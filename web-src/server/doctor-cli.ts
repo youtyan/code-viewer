@@ -9,6 +9,11 @@ import type {
   DoctorReport,
   DoctorStatus,
 } from "../core/doctor-types";
+import {
+  configureExternalCommands,
+  type ExternalCommandOverride,
+  parseExternalCommandOverride,
+} from "./command-resolver";
 import { buildDoctorReport } from "./doctor";
 import { DOCTOR_AGENT_HELP } from "./doctor-agent-help";
 import { DEFAULT_WORKTREE_OMIT_DIR_NAMES } from "./git";
@@ -16,12 +21,13 @@ import { DEFAULT_WORKTREE_OMIT_DIR_NAMES } from "./git";
 const DOCTOR_HELP = `code-viewer doctor — diagnose the current environment
 
 Usage:
-  code-viewer doctor [--cwd <path>] [--port <N>] [--json]
+  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|docker>=<path>]
   code-viewer doctor agent-help
 
 Options:
   --cwd <path>   Working directory to inspect (default: process.cwd()).
   --port <N>     Listening port to mention in the report (default: 0 = no server).
+  --bin <n>=<p>  Override git/docker executable path. Repeatable.
   --json         Print the full DoctorReport as JSON instead of a summary.
   --help, -h     Show this help.
 
@@ -37,6 +43,7 @@ type DoctorCliArgs = {
   cwd: string;
   port: number;
   json: boolean;
+  commandOverrides?: ExternalCommandOverride[];
 };
 
 export type DoctorCliParseResult =
@@ -49,6 +56,7 @@ export function parseDoctorCliArgs(argv: string[]): DoctorCliParseResult {
   let cwd = process.cwd();
   let port = 0;
   let json = false;
+  const commandOverrides: ExternalCommandOverride[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h" || arg === "help") {
@@ -67,6 +75,22 @@ export function parseDoctorCliArgs(argv: string[]): DoctorCliParseResult {
       cwd = next;
       continue;
     }
+    if (arg === "--bin") {
+      const next = argv[++i];
+      if (!next) {
+        return {
+          kind: "error",
+          message: "--bin requires <name>=<absolute-path>",
+        };
+      }
+      const parsed = parseExternalCommandOverride(next, "--bin", [
+        "git",
+        "docker",
+      ]);
+      if (parsed.ok === false) return { kind: "error", message: parsed.error };
+      commandOverrides.push(parsed.override);
+      continue;
+    }
     if (arg === "--port") {
       const next = argv[++i];
       if (!next) return { kind: "error", message: "--port requires a value" };
@@ -82,7 +106,15 @@ export function parseDoctorCliArgs(argv: string[]): DoctorCliParseResult {
     }
     return { kind: "error", message: `unknown argument: ${arg}` };
   }
-  return { kind: "run", args: { cwd, port, json } };
+  return {
+    kind: "run",
+    args: {
+      cwd,
+      port,
+      json,
+      ...(commandOverrides.length ? { commandOverrides } : {}),
+    },
+  };
 }
 
 const STATUS_SYMBOL: Record<DoctorStatus, string> = {
@@ -140,7 +172,16 @@ export async function runDoctorCli(argv: string[]): Promise<void> {
     process.stdout.write(`${DOCTOR_AGENT_HELP}\n`);
     return;
   }
-  const { cwd, port, json } = parsed.args;
+  const { cwd, port, json, commandOverrides = [] } = parsed.args;
+  const commandConfig = configureExternalCommands({
+    cwd,
+    cliOverrides: commandOverrides,
+    allowedNames: ["git", "docker"],
+  });
+  if (commandConfig.ok === false) {
+    process.stderr.write(`code-viewer doctor: ${commandConfig.error}\n`);
+    process.exit(2);
+  }
   const report = await buildDoctorReport({
     cwd,
     scopeOmitDirNames: DEFAULT_WORKTREE_OMIT_DIR_NAMES,

@@ -13,7 +13,11 @@ import type {
   SnapshotIterable,
 } from "../sources/types";
 import { throwIfAborted } from "./abort";
-import { resolveRunningComposeContainerNameOrThrowAsync } from "./docker-utils";
+import {
+  dockerCommand,
+  resolveRunningComposeContainerNameOrThrowAsync,
+  throwIfDockerCommandUnavailableResult,
+} from "./docker-utils";
 import { spawnTextAsync } from "./spawn-runner";
 
 type EsConfig = {
@@ -126,7 +130,7 @@ function buildEsRequestInvocation(
   return { args, input: curlConfig };
 }
 
-function execEsRequestAsync(
+async function execEsRequestAsync(
   config: EsConfig,
   method: EsHttpMethod,
   path: string,
@@ -136,8 +140,8 @@ function execEsRequestAsync(
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   throwIfAborted(signal, "elasticsearch request aborted");
   const invocation = buildEsRequestInvocation(config, method, path, body);
-  return spawnTextAsync({
-    command: "docker",
+  const result = await spawnTextAsync({
+    command: dockerCommand(),
     args: invocation.args,
     env: process.env,
     input: invocation.input,
@@ -147,6 +151,8 @@ function execEsRequestAsync(
     timeoutMessage: `elasticsearch request timed out after ${timeoutMs}ms`,
     rejectOnError: false,
   });
+  throwIfDockerCommandUnavailableResult(result);
+  return result;
 }
 
 // curl の write-out で末尾に `\n__ES_STATUS__:NNN\n` を付けている。

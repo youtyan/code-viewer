@@ -20,9 +20,14 @@ import {
   validateRepoRelativePathValue,
 } from "./cli-helpers";
 import {
+  configureExternalCommands,
+  type ExternalCommandOverride,
+  parseExternalCommandOverride,
+} from "./command-resolver";
+import {
   commitHistory,
   currentBranch,
-  fileMeta,
+  fileMetaResult,
   type GitFileMeta,
   type GitHistoryCommit,
   remoteWebUrl,
@@ -36,11 +41,12 @@ export const STATUS_DEFAULT_REF = "HEAD";
 export const STATUS_HELP = `code-viewer status — snapshot the current repo for AI agents
 
 Usage:
-  code-viewer status [--cwd <repo>] [--ref <ref>] [--limit <N>] [--json]
+  code-viewer status [--cwd <repo>] [--bin git=<path>] [--ref <ref>] [--limit <N>] [--json]
   code-viewer status agent-help
 
 Options:
   --cwd <repo>    Repository to inspect (default: current directory).
+  --bin git=<p>   Override git executable path.
   --ref <ref>     Ref to read recent commits from (default: ${STATUS_DEFAULT_REF}).
   --limit <N>     Recent commits to include (default: ${STATUS_DEFAULT_LIMIT}, max ${STATUS_HARD_CAP_LIMIT}).
   --json          Emit a structured JSON payload instead of plain text.
@@ -85,11 +91,11 @@ browser home page uses — no server, no SQLite, no docker required.
   { repoRoot, branch, remoteWebUrl, changed, staged, recentCommits,
     nextCommands }
   changed / staged share shape { files: GitFileMeta[], totals: { files,
-  additions, deletions } } so AI can iterate both the same way.
+  additions, deletions }, error? } so AI can iterate both the same way.
   recentCommitsError is present when --ref cannot resolve; the command
   still emits changed / staged / nextCommands and exits 0.
-- exit 0 on success. exit 1 only on argument errors or when --cwd does
-  not resolve to a directory.
+- exit 0 on success. exit 1 on argument errors, when --cwd does not
+  resolve to a directory, or when changed / staged git collection fails.
 
 ## Suggested usage
 
@@ -114,6 +120,7 @@ export type StatusCommand =
 export type StatusArgs = {
   command: StatusCommand;
   cwd?: string;
+  commandOverrides?: ExternalCommandOverride[];
 };
 
 export type StatusParseResult =
@@ -135,6 +142,7 @@ export function parseStatusArgs(argv: string[]): StatusParseResult {
   const options = new Map<string, string>();
   const flags = new Set<string>();
   const positional: string[] = [];
+  const commandOverrides: ExternalCommandOverride[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -145,6 +153,15 @@ export function parseStatusArgs(argv: string[]): StatusParseResult {
       const taken = takeValue(argv, i, arg);
       if ("error" in taken) return { ok: false, error: taken.error };
       cwd = taken.value;
+      i = taken.next;
+    } else if (arg === "--bin") {
+      const taken = takeValue(argv, i, arg);
+      if ("error" in taken) return { ok: false, error: taken.error };
+      const parsed = parseExternalCommandOverride(taken.value, "--bin", [
+        "git",
+      ]);
+      if (parsed.ok === false) return { ok: false, error: parsed.error };
+      commandOverrides.push(parsed.override);
       i = taken.next;
     } else if (VALUE_FLAGS.has(arg)) {
       const taken = takeValue(argv, i, arg);
@@ -198,6 +215,7 @@ export function parseStatusArgs(argv: string[]): StatusParseResult {
         json: flags.has("--json"),
       },
       cwd,
+      ...(commandOverrides.length ? { commandOverrides } : {}),
     },
   };
 }
@@ -205,6 +223,7 @@ export function parseStatusArgs(argv: string[]): StatusParseResult {
 export type StatusGroup = {
   files: GitFileMeta[];
   totals: { files: number; additions: number; deletions: number };
+  error?: string;
 };
 
 // JSON output shape AI agents consume (mirrors the CLI's `--json` payload).
@@ -231,12 +250,16 @@ function sumTotals(files: GitFileMeta[]): StatusGroup["totals"] {
   return { files: files.length, additions, deletions };
 }
 
-function buildGroup(files: GitFileMeta[]): StatusGroup {
+function buildGroup(files: GitFileMeta[], error?: string): StatusGroup {
   // Sort by path so AI gets a stable order regardless of git output order.
   const sorted = [...files].sort((a, b) =>
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
   );
-  return { files: sorted, totals: sumTotals(sorted) };
+  return {
+    files: sorted,
+    totals: sumTotals(sorted),
+    ...(error ? { error } : {}),
+  };
 }
 
 function metaPathKey(file: GitFileMeta): string {
@@ -256,6 +279,12 @@ function mergeMissingByPath(
     merged.push(file);
   }
   return merged;
+}
+
+function isMissingDiffBaseError(error: string | undefined): boolean {
+  return (
+    !!error && /ambiguous argument 'HEAD'|bad revision 'HEAD'/i.test(error)
+  );
 }
 
 // Compose a paste-safe `code-viewer <subcommand>` line.
@@ -345,6 +374,7 @@ function formatGroupText(label: string, group: StatusGroup): string[] {
       ? `${label}: 0 files`
       : `${label}: ${totals.files} files (+${totals.additions} / -${totals.deletions})`;
   lines.push(summary);
+  if (group.error) lines.push(`  # error: ${group.error}`);
   for (const file of group.files) lines.push(formatChangedLine(file));
   return lines;
 }
@@ -373,13 +403,24 @@ export function buildStatusReport(opts: {
   // since the last commit?", which is the orient question. With no ref
   // arg, git diff is worktree-vs-index — that would silently miss
   // staged-only changes from the summary.
-  const stagedFiles = fileMeta(["--cached"], root, false);
-  const changedFiles = mergeMissingByPath(
-    fileMeta(["HEAD"], root, true),
-    stagedFiles,
+  const stagedResult = fileMetaResult(["--cached"], root, false);
+  const changedResult = fileMetaResult(["HEAD"], root, true);
+  const worktreeFallbackResult = isMissingDiffBaseError(changedResult.error)
+    ? fileMetaResult([], root, true)
+    : null;
+  const stagedFiles = stagedResult.files;
+  const changedFiles = changedResult.error
+    ? worktreeFallbackResult
+      ? mergeMissingByPath(worktreeFallbackResult.files, stagedFiles)
+      : []
+    : mergeMissingByPath(changedResult.files, stagedFiles);
+  const changed = buildGroup(
+    changedFiles,
+    worktreeFallbackResult
+      ? worktreeFallbackResult.error || stagedResult.error
+      : changedResult.error || stagedResult.error,
   );
-  const changed = buildGroup(changedFiles);
-  const staged = buildGroup(stagedFiles);
+  const staged = buildGroup(stagedFiles, stagedResult.error);
   const history = commitHistory(root, { ref, skip: 0, limit });
   const branch = currentBranch(root);
   const remote = remoteWebUrl(root);
@@ -429,7 +470,7 @@ export function runStatusCli(argv: string[]): void {
     console.error('Run "code-viewer status --help" for usage.');
     process.exit(1);
   }
-  const { command, cwd } = parsed.args;
+  const { command, cwd, commandOverrides = [] } = parsed.args;
   if (command.kind === "help") {
     console.log(STATUS_HELP);
     return;
@@ -439,6 +480,15 @@ export function runStatusCli(argv: string[]): void {
     return;
   }
 
+  const commandConfig = configureExternalCommands({
+    cwd: cwd || process.cwd(),
+    cliOverrides: commandOverrides,
+    allowedNames: ["git"],
+  });
+  if (commandConfig.ok === false) {
+    console.error(commandConfig.error);
+    process.exit(1);
+  }
   const root = resolveRepoRoot(cwd);
   const report = buildStatusReport({
     root,
@@ -448,8 +498,10 @@ export function runStatusCli(argv: string[]): void {
 
   if (command.json) {
     console.log(JSON.stringify(report, null, 2));
+    if (report.changed.error || report.staged.error) process.exit(1);
     return;
   }
 
   console.log(formatStatusReportText(report));
+  if (report.changed.error || report.staged.error) process.exit(1);
 }

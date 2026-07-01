@@ -296,6 +296,34 @@ describe("dispatchJsonRpc — tools/call code_viewer_status (fixture repo)", () 
     );
   });
 
+  test("marks status reports with git collection errors as MCP errors", async () => {
+    const nonGitDir = mkdtempSync(join(tmpdir(), "code-viewer-mcp-non-git-"));
+    try {
+      const result = await call({
+        jsonrpc: "2.0",
+        id: "status-non-git",
+        method: "tools/call",
+        params: {
+          name: "code_viewer_status",
+          arguments: { cwd: nonGitDir, ref: "HEAD", limit: 1 },
+        },
+      });
+      if (result.kind !== "response") throw new Error("expected response");
+      expect(result.body.error).toBeUndefined();
+      const payload = result.body.result as {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+      expect(payload.isError).toBe(true);
+      const report = JSON.parse(payload.content[0].text);
+      expect(report.changed.error || report.staged.error).toMatch(
+        /not a git repository/i,
+      );
+    } finally {
+      rmSync(nonGitDir, { recursive: true, force: true });
+    }
+  });
+
   test("rejects unsafe ref values with isError true and a descriptive text", async () => {
     for (const bad of [
       { input: { ref: "" }, expect: /non-empty/ },

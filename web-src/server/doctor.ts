@@ -9,6 +9,11 @@ import type {
   DoctorStatus,
 } from "../core/doctor-types";
 import { shellSingleQuote } from "./cli-helpers";
+import {
+  commandForExternal,
+  commandNotFoundDetail,
+  isCommandNotFoundResult,
+} from "./command-resolver";
 import { openDockerAdapterAsync } from "./database/adapters/docker";
 import { openElasticsearchAdapterAsync } from "./database/adapters/elasticsearch";
 import { openRedisExplorerAsync } from "./database/adapters/redis";
@@ -406,7 +411,7 @@ async function checkGit(
   const versionRes = await runCached(
     versionCache,
     TTL.version,
-    "git",
+    commandForExternal("git"),
     ["--version"],
     TIMEOUT.version,
     signal,
@@ -420,7 +425,10 @@ async function checkGit(
           id: "git.binary",
           title: "git binary",
           status: "error",
-          detail: "not found in PATH",
+          detail:
+            versionRes && isCommandNotFoundResult("git", versionRes)
+              ? commandNotFoundDetail("git")
+              : "git command failed",
           hint: "git is required for diff, history, and blame features. Install git and ensure it is on PATH.",
         },
       ],
@@ -437,7 +445,7 @@ async function checkGit(
   const repoCheck = await runCached(
     gitCache,
     TTL.gitRepo,
-    "git",
+    commandForExternal("git"),
     ["rev-parse", "--is-inside-work-tree"],
     TIMEOUT.git,
     signal,
@@ -447,7 +455,7 @@ async function checkGit(
     const topRes = await runCached(
       gitCache,
       TTL.gitRepo,
-      "git",
+      commandForExternal("git"),
       ["rev-parse", "--show-toplevel"],
       TIMEOUT.git,
       signal,
@@ -481,14 +489,14 @@ async function detectComposeBinary(
   const v2 = await runCached(
     versionCache,
     TTL.version,
-    "docker",
+    commandForExternal("docker"),
     ["compose", "version", "--short"],
     TIMEOUT.version,
     signal,
   );
   if (v2 && v2.code === 0) {
     return {
-      cmd: { binary: "docker", subcommand: ["compose"] },
+      cmd: { binary: commandForExternal("docker"), subcommand: ["compose"] },
       v2Version: firstLine(v2.stdout),
     };
   }
@@ -570,7 +578,7 @@ async function checkDocker(
   const dockerVersion = await runCached(
     versionCache,
     TTL.version,
-    "docker",
+    commandForExternal("docker"),
     ["--version"],
     TIMEOUT.version,
     signal,
@@ -580,7 +588,11 @@ async function checkDocker(
     id: "docker.binary",
     title: "docker CLI",
     status: dockerOk ? "ok" : dockerSourcesPresent ? "error" : "warn",
-    detail: dockerOk ? firstLine(dockerVersion.stdout) : "not found in PATH",
+    detail: dockerOk
+      ? firstLine(dockerVersion.stdout)
+      : dockerVersion && isCommandNotFoundResult("docker", dockerVersion)
+        ? commandNotFoundDetail("docker")
+        : "docker command failed",
     ...(dockerOk
       ? {}
       : {
@@ -624,7 +636,7 @@ async function checkDocker(
     ? await runCached(
         dockerInfoCache,
         TTL.dockerInfo,
-        "docker",
+        commandForExternal("docker"),
         ["info", "--format", "{{.ServerVersion}}"],
         TIMEOUT.dockerInfo,
         signal,

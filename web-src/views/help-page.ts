@@ -150,7 +150,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: 'From the terminal — and for AI agents or CI — the same report is available without a browser. `code-viewer doctor` prints a status summary; add `--json` for the full DoctorReport (matches the /_doctor endpoint). Exit code is 1 when worstStatus is "error", so it doubles as a CI gate.',
+                text: 'From the terminal — and for AI agents or CI — the same report is available without a browser. `code-viewer doctor` prints a status summary; add `--json` for the full DoctorReport (matches the /_doctor endpoint). Use `--bin git=/absolute/path` or `--bin docker=/absolute/path` when PATH resolves the wrong tool. Exit code is 1 when worstStatus is "error", so it doubles as a CI gate.',
               },
               {
                 kind: "command",
@@ -161,7 +161,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 kind: "command",
                 title: "Doctor JSON for agents and CI",
                 command:
-                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json",
+                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json\ncode-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --json",
               },
             ],
           },
@@ -817,7 +817,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: 'ターミナルからは `code-viewer doctor` で同じレポートを取得できます。AI エージェントや CI からは `--json` で /_doctor と同じ DoctorReport を受け取れます。worstStatus が "error" なら exit code 1 を返すので CI ガードに直接使えます。',
+                text: 'ターミナルからは `code-viewer doctor` で同じレポートを取得できます。AI エージェントや CI からは `--json` で /_doctor と同じ DoctorReport を受け取れます。PATH と別の実行ファイルを使いたい場合は `--bin git=/absolute/path` や `--bin docker=/absolute/path` を指定できます。worstStatus が "error" なら exit code 1 を返すので CI ガードに直接使えます。',
               },
               {
                 kind: "command",
@@ -828,7 +828,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "AI / CI 用 doctor JSON",
                 command:
-                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json",
+                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json\ncode-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --json",
               },
             ],
           },

@@ -39,7 +39,10 @@ export function runSync(
   return {
     code: proc.status ?? (proc.error ? 1 : 0),
     stdout: new TextDecoder().decode(proc.stdout || new Uint8Array()),
-    stderr: new TextDecoder().decode(proc.stderr || new Uint8Array()),
+    stderr: appendProcessError(
+      new TextDecoder().decode(proc.stderr || new Uint8Array()),
+      proc.error,
+    ),
   };
 }
 
@@ -58,7 +61,10 @@ export function runBytesSync(
   return {
     code: proc.status ?? (proc.error ? 1 : 0),
     stdout: new Uint8Array(proc.stdout || new Uint8Array()),
-    stderr: new TextDecoder().decode(proc.stderr || new Uint8Array()),
+    stderr: appendProcessError(
+      new TextDecoder().decode(proc.stderr || new Uint8Array()),
+      proc.error,
+    ),
   };
 }
 
@@ -66,6 +72,12 @@ export function spawnDetached(args: string[]): void {
   const child = spawn(args[0], args.slice(1), {
     detached: true,
     stdio: "ignore",
+  });
+  child.on("error", (err) => {
+    console.warn(
+      "[code-viewer] failed to start detached command:",
+      err.message,
+    );
   });
   child.unref();
 }
@@ -82,15 +94,31 @@ export function spawnStream(
     cwd,
     stdio: ["ignore", "pipe", "ignore"],
   });
+  let errorCode = 0;
+  proc.on("error", () => {
+    errorCode = 1;
+  });
   return {
     stream: Readable.toWeb(
       proc.stdout,
     ) as unknown as ReadableStream<Uint8Array>,
-    exited: new Promise((resolve) =>
-      proc.on("close", (code) => resolve(code ?? 1)),
-    ),
+    exited: new Promise((resolve) => {
+      let settled = false;
+      const done = (code: number) => {
+        if (settled) return;
+        settled = true;
+        resolve(code);
+      };
+      proc.on("error", () => done(1));
+      proc.on("close", (code) => done(errorCode || (code ?? 1)));
+    }),
     kill: (signal?: string) => proc.kill(signal as NodeJS.Signals | undefined),
   };
+}
+
+function appendProcessError(stderr: string, err: Error | undefined): string {
+  if (!err) return stderr;
+  return `${stderr}${stderr ? "\n" : ""}${err.message}`;
 }
 
 export function fileReadableStream(path: string): ReadableStream<Uint8Array> {

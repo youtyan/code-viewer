@@ -27,8 +27,12 @@ import {
 } from "../sql-utils";
 import { abortError, isAbortLikeError, throwIfAborted } from "./abort";
 import {
+  DockerCommandUnavailableError,
+  dockerCommand,
   resolveRunningComposeContainerNameAsync,
   resolveRunningComposeContainerNameOrThrowAsync,
+  throwIfCachedComposeDockerCommandUnavailable,
+  throwIfDockerCommandUnavailableResult,
 } from "./docker-utils";
 import { spawnTextAsync } from "./spawn-runner";
 import { recordSql } from "./sql-capture";
@@ -172,7 +176,7 @@ const PG_RECORD_SEPARATOR = "\x1e";
 function buildExecArgs(config: DockerDbConfig, sql: string): string[] {
   if (config.kind === "postgresql") {
     return [
-      "docker",
+      dockerCommand(),
       "exec",
       "-i",
       "-e",
@@ -198,7 +202,7 @@ function buildExecArgs(config: DockerDbConfig, sql: string): string[] {
     ];
   }
   return [
-    "docker",
+    dockerCommand(),
     "exec",
     "-i",
     "-e",
@@ -228,7 +232,7 @@ function execInContainer(
   });
   return {
     stdout: proc.stdout || "",
-    stderr: proc.stderr || "",
+    stderr: `${proc.stderr || ""}${proc.error ? `\n${proc.error.message}` : ""}`,
     code: proc.status ?? 1,
   };
 }
@@ -256,11 +260,20 @@ async function execWithBunSpawn(
   signal?: AbortSignal,
 ): Promise<ExecResult> {
   throwIfAborted(signal, "query aborted");
-  const proc = spawnFn(args, {
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  let proc: ReturnType<BunSpawnFn>;
+  try {
+    proc = spawnFn(args, {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  } catch (err) {
+    return {
+      code: 1,
+      stdout: "",
+      stderr: err instanceof Error ? err.message : String(err),
+    };
+  }
   let timedOut = false;
   let aborted = false;
   const abort = () => {
@@ -320,13 +333,20 @@ async function execInContainerAsync(
   signal?: AbortSignal,
 ): Promise<ExecResult> {
   recordSql(sql);
-  if (spawnSyncImpl !== spawnSync)
-    return execInContainer(config, sql, timeoutMs);
+  let result: ExecResult;
+  if (spawnSyncImpl !== spawnSync) {
+    result = execInContainer(config, sql, timeoutMs);
+    throwIfDockerCommandUnavailableResult(result);
+    return result;
+  }
   const args = buildExecArgs(config, sql);
   const bunSpawn = (globalThis as unknown as { Bun?: { spawn?: BunSpawnFn } })
     .Bun?.spawn;
-  if (bunSpawn) return execWithBunSpawn(bunSpawn, args, timeoutMs, signal);
-  return execWithNodeSpawn(args, timeoutMs, signal);
+  result = bunSpawn
+    ? await execWithBunSpawn(bunSpawn, args, timeoutMs, signal)
+    : await execWithNodeSpawn(args, timeoutMs, signal);
+  throwIfDockerCommandUnavailableResult(result);
+  return result;
 }
 
 function stripFinalLineBreak(text: string): string {
@@ -1102,7 +1122,9 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
             signal,
           );
           return result.rows.length > 0 ? result.rows[0][1] || "" : "";
-        } catch {
+        } catch (err) {
+          if (isAbortLikeError(err, signal)) throw err;
+          if (err instanceof DockerCommandUnavailableError) throw err;
           return "";
         }
       }
@@ -1112,7 +1134,9 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
           signal,
         );
         return result.rows.length > 0 ? result.rows[0][0] || "" : "";
-      } catch {
+      } catch (err) {
+        if (isAbortLikeError(err, signal)) throw err;
+        if (err instanceof DockerCommandUnavailableError) throw err;
         return "";
       }
     },
@@ -1133,7 +1157,9 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
           name: row[0],
           sql: row[1] || "",
         }));
-      } catch {
+      } catch (err) {
+        if (isAbortLikeError(err, signal)) throw err;
+        if (err instanceof DockerCommandUnavailableError) throw err;
         return [];
       }
     },
@@ -1206,6 +1232,7 @@ export async function listDockerDatabasesAsync(
     signal,
   );
   if (!containerName) {
+    throwIfCachedComposeDockerCommandUnavailable(cwd);
     return setDockerDatabasesCache(
       cacheKey,
       [],
@@ -1272,6 +1299,7 @@ export async function listDockerDatabasesAsync(
     );
   } catch (err) {
     if (isAbortLikeError(err, signal)) throw err;
+    if (err instanceof DockerCommandUnavailableError) throw err;
     const fallback = fallbackDockerDatabases(defaultDb);
     if (fallback.length > 0) return fallback;
     return setDockerDatabasesCache(
@@ -1306,6 +1334,7 @@ export async function listDockerSchemasAsync(
     signal,
   );
   if (!containerName) {
+    throwIfCachedComposeDockerCommandUnavailable(cwd);
     return setDockerSchemasCache(
       cacheKey,
       [],
@@ -1344,6 +1373,7 @@ export async function listDockerSchemasAsync(
     );
   } catch (err) {
     if (isAbortLikeError(err, signal)) throw err;
+    if (err instanceof DockerCommandUnavailableError) throw err;
     return setDockerSchemasCache(
       cacheKey,
       ["public"],

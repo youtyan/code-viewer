@@ -297,6 +297,48 @@ describe("parseFileArgs", () => {
     if (result.ok) expect(result.args.cwd).toBe("/tmp/example");
   });
 
+  test("captures --bin command overrides", () => {
+    const result = parseFileArgs([
+      "blame",
+      "--path",
+      "a.txt",
+      "--bin",
+      "git=/opt/bin/git",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.commandOverrides).toEqual([
+      { name: "git", path: "/opt/bin/git" },
+    ]);
+  });
+
+  test("--bin rejects unsupported command names", () => {
+    expect(
+      parseFileArgs([
+        "blame",
+        "--path",
+        "a.txt",
+        "--bin",
+        "psql=/opt/bin/psql",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--bin unsupported command: psql",
+    });
+    expect(
+      parseFileArgs([
+        "blame",
+        "--path",
+        "a.txt",
+        "--bin",
+        "docker=/opt/bin/docker",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--bin unsupported command: docker",
+    });
+  });
+
   test("diff defaults from=HEAD, to=worktree, preview mode with default caps", () => {
     const result = parseFileArgs([
       "diff",

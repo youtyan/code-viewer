@@ -17,6 +17,11 @@ import {
   takeValue,
 } from "./cli-helpers";
 import {
+  configureExternalCommands,
+  type ExternalCommandOverride,
+  parseExternalCommandOverride,
+} from "./command-resolver";
+import {
   FILE_SEARCH_ABSOLUTE_MAX,
   GREP_ABSOLUTE_MAX,
   GREP_DEFAULT_MAX,
@@ -68,6 +73,7 @@ export type SearchArgs = {
   command: SearchCommand;
   cwd?: string;
   server?: string;
+  commandOverrides?: ExternalCommandOverride[];
 };
 
 export type SearchParseResult =
@@ -79,9 +85,9 @@ export const SEARCH_HELP = `code-viewer search — text and filename search acro
 Usage:
   code-viewer search code --term <text> [--ref <ref>] [--path <path>...]
                           [--regex] [--max <n>] [--json]
-                          [--cwd <dir>] [--server <url>]
+                          [--cwd <dir>] [--server <url>] [--bin <name>=<path>]
   code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json]
-                           [--cwd <dir>] [--server <url>]
+                           [--cwd <dir>] [--server <url>] [--bin <name>=<path>]
   code-viewer search --help
   code-viewer search agent-help
 
@@ -94,6 +100,8 @@ Common options:
   --json            Emit a structured JSON payload instead of plain lines.
   --cwd <dir>       Repository to target (default: process.cwd()).
   --server <url>    code-viewer server URL (default: auto-discover).
+  --bin git=<p>     Override the CLI-side git path used for server discovery.
+                    Server-side rg/docker paths are set when starting code-viewer.
   --help, -h        Show this help.
 
 search code only:
@@ -226,6 +234,7 @@ export function parseSearchArgs(argv: string[]): SearchParseResult {
   const options = new Map<string, string>();
   const paths: string[] = [];
   const flags = new Set<string>();
+  const commandOverrides: ExternalCommandOverride[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -237,6 +246,15 @@ export function parseSearchArgs(argv: string[]): SearchParseResult {
       if ("error" in taken) return { ok: false, error: taken.error };
       if (arg === "--cwd") cwd = taken.value;
       else server = taken.value;
+      i = taken.next;
+    } else if (arg === "--bin") {
+      const taken = takeValue(argv, i, arg);
+      if ("error" in taken) return { ok: false, error: taken.error };
+      const parsed = parseExternalCommandOverride(taken.value, "--bin", [
+        "git",
+      ]);
+      if (parsed.ok === false) return { ok: false, error: parsed.error };
+      commandOverrides.push(parsed.override);
       i = taken.next;
     } else if (REPEATABLE_VALUE_FLAGS.has(arg)) {
       const taken = takeValue(argv, i, arg);
@@ -329,6 +347,7 @@ export function parseSearchArgs(argv: string[]): SearchParseResult {
         },
         cwd,
         server,
+        ...(commandOverrides.length ? { commandOverrides } : {}),
       },
     };
   }
@@ -367,6 +386,7 @@ export function parseSearchArgs(argv: string[]): SearchParseResult {
       },
       cwd,
       server,
+      ...(commandOverrides.length ? { commandOverrides } : {}),
     },
   };
 }
@@ -505,7 +525,7 @@ export async function runSearchCli(argv: string[]): Promise<void> {
     console.error('Run "code-viewer search --help" for usage.');
     process.exit(1);
   }
-  const { command, cwd, server } = parsed.args;
+  const { command, cwd, server, commandOverrides = [] } = parsed.args;
   if (command.kind === "help") {
     console.log(SEARCH_HELP);
     return;
@@ -514,7 +534,16 @@ export async function runSearchCli(argv: string[]): Promise<void> {
     console.log(SEARCH_AGENT_HELP);
     return;
   }
-  const root = resolveRepoRoot(cwd);
+  const commandConfig = configureExternalCommands({
+    cwd: cwd || process.cwd(),
+    cliOverrides: commandOverrides,
+    allowedNames: ["git"],
+  });
+  if (commandConfig.ok === false) {
+    console.error(commandConfig.error);
+    process.exit(1);
+  }
+  const root = server ? cwd || process.cwd() : resolveRepoRoot(cwd);
   const serverUrl = await ensureServerUrl(root, server, "/");
   if (command.kind === "code") return runCode(serverUrl, command);
   if (command.kind === "files") return runFiles(serverUrl, command);

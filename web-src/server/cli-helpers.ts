@@ -79,14 +79,19 @@ export function resolveRepoRootSafe(
   cwdOption: string | undefined,
 ): { ok: true; root: string } | { ok: false; error: string } {
   const base = cwdOption || process.cwd();
+  let baseReal: string;
   try {
-    return { ok: true, root: git.repoRoot(base) || realpathSync(base) };
+    baseReal = realpathSync(base);
   } catch {
     return {
       ok: false,
       error: `--cwd must point to an existing directory: ${base}`,
     };
   }
+  const root = git.repoRootResult(baseReal);
+  if (root.kind === "root") return { ok: true, root: root.root };
+  if (root.kind === "error") return { ok: false, error: root.error };
+  return { ok: true, root: baseReal };
 }
 
 // `--cwd` 指定 (なければ process.cwd()) から repo root を返す。

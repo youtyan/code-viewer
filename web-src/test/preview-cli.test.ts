@@ -89,6 +89,18 @@ function makeFakeBrowserCommand() {
   return { root, log };
 }
 
+function makeFakeMissingGitCommand(): string {
+  const root = mkdtempSync(join(tmpdir(), "code-viewer-missing-git-bin-"));
+  tmpRoots.push(root);
+  const command = join(root, "git");
+  writeFileSync(
+    command,
+    "#!/bin/sh\nprintf 'spawn git ENOENT\\n' >&2\nexit 127\n",
+  );
+  chmodSync(command, 0o755);
+  return command;
+}
+
 afterEach(() => {
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -223,6 +235,105 @@ describe("preview CLI", () => {
     },
   );
 
+  runOrSkip("keeps an explicit non-git cwd as the project root", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-explicit-cwd-"));
+    tmpRoots.push(root);
+    const explicitCwd = join(root, "nested");
+    mkdirSync(explicitCwd);
+
+    const proc = spawn(
+      process.execPath,
+      ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", explicitCwd],
+      {
+        cwd: join(import.meta.dir, "..", ".."),
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const exited = new Promise<number | null>((resolve) => {
+      proc.once("exit", (code) => resolve(code));
+    });
+
+    let cleanupTimedOut = false;
+    try {
+      const url = await Promise.race([
+        waitForPreviewUrl(proc),
+        sleep(5000).then(() => {
+          throw new Error("preview did not start");
+        }),
+      ]);
+      const res = await fetchWithTimeout(`${url}_settings`, 5000);
+      expect(res.status).toBe(200);
+      const settings = (await res.json()) as { project?: string };
+      expect(settings.project).toBe("nested");
+    } finally {
+      proc.kill("SIGKILL");
+      cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+    }
+    if (cleanupTimedOut) {
+      throw new Error("preview process did not exit after SIGKILL");
+    }
+  });
+
+  runOrSkip(
+    "surfaces git command failures from preview HTTP endpoints",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-http-missing-git-"));
+      tmpRoots.push(root);
+      const explicitCwd = join(root, "repo");
+      mkdirSync(explicitCwd);
+      writeFileSync(join(explicitCwd, "sample.txt"), "alpha\n");
+      const fakeGit = makeFakeMissingGitCommand();
+
+      const proc = spawn(
+        process.execPath,
+        [
+          "run",
+          "web-src/server/preview.ts",
+          "--port",
+          "0",
+          "--cwd",
+          explicitCwd,
+        ],
+        {
+          cwd: join(import.meta.dir, "..", ".."),
+          env: { ...process.env, CODE_VIEWER_BIN_GIT: fakeGit },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+
+      let cleanupTimedOut = false;
+      try {
+        const url = await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(5000).then(() => {
+            throw new Error("preview did not start");
+          }),
+        ]);
+
+        for (const path of [
+          "_grep?ref=HEAD&q=",
+          "_file_blame?path=sample.txt&ref=worktree",
+          "file_diff?path=sample.txt",
+        ]) {
+          const res = await fetchWithTimeout(`${url}${path}`, 5000);
+          expect(res.status).toBe(503);
+          expect(await res.text()).toMatch(
+            /git binary not found|git not found/,
+          );
+        }
+      } finally {
+        proc.kill("SIGKILL");
+        cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+      }
+      if (cleanupTimedOut) {
+        throw new Error("preview process did not exit after SIGKILL");
+      }
+    },
+  );
+
   runOrSkip(
     "/_tree gives a browsable non-submodule worktree commit entry directory metadata",
     async () => {
@@ -338,7 +449,7 @@ describe("preview CLI", () => {
     }
 
     expect(stdout).toMatch(
-      /code-viewer status \[--cwd <repo>\] \[--ref <ref>\] \[--limit <N>\] \[--json\]/,
+      /code-viewer status \[--cwd <repo>\] \[--bin git=<path>\] \[--ref <ref>\] \[--limit <N>\] \[--json\]/,
     );
     expect(stdout).toMatch(
       /code-viewer annotate <start\|add\|add-db\|rename\|edit\|move\|list\|delete\|clear>/,

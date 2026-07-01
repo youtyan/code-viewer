@@ -48,6 +48,12 @@ import {
   setTimedCacheEntry,
   type TimedCacheEntry,
 } from "./cache";
+import {
+  commandNotFoundDetail,
+  configureExternalCommands,
+  type ExternalCommandOverride,
+  parseExternalCommandOverride,
+} from "./command-resolver";
 import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
 import * as git from "./git";
@@ -152,10 +158,12 @@ const SAFE_UPLOAD_EXTENSIONS = new Set([
 ]);
 
 let generation = 1;
-let cwd = git.repoRoot(process.cwd()) || process.cwd();
+let cwd = process.cwd();
 let cliArgs = DEFAULT_ARGS;
 let listenPort = 0;
 let openAfterStart = false;
+const commandOverrides: ExternalCommandOverride[] = [];
+let cwdWasExplicit = false;
 let scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES;
 let scopeOmitDirCliOverride: string[] | null = null;
 let scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
@@ -196,15 +204,15 @@ function parseCli() {
       console.log(`code-viewer ${VERSION}
 
 Usage:
-  code-viewer [--cwd <repo>] [--port <port>] [--open] [git-diff-args...]
-  code-viewer status [--cwd <repo>] [--ref <ref>] [--limit <N>] [--json]
+  code-viewer [--cwd <repo>] [--port <port>] [--open] [--bin <name>=<path>] [git-diff-args...]
+  code-viewer status [--cwd <repo>] [--bin git=<path>] [--ref <ref>] [--limit <N>] [--json]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
-  code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search|redis|elasticsearch|s3> [options]
-  code-viewer search code --term <text> [--ref <ref>] [--path <p>...] [--regex] [--max <n>] [--json]
-  code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json]
-  code-viewer file <blame|history|show|diff> --path <p> [--ref <ref>] [...subcommand options] [--json]
+  code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search|redis|elasticsearch|s3> [options] [--bin git=<path>]
+  code-viewer search code --term <text> [--ref <ref>] [--path <p>...] [--regex] [--max <n>] [--json] [--bin git=<path>]
+  code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json] [--bin git=<path>]
+  code-viewer file <blame|history|show|diff> --path <p> [--ref <ref>] [...subcommand options] [--json] [--bin git=<path>]
   code-viewer skill install [--agent <list>] [--global]
-  code-viewer doctor [--cwd <path>] [--port <N>] [--json]
+  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|docker>=<path>]
   code-viewer agent-help
   code-viewer help
 
@@ -240,13 +248,8 @@ Examples:
         process.exit(1);
       }
       try {
-        // --cwd で明示された path が git repo の toplevel そのものなら
-        // それを使う。サブディレクトリ指定や非 git ディレクトリの場合は
-        // 親 repoRoot に勝手に上がらず、指定された path 自身を cwd にする
-        // (data/test/* のような独立 cwd を含めるための挙動)。
-        const nextReal = realpathSync(next);
-        const candidate = git.repoRoot(next);
-        cwd = candidate === nextReal ? candidate : nextReal;
+        cwd = realpathSync(next);
+        cwdWasExplicit = true;
       } catch {
         console.error("--cwd must point to an existing directory");
         process.exit(1);
@@ -261,6 +264,18 @@ Examples:
       listenPort = parsed;
     } else if (arg === "--open") {
       openAfterStart = true;
+    } else if (arg === "--bin") {
+      const next = process.argv[++i];
+      if (!next) {
+        console.error("--bin requires <name>=<absolute-path>");
+        process.exit(1);
+      }
+      const parsed = parseExternalCommandOverride(next);
+      if (parsed.ok === false) {
+        console.error(parsed.error);
+        process.exit(1);
+      }
+      commandOverrides.push(parsed.override);
     } else if (arg === "--allow-upload") {
       // Deprecated no-op: uploads are enabled for worktree folders by default.
     } else if (arg === "--scope-omit-dir") {
@@ -278,6 +293,24 @@ Examples:
     }
   }
   if (rest.length) cliArgs = rest;
+  const commandConfig = configureExternalCommands({
+    cwd,
+    cliOverrides: commandOverrides,
+  });
+  if (commandConfig.ok === false) {
+    console.error(commandConfig.error);
+    process.exit(1);
+  }
+  const candidate = git.repoRoot(cwd);
+  if (cwdWasExplicit) {
+    // --cwd で明示された path が git repo の toplevel そのものなら
+    // それを使う。サブディレクトリ指定や非 git ディレクトリの場合は
+    // 親 repoRoot に勝手に上がらず、指定された path 自身を cwd にする
+    // (data/test/* のような独立 cwd を含めるための挙動)。
+    if (candidate === cwd) cwd = candidate;
+  } else if (candidate) {
+    cwd = candidate;
+  }
   warnIfLegacyConfigPresent();
   if (scopeOmitDirCliOverride) {
     scopeOmitDirNames = scopeOmitDirCliOverride;
@@ -548,8 +581,11 @@ function computePayload(
   }
   const { args, refs } = buildRangeArgs(range);
   const fullArgs = [...extras, ...args];
-  const files = git.fileMeta(fullArgs, cwd, false);
-  if (includeUntracked(range, refs)) files.push(...git.untrackedMeta(cwd));
+  const metaResult = git.fileMetaResult(fullArgs, cwd, false);
+  const files = metaResult.files;
+  if (!metaResult.error && includeUntracked(range, refs)) {
+    files.push(...git.untrackedMeta(cwd));
+  }
   const filteredFiles = pathFilter
     ? files.filter(
         (file) => file.path === pathFilter || file.old_path === pathFilter,
@@ -586,6 +622,7 @@ function computePayload(
     project: basename(cwd),
     branch: git.currentBranch(cwd) || undefined,
     generation,
+    ...(metaResult.error ? { error: metaResult.error } : {}),
   };
 }
 
@@ -910,20 +947,25 @@ function handleTree(url: URL) {
   if (!safeRepoPath(path)) return text("invalid path", 400);
   if ((target === "worktree" || target === "") && git.isGitInternalPath(path))
     return text("forbidden", 403);
-  if (target !== "worktree" && !git.verifyTreeRef(target, cwd))
-    return text("invalid target", 400);
+  if (target !== "worktree") {
+    const refCheck = git.verifyTreeRefResult(target, cwd);
+    if (refCheck.ok !== true)
+      return text(refCheck.error, refCheck.status ?? 400);
+  }
   const recursive = url.searchParams.get("recursive") === "1";
   if (invalidScopeOmitDirNamesQuery(url)) return text("invalid omit dirs", 400);
   if (invalidScopeExcludeNamesQuery(url))
     return text("invalid exclude names", 400);
   const excludeNames = scopeExcludeNamesFromQuery(url);
-  const entries = git
-    .listTree(target, path, cwd, {
-      recursive,
-      omitDirNames: scopeOmitDirNamesFromQuery(url),
-      excludeNames,
-    })
-    .entries.filter((entry) => !isExcludedScopePath(entry.path, excludeNames));
+  const tree = git.listTreeResult(target, path, cwd, {
+    recursive,
+    omitDirNames: scopeOmitDirNamesFromQuery(url),
+    excludeNames,
+  });
+  if (tree.error) return text(tree.error, tree.status ?? 500);
+  const entries = tree.entries.filter(
+    (entry) => !isExcludedScopePath(entry.path, excludeNames),
+  );
   return json({
     ref: target,
     path,
@@ -1000,7 +1042,7 @@ function handleFiles(url: URL) {
     target,
     generation,
   );
-  if (result.ok !== true) return text(result.error, 400);
+  if (result.ok !== true) return text(result.error, result.status ?? 400);
   fileListCache.set(key, { generation, body: result.value });
   return json(result.value);
 }
@@ -1023,7 +1065,7 @@ function handleGrep(url: URL) {
     regex,
     max,
   });
-  if (result.ok !== true) return text(result.error, 400);
+  if (result.ok !== true) return text(result.error, result.status ?? 400);
   return json(result.value);
 }
 
@@ -1035,7 +1077,9 @@ function handleRefCommits(url: URL) {
     Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : undefined;
   const skip =
     Number.isFinite(parsedSkip) && parsedSkip > 0 ? parsedSkip : undefined;
-  return json(git.refCommitPage(cwd, { query, max, skip }));
+  const result = git.refCommitPageResult(cwd, { query, max, skip });
+  if (result.error) return text(result.error, result.status ?? 500);
+  return json({ commits: result.commits, hasMore: result.hasMore });
 }
 
 function handleLog(url: URL) {
@@ -1051,7 +1095,7 @@ function handleLog(url: URL) {
     query: url.searchParams.get("q") || "",
     ...(path ? { path } : {}),
   });
-  if (result.error) return text(result.error, 400);
+  if (result.error) return text(result.error, result.status ?? 400);
   // ref=worktree (or worktree=1) with a path filter prepends a "Working tree"
   // pseudo-commit when this path has uncommitted changes vs HEAD.
   const wantsWorktreeHead =
@@ -1061,21 +1105,8 @@ function handleLog(url: URL) {
   let commits: typeof result.commits = result.commits;
   let hasWorktree = false;
   if (wantsWorktreeHead) {
-    const status = runSync(
-      [
-        "git",
-        "-c",
-        "core.quotepath=false",
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--untracked-files=normal",
-        "--",
-        path,
-      ],
-      cwd,
-    );
-    if (status.code === 0 && status.stdout.length > 0) {
+    const status = git.statusPorcelainForPath(path, cwd);
+    if (status.ok && status.stdout.length > 0) {
       // Any non-empty record means the path has uncommitted changes.
       const parts = status.stdout.split("\0").filter(Boolean);
       if (parts.length > 0) {
@@ -1142,12 +1173,13 @@ function handleFileBlame(url: URL) {
   if (base === "worktree") {
     cacheKey = `worktree|${path}|${blamePathKey(path)}`;
   } else {
-    const resolved = runSync(
-      ["git", "rev-parse", "--verify", `${normalized.ref}^{commit}`],
-      cwd,
-    );
-    if (resolved.code !== 0) return text("unknown ref", 400);
-    cacheKey = `HEAD|${path}|${resolved.stdout.trim()}`;
+    const resolved = git.verifyCommit(normalized.ref, cwd);
+    if (resolved.ok === false) {
+      const status =
+        resolved.error === commandNotFoundDetail("git") ? 503 : 400;
+      return text(resolved.error || "unknown ref", status);
+    }
+    cacheKey = `HEAD|${path}|${resolved.sha}`;
   }
   const cached = blameCache.get(cacheKey);
   if (cached) {
@@ -1158,6 +1190,7 @@ function handleFileBlame(url: URL) {
     return json({ ...cached, base, ref, generation });
   }
   const result = git.blame(cwd, { path, ref: normalized.ref, base });
+  if (result.error && result.status) return text(result.error, result.status);
   if (!result.error) rememberBlame(cacheKey, result);
   return json({ ...result, base, ref, generation });
 }
@@ -1208,11 +1241,17 @@ function handleFileDiff(url: URL) {
   const cached = fileCache.get(cacheKey);
   let diffText: string;
   let errText = "";
+  let errStatus: number | undefined;
   if (cacheFresh(cached)) {
     diffText = cached.diffText;
   } else {
     if (isUntracked) {
-      diffText = git.untrackedFileDiff(extras, path, cwd).stdout || "";
+      const res = git.untrackedFileDiff(extras, path, cwd);
+      diffText = res.stdout || "";
+      if (res.code !== 0) {
+        errText = res.stderr;
+        errStatus = res.status;
+      }
     } else {
       const res = git.fileDiffText(
         [...extras, ...args],
@@ -1220,10 +1259,14 @@ function handleFileDiff(url: URL) {
         cwd,
       );
       diffText = res.stdout || "";
-      if (res.code !== 0) errText = res.stderr;
+      if (res.code !== 0) {
+        errText = res.stderr;
+        errStatus = res.status;
+      }
     }
-    setTimedCacheEntry(fileCache, cacheKey, { diffText });
+    if (!errText) setTimedCacheEntry(fileCache, cacheKey, { diffText });
   }
+  if (errStatus) return text(errText || "diff failed", errStatus);
   const mode = url.searchParams.get("mode") || "full";
   const truncated =
     mode === "preview"
@@ -1480,7 +1523,9 @@ async function handleFileRange(url: URL) {
     };
     return json(body);
   } else {
-    if (!git.verifyTreeRef(ref, cwd)) return text("invalid ref", 400);
+    const refCheck = git.verifyTreeRefResult(ref, cwd);
+    if (refCheck.ok !== true)
+      return text(refCheck.error, refCheck.status ?? 400);
     const oid = git.objectId(ref, path, cwd);
     if (oid.code !== 0 || !oid.oid) return text("not in ref", 404);
     const size = git.objectByteSize(oid.oid, cwd);
@@ -1513,7 +1558,9 @@ function handleRawFile(req: Request, url: URL) {
   const ref = url.searchParams.get("ref") || "worktree";
   let body: BodyInit;
   if (ref !== "worktree" && ref !== "") {
-    if (!git.verifyTreeRef(ref, cwd)) return text("invalid ref", 400);
+    const refCheck = git.verifyTreeRefResult(ref, cwd);
+    if (refCheck.ok !== true)
+      return text(refCheck.error, refCheck.status ?? 400);
     const size = rawFileSize(path, ref);
     if (size == null) return text("not in ref", 404);
     const metadata = gitFileMetadata(ref, path, size);
@@ -2431,7 +2478,11 @@ const server = await startServer({
     }
     if (url.pathname === "/_mcp") return handleMcp(req);
     if (url.pathname === "/_annotations") return handleAnnotations(req);
-    if (url.pathname === "/_refs") return json(git.refs(cwd));
+    if (url.pathname === "/_refs") {
+      const result = git.refsResult(cwd);
+      if (result.error) return text(result.error, result.status ?? 500);
+      return json(result.refs);
+    }
     if (url.pathname === "/refresh" && req.method === "POST") {
       if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
       triggerUpdate();

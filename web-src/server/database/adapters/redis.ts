@@ -11,7 +11,11 @@ import type {
   SnapshotIterable,
 } from "../sources/types";
 import { throwIfAborted } from "./abort";
-import { resolveRunningComposeContainerNameOrThrowAsync } from "./docker-utils";
+import {
+  dockerCommand,
+  resolveRunningComposeContainerNameOrThrowAsync,
+  throwIfDockerCommandUnavailableResult,
+} from "./docker-utils";
 import { spawnTextAsync } from "./spawn-runner";
 
 type RedisConfig = {
@@ -126,7 +130,7 @@ function buildRedisCliInvocation(
   return { args: dockerArgs, env: spawnEnv };
 }
 
-function execRedisCliAsync(
+async function execRedisCliAsync(
   config: RedisConfig,
   args: string[],
   timeoutMs = 10000,
@@ -134,8 +138,8 @@ function execRedisCliAsync(
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   throwIfAborted(signal, "redis-cli aborted");
   const invocation = buildRedisCliInvocation(config, args);
-  return spawnTextAsync({
-    command: "docker",
+  const result = await spawnTextAsync({
+    command: dockerCommand(),
     args: invocation.args,
     env: invocation.env,
     timeoutMs,
@@ -144,6 +148,8 @@ function execRedisCliAsync(
     timeoutMessage: `redis-cli timed out after ${timeoutMs}ms`,
     rejectOnError: false,
   });
+  throwIfDockerCommandUnavailableResult(result);
+  return result;
 }
 
 function parseInfoKeyspace(stdout: string): Map<number, number> {

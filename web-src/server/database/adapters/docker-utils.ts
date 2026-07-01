@@ -1,4 +1,9 @@
 import { spawnSync } from "node:child_process";
+import {
+  commandForExternal,
+  commandNotFoundDetail,
+  isCommandNotFoundResult,
+} from "../../command-resolver";
 import { isAbortLikeError, throwIfAborted } from "./abort";
 import { spawnTextAsync } from "./spawn-runner";
 
@@ -12,9 +17,11 @@ type ComposePsCacheEntry = {
   containers: ComposeContainerNameByService | null;
   positiveExpiresAt: number;
   negativeExpiresAt: number;
+  error?: string;
 };
 
 type ComposeContainerNameByService = Map<string, string>;
+type DockerCommandResult = { code: number; stderr?: string };
 
 const COMPOSE_CONTAINER_NAME_POSITIVE_TTL_MS = 30_000;
 const COMPOSE_CONTAINER_NAME_NEGATIVE_TTL_MS = 3_000;
@@ -45,10 +52,49 @@ export class DockerComposeServiceUnavailableError extends Error {
   }
 }
 
+export class DockerCommandUnavailableError extends Error {
+  readonly status = 503;
+
+  constructor() {
+    super(
+      `${commandNotFoundDetail("docker")}. Install Docker or pass --bin docker=/absolute/path.`,
+    );
+    this.name = "DockerCommandUnavailableError";
+  }
+}
+
 export function isDockerComposeServiceUnavailableError(
   err: unknown,
-): err is DockerComposeServiceUnavailableError {
-  return err instanceof DockerComposeServiceUnavailableError;
+): err is DockerComposeServiceUnavailableError | DockerCommandUnavailableError {
+  return (
+    err instanceof DockerComposeServiceUnavailableError ||
+    err instanceof DockerCommandUnavailableError
+  );
+}
+
+export function dockerCommand(): string {
+  return commandForExternal("docker");
+}
+
+export function isDockerCommandUnavailableResult(
+  result: DockerCommandResult,
+): boolean {
+  return isCommandNotFoundResult("docker", result);
+}
+
+export function throwIfDockerCommandUnavailableResult(
+  result: DockerCommandResult,
+): void {
+  if (isDockerCommandUnavailableResult(result)) {
+    throw new DockerCommandUnavailableError();
+  }
+}
+
+export function throwIfCachedComposeDockerCommandUnavailable(
+  cwd: string,
+): void {
+  const failure = composePsCache.get(cwd)?.error || "";
+  throwIfDockerCommandUnavailableResult({ code: 1, stderr: failure });
 }
 
 export function __clearDockerComposeContainerNameCacheForTest(): void {
@@ -79,8 +125,14 @@ function parseComposePsOutput(stdout: string): ComposeContainerNameByService {
   return byService;
 }
 
-function cacheComposePsFailure(cwd: string, stderr: string, now: number): void {
+function cacheComposePsFailure(
+  cwd: string,
+  result: DockerCommandResult,
+  now: number,
+): void {
+  const stderr = result.stderr || "";
   const failureTtl =
+    isDockerCommandUnavailableResult(result) ||
     /docker daemon|cannot connect|is the docker daemon running/i.test(stderr)
       ? COMPOSE_PS_FAILURE_TTL_MS
       : COMPOSE_CONTAINER_NAME_NEGATIVE_TTL_MS;
@@ -88,6 +140,7 @@ function cacheComposePsFailure(cwd: string, stderr: string, now: number): void {
     containers: null,
     positiveExpiresAt: now,
     negativeExpiresAt: now + failureTtl,
+    error: stderr,
   });
 }
 
@@ -97,8 +150,9 @@ function runComposePsAsync(
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   throwIfAborted(signal, "docker compose ps aborted");
   if (spawnSyncImpl !== spawnSync) {
+    const command = dockerCommand();
     const proc = spawnSyncImpl(
-      "docker",
+      command,
       ["compose", "ps", "--format", "json", "--status", "running"],
       {
         encoding: "utf8",
@@ -109,12 +163,12 @@ function runComposePsAsync(
     );
     return Promise.resolve({
       stdout: String(proc.stdout || ""),
-      stderr: String(proc.stderr || ""),
+      stderr: `${String(proc.stderr || "")}${proc.error ? `\n${proc.error.message}` : ""}`,
       code: proc.status ?? 1,
     });
   }
   return spawnTextAsync({
-    command: "docker",
+    command: dockerCommand(),
     args: ["compose", "ps", "--format", "json", "--status", "running"],
     cwd,
     timeoutMs: 5000,
@@ -122,6 +176,7 @@ function runComposePsAsync(
     killSignal: "SIGKILL",
     abortMessage: "docker compose ps aborted",
     timeoutMessage: "docker compose ps timed out",
+    rejectOnError: false,
   });
 }
 
@@ -155,13 +210,16 @@ export async function resolveRunningComposeContainerNameAsync(
           if (isAbortLikeError(err, controller.signal)) throw err;
           cacheComposePsFailure(
             cwd,
-            err instanceof Error ? err.message : String(err),
+            {
+              code: 1,
+              stderr: err instanceof Error ? err.message : String(err),
+            },
             startedAt,
           );
           return null;
         }
         if (proc.code !== 0) {
-          cacheComposePsFailure(cwd, proc.stderr || "", startedAt);
+          cacheComposePsFailure(cwd, proc, startedAt);
           return null;
         }
         try {
@@ -180,6 +238,7 @@ export async function resolveRunningComposeContainerNameAsync(
             positiveExpiresAt: startedAt,
             negativeExpiresAt:
               startedAt + COMPOSE_CONTAINER_NAME_NEGATIVE_TTL_MS,
+            error: "could not parse docker compose ps output",
           });
           return null;
         }
@@ -229,6 +288,7 @@ export async function resolveRunningComposeContainerNameOrThrowAsync(
     signal,
   );
   if (!containerName) {
+    throwIfCachedComposeDockerCommandUnavailable(cwd);
     throw new DockerComposeServiceUnavailableError(serviceName, cwd);
   }
   return containerName;

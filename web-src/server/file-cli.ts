@@ -18,6 +18,11 @@ import {
   validateRepoRelativePathValue,
 } from "./cli-helpers";
 import {
+  configureExternalCommands,
+  type ExternalCommandOverride,
+  parseExternalCommandOverride,
+} from "./command-resolver";
+import {
   BLAME_ZERO_SHA,
   blame,
   commitHistory,
@@ -85,6 +90,7 @@ export type FileCommand =
 export type FileArgs = {
   command: FileCommand;
   cwd?: string;
+  commandOverrides?: ExternalCommandOverride[];
 };
 
 export type FileParseResult =
@@ -101,9 +107,9 @@ export const FILE_DIFF_LINE_HARD_CAP = 100_000;
 export const FILE_HELP = `code-viewer file — inspect a path's blame, history, contents, or diff
 
 Usage:
-  code-viewer file blame   --path <path> [--ref <ref>] [--base <worktree|HEAD>] [--json] [--cwd <dir>]
-  code-viewer file history --path <path> [--ref <ref>] [--limit <n>] [--skip <n>] [--query <text>] [--json] [--cwd <dir>]
-  code-viewer file show    --path <path> [--ref <ref>] [--start <line>] [--end <line>] [--json] [--cwd <dir>]
+  code-viewer file blame   --path <path> [--ref <ref>] [--base <worktree|HEAD>] [--json] [--cwd <dir>] [--bin git=<path>]
+  code-viewer file history --path <path> [--ref <ref>] [--limit <n>] [--skip <n>] [--query <text>] [--json] [--cwd <dir>] [--bin git=<path>]
+  code-viewer file show    --path <path> [--ref <ref>] [--start <line>] [--end <line>] [--json] [--cwd <dir>] [--bin git=<path>]
   code-viewer file diff    --path <path> [--from <ref>] [--to <ref>] [--old-path <path>] [--untracked]
                            [--ignore-ws] [--ignore-blank] [--max-hunks <n>] [--max-lines <n>] [--full] [--json] [--cwd <dir>]
   code-viewer file --help
@@ -116,6 +122,7 @@ Common options:
                   HEAD. Single-line, no NUL, no leading "-". blame/show accept
                   the literal "worktree" to mean the working tree.
   --cwd <dir>     Repository to target (default: process.cwd()).
+  --bin git=<p>   Override git executable path.
   --json          Emit a structured JSON payload instead of plain text.
   --help, -h      Show this help.
 
@@ -183,7 +190,8 @@ Diff Viewer views.
 - Run from inside the repository, or pass --cwd <repo>.
 - No code-viewer server is required (this command reads git refs or the
   worktree directly).
-- Git must be available on PATH.
+- Git must be available on PATH, or supplied with --bin git=/absolute/path
+  / CODE_VIEWER_BIN_GIT.
 
 ## How to call
 
@@ -335,6 +343,7 @@ export function parseFileArgs(argv: string[]): FileParseResult {
   let cwd: string | undefined;
   const options = new Map<string, string>();
   const flags = new Set<string>();
+  const commandOverrides: ExternalCommandOverride[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -345,6 +354,15 @@ export function parseFileArgs(argv: string[]): FileParseResult {
       const taken = takeValue(argv, i, arg);
       if ("error" in taken) return { ok: false, error: taken.error };
       cwd = taken.value;
+      i = taken.next;
+    } else if (arg === "--bin") {
+      const taken = takeValue(argv, i, arg);
+      if ("error" in taken) return { ok: false, error: taken.error };
+      const parsed = parseExternalCommandOverride(taken.value, "--bin", [
+        "git",
+      ]);
+      if (parsed.ok === false) return { ok: false, error: parsed.error };
+      commandOverrides.push(parsed.override);
       i = taken.next;
     } else if (VALUE_FLAGS.has(arg)) {
       const taken = takeValue(argv, i, arg);
@@ -416,6 +434,7 @@ export function parseFileArgs(argv: string[]): FileParseResult {
           json,
         },
         cwd,
+        ...(commandOverrides.length ? { commandOverrides } : {}),
       },
     };
   }
@@ -463,6 +482,7 @@ export function parseFileArgs(argv: string[]): FileParseResult {
           json,
         },
         cwd,
+        ...(commandOverrides.length ? { commandOverrides } : {}),
       },
     };
   }
@@ -511,6 +531,7 @@ export function parseFileArgs(argv: string[]): FileParseResult {
           json,
         },
         cwd,
+        ...(commandOverrides.length ? { commandOverrides } : {}),
       },
     };
   }
@@ -616,6 +637,7 @@ export function parseFileArgs(argv: string[]): FileParseResult {
         json,
       },
       cwd,
+      ...(commandOverrides.length ? { commandOverrides } : {}),
     },
   };
 }
@@ -1021,7 +1043,7 @@ export async function runFileCli(argv: string[]): Promise<void> {
     console.error('Run "code-viewer file --help" for usage.');
     process.exit(1);
   }
-  const { command, cwd } = parsed.args;
+  const { command, cwd, commandOverrides = [] } = parsed.args;
   if (command.kind === "help") {
     console.log(FILE_HELP);
     return;
@@ -1029,6 +1051,15 @@ export async function runFileCli(argv: string[]): Promise<void> {
   if (command.kind === "agent-help") {
     console.log(FILE_AGENT_HELP);
     return;
+  }
+  const commandConfig = configureExternalCommands({
+    cwd: cwd || process.cwd(),
+    cliOverrides: commandOverrides,
+    allowedNames: ["git"],
+  });
+  if (commandConfig.ok === false) {
+    console.error(commandConfig.error);
+    process.exit(1);
   }
   const root = resolveRepoRoot(cwd);
   if (command.kind === "blame") return runBlame(root, command);

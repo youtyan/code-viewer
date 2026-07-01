@@ -100,6 +100,9 @@ Common options:
 - `--cwd <dir>` — repository to view (default: current working directory).
 - `--open` — open the printed URL in the default browser.
 - `--port <port>` — bind to a specific port (default: pick a free port).
+- `--bin <name>=<absolute-path>` — override an external command path
+  (`git`, `rg`, or `docker`). The same values can be supplied through
+  `CODE_VIEWER_BIN_GIT`, `CODE_VIEWER_BIN_RG`, and `CODE_VIEWER_BIN_DOCKER`.
 - `--scope-omit-dir <name>` — skip a directory under the worktree (repeatable;
   overrides the Viewer Settings list for this session).
 - `--version`, `-v` — print the installed version.
@@ -114,6 +117,10 @@ npx @youtyan/code-viewer --staged
 code-viewer HEAD~1 HEAD
 code-viewer --cwd /path/to/repo --staged
 ```
+
+`--bin` is useful when several command installations exist or a login shell
+PATH differs from the environment that starts code-viewer. Override paths must
+be absolute executable files outside the opened repository.
 
 Open **Viewer Settings** in the header to change display options such as
 theme, layout, sidebar mode, font sizes, and UI language. The language setting
@@ -531,6 +538,9 @@ code-viewer status --json
 
 # Override the ref / depth used for "recent commits".
 code-viewer status --ref main --limit 20 --json
+
+# Use a specific git binary when PATH resolution is not the one you want.
+code-viewer status --bin git=/opt/bin/git --json
 ```
 
 The `nextCommands` field pins `--server '<url>'` automatically for
@@ -587,6 +597,9 @@ code-viewer search files --term "src/**/*.test.ts" --max 200 --json
 
 # Look at a specific ref instead of the worktree.
 code-viewer search files --term "config" --ref main --json
+
+# Pin the git binary used for CLI-side repository discovery.
+code-viewer search files --term "config" --bin git=/opt/bin/git --json
 ```
 
 Default text output is one path per line, best first. An empty result
@@ -630,6 +643,9 @@ code-viewer file show --path src/sample.ts --ref main --json
 code-viewer file diff --path src/sample.ts --json
 code-viewer file diff --path src/sample.ts --from HEAD~1 --to HEAD --full --json
 code-viewer file diff --path new_sample.ts --untracked --json
+
+# Pin the git binary used by local file/blame/history/diff reads.
+code-viewer file history --path src/sample.ts --bin git=/opt/bin/git --json
 ```
 
 Default (non-`--json`) output is tab-separated and easy to grep:
@@ -660,6 +676,7 @@ code-viewer doctor
 # Full DoctorReport JSON (matches the /_doctor endpoint).
 code-viewer doctor --json
 code-viewer doctor --cwd /path/to/repo --port 64160 --json
+code-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --json
 ```
 
 The exit code is `1` iff the worst check status is `"error"` (never on

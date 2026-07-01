@@ -25,6 +25,7 @@ import type {
   GrepMatch,
   GrepResponse,
 } from "../core/types";
+import { commandForExternal } from "./command-resolver";
 import * as git from "./git";
 import { runSync } from "./runtime";
 import {
@@ -53,11 +54,11 @@ export type GrepRequest = {
 
 export type GrepRunResult =
   | { ok: true; value: GrepResponse }
-  | { ok: false; error: string };
+  | { ok: false; error: string; status?: number };
 
 export type FileListResult =
   | { ok: true; value: FileSearchListResponse }
-  | { ok: false; error: string };
+  | { ok: false; error: string; status?: number };
 
 // rg availability does not depend on cwd in practice (it is a PATH
 // question), so we keep a single boolean cache shared by every call.
@@ -66,7 +67,7 @@ let rgAvailableCache: boolean | null = null;
 
 export function rgAvailable(cwd: string): boolean {
   if (rgAvailableCache !== null) return rgAvailableCache;
-  const proc = runSync(["rg", "--version"], cwd);
+  const proc = runSync([commandForExternal("rg"), "--version"], cwd);
   rgAvailableCache = proc.code === 0;
   return rgAvailableCache;
 }
@@ -207,6 +208,7 @@ function grepWorktree(env: SearchEnv, req: GrepRequest): GrepResponse {
       env.omitDirNames,
       env.excludeNames,
     );
+    args[0] = commandForExternal("rg");
     const proc = runSync(args, env.cwd, { timeout: 5000 });
     const stdout = proc.stdout;
     const matches = parseRgOutput(
@@ -252,7 +254,7 @@ function grepWorktree(env: SearchEnv, req: GrepRequest): GrepResponse {
 function grepTreeRef(env: SearchEnv, req: GrepRequest): GrepResponse {
   const safePaths = filterCallerPaths(env, req.paths);
   const args = [
-    "git",
+    commandForExternal("git"),
     "-c",
     "core.quotepath=false",
     "grep",
@@ -289,6 +291,17 @@ function grepTreeRef(env: SearchEnv, req: GrepRequest): GrepResponse {
 // yet" the way the browser palette does. Unknown refs are surfaced as
 // errors; everything else returns a populated GrepResponse.
 export function grepRepo(env: SearchEnv, req: GrepRequest): GrepRunResult {
+  const isWorktree = req.ref === "worktree" || req.ref === "";
+  if (!isWorktree) {
+    const refCheck = git.verifyTreeRefResult(req.ref, env.cwd);
+    if (refCheck.ok !== true) {
+      return {
+        ok: false,
+        error: refCheck.error,
+        status: refCheck.status,
+      };
+    }
+  }
   if (!req.query.trim()) {
     return {
       ok: true,
@@ -300,11 +313,8 @@ export function grepRepo(env: SearchEnv, req: GrepRequest): GrepRunResult {
       },
     };
   }
-  if (req.ref === "worktree" || req.ref === "") {
+  if (isWorktree) {
     return { ok: true, value: grepWorktree(env, req) };
-  }
-  if (!git.verifyTreeRef(req.ref, env.cwd)) {
-    return { ok: false, error: "invalid target" };
   }
   return { ok: true, value: grepTreeRef(env, req) };
 }
@@ -317,19 +327,28 @@ export function listRepoFiles(
   ref: string,
   generation: number,
 ): FileListResult {
-  if (ref !== "worktree" && !git.verifyTreeRef(ref, env.cwd)) {
-    return { ok: false, error: "invalid target" };
+  if (ref !== "worktree" && ref !== "") {
+    const refCheck = git.verifyTreeRefResult(ref, env.cwd);
+    if (refCheck.ok !== true) {
+      return {
+        ok: false,
+        error: refCheck.error,
+        status: refCheck.status,
+      };
+    }
   }
   const effectiveRef = ref || "worktree";
-  const entries = git
-    .listTree(effectiveRef, "", env.cwd, {
-      recursive: true,
-      omitDirNames: env.omitDirNames,
-      excludeNames: env.excludeNames,
-    })
-    .entries.filter(
-      (entry) => !isExcludedScopePath(entry.path, env.excludeNames),
-    );
+  const tree = git.listTreeResult(effectiveRef, "", env.cwd, {
+    recursive: true,
+    omitDirNames: env.omitDirNames,
+    excludeNames: env.excludeNames,
+  });
+  if (tree.error) {
+    return { ok: false, error: tree.error, status: tree.status };
+  }
+  const entries = tree.entries.filter(
+    (entry) => !isExcludedScopePath(entry.path, env.excludeNames),
+  );
   return {
     ok: true,
     value: buildFileSearchList(effectiveRef, generation, entries),

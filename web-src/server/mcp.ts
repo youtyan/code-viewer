@@ -764,7 +764,10 @@ function runStatusTool(input: unknown, defaultCwd?: string): McpToolRunReturn {
 
   try {
     const report = buildStatusReport({ root: resolved.root, ref, limit });
-    return { text: JSON.stringify(report, null, 2) };
+    return {
+      text: JSON.stringify(report, null, 2),
+      isError: !!(report.changed.error || report.staged.error),
+    };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return { text: `status failed: ${detail}`, isError: true };

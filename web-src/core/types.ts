@@ -35,6 +35,7 @@ export type DiffMeta = {
   branch?: string;
   project?: string;
   generation?: number;
+  error?: string;
 };
 
 // ai-dup-check: allow -- client response DTO is intentionally kept in core types.
