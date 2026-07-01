@@ -1241,9 +1241,11 @@ body.gdp-history-page #topbar .ref-pickers {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 28px;
+  width: auto;
+  min-width: 28px;
   height: 28px;
-  padding: 0;
+  padding: 0 7px;
+  gap: 4px;
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
@@ -1262,7 +1264,7 @@ body.gdp-history-page #topbar .ref-pickers {
   cursor: default;
   opacity: 0.7;
 }
-.history-refresh.spinning {
+.history-refresh.spinning svg {
   animation: gdp-spin 0.7s linear infinite;
 }
 .history-refresh.has-update {
@@ -1284,7 +1286,14 @@ body.gdp-history-page #topbar .ref-pickers {
 .history-refresh svg {
   width: 16px;
   height: 16px;
+  flex: 0 0 auto;
   pointer-events: none;
+}
+.history-refresh-label {
+  line-height: 1;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
 }
 .history-filter-wrap {
   position: relative;

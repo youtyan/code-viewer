@@ -24,6 +24,8 @@ export type HistoryText = {
   worktreeLabel: string;
   bodyExpandClose: string;
   bodyExpandMore: (remainingLines: number) => string;
+  refreshLabel: string;
+  refreshLabelPending: string;
   refreshTitle: string;
   refreshTitlePending: string;
 };
@@ -33,6 +35,8 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     worktreeLabel: "Uncommitted changes (Working tree)",
     bodyExpandClose: "Collapse",
     bodyExpandMore: (n) => `Show more (${n} lines)`,
+    refreshLabel: "Refresh",
+    refreshLabelPending: "Update",
     refreshTitle: "Refresh commit history",
     refreshTitlePending: "History may have changed. Refresh",
   },
@@ -40,6 +44,8 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     worktreeLabel: "未コミット変更 (Working tree)",
     bodyExpandClose: "閉じる",
     bodyExpandMore: (n) => `もっと見る (${n} 行)`,
+    refreshLabel: "更新",
+    refreshLabelPending: "更新あり",
     refreshTitle: "コミット履歴を更新",
     refreshTitlePending: "新しい履歴がある可能性があります。更新",
   },
@@ -112,6 +118,10 @@ export function buildHistoryPanelDom(
   refreshButton.title = HISTORY_TEXT.en.refreshTitle;
   refreshButton.setAttribute("aria-label", HISTORY_TEXT.en.refreshTitle);
   refreshButton.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+  const refreshLabel = document.createElement("span");
+  refreshLabel.className = "history-refresh-label";
+  refreshLabel.textContent = HISTORY_TEXT.en.refreshLabel;
+  refreshButton.appendChild(refreshLabel);
 
   if (page) {
     const refMount = document.createElement("span");
@@ -490,6 +500,12 @@ export function createHistoryView(deps: HistoryViewDeps) {
     button.title = title;
     button.setAttribute("aria-label", title);
     button.classList.toggle("has-update", hasPendingUpdate);
+    const label = button.querySelector(".history-refresh-label");
+    if (label) {
+      label.textContent = hasPendingUpdate
+        ? text.refreshLabelPending
+        : text.refreshLabel;
+    }
   }
 
   async function updateCommitInfo(commit: HistoryCommit | null) {

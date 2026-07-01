@@ -402,6 +402,7 @@ function installHistoryViewDom() {
   const status = new FakeElement();
   const sentinel = new FakeElement();
   const refreshButton = new FakeElement();
+  const refreshLabel = new FakeElement();
   const info = new FakeElement();
   const documentListeners: Record<string, Array<(event: unknown) => void>> = {};
   const head = new FakeElement();
@@ -418,6 +419,8 @@ function installHistoryViewDom() {
   subject.className = "hci-subject";
   body.className = "hci-body";
   refreshButton.className = "history-refresh";
+  refreshLabel.className = "history-refresh-label";
+  refreshButton.appendChild(refreshLabel);
   head.append(sha, author, date);
   info.append(head, subject, body);
 
@@ -458,6 +461,7 @@ function installHistoryViewDom() {
     status,
     sentinel,
     refreshButton,
+    refreshLabel,
     info,
     head,
     subject,
@@ -974,6 +978,9 @@ describe("history view lifecycle", () => {
     await waitFor(() => fetchCount === 2);
     expect(refreshButton.attributes["aria-label"]).toBe("コミット履歴を更新");
     expect(
+      refreshButton.querySelector(".history-refresh-label")?.textContent,
+    ).toBe("更新");
+    expect(
       list.querySelectorAll(".history-item").map((row) => row.dataset.sha),
     ).toEqual([HISTORY_WORKTREE_COMMIT, commit.sha]);
   });
@@ -1027,6 +1034,9 @@ describe("history view lifecycle", () => {
     expect(refreshButton.classList.contains("has-update")).toBe(false);
     expect(refreshButton.title).toBe("コミット履歴を更新");
     expect(refreshButton.attributes["aria-label"]).toBe("コミット履歴を更新");
+    expect(
+      refreshButton.querySelector(".history-refresh-label")?.textContent,
+    ).toBe("更新");
 
     view.notePossibleUpdate();
     expect(refreshButton.classList.contains("has-update")).toBe(true);
@@ -1034,12 +1044,18 @@ describe("history view lifecycle", () => {
     expect(refreshButton.attributes["aria-label"]).toBe(
       "新しい履歴がある可能性があります。更新",
     );
+    expect(
+      refreshButton.querySelector(".history-refresh-label")?.textContent,
+    ).toBe("更新あり");
 
     refreshButton.click();
     await waitFor(() => fetchCount === 2);
     expect(refreshButton.classList.contains("has-update")).toBe(false);
     expect(refreshButton.title).toBe("コミット履歴を更新");
     expect(refreshButton.attributes["aria-label"]).toBe("コミット履歴を更新");
+    expect(
+      refreshButton.querySelector(".history-refresh-label")?.textContent,
+    ).toBe("更新");
   });
 
   test("arrow keys select commits in file history mode without leaving the /file route", async () => {
