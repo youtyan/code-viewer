@@ -180,4 +180,36 @@ describe("database table list", () => {
     ).toBe(false);
     expect(selected).toEqual(["sample_users"]);
   });
+
+  test("updates one row count without resetting the table filter", () => {
+    const view = createTableList({
+      onSelectTable: () => undefined,
+    });
+    document.body.appendChild(view.el);
+
+    view.render([
+      { name: "sample_users", type: "table", rowCount: 2 },
+      { name: "audit_logs", type: "table", rowCount: 5 },
+    ]);
+
+    const input = view.el.querySelector<HTMLInputElement>(".db-table-filter");
+    if (!input) throw new Error("missing table filter input");
+    input.value = "users";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    view.updateRowCount("sample_users", 12_500);
+    expect(input.value).toBe("users");
+    expect(view.el.querySelectorAll(".db-table-node")).toHaveLength(1);
+    expect(view.el.querySelector(".db-table-count")?.textContent).toBe("12.5K");
+
+    view.updateRowCount("audit_logs", 9);
+    expect((view.el.textContent || "").includes("audit_logs")).toBe(false);
+
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const counts = Array.from(view.el.querySelectorAll(".db-table-count")).map(
+      (count) => count.textContent,
+    );
+    expect(counts).toEqual(["12.5K", "9"]);
+  });
 });

@@ -15,6 +15,7 @@ export type TableList = {
   el: HTMLElement;
   render: (tables: DbTableInfo[]) => void;
   setActive: (table: string | null) => void;
+  updateRowCount: (table: string, rowCount: number | null) => void;
   dispose: () => void;
 };
 
@@ -358,6 +359,18 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     });
   }
 
+  function updateRowCount(table: string, rowCount: number | null): void {
+    allTables = allTables.map((entry) =>
+      entry.name === table ? { ...entry, rowCount } : entry,
+    );
+    for (const node of el.querySelectorAll<HTMLElement>(".db-table-node")) {
+      if (node.dataset.table !== table) continue;
+      const count = node.querySelector<HTMLElement>(".db-table-count");
+      if (count)
+        count.textContent = rowCount != null ? formatRowCount(rowCount) : "";
+    }
+  }
+
   function dispose(): void {
     closeContextMenu();
     allTables = [];
@@ -368,7 +381,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     filterClear.removeEventListener("click", clearFilter);
   }
 
-  return { el: wrapper, render, setActive, dispose };
+  return { el: wrapper, render, setActive, updateRowCount, dispose };
 }
 
 function formatRowCount(n: number): string {

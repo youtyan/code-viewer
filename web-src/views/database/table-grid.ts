@@ -111,6 +111,12 @@ export type TableGridCallbacks = {
   getEditable?: () => boolean;
   /** 保留中の変更をサーバへ適用する。失敗時は throw (メッセージを表示する)。 */
   applyMutations?: (mutations: RowMutation[]) => Promise<void>;
+  /** ユーザー操作のリロードが成功したとき、親ビューへ件数同期の機会を通知する。 */
+  onRefreshComplete?: (event: {
+    table: string;
+    totalRows: number;
+    filters: GridFilter[];
+  }) => void;
 };
 
 export type TableGridOptions = {
@@ -789,6 +795,7 @@ export function createTableGrid(
 
   async function refreshCurrentTable(): Promise<void> {
     if (!currentTable || refreshBtn.disabled) return;
+    const refreshTable = currentTable;
     const previousTotalRows = totalRows;
     const refreshFilterKey = JSON.stringify(collectFilters());
     const scrollTop = viewport.scrollTop;
@@ -827,6 +834,11 @@ export function createTableGrid(
           JSON.stringify(collectFilters()) === refreshFilterKey
         ) {
           setRefreshResult(previousTotalRows, totalRows);
+          callbacks.onRefreshComplete?.({
+            table: refreshTable,
+            totalRows,
+            filters: collectFilters(),
+          });
         }
         updateStatus();
       }

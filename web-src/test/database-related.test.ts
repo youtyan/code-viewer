@@ -3,7 +3,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DbTableDataResponse } from "../core/database/types";
+import type {
+  DbTableCountResponse,
+  DbTableDataResponse,
+} from "../core/database/types";
 import { handleDatabaseRoute } from "../server/database/handle";
 
 const dirs: string[] = [];
@@ -25,6 +28,7 @@ function seedDb(): { dir: string; db: string } {
       user_id INTEGER REFERENCES users(id),
       title TEXT
     );
+    CREATE VIEW post_titles AS SELECT title FROM posts;
     INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (11, 'Eve');
     INSERT INTO posts (id, user_id, title) VALUES
       (1, 1, 'Hello'),
@@ -63,7 +67,36 @@ function tableUrl(
   return `/_db/table?${params}`;
 }
 
+function tableCountUrl(db: string, table: string): string {
+  return `/_db/table-count?${new URLSearchParams({ db, table })}`;
+}
+
 describe("/_db/table eq (exact foreign-key match)", () => {
+  test("table-count returns an unfiltered table row count", async () => {
+    const { dir, db } = seedDb();
+    const res = await route(dir, tableCountUrl(db, "posts"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DbTableCountResponse;
+    expect(body.table).toBe("posts");
+    expect(body.rowCount).toBe(3);
+  });
+
+  test("table-count keeps view row counts unset", async () => {
+    const { dir, db } = seedDb();
+    const res = await route(dir, tableCountUrl(db, "post_titles"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DbTableCountResponse;
+    expect(body.table).toBe("post_titles");
+    expect(body.rowCount).toBeNull();
+  });
+
+  test("table-count rejects an unknown table instead of returning zero", async () => {
+    const { dir, db } = seedDb();
+    const res = await route(dir, tableCountUrl(db, "missing_table"));
+    expect(res.status).toBe(500);
+    expect(await res.text()).toMatch(/unknown table/);
+  });
+
   test("eq matches exactly and not as a substring", async () => {
     const { dir, db } = seedDb();
     // user_id = 1 must match only the two posts for user 1, not user 11.

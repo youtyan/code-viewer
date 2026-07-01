@@ -8,6 +8,7 @@ import type {
   DbQueryResponse,
   DbSchemaResponse,
   DbSchemasResponse,
+  DbTableCountResponse,
   DbTableDataResponse,
   QueryHistoryEntry,
   QueryHistoryState,
@@ -672,6 +673,46 @@ async function handleTable(
     return json(body);
   } catch (err) {
     return handleError("database", "read table", err, signal);
+  }
+}
+
+async function handleTableCount(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<Response> {
+  const r = await resolveDb(
+    cwd,
+    url.searchParams.get("db"),
+    omitDirNames,
+    url.searchParams.get("schema"),
+    signal,
+  );
+  if (r instanceof Response) return r;
+  const table = url.searchParams.get("table");
+  if (!table) return textError("missing table parameter", 400);
+  try {
+    const adapter = await getAdapter(r, cwd, signal);
+    const { result, executedSql } = await captureSql(async () => {
+      const db = asAsync(adapter);
+      const tables = await db.tables(signal);
+      const entry = tables.find((candidate) => candidate.name === table);
+      if (!entry) throw new Error(`unknown table: ${table}`);
+      if (entry.type !== "table") return { rowCount: null };
+      const counts = await db.tableRowCounts([table], signal);
+      return { rowCount: counts.get(table) ?? null };
+    });
+    const body: DbTableCountResponse = {
+      dbId: r.dbId,
+      ...(r.schema ? { schema: r.schema } : {}),
+      table,
+      rowCount: result.rowCount,
+      executedSql,
+    };
+    return json(body);
+  } catch (err) {
+    return handleError("database", "read table count", err, signal);
   }
 }
 
@@ -2061,6 +2102,10 @@ export async function handleDatabaseRoute(
       "/_db/table": {
         methods: ["GET"],
         handler: () => handleTable(cwd, url, omitDirNames, req.signal),
+      },
+      "/_db/table-count": {
+        methods: ["GET"],
+        handler: () => handleTableCount(cwd, url, omitDirNames, req.signal),
       },
       "/_db/columns": {
         methods: ["GET"],

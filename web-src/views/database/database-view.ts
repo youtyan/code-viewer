@@ -8,6 +8,7 @@ import type {
   DbQueryResponse,
   DbSchemaResponse,
   DbSchemasResponse,
+  DbTableCountResponse,
   DbTableDataResponse,
   QueryHistoryState,
   RowMutation,
@@ -585,6 +586,12 @@ function createTabPane(
     // 編集 UI を出す。これらは adapter.applyMutations + /_db/mutate に対応。
     getEditable: () => isSqlKind(currentDbInfo?.kind),
     applyMutations: (mutations) => applyRowMutations(mutations),
+    onRefreshComplete: ({ table, filters }) => {
+      if (filters.length === 0) {
+        return;
+      }
+      void refreshTableRowCount(table);
+    },
   });
 
   // 編集モードのトグル (#16): table-grid 内の Edit ボタンを廃止し、サイドバー
@@ -1144,6 +1151,61 @@ function createTabPane(
     });
   }
 
+  function syncCachedTableRowCount(
+    table: string,
+    rowCount: number | null,
+  ): void {
+    if (!schemaCache) return;
+    let changed = false;
+    const tables = schemaCache.tables.map((entry) => {
+      if (entry.name !== table || entry.rowCount === rowCount) return entry;
+      changed = true;
+      return { ...entry, rowCount };
+    });
+    if (!changed) return;
+    schemaCache = { ...schemaCache, tables };
+    tableList.updateRowCount(table, rowCount);
+  }
+
+  async function fetchTableRowCount(
+    table: string,
+    dbId: string,
+    schema: string | null,
+  ): Promise<DbTableCountResponse> {
+    const params = new URLSearchParams({ db: dbId, table });
+    if (schema) params.set("schema", schema);
+    return logSqlFetch<DbTableCountResponse>({
+      url: `/_db/table-count?${params}`,
+      kind: "query",
+      label: `_db/table-count ${table}`,
+      errorPrefix: "failed to fetch table count",
+      rowCountOf: (r) => r.rowCount ?? undefined,
+    });
+  }
+
+  async function refreshTableRowCount(table: string): Promise<void> {
+    const dbId = currentDbInfo?.id;
+    if (!dbId) return;
+    const schema = currentSchema;
+    const generation = loadGeneration;
+    try {
+      const data = await fetchTableRowCount(table, dbId, schema);
+      if (
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== dbId ||
+        currentSchema !== schema ||
+        currentTable !== table
+      ) {
+        return;
+      }
+      syncCachedTableRowCount(table, data.rowCount);
+    } catch (err) {
+      if (!isAbortError(err)) {
+        console.warn(`failed to refresh table count: ${errorMessage(err)}`);
+      }
+    }
+  }
+
   /**
    * テーブルページを取得する。eq はベース WHERE（完全一致）として常に適用され、
    * その上にグリッド標準の filters / sort を重ねられる（FK 関連表示で使う）。
@@ -1158,8 +1220,11 @@ function createTabPane(
     eq: Array<{ column: string; value: string }> = [],
   ): Promise<DbTableDataResponse> {
     if (!currentDbInfo) throw new Error("no database selected");
+    const requestDbId = currentDbInfo.id;
+    const requestSchema = currentSchema;
+    const requestGeneration = loadGeneration;
     const params = new URLSearchParams({
-      db: currentDbInfo.id,
+      db: requestDbId,
       table,
       offset: String(offset),
       limit: String(limit),
@@ -1175,7 +1240,7 @@ function createTabPane(
     if (eq.length > 0) {
       params.set("eq", JSON.stringify(eq));
     }
-    return logSqlFetch<DbTableDataResponse>({
+    const data = await logSqlFetch<DbTableDataResponse>({
       url: `/_db/table?${params}`,
       init: signal ? { signal } : undefined,
       kind: "query",
@@ -1184,6 +1249,17 @@ function createTabPane(
       errorPrefix: "failed to fetch table",
       rowCountOf: (r) => r.rows.length,
     });
+    if (
+      filters.length === 0 &&
+      eq.length === 0 &&
+      currentDbInfo?.id === requestDbId &&
+      currentSchema === requestSchema &&
+      currentTable === table &&
+      requestGeneration === loadGeneration
+    ) {
+      syncCachedTableRowCount(table, data.totalRows);
+    }
+    return data;
   }
 
   function fetchRelatedPage(

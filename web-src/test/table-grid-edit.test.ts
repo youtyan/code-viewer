@@ -627,6 +627,11 @@ describe("table-grid edit mode", () => {
   test("refresh status shows active filters are kept while reloading", async () => {
     let resolveFetch: ((data: DbTableDataResponse) => void) | null = null;
     const fetchCalls: unknown[][] = [];
+    const refreshEvents: Array<{
+      table: string;
+      totalRows: number;
+      filters: unknown[];
+    }> = [];
     const grid = createTableGrid({
       fetchPage: async (_table, _offset, _limit, _sort, filters) => {
         fetchCalls.push(filters);
@@ -640,6 +645,7 @@ describe("table-grid edit mode", () => {
       getText: () => dbText("en"),
       getEditable: () => true,
       applyMutations: async () => undefined,
+      onRefreshComplete: (event) => refreshEvents.push(event),
     });
     document.body.appendChild(grid.el);
     grid.load("users", initialData());
@@ -669,6 +675,13 @@ describe("table-grid edit mode", () => {
     expect(refreshResult.hidden).toBe(false);
     expect(refreshResult.textContent).toBe("Rows unchanged (2)");
     expect(refreshResult.classList.contains("changed")).toBe(false);
+    expect(refreshEvents).toEqual([
+      {
+        table: "users",
+        totalRows: 2,
+        filters: [{ column: "name", value: "Ali" }],
+      },
+    ]);
     grid.destroy();
   });
 
@@ -804,6 +817,7 @@ describe("table-grid edit mode", () => {
   test("refresh result is skipped when filters change during reload", async () => {
     let resolveFetch: ((data: DbTableDataResponse) => void) | null = null;
     let fetches = 0;
+    const refreshEvents: unknown[] = [];
     const fetchPromise = new Promise<DbTableDataResponse>((resolve) => {
       resolveFetch = resolve;
     });
@@ -818,6 +832,7 @@ describe("table-grid edit mode", () => {
       getText: () => dbText("en"),
       getEditable: () => true,
       applyMutations: async () => undefined,
+      onRefreshComplete: (event) => refreshEvents.push(event),
     });
     document.body.appendChild(grid.el);
     grid.load("users", initialData());
@@ -842,6 +857,7 @@ describe("table-grid edit mode", () => {
     );
     expect(refreshResult.hidden).toBe(true);
     expect(refreshResult.textContent).toBe("");
+    expect(refreshEvents).toEqual([]);
     grid.destroy();
   });
 
@@ -850,6 +866,7 @@ describe("table-grid edit mode", () => {
       filters: unknown[];
       request: Deferred<DbTableDataResponse>;
     }> = [];
+    const refreshEvents: unknown[] = [];
     const grid = createTableGrid({
       fetchPage: async (_table, _offset, _limit, _sort, filters) => {
         const request = deferred<DbTableDataResponse>();
@@ -862,6 +879,7 @@ describe("table-grid edit mode", () => {
       getText: () => dbText("en"),
       getEditable: () => true,
       applyMutations: async () => undefined,
+      onRefreshComplete: (event) => refreshEvents.push(event),
     });
     document.body.appendChild(grid.el);
     grid.load("users", initialData());
@@ -887,6 +905,7 @@ describe("table-grid edit mode", () => {
     );
     expect(refreshResult.hidden).toBe(true);
     expect(refreshResult.textContent).toBe("");
+    expect(refreshEvents).toEqual([]);
 
     requests[1].request.resolve({
       ...initialData(),
