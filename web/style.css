@@ -1264,6 +1264,10 @@ body.gdp-history-page #topbar .ref-pickers {
 .history-refresh.spinning {
   animation: gdp-spin 0.7s linear infinite;
 }
+.history-refresh.has-update {
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .history-refresh svg {
   width: 16px;
   height: 16px;

@@ -293,7 +293,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   // screen; cleared once the list actually refetches (button click or ref
   // switch). Purely a visual hint — never triggers a fetch on its own, so it
   // can't interact with the generation/trackLoad race-safety contract.
-  const hasPendingUpdate = false;
+  let hasPendingUpdate = false;
 
   let ref = "HEAD";
   let commits: HistoryCommit[] = [];
@@ -815,6 +815,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       selectionGeneration++;
       selectedSha = "";
       setBanner("");
+      hasPendingUpdate = false;
       await updateCommitInfo(null);
       renderList();
       await loadNextPage();
@@ -1040,6 +1041,13 @@ export function createHistoryView(deps: HistoryViewDeps) {
     localize: () => {
       syncRefreshButton(activeMount.refreshButton);
       renderList();
+    },
+    // Called from the SSE "update" listener when a history panel is on
+    // screen. Only toggles a CSS hint on the refresh button — no fetch, no
+    // generation bump, so it can't race with trackLoad/cancelInFlightRequests.
+    notePossibleUpdate: () => {
+      hasPendingUpdate = true;
+      syncRefreshButton(activeMount.refreshButton);
     },
     isWorktreeSelected: () => selectedSha === HISTORY_WORKTREE_COMMIT,
   };

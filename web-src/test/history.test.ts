@@ -977,6 +977,62 @@ describe("history view lifecycle", () => {
     ).toEqual([HISTORY_WORKTREE_COMMIT, commit.sha]);
   });
 
+  test("notePossibleUpdate flags the refresh button, and refreshing clears it", async () => {
+    const { panel, list, banner, status, sentinel, refreshButton } =
+      installHistoryViewDom();
+    const commit = {
+      sha: "abc123",
+      parents: ["parent-a"],
+      subject: "first",
+      body: "",
+      author: "Alice",
+      when: new Date().toISOString(),
+    };
+    let fetchCount = 0;
+    globalThis.fetch = (() => {
+      fetchCount++;
+      return Promise.resolve(
+        new Response(JSON.stringify({ commits: [commit], hasMore: false }), {
+          status: 200,
+        }),
+      );
+    }) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: () => undefined,
+      applyCommitRange: async () => undefined,
+      showEmptyDiffPane: () => undefined,
+      getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+    expect(refreshButton.classList.contains("has-update")).toBe(false);
+
+    view.notePossibleUpdate();
+    expect(refreshButton.classList.contains("has-update")).toBe(true);
+
+    refreshButton.click();
+    await waitFor(() => fetchCount === 2);
+    expect(refreshButton.classList.contains("has-update")).toBe(false);
+  });
+
   test("arrow keys select commits in file history mode without leaving the /file route", async () => {
     const { panel, list, banner, status, sentinel, keyDownDocument } =
       installHistoryViewDom();

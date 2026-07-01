@@ -4637,6 +4637,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           /* ignore parse errors */
         }
       }
+      if (isHistoryPanelRoute(STATE.route)) HISTORY_VIEW.notePossibleUpdate();
       scheduleSseLoad(paths);
     });
     es.addEventListener("watch-limit", (event) => {
