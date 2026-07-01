@@ -491,4 +491,82 @@ describe("repository omitted directory badge localization", () => {
     expect(internal?.textContent).toBe("サンプル非公開");
     expect(internal?.title).toBe("サンプル非公開タイトル");
   });
+
+  test("marks omitted directory rows and only opens browseable ones", () => {
+    installSidebarDom();
+    const clicked: Array<{
+      path: string;
+      type?: string;
+      children_omitted?: true;
+      children_omitted_reason?: string;
+    }> = [];
+    const sidebar = createSidebarForTest({
+      omittedDirectoryBadge: (reason) => ({
+        label: `${reason}-badge`,
+        title: `${reason}-title`,
+      }),
+    });
+
+    sidebar.renderSidebar(
+      [
+        {
+          path: "large-dir",
+          type: "tree",
+          children_omitted: true,
+          children_omitted_reason: "heavy",
+        },
+        {
+          path: "internal-dir",
+          type: "tree",
+          children_omitted: true,
+          children_omitted_reason: "internal",
+        },
+      ],
+      (file) => clicked.push(file),
+    );
+
+    const heavy = document.querySelector<HTMLElement>(
+      '#filelist li[data-dirpath="large-dir"]',
+    );
+    const internal = document.querySelector<HTMLElement>(
+      '#filelist li[data-dirpath="internal-dir"]',
+    );
+    const heavyBadge = heavy?.querySelector<HTMLElement>(".dir-omitted");
+    const internalBadge = internal?.querySelector<HTMLElement>(".dir-omitted");
+
+    expect(heavy?.classList.contains("children-omitted")).toBe(true);
+    expect(heavy?.classList.contains("children-omitted-heavy")).toBe(true);
+    expect(heavy?.dataset.childrenOmittedReason).toBe("heavy");
+    expect(heavy?.querySelector(".chev-spacer")).toBeTruthy();
+    expect(heavy?.querySelector(".chev")).toBeNull();
+    expect(heavyBadge?.classList.contains("dir-omitted-heavy")).toBe(true);
+    expect(heavyBadge?.textContent).toBe("heavy-badge");
+    expect(heavyBadge?.title).toBe("heavy-title");
+
+    expect(internal?.classList.contains("children-omitted")).toBe(true);
+    expect(internal?.classList.contains("children-omitted-internal")).toBe(
+      true,
+    );
+    expect(internal?.dataset.childrenOmittedReason).toBe("internal");
+    expect(internal?.querySelector(".chev-spacer")).toBeTruthy();
+    expect(internal?.querySelector(".chev")).toBeNull();
+    expect(internalBadge?.classList.contains("dir-omitted-internal")).toBe(
+      true,
+    );
+    expect(internalBadge?.textContent).toBe("internal-badge");
+    expect(internalBadge?.title).toBe("internal-title");
+
+    heavy?.click();
+    internal?.click();
+
+    expect(clicked).toEqual([
+      {
+        path: "large-dir",
+        display_path: "large-dir",
+        type: "tree",
+        children_omitted: true,
+        children_omitted_reason: "heavy",
+      },
+    ]);
+  });
 });
