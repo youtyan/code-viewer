@@ -7458,9 +7458,10 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   color: var(--danger);
 }
 .db-grid-refresh {
-  width: 30px;
+  width: auto;
+  min-width: 30px;
   height: 24px;
-  padding: 0;
+  padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg);
@@ -7469,6 +7470,9 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
+  font-size: var(--db-font-base);
+  font-weight: 500;
 }
 .db-grid-refresh:hover {
   color: var(--fg);
@@ -7479,6 +7483,11 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   width: 16px;
   height: 16px;
   display: block;
+  flex: 0 0 auto;
+}
+.db-grid-refresh-label {
+  line-height: 1;
+  white-space: nowrap;
 }
 .db-grid-refresh[disabled] {
   cursor: default;
@@ -7486,6 +7495,16 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 }
 .db-grid-refresh.spinning svg {
   animation: gdp-spin 0.7s linear infinite;
+}
+
+@media (max-width: 720px) {
+  .db-grid-refresh {
+    width: 30px;
+    padding: 0;
+  }
+  .db-grid-refresh-label {
+    display: none;
+  }
 }
 
 /* ---------- Data Grid: Column Filter Row ---------- */

@@ -170,6 +170,10 @@ export function createTableGrid(
   refreshBtn.title = text().grid.refreshAction;
   refreshBtn.setAttribute("aria-label", text().grid.refreshAction);
   refreshBtn.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+  const refreshLabel = document.createElement("span");
+  refreshLabel.className = "db-grid-refresh-label";
+  refreshLabel.textContent = text().grid.refreshLabel;
+  refreshBtn.appendChild(refreshLabel);
 
   // エクスポートは検索バー右端のアイコン+メニューに集約する。これにより
   // 「どのグリッドのエクスポートか」が見た目で分かる（メイン/関連で別々）。
@@ -2028,6 +2032,7 @@ export function createTableGrid(
     filterInput.placeholder = t.grid.searchPlaceholder;
     refreshBtn.title = t.grid.refreshAction;
     refreshBtn.setAttribute("aria-label", t.grid.refreshAction);
+    refreshLabel.textContent = t.grid.refreshLabel;
     exportBtn.title = t.grid.exportAction;
     exportBtn.setAttribute("aria-label", t.grid.exportAction);
     newRowBtn.textContent = t.edit.newRow;

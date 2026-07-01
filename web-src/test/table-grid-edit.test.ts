@@ -409,6 +409,12 @@ describe("table-grid edit mode", () => {
     });
     document.body.appendChild(grid.el);
     grid.load("users", initialData());
+    const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
+    expect(refreshButton.textContent).toMatch(/Reload/);
+    expect(refreshButton.title).toBe("Reload this table, keeping filters");
+    expect(refreshButton.getAttribute("aria-label")).toBe(
+      "Reload this table, keeping filters",
+    );
 
     const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
       ".db-grid-col-filter",
@@ -418,7 +424,7 @@ describe("table-grid edit mode", () => {
     await waitFor(() => fetchCalls.length === 1);
 
     fetchCalls.length = 0;
-    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+    refreshButton.click();
     await waitFor(() => fetchCalls.length === 1);
 
     expect(fetchCalls[0]).toEqual({
@@ -429,7 +435,7 @@ describe("table-grid edit mode", () => {
 
     setInput(nameFilter, "Alice");
     fetchCalls.length = 0;
-    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+    refreshButton.click();
     await waitFor(() => fetchCalls.length === 1);
     expect(fetchCalls[0]).toEqual({
       table: "users",
