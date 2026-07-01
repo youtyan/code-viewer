@@ -77,4 +77,52 @@ describe("query history view", () => {
     expect(refresh.classList.contains("spinning")).toBe(false);
     expect(refresh.getAttribute("aria-busy")).toBe("false");
   });
+
+  test("selected query details show execution metadata", async () => {
+    globalThis.fetch = ((_input: RequestInfo | URL) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            entries: [
+              {
+                id: "sample-entry",
+                dbId: "sample.db",
+                schema: "public",
+                sql: "SELECT id FROM sample_table ORDER BY id",
+                columns: ["id"],
+                rowsPreview: [[1], [2]],
+                rowCount: 12,
+                savedRows: 2,
+                truncated: true,
+                elapsedMs: 34,
+                executedAt: "2026-01-02T03:04:05",
+                executedBy: "ai",
+                source: "browser",
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )) as typeof fetch;
+
+    const view = createQueryHistoryView({
+      getDbId: () => "sample.db",
+      getSchema: () => "public",
+      copySqlToQuery: () => undefined,
+      getText: () => dbText("en"),
+    });
+    document.body.appendChild(view.el);
+
+    await view.refresh({ force: true });
+    q<HTMLElement>(view.el, ".db-query-history-entry").click();
+
+    const meta = q<HTMLElement>(view.el, ".db-query-history-detail-meta");
+    expect(meta.textContent || "").toMatch(/AI/);
+    expect(meta.textContent || "").toMatch(/2026-01-02 03:04:05/);
+    expect(meta.textContent || "").toMatch(/12\+ rows/);
+    expect(meta.textContent || "").toMatch(/34ms/);
+  });
 });

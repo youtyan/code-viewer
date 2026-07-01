@@ -134,6 +134,10 @@ export type DbText = {
     delete: string;
     confirmDelete: string;
     confirmClear: string;
+    executorAi: string;
+    executorUser: string;
+    rowsLabel: (rows: number, truncated: boolean) => string;
+    elapsedLabel: (ms: number) => string;
     truncatedRows: (saved: number, total: number) => string;
   };
   // セッションログペイン (session 限定。SQL 実行 / 編集コミットの成否を記録)。
@@ -446,6 +450,10 @@ const EN: DbText = {
     delete: "Delete",
     confirmDelete: "Confirm delete",
     confirmClear: "Confirm clear",
+    executorAi: "AI",
+    executorUser: "User",
+    rowsLabel: (rows, truncated) => `${rows}${truncated ? "+" : ""} rows`,
+    elapsedLabel: (ms) => `${ms}ms`,
     truncatedRows: (saved, total) => `Showing ${saved} of ${total} rows`,
   },
   sessionLog: {
@@ -759,6 +767,10 @@ const JA: DbText = {
     delete: "削除",
     confirmDelete: "削除を確認",
     confirmClear: "全削除を確認",
+    executorAi: "AI",
+    executorUser: "ユーザー",
+    rowsLabel: (rows, truncated) => `${rows}${truncated ? "+" : ""} 行`,
+    elapsedLabel: (ms) => `${ms}ms`,
     truncatedRows: (saved, total) => `全 ${total} 行中 ${saved} 行を表示`,
   },
   sessionLog: {

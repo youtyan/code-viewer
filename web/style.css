@@ -5663,6 +5663,22 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   padding: 40px 16px;
   font-size: 13px;
 }
+.db-query-history-detail-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+.db-query-history-detail-meta .db-query-history-by {
+  color: var(--fg);
+}
 .db-query-history-detail-actions {
   display: flex;
   gap: 8px;

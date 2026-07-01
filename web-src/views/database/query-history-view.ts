@@ -203,6 +203,8 @@ export function createQueryHistoryView(
   function renderDetail(entry: QueryHistoryEntry) {
     detailCol.innerHTML = "";
 
+    const meta = renderEntryMeta(entry, "detail");
+
     const actions = document.createElement("div");
     actions.className = "db-query-history-detail-actions";
 
@@ -250,7 +252,7 @@ export function createQueryHistoryView(
     sqlBlock.className = "db-query-history-sql";
     sqlBlock.textContent = entry.sql;
 
-    detailCol.append(actions, sqlBlock);
+    detailCol.append(meta, actions, sqlBlock);
 
     if (entry.body) {
       const bodyBlock = document.createElement("div");
@@ -284,25 +286,7 @@ export function createQueryHistoryView(
     item.dataset.id = entry.id;
     entryRowsById.set(entry.id, item);
 
-    const meta = document.createElement("div");
-    meta.className = "db-query-history-entry-meta";
-
-    const byIcon = document.createElement("span");
-    byIcon.className = "db-query-history-by";
-    byIcon.textContent = entry.executedBy === "ai" ? "[AI]" : "[User]";
-
-    const time = document.createElement("span");
-    time.className = "db-query-history-time";
-    time.textContent = formatTime(entry.executedAt);
-    time.title = entry.executedAt;
-
-    const stats = document.createElement("span");
-    stats.className = "db-query-history-stats";
-    const truncMark = entry.truncated ? "+" : "";
-    stats.textContent = `${entry.rowCount}${truncMark} rows, ${entry.elapsedMs}ms`;
-
-    meta.append(byIcon, time, stats);
-
+    const meta = renderEntryMeta(entry, "entry");
     const title = document.createElement("div");
     title.className = "db-query-history-entry-title";
     title.textContent =
@@ -314,6 +298,40 @@ export function createQueryHistoryView(
     item.addEventListener("click", () => selectEntry(entry));
 
     return item;
+  }
+
+  function renderEntryMeta(
+    entry: QueryHistoryEntry,
+    mode: "entry" | "detail",
+  ): HTMLElement {
+    const meta = document.createElement("div");
+    meta.className =
+      mode === "detail"
+        ? "db-query-history-detail-meta"
+        : "db-query-history-entry-meta";
+
+    const byIcon = document.createElement("span");
+    byIcon.className = "db-query-history-by";
+    const executor =
+      entry.executedBy === "ai"
+        ? text().history.executorAi
+        : text().history.executorUser;
+    byIcon.textContent = mode === "detail" ? executor : `[${executor}]`;
+
+    const time = document.createElement("span");
+    time.className = "db-query-history-time";
+    time.textContent = formatTime(entry.executedAt);
+    time.title = entry.executedAt;
+
+    const stats = document.createElement("span");
+    stats.className = "db-query-history-stats";
+    stats.textContent = `${text().history.rowsLabel(
+      entry.rowCount,
+      entry.truncated,
+    )}, ${text().history.elapsedLabel(entry.elapsedMs)}`;
+
+    meta.append(byIcon, time, stats);
+    return meta;
   }
 
   function renderPreviewTable(entry: QueryHistoryEntry): HTMLElement {
