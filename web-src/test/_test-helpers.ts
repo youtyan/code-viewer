@@ -4,6 +4,25 @@
 //   で同形だった)
 // - deferred<T>(): resolve/reject を外から触れる Promise (history /
 //   network-activity / repo-view-race / file-shell-view で同形だった)
+// - makeDiffMeta(files): files から totals を集計した DiffMeta を作る
+//   (diff-view-fast-path / ai-context-copy で同形だった)
+
+import type { DiffMeta, FileMeta } from "../core/types";
+
+export function makeDiffMeta(
+  files: FileMeta[],
+  overrides?: Partial<DiffMeta>,
+): DiffMeta {
+  return {
+    files,
+    totals: {
+      files: files.length,
+      additions: files.reduce((sum, f) => sum + (f.additions || 0), 0),
+      deletions: files.reduce((sum, f) => sum + (f.deletions || 0), 0),
+    },
+    ...overrides,
+  };
+}
 
 export function q<T extends Element>(root: ParentNode, sel: string): T {
   const el = root.querySelector<T>(sel);
@@ -17,6 +36,7 @@ export type Deferred<T> = {
   reject: (reason?: unknown) => void;
 };
 
+// ai-dup-check: allow -- fp:this IS the shared implementation; network-activity.test.ts imports it rather than redefining it, so the reported "duplicate" is this same function seen via its caller.
 export function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;

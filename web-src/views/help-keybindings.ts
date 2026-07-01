@@ -102,6 +102,13 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
         },
       },
       {
+        selectors: [{ action: "next-unviewed-file" }],
+        description: {
+          en: "Jump to the next unviewed file",
+          ja: "次の未確認ファイルへ移動",
+        },
+      },
+      {
         selectors: [{ action: "layout-unified" }, { action: "layout-split" }],
         description: {
           en: "Switch unified / split layout",

@@ -42,6 +42,7 @@ export type RepoTreeEntry = {
   name: string;
   path: string;
   type: "tree" | "blob" | "commit";
+  submodule?: true;
   children_omitted?: true;
   children_omitted_reason?: "heavy" | "internal" | "truncated";
   size?: number;
@@ -383,11 +384,15 @@ export type SidebarItem = {
   path: string;
   display_path?: string;
   type?: RepoTreeEntry["type"];
+  submodule?: RepoTreeEntry["submodule"];
   children_omitted?: true;
   children_omitted_reason?: RepoTreeEntry["children_omitted_reason"];
   status?: string;
   additions?: number;
   deletions?: number;
+  size_class?: string;
+  media_kind?: string | null;
+  binary?: boolean;
 };
 
 export type RawFileInfo = {

@@ -862,7 +862,38 @@ describe("repository tree helpers", () => {
       );
 
       expect(entry?.type).toBe("commit");
+      expect(entry?.submodule).toBe(undefined);
       expect(entry?.children_omitted).toBe(undefined);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("marks gitlink-like worktree directories listed in .gitmodules as submodules", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-submodule-tree-"));
+    try {
+      mkdirSync(join(dir, "submodule-dir"));
+      writeFileSync(
+        join(dir, "submodule-dir", ".git"),
+        "gitdir: ../.git/modules/submodule-dir\n",
+      );
+      writeFileSync(
+        join(dir, ".gitmodules"),
+        [
+          '[submodule "submodule-dir"]',
+          "\tpath = submodule-dir",
+          "\turl = ../sample.git",
+          "",
+        ].join("\n"),
+      );
+
+      const result = listTree("worktree", "", dir);
+      const entry = result.entries.find(
+        (entry) => entry.path === "submodule-dir",
+      );
+
+      expect(entry?.type).toBe("commit");
+      expect(entry?.submodule).toBe(true);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }

@@ -177,3 +177,137 @@ describe("diff sidebar repository target", () => {
     ).toBe("flex");
   });
 });
+
+describe("diff sidebar file kind indicators", () => {
+  test("shows a heavy indicator for a large/huge diff file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "big.ts", status: "M", size_class: "large" },
+    ]);
+
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="big.ts"] .kind-tag',
+    );
+    expect(tag?.classList.contains("heavy")).toBe(true);
+    expect(tag?.classList.contains("binary")).toBe(false);
+  });
+
+  test("shows a binary indicator for a binary file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "archive.zip", status: "M", size_class: "binary" },
+    ]);
+
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="archive.zip"] .kind-tag',
+    );
+    expect(tag?.classList.contains("binary")).toBe(true);
+    expect(tag?.classList.contains("heavy")).toBe(false);
+  });
+
+  test("shows a binary indicator for a media file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "logo.png", status: "M", media_kind: "image" },
+    ]);
+
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="logo.png"] .kind-tag',
+    );
+    expect(tag?.classList.contains("binary")).toBe(true);
+  });
+
+  test("omits the indicator for an ordinary small text diff", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "small.ts", status: "M", size_class: "small" },
+    ]);
+
+    expect(
+      document.querySelector('#filelist li[data-path="small.ts"] .kind-tag'),
+    ).toBeNull();
+  });
+});
+
+describe("virtual tree sidebar file kind indicators (createTreeFileRow)", () => {
+  test("shows a heavy indicator for a large/huge diff file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "big.ts", status: "M", size_class: "large" }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="big.ts"] .kind-tag',
+    );
+    expect(tag?.classList.contains("heavy")).toBe(true);
+    expect(tag?.classList.contains("binary")).toBe(false);
+  });
+
+  test("shows a binary indicator for a binary file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "archive.zip", status: "M", size_class: "binary" }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="archive.zip"] .kind-tag',
+    );
+    expect(tag?.classList.contains("binary")).toBe(true);
+    expect(tag?.classList.contains("heavy")).toBe(false);
+  });
+
+  test("shows a binary indicator for a media file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "logo.png", status: "M", media_kind: "image" }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="logo.png"] .kind-tag',
+    );
+    expect(tag?.classList.contains("binary")).toBe(true);
+  });
+
+  test("omits the indicator for an ordinary small text diff", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "small.ts", status: "M", size_class: "small" }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    expect(
+      document.querySelector('#filelist li[data-path="small.ts"] .kind-tag'),
+    ).toBeNull();
+  });
+});

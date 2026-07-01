@@ -59,7 +59,6 @@ describe("file metadata display", () => {
   test("repository list and file detail render GitHub-style file metadata", () => {
     expect(app.includes("function createRepoEntryMeta")).toBe(true);
     expect(app.includes("function createFileDetailMeta")).toBe(true);
-    expect(app.includes("entry.type === 'tree' && updated")).toBe(true);
     expect(app.includes("meta.textContent = '-'")).toBe(true);
     expect(app.includes(": ''")).toBe(true);
     expect(

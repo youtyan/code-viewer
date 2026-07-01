@@ -30,7 +30,8 @@ export type KeymapAction =
   | "annotation-previous"
   | "open-help"
   | "copy-ai-context"
-  | "copy-ai-context-with-code";
+  | "copy-ai-context-with-code"
+  | "next-unviewed-file";
 
 export type KeyEventLike = {
   key: string;
@@ -173,6 +174,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "open-help", key: "?", shift: true },
   { action: "copy-ai-context", key: "y" },
   { action: "copy-ai-context-with-code", key: "y", shift: true },
+  { action: "next-unviewed-file", key: "n" },
 ];
 
 export function resolveKeymapAction(

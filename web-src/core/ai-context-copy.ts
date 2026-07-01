@@ -1,5 +1,7 @@
+import { summarizeDiffFileKinds } from "./diff-file-kinds";
 import { fileReferenceClipboardText } from "./file-path-copy";
 import type { AppRoute, SourceLineTarget } from "./routes";
+import type { DiffMeta } from "./types";
 
 // Selections at/above this size start to feel like "pasting a whole file"
 // into an AI prompt - the pill/header copy UI flags them so a Shift+Click
@@ -26,6 +28,8 @@ export type AiContextScreenSnapshot = {
   diffFrom: string;
   diffTo: string;
   selectionCode?: AiContextSelectionCode;
+  diffMeta?: DiffMeta | null;
+  viewedFiles?: ReadonlySet<string>;
 };
 
 function lineRange(line: SourceLineTarget): { start: number; end: number } {
@@ -110,6 +114,40 @@ function databaseLine(
   return parts.length > 0 ? `database: ${parts.join(", ")}` : "";
 }
 
+// A one-line "AI review brief" for the diff overview: range + totals + kind
+// counts (added/deleted/renamed/heavy/binary/media). Counts only - no file
+// paths or code, so it stays cheap to paste even on large diffs.
+function diffOverviewLine(
+  from: string,
+  to: string,
+  meta: DiffMeta | null | undefined,
+  viewedFiles?: ReadonlySet<string>,
+): string {
+  const base = `Diff: ${from}..${to}`;
+  if (!meta?.totals) return base;
+  const parts = [
+    `${meta.totals.files} file${meta.totals.files === 1 ? "" : "s"}`,
+    `+${meta.totals.additions}/-${meta.totals.deletions}`,
+  ];
+  const viewedTotal = meta.files.length;
+  if (viewedFiles && viewedTotal > 0) {
+    const viewed = meta.files.filter((file) =>
+      viewedFiles.has(file.path),
+    ).length;
+    parts.push(`${viewed}/${viewedTotal} viewed`);
+  }
+  const kinds = summarizeDiffFileKinds(meta.files);
+  const kindParts: string[] = [];
+  if (kinds.added) kindParts.push(`${kinds.added} added`);
+  if (kinds.deleted) kindParts.push(`${kinds.deleted} deleted`);
+  if (kinds.renamed) kindParts.push(`${kinds.renamed} renamed`);
+  if (kinds.heavy) kindParts.push(`${kinds.heavy} heavy`);
+  if (kinds.binary) kindParts.push(`${kinds.binary} binary`);
+  if (kinds.media) kindParts.push(`${kinds.media} media`);
+  if (kindParts.length > 0) parts.push(kindParts.join(", "));
+  return `${base} (${parts.join(", ")})`;
+}
+
 // A short, pasteable reference for the current screen, close to what the
 // line-ref-pill already copies ("@path#start-end"), not a screen-state dump.
 // No heading, no URL, no absolute paths, env vars, cookies, local storage,
@@ -121,7 +159,12 @@ export function aiContextClipboardText(
   if (route.screen === "database") return databaseLine(route);
   if (route.screen === "history") return historyLine(route);
   if (route.screen === "diff" && !route.path) {
-    return `Diff: ${snapshot.diffFrom}..${snapshot.diffTo}`;
+    return diffOverviewLine(
+      snapshot.diffFrom,
+      snapshot.diffTo,
+      snapshot.diffMeta,
+      snapshot.viewedFiles,
+    );
   }
   return referenceLine(route, snapshot.selectionCode);
 }

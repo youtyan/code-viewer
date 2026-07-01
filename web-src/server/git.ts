@@ -26,6 +26,7 @@ export type GitTreeEntry = {
   name: string;
   path: string;
   type: "tree" | "blob" | "commit";
+  submodule?: true;
   children_omitted?: true;
   children_omitted_reason?: "heavy" | "internal" | "truncated";
   size?: number;
@@ -882,6 +883,24 @@ function omittedWorktreeDirectoryReason(
   return omitDirNames.has(name) ? "heavy" : undefined;
 }
 
+function worktreeSubmodulePaths(cwd: string): Set<string> {
+  if (!existsSync(join(cwd, ".gitmodules"))) return new Set();
+  const res = run(
+    ["git", "config", "--file", ".gitmodules", "--get-regexp", "\\.path$"],
+    cwd,
+  );
+  if (res.code !== 0) return new Set();
+  return new Set(
+    res.stdout
+      .split("\n")
+      .map((line) => {
+        const split = line.indexOf(" ");
+        return split >= 0 ? normalizeTreePath(line.slice(split + 1)) : "";
+      })
+      .filter(Boolean),
+  );
+}
+
 function worktreeEntryFromDirent(
   base: string,
   dir: string,
@@ -889,6 +908,7 @@ function worktreeEntryFromDirent(
   isDirectory: boolean,
   omitDirNames: Set<string>,
   excludeNames: Set<string>,
+  submodulePaths: Set<string>,
 ): GitTreeEntry {
   if (excludeNames.has(name.toLowerCase()))
     return {
@@ -906,15 +926,18 @@ function worktreeEntryFromDirent(
     type === "tree"
       ? omittedWorktreeDirectoryReason(name, omitDirNames)
       : undefined;
+  const submodule =
+    type === "commit" && submodulePaths.has(entryPath) ? true : undefined;
+  const baseEntry = submodule
+    ? ({ name, path: entryPath, type, submodule } satisfies GitTreeEntry)
+    : ({ name, path: entryPath, type } satisfies GitTreeEntry);
   return omittedReason
     ? {
-        name,
-        path: entryPath,
-        type,
+        ...baseEntry,
         children_omitted: true,
         children_omitted_reason: omittedReason,
       }
-    : { name, path: entryPath, type };
+    : baseEntry;
 }
 
 function worktreeFilesystemEntries(
@@ -930,6 +953,7 @@ function worktreeFilesystemEntries(
   const excludeNameSet = new Set(
     excludeNames.map((name) => name.toLowerCase()),
   );
+  const submodulePaths = worktreeSubmodulePaths(cwd);
   let directEntries: GitTreeEntry[];
   try {
     const dirents = readdirSync(root, { withFileTypes: true });
@@ -943,6 +967,7 @@ function worktreeFilesystemEntries(
             entry.isDirectory(),
             omitDirNameSet,
             excludeNameSet,
+            submodulePaths,
           ),
         )
         .filter((entry) => entry.path),

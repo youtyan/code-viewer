@@ -2,6 +2,7 @@
 // filtering, folder icons, keyboard navigation, and sidebar chrome
 // (width / font size / hide toggle). Extracted from app.ts.
 
+import { classifyDiffFileKind } from "../core/diff-file-kinds";
 import { compileFileFilter } from "../core/file-filter";
 import { nextVisibleFileIndex } from "../core/file-navigation";
 import {
@@ -519,6 +520,8 @@ export function createSidebar(deps: SidebarDeps) {
         name.textContent = f.path.split("/").pop();
         name.title = f.path;
         li.appendChild(name);
+        const kindTag = fileKindTag(f);
+        if (kindTag) li.appendChild(kindTag);
         li.addEventListener("click", () => {
           if (onFileClick) onFileClick(f);
           else scrollToFile(f.path);
@@ -628,7 +631,13 @@ export function createSidebar(deps: SidebarDeps) {
               order: dir.minOrder + (index + 1) / 100000,
               path: entry.path,
               display_path: entry.path,
-              type: entry.type,
+              type:
+                meta.ref === "worktree" &&
+                entry.type === "commit" &&
+                !entry.submodule
+                  ? "tree"
+                  : entry.type,
+              submodule: entry.submodule,
               children_omitted: entry.children_omitted,
               children_omitted_reason: entry.children_omitted_reason,
             }) satisfies SidebarItem,
@@ -786,6 +795,20 @@ export function createSidebar(deps: SidebarDeps) {
     return li;
   }
 
+  // Small opt-in marker next to the status badge for files worth a second
+  // look before diving in: a large/huge diff, or a binary/media file. Mirrors
+  // the size-tag colors already used on the diff card header.
+  function fileKindTag(f: SidebarItem): HTMLElement | null {
+    const kind = classifyDiffFileKind(f);
+    if (!kind.heavy && !kind.binary && !kind.media) return null;
+    const tag = document.createElement("span");
+    const isBinaryLike = kind.binary || kind.media;
+    tag.className = `kind-tag ${isBinaryLike ? "binary" : "heavy"}`;
+    tag.textContent = isBinaryLike ? "B" : "!";
+    tag.title = isBinaryLike ? "binary/media file" : "large diff";
+    return tag;
+  }
+
   function createTreeFileRow(
     f: SidebarItem,
     depth: number,
@@ -821,6 +844,8 @@ export function createSidebar(deps: SidebarDeps) {
     name.textContent = f.path.split("/").pop();
     name.title = f.path;
     li.appendChild(name);
+    const kindTag = fileKindTag(f);
+    if (kindTag) li.appendChild(kindTag);
     li.addEventListener("click", () => {
       if (onFileClick) onFileClick(f);
       else scrollToFile(f.path);
@@ -1095,6 +1120,8 @@ export function createSidebar(deps: SidebarDeps) {
       name.textContent = f.path;
       name.title = f.path;
       li.appendChild(name);
+      const kindTag = fileKindTag(f);
+      if (kindTag) li.appendChild(kindTag);
       li.addEventListener("click", () => {
         if (onFileClick) onFileClick(f);
         else scrollToFile(f.path);

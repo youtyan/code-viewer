@@ -178,6 +178,20 @@ export function createRepoView(deps: RepoViewDeps) {
     return iconSvg("octicon-file", FILE_16_PATH);
   }
 
+  function isWorktreeRef(ref: string): boolean {
+    return canTrashWorktreeRef(ref);
+  }
+
+  function canBrowseRepoEntry(
+    entry: { type?: string; submodule?: true },
+    ref: string,
+  ): boolean {
+    return (
+      entry.type === "tree" ||
+      (entry.type === "commit" && isWorktreeRef(ref) && !entry.submodule)
+    );
+  }
+
   function closeRepoContextMenu() {
     document.querySelector<HTMLElement>(".gdp-context-menu")?.remove();
   }
@@ -632,23 +646,23 @@ export function createRepoView(deps: RepoViewDeps) {
         });
         list.appendChild(row);
       }
-      sortedRepoEntries(meta.entries).forEach((entry) => {
+      sortedRepoEntries(meta.entries, meta.ref).forEach((entry) => {
+        const browsable = canBrowseRepoEntry(entry, meta.ref);
         const row = document.createElement("button");
         row.type = "button";
         row.className = `gdp-repo-row ${entry.type}`;
         const icon = document.createElement("span");
-        icon.className =
-          entry.type === "tree" ? "dir-icon" : "d2h-icon-wrapper";
-        if (entry.type === "tree") setFolderIcon(icon, true);
+        icon.className = browsable ? "dir-icon" : "d2h-icon-wrapper";
+        if (browsable) setFolderIcon(icon, true);
         else icon.innerHTML = fileEntryIcon();
         const name = document.createElement("span");
         name.className = "name";
         name.textContent = entry.name;
-        const metaBlock = createRepoEntryMeta(entry);
+        const metaBlock = createRepoEntryMeta(entry, browsable);
         const size = createRepoEntrySize(entry);
         row.append(icon, name, metaBlock, size);
         row.addEventListener("click", () => {
-          if (entry.type === "tree") {
+          if (browsable) {
             setRoute(repoRoute(meta.ref, entry.path));
             loadRepo();
           } else if (entry.type === "blob") {
@@ -767,7 +781,10 @@ export function createRepoView(deps: RepoViewDeps) {
               order: index + 1,
               path: entry.path,
               display_path: entry.path,
-              type: entry.type,
+              type: canBrowseRepoEntry(entry, normalizedRef)
+                ? "tree"
+                : entry.type,
+              submodule: entry.submodule,
               children_omitted: entry.children_omitted,
               children_omitted_reason: entry.children_omitted_reason,
             }) satisfies SidebarItem,
@@ -832,12 +849,15 @@ export function createRepoView(deps: RepoViewDeps) {
       });
   }
 
-  function createRepoEntryMeta(entry: RepoTreeEntry): HTMLElement {
+  function createRepoEntryMeta(
+    entry: RepoTreeEntry,
+    browsable: boolean,
+  ): HTMLElement {
     const meta = document.createElement("span");
     meta.className = "meta";
     const updated = formatFileDate(entry.updated_at || entry.commit_updated_at);
     const created = formatFileDate(entry.created_at);
-    if (entry.type === "tree" && updated) {
+    if (browsable && updated) {
       meta.textContent = updated;
       if (created) meta.title = `Created ${created}`;
       return meta;
@@ -868,12 +888,17 @@ export function createRepoView(deps: RepoViewDeps) {
     return Number.isNaN(time) ? -1 : time;
   }
 
-  function sortedRepoEntries(entries: RepoTreeEntry[]): RepoTreeEntry[] {
+  function sortedRepoEntries(
+    entries: RepoTreeEntry[],
+    ref = "worktree",
+  ): RepoTreeEntry[] {
     const direction = REPO_SORT.direction === "asc" ? 1 : -1;
     return [...entries].sort((a, b) => {
-      if (REPO_SORT.key === "name" && a.type !== b.type) {
-        if (a.type === "tree") return -1;
-        if (b.type === "tree") return 1;
+      const aBrowsable = canBrowseRepoEntry(a, ref);
+      const bBrowsable = canBrowseRepoEntry(b, ref);
+      if (REPO_SORT.key === "name" && aBrowsable !== bBrowsable) {
+        if (aBrowsable) return -1;
+        if (bBrowsable) return 1;
       }
       let result = 0;
       if (REPO_SORT.key === "updated") {

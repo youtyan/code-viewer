@@ -166,6 +166,16 @@ window.GdpExpandLogic = GdpExpandLogic;
   function updateNetworkActivity(state = NETWORK_ACTIVITY.getState()): void {
     const loadBar = document.querySelector<HTMLElement>("#load-bar");
     if (loadBar) loadBar.classList.toggle("active", state.inFlight > 0);
+    const statusEl = document.querySelector<HTMLElement>("#status");
+    if (statusEl) {
+      statusEl.title =
+        state.inFlight > 0
+          ? `${state.inFlight} request${state.inFlight === 1 ? "" : "s"} in flight${
+              state.cancellable > 0 ? " (cancellable)" : ""
+            }`
+          : (statusEl.querySelector<HTMLElement>(".status-label")
+              ?.textContent ?? "");
+    }
     const cancelButton =
       document.querySelector<HTMLButtonElement>("#cancel-requests");
     if (!cancelButton) return;
@@ -1057,10 +1067,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         theme: string;
         product: string;
         copyAiContext: string;
+        copyAiContextLabel: string;
         copyAiContextCopied: string;
         copyAiContextCopiedWithCode: (lines: number) => string;
         copyAiContextFailed: string;
         copyAiContextEmpty: string;
+        statusLive: string;
+        statusLoading: string;
+        statusError: string;
+        statusIdle: string;
       };
       topbar: {
         resetRange: string;
@@ -1169,11 +1184,16 @@ window.GdpExpandLogic = GdpExpandLogic;
         theme: "toggle theme",
         product: "code viewer",
         copyAiContext: "Copy AI context (Shift+Click to include code)",
+        copyAiContextLabel: "AI context",
         copyAiContextCopied: "Copied AI context",
         copyAiContextCopiedWithCode: (lines) =>
           `Copied AI context + code (${lines} line${lines === 1 ? "" : "s"})`,
         copyAiContextFailed: "Copy failed",
         copyAiContextEmpty: "Nothing to copy here",
+        statusLive: "Live",
+        statusLoading: "Loading",
+        statusError: "Error",
+        statusIdle: "Idle",
       },
       topbar: {
         resetRange: "reset to HEAD .. worktree",
@@ -1293,11 +1313,16 @@ window.GdpExpandLogic = GdpExpandLogic;
         product: "code viewer",
         copyAiContext:
           "AI 用コンテキストをコピー（Shift+Click でコードも添付）",
+        copyAiContextLabel: "AI context",
         copyAiContextCopied: "コピーしました",
         copyAiContextCopiedWithCode: (lines) =>
           `コピーしました（コード付き・${lines}行）`,
         copyAiContextFailed: "コピーに失敗しました",
         copyAiContextEmpty: "コピーする内容がありません",
+        statusLive: "稼働中",
+        statusLoading: "更新中",
+        statusError: "エラー",
+        statusIdle: "待機中",
       },
       topbar: {
         resetRange: "HEAD .. worktree に戻す",
@@ -1461,6 +1486,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (copyAiContext) {
       copyAiContext.title = text.global.copyAiContext;
       copyAiContext.setAttribute("aria-label", text.global.copyAiContext);
+      const copyAiContextLabel =
+        copyAiContext.querySelector<HTMLElement>(".ai-context-label");
+      if (copyAiContextLabel)
+        copyAiContextLabel.textContent = text.global.copyAiContextLabel;
     }
 
     const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
@@ -1667,6 +1696,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     const el = $("#status");
     el.classList.remove("live", "refreshing", "error");
     if (s) el.classList.add(s);
+    const text = uiText();
+    const label =
+      s === "live"
+        ? text.global.statusLive
+        : s === "refreshing"
+          ? text.global.statusLoading
+          : s === "error"
+            ? text.global.statusError
+            : text.global.statusIdle;
+    const labelEl = el.querySelector<HTMLElement>(".status-label");
+    if (labelEl) labelEl.textContent = label;
+    el.setAttribute("aria-label", label);
+    updateNetworkActivity();
   }
 
   function applyTheme() {
@@ -2720,10 +2762,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (themeButton) {
       themeButton.innerHTML = iconSvg("octicon-moon", MOON_16_PATH);
     }
-    const copyAiContextButton =
-      document.querySelector<HTMLButtonElement>("#copy-ai-context");
-    if (copyAiContextButton) {
-      copyAiContextButton.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+    const copyAiContextIcon = document.querySelector<HTMLElement>(
+      "#copy-ai-context .goi-icon",
+    );
+    if (copyAiContextIcon) {
+      copyAiContextIcon.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
     }
   }
 
@@ -2782,6 +2825,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       diffFrom: STATE.from,
       diffTo: STATE.to,
       selectionCode,
+      diffMeta: window._lastMeta
+        ? visibleDiffMetaForBrief(window._lastMeta)
+        : null,
+      viewedFiles: STATE.viewedFiles,
     });
     const finish = (
       ok: boolean,
@@ -3287,6 +3334,10 @@ window.GdpExpandLogic = GdpExpandLogic;
           shiftKey: true,
         }),
       );
+      return true;
+    }
+    if (action === "next-unviewed-file") {
+      if (DIFF_VIEW.scrollToNextUnviewedFile()) scheduleMainSurfaceFocus();
       return true;
     }
     if (action === "open-help") {
@@ -3882,24 +3933,33 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyHideTestsToMeta();
   }
 
-  function applyHideTestsToMeta() {
-    const meta = window._lastMeta;
-    if (!meta || !meta.totals) return;
+  function visibleDiffMetaForBrief(meta: DiffMeta): DiffMeta {
+    if (!meta.totals) return meta;
     const effective = STATE.hideTests && !isRepositorySidebarMode();
-    if (!effective) {
-      renderMeta(meta);
-      return;
-    }
+    if (!effective) return meta;
     let additions = 0;
     let deletions = 0;
-    let files = 0;
-    for (const f of STATE.files) {
+    const visibleFiles: FileMeta[] = [];
+    for (const f of meta.files) {
       if (TEST_RE.test(f.path || "")) continue;
       additions += f.additions || 0;
       deletions += f.deletions || 0;
-      files += 1;
+      visibleFiles.push(f);
     }
-    renderMeta({ ...meta, totals: { files, additions, deletions } });
+    return {
+      ...meta,
+      files: visibleFiles,
+      totals: { files: visibleFiles.length, additions, deletions },
+    };
+  }
+
+  function applyHideTestsToMeta() {
+    const meta = window._lastMeta;
+    if (!meta?.totals) return;
+    renderMeta(visibleDiffMetaForBrief(meta));
+    // renderMeta() above rebuilds #meta from raw totals, so re-sync the
+    // next-unviewed button against the live sidebar filter/viewed state.
+    applyViewedState();
   }
   applyHideTests();
   $("#hide-tests").addEventListener("click", () => {
