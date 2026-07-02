@@ -137,9 +137,8 @@ describe("journal state", () => {
     expect(first.task.priority).toBe("p2");
     expect(first.task.labels).toEqual(["github", "issue-42", "ai-ready"]);
     expect(first.task.body.includes("GitHub issue #42")).toBe(true);
-    expect(
-      first.task.body.includes("https://example.invalid/repo/issues/42"),
-    ).toBe(true);
+    const linkedUrl = first.task.body.match(/https:\/\/[^\s)]+/)?.[0];
+    expect(linkedUrl).toBe("https://example.invalid/repo/issues/42");
 
     const second = linkGithubIssueTask(
       state,
