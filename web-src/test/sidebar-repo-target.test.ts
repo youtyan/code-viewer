@@ -200,6 +200,35 @@ describe("diff sidebar repository target", () => {
     ).toBeTruthy();
   });
 
+  test("keeps file counts out of repository sidebars", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [
+        { path: "src", type: "tree" },
+        { path: "README.md", type: "blob" },
+      ],
+      () => {
+        /* noop: presence forces repository sidebar mode */
+      },
+    );
+
+    expect(document.querySelector("#totals")?.textContent).toBe("");
+  });
+
+  test("keeps file counts in diff sidebars", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "sample-a.ts", display_path: "sample-a.ts", status: "M" },
+      { path: "sample-b.ts", display_path: "sample-b.ts", status: "A" },
+    ]);
+
+    expect(document.querySelector("#totals")?.textContent).toBe("2 files");
+  });
+
   test("keeps the repository target visually hidden outside repository pages", () => {
     expect(repoTargetDisplayForBodyClass("gdp-repo-page")).toBe("flex");
     expect(repoTargetDisplayForBodyClass("")).toBe("none");

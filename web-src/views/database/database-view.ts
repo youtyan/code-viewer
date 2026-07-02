@@ -344,7 +344,6 @@ function createTabPane(
   const tableSelectGuard = createAbortGuard();
   let historyRefreshPending: ReturnType<typeof setTimeout> | null = null;
   let isRefreshingDatastores = false;
-  let datastoreRefreshResult: { added: number; removed: number } | null = null;
 
   const dbSelect = document.createElement("select");
   dbSelect.className = "db-file-select";
@@ -1793,10 +1792,7 @@ function createTabPane(
   });
 
   function syncDbRefreshButton(): void {
-    const text = paneText().nav;
-    dbRefreshLabel.textContent = isRefreshingDatastores
-      ? text.refreshDatastoresBusy
-      : text.refreshDatastoresShort;
+    dbRefreshLabel.textContent = "";
     dbRefreshBtn.setAttribute(
       "aria-busy",
       isRefreshingDatastores ? "true" : "false",
@@ -1805,49 +1801,19 @@ function createTabPane(
   }
 
   function syncDatastoreRefreshResult(): void {
-    const result = datastoreRefreshResult;
-    dbRefreshResult.hidden = !result;
-    dbRefreshResult.classList.toggle(
-      "changed",
-      !!result && (result.added > 0 || result.removed > 0),
-    );
-    if (!result) return;
-    const text = paneText().nav;
-    dbRefreshResult.textContent =
-      result.added > 0 || result.removed > 0
-        ? text.refreshDatastoresChanged(result.added, result.removed)
-        : text.refreshDatastoresUnchanged;
-  }
-
-  function diffDatastoreFiles(
-    before: DbFileInfo[],
-    after: DbFileInfo[],
-  ): { added: number; removed: number } {
-    const beforeIds = new Set(before.map((file) => file.id));
-    const afterIds = new Set(after.map((file) => file.id));
-    let added = 0;
-    let removed = 0;
-    for (const id of afterIds) {
-      if (!beforeIds.has(id)) added++;
-    }
-    for (const id of beforeIds) {
-      if (!afterIds.has(id)) removed++;
-    }
-    return { added, removed };
+    dbRefreshResult.hidden = true;
+    dbRefreshResult.textContent = "";
+    dbRefreshResult.classList.toggle("changed", false);
   }
 
   async function refreshDatastoreList(): Promise<void> {
     if (dbRefreshBtn.disabled) return;
-    const beforeFiles = [...lastFiles];
     isRefreshingDatastores = true;
     dbRefreshBtn.disabled = true;
     dbRefreshBtn.classList.add("spinning");
     syncDbRefreshButton();
     try {
       await outerDeps.refreshDatastores();
-      datastoreRefreshResult = cb.isActive()
-        ? diffDatastoreFiles(beforeFiles, lastFiles)
-        : null;
     } finally {
       isRefreshingDatastores = false;
       dbRefreshBtn.classList.remove("spinning");
@@ -1889,7 +1855,6 @@ function createTabPane(
   async function handleDbSelectChange(): Promise<void> {
     const dbId = dbSelect.value;
     if (!dbId) return;
-    datastoreRefreshResult = null;
     syncDatastoreRefreshResult();
     const generation = ++loadGeneration;
     const file = lastFiles.find((f) => f.id === dbId);

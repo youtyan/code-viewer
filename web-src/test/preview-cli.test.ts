@@ -455,10 +455,13 @@ describe("preview CLI", () => {
       /code-viewer annotate <start\|add\|add-db\|rename\|edit\|move\|list\|delete\|clear>/,
     );
     expect(stdout).toMatch(
+      /code-viewer journal <list\|add\|edit\|tasks\|task-add\|task-update\|task-next\|github-issues\|task-link-issue\|task-claim\|task-done\|task-delete>/,
+    );
+    expect(stdout).toMatch(
       /code-viewer query <sources\|schemas\|schema\|columns\|ddl\|exec\|list\|clear\|snapshot\|diff\|search\|redis\|elasticsearch\|s3>/,
     );
     expect(stdout).toMatch(
-      /code-viewer <status\|annotate\|query\|search\|file\|skill\|doctor> agent-help/,
+      /code-viewer <status\|annotate\|journal\|query\|search\|file\|skill\|doctor> agent-help/,
     );
     expect(stdout).toMatch(/code-viewer search code --term <text>/);
     expect(stdout).toMatch(/code-viewer search files --term <pattern>/);

@@ -419,7 +419,7 @@ describe("table-grid edit mode", () => {
     expect(exportButton.querySelector("svg.octicon-download")).toBeTruthy();
     expect(exportButton.textContent).toBe("");
     const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
-    expect(refreshButton.textContent).toMatch(/Reload table/);
+    expect(refreshButton.textContent).toBe("");
     expect(refreshButton.title).toBe(
       "Reload this table, keeping search and column filters",
     );
@@ -445,7 +445,7 @@ describe("table-grid edit mode", () => {
     )[1];
     expect(nameFilter).toBeTruthy();
     setInput(nameFilter, "Ali");
-    expect(refreshButton.textContent).toMatch(/Reload filtered rows/);
+    expect(refreshButton.textContent).toBe("");
     expect(refreshButton.title).toBe(
       "Reload this table, keeping 1 active filter",
     );
@@ -502,7 +502,7 @@ describe("table-grid edit mode", () => {
     setInput(nameFilter, "Ali");
 
     const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
-    expect(refreshButton.textContent).toMatch(/Reload filtered rows/);
+    expect(refreshButton.textContent).toBe("");
     expect(refreshButton.title).toBe(
       "Reload this table, keeping 2 active filters",
     );
@@ -606,7 +606,8 @@ describe("table-grid edit mode", () => {
     expect(actions).toHaveLength(2);
     const reloadAction = actions[0];
     const clearAction = actions[1];
-    expect(reloadAction.textContent).toBe("Reload filtered rows");
+    expect(reloadAction.textContent).toBe("");
+    expect(reloadAction.classList.contains("db-grid-refresh")).toBe(true);
     expect(reloadAction.title).toBe(
       "Reload this table, keeping 1 active filter",
     );
@@ -632,6 +633,54 @@ describe("table-grid edit mode", () => {
     expect(reloadAction.disabled).toBe(true);
     expect(clearAction.hidden).toBe(true);
     expect(clearAction.disabled).toBe(true);
+    grid.destroy();
+  });
+
+  test("filtered empty reload action stays icon-only while refreshing", async () => {
+    let filteredFetches = 0;
+    let pendingReload: Deferred<DbTableDataResponse> | null = null;
+    const grid = createTableGrid({
+      fetchPage: async (_table, _offset, _limit, _sort, filters) => {
+        if (!filters.length) return initialData();
+        filteredFetches++;
+        if (filteredFetches === 1)
+          return { ...initialData(), rows: [], totalRows: 0 };
+        pendingReload = deferred<DbTableDataResponse>();
+        return pendingReload.promise;
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
+      ".db-grid-col-filter",
+    )[1];
+    setInput(nameFilter, "Nobody");
+
+    await waitFor(() => filteredFetches === 1);
+    const empty = q<HTMLElement>(grid.el, ".db-grid-viewport .db-pane-empty");
+    await waitFor(() => empty.hidden === false);
+    const reloadAction = empty.querySelectorAll<HTMLButtonElement>("button")[0];
+
+    expect(reloadAction.textContent).toBe("");
+    expect(reloadAction.getAttribute("aria-busy")).toBe("false");
+    reloadAction.click();
+
+    await waitFor(() => filteredFetches === 2);
+    expect(reloadAction.textContent).toBe("");
+    expect(reloadAction.getAttribute("aria-busy")).toBe("true");
+    expect(reloadAction.disabled).toBe(true);
+
+    pendingReload?.resolve({ ...initialData(), rows: [], totalRows: 0 });
+    await waitFor(() => reloadAction.getAttribute("aria-busy") === "false");
+    expect(reloadAction.textContent).toBe("");
+    expect(reloadAction.disabled).toBe(false);
     grid.destroy();
   });
 
@@ -713,17 +762,17 @@ describe("table-grid edit mode", () => {
     const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
     expect(refreshResult.hidden).toBe(true);
     expect(refreshResult.getAttribute("aria-live")).toBe("polite");
-    expect(refreshButton.textContent).toMatch(/Reloading/);
+    expect(refreshButton.textContent).toBe("");
     expect(refreshButton.getAttribute("aria-busy")).toBe("true");
     expect(fetchCalls[0]).toEqual([{ column: "name", value: "Ali" }]);
 
     resolveFetch?.(initialData());
     await waitFor(() => !(status.textContent || "").includes("Reloading"));
     expect(status.textContent || "").toMatch(/1 filter\(s\)/);
-    expect(refreshButton.textContent).toMatch(/Reload filtered rows/);
+    expect(refreshButton.textContent).toBe("");
     expect(refreshButton.getAttribute("aria-busy")).toBe("false");
-    expect(refreshResult.hidden).toBe(false);
-    expect(refreshResult.textContent).toBe("Rows unchanged (2)");
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
     expect(refreshResult.classList.contains("changed")).toBe(false);
     expect(refreshEvents).toEqual([
       {
@@ -735,7 +784,7 @@ describe("table-grid edit mode", () => {
     grid.destroy();
   });
 
-  test("refresh result announces row count changes and clears on filter edits", async () => {
+  test("refresh keeps the compact result slot empty while row counts change", async () => {
     const data = initialData();
     let nextData = data;
     const grid = createTableGrid({
@@ -760,12 +809,14 @@ describe("table-grid edit mode", () => {
     };
     q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
 
-    await waitFor(() => refreshResult.hidden === false);
-    expect(refreshResult.textContent).toBe("Rows +1 (3 now)");
-    expect(refreshResult.classList.contains("changed")).toBe(true);
-    expect(
-      q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
-    ).toMatch(/3 rows/);
+    await waitFor(() =>
+      /3 rows/.test(
+        q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
+      ),
+    );
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    expect(refreshResult.classList.contains("changed")).toBe(false);
 
     nextData = {
       ...data,
@@ -774,11 +825,14 @@ describe("table-grid edit mode", () => {
     };
     q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
 
-    await waitFor(() => refreshResult.textContent === "Rows -2 (1 now)");
-    expect(refreshResult.classList.contains("changed")).toBe(true);
-    expect(
-      q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
-    ).toMatch(/1 rows/);
+    await waitFor(() =>
+      /1 rows/.test(
+        q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
+      ),
+    );
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    expect(refreshResult.classList.contains("changed")).toBe(false);
 
     const search = q<HTMLInputElement>(grid.el, ".db-grid-filter-input");
     setInput(search, "Carol");
@@ -787,7 +841,7 @@ describe("table-grid edit mode", () => {
     grid.destroy();
   });
 
-  test("refresh result localizes with the grid language", async () => {
+  test("refresh button keeps icon-only text while localizing aria labels", async () => {
     let language: "en" | "ja" = "en";
     const data = initialData();
     const grid = createTableGrid({
@@ -807,12 +861,22 @@ describe("table-grid edit mode", () => {
     grid.load("users", data);
 
     const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
-    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+    const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
+    refreshButton.click();
 
-    await waitFor(() => refreshResult.textContent === "Rows +1 (3 now)");
+    await waitFor(() =>
+      /3 rows/.test(
+        q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
+      ),
+    );
     language = "ja";
     grid.localize();
-    expect(refreshResult.textContent).toBe("行数 +1 (現在 3)");
+    expect(refreshButton.textContent).toBe("");
+    expect(refreshButton.getAttribute("aria-label")).toBe(
+      "検索/列フィルタを保持して、この表だけ再読み込み",
+    );
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
     grid.destroy();
   });
 
@@ -841,7 +905,12 @@ describe("table-grid edit mode", () => {
 
     const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
     q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
-    await waitFor(() => refreshResult.textContent === "Rows unchanged (2)");
+    await waitFor(
+      () =>
+        q<HTMLButtonElement>(grid.el, ".db-grid-refresh").getAttribute(
+          "aria-busy",
+        ) === "false",
+    );
 
     await grid.setEditMode(true);
     q<HTMLButtonElement>(grid.el, ".db-grid-edit-newrow").click();

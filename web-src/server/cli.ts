@@ -47,6 +47,9 @@ if (process.argv[2] === "agent-help") {
 } else if (process.argv[2] === "annotate") {
   const { runAnnotateCli } = await import("./annotate-cli");
   await runAnnotateCli(process.argv.slice(3));
+} else if (process.argv[2] === "journal") {
+  const { runJournalCli } = await import("./journal-cli");
+  await runJournalCli(process.argv.slice(3));
 } else if (process.argv[2] === "query") {
   const sub = process.argv[3];
   const helpOnly =

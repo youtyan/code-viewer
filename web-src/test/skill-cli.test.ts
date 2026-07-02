@@ -6,6 +6,7 @@ import { installSkill, parseSkillArgs } from "../server/skill-cli";
 
 const BUNDLED_SKILLS = [
   "code-viewer-annotate",
+  "code-viewer-journal",
   "code-viewer-query",
   "code-viewer-snapshot",
 ] as const;

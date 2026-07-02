@@ -9,6 +9,7 @@ import type {
 import { normalizeDatabaseTab, parseAnnotationLine } from "./annotations";
 import {
   ensureServerUrl,
+  readStdin,
   requestJson,
   resolveRepoRoot,
   takeValue,
@@ -184,8 +185,8 @@ location and renders your explanation directly under the annotated lines.
 - The body is Markdown. Code spans, fenced blocks, and links work. Long
   bodies: use --body-file <path> or pipe via stdin instead of --body.
 - Give every annotation a short --title; it becomes the inline heading.
-- Annotating unchanged code is fine: the viewer auto-expands diff context
-  or falls back to the full source view.
+- Annotating unchanged code is fine: when the selected lines are not an
+  after-side diff change, the viewer falls back to the full source view.
 
 ## Sessions
 
@@ -575,15 +576,6 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
     return { ok: true, args: { command: { kind: "clear" }, cwd, server } };
   }
   return { ok: false, error: `unknown annotate command: ${subcommand}` };
-}
-
-async function readStdin(): Promise<string> {
-  if (process.stdin.isTTY) return "";
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 // /_annotations は server 側で text/plain の text() 系で 4xx/5xx を返すのが

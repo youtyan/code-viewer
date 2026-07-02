@@ -52,7 +52,13 @@ Trusted Publisher setup verification, or npm-specific troubleshooting.
 - For buttons in the global header, use the `global-icon-action` class. For text buttons, keep changes limited to overrides such as `width: auto; padding: 0 8px;`.
 - For toggle buttons in the topbar, follow the existing `.controls > button` pattern used by `#ignore-ws` and `#hide-tests`.
 - For segmented buttons, use the `.seg` pattern.
+- Interactive controls must keep stable box dimensions across idle, hover, focus, loading, success, warning, disabled, and updated states. Never change button labels, padding, borders, or result text in a way that shifts the clickable target after the user acts. Reserve fixed space up front or use icon-only state indicators.
 - Add new UI patterns only when they are truly necessary. First verify that existing classes cannot solve the requirement in combination.
+
+## Desktop-Only UI Scope
+
+- This app is a local desktop tool. Do not spend implementation effort on phone or narrow mobile layouts unless the user explicitly asks for mobile support in that specific task.
+- Prefer dense desktop workflows, resizable panels, stable table/board dimensions, keyboard and pointer ergonomics, and wide-screen information layout over mobile stacking.
 
 ## Design Reuse Discipline
 
@@ -101,3 +107,9 @@ Rules:
 - For UI changes, verify the actual rendered screen with Browser Pilot before claiming the behavior is correct. Compare the relevant DOM structure and visual placement against the requested existing screen or component.
 - If the user points to an existing UI as the reference, inspect that reference implementation first and match its DOM/CSS structure instead of inventing a parallel layout.
 - Never adjust tests to match an implementation when the implementation is still disputed. Fix the implementation first, then add behavior-level tests that would fail for the wrong UI.
+- Do not put verbose transient status text in narrow chrome such as global headers, sidebars, topbars, compact toolbars, table filter rows, or beside small icon buttons. In constrained areas prefer icon-only buttons, dots, `aria-label`/`title`, disabled/busy states, or a reserved-width status slot that cannot move controls. Text like "no changes", "updated", or row-count deltas belongs in a wider content area only when it is genuinely useful. Even in wider areas, transient status text must not live inside a clickable control's own label; put it in a separate, non-interactive slot so the button hit target never moves.
+
+## Desktop Viewport Scope
+
+- This app is a local desktop workflow. Smartphone viewport support is not required for any screen unless the user explicitly requests it.
+- For UI work, prioritize desktop layouts, pointer/drag interactions, dense information display, and efficient local-tool workflows. Do not spend default verification effort optimizing or reworking smartphone layouts.

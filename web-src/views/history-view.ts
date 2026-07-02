@@ -25,22 +25,13 @@ export type HistoryText = {
   bodyExpandClose: string;
   bodyExpandMore: (remainingLines: number) => string;
   refreshLabel: string;
-  refreshLabelPending: string;
   refreshTitle: string;
   refreshTitlePending: string;
-  refreshPendingStatus: string;
-  refreshResultUpdated: (sha: string) => string;
-  refreshResultUnchanged: string;
-  refreshResultUnchangedInView: string;
   filterClearLabel: string;
   filterClearTitle: string;
 };
 
-type HistoryRefreshStatus =
-  | { type: "none" }
-  | { type: "pending" }
-  | { type: "updated"; sha: string }
-  | { type: "unchanged"; scoped: boolean };
+type HistoryRefreshStatus = { type: "none" } | { type: "pending" };
 
 const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
   en: {
@@ -48,13 +39,8 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     bodyExpandClose: "Collapse",
     bodyExpandMore: (n) => `Show more (${n} lines)`,
     refreshLabel: "Refresh",
-    refreshLabelPending: "Update",
     refreshTitle: "Refresh commit history",
     refreshTitlePending: "History may have changed. Refresh",
-    refreshPendingStatus: "History may have changed",
-    refreshResultUpdated: (sha) => `Updated: ${sha} is now latest`,
-    refreshResultUnchanged: "No new commits",
-    refreshResultUnchangedInView: "No new commits in this view",
     filterClearLabel: "Clear",
     filterClearTitle: "Clear commit filter",
   },
@@ -63,13 +49,8 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     bodyExpandClose: "閉じる",
     bodyExpandMore: (n) => `もっと見る (${n} 行)`,
     refreshLabel: "更新",
-    refreshLabelPending: "更新あり",
     refreshTitle: "コミット履歴を更新",
     refreshTitlePending: "新しい履歴がある可能性があります。更新",
-    refreshPendingStatus: "新しい履歴がある可能性があります",
-    refreshResultUpdated: (sha) => `更新: ${sha} が最新です`,
-    refreshResultUnchanged: "新しいコミットはありません",
-    refreshResultUnchangedInView: "この表示では新しいコミットはありません",
     filterClearLabel: "解除",
     filterClearTitle: "コミットフィルタを解除",
   },
@@ -146,7 +127,7 @@ export function buildHistoryPanelDom(
   refreshButton.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
   const refreshLabel = document.createElement("span");
   refreshLabel.className = "history-refresh-label";
-  refreshLabel.textContent = HISTORY_TEXT.en.refreshLabel;
+  refreshLabel.textContent = "";
   refreshButton.appendChild(refreshLabel);
   const refreshResult = document.createElement("span");
   refreshResult.className = "db-refresh-result history-refresh-result";
@@ -442,37 +423,19 @@ export function createHistoryView(deps: HistoryViewDeps) {
       previousTopSha && nextTopSha && previousTopSha !== nextTopSha
         ? nextTopSha
         : "";
-    refreshStatus = freshSha
-      ? { type: "updated", sha: nextTopSha.slice(0, 7) }
-      : { type: "unchanged", scoped: Boolean(query || pathFilter) };
+    refreshStatus = { type: "none" };
     renderList();
-  }
-
-  function refreshStatusMessage(): string {
-    const text = historyText(deps.getLanguage());
-    switch (refreshStatus.type) {
-      case "pending":
-        return text.refreshPendingStatus;
-      case "updated":
-        return text.refreshResultUpdated(refreshStatus.sha);
-      case "unchanged":
-        return refreshStatus.scoped
-          ? text.refreshResultUnchangedInView
-          : text.refreshResultUnchanged;
-      case "none":
-        return "";
-      default: {
-        const exhaustive: never = refreshStatus;
-        return exhaustive;
-      }
-    }
   }
 
   function syncRefreshStatusText() {
     setStatusText(
       loading
         ? "loading..."
-        : refreshStatusMessage() || (commits.length ? "" : "no commits"),
+        : refreshStatus.type === "pending"
+          ? ""
+          : commits.length
+            ? ""
+            : "no commits",
     );
   }
 
@@ -614,26 +577,16 @@ export function createHistoryView(deps: HistoryViewDeps) {
     button.setAttribute("aria-label", title);
     button.classList.toggle("has-update", hasPendingUpdate);
     const label = button.querySelector(".history-refresh-label");
-    if (label) {
-      label.textContent = hasPendingUpdate
-        ? text.refreshLabelPending
-        : text.refreshLabel;
-    }
+    if (label) label.textContent = "";
   }
 
   function syncRefreshResult(result?: HTMLElement | null) {
     const el = result ?? activeMount.refreshResult;
     if (!el) return;
-    const message =
-      refreshStatus.type === "pending" ||
-      refreshStatus.type === "updated" ||
-      refreshStatus.type === "unchanged"
-        ? refreshStatusMessage()
-        : "";
-    el.textContent = message;
-    el.hidden = message.length === 0;
-    el.classList.toggle("changed", refreshStatus.type === "updated");
-    el.classList.toggle("pending", refreshStatus.type === "pending");
+    el.textContent = "";
+    el.hidden = true;
+    el.classList.toggle("changed", false);
+    el.classList.toggle("pending", false);
   }
 
   function syncFilterClearButton(button?: HTMLButtonElement | null) {

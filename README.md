@@ -101,8 +101,9 @@ Common options:
 - `--open` — open the printed URL in the default browser.
 - `--port <port>` — bind to a specific port (default: pick a free port).
 - `--bin <name>=<absolute-path>` — override an external command path
-  (`git`, `rg`, or `docker`). The same values can be supplied through
-  `CODE_VIEWER_BIN_GIT`, `CODE_VIEWER_BIN_RG`, and `CODE_VIEWER_BIN_DOCKER`.
+  (`git`, `rg`, `docker`, or `gh`). The same values can be supplied through
+  `CODE_VIEWER_BIN_GIT`, `CODE_VIEWER_BIN_RG`, `CODE_VIEWER_BIN_DOCKER`, and
+  `CODE_VIEWER_BIN_GH`.
 - `--scope-omit-dir <name>` — skip a directory under the worktree (repeatable;
   overrides the Viewer Settings list for this session).
 - `--version`, `-v` — print the installed version.
@@ -512,8 +513,8 @@ stdout and adds `text truncated` to stderr when the server flagged
 truncation. `--json` always emits the full server response envelope.
 
 AI agents who don't yet know which subcommand they need can run
-`code-viewer agent-help` once. It prints a short index of the seven
-AI-facing entry points (`status`, `query`, `annotate`, `search`,
+`code-viewer agent-help` once. It prints a short index of the eight
+AI-facing entry points (`status`, `query`, `annotate`, `journal`, `search`,
 `file`, `skill`, `doctor`) with the exact `code-viewer <name>
 agent-help` command for each full guide. The index runs without any
 preflight, so it works even before SQLite or a running server is set
@@ -666,8 +667,8 @@ including the JSON contract for each subcommand.
 
 The same diagnostic report behind the Environment Doctor sheet (see
 Features above) is available from the terminal without a browser, so AI
-agents and CI can introspect the runtime, SQLite driver, Git, Docker
-discovery, and snapshot store status directly.
+agents and CI can introspect the runtime, SQLite driver, Git, GitHub CLI,
+Docker discovery, and snapshot store status directly.
 
 ```sh
 # Human-readable status summary.
@@ -676,7 +677,7 @@ code-viewer doctor
 # Full DoctorReport JSON (matches the /_doctor endpoint).
 code-viewer doctor --json
 code-viewer doctor --cwd /path/to/repo --port 64160 --json
-code-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --json
+code-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --bin gh=/opt/bin/gh --json
 ```
 
 The exit code is `1` iff the worst check status is `"error"` (never on
@@ -767,11 +768,12 @@ write concise Markdown explanations, and how to install the bundled agent skill.
 
 ### Agent Skill
 
-The package bundles three [Agent Skills](https://agentskills.io)
-(the SKILL.md open standard) — `code-viewer-annotate`, `code-viewer-query`,
-and `code-viewer-snapshot` — that teach AI coding agents when and how to use
-`annotate`, read-only `query`, and snapshot / diff workflows. A single
-`skill install` copies all three into the selected agent directories:
+The package bundles four [Agent Skills](https://agentskills.io)
+(the SKILL.md open standard) — `code-viewer-annotate`,
+`code-viewer-journal`, `code-viewer-query`, and `code-viewer-snapshot` —
+that teach AI coding agents when and how to use `annotate`, Work Log task
+queues, read-only `query`, and snapshot / diff workflows. A single
+`skill install` copies all four into the selected agent directories:
 
 ```sh
 npx -y @youtyan/code-viewer skill install                       # Claude Code (.claude/skills/)

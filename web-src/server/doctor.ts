@@ -481,6 +481,49 @@ async function checkGit(
   return { id: "git", title: "Git", rows };
 }
 
+async function checkGithubCli(
+  signal: AbortSignal | undefined,
+): Promise<DoctorGroup> {
+  const versionRes = await runCached(
+    versionCache,
+    TTL.version,
+    commandForExternal("gh"),
+    ["--version"],
+    TIMEOUT.version,
+    signal,
+  );
+  if (!versionRes || versionRes.code !== 0) {
+    return {
+      id: "github",
+      title: "GitHub CLI",
+      rows: [
+        {
+          id: "github.gh",
+          title: "gh binary",
+          status: "warn",
+          detail:
+            versionRes && isCommandNotFoundResult("gh", versionRes)
+              ? commandNotFoundDetail("gh")
+              : "gh --version failed",
+          hint: "GitHub issue listing and issue-to-task linking require gh. Install GitHub CLI or pass --bin gh=/absolute/path.",
+        },
+      ],
+    };
+  }
+  return {
+    id: "github",
+    title: "GitHub CLI",
+    rows: [
+      {
+        id: "github.gh",
+        title: "gh binary",
+        status: "ok",
+        detail: firstLine(versionRes.stdout),
+      },
+    ],
+  };
+}
+
 type DockerCmd = { binary: string; subcommand: string[] };
 
 async function detectComposeBinary(
@@ -1357,6 +1400,7 @@ export async function buildDoctorReport(
   const sqlite = await checkSqlite(ctx.cwd);
   const snapshot = checkSnapshotStore(ctx.cwd);
   const git = await checkGit(ctx.cwd, ctx.signal);
+  const github = await checkGithubCli(ctx.signal);
   const discovery = await checkDiscovery(
     ctx.cwd,
     ctx.scopeOmitDirNames,
@@ -1379,6 +1423,7 @@ export async function buildDoctorReport(
     sqlite,
     snapshot,
     git,
+    github,
     discovery.group,
     datastore,
     docker,
