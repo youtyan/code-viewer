@@ -32,6 +32,14 @@ export type AppRoute =
   | { screen: "help"; range: DiffRange; lang: string; section: string }
   | { screen: "history"; ref: string; commit?: string; range: DiffRange }
   | {
+      screen: "journal";
+      tab?: "journal" | "tasks";
+      date?: string;
+      label?: string;
+      task?: string;
+      range: DiffRange;
+    }
+  | {
       screen: "database";
       db?: string;
       schema?: string;
@@ -57,6 +65,7 @@ export const SPA_PATHS = [
   "/file",
   "/help",
   "/history",
+  "/journal",
   "/database",
   "/doctor",
 ] as const;
@@ -216,6 +225,22 @@ export function parseRoute(
         range,
       };
     }
+    case "/journal": {
+      const tabRaw = params.get("tab");
+      const tab =
+        tabRaw === "tasks" || tabRaw === "journal" ? tabRaw : undefined;
+      const date = params.get("date") || undefined;
+      const label = params.get("label") || undefined;
+      const task = params.get("task") || undefined;
+      return {
+        screen: "journal",
+        ...(tab ? { tab } : {}),
+        ...(date ? { date } : {}),
+        ...(label ? { label } : {}),
+        ...(task ? { task } : {}),
+        range,
+      };
+    }
     case "/database": {
       const db = params.get("db") || undefined;
       const schema = params.get("schema") || undefined;
@@ -343,6 +368,15 @@ export function buildRoute(route: AppRoute): string {
       if (route.commit) params.set("commit", route.commit);
       const qs = params.toString();
       return `/history${qs ? `?${qs}` : ""}`;
+    }
+    case "journal": {
+      const params = new URLSearchParams();
+      if (route.tab && route.tab !== "journal") params.set("tab", route.tab);
+      if (route.date) params.set("date", route.date);
+      if (route.label) params.set("label", route.label);
+      if (route.task) params.set("task", route.task);
+      const qs = params.toString();
+      return `/journal${qs ? `?${qs}` : ""}`;
     }
     case "database": {
       const params = new URLSearchParams();

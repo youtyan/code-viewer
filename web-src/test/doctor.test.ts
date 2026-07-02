@@ -86,6 +86,7 @@ describe("doctor report", () => {
         "sqlite",
         "snapshot",
         "git",
+        "github",
         "discovery",
         "datastore",
         "docker",
@@ -96,12 +97,20 @@ describe("doctor report", () => {
       // datastore は discovery と docker の間に並ぶ (AI/human が top-down に
       // discover -> connect -> compose health の順で読めるようにする位置決め)。
       const orderedIds = report.groups.map((g) => g.id);
+      const gitIdx = orderedIds.indexOf("git");
+      const githubIdx = orderedIds.indexOf("github");
       const discoveryIdx = orderedIds.indexOf("discovery");
       const datastoreIdx = orderedIds.indexOf("datastore");
       const dockerIdx = orderedIds.indexOf("docker");
+      expect(githubIdx > gitIdx).toBe(true);
+      expect(discoveryIdx > githubIdx).toBe(true);
       expect(discoveryIdx >= 0).toBe(true);
       expect(datastoreIdx > discoveryIdx).toBe(true);
       expect(dockerIdx > datastoreIdx).toBe(true);
+      const github = report.groups.find((g) => g.id === "github");
+      const ghRow = github?.rows.find((r) => r.id === "github.gh");
+      expect(Boolean(ghRow)).toBe(true);
+      expect(ghRow?.status === "ok" || ghRow?.status === "warn").toBe(true);
       const worst = report.worstStatus;
       const validWorst =
         worst === "ok" || worst === "warn" || worst === "error";

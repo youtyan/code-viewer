@@ -47,12 +47,15 @@ describe("parseDoctorCliArgs", () => {
       "git=/opt/bin/git",
       "--bin",
       "docker=/opt/bin/docker",
+      "--bin",
+      "gh=/opt/bin/gh",
     ]);
     expect(result.kind).toBe("run");
     if (result.kind === "run") {
       expect(result.args.commandOverrides).toEqual([
         { name: "git", path: "/opt/bin/git" },
         { name: "docker", path: "/opt/bin/docker" },
+        { name: "gh", path: "/opt/bin/gh" },
       ]);
     }
   });

@@ -94,9 +94,10 @@ missing bundled skills).
 ## What gets installed
 
 The bundled set covers code-viewer's own AI workflows (annotation
-walkthroughs, doctor introspection, query/snapshot inspection). After
-install, ask the AI to use \`code-viewer annotate\` and the related
-skills will guide it.
+walkthroughs, Work Log task queues, doctor introspection, and
+query/snapshot inspection). After install, ask the AI to use
+\`code-viewer annotate\`, \`code-viewer journal\`, or the related
+commands and the skills will guide it.
 `;
 
 export type SkillArgs =

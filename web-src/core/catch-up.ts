@@ -8,6 +8,7 @@ export function shouldAutoLoadForRoute(
     return options.historyWorktreeSelected === true;
   if (
     route.screen === "database" ||
+    route.screen === "journal" ||
     route.screen === "help" ||
     route.screen === "unknown"
   )

@@ -146,11 +146,11 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Each row reports OK / WARN / ERROR with a remediation hint when relevant. The check groups are Runtime (Node / Bun / NODE_MODULE_VERSION), Package (version + execution origin including npx cache), SQLite driver, Snapshot store, Git, Discovery summary, Docker / Compose (CLI / v2 plugin / daemon / compose config dry-parse / compose ps health per discovered service), and Server. The most common hint is the npx cache fix for better-sqlite3 NODE_MODULE_VERSION mismatch (rm -rf ~/.npm/_npx then re-run with npx -y @youtyan/code-viewer@latest).",
+                text: "Each row reports OK / WARN / ERROR with a remediation hint when relevant. The check groups are Runtime (Node / Bun / NODE_MODULE_VERSION), Package (version + execution origin including npx cache), SQLite driver, Snapshot store, Git, GitHub CLI, Discovery summary, Docker / Compose (CLI / v2 plugin / daemon / compose config dry-parse / compose ps health per discovered service), and Server. The most common hint is the npx cache fix for better-sqlite3 NODE_MODULE_VERSION mismatch (rm -rf ~/.npm/_npx then re-run with npx -y @youtyan/code-viewer@latest).",
               },
               {
                 kind: "paragraph",
-                text: 'From the terminal — and for AI agents or CI — the same report is available without a browser. `code-viewer doctor` prints a status summary; add `--json` for the full DoctorReport (matches the /_doctor endpoint). Use `--bin git=/absolute/path` or `--bin docker=/absolute/path` when PATH resolves the wrong tool. Exit code is 1 when worstStatus is "error", so it doubles as a CI gate.',
+                text: 'From the terminal — and for AI agents or CI — the same report is available without a browser. `code-viewer doctor` prints a status summary; add `--json` for the full DoctorReport (matches the /_doctor endpoint). Use `--bin git=/absolute/path`, `--bin docker=/absolute/path`, or `--bin gh=/absolute/path` when PATH resolves the wrong tool. Exit code is 1 when worstStatus is "error", so it doubles as a CI gate.',
               },
               {
                 kind: "command",
@@ -161,7 +161,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 kind: "command",
                 title: "Doctor JSON for agents and CI",
                 command:
-                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json\ncode-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --json",
+                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json\ncode-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --bin gh=/opt/bin/gh --json",
               },
             ],
           },
@@ -526,7 +526,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "Agent Skill",
         title: "Agent Skill Setup",
         intro:
-          "The package bundles three skills — code-viewer-annotate, code-viewer-query, and code-viewer-snapshot — so AI agents know when and how to create browser walkthroughs, run read-only queries, and capture snapshot / diff sessions. A single skill install command copies all three into the selected agent directories.",
+          "The package bundles four skills — code-viewer-annotate, code-viewer-journal, code-viewer-query, and code-viewer-snapshot — so AI agents know when and how to create browser walkthroughs, manage Work Log task queues, run read-only queries, and capture snapshot / diff sessions. A single skill install command copies all four into the selected agent directories.",
         groups: [
           {
             title: "Install the skills",
@@ -573,12 +573,16 @@ code-viewer annotate add-db --db app.db --tab query \\
                     "Code reviews, onboarding walkthroughs, and explanations of changes.",
                   ],
                   [
-                    "How to target code",
-                    "Use --file and --line, and include --from / --to when explaining a diff range.",
+                    "How to manage Work Log tasks",
+                    "Use the journal CLI for task lists, task creation, claim/done flows, and GitHub Issue linking.",
                   ],
                   [
-                    "How to keep history clean",
-                    "Use one session per topic, edit wrong notes in place, and avoid unrelated cleanup.",
+                    "How to inspect data",
+                    "Use read-only query commands for schema, SQL, saved query history, and table-wide search.",
+                  ],
+                  [
+                    "How to verify data changes",
+                    "Use snapshot create/list/diff workflows to compare before and after states.",
                   ],
                 ],
               },
@@ -593,8 +597,9 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "command",
-                title: "Show the agent guide",
-                command: "code-viewer annotate agent-help",
+                title: "Show the agent guides",
+                command:
+                  "code-viewer annotate agent-help\ncode-viewer journal agent-help\ncode-viewer query agent-help",
               },
             ],
           },
@@ -813,11 +818,11 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "各項目は OK / WARN / ERROR で表示され、必要に応じて対処手順のヒントが付きます。診断グループは Runtime (Node / Bun / NODE_MODULE_VERSION)、Package (バージョン + 実行元: npx cache / global / local / bunx)、SQLite driver、Snapshot store、Git、Discovery summary、Docker / Compose (CLI / v2 plugin / daemon / compose config dry parse / compose ps による各サービスのヘルス)、Server (待ち受けポート) の 8 つ。よくあるヒントは npx キャッシュ起因の better-sqlite3 NODE_MODULE_VERSION 不一致で、rm -rf ~/.npm/_npx の後に npx -y @youtyan/code-viewer@latest を再実行する手順を表示します。",
+                text: "各項目は OK / WARN / ERROR で表示され、必要に応じて対処手順のヒントが付きます。診断グループは Runtime (Node / Bun / NODE_MODULE_VERSION)、Package (バージョン + 実行元: npx cache / global / local / bunx)、SQLite driver、Snapshot store、Git、GitHub CLI、Discovery summary、Docker / Compose (CLI / v2 plugin / daemon / compose config dry parse / compose ps による各サービスのヘルス)、Server (待ち受けポート) です。よくあるヒントは npx キャッシュ起因の better-sqlite3 NODE_MODULE_VERSION 不一致で、rm -rf ~/.npm/_npx の後に npx -y @youtyan/code-viewer@latest を再実行する手順を表示します。",
               },
               {
                 kind: "paragraph",
-                text: 'ターミナルからは `code-viewer doctor` で同じレポートを取得できます。AI エージェントや CI からは `--json` で /_doctor と同じ DoctorReport を受け取れます。PATH と別の実行ファイルを使いたい場合は `--bin git=/absolute/path` や `--bin docker=/absolute/path` を指定できます。worstStatus が "error" なら exit code 1 を返すので CI ガードに直接使えます。',
+                text: 'ターミナルからは `code-viewer doctor` で同じレポートを取得できます。AI エージェントや CI からは `--json` で /_doctor と同じ DoctorReport を受け取れます。PATH と別の実行ファイルを使いたい場合は `--bin git=/absolute/path`、`--bin docker=/absolute/path`、`--bin gh=/absolute/path` を指定できます。worstStatus が "error" なら exit code 1 を返すので CI ガードに直接使えます。',
               },
               {
                 kind: "command",
@@ -828,7 +833,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "AI / CI 用 doctor JSON",
                 command:
-                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json\ncode-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --json",
+                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json\ncode-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --bin gh=/opt/bin/gh --json",
               },
             ],
           },
@@ -1193,7 +1198,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "スキル登録",
         title: "Agent Skill の登録",
         intro:
-          "このパッケージには 3 つのスキル (code-viewer-annotate / code-viewer-query / code-viewer-snapshot) が同梱されており、AI エージェントに annotate でのウォークスルー、read-only な query、スナップショット / 差分の使い分けを教えます。skill install を 1 回叩くと、選んだエージェントすべてに 3 スキルがコピーされます。",
+          "このパッケージには 4 つのスキル (code-viewer-annotate / code-viewer-journal / code-viewer-query / code-viewer-snapshot) が同梱されており、AI エージェントに annotate でのウォークスルー、Work Log タスク管理、read-only な query、スナップショット / 差分の使い分けを教えます。skill install を 1 回叩くと、選んだエージェントすべてに 4 スキルがコピーされます。",
         groups: [
           {
             title: "スキルをインストールする",
@@ -1240,12 +1245,16 @@ code-viewer annotate add-db --db app.db --tab query \\
                     "コードレビュー、オンボーディング、変更内容の解説で使うこと。",
                   ],
                   [
-                    "どこへ注釈するか",
-                    "--file と --line を使い、diff 範囲を説明するときは --from / --to も渡すこと。",
+                    "Work Log タスクをどう扱うか",
+                    "journal CLI でタスク一覧取得、作成、claim/done、GitHub Issue 紐づけを行うこと。",
                   ],
                   [
-                    "履歴をきれいに保つ方法",
-                    "1テーマ1セッション、間違いは edit で修正、無関係な削除をしないこと。",
+                    "データをどう調査するか",
+                    "read-only な query コマンドでスキーマ、SQL、履歴、横断検索を扱うこと。",
+                  ],
+                  [
+                    "データ変更をどう検証するか",
+                    "snapshot create/list/diff で before/after を比較すること。",
                   ],
                 ],
               },
@@ -1261,7 +1270,8 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "command",
                 title: "AI 向けガイドを表示",
-                command: "code-viewer annotate agent-help",
+                command:
+                  "code-viewer annotate agent-help\ncode-viewer journal agent-help\ncode-viewer query agent-help",
               },
             ],
           },

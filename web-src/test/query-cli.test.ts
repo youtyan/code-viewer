@@ -10,6 +10,7 @@ import {
   runQueryCli,
   shellSingleQuote,
 } from "../server/query-cli";
+import { extractDocumentedSubcommandInvocations } from "./_documented-cli-fixture";
 
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 
@@ -4644,94 +4645,10 @@ describe("runQueryCli snapshot create --wait integration", () => {
   });
 });
 
-// Markdown 内のコードフェンス (```...```) からだけ抽出する。
-// 散文中の `code-viewer query ...` (バックティック付き) は人間向けの言及で
-// 構文契約の対象外なので無視する。`#` で始まる行はコメントなのでスキップ。
-function codeFenceLines(text: string): string[] {
-  const out: string[] = [];
-  let inFence = false;
-  for (const raw of text.split(/\r?\n/)) {
-    const trimmed = raw.trim();
-    if (trimmed.startsWith("```")) {
-      inFence = !inFence;
-      continue;
-    }
-    if (!inFence) continue;
-    if (trimmed.startsWith("#")) continue;
-    out.push(raw);
-  }
-  return out;
-}
-
-// 行末 `\` 継続を join して 1 行コマンドにまとめる。
-function joinBackslashContinuations(lines: string[]): string[] {
-  const joined: string[] = [];
-  let acc = "";
-  for (const line of lines) {
-    if (/\\\s*$/.test(line)) {
-      acc += `${line.replace(/\\\s*$/, "")} `;
-    } else {
-      joined.push((acc + line).trim());
-      acc = "";
-    }
-  }
-  if (acc) joined.push(acc.trim());
-  return joined.filter((l) => l.length > 0);
-}
-
-// 単純なシェル風 split。"..."、'...' で囲まれた範囲のスペースは保存する。
-// バックスラッシュエスケープは double-quote 内のみで簡易対応。
-function shellSplit(s: string): string[] {
-  const result: string[] = [];
-  let buf = "";
-  let inSingle = false;
-  let inDouble = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (inSingle) {
-      if (c === "'") inSingle = false;
-      else buf += c;
-      continue;
-    }
-    if (inDouble) {
-      if (c === '"') inDouble = false;
-      else if (c === "\\" && i + 1 < s.length) {
-        buf += s[i + 1];
-        i++;
-      } else buf += c;
-      continue;
-    }
-    if (c === "'") inSingle = true;
-    else if (c === '"') inDouble = true;
-    else if (c === " " || c === "\t") {
-      if (buf.length > 0) {
-        result.push(buf);
-        buf = "";
-      }
-    } else buf += c;
-  }
-  if (buf.length > 0) result.push(buf);
-  return result;
-}
-
 // ドキュメント本文から `code-viewer query <...>` 例を全部取り出し、
 // "code-viewer query" プレフィックス除去後の argv 配列に変換する。
 function extractDocumentedQueryInvocations(text: string): string[][] {
-  const lines = joinBackslashContinuations(codeFenceLines(text));
-  const out: string[][] = [];
-  for (const line of lines) {
-    const parts = shellSplit(line);
-    // npx -y @youtyan/code-viewer query <...> も拾う (README の install 例で
-    // 出てくる可能性に備える)。 prefix を見つけて以降を argv 化する。
-    const idx = parts.findIndex(
-      (p, i) =>
-        (p === "code-viewer" || p.endsWith("/code-viewer")) &&
-        parts[i + 1] === "query",
-    );
-    if (idx < 0) continue;
-    out.push(parts.slice(idx + 2));
-  }
-  return out;
+  return extractDocumentedSubcommandInvocations(text, "query");
 }
 
 describe("parseQueryArgs rejects redis-only flags on non-redis subcommands", () => {

@@ -21,13 +21,13 @@ import { DEFAULT_WORKTREE_OMIT_DIR_NAMES } from "./git";
 const DOCTOR_HELP = `code-viewer doctor — diagnose the current environment
 
 Usage:
-  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|docker>=<path>]
+  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|docker|gh>=<path>]
   code-viewer doctor agent-help
 
 Options:
   --cwd <path>   Working directory to inspect (default: process.cwd()).
   --port <N>     Listening port to mention in the report (default: 0 = no server).
-  --bin <n>=<p>  Override git/docker executable path. Repeatable.
+  --bin <n>=<p>  Override git/docker/gh executable path. Repeatable.
   --json         Print the full DoctorReport as JSON instead of a summary.
   --help, -h     Show this help.
 
@@ -86,6 +86,7 @@ export function parseDoctorCliArgs(argv: string[]): DoctorCliParseResult {
       const parsed = parseExternalCommandOverride(next, "--bin", [
         "git",
         "docker",
+        "gh",
       ]);
       if (parsed.ok === false) return { kind: "error", message: parsed.error };
       commandOverrides.push(parsed.override);
@@ -176,7 +177,7 @@ export async function runDoctorCli(argv: string[]): Promise<void> {
   const commandConfig = configureExternalCommands({
     cwd,
     cliOverrides: commandOverrides,
-    allowedNames: ["git", "docker"],
+    allowedNames: ["git", "docker", "gh"],
   });
   if (commandConfig.ok === false) {
     process.stderr.write(`code-viewer doctor: ${commandConfig.error}\n`);

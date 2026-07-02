@@ -11,6 +11,7 @@
 import { ANNOTATE_AGENT_HELP } from "./annotate-cli";
 import { DOCTOR_AGENT_HELP } from "./doctor-agent-help";
 import { FILE_AGENT_HELP } from "./file-cli";
+import { JOURNAL_AGENT_HELP } from "./journal-cli";
 import { QUERY_AGENT_HELP } from "./query-cli";
 import { SEARCH_AGENT_HELP } from "./search-cli";
 import { SKILL_AGENT_HELP } from "./skill-cli";
@@ -21,6 +22,7 @@ export type AgentGuideEntry = {
     | "status"
     | "query"
     | "annotate"
+    | "journal"
     | "search"
     | "file"
     | "skill"
@@ -54,6 +56,11 @@ export const AGENT_GUIDES: readonly AgentGuideEntry[] = [
     name: "annotate",
     signature: firstLine(ANNOTATE_AGENT_HELP),
     rerun: "code-viewer annotate agent-help",
+  },
+  {
+    name: "journal",
+    signature: firstLine(JOURNAL_AGENT_HELP),
+    rerun: "code-viewer journal agent-help",
   },
   {
     name: "search",

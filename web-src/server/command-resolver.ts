@@ -1,7 +1,7 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
 
-export const EXTERNAL_COMMAND_NAMES = ["git", "rg", "docker"] as const;
+export const EXTERNAL_COMMAND_NAMES = ["git", "rg", "docker", "gh"] as const;
 
 export type ExternalCommandName = (typeof EXTERNAL_COMMAND_NAMES)[number];
 

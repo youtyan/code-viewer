@@ -7,7 +7,7 @@ bunch of probing commands or open the 🩺 browser panel.
 ## When to use
 
 - A previous command failed; you want to confirm Node / Bun / SQLite /
-  Docker / git state before suggesting a fix.
+  Docker / git / gh state before suggesting a fix.
 - The human asks "is my environment OK", "why does install fail", or
   similar; \`code-viewer doctor\` is the single source of truth.
 - Pre-flight before a destructive step (DB snapshot reset, npx upgrade)
@@ -38,7 +38,7 @@ Stable JSON contract (see core/doctor-types.ts):
     "generation": number,         // monotonic, restart resets to 1
     "worstStatus": "ok"|"warn"|"error",
     "groups": [
-      { "id": "runtime"|"package"|"sqlite"|"snapshot"|"git"
+      { "id": "runtime"|"package"|"sqlite"|"snapshot"|"git"|"github"
             |"discovery"|"datastore"|"docker"|"server",
         "title": string,
         "rows": [
@@ -69,6 +69,9 @@ The exit code is 1 iff \`worstStatus === "error"\` — never on \`warn\`.
 - \`hint\` is the human-readable fix; quote it verbatim when reporting back.
 - A \`runtime.node\` row failing means Node < 20 — almost everything else
   is downstream of that. Fix it first.
+- A \`github.gh\` row warning means GitHub Issue listing/linking cannot use
+  the GitHub CLI yet. Install \`gh\` or pass \`--bin gh=/absolute/path\`.
+  Doctor intentionally does not inspect GitHub auth metadata.
 - A \`sqlite.*\` row failing usually points at npx cache; the hint shows
   the rm -rf ~/.npm/_npx workaround.
 - Docker rows are advisory — \`code-viewer\` works without Docker; warnings

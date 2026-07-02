@@ -16,6 +16,13 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { normalizeNewDirectoryName } from "../core/directory-name";
+import {
+  collectJournalLabels,
+  isJournalTaskPriority,
+  isJournalTaskStatus,
+  type JournalTaskPriority,
+  type JournalTaskStatus,
+} from "../core/journal";
 import { APP_ENTRY_PATHS, SPA_PATHS } from "../core/routes";
 import type {
   AnnotationTarget,
@@ -57,6 +64,30 @@ import {
 import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
 import * as git from "./git";
+import {
+  GithubIssueListError,
+  normalizeGithubIssueListLimit,
+  normalizeGithubIssueListState,
+  readGithubIssueList,
+} from "./github-issues";
+import {
+  addDailyJournalEntry,
+  addJournalTask,
+  claimJournalTask,
+  completeJournalTask,
+  deleteDailyJournalEntry,
+  deleteJournalTask,
+  JOURNAL_ENTRY_BODY_MAX_BYTES,
+  JOURNAL_TASK_BODY_MAX_BYTES,
+  linkGithubIssueTask,
+  loadDailyJournalState,
+  loadJournalTaskState,
+  moveJournalTask,
+  updateDailyJournalEntry,
+  updateDailyJournalState,
+  updateJournalTask,
+  updateJournalTaskState,
+} from "./journal";
 import {
   buildMcpInstructions,
   defaultMcpTools,
@@ -207,17 +238,18 @@ Usage:
   code-viewer [--cwd <repo>] [--port <port>] [--open] [--bin <name>=<path>] [git-diff-args...]
   code-viewer status [--cwd <repo>] [--bin git=<path>] [--ref <ref>] [--limit <N>] [--json]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
+  code-viewer journal <list|add|edit|tasks|task-add|task-update|task-next|github-issues|task-link-issue|task-claim|task-done|task-delete> [options]
   code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search|redis|elasticsearch|s3> [options] [--bin git=<path>]
   code-viewer search code --term <text> [--ref <ref>] [--path <p>...] [--regex] [--max <n>] [--json] [--bin git=<path>]
   code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json] [--bin git=<path>]
   code-viewer file <blame|history|show|diff> --path <p> [--ref <ref>] [...subcommand options] [--json] [--bin git=<path>]
   code-viewer skill install [--agent <list>] [--global]
-  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|docker>=<path>]
+  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|docker|gh>=<path>]
   code-viewer agent-help
   code-viewer help
 
 AI-agent index (start here):  code-viewer agent-help
-Subcommand guides (AI agents): code-viewer <status|annotate|query|search|file|skill|doctor> agent-help
+Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search|file|skill|doctor> agent-help
 
 Examples:
   code-viewer --open
@@ -2221,6 +2253,334 @@ async function handleMcp(req: Request): Promise<Response> {
   return json(dispatched.body);
 }
 
+class JournalRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status = 400,
+  ) {
+    super(message);
+  }
+}
+
+function journalSse(kind: string, id?: string) {
+  sendSse("journal", JSON.stringify({ kind, id }));
+}
+
+function bodyString(
+  body: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = body[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function bodyStringList(body: Record<string, unknown>, key: string): string[] {
+  const value = body[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function bodyTaskStatus(
+  body: Record<string, unknown>,
+  key: string,
+): JournalTaskStatus | undefined {
+  const value = body[key];
+  if (value === undefined) return undefined;
+  if (isJournalTaskStatus(value)) return value;
+  throw new JournalRequestError(
+    `${key} must be draft, todo, doing, blocked, or done`,
+  );
+}
+
+function bodyTaskPriority(
+  body: Record<string, unknown>,
+  key: string,
+): JournalTaskPriority | undefined {
+  const value = body[key];
+  if (value === undefined) return undefined;
+  if (isJournalTaskPriority(value)) return value;
+  throw new JournalRequestError(`${key} must be p0, p1, p2, or p3`);
+}
+
+function bodyNumber(
+  body: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = body[key];
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+async function handleJournal(req: Request): Promise<Response> {
+  if (req.method === "GET") {
+    const journal = await loadDailyJournalState(cwd);
+    const tasks = await loadJournalTaskState(cwd);
+    return json({
+      generation,
+      journal,
+      tasks,
+      labels: collectJournalLabels(journal, tasks),
+    });
+  }
+  if (req.method !== "POST") return text("method not allowed", 405);
+  if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
+  const contentType = req.headers.get("content-type") || "";
+  if (!/^application\/json(?:;|$)/i.test(contentType))
+    return text("unsupported media type", 415);
+  const maxBytes =
+    Math.max(JOURNAL_ENTRY_BODY_MAX_BYTES, JOURNAL_TASK_BODY_MAX_BYTES) + 8192;
+  const length = Number(req.headers.get("content-length") || "0");
+  if (length > maxBytes) return text("payload too large", 413);
+
+  let body: Record<string, unknown> = {};
+  try {
+    const raw = await req.text();
+    if (raw.length > maxBytes) return text("payload too large", 413);
+    body = JSON.parse(raw);
+  } catch {
+    return text("invalid json", 400);
+  }
+
+  try {
+    const action = body.action;
+    const now = new Date().toISOString();
+    if (action === "add-entry") {
+      const entry = await updateDailyJournalState(cwd, (state) => {
+        const result = addDailyJournalEntry(
+          state,
+          {
+            date: bodyString(body, "date") || "",
+            title: bodyString(body, "title"),
+            body: bodyString(body, "body") || "",
+            labels: body.labels,
+            source: body.source === "ai" ? "ai" : "user",
+          },
+          now,
+        );
+        if (result.ok === false) throw new JournalRequestError(result.error);
+        return { state: result.state, result: result.entry };
+      });
+      journalSse("add-entry", entry.id);
+      return json({ ok: true, entry, generation });
+    }
+    if (action === "list-github-issues") {
+      const label = bodyString(body, "label");
+      const labels = bodyStringList(body, "labels");
+      if (label) labels.push(label);
+      const issues = readGithubIssueList({
+        cwd,
+        repo: bodyString(body, "repo"),
+        labels,
+        search: bodyString(body, "search"),
+        state: normalizeGithubIssueListState(bodyString(body, "state")),
+        limit: normalizeGithubIssueListLimit(bodyNumber(body, "limit")),
+      });
+      return json({ ok: true, issues, generation });
+    }
+    if (action === "update-entry") {
+      const id = bodyString(body, "id") || "";
+      if (!id) return text("invalid id", 400);
+      const entry = await updateDailyJournalState(cwd, (state) => {
+        const result = updateDailyJournalEntry(
+          state,
+          id,
+          {
+            date: bodyString(body, "date"),
+            title: bodyString(body, "title"),
+            body: bodyString(body, "body"),
+            labels: body.labels,
+            source: body.source === "ai" ? "ai" : undefined,
+          },
+          now,
+        );
+        if (result.ok === false) throw new JournalRequestError(result.error);
+        return { state: result.state, result: result.entry };
+      });
+      journalSse("update-entry", entry.id);
+      return json({ ok: true, entry, generation });
+    }
+    if (action === "delete-entry") {
+      const id = bodyString(body, "id") || "";
+      if (!id) return text("invalid id", 400);
+      const removed = await updateDailyJournalState(cwd, (state) => {
+        const result = deleteDailyJournalEntry(state, id);
+        return { state: result.state, result: result.removed };
+      });
+      if (removed) journalSse("delete-entry", id);
+      return json({ ok: true, removed, generation });
+    }
+    if (action === "link-github-issue") {
+      const result = await updateJournalTaskState(cwd, (state) => {
+        const linked = linkGithubIssueTask(
+          state,
+          {
+            issue_number: bodyNumber(body, "issue_number") || 0,
+            repo: bodyString(body, "repo"),
+            title: bodyString(body, "title"),
+            url: bodyString(body, "url"),
+            memo_label: bodyString(body, "memo_label"),
+            status: bodyTaskStatus(body, "status"),
+            priority: bodyTaskPriority(body, "priority"),
+            labels: body.labels,
+            before_id: bodyString(body, "before_id"),
+            after_id: bodyString(body, "after_id"),
+            position: bodyNumber(body, "position"),
+          },
+          now,
+        );
+        if (linked.ok === false) throw new JournalRequestError(linked.error);
+        return { state: linked.state, result: linked };
+      });
+      journalSse("link-github-issue", result.task.id);
+      return json({
+        ok: true,
+        task: result.task,
+        created: result.created,
+        moved: result.moved,
+        generation,
+      });
+    }
+    if (action === "add-task") {
+      const task = await updateJournalTaskState(cwd, (state) => {
+        const result = addJournalTask(
+          state,
+          {
+            title: bodyString(body, "title") || "",
+            body: bodyString(body, "body"),
+            status: bodyTaskStatus(body, "status"),
+            priority: bodyTaskPriority(body, "priority"),
+            labels: body.labels,
+            due_date: bodyString(body, "due_date"),
+            source_date: bodyString(body, "source_date"),
+            journal_entry_id: bodyString(body, "journal_entry_id"),
+            before_id: bodyString(body, "before_id"),
+            after_id: bodyString(body, "after_id"),
+            position: bodyNumber(body, "position"),
+          },
+          now,
+        );
+        if (result.ok === false) throw new JournalRequestError(result.error);
+        return { state: result.state, result: result.task };
+      });
+      journalSse("add-task", task.id);
+      return json({ ok: true, task, generation });
+    }
+    if (action === "update-task") {
+      const id = bodyString(body, "id") || "";
+      if (!id) return text("invalid id", 400);
+      const task = await updateJournalTaskState(cwd, (state) => {
+        const result = updateJournalTask(
+          state,
+          id,
+          {
+            title: bodyString(body, "title"),
+            body: bodyString(body, "body"),
+            status: bodyTaskStatus(body, "status"),
+            priority: bodyTaskPriority(body, "priority"),
+            labels: body.labels,
+            due_date:
+              body.due_date === null ? null : bodyString(body, "due_date"),
+            source_date:
+              body.source_date === null
+                ? null
+                : bodyString(body, "source_date"),
+            journal_entry_id:
+              body.journal_entry_id === null
+                ? null
+                : bodyString(body, "journal_entry_id"),
+          },
+          now,
+        );
+        if (result.ok === false) throw new JournalRequestError(result.error);
+        return { state: result.state, result: result.task };
+      });
+      journalSse("update-task", task.id);
+      return json({ ok: true, task, generation });
+    }
+    if (action === "move-task") {
+      const id = bodyString(body, "id") || "";
+      if (!id) return text("invalid id", 400);
+      const task = await updateJournalTaskState(cwd, (state) => {
+        const result = moveJournalTask(
+          state,
+          id,
+          {
+            status: bodyTaskStatus(body, "status"),
+            before_id: bodyString(body, "before_id"),
+            after_id: bodyString(body, "after_id"),
+            position: bodyNumber(body, "position"),
+          },
+          now,
+        );
+        if (result.ok === false) throw new JournalRequestError(result.error);
+        return { state: result.state, result: result.task };
+      });
+      journalSse("move-task", task.id);
+      return json({ ok: true, task, generation });
+    }
+    if (action === "claim-task") {
+      const id = bodyString(body, "id") || "";
+      if (!id) return text("invalid id", 400);
+      const task = await updateJournalTaskState(cwd, (state) => {
+        const result = claimJournalTask(
+          state,
+          id,
+          {
+            by: bodyString(body, "by"),
+            lease_minutes: bodyNumber(body, "lease_minutes"),
+            wip_limit: bodyNumber(body, "wip_limit"),
+          },
+          now,
+        );
+        if (result.ok === false) throw new JournalRequestError(result.error);
+        return { state: result.state, result: result.task };
+      });
+      journalSse("claim-task", task.id);
+      return json({ ok: true, task, generation });
+    }
+    if (action === "complete-task") {
+      const id = bodyString(body, "id") || "";
+      if (!id) return text("invalid id", 400);
+      const task = await updateJournalTaskState(cwd, (state) => {
+        const result = completeJournalTask(
+          state,
+          id,
+          {
+            by: bodyString(body, "by"),
+            note: bodyString(body, "note"),
+            source: body.source === "user" ? "user" : "ai",
+          },
+          now,
+        );
+        if (result.ok === false) throw new JournalRequestError(result.error);
+        return { state: result.state, result: result.task };
+      });
+      journalSse("complete-task", task.id);
+      return json({ ok: true, task, generation });
+    }
+    if (action === "delete-task") {
+      const id = bodyString(body, "id") || "";
+      if (!id) return text("invalid id", 400);
+      const removed = await updateJournalTaskState(cwd, (state) => {
+        const result = deleteJournalTask(state, id);
+        return { state: result.state, result: result.removed };
+      });
+      if (removed) journalSse("delete-task", id);
+      return json({ ok: true, removed, generation });
+    }
+  } catch (error) {
+    if (error instanceof GithubIssueListError) {
+      return text(error.message, error.status);
+    }
+    if (error instanceof JournalRequestError) {
+      return text(error.message, error.status);
+    }
+    throw error;
+  }
+  return text("invalid action", 400);
+}
+
 async function handleAnnotations(req: Request) {
   if (req.method === "GET") return json(await loadAnnotationsState(cwd));
   if (req.method !== "POST") return text("method not allowed", 405);
@@ -2477,6 +2837,7 @@ const server = await startServer({
       if (stateResponse) return stateResponse;
     }
     if (url.pathname === "/_mcp") return handleMcp(req);
+    if (url.pathname === "/_journal") return handleJournal(req);
     if (url.pathname === "/_annotations") return handleAnnotations(req);
     if (url.pathname === "/_refs") {
       const result = git.refsResult(cwd);

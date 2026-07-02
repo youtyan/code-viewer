@@ -49,6 +49,7 @@ describe("external command resolver", () => {
     expect(commandForExternal("git")).toBe("git");
     expect(commandForExternal("rg")).toBe("rg");
     expect(commandForExternal("docker")).toBe("docker");
+    expect(commandForExternal("gh")).toBe("gh");
   });
 
   test("accepts env overrides and lets CLI overrides win", () => {
