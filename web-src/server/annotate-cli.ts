@@ -9,6 +9,7 @@ import type {
 import { normalizeDatabaseTab, parseAnnotationLine } from "./annotations";
 import {
   ensureServerUrl,
+  readStdin,
   requestJson,
   resolveRepoRoot,
   takeValue,
@@ -575,15 +576,6 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
     return { ok: true, args: { command: { kind: "clear" }, cwd, server } };
   }
   return { ok: false, error: `unknown annotate command: ${subcommand}` };
-}
-
-async function readStdin(): Promise<string> {
-  if (process.stdin.isTTY) return "";
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 // /_annotations は server 側で text/plain の text() 系で 4xx/5xx を返すのが

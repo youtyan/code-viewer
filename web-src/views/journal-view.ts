@@ -25,6 +25,7 @@ import {
 } from "../core/journal";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute, DiffRange } from "../core/routes";
+import { showConfirmDialog } from "./ui-dialog";
 
 export type JournalViewText = {
   locale: string;
@@ -1026,17 +1027,14 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
       del.className = "journal-danger-action";
       del.innerHTML = `${iconSvg("octicon-trash", TRASH_16_PATH)}<span>${text().delete}</span>`;
       del.addEventListener("click", async () => {
-        if (del.dataset.confirm !== "1") {
-          del.dataset.confirm = "1";
-          const span = del.querySelector("span");
-          if (span) span.textContent = text().confirm;
-          window.setTimeout(() => {
-            del.dataset.confirm = "";
-            const span = del.querySelector("span");
-            if (span) span.textContent = text().delete;
-          }, 2500);
-          return;
-        }
+        const ok = await showConfirmDialog({
+          title: `${text().delete}?`,
+          body: selected.title || selected.date,
+          confirmLabel: text().delete,
+          danger: true,
+          focusReturnTarget: del,
+        });
+        if (!ok) return;
         setButtonBusy(del, true);
         try {
           await requestJournal("delete-entry", { id: selected.id });
@@ -2327,17 +2325,14 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
       del.className = "journal-danger-action";
       del.innerHTML = `${iconSvg("octicon-trash", TRASH_16_PATH)}<span>${text().delete}</span>`;
       del.addEventListener("click", async () => {
-        if (del.dataset.confirm !== "1") {
-          del.dataset.confirm = "1";
-          const span = del.querySelector("span");
-          if (span) span.textContent = text().confirm;
-          window.setTimeout(() => {
-            del.dataset.confirm = "";
-            const span = del.querySelector("span");
-            if (span) span.textContent = text().delete;
-          }, 2500);
-          return;
-        }
+        const ok = await showConfirmDialog({
+          title: `${text().delete}?`,
+          body: task.title,
+          confirmLabel: text().delete,
+          danger: true,
+          focusReturnTarget: del,
+        });
+        if (!ok) return;
         setButtonBusy(del, true);
         try {
           const result = await requestJournal("delete-task", { id: task.id });

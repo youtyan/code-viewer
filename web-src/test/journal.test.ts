@@ -233,6 +233,23 @@ describe("journal state", () => {
     expect(relink.moved).toBe(false);
     expect(relink.task.id).toBe(first.task.id);
     expect(relink.state.tasks).toHaveLength(3);
+
+    const unscoped = linkGithubIssueTask(
+      relink.state,
+      {
+        issue_number: 7,
+        title: "Unscoped issue",
+      },
+      "2026-07-02T00:40:00.000Z",
+      makeId,
+    );
+    if (unscoped.ok === false) throw new Error(unscoped.error);
+    expect(unscoped.created).toBe(true);
+    expect(unscoped.task.labels).toEqual(["github", "issue-7"]);
+    expect([first.task.id, second.task.id].includes(unscoped.task.id)).toBe(
+      false,
+    );
+    expect(unscoped.state.tasks).toHaveLength(4);
   });
 
   test("claim WIP limit only counts the same claimant", () => {

@@ -274,7 +274,8 @@ describe("journal view", () => {
     await view.enter();
     const del = q(document, ".journal-danger-action");
     click(del);
-    click(del);
+    expect(document.querySelector(".gdp-dialog")).toBeTruthy();
+    click(q(document, ".gdp-dialog-danger"));
 
     await waitFor(() => posts.some((post) => post.action === "delete-task"));
     await waitFor(

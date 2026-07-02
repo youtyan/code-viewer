@@ -682,12 +682,13 @@ export function linkGithubIssueTask(
   );
   const linkLabel = journalIssueLabel(input.issue_number);
   const repoLabel = journalIssueRepoLabel(repo);
-  const linked = state.tasks.find(
-    (task) =>
-      task.labels.includes("github") &&
-      task.labels.includes(linkLabel) &&
-      (!repoLabel || task.labels.includes(repoLabel)),
-  );
+  const linked = state.tasks.find((task) => {
+    if (!task.labels.includes("github") || !task.labels.includes(linkLabel)) {
+      return false;
+    }
+    if (repoLabel) return task.labels.includes(repoLabel);
+    return !task.labels.some((label) => label.startsWith("repo-"));
+  });
   if (!linked) {
     const hasAnchor = !!input.before_id || !!input.after_id;
     const result = addJournalTask(

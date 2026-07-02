@@ -13,6 +13,7 @@ import {
 } from "../core/journal";
 import {
   ensureServerUrl,
+  readStdin,
   requestJson,
   resolveRepoRoot,
   takeValue,
@@ -641,15 +642,6 @@ export function parseJournalArgs(argv: string[]): JournalParseResult {
         error instanceof Error ? error.message : "invalid journal arguments",
     };
   }
-}
-
-async function readStdin(): Promise<string> {
-  if (process.stdin.isTTY) return "";
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function textFromBody(

@@ -25,6 +25,15 @@ export function shellSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+export async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) return "";
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 // CLI 引数として受け取った文字列に NUL や改行が混ざっていないかの判定。
 // shell の引数注入対策ではなく、git ref / path のような single-line で扱う
 // CLI 値が複数行に膨らんで以降の引数解析が崩れるのを防ぐためのガード。
