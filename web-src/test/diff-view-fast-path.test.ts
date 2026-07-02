@@ -132,7 +132,10 @@ function createDiffViewForShellTest(text: DiffViewText = defaultDiffText) {
       `.gdp-file-shell[data-path="${CSS.escape(path)}"]`,
     getHljs: () => null,
     inferLang: () => null,
-    lineTargetStart: () => null,
+    lineTargetStart: (line) => {
+      if (!line) return null;
+      return typeof line === "number" ? line : line.start;
+    },
     fileSourceTarget: (file) => ({ path: file.path, ref: "head" }),
     applySourceRouteToShell() {
       /* noop */
@@ -572,6 +575,73 @@ describe("diff view fast path", () => {
       globalThis.IntersectionObserver = originalObserver;
       HTMLElement.prototype.getBoundingClientRect = originalRect;
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("focuses every diff row in a line range", () => {
+    setupDiffDom();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = () => undefined;
+    try {
+      const { view } = createDiffViewForShellTest();
+      const card = document.createElement("article");
+      card.innerHTML = `
+        <table class="d2h-diff-table">
+          <tbody>
+            <tr data-row="1"><td class="d2h-code-linenumber d2h-ins"><span class="line-num2">1</span></td><td>one</td></tr>
+            <tr data-row="2"><td class="d2h-code-linenumber d2h-ins"><span class="line-num2">2</span></td><td>two</td></tr>
+            <tr data-row="3"><td class="d2h-code-linenumber d2h-ins"><span class="line-num2">3</span></td><td>three</td></tr>
+            <tr data-row="4"><td class="d2h-code-linenumber d2h-ins"><span class="line-num2">4</span></td><td>four</td></tr>
+          </tbody>
+        </table>
+      `;
+
+      expect(view.focusDiffLine(card, { start: 2, end: 4 })).toBe(true);
+
+      expect(
+        card
+          .querySelector('tr[data-row="1"]')
+          ?.classList.contains("gdp-diff-line-target"),
+      ).toBe(false);
+      for (const row of ["2", "3", "4"]) {
+        expect(
+          card
+            .querySelector(`tr[data-row="${row}"]`)
+            ?.classList.contains("gdp-diff-line-target"),
+        ).toBe(true);
+      }
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  test("does not focus old-side rows as after-side diff targets", () => {
+    setupDiffDom();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = () => undefined;
+    try {
+      const { view } = createDiffViewForShellTest();
+      const card = document.createElement("article");
+      card.innerHTML = `
+        <div class="d2h-file-wrapper">
+          <div class="d2h-file-side-diff">
+            <table class="d2h-diff-table"><tbody>
+              <tr data-row="old-10"><td class="d2h-code-side-linenumber d2h-del">10</td><td>old</td></tr>
+              <tr data-row="old-11"><td class="d2h-code-side-linenumber d2h-del">11</td><td>old</td></tr>
+            </tbody></table>
+          </div>
+          <div class="d2h-file-side-diff">
+            <table class="d2h-diff-table"><tbody>
+              <tr data-row="new-10"><td class="d2h-code-side-linenumber d2h-cntx">10</td><td>current</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+      `;
+
+      expect(view.focusDiffLine(card, { start: 10, end: 11 })).toBe(false);
+      expect(card.querySelector(".gdp-diff-line-target")).toBe(null);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
   });
 });

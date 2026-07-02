@@ -3097,6 +3097,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     focusDiffLine,
     scrollDiffElementIntoView,
     expandAllFileContext,
+    loadDiffFile,
     applyViewedState,
     enqueueInitialLoads,
   } = DIFF_VIEW;
@@ -4525,6 +4526,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     focusDiffLine,
     scrollDiffElementIntoView,
     expandAllFileContext,
+    loadDiffFile,
     scrollToFile,
     renderStandaloneSource,
     removeStandaloneSource,

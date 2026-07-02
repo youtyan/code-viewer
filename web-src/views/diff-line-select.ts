@@ -23,7 +23,7 @@ function cardPath(el: Element): string {
 
 // The after-side line number for a clicked cell, or null when the cell is on
 // the old side (left pane / .line-num1) or has no line (deleted rows).
-function afterLineFromCell(cell: HTMLElement): number | null {
+export function afterLineFromCell(cell: HTMLElement): number | null {
   const sideCell = cell.closest<HTMLElement>("td.d2h-code-side-linenumber");
   if (sideCell) {
     const side = sideCell.closest<HTMLElement>(".d2h-file-side-diff");
@@ -43,6 +43,28 @@ function afterLineFromCell(cell: HTMLElement): number | null {
   return Number.isInteger(line) && line > 0 ? line : null;
 }
 
+function afterLineCellFromRow(row: HTMLTableRowElement): HTMLElement | null {
+  const cells = row.querySelectorAll<HTMLElement>(
+    "td.d2h-code-linenumber, td.d2h-code-side-linenumber",
+  );
+  for (const cell of cells) {
+    if (afterLineFromCell(cell) !== null) return cell;
+  }
+  return null;
+}
+
+export function diffRowAfterLineNumber(
+  row: HTMLTableRowElement,
+): number | null {
+  const cell = afterLineCellFromRow(row);
+  return cell ? afterLineFromCell(cell) : null;
+}
+
+export function diffRowHasAfterChange(row: HTMLTableRowElement): boolean {
+  const cell = afterLineCellFromRow(row);
+  return !!cell && cell.classList.contains("d2h-ins");
+}
+
 // Rows carrying an after-side line within the card. Unified tables and the
 // right pane of side-by-side tables both resolve through afterLineFromCell.
 function rowsWithAfterLines(
@@ -52,11 +74,7 @@ function rowsWithAfterLines(
   card
     .querySelectorAll<HTMLTableRowElement>("table.d2h-diff-table tr")
     .forEach((row) => {
-      const cell = row.querySelector<HTMLElement>(
-        "td.d2h-code-linenumber, td.d2h-code-side-linenumber",
-      );
-      if (!cell) return;
-      const line = afterLineFromCell(cell);
+      const line = diffRowAfterLineNumber(row);
       if (line !== null) out.push({ row, line });
     });
   return out;

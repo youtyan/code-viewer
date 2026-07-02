@@ -184,8 +184,8 @@ location and renders your explanation directly under the annotated lines.
 - The body is Markdown. Code spans, fenced blocks, and links work. Long
   bodies: use --body-file <path> or pipe via stdin instead of --body.
 - Give every annotation a short --title; it becomes the inline heading.
-- Annotating unchanged code is fine: the viewer auto-expands diff context
-  or falls back to the full source view.
+- Annotating unchanged code is fine: when the selected lines are not an
+  after-side diff change, the viewer falls back to the full source view.
 
 ## Sessions
 

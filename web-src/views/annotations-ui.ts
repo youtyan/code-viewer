@@ -36,6 +36,7 @@ import type {
   DiffCardElement,
   FileMeta,
 } from "../core/types";
+import { diffRowHasAfterChange } from "./diff-line-select";
 import { showConfirmDialog, showPromptDialog } from "./ui-dialog";
 
 export const ANNOTATION_SESSION_PARAM = "annotationSession";
@@ -50,6 +51,7 @@ export type AnnotationsUiDeps = {
     block: ScrollLogicalPosition,
   ): void;
   expandAllFileContext(card: DiffCardElement, file: FileMeta): Promise<void>;
+  loadDiffFile(path: string): Promise<boolean>;
   scrollToFile(path: string, line?: SourceLineTarget): void;
   renderStandaloneSource(target: {
     path: string;
@@ -332,19 +334,33 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     entry: AnnotationEntry,
   ): HTMLTableRowElement | null {
     if (!entry.line) return null;
-    const line = entry.line.end;
     const card = document.querySelector<HTMLElement>(
       deps.diffCardSelector(entry.path),
     );
     if (!card) return null;
+    const line = entry.line.end;
     const sourceRow = card.querySelector<HTMLTableRowElement>(
       `.gdp-source-table tr[data-line="${String(line)}"]`,
     );
     if (sourceRow) return sourceRow;
+    const start = entry.line.start;
+    const end = entry.line.end;
     const rows = Array.from(
       card.querySelectorAll<HTMLTableRowElement>("table.d2h-diff-table tr"),
     );
-    return rows.find((row) => deps.diffRowLineNumber(row) === line) || null;
+    const byLine = new Map<number, HTMLTableRowElement>();
+    let hasChangedAfterRow = false;
+    for (const row of rows) {
+      const rowLine = deps.diffRowLineNumber(row);
+      if (rowLine === null || rowLine < start || rowLine > end) continue;
+      if (!byLine.has(rowLine)) byLine.set(rowLine, row);
+      if (diffRowHasAfterChange(row)) hasChangedAfterRow = true;
+    }
+    if (!hasChangedAfterRow) return null;
+    for (let rowLine = start; rowLine <= end; rowLine++) {
+      if (!byLine.has(rowLine)) return null;
+    }
+    return byLine.get(end) || null;
   }
 
   // Side-by-side diffs render LEFT and RIGHT as two separate tables whose
@@ -392,10 +408,6 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     // Inline rows are scoped to the selected session: showing every entry at
     // once buries the code, so nothing is inlined until a session is active.
     const session = ANNOTATIONS.sessions.find((s) => s.id === activeSessionId);
-    if (!annotationPanel.hidden) {
-      applyDatabaseAnnotations(undefined);
-      return;
-    }
     applyDatabaseAnnotations(session);
     if (!session) return;
     for (const entry of session.entries) {
@@ -486,24 +498,22 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     applyInlineAnnotations();
   }
 
-  // When an annotation targets unchanged code outside the diff hunks, the
-  // target row does not exist yet — expand the full file context (same as
-  // the header unfold button) so the line and its inline note become visible.
-  async function expandAnnotationContext(entry: AnnotationEntry) {
-    if (!entry.line || inlineAnnotationTargetRow(entry)) return;
+  async function waitForAnnotationDiffTarget(
+    entry: AnnotationEntry,
+  ): Promise<HTMLTableRowElement | null> {
+    if (!entry.line) return null;
+    const ready = inlineAnnotationTargetRow(entry);
+    if (ready) return ready;
     const card = document.querySelector<DiffCardElement>(
       deps.diffCardSelector(entry.path),
     );
-    const file = deps.getFiles().find((f) => f.path === entry.path);
-    if (!card || !file || card.classList.contains("gdp-standalone-source"))
-      return;
-    // The card may still be lazy-loading after the scrollToFile priority load.
-    for (let i = 0; i < 50 && !card.classList.contains("loaded"); i++)
-      await new Promise<void>((resolve) => setTimeout(resolve, 100));
-    if (inlineAnnotationTargetRow(entry)) return;
-    if (card.classList.contains("gdp-context-expanded")) return;
-    await deps.expandAllFileContext(card, file);
-    deps.focusDiffLine(card, annotationLineTarget(entry));
+    if (!card || card.classList.contains("gdp-standalone-source")) return null;
+    if (
+      !card.classList.contains("loaded") &&
+      !(await deps.loadDiffFile(entry.path))
+    )
+      return null;
+    return inlineAnnotationTargetRow(entry);
   }
 
   function syncInlineAnnotationActive() {
@@ -1124,14 +1134,9 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       emptyDiffRangeKey = deps.getFiles().length ? null : rangeKey;
     }
 
-    if (deps.getFiles().some((f) => f.path === entry.path)) {
-      // Replace the route pushed for the load above instead of stacking a
-      // second history entry for the same step.
-      deps.setRoute(
-        { screen: "diff", range, path: entry.path, line },
-        needDiffLoad,
-      );
-      deps.setPageMode();
+    let showSourceView = !deps.getFiles().some((f) => f.path === entry.path);
+    let replaceSourceRoute = needDiffLoad;
+    if (!showSourceView) {
       // Reload the diff only when the rendered cards cannot be reused: a
       // full load() tears down and rebuilds every file card, which is the
       // heaviest re-render an entry click can trigger.
@@ -1139,15 +1144,35 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         ".gdp-file-shell:not(.gdp-standalone-source)",
       );
       if (!hasDiffCards) {
+        // With no diff shell in the DOM we cannot resolve line-level diff
+        // targets yet, so this is the one path that must paint the diff first.
+        deps.setRoute(
+          { screen: "diff", range, path: entry.path, line },
+          needDiffLoad,
+        );
+        deps.setPageMode();
         deps.removeStandaloneSource();
         await deps.load();
         if (stale()) return;
       }
       deps.removeStandaloneSource();
       deps.scrollToFile(entry.path, line);
-      await expandAnnotationContext(entry);
+      const target = await waitForAnnotationDiffTarget(entry);
       if (stale()) return;
-    } else {
+      if (!target) {
+        showSourceView = true;
+        replaceSourceRoute = true;
+      } else {
+        // Replace the route pushed for the load above instead of stacking a
+        // second history entry for the same step.
+        deps.setRoute(
+          { screen: "diff", range, path: entry.path, line },
+          needDiffLoad,
+        );
+        deps.setPageMode();
+      }
+    }
+    if (showSourceView) {
       // The annotated file has no diff in this range — show its source
       // directly so unchanged code can be explained too.
       const ref = annotationRefForEntry(entry);
@@ -1164,7 +1189,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         !!card.querySelector(".gdp-source-table");
       deps.setRoute(
         { screen: "file", path: entry.path, ref, view: "blob", line, range },
-        needDiffLoad,
+        replaceSourceRoute,
       );
       deps.setPageMode();
       if (reusable && card) {

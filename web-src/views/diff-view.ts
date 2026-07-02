@@ -22,6 +22,7 @@ import type {
   SidebarItem,
 } from "../core/types";
 import { suppressWhitespaceOnlyInlineHighlights } from "../core/ws-highlight";
+import { diffRowAfterLineNumber } from "./diff-line-select";
 import type { ExpandStackElement } from "./hunk-expand";
 import { enhanceMediaCard } from "./media-embed";
 
@@ -452,12 +453,7 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   function diffRowLineNumber(row: HTMLTableRowElement): number | null {
-    const newLine = row.querySelector<HTMLElement>(
-      ".line-num2, td.d2h-code-side-linenumber",
-    );
-    const raw = (newLine?.textContent || "").trim();
-    const line = Number(raw);
-    return Number.isInteger(line) && line > 0 ? line : null;
+    return diffRowAfterLineNumber(row);
   }
 
   function focusDiffLine(
@@ -466,16 +462,31 @@ export function createDiffView(deps: DiffViewDeps) {
   ) {
     const start = lineTargetStart(line);
     if (!start) return false;
+    const end = typeof line === "object" ? line.end : start;
     const rows = Array.from(
       card.querySelectorAll<HTMLTableRowElement>("table.d2h-diff-table tr"),
     );
-    const row = rows.find(
-      (candidate) => diffRowLineNumber(candidate) === start,
+    const targetRows = rows.filter((candidate) => {
+      const rowLine = diffRowLineNumber(candidate);
+      return rowLine !== null && rowLine >= start && rowLine <= end;
+    });
+    const targetLines = new Set(
+      targetRows
+        .map((candidate) => diffRowLineNumber(candidate))
+        .filter((value): value is number => value !== null),
     );
-    if (!row) return false;
+    // Ranges are all-or-nothing here: partial after-side matches can point a
+    // stale annotation URL at unrelated current lines after deletions.
+    for (let lineNo = start; lineNo <= end; lineNo++) {
+      if (!targetLines.has(lineNo)) return false;
+    }
+    const firstRow = targetRows[0];
+    if (!firstRow) return false;
     clearDiffLineFocus();
-    row.classList.add("gdp-diff-line-target");
-    scrollDiffElementIntoView(row, "center");
+    targetRows.forEach((row) => {
+      row.classList.add("gdp-diff-line-target");
+    });
+    scrollDiffElementIntoView(firstRow, "center");
     return true;
   }
 
@@ -1126,6 +1137,7 @@ export function createDiffView(deps: DiffViewDeps) {
     file: FileMeta,
     card: DiffCardElement,
     urlOverride?: string,
+    options?: { immediate?: boolean },
   ): Promise<void> {
     card.classList.remove("pending");
     card.classList.add("loading");
@@ -1162,7 +1174,7 @@ export function createDiffView(deps: DiffViewDeps) {
           retryStale();
           return;
         }
-        await nextIdle();
+        if (!options?.immediate) await nextIdle();
         if (String(myReq) !== card.dataset.reqId) return;
         renderFile(file, data, card);
       })
@@ -1183,6 +1195,18 @@ export function createDiffView(deps: DiffViewDeps) {
             enqueueLoad(file, card, 1);
           });
       });
+  }
+
+  async function loadDiffFile(path: string): Promise<boolean> {
+    const card = document.querySelector<DiffCardElement>(
+      diffCardSelector(path),
+    );
+    if (!card || card.classList.contains("gdp-standalone-source")) return false;
+    if (card.classList.contains("loaded")) return true;
+    const file = STATE.files.find((x) => x.path === path);
+    if (!file) return false;
+    await loadFile(file, card, undefined, { immediate: true });
+    return card.classList.contains("loaded");
   }
 
   function mountDiff(
@@ -1831,6 +1855,7 @@ export function createDiffView(deps: DiffViewDeps) {
     enqueueInitialLoads,
     enqueueLoad,
     loadFile,
+    loadDiffFile,
     createFileBreadcrumb,
     highlightInsertedSpans,
     setFileCollapsed,
