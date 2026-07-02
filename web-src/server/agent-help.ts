@@ -1,6 +1,6 @@
 // Top-level `code-viewer agent-help` aggregator. Lets an AI coding agent
 // discover every AI-facing subcommand guide (status / query / annotate /
-// search / file / skill / doctor) by running ONE command, instead of
+// journal / search / file / skill / doctor) by running ONE command, instead of
 // guessing which subcommand to agent-help into first.
 //
 // Implementation rule: we MUST NOT copy any text from the subcommand guides.

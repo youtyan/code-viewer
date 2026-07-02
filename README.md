@@ -513,8 +513,8 @@ stdout and adds `text truncated` to stderr when the server flagged
 truncation. `--json` always emits the full server response envelope.
 
 AI agents who don't yet know which subcommand they need can run
-`code-viewer agent-help` once. It prints a short index of the seven
-AI-facing entry points (`status`, `query`, `annotate`, `search`,
+`code-viewer agent-help` once. It prints a short index of the eight
+AI-facing entry points (`status`, `query`, `annotate`, `journal`, `search`,
 `file`, `skill`, `doctor`) with the exact `code-viewer <name>
 agent-help` command for each full guide. The index runs without any
 preflight, so it works even before SQLite or a running server is set
