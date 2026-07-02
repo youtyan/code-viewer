@@ -53,7 +53,6 @@ export type JournalViewText = {
   addEntry: string;
   saveEntry: string;
   delete: string;
-  confirm: string;
   deleteEntryFailed: string;
   saveEntryFailed: string;
   moveTaskFailed: string;
@@ -1594,14 +1593,15 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
 
   function linkedTaskForIssue(issueNumber: number): JournalTask | null {
     const label = issueLabel(issueNumber);
-    const repoLabel = journalIssueRepoLabel(githubRepoFilter);
+    const repoLabel = journalIssueRepoLabel(githubRepoFilter || undefined);
     return (
-      data?.tasks.tasks.find(
-        (task) =>
-          task.labels.includes("github") &&
-          task.labels.includes(label) &&
-          (!repoLabel || task.labels.includes(repoLabel)),
-      ) || null
+      data?.tasks.tasks.find((task) => {
+        if (!task.labels.includes("github") || !task.labels.includes(label)) {
+          return false;
+        }
+        if (repoLabel) return task.labels.includes(repoLabel);
+        return !task.labels.some((taskLabel) => taskLabel.startsWith("repo-"));
+      }) || null
     );
   }
 

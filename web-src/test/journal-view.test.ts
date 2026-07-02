@@ -46,7 +46,6 @@ const TEXT: JournalViewText = {
   addEntry: "ログを追加",
   saveEntry: "ログを保存",
   delete: "削除",
-  confirm: "確認",
   deleteEntryFailed: "ログの削除に失敗しました",
   saveEntryFailed: "ログの保存に失敗しました",
   moveTaskFailed: "タスクの移動に失敗しました",
@@ -246,6 +245,41 @@ describe("journal view", () => {
         2,
     );
     expect(posts[1]?.state).toBe("closed");
+  });
+
+  test("shows unscoped linked GitHub issues without a repo filter", async () => {
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (!init?.method || init.method === "GET")
+          return json(journalData([task({ labels: ["github", "issue-1"] })]));
+        return json({
+          issues: [
+            {
+              number: 1,
+              title: "Linked issue",
+              state: "open",
+              labels: [],
+            },
+          ],
+        });
+      }) as typeof fetch,
+    });
+
+    const view = createView({ screen: "journal", tab: "tasks", range: RANGE });
+    await view.enter();
+    click(q(document, ".journal-github-toggle"));
+    await waitFor(
+      () =>
+        document
+          .querySelector(".journal-github-issue-card")
+          ?.classList.contains("linked") === true,
+    );
+
+    expect(
+      q(document, ".journal-github-issue-action").textContent?.trim(),
+    ).toBe(TEXT.githubOpenTask);
   });
 
   test("keeps the selected task when delete returns removed false", async () => {
