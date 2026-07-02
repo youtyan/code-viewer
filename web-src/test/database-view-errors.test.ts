@@ -610,7 +610,7 @@ describe("database view SQL error rendering", () => {
     expect(refresh).toBeTruthy();
     expect(refresh.attributes["aria-label"]).toBe("Refresh datastores");
     expect(refresh.attributes["aria-busy"]).toBe("false");
-    expect(label.textContent).toBe("Refresh");
+    expect(label.textContent).toBe("");
     expect(result.hidden).toBe(true);
 
     const refreshClick = refresh.click();
@@ -618,7 +618,7 @@ describe("database view SQL error rendering", () => {
     expect(refresh.disabled).toBe(true);
     expect(refresh.classList.contains("spinning")).toBe(true);
     expect(refresh.attributes["aria-busy"]).toBe("true");
-    expect(label.textContent).toBe("Refreshing...");
+    expect(label.textContent).toBe("");
 
     resolveRefreshFiles?.();
     await refreshClick;
@@ -628,10 +628,10 @@ describe("database view SQL error rendering", () => {
     expect(refresh.disabled).toBe(false);
     expect(refresh.classList.contains("spinning")).toBe(false);
     expect(refresh.attributes["aria-busy"]).toBe("false");
-    expect(label.textContent).toBe("Refresh");
-    expect(result.hidden).toBe(false);
-    expect(result.textContent).toBe("+1 datastore");
-    expect(result.classList.contains("changed")).toBe(true);
+    expect(label.textContent).toBe("");
+    expect(result.hidden).toBe(true);
+    expect(result.textContent).toBe("");
+    expect(result.classList.contains("changed")).toBe(false);
     expect(document.querySelector(".db-table-name")?.textContent).toBe("users");
     await leaveView(view);
   });
@@ -828,14 +828,14 @@ describe("database view SQL error rendering", () => {
     expect(refresh).toBeTruthy();
     expect(refresh.attributes["aria-label"]).toBe("Refresh this table schema");
     expect(refresh.attributes["aria-busy"]).toBe("false");
-    expect(label.textContent).toBe("Refresh schema");
+    expect(label.textContent).toBe("");
 
     refresh.click();
     await waitUntil(() => schemaFetches === 2);
     expect(refresh.disabled).toBe(true);
     expect(refresh.classList.contains("spinning")).toBe(true);
     expect(refresh.attributes["aria-busy"]).toBe("true");
-    expect(label.textContent).toBe("Refreshing...");
+    expect(label.textContent).toBe("");
 
     resolveRefreshSchema?.();
     await waitUntil(() => {
@@ -855,7 +855,7 @@ describe("database view SQL error rendering", () => {
     expect(schemaFetches).toBe(2);
     expect(doneRefresh.disabled).toBe(false);
     expect(doneRefresh.classList.contains("spinning")).toBe(false);
-    expect(doneLabel.textContent).toBe("Refresh schema");
+    expect(doneLabel.textContent).toBe("");
     expect(schemaText || "").toMatch(/name/);
     expect(schemaText || "").toMatch(/users_name_idx/);
     await leaveView(view);

@@ -84,6 +84,11 @@ import {
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
 import {
+  createJournalView,
+  type JournalView,
+  type JournalViewText,
+} from "./views/journal-view";
+import {
   createLineRefPill,
   langFromPath,
   readRenderedLines,
@@ -1117,7 +1122,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   const UI_TEXT: Record<
     ViewerLanguage,
     {
-      nav: Record<"repo" | "diff" | "history" | "database" | "help", string>;
+      nav: Record<
+        "repo" | "diff" | "history" | "journal" | "database" | "help",
+        string
+      >;
       global: {
         annotations: string;
         queryHistory: string;
@@ -1252,6 +1260,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterTitle: string;
         refreshTitle: string;
       };
+      journal: JournalViewText;
       quickHelp: {
         buttonTitle: string;
         panelTitle: string;
@@ -1308,6 +1317,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         repo: "Repository",
         diff: "Diff Viewer",
         history: "History",
+        journal: "Work Log",
         database: "Datastores",
         help: "Help",
       },
@@ -1456,6 +1466,101 @@ window.GdpExpandLogic = GdpExpandLogic;
           "Filter commits by message, SHA, author:name, or path:file.",
         refreshTitle: "Refresh commit history",
       },
+      journal: {
+        locale: "en",
+        ariaLabel: "Work log and tasks",
+        title: "Work Log",
+        tabs: {
+          journal: "Log",
+          tasks: "Tasks",
+        },
+        refresh: "Refresh work log",
+        loading: "loading...",
+        loadFailed: "failed to load work log",
+        statusLabels: {
+          draft: "Draft",
+          todo: "Todo",
+          doing: "Doing",
+          blocked: "Blocked",
+          done: "Done",
+        },
+        priorityLabels: {
+          p0: "P0",
+          p1: "P1",
+          p2: "P2",
+          p3: "P3",
+        },
+        previousMonth: "Previous month",
+        nextMonth: "Next month",
+        weekDays: ["S", "M", "T", "W", "T", "F", "S"],
+        noEntries: "No logs",
+        noRelatedTasks: "No related tasks",
+        noBody: "No body",
+        relatedTasks: "Tasks",
+        new: "New",
+        titlePlaceholder: "Title",
+        labelPlaceholder: "labels",
+        entryBodyPlaceholder: "What did you work on today?",
+        addEntry: "Add log",
+        saveEntry: "Save log",
+        delete: "Delete",
+        confirm: "Confirm",
+        deleteEntryFailed: "failed to delete log",
+        saveEntryFailed: "failed to save log",
+        moveTaskFailed: "failed to move task",
+        aiQueue: "AI queue",
+        empty: "Empty",
+        duePrefix: "due",
+        startDate: "Start date",
+        endDate: "End date",
+        claimedBy: (name) => `claimed by ${name}`,
+        taskHeading: "Task",
+        newTaskHeading: "New task",
+        taskBodyPlaceholder: "Task details, acceptance checklist, notes",
+        addTask: "Add task",
+        saveTask: "Save task",
+        saveTaskFailed: "failed to save task",
+        claim: "Claim",
+        claimTaskFailed: "failed to claim task",
+        done: "Done",
+        doneTaskFailed: "failed to complete task",
+        deleteTaskFailed: "failed to delete task",
+        labelFilterPlaceholder: "label",
+        allLabels: "All",
+        labelFilters: "Label filters",
+        githubIssues: "GitHub Issues",
+        githubRepoPlaceholder: "repo (optional)",
+        githubLabelPlaceholder: "GitHub labels, comma separated",
+        githubSearchPlaceholder: "search issues",
+        githubStateLabels: {
+          open: "Open",
+          closed: "Closed",
+          all: "All",
+        },
+        githubLoad: "Load issues",
+        githubLoadMore: "Load more",
+        githubLoading: "loading issues...",
+        githubLoadFailed: "failed to load GitHub issues",
+        githubShowing: (count, limit) => `Showing ${count} of ${limit}.`,
+        githubRateLimited: (seconds) =>
+          `GitHub rate limit hit. Try again in ${seconds}s.`,
+        githubNotLoaded: "GitHub issues are not loaded",
+        githubNoIssues: "No GitHub issues",
+        githubClose: "Close GitHub issues",
+        githubLinked: "linked",
+        githubAddToBoard: "Add to board",
+        githubOpenTask: "Open task",
+        githubDragHint: "Add or drag an issue to link it to a local task.",
+        githubLinkTaskFailed: "failed to link GitHub issue",
+        githubMemoLabel: "Memo:",
+        resizeTaskPanel: "Resize task panel",
+        dragTask: "Drag task",
+        editorModes: {
+          write: "write",
+          preview: "preview",
+          split: "split",
+        },
+      },
       quickHelp: {
         buttonTitle: "quick help (shortcuts)",
         panelTitle: "Quick Help",
@@ -1519,6 +1624,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         repo: "リポジトリ",
         diff: "Diff ビューア",
         history: "履歴",
+        journal: "ワークログ",
         database: "データストア",
         help: "ヘルプ",
       },
@@ -1668,6 +1774,102 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterTitle:
           "メッセージ、SHA、author:name、path:file でコミットを絞り込みます。",
         refreshTitle: "コミット履歴を更新",
+      },
+      journal: {
+        locale: "ja",
+        ariaLabel: "ワークログとタスク",
+        title: "ワークログ",
+        tabs: {
+          journal: "ログ",
+          tasks: "タスク",
+        },
+        refresh: "ワークログを更新",
+        loading: "読み込み中...",
+        loadFailed: "ワークログの読み込みに失敗しました",
+        statusLabels: {
+          draft: "下書き",
+          todo: "未着手",
+          doing: "進行中",
+          blocked: "ブロック",
+          done: "完了",
+        },
+        priorityLabels: {
+          p0: "P0",
+          p1: "P1",
+          p2: "P2",
+          p3: "P3",
+        },
+        previousMonth: "前の月",
+        nextMonth: "次の月",
+        weekDays: ["日", "月", "火", "水", "木", "金", "土"],
+        noEntries: "ログはありません",
+        noRelatedTasks: "関連タスクはありません",
+        noBody: "本文はありません",
+        relatedTasks: "タスク",
+        new: "新規",
+        titlePlaceholder: "タイトル",
+        labelPlaceholder: "ラベル",
+        entryBodyPlaceholder: "今日の作業を記録",
+        addEntry: "ログを追加",
+        saveEntry: "ログを保存",
+        delete: "削除",
+        confirm: "確認",
+        deleteEntryFailed: "ログの削除に失敗しました",
+        saveEntryFailed: "ログの保存に失敗しました",
+        moveTaskFailed: "タスクの移動に失敗しました",
+        aiQueue: "AIキュー",
+        empty: "空",
+        duePrefix: "期限",
+        startDate: "開始日",
+        endDate: "終了日",
+        claimedBy: (name) => `${name} が確保中`,
+        taskHeading: "タスク",
+        newTaskHeading: "新規タスク",
+        taskBodyPlaceholder: "詳細、受け入れ条件、メモ",
+        addTask: "タスクを追加",
+        saveTask: "タスクを保存",
+        saveTaskFailed: "タスクの保存に失敗しました",
+        claim: "確保",
+        claimTaskFailed: "タスクの確保に失敗しました",
+        done: "完了",
+        doneTaskFailed: "タスクの完了に失敗しました",
+        deleteTaskFailed: "タスクの削除に失敗しました",
+        labelFilterPlaceholder: "ラベル",
+        allLabels: "すべて",
+        labelFilters: "ラベルフィルタ",
+        githubIssues: "GitHub Issue",
+        githubRepoPlaceholder: "リポジトリ（任意）",
+        githubLabelPlaceholder: "GitHubラベル（カンマ区切り）",
+        githubSearchPlaceholder: "Issue検索",
+        githubStateLabels: {
+          open: "未解決",
+          closed: "解決済み",
+          all: "すべて",
+        },
+        githubLoad: "Issueを表示",
+        githubLoadMore: "さらに読む",
+        githubLoading: "Issueを読み込み中...",
+        githubLoadFailed: "GitHub Issueの読み込みに失敗しました",
+        githubShowing: (count, limit) => `${limit}件中${count}件を表示中。`,
+        githubRateLimited: (seconds) =>
+          `GitHubの制限に達しました。${seconds}秒後に再試行してください。`,
+        githubNotLoaded: "GitHub Issueは未読み込みです",
+        githubNoIssues: "GitHub Issueは0件です",
+        githubClose: "GitHub Issueを閉じる",
+        githubLinked: "紐づき済み",
+        githubAddToBoard: "看板へ追加",
+        githubOpenTask: "タスクを開く",
+        githubDragHint:
+          "Issueを追加またはドラッグすると、自分用タスクとして紐づけます。",
+        githubLinkTaskFailed: "GitHub Issueの紐づけに失敗しました",
+        githubMemoLabel: "メモ:",
+        resizeTaskPanel: "タスクパネル幅を変更",
+        dragTask: "タスクをドラッグ",
+        editorModes: {
+          write: "編集",
+          preview: "プレビュー",
+          split: "分割",
+        },
       },
       quickHelp: {
         buttonTitle: "クイックヘルプ(ショートカット)",
@@ -1919,6 +2121,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         button.setAttribute("aria-label", text.history.refreshTitle);
       });
     relocalizeHistory?.();
+    relocalizeJournal?.();
 
     setElementText(".scope-settings-head strong", text.settings.title);
     const settingsClose = document.querySelector<HTMLButtonElement>(
@@ -2032,6 +2235,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // createHistoryView / createDatabaseView 後に登録されるビュー再ローカライズ関数。
   // localizeViewerChrome より後 (init / 言語切替) に呼ばれるため遅延参照する。
   let relocalizeHistory: (() => void) | null = null;
+  let relocalizeJournal: (() => void) | null = null;
   let relocalizeDatabase: (() => void) | null = null;
 
   // createQuickHelp 後に代入される (同じ遅延参照パターン)。
@@ -2629,6 +2833,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // file once its dependencies exist; the few call sites that can run before
   // that (setRoute, lazy diff renders) go through this late-bound handle.
   let ANNOTATIONS_UI: AnnotationsUi | null = null;
+  let JOURNAL_VIEW: JournalView | null = null;
 
   function applyInlineAnnotations() {
     ANNOTATIONS_UI?.applyInlineAnnotations();
@@ -2744,6 +2949,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       preHistoryRange = null;
       removeFileHistoryShell();
     }
+    if (previousRoute.screen === "journal" && nextRoute.screen !== "journal") {
+      JOURNAL_VIEW?.suspend();
+    }
     STATE.route = nextRoute;
     STATE.from = nextRoute.range.from;
     STATE.to = nextRoute.range.to;
@@ -2772,6 +2980,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     if (shouldDispatchFileRouteAfterSetRoute(previousRoute, nextRoute)) {
       dispatchFileRoute(nextRoute);
+    }
+    if (nextRoute.screen === "journal") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      removeStandaloneSource();
+      void JOURNAL_VIEW?.enter();
     }
   }
 
@@ -2818,6 +3032,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     document.body.classList.toggle(
       "gdp-database-page",
       STATE.route.screen === "database",
+    );
+    document.body.classList.toggle(
+      "gdp-journal-page",
+      STATE.route.screen === "journal",
     );
     const repoTargetWrap =
       document.querySelector<HTMLElement>("#repo-target-wrap");
@@ -2894,6 +3112,12 @@ window.GdpExpandLogic = GdpExpandLogic;
           link.href = buildRoute({
             screen: "history",
             ref: "HEAD",
+            range: currentRange(),
+          });
+        }
+        if (link.dataset.route === "journal") {
+          link.href = buildRoute({
+            screen: "journal",
             range: currentRange(),
           });
         }
@@ -3944,6 +4168,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function reloadDiffFromUi(trigger?: HTMLElement | null): void {
     const topbarButton = $("#reload-prom");
     topbarButton.classList.add("spinning");
+    topbarButton.setAttribute("aria-busy", "true");
     if (trigger && trigger !== topbarButton) {
       trigger.classList.add("spinning");
       trigger.setAttribute("aria-busy", "true");
@@ -3951,6 +4176,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     load().finally(() => {
       setTimeout(() => {
         topbarButton.classList.remove("spinning");
+        topbarButton.setAttribute("aria-busy", "false");
         if (trigger && trigger !== topbarButton) {
           trigger.classList.remove("spinning");
           trigger.setAttribute("aria-busy", "false");
@@ -3975,6 +4201,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         STATE.route.table,
         STATE.route.tab,
       ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
+      setStatus("live");
+      return Promise.resolve(null);
+    }
+    if (STATE.route.screen === "journal") {
+      void JOURNAL_VIEW?.enter();
       setStatus("live");
       return Promise.resolve(null);
     }
@@ -4048,6 +4279,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         STATE.route.table,
         STATE.route.tab,
       ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
+    } else if (STATE.route.screen === "journal") {
+      setStatus("live");
+      void JOURNAL_VIEW?.enter();
     } else load();
     // Deep links land here without going through setRoute; reflect a line=
     // selection in the copy pill on first paint too.
@@ -4239,6 +4473,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     closeDoctorSheet();
   });
 
+  JOURNAL_VIEW = createJournalView({
+    getRoute: () => STATE.route,
+    setRoute,
+    currentRange,
+    trackLoad,
+    getText: () => uiText().journal,
+    setPageMode,
+    syncHeaderMenu,
+    setStatus,
+  });
+  relocalizeJournal = () => JOURNAL_VIEW?.localize();
+
   const DATABASE_VIEW = createDatabaseView({
     setRoute,
     setPageMode,
@@ -4313,6 +4559,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     nextRoute = normalizeInternalFileRoute(nextRoute);
     if (previousRoute.screen === "database" && nextRoute.screen !== "database")
       DATABASE_VIEW.suspend();
+    if (previousRoute.screen === "journal" && nextRoute.screen !== "journal")
+      JOURNAL_VIEW?.suspend();
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
       HISTORY_VIEW.leaveHistory();
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
@@ -4383,6 +4631,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         STATE.route.table,
         STATE.route.tab,
       ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
+      setStatus("live");
+      return;
+    }
+    if (STATE.route.screen === "journal") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      removeStandaloneSource();
+      void JOURNAL_VIEW?.enter();
       setStatus("live");
       return;
     }
@@ -4902,6 +5158,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     es.addEventListener("reload", () => location.reload());
     es.addEventListener("annotation", (event) => {
       ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
+    });
+    es.addEventListener("journal", () => {
+      JOURNAL_VIEW?.handleSse();
     });
     es.addEventListener("db-query", (event) => {
       DATABASE_VIEW.handleSse("db-query", (event as MessageEvent).data);

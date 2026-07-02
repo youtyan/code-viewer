@@ -1168,9 +1168,10 @@ export function createSidebar(deps: SidebarDeps) {
     } else {
       renderFlat(files, ul, onFileClick);
     }
-    $("#totals").textContent = files.length
-      ? `${files.length} file${files.length === 1 ? "" : "s"}`
-      : "";
+    $("#totals").textContent =
+      !repoSidebar && files.length
+        ? `${files.length} file${files.length === 1 ? "" : "s"}`
+        : "";
     // Update view-toggle visual
     const effectiveView = treeMode ? "tree" : STATE.sbView;
     $$(".sb-view-seg button").forEach((b) => {

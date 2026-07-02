@@ -992,11 +992,11 @@ describe("history view lifecycle", () => {
     expect(refreshButton.attributes["aria-label"]).toBe("コミット履歴を更新");
     expect(
       refreshButton.querySelector(".history-refresh-label")?.textContent,
-    ).toBe("更新");
-    await waitFor(() => status.textContent === "新しいコミットはありません");
-    expect(status.hidden).toBe(false);
-    expect(refreshResult.hidden).toBe(false);
-    expect(refreshResult.textContent).toBe("新しいコミットはありません");
+    ).toBe("");
+    expect(status.hidden).toBe(true);
+    expect(status.textContent).toBe("");
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
     expect(refreshResult.classList.contains("changed")).toBe(false);
     expect(
       list.querySelectorAll(".history-item").map((row) => row.dataset.sha),
@@ -1074,11 +1074,17 @@ describe("history view lifecycle", () => {
 
     refreshButton.click();
 
-    await waitFor(() => status.textContent === "更新: bbb2222 が最新です");
+    await waitFor(() =>
+      list
+        .querySelectorAll(".history-item")
+        .some((row) => row.dataset.sha === newerCommit.sha),
+    );
     expect(fetchCount).toBe(2);
-    expect(refreshResult.hidden).toBe(false);
-    expect(refreshResult.textContent).toBe("更新: bbb2222 が最新です");
-    expect(refreshResult.classList.contains("changed")).toBe(true);
+    expect(status.hidden).toBe(true);
+    expect(status.textContent).toBe("");
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    expect(refreshResult.classList.contains("changed")).toBe(false);
     const rows = list.querySelectorAll(".history-item");
     expect(rows.map((row) => row.dataset.sha)).toEqual([
       HISTORY_WORKTREE_COMMIT,
@@ -1276,7 +1282,7 @@ describe("history view lifecycle", () => {
     expect(refreshButton.attributes["aria-label"]).toBe("コミット履歴を更新");
     expect(
       refreshButton.querySelector(".history-refresh-label")?.textContent,
-    ).toBe("更新");
+    ).toBe("");
     expect(status.hidden).toBe(true);
     expect(refreshResult.hidden).toBe(true);
     expect(refreshResult.textContent).toBe("");
@@ -1289,12 +1295,12 @@ describe("history view lifecycle", () => {
     );
     expect(
       refreshButton.querySelector(".history-refresh-label")?.textContent,
-    ).toBe("更新あり");
-    expect(status.hidden).toBe(false);
-    expect(status.textContent).toBe("新しい履歴がある可能性があります");
-    expect(refreshResult.hidden).toBe(false);
-    expect(refreshResult.textContent).toBe("新しい履歴がある可能性があります");
-    expect(refreshResult.classList.contains("pending")).toBe(true);
+    ).toBe("");
+    expect(status.hidden).toBe(true);
+    expect(status.textContent).toBe("");
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    expect(refreshResult.classList.contains("pending")).toBe(false);
     expect(refreshResult.classList.contains("changed")).toBe(false);
 
     refreshButton.click();
@@ -1304,15 +1310,15 @@ describe("history view lifecycle", () => {
     expect(refreshButton.attributes["aria-label"]).toBe("コミット履歴を更新");
     expect(
       refreshButton.querySelector(".history-refresh-label")?.textContent,
-    ).toBe("更新");
-    expect(status.hidden).toBe(false);
-    expect(status.textContent).toBe("新しいコミットはありません");
-    expect(refreshResult.hidden).toBe(false);
-    expect(refreshResult.textContent).toBe("新しいコミットはありません");
+    ).toBe("");
+    expect(status.hidden).toBe(true);
+    expect(status.textContent).toBe("");
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
     expect(refreshResult.classList.contains("pending")).toBe(false);
   });
 
-  test("notePossibleUpdate status takes priority over an empty commit list", async () => {
+  test("notePossibleUpdate hides empty state text while the refresh dot is active", async () => {
     const { panel, list, banner, status, sentinel, refreshButton } =
       installHistoryViewDom();
     globalThis.fetch = (() =>
@@ -1352,8 +1358,8 @@ describe("history view lifecycle", () => {
 
     view.notePossibleUpdate();
     expect(refreshButton.classList.contains("has-update")).toBe(true);
-    expect(status.hidden).toBe(false);
-    expect(status.textContent).toBe("新しい履歴がある可能性があります");
+    expect(status.hidden).toBe(true);
+    expect(status.textContent).toBe("");
   });
 
   test("arrow keys select commits in file history mode without leaving the /file route", async () => {

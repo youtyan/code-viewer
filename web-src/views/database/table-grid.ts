@@ -186,7 +186,7 @@ export function createTableGrid(
   refreshBtn.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
   const refreshLabel = document.createElement("span");
   refreshLabel.className = "db-grid-refresh-label";
-  refreshLabel.textContent = text().grid.refreshLabel;
+  refreshLabel.textContent = "";
   refreshBtn.appendChild(refreshLabel);
   const refreshResult = document.createElement("span");
   refreshResult.className = "db-refresh-result db-grid-refresh-result";
@@ -320,7 +320,8 @@ export function createTableGrid(
   filteredEmptyActions.hidden = true;
   const filteredEmptyReloadAction = document.createElement("button");
   filteredEmptyReloadAction.type = "button";
-  filteredEmptyReloadAction.className = "db-btn db-btn-primary db-btn-sm";
+  filteredEmptyReloadAction.className = "db-btn db-btn-icon db-grid-refresh";
+  filteredEmptyReloadAction.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
   filteredEmptyReloadAction.hidden = true;
   filteredEmptyReloadAction.disabled = true;
   const filteredEmptyAction = document.createElement("button");
@@ -470,7 +471,6 @@ export function createTableGrid(
   let rafId = 0;
   let statusEl: HTMLElement | null = null;
   let isRefreshing = false;
-  let refreshResultState: { delta: number; totalRows: number } | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedRowIndex = -1;
   // 詳細フッタ or 関連パネルに「いまどのセルの値を出してるか」を覚えておく。
@@ -673,11 +673,7 @@ export function createTableGrid(
   function syncRefreshButton(): void {
     const count = activeFilterCount();
     const t = text().grid;
-    refreshLabel.textContent = isRefreshing
-      ? t.refreshingLabel
-      : count > 0
-        ? t.refreshFilteredLabel
-        : t.refreshLabel;
+    refreshLabel.textContent = "";
     const action =
       count > 0 ? t.refreshActionWithFilters(count) : t.refreshAction;
     refreshBtn.classList.toggle("has-filters", count > 0);
@@ -687,34 +683,12 @@ export function createTableGrid(
   }
 
   function syncRefreshResult(): void {
-    const result = refreshResultState;
-    refreshResult.hidden = !result;
-    refreshResult.classList.toggle("changed", !!result && result.delta !== 0);
-    if (!result) {
-      refreshResult.textContent = "";
-      return;
-    }
-    const t = text().grid;
-    const total = result.totalRows.toLocaleString();
-    refreshResult.textContent =
-      result.delta === 0
-        ? t.refreshResultUnchanged(total)
-        : t.refreshResultChanged(result.delta, total);
+    refreshResult.hidden = true;
+    refreshResult.textContent = "";
+    refreshResult.classList.toggle("changed", false);
   }
 
   function clearRefreshResult(): void {
-    refreshResultState = null;
-    syncRefreshResult();
-  }
-
-  function setRefreshResult(
-    previousTotalRows: number,
-    nextTotalRows: number,
-  ): void {
-    refreshResultState = {
-      delta: nextTotalRows - previousTotalRows,
-      totalRows: nextTotalRows,
-    };
     syncRefreshResult();
   }
 
@@ -742,9 +716,9 @@ export function createTableGrid(
     const reloadAction = t.refreshActionWithFilters(count);
     filteredEmptyTitle.textContent = t.filteredEmptyTitle(count);
     filteredEmptyHint.textContent = t.filteredEmptyHint;
-    filteredEmptyReloadAction.textContent = isRefreshing
-      ? t.refreshingLabel
-      : t.refreshFilteredLabel;
+    filteredEmptyReloadAction.classList.toggle("spinning", isRefreshing);
+    filteredEmptyReloadAction.textContent = "";
+    filteredEmptyReloadAction.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
     filteredEmptyReloadAction.title = reloadAction;
     filteredEmptyReloadAction.setAttribute("aria-label", reloadAction);
     filteredEmptyReloadAction.setAttribute(
@@ -808,7 +782,6 @@ export function createTableGrid(
   async function refreshCurrentTable(): Promise<void> {
     if (!currentTable || refreshBtn.disabled) return;
     const refreshTable = currentTable;
-    const previousTotalRows = totalRows;
     const refreshFilterKey = JSON.stringify(collectFilters());
     const scrollTop = viewport.scrollTop;
     const pageStart =
@@ -845,7 +818,7 @@ export function createTableGrid(
           loadGeneration === refreshGeneration &&
           JSON.stringify(collectFilters()) === refreshFilterKey
         ) {
-          setRefreshResult(previousTotalRows, totalRows);
+          syncRefreshResult();
           callbacks.onRefreshComplete?.({
             table: refreshTable,
             totalRows,

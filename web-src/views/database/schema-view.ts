@@ -68,7 +68,7 @@ export function createSchemaView(
     refreshBtn.setAttribute("aria-busy", refreshBusy ? "true" : "false");
     refreshBtn.disabled = refreshBusy;
     refreshBtn.classList.toggle("spinning", refreshBusy);
-    refreshLabel.textContent = refreshBusy ? t.refreshingLabel : t.refreshLabel;
+    refreshLabel.textContent = "";
   }
 
   function setRefreshBusy(busy: boolean): void {
