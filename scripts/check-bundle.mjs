@@ -19,6 +19,11 @@ const bundles = [
     format: "esm",
     outfile: "shiki.js",
   },
+  {
+    entry: "web-src/highlight-entry.ts",
+    format: "iife",
+    outfile: "highlight.min.js",
+  },
 ];
 
 const dirs = [
