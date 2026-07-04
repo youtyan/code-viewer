@@ -94,6 +94,22 @@ function safePrepare(db: SqliteDb, sql: string): SqliteStmt {
   return stmt;
 }
 
+// 他プロセス (アプリ自体の Rails/Node サーバーなど) が同じファイルに書き込み中
+// だと、readonly 接続でも SQLite はロック解放待ちで同期的にブロックする。
+// bun:sqlite / better-sqlite3 とも既定の busy_timeout は 0 (即座に SQLITE_BUSY
+// を返す) ではなくドライバ依存で無期限に近い待ちになり得るため、明示的に短い
+// 上限を設定する。Bun はシングルスレッドなので、ここが長く詰まると DB と無関
+// 係な他リクエストまで巻き込んで全体が固まる。
+const SQLITE_BUSY_TIMEOUT_MS = 2000;
+
+function applyBusyTimeout(db: SqliteDb): void {
+  try {
+    db.prepare(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`).get();
+  } catch {
+    // PRAGMA is best-effort; a driver that rejects it still opens the DB.
+  }
+}
+
 function queryRowsToResult(
   rows: Record<string, DbValue>[],
   columns: DbColumn[],
@@ -575,12 +591,17 @@ export const sqliteAdapterFactory: DatabaseAdapterFactory = {
   async open(path: string): Promise<DatabaseAdapter> {
     const DbClass = await loadSqliteClass<SqliteDb>();
     const db = new DbClass(path, { readonly: true, create: false });
+    applyBusyTimeout(db);
     // 書き込み用接続は実際に書き込みが要求されたときだけ遅延生成する。
     // 既定 (read-write) で開く: ここに到達した時点で readonly 接続が同じファイル
     // を開けているので必ず存在しており、create が走ることはない。driver 差
     // (bun:sqlite と better-sqlite3 で write+no-create のオプション表現が異なる)
     // を避けるためオプションは渡さない。
-    const openWriteDb = () => new DbClass(path);
+    const openWriteDb = () => {
+      const wdb = new DbClass(path);
+      applyBusyTimeout(wdb);
+      return wdb;
+    };
     return createSqliteAdapter(db, openWriteDb);
   },
 };

@@ -161,18 +161,27 @@ export const DEFAULT_WORKTREE_OMIT_DIR_NAMES = [
   "obj",
 ];
 
+// spawnSync はプロセス全体をブロックする (Bun はシングルスレッド)。lock 競合
+// や巨大リポジトリでの想定外の停止が起きても、DB 等の無関係なリクエストまで
+// 巻き込んで無期限に固まらないよう上限を設ける。
+const GIT_COMMAND_TIMEOUT_MS = 20_000;
+
 function run(
   args: string[],
   cwd: string,
 ): { code: number; stdout: string; stderr: string } {
-  return runSync(resolveGitArgs(args), cwd);
+  return runSync(resolveGitArgs(args), cwd, {
+    timeout: GIT_COMMAND_TIMEOUT_MS,
+  });
 }
 
 function runBytes(
   args: string[],
   cwd: string,
 ): { code: number; stdout: Uint8Array; stderr: string } {
-  return runBytesSync(resolveGitArgs(args), cwd);
+  return runBytesSync(resolveGitArgs(args), cwd, {
+    timeout: GIT_COMMAND_TIMEOUT_MS,
+  });
 }
 
 function resolveGitArgs(args: string[]): string[] {
@@ -205,9 +214,13 @@ function gitFailureResult(
   };
 }
 
-export function repoRoot(cwd: string): string | null {
-  const res = run(["git", "rev-parse", "--show-toplevel"], cwd);
+function runGitRefLookup(args: string[], cwd: string): string | null {
+  const res = run(args, cwd);
   return res.code === 0 ? res.stdout.trimEnd() : null;
+}
+
+export function repoRoot(cwd: string): string | null {
+  return runGitRefLookup(["git", "rev-parse", "--show-toplevel"], cwd);
 }
 
 export function repoRootResult(
@@ -227,8 +240,7 @@ export function repoRootResult(
 }
 
 export function currentBranch(cwd: string): string | null {
-  const res = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd);
-  return res.code === 0 ? res.stdout.trimEnd() : null;
+  return runGitRefLookup(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd);
 }
 
 export function verifyCommit(
