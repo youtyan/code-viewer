@@ -345,7 +345,9 @@ Examples:
   }
   warnIfLegacyConfigPresent();
   if (scopeOmitDirCliOverride) {
-    scopeOmitDirNames = scopeOmitDirCliOverride;
+    scopeOmitDirNames = git.withAlwaysWorktreeOmitDirNames(
+      scopeOmitDirCliOverride,
+    );
   }
   scopeWatchLimit = worktreeWatchDirectoryLimitFromEnv();
 }
@@ -371,7 +373,9 @@ function applyPersistedSettings(state: AppSettingsState) {
     Array.isArray(state.scopeOmitDirs) &&
     state.scopeOmitDirs.length > 0
   ) {
-    scopeOmitDirNames = state.scopeOmitDirs;
+    // withAlwaysWorktreeOmitDirNames は union 済みなら同一参照を返すので、
+    // 下の prevOmit !== 比較による watcher 再構築判定はそのまま機能する。
+    scopeOmitDirNames = git.withAlwaysWorktreeOmitDirNames(state.scopeOmitDirs);
   } else if (!scopeOmitDirCliOverride) {
     scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES;
   }
