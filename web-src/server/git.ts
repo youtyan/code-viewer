@@ -137,6 +137,8 @@ export const DEFAULT_WORKTREE_OMIT_DIR_NAMES = [
   "out",
   "target",
   ".gradle",
+  ".devbox",
+  ".direnv",
   ".pnpm-store",
   ".turbo",
   ".parcel-cache",
