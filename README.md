@@ -178,7 +178,10 @@ separate project-level config file). `.DS_Store` and a broad set of
 build/cache directories (`node_modules`, `dist`, `build`, `.next`, `.turbo`,
 `.parcel-cache`, `.vite`, `.angular`, `.dart_tool`, `.venv`, …) are hidden by
 default. Pass `--scope-omit-dir <name>` (repeatable) to override the omit
-list on the command line for one session.
+list on the command line for one session. `.devbox` and `.direnv` are always
+excluded regardless of saved settings or CLI overrides: they hold thousands
+of generated directories (Nix store link trees) that would stall the
+worktree watcher.
 
 The viewer keeps its per-project state under `.code-viewer/` at the repository
 root:
