@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_WORKTREE_OMIT_DIR_NAMES } from "../server/git";
+import {
+  DEFAULT_WORKTREE_OMIT_DIR_NAMES,
+  withAlwaysWorktreeOmitDirNames,
+} from "../server/git";
 import {
   startWorktreeUpdateWatch,
   type WatchFn,
@@ -606,4 +609,54 @@ describe("worktree update watcher", () => {
       }
     },
   );
+});
+
+describe("withAlwaysWorktreeOmitDirNames", () => {
+  test.each([
+    {
+      name: "旧設定スナップショット (両方欠落) は末尾に .devbox / .direnv を追加",
+      input: ["node_modules", "vendor"],
+      expected: ["node_modules", "vendor", ".devbox", ".direnv"],
+    },
+    {
+      name: "両方含む場合は変更なし",
+      input: ["node_modules", ".devbox", ".direnv"],
+      expected: ["node_modules", ".devbox", ".direnv"],
+    },
+    {
+      name: ".devbox のみ欠落なら .devbox だけ追加",
+      input: [".direnv", "dist"],
+      expected: [".direnv", "dist", ".devbox"],
+    },
+    {
+      name: ".direnv のみ欠落なら .direnv だけ追加",
+      input: [".devbox", "dist"],
+      expected: [".devbox", "dist", ".direnv"],
+    },
+    {
+      name: "空リストには両方追加",
+      input: [],
+      expected: [".devbox", ".direnv"],
+    },
+  ])("$name", ({ input, expected }) => {
+    expect(withAlwaysWorktreeOmitDirNames(input)).toEqual(expected);
+  });
+
+  test("union 済み入力は同一参照を返す (watcher 再構築判定の契約)", () => {
+    const merged = ["node_modules", ".devbox", ".direnv"];
+    expect(withAlwaysWorktreeOmitDirNames(merged)).toBe(merged);
+  });
+
+  test("既定リストは union 済みなので同一参照を返す", () => {
+    expect(
+      withAlwaysWorktreeOmitDirNames(DEFAULT_WORKTREE_OMIT_DIR_NAMES),
+    ).toBe(DEFAULT_WORKTREE_OMIT_DIR_NAMES);
+  });
+
+  test("欠落時は新しい配列を返し入力リストを破壊しない", () => {
+    const input = ["node_modules"];
+    const result = withAlwaysWorktreeOmitDirNames(input);
+    expect(result).not.toBe(input);
+    expect(input).toEqual(["node_modules"]);
+  });
 });

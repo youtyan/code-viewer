@@ -117,6 +117,24 @@ export const WORKTREE_RECURSIVE_ENTRY_LIMIT = 50000;
 export const DEFAULT_REF_COMMIT_LIMIT = 100;
 const MAX_REF_COMMIT_LIMIT = 500;
 const COMMIT_FORMAT = "%H%x00%s%x00%an%x00%aI";
+// ユーザー設定 (scopeOmitDirs) や CLI 指定に関係なく常に監視・走査対象から
+// 除外するディレクトリ。保存済み scopeOmitDirs は保存時点のデフォルトの
+// スナップショットなので、デフォルトリストへの追加だけでは既存プロジェクト
+// に届かない。.devbox / .direnv は Nix ストアへのシンボリックリンクツリーで
+// 数千ディレクトリ規模になり、watcher に載るとファイル監視の登録・解除が
+// イベントループを数十秒ブロックして全リクエストを止める。
+export const ALWAYS_WORKTREE_OMIT_DIR_NAMES = [".devbox", ".direnv"];
+
+// 保存済みリストが union 済みなら同一参照を返す: 呼び出し側
+// (applyPersistedSettings) は参照比較で watcher 再構築を判断するため、
+// 変化が無いのに新しい配列を返すと設定保存のたびに再構築が走ってしまう。
+export function withAlwaysWorktreeOmitDirNames(names: string[]): string[] {
+  const missing = ALWAYS_WORKTREE_OMIT_DIR_NAMES.filter(
+    (name) => !names.includes(name),
+  );
+  return missing.length ? [...names, ...missing] : names;
+}
+
 export const DEFAULT_WORKTREE_OMIT_DIR_NAMES = [
   "node_modules",
   "bower_components",
@@ -137,8 +155,7 @@ export const DEFAULT_WORKTREE_OMIT_DIR_NAMES = [
   "out",
   "target",
   ".gradle",
-  ".devbox",
-  ".direnv",
+  ...ALWAYS_WORKTREE_OMIT_DIR_NAMES,
   ".pnpm-store",
   ".turbo",
   ".parcel-cache",
