@@ -687,6 +687,54 @@ async function pathExistsAsync(path: string): Promise<boolean> {
   }
 }
 
+// 「ディレクトリごとに1つのマーカー (compose ファイル / supabase
+// config.toml) を探してから子ディレクトリへ再帰する」という共通の walk。
+// docker-compose 探索と supabase CLI 探索はこの形が同じなので共有する
+// (sqlite 探索は「任意深さの拡張子一致ファイルを列挙する」という別の形
+// なので対象外)。`visitDir` が現在のディレクトリでマーカーを探して結果に
+// 積む役目、`hasCapacity` が MAX_* 上限判定を担う。
+async function walkForMarkerFileAsync(
+  dir: string,
+  depth: number,
+  omitSet: Set<string>,
+  hasCapacity: () => boolean,
+  visitDir: (dir: string) => Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted || !hasCapacity()) return;
+  if (depth > MAX_SCAN_DEPTH) return;
+  await visitDir(dir);
+  if (signal?.aborted || !hasCapacity()) return;
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (signal?.aborted || !hasCapacity()) return;
+    if (omitSet.has(entry.toLowerCase())) continue;
+    const full = join(dir, entry);
+    let entryStat: Awaited<ReturnType<typeof lstat>>;
+    try {
+      entryStat = await lstat(full);
+    } catch {
+      continue;
+    }
+    if (entryStat.isSymbolicLink()) continue;
+    if (entryStat.isDirectory()) {
+      await walkForMarkerFileAsync(
+        full,
+        depth + 1,
+        omitSet,
+        hasCapacity,
+        visitDir,
+        signal,
+      );
+    }
+  }
+}
+
 export async function discoverDockerDatabasesAsync(
   cwd: string,
   omitDirNames: string[] = [],
@@ -704,42 +752,22 @@ export async function discoverDockerDatabasesAsync(
   omitSet.add(".git");
   omitSet.add("node_modules");
 
-  async function scan(dir: string, depth: number): Promise<void> {
-    if (signal?.aborted) return;
-    if (results.length >= MAX_DOCKER_SERVICES) return;
-    if (depth > MAX_SCAN_DEPTH) return;
-    for (const filename of COMPOSE_FILENAMES) {
-      const filepath = join(dir, filename);
-      if (await pathExistsAsync(filepath)) {
-        await parseComposeFileAsync(filepath, dir, cwd, results);
-        break;
+  await walkForMarkerFileAsync(
+    cwd,
+    0,
+    omitSet,
+    () => results.length < MAX_DOCKER_SERVICES,
+    async (dir) => {
+      for (const filename of COMPOSE_FILENAMES) {
+        const filepath = join(dir, filename);
+        if (await pathExistsAsync(filepath)) {
+          await parseComposeFileAsync(filepath, dir, cwd, results);
+          break;
+        }
       }
-    }
-    if (signal?.aborted) return;
-    if (results.length >= MAX_DOCKER_SERVICES) return;
-    let entries: string[];
-    try {
-      entries = await readdir(dir);
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (signal?.aborted) return;
-      if (results.length >= MAX_DOCKER_SERVICES) return;
-      if (omitSet.has(entry.toLowerCase())) continue;
-      const full = join(dir, entry);
-      let entryStat: Awaited<ReturnType<typeof lstat>>;
-      try {
-        entryStat = await lstat(full);
-      } catch {
-        continue;
-      }
-      if (entryStat.isSymbolicLink()) continue;
-      if (entryStat.isDirectory()) await scan(full, depth + 1);
-    }
-  }
-
-  await scan(cwd, 0);
+    },
+    signal,
+  );
   if (signal?.aborted) return cloneDockerDiscoveryResult(results);
   if (results.length >= MAX_DOCKER_SERVICES) {
     results.truncated = true;
@@ -916,24 +944,35 @@ function parseSupabaseConfigToml(
   };
 }
 
-async function scanForSupabaseConfigAsync(
-  dir: string,
-  depth: number,
+export async function discoverSupabaseCliProjectsAsync(
   cwd: string,
-  omitSet: Set<string>,
-  results: SupabaseCliDbInfo[],
+  omitDirNames: string[] = [],
   signal?: AbortSignal,
-): Promise<void> {
-  if (signal?.aborted) return;
-  if (results.length >= MAX_SUPABASE_PROJECTS) return;
-  if (depth > MAX_SCAN_DEPTH) return;
+): Promise<SupabaseCliDbInfo[]> {
+  const cacheKey = discoveryCacheKey(cwd, omitDirNames);
+  const now = Date.now();
+  const cached = supabaseDiscoveryCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cloneSupabaseDiscoveryResult(cached.result);
+  }
 
-  const configPath = join(dir, "supabase", "config.toml");
-  if (await pathExistsAsync(configPath)) {
-    try {
-      const content = await readFile(configPath, "utf-8");
-      const parsed = parseSupabaseConfigToml(content);
-      if (parsed) {
+  const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
+  omitSet.add(".git");
+  omitSet.add("node_modules");
+  const results: SupabaseCliDbInfo[] = [];
+
+  await walkForMarkerFileAsync(
+    cwd,
+    0,
+    omitSet,
+    () => results.length < MAX_SUPABASE_PROJECTS,
+    async (dir) => {
+      const configPath = join(dir, "supabase", "config.toml");
+      if (!(await pathExistsAsync(configPath))) return;
+      try {
+        const content = await readFile(configPath, "utf-8");
+        const parsed = parseSupabaseConfigToml(content);
+        if (!parsed) return;
         const relDir = relative(cwd, dir);
         const isRoot = relDir === "" || relDir === ".";
         const relDirSlash = relDir.replace(/\\/g, "/");
@@ -953,60 +992,12 @@ async function scanForSupabaseConfigAsync(
           relDirSlash,
           dbPort: parsed.dbPort,
         });
+      } catch {
+        // 読めない/壊れた config.toml は無視して探索を続ける。
       }
-    } catch {
-      // 読めない/壊れた config.toml は無視して探索を続ける。
-    }
-  }
-
-  if (signal?.aborted || results.length >= MAX_SUPABASE_PROJECTS) return;
-  let entries: string[];
-  try {
-    entries = await readdir(dir);
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (signal?.aborted || results.length >= MAX_SUPABASE_PROJECTS) return;
-    if (omitSet.has(entry.toLowerCase())) continue;
-    const full = join(dir, entry);
-    let entryStat: Awaited<ReturnType<typeof lstat>>;
-    try {
-      entryStat = await lstat(full);
-    } catch {
-      continue;
-    }
-    if (entryStat.isSymbolicLink()) continue;
-    if (entryStat.isDirectory()) {
-      await scanForSupabaseConfigAsync(
-        full,
-        depth + 1,
-        cwd,
-        omitSet,
-        results,
-        signal,
-      );
-    }
-  }
-}
-
-export async function discoverSupabaseCliProjectsAsync(
-  cwd: string,
-  omitDirNames: string[] = [],
-  signal?: AbortSignal,
-): Promise<SupabaseCliDbInfo[]> {
-  const cacheKey = discoveryCacheKey(cwd, omitDirNames);
-  const now = Date.now();
-  const cached = supabaseDiscoveryCache.get(cacheKey);
-  if (cached && cached.expiresAt > now) {
-    return cloneSupabaseDiscoveryResult(cached.result);
-  }
-
-  const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
-  omitSet.add(".git");
-  omitSet.add("node_modules");
-  const results: SupabaseCliDbInfo[] = [];
-  await scanForSupabaseConfigAsync(cwd, 0, cwd, omitSet, results, signal);
+    },
+    signal,
+  );
 
   if (signal?.aborted) return cloneSupabaseDiscoveryResult(results);
   supabaseDiscoveryCache.set(cacheKey, {

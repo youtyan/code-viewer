@@ -567,6 +567,30 @@ describe("supabase CLI container resolution", () => {
     );
   });
 
+  test("dedupes concurrent lookups for the same projectId into a single docker ps spawn", async () => {
+    let calls = 0;
+    __setDockerComposeSpawnSyncForTest((() => {
+      calls++;
+      return {
+        status: 0,
+        stdout: dockerPsSuccess(["supabase_db_hojo"]),
+        stderr: "",
+      };
+    }) as unknown as SpawnSyncLike);
+
+    const results = await Promise.all([
+      resolveRunningSupabaseDbContainerAsync("hojo"),
+      resolveRunningSupabaseDbContainerAsync("hojo"),
+      resolveRunningSupabaseDbContainerAsync("hojo"),
+    ]);
+    expect(results).toEqual([
+      "supabase_db_hojo",
+      "supabase_db_hojo",
+      "supabase_db_hojo",
+    ]);
+    expect(calls).toBe(1);
+  });
+
   test("returns null when no container matches name+label", async () => {
     __setDockerComposeSpawnSyncForTest((() => ({
       status: 0,

@@ -128,14 +128,23 @@ export function __setDockerComposeSpawnSyncForTest(
   spawnSyncImpl = spawnSyncForTest ?? spawnSync;
 }
 
-function parseComposePsOutput(stdout: string): ComposeContainerNameByService {
+// `docker ... --format json` は複数コンテナがあると NDJSON、単体だと配列
+// (あるいはその逆、docker/OS のバージョンで揺れる) で返るため、先頭が `[`
+// かどうかで両対応する。`docker compose ps` と `docker ps` の両方が使う
+// 共通の低レベルパーサ。
+function parseDockerJsonLines<T>(stdout: string): T[] {
   const output = stdout.trim();
-  const containers: ComposePsContainer[] = output.startsWith("[")
+  if (!output) return [];
+  return output.startsWith("[")
     ? JSON.parse(output)
     : output
         .split("\n")
         .filter(Boolean)
         .map((line) => JSON.parse(line));
+}
+
+function parseComposePsOutput(stdout: string): ComposeContainerNameByService {
+  const containers = parseDockerJsonLines<ComposePsContainer>(stdout);
   const byService: ComposeContainerNameByService = new Map();
   for (const container of containers) {
     if (container.Service && container.Name && container.State === "running") {
@@ -164,23 +173,27 @@ function cacheComposePsFailure(
   });
 }
 
-function runComposePsAsync(
-  cwd: string,
-  signal?: AbortSignal,
+// `docker compose ps` (cwd 依存) と `docker ps` (cwd 非依存、任意の args) の
+// 両方が使う共通の低レベル spawn ラッパー。テスト用 spawnSyncImpl 差し替え
+// があれば同期実行、無ければ `spawnTextAsync` で非同期実行という二重分岐を
+// 一箇所にまとめる。
+function runDockerCliAsync(
+  args: string[],
+  opts: {
+    cwd?: string;
+    signal?: AbortSignal;
+    abortMessage: string;
+    timeoutMessage: string;
+  },
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  throwIfAborted(signal, "docker compose ps aborted");
+  throwIfAborted(opts.signal, opts.abortMessage);
   if (spawnSyncImpl !== spawnSync) {
-    const command = dockerCommand();
-    const proc = spawnSyncImpl(
-      command,
-      ["compose", "ps", "--format", "json", "--status", "running"],
-      {
-        encoding: "utf8",
-        timeout: 5000,
-        stdio: ["ignore", "pipe", "pipe"],
-        cwd,
-      },
-    );
+    const proc = spawnSyncImpl(dockerCommand(), args, {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    });
     return Promise.resolve({
       stdout: String(proc.stdout || ""),
       stderr: `${String(proc.stderr || "")}${proc.error ? `\n${proc.error.message}` : ""}`,
@@ -189,15 +202,30 @@ function runComposePsAsync(
   }
   return spawnTextAsync({
     command: dockerCommand(),
-    args: ["compose", "ps", "--format", "json", "--status", "running"],
-    cwd,
+    args,
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
     timeoutMs: 5000,
-    signal,
+    signal: opts.signal,
     killSignal: "SIGKILL",
-    abortMessage: "docker compose ps aborted",
-    timeoutMessage: "docker compose ps timed out",
+    abortMessage: opts.abortMessage,
+    timeoutMessage: opts.timeoutMessage,
     rejectOnError: false,
   });
+}
+
+function runComposePsAsync(
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<{ stdout: string; stderr: string; code: number }> {
+  return runDockerCliAsync(
+    ["compose", "ps", "--format", "json", "--status", "running"],
+    {
+      cwd,
+      signal,
+      abortMessage: "docker compose ps aborted",
+      timeoutMessage: "docker compose ps timed out",
+    },
+  );
 }
 
 export async function resolveRunningComposeContainerNameAsync(
@@ -333,12 +361,24 @@ type SupabaseContainerCacheEntry = {
   negativeExpiresAt: number;
 };
 
+type SupabaseContainerPendingEntry = {
+  promise: Promise<string | null>;
+  controller: AbortController;
+  refs: number;
+  done: boolean;
+};
+
 const SUPABASE_CONTAINER_POSITIVE_TTL_MS = 15_000;
 const SUPABASE_CONTAINER_NEGATIVE_TTL_MS = 3_000;
 const supabaseContainerCache = new Map<string, SupabaseContainerCacheEntry>();
+const supabaseContainerPending = new Map<
+  string,
+  SupabaseContainerPendingEntry
+>();
 
 export function __clearSupabaseContainerCacheForTest(): void {
   supabaseContainerCache.clear();
+  supabaseContainerPending.clear();
 }
 
 export function supabaseDbContainerName(projectId: string): string {
@@ -346,45 +386,24 @@ export function supabaseDbContainerName(projectId: string): string {
 }
 
 function parseDockerPsOutput(stdout: string): DockerPsContainer[] {
-  const output = stdout.trim();
-  if (!output) return [];
-  return output.startsWith("[")
-    ? JSON.parse(output)
-    : output
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
+  return parseDockerJsonLines<DockerPsContainer>(stdout);
 }
 
 function runDockerPsAsync(
   args: string[],
   signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  throwIfAborted(signal, "docker ps aborted");
-  if (spawnSyncImpl !== spawnSync) {
-    const proc = spawnSyncImpl(dockerCommand(), args, {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    return Promise.resolve({
-      stdout: String(proc.stdout || ""),
-      stderr: `${String(proc.stderr || "")}${proc.error ? `\n${proc.error.message}` : ""}`,
-      code: proc.status ?? 1,
-    });
-  }
-  return spawnTextAsync({
-    command: dockerCommand(),
-    args,
-    timeoutMs: 5000,
+  return runDockerCliAsync(args, {
     signal,
-    killSignal: "SIGKILL",
     abortMessage: "docker ps aborted",
     timeoutMessage: "docker ps timed out",
-    rejectOnError: false,
   });
 }
 
+// 同一 projectId への同時呼び出しが `docker ps` を多重 spawn しないよう、
+// `resolveRunningComposeContainerNameAsync` の pending dedupe パターン
+// (in-flight Promise を参照カウント付きで共有し、全呼び出し元が離脱したら
+// AbortController で実プロセスをキャンセルする) をそのまま踏襲する。
 export async function resolveRunningSupabaseDbContainerAsync(
   projectId: string,
   signal?: AbortSignal,
@@ -402,56 +421,96 @@ export async function resolveRunningSupabaseDbContainerAsync(
     }
   }
 
-  const cacheMiss = (negativeTtlMs: number): null => {
-    supabaseContainerCache.set(projectId, {
-      containerName: null,
-      positiveExpiresAt: now,
-      negativeExpiresAt: now + negativeTtlMs,
-    });
-    return null;
+  let pending = supabaseContainerPending.get(projectId);
+  if (!pending) {
+    const controller = new AbortController();
+    pending = {
+      controller,
+      refs: 0,
+      done: false,
+      promise: (async () => {
+        const startedAt = Date.now();
+        const cacheMiss = (negativeTtlMs: number): null => {
+          supabaseContainerCache.set(projectId, {
+            containerName: null,
+            positiveExpiresAt: startedAt,
+            negativeExpiresAt: startedAt + negativeTtlMs,
+          });
+          return null;
+        };
+
+        let proc: { stdout: string; stderr: string; code: number };
+        try {
+          proc = await runDockerPsAsync(
+            [
+              "ps",
+              "--filter",
+              `name=^/${containerName}$`,
+              "--filter",
+              `label=com.supabase.cli.project=${projectId}`,
+              "--filter",
+              "status=running",
+              "--format",
+              "json",
+            ],
+            controller.signal,
+          );
+        } catch (err) {
+          if (isAbortLikeError(err, controller.signal)) throw err;
+          return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+        }
+        if (proc.code !== 0) {
+          throwIfDockerCommandUnavailableResult(proc);
+          return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+        }
+        let containers: DockerPsContainer[];
+        try {
+          containers = parseDockerPsOutput(proc.stdout);
+        } catch {
+          return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+        }
+        const match = containers.some(
+          (c) => (c.Names || "").replace(/^\//, "") === containerName,
+        );
+        if (!match) return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+
+        supabaseContainerCache.set(projectId, {
+          containerName,
+          positiveExpiresAt: startedAt + SUPABASE_CONTAINER_POSITIVE_TTL_MS,
+          negativeExpiresAt: startedAt,
+        });
+        return containerName;
+      })().finally(() => {
+        if (supabaseContainerPending.get(projectId) === pending) {
+          supabaseContainerPending.delete(projectId);
+        }
+        if (pending) pending.done = true;
+      }),
+    };
+    supabaseContainerPending.set(projectId, pending);
+  }
+  pending.refs++;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    pending.refs--;
+    if (pending.refs <= 0 && !pending.done) {
+      pending.controller.abort();
+    }
   };
-
-  let proc: { stdout: string; stderr: string; code: number };
+  signal?.addEventListener("abort", release, { once: true });
+  if (signal?.aborted) {
+    signal.removeEventListener("abort", release);
+    release();
+    throwIfAborted(signal, "docker ps aborted");
+  }
   try {
-    proc = await runDockerPsAsync(
-      [
-        "ps",
-        "--filter",
-        `name=^/${containerName}$`,
-        "--filter",
-        `label=com.supabase.cli.project=${projectId}`,
-        "--filter",
-        "status=running",
-        "--format",
-        "json",
-      ],
-      signal,
-    );
-  } catch (err) {
-    if (isAbortLikeError(err, signal)) throw err;
-    return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+    return await pending.promise;
+  } finally {
+    signal?.removeEventListener("abort", release);
+    release();
   }
-  if (proc.code !== 0) {
-    throwIfDockerCommandUnavailableResult(proc);
-    return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
-  }
-  let containers: DockerPsContainer[];
-  try {
-    containers = parseDockerPsOutput(proc.stdout);
-  } catch {
-    return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
-  }
-  const match = containers.some(
-    (c) => (c.Names || "").replace(/^\//, "") === containerName,
-  );
-  if (!match) return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
-
-  supabaseContainerCache.set(projectId, {
-    containerName,
-    positiveExpiresAt: now + SUPABASE_CONTAINER_POSITIVE_TTL_MS,
-    negativeExpiresAt: now,
-  });
-  return containerName;
 }
 
 export async function resolveRunningSupabaseDbContainerOrThrowAsync(

@@ -660,6 +660,88 @@ describe("supabase CLI datasource route wiring", () => {
     }
   });
 
+  test("close route evicts the cached supabase adapter instead of no-oping", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-close-"));
+    let psCalls = 0;
+    try {
+      writeSupabaseConfig(dir, "hojo");
+      __setDockerComposeSpawnSyncForTest((() => {
+        psCalls++;
+        return {
+          status: 0,
+          stdout: JSON.stringify([
+            { Names: "supabase_db_hojo", State: "running" },
+          ]),
+          stderr: "",
+        };
+      }) as unknown as SpawnSyncLike);
+      __setDockerSpawnSyncForTest(((_command, args) => {
+        const argv = Array.isArray(args) ? args.map(String) : [];
+        const sql = argv[argv.indexOf("-c") + 1] || "";
+        if (sql.includes("information_schema.columns")) {
+          return { status: 0, stdout: "id\tinteger\tNO\t\tYES\n", stderr: "" };
+        }
+        return { status: 0, stdout: "1\n", stderr: "" };
+      }) as unknown as SpawnSyncLike);
+
+      const query = async () => {
+        const req = new Request(
+          "http://localhost/_db/table?db=supabase:hojo&schema=public&table=users&offset=0&limit=1",
+        );
+        const res = await handleDatabaseRoute(
+          req,
+          new URL(req.url),
+          dir,
+          [],
+          () => true,
+        );
+        if (!res) throw new Error("route did not match");
+        expect(res.status).toBe(200);
+      };
+
+      const closeSupabaseDb = async () => {
+        const closeReq = new Request("http://localhost/_db/close", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ db: "supabase:hojo" }),
+        });
+        const closeRes = await handleDatabaseRoute(
+          closeReq,
+          new URL(closeReq.url),
+          dir,
+          [],
+          () => true,
+        );
+        if (!closeRes) throw new Error("route did not match");
+        expect(closeRes.status).toBe(200);
+      };
+
+      await query();
+      expect(psCalls).toBe(1);
+
+      await closeSupabaseDb();
+
+      // コンテナ名解決の TTL キャッシュを手動で飛ばし、dockerAdapterCache
+      // の eviction だけを観測できるようにする (container 名キャッシュが
+      // 温かいままだと docker ps 呼び出し有無で adapter cache 側の状態を
+      // 判別できない)。
+      __clearSupabaseContainerCacheForTest();
+
+      await query();
+      // close で dockerAdapterCache から実際に破棄されていれば adapter が
+      // 再オープンされ docker ps がもう一度呼ばれる。破棄されていなければ
+      // (回帰時) キャッシュされた adapter がそのまま使い回され 1 のまま。
+      expect(psCalls).toBe(2);
+
+      // 後続テストへ生きたままの adapter cache エントリを残さないよう
+      // 明示的に片付ける (dockerAdapterCache はテスト間でクリアする hook
+      // が無いモジュール内 singleton のため)。
+      await closeSupabaseDb();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("supabase schema-qualified table route resolves the db container via docker ps (no compose file)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-table-"));
     const sqls: string[] = [];

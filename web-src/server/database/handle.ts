@@ -2044,7 +2044,7 @@ async function handleClose(
   }
   const r = await resolveDb(cwd, body.db, omitDirNames, undefined, req.signal);
   if (r instanceof Response) return r;
-  if (r.docker) {
+  if (r.docker || r.supabase) {
     dockerAdapterCache.close(r.dbId);
     dockerAdapterCache.closePrefix(`${r.dbId}\0`);
   } else {
