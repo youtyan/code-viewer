@@ -1241,7 +1241,7 @@ export function createDiffView(deps: DiffViewDeps) {
         matching: "lines",
         outputFormat: layout,
         synchronisedScroll: true,
-        highlight: !!(STATE.syntaxHighlight && file.highlight && hljsRef),
+        highlight: false,
         fileListToggle: false,
         fileContentToggle: false,
       },
@@ -1249,15 +1249,6 @@ export function createDiffView(deps: DiffViewDeps) {
     );
     ui.draw();
     if (STATE.ignoreWs) suppressWhitespaceOnlyInlineHighlights(body);
-    if (
-      STATE.syntaxHighlight &&
-      file.highlight &&
-      hljsRef &&
-      typeof ui.highlightCode === "function"
-    ) {
-      ui.highlightCode();
-      highlightPlaintextSpans(card, file);
-    }
 
     enhanceMediaCard(file, card);
     syncSideScrollCard(card);
@@ -1671,13 +1662,6 @@ export function createDiffView(deps: DiffViewDeps) {
     highlightDiffSpans(file, spans);
   }
 
-  function highlightPlaintextSpans(card: Element, file: FileMeta) {
-    const spans = card.querySelectorAll<HTMLElement>(
-      ".d2h-code-line-ctn.hljs.plaintext:not([data-gdp-hl])",
-    );
-    highlightDiffSpans(file, spans);
-  }
-
   function highlightDiffSpans(
     file: FileMeta,
     spans: Iterable<HTMLElement>,
@@ -1710,7 +1694,6 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   function scheduleIdleHighlight(card: DiffCardElement, file: FileMeta) {
-    if (file.highlight) return; // already highlighted at render time
     if (file.size_class === "huge") return; // skip
     if (!STATE.syntaxHighlight) return;
     if (!("requestIdleCallback" in window)) return;

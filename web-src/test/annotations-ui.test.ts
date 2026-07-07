@@ -9,7 +9,7 @@ import {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { AnnotationsUiDeps } from "../views/annotations-ui";
 import { createAnnotationsUi } from "../views/annotations-ui";
-import { q } from "./_test-helpers";
+import { deferred, q } from "./_test-helpers";
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -106,6 +106,34 @@ describe("annotations detail panel nav buttons", () => {
 });
 
 describe("inline annotation rendering", () => {
+  test("dedupes concurrent annotation refresh requests", async () => {
+    setupDom();
+    const originalFetch = globalThis.fetch;
+    const response = deferred<Response>();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount++;
+      return response.promise;
+    }) as unknown as typeof fetch;
+    try {
+      const ui = createAnnotationsUi(createDeps());
+      const first = ui.refreshAnnotations();
+      const second = ui.refreshAnnotations();
+
+      expect(fetchCount).toBe(1);
+
+      response.resolve({
+        ok: true,
+        json: async () => ({ version: 1, sessions: [] }),
+      } as Response);
+      await Promise.all([first, second]);
+
+      expect(fetchCount).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("keeps code inline annotations mounted while the annotation panel is open", async () => {
     setupDom();
     document.body.insertAdjacentHTML(
