@@ -39,7 +39,9 @@ browser's Database > Search tab, so the human can review the same workflow.
 1. Discover the datastore ids the running server has detected. This is the
    AI-friendly equivalent of opening the browser's Database tab and reading
    the sidebar — it lists every SQLite file plus PostgreSQL / MySQL / Redis
-   / Elasticsearch / S3 service that any nearby `docker-compose` exposes.
+   / Elasticsearch / S3 service that any nearby `docker-compose` exposes, as
+   well as any local Supabase CLI (`supabase start`) project found via a
+   `supabase/config.toml` (id form `supabase:<project_id>`).
    Use the printed `id` as `--db` on every other command. Credentials and
    internal config are stripped server-side.
 
