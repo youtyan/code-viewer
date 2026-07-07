@@ -439,7 +439,7 @@ export function createDiffView(deps: DiffViewDeps) {
       diffCardSelector(path),
     );
     if (!card?.classList.contains("pending")) return;
-    const f = STATE.files.find((x) => x.path === path);
+    const f = card._file || STATE.files.find((x) => x.path === path);
     if (!f) return;
     enqueueLoad(f, card, 5);
   }
@@ -550,7 +550,7 @@ export function createDiffView(deps: DiffViewDeps) {
     window.addEventListener("scrollend", onEnd, { once: true });
     // Priority-load if still pending
     if (card.classList.contains("pending")) {
-      const f = STATE.files.find((x) => x.path === path);
+      const f = card._file || STATE.files.find((x) => x.path === path);
       if (f) enqueueLoad(f, card, 10);
     }
     if (!line || !focusDiffLine(card, line)) {
@@ -635,7 +635,9 @@ export function createDiffView(deps: DiffViewDeps) {
               card.classList.contains("loading")
             )
               continue;
-            const f = STATE.files.find((x) => x.path === card.dataset.path);
+            const f =
+              card._file ||
+              STATE.files.find((x) => x.path === card.dataset.path);
             if (f) enqueueLoad(f, card, 0);
           }
         },
@@ -711,7 +713,7 @@ export function createDiffView(deps: DiffViewDeps) {
     delete card.dataset.manualMode;
     card.style.minHeight = `${file.estimated_height_px || 80}px`;
     card._diffData = null;
-    card._file = null;
+    card._file = file;
   }
 
   function renderShell(
@@ -914,12 +916,13 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   function createPlaceholder(f: FileMeta): DiffCardElement {
-    const card = document.createElement("div");
+    const card = document.createElement("div") as DiffCardElement;
     card.className = "gdp-file-shell pending";
     card.dataset.path = f.path;
     card.dataset.key = f.key || f.path;
     card.dataset.sizeClass = f.size_class || "small";
     card.dataset.status = f.status || "M";
+    card._file = f;
     card.classList.toggle("viewed", STATE.viewedFiles.has(f.path));
     if (f.estimated_height_px) {
       card.style.minHeight = `${f.estimated_height_px}px`;
@@ -971,7 +974,8 @@ export function createDiffView(deps: DiffViewDeps) {
             card.classList.contains("loading")
           )
             return;
-          const f = STATE.files.find((x) => x.path === card.dataset.path);
+          const f =
+            card._file || STATE.files.find((x) => x.path === card.dataset.path);
           if (!f) return;
           enqueueLoad(f, card, 0);
         });
@@ -992,7 +996,8 @@ export function createDiffView(deps: DiffViewDeps) {
       .forEach((card) => {
         const rect = card.getBoundingClientRect();
         if (rect.top > viewportBottom) return;
-        const f = STATE.files.find((x) => x.path === card.dataset.path);
+        const f =
+          card._file || STATE.files.find((x) => x.path === card.dataset.path);
         if (f) enqueueLoad(f, card, 0);
       });
   }
@@ -1159,7 +1164,8 @@ export function createDiffView(deps: DiffViewDeps) {
       card.classList.remove("loading");
       card.classList.add("pending");
       if (indicator) indicator.hidden = true;
-      const fresh = STATE.files.find((x) => x.path === card.dataset.path);
+      const fresh =
+        card._file || STATE.files.find((x) => x.path === card.dataset.path);
       if (fresh && card.isConnected) enqueueLoad(fresh, card, 0);
     };
 
@@ -1203,7 +1209,7 @@ export function createDiffView(deps: DiffViewDeps) {
     );
     if (!card || card.classList.contains("gdp-standalone-source")) return false;
     if (card.classList.contains("loaded")) return true;
-    const file = STATE.files.find((x) => x.path === path);
+    const file = card._file || STATE.files.find((x) => x.path === path);
     if (!file) return false;
     await loadFile(file, card, undefined, { immediate: true });
     return card.classList.contains("loaded");
@@ -1763,18 +1769,7 @@ export function createDiffView(deps: DiffViewDeps) {
         for (const w of cards) {
           const r = w.getBoundingClientRect();
           if (r.top <= scanY && r.bottom > scanY) {
-            const text = w.dataset.path || "";
-            let best: string | null = null,
-              bestLen = 0;
-            STATE.files.forEach((f) => {
-              if (
-                (text === f.path || text.endsWith(f.path)) &&
-                f.path.length > bestLen
-              ) {
-                best = f.path;
-                bestLen = f.path.length;
-              }
-            });
+            const best = w.dataset.path || "";
             if (best) {
               markActive(best);
               // Auto-scroll sidebar so the active item stays visible — but

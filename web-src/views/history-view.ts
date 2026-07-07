@@ -340,6 +340,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let generation = 0; // bumped on ref switch / re-enter to drop stale fetches
   let selectionGeneration = 0; // bumped on selection changes to drop stale async commits
   let selectedSha = "";
+  let activeHistoryRow: HTMLElement | null = null;
   let query = "";
   let mode: "history" | "file" = "history";
   let routeRef = "HEAD";
@@ -484,6 +485,14 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return `${relative} (${absolute})`;
   }
 
+  function historyItemSelector(sha: string): string {
+    const escaped =
+      typeof CSS !== "undefined" && CSS.escape
+        ? CSS.escape(sha)
+        : sha.replace(/["\\]/g, "\\$&");
+    return `.history-item[data-sha="${escaped}"]`;
+  }
+
   function fetchPage(
     skip: number,
     requestGeneration: number,
@@ -563,6 +572,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       html.push(commitRow(commit));
     }
     list.innerHTML = html.join("");
+    activeHistoryRow = list.querySelector<HTMLElement>(".history-item.active");
     syncRefreshStatusText();
   }
 
@@ -659,9 +669,22 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   function updateActiveRow() {
-    list.querySelectorAll<HTMLElement>(".history-item").forEach((row) => {
-      row.classList.toggle("active", row.dataset.sha === selectedSha);
-    });
+    if (
+      activeHistoryRow &&
+      (!("isConnected" in activeHistoryRow) || activeHistoryRow.isConnected)
+    ) {
+      activeHistoryRow.classList.remove("active");
+    } else {
+      list
+        .querySelectorAll<HTMLElement>(".history-item.active")
+        .forEach((row) => {
+          row.classList.remove("active");
+        });
+    }
+    activeHistoryRow = selectedSha
+      ? list.querySelector<HTMLElement>(historyItemSelector(selectedSha))
+      : null;
+    activeHistoryRow?.classList.add("active");
   }
 
   function isEditableTarget(target: EventTarget | null): boolean {
@@ -881,12 +904,8 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   function scrollToSelected() {
-    const escaped =
-      typeof CSS !== "undefined" && CSS.escape
-        ? CSS.escape(selectedSha)
-        : selectedSha.replace(/["\\]/g, "\\$&");
     list
-      .querySelector<HTMLElement>(`.history-item[data-sha="${escaped}"]`)
+      .querySelector<HTMLElement>(historyItemSelector(selectedSha))
       ?.scrollIntoView({ block: "center" });
   }
 
