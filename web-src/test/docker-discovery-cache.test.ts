@@ -15,9 +15,13 @@ import {
 } from "../server/database/adapters/docker";
 import {
   __clearDockerComposeContainerNameCacheForTest,
+  __clearSupabaseContainerCacheForTest,
   __setDockerComposeSpawnSyncForTest,
   resolveRunningComposeContainerNameAsync,
   resolveRunningComposeContainerNameOrThrowAsync,
+  resolveRunningSupabaseDbContainerAsync,
+  resolveRunningSupabaseDbContainerOrThrowAsync,
+  SupabaseDbContainerUnavailableError,
 } from "../server/database/adapters/docker-utils";
 import { openElasticsearchAdapterAsync } from "../server/database/adapters/elasticsearch";
 import { createRedisAdapter } from "../server/database/adapters/redis";
@@ -42,6 +46,7 @@ afterEach(() => {
   __setS3SpawnSyncForTest(null);
   __clearDockerComposeContainerNameCacheForTest();
   __clearDockerDatabaseListCacheForTest();
+  __clearSupabaseContainerCacheForTest();
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -69,6 +74,9 @@ function tempRoot(prefix: string): string {
   return root;
 }
 
+// ai-dup-check: allow -- fp: fakeMissingGit (git-command-errors.test.ts) と
+// 同型の「コマンドが見つからないふりをするスタブ実行ファイルを作る」
+// pre-existing のテストヘルパー。対象コマンドが違うので共通化しない。
 function fakeMissingDocker(): string {
   const root = tempRoot("code-viewer-missing-docker-bin-");
   const path = join(root, "docker");
@@ -80,6 +88,8 @@ function fakeMissingDocker(): string {
   return path;
 }
 
+// ai-dup-check: allow -- fp: configureMissingGit (git-command-errors.test.ts)
+// と同型の pre-existing ヘルパー。対象コマンドが違うので共通化しない。
 function configureMissingDocker(cwd: string): void {
   const configured = configureExternalCommands({
     cwd,
@@ -90,6 +100,8 @@ function configureMissingDocker(cwd: string): void {
   expect(configured).toEqual({ ok: true });
 }
 
+// ai-dup-check: allow -- fp: s3Info (s3-adapter.test.ts) とはテスト対象の
+// fixture 形状が異なる pre-existing ヘルパー。
 function s3InfoWithoutHostPort(composeDir: string): DockerDbInfo {
   return {
     id: "docker:s3",
@@ -518,6 +530,142 @@ describe("docker command failures in document/kv/object adapters", () => {
     let error: unknown;
     try {
       await adapter.listBuckets();
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeTruthy();
+    expect(error instanceof Error ? error.message : String(error)).toMatch(
+      DOCKER_UNAVAILABLE_PATTERN,
+    );
+  });
+});
+
+function dockerPsSuccess(names: string[]): string {
+  return JSON.stringify(
+    names.map((name) => ({ Names: name, State: "running" })),
+  );
+}
+
+describe("supabase CLI container resolution", () => {
+  test("resolves the container name when docker ps reports it running", async () => {
+    const calls: string[][] = [];
+    __setDockerComposeSpawnSyncForTest(((_command: string, args: string[]) => {
+      calls.push(args);
+      return {
+        status: 0,
+        stdout: dockerPsSuccess(["supabase_db_hojo"]),
+        stderr: "",
+      };
+    }) as unknown as SpawnSyncLike);
+
+    const containerName = await resolveRunningSupabaseDbContainerAsync("hojo");
+    expect(containerName).toBe("supabase_db_hojo");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.includes("name=^/supabase_db_hojo$")).toBe(true);
+    expect(calls[0]?.includes("label=com.supabase.cli.project=hojo")).toBe(
+      true,
+    );
+  });
+
+  test("dedupes concurrent lookups for the same projectId into a single docker ps spawn", async () => {
+    let calls = 0;
+    __setDockerComposeSpawnSyncForTest((() => {
+      calls++;
+      return {
+        status: 0,
+        stdout: dockerPsSuccess(["supabase_db_hojo"]),
+        stderr: "",
+      };
+    }) as unknown as SpawnSyncLike);
+
+    const results = await Promise.all([
+      resolveRunningSupabaseDbContainerAsync("hojo"),
+      resolveRunningSupabaseDbContainerAsync("hojo"),
+      resolveRunningSupabaseDbContainerAsync("hojo"),
+    ]);
+    expect(results).toEqual([
+      "supabase_db_hojo",
+      "supabase_db_hojo",
+      "supabase_db_hojo",
+    ]);
+    expect(calls).toBe(1);
+  });
+
+  test("returns null when no container matches name+label", async () => {
+    __setDockerComposeSpawnSyncForTest((() => ({
+      status: 0,
+      stdout: dockerPsSuccess([]),
+      stderr: "",
+    })) as unknown as SpawnSyncLike);
+
+    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBeNull();
+  });
+
+  test("caches positive lookups for 15 seconds and negative for 3 seconds", async () => {
+    const now = { value: 1000 };
+    setNow(now);
+    let running = false;
+    let calls = 0;
+    __setDockerComposeSpawnSyncForTest((() => {
+      calls++;
+      return {
+        status: 0,
+        stdout: dockerPsSuccess(running ? ["supabase_db_hojo"] : []),
+        stderr: "",
+      };
+    }) as unknown as SpawnSyncLike);
+
+    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBeNull();
+    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBeNull();
+    expect(calls).toBe(1);
+
+    now.value += 2_999;
+    running = true;
+    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBeNull();
+    expect(calls).toBe(1);
+
+    now.value += 2;
+    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBe(
+      "supabase_db_hojo",
+    );
+    expect(calls).toBe(2);
+
+    now.value += 14_999;
+    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBe(
+      "supabase_db_hojo",
+    );
+    expect(calls).toBe(2);
+
+    now.value += 2;
+    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBe(
+      "supabase_db_hojo",
+    );
+    expect(calls).toBe(3);
+  });
+
+  test("resolveRunningSupabaseDbContainerOrThrowAsync throws when not running", async () => {
+    __setDockerComposeSpawnSyncForTest((() => ({
+      status: 0,
+      stdout: dockerPsSuccess([]),
+      stderr: "",
+    })) as unknown as SpawnSyncLike);
+
+    let error: unknown;
+    try {
+      await resolveRunningSupabaseDbContainerOrThrowAsync("hojo");
+    } catch (err) {
+      error = err;
+    }
+    expect(error instanceof SupabaseDbContainerUnavailableError).toBe(true);
+  });
+
+  test("throws a command-unavailable error when docker itself cannot be spawned", async () => {
+    const cwd = tempRoot("code-viewer-missing-docker-supabase-");
+    configureMissingDocker(cwd);
+
+    let error: unknown;
+    try {
+      await resolveRunningSupabaseDbContainerAsync("hojo");
     } catch (err) {
       error = err;
     }

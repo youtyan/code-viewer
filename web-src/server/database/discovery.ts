@@ -687,6 +687,54 @@ async function pathExistsAsync(path: string): Promise<boolean> {
   }
 }
 
+// 「ディレクトリごとに1つのマーカー (compose ファイル / supabase
+// config.toml) を探してから子ディレクトリへ再帰する」という共通の walk。
+// docker-compose 探索と supabase CLI 探索はこの形が同じなので共有する
+// (sqlite 探索は「任意深さの拡張子一致ファイルを列挙する」という別の形
+// なので対象外)。`visitDir` が現在のディレクトリでマーカーを探して結果に
+// 積む役目、`hasCapacity` が MAX_* 上限判定を担う。
+async function walkForMarkerFileAsync(
+  dir: string,
+  depth: number,
+  omitSet: Set<string>,
+  hasCapacity: () => boolean,
+  visitDir: (dir: string) => Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted || !hasCapacity()) return;
+  if (depth > MAX_SCAN_DEPTH) return;
+  await visitDir(dir);
+  if (signal?.aborted || !hasCapacity()) return;
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (signal?.aborted || !hasCapacity()) return;
+    if (omitSet.has(entry.toLowerCase())) continue;
+    const full = join(dir, entry);
+    let entryStat: Awaited<ReturnType<typeof lstat>>;
+    try {
+      entryStat = await lstat(full);
+    } catch {
+      continue;
+    }
+    if (entryStat.isSymbolicLink()) continue;
+    if (entryStat.isDirectory()) {
+      await walkForMarkerFileAsync(
+        full,
+        depth + 1,
+        omitSet,
+        hasCapacity,
+        visitDir,
+        signal,
+      );
+    }
+  }
+}
+
 export async function discoverDockerDatabasesAsync(
   cwd: string,
   omitDirNames: string[] = [],
@@ -704,42 +752,22 @@ export async function discoverDockerDatabasesAsync(
   omitSet.add(".git");
   omitSet.add("node_modules");
 
-  async function scan(dir: string, depth: number): Promise<void> {
-    if (signal?.aborted) return;
-    if (results.length >= MAX_DOCKER_SERVICES) return;
-    if (depth > MAX_SCAN_DEPTH) return;
-    for (const filename of COMPOSE_FILENAMES) {
-      const filepath = join(dir, filename);
-      if (await pathExistsAsync(filepath)) {
-        await parseComposeFileAsync(filepath, dir, cwd, results);
-        break;
+  await walkForMarkerFileAsync(
+    cwd,
+    0,
+    omitSet,
+    () => results.length < MAX_DOCKER_SERVICES,
+    async (dir) => {
+      for (const filename of COMPOSE_FILENAMES) {
+        const filepath = join(dir, filename);
+        if (await pathExistsAsync(filepath)) {
+          await parseComposeFileAsync(filepath, dir, cwd, results);
+          break;
+        }
       }
-    }
-    if (signal?.aborted) return;
-    if (results.length >= MAX_DOCKER_SERVICES) return;
-    let entries: string[];
-    try {
-      entries = await readdir(dir);
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (signal?.aborted) return;
-      if (results.length >= MAX_DOCKER_SERVICES) return;
-      if (omitSet.has(entry.toLowerCase())) continue;
-      const full = join(dir, entry);
-      let entryStat: Awaited<ReturnType<typeof lstat>>;
-      try {
-        entryStat = await lstat(full);
-      } catch {
-        continue;
-      }
-      if (entryStat.isSymbolicLink()) continue;
-      if (entryStat.isDirectory()) await scan(full, depth + 1);
-    }
-  }
-
-  await scan(cwd, 0);
+    },
+    signal,
+  );
   if (signal?.aborted) return cloneDockerDiscoveryResult(results);
   if (results.length >= MAX_DOCKER_SERVICES) {
     results.truncated = true;
@@ -852,4 +880,177 @@ function isSafeDockerDatabaseName(value: string | undefined): boolean {
   if (value === "") return false;
   if (hasControlCharacter(value)) return false;
   return /^[A-Za-z0-9_$.-]+$/.test(value);
+}
+
+// ---------- Supabase CLI (supabase start) discovery ----------
+//
+// `supabase start` は Docker API を直接叩いてコンテナ (supabase_db_<project_id> 等)
+// を作るだけで、docker-compose.yml をプロジェクトディレクトリに書き出さない。
+// そのため上の compose 探索では見つからない。supabase/config.toml を独立に
+// 再帰 walk して project_id と db port を拾い、接続は docker.ts 側で
+// `docker ps` によるコンテナ名解決 (compose ps 不要) に任せる。
+
+export type SupabaseCliDbInfo = DbFileInfo & {
+  kind: "postgresql";
+  projectId: string;
+  relDirSlash: string;
+  dbPort: string;
+};
+
+const MAX_SUPABASE_PROJECTS = 30;
+const SUPABASE_DISCOVERY_TTL_MS = 5_000;
+const DEFAULT_SUPABASE_DB_PORT = "54322";
+const supabaseDiscoveryCache = new Map<
+  string,
+  { expiresAt: number; result: SupabaseCliDbInfo[] }
+>();
+
+function cloneSupabaseDiscoveryResult(
+  result: SupabaseCliDbInfo[],
+): SupabaseCliDbInfo[] {
+  return result.map((entry) => ({ ...entry }));
+}
+
+// supabase/config.toml のうち project_id (トップレベル) と [db] セクションの
+// port だけを状態機械的に読む。[remotes.<branch>] 等、他セクションに同名キー
+// があっても誤って拾わないようにセクション追跡が必要。
+function parseSupabaseConfigToml(
+  content: string,
+): { projectId: string; dbPort: string } | null {
+  let section: string | null = null;
+  let projectId: string | null = null;
+  let dbPort: string | null = null;
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+    if (sectionMatch) {
+      section = sectionMatch[1];
+      continue;
+    }
+    const kvMatch = line.match(/^([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(.+)$/);
+    if (!kvMatch) continue;
+    const value = stripScalarSyntax(kvMatch[2]);
+    if (section === null && kvMatch[1] === "project_id") {
+      projectId = value;
+    } else if (section === "db" && kvMatch[1] === "port") {
+      dbPort = value;
+    }
+  }
+  if (!projectId || !isSafeDockerServiceName(projectId)) return null;
+  return {
+    projectId,
+    dbPort: dbPort && /^\d+$/.test(dbPort) ? dbPort : DEFAULT_SUPABASE_DB_PORT,
+  };
+}
+
+export async function discoverSupabaseCliProjectsAsync(
+  cwd: string,
+  omitDirNames: string[] = [],
+  signal?: AbortSignal,
+): Promise<SupabaseCliDbInfo[]> {
+  const cacheKey = discoveryCacheKey(cwd, omitDirNames);
+  const now = Date.now();
+  const cached = supabaseDiscoveryCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cloneSupabaseDiscoveryResult(cached.result);
+  }
+
+  const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
+  omitSet.add(".git");
+  omitSet.add("node_modules");
+  const results: SupabaseCliDbInfo[] = [];
+
+  await walkForMarkerFileAsync(
+    cwd,
+    0,
+    omitSet,
+    () => results.length < MAX_SUPABASE_PROJECTS,
+    async (dir) => {
+      const configPath = join(dir, "supabase", "config.toml");
+      if (!(await pathExistsAsync(configPath))) return;
+      try {
+        const content = await readFile(configPath, "utf-8");
+        const parsed = parseSupabaseConfigToml(content);
+        if (!parsed) return;
+        const relDir = relative(cwd, dir);
+        const isRoot = relDir === "" || relDir === ".";
+        const relDirSlash = relDir.replace(/\\/g, "/");
+        const id = isRoot
+          ? `supabase:${parsed.projectId}`
+          : `supabase:${parsed.projectId}@${encodeURIComponent(relDirSlash)}`;
+        const labelPath = isRoot ? "" : ` — ${relDirSlash}`;
+        results.push({
+          id,
+          path: isRoot
+            ? "supabase/config.toml"
+            : `${relDirSlash}/supabase/config.toml`,
+          name: `${parsed.projectId} (Supabase CLI, postgres@127.0.0.1:${parsed.dbPort}/postgres${labelPath})`,
+          sizeBytes: 0,
+          kind: "postgresql",
+          projectId: parsed.projectId,
+          relDirSlash,
+          dbPort: parsed.dbPort,
+        });
+      } catch {
+        // 読めない/壊れた config.toml は無視して探索を続ける。
+      }
+    },
+    signal,
+  );
+
+  if (signal?.aborted) return cloneSupabaseDiscoveryResult(results);
+  supabaseDiscoveryCache.set(cacheKey, {
+    expiresAt: now + SUPABASE_DISCOVERY_TTL_MS,
+    result: cloneSupabaseDiscoveryResult(results),
+  });
+  return cloneSupabaseDiscoveryResult(results);
+}
+
+// `supabase:<project_id>` または `supabase:<project_id>@<encodedRelDir>` を
+// parse する。docker: 系と衝突しないよう別 prefix にしてある。
+export function parseSupabaseDbId(
+  dbId: string,
+): { projectId: string; relDir: string } | null {
+  if (!dbId.startsWith("supabase:")) return null;
+  const rest = dbId.slice("supabase:".length);
+  if (!rest) return null;
+  const atIdx = rest.indexOf("@");
+  let projectId: string;
+  let relDir = "";
+  if (atIdx >= 0) {
+    if (rest.indexOf("@", atIdx + 1) >= 0) return null;
+    projectId = rest.slice(0, atIdx);
+    try {
+      relDir = decodeURIComponent(rest.slice(atIdx + 1));
+    } catch {
+      return null;
+    }
+    if (!isSafeDockerRelDir(relDir)) return null;
+  } else {
+    projectId = rest;
+  }
+  if (!isSafeDockerServiceName(projectId)) return null;
+  return { projectId, relDir };
+}
+
+export async function findSupabaseCliProjectByDbIdAsync(
+  cwd: string,
+  dbId: string,
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<SupabaseCliDbInfo | null> {
+  const parsed = parseSupabaseDbId(dbId);
+  if (!parsed) return null;
+  const projects = await discoverSupabaseCliProjectsAsync(
+    cwd,
+    omitDirNames,
+    signal,
+  );
+  return (
+    projects.find(
+      (p) =>
+        p.projectId === parsed.projectId && p.relDirSlash === parsed.relDir,
+    ) || null
+  );
 }

@@ -1,14 +1,27 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import type { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
   DbFileInfo,
   DbFilesResponse,
   DbKind,
 } from "../core/database/types";
+import { __setDockerSpawnSyncForTest } from "../server/database/adapters/docker";
+import {
+  __clearDockerComposeContainerNameCacheForTest,
+  __clearSupabaseContainerCacheForTest,
+  __setDockerComposeSpawnSyncForTest,
+} from "../server/database/adapters/docker-utils";
 import {
   buildDatastoreRetryHint,
   checkDatastoreConnectivity,
   type DatastoreConnectivityDeps,
+  DEFAULT_DATASTORE_CONNECTIVITY_DEPS,
 } from "../server/doctor";
+
+type SpawnSyncLike = typeof spawnSync;
 
 const CWD = "/example/repo";
 
@@ -101,6 +114,58 @@ describe("buildDatastoreRetryHint", () => {
     ).toBe(
       "Retry with: code-viewer query s3 buckets --db 'docker:s3-svc/sample-bucket' --json",
     );
+  });
+});
+
+describe("defaultDatastoreProbe (Supabase CLI source)", () => {
+  afterEach(() => {
+    __setDockerComposeSpawnSyncForTest(null);
+    __setDockerSpawnSyncForTest(null);
+    __clearDockerComposeContainerNameCacheForTest();
+    __clearSupabaseContainerCacheForTest();
+  });
+
+  // regression: defaultDatastoreProbe は file.kind だけで振り分けると
+  // supabase: id (kind は "postgresql" 共用) が probeDockerSqlSource に
+  // 落ちて "invalid docker db id" で必ず失敗する。Environment Doctor の
+  // 接続チェックが Supabase ソースを常に赤くしないことを確認する。
+  test("probes a supabase: source through the docker ps / docker exec path instead of docker compose ps", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-doctor-supabase-"));
+    try {
+      mkdirSync(join(dir, "supabase"), { recursive: true });
+      writeFileSync(
+        join(dir, "supabase", "config.toml"),
+        'project_id = "hojo"\n\n[db]\nport = 54322\n',
+      );
+      __setDockerComposeSpawnSyncForTest((() => ({
+        status: 0,
+        stdout: JSON.stringify([
+          { Names: "supabase_db_hojo", State: "running" },
+        ]),
+        stderr: "",
+      })) as unknown as SpawnSyncLike);
+      __setDockerSpawnSyncForTest((() => ({
+        status: 0,
+        stdout: "",
+        stderr: "",
+      })) as unknown as SpawnSyncLike);
+
+      const controller = new AbortController();
+      const file: DbFileInfo = {
+        id: "supabase:hojo",
+        path: "supabase/config.toml",
+        name: "hojo (Supabase CLI, postgres@127.0.0.1:54322/postgres)",
+        sizeBytes: 0,
+        kind: "postgresql",
+      };
+      await DEFAULT_DATASTORE_CONNECTIVITY_DEPS.probeSource(
+        file,
+        dir,
+        controller.signal,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

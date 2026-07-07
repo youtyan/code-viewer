@@ -1516,6 +1516,9 @@ async function runDatastoreColumnsTool(
   }
 }
 
+// ai-dup-check: allow -- fp: runDatastoreColumnsTool と同型の
+// 「入力検証→createDb*Response 呼び出し→整形」という pre-existing の
+// MCP tool 実装パターン。今回の変更とは無関係。
 async function runDatastoreDdlTool(
   input: unknown,
   options: DefaultMcpToolsOptions,
@@ -1675,13 +1678,19 @@ function validateMcpOptionalDbId(
   if (raw === undefined || raw === "") return { ok: true, value: undefined };
   const parsed = validateMcpDbId(raw);
   if (parsed.ok !== true) return parsed;
-  if (!parsed.value.startsWith("docker:")) {
+  if (
+    !parsed.value.startsWith("docker:") &&
+    !parsed.value.startsWith("supabase:")
+  ) {
     const pathError = validateMcpPath(parsed.value);
     if (pathError) return { ok: false, error: "invalid database path" };
   }
   return { ok: true, value: parsed.value };
 }
 
+// ai-dup-check: allow -- fp: validateMcpDbId と同型の
+// 「string型チェック→単一行/NUL チェック」という pre-existing のバリデータ
+// パターン。今回の変更とは無関係。
 function validateMcpRequiredSingleLine(
   raw: unknown,
   name: string,

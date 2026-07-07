@@ -386,7 +386,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "PostgreSQL",
-                    "Detected from compose files. Multiple databases per server, plus a schema selector for switching schemas without reopening. Same inline row edit / insert / delete as SQLite.",
+                    "Detected from compose files. Multiple databases per server, plus a schema selector for switching schemas without reopening. Same inline row edit / insert / delete as SQLite. Local Supabase CLI (`supabase start`) projects are also auto-discovered from `supabase/config.toml`, without needing a docker-compose file.",
                   ],
                   [
                     "Redis",
@@ -1058,7 +1058,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "PostgreSQL",
-                    "compose ファイルから検出。同一サーバー上の複数データベースに対応し、スキーマ切替セレクターで再オープンせずスキーマを切り替えられます。SQLite と同じく行のインライン編集 / 追加 / 削除に対応。",
+                    "compose ファイルから検出。同一サーバー上の複数データベースに対応し、スキーマ切替セレクターで再オープンせずスキーマを切り替えられます。SQLite と同じく行のインライン編集 / 追加 / 削除に対応。ローカルの Supabase CLI (`supabase start`) プロジェクトも `supabase/config.toml` から自動検出され、docker-compose ファイルは不要です。",
                   ],
                   [
                     "Redis",
@@ -1412,6 +1412,9 @@ export function helpLanguageFromRoute(route: AppRoute): HelpLanguage {
     : "en";
 }
 
+// ai-dup-check: allow -- fp: helpLanguageFromRoute と同型の
+// 「route から allowlist 照合してフォールバック値を返す」pre-existing
+// パターン。対象フィールド (lang vs section) が異なるため共通化しない。
 export function helpSectionFromRoute(route: AppRoute): HelpSection {
   return route.screen === "help" &&
     HELP_SECTIONS.includes(route.section as HelpSection)

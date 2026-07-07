@@ -277,6 +277,11 @@ function labelFromDbId(dbId: string | null | undefined): string {
     const service = rest.split(/[@:]/, 1)[0];
     return service || "Docker";
   }
+  if (dbId.startsWith("supabase:")) {
+    const rest = dbId.slice("supabase:".length);
+    const projectId = rest.split(/[@]/, 1)[0];
+    return projectId || "Supabase";
+  }
   const normalized = dbId.replace(/\\/g, "/");
   const lastSlash = normalized.lastIndexOf("/");
   return lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized;
@@ -1939,9 +1944,12 @@ function createTabPane(
       const opt = document.createElement("option");
       opt.value = f.id;
       const isDocker = f.id.startsWith("docker:");
+      const isSupabase = f.id.startsWith("supabase:");
       const label = isDocker
         ? `${f.name} (Docker)`
-        : `${f.path} (${formatSize(f.sizeBytes)})`;
+        : isSupabase
+          ? `${f.name} (Supabase)`
+          : `${f.path} (${formatSize(f.sizeBytes)})`;
       opt.textContent = label;
       optionsFragment.appendChild(opt);
     }
@@ -2159,9 +2167,14 @@ function createTabPane(
     if (noDatastoresAvailable) return paneText().nav.noDatastoreTab;
     if (!currentDbInfo) return labelFromDbId(initial.dbId);
     const suffix = currentSchema ? ` / ${currentSchema}` : "";
-    // 既存 sidebar select の表示と揃える: docker は service 名、sqlite は path basename。
-    if (currentDbInfo.id.startsWith("docker:")) {
-      // currentDbInfo.name は recursive discovery の長い label なので、service 部分だけ取り出す。
+    // 既存 sidebar select の表示と揃える: docker/supabase は service 名 (or
+    // project_id)、sqlite は path basename。
+    if (
+      currentDbInfo.id.startsWith("docker:") ||
+      currentDbInfo.id.startsWith("supabase:")
+    ) {
+      // currentDbInfo.name は recursive discovery の長い label なので、先頭の
+      // service 名 (or supabase project_id) 部分だけ取り出す。
       // 例: "redis-svc (redis:7-alpine, localhost:6390 — data/test/redis)"
       //  → "redis-svc"
       const m = currentDbInfo.name.match(/^(\S+)/);

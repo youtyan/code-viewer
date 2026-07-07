@@ -23,6 +23,9 @@ type ComposePsCacheEntry = {
 type ComposeContainerNameByService = Map<string, string>;
 type DockerCommandResult = { code: number; stderr?: string };
 
+// ai-dup-check: allow -- ok: compose ps cache と supabase container cache は
+// 別ソース種別 (docker-compose vs supabase CLI) 向けの独立した TTL で、
+// 値も意味も異なるため辞書に統合しない。
 const COMPOSE_CONTAINER_NAME_POSITIVE_TTL_MS = 30_000;
 const COMPOSE_CONTAINER_NAME_NEGATIVE_TTL_MS = 3_000;
 const COMPOSE_PS_FAILURE_TTL_MS = 15_000;
@@ -63,12 +66,29 @@ export class DockerCommandUnavailableError extends Error {
   }
 }
 
+export class SupabaseDbContainerUnavailableError extends Error {
+  readonly projectId: string;
+  readonly status = 503;
+
+  constructor(projectId: string) {
+    super(
+      `Supabase local DB container for project "${projectId}" is not running. Start it with: supabase start`,
+    );
+    this.name = "SupabaseDbContainerUnavailableError";
+    this.projectId = projectId;
+  }
+}
+
 export function isDockerComposeServiceUnavailableError(
   err: unknown,
-): err is DockerComposeServiceUnavailableError | DockerCommandUnavailableError {
+): err is
+  | DockerComposeServiceUnavailableError
+  | DockerCommandUnavailableError
+  | SupabaseDbContainerUnavailableError {
   return (
     err instanceof DockerComposeServiceUnavailableError ||
-    err instanceof DockerCommandUnavailableError
+    err instanceof DockerCommandUnavailableError ||
+    err instanceof SupabaseDbContainerUnavailableError
   );
 }
 
@@ -108,14 +128,23 @@ export function __setDockerComposeSpawnSyncForTest(
   spawnSyncImpl = spawnSyncForTest ?? spawnSync;
 }
 
-function parseComposePsOutput(stdout: string): ComposeContainerNameByService {
+// `docker ... --format json` は複数コンテナがあると NDJSON、単体だと配列
+// (あるいはその逆、docker/OS のバージョンで揺れる) で返るため、先頭が `[`
+// かどうかで両対応する。`docker compose ps` と `docker ps` の両方が使う
+// 共通の低レベルパーサ。
+function parseDockerJsonLines<T>(stdout: string): T[] {
   const output = stdout.trim();
-  const containers: ComposePsContainer[] = output.startsWith("[")
+  if (!output) return [];
+  return output.startsWith("[")
     ? JSON.parse(output)
     : output
         .split("\n")
         .filter(Boolean)
         .map((line) => JSON.parse(line));
+}
+
+function parseComposePsOutput(stdout: string): ComposeContainerNameByService {
+  const containers = parseDockerJsonLines<ComposePsContainer>(stdout);
   const byService: ComposeContainerNameByService = new Map();
   for (const container of containers) {
     if (container.Service && container.Name && container.State === "running") {
@@ -144,23 +173,27 @@ function cacheComposePsFailure(
   });
 }
 
-function runComposePsAsync(
-  cwd: string,
-  signal?: AbortSignal,
+// `docker compose ps` (cwd 依存) と `docker ps` (cwd 非依存、任意の args) の
+// 両方が使う共通の低レベル spawn ラッパー。テスト用 spawnSyncImpl 差し替え
+// があれば同期実行、無ければ `spawnTextAsync` で非同期実行という二重分岐を
+// 一箇所にまとめる。
+function runDockerCliAsync(
+  args: string[],
+  opts: {
+    cwd?: string;
+    signal?: AbortSignal;
+    abortMessage: string;
+    timeoutMessage: string;
+  },
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  throwIfAborted(signal, "docker compose ps aborted");
+  throwIfAborted(opts.signal, opts.abortMessage);
   if (spawnSyncImpl !== spawnSync) {
-    const command = dockerCommand();
-    const proc = spawnSyncImpl(
-      command,
-      ["compose", "ps", "--format", "json", "--status", "running"],
-      {
-        encoding: "utf8",
-        timeout: 5000,
-        stdio: ["ignore", "pipe", "pipe"],
-        cwd,
-      },
-    );
+    const proc = spawnSyncImpl(dockerCommand(), args, {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    });
     return Promise.resolve({
       stdout: String(proc.stdout || ""),
       stderr: `${String(proc.stderr || "")}${proc.error ? `\n${proc.error.message}` : ""}`,
@@ -169,15 +202,30 @@ function runComposePsAsync(
   }
   return spawnTextAsync({
     command: dockerCommand(),
-    args: ["compose", "ps", "--format", "json", "--status", "running"],
-    cwd,
+    args,
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
     timeoutMs: 5000,
-    signal,
+    signal: opts.signal,
     killSignal: "SIGKILL",
-    abortMessage: "docker compose ps aborted",
-    timeoutMessage: "docker compose ps timed out",
+    abortMessage: opts.abortMessage,
+    timeoutMessage: opts.timeoutMessage,
     rejectOnError: false,
   });
+}
+
+function runComposePsAsync(
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<{ stdout: string; stderr: string; code: number }> {
+  return runDockerCliAsync(
+    ["compose", "ps", "--format", "json", "--status", "running"],
+    {
+      cwd,
+      signal,
+      abortMessage: "docker compose ps aborted",
+      timeoutMessage: "docker compose ps timed out",
+    },
+  );
 }
 
 export async function resolveRunningComposeContainerNameAsync(
@@ -290,6 +338,191 @@ export async function resolveRunningComposeContainerNameOrThrowAsync(
   if (!containerName) {
     throwIfCachedComposeDockerCommandUnavailable(cwd);
     throw new DockerComposeServiceUnavailableError(serviceName, cwd);
+  }
+  return containerName;
+}
+
+// ---------- Supabase CLI (supabase start) container resolution ----------
+//
+// Supabase CLI が起動するコンテナは docker-compose.yml を伴わないので、
+// `docker compose ps` によるサービス名解決が使えない。代わりに `docker ps`
+// を直接叩き、コンテナ名 (`supabase_db_<project_id>` という CLI 固定の命名規約)
+// と `com.supabase.cli.project` ラベルの両方が一致する running コンテナだけを
+// 対象にする (名前だけの一致は他プロジェクトとの偶然衝突を招きうるため)。
+
+type DockerPsContainer = {
+  Names?: string;
+  State?: string;
+};
+
+type SupabaseContainerCacheEntry = {
+  containerName: string | null;
+  positiveExpiresAt: number;
+  negativeExpiresAt: number;
+};
+
+type SupabaseContainerPendingEntry = {
+  promise: Promise<string | null>;
+  controller: AbortController;
+  refs: number;
+  done: boolean;
+};
+
+const SUPABASE_CONTAINER_POSITIVE_TTL_MS = 15_000;
+const SUPABASE_CONTAINER_NEGATIVE_TTL_MS = 3_000;
+const supabaseContainerCache = new Map<string, SupabaseContainerCacheEntry>();
+const supabaseContainerPending = new Map<
+  string,
+  SupabaseContainerPendingEntry
+>();
+
+export function __clearSupabaseContainerCacheForTest(): void {
+  supabaseContainerCache.clear();
+  supabaseContainerPending.clear();
+}
+
+export function supabaseDbContainerName(projectId: string): string {
+  return `supabase_db_${projectId}`;
+}
+
+function parseDockerPsOutput(stdout: string): DockerPsContainer[] {
+  return parseDockerJsonLines<DockerPsContainer>(stdout);
+}
+
+function runDockerPsAsync(
+  args: string[],
+  signal?: AbortSignal,
+): Promise<{ stdout: string; stderr: string; code: number }> {
+  return runDockerCliAsync(args, {
+    signal,
+    abortMessage: "docker ps aborted",
+    timeoutMessage: "docker ps timed out",
+  });
+}
+
+// 同一 projectId への同時呼び出しが `docker ps` を多重 spawn しないよう、
+// `resolveRunningComposeContainerNameAsync` の pending dedupe パターン
+// (in-flight Promise を参照カウント付きで共有し、全呼び出し元が離脱したら
+// AbortController で実プロセスをキャンセルする) をそのまま踏襲する。
+export async function resolveRunningSupabaseDbContainerAsync(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  throwIfAborted(signal, "docker ps aborted");
+  const containerName = supabaseDbContainerName(projectId);
+  const now = Date.now();
+  const cached = supabaseContainerCache.get(projectId);
+  if (cached) {
+    if (cached.containerName && cached.positiveExpiresAt > now) {
+      return cached.containerName;
+    }
+    if (!cached.containerName && cached.negativeExpiresAt > now) {
+      return null;
+    }
+  }
+
+  let pending = supabaseContainerPending.get(projectId);
+  if (!pending) {
+    const controller = new AbortController();
+    pending = {
+      controller,
+      refs: 0,
+      done: false,
+      promise: (async () => {
+        const startedAt = Date.now();
+        const cacheMiss = (negativeTtlMs: number): null => {
+          supabaseContainerCache.set(projectId, {
+            containerName: null,
+            positiveExpiresAt: startedAt,
+            negativeExpiresAt: startedAt + negativeTtlMs,
+          });
+          return null;
+        };
+
+        let proc: { stdout: string; stderr: string; code: number };
+        try {
+          proc = await runDockerPsAsync(
+            [
+              "ps",
+              "--filter",
+              `name=^/${containerName}$`,
+              "--filter",
+              `label=com.supabase.cli.project=${projectId}`,
+              "--filter",
+              "status=running",
+              "--format",
+              "json",
+            ],
+            controller.signal,
+          );
+        } catch (err) {
+          if (isAbortLikeError(err, controller.signal)) throw err;
+          return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+        }
+        if (proc.code !== 0) {
+          throwIfDockerCommandUnavailableResult(proc);
+          return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+        }
+        let containers: DockerPsContainer[];
+        try {
+          containers = parseDockerPsOutput(proc.stdout);
+        } catch {
+          return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+        }
+        const match = containers.some(
+          (c) => (c.Names || "").replace(/^\//, "") === containerName,
+        );
+        if (!match) return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+
+        supabaseContainerCache.set(projectId, {
+          containerName,
+          positiveExpiresAt: startedAt + SUPABASE_CONTAINER_POSITIVE_TTL_MS,
+          negativeExpiresAt: startedAt,
+        });
+        return containerName;
+      })().finally(() => {
+        if (supabaseContainerPending.get(projectId) === pending) {
+          supabaseContainerPending.delete(projectId);
+        }
+        if (pending) pending.done = true;
+      }),
+    };
+    supabaseContainerPending.set(projectId, pending);
+  }
+  pending.refs++;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    pending.refs--;
+    if (pending.refs <= 0 && !pending.done) {
+      pending.controller.abort();
+    }
+  };
+  signal?.addEventListener("abort", release, { once: true });
+  if (signal?.aborted) {
+    signal.removeEventListener("abort", release);
+    release();
+    throwIfAborted(signal, "docker ps aborted");
+  }
+  try {
+    return await pending.promise;
+  } finally {
+    signal?.removeEventListener("abort", release);
+    release();
+  }
+}
+
+export async function resolveRunningSupabaseDbContainerOrThrowAsync(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const containerName = await resolveRunningSupabaseDbContainerAsync(
+    projectId,
+    signal,
+  );
+  if (!containerName) {
+    throw new SupabaseDbContainerUnavailableError(projectId);
   }
   return containerName;
 }

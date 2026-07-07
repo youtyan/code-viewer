@@ -34,6 +34,8 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   viewer.
 - Browse SQLite, PostgreSQL, MySQL, Redis, Elasticsearch, and S3-compatible
   object storage (MinIO, LocalStack) with a built-in datastore viewer.
+  Local Supabase CLI (`supabase start`) Postgres projects are auto-discovered
+  too, without needing a `docker-compose.yml`.
 - Read the built-in Help page for getting started, the `.code-viewer/`
   project files, AI annotations, datastores, the agent skill, and
   keybindings.
@@ -42,8 +44,9 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   `@youtyan/code-viewer` version and execution origin (npx cache vs
   local), SQLite driver and snapshot store, Git, discovery summary,
   per-source datastore connectivity (each discovered SQLite / docker
-  SQL / Redis / Elasticsearch / S3 source gets one row with a 2s
-  minimal-read probe; failure rows include a paste-safe retry hint),
+  SQL / Supabase CLI / Redis / Elasticsearch / S3 source gets one row
+  with a 2s minimal-read probe; failure rows include a paste-safe retry
+  hint),
   Docker / Compose health (config dry-parse + `compose ps` per service),
   and the listening port. Useful when `npx` cache mismatch (e.g.
   `NODE_MODULE_VERSION` errors) needs a remediation hint, or when a
@@ -218,6 +221,15 @@ a few dozen services per scan to keep startup cheap.
 Services whose names collide across subdirectories are kept distinct via
 `docker:<service>@<relDir>` ids (cwd-direct compose files keep the historical
 `docker:<service>` id for backward compatibility).
+
+**Supabase CLI** (`supabase start`) local projects are also auto-discovered,
+even though the Supabase CLI does not write a `docker-compose.yml` into the
+project directory. Any `supabase/config.toml` found by the same recursive scan
+is picked up (`project_id` and `[db] port` are read from it), and the running
+Postgres container is resolved directly via `docker ps` (matched by container
+name and the `com.supabase.cli.project` label) instead of `docker compose ps`.
+Connection defaults to the Supabase CLI's documented local credentials
+(`postgres`/`postgres`/`postgres`).
 
 **Redis** support: browse DB 0–15, SCAN keys, and view values per
 type (string/hash/list as dedicated panes, set/zset/stream as JSON views).

@@ -14,7 +14,10 @@ import {
   commandNotFoundDetail,
   isCommandNotFoundResult,
 } from "./command-resolver";
-import { openDockerAdapterAsync } from "./database/adapters/docker";
+import {
+  openDockerAdapterAsync,
+  openSupabaseDockerAdapterAsync,
+} from "./database/adapters/docker";
 import { openElasticsearchAdapterAsync } from "./database/adapters/elasticsearch";
 import { openRedisExplorerAsync } from "./database/adapters/redis";
 import { openS3ExplorerAsync } from "./database/adapters/s3";
@@ -28,7 +31,9 @@ import {
   discoverDockerDatabasesAsync,
   discoverSqliteFilesAsync,
   findDockerServiceByDbIdAsync,
+  findSupabaseCliProjectByDbIdAsync,
   parseDockerDbId,
+  parseSupabaseDbId,
   validateDbPath,
 } from "./database/discovery";
 import { createDbFilesResponse } from "./database/handle";
@@ -1058,6 +1063,11 @@ async function defaultDatastoreProbe(
   cwd: string,
   signal: AbortSignal,
 ): Promise<void> {
+  // Supabase CLI ソースも kind は "postgresql" (docker: 系と同じ) だが、
+  // id prefix で見分けて別経路 (docker compose ps を使わない) に振る。
+  if (file.id.startsWith("supabase:")) {
+    return probeSupabaseSource(file, cwd, signal);
+  }
   switch (file.kind) {
     case "sqlite":
       return probeSqliteSource(file, cwd, signal);
@@ -1134,6 +1144,37 @@ async function probeDockerSqlSource(
   }
 }
 
+async function probeSupabaseSource(
+  file: DbFileInfo,
+  cwd: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const parsed = parseSupabaseDbId(file.id);
+  if (!parsed) throw new Error("invalid supabase db id");
+  const info = await findSupabaseCliProjectByDbIdAsync(
+    cwd,
+    file.id,
+    undefined,
+    signal,
+  );
+  if (!info) throw new Error("supabase project not found");
+  const adapter = await openSupabaseDockerAdapterAsync(
+    info.projectId,
+    undefined,
+    signal,
+  );
+  try {
+    signal.throwIfAborted();
+    await adapter.getTablesAsync(signal);
+  } finally {
+    try {
+      adapter.close();
+    } catch {
+      // best-effort
+    }
+  }
+}
+
 async function probeRedisSource(
   file: DbFileInfo,
   cwd: string,
@@ -1165,6 +1206,9 @@ async function probeRedisSource(
   }
 }
 
+// ai-dup-check: allow -- fp: probeRedisSource と同型の
+// 「find + open + close」pre-existing プローブ実装。対象アダプタが違うので
+// 共通化しない。今回の変更とは無関係。
 async function probeEsSource(
   file: DbFileInfo,
   cwd: string,
