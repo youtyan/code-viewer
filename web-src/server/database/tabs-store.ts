@@ -69,7 +69,9 @@ function sanitizeCssSize(v: unknown): string | undefined {
 }
 
 function isToolInternalDbId(dbId: string | null): boolean {
-  if (!dbId || dbId.startsWith("docker:")) return false;
+  if (!dbId || dbId.startsWith("docker:") || dbId.startsWith("supabase:")) {
+    return false;
+  }
   return dbId
     .split(/[\\/]+/)
     .some((part) => part.toLowerCase() === ".code-viewer");

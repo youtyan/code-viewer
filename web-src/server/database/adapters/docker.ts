@@ -31,6 +31,8 @@ import {
   dockerCommand,
   resolveRunningComposeContainerNameAsync,
   resolveRunningComposeContainerNameOrThrowAsync,
+  resolveRunningSupabaseDbContainerAsync,
+  resolveRunningSupabaseDbContainerOrThrowAsync,
   throwIfCachedComposeDockerCommandUnavailable,
   throwIfDockerCommandUnavailableResult,
 } from "./docker-utils";
@@ -131,6 +133,9 @@ function setDockerDatabasesCache(
   return [...cachedValue];
 }
 
+// ai-dup-check: allow -- fp: setDockerDatabasesCache と同型の cache-set helper
+// だが対象 Map (dockerDatabasesCache vs dockerSchemasCache) が異なる。既存の
+// pre-existing な最小重複で今回の変更とは無関係。
 function setDockerSchemasCache(
   key: string,
   value: string[],
@@ -1342,13 +1347,23 @@ export async function listDockerSchemasAsync(
       now,
     );
   }
-  const config: DockerDbConfig = {
-    kind,
-    containerName,
-    user,
-    password,
-    database,
-  };
+  return fetchPostgresSchemasViaContainerAsync(
+    { kind, containerName, user, password, database },
+    cacheKey,
+    now,
+    signal,
+  );
+}
+
+// listDockerSchemasAsync (compose 経路) と listSupabaseSchemasAsync (Supabase
+// CLI 経路) はコンテナ名の解決方法だけが違い、解決後のクエリ・キャッシュ
+// ロジックは共通なのでここに切り出す。
+async function fetchPostgresSchemasViaContainerAsync(
+  config: DockerDbConfig,
+  cacheKey: string,
+  now: number,
+  signal?: AbortSignal,
+): Promise<string[]> {
   try {
     const sql = `SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('pg_catalog', 'information_schema') AND schema_name NOT LIKE 'pg_toast%' AND schema_name NOT LIKE 'pg_temp_%' AND schema_name NOT LIKE 'pg_toast_temp_%' AND has_schema_privilege(schema_name, 'USAGE') ORDER BY CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END, schema_name`;
     const result = await execInContainerAsync(config, sql, 10000, signal);
@@ -1360,8 +1375,8 @@ export async function listDockerSchemasAsync(
         now,
       );
     }
-    // listDockerSchemasAsync は postgres 専用パス (上で kind !== "postgresql"
-    // を early-return している) なので、常に PG_RECORD_SEPARATOR を渡す。
+    // postgres 専用ヘルパー (呼び出し元がどちらも kind: "postgresql" 固定) な
+    // ので、常に PG_RECORD_SEPARATOR を渡す。
     const parsed = parseTsvOutput(result.stdout, false, PG_RECORD_SEPARATOR);
     const schemas = parsed.rows.map((r) => r[0]).filter(Boolean);
     const value = schemas.length > 0 ? schemas : ["public"];
@@ -1381,6 +1396,73 @@ export async function listDockerSchemasAsync(
       now,
     );
   }
+}
+
+// Supabase CLI (supabase start) のローカル Postgres は database が常に
+// "postgres" 固定で、公式ドキュメント記載の既定認証情報も postgres/postgres
+// で固定 (supabase status が案内する接続文字列と同一)。config.toml にパス
+// ワードは保存されないため、docker inspect 等で env を読みに行かず、この
+// Supabase 専用経路内に閉じたデフォルト値として扱う。
+const SUPABASE_LOCAL_DB_USER = "postgres";
+const SUPABASE_LOCAL_DB_PASSWORD = "postgres";
+const SUPABASE_LOCAL_DB_NAME = "postgres";
+
+function supabaseSchemasCacheKey(projectId: string): string {
+  return `supabase\0${projectId}`;
+}
+
+export async function listSupabaseSchemasAsync(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const cacheKey = supabaseSchemasCacheKey(projectId);
+  const now = Date.now();
+  const cached = dockerSchemasCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return [...cached.value];
+
+  const containerName = await resolveRunningSupabaseDbContainerAsync(
+    projectId,
+    signal,
+  );
+  if (!containerName) {
+    return setDockerSchemasCache(
+      cacheKey,
+      [],
+      DOCKER_DATABASES_NEGATIVE_TTL_MS,
+      now,
+    );
+  }
+  return fetchPostgresSchemasViaContainerAsync(
+    {
+      kind: "postgresql",
+      containerName,
+      user: SUPABASE_LOCAL_DB_USER,
+      password: SUPABASE_LOCAL_DB_PASSWORD,
+      database: SUPABASE_LOCAL_DB_NAME,
+    },
+    cacheKey,
+    now,
+    signal,
+  );
+}
+
+export async function openSupabaseDockerAdapterAsync(
+  projectId: string,
+  schema?: string,
+  signal?: AbortSignal,
+): Promise<DatabaseAdapter> {
+  const containerName = await resolveRunningSupabaseDbContainerOrThrowAsync(
+    projectId,
+    signal,
+  );
+  return createDockerAdapter({
+    kind: "postgresql",
+    containerName,
+    user: SUPABASE_LOCAL_DB_USER,
+    password: SUPABASE_LOCAL_DB_PASSWORD,
+    database: SUPABASE_LOCAL_DB_NAME,
+    ...(schema ? { schema } : {}),
+  });
 }
 
 export async function openDockerAdapterAsync(

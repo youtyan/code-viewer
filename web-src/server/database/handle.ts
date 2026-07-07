@@ -21,7 +21,9 @@ import { asAsync } from "./adapters/async-facade";
 import {
   listDockerDatabasesAsync,
   listDockerSchemasAsync,
+  listSupabaseSchemasAsync,
   openDockerAdapterAsync,
+  openSupabaseDockerAdapterAsync,
 } from "./adapters/docker";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import { captureSql } from "./adapters/sql-capture";
@@ -37,8 +39,12 @@ import {
   type DockerDiscoveryResult,
   discoverDockerDatabasesAsync,
   discoverSqliteFilesAsync,
+  discoverSupabaseCliProjectsAsync,
   findDockerServiceByDbIdAsync,
+  findSupabaseCliProjectByDbIdAsync,
   parseDockerDbId,
+  parseSupabaseDbId,
+  type SupabaseCliDbInfo,
   validateDbPath,
 } from "./discovery";
 import {
@@ -110,6 +116,13 @@ async function getAdapter(
       ),
     );
   }
+  if (r.supabase) {
+    const projectId = r.supabase.projectId;
+    const cacheKey = r.schema ? `${r.dbId}\0schema=${r.schema}` : r.dbId;
+    return dockerAdapterCache.getOrOpenAsync(cacheKey, () =>
+      openSupabaseDockerAdapterAsync(projectId, r.schema, signal),
+    );
+  }
   return getConnection(r.resolved);
 }
 
@@ -122,6 +135,7 @@ type ResolvedDb = {
   resolved: string;
   dbId: string;
   docker?: DockerDbInfo;
+  supabase?: SupabaseCliDbInfo;
   schema?: string;
 };
 
@@ -137,12 +151,14 @@ export type DbFileDiscoveryDeps = {
   discoverSqliteFiles: typeof discoverSqliteFilesAsync;
   discoverDockerDatabases: typeof discoverDockerDatabasesAsync;
   listDockerDatabases: DockerDatabaseLister;
+  discoverSupabaseCliProjects: typeof discoverSupabaseCliProjectsAsync;
 };
 
 const DEFAULT_DB_FILE_DISCOVERY_DEPS: DbFileDiscoveryDeps = {
   discoverSqliteFiles: discoverSqliteFilesAsync,
   discoverDockerDatabases: discoverDockerDatabasesAsync,
   listDockerDatabases: listDockerDatabasesAsync,
+  discoverSupabaseCliProjects: discoverSupabaseCliProjectsAsync,
 };
 
 export type DbServiceResult<T> =
@@ -200,6 +216,17 @@ async function resolvePostgresSchema(
   return schemas[0] || "public";
 }
 
+async function resolveSupabaseSchema(
+  info: SupabaseCliDbInfo,
+  requestedSchema: string | undefined,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (requestedSchema) return requestedSchema;
+  const schemas = await listSupabaseSchemasAsync(info.projectId, signal);
+  if (schemas.includes("public")) return "public";
+  return schemas[0] || "public";
+}
+
 async function resolveDb(
   cwd: string,
   dbParam: string | null,
@@ -208,6 +235,26 @@ async function resolveDb(
   signal?: AbortSignal,
 ): Promise<ResolvedDb | Response> {
   if (!dbParam) return textError("missing db parameter", 400);
+  if (dbParam.startsWith("supabase:")) {
+    const parsed = parseSupabaseDbId(dbParam);
+    if (!parsed) return textError("invalid supabase db id", 400);
+    const info = await findSupabaseCliProjectByDbIdAsync(
+      cwd,
+      dbParam,
+      omitDirNames,
+      signal,
+    );
+    if (!info) return textError("supabase project not found", 404);
+    const requestedSchema = normalizeSchemaParam(schemaParam);
+    if (requestedSchema instanceof Response) return requestedSchema;
+    const schema = await resolveSupabaseSchema(info, requestedSchema, signal);
+    return {
+      resolved: dbParam,
+      dbId: dbParam,
+      supabase: info,
+      ...(schema ? { schema } : {}),
+    };
+  }
   if (dbParam.startsWith("docker:")) {
     const parsed = parseDockerDbId(dbParam);
     if (!parsed) return textError("invalid docker db id", 400);
@@ -338,12 +385,17 @@ export async function createDbFilesResponse(
   // Idempotent service entry point init. HTTP routes also call ensureInit,
   // but MCP/CLI tests can invoke these exported helpers directly.
   ensureInit();
-  const [sqliteSettled, dockerSettled] = await Promise.allSettled([
-    deps.discoverSqliteFiles(cwd, omitDirNames, signal),
-    deps.discoverDockerDatabases(cwd, omitDirNames, signal),
-  ]);
+  const [sqliteSettled, dockerSettled, supabaseSettled] =
+    await Promise.allSettled([
+      deps.discoverSqliteFiles(cwd, omitDirNames, signal),
+      deps.discoverDockerDatabases(cwd, omitDirNames, signal),
+      deps.discoverSupabaseCliProjects(cwd, omitDirNames, signal),
+    ]);
   if (sqliteSettled.status === "rejected") {
     throw sqliteSettled.reason;
+  }
+  if (supabaseSettled.status === "rejected") {
+    throw supabaseSettled.reason;
   }
   if (
     dockerSettled.status === "rejected" &&
@@ -352,6 +404,7 @@ export async function createDbFilesResponse(
     throw dockerSettled.reason;
   }
   const sqliteFiles = sqliteSettled.value;
+  const supabaseProjects = supabaseSettled.value;
   const dockerServices =
     dockerSettled.status === "fulfilled"
       ? dockerSettled.value
@@ -380,6 +433,7 @@ export async function createDbFilesResponse(
         kind: "sqlite" as const,
       })),
       ...dockerEntries.map(toFileInfo),
+      ...supabaseProjects.map(toFileInfo),
     ],
     ...(dockerTruncated ? { truncated: true } : {}),
     ...(dockerErrors.length > 0
@@ -406,6 +460,19 @@ export async function createDbSchemasResponse(
   ensureInit();
   const r = await resolveDb(cwd, dbParam, omitDirNames, schemaParam, signal);
   if (r instanceof Response) return { ok: false, response: r };
+  if (r.supabase) {
+    const projectId = r.supabase.projectId;
+    const { result: schemas, executedSql } = await captureSql(() =>
+      listSupabaseSchemasAsync(projectId, signal),
+    );
+    const body: DbSchemasResponse = {
+      dbId: r.dbId,
+      schemas: schemas.map((name) => ({ name })),
+      selectedSchema: r.schema,
+      executedSql,
+    };
+    return { ok: true, value: body };
+  }
   if (!r.docker || r.docker.kind !== "postgresql") {
     const body: DbSchemasResponse = { dbId: r.dbId, schemas: [] };
     return { ok: true, value: body };
@@ -1212,6 +1279,9 @@ export async function createDbColumnsResponse(
   }
 }
 
+// ai-dup-check: allow -- fp: handleSchema/handleColumns/handleDdl は
+// URL パース→createDb*Response 呼び出し→json 化、という同型の薄い HTTP
+// ハンドラで pre-existing の最小重複。今回の変更とは無関係。
 async function handleColumns(
   cwd: string,
   url: URL,
@@ -1280,6 +1350,8 @@ export async function createDbDdlResponse(
   }
 }
 
+// ai-dup-check: allow -- fp: handleColumns と同型の薄い HTTP ハンドラ (前掲コ
+// メント参照)。pre-existing で今回の変更とは無関係。
 async function handleDdl(
   cwd: string,
   url: URL,
@@ -1527,6 +1599,9 @@ const SNAPSHOT_DOCKER_SOURCE_REGISTRY: Partial<
       closeAfterSnapshot: true,
     };
   },
+  // ai-dup-check: allow -- fp: redis/elasticsearch factory は
+  // 「open + canonicalize container 名」という同型の pre-existing 実装。
+  // 今回の変更とは無関係。
   elasticsearch: async (info, requestedContainers, signal) => {
     const { openElasticsearchAdapterAsync, canonicalizeEsSnapshotContainer } =
       await import("./adapters/elasticsearch");

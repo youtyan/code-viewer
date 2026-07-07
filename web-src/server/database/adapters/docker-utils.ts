@@ -23,6 +23,9 @@ type ComposePsCacheEntry = {
 type ComposeContainerNameByService = Map<string, string>;
 type DockerCommandResult = { code: number; stderr?: string };
 
+// ai-dup-check: allow -- ok: compose ps cache と supabase container cache は
+// 別ソース種別 (docker-compose vs supabase CLI) 向けの独立した TTL で、
+// 値も意味も異なるため辞書に統合しない。
 const COMPOSE_CONTAINER_NAME_POSITIVE_TTL_MS = 30_000;
 const COMPOSE_CONTAINER_NAME_NEGATIVE_TTL_MS = 3_000;
 const COMPOSE_PS_FAILURE_TTL_MS = 15_000;
@@ -63,12 +66,29 @@ export class DockerCommandUnavailableError extends Error {
   }
 }
 
+export class SupabaseDbContainerUnavailableError extends Error {
+  readonly projectId: string;
+  readonly status = 503;
+
+  constructor(projectId: string) {
+    super(
+      `Supabase local DB container for project "${projectId}" is not running. Start it with: supabase start`,
+    );
+    this.name = "SupabaseDbContainerUnavailableError";
+    this.projectId = projectId;
+  }
+}
+
 export function isDockerComposeServiceUnavailableError(
   err: unknown,
-): err is DockerComposeServiceUnavailableError | DockerCommandUnavailableError {
+): err is
+  | DockerComposeServiceUnavailableError
+  | DockerCommandUnavailableError
+  | SupabaseDbContainerUnavailableError {
   return (
     err instanceof DockerComposeServiceUnavailableError ||
-    err instanceof DockerCommandUnavailableError
+    err instanceof DockerCommandUnavailableError ||
+    err instanceof SupabaseDbContainerUnavailableError
   );
 }
 
@@ -290,6 +310,160 @@ export async function resolveRunningComposeContainerNameOrThrowAsync(
   if (!containerName) {
     throwIfCachedComposeDockerCommandUnavailable(cwd);
     throw new DockerComposeServiceUnavailableError(serviceName, cwd);
+  }
+  return containerName;
+}
+
+// ---------- Supabase CLI (supabase start) container resolution ----------
+//
+// Supabase CLI が起動するコンテナは docker-compose.yml を伴わないので、
+// `docker compose ps` によるサービス名解決が使えない。代わりに `docker ps`
+// を直接叩き、コンテナ名 (`supabase_db_<project_id>` という CLI 固定の命名規約)
+// と `com.supabase.cli.project` ラベルの両方が一致する running コンテナだけを
+// 対象にする (名前だけの一致は他プロジェクトとの偶然衝突を招きうるため)。
+
+type DockerPsContainer = {
+  Names?: string;
+  State?: string;
+};
+
+type SupabaseContainerCacheEntry = {
+  containerName: string | null;
+  positiveExpiresAt: number;
+  negativeExpiresAt: number;
+};
+
+const SUPABASE_CONTAINER_POSITIVE_TTL_MS = 15_000;
+const SUPABASE_CONTAINER_NEGATIVE_TTL_MS = 3_000;
+const supabaseContainerCache = new Map<string, SupabaseContainerCacheEntry>();
+
+export function __clearSupabaseContainerCacheForTest(): void {
+  supabaseContainerCache.clear();
+}
+
+export function supabaseDbContainerName(projectId: string): string {
+  return `supabase_db_${projectId}`;
+}
+
+function parseDockerPsOutput(stdout: string): DockerPsContainer[] {
+  const output = stdout.trim();
+  if (!output) return [];
+  return output.startsWith("[")
+    ? JSON.parse(output)
+    : output
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+}
+
+function runDockerPsAsync(
+  args: string[],
+  signal?: AbortSignal,
+): Promise<{ stdout: string; stderr: string; code: number }> {
+  throwIfAborted(signal, "docker ps aborted");
+  if (spawnSyncImpl !== spawnSync) {
+    const proc = spawnSyncImpl(dockerCommand(), args, {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return Promise.resolve({
+      stdout: String(proc.stdout || ""),
+      stderr: `${String(proc.stderr || "")}${proc.error ? `\n${proc.error.message}` : ""}`,
+      code: proc.status ?? 1,
+    });
+  }
+  return spawnTextAsync({
+    command: dockerCommand(),
+    args,
+    timeoutMs: 5000,
+    signal,
+    killSignal: "SIGKILL",
+    abortMessage: "docker ps aborted",
+    timeoutMessage: "docker ps timed out",
+    rejectOnError: false,
+  });
+}
+
+export async function resolveRunningSupabaseDbContainerAsync(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  throwIfAborted(signal, "docker ps aborted");
+  const containerName = supabaseDbContainerName(projectId);
+  const now = Date.now();
+  const cached = supabaseContainerCache.get(projectId);
+  if (cached) {
+    if (cached.containerName && cached.positiveExpiresAt > now) {
+      return cached.containerName;
+    }
+    if (!cached.containerName && cached.negativeExpiresAt > now) {
+      return null;
+    }
+  }
+
+  const cacheMiss = (negativeTtlMs: number): null => {
+    supabaseContainerCache.set(projectId, {
+      containerName: null,
+      positiveExpiresAt: now,
+      negativeExpiresAt: now + negativeTtlMs,
+    });
+    return null;
+  };
+
+  let proc: { stdout: string; stderr: string; code: number };
+  try {
+    proc = await runDockerPsAsync(
+      [
+        "ps",
+        "--filter",
+        `name=^/${containerName}$`,
+        "--filter",
+        `label=com.supabase.cli.project=${projectId}`,
+        "--filter",
+        "status=running",
+        "--format",
+        "json",
+      ],
+      signal,
+    );
+  } catch (err) {
+    if (isAbortLikeError(err, signal)) throw err;
+    return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+  }
+  if (proc.code !== 0) {
+    throwIfDockerCommandUnavailableResult(proc);
+    return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+  }
+  let containers: DockerPsContainer[];
+  try {
+    containers = parseDockerPsOutput(proc.stdout);
+  } catch {
+    return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+  }
+  const match = containers.some(
+    (c) => (c.Names || "").replace(/^\//, "") === containerName,
+  );
+  if (!match) return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+
+  supabaseContainerCache.set(projectId, {
+    containerName,
+    positiveExpiresAt: now + SUPABASE_CONTAINER_POSITIVE_TTL_MS,
+    negativeExpiresAt: now,
+  });
+  return containerName;
+}
+
+export async function resolveRunningSupabaseDbContainerOrThrowAsync(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const containerName = await resolveRunningSupabaseDbContainerAsync(
+    projectId,
+    signal,
+  );
+  if (!containerName) {
+    throw new SupabaseDbContainerUnavailableError(projectId);
   }
   return containerName;
 }

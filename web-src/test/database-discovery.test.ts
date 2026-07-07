@@ -11,6 +11,8 @@ import { join } from "node:path";
 import {
   discoverDockerDatabasesAsync,
   discoverSqliteFilesAsync,
+  discoverSupabaseCliProjectsAsync,
+  parseSupabaseDbId,
   validateDbPath,
 } from "../server/database/discovery";
 
@@ -483,5 +485,164 @@ services:
     const dbTest = results.find((r) => r.serviceName === "db-test");
     expect(db?.profiled).toBeUndefined();
     expect(dbTest?.profiled).toBe(true);
+  });
+});
+
+describe("supabase CLI database discovery", () => {
+  function writeSupabaseConfig(dir: string, projectId: string, extra = "") {
+    mkdirSync(join(dir, "supabase"), { recursive: true });
+    writeFileSync(
+      join(dir, "supabase", "config.toml"),
+      `project_id = "${projectId}"\n${extra}`,
+      "utf8",
+    );
+  }
+
+  test("discovers project_id and db port from supabase/config.toml", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-discovery-"));
+    try {
+      writeSupabaseConfig(
+        dir,
+        "hojo",
+        `
+[db]
+port = 54322
+shadow_port = 54320
+`,
+      );
+
+      const results = await discoverSupabaseCliProjectsAsync(dir, []);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.projectId).toBe("hojo");
+      expect(results[0]?.dbPort).toBe("54322");
+      expect(results[0]?.kind).toBe("postgresql");
+      expect(results[0]?.id).toBe("supabase:hojo");
+      expect(results[0]?.name).toMatch(/hojo/);
+      expect(results[0]?.name).toMatch(/54322/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to the default db port when [db] port is missing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-noport-"));
+    try {
+      writeSupabaseConfig(dir, "noport");
+
+      const results = await discoverSupabaseCliProjectsAsync(dir, []);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.dbPort).toBe("54322");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("ignores project_id declared inside [remotes.*] sections", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-remotes-"));
+    try {
+      writeSupabaseConfig(
+        dir,
+        "local-project",
+        `
+[remotes.staging]
+project_id = "staging-project"
+
+[db]
+port = 55000
+`,
+      );
+
+      const results = await discoverSupabaseCliProjectsAsync(dir, []);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.projectId).toBe("local-project");
+      expect(results[0]?.dbPort).toBe("55000");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("discovers nested supabase projects with a relDir-scoped id", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-nested-"));
+    try {
+      writeSupabaseConfig(join(dir, "apps", "db"), "nested-project");
+
+      const results = await discoverSupabaseCliProjectsAsync(dir, []);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.id).toBe("supabase:nested-project@apps%2Fdb");
+      expect(results[0]?.relDirSlash).toBe("apps/db");
+      expect(results[0]?.path).toBe("apps/db/supabase/config.toml");
+
+      const parsed = parseSupabaseDbId(results[0]?.id ?? "");
+      expect(parsed).toEqual({
+        projectId: "nested-project",
+        relDir: "apps/db",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("ignores config.toml without a project_id", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-noid-"));
+    try {
+      mkdirSync(join(dir, "supabase"), { recursive: true });
+      writeFileSync(
+        join(dir, "supabase", "config.toml"),
+        "[db]\nport = 54322\n",
+        "utf8",
+      );
+
+      expect(await discoverSupabaseCliProjectsAsync(dir, [])).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not cache results after abort", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-abort-"));
+    try {
+      writeSupabaseConfig(dir, "abort-project");
+      const controller = new AbortController();
+      controller.abort();
+
+      expect(
+        await discoverSupabaseCliProjectsAsync(dir, [], controller.signal),
+      ).toEqual([]);
+      const results = await discoverSupabaseCliProjectsAsync(dir, []);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.projectId).toBe("abort-project");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("parseSupabaseDbId", () => {
+  test("parses a root-level id", () => {
+    expect(parseSupabaseDbId("supabase:hojo")).toEqual({
+      projectId: "hojo",
+      relDir: "",
+    });
+  });
+
+  test("parses a nested id with an encoded relDir", () => {
+    expect(parseSupabaseDbId("supabase:hojo@apps%2Fdb")).toEqual({
+      projectId: "hojo",
+      relDir: "apps/db",
+    });
+  });
+
+  test("rejects ids without the supabase: prefix", () => {
+    expect(parseSupabaseDbId("docker:hojo")).toBeNull();
+  });
+
+  test("rejects unsafe project ids", () => {
+    expect(parseSupabaseDbId("supabase:../etc/passwd")).toBeNull();
+  });
+
+  test("rejects malformed relDir traversal", () => {
+    expect(
+      parseSupabaseDbId(`supabase:hojo@${encodeURIComponent("../evil")}`),
+    ).toBeNull();
   });
 });

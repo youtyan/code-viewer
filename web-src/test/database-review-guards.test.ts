@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,6 +14,7 @@ import {
 } from "../server/database/adapters/docker";
 import {
   __clearDockerComposeContainerNameCacheForTest,
+  __clearSupabaseContainerCacheForTest,
   __setDockerComposeSpawnSyncForTest,
 } from "../server/database/adapters/docker-utils";
 import {
@@ -45,6 +46,7 @@ afterEach(() => {
   __clearDockerComposeContainerNameCacheForTest();
   __clearDockerDatabaseListCacheForTest();
   __clearDockerSchemaListCacheForTest();
+  __clearSupabaseContainerCacheForTest();
 });
 
 describe("Elasticsearch read-only path allowlist", () => {
@@ -149,6 +151,7 @@ describe("database file response fault isolation", () => {
         throw new Error("compose scan failed");
       },
       listDockerDatabases: async () => [],
+      discoverSupabaseCliProjects: async () => [],
     });
 
     expect(body).toEqual({
@@ -172,6 +175,7 @@ describe("database file response fault isolation", () => {
         throw new Error(`compose scan${String.fromCharCode(0)}failed\nretry`);
       },
       listDockerDatabases: async () => [],
+      discoverSupabaseCliProjects: async () => [],
     });
 
     expect(body.dockerError).toBe("compose scan failed retry");
@@ -184,6 +188,7 @@ describe("database file response fault isolation", () => {
       listDockerDatabases: async () => {
         throw new Error("database list failed");
       },
+      discoverSupabaseCliProjects: async () => [],
     });
 
     expect(body).toEqual({
@@ -575,6 +580,110 @@ describe("docker service unavailable route errors", () => {
 
       const req = new Request(
         "http://localhost/_db/table?db=docker:pg-svc&schema=public&table=users&offset=0&limit=1",
+      );
+      const res = await handleDatabaseRoute(
+        req,
+        new URL(req.url),
+        dir,
+        [],
+        () => true,
+      );
+      if (!res) throw new Error("route did not match");
+      expect(res.status).toBe(200);
+      expect(
+        sqls.some((sql) => sql.includes("information_schema.schemata")),
+      ).toBe(false);
+      expect(
+        sqls.some((sql) => sql.includes("information_schema.columns")),
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("supabase CLI datasource route wiring", () => {
+  function writeSupabaseConfig(dir: string, projectId: string): void {
+    mkdirSync(join(dir, "supabase"), { recursive: true });
+    writeFileSync(
+      join(dir, "supabase", "config.toml"),
+      `project_id = "${projectId}"\n\n[db]\nport = 54322\n`,
+    );
+  }
+
+  function mockNoRunningSupabaseContainer(): void {
+    __setDockerComposeSpawnSyncForTest((() => ({
+      status: 0,
+      stdout: "[]",
+      stderr: "",
+    })) as unknown as SpawnSyncLike);
+  }
+
+  test("createDbFilesResponse lists the supabase CLI project without touching docker", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-files-"));
+    try {
+      writeSupabaseConfig(dir, "hojo");
+
+      const body = await createDbFilesResponse(dir, []);
+      expect(body.files).toHaveLength(1);
+      expect(body.files[0]?.id).toBe("supabase:hojo");
+      expect(body.files[0]?.kind).toBe("postgresql");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("supabase query routes return startup guidance instead of a generic 500", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-down-"));
+    try {
+      writeSupabaseConfig(dir, "hojo");
+      mockNoRunningSupabaseContainer();
+      const req = new Request("http://localhost/_db/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ db: "supabase:hojo", sql: "SELECT 1" }),
+      });
+      const res = await handleDatabaseRoute(
+        req,
+        new URL(req.url),
+        dir,
+        [],
+        () => true,
+      );
+      if (!res) throw new Error("route did not match");
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe(
+        'Supabase local DB container for project "hojo" is not running. Start it with: supabase start',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("supabase schema-qualified table route resolves the db container via docker ps (no compose file)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-table-"));
+    const sqls: string[] = [];
+    try {
+      writeSupabaseConfig(dir, "hojo");
+      __setDockerComposeSpawnSyncForTest((() => ({
+        status: 0,
+        stdout: JSON.stringify([
+          { Names: "supabase_db_hojo", State: "running" },
+        ]),
+        stderr: "",
+      })) as unknown as SpawnSyncLike);
+      __setDockerSpawnSyncForTest(((_command, args) => {
+        const argv = Array.isArray(args) ? args.map(String) : [];
+        const sql = argv[argv.indexOf("-c") + 1] || "";
+        sqls.push(sql);
+        if (sql.includes("information_schema.columns")) {
+          return { status: 0, stdout: "id\tinteger\tNO\t\tYES\n", stderr: "" };
+        }
+        return { status: 0, stdout: "1\n", stderr: "" };
+      }) as unknown as SpawnSyncLike);
+
+      const req = new Request(
+        "http://localhost/_db/table?db=supabase:hojo&schema=public&table=users&offset=0&limit=1",
       );
       const res = await handleDatabaseRoute(
         req,
