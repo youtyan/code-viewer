@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export type JsonStoreOptions<T> = {
@@ -76,8 +76,13 @@ export function createJsonFileStore<T>(
     }
     await mkdir(dirname(file), { recursive: true });
     const tmp = tmpPath(file);
-    await writeFile(tmp, content, "utf8");
-    await rename(tmp, file);
+    try {
+      await writeFile(tmp, content, "utf8");
+      await rename(tmp, file);
+    } catch (err) {
+      await unlink(tmp).catch(() => undefined);
+      throw err;
+    }
   }
 
   async function load(root: string): Promise<T> {

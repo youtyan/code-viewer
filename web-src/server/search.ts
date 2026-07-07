@@ -130,8 +130,9 @@ export function parseRgOutput(
 ): GrepMatch[] {
   const matches: GrepMatch[] = [];
   for (const line of stdout.split("\n")) {
-    if (!line || matches.length >= max) continue;
-    const parsed = /^(.*):(\d+):(\d+):(.*)$/.exec(line);
+    if (!line) continue;
+    if (matches.length >= max) break;
+    const parsed = /^(.*?):(\d+):(\d+):(.*)$/.exec(line);
     if (!parsed) continue;
     const path = parsed[1];
     const lineNo = Number(parsed[2]);

@@ -15,6 +15,7 @@ import {
 } from "../server/search";
 import {
   grepRepo,
+  grepRepoAsync,
   listRepoFiles,
   safeWorktreePath,
 } from "../server/search-service";
@@ -60,7 +61,7 @@ describe("search path filtering", () => {
     expect(isSkippableSearchPath("node_modules/pkg/index.js", ["dist"])).toBe(
       false,
     );
-    expect(isSkippableSearchPath("audio/Horizon.wav", ["dist"])).toBe(false);
+    expect(isSkippableSearchPath("audio/sample.wav", ["dist"])).toBe(false);
     expect(isSkippableSearchPath(".DS_Store", [], [".DS_Store"])).toBe(true);
     expect(isSkippableSearchPath("src/.DS_Store", [], [".DS_Store"])).toBe(
       true,
@@ -156,6 +157,32 @@ describe("grep output parsers", () => {
       { path: "src/a:b.ts", line: 10, column: 3, preview: "const app = true" },
     ]);
   });
+
+  test("keeps location-like text inside grep previews", () => {
+    expect(
+      parseRgOutput("src/app.ts:10:3:see nested :5:3: marker\n", 10),
+    ).toEqual([
+      {
+        path: "src/app.ts",
+        line: 10,
+        column: 3,
+        preview: "see nested :5:3: marker",
+      },
+    ]);
+  });
+
+  test("stops parsing after the requested maximum result count", () => {
+    const output = [
+      "src/a.ts:1:1:match a",
+      "src/b.ts:2:1:match b",
+      "src/c.ts:3:1:match c",
+    ].join("\n");
+
+    expect(parseRgOutput(output, 2)).toEqual([
+      { path: "src/a.ts", line: 1, column: 1, preview: "match a" },
+      { path: "src/b.ts", line: 2, column: 1, preview: "match b" },
+    ]);
+  });
 });
 
 describe("search-service shared behavior", () => {
@@ -195,6 +222,21 @@ describe("search-service shared behavior", () => {
 
   test("grepRepo honors a single paths[] filter in worktree search", () => {
     const result = grepRepo(env(), {
+      query: "sample",
+      ref: "worktree",
+      paths: ["sample_file.ts"],
+      regex: false,
+      max: 10,
+    });
+    if (result.ok !== true) throw new Error(result.error);
+    expect(result.value.ref).toBe("worktree");
+    expect(result.value.matches.map((match) => match.path)).toEqual([
+      "sample_file.ts",
+    ]);
+  });
+
+  test("grepRepoAsync honors a single paths[] filter in worktree search", async () => {
+    const result = await grepRepoAsync(env(), {
       query: "sample",
       ref: "worktree",
       paths: ["sample_file.ts"],

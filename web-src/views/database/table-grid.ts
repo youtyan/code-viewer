@@ -22,6 +22,7 @@ import { type DbText, dbText } from "./i18n";
 const ROW_HEIGHT = 28;
 const OVERSCAN = 20;
 const PAGE_SIZE = 200;
+const MAX_PAGE_CACHE_PAGES = 32;
 const FILTER_DEBOUNCE_MS = 300;
 const DEFAULT_COL_WIDTH = 180;
 const CELL_PREVIEW_MAX_CHARS = 4000;
@@ -308,9 +309,6 @@ export function createTableGrid(
   const filteredEmpty = document.createElement("div");
   filteredEmpty.className = "db-pane-empty";
   filteredEmpty.hidden = true;
-  const filteredEmptyIcon = document.createElement("div");
-  filteredEmptyIcon.className = "db-pane-empty-icon";
-  filteredEmptyIcon.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
   const filteredEmptyTitle = document.createElement("div");
   filteredEmptyTitle.className = "db-pane-empty-title";
   const filteredEmptyHint = document.createElement("div");
@@ -331,7 +329,6 @@ export function createTableGrid(
   filteredEmptyAction.disabled = true;
   filteredEmptyActions.append(filteredEmptyReloadAction, filteredEmptyAction);
   filteredEmpty.append(
-    filteredEmptyIcon,
     filteredEmptyTitle,
     filteredEmptyHint,
     filteredEmptyActions,
@@ -1550,7 +1547,7 @@ export function createTableGrid(
   }
 
   function ensurePage(pageStart: number): Promise<void> {
-    if (pageCache.has(pageStart)) return Promise.resolve();
+    if (getCachedPage(pageStart) !== undefined) return Promise.resolve();
     const pending = pendingPages.get(pageStart);
     if (pending) return pending;
     const gen = loadGeneration;
@@ -1560,7 +1557,7 @@ export function createTableGrid(
       .fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters, signal)
       .then((data) => {
         if (gen !== loadGeneration) return;
-        pageCache.set(pageStart, data.rows);
+        rememberPage(pageStart, data.rows);
         totalRows = data.totalRows;
         syncSpacer();
         updateStatus();
@@ -1579,6 +1576,24 @@ export function createTableGrid(
     });
     pendingPages.set(pageStart, tracked);
     return tracked;
+  }
+
+  function rememberPage(pageStart: number, rows: DbValue[][]): void {
+    pageCache.delete(pageStart);
+    pageCache.set(pageStart, rows);
+    while (pageCache.size > MAX_PAGE_CACHE_PAGES) {
+      const oldest = pageCache.keys().next().value;
+      if (oldest === undefined) break;
+      pageCache.delete(oldest);
+    }
+  }
+
+  function getCachedPage(pageStart: number): DbValue[][] | undefined {
+    const rows = pageCache.get(pageStart);
+    if (rows === undefined) return undefined;
+    pageCache.delete(pageStart);
+    pageCache.set(pageStart, rows);
+    return rows;
   }
 
   // 編集モードのセルを作る。editing=false なら表示モード (read-only セル相当
@@ -1699,7 +1714,7 @@ export function createTableGrid(
   // 既存データ行 (read-only もしくは編集モード) を 1 行ぶん組み立てる。
   function buildDataRow(i: number): HTMLElement {
     const pageStart = Math.floor(i / PAGE_SIZE) * PAGE_SIZE;
-    const pageRows = pageCache.get(pageStart);
+    const pageRows = getCachedPage(pageStart);
     const rowData = pageRows ? pageRows[i - pageStart] : null;
 
     const row = document.createElement("div");
@@ -2127,7 +2142,7 @@ export function createTableGrid(
       columns = initialData.columns;
       columnNames = columns.map((c) => c.name);
       totalRows = initialData.totalRows;
-      pageCache.set(0, initialData.rows);
+      rememberPage(0, initialData.rows);
     } else {
       columns = [];
       columnNames = [];

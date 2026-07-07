@@ -19,6 +19,7 @@ import type { AppRoute } from "../core/routes";
 import {
   limitPaletteResults,
   movePaletteSelection,
+  PALETTE_RESULT_LIMIT,
 } from "../core/search-palette";
 import type {
   FileMeta,
@@ -426,7 +427,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       const response = await repoPaletteFiles(ref);
       if (PALETTE !== state || state.input.value !== query) return;
       state.items = limitPaletteResults(
-        rankPathMatches(query, response.files),
+        rankPathMatches(query, response.files, PALETTE_RESULT_LIMIT),
       ).map((match) => ({
         kind: "file",
         path: match.item.path,
@@ -519,6 +520,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     const query = state.input.value;
     if (state.mode === "file") {
       updateFilePalette(state, query).catch(() => {
+        if (PALETTE !== state || state.input.value !== query) return;
         state.status.textContent = "Search failed";
       });
     } else {

@@ -17,6 +17,7 @@ import {
   refCommitPage,
   refCommits,
   refs,
+  splitHunks,
   treeEntries,
   truncateToNHunks,
   untrackedMeta,
@@ -112,6 +113,24 @@ describe("truncateToNHunks", () => {
     expect(result.text.includes("@@ -40,4 +40,4 @@")).toBe(false);
   });
 
+  test("splits unified hunks even when the diff has no file header", () => {
+    const result = splitHunks("@@ -1 +1 @@\n-old\n+new\n");
+
+    expect(result).toEqual({
+      header: "",
+      hunks: ["@@ -1 +1 @@\n-old\n+new\n"],
+    });
+  });
+
+  test("keeps a leading blank line in the diff header before the first hunk", () => {
+    const result = splitHunks("\n@@ -1 +1 @@\n-old\n+new\n");
+
+    expect(result).toEqual({
+      header: "\n",
+      hunks: ["@@ -1 +1 @@\n-old\n+new\n"],
+    });
+  });
+
   test("server preview keeps medium and large files eligible for split layout", () => {
     const server = sourceFixture(
       readFileSync("web-src/server/preview.ts", "utf8"),
@@ -136,9 +155,9 @@ describe("truncateToNHunks", () => {
   test("untracked diff cache is keyed by the current worktree file signature", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-untracked-cache-key-"));
     try {
-      writeFileSync(join(dir, "main.tf"), "");
+      writeFileSync(join(dir, "sample.cfg"), "");
       const empty = fileDiffCacheKey({
-        path: "main.tf",
+        path: "sample.cfg",
         isUntracked: true,
         range: { from: "HEAD", to: "worktree" },
         extras: [],
@@ -146,12 +165,9 @@ describe("truncateToNHunks", () => {
         cwd: dir,
       });
 
-      writeFileSync(
-        join(dir, "main.tf"),
-        'terraform {\n  required_version = ">= 1.6.0"\n}\n',
-      );
+      writeFileSync(join(dir, "sample.cfg"), "setting {\n  value = true\n}\n");
       const edited = fileDiffCacheKey({
-        path: "main.tf",
+        path: "sample.cfg",
         isUntracked: true,
         range: { from: "HEAD", to: "worktree" },
         extras: [],
@@ -160,7 +176,9 @@ describe("truncateToNHunks", () => {
       });
 
       expect(empty === edited).toBe(false);
-      expect(edited.startsWith("u\u0000main.tf\u0000state:file|")).toBe(true);
+      expect(edited.startsWith("u\u0000sample.cfg\u0000state:file|")).toBe(
+        true,
+      );
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
@@ -169,9 +187,9 @@ describe("truncateToNHunks", () => {
   test("tracked worktree diff cache is keyed by the current worktree file signature", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-tracked-cache-key-"));
     try {
-      writeFileSync(join(dir, "main.tf"), "terraform {}\n");
+      writeFileSync(join(dir, "sample.cfg"), "setting {}\n");
       const original = fileDiffCacheKey({
-        path: "main.tf",
+        path: "sample.cfg",
         isUntracked: false,
         range: { from: "HEAD", to: "worktree" },
         extras: [],
@@ -179,12 +197,9 @@ describe("truncateToNHunks", () => {
         cwd: dir,
       });
 
-      writeFileSync(
-        join(dir, "main.tf"),
-        'terraform {\n  required_version = ">= 1.6.0"\n}\n',
-      );
+      writeFileSync(join(dir, "sample.cfg"), "setting {\n  value = true\n}\n");
       const edited = fileDiffCacheKey({
-        path: "main.tf",
+        path: "sample.cfg",
         isUntracked: false,
         range: { from: "HEAD", to: "worktree" },
         extras: [],
@@ -193,9 +208,9 @@ describe("truncateToNHunks", () => {
       });
 
       expect(original === edited).toBe(false);
-      expect(edited.startsWith("t\u0000main.tf\u0000\u0000state:file|")).toBe(
-        true,
-      );
+      expect(
+        edited.startsWith("t\u0000sample.cfg\u0000\u0000state:file|"),
+      ).toBe(true);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
@@ -206,9 +221,9 @@ describe("truncateToNHunks", () => {
       join(tmpdir(), "code-viewer-reverse-worktree-cache-key-"),
     );
     try {
-      writeFileSync(join(dir, "main.tf"), "terraform {}\n");
+      writeFileSync(join(dir, "sample.cfg"), "setting {}\n");
       const original = fileDiffCacheKey({
-        path: "main.tf",
+        path: "sample.cfg",
         isUntracked: false,
         range: { from: "worktree", to: "HEAD" },
         extras: [],
@@ -216,12 +231,9 @@ describe("truncateToNHunks", () => {
         cwd: dir,
       });
 
-      writeFileSync(
-        join(dir, "main.tf"),
-        'terraform {\n  required_version = ">= 1.6.0"\n}\n',
-      );
+      writeFileSync(join(dir, "sample.cfg"), "setting {\n  value = true\n}\n");
       const edited = fileDiffCacheKey({
-        path: "main.tf",
+        path: "sample.cfg",
         isUntracked: false,
         range: { from: "worktree", to: "HEAD" },
         extras: [],
@@ -230,9 +242,9 @@ describe("truncateToNHunks", () => {
       });
 
       expect(original === edited).toBe(false);
-      expect(edited.startsWith("t\u0000main.tf\u0000\u0000state:file|")).toBe(
-        true,
-      );
+      expect(
+        edited.startsWith("t\u0000sample.cfg\u0000\u0000state:file|"),
+      ).toBe(true);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
@@ -241,9 +253,9 @@ describe("truncateToNHunks", () => {
   test("commit-to-commit diff cache omits worktree file signatures", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-cache-key-"));
     try {
-      writeFileSync(join(dir, "main.tf"), "terraform {}\n");
+      writeFileSync(join(dir, "sample.cfg"), "setting {}\n");
       const original = fileDiffCacheKey({
-        path: "main.tf",
+        path: "sample.cfg",
         isUntracked: false,
         range: { from: "HEAD~1", to: "HEAD" },
         extras: [],
@@ -251,12 +263,9 @@ describe("truncateToNHunks", () => {
         cwd: dir,
       });
 
-      writeFileSync(
-        join(dir, "main.tf"),
-        'terraform {\n  required_version = ">= 1.6.0"\n}\n',
-      );
+      writeFileSync(join(dir, "sample.cfg"), "setting {\n  value = true\n}\n");
       const edited = fileDiffCacheKey({
-        path: "main.tf",
+        path: "sample.cfg",
         isUntracked: false,
         range: { from: "HEAD~1", to: "HEAD" },
         extras: [],
@@ -276,14 +285,11 @@ describe("repository tree helpers", () => {
   test("worktree file signature changes when an untracked file is edited", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-file-signature-"));
     try {
-      writeFileSync(join(dir, "main.tf"), "");
-      const empty = worktreeFileSignature("main.tf", dir);
+      writeFileSync(join(dir, "sample.cfg"), "");
+      const empty = worktreeFileSignature("sample.cfg", dir);
 
-      writeFileSync(
-        join(dir, "main.tf"),
-        'terraform {\n  required_version = ">= 1.6.0"\n}\n',
-      );
-      const edited = worktreeFileSignature("main.tf", dir);
+      writeFileSync(join(dir, "sample.cfg"), "setting {\n  value = true\n}\n");
+      const edited = worktreeFileSignature("sample.cfg", dir);
 
       expect(empty === edited).toBe(false);
       expect(edited.startsWith("state:file|size:")).toBe(true);
@@ -318,6 +324,23 @@ describe("repository tree helpers", () => {
       expect(existsSync(join(dir, "nested-repo"))).toBe(true);
       expect(result.some((file) => file.path === "nested-repo/")).toBe(false);
       expect(result.some((file) => file.path === "link-dir")).toBe(false);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("untracked file metadata counts large text files by newline bytes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-untracked-large-"));
+    try {
+      git(dir, ["init"]);
+      writeFileSync(join(dir, "large.txt"), "line\n".repeat(200_000));
+
+      const result = untrackedMeta(dir);
+      const large = result.find((file) => file.path === "large.txt");
+
+      expect(large?.status).toBe("A");
+      expect(large?.binary).toBe(false);
+      expect(large?.additions).toBe(200_000);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }

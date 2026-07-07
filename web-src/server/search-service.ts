@@ -13,7 +13,7 @@
 //     parseGitGrepOutput / fixedStringLineMatches / buildFileSearchList /
 //     isSkippableSearchPath / size constants). Nothing is duplicated.
 //   - git.ts owns listTree / verifyTreeRef / isGitInternalPath / show.
-//   - runtime.runSync is the existing process-spawn helper.
+//   - runtime.runSync and spawn-runner own process execution.
 //
 // What we add here is only the orchestration that previously read closure
 // state — turned into pure functions that take `SearchEnv`.
@@ -26,6 +26,7 @@ import type {
   GrepResponse,
 } from "../core/types";
 import { commandForExternal } from "./command-resolver";
+import { spawnTextAsync } from "./database/adapters/spawn-runner";
 import * as git from "./git";
 import { runSync } from "./runtime";
 import {
@@ -68,6 +69,21 @@ let rgAvailableCache: boolean | null = null;
 export function rgAvailable(cwd: string): boolean {
   if (rgAvailableCache !== null) return rgAvailableCache;
   const proc = runSync([commandForExternal("rg"), "--version"], cwd);
+  rgAvailableCache = proc.code === 0;
+  return rgAvailableCache;
+}
+
+export async function rgAvailableAsync(cwd: string): Promise<boolean> {
+  if (rgAvailableCache !== null) return rgAvailableCache;
+  const proc = await spawnTextAsync({
+    command: commandForExternal("rg"),
+    args: ["--version"],
+    cwd,
+    timeoutMs: 5000,
+    abortMessage: "rg version aborted",
+    timeoutMessage: "rg version timed out after 5000ms",
+    rejectOnError: false,
+  });
   rgAvailableCache = proc.code === 0;
   return rgAvailableCache;
 }
@@ -251,6 +267,70 @@ function grepWorktree(env: SearchEnv, req: GrepRequest): GrepResponse {
   };
 }
 
+async function grepWorktreeAsync(
+  env: SearchEnv,
+  req: GrepRequest,
+): Promise<GrepResponse> {
+  const paths = filterCallerPaths(env, req.paths);
+  if (await rgAvailableAsync(env.cwd)) {
+    const safePaths = paths.filter((path) => safeWorktreePath(env, path));
+    const args = buildRgArgs(
+      req.query,
+      req.max,
+      safePaths,
+      req.regex,
+      env.omitDirNames,
+      env.excludeNames,
+    );
+    const proc = await spawnTextAsync({
+      command: commandForExternal("rg"),
+      args: args.slice(1),
+      cwd: env.cwd,
+      timeoutMs: 5000,
+      abortMessage: "grep aborted",
+      timeoutMessage: "grep timed out after 5000ms",
+      rejectOnError: false,
+    });
+    const matches = parseRgOutput(
+      proc.stdout,
+      req.max,
+      env.omitDirNames,
+      env.excludeNames,
+    ).filter(
+      (match) =>
+        isSafePath(match.path) &&
+        !git.isGitInternalPath(match.path) &&
+        !isSkippableSearchPath(
+          match.path,
+          env.omitDirNames,
+          env.excludeNames,
+        ) &&
+        !!safeWorktreePath(env, match.path),
+    );
+    return {
+      ref: "worktree",
+      engine: "rg",
+      truncated: matches.length >= req.max,
+      matches,
+    };
+  }
+  if (req.regex) {
+    return {
+      ref: "worktree",
+      engine: "fallback",
+      truncated: false,
+      matches: [],
+    };
+  }
+  const matches = grepWorktreeFallback(env, req.query, req.max, paths);
+  return {
+    ref: "worktree",
+    engine: "fallback",
+    truncated: matches.length >= req.max,
+    matches,
+  };
+}
+
 function grepTreeRef(env: SearchEnv, req: GrepRequest): GrepResponse {
   const safePaths = filterCallerPaths(env, req.paths);
   const args = [
@@ -273,6 +353,50 @@ function grepTreeRef(env: SearchEnv, req: GrepRequest): GrepResponse {
   const stdout = proc.stdout;
   const matches = parseGitGrepOutput(
     stdout,
+    req.ref,
+    req.max,
+    env.omitDirNames,
+    env.excludeNames,
+  ).slice(0, req.max);
+  return {
+    ref: req.ref,
+    engine: "git",
+    truncated: matches.length >= req.max,
+    matches,
+  };
+}
+
+async function grepTreeRefAsync(
+  env: SearchEnv,
+  req: GrepRequest,
+): Promise<GrepResponse> {
+  const safePaths = filterCallerPaths(env, req.paths);
+  const args = [
+    "-c",
+    "core.quotepath=false",
+    "grep",
+    "-n",
+    "--column",
+    "-i",
+    req.regex ? "-E" : "-F",
+    "--no-color",
+    "-e",
+    req.query,
+    req.ref,
+    "--",
+    ...safePaths,
+  ];
+  const proc = await spawnTextAsync({
+    command: commandForExternal("git"),
+    args,
+    cwd: env.cwd,
+    timeoutMs: 5000,
+    abortMessage: "git grep aborted",
+    timeoutMessage: "git grep timed out after 5000ms",
+    rejectOnError: false,
+  });
+  const matches = parseGitGrepOutput(
+    proc.stdout,
     req.ref,
     req.max,
     env.omitDirNames,
@@ -317,6 +441,38 @@ export function grepRepo(env: SearchEnv, req: GrepRequest): GrepRunResult {
     return { ok: true, value: grepWorktree(env, req) };
   }
   return { ok: true, value: grepTreeRef(env, req) };
+}
+
+export async function grepRepoAsync(
+  env: SearchEnv,
+  req: GrepRequest,
+): Promise<GrepRunResult> {
+  const isWorktree = req.ref === "worktree" || req.ref === "";
+  if (!isWorktree) {
+    const refCheck = git.verifyTreeRefResult(req.ref, env.cwd);
+    if (refCheck.ok !== true) {
+      return {
+        ok: false,
+        error: refCheck.error,
+        status: refCheck.status,
+      };
+    }
+  }
+  if (!req.query.trim()) {
+    return {
+      ok: true,
+      value: {
+        ref: req.ref,
+        engine: req.ref === "worktree" ? "fallback" : "git",
+        truncated: false,
+        matches: [],
+      },
+    };
+  }
+  if (isWorktree) {
+    return { ok: true, value: await grepWorktreeAsync(env, req) };
+  }
+  return { ok: true, value: await grepTreeRefAsync(env, req) };
 }
 
 // List every blob/commit entry under `ref`. Used by /_files (with a

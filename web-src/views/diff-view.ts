@@ -1169,7 +1169,12 @@ export function createDiffView(deps: DiffViewDeps) {
       if (fresh && card.isConnected) enqueueLoad(fresh, card, 0);
     };
 
-    return trackLoad<FileDiffResponse>(fetch(url).then((r) => r.json()))
+    return trackLoad<FileDiffResponse>(
+      fetch(url).then(async (r) => {
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      }),
+    )
       .then(async (data) => {
         if (String(myReq) !== card.dataset.reqId) return; // superseded by newer request
         if (myGen !== getServerGeneration()) {

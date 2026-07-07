@@ -1,9 +1,12 @@
 import {
+  closeSync,
   type Dirent,
   existsSync,
   lstatSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   statSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -1436,19 +1439,19 @@ export function listTreeResult(
 export function untrackedMeta(cwd: string): GitFileMeta[] {
   return untracked(cwd).flatMap((path) => {
     const full = join(cwd, path);
-    let binary = false;
-    let lines = 0;
     let fileExists = false;
     try {
       fileExists = existsSync(full) && statSync(full).isFile();
     } catch {
       fileExists = false;
     }
+    let scan: { binary: boolean; newlines: number };
     if (fileExists) {
-      const data = readFileSync(full);
-      const probe = data.subarray(0, 8192);
-      binary = probe.includes(0);
-      if (!binary) lines = data.toString("utf8").split("\n").length - 1;
+      try {
+        scan = scanFileBinaryAndNewlines(full);
+      } catch {
+        return [];
+      }
     } else {
       return [];
     }
@@ -1456,13 +1459,40 @@ export function untrackedMeta(cwd: string): GitFileMeta[] {
       {
         path,
         status: "A",
-        additions: binary ? 0 : lines,
+        additions: scan.binary ? 0 : scan.newlines,
         deletions: 0,
-        binary,
+        binary: scan.binary,
         untracked: true,
       },
     ];
   });
+}
+
+function scanFileBinaryAndNewlines(full: string): {
+  binary: boolean;
+  newlines: number;
+} {
+  const fd = openSync(full, "r");
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let newlines = 0;
+  let inspected = 0;
+  try {
+    while (true) {
+      const read = readSync(fd, buffer, 0, buffer.length, null);
+      if (read <= 0) break;
+      const binaryProbeBytes = Math.min(read, Math.max(0, 8192 - inspected));
+      for (let i = 0; i < binaryProbeBytes; i++) {
+        if (buffer[i] === 0) return { binary: true, newlines: 0 };
+      }
+      inspected += read;
+      for (let i = 0; i < read; i++) {
+        if (buffer[i] === 10) newlines++;
+      }
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return { binary: false, newlines };
 }
 
 export function fileMeta(
@@ -1555,11 +1585,14 @@ export function splitHunks(diffText: string): {
   hunks: string[];
 } {
   if (!diffText) return { header: "", hunks: [] };
-  const first = diffText.startsWith("@@") ? 0 : diffText.indexOf("\n@@") + 1;
-  if (first <= 0) return { header: diffText, hunks: [] };
-  const header = diffText.slice(0, first);
+  const startsWithHunk = diffText.startsWith("@@");
+  const first = startsWithHunk ? 0 : diffText.indexOf("\n@@");
+  if (first < 0) return { header: diffText, hunks: [] };
+  const hunkStart = startsWithHunk ? 0 : first + 1;
+  if (hunkStart >= diffText.length) return { header: diffText, hunks: [] };
+  const header = diffText.slice(0, hunkStart);
   const hunks: string[] = [];
-  let cur = first;
+  let cur = hunkStart;
   while (cur < diffText.length) {
     const next = diffText.indexOf("\n@@", cur + 1);
     const end = next >= 0 ? next : diffText.length;

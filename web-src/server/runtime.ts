@@ -27,13 +27,14 @@ export type StartedServer = {
 export function runSync(
   args: string[],
   cwd: string,
-  options: { timeout?: number } = {},
+  options: { timeout?: number; maxBuffer?: number } = {},
 ): RunResult {
   const proc = spawnSync(args[0], args.slice(1), {
     cwd,
     encoding: "buffer",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: options.timeout,
+    maxBuffer: options.maxBuffer ?? 64 * 1024 * 1024,
     killSignal: "SIGKILL",
   });
   return {
@@ -49,13 +50,14 @@ export function runSync(
 export function runBytesSync(
   args: string[],
   cwd: string,
-  options: { timeout?: number } = {},
+  options: { timeout?: number; maxBuffer?: number } = {},
 ): RunBytesResult {
   const proc = spawnSync(args[0], args.slice(1), {
     cwd,
     encoding: "buffer",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: options.timeout,
+    maxBuffer: options.maxBuffer ?? 64 * 1024 * 1024,
     killSignal: "SIGKILL",
   });
   return {

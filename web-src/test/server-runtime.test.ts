@@ -28,6 +28,21 @@ describe("server runtime compatibility helpers", () => {
     expect(result.stderr).toBe("");
   });
 
+  test("runSync captures command output beyond Node's small default buffer", () => {
+    const result = runSync(
+      [
+        process.execPath,
+        "-e",
+        "process.stdout.write('x'.repeat(2 * 1024 * 1024))",
+      ],
+      process.cwd(),
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout.length).toBe(2 * 1024 * 1024);
+    expect(result.stderr).toBe("");
+  });
+
   test("sync runners return ENOENT diagnostics instead of hiding spawn errors", () => {
     const missing = join(tmpRoot, "missing-command-for-sync-runtime");
 

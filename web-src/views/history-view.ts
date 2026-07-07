@@ -1000,6 +1000,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
     generation++;
     loading = false;
     inFlight = null;
+    if (filterTimer) {
+      clearTimeout(filterTimer);
+      filterTimer = undefined;
+    }
     selectionGeneration++;
     selectedSha = "";
     setBanner("");

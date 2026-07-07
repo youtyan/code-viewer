@@ -2716,10 +2716,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   // ============================================================
   let SERVER_GENERATION = 0;
 
-  // fetch() is wrapped once at startup, so new server calls are counted and
-  // cancellable without every feature remembering to call trackLoad.
+  // fetch() is wrapped once at startup, so trackLoad is only a compatibility
+  // passthrough. Do not pass non-fetch promises here unless tracking is restored.
   function trackLoad<T>(promise: Promise<T>): Promise<T> {
-    return NETWORK_ACTIVITY.track(promise);
+    return promise;
   }
 
   function escapeHtml(s: unknown): string {
