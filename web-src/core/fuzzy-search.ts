@@ -144,24 +144,146 @@ export function fuzzyMatchPath(query: string, path: string): FuzzyMatch | null {
 export function rankFuzzyPaths<T extends { path: string }>(
   query: string,
   items: T[],
+  limit?: number,
 ): RankedFuzzyPath<T>[] {
-  return items
-    .map((item) => {
-      const match = computeFuzzyMatch(query, item.path);
-      return match
-        ? { item, score: match.score, ranges: match.ranges, tier: match.tier }
-        : null;
-    })
-    .filter(
-      (item): item is RankedFuzzyPath<T> & { tier: number } => item !== null,
-    )
-    .sort(
-      (a, b) =>
-        b.tier - a.tier ||
-        b.score - a.score ||
-        a.item.path.localeCompare(b.item.path),
-    )
+  const bounded =
+    Number.isInteger(limit) && limit !== undefined && limit > 0
+      ? Math.floor(limit)
+      : 0;
+  const compare = (
+    a: RankedFuzzyPath<T> & { tier: number },
+    b: RankedFuzzyPath<T> & { tier: number },
+  ) =>
+    b.tier - a.tier ||
+    b.score - a.score ||
+    a.item.path.localeCompare(b.item.path);
+  if (!bounded) {
+    return items
+      .map((item) => {
+        const match = computeFuzzyMatch(query, item.path);
+        return match
+          ? { item, score: match.score, ranges: match.ranges, tier: match.tier }
+          : null;
+      })
+      .filter(
+        (item): item is RankedFuzzyPath<T> & { tier: number } => item !== null,
+      )
+      .sort(compare)
+      .map(({ item, score, ranges }) => ({ item, score, ranges }));
+  }
+
+  const top: Array<RankedFuzzyPath<T> & { tier: number }> = [];
+  for (const item of items) {
+    const match = computeFuzzyMatch(query, item.path);
+    if (!match) continue;
+    const ranked = {
+      item,
+      score: match.score,
+      ranges: match.ranges,
+      tier: match.tier,
+    };
+    pushBoundedTop(top, ranked, bounded, compare);
+  }
+  return top
+    .sort(compare)
     .map(({ item, score, ranges }) => ({ item, score, ranges }));
+}
+
+function pushBoundedTop<T>(
+  heap: T[],
+  item: T,
+  limit: number,
+  compareBestFirst: (a: T, b: T) => number,
+): void {
+  const isWorse = (a: T, b: T) => compareBestFirst(a, b) > 0;
+  const siftUp = (index: number) => {
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (!isWorse(heap[index], heap[parent])) break;
+      [heap[index], heap[parent]] = [heap[parent], heap[index]];
+      index = parent;
+    }
+  };
+  const siftDown = (index: number) => {
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let worst = index;
+      if (left < heap.length && isWorse(heap[left], heap[worst])) worst = left;
+      if (right < heap.length && isWorse(heap[right], heap[worst]))
+        worst = right;
+      if (worst === index) break;
+      [heap[index], heap[worst]] = [heap[worst], heap[index]];
+      index = worst;
+    }
+  };
+  if (heap.length < limit) {
+    heap.push(item);
+    siftUp(heap.length - 1);
+    return;
+  }
+  if (compareBestFirst(item, heap[0]) >= 0) return;
+  heap[0] = item;
+  siftDown(0);
+}
+
+function rankGlobPathMatches<T extends { path: string }>(
+  query: string,
+  items: T[],
+  limit?: number,
+): RankedPathMatch<T>[] {
+  const matchPath = createGlobPathMatcher(query);
+  if (!matchPath) return [];
+  const bounded =
+    Number.isInteger(limit) && limit !== undefined && limit > 0
+      ? Math.floor(limit)
+      : 0;
+  const compare = (a: RankedPathMatch<T>, b: RankedPathMatch<T>) =>
+    b.score - a.score || a.item.path.localeCompare(b.item.path);
+  if (!bounded) {
+    return items
+      .map((item): RankedPathMatch<T> | null => {
+        const match = matchPath(item.path);
+        return match
+          ? {
+              item,
+              score: match.score,
+              ranges: match.ranges,
+              mode: "glob" as const,
+            }
+          : null;
+      })
+      .filter((item): item is RankedPathMatch<T> => item !== null)
+      .sort(compare);
+  }
+
+  const top: RankedPathMatch<T>[] = [];
+  for (const item of items) {
+    const match = matchPath(item.path);
+    if (!match) continue;
+    const ranked = {
+      item,
+      score: match.score,
+      ranges: match.ranges,
+      mode: "glob" as const,
+    };
+    pushBoundedTop(top, ranked, bounded, compare);
+  }
+  return top.sort(compare);
+}
+
+export function rankPathMatches<T extends { path: string }>(
+  query: string,
+  items: T[],
+  limit?: number,
+): RankedPathMatch<T>[] {
+  if (isGlobPathQuery(query)) {
+    return rankGlobPathMatches(query, items, limit);
+  }
+  return rankFuzzyPaths(query, items, limit).map((item) => ({
+    ...item,
+    mode: "fuzzy" as const,
+  }));
 }
 
 export function isGlobPathQuery(query: string): boolean {
@@ -209,71 +331,45 @@ export function globToRegExp(query: string): RegExp | null {
 }
 
 export function globMatchPath(query: string, path: string): FuzzyMatch | null {
+  return createGlobPathMatcher(query)?.(path) ?? null;
+}
+
+function createGlobPathMatcher(
+  query: string,
+): ((path: string) => FuzzyMatch | null) | null {
   const regex = globToRegExp(query);
-  const baseStart = basenameStart(path);
-  const basename = path.slice(baseStart);
-  if (
-    !regex ||
-    (!regex.test(path) && (query.includes("/") || !regex.test(basename)))
-  )
-    return null;
+  if (!regex) return null;
   const literal = query
     .replace(/[*?[\]]+/g, " ")
     .trim()
     .split(/\s+/)
     .filter(Boolean);
-  const ranges: FuzzyRange[] = [];
-  const lowerPath = path.toLowerCase();
-  for (const part of literal) {
-    const start = lowerPath.indexOf(part.toLowerCase());
-    if (start >= 0) ranges.push({ start, end: start + part.length });
-  }
-  ranges.sort((a, b) => a.start - b.start || a.end - b.end);
-  const mergedRanges: FuzzyRange[] = [];
-  for (const range of ranges) {
-    const last = mergedRanges[mergedRanges.length - 1];
-    if (last && last.end >= range.start) {
-      last.end = Math.max(last.end, range.end);
-    } else {
-      mergedRanges.push({ ...range });
+  const suffix = query.replace(/^\*+/, "").toLowerCase();
+  return (path: string): FuzzyMatch | null => {
+    const baseStart = basenameStart(path);
+    const basename = path.slice(baseStart);
+    if (!regex.test(path) && (query.includes("/") || !regex.test(basename)))
+      return null;
+    const ranges: FuzzyRange[] = [];
+    const lowerPath = path.toLowerCase();
+    for (const part of literal) {
+      const start = lowerPath.indexOf(part.toLowerCase());
+      if (start >= 0) ranges.push({ start, end: start + part.length });
     }
-  }
-  const score =
-    1000 -
-    Math.min(path.length, 200) +
-    (path
-      .slice(baseStart)
-      .toLowerCase()
-      .endsWith(query.replace(/^\*+/, "").toLowerCase())
-      ? 50
-      : 0);
-  return { score, ranges: mergedRanges };
-}
-
-export function rankPathMatches<T extends { path: string }>(
-  query: string,
-  items: T[],
-): RankedPathMatch<T>[] {
-  if (isGlobPathQuery(query)) {
-    return items
-      .map((item): RankedPathMatch<T> | null => {
-        const match = globMatchPath(query, item.path);
-        return match
-          ? {
-              item,
-              score: match.score,
-              ranges: match.ranges,
-              mode: "glob" as const,
-            }
-          : null;
-      })
-      .filter((item): item is RankedPathMatch<T> => item !== null)
-      .sort(
-        (a, b) => b.score - a.score || a.item.path.localeCompare(b.item.path),
-      );
-  }
-  return rankFuzzyPaths(query, items).map((item) => ({
-    ...item,
-    mode: "fuzzy" as const,
-  }));
+    ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+    const mergedRanges: FuzzyRange[] = [];
+    for (const range of ranges) {
+      const last = mergedRanges[mergedRanges.length - 1];
+      if (last && last.end >= range.start) {
+        last.end = Math.max(last.end, range.end);
+      } else {
+        mergedRanges.push({ ...range });
+      }
+    }
+    const score =
+      1000 -
+      Math.min(path.length, 200) +
+      (path.slice(baseStart).toLowerCase().endsWith(suffix) ? 50 : 0);
+    return { score, ranges: mergedRanges };
+  };
 }

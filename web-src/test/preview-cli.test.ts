@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runGit as git } from "./_git-fixture";
 
 const tmpRoots: string[] = [];
 
@@ -273,6 +274,111 @@ describe("preview CLI", () => {
       throw new Error("preview process did not exit after SIGKILL");
     }
   });
+
+  runOrSkip("serves ranged raw files from a committed ref", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-ref-raw-"));
+    tmpRoots.push(root);
+    git(root, ["init", "-b", "main"]);
+    git(root, ["config", "user.email", "sample-author"]);
+    git(root, ["config", "user.name", "sample-author"]);
+    writeFileSync(join(root, "sample.txt"), "abcdef\n");
+    git(root, ["add", "sample.txt"]);
+    git(root, ["commit", "-m", "sample initial commit"]);
+
+    const proc = spawn(
+      process.execPath,
+      ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+      {
+        cwd: join(import.meta.dir, "..", ".."),
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const exited = new Promise<number | null>((resolve) => {
+      proc.once("exit", (code) => resolve(code));
+    });
+
+    let cleanupTimedOut = false;
+    try {
+      const url = await Promise.race([
+        waitForPreviewUrl(proc),
+        sleep(5000).then(() => {
+          throw new Error("preview did not start");
+        }),
+      ]);
+      const rawUrl = new URL("/_file?path=sample.txt&ref=HEAD", url).toString();
+      const response = await fetch(rawUrl, {
+        headers: { Range: "bytes=1-3" },
+      });
+
+      expect(response.status).toBe(206);
+      expect(response.headers.get("content-range")).toBe("bytes 1-3/7");
+      expect(response.headers.get("content-length")).toBe("3");
+      expect(await response.text()).toBe("bcd");
+    } finally {
+      proc.kill("SIGKILL");
+      cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+    }
+    if (cleanupTimedOut) {
+      throw new Error("preview process did not exit after SIGKILL");
+    }
+  });
+
+  runOrSkip(
+    "serves untracked file diffs even when git diff exits with differences",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-untracked-http-"));
+      tmpRoots.push(root);
+      git(root, ["init", "-b", "main"]);
+      git(root, ["config", "user.email", "sample-author"]);
+      git(root, ["config", "user.name", "sample-author"]);
+      writeFileSync(join(root, "tracked.txt"), "base\n");
+      git(root, ["add", "tracked.txt"]);
+      git(root, ["commit", "-m", "sample initial commit"]);
+      writeFileSync(join(root, "sample_new.ts"), "export const sample = 1;\n");
+
+      const proc = spawn(
+        process.execPath,
+        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        {
+          cwd: join(import.meta.dir, "..", ".."),
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+
+      let cleanupTimedOut = false;
+      try {
+        const url = await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(5000).then(() => {
+            throw new Error("preview did not start");
+          }),
+        ]);
+        const diffUrl = new URL("/file_diff", url);
+        diffUrl.searchParams.set("from", "HEAD");
+        diffUrl.searchParams.set("to", "worktree");
+        diffUrl.searchParams.set("untracked", "1");
+        diffUrl.searchParams.set("ignore_ws", "1");
+        diffUrl.searchParams.set("status", "A");
+        diffUrl.searchParams.set("path", "sample_new.ts");
+
+        const response = await fetchWithTimeout(diffUrl.toString(), 5000);
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as { diff: string; path: string };
+        expect(body.path).toBe("sample_new.ts");
+        expect(body.diff).toMatch(/diff --git/);
+        expect(body.diff).toMatch(/\+export const sample = 1;/);
+      } finally {
+        proc.kill("SIGKILL");
+        cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+      }
+      if (cleanupTimedOut) {
+        throw new Error("preview process did not exit after SIGKILL");
+      }
+    },
+  );
 
   runOrSkip(
     "surfaces git command failures from preview HTTP endpoints",

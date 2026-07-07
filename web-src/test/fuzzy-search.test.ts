@@ -117,4 +117,37 @@ describe("rankFuzzyPaths", () => {
       ".tmp/ai-character-venv/lib/python3.11/site-packages/PIL/FontFile.py",
     ]);
   });
+
+  test.each([
+    {
+      name: "fuzzy ranker keeps the same first two matches",
+      query: "app",
+      limit: 2,
+      rank: (query: string, items: Array<{ path: string }>, limit?: number) =>
+        rankFuzzyPaths(query, items, limit),
+    },
+    {
+      name: "glob ranker keeps the same first two matches",
+      query: "*.ts",
+      limit: 2,
+      rank: (query: string, items: Array<{ path: string }>, limit?: number) =>
+        rankPathMatches(query, items, limit),
+    },
+  ])("$name", ({ query, limit, rank }) => {
+    const items = [
+      { path: "src/application.ts" },
+      { path: "README.md" },
+      { path: "web-src/app.ts" },
+      { path: "app.ts" },
+      { path: "src/app.test.ts" },
+    ];
+
+    const full = rank(query, items);
+    const bounded = rank(query, items, limit);
+
+    expect(bounded.map((item) => item.item.path)).toEqual(
+      full.slice(0, limit).map((item) => item.item.path),
+    );
+    expect(bounded.length).toBe(limit);
+  });
 });

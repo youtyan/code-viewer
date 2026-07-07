@@ -188,6 +188,7 @@ export type FileDiffResponse = {
   truncated?: boolean;
   binary?: boolean;
   generation?: number;
+  error?: string;
 };
 
 export type FileRangeResponse = {

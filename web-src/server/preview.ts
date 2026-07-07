@@ -52,6 +52,7 @@ import {
 import {
   cacheFresh,
   fileDiffCacheKey,
+  MAX_TIMED_CACHE_ENTRIES,
   setTimedCacheEntry,
   type TimedCacheEntry,
 } from "./cache";
@@ -118,7 +119,7 @@ import {
 } from "./runtime";
 import { DEFAULT_EXCLUDE_NAMES, normalizeGrepMax } from "./search";
 import {
-  grepRepo,
+  grepRepoAsync,
   isExcludedScopePath,
   isSafePath,
   listRepoFiles,
@@ -1080,10 +1081,15 @@ function handleFiles(url: URL) {
   );
   if (result.ok !== true) return text(result.error, result.status ?? 400);
   fileListCache.set(key, { generation, body: result.value });
+  while (fileListCache.size > MAX_TIMED_CACHE_ENTRIES) {
+    const oldest = fileListCache.keys().next().value;
+    if (oldest === undefined) break;
+    fileListCache.delete(oldest);
+  }
   return json(result.value);
 }
 
-function handleGrep(url: URL) {
+async function handleGrep(url: URL) {
   const query = url.searchParams.get("q") || "";
   const ref = url.searchParams.get("ref") || "worktree";
   const max = normalizeGrepMax(url.searchParams.get("max"));
@@ -1094,13 +1100,16 @@ function handleGrep(url: URL) {
   const excludeNames = scopeExcludeNamesFromQuery(url);
   const paths = url.searchParams.getAll("path");
   const regex = url.searchParams.get("regex") === "1";
-  const result = grepRepo(currentSearchEnv(omitDirNames, excludeNames), {
-    query,
-    ref,
-    paths,
-    regex,
-    max,
-  });
+  const result = await grepRepoAsync(
+    currentSearchEnv(omitDirNames, excludeNames),
+    {
+      query,
+      ref,
+      paths,
+      regex,
+      max,
+    },
+  );
   if (result.ok !== true) return text(result.error, result.status ?? 400);
   return json(result.value);
 }
@@ -1284,9 +1293,9 @@ function handleFileDiff(url: URL) {
     if (isUntracked) {
       const res = git.untrackedFileDiff(extras, path, cwd);
       diffText = res.stdout || "";
-      if (res.code !== 0) {
-        errText = res.stderr;
-        errStatus = res.status;
+      if (res.code !== 0 && !(res.code === 1 && diffText)) {
+        errText = res.stderr || "diff failed";
+        errStatus = res.status ?? 500;
       }
     } else {
       const res = git.fileDiffText(
@@ -1296,8 +1305,8 @@ function handleFileDiff(url: URL) {
       );
       diffText = res.stdout || "";
       if (res.code !== 0) {
-        errText = res.stderr;
-        errStatus = res.status;
+        errText = res.stderr || "diff failed";
+        errStatus = res.status ?? 500;
       }
     }
     if (!errText) setTimedCacheEntry(fileCache, cacheKey, { diffText });
@@ -1546,6 +1555,7 @@ async function handleFileRange(url: URL) {
   if (ref === "worktree" || ref === "") {
     const full = safeWorktreePath(path);
     if (!full) return text("no file", 404);
+    const responseGeneration = generation;
     const result = await collectIndexedWorktreeLineRange(full, start, end);
     const body: FileRangeResponse = {
       path,
@@ -1555,10 +1565,11 @@ async function handleFileRange(url: URL) {
       lines: result.lines,
       total: result.total,
       complete: result.complete,
-      generation,
+      generation: responseGeneration,
     };
     return json(body);
   } else {
+    const responseGeneration = generation;
     const refCheck = git.verifyTreeRefResult(ref, cwd);
     if (refCheck.ok !== true)
       return text(refCheck.error, refCheck.status ?? 400);
@@ -1582,35 +1593,70 @@ async function handleFileRange(url: URL) {
       lines: result.lines,
       total: result.total,
       complete: result.complete,
-      generation,
+      generation: responseGeneration,
     };
     return json(body);
   }
 }
 
-function handleRawFile(req: Request, url: URL) {
+async function handleRawFile(req: Request, url: URL) {
   const path = url.searchParams.get("path") || "";
   if (!safePath(path)) return text("forbidden", 403);
   const ref = url.searchParams.get("ref") || "worktree";
-  let body: BodyInit;
   if (ref !== "worktree" && ref !== "") {
     const refCheck = git.verifyTreeRefResult(ref, cwd);
     if (refCheck.ok !== true)
       return text(refCheck.error, refCheck.status ?? 400);
-    const size = rawFileSize(path, ref);
-    if (size == null) return text("not in ref", 404);
+    const oid = git.objectId(ref, path, cwd);
+    if (oid.code !== 0 || !oid.oid) return text("not in ref", 404);
+    const sizeResult = git.objectByteSize(oid.oid, cwd);
+    if (sizeResult.code !== 0) return text("cannot read ref", 500);
+    const size = sizeResult.size;
     const metadata = gitFileMetadata(ref, path, size);
+    const rangeResult = req.headers.get("range")
+      ? parseHttpByteRange(req.headers.get("range"), size)
+      : null;
+    if (rangeResult?.kind === "unsatisfiable") {
+      return new Response(null, {
+        status: 416,
+        headers: {
+          ...rawFileHeaders(path, { size, metadata }),
+          "Content-Range": `bytes */${size}`,
+          "Content-Length": "0",
+        },
+      });
+    }
+    if (rangeResult?.kind === "range") {
+      const range = rangeResult.range;
+      if (req.method === "HEAD") {
+        return new Response(null, {
+          status: 206,
+          headers: rawFileHeaders(path, { size, range, metadata }),
+        });
+      }
+      const shown = git.catFileBlobStream(oid.oid, cwd);
+      const bytes = await collectByteRangeFromStream(
+        shown.stream,
+        range.start,
+        range.end + 1,
+      );
+      const code = await shown.exited;
+      if (code !== 0) return text("not in ref", 404);
+      const body = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength,
+      ) as ArrayBuffer;
+      return new Response(body, {
+        status: 206,
+        headers: rawFileHeaders(path, { size, range, metadata }),
+      });
+    }
     if (req.method === "HEAD")
       return new Response(null, {
         headers: rawFileHeaders(path, { size, metadata }),
       });
-    const res = git.showBytes(ref, path, cwd);
-    if (res.code !== 0) return text("not in ref", 404);
-    body = res.stdout.buffer.slice(
-      res.stdout.byteOffset,
-      res.stdout.byteOffset + res.stdout.byteLength,
-    ) as ArrayBuffer;
-    return new Response(body, {
+    const shown = git.catFileBlobStream(oid.oid, cwd);
+    return new Response(shown.stream, {
       headers: rawFileHeaders(path, { size, metadata }),
     });
   } else {
@@ -2804,13 +2850,13 @@ const server = await startServer({
       });
     if (url.pathname === "/_tree") return handleTree(url);
     if (url.pathname === "/_files") return handleFiles(url);
-    if (url.pathname === "/_grep") return handleGrep(url);
+    if (url.pathname === "/_grep") return await handleGrep(url);
     if (url.pathname === "/_commits") return handleRefCommits(url);
     if (url.pathname === "/_log") return handleLog(url);
     if (url.pathname === "/_file_blame") return handleFileBlame(url);
     if (url.pathname === "/file_diff") return handleFileDiff(url);
     if (url.pathname === "/file_range") return handleFileRange(url);
-    if (url.pathname === "/_file") return handleRawFile(req, url);
+    if (url.pathname === "/_file") return await handleRawFile(req, url);
     if (url.pathname === "/_open_path") return handleOpenPath(req);
     if (url.pathname === "/_trash_path") return handleTrashPath(req);
     if (url.pathname === "/_restore_trash") return handleRestoreTrash(req);

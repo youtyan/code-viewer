@@ -596,6 +596,7 @@ describe("table-grid edit mode", () => {
     await waitFor(() => fetchCalls.length === 1);
     const empty = q<HTMLElement>(grid.el, ".db-grid-viewport .db-pane-empty");
     await waitFor(() => empty.hidden === false);
+    expect(empty.querySelector(".db-pane-empty-icon")).toBeNull();
     expect(empty.querySelector(".db-pane-empty-title")?.textContent).toBe(
       "No rows match 1 active filter",
     );

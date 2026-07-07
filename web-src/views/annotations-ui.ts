@@ -118,6 +118,9 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   let ANNOTATIONS: AnnotationsState = { version: 1, sessions: [] };
   let annotationFollow = deps.getAnnotationFollow();
   let activeAnnotationId: string | null = null;
+  let refreshAnnotationsInFlight: Promise<void> | null = null;
+  let inlineAnnotationsMounted = false;
+  let databaseAnnotationsMounted = false;
   let annotationPanelDismissed = false;
   let activeSessionId: string | null = new URLSearchParams(
     window.location.search,
@@ -311,11 +314,14 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   }
 
   function applyDatabaseAnnotations(session: AnnotationSession | undefined) {
-    document
-      .querySelectorAll<HTMLElement>(".gdp-db-annotation-strip")
-      .forEach((el) => {
-        el.remove();
-      });
+    if (databaseAnnotationsMounted) {
+      document
+        .querySelectorAll<HTMLElement>(".gdp-db-annotation-strip")
+        .forEach((el) => {
+          el.remove();
+        });
+      databaseAnnotationsMounted = false;
+    }
     if (!session || deps.getRoute().screen !== "database") return;
     const matches = session.entries.filter(databaseAnnotationMatchesRoute);
     if (!matches.length) return;
@@ -328,6 +334,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       strip.appendChild(buildDatabaseAnnotationBlock(entry));
     }
     root.prepend(strip);
+    databaseAnnotationsMounted = true;
   }
 
   function inlineAnnotationTargetRow(
@@ -402,14 +409,20 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   }
 
   function applyInlineAnnotations() {
-    document.querySelectorAll(".gdp-annotation-row").forEach((row) => {
-      row.remove();
-    });
     // Inline rows are scoped to the selected session: showing every entry at
     // once buries the code, so nothing is inlined until a session is active.
     const session = ANNOTATIONS.sessions.find((s) => s.id === activeSessionId);
+    if (!session && !inlineAnnotationsMounted && !databaseAnnotationsMounted)
+      return;
+    if (inlineAnnotationsMounted) {
+      document.querySelectorAll(".gdp-annotation-row").forEach((row) => {
+        row.remove();
+      });
+      inlineAnnotationsMounted = false;
+    }
     applyDatabaseAnnotations(session);
     if (!session) return;
+    let mountedInlineRows = false;
     for (const entry of session.entries) {
       if (entry.target?.kind === "database") continue;
       const target = inlineAnnotationTargetRow(entry);
@@ -430,7 +443,9 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
           sibAnchor = sibAnchor.nextElementSibling as HTMLTableRowElement;
         sibAnchor.after(buildInlineSpacerRow(entry, sibling.cells.length));
       }
+      mountedInlineRows = true;
     }
+    inlineAnnotationsMounted = mountedInlineRows;
     syncInlineAnnotationWidths();
   }
 
@@ -617,7 +632,17 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     annotationListCountEl.textContent = `${ANNOTATIONS.sessions.length} sessions / ${total} annotations`;
   }
 
-  async function refreshAnnotations(): Promise<void> {
+  function refreshAnnotations(): Promise<void> {
+    if (refreshAnnotationsInFlight) return refreshAnnotationsInFlight;
+    const started = doRefreshAnnotations().finally(() => {
+      if (refreshAnnotationsInFlight === started)
+        refreshAnnotationsInFlight = null;
+    });
+    refreshAnnotationsInFlight = started;
+    return started;
+  }
+
+  async function doRefreshAnnotations(): Promise<void> {
     try {
       const res = await fetch("/_annotations");
       if (!res.ok) return;

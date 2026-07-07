@@ -100,7 +100,14 @@ const defaultDiffText: DiffViewText = {
   allViewedTitle: "All visible files are viewed",
 };
 
-function createDiffViewForShellTest(text: DiffViewText = defaultDiffText) {
+function createDiffViewForShellTest(
+  text: DiffViewText = defaultDiffText,
+  overrides: Partial<
+    Pick<DiffViewDeps, "getHljs" | "inferLang"> & {
+      syntaxHighlight: boolean;
+    }
+  > = {},
+) {
   const route: AppRoute = {
     screen: "diff",
     range: { from: "base", to: "head" },
@@ -110,7 +117,7 @@ function createDiffViewForShellTest(text: DiffViewText = defaultDiffText) {
     files: [] as FileMeta[],
     layout: "line-by-line",
     ignoreWs: false,
-    syntaxHighlight: false,
+    syntaxHighlight: overrides.syntaxHighlight ?? false,
     collapsed: false,
     viewedFiles: new Set<string>(),
   };
@@ -130,8 +137,8 @@ function createDiffViewForShellTest(text: DiffViewText = defaultDiffText) {
     trackLoad: (promise) => promise,
     diffCardSelector: (path) =>
       `.gdp-file-shell[data-path="${CSS.escape(path)}"]`,
-    getHljs: () => null,
-    inferLang: () => null,
+    getHljs: overrides.getHljs ?? (() => null),
+    inferLang: overrides.inferLang ?? (() => null),
     lineTargetStart: (line) => {
       if (!line) return null;
       return typeof line === "number" ? line : line.start;
@@ -308,6 +315,99 @@ describe("diff view fast path", () => {
     expect(
       document.querySelector<HTMLElement>("#meta .chip-viewed")?.textContent,
     ).toBe("1/2 viewed");
+  });
+
+  test("defers syntax highlighting until idle after mounting a diff", () => {
+    setupDiffDom();
+    const originalDiff2Html = window.Diff2HtmlUI;
+    const originalRequestIdleCallback = window.requestIdleCallback;
+    let highlightCodeCalls = 0;
+    let renderedWithInitialHighlight: boolean | undefined;
+    let idleWork: IdleRequestCallback | null = null;
+
+    window.requestIdleCallback = ((callback: IdleRequestCallback) => {
+      idleWork = callback;
+      return 1;
+    }) as typeof window.requestIdleCallback;
+    window.Diff2HtmlUI = class {
+      private readonly element: HTMLElement;
+      private readonly options: { highlight?: boolean };
+
+      constructor(
+        element: HTMLElement,
+        _diff: string,
+        options: { highlight?: boolean },
+      ) {
+        this.element = element;
+        this.options = options;
+      }
+
+      draw() {
+        renderedWithInitialHighlight = this.options.highlight;
+        this.element.innerHTML =
+          '<div class="d2h-file-wrapper"><table class="d2h-diff-table"><tbody>' +
+          '<tr><td class="d2h-code-line"><span class="d2h-code-line-ctn">const value = 1;</span></td></tr>' +
+          "</tbody></table></div>";
+      }
+
+      highlightCode() {
+        highlightCodeCalls++;
+      }
+    } as unknown as typeof window.Diff2HtmlUI;
+
+    try {
+      const { view } = createDiffViewForShellTest(defaultDiffText, {
+        syntaxHighlight: true,
+        inferLang: () => "ts",
+        getHljs: () =>
+          ({
+            getLanguage: () => true,
+            highlight: (code: string) => ({
+              value: `<span class="tok">${code}</span>`,
+            }),
+          }) as never,
+      });
+      const card = document.createElement("div") as DiffCardElement;
+      card.className = "gdp-file-shell";
+      card.dataset.path = "src/sample.ts";
+      card.innerHTML =
+        '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+      document.querySelector("#diff")?.appendChild(card);
+
+      view.renderFile(
+        {
+          path: "src/sample.ts",
+          status: "M",
+          additions: 1,
+          deletions: 0,
+          size_class: "small",
+          highlight: true,
+          load_url: "/file_diff?path=src%2Fsample.ts",
+        },
+        {
+          path: "src/sample.ts",
+          status: "M",
+          diff: "diff --git a/src/sample.ts b/src/sample.ts\n",
+        },
+        card,
+      );
+
+      const span = card.querySelector<HTMLElement>(".d2h-code-line-ctn");
+      expect(renderedWithInitialHighlight).toBe(false);
+      expect(highlightCodeCalls).toBe(0);
+      expect(span?.dataset.gdpHl).toBeUndefined();
+
+      idleWork?.({
+        didTimeout: false,
+        timeRemaining: () => 50,
+      } as IdleDeadline);
+
+      expect(span?.dataset.gdpHl).toBe("1");
+      expect(span?.querySelector(".tok")?.textContent).toBe("const value = 1;");
+    } finally {
+      window.Diff2HtmlUI = originalDiff2Html;
+      window.requestIdleCallback = originalRequestIdleCallback;
+    }
   });
 
   test("resets a reused loaded card when full-path render changes its diff signature", () => {

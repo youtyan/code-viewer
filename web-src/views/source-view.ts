@@ -186,22 +186,21 @@ export function createSourceView(deps: SourceViewDeps) {
   };
 
   let SOURCE_CURSOR: { target: SourceFileTarget; line: number } | null = null;
+  let SOURCE_CURSOR_ROWS: HTMLElement[] = [];
 
   const SOURCE_CURSOR_TOTALS = new Map<string, number>();
 
   function sourceLineScrollAmount(): number | null {
-    const virtualRow = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        "#content .gdp-source-virtual-row",
-      ),
-    ).find((item) => item.offsetParent !== null);
+    const virtualRow = document.querySelector<HTMLElement>(
+      "#content .gdp-source-virtual:not([hidden]) .gdp-source-virtual-row",
+    );
     if (virtualRow)
       return (
         virtualRow.getBoundingClientRect().height || VIRTUAL_SOURCE_ROW_HEIGHT
       );
-    const sourceRow = Array.from(
-      document.querySelectorAll<HTMLElement>("#content .gdp-source-table tr"),
-    ).find((item) => item.offsetParent !== null);
+    const sourceRow = document.querySelector<HTMLElement>(
+      "#content .gdp-source-table:not([hidden]) tr",
+    );
     if (sourceRow) return sourceRow.getBoundingClientRect().height || 20;
     const preview = document.querySelector<HTMLElement>(
       "#content .gdp-markdown-preview:not([hidden])",
@@ -236,15 +235,48 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function syncSourceCursorRows(target: SourceFileTarget) {
-    document
-      .querySelectorAll<HTMLElement>("#content [data-line]")
-      .forEach((row) => {
-        const line = Number(row.dataset.line || "0");
-        row.classList.toggle(
-          "gdp-source-cursor",
-          sourceCursorMatches(target, line),
-        );
-      });
+    if (
+      SOURCE_CURSOR_ROWS.length === 0 ||
+      SOURCE_CURSOR_ROWS.every((row) => !row.isConnected)
+    ) {
+      SOURCE_CURSOR_ROWS = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          "#content .gdp-source-table tr.gdp-source-cursor, #content .gdp-source-virtual-row.gdp-source-cursor",
+        ),
+      );
+    }
+    for (const row of SOURCE_CURSOR_ROWS) {
+      row.classList.remove("gdp-source-cursor");
+    }
+    SOURCE_CURSOR_ROWS = [];
+    if (!SOURCE_CURSOR || !sourceTargetsEqual(SOURCE_CURSOR.target, target))
+      return;
+    const line = String(SOURCE_CURSOR.line);
+    const table = document.querySelector<HTMLTableElement>(
+      "#content .gdp-source-table",
+    );
+    const tableRow = table?.rows[SOURCE_CURSOR.line - 1];
+    if (tableRow?.dataset.line === line) {
+      tableRow.classList.add("gdp-source-cursor");
+      SOURCE_CURSOR_ROWS.push(tableRow);
+    }
+    const windowEl = document.querySelector<HTMLElement>(
+      "#content .gdp-source-virtual-window",
+    );
+    if (windowEl) {
+      const firstLine = Number(
+        (windowEl.firstElementChild as HTMLElement | null)?.dataset.line || "0",
+      );
+      const offset = SOURCE_CURSOR.line - firstLine;
+      const row =
+        offset >= 0
+          ? (windowEl.children[offset] as HTMLElement | undefined)
+          : null;
+      if (row?.dataset.line === line) {
+        row.classList.add("gdp-source-cursor");
+        SOURCE_CURSOR_ROWS.push(row);
+      }
+    }
   }
 
   function visibleSourceLineFallback(): number {

@@ -11412,6 +11412,9 @@ body.db-resizing {
   padding: 32px 16px;
   text-align: center;
 }
+.db-pane-empty[hidden] {
+  display: none;
+}
 .db-pane-empty-icon {
   display: flex;
   color: var(--fg-subtle);

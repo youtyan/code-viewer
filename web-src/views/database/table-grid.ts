@@ -22,6 +22,7 @@ import { type DbText, dbText } from "./i18n";
 const ROW_HEIGHT = 28;
 const OVERSCAN = 20;
 const PAGE_SIZE = 200;
+const MAX_PAGE_CACHE_PAGES = 32;
 const FILTER_DEBOUNCE_MS = 300;
 const DEFAULT_COL_WIDTH = 180;
 const CELL_PREVIEW_MAX_CHARS = 4000;
@@ -308,9 +309,6 @@ export function createTableGrid(
   const filteredEmpty = document.createElement("div");
   filteredEmpty.className = "db-pane-empty";
   filteredEmpty.hidden = true;
-  const filteredEmptyIcon = document.createElement("div");
-  filteredEmptyIcon.className = "db-pane-empty-icon";
-  filteredEmptyIcon.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
   const filteredEmptyTitle = document.createElement("div");
   filteredEmptyTitle.className = "db-pane-empty-title";
   const filteredEmptyHint = document.createElement("div");
@@ -331,7 +329,6 @@ export function createTableGrid(
   filteredEmptyAction.disabled = true;
   filteredEmptyActions.append(filteredEmptyReloadAction, filteredEmptyAction);
   filteredEmpty.append(
-    filteredEmptyIcon,
     filteredEmptyTitle,
     filteredEmptyHint,
     filteredEmptyActions,
@@ -382,15 +379,36 @@ export function createTableGrid(
   function setActiveCell(rowIndex: number, colIndex: number) {
     activeCellRowIndex = rowIndex;
     activeCellColIndex = colIndex;
-    for (const c of body.querySelectorAll(".db-grid-cell-active")) {
-      c.classList.remove("db-grid-cell-active");
+    if (activeCellElement?.isConnected) {
+      activeCellElement.classList.remove("db-grid-cell-active");
+    } else {
+      for (const c of body.querySelectorAll(".db-grid-cell-active")) {
+        c.classList.remove("db-grid-cell-active");
+      }
     }
+    activeCellElement = null;
     if (rowIndex < 0 || colIndex < 0) return;
     // colIndex+1: rowNum cell が先頭にあるので 1 ずれる。
     const targetRow = body.children[rowIndex - renderStartRow] as
       | HTMLElement
       | undefined;
-    targetRow?.children[colIndex + 1]?.classList.add("db-grid-cell-active");
+    const targetCell = targetRow?.children[colIndex + 1];
+    if (!targetCell) return;
+    targetCell.classList.add("db-grid-cell-active");
+    activeCellElement = targetCell;
+  }
+
+  function setSelectedRow(rowIndex: number, row: HTMLElement | null) {
+    selectedRowIndex = rowIndex;
+    if (selectedRowElement?.isConnected) {
+      selectedRowElement.classList.remove("selected");
+    } else {
+      body.querySelectorAll(".db-grid-row.selected").forEach((r) => {
+        r.classList.remove("selected");
+      });
+    }
+    selectedRowElement = row;
+    row?.classList.add("selected");
   }
 
   function clearActiveCell() {
@@ -473,10 +491,12 @@ export function createTableGrid(
   let isRefreshing = false;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedRowIndex = -1;
+  let selectedRowElement: HTMLElement | null = null;
   // 詳細フッタ or 関連パネルに「いまどのセルの値を出してるか」を覚えておく。
   // renderViewport / 再描画でも色が維持されるよう、行/列 index を state に持つ。
   let activeCellRowIndex = -1;
   let activeCellColIndex = -1;
+  let activeCellElement: Element | null = null;
   // 仮想スクロール時に body に積まれている先頭行の global index。
   // renderViewport が描画する直前に確定する。setActiveCell が body 内の
   // 相対位置を計算するために参照する (CSS transform を regex で読むのは
@@ -752,6 +772,7 @@ export function createTableGrid(
 
   function resetSelectionAndDetail() {
     selectedRowIndex = -1;
+    selectedRowElement = null;
     detailPanel.hidden = true;
     clearDetailContent();
   }
@@ -860,6 +881,8 @@ export function createTableGrid(
     // 関連グリッドの使い回し時に前テーブルの行 index が別の行へ誤適用され、
     // getState() にも誤った行番号が混入する。
     selectedRowIndex = -1;
+    selectedRowElement = null;
+    activeCellElement = null;
     // 開いたままの export メニューが残すと document クリックリスナーが
     // リークするため、確実に閉じて解除する。
     closeExportMenu();
@@ -1524,7 +1547,7 @@ export function createTableGrid(
   }
 
   function ensurePage(pageStart: number): Promise<void> {
-    if (pageCache.has(pageStart)) return Promise.resolve();
+    if (getCachedPage(pageStart) !== undefined) return Promise.resolve();
     const pending = pendingPages.get(pageStart);
     if (pending) return pending;
     const gen = loadGeneration;
@@ -1534,7 +1557,7 @@ export function createTableGrid(
       .fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters, signal)
       .then((data) => {
         if (gen !== loadGeneration) return;
-        pageCache.set(pageStart, data.rows);
+        rememberPage(pageStart, data.rows);
         totalRows = data.totalRows;
         syncSpacer();
         updateStatus();
@@ -1553,6 +1576,24 @@ export function createTableGrid(
     });
     pendingPages.set(pageStart, tracked);
     return tracked;
+  }
+
+  function rememberPage(pageStart: number, rows: DbValue[][]): void {
+    pageCache.delete(pageStart);
+    pageCache.set(pageStart, rows);
+    while (pageCache.size > MAX_PAGE_CACHE_PAGES) {
+      const oldest = pageCache.keys().next().value;
+      if (oldest === undefined) break;
+      pageCache.delete(oldest);
+    }
+  }
+
+  function getCachedPage(pageStart: number): DbValue[][] | undefined {
+    const rows = pageCache.get(pageStart);
+    if (rows === undefined) return undefined;
+    pageCache.delete(pageStart);
+    pageCache.set(pageStart, rows);
+    return rows;
   }
 
   // 編集モードのセルを作る。editing=false なら表示モード (read-only セル相当
@@ -1673,13 +1714,16 @@ export function createTableGrid(
   // 既存データ行 (read-only もしくは編集モード) を 1 行ぶん組み立てる。
   function buildDataRow(i: number): HTMLElement {
     const pageStart = Math.floor(i / PAGE_SIZE) * PAGE_SIZE;
-    const pageRows = pageCache.get(pageStart);
+    const pageRows = getCachedPage(pageStart);
     const rowData = pageRows ? pageRows[i - pageStart] : null;
 
     const row = document.createElement("div");
     row.className = "db-grid-row";
     if (i % 2 === 1) row.classList.add("alt");
-    if (i === selectedRowIndex) row.classList.add("selected");
+    if (i === selectedRowIndex) {
+      row.classList.add("selected");
+      selectedRowElement = row;
+    }
     const rowIndex = i;
 
     const rowNum = document.createElement("div");
@@ -1751,11 +1795,7 @@ export function createTableGrid(
         // シングルクリック時のハンドラ。read-only モードと同じく、行/アクティブ
         // セルを更新し、FK セルなら関連パネル、その他なら詳細フッタを開く。
         const activate = () => {
-          selectedRowIndex = rowIndex;
-          body.querySelectorAll(".db-grid-row.selected").forEach((r) => {
-            r.classList.remove("selected");
-          });
-          row.classList.add("selected");
+          setSelectedRow(rowIndex, row);
           setActiveCell(rowIndex, cellColIndex);
           if (fkClickable) {
             if (embedded) {
@@ -1829,6 +1869,7 @@ export function createTableGrid(
           c === activeCellColIndex
         ) {
           cellEl.classList.add("db-grid-cell-active");
+          activeCellElement = cellEl;
         }
         row.appendChild(cellEl);
       }
@@ -1837,11 +1878,7 @@ export function createTableGrid(
 
     // --- read-only (既存挙動) ---
     row.addEventListener("click", () => {
-      selectedRowIndex = rowIndex;
-      body.querySelectorAll(".db-grid-row.selected").forEach((r) => {
-        r.classList.remove("selected");
-      });
-      row.classList.add("selected");
+      setSelectedRow(rowIndex, row);
     });
     for (let c = 0; c < columnNames.length; c++) {
       const cell = document.createElement("div");
@@ -1868,11 +1905,7 @@ export function createTableGrid(
       }
       cell.addEventListener("click", (e) => {
         e.stopPropagation();
-        selectedRowIndex = rowIndex;
-        body.querySelectorAll(".db-grid-row.selected").forEach((r) => {
-          r.classList.remove("selected");
-        });
-        row.classList.add("selected");
+        setSelectedRow(rowIndex, row);
         // 詳細フッタ / 関連パネルに表示する対象セルを覚えておく。
         setActiveCell(rowIndex, cellColIndex);
         // FK セルは関連テーブルをパネルに開く（埋め込みは親へ通知して
@@ -1901,6 +1934,7 @@ export function createTableGrid(
       // 突合せてクラスを付ける。
       if (i === activeCellRowIndex && c === activeCellColIndex) {
         cell.classList.add("db-grid-cell-active");
+        activeCellElement = cell;
       }
       row.appendChild(cell);
     }
@@ -2010,6 +2044,8 @@ export function createTableGrid(
       }
 
       body.innerHTML = "";
+      selectedRowElement = null;
+      activeCellElement = null;
       body.style.transform = `translateY(${startRow * ROW_HEIGHT}px)`;
 
       for (let i = startRow; i < endRow; i++) {
@@ -2106,7 +2142,7 @@ export function createTableGrid(
       columns = initialData.columns;
       columnNames = columns.map((c) => c.name);
       totalRows = initialData.totalRows;
-      pageCache.set(0, initialData.rows);
+      rememberPage(0, initialData.rows);
     } else {
       columns = [];
       columnNames = [];
