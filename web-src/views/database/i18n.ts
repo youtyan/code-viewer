@@ -339,6 +339,24 @@ export type DbText = {
       editTextHint: string;
       create: string;
     };
+    dynamodb: {
+      table: string;
+      scanMode: string;
+      queryMode: string;
+      keyConditionPlaceholder: string;
+      filterPlaceholder: string;
+      attributeValuesPlaceholder: string;
+      sortAsc: string;
+      sortDesc: string;
+      selectItem: string;
+      noItems: string;
+      noTables: string;
+      copyKey: string;
+      copied: string;
+      copyFailed: string;
+      invalidAttributeValues: string;
+      runQuery: string;
+    };
   };
 };
 
@@ -688,6 +706,24 @@ const EN: DbText = {
       editTextHint: "Only text objects can be edited in the browser.",
       create: "Create",
     },
+    dynamodb: {
+      table: "Table",
+      scanMode: "Scan",
+      queryMode: "Query",
+      keyConditionPlaceholder: "Key condition expression, e.g. pk = :pk",
+      filterPlaceholder: "Filter expression (optional)",
+      attributeValuesPlaceholder: '{":pk": {"S": "value"}}',
+      sortAsc: "Ascending",
+      sortDesc: "Descending",
+      selectItem: "Select an item to preview.",
+      noItems: "(no items)",
+      noTables: "(no tables)",
+      copyKey: "Copy key",
+      copied: "Copied",
+      copyFailed: "Copy failed",
+      invalidAttributeValues: "Invalid attribute values JSON",
+      runQuery: "Run",
+    },
   },
 };
 
@@ -1035,6 +1071,24 @@ const JA: DbText = {
       confirmDeleteObject: (key) => `オブジェクト "${key}" を削除しますか?`,
       editTextHint: "ブラウザで編集できるのはテキストオブジェクトのみです。",
       create: "作成",
+    },
+    dynamodb: {
+      table: "テーブル",
+      scanMode: "Scan",
+      queryMode: "Query",
+      keyConditionPlaceholder: "キー条件式 例: pk = :pk",
+      filterPlaceholder: "フィルタ式 (任意)",
+      attributeValuesPlaceholder: '{":pk": {"S": "value"}}',
+      sortAsc: "昇順",
+      sortDesc: "降順",
+      selectItem: "アイテムを選択するとプレビューが表示されます。",
+      noItems: "(アイテムがありません)",
+      noTables: "(テーブルがありません)",
+      copyKey: "キーをコピー",
+      copied: "コピーしました",
+      copyFailed: "コピーに失敗しました",
+      invalidAttributeValues: "属性値の JSON が不正です",
+      runQuery: "実行",
     },
   },
 };

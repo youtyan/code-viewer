@@ -12270,6 +12270,179 @@ body.db-resizing {
   border: 1px solid var(--border);
   background: var(--bg);
 }
+/* ---------- DynamoDB explorer ---------- */
+.dynamodb-explorer {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  background: var(--bg);
+  font-size: var(--db-font-base);
+}
+.dynamodb-explorer[hidden] {
+  display: none;
+}
+/* dynamodb-table-list-pane は es-index-list-pane と同じく db-sidebar の
+   explorerSidebarHost 内にスロットとして mount される。 */
+.dynamodb-table-list-pane {
+  flex: 1 1 auto;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dynamodb-table-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.dynamodb-table-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  user-select: none;
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dynamodb-table-item:hover {
+  background: var(--bg-hover, var(--bg));
+}
+.dynamodb-table-item.active {
+  background: var(--bg-active, var(--bg-soft));
+  border-left-color: var(--accent);
+}
+.dynamodb-item-list-pane {
+  width: 380px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+.dynamodb-query-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+  flex-shrink: 0;
+}
+.dynamodb-key-condition-input,
+.dynamodb-filter-input {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+}
+.dynamodb-attribute-values-input {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  resize: vertical;
+}
+.dynamodb-run-btn {
+  align-self: flex-start;
+}
+.dynamodb-query-error {
+  padding: 4px 12px;
+  color: var(--danger);
+  font-size: var(--db-font-sm);
+}
+.dynamodb-item-status {
+  padding: 4px 12px;
+  color: var(--fg-muted);
+  font-size: var(--db-font-sm);
+}
+.dynamodb-item-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.dynamodb-item-row {
+  display: flex;
+  padding: 4px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  user-select: none;
+  border-bottom: 1px solid var(--border);
+}
+.dynamodb-item-row:hover {
+  background: var(--bg-hover, var(--bg-soft));
+}
+.dynamodb-item-row.active {
+  background: var(--bg-active, var(--bg-soft));
+  border-left-color: var(--accent);
+}
+.dynamodb-item-preview {
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dynamodb-item-more-btn {
+  padding: 6px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+  cursor: pointer;
+  font-size: var(--db-font-sm);
+  color: var(--fg);
+}
+.dynamodb-item-more-btn:hover {
+  background: var(--bg-hover, var(--bg));
+}
+.dynamodb-item-more-btn:disabled {
+  cursor: default;
+  color: var(--fg-muted);
+}
+.dynamodb-detail-pane {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  color: var(--fg);
+  background: var(--bg);
+}
+.dynamodb-table-info-header,
+.dynamodb-item-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  font-weight: 600;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.dynamodb-table-info-meta,
+.dynamodb-table-info-keys {
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-sm);
+  color: var(--fg-muted);
+  margin-bottom: 8px;
+}
+.dynamodb-table-info-empty {
+  margin-top: 24px;
+}
+.dynamodb-item-source {
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
 /* ---------- Database multi-tab manager ---------- */
 .db-root {
   display: flex;

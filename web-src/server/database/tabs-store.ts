@@ -21,6 +21,10 @@ const MAX_INDEX_NAME_LEN = 256;
 const MAX_S3_BUCKET_LEN = 256;
 const MAX_S3_KEY_LEN = 2048;
 const MAX_S3_QUERY_LEN = 2048;
+const MAX_DYNAMODB_TABLE_LEN = 255;
+const MAX_DYNAMODB_EXPRESSION_LEN = 4096;
+const MAX_DYNAMODB_ATTRIBUTE_VALUES_LEN = 16_000;
+const MAX_DYNAMODB_ITEM_KEY_LEN = 4096;
 // CSS の "240px" のような短い文字列だけ受ける。長さで弾く。
 const MAX_CSS_SIZE_LEN = 16;
 const VALID_VIEWS = new Set([
@@ -143,6 +147,49 @@ function sanitizeS3(v: unknown): NonNullable<TabState["s3"]> | undefined {
   return out;
 }
 
+function sanitizeDynamodb(
+  v: unknown,
+): NonNullable<TabState["dynamodb"]> | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const r = v as Record<string, unknown>;
+  const out: NonNullable<TabState["dynamodb"]> = {};
+  const table = sanitizeOptionalString(r.table, MAX_DYNAMODB_TABLE_LEN);
+  if (table !== undefined) out.table = table;
+  if (r.mode === "scan" || r.mode === "query") out.mode = r.mode;
+  const keyConditionExpression = sanitizeOptionalString(
+    r.keyConditionExpression,
+    MAX_DYNAMODB_EXPRESSION_LEN,
+  );
+  if (keyConditionExpression !== undefined)
+    out.keyConditionExpression = keyConditionExpression;
+  const filterExpression = sanitizeOptionalString(
+    r.filterExpression,
+    MAX_DYNAMODB_EXPRESSION_LEN,
+  );
+  if (filterExpression !== undefined) out.filterExpression = filterExpression;
+  const expressionAttributeValues = sanitizeOptionalString(
+    r.expressionAttributeValues,
+    MAX_DYNAMODB_ATTRIBUTE_VALUES_LEN,
+  );
+  if (expressionAttributeValues !== undefined)
+    out.expressionAttributeValues = expressionAttributeValues;
+  if (typeof r.scanIndexForward === "boolean")
+    out.scanIndexForward = r.scanIndexForward;
+  const itemKey = sanitizeOptionalString(r.itemKey, MAX_DYNAMODB_ITEM_KEY_LEN);
+  if (itemKey !== undefined) out.itemKey = itemKey;
+  if (
+    out.table === undefined &&
+    out.mode === undefined &&
+    out.keyConditionExpression === undefined &&
+    out.filterExpression === undefined &&
+    out.expressionAttributeValues === undefined &&
+    out.scanIndexForward === undefined &&
+    out.itemKey === undefined
+  )
+    return undefined;
+  return out;
+}
+
 // 入力 JSON を厳密に検証して unknown フィールドを捨てる。tabs.json は
 // ユーザーが手で書き換える可能性もあるので、壊れた値は静かに正規化する。
 function sanitize(input: unknown): TabsState {
@@ -192,6 +239,8 @@ function sanitize(input: unknown): TabsState {
     if (es !== undefined) out.es = es;
     const s3 = sanitizeS3(tab.s3);
     if (s3 !== undefined) out.s3 = s3;
+    const dynamodb = sanitizeDynamodb(tab.dynamodb);
+    if (dynamodb !== undefined) out.dynamodb = dynamodb;
 
     tabs.push(out);
   }

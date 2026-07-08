@@ -10,6 +10,7 @@ import type {
   DbSchemasResponse,
   DbTableCountResponse,
   DbTableDataResponse,
+  DynamoDbExplorerSelection,
   QueryHistoryState,
   RowMutation,
   TabState,
@@ -22,6 +23,7 @@ import { isImeComposing } from "../../core/keyboard";
 import { type AppRoute, type DiffRange, parseRoute } from "../../core/routes";
 import type { AnnotationTarget, DbUiPrefs, DbUiState } from "../../core/types";
 import { createAbortGuard } from "./abort-guard";
+import { createDynamoDbExplorer } from "./dynamodb-explorer";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
 import { createGlobalSearchView } from "./global-search-view";
@@ -233,6 +235,7 @@ type DbVisibility = {
   redisHidden: boolean;
   esHidden: boolean;
   s3Hidden: boolean;
+  dynamodbHidden: boolean;
 };
 
 function computeVisibility(
@@ -259,6 +262,7 @@ function computeVisibility(
     redisHidden: kind !== "redis",
     esHidden: kind !== "elasticsearch",
     s3Hidden: kind !== "s3",
+    dynamodbHidden: kind !== "dynamodb",
   };
 }
 
@@ -743,12 +747,20 @@ function createTabPane(
   s3Explorer.el.hidden = true;
   s3Explorer.sidebarSlot.hidden = true;
 
+  const dynamodbExplorer = createDynamoDbExplorer({
+    onSelectionChange: () => cb.onStateChange(),
+    getText: () => paneText(),
+  });
+  dynamodbExplorer.el.hidden = true;
+  dynamodbExplorer.sidebarSlot.hidden = true;
+
   // explorer ごとの sidebarSlot を sidebar host に差し込む。表示制御は
   // applyVisibility が一括で行う (kind による hidden toggle)。
   explorerSidebarHost.append(
     redisExplorer.sidebarSlot,
     esExplorer.sidebarSlot,
     s3Explorer.sidebarSlot,
+    dynamodbExplorer.sidebarSlot,
   );
 
   const noDatastoresPane = document.createElement("div");
@@ -789,6 +801,7 @@ function createTabPane(
     redisExplorer.el,
     esExplorer.el,
     s3Explorer.el,
+    dynamodbExplorer.el,
     noDatastoresPane,
   );
   queryEditor.el.hidden = true;
@@ -951,15 +964,20 @@ function createTabPane(
     redisExplorer.el.hidden = visibility.redisHidden;
     esExplorer.el.hidden = visibility.esHidden;
     s3Explorer.el.hidden = visibility.s3Hidden;
+    dynamodbExplorer.el.hidden = visibility.dynamodbHidden;
     // sidebar 内の第1階層セレクタも explorer 表示と同期する。
     redisExplorer.sidebarSlot.hidden = visibility.redisHidden;
     esExplorer.sidebarSlot.hidden = visibility.esHidden;
     s3Explorer.sidebarSlot.hidden = visibility.s3Hidden;
+    dynamodbExplorer.sidebarSlot.hidden = visibility.dynamodbHidden;
     // host は `flex: 1` で残り高さを全部食うため、SQL kind で中身が全部 hidden
     // のときは host ごと畳まないと、tableList が下に押し出されて余白だらけに
     // なる (報告された SQL ビューの「テーブル一覧がすごい離れる」回帰)。
     explorerSidebarHost.hidden =
-      visibility.redisHidden && visibility.esHidden && visibility.s3Hidden;
+      visibility.redisHidden &&
+      visibility.esHidden &&
+      visibility.s3Hidden &&
+      visibility.dynamodbHidden;
     if (noDatastoresAvailable) {
       toolsSection.hidden = true;
       prefsBar.hidden = true;
@@ -977,9 +995,11 @@ function createTabPane(
       redisExplorer.el.hidden = true;
       esExplorer.el.hidden = true;
       s3Explorer.el.hidden = true;
+      dynamodbExplorer.el.hidden = true;
       redisExplorer.sidebarSlot.hidden = true;
       esExplorer.sidebarSlot.hidden = true;
       s3Explorer.sidebarSlot.hidden = true;
+      dynamodbExplorer.sidebarSlot.hidden = true;
       explorerSidebarHost.hidden = true;
     }
     if (!sqlMode) {
@@ -1432,6 +1452,7 @@ function createTabPane(
         sort?: "key-asc" | "updated-desc";
         key?: string;
       };
+      dynamodb?: DynamoDbExplorerSelection;
     },
     generation = loadGeneration,
     preferredSchema?: string | null,
@@ -1444,7 +1465,8 @@ function createTabPane(
     if (
       currentDbInfo?.kind === "redis" ||
       currentDbInfo?.kind === "elasticsearch" ||
-      currentDbInfo?.kind === "s3"
+      currentDbInfo?.kind === "s3" ||
+      currentDbInfo?.kind === "dynamodb"
     ) {
       currentSchema = null;
       renderSchemaOptions([], null);
@@ -1458,15 +1480,23 @@ function createTabPane(
       if (currentDbInfo.kind === "redis") {
         esExplorer.clear();
         s3Explorer.clear();
+        dynamodbExplorer.clear();
         await redisExplorer.load(dbId, explorerInitial?.redis);
       } else if (currentDbInfo.kind === "elasticsearch") {
         redisExplorer.clear();
         s3Explorer.clear();
+        dynamodbExplorer.clear();
         await esExplorer.load(dbId, explorerInitial?.es);
+      } else if (currentDbInfo.kind === "s3") {
+        redisExplorer.clear();
+        esExplorer.clear();
+        dynamodbExplorer.clear();
+        await s3Explorer.load(dbId, explorerInitial?.s3);
       } else {
         redisExplorer.clear();
         esExplorer.clear();
-        await s3Explorer.load(dbId, explorerInitial?.s3);
+        s3Explorer.clear();
+        await dynamodbExplorer.load(dbId, explorerInitial?.dynamodb);
       }
       if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
       cb.onStateChange();
@@ -1475,6 +1505,7 @@ function createTabPane(
     redisExplorer.clear();
     esExplorer.clear();
     s3Explorer.clear();
+    dynamodbExplorer.clear();
     applyVisibility();
     tableList.render([]);
     setTableListStatus(paneText().nav.loadingSchema);
@@ -1895,6 +1926,7 @@ function createTabPane(
   let pendingRedisInitial = initial.redis;
   let pendingEsInitial = initial.es;
   let pendingS3Initial = initial.s3;
+  let pendingDynamodbInitial = initial.dynamodb;
 
   async function enter(
     db?: string | null,
@@ -1933,6 +1965,7 @@ function createTabPane(
       redisExplorer.clear();
       esExplorer.clear();
       s3Explorer.clear();
+      dynamodbExplorer.clear();
       renderNoDatastoresEmpty();
       applyVisibility();
       cb.onStateChange();
@@ -1973,6 +2006,7 @@ function createTabPane(
       redisExplorer.clear();
       esExplorer.clear();
       s3Explorer.clear();
+      dynamodbExplorer.clear();
       setActiveTab("data", false);
       cb.onStateChange();
       return;
@@ -1986,10 +2020,12 @@ function createTabPane(
       redis: pendingRedisInitial,
       es: pendingEsInitial,
       s3: pendingS3Initial,
+      dynamodb: pendingDynamodbInitial,
     };
     pendingRedisInitial = undefined;
     pendingEsInitial = undefined;
     pendingS3Initial = undefined;
+    pendingDynamodbInitial = undefined;
     await selectDb(
       target,
       explorerInitial,
@@ -2002,7 +2038,8 @@ function createTabPane(
     if (
       currentDbInfo?.kind === "redis" ||
       currentDbInfo?.kind === "elasticsearch" ||
-      currentDbInfo?.kind === "s3"
+      currentDbInfo?.kind === "s3" ||
+      currentDbInfo?.kind === "dynamodb"
     ) {
       cb.onStateChange();
       return;
@@ -2111,6 +2148,7 @@ function createTabPane(
       if (initial.redis) state.redis = initial.redis;
       if (initial.es) state.es = initial.es;
       if (initial.s3) state.s3 = initial.s3;
+      if (initial.dynamodb) state.dynamodb = initial.dynamodb;
     } else if (currentDbInfo?.kind === "redis") {
       const sel = redisExplorer.getSelection();
       if (
@@ -2137,6 +2175,18 @@ function createTabPane(
         sel.view === "explorer"
       ) {
         state.s3 = sel;
+      }
+    } else if (currentDbInfo?.kind === "dynamodb") {
+      const sel = dynamodbExplorer.getSelection();
+      if (
+        sel.table !== undefined ||
+        sel.mode !== "scan" ||
+        sel.keyConditionExpression !== undefined ||
+        sel.filterExpression !== undefined ||
+        sel.expressionAttributeValues !== undefined ||
+        sel.itemKey !== undefined
+      ) {
+        state.dynamodb = sel;
       }
     }
 
@@ -2230,6 +2280,7 @@ function createTabPane(
     redisExplorer.localize();
     esExplorer.localize();
     s3Explorer.localize();
+    dynamodbExplorer.localize();
   }
 
   return {
@@ -2728,6 +2779,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         redis: tab.redis ?? null,
         es: tab.es ?? null,
         s3: tab.s3 ?? null,
+        dynamodb: tab.dynamodb ?? null,
       });
       if (seen.has(key)) continue;
       seen.add(key);
@@ -3004,6 +3056,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         redis: initial?.redis,
         es: initial?.es,
         s3: initial?.s3,
+        dynamodb: initial?.dynamodb,
       },
     );
     pane.el.hidden = true;

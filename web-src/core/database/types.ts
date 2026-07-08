@@ -4,7 +4,8 @@ export type DbKind =
   | "mysql"
   | "redis"
   | "elasticsearch"
-  | "s3";
+  | "s3"
+  | "dynamodb";
 
 export type DbValue = string | number | boolean | null | Uint8Array;
 
@@ -434,6 +435,69 @@ export type ElasticsearchExplorerSelection = {
   query?: string;
 };
 
+// ---------- DynamoDB ----------
+
+export type DynamoDbAttributeValue =
+  | { S: string }
+  | { N: string }
+  | { B: string }
+  | { BOOL: boolean }
+  | { NULL: boolean }
+  | { M: Record<string, DynamoDbAttributeValue> }
+  | { L: DynamoDbAttributeValue[] }
+  | { SS: string[] }
+  | { NS: string[] }
+  | { BS: string[] };
+
+export type DynamoDbKey = Record<string, DynamoDbAttributeValue>;
+export type DynamoDbItem = Record<string, DynamoDbAttributeValue>;
+
+export type DynamoDbTableDescription = {
+  TableName?: string;
+  TableStatus?: string;
+  CreationDateTime?: number;
+  ItemCount?: number;
+  TableSizeBytes?: number;
+  KeySchema?: Array<{ AttributeName: string; KeyType: string }>;
+  AttributeDefinitions?: Array<{
+    AttributeName: string;
+    AttributeType: string;
+  }>;
+  BillingModeSummary?: { BillingMode?: string };
+  GlobalSecondaryIndexes?: unknown[];
+  LocalSecondaryIndexes?: unknown[];
+  [key: string]: unknown;
+};
+
+export type DynamoDbTablesResponse = {
+  dbId: string;
+  tableNames: string[];
+  lastEvaluatedTableName?: string;
+};
+
+export type DynamoDbTableResponse = {
+  dbId: string;
+  table: DynamoDbTableDescription;
+};
+
+export type DynamoDbItemsResponse = {
+  dbId: string;
+  tableName: string;
+  mode: "scan" | "query";
+  items: DynamoDbItem[];
+  count: number;
+  scannedCount: number;
+  lastEvaluatedKey?: DynamoDbKey;
+};
+
+export type DynamoDbItemResponse = {
+  dbId: string;
+  tableName: string;
+  key: DynamoDbKey;
+  item?: DynamoDbItem;
+  consumedCapacity?: unknown;
+};
+
 // ---------- S3 / object storage ----------
 
 export type S3SearchMode = "prefix" | "contains";
@@ -511,6 +575,22 @@ export type S3ExplorerSelection = {
   path?: string;
 };
 
+// ---------- DynamoDB explorer selection ----------
+
+export type DynamoDbExplorerSelection = {
+  table?: string;
+  mode?: "scan" | "query";
+  keyConditionExpression?: string;
+  filterExpression?: string;
+  // Query/Filter expression のプレースホルダに対応する値。DynamoDB の
+  // AttributeValue 表記 (例: {":pk": {"S": "value"}}) の JSON 文字列のまま
+  // 保存する (パース済み object にすると tabs.json 側のサニタイズが複雑になるため)。
+  expressionAttributeValues?: string;
+  scanIndexForward?: boolean;
+  // 選択中アイテムを再選択するためのキー。DynamoDbKey を JSON.stringify した文字列。
+  itemKey?: string;
+};
+
 // ---------- Tabs ----------
 
 // 1 つの database タブ。画面全体 (サイドバー + メイン pane + 履歴 pane) の
@@ -559,6 +639,9 @@ export type TabState = {
 
   // S3 explorer の選択中 state。
   s3?: S3ExplorerSelection;
+
+  // DynamoDB explorer の選択中 state。
+  dynamodb?: DynamoDbExplorerSelection;
 };
 
 export type TabsState = {
