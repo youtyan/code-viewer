@@ -4191,6 +4191,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
   }
 
+  let diffLoadGeneration = 0;
+
   function load(
     options: { force?: boolean; changedPaths?: Set<string> | null } = {},
   ): Promise<RenderResult | null> {
@@ -4236,10 +4238,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       }
     }
     const routeAtRequest = STATE.route;
+    const requestGeneration = ++diffLoadGeneration;
     const fromAtRequest = STATE.from;
     const toAtRequest = STATE.to;
     const ignoreWsAtRequest = STATE.ignoreWs;
     const isCurrentDiffRequest = () =>
+      requestGeneration === diffLoadGeneration &&
       STATE.route === routeAtRequest &&
       STATE.from === fromAtRequest &&
       STATE.to === toAtRequest &&

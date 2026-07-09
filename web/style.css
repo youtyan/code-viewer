@@ -12433,6 +12433,12 @@ body.db-resizing {
   color: var(--fg-muted);
   margin-bottom: 8px;
 }
+.dynamodb-copy-status {
+  min-width: 9em;
+  color: var(--fg-muted);
+  font-size: var(--db-font-sm);
+  font-weight: 400;
+}
 .dynamodb-table-info-empty {
   margin-top: 24px;
 }

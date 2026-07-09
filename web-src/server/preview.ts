@@ -217,6 +217,8 @@ const metaCache = new Map<
   string,
   TimedCacheEntry<{ body: string; sig: string }>
 >();
+let diffMetaRequestSequence = 0;
+const latestDiffMetaRequest = new Map<string, number>();
 const fileListCache = new Map<
   string,
   { generation: number; body: FileSearchListResponse }
@@ -607,6 +609,7 @@ async function computePayload(
   extras: string[],
   range: { from?: string; to?: string },
   pathFilter = "",
+  responseGeneration = generation,
 ): Promise<DiffMeta> {
   if (isSameWorktreeRange(range)) {
     return {
@@ -615,7 +618,7 @@ async function computePayload(
       range: "worktree .. worktree",
       project: basename(cwd),
       branch: await currentBranchMetadata(),
-      generation,
+      generation: responseGeneration,
     };
   }
   const { args, refs } = buildRangeArgs(range);
@@ -660,12 +663,13 @@ async function computePayload(
     range: label || "HEAD",
     project: basename(cwd),
     branch: await currentBranchMetadata(),
-    generation,
+    generation: responseGeneration,
     ...(metaResult.error ? { error: metaResult.error } : {}),
   };
 }
 
 async function handleDiffJson(url: URL) {
+  const responseGeneration = generation;
   const extras = [];
   if (url.searchParams.get("ignore_ws") === "1") extras.push("-w");
   if (url.searchParams.get("ignore_blank") === "1")
@@ -677,11 +681,31 @@ async function handleDiffJson(url: URL) {
   const path = url.searchParams.get("path") || "";
   if (path && !safePath(path)) return text("invalid path", 400);
   const key = `${range.from}|${range.to}|${url.searchParams.get("ignore_ws") || ""}|${url.searchParams.get("ignore_blank") || ""}|${path}`;
-  if (url.searchParams.get("nocache") === "1") {
-    const payload = await computePayload(extras, range, path);
+  const noCache = url.searchParams.get("nocache") === "1";
+  const cached = metaCache.get(key);
+  if (!noCache && cacheFresh(cached))
+    return new Response(cached.body, {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    });
+  const requestSequence = ++diffMetaRequestSequence;
+  latestDiffMetaRequest.set(key, requestSequence);
+  try {
+    const payload = await computePayload(
+      extras,
+      range,
+      path,
+      responseGeneration,
+    );
+    if (
+      latestDiffMetaRequest.get(key) !== requestSequence ||
+      responseGeneration !== generation
+    )
+      return json(payload);
     const sig = JSON.stringify({ ...payload, generation: undefined });
-    const cached = metaCache.get(key);
-    if (!cached || cached.sig !== sig) {
+    if (noCache && (!cached || cached.sig !== sig)) {
       generation++;
       payload.generation = generation;
       metaCache.clear();
@@ -695,27 +719,10 @@ async function handleDiffJson(url: URL) {
         "Cache-Control": "no-store",
       },
     });
+  } finally {
+    if (latestDiffMetaRequest.get(key) === requestSequence)
+      latestDiffMetaRequest.delete(key);
   }
-  const cached = metaCache.get(key);
-  if (cacheFresh(cached))
-    return new Response(cached.body, {
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": "no-store",
-      },
-    });
-  const payload = await computePayload(extras, range, path);
-  const body = JSON.stringify(payload);
-  setTimedCacheEntry(metaCache, key, {
-    body,
-    sig: JSON.stringify({ ...payload, generation: undefined }),
-  });
-  return new Response(body, {
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
 }
 
 // Local alias to the shared search-service guard so the rest of preview.ts
@@ -1080,6 +1087,7 @@ async function currentBranchMetadata(): Promise<string | undefined> {
 }
 
 async function handleFiles(url: URL) {
+  const responseGeneration = generation;
   const target =
     url.searchParams.get("ref") || url.searchParams.get("target") || "worktree";
   if (invalidScopeOmitDirNamesQuery(url)) return text("invalid omit dirs", 400);
@@ -1093,10 +1101,14 @@ async function handleFiles(url: URL) {
   const result = await listRepoFilesAsync(
     currentSearchEnv(omitDirNames, excludeNames),
     target,
-    generation,
+    responseGeneration,
   );
   if (result.ok !== true) return text(result.error, result.status ?? 400);
-  fileListCache.set(key, { generation, body: result.value });
+  if (responseGeneration !== generation) return json(result.value);
+  fileListCache.set(key, {
+    generation: responseGeneration,
+    body: result.value,
+  });
   while (fileListCache.size > MAX_TIMED_CACHE_ENTRIES) {
     const oldest = fileListCache.keys().next().value;
     if (oldest === undefined) break;
@@ -1144,6 +1156,7 @@ async function handleRefCommits(url: URL) {
 }
 
 async function handleLog(url: URL) {
+  const responseGeneration = generation;
   const ref = url.searchParams.get("ref") || "HEAD";
   const skip = Number(url.searchParams.get("skip") || "0");
   const limit = Number(url.searchParams.get("limit") || "50");
@@ -1189,7 +1202,7 @@ async function handleLog(url: URL) {
   return json({
     commits,
     hasMore: result.hasMore,
-    generation,
+    generation: responseGeneration,
     ...(hasWorktree ? { hasWorktree: true } : {}),
   });
 }
@@ -1214,6 +1227,7 @@ function rememberBlame(key: string, value: git.GitBlameResult) {
 }
 
 async function handleFileBlame(url: URL) {
+  const responseGeneration = generation;
   const path = url.searchParams.get("path") || "";
   if (!safePath(path)) return text("invalid path", 400);
   const ref = url.searchParams.get("ref") || "worktree";
@@ -1248,7 +1262,7 @@ async function handleFileBlame(url: URL) {
       blameCache.delete(cacheKey);
       blameCache.set(cacheKey, cached);
     }
-    return json({ ...cached, base, ref, generation });
+    return json({ ...cached, base, ref, generation: responseGeneration });
   }
   const result = await git.blameAsync(cwd, {
     path,
@@ -1256,11 +1270,13 @@ async function handleFileBlame(url: URL) {
     base,
   });
   if (result.error && result.status) return text(result.error, result.status);
-  if (!result.error) rememberBlame(cacheKey, result);
-  return json({ ...result, base, ref, generation });
+  if (!result.error && responseGeneration === generation)
+    rememberBlame(cacheKey, result);
+  return json({ ...result, base, ref, generation: responseGeneration });
 }
 
 async function handleFileDiff(url: URL) {
+  const responseGeneration = generation;
   const path = url.searchParams.get("path") || "";
   if (!safePath(path)) return text("invalid path", 400);
   const extras = [];
@@ -1284,7 +1300,7 @@ async function handleFileDiff(url: URL) {
       line_count: 0,
       truncated: false,
       binary: false,
-      generation,
+      generation: responseGeneration,
     });
   }
   const { args } = buildRangeArgs(range);
@@ -1329,7 +1345,8 @@ async function handleFileDiff(url: URL) {
         errStatus = res.status ?? 500;
       }
     }
-    if (!errText) setTimedCacheEntry(fileCache, cacheKey, { diffText });
+    if (!errText && responseGeneration === generation)
+      setTimedCacheEntry(fileCache, cacheKey, { diffText });
   }
   if (errStatus) return text(errText || "diff failed", errStatus);
   const mode = url.searchParams.get("mode") || "full";
@@ -1356,7 +1373,7 @@ async function handleFileDiff(url: URL) {
         truncated.lineTruncated),
     binary: diffText.includes("Binary files"),
     error: errText,
-    generation,
+    generation: responseGeneration,
   };
   return json(body);
 }

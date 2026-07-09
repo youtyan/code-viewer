@@ -17,6 +17,7 @@ import { setPaneEmpty, setPaneStatus } from "./pane-status";
 export type DynamoDbExplorerCallbacks = {
   onSelectionChange?: (selection: DynamoDbExplorerSelection) => void;
   getText?: () => DbText;
+  trackLoad?: <T>(promise: Promise<T>) => Promise<T>;
 };
 
 export type DynamoDbExplorerView = {
@@ -118,6 +119,8 @@ export function createDynamoDbExplorer(
 ): DynamoDbExplorerView {
   const text = (): DbText["explorer"] =>
     (callbacks.getText?.() ?? dbText("en")).explorer;
+  const trackLoad = <T>(promise: Promise<T>): Promise<T> =>
+    callbacks.trackLoad ? callbacks.trackLoad(promise) : promise;
 
   const container = document.createElement("div");
   container.className = "dynamodb-explorer";
@@ -134,6 +137,13 @@ export function createDynamoDbExplorer(
   const tableList = document.createElement("div");
   tableList.className = "dynamodb-table-list";
   sidebarSlot.appendChild(tableList);
+
+  const tableMoreBtn = document.createElement("button");
+  tableMoreBtn.type = "button";
+  tableMoreBtn.className = "dynamodb-item-more-btn dynamodb-table-more-btn";
+  tableMoreBtn.textContent = text().common.loadMore;
+  tableMoreBtn.hidden = true;
+  sidebarSlot.appendChild(tableMoreBtn);
 
   // ----- pane: item list + query form -----
   const itemListPane = document.createElement("div");
@@ -194,6 +204,7 @@ export function createDynamoDbExplorer(
   const moreBtn = document.createElement("button");
   moreBtn.type = "button";
   moreBtn.className = "dynamodb-item-more-btn";
+  moreBtn.textContent = text().common.loadMore;
   moreBtn.hidden = true;
   itemListPane.appendChild(moreBtn);
 
@@ -210,6 +221,7 @@ export function createDynamoDbExplorer(
   let currentMode: "scan" | "query" = "scan";
   let currentScanIndexForward = true;
   let currentTableInfo: DynamoDbTableDescription | null = null;
+  let currentTableNextToken: string | undefined;
   let currentNextToken: DynamoDbKey | undefined;
   let currentItemKeyToken: string | null = null;
   // Load more は都度そのページ分だけを返すため、ステータス行 (shown/scanned)
@@ -226,6 +238,7 @@ export function createDynamoDbExplorer(
   const itemsByKeyToken = new Map<string, DynamoDbItem>();
   const itemRowsByKeyToken = new Map<string, HTMLElement>();
   const tableGuard = createAbortGuard();
+  const tablePageGuard = createAbortGuard();
   const tableInfoGuard = createAbortGuard();
   const itemsGuard = createAbortGuard();
   const itemGuard = createAbortGuard();
@@ -242,10 +255,12 @@ export function createDynamoDbExplorer(
     keyConditionInput.hidden = mode !== "query";
   }
 
-  function renderTables(tableNames: string[]): void {
-    tableList.innerHTML = "";
-    activeTableRow = null;
-    if (tableNames.length === 0) {
+  function renderTables(tableNames: string[], append = false): void {
+    if (!append) {
+      tableList.innerHTML = "";
+      activeTableRow = null;
+    }
+    if (tableNames.length === 0 && !append) {
       setPaneStatus(tableList, text().dynamodb.noTables);
       return;
     }
@@ -340,21 +355,22 @@ export function createDynamoDbExplorer(
     title.textContent = currentTable ?? "";
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
-    copyBtn.className = "db-btn db-btn-sm";
+    copyBtn.className = "db-btn db-btn-sm dynamodb-copy-key-btn";
     copyBtn.textContent = text().dynamodb.copyKey;
+    const copyStatus = document.createElement("span");
+    copyStatus.className = "dynamodb-copy-status";
+    copyStatus.setAttribute("aria-live", "polite");
     copyBtn.addEventListener("click", async () => {
+      copyStatus.textContent = "";
       try {
         const key = extractItemKey(item, currentTableInfo?.KeySchema);
         await navigator.clipboard.writeText(JSON.stringify(key));
-        copyBtn.textContent = text().dynamodb.copied;
-        window.setTimeout(() => {
-          copyBtn.textContent = text().dynamodb.copyKey;
-        }, 1200);
+        copyStatus.textContent = text().dynamodb.copied;
       } catch {
-        copyBtn.textContent = text().dynamodb.copyFailed;
+        copyStatus.textContent = text().dynamodb.copyFailed;
       }
     });
-    header.append(title, copyBtn);
+    header.append(title, copyBtn, copyStatus);
     detailPane.appendChild(header);
     const pre = document.createElement("pre");
     pre.className = "dynamodb-item-source";
@@ -438,9 +454,9 @@ export function createDynamoDbExplorer(
       if (append && currentNextToken) {
         params.set("exclusiveStartKey", JSON.stringify(currentNextToken));
       }
-      const res = await fetch(`/_db/dynamodb/items?${params}`, {
-        signal: slot.signal,
-      });
+      const res = await trackLoad(
+        fetch(`/_db/dynamodb/items?${params}`, { signal: slot.signal }),
+      );
       if (disposed || slot.isStale()) return;
       if (!res.ok) {
         const errText = await res.text();
@@ -491,9 +507,9 @@ export function createDynamoDbExplorer(
     const requestDbId = currentDbId;
     try {
       const params = new URLSearchParams({ db: requestDbId, table });
-      const res = await fetch(`/_db/dynamodb/table?${params}`, {
-        signal: slot.signal,
-      });
+      const res = await trackLoad(
+        fetch(`/_db/dynamodb/table?${params}`, { signal: slot.signal }),
+      );
       if (disposed || slot.isStale()) return;
       if (!res.ok) return;
       const data = (await res.json()) as DynamoDbTableResponse;
@@ -526,9 +542,9 @@ export function createDynamoDbExplorer(
         table: requestTable,
         key: JSON.stringify(key),
       });
-      const res = await fetch(`/_db/dynamodb/item?${params}`, {
-        signal: slot.signal,
-      });
+      const res = await trackLoad(
+        fetch(`/_db/dynamodb/item?${params}`, { signal: slot.signal }),
+      );
       if (disposed || slot.isStale()) return;
       if (!res.ok) return;
       const data = (await res.json()) as DynamoDbItemResponse;
@@ -589,6 +605,40 @@ export function createDynamoDbExplorer(
     });
   }
   moreBtn.addEventListener("click", () => loadItems(true));
+  tableMoreBtn.addEventListener("click", async () => {
+    if (!currentDbId || !currentTableNextToken || disposed) return;
+    const slot = tablePageGuard.start();
+    const requestDbId = currentDbId;
+    const requestToken = currentTableNextToken;
+    tableMoreBtn.disabled = true;
+    tableMoreBtn.title = "";
+    try {
+      const params = new URLSearchParams({
+        db: requestDbId,
+        exclusiveStartTableName: requestToken,
+      });
+      const res = await trackLoad(
+        fetch(`/_db/dynamodb/tables?${params}`, { signal: slot.signal }),
+      );
+      if (disposed || slot.isStale() || requestDbId !== currentDbId) return;
+      if (!res.ok) {
+        tableMoreBtn.title = (await res.text()) || res.statusText;
+        return;
+      }
+      const data = (await res.json()) as DynamoDbTablesResponse;
+      if (disposed || slot.isStale() || requestDbId !== currentDbId) return;
+      renderTables(data.tableNames, true);
+      currentTableNextToken = data.lastEvaluatedTableName;
+      tableMoreBtn.hidden = !currentTableNextToken;
+      if (currentTable) highlightActiveTable(currentTable);
+    } catch (err) {
+      if (slot.isStale()) return;
+      tableMoreBtn.title = err instanceof Error ? err.message : String(err);
+    } finally {
+      slot.finish();
+      if (!slot.isStale()) tableMoreBtn.disabled = false;
+    }
+  });
   tableList.addEventListener("click", (e) => {
     const row = (e.target as HTMLElement | null)?.closest<HTMLElement>(
       ".dynamodb-table-item",
@@ -615,6 +665,7 @@ export function createDynamoDbExplorer(
     if (disposed) return;
     if (currentDbId === dbId && !initial) return;
     tableGuard.dispose();
+    tablePageGuard.dispose();
     tableInfoGuard.dispose();
     itemsGuard.dispose();
     itemGuard.dispose();
@@ -623,6 +674,7 @@ export function createDynamoDbExplorer(
     currentDbId = dbId;
     currentTable = null;
     currentTableInfo = null;
+    currentTableNextToken = undefined;
     currentItemKeyToken = null;
     currentNextToken = undefined;
     setMode(initial?.mode === "query" ? "query" : "scan");
@@ -637,12 +689,14 @@ export function createDynamoDbExplorer(
     itemRowsByKeyToken.clear();
     activeItemRow = null;
     moreBtn.hidden = true;
+    tableMoreBtn.hidden = true;
     setPaneEmpty(detailPane, text().dynamodb.selectItem);
     setPaneStatus(tableList, "Loading tables...");
     try {
-      const res = await fetch(
-        `/_db/dynamodb/tables?db=${encodeURIComponent(dbId)}`,
-        { signal: slot.signal },
+      const res = await trackLoad(
+        fetch(`/_db/dynamodb/tables?db=${encodeURIComponent(dbId)}`, {
+          signal: slot.signal,
+        }),
       );
       if (disposed || slot.isStale()) return;
       if (!res.ok) {
@@ -662,6 +716,8 @@ export function createDynamoDbExplorer(
         return;
       }
       renderTables(data.tableNames);
+      currentTableNextToken = data.lastEvaluatedTableName;
+      tableMoreBtn.hidden = !currentTableNextToken;
       const selected =
         (initial?.table &&
           data.tableNames.includes(initial.table) &&
@@ -699,6 +755,7 @@ export function createDynamoDbExplorer(
 
   function clear(): void {
     tableGuard.dispose();
+    tablePageGuard.dispose();
     tableInfoGuard.dispose();
     itemsGuard.dispose();
     itemGuard.dispose();
@@ -708,6 +765,7 @@ export function createDynamoDbExplorer(
     currentDbId = null;
     currentTable = null;
     currentTableInfo = null;
+    currentTableNextToken = undefined;
     currentItemKeyToken = null;
     currentNextToken = undefined;
     cumulativeShownCount = 0;
@@ -718,6 +776,9 @@ export function createDynamoDbExplorer(
     attributeValuesInput.value = "";
     queryError.hidden = true;
     tableList.innerHTML = "";
+    tableMoreBtn.hidden = true;
+    tableMoreBtn.disabled = false;
+    tableMoreBtn.title = "";
     activeTableRow = null;
     itemStatus.textContent = "";
     itemList.innerHTML = "";
@@ -757,6 +818,7 @@ export function createDynamoDbExplorer(
     filterInput.placeholder = t.dynamodb.filterPlaceholder;
     attributeValuesInput.placeholder = t.dynamodb.attributeValuesPlaceholder;
     runBtn.textContent = t.dynamodb.runQuery;
+    tableMoreBtn.textContent = t.common.loadMore;
     moreBtn.textContent = t.common.loadMore;
     if (!activeItemRow) {
       if (currentTableInfo) renderTableInfo();

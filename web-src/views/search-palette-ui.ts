@@ -105,6 +105,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     previousFocusScope: PanelFocusScope | null;
   };
   let PALETTE: PaletteState | null = null;
+  let repoFileRequestGeneration = 0;
   const REPO_FILE_CACHE = new Map<string, FileSearchListResponse>();
 
   function paletteSource(): "diff" | "repo" {
@@ -341,7 +342,6 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
         return r.json();
       }),
     );
-    REPO_FILE_CACHE.set(cacheKey, res);
     return res;
   }
 
@@ -424,8 +424,21 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     } else {
       state.status.textContent = "Loading files...";
       const ref = paletteRef(source);
-      const response = await repoPaletteFiles(ref);
-      if (PALETTE !== state || state.input.value !== query) return;
+      const requestGeneration = ++repoFileRequestGeneration;
+      let response: FileSearchListResponse;
+      try {
+        response = await repoPaletteFiles(ref);
+      } catch (err) {
+        if (requestGeneration !== repoFileRequestGeneration) return;
+        throw err;
+      }
+      if (
+        PALETTE !== state ||
+        state.input.value !== query ||
+        requestGeneration !== repoFileRequestGeneration
+      )
+        return;
+      REPO_FILE_CACHE.set(repoFileCacheKey(ref), response);
       state.items = limitPaletteResults(
         rankPathMatches(query, response.files, PALETTE_RESULT_LIMIT),
       ).map((match) => ({

@@ -750,6 +750,7 @@ function createTabPane(
   const dynamodbExplorer = createDynamoDbExplorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
+    trackLoad: (p) => deps.trackLoad(p),
   });
   dynamodbExplorer.el.hidden = true;
   dynamodbExplorer.sidebarSlot.hidden = true;
@@ -2259,6 +2260,7 @@ function createTabPane(
     redisExplorer.dispose();
     esExplorer.dispose();
     s3Explorer.dispose();
+    dynamodbExplorer.dispose();
     currentDbInfo = null;
     currentSchema = null;
     currentTable = null;
