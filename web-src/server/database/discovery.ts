@@ -455,16 +455,15 @@ function parseComposePortMappings(
   for (const line of portsMatch[1].split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("-")) continue;
-    const value = resolveEnvValue(
-      trimmed
-        .slice(1)
-        .trim()
-        .replace(/^["']|["']$/g, "")
-        .split(/\s+#/)[0]
-        .split("/")[0]
-        .trim(),
-      composeDirEnv,
-    );
+    // resolveEnvValue (→ stripScalarSyntax) が引用符とコメントを正しい順序
+    // (引用符の対応する終端まで見てからコメントを切る) で除去したうえで
+    // ${VAR}/$VAR を展開する。ここで先に独自に引用符/コメントを削ると、
+    // 閉じ引用符がコメントの手前にある行 (例: `- "4566:4566"  # comment`)
+    // で終端引用符だけ消せず `4566:4566"` が残り、ポート番号として parse
+    // できなくなる (該当行が丸ごと無視されホストポート未検出になる)。
+    const value = resolveEnvValue(trimmed.slice(1).trim(), composeDirEnv)
+      .split("/")[0]
+      .trim();
     if (!value || value.includes("target:")) continue;
     const parts = value.split(":");
     const container = parts.pop()?.trim() || "";

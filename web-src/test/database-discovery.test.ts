@@ -334,6 +334,28 @@ services:
     expect(disabled).toHaveLength(0);
   });
 
+  // 引用符付きポート値に末尾コメントが続く行 (例: `- "4566:4566"  # comment`)
+  // で、コメント除去前に独自の引用符除去を行うと終端の `"` を消せず
+  // `4566:4566"` が残って expandPortRange に弾かれ、hostPort が undefined に
+  // なる回帰があった。この形式は複数ポート範囲マッピング (例:
+  // `4510-4559:4510-4559`) と組み合わせても同様に起きる。
+  test("detects host port from a quoted port mapping followed by a trailing comment", async () => {
+    const results = await discoverFromCompose(`
+services:
+  localstack:
+    image: localstack/localstack:4.14.0
+    ports:
+      - "4566:4566"            # LocalStack Gateway
+      - "4510-4559:4510-4559"  # external services port range
+    environment:
+      - SERVICES=s3,sqs
+`);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.kind).toBe("s3");
+    expect(results[0]?.hostPort).toBe("4566");
+  });
+
   test("detects LocalStack S3 from whitespace-separated SERVICES", async () => {
     const results = await discoverFromCompose(`
 services:
