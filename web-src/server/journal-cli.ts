@@ -26,8 +26,8 @@ import {
 import {
   type GithubIssueListItem,
   type GithubIssueListState,
-  readGithubIssue,
-  readGithubIssueList,
+  readGithubIssueAsync,
+  readGithubIssueListAsync,
   singleLineGithubOption,
 } from "./github-issues";
 
@@ -906,7 +906,7 @@ export async function runJournalCli(argv: string[]): Promise<void> {
       console.error(commandConfig.error);
       process.exit(1);
     }
-    const issues = readGithubIssueList({
+    const issues = await readGithubIssueListAsync({
       cwd: root,
       repo: command.repo,
       labels: command.ghLabels,
@@ -928,7 +928,7 @@ export async function runJournalCli(argv: string[]): Promise<void> {
       console.error(commandConfig.error);
       process.exit(1);
     }
-    const issue = readGithubIssue({
+    const issue = await readGithubIssueAsync({
       cwd: root,
       number: command.issueNumber,
       repo: command.repo,

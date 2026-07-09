@@ -14,9 +14,8 @@ import {
   parseRgOutput,
 } from "../server/search";
 import {
-  grepRepo,
   grepRepoAsync,
-  listRepoFiles,
+  listRepoFilesAsync,
   safeWorktreePath,
 } from "../server/search-service";
 import { runGit as git } from "./_git-fixture";
@@ -209,28 +208,13 @@ describe("search-service shared behavior", () => {
     rmSync(repo, { recursive: true, force: true });
   });
 
-  test("listRepoFiles returns searchable worktree files with generation", () => {
-    const result = listRepoFiles(env(), "worktree", 7);
+  test("listRepoFilesAsync returns searchable worktree files with generation", async () => {
+    const result = await listRepoFilesAsync(env(), "worktree", 7);
     if (result.ok !== true) throw new Error(result.error);
     expect(result.value.ref).toBe("worktree");
     expect(result.value.generation).toBe(7);
     expect(result.value.files.map((file) => file.path).sort()).toEqual([
       "other_sample.ts",
-      "sample_file.ts",
-    ]);
-  });
-
-  test("grepRepo honors a single paths[] filter in worktree search", () => {
-    const result = grepRepo(env(), {
-      query: "sample",
-      ref: "worktree",
-      paths: ["sample_file.ts"],
-      regex: false,
-      max: 10,
-    });
-    if (result.ok !== true) throw new Error(result.error);
-    expect(result.value.ref).toBe("worktree");
-    expect(result.value.matches.map((match) => match.path)).toEqual([
       "sample_file.ts",
     ]);
   });
@@ -257,8 +241,8 @@ describe("search-service shared behavior", () => {
     );
   });
 
-  test("grepRepo rejects unknown committed refs", () => {
-    const result = grepRepo(env(), {
+  test("grepRepoAsync rejects unknown committed refs", async () => {
+    const result = await grepRepoAsync(env(), {
       query: "sample",
       ref: "missing-ref",
       paths: [],

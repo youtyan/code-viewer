@@ -230,7 +230,7 @@ describe("repository scope omit settings", () => {
     ).toBe(true);
     expect(
       server.includes(
-        'if (url.pathname === "/_settings") return handleSettings()',
+        'if (url.pathname === "/_settings") return await handleSettings()',
       ),
     ).toBe(true);
     expect(server.includes("url.searchParams.has('omit_dirs')")).toBe(true);

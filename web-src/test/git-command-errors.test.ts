@@ -13,7 +13,7 @@ import {
   verifyTreeRefResult,
 } from "../server/git";
 import { defaultMcpTools, dispatchJsonRpc } from "../server/mcp";
-import { grepRepo, listRepoFiles } from "../server/search-service";
+import { grepRepoAsync, listRepoFilesAsync } from "../server/search-service";
 
 const tmpRoots: string[] = [];
 
@@ -69,7 +69,7 @@ async function callMcpTool(name: string, args: Record<string, unknown>) {
 }
 
 describe("git command failures", () => {
-  test("propagates command-not-found from tree-ref validation and search", () => {
+  test("propagates command-not-found from tree-ref validation and search", async () => {
     const cwd = tempRoot("code-viewer-missing-git-cwd-");
     configureMissingGit(cwd);
 
@@ -81,7 +81,7 @@ describe("git command failures", () => {
     }
 
     const env = { cwd, omitDirNames: [], excludeNames: [] };
-    const grep = grepRepo(env, {
+    const grep = await grepRepoAsync(env, {
       query: "sample",
       ref: "HEAD",
       paths: [],
@@ -91,11 +91,11 @@ describe("git command failures", () => {
     expect(grep.ok).toBe(false);
     if (grep.ok === false) expect(grep.status).toBe(503);
 
-    const files = listRepoFiles(env, "HEAD", 1);
+    const files = await listRepoFilesAsync(env, "HEAD", 1);
     expect(files.ok).toBe(false);
     if (files.ok === false) expect(files.status).toBe(503);
 
-    const emptyGrep = grepRepo(env, {
+    const emptyGrep = await grepRepoAsync(env, {
       query: "",
       ref: "HEAD",
       paths: [],

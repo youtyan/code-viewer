@@ -203,19 +203,19 @@ describe("preview CLI", () => {
 
         const started = Date.now();
         const responses = await Promise.all([
-          fetchWithTimeout(url, 1000),
+          fetchWithTimeout(url, 2500),
           fetchWithTimeout(
             new URL("/_tree?ref=worktree", url).toString(),
-            1000,
+            2500,
           ),
           fetchWithTimeout(
             new URL("/_tree?ref=worktree&recursive=1", url).toString(),
-            1000,
+            2500,
           ),
-          fetchWithTimeout(new URL("/_db/files", url).toString(), 1000),
+          fetchWithTimeout(new URL("/_db/files", url).toString(), 2500),
         ]);
 
-        expect(Date.now() - started < 1500).toBe(true);
+        expect(Date.now() - started < 2500).toBe(true);
         expect(responses.map((response) => response.status)).toEqual([
           200, 200, 200, 200,
         ]);

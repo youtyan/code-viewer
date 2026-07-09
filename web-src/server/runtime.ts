@@ -19,6 +19,11 @@ export type RunBytesResult = {
   stderr: string;
 };
 
+type RunOptions = {
+  timeout?: number;
+  maxBuffer?: number;
+};
+
 export type StartedServer = {
   port: number;
   close(): Promise<void>;
@@ -27,7 +32,7 @@ export type StartedServer = {
 export function runSync(
   args: string[],
   cwd: string,
-  options: { timeout?: number; maxBuffer?: number } = {},
+  options: RunOptions = {},
 ): RunResult {
   const proc = spawnSync(args[0], args.slice(1), {
     cwd,
@@ -47,10 +52,22 @@ export function runSync(
   };
 }
 
+export function runAsync(
+  args: string[],
+  cwd: string,
+  options: RunOptions = {},
+): Promise<RunResult> {
+  return runBytesAsync(args, cwd, options).then((proc) => ({
+    code: proc.code,
+    stdout: new TextDecoder().decode(proc.stdout),
+    stderr: proc.stderr,
+  }));
+}
+
 export function runBytesSync(
   args: string[],
   cwd: string,
-  options: { timeout?: number; maxBuffer?: number } = {},
+  options: RunOptions = {},
 ): RunBytesResult {
   const proc = spawnSync(args[0], args.slice(1), {
     cwd,
@@ -68,6 +85,104 @@ export function runBytesSync(
       proc.error,
     ),
   };
+}
+
+export function runBytesAsync(
+  args: string[],
+  cwd: string,
+  options: RunOptions = {},
+): Promise<RunBytesResult> {
+  const maxBuffer = options.maxBuffer ?? 64 * 1024 * 1024;
+  return new Promise((resolve) => {
+    const proc = spawn(args[0], args.slice(1), {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdoutChunks: Uint8Array[] = [];
+    const stderrChunks: Uint8Array[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let settled = false;
+    let timedOut = false;
+    let bufferExceeded = false;
+    let processError: Error | undefined;
+    const killSignal: NodeJS.Signals = "SIGKILL";
+    const timer =
+      options.timeout === undefined
+        ? null
+        : setTimeout(() => {
+            timedOut = true;
+            proc.kill(killSignal);
+          }, options.timeout);
+    const finish = (code: number) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      let stderr = new TextDecoder().decode(concatBytes(stderrChunks));
+      if (timedOut) {
+        stderr = appendProcessError(
+          stderr,
+          new Error(`spawn ${args[0]} ETIMEDOUT`),
+        );
+      } else if (bufferExceeded) {
+        stderr = appendProcessError(
+          stderr,
+          new Error("stdout maxBuffer exceeded"),
+        );
+      } else {
+        stderr = appendProcessError(stderr, processError);
+      }
+      resolve({
+        code,
+        stdout: concatBytes(stdoutChunks),
+        stderr,
+      });
+    };
+    const collect =
+      (chunks: Uint8Array[], onBytes: (length: number) => void) =>
+      (chunk: Uint8Array) => {
+        const bytes = new Uint8Array(chunk);
+        chunks.push(bytes);
+        onBytes(bytes.byteLength);
+        if (
+          !bufferExceeded &&
+          (stdoutBytes > maxBuffer || stderrBytes > maxBuffer)
+        ) {
+          bufferExceeded = true;
+          proc.kill(killSignal);
+        }
+      };
+    proc.stdout?.on(
+      "data",
+      collect(stdoutChunks, (length) => {
+        stdoutBytes += length;
+      }),
+    );
+    proc.stderr?.on(
+      "data",
+      collect(stderrChunks, (length) => {
+        stderrBytes += length;
+      }),
+    );
+    proc.on("error", (err) => {
+      processError = err;
+    });
+    proc.on("close", (code) => {
+      finish(timedOut || bufferExceeded ? 1 : (code ?? (processError ? 1 : 0)));
+    });
+  });
+}
+
+function concatBytes(chunks: Uint8Array[]): Uint8Array {
+  if (chunks.length === 0) return new Uint8Array();
+  const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
 }
 
 export function spawnDetached(args: string[]): void {
