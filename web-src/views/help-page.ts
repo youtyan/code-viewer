@@ -368,7 +368,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "Datastores",
         title: "Datastore Viewer",
         intro:
-          "Browse and edit SQLite files, Docker-hosted databases, Redis, Elasticsearch, and S3-compatible object stores from one local viewer.",
+          "Browse SQLite files, Docker-hosted databases, Redis, Elasticsearch, DynamoDB, and S3-compatible object stores from one local viewer.",
         groups: [
           {
             title: "Supported datastores",
@@ -395,6 +395,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                   [
                     "Elasticsearch",
                     "Detected from compose files. List indices, view mappings, paginate with search_after, run lucene q= or DSL queries on an allowlist. Edit / create / delete documents with _seq_no / _primary_term optimistic concurrency. Take snapshots/diffs.",
+                  ],
+                  [
+                    "DynamoDB / LocalStack",
+                    "Detected when DynamoDB is enabled on a LocalStack compose service. List tables, inspect key schemas, scan or query items, follow pagination tokens, and open item details with a copyable key. Browsing is read-only.",
                   ],
                   [
                     "S3 / MinIO / LocalStack",
@@ -452,7 +456,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Datastore explorers",
-                    "Redis / Elasticsearch / S3 keep the same Multi-DB tab UI but swap the table tree for a key-space / index-tree / folder-tree explorer. Each supports value editing, document/key/object creation, and deletion via in-pane editors and confirmation dialogs.",
+                    "Redis / Elasticsearch / DynamoDB / S3 keep the same Multi-DB tab UI but swap the table tree for a key-space / index-tree / table-list / folder-tree explorer. Redis, Elasticsearch, and S3 provide editing or creation flows; DynamoDB browsing is read-only.",
                   ],
                 ],
               },
@@ -1040,7 +1044,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "データストア",
         title: "データストアビューア",
         intro:
-          "SQLite ファイル、Docker 上のデータベース、Redis、Elasticsearch、S3 互換オブジェクトストアをローカルビューアで閲覧・編集できます。",
+          "SQLite ファイル、Docker 上のデータベース、Redis、Elasticsearch、DynamoDB、S3 互換オブジェクトストアをローカルビューアで閲覧できます。",
         groups: [
           {
             title: "対応データストア",
@@ -1067,6 +1071,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                   [
                     "Elasticsearch",
                     "compose ファイルから検出。インデックス一覧、マッピング、search_after ページング、lucene q= と許可リスト経由の DSL、スナップショット/差分に対応。_seq_no / _primary_term 楽観ロックでドキュメントの編集 / 新規作成 / 削除も可能。",
+                  ],
+                  [
+                    "DynamoDB / LocalStack",
+                    "LocalStack の compose サービスで DynamoDB が有効な場合に検出。テーブル一覧、キースキーマ、scan / query、継続トークンによるページング、コピー可能なキー付きのアイテム詳細を表示します。閲覧専用です。",
                   ],
                   [
                     "S3 / MinIO / LocalStack",
@@ -1124,7 +1132,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "データストア専用エクスプローラ",
-                    "Redis / Elasticsearch / S3 はマルチ DB タブ UI を共有しつつ、テーブルツリーをキー空間ツリー / インデックスツリー / フォルダツリーに差し替えます。それぞれインライン編集ペインと確認ダイアログによる値編集 / ドキュメント・キー・オブジェクト作成 / 削除に対応。",
+                    "Redis / Elasticsearch / DynamoDB / S3 はマルチ DB タブ UI を共有しつつ、テーブルツリーをキー空間ツリー / インデックスツリー / テーブル一覧 / フォルダツリーに差し替えます。Redis、Elasticsearch、S3 は編集・作成フローを提供し、DynamoDB は閲覧専用です。",
                   ],
                 ],
               },

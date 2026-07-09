@@ -32,8 +32,9 @@ Requires Node.js 20 or newer when installed from npm. Development uses
 - Switch the viewer UI between English and Japanese from Viewer Settings —
   the language toggle live-updates every screen including the datastore
   viewer.
-- Browse SQLite, PostgreSQL, MySQL, Redis, Elasticsearch, and S3-compatible
-  object storage (MinIO, LocalStack) with a built-in datastore viewer.
+- Browse SQLite, PostgreSQL, MySQL, Redis, Elasticsearch, DynamoDB, and
+  S3-compatible object storage (MinIO, LocalStack) with a built-in datastore
+  viewer.
   Local Supabase CLI (`supabase start`) Postgres projects are auto-discovered
   too, without needing a `docker-compose.yml`.
 - Read the built-in Help page for getting started, the `.code-viewer/`
@@ -210,13 +211,14 @@ browser-based viewer for exploring their contents.
 
 **SQLite** files (`.db`, `.sqlite`, `.sqlite3`, `.s3db`) are detected
 automatically by scanning the repository tree. **PostgreSQL**, **MySQL**,
-**Redis**, **Elasticsearch**, **MinIO**, and **LocalStack S3** services are
-detected from any `docker-compose.yml`, `docker-compose.yaml`, `compose.yml`,
-or `compose.yaml` found by the same recursive scan — both the repository root
-and subdirectories are considered, so a single `code-viewer --cwd <root>`
-brings up every DB defined under that root. `.git/`, `.code-viewer/`, and
-`node_modules/` are skipped, and discovery is capped at a few-level depth and
-a few dozen services per scan to keep startup cheap.
+**Redis**, **Elasticsearch**, **DynamoDB on LocalStack**, **MinIO**, and
+**LocalStack S3** services are detected from any `docker-compose.yml`,
+`docker-compose.yaml`, `compose.yml`, or `compose.yaml` found by the same
+recursive scan — both the repository root and subdirectories are considered,
+so a single `code-viewer --cwd <root>` brings up every DB defined under that
+root. `.git/`, `.code-viewer/`, and `node_modules/` are skipped, and discovery
+is capped at a few-level depth and a few dozen services per scan to keep
+startup cheap.
 
 Services whose names collide across subdirectories are kept distinct via
 `docker:<service>@<relDir>` ids (cwd-direct compose files keep the historical
@@ -242,6 +244,11 @@ small allowlist of `_search` / `_count` / `_msearch` / `_explain` /
 `_validate` / `_field_caps` / `_eql`. Edit documents (with optimistic
 concurrency via `_seq_no` / `_primary_term`), create new documents, and delete
 existing ones. Snapshots and diffs over `_search` iteration are supported.
+
+**DynamoDB** support: detect LocalStack services with DynamoDB enabled, list
+tables across paginated responses, inspect key schemas, scan or query items,
+page with `LastEvaluatedKey`, and open an item detail view with a copyable key.
+The explorer is read-only.
 
 **S3-compatible object storage** (MinIO, LocalStack): browse
 buckets as a folder tree, search by prefix or filename, sort scanned objects by
@@ -311,10 +318,11 @@ Open Datastores in the global navigation to access:
   snapshots to see inserted, updated, and deleted rows with full before/after
   values.
 - **Datastore explorers** — first-class sidebars for Redis (DB / SCAN),
-  Elasticsearch (indices / mappings / docs), and S3 (folder tree, kind
-  badges) so the same Multi-DB tab UI works for non-SQL stores too. Each
-  explorer supports value editing / document creation / object upload /
-  deletion via in-line panes and confirmation dialogs.
+  Elasticsearch (indices / mappings / docs), DynamoDB (tables / scan / query),
+  and S3 (folder tree, kind badges) so the same Multi-DB tab UI works for
+  non-SQL stores too. Redis, Elasticsearch, and S3 support editing or creation
+  through in-line panes and confirmation dialogs; DynamoDB browsing is
+  read-only.
 
 ### CLI
 
