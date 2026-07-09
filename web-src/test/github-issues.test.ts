@@ -12,8 +12,8 @@ import {
   githubSearchHasStateQualifier,
   parseGithubIssueListOutput,
   parseGithubIssueViewOutput,
-  readGithubIssue,
-  readGithubIssueList,
+  readGithubIssueAsync,
+  readGithubIssueListAsync,
 } from "../server/github-issues";
 
 describe("github issue listing", () => {
@@ -174,7 +174,7 @@ describe("github issue listing", () => {
     ).toEqual([{ number: 1, title: "Valid", state: "closed", labels: [] }]);
   });
 
-  test("uses configured gh override when reading issues", () => {
+  test("uses configured gh override when reading issues", async () => {
     const base = mkdtempSync(join(tmpdir(), "code-viewer-gh-"));
     const cwd = join(base, "cwd");
     const binDir = join(base, "bin");
@@ -199,10 +199,10 @@ describe("github issue listing", () => {
       allowedNames: ["gh"],
     });
     expect(configured).toEqual({ ok: true });
-    expect(readGithubIssueList({ cwd, limit: 1 })).toEqual([
+    expect(await readGithubIssueListAsync({ cwd, limit: 1 })).toEqual([
       { number: 7, title: "Fixture issue", state: "open", labels: [] },
     ]);
-    expect(readGithubIssue({ cwd, number: 7 })).toEqual({
+    expect(await readGithubIssueAsync({ cwd, number: 7 })).toEqual({
       number: 7,
       title: "Fixture issue",
       state: "open",

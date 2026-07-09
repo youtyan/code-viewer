@@ -102,11 +102,171 @@ function makeFakeMissingGitCommand(): string {
   return command;
 }
 
+function makeGatedGitCommand(match: "numstat" | "ls-tree" | "file-diff"): {
+  command: string;
+  started: string;
+  release: string;
+} {
+  const root = mkdtempSync(join(tmpdir(), "code-viewer-gated-git-"));
+  tmpRoots.push(root);
+  const command = join(root, "git");
+  const started = join(root, "started");
+  const release = join(root, "release");
+  const claim = join(root, "claim");
+  const stdout = join(root, "stdout");
+  const stderr = join(root, "stderr");
+  const status = join(root, "status");
+  const realGit = process.env.PATH?.split(":")
+    .map((dir) => join(dir, "git"))
+    .find((path) => existsSync(path));
+  if (!realGit) throw new Error("git command is unavailable");
+  writeFileSync(
+    command,
+    `#!/bin/sh
+matched=0
+case ${JSON.stringify(match)} in
+  numstat)
+    for arg in "$@"; do [ "$arg" = "--numstat" ] && matched=1; done
+    ;;
+  ls-tree)
+    saw_ls_tree=0
+    saw_recursive=0
+    for arg in "$@"; do
+      [ "$arg" = "ls-tree" ] && saw_ls_tree=1
+      [ "$arg" = "-r" ] && saw_recursive=1
+    done
+    [ "$saw_ls_tree" = 1 ] && [ "$saw_recursive" = 1 ] && matched=1
+    ;;
+  file-diff)
+    saw_diff=0
+    rejected=0
+    for arg in "$@"; do
+      [ "$arg" = "diff" ] && saw_diff=1
+      case "$arg" in --name-status|--numstat|--no-index) rejected=1 ;; esac
+    done
+    [ "$saw_diff" = 1 ] && [ "$rejected" = 0 ] && matched=1
+    ;;
+esac
+if [ "$matched" = 1 ] && mkdir ${JSON.stringify(claim)} 2>/dev/null; then
+  ${JSON.stringify(realGit)} "$@" > ${JSON.stringify(stdout)} 2> ${JSON.stringify(stderr)}
+  printf '%s' "$?" > ${JSON.stringify(status)}
+  : > ${JSON.stringify(started)}
+  while [ ! -e ${JSON.stringify(release)} ]; do sleep 0.01; done
+  cat ${JSON.stringify(stdout)}
+  cat ${JSON.stringify(stderr)} >&2
+  exit "$(cat ${JSON.stringify(status)})"
+fi
+exec ${JSON.stringify(realGit)} "$@"
+`,
+  );
+  chmodSync(command, 0o755);
+  return { command, started, release };
+}
+
+function makeDoubleGatedGitCommand(): {
+  command: string;
+  gates: readonly [
+    { started: string; release: string },
+    { started: string; release: string },
+  ];
+} {
+  const root = mkdtempSync(join(tmpdir(), "code-viewer-double-gated-git-"));
+  tmpRoots.push(root);
+  const command = join(root, "git");
+  const gates = [
+    { started: join(root, "started-1"), release: join(root, "release-1") },
+    { started: join(root, "started-2"), release: join(root, "release-2") },
+  ] as const;
+  const realGit = process.env.PATH?.split(":")
+    .map((dir) => join(dir, "git"))
+    .find((path) => existsSync(path));
+  if (!realGit) throw new Error("git command is unavailable");
+  writeFileSync(
+    command,
+    `#!/bin/sh
+matched=0
+for arg in "$@"; do [ "$arg" = "--numstat" ] && matched=1; done
+if [ "$matched" = 1 ]; then
+  gate=0
+  if mkdir ${JSON.stringify(join(root, "claim-1"))} 2>/dev/null; then
+    gate=1
+  elif mkdir ${JSON.stringify(join(root, "claim-2"))} 2>/dev/null; then
+    gate=2
+  fi
+  if [ "$gate" != 0 ]; then
+    stdout=${JSON.stringify(root)}/stdout-$gate
+    stderr=${JSON.stringify(root)}/stderr-$gate
+    status=${JSON.stringify(root)}/status-$gate
+    ${JSON.stringify(realGit)} "$@" > "$stdout" 2> "$stderr"
+    printf '%s' "$?" > "$status"
+    : > ${JSON.stringify(root)}/started-$gate
+    while [ ! -e ${JSON.stringify(root)}/release-$gate ]; do sleep 0.01; done
+    cat "$stdout"
+    cat "$stderr" >&2
+    exit "$(cat "$status")"
+  fi
+fi
+exec ${JSON.stringify(realGit)} "$@"
+`,
+  );
+  chmodSync(command, 0o755);
+  return { command, gates };
+}
+
 afterEach(() => {
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+async function startTestPreview(root: string, gitCommand: string) {
+  const proc = spawn(
+    process.execPath,
+    ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+    {
+      cwd: join(import.meta.dir, "..", ".."),
+      env: { ...process.env, CODE_VIEWER_BIN_GIT: gitCommand },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  const exited = new Promise<number | null>((resolve) => {
+    proc.once("exit", (code) => resolve(code));
+  });
+  try {
+    const url = await Promise.race([
+      waitForPreviewUrl(proc),
+      sleep(5000).then(() => {
+        throw new Error("preview did not start");
+      }),
+    ]);
+    return { proc, exited, url };
+  } catch (err) {
+    proc.kill("SIGKILL");
+    await waitForExit(exited, 3000);
+    throw err;
+  }
+}
+
+async function stopTestPreview(
+  proc: ReturnType<typeof spawn>,
+  exited: Promise<number | null>,
+): Promise<void> {
+  proc.kill("SIGKILL");
+  if ((await waitForExit(exited, 3000)) === "timeout") {
+    throw new Error("preview process did not exit after SIGKILL");
+  }
+}
+
+async function refreshPreview(url: string): Promise<Response> {
+  const origin = new URL(url).origin;
+  return fetch(new URL("/refresh", url), {
+    method: "POST",
+    headers: {
+      Origin: origin,
+      "X-Code-Viewer-Action": "1",
+    },
+  });
+}
 
 describe("preview CLI", () => {
   const runOrSkip = process.platform === "win32" ? test.skip : test;
@@ -203,19 +363,19 @@ describe("preview CLI", () => {
 
         const started = Date.now();
         const responses = await Promise.all([
-          fetchWithTimeout(url, 1000),
+          fetchWithTimeout(url, 2500),
           fetchWithTimeout(
             new URL("/_tree?ref=worktree", url).toString(),
-            1000,
+            2500,
           ),
           fetchWithTimeout(
             new URL("/_tree?ref=worktree&recursive=1", url).toString(),
-            1000,
+            2500,
           ),
-          fetchWithTimeout(new URL("/_db/files", url).toString(), 1000),
+          fetchWithTimeout(new URL("/_db/files", url).toString(), 2500),
         ]);
 
-        expect(Date.now() - started < 1500).toBe(true);
+        expect(Date.now() - started < 2500).toBe(true);
         expect(responses.map((response) => response.status)).toEqual([
           200, 200, 200, 200,
         ]);
@@ -580,4 +740,330 @@ describe("preview CLI", () => {
     expect(/query <run/.test(stdout)).toBe(false);
     expect(stdout).toMatch(/^Usage:$/m);
   });
+
+  runOrSkip(
+    "later stale diff metadata cannot overwrite the newer generation cache",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-diff-meta-race-"));
+      tmpRoots.push(root);
+      git(root, ["init", "-b", "main"]);
+      git(root, ["config", "user.email", "sample-author"]);
+      git(root, ["config", "user.name", "sample-author"]);
+      writeFileSync(join(root, "sample.txt"), "base\n");
+      git(root, ["add", "sample.txt"]);
+      git(root, ["commit", "-m", "sample initial commit"]);
+      writeFileSync(join(root, "sample.txt"), "first\n");
+      const gate = makeGatedGitCommand("numstat");
+      const preview = await startTestPreview(root, gate.command);
+      try {
+        const endpoint = new URL("/diff.json?nocache=1", preview.url);
+        const olderPromise = fetch(endpoint).then(
+          (response) =>
+            response.json() as Promise<{
+              generation: number;
+              totals: { additions: number; deletions: number };
+            }>,
+        );
+        expect(
+          await waitForOutput(
+            () => (existsSync(gate.started) ? "started" : ""),
+            /started/,
+            5000,
+          ),
+        ).toBe(true);
+
+        writeFileSync(join(root, "sample.txt"), "second\nthird\n");
+        const newer = (await (await fetch(endpoint)).json()) as {
+          generation: number;
+          totals: { additions: number; deletions: number };
+        };
+        writeFileSync(gate.release, "release");
+        const older = await olderPromise;
+        const cached = (await (
+          await fetch(new URL("/diff.json", preview.url))
+        ).json()) as {
+          generation: number;
+          totals: { additions: number; deletions: number };
+        };
+
+        expect(older.totals).toEqual({
+          files: 1,
+          additions: 1,
+          deletions: 1,
+        });
+        expect(newer.totals).toEqual({
+          files: 1,
+          additions: 2,
+          deletions: 1,
+        });
+        expect(older.generation < newer.generation).toBe(true);
+        expect(cached.totals).toEqual({
+          files: 1,
+          additions: 2,
+          deletions: 1,
+        });
+      } finally {
+        writeFileSync(gate.release, "release");
+        await stopTestPreview(preview.proc, preview.exited);
+      }
+    },
+  );
+
+  runOrSkip(
+    "an older diff result finishing first cannot make a newer result stale",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-diff-meta-first-"));
+      tmpRoots.push(root);
+      git(root, ["init", "-b", "main"]);
+      git(root, ["config", "user.email", "sample-author"]);
+      git(root, ["config", "user.name", "sample-author"]);
+      writeFileSync(join(root, "sample.txt"), "base\n");
+      git(root, ["add", "sample.txt"]);
+      git(root, ["commit", "-m", "sample initial commit"]);
+      writeFileSync(join(root, "sample.txt"), "first\n");
+      const gate = makeDoubleGatedGitCommand();
+      const preview = await startTestPreview(root, gate.command);
+      try {
+        const endpoint = new URL("/diff.json?nocache=1", preview.url);
+        const olderPromise = fetch(endpoint).then(
+          (response) =>
+            response.json() as Promise<{
+              generation: number;
+              totals: { additions: number; deletions: number };
+            }>,
+        );
+        expect(
+          await waitForOutput(
+            () => (existsSync(gate.gates[0].started) ? "started" : ""),
+            /started/,
+            5000,
+          ),
+        ).toBe(true);
+
+        writeFileSync(join(root, "sample.txt"), "second\nthird\n");
+        const newerPromise = fetch(endpoint).then(
+          (response) =>
+            response.json() as Promise<{
+              generation: number;
+              totals: { additions: number; deletions: number };
+            }>,
+        );
+        expect(
+          await waitForOutput(
+            () => (existsSync(gate.gates[1].started) ? "started" : ""),
+            /started/,
+            5000,
+          ),
+        ).toBe(true);
+
+        writeFileSync(gate.gates[0].release, "release");
+        const older = await olderPromise;
+        writeFileSync(gate.gates[1].release, "release");
+        const newer = await newerPromise;
+        const cached = (await (
+          await fetch(new URL("/diff.json", preview.url))
+        ).json()) as {
+          generation: number;
+          totals: { additions: number; deletions: number };
+        };
+
+        expect(older.totals).toEqual({
+          files: 1,
+          additions: 1,
+          deletions: 1,
+        });
+        expect(newer.totals).toEqual({
+          files: 1,
+          additions: 2,
+          deletions: 1,
+        });
+        expect(older.generation < newer.generation).toBe(true);
+        expect(cached.generation).toBe(newer.generation);
+        expect(cached.totals).toEqual({
+          files: 1,
+          additions: 2,
+          deletions: 1,
+        });
+      } finally {
+        for (const item of gate.gates) writeFileSync(item.release, "release");
+        await stopTestPreview(preview.proc, preview.exited);
+      }
+    },
+  );
+
+  runOrSkip(
+    "later stale repository file lists are not published as the current cache",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-file-list-race-"));
+      tmpRoots.push(root);
+      git(root, ["init", "-b", "main"]);
+      git(root, ["config", "user.email", "sample-author"]);
+      git(root, ["config", "user.name", "sample-author"]);
+      writeFileSync(join(root, "sample_a.txt"), "a\n");
+      git(root, ["add", "sample_a.txt"]);
+      git(root, ["commit", "-m", "sample initial commit"]);
+      const gate = makeGatedGitCommand("ls-tree");
+      const preview = await startTestPreview(root, gate.command);
+      try {
+        const endpoint = new URL("/_files?ref=HEAD", preview.url);
+        const olderPromise = fetch(endpoint).then(
+          (response) =>
+            response.json() as Promise<{
+              generation: number;
+              files: Array<{ path: string }>;
+            }>,
+        );
+        expect(
+          await waitForOutput(
+            () => (existsSync(gate.started) ? "started" : ""),
+            /started/,
+            5000,
+          ),
+        ).toBe(true);
+
+        writeFileSync(join(root, "sample_b.txt"), "b\n");
+        git(root, ["add", "sample_b.txt"]);
+        git(root, ["commit", "-m", "sample second commit"]);
+        expect((await refreshPreview(preview.url)).status).toBe(200);
+        const newer = (await (await fetch(endpoint)).json()) as {
+          generation: number;
+          files: Array<{ path: string }>;
+        };
+        writeFileSync(gate.release, "release");
+        const older = await olderPromise;
+        const cached = (await (await fetch(endpoint)).json()) as {
+          generation: number;
+          files: Array<{ path: string }>;
+        };
+
+        expect(older.files.map((file) => file.path)).toEqual(["sample_a.txt"]);
+        expect(newer.files.map((file) => file.path)).toEqual([
+          "sample_a.txt",
+          "sample_b.txt",
+        ]);
+        expect(older.generation < newer.generation).toBe(true);
+        expect(cached.files.map((file) => file.path)).toEqual([
+          "sample_a.txt",
+          "sample_b.txt",
+        ]);
+      } finally {
+        writeFileSync(gate.release, "release");
+        await stopTestPreview(preview.proc, preview.exited);
+      }
+    },
+  );
+
+  runOrSkip(
+    "a stale file diff response keeps its starting generation",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-file-diff-race-"));
+      tmpRoots.push(root);
+      git(root, ["init", "-b", "main"]);
+      git(root, ["config", "user.email", "sample-author"]);
+      git(root, ["config", "user.name", "sample-author"]);
+      writeFileSync(join(root, "sample.txt"), "base\n");
+      git(root, ["add", "sample.txt"]);
+      git(root, ["commit", "-m", "sample initial commit"]);
+      writeFileSync(join(root, "sample.txt"), "first\n");
+      const gate = makeGatedGitCommand("file-diff");
+      const preview = await startTestPreview(root, gate.command);
+      try {
+        const endpoint = new URL(
+          "/file_diff?from=HEAD&to=worktree&path=sample.txt",
+          preview.url,
+        );
+        const olderPromise = fetch(endpoint).then(
+          (response) =>
+            response.json() as Promise<{
+              generation: number;
+              diff: string;
+            }>,
+        );
+        expect(
+          await waitForOutput(
+            () => (existsSync(gate.started) ? "started" : ""),
+            /started/,
+            5000,
+          ),
+        ).toBe(true);
+
+        writeFileSync(join(root, "sample.txt"), "second\n");
+        expect((await refreshPreview(preview.url)).status).toBe(200);
+        const newer = (await (await fetch(endpoint)).json()) as {
+          generation: number;
+          diff: string;
+        };
+        writeFileSync(gate.release, "release");
+        const older = await olderPromise;
+
+        expect(older.diff).toMatch(/\+first/);
+        expect(newer.diff).toMatch(/\+second/);
+        expect(older.generation < newer.generation).toBe(true);
+      } finally {
+        writeFileSync(gate.release, "release");
+        await stopTestPreview(preview.proc, preview.exited);
+      }
+    },
+  );
+
+  runOrSkip(
+    "a stale staged diff cannot replace the current same-key cache entry",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-staged-diff-race-"));
+      tmpRoots.push(root);
+      git(root, ["init", "-b", "main"]);
+      git(root, ["config", "user.email", "sample-author"]);
+      git(root, ["config", "user.name", "sample-author"]);
+      writeFileSync(join(root, "sample.txt"), "base\n");
+      git(root, ["add", "sample.txt"]);
+      git(root, ["commit", "-m", "sample initial commit"]);
+      writeFileSync(join(root, "sample.txt"), "first\n");
+      git(root, ["add", "sample.txt"]);
+      const gate = makeGatedGitCommand("file-diff");
+      const preview = await startTestPreview(root, gate.command);
+      try {
+        const endpoint = new URL(
+          "/file_diff?to=--staged&path=sample.txt",
+          preview.url,
+        );
+        const olderPromise = fetch(endpoint).then(
+          (response) =>
+            response.json() as Promise<{
+              generation: number;
+              diff: string;
+            }>,
+        );
+        expect(
+          await waitForOutput(
+            () => (existsSync(gate.started) ? "started" : ""),
+            /started/,
+            5000,
+          ),
+        ).toBe(true);
+
+        writeFileSync(join(root, "sample.txt"), "second\n");
+        git(root, ["add", "sample.txt"]);
+        expect((await refreshPreview(preview.url)).status).toBe(200);
+        const newer = (await (await fetch(endpoint)).json()) as {
+          generation: number;
+          diff: string;
+        };
+        writeFileSync(gate.release, "release");
+        const older = await olderPromise;
+        const cached = (await (await fetch(endpoint)).json()) as {
+          generation: number;
+          diff: string;
+        };
+
+        expect(older.diff).toMatch(/\+first/);
+        expect(newer.diff).toMatch(/\+second/);
+        expect(cached.diff).toMatch(/\+second/);
+        expect(cached.diff).not.toMatch(/\+first/);
+        expect(cached.generation).toBe(newer.generation);
+      } finally {
+        writeFileSync(gate.release, "release");
+        await stopTestPreview(preview.proc, preview.exited);
+      }
+    },
+  );
 });

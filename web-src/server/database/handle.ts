@@ -51,6 +51,7 @@ import {
   getPrimaryKeyColumnsFromColumns,
   searchTableAsync,
 } from "./global-search";
+import { closeDynamoDbAdapter } from "./handle-dynamodb";
 import { closeElasticsearchAdapter } from "./handle-elasticsearch";
 import { closeRedisAdapter } from "./handle-redis";
 import { closeS3Adapter } from "./handle-s3";
@@ -277,6 +278,12 @@ async function resolveDb(
     }
     if (info.kind === "s3") {
       return textError("s3 services must use the /_db/s3/* routes", 400);
+    }
+    if (info.kind === "dynamodb") {
+      return textError(
+        "dynamodb services must use the /_db/dynamodb/* routes",
+        400,
+      );
     }
     const resolved = parsed.database
       ? { ...info, database: parsed.database }
@@ -1576,6 +1583,7 @@ const DOCKER_CLOSE_REGISTRY: Partial<Record<DbKind, DockerCloseHandler>> = {
   redis: closeRedisAdapter,
   elasticsearch: closeElasticsearchAdapter,
   s3: closeS3Adapter,
+  dynamodb: closeDynamoDbAdapter,
 };
 
 const SNAPSHOT_DOCKER_SOURCE_REGISTRY: Partial<
@@ -2149,6 +2157,10 @@ export async function handleDatabaseRoute(
   if (url.pathname.startsWith("/_db/s3/")) {
     const { handleS3Route } = await import("./handle-s3");
     return handleS3Route(req, url, cwd, sideEffectAllowed, omitDirNames);
+  }
+  if (url.pathname.startsWith("/_db/dynamodb/")) {
+    const { handleDynamoDbRoute } = await import("./handle-dynamodb");
+    return handleDynamoDbRoute(req, url, cwd, sideEffectAllowed, omitDirNames);
   }
   const start = Date.now();
   const method = req.method;

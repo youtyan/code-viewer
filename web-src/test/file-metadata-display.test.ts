@@ -26,9 +26,7 @@ describe("file metadata display", () => {
     expect(server.includes("function directoryMetadata")).toBe(true);
     expect(server.includes("return ms && Number.isFinite(ms)")).toBe(true);
     expect(
-      server.includes(
-        "entries: recursive ? entries : entries.map((entry) => attachTreeEntryMetadata(target, entry))",
-      ),
+      server.includes("entries: recursive ? entries : await Promise.all("),
     ).toBe(true);
     const rawHeaders = new Headers(
       rawFileHeaders("README.md", {
@@ -49,7 +47,9 @@ describe("file metadata display", () => {
       "2026-01-03T00:00:00.000Z",
     );
     expect(
-      server.includes("const metadata = gitFileMetadata(ref, path, size)"),
+      server.includes(
+        "const metadata = await gitFileMetadata(ref, path, size)",
+      ),
     ).toBe(true);
     expect(
       server.includes("const metadata = worktreeFileMetadata(path, size)"),

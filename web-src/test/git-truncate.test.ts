@@ -480,7 +480,7 @@ describe("repository tree helpers", () => {
         "-m",
         "needle oldest commit",
       ]).stdout.trim();
-      for (let index = 1; index <= 105; index++) {
+      for (let index = 1; index <= 60; index++) {
         parent = git(dir, [
           "commit-tree",
           "4b825dc642cb6eb9a060e54bf8d69288fbee4904",

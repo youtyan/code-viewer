@@ -15,7 +15,13 @@ import {
   commandNotFoundDetail,
   isCommandNotFoundResult,
 } from "./command-resolver";
-import { runBytesSync, runSync, spawnStream } from "./runtime";
+import {
+  runAsync,
+  runBytesAsync,
+  runBytesSync,
+  runSync,
+  spawnStream,
+} from "./runtime";
 
 export type GitFileMeta = {
   order?: number;
@@ -197,11 +203,29 @@ function run(
   });
 }
 
+function runGitAsync(
+  args: string[],
+  cwd: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return runAsync(resolveGitArgs(args), cwd, {
+    timeout: GIT_COMMAND_TIMEOUT_MS,
+  });
+}
+
 function runBytes(
   args: string[],
   cwd: string,
 ): { code: number; stdout: Uint8Array; stderr: string } {
   return runBytesSync(resolveGitArgs(args), cwd, {
+    timeout: GIT_COMMAND_TIMEOUT_MS,
+  });
+}
+
+function runGitBytesAsync(
+  args: string[],
+  cwd: string,
+): Promise<{ code: number; stdout: Uint8Array; stderr: string }> {
+  return runBytesAsync(resolveGitArgs(args), cwd, {
     timeout: GIT_COMMAND_TIMEOUT_MS,
   });
 }
@@ -241,6 +265,14 @@ function runGitRefLookup(args: string[], cwd: string): string | null {
   return res.code === 0 ? res.stdout.trimEnd() : null;
 }
 
+async function runGitRefLookupAsync(
+  args: string[],
+  cwd: string,
+): Promise<string | null> {
+  const res = await runGitAsync(args, cwd);
+  return res.code === 0 ? res.stdout.trimEnd() : null;
+}
+
 export function repoRoot(cwd: string): string | null {
   return runGitRefLookup(["git", "rev-parse", "--show-toplevel"], cwd);
 }
@@ -265,11 +297,30 @@ export function currentBranch(cwd: string): string | null {
   return runGitRefLookup(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd);
 }
 
+export function currentBranchAsync(cwd: string): Promise<string | null> {
+  return runGitRefLookupAsync(
+    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+    cwd,
+  );
+}
+
 export function verifyCommit(
   ref: string,
   cwd: string,
 ): { ok: true; sha: string } | { ok: false; error: string } {
   const res = run(["git", "rev-parse", "--verify", `${ref}^{commit}`], cwd);
+  if (res.code === 0) return { ok: true, sha: res.stdout.trim() };
+  return { ok: false, error: gitFailureMessage(res, "unknown ref") };
+}
+
+export async function verifyCommitAsync(
+  ref: string,
+  cwd: string,
+): Promise<{ ok: true; sha: string } | { ok: false; error: string }> {
+  const res = await runGitAsync(
+    ["git", "rev-parse", "--verify", `${ref}^{commit}`],
+    cwd,
+  );
   if (res.code === 0) return { ok: true, sha: res.stdout.trim() };
   return { ok: false, error: gitFailureMessage(res, "unknown ref") };
 }
@@ -299,6 +350,31 @@ export function statusPorcelainForPath(
   };
 }
 
+export async function statusPorcelainForPathAsync(
+  path: string,
+  cwd: string,
+): Promise<{ ok: true; stdout: string } | { ok: false; error: string }> {
+  const res = await runGitAsync(
+    [
+      "git",
+      "-c",
+      "core.quotepath=false",
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "--untracked-files=normal",
+      "--",
+      path,
+    ],
+    cwd,
+  );
+  if (res.code === 0) return { ok: true, stdout: res.stdout };
+  return {
+    ok: false,
+    error: gitFailureMessage(res, "git status failed"),
+  };
+}
+
 export function show(
   ref: string,
   path: string,
@@ -307,12 +383,28 @@ export function show(
   return run(["git", "show", `${ref}:${path}`], cwd);
 }
 
+export function showAsync(
+  ref: string,
+  path: string,
+  cwd: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return runGitAsync(["git", "show", `${ref}:${path}`], cwd);
+}
+
 export function showBytes(
   ref: string,
   path: string,
   cwd: string,
 ): { code: number; stdout: Uint8Array; stderr: string } {
   return runBytes(["git", "show", `${ref}:${path}`], cwd);
+}
+
+export function showBytesAsync(
+  ref: string,
+  path: string,
+  cwd: string,
+): Promise<{ code: number; stdout: Uint8Array; stderr: string }> {
+  return runGitBytesAsync(["git", "show", `${ref}:${path}`], cwd);
 }
 
 export function catFileBlobStream(
@@ -339,11 +431,39 @@ export function objectSize(
   };
 }
 
+export async function objectSizeAsync(
+  ref: string,
+  path: string,
+  cwd: string,
+): Promise<{ code: number; size: number; stderr: string }> {
+  const res = await runGitAsync(
+    ["git", "cat-file", "-s", `${ref}:${path}`],
+    cwd,
+  );
+  return {
+    code: res.code,
+    size: Number(res.stdout.trim()) || 0,
+    stderr: res.stderr,
+  };
+}
+
 export function objectByteSize(
   oid: string,
   cwd: string,
 ): { code: number; size: number; stderr: string } {
   const res = run(["git", "cat-file", "-s", oid], cwd);
+  return {
+    code: res.code,
+    size: Number(res.stdout.trim()) || 0,
+    stderr: res.stderr,
+  };
+}
+
+export async function objectByteSizeAsync(
+  oid: string,
+  cwd: string,
+): Promise<{ code: number; size: number; stderr: string }> {
+  const res = await runGitAsync(["git", "cat-file", "-s", oid], cwd);
   return {
     code: res.code,
     size: Number(res.stdout.trim()) || 0,
@@ -358,6 +478,17 @@ export function lastCommitDateForPath(
 ): string | null {
   const args = ["git", "log", "-1", "--format=%cI", ref, "--", path];
   const res = run(args, cwd);
+  if (res.code !== 0) return null;
+  return res.stdout.trim() || null;
+}
+
+export async function lastCommitDateForPathAsync(
+  ref: string,
+  path: string,
+  cwd: string,
+): Promise<string | null> {
+  const args = ["git", "log", "-1", "--format=%cI", ref, "--", path];
+  const res = await runGitAsync(args, cwd);
   if (res.code !== 0) return null;
   return res.stdout.trim() || null;
 }
@@ -377,6 +508,24 @@ export function objectId(
   return { code: 0, oid, stderr: "" };
 }
 
+export async function objectIdAsync(
+  ref: string,
+  path: string,
+  cwd: string,
+): Promise<{ code: number; oid: string; stderr: string }> {
+  const res = await runGitAsync(
+    ["git", "rev-parse", "--verify", `${ref}:${path}`],
+    cwd,
+  );
+  const oid = res.stdout.trim();
+  if (res.code !== 0 || !oid)
+    return { code: res.code || 1, oid: "", stderr: res.stderr };
+  const type = await runGitAsync(["git", "cat-file", "-t", oid], cwd);
+  if (type.code !== 0 || type.stdout.trim() !== "blob")
+    return { code: 1, oid: "", stderr: type.stderr };
+  return { code: 0, oid, stderr: "" };
+}
+
 export function verifyTreeRef(ref: string, cwd: string): boolean {
   return verifyTreeRefResult(ref, cwd).ok;
 }
@@ -390,6 +539,22 @@ export function verifyTreeRefResult(
   if (ref.startsWith("-"))
     return { ok: false, error: "invalid target", status: 400 };
   const res = run(["git", "rev-parse", "--verify", `${ref}^{tree}`], cwd);
+  if (res.code === 0) return { ok: true };
+  return { ok: false, ...gitFailureResult(res, "invalid target") };
+}
+
+export async function verifyTreeRefResultAsync(
+  ref: string,
+  cwd: string,
+): Promise<{ ok: true } | ({ ok: false } & GitErrorResult)> {
+  if (!ref || ref === "worktree")
+    return { ok: false, error: "invalid target", status: 400 };
+  if (ref.startsWith("-"))
+    return { ok: false, error: "invalid target", status: 400 };
+  const res = await runGitAsync(
+    ["git", "rev-parse", "--verify", `${ref}^{tree}`],
+    cwd,
+  );
   if (res.code === 0) return { ok: true };
   return { ok: false, ...gitFailureResult(res, "invalid target") };
 }
@@ -472,6 +637,73 @@ export function refsResult(
   return { refs: out };
 }
 
+export async function refsResultAsync(
+  cwd: string,
+): Promise<{ refs: GitRefs } & Partial<GitErrorResult>> {
+  const out = {
+    branches: [] as GitBranchMeta[],
+    tags: [] as GitTagMeta[],
+    commits: [] as GitCommitMeta[],
+    current: "",
+  };
+  const branches = await runGitAsync(
+    [
+      "git",
+      "for-each-ref",
+      "--sort=-committerdate",
+      "--format=%(refname)%09%(refname:short)%09%(committerdate:iso-strict)",
+      "refs/heads",
+      "refs/remotes",
+    ],
+    cwd,
+  );
+  if (branches.code !== 0 && isCommandNotFoundResult("git", branches)) {
+    return { refs: out, ...gitFailureResult(branches, "git refs failed") };
+  }
+  if (branches.code === 0) {
+    for (const line of branches.stdout.split("\n")) {
+      const [fullName, name, when] = line.split("\t");
+      if (
+        !fullName ||
+        !name ||
+        (fullName.startsWith("refs/remotes/") && fullName.endsWith("/HEAD"))
+      )
+        continue;
+      out.branches.push({ name, when });
+    }
+  }
+  const tags = await runGitAsync(
+    [
+      "git",
+      "for-each-ref",
+      "--sort=-creatordate",
+      "--format=%(refname:short)%09%(creatordate:iso-strict)",
+      "refs/tags",
+    ],
+    cwd,
+  );
+  if (tags.code !== 0 && isCommandNotFoundResult("git", tags)) {
+    return { refs: out, ...gitFailureResult(tags, "git refs failed") };
+  }
+  if (tags.code === 0) {
+    for (const line of tags.stdout.split("\n")) {
+      const [name, when] = line.split("\t");
+      if (!name) continue;
+      out.tags.push({ name, when });
+    }
+  }
+  const commits = await refCommitPageResultAsync(cwd, {
+    query: "",
+    max: DEFAULT_REF_COMMIT_LIMIT,
+  });
+  if (commits.error) {
+    return { refs: out, error: commits.error, status: commits.status };
+  }
+  out.commits = commits.commits;
+  out.current = (await currentBranchAsync(cwd)) || "";
+  return { refs: out };
+}
+
 function clampCommitLimit(max: number): number {
   return Math.max(1, Math.min(max, MAX_REF_COMMIT_LIMIT));
 }
@@ -532,6 +764,17 @@ function runCommitLogResult(
   args: string[],
 ): { commits: GitCommitMeta[] } & Partial<GitErrorResult> {
   const commits = run(args, cwd);
+  if (commits.code === 0) return { commits: parseCommitLog(commits.stdout) };
+  if (isCommandNotFoundResult("git", commits))
+    return { commits: [], ...gitFailureResult(commits, "git log failed") };
+  return { commits: [] };
+}
+
+async function runCommitLogResultAsync(
+  cwd: string,
+  args: string[],
+): Promise<{ commits: GitCommitMeta[] } & Partial<GitErrorResult>> {
+  const commits = await runGitAsync(args, cwd);
   if (commits.code === 0) return { commits: parseCommitLog(commits.stdout) };
   if (isCommandNotFoundResult("git", commits))
     return { commits: [], ...gitFailureResult(commits, "git log failed") };
@@ -655,6 +898,114 @@ export function refCommitPageResult(
   };
 }
 
+export async function refCommitPageResultAsync(
+  cwd: string,
+  options: { query?: string; max?: number; skip?: number } = {},
+): Promise<
+  { commits: GitCommitMeta[]; hasMore: boolean } & Partial<GitErrorResult>
+> {
+  const limit = clampCommitLimit(options.max ?? DEFAULT_REF_COMMIT_LIMIT);
+  const skip = clampCommitSkip(options.skip ?? 0);
+  const fetchLimit = limit + 1;
+  const hashMatches: GitCommitMeta[] = [];
+  const trimmed = (options.query || "").trim().slice(0, 200).replace(/\0/g, "");
+  if (skip === 0 && /^[0-9a-f]{4,40}$/i.test(trimmed)) {
+    const verified = await runGitAsync(
+      ["git", "rev-parse", "--verify", `${trimmed}^{commit}`],
+      cwd,
+    );
+    if (verified.code !== 0 && isCommandNotFoundResult("git", verified)) {
+      return {
+        commits: [],
+        hasMore: false,
+        ...gitFailureResult(verified, "unknown ref"),
+      };
+    }
+    const single = await runGitAsync(
+      [
+        "git",
+        "log",
+        "-z",
+        "-1",
+        `--format=${COMMIT_FORMAT}`,
+        verified.code === 0 && verified.stdout.trim()
+          ? verified.stdout.trim()
+          : trimmed,
+      ],
+      cwd,
+    );
+    if (single.code !== 0 && isCommandNotFoundResult("git", single)) {
+      return {
+        commits: [],
+        hasMore: false,
+        ...gitFailureResult(single, "git log failed"),
+      };
+    }
+    if (single.code === 0 && single.stdout.trim()) {
+      hashMatches.push(...parseCommitLog(single.stdout));
+    }
+  }
+  if (!trimmed) {
+    const result = await runCommitLogResultAsync(
+      cwd,
+      commitLogArgs(fetchLimit, skip),
+    );
+    if (result.error) {
+      return {
+        commits: [],
+        hasMore: false,
+        error: result.error,
+        status: result.status,
+      };
+    }
+    const commits = result.commits;
+    return {
+      commits: commits.slice(0, limit),
+      hasMore: commits.length > limit,
+    };
+  }
+  const [subjectMatches, authorMatches] = await Promise.all([
+    runCommitLogResultAsync(cwd, [
+      ...commitLogArgs(fetchLimit, skip),
+      "--regexp-ignore-case",
+      "--fixed-strings",
+      `--grep=${trimmed}`,
+    ]),
+    runCommitLogResultAsync(cwd, [
+      ...commitLogArgs(fetchLimit, skip),
+      "--regexp-ignore-case",
+      "--fixed-strings",
+      `--author=${trimmed}`,
+    ]),
+  ]);
+  if (subjectMatches.error) {
+    return {
+      commits: [],
+      hasMore: false,
+      error: subjectMatches.error,
+      status: subjectMatches.status,
+    };
+  }
+  if (authorMatches.error) {
+    return {
+      commits: [],
+      hasMore: false,
+      error: authorMatches.error,
+      status: authorMatches.status,
+    };
+  }
+  const merged = mergeCommitResults(
+    fetchLimit,
+    hashMatches,
+    subjectMatches.commits,
+    authorMatches.commits,
+  );
+  return {
+    commits: merged.slice(0, limit),
+    hasMore: merged.length > limit,
+  };
+}
+
 // Converts a git remote URL to the matching https web URL (GitHub-style
 // hosts). Returns null for local paths and other non-web remotes.
 export function parseRemoteWebUrl(remote: string): string | null {
@@ -672,6 +1023,12 @@ export function parseRemoteWebUrl(remote: string): string | null {
 
 export function remoteWebUrl(cwd: string): string | null {
   const res = run(["git", "remote", "get-url", "origin"], cwd);
+  if (res.code !== 0) return null;
+  return parseRemoteWebUrl(res.stdout.trim());
+}
+
+export async function remoteWebUrlAsync(cwd: string): Promise<string | null> {
+  const res = await runGitAsync(["git", "remote", "get-url", "origin"], cwd);
   if (res.code !== 0) return null;
   return parseRemoteWebUrl(res.stdout.trim());
 }
@@ -842,11 +1199,145 @@ export function commitHistory(
   return { commits: hasMore ? parsed.slice(0, limit) : parsed, hasMore };
 }
 
+export async function commitHistoryAsync(
+  cwd: string,
+  options: {
+    ref: string;
+    skip: number;
+    limit: number;
+    query?: string;
+    path?: string;
+  },
+): Promise<{
+  commits: GitHistoryCommit[];
+  hasMore: boolean;
+  error?: string;
+  status?: number;
+}> {
+  const ref = (options.ref || "HEAD").trim();
+  if (!ref || ref.startsWith("-") || ref.includes("\0"))
+    return { commits: [], hasMore: false, error: "invalid ref" };
+  const verified = await runGitAsync(
+    ["git", "rev-parse", "--verify", `${ref}^{commit}`],
+    cwd,
+  );
+  if (verified.code !== 0)
+    return {
+      commits: [],
+      hasMore: false,
+      ...gitFailureResult(verified, "unknown ref"),
+    };
+  const skip = Math.max(0, Math.floor(options.skip) || 0);
+  const limit = Math.max(
+    1,
+    Math.min(Math.floor(options.limit) || 1, MAX_HISTORY_LIMIT),
+  );
+  const { filterArgs, pathspec, shaTerm } = historyQueryArgs(
+    options.query || "",
+  );
+  const pathFilter = (options.path || "").trim();
+  const pathArgs: string[] = [];
+  if (pathFilter && !pathFilter.includes("\0") && !pathFilter.startsWith("-")) {
+    if (!pathFilter.endsWith("/")) pathArgs.push("--follow");
+    pathArgs.push("--", pathFilter);
+  }
+  const res = await runGitAsync(
+    [
+      "git",
+      "log",
+      "-z",
+      `--skip=${skip}`,
+      `--max-count=${limit + 1}`,
+      `--format=${HISTORY_FORMAT}`,
+      ...filterArgs,
+      verified.stdout.trim(),
+      ...pathspec,
+      ...pathArgs,
+    ],
+    cwd,
+  );
+  if (res.code !== 0)
+    return {
+      commits: [],
+      hasMore: false,
+      ...gitFailureResult(res, "git log failed"),
+    };
+  let parsed = parseHistoryLog(res.stdout);
+  if (shaTerm && skip === 0) {
+    const bySha = await runGitAsync(
+      ["git", "rev-parse", "--verify", `${shaTerm}^{commit}`],
+      cwd,
+    );
+    const sha = bySha.code === 0 ? bySha.stdout.trim() : "";
+    if (sha) {
+      const single = await runGitAsync(
+        ["git", "log", "-z", "-1", `--format=${HISTORY_FORMAT}`, sha],
+        cwd,
+      );
+      if (single.code === 0) {
+        const hit = parseHistoryLog(single.stdout);
+        parsed = [...hit, ...parsed.filter((c) => c.sha !== sha)];
+      }
+    }
+  }
+  const hasMore = parsed.length > limit;
+  return { commits: hasMore ? parsed.slice(0, limit) : parsed, hasMore };
+}
+
 export function nameStatusResult(
   args: string[],
   cwd: string,
 ): GitFileMetaResult {
   const res = run(
+    [
+      "git",
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--find-renames",
+      "--name-status",
+      "-z",
+      ...args,
+    ],
+    cwd,
+  );
+  if (res.code !== 0) {
+    return {
+      files: [],
+      error: gitFailureMessage(res, "git diff --name-status failed"),
+    };
+  }
+  const parts = res.stdout.split("\0");
+  const files: GitFileMeta[] = [];
+  for (let i = 0; i < parts.length; ) {
+    const status = parts[i++];
+    if (!status) break;
+    const kind = status[0];
+    if (kind === "R" || kind === "C") {
+      const oldPath = parts[i++] || "";
+      const path = parts[i++] || "";
+      if (path)
+        files.push({
+          status: kind,
+          old_path: oldPath,
+          path,
+          similarity: Number(status.slice(1)) || undefined,
+        });
+    } else {
+      const path = parts[i++] || "";
+      if (path) files.push({ status: kind, path });
+    }
+  }
+  return { files };
+}
+
+export async function nameStatusResultAsync(
+  args: string[],
+  cwd: string,
+): Promise<GitFileMetaResult> {
+  const res = await runGitAsync(
     [
       "git",
       "-c",
@@ -897,6 +1388,54 @@ export function nameStatus(args: string[], cwd: string): GitFileMeta[] {
 
 export function numstatZResult(args: string[], cwd: string): GitFileMetaResult {
   const res = run(
+    [
+      "git",
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--find-renames",
+      "--numstat",
+      "-z",
+      ...args,
+    ],
+    cwd,
+  );
+  if (res.code !== 0) {
+    return {
+      files: [],
+      error: gitFailureMessage(res, "git diff --numstat failed"),
+    };
+  }
+  const parts = res.stdout.split("\0");
+  const files: GitFileMeta[] = [];
+  for (let i = 0; i < parts.length; ) {
+    const rec = parts[i++];
+    if (!rec) break;
+    const match = rec.match(/^(\S+)\t(\S+)\t(.*)$/);
+    if (!match) break;
+    const [, add, del, rest] = match;
+    const binary = add === "-" && del === "-";
+    const additions = binary ? 0 : Number(add) || 0;
+    const deletions = binary ? 0 : Number(del) || 0;
+    if (rest === "") {
+      const oldPath = parts[i++] || "";
+      const path = parts[i++] || "";
+      if (path)
+        files.push({ old_path: oldPath, path, additions, deletions, binary });
+    } else {
+      files.push({ path: rest, additions, deletions, binary });
+    }
+  }
+  return { files };
+}
+
+export async function numstatZResultAsync(
+  args: string[],
+  cwd: string,
+): Promise<GitFileMetaResult> {
+  const res = await runGitAsync(
     [
       "git",
       "-c",
@@ -1109,10 +1648,117 @@ export function blame(
   return { lines, commits };
 }
 
+export async function blameAsync(
+  cwd: string,
+  options: { path: string; ref: string; base: GitBlameBase },
+): Promise<GitBlameResult> {
+  const path = options.path;
+  if (!path || path.includes("\0") || path.startsWith("-")) {
+    return { lines: [], commits: {}, error: "invalid path" };
+  }
+  const normalized = normalizeBlameRef(options.ref, options.base);
+  const args = ["git", "blame", "--porcelain"];
+  if (normalized.base === "HEAD") {
+    if (normalized.ref.startsWith("-") || normalized.ref.includes("\0"))
+      return { lines: [], commits: {}, error: "invalid ref" };
+    args.push(normalized.ref);
+  }
+  args.push("--", path);
+  const res = await runGitAsync(args, cwd);
+  if (res.code !== 0) {
+    if (isCommandNotFoundResult("git", res)) {
+      return {
+        lines: [],
+        commits: {},
+        error: commandNotFoundDetail("git"),
+        status: 503,
+      };
+    }
+    if (normalized.base === "worktree") {
+      return syntheticUncommittedBlameFromWorktree(cwd, path);
+    }
+    return {
+      lines: [],
+      commits: {},
+      error: res.stderr.trim() || "blame failed",
+    };
+  }
+  const lines: GitBlameLine[] = [];
+  const commits: Record<string, GitBlameCommit> = {};
+  const rawLines = res.stdout.split("\n");
+  let i = 0;
+  while (i < rawLines.length) {
+    const headerLine = rawLines[i];
+    if (!headerLine) {
+      i++;
+      continue;
+    }
+    const headerMatch = /^([0-9a-f]{40}) (\d+) (\d+)(?: (\d+))?$/.exec(
+      headerLine,
+    );
+    if (!headerMatch) {
+      i++;
+      continue;
+    }
+    const sha = headerMatch[1];
+    const finalLine = Number(headerMatch[3]);
+    i++;
+    let commit = commits[sha];
+    if (!commit) {
+      commit = {
+        sha,
+        author: "",
+        authorMail: "",
+        authorTime: 0,
+        summary: "",
+        isUncommitted: sha === BLAME_ZERO_SHA,
+      };
+      commits[sha] = commit;
+    }
+    while (i < rawLines.length && !rawLines[i].startsWith("\t")) {
+      const metaLine = rawLines[i++];
+      if (!metaLine) continue;
+      const sp = metaLine.indexOf(" ");
+      const key = sp >= 0 ? metaLine.slice(0, sp) : metaLine;
+      const val = sp >= 0 ? metaLine.slice(sp + 1) : "";
+      if (key === "author" && !commit.author) commit.author = val;
+      else if (key === "author-mail" && !commit.authorMail)
+        commit.authorMail = val.replace(/^</, "").replace(/>$/, "");
+      else if (key === "author-time" && !commit.authorTime)
+        commit.authorTime = Number(val) || 0;
+      else if (key === "summary" && !commit.summary) commit.summary = val;
+    }
+    if (i < rawLines.length && rawLines[i].startsWith("\t")) i++;
+    if (Number.isFinite(finalLine) && finalLine > 0) {
+      lines.push({
+        lineNo: finalLine,
+        sha,
+        isUncommitted: sha === BLAME_ZERO_SHA,
+      });
+    }
+  }
+  lines.sort((a, b) => a.lineNo - b.lineNo);
+  return { lines, commits };
+}
+
 export function untracked(cwd: string, path = ""): string[] {
   const args = ["git", "ls-files", "--others", "--exclude-standard"];
   if (path) args.push("--", `${path}/`);
   const res = run(args, cwd);
+  if (res.code !== 0) return [];
+  return res.stdout
+    .split("\n")
+    .filter(Boolean)
+    .filter((entry) => !isToolInternalPath(entry));
+}
+
+export async function untrackedAsync(
+  cwd: string,
+  path = "",
+): Promise<string[]> {
+  const args = ["git", "ls-files", "--others", "--exclude-standard"];
+  if (path) args.push("--", `${path}/`);
+  const res = await runGitAsync(args, cwd);
   if (res.code !== 0) return [];
   return res.stdout
     .split("\n")
@@ -1142,6 +1788,24 @@ function omittedWorktreeDirectoryReason(
 function worktreeSubmodulePaths(cwd: string): Set<string> {
   if (!existsSync(join(cwd, ".gitmodules"))) return new Set();
   const res = run(
+    ["git", "config", "--file", ".gitmodules", "--get-regexp", "\\.path$"],
+    cwd,
+  );
+  if (res.code !== 0) return new Set();
+  return new Set(
+    res.stdout
+      .split("\n")
+      .map((line) => {
+        const split = line.indexOf(" ");
+        return split >= 0 ? normalizeTreePath(line.slice(split + 1)) : "";
+      })
+      .filter(Boolean),
+  );
+}
+
+async function worktreeSubmodulePathsAsync(cwd: string): Promise<Set<string>> {
+  if (!existsSync(join(cwd, ".gitmodules"))) return new Set();
+  const res = await runGitAsync(
     ["git", "config", "--file", ".gitmodules", "--get-regexp", "\\.path$"],
     cwd,
   );
@@ -1304,6 +1968,126 @@ function worktreeFilesystemEntries(
   );
 }
 
+async function worktreeFilesystemEntriesAsync(
+  cwd: string,
+  path: string,
+  recursive: boolean,
+  omitDirNames: string[] = DEFAULT_WORKTREE_OMIT_DIR_NAMES,
+  excludeNames: string[] = [],
+): Promise<GitTreeEntry[]> {
+  const base = normalizeTreePath(path);
+  const root = join(cwd, base);
+  const omitDirNameSet = new Set(omitDirNames);
+  const excludeNameSet = new Set(
+    excludeNames.map((name) => name.toLowerCase()),
+  );
+  const submodulePaths = await worktreeSubmodulePathsAsync(cwd);
+  let directEntries: GitTreeEntry[];
+  try {
+    const dirents = readdirSync(root, { withFileTypes: true });
+    directEntries = sortTreeEntries(
+      dirents
+        .map((entry) =>
+          worktreeEntryFromDirent(
+            base,
+            root,
+            entry.name,
+            entry.isDirectory(),
+            omitDirNameSet,
+            excludeNameSet,
+            submodulePaths,
+          ),
+        )
+        .filter((entry) => entry.path),
+    );
+  } catch {
+    return [];
+  }
+  if (!recursive) return directEntries;
+
+  const fileEntries: GitTreeEntry[] = [];
+  let truncated = false;
+  const pushRecursiveEntry = (entry: GitTreeEntry): boolean => {
+    if (fileEntries.length >= WORKTREE_RECURSIVE_ENTRY_LIMIT) {
+      if (!truncated) {
+        fileEntries.push({
+          name: "more...",
+          path: "__code_viewer_truncated__",
+          type: "tree",
+          children_omitted: true,
+          children_omitted_reason: "truncated",
+        });
+        truncated = true;
+      }
+      return false;
+    }
+    fileEntries.push(entry);
+    return true;
+  };
+  let visitedDirs = 0;
+  const yieldIfNeeded = async () => {
+    visitedDirs++;
+    if (visitedDirs % 25 === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  };
+  const walk = async (
+    dir: string,
+    prefix: string,
+    depth: number,
+  ): Promise<void> => {
+    if (truncated) return;
+    if (depth >= WORKTREE_RECURSIVE_DEPTH_LIMIT) return;
+    await yieldIfNeeded();
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (excludeNameSet.has(entry.name.toLowerCase())) continue;
+      const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const omittedReason = omittedWorktreeDirectoryReason(
+          entry.name,
+          omitDirNameSet,
+        );
+        if (omittedReason) {
+          if (
+            !pushRecursiveEntry({
+              name: entry.name,
+              path: entryPath,
+              type: "tree",
+              children_omitted: true,
+              children_omitted_reason: omittedReason,
+            })
+          )
+            return;
+          continue;
+        }
+        if (hasDotGitEntry(full)) continue;
+        await walk(full, entryPath, depth + 1);
+      } else if (entry.isFile() || entry.isSymbolicLink()) {
+        if (
+          !pushRecursiveEntry({
+            name: entry.name,
+            path: entryPath,
+            type: "blob",
+          })
+        )
+          return;
+      }
+    }
+  };
+  await walk(root, base, 0);
+  return combineDirectAndRecursiveFiles(
+    directEntries,
+    fileEntries.sort((a, b) => a.path.localeCompare(b.path)),
+  );
+}
+
 function hasDotGitEntry(dir: string): boolean {
   try {
     lstatSync(join(dir, ".git"));
@@ -1327,6 +2111,42 @@ function gitTreeEntries(
   args.push("-z", "--full-tree", ref, "--");
   if (base) args.push(`${base}/`);
   const res = run(args, cwd);
+  if (res.code !== 0)
+    return { code: res.code, entries: [], stderr: res.stderr };
+  const allowedTypes = recursive ? "blob|commit" : "tree|blob|commit";
+  let entries = res.stdout
+    .split("\0")
+    .filter(Boolean)
+    .map((rec) => {
+      const match = rec.match(
+        new RegExp(`^\\d+\\s+(${allowedTypes})\\s+[0-9a-fA-F]+\\t(.+)$`),
+      );
+      if (!match) return null;
+      const entryPath = match[2];
+      return {
+        name: entryPath.split("/").pop() || entryPath,
+        path: entryPath,
+        type: match[1] as GitTreeEntry["type"],
+      };
+    })
+    .filter((entry): entry is GitTreeEntry => !!entry);
+  if (recursive) entries.sort((a, b) => a.path.localeCompare(b.path));
+  else entries = sortTreeEntries(entries);
+  return { code: 0, entries, stderr: "" };
+}
+
+async function gitTreeEntriesAsync(
+  ref: string,
+  path: string,
+  cwd: string,
+  recursive: boolean,
+): Promise<{ code: number; entries: GitTreeEntry[]; stderr: string }> {
+  const base = normalizeTreePath(path);
+  const args = ["git", "-c", "core.quotepath=false", "ls-tree"];
+  if (recursive) args.push("-r");
+  args.push("-z", "--full-tree", ref, "--");
+  if (base) args.push(`${base}/`);
+  const res = await runGitAsync(args, cwd);
   if (res.code !== 0)
     return { code: res.code, entries: [], stderr: res.stderr };
   const allowedTypes = recursive ? "blob|commit" : "tree|blob|commit";
@@ -1421,6 +2241,42 @@ export function listTree(
   };
 }
 
+export async function listTreeAsync(
+  ref: string,
+  path: string,
+  cwd: string,
+  options: {
+    recursive?: boolean;
+    omitDirNames?: string[];
+    excludeNames?: string[];
+  } = {},
+): Promise<{ code: number; entries: GitTreeEntry[]; stderr: string }> {
+  const base = normalizeTreePath(path);
+  if (ref === "worktree") {
+    return {
+      code: 0,
+      entries: await worktreeFilesystemEntriesAsync(
+        cwd,
+        base,
+        !!options.recursive,
+        options.omitDirNames,
+        options.excludeNames,
+      ),
+      stderr: "",
+    };
+  }
+
+  const direct = await gitTreeEntriesAsync(ref, base, cwd, false);
+  if (direct.code !== 0 || !options.recursive) return direct;
+  const recursive = await gitTreeEntriesAsync(ref, base, cwd, true);
+  if (recursive.code !== 0) return recursive;
+  return {
+    code: 0,
+    entries: combineDirectAndRecursiveFiles(direct.entries, recursive.entries),
+    stderr: "",
+  };
+}
+
 export function listTreeResult(
   ref: string,
   path: string,
@@ -1436,8 +2292,56 @@ export function listTreeResult(
   return { entries: [], ...gitFailureResult(result, "git ls-tree failed") };
 }
 
+export async function listTreeResultAsync(
+  ref: string,
+  path: string,
+  cwd: string,
+  options: {
+    recursive?: boolean;
+    omitDirNames?: string[];
+    excludeNames?: string[];
+  } = {},
+): Promise<{ entries: GitTreeEntry[] } & Partial<GitErrorResult>> {
+  const result = await listTreeAsync(ref, path, cwd, options);
+  if (result.code === 0) return { entries: result.entries };
+  return { entries: [], ...gitFailureResult(result, "git ls-tree failed") };
+}
+
 export function untrackedMeta(cwd: string): GitFileMeta[] {
   return untracked(cwd).flatMap((path) => {
+    const full = join(cwd, path);
+    let fileExists = false;
+    try {
+      fileExists = existsSync(full) && statSync(full).isFile();
+    } catch {
+      fileExists = false;
+    }
+    let scan: { binary: boolean; newlines: number };
+    if (fileExists) {
+      try {
+        scan = scanFileBinaryAndNewlines(full);
+      } catch {
+        return [];
+      }
+    } else {
+      return [];
+    }
+    return [
+      {
+        path,
+        status: "A",
+        additions: scan.binary ? 0 : scan.newlines,
+        deletions: 0,
+        binary: scan.binary,
+        untracked: true,
+      },
+    ];
+  });
+}
+
+export async function untrackedMetaAsync(cwd: string): Promise<GitFileMeta[]> {
+  const paths = await untrackedAsync(cwd);
+  return paths.flatMap((path) => {
     const full = join(cwd, path);
     let fileExists = false;
     try {
@@ -1527,6 +2431,32 @@ export function fileMetaResult(
   };
 }
 
+export async function fileMetaResultAsync(
+  args: string[],
+  cwd: string,
+  includeUntracked = false,
+): Promise<GitFileMetaResult> {
+  const ns = await nameStatusResultAsync(args, cwd);
+  if (ns.error) return { files: [], error: ns.error };
+  const nm = await numstatZResultAsync(args, cwd);
+  if (nm.error) return { files: [], error: nm.error };
+  const byPath = new Map(nm.files.map((file) => [file.path, file]));
+  const files: GitFileMeta[] = ns.files.map((file) => {
+    const stats = byPath.get(file.path);
+    return {
+      ...file,
+      additions: stats?.additions || 0,
+      deletions: stats?.deletions || 0,
+      binary: stats?.binary || false,
+    };
+  });
+  return {
+    files: includeUntracked
+      ? files.concat(await untrackedMetaAsync(cwd))
+      : files,
+  };
+}
+
 export function fileDiffText(
   args: string[],
   path: string | string[],
@@ -1554,12 +2484,65 @@ export function fileDiffText(
   return res;
 }
 
+export async function fileDiffTextAsync(
+  args: string[],
+  path: string | string[],
+  cwd: string,
+): Promise<{ code: number; stdout: string; stderr: string; status?: number }> {
+  const paths = Array.isArray(path) ? path : [path];
+  const res = await runGitAsync(
+    [
+      "git",
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--find-renames",
+      ...args,
+      "--",
+      ...paths,
+    ],
+    cwd,
+  );
+  if (isCommandNotFoundResult("git", res)) {
+    return { ...res, stderr: commandNotFoundDetail("git"), status: 503 };
+  }
+  return res;
+}
+
 export function untrackedFileDiff(
   extras: string[],
   path: string,
   cwd: string,
 ): { code: number; stdout: string; stderr: string; status?: number } {
   const res = run(
+    [
+      "git",
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-index",
+      ...extras,
+      "/dev/null",
+      path,
+    ],
+    cwd,
+  );
+  if (isCommandNotFoundResult("git", res)) {
+    return { ...res, stderr: commandNotFoundDetail("git"), status: 503 };
+  }
+  return res;
+}
+
+export async function untrackedFileDiffAsync(
+  extras: string[],
+  path: string,
+  cwd: string,
+): Promise<{ code: number; stdout: string; stderr: string; status?: number }> {
+  const res = await runGitAsync(
     [
       "git",
       "-c",

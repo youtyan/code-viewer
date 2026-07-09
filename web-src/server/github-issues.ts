@@ -3,7 +3,7 @@ import {
   commandNotFoundDetail,
   isCommandNotFoundResult,
 } from "./command-resolver";
-import { runSync } from "./runtime";
+import { runAsync } from "./runtime";
 
 export type GithubIssueListState = "open" | "closed" | "all";
 
@@ -184,10 +184,10 @@ export function buildGithubIssueViewArgs(
   return args;
 }
 
-export function readGithubIssueList(
+export async function readGithubIssueListAsync(
   options: GithubIssueListOptions,
-): GithubIssueListItem[] {
-  const proc = runSync(buildGithubIssueListArgs(options), options.cwd, {
+): Promise<GithubIssueListItem[]> {
+  const proc = await runAsync(buildGithubIssueListArgs(options), options.cwd, {
     timeout: 30000,
   });
   if (proc.code !== 0) {
@@ -203,10 +203,10 @@ export function readGithubIssueList(
   }
 }
 
-export function readGithubIssue(
+export async function readGithubIssueAsync(
   options: GithubIssueViewOptions,
-): GithubIssueListItem {
-  const proc = runSync(buildGithubIssueViewArgs(options), options.cwd, {
+): Promise<GithubIssueListItem> {
+  const proc = await runAsync(buildGithubIssueViewArgs(options), options.cwd, {
     timeout: 30000,
   });
   if (proc.code !== 0) {

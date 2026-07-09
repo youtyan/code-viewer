@@ -69,7 +69,7 @@ import {
   GithubIssueListError,
   normalizeGithubIssueListLimit,
   normalizeGithubIssueListState,
-  readGithubIssueList,
+  readGithubIssueListAsync,
 } from "./github-issues";
 import {
   addDailyJournalEntry,
@@ -113,7 +113,7 @@ import {
   fileByteRangeResponseBody,
   fileReadableStream,
   readFileTextRange,
-  runSync,
+  runAsync,
   spawnDetached,
   startServer,
 } from "./runtime";
@@ -122,7 +122,7 @@ import {
   grepRepoAsync,
   isExcludedScopePath,
   isSafePath,
-  listRepoFiles,
+  listRepoFilesAsync,
   type SearchEnv,
   safeWorktreePath as safeWorktreePathInEnv,
 } from "./search-service";
@@ -196,6 +196,7 @@ let listenPort = 0;
 let openAfterStart = false;
 const commandOverrides: ExternalCommandOverride[] = [];
 let cwdWasExplicit = false;
+let cwdHasGitRepository = false;
 let scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES;
 let scopeOmitDirCliOverride: string[] | null = null;
 let scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
@@ -216,6 +217,8 @@ const metaCache = new Map<
   string,
   TimedCacheEntry<{ body: string; sig: string }>
 >();
+let diffMetaRequestSequence = 0;
+const latestDiffMetaRequest = new Map<string, number>();
 const fileListCache = new Map<
   string,
   { generation: number; body: FileSearchListResponse }
@@ -335,6 +338,7 @@ Examples:
     process.exit(1);
   }
   const candidate = git.repoRoot(cwd);
+  cwdHasGitRepository = !!candidate;
   if (cwdWasExplicit) {
     // --cwd で明示された path が git repo の toplevel そのものなら
     // それを使う。サブディレクトリ指定や非 git ディレクトリの場合は
@@ -601,27 +605,28 @@ function fileToMeta(
   };
 }
 
-function computePayload(
+async function computePayload(
   extras: string[],
   range: { from?: string; to?: string },
   pathFilter = "",
-): DiffMeta {
+  responseGeneration = generation,
+): Promise<DiffMeta> {
   if (isSameWorktreeRange(range)) {
     return {
       files: [],
       totals: { files: 0, additions: 0, deletions: 0 },
       range: "worktree .. worktree",
       project: basename(cwd),
-      branch: git.currentBranch(cwd) || undefined,
-      generation,
+      branch: await currentBranchMetadata(),
+      generation: responseGeneration,
     };
   }
   const { args, refs } = buildRangeArgs(range);
   const fullArgs = [...extras, ...args];
-  const metaResult = git.fileMetaResult(fullArgs, cwd, false);
+  const metaResult = await git.fileMetaResultAsync(fullArgs, cwd, false);
   const files = metaResult.files;
   if (!metaResult.error && includeUntracked(range, refs)) {
-    files.push(...git.untrackedMeta(cwd));
+    files.push(...(await git.untrackedMetaAsync(cwd)));
   }
   const filteredFiles = pathFilter
     ? files.filter(
@@ -657,13 +662,14 @@ function computePayload(
     totals,
     range: label || "HEAD",
     project: basename(cwd),
-    branch: git.currentBranch(cwd) || undefined,
-    generation,
+    branch: await currentBranchMetadata(),
+    generation: responseGeneration,
     ...(metaResult.error ? { error: metaResult.error } : {}),
   };
 }
 
-function handleDiffJson(url: URL) {
+async function handleDiffJson(url: URL) {
+  const responseGeneration = generation;
   const extras = [];
   if (url.searchParams.get("ignore_ws") === "1") extras.push("-w");
   if (url.searchParams.get("ignore_blank") === "1")
@@ -675,11 +681,31 @@ function handleDiffJson(url: URL) {
   const path = url.searchParams.get("path") || "";
   if (path && !safePath(path)) return text("invalid path", 400);
   const key = `${range.from}|${range.to}|${url.searchParams.get("ignore_ws") || ""}|${url.searchParams.get("ignore_blank") || ""}|${path}`;
-  if (url.searchParams.get("nocache") === "1") {
-    const payload = computePayload(extras, range, path);
+  const noCache = url.searchParams.get("nocache") === "1";
+  const cached = metaCache.get(key);
+  if (!noCache && cacheFresh(cached))
+    return new Response(cached.body, {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    });
+  const requestSequence = ++diffMetaRequestSequence;
+  latestDiffMetaRequest.set(key, requestSequence);
+  try {
+    const payload = await computePayload(
+      extras,
+      range,
+      path,
+      responseGeneration,
+    );
+    if (
+      latestDiffMetaRequest.get(key) !== requestSequence ||
+      responseGeneration !== generation
+    )
+      return json(payload);
     const sig = JSON.stringify({ ...payload, generation: undefined });
-    const cached = metaCache.get(key);
-    if (!cached || cached.sig !== sig) {
+    if (noCache && (!cached || cached.sig !== sig)) {
       generation++;
       payload.generation = generation;
       metaCache.clear();
@@ -693,27 +719,10 @@ function handleDiffJson(url: URL) {
         "Cache-Control": "no-store",
       },
     });
+  } finally {
+    if (latestDiffMetaRequest.get(key) === requestSequence)
+      latestDiffMetaRequest.delete(key);
   }
-  const cached = metaCache.get(key);
-  if (cacheFresh(cached))
-    return new Response(cached.body, {
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": "no-store",
-      },
-    });
-  const payload = computePayload(extras, range, path);
-  const body = JSON.stringify(payload);
-  setTimedCacheEntry(metaCache, key, {
-    body,
-    sig: JSON.stringify({ ...payload, generation: undefined }),
-  });
-  return new Response(body, {
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
 }
 
 // Local alias to the shared search-service guard so the rest of preview.ts
@@ -892,14 +901,14 @@ function worktreeFileMetadata(path: string, knownSize?: number): FileMetadata {
   }
 }
 
-function gitFileMetadata(
+async function gitFileMetadata(
   ref: string,
   path: string,
   knownSize?: number,
-): FileMetadata {
-  const size = knownSize ?? rawFileSize(path, ref);
+): Promise<FileMetadata> {
+  const size = knownSize ?? (await rawFileSize(path, ref));
   const commitUpdatedAt =
-    git.lastCommitDateForPath(ref, path, cwd) || undefined;
+    (await git.lastCommitDateForPathAsync(ref, path, cwd)) || undefined;
   return {
     size: size == null ? undefined : size,
     updated_at: commitUpdatedAt,
@@ -907,7 +916,10 @@ function gitFileMetadata(
   };
 }
 
-function directoryMetadata(target: string, path: string): FileMetadata {
+async function directoryMetadata(
+  target: string,
+  path: string,
+): Promise<FileMetadata> {
   if (target === "worktree" || target === "") {
     const full =
       path === "" ? safeOpenWorktreePath("") : safeWorktreePath(path);
@@ -926,22 +938,26 @@ function directoryMetadata(target: string, path: string): FileMetadata {
     }
   }
   const commitUpdatedAt =
-    git.lastCommitDateForPath(target, path || ".", cwd) || undefined;
+    (await git.lastCommitDateForPathAsync(target, path || ".", cwd)) ||
+    undefined;
   return { updated_at: commitUpdatedAt, commit_updated_at: commitUpdatedAt };
 }
 
-function fileMetadataForTarget(target: string, path: string): FileMetadata {
+async function fileMetadataForTarget(
+  target: string,
+  path: string,
+): Promise<FileMetadata> {
   return target === "worktree" || target === ""
     ? worktreeFileMetadata(path)
     : gitFileMetadata(target, path);
 }
 
-function attachTreeEntryMetadata(
+async function attachTreeEntryMetadata(
   target: string,
   entry: git.GitTreeEntry,
-): git.GitTreeEntry {
+): Promise<git.GitTreeEntry> {
   if (entry.type === "tree")
-    return { ...entry, ...directoryMetadata(target, entry.path) };
+    return { ...entry, ...(await directoryMetadata(target, entry.path)) };
   // A browsable worktree commit entry (nested repo dir without a registered
   // submodule) opens like a directory in the client - give it the same
   // directory metadata so its listing shows an updated date, not "-".
@@ -950,15 +966,15 @@ function attachTreeEntryMetadata(
     !entry.submodule &&
     (target === "worktree" || target === "")
   )
-    return { ...entry, ...directoryMetadata(target, entry.path) };
+    return { ...entry, ...(await directoryMetadata(target, entry.path)) };
   if (entry.type !== "blob") return entry;
-  return { ...entry, ...fileMetadataForTarget(target, entry.path) };
+  return { ...entry, ...(await fileMetadataForTarget(target, entry.path)) };
 }
 
-function readReadme(
+async function readReadme(
   target: string,
   dirPath: string,
-): RepoTreeResponse["readme"] {
+): Promise<RepoTreeResponse["readme"]> {
   const candidates = ["README.md", "readme.md", "README.markdown", "README"];
   for (const name of candidates) {
     const path = dirPath ? `${dirPath}/${name}` : name;
@@ -971,13 +987,13 @@ function readReadme(
         continue;
       }
     }
-    const res = git.show(target, path, cwd);
+    const res = await git.showAsync(target, path, cwd);
     if (res.code === 0) return { path, text: res.stdout };
   }
   return null;
 }
 
-function handleTree(url: URL) {
+async function handleTree(url: URL) {
   const target =
     url.searchParams.get("ref") || url.searchParams.get("target") || "worktree";
   const path = (url.searchParams.get("path") || "").replace(/^\/+|\/+$/g, "");
@@ -985,7 +1001,7 @@ function handleTree(url: URL) {
   if ((target === "worktree" || target === "") && git.isGitInternalPath(path))
     return text("forbidden", 403);
   if (target !== "worktree") {
-    const refCheck = git.verifyTreeRefResult(target, cwd);
+    const refCheck = await git.verifyTreeRefResultAsync(target, cwd);
     if (refCheck.ok !== true)
       return text(refCheck.error, refCheck.status ?? 400);
   }
@@ -994,7 +1010,7 @@ function handleTree(url: URL) {
   if (invalidScopeExcludeNamesQuery(url))
     return text("invalid exclude names", 400);
   const excludeNames = scopeExcludeNamesFromQuery(url);
-  const tree = git.listTreeResult(target, path, cwd, {
+  const tree = await git.listTreeResultAsync(target, path, cwd, {
     recursive,
     omitDirNames: scopeOmitDirNamesFromQuery(url),
     excludeNames,
@@ -1007,20 +1023,22 @@ function handleTree(url: URL) {
     ref: target,
     path,
     project: basename(cwd),
-    branch: git.currentBranch(cwd) || undefined,
+    branch: await currentBranchMetadata(),
     entries: recursive
       ? entries
-      : entries.map((entry) => attachTreeEntryMetadata(target, entry)),
-    readme: readReadme(target, path),
+      : await Promise.all(
+          entries.map((entry) => attachTreeEntryMetadata(target, entry)),
+        ),
+    readme: await readReadme(target, path),
     upload_enabled: uploadEnabled && (target === "worktree" || target === ""),
   } satisfies RepoTreeResponse);
 }
 
-function handleSettings() {
+async function handleSettings() {
   return json({
     project: basename(cwd),
-    branch: git.currentBranch(cwd) || undefined,
-    repo_web_url: git.remoteWebUrl(cwd),
+    branch: await currentBranchMetadata(),
+    repo_web_url: cwdHasGitRepository ? await git.remoteWebUrlAsync(cwd) : null,
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
       omit_dirs_built_in: git.DEFAULT_WORKTREE_OMIT_DIR_NAMES,
@@ -1063,7 +1081,13 @@ function currentSearchEnv(
   };
 }
 
-function handleFiles(url: URL) {
+async function currentBranchMetadata(): Promise<string | undefined> {
+  if (!cwdHasGitRepository) return undefined;
+  return (await git.currentBranchAsync(cwd)) || undefined;
+}
+
+async function handleFiles(url: URL) {
+  const responseGeneration = generation;
   const target =
     url.searchParams.get("ref") || url.searchParams.get("target") || "worktree";
   if (invalidScopeOmitDirNamesQuery(url)) return text("invalid omit dirs", 400);
@@ -1074,13 +1098,17 @@ function handleFiles(url: URL) {
   const key = `${target || "worktree"}\0${omitDirNames.join("\0")}\0${excludeNames.join("\0")}`;
   const cached = fileListCache.get(key);
   if (cached && cached.generation === generation) return json(cached.body);
-  const result = listRepoFiles(
+  const result = await listRepoFilesAsync(
     currentSearchEnv(omitDirNames, excludeNames),
     target,
-    generation,
+    responseGeneration,
   );
   if (result.ok !== true) return text(result.error, result.status ?? 400);
-  fileListCache.set(key, { generation, body: result.value });
+  if (responseGeneration !== generation) return json(result.value);
+  fileListCache.set(key, {
+    generation: responseGeneration,
+    body: result.value,
+  });
   while (fileListCache.size > MAX_TIMED_CACHE_ENTRIES) {
     const oldest = fileListCache.keys().next().value;
     if (oldest === undefined) break;
@@ -1114,7 +1142,7 @@ async function handleGrep(url: URL) {
   return json(result.value);
 }
 
-function handleRefCommits(url: URL) {
+async function handleRefCommits(url: URL) {
   const query = url.searchParams.get("q") || "";
   const parsedMax = Number(url.searchParams.get("max") || "");
   const parsedSkip = Number(url.searchParams.get("skip") || "0");
@@ -1122,18 +1150,19 @@ function handleRefCommits(url: URL) {
     Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : undefined;
   const skip =
     Number.isFinite(parsedSkip) && parsedSkip > 0 ? parsedSkip : undefined;
-  const result = git.refCommitPageResult(cwd, { query, max, skip });
+  const result = await git.refCommitPageResultAsync(cwd, { query, max, skip });
   if (result.error) return text(result.error, result.status ?? 500);
   return json({ commits: result.commits, hasMore: result.hasMore });
 }
 
-function handleLog(url: URL) {
+async function handleLog(url: URL) {
+  const responseGeneration = generation;
   const ref = url.searchParams.get("ref") || "HEAD";
   const skip = Number(url.searchParams.get("skip") || "0");
   const limit = Number(url.searchParams.get("limit") || "50");
   const path = url.searchParams.get("path") || "";
   if (path && !safePath(path)) return text("invalid path", 400);
-  const result = git.commitHistory(cwd, {
+  const result = await git.commitHistoryAsync(cwd, {
     ref,
     skip: Number.isFinite(skip) ? skip : 0,
     limit: Number.isFinite(limit) ? limit : 50,
@@ -1150,7 +1179,7 @@ function handleLog(url: URL) {
   let commits: typeof result.commits = result.commits;
   let hasWorktree = false;
   if (wantsWorktreeHead) {
-    const status = git.statusPorcelainForPath(path, cwd);
+    const status = await git.statusPorcelainForPathAsync(path, cwd);
     if (status.ok && status.stdout.length > 0) {
       // Any non-empty record means the path has uncommitted changes.
       const parts = status.stdout.split("\0").filter(Boolean);
@@ -1173,7 +1202,7 @@ function handleLog(url: URL) {
   return json({
     commits,
     hasMore: result.hasMore,
-    generation,
+    generation: responseGeneration,
     ...(hasWorktree ? { hasWorktree: true } : {}),
   });
 }
@@ -1197,7 +1226,8 @@ function rememberBlame(key: string, value: git.GitBlameResult) {
   }
 }
 
-function handleFileBlame(url: URL) {
+async function handleFileBlame(url: URL) {
+  const responseGeneration = generation;
   const path = url.searchParams.get("path") || "";
   if (!safePath(path)) return text("invalid path", 400);
   const ref = url.searchParams.get("ref") || "worktree";
@@ -1218,7 +1248,7 @@ function handleFileBlame(url: URL) {
   if (base === "worktree") {
     cacheKey = `worktree|${path}|${blamePathKey(path)}`;
   } else {
-    const resolved = git.verifyCommit(normalized.ref, cwd);
+    const resolved = await git.verifyCommitAsync(normalized.ref, cwd);
     if (resolved.ok === false) {
       const status =
         resolved.error === commandNotFoundDetail("git") ? 503 : 400;
@@ -1232,15 +1262,21 @@ function handleFileBlame(url: URL) {
       blameCache.delete(cacheKey);
       blameCache.set(cacheKey, cached);
     }
-    return json({ ...cached, base, ref, generation });
+    return json({ ...cached, base, ref, generation: responseGeneration });
   }
-  const result = git.blame(cwd, { path, ref: normalized.ref, base });
+  const result = await git.blameAsync(cwd, {
+    path,
+    ref: normalized.ref,
+    base,
+  });
   if (result.error && result.status) return text(result.error, result.status);
-  if (!result.error) rememberBlame(cacheKey, result);
-  return json({ ...result, base, ref, generation });
+  if (!result.error && responseGeneration === generation)
+    rememberBlame(cacheKey, result);
+  return json({ ...result, base, ref, generation: responseGeneration });
 }
 
-function handleFileDiff(url: URL) {
+async function handleFileDiff(url: URL) {
+  const responseGeneration = generation;
   const path = url.searchParams.get("path") || "";
   if (!safePath(path)) return text("invalid path", 400);
   const extras = [];
@@ -1264,7 +1300,7 @@ function handleFileDiff(url: URL) {
       line_count: 0,
       truncated: false,
       binary: false,
-      generation,
+      generation: responseGeneration,
     });
   }
   const { args } = buildRangeArgs(range);
@@ -1291,14 +1327,14 @@ function handleFileDiff(url: URL) {
     diffText = cached.diffText;
   } else {
     if (isUntracked) {
-      const res = git.untrackedFileDiff(extras, path, cwd);
+      const res = await git.untrackedFileDiffAsync(extras, path, cwd);
       diffText = res.stdout || "";
       if (res.code !== 0 && !(res.code === 1 && diffText)) {
         errText = res.stderr || "diff failed";
         errStatus = res.status ?? 500;
       }
     } else {
-      const res = git.fileDiffText(
+      const res = await git.fileDiffTextAsync(
         [...extras, ...args],
         oldPath ? [oldPath, path] : path,
         cwd,
@@ -1309,7 +1345,8 @@ function handleFileDiff(url: URL) {
         errStatus = res.status ?? 500;
       }
     }
-    if (!errText) setTimedCacheEntry(fileCache, cacheKey, { diffText });
+    if (!errText && responseGeneration === generation)
+      setTimedCacheEntry(fileCache, cacheKey, { diffText });
   }
   if (errStatus) return text(errText || "diff failed", errStatus);
   const mode = url.searchParams.get("mode") || "full";
@@ -1336,7 +1373,7 @@ function handleFileDiff(url: URL) {
         truncated.lineTruncated),
     binary: diffText.includes("Binary files"),
     error: errText,
-    generation,
+    generation: responseGeneration,
   };
   return json(body);
 }
@@ -1570,12 +1607,12 @@ async function handleFileRange(url: URL) {
     return json(body);
   } else {
     const responseGeneration = generation;
-    const refCheck = git.verifyTreeRefResult(ref, cwd);
+    const refCheck = await git.verifyTreeRefResultAsync(ref, cwd);
     if (refCheck.ok !== true)
       return text(refCheck.error, refCheck.status ?? 400);
-    const oid = git.objectId(ref, path, cwd);
+    const oid = await git.objectIdAsync(ref, path, cwd);
     if (oid.code !== 0 || !oid.oid) return text("not in ref", 404);
-    const size = git.objectByteSize(oid.oid, cwd);
+    const size = await git.objectByteSizeAsync(oid.oid, cwd);
     if (size.code !== 0) return text("cannot read ref", 500);
     const result = await collectIndexedGitBlobLineRange(
       path,
@@ -1604,15 +1641,15 @@ async function handleRawFile(req: Request, url: URL) {
   if (!safePath(path)) return text("forbidden", 403);
   const ref = url.searchParams.get("ref") || "worktree";
   if (ref !== "worktree" && ref !== "") {
-    const refCheck = git.verifyTreeRefResult(ref, cwd);
+    const refCheck = await git.verifyTreeRefResultAsync(ref, cwd);
     if (refCheck.ok !== true)
       return text(refCheck.error, refCheck.status ?? 400);
-    const oid = git.objectId(ref, path, cwd);
+    const oid = await git.objectIdAsync(ref, path, cwd);
     if (oid.code !== 0 || !oid.oid) return text("not in ref", 404);
-    const sizeResult = git.objectByteSize(oid.oid, cwd);
+    const sizeResult = await git.objectByteSizeAsync(oid.oid, cwd);
     if (sizeResult.code !== 0) return text("cannot read ref", 500);
     const size = sizeResult.size;
-    const metadata = gitFileMetadata(ref, path, size);
+    const metadata = await gitFileMetadata(ref, path, size);
     const rangeResult = req.headers.get("range")
       ? parseHttpByteRange(req.headers.get("range"), size)
       : null;
@@ -1662,7 +1699,7 @@ async function handleRawFile(req: Request, url: URL) {
   } else {
     const full = safeWorktreePath(path);
     if (!full) return text("not found", 404);
-    const size = rawFileSize(path, ref);
+    const size = await rawFileSize(path, ref);
     if (size == null) return text("not found", 404);
     const metadata = worktreeFileMetadata(path, size);
     const rangeResult = req.headers.get("range")
@@ -1704,10 +1741,11 @@ async function handleRawFile(req: Request, url: URL) {
   }
 }
 
-function rawFileSize(path: string, ref: string): number | null {
+async function rawFileSize(path: string, ref: string): Promise<number | null> {
   if (ref !== "worktree" && ref !== "") {
-    if (!git.verifyTreeRef(ref, cwd)) return null;
-    const res = git.objectSize(ref, path, cwd);
+    const refCheck = await git.verifyTreeRefResultAsync(ref, cwd);
+    if (refCheck.ok !== true) return null;
+    const res = await git.objectSizeAsync(ref, path, cwd);
     return res.code === 0 ? res.size : null;
   }
   const full = safeWorktreePath(path);
@@ -1995,17 +2033,17 @@ function moveMacPathIntoTrash(path: string): {
   }
 }
 
-function movePathToTrash(path: string): {
+async function movePathToTrash(path: string): Promise<{
   ok: boolean;
   trashPath?: string;
   error?: string;
-} {
+}> {
   lstatSync(path);
   if (process.platform === "darwin") {
     return moveMacPathIntoTrash(path);
   }
   if (process.platform === "win32") {
-    const res = runSync(
+    const res = await runAsync(
       [
         "powershell.exe",
         "-NoProfile",
@@ -2025,13 +2063,13 @@ function movePathToTrash(path: string): {
   return { ok: false, error: "trash unsupported" };
 }
 
-function restoreTrashPath(
+async function restoreTrashPath(
   originalPath: string,
   trashPath?: string,
-): {
+): Promise<{
   ok: boolean;
   error?: string;
-} {
+}> {
   const parent = parentRepoPath(originalPath);
   const parentFullPath = safeOpenWorktreePath(parent);
   if (!parentFullPath) return { ok: false, error: "invalid restore target" };
@@ -2061,7 +2099,7 @@ function restoreTrashPath(
     }
   }
   if (process.platform === "win32") {
-    const res = runSync(
+    const res = await runAsync(
       [
         "powershell.exe",
         "-NoProfile",
@@ -2143,7 +2181,7 @@ async function handleTrashPath(req: Request) {
   if (git.isGitInternalPath(path)) return text("forbidden", 403);
   const originalFullPath = safeWorktreePath(path);
   if (!originalFullPath) return text("not found", 404);
-  const moved = movePathToTrash(worktreePath(path));
+  const moved = await movePathToTrash(worktreePath(path));
   if (!moved.ok) return text(moved.error || "trash failed", 500);
   const undo: UndoActionResponse = {
     id: makeUndoId(),
@@ -2233,7 +2271,7 @@ async function handleRestoreTrash(req: Request) {
   if (!originalPath || !safeRepoPath(originalPath))
     return text("invalid restore target", 400);
   if (git.isGitInternalPath(originalPath)) return text("forbidden", 403);
-  const restored = restoreTrashPath(originalPath, trashPath || undefined);
+  const restored = await restoreTrashPath(originalPath, trashPath || undefined);
   if (!restored.ok) return text(restored.error || "undo failed", 409);
   triggerUpdate();
   return json({ ok: true, generation });
@@ -2418,7 +2456,7 @@ async function handleJournal(req: Request): Promise<Response> {
       const label = bodyString(body, "label");
       const labels = bodyStringList(body, "labels");
       if (label) labels.push(label);
-      const issues = readGithubIssueList({
+      const issues = await readGithubIssueListAsync({
         cwd,
         repo: bodyString(body, "repo"),
         labels,
@@ -2831,6 +2869,7 @@ applyPersistedSettings(await loadAppSettingsState(cwd));
 // Directory count the worktree watcher capped at, or null while under the cap.
 // Tracked so clients that connect after the cap was hit still learn about it.
 let watchLimitReached: number | null = null;
+const databaseHandleModule = import("./database/handle");
 
 const server = await startServer({
   hostname: "127.0.0.1",
@@ -2840,21 +2879,21 @@ const server = await startServer({
     const url = new URL(req.url);
     const staticResponse = staticFile(url.pathname);
     if (staticResponse) return staticResponse;
-    if (url.pathname === "/diff.json") return handleDiffJson(url);
-    if (url.pathname === "/_settings") return handleSettings();
+    if (url.pathname === "/diff.json") return await handleDiffJson(url);
+    if (url.pathname === "/_settings") return await handleSettings();
     if (url.pathname === "/_doctor")
       return handleDoctor({
         cwd,
         scopeOmitDirNames,
         listenPort,
       });
-    if (url.pathname === "/_tree") return handleTree(url);
-    if (url.pathname === "/_files") return handleFiles(url);
+    if (url.pathname === "/_tree") return await handleTree(url);
+    if (url.pathname === "/_files") return await handleFiles(url);
     if (url.pathname === "/_grep") return await handleGrep(url);
-    if (url.pathname === "/_commits") return handleRefCommits(url);
-    if (url.pathname === "/_log") return handleLog(url);
-    if (url.pathname === "/_file_blame") return handleFileBlame(url);
-    if (url.pathname === "/file_diff") return handleFileDiff(url);
+    if (url.pathname === "/_commits") return await handleRefCommits(url);
+    if (url.pathname === "/_log") return await handleLog(url);
+    if (url.pathname === "/_file_blame") return await handleFileBlame(url);
+    if (url.pathname === "/file_diff") return await handleFileDiff(url);
     if (url.pathname === "/file_range") return handleFileRange(url);
     if (url.pathname === "/_file") return await handleRawFile(req, url);
     if (url.pathname === "/_open_path") return handleOpenPath(req);
@@ -2864,7 +2903,7 @@ const server = await startServer({
       return handleCreateDirectory(req);
     if (url.pathname === "/_upload_files") return handleUploadFiles(req);
     if (url.pathname.startsWith("/_db/")) {
-      const { handleDatabaseRoute } = await import("./database/handle");
+      const { handleDatabaseRoute } = await databaseHandleModule;
       const dbResponse = await handleDatabaseRoute(
         req,
         url,
@@ -2890,7 +2929,7 @@ const server = await startServer({
     if (url.pathname === "/_journal") return handleJournal(req);
     if (url.pathname === "/_annotations") return handleAnnotations(req);
     if (url.pathname === "/_refs") {
-      const result = git.refsResult(cwd);
+      const result = await git.refsResultAsync(cwd);
       if (result.error) return text(result.error, result.status ?? 500);
       return json(result.refs);
     }

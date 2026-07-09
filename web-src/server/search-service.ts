@@ -13,7 +13,7 @@
 //     parseGitGrepOutput / fixedStringLineMatches / buildFileSearchList /
 //     isSkippableSearchPath / size constants). Nothing is duplicated.
 //   - git.ts owns listTree / verifyTreeRef / isGitInternalPath / show.
-//   - runtime.runSync and spawn-runner own process execution.
+//   - git.ts and spawn-runner own async process execution.
 //
 // What we add here is only the orchestration that previously read closure
 // state — turned into pure functions that take `SearchEnv`.
@@ -28,7 +28,6 @@ import type {
 import { commandForExternal } from "./command-resolver";
 import { spawnTextAsync } from "./database/adapters/spawn-runner";
 import * as git from "./git";
-import { runSync } from "./runtime";
 import {
   buildFileSearchList,
   buildRgArgs,
@@ -65,13 +64,6 @@ export type FileListResult =
 // question), so we keep a single boolean cache shared by every call.
 // `resetRgAvailableCache` exists so tests can re-probe between runs.
 let rgAvailableCache: boolean | null = null;
-
-export function rgAvailable(cwd: string): boolean {
-  if (rgAvailableCache !== null) return rgAvailableCache;
-  const proc = runSync([commandForExternal("rg"), "--version"], cwd);
-  rgAvailableCache = proc.code === 0;
-  return rgAvailableCache;
-}
 
 export async function rgAvailableAsync(cwd: string): Promise<boolean> {
   if (rgAvailableCache !== null) return rgAvailableCache;
@@ -212,61 +204,6 @@ function grepWorktreeFallback(
   return matches;
 }
 
-function grepWorktree(env: SearchEnv, req: GrepRequest): GrepResponse {
-  const paths = filterCallerPaths(env, req.paths);
-  if (rgAvailable(env.cwd)) {
-    const safePaths = paths.filter((path) => safeWorktreePath(env, path));
-    const args = buildRgArgs(
-      req.query,
-      req.max,
-      safePaths,
-      req.regex,
-      env.omitDirNames,
-      env.excludeNames,
-    );
-    args[0] = commandForExternal("rg");
-    const proc = runSync(args, env.cwd, { timeout: 5000 });
-    const stdout = proc.stdout;
-    const matches = parseRgOutput(
-      stdout,
-      req.max,
-      env.omitDirNames,
-      env.excludeNames,
-    ).filter(
-      (match) =>
-        isSafePath(match.path) &&
-        !git.isGitInternalPath(match.path) &&
-        !isSkippableSearchPath(
-          match.path,
-          env.omitDirNames,
-          env.excludeNames,
-        ) &&
-        !!safeWorktreePath(env, match.path),
-    );
-    return {
-      ref: "worktree",
-      engine: "rg",
-      truncated: matches.length >= req.max,
-      matches,
-    };
-  }
-  if (req.regex) {
-    return {
-      ref: "worktree",
-      engine: "fallback",
-      truncated: false,
-      matches: [],
-    };
-  }
-  const matches = grepWorktreeFallback(env, req.query, req.max, paths);
-  return {
-    ref: "worktree",
-    engine: "fallback",
-    truncated: matches.length >= req.max,
-    matches,
-  };
-}
-
 async function grepWorktreeAsync(
   env: SearchEnv,
   req: GrepRequest,
@@ -331,41 +268,6 @@ async function grepWorktreeAsync(
   };
 }
 
-function grepTreeRef(env: SearchEnv, req: GrepRequest): GrepResponse {
-  const safePaths = filterCallerPaths(env, req.paths);
-  const args = [
-    commandForExternal("git"),
-    "-c",
-    "core.quotepath=false",
-    "grep",
-    "-n",
-    "--column",
-    "-i",
-    req.regex ? "-E" : "-F",
-    "--no-color",
-    "-e",
-    req.query,
-    req.ref,
-    "--",
-    ...safePaths,
-  ];
-  const proc = runSync(args, env.cwd, { timeout: 5000 });
-  const stdout = proc.stdout;
-  const matches = parseGitGrepOutput(
-    stdout,
-    req.ref,
-    req.max,
-    env.omitDirNames,
-    env.excludeNames,
-  ).slice(0, req.max);
-  return {
-    ref: req.ref,
-    engine: "git",
-    truncated: matches.length >= req.max,
-    matches,
-  };
-}
-
 async function grepTreeRefAsync(
   env: SearchEnv,
   req: GrepRequest,
@@ -414,42 +316,13 @@ async function grepTreeRefAsync(
 // return an empty result so callers don't have to special-case "no input
 // yet" the way the browser palette does. Unknown refs are surfaced as
 // errors; everything else returns a populated GrepResponse.
-export function grepRepo(env: SearchEnv, req: GrepRequest): GrepRunResult {
-  const isWorktree = req.ref === "worktree" || req.ref === "";
-  if (!isWorktree) {
-    const refCheck = git.verifyTreeRefResult(req.ref, env.cwd);
-    if (refCheck.ok !== true) {
-      return {
-        ok: false,
-        error: refCheck.error,
-        status: refCheck.status,
-      };
-    }
-  }
-  if (!req.query.trim()) {
-    return {
-      ok: true,
-      value: {
-        ref: req.ref,
-        engine: req.ref === "worktree" ? "fallback" : "git",
-        truncated: false,
-        matches: [],
-      },
-    };
-  }
-  if (isWorktree) {
-    return { ok: true, value: grepWorktree(env, req) };
-  }
-  return { ok: true, value: grepTreeRef(env, req) };
-}
-
 export async function grepRepoAsync(
   env: SearchEnv,
   req: GrepRequest,
 ): Promise<GrepRunResult> {
   const isWorktree = req.ref === "worktree" || req.ref === "";
   if (!isWorktree) {
-    const refCheck = git.verifyTreeRefResult(req.ref, env.cwd);
+    const refCheck = await git.verifyTreeRefResultAsync(req.ref, env.cwd);
     if (refCheck.ok !== true) {
       return {
         ok: false,
@@ -478,13 +351,13 @@ export async function grepRepoAsync(
 // List every blob/commit entry under `ref`. Used by /_files (with a
 // per-generation cache layered on top in preview.ts) and by the MCP
 // `code_viewer_search_files` tool (always fresh per call).
-export function listRepoFiles(
+export async function listRepoFilesAsync(
   env: SearchEnv,
   ref: string,
   generation: number,
-): FileListResult {
+): Promise<FileListResult> {
   if (ref !== "worktree" && ref !== "") {
-    const refCheck = git.verifyTreeRefResult(ref, env.cwd);
+    const refCheck = await git.verifyTreeRefResultAsync(ref, env.cwd);
     if (refCheck.ok !== true) {
       return {
         ok: false,
@@ -494,7 +367,7 @@ export function listRepoFiles(
     }
   }
   const effectiveRef = ref || "worktree";
-  const tree = git.listTreeResult(effectiveRef, "", env.cwd, {
+  const tree = await git.listTreeResultAsync(effectiveRef, "", env.cwd, {
     recursive: true,
     omitDirNames: env.omitDirNames,
     excludeNames: env.excludeNames,

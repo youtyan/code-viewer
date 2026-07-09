@@ -178,13 +178,31 @@ const COMPOSE_FILENAMES = [
   "compose.yaml",
 ];
 
-function serviceListIncludesS3(value: string | undefined): boolean {
+function serviceListIncludesAwsService(
+  value: string | undefined,
+  service: string,
+): boolean {
   if (value === undefined || value.trim() === "") return true;
   return value
     .split(/[,\s]+/)
     .map((part) => part.trim().toLowerCase())
     .filter(Boolean)
-    .includes("s3");
+    .includes(service);
+}
+
+// LocalStack の SERVICES 環境変数から、code-viewer が対応する AWS サービスの
+// DbKind を全て検出する。1コンテナで複数サービス(s3, dynamodb 等)を同時に
+// 提供するため、単一 kind ではなく配列で返す。
+function detectAwsKindsFromServices(services: string | undefined): DbKind[] {
+  const kinds: DbKind[] = [];
+  if (serviceListIncludesAwsService(services, "s3")) kinds.push("s3");
+  if (serviceListIncludesAwsService(services, "dynamodb"))
+    kinds.push("dynamodb");
+  return kinds;
+}
+
+function isLocalstackImage(image: string | null): boolean {
+  return !!image && image.toLowerCase().includes("localstack/localstack");
 }
 
 function imageLooksLikeMinio(image: string): boolean {
@@ -193,7 +211,7 @@ function imageLooksLikeMinio(image: string): boolean {
 
 function detectDbKind(
   image: string,
-  env: Record<string, string> = {},
+  _env: Record<string, string> = {},
 ): DbKind | null {
   const lower = image.toLowerCase();
   if (lower.includes("postgres")) return "postgresql";
@@ -202,9 +220,6 @@ function detectDbKind(
   if (lower.includes("elasticsearch") || lower.includes("opensearch"))
     return "elasticsearch";
   if (imageLooksLikeMinio(lower)) return "s3";
-  if (lower.includes("localstack/localstack")) {
-    return serviceListIncludesS3(env.SERVICES) ? "s3" : null;
-  }
   return null;
 }
 
@@ -230,8 +245,47 @@ function detectDbKindFromEnv(env: Record<string, string>): DbKind | null {
   ) {
     return "s3";
   }
-  if (env.SERVICES && serviceListIncludesS3(env.SERVICES)) return "s3";
   return null;
+}
+
+// service block から検出できる DbKind を全て返す。LocalStack (image または
+// SERVICES 環境変数で判定) は1コンテナで複数 AWS サービスを提供しうるため
+// 複数 kind を返すことがある。それ以外は既存の単一判定チェーンにフォールバック。
+function detectDbKindsForService(
+  image: string | null,
+  env: Record<string, string>,
+  containerPort: string | null,
+  serviceName: string,
+): DbKind[] {
+  if (isLocalstackImage(image) || env.SERVICES !== undefined) {
+    return detectAwsKindsFromServices(env.SERVICES);
+  }
+  const single =
+    (image ? detectDbKind(image, env) : null) ??
+    detectDbKindFromEnv(env) ??
+    detectDbKindFromContainerPort(containerPort) ??
+    detectDbKindFromServiceName(serviceName);
+  return single ? [single] : [];
+}
+
+// 同一 service から複数 kind が検出された場合の label 表示用。
+function dbKindDisplayName(kind: DbKind): string {
+  switch (kind) {
+    case "s3":
+      return "S3";
+    case "dynamodb":
+      return "DynamoDB";
+    case "redis":
+      return "Redis";
+    case "elasticsearch":
+      return "Elasticsearch";
+    case "postgresql":
+      return "PostgreSQL";
+    case "mysql":
+      return "MySQL";
+    case "sqlite":
+      return "SQLite";
+  }
 }
 
 function detectDbKindFromContainerPort(port: string | null): DbKind | null {
@@ -284,10 +338,13 @@ function defaultPortFor(
     case "s3": {
       const lower = image?.toLowerCase() || "";
       return lower.includes("localstack/localstack") ||
-        (env.SERVICES !== undefined && serviceListIncludesS3(env.SERVICES))
+        (env.SERVICES !== undefined &&
+          serviceListIncludesAwsService(env.SERVICES, "s3"))
         ? "4566"
         : "9000";
     }
+    case "dynamodb":
+      return "4566";
     default:
       return "";
   }
@@ -398,16 +455,15 @@ function parseComposePortMappings(
   for (const line of portsMatch[1].split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("-")) continue;
-    const value = resolveEnvValue(
-      trimmed
-        .slice(1)
-        .trim()
-        .replace(/^["']|["']$/g, "")
-        .split(/\s+#/)[0]
-        .split("/")[0]
-        .trim(),
-      composeDirEnv,
-    );
+    // resolveEnvValue (→ stripScalarSyntax) が引用符とコメントを正しい順序
+    // (引用符の対応する終端まで見てからコメントを切る) で除去したうえで
+    // ${VAR}/$VAR を展開する。ここで先に独自に引用符/コメントを削ると、
+    // 閉じ引用符がコメントの手前にある行 (例: `- "4566:4566"  # comment`)
+    // で終端引用符だけ消せず `4566:4566"` が残り、ポート番号として parse
+    // できなくなる (該当行が丸ごと無視されホストポート未検出になる)。
+    const value = resolveEnvValue(trimmed.slice(1).trim(), composeDirEnv)
+      .split("/")[0]
+      .trim();
     if (!value || value.includes("target:")) continue;
     const parts = value.split(":");
     const container = parts.pop()?.trim() || "";
@@ -564,70 +620,89 @@ function parseComposeContent(
     // profiles: が定義されていれば profile-gated。値が空でも key の存在で判定する
     // (compose は `profiles:` だけあって中身が空の場合も警告を出さないため)。
     const profiled = /^\s+profiles:/m.test(svcBlock);
-    const kind =
-      (image ? detectDbKind(image, env) : null) ??
-      detectDbKindFromEnv(env) ??
-      detectDbKindFromContainerPort(containerPort) ??
-      detectDbKindFromServiceName(svc.name);
-    if (!kind) continue;
+    // LocalStack 等、1コンテナが複数 AWS サービスを同時提供する場合は
+    // kinds.length > 1 になる。その場合のみ id/label に kind を明示する。
+    const kinds = detectDbKindsForService(image, env, containerPort, svc.name);
+    const isMultiKind = kinds.length > 1;
 
-    const defaultPort = defaultPortFor(kind, image, env);
-    const serviceContainerPort =
-      kind === "s3" ? defaultPort : containerPort || defaultPort;
-    const publishedHostPort =
-      parseComposeHostPortForContainer(
-        svcBlock,
-        serviceContainerPort,
-        composeDirEnv,
-      ) ||
-      parseComposeHostPortForContainer(svcBlock, defaultPort, composeDirEnv) ||
-      parseComposePorts(svcBlock, composeDirEnv);
-    const hostPort =
-      kind === "s3"
-        ? publishedHostPort || undefined
-        : publishedHostPort || defaultPort;
-    const imageLabel = image ?? `build:${kind}`;
+    for (const kind of kinds) {
+      if (results.length >= MAX_DOCKER_SERVICES) return;
 
-    const id = isRoot
-      ? `docker:${svc.name}`
-      : `docker:${svc.name}@${encodeURIComponent(relDirSlash)}`;
-    const labelPath = isRoot ? "" : ` — ${relDirSlash}`;
+      const defaultPort = defaultPortFor(kind, image, env);
+      const serviceContainerPort =
+        kind === "s3" || kind === "dynamodb"
+          ? defaultPort
+          : containerPort || defaultPort;
+      const publishedHostPort =
+        parseComposeHostPortForContainer(
+          svcBlock,
+          serviceContainerPort,
+          composeDirEnv,
+        ) ||
+        parseComposeHostPortForContainer(
+          svcBlock,
+          defaultPort,
+          composeDirEnv,
+        ) ||
+        parseComposePorts(svcBlock, composeDirEnv);
+      const hostPort =
+        kind === "s3" || kind === "dynamodb"
+          ? publishedHostPort || undefined
+          : publishedHostPort || defaultPort;
+      const imageLabel = image ?? `build:${kind}`;
 
-    let label: string;
-    if (kind === "redis" || kind === "elasticsearch" || kind === "s3") {
-      const endpointLabel = hostPort
-        ? `localhost:${hostPort}`
-        : `container:${serviceContainerPort}`;
-      label = `${svc.name} (${imageLabel}, ${endpointLabel}${labelPath})`;
-    } else {
-      const dbName =
-        env.POSTGRES_DB ||
-        env.MYSQL_DATABASE ||
-        env.MARIADB_DATABASE ||
-        svc.name;
-      const user =
-        env.POSTGRES_USER ||
-        env.MYSQL_USER ||
-        env.MARIADB_USER ||
-        (kind === "postgresql" ? "postgres" : "root");
-      label = `${svc.name} (${imageLabel}, ${user}@localhost:${hostPort}/${dbName}${labelPath})`;
+      // 複数 kind を持つ service は id が衝突するため kind suffix で一意化する
+      // (単一 kind の service は既存の id 形式を維持し後方互換を保つ)。
+      const kindSuffix = isMultiKind ? `#${kind}` : "";
+      const id = isRoot
+        ? `docker:${svc.name}${kindSuffix}`
+        : `docker:${svc.name}@${encodeURIComponent(relDirSlash)}${kindSuffix}`;
+      const labelPath = isRoot ? "" : ` — ${relDirSlash}`;
+
+      let label: string;
+      if (
+        kind === "redis" ||
+        kind === "elasticsearch" ||
+        kind === "s3" ||
+        kind === "dynamodb"
+      ) {
+        const endpointLabel = hostPort
+          ? `localhost:${hostPort}`
+          : `container:${serviceContainerPort}`;
+        const svcLabel = isMultiKind
+          ? `${svc.name} / ${dbKindDisplayName(kind)}`
+          : svc.name;
+        label = `${svcLabel} (${imageLabel}, ${endpointLabel}${labelPath})`;
+      } else {
+        const dbName =
+          env.POSTGRES_DB ||
+          env.MYSQL_DATABASE ||
+          env.MARIADB_DATABASE ||
+          svc.name;
+        const user =
+          env.POSTGRES_USER ||
+          env.MYSQL_USER ||
+          env.MARIADB_USER ||
+          (kind === "postgresql" ? "postgres" : "root");
+        label = `${svc.name} (${imageLabel}, ${user}@localhost:${hostPort}/${dbName}${labelPath})`;
+      }
+
+      results.push({
+        id,
+        path: isRoot ? filename : `${relDirSlash}/${filename}`,
+        name: label,
+        sizeBytes: 0,
+        kind,
+        serviceName: svc.name,
+        ...(image ? { image } : {}),
+        env,
+        composeDir,
+        relDirSlash,
+        ...(hostPort ? { hostPort } : {}),
+        containerPort: serviceContainerPort,
+        ...(profiled ? { profiled: true } : {}),
+      });
     }
-
-    results.push({
-      id,
-      path: isRoot ? filename : `${relDirSlash}/${filename}`,
-      name: label,
-      sizeBytes: 0,
-      kind,
-      serviceName: svc.name,
-      ...(image ? { image } : {}),
-      env,
-      composeDir,
-      relDirSlash,
-      ...(hostPort ? { hostPort } : {}),
-      containerPort: serviceContainerPort,
-      ...(profiled ? { profiled: true } : {}),
-    });
   }
 }
 
@@ -782,16 +857,46 @@ export async function discoverDockerDatabasesAsync(
   return cloneDockerDiscoveryResult(results);
 }
 
-// `docker:<svc>` または `docker:<svc>@<encodedRelDir>` (+ optional `:<db>`) を
-// parse して `{serviceName, relDir, database}` を返す。
-// `relDir` は encodeURIComponent された slash 区切り。cwd 直下は空文字。
-// 解析失敗時は null。
-export function parseDockerDbId(
-  dbId: string,
-): { serviceName: string; relDir: string; database?: string } | null {
+// DbKind の全メンバー (types.ts と手動同期)。id 末尾の `#<kind>` suffix が
+// 任意の文字列を kind として通してしまわないよう、既知の値だけ許可する。
+const DB_KIND_VALUES: ReadonlySet<string> = new Set<DbKind>([
+  "sqlite",
+  "postgresql",
+  "mysql",
+  "redis",
+  "elasticsearch",
+  "s3",
+  "dynamodb",
+]);
+
+function isDbKind(value: string): value is DbKind {
+  return DB_KIND_VALUES.has(value);
+}
+
+// `docker:<svc>` または `docker:<svc>@<encodedRelDir>` (+ optional `:<db>`,
+// + optional `#<kind>`) を parse して `{serviceName, relDir, database, kind}`
+// を返す。`relDir` は encodeURIComponent された slash 区切り。cwd 直下は空文字。
+// `#<kind>` は LocalStack 等、1コンテナから複数 DbKind を検出した service を
+// 一意化するための suffix (単一 kind の service には付かない)。解析失敗時は null。
+export function parseDockerDbId(dbId: string): {
+  serviceName: string;
+  relDir: string;
+  database?: string;
+  kind?: DbKind;
+} | null {
   if (!dbId.startsWith("docker:")) return null;
   let rest = dbId.slice(7);
   if (!rest) return null;
+  // `#<kind>` は id の末尾に付く。DB セパレータ `:` や `@<encodedRelDir>` の
+  // 解析より先に切り離しておく。
+  let kind: DbKind | undefined;
+  const hashIdx = rest.indexOf("#");
+  if (hashIdx >= 0) {
+    const kindPart = rest.slice(hashIdx + 1);
+    if (!isDbKind(kindPart)) return null;
+    kind = kindPart;
+    rest = rest.slice(0, hashIdx);
+  }
   // `:<db>` は最後にあるので、`@` の後に出る `:` のみ DB セパレータ。
   // つまり @ より前の最初の `:` は DB セパレータ、@ より後の最初の `:` も DB セパレータ。
   let database: string | undefined;
@@ -816,6 +921,7 @@ export function parseDockerDbId(
         serviceName,
         relDir,
         database,
+        kind,
       };
     } catch {
       return null;
@@ -829,15 +935,17 @@ export function parseDockerDbId(
   }
   if (!isSafeDockerServiceName(rest)) return null;
   if (!isSafeDockerDatabaseName(database)) return null;
-  return { serviceName: rest, relDir: "", database };
+  return { serviceName: rest, relDir: "", database, kind };
 }
 
 export function canonicalizeDockerDbId(dbId: string): string | null {
   const parsed = parseDockerDbId(dbId);
   if (!parsed) return null;
   const database = parsed.database ? `:${parsed.database}` : "";
-  if (!parsed.relDir) return `docker:${parsed.serviceName}${database}`;
-  return `docker:${parsed.serviceName}@${encodeURIComponent(parsed.relDir)}${database}`;
+  const kindSuffix = parsed.kind ? `#${parsed.kind}` : "";
+  if (!parsed.relDir)
+    return `docker:${parsed.serviceName}${database}${kindSuffix}`;
+  return `docker:${parsed.serviceName}@${encodeURIComponent(parsed.relDir)}${database}${kindSuffix}`;
 }
 
 export async function findDockerServiceByDbIdAsync(
@@ -849,6 +957,10 @@ export async function findDockerServiceByDbIdAsync(
 ): Promise<DockerDbInfo | null> {
   const parsed = parseDockerDbId(dbId);
   if (!parsed) return null;
+  // id 自体に kind suffix (#dynamodb 等) が含まれる場合、呼び出し元が別の
+  // kind を明示していれば矛盾なので「見つからない」扱いにする。
+  if (kind && parsed.kind && parsed.kind !== kind) return null;
+  const effectiveKind = parsed.kind ?? kind;
   const services = await discoverDockerDatabasesAsync(
     cwd,
     omitDirNames,
@@ -859,7 +971,7 @@ export async function findDockerServiceByDbIdAsync(
       (d) =>
         d.serviceName === parsed.serviceName &&
         d.relDirSlash === parsed.relDir &&
-        (!kind || d.kind === kind),
+        (!effectiveKind || d.kind === effectiveKind),
     ) || null
   );
 }

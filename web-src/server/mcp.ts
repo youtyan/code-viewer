@@ -41,10 +41,10 @@ import {
   type DbServiceResult,
 } from "./database/handle";
 import {
-  buildFileBlameReport,
-  buildFileDiffReport,
-  buildFileHistoryReport,
-  buildFileShowReport,
+  buildFileBlameReportAsync,
+  buildFileDiffReportAsync,
+  buildFileHistoryReportAsync,
+  buildFileShowReportAsync,
   FILE_DEFAULT_HISTORY_LIMIT,
   FILE_DIFF_DEFAULT_MAX_HUNKS,
   FILE_DIFF_DEFAULT_MAX_LINES,
@@ -64,7 +64,11 @@ import {
   GREP_DEFAULT_MAX,
 } from "./search";
 import { FILE_NAME_SEARCH_DEFAULT_MAX } from "./search-cli";
-import { grepRepo, listRepoFiles, type SearchEnv } from "./search-service";
+import {
+  grepRepoAsync,
+  listRepoFilesAsync,
+  type SearchEnv,
+} from "./search-service";
 import {
   buildStatusReport,
   STATUS_DEFAULT_LIMIT,
@@ -844,10 +848,10 @@ function validateMcpIntegerLimit(
   return { ok: true, value: raw };
 }
 
-function runFileShowTool(
+async function runFileShowTool(
   input: unknown,
   defaultCwd?: string,
-): McpToolRunReturn {
+): Promise<McpToolRunReturn> {
   const params = isPlainObject(input) ? input : {};
   const pathRaw = params.path;
   if (typeof pathRaw !== "string") {
@@ -914,7 +918,7 @@ function runFileShowTool(
     json: true,
   };
   try {
-    const report = buildFileShowReport(resolved.root, command);
+    const report = await buildFileShowReportAsync(resolved.root, command);
     // FileShowReport already carries `error` when readShowText failed.
     // We surface that as MCP isError so the agent can react without
     // having to parse the body; the JSON text still carries the field.
@@ -928,10 +932,10 @@ function runFileShowTool(
   }
 }
 
-function runFileBlameTool(
+async function runFileBlameTool(
   input: unknown,
   defaultCwd?: string,
-): McpToolRunReturn {
+): Promise<McpToolRunReturn> {
   const params = isPlainObject(input) ? input : {};
   const pathRaw = params.path;
   if (typeof pathRaw !== "string") {
@@ -971,7 +975,7 @@ function runFileBlameTool(
     json: true,
   };
   try {
-    const report = buildFileBlameReport(resolved.root, command);
+    const report = await buildFileBlameReportAsync(resolved.root, command);
     return {
       text: JSON.stringify(report, null, 2),
       isError: report.result.error !== undefined,
@@ -982,10 +986,10 @@ function runFileBlameTool(
   }
 }
 
-function runFileHistoryTool(
+async function runFileHistoryTool(
   input: unknown,
   defaultCwd?: string,
-): McpToolRunReturn {
+): Promise<McpToolRunReturn> {
   const params = isPlainObject(input) ? input : {};
   const pathRaw = params.path;
   if (typeof pathRaw !== "string") {
@@ -1054,7 +1058,7 @@ function runFileHistoryTool(
     json: true,
   };
   try {
-    const report = buildFileHistoryReport(resolved.root, command);
+    const report = await buildFileHistoryReportAsync(resolved.root, command);
     return {
       text: JSON.stringify(report, null, 2),
       isError: report.result.error !== undefined,
@@ -1065,10 +1069,10 @@ function runFileHistoryTool(
   }
 }
 
-function runFileDiffTool(
+async function runFileDiffTool(
   input: unknown,
   defaultCwd?: string,
-): McpToolRunReturn {
+): Promise<McpToolRunReturn> {
   const params = isPlainObject(input) ? input : {};
   const pathRaw = params.path;
   if (typeof pathRaw !== "string") {
@@ -1197,7 +1201,7 @@ function runFileDiffTool(
     json: true,
   };
   try {
-    const report = buildFileDiffReport(resolved.root, command);
+    const report = await buildFileDiffReportAsync(resolved.root, command);
     return {
       text: JSON.stringify(report, null, 2),
       isError: report.error !== undefined,
@@ -1208,10 +1212,10 @@ function runFileDiffTool(
   }
 }
 
-function runSearchFilesTool(
+async function runSearchFilesTool(
   input: unknown,
   defaultCwd?: string,
-): McpToolRunReturn {
+): Promise<McpToolRunReturn> {
   const params = isPlainObject(input) ? input : {};
   const termRaw = params.term;
   if (typeof termRaw !== "string") {
@@ -1257,7 +1261,7 @@ function runSearchFilesTool(
   };
   // Generation is 1 for MCP — we do not share preview.ts's cache, and
   // the FileSearchListResponse field is informational for the client.
-  const listResult = listRepoFiles(env, refParsed.ref, 1);
+  const listResult = await listRepoFilesAsync(env, refParsed.ref, 1);
   if (listResult.ok !== true) {
     return { text: listResult.error, isError: true };
   }
@@ -1285,10 +1289,10 @@ function runSearchFilesTool(
   return { text: JSON.stringify(payload, null, 2) };
 }
 
-function runSearchCodeTool(
+async function runSearchCodeTool(
   input: unknown,
   defaultCwd?: string,
-): McpToolRunReturn {
+): Promise<McpToolRunReturn> {
   const params = isPlainObject(input) ? input : {};
   const termRaw = params.term;
   if (typeof termRaw !== "string") {
@@ -1352,7 +1356,7 @@ function runSearchCodeTool(
     omitDirNames: [],
     excludeNames: DEFAULT_EXCLUDE_NAMES,
   };
-  const result = grepRepo(env, {
+  const result = await grepRepoAsync(env, {
     query: termRaw,
     ref: refParsed.ref,
     paths,
