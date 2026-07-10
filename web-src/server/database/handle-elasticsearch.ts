@@ -8,6 +8,7 @@ import type {
 import { isAbortLikeError } from "./adapters/abort";
 import { asAsyncDoc } from "./adapters/async-facade";
 import {
+  createElasticsearchAdapter,
   type ElasticsearchExplorer,
   openElasticsearchAdapterAsync,
 } from "./adapters/elasticsearch";
@@ -19,7 +20,7 @@ import {
   json,
   parseBoundedJsonBody,
   parsePostJsonBody,
-  resolveDockerExplorerAsync,
+  resolveDatastoreExplorerAsync,
   textError,
 } from "./handle-shared";
 
@@ -35,7 +36,7 @@ function resolveEs(
   signal?: AbortSignal,
   omitDirNames?: string[],
 ): Promise<{ dbId: string; explorer: ElasticsearchExplorer } | Response> {
-  return resolveDockerExplorerAsync<ElasticsearchExplorer>(
+  return resolveDatastoreExplorerAsync<ElasticsearchExplorer>(
     cwd,
     dbParam,
     "elasticsearch",
@@ -46,6 +47,12 @@ function resolveEs(
         info.env,
         info.composeDir,
       ),
+    (connection) => {
+      if (connection.kind !== "elasticsearch") {
+        throw new Error("invalid Elasticsearch connection");
+      }
+      return createElasticsearchAdapter(connection);
+    },
     omitDirNames,
     signal,
   );

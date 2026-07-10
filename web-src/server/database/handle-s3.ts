@@ -11,6 +11,7 @@ import type {
 import { sourceDisplayKind } from "../../core/source-meta";
 import { isAbortLikeError } from "./adapters/abort";
 import {
+  createS3Adapter,
   isS3HttpError,
   openS3ExplorerAsync,
   type S3Explorer,
@@ -22,7 +23,7 @@ import {
   handleError,
   json,
   parseBoundedJsonBody,
-  resolveDockerExplorerAsync,
+  resolveDatastoreExplorerAsync,
   textError,
 } from "./handle-shared";
 
@@ -43,12 +44,16 @@ function resolveS3(
   signal?: AbortSignal,
   omitDirNames?: string[],
 ): Promise<{ dbId: string; explorer: S3Explorer } | Response> {
-  return resolveDockerExplorerAsync<S3Explorer>(
+  return resolveDatastoreExplorerAsync<S3Explorer>(
     cwd,
     dbParam,
     "s3",
     s3AdapterCache,
     (info) => openS3ExplorerAsync(info),
+    (connection) => {
+      if (connection.kind !== "s3") throw new Error("invalid S3 connection");
+      return createS3Adapter(connection);
+    },
     omitDirNames,
     signal,
   );

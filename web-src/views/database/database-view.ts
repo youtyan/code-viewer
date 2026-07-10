@@ -17,12 +17,23 @@ import type {
   TabsResponse,
   TabsState,
 } from "../../core/database/types";
-import { SEARCH_16_PATH, SYNC_16_PATH } from "../../core/icons";
+import {
+  PENCIL_16_PATH,
+  PLUS_16_PATH,
+  SEARCH_16_PATH,
+  SYNC_16_PATH,
+  TRASH_16_PATH,
+} from "../../core/icons";
 import { makeId } from "../../core/id";
 import { isImeComposing } from "../../core/keyboard";
 import { type AppRoute, type DiffRange, parseRoute } from "../../core/routes";
 import type { AnnotationTarget, DbUiPrefs, DbUiState } from "../../core/types";
+import { showAlertDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
+import {
+  deleteDatastoreConnectionFromUi,
+  showDatastoreConnectionDialog,
+} from "./connection-dialog";
 import { createDynamoDbExplorer } from "./dynamodb-explorer";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
@@ -385,9 +396,106 @@ function createTabPane(
   dbRefreshResult.setAttribute("aria-live", "polite");
   syncDbRefreshButton();
 
+  const connectionDialogDeps = {
+    trackLoad: <T>(promise: Promise<T>) => deps.trackLoad(promise),
+    get language(): DbLang {
+      return outerDeps.getLanguage?.() ?? "en";
+    },
+  };
+  function runConnectionAction(action: () => Promise<void>): void {
+    void action().catch((err) =>
+      showAlertDialog({
+        body: errorMessage(err),
+        danger: true,
+      }),
+    );
+  }
+  const addConnectionBtn = makeIconButton({
+    label: paneText().nav.addConnection,
+    title: paneText().nav.addConnection,
+    pathD: PLUS_16_PATH,
+    onClick: () => {
+      runConnectionAction(async () => {
+        const id = await showDatastoreConnectionDialog(connectionDialogDeps);
+        if (!id) return;
+        await outerDeps.refreshDatastores();
+        dbSelect.value = id;
+        await handleDbSelectChange();
+      });
+    },
+  });
+  const editConnectionBtn = makeIconButton({
+    label: paneText().nav.editConnection,
+    title: paneText().nav.editConnection,
+    pathD: PENCIL_16_PATH,
+    onClick: () => {
+      runConnectionAction(async () => {
+        if (!currentDbInfo?.savedConnection) return;
+        const id = await showDatastoreConnectionDialog(
+          connectionDialogDeps,
+          currentDbInfo.id,
+        );
+        if (id) await outerDeps.refreshDatastores();
+      });
+    },
+  });
+  const deleteConnectionBtn = makeIconButton({
+    label: paneText().nav.deleteConnection,
+    title: paneText().nav.deleteConnection,
+    pathD: TRASH_16_PATH,
+    onClick: () => {
+      runConnectionAction(async () => {
+        if (!currentDbInfo?.savedConnection) return;
+        const deleted = await deleteDatastoreConnectionFromUi(
+          connectionDialogDeps,
+          currentDbInfo.id,
+        );
+        if (deleted) await outerDeps.refreshDatastores();
+      });
+    },
+  });
+  for (const button of [
+    addConnectionBtn,
+    editConnectionBtn,
+    deleteConnectionBtn,
+  ]) {
+    button.classList.add("db-connection-action");
+  }
+  reloc(() => {
+    localizeIconButton(
+      addConnectionBtn,
+      paneText().nav.addConnection,
+      paneText().nav.addConnection,
+    );
+    localizeIconButton(
+      editConnectionBtn,
+      paneText().nav.editConnection,
+      paneText().nav.editConnection,
+    );
+    localizeIconButton(
+      deleteConnectionBtn,
+      paneText().nav.deleteConnection,
+      paneText().nav.deleteConnection,
+    );
+  });
+
+  function syncConnectionActions(): void {
+    const saved = currentDbInfo?.savedConnection === true;
+    editConnectionBtn.hidden = !saved;
+    deleteConnectionBtn.hidden = !saved;
+  }
+  syncConnectionActions();
+
   const dbSelectRow = document.createElement("div");
   dbSelectRow.className = "db-select-row";
-  dbSelectRow.append(dbSelect, dbRefreshBtn, dbRefreshResult);
+  dbSelectRow.append(
+    dbSelect,
+    dbRefreshBtn,
+    addConnectionBtn,
+    editConnectionBtn,
+    deleteConnectionBtn,
+    dbRefreshResult,
+  );
 
   const dbToolbar = document.createElement("div");
   dbToolbar.className = "db-toolbar";
@@ -783,7 +891,12 @@ function createTabPane(
     refresh.addEventListener("click", () => {
       void refreshDatastoreList();
     });
-    actionRow.appendChild(refresh);
+    const addConnection = document.createElement("button");
+    addConnection.type = "button";
+    addConnection.className = "db-btn db-no-datastores-action";
+    addConnection.textContent = t.addConnection;
+    addConnection.addEventListener("click", () => addConnectionBtn.click());
+    actionRow.append(refresh, addConnection);
     noDatastoresPane
       .querySelector<HTMLElement>(".db-pane-empty")
       ?.appendChild(actionRow);
@@ -1902,7 +2015,9 @@ function createTabPane(
       name: option?.textContent || dbId,
       sizeBytes: file?.sizeBytes || 0,
       kind: file?.kind || "sqlite",
+      savedConnection: file?.savedConnection,
     };
+    syncConnectionActions();
     currentSchema = null;
     clearDockerNotice();
     await selectDb(dbId, undefined, generation, null);
@@ -1955,6 +2070,7 @@ function createTabPane(
       dbSelect.appendChild(opt);
       dbSelect.disabled = true;
       currentDbInfo = null;
+      syncConnectionActions();
       currentSchema = null;
       currentTable = null;
       schemaCache = null;
@@ -1979,11 +2095,13 @@ function createTabPane(
       opt.value = f.id;
       const isDocker = f.id.startsWith("docker:");
       const isSupabase = f.id.startsWith("supabase:");
-      const label = isDocker
-        ? `${f.name} (Docker)`
-        : isSupabase
-          ? `${f.name} (Supabase)`
-          : `${f.path} (${formatSize(f.sizeBytes)})`;
+      const label = f.savedConnection
+        ? f.name
+        : isDocker
+          ? `${f.name} (Docker)`
+          : isSupabase
+            ? `${f.name} (Supabase)`
+            : `${f.path} (${formatSize(f.sizeBytes)})`;
       opt.textContent = label;
       optionsFragment.appendChild(opt);
     }
@@ -1996,6 +2114,7 @@ function createTabPane(
     if (!db && !autoSelectFirst) {
       dbSelect.value = "";
       currentDbInfo = null;
+      syncConnectionActions();
       currentSchema = null;
       currentTable = null;
       schemaCache = null;
@@ -2015,6 +2134,7 @@ function createTabPane(
     const target = db || files[0].id;
     dbSelect.value = target;
     currentDbInfo = files.find((f) => f.id === target) || null;
+    syncConnectionActions();
 
     // 復元時は initial の redis/es selection を 1 度だけ流し込む。
     const explorerInitial = {
@@ -2218,6 +2338,9 @@ function createTabPane(
     if (noDatastoresAvailable) return paneText().nav.noDatastoreTab;
     if (!currentDbInfo) return labelFromDbId(initial.dbId);
     const suffix = currentSchema ? ` / ${currentSchema}` : "";
+    if (currentDbInfo.savedConnection) {
+      return `${currentDbInfo.name}${suffix}`;
+    }
     // 既存 sidebar select の表示と揃える: docker/supabase は service 名 (or
     // project_id)、sqlite は path basename。
     if (

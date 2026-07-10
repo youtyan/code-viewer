@@ -15,7 +15,7 @@ import {
 } from "./docker-utils";
 import { spawnCollectAsync } from "./spawn-runner";
 
-type S3Config = {
+export type S3Config = {
   endpoint: string;
   dockerContainerName?: string;
   region: string;
@@ -671,7 +671,7 @@ function parseObjects(xml: string): {
   };
 }
 
-function createS3Adapter(config: S3Config): S3Explorer {
+export function createS3Adapter(config: S3Config): S3Explorer {
   async function signedFetch(
     opts: SignedRequestOptions,
     deadline = createS3TransportDeadline(config),

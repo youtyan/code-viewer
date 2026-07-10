@@ -377,6 +377,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "table",
                 rows: [
                   [
+                    "Saved connections",
+                    "Use + beside the datastore selector to add an arbitrary PostgreSQL, MySQL, Redis, Elasticsearch, S3-compatible, or DynamoDB endpoint. Required fields are marked, and Test connection verifies the current values before saving. Drivers are included, so no database CLI or curl is required. Non-secret settings are saved locally; authentication values stay in server memory and must be entered again after a restart.",
+                  ],
+                  [
                     "SQLite",
                     "Automatically discovered from .db, .sqlite, .sqlite3, and .s3db files in the repository. Inline row edit / insert / delete via the grid Edit mode (atomic per-commit batch).",
                   ],
@@ -1052,6 +1056,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "table",
                 rows: [
+                  [
+                    "保存済み接続",
+                    "データストア選択の横にある + から、任意の PostgreSQL、MySQL、Redis、Elasticsearch、S3 互換、DynamoDB エンドポイントを追加できます。必須項目にはマークが付き、保存前に「接続テスト」で入力内容を確認できます。ドライバーは同梱されているため、データベース CLI や curl は不要です。非機密設定はローカルに保存されますが、認証情報はサーバーメモリだけに保持され、再起動後は再入力が必要です。",
+                  ],
                   [
                     "SQLite",
                     "リポジトリ内の .db, .sqlite, .sqlite3, .s3db ファイルを自動検出します。グリッドの Edit モードで行のインライン編集 / 追加 / 削除に対応 (コミット単位でアトミックに適用)。",

@@ -19,6 +19,9 @@ export type DbText = {
     refreshDatastoresShort: string;
     refreshDatastoresBusy: string;
     refreshDatastoresTitle: string;
+    addConnection: string;
+    editConnection: string;
+    deleteConnection: string;
     refreshDatastoresUnchanged: string;
     refreshDatastoresChanged: (added: number, removed: number) => string;
     toolbar: string;
@@ -370,6 +373,9 @@ const EN: DbText = {
     refreshDatastoresShort: "Refresh",
     refreshDatastoresBusy: "Refreshing...",
     refreshDatastoresTitle: "Refresh the datastore list",
+    addConnection: "Add datastore connection",
+    editConnection: "Edit saved connection",
+    deleteConnection: "Delete saved connection",
     refreshDatastoresUnchanged: "No datastore changes",
     refreshDatastoresChanged: (added, removed) =>
       [
@@ -737,6 +743,9 @@ const JA: DbText = {
     refreshDatastoresShort: "更新",
     refreshDatastoresBusy: "更新中...",
     refreshDatastoresTitle: "データストア一覧を更新",
+    addConnection: "データストア接続を追加",
+    editConnection: "保存済み接続を編集",
+    deleteConnection: "保存済み接続を削除",
     refreshDatastoresUnchanged: "データストアに変化なし",
     refreshDatastoresChanged: (added, removed) =>
       [

@@ -282,3 +282,108 @@ export function showPromptDialog(
     if (input.value) input.select();
   });
 }
+
+export type FormDialogOptions<T> = {
+  title?: string;
+  body: HTMLElement;
+  submit: () => T | Promise<T>;
+  validate?: () => string | null;
+  submitLabel?: string;
+  cancelLabel?: string;
+  focusTarget?: HTMLElement | null;
+  focusReturnTarget?: HTMLElement | null;
+};
+
+export function showFormDialog<T>(
+  opts: FormDialogOptions<T>,
+): Promise<T | null> {
+  return new Promise((resolve) => {
+    const previousFocus =
+      opts.focusReturnTarget ?? (document.activeElement as HTMLElement | null);
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "gdp-btn gdp-btn-sm";
+    cancel.textContent = opts.cancelLabel ?? "Cancel";
+    const submit = document.createElement("button");
+    submit.type = "button";
+    submit.className = "gdp-btn gdp-btn-sm";
+    submit.textContent = opts.submitLabel ?? "Save";
+    const error = document.createElement("div");
+    error.className = "gdp-dialog-error";
+    error.setAttribute("role", "alert");
+    let busy = false;
+
+    const focusables = (): HTMLElement[] => [
+      ...Array.from(
+        opts.body.querySelectorAll<HTMLElement>(
+          "input:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), textarea:not([disabled]):not([hidden]), button:not([disabled]):not([hidden])",
+        ),
+      ).filter((element) => element.offsetParent !== null),
+      cancel,
+      submit,
+    ];
+    const done = (value: T | null) => {
+      document.removeEventListener("keydown", onKeydown);
+      closeOpenDialog();
+      previousFocus?.focus?.();
+      resolve(value);
+    };
+    const trySubmit = async () => {
+      if (busy) return;
+      const validationError = opts.validate?.() ?? null;
+      if (validationError) {
+        error.textContent = validationError;
+        return;
+      }
+      busy = true;
+      cancel.disabled = true;
+      submit.disabled = true;
+      error.textContent = "";
+      try {
+        done(await opts.submit());
+      } catch (err) {
+        busy = false;
+        cancel.disabled = false;
+        submit.disabled = false;
+        error.textContent = err instanceof Error ? err.message : String(err);
+      }
+    };
+    const onKeydown = (event: KeyboardEvent) => {
+      if (isImeComposing(event) || busy) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        done(null);
+        return;
+      }
+      if (
+        event.key === "Enter" &&
+        !(document.activeElement instanceof HTMLTextAreaElement)
+      ) {
+        event.preventDefault();
+        if (
+          document.activeElement instanceof HTMLButtonElement &&
+          opts.body.contains(document.activeElement)
+        ) {
+          document.activeElement.click();
+          return;
+        }
+        void trySubmit();
+        return;
+      }
+      trapTabKey(event, focusables());
+    };
+    cancel.addEventListener("click", () => done(null));
+    submit.addEventListener("click", () => void trySubmit());
+    const { backdrop, body } = createDialogShell(opts.title, undefined, [
+      cancel,
+      submit,
+    ]);
+    body.append(opts.body, error);
+    backdrop.addEventListener("pointerdown", (event) => {
+      if (event.target === backdrop && !busy) done(null);
+    });
+    document.addEventListener("keydown", onKeydown);
+    (opts.focusTarget ?? focusables()[0])?.focus();
+  });
+}
