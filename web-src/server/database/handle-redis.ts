@@ -4,7 +4,11 @@ import type {
   RedisValueResponse,
 } from "../../core/database/types";
 import { asAsyncKv } from "./adapters/async-facade";
-import { openRedisExplorerAsync, type RedisExplorer } from "./adapters/redis";
+import {
+  createRedisAdapter,
+  openRedisExplorerAsync,
+  type RedisExplorer,
+} from "./adapters/redis";
 import {
   createDockerAdapterCache,
   createQueryStrippedLogger,
@@ -12,7 +16,7 @@ import {
   handleError,
   json,
   parseBoundedJsonBody,
-  resolveDockerExplorerAsync,
+  resolveDatastoreExplorerAsync,
   textError,
 } from "./handle-shared";
 
@@ -28,13 +32,18 @@ function resolveRedis(
   signal?: AbortSignal,
   omitDirNames?: string[],
 ): Promise<{ dbId: string; explorer: RedisExplorer } | Response> {
-  return resolveDockerExplorerAsync<RedisExplorer>(
+  return resolveDatastoreExplorerAsync<RedisExplorer>(
     cwd,
     dbParam,
     "redis",
     redisAdapterCache,
     (info) =>
       openRedisExplorerAsync(info.serviceName, info.env, info.composeDir),
+    (connection) => {
+      if (connection.kind !== "redis")
+        throw new Error("invalid Redis connection");
+      return createRedisAdapter(connection);
+    },
     omitDirNames,
     signal,
   );

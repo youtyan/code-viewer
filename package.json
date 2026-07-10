@@ -1,6 +1,6 @@
 {
   "name": "@youtyan/code-viewer",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Local browser-based code and git diff viewer",
   "type": "module",
   "bin": {
@@ -29,7 +29,7 @@
   "scripts": {
     "build": "bun run build:web && bun run build:server",
     "build:web": "bun build --target=browser --format=iife --outfile=web/app.js web-src/app.ts && bun build --target=browser --format=esm --outfile=web/mermaid.js web-src/mermaid-entry.ts && bun build --target=browser --format=esm --outfile=web/shiki.js web-src/shiki-entry.ts && bun build --target=browser --format=iife --outfile=web/vendor/highlight.js/highlight.min.js web-src/highlight-entry.ts && node scripts/generate-third-party-notices.mjs",
-    "build:server": "bun build --target=node --format=esm --outfile=dist/code-viewer.js web-src/server/cli.ts",
+    "build:server": "bun build --target=node --format=esm --outfile=dist/code-viewer.js --external pg --external mysql2/promise --external @redis/client web-src/server/cli.ts",
     "check": "bun run typecheck",
     "typecheck": "tsc --noEmit",
     "check:bundle": "node scripts/check-bundle.mjs",
@@ -68,6 +68,7 @@
     "@happy-dom/global-registrator": "^20.10.6",
     "@types/bun": "1.3.13",
     "@types/markdown-it": "14.1.2",
+    "@types/pg": "8.20.0",
     "highlight.js": "11.9.0",
     "markdown-it": "14.1.1",
     "markdown-it-anchor": "9.2.0",
@@ -81,5 +82,10 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@redis/client": "6.1.0",
+    "mysql2": "3.22.6",
+    "pg": "8.22.0"
   }
 }

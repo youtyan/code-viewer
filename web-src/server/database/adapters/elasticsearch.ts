@@ -20,12 +20,20 @@ import {
 } from "./docker-utils";
 import { spawnTextAsync } from "./spawn-runner";
 
-type EsConfig = {
-  containerName: string;
+export type EsConfig = {
+  containerName?: string;
+  endpoint?: string;
+  username?: string;
   // 認証あり ES の場合 elastic ユーザーのパスワード。stdin 経由で
   // 渡すので argv には現れない (Round 1 C2 と同パターン)。
   password: string;
 };
+
+let esFetchImpl: typeof fetch = globalThis.fetch;
+
+export function __setEsFetchForTest(fetchForTest: typeof fetch | null): void {
+  esFetchImpl = fetchForTest ?? globalThis.fetch;
+}
 
 // ドキュメント書き込み。id 指定で PUT (更新/upsert)、未指定で POST (id 自動採番)。
 // seqNo/primaryTerm を渡すと楽観ロック (if_seq_no/if_primary_term) を付ける。
@@ -96,7 +104,7 @@ function buildEsRequestInvocation(
   method: EsHttpMethod,
   path: string,
   body?: unknown,
-): { args: string[]; input?: string } {
+): { command: string; args: string[]; input?: string } {
   const hasPassword = !!config.password;
   // curl --user elastic:$PASSWORD は argv 露出するため、認証ありの場合は
   // -K - で stdin から config を流す。host の `ps -ef` には -K - だけが
@@ -106,14 +114,13 @@ function buildEsRequestInvocation(
   // curl の write-out で HTTP status と body を区切るために以下の trick を使う。
   //   --write-out '\n__ES_STATUS__:%{http_code}\n'
   // tail で status を取り、それより上を body とする。
-  const url = `http://localhost:9200${path.startsWith("/") ? "" : "/"}${path}`;
+  const endpoint =
+    config.endpoint?.replace(/\/$/, "") || "http://localhost:9200";
+  const url = `${endpoint}${path.startsWith("/") ? "" : "/"}${path}`;
   const curlConfig = hasPassword
-    ? `user = ${quoteCurlConfigString(`elastic:${config.password}`)}\n`
+    ? `user = ${quoteCurlConfigString(`${config.username || "elastic"}:${config.password}`)}\n`
     : undefined;
-  const args = [
-    "exec",
-    "-i",
-    config.containerName,
+  const curlArgs = [
     "curl",
     "-s",
     "-S",
@@ -127,7 +134,16 @@ function buildEsRequestInvocation(
     ...(hasPassword ? ["-K", "-"] : []),
     ...(body !== undefined ? ["--data-binary", JSON.stringify(body)] : []),
   ];
-  return { args, input: curlConfig };
+  if (!config.containerName) {
+    throw new Error(
+      "direct Elasticsearch connections use the built-in HTTP client",
+    );
+  }
+  return {
+    command: dockerCommand(),
+    args: ["exec", "-i", config.containerName, ...curlArgs],
+    input: curlConfig,
+  };
 }
 
 async function execEsRequestAsync(
@@ -139,9 +155,58 @@ async function execEsRequestAsync(
   signal?: AbortSignal,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   throwIfAborted(signal, "elasticsearch request aborted");
+  if (!config.containerName) {
+    const endpoint =
+      config.endpoint?.replace(/\/$/, "") || "http://localhost:9200";
+    const url = `${endpoint}${path.startsWith("/") ? "" : "/"}${path}`;
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    try {
+      const headers = new Headers({ "Content-Type": "application/json" });
+      if (config.password) {
+        headers.set(
+          "Authorization",
+          `Basic ${Buffer.from(`${config.username || "elastic"}:${config.password}`).toString("base64")}`,
+        );
+      }
+      const response = await esFetchImpl(url, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller.signal,
+        redirect: "error",
+      });
+      const text = await response.text();
+      return {
+        code: 0,
+        stdout: `${text}\n__ES_STATUS__:${response.status}\n`,
+        stderr: "",
+      };
+    } catch (error) {
+      if (signal?.aborted) throw new Error("elasticsearch request aborted");
+      return {
+        code: 1,
+        stdout: "",
+        stderr: timedOut
+          ? `elasticsearch request timed out after ${timeoutMs}ms`
+          : error instanceof Error
+            ? error.message
+            : String(error),
+      };
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+    }
+  }
   const invocation = buildEsRequestInvocation(config, method, path, body);
   const result = await spawnTextAsync({
-    command: dockerCommand(),
+    command: invocation.command,
     args: invocation.args,
     env: process.env,
     input: invocation.input,
@@ -151,7 +216,7 @@ async function execEsRequestAsync(
     timeoutMessage: `elasticsearch request timed out after ${timeoutMs}ms`,
     rejectOnError: false,
   });
-  throwIfDockerCommandUnavailableResult(result);
+  if (config.containerName) throwIfDockerCommandUnavailableResult(result);
   return result;
 }
 
@@ -179,7 +244,9 @@ function safeJsonParse<T>(stdout: string, label: string): T {
   }
 }
 
-function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
+export function createElasticsearchAdapter(
+  config: EsConfig,
+): ElasticsearchExplorer {
   async function callJsonAsync<T>(
     method: EsHttpMethod,
     path: string,
@@ -196,7 +263,7 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
       signal,
     );
     if (r.code !== 0) {
-      throw new Error(r.stderr.trim() || `${label}: curl exit ${r.code}`);
+      throw new Error(r.stderr.trim() || `${label}: request failed`);
     }
     const { status, body: text } = parseEsResponse(r.stdout);
     if (status < 200 || status >= 300) {
@@ -360,7 +427,7 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
       opts.signal,
     );
     if (r.code !== 0) {
-      throw new Error(r.stderr.trim() || `_doc: curl exit ${r.code}`);
+      throw new Error(r.stderr.trim() || "_doc: request failed");
     }
     const { status, body: text } = parseEsResponse(r.stdout);
     type DocResp = {
@@ -523,7 +590,7 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     );
     const elapsedMs = Date.now() - start;
     if (r.code !== 0) {
-      throw new Error(r.stderr.trim() || `query: curl exit ${r.code}`);
+      throw new Error(r.stderr.trim() || "query: request failed");
     }
     const { status, body: text } = parseEsResponse(r.stdout);
     let body: unknown = text;

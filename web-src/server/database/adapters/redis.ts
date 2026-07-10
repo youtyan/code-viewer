@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createClient } from "@redis/client";
 import type {
   RedisHashField,
   RedisItem,
@@ -10,7 +11,7 @@ import type {
   SnapshotItem,
   SnapshotIterable,
 } from "../sources/types";
-import { throwIfAborted } from "./abort";
+import { abortError, throwIfAborted, waitForAbortableResource } from "./abort";
 import {
   dockerCommand,
   resolveRunningComposeContainerNameOrThrowAsync,
@@ -18,14 +19,40 @@ import {
 } from "./docker-utils";
 import { spawnTextAsync } from "./spawn-runner";
 
-type RedisConfig = {
-  containerName: string;
+export type RedisConfig = {
+  containerName?: string;
+  host?: string;
+  port?: number;
+  username?: string;
   password: string;
+  tls?: boolean;
 };
+
+type RedisClientLike = {
+  on(event: "error", listener: (error: Error) => void): RedisClientLike;
+  connect(): Promise<unknown>;
+  sendCommand(args: string[]): Promise<unknown>;
+  withAbortSignal(signal: AbortSignal): {
+    sendCommand(args: string[]): Promise<unknown>;
+  };
+  destroy(): void;
+};
+
+let createRedisClientImpl = (options: Parameters<typeof createClient>[0]) =>
+  createClient(options) as RedisClientLike;
+
+export function __setRedisClientFactoryForTest(
+  factory:
+    | ((options: Parameters<typeof createClient>[0]) => RedisClientLike)
+    | null,
+): void {
+  createRedisClientImpl =
+    factory ?? ((options) => createClient(options) as RedisClientLike);
+}
 
 // Redis の書き込み操作。型ごとにコマンドが異なるため per-op のメソッドにする
 // (SQL のような汎用 mutation バッチには馴染まない)。値は UTF-8 テキストとして
-// redis-cli の argv で渡す (バイナリ値の書き込みは将来対応)。
+// コマンド引数として渡す (バイナリ値の書き込みは将来対応)。
 export type RedisWriteOps = {
   setStringAsync(opts: {
     db: number;
@@ -115,28 +142,33 @@ function buildRedisCliInvocation(
   // docker は `-e KEY` (値なし) のとき、host 環境変数の同名値を container 内に継承する。
   // host の `ps -ef` には KEY 名しか現れない。
   const hasPassword = !!config.password;
-  const dockerArgs = [
-    "exec",
-    "-i",
-    ...(hasPassword ? ["-e", "REDISCLI_AUTH"] : []),
-    config.containerName,
-    "redis-cli",
-    "-3",
-    ...args,
-  ];
   const spawnEnv = hasPassword
     ? { ...process.env, REDISCLI_AUTH: config.password }
     : process.env;
-  return { args: dockerArgs, env: spawnEnv };
+  if (!config.containerName) {
+    throw new Error("direct Redis connections use the built-in driver");
+  }
+  return {
+    args: [
+      "exec",
+      "-i",
+      ...(hasPassword ? ["-e", "REDISCLI_AUTH"] : []),
+      config.containerName,
+      "redis-cli",
+      "-3",
+      ...args,
+    ],
+    env: spawnEnv,
+  };
 }
 
-async function execRedisCliAsync(
+async function execRedisCliProcessAsync(
   config: RedisConfig,
   args: string[],
   timeoutMs = 10000,
   signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  throwIfAborted(signal, "redis-cli aborted");
+  throwIfAborted(signal, "redis request aborted");
   const invocation = buildRedisCliInvocation(config, args);
   const result = await spawnTextAsync({
     command: dockerCommand(),
@@ -144,12 +176,133 @@ async function execRedisCliAsync(
     env: invocation.env,
     timeoutMs,
     signal,
-    abortMessage: "redis-cli aborted",
-    timeoutMessage: `redis-cli timed out after ${timeoutMs}ms`,
+    abortMessage: "redis request aborted",
+    timeoutMessage: `redis request timed out after ${timeoutMs}ms`,
     rejectOnError: false,
   });
-  throwIfDockerCommandUnavailableResult(result);
+  if (config.containerName) throwIfDockerCommandUnavailableResult(result);
   return result;
+}
+
+function redisReplyText(reply: unknown): string {
+  if (reply === null || reply === undefined) return "";
+  if (reply instanceof Uint8Array) return Buffer.from(reply).toString("utf8");
+  if (Array.isArray(reply)) return JSON.stringify(reply);
+  if (typeof reply === "object") return JSON.stringify(reply);
+  return String(reply);
+}
+
+function createRedisDriverExecutor(config: RedisConfig): {
+  exec(
+    args: string[],
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<{ stdout: string; stderr: string; code: number }>;
+  close(): void;
+} {
+  if (!config.host || !config.port) {
+    throw new Error("direct Redis connection requires host and port");
+  }
+  const clients = new Map<
+    number,
+    { client: RedisClientLike; connected: Promise<unknown> }
+  >();
+
+  function clientForDatabase(database: number) {
+    const existing = clients.get(database);
+    if (existing) return existing;
+    const socket = config.tls
+      ? {
+          host: config.host,
+          port: config.port,
+          tls: true as const,
+          connectTimeout: 10_000,
+        }
+      : {
+          host: config.host,
+          port: config.port,
+          connectTimeout: 10_000,
+        };
+    const client = createRedisClientImpl({
+      username: config.username || undefined,
+      password: config.password || undefined,
+      database,
+      socket,
+    });
+    client.on("error", () => {
+      // Errors are returned by the pending operation. The EventEmitter listener
+      // prevents an unhandled error event without logging connection metadata.
+    });
+    const entry = { client, connected: client.connect() };
+    clients.set(database, entry);
+    return entry;
+  }
+
+  return {
+    async exec(args, timeoutMs = 10_000, signal) {
+      throwIfAborted(signal, "redis request aborted");
+      let database = 0;
+      let command = args;
+      if (args[0] === "-n" && args.length >= 3) {
+        database = Number(args[1]) || 0;
+        command = args.slice(2);
+      }
+      const entry = clientForDatabase(database);
+      let connectDisposed = false;
+      const disposeConnectingClient = () => {
+        if (connectDisposed) return;
+        connectDisposed = true;
+        if (clients.get(database) === entry) clients.delete(database);
+        entry.client.destroy();
+      };
+      const abortConnect = () => disposeConnectingClient();
+      signal?.addEventListener("abort", abortConnect, { once: true });
+      const timeoutController = new AbortController();
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        timeoutController.abort();
+      }, timeoutMs);
+      const abort = () => timeoutController.abort();
+      signal?.addEventListener("abort", abort, { once: true });
+      let connected = false;
+      try {
+        await waitForAbortableResource(
+          entry.connected.then(() => entry.client),
+          signal,
+          disposeConnectingClient,
+          "redis request aborted",
+        );
+        connected = true;
+        signal?.removeEventListener("abort", abortConnect);
+        throwIfAborted(signal, "redis request aborted");
+        const reply = await entry.client
+          .withAbortSignal(timeoutController.signal)
+          .sendCommand(command);
+        return { stdout: redisReplyText(reply), stderr: "", code: 0 };
+      } catch (error) {
+        if (!connected) disposeConnectingClient();
+        if (signal?.aborted) throw abortError("redis request aborted");
+        return {
+          stdout: "",
+          stderr: timedOut
+            ? `redis request timed out after ${timeoutMs}ms`
+            : error instanceof Error
+              ? error.message
+              : String(error),
+          code: 1,
+        };
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abortConnect);
+        signal?.removeEventListener("abort", abort);
+      }
+    },
+    close() {
+      for (const { client } of clients.values()) client.destroy();
+      clients.clear();
+    },
+  };
 }
 
 function parseInfoKeyspace(stdout: string): Map<number, number> {
@@ -203,7 +356,7 @@ const TYPE_OR_STRING_LUA = `${LUA_TOHEX_PRELUDE} local t = redis.call('TYPE', KE
 
 // snapshot 専用 Lua prelude。tohex に加えて、ARGV 経由で渡された hex key を
 // raw bytes に戻す fromhex も提供する。binary key を ARGV から redis.call の
-// key 引数として渡すために使う (redis-cli の argv は string なので binary を
+// key 引数として渡すために使う (コマンド引数は string なので binary を
 // 直接渡せないが、hex を ARGV で受け Lua 内で復元すれば任意 byte 列で
 // command を発行できる)。
 const LUA_HEX_KEY_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end local function fromhex(h) local b = {} for i = 1, #h, 2 do b[#b+1] = string.char(tonumber(string.sub(h, i, i+1), 16)) end return table.concat(b) end`;
@@ -219,6 +372,19 @@ function decodeHexItem(hex: string): RedisItem {
 }
 
 export function createRedisAdapter(config: RedisConfig): RedisExplorer {
+  const driver = config.containerName
+    ? null
+    : createRedisDriverExecutor(config);
+  const execRedisCliAsync = (
+    _config: RedisConfig,
+    args: string[],
+    timeoutMs = 10_000,
+    signal?: AbortSignal,
+  ) =>
+    driver
+      ? driver.exec(args, timeoutMs, signal)
+      : execRedisCliProcessAsync(config, args, timeoutMs, signal);
+
   function parseDatabasesResult(result: {
     stdout: string;
     stderr: string;
@@ -929,9 +1095,8 @@ export function createRedisAdapter(config: RedisConfig): RedisExplorer {
     return [];
   }
 
-  // redis-cli は引数を argv で渡すのでシェル経由のインジェクションは無い。
-  // ただしコマンドエラーは exit 0 + stdout "(error) ..." で返ることがあるため
-  // stdout/stderr の両方を見て失敗を検出する。
+  // Docker の redis-cli はコマンドエラーを exit 0 + stdout "(error) ..." で
+  // 返すことがあるため、ドライバ経路と共通の結果で stdout/stderr を確認する。
   async function runWriteAsync(
     args: string[],
     signal?: AbortSignal,
@@ -960,8 +1125,8 @@ export function createRedisAdapter(config: RedisConfig): RedisExplorer {
     );
   }
 
-  // 新規作成。SET ... NX で既存キーがあれば書き込まない。redis-cli は NX で
-  // セットしなかった場合 nil を返す (OK は返らない) ので、それを「既に存在」
+  // 新規作成。SET ... NX で既存キーがあれば書き込まない。NX でセット
+  // しなかった場合は OK が返らないので、それを「既に存在」
   // として 409 相当のエラーに変換する。これにより「新規作成」が既存キー
   // (型を問わず) を黙って上書きするのを防ぐ。
   async function createStringAsync(opts: {
@@ -1040,7 +1205,7 @@ export function createRedisAdapter(config: RedisConfig): RedisExplorer {
     iterateForSnapshot,
     listSnapshotContainers,
     close() {
-      // nothing to close (docker exec is one-shot per call)
+      driver?.close();
     },
   };
 }

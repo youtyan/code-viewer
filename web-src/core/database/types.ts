@@ -141,6 +141,7 @@ export type DbFileInfo = {
   name: string;
   sizeBytes: number;
   kind: DbKind;
+  savedConnection?: boolean;
 };
 
 export type DbFilesResponse = {

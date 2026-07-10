@@ -8,7 +8,7 @@ import {
 } from "./docker-utils";
 import { spawnCollectAsync } from "./spawn-runner";
 
-type DynamoDbConfig = {
+export type DynamoDbConfig = {
   endpoint: string;
   dockerContainerName?: string;
   region: string;
@@ -581,7 +581,9 @@ function asNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function createDynamoDbAdapter(config: DynamoDbConfig): DynamoDbExplorer {
+export function createDynamoDbAdapter(
+  config: DynamoDbConfig,
+): DynamoDbExplorer {
   async function signedJsonRequest<T>(
     action: DynamoDbAction,
     body: Record<string, unknown>,

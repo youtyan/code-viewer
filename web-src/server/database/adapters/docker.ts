@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import mysql from "mysql2/promise";
+import pg from "pg";
 import type {
   DbColumn,
   DbForeignKey,
@@ -25,7 +27,12 @@ import {
   filterOrderByColumns,
   sanitizeIdentifier,
 } from "../sql-utils";
-import { abortError, isAbortLikeError, throwIfAborted } from "./abort";
+import {
+  abortError,
+  isAbortLikeError,
+  throwIfAborted,
+  waitForAbortableResource,
+} from "./abort";
 import {
   DockerCommandUnavailableError,
   dockerCommand,
@@ -65,16 +72,56 @@ type DockerSource = DatabaseAdapter & {
   listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
 };
 
-type DockerDbConfig = {
+export type SqlCliConfig = {
   kind: "postgresql" | "mysql";
-  containerName: string;
+  containerName?: string;
+  host?: string;
+  port?: number;
   user: string;
   password: string;
   database: string;
   schema?: string;
+  tls?: boolean;
 };
 
 type ExecResult = { stdout: string; stderr: string; code: number };
+
+type SqlDriverResult = { columns: string[]; rows: string[][] };
+
+type PgPoolLike = {
+  connect(): Promise<{
+    query(config: { text: string; rowMode: "array" }): Promise<unknown>;
+    release(destroy?: boolean): void;
+  }>;
+  end(): Promise<void>;
+};
+
+type MysqlPoolLike = {
+  getConnection(): Promise<{
+    query(config: {
+      sql: string;
+      rowsAsArray: true;
+      timeout: number;
+    }): Promise<unknown>;
+    release(): void;
+    destroy(): void;
+  }>;
+  end(): Promise<void>;
+};
+
+let createPgPoolImpl = (config: pg.PoolConfig): PgPoolLike =>
+  new pg.Pool(config) as PgPoolLike;
+let createMysqlPoolImpl = (config: mysql.PoolOptions): MysqlPoolLike =>
+  mysql.createPool(config) as MysqlPoolLike;
+
+export function __setSqlDriverFactoriesForTest(factories: {
+  pg?: ((config: pg.PoolConfig) => PgPoolLike) | null;
+  mysql?: ((config: mysql.PoolOptions) => MysqlPoolLike) | null;
+}): void {
+  createPgPoolImpl = factories.pg ?? ((config) => new pg.Pool(config));
+  createMysqlPoolImpl =
+    factories.mysql ?? ((config) => mysql.createPool(config) as MysqlPoolLike);
+}
 
 type BunSpawnResult = {
   kill(signal?: string): void;
@@ -178,60 +225,252 @@ export function __setDockerSpawnSyncForTest(
 // terminator として安全。
 const PG_RECORD_SEPARATOR = "\x1e";
 
-function buildExecArgs(config: DockerDbConfig, sql: string): string[] {
+function buildExecInvocation(
+  config: SqlCliConfig,
+  sql: string,
+): { args: string[]; env: NodeJS.ProcessEnv } {
+  if (!config.containerName) {
+    throw new Error("direct SQL connections use the built-in driver");
+  }
   if (config.kind === "postgresql") {
-    return [
+    return {
+      args: [
+        dockerCommand(),
+        "exec",
+        "-i",
+        "-e",
+        `PGPASSWORD=${config.password}`,
+        config.containerName,
+        "psql",
+        "-U",
+        config.user,
+        "-d",
+        config.database,
+        "-X",
+        "-q",
+        "-t",
+        "-A",
+        "-F",
+        "\t",
+        "-R",
+        PG_RECORD_SEPARATOR,
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        sql,
+      ],
+      env: process.env,
+    };
+  }
+  return {
+    args: [
       dockerCommand(),
       "exec",
       "-i",
       "-e",
-      `PGPASSWORD=${config.password}`,
+      `MYSQL_PWD=${config.password}`,
       config.containerName,
-      "psql",
-      "-U",
+      "mysql",
+      "-u",
       config.user,
-      "-d",
       config.database,
-      "-X",
-      "-q",
-      "-t",
-      "-A",
-      "-F",
-      "\t",
-      "-R",
-      PG_RECORD_SEPARATOR,
-      "-v",
-      "ON_ERROR_STOP=1",
-      "-c",
+      "--batch",
+      "--default-character-set=utf8mb4",
+      "-e",
       sql,
-    ];
+    ],
+    env: process.env,
+  };
+}
+
+function sqlDriverValue(value: unknown, nullValue: string): string {
+  if (value === null || value === undefined) return nullValue;
+  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Uint8Array) return Buffer.from(value).toString("hex");
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function pgDriverResult(raw: unknown): SqlDriverResult {
+  const results = Array.isArray(raw) ? raw : [raw];
+  const reversed = [...results].reverse();
+  const result =
+    reversed.find(
+      (item) =>
+        !!item &&
+        typeof item === "object" &&
+        Array.isArray((item as { fields?: unknown }).fields) &&
+        (item as { fields: unknown[] }).fields.length > 0,
+    ) ??
+    reversed.find(
+      (item) =>
+        !!item &&
+        typeof item === "object" &&
+        Array.isArray((item as { rows?: unknown }).rows) &&
+        (item as { rows: unknown[] }).rows.length > 0,
+    ) ??
+    raw;
+  if (!result || typeof result !== "object") return { columns: [], rows: [] };
+  const fields = Array.isArray((result as { fields?: unknown }).fields)
+    ? (result as { fields: Array<{ name?: unknown }> }).fields
+    : [];
+  const rows = Array.isArray((result as { rows?: unknown }).rows)
+    ? (result as { rows: unknown[][] }).rows
+    : [];
+  return {
+    columns: fields.map((field) => String(field.name ?? "")),
+    rows: rows.map((row) => row.map((value) => sqlDriverValue(value, "\\N"))),
+  };
+}
+
+function mysqlDriverResult(raw: unknown): SqlDriverResult {
+  if (!Array.isArray(raw) || raw.length < 2) return { columns: [], rows: [] };
+  const [allRows, allFields] = raw as [unknown, unknown];
+  let rows = allRows;
+  let fields = allFields;
+  if (
+    Array.isArray(allFields) &&
+    allFields.length > 0 &&
+    Array.isArray(allFields[0])
+  ) {
+    const fieldSets = allFields as Array<Array<{ name?: unknown }> | undefined>;
+    const rowSets = Array.isArray(allRows) ? allRows : [];
+    let index = -1;
+    for (let i = fieldSets.length - 1; i >= 0; i--) {
+      if (Array.isArray(fieldSets[i])) {
+        index = i;
+        break;
+      }
+    }
+    fields = index >= 0 ? fieldSets[index] : [];
+    rows = index >= 0 ? rowSets[index] : [];
   }
-  return [
-    dockerCommand(),
-    "exec",
-    "-i",
-    "-e",
-    `MYSQL_PWD=${config.password}`,
-    config.containerName,
-    "mysql",
-    "-u",
-    config.user,
-    config.database,
-    "--batch",
-    "--default-character-set=utf8mb4",
-    "-e",
-    sql,
-  ];
+  const fieldList = Array.isArray(fields)
+    ? (fields as Array<{ name?: unknown }>).filter(Boolean)
+    : [];
+  const rowList = Array.isArray(rows) ? (rows as unknown[][]) : [];
+  return {
+    columns: fieldList.map((field) => String(field.name ?? "")),
+    rows: rowList.map((row) =>
+      row.map((value) => sqlDriverValue(value, "NULL")),
+    ),
+  };
+}
+
+function createSqlDriverExecutor(config: SqlCliConfig): {
+  exec(sql: string, signal?: AbortSignal): Promise<SqlDriverResult>;
+  close(): void;
+} {
+  if (!config.host || !config.port) {
+    throw new Error("direct SQL connection requires host and port");
+  }
+  if (config.kind === "postgresql") {
+    const pool = createPgPoolImpl({
+      host: config.host,
+      port: config.port,
+      user: config.user,
+      password: config.password,
+      database: config.database,
+      ssl: config.tls,
+      max: 4,
+      connectionTimeoutMillis: 10_000,
+      query_timeout: 10_000,
+    });
+    return {
+      async exec(sql, signal) {
+        throwIfAborted(signal, "query aborted");
+        const client = await waitForAbortableResource(
+          pool.connect(),
+          signal,
+          (lateClient) => lateClient.release(true),
+          "query aborted",
+        );
+        let released = false;
+        const abort = () => {
+          if (released) return;
+          released = true;
+          client.release(true);
+        };
+        signal?.addEventListener("abort", abort, { once: true });
+        try {
+          throwIfAborted(signal, "query aborted");
+          return pgDriverResult(
+            await client.query({ text: sql, rowMode: "array" }),
+          );
+        } catch (error) {
+          if (signal?.aborted) throw abortError("query aborted");
+          throw error;
+        } finally {
+          signal?.removeEventListener("abort", abort);
+          if (!released) client.release();
+        }
+      },
+      close() {
+        void pool.end().catch(() => undefined);
+      },
+    };
+  }
+
+  const pool = createMysqlPoolImpl({
+    host: config.host,
+    port: config.port,
+    user: config.user,
+    password: config.password,
+    database: config.database,
+    ssl: config.tls ? {} : undefined,
+    waitForConnections: true,
+    connectionLimit: 4,
+    connectTimeout: 10_000,
+    multipleStatements: true,
+    rowsAsArray: true,
+    supportBigNumbers: true,
+    bigNumberStrings: true,
+    dateStrings: true,
+  });
+  return {
+    async exec(sql, signal) {
+      throwIfAborted(signal, "query aborted");
+      const connection = await waitForAbortableResource(
+        pool.getConnection(),
+        signal,
+        (lateConnection) => lateConnection.destroy(),
+        "query aborted",
+      );
+      let released = false;
+      const abort = () => {
+        if (released) return;
+        released = true;
+        connection.destroy();
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      try {
+        throwIfAborted(signal, "query aborted");
+        return mysqlDriverResult(
+          await connection.query({ sql, rowsAsArray: true, timeout: 10_000 }),
+        );
+      } catch (error) {
+        if (signal?.aborted) throw abortError("query aborted");
+        throw error;
+      } finally {
+        signal?.removeEventListener("abort", abort);
+        if (!released) connection.release();
+      }
+    },
+    close() {
+      void pool.end().catch(() => undefined);
+    },
+  };
 }
 
 function execInContainer(
-  config: DockerDbConfig,
+  config: SqlCliConfig,
   sql: string,
   timeoutMs = 10000,
 ): ExecResult {
-  const args = buildExecArgs(config, sql);
+  const { args, env } = buildExecInvocation(config, sql);
   const proc = spawnSyncImpl(args[0], args.slice(1), {
     encoding: "utf8",
+    env,
     timeout: timeoutMs,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -261,6 +500,7 @@ async function readStreamText(
 async function execWithBunSpawn(
   spawnFn: BunSpawnFn,
   args: string[],
+  env: NodeJS.ProcessEnv,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<ExecResult> {
@@ -268,6 +508,7 @@ async function execWithBunSpawn(
   let proc: ReturnType<BunSpawnFn>;
   try {
     proc = spawnFn(args, {
+      env,
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
@@ -316,12 +557,14 @@ async function execWithBunSpawn(
 
 function execWithNodeSpawn(
   args: string[],
+  env: NodeJS.ProcessEnv,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<ExecResult> {
   return spawnTextAsync({
     command: args[0],
     args: args.slice(1),
+    env,
     timeoutMs,
     signal,
     killSignal: "SIGKILL",
@@ -332,7 +575,7 @@ function execWithNodeSpawn(
 }
 
 async function execInContainerAsync(
-  config: DockerDbConfig,
+  config: SqlCliConfig,
   sql: string,
   timeoutMs = 10000,
   signal?: AbortSignal,
@@ -344,13 +587,13 @@ async function execInContainerAsync(
     throwIfDockerCommandUnavailableResult(result);
     return result;
   }
-  const args = buildExecArgs(config, sql);
+  const { args, env } = buildExecInvocation(config, sql);
   const bunSpawn = (globalThis as unknown as { Bun?: { spawn?: BunSpawnFn } })
     .Bun?.spawn;
   result = bunSpawn
-    ? await execWithBunSpawn(bunSpawn, args, timeoutMs, signal)
-    : await execWithNodeSpawn(args, timeoutMs, signal);
-  throwIfDockerCommandUnavailableResult(result);
+    ? await execWithBunSpawn(bunSpawn, args, env, timeoutMs, signal)
+    : await execWithNodeSpawn(args, env, timeoutMs, signal);
+  if (config.containerName) throwIfDockerCommandUnavailableResult(result);
   return result;
 }
 
@@ -533,11 +776,17 @@ function observeBackgroundRejection<T>(promise: Promise<T>): Promise<T> {
   return promise;
 }
 
-export function createDockerAdapter(config: DockerDbConfig): DockerSource {
+export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
+  const driver = config.containerName ? null : createSqlDriverExecutor(config);
+
   async function execAsync(
     sql: string,
     signal?: AbortSignal,
   ): Promise<{ columns: string[]; rows: string[][] }> {
+    if (driver) {
+      recordSql(sql);
+      return driver.exec(sql, signal);
+    }
     // recordSql は execInContainerAsync 内部で 1 度だけ呼ぶ (重複防止)。
     const result = await execInContainerAsync(config, sql, 10000, signal);
     if (result.code !== 0) {
@@ -1079,8 +1328,8 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
         columns,
         config.kind,
       );
-      // docker exec (CLI) はパラメータバインドが使えないので、ビルダはリテラル
-      // 埋め込み (params 空) で SQL を生成する。これらを 1 トランザクションに
+      // Docker 経路との共通性を保つため、ビルダはリテラル埋め込み
+      // (params 空) で SQL を生成する。これらを 1 トランザクションに
       // まとめて流す。途中でエラーになった場合:
       //   - PostgreSQL: psql は ON_ERROR_STOP=1 (buildExecArgs で付与) により
       //     最初のエラーで異常終了する。仮に走り切っても、中断されたトランザク
@@ -1101,8 +1350,8 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
             )}; ${body}; COMMIT`
           : `START TRANSACTION; ${body}; COMMIT`;
       await execAsync(wrapped, signal);
-      // CLI 経由では正確な affected 行数の取得が難しいため、適用した
-      // ステートメント数を返す (各文は PK 指定でおおむね 1 行に対応)。
+      // 経路間で一貫した値にするため、適用したステートメント数を返す
+      // (各文は PK 指定でおおむね 1 行に対応)。
       this.invalidateTableMetaCache?.(table);
       return { affected: statements.length };
     },
@@ -1172,6 +1421,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     close(): void {
       columnCache.clear();
       tableMetaCache.invalidate();
+      driver?.close();
     },
 
     async *iterateForSnapshot(
@@ -1219,6 +1469,8 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
   return adapter;
 }
 
+export const createDockerAdapter = createSqlCliAdapter;
+
 export async function listDockerDatabasesAsync(
   serviceName: string,
   kind: "postgresql" | "mysql",
@@ -1261,7 +1513,7 @@ export async function listDockerDatabasesAsync(
     env.MARIADB_DATABASE ||
     env.DATABASE_NAME ||
     "";
-  const config: DockerDbConfig = {
+  const config: SqlCliConfig = {
     kind,
     containerName,
     user,
@@ -1359,7 +1611,7 @@ export async function listDockerSchemasAsync(
 // CLI 経路) はコンテナ名の解決方法だけが違い、解決後のクエリ・キャッシュ
 // ロジックは共通なのでここに切り出す。
 async function fetchPostgresSchemasViaContainerAsync(
-  config: DockerDbConfig,
+  config: SqlCliConfig,
   cacheKey: string,
   now: number,
   signal?: AbortSignal,

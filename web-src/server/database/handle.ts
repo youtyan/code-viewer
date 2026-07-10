@@ -19,6 +19,7 @@ import { loadDbUiState, patchDbUiState } from "../state-store";
 import { isAbortLikeError } from "./adapters/abort";
 import { asAsync } from "./adapters/async-facade";
 import {
+  createSqlCliAdapter,
   listDockerDatabasesAsync,
   listDockerSchemasAsync,
   listSupabaseSchemasAsync,
@@ -26,6 +27,10 @@ import {
   openSupabaseDockerAdapterAsync,
 } from "./adapters/docker";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
+import { createDynamoDbAdapter } from "./adapters/dynamodb";
+import { createElasticsearchAdapter } from "./adapters/elasticsearch";
+import { createRedisAdapter } from "./adapters/redis";
+import { createS3Adapter } from "./adapters/s3";
 import { captureSql } from "./adapters/sql-capture";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
 import type { DatabaseAdapter, TriggerInfo } from "./adapters/types";
@@ -34,6 +39,16 @@ import {
   getConnection,
   setAdapterFactory,
 } from "./connection-pool";
+import {
+  connectionToFileInfo,
+  deleteDatastoreConnection,
+  findDatastoreConnection,
+  loadDatastoreConnections,
+  publicConnection,
+  type SqlConnection,
+  saveDatastoreConnection,
+  validateDatastoreConnection,
+} from "./connections-store";
 import {
   type DockerDbInfo,
   type DockerDiscoveryResult,
@@ -100,6 +115,12 @@ async function getAdapter(
   _cwd: string,
   signal?: AbortSignal,
 ): Promise<DatabaseAdapter> {
+  if (r.saved) {
+    const cacheKey = r.schema ? `${r.dbId}\0schema=${r.schema}` : r.dbId;
+    return dockerAdapterCache.getOrOpenAsync(cacheKey, () =>
+      createSqlCliAdapter({ ...r.saved, schema: r.schema }),
+    );
+  }
   if (r.docker) {
     const docker = r.docker;
     const cacheKey = r.schema ? `${r.dbId}\0schema=${r.schema}` : r.dbId;
@@ -137,6 +158,7 @@ type ResolvedDb = {
   dbId: string;
   docker?: DockerDbInfo;
   supabase?: SupabaseCliDbInfo;
+  saved?: SqlConnection;
   schema?: string;
 };
 
@@ -153,6 +175,7 @@ export type DbFileDiscoveryDeps = {
   discoverDockerDatabases: typeof discoverDockerDatabasesAsync;
   listDockerDatabases: DockerDatabaseLister;
   discoverSupabaseCliProjects: typeof discoverSupabaseCliProjectsAsync;
+  loadConnections?: typeof loadDatastoreConnections;
 };
 
 const DEFAULT_DB_FILE_DISCOVERY_DEPS: DbFileDiscoveryDeps = {
@@ -160,6 +183,7 @@ const DEFAULT_DB_FILE_DISCOVERY_DEPS: DbFileDiscoveryDeps = {
   discoverDockerDatabases: discoverDockerDatabasesAsync,
   listDockerDatabases: listDockerDatabasesAsync,
   discoverSupabaseCliProjects: discoverSupabaseCliProjectsAsync,
+  loadConnections: loadDatastoreConnections,
 };
 
 export type DbServiceResult<T> =
@@ -236,6 +260,25 @@ async function resolveDb(
   signal?: AbortSignal,
 ): Promise<ResolvedDb | Response> {
   if (!dbParam) return textError("missing db parameter", 400);
+  if (dbParam.startsWith("connection:")) {
+    const connection = await findDatastoreConnection(cwd, dbParam);
+    if (!connection) return textError("datastore connection not found", 404);
+    if (connection.kind !== "postgresql" && connection.kind !== "mysql") {
+      return textError(`${connection.kind} must use its datastore routes`, 400);
+    }
+    const requestedSchema = normalizeSchemaParam(schemaParam);
+    if (requestedSchema instanceof Response) return requestedSchema;
+    const schema =
+      connection.kind === "postgresql"
+        ? requestedSchema || connection.schema || "public"
+        : undefined;
+    return {
+      resolved: dbParam,
+      dbId: dbParam,
+      saved: connection,
+      ...(schema ? { schema } : {}),
+    };
+  }
   if (dbParam.startsWith("supabase:")) {
     const parsed = parseSupabaseDbId(dbParam);
     if (!parsed) return textError("invalid supabase db id", 400);
@@ -392,17 +435,21 @@ export async function createDbFilesResponse(
   // Idempotent service entry point init. HTTP routes also call ensureInit,
   // but MCP/CLI tests can invoke these exported helpers directly.
   ensureInit();
-  const [sqliteSettled, dockerSettled, supabaseSettled] =
+  const [sqliteSettled, dockerSettled, supabaseSettled, connectionsSettled] =
     await Promise.allSettled([
       deps.discoverSqliteFiles(cwd, omitDirNames, signal),
       deps.discoverDockerDatabases(cwd, omitDirNames, signal),
       deps.discoverSupabaseCliProjects(cwd, omitDirNames, signal),
+      (deps.loadConnections ?? loadDatastoreConnections)(cwd),
     ]);
   if (sqliteSettled.status === "rejected") {
     throw sqliteSettled.reason;
   }
   if (supabaseSettled.status === "rejected") {
     throw supabaseSettled.reason;
+  }
+  if (connectionsSettled.status === "rejected") {
+    throw connectionsSettled.reason;
   }
   if (
     dockerSettled.status === "rejected" &&
@@ -412,6 +459,7 @@ export async function createDbFilesResponse(
   }
   const sqliteFiles = sqliteSettled.value;
   const supabaseProjects = supabaseSettled.value;
+  const savedConnections = connectionsSettled.value;
   const dockerServices =
     dockerSettled.status === "fulfilled"
       ? dockerSettled.value
@@ -441,6 +489,7 @@ export async function createDbFilesResponse(
       })),
       ...dockerEntries.map(toFileInfo),
       ...supabaseProjects.map(toFileInfo),
+      ...savedConnections.map(connectionToFileInfo),
     ],
     ...(dockerTruncated ? { truncated: true } : {}),
     ...(dockerErrors.length > 0
@@ -479,6 +528,33 @@ export async function createDbSchemasResponse(
       executedSql,
     };
     return { ok: true, value: body };
+  }
+  if (r.saved?.kind === "postgresql") {
+    try {
+      const adapter = await getAdapter(r, cwd, signal);
+      const { result, executedSql } = await captureSql(() =>
+        adapter.executeReadonlyQueryAsync(
+          "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name",
+          undefined,
+          1000,
+          signal,
+        ),
+      );
+      return {
+        ok: true,
+        value: {
+          dbId: r.dbId,
+          schemas: result.rows.map((row) => ({ name: String(row[0]) })),
+          selectedSchema: r.schema,
+          executedSql,
+        },
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        response: handleError("database", "list schemas", err, signal),
+      };
+    }
   }
   if (!r.docker || r.docker.kind !== "postgresql") {
     const body: DbSchemasResponse = { dbId: r.dbId, schemas: [] };
@@ -2004,6 +2080,143 @@ async function handleDbUiGet(cwd: string): Promise<Response> {
   );
 }
 
+function closeSavedConnection(id: string, kind: DbKind): void {
+  if (kind === "postgresql" || kind === "mysql") {
+    dockerAdapterCache.close(id);
+    dockerAdapterCache.closePrefix(`${id}\0`);
+    return;
+  }
+  void DOCKER_CLOSE_REGISTRY[kind]?.(id);
+}
+
+async function handleConnections(cwd: string, req: Request): Promise<Response> {
+  if (req.method === "GET") {
+    const connections = await loadDatastoreConnections(cwd);
+    return json({ connections: connections.map(publicConnection) });
+  }
+  const body = await parseBoundedJsonBody(
+    req,
+    64 * 1024,
+    "connection payload too large",
+  );
+  if (body instanceof Response) return body;
+  if (req.method === "PUT") {
+    try {
+      const connection = await saveDatastoreConnection(cwd, body);
+      closeSavedConnection(connection.id, connection.kind);
+      return json({ connection: publicConnection(connection) });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "invalid datastore connection";
+      return textError(
+        message,
+        message === "too many datastore connections" ? 409 : 400,
+      );
+    }
+  }
+  const id =
+    body && typeof body === "object" && "id" in body
+      ? (body as { id?: unknown }).id
+      : undefined;
+  if (typeof id !== "string" || !id.startsWith("connection:")) {
+    return textError("invalid datastore connection id", 400);
+  }
+  const existing = await findDatastoreConnection(cwd, id);
+  if (!existing) return textError("datastore connection not found", 404);
+  await deleteDatastoreConnection(cwd, id);
+  closeSavedConnection(id, existing.kind);
+  return json({ ok: true });
+}
+
+async function probeDatastoreConnection(
+  connection: import("./connections-store").DatastoreConnection,
+  signal: AbortSignal,
+): Promise<void> {
+  if (connection.kind === "postgresql" || connection.kind === "mysql") {
+    const adapter = createSqlCliAdapter(connection);
+    try {
+      await adapter.getTablesAsync(signal);
+    } finally {
+      adapter.close();
+    }
+    return;
+  }
+  if (connection.kind === "redis") {
+    const adapter = createRedisAdapter(connection);
+    try {
+      await adapter.listDatabasesAsync(signal);
+    } finally {
+      adapter.close();
+    }
+    return;
+  }
+  if (connection.kind === "elasticsearch") {
+    const adapter = createElasticsearchAdapter(connection);
+    try {
+      await adapter.listIndicesAsync(signal);
+    } finally {
+      adapter.close();
+    }
+    return;
+  }
+  if (connection.kind === "s3") {
+    const adapter = createS3Adapter(connection);
+    try {
+      await adapter.listBuckets(signal);
+    } finally {
+      adapter.close();
+    }
+    return;
+  }
+  if (connection.kind !== "dynamodb") {
+    throw new Error("invalid datastore connection");
+  }
+  const adapter = createDynamoDbAdapter(connection);
+  try {
+    await adapter.listTablesAsync({ limit: 1, signal });
+  } finally {
+    adapter.close();
+  }
+}
+
+async function handleConnectionTest(
+  cwd: string,
+  req: Request,
+): Promise<Response> {
+  const body = await parseBoundedJsonBody(
+    req,
+    64 * 1024,
+    "connection payload too large",
+  );
+  if (body instanceof Response) return body;
+  const input =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  let existing: import("./connections-store").DatastoreConnection | null = null;
+  if (typeof input.id === "string") {
+    existing = await findDatastoreConnection(cwd, input.id);
+    if (!existing) return textError("datastore connection not found", 404);
+  }
+  try {
+    const connection = validateDatastoreConnection({
+      ...(existing ?? {}),
+      ...input,
+    });
+    await probeDatastoreConnection(connection, req.signal);
+    return json({ ok: true });
+  } catch (err) {
+    if (isAbortLikeError(err, req.signal)) {
+      return textError("connection test aborted", 503);
+    }
+    if (
+      err instanceof Error &&
+      err.message === "invalid datastore connection"
+    ) {
+      return textError(err.message, 400);
+    }
+    return textError("connection failed", 400);
+  }
+}
+
 async function handleDbUiPatch(cwd: string, req: Request): Promise<Response> {
   const body = await parseBoundedJsonBody(
     req,
@@ -2029,6 +2242,11 @@ async function handleClose(
   const body = await parsePostJsonBody<{ db?: string }>(req);
   if (body instanceof Response) return body;
   if (!body.db) return textError("missing db", 400);
+  if (body.db.startsWith("connection:")) {
+    const connection = await findDatastoreConnection(cwd, body.db);
+    if (connection) closeSavedConnection(body.db, connection.kind);
+    return json({ ok: true });
+  }
   if (body.db.startsWith("docker:")) {
     const parsed = parseDockerDbId(body.db);
     if (!parsed) return textError("invalid docker db id", 400);
@@ -2177,6 +2395,16 @@ export async function handleDatabaseRoute(
       "/_db/files": {
         methods: ["GET"],
         handler: () => handleFiles(cwd, omitDirNames, req.signal),
+      },
+      "/_db/connections": {
+        methods: ["GET", "PUT", "DELETE"],
+        sideEffect: (requestMethod) => requestMethod !== "GET",
+        handler: () => handleConnections(cwd, req),
+      },
+      "/_db/connections/test": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleConnectionTest(cwd, req),
       },
       "/_db/schemas": {
         methods: ["GET"],

@@ -9,6 +9,7 @@ import type {
 } from "../../core/database/types";
 import { isAbortLikeError } from "./adapters/abort";
 import {
+  createDynamoDbAdapter,
   type DynamoDbExplorer,
   isDynamoDbHttpError,
   openDynamoDbExplorerAsync,
@@ -19,7 +20,7 @@ import {
   dispatchRoutes,
   handleError,
   json,
-  resolveDockerExplorerAsync,
+  resolveDatastoreExplorerAsync,
   textError,
 } from "./handle-shared";
 
@@ -41,12 +42,18 @@ function resolveDynamoDb(
   signal?: AbortSignal,
   omitDirNames?: string[],
 ): Promise<{ dbId: string; explorer: DynamoDbExplorer } | Response> {
-  return resolveDockerExplorerAsync<DynamoDbExplorer>(
+  return resolveDatastoreExplorerAsync<DynamoDbExplorer>(
     cwd,
     dbParam,
     "dynamodb",
     dynamoDbAdapterCache,
     (info) => openDynamoDbExplorerAsync(info),
+    (connection) => {
+      if (connection.kind !== "dynamodb") {
+        throw new Error("invalid DynamoDB connection");
+      }
+      return createDynamoDbAdapter(connection);
+    },
     omitDirNames,
     signal,
   );

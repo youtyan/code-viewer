@@ -199,6 +199,7 @@ root:
 - `annotations.json` — AI Code Annotations.
 - `query-history.json` — datastore query history.
 - `db-snapshots.sqlite` — datastore snapshots and diff blobs.
+- `datastore-connections.json` — saved non-secret datastore connection settings.
 
 The `.code-viewer` directory is tool-internal: it never shows up in the file
 tree, searches, or diffs. Add it to `.gitignore` if you do not want to share
@@ -272,6 +273,22 @@ constraint violation.
 ### Browser UI
 
 Open Datastores in the global navigation to access:
+
+- **Saved connections** — use the `+` action beside the datastore selector to
+  add PostgreSQL, MySQL, Redis, Elasticsearch, S3-compatible, or DynamoDB
+  endpoints that are not present in the repository's local discovery files.
+  Required fields are marked in the connection dialog, and **Test connection**
+  verifies the current values before saving. Saved connections can be edited
+  or deleted from the adjacent actions.
+  PostgreSQL, MySQL, and Redis use Node.js drivers installed automatically with
+  this package, while Elasticsearch, S3, and DynamoDB use built-in HTTP
+  clients. No database CLI or `curl` installation is required for saved
+  connections.
+  Non-secret settings are stored in `.code-viewer/datastore-connections.json`.
+  User names, access key IDs, passwords, secret keys, and session tokens remain
+  in server memory only and are never written to that file or returned by
+  list/edit responses, so they must be entered again after restarting
+  code-viewer.
 
 - **Multi-DB tabs** — open multiple databases side by side, with their own
   sidebar, panes, and history. `+` adds an empty tab; `×` or middle-click

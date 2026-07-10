@@ -4694,6 +4694,61 @@ body.gdp-file-detail-page #empty {
 .gdp-dialog-danger:hover {
   background: var(--diff-del-bg);
 }
+.db-connection-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin-top: 6px;
+}
+.db-connection-field[hidden] {
+  display: none !important;
+}
+.db-connection-form .db-connection-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.db-connection-form .gdp-dialog-input {
+  margin-top: 4px;
+}
+.db-connection-form input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-top: 8px;
+  padding: 0;
+}
+.db-connection-required {
+  color: var(--danger);
+  font-weight: 700;
+}
+.db-connection-test-row {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  margin-top: 2px;
+}
+.db-connection-test-button {
+  min-width: 120px;
+}
+.db-connection-test-status {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.db-connection-test-status[data-state="success"] {
+  color: var(--success);
+}
+.db-connection-test-status[data-state="error"] {
+  color: var(--danger);
+}
+.gdp-dialog:has(.db-connection-form) {
+  width: min(640px, calc(100vw - 64px));
+}
 .gdp-repo-empty {
   padding: 32px;
   color: var(--fg-muted);
@@ -8243,6 +8298,16 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   border: 1px solid var(--border);
   background: var(--bg);
   font-weight: 500;
+}
+.db-connection-action {
+  flex: 0 0 30px;
+  width: 30px;
+  min-width: 30px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.db-connection-action[hidden] {
+  display: none !important;
 }
 .db-refresh-btn[disabled] {
   cursor: default;

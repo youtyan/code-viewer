@@ -2,6 +2,10 @@ import type { DbKind } from "../../core/database/types";
 import { abortError, isAbortLikeError } from "./adapters/abort";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import {
+  type DatastoreConnection,
+  findDatastoreConnection,
+} from "./connections-store";
+import {
   type DockerDbInfo,
   findDockerServiceByDbIdAsync,
   parseDockerDbId,
@@ -360,6 +364,48 @@ export async function resolveDockerExplorerAsync<
     throw err;
   }
   return { dbId: dbParam, explorer };
+}
+
+export async function resolveDatastoreExplorerAsync<
+  T extends CloseableDatabaseHandle,
+>(
+  cwd: string,
+  dbParam: string | null,
+  kind: DbKind,
+  cache: DockerAdapterCache<T>,
+  openDocker: (info: DockerDbInfo) => T | Promise<T>,
+  openSaved: (connection: DatastoreConnection) => T | Promise<T>,
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<{ dbId: string; explorer: T } | Response> {
+  if (dbParam?.startsWith("connection:")) {
+    const connection = await findDatastoreConnection(cwd, dbParam);
+    if (!connection || connection.kind !== kind) {
+      return textError(`${kind} connection not found`, 404);
+    }
+    try {
+      const explorer = await waitForCallerAbort(
+        cache.getOrOpenAsync(dbParam, () => openSaved(connection)),
+        signal,
+        `${kind} open aborted`,
+      );
+      return { dbId: dbParam, explorer };
+    } catch (err) {
+      if (isAbortLikeError(err, signal)) {
+        return textError(`${kind} open aborted`, 503);
+      }
+      throw err;
+    }
+  }
+  return resolveDockerExplorerAsync(
+    cwd,
+    dbParam,
+    kind,
+    cache,
+    openDocker,
+    omitDirNames,
+    signal,
+  );
 }
 
 export type RouteEntry = {
