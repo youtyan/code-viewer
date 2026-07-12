@@ -1777,7 +1777,10 @@ function createTabPane(
       ) {
         return;
       }
-      schemaView.render(table, columns, schemaCache?.indexes || []);
+      schemaView.render(table, columns, schemaCache?.indexes || [], {
+        tableComment: schemaCache?.tables.find((entry) => entry.name === table)
+          ?.comment,
+      });
     }
   }
 
@@ -1799,7 +1802,10 @@ function createTabPane(
     ) {
       return;
     }
-    schemaView.render(table, columns, schemaCache?.indexes || []);
+    schemaView.render(table, columns, schemaCache?.indexes || [], {
+      tableComment: schemaCache?.tables.find((entry) => entry.name === table)
+        ?.comment,
+    });
   }
 
   async function fetchColumns(table: string): Promise<DbColumn[]> {
@@ -1828,7 +1834,10 @@ function createTabPane(
     setActiveTab("schema");
     if (!currentDbInfo) return;
     const columns = await fetchColumns(table);
-    schemaView.render(table, columns, schemaCache?.indexes || []);
+    schemaView.render(table, columns, schemaCache?.indexes || [], {
+      tableComment: schemaCache?.tables.find((entry) => entry.name === table)
+        ?.comment,
+    });
   }
 
   async function refreshCurrentSchemaView(): Promise<void> {
@@ -1870,7 +1879,10 @@ function createTabPane(
       ) {
         return;
       }
-      schemaView.render(nextTable, columns, schema.indexes || []);
+      schemaView.render(nextTable, columns, schema.indexes || [], {
+        tableComment: schema.tables.find((entry) => entry.name === nextTable)
+          ?.comment,
+      });
       cb.onStateChange();
     } catch (err) {
       if (
@@ -1906,6 +1918,8 @@ function createTabPane(
         foreignKeys: schemaCache?.foreignKeys,
         triggers: data.triggers,
         ddl: data.sql,
+        tableComment: schemaCache?.tables.find((entry) => entry.name === table)
+          ?.comment,
       });
     } catch {
       /* ignore */

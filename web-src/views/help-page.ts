@@ -424,7 +424,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Sidebar",
-                    "DB selector, PostgreSQL schema selector, table tree (expand to see columns), filter, Rails FK inference toggle, and icon toolbar for Query / ER / Search / Snapshot tabs.",
+                    "DB selector, PostgreSQL schema selector, table tree (expand to see columns and a table description when available), filter, Rails FK inference toggle, and icon toolbar for Query / ER / Search / Snapshot tabs.",
                   ],
                   [
                     "Data tab",
@@ -436,7 +436,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Schema tab",
-                    "Column definitions, indexes, foreign keys, triggers, and DDL, with an in-tab refresh action for reloading the current table structure.",
+                    "Table description when available, column definitions, indexes, foreign keys, triggers, and DDL, with an in-tab refresh action for reloading the current table structure.",
                   ],
                   [
                     "Query editor",
@@ -1104,7 +1104,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "サイドバー",
-                    "DB 選択、PostgreSQL スキーマセレクター、テーブルツリー（展開でカラム表示）、フィルター、Rails 命名規約による仮想 FK 推測トグル、Query / ER / Search / Snapshot アイコンツールバー。",
+                    "DB 選択、PostgreSQL スキーマセレクター、テーブルツリー（展開でカラムと、あればテーブルコメントを表示）、フィルター、Rails 命名規約による仮想 FK 推測トグル、Query / ER / Search / Snapshot アイコンツールバー。",
                   ],
                   [
                     "Data タブ",
@@ -1116,7 +1116,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Schema タブ",
-                    "カラム定義、インデックス、外部キー、トリガー、DDL。現在の表構造だけを再読み込みするタブ内更新にも対応。",
+                    "テーブルコメント（あれば）、カラム定義、インデックス、外部キー、トリガー、DDL。現在の表構造だけを再読み込みするタブ内更新にも対応。",
                   ],
                   [
                     "クエリエディター",

@@ -22,6 +22,7 @@ export type DbTableInfo = {
   name: string;
   type: "table" | "view";
   rowCount: number | null;
+  comment?: string | null;
 };
 
 export type DbIndexInfo = {

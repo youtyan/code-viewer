@@ -35,6 +35,35 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("database table list", () => {
+  test("shows a table comment only while its accordion is expanded", () => {
+    const view = createTableList({ onSelectTable: () => undefined });
+    document.body.appendChild(view.el);
+
+    view.render([
+      {
+        name: "sample_table",
+        type: "table",
+        rowCount: 1,
+        comment: "A table-level description.",
+      },
+    ]);
+
+    const comment = view.el.querySelector(".db-table-col-comment");
+    expect(comment?.textContent).toBe("A table-level description.");
+    expect(comment?.getAttribute("title")).toBe("A table-level description.");
+    expect(
+      view.el.querySelector<HTMLElement>(".db-table-children")?.hidden,
+    ).toBe(true);
+
+    view.el
+      .querySelector<HTMLElement>(".db-table-arrow")
+      ?.dispatchEvent(new Event("click", { bubbles: true }));
+
+    expect(
+      view.el.querySelector<HTMLElement>(".db-table-children")?.hidden,
+    ).toBe(false);
+  });
+
   test("renders compact types and Japanese column comments in expanded rows", async () => {
     const changes: Array<{ table: string; expanded: boolean }> = [];
     const view = createTableList({
