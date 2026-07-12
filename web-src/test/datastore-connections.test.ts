@@ -311,7 +311,7 @@ describe("direct SQL connection", () => {
     });
 
     expect(await adapter.getTablesAsync()).toEqual([
-      { name: "sample_table", type: "table", rowCount: null },
+      { name: "sample_table", type: "table", rowCount: null, comment: null },
     ]);
     expect(receivedConfig.host).toBe("db.example.test");
     expect(receivedConfig.port).toBe(5432);
@@ -359,7 +359,7 @@ describe("direct SQL connection", () => {
     });
 
     expect(await adapter.getTablesAsync()).toEqual([
-      { name: "sample_table", type: "table", rowCount: null },
+      { name: "sample_table", type: "table", rowCount: null, comment: null },
     ]);
     expect(multipleStatements).toBe(true);
     adapter.close();
