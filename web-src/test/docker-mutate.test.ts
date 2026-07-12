@@ -9,6 +9,7 @@ import {
 } from "../server/database/adapters/docker";
 
 const PG_RS = "\x1e";
+const PG_US = "\x1f";
 
 type SpawnLike = (
   args: string[],
@@ -62,9 +63,10 @@ afterEach(() => {
   __setDockerSpawnSyncForTest(null);
 });
 
-const PG_COLUMNS = ["id\tinteger\tNO\t\tYES", "name\ttext\tYES\t\tNO"].join(
-  PG_RS,
-);
+const PG_COLUMNS = [
+  ["id", "integer", "NO", "", "YES"].join(PG_US),
+  ["name", "text", "YES", "", "NO"].join(PG_US),
+].join(PG_RS);
 const MYSQL_COLUMNS = [
   "column_name\tcolumn_type\tis_nullable\tcolumn_default\tcolumn_key",
   "id\tint\tNO\tNULL\tPRI",
@@ -153,8 +155,8 @@ describe("docker applyMutations", () => {
   test("postgresql boolean column renders TRUE/FALSE through applyMutations", async () => {
     // 回帰防止 (round-1 修正): boolean 列を `= 1` にすると PG が型エラーで弾く。
     const PG_BOOL_COLUMNS = [
-      "id\tinteger\tNO\t\tYES",
-      "active\tboolean\tYES\t\tNO",
+      ["id", "integer", "NO", "", "YES"].join(PG_US),
+      ["active", "boolean", "YES", "", "NO"].join(PG_US),
     ].join(PG_RS);
     harness = installSpawn((sql) =>
       sql.includes("information_schema.columns")

@@ -209,6 +209,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     _node: HTMLElement,
     arrow: HTMLElement,
     children: HTMLElement,
+    columnsHost: HTMLElement,
   ) {
     const expanded = expandedTables.has(tableName);
     if (expanded) {
@@ -221,8 +222,8 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
       children.hidden = false;
       arrow.classList.add("expanded");
       callbacks.onExpandedTableChange?.(tableName, true);
-      if (children.children.length === 0) {
-        renderColumns(children, tableName);
+      if (columnsHost.children.length === 0) {
+        renderColumns(columnsHost, tableName);
       }
     }
   }
@@ -310,13 +311,25 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
         children.className = "db-table-children";
         children.hidden = !expandedTables.has(table.name);
 
+        const comment = columnCommentText(table.comment);
+        if (comment) {
+          const tableComment = document.createElement("div");
+          tableComment.className = "db-table-col-comment";
+          tableComment.textContent = comment;
+          tableComment.title = comment;
+          children.appendChild(tableComment);
+        }
+
+        const columnsHost = document.createElement("div");
+        children.appendChild(columnsHost);
+
         if (expandedTables.has(table.name)) {
-          renderColumns(children, table.name);
+          renderColumns(columnsHost, table.name);
         }
 
         arrow.addEventListener("click", (e) => {
           e.stopPropagation();
-          toggleExpand(table.name, node, arrow, children);
+          toggleExpand(table.name, node, arrow, children, columnsHost);
         });
         row.addEventListener("click", () =>
           callbacks.onSelectTable(table.name),

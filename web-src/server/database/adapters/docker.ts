@@ -224,6 +224,10 @@ export function __setDockerSpawnSyncForTest(
 // カラム数がずれる。RS は通常のテキストデータには現れないので、行の
 // terminator として安全。
 const PG_RECORD_SEPARATOR = "\x1e";
+// フィールド区切りも Tab のままでは HTML / テキスト中の Tab で列が分割される。
+// Unit Separator (0x1F) は通常のテキストには現れないため、psql の fieldsep と
+// パーサの両方で使用する。
+const PG_FIELD_SEPARATOR = "\x1f";
 
 function buildExecInvocation(
   config: SqlCliConfig,
@@ -251,7 +255,7 @@ function buildExecInvocation(
         "-t",
         "-A",
         "-F",
-        "\t",
+        PG_FIELD_SEPARATOR,
         "-R",
         PG_RECORD_SEPARATOR,
         "-v",
@@ -651,8 +655,12 @@ function decodeMysqlBatchField(value: string): string {
   return out;
 }
 
-function splitTsvLine(line: string, decodeFields: boolean): string[] {
-  const fields = line.split("\t");
+function splitTsvLine(
+  line: string,
+  decodeFields: boolean,
+  fieldSeparator = "\t",
+): string[] {
+  const fields = line.split(fieldSeparator);
   return decodeFields ? fields.map(decodeMysqlBatchField) : fields;
 }
 
@@ -669,6 +677,7 @@ function parseTsvOutput(
   stdout: string,
   hasHeader: boolean,
   recordSeparator?: string,
+  fieldSeparator?: string,
 ): { columns: string[]; rows: string[][] } {
   // psql は landing_page_html のような改行を含む TEXT 列を -A モードでは
   // エスケープしないので、改行で行を区切ると 1 行が複数行に化ける。postgres
@@ -690,11 +699,13 @@ function parseTsvOutput(
     : text.split(/\r?\n/);
   if (lines.length === 0) return { columns: [], rows: [] };
   if (hasHeader) {
-    const columns = splitTsvLine(lines[0], true);
-    const rows = lines.slice(1).map((line) => splitTsvLine(line, true));
+    const columns = splitTsvLine(lines[0], true, fieldSeparator);
+    const rows = lines
+      .slice(1)
+      .map((line) => splitTsvLine(line, true, fieldSeparator));
     return { columns, rows };
   }
-  const rows = lines.map((line) => splitTsvLine(line, false));
+  const rows = lines.map((line) => splitTsvLine(line, false, fieldSeparator));
   return { columns: [], rows };
 }
 
@@ -796,6 +807,7 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
       result.stdout,
       config.kind === "mysql",
       config.kind === "postgresql" ? PG_RECORD_SEPARATOR : undefined,
+      config.kind === "postgresql" ? PG_FIELD_SEPARATOR : undefined,
     );
   }
 
@@ -905,15 +917,16 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
     async getTablesAsync(signal?: AbortSignal): Promise<DbTableInfo[]> {
       let sql: string;
       if (config.kind === "postgresql") {
-        sql = `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = ${postgresSchemaLiteral()} ORDER BY table_name`;
+        sql = `SELECT t.table_name, t.table_type, COALESCE(obj_description(cls.oid, 'pg_class'), '') FROM information_schema.tables t JOIN pg_namespace n ON n.nspname = t.table_schema JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = t.table_name WHERE t.table_schema = ${postgresSchemaLiteral()} ORDER BY t.table_name`;
       } else {
-        sql = `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name`;
+        sql = `SELECT table_name, table_type, table_comment FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name`;
       }
       const result = await execAsync(sql, signal);
       return result.rows.map((row) => ({
         name: row[0],
         type: (row[1] === "VIEW" ? "view" : "table") as "table" | "view",
         rowCount: null,
+        comment: row[2] || null,
       }));
     },
 
@@ -932,19 +945,19 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
       let sql: string;
       // postgres も mysql も「複数列インデックスの列名を 1 セル内に集約」する。
       // カンマ等の通常文字を separator にすると、引用列名 ("foo,bar") に
-      // separator 自体が含まれて split が崩れる。ASCII 0x1F (Unit Separator)
-      // は通常テキスト・SQL 識別子に出現しないので衝突しない。
-      const INDEX_COL_SEP = "\x1f";
+      // separator 自体が含まれて split が崩れる。field separator (0x1F) や
+      // record separator (0x1E) と異なる ASCII 0x1D (Group Separator) を使う。
+      const INDEX_COL_SEP = "\x1d";
       if (config.kind === "postgresql") {
         // pg_index.indkey の順序で構成列を string_agg。式 index は attname が
         // null になるので空文字を捨てる。PK もここに乗る (PRIMARY KEY は内部的に
         // unique index)。 schema view の indexes 表示に columns と uniqueness が
         // 必要なので、pg_indexes 名前だけ取る旧クエリから差し替えた。
-        sql = `SELECT i.relname, t.relname, CASE WHEN ix.indisunique THEN '1' ELSE '0' END, COALESCE(string_agg(a.attname, E'\\x1f' ORDER BY k.ord), '') FROM pg_index ix JOIN pg_class i ON i.oid = ix.indexrelid JOIN pg_class t ON t.oid = ix.indrelid JOIN pg_namespace n ON n.oid = t.relnamespace LEFT JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum WHERE n.nspname = ${postgresSchemaLiteral()} AND i.relname NOT LIKE 'pg_%' GROUP BY i.relname, t.relname, ix.indisunique ORDER BY t.relname, i.relname`;
+        sql = `SELECT i.relname, t.relname, CASE WHEN ix.indisunique THEN '1' ELSE '0' END, COALESCE(string_agg(a.attname, E'\\x1d' ORDER BY k.ord), '') FROM pg_index ix JOIN pg_class i ON i.oid = ix.indexrelid JOIN pg_class t ON t.oid = ix.indrelid JOIN pg_namespace n ON n.oid = t.relnamespace LEFT JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum WHERE n.nspname = ${postgresSchemaLiteral()} AND i.relname NOT LIKE 'pg_%' GROUP BY i.relname, t.relname, ix.indisunique ORDER BY t.relname, i.relname`;
       } else {
         // mysql は statistics に列ごと 1 行で seq_in_index 順を持つので、
         // index 単位に集約して columns と unique を一発で取る。
-        sql = `SELECT index_name, table_name, IF(MAX(non_unique) = 0, '1', '0'), GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR '\x1f') FROM information_schema.statistics WHERE table_schema = DATABASE() GROUP BY index_name, table_name ORDER BY table_name, index_name`;
+        sql = `SELECT index_name, table_name, IF(MAX(non_unique) = 0, '1', '0'), GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR '\x1d') FROM information_schema.statistics WHERE table_schema = DATABASE() GROUP BY index_name, table_name ORDER BY table_name, index_name`;
       }
       const result = await execAsync(sql, signal);
       return result.rows.map((row) => ({
@@ -1543,6 +1556,7 @@ export async function listDockerDatabasesAsync(
       result.stdout,
       kind === "mysql",
       kind === "postgresql" ? PG_RECORD_SEPARATOR : undefined,
+      kind === "postgresql" ? PG_FIELD_SEPARATOR : undefined,
     );
     const dbs = parsed.rows.map((r) => r[0]).filter(Boolean);
     const value = dbs.length > 0 ? dbs : fallbackDockerDatabases(defaultDb);
@@ -1629,7 +1643,12 @@ async function fetchPostgresSchemasViaContainerAsync(
     }
     // postgres 専用ヘルパー (呼び出し元がどちらも kind: "postgresql" 固定) な
     // ので、常に PG_RECORD_SEPARATOR を渡す。
-    const parsed = parseTsvOutput(result.stdout, false, PG_RECORD_SEPARATOR);
+    const parsed = parseTsvOutput(
+      result.stdout,
+      false,
+      PG_RECORD_SEPARATOR,
+      PG_FIELD_SEPARATOR,
+    );
     const schemas = parsed.rows.map((r) => r[0]).filter(Boolean);
     const value = schemas.length > 0 ? schemas : ["public"];
     return setDockerSchemasCache(

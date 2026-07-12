@@ -83,14 +83,19 @@ function mysqlStdout(sql: string): string {
 // (docker.ts:PG_RECORD_SEPARATOR)。テストのモックも同じ separator で
 // stdout を組み立てる。
 const PG_RS = "\x1e";
+const PG_US = "\x1f";
+const PG_GS = "\x1d";
 function postgresStdout(sql: string): string {
   if (sql.includes("information_schema.columns")) {
-    return ["id\tinteger\tNO\t\tYES", "name\ttext\tYES\t\tNO"].join(PG_RS);
+    return [
+      ["id", "integer", "NO", "", "YES"].join(PG_US),
+      ["name", "text", "YES", "", "NO"].join(PG_US),
+    ].join(PG_RS);
   }
   if (sql.includes("COUNT(*)")) {
     return `2${PG_RS}`;
   }
-  return `1\tAda${PG_RS}`;
+  return `1${PG_US}Ada${PG_RS}`;
 }
 
 function installSpawnHarness(
@@ -146,6 +151,36 @@ function createPostgresAdapter(schema = "tenant_a") {
 }
 
 describe("docker table meta queries", () => {
+  test.each([
+    {
+      name: "PostgreSQL",
+      adapter: () => createPostgresAdapter("public"),
+      stdout: `sample_table${PG_US}BASE TABLE${PG_US}table description${PG_RS}`,
+      queryPart: "obj_description",
+    },
+    {
+      name: "MySQL",
+      adapter: createMysqlAdapter,
+      stdout:
+        "table_name\ttable_type\ttable_comment\nsample_table\tBASE TABLE\ttable description",
+      queryPart: "table_comment",
+    },
+  ])("reads $name table comments", async ({ adapter, stdout, queryPart }) => {
+    activeHarness = installSpawnHarness(() => stdout);
+
+    const tables = await adapter().getTablesAsync();
+
+    expect(activeHarness.calls[0]?.sql.includes(queryPart)).toBe(true);
+    expect(tables).toEqual([
+      {
+        name: "sample_table",
+        type: "table",
+        rowCount: null,
+        comment: "table description",
+      },
+    ]);
+  });
+
   test("starts columns and count before awaiting table data", async () => {
     activeHarness = installSpawnHarness();
     const adapter = createMysqlAdapter();
@@ -186,7 +221,7 @@ describe("docker table meta queries", () => {
           delayMs: 0,
         };
       }
-      return { stdout: "1\tAda\n", delayMs: 30 };
+      return { stdout: `1${PG_US}Ada${PG_RS}`, delayMs: 30 };
     });
     const adapter = createPostgresAdapter("public");
 
@@ -343,12 +378,66 @@ describe("docker table meta queries", () => {
     expect(result.totalRows).toBe(2);
   });
 
+  test("keeps PostgreSQL markup text with newlines and tabs in one column", async () => {
+    activeHarness = installSpawnHarness((sql) => {
+      if (sql.includes("information_schema.columns"))
+        return postgresStdout(sql);
+      if (sql.includes("COUNT(*)")) return `1${PG_RS}`;
+      return `1${PG_US}line1\nline2\tTabbed${PG_RS}`;
+    });
+    const adapter = createPostgresAdapter("public");
+
+    const result = await adapter.getTablePageWithMeta("markup_text", {
+      offset: 0,
+      limit: 25,
+    });
+
+    const dataCall = activeHarness.calls.find((call) =>
+      call.sql.includes('SELECT * FROM "public"."markup_text"'),
+    );
+    expect(dataCall?.args.includes(PG_US)).toBe(true);
+    expect(result.rows).toEqual([["1", "line1\nline2\tTabbed"]]);
+    expect(result.rows[0]).toHaveLength(2);
+  });
+
+  test("keeps PostgreSQL multi-column index names inside one CLI field", async () => {
+    activeHarness = installSpawnHarness((sql) => {
+      if (sql.includes("pg_index")) {
+        return (
+          [
+            "idx_example",
+            "sample_table",
+            "1",
+            `primary_col${PG_GS}secondary_col`,
+          ].join(PG_US) + PG_RS
+        );
+      }
+      return postgresStdout(sql);
+    });
+    const adapter = createPostgresAdapter("public");
+
+    const indexes = await adapter.getIndexesAsync();
+
+    const indexCall = activeHarness.calls.find((call) =>
+      call.sql.includes("pg_index"),
+    );
+    expect(indexCall?.sql.includes("E'\\x1d'")).toBe(true);
+    expect(indexes).toEqual([
+      {
+        name: "idx_example",
+        table: "sample_table",
+        unique: true,
+        columns: ["primary_col", "secondary_col"],
+      },
+    ]);
+  });
+
   test("reads PostgreSQL column comments", async () => {
     activeHarness = installSpawnHarness((sql) => {
       if (sql.includes("information_schema.columns")) {
         return [
-          "id\tuuid\tNO\t\tYES\tprimary identifier",
-          "name\ttext\tYES\t\tNO\tdisplay label",
+          ["id", "uuid", "NO", "", "YES", "primary identifier"].join(PG_US),
+          ["name", "text", "YES", "", "NO", "display label"].join(PG_US),
         ].join(PG_RS);
       }
       return postgresStdout(sql);
@@ -368,12 +457,16 @@ describe("docker table meta queries", () => {
     activeHarness = installSpawnHarness((sql) => {
       if (sql.includes("information_schema.columns")) {
         return [
-          "sample_table\tid\tuuid\tNO\t\tprimary identifier",
-          "sample_table\tname\ttext\tYES\t\tdisplay label",
+          ["sample_table", "id", "uuid", "NO", "", "primary identifier"].join(
+            PG_US,
+          ),
+          ["sample_table", "name", "text", "YES", "", "display label"].join(
+            PG_US,
+          ),
         ].join(PG_RS);
       }
       if (sql.includes("pg_index")) {
-        return `sample_table\tid${PG_RS}`;
+        return `sample_table${PG_US}id${PG_RS}`;
       }
       return postgresStdout(sql);
     });

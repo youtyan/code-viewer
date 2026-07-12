@@ -37,6 +37,8 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   viewer.
   Local Supabase CLI (`supabase start`) Postgres projects are auto-discovered
   too, without needing a `docker-compose.yml`.
+  Table descriptions appear inside expanded table entries and in the Schema
+  tab header when the database provides them.
 - Read the built-in Help page for getting started, the `.code-viewer/`
   project files, AI annotations, datastores, the agent skill, and
   keybindings.

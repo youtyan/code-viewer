@@ -30,6 +30,7 @@ export type SchemaView = {
       foreignKeys?: DbForeignKey[];
       triggers?: TriggerDisplayInfo[];
       ddl?: string;
+      tableComment?: string | null;
     },
   ) => void;
   clear: () => void;
@@ -57,6 +58,7 @@ export function createSchemaView(
       foreignKeys?: DbForeignKey[];
       triggers?: TriggerDisplayInfo[];
       ddl?: string;
+      tableComment?: string | null;
     };
   } | null = null;
 
@@ -84,6 +86,7 @@ export function createSchemaView(
       foreignKeys?: DbForeignKey[];
       triggers?: TriggerDisplayInfo[];
       ddl?: string;
+      tableComment?: string | null;
     },
   ) {
     lastArgs = { table, columns, indexes, extra };
@@ -95,7 +98,10 @@ export function createSchemaView(
     header.className = "db-schema-header";
     const headerTitle = document.createElement("span");
     headerTitle.className = "db-schema-header-title";
-    headerTitle.textContent = `Schema: ${table}`;
+    const tableComment = extra?.tableComment?.trim();
+    headerTitle.textContent = tableComment
+      ? `Schema: ${table} — ${tableComment}`
+      : `Schema: ${table}`;
     header.appendChild(headerTitle);
     if (deps.onRefresh) {
       refreshBtn = document.createElement("button");
