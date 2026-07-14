@@ -131,6 +131,11 @@ type DatabaseEnterOptions = {
   annotationTarget?: DatabaseAnnotationTarget;
   reuseActiveTab?: boolean;
   suppressRouteSync?: boolean;
+  // true のときは redis/es/s3/dynamodb explorer の「同じ dbId かつ initial
+  // なしなら load を skip する」ガードを、現在のライブ選択状態 (getSelection())
+  // を initial として流し込むことで意図的にバイパスし、テーブル/インデックス/
+  // キー一覧を強制的に再取得する。データストア更新ボタン専用。
+  forceReload?: boolean;
 };
 type OpenTabOptions = DatabaseEnterOptions & {
   deferInitialEnter?: boolean;
@@ -2151,11 +2156,33 @@ function createTabPane(
     syncConnectionActions();
 
     // 復元時は initial の redis/es selection を 1 度だけ流し込む。
+    // forceReload (データストア更新ボタン) のときは、pending initial の
+    // 代わりにライブの現在選択 (getSelection()) を initial として渡す。
+    // これにより各 explorer.load() 内の「同じ dbId かつ initial なしなら
+    // skip」ガードを迂回して一覧を再取得しつつ、選択中のテーブル/キー等は
+    // 維持する (さもないと更新のたびに先頭テーブルへ戻ってしまう)。
+    const forceReload = options.forceReload ?? false;
     const explorerInitial = {
-      redis: pendingRedisInitial,
-      es: pendingEsInitial,
-      s3: pendingS3Initial,
-      dynamodb: pendingDynamodbInitial,
+      redis:
+        pendingRedisInitial ??
+        (forceReload && currentDbInfo?.kind === "redis"
+          ? redisExplorer.getSelection()
+          : undefined),
+      es:
+        pendingEsInitial ??
+        (forceReload && currentDbInfo?.kind === "elasticsearch"
+          ? esExplorer.getSelection()
+          : undefined),
+      s3:
+        pendingS3Initial ??
+        (forceReload && currentDbInfo?.kind === "s3"
+          ? s3Explorer.getSelection()
+          : undefined),
+      dynamodb:
+        pendingDynamodbInitial ??
+        (forceReload && currentDbInfo?.kind === "dynamodb"
+          ? dynamodbExplorer.getSelection()
+          : undefined),
     };
     pendingRedisInitial = undefined;
     pendingEsInitial = undefined;
@@ -2319,7 +2346,8 @@ function createTabPane(
         sel.keyConditionExpression !== undefined ||
         sel.filterExpression !== undefined ||
         sel.expressionAttributeValues !== undefined ||
-        sel.itemKey !== undefined
+        sel.itemKey !== undefined ||
+        sel.detailTab === "item"
       ) {
         state.dynamodb = sel;
       }
@@ -3567,7 +3595,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       state.schema ?? undefined,
       state.table ?? undefined,
       state.view,
-      { autoSelectFirst: state.dbId !== null },
+      { autoSelectFirst: state.dbId !== null, forceReload: true },
     );
     if (!mounted || activeTabId !== id) return;
     refreshChipLabel(id);

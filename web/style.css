@@ -11661,13 +11661,17 @@ body.db-resizing {
   overflow: hidden;
   background: var(--bg);
 }
-.es-detail-tabs {
+/* .dynamodb-detail-tab* は es-explorer の mapping/doc タブと同一デザイン
+   (Structure/Item タブ) なので、セレクタを共有して重複メンテナンスを避ける。 */
+.es-detail-tabs,
+.dynamodb-detail-tabs {
   display: flex;
   border-bottom: 1px solid var(--border);
   background: var(--bg-soft);
   flex-shrink: 0;
 }
-.es-detail-tab {
+.es-detail-tab,
+.dynamodb-detail-tab {
   padding: 6px 14px;
   border: none;
   background: transparent;
@@ -11676,12 +11680,15 @@ body.db-resizing {
   color: var(--fg-muted);
   border-bottom: 2px solid transparent;
 }
-.es-detail-tab.active {
+.es-detail-tab.active,
+.dynamodb-detail-tab.active {
   color: var(--fg);
   border-bottom-color: var(--accent);
 }
 .es-mapping-body,
-.es-doc-body {
+.es-doc-body,
+.dynamodb-structure-body,
+.dynamodb-item-body {
   flex: 1;
   overflow: auto;
   padding: 12px;
@@ -12474,9 +12481,9 @@ body.db-resizing {
 }
 .dynamodb-detail-pane {
   flex: 1;
-  overflow: auto;
-  padding: 12px;
-  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--bg);
 }
 .dynamodb-table-info-header,
@@ -12491,8 +12498,7 @@ body.db-resizing {
   border-bottom: 1px solid var(--border);
   margin-bottom: 8px;
 }
-.dynamodb-table-info-meta,
-.dynamodb-table-info-keys {
+.dynamodb-table-info-meta {
   font-family: var(--mono, monospace);
   font-size: var(--db-font-sm);
   color: var(--fg-muted);
@@ -12504,8 +12510,66 @@ body.db-resizing {
   font-size: var(--db-font-sm);
   font-weight: 400;
 }
-.dynamodb-table-info-empty {
-  margin-top: 24px;
+.dynamodb-attr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  margin-bottom: 16px;
+}
+.dynamodb-attr-table th,
+.dynamodb-attr-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.dynamodb-attr-table th {
+  font-weight: 600;
+  background: var(--bg-soft);
+}
+.dynamodb-attr-name {
+  font-weight: 500;
+}
+.dynamodb-attr-type,
+.dynamodb-attr-role {
+  color: var(--fg-muted);
+}
+.dynamodb-value-empty {
+  color: var(--fg-muted);
+  font-size: var(--db-font-base);
+  font-style: italic;
+  text-align: center;
+  padding: 8px;
+}
+.dynamodb-index-section {
+  margin-bottom: 16px;
+}
+.dynamodb-index-heading {
+  font-weight: 600;
+  font-size: var(--db-font-sm);
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+.dynamodb-index-row {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.dynamodb-index-name {
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  font-weight: 500;
+}
+.dynamodb-index-detail {
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-sm);
+  color: var(--fg-muted);
+}
+.dynamodb-attr-note {
+  margin-top: -4px;
+  margin-bottom: 16px;
+  font-size: var(--db-font-sm);
+  color: var(--fg-muted);
+  font-style: italic;
 }
 .dynamodb-item-source {
   font-family: var(--mono, monospace);

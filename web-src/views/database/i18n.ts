@@ -359,6 +359,20 @@ export type DbText = {
       copyFailed: string;
       invalidAttributeValues: string;
       runQuery: string;
+      structureTab: string;
+      itemTab: string;
+      selectTable: string;
+      attributeHeader: string;
+      typeHeader: string;
+      keyRoleHeader: string;
+      noAttributes: string;
+      globalSecondaryIndexes: string;
+      localSecondaryIndexes: string;
+      projectionAll: string;
+      projectionKeysOnly: string;
+      projectionInclude: (attrs: string) => string;
+      keySchemaOnlyHint: string;
+      inferredAttributesNote: (count: number) => string;
     };
   };
 };
@@ -729,6 +743,24 @@ const EN: DbText = {
       copyFailed: "Copy failed",
       invalidAttributeValues: "Invalid attribute values JSON",
       runQuery: "Run",
+      structureTab: "Structure",
+      itemTab: "Item",
+      selectTable: "Select a table to view its structure.",
+      attributeHeader: "Attribute",
+      typeHeader: "Type",
+      keyRoleHeader: "Key",
+      noAttributes: "(no attributes)",
+      globalSecondaryIndexes: "Global secondary indexes",
+      localSecondaryIndexes: "Local secondary indexes",
+      projectionAll: "ALL",
+      projectionKeysOnly: "KEYS_ONLY",
+      projectionInclude: (attrs) => `INCLUDE (${attrs})`,
+      keySchemaOnlyHint:
+        "DynamoDB only enforces types for key attributes. Additional attributes will appear here once items are loaded.",
+      inferredAttributesNote: (count) =>
+        `Attributes beyond the key schema are inferred from ${count.toLocaleString()} loaded item${
+          count === 1 ? "" : "s"
+        } and may not reflect every item.`,
     },
   },
 };
@@ -792,6 +824,7 @@ const JA: DbText = {
     refreshAction: "検索/列フィルタを保持して、この表だけ再読み込み",
     refreshActionWithFilters: (count) =>
       `有効なフィルタ ${count} 件を保持して、この表だけ再読み込み`,
+    // ai-dup-check: allow -- ok:EN側と同一ロジックの JA 文言ペア。i18n テーブルの構造上、翻訳違いだけの関数は常にトークン指紋が一致する。
     refreshResultChanged: (delta, total) => {
       const abs = Math.abs(delta).toLocaleString();
       const sign = delta > 0 ? "+" : "-";
@@ -1098,6 +1131,22 @@ const JA: DbText = {
       copyFailed: "コピーに失敗しました",
       invalidAttributeValues: "属性値の JSON が不正です",
       runQuery: "実行",
+      structureTab: "構造",
+      itemTab: "アイテム",
+      selectTable: "テーブルを選択すると構造が表示されます。",
+      attributeHeader: "属性",
+      typeHeader: "型",
+      keyRoleHeader: "キー",
+      noAttributes: "(属性がありません)",
+      globalSecondaryIndexes: "グローバルセカンダリインデックス",
+      localSecondaryIndexes: "ローカルセカンダリインデックス",
+      projectionAll: "ALL",
+      projectionKeysOnly: "KEYS_ONLY",
+      projectionInclude: (attrs) => `INCLUDE (${attrs})`,
+      keySchemaOnlyHint:
+        "DynamoDBがスキーマとして強制するのはキー属性のみです。アイテムを読み込むと追加の属性がここに表示されます。",
+      inferredAttributesNote: (count) =>
+        `キー以外の属性は、読み込み済みの${count.toLocaleString()}件のアイテムから検出したものです (全アイテムを網羅するとは限りません)。`,
     },
   },
 };

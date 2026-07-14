@@ -454,6 +454,18 @@ export type DynamoDbAttributeValue =
 export type DynamoDbKey = Record<string, DynamoDbAttributeValue>;
 export type DynamoDbItem = Record<string, DynamoDbAttributeValue>;
 
+export type DynamoDbSecondaryIndexDescription = {
+  IndexName?: string;
+  KeySchema?: Array<{ AttributeName: string; KeyType: string }>;
+  Projection?: {
+    ProjectionType?: string;
+    NonKeyAttributes?: string[];
+  };
+  IndexStatus?: string;
+  ItemCount?: number;
+  IndexSizeBytes?: number;
+};
+
 export type DynamoDbTableDescription = {
   TableName?: string;
   TableStatus?: string;
@@ -466,8 +478,8 @@ export type DynamoDbTableDescription = {
     AttributeType: string;
   }>;
   BillingModeSummary?: { BillingMode?: string };
-  GlobalSecondaryIndexes?: unknown[];
-  LocalSecondaryIndexes?: unknown[];
+  GlobalSecondaryIndexes?: DynamoDbSecondaryIndexDescription[];
+  LocalSecondaryIndexes?: DynamoDbSecondaryIndexDescription[];
   [key: string]: unknown;
 };
 
@@ -591,6 +603,11 @@ export type DynamoDbExplorerSelection = {
   scanIndexForward?: boolean;
   // 選択中アイテムを再選択するためのキー。DynamoDbKey を JSON.stringify した文字列。
   itemKey?: string;
+  // 詳細ペインでどちらのタブを見ていたか。itemKey の復元 (selectItemByKey) は
+  // 内部で常に "item" タブへ切り替えるため、更新ボタン (forceReload) 経由の
+  // 再入場時にこれを渡さないと、構造タブを見ていたのに更新のたびに強制的に
+  // アイテムタブへ戻される。
+  detailTab?: "structure" | "item";
 };
 
 // ---------- Tabs ----------
