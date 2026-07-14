@@ -760,6 +760,69 @@ describe("repository tree helpers", () => {
     }
   });
 
+  test("matches wildcard omitDirNames patterns like gitignore", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-omit-wildcard-tree-"));
+    try {
+      git(dir, ["init"]);
+      mkdirSync(join(dir, "test-cache"));
+      writeFileSync(join(dir, "test-cache", "x.txt"), "cache");
+      mkdirSync(join(dir, "other-dir"));
+      writeFileSync(join(dir, "other-dir", "y.txt"), "other");
+
+      const result = listTree("worktree", "", dir, {
+        recursive: true,
+        omitDirNames: ["test-*"],
+      });
+
+      expect(
+        result.entries.find((entry) => entry.path === "test-cache")
+          ?.children_omitted_reason,
+      ).toBe("heavy");
+      expect(
+        result.entries.some((entry) => entry.path === "test-cache/x.txt"),
+      ).toBe(false);
+      expect(
+        result.entries.find((entry) => entry.path === "other-dir")
+          ?.children_omitted,
+      ).toBe(undefined);
+      expect(
+        result.entries.some((entry) => entry.path === "other-dir/y.txt"),
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("matches wildcard excludeNames patterns like gitignore", () => {
+    const dir = mkdtempSync(
+      join(tmpdir(), "code-viewer-exclude-wildcard-tree-"),
+    );
+    try {
+      git(dir, ["init"]);
+      writeFileSync(join(dir, "app.log"), "log");
+      writeFileSync(join(dir, "app.ts"), "ts");
+      mkdirSync(join(dir, "src"));
+      writeFileSync(join(dir, "src", "debug.log"), "log2");
+
+      const result = listTree("worktree", "", dir, {
+        recursive: true,
+        excludeNames: ["*.log"],
+      });
+
+      expect(result.entries.some((entry) => entry.path === "app.log")).toBe(
+        false,
+      );
+      expect(
+        result.entries.some((entry) => entry.path === "src/debug.log"),
+      ).toBe(false);
+      expect(result.entries.some((entry) => entry.path === "app.ts")).toBe(
+        true,
+      );
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
   test("marks the .git directory as internal omitted tree data", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-internal-tree-"));
     try {

@@ -28,6 +28,7 @@ import type {
 import { commandForExternal } from "./command-resolver";
 import { spawnTextAsync } from "./database/adapters/spawn-runner";
 import * as git from "./git";
+import { compileNamePatterns } from "./name-pattern";
 import {
   buildFileSearchList,
   buildRgArgs,
@@ -88,11 +89,8 @@ export function isExcludedScopePath(
   path: string,
   excludeNames: string[],
 ): boolean {
-  return path
-    .split(/[\\/]+/)
-    .some((part) =>
-      excludeNames.some((name) => part.toLowerCase() === name.toLowerCase()),
-    );
+  const excluded = compileNamePatterns(excludeNames);
+  return path.split(/[\\/]+/).some((part) => excluded.matches(part));
 }
 
 export function isSafePath(path: string): boolean {

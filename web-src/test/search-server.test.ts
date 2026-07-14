@@ -15,6 +15,7 @@ import {
 } from "../server/search";
 import {
   grepRepoAsync,
+  isExcludedScopePath,
   listRepoFilesAsync,
   safeWorktreePath,
 } from "../server/search-service";
@@ -72,6 +73,126 @@ describe("search path filtering", () => {
     expect(isSkippableSearchPath(".code-viewer/annotations.json")).toBe(true);
     expect(isSkippableSearchPath("docs/.code-viewer/notes.md")).toBe(true);
     expect(isSkippableSearchPath("src/code-viewer.ts")).toBe(false);
+  });
+
+  test.each([
+    {
+      name: "* が excludeNames のファイル名にマッチする",
+      path: "src/app.log",
+      omitDirNames: [],
+      excludeNames: ["*.log"],
+      expected: true,
+    },
+    {
+      name: "* が拡張子違いには非マッチ",
+      path: "src/app.ts",
+      omitDirNames: [],
+      excludeNames: ["*.log"],
+      expected: false,
+    },
+    {
+      name: "* が omitDirNames のディレクトリ名にマッチする",
+      path: "test-cache/x.txt",
+      omitDirNames: ["test-*"],
+      excludeNames: [],
+      expected: true,
+    },
+    {
+      name: "* が前方一致しないディレクトリ名には非マッチ",
+      path: "cache-test/x.txt",
+      omitDirNames: ["test-*"],
+      excludeNames: [],
+      expected: false,
+    },
+    {
+      name: "? は1文字にマッチする",
+      path: "a1.log",
+      omitDirNames: [],
+      excludeNames: ["a?.log"],
+      expected: true,
+    },
+    {
+      name: "? は2文字には非マッチ",
+      path: "a12.log",
+      omitDirNames: [],
+      excludeNames: ["a?.log"],
+      expected: false,
+    },
+    {
+      name: "[abc] は文字クラス内にマッチする",
+      path: "log-a.txt",
+      omitDirNames: [],
+      excludeNames: ["log-[abc].txt"],
+      expected: true,
+    },
+    {
+      name: "[abc] は文字クラス外には非マッチ",
+      path: "log-z.txt",
+      omitDirNames: [],
+      excludeNames: ["log-[abc].txt"],
+      expected: false,
+    },
+    {
+      name: "[!abc] は否定文字クラスにマッチする",
+      path: "log-z.txt",
+      omitDirNames: [],
+      excludeNames: ["log-[!abc].txt"],
+      expected: true,
+    },
+    {
+      name: "[!abc] は否定対象文字には非マッチ",
+      path: "log-a.txt",
+      omitDirNames: [],
+      excludeNames: ["log-[!abc].txt"],
+      expected: false,
+    },
+  ])("$name", ({ path, omitDirNames, excludeNames, expected }) => {
+    expect(isSkippableSearchPath(path, omitDirNames, excludeNames)).toBe(
+      expected,
+    );
+  });
+});
+
+describe("isExcludedScopePath", () => {
+  test.each([
+    {
+      name: "ルート直下でリテラル一致",
+      path: ".DS_Store",
+      excludeNames: [".DS_Store"],
+      expected: true,
+    },
+    {
+      name: "ネストした階層でリテラル一致",
+      path: "src/.DS_Store",
+      excludeNames: [".DS_Store"],
+      expected: true,
+    },
+    {
+      name: "* がネストしたファイル名にマッチする",
+      path: "src/debug.log",
+      excludeNames: ["*.log"],
+      expected: true,
+    },
+    {
+      name: "* が拡張子違いには非マッチ",
+      path: "src/debug.ts",
+      excludeNames: ["*.log"],
+      expected: false,
+    },
+    {
+      name: "文字クラスがファイル名にマッチする",
+      path: "logs/x1.txt",
+      excludeNames: ["x[0-9].txt"],
+      expected: true,
+    },
+    {
+      name: "一致するパターンが無ければ非除外",
+      path: "src/app.ts",
+      excludeNames: [],
+      expected: false,
+    },
+  ])("$name", ({ path, excludeNames, expected }) => {
+    expect(isExcludedScopePath(path, excludeNames)).toBe(expected);
   });
 });
 

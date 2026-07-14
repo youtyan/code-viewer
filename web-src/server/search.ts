@@ -1,5 +1,6 @@
 import type { FileSearchListResponse, GrepMatch } from "../core/types";
 import type { GitTreeEntry } from "./git";
+import { compileNamePatterns } from "./name-pattern";
 
 export const GREP_DEFAULT_MAX = 200;
 export const GREP_ABSOLUTE_MAX = 500;
@@ -18,15 +19,15 @@ export function isSkippableSearchPath(
   omitDirNames: string[] = [],
   excludeNames: string[] = [],
 ): boolean {
-  const omitDirs = new Set(omitDirNames.map((name) => name.toLowerCase()));
-  const excluded = new Set(excludeNames.map((name) => name.toLowerCase()));
+  const omitDirs = compileNamePatterns(omitDirNames);
+  const excluded = compileNamePatterns(excludeNames);
   return path.split(/[\\/]+/).some((part) => {
     const lower = part.toLowerCase();
     return (
       lower === ".git" ||
       lower === ".code-viewer" ||
-      omitDirs.has(lower) ||
-      excluded.has(lower)
+      omitDirs.matches(part) ||
+      excluded.matches(part)
     );
   });
 }
