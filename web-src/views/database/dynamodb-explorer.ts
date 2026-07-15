@@ -13,6 +13,8 @@ import type {
 import { isImeComposing } from "../../core/keyboard";
 import { formatBytes } from "../../core/source-meta";
 import { createAbortGuard } from "./abort-guard";
+import { createDetailTable } from "./detail-table";
+import { createDetailTabs } from "./detail-tabs";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
 
@@ -233,29 +235,23 @@ export function createDynamoDbExplorer(
   moreBtn.hidden = true;
   itemListPane.appendChild(moreBtn);
 
-  // ----- pane: detail (structure + item), es-explorer の mapping/doc タブと同じ構成 -----
+  // ----- pane: detail (structure + item), es-explorer の mapping/doc タブと
+  // 共通の createDetailTabs ウィジェットを使う -----
   const detailPane = document.createElement("div");
-  detailPane.className = "dynamodb-detail-pane";
+  detailPane.className = "db-detail-pane";
 
-  const detailTabs = document.createElement("div");
-  detailTabs.className = "dynamodb-detail-tabs";
-  const structureTabBtn = document.createElement("button");
-  structureTabBtn.type = "button";
-  structureTabBtn.className = "dynamodb-detail-tab active";
-  structureTabBtn.textContent = text().dynamodb.structureTab;
-  const itemTabBtn = document.createElement("button");
-  itemTabBtn.type = "button";
-  itemTabBtn.className = "dynamodb-detail-tab";
-  itemTabBtn.textContent = text().dynamodb.itemTab;
-  detailTabs.append(structureTabBtn, itemTabBtn);
-  detailPane.appendChild(detailTabs);
-
-  const structureBody = document.createElement("div");
-  structureBody.className = "dynamodb-structure-body";
+  const detailTabs = createDetailTabs(
+    [
+      { id: "structure", label: text().dynamodb.structureTab },
+      { id: "item", label: text().dynamodb.itemTab },
+    ] as const,
+    "structure",
+    () => notifySelectionChange(),
+  );
+  detailPane.appendChild(detailTabs.tabsEl);
+  const structureBody = detailTabs.bodies.structure;
   setPaneEmpty(structureBody, text().dynamodb.selectTable);
-  const itemBody = document.createElement("div");
-  itemBody.className = "dynamodb-item-body";
-  itemBody.hidden = true;
+  const itemBody = detailTabs.bodies.item;
   setPaneEmpty(itemBody, text().dynamodb.selectItem);
   detailPane.append(structureBody, itemBody);
 
@@ -275,7 +271,6 @@ export function createDynamoDbExplorer(
   // 件数に見えてしまう)。
   let cumulativeShownCount = 0;
   let cumulativeScannedCount = 0;
-  let detailTab: "structure" | "item" = "structure";
   // 言語ライブ切替時に描画済みのアイテム内容を再ローカライズするための保持。
   let lastRenderedItem: DynamoDbItem | null = null;
   let disposed = false;
@@ -305,20 +300,8 @@ export function createDynamoDbExplorer(
   }
 
   function setDetailTab(tab: "structure" | "item"): void {
-    detailTab = tab;
-    structureTabBtn.classList.toggle("active", tab === "structure");
-    itemTabBtn.classList.toggle("active", tab === "item");
-    structureBody.hidden = tab !== "structure";
-    itemBody.hidden = tab !== "item";
+    detailTabs.setActive(tab);
   }
-  structureTabBtn.addEventListener("click", () => {
-    setDetailTab("structure");
-    notifySelectionChange();
-  });
-  itemTabBtn.addEventListener("click", () => {
-    setDetailTab("item");
-    notifySelectionChange();
-  });
 
   function renderTables(tableNames: string[], append = false): void {
     if (!append) {
@@ -468,17 +451,6 @@ export function createDynamoDbExplorer(
         k.KeyType,
       ]),
     );
-    const table = document.createElement("table");
-    table.className = "dynamodb-attr-table";
-    const thead = document.createElement("thead");
-    const headRow = document.createElement("tr");
-    for (const label of [t.attributeHeader, t.typeHeader, t.keyRoleHeader]) {
-      const th = document.createElement("th");
-      th.textContent = label;
-      headRow.appendChild(th);
-    }
-    thead.appendChild(headRow);
-    table.appendChild(thead);
     const attrNames = [...attributeTypeByName.keys()];
     // AttributeDefinitions に載らない非キー属性は、現在読み込み済みのアイテム
     // を実際に見て型を推測する以外に知る方法がない (DynamoDB はキー以外の
@@ -496,47 +468,25 @@ export function createDynamoDbExplorer(
     }
     const inferredNames = [...inferredTypesByName.keys()].sort();
 
-    const tbody = document.createElement("tbody");
-    if (attrNames.length === 0 && inferredNames.length === 0) {
-      const row = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = 3;
-      td.className = "dynamodb-value-empty";
-      td.textContent = t.noAttributes;
-      row.appendChild(td);
-      tbody.appendChild(row);
-    }
-    for (const name of attrNames) {
-      const row = document.createElement("tr");
-      const nameTd = document.createElement("td");
-      nameTd.className = "dynamodb-attr-name";
-      nameTd.textContent = name;
-      const typeTd = document.createElement("td");
-      typeTd.className = "dynamodb-attr-type";
-      typeTd.textContent = attributeTypeByName.get(name) ?? "";
-      const roleTd = document.createElement("td");
-      roleTd.className = "dynamodb-attr-role";
-      roleTd.textContent = keyRoleByName.get(name) ?? "";
-      row.append(nameTd, typeTd, roleTd);
-      tbody.appendChild(row);
-    }
-    for (const name of inferredNames) {
-      const row = document.createElement("tr");
-      const nameTd = document.createElement("td");
-      nameTd.className = "dynamodb-attr-name";
-      nameTd.textContent = name;
-      const typeTd = document.createElement("td");
-      typeTd.className = "dynamodb-attr-type";
-      typeTd.textContent = [...(inferredTypesByName.get(name) ?? [])].join(
-        ", ",
-      );
-      const roleTd = document.createElement("td");
-      roleTd.className = "dynamodb-attr-role";
-      row.append(nameTd, typeTd, roleTd);
-      tbody.appendChild(row);
-    }
-    table.appendChild(tbody);
-    structureBody.appendChild(table);
+    const rows = [
+      ...attrNames.map((name) => [
+        name,
+        attributeTypeByName.get(name) ?? "",
+        keyRoleByName.get(name) ?? "",
+      ]),
+      ...inferredNames.map((name) => [
+        name,
+        [...(inferredTypesByName.get(name) ?? [])].join(", "),
+        "",
+      ]),
+    ];
+    structureBody.appendChild(
+      createDetailTable(
+        [t.attributeHeader, t.typeHeader, t.keyRoleHeader],
+        rows,
+        t.noAttributes,
+      ),
+    );
 
     const note = document.createElement("div");
     note.className = "dynamodb-attr-note";
@@ -1051,7 +1001,7 @@ export function createDynamoDbExplorer(
       scanIndexForward:
         currentMode === "query" ? currentScanIndexForward : undefined,
       itemKey: currentItemKeyToken ?? undefined,
-      detailTab,
+      detailTab: detailTabs.getActive(),
     };
   }
 
@@ -1071,8 +1021,10 @@ export function createDynamoDbExplorer(
     runBtn.textContent = t.dynamodb.runQuery;
     tableMoreBtn.textContent = t.common.loadMore;
     moreBtn.textContent = t.common.loadMore;
-    structureTabBtn.textContent = t.dynamodb.structureTab;
-    itemTabBtn.textContent = t.dynamodb.itemTab;
+    detailTabs.setLabels({
+      structure: t.dynamodb.structureTab,
+      item: t.dynamodb.itemTab,
+    });
     if (currentTableInfo) renderTableStructure();
     else setPaneEmpty(structureBody, t.dynamodb.selectTable);
     if (lastRenderedItem) renderItemDetail(lastRenderedItem);
