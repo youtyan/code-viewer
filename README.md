@@ -178,7 +178,9 @@ files or directory names completely.
 
 Scope settings control directory exclusions shared by the sidebar, Ctrl+K file
 palette, Ctrl+G grep palette, the Datastores browser, and the file change
-watcher — the same list applies to all five. Everything you change in Viewer
+watcher — the same list applies to all five. Both the skip list and the hide
+list accept gitignore-style wildcards (`*`, `?`, `[abc]`, `[!abc]`) in
+addition to exact names. Everything you change in Viewer
 Settings is saved on the server under `.code-viewer/settings.json` (no
 separate project-level config file). `.DS_Store` and a broad set of
 build/cache directories (`node_modules`, `dist`, `build`, `.next`, `.turbo`,
@@ -249,9 +251,10 @@ concurrency via `_seq_no` / `_primary_term`), create new documents, and delete
 existing ones. Snapshots and diffs over `_search` iteration are supported.
 
 **DynamoDB** support: detect LocalStack services with DynamoDB enabled, list
-tables across paginated responses, inspect key schemas, scan or query items,
-page with `LastEvaluatedKey`, and open an item detail view with a copyable key.
-The explorer is read-only.
+tables across paginated responses, and browse a Structure tab (key schema,
+global/local secondary indexes, and non-key attribute types inferred from
+loaded items) alongside scan or query items, `LastEvaluatedKey` pagination,
+and an item detail view with a copyable key. The explorer is read-only.
 
 **S3-compatible object storage** (MinIO, LocalStack): browse
 buckets as a folder tree, search by prefix or filename, sort scanned objects by

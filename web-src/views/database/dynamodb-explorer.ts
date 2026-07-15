@@ -5,12 +5,16 @@ import type {
   DynamoDbItemResponse,
   DynamoDbItemsResponse,
   DynamoDbKey,
+  DynamoDbSecondaryIndexDescription,
   DynamoDbTableDescription,
   DynamoDbTableResponse,
   DynamoDbTablesResponse,
 } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
+import { formatBytes } from "../../core/source-meta";
 import { createAbortGuard } from "./abort-guard";
+import { createDetailTable } from "./detail-table";
+import { createDetailTabs } from "./detail-tabs";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
 
@@ -56,6 +60,29 @@ function unwrapItem(item: DynamoDbItem): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(item)) out[k] = unwrapAttributeValue(v);
   return out;
+}
+
+const ATTRIBUTE_VALUE_TAG_ORDER = [
+  "S",
+  "N",
+  "B",
+  "BOOL",
+  "NULL",
+  "M",
+  "L",
+  "SS",
+  "NS",
+  "BS",
+] as const;
+
+// AttributeValue ({S: "x"} 等) が実際にどの DynamoDB 型かを1文字/略号タグで返す。
+// AttributeDefinitions はキー属性しか記述しないため、非キー属性の型はロード済み
+// アイテムから実際の値を見て推測するしかない (DynamoDB はスキーマレス)。
+function attributeValueTag(av: DynamoDbAttributeValue): string {
+  for (const tag of ATTRIBUTE_VALUE_TAG_ORDER) {
+    if (tag in av) return tag;
+  }
+  return "?";
 }
 
 // アイテム一覧の1行に出す要約テキスト。属性が多い/値が長いテーブルでも
@@ -208,10 +235,25 @@ export function createDynamoDbExplorer(
   moreBtn.hidden = true;
   itemListPane.appendChild(moreBtn);
 
-  // ----- pane: detail (table info + item) -----
+  // ----- pane: detail (structure + item), es-explorer の mapping/doc タブと
+  // 共通の createDetailTabs ウィジェットを使う -----
   const detailPane = document.createElement("div");
-  detailPane.className = "dynamodb-detail-pane";
-  setPaneEmpty(detailPane, text().dynamodb.selectItem);
+  detailPane.className = "db-detail-pane";
+
+  const detailTabs = createDetailTabs(
+    [
+      { id: "structure", label: text().dynamodb.structureTab },
+      { id: "item", label: text().dynamodb.itemTab },
+    ] as const,
+    "structure",
+    () => notifySelectionChange(),
+  );
+  detailPane.appendChild(detailTabs.tabsEl);
+  const structureBody = detailTabs.bodies.structure;
+  setPaneEmpty(structureBody, text().dynamodb.selectTable);
+  const itemBody = detailTabs.bodies.item;
+  setPaneEmpty(itemBody, text().dynamodb.selectItem);
+  detailPane.append(structureBody, itemBody);
 
   container.append(itemListPane, detailPane);
 
@@ -229,6 +271,8 @@ export function createDynamoDbExplorer(
   // 件数に見えてしまう)。
   let cumulativeShownCount = 0;
   let cumulativeScannedCount = 0;
+  // 言語ライブ切替時に描画済みのアイテム内容を再ローカライズするための保持。
+  let lastRenderedItem: DynamoDbItem | null = null;
   let disposed = false;
   let loadRunId = 0;
   let itemRunId = 0;
@@ -253,6 +297,10 @@ export function createDynamoDbExplorer(
     scanModeBtn.classList.toggle("active", mode === "scan");
     queryModeBtn.classList.toggle("active", mode === "query");
     keyConditionInput.hidden = mode !== "query";
+  }
+
+  function setDetailTab(tab: "structure" | "item"): void {
+    detailTabs.setActive(tab);
   }
 
   function renderTables(tableNames: string[], append = false): void {
@@ -312,9 +360,63 @@ export function createDynamoDbExplorer(
     itemList.appendChild(fragment);
   }
 
-  function renderTableInfo(): void {
-    detailPane.innerHTML = "";
-    if (!currentTableInfo) return;
+  function projectionText(
+    projection: DynamoDbSecondaryIndexDescription["Projection"],
+  ): string {
+    const t = text().dynamodb;
+    if (!projection?.ProjectionType) return "";
+    if (projection.ProjectionType === "ALL") return t.projectionAll;
+    if (projection.ProjectionType === "KEYS_ONLY") return t.projectionKeysOnly;
+    return t.projectionInclude((projection.NonKeyAttributes ?? []).join(", "));
+  }
+
+  function renderSecondaryIndexes(
+    label: string,
+    indexes: DynamoDbSecondaryIndexDescription[] | undefined,
+  ): void {
+    if (!indexes || indexes.length === 0) return;
+    const section = document.createElement("div");
+    section.className = "dynamodb-index-section";
+    const heading = document.createElement("div");
+    heading.className = "dynamodb-index-heading";
+    heading.textContent = label;
+    section.appendChild(heading);
+    for (const ix of indexes) {
+      const row = document.createElement("div");
+      row.className = "dynamodb-index-row";
+      const name = document.createElement("div");
+      name.className = "dynamodb-index-name";
+      name.textContent = ix.IndexName ?? "";
+      const detail = document.createElement("div");
+      detail.className = "dynamodb-index-detail";
+      const keyPart = (ix.KeySchema ?? [])
+        .map((k) => `${k.AttributeName} (${k.KeyType})`)
+        .join(", ");
+      detail.textContent = [
+        keyPart,
+        projectionText(ix.Projection),
+        ix.ItemCount !== undefined
+          ? `${ix.ItemCount.toLocaleString()} items`
+          : undefined,
+      ]
+        .filter(Boolean)
+        .join(" / ");
+      row.append(name, detail);
+      section.appendChild(row);
+    }
+    structureBody.appendChild(section);
+  }
+
+  // テーブル本体の KeySchema/AttributeDefinitions に加え、GSI/LSI も含めた
+  // 「テーブル構造」全体を表示する。アイテム選択有無に関わらず常に見える
+  // ように、アイテム詳細 (renderItemDetail) とは別タブに分離している。
+  function renderTableStructure(): void {
+    structureBody.innerHTML = "";
+    if (!currentTableInfo) {
+      setPaneEmpty(structureBody, text().dynamodb.selectTable);
+      return;
+    }
+    const t = text().dynamodb;
     const header = document.createElement("div");
     header.className = "dynamodb-table-info-header";
     header.textContent = currentTableInfo.TableName ?? currentTable ?? "";
@@ -325,30 +427,88 @@ export function createDynamoDbExplorer(
       currentTableInfo.ItemCount !== undefined
         ? `${currentTableInfo.ItemCount.toLocaleString()} items`
         : undefined,
+      currentTableInfo.TableSizeBytes !== undefined
+        ? formatBytes(currentTableInfo.TableSizeBytes)
+        : undefined,
+      currentTableInfo.BillingModeSummary?.BillingMode,
     ]
       .filter(Boolean)
       .join(" / ");
-    detailPane.append(header, meta);
-    const keySchema = currentTableInfo.KeySchema ?? [];
-    if (keySchema.length > 0) {
-      const keyList = document.createElement("div");
-      keyList.className = "dynamodb-table-info-keys";
-      keyList.textContent = keySchema
-        .map((k) => `${k.AttributeName} (${k.KeyType})`)
-        .join(", ");
-      detailPane.appendChild(keyList);
+    structureBody.append(header, meta);
+
+    // AttributeDefinitions には (DynamoDB の仕様上) テーブルの KeySchema と
+    // 各 GSI/LSI の KeySchema で参照される属性だけが載る。スキーマレスな
+    // その他の item 属性はここには現れない。
+    const attributeTypeByName = new Map(
+      (currentTableInfo.AttributeDefinitions ?? []).map((a) => [
+        a.AttributeName,
+        a.AttributeType,
+      ]),
+    );
+    const keyRoleByName = new Map(
+      (currentTableInfo.KeySchema ?? []).map((k) => [
+        k.AttributeName,
+        k.KeyType,
+      ]),
+    );
+    const attrNames = [...attributeTypeByName.keys()];
+    // AttributeDefinitions に載らない非キー属性は、現在読み込み済みのアイテム
+    // を実際に見て型を推測する以外に知る方法がない (DynamoDB はキー以外の
+    // スキーマを強制しない)。表示中のテーブルに切り替わった直後の itemsByKeyToken
+    // だけを対象にするため、テーブル切り替え時は selectTable() 側で必ず先に
+    // itemsByKeyToken.clear() されている前提。
+    const inferredTypesByName = new Map<string, Set<string>>();
+    for (const item of itemsByKeyToken.values()) {
+      for (const [attrName, av] of Object.entries(item)) {
+        if (attributeTypeByName.has(attrName)) continue;
+        const set = inferredTypesByName.get(attrName) ?? new Set<string>();
+        set.add(attributeValueTag(av));
+        inferredTypesByName.set(attrName, set);
+      }
     }
-    const empty = document.createElement("div");
-    empty.className = "db-pane-empty dynamodb-table-info-empty";
-    const emptyTitle = document.createElement("div");
-    emptyTitle.className = "db-pane-empty-title";
-    emptyTitle.textContent = text().dynamodb.selectItem;
-    empty.appendChild(emptyTitle);
-    detailPane.appendChild(empty);
+    const inferredNames = [...inferredTypesByName.keys()].sort();
+
+    const rows = [
+      ...attrNames.map((name) => [
+        name,
+        attributeTypeByName.get(name) ?? "",
+        keyRoleByName.get(name) ?? "",
+      ]),
+      ...inferredNames.map((name) => [
+        name,
+        [...(inferredTypesByName.get(name) ?? [])].join(", "),
+        "",
+      ]),
+    ];
+    structureBody.appendChild(
+      createDetailTable(
+        [t.attributeHeader, t.typeHeader, t.keyRoleHeader],
+        rows,
+        t.noAttributes,
+      ),
+    );
+
+    const note = document.createElement("div");
+    note.className = "dynamodb-attr-note";
+    note.textContent =
+      inferredNames.length === 0
+        ? t.keySchemaOnlyHint
+        : t.inferredAttributesNote(itemsByKeyToken.size);
+    structureBody.appendChild(note);
+
+    renderSecondaryIndexes(
+      t.globalSecondaryIndexes,
+      currentTableInfo.GlobalSecondaryIndexes,
+    );
+    renderSecondaryIndexes(
+      t.localSecondaryIndexes,
+      currentTableInfo.LocalSecondaryIndexes,
+    );
   }
 
   function renderItemDetail(item: DynamoDbItem): void {
-    detailPane.innerHTML = "";
+    lastRenderedItem = item;
+    itemBody.innerHTML = "";
     const header = document.createElement("div");
     header.className = "dynamodb-item-detail-header";
     const title = document.createElement("span");
@@ -371,7 +531,7 @@ export function createDynamoDbExplorer(
       }
     });
     header.append(title, copyBtn, copyStatus);
-    detailPane.appendChild(header);
+    itemBody.appendChild(header);
     const pre = document.createElement("pre");
     pre.className = "dynamodb-item-source";
     try {
@@ -379,7 +539,7 @@ export function createDynamoDbExplorer(
     } catch {
       pre.textContent = String(item);
     }
-    detailPane.appendChild(pre);
+    itemBody.appendChild(pre);
   }
 
   // token 省略時は現在の currentTableInfo から計算し直す (GetItem 経由の
@@ -391,6 +551,7 @@ export function createDynamoDbExplorer(
       token ?? itemKeyToken(extractItemKey(item, currentTableInfo?.KeySchema));
     highlightActiveItem(currentItemKeyToken);
     renderItemDetail(item);
+    setDetailTab("item");
     notifySelectionChange();
   }
 
@@ -430,8 +591,6 @@ export function createDynamoDbExplorer(
       cumulativeShownCount = 0;
       cumulativeScannedCount = 0;
       setPaneStatus(itemList, "Loading items...");
-      if (!currentTableInfo)
-        setPaneEmpty(detailPane, text().dynamodb.selectItem);
     }
     try {
       const params = new URLSearchParams({
@@ -482,6 +641,10 @@ export function createDynamoDbExplorer(
       } else {
         appendItems(data.items);
       }
+      // 読み込んだアイテムから推測する非キー属性一覧 (renderTableStructure 内)
+      // を最新化する。currentTableInfo 未取得ならヘッダ自体まだ描画されて
+      // いないので、fetchTableInfo 側の renderTableStructure に任せる。
+      if (currentTableInfo) renderTableStructure();
       currentNextToken = data.lastEvaluatedKey;
       moreBtn.hidden = !data.lastEvaluatedKey;
       cumulativeShownCount += data.items.length;
@@ -505,26 +668,38 @@ export function createDynamoDbExplorer(
     if (disposed || !currentDbId) return;
     const slot = tableInfoGuard.start();
     const requestDbId = currentDbId;
+    const isStaleRequest = (): boolean =>
+      disposed ||
+      slot.isStale() ||
+      requestDbId !== currentDbId ||
+      currentTable !== table;
     try {
       const params = new URLSearchParams({ db: requestDbId, table });
       const res = await trackLoad(
         fetch(`/_db/dynamodb/table?${params}`, { signal: slot.signal }),
       );
-      if (disposed || slot.isStale()) return;
-      if (!res.ok) return;
-      const data = (await res.json()) as DynamoDbTableResponse;
-      if (
-        disposed ||
-        slot.isStale() ||
-        requestDbId !== currentDbId ||
-        currentTable !== table
-      ) {
+      if (isStaleRequest()) return;
+      if (!res.ok) {
+        const errText = await res.text();
+        setPaneStatus(structureBody, `Error: ${errText || res.statusText}`, {
+          error: true,
+        });
         return;
       }
+      const data = (await res.json()) as DynamoDbTableResponse;
+      if (isStaleRequest()) return;
       currentTableInfo = data.table;
-      if (!currentItemKeyToken) renderTableInfo();
-    } catch {
+      renderTableStructure();
+    } catch (err) {
       // テーブル情報の取得失敗はアイテム一覧の妨げにしない (ベストエフォート)。
+      // ただし構造タブの「Loading table...」表示は必ず終端させる (Request
+      // Lifecycle Discipline: 全経路でローディング状態をクリアする)。
+      if (isStaleRequest()) return;
+      setPaneStatus(
+        structureBody,
+        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        { error: true },
+      );
     } finally {
       slot.finish();
     }
@@ -574,7 +749,18 @@ export function createDynamoDbExplorer(
     currentNextToken = undefined;
     highlightActiveTable(name);
     notifySelectionChange();
-    setPaneEmpty(detailPane, text().dynamodb.selectItem);
+    lastRenderedItem = null;
+    // renderTableStructure() は itemsByKeyToken から非キー属性を推測するため、
+    // fetchTableInfo() が呼ぶ最初の renderTableStructure() より前に、直前の
+    // テーブルのアイテムを破棄しておく (さもないと切り替え直後に前のテーブルの
+    // 推測属性が一瞬混ざって見えてしまう)。
+    itemsByKeyToken.clear();
+    itemRowsByKeyToken.clear();
+    structureBody.innerHTML = "";
+    setPaneStatus(structureBody, "Loading table...");
+    itemBody.innerHTML = "";
+    setPaneEmpty(itemBody, text().dynamodb.selectItem);
+    setDetailTab("structure");
     // appendItems() は KeySchema (currentTableInfo) の有無で item key token の
     // 計算結果が変わる。並行実行すると loadItems が先に終わったときだけ
     // KeySchema 無しの token になり、後からのクリック選択時の再計算結果と
@@ -690,7 +876,12 @@ export function createDynamoDbExplorer(
     activeItemRow = null;
     moreBtn.hidden = true;
     tableMoreBtn.hidden = true;
-    setPaneEmpty(detailPane, text().dynamodb.selectItem);
+    lastRenderedItem = null;
+    structureBody.innerHTML = "";
+    setPaneEmpty(structureBody, text().dynamodb.selectTable);
+    itemBody.innerHTML = "";
+    setPaneEmpty(itemBody, text().dynamodb.selectItem);
+    setDetailTab("structure");
     setPaneStatus(tableList, "Loading tables...");
     try {
       const res = await trackLoad(
@@ -737,6 +928,10 @@ export function createDynamoDbExplorer(
             // 保存済み itemKey が壊れていても致命的ではないので無視する。
           }
         }
+        // selectItemByKey() (→ selectItem()) はアイテム復元のため常に "item"
+        // タブへ切り替える。initial.detailTab が明示されていれば (更新ボタン
+        // 経由の forceReload など)、更新前に見ていたタブへ最終的に戻す。
+        if (initial?.detailTab) setDetailTab(initial.detailTab);
       } finally {
         suppressNotify = false;
       }
@@ -786,7 +981,12 @@ export function createDynamoDbExplorer(
     itemRowsByKeyToken.clear();
     activeItemRow = null;
     moreBtn.hidden = true;
-    setPaneEmpty(detailPane, text().dynamodb.selectItem);
+    lastRenderedItem = null;
+    structureBody.innerHTML = "";
+    setPaneEmpty(structureBody, text().dynamodb.selectTable);
+    itemBody.innerHTML = "";
+    setPaneEmpty(itemBody, text().dynamodb.selectItem);
+    setDetailTab("structure");
   }
 
   setMode("scan");
@@ -801,6 +1001,7 @@ export function createDynamoDbExplorer(
       scanIndexForward:
         currentMode === "query" ? currentScanIndexForward : undefined,
       itemKey: currentItemKeyToken ?? undefined,
+      detailTab: detailTabs.getActive(),
     };
   }
 
@@ -820,10 +1021,14 @@ export function createDynamoDbExplorer(
     runBtn.textContent = t.dynamodb.runQuery;
     tableMoreBtn.textContent = t.common.loadMore;
     moreBtn.textContent = t.common.loadMore;
-    if (!activeItemRow) {
-      if (currentTableInfo) renderTableInfo();
-      else setPaneEmpty(detailPane, t.dynamodb.selectItem);
-    }
+    detailTabs.setLabels({
+      structure: t.dynamodb.structureTab,
+      item: t.dynamodb.itemTab,
+    });
+    if (currentTableInfo) renderTableStructure();
+    else setPaneEmpty(structureBody, t.dynamodb.selectTable);
+    if (lastRenderedItem) renderItemDetail(lastRenderedItem);
+    else setPaneEmpty(itemBody, t.dynamodb.selectItem);
   }
 
   return {

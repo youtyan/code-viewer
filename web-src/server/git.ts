@@ -15,6 +15,7 @@ import {
   commandNotFoundDetail,
   isCommandNotFoundResult,
 } from "./command-resolver";
+import { compileNamePatterns, type NamePatternSet } from "./name-pattern";
 import {
   runAsync,
   runBytesAsync,
@@ -1779,10 +1780,10 @@ function sortTreeEntries(entries: GitTreeEntry[]): GitTreeEntry[] {
 
 function omittedWorktreeDirectoryReason(
   name: string,
-  omitDirNames: Set<string>,
+  omitDirNames: NamePatternSet,
 ): GitTreeEntry["children_omitted_reason"] | undefined {
   if (name === ".git") return "internal";
-  return omitDirNames.has(name) ? "heavy" : undefined;
+  return omitDirNames.matches(name) ? "heavy" : undefined;
 }
 
 function worktreeSubmodulePaths(cwd: string): Set<string> {
@@ -1826,11 +1827,11 @@ function worktreeEntryFromDirent(
   dir: string,
   name: string,
   isDirectory: boolean,
-  omitDirNames: Set<string>,
-  excludeNames: Set<string>,
+  omitDirNames: NamePatternSet,
+  excludeNames: NamePatternSet,
   submodulePaths: Set<string>,
 ): GitTreeEntry {
-  if (excludeNames.has(name.toLowerCase()))
+  if (excludeNames.matches(name))
     return {
       name,
       path: "",
@@ -1869,10 +1870,8 @@ function worktreeFilesystemEntries(
 ): GitTreeEntry[] {
   const base = normalizeTreePath(path);
   const root = join(cwd, base);
-  const omitDirNameSet = new Set(omitDirNames);
-  const excludeNameSet = new Set(
-    excludeNames.map((name) => name.toLowerCase()),
-  );
+  const omitDirNameSet = compileNamePatterns(omitDirNames);
+  const excludeNameSet = compileNamePatterns(excludeNames);
   const submodulePaths = worktreeSubmodulePaths(cwd);
   let directEntries: GitTreeEntry[];
   try {
@@ -1926,7 +1925,7 @@ function worktreeFilesystemEntries(
       return;
     }
     for (const entry of entries) {
-      if (excludeNameSet.has(entry.name.toLowerCase())) continue;
+      if (excludeNameSet.matches(entry.name)) continue;
       const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -1977,10 +1976,8 @@ async function worktreeFilesystemEntriesAsync(
 ): Promise<GitTreeEntry[]> {
   const base = normalizeTreePath(path);
   const root = join(cwd, base);
-  const omitDirNameSet = new Set(omitDirNames);
-  const excludeNameSet = new Set(
-    excludeNames.map((name) => name.toLowerCase()),
-  );
+  const omitDirNameSet = compileNamePatterns(omitDirNames);
+  const excludeNameSet = compileNamePatterns(excludeNames);
   const submodulePaths = await worktreeSubmodulePathsAsync(cwd);
   let directEntries: GitTreeEntry[];
   try {
@@ -2046,7 +2043,7 @@ async function worktreeFilesystemEntriesAsync(
       return;
     }
     for (const entry of entries) {
-      if (excludeNameSet.has(entry.name.toLowerCase())) continue;
+      if (excludeNameSet.matches(entry.name)) continue;
       const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {

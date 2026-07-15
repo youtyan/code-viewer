@@ -402,7 +402,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "DynamoDB / LocalStack",
-                    "Detected when DynamoDB is enabled on a LocalStack compose service. List tables, inspect key schemas, scan or query items, follow pagination tokens, and open item details with a copyable key. Browsing is read-only.",
+                    "Detected when DynamoDB is enabled on a LocalStack compose service. List tables, browse a Structure tab (key schema, GSI/LSI, and non-key attribute types inferred from loaded items), scan or query items, follow pagination tokens, and open item details with a copyable key. Browsing is read-only.",
                   ],
                   [
                     "S3 / MinIO / LocalStack",
@@ -1082,7 +1082,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "DynamoDB / LocalStack",
-                    "LocalStack の compose サービスで DynamoDB が有効な場合に検出。テーブル一覧、キースキーマ、scan / query、継続トークンによるページング、コピー可能なキー付きのアイテム詳細を表示します。閲覧専用です。",
+                    "LocalStack の compose サービスで DynamoDB が有効な場合に検出。テーブル一覧、構造タブ(キースキーマ・GSI/LSI・読み込み済みアイテムから推測した非キー属性の型)、scan / query、継続トークンによるページング、コピー可能なキー付きのアイテム詳細を表示します。閲覧専用です。",
                   ],
                   [
                     "S3 / MinIO / LocalStack",

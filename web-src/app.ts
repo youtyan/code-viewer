@@ -1586,10 +1586,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         excludedDirectories: "Excluded directories",
         omitDirs: "Skip these directory names while browsing and searching",
         omitDirsHelp:
-          "Reads no contents inside these directories. Applies to the sidebar (Files), Ctrl+K (file search), Ctrl+G (grep), Datastores, and the file change watcher.",
+          "Reads no contents inside these directories. Applies to the sidebar (Files), Ctrl+K (file search), Ctrl+G (grep), Datastores, and the file change watcher. Supports gitignore-style wildcards (*, ?, [abc], [!abc]).",
         excludeNames: "Hide these file or directory names completely",
         excludeNamesHelp:
-          "Removes matching files or directories from the sidebar, search, and grep results entirely. Unlike Skip, the names themselves disappear from the UI.",
+          "Removes matching files or directories from the sidebar, search, and grep results entirely. Unlike Skip, the names themselves disappear from the UI. Supports gitignore-style wildcards (*, ?, [abc], [!abc]).",
         reset: "Restore defaults",
         autosaveNote: "Changes save automatically.",
         scopeSource: (project, source) =>
@@ -1899,10 +1899,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         excludedDirectories: "除外ディレクトリ",
         omitDirs: "閲覧と検索でスキップするディレクトリ名",
         omitDirsHelp:
-          "これらのディレクトリの中身は読み込みません。サイドバー（Files）・Ctrl+K（ファイル検索）・Ctrl+G（grep）・Datastores・File change watcher の5機能すべてに適用されます。",
+          "これらのディレクトリの中身は読み込みません。サイドバー（Files）・Ctrl+K（ファイル検索）・Ctrl+G（grep）・Datastores・File change watcher の5機能すべてに適用されます。gitignore方式のワイルドカード（*, ?, [abc], [!abc]）に対応しています。",
         excludeNames: "完全に非表示にするファイル名またはディレクトリ名",
         excludeNamesHelp:
-          "リスト中の名前に一致するファイル/ディレクトリを、サイドバー・検索結果・grep 結果から完全に消します。Skip と違い、名前自体が UI に出なくなります。",
+          "リスト中の名前に一致するファイル/ディレクトリを、サイドバー・検索結果・grep 結果から完全に消します。Skip と違い、名前自体が UI に出なくなります。gitignore方式のワイルドカード（*, ?, [abc], [!abc]）に対応しています。",
         reset: "デフォルトに戻す",
         autosaveNote: "変更は自動で保存されます。",
         scopeSource: (project, source) =>

@@ -10,6 +10,8 @@ import { isImeComposing } from "../../core/keyboard";
 import { formatBytes } from "../../core/source-meta";
 import { showConfirmDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
+import { createDetailTable } from "./detail-table";
+import { createDetailTabs } from "./detail-tabs";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
 
@@ -101,29 +103,26 @@ export function createElasticsearchExplorer(
   docMoreBtn.hidden = true;
   docListPane.appendChild(docMoreBtn);
 
-  // ----- pane: detail (mapping + doc source) -----
+  // ----- pane: detail (mapping + doc source), dynamodb-explorer の
+  // structure/item タブと共通の createDetailTabs ウィジェットを使う -----
   const detailPane = document.createElement("div");
-  detailPane.className = "es-detail-pane";
+  detailPane.className = "db-detail-pane";
 
-  const detailTabs = document.createElement("div");
-  detailTabs.className = "es-detail-tabs";
-  const tabMapping = document.createElement("button");
-  tabMapping.type = "button";
-  tabMapping.className = "es-detail-tab active";
-  tabMapping.textContent = text().es.mapping;
-  const tabDoc = document.createElement("button");
-  tabDoc.type = "button";
-  tabDoc.className = "es-detail-tab";
-  tabDoc.textContent = text().es.doc;
-  detailTabs.append(tabMapping, tabDoc);
-  detailPane.appendChild(detailTabs);
-
-  const mappingBody = document.createElement("div");
-  mappingBody.className = "es-mapping-body";
+  const detailTabs = createDetailTabs(
+    [
+      { id: "mapping", label: text().es.mapping },
+      { id: "doc", label: text().es.doc },
+    ] as const,
+    "mapping",
+    () => {
+      // タブクリックだけでは selection は変わらないため notify しない
+      // (mapping/doc の切替は getSelection() の内容に影響しない)。
+    },
+  );
+  detailPane.appendChild(detailTabs.tabsEl);
+  const mappingBody = detailTabs.bodies.mapping;
   setPaneEmpty(mappingBody, text().es.selectIndex);
-  const docBody = document.createElement("div");
-  docBody.className = "es-doc-body";
-  docBody.hidden = true;
+  const docBody = detailTabs.bodies.doc;
   setPaneEmpty(docBody, text().es.selectDoc);
   detailPane.append(mappingBody, docBody);
 
@@ -257,13 +256,8 @@ export function createElasticsearchExplorer(
 
   function setDetailTab(tab: "mapping" | "doc") {
     detailTab = tab;
-    tabMapping.classList.toggle("active", tab === "mapping");
-    tabDoc.classList.toggle("active", tab === "doc");
-    mappingBody.hidden = tab !== "mapping";
-    docBody.hidden = tab !== "doc";
+    detailTabs.setActive(tab);
   }
-  tabMapping.addEventListener("click", () => setDetailTab("mapping"));
-  tabDoc.addEventListener("click", () => setDetailTab("doc"));
 
   function renderMapping(resp: EsMappingResponse): void {
     lastMapping = resp;
@@ -272,43 +266,19 @@ export function createElasticsearchExplorer(
     header.className = "es-mapping-header";
     header.textContent = resp.mapping.index;
     mappingBody.appendChild(header);
-    const table = document.createElement("table");
-    table.className = "es-mapping-table";
-    const thead = document.createElement("thead");
-    const headRow = document.createElement("tr");
-    for (const label of [text().es.fieldHeader, text().es.typeHeader]) {
-      const th = document.createElement("th");
-      th.textContent = label;
-      headRow.appendChild(th);
-    }
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
     const props = resp.mapping.properties;
     const keys = Object.keys(props).sort();
-    if (keys.length === 0) {
-      const row = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = 2;
-      td.className = "es-value-empty";
-      td.textContent = text().es.noMappedFields;
-      row.appendChild(td);
-      tbody.appendChild(row);
-    }
-    for (const key of keys) {
-      const row = document.createElement("tr");
-      const fieldTd = document.createElement("td");
-      fieldTd.className = "es-mapping-field";
-      fieldTd.textContent = key;
-      const typeTd = document.createElement("td");
-      typeTd.className = "es-mapping-type";
+    const rows = keys.map((key) => {
       const p = props[key];
-      typeTd.textContent = p.type ?? (p.properties ? "object" : "(unknown)");
-      row.append(fieldTd, typeTd);
-      tbody.appendChild(row);
-    }
-    table.appendChild(tbody);
-    mappingBody.appendChild(table);
+      return [key, p.type ?? (p.properties ? "object" : "(unknown)")];
+    });
+    mappingBody.appendChild(
+      createDetailTable(
+        [text().es.fieldHeader, text().es.typeHeader],
+        rows,
+        text().es.noMappedFields,
+      ),
+    );
   }
 
   function mkBtn(label: string, cls: string): HTMLButtonElement {
@@ -879,11 +849,10 @@ export function createElasticsearchExplorer(
     searchInput.placeholder = t.es.queryPlaceholder;
     searchBtn.textContent = t.common.search;
     docMoreBtn.textContent = t.common.loadMore;
-    tabMapping.textContent = t.es.mapping;
-    tabDoc.textContent = t.es.doc;
+    detailTabs.setLabels({ mapping: t.es.mapping, doc: t.es.doc });
     if (!currentIndex) {
       setPaneEmpty(mappingBody, t.es.selectIndex);
-    } else if (lastMapping && mappingBody.querySelector(".es-mapping-table")) {
+    } else if (lastMapping && mappingBody.querySelector(".db-detail-table")) {
       // 描画済みのマッピングテーブル(ヘッダ/「(no mapped fields)」)を再ローカライズ。
       renderMapping(lastMapping);
     }
