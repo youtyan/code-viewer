@@ -135,6 +135,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 kind: "paragraph",
                 text: "In large repositories the sidebar loads folder children on demand. Folders you open are remembered and automatically re-expanded after a reload.",
               },
+              {
+                kind: "paragraph",
+                text: 'Symlinks show a distinct icon and a "→ target" label so they are never mistaken for a regular file or folder, and clicking one navigates to its resolved target. A broken symlink is visually flagged and disabled. Files with pending git changes (new, modified, renamed, deleted) show a status badge in the tree instead of the regular type icon.',
+              },
             ],
           },
           {
@@ -814,6 +818,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "大きいリポジトリではサイドバーがフォルダの中身を必要に応じて読み込みます。開いたフォルダは記憶され、次回のリロード時に同じ状態で展開し直されます。",
+              },
+              {
+                kind: "paragraph",
+                text: "シンボリックリンクは専用アイコンと「→ リンク先」ラベルで表示されるため通常のファイル/フォルダと区別でき、クリックするとリンク先に遷移します。リンク切れのシンボリックリンクは無効化されたことが分かる表示になります。未コミットの git 変更(新規・変更・リネーム・削除)があるファイルは、通常の種類アイコンの代わりにステータスバッジがツリーに表示されます。",
               },
             ],
           },

@@ -169,6 +169,12 @@ Large repositories load folder children on demand. The sidebar remembers which
 lazy-loaded folders you opened and re-expands them on the next reload, so the
 tree state survives navigation and refresh.
 
+Symlinks get a distinct icon and a "→ target" label instead of looking like a
+regular file, and clicking one navigates straight to its resolved target.
+Broken symlinks are flagged and disabled instead of erroring out. Files with
+pending git changes (new, modified, renamed, deleted) show a status badge in
+the tree in place of the regular type icon.
+
 ## Uploads and Scope Settings
 
 File uploads are available for the local worktree target by default. Git tree

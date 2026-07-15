@@ -162,6 +162,11 @@ function makeRepoView(
             label: "gitlink",
             title: "Git commit entry is not directly browsable at this ref",
           },
+    fileBadge: (status) => {
+      const span = document.createElement("span");
+      span.className = `badge ${status || "M"}`;
+      return span;
+    },
     $: <T extends Element = HTMLElement>(selector: string): T => {
       const element = document.querySelector<T>(selector);
       if (!element) throw new Error(`missing ${selector}`);
@@ -502,5 +507,242 @@ describe("repo view localized labels", () => {
     expect(row?.title).toBe("サンプル固定コミット説明");
     expect(meta?.textContent).toBe("固定コミット");
     expect(meta?.title).toBe("サンプル固定コミット説明");
+  });
+});
+
+describe("repo view symlink entries", () => {
+  test("a symlink-to-file row shows a link icon and its target, and is browsable", async () => {
+    setupDom();
+    const root: RepoTreeResponse = {
+      ref: "worktree",
+      path: "",
+      project: "sample-repo",
+      entries: [
+        {
+          name: "link-to-file.txt",
+          path: "link-to-file.txt",
+          type: "blob",
+          is_symlink: true,
+          symlink_target: "real.txt",
+          symlink_target_type: "blob",
+        },
+      ],
+    };
+    globalThis.fetch = (async () => response(root)) as unknown as typeof fetch;
+
+    const { view, calls } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+
+    await view.loadRepo();
+
+    const row = document.querySelector<HTMLElement>(".gdp-repo-row.blob");
+    expect(
+      row?.querySelector(".d2h-icon-wrapper svg")?.getAttribute("class"),
+    ).toBe("octicon octicon-link");
+    expect(row?.querySelector(".meta.symlink-target")?.textContent).toBe(
+      "→ real.txt",
+    );
+    expect(row?.hasAttribute("aria-disabled")).toBe(false);
+
+    row?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(calls.standaloneSources).toEqual(["link-to-file.txt"]);
+  });
+
+  test("a symlink-to-directory row is browsable like a regular directory", async () => {
+    setupDom();
+    const root: RepoTreeResponse = {
+      ref: "worktree",
+      path: "",
+      project: "sample-repo",
+      entries: [
+        {
+          name: "link-to-dir",
+          path: "link-to-dir",
+          type: "tree",
+          is_symlink: true,
+          symlink_target: "real-dir",
+          symlink_target_type: "tree",
+        },
+      ],
+    };
+    globalThis.fetch = (async () => response(root)) as unknown as typeof fetch;
+
+    const { view, state } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+
+    await view.loadRepo();
+
+    const row = document.querySelector<HTMLElement>(".gdp-repo-row.tree");
+    expect(row?.querySelector(".meta.symlink-target")?.textContent).toBe(
+      "→ real-dir",
+    );
+
+    row?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(state.route).toEqual({
+      screen: "repo",
+      ref: "worktree",
+      path: "link-to-dir",
+      range,
+    });
+  });
+
+  test("a committed-ref directory symlink navigates via resolved_path, not its own path", async () => {
+    setupDom();
+    const root: RepoTreeResponse = {
+      ref: "abc1234",
+      path: "",
+      project: "sample-repo",
+      entries: [
+        {
+          name: "link-to-dir",
+          path: "link-to-dir",
+          type: "tree",
+          is_symlink: true,
+          symlink_target: "real-dir",
+          symlink_target_type: "tree",
+          resolved_path: "real-dir",
+        },
+      ],
+    };
+    globalThis.fetch = (async () => response(root)) as unknown as typeof fetch;
+
+    const { view, state } = makeRepoView({
+      screen: "repo",
+      ref: "abc1234",
+      path: "",
+      range,
+    });
+
+    await view.loadRepo();
+
+    const row = document.querySelector<HTMLElement>(".gdp-repo-row.tree");
+    row?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(state.route).toEqual({
+      screen: "repo",
+      ref: "abc1234",
+      path: "real-dir",
+      range,
+    });
+  });
+
+  test("a broken symlink row is disabled and does not navigate on click", async () => {
+    setupDom();
+    const root: RepoTreeResponse = {
+      ref: "worktree",
+      path: "",
+      project: "sample-repo",
+      entries: [
+        {
+          name: "link-broken.txt",
+          path: "link-broken.txt",
+          type: "blob",
+          is_symlink: true,
+          symlink_target: "missing.txt",
+          symlink_target_type: "missing",
+        },
+      ],
+    };
+    globalThis.fetch = (async () => response(root)) as unknown as typeof fetch;
+
+    const { view, calls } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+
+    await view.loadRepo();
+
+    const row = document.querySelector<HTMLElement>(".gdp-repo-row.blob");
+    expect(row?.classList.contains("symlink-broken-row")).toBe(true);
+    expect(row?.getAttribute("aria-disabled")).toBe("true");
+    expect(row?.querySelector(".meta.symlink-target.broken")?.textContent).toBe(
+      "→ missing.txt",
+    );
+
+    row?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(calls.standaloneSources).toEqual([]);
+  });
+
+  test("a pending git change badge wins over the symlink icon", async () => {
+    setupDom();
+    const root: RepoTreeResponse = {
+      ref: "worktree",
+      path: "",
+      project: "sample-repo",
+      entries: [
+        {
+          name: "link-to-file.txt",
+          path: "link-to-file.txt",
+          type: "blob",
+          status: "M",
+          is_symlink: true,
+          symlink_target: "real.txt",
+          symlink_target_type: "blob",
+        },
+      ],
+    };
+    globalThis.fetch = (async () => response(root)) as unknown as typeof fetch;
+
+    const { view } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+
+    await view.loadRepo();
+
+    const row = document.querySelector<HTMLElement>(".gdp-repo-row.blob");
+    expect(row?.querySelector(".badge.M")).toBeTruthy();
+    expect(row?.querySelector(".d2h-icon-wrapper")).toBeNull();
+    expect(row?.querySelector(".meta.symlink-target")?.textContent).toBe(
+      "→ real.txt",
+    );
+  });
+});
+
+describe("repo view deleted entries", () => {
+  test("a deleted-but-uncommitted entry (status D) is disabled and does not navigate on click", async () => {
+    setupDom();
+    const root: RepoTreeResponse = {
+      ref: "worktree",
+      path: "",
+      project: "sample-repo",
+      entries: [
+        {
+          name: "gone.txt",
+          path: "gone.txt",
+          type: "blob",
+          status: "D",
+        },
+      ],
+    };
+    globalThis.fetch = (async () => response(root)) as unknown as typeof fetch;
+
+    const { view, calls } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+
+    await view.loadRepo();
+
+    const row = document.querySelector<HTMLElement>(".gdp-repo-row.blob");
+    expect(row?.classList.contains("gdp-row-disabled")).toBe(true);
+    expect(row?.getAttribute("aria-disabled")).toBe("true");
+    expect(row?.querySelector(".badge.D")).toBeTruthy();
+
+    row?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(calls.standaloneSources).toEqual([]);
   });
 });

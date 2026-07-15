@@ -190,6 +190,9 @@ function makeRepoView(
             label: "gitlink",
             title: "Git commit entry is not directly browsable at this ref",
           },
+    fileBadge: () => {
+      throw new Error("stale repository render touched the DOM");
+    },
     $: () => {
       throw new Error("stale repository render touched the DOM");
     },

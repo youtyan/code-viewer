@@ -968,6 +968,34 @@ async function attachTreeEntryMetadata(
   )
     return { ...entry, ...(await directoryMetadata(target, entry.path)) };
   if (entry.type !== "blob") return entry;
+  // Worktree symlinks already resolved their target in listTree (readlink is
+  // cheap, and the OS transparently follows the link when the client later
+  // browses into it). A committed-ref symlink still reports git object type
+  // "blob" - ls-tree never carries the target text - so it is resolved
+  // here, and promoted to type "tree" when it points at a directory. Unlike
+  // the worktree case, `git ls-tree`/`cat-file` never resolve a symlink
+  // path as if it were the target directory, so gitSymlinkTargetMetadataAsync
+  // also returns resolved_path - the client must navigate using that repo-
+  // relative path instead of `path` to see the target contents.
+  if (entry.is_symlink && target !== "worktree" && target !== "") {
+    const symlinkMeta = await git.gitSymlinkTargetMetadataAsync(
+      target,
+      entry.path,
+      cwd,
+    );
+    if (symlinkMeta.symlink_target_type === "tree")
+      return {
+        ...entry,
+        ...symlinkMeta,
+        type: "tree",
+        ...(await directoryMetadata(target, entry.path)),
+      };
+    return {
+      ...entry,
+      ...symlinkMeta,
+      ...(await fileMetadataForTarget(target, entry.path)),
+    };
+  }
   return { ...entry, ...(await fileMetadataForTarget(target, entry.path)) };
 }
 
@@ -991,6 +1019,30 @@ async function readReadme(
     if (res.code === 0) return { path, text: res.stdout };
   }
   return null;
+}
+
+// A deleted-but-uncommitted file has no filesystem entry to list - readdir
+// never sees it - so it never appears in `tree.entries`. Synthesize a
+// display-only row for each direct child of `basePath` reported "D" by
+// repoStatusMapAsync, so the tree explorer can badge it instead of
+// silently dropping it. Nested descendants (still shown once their own
+// parent directory is opened) are excluded to match the one-level-per-
+// request shape of the rest of this listing.
+function deletedTreeEntriesForPath(
+  statusMap: Map<string, string>,
+  basePath: string,
+): git.GitTreeEntry[] {
+  const entries: git.GitTreeEntry[] = [];
+  for (const [path, status] of statusMap) {
+    if (status !== "D") continue;
+    if (basePath) {
+      if (!path.startsWith(`${basePath}/`)) continue;
+    }
+    const rel = basePath ? path.slice(basePath.length + 1) : path;
+    if (!rel || rel.includes("/")) continue;
+    entries.push({ name: rel, path, type: "blob", status: "D" });
+  }
+  return entries;
 }
 
 async function handleTree(url: URL) {
@@ -1019,16 +1071,37 @@ async function handleTree(url: URL) {
   const entries = tree.entries.filter(
     (entry) => !isExcludedScopePath(entry.path, excludeNames),
   );
+  // Committed refs are immutable - only the worktree can have pending
+  // changes, so the status map (and its `git status` call) is worktree-only.
+  const statusMap =
+    target === "worktree" || target === ""
+      ? await git.repoStatusMapAsync(cwd)
+      : null;
+  const withStatus = (entry: git.GitTreeEntry): git.GitTreeEntry => {
+    const status = statusMap?.get(entry.path);
+    return status ? { ...entry, status } : entry;
+  };
+  // Synthesized rows for files git status reports as deleted - they have no
+  // filesystem entry to list, so they would otherwise be silently dropped
+  // instead of badged. Non-recursive only, matching the one-level shape of
+  // the rest of this listing.
+  const deletedEntries =
+    !recursive && statusMap ? deletedTreeEntriesForPath(statusMap, path) : [];
   return json({
     ref: target,
     path,
     project: basename(cwd),
     branch: await currentBranchMetadata(),
     entries: recursive
-      ? entries
-      : await Promise.all(
-          entries.map((entry) => attachTreeEntryMetadata(target, entry)),
-        ),
+      ? entries.map(withStatus)
+      : [
+          ...(await Promise.all(
+            entries.map((entry) =>
+              attachTreeEntryMetadata(target, entry).then(withStatus),
+            ),
+          )),
+          ...deletedEntries,
+        ],
     readme: await readReadme(target, path),
     upload_enabled: uploadEnabled && (target === "worktree" || target === ""),
   } satisfies RepoTreeResponse);
