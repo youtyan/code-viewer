@@ -12,6 +12,7 @@ import {
   GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
   iconSvg,
+  LINK_16_PATH,
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
 } from "../core/icons";
@@ -123,6 +124,9 @@ export function createSidebar(deps: SidebarDeps) {
     explicit?: boolean;
     children_omitted?: true;
     children_omitted_reason?: RepoTreeEntry["children_omitted_reason"];
+    is_symlink?: true;
+    symlink_target?: string;
+    resolved_path?: string;
   };
 
   const VIRTUAL_SIDEBAR_THRESHOLD = 3000;
@@ -345,6 +349,11 @@ export function createSidebar(deps: SidebarDeps) {
           node.children_omitted = true;
           node.children_omitted_reason = f.children_omitted_reason;
         }
+        if (f.is_symlink) {
+          node.is_symlink = true;
+          node.symlink_target = f.symlink_target;
+          node.resolved_path = f.resolved_path;
+        }
         continue;
       }
       node.files.push(f);
@@ -407,6 +416,7 @@ export function createSidebar(deps: SidebarDeps) {
         if (dir.children_omitted_reason)
           li.dataset.childrenOmittedReason = dir.children_omitted_reason;
         if (dir.explicit) li.dataset.explicit = "true";
+        if (dir.is_symlink) li.classList.add("symlink-row");
         if (dir.children_omitted) {
           li.classList.add("children-omitted");
           li.classList.add(
@@ -451,6 +461,8 @@ export function createSidebar(deps: SidebarDeps) {
           omitted.title = badge.title;
           label.appendChild(omitted);
         }
+        const dirSymlinkLabel = symlinkTargetLabel(dir);
+        if (dirSymlinkLabel) label.appendChild(dirSymlinkLabel);
         li.appendChild(label);
         li.appendChild(
           createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
@@ -494,6 +506,7 @@ export function createSidebar(deps: SidebarDeps) {
               type: "tree",
               children_omitted: dir.children_omitted,
               children_omitted_reason: dir.children_omitted_reason,
+              resolved_path: dir.resolved_path,
             });
             scheduleMainSurfaceFocus();
           });
@@ -570,6 +583,11 @@ export function createSidebar(deps: SidebarDeps) {
         node.children_omitted = true;
         node.children_omitted_reason = entry.children_omitted_reason;
       }
+      if (entry.is_symlink) {
+        node.is_symlink = true;
+        node.symlink_target = entry.symlink_target;
+        node.resolved_path = entry.resolved_path;
+      }
       return;
     }
     if (!node.files.some((file) => file.path === entry.path))
@@ -614,6 +632,11 @@ export function createSidebar(deps: SidebarDeps) {
               submodule: entry.submodule,
               children_omitted: entry.children_omitted,
               children_omitted_reason: entry.children_omitted_reason,
+              is_symlink: entry.is_symlink,
+              symlink_target: entry.symlink_target,
+              symlink_target_type: entry.symlink_target_type,
+              resolved_path: entry.resolved_path,
+              status: entry.status,
             }) satisfies SidebarItem,
         );
         mergeSidebarTreeEntries(entries);
@@ -639,6 +662,7 @@ export function createSidebar(deps: SidebarDeps) {
     if (dir.children_omitted_reason)
       li.dataset.childrenOmittedReason = dir.children_omitted_reason;
     if (dir.explicit) li.dataset.explicit = "true";
+    if (dir.is_symlink) li.classList.add("symlink-row");
     if (dir.children_omitted) {
       li.classList.add("children-omitted");
       li.classList.add(
@@ -683,6 +707,8 @@ export function createSidebar(deps: SidebarDeps) {
       omitted.title = badge.title;
       label.appendChild(omitted);
     }
+    const dirSymlinkLabel = symlinkTargetLabel(dir);
+    if (dirSymlinkLabel) label.appendChild(dirSymlinkLabel);
     li.appendChild(label);
     li.appendChild(
       createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
@@ -789,9 +815,30 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function sidebarEntryIcon(f: SidebarItem): string {
+    if (f.is_symlink) return iconSvg("octicon-link", LINK_16_PATH);
     return f.type === "commit"
       ? iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH)
       : fileEntryIcon();
+  }
+
+  // Small "→ target" sublabel next to the name so a symlink target is
+  // visible without a hover, and broken links (target missing/outside the
+  // repo) are visually distinct. Mirrors the dir-omitted/kind-tag pattern of
+  // a compact inline marker rather than a separate tooltip component.
+  function symlinkTargetLabel(f: {
+    is_symlink?: true;
+    symlink_target?: string;
+    symlink_target_type?: "tree" | "blob" | "missing";
+  }): HTMLElement | null {
+    if (!f.is_symlink) return null;
+    const broken = f.symlink_target_type === "missing";
+    const label = document.createElement("span");
+    label.className = broken ? "symlink-target broken" : "symlink-target";
+    label.textContent = `→ ${f.symlink_target || "?"}`;
+    label.title = broken
+      ? `Broken symlink → ${f.symlink_target || ""}`
+      : `Symlink → ${f.symlink_target || ""}`;
+    return label;
   }
 
   function createTreeFileRow(
@@ -804,8 +851,22 @@ export function createSidebar(deps: SidebarDeps) {
     li.tabIndex = -1;
     li.dataset.path = f.path;
     li.dataset.type = f.type || "blob";
+    const brokenSymlink = f.is_symlink && f.symlink_target_type === "missing";
+    // A deleted-status entry is only synthesized for the repository
+    // explorer (see deletedTreeEntriesForPath in preview.ts) and has no
+    // filesystem content left to open there. Deleted files coming from the
+    // diff sidebar itself (no onFileClick) still scroll to their diff card
+    // as before.
+    const deletedEntry = !!onFileClick && f.status === "D";
+    if (f.is_symlink) li.classList.add("symlink-row");
     if (f.type === "commit") {
       li.title = commitEntryBadge(f.submodule).title;
+    } else if (brokenSymlink) {
+      li.classList.add("symlink-broken-row", "gdp-row-disabled");
+      li.setAttribute("aria-disabled", "true");
+    } else if (deletedEntry) {
+      li.classList.add("gdp-row-disabled");
+      li.setAttribute("aria-disabled", "true");
     }
     li.classList.toggle(
       "viewed",
@@ -832,14 +893,17 @@ export function createSidebar(deps: SidebarDeps) {
     name.textContent = f.path.split("/").pop();
     name.title = f.path;
     li.appendChild(name);
+    const symlinkLabel = symlinkTargetLabel(f);
+    if (symlinkLabel) li.appendChild(symlinkLabel);
     const kindTag = fileKindTag(f);
     if (kindTag) li.appendChild(kindTag);
     li.addEventListener("click", () => {
+      if (brokenSymlink || deletedEntry) return;
       if (onFileClick) onFileClick(f);
       else scrollToFile(f.path);
       scheduleMainSurfaceFocus();
     });
-    if (!onFileClick)
+    if (!onFileClick && !brokenSymlink)
       li.addEventListener("mouseenter", () => prefetchByPath(f.path), {
         passive: true,
       });

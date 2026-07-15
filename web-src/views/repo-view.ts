@@ -12,6 +12,7 @@ import {
   FILE_16_PATH,
   GIT_BRANCH_16_PATH,
   iconSvg,
+  LINK_16_PATH,
   PLUS_16_PATH,
   TRASH_16_PATH,
 } from "../core/icons";
@@ -95,6 +96,7 @@ export type RepoViewDeps = {
     label: string;
     title: string;
   };
+  fileBadge(status?: string): HTMLElement;
   $: <T extends Element = HTMLElement>(sel: string) => T;
   STATE: {
     route: AppRoute;
@@ -150,6 +152,7 @@ export function createRepoView(deps: RepoViewDeps) {
     repositoryFallback,
     repositoryRootFallback,
     commitEntryMeta,
+    fileBadge,
   } = deps;
 
   type RepoSortKey = "name" | "updated" | "size";
@@ -213,8 +216,33 @@ export function createRepoView(deps: RepoViewDeps) {
     return iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
   }
 
+  function symlinkEntryIcon(): string {
+    return iconSvg("octicon-link", LINK_16_PATH);
+  }
+
   function isWorktreeRef(ref: string): boolean {
     return canTrashWorktreeRef(ref);
+  }
+
+  function repoEntryTypeIcon(
+    entry: RepoTreeEntry,
+    browsable: boolean,
+    nonBrowsableCommit: boolean,
+  ): HTMLElement {
+    const icon = document.createElement("span");
+    icon.className = browsable
+      ? "dir-icon"
+      : nonBrowsableCommit
+        ? "d2h-icon-wrapper gdp-repo-row-gitlink-icon"
+        : "d2h-icon-wrapper";
+    if (browsable) setFolderIcon(icon, true);
+    else
+      icon.innerHTML = entry.is_symlink
+        ? symlinkEntryIcon()
+        : entry.type === "commit"
+          ? commitEntryIcon()
+          : fileEntryIcon();
+    return icon;
   }
 
   function canBrowseRepoEntry(
@@ -695,34 +723,49 @@ export function createRepoView(deps: RepoViewDeps) {
         // フォルダ/ファイルに近いが実際には開けない。通常行と混同されないよう
         // 専用クラスで区別する (cursor/アイコン色/meta chip 化はCSS側)。
         const nonBrowsableCommit = entry.type === "commit" && !browsable;
+        // A symlink whose target is missing/outside the repo still resolves
+        // to type "blob" server-side (see attachTreeEntryMetadata) - not
+        // browsable, and opening it would just 404, so this is disabled the
+        // same way a non-browsable commit entry is.
+        const brokenSymlink =
+          !!entry.is_symlink && entry.symlink_target_type === "missing";
+        // A "D" (deleted) entry is synthesized from git status - it has no
+        // filesystem content left to open (see deletedTreeEntriesForPath in
+        // preview.ts), so it is shown badged but disabled, same as a broken
+        // symlink.
+        const deletedEntry = entry.status === "D";
         const row = document.createElement("button");
         row.type = "button";
         row.className = nonBrowsableCommit
           ? `gdp-repo-row ${entry.type} gdp-repo-row-gitlink`
-          : `gdp-repo-row ${entry.type}`;
-        const icon = document.createElement("span");
-        icon.className = browsable
-          ? "dir-icon"
-          : nonBrowsableCommit
-            ? "d2h-icon-wrapper gdp-repo-row-gitlink-icon"
-            : "d2h-icon-wrapper";
-        if (browsable) setFolderIcon(icon, true);
-        else
-          icon.innerHTML =
-            entry.type === "commit" ? commitEntryIcon() : fileEntryIcon();
+          : entry.is_symlink
+            ? `gdp-repo-row ${entry.type} symlink-row${brokenSymlink ? " symlink-broken-row gdp-row-disabled" : ""}`
+            : `gdp-repo-row ${entry.type}`;
+        if (deletedEntry) row.classList.add("gdp-row-disabled");
+        // A pending git change wins over the type icon, same precedence as
+        // sidebar.ts createTreeFileRow uses for the diff view.
+        const icon = entry.status
+          ? fileBadge(entry.status)
+          : repoEntryTypeIcon(entry, browsable, nonBrowsableCommit);
         const name = document.createElement("span");
         name.className = "name";
         name.textContent = entry.name;
         if (nonBrowsableCommit) {
           row.title = commitEntryMeta(entry.submodule).title;
           row.setAttribute("aria-disabled", "true");
+        } else if (brokenSymlink || deletedEntry) {
+          row.setAttribute("aria-disabled", "true");
         }
         const metaBlock = createRepoEntryMeta(entry, browsable);
         const size = createRepoEntrySize(entry);
         row.append(icon, name, metaBlock, size);
         row.addEventListener("click", () => {
+          if (brokenSymlink || deletedEntry) return;
           if (browsable) {
-            setRoute(repoRoute(meta.ref, entry.path));
+            // A committed-ref directory symlink cannot be browsed at its
+            // own path (git ls-tree does not resolve it) - resolved_path
+            // is the real repo-relative path to navigate to instead.
+            setRoute(repoRoute(meta.ref, entry.resolved_path ?? entry.path));
             loadRepo();
           } else if (entry.type === "blob") {
             setRoute({
@@ -846,12 +889,19 @@ export function createRepoView(deps: RepoViewDeps) {
               submodule: entry.submodule,
               children_omitted: entry.children_omitted,
               children_omitted_reason: entry.children_omitted_reason,
+              is_symlink: entry.is_symlink,
+              symlink_target: entry.symlink_target,
+              symlink_target_type: entry.symlink_target_type,
+              resolved_path: entry.resolved_path,
+              status: entry.status,
             }) satisfies SidebarItem,
         );
         setRepoSidebarRef(normalizedRef);
         renderSidebar(files, (file) => {
           if (file.type === "tree") {
-            setRoute(repoRoute(normalizedRef, file.path));
+            // See the click handler above: a committed-ref directory
+            // symlink navigates via resolved_path, not its own path.
+            setRoute(repoRoute(normalizedRef, file.resolved_path ?? file.path));
             loadRepo();
             return;
           }
@@ -919,6 +969,18 @@ export function createRepoView(deps: RepoViewDeps) {
       const badge = commitEntryMeta(entry.submodule);
       meta.textContent = badge.label;
       meta.title = badge.title;
+      return meta;
+    }
+    // A symlink destination is more useful at a glance than its mtime -
+    // show it in place of the usual updated/created date.
+    if (entry.is_symlink) {
+      const broken = entry.symlink_target_type === "missing";
+      meta.classList.add("symlink-target");
+      if (broken) meta.classList.add("broken");
+      meta.textContent = `→ ${entry.symlink_target || "?"}`;
+      meta.title = broken
+        ? `Broken symlink → ${entry.symlink_target || ""}`
+        : `Symlink → ${entry.symlink_target || ""}`;
       return meta;
     }
     const updated = formatFileDate(entry.updated_at || entry.commit_updated_at);

@@ -26,7 +26,9 @@ describe("file metadata display", () => {
     expect(server.includes("function directoryMetadata")).toBe(true);
     expect(server.includes("return ms && Number.isFinite(ms)")).toBe(true);
     expect(
-      server.includes("entries: recursive ? entries : await Promise.all("),
+      server.includes(
+        "entries: recursive ? entries.map(withStatus) : [...(await Promise.all(",
+      ),
     ).toBe(true);
     const rawHeaders = new Headers(
       rawFileHeaders("README.md", {

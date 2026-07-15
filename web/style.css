@@ -2646,6 +2646,45 @@ body.gdp-help-page #content {
   color: var(--accent-emph);
 }
 
+/* "→ target" sublabel next to a symlink name in the sidebar tree, and the
+   same marker's meta-column form in the repo listing (.gdp-repo-row
+   .meta.symlink-target below). Uses --done (violet) rather than the usual
+   muted meta color so a symlink row reads as distinct at a glance, not
+   just on hover/title. Broken links (target missing/outside the repo)
+   switch to the danger color instead. */
+.symlink-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--done);
+  font-weight: 500;
+  font-size: 12px;
+  margin-left: 6px;
+}
+.symlink-target.broken { color: var(--danger); }
+/* Recolor the row's own type icon (file icon, or the shared blue dir-icon)
+   to match the target label, so the symlink signal isn't limited to the
+   sublabel text. */
+#filelist.tree .tree-file.symlink-row .d2h-icon-wrapper,
+#filelist.tree .tree-dir.symlink-row .dir-icon,
+.gdp-repo-row.symlink-row .d2h-icon-wrapper,
+.gdp-repo-row.symlink-row .dir-icon {
+  color: var(--done);
+}
+.tree-file.symlink-broken-row .d2h-icon-wrapper,
+.gdp-repo-row.symlink-broken-row .d2h-icon-wrapper {
+  color: var(--danger);
+}
+/* Shared "disabled row" treatment: a broken symlink or a synthesized
+   deleted-file row (see deletedTreeEntriesForPath in preview.ts) - both are
+   badged but cannot actually be opened. */
+.tree-file.gdp-row-disabled,
+.tree-dir.gdp-row-disabled,
+.gdp-repo-row.gdp-row-disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
 /* ===== Main content area ===== */
 #content {
   margin-left: var(--sidebar-w);
@@ -4594,6 +4633,13 @@ body.gdp-file-detail-page #empty {
   padding: 2px 8px;
   font-size: 11px;
   line-height: 1.4;
+}
+.gdp-repo-row .meta.symlink-target.broken { color: var(--danger); }
+/* Disabled row (broken symlink or synthesized deleted-file entry): opening
+   it would just 404, so no hover affordance - same treatment as
+   .gdp-repo-row-gitlink above. */
+.gdp-repo-row.gdp-row-disabled:hover {
+  background: var(--bg);
 }
 .gdp-context-menu {
   position: fixed;

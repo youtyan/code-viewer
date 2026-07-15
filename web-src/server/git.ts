@@ -6,10 +6,13 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   readSync,
+  realpathSync,
   statSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, posix, relative } from "node:path";
+import { cacheFresh, setTimedCacheEntry, type TimedCacheEntry } from "./cache";
 import {
   commandForExternal,
   commandNotFoundDetail,
@@ -58,6 +61,19 @@ export type GitTreeEntry = {
   created_at?: string;
   updated_at?: string;
   commit_updated_at?: string;
+  // A symlink keeps its resolved `type` (tree/blob) so every existing
+  // type-based branch (navigation, sorting, icons) treats it like the real
+  // target. is_symlink only changes how it is drawn/labeled.
+  is_symlink?: true;
+  symlink_target?: string;
+  symlink_target_type?: "tree" | "blob" | "missing";
+  // Committed-ref directory symlinks only: `git ls-tree`/`cat-file` never
+  // resolve a symlink path as if it were the target directory (unlike a
+  // worktree path, which the OS resolves transparently), so the client must
+  // navigate using this repo-relative path instead of `path` to actually
+  // see the target contents.
+  resolved_path?: string;
+  status?: string;
 };
 
 // ai-dup-check: allow -- server git layer emits commit DTOs without importing browser-facing core types.
@@ -376,6 +392,70 @@ export async function statusPorcelainForPathAsync(
   };
 }
 
+// Keyed by cwd. Every tree render (expand a dir, switch ref, poll for
+// changes) calls repoStatusMapAsync, and each call shells out to `git
+// status` over the whole repo - a short TTL cache coalesces those bursts
+// the same way metaCache/fileListCache do in preview.ts.
+const repoStatusMapCache = new Map<
+  string,
+  TimedCacheEntry<{ map: Map<string, string> }>
+>();
+
+// One-char status per path across the whole repo (index + worktree +
+// untracked), for the tree explorer change badges. Distinct from
+// statusPorcelainForPathAsync, which only checks whether a single given
+// path has any uncommitted change (existence, not per-path codes).
+export async function repoStatusMapAsync(
+  cwd: string,
+  now = Date.now(),
+): Promise<Map<string, string>> {
+  const cached = repoStatusMapCache.get(cwd);
+  if (cacheFresh(cached, now)) return cached.map;
+  const map = new Map<string, string>();
+  const res = await runGitAsync(
+    [
+      "git",
+      "-c",
+      "core.quotepath=false",
+      "status",
+      "--porcelain=v1",
+      "-z",
+      // "all" (not "normal") so a brand-new untracked directory is expanded
+      // into its individual file paths (`?? dir/file` for each) instead of
+      // collapsing to one `?? dir/` record - the tree explorer needs a
+      // per-file status to badge each entry, not just the containing dir.
+      "--untracked-files=all",
+    ],
+    cwd,
+  );
+  if (res.code !== 0) return map;
+  const records = res.stdout.split("\0").filter(Boolean);
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    const xy = record.slice(0, 2);
+    const path = record.slice(3);
+    if (!path) continue;
+    if (xy === "??") {
+      map.set(path, "A");
+      continue;
+    }
+    // Renames/copies emit "XY PATH" followed by a separate "ORIG_PATH"
+    // record (the -z form drops the " -> " separator) - skip that record.
+    // R/C can land in either column: the index side (staged rename) or the
+    // worktree side (unstaged rename, only detected when a rename-tracking
+    // config/flag is active) - check both, not just xy[0].
+    if (xy[0] === "R" || xy[0] === "C" || xy[1] === "R" || xy[1] === "C") {
+      i++;
+      map.set(path, "R");
+      continue;
+    }
+    const code = xy[0] !== " " ? xy[0] : xy[1];
+    if (code && code !== " ") map.set(path, code);
+  }
+  setTimedCacheEntry(repoStatusMapCache, cwd, { map }, now);
+  return map;
+}
+
 export function show(
   ref: string,
   path: string,
@@ -390,6 +470,55 @@ export function showAsync(
   cwd: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return runGitAsync(["git", "show", `${ref}:${path}`], cwd);
+}
+
+// Resolves a symlink raw target text (relative to the link own directory,
+// git-style forward slashes) to a repo-relative path. Absolute targets and
+// targets that escape the repo root resolve to null - same "do not follow
+// outside the tree" stance as safeWorktreePath in search-service.
+export function resolveSymlinkPath(
+  linkPath: string,
+  target: string,
+): string | null {
+  if (!target || target.startsWith("/") || target.includes("\0")) return null;
+  const baseDir = dirname(linkPath);
+  const combined = baseDir === "." ? target : `${baseDir}/${target}`;
+  const normalized = posix.normalize(combined);
+  if (normalized === "." || normalized === "") return "";
+  if (normalized === ".." || normalized.startsWith("../")) return null;
+  return normalized;
+}
+
+// Committed-ref symlinks do not carry their target text in `ls-tree` output
+// (only the mode flags them as a symlink) - the target is the blob content
+// itself, so resolving it costs a `git show` + `git cat-file -t`. Only
+// called for the non-recursive listing (attachTreeEntryMetadata), never for
+// the flat recursive file list, to keep that path cheap.
+export async function gitSymlinkTargetMetadataAsync(
+  ref: string,
+  path: string,
+  cwd: string,
+): Promise<{
+  symlink_target?: string;
+  symlink_target_type: "tree" | "blob" | "missing";
+  resolved_path?: string;
+}> {
+  const res = await showAsync(ref, path, cwd);
+  if (res.code !== 0) return { symlink_target_type: "missing" };
+  const target = res.stdout;
+  const resolved = resolveSymlinkPath(path, target);
+  if (resolved === null)
+    return { symlink_target: target, symlink_target_type: "missing" };
+  const type = await runGitAsync(
+    ["git", "cat-file", "-t", `${ref}:${resolved}`],
+    cwd,
+  );
+  const kind = type.stdout.trim();
+  const symlink_target_type: "tree" | "blob" | "missing" =
+    kind === "tree" ? "tree" : kind === "blob" ? "blob" : "missing";
+  return symlink_target_type === "missing"
+    ? { symlink_target: target, symlink_target_type }
+    : { symlink_target: target, symlink_target_type, resolved_path: resolved };
 }
 
 export function showBytes(
@@ -1822,11 +1951,98 @@ async function worktreeSubmodulePathsAsync(cwd: string): Promise<Set<string>> {
   );
 }
 
+// Resolves `full` (an already-joined absolute path) only if it stays
+// inside the repo rooted at `cwd` - same containment rule search-service
+// enforces via safeWorktreePath for direct file reads. Not calling
+// safeWorktreePath itself: search-service.ts imports git.ts, so the
+// reverse import would create a cycle. `allowRoot` controls whether
+// `full === cwd` counts as "inside": true for tree listing (path="" means
+// the repo root itself), false for symlink target resolution (a link that
+// resolves to the repo root is not a meaningful browsable target).
+function realpathWithinRepo(
+  cwd: string,
+  full: string,
+  allowRoot: boolean,
+): string | null {
+  try {
+    const realCwd = realpathSync(cwd);
+    const realFull = realpathSync(full);
+    const rel = relative(realCwd, realFull);
+    if (rel.startsWith("..") || rel.startsWith("/") || rel.startsWith("\\"))
+      return null;
+    if (rel === "" && !allowRoot) return null;
+    return realFull;
+  } catch {
+    return null;
+  }
+}
+
+// A symlink Dirent.isDirectory()/isFile() reflect the link itself (always
+// false), never the target - so callers must resolve the target explicitly
+// to know whether it behaves like a directory or a file in the tree. A
+// target that resolves outside the repo root is treated as "missing" (not
+// browsable).
+function resolveWorktreeSymlinkTarget(
+  cwd: string,
+  full: string,
+): {
+  symlink_target?: string;
+  symlink_target_type: "tree" | "blob" | "missing";
+} {
+  let symlink_target: string | undefined;
+  try {
+    symlink_target = readlinkSync(full);
+  } catch {
+    symlink_target = undefined;
+  }
+  let symlink_target_type: "tree" | "blob" | "missing" = "missing";
+  if (realpathWithinRepo(cwd, full, false) !== null) {
+    try {
+      const stat = statSync(full);
+      symlink_target_type = stat.isDirectory()
+        ? "tree"
+        : stat.isFile()
+          ? "blob"
+          : "missing";
+    } catch {
+      symlink_target_type = "missing";
+    }
+  }
+  return symlink_target === undefined
+    ? { symlink_target_type }
+    : { symlink_target, symlink_target_type };
+}
+
+// Recursive worktree walks (used by search/flat-file listing) treat a
+// symlink as a leaf blob rather than following it as a directory - that
+// keeps the walk from cycling through a symlink loop. It still needs the
+// same is_symlink/target metadata as the non-recursive listing so the
+// explorer can badge it consistently wherever the entry surfaces.
+function recursiveWorktreeFileEntry(
+  cwd: string,
+  full: string,
+  name: string,
+  path: string,
+  isSymlink: boolean,
+): GitTreeEntry {
+  const symlinkInfo = isSymlink
+    ? resolveWorktreeSymlinkTarget(cwd, full)
+    : null;
+  return {
+    name,
+    path,
+    type: "blob",
+    ...(symlinkInfo ? { is_symlink: true as const, ...symlinkInfo } : {}),
+  };
+}
+
 function worktreeEntryFromDirent(
+  cwd: string,
   base: string,
   dir: string,
   name: string,
   isDirectory: boolean,
+  isSymlink: boolean,
   omitDirNames: NamePatternSet,
   excludeNames: NamePatternSet,
   submodulePaths: Set<string>,
@@ -1838,20 +2054,36 @@ function worktreeEntryFromDirent(
       type: isDirectory ? "tree" : "blob",
     };
   const entryPath = base ? `${base}/${name}` : name;
-  const type = isDirectory
-    ? hasDotGitEntry(join(dir, name))
-      ? ("commit" as const)
-      : ("tree" as const)
-    : ("blob" as const);
+  const symlinkInfo = isSymlink
+    ? resolveWorktreeSymlinkTarget(cwd, join(dir, name))
+    : null;
+  // A symlink resolves to the target shape (tree/blob) so every type-based
+  // branch downstream (navigation, sorting, icons) treats it like the real
+  // target - is_symlink only changes how it is labeled.
+  const resolvedIsDirectory = symlinkInfo
+    ? symlinkInfo.symlink_target_type === "tree"
+    : isDirectory;
+  const type =
+    symlinkInfo && symlinkInfo.symlink_target_type === "missing"
+      ? ("blob" as const)
+      : resolvedIsDirectory
+        ? hasDotGitEntry(join(dir, name))
+          ? ("commit" as const)
+          : ("tree" as const)
+        : ("blob" as const);
   const omittedReason =
     type === "tree"
       ? omittedWorktreeDirectoryReason(name, omitDirNames)
       : undefined;
   const submodule =
     type === "commit" && submodulePaths.has(entryPath) ? true : undefined;
-  const baseEntry = submodule
-    ? ({ name, path: entryPath, type, submodule } satisfies GitTreeEntry)
-    : ({ name, path: entryPath, type } satisfies GitTreeEntry);
+  const baseEntry = {
+    name,
+    path: entryPath,
+    type,
+    ...(submodule ? { submodule } : {}),
+    ...(symlinkInfo ? { is_symlink: true as const, ...symlinkInfo } : {}),
+  } satisfies GitTreeEntry;
   return omittedReason
     ? {
         ...baseEntry,
@@ -1870,6 +2102,11 @@ function worktreeFilesystemEntries(
 ): GitTreeEntry[] {
   const base = normalizeTreePath(path);
   const root = join(cwd, base);
+  // `path` can itself be (or pass through) a symlink that escapes the repo -
+  // reject here so /_tree cannot be used to browse the host filesystem
+  // through it, regardless of what the client-side type/is_symlink display
+  // does.
+  if (realpathWithinRepo(cwd, root, true) === null) return [];
   const omitDirNameSet = compileNamePatterns(omitDirNames);
   const excludeNameSet = compileNamePatterns(excludeNames);
   const submodulePaths = worktreeSubmodulePaths(cwd);
@@ -1880,10 +2117,12 @@ function worktreeFilesystemEntries(
       dirents
         .map((entry) =>
           worktreeEntryFromDirent(
+            cwd,
             base,
             root,
             entry.name,
             entry.isDirectory(),
+            entry.isSymbolicLink(),
             omitDirNameSet,
             excludeNameSet,
             submodulePaths,
@@ -1950,11 +2189,15 @@ function worktreeFilesystemEntries(
         walk(full, entryPath, depth + 1);
       } else if (entry.isFile() || entry.isSymbolicLink()) {
         if (
-          !pushRecursiveEntry({
-            name: entry.name,
-            path: entryPath,
-            type: "blob",
-          })
+          !pushRecursiveEntry(
+            recursiveWorktreeFileEntry(
+              cwd,
+              full,
+              entry.name,
+              entryPath,
+              entry.isSymbolicLink(),
+            ),
+          )
         )
           return;
       }
@@ -1976,6 +2219,9 @@ async function worktreeFilesystemEntriesAsync(
 ): Promise<GitTreeEntry[]> {
   const base = normalizeTreePath(path);
   const root = join(cwd, base);
+  // See worktreeFilesystemEntries (sync) for why this containment check
+  // exists: `path` can pass through a symlink that escapes the repo.
+  if (realpathWithinRepo(cwd, root, true) === null) return [];
   const omitDirNameSet = compileNamePatterns(omitDirNames);
   const excludeNameSet = compileNamePatterns(excludeNames);
   const submodulePaths = await worktreeSubmodulePathsAsync(cwd);
@@ -1986,10 +2232,12 @@ async function worktreeFilesystemEntriesAsync(
       dirents
         .map((entry) =>
           worktreeEntryFromDirent(
+            cwd,
             base,
             root,
             entry.name,
             entry.isDirectory(),
+            entry.isSymbolicLink(),
             omitDirNameSet,
             excludeNameSet,
             submodulePaths,
@@ -2068,11 +2316,15 @@ async function worktreeFilesystemEntriesAsync(
         await walk(full, entryPath, depth + 1);
       } else if (entry.isFile() || entry.isSymbolicLink()) {
         if (
-          !pushRecursiveEntry({
-            name: entry.name,
-            path: entryPath,
-            type: "blob",
-          })
+          !pushRecursiveEntry(
+            recursiveWorktreeFileEntry(
+              cwd,
+              full,
+              entry.name,
+              entryPath,
+              entry.isSymbolicLink(),
+            ),
+          )
         )
           return;
       }
@@ -2096,6 +2348,29 @@ function hasDotGitEntry(dir: string): boolean {
   }
 }
 
+// A ls-tree symlink record still reports the git object type "blob" (git
+// stores the link target text as the blob content) - only mode 120000
+// distinguishes it from a regular file. The target text itself is resolved
+// separately (see gitSymlinkTargetMetadata) since ls-tree does not carry it.
+const LS_TREE_SYMLINK_MODE = "120000";
+
+function parseLsTreeRecord(
+  rec: string,
+  allowedTypes: string,
+): GitTreeEntry | null {
+  const match = rec.match(
+    new RegExp(`^(\\d+)\\s+(${allowedTypes})\\s+[0-9a-fA-F]+\\t(.+)$`),
+  );
+  if (!match) return null;
+  const [, mode, type, entryPath] = match;
+  return {
+    name: entryPath.split("/").pop() || entryPath,
+    path: entryPath,
+    type: type as GitTreeEntry["type"],
+    ...(mode === LS_TREE_SYMLINK_MODE ? { is_symlink: true as const } : {}),
+  };
+}
+
 function gitTreeEntries(
   ref: string,
   path: string,
@@ -2114,18 +2389,7 @@ function gitTreeEntries(
   let entries = res.stdout
     .split("\0")
     .filter(Boolean)
-    .map((rec) => {
-      const match = rec.match(
-        new RegExp(`^\\d+\\s+(${allowedTypes})\\s+[0-9a-fA-F]+\\t(.+)$`),
-      );
-      if (!match) return null;
-      const entryPath = match[2];
-      return {
-        name: entryPath.split("/").pop() || entryPath,
-        path: entryPath,
-        type: match[1] as GitTreeEntry["type"],
-      };
-    })
+    .map((rec) => parseLsTreeRecord(rec, allowedTypes))
     .filter((entry): entry is GitTreeEntry => !!entry);
   if (recursive) entries.sort((a, b) => a.path.localeCompare(b.path));
   else entries = sortTreeEntries(entries);
@@ -2150,18 +2414,7 @@ async function gitTreeEntriesAsync(
   let entries = res.stdout
     .split("\0")
     .filter(Boolean)
-    .map((rec) => {
-      const match = rec.match(
-        new RegExp(`^\\d+\\s+(${allowedTypes})\\s+[0-9a-fA-F]+\\t(.+)$`),
-      );
-      if (!match) return null;
-      const entryPath = match[2];
-      return {
-        name: entryPath.split("/").pop() || entryPath,
-        path: entryPath,
-        type: match[1] as GitTreeEntry["type"],
-      };
-    })
+    .map((rec) => parseLsTreeRecord(rec, allowedTypes))
     .filter((entry): entry is GitTreeEntry => !!entry);
   if (recursive) entries.sort((a, b) => a.path.localeCompare(b.path));
   else entries = sortTreeEntries(entries);

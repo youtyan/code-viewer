@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -672,6 +673,229 @@ describe("preview CLI", () => {
         expect(submodule?.type).toBe("commit");
         expect(submodule?.submodule).toBe(true);
         expect(submodule?.updated_at).toBe(undefined);
+      } finally {
+        proc.kill("SIGKILL");
+        cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+      }
+      if (cleanupTimedOut) {
+        throw new Error("preview process did not exit after SIGKILL");
+      }
+    },
+  );
+
+  runOrSkip(
+    "/_tree includes a badged entry for a deleted-but-uncommitted file",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-deleted-tree-"));
+      tmpRoots.push(root);
+      git(root, ["init"]);
+      git(root, ["config", "user.email", "test@example.com"]);
+      git(root, ["config", "user.name", "Test"]);
+      writeFileSync(join(root, "keep.txt"), "keep\n");
+      writeFileSync(join(root, "gone.txt"), "gone\n");
+      git(root, ["add", "-A"]);
+      git(root, ["commit", "-m", "initial"]);
+      rmSync(join(root, "gone.txt"));
+
+      const proc = spawn(
+        process.execPath,
+        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        {
+          cwd: join(import.meta.dir, "..", ".."),
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+
+      let cleanupTimedOut = false;
+      try {
+        const url = await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(5000).then(() => {
+            throw new Error("preview did not start");
+          }),
+        ]);
+
+        const response = await fetchWithTimeout(
+          new URL("/_tree?ref=worktree", url).toString(),
+          1000,
+        );
+        const body = (await response.json()) as {
+          entries: Array<{ path: string; type: string; status?: string }>;
+        };
+        const deleted = body.entries.find((entry) => entry.path === "gone.txt");
+        const kept = body.entries.find((entry) => entry.path === "keep.txt");
+
+        expect(deleted?.type).toBe("blob");
+        expect(deleted?.status).toBe("D");
+        expect(kept?.status).toBe(undefined);
+      } finally {
+        proc.kill("SIGKILL");
+        cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+      }
+      if (cleanupTimedOut) {
+        throw new Error("preview process did not exit after SIGKILL");
+      }
+    },
+  );
+
+  runOrSkip(
+    "/_tree resolves a committed-ref directory symlink via resolved_path",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-symlink-tree-"));
+      tmpRoots.push(root);
+      git(root, ["init"]);
+      git(root, ["config", "user.email", "test@example.com"]);
+      git(root, ["config", "user.name", "Test"]);
+      mkdirSync(join(root, "real-dir"));
+      writeFileSync(join(root, "real-dir", "inner.txt"), "inner\n");
+      symlinkSync("real-dir", join(root, "link-to-dir"));
+      git(root, ["add", "-A"]);
+      git(root, ["commit", "-m", "initial"]);
+      const sha = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+
+      const proc = spawn(
+        process.execPath,
+        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        {
+          cwd: join(import.meta.dir, "..", ".."),
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+
+      let cleanupTimedOut = false;
+      try {
+        const url = await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(5000).then(() => {
+            throw new Error("preview did not start");
+          }),
+        ]);
+
+        const rootResponse = await fetchWithTimeout(
+          new URL(`/_tree?ref=${sha}`, url).toString(),
+          1000,
+        );
+        const rootBody = (await rootResponse.json()) as {
+          entries: Array<{
+            path: string;
+            type: string;
+            is_symlink?: boolean;
+            resolved_path?: string;
+          }>;
+        };
+        const link = rootBody.entries.find(
+          (entry) => entry.path === "link-to-dir",
+        );
+        expect(link?.is_symlink).toBe(true);
+        expect(link?.resolved_path).toBe("real-dir");
+
+        const resolvedResponse = await fetchWithTimeout(
+          new URL(
+            `/_tree?ref=${sha}&path=${link?.resolved_path}`,
+            url,
+          ).toString(),
+          1000,
+        );
+        const resolvedBody = (await resolvedResponse.json()) as {
+          entries: Array<{ path: string; type: string }>;
+        };
+        expect(
+          resolvedBody.entries.some(
+            (entry) => entry.path === "real-dir/inner.txt",
+          ),
+        ).toBe(true);
+
+        const ownPathResponse = await fetchWithTimeout(
+          new URL(`/_tree?ref=${sha}&path=link-to-dir`, url).toString(),
+          1000,
+        );
+        const ownPathBody = (await ownPathResponse.json()) as {
+          entries: Array<{ path: string }>;
+        };
+        expect(ownPathBody.entries).toEqual([]);
+      } finally {
+        proc.kill("SIGKILL");
+        cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+      }
+      if (cleanupTimedOut) {
+        throw new Error("preview process did not exit after SIGKILL");
+      }
+    },
+  );
+
+  runOrSkip(
+    "/_tree does not expose files reached through a symlink that escapes the worktree",
+    async () => {
+      const outsideRoot = mkdtempSync(
+        join(tmpdir(), "code-viewer-symlink-outside-"),
+      );
+      tmpRoots.push(outsideRoot);
+      writeFileSync(join(outsideRoot, "secret.txt"), "top secret\n");
+
+      const root = mkdtempSync(
+        join(tmpdir(), "code-viewer-symlink-escape-tree-"),
+      );
+      tmpRoots.push(root);
+      git(root, ["init"]);
+      git(root, ["config", "user.email", "test@example.com"]);
+      git(root, ["config", "user.name", "Test"]);
+      writeFileSync(join(root, "keep.txt"), "keep\n");
+      symlinkSync(outsideRoot, join(root, "link-outside"));
+      git(root, ["add", "-A"]);
+      git(root, ["commit", "-m", "initial"]);
+
+      const proc = spawn(
+        process.execPath,
+        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        {
+          cwd: join(import.meta.dir, "..", ".."),
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+
+      let cleanupTimedOut = false;
+      try {
+        const url = await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(5000).then(() => {
+            throw new Error("preview did not start");
+          }),
+        ]);
+
+        const rootResponse = await fetchWithTimeout(
+          new URL("/_tree?ref=worktree", url).toString(),
+          1000,
+        );
+        const rootBody = (await rootResponse.json()) as {
+          entries: Array<{
+            path: string;
+            type: string;
+            symlink_target_type?: string;
+          }>;
+        };
+        const link = rootBody.entries.find(
+          (entry) => entry.path === "link-outside",
+        );
+        expect(link?.type).toBe("blob");
+        expect(link?.symlink_target_type).toBe("missing");
+
+        const escapedResponse = await fetchWithTimeout(
+          new URL("/_tree?ref=worktree&path=link-outside", url).toString(),
+          1000,
+        );
+        const escapedBody = (await escapedResponse.json()) as {
+          entries: Array<{ path: string }>;
+        };
+        expect(escapedBody.entries).toEqual([]);
       } finally {
         proc.kill("SIGKILL");
         cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";

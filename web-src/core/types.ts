@@ -50,6 +50,16 @@ export type RepoTreeEntry = {
   created_at?: string;
   updated_at?: string;
   commit_updated_at?: string;
+  // A symlink keeps its resolved `type` (tree/blob) so navigation just
+  // works - is_symlink only changes how it is drawn/labeled. resolved_path
+  // is set only for a committed-ref directory symlink: `path` itself
+  // cannot be browsed with `git ls-tree` (unlike a worktree path, which the
+  // OS resolves transparently), so navigation must use resolved_path.
+  is_symlink?: true;
+  symlink_target?: string;
+  symlink_target_type?: "tree" | "blob" | "missing";
+  resolved_path?: string;
+  status?: string;
 };
 
 export type RepoTreeResponse = {
@@ -389,6 +399,10 @@ export type SidebarItem = {
   submodule?: RepoTreeEntry["submodule"];
   children_omitted?: true;
   children_omitted_reason?: RepoTreeEntry["children_omitted_reason"];
+  is_symlink?: RepoTreeEntry["is_symlink"];
+  symlink_target?: RepoTreeEntry["symlink_target"];
+  symlink_target_type?: RepoTreeEntry["symlink_target_type"];
+  resolved_path?: RepoTreeEntry["resolved_path"];
   status?: string;
   additions?: number;
   deletions?: number;

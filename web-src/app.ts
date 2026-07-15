@@ -1089,6 +1089,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         ? { label: text.submoduleLabel, title: text.submoduleTitle }
         : { label: text.gitlinkLabel, title: text.gitlinkTitle };
     },
+    fileBadge: (status) => DIFF_VIEW.fileBadge(status),
   });
   const {
     loadRepo,
