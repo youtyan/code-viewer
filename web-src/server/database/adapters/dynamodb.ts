@@ -1,5 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
+import type {
+  DynamoDbAttributeValue,
+  DynamoDbItem,
+  DynamoDbKey,
+} from "../../../core/database/types";
 import type { DockerDbInfo } from "../discovery";
 import {
   dockerCommand,
@@ -17,20 +22,7 @@ export type DynamoDbConfig = {
   sessionToken?: string;
 };
 
-export type DynamoDbAttributeValue =
-  | { S: string }
-  | { N: string }
-  | { B: string }
-  | { BOOL: boolean }
-  | { NULL: boolean }
-  | { M: Record<string, DynamoDbAttributeValue> }
-  | { L: DynamoDbAttributeValue[] }
-  | { SS: string[] }
-  | { NS: string[] }
-  | { BS: string[] };
-
-export type DynamoDbKey = Record<string, DynamoDbAttributeValue>;
-export type DynamoDbItem = Record<string, DynamoDbAttributeValue>;
+export type { DynamoDbAttributeValue, DynamoDbItem, DynamoDbKey };
 
 export type DynamoDbTableDescription = {
   TableName?: string;
