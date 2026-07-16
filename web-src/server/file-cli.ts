@@ -13,6 +13,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   resolveRepoRoot,
+  takeGlobalCliOption,
   takeValue,
   validateRefValue,
   validateRepoRelativePathValue,
@@ -20,7 +21,6 @@ import {
 import {
   configureExternalCommands,
   type ExternalCommandOverride,
-  parseExternalCommandOverride,
 } from "./command-resolver";
 import {
   BLAME_ZERO_SHA,
@@ -355,20 +355,16 @@ export function parseFileArgs(argv: string[]): FileParseResult {
     if (arg === "--help" || arg === "-h") {
       return { ok: true, args: { command: { kind: "help" } } };
     }
-    if (arg === "--cwd") {
-      const taken = takeValue(argv, i, arg);
-      if ("error" in taken) return { ok: false, error: taken.error };
-      cwd = taken.value;
-      i = taken.next;
-    } else if (arg === "--bin") {
-      const taken = takeValue(argv, i, arg);
-      if ("error" in taken) return { ok: false, error: taken.error };
-      const parsed = parseExternalCommandOverride(taken.value, "--bin", [
-        "git",
-      ]);
-      if (parsed.ok === false) return { ok: false, error: parsed.error };
-      commandOverrides.push(parsed.override);
-      i = taken.next;
+    const global = takeGlobalCliOption(argv, i, {
+      allowedCommands: ["git"],
+    });
+    if (global.kind === "error") return { ok: false, error: global.error };
+    if (global.kind === "cwd") {
+      cwd = global.value;
+      i = global.next;
+    } else if (global.kind === "command-override") {
+      commandOverrides.push(global.override);
+      i = global.next;
     } else if (VALUE_FLAGS.has(arg)) {
       const taken = takeValue(argv, i, arg);
       if ("error" in taken) return { ok: false, error: taken.error };

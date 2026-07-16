@@ -1,4 +1,6 @@
 import { join } from "node:path";
+import { makeTimedId } from "../core/id";
+import { parseLineTarget } from "../core/routes";
 import type {
   AnnotationDatabaseDataState,
   AnnotationDatabaseQueryState,
@@ -12,6 +14,10 @@ import type {
   AnnotationTarget,
 } from "../core/types";
 import { createJsonFileStore } from "./json-store";
+import {
+  type OrderedInsertOptions,
+  orderedInsertOptionCount,
+} from "./ordered-insert";
 
 export const CODE_VIEWER_DIR = ".code-viewer";
 export const ANNOTATIONS_FILE_NAME = "annotations.json";
@@ -30,9 +36,7 @@ export function emptyAnnotationsState(): AnnotationsState {
 
 // ai-dup-check: allow -- annotation ids keep their historical prefix/time format.
 export function makeAnnotationId(prefix: string): string {
-  const random = Math.random().toString(36).slice(2, 8);
-  const time = Date.now().toString(36);
-  return `${prefix}-${time}${random}`;
+  return makeTimedId(prefix);
 }
 
 function normalizeLineRange(raw: unknown): AnnotationLineRange | undefined {
@@ -50,18 +54,9 @@ function normalizeLineRange(raw: unknown): AnnotationLineRange | undefined {
 export function parseAnnotationLine(
   raw: string,
 ): AnnotationLineRange | undefined {
-  const range = /^(\d+)-(\d+)$/.exec(raw);
-  if (range) {
-    const a = Number(range[1]);
-    const b = Number(range[2]);
-    const start = Math.min(a, b);
-    const end = Math.max(a, b);
-    return start > 0 ? { start, end } : undefined;
-  }
-  const line = Number(raw);
-  return Number.isInteger(line) && line > 0
-    ? { start: line, end: line }
-    : undefined;
+  const target = parseLineTarget(raw);
+  if (target === undefined) return undefined;
+  return typeof target === "number" ? { start: target, end: target } : target;
 }
 
 function normalizeRange(raw: unknown): { from: string; to: string } {
@@ -363,25 +358,11 @@ export type AddAnnotationResult =
     }
   | { ok: false; error: string };
 
-type InsertOptions = {
-  before_id?: string;
-  after_id?: string;
-  position?: number;
-};
-
-function insertOptionCount(input: InsertOptions): number {
-  return (
-    (input.before_id ? 1 : 0) +
-    (input.after_id ? 1 : 0) +
-    (input.position !== undefined ? 1 : 0)
-  );
-}
-
 function entryInsertIndex(
   entries: AnnotationEntry[],
-  input: InsertOptions,
+  input: OrderedInsertOptions,
 ): { ok: true; index: number } | { ok: false; error: string } {
-  if (insertOptionCount(input) > 1)
+  if (orderedInsertOptionCount(input) > 1)
     return { ok: false, error: "use only one of before, after, or position" };
   if (input.before_id) {
     const index = entries.findIndex((entry) => entry.id === input.before_id);
@@ -520,9 +501,9 @@ export type MoveAnnotationResult =
 export function moveAnnotationEntry(
   state: AnnotationsState,
   id: string,
-  input: InsertOptions,
+  input: OrderedInsertOptions,
 ): MoveAnnotationResult {
-  if (insertOptionCount(input) !== 1)
+  if (orderedInsertOptionCount(input) !== 1)
     return { ok: false, error: "move requires before, after, or position" };
   const sourceSession = findSessionByEntryId(state.sessions, id);
   const entry = sourceSession?.entries.find((e) => e.id === id);

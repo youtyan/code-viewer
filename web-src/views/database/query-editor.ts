@@ -1,10 +1,11 @@
-import type { DbQueryResponse, DbValue } from "../../core/database/types";
+import type { DbQueryResponse } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
 import {
   loadShikiHighlighter,
   type ShikiHighlighter,
 } from "../../core/shiki-loader";
 import { type DbText, dbText } from "./i18n";
+import { formatQueryValue } from "./query-value";
 import { highlightSqlToInnerHtml } from "./shiki-sql";
 
 const MAX_HISTORY = 50;
@@ -219,7 +220,7 @@ export function createQueryEditor(
         tr.appendChild(tdNum);
         for (const value of row) {
           const td = document.createElement("td");
-          td.textContent = formatValue(value);
+          td.textContent = formatQueryValue(value);
           if (value === null) td.classList.add("null");
           tr.appendChild(td);
         }
@@ -396,13 +397,4 @@ export function createQueryEditor(
     dispose,
     localize,
   };
-}
-
-// ai-dup-check: allow -- query result cells share DB value formatting semantics.
-function formatValue(value: DbValue): string {
-  if (value === null) return "NULL";
-  if (value instanceof Uint8Array) return `<blob ${value.byteLength} bytes>`;
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
 }

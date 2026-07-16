@@ -34,21 +34,11 @@ export function runSync(
   cwd: string,
   options: RunOptions = {},
 ): RunResult {
-  const proc = spawnSync(args[0], args.slice(1), {
-    cwd,
-    encoding: "buffer",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: options.timeout,
-    maxBuffer: options.maxBuffer ?? 64 * 1024 * 1024,
-    killSignal: "SIGKILL",
-  });
+  const proc = runBytesSync(args, cwd, options);
   return {
-    code: proc.status ?? (proc.error ? 1 : 0),
-    stdout: new TextDecoder().decode(proc.stdout || new Uint8Array()),
-    stderr: appendProcessError(
-      new TextDecoder().decode(proc.stderr || new Uint8Array()),
-      proc.error,
-    ),
+    code: proc.code,
+    stdout: new TextDecoder().decode(proc.stdout),
+    stderr: proc.stderr,
   };
 }
 

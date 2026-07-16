@@ -161,6 +161,89 @@ describe("buildDeleteSql", () => {
   });
 });
 
+describe("write SQL comparison clauses", () => {
+  test.each([
+    {
+      name: "sqlite preserves SET then composite primary-key parameter order",
+      set: [
+        { column: "name", value: "updated" },
+        { column: "active", value: "true" },
+      ],
+      pk: [
+        { column: "id", value: "3" },
+        { column: "region", value: "east" },
+      ],
+      kind: "sqlite" as const,
+      expected: {
+        sql: 'UPDATE "sample_table" SET "name" = ?, "active" = ? WHERE "id" = ? AND "region" = ?',
+        params: ["updated", 1, 3, "east"],
+      },
+    },
+    {
+      name: "postgresql inlines quoted text and booleans",
+      set: [
+        { column: "name", value: "O'Brien" },
+        { column: "active", value: "true" },
+      ],
+      pk: [{ column: "id", value: "4" }],
+      kind: "postgresql" as const,
+      expected: {
+        sql: `UPDATE "sample_table" SET "name" = 'O''Brien', "active" = TRUE WHERE "id" = 4`,
+        params: [],
+      },
+    },
+    {
+      name: "mysql escapes backslashes in a SET value",
+      set: [{ column: "name", value: "x\\y" }],
+      pk: [{ column: "id", value: "5" }],
+      kind: "mysql" as const,
+      expected: {
+        sql: "UPDATE `sample_table` SET `name` = 'x\\\\y' WHERE `id` = 5",
+        params: [],
+      },
+    },
+  ])("buildUpdateSql $name", ({ set, pk, kind, expected }) => {
+    expect(buildUpdateSql("sample_table", set, pk, types, kind)).toEqual(
+      expected,
+    );
+  });
+
+  test.each([
+    {
+      name: "sqlite binds composite primary keys in order",
+      pk: [
+        { column: "id", value: "4" },
+        { column: "region", value: "east" },
+      ],
+      kind: "sqlite" as const,
+      expected: {
+        sql: 'DELETE FROM "sample_table" WHERE "id" = ? AND "region" = ?',
+        params: [4, "east"],
+      },
+    },
+    {
+      name: "postgresql inlines a boolean primary-key value",
+      pk: [{ column: "active", value: "0" }],
+      kind: "postgresql" as const,
+      expected: {
+        sql: 'DELETE FROM "sample_table" WHERE "active" = FALSE',
+        params: [],
+      },
+    },
+    {
+      name: "mysql escapes apostrophes in a primary-key value",
+      pk: [{ column: "name", value: "O'Brien" }],
+      kind: "mysql" as const,
+      expected: {
+        sql: "DELETE FROM `sample_table` WHERE `name` = 'O''Brien'",
+        params: [],
+      },
+    },
+  ])("buildDeleteSql $name", ({ pk, kind, expected }) => {
+    expect(buildDeleteSql("sample_table", pk, types, kind)).toEqual(expected);
+  });
+});
+
 const columns: DbColumn[] = [
   {
     name: "id",

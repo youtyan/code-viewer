@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import type { JournalTask } from "../core/journal";
 import {
   isIsoDate,
   normalizeJournalLabels,
   selectNextJournalTasks,
+  taskClaimActive,
 } from "../core/journal";
 import {
   addDailyJournalEntry,
@@ -16,11 +18,86 @@ import {
 } from "../server/journal";
 
 const NOW = "2026-07-02T00:00:00.000Z";
+const NOW_MS = Date.parse(NOW);
+
+const SAMPLE_TASK: JournalTask = {
+  id: "task-1",
+  title: "Sample task",
+  body: "",
+  status: "doing",
+  priority: "p2",
+  labels: [],
+  created_at: NOW,
+  updated_at: NOW,
+};
 
 function makeIdFactory() {
   let n = 0;
   return (prefix: string) => `${prefix}-${++n}`;
 }
+
+describe("taskClaimActive", () => {
+  test.each([
+    { task: SAMPLE_TASK, expected: false },
+    {
+      task: {
+        ...SAMPLE_TASK,
+        claim: {
+          by: "sample-agent",
+          claimed_at: NOW,
+          lease_expires_at: "2026-07-02T00:00:01.000Z",
+        },
+      },
+      expected: true,
+    },
+    {
+      task: {
+        ...SAMPLE_TASK,
+        claim: {
+          by: "sample-agent",
+          claimed_at: NOW,
+          lease_expires_at: NOW,
+        },
+      },
+      expected: false,
+    },
+    {
+      task: {
+        ...SAMPLE_TASK,
+        claim: {
+          by: "sample-agent",
+          claimed_at: NOW,
+          lease_expires_at: "2026-07-01T23:59:59.000Z",
+        },
+      },
+      expected: false,
+    },
+    {
+      task: {
+        ...SAMPLE_TASK,
+        claim: {
+          by: "sample-agent",
+          claimed_at: NOW,
+          lease_expires_at: "invalid",
+        },
+      },
+      expected: false,
+    },
+    {
+      task: {
+        ...SAMPLE_TASK,
+        claim: {
+          by: "sample-agent",
+          claimed_at: NOW,
+          lease_expires_at: "",
+        },
+      },
+      expected: false,
+    },
+  ])("returns $expected for the claim boundary", ({ task, expected }) => {
+    expect(taskClaimActive(task, NOW_MS)).toBe(expected);
+  });
+});
 
 describe("journal state", () => {
   test("adds daily entries with normalized labels", () => {

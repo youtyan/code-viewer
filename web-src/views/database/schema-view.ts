@@ -20,18 +20,20 @@ export type SchemaViewData = {
   ddl?: string;
 };
 
+type SchemaViewExtra = {
+  foreignKeys?: DbForeignKey[];
+  triggers?: TriggerDisplayInfo[];
+  ddl?: string;
+  tableComment?: string | null;
+};
+
 export type SchemaView = {
   el: HTMLElement;
   render: (
     table: string,
     columns: DbColumn[],
     indexes: DbIndexInfo[],
-    extra?: {
-      foreignKeys?: DbForeignKey[];
-      triggers?: TriggerDisplayInfo[];
-      ddl?: string;
-      tableComment?: string | null;
-    },
+    extra?: SchemaViewExtra,
   ) => void;
   clear: () => void;
   localize: () => void;
@@ -54,12 +56,7 @@ export function createSchemaView(
     table: string;
     columns: DbColumn[];
     indexes: DbIndexInfo[];
-    extra?: {
-      foreignKeys?: DbForeignKey[];
-      triggers?: TriggerDisplayInfo[];
-      ddl?: string;
-      tableComment?: string | null;
-    };
+    extra?: SchemaViewExtra;
   } | null = null;
 
   function syncRefreshButton(): void {
@@ -82,12 +79,7 @@ export function createSchemaView(
     table: string,
     columns: DbColumn[],
     indexes: DbIndexInfo[],
-    extra?: {
-      foreignKeys?: DbForeignKey[];
-      triggers?: TriggerDisplayInfo[];
-      ddl?: string;
-      tableComment?: string | null;
-    },
+    extra?: SchemaViewExtra,
   ) {
     lastArgs = { table, columns, indexes, extra };
     const t = text().schema;

@@ -12,6 +12,7 @@ import {
   readStdin,
   requestJson,
   resolveRepoRoot,
+  takeGlobalCliOption,
   takeValue,
 } from "./cli-helpers";
 
@@ -87,6 +88,24 @@ export type AnnotateArgs = {
 export type AnnotateParseResult =
   | { ok: true; args: AnnotateArgs }
   | { ok: false; error: string };
+
+type AnnotateAddResponse = {
+  session_id: string;
+  session_title?: string;
+  created_session?: boolean;
+  entry: AnnotationEntry;
+};
+
+type AnnotationAddCommonOptions = {
+  title?: string;
+  session?: string;
+  sessionTitle?: string;
+  body?: string;
+  bodyFile?: string;
+  before?: string;
+  after?: string;
+  position?: number;
+};
 
 export const ANNOTATE_HELP = `code-viewer annotate — attach explanations to code locations
 
@@ -243,6 +262,33 @@ function parsePosition(value: string | undefined): number | undefined {
   return Number.isInteger(n) && n > 0 ? n : Number.NaN;
 }
 
+function parseAnnotationAddOptions(
+  options: Map<string, string>,
+):
+  | { ok: true; options: AnnotationAddCommonOptions }
+  | { ok: false; error: string } {
+  const body = options.get("--body");
+  const bodyFile = options.get("--body-file");
+  if (body !== undefined && bodyFile !== undefined)
+    return { ok: false, error: "use either --body or --body-file" };
+  const position = parsePosition(options.get("--position"));
+  if (Number.isNaN(position))
+    return { ok: false, error: "--position must be a positive integer" };
+  return {
+    ok: true,
+    options: {
+      title: options.get("--title"),
+      session: options.get("--session"),
+      sessionTitle: options.get("--session-title"),
+      body,
+      bodyFile,
+      before: options.get("--before"),
+      after: options.get("--after"),
+      position,
+    },
+  };
+}
+
 function parseFilter(value: string): { column: string; value: string } | null {
   const idx = value.indexOf("=");
   if (idx <= 0) return null;
@@ -301,12 +347,14 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h")
       return { ok: true, args: { command: { kind: "help" } } };
-    if (arg === "--cwd" || arg === "--server") {
-      const taken = takeValue(argv, i, arg);
-      if ("error" in taken) return { ok: false, error: taken.error };
-      if (arg === "--cwd") cwd = taken.value;
-      else server = taken.value;
-      i = taken.next;
+    const global = takeGlobalCliOption(argv, i, { allowServer: true });
+    if (global.kind === "error") return { ok: false, error: global.error };
+    if (global.kind === "cwd") {
+      cwd = global.value;
+      i = global.next;
+    } else if (global.kind === "server") {
+      server = global.value;
+      i = global.next;
     } else if (valueFlags.has(arg)) {
       const taken = takeValue(argv, i, arg);
       if ("error" in taken) return { ok: false, error: taken.error };
@@ -354,13 +402,9 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
       line = parseAnnotationLine(rawLine);
       if (!line) return { ok: false, error: "--line must be <n> or <n>-<m>" };
     }
-    const body = options.get("--body");
-    const bodyFile = options.get("--body-file");
-    if (body !== undefined && bodyFile !== undefined)
-      return { ok: false, error: "use either --body or --body-file" };
-    const position = parsePosition(options.get("--position"));
-    if (Number.isNaN(position))
-      return { ok: false, error: "--position must be a positive integer" };
+    const commonOptions = parseAnnotationAddOptions(options);
+    if (commonOptions.ok === false)
+      return { ok: false, error: commonOptions.error };
     return {
       ok: true,
       args: {
@@ -370,14 +414,7 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
           line,
           from: options.get("--from"),
           to: options.get("--to"),
-          title: options.get("--title"),
-          session: options.get("--session"),
-          sessionTitle: options.get("--session-title"),
-          body,
-          bodyFile,
-          before: options.get("--before"),
-          after: options.get("--after"),
-          position,
+          ...commonOptions.options,
         },
         cwd,
         server,
@@ -387,13 +424,9 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
   if (subcommand === "add-db") {
     if (!options.get("--db"))
       return { ok: false, error: "add-db requires --db <id>" };
-    const body = options.get("--body");
-    const bodyFile = options.get("--body-file");
-    if (body !== undefined && bodyFile !== undefined)
-      return { ok: false, error: "use either --body or --body-file" };
-    const position = parsePosition(options.get("--position"));
-    if (Number.isNaN(position))
-      return { ok: false, error: "--position must be a positive integer" };
+    const commonOptions = parseAnnotationAddOptions(options);
+    if (commonOptions.ok === false)
+      return { ok: false, error: commonOptions.error };
     const rawTab = options.get("--tab");
     const tab = normalizeDatabaseTab(rawTab);
     if (rawTab !== undefined && tab === undefined)
@@ -481,14 +514,7 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
           searchTerm: options.get("--search-term"),
           includeNonText: flags.has("--include-non-text") || undefined,
           searchAutoRun: flags.has("--run-search"),
-          title: options.get("--title"),
-          session: options.get("--session"),
-          sessionTitle: options.get("--session-title"),
-          body,
-          bodyFile,
-          before: options.get("--before"),
-          after: options.get("--after"),
-          position,
+          ...commonOptions.options,
         },
         cwd,
         server,
@@ -613,6 +639,26 @@ function printList(state: AnnotationsState): void {
   }
 }
 
+function printAddedAnnotation(
+  result: AnnotateAddResponse,
+  location: string,
+  serverUrl: string,
+): void {
+  const sessionTitle = result.session_title || "Untitled session";
+  if (result.created_session) {
+    console.error(
+      `created new annotation session ${result.session_id} (${sessionTitle})`,
+    );
+  }
+  console.log(
+    `annotated ${location} ` +
+      `[${result.entry.id}] in session ${result.session_id} (${sessionTitle})`,
+  );
+  console.error(
+    `view annotations at ${serverUrl}/ with the code annotations panel`,
+  );
+}
+
 async function annotationBodyFromCommand(command: {
   body?: string;
   bodyFile?: string;
@@ -680,23 +726,11 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
       before_id: command.before,
       after_id: command.after,
       position: command.position,
-    })) as {
-      session_id: string;
-      session_title?: string;
-      created_session?: boolean;
-      entry: AnnotationEntry;
-    };
-    if (result.created_session) {
-      console.error(
-        `created new annotation session ${result.session_id} (${result.session_title || "Untitled session"})`,
-      );
-    }
-    console.log(
-      `annotated ${result.entry.path}${formatLine(result.entry.line)} ` +
-        `[${result.entry.id}] in session ${result.session_id} (${result.session_title || "Untitled session"})`,
-    );
-    console.error(
-      `view annotations at ${serverUrl}/ with the code annotations panel`,
+    })) as AnnotateAddResponse;
+    printAddedAnnotation(
+      result,
+      `${result.entry.path}${formatLine(result.entry.line)}`,
+      serverUrl,
     );
     return;
   }
@@ -771,24 +805,8 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
         after_id: command.after,
         position: command.position,
       },
-    )) as {
-      session_id: string;
-      session_title?: string;
-      created_session?: boolean;
-      entry: AnnotationEntry;
-    };
-    if (result.created_session) {
-      console.error(
-        `created new annotation session ${result.session_id} (${result.session_title || "Untitled session"})`,
-      );
-    }
-    console.log(
-      `annotated ${result.entry.path} ` +
-        `[${result.entry.id}] in session ${result.session_id} (${result.session_title || "Untitled session"})`,
-    );
-    console.error(
-      `view annotations at ${serverUrl}/ with the code annotations panel`,
-    );
+    )) as AnnotateAddResponse;
+    printAddedAnnotation(result, result.entry.path, serverUrl);
     return;
   }
   if (command.kind === "list") {

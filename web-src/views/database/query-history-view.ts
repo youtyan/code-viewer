@@ -1,10 +1,10 @@
 import type {
-  DbValue,
   QueryHistoryEntry,
   QueryHistoryState,
 } from "../../core/database/types";
 import { iconSvg, SYNC_16_PATH } from "../../core/icons";
 import { type DbText, dbText } from "./i18n";
+import { formatQueryValue } from "./query-value";
 
 export type QueryHistoryViewCallbacks = {
   getDbId: () => string | null;
@@ -428,7 +428,7 @@ export function createQueryHistoryView(
       tr.appendChild(tdNum);
       for (const value of row) {
         const td = document.createElement("td");
-        td.textContent = formatValue(value);
+        td.textContent = formatQueryValue(value);
         if (value === null) td.classList.add("null");
         tr.appendChild(td);
       }
@@ -585,12 +585,4 @@ function formatTime(iso: string): string {
   } catch {
     return iso;
   }
-}
-
-function formatValue(value: DbValue): string {
-  if (value === null) return "NULL";
-  if (value instanceof Uint8Array) return `<blob ${value.byteLength} bytes>`;
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
 }

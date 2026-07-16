@@ -154,6 +154,27 @@ function coerceCell(cell: DbCellInput, columnType: string): DbValue {
   return coerceDbValue(cell.value, columnType);
 }
 
+function formatWriteComparisons(
+  cells: DbCellInput[],
+  columnTypes: Map<string, string>,
+  kind: SqlKind,
+  useParams: boolean,
+  params: DbValue[],
+  separator: string,
+): string {
+  return cells
+    .map(
+      (cell) =>
+        `${sanitizeIdentifier(cell.column, kind)} = ${placeValue(
+          coerceCell(cell, columnTypes.get(cell.column) ?? "TEXT"),
+          kind,
+          useParams,
+          params,
+        )}`,
+    )
+    .join(separator);
+}
+
 export function buildInsertSql(
   table: string,
   cells: DbCellInput[],
@@ -195,28 +216,22 @@ export function buildUpdateSql(
   }
   const useParams = useParamsFor(kind);
   const params: DbValue[] = [];
-  const setSql = set
-    .map(
-      (c) =>
-        `${sanitizeIdentifier(c.column, kind)} = ${placeValue(
-          coerceCell(c, columnTypes.get(c.column) ?? "TEXT"),
-          kind,
-          useParams,
-          params,
-        )}`,
-    )
-    .join(", ");
-  const whereSql = pk
-    .map(
-      (c) =>
-        `${sanitizeIdentifier(c.column, kind)} = ${placeValue(
-          coerceCell(c, columnTypes.get(c.column) ?? "TEXT"),
-          kind,
-          useParams,
-          params,
-        )}`,
-    )
-    .join(" AND ");
+  const setSql = formatWriteComparisons(
+    set,
+    columnTypes,
+    kind,
+    useParams,
+    params,
+    ", ",
+  );
+  const whereSql = formatWriteComparisons(
+    pk,
+    columnTypes,
+    kind,
+    useParams,
+    params,
+    " AND ",
+  );
   const sql = `UPDATE ${sanitizeIdentifier(
     table,
     kind,
@@ -235,17 +250,14 @@ export function buildDeleteSql(
   }
   const useParams = useParamsFor(kind);
   const params: DbValue[] = [];
-  const whereSql = pk
-    .map(
-      (c) =>
-        `${sanitizeIdentifier(c.column, kind)} = ${placeValue(
-          coerceCell(c, columnTypes.get(c.column) ?? "TEXT"),
-          kind,
-          useParams,
-          params,
-        )}`,
-    )
-    .join(" AND ");
+  const whereSql = formatWriteComparisons(
+    pk,
+    columnTypes,
+    kind,
+    useParams,
+    params,
+    " AND ",
+  );
   const sql = `DELETE FROM ${sanitizeIdentifier(
     table,
     kind,

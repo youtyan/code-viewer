@@ -1,5 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
+import type {
+  DynamoDbAttributeValue,
+  DynamoDbItem,
+  DynamoDbKey,
+} from "../../../core/database/types";
 import type { DockerDbInfo } from "../discovery";
 import {
   dockerCommand,
@@ -17,20 +22,7 @@ export type DynamoDbConfig = {
   sessionToken?: string;
 };
 
-export type DynamoDbAttributeValue =
-  | { S: string }
-  | { N: string }
-  | { B: string }
-  | { BOOL: boolean }
-  | { NULL: boolean }
-  | { M: Record<string, DynamoDbAttributeValue> }
-  | { L: DynamoDbAttributeValue[] }
-  | { SS: string[] }
-  | { NS: string[] }
-  | { BS: string[] };
-
-export type DynamoDbKey = Record<string, DynamoDbAttributeValue>;
-export type DynamoDbItem = Record<string, DynamoDbAttributeValue>;
+export type { DynamoDbAttributeValue, DynamoDbItem, DynamoDbKey };
 
 export type DynamoDbTableDescription = {
   TableName?: string;
@@ -68,51 +60,61 @@ export type DynamoDbGetItemResult = {
   consumedCapacity?: unknown;
 };
 
+type DynamoDbListTablesOptions = {
+  limit?: number;
+  exclusiveStartTableName?: string;
+  signal?: AbortSignal;
+};
+
+type DynamoDbScanOptions = {
+  tableName: string;
+  limit?: number;
+  exclusiveStartKey?: DynamoDbKey;
+  indexName?: string;
+  projectionExpression?: string;
+  filterExpression?: string;
+  expressionAttributeNames?: Record<string, string>;
+  expressionAttributeValues?: Record<string, DynamoDbAttributeValue>;
+  signal?: AbortSignal;
+};
+
+type DynamoDbQueryOptions = {
+  tableName: string;
+  keyConditionExpression: string;
+  limit?: number;
+  exclusiveStartKey?: DynamoDbKey;
+  indexName?: string;
+  projectionExpression?: string;
+  filterExpression?: string;
+  expressionAttributeNames?: Record<string, string>;
+  expressionAttributeValues?: Record<string, DynamoDbAttributeValue>;
+  scanIndexForward?: boolean;
+  signal?: AbortSignal;
+};
+
+type DynamoDbGetItemOptions = {
+  tableName: string;
+  key: DynamoDbKey;
+  projectionExpression?: string;
+  expressionAttributeNames?: Record<string, string>;
+  consistentRead?: boolean;
+  signal?: AbortSignal;
+};
+
 export type DynamoDbExplorer = {
   readonly kind: "dynamodb";
   readonly model: "document";
   close(): void;
-  listTablesAsync(opts?: {
-    limit?: number;
-    exclusiveStartTableName?: string;
-    signal?: AbortSignal;
-  }): Promise<DynamoDbListTablesResult>;
+  listTablesAsync(
+    opts?: DynamoDbListTablesOptions,
+  ): Promise<DynamoDbListTablesResult>;
   describeTableAsync(
     tableName: string,
     signal?: AbortSignal,
   ): Promise<DynamoDbTableDescription>;
-  scanAsync(opts: {
-    tableName: string;
-    limit?: number;
-    exclusiveStartKey?: DynamoDbKey;
-    indexName?: string;
-    projectionExpression?: string;
-    filterExpression?: string;
-    expressionAttributeNames?: Record<string, string>;
-    expressionAttributeValues?: Record<string, DynamoDbAttributeValue>;
-    signal?: AbortSignal;
-  }): Promise<DynamoDbScanResult>;
-  queryAsync(opts: {
-    tableName: string;
-    keyConditionExpression: string;
-    limit?: number;
-    exclusiveStartKey?: DynamoDbKey;
-    indexName?: string;
-    projectionExpression?: string;
-    filterExpression?: string;
-    expressionAttributeNames?: Record<string, string>;
-    expressionAttributeValues?: Record<string, DynamoDbAttributeValue>;
-    scanIndexForward?: boolean;
-    signal?: AbortSignal;
-  }): Promise<DynamoDbQueryResult>;
-  getItemAsync(opts: {
-    tableName: string;
-    key: DynamoDbKey;
-    projectionExpression?: string;
-    expressionAttributeNames?: Record<string, string>;
-    consistentRead?: boolean;
-    signal?: AbortSignal;
-  }): Promise<DynamoDbGetItemResult>;
+  scanAsync(opts: DynamoDbScanOptions): Promise<DynamoDbScanResult>;
+  queryAsync(opts: DynamoDbQueryOptions): Promise<DynamoDbQueryResult>;
+  getItemAsync(opts: DynamoDbGetItemOptions): Promise<DynamoDbGetItemResult>;
 };
 
 type DynamoDbAction =
@@ -581,6 +583,43 @@ function asNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function asDynamoDbItemsResult(
+  raw: Record<string, unknown>,
+): DynamoDbScanResult {
+  return {
+    items: Array.isArray(raw.Items) ? (raw.Items as DynamoDbItem[]) : [],
+    count: asNumber(raw.Count),
+    scannedCount: asNumber(raw.ScannedCount),
+    ...(raw.LastEvaluatedKey
+      ? { lastEvaluatedKey: asObject(raw.LastEvaluatedKey) as DynamoDbKey }
+      : {}),
+  };
+}
+
+function dynamoDbItemsRequestFields(
+  opts: DynamoDbScanOptions | DynamoDbQueryOptions,
+) {
+  return {
+    ...(opts.limit ? { Limit: Math.min(1000, Math.max(1, opts.limit)) } : {}),
+    ...(opts.exclusiveStartKey
+      ? { ExclusiveStartKey: opts.exclusiveStartKey }
+      : {}),
+    ...(opts.indexName ? { IndexName: opts.indexName } : {}),
+    ...(opts.projectionExpression
+      ? { ProjectionExpression: opts.projectionExpression }
+      : {}),
+    ...(opts.filterExpression
+      ? { FilterExpression: opts.filterExpression }
+      : {}),
+    ...(opts.expressionAttributeNames
+      ? { ExpressionAttributeNames: opts.expressionAttributeNames }
+      : {}),
+    ...(opts.expressionAttributeValues
+      ? { ExpressionAttributeValues: opts.expressionAttributeValues }
+      : {}),
+  };
+}
+
 export function createDynamoDbAdapter(
   config: DynamoDbConfig,
 ): DynamoDbExplorer {
@@ -661,11 +700,9 @@ export function createDynamoDbAdapter(
     return (text ? JSON.parse(text) : {}) as T;
   }
 
-  async function listTablesAsync(opts?: {
-    limit?: number;
-    exclusiveStartTableName?: string;
-    signal?: AbortSignal;
-  }): Promise<DynamoDbListTablesResult> {
+  async function listTablesAsync(
+    opts?: DynamoDbListTablesOptions,
+  ): Promise<DynamoDbListTablesResult> {
     const body = {
       ...(opts?.limit ? { Limit: Math.min(100, Math.max(1, opts.limit)) } : {}),
       ...(opts?.exclusiveStartTableName
@@ -698,116 +735,43 @@ export function createDynamoDbAdapter(
     return asObject(raw.Table) as DynamoDbTableDescription;
   }
 
-  async function scanAsync(opts: {
-    tableName: string;
-    limit?: number;
-    exclusiveStartKey?: DynamoDbKey;
-    indexName?: string;
-    projectionExpression?: string;
-    filterExpression?: string;
-    expressionAttributeNames?: Record<string, string>;
-    expressionAttributeValues?: Record<string, DynamoDbAttributeValue>;
-    signal?: AbortSignal;
-  }): Promise<DynamoDbScanResult> {
+  async function scanAsync(
+    opts: DynamoDbScanOptions,
+  ): Promise<DynamoDbScanResult> {
     assertTableName(opts.tableName);
     const raw = await signedJsonRequest<Record<string, unknown>>(
       "Scan",
       {
         TableName: opts.tableName,
-        ...(opts.limit
-          ? { Limit: Math.min(1000, Math.max(1, opts.limit)) }
-          : {}),
-        ...(opts.exclusiveStartKey
-          ? { ExclusiveStartKey: opts.exclusiveStartKey }
-          : {}),
-        ...(opts.indexName ? { IndexName: opts.indexName } : {}),
-        ...(opts.projectionExpression
-          ? { ProjectionExpression: opts.projectionExpression }
-          : {}),
-        ...(opts.filterExpression
-          ? { FilterExpression: opts.filterExpression }
-          : {}),
-        ...(opts.expressionAttributeNames
-          ? { ExpressionAttributeNames: opts.expressionAttributeNames }
-          : {}),
-        ...(opts.expressionAttributeValues
-          ? { ExpressionAttributeValues: opts.expressionAttributeValues }
-          : {}),
+        ...dynamoDbItemsRequestFields(opts),
       },
       opts.signal,
     );
-    return {
-      items: Array.isArray(raw.Items) ? (raw.Items as DynamoDbItem[]) : [],
-      count: asNumber(raw.Count),
-      scannedCount: asNumber(raw.ScannedCount),
-      ...(raw.LastEvaluatedKey
-        ? { lastEvaluatedKey: asObject(raw.LastEvaluatedKey) as DynamoDbKey }
-        : {}),
-    };
+    return asDynamoDbItemsResult(raw);
   }
 
-  async function queryAsync(opts: {
-    tableName: string;
-    keyConditionExpression: string;
-    limit?: number;
-    exclusiveStartKey?: DynamoDbKey;
-    indexName?: string;
-    projectionExpression?: string;
-    filterExpression?: string;
-    expressionAttributeNames?: Record<string, string>;
-    expressionAttributeValues?: Record<string, DynamoDbAttributeValue>;
-    scanIndexForward?: boolean;
-    signal?: AbortSignal;
-  }): Promise<DynamoDbQueryResult> {
+  async function queryAsync(
+    opts: DynamoDbQueryOptions,
+  ): Promise<DynamoDbQueryResult> {
     assertTableName(opts.tableName);
     const raw = await signedJsonRequest<Record<string, unknown>>(
       "Query",
       {
         TableName: opts.tableName,
         KeyConditionExpression: opts.keyConditionExpression,
-        ...(opts.limit
-          ? { Limit: Math.min(1000, Math.max(1, opts.limit)) }
-          : {}),
-        ...(opts.exclusiveStartKey
-          ? { ExclusiveStartKey: opts.exclusiveStartKey }
-          : {}),
-        ...(opts.indexName ? { IndexName: opts.indexName } : {}),
-        ...(opts.projectionExpression
-          ? { ProjectionExpression: opts.projectionExpression }
-          : {}),
-        ...(opts.filterExpression
-          ? { FilterExpression: opts.filterExpression }
-          : {}),
-        ...(opts.expressionAttributeNames
-          ? { ExpressionAttributeNames: opts.expressionAttributeNames }
-          : {}),
-        ...(opts.expressionAttributeValues
-          ? { ExpressionAttributeValues: opts.expressionAttributeValues }
-          : {}),
+        ...dynamoDbItemsRequestFields(opts),
         ...(opts.scanIndexForward !== undefined
           ? { ScanIndexForward: opts.scanIndexForward }
           : {}),
       },
       opts.signal,
     );
-    return {
-      items: Array.isArray(raw.Items) ? (raw.Items as DynamoDbItem[]) : [],
-      count: asNumber(raw.Count),
-      scannedCount: asNumber(raw.ScannedCount),
-      ...(raw.LastEvaluatedKey
-        ? { lastEvaluatedKey: asObject(raw.LastEvaluatedKey) as DynamoDbKey }
-        : {}),
-    };
+    return asDynamoDbItemsResult(raw);
   }
 
-  async function getItemAsync(opts: {
-    tableName: string;
-    key: DynamoDbKey;
-    projectionExpression?: string;
-    expressionAttributeNames?: Record<string, string>;
-    consistentRead?: boolean;
-    signal?: AbortSignal;
-  }): Promise<DynamoDbGetItemResult> {
+  async function getItemAsync(
+    opts: DynamoDbGetItemOptions,
+  ): Promise<DynamoDbGetItemResult> {
     assertTableName(opts.tableName);
     const raw = await signedJsonRequest<Record<string, unknown>>(
       "GetItem",

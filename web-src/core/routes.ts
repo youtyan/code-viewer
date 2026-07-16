@@ -88,7 +88,7 @@ function parseLegacyRange(
   };
 }
 
-function parseLineTarget(
+export function parseLineTarget(
   value: string | null | undefined,
 ): SourceLineTarget | undefined {
   const raw = value || "";

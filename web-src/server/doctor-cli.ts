@@ -12,8 +12,8 @@ import type {
 import {
   configureExternalCommands,
   type ExternalCommandOverride,
-  parseExternalCommandOverride,
 } from "./command-resolver";
+import { takeGlobalCliOption } from "./cli-helpers";
 import { buildDoctorReport } from "./doctor";
 import { DOCTOR_AGENT_HELP } from "./doctor-agent-help";
 import { DEFAULT_WORKTREE_OMIT_DIR_NAMES } from "./git";
@@ -69,27 +69,20 @@ export function parseDoctorCliArgs(argv: string[]): DoctorCliParseResult {
       json = true;
       continue;
     }
-    if (arg === "--cwd") {
-      const next = argv[++i];
-      if (!next) return { kind: "error", message: "--cwd requires a value" };
-      cwd = next;
+    const global = takeGlobalCliOption(argv, i, {
+      allowedCommands: ["git", "docker", "gh"],
+    });
+    if (global.kind === "error") {
+      return { kind: "error", message: global.error };
+    }
+    if (global.kind === "cwd") {
+      cwd = global.value;
+      i = global.next;
       continue;
     }
-    if (arg === "--bin") {
-      const next = argv[++i];
-      if (!next) {
-        return {
-          kind: "error",
-          message: "--bin requires <name>=<absolute-path>",
-        };
-      }
-      const parsed = parseExternalCommandOverride(next, "--bin", [
-        "git",
-        "docker",
-        "gh",
-      ]);
-      if (parsed.ok === false) return { kind: "error", message: parsed.error };
-      commandOverrides.push(parsed.override);
+    if (global.kind === "command-override") {
+      commandOverrides.push(global.override);
+      i = global.next;
       continue;
     }
     if (arg === "--port") {
