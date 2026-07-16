@@ -5,6 +5,11 @@
 // していたため集約。
 
 import { realpathSync } from "node:fs";
+import {
+  type ExternalCommandName,
+  type ExternalCommandOverride,
+  parseExternalCommandOverride,
+} from "./command-resolver";
 import * as git from "./git";
 import { readServerRegistry } from "./server-registry";
 
@@ -17,6 +22,56 @@ export function takeValue(
   const value = argv[index + 1];
   if (value === undefined) return { error: `${flag} requires a value` };
   return { value, next: index + 1 };
+}
+
+export type GlobalCliOption =
+  | { kind: "unhandled" }
+  | { kind: "error"; error: string }
+  | { kind: "cwd" | "server"; value: string; next: number }
+  | {
+      kind: "command-override";
+      override: ExternalCommandOverride;
+      next: number;
+    };
+
+export type GlobalCliOptionOptions = {
+  allowServer?: boolean;
+  allowedCommands?: readonly ExternalCommandName[];
+};
+
+// CLI subcommand 共通の global option を 1 つ消費する。未対応の option は
+// caller に返し、各サブコマンド固有の unknown-option 契約を保つ。
+export function takeGlobalCliOption(
+  argv: string[],
+  index: number,
+  options: GlobalCliOptionOptions,
+): GlobalCliOption {
+  const flag = argv[index];
+  if (flag === "--cwd" || (flag === "--server" && options.allowServer)) {
+    const taken = takeValue(argv, index, flag);
+    if ("error" in taken) return { kind: "error", error: taken.error };
+    return {
+      kind: flag === "--cwd" ? "cwd" : "server",
+      value: taken.value,
+      next: taken.next,
+    };
+  }
+  if (flag === "--bin" && options.allowedCommands) {
+    const taken = takeValue(argv, index, flag);
+    if ("error" in taken) return { kind: "error", error: taken.error };
+    const parsed = parseExternalCommandOverride(
+      taken.value,
+      "--bin",
+      options.allowedCommands,
+    );
+    if (parsed.ok === false) return { kind: "error", error: parsed.error };
+    return {
+      kind: "command-override",
+      override: parsed.override,
+      next: taken.next,
+    };
+  }
+  return { kind: "unhandled" };
 }
 
 // POSIX shell の single-quote 規則: '...' 内は literal、内部の ' だけ
@@ -48,10 +103,7 @@ export function isUnsafeText(value: string): boolean {
 // `--ref <value>` の典型的なバリデーション。empty / NUL / 改行 / leading
 // dash を rejectする。file-cli と status-cli の両方で `--ref` という名前で
 // ref を受けるので、flag 名は引数で受けて両者でメッセージを共有する。
-export function validateRefValue(
-  value: string,
-  flag: string,
-): string | undefined {
+function validateSafeCliValue(value: string, flag: string): string | undefined {
   if (!value) return `${flag} requires a non-empty value`;
   if (isUnsafeText(value))
     return `${flag} must be single-line and must not contain NUL`;
@@ -59,14 +111,21 @@ export function validateRefValue(
   return undefined;
 }
 
+export function validateRefValue(
+  value: string,
+  flag: string,
+): string | undefined {
+  const error = validateSafeCliValue(value, flag);
+  if (error) return error;
+  return undefined;
+}
+
 export function validateRepoRelativePathValue(
   value: string,
   flag: string,
 ): string | undefined {
-  if (!value) return `${flag} requires a non-empty value`;
-  if (isUnsafeText(value))
-    return `${flag} must be single-line and must not contain NUL`;
-  if (value.startsWith("-")) return `${flag} must not start with '-'`;
+  const error = validateSafeCliValue(value, flag);
+  if (error) return error;
   if (value.startsWith("/") || value.startsWith("\\"))
     return `${flag} must be repo-relative`;
   const parts = value.split(/[\\/]+/);

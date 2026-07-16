@@ -16,12 +16,12 @@ import {
   readStdin,
   requestJson,
   resolveRepoRoot,
+  takeGlobalCliOption,
   takeValue,
 } from "./cli-helpers";
 import {
   configureExternalCommands,
   type ExternalCommandOverride,
-  parseExternalCommandOverride,
 } from "./command-resolver";
 import {
   type GithubIssueListItem,
@@ -308,21 +308,20 @@ export function parseJournalArgs(argv: string[]): JournalParseResult {
       const arg = argv[i];
       if (arg === "--help" || arg === "-h")
         return { ok: true, args: { command: { kind: "help" }, dryRun: false } };
-      if (arg === "--cwd" || arg === "--server") {
-        const taken = takeValue(argv, i, arg);
-        if ("error" in taken) return { ok: false, error: taken.error };
-        if (arg === "--cwd") cwd = taken.value;
-        else server = taken.value;
-        i = taken.next;
-      } else if (arg === "--bin") {
-        const taken = takeValue(argv, i, arg);
-        if ("error" in taken) return { ok: false, error: taken.error };
-        const parsed = parseExternalCommandOverride(taken.value, "--bin", [
-          "gh",
-        ]);
-        if (parsed.ok === false) return { ok: false, error: parsed.error };
-        commandOverrides.push(parsed.override);
-        i = taken.next;
+      const global = takeGlobalCliOption(argv, i, {
+        allowServer: true,
+        allowedCommands: ["gh"],
+      });
+      if (global.kind === "error") return { ok: false, error: global.error };
+      if (global.kind === "cwd") {
+        cwd = global.value;
+        i = global.next;
+      } else if (global.kind === "server") {
+        server = global.value;
+        i = global.next;
+      } else if (global.kind === "command-override") {
+        commandOverrides.push(global.override);
+        i = global.next;
       } else if (valueFlags.has(arg)) {
         const taken = takeValue(argv, i, arg);
         if ("error" in taken) return { ok: false, error: taken.error };

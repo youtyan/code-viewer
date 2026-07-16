@@ -12,6 +12,7 @@ import {
   readStdin,
   requestJson,
   resolveRepoRoot,
+  takeGlobalCliOption,
   takeValue,
 } from "./cli-helpers";
 
@@ -301,12 +302,14 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h")
       return { ok: true, args: { command: { kind: "help" } } };
-    if (arg === "--cwd" || arg === "--server") {
-      const taken = takeValue(argv, i, arg);
-      if ("error" in taken) return { ok: false, error: taken.error };
-      if (arg === "--cwd") cwd = taken.value;
-      else server = taken.value;
-      i = taken.next;
+    const global = takeGlobalCliOption(argv, i, { allowServer: true });
+    if (global.kind === "error") return { ok: false, error: global.error };
+    if (global.kind === "cwd") {
+      cwd = global.value;
+      i = global.next;
+    } else if (global.kind === "server") {
+      server = global.value;
+      i = global.next;
     } else if (valueFlags.has(arg)) {
       const taken = takeValue(argv, i, arg);
       if ("error" in taken) return { ok: false, error: taken.error };

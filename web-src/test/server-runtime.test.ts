@@ -17,6 +17,38 @@ import {
 const tmpRoot = join(import.meta.dir, "..", "..", ".tmp-tests");
 
 describe("server runtime compatibility helpers", () => {
+  test.each([
+    {
+      name: "returns empty output for a successful no-op",
+      program: "void 0",
+      expected: { code: 0, stdout: "", stderr: "" },
+    },
+    {
+      name: "keeps standard output and standard error separate",
+      program: 'process.stdout.write("out"); process.stderr.write("err")',
+      expected: { code: 0, stdout: "out", stderr: "err" },
+    },
+    {
+      name: "preserves a non-zero exit status",
+      program: 'process.stdout.write("failed"); process.exit(7)',
+      expected: { code: 7, stdout: "failed", stderr: "" },
+    },
+    {
+      name: "decodes UTF-8 output",
+      program: 'process.stdout.write("こんにちは")',
+      expected: { code: 0, stdout: "こんにちは", stderr: "" },
+    },
+    {
+      name: "keeps a non-zero error-only result",
+      program: 'process.stderr.write("problem"); process.exit(1)',
+      expected: { code: 1, stdout: "", stderr: "problem" },
+    },
+  ])("runSync $name", ({ program, expected }) => {
+    expect(runSync([process.execPath, "-e", program], process.cwd())).toEqual(
+      expected,
+    );
+  });
+
   test("runSync returns process status and decoded output", () => {
     const result = runSync(
       [process.execPath, "-e", 'process.stdout.write("ok")'],

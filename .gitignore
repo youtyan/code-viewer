@@ -6,6 +6,7 @@ web/shiki.js
 web/vendor/highlight.js/highlight.min.js
 web/vendor/THIRD_PARTY_NOTICES.txt
 .code-viewer/
+.jscpd-todo.md
 docs/superpowers/
 *.tgz
 .DS_Store

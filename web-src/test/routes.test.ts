@@ -3,12 +3,32 @@ import {
   buildRawFileUrl,
   buildRoute,
   parseDoctorOverlay,
+  parseLineTarget,
   parseRoute,
   withDoctorOverlay,
 } from "../core/routes";
 
 describe("routes", () => {
   const defaultRange = { from: "HEAD", to: "worktree" };
+
+  test.each([
+    { name: "accepts a positive line", input: "12", expected: 12 },
+    {
+      name: "accepts an ascending range",
+      input: "5-9",
+      expected: { start: 5, end: 9 },
+    },
+    {
+      name: "normalizes a reversed range",
+      input: "9-5",
+      expected: { start: 5, end: 9 },
+    },
+    { name: "rejects zero", input: "0", expected: undefined },
+    { name: "rejects a decimal", input: "1.5", expected: undefined },
+    { name: "rejects an empty value", input: "", expected: undefined },
+  ])("parseLineTarget $name", ({ input, expected }) => {
+    expect(parseLineTarget(input)).toEqual(expected);
+  });
 
   test("builds canonical diff and file detail URLs", () => {
     const range = { from: "HEAD", to: "worktree" };

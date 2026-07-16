@@ -25,6 +25,43 @@ async function withTempProject(
 }
 
 describe("state store", () => {
+  test.each([
+    {
+      name: "rounds an in-range integer setting",
+      input: { sidebarWidth: 400.6 },
+      expected: { version: 1, sidebarWidth: 401 },
+    },
+    {
+      name: "clamps an integer setting below its minimum",
+      input: { sidebarWidth: 0 },
+      expected: { version: 1, sidebarWidth: 180 },
+    },
+    {
+      name: "clamps an integer setting above its maximum",
+      input: { sidebarWidth: 9_999 },
+      expected: { version: 1, sidebarWidth: 900 },
+    },
+    {
+      name: "preserves an in-range floating-point setting",
+      input: { annotationRate: 1.25 },
+      expected: { version: 1, annotationRate: 1.25 },
+    },
+    {
+      name: "clamps a floating-point setting below its minimum",
+      input: { annotationRate: 0 },
+      expected: { version: 1, annotationRate: 0.5 },
+    },
+    {
+      name: "clamps a floating-point setting above its maximum",
+      input: { annotationRate: 4 },
+      expected: { version: 1, annotationRate: 2 },
+    },
+  ])("settings numeric sanitizer $name", async ({ input, expected }) => {
+    await withTempProject(async (dir) => {
+      expect(await patchAppSettingsState(dir, input)).toEqual(expected);
+    });
+  });
+
   test("settings patch sanitizes values and supports null deletes", async () => {
     await withTempProject(async (dir) => {
       expect(await loadAppSettingsState(dir)).toEqual({ version: 1 });

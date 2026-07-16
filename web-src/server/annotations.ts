@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { parseLineTarget } from "../core/routes";
 import type {
   AnnotationDatabaseDataState,
   AnnotationDatabaseQueryState,
@@ -50,18 +51,9 @@ function normalizeLineRange(raw: unknown): AnnotationLineRange | undefined {
 export function parseAnnotationLine(
   raw: string,
 ): AnnotationLineRange | undefined {
-  const range = /^(\d+)-(\d+)$/.exec(raw);
-  if (range) {
-    const a = Number(range[1]);
-    const b = Number(range[2]);
-    const start = Math.min(a, b);
-    const end = Math.max(a, b);
-    return start > 0 ? { start, end } : undefined;
-  }
-  const line = Number(raw);
-  return Number.isInteger(line) && line > 0
-    ? { start: line, end: line }
-    : undefined;
+  const target = parseLineTarget(raw);
+  if (target === undefined) return undefined;
+  return typeof target === "number" ? { start: target, end: target } : target;
 }
 
 function normalizeRange(raw: unknown): { from: string; to: string } {

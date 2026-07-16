@@ -47,13 +47,23 @@ function optionalBoolean(value: unknown): boolean | undefined {
 }
 
 // ai-dup-check: allow -- app-state sanitizer clamps numeric settings locally.
+function optionalFiniteNumber(
+  value: unknown,
+  min: number,
+  max: number,
+  round: boolean,
+): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const normalized = round ? Math.round(value) : value;
+  return Math.max(min, Math.min(max, normalized));
+}
+
 function optionalNumber(
   value: unknown,
   min: number,
   max: number,
 ): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
-  return Math.max(min, Math.min(max, Math.round(value)));
+  return optionalFiniteNumber(value, min, max, true);
 }
 
 function optionalFloat(
@@ -61,8 +71,7 @@ function optionalFloat(
   min: number,
   max: number,
 ): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
-  return Math.max(min, Math.min(max, value));
+  return optionalFiniteNumber(value, min, max, false);
 }
 
 function optionalFontSize(value: unknown): ViewerFontSizeSetting | undefined {
