@@ -227,6 +227,21 @@ const VALUE_FLAGS = new Set(["--term", "--ref", "--max"]);
 const REPEATABLE_VALUE_FLAGS = new Set(["--path"]);
 const BOOL_FLAGS = new Set(["--regex", "--json"]);
 
+function parseSearchMax(
+  raw: string | undefined,
+  hardCap: number,
+): { value: number | undefined } | { error: string } {
+  if (raw === undefined) return { value: undefined };
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    return { error: `--max must be a positive integer (got ${raw})` };
+  }
+  if (value > hardCap) {
+    return { error: `--max must be <= ${hardCap} (got ${value})` };
+  }
+  return { value };
+}
+
 export function parseSearchArgs(argv: string[]): SearchParseResult {
   const rest: string[] = [];
   let cwd: string | undefined;
@@ -316,24 +331,12 @@ export function parseSearchArgs(argv: string[]): SearchParseResult {
         error: "search files does not accept --path",
       };
     }
-    const maxRaw = options.get("--max");
-    let max = FILE_NAME_SEARCH_DEFAULT_MAX;
-    if (maxRaw !== undefined) {
-      const n = Number(maxRaw);
-      if (!Number.isInteger(n) || n <= 0) {
-        return {
-          ok: false,
-          error: `--max must be a positive integer (got ${maxRaw})`,
-        };
-      }
-      if (n > FILE_SEARCH_ABSOLUTE_MAX) {
-        return {
-          ok: false,
-          error: `--max must be <= ${FILE_SEARCH_ABSOLUTE_MAX} (got ${n})`,
-        };
-      }
-      max = n;
-    }
+    const parsedMax = parseSearchMax(
+      options.get("--max"),
+      FILE_SEARCH_ABSOLUTE_MAX,
+    );
+    if ("error" in parsedMax) return { ok: false, error: parsedMax.error };
+    const max = parsedMax.value ?? FILE_NAME_SEARCH_DEFAULT_MAX;
     return {
       ok: true,
       args: {
@@ -352,24 +355,8 @@ export function parseSearchArgs(argv: string[]): SearchParseResult {
   }
 
   // subcommand === "code"
-  const maxRaw = options.get("--max");
-  let max: number | undefined;
-  if (maxRaw !== undefined) {
-    const n = Number(maxRaw);
-    if (!Number.isInteger(n) || n <= 0) {
-      return {
-        ok: false,
-        error: `--max must be a positive integer (got ${maxRaw})`,
-      };
-    }
-    if (n > GREP_ABSOLUTE_MAX) {
-      return {
-        ok: false,
-        error: `--max must be <= ${GREP_ABSOLUTE_MAX} (got ${n})`,
-      };
-    }
-    max = n;
-  }
+  const parsedMax = parseSearchMax(options.get("--max"), GREP_ABSOLUTE_MAX);
+  if ("error" in parsedMax) return { ok: false, error: parsedMax.error };
 
   return {
     ok: true,
@@ -380,7 +367,7 @@ export function parseSearchArgs(argv: string[]): SearchParseResult {
         ref: options.get("--ref"),
         paths,
         regex: flags.has("--regex"),
-        max,
+        max: parsedMax.value,
         json: flags.has("--json"),
       },
       cwd,

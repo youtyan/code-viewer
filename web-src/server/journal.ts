@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { makeTimedId } from "../core/id";
 import type {
   DailyJournalEntry,
   DailyJournalState,
@@ -16,9 +17,14 @@ import {
   journalIssueLabel,
   journalIssueRepoLabel,
   normalizeJournalLabels,
+  taskClaimActive,
 } from "../core/journal";
 import { CODE_VIEWER_DIR } from "./annotations";
 import { createJsonFileStore } from "./json-store";
+import {
+  type OrderedInsertOptions,
+  orderedInsertOptionCount,
+} from "./ordered-insert";
 
 export const DAILY_JOURNAL_FILE_NAME = "daily-journal.json";
 export const JOURNAL_TASKS_FILE_NAME = "tasks.json";
@@ -50,9 +56,7 @@ export function emptyJournalTaskState(): JournalTaskState {
 }
 
 export function makeJournalId(prefix: string): string {
-  const random = Math.random().toString(36).slice(2, 8);
-  const time = Date.now().toString(36);
-  return `${prefix}-${time}${random}`;
+  return makeTimedId(prefix);
 }
 
 function optionalString(value: unknown, maxLen: number): string | undefined {
@@ -290,26 +294,12 @@ export type JournalTaskPatch = {
   journal_entry_id?: string | null;
 };
 
-type InsertOptions = {
-  before_id?: string;
-  after_id?: string;
-  position?: number;
-};
-
-function insertOptionCount(input: InsertOptions): number {
-  return (
-    (input.before_id ? 1 : 0) +
-    (input.after_id ? 1 : 0) +
-    (input.position !== undefined ? 1 : 0)
-  );
-}
-
 function taskInsertIndex(
   tasks: JournalTask[],
   status: JournalTaskStatus,
-  input: InsertOptions,
+  input: OrderedInsertOptions,
 ): { ok: true; index: number } | { ok: false; error: string } {
-  if (insertOptionCount(input) > 1)
+  if (orderedInsertOptionCount(input) > 1)
     return { ok: false, error: "use only one of before, after, or position" };
   if (input.before_id || input.after_id) {
     const anchorId = input.before_id || input.after_id || "";
@@ -491,7 +481,7 @@ function githubIssueRequiredLabels(
 }
 
 function taskHasPlacement(
-  input: InsertOptions & { status?: JournalTaskStatus },
+  input: OrderedInsertOptions & { status?: JournalTaskStatus },
   currentStatus?: JournalTaskStatus,
 ) {
   return (
@@ -545,6 +535,20 @@ export function addJournalTask(
   const tasks = [...state.tasks];
   tasks.splice(insertAt.index, 0, task);
   return { ok: true, state: { version: 1, tasks }, task };
+}
+
+function journalTaskResult(
+  state: JournalTaskState,
+  task: JournalTask,
+): { ok: true; state: JournalTaskState; task: JournalTask } {
+  return {
+    ok: true,
+    state: {
+      version: 1,
+      tasks: state.tasks.map((item) => (item.id === task.id ? task : item)),
+    },
+    task,
+  };
 }
 
 export function updateJournalTask(
@@ -601,20 +605,13 @@ export function updateJournalTask(
     if (journalEntryId) next.journal_entry_id = journalEntryId;
     else delete next.journal_entry_id;
   }
-  return {
-    ok: true,
-    state: {
-      version: 1,
-      tasks: state.tasks.map((item) => (item.id === id ? next : item)),
-    },
-    task: next,
-  };
+  return journalTaskResult(state, next);
 }
 
 export function moveJournalTask(
   state: JournalTaskState,
   id: string,
-  input: InsertOptions & { status?: JournalTaskStatus },
+  input: OrderedInsertOptions & { status?: JournalTaskStatus },
   now: string,
 ):
   | { ok: true; state: JournalTaskState; task: JournalTask }
@@ -768,11 +765,8 @@ export function claimJournalTask(
   const task = state.tasks.find((item) => item.id === id);
   if (!task) return { ok: false, error: "task not found" };
   const nowMs = Date.parse(now);
-  const activeClaim =
-    task.claim &&
-    Number.isFinite(Date.parse(task.claim.lease_expires_at)) &&
-    Date.parse(task.claim.lease_expires_at) > nowMs;
-  if (activeClaim) return { ok: false, error: "task is already claimed" };
+  if (taskClaimActive(task, nowMs))
+    return { ok: false, error: "task is already claimed" };
   if (task.status !== "todo" && task.status !== "doing")
     return {
       ok: false,
@@ -782,10 +776,8 @@ export function claimJournalTask(
   const wipLimit = input.wip_limit;
   if (wipLimit !== undefined && wipLimit > 0) {
     const activeDoing = state.tasks.filter((item) => {
-      if (item.status !== "doing" || !item.claim) return false;
-      if (item.claim.by !== by) return false;
-      const expires = Date.parse(item.claim.lease_expires_at);
-      return Number.isFinite(expires) && expires > nowMs;
+      if (item.status !== "doing" || item.claim?.by !== by) return false;
+      return taskClaimActive(item, nowMs);
     }).length;
     if (activeDoing >= wipLimit)
       return { ok: false, error: "WIP limit reached" };
@@ -805,14 +797,7 @@ export function claimJournalTask(
       lease_expires_at: leaseExpiresAt,
     },
   };
-  return {
-    ok: true,
-    state: {
-      version: 1,
-      tasks: state.tasks.map((item) => (item.id === id ? next : item)),
-    },
-    task: next,
-  };
+  return journalTaskResult(state, next);
 }
 
 export function completeJournalTask(
@@ -832,11 +817,7 @@ export function completeJournalTask(
   if (task.status !== "doing")
     return { ok: false, error: "only doing tasks can be completed" };
   const nowMs = Date.parse(now);
-  const activeClaim =
-    task.claim &&
-    Number.isFinite(Date.parse(task.claim.lease_expires_at)) &&
-    Date.parse(task.claim.lease_expires_at) > nowMs;
-  if (!activeClaim)
+  if (!taskClaimActive(task, nowMs))
     return { ok: false, error: "task must be claimed before completion" };
   const by = optionalString(input.by, 128);
   if (!by) return { ok: false, error: "task completion requires claim owner" };
@@ -864,14 +845,7 @@ export function completeJournalTask(
     ...(notes.length ? { notes } : {}),
   };
   delete next.claim;
-  return {
-    ok: true,
-    state: {
-      version: 1,
-      tasks: state.tasks.map((item) => (item.id === id ? next : item)),
-    },
-    task: next,
-  };
+  return journalTaskResult(state, next);
 }
 
 export function deleteJournalTask(

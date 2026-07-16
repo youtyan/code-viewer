@@ -448,6 +448,169 @@ async function runAnnotateAndCatchExit(argv: string[]): Promise<void> {
   }
 }
 
+describe("runAnnotateCli add output", () => {
+  test.each([
+    {
+      name: "file annotation shows a single line",
+      argv: [
+        "--server",
+        SERVER,
+        "add",
+        "--file",
+        "src/sample.ts",
+        "--line",
+        "3",
+        "--body",
+        "sample note",
+      ],
+      response: {
+        session_id: "session-1",
+        session_title: "Sample session",
+        entry: {
+          id: "entry-1",
+          created_at: "2026-01-02T03:04:05Z",
+          path: "src/sample.ts",
+          line: { start: 3, end: 3 },
+          body: "sample note",
+        },
+      },
+      expectedLogs: [
+        "annotated src/sample.ts:3 [entry-1] in session session-1 (Sample session)",
+      ],
+      expectedErrs: [
+        `view annotations at ${SERVER}/ with the code annotations panel`,
+      ],
+    },
+    {
+      name: "file annotation shows a line range",
+      argv: [
+        "--server",
+        SERVER,
+        "add",
+        "--file",
+        "src/sample.ts",
+        "--line",
+        "3-5",
+        "--body",
+        "sample note",
+      ],
+      response: {
+        session_id: "session-1",
+        session_title: "Sample session",
+        entry: {
+          id: "entry-2",
+          created_at: "2026-01-02T03:04:05Z",
+          path: "src/sample.ts",
+          line: { start: 3, end: 5 },
+          body: "sample note",
+        },
+      },
+      expectedLogs: [
+        "annotated src/sample.ts:3-5 [entry-2] in session session-1 (Sample session)",
+      ],
+      expectedErrs: [
+        `view annotations at ${SERVER}/ with the code annotations panel`,
+      ],
+    },
+    {
+      name: "file annotation omits an absent line",
+      argv: [
+        "--server",
+        SERVER,
+        "add",
+        "--file",
+        "src/sample.ts",
+        "--body",
+        "sample note",
+      ],
+      response: {
+        session_id: "session-1",
+        session_title: "Sample session",
+        entry: {
+          id: "entry-3",
+          created_at: "2026-01-02T03:04:05Z",
+          path: "src/sample.ts",
+          body: "sample note",
+        },
+      },
+      expectedLogs: [
+        "annotated src/sample.ts [entry-3] in session session-1 (Sample session)",
+      ],
+      expectedErrs: [
+        `view annotations at ${SERVER}/ with the code annotations panel`,
+      ],
+    },
+    {
+      name: "database annotation shows its stored location",
+      argv: [
+        "--server",
+        SERVER,
+        "add-db",
+        "--db",
+        "sample.db",
+        "--body",
+        "sample note",
+      ],
+      response: {
+        session_id: "session-1",
+        session_title: "Sample session",
+        entry: {
+          id: "entry-4",
+          created_at: "2026-01-02T03:04:05Z",
+          path: "database/sample_table",
+          body: "sample note",
+        },
+      },
+      expectedLogs: [
+        "annotated database/sample_table [entry-4] in session session-1 (Sample session)",
+      ],
+      expectedErrs: [
+        `view annotations at ${SERVER}/ with the code annotations panel`,
+      ],
+    },
+    {
+      name: "auto-created session is announced with the fallback title",
+      argv: [
+        "--server",
+        SERVER,
+        "add",
+        "--file",
+        "src/sample.ts",
+        "--body",
+        "sample note",
+      ],
+      response: {
+        session_id: "session-2",
+        created_session: true,
+        entry: {
+          id: "entry-5",
+          created_at: "2026-01-02T03:04:05Z",
+          path: "src/sample.ts",
+          body: "sample note",
+        },
+      },
+      expectedLogs: [
+        "annotated src/sample.ts [entry-5] in session session-2 (Untitled session)",
+      ],
+      expectedErrs: [
+        "created new annotation session session-2 (Untitled session)",
+        `view annotations at ${SERVER}/ with the code annotations panel`,
+      ],
+    },
+  ])("$name", async ({ argv, response, expectedLogs, expectedErrs }) => {
+    const harness = installAnnotateRunHarness([
+      { body: JSON.stringify({ sessions: [] }) },
+      { body: JSON.stringify(response) },
+    ]);
+
+    await runAnnotateAndCatchExit(argv);
+
+    expect(harness.logs).toEqual(expectedLogs);
+    expect(harness.errs).toEqual(expectedErrs);
+    expect(harness.exits).toEqual([]);
+  });
+});
+
 describe("runAnnotateCli server error handling", () => {
   test("non-2xx application/json bodies with {error:string} surface the error text only", async () => {
     const harness = installAnnotateRunHarness([

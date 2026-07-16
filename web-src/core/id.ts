@@ -14,3 +14,9 @@ export function makeId(prefix: string): string {
   }
   return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }
+
+export function makeTimedId(prefix: string): string {
+  const random = Math.random().toString(36).slice(2, 8);
+  const time = Date.now().toString(36);
+  return `${prefix}-${time}${random}`;
+}

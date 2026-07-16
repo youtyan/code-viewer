@@ -10,6 +10,7 @@ import {
   __setDynamoDbDockerCurlTimeoutMsForTest,
   __setDynamoDbRequestTimeoutMsForTest,
   __setDynamoDbSpawnSyncForTest,
+  type DynamoDbExplorer,
   openDynamoDbExplorerAsync,
 } from "../server/database/adapters/dynamodb";
 import type { DockerDbInfo } from "../server/database/discovery";
@@ -228,6 +229,264 @@ describe("DynamoDB adapter", () => {
       scannedCount: 2,
       lastEvaluatedKey: { id: { S: "b" } },
     });
+  });
+
+  test.each([
+    {
+      name: "scan preserves a complete page with a continuation key",
+      operation: "Scan",
+      raw: {
+        Items: [{ id: { S: "item-a" } }, { id: { S: "item-b" } }],
+        Count: 2,
+        ScannedCount: 3,
+        LastEvaluatedKey: { id: { S: "item-b" } },
+      },
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.scanAsync({ tableName: "sample_table" }),
+      expected: {
+        items: [{ id: { S: "item-a" } }, { id: { S: "item-b" } }],
+        count: 2,
+        scannedCount: 3,
+        lastEvaluatedKey: { id: { S: "item-b" } },
+      },
+    },
+    {
+      name: "query preserves a complete page without a continuation key",
+      operation: "Query",
+      raw: {
+        Items: [{ id: { S: "item-c" } }],
+        Count: 1,
+        ScannedCount: 1,
+      },
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.queryAsync({
+          tableName: "sample_table",
+          keyConditionExpression: "#id = :id",
+        }),
+      expected: {
+        items: [{ id: { S: "item-c" } }],
+        count: 1,
+        scannedCount: 1,
+      },
+    },
+    {
+      name: "scan defaults an empty response",
+      operation: "Scan",
+      raw: {},
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.scanAsync({ tableName: "sample_table" }),
+      expected: { items: [], count: 0, scannedCount: 0 },
+    },
+    {
+      name: "query defaults fields with invalid response types",
+      operation: "Query",
+      raw: { Items: {}, Count: "1", ScannedCount: null },
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.queryAsync({
+          tableName: "sample_table",
+          keyConditionExpression: "#id = :id",
+        }),
+      expected: { items: [], count: 0, scannedCount: 0 },
+    },
+    {
+      name: "scan preserves explicit empty collections and zero counts",
+      operation: "Scan",
+      raw: { Items: [], Count: 0, ScannedCount: 0 },
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.scanAsync({ tableName: "sample_table" }),
+      expected: { items: [], count: 0, scannedCount: 0 },
+    },
+    {
+      name: "query preserves an explicit empty continuation key",
+      operation: "Query",
+      raw: {
+        Items: [],
+        Count: 0,
+        ScannedCount: 0,
+        LastEvaluatedKey: {},
+      },
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.queryAsync({
+          tableName: "sample_table",
+          keyConditionExpression: "#id = :id",
+        }),
+      expected: {
+        items: [],
+        count: 0,
+        scannedCount: 0,
+        lastEvaluatedKey: {},
+      },
+    },
+  ])("normalizes $name", async ({ operation, raw, run, expected }) => {
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        expect(new Headers(init?.headers).get("x-amz-target")).toBe(
+          `DynamoDB_20120810.${operation}`,
+        );
+        return new Response(JSON.stringify(raw), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    const explorer = await openDynamoDbExplorerAsync(dynamoInfo());
+    expect(await run(explorer)).toEqual(expected);
+  });
+
+  test.each([
+    {
+      name: "scan emits only the table name for minimal options",
+      operation: "Scan",
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.scanAsync({ tableName: "sample_table" }),
+      expected: { TableName: "sample_table" },
+    },
+    {
+      name: "scan clamps a negative limit to one",
+      operation: "Scan",
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.scanAsync({ tableName: "sample_table", limit: -1 }),
+      expected: { TableName: "sample_table", Limit: 1 },
+    },
+    {
+      name: "scan omits a zero limit",
+      operation: "Scan",
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.scanAsync({ tableName: "sample_table", limit: 0 }),
+      expected: { TableName: "sample_table" },
+    },
+    {
+      name: "scan preserves the lower limit boundary",
+      operation: "Scan",
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.scanAsync({ tableName: "sample_table", limit: 1 }),
+      expected: { TableName: "sample_table", Limit: 1 },
+    },
+    {
+      name: "scan preserves a limit below the upper boundary",
+      operation: "Scan",
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.scanAsync({ tableName: "sample_table", limit: 999 }),
+      expected: { TableName: "sample_table", Limit: 999 },
+    },
+    {
+      name: "scan preserves the upper limit boundary",
+      operation: "Scan",
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.scanAsync({ tableName: "sample_table", limit: 1000 }),
+      expected: { TableName: "sample_table", Limit: 1000 },
+    },
+    {
+      name: "scan clamps a limit above the upper boundary",
+      operation: "Scan",
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.scanAsync({ tableName: "sample_table", limit: 1001 }),
+      expected: { TableName: "sample_table", Limit: 1000 },
+    },
+    {
+      name: "scan forwards every common optional field",
+      operation: "Scan",
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.scanAsync({
+          tableName: "sample_table",
+          limit: 5,
+          exclusiveStartKey: { id: { S: "item-a" } },
+          indexName: "sample_index",
+          projectionExpression: "#id, #name",
+          filterExpression: "#status = :status",
+          expressionAttributeNames: {
+            "#id": "id",
+            "#name": "name",
+            "#status": "status",
+          },
+          expressionAttributeValues: { ":status": { S: "active" } },
+        }),
+      expected: {
+        TableName: "sample_table",
+        Limit: 5,
+        ExclusiveStartKey: { id: { S: "item-a" } },
+        IndexName: "sample_index",
+        ProjectionExpression: "#id, #name",
+        FilterExpression: "#status = :status",
+        ExpressionAttributeNames: {
+          "#id": "id",
+          "#name": "name",
+          "#status": "status",
+        },
+        ExpressionAttributeValues: { ":status": { S: "active" } },
+      },
+    },
+    {
+      name: "query emits its required key condition",
+      operation: "Query",
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.queryAsync({
+          tableName: "sample_table",
+          keyConditionExpression: "#id = :id",
+        }),
+      expected: {
+        TableName: "sample_table",
+        KeyConditionExpression: "#id = :id",
+      },
+    },
+    {
+      name: "query forwards common fields and a false scan direction",
+      operation: "Query",
+      run: (explorer: DynamoDbExplorer) =>
+        explorer.queryAsync({
+          tableName: "sample_table",
+          keyConditionExpression: "#id = :id",
+          limit: 5,
+          exclusiveStartKey: { id: { S: "item-a" } },
+          indexName: "sample_index",
+          projectionExpression: "#id, #name",
+          filterExpression: "#status = :status",
+          expressionAttributeNames: {
+            "#id": "id",
+            "#name": "name",
+            "#status": "status",
+          },
+          expressionAttributeValues: {
+            ":id": { S: "item-b" },
+            ":status": { S: "active" },
+          },
+          scanIndexForward: false,
+        }),
+      expected: {
+        TableName: "sample_table",
+        KeyConditionExpression: "#id = :id",
+        Limit: 5,
+        ExclusiveStartKey: { id: { S: "item-a" } },
+        IndexName: "sample_index",
+        ProjectionExpression: "#id, #name",
+        FilterExpression: "#status = :status",
+        ExpressionAttributeNames: {
+          "#id": "id",
+          "#name": "name",
+          "#status": "status",
+        },
+        ExpressionAttributeValues: {
+          ":id": { S: "item-b" },
+          ":status": { S: "active" },
+        },
+        ScanIndexForward: false,
+      },
+    },
+  ])("builds request body: $name", async ({ operation, run, expected }) => {
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        expect(new Headers(init?.headers).get("x-amz-target")).toBe(
+          `DynamoDB_20120810.${operation}`,
+        );
+        expect(JSON.parse(String(init?.body))).toEqual(expected);
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
+    });
+
+    const explorer = await openDynamoDbExplorerAsync(dynamoInfo());
+    await run(explorer);
   });
 
   test("uses docker exec curl without placing request body in argv", async () => {
