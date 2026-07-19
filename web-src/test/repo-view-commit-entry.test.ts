@@ -89,6 +89,7 @@ function makeRepoView(
     renderSidebar(files) {
       calls.renderedFiles.push(files);
     },
+    refreshRepoSidebarTree: async () => undefined,
     rerenderVirtualSidebar() {
       /* noop */
     },
@@ -744,5 +745,71 @@ describe("repo view deleted entries", () => {
 
     row?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(calls.standaloneSources).toEqual([]);
+  });
+});
+
+describe("repo view re-render suppression", () => {
+  function rootResponse(updatedAt: string): RepoTreeResponse {
+    return {
+      ref: "worktree",
+      path: "",
+      project: "sample-repo",
+      entries: [
+        {
+          name: "sample.txt",
+          path: "sample.txt",
+          type: "blob",
+          updated_at: updatedAt,
+        },
+      ],
+    };
+  }
+
+  test("keeps the rendered panel DOM when a reload returns identical content", async () => {
+    setupDom();
+    globalThis.fetch = (async () =>
+      response(rootResponse("2026-07-01"))) as unknown as typeof fetch;
+    const { view } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+
+    await view.loadRepo();
+    const firstShell = document.querySelector("#diff > .gdp-repo-shell");
+    expect(firstShell).not.toBeNull();
+
+    // SSE 起因の再読込で内容が同じなら、一覧を作り直さず同じ DOM を保つ
+    // (作り直すと画面がガクつき、フォーカスやソート操作も失われる)。
+    await view.loadRepo();
+    const secondShell = document.querySelector("#diff > .gdp-repo-shell");
+    expect(secondShell).toBe(firstShell as Element);
+  });
+
+  test("rebuilds the panel in one swap when the tree content changes", async () => {
+    setupDom();
+    // メイン fetch とサイドバー fetch の両方が同じモックを消費するため、
+    // 応答は配列消費ではなく「その時点の応答」を丸ごと差し替えて切り替える。
+    globalThis.fetch = (async () =>
+      response(rootResponse("2026-07-01"))) as unknown as typeof fetch;
+    const { view } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+
+    await view.loadRepo();
+    const firstShell = document.querySelector("#diff > .gdp-repo-shell");
+
+    globalThis.fetch = (async () =>
+      response(rootResponse("2026-07-02"))) as unknown as typeof fetch;
+    await view.loadRepo();
+    const secondShell = document.querySelector("#diff > .gdp-repo-shell");
+    expect(secondShell).not.toBeNull();
+    expect(secondShell).not.toBe(firstShell as Element);
+    // 差し替え後も一覧は 1 つだけ (先に消してから作る白抜け方式ではない)。
+    expect(document.querySelectorAll("#diff > .gdp-repo-shell").length).toBe(1);
   });
 });

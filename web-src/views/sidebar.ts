@@ -166,6 +166,10 @@ export function createSidebar(deps: SidebarDeps) {
 
   const SIDEBAR_LAZY_LOADING_DIRS = new Map<string, Promise<void>>();
 
+  // ロード済み lazy dir ごとの entries シグネチャ。SSE リフレッシュ時に
+  // 「中身が変わっていなければ触らない」判定に使う。
+  const SIDEBAR_LAZY_DIR_SIGNATURES = new Map<string, string>();
+
   function savedSidebarFontSize(): ViewerFontSize {
     return normalizeViewerFontSize(getSidebarFontSize());
   }
@@ -602,45 +606,54 @@ export function createSidebar(deps: SidebarDeps) {
     if (SIDEBAR_TREE_ROOT) buildSidebarTreeRows(SIDEBAR_TREE_ROOT);
   }
 
-  function ensureVirtualSidebarDirLoaded(dir: TreeNode): Promise<void> {
-    if (!shouldLazyLoadSidebarDir(dir)) return Promise.resolve();
-    const existing = SIDEBAR_LAZY_LOADING_DIRS.get(dir.path);
-    if (existing) return existing;
+  function fetchSidebarDirEntries(dir: TreeNode): Promise<SidebarItem[]> {
     const params = new URLSearchParams();
     params.set("ref", getRepoSidebarRef() || "worktree");
     params.set("path", dir.path);
     appendScopeParams(params);
-    const load = trackLoad<RepoTreeResponse>(
+    return trackLoad<RepoTreeResponse>(
       fetch(`/_tree?${params.toString()}`).then((response) => {
         if (!response.ok) throw new Error("failed to load repository tree");
         return response.json();
       }),
-    )
-      .then((meta) => {
-        const entries = meta.entries.map(
-          (entry, index) =>
-            ({
-              order: dir.minOrder + (index + 1) / 100000,
-              path: entry.path,
-              display_path: entry.path,
-              type:
-                meta.ref === "worktree" &&
-                entry.type === "commit" &&
-                !entry.submodule
-                  ? "tree"
-                  : entry.type,
-              submodule: entry.submodule,
-              children_omitted: entry.children_omitted,
-              children_omitted_reason: entry.children_omitted_reason,
-              is_symlink: entry.is_symlink,
-              symlink_target: entry.symlink_target,
-              symlink_target_type: entry.symlink_target_type,
-              resolved_path: entry.resolved_path,
-              status: entry.status,
-            }) satisfies SidebarItem,
-        );
+    ).then((meta) =>
+      meta.entries.map(
+        (entry, index) =>
+          ({
+            order: dir.minOrder + (index + 1) / 100000,
+            path: entry.path,
+            display_path: entry.path,
+            type:
+              meta.ref === "worktree" &&
+              entry.type === "commit" &&
+              !entry.submodule
+                ? "tree"
+                : entry.type,
+            submodule: entry.submodule,
+            children_omitted: entry.children_omitted,
+            children_omitted_reason: entry.children_omitted_reason,
+            is_symlink: entry.is_symlink,
+            symlink_target: entry.symlink_target,
+            symlink_target_type: entry.symlink_target_type,
+            resolved_path: entry.resolved_path,
+            status: entry.status,
+          }) satisfies SidebarItem,
+      ),
+    );
+  }
+
+  function ensureVirtualSidebarDirLoaded(dir: TreeNode): Promise<void> {
+    if (!shouldLazyLoadSidebarDir(dir)) return Promise.resolve();
+    const existing = SIDEBAR_LAZY_LOADING_DIRS.get(dir.path);
+    if (existing) return existing;
+    const load = fetchSidebarDirEntries(dir)
+      .then((entries) => {
         mergeSidebarTreeEntries(entries);
         SIDEBAR_LAZY_LOADED_DIRS.add(dir.path);
+        SIDEBAR_LAZY_DIR_SIGNATURES.set(
+          dir.path,
+          sidebarItemsSignature(entries),
+        );
       })
       .finally(() => {
         SIDEBAR_LAZY_LOADING_DIRS.delete(dir.path);
@@ -1145,6 +1158,120 @@ export function createSidebar(deps: SidebarDeps) {
     void visit(root);
   }
 
+  function sidebarItemsSignature(items: SidebarItem[]): string {
+    return items
+      .map((f) =>
+        [
+          f.path,
+          f.type || "blob",
+          f.status || "",
+          f.children_omitted ? 1 : 0,
+          f.children_omitted_reason || "",
+          f.is_symlink ? 1 : 0,
+          f.symlink_target || "",
+          f.resolved_path || "",
+          f.submodule ? 1 : 0,
+        ].join("\0"),
+      )
+      .join("\n");
+  }
+
+  function findSidebarTreeDir(node: TreeNode, path: string): TreeNode | null {
+    if (node.path === path) return node;
+    for (const child of Object.values(node.dirs)) {
+      if (path === child.path || path.startsWith(`${child.path}/`))
+        return findSidebarTreeDir(child, path);
+    }
+    return null;
+  }
+
+  // 旧サブツリーでロード済みだった lazy dir の子を、新サブツリーの同じ path の
+  // dir へ移植する。移植できない dir (新側に無い / omitted に転じた) はロード済み
+  // 集合から外し、次に必要になったとき通常の lazy load で取り直す。親を先に
+  // 移植しないと子の path が新側で見つからないため、浅い path から処理する。
+  function graftLoadedSidebarDirs(oldRoot: TreeNode, newRoot: TreeNode) {
+    const scope = newRoot.path ? `${newRoot.path}/` : "";
+    const paths = [...SIDEBAR_LAZY_LOADED_DIRS]
+      .filter((p) => p !== newRoot.path && (!scope || p.startsWith(scope)))
+      .sort((a, b) => a.length - b.length);
+    for (const path of paths) {
+      const oldNode = findSidebarTreeDir(oldRoot, path);
+      const newNode = findSidebarTreeDir(newRoot, path);
+      if (!oldNode || !newNode || newNode.children_omitted) {
+        SIDEBAR_LAZY_LOADED_DIRS.delete(path);
+        SIDEBAR_LAZY_DIR_SIGNATURES.delete(path);
+        continue;
+      }
+      if (sidebarTreeNodeHasChildren(newNode)) continue;
+      newNode.dirs = oldNode.dirs;
+      newNode.files = oldNode.files;
+    }
+  }
+
+  // ロード済み lazy dir の子をサーバーの最新 entries で作り直す。子孫の
+  // ロード済み dir の中身は移植して残す。前回と同じ内容なら何もしない。
+  function applySidebarDirEntries(
+    dir: TreeNode,
+    entries: SidebarItem[],
+  ): boolean {
+    const signature = sidebarItemsSignature(entries);
+    if (SIDEBAR_LAZY_DIR_SIGNATURES.get(dir.path) === signature) return false;
+    SIDEBAR_LAZY_DIR_SIGNATURES.set(dir.path, signature);
+    const oldSubtree: TreeNode = { ...dir };
+    dir.dirs = {};
+    dir.files = [];
+    for (const entry of entries)
+      upsertSidebarTreeEntry(entry, entry.order ?? 0);
+    graftLoadedSidebarDirs(oldSubtree, dir);
+    return true;
+  }
+
+  function rebuildVirtualSidebarRows() {
+    if (!SIDEBAR_TREE_ROOT) return;
+    SIDEBAR_TREE_ITEMS_CACHE = new WeakMap<TreeNode, TreeNodeItem[]>();
+    buildSidebarTreeRows(SIDEBAR_TREE_ROOT);
+    rerenderVirtualSidebar();
+    // active ハイライトのみ再適用する。reveal なしなのでスクロールは動かない。
+    if (STATE.activeFile) markActive(STATE.activeFile);
+    applyFilter();
+  }
+
+  // SSE 更新時に repo サイドバーをサーバーの最新ツリーへ合わせる。
+  // renderSidebar() の全消去・再構築と違い、DOM・スクロール位置・展開状態を
+  // 温存し、内容が変わったときだけ仮想窓 (絶対配置の可視行) を描き直す。
+  async function refreshRepoSidebarTree(rootFiles: SidebarItem[]) {
+    if (!isRepositorySidebarMode() || !isVirtualSidebarActive()) return;
+    if (!SIDEBAR_TREE_ROOT) return;
+    if (
+      sidebarItemsSignature(rootFiles) !== sidebarItemsSignature(SIDEBAR_FILES)
+    ) {
+      const newRoot = buildTree(rootFiles);
+      graftLoadedSidebarDirs(SIDEBAR_TREE_ROOT, newRoot);
+      SIDEBAR_FILES = rootFiles;
+      SIDEBAR_TREE_ROOT = newRoot;
+      rebuildVirtualSidebarRows();
+    }
+    // ロード済み lazy dir の中身も取り直し、全件そろってから一度だけ反映する。
+    const root = SIDEBAR_TREE_ROOT;
+    const refreshed = await Promise.all(
+      [...SIDEBAR_LAZY_LOADED_DIRS].map(async (path) => {
+        const node = findSidebarTreeDir(root, path);
+        if (!node) return null;
+        const entries = await fetchSidebarDirEntries(node).catch(() => null);
+        return entries ? { path, entries } : null;
+      }),
+    );
+    if (SIDEBAR_TREE_ROOT !== root) return; // ref 切替などで作り直された
+    let childrenChanged = false;
+    for (const result of refreshed) {
+      if (!result) continue;
+      const node = findSidebarTreeDir(root, result.path);
+      if (node && applySidebarDirEntries(node, result.entries))
+        childrenChanged = true;
+    }
+    if (childrenChanged) rebuildVirtualSidebarRows();
+  }
+
   function renderFlat(
     files: SidebarItem[],
     ul: HTMLElement,
@@ -1217,6 +1344,7 @@ export function createSidebar(deps: SidebarDeps) {
     SIDEBAR_ROW_BY_PATH = new Map();
     SIDEBAR_LAZY_LOADED_DIRS.clear();
     SIDEBAR_LAZY_LOADING_DIRS.clear();
+    SIDEBAR_LAZY_DIR_SIGNATURES.clear();
     // Repo-mode sidebars (custom onFileClick) list the whole repository;
     // writing that into STATE.files would make every file look like part of
     // the current diff. Only the diff sidebar owns STATE.files.
@@ -1346,7 +1474,11 @@ export function createSidebar(deps: SidebarDeps) {
     setActiveSidebarItem(sidebarItemByPath(path));
     if ($("#filelist").classList.contains("tree-virtual")) {
       renderVirtualSidebarWindow();
-      scrollVirtualSidebarPathIntoView(path);
+      // Only navigation-driven activations may move the sidebar scroll.
+      // Re-marking during a refresh/re-render must not yank the position
+      // the user scrolled to (callers that need follow-scroll pass reveal
+      // or call scrollVirtualSidebarPathIntoView themselves).
+      if (options.reveal) scrollVirtualSidebarPathIntoView(path);
       return;
     }
     if (options.reveal) {
@@ -1861,6 +1993,7 @@ export function createSidebar(deps: SidebarDeps) {
 
   return {
     renderSidebar,
+    refreshRepoSidebarTree,
     applyFilter,
     scheduleApplyFilter,
     flushSidebarFilter,

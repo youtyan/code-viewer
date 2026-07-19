@@ -1978,7 +1978,11 @@ async function handleUploadFiles(req: Request) {
     return text("upload failed", 500);
   }
 
-  triggerUpdate();
+  // アップロードしたファイルのパスを SSE に載せる。パス無しの "tick" を送ると
+  // クライアントは全 diff カードを stale 扱いして作り直してしまう。
+  triggerUpdate(
+    uploads.map((upload) => (dir ? `${dir}/${upload.name}` : upload.name)),
+  );
   return json({
     ok: true,
     files: uploads.map((upload) => upload.name),
@@ -2254,6 +2258,17 @@ async function handleTrashPath(req: Request) {
   if (git.isGitInternalPath(path)) return text("forbidden", 403);
   const originalFullPath = safeWorktreePath(path);
   if (!originalFullPath) return text("not found", 404);
+  // 単一ファイルの trash は変更パス付きで通知する。ディレクトリは配下を
+  // 列挙できないので従来どおり全体 tick に落とす。
+  let changedPaths: string[] | undefined;
+  try {
+    const stats = statSync(originalFullPath) as unknown as {
+      isDirectory(): boolean;
+    };
+    if (!stats.isDirectory()) changedPaths = [path];
+  } catch {
+    /* keep the full tick */
+  }
   const moved = await movePathToTrash(worktreePath(path));
   if (!moved.ok) return text(moved.error || "trash failed", 500);
   const undo: UndoActionResponse = {
@@ -2265,7 +2280,7 @@ async function handleTrashPath(req: Request) {
       trashPath: moved.trashPath,
     },
   };
-  triggerUpdate();
+  triggerUpdate(changedPaths);
   return json({ ok: true, generation, undo });
 }
 
@@ -2314,7 +2329,9 @@ async function handleCreateDirectory(req: Request) {
       return text("already exists", 409);
     return text("create failed", 500);
   }
-  triggerUpdate();
+  // 空ディレクトリの作成は diff に影響しない。パス付きで通知して、開いている
+  // Diff 画面のロード済みカードが全部 stale 扱いされるのを避ける。
+  triggerUpdate([targetPath]);
   return json({ ok: true, path: targetPath, generation });
 }
 
@@ -2346,7 +2363,17 @@ async function handleRestoreTrash(req: Request) {
   if (git.isGitInternalPath(originalPath)) return text("forbidden", 403);
   const restored = await restoreTrashPath(originalPath, trashPath || undefined);
   if (!restored.ok) return text(restored.error || "undo failed", 409);
-  triggerUpdate();
+  // 単一ファイルの復元は変更パス付きで通知する (trash 側と同じ理由)。
+  let changedPaths: string[] | undefined;
+  try {
+    const stats = statSync(worktreePath(originalPath)) as unknown as {
+      isDirectory(): boolean;
+    };
+    if (!stats.isDirectory()) changedPaths = [originalPath];
+  } catch {
+    /* keep the full tick */
+  }
+  triggerUpdate(changedPaths);
   return json({ ok: true, generation });
 }
 

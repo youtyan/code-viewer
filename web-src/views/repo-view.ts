@@ -50,6 +50,7 @@ export type RepoViewDeps = {
     files: SidebarItem[],
     onFileClick?: (file: SidebarItem) => void,
   ): void;
+  refreshRepoSidebarTree(files: SidebarItem[]): Promise<void>;
   rerenderVirtualSidebar(): void;
   ensureVirtualSidebarDirLoaded(dir: unknown): Promise<void>;
   scrollVirtualSidebarPathIntoView(path: string): void;
@@ -118,6 +119,7 @@ export function createRepoView(deps: RepoViewDeps) {
     markActive,
     applyFilter,
     renderSidebar,
+    refreshRepoSidebarTree,
     rerenderVirtualSidebar,
     ensureVirtualSidebarDirLoaded,
     scrollVirtualSidebarPathIntoView,
@@ -628,18 +630,32 @@ export function createRepoView(deps: RepoViewDeps) {
     return nav;
   }
 
+  let REPO_RENDER_SIGNATURE = "";
+  let REPO_RENDER_SEQ = 0;
+  let REPO_RENDER_LOCATION = "";
+
   async function renderRepo(meta: RepoTreeResponse) {
+    const myRender = ++REPO_RENDER_SEQ;
     setProjectName(meta.project || "");
     setPageMode();
     removeStandaloneSource();
     $("#empty").classList.add("hidden");
-    $("#diff").replaceChildren();
     if (!isRepoSidebarReusable(meta.ref)) $("#totals").textContent = "";
     STATE.files = [];
     clearLoadQueue();
     renderRepoBlobSidebar(meta.path || "", meta.ref);
 
     const target = $("#diff");
+    // 同じ内容のままなら組み立て直さない。SSE のたびに一覧と README を作り
+    // 直すと表示がガクつくだけで得るものがない。ソート状態やイベントも保たれる。
+    const signature = JSON.stringify(meta);
+    if (
+      signature === REPO_RENDER_SIGNATURE &&
+      target.querySelector(":scope > .gdp-repo-shell")
+    ) {
+      placeSidebarToggle();
+      return;
+    }
     const shell = document.createElement("section");
     shell.className = "gdp-repo-shell";
 
@@ -844,8 +860,50 @@ export function createRepoView(deps: RepoViewDeps) {
       shell.appendChild(readme);
     }
 
-    target.appendChild(shell);
+    // README の markdown レンダ (await) 中に別ビューへ移動したか、より新しい
+    // renderRepo が始まっていたら、この応答は破棄する。古い応答が後から
+    // replaceChildren すると、開いたばかりのファイルビュー (renderStandaloneSource
+    // が prepend した blob カード) や新しい一覧を丸ごと消してしまう。
+    if (
+      myRender !== REPO_RENDER_SEQ ||
+      !isActiveRepoRoute(meta.ref || "worktree", meta.path || "")
+    )
+      return;
+    // shell を組み立て終えてから一括で差し替える。先に消してしまうと README の
+    // markdown レンダリング待ちの間ページが白抜けしてガクつく。
+    REPO_RENDER_SIGNATURE = signature;
+    const location = `${meta.ref || "worktree"}\0${meta.path || ""}`;
+    const sameLocation = location === REPO_RENDER_LOCATION;
+    REPO_RENDER_LOCATION = location;
+    const savedScroll = window.scrollY;
+    target.replaceChildren(shell);
+    // 同じディレクトリの再描画 (SSE 更新) なら読んでいた位置を保ち、別の
+    // ディレクトリへ移動したときは先頭から表示する。
+    window.scrollTo(0, sameLocation ? savedScroll : 0);
     placeSidebarToggle();
+  }
+
+  function repoTreeEntriesToSidebarItems(
+    entries: RepoTreeEntry[],
+    ref: string,
+  ): SidebarItem[] {
+    return entries.map(
+      (entry, index) =>
+        ({
+          order: index + 1,
+          path: entry.path,
+          display_path: entry.path,
+          type: canBrowseRepoEntry(entry, ref) ? "tree" : entry.type,
+          submodule: entry.submodule,
+          children_omitted: entry.children_omitted,
+          children_omitted_reason: entry.children_omitted_reason,
+          is_symlink: entry.is_symlink,
+          symlink_target: entry.symlink_target,
+          symlink_target_type: entry.symlink_target_type,
+          resolved_path: entry.resolved_path,
+          status: entry.status,
+        }) satisfies SidebarItem,
+    );
   }
 
   function renderRepoBlobSidebar(currentPath: string, ref: string) {
@@ -877,24 +935,9 @@ export function createRepoView(deps: RepoViewDeps) {
     )
       .then(async (meta) => {
         if (!isActiveRepoTreeRef(normalizedRef)) return;
-        const files = meta.entries.map(
-          (entry, index) =>
-            ({
-              order: index + 1,
-              path: entry.path,
-              display_path: entry.path,
-              type: canBrowseRepoEntry(entry, normalizedRef)
-                ? "tree"
-                : entry.type,
-              submodule: entry.submodule,
-              children_omitted: entry.children_omitted,
-              children_omitted_reason: entry.children_omitted_reason,
-              is_symlink: entry.is_symlink,
-              symlink_target: entry.symlink_target,
-              symlink_target_type: entry.symlink_target_type,
-              resolved_path: entry.resolved_path,
-              status: entry.status,
-            }) satisfies SidebarItem,
+        const files = repoTreeEntriesToSidebarItems(
+          meta.entries,
+          normalizedRef,
         );
         setRepoSidebarRef(normalizedRef);
         renderSidebar(files, (file) => {
@@ -945,15 +988,19 @@ export function createRepoView(deps: RepoViewDeps) {
   }
 
   async function activateRepoSidebarPath(currentPath: string) {
+    // 同じ path の再 activate (SSE リフレッシュや同一ディレクトリの再描画)
+    // ではユーザーが動かしたサイドバーのスクロール位置を奪わない。reveal は
+    // ナビゲーションで path が変わったときだけ。
+    const reveal = getSidebarVirtualActivePath() !== currentPath;
     await loadRepoSidebarAncestors(currentPath);
-    markActive(currentPath, { reveal: true });
+    markActive(currentPath, { reveal });
     applyFilter();
     const row = getSidebarRowByPath(currentPath);
     if (row?.kind === "dir" && row.dir && shouldLazyLoadSidebarDir(row.dir))
       ensureVirtualSidebarDirLoaded(row.dir).then(() => {
         if (getSidebarVirtualActivePath() === currentPath) {
           rerenderVirtualSidebar();
-          scrollVirtualSidebarPathIntoView(currentPath);
+          if (reveal) scrollVirtualSidebarPathIntoView(currentPath);
         }
       });
   }
@@ -1233,6 +1280,55 @@ export function createRepoView(deps: RepoViewDeps) {
   let REPO_SIDEBAR_LOAD_REF: string | null = null;
   let REPO_SIDEBAR_LOAD: Promise<void> | null = null;
 
+  let REPO_SIDEBAR_REFRESHING = false;
+  let REPO_SIDEBAR_REFRESH_QUEUED = false;
+
+  // SSE 更新時のサイドバー再検証。invalidateRepoSidebar + 全再構築と違い、
+  // 既存 DOM とスクロール位置を温存したままサーバーの最新ツリーに合わせる。
+  // 進行中に次の更新が来たら完了後にもう一度だけ走らせ、取りこぼさない。
+  async function refreshRepoSidebar(): Promise<void> {
+    const ref = activeRepoTreeRef();
+    if (ref == null) return;
+    if (!isRepoSidebarReusable(ref)) {
+      // 温存できる DOM が無いときだけ従来の全構築パスに任せる
+      invalidateRepoSidebar();
+      await renderRepoBlobSidebar(
+        STATE.route.screen === "repo" ? STATE.route.path || "" : "",
+        ref,
+      );
+      return;
+    }
+    if (REPO_SIDEBAR_REFRESHING) {
+      REPO_SIDEBAR_REFRESH_QUEUED = true;
+      return;
+    }
+    REPO_SIDEBAR_REFRESHING = true;
+    try {
+      const params = new URLSearchParams();
+      params.set("ref", ref);
+      appendScopeParams(params);
+      const meta = await trackLoad<RepoTreeResponse>(
+        fetch(`/_tree?${params.toString()}`).then((r) => {
+          if (!r.ok) throw new Error("failed to load repository tree");
+          return r.json();
+        }),
+      );
+      // fetch 中に ref 切替や画面遷移で前提が崩れていたら適用しない
+      if (!isActiveRepoTreeRef(ref) || !isRepoSidebarReusable(ref)) return;
+      await refreshRepoSidebarTree(
+        repoTreeEntriesToSidebarItems(meta.entries, ref),
+      );
+    } catch {
+      /* best-effort: 次の SSE か手動更新で追いつく */
+    } finally {
+      REPO_SIDEBAR_REFRESHING = false;
+      if (REPO_SIDEBAR_REFRESH_QUEUED) {
+        REPO_SIDEBAR_REFRESH_QUEUED = false;
+        void refreshRepoSidebar();
+      }
+    }
+  }
+
   return {
     loadRepo,
     createFileDetailMeta,
@@ -1246,6 +1342,7 @@ export function createRepoView(deps: RepoViewDeps) {
     handleSidebarContextMenu,
     fileEntryIcon,
     invalidateRepoSidebar,
+    refreshRepoSidebar,
     showTrashError,
   };
 }

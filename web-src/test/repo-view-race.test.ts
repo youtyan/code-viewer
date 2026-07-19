@@ -106,6 +106,7 @@ function makeRepoView(
     renderSidebar(files) {
       calls.sidebarRenders.push(files);
     },
+    refreshRepoSidebarTree: async () => undefined,
     rerenderVirtualSidebar() {
       calls.virtualRenders++;
     },

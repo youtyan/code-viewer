@@ -900,6 +900,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   const {
     renderSidebar,
+    refreshRepoSidebarTree,
     applyFilter,
     scheduleApplyFilter,
     flushSidebarFilter,
@@ -1032,6 +1033,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     markActive,
     applyFilter,
     renderSidebar,
+    refreshRepoSidebarTree,
     rerenderVirtualSidebar,
     ensureVirtualSidebarDirLoaded,
     scrollVirtualSidebarPathIntoView,
@@ -1098,6 +1100,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     closeRepoContextMenu,
     handleSidebarContextMenu,
     invalidateRepoSidebar,
+    refreshRepoSidebar,
     showTrashError,
   } = REPO_VIEW;
 
@@ -5073,8 +5076,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     if (route.screen === "repo") {
-      invalidateRepoSidebar();
+      // サイドバーのキャッシュは破棄しない。invalidate すると全消去・全再構築が
+      // 走ってスクロール位置と展開状態が飛ぶ。refreshRepoSidebar が既存 DOM を
+      // 温存したまま最新ツリーに合わせ、loadRepo はシグネチャ比較で同一内容の
+      // 再構築をスキップする。
       void loadRepo();
+      void refreshRepoSidebar();
       return;
     }
     if (route.screen !== "diff" && route.screen !== "history") {

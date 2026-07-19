@@ -123,16 +123,14 @@ export function shouldRenderDiffSidebar(listSame: boolean, domIntact: boolean) {
   return !listSame || !domIntact;
 }
 
-function findDirectDiffCardByKey(
-  target: Element,
-  key: string,
-): DiffCardElement | null {
+function collectDiffCardsByKey(target: Element): Map<string, DiffCardElement> {
+  const cards = new Map<string, DiffCardElement>();
   for (const child of Array.from(target.children)) {
     if (!child.classList.contains("gdp-file-shell")) continue;
     const card = child as DiffCardElement;
-    if (card.dataset.key === key) return card;
+    if (card.dataset.key) cards.set(card.dataset.key, card);
   }
-  return null;
+  return cards;
 }
 
 export function createDiffView(deps: DiffViewDeps) {
@@ -659,6 +657,7 @@ export function createDiffView(deps: DiffViewDeps) {
     card: DiffCardElement,
     file: FileMeta,
     changedPaths: Set<string> | null,
+    measuredHeight?: number,
   ): boolean {
     if (
       !card.classList.contains("loaded") &&
@@ -667,13 +666,15 @@ export function createDiffView(deps: DiffViewDeps) {
       return false;
     if (changedPaths && !changedPaths.has(file.path)) return false;
     card.dataset.reqId = String(++CLIENT_REQ_SEQ);
+    // Stale-while-revalidate: keep the previous diff visible (dimmed by the
+    // .pending style) while the fresh content loads. Wiping the body here
+    // collapsed every loaded card into a spinner on each SSE tick, which
+    // made the whole page jump. renderFile() rebuilds the body on arrival;
+    // the height reservation stops the card from collapsing in between.
+    card.style.minHeight = `${measuredHeight ?? card.offsetHeight}px`;
     card.classList.remove("loaded", "loading", "error");
     card.classList.add("pending");
     card._diffData = null;
-    const body = card.querySelector<HTMLElement>(".gdp-shell-body");
-    if (body) body.innerHTML = "";
-    const head = card.querySelector<HTMLElement>(".gdp-shell-header");
-    if (head) head.style.display = "";
     const indicator = card.querySelector<HTMLElement>(".loading-indicator");
     if (indicator) indicator.hidden = false;
     activatePendingCard(card, file);
@@ -783,6 +784,23 @@ export function createDiffView(deps: DiffViewDeps) {
       // changedPaths === null means unknown (e.g. tick, parse failure, truncated paths)
       // so treat all loaded cards as potentially stale.
       const pathsUnknown = !changedPaths;
+      // Index the cards once — a per-file linear scan from both loops below
+      // is O(n²) on large diffs.
+      const cardsByKey = collectDiffCardsByKey(target);
+      // Read all card heights up front: interleaving offsetHeight reads with
+      // the class/minHeight writes below would force one synchronous reflow
+      // per invalidated card.
+      const measuredHeights = new Map<string, number>();
+      for (const f of newFiles) {
+        const key = fileKey(f);
+        const card = cardsByKey.get(key);
+        if (
+          card &&
+          (card.classList.contains("loaded") ||
+            card.classList.contains("loading"))
+        )
+          measuredHeights.set(key, card.offsetHeight);
+      }
       let sidebarNeedsStatsUpdate = false;
       for (const f of newFiles) {
         const key = fileKey(f);
@@ -793,7 +811,7 @@ export function createDiffView(deps: DiffViewDeps) {
         if (!sigChanged && !pathHint) {
           continue;
         }
-        const card = findDirectDiffCardByKey(target, key);
+        const card = cardsByKey.get(key);
         if (!card) continue;
         const sizeChanged =
           card.dataset.sizeClass !== (f.size_class || "small");
@@ -816,8 +834,13 @@ export function createDiffView(deps: DiffViewDeps) {
           }
           card._file = f;
           const didInvalidate = sigChanged
-            ? invalidateLoadedCard(card, f, null)
-            : invalidateLoadedCard(card, f, changedPaths);
+            ? invalidateLoadedCard(card, f, null, measuredHeights.get(key))
+            : invalidateLoadedCard(
+                card,
+                f,
+                changedPaths,
+                measuredHeights.get(key),
+              );
           if (didInvalidate) invalidatedCards++;
           else if (
             (sigChanged || pathHint) &&
@@ -852,10 +875,7 @@ export function createDiffView(deps: DiffViewDeps) {
     // Full path: file list structure changed
     if (sidebarNeedsRender && canUpdateSidebar) renderSidebar(newFiles);
 
-    const oldByKey = new Map<string, DiffCardElement>();
-    target.querySelectorAll<DiffCardElement>(".gdp-file-shell").forEach((c) => {
-      if (c.dataset.key) oldByKey.set(c.dataset.key, c);
-    });
+    const oldByKey = collectDiffCardsByKey(target);
 
     const ordered: DiffCardElement[] = [];
     for (const f of newFiles) {
@@ -1193,6 +1213,9 @@ export function createDiffView(deps: DiffViewDeps) {
         if (String(myReq) !== card.dataset.reqId) return;
         card.classList.remove("loading");
         card.classList.add("error");
+        // Drop the stale-while-revalidate height reservation: the error
+        // panel replaces the old content, so the card must shrink to fit.
+        card.style.minHeight = "";
         const body = card.querySelector<HTMLElement>(".gdp-shell-body");
         if (!body) return;
         body.innerHTML =
@@ -1263,6 +1286,9 @@ export function createDiffView(deps: DiffViewDeps) {
 
   function setFileCollapsed(card: DiffCardElement, collapsed: boolean) {
     card.classList.toggle("gdp-file-collapsed", collapsed);
+    // 折りたたみ時は stale-while-revalidate の高さ予約を解除する。残すと
+    // 再検証が終わるまで予約分の空箱が見え続ける。
+    if (collapsed) card.style.minHeight = "";
     card
       .querySelectorAll<HTMLElement>(
         ".d2h-files-diff, .d2h-file-diff, .gdp-source-viewer, .gdp-media",
