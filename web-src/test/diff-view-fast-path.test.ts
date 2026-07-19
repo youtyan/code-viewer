@@ -572,8 +572,12 @@ describe("diff view fast path", () => {
       expect(result.invalidatedCards).toBe(1);
       expect(reused?.classList.contains("pending")).toBe(true);
       expect(reused?.classList.contains("loaded")).toBe(false);
-      expect(reused?.querySelector(".d2h-wrapper")).toBeNull();
-      expect(reused?.querySelector(".gdp-shell-body")?.textContent).toBe("");
+      // Stale-while-revalidate: the old diff stays visible while the fresh
+      // content is being re-fetched (reqId bump + pending class), instead of
+      // collapsing the card into a spinner.
+      expect(reused?.querySelector(".d2h-wrapper")?.textContent).toBe(
+        "stale commit diff",
+      );
       expect(
         reused?.querySelector(".gdp-shell-header .stats")?.textContent,
       ).toBe("+102−27");
