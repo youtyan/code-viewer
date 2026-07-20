@@ -146,14 +146,16 @@ resolved inside the repository, code blocks are highlighted with Shiki, and
 Mermaid diagrams are rendered lazily in the browser (click any diagram to
 open it in a lightbox).
 
-A file detail page lays out four tabs — **Preview**, **Code**, **Blame**,
-**History** — modelled after the GitHub file view. `Code` is the default and
-`?preview=1` opts in to the Markdown / media preview. `Blame` and `History`
-each have their own canonical URL (`view=blame`, `view=history`), so deep
-links and the browser back/forward stay in sync. The Blame tab reuses the
-source view's row component, so line numbers, drag-selection of `line=`
-ranges, syntax highlighting and the Viewer Settings code font size all match
-the Code tab.
+A file detail page lays out up to four tabs — **Preview**, **Code**,
+**Blame**, **History** — modelled after the GitHub file view. For text files
+`Code` is the default and `?preview=1` opts in to the Markdown / HTML
+preview. Media files (images, video, audio, PDF) show a **Preview** tab only
+— there is no Code tab for binary media. `Blame` and `History` each have
+their own canonical URL (`view=blame`, `view=history`), so deep links and
+the browser back/forward stay in sync. The Blame tab reuses the source
+view's row component, so line numbers, drag-selection of `line=` ranges,
+syntax highlighting and the Viewer Settings code font size all match the
+Code tab.
 
 Very large text files use a virtualized source viewer. Only visible rows are
 rendered, and the page includes controls to copy the full file or reopen it in
