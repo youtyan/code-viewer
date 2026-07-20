@@ -1,31 +1,28 @@
 import {
-  closeSync,
   type Dirent,
   existsSync,
   lstatSync,
-  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
-  readSync,
   realpathSync,
   statSync,
 } from "node:fs";
+import { open, stat } from "node:fs/promises";
 import { dirname, join, posix, relative } from "node:path";
-import { cacheFresh, setTimedCacheEntry, type TimedCacheEntry } from "./cache";
+import {
+  cacheFresh,
+  fileSignatureFromStats,
+  setTimedCacheEntry,
+  type TimedCacheEntry,
+} from "./cache";
 import {
   commandForExternal,
   commandNotFoundDetail,
   isCommandNotFoundResult,
 } from "./command-resolver";
 import { compileNamePatterns, type NamePatternSet } from "./name-pattern";
-import {
-  runAsync,
-  runBytesAsync,
-  runBytesSync,
-  runSync,
-  spawnStream,
-} from "./runtime";
+import { runAsync, runBytesAsync, runSync, spawnStream } from "./runtime";
 
 export type GitFileMeta = {
   order?: number;
@@ -229,15 +226,6 @@ function runGitAsync(
   });
 }
 
-function runBytes(
-  args: string[],
-  cwd: string,
-): { code: number; stdout: Uint8Array; stderr: string } {
-  return runBytesSync(resolveGitArgs(args), cwd, {
-    timeout: GIT_COMMAND_TIMEOUT_MS,
-  });
-}
-
 function runGitBytesAsync(
   args: string[],
   cwd: string,
@@ -310,24 +298,11 @@ export function repoRootResult(
   return { kind: "error", error: stderr || "git rev-parse failed" };
 }
 
-export function currentBranch(cwd: string): string | null {
-  return runGitRefLookup(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd);
-}
-
 export function currentBranchAsync(cwd: string): Promise<string | null> {
   return runGitRefLookupAsync(
     ["git", "rev-parse", "--abbrev-ref", "HEAD"],
     cwd,
   );
-}
-
-export function verifyCommit(
-  ref: string,
-  cwd: string,
-): { ok: true; sha: string } | { ok: false; error: string } {
-  const res = run(["git", "rev-parse", "--verify", `${ref}^{commit}`], cwd);
-  if (res.code === 0) return { ok: true, sha: res.stdout.trim() };
-  return { ok: false, error: gitFailureMessage(res, "unknown ref") };
 }
 
 export async function verifyCommitAsync(
@@ -340,31 +315,6 @@ export async function verifyCommitAsync(
   );
   if (res.code === 0) return { ok: true, sha: res.stdout.trim() };
   return { ok: false, error: gitFailureMessage(res, "unknown ref") };
-}
-
-export function statusPorcelainForPath(
-  path: string,
-  cwd: string,
-): { ok: true; stdout: string } | { ok: false; error: string } {
-  const res = run(
-    [
-      "git",
-      "-c",
-      "core.quotepath=false",
-      "status",
-      "--porcelain=v1",
-      "-z",
-      "--untracked-files=normal",
-      "--",
-      path,
-    ],
-    cwd,
-  );
-  if (res.code === 0) return { ok: true, stdout: res.stdout };
-  return {
-    ok: false,
-    error: gitFailureMessage(res, "git status failed"),
-  };
 }
 
 export async function statusPorcelainForPathAsync(
@@ -456,14 +406,6 @@ export async function repoStatusMapAsync(
   return map;
 }
 
-export function show(
-  ref: string,
-  path: string,
-  cwd: string,
-): { code: number; stdout: string; stderr: string } {
-  return run(["git", "show", `${ref}:${path}`], cwd);
-}
-
 export function showAsync(
   ref: string,
   path: string,
@@ -521,14 +463,6 @@ export async function gitSymlinkTargetMetadataAsync(
     : { symlink_target: target, symlink_target_type, resolved_path: resolved };
 }
 
-export function showBytes(
-  ref: string,
-  path: string,
-  cwd: string,
-): { code: number; stdout: Uint8Array; stderr: string } {
-  return runBytes(["git", "show", `${ref}:${path}`], cwd);
-}
-
 export function showBytesAsync(
   ref: string,
   path: string,
@@ -548,19 +482,6 @@ export function catFileBlobStream(
   return spawnStream(resolveGitArgs(["git", "cat-file", "blob", oid]), cwd);
 }
 
-export function objectSize(
-  ref: string,
-  path: string,
-  cwd: string,
-): { code: number; size: number; stderr: string } {
-  const res = run(["git", "cat-file", "-s", `${ref}:${path}`], cwd);
-  return {
-    code: res.code,
-    size: Number(res.stdout.trim()) || 0,
-    stderr: res.stderr,
-  };
-}
-
 export async function objectSizeAsync(
   ref: string,
   path: string,
@@ -570,18 +491,6 @@ export async function objectSizeAsync(
     ["git", "cat-file", "-s", `${ref}:${path}`],
     cwd,
   );
-  return {
-    code: res.code,
-    size: Number(res.stdout.trim()) || 0,
-    stderr: res.stderr,
-  };
-}
-
-export function objectByteSize(
-  oid: string,
-  cwd: string,
-): { code: number; size: number; stderr: string } {
-  const res = run(["git", "cat-file", "-s", oid], cwd);
   return {
     code: res.code,
     size: Number(res.stdout.trim()) || 0,
@@ -601,17 +510,6 @@ export async function objectByteSizeAsync(
   };
 }
 
-export function lastCommitDateForPath(
-  ref: string,
-  path: string,
-  cwd: string,
-): string | null {
-  const args = ["git", "log", "-1", "--format=%cI", ref, "--", path];
-  const res = run(args, cwd);
-  if (res.code !== 0) return null;
-  return res.stdout.trim() || null;
-}
-
 export async function lastCommitDateForPathAsync(
   ref: string,
   path: string,
@@ -621,21 +519,6 @@ export async function lastCommitDateForPathAsync(
   const res = await runGitAsync(args, cwd);
   if (res.code !== 0) return null;
   return res.stdout.trim() || null;
-}
-
-export function objectId(
-  ref: string,
-  path: string,
-  cwd: string,
-): { code: number; oid: string; stderr: string } {
-  const res = run(["git", "rev-parse", "--verify", `${ref}:${path}`], cwd);
-  const oid = res.stdout.trim();
-  if (res.code !== 0 || !oid)
-    return { code: res.code || 1, oid: "", stderr: res.stderr };
-  const type = run(["git", "cat-file", "-t", oid], cwd);
-  if (type.code !== 0 || type.stdout.trim() !== "blob")
-    return { code: 1, oid: "", stderr: type.stderr };
-  return { code: 0, oid, stderr: "" };
 }
 
 export async function objectIdAsync(
@@ -654,23 +537,6 @@ export async function objectIdAsync(
   if (type.code !== 0 || type.stdout.trim() !== "blob")
     return { code: 1, oid: "", stderr: type.stderr };
   return { code: 0, oid, stderr: "" };
-}
-
-export function verifyTreeRef(ref: string, cwd: string): boolean {
-  return verifyTreeRefResult(ref, cwd).ok;
-}
-
-export function verifyTreeRefResult(
-  ref: string,
-  cwd: string,
-): { ok: true } | ({ ok: false } & GitErrorResult) {
-  if (!ref || ref === "worktree")
-    return { ok: false, error: "invalid target", status: 400 };
-  if (ref.startsWith("-"))
-    return { ok: false, error: "invalid target", status: 400 };
-  const res = run(["git", "rev-parse", "--verify", `${ref}^{tree}`], cwd);
-  if (res.code === 0) return { ok: true };
-  return { ok: false, ...gitFailureResult(res, "invalid target") };
 }
 
 export async function verifyTreeRefResultAsync(
@@ -695,77 +561,6 @@ export type GitRefs = {
   commits: GitCommitMeta[];
   current: string;
 };
-
-export function refs(cwd: string): GitRefs {
-  return refsResult(cwd).refs;
-}
-
-export function refsResult(
-  cwd: string,
-): { refs: GitRefs } & Partial<GitErrorResult> {
-  const out = {
-    branches: [] as GitBranchMeta[],
-    tags: [] as GitTagMeta[],
-    commits: [] as GitCommitMeta[],
-    current: "",
-  };
-  const branches = run(
-    [
-      "git",
-      "for-each-ref",
-      "--sort=-committerdate",
-      "--format=%(refname)%09%(refname:short)%09%(committerdate:iso-strict)",
-      "refs/heads",
-      "refs/remotes",
-    ],
-    cwd,
-  );
-  if (branches.code !== 0 && isCommandNotFoundResult("git", branches)) {
-    return { refs: out, ...gitFailureResult(branches, "git refs failed") };
-  }
-  if (branches.code === 0) {
-    for (const line of branches.stdout.split("\n")) {
-      const [fullName, name, when] = line.split("\t");
-      if (
-        !fullName ||
-        !name ||
-        (fullName.startsWith("refs/remotes/") && fullName.endsWith("/HEAD"))
-      )
-        continue;
-      out.branches.push({ name, when });
-    }
-  }
-  const tags = run(
-    [
-      "git",
-      "for-each-ref",
-      "--sort=-creatordate",
-      "--format=%(refname:short)%09%(creatordate:iso-strict)",
-      "refs/tags",
-    ],
-    cwd,
-  );
-  if (tags.code !== 0 && isCommandNotFoundResult("git", tags)) {
-    return { refs: out, ...gitFailureResult(tags, "git refs failed") };
-  }
-  if (tags.code === 0) {
-    for (const line of tags.stdout.split("\n")) {
-      const [name, when] = line.split("\t");
-      if (!name) continue;
-      out.tags.push({ name, when });
-    }
-  }
-  const commits = refCommitPageResult(cwd, {
-    query: "",
-    max: DEFAULT_REF_COMMIT_LIMIT,
-  });
-  if (commits.error) {
-    return { refs: out, error: commits.error, status: commits.status };
-  }
-  out.commits = commits.commits;
-  out.current = currentBranch(cwd) || "";
-  return { refs: out };
-}
 
 export async function refsResultAsync(
   cwd: string,
@@ -889,17 +684,6 @@ function mergeCommitResults(
   return merged;
 }
 
-function runCommitLogResult(
-  cwd: string,
-  args: string[],
-): { commits: GitCommitMeta[] } & Partial<GitErrorResult> {
-  const commits = run(args, cwd);
-  if (commits.code === 0) return { commits: parseCommitLog(commits.stdout) };
-  if (isCommandNotFoundResult("git", commits))
-    return { commits: [], ...gitFailureResult(commits, "git log failed") };
-  return { commits: [] };
-}
-
 async function runCommitLogResultAsync(
   cwd: string,
   args: string[],
@@ -909,123 +693,6 @@ async function runCommitLogResultAsync(
   if (isCommandNotFoundResult("git", commits))
     return { commits: [], ...gitFailureResult(commits, "git log failed") };
   return { commits: [] };
-}
-
-export function refCommits(
-  cwd: string,
-  query = "",
-  max = DEFAULT_REF_COMMIT_LIMIT,
-): GitCommitMeta[] {
-  return refCommitPageResult(cwd, { query, max }).commits;
-}
-
-export function refCommitPage(
-  cwd: string,
-  options: { query?: string; max?: number; skip?: number } = {},
-): { commits: GitCommitMeta[]; hasMore: boolean } {
-  const result = refCommitPageResult(cwd, options);
-  return { commits: result.commits, hasMore: result.hasMore };
-}
-
-export function refCommitPageResult(
-  cwd: string,
-  options: { query?: string; max?: number; skip?: number } = {},
-): { commits: GitCommitMeta[]; hasMore: boolean } & Partial<GitErrorResult> {
-  const limit = clampCommitLimit(options.max ?? DEFAULT_REF_COMMIT_LIMIT);
-  const skip = clampCommitSkip(options.skip ?? 0);
-  const fetchLimit = limit + 1;
-  const hashMatches: GitCommitMeta[] = [];
-  const trimmed = (options.query || "").trim().slice(0, 200).replace(/\0/g, "");
-  if (skip === 0 && /^[0-9a-f]{4,40}$/i.test(trimmed)) {
-    const verified = run(
-      ["git", "rev-parse", "--verify", `${trimmed}^{commit}`],
-      cwd,
-    );
-    if (verified.code !== 0 && isCommandNotFoundResult("git", verified)) {
-      return {
-        commits: [],
-        hasMore: false,
-        ...gitFailureResult(verified, "unknown ref"),
-      };
-    }
-    const single = run(
-      [
-        "git",
-        "log",
-        "-z",
-        "-1",
-        `--format=${COMMIT_FORMAT}`,
-        verified.code === 0 && verified.stdout.trim()
-          ? verified.stdout.trim()
-          : trimmed,
-      ],
-      cwd,
-    );
-    if (single.code !== 0 && isCommandNotFoundResult("git", single)) {
-      return {
-        commits: [],
-        hasMore: false,
-        ...gitFailureResult(single, "git log failed"),
-      };
-    }
-    if (single.code === 0 && single.stdout.trim()) {
-      hashMatches.push(...parseCommitLog(single.stdout));
-    }
-  }
-  if (!trimmed) {
-    const result = runCommitLogResult(cwd, commitLogArgs(fetchLimit, skip));
-    if (result.error) {
-      return {
-        commits: [],
-        hasMore: false,
-        error: result.error,
-        status: result.status,
-      };
-    }
-    const commits = result.commits;
-    return {
-      commits: commits.slice(0, limit),
-      hasMore: commits.length > limit,
-    };
-  }
-  const subjectMatches = runCommitLogResult(cwd, [
-    ...commitLogArgs(fetchLimit, skip),
-    "--regexp-ignore-case",
-    "--fixed-strings",
-    `--grep=${trimmed}`,
-  ]);
-  if (subjectMatches.error) {
-    return {
-      commits: [],
-      hasMore: false,
-      error: subjectMatches.error,
-      status: subjectMatches.status,
-    };
-  }
-  const authorMatches = runCommitLogResult(cwd, [
-    ...commitLogArgs(fetchLimit, skip),
-    "--regexp-ignore-case",
-    "--fixed-strings",
-    `--author=${trimmed}`,
-  ]);
-  if (authorMatches.error) {
-    return {
-      commits: [],
-      hasMore: false,
-      error: authorMatches.error,
-      status: authorMatches.status,
-    };
-  }
-  const merged = mergeCommitResults(
-    fetchLimit,
-    hashMatches,
-    subjectMatches.commits,
-    authorMatches.commits,
-  );
-  return {
-    commits: merged.slice(0, limit),
-    hasMore: merged.length > limit,
-  };
 }
 
 export async function refCommitPageResultAsync(
@@ -1151,12 +818,6 @@ export function parseRemoteWebUrl(remote: string): string | null {
   return null;
 }
 
-export function remoteWebUrl(cwd: string): string | null {
-  const res = run(["git", "remote", "get-url", "origin"], cwd);
-  if (res.code !== 0) return null;
-  return parseRemoteWebUrl(res.stdout.trim());
-}
-
 export async function remoteWebUrlAsync(cwd: string): Promise<string | null> {
   const res = await runGitAsync(["git", "remote", "get-url", "origin"], cwd);
   if (res.code !== 0) return null;
@@ -1237,96 +898,6 @@ function historyQueryArgs(query: string): {
     pathspec: [],
     shaTerm: /^[0-9a-f]{4,40}$/i.test(trimmed) ? trimmed : "",
   };
-}
-
-export function commitHistory(
-  cwd: string,
-  options: {
-    ref: string;
-    skip: number;
-    limit: number;
-    query?: string;
-    path?: string;
-  },
-): {
-  commits: GitHistoryCommit[];
-  hasMore: boolean;
-  error?: string;
-  status?: number;
-} {
-  const ref = (options.ref || "HEAD").trim();
-  if (!ref || ref.startsWith("-") || ref.includes("\0"))
-    return { commits: [], hasMore: false, error: "invalid ref" };
-  const verified = run(
-    ["git", "rev-parse", "--verify", `${ref}^{commit}`],
-    cwd,
-  );
-  if (verified.code !== 0)
-    return {
-      commits: [],
-      hasMore: false,
-      ...gitFailureResult(verified, "unknown ref"),
-    };
-  const skip = Math.max(0, Math.floor(options.skip) || 0);
-  const limit = Math.max(
-    1,
-    Math.min(Math.floor(options.limit) || 1, MAX_HISTORY_LIMIT),
-  );
-  const { filterArgs, pathspec, shaTerm } = historyQueryArgs(
-    options.query || "",
-  );
-  const pathFilter = (options.path || "").trim();
-  // When the caller pins a path, follow renames through history. Skip --follow
-  // for directories (git --follow rejects them) by treating any path ending in
-  // "/" as a directory and not adding --follow.
-  const pathArgs: string[] = [];
-  if (pathFilter && !pathFilter.includes("\0") && !pathFilter.startsWith("-")) {
-    if (!pathFilter.endsWith("/")) pathArgs.push("--follow");
-    pathArgs.push("--", pathFilter);
-  }
-  const res = run(
-    [
-      "git",
-      "log",
-      "-z",
-      `--skip=${skip}`,
-      `--max-count=${limit + 1}`,
-      `--format=${HISTORY_FORMAT}`,
-      ...filterArgs,
-      verified.stdout.trim(),
-      ...pathspec,
-      ...pathArgs,
-    ],
-    cwd,
-  );
-  if (res.code !== 0)
-    return {
-      commits: [],
-      hasMore: false,
-      ...gitFailureResult(res, "git log failed"),
-    };
-  let parsed = parseHistoryLog(res.stdout);
-  // A hex-looking term also matches a commit by sha prefix; pin that commit
-  // ahead of message matches on the first page.
-  if (shaTerm && skip === 0) {
-    const bySha = run(
-      ["git", "rev-parse", "--verify", `${shaTerm}^{commit}`],
-      cwd,
-    );
-    const sha = bySha.code === 0 ? bySha.stdout.trim() : "";
-    if (sha) {
-      const single = run(
-        ["git", "log", "-z", "-1", `--format=${HISTORY_FORMAT}`, sha],
-        cwd,
-      );
-      if (single.code === 0) {
-        const hit = parseHistoryLog(single.stdout);
-        parsed = [...hit, ...parsed.filter((c) => c.sha !== sha)];
-      }
-    }
-  }
-  const hasMore = parsed.length > limit;
-  return { commits: hasMore ? parsed.slice(0, limit) : parsed, hasMore };
 }
 
 export async function commitHistoryAsync(
@@ -1414,55 +985,6 @@ export async function commitHistoryAsync(
   return { commits: hasMore ? parsed.slice(0, limit) : parsed, hasMore };
 }
 
-export function nameStatusResult(
-  args: string[],
-  cwd: string,
-): GitFileMetaResult {
-  const res = run(
-    [
-      "git",
-      "-c",
-      "core.quotepath=false",
-      "diff",
-      "--no-color",
-      "--no-ext-diff",
-      "--find-renames",
-      "--name-status",
-      "-z",
-      ...args,
-    ],
-    cwd,
-  );
-  if (res.code !== 0) {
-    return {
-      files: [],
-      error: gitFailureMessage(res, "git diff --name-status failed"),
-    };
-  }
-  const parts = res.stdout.split("\0");
-  const files: GitFileMeta[] = [];
-  for (let i = 0; i < parts.length; ) {
-    const status = parts[i++];
-    if (!status) break;
-    const kind = status[0];
-    if (kind === "R" || kind === "C") {
-      const oldPath = parts[i++] || "";
-      const path = parts[i++] || "";
-      if (path)
-        files.push({
-          status: kind,
-          old_path: oldPath,
-          path,
-          similarity: Number(status.slice(1)) || undefined,
-        });
-    } else {
-      const path = parts[i++] || "";
-      if (path) files.push({ status: kind, path });
-    }
-  }
-  return { files };
-}
-
 export async function nameStatusResultAsync(
   args: string[],
   cwd: string,
@@ -1507,55 +1029,6 @@ export async function nameStatusResultAsync(
     } else {
       const path = parts[i++] || "";
       if (path) files.push({ status: kind, path });
-    }
-  }
-  return { files };
-}
-
-export function nameStatus(args: string[], cwd: string): GitFileMeta[] {
-  return nameStatusResult(args, cwd).files;
-}
-
-export function numstatZResult(args: string[], cwd: string): GitFileMetaResult {
-  const res = run(
-    [
-      "git",
-      "-c",
-      "core.quotepath=false",
-      "diff",
-      "--no-color",
-      "--no-ext-diff",
-      "--find-renames",
-      "--numstat",
-      "-z",
-      ...args,
-    ],
-    cwd,
-  );
-  if (res.code !== 0) {
-    return {
-      files: [],
-      error: gitFailureMessage(res, "git diff --numstat failed"),
-    };
-  }
-  const parts = res.stdout.split("\0");
-  const files: GitFileMeta[] = [];
-  for (let i = 0; i < parts.length; ) {
-    const rec = parts[i++];
-    if (!rec) break;
-    const match = rec.match(/^(\S+)\t(\S+)\t(.*)$/);
-    if (!match) break;
-    const [, add, del, rest] = match;
-    const binary = add === "-" && del === "-";
-    const additions = binary ? 0 : Number(add) || 0;
-    const deletions = binary ? 0 : Number(del) || 0;
-    if (rest === "") {
-      const oldPath = parts[i++] || "";
-      const path = parts[i++] || "";
-      if (path)
-        files.push({ old_path: oldPath, path, additions, deletions, binary });
-    } else {
-      files.push({ path: rest, additions, deletions, binary });
     }
   }
   return { files };
@@ -1607,10 +1080,6 @@ export async function numstatZResultAsync(
     }
   }
   return { files };
-}
-
-export function numstatZ(args: string[], cwd: string): GitFileMeta[] {
-  return numstatZResult(args, cwd).files;
 }
 
 // Shared "does this path contain segment X?" predicate, case-insensitive.
@@ -1684,10 +1153,10 @@ function syntheticUncommittedBlameFromWorktree(
 
 // git blame --porcelain parser. base "worktree": blame the working copy;
 // base "HEAD": blame the committed snapshot at the given ref.
-export function blame(
+export async function blameAsync(
   cwd: string,
   options: { path: string; ref: string; base: GitBlameBase },
-): GitBlameResult {
+): Promise<GitBlameResult> {
   const path = options.path;
   if (!path || path.includes("\0") || path.startsWith("-")) {
     return { lines: [], commits: {}, error: "invalid path" };
@@ -1700,7 +1169,7 @@ export function blame(
     args.push(normalized.ref);
   }
   args.push("--", path);
-  const res = run(args, cwd);
+  const res = await runGitAsync(args, cwd);
   if (res.code !== 0) {
     if (isCommandNotFoundResult("git", res)) {
       return {
@@ -1778,110 +1247,6 @@ export function blame(
   return { lines, commits };
 }
 
-export async function blameAsync(
-  cwd: string,
-  options: { path: string; ref: string; base: GitBlameBase },
-): Promise<GitBlameResult> {
-  const path = options.path;
-  if (!path || path.includes("\0") || path.startsWith("-")) {
-    return { lines: [], commits: {}, error: "invalid path" };
-  }
-  const normalized = normalizeBlameRef(options.ref, options.base);
-  const args = ["git", "blame", "--porcelain"];
-  if (normalized.base === "HEAD") {
-    if (normalized.ref.startsWith("-") || normalized.ref.includes("\0"))
-      return { lines: [], commits: {}, error: "invalid ref" };
-    args.push(normalized.ref);
-  }
-  args.push("--", path);
-  const res = await runGitAsync(args, cwd);
-  if (res.code !== 0) {
-    if (isCommandNotFoundResult("git", res)) {
-      return {
-        lines: [],
-        commits: {},
-        error: commandNotFoundDetail("git"),
-        status: 503,
-      };
-    }
-    if (normalized.base === "worktree") {
-      return syntheticUncommittedBlameFromWorktree(cwd, path);
-    }
-    return {
-      lines: [],
-      commits: {},
-      error: res.stderr.trim() || "blame failed",
-    };
-  }
-  const lines: GitBlameLine[] = [];
-  const commits: Record<string, GitBlameCommit> = {};
-  const rawLines = res.stdout.split("\n");
-  let i = 0;
-  while (i < rawLines.length) {
-    const headerLine = rawLines[i];
-    if (!headerLine) {
-      i++;
-      continue;
-    }
-    const headerMatch = /^([0-9a-f]{40}) (\d+) (\d+)(?: (\d+))?$/.exec(
-      headerLine,
-    );
-    if (!headerMatch) {
-      i++;
-      continue;
-    }
-    const sha = headerMatch[1];
-    const finalLine = Number(headerMatch[3]);
-    i++;
-    let commit = commits[sha];
-    if (!commit) {
-      commit = {
-        sha,
-        author: "",
-        authorMail: "",
-        authorTime: 0,
-        summary: "",
-        isUncommitted: sha === BLAME_ZERO_SHA,
-      };
-      commits[sha] = commit;
-    }
-    while (i < rawLines.length && !rawLines[i].startsWith("\t")) {
-      const metaLine = rawLines[i++];
-      if (!metaLine) continue;
-      const sp = metaLine.indexOf(" ");
-      const key = sp >= 0 ? metaLine.slice(0, sp) : metaLine;
-      const val = sp >= 0 ? metaLine.slice(sp + 1) : "";
-      if (key === "author" && !commit.author) commit.author = val;
-      else if (key === "author-mail" && !commit.authorMail)
-        commit.authorMail = val.replace(/^</, "").replace(/>$/, "");
-      else if (key === "author-time" && !commit.authorTime)
-        commit.authorTime = Number(val) || 0;
-      else if (key === "summary" && !commit.summary) commit.summary = val;
-    }
-    if (i < rawLines.length && rawLines[i].startsWith("\t")) i++;
-    if (Number.isFinite(finalLine) && finalLine > 0) {
-      lines.push({
-        lineNo: finalLine,
-        sha,
-        isUncommitted: sha === BLAME_ZERO_SHA,
-      });
-    }
-  }
-  lines.sort((a, b) => a.lineNo - b.lineNo);
-  return { lines, commits };
-}
-
-export function untracked(cwd: string, path = ""): string[] {
-  const args = ["git", "ls-files", "--others", "--exclude-standard"];
-  if (path) args.push("--", `${path}/`);
-  const res = run(args, cwd);
-  if (res.code !== 0) return [];
-  return res.stdout
-    .split("\n")
-    .filter(Boolean)
-    .filter((entry) => !isToolInternalPath(entry));
-}
-
 export async function untrackedAsync(
   cwd: string,
   path = "",
@@ -1913,24 +1278,6 @@ function omittedWorktreeDirectoryReason(
 ): GitTreeEntry["children_omitted_reason"] | undefined {
   if (name === ".git") return "internal";
   return omitDirNames.matches(name) ? "heavy" : undefined;
-}
-
-function worktreeSubmodulePaths(cwd: string): Set<string> {
-  if (!existsSync(join(cwd, ".gitmodules"))) return new Set();
-  const res = run(
-    ["git", "config", "--file", ".gitmodules", "--get-regexp", "\\.path$"],
-    cwd,
-  );
-  if (res.code !== 0) return new Set();
-  return new Set(
-    res.stdout
-      .split("\n")
-      .map((line) => {
-        const split = line.indexOf(" ");
-        return split >= 0 ? normalizeTreePath(line.slice(split + 1)) : "";
-      })
-      .filter(Boolean),
-  );
 }
 
 async function worktreeSubmodulePathsAsync(cwd: string): Promise<Set<string>> {
@@ -2091,123 +1438,6 @@ function worktreeEntryFromDirent(
         children_omitted_reason: omittedReason,
       }
     : baseEntry;
-}
-
-function worktreeFilesystemEntries(
-  cwd: string,
-  path: string,
-  recursive: boolean,
-  omitDirNames: string[] = DEFAULT_WORKTREE_OMIT_DIR_NAMES,
-  excludeNames: string[] = [],
-): GitTreeEntry[] {
-  const base = normalizeTreePath(path);
-  const root = join(cwd, base);
-  // `path` can itself be (or pass through) a symlink that escapes the repo -
-  // reject here so /_tree cannot be used to browse the host filesystem
-  // through it, regardless of what the client-side type/is_symlink display
-  // does.
-  if (realpathWithinRepo(cwd, root, true) === null) return [];
-  const omitDirNameSet = compileNamePatterns(omitDirNames);
-  const excludeNameSet = compileNamePatterns(excludeNames);
-  const submodulePaths = worktreeSubmodulePaths(cwd);
-  let directEntries: GitTreeEntry[];
-  try {
-    const dirents = readdirSync(root, { withFileTypes: true });
-    directEntries = sortTreeEntries(
-      dirents
-        .map((entry) =>
-          worktreeEntryFromDirent(
-            cwd,
-            base,
-            root,
-            entry.name,
-            entry.isDirectory(),
-            entry.isSymbolicLink(),
-            omitDirNameSet,
-            excludeNameSet,
-            submodulePaths,
-          ),
-        )
-        .filter((entry) => entry.path),
-    );
-  } catch {
-    return [];
-  }
-  if (!recursive) return directEntries;
-
-  const fileEntries: GitTreeEntry[] = [];
-  let truncated = false;
-  const pushRecursiveEntry = (entry: GitTreeEntry): boolean => {
-    if (fileEntries.length >= WORKTREE_RECURSIVE_ENTRY_LIMIT) {
-      if (!truncated) {
-        fileEntries.push({
-          name: "more...",
-          path: "__code_viewer_truncated__",
-          type: "tree",
-          children_omitted: true,
-          children_omitted_reason: "truncated",
-        });
-        truncated = true;
-      }
-      return false;
-    }
-    fileEntries.push(entry);
-    return true;
-  };
-  const walk = (dir: string, prefix: string, depth: number) => {
-    if (truncated) return;
-    if (depth >= WORKTREE_RECURSIVE_DEPTH_LIMIT) return;
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (excludeNameSet.matches(entry.name)) continue;
-      const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        const omittedReason = omittedWorktreeDirectoryReason(
-          entry.name,
-          omitDirNameSet,
-        );
-        if (omittedReason) {
-          if (
-            !pushRecursiveEntry({
-              name: entry.name,
-              path: entryPath,
-              type: "tree",
-              children_omitted: true,
-              children_omitted_reason: omittedReason,
-            })
-          )
-            return;
-          continue;
-        }
-        if (hasDotGitEntry(full)) continue;
-        walk(full, entryPath, depth + 1);
-      } else if (entry.isFile() || entry.isSymbolicLink()) {
-        if (
-          !pushRecursiveEntry(
-            recursiveWorktreeFileEntry(
-              cwd,
-              full,
-              entry.name,
-              entryPath,
-              entry.isSymbolicLink(),
-            ),
-          )
-        )
-          return;
-      }
-    }
-  };
-  walk(root, base, 0);
-  return combineDirectAndRecursiveFiles(
-    directEntries,
-    fileEntries.sort((a, b) => a.path.localeCompare(b.path)),
-  );
 }
 
 async function worktreeFilesystemEntriesAsync(
@@ -2371,31 +1601,6 @@ function parseLsTreeRecord(
   };
 }
 
-function gitTreeEntries(
-  ref: string,
-  path: string,
-  cwd: string,
-  recursive: boolean,
-): { code: number; entries: GitTreeEntry[]; stderr: string } {
-  const base = normalizeTreePath(path);
-  const args = ["git", "-c", "core.quotepath=false", "ls-tree"];
-  if (recursive) args.push("-r");
-  args.push("-z", "--full-tree", ref, "--");
-  if (base) args.push(`${base}/`);
-  const res = run(args, cwd);
-  if (res.code !== 0)
-    return { code: res.code, entries: [], stderr: res.stderr };
-  const allowedTypes = recursive ? "blob|commit" : "tree|blob|commit";
-  let entries = res.stdout
-    .split("\0")
-    .filter(Boolean)
-    .map((rec) => parseLsTreeRecord(rec, allowedTypes))
-    .filter((entry): entry is GitTreeEntry => !!entry);
-  if (recursive) entries.sort((a, b) => a.path.localeCompare(b.path));
-  else entries = sortTreeEntries(entries);
-  return { code: 0, entries, stderr: "" };
-}
-
 async function gitTreeEntriesAsync(
   ref: string,
   path: string,
@@ -2430,65 +1635,6 @@ function combineDirectAndRecursiveFiles(
     ...directEntries,
     ...fileEntries.filter((entry) => !seen.has(entry.path)),
   ];
-}
-
-export function worktreeEntries(cwd: string, path: string): GitTreeEntry[] {
-  return listTree("worktree", path, cwd).entries;
-}
-
-export function worktreeFiles(cwd: string): GitTreeEntry[] {
-  return listTree("worktree", "", cwd, { recursive: true }).entries;
-}
-
-export function treeEntries(
-  ref: string,
-  path: string,
-  cwd: string,
-): { code: number; entries: GitTreeEntry[]; stderr: string } {
-  return listTree(ref, path, cwd);
-}
-
-export function treeFiles(
-  ref: string,
-  cwd: string,
-): { code: number; entries: GitTreeEntry[]; stderr: string } {
-  return listTree(ref, "", cwd, { recursive: true });
-}
-
-export function listTree(
-  ref: string,
-  path: string,
-  cwd: string,
-  options: {
-    recursive?: boolean;
-    omitDirNames?: string[];
-    excludeNames?: string[];
-  } = {},
-): { code: number; entries: GitTreeEntry[]; stderr: string } {
-  const base = normalizeTreePath(path);
-  if (ref === "worktree") {
-    return {
-      code: 0,
-      entries: worktreeFilesystemEntries(
-        cwd,
-        base,
-        !!options.recursive,
-        options.omitDirNames,
-        options.excludeNames,
-      ),
-      stderr: "",
-    };
-  }
-
-  const direct = gitTreeEntries(ref, base, cwd, false);
-  if (direct.code !== 0 || !options.recursive) return direct;
-  const recursive = gitTreeEntries(ref, base, cwd, true);
-  if (recursive.code !== 0) return recursive;
-  return {
-    code: 0,
-    entries: combineDirectAndRecursiveFiles(direct.entries, recursive.entries),
-    stderr: "",
-  };
 }
 
 export async function listTreeAsync(
@@ -2527,21 +1673,6 @@ export async function listTreeAsync(
   };
 }
 
-export function listTreeResult(
-  ref: string,
-  path: string,
-  cwd: string,
-  options: {
-    recursive?: boolean;
-    omitDirNames?: string[];
-    excludeNames?: string[];
-  } = {},
-): { entries: GitTreeEntry[] } & Partial<GitErrorResult> {
-  const result = listTree(ref, path, cwd, options);
-  if (result.code === 0) return { entries: result.entries };
-  return { entries: [], ...gitFailureResult(result, "git ls-tree failed") };
-}
-
 export async function listTreeResultAsync(
   ref: string,
   path: string,
@@ -2557,128 +1688,106 @@ export async function listTreeResultAsync(
   return { entries: [], ...gitFailureResult(result, "git ls-tree failed") };
 }
 
-export function untrackedMeta(cwd: string): GitFileMeta[] {
-  return untracked(cwd).flatMap((path) => {
-    const full = join(cwd, path);
-    let fileExists = false;
-    try {
-      fileExists = existsSync(full) && statSync(full).isFile();
-    } catch {
-      fileExists = false;
-    }
-    let scan: { binary: boolean; newlines: number };
-    if (fileExists) {
-      try {
-        scan = scanFileBinaryAndNewlines(full);
-      } catch {
-        return [];
-      }
-    } else {
-      return [];
-    }
-    return [
-      {
-        path,
-        status: "A",
-        additions: scan.binary ? 0 : scan.newlines,
-        deletions: 0,
-        binary: scan.binary,
-        untracked: true,
-      },
-    ];
-  });
+type UntrackedScan = { binary: boolean; newlines: number };
+
+function untrackedFileMeta(path: string, scan: UntrackedScan): GitFileMeta {
+  return {
+    path,
+    status: "A",
+    additions: scan.binary ? 0 : scan.newlines,
+    deletions: 0,
+    binary: scan.binary,
+    untracked: true,
+  };
 }
 
-export async function untrackedMetaAsync(cwd: string): Promise<GitFileMeta[]> {
-  const paths = await untrackedAsync(cwd);
-  return paths.flatMap((path) => {
-    const full = join(cwd, path);
-    let fileExists = false;
-    try {
-      fileExists = existsSync(full) && statSync(full).isFile();
-    } catch {
-      fileExists = false;
-    }
-    let scan: { binary: boolean; newlines: number };
-    if (fileExists) {
-      try {
-        scan = scanFileBinaryAndNewlines(full);
-      } catch {
-        return [];
-      }
-    } else {
-      return [];
-    }
-    return [
-      {
-        path,
-        status: "A",
-        additions: scan.binary ? 0 : scan.newlines,
-        deletions: 0,
-        binary: scan.binary,
-        untracked: true,
-      },
-    ];
-  });
-}
+// Diff payloads recompute on every SSE tick, and rereading thousands of
+// unchanged untracked files each time both wastes IO and (before the async
+// rewrite) starved the event loop for tens of seconds on large repos -
+// even static assets stalled behind the scan. Entries are keyed per cwd,
+// invalidated by the stat signature (symlinks resolved, matching the old
+// statSync behavior), and each scan rebuilds its cwd map
+// so files that left the untracked set do not accumulate.
+const untrackedScanCache = new Map<
+  string,
+  Map<string, { signature: string; scan: UntrackedScan }>
+>();
 
-function scanFileBinaryAndNewlines(full: string): {
-  binary: boolean;
-  newlines: number;
-} {
-  const fd = openSync(full, "r");
+const UNTRACKED_SCAN_CONCURRENCY = 8;
+
+async function scanFileBinaryAndNewlinesAsync(
+  full: string,
+): Promise<UntrackedScan> {
+  const handle = await open(full, "r");
   const buffer = Buffer.allocUnsafe(64 * 1024);
   let newlines = 0;
   let inspected = 0;
   try {
     while (true) {
-      const read = readSync(fd, buffer, 0, buffer.length, null);
-      if (read <= 0) break;
-      const binaryProbeBytes = Math.min(read, Math.max(0, 8192 - inspected));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (bytesRead <= 0) break;
+      const binaryProbeBytes = Math.min(
+        bytesRead,
+        Math.max(0, 8192 - inspected),
+      );
       for (let i = 0; i < binaryProbeBytes; i++) {
         if (buffer[i] === 0) return { binary: true, newlines: 0 };
       }
-      inspected += read;
-      for (let i = 0; i < read; i++) {
+      inspected += bytesRead;
+      for (let i = 0; i < bytesRead; i++) {
         if (buffer[i] === 10) newlines++;
       }
     }
   } finally {
-    closeSync(fd);
+    await handle.close();
   }
   return { binary: false, newlines };
 }
 
-export function fileMeta(
-  args: string[],
-  cwd: string,
-  includeUntracked = false,
-): GitFileMeta[] {
-  return fileMetaResult(args, cwd, includeUntracked).files;
-}
-
-export function fileMetaResult(
-  args: string[],
-  cwd: string,
-  includeUntracked = false,
-): GitFileMetaResult {
-  const ns = nameStatusResult(args, cwd);
-  if (ns.error) return { files: [], error: ns.error };
-  const nm = numstatZResult(args, cwd);
-  if (nm.error) return { files: [], error: nm.error };
-  const byPath = new Map(nm.files.map((file) => [file.path, file]));
-  const files: GitFileMeta[] = ns.files.map((file) => {
-    const stats = byPath.get(file.path);
-    return {
-      ...file,
-      additions: stats?.additions || 0,
-      deletions: stats?.deletions || 0,
-      binary: stats?.binary || false,
-    };
-  });
-  return {
-    files: includeUntracked ? files.concat(untrackedMeta(cwd)) : files,
+export async function untrackedMetaAsync(cwd: string): Promise<GitFileMeta[]> {
+  const paths = await untrackedAsync(cwd);
+  const previous = untrackedScanCache.get(cwd);
+  const next = new Map<string, { signature: string; scan: UntrackedScan }>();
+  const results: (GitFileMeta | null)[] = new Array(paths.length).fill(null);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < paths.length) {
+      const index = cursor++;
+      const path = paths[index];
+      const full = join(cwd, path);
+      let stats: Awaited<ReturnType<typeof stat>>;
+      try {
+        stats = await stat(full);
+      } catch {
+        continue;
+      }
+      if (!stats.isFile()) continue;
+      const signature = fileSignatureFromStats(stats);
+      const cached = previous?.get(path);
+      let scan: UntrackedScan;
+      if (cached && cached.signature === signature) {
+        scan = cached.scan;
+      } else {
+        try {
+          scan = await scanFileBinaryAndNewlinesAsync(full);
+        } catch {
+          continue;
+        }
+      }
+      next.set(path, { signature, scan });
+      results[index] = untrackedFileMeta(path, scan);
+    }
   };
+  await Promise.all(
+    Array.from(
+      {
+        length: Math.min(UNTRACKED_SCAN_CONCURRENCY, Math.max(1, paths.length)),
+      },
+      () => worker(),
+    ),
+  );
+  untrackedScanCache.set(cwd, next);
+  return results.filter((meta): meta is GitFileMeta => meta !== null);
 }
 
 export async function fileMetaResultAsync(
@@ -2707,33 +1816,6 @@ export async function fileMetaResultAsync(
   };
 }
 
-export function fileDiffText(
-  args: string[],
-  path: string | string[],
-  cwd: string,
-): { code: number; stdout: string; stderr: string; status?: number } {
-  const paths = Array.isArray(path) ? path : [path];
-  const res = run(
-    [
-      "git",
-      "-c",
-      "core.quotepath=false",
-      "diff",
-      "--no-color",
-      "--no-ext-diff",
-      "--find-renames",
-      ...args,
-      "--",
-      ...paths,
-    ],
-    cwd,
-  );
-  if (isCommandNotFoundResult("git", res)) {
-    return { ...res, stderr: commandNotFoundDetail("git"), status: 503 };
-  }
-  return res;
-}
-
 export async function fileDiffTextAsync(
   args: string[],
   path: string | string[],
@@ -2752,32 +1834,6 @@ export async function fileDiffTextAsync(
       ...args,
       "--",
       ...paths,
-    ],
-    cwd,
-  );
-  if (isCommandNotFoundResult("git", res)) {
-    return { ...res, stderr: commandNotFoundDetail("git"), status: 503 };
-  }
-  return res;
-}
-
-export function untrackedFileDiff(
-  extras: string[],
-  path: string,
-  cwd: string,
-): { code: number; stdout: string; stderr: string; status?: number } {
-  const res = run(
-    [
-      "git",
-      "-c",
-      "core.quotepath=false",
-      "diff",
-      "--no-color",
-      "--no-ext-diff",
-      "--no-index",
-      ...extras,
-      "/dev/null",
-      path,
     ],
     cwd,
   );

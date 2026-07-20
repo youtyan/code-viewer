@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { commitHistory, parseRemoteWebUrl } from "../server/git";
+import { commitHistoryAsync, parseRemoteWebUrl } from "../server/git";
 
 function git(cwd: string, args: string[]) {
   const proc = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -32,8 +32,12 @@ describe("commitHistory", () => {
     rmSync(repo, { recursive: true, force: true });
   });
 
-  test("returns newest-first commits with parents", () => {
-    const res = commitHistory(repo, { ref: "HEAD", skip: 0, limit: 10 });
+  test("returns newest-first commits with parents", async () => {
+    const res = await commitHistoryAsync(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 10,
+    });
     expect(res.error).toBeUndefined();
     expect(res.commits.map((c) => c.sha)).toEqual([...shas].reverse());
     expect(res.hasMore).toBe(false);
@@ -45,7 +49,7 @@ describe("commitHistory", () => {
     expect(res.commits[0].body).toBe("");
   });
 
-  test("returns the commit body", () => {
+  test("returns the commit body", async () => {
     writeFileSync(join(repo, "body.txt"), "body\n");
     git(repo, ["add", "body.txt"]);
     git(repo, [
@@ -55,7 +59,11 @@ describe("commitHistory", () => {
       "-m",
       "body first line\n\nbody second paragraph",
     ]);
-    const res = commitHistory(repo, { ref: "HEAD", skip: 0, limit: 1 });
+    const res = await commitHistoryAsync(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 1,
+    });
     expect(res.commits[0].subject).toBe("subject line");
     expect(res.commits[0].body).toBe(
       "body first line\n\nbody second paragraph",
@@ -63,41 +71,64 @@ describe("commitHistory", () => {
     git(repo, ["reset", "--hard", "HEAD^"]);
   });
 
-  test("pages with skip and reports hasMore", () => {
-    const page1 = commitHistory(repo, { ref: "HEAD", skip: 0, limit: 2 });
+  test("pages with skip and reports hasMore", async () => {
+    const page1 = await commitHistoryAsync(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 2,
+    });
     expect(page1.commits.map((c) => c.subject)).toEqual([
       "commit 4",
       "commit 3",
     ]);
     expect(page1.hasMore).toBe(true);
-    const page3 = commitHistory(repo, { ref: "HEAD", skip: 4, limit: 2 });
+    const page3 = await commitHistoryAsync(repo, {
+      ref: "HEAD",
+      skip: 4,
+      limit: 2,
+    });
     expect(page3.commits.map((c) => c.subject)).toEqual(["commit 0"]);
     expect(page3.hasMore).toBe(false);
   });
 
-  test("resolves a single sha as ref (deep-link fallback lookup)", () => {
-    const res = commitHistory(repo, { ref: shas[1], skip: 0, limit: 1 });
+  test("resolves a single sha as ref (deep-link fallback lookup)", async () => {
+    const res = await commitHistoryAsync(repo, {
+      ref: shas[1],
+      skip: 0,
+      limit: 1,
+    });
     expect(res.commits[0].sha).toBe(shas[1]);
     expect(res.hasMore).toBe(true);
   });
 
-  test("rejects unknown and unsafe refs", () => {
+  test("rejects unknown and unsafe refs", async () => {
     expect(
-      commitHistory(repo, { ref: "no-such-ref", skip: 0, limit: 10 }).error,
+      (
+        await commitHistoryAsync(repo, {
+          ref: "no-such-ref",
+          skip: 0,
+          limit: 10,
+        })
+      ).error,
     ).toBeTruthy();
     expect(
-      commitHistory(repo, { ref: "--all", skip: 0, limit: 10 }).error,
+      (await commitHistoryAsync(repo, { ref: "--all", skip: 0, limit: 10 }))
+        .error,
     ).toBeTruthy();
   });
 
-  test("clamps limit and skip", () => {
-    const res = commitHistory(repo, { ref: "HEAD", skip: -5, limit: 100000 });
+  test("clamps limit and skip", async () => {
+    const res = await commitHistoryAsync(repo, {
+      ref: "HEAD",
+      skip: -5,
+      limit: 100000,
+    });
     expect(res.error).toBeUndefined();
     expect(res.commits.length).toBe(5);
   });
 
-  test("filters by commit message", () => {
-    const res = commitHistory(repo, {
+  test("filters by commit message", async () => {
+    const res = await commitHistoryAsync(repo, {
       ref: "HEAD",
       skip: 0,
       limit: 10,
@@ -108,8 +139,8 @@ describe("commitHistory", () => {
     expect(res.hasMore).toBe(false);
   });
 
-  test("filters by sha prefix", () => {
-    const res = commitHistory(repo, {
+  test("filters by sha prefix", async () => {
+    const res = await commitHistoryAsync(repo, {
       ref: "HEAD",
       skip: 0,
       limit: 10,
@@ -118,15 +149,15 @@ describe("commitHistory", () => {
     expect(res.commits[0].sha).toBe(shas[1]);
   });
 
-  test("filters by author prefix syntax", () => {
-    const hit = commitHistory(repo, {
+  test("filters by author prefix syntax", async () => {
+    const hit = await commitHistoryAsync(repo, {
       ref: "HEAD",
       skip: 0,
       limit: 10,
       query: "author:tester",
     });
     expect(hit.commits.length).toBe(5);
-    const miss = commitHistory(repo, {
+    const miss = await commitHistoryAsync(repo, {
       ref: "HEAD",
       skip: 0,
       limit: 10,
@@ -135,18 +166,18 @@ describe("commitHistory", () => {
     expect(miss.commits.length).toBe(0);
   });
 
-  test("filters by touched path syntax", () => {
+  test("filters by touched path syntax", async () => {
     writeFileSync(join(repo, "special-name.txt"), "x\n");
     git(repo, ["add", "special-name.txt"]);
     git(repo, ["commit", "-m", "touch special file"]);
-    const hit = commitHistory(repo, {
+    const hit = await commitHistoryAsync(repo, {
       ref: "HEAD",
       skip: 0,
       limit: 10,
       query: "path:special",
     });
     expect(hit.commits.map((c) => c.subject)).toEqual(["touch special file"]);
-    const all = commitHistory(repo, {
+    const all = await commitHistoryAsync(repo, {
       ref: "HEAD",
       skip: 0,
       limit: 10,
@@ -156,8 +187,8 @@ describe("commitHistory", () => {
     git(repo, ["reset", "--hard", "HEAD^"]);
   });
 
-  test("pages filtered results with skip and hasMore", () => {
-    const page1 = commitHistory(repo, {
+  test("pages filtered results with skip and hasMore", async () => {
+    const page1 = await commitHistoryAsync(repo, {
       ref: "HEAD",
       skip: 0,
       limit: 2,
@@ -168,7 +199,7 @@ describe("commitHistory", () => {
       "commit 3",
     ]);
     expect(page1.hasMore).toBe(true);
-    const page3 = commitHistory(repo, {
+    const page3 = await commitHistoryAsync(repo, {
       ref: "HEAD",
       skip: 4,
       limit: 2,
@@ -179,7 +210,7 @@ describe("commitHistory", () => {
   });
 
   // Mutates the repo (adds commits), so this must stay the last test.
-  test("lists both parents for merge commits", () => {
+  test("lists both parents for merge commits", async () => {
     git(repo, ["checkout", "-b", "topic", shas[3]]);
     writeFileSync(join(repo, "topic.txt"), "topic\n");
     git(repo, ["add", "topic.txt"]);
@@ -187,20 +218,24 @@ describe("commitHistory", () => {
     const topicSha = git(repo, ["rev-parse", "HEAD"]).stdout.trim();
     git(repo, ["checkout", "main"]);
     git(repo, ["merge", "--no-ff", "-m", "merge topic", "topic"]);
-    const res = commitHistory(repo, { ref: "HEAD", skip: 0, limit: 1 });
+    const res = await commitHistoryAsync(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 1,
+    });
     expect(res.commits[0].subject).toBe("merge topic");
     expect(res.commits[0].parents).toEqual([shas[4], topicSha]);
   });
 });
 
 describe("remoteWebUrl", () => {
-  test("converts ssh shorthand remotes to https", () => {
+  test("converts ssh shorthand remotes to https", async () => {
     expect(parseRemoteWebUrl("git@github.com:youtyan/code-viewer.git")).toBe(
       "https://github.com/youtyan/code-viewer",
     );
   });
 
-  test("strips .git from https remotes", () => {
+  test("strips .git from https remotes", async () => {
     expect(
       parseRemoteWebUrl("https://github.com/youtyan/code-viewer.git"),
     ).toBe("https://github.com/youtyan/code-viewer");
@@ -209,13 +244,13 @@ describe("remoteWebUrl", () => {
     );
   });
 
-  test("converts ssh:// remotes", () => {
+  test("converts ssh:// remotes", async () => {
     expect(
       parseRemoteWebUrl("ssh://git@github.com/youtyan/code-viewer.git"),
     ).toBe("https://github.com/youtyan/code-viewer");
   });
 
-  test("returns null for unusable remotes", () => {
+  test("returns null for unusable remotes", async () => {
     expect(parseRemoteWebUrl("")).toBeNull();
     expect(parseRemoteWebUrl("/local/path/repo.git")).toBeNull();
     expect(parseRemoteWebUrl("file:///tmp/repo.git")).toBeNull();

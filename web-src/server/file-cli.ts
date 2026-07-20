@@ -1,10 +1,10 @@
 // `code-viewer file` subcommand. Thin CLI veneer over the existing
 // per-file git inspection helpers in `web-src/server/git.ts`:
 //
-//   blame   → git.blame   (uses git.normalizeBlameRef for ref/base handling)
-//   history → git.commitHistory
-//   show    → worktree read or git.show for committed refs
-//   diff    → git.fileDiffText / git.untrackedFileDiff
+//   blame   → git.blameAsync (uses git.normalizeBlameRef for ref/base handling)
+//   history → git.commitHistoryAsync
+//   show    → worktree read or git.showAsync for committed refs
+//   diff    → git.fileDiffTextAsync / git.untrackedFileDiffAsync
 //
 // Git invocations stay in `git.ts`, so this CLI can never drift from the
 // browser's per-file inspection views.
@@ -24,20 +24,15 @@ import {
 } from "./command-resolver";
 import {
   BLAME_ZERO_SHA,
-  blame,
   blameAsync,
-  commitHistory,
   commitHistoryAsync,
-  fileDiffText,
   fileDiffTextAsync,
   type GitBlameBase,
   type GitBlameLine,
   type GitBlameResult,
   type GitHistoryCommit,
-  show,
   showAsync,
   truncateToNHunks,
-  untrackedFileDiff,
   untrackedFileDiffAsync,
 } from "./git";
 import { isSameWorktreeRange } from "./range";
@@ -679,23 +674,6 @@ export type FileBlameReport = {
   result: GitBlameResult;
 };
 
-export function buildFileBlameReport(
-  root: string,
-  command: FileBlameCommand,
-): FileBlameReport {
-  const result = blame(root, {
-    path: command.path,
-    ref: command.ref,
-    base: command.base,
-  });
-  return {
-    path: command.path,
-    ref: command.ref,
-    base: command.base,
-    result,
-  };
-}
-
 export async function buildFileBlameReportAsync(
   root: string,
   command: FileBlameCommand,
@@ -724,27 +702,6 @@ export type FileHistoryReport = {
   result: { commits: GitHistoryCommit[]; hasMore: boolean; error?: string };
 };
 
-export function buildFileHistoryReport(
-  root: string,
-  command: FileHistoryCommand,
-): FileHistoryReport {
-  const result = commitHistory(root, {
-    ref: command.ref,
-    skip: command.skip,
-    limit: command.limit,
-    query: command.query,
-    path: command.path,
-  });
-  return {
-    path: command.path,
-    ref: command.ref,
-    limit: command.limit,
-    skip: command.skip,
-    ...(command.query !== undefined ? { query: command.query } : {}),
-    result,
-  };
-}
-
 export async function buildFileHistoryReportAsync(
   root: string,
   command: FileHistoryCommand,
@@ -766,8 +723,11 @@ export async function buildFileHistoryReportAsync(
   };
 }
 
-function runBlame(root: string, command: FileBlameCommand): void {
-  const report = buildFileBlameReport(root, command);
+async function runBlame(
+  root: string,
+  command: FileBlameCommand,
+): Promise<void> {
+  const report = await buildFileBlameReportAsync(root, command);
   if (command.json) {
     console.log(JSON.stringify(report, null, 2));
   } else {
@@ -779,8 +739,11 @@ function runBlame(root: string, command: FileBlameCommand): void {
   }
 }
 
-function runHistory(root: string, command: FileHistoryCommand): void {
-  const report = buildFileHistoryReport(root, command);
+async function runHistory(
+  root: string,
+  command: FileHistoryCommand,
+): Promise<void> {
+  const report = await buildFileHistoryReportAsync(root, command);
   if (command.json) {
     console.log(JSON.stringify(report, null, 2));
   } else if (report.result.commits.length === 0) {
@@ -857,34 +820,8 @@ export function safeWorktreePathFromRoot(
 }
 
 // Read the requested ref's content. Worktree paths go through
-// safeWorktreePathFromRoot; committed refs go through git.show. Exposed
-// for `buildFileShowReport` and the MCP tool to share.
-export function readShowText(
-  root: string,
-  command: FileShowCommand,
-): { code: number; stdout: string; stderr: string } {
-  if (command.ref !== "worktree" && command.ref !== "") {
-    return show(command.ref, command.path, root);
-  }
-  const full = safeWorktreePathFromRoot(root, command.path);
-  if (!full) {
-    return {
-      code: 1,
-      stdout: "",
-      stderr: "file not found or forbidden",
-    };
-  }
-  try {
-    const stat = statSync(full);
-    if (!stat.isFile()) {
-      return { code: 1, stdout: "", stderr: "not a file" };
-    }
-    return { code: 0, stdout: readFileSync(full, "utf8"), stderr: "" };
-  } catch {
-    return { code: 1, stdout: "", stderr: "file not readable" };
-  }
-}
-
+// safeWorktreePathFromRoot; committed refs go through git.showAsync. Exposed
+// for `buildFileShowReportAsync` and the MCP tool to share.
 export async function readShowTextAsync(
   root: string,
   command: FileShowCommand,
@@ -924,36 +861,6 @@ export type FileShowReport = {
   error?: string;
 };
 
-export function buildFileShowReport(
-  root: string,
-  command: FileShowCommand,
-): FileShowReport {
-  const res = readShowText(root, command);
-  if (res.code !== 0) {
-    const detail = res.stderr.trim() || `git show exited with code ${res.code}`;
-    return {
-      path: command.path,
-      ref: command.ref,
-      ...(command.start !== undefined ? { start: command.start } : {}),
-      ...(command.end !== undefined ? { end: command.end } : {}),
-      totalLines: 0,
-      complete: false,
-      text: "",
-      error: detail,
-    };
-  }
-  const sliced = sliceLines(res.stdout, command.start, command.end);
-  return {
-    path: command.path,
-    ref: command.ref,
-    ...(command.start !== undefined ? { start: command.start } : {}),
-    ...(command.end !== undefined ? { end: command.end } : {}),
-    totalLines: sliced.total,
-    complete: sliced.complete,
-    text: sliced.lines.join("\n"),
-  };
-}
-
 export async function buildFileShowReportAsync(
   root: string,
   command: FileShowCommand,
@@ -984,8 +891,8 @@ export async function buildFileShowReportAsync(
   };
 }
 
-function runShow(root: string, command: FileShowCommand): void {
-  const report = buildFileShowReport(root, command);
+async function runShow(root: string, command: FileShowCommand): Promise<void> {
+  const report = await buildFileShowReportAsync(root, command);
   if (report.error !== undefined) {
     if (command.json) {
       console.log(JSON.stringify(report, null, 2));
@@ -1038,82 +945,6 @@ function buildFileDiffRangeArgs(from: string, to: string): string[] {
   if (from && from !== "worktree") refs.push(from);
   if (to && to !== "worktree") refs.push(to);
   return refs;
-}
-
-export function buildFileDiffReport(
-  root: string,
-  command: FileDiffCommand,
-): FileDiffReport {
-  const base: FileDiffReport = {
-    path: command.path,
-    ...(command.oldPath !== undefined ? { old_path: command.oldPath } : {}),
-    from: command.untracked ? "/dev/null" : command.from,
-    to: command.to,
-    untracked: command.untracked,
-    ignore_ws: command.ignoreWs,
-    ignore_blank: command.ignoreBlank,
-    mode: command.mode,
-    max_hunks: command.mode === "preview" ? command.maxHunks : null,
-    max_lines: command.mode === "preview" ? command.maxLines : null,
-    diff: "",
-    hunk_count: 0,
-    rendered_hunk_count: 0,
-    line_count: 0,
-    truncated: false,
-    binary: false,
-  };
-
-  // Same-worktree range is a no-op: same as preview.ts:handleFileDiff.
-  // Short-circuit avoids spawning a git process to print nothing.
-  if (
-    !command.untracked &&
-    isSameWorktreeRange({ from: command.from, to: command.to })
-  ) {
-    return base;
-  }
-
-  const extras: string[] = [];
-  if (command.ignoreWs) extras.push("-w");
-  if (command.ignoreBlank) extras.push("--ignore-blank-lines");
-
-  let diffText = "";
-  let errText = "";
-  if (command.untracked) {
-    const res = untrackedFileDiff(extras, command.path, root);
-    diffText = res.stdout || "";
-    if (res.code !== 0) errText = res.stderr.trim();
-  } else {
-    const args = [
-      ...extras,
-      ...buildFileDiffRangeArgs(command.from, command.to),
-    ];
-    const paths =
-      command.oldPath !== undefined
-        ? [command.oldPath, command.path]
-        : command.path;
-    const res = fileDiffText(args, paths, root);
-    diffText = res.stdout || "";
-    if (res.code !== 0) errText = res.stderr.trim();
-  }
-
-  const truncated =
-    command.mode === "preview"
-      ? truncateToNHunks(diffText, command.maxHunks, command.maxLines)
-      : truncateToNHunks(diffText, 1e9);
-  const previewTruncated =
-    command.mode === "preview" &&
-    (truncated.totalHunks > truncated.renderedHunks || truncated.lineTruncated);
-
-  return {
-    ...base,
-    diff: truncated.text,
-    hunk_count: truncated.totalHunks,
-    rendered_hunk_count: truncated.renderedHunks,
-    line_count: truncated.lineCount,
-    truncated: previewTruncated,
-    binary: diffText.includes("Binary files"),
-    ...(errText ? { error: errText } : {}),
-  };
 }
 
 export async function buildFileDiffReportAsync(
@@ -1190,8 +1021,8 @@ export async function buildFileDiffReportAsync(
   };
 }
 
-function runDiff(root: string, command: FileDiffCommand): void {
-  const report = buildFileDiffReport(root, command);
+async function runDiff(root: string, command: FileDiffCommand): Promise<void> {
+  const report = await buildFileDiffReportAsync(root, command);
   if (command.json) {
     console.log(JSON.stringify(report, null, 2));
   } else if (report.diff.length > 0) {

@@ -13,16 +13,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileDiffCacheKey, worktreeFileSignature } from "../server/cache";
 import {
-  listTree,
-  refCommitPage,
-  refCommits,
-  refs,
+  listTreeAsync,
+  refCommitPageResultAsync,
+  refsResultAsync,
   splitHunks,
-  treeEntries,
   truncateToNHunks,
-  untrackedMeta,
-  verifyTreeRef,
-  worktreeEntries,
+  untrackedMetaAsync,
+  verifyTreeRefResultAsync,
 } from "../server/git";
 import { sourceFixture } from "./source-fixture";
 
@@ -46,7 +43,7 @@ function gitInput(cwd: string, args: string[], input: string) {
 }
 
 describe("truncateToNHunks", () => {
-  test("preserves newlines between rendered hunks", () => {
+  test("preserves newlines between rendered hunks", async () => {
     const diff = [
       "diff --git a/file.ts b/file.ts",
       "--- a/file.ts",
@@ -68,7 +65,7 @@ describe("truncateToNHunks", () => {
     expect(result.includes("+new one@@ -10,2 +10,2 @@")).toBe(false);
   });
 
-  test("caps preview output by line count even when a single hunk is huge", () => {
+  test("caps preview output by line count even when a single hunk is huge", async () => {
     const diff = [
       "diff --git a/generated.js b/generated.js",
       "new file mode 100644",
@@ -87,7 +84,7 @@ describe("truncateToNHunks", () => {
     expect(result.text.includes("+line 4999")).toBe(false);
   });
 
-  test("counts inserted separators when capping multi-hunk preview lines", () => {
+  test("counts inserted separators when capping multi-hunk preview lines", async () => {
     const hunk = (offset: number) =>
       [
         `@@ -${offset},4 +${offset},4 @@`,
@@ -113,7 +110,7 @@ describe("truncateToNHunks", () => {
     expect(result.text.includes("@@ -40,4 +40,4 @@")).toBe(false);
   });
 
-  test("splits unified hunks even when the diff has no file header", () => {
+  test("splits unified hunks even when the diff has no file header", async () => {
     const result = splitHunks("@@ -1 +1 @@\n-old\n+new\n");
 
     expect(result).toEqual({
@@ -122,7 +119,7 @@ describe("truncateToNHunks", () => {
     });
   });
 
-  test("keeps a leading blank line in the diff header before the first hunk", () => {
+  test("keeps a leading blank line in the diff header before the first hunk", async () => {
     const result = splitHunks("\n@@ -1 +1 @@\n-old\n+new\n");
 
     expect(result).toEqual({
@@ -131,7 +128,7 @@ describe("truncateToNHunks", () => {
     });
   });
 
-  test("server preview keeps medium and large files eligible for split layout", () => {
+  test("server preview keeps medium and large files eligible for split layout", async () => {
     const server = sourceFixture(
       readFileSync("web-src/server/preview.ts", "utf8"),
     );
@@ -152,7 +149,7 @@ describe("truncateToNHunks", () => {
     expect(server.includes("force_layout: sizeClass !== 'small'")).toBe(false);
   });
 
-  test("untracked diff cache is keyed by the current worktree file signature", () => {
+  test("untracked diff cache is keyed by the current worktree file signature", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-untracked-cache-key-"));
     try {
       writeFileSync(join(dir, "sample.cfg"), "");
@@ -184,7 +181,7 @@ describe("truncateToNHunks", () => {
     }
   });
 
-  test("tracked worktree diff cache is keyed by the current worktree file signature", () => {
+  test("tracked worktree diff cache is keyed by the current worktree file signature", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-tracked-cache-key-"));
     try {
       writeFileSync(join(dir, "sample.cfg"), "setting {}\n");
@@ -216,7 +213,7 @@ describe("truncateToNHunks", () => {
     }
   });
 
-  test("reverse worktree diff cache is keyed by the current worktree file signature", () => {
+  test("reverse worktree diff cache is keyed by the current worktree file signature", async () => {
     const dir = mkdtempSync(
       join(tmpdir(), "code-viewer-reverse-worktree-cache-key-"),
     );
@@ -250,7 +247,7 @@ describe("truncateToNHunks", () => {
     }
   });
 
-  test("commit-to-commit diff cache omits worktree file signatures", () => {
+  test("commit-to-commit diff cache omits worktree file signatures", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-cache-key-"));
     try {
       writeFileSync(join(dir, "sample.cfg"), "setting {}\n");
@@ -282,7 +279,7 @@ describe("truncateToNHunks", () => {
 });
 
 describe("repository tree helpers", () => {
-  test("worktree file signature changes when an untracked file is edited", () => {
+  test("worktree file signature changes when an untracked file is edited", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-file-signature-"));
     try {
       writeFileSync(join(dir, "sample.cfg"), "");
@@ -298,7 +295,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("untracked file metadata ignores untracked directories", () => {
+  test("untracked file metadata ignores untracked directories", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-untracked-dir-"));
     try {
       git(dir, ["init"]);
@@ -310,7 +307,7 @@ describe("repository tree helpers", () => {
       mkdirSync(join(dir, "target-dir"));
       symlinkSync("target-dir", join(dir, "link-dir"));
 
-      const result = untrackedMeta(dir);
+      const result = await untrackedMetaAsync(dir);
       const normal = result.find((file) => file.path === "normal.txt");
       const binary = result.find((file) => file.path === "binary.bin");
       const link = result.find((file) => file.path === "link.txt");
@@ -329,13 +326,13 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("untracked file metadata counts large text files by newline bytes", () => {
+  test("untracked file metadata counts large text files by newline bytes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-untracked-large-"));
     try {
       git(dir, ["init"]);
       writeFileSync(join(dir, "large.txt"), "line\n".repeat(200_000));
 
-      const result = untrackedMeta(dir);
+      const result = await untrackedMetaAsync(dir);
       const large = result.find((file) => file.path === "large.txt");
 
       expect(large?.status).toBe("A");
@@ -346,8 +343,41 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("lists only direct worktree children", () => {
-    const entries = worktreeEntries(process.cwd(), "");
+  test("untracked scan results follow file edits across repeated scans", async () => {
+    // The per-file scan cache is keyed by the lstat signature - editing an
+    // untracked file must invalidate its cached newline count while an
+    // untouched sibling keeps reporting correct numbers from the cache.
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-untracked-rescan-"));
+    try {
+      git(dir, ["init"]);
+      writeFileSync(join(dir, "edited.txt"), "one\n");
+      writeFileSync(join(dir, "stable.txt"), "a\nb\nc\n");
+
+      const first = await untrackedMetaAsync(dir);
+      expect(first.find((file) => file.path === "edited.txt")?.additions).toBe(
+        1,
+      );
+      expect(first.find((file) => file.path === "stable.txt")?.additions).toBe(
+        3,
+      );
+
+      writeFileSync(join(dir, "edited.txt"), "one\ntwo\nthree\n");
+
+      const second = await untrackedMetaAsync(dir);
+      expect(second.find((file) => file.path === "edited.txt")?.additions).toBe(
+        3,
+      );
+      expect(second.find((file) => file.path === "stable.txt")?.additions).toBe(
+        3,
+      );
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("lists only direct worktree children", async () => {
+    const entries = (await listTreeAsync("worktree", "", process.cwd()))
+      .entries;
     expect(
       entries.some(
         (entry) => entry.path === "web-src" && entry.type === "tree",
@@ -358,7 +388,7 @@ describe("repository tree helpers", () => {
     );
   });
 
-  test("caps the initial commit list in the ref picker data", () => {
+  test("caps the initial commit list in the ref picker data", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-refs-"));
     try {
       git(dir, ["init"]);
@@ -378,7 +408,7 @@ describe("repository tree helpers", () => {
       }).join("");
       gitInput(dir, ["fast-import", "--quiet"], importStream);
 
-      const result = refs(dir);
+      const result = (await refsResultAsync(dir)).refs;
 
       expect(result.commits.length).toBe(100);
       expect(result.commits[0].subject).toBe("commit 105");
@@ -390,7 +420,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("returns branch metadata without remote HEAD aliases", () => {
+  test("returns branch metadata without remote HEAD aliases", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-branches-"));
     try {
       git(dir, ["init"]);
@@ -413,7 +443,7 @@ describe("repository tree helpers", () => {
         "refs/remotes/upstream/main",
       ]);
 
-      const result = refs(dir);
+      const result = (await refsResultAsync(dir)).refs;
 
       expect(result.branches.some((branch) => branch.name === "origin")).toBe(
         false,
@@ -438,7 +468,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("returns tag metadata for the ref picker", () => {
+  test("returns tag metadata for the ref picker", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-tags-"));
     try {
       git(dir, ["init"]);
@@ -450,7 +480,7 @@ describe("repository tree helpers", () => {
       git(dir, ["tag", "v1.0.0"]);
       git(dir, ["tag", "-a", "v1.1.0", "-m", "annotated tag"]);
 
-      const result = refs(dir);
+      const result = (await refsResultAsync(dir)).refs;
       const lightTag = result.tags.find((item) => item.name === "v1.0.0");
       const annotatedTag = result.tags.find((item) => item.name === "v1.1.0");
 
@@ -467,7 +497,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("searches commits server-side beyond the initial visible window", () => {
+  test("searches commits server-side beyond the initial visible window", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-commit-search-"));
     try {
       git(dir, ["init"]);
@@ -492,19 +522,26 @@ describe("repository tree helpers", () => {
       }
       git(dir, ["update-ref", "refs/heads/main", parent]);
 
-      const result = refCommits(dir, "needle oldest", 5);
+      const result = (
+        await refCommitPageResultAsync(dir, { query: "needle oldest", max: 5 })
+      ).commits;
 
       expect(result.length).toBe(1);
       expect(result[0].subject).toBe("needle oldest commit");
-      expect(refCommits(dir, result[0].sha.slice(0, 8), 5)[0].sha).toBe(
-        result[0].sha,
-      );
+      expect(
+        (
+          await refCommitPageResultAsync(dir, {
+            query: result[0].sha.slice(0, 8),
+            max: 5,
+          })
+        ).commits[0].sha,
+      ).toBe(result[0].sha);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
   });
 
-  test("searches commits by author and across non-HEAD refs", () => {
+  test("searches commits by author and across non-HEAD refs", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-author-search-"));
     try {
       git(dir, ["init"]);
@@ -524,7 +561,9 @@ describe("repository tree helpers", () => {
       git(dir, ["commit", "-m", "side branch work"]);
       git(dir, ["switch", initialBranch]);
 
-      const result = refCommits(dir, "Alice Writer", 5);
+      const result = (
+        await refCommitPageResultAsync(dir, { query: "Alice Writer", max: 5 })
+      ).commits;
 
       expect(result.length).toBe(1);
       expect(result[0].subject).toBe("side branch work");
@@ -534,7 +573,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("combines hash matches with subject grep matches", () => {
+  test("combines hash matches with subject grep matches", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-hash-grep-"));
     try {
       git(dir, ["init"]);
@@ -551,7 +590,12 @@ describe("repository tree helpers", () => {
         .stdout.toString()
         .trim();
 
-      const result = refCommits(dir, firstSha.slice(0, 8), 5);
+      const result = (
+        await refCommitPageResultAsync(dir, {
+          query: firstSha.slice(0, 8),
+          max: 5,
+        })
+      ).commits;
 
       expect(result.map((commit) => commit.sha)).toEqual([firstSha, secondSha]);
     } finally {
@@ -559,7 +603,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("clamps commit search limits and handles hostile queries safely", () => {
+  test("clamps commit search limits and handles hostile queries safely", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-hostile-"));
     try {
       git(dir, ["init"]);
@@ -571,16 +615,32 @@ describe("repository tree helpers", () => {
         git(dir, ["commit", "-m", `commit ${index}`]);
       }
 
-      expect(refCommits(dir, "", -1).length).toBe(1);
-      expect(refCommits(dir, "", 99999).length).toBe(8);
-      expect(refCommits(dir, "--evil", 5)).toEqual([]);
-      expect(refCommits(dir, "commit\0".repeat(300), 5)).toEqual([]);
+      expect(
+        (await refCommitPageResultAsync(dir, { query: "", max: -1 })).commits
+          .length,
+      ).toBe(1);
+      expect(
+        (await refCommitPageResultAsync(dir, { query: "", max: 99999 })).commits
+          .length,
+      ).toBe(8);
+      expect(
+        (await refCommitPageResultAsync(dir, { query: "--evil", max: 5 }))
+          .commits,
+      ).toEqual([]);
+      expect(
+        (
+          await refCommitPageResultAsync(dir, {
+            query: "commit\0".repeat(300),
+            max: 5,
+          })
+        ).commits,
+      ).toEqual([]);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
   });
 
-  test("pages ref picker commits with hasMore", () => {
+  test("pages ref picker commits with hasMore", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-page-"));
     try {
       git(dir, ["init"]);
@@ -592,9 +652,9 @@ describe("repository tree helpers", () => {
         git(dir, ["commit", "-m", `commit ${index}`]);
       }
 
-      const page1 = refCommitPage(dir, { max: 2 });
-      const page2 = refCommitPage(dir, { max: 2, skip: 2 });
-      const page3 = refCommitPage(dir, { max: 2, skip: 4 });
+      const page1 = await refCommitPageResultAsync(dir, { max: 2 });
+      const page2 = await refCommitPageResultAsync(dir, { max: 2, skip: 2 });
+      const page3 = await refCommitPageResultAsync(dir, { max: 2, skip: 4 });
 
       expect(page1.commits.map((commit) => commit.subject)).toEqual([
         "commit 5",
@@ -615,14 +675,14 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("lists ignored filesystem directories in worktree view", () => {
+  test("lists ignored filesystem directories in worktree view", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-tree-"));
     try {
       writeFileSync(join(dir, ".gitignore"), "ignored-dir/\n");
       mkdirSync(join(dir, "ignored-dir"));
       writeFileSync(join(dir, "ignored-dir", "cache.txt"), "cache");
 
-      const entries = worktreeEntries(dir, "");
+      const entries = (await listTreeAsync("worktree", "", dir)).entries;
 
       expect(
         entries.some(
@@ -637,7 +697,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("includes ignored filesystem files in recursive worktree tree data", () => {
+  test("includes ignored filesystem files in recursive worktree tree data", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-recursive-tree-"));
     try {
       git(dir, ["init"]);
@@ -647,7 +707,9 @@ describe("repository tree helpers", () => {
       writeFileSync(join(dir, "ignored-dir", "sound.mp3"), "audio");
       writeFileSync(join(dir, "ignored-root.log"), "log");
 
-      const result = listTree("worktree", "", dir, { recursive: true });
+      const result = await listTreeAsync("worktree", "", dir, {
+        recursive: true,
+      });
 
       expect(
         result.entries.some(
@@ -686,7 +748,7 @@ describe("repository tree helpers", () => {
         ),
       ).toBe(true);
 
-      const direct = listTree("worktree", "", dir);
+      const direct = await listTreeAsync("worktree", "", dir);
       expect(
         direct.entries.find((entry) => entry.path === "ignored-dir")
           ?.children_omitted,
@@ -696,7 +758,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("omits known heavy worktree directories from recursive tree data", () => {
+  test("omits known heavy worktree directories from recursive tree data", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-heavy-tree-"));
     try {
       git(dir, ["init"]);
@@ -706,7 +768,9 @@ describe("repository tree helpers", () => {
       mkdirSync(join(dir, "sandbox"), { recursive: true });
       writeFileSync(join(dir, "sandbox", "sound.mp3"), "audio");
 
-      const result = listTree("worktree", "", dir, { recursive: true });
+      const result = await listTreeAsync("worktree", "", dir, {
+        recursive: true,
+      });
 
       expect(
         result.entries.find((entry) => entry.path === "node_modules")
@@ -734,14 +798,14 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("allows overriding heavy worktree directory omissions", () => {
+  test("allows overriding heavy worktree directory omissions", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-heavy-override-tree-"));
     try {
       git(dir, ["init"]);
       mkdirSync(join(dir, "node_modules", "pkg"), { recursive: true });
       writeFileSync(join(dir, "node_modules", "pkg", "index.js"), "module");
 
-      const result = listTree("worktree", "", dir, {
+      const result = await listTreeAsync("worktree", "", dir, {
         recursive: true,
         omitDirNames: [],
       });
@@ -760,7 +824,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("matches wildcard omitDirNames patterns like gitignore", () => {
+  test("matches wildcard omitDirNames patterns like gitignore", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-omit-wildcard-tree-"));
     try {
       git(dir, ["init"]);
@@ -769,7 +833,7 @@ describe("repository tree helpers", () => {
       mkdirSync(join(dir, "other-dir"));
       writeFileSync(join(dir, "other-dir", "y.txt"), "other");
 
-      const result = listTree("worktree", "", dir, {
+      const result = await listTreeAsync("worktree", "", dir, {
         recursive: true,
         omitDirNames: ["test-*"],
       });
@@ -793,7 +857,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("matches wildcard excludeNames patterns like gitignore", () => {
+  test("matches wildcard excludeNames patterns like gitignore", async () => {
     const dir = mkdtempSync(
       join(tmpdir(), "code-viewer-exclude-wildcard-tree-"),
     );
@@ -804,7 +868,7 @@ describe("repository tree helpers", () => {
       mkdirSync(join(dir, "src"));
       writeFileSync(join(dir, "src", "debug.log"), "log2");
 
-      const result = listTree("worktree", "", dir, {
+      const result = await listTreeAsync("worktree", "", dir, {
         recursive: true,
         excludeNames: ["*.log"],
       });
@@ -823,11 +887,13 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("marks the .git directory as internal omitted tree data", () => {
+  test("marks the .git directory as internal omitted tree data", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-internal-tree-"));
     try {
       git(dir, ["init"]);
-      const result = listTree("worktree", "", dir, { recursive: true });
+      const result = await listTreeAsync("worktree", "", dir, {
+        recursive: true,
+      });
 
       const gitEntry = result.entries.find((entry) => entry.path === ".git");
       expect(gitEntry).toEqual({
@@ -845,15 +911,17 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("lists .code-viewer as normal repository tree data", () => {
+  test("lists .code-viewer as normal repository tree data", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-visible-tree-"));
     try {
       git(dir, ["init"]);
       mkdirSync(join(dir, ".code-viewer"));
       writeFileSync(join(dir, ".code-viewer", "settings.json"), "{}\n");
 
-      const direct = listTree("worktree", "", dir);
-      const recursive = listTree("worktree", "", dir, { recursive: true });
+      const direct = await listTreeAsync("worktree", "", dir);
+      const recursive = await listTreeAsync("worktree", "", dir, {
+        recursive: true,
+      });
 
       expect(
         direct.entries.find((entry) => entry.path === ".code-viewer"),
@@ -874,12 +942,14 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("does not mark empty worktree directories as omitted", () => {
+  test("does not mark empty worktree directories as omitted", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-empty-tree-"));
     try {
       mkdirSync(join(dir, "empty-dir"));
 
-      const result = listTree("worktree", "", dir, { recursive: true });
+      const result = await listTreeAsync("worktree", "", dir, {
+        recursive: true,
+      });
 
       expect(
         result.entries.find((entry) => entry.path === "empty-dir")
@@ -890,14 +960,16 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("does not mark metadata-only untracked directories as omitted", () => {
+  test("does not mark metadata-only untracked directories as omitted", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-metadata-tree-"));
     try {
       git(dir, ["init"]);
       mkdirSync(join(dir, "metadata-dir"));
       writeFileSync(join(dir, "metadata-dir", ".DS_Store"), "metadata");
 
-      const result = listTree("worktree", "", dir, { recursive: true });
+      const result = await listTreeAsync("worktree", "", dir, {
+        recursive: true,
+      });
 
       expect(
         result.entries.find((entry) => entry.path === "metadata-dir")
@@ -911,7 +983,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("does not mark listed worktree child directories as omitted", () => {
+  test("does not mark listed worktree child directories as omitted", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-listed-tree-"));
     try {
       git(dir, ["init"]);
@@ -919,7 +991,9 @@ describe("repository tree helpers", () => {
       writeFileSync(join(dir, "tracked-dir", "file.txt"), "content");
       git(dir, ["add", "tracked-dir/file.txt"]);
 
-      const result = listTree("worktree", "", dir, { recursive: true });
+      const result = await listTreeAsync("worktree", "", dir, {
+        recursive: true,
+      });
 
       expect(
         result.entries.find((entry) => entry.path === "tracked-dir")
@@ -933,7 +1007,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("does not mark gitlink-like worktree directories as omitted", () => {
+  test("does not mark gitlink-like worktree directories as omitted", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-gitlink-tree-"));
     try {
       mkdirSync(join(dir, "submodule-ish"));
@@ -942,7 +1016,9 @@ describe("repository tree helpers", () => {
         "gitdir: ../.git/modules/submodule-ish\n",
       );
 
-      const result = listTree("worktree", "", dir, { recursive: true });
+      const result = await listTreeAsync("worktree", "", dir, {
+        recursive: true,
+      });
       const entry = result.entries.find(
         (entry) => entry.path === "submodule-ish",
       );
@@ -955,7 +1031,7 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("marks gitlink-like worktree directories listed in .gitmodules as submodules", () => {
+  test("marks gitlink-like worktree directories listed in .gitmodules as submodules", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-submodule-tree-"));
     try {
       mkdirSync(join(dir, "submodule-dir"));
@@ -973,7 +1049,7 @@ describe("repository tree helpers", () => {
         ].join("\n"),
       );
 
-      const result = listTree("worktree", "", dir);
+      const result = await listTreeAsync("worktree", "", dir);
       const entry = result.entries.find(
         (entry) => entry.path === "submodule-dir",
       );
@@ -985,10 +1061,14 @@ describe("repository tree helpers", () => {
     }
   });
 
-  test("validates tree refs and lists direct git tree entries", () => {
-    expect(verifyTreeRef("HEAD", process.cwd())).toBe(true);
-    expect(verifyTreeRef("--upload-pack=bad", process.cwd())).toBe(false);
-    const result = treeEntries("HEAD", "", process.cwd());
+  test("validates tree refs and lists direct git tree entries", async () => {
+    expect((await verifyTreeRefResultAsync("HEAD", process.cwd())).ok).toBe(
+      true,
+    );
+    expect(
+      (await verifyTreeRefResultAsync("--upload-pack=bad", process.cwd())).ok,
+    ).toBe(false);
+    const result = await listTreeAsync("HEAD", "", process.cwd());
     expect(result.code).toBe(0);
     expect(
       result.entries.some(
@@ -997,11 +1077,11 @@ describe("repository tree helpers", () => {
     ).toBe(true);
   });
 
-  test("uses the same direct-child ordering for recursive git tree data", () => {
-    const direct = treeEntries("HEAD", "", process.cwd()).entries;
-    const recursive = listTree("HEAD", "", process.cwd(), {
-      recursive: true,
-    }).entries;
+  test("uses the same direct-child ordering for recursive git tree data", async () => {
+    const direct = (await listTreeAsync("HEAD", "", process.cwd())).entries;
+    const recursive = (
+      await listTreeAsync("HEAD", "", process.cwd(), { recursive: true })
+    ).entries;
     const firstBlob = recursive.findIndex((entry) => entry.type === "blob");
     let lastTree = -1;
     recursive.forEach((entry, index) => {

@@ -19,7 +19,7 @@ import {
   STATUS_HELP,
 } from "../server/status-cli";
 import { runGit as git } from "./_git-fixture";
-import { captureIo, catchExit, restoreIo } from "./_io-fixture";
+import { captureIo, catchExitAsync, restoreIo } from "./_io-fixture";
 
 // 全テストでサーバ未登録の状態 (nextCommands の --server pin 無し経路) を
 // 再現したい。registry dir を temp dir に差し替えて readServerRegistry を
@@ -194,37 +194,37 @@ describe("STATUS_HELP / STATUS_AGENT_HELP", () => {
 });
 
 // --- runStatusCli integration tests against a real sample repo ---
-// captureIo / ExitMarker / catchExit は `_io-fixture` に集約済み。
+// captureIo / ExitMarker / catchExitAsync は `_io-fixture` に集約済み。
 
 afterEach(() => {
   restoreIo();
   rmSync(registryDirStub, { recursive: true, force: true });
 });
 
-function runAndCatchExit(argv: string[]): void {
-  catchExit(() => runStatusCli(argv));
+async function runAndCatchExit(argv: string[]): Promise<void> {
+  await catchExitAsync(() => runStatusCli(argv));
 }
 
 describe("runStatusCli help and agent-help", () => {
-  test("--help prints STATUS_HELP", () => {
+  test("--help prints STATUS_HELP", async () => {
     const io = captureIo();
-    runAndCatchExit(["--help"]);
+    await runAndCatchExit(["--help"]);
     expect(io.exits).toEqual([]);
     expect(io.logs.length).toBe(1);
     expect(io.logs[0]).toBe(STATUS_HELP);
   });
 
-  test("agent-help prints STATUS_AGENT_HELP", () => {
+  test("agent-help prints STATUS_AGENT_HELP", async () => {
     const io = captureIo();
-    runAndCatchExit(["agent-help"]);
+    await runAndCatchExit(["agent-help"]);
     expect(io.exits).toEqual([]);
     expect(io.logs.length).toBe(1);
     expect(io.logs[0]).toBe(STATUS_AGENT_HELP);
   });
 
-  test("unknown option exits 1 with usage hint", () => {
+  test("unknown option exits 1 with usage hint", async () => {
     const io = captureIo();
-    runAndCatchExit(["--bogus"]);
+    await runAndCatchExit(["--bogus"]);
     expect(io.exits).toEqual([1]);
     expect(io.errs[0]).toBe("unknown option: --bogus");
     expect(io.errs[1]).toBe('Run "code-viewer status --help" for usage.');
@@ -269,9 +269,9 @@ describe("runStatusCli against a fixture repo", () => {
     rmSync(repo, { recursive: true, force: true });
   });
 
-  test("--json emits the structured payload AI agents consume", () => {
+  test("--json emits the structured payload AI agents consume", async () => {
     const io = captureIo();
-    runAndCatchExit(["--cwd", repo, "--json"]);
+    await runAndCatchExit(["--cwd", repo, "--json"]);
     expect(io.exits).toEqual([]);
     expect(io.errs).toEqual([]);
     expect(io.logs.length).toBe(1);
@@ -323,18 +323,18 @@ describe("runStatusCli against a fixture repo", () => {
     expect(/query sources --commands/.test(cmdStr)).toBe(false);
   });
 
-  test("--limit caps recentCommits length", () => {
+  test("--limit caps recentCommits length", async () => {
     const io = captureIo();
-    runAndCatchExit(["--cwd", repo, "--limit", "1", "--json"]);
+    await runAndCatchExit(["--cwd", repo, "--limit", "1", "--json"]);
     expect(io.exits).toEqual([]);
     const payload = JSON.parse(io.logs[0]);
     expect(payload.recentCommits.length).toBe(1);
     expect(payload.recentCommits[0].sha).toBe(secondSha);
   });
 
-  test("default text output groups branch / changed / staged / recent / next steps", () => {
+  test("default text output groups branch / changed / staged / recent / next steps", async () => {
     const io = captureIo();
-    runAndCatchExit(["--cwd", repo]);
+    await runAndCatchExit(["--cwd", repo]);
     expect(io.exits).toEqual([]);
     expect(io.logs.length).toBe(1);
     const out = io.logs[0];
@@ -356,9 +356,9 @@ describe("runStatusCli against a fixture repo", () => {
     expect(out).toMatch(/ {2}code-viewer search code --term 'TODO' --json/);
   });
 
-  test("an unreachable --ref surfaces the error inside recentCommitsError but still emits the rest", () => {
+  test("an unreachable --ref surfaces the error inside recentCommitsError but still emits the rest", async () => {
     const io = captureIo();
-    runAndCatchExit([
+    await runAndCatchExit([
       "--cwd",
       repo,
       "--ref",
@@ -375,7 +375,7 @@ describe("runStatusCli against a fixture repo", () => {
     expect(payload.staged.totals.files).toBe(1);
   });
 
-  test("registered server is pinned only on server-backed next commands", () => {
+  test("registered server is pinned only on server-backed next commands", async () => {
     const registryRoot = git(repo, [
       "rev-parse",
       "--show-toplevel",
@@ -387,7 +387,7 @@ describe("runStatusCli against a fixture repo", () => {
       started_at: "2026-06-30T00:00:00.000Z",
     });
     const io = captureIo();
-    runAndCatchExit(["--cwd", repo, "--json"]);
+    await runAndCatchExit(["--cwd", repo, "--json"]);
     expect(io.exits).toEqual([]);
     const payload = JSON.parse(io.logs[0]);
     const commands = payload.nextCommands as string[];
@@ -414,7 +414,7 @@ describe("runStatusCli against a fixture repo", () => {
     ).toBe(true);
   });
 
-  test("nextCommands omit file history when every changed path is unsafe for file CLI", () => {
+  test("nextCommands omit file history when every changed path is unsafe for file CLI", async () => {
     const oddRepo = mkdtempSync(join(tmpdir(), "code-viewer-status-odd-path-"));
     try {
       git(oddRepo, ["init", "-b", "main"]);
@@ -426,7 +426,7 @@ describe("runStatusCli against a fixture repo", () => {
       writeFileSync(join(oddRepo, "line\nbreak.ts"), "odd\n");
 
       const io = captureIo();
-      runAndCatchExit(["--cwd", oddRepo, "--json"]);
+      await runAndCatchExit(["--cwd", oddRepo, "--json"]);
       expect(io.exits).toEqual([]);
       const payload = JSON.parse(io.logs[0]);
       const commands = payload.nextCommands as string[];
@@ -442,7 +442,7 @@ describe("runStatusCli against a fixture repo", () => {
     }
   });
 
-  test("unborn repositories still report staged and untracked changes", () => {
+  test("unborn repositories still report staged and untracked changes", async () => {
     const emptyRepo = mkdtempSync(join(tmpdir(), "code-viewer-status-empty-"));
     try {
       git(emptyRepo, ["init", "-b", "main"]);
@@ -453,7 +453,7 @@ describe("runStatusCli against a fixture repo", () => {
       writeFileSync(join(emptyRepo, "untracked-before-first-commit.ts"), "2\n");
 
       const io = captureIo();
-      runAndCatchExit(["--cwd", emptyRepo, "--json"]);
+      await runAndCatchExit(["--cwd", emptyRepo, "--json"]);
       expect(io.exits).toEqual([]);
       const payload = JSON.parse(io.logs[0]);
       const changedPaths = payload.changed.files.map(

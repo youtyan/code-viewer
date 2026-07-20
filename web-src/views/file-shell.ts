@@ -1,6 +1,6 @@
 import { COPY_16_PATHS, iconSvg } from "../core/icons";
 import type { AppRoute, DiffRange, SourceFileTarget } from "../core/routes";
-import { isPreviewableSource } from "../core/source-meta";
+import { isPreviewableSource, sourceDisplayKind } from "../core/source-meta";
 
 export type FileShellView = "blob" | "blame" | "history";
 export type SourceBlobTab = "preview" | "code";
@@ -35,9 +35,20 @@ export type FileViewTabsOptions = {
 };
 
 export type FileViewTabButtons = {
-  codeButton: HTMLButtonElement;
+  codeButton: HTMLButtonElement | null;
   previewButton: HTMLButtonElement | null;
 };
+
+// Media files (image / video / audio / pdf) render as an embedded preview -
+// there is no text pane behind them, so a "Code" tab would be a lie (and
+// clicking it used to look like the app trying to render binary as code).
+// They get a single "Preview" tab instead.
+export function isMediaPreviewOnlySource(path: string): boolean {
+  const kind = sourceDisplayKind(path);
+  return (
+    kind === "image" || kind === "video" || kind === "audio" || kind === "pdf"
+  );
+}
 
 export function isBlobOrBlameFileRoute(
   route: AppRoute,
@@ -112,28 +123,37 @@ export function appendFileViewTabs(
   options: FileViewTabsOptions = {},
 ): FileViewTabButtons {
   const includeFileTabs = options.includeFileTabs !== false;
+  // An explicit `previewable` option pins the classic Code/Preview pair
+  // (text renderers and internal paths); only the default path applies the
+  // media-only rule.
+  const mediaOnly =
+    options.previewable === undefined && isMediaPreviewOnlySource(target.path);
   const showPreview =
-    options.previewable ??
-    (isPreviewableSource(target.path) || activeTab === "preview");
+    mediaOnly ||
+    (options.previewable ??
+      (isPreviewableSource(target.path) || activeTab === "preview"));
   let previewButton: HTMLButtonElement | null = null;
   if (showPreview) {
     previewButton = createBlobSourceTabButton(
       deps,
       target,
       "preview",
-      activeTab === "preview",
+      activeTab === "preview" || (mediaOnly && activeTab === "code"),
       options,
     );
     tabs.appendChild(previewButton);
   }
-  const codeButton = createBlobSourceTabButton(
-    deps,
-    target,
-    "code",
-    activeTab === "code",
-    options,
-  );
-  tabs.appendChild(codeButton);
+  let codeButton: HTMLButtonElement | null = null;
+  if (!mediaOnly) {
+    codeButton = createBlobSourceTabButton(
+      deps,
+      target,
+      "code",
+      activeTab === "code",
+      options,
+    );
+    tabs.appendChild(codeButton);
+  }
   if (includeFileTabs) {
     tabs.appendChild(
       createFileViewTabButton(

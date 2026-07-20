@@ -18,7 +18,8 @@
 // What we add here is only the orchestration that previously read closure
 // state — turned into pure functions that take `SearchEnv`.
 
-import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { lstat, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import type {
   FileSearchListResponse,
@@ -145,21 +146,21 @@ function filterCallerPaths(env: SearchEnv, paths: string[]): string[] {
   );
 }
 
-function grepWorktreeFallback(
+async function grepWorktreeFallback(
   env: SearchEnv,
   query: string,
   max: number,
   paths: string[],
-): GrepMatch[] {
+): Promise<GrepMatch[]> {
   const candidates = paths.length
     ? paths
-    : git
-        .listTree("worktree", "", env.cwd, {
+    : (
+        await git.listTreeAsync("worktree", "", env.cwd, {
           recursive: true,
           omitDirNames: env.omitDirNames,
           excludeNames: env.excludeNames,
         })
-        .entries.map((entry) => entry.path);
+      ).entries.map((entry) => entry.path);
   const matches: GrepMatch[] = [];
   for (const path of candidates) {
     if (matches.length >= max) break;
@@ -171,9 +172,9 @@ function grepWorktreeFallback(
       continue;
     const full = safeWorktreePath(env, path);
     if (!full) continue;
-    let stat: ReturnType<typeof lstatSync>;
+    let stat: Awaited<ReturnType<typeof lstat>>;
     try {
-      stat = lstatSync(full);
+      stat = await lstat(full);
     } catch {
       continue;
     }
@@ -185,7 +186,7 @@ function grepWorktreeFallback(
       continue;
     let data: Buffer;
     try {
-      data = readFileSync(full);
+      data = await readFile(full);
     } catch {
       continue;
     }
@@ -257,7 +258,7 @@ async function grepWorktreeAsync(
       matches: [],
     };
   }
-  const matches = grepWorktreeFallback(env, req.query, req.max, paths);
+  const matches = await grepWorktreeFallback(env, req.query, req.max, paths);
   return {
     ref: "worktree",
     engine: "fallback",

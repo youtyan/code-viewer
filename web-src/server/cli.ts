@@ -80,7 +80,7 @@ if (process.argv[2] === "agent-help") {
   // CLI command when they enter a repository, so it must run in any
   // environment the user can `npx @youtyan/code-viewer status` into.
   const { runStatusCli } = await import("./status-cli");
-  runStatusCli(process.argv.slice(3));
+  await runStatusCli(process.argv.slice(3));
 } else if (process.argv[2] === "skill") {
   const { runSkillCli } = await import("./skill-cli");
   runSkillCli(process.argv.slice(3));
