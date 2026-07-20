@@ -2349,7 +2349,20 @@ export function createSourceView(deps: SourceViewDeps) {
             !sourceTargetsEqual(sourceTargetFromRoute(), target)
           )
             return;
-          if (!rendered) return;
+          if (!rendered) {
+            // The only way to get here with a current req is the initial
+            // range request failing (an abort always bumps SOURCE_REQ_SEQ
+            // first). Land on "error" instead of leaving the card stuck in
+            // "loading", which the idempotent-mount guard would otherwise
+            // treat as in-progress and refuse to retry on re-click.
+            finishSourceLoad(req);
+            renderSourceError(
+              card,
+              target,
+              `Cannot load ${target.path} at ${target.ref}`,
+            );
+            return;
+          }
           scrollStandaloneSourceLine(
             card,
             lineTargetStart(

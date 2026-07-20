@@ -4225,7 +4225,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (
       STATE.route.screen === "file" &&
       !(isFileHistoryRoute(STATE.route) && activeHistoryPathFilter) &&
-      dispatchFileRoute(STATE.route)
+      // load() is by definition a reload (topbar Reload button, ignore-ws
+      // toggle, catch-up after SSE reconnect) - bypass the idempotent-mount
+      // guard so the blob view actually refetches, matching the pre-guard
+      // behavior of every load() caller.
+      dispatchFileRoute(STATE.route, { refresh: true })
     ) {
       return Promise.resolve({
         structureChanged: false,
@@ -5028,7 +5032,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       const route = STATE.route;
       if (!shouldAutoLoadCurrentRoute(route)) return;
       if (isBlobOrBlameFileRoute(route)) {
-        dispatchFileRoute(route);
+        // The banner only appears after the viewed file changed on disk, so
+        // this explicit reload must bypass the idempotent-mount guard.
+        dispatchFileRoute(route, { refresh: true });
         return;
       }
       doSseLoad(paths);

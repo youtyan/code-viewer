@@ -10,6 +10,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { AppRoute } from "../core/routes";
 import type { SourceViewDeps } from "../views/source-view";
 import { createSourceView } from "../views/source-view";
+import { deferred, waitFor } from "./_test-helpers";
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -23,7 +24,10 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function createSourceViewForCursorTest(route: AppRoute) {
+function createSourceViewForCursorTest(
+  route: AppRoute,
+  overrides: Partial<SourceViewDeps> = {},
+) {
   const state: SourceViewDeps["STATE"] = {
     route,
     from: "HEAD",
@@ -81,6 +85,7 @@ function createSourceViewForCursorTest(route: AppRoute) {
       /* noop */
     },
     isPaletteOpen: () => false,
+    ...overrides,
   });
 }
 
@@ -301,6 +306,95 @@ describe("renderStandaloneSource idempotency", () => {
         ".gdp-source-tabs button.active",
       )?.textContent,
     ).toBe("Preview");
+    expect(
+      document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+        .sourceState,
+    ).toBe("done");
+  });
+});
+
+describe("renderStandaloneSource loading-state guard and paged retry", () => {
+  test("re-invoking while the mounted target is still loading is a no-op", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    let calls = 0;
+    const gate = deferred<Response>();
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/_file") {
+          calls++;
+          return gate.promise;
+        }
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
+    });
+    const view = createSourceViewForCursorTest(blobRoute("a.txt"));
+    const target = { path: "a.txt", ref: "worktree" };
+
+    const first = view.renderStandaloneSource(target);
+    await waitFor(() => calls === 1);
+    await view.renderStandaloneSource(target);
+
+    expect(calls).toBe(1);
+    expect(
+      document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+        .sourceState,
+    ).toBe("loading");
+
+    gate.resolve(new Response("line one\n", { status: 200 }));
+    await first;
+    expect(
+      document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+        .sourceState,
+    ).toBe("done");
+  });
+
+  test("a failed paged initial range lands on error and the next click retries", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    let rangeCalls = 0;
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/file_range") {
+          rangeCalls++;
+          if (rangeCalls === 1) return new Response("boom", { status: 500 });
+          return new Response(
+            JSON.stringify({
+              path: "big.txt",
+              ref: "worktree",
+              start: 1,
+              end: 400,
+              lines: ["line one"],
+              total: 1,
+              complete: true,
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
+    });
+    const view = createSourceViewForCursorTest(blobRoute("big.txt"), {
+      // 2MB pushes the render down the paged/virtual path.
+      loadRawFileInfo: async () => ({ size: 2 * 1024 * 1024 }),
+    });
+    const target = { path: "big.txt", ref: "worktree" };
+
+    await view.renderStandaloneSource(target);
+    expect(
+      document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+        .sourceState,
+    ).toBe("error");
+
+    await view.renderStandaloneSource(target);
+    expect(rangeCalls).toBe(2);
     expect(
       document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
         .sourceState,

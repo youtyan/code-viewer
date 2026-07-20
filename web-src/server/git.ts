@@ -22,13 +22,7 @@ import {
   isCommandNotFoundResult,
 } from "./command-resolver";
 import { compileNamePatterns, type NamePatternSet } from "./name-pattern";
-import {
-  runAsync,
-  runBytesAsync,
-  runBytesSync,
-  runSync,
-  spawnStream,
-} from "./runtime";
+import { runAsync, runBytesAsync, runSync, spawnStream } from "./runtime";
 
 export type GitFileMeta = {
   order?: number;
@@ -228,15 +222,6 @@ function runGitAsync(
   cwd: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return runAsync(resolveGitArgs(args), cwd, {
-    timeout: GIT_COMMAND_TIMEOUT_MS,
-  });
-}
-
-function runBytes(
-  args: string[],
-  cwd: string,
-): { code: number; stdout: Uint8Array; stderr: string } {
-  return runBytesSync(resolveGitArgs(args), cwd, {
     timeout: GIT_COMMAND_TIMEOUT_MS,
   });
 }
@@ -476,14 +461,6 @@ export async function gitSymlinkTargetMetadataAsync(
   return symlink_target_type === "missing"
     ? { symlink_target: target, symlink_target_type }
     : { symlink_target: target, symlink_target_type, resolved_path: resolved };
-}
-
-export function showBytes(
-  ref: string,
-  path: string,
-  cwd: string,
-): { code: number; stdout: Uint8Array; stderr: string } {
-  return runBytes(["git", "show", `${ref}:${path}`], cwd);
 }
 
 export function showBytesAsync(
@@ -1203,6 +1180,7 @@ export async function blameAsync(
       };
     }
     if (normalized.base === "worktree") {
+      // untracked / newly added file: synthesize an all-uncommitted blame.
       return syntheticUncommittedBlameFromWorktree(cwd, path);
     }
     return {
@@ -1727,7 +1705,8 @@ function untrackedFileMeta(path: string, scan: UntrackedScan): GitFileMeta {
 // unchanged untracked files each time both wastes IO and (before the async
 // rewrite) starved the event loop for tens of seconds on large repos -
 // even static assets stalled behind the scan. Entries are keyed per cwd,
-// invalidated by the lstat signature, and each scan rebuilds its cwd map
+// invalidated by the stat signature (symlinks resolved, matching the old
+// statSync behavior), and each scan rebuilds its cwd map
 // so files that left the untracked set do not accumulate.
 const untrackedScanCache = new Map<
   string,

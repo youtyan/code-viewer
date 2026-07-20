@@ -1,10 +1,10 @@
 // `code-viewer file` subcommand. Thin CLI veneer over the existing
 // per-file git inspection helpers in `web-src/server/git.ts`:
 //
-//   blame   → git.blame   (uses git.normalizeBlameRef for ref/base handling)
-//   history → git.commitHistory
-//   show    → worktree read or git.show for committed refs
-//   diff    → git.fileDiffText / git.untrackedFileDiff
+//   blame   → git.blameAsync (uses git.normalizeBlameRef for ref/base handling)
+//   history → git.commitHistoryAsync
+//   show    → worktree read or git.showAsync for committed refs
+//   diff    → git.fileDiffTextAsync / git.untrackedFileDiffAsync
 //
 // Git invocations stay in `git.ts`, so this CLI can never drift from the
 // browser's per-file inspection views.
