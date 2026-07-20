@@ -2889,12 +2889,13 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function dispatchFileRoute(
     route: Extract<AppRoute, { screen: "file" }>,
+    options: { refresh?: boolean } = {},
   ): boolean {
     if (route.view === "blob") {
       setStatus("live");
       removeFileHistoryShell();
       BLAME_VIEW.removeBlamePage();
-      applySourceRouteToShell();
+      applySourceRouteToShell(options);
       return true;
     }
     if (route.view === "blame") {
@@ -5072,7 +5073,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (isBlobOrBlameFileRoute(route)) {
       const viewingPath = route.path;
       if (paths && viewingPath && !paths.has(viewingPath)) return;
-      dispatchFileRoute(route);
+      // The viewed file changed on disk - bypass the idempotent-mount guard
+      // so the fresh content actually renders.
+      dispatchFileRoute(route, { refresh: true });
       return;
     }
     if (route.screen === "repo") {

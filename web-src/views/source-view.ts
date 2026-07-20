@@ -45,6 +45,7 @@ import type {
 import {
   appendFileViewTabs,
   createFileShellSticky,
+  isMediaPreviewOnlySource,
   mountFileShellCard,
   type SourceBlobTab,
 } from "./file-shell";
@@ -398,12 +399,13 @@ export function createSourceView(deps: SourceViewDeps) {
 
   function applyRenderedSourceTab(
     tab: SourceBlobTab,
-    codeButton: HTMLButtonElement,
+    codeButton: HTMLButtonElement | null,
     previewButton: HTMLButtonElement | null,
     codePane: HTMLElement,
     previewPane: HTMLElement | null,
     updateRoute = true,
   ): boolean {
+    if (!codeButton) return false;
     if (tab === "preview" && (!previewButton || !previewPane)) return false;
     codeButton.classList.toggle("active", tab === "code");
     previewButton?.classList.toggle("active", tab === "preview");
@@ -728,6 +730,7 @@ export function createSourceView(deps: SourceViewDeps) {
     view.textContent = message || `Cannot load ${target.path} at ${target.ref}`;
     if (body) body.replaceWith(view);
     else card.appendChild(view);
+    setSourceCardState(card, "error");
   }
 
   function renderSourceCancelled(
@@ -758,6 +761,7 @@ export function createSourceView(deps: SourceViewDeps) {
     view.appendChild(content);
     if (body) body.replaceWith(view);
     else card.appendChild(view);
+    setSourceCardState(card, "cancelled");
   }
 
   function renderSourceUnsupported(
@@ -780,6 +784,7 @@ export function createSourceView(deps: SourceViewDeps) {
     });
     if (body) body.replaceWith(view);
     else card.appendChild(view);
+    setSourceCardState(card, "done");
   }
 
   function renderSourceInternalPath(
@@ -815,6 +820,7 @@ export function createSourceView(deps: SourceViewDeps) {
     });
     if (body) body.replaceWith(view);
     else card.appendChild(view);
+    setSourceCardState(card, "done");
   }
 
   function renderHtmlPreview(
@@ -990,7 +996,7 @@ export function createSourceView(deps: SourceViewDeps) {
             preview,
           );
         });
-        codeButton.addEventListener("click", () => {
+        codeButton?.addEventListener("click", () => {
           applyRenderedSourceTab(
             "code",
             codeButton,
@@ -1111,7 +1117,7 @@ export function createSourceView(deps: SourceViewDeps) {
           preview,
         );
       });
-      codeButton.addEventListener("click", () => {
+      codeButton?.addEventListener("click", () => {
         applyRenderedSourceTab(
           "code",
           codeButton,
@@ -1574,7 +1580,7 @@ export function createSourceView(deps: SourceViewDeps) {
       e.preventDefault();
       const url = new URL(full.href, window.location.origin);
       setRoute(parseRoute(url.pathname, url.search, currentRange()), true);
-      renderStandaloneSource(target);
+      renderStandaloneSource(target, { refresh: true });
     });
     actions.append(copy, full);
     info.append(badge, summary, actions);
@@ -1741,7 +1747,7 @@ export function createSourceView(deps: SourceViewDeps) {
       e.preventDefault();
       const url = new URL(full.href, window.location.origin);
       setRoute(parseRoute(url.pathname, url.search, currentRange()), true);
-      renderStandaloneSource(target);
+      renderStandaloneSource(target, { refresh: true });
     });
     actions.append(raw, full);
     info.append(badge, summary, actions);
@@ -2110,6 +2116,7 @@ export function createSourceView(deps: SourceViewDeps) {
     });
     if (body) body.replaceWith(view);
     else card.appendChild(view);
+    setSourceCardState(card, "done");
   }
 
   function _renderSourceBinary(
@@ -2138,7 +2145,51 @@ export function createSourceView(deps: SourceViewDeps) {
     else card.appendChild(view);
   }
 
-  async function renderStandaloneSource(target: SourceFileTarget) {
+  // AGENTS.md "Request Lifecycle Discipline": entering the blob view must be
+  // idempotent. setRoute() already dispatches a render when the route
+  // changes, and most click handlers also call renderStandaloneSource
+  // directly - without this guard every file open rendered twice (two
+  // loads and duplicate HEAD /_file metadata fetches). A mounted card that
+  // is loading or done for the same target short-circuits; error/cancelled
+  // cards stay re-renderable so a retry click still works. Callers that
+  // must re-render the same target (SSE file change, virtual-mode switch)
+  // pass refresh: true.
+  function mountedStandaloneSourceCard(
+    target: SourceFileTarget,
+  ): HTMLElement | null {
+    const card = document.querySelector<HTMLElement>(".gdp-standalone-source");
+    if (!card) return null;
+    if (card.dataset.path !== target.path) return null;
+    if (card.dataset.sourceRef !== (target.ref || "worktree")) return null;
+    return card;
+  }
+
+  function setSourceCardState(
+    card: HTMLElement,
+    state: "loading" | "done" | "error" | "cancelled",
+  ) {
+    card.dataset.sourceState = state;
+  }
+
+  async function renderStandaloneSource(
+    target: SourceFileTarget,
+    options: { refresh?: boolean } = {},
+  ) {
+    if (!options.refresh) {
+      const mounted = mountedStandaloneSourceCard(target);
+      const state = mounted?.dataset.sourceState;
+      if (mounted && state === "done") {
+        // Same target already on screen: honor a line jump, skip the reload.
+        scrollStandaloneSourceLine(
+          mounted,
+          lineTargetStart(
+            STATE.route.screen === "file" ? STATE.route.line : undefined,
+          ),
+        );
+        return;
+      }
+      if (mounted && state === "loading") return;
+    }
     cancelActiveSourceLoad("navigation");
     const req = ++SOURCE_REQ_SEQ;
     const repoTarget = repoFileTargetFromRoute();
@@ -2151,11 +2202,15 @@ export function createSourceView(deps: SourceViewDeps) {
     card.className =
       "gdp-file-shell loaded gdp-standalone-source gdp-source-mode";
     card.dataset.path = target.path;
+    card.dataset.sourceRef = target.ref || "worktree";
+    setSourceCardState(card, "loading");
     const internalKind = sourceInternalPathKind(target.path);
     const wrapper = document.createElement("div");
     wrapper.className = "gdp-file-detail-wrapper";
+    const mediaOnly = !internalKind && isMediaPreviewOnlySource(target.path);
     const activeTab: SourceBlobTab =
-      !internalKind && STATE.route.screen === "file" && STATE.route.preview
+      mediaOnly ||
+      (!internalKind && STATE.route.screen === "file" && STATE.route.preview)
         ? "preview"
         : "code";
     const { sticky, header } = createFileShellSticky(
@@ -2301,6 +2356,7 @@ export function createSourceView(deps: SourceViewDeps) {
               STATE.route.screen === "file" ? STATE.route.line : undefined,
             ),
           );
+          setSourceCardState(card, "done");
           finishSourceLoad(req);
           return;
         }
@@ -2345,6 +2401,7 @@ export function createSourceView(deps: SourceViewDeps) {
             STATE.route.screen === "file" ? STATE.route.line : undefined,
           ),
         );
+        setSourceCardState(card, "done");
         finishSourceLoad(req);
       }
     } catch (err) {
@@ -2394,7 +2451,7 @@ export function createSourceView(deps: SourceViewDeps) {
     if (row) row.scrollIntoView({ block: "center" });
   }
 
-  function applySourceRouteToShell() {
+  function applySourceRouteToShell(options: { refresh?: boolean } = {}) {
     const target = sourceTargetFromRoute();
     setPageMode();
     if (!target) {
@@ -2406,7 +2463,7 @@ export function createSourceView(deps: SourceViewDeps) {
         });
       return;
     }
-    renderStandaloneSource(target);
+    renderStandaloneSource(target, options);
   }
 
   function inferLang(path: string): string | null {

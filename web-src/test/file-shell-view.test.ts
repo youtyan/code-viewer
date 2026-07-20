@@ -441,6 +441,85 @@ describe("file view shell routing", () => {
     expect(preferredTabs).toEqual([]);
   });
 
+  test.each([
+    {
+      name: "png shows Preview only (no Code tab) with Preview active",
+      path: "assets/photo.png",
+      activeTab: "code" as const,
+      labels: ["Preview", "Blame", "History"],
+      active: "Preview",
+    },
+    {
+      name: "mp4 shows Preview only (no Code tab) with Preview active",
+      path: "media/clip.mp4",
+      activeTab: "code" as const,
+      labels: ["Preview", "Blame", "History"],
+      active: "Preview",
+    },
+    {
+      name: "pdf shows Preview only (no Code tab) with Preview active",
+      path: "docs/manual.pdf",
+      activeTab: "code" as const,
+      labels: ["Preview", "Blame", "History"],
+      active: "Preview",
+    },
+    {
+      name: "mp3 shows Preview only (no Code tab) with Preview active",
+      path: "media/sound.mp3",
+      activeTab: "code" as const,
+      labels: ["Preview", "Blame", "History"],
+      active: "Preview",
+    },
+    {
+      name: "markdown keeps the Preview/Code pair with Code active",
+      path: "README.md",
+      activeTab: "code" as const,
+      labels: ["Preview", "Code", "Blame", "History"],
+      active: "Code",
+    },
+    {
+      name: "plain source keeps Code only with Code active",
+      path: "web-src/app.ts",
+      activeTab: "code" as const,
+      labels: ["Code", "Blame", "History"],
+      active: "Code",
+    },
+    {
+      name: "png in the blame view keeps Preview inactive and Blame active",
+      path: "assets/photo.png",
+      activeTab: "blame" as const,
+      labels: ["Preview", "Blame", "History"],
+      active: "Blame",
+    },
+  ])("$name", ({ path, activeTab, labels, active }) => {
+    const { sticky } = createFileShellSticky(
+      {
+        currentRange: () => RANGE,
+        setRoute() {
+          /* not exercised */
+        },
+        setPreferredSourceTab() {
+          /* not exercised */
+        },
+        createFileBreadcrumb(breadcrumbPath: string) {
+          const span = document.createElement("span");
+          span.textContent = breadcrumbPath;
+          return span;
+        },
+      },
+      { path, ref: "worktree" },
+      activeTab,
+    );
+    document.body.appendChild(sticky);
+
+    expect(tabLabels()).toEqual(labels);
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        ".gdp-source-tabs button.active",
+      )?.textContent,
+    ).toBe(active);
+  });
+
   test("blame ignores an older render response after a newer render wins", async () => {
     const firstBlame = deferred<Response>();
     const secondSha = "2222222222222222222222222222222222222222";

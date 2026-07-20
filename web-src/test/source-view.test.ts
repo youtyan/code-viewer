@@ -166,3 +166,144 @@ describe("source view cursor", () => {
     ).toBe(true);
   });
 });
+
+// --- renderStandaloneSource idempotency (AGENTS.md Request Lifecycle) ---
+// setRoute() dispatches a render and click handlers also call
+// renderStandaloneSource directly; the mounted-card guard must collapse the
+// duplicate invocation into a no-op without breaking refresh or retry.
+
+function blobRoute(path: string): AppRoute {
+  return {
+    screen: "file",
+    path,
+    ref: "worktree",
+    view: "blob",
+    range: { from: "HEAD", to: "worktree" },
+  };
+}
+
+function installRawFileFetchMock(responses?: { failFirst?: boolean }): {
+  calls: () => number;
+} {
+  let calls = 0;
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    writable: true,
+    value: (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/_file") {
+        calls++;
+        if (responses?.failFirst && calls === 1) {
+          return new Response("boom", { status: 500 });
+        }
+        return new Response("line one\nline two\n", { status: 200 });
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch,
+  });
+  return { calls: () => calls };
+}
+
+describe("renderStandaloneSource idempotency", () => {
+  test("re-invoking with the mounted target is a no-op (single load, single card)", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    const fetchMock = installRawFileFetchMock();
+    const view = createSourceViewForCursorTest(blobRoute("a.txt"));
+    const target = { path: "a.txt", ref: "worktree" };
+
+    await view.renderStandaloneSource(target);
+    await view.renderStandaloneSource(target);
+
+    expect(fetchMock.calls()).toBe(1);
+    expect(document.querySelectorAll(".gdp-standalone-source").length).toBe(1);
+    expect(
+      document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+        .sourceState,
+    ).toBe("done");
+  });
+
+  test("refresh: true re-renders the mounted target", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    const fetchMock = installRawFileFetchMock();
+    const view = createSourceViewForCursorTest(blobRoute("a.txt"));
+    const target = { path: "a.txt", ref: "worktree" };
+
+    await view.renderStandaloneSource(target);
+    await view.renderStandaloneSource(target, { refresh: true });
+
+    expect(fetchMock.calls()).toBe(2);
+    expect(document.querySelectorAll(".gdp-standalone-source").length).toBe(1);
+  });
+
+  test("a different target renders normally after the first", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    const fetchMock = installRawFileFetchMock();
+    const route = blobRoute("a.txt") as Extract<AppRoute, { screen: "file" }>;
+    const view = createSourceViewForCursorTest(route);
+
+    await view.renderStandaloneSource({ path: "a.txt", ref: "worktree" });
+    // Real navigation updates the route before the render call fires.
+    route.path = "b.txt";
+    await view.renderStandaloneSource({ path: "b.txt", ref: "worktree" });
+
+    expect(fetchMock.calls()).toBe(2);
+    expect(
+      document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+        .path,
+    ).toBe("b.txt");
+  });
+
+  test("an errored render is retried on the next invocation", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    const fetchMock = installRawFileFetchMock({ failFirst: true });
+    const view = createSourceViewForCursorTest(blobRoute("a.txt"));
+    const target = { path: "a.txt", ref: "worktree" };
+
+    await view.renderStandaloneSource(target);
+    expect(
+      document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+        .sourceState,
+    ).toBe("error");
+
+    await view.renderStandaloneSource(target);
+
+    expect(fetchMock.calls()).toBe(2);
+    expect(
+      document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+        .sourceState,
+    ).toBe("done");
+  });
+
+  test("a png target renders the media preview with a Preview-only tab row", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    const fetchMock = installRawFileFetchMock();
+    const view = createSourceViewForCursorTest(blobRoute("assets/photo.png"));
+
+    await view.renderStandaloneSource({
+      path: "assets/photo.png",
+      ref: "worktree",
+    });
+
+    expect(fetchMock.calls()).toBe(0);
+    expect(document.querySelector(".gdp-source-viewer.media.image")).not.toBe(
+      null,
+    );
+    expect(
+      Array.from(
+        document.querySelectorAll<HTMLButtonElement>(".gdp-source-tabs button"),
+      ).map((button) => button.textContent),
+    ).toEqual(["Preview", "Blame", "History"]);
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        ".gdp-source-tabs button.active",
+      )?.textContent,
+    ).toBe("Preview");
+    expect(
+      document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+        .sourceState,
+    ).toBe("done");
+  });
+});
