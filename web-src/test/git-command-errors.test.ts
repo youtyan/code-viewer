@@ -7,10 +7,10 @@ import {
   resetExternalCommandsForTest,
 } from "../server/command-resolver";
 import {
-  commitHistory,
-  refCommitPageResult,
-  refsResult,
-  verifyTreeRefResult,
+  commitHistoryAsync,
+  refCommitPageResultAsync,
+  refsResultAsync,
+  verifyTreeRefResultAsync,
 } from "../server/git";
 import { defaultMcpTools, dispatchJsonRpc } from "../server/mcp";
 import { grepRepoAsync, listRepoFilesAsync } from "../server/search-service";
@@ -73,7 +73,7 @@ describe("git command failures", () => {
     const cwd = tempRoot("code-viewer-missing-git-cwd-");
     configureMissingGit(cwd);
 
-    const ref = verifyTreeRefResult("HEAD", cwd);
+    const ref = await verifyTreeRefResultAsync("HEAD", cwd);
     expect(ref.ok).toBe(false);
     if (ref.ok === false) {
       expect(ref.status).toBe(503);
@@ -106,19 +106,23 @@ describe("git command failures", () => {
     if (emptyGrep.ok === false) expect(emptyGrep.status).toBe(503);
   });
 
-  test("propagates command-not-found from history and refs helpers", () => {
+  test("propagates command-not-found from history and refs helpers", async () => {
     const cwd = tempRoot("code-viewer-missing-git-history-");
     configureMissingGit(cwd);
 
-    const history = commitHistory(cwd, { ref: "HEAD", skip: 0, limit: 5 });
+    const history = await commitHistoryAsync(cwd, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 5,
+    });
     expect(history.status).toBe(503);
     expect(history.error).toMatch(/git binary not found|git not found/);
 
-    const commits = refCommitPageResult(cwd);
+    const commits = await refCommitPageResultAsync(cwd);
     expect(commits.status).toBe(503);
     expect(commits.error).toMatch(/git binary not found|git not found/);
 
-    const refs = refsResult(cwd);
+    const refs = await refsResultAsync(cwd);
     expect(refs.status).toBe(503);
     expect(refs.error).toMatch(/git binary not found|git not found/);
   });

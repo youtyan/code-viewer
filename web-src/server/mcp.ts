@@ -715,7 +715,10 @@ export function defaultMcpTools(
   ];
 }
 
-function runStatusTool(input: unknown, defaultCwd?: string): McpToolRunReturn {
+async function runStatusTool(
+  input: unknown,
+  defaultCwd?: string,
+): Promise<McpToolRunReturn> {
   const params = isPlainObject(input) ? input : {};
   const cwdRaw = params.cwd;
   const refRaw = params.ref;
@@ -767,7 +770,7 @@ function runStatusTool(input: unknown, defaultCwd?: string): McpToolRunReturn {
   }
 
   try {
-    const report = buildStatusReport({ root: resolved.root, ref, limit });
+    const report = await buildStatusReport({ root: resolved.root, ref, limit });
     return {
       text: JSON.stringify(report, null, 2),
       isError: !!(report.changed.error || report.staged.error),

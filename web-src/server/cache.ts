@@ -31,11 +31,21 @@ export function setTimedCacheEntry<T>(
   }
 }
 
+export type FileSignatureStats = {
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  ino?: number;
+};
+
+export function fileSignatureFromStats(stats: FileSignatureStats): string {
+  const inode = stats.ino ?? 0;
+  return `state:file|size:${stats.size}|mtime:${stats.mtimeMs}|ctime:${stats.ctimeMs}|ino:${inode}`;
+}
+
 export function worktreeFileSignature(path: string, cwd: string): string {
   try {
-    const stats = lstatSync(join(cwd, path));
-    const inode = "ino" in stats ? stats.ino : 0;
-    return `state:file|size:${stats.size}|mtime:${stats.mtimeMs}|ctime:${stats.ctimeMs}|ino:${inode}`;
+    return fileSignatureFromStats(lstatSync(join(cwd, path)));
   } catch {
     return "state:missing";
   }

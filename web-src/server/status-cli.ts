@@ -25,12 +25,12 @@ import {
   type ExternalCommandOverride,
 } from "./command-resolver";
 import {
-  commitHistory,
-  currentBranch,
-  fileMetaResult,
+  commitHistoryAsync,
+  currentBranchAsync,
+  fileMetaResultAsync,
   type GitFileMeta,
   type GitHistoryCommit,
-  remoteWebUrl,
+  remoteWebUrlAsync,
 } from "./git";
 import { readServerRegistry } from "./server-registry";
 
@@ -388,21 +388,21 @@ function formatRecentText(commits: GitHistoryCommit[]): string[] {
 // MCP `code_viewer_status` tool both emit. Reading from git/registry is
 // allowed; throwing / process.exit / console.* are NOT — the caller
 // decides how to surface results so this stays reusable.
-export function buildStatusReport(opts: {
+export async function buildStatusReport(opts: {
   root: string;
   ref: string;
   limit: number;
-}): StatusReport {
+}): Promise<StatusReport> {
   const { root, ref, limit } = opts;
   // `changed` = worktree vs HEAD (staged + unstaged + untracked). We pin
   // the explicit "HEAD" arg so the snapshot answers "what has moved
   // since the last commit?", which is the orient question. With no ref
   // arg, git diff is worktree-vs-index — that would silently miss
   // staged-only changes from the summary.
-  const stagedResult = fileMetaResult(["--cached"], root, false);
-  const changedResult = fileMetaResult(["HEAD"], root, true);
+  const stagedResult = await fileMetaResultAsync(["--cached"], root, false);
+  const changedResult = await fileMetaResultAsync(["HEAD"], root, true);
   const worktreeFallbackResult = isMissingDiffBaseError(changedResult.error)
-    ? fileMetaResult([], root, true)
+    ? await fileMetaResultAsync([], root, true)
     : null;
   const stagedFiles = stagedResult.files;
   const changedFiles = changedResult.error
@@ -417,9 +417,9 @@ export function buildStatusReport(opts: {
       : changedResult.error || stagedResult.error,
   );
   const staged = buildGroup(stagedFiles, stagedResult.error);
-  const history = commitHistory(root, { ref, skip: 0, limit });
-  const branch = currentBranch(root);
-  const remote = remoteWebUrl(root);
+  const history = await commitHistoryAsync(root, { ref, skip: 0, limit });
+  const branch = await currentBranchAsync(root);
+  const remote = await remoteWebUrlAsync(root);
   const registry = readServerRegistry(root);
   const serverUrl = registry?.url ?? null;
   const nextCommands = buildNextCommands(changed, staged, serverUrl);
@@ -459,7 +459,7 @@ export function formatStatusReportText(report: StatusReport): string {
   return lines.join("\n");
 }
 
-export function runStatusCli(argv: string[]): void {
+export async function runStatusCli(argv: string[]): Promise<void> {
   const parsed = parseStatusArgs(argv);
   if (parsed.ok === false) {
     console.error(parsed.error);
@@ -486,7 +486,7 @@ export function runStatusCli(argv: string[]): void {
     process.exit(1);
   }
   const root = resolveRepoRoot(cwd);
-  const report = buildStatusReport({
+  const report = await buildStatusReport({
     root,
     ref: command.ref,
     limit: command.limit,
