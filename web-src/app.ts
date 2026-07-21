@@ -2833,6 +2833,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         emptyText: () => uiText().diff,
       },
       historyRoute,
+      { loadSidebar: false },
     );
     activeFileHistoryDiffHost = mount.diffHost;
     activeFileHistoryEmptyHost = mount.emptyHost;
@@ -2913,7 +2914,27 @@ window.GdpExpandLogic = GdpExpandLogic;
       parkRangeForHistory();
       setPageMode();
       const mount = renderFileHistoryShell(route);
-      void HISTORY_VIEW.enterHistory({ mount });
+      void HISTORY_VIEW.enterHistory({ mount }).then(async () => {
+        const currentRoute = STATE.route;
+        if (
+          currentRoute.screen !== "file" ||
+          currentRoute.view !== "history" ||
+          currentRoute.path !== route.path ||
+          currentRoute.ref !== route.ref
+        )
+          return;
+        await loadDiffFile(route.path);
+        const routeAfterDiff = STATE.route;
+        if (
+          routeAfterDiff.screen !== "file" ||
+          routeAfterDiff.view !== "history" ||
+          routeAfterDiff.path !== route.path ||
+          routeAfterDiff.ref !== route.ref
+        )
+          return;
+        await REPO_VIEW.renderRepoBlobSidebar(route.path, route.ref);
+        placeSidebarToggle();
+      });
       return true;
     }
     return false;

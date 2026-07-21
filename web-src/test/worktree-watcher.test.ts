@@ -180,6 +180,49 @@ describe("worktree update watcher", () => {
     expect(watched).toEqual(["/repo", "/repo/src", "/repo/src/nested"]);
   });
 
+  test("async initial scan keeps only one directory-scan timer pending", () => {
+    const watched: string[] = [];
+    const scheduled = new Map<number, () => void>();
+    let nextTimerId = 0;
+
+    startWorktreeUpdateWatch({
+      root: "/repo",
+      omitDirNames: [],
+      excludeNames: [],
+      initialScanMode: "async",
+      watch: ((path) => {
+        watched.push(path);
+      }) as WatchFn,
+      readdirSync: (path) => {
+        if (path === "/repo") return [{ name: "src", isDirectory: () => true }];
+        if (path === "/repo/src")
+          return [{ name: "nested", isDirectory: () => true }];
+        return [];
+      },
+      onUpdate: () => undefined,
+      setTimeoutFn: ((callback: () => void) => {
+        const id = ++nextTimerId;
+        scheduled.set(id, callback);
+        return id;
+      }) as typeof setTimeout,
+      clearTimeoutFn: ((id: number) => {
+        scheduled.delete(id);
+      }) as typeof clearTimeout,
+    });
+
+    expect(scheduled.size).toBe(1);
+    while (scheduled.size) {
+      const [id, callback] = scheduled.entries().next().value as [
+        number,
+        () => void,
+      ];
+      scheduled.delete(id);
+      callback();
+      expect(scheduled.size > 1).toBe(false);
+    }
+    expect(watched).toEqual(["/repo", "/repo/src", "/repo/src/nested"]);
+  });
+
   test("async initial scan skips default heavy runtime directories", () => {
     const readDirs: string[] = [];
     const scheduled: (() => void)[] = [];

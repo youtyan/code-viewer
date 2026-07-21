@@ -103,7 +103,7 @@ const defaultDiffText: DiffViewText = {
 function createDiffViewForShellTest(
   text: DiffViewText = defaultDiffText,
   overrides: Partial<
-    Pick<DiffViewDeps, "getHljs" | "inferLang"> & {
+    Pick<DiffViewDeps, "getDiffRoot" | "getHljs" | "inferLang"> & {
       syntaxHighlight: boolean;
     }
   > = {},
@@ -189,6 +189,7 @@ function createDiffViewForShellTest(
       /* noop */
     },
     diffText: () => text,
+    getDiffRoot: overrides.getDiffRoot,
     $: <T extends Element = HTMLElement>(sel: string): T => {
       const found = document.querySelector<T>(sel);
       if (!found) throw new Error(`missing ${sel}`);
@@ -234,6 +235,46 @@ function installSidebarFileRow(
 }
 
 describe("diff view fast path", () => {
+  test("awaits an in-flight card load without starting another request", async () => {
+    setupDiffDom();
+    const outerCard = document.createElement("article");
+    outerCard.className = "gdp-file-shell loaded";
+    outerCard.dataset.path = "src/sample.ts";
+    const embeddedDiff = document.createElement("main");
+    document.querySelector("#diff")?.append(outerCard, embeddedDiff);
+    const { view, state } = createDiffViewForShellTest(defaultDiffText, {
+      getDiffRoot: () => embeddedDiff,
+    });
+    const file = makeFile(
+      "src/sample.ts",
+      1,
+      0,
+      "/file_diff?path=src%2Fsample.ts",
+    );
+    state.files = [file];
+    const card = document.createElement("div") as DiffCardElement;
+    card.className = "gdp-file-shell loading";
+    card.dataset.path = file.path;
+    card._file = file;
+    const pending = deferred<void>();
+    card._loadPromise = pending.promise.then(() => {
+      card.classList.remove("loading");
+      card.classList.add("loaded");
+    });
+    embeddedDiff.appendChild(card);
+
+    let settled = false;
+    const result = view.loadDiffFile(file.path).then((loaded) => {
+      settled = true;
+      return loaded;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    pending.resolve();
+    expect(await result).toBe(true);
+  });
+
   test("accepts the fast path only when direct diff cards match the file list", () => {
     expect(
       isDiffShellDomIntact(

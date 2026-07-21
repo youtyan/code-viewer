@@ -248,21 +248,21 @@ export function gitFailureMessage(
   res: { code: number; stderr?: string },
   fallback: string,
 ): string {
-  if (isCommandNotFoundResult("git", res)) return commandNotFoundDetail("git");
-  return res.stderr?.trim() || fallback;
+  const message = isCommandNotFoundResult("git", res)
+    ? commandNotFoundDetail("git")
+    : res.stderr?.trim() || fallback;
+  console.error(`[code-viewer] ${fallback} (git exit ${res.code}): ${message}`);
+  return message;
 }
 
 function gitFailureResult(
   res: { code: number; stderr?: string },
   fallback: string,
 ): GitErrorResult {
-  if (!isCommandNotFoundResult("git", res)) {
-    return { error: fallback };
-  }
-  return {
-    error: commandNotFoundDetail("git"),
-    status: 503,
-  };
+  const error = gitFailureMessage(res, fallback);
+  return isCommandNotFoundResult("git", res)
+    ? { error, status: 503 }
+    : { error };
 }
 
 function runGitRefLookup(args: string[], cwd: string): string | null {
@@ -1795,9 +1795,18 @@ export async function fileMetaResultAsync(
   cwd: string,
   includeUntracked = false,
 ): Promise<GitFileMetaResult> {
-  const ns = await nameStatusResultAsync(args, cwd);
+  let ns: GitFileMetaResult;
+  let nm: GitFileMetaResult;
+  if (args.includes("--")) {
+    [ns, nm] = await Promise.all([
+      nameStatusResultAsync(args, cwd),
+      numstatZResultAsync(args, cwd),
+    ]);
+  } else {
+    ns = await nameStatusResultAsync(args, cwd);
+    nm = await numstatZResultAsync(args, cwd);
+  }
   if (ns.error) return { files: [], error: ns.error };
-  const nm = await numstatZResultAsync(args, cwd);
   if (nm.error) return { files: [], error: nm.error };
   const byPath = new Map(nm.files.map((file) => [file.path, file]));
   const files: GitFileMeta[] = ns.files.map((file) => {

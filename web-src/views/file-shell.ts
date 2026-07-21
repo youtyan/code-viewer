@@ -243,6 +243,7 @@ export function mountFileShellCard(
   target: SourceFileTarget,
   card: HTMLElement,
   repoTarget = deps.repoFileTargetFromRoute(),
+  options: { loadSidebar?: boolean } = {},
 ): void {
   const root = deps.$<HTMLElement>("#diff");
   if (repoTarget) {
@@ -250,11 +251,17 @@ export function mountFileShellCard(
     layout.className = "gdp-repo-blob-layout";
     layout.appendChild(card);
     root.prepend(layout);
-    void Promise.resolve(deps.renderRepoBlobSidebar(target.path, repoTarget))
-      .catch(() => {
-        // renderRepoBlobSidebar owns its visible error state.
-      })
-      .finally(() => deps.placeSidebarToggle());
+    if (options.loadSidebar !== false) {
+      void Promise.resolve(deps.renderRepoBlobSidebar(target.path, repoTarget))
+        .catch((error) => {
+          console.error(
+            "[code-viewer] failed to load repository sidebar",
+            error,
+          );
+          // renderRepoBlobSidebar owns its visible error state.
+        })
+        .finally(() => deps.placeSidebarToggle());
+    }
   } else {
     root.prepend(card);
   }

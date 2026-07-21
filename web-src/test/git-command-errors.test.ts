@@ -41,11 +41,32 @@ function fakeMissingGit(): string {
   return path;
 }
 
+function fakeFailingGit(): string {
+  const root = tempRoot("code-viewer-failing-git-bin-");
+  const path = join(root, "git");
+  writeFileSync(
+    path,
+    "#!/bin/sh\nprintf 'fatal: simulated git failure\\n' >&2\nexit 2\n",
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
+
 function configureMissingGit(cwd: string): void {
   const configured = configureExternalCommands({
     cwd,
     env: {},
     cliOverrides: [{ name: "git", path: fakeMissingGit() }],
+    allowedNames: ["git"],
+  });
+  expect(configured).toEqual({ ok: true });
+}
+
+function configureFailingGit(cwd: string): void {
+  const configured = configureExternalCommands({
+    cwd,
+    env: {},
+    cliOverrides: [{ name: "git", path: fakeFailingGit() }],
     allowedNames: ["git"],
   });
   expect(configured).toEqual({ ok: true });
@@ -69,6 +90,33 @@ async function callMcpTool(name: string, args: Record<string, unknown>) {
 }
 
 describe("git command failures", () => {
+  test("preserves and logs stderr from an ordinary git failure", async () => {
+    const cwd = tempRoot("code-viewer-failing-git-cwd-");
+    configureFailingGit(cwd);
+    const originalError = console.error;
+    const logged: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+
+    try {
+      const history = await commitHistoryAsync(cwd, {
+        ref: "HEAD",
+        skip: 0,
+        limit: 5,
+      });
+
+      expect(history.error).toBe("fatal: simulated git failure");
+      expect(logged).toEqual([
+        [
+          "[code-viewer] unknown ref (git exit 2): fatal: simulated git failure",
+        ],
+      ]);
+    } finally {
+      console.error = originalError;
+    }
+  });
+
   test("propagates command-not-found from tree-ref validation and search", async () => {
     const cwd = tempRoot("code-viewer-missing-git-cwd-");
     configureMissingGit(cwd);

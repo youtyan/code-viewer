@@ -60,15 +60,37 @@ export function createRefPicker(deps: RefPickerDeps) {
   if (!popBody || !popSearch) return;
   let popTarget: HTMLInputElement | null = null; // which input opened the popover
 
-  function fetchRefs() {
-    return fetch("/_refs")
+  let refsLoaded = false;
+  let refsLoading = false;
+  let refsError = false;
+  let refsInFlight: Promise<void> | null = null;
+
+  function fetchRefs(): Promise<void> {
+    if (refsLoaded) return Promise.resolve();
+    if (refsInFlight) return refsInFlight;
+    refsLoading = true;
+    refsError = false;
+    const request = fetch("/_refs")
       .then((r) => r.json())
       .then((refs: RefResponse) => {
         Object.assign(REFS, refs);
+        refsLoaded = true;
+        if (!popover.hidden && popTab !== "commits")
+          buildPopBody(popSearch.value);
       })
-      .catch(() => undefined);
+      .catch((error) => {
+        refsError = true;
+        console.error("[code-viewer] failed to load refs", error);
+      })
+      .finally(() => {
+        refsLoading = false;
+        refsInFlight = null;
+        if (!popover.hidden && popTab !== "commits")
+          buildPopBody(popSearch.value);
+      });
+    refsInFlight = request;
+    return request;
   }
-  fetchRefs();
 
   let popTab = "commits";
   const COMMIT_PAGE_SIZE = 50;
@@ -231,6 +253,10 @@ export function createRefPicker(deps: RefPickerDeps) {
       } else if (commitHasMore) {
         html.push('<div class="rp-empty">scroll for more commits...</div>');
       }
+    } else if (refsLoading) {
+      html.push('<div class="rp-empty">loading refs...</div>');
+    } else if (refsError) {
+      html.push('<div class="rp-empty">failed to load refs</div>');
     } else if (popTab === "branches") {
       const branches = (REFS.branches || []).filter((b) => m(b.name));
       if (!branches.length) {
@@ -403,6 +429,14 @@ export function createRefPicker(deps: RefPickerDeps) {
         b.classList.toggle("active", b === t);
       });
       if (popTab === "commits") scheduleCommitSearch(popSearch.value);
+      else {
+        if (commitSearchTimer) {
+          clearTimeout(commitSearchTimer);
+          commitSearchTimer = null;
+        }
+        commitSearchLoading = false;
+        void fetchRefs();
+      }
       buildPopBody(popSearch.value);
     });
   });

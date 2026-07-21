@@ -36,6 +36,7 @@ export function removeFileHistoryShell(): void {
 export function renderFileHistoryShell(
   deps: FileHistoryShellDeps,
   route: FileHistoryRoute,
+  options: { loadSidebar?: boolean } = {},
 ): FileHistoryShellMount {
   removeFileHistoryShell();
   const target: SourceFileTarget = { path: route.path, ref: route.ref };
@@ -78,7 +79,7 @@ export function renderFileHistoryShell(
   wrapper.appendChild(body);
   card.appendChild(wrapper);
 
-  mountFileShellCard(deps, target, card, target.ref);
+  mountFileShellCard(deps, target, card, target.ref, options);
   return {
     ...panelDom,
     commitInfo,

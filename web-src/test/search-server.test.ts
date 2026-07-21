@@ -370,6 +370,10 @@ describe("search-service shared behavior", () => {
       regex: false,
       max: 10,
     });
-    expect(result).toEqual({ ok: false, error: "invalid target" });
+    expect(result).toEqual({
+      ok: false,
+      error: "fatal: Needed a single revision",
+      status: undefined,
+    });
   });
 });
