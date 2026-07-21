@@ -133,6 +133,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
+                text: "When the repository remote is on GitHub, repository and file headers can open the current path there. Selecting source lines also exposes separate actions to copy the AI reference, open the exact GitHub line range, or copy its URL. Markdown and HTML diff cards include a direct Preview shortcut.",
+              },
+              {
+                kind: "paragraph",
                 text: "In large repositories the sidebar loads folder children on demand. Folders you open are remembered and automatically re-expanded after a reload.",
               },
               {
@@ -221,6 +225,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               {
                 kind: "paragraph",
                 text: "Everything in .code-viewer/ is owned by code-viewer. JSON files are rewritten safely with validation on every change, so unknown keys are dropped and invalid values are reset to defaults. Hand-edit at your own risk — a corrupt file is renamed with a .corrupt suffix and replaced with an empty default.",
+              },
+              {
+                kind: "paragraph",
+                text: "The directory appears in the repository tree and its text files can be inspected in the Code view. It remains excluded from repository searches and diffs.",
               },
               {
                 kind: "paragraph",
@@ -331,6 +339,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                   [
                     "Persistent state",
                     "Open/closed, width, follow, mute, and rate are stored under .code-viewer/settings.json; annotations themselves live in .code-viewer/annotations.json.",
+                  ],
+                  [
+                    "Restorable URL",
+                    "The panel-open state, selected session, and selected annotation are kept in the URL, so reloads and shared links restore the same walkthrough context.",
                   ],
                 ],
               },
@@ -817,6 +829,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
+                text: "リポジトリの remote が GitHub の場合、リポジトリとファイルのヘッダーから現在のパスを GitHub で開けます。ソース行を選択すると、AI 参照のコピー、選択行範囲を GitHub で開く、GitHub URL のコピーを個別に選べます。Markdown / HTML の diff カードには直接 Preview を開く導線も表示されます。",
+              },
+              {
+                kind: "paragraph",
                 text: "大きいリポジトリではサイドバーがフォルダの中身を必要に応じて読み込みます。開いたフォルダは記憶され、次回のリロード時に同じ状態で展開し直されます。",
               },
               {
@@ -905,6 +921,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: ".code-viewer/ の中身はすべて code-viewer が管理します。JSON ファイルは書き込みごとにバリデーションを通して安全に書き換えられるため、未知のキーは破棄され、不正な値は既定値に戻されます。手で編集すると壊れる可能性があり、壊れたファイルは .corrupt サフィックスに改名されて空の既定値で置き換えられます。",
+              },
+              {
+                kind: "paragraph",
+                text: "ディレクトリはリポジトリツリーに表示され、テキストファイルは Code ビューで確認できます。リポジトリ検索と diff の対象からは引き続き除外されます。",
               },
               {
                 kind: "paragraph",
@@ -1015,6 +1035,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                   [
                     "永続化",
                     "パネルの開閉・幅・follow・ミュート・速度は .code-viewer/settings.json に、注釈自体は .code-viewer/annotations.json に保存されます。",
+                  ],
+                  [
+                    "復元できる URL",
+                    "パネルの開閉、選択中のセッション、選択中の注釈は URL に反映されるため、リロードや共有リンクでも同じウォークスルー状態を復元できます。",
                   ],
                 ],
               },

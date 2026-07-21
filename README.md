@@ -157,6 +157,12 @@ view's row component, so line numbers, drag-selection of `line=` ranges,
 syntax highlighting and the Viewer Settings code font size all match the
 Code tab.
 
+When the repository remote is hosted on GitHub, repository and file headers
+include an **Open on GitHub** action. Selecting source lines opens a compact
+action bar for copying the AI reference, opening the exact line range on
+GitHub, or copying that GitHub URL. Markdown and HTML diff cards also expose a
+direct **Preview** shortcut beside the regular file view action.
+
 Very large text files use a virtualized source viewer. Only visible rows are
 rendered, and the page includes controls to copy the full file or reopen it in
 the full non-virtual view.
@@ -213,9 +219,11 @@ root:
 - `db-snapshots.sqlite` — datastore snapshots and diff blobs.
 - `datastore-connections.json` — saved non-secret datastore connection settings.
 
-The `.code-viewer` directory is tool-internal: it never shows up in the file
-tree, searches, or diffs. Add it to `.gitignore` if you do not want to share
-its contents through git.
+The `.code-viewer` directory is tool-managed. It appears in the repository
+tree, and its text files can be inspected in the Code view, but it remains
+excluded from repository searches and diffs. Treat the files as diagnostic
+state rather than hand-edited configuration. Add `.code-viewer/` to
+`.gitignore` if you do not want to share its contents through git.
 
 ## Datastore Viewer
 
@@ -803,6 +811,8 @@ state is saved per project).
 
 A copy button on each annotation produces a paste-ready prompt block that
 references the annotation by URL for sharing back into the originating agent.
+The panel-open state, selected session, and selected annotation are also kept
+in the URL, so a reload or shared link restores the same walkthrough context.
 
 The `annotate` subcommand talks to the running server for the repository
 (discovered via `~/.cache/code-viewer/servers/`); start one with
