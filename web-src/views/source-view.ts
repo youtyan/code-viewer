@@ -21,6 +21,10 @@ import {
   type SourceLineTarget,
 } from "../core/routes";
 import {
+  loadShikiHighlighter,
+  type ShikiHighlighter,
+} from "../core/shiki-loader";
+import {
   EXT_TO_LANG,
   FILENAME_TO_LANG,
   formatBytes,
@@ -95,6 +99,8 @@ export type SourceViewDeps = {
   canTrashWorktreeRef(ref: string): boolean;
   loadRawFileInfo(target: SourceFileTarget): Promise<RawFileInfo>;
   loadSyntaxHighlighter(): Promise<HljsApi | null>;
+  loadSourceHighlighter?: (lang: string) => Promise<ShikiHighlighter | null>;
+  renderMarkdownPreview?: typeof renderMarkdownPreview;
   setViewFileButtonState(
     button: HTMLButtonElement | null,
     sourceMode: boolean,
@@ -136,25 +142,6 @@ export function createSourceView(deps: SourceViewDeps) {
     isPaletteOpen,
   } = deps;
 
-  type SourceShikiHighlighter = {
-    codeToHtml: (
-      code: string,
-      options: {
-        lang: string;
-        themes: { light: string; dark: string };
-        defaultColor: false;
-      },
-    ) => string;
-  };
-
-  type SourceShikiModule = {
-    bundledLanguages?: Record<string, unknown>;
-    createHighlighter: (options: {
-      themes: string[];
-      langs: string[];
-    }) => Promise<SourceShikiHighlighter>;
-  };
-
   const VIRTUAL_SOURCE_LINE_THRESHOLD = 3000;
 
   const VIRTUAL_SOURCE_SIZE_THRESHOLD = 1024 * 1024;
@@ -168,9 +155,6 @@ export function createSourceView(deps: SourceViewDeps) {
   const UNKNOWN_TEXT_SNIFF_BYTES = 8192;
 
   const SOURCE_LOADING_SLOW_THRESHOLD_MS = 3000;
-
-  let sourceShikiLoadPromise: Promise<SourceShikiHighlighter | null> | null =
-    null;
 
   let PREFERRED_SOURCE_TAB: SourceBlobTab | null = null;
 
@@ -457,101 +441,20 @@ export function createSourceView(deps: SourceViewDeps) {
     return true;
   }
 
-  const SOURCE_SHIKI_LANGS = Array.from(
-    new Set([
-      "asciidoc",
-      "astro",
-      "bash",
-      "bibtex",
-      "c",
-      "clojure",
-      "cmake",
-      "cpp",
-      "csharp",
-      "css",
-      "dart",
-      "diff",
-      "dockerfile",
-      "dotenv",
-      "elixir",
-      "erb",
-      "erlang",
-      "fortran",
-      "go",
-      "gradle",
-      "graphql",
-      "haml",
-      "handlebars",
-      "haskell",
-      "html",
-      "ini",
-      "java",
-      "javascript",
-      "json",
-      "jsonc",
-      "julia",
-      "kotlin",
-      "less",
-      "liquid",
-      "lua",
-      "make",
-      "markdown",
-      "nix",
-      "ocaml",
-      "pascal",
-      "perl",
-      "php",
-      "powershell",
-      "prisma",
-      "properties",
-      "protobuf",
-      "pug",
-      "python",
-      "r",
-      "rst",
-      "ruby",
-      "rust",
-      "sass",
-      "scala",
-      "scss",
-      "sql",
-      "swift",
-      "terraform",
-      "tex",
-      "toml",
-      "twig",
-      "typescript",
-      "vim",
-      "vue",
-      "xml",
-      "yaml",
-    ]),
-  );
-
-  function loadSourceShikiHighlighter(): Promise<SourceShikiHighlighter | null> {
-    if (!sourceShikiLoadPromise) {
-      sourceShikiLoadPromise = import("/" + "shiki.js")
-        .then((mod: unknown) => {
-          const typed = mod as SourceShikiModule;
-          const langs = typed.bundledLanguages
-            ? SOURCE_SHIKI_LANGS.filter(
-                (lang) => !!typed.bundledLanguages?.[lang],
-              )
-            : SOURCE_SHIKI_LANGS;
-          return typed.createHighlighter({
-            themes: ["github-light", "github-dark"],
-            langs,
-          });
-        })
-        .catch(() => null);
-    }
-    return sourceShikiLoadPromise;
+  function loadSourceShikiHighlighter(
+    lang: string,
+  ): Promise<ShikiHighlighter | null> {
+    if (deps.loadSourceHighlighter) return deps.loadSourceHighlighter(lang);
+    return loadShikiHighlighter({
+      themes: ["github-light", "github-dark"],
+      langs: [lang],
+    });
   }
 
   function sourceShikiLines(
     textValue: string,
     lang: string,
-    highlighter: SourceShikiHighlighter,
+    highlighter: ShikiHighlighter,
   ): string[] | null {
     try {
       const html = highlighter.codeToHtml(textValue || " ", {
@@ -569,6 +472,109 @@ export function createSourceView(deps: SourceViewDeps) {
     } catch {
       return null;
     }
+  }
+
+  function scheduleSourceHighlight(
+    table: HTMLTableElement,
+    target: SourceFileTarget,
+    textValue: string,
+    lang: string,
+    signal?: AbortSignal,
+  ): void {
+    setTimeout(() => {
+      if (
+        signal?.aborted ||
+        !table.isConnected ||
+        !STATE.syntaxHighlight ||
+        !sourceTargetsEqual(sourceTargetFromRoute(), target)
+      )
+        return;
+      void loadSourceShikiHighlighter(lang)
+        .then((highlighter) => {
+          if (
+            !highlighter ||
+            signal?.aborted ||
+            !table.isConnected ||
+            !STATE.syntaxHighlight ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          const highlightedLines = sourceShikiLines(
+            textValue,
+            lang,
+            highlighter,
+          );
+          if (
+            !highlightedLines ||
+            signal?.aborted ||
+            !table.isConnected ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          const cells = table.querySelectorAll<HTMLElement>(
+            ".gdp-source-line-code",
+          );
+          cells.forEach((cell, index) => {
+            if (highlightedLines[index] == null) return;
+            cell.innerHTML = highlightedLines[index] || " ";
+            cell.classList.add("shiki");
+          });
+        })
+        .catch((err: unknown) => {
+          console.error("Failed to apply source syntax highlighting", err);
+        });
+    }, 0);
+  }
+
+  function scheduleMarkdownPreviewHighlight(
+    preview: HTMLElement,
+    target: SourceFileTarget,
+    textValue: string,
+    signal: AbortSignal | undefined,
+    onReplace: (next: HTMLElement) => void,
+  ): void {
+    setTimeout(() => {
+      if (
+        signal?.aborted ||
+        !preview.isConnected ||
+        !STATE.syntaxHighlight ||
+        !sourceTargetsEqual(sourceTargetFromRoute(), target)
+      )
+        return;
+      void (deps.renderMarkdownPreview ?? renderMarkdownPreview)(
+        textValue,
+        target,
+        {
+          syntaxHighlight: true,
+          signal,
+          onNavigateMarkdown: (path, ref) => {
+            setRoute({
+              screen: "file",
+              path,
+              ref,
+              view: "blob",
+              range: currentRange(),
+            });
+            renderStandaloneSource({ path, ref });
+          },
+        },
+      )
+        .then((next) => {
+          if (
+            signal?.aborted ||
+            !preview.isConnected ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          next.dataset.sourcePane = "preview";
+          next.hidden = preview.hidden;
+          preview.replaceWith(next);
+          onReplace(next);
+        })
+        .catch((err: unknown) => {
+          console.error("Failed to apply preview syntax highlighting", err);
+        });
+    }, 0);
   }
 
   function setPreferredSourceTab(tab: SourceBlobTab): void {
@@ -925,15 +931,12 @@ export function createSourceView(deps: SourceViewDeps) {
       header.textContent = `${target.path} @ ${target.ref}`;
     }
     const lang = inferLang(target.path);
+    const sourceShikiLang = normalizeSourceShikiLang(lang);
     const usesVirtualSource =
       shouldVirtualizeSource(textValue, lines) && !isVirtualSourceDisabled();
     const hljsRef =
       STATE.syntaxHighlight && usesVirtualSource
         ? await loadSyntaxHighlighter()
-        : null;
-    const sourceShikiRef =
-      STATE.syntaxHighlight && !usesVirtualSource
-        ? await loadSourceShikiHighlighter()
         : null;
     if (signal?.aborted) return false;
     const previewable = isPreviewableSource(target.path);
@@ -960,25 +963,48 @@ export function createSourceView(deps: SourceViewDeps) {
           tabsHost.hidden = false;
           tabsHost.replaceChildren(tabs);
         }
-        const preview =
+        let preview =
           previewKind === "html"
             ? renderHtmlPreview(target, textValue)
-            : await renderMarkdownPreview(textValue, target, {
-                syntaxHighlight: STATE.syntaxHighlight,
-                signal,
-                onNavigateMarkdown: (path, ref) => {
-                  setRoute({
-                    screen: "file",
-                    path,
-                    ref,
-                    view: "blob",
-                    range: currentRange(),
-                  });
-                  renderStandaloneSource({ path, ref });
+            : await (deps.renderMarkdownPreview ?? renderMarkdownPreview)(
+                textValue,
+                target,
+                {
+                  syntaxHighlight: false,
+                  signal,
+                  onNavigateMarkdown: (path, ref) => {
+                    setRoute({
+                      screen: "file",
+                      path,
+                      ref,
+                      view: "blob",
+                      range: currentRange(),
+                    });
+                    renderStandaloneSource({ path, ref });
+                  },
                 },
-              });
+              );
         if (signal?.aborted) return false;
         preview.dataset.sourcePane = "preview";
+        let previewHighlightScheduled = false;
+        const ensurePreviewHighlight = () => {
+          if (
+            previewKind === "html" ||
+            !STATE.syntaxHighlight ||
+            previewHighlightScheduled
+          )
+            return;
+          previewHighlightScheduled = true;
+          scheduleMarkdownPreviewHighlight(
+            preview,
+            target,
+            textValue,
+            signal,
+            (next) => {
+              preview = next;
+            },
+          );
+        };
         applyRenderedSourceTab(
           initialSourceTab,
           codeButton,
@@ -995,6 +1021,7 @@ export function createSourceView(deps: SourceViewDeps) {
             virtualCode,
             preview,
           );
+          ensurePreviewHighlight();
         });
         codeButton?.addEventListener("click", () => {
           applyRenderedSourceTab(
@@ -1010,6 +1037,7 @@ export function createSourceView(deps: SourceViewDeps) {
         view.append(preview, virtualCode);
         if (body) body.replaceWith(view);
         else card.appendChild(view);
+        if (initialSourceTab === "preview") ensurePreviewHighlight();
         return true;
       }
       const { tabs } = createSourceTabs(target, "code", textValue, {
@@ -1031,11 +1059,6 @@ export function createSourceView(deps: SourceViewDeps) {
     table.className = "gdp-source-table";
     table.dataset.sourcePane = "code";
     const tbody = document.createElement("tbody");
-    const sourceShikiLang = normalizeSourceShikiLang(lang);
-    const shikiLines =
-      sourceShikiRef && sourceShikiLang
-        ? sourceShikiLines(textValue, sourceShikiLang, sourceShikiRef)
-        : null;
     for (let index = 0; index < lines.length; index++) {
       if (signal?.aborted) return false;
       const line = lines[index];
@@ -1055,12 +1078,7 @@ export function createSourceView(deps: SourceViewDeps) {
       bindSourceLineNumber(num, card, target, index + 1);
       const code = document.createElement("td");
       code.className = "gdp-source-line-code";
-      if (shikiLines && shikiLines[index] != null) {
-        code.innerHTML = shikiLines[index] || " ";
-        code.classList.add("shiki");
-      } else {
-        code.textContent = line || " ";
-      }
+      code.textContent = line || " ";
       tr.appendChild(num);
       tr.appendChild(code);
       tbody.appendChild(tr);
@@ -1081,25 +1099,48 @@ export function createSourceView(deps: SourceViewDeps) {
       tabsHost.replaceChildren(tabs);
     }
     if (previewable) {
-      const preview =
+      let preview =
         previewKind === "html"
           ? renderHtmlPreview(target, textValue)
-          : await renderMarkdownPreview(textValue, target, {
-              syntaxHighlight: STATE.syntaxHighlight,
-              signal,
-              onNavigateMarkdown: (path, ref) => {
-                setRoute({
-                  screen: "file",
-                  path,
-                  ref,
-                  view: "blob",
-                  range: currentRange(),
-                });
-                renderStandaloneSource({ path, ref });
+          : await (deps.renderMarkdownPreview ?? renderMarkdownPreview)(
+              textValue,
+              target,
+              {
+                syntaxHighlight: false,
+                signal,
+                onNavigateMarkdown: (path, ref) => {
+                  setRoute({
+                    screen: "file",
+                    path,
+                    ref,
+                    view: "blob",
+                    range: currentRange(),
+                  });
+                  renderStandaloneSource({ path, ref });
+                },
               },
-            });
+            );
       if (signal?.aborted) return false;
       preview.dataset.sourcePane = "preview";
+      let previewHighlightScheduled = false;
+      const ensurePreviewHighlight = () => {
+        if (
+          previewKind === "html" ||
+          !STATE.syntaxHighlight ||
+          previewHighlightScheduled
+        )
+          return;
+        previewHighlightScheduled = true;
+        scheduleMarkdownPreviewHighlight(
+          preview,
+          target,
+          textValue,
+          signal,
+          (next) => {
+            preview = next;
+          },
+        );
+      };
       applyRenderedSourceTab(
         initialSourceTab,
         codeButton,
@@ -1116,6 +1157,7 @@ export function createSourceView(deps: SourceViewDeps) {
           table,
           preview,
         );
+        ensurePreviewHighlight();
       });
       codeButton?.addEventListener("click", () => {
         applyRenderedSourceTab(
@@ -1132,6 +1174,15 @@ export function createSourceView(deps: SourceViewDeps) {
       if (signal?.aborted) return false;
       if (body) body.replaceWith(view);
       else card.appendChild(view);
+      if (STATE.syntaxHighlight && sourceShikiLang)
+        scheduleSourceHighlight(
+          table,
+          target,
+          textValue,
+          sourceShikiLang,
+          signal,
+        );
+      if (initialSourceTab === "preview") ensurePreviewHighlight();
       return true;
     }
     if (header) view.appendChild(header);
@@ -1139,6 +1190,14 @@ export function createSourceView(deps: SourceViewDeps) {
     if (signal?.aborted) return false;
     if (body) body.replaceWith(view);
     else card.appendChild(view);
+    if (STATE.syntaxHighlight && sourceShikiLang)
+      scheduleSourceHighlight(
+        table,
+        target,
+        textValue,
+        sourceShikiLang,
+        signal,
+      );
     return true;
   }
 
@@ -2156,8 +2215,10 @@ export function createSourceView(deps: SourceViewDeps) {
   // pass refresh: true.
   function mountedStandaloneSourceCard(
     target: SourceFileTarget,
-  ): HTMLElement | null {
-    const card = document.querySelector<HTMLElement>(".gdp-standalone-source");
+  ): DiffCardElement | null {
+    const card = document.querySelector<DiffCardElement>(
+      ".gdp-standalone-source",
+    );
     if (!card) return null;
     if (card.dataset.path !== target.path) return null;
     if (card.dataset.sourceRef !== (target.ref || "worktree")) return null;
@@ -2188,7 +2249,8 @@ export function createSourceView(deps: SourceViewDeps) {
         );
         return;
       }
-      if (mounted && state === "loading") return;
+      if (mounted && state === "loading" && mounted._loadPromise)
+        return mounted._loadPromise;
     }
     cancelActiveSourceLoad("navigation");
     const req = ++SOURCE_REQ_SEQ;
@@ -2285,76 +2347,104 @@ export function createSourceView(deps: SourceViewDeps) {
     const controller = new AbortController();
     ACTIVE_SOURCE_LOAD = { controller, req, target, card };
     renderSourceLoading(card, target, () => cancelActiveSourceLoad("user"));
-    try {
-      let displayKind = sourceDisplayKind(target.path);
-      let rawInfo: RawFileInfo | null = null;
-      if (displayKind === "unsupported") {
-        rawInfo = await loadRawFileInfo(target);
-        if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
-          return;
-        if (
-          await sourceLooksTextByContent(target, rawInfo, controller.signal)
-        ) {
-          displayKind = "text";
+    const sourceLoad = (async () => {
+      try {
+        let displayKind = sourceDisplayKind(target.path);
+        let rawInfo: RawFileInfo | null = null;
+        if (displayKind === "unsupported") {
+          rawInfo = await loadRawFileInfo(target);
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          if (
+            await sourceLooksTextByContent(target, rawInfo, controller.signal)
+          ) {
+            displayKind = "text";
+          }
         }
-      }
-      if (displayKind === "unsupported") {
-        if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
+        if (displayKind === "unsupported") {
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          finishSourceLoad(req);
+          renderSourceUnsupported(card, target);
           return;
-        finishSourceLoad(req);
-        renderSourceUnsupported(card, target);
-        return;
-      }
-      if (
-        displayKind === "image" ||
-        displayKind === "video" ||
-        displayKind === "audio" ||
-        displayKind === "pdf"
-      ) {
+        }
         if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
-          return;
-        finishSourceLoad(req);
-        renderSourceMedia(card, target, displayKind);
-        return;
-      }
-      if (displayKind === "text") {
-        const meta = rawInfo ?? (await loadRawFileInfo(target));
-        if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
-          return;
-        if (
-          !isVirtualSourceDisabled() &&
-          meta.size != null &&
-          meta.size >= VIRTUAL_SOURCE_SIZE_THRESHOLD
+          displayKind === "image" ||
+          displayKind === "video" ||
+          displayKind === "audio" ||
+          displayKind === "pdf"
         ) {
-          const rendered = await renderPagedSourceText(
-            card,
-            target,
-            meta.size,
-            controller.signal,
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          finishSourceLoad(req);
+          renderSourceMedia(card, target, displayKind);
+          return;
+        }
+        if (displayKind === "text") {
+          const meta = rawInfo ?? (await loadRawFileInfo(target));
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          if (
+            !isVirtualSourceDisabled() &&
+            meta.size != null &&
+            meta.size >= VIRTUAL_SOURCE_SIZE_THRESHOLD
+          ) {
+            const rendered = await renderPagedSourceText(
+              card,
+              target,
+              meta.size,
+              controller.signal,
+            );
+            if (
+              req !== SOURCE_REQ_SEQ ||
+              !sourceTargetsEqual(sourceTargetFromRoute(), target)
+            )
+              return;
+            if (!rendered) {
+              // The only way to get here with a current req is the initial
+              // range request failing (an abort always bumps SOURCE_REQ_SEQ
+              // first). Land on "error" instead of leaving the card stuck in
+              // "loading", which the idempotent-mount guard would otherwise
+              // treat as in-progress and refuse to retry on re-click.
+              finishSourceLoad(req);
+              renderSourceError(
+                card,
+                target,
+                `Cannot load ${target.path} at ${target.ref}`,
+              );
+              return;
+            }
+            scrollStandaloneSourceLine(
+              card,
+              lineTargetStart(
+                STATE.route.screen === "file" ? STATE.route.line : undefined,
+              ),
+            );
+            setSourceCardState(card, "done");
+            finishSourceLoad(req);
+            return;
+          }
+          const response = await trackLoad(
+            fetch(buildRawFileUrl(target), { signal: controller.signal }),
           );
           if (
             req !== SOURCE_REQ_SEQ ||
             !sourceTargetsEqual(sourceTargetFromRoute(), target)
           )
             return;
-          if (!rendered) {
-            // The only way to get here with a current req is the initial
-            // range request failing (an abort always bumps SOURCE_REQ_SEQ
-            // first). Land on "error" instead of leaving the card stuck in
-            // "loading", which the idempotent-mount guard would otherwise
-            // treat as in-progress and refuse to retry on re-click.
+          if (!response.ok) {
             finishSourceLoad(req);
             renderSourceError(
               card,
@@ -2363,6 +2453,24 @@ export function createSourceView(deps: SourceViewDeps) {
             );
             return;
           }
+          const textValue = await response.text();
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          const rendered = await renderSourceText(
+            card,
+            target,
+            textValue,
+            controller.signal,
+          );
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          if (!rendered) return;
           scrollStandaloneSourceLine(
             card,
             lineTargetStart(
@@ -2371,69 +2479,30 @@ export function createSourceView(deps: SourceViewDeps) {
           );
           setSourceCardState(card, "done");
           finishSourceLoad(req);
-          return;
         }
-        const response = await trackLoad(
-          fetch(buildRawFileUrl(target), { signal: controller.signal }),
-        );
+      } catch (err) {
         if (
           req !== SOURCE_REQ_SEQ ||
           !sourceTargetsEqual(sourceTargetFromRoute(), target)
         )
           return;
-        if (!response.ok) {
-          finishSourceLoad(req);
-          renderSourceError(
-            card,
-            target,
-            `Cannot load ${target.path} at ${target.ref}`,
-          );
+        finishSourceLoad(req);
+        if (isAbortError(err)) {
+          renderSourceCancelled(card, target);
           return;
         }
-        const textValue = await response.text();
-        if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
-          return;
-        const rendered = await renderSourceText(
+        renderSourceError(
           card,
           target,
-          textValue,
-          controller.signal,
+          `Cannot load ${target.path} at ${target.ref}`,
         );
-        if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
-          return;
-        if (!rendered) return;
-        scrollStandaloneSourceLine(
-          card,
-          lineTargetStart(
-            STATE.route.screen === "file" ? STATE.route.line : undefined,
-          ),
-        );
-        setSourceCardState(card, "done");
-        finishSourceLoad(req);
       }
-    } catch (err) {
-      if (
-        req !== SOURCE_REQ_SEQ ||
-        !sourceTargetsEqual(sourceTargetFromRoute(), target)
-      )
-        return;
-      finishSourceLoad(req);
-      if (isAbortError(err)) {
-        renderSourceCancelled(card, target);
-        return;
-      }
-      renderSourceError(
-        card,
-        target,
-        `Cannot load ${target.path} at ${target.ref}`,
-      );
-    }
+    })();
+    const completed = sourceLoad.finally(() => {
+      if (card._loadPromise === completed) delete card._loadPromise;
+    });
+    card._loadPromise = completed;
+    return completed;
   }
 
   function scrollStandaloneSourceLine(

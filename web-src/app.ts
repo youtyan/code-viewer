@@ -999,7 +999,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     trackLoad,
     getSyntaxHighlight: () => STATE.syntaxHighlight,
-    loadSourceShikiHighlighter: () => SOURCE_VIEW.loadSourceShikiHighlighter(),
+    loadSourceShikiHighlighter: (lang) =>
+      SOURCE_VIEW.loadSourceShikiHighlighter(lang),
     sourceShikiLines: (textValue, lang, highlighter) =>
       SOURCE_VIEW.sourceShikiLines(textValue, lang, highlighter),
     inferLang: (path) => SOURCE_VIEW.inferLang(path),

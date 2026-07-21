@@ -44,7 +44,9 @@ export type BlameViewDeps = {
   currentRange(): DiffRange;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
   getSyntaxHighlight(): boolean;
-  loadSourceShikiHighlighter(): Promise<SourceShikiHighlighter | null>;
+  loadSourceShikiHighlighter(
+    lang: string,
+  ): Promise<SourceShikiHighlighter | null>;
   sourceShikiLines(
     textValue: string,
     lang: string,
@@ -327,11 +329,14 @@ export function createBlameView(deps: BlameViewDeps) {
     card.appendChild(wrapper);
     mountFileShellCard(deps, target, card);
 
+    const sourceShikiLang = normalizeSourceShikiLang(
+      deps.inferLang(target.path),
+    );
     const [blameResp, srcText, highlighter] = await Promise.all([
       fetchBlame(target, generation),
       fetchSource(target, base),
-      deps.getSyntaxHighlight()
-        ? deps.loadSourceShikiHighlighter()
+      deps.getSyntaxHighlight() && sourceShikiLang
+        ? deps.loadSourceShikiHighlighter(sourceShikiLang)
         : Promise.resolve(null),
     ]);
     if (generation !== activeGeneration) return;

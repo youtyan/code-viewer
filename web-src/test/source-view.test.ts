@@ -8,6 +8,7 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { AppRoute } from "../core/routes";
+import type { ShikiHighlighter } from "../core/shiki-loader";
 import type { SourceViewDeps } from "../views/source-view";
 import { createSourceView } from "../views/source-view";
 import { deferred, waitFor } from "./_test-helpers";
@@ -314,7 +315,129 @@ describe("renderStandaloneSource idempotency", () => {
 });
 
 describe("renderStandaloneSource loading-state guard and paged retry", () => {
-  test("re-invoking while the mounted target is still loading is a no-op", async () => {
+  test("finishes plain source first and applies syntax highlighting later", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    installRawFileFetchMock();
+    const route = blobRoute("sample.md");
+    const state: SourceViewDeps["STATE"] = {
+      route,
+      from: "HEAD",
+      to: "worktree",
+      syntaxHighlight: true,
+    };
+    const highlighter = deferred<ShikiHighlighter | null>();
+    const requestedLanguages: string[] = [];
+    const markdownHighlightModes: boolean[] = [];
+    const view = createSourceViewForCursorTest(route, {
+      STATE: state,
+      loadSourceHighlighter: (lang) => {
+        requestedLanguages.push(lang);
+        return highlighter.promise;
+      },
+      renderMarkdownPreview: async (_textValue, _target, options) => {
+        markdownHighlightModes.push(options.syntaxHighlight);
+        const preview = document.createElement("div");
+        preview.className = "gdp-markdown-preview";
+        return preview;
+      },
+    });
+
+    const rendering = view.renderStandaloneSource({
+      path: "sample.md",
+      ref: "worktree",
+    });
+    try {
+      await waitFor(
+        () =>
+          document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+            .sourceState === "done",
+        100,
+      );
+      const firstCode = document.querySelector<HTMLElement>(
+        ".gdp-source-line-code",
+      );
+      expect(firstCode?.textContent).toBe("line one");
+      expect(firstCode?.classList.contains("shiki")).toBe(false);
+      expect(markdownHighlightModes[0]).toBe(false);
+
+      await waitFor(() => requestedLanguages.length === 1);
+      expect(requestedLanguages).toEqual(["markdown"]);
+      highlighter.resolve({
+        codeToHtml(code) {
+          const renderedLines = code
+            .split("\n")
+            .map(
+              (line) =>
+                `<span class="line"><span data-test-token>${line}</span></span>`,
+            )
+            .join("\n");
+          return `<pre><code>${renderedLines}</code></pre>`;
+        },
+      });
+      await waitFor(() => firstCode?.classList.contains("shiki") === true);
+      expect(firstCode?.querySelector("[data-test-token]")?.textContent).toBe(
+        "line one",
+      );
+    } finally {
+      highlighter.resolve(null);
+      await rendering;
+    }
+  });
+
+  test("does not apply a late syntax result to the next file", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost");
+        const path = url.searchParams.get("path");
+        return new Response(
+          path === "first.ts" ? "first line" : "second line",
+          {
+            status: 200,
+          },
+        );
+      }) as typeof fetch,
+    });
+    const state: SourceViewDeps["STATE"] = {
+      route: blobRoute("first.ts"),
+      from: "HEAD",
+      to: "worktree",
+      syntaxHighlight: true,
+    };
+    const highlighter = deferred<ShikiHighlighter | null>();
+    let highlighterRequests = 0;
+    const view = createSourceViewForCursorTest(state.route, {
+      STATE: state,
+      loadSourceHighlighter: () => {
+        highlighterRequests++;
+        return highlighter.promise;
+      },
+    });
+
+    await view.renderStandaloneSource({ path: "first.ts", ref: "worktree" });
+    await waitFor(() => highlighterRequests === 1);
+    state.syntaxHighlight = false;
+    state.route = blobRoute("second.ts");
+    await view.renderStandaloneSource({ path: "second.ts", ref: "worktree" });
+
+    highlighter.resolve({
+      codeToHtml: () =>
+        '<pre><code><span class="line"><span data-stale-token>stale</span></span></code></pre>',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const currentCode = document.querySelector<HTMLElement>(
+      ".gdp-source-line-code",
+    );
+    expect(currentCode?.textContent).toBe("second line");
+    expect(currentCode?.classList.contains("shiki")).toBe(false);
+    expect(document.querySelector("[data-stale-token]")).toBeNull();
+  });
+
+  test("re-invoking while the mounted target is still loading waits for the shared render", async () => {
     document.body.innerHTML = '<div id="diff"></div>';
     let calls = 0;
     const gate = deferred<Response>();
@@ -335,16 +458,22 @@ describe("renderStandaloneSource loading-state guard and paged retry", () => {
 
     const first = view.renderStandaloneSource(target);
     await waitFor(() => calls === 1);
-    await view.renderStandaloneSource(target);
+    let secondSettled = false;
+    const second = view.renderStandaloneSource(target).then(() => {
+      secondSettled = true;
+    });
+    await Promise.resolve();
 
     expect(calls).toBe(1);
+    expect(secondSettled).toBe(false);
     expect(
       document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
         .sourceState,
     ).toBe("loading");
 
     gate.resolve(new Response("line one\n", { status: 200 }));
-    await first;
+    await Promise.all([first, second]);
+    expect(secondSettled).toBe(true);
     expect(
       document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
         .sourceState,
