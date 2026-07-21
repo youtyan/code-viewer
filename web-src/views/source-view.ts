@@ -21,6 +21,10 @@ import {
   type SourceLineTarget,
 } from "../core/routes";
 import {
+  loadShikiHighlighter,
+  type ShikiHighlighter,
+} from "../core/shiki-loader";
+import {
   EXT_TO_LANG,
   FILENAME_TO_LANG,
   formatBytes,
@@ -82,6 +86,7 @@ export type SourceViewDeps = {
   ): Promise<unknown> | unknown;
   placeSidebarToggle(): void;
   createFileBreadcrumb(path: string, ref?: string): HTMLElement;
+  createRepositoryWebLink?(target: SourceFileTarget): HTMLAnchorElement | null;
   createFileDetailMeta(
     target: SourceFileTarget,
     meta: RawFileInfo,
@@ -95,6 +100,8 @@ export type SourceViewDeps = {
   canTrashWorktreeRef(ref: string): boolean;
   loadRawFileInfo(target: SourceFileTarget): Promise<RawFileInfo>;
   loadSyntaxHighlighter(): Promise<HljsApi | null>;
+  loadSourceHighlighter?: (lang: string) => Promise<ShikiHighlighter | null>;
+  renderMarkdownPreview?: typeof renderMarkdownPreview;
   setViewFileButtonState(
     button: HTMLButtonElement | null,
     sourceMode: boolean,
@@ -124,6 +131,7 @@ export function createSourceView(deps: SourceViewDeps) {
     renderRepoBlobSidebar,
     placeSidebarToggle,
     createFileBreadcrumb,
+    createRepositoryWebLink,
     createFileDetailMeta,
     createOpenPathButton,
     createMoveToTrashButton,
@@ -135,25 +143,6 @@ export function createSourceView(deps: SourceViewDeps) {
     focusMainSurface,
     isPaletteOpen,
   } = deps;
-
-  type SourceShikiHighlighter = {
-    codeToHtml: (
-      code: string,
-      options: {
-        lang: string;
-        themes: { light: string; dark: string };
-        defaultColor: false;
-      },
-    ) => string;
-  };
-
-  type SourceShikiModule = {
-    bundledLanguages?: Record<string, unknown>;
-    createHighlighter: (options: {
-      themes: string[];
-      langs: string[];
-    }) => Promise<SourceShikiHighlighter>;
-  };
 
   const VIRTUAL_SOURCE_LINE_THRESHOLD = 3000;
 
@@ -168,9 +157,6 @@ export function createSourceView(deps: SourceViewDeps) {
   const UNKNOWN_TEXT_SNIFF_BYTES = 8192;
 
   const SOURCE_LOADING_SLOW_THRESHOLD_MS = 3000;
-
-  let sourceShikiLoadPromise: Promise<SourceShikiHighlighter | null> | null =
-    null;
 
   let PREFERRED_SOURCE_TAB: SourceBlobTab | null = null;
 
@@ -206,10 +192,19 @@ export function createSourceView(deps: SourceViewDeps) {
     const preview = document.querySelector<HTMLElement>(
       "#content .gdp-markdown-preview:not([hidden])",
     );
-    const lineHeight = Number.parseFloat(
-      getComputedStyle(preview || document.body).lineHeight,
+    if (preview) {
+      const previewLineHeight = Number.parseFloat(
+        getComputedStyle(preview).lineHeight,
+      );
+      if (Number.isFinite(previewLineHeight) && previewLineHeight > 0)
+        return previewLineHeight;
+    }
+    const configuredLineHeight = Number.parseFloat(
+      getComputedStyle(document.body).getPropertyValue("--code-line-height"),
     );
-    return Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 20;
+    return Number.isFinite(configuredLineHeight) && configuredLineHeight > 0
+      ? configuredLineHeight
+      : VIRTUAL_SOURCE_ROW_HEIGHT;
   }
 
   function hasVisibleSourceCodeSurface(): boolean {
@@ -282,11 +277,9 @@ export function createSourceView(deps: SourceViewDeps) {
 
   function visibleSourceLineFallback(): number {
     const scroller = findMainScrollTarget();
+    const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
     if (scroller)
-      return Math.max(
-        1,
-        Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) + 1,
-      );
+      return Math.max(1, Math.floor(scroller.scrollTop / rowHeight) + 1);
     const rows = $$<HTMLElement>("#content .gdp-source-table tr[data-line]");
     const contentTop =
       document.querySelector<HTMLElement>("#content")?.getBoundingClientRect()
@@ -326,8 +319,9 @@ export function createSourceView(deps: SourceViewDeps) {
   ) {
     const scroller = findMainScrollTarget();
     if (scroller) {
-      const top = (cursor.line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT;
-      const bottom = top + VIRTUAL_SOURCE_ROW_HEIGHT;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
+      const top = (cursor.line - 1) * rowHeight;
+      const bottom = top + rowHeight;
       const before = scroller.scrollTop;
       if (edge === "center")
         scroller.scrollTop = Math.max(
@@ -457,101 +451,20 @@ export function createSourceView(deps: SourceViewDeps) {
     return true;
   }
 
-  const SOURCE_SHIKI_LANGS = Array.from(
-    new Set([
-      "asciidoc",
-      "astro",
-      "bash",
-      "bibtex",
-      "c",
-      "clojure",
-      "cmake",
-      "cpp",
-      "csharp",
-      "css",
-      "dart",
-      "diff",
-      "dockerfile",
-      "dotenv",
-      "elixir",
-      "erb",
-      "erlang",
-      "fortran",
-      "go",
-      "gradle",
-      "graphql",
-      "haml",
-      "handlebars",
-      "haskell",
-      "html",
-      "ini",
-      "java",
-      "javascript",
-      "json",
-      "jsonc",
-      "julia",
-      "kotlin",
-      "less",
-      "liquid",
-      "lua",
-      "make",
-      "markdown",
-      "nix",
-      "ocaml",
-      "pascal",
-      "perl",
-      "php",
-      "powershell",
-      "prisma",
-      "properties",
-      "protobuf",
-      "pug",
-      "python",
-      "r",
-      "rst",
-      "ruby",
-      "rust",
-      "sass",
-      "scala",
-      "scss",
-      "sql",
-      "swift",
-      "terraform",
-      "tex",
-      "toml",
-      "twig",
-      "typescript",
-      "vim",
-      "vue",
-      "xml",
-      "yaml",
-    ]),
-  );
-
-  function loadSourceShikiHighlighter(): Promise<SourceShikiHighlighter | null> {
-    if (!sourceShikiLoadPromise) {
-      sourceShikiLoadPromise = import("/" + "shiki.js")
-        .then((mod: unknown) => {
-          const typed = mod as SourceShikiModule;
-          const langs = typed.bundledLanguages
-            ? SOURCE_SHIKI_LANGS.filter(
-                (lang) => !!typed.bundledLanguages?.[lang],
-              )
-            : SOURCE_SHIKI_LANGS;
-          return typed.createHighlighter({
-            themes: ["github-light", "github-dark"],
-            langs,
-          });
-        })
-        .catch(() => null);
-    }
-    return sourceShikiLoadPromise;
+  function loadSourceShikiHighlighter(
+    lang: string,
+  ): Promise<ShikiHighlighter | null> {
+    if (deps.loadSourceHighlighter) return deps.loadSourceHighlighter(lang);
+    return loadShikiHighlighter({
+      themes: ["github-light", "github-dark"],
+      langs: [lang],
+    });
   }
 
   function sourceShikiLines(
     textValue: string,
     lang: string,
-    highlighter: SourceShikiHighlighter,
+    highlighter: ShikiHighlighter,
   ): string[] | null {
     try {
       const html = highlighter.codeToHtml(textValue || " ", {
@@ -569,6 +482,109 @@ export function createSourceView(deps: SourceViewDeps) {
     } catch {
       return null;
     }
+  }
+
+  function scheduleSourceHighlight(
+    table: HTMLTableElement,
+    target: SourceFileTarget,
+    textValue: string,
+    lang: string,
+    signal?: AbortSignal,
+  ): void {
+    setTimeout(() => {
+      if (
+        signal?.aborted ||
+        !table.isConnected ||
+        !STATE.syntaxHighlight ||
+        !sourceTargetsEqual(sourceTargetFromRoute(), target)
+      )
+        return;
+      void loadSourceShikiHighlighter(lang)
+        .then((highlighter) => {
+          if (
+            !highlighter ||
+            signal?.aborted ||
+            !table.isConnected ||
+            !STATE.syntaxHighlight ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          const highlightedLines = sourceShikiLines(
+            textValue,
+            lang,
+            highlighter,
+          );
+          if (
+            !highlightedLines ||
+            signal?.aborted ||
+            !table.isConnected ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          const cells = table.querySelectorAll<HTMLElement>(
+            ".gdp-source-line-code",
+          );
+          cells.forEach((cell, index) => {
+            if (highlightedLines[index] == null) return;
+            cell.innerHTML = highlightedLines[index] || " ";
+            cell.classList.add("shiki");
+          });
+        })
+        .catch((err: unknown) => {
+          console.error("Failed to apply source syntax highlighting", err);
+        });
+    }, 0);
+  }
+
+  function scheduleMarkdownPreviewHighlight(
+    preview: HTMLElement,
+    target: SourceFileTarget,
+    textValue: string,
+    signal: AbortSignal | undefined,
+    onReplace: (next: HTMLElement) => void,
+  ): void {
+    setTimeout(() => {
+      if (
+        signal?.aborted ||
+        !preview.isConnected ||
+        !STATE.syntaxHighlight ||
+        !sourceTargetsEqual(sourceTargetFromRoute(), target)
+      )
+        return;
+      void (deps.renderMarkdownPreview ?? renderMarkdownPreview)(
+        textValue,
+        target,
+        {
+          syntaxHighlight: true,
+          signal,
+          onNavigateMarkdown: (path, ref) => {
+            setRoute({
+              screen: "file",
+              path,
+              ref,
+              view: "blob",
+              range: currentRange(),
+            });
+            renderStandaloneSource({ path, ref });
+          },
+        },
+      )
+        .then((next) => {
+          if (
+            signal?.aborted ||
+            !preview.isConnected ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          next.dataset.sourcePane = "preview";
+          next.hidden = preview.hidden;
+          preview.replaceWith(next);
+          onReplace(next);
+        })
+        .catch((err: unknown) => {
+          console.error("Failed to apply preview syntax highlighting", err);
+        });
+    }, 0);
   }
 
   function setPreferredSourceTab(tab: SourceBlobTab): void {
@@ -790,7 +806,6 @@ export function createSourceView(deps: SourceViewDeps) {
   function renderSourceInternalPath(
     card: DiffCardElement,
     target: SourceFileTarget,
-    kind: "code-viewer" | "git",
   ) {
     const body = card.querySelector<HTMLElement>(
       ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
@@ -798,25 +813,9 @@ export function createSourceView(deps: SourceViewDeps) {
     const info = createSourceFileInfo(target, "internal metadata", {
       loadMeta: false,
     });
-    const extraChildren: Node[] = [info];
-    // Only the code-viewer state directory is servable raw. /_file returns
-    // 404 for .git/* paths because server/preview.ts blocks git-internal
-    // reads.
-    if (kind === "code-viewer") {
-      const link = document.createElement("a");
-      link.className = "gdp-btn gdp-btn-sm gdp-source-download";
-      link.href = buildRawFileUrl(target);
-      link.textContent = "Download raw";
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      extraChildren.push(link);
-    }
     const view = renderUnsupportedPreview({
-      message:
-        kind === "code-viewer"
-          ? "This path is managed by code-viewer and is not previewed from the file viewer."
-          : "Git internal metadata is not previewed from the file viewer.",
-      extraChildren,
+      message: "Git internal metadata is not previewed from the file viewer.",
+      extraChildren: [info],
     });
     if (body) body.replaceWith(view);
     else card.appendChild(view);
@@ -891,7 +890,9 @@ export function createSourceView(deps: SourceViewDeps) {
       target,
       active,
       {
-        includeFileTabs: STATE.route.screen === "file",
+        includeFileTabs:
+          STATE.route.screen === "file" &&
+          sourceInternalPathKind(target.path) !== "code-viewer",
         previewable: !!options.previewable || active === "preview",
         sourceTabClick: "manual",
         ...(textValue != null
@@ -925,15 +926,12 @@ export function createSourceView(deps: SourceViewDeps) {
       header.textContent = `${target.path} @ ${target.ref}`;
     }
     const lang = inferLang(target.path);
+    const sourceShikiLang = normalizeSourceShikiLang(lang);
     const usesVirtualSource =
       shouldVirtualizeSource(textValue, lines) && !isVirtualSourceDisabled();
     const hljsRef =
       STATE.syntaxHighlight && usesVirtualSource
         ? await loadSyntaxHighlighter()
-        : null;
-    const sourceShikiRef =
-      STATE.syntaxHighlight && !usesVirtualSource
-        ? await loadSourceShikiHighlighter()
         : null;
     if (signal?.aborted) return false;
     const previewable = isPreviewableSource(target.path);
@@ -960,25 +958,48 @@ export function createSourceView(deps: SourceViewDeps) {
           tabsHost.hidden = false;
           tabsHost.replaceChildren(tabs);
         }
-        const preview =
+        let preview =
           previewKind === "html"
             ? renderHtmlPreview(target, textValue)
-            : await renderMarkdownPreview(textValue, target, {
-                syntaxHighlight: STATE.syntaxHighlight,
-                signal,
-                onNavigateMarkdown: (path, ref) => {
-                  setRoute({
-                    screen: "file",
-                    path,
-                    ref,
-                    view: "blob",
-                    range: currentRange(),
-                  });
-                  renderStandaloneSource({ path, ref });
+            : await (deps.renderMarkdownPreview ?? renderMarkdownPreview)(
+                textValue,
+                target,
+                {
+                  syntaxHighlight: false,
+                  signal,
+                  onNavigateMarkdown: (path, ref) => {
+                    setRoute({
+                      screen: "file",
+                      path,
+                      ref,
+                      view: "blob",
+                      range: currentRange(),
+                    });
+                    renderStandaloneSource({ path, ref });
+                  },
                 },
-              });
+              );
         if (signal?.aborted) return false;
         preview.dataset.sourcePane = "preview";
+        let previewHighlightScheduled = false;
+        const ensurePreviewHighlight = () => {
+          if (
+            previewKind === "html" ||
+            !STATE.syntaxHighlight ||
+            previewHighlightScheduled
+          )
+            return;
+          previewHighlightScheduled = true;
+          scheduleMarkdownPreviewHighlight(
+            preview,
+            target,
+            textValue,
+            signal,
+            (next) => {
+              preview = next;
+            },
+          );
+        };
         applyRenderedSourceTab(
           initialSourceTab,
           codeButton,
@@ -995,6 +1016,7 @@ export function createSourceView(deps: SourceViewDeps) {
             virtualCode,
             preview,
           );
+          ensurePreviewHighlight();
         });
         codeButton?.addEventListener("click", () => {
           applyRenderedSourceTab(
@@ -1010,6 +1032,7 @@ export function createSourceView(deps: SourceViewDeps) {
         view.append(preview, virtualCode);
         if (body) body.replaceWith(view);
         else card.appendChild(view);
+        if (initialSourceTab === "preview") ensurePreviewHighlight();
         return true;
       }
       const { tabs } = createSourceTabs(target, "code", textValue, {
@@ -1031,11 +1054,6 @@ export function createSourceView(deps: SourceViewDeps) {
     table.className = "gdp-source-table";
     table.dataset.sourcePane = "code";
     const tbody = document.createElement("tbody");
-    const sourceShikiLang = normalizeSourceShikiLang(lang);
-    const shikiLines =
-      sourceShikiRef && sourceShikiLang
-        ? sourceShikiLines(textValue, sourceShikiLang, sourceShikiRef)
-        : null;
     for (let index = 0; index < lines.length; index++) {
       if (signal?.aborted) return false;
       const line = lines[index];
@@ -1055,12 +1073,7 @@ export function createSourceView(deps: SourceViewDeps) {
       bindSourceLineNumber(num, card, target, index + 1);
       const code = document.createElement("td");
       code.className = "gdp-source-line-code";
-      if (shikiLines && shikiLines[index] != null) {
-        code.innerHTML = shikiLines[index] || " ";
-        code.classList.add("shiki");
-      } else {
-        code.textContent = line || " ";
-      }
+      code.textContent = line || " ";
       tr.appendChild(num);
       tr.appendChild(code);
       tbody.appendChild(tr);
@@ -1081,25 +1094,48 @@ export function createSourceView(deps: SourceViewDeps) {
       tabsHost.replaceChildren(tabs);
     }
     if (previewable) {
-      const preview =
+      let preview =
         previewKind === "html"
           ? renderHtmlPreview(target, textValue)
-          : await renderMarkdownPreview(textValue, target, {
-              syntaxHighlight: STATE.syntaxHighlight,
-              signal,
-              onNavigateMarkdown: (path, ref) => {
-                setRoute({
-                  screen: "file",
-                  path,
-                  ref,
-                  view: "blob",
-                  range: currentRange(),
-                });
-                renderStandaloneSource({ path, ref });
+          : await (deps.renderMarkdownPreview ?? renderMarkdownPreview)(
+              textValue,
+              target,
+              {
+                syntaxHighlight: false,
+                signal,
+                onNavigateMarkdown: (path, ref) => {
+                  setRoute({
+                    screen: "file",
+                    path,
+                    ref,
+                    view: "blob",
+                    range: currentRange(),
+                  });
+                  renderStandaloneSource({ path, ref });
+                },
               },
-            });
+            );
       if (signal?.aborted) return false;
       preview.dataset.sourcePane = "preview";
+      let previewHighlightScheduled = false;
+      const ensurePreviewHighlight = () => {
+        if (
+          previewKind === "html" ||
+          !STATE.syntaxHighlight ||
+          previewHighlightScheduled
+        )
+          return;
+        previewHighlightScheduled = true;
+        scheduleMarkdownPreviewHighlight(
+          preview,
+          target,
+          textValue,
+          signal,
+          (next) => {
+            preview = next;
+          },
+        );
+      };
       applyRenderedSourceTab(
         initialSourceTab,
         codeButton,
@@ -1116,6 +1152,7 @@ export function createSourceView(deps: SourceViewDeps) {
           table,
           preview,
         );
+        ensurePreviewHighlight();
       });
       codeButton?.addEventListener("click", () => {
         applyRenderedSourceTab(
@@ -1132,6 +1169,15 @@ export function createSourceView(deps: SourceViewDeps) {
       if (signal?.aborted) return false;
       if (body) body.replaceWith(view);
       else card.appendChild(view);
+      if (STATE.syntaxHighlight && sourceShikiLang)
+        scheduleSourceHighlight(
+          table,
+          target,
+          textValue,
+          sourceShikiLang,
+          signal,
+        );
+      if (initialSourceTab === "preview") ensurePreviewHighlight();
       return true;
     }
     if (header) view.appendChild(header);
@@ -1139,6 +1185,14 @@ export function createSourceView(deps: SourceViewDeps) {
     if (signal?.aborted) return false;
     if (body) body.replaceWith(view);
     else card.appendChild(view);
+    if (STATE.syntaxHighlight && sourceShikiLang)
+      scheduleSourceHighlight(
+        table,
+        target,
+        textValue,
+        sourceShikiLang,
+        signal,
+      );
     return true;
   }
 
@@ -1450,12 +1504,14 @@ export function createSourceView(deps: SourceViewDeps) {
           count.textContent = matches.length
             ? `${active + 1} / ${matches.length}`
             : "0 / 0";
-          if (active >= 0)
+          if (active >= 0) {
+            const rowHeight =
+              sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
             scroller.scrollTop = Math.max(
               0,
-              (matches[active].line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT -
-                VIRTUAL_SOURCE_ROW_HEIGHT * 3,
+              (matches[active].line - 1) * rowHeight - rowHeight * 3,
             );
+          }
           renderFn();
         })
         .catch(() => {
@@ -1474,10 +1530,10 @@ export function createSourceView(deps: SourceViewDeps) {
       if (!matches.length) return;
       active = (active + direction + matches.length) % matches.length;
       count.textContent = `${active + 1} / ${matches.length}`;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
       scroller.scrollTop = Math.max(
         0,
-        (matches[active].line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT -
-          VIRTUAL_SOURCE_ROW_HEIGHT * 3,
+        (matches[active].line - 1) * rowHeight - rowHeight * 3,
       );
       renderFn();
     };
@@ -1591,7 +1647,10 @@ export function createSourceView(deps: SourceViewDeps) {
     scroller.setAttribute("aria-label", `${target.path} source code`);
     const spacer = document.createElement("div");
     spacer.className = "gdp-source-virtual-spacer";
-    spacer.style.height = `${Math.max(1, lines.length * VIRTUAL_SOURCE_ROW_HEIGHT)}px`;
+    spacer.style.height = `${Math.max(
+      1,
+      lines.length * (sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT),
+    )}px`;
     const windowEl = document.createElement("div");
     windowEl.className = "gdp-source-virtual-window";
     spacer.appendChild(windowEl);
@@ -1601,26 +1660,33 @@ export function createSourceView(deps: SourceViewDeps) {
     let raf = 0;
     let renderedStart = -1;
     let renderedEnd = -1;
+    let renderedRowHeight = -1;
     let search: VirtualSourceSearchHandle | null = null;
     const render = () => {
       raf = 0;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
+      spacer.style.height = `${Math.max(1, lines.length * rowHeight)}px`;
       const viewportHeight = scroller.clientHeight || window.innerHeight;
       const overscan = 20;
       const start = Math.max(
         0,
-        Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) - overscan,
+        Math.floor(scroller.scrollTop / rowHeight) - overscan,
       );
       const end = Math.min(
         lines.length,
-        Math.ceil(
-          (scroller.scrollTop + viewportHeight) / VIRTUAL_SOURCE_ROW_HEIGHT,
-        ) + overscan,
+        Math.ceil((scroller.scrollTop + viewportHeight) / rowHeight) + overscan,
       );
-      if (start === renderedStart && end === renderedEnd) return;
+      if (
+        start === renderedStart &&
+        end === renderedEnd &&
+        rowHeight === renderedRowHeight
+      )
+        return;
       renderedStart = start;
       renderedEnd = end;
+      renderedRowHeight = rowHeight;
       windowEl.replaceChildren();
-      windowEl.style.transform = `translateY(${start * VIRTUAL_SOURCE_ROW_HEIGHT}px)`;
+      windowEl.style.transform = `translateY(${start * rowHeight}px)`;
       const fragment = document.createDocumentFragment();
       for (let index = start; index < end; index++) {
         const row = document.createElement("div");
@@ -1802,7 +1868,8 @@ export function createSourceView(deps: SourceViewDeps) {
         " lines loaded from " +
         formatBytes(size) +
         ". More rows load as you scroll.";
-      spacer.style.height = `${Math.max(1, totalRows * VIRTUAL_SOURCE_ROW_HEIGHT)}px`;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
+      spacer.style.height = `${Math.max(1, totalRows * rowHeight)}px`;
     };
 
     const loadPage = (line: number) => {
@@ -1849,27 +1916,34 @@ export function createSourceView(deps: SourceViewDeps) {
     let raf = 0;
     let renderedStart = -1;
     let renderedEnd = -1;
+    let renderedRowHeight = -1;
     let search: VirtualSourceSearchHandle | null = null;
     let searchController: AbortController | null = null;
     const render = () => {
       raf = 0;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
+      spacer.style.height = `${Math.max(1, totalRows * rowHeight)}px`;
       const viewportHeight = scroller.clientHeight || window.innerHeight;
       const overscan = 20;
       const start = Math.max(
         0,
-        Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) - overscan,
+        Math.floor(scroller.scrollTop / rowHeight) - overscan,
       );
       const end = Math.min(
         totalRows,
-        Math.ceil(
-          (scroller.scrollTop + viewportHeight) / VIRTUAL_SOURCE_ROW_HEIGHT,
-        ) + overscan,
+        Math.ceil((scroller.scrollTop + viewportHeight) / rowHeight) + overscan,
       );
-      if (start === renderedStart && end === renderedEnd) return;
+      if (
+        start === renderedStart &&
+        end === renderedEnd &&
+        rowHeight === renderedRowHeight
+      )
+        return;
       renderedStart = start;
       renderedEnd = end;
+      renderedRowHeight = rowHeight;
       windowEl.replaceChildren();
-      windowEl.style.transform = `translateY(${start * VIRTUAL_SOURCE_ROW_HEIGHT}px)`;
+      windowEl.style.transform = `translateY(${start * rowHeight}px)`;
       const fragment = document.createDocumentFragment();
       for (let index = start; index < end; index++) {
         const lineNumber = index + 1;
@@ -2156,8 +2230,10 @@ export function createSourceView(deps: SourceViewDeps) {
   // pass refresh: true.
   function mountedStandaloneSourceCard(
     target: SourceFileTarget,
-  ): HTMLElement | null {
-    const card = document.querySelector<HTMLElement>(".gdp-standalone-source");
+  ): DiffCardElement | null {
+    const card = document.querySelector<DiffCardElement>(
+      ".gdp-standalone-source",
+    );
     if (!card) return null;
     if (card.dataset.path !== target.path) return null;
     if (card.dataset.sourceRef !== (target.ref || "worktree")) return null;
@@ -2188,7 +2264,8 @@ export function createSourceView(deps: SourceViewDeps) {
         );
         return;
       }
-      if (mounted && state === "loading") return;
+      if (mounted && state === "loading" && mounted._loadPromise)
+        return mounted._loadPromise;
     }
     cancelActiveSourceLoad("navigation");
     const req = ++SOURCE_REQ_SEQ;
@@ -2219,6 +2296,7 @@ export function createSourceView(deps: SourceViewDeps) {
         setRoute,
         setPreferredSourceTab,
         createFileBreadcrumb,
+        createRepositoryWebLink,
       },
       target,
       activeTab,
@@ -2242,7 +2320,7 @@ export function createSourceView(deps: SourceViewDeps) {
         }),
       );
     }
-    if (!internalKind) {
+    if (internalKind !== "git") {
       loadRawFileInfo(target).then((meta) => {
         if (
           req !== SOURCE_REQ_SEQ ||
@@ -2278,83 +2356,111 @@ export function createSourceView(deps: SourceViewDeps) {
       card,
       repoTarget,
     );
-    if (internalKind) {
-      renderSourceInternalPath(card, target, internalKind);
+    if (internalKind === "git") {
+      renderSourceInternalPath(card, target);
       return;
     }
     const controller = new AbortController();
     ACTIVE_SOURCE_LOAD = { controller, req, target, card };
     renderSourceLoading(card, target, () => cancelActiveSourceLoad("user"));
-    try {
-      let displayKind = sourceDisplayKind(target.path);
-      let rawInfo: RawFileInfo | null = null;
-      if (displayKind === "unsupported") {
-        rawInfo = await loadRawFileInfo(target);
-        if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
-          return;
-        if (
-          await sourceLooksTextByContent(target, rawInfo, controller.signal)
-        ) {
-          displayKind = "text";
+    const sourceLoad = (async () => {
+      try {
+        let displayKind = sourceDisplayKind(target.path);
+        let rawInfo: RawFileInfo | null = null;
+        if (displayKind === "unsupported") {
+          rawInfo = await loadRawFileInfo(target);
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          if (
+            await sourceLooksTextByContent(target, rawInfo, controller.signal)
+          ) {
+            displayKind = "text";
+          }
         }
-      }
-      if (displayKind === "unsupported") {
-        if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
+        if (displayKind === "unsupported") {
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          finishSourceLoad(req);
+          renderSourceUnsupported(card, target);
           return;
-        finishSourceLoad(req);
-        renderSourceUnsupported(card, target);
-        return;
-      }
-      if (
-        displayKind === "image" ||
-        displayKind === "video" ||
-        displayKind === "audio" ||
-        displayKind === "pdf"
-      ) {
+        }
         if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
-          return;
-        finishSourceLoad(req);
-        renderSourceMedia(card, target, displayKind);
-        return;
-      }
-      if (displayKind === "text") {
-        const meta = rawInfo ?? (await loadRawFileInfo(target));
-        if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
-          return;
-        if (
-          !isVirtualSourceDisabled() &&
-          meta.size != null &&
-          meta.size >= VIRTUAL_SOURCE_SIZE_THRESHOLD
+          displayKind === "image" ||
+          displayKind === "video" ||
+          displayKind === "audio" ||
+          displayKind === "pdf"
         ) {
-          const rendered = await renderPagedSourceText(
-            card,
-            target,
-            meta.size,
-            controller.signal,
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          finishSourceLoad(req);
+          renderSourceMedia(card, target, displayKind);
+          return;
+        }
+        if (displayKind === "text") {
+          const meta = rawInfo ?? (await loadRawFileInfo(target));
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          if (
+            !isVirtualSourceDisabled() &&
+            meta.size != null &&
+            meta.size >= VIRTUAL_SOURCE_SIZE_THRESHOLD
+          ) {
+            const rendered = await renderPagedSourceText(
+              card,
+              target,
+              meta.size,
+              controller.signal,
+            );
+            if (
+              req !== SOURCE_REQ_SEQ ||
+              !sourceTargetsEqual(sourceTargetFromRoute(), target)
+            )
+              return;
+            if (!rendered) {
+              // The only way to get here with a current req is the initial
+              // range request failing (an abort always bumps SOURCE_REQ_SEQ
+              // first). Land on "error" instead of leaving the card stuck in
+              // "loading", which the idempotent-mount guard would otherwise
+              // treat as in-progress and refuse to retry on re-click.
+              finishSourceLoad(req);
+              renderSourceError(
+                card,
+                target,
+                `Cannot load ${target.path} at ${target.ref}`,
+              );
+              return;
+            }
+            scrollStandaloneSourceLine(
+              card,
+              lineTargetStart(
+                STATE.route.screen === "file" ? STATE.route.line : undefined,
+              ),
+            );
+            setSourceCardState(card, "done");
+            finishSourceLoad(req);
+            return;
+          }
+          const response = await trackLoad(
+            fetch(buildRawFileUrl(target), { signal: controller.signal }),
           );
           if (
             req !== SOURCE_REQ_SEQ ||
             !sourceTargetsEqual(sourceTargetFromRoute(), target)
           )
             return;
-          if (!rendered) {
-            // The only way to get here with a current req is the initial
-            // range request failing (an abort always bumps SOURCE_REQ_SEQ
-            // first). Land on "error" instead of leaving the card stuck in
-            // "loading", which the idempotent-mount guard would otherwise
-            // treat as in-progress and refuse to retry on re-click.
+          if (!response.ok) {
             finishSourceLoad(req);
             renderSourceError(
               card,
@@ -2363,6 +2469,24 @@ export function createSourceView(deps: SourceViewDeps) {
             );
             return;
           }
+          const textValue = await response.text();
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          const rendered = await renderSourceText(
+            card,
+            target,
+            textValue,
+            controller.signal,
+          );
+          if (
+            req !== SOURCE_REQ_SEQ ||
+            !sourceTargetsEqual(sourceTargetFromRoute(), target)
+          )
+            return;
+          if (!rendered) return;
           scrollStandaloneSourceLine(
             card,
             lineTargetStart(
@@ -2371,69 +2495,30 @@ export function createSourceView(deps: SourceViewDeps) {
           );
           setSourceCardState(card, "done");
           finishSourceLoad(req);
-          return;
         }
-        const response = await trackLoad(
-          fetch(buildRawFileUrl(target), { signal: controller.signal }),
-        );
+      } catch (err) {
         if (
           req !== SOURCE_REQ_SEQ ||
           !sourceTargetsEqual(sourceTargetFromRoute(), target)
         )
           return;
-        if (!response.ok) {
-          finishSourceLoad(req);
-          renderSourceError(
-            card,
-            target,
-            `Cannot load ${target.path} at ${target.ref}`,
-          );
+        finishSourceLoad(req);
+        if (isAbortError(err)) {
+          renderSourceCancelled(card, target);
           return;
         }
-        const textValue = await response.text();
-        if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
-          return;
-        const rendered = await renderSourceText(
+        renderSourceError(
           card,
           target,
-          textValue,
-          controller.signal,
+          `Cannot load ${target.path} at ${target.ref}`,
         );
-        if (
-          req !== SOURCE_REQ_SEQ ||
-          !sourceTargetsEqual(sourceTargetFromRoute(), target)
-        )
-          return;
-        if (!rendered) return;
-        scrollStandaloneSourceLine(
-          card,
-          lineTargetStart(
-            STATE.route.screen === "file" ? STATE.route.line : undefined,
-          ),
-        );
-        setSourceCardState(card, "done");
-        finishSourceLoad(req);
       }
-    } catch (err) {
-      if (
-        req !== SOURCE_REQ_SEQ ||
-        !sourceTargetsEqual(sourceTargetFromRoute(), target)
-      )
-        return;
-      finishSourceLoad(req);
-      if (isAbortError(err)) {
-        renderSourceCancelled(card, target);
-        return;
-      }
-      renderSourceError(
-        card,
-        target,
-        `Cannot load ${target.path} at ${target.ref}`,
-      );
-    }
+    })();
+    const completed = sourceLoad.finally(() => {
+      if (card._loadPromise === completed) delete card._loadPromise;
+    });
+    card._loadPromise = completed;
+    return completed;
   }
 
   function scrollStandaloneSourceLine(
@@ -2445,11 +2530,11 @@ export function createSourceView(deps: SourceViewDeps) {
       ".gdp-source-virtual-scroller",
     );
     if (virtualScroller) {
-      const centeredOffset =
-        virtualScroller.clientHeight / 2 - VIRTUAL_SOURCE_ROW_HEIGHT / 2;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
+      const centeredOffset = virtualScroller.clientHeight / 2 - rowHeight / 2;
       virtualScroller.scrollTop = Math.max(
         0,
-        (line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT - Math.max(0, centeredOffset),
+        (line - 1) * rowHeight - Math.max(0, centeredOffset),
       );
       (
         virtualScroller as HTMLElement & {

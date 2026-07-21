@@ -3110,7 +3110,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     chip.addEventListener("dragend", () => clearDragState());
   }
 
-  tabsList.addEventListener("dragover", (e) => {
+  tabsBar.addEventListener("dragover", (e) => {
     if (!draggingTabId) return;
     const target = (e.target as HTMLElement | null)?.closest(".db-tabs-chip");
     if (target && tabsList.contains(target)) return;
@@ -3119,7 +3119,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     clearDropTarget();
   });
 
-  tabsList.addEventListener("drop", (e) => {
+  tabsBar.addEventListener("drop", (e) => {
     if (!draggingTabId) return;
     const target = (e.target as HTMLElement | null)?.closest(".db-tabs-chip");
     if (target && tabsList.contains(target)) return;

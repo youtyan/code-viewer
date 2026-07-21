@@ -371,7 +371,9 @@ export function buildRoute(route: AppRoute): string {
     }
     case "journal": {
       const params = new URLSearchParams();
-      if (route.tab && route.tab !== "journal") params.set("tab", route.tab);
+      // "tasks" is the default tab, so only "journal" needs the explicit
+      // param (inverted when the tasks board became the default view).
+      if (route.tab && route.tab !== "tasks") params.set("tab", route.tab);
       if (route.date) params.set("date", route.date);
       if (route.label) params.set("label", route.label);
       if (route.task) params.set("task", route.task);

@@ -191,6 +191,9 @@ function makeRepoView(
             label: "gitlink",
             title: "Git commit entry is not directly browsable at this ref",
           },
+    repositoryWebTarget: () => null,
+    openGithubLabel: () => "Open on GitHub",
+    openRepositoryWebLabel: () => "Open repository web page",
     fileBadge: () => {
       throw new Error("stale repository render touched the DOM");
     },

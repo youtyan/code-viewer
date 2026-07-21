@@ -424,7 +424,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
   let mounted = false;
   let lifecycle = 0;
   let data: JournalDataResponse | null = null;
-  let activeTab: ActiveTab = "journal";
+  let activeTab: ActiveTab = "tasks";
   let selectedDate = todayIsoDate();
   let selectedEntryId = "";
   let creatingEntry = false;
@@ -647,7 +647,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
 
   function applyRoute(route = deps.getRoute()): void {
     if (!isJournalRoute(route)) return;
-    activeTab = route.tab || activeTab || "journal";
+    activeTab = route.tab || activeTab || "tasks";
     selectedDate = route.date || selectedDate || todayIsoDate();
     labelFilter = route.label || "";
     selectedTaskId = route.task || "";

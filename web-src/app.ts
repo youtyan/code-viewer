@@ -20,16 +20,21 @@ import {
 } from "./core/focus-scope";
 import { ensureTerraformHighlightLanguage } from "./core/highlight-languages";
 import {
+  ARROW_RIGHT_16_PATH,
+  BOOK_16_PATH,
   CHEVRON_DOWN_12_PATH,
   COMMENT_DISCUSSION_16_PATH,
   COPY_16_PATHS,
   GIT_BRANCH_16_PATH,
   iconSvg,
+  MARK_GITHUB_16_PATH,
   MOON_16_PATH,
   OPEN_EXTERNAL_16_PATH,
   PULSE_16_PATH,
+  QUESTION_16_PATH,
   SYNC_16_PATH,
   TRIANGLE_DOWN_16_PATH,
+  UNDO_16_PATH,
   X_16_PATH,
 } from "./core/icons";
 import { isImeComposing } from "./core/keyboard";
@@ -39,12 +44,14 @@ import {
   resolveKeymapAction,
 } from "./core/keymap";
 import { createNetworkActivityTracker } from "./core/network-activity";
+import { buildRepositoryWebTarget } from "./core/repository-web-url";
 import {
   type AppRoute,
   buildRoute,
   type DiffRange,
   parseDoctorOverlay,
   parseRoute,
+  type SourceFileTarget,
   type SourceLineTarget,
   withDoctorOverlay,
 } from "./core/routes";
@@ -96,6 +103,7 @@ import {
 import { createQuickHelp } from "./views/quick-help";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
+import { createRepositoryWebLink } from "./views/repository-web-link";
 import { createSearchPalette } from "./views/search-palette-ui";
 import { createSidebar, type ViewerFontSize } from "./views/sidebar";
 import {
@@ -157,6 +165,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   let PENDING_G_UNTIL = 0;
 
   let PROJECT_NAME = "";
+  let PROJECT_BRANCH = "";
+  let REPO_WEB_URL: string | null = null;
 
   let APP_SETTINGS: AppSettingsState = { version: 1 };
   let VIEW_STATE: ViewState = {
@@ -362,10 +372,12 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function setProjectBranch(branch: string) {
+    PROJECT_BRANCH = branch;
     const el = document.querySelector<HTMLElement>("#project-branch");
     if (!el) return;
     el.hidden = !branch;
-    el.textContent = branch;
+    const name = el.querySelector<HTMLElement>(".project-branch-name");
+    if (name) name.textContent = branch;
     el.title = branch ? `Current branch: ${branch}` : "";
   }
 
@@ -601,7 +613,29 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function applyCodeFontSize(size: ViewerFontSize = savedCodeFontSize()) {
+    const previousLineHeight = Number.parseFloat(
+      getComputedStyle(document.body).getPropertyValue("--code-line-height"),
+    );
     document.body.dataset.codeFontSize = size;
+    const nextLineHeight = Number.parseFloat(
+      getComputedStyle(document.body).getPropertyValue("--code-line-height"),
+    );
+    document
+      .querySelectorAll<HTMLElement>(".gdp-source-virtual-scroller")
+      .forEach((scroller) => {
+        if (
+          Number.isFinite(previousLineHeight) &&
+          previousLineHeight > 0 &&
+          Number.isFinite(nextLineHeight) &&
+          nextLineHeight > 0
+        )
+          scroller.scrollTop *= nextLineHeight / previousLineHeight;
+        (
+          scroller as HTMLElement & {
+            __gdpRenderVirtualSource?: () => void;
+          }
+        ).__gdpRenderVirtualSource?.();
+      });
   }
 
   function savedSidebarFontSizeSetting(): ViewerFontSize {
@@ -654,11 +688,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       const settings = (await res.json()) as SettingsResponse;
       setProjectName(settings.project || "");
       setProjectBranch(settings.branch || "");
+      REPO_WEB_URL = settings.repo_web_url;
       const repoLink =
         document.querySelector<HTMLAnchorElement>("#repo-web-link");
-      if (repoLink && settings.repo_web_url) {
-        repoLink.href = settings.repo_web_url;
-        repoLink.hidden = false;
+      if (repoLink) {
+        repoLink.href = settings.repo_web_url || "#";
+        repoLink.hidden = !settings.repo_web_url;
       }
       SERVER_SCOPE_OMIT_DIRS_DEFAULT = normalizeScopeOmitDirs(
         settings.scope.omit_dirs_effective,
@@ -796,6 +831,28 @@ window.GdpExpandLogic = GdpExpandLogic;
     onClose: () => {
       clearLineSelection();
     },
+    githubUrlForSelection: (path, start, end) => {
+      const route = STATE.route;
+      const ref =
+        route.screen === "file"
+          ? route.commit || route.ref
+          : route.screen === "diff"
+            ? route.range.to
+            : "worktree";
+      const target = buildRepositoryWebTarget(REPO_WEB_URL, {
+        ref,
+        fallbackRef: PROJECT_BRANCH,
+        path,
+        kind: "blob",
+        start,
+        end,
+      });
+      return target?.provider === "github" ? target.url : null;
+    },
+    copyReferenceLabel: () => uiText().global.copyLineReference,
+    lineCountLabel: (count) => uiText().global.selectedLineCount(count),
+    githubOpenTitle: () => uiText().global.githubSelectionOpen,
+    githubCopyTitle: () => uiText().global.githubSelectionCopy,
   });
   const DIFF_LINE_SELECT = createDiffLineSelect({ pill: LINE_REF_PILL });
 
@@ -962,6 +1019,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     placeSidebarToggle,
     createFileBreadcrumb: (path, ref) =>
       DIFF_VIEW.createFileBreadcrumb(path, ref),
+    createRepositoryWebLink: createFileRepositoryWebLink,
     createFileDetailMeta: (target, meta) =>
       REPO_VIEW.createFileDetailMeta(target, meta),
     createOpenPathButton,
@@ -999,7 +1057,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     trackLoad,
     getSyntaxHighlight: () => STATE.syntaxHighlight,
-    loadSourceShikiHighlighter: () => SOURCE_VIEW.loadSourceShikiHighlighter(),
+    loadSourceShikiHighlighter: (lang) =>
+      SOURCE_VIEW.loadSourceShikiHighlighter(lang),
     sourceShikiLines: (textValue, lang, highlighter) =>
       SOURCE_VIEW.sourceShikiLines(textValue, lang, highlighter),
     inferLang: (path) => SOURCE_VIEW.inferLang(path),
@@ -1012,6 +1071,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setPreferredSourceTab: (tab) => SOURCE_VIEW.setPreferredSourceTab(tab),
     createFileBreadcrumb: (path, ref) =>
       DIFF_VIEW.createFileBreadcrumb(path, ref),
+    createRepositoryWebLink: createFileRepositoryWebLink,
     removeStandaloneSource,
     placeSidebarToggle,
     escapeHtml,
@@ -1091,6 +1151,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         ? { label: text.submoduleLabel, title: text.submoduleTitle }
         : { label: text.gitlinkLabel, title: text.gitlinkTitle };
     },
+    repositoryWebTarget: (path, ref) =>
+      buildRepositoryWebTarget(REPO_WEB_URL, {
+        ref,
+        fallbackRef: PROJECT_BRANCH,
+        path,
+        kind: "tree",
+      }),
+    openGithubLabel: () => uiText().repo.openGithub,
+    openRepositoryWebLabel: () => uiText().repo.openRepositoryWeb,
     fileBadge: (status) => DIFF_VIEW.fileBadge(status),
   });
   const {
@@ -1135,9 +1204,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         queryHistory: string;
         settings: string;
         theme: string;
-        product: string;
         copyAiContext: string;
-        copyAiContextLabel: string;
         copyAiContextCopied: string;
         copyAiContextCopiedWithCode: (lines: number) => string;
         copyAiContextFailed: string;
@@ -1151,6 +1218,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         cancelRequestsInactiveTitle: string;
         brandHome: string;
         menuViews: string;
+        repoWebLink: string;
+        copyLineReference: string;
+        selectedLineCount: (count: number) => string;
+        githubSelectionOpen: string;
+        githubSelectionCopy: string;
       };
       topbar: {
         resetRange: string;
@@ -1161,15 +1233,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         ignoreWs: string;
         ignoreWsLabel: string;
         syntaxLoading: string;
-        syntaxOn: string;
-        syntaxOff: string;
+        syntax: string;
         syntaxOnTitle: string;
         syntaxLoadingTitle: string;
         syntaxErrorTitle: string;
         syntaxOffTitle: string;
         hideTests: string;
         hideTestsLabel: string;
-        autoUpdate: string;
         autoUpdateOnTitle: string;
         autoUpdateOffTitle: string;
       };
@@ -1257,6 +1327,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         gitlinkTitle: string;
         submoduleLabel: string;
         submoduleTitle: string;
+        openGithub: string;
+        openRepositoryWeb: string;
       };
       history: {
         title: string;
@@ -1330,9 +1402,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         queryHistory: "query history",
         settings: "viewer settings",
         theme: "toggle theme",
-        product: "code viewer",
         copyAiContext: "Copy AI context (Shift+Click to include code)",
-        copyAiContextLabel: "AI context",
         copyAiContextCopied: "Copied AI context",
         copyAiContextCopiedWithCode: (lines) =>
           `Copied AI context + code (${lines} line${lines === 1 ? "" : "s"})`,
@@ -1351,6 +1421,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         cancelRequestsInactiveTitle: "no in-flight requests",
         brandHome: "Repository home",
         menuViews: "Views",
+        repoWebLink: "open repository web page",
+        copyLineReference: "Copy AI reference",
+        selectedLineCount: (count) => `${count} line${count === 1 ? "" : "s"}`,
+        githubSelectionOpen: "Open selected lines on GitHub",
+        githubSelectionCopy: "Copy GitHub link",
       },
       topbar: {
         resetRange: "reset to HEAD .. worktree",
@@ -1361,15 +1436,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         ignoreWs: "ignore whitespace changes (-w)",
         ignoreWsLabel: "ws",
         syntaxLoading: "loading...",
-        syntaxOn: "syntax on",
-        syntaxOff: "syntax off",
+        syntax: "syntax",
         syntaxOnTitle: "syntax highlighting on",
         syntaxLoadingTitle: "loading syntax highlighter",
         syntaxErrorTitle: "failed to load syntax highlighter",
         syntaxOffTitle: "syntax highlighting off",
         hideTests: "hide test files (test|spec)",
         hideTestsLabel: "no test",
-        autoUpdate: "auto",
         autoUpdateOnTitle: "auto update on file change",
         autoUpdateOffTitle: "auto update off — manual reload",
       },
@@ -1462,6 +1535,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         gitlinkTitle: "Git commit entry is not directly browsable at this ref",
         submoduleLabel: "submodule",
         submoduleTitle: "Git submodule pinned to a commit",
+        openGithub: "Open on GitHub",
+        openRepositoryWeb: "Open repository web page",
       },
       history: {
         title: "Commits",
@@ -1580,7 +1655,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         display: "Display",
         language: "Language",
         fileListFontSize: "UI font size",
-        fileListFontSizeHelp: "Applies to the file sidebar and datastore UI.",
+        fileListFontSizeHelp: "Applies to all UI except code content.",
         codeFontSize: "Code font size",
         sizeSmall: "Small",
         sizeRegular: "Regular",
@@ -1640,10 +1715,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         queryHistory: "クエリ履歴",
         settings: "ビューア設定",
         theme: "テーマ切り替え",
-        product: "code viewer",
         copyAiContext:
           "AI 用コンテキストをコピー（Shift+Click でコードも添付）",
-        copyAiContextLabel: "AI文脈",
         copyAiContextCopied: "コピーしました",
         copyAiContextCopiedWithCode: (lines) =>
           `コピーしました（コード付き・${lines}行）`,
@@ -1660,6 +1733,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         cancelRequestsInactiveTitle: "実行中のリクエストはありません",
         brandHome: "リポジトリホーム",
         menuViews: "ビュー切り替え",
+        repoWebLink: "リポジトリのウェブページを開く",
+        copyLineReference: "AI参照をコピー",
+        selectedLineCount: (count) => `${count}行`,
+        githubSelectionOpen: "選択行をGitHubで開く",
+        githubSelectionCopy: "GitHubリンクをコピー",
       },
       topbar: {
         resetRange: "HEAD .. worktree に戻す",
@@ -1670,15 +1748,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         ignoreWs: "空白差分を無視 (-w)",
         ignoreWsLabel: "空白",
         syntaxLoading: "読み込み中...",
-        syntaxOn: "構文あり",
-        syntaxOff: "構文なし",
+        syntax: "構文",
         syntaxOnTitle: "シンタックスハイライト有効",
         syntaxLoadingTitle: "シンタックスハイライトを読み込み中",
         syntaxErrorTitle: "シンタックスハイライトの読み込みに失敗",
         syntaxOffTitle: "シンタックスハイライト無効",
         hideTests: "test/spec ファイルを隠す",
         hideTestsLabel: "テスト非表示",
-        autoUpdate: "自動",
         autoUpdateOnTitle: "ファイル変更時に自動更新",
         autoUpdateOffTitle: "自動更新オフ — 手動で再読み込み",
       },
@@ -1774,6 +1850,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         submoduleLabel: "サブモジュール",
         submoduleTitle:
           "Git サブモジュール: 特定のコミットに固定されています。直接は開けません。",
+        openGithub: "GitHubで開く",
+        openRepositoryWeb: "リポジトリのウェブページを開く",
       },
       history: {
         title: "コミット",
@@ -1893,7 +1971,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         display: "表示",
         language: "言語",
         fileListFontSize: "UIの文字サイズ",
-        fileListFontSizeHelp: "ファイル一覧とデータストア画面に適用されます。",
+        fileListFontSizeHelp: "コード本文を除くUI全体に適用されます。",
         codeFontSize: "コード表示の文字サイズ",
         sizeSmall: "小",
         sizeRegular: "標準",
@@ -1973,8 +2051,21 @@ window.GdpExpandLogic = GdpExpandLogic;
         const route = link.dataset.route as keyof typeof text.nav;
         if (route && text.nav[route]) link.textContent = text.nav[route];
       });
-    setElementText(".global-help-link[data-route='help']", text.nav.help);
-    setElementText(".product-label", text.global.product);
+    // The help and repo links are icon-only; the label lives in
+    // title/aria-label instead of visible text.
+    const helpLink = document.querySelector<HTMLAnchorElement>(
+      ".global-icon-link[data-route='help']",
+    );
+    if (helpLink) {
+      helpLink.title = text.nav.help;
+      helpLink.setAttribute("aria-label", text.nav.help);
+    }
+    const repoWebLink =
+      document.querySelector<HTMLAnchorElement>("#repo-web-link");
+    if (repoWebLink) {
+      repoWebLink.title = text.global.repoWebLink;
+      repoWebLink.setAttribute("aria-label", text.global.repoWebLink);
+    }
     document
       .querySelector<HTMLAnchorElement>(".brand")
       ?.setAttribute("aria-label", text.global.brandHome);
@@ -2021,10 +2112,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (copyAiContext) {
       copyAiContext.title = text.global.copyAiContext;
       copyAiContext.setAttribute("aria-label", text.global.copyAiContext);
-      const copyAiContextLabel =
-        copyAiContext.querySelector<HTMLElement>(".ai-context-label");
-      if (copyAiContextLabel)
-        copyAiContextLabel.textContent = text.global.copyAiContextLabel;
     }
 
     const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
@@ -2319,12 +2406,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     const text = uiText();
     btn.classList.toggle("active", STATE.syntaxHighlight);
     btn.classList.toggle("loading", state === "loading");
+    // The label is state-neutral ("syntax"); ON/OFF reads from the tinted
+    // .active styling, not from the text.
     btn.textContent =
-      state === "loading"
-        ? text.topbar.syntaxLoading
-        : STATE.syntaxHighlight
-          ? text.topbar.syntaxOn
-          : text.topbar.syntaxOff;
+      state === "loading" ? text.topbar.syntaxLoading : text.topbar.syntax;
     btn.setAttribute("aria-pressed", STATE.syntaxHighlight ? "true" : "false");
     btn.title = STATE.syntaxHighlight
       ? text.topbar.syntaxOnTitle
@@ -2830,6 +2915,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         setPreferredSourceTab: (tab) => SOURCE_VIEW.setPreferredSourceTab(tab),
         createFileBreadcrumb: (path, ref) =>
           DIFF_VIEW.createFileBreadcrumb(path, ref),
+        createRepositoryWebLink: createFileRepositoryWebLink,
         emptyText: () => uiText().diff,
       },
       historyRoute,
@@ -3109,7 +3195,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function syncHeaderMenu() {
     document
-      .querySelectorAll<HTMLAnchorElement>(".app-menu-item, .global-help-link")
+      .querySelectorAll<HTMLAnchorElement>(".app-menu-item, .global-icon-link")
       .forEach((link) => {
         const fileRouteOwner =
           STATE.route.screen === "file" &&
@@ -3256,6 +3342,23 @@ window.GdpExpandLogic = GdpExpandLogic;
       openPathInOs(path, kind, button);
     });
     return button;
+  }
+
+  function createFileRepositoryWebLink(
+    target: SourceFileTarget,
+  ): HTMLAnchorElement | null {
+    const webTarget = buildRepositoryWebTarget(REPO_WEB_URL, {
+      ref: target.ref,
+      fallbackRef: PROJECT_BRANCH,
+      path: target.path,
+      kind: "blob",
+    });
+    if (!webTarget) return null;
+    const label =
+      webTarget.provider === "github"
+        ? uiText().repo.openGithub
+        : uiText().repo.openRepositoryWeb;
+    return createRepositoryWebLink(webTarget, label);
   }
 
   window.addEventListener("scroll", () => enqueueInitialLoads(), {
@@ -3415,6 +3518,33 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (cancelRequestsIcon) {
       cancelRequestsIcon.innerHTML = iconSvg("octicon-x", X_16_PATH);
     }
+    const repoWebLinkIcon = document.querySelector<HTMLElement>(
+      "#repo-web-link .goi-icon",
+    );
+    if (repoWebLinkIcon) {
+      repoWebLinkIcon.innerHTML = iconSvg(
+        "octicon-mark-github",
+        MARK_GITHUB_16_PATH,
+      );
+    }
+    const quickHelpIcon = document.querySelector<HTMLElement>(
+      "#quick-help-btn .goi-icon",
+    );
+    if (quickHelpIcon) {
+      quickHelpIcon.innerHTML = iconSvg("octicon-question", QUESTION_16_PATH);
+    }
+    const helpLinkIcon = document.querySelector<HTMLElement>(
+      ".global-icon-link[data-route='help'] .goi-icon",
+    );
+    if (helpLinkIcon) {
+      helpLinkIcon.innerHTML = iconSvg("octicon-book", BOOK_16_PATH);
+    }
+    const branchIcon = document.querySelector<HTMLElement>(
+      "#project-branch .goi-icon",
+    );
+    if (branchIcon) {
+      branchIcon.innerHTML = iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
+    }
   }
 
   // Static SVGs for the topbar ref-picker actions. Run once at
@@ -3422,9 +3552,13 @@ window.GdpExpandLogic = GdpExpandLogic;
   // with the active language via localizeViewerChrome() instead.
   function setRefActionIcons() {
     const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
-    if (refReset) refReset.innerHTML = iconSvg("octicon-x", X_16_PATH);
+    if (refReset) refReset.innerHTML = iconSvg("octicon-undo", UNDO_16_PATH);
     const reload = document.querySelector<HTMLButtonElement>("#reload-prom");
     if (reload) reload.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+    const refDots = document.querySelector<HTMLElement>(".ref-dots .goi-icon");
+    if (refDots) {
+      refDots.innerHTML = iconSvg("octicon-arrow-right", ARROW_RIGHT_16_PATH);
+    }
   }
 
   // ----- wiring -----
@@ -4702,7 +4836,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // notorious for); pushState + the shared route handler keeps the chrome
   // stable. Modified clicks (new tab etc.) keep native anchor behavior.
   document
-    .querySelectorAll<HTMLAnchorElement>(".app-menu-item, .global-help-link")
+    .querySelectorAll<HTMLAnchorElement>(".app-menu-item, .global-icon-link")
     .forEach((link) => {
       // External links (the GitHub repo link) keep native anchor behavior;
       // hijacking them would push their pathname onto the local origin.
@@ -4975,8 +5109,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     btn.title = autoUpdateTitle;
     btn.setAttribute("aria-label", autoUpdateTitle);
     btn.setAttribute("aria-pressed", STATE.autoUpdate ? "true" : "false");
-    const label = btn.querySelector<HTMLElement>(".auto-update-label");
-    if (label) label.textContent = text.topbar.autoUpdate;
   }
 
   function setAutoUpdate(on: boolean) {
