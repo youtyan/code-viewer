@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { AppRoute } from "../core/routes";
 import { createRefPicker } from "../views/ref-picker";
+import { waitFor } from "./_test-helpers";
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -30,6 +31,9 @@ function installRefPickerDom() {
     <div data-ref-selector><input id="ref-to" /></div>
     <div id="repo-target-wrap" data-ref-selector><input id="repo-target" /></div>
     <div id="ref-popover" hidden>
+      <button class="rp-tab" data-tab="commits"></button>
+      <button class="rp-tab" data-tab="branches"></button>
+      <button class="rp-tab" data-tab="tags"></button>
       <input class="rp-search" />
       <div class="rp-body"></div>
     </div>
@@ -63,10 +67,54 @@ function createPickerForRoute(route: AppRoute) {
     getRoute: () => currentRoute,
   });
   if (!picker) throw new Error("picker not created");
-  return { routes, repoLoads: () => repoLoads };
+  return { picker, routes, repoLoads: () => repoLoads };
 }
 
 describe("repository ref picker", () => {
+  test("loads branch refs only when the branch picker is opened", async () => {
+    installRefPickerDom();
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = ((input: string | URL | Request) => {
+      requestedUrls.push(String(input));
+      return Promise.resolve({
+        json: async () => ({
+          branches: [{ name: "feature/sample", when: "" }],
+          tags: [],
+          commits: [],
+          current: "feature/sample",
+        }),
+      } as Response);
+    }) as typeof fetch;
+
+    try {
+      const { picker } = createPickerForRoute({
+        screen: "repo",
+        ref: "worktree",
+        path: "web-src/views",
+        range: { from: "HEAD", to: "worktree" },
+      });
+
+      expect(requestedUrls).toEqual([]);
+      const input = document.querySelector<HTMLInputElement>("#repo-target");
+      if (!input) throw new Error("missing repo target");
+      picker.openPopover(input);
+      document
+        .querySelector<HTMLButtonElement>('[data-tab="branches"]')
+        ?.click();
+      await waitFor(
+        () =>
+          document
+            .querySelector(".rp-body")
+            ?.textContent?.includes("feature/sample") === true,
+      );
+
+      expect(requestedUrls).toEqual(["/_refs"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("repository target is only displayed in repository sidebar modes", () => {
     const style = document.createElement("style");
     style.textContent = readFileSync("web/style.css", "utf8");

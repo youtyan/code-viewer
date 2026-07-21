@@ -103,6 +103,7 @@ export function startWorktreeUpdateWatch(
       !options.readdirSync) as boolean);
   const initialScanQueue: string[] = [];
   let initialScanTimer: ReturnType<typeof setTimeout> | null = null;
+  let processingInitialScan = false;
   const pendingPathInspections = new Map<string, string>();
   let pathInspectionTimer: ReturnType<typeof setTimeout> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -209,7 +210,14 @@ export function startWorktreeUpdateWatch(
       return;
     }
     const next = initialScanQueue.shift();
-    if (next) watchDirectory(next, true);
+    if (next) {
+      processingInitialScan = true;
+      try {
+        watchDirectory(next, true);
+      } finally {
+        processingInitialScan = false;
+      }
+    }
     if (watchers.size >= maxWatchedDirectories) {
       reportWatchLimit();
       initialScanQueue.length = 0;
@@ -227,7 +235,7 @@ export function startWorktreeUpdateWatch(
     const children = readChildDirectories(dir);
     if (children.length > remaining) reportWatchLimit();
     initialScanQueue.push(...children.slice(0, remaining));
-    if (!initialScanTimer)
+    if (!initialScanTimer && !processingInitialScan)
       initialScanTimer = setTimer(processInitialScanQueue, 5000);
   };
 

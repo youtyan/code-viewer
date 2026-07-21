@@ -469,7 +469,9 @@ describe("runStatusCli against a fixture repo", () => {
       ]);
       expect(stagedPaths).toEqual(["staged-before-first-commit.ts"]);
       expect(payload.recentCommits).toEqual([]);
-      expect(payload.recentCommitsError).toBe("unknown ref");
+      expect(payload.recentCommitsError).toBe(
+        "fatal: Needed a single revision",
+      );
     } finally {
       rmSync(emptyRepo, { recursive: true, force: true });
     }

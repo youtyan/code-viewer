@@ -2193,7 +2193,7 @@ describe("dispatchJsonRpc — tools/call code_viewer_search_code (fixture repo)"
     expect(payload.content[0].text).toMatch(/regex must be a boolean/);
   });
 
-  test("unknown ref returns the service's 'invalid target' error", async () => {
+  test("unknown ref returns git's diagnostic instead of a fallback", async () => {
     const result = await call({
       jsonrpc: "2.0",
       id: 125,
@@ -2213,6 +2213,6 @@ describe("dispatchJsonRpc — tools/call code_viewer_search_code (fixture repo)"
       isError: boolean;
     };
     expect(payload.isError).toBe(true);
-    expect(payload.content[0].text).toMatch(/invalid target/);
+    expect(payload.content[0].text).toBe("fatal: Needed a single revision");
   });
 });

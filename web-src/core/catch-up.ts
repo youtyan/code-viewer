@@ -6,6 +6,13 @@ export function shouldAutoLoadForRoute(
 ): boolean {
   if (route.screen === "history")
     return options.historyWorktreeSelected === true;
+  if (route.screen === "diff")
+    return (
+      !route.range.from ||
+      route.range.from === "worktree" ||
+      !route.range.to ||
+      route.range.to === "worktree"
+    );
   if (
     route.screen === "database" ||
     route.screen === "journal" ||

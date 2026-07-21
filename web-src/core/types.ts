@@ -306,6 +306,7 @@ export type AnnotationSseEvent = {
 export type DiffCardElement = HTMLElement & {
   _diffData?: FileDiffResponse | null;
   _file?: FileMeta | null;
+  _loadPromise?: Promise<void>;
 };
 
 export type RefResponse = {

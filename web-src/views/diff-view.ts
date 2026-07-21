@@ -1189,7 +1189,7 @@ export function createDiffView(deps: DiffViewDeps) {
       if (fresh && card.isConnected) enqueueLoad(fresh, card, 0);
     };
 
-    return trackLoad<FileDiffResponse>(
+    const request = trackLoad<FileDiffResponse>(
       fetch(url).then(async (r) => {
         if (!r.ok) throw new Error(await r.text());
         return r.json();
@@ -1209,8 +1209,9 @@ export function createDiffView(deps: DiffViewDeps) {
         if (String(myReq) !== card.dataset.reqId) return;
         renderFile(file, data, card);
       })
-      .catch(() => {
+      .catch((error) => {
         if (String(myReq) !== card.dataset.reqId) return;
+        console.error("[code-viewer] failed to load diff", error);
         card.classList.remove("loading");
         card.classList.add("error");
         // Drop the stale-while-revalidate height reservation: the error
@@ -1229,14 +1230,22 @@ export function createDiffView(deps: DiffViewDeps) {
             enqueueLoad(file, card, 1);
           });
       });
+    const completed = request.finally(() => {
+      if (card._loadPromise === completed) delete card._loadPromise;
+    });
+    card._loadPromise = completed;
+    return completed;
   }
 
   async function loadDiffFile(path: string): Promise<boolean> {
-    const card = document.querySelector<DiffCardElement>(
-      diffCardSelector(path),
-    );
+    const root = getDiffRoot?.() || document;
+    const card = root.querySelector<DiffCardElement>(diffCardSelector(path));
     if (!card || card.classList.contains("gdp-standalone-source")) return false;
     if (card.classList.contains("loaded")) return true;
+    if (card.classList.contains("loading") && card._loadPromise) {
+      await card._loadPromise;
+      return card.classList.contains("loaded");
+    }
     const file = card._file || STATE.files.find((x) => x.path === path);
     if (!file) return false;
     await loadFile(file, card, undefined, { immediate: true });

@@ -103,6 +103,36 @@ function makeFakeMissingGitCommand(): string {
   return command;
 }
 
+function makePathspecRequiredGitCommand(requiredPath: string): string {
+  const root = mkdtempSync(join(tmpdir(), "code-viewer-pathspec-git-"));
+  tmpRoots.push(root);
+  const command = join(root, "git");
+  const realGit = process.env.PATH?.split(":")
+    .map((dir) => join(dir, "git"))
+    .find((path) => existsSync(path));
+  if (!realGit) throw new Error("git command is unavailable");
+  writeFileSync(
+    command,
+    `#!/bin/sh
+saw_metadata=0
+saw_separator=0
+saw_path=0
+for arg in "$@"; do
+  case "$arg" in --name-status|--numstat) saw_metadata=1 ;; esac
+  [ "$saw_separator" = 1 ] && [ "$arg" = ${JSON.stringify(requiredPath)} ] && saw_path=1
+  [ "$arg" = "--" ] && saw_separator=1
+done
+if [ "$saw_metadata" = 1 ] && [ "$saw_path" != 1 ]; then
+  printf 'missing diff pathspec\n' >&2
+  exit 2
+fi
+exec ${JSON.stringify(realGit)} "$@"
+`,
+  );
+  chmodSync(command, 0o755);
+  return command;
+}
+
 function makeGatedGitCommand(match: "numstat" | "ls-tree" | "file-diff"): {
   command: string;
   started: string;
@@ -966,6 +996,46 @@ describe("preview CLI", () => {
   });
 
   runOrSkip(
+    "passes a file history path filter through to git diff metadata commands",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-diff-pathspec-"));
+      tmpRoots.push(root);
+      git(root, ["init", "-b", "main"]);
+      git(root, ["config", "user.email", "sample-author"]);
+      git(root, ["config", "user.name", "sample-author"]);
+      writeFileSync(join(root, "sample.txt"), "base\n");
+      writeFileSync(join(root, "unrelated.txt"), "base\n");
+      git(root, ["add", "sample.txt", "unrelated.txt"]);
+      git(root, ["commit", "-m", "sample initial commit"]);
+      writeFileSync(join(root, "sample.txt"), "changed\n");
+      writeFileSync(join(root, "unrelated.txt"), "changed\n");
+      const preview = await startTestPreview(
+        root,
+        makePathspecRequiredGitCommand("sample.txt"),
+      );
+
+      try {
+        const endpoint = new URL(
+          "/diff.json?from=HEAD&to=worktree&path=sample.txt&nocache=1",
+          preview.url,
+        );
+        const response = await fetchWithTimeout(endpoint.toString(), 5000);
+        const body = (await response.json()) as {
+          error?: string;
+          files: Array<{ path: string }>;
+        };
+
+        expect(response.status).toBe(200);
+        expect(body.error).toBeUndefined();
+        expect(body.files).toHaveLength(1);
+        expect(body.files[0]?.path).toBe("sample.txt");
+      } finally {
+        await stopTestPreview(preview.proc, preview.exited);
+      }
+    },
+  );
+
+  runOrSkip(
     "later stale diff metadata cannot overwrite the newer generation cache",
     async () => {
       const root = mkdtempSync(join(tmpdir(), "code-viewer-diff-meta-race-"));
@@ -1172,6 +1242,54 @@ describe("preview CLI", () => {
         ]);
       } finally {
         writeFileSync(gate.release, "release");
+        await stopTestPreview(preview.proc, preview.exited);
+      }
+    },
+  );
+
+  runOrSkip(
+    "fixed-ref file diff URLs keep the metadata generation after worktree updates",
+    async () => {
+      const root = mkdtempSync(
+        join(tmpdir(), "code-viewer-fixed-diff-generation-"),
+      );
+      tmpRoots.push(root);
+      git(root, ["init", "-b", "main"]);
+      git(root, ["config", "user.email", "sample-author"]);
+      git(root, ["config", "user.name", "sample-author"]);
+      writeFileSync(join(root, "sample.txt"), "base\n");
+      git(root, ["add", "sample.txt"]);
+      git(root, ["commit", "-m", "sample initial commit"]);
+      const baseRef = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+      writeFileSync(join(root, "sample.txt"), "target\n");
+      git(root, ["add", "sample.txt"]);
+      git(root, ["commit", "-m", "sample target commit"]);
+      const targetRef = git(root, ["rev-parse", "HEAD"]).stdout.trim();
+      const gate = makeGatedGitCommand("file-diff");
+      writeFileSync(gate.release, "release");
+      const preview = await startTestPreview(root, gate.command);
+
+      try {
+        const metaUrl = new URL("/diff.json", preview.url);
+        metaUrl.searchParams.set("from", baseRef);
+        metaUrl.searchParams.set("to", targetRef);
+        const meta = (await (await fetch(metaUrl)).json()) as {
+          generation: number;
+          files: Array<{ load_url: string }>;
+        };
+        const fileUrl = new URL(meta.files[0]?.load_url || "", preview.url);
+
+        expect(fileUrl.searchParams.get("generation")).toBe(
+          String(meta.generation),
+        );
+        expect((await refreshPreview(preview.url)).status).toBe(200);
+        const fileDiff = (await (await fetch(fileUrl)).json()) as {
+          generation: number;
+          diff: string;
+        };
+        expect(fileDiff.generation).toBe(meta.generation);
+        expect(fileDiff.diff).toMatch(/\+target/);
+      } finally {
         await stopTestPreview(preview.proc, preview.exited);
       }
     },

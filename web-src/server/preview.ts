@@ -570,6 +570,7 @@ function fileToMeta(
   file: git.GitFileMeta,
   range: { from?: string; to?: string },
   extraQs: Record<string, string>,
+  responseGeneration: number,
 ): FileMeta {
   const sizeClass = classify(file);
   const q = {
@@ -578,6 +579,7 @@ function fileToMeta(
     status: file.status,
     from: range.from,
     to: range.to,
+    generation: responseGeneration,
     ...extraQs,
   };
   if (file.untracked) Object.assign(q, { untracked: "1" });
@@ -622,7 +624,9 @@ async function computePayload(
     };
   }
   const { args, refs } = buildRangeArgs(range);
-  const fullArgs = [...extras, ...args];
+  const fullArgs = pathFilter
+    ? [...extras, ...args, "--", pathFilter]
+    : [...extras, ...args];
   const metaResult = await git.fileMetaResultAsync(fullArgs, cwd, false);
   const files = metaResult.files;
   if (!metaResult.error && includeUntracked(range, refs)) {
@@ -644,7 +648,9 @@ async function computePayload(
     if (e === "-w" || e === "--ignore-all-space") extraQs.ignore_ws = "1";
     if (e === "--ignore-blank-lines") extraQs.ignore_blank = "1";
   }
-  const meta = filteredFiles.map((file) => fileToMeta(file, range, extraQs));
+  const meta = filteredFiles.map((file) =>
+    fileToMeta(file, range, extraQs, responseGeneration),
+  );
   const totals = meta.reduce(
     (acc, file) => {
       acc.additions += file.additions || 0;
@@ -669,7 +675,7 @@ async function computePayload(
 }
 
 async function handleDiffJson(url: URL) {
-  const responseGeneration = generation;
+  let responseGeneration = generation;
   const extras = [];
   if (url.searchParams.get("ignore_ws") === "1") extras.push("-w");
   if (url.searchParams.get("ignore_blank") === "1")
@@ -693,17 +699,18 @@ async function handleDiffJson(url: URL) {
   const requestSequence = ++diffMetaRequestSequence;
   latestDiffMetaRequest.set(key, requestSequence);
   try {
-    const payload = await computePayload(
-      extras,
-      range,
-      path,
-      responseGeneration,
-    );
-    if (
-      latestDiffMetaRequest.get(key) !== requestSequence ||
-      responseGeneration !== generation
-    )
+    let payload = await computePayload(extras, range, path, responseGeneration);
+    if (latestDiffMetaRequest.get(key) !== requestSequence)
       return json(payload);
+    if (responseGeneration !== generation) {
+      responseGeneration = generation;
+      payload = await computePayload(extras, range, path, responseGeneration);
+      if (
+        latestDiffMetaRequest.get(key) !== requestSequence ||
+        responseGeneration !== generation
+      )
+        return json(payload);
+    }
     const sig = JSON.stringify({ ...payload, generation: undefined });
     if (noCache && (!cached || cached.sig !== sig)) {
       generation++;
@@ -1349,7 +1356,7 @@ async function handleFileBlame(url: URL) {
 }
 
 async function handleFileDiff(url: URL) {
-  const responseGeneration = generation;
+  const serverGenerationAtRequest = generation;
   const path = url.searchParams.get("path") || "";
   if (!safePath(path)) return text("invalid path", 400);
   const extras = [];
@@ -1361,6 +1368,18 @@ async function handleFileDiff(url: URL) {
     from: url.searchParams.get("from") || "",
     to: url.searchParams.get("to") || "",
   };
+  const requestedGeneration = Number(url.searchParams.get("generation"));
+  const usesWorktree =
+    !range.from ||
+    range.from === "worktree" ||
+    !range.to ||
+    range.to === "worktree";
+  const responseGeneration =
+    !usesWorktree &&
+    Number.isSafeInteger(requestedGeneration) &&
+    requestedGeneration > 0
+      ? requestedGeneration
+      : serverGenerationAtRequest;
   if (isSameWorktreeRange(range)) {
     return json({
       path,
@@ -1418,7 +1437,7 @@ async function handleFileDiff(url: URL) {
         errStatus = res.status ?? 500;
       }
     }
-    if (!errText && responseGeneration === generation)
+    if (!errText && serverGenerationAtRequest === generation)
       setTimedCacheEntry(fileCache, cacheKey, { diffText });
   }
   if (errStatus) return text(errText || "diff failed", errStatus);
