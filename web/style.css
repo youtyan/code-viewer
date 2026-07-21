@@ -22,6 +22,8 @@
   --accent-emph:   #0550ae;
   --accent-subtle: #ddf4ff;
   --accent-muted:  #54aeff66;
+  /* sidebar tree */
+  --tree-guide:    color-mix(in srgb, var(--fg-subtle) 22%, transparent);
   --scope-accent:  #bf8700;
   /* success / danger / attention / done */
   --success:        #1a7f37;
@@ -103,7 +105,21 @@
 html, body {
   margin: 0; padding: 0;
   background: var(--bg); color: var(--fg);
+  --ui-font-xs: 10px;
+  --ui-font-sm: 11px;
+  --ui-font-base: 12px;
+  --ui-font-md: 13px;
+  --ui-font-lg: 14px;
+  --ui-font-title: 15px;
+  --ui-control-sm: 28px;
+  --ui-control-md: 32px;
+  --ui-dense-row-h: 36px;
+  --ui-file-header-h: 46px;
+  --ui-file-header-wrapped-h: 82px;
+  --ui-history-dock-h: 28px;
+  --chrome-h: calc(var(--global-header-h) + var(--topbar-h));
   --code-font-size: 12px;
+  --code-line-height: 20px;
   --markdown-font-size: calc(var(--code-font-size) + 2px);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
                Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
@@ -115,9 +131,67 @@ html, body {
   -moz-osx-font-smoothing: auto;
 }
 
-body[data-code-font-size="compact"] { --code-font-size: 11.5px; }
-body[data-code-font-size="large"] { --code-font-size: 13.5px; }
-body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
+body[data-sidebar-font-size="compact"] {
+  --global-header-h: 44px;
+  --topbar-h: 52px;
+  --ui-font-xs: 9px;
+  --ui-font-sm: 10px;
+  --ui-font-base: 11px;
+  --ui-font-md: 12px;
+  --ui-font-lg: 13px;
+  --ui-font-title: 14px;
+  --ui-control-sm: 26px;
+  --ui-control-md: 30px;
+  --ui-dense-row-h: 34px;
+  --ui-file-header-h: 42px;
+  --ui-file-header-wrapped-h: 74px;
+  --ui-history-dock-h: 26px;
+}
+body[data-sidebar-font-size="large"] {
+  --global-header-h: 54px;
+  --topbar-h: 62px;
+  --ui-font-xs: 11px;
+  --ui-font-sm: 12px;
+  --ui-font-base: 14px;
+  --ui-font-md: 15px;
+  --ui-font-lg: 16px;
+  --ui-font-title: 17px;
+  --ui-control-sm: 32px;
+  --ui-control-md: 36px;
+  --ui-dense-row-h: 42px;
+  --ui-file-header-h: 52px;
+  --ui-file-header-wrapped-h: 94px;
+  --ui-history-dock-h: 34px;
+}
+body[data-sidebar-font-size="xlarge"] {
+  --global-header-h: 60px;
+  --topbar-h: 68px;
+  --ui-font-xs: 12px;
+  --ui-font-sm: 13px;
+  --ui-font-base: 15px;
+  --ui-font-md: 16px;
+  --ui-font-lg: 17px;
+  --ui-font-title: 18px;
+  --ui-control-sm: 36px;
+  --ui-control-md: 40px;
+  --ui-dense-row-h: 48px;
+  --ui-file-header-h: 58px;
+  --ui-file-header-wrapped-h: 104px;
+  --ui-history-dock-h: 38px;
+}
+
+body[data-code-font-size="compact"] {
+  --code-font-size: 11.5px;
+  --code-line-height: 19px;
+}
+body[data-code-font-size="large"] {
+  --code-font-size: 13.5px;
+  --code-line-height: 22px;
+}
+body[data-code-font-size="xlarge"] {
+  --code-font-size: 15px;
+  --code-line-height: 24px;
+}
 
 /* Window scrolls; global header + topbar + sidebar are fixed */
 #app { display: block; }
@@ -286,7 +360,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
 .brand {
   display: flex; align-items: center; gap: 8px;
   font-weight: 600;
-  font-size: 15px;
+  font-size: var(--ui-font-title);
   color: var(--fg);
   min-width: 0;
   max-width: min(40vw, 560px);
@@ -295,8 +369,8 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
 }
 .brand:hover { color: var(--fg); text-decoration: none; }
 .brand-icon {
-  width: 20px;
-  height: 20px;
+  width: calc(var(--ui-font-title) + 5px);
+  height: calc(var(--ui-font-title) + 5px);
   display: block;
   border-radius: 5px;
 }
@@ -307,95 +381,102 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   white-space: nowrap;
 }
 .project-branch {
+  /* Quiet branch indicator next to the brand: a small git-branch icon and
+     the mono branch name, no pill. The old bordered chip with a green dot
+     read like a notification badge. */
   display: inline-flex;
   align-items: center;
-  height: 24px;
+  gap: 4px;
   flex: 0 1 auto;
+  min-width: 0;
   max-width: min(20vw, 260px);
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  line-height: 1;
+}
+.project-branch .goi-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--fg-subtle);
+}
+.project-branch .goi-icon svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+.project-branch-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg) 72%, var(--bg-soft));
-  color: var(--fg-muted);
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-}
-.project-branch::before {
-  content: "";
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  margin-right: 6px;
-  border-radius: 999px;
-  background: var(--success);
+  font-weight: 500;
 }
 
 .app-menu {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
   height: 100%;
-  margin-left: 0;
-  padding-left: 18px;
-  border-left: 1px solid var(--border);
   flex-shrink: 0;
 }
-.global-help-link {
+.global-icon-link {
+  /* Icon-only header links (help page, repository web page): same 28x28
+     shell as .global-icon-action so the action cluster reads as one
+     consistent row of controls. */
   display: inline-flex;
   align-items: center;
-  height: 28px;
-  padding: 0 2px;
-  color: var(--fg-muted);
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.global-help-link:hover {
-  color: var(--accent);
-  text-decoration: none;
-}
-.global-help-link.active {
+  justify-content: center;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
   color: var(--fg);
+  text-decoration: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+.global-icon-link:hover {
+  background: var(--bg-mute);
+  border-color: var(--border-strong);
+  text-decoration: none;
+}
+.global-icon-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.global-icon-link.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.global-icon-link svg {
+  display: block;
 }
 .app-menu-item {
-  position: relative;
+  /* Nav items sit one notch below the brand: smaller, muted, and the
+     active screen is a soft accent pill instead of an underline tab. */
   display: inline-flex;
   align-items: center;
-  height: 32px;
+  height: var(--ui-control-sm);
   padding: 0 10px;
   border-radius: 6px;
   color: var(--fg-muted);
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--ui-font-md);
+  font-weight: 500;
   line-height: 1;
   text-decoration: none;
   white-space: nowrap;
 }
 .app-menu-item:hover {
-  color: var(--accent);
+  color: var(--fg);
   background: var(--bg-mute);
   text-decoration: none;
 }
 .app-menu-item.active {
-  background: var(--bg);
-  color: var(--fg);
-}
-.app-menu-item.active::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -9px;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--blob-tab-active);
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .global-actions {
@@ -403,29 +484,30 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: 0 0 auto;
 }
-.product-label {
-  color: var(--fg-muted);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
+.global-actions-sep {
+  /* Quiet divider between the view-tool / session / help groups. */
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border);
 }
 .global-actions #theme,
 .global-icon-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--ui-font-md);
   transition: background 0.12s, border-color 0.12s;
 }
 .global-actions #theme svg,
@@ -486,23 +568,6 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   color: var(--attn);
   border-color: var(--attn);
 }
-.ai-context-action {
-  width: auto;
-  gap: 6px;
-  padding: 0 10px;
-}
-.ai-context-label {
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-#auto-update {
-  width: auto;
-  gap: 6px;
-  padding: 0 8px;
-  font-size: 11px;
-  font-weight: 600;
-}
 #auto-update.active {
   background: var(--success-subtle);
   border-color: var(--success);
@@ -524,7 +589,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
 #meta {
   display: flex; align-items: center; gap: 10px;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--ui-font-base);
 }
 #meta .ref {
   display: inline-flex; align-items: center; gap: 4px;
@@ -534,52 +599,59 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   padding: 3px 9px;
   color: var(--fg);
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
   line-height: 1;
   white-space: nowrap;
 }
 #meta .chip {
+  /* Meta chips are READ-ONLY stats: plain text, no pill. The single
+     actionable control (.chip-next-unviewed below) keeps a real button
+     outline so clickable vs static is obvious at a glance. */
   display: inline-flex;
   align-items: center;
   gap: 4px;
   color: var(--fg-muted);
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 3px 9px;
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
   line-height: 1;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 #meta .chip-files { color: var(--fg); font-weight: 600; }
-#meta .chip-add { color: var(--success); font-weight: 600; border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
-#meta .chip-del { color: var(--danger); font-weight: 600; border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
-#meta .chip-added { color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
-#meta .chip-deleted { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
-#meta .chip-renamed { color: var(--done); border-color: color-mix(in srgb, var(--done) 35%, var(--border)); }
-#meta .chip-heavy { color: var(--attn); border-color: color-mix(in srgb, var(--attn) 35%, var(--border)); }
-#meta .chip-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+#meta .chip-add { color: var(--success); font-weight: 600; }
+#meta .chip-del { color: var(--danger); font-weight: 600; }
+#meta .chip-added { color: var(--success); }
+#meta .chip-deleted { color: var(--danger); }
+#meta .chip-renamed { color: var(--done); }
+#meta .chip-heavy { color: var(--attn); }
+#meta .chip-error { color: var(--danger); }
 #meta .chip-binary,
 #meta .chip-media { color: var(--fg-muted); }
 #meta .chip-viewed-empty { color: var(--fg-muted); }
-#meta .chip-viewed-partial { color: var(--attn); border-color: color-mix(in srgb, var(--attn) 35%, var(--border)); }
-#meta .chip-viewed-done { color: var(--done); border-color: color-mix(in srgb, var(--done) 35%, var(--border)); }
+#meta .chip-viewed-partial { color: var(--attn); }
+#meta .chip-viewed-done { color: var(--done); }
 #meta .chip-next-unviewed {
   font: inherit;
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
+  line-height: 1;
   cursor: pointer;
-  color: var(--accent-emph);
-  border-color: color-mix(in srgb, var(--accent-emph) 35%, var(--border));
+  color: var(--accent);
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
 }
 #meta .chip-next-unviewed:hover:not(:disabled) {
-  background: var(--bg-soft);
-  border-color: var(--border-strong);
+  background: var(--accent-subtle);
+  border-color: var(--accent);
 }
 #meta .chip-next-unviewed:disabled {
   cursor: default;
-  opacity: 0.45;
+  opacity: 0.5;
   color: var(--fg-muted);
   border-color: var(--border);
+  background: transparent;
 }
 .ref-pickers {
   display: flex;
@@ -594,23 +666,21 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   flex: 0 0 auto;
   gap: 8px;
   width: 220px;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid #d1d9e0;
+  /* Match the 28px controls around it; theme tokens instead of hardcoded
+     light-only colors (the dark override below became redundant). */
+  height: var(--ui-control-sm);
+  padding: 0 10px;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #f6f8fa;
+  background: var(--bg-soft);
   color: var(--fg);
-  font: 500 14px/21px -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font: 500 var(--ui-font-md)/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   cursor: pointer;
   transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
 }
 .ref-selector[hidden],
 #repo-target-wrap {
   display: none !important;
-}
-[data-theme="dark"] .ref-selector {
-  border-color: var(--border);
-  background: var(--bg-soft);
 }
 .ref-selector:hover {
   border-color: var(--border-strong);
@@ -634,14 +704,14 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   flex: 1 1 auto;
   min-width: 0;
   width: auto;
-  height: 30px;
+  height: calc(var(--ui-control-md) - 2px);
   padding: 0;
   background: transparent;
   border: 0;
   color: var(--fg);
   border-radius: 0;
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--ui-font-lg);
   font-weight: 500;
   outline: none;
   cursor: pointer;
@@ -662,13 +732,19 @@ body.gdp-diff-page #repo-target-wrap {
   display: none !important;
 }
 .ref-dots {
+  display: inline-flex;
+  align-items: center;
   color: var(--fg-subtle);
-  font-size: 14px;
   padding: 0 2px;
   user-select: none;
 }
+.ref-dots svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
 .ref-pickers > button {
-  width: 24px; height: 26px;
+  width: var(--ui-control-sm); height: var(--ui-control-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -678,7 +754,7 @@ body.gdp-diff-page #repo-target-wrap {
   color: var(--fg-muted);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--ui-font-md);
   transition: background 0.12s, color 0.12s;
 }
 .ref-pickers > button svg {
@@ -693,7 +769,7 @@ body.gdp-diff-page #repo-target-wrap {
 }
 #ref-reset:hover { background: var(--bg-mute); color: var(--danger); border-color: var(--danger); }
 #reload-prom {
-  width: 24px; height: 26px;
+  width: var(--ui-control-sm); height: var(--ui-control-sm);
   margin-left: 6px;
 }
 #reload-prom.spinning {
@@ -706,14 +782,9 @@ body.gdp-diff-page #repo-target-wrap {
 #hide-tests {
   width: auto !important;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
   font-weight: 600;
   letter-spacing: 0.04em;
-}
-#hide-tests.active {
-  background: var(--attn);
-  color: #fff;
-  border-color: var(--attn);
 }
 .hidden-by-tests,
 .hidden-by-filter { display: none !important; }
@@ -739,53 +810,64 @@ body.gdp-diff-page #repo-target-wrap {
 .rp-quick {
   display: flex;
   gap: 6px;
-  padding: 8px 10px 0;
-  background: var(--bg-soft);
+  padding: 10px 10px 0;
+  background: var(--bg);
 }
 .rp-chip {
-  flex: 1;
+  /* Compact quick-fill pills; .current uses the same tinted-active idiom
+     as the topbar toggles and header nav. */
+  flex: none;
   background: var(--bg);
   border: 1px solid var(--border);
-  color: var(--fg);
-  border-radius: 6px;
-  padding: 5px 10px;
+  color: var(--fg-muted);
+  border-radius: 999px;
+  padding: 3px 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: background 0.10s, color 0.10s, border-color 0.10s;
 }
 .rp-chip:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+.rp-chip.current {
+  /* The selected value is the ONE strong element in the popover header:
+     solid accent with white text, everything else stays quiet. */
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
+  font-weight: 600;
 }
 
 /* Tab bar */
 .rp-tabs {
   display: flex;
-  background: var(--bg-soft);
+  gap: 4px;
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
-  padding: 0 6px;
+  padding: 8px 10px;
 }
 .rp-tab {
   background: transparent;
   border: 0;
+  border-radius: 6px;
   color: var(--fg-muted);
-  padding: 9px 14px 8px;
+  padding: 4px 10px;
   font: inherit;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color 0.12s, border-color 0.12s;
+  transition: background 0.12s, color 0.12s;
 }
-.rp-tab:hover { color: var(--fg); }
+.rp-tab:hover { color: var(--fg); background: var(--bg-mute); }
 .rp-tab.active {
+  background: var(--accent-subtle);
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  font-weight: 600;
 }
 
 .rp-search-wrap {
@@ -810,14 +892,18 @@ body.gdp-diff-page #repo-target-wrap {
 /* Commit item — two-line layout, plenty of room for time/author */
 .rp-item-commit {
   display: block;
-  padding: 8px 14px;
+  padding: 6px 12px;
   cursor: pointer;
   border-left: 2px solid transparent;
   transition: background 0.10s, border-color 0.10s;
 }
 .rp-item-commit:hover {
-  background: var(--bg-mute);
-  border-left-color: var(--accent);
+  background: var(--bg-soft);
+}
+/* Hairline separators give the flat list structure. */
+.rp-item-commit + .rp-item-commit,
+.rp-item-ref + .rp-item-ref {
+  border-top: 1px solid var(--border);
 }
 .rp-item-commit .row1 {
   display: flex;
@@ -826,6 +912,8 @@ body.gdp-diff-page #repo-target-wrap {
   margin-bottom: 2px;
 }
 .rp-item-commit .sha {
+  /* The SHA is the row's identifier: accent mono so the eye can scan the
+     column; subject carries weight, meta stays muted. */
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   color: var(--accent);
@@ -839,7 +927,8 @@ body.gdp-diff-page #repo-target-wrap {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg);
-  font-size: 12.5px;
+  font-size: 13px;
+  font-weight: 500;
 }
 .rp-item-commit .row2 {
   display: flex;
@@ -857,15 +946,14 @@ body.gdp-diff-page #repo-target-wrap {
 /* Branch / tag / special items */
 .rp-item-ref {
   display: block;
-  padding: 7px 14px;
+  padding: 6px 12px;
   cursor: pointer;
   border-left: 2px solid transparent;
   transition: background 0.10s, border-color 0.10s;
   font-size: 12.5px;
 }
 .rp-item-ref:hover {
-  background: var(--bg-mute);
-  border-left-color: var(--accent);
+  background: var(--bg-soft);
 }
 .rp-item-ref .row1 {
   display: grid;
@@ -875,6 +963,7 @@ body.gdp-diff-page #repo-target-wrap {
 }
 .rp-item-ref .name {
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-weight: 500;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -891,12 +980,10 @@ body.gdp-diff-page #repo-target-wrap {
   font-size: 10px;
   line-height: 1;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--fg-subtle);
   background: var(--bg-mute);
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
   white-space: nowrap;
   justify-self: end;
 }
@@ -916,23 +1003,18 @@ body.gdp-diff-page #repo-target-wrap {
 /* Currently-selected ref highlight (matches focused input's value) */
 #ref-popover .rp-item-commit.current,
 #ref-popover .rp-item-ref.current {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: var(--accent-subtle);
   border-left-color: var(--accent);
 }
 #ref-popover .rp-item-commit.current .sha,
 #ref-popover .rp-item-commit.current .subject,
 #ref-popover .rp-item-ref.current   .name {
   color: var(--accent);
-  font-weight: 700;
+  font-weight: 600;
 }
 #ref-popover .rp-item-ref.current .badge {
   background: var(--accent-subtle);
-  color: var(--accent-emph);
-}
-.rp-chip.current {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .spacer { flex: 1; }
@@ -963,7 +1045,7 @@ body.gdp-diff-page #repo-target-wrap {
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
-  height: 28px;
+  height: var(--ui-control-sm);
 }
 .seg button {
   border: 0;
@@ -972,42 +1054,48 @@ body.gdp-diff-page #repo-target-wrap {
   padding: 0 11px;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   font-weight: 500;
   transition: background 0.12s, color 0.12s;
 }
 .seg button + button { border-left: 1px solid var(--border); }
 .seg button:hover { background: var(--bg-soft); color: var(--fg); }
 .seg button.active {
-  background: var(--accent);
-  color: #fff;
+  /* Mode switch uses the same tinted-active idiom as the toggle buttons
+     and the header nav pill (no more solid fill). */
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-weight: 600;
 }
 .seg button.active + button,
 .seg button + button.active { border-left-color: transparent; }
 
 .controls > button {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px;
+  width: var(--ui-control-sm); height: var(--ui-control-sm);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--ui-font-md);
   transition: background 0.12s, border-color 0.12s;
 }
 .controls > button:hover { background: var(--bg-soft); border-color: var(--border-strong); }
 .controls > button.active {
-  background: var(--accent);
-  color: #fff;
+  /* Toggle ON state: tinted accent, consistent with the nav pill and the
+     seg control. State reads from styling, so labels stay neutral. */
+  background: var(--accent-subtle);
+  color: var(--accent);
   border-color: var(--accent);
+  font-weight: 600;
 }
-.controls > button.active:hover { background: var(--accent-emph); border-color: var(--accent-emph); }
+.controls > button.active:hover { background: color-mix(in srgb, var(--accent) 16%, var(--bg)); border-color: var(--accent); }
 #ignore-ws,
 #syntax-highlight {
   width: auto;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -1021,13 +1109,13 @@ body.gdp-diff-page #repo-target-wrap {
 #status {
   display: inline-flex;
   align-items: center;
-  height: 24px;
+  height: calc(var(--ui-control-sm) - 4px);
   padding: 0 9px 0 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg) 72%, var(--bg-soft));
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
@@ -1173,6 +1261,7 @@ body.gdp-diff-page #repo-target-wrap {
   overflow-y: auto;
   z-index: 31;
   flex-direction: column;
+  font-size: var(--ui-font-base);
 }
 body.gdp-history-page #history-panel { display: flex; }
 body.gdp-history-page #sidebar { left: var(--history-w); }
@@ -1231,7 +1320,7 @@ body.gdp-history-page #topbar .ref-pickers {
   flex: 0 0 auto;
   white-space: nowrap;
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--ui-font-md);
 }
 .history-head .ref-selector {
   flex: 1 1 auto;
@@ -1243,9 +1332,9 @@ body.gdp-history-page #topbar .ref-pickers {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
+  width: var(--ui-control-sm);
+  min-width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
   padding: 0;
   border: 1px solid transparent;
   border-radius: 4px;
@@ -1292,7 +1381,7 @@ body.gdp-history-page #topbar .ref-pickers {
   display: none;
   line-height: 1;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   font-weight: 600;
 }
 .history-refresh-result {
@@ -1341,14 +1430,14 @@ body.gdp-history-page #topbar .ref-pickers {
 .history-filter {
   box-sizing: border-box;
   width: 100%;
-  height: 32px;
+  height: var(--ui-control-md);
   background: color-mix(in srgb, var(--bg) 78%, var(--bg-soft));
   border: 1px solid var(--border);
   color: var(--fg);
   border-radius: 8px;
   font: inherit;
-  font-size: 13px;
-  line-height: 30px;
+  font-size: var(--ui-font-md);
+  line-height: calc(var(--ui-control-md) - 2px);
   padding: 0 60px 0 34px;
   outline: none;
   transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
@@ -1432,10 +1521,11 @@ body.gdp-history-page #topbar .ref-pickers {
   gap: 8px;
   padding: 14px 14px 6px;
   background: var(--bg-mute);
-  border-top: 1px solid var(--border);
+  /* Only border-bottom: the previous group's last .history-item already
+     ends with border-bottom, so a border-top here would double the line. */
   border-bottom: 1px solid var(--border);
   color: var(--accent);
-  font-size: 11.5px;
+  font-size: var(--ui-font-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1447,9 +1537,8 @@ body.gdp-history-page #topbar .ref-pickers {
   border-radius: 2px;
   background: var(--accent);
 }
-#history-list > .history-group:first-child,
-.history-list > .history-group:first-child { border-top: 0; }
 .history-item {
+  min-height: var(--ui-dense-row-h);
   padding: 8px 14px;
   cursor: pointer;
   border-left: 3px solid transparent;
@@ -1474,7 +1563,7 @@ body.gdp-history-page #topbar .ref-pickers {
 }
 .history-item .subject {
   display: block;
-  font-size: 12.5px;
+  font-size: var(--ui-font-md);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1483,14 +1572,14 @@ body.gdp-history-page #topbar .ref-pickers {
   display: flex;
   gap: 8px;
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
   margin-top: 2px;
 }
 .history-item .sha { font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
 .history-status {
   padding: 10px 14px;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--ui-font-base);
 }
 #history-sentinel,
 .history-sentinel { height: 1px; }
@@ -1572,7 +1661,8 @@ body.gdp-history-page #history-commit-info:not([hidden]),
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   min-height: calc(100vh - var(--global-header-h) - 92px);
-  border-top: 1px solid var(--border);
+  /* No border-top: the sticky header above already supplies the separator
+     (border-bottom), two borders would paint a 2px line. */
 }
 .gdp-file-history-panel {
   min-width: 0;
@@ -1760,7 +1850,7 @@ body[data-focus-scope="main"] #content {
   padding: 13px 14px 10px;
   min-height: var(--sidebar-head-h);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   font-weight: 600;
   position: sticky; top: 0;
   background: var(--bg-soft);
@@ -1799,8 +1889,8 @@ body[data-focus-scope="main"] #content {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
@@ -1827,8 +1917,8 @@ body[data-focus-scope="main"] #content {
 .sb-icon-action svg {
   display: block;
 }
-.sb-view-seg { height: 22px; }
-.sb-view-seg button { padding: 0 8px; font-size: 11px; }
+.sb-view-seg { height: calc(var(--ui-control-sm) - 6px); }
+.sb-view-seg button { padding: 0 8px; font-size: var(--ui-font-sm); }
 .sb-filter-wrap {
   position: sticky;
   top: var(--sidebar-head-h);
@@ -1864,14 +1954,14 @@ body[data-focus-scope="main"] #content {
 #sb-filter {
   box-sizing: border-box;
   width: 100%;
-  height: 32px;
+  height: var(--ui-control-md);
   background: color-mix(in srgb, var(--bg) 78%, var(--bg-soft));
   border: 1px solid var(--border);
   color: var(--fg);
   border-radius: 8px;
   font: inherit;
-  font-size: 13px;
-  line-height: 30px;
+  font-size: var(--ui-font-md);
+  line-height: calc(var(--ui-control-md) - 2px);
   padding: 0 60px 0 34px;
   outline: none;
   transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
@@ -2110,9 +2200,6 @@ body.gdp-history-resizing * {
   background: var(--bg-mute);
 }
 
-.quick-help-btn {
-  font-weight: 700;
-}
 #quick-help-popover {
   position: fixed;
   right: 16px;
@@ -2361,7 +2448,26 @@ body.gdp-help-page #content {
   overflow: hidden;
   box-sizing: border-box;
 }
+/* Indent guides: one vertical line under every ancestor dir's chevron
+   center, tiled from the row's own --lvl-pad (12px + depth * 14px, chevron
+   centers land on 20px + k * 14px). The pseudo-element's width limits the
+   tiling to the indent region and collapses to 0 at depth 0, where a row
+   has no ancestor dirs. Works for both the nested renderer and the flat
+   absolute-positioned virtual rows. */
+#filelist.tree .tree-dir::before,
+#filelist.tree .tree-file::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 20px;
+  width: max(0px, calc(var(--lvl-pad, 12px) - 25px));
+  background-image: linear-gradient(90deg, var(--tree-guide) 1px, transparent 1px);
+  background-size: 14px 100%;
+  pointer-events: none;
+}
 #filelist.tree .tree-dir {
+  position: relative;
   display: grid;
   grid-template-columns: 16px 16px minmax(0, 1fr) 22px;
   align-items: center;
@@ -2372,9 +2478,14 @@ body.gdp-help-page #content {
   font-size: var(--sidebar-dir-font);
   line-height: calc(var(--sidebar-dir-font) + 7px);
   user-select: none;
-  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: background 0.10s, border-color 0.10s;
 }
 #filelist.tree .tree-dir:hover { background: var(--bg-mute); color: var(--fg); }
+#filelist.tree .tree-dir.active {
+  background: var(--accent-subtle);
+  border-left-color: var(--accent);
+}
 #filelist.tree .tree-dir.children-omitted {
   color: var(--fg-muted);
 }
@@ -2400,10 +2511,10 @@ body.gdp-help-page #content {
   padding-top: 4.4px;
   font-weight: 700;
   transition: transform 0.15s, color 0.15s;
-  color: #59636e;
+  color: var(--fg-subtle);
 }
 #filelist.tree .tree-dir.collapsed .chev { transform: rotate(-90deg); }
-#filelist.tree .tree-dir:hover .chev { color: #59636e; }
+#filelist.tree .tree-dir:hover .chev { color: var(--fg-muted); }
 #filelist.tree .tree-dir .chev .octicon {
   display: block;
   width: 12px;
@@ -2456,7 +2567,8 @@ body.gdp-help-page #content {
   background: var(--bg-soft);
 }
 #filelist.tree .tree-dir .dir-icon {
-  color: #54aeff;
+  /* Match the repo listing's folder color (.gdp-repo-row .dir-icon). */
+  color: var(--accent);
   flex-shrink: 0;
   width: 16px;
   height: 16px;
@@ -2471,6 +2583,7 @@ body.gdp-help-page #content {
 #filelist.tree .tree-dir.collapsed + .tree-children { display: none; }
 
 #filelist.tree .tree-file {
+  position: relative;
   display: grid;
   grid-template-columns: 16px 16px minmax(0, 1fr) auto auto;
   align-items: center;
@@ -2862,9 +2975,11 @@ body:not(.gdp-file-detail-page):not(.gdp-history-page) #diff::after {
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 6px 6px 0 0;
-  margin: 0 0 -1px;
+  /* -1px on top/left/right: the header's own border overlaps the wrapper's
+     border instead of painting a 2px band inside it. */
+  margin: -1px -1px 0;
   padding: 6px 8px;
-  min-height: 46px;
+  min-height: var(--ui-file-header-h);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2873,19 +2988,19 @@ body:not(.gdp-file-detail-page):not(.gdp-history-page) #diff::after {
   position: sticky;
   top: var(--chrome-h);
   z-index: 20;
-  font-size: 14px;
-  line-height: 21px;
+  font-size: var(--ui-font-lg);
+  line-height: 1.5;
 }
 .d2h-file-name-wrapper {
   display: flex; align-items: center; gap: 8px;
   flex: 1; min-width: 0;
-  font-size: 14px;
+  font-size: var(--ui-font-lg);
 }
 .d2h-file-name {
   color: var(--fg) !important;
   font-weight: 400;
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
+  font-size: var(--ui-font-md);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .d2h-icon-wrapper { display: inline-flex; color: var(--fg-muted); }
@@ -2895,13 +3010,13 @@ body:not(.gdp-file-detail-page):not(.gdp-history-page) #diff::after {
 .d2h-lines-added {
   color: var(--success); font-weight: 600;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 .d2h-lines-deleted {
   color: var(--danger); font-weight: 600;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -2922,23 +3037,23 @@ tr.gdp-hunk-row > td {
   white-space: nowrap;
   font-size: 0 !important;
 }
-/* Force the inner div to act as a 20px block. d2h ships
+/* Force the inner div to act as a single code-line block. d2h ships
  * `.d2h-code-side-line { display: inline-block }`, and inline-blocks
  * sitting next to whitespace text nodes inside a table-cell create a
- * second line box (~20px). Switching to `display: block` leaves only
+ * second line box. Switching to `display: block` leaves only
  * the div in the cell's flow. */
 tr.gdp-hunk-row > td > .d2h-code-line,
 tr.gdp-hunk-row > td > .d2h-code-side-line,
 tr.gdp-hunk-row > td > .gdp-expand-stack {
-  /* Stack auto-sizes: 1 button = 20px, 2 buttons (↑+↓) = 40px. */
+  /* Stack auto-sizes with the configured code line height. */
   font-size: var(--code-font-size);
-  line-height: 20px;
+  line-height: var(--code-line-height);
 }
 tr.gdp-hunk-row .d2h-code-line,
 tr.gdp-hunk-row .d2h-code-side-line,
 tr.gdp-hunk-row .d2h-code-line-ctn {
-  height: 20px !important;
-  line-height: 20px !important;
+  height: var(--code-line-height) !important;
+  line-height: var(--code-line-height) !important;
   padding-top: 0 !important;
   padding-bottom: 0 !important;
   overflow: hidden;
@@ -2984,7 +3099,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   padding: 0 4px !important;
   text-align: center;
   direction: ltr;
-  line-height: 20px;
+  line-height: var(--code-line-height);
   white-space: nowrap;
 }
 /* Unified line-num cell holds two numbers (old, new) side-by-side via d2h's
@@ -3012,19 +3127,19 @@ table.d2h-diff-table td.d2h-code-linenumber > .line-num2 {
 }
 table.d2h-diff-table td.d2h-code-linenumber > .line-num1 { float: left; }
 table.d2h-diff-table td.d2h-code-linenumber > .line-num2 { float: right; }
-/* Match GitHub's 20px row height: remove td padding, let line-height fill. */
+/* Remove td padding and let the configured code line-height fill the row. */
 table.d2h-diff-table td.d2h-cntx,
 table.d2h-diff-table td.d2h-ins,
 table.d2h-diff-table td.d2h-del,
 table.d2h-diff-table td.d2h-info {
   padding: 0 !important;
-  line-height: 20px;
+  line-height: var(--code-line-height);
 }
 table.d2h-diff-table .d2h-code-line,
 table.d2h-diff-table .d2h-code-side-line {
   padding: 0 !important;
   width: auto !important;
-  line-height: 20px;
+  line-height: var(--code-line-height);
 }
 table.d2h-diff-table .d2h-code-line-prefix {
   display: inline-block;
@@ -3060,9 +3175,8 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   user-select: none;
 }
 
-/* Floating "copy @path#start-end" pill shown while lines are selected. Root
-   is a plain div (see line-ref-pill.ts) hosting two buttons: the copy
-   action fills the capsule, the close (×) button overlays its corner. */
+/* Floating selection action bar. AI reference copy and repository-web
+   actions are visually separated so their payloads are unambiguous. */
 #line-ref-pill {
   position: fixed;
   left: 50%;
@@ -3071,33 +3185,100 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   z-index: 400;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  max-width: min(680px, calc(100vw - 48px));
+  gap: 4px;
+  max-width: min(1040px, calc(100vw - 48px));
   white-space: nowrap;
-  padding: 9px 16px;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: var(--bg);
+  color: var(--fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--ui-font-base);
   font-weight: 600;
   box-shadow: 0 8px 28px rgba(31, 35, 40, 0.35);
-}
-#line-ref-pill:hover {
-  filter: brightness(1.1);
 }
 #line-ref-pill-copy {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 0;
+  min-height: var(--ui-control-sm);
+  padding: 0 10px;
   border: none;
-  background: none;
-  color: inherit;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
   font: inherit;
   cursor: pointer;
+}
+#line-ref-pill-copy:hover {
+  background: var(--accent-emph);
+}
+#line-ref-pill-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+#line-ref-pill-copy.copied {
+  background: var(--success);
+}
+#line-ref-pill-copy.failed {
+  background: var(--danger);
+}
+#line-ref-pill-github-actions {
+  display: inline-flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  overflow: hidden;
+  min-height: var(--ui-control-sm);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-soft);
+}
+#line-ref-pill-github-actions[hidden] {
+  display: none;
+}
+#line-ref-pill-github-open,
+#line-ref-pill-github-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--ui-control-sm);
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-decoration: none;
+}
+#line-ref-pill-github-open {
+  gap: 6px;
+  padding: 0 10px;
+}
+#line-ref-pill-github-copy {
+  gap: 6px;
+  width: auto;
+  padding: 0 10px;
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+}
+#line-ref-pill-github-open:hover,
+#line-ref-pill-github-copy:hover {
+  background: var(--bg-mute);
+  color: var(--fg);
+  text-decoration: none;
+}
+#line-ref-pill-github-open:focus-visible,
+#line-ref-pill-github-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+#line-ref-pill-github-copy.copied {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+#line-ref-pill-github-copy.failed {
+  color: #fff;
+  background: var(--danger);
 }
 #line-ref-pill-close {
   position: absolute;
@@ -3109,7 +3290,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--border-strong);
   border-radius: 50%;
   background: var(--bg);
   color: var(--fg-muted);
@@ -3126,6 +3307,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 }
 #line-ref-pill .lrp-label {
   flex: 0 0 auto;
+  font-weight: 700;
 }
 #line-ref-pill .lrp-ref {
   overflow: hidden;
@@ -3134,7 +3316,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.18);
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-size: var(--ui-font-sm);
   font-weight: 400;
 }
 /* Line count badge shown for multi-line selections. Flips to a solid
@@ -3152,10 +3334,6 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   background: #fff;
   color: var(--attn);
 }
-#line-ref-pill.copied {
-  background: var(--success, #2ea043);
-  border-color: var(--success, #2ea043);
-}
 #line-ref-pill.pop {
   animation: lrp-pop 0.22s ease-out;
 }
@@ -3172,8 +3350,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 #line-ref-pill[hidden] {
   display: none;
 }
-/* Stack height = number of buttons * 20px. With 1 button = 20px row,
- * with 2 (↑+↓) = 40px row, matching GitHub. */
+/* Stack height follows the configured code line height. */
 .gdp-expand-stack {
   display: flex;
   flex-direction: column;
@@ -3185,9 +3362,9 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   -webkit-appearance: none;
   display: grid;
   place-items: center;
-  flex: 0 0 20px;
+  flex: 0 0 var(--code-line-height);
   width: 100%;
-  height: 20px;
+  height: var(--code-line-height);
   min-height: 0;
   border: 0;
   background: var(--accent-subtle);
@@ -3213,7 +3390,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   margin-left: auto;
   display: inline-flex;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -3226,15 +3403,15 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   appearance: none;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--fg-muted);
   border-radius: 6px;
   padding: 0 8px;
   cursor: pointer;
-  flex: 0 0 28px;
+  flex: 0 0 var(--ui-control-sm);
 }
 .gdp-file-header-icon:hover {
   color: var(--fg);
@@ -3279,10 +3456,10 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   text-decoration: none;
 }
 .gdp-btn-sm {
-  height: 28px;
+  height: var(--ui-control-sm);
   padding: 0 10px;
-  font-size: 12px;
-  line-height: 26px;
+  font-size: var(--ui-font-base);
+  line-height: calc(var(--ui-control-sm) - 2px);
 }
 .gdp-btn:hover {
   background: var(--bg-mute);
@@ -3299,8 +3476,8 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   opacity: 0.65;
 }
 .d2h-file-collapse-input {
-  width: 13px;
-  height: 13px;
+  width: calc(var(--ui-font-sm) + 2px);
+  height: calc(var(--ui-font-sm) + 2px);
   margin: 0;
   accent-color: var(--accent);
 }
@@ -3314,8 +3491,8 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 }
 .gdp-stat-squares .sq {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: calc(var(--ui-font-sm) - 3px);
+  height: calc(var(--ui-font-sm) - 3px);
   border-radius: 2px;
   background: #d0d7de; /* fallback / neutral */
 }
@@ -3532,7 +3709,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   table-layout: auto;
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: var(--code-font-size);
-  line-height: 20px;
+  line-height: var(--code-line-height);
 }
 .gdp-source-table tr.gdp-source-line-target {
   background: var(--line-hit-bg);
@@ -3593,12 +3770,15 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: 12px;
-  padding: 14px;
-  border: 1px dashed var(--border-strong);
+  margin: 12px 14px;
+  padding: 10px 14px;
+  border: 1px dashed var(--border);
   border-radius: 8px;
   background: var(--bg);
   transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.gdp-upload-panel:hover {
+  border-color: var(--border-strong);
 }
 .gdp-upload-panel.dragging {
   border-color: var(--accent);
@@ -3611,12 +3791,13 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-upload-error {
   min-height: 18px;
   color: var(--danger);
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   line-height: 18px;
 }
 .gdp-upload-copy {
   min-width: 0;
   color: var(--fg-muted);
+  font-size: var(--ui-font-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3757,7 +3938,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   min-height: 0;
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: var(--code-font-size);
-  line-height: 20px;
+  line-height: var(--code-line-height);
   cursor: text;
 }
 .gdp-source-virtual-spacer {
@@ -3773,8 +3954,8 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-source-virtual-row {
   display: grid;
   grid-template-columns: minmax(50px, max-content) minmax(0, 1fr);
-  height: 20px;
-  line-height: 20px;
+  height: var(--code-line-height);
+  line-height: var(--code-line-height);
 }
 .gdp-source-virtual-line-number {
   position: sticky;
@@ -3793,7 +3974,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   padding: 0 12px;
   color: var(--fg);
   white-space: pre;
-  min-height: 20px;
+  min-height: var(--code-line-height);
 }
 .gdp-source-virtual-line-code.hljs {
   background: var(--bg);
@@ -3914,6 +4095,13 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 }
 .gdp-file-detail-header .gdp-create-dir {
   flex-shrink: 0;
+}
+.gdp-repo-web-link {
+  flex: 0 0 auto;
+  gap: 6px;
+}
+.gdp-repo-web-link svg {
+  display: block;
 }
 .gdp-file-detail-meta {
   display: flex;
@@ -4484,6 +4672,7 @@ body.gdp-file-detail-page #empty {
   width: 100%;
   min-width: 0;
   margin: 0;
+  font-size: var(--ui-font-md);
 }
 .gdp-repo-header,
 .gdp-repo-toolbar {
@@ -4504,7 +4693,10 @@ body.gdp-file-detail-page #empty {
   cursor: default;
 }
 .gdp-repo-file-list {
-  border-top: 0;
+  /* The wrapper (.d2h-file-wrapper) supplies the card outline and shadow;
+     an inner border here painted a 2px band on three sides. */
+  border: 0;
+  box-shadow: none;
   border-radius: 0 0 6px 6px;
   padding: 0;
   overflow: hidden;
@@ -4514,9 +4706,10 @@ body.gdp-file-detail-page #empty {
   grid-template-columns: 28px minmax(0, 1fr) minmax(150px, 220px) 80px;
   column-gap: 8px;
   align-items: center;
-  min-height: 34px;
+  min-height: var(--ui-control-md);
   padding: 0 14px;
-  border-top: 1px solid var(--border);
+  /* No border-top: the wrapper's card border is right above; two borders
+     would paint a 2px band when there is no upload panel. */
   border-bottom: 1px solid var(--border);
   background: var(--bg-soft);
 }
@@ -4530,8 +4723,9 @@ body.gdp-file-detail-page #empty {
   background: transparent;
   color: var(--fg-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ui-font-sm);
   font-weight: 600;
+  letter-spacing: 0.02em;
   text-align: left;
   cursor: pointer;
   line-height: 20px;
@@ -4550,13 +4744,14 @@ body.gdp-file-detail-page #empty {
   align-items: center;
   column-gap: 8px;
   width: 100%;
-  min-height: 42px;
+  min-height: var(--ui-dense-row-h);
   border: 0;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
   padding: 0 14px;
   font: inherit;
+  font-size: var(--ui-font-md);
   text-align: left;
   cursor: pointer;
 }
@@ -4571,7 +4766,9 @@ body.gdp-file-detail-page #empty {
 }
 .gdp-repo-row .dir-icon,
 .gdp-repo-list-shell .d2h-file-name-wrapper .dir-icon {
-  color: #54aeff;
+  /* Theme-aware folder blue: deep link-blue in light mode, soft blue in
+     dark mode (previously a single hardcoded mid-blue for both). */
+  color: var(--accent);
   flex-shrink: 0;
   width: 16px;
   height: 16px;
@@ -4592,20 +4789,22 @@ body.gdp-file-detail-page #empty {
 .gdp-repo-row .kind {
   justify-self: end;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--ui-font-base);
 }
 .gdp-repo-row .meta {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--ui-font-base);
+  font-variant-numeric: tabular-nums;
 }
 .gdp-repo-row .size {
   justify-self: end;
   min-width: 0;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--ui-font-base);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -4805,7 +5004,7 @@ body.gdp-file-detail-page #empty {
 }
 
 .d2h-tag {
-  font-size: 10px;
+  font-size: var(--ui-font-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -4838,7 +5037,7 @@ body.gdp-file-detail-page #empty {
   /* match GitHub Primer exactly */
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
-  line-height: 20px;
+  line-height: var(--code-line-height);
   color: var(--fg);
   tab-size: 4;
   -moz-tab-size: 4;
@@ -4849,7 +5048,7 @@ body.gdp-file-detail-page #empty {
 .d2h-code-line, .d2h-code-side-line, .d2h-code-line-ctn, .d2h-code-side-emptyplaceholder {
   font-family: inherit !important;
   font-size: var(--code-font-size) !important;
-  line-height: 20px !important;
+  line-height: var(--code-line-height) !important;
   font-weight: 400 !important;
 }
 /* Force the line wrappers (NOT the inner highlighted spans) to use Primer's
@@ -5085,7 +5284,7 @@ body.gdp-file-detail-page #empty {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   color: var(--fg-muted);
   cursor: pointer;
 }
@@ -5102,6 +5301,105 @@ body.gdp-file-detail-page #empty {
 [data-theme="dark"] ::-webkit-scrollbar-thumb { border-color: var(--bg); }
 
 /* ===== Responsive ===== */
+@media (max-width: 1440px) {
+  #topbar {
+    gap: 8px;
+    padding-inline: 12px;
+  }
+  #meta {
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: 6px;
+  }
+  #meta .chip-added,
+  #meta .chip-deleted,
+  #meta .chip-renamed,
+  #meta .chip-heavy,
+  #meta .chip-binary,
+  #meta .chip-media,
+  #meta .chip-updated {
+    display: none;
+  }
+  #topbar .ref-pickers {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: 0;
+    gap: 6px;
+  }
+  #topbar .ref-selector {
+    flex: 1 1 clamp(140px, 16vw, 220px);
+    width: clamp(140px, 16vw, 220px);
+    min-width: 140px;
+  }
+  #topbar .spacer {
+    display: none;
+  }
+  #topbar .controls {
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 1100px) {
+  #global-header {
+    gap: 10px;
+    padding-inline: 12px;
+  }
+  .app-menu-item {
+    padding-inline: 7px;
+  }
+  .global-actions {
+    gap: 4px;
+  }
+  .global-actions-sep {
+    margin-inline: 0;
+  }
+}
+
+@media (max-width: 1050px) {
+  #meta .chip-viewed {
+    display: none;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1100px) {
+  .d2h-file-header,
+  .d2h-file-header.d2h-sticky-header {
+    height: auto !important;
+    min-height: var(--ui-file-header-wrapped-h);
+    flex-wrap: wrap;
+    align-items: center;
+    align-content: center;
+    row-gap: 6px;
+  }
+  .d2h-file-header .d2h-file-name-wrapper {
+    flex: 1 1 calc(100% - 44px);
+    min-width: 160px;
+    order: 1;
+  }
+  .d2h-file-header > .gdp-file-toggle {
+    order: 0;
+  }
+  .d2h-file-header > .d2h-file-collapse {
+    order: 2;
+    margin-left: 0;
+  }
+  .d2h-file-header > .gdp-stat-text {
+    order: 3;
+    margin-left: 0;
+  }
+  .d2h-file-header > .gdp-stat-squares {
+    order: 4;
+  }
+  .d2h-file-header > .gdp-preview-file {
+    order: 5;
+    margin-left: auto;
+  }
+  .d2h-file-header > .gdp-view-file {
+    order: 6;
+    margin-left: 0;
+  }
+}
+
 @media (max-width: 900px) {
   #sidebar {
     position: static;
@@ -5127,7 +5425,7 @@ body.gdp-file-detail-page #empty {
   .d2h-file-header,
   .d2h-file-header.d2h-sticky-header {
     height: auto !important;
-    min-height: 82px;
+    min-height: var(--ui-file-header-wrapped-h);
     flex-wrap: wrap;
     align-items: center;
     align-content: center;
@@ -5152,9 +5450,13 @@ body.gdp-file-detail-page #empty {
   .d2h-file-header > .gdp-stat-squares {
     order: 4;
   }
-  .d2h-file-header > .gdp-view-file {
+  .d2h-file-header > .gdp-preview-file {
     order: 5;
     margin-left: auto;
+  }
+  .d2h-file-header > .gdp-view-file {
+    order: 6;
+    margin-left: 0;
   }
   body.gdp-history-page #history-panel {
     position: static;
@@ -5606,11 +5908,11 @@ body.query-history-panel-open #content {
   display: flex;
   align-items: stretch;
   gap: 0;
-  min-height: 28px;
+  min-height: var(--ui-history-dock-h);
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--ui-font-base);
 }
 .db-history-dock-tab {
   appearance: none;
@@ -5691,7 +5993,7 @@ body.query-history-panel-open #content {
   border-radius: 4px;
   background: var(--bg);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   cursor: pointer;
   font-family: inherit;
 }
@@ -5732,7 +6034,7 @@ body.query-history-panel-open #content {
   color: var(--fg-muted);
   text-align: center;
   padding: 40px 16px;
-  font-size: 13px;
+  font-size: var(--ui-font-md);
 }
 .db-session-log-detail-actions {
   display: flex;
@@ -5760,12 +6062,12 @@ body.query-history-panel-open #content {
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
   color: var(--fg-muted);
 }
 .db-session-log-badge {
   font-weight: 600;
-  font-size: 10px;
+  font-size: var(--ui-font-xs);
   padding: 1px 6px;
   border-radius: 999px;
   border: 1px solid transparent;
@@ -5781,20 +6083,20 @@ body.query-history-panel-open #content {
   color: var(--danger, #cf222e);
 }
 .db-session-log-kind {
-  font-size: 10px;
+  font-size: var(--ui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--fg-subtle);
 }
 .db-session-log-time {
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
 }
 .db-session-log-stats {
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
 }
 .db-session-log-entry-title {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -5805,7 +6107,7 @@ body.query-history-panel-open #content {
   border-radius: 4px;
   background: var(--bg);
   border: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--code-font-size);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   white-space: pre-wrap;
   word-break: break-word;
@@ -5829,7 +6131,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 .db-session-log-message {
   padding: 8px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   white-space: pre-wrap;
   word-break: break-word;
@@ -5861,7 +6163,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   border-radius: 4px;
   background: var(--bg);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   cursor: pointer;
   font-family: inherit;
   display: inline-flex;
@@ -5913,7 +6215,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   color: var(--fg-muted);
   text-align: center;
   padding: 40px 16px;
-  font-size: 13px;
+  font-size: var(--ui-font-md);
 }
 .db-query-history-detail-meta {
   display: flex;
@@ -5926,7 +6228,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   border-radius: 4px;
   background: var(--bg-soft);
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
 }
 .db-query-history-detail-meta .db-query-history-by {
   color: var(--fg);
@@ -5957,22 +6259,22 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
   color: var(--fg-muted);
 }
 .db-query-history-by {
   font-weight: 600;
-  font-size: 10px;
+  font-size: var(--ui-font-xs);
 }
 .db-query-history-time {
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
 }
 .db-query-history-stats {
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
 }
 .db-query-history-entry-title {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -5986,7 +6288,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   border-radius: 4px;
   background: var(--bg);
   border: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--code-font-size);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   white-space: pre-wrap;
   word-break: break-all;
@@ -5996,7 +6298,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 }
 .db-query-history-body {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--ui-font-base);
   color: var(--fg-muted);
 }
 .db-query-history-actions {
@@ -6006,7 +6308,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 }
 .db-query-history-truncated {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--ui-font-sm);
   color: var(--fg-muted);
   text-align: center;
 }
@@ -6679,7 +6981,7 @@ body.gdp-journal-page #load-bar {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-muted);
   background: var(--bg-soft);
 }
 
@@ -6727,7 +7029,7 @@ body.gdp-journal-page #load-bar {
 .journal-related,
 .journal-task-editor {
   min-width: 0;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--border-muted);
   background: var(--bg-soft);
   overflow: auto;
 }
@@ -6735,7 +7037,7 @@ body.gdp-journal-page #load-bar {
 .journal-related,
 .journal-task-editor {
   border-right: 0;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--border-muted);
   background: var(--bg);
 }
 
@@ -6750,7 +7052,7 @@ body.gdp-journal-page #load-bar {
 
 .journal-calendar-head {
   padding: 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-muted);
 }
 
 .journal-calendar-head button,
@@ -7107,9 +7409,11 @@ body.gdp-journal-page #load-bar {
   flex: 0 0 auto;
   max-width: 160px;
   min-height: 22px;
-  border: 1px solid var(--border);
+  /* Borderless pill: the enclosing .journal-label-editor already draws the
+     field frame, so a bordered chip inside it reads as a double border. */
+  border: 0;
   border-radius: 999px;
-  background: var(--bg-soft);
+  background: var(--bg-mute);
   color: var(--fg-muted);
   cursor: pointer;
   font: inherit;
@@ -7124,7 +7428,6 @@ body.gdp-journal-page #load-bar {
 
 .journal-label-editor-quick-chip:hover,
 .journal-label-editor-quick-chip:focus-visible {
-  border-color: var(--accent);
   background: var(--accent-subtle);
   color: var(--accent);
   outline: none;
@@ -7284,8 +7587,8 @@ body.gdp-journal-page #load-bar {
     "labels labels labels";
   gap: 10px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg);
 }
 
 .journal-task-toolbar input {
@@ -7701,15 +8004,17 @@ body.gdp-journal-page #load-bar {
   min-width: 980px;
   display: grid;
   grid-template-columns: repeat(5, minmax(180px, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .journal-task-column {
   min-width: 0;
   min-height: 360px;
-  border: 1px solid var(--border);
+  /* Border stays 1px (transparent) so the drop-target accent border does
+     not shift the column box when it appears. */
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: var(--bg-soft);
+  background: transparent;
   overflow: hidden;
 }
 
@@ -7718,12 +8023,48 @@ body.gdp-journal-page #load-bar {
   background: var(--accent-subtle);
 }
 
+/* Linear-style quiet column header: status dot + muted label + count pill,
+   no box or divider line. The dot color comes from the column's status
+   class, so no JS change is needed. */
 .journal-task-column-head {
   min-height: 36px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
+  padding: 8px 10px 6px;
   font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.journal-task-column-head strong {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.journal-task-column-head strong::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--fg-subtle);
+}
+
+.journal-task-column-todo .journal-task-column-head strong::before {
+  background: var(--accent);
+}
+
+.journal-task-column-doing .journal-task-column-head strong::before {
+  background: var(--attn);
+}
+
+.journal-task-column-blocked .journal-task-column-head strong::before {
+  background: var(--danger);
+}
+
+.journal-task-column-done .journal-task-column-head strong::before {
+  background: var(--success);
 }
 
 .journal-task-column-head span {
@@ -7740,13 +8081,12 @@ body.gdp-journal-page #load-bar {
 .journal-task-card {
   position: relative;
   width: calc(100% - 16px);
-  min-height: 96px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin: 8px;
-  padding: 9px;
-  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border: 1px solid var(--border-muted);
   border-radius: 8px;
   background: var(--bg);
   color: var(--fg);
@@ -7796,13 +8136,25 @@ body.gdp-journal-page #load-bar {
 .journal-task-card.compact {
   width: 100%;
   margin: 0 0 8px;
-  min-height: 78px;
 }
 
-.journal-task-card:hover,
+/* Stable-box hover: only border color and shadow change, never the box
+   dimensions. Selected keeps the accent frame. */
+.journal-task-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
 .journal-task-card.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent-subtle);
+}
+
+/* The status pill repeats the column title on the board; hide it there.
+   Compact cards (related-tasks panel on the log tab) keep it, since they
+   are shown outside the board context. */
+.journal-task-board .journal-task-card .journal-task-status {
+  display: none;
 }
 
 .journal-task-card.dragging:hover,
@@ -7861,7 +8213,9 @@ body.gdp-journal-page #load-bar {
   color: var(--fg-subtle);
   cursor: grab;
   line-height: 1;
-  opacity: 0.7;
+  /* Hidden until the card is hovered: pointer-drag on the card body still
+     works, so this only declutters the resting board. */
+  opacity: 0;
   touch-action: none;
   transition:
     background 0.14s ease,
@@ -7901,6 +8255,8 @@ body.gdp-journal-page #load-bar {
 .journal-task-claim {
   display: inline-flex;
   align-items: center;
+  /* Cards are flex-column, so without this the pills stretch full-width. */
+  align-self: flex-start;
   max-width: 100%;
   min-height: 18px;
   padding: 0 6px;
@@ -7987,10 +8343,34 @@ body.journal-task-editor-resizing * {
   flex-wrap: wrap;
 }
 
-.journal-markdown-toolbar button {
+/* The shared ".journal-markdown-toolbar button" rule above gives every
+   button in the toolbar its own border. Restore the segmented control's
+   own look inside the toolbar (its container already draws the frame),
+   otherwise seg buttons render a second border inside the seg border. */
+.journal-markdown-toolbar .seg button {
+  border: 0;
+}
+
+.journal-markdown-toolbar .seg button + button {
+  border-left: 1px solid var(--border);
+}
+
+/* Format buttons (B / ` / [] / >) read calmer as ghost icon buttons, in
+   the .sb-icon-action idiom, instead of four more bordered boxes. Direct
+   children only, so the .seg rules above stay in charge of mode buttons. */
+.journal-markdown-toolbar > button {
   min-width: 30px;
   padding: 0 8px;
   font-weight: 600;
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-muted);
+}
+
+.journal-markdown-toolbar > button:hover {
+  border-color: transparent;
+  background: var(--bg-mute);
+  color: var(--fg);
 }
 
 .journal-editor-mode {
@@ -8001,9 +8381,11 @@ body.journal-task-editor-resizing * {
   min-height: 180px;
   max-height: 360px;
   overflow: auto;
-  border: 1px solid var(--border);
+  /* Reading pane, not a form field: recessed fill instead of a second
+     bordered box under the bordered textarea. */
+  border: 0;
   border-radius: 6px;
-  background: var(--bg);
+  background: var(--bg-soft);
   font-size: 13px;
   line-height: 1.5;
   padding: 8px 10px;
@@ -8140,10 +8522,14 @@ body.journal-task-editor-resizing * {
 
 .db-root,
 .db-container {
-  --db-font-sm: 11px;
-  --db-font-base: 12px;
-  --db-font-md: 13px;
-  --db-font-mono: 13px;
+  --db-font-sm: var(--ui-font-sm);
+  --db-font-base: var(--ui-font-base);
+  --db-font-md: var(--ui-font-md);
+  --db-font-mono: var(--ui-font-md);
+}
+
+.db-root {
+  font-size: var(--db-font-base);
 }
 
 .db-container {
@@ -8158,27 +8544,6 @@ body.journal-task-editor-resizing * {
   min-height: 0;
   overflow: hidden;
   font-size: var(--db-font-base);
-}
-body[data-sidebar-font-size="compact"] .db-root,
-body[data-sidebar-font-size="compact"] .db-container {
-  --db-font-sm: 10px;
-  --db-font-base: 11px;
-  --db-font-md: 12px;
-  --db-font-mono: 12px;
-}
-body[data-sidebar-font-size="large"] .db-root,
-body[data-sidebar-font-size="large"] .db-container {
-  --db-font-sm: 12px;
-  --db-font-base: 14px;
-  --db-font-md: 15px;
-  --db-font-mono: 14px;
-}
-body[data-sidebar-font-size="xlarge"] .db-root,
-body[data-sidebar-font-size="xlarge"] .db-container {
-  --db-font-sm: 13px;
-  --db-font-base: 15px;
-  --db-font-md: 16px;
-  --db-font-mono: 15px;
 }
 .db-upper-area {
   display: flex;
@@ -13130,4 +13495,741 @@ body.db-resizing {
 }
 .doctor-badge[data-level="warn"] {
   background: var(--attn, #9a6700);
+}
+
+/* ==========================================================================
+   Datastore page — premium glass theme
+   データストアページ (.db-root) 全体にスコープした装飾レイヤ。
+   既存トークン (--bg/--fg/--accent ...) から color-mix で導出するため、
+   ライト/ダーク両テーマに自動追従する。状態変化で box dimensions が
+   動かないよう、hover/active は background / box-shadow / color のみで
+   表現する (padding/border の変更禁止)。
+   ========================================================================== */
+.db-root {
+  /* ガラス面の下に敷くキャンバス。ごく薄い色相のグラデーション。 */
+  background:
+    radial-gradient(
+      1100px 480px at 88% -12%,
+      color-mix(in srgb, var(--done) 14%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      900px 520px at -8% 112%,
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 58%
+    ),
+    radial-gradient(
+      700px 420px at -6% -10%,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 60%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-soft) 60%, var(--bg)) 0%,
+      var(--bg) 46%
+    );
+  /* ガラス素材の共通レシピ */
+  --db-glass-bg: color-mix(in srgb, var(--bg) 76%, transparent);
+  --db-glass-bg-strong: color-mix(in srgb, var(--bg) 90%, transparent);
+  --db-glass-border: color-mix(in srgb, var(--border) 62%, transparent);
+  --db-glass-blur: blur(18px) saturate(1.45);
+  --db-glass-shadow:
+    0 1px 2px color-mix(in srgb, var(--fg) 6%, transparent),
+    0 8px 24px -12px color-mix(in srgb, var(--fg) 22%, transparent);
+  --db-focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+/* ----- スリムなスクロールバー (ページ内のガラス質感を揃える) ----- */
+.db-root ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.db-root ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+.db-root ::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--fg) 32%, transparent);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.db-root ::-webkit-scrollbar-track,
+.db-root ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ----- 最上段のタブバー (db / s3 / +) : フローティングピル ----- */
+.db-root .db-tabs-bar {
+  background: transparent;
+  border-bottom: 1px solid var(--db-glass-border);
+  align-items: center;
+  min-height: 40px;
+}
+.db-root .db-tabs-list {
+  gap: 2px;
+  padding: 4px 8px;
+  /* 「+」を最後のタブの直後に寄せるため、中身の幅だけ取る (溢れたら
+     この中で横スクロール)。flex:1 だと「+」が右端に吸い寄せられる。 */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.db-root .db-tabs-chip {
+  border-right: none;
+  border-radius: 8px;
+  margin: 0;
+  padding: 4px 8px 4px 12px;
+  /* 非アクティブも「タブのかたまり」に見えるよう、うっすらした面と
+     輪郭を常時表示する (完全透明だとテキストの羅列に見える)。 */
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border: 1px solid var(--db-glass-border);
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+.db-root .db-tabs-chip:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+.db-root .db-tabs-chip.active {
+  background: var(--db-glass-bg-strong);
+  border-bottom: 1px solid var(--db-glass-border);
+  margin-bottom: 0;
+  box-shadow:
+    inset 0 -2px 0 var(--accent),
+    var(--db-glass-shadow);
+  font-weight: 600;
+}
+.db-root .db-tabs-chip.drop-target {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.db-root .db-tabs-chip-close {
+  border-radius: 6px;
+}
+/* 「+」はタブと混同しないよう、破線のゴーストボタンにする。 */
+.db-root .db-tabs-new-btn {
+  border: 1px dashed color-mix(in srgb, var(--fg) 25%, transparent);
+  border-radius: 8px;
+  margin: 4px 8px 4px 4px;
+  align-self: center;
+  min-height: 26px;
+  background: transparent;
+  color: var(--fg-muted);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+.db-root .db-tabs-new-btn:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+
+/* ----- サイドバー: ガラス面 ----- */
+.db-root .db-sidebar {
+  background: var(--db-glass-bg);
+  -webkit-backdrop-filter: var(--db-glass-blur);
+  backdrop-filter: var(--db-glass-blur);
+  border-right: 1px solid var(--db-glass-border);
+}
+.db-root .db-toolbar,
+.db-root .db-icon-toolbar,
+.db-root .db-prefs-bar,
+.db-root .db-explorer-sidebar-slot {
+  border-bottom-color: var(--db-glass-border);
+  background: transparent;
+}
+
+/* ----- 入力コントロール: ガラスの入力面 + ソフトなフォーカスリング ----- */
+.db-root .db-file-select,
+.db-root .db-table-filter,
+.db-root .s3-bucket-select,
+.db-root .s3-sort-select,
+.db-root .s3-search-input,
+.db-root .s3-edit-textarea,
+.db-root .s3-new-object-key {
+  border: 1px solid var(--db-glass-border);
+  border-radius: 8px;
+  background: var(--db-glass-bg-strong);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--fg) 4%, transparent);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
+}
+.db-root .db-file-select:hover,
+.db-root .s3-bucket-select:hover,
+.db-root .s3-sort-select:hover,
+.db-root .s3-search-input:hover {
+  border-color: color-mix(in srgb, var(--border-strong) 70%, transparent);
+}
+.db-root .db-file-select:focus,
+.db-root .db-table-filter:focus,
+.db-root .s3-bucket-select:focus,
+.db-root .s3-sort-select:focus,
+.db-root .s3-search-input:focus,
+.db-root .s3-edit-textarea:focus,
+.db-root .s3-new-object-key:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 1px 2px color-mix(in srgb, var(--fg) 4%, transparent),
+    var(--db-focus-ring);
+}
+
+/* ----- ボタン: 丸みと立体感。primary はアクセントのグラデーション ----- */
+.db-root .db-btn {
+  border: 1px solid var(--db-glass-border);
+  border-radius: 8px;
+  background: var(--db-glass-bg-strong);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--fg) 6%, transparent);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+.db-root .db-btn:hover {
+  background: var(--bg);
+  border-color: color-mix(in srgb, var(--border-strong) 70%, transparent);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--fg) 10%, transparent);
+}
+.db-root .db-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--fg) 6%, transparent),
+    var(--db-focus-ring);
+}
+.db-root .db-btn-primary,
+.db-root .db-btn.db-btn-primary {
+  border-color: color-mix(in srgb, var(--accent-emph) 80%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 92%, #ffffff 8%) 0%,
+    var(--accent-emph) 100%
+  );
+  color: #ffffff;
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--accent-emph) 45%, transparent),
+    0 6px 16px -8px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.db-root .db-btn-primary:hover,
+.db-root .db-btn.db-btn-primary:hover {
+  background: linear-gradient(
+    180deg,
+    var(--accent) 0%,
+    var(--accent-emph) 100%
+  );
+  border-color: var(--accent-emph);
+}
+
+/* ----- セグメントコントロール: ガラスのトラック + 浮き上がる選択片 ----- */
+.db-root .seg {
+  border: 1px solid var(--db-glass-border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  padding: 2px;
+  height: auto;
+  overflow: visible;
+}
+.db-root .seg button {
+  border-radius: 7px;
+  padding: 3px 11px;
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+.db-root .seg button + button {
+  border-left: none;
+}
+.db-root .seg button:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.db-root .seg button.active {
+  background: var(--db-glass-bg-strong);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow:
+    inset 0 0 0 1px var(--db-glass-border),
+    0 1px 3px color-mix(in srgb, var(--fg) 14%, transparent);
+}
+
+/* ----- サイドバーのテーブルリスト: 丸みのある行 ----- */
+.db-root .db-table-item {
+  border-left: none;
+  border-radius: 8px;
+  margin: 1px 6px;
+  padding: 4px 6px 4px 11px; /* 旧 border-left 3px 分を padding に移し位置不変 */
+  transition:
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.db-root .db-table-item:hover {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+.db-root .db-table-item.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  font-weight: 600;
+}
+.db-root .db-table-node {
+  border-bottom-color: var(--db-glass-border);
+}
+
+/* ----- S3: サイドバースロット ----- */
+.db-root .s3-sidebar-slot {
+  padding: 10px;
+  gap: 10px;
+}
+.db-root .s3-object-status {
+  padding: 0 2px;
+  min-height: 18px;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--fg-subtle);
+}
+.db-root .s3-object-status.warn {
+  background: color-mix(in srgb, var(--attn) 12%, transparent);
+  color: var(--attn);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+/* ----- S3: オブジェクトリストをカード列に ----- */
+.db-root .s3-object-list {
+  margin: 0;
+  padding: 4px 2px;
+  border-top: 1px solid var(--db-glass-border);
+}
+.db-root .s3-object-item {
+  border-left: none;
+  border-bottom: none;
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin: 1px 0;
+  transition:
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.db-root .s3-object-item:hover {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+.db-root .s3-object-item.active {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
+    inset 2px 0 0 var(--accent);
+}
+.db-root .s3-object-more-btn {
+  margin: 4px 0 0;
+  border: 1px solid var(--db-glass-border);
+  border-radius: 8px;
+  background: var(--db-glass-bg-strong);
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.db-root .s3-object-more-btn:hover {
+  background: var(--bg);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+/* ----- S3: Explorer ツリーも同じ丸みの行に ----- */
+.db-root .s3-tree {
+  margin: 0;
+  padding: 4px 2px;
+  border-top: 1px solid var(--db-glass-border);
+}
+.db-root .s3-tree .tree-dir {
+  border-radius: 8px;
+}
+.db-root .s3-tree .tree-file {
+  border-left: none;
+  border-radius: 8px;
+  padding-right: 10px;
+  transition:
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.db-root .s3-tree .tree-file.active {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
+    inset 2px 0 0 var(--accent);
+}
+
+/* ----- S3: kind バッジに微かな発光 ----- */
+.db-root .s3-kind-badge {
+  height: 17px;
+  letter-spacing: 0.04em;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+/* ----- S3: プレビューペイン。ヘッダを浮いたガラスカードに ----- */
+.db-root .s3-explorer,
+.db-root .db-main-content {
+  background: transparent;
+}
+.db-root .s3-preview-pane {
+  padding: 12px 14px;
+  gap: 12px;
+}
+.db-root .s3-preview-header {
+  border: 1px solid var(--db-glass-border);
+  border-radius: 12px;
+  background: var(--db-glass-bg-strong);
+  -webkit-backdrop-filter: var(--db-glass-blur);
+  backdrop-filter: var(--db-glass-blur);
+  box-shadow: var(--db-glass-shadow);
+  padding: 12px 16px;
+}
+.db-root .s3-preview-title {
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+.db-root .s3-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--db-glass-border);
+  border-radius: 12px;
+  background: var(--db-glass-bg-strong);
+  box-shadow: var(--db-glass-shadow);
+  padding: 16px;
+}
+
+/* ----- ホバーのキーツールチップ: ガラスカード ----- */
+/* tooltip は document.body 直下に attach されるため .db-root の変数を
+   継承しない。各 var() にフォールバックを明示する。 */
+.s3-key-tooltip {
+  background: var(--db-glass-bg-strong, color-mix(in srgb, var(--bg) 90%, transparent));
+  -webkit-backdrop-filter: var(--db-glass-blur, blur(18px) saturate(1.45));
+  backdrop-filter: var(--db-glass-blur, blur(18px) saturate(1.45));
+  border: 1px solid var(--db-glass-border, color-mix(in srgb, var(--border) 62%, transparent));
+  border-radius: 10px;
+  box-shadow:
+    0 4px 12px color-mix(in srgb, var(--fg) 10%, transparent),
+    0 16px 40px -12px color-mix(in srgb, var(--fg) 30%, transparent);
+}
+.s3-key-tooltip .s3-key-tooltip-image {
+  border-radius: 6px;
+}
+.s3-key-tooltip .s3-key-tooltip-meta {
+  border-top-color: var(--db-glass-border);
+}
+
+/* ----- ビュー切替タブ (Table / Query / ER ...) : ピルタブ ----- */
+.db-root .db-tab-bar {
+  background: transparent;
+  border-bottom: 1px solid var(--db-glass-border);
+  gap: 2px;
+  padding: 4px 10px;
+  align-items: center;
+}
+.db-root .db-tab {
+  border-bottom: none;
+  margin-bottom: 0;
+  border-radius: 8px;
+  padding: 5px 14px;
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+.db-root .db-tab:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.db-root .db-tab.active {
+  background: var(--db-glass-bg-strong);
+  box-shadow:
+    inset 0 0 0 1px var(--db-glass-border),
+    inset 0 -2px 0 var(--accent),
+    var(--db-glass-shadow);
+  font-weight: 600;
+}
+
+/* ----- アイコンボタン / ツールボタンも丸みを統一 ----- */
+.db-root .db-icon-btn,
+.db-root .db-refresh-btn,
+.db-root .db-connection-action {
+  border-radius: 8px;
+  border-color: var(--db-glass-border);
+  background: var(--db-glass-bg-strong);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+.db-root .db-icon-btn:hover,
+.db-root .db-refresh-btn:hover,
+.db-root .db-connection-action:hover {
+  border-color: color-mix(in srgb, var(--border-strong) 70%, transparent);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--fg) 10%, transparent);
+}
+.db-root .db-tool-btn {
+  border-radius: 8px;
+  border-color: var(--db-glass-border);
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+
+/* ==========================================================================
+   Datastore page — aurora & glow boost
+   ガラステーマの上に「気分が上がる」演出層を重ねる。ゆっくり漂うオーロラ
+   背景と、アクティブ要素へのグロー。色はすべてテーマトークン由来で
+   ライト/ダークに追従。レイアウトに影響する寸法は一切変更しない。
+   ========================================================================== */
+
+/* ----- 漂うオーロラ。キャンバス (::before) を stacking context の最背面に ----- */
+.db-root {
+  position: relative;
+  isolation: isolate;
+}
+.db-root::before {
+  content: "";
+  position: absolute;
+  inset: -12%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      38% 42% at 82% 4%,
+      color-mix(in srgb, var(--done) 20%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      36% 42% at 6% 98%,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      26% 30% at 2% 2%,
+      color-mix(in srgb, var(--success) 12%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      30% 34% at 98% 90%,
+      color-mix(in srgb, var(--attn) 10%, transparent),
+      transparent 70%
+    );
+  animation: db-aurora-drift 30s ease-in-out infinite alternate;
+  will-change: transform;
+}
+@keyframes db-aurora-drift {
+  from {
+    transform: translate3d(-1.5%, -1%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(1.5%, 1.5%, 0) scale(1.05);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .db-root::before {
+    animation: none;
+  }
+}
+
+/* ----- アクティブなタブ/チップにアクセントのグロー ----- */
+.db-root .db-tabs-chip.active {
+  box-shadow:
+    inset 0 0 0 1px var(--db-glass-border),
+    inset 0 -2px 0 var(--accent),
+    0 0 18px -6px color-mix(in srgb, var(--accent) 55%, transparent),
+    var(--db-glass-shadow);
+}
+.db-root .db-tab.active {
+  box-shadow:
+    inset 0 0 0 1px var(--db-glass-border),
+    inset 0 -2px 0 var(--accent),
+    0 0 18px -6px color-mix(in srgb, var(--accent) 55%, transparent),
+    var(--db-glass-shadow);
+}
+
+/* ----- primary ボタン: 光沢 + 強めの発光 ----- */
+.db-root .db-btn-primary,
+.db-root .db-btn.db-btn-primary {
+  text-shadow: 0 1px 1px color-mix(in srgb, #000000 22%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 28%, transparent),
+    0 1px 2px color-mix(in srgb, var(--accent-emph) 45%, transparent),
+    0 8px 20px -6px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* ----- テーブルアイコン: アクセント→パープルのグラデーション ----- */
+.db-root .db-table-icon {
+  background: linear-gradient(
+    150deg,
+    var(--accent) 0%,
+    color-mix(in srgb, var(--done) 70%, var(--accent)) 100%
+  );
+  box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.db-root .db-table-item[data-type="view"] .db-table-icon {
+  background: linear-gradient(
+    150deg,
+    var(--scope-accent) 0%,
+    color-mix(in srgb, var(--attn) 70%, var(--scope-accent)) 100%
+  );
+  box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--scope-accent) 60%, transparent);
+}
+
+/* ----- データグリッド: ガラス化 + 選択/ホバーのグロー ----- */
+.db-root .db-grid-filter-bar {
+  background: transparent;
+  border-bottom: 1px solid var(--db-glass-border);
+}
+.db-root .db-grid-filter-input {
+  border: 1px solid var(--db-glass-border);
+  border-radius: 8px;
+  background: var(--db-glass-bg-strong);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.db-root .db-grid-filter-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--db-focus-ring);
+}
+.db-root .db-grid-header-wrap {
+  background: var(--db-glass-bg);
+  -webkit-backdrop-filter: var(--db-glass-blur);
+  backdrop-filter: var(--db-glass-blur);
+  border-bottom: 1px solid var(--db-glass-border);
+}
+.db-root .db-grid-header-cell {
+  transition:
+    background-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.db-root .db-grid-header-cell:hover {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+.db-root .db-grid-header-cell.sorted {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.db-root .db-grid-header-cell.sorted .db-grid-header-label {
+  color: var(--accent);
+}
+.db-root .db-grid-row.alt {
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+.db-root .db-grid-row:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.db-root .db-grid-row.selected {
+  background: color-mix(in srgb, var(--accent) 13%, transparent) !important;
+  outline: none;
+  box-shadow:
+    inset 2px 0 0 var(--accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.db-root .db-grid-rownum-header,
+.db-root .db-grid-rownum {
+  background: transparent;
+}
+.db-root .db-grid-status {
+  background: transparent;
+  border-top: 1px solid var(--db-glass-border);
+  letter-spacing: 0.02em;
+}
+
+/* ----- クエリ履歴 / ログ dock: ガラス + ピルタブ ----- */
+.db-root .db-history-pane {
+  background: var(--db-glass-bg);
+  -webkit-backdrop-filter: var(--db-glass-blur);
+  backdrop-filter: var(--db-glass-blur);
+  border-top: 1px solid var(--db-glass-border);
+}
+.db-root .db-history-dock {
+  background: transparent;
+  border-top: 1px solid var(--db-glass-border);
+  gap: 2px;
+  padding: 2px 8px;
+  align-items: center;
+}
+.db-root .db-history-dock-tab {
+  border-radius: 7px;
+  padding: 3px 12px;
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+.db-root .db-history-dock-tab:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.db-root .db-history-dock.open .db-history-dock-tab.active {
+  box-shadow:
+    inset 0 0 0 1px var(--db-glass-border),
+    inset 0 -2px 0 var(--accent),
+    0 0 14px -6px color-mix(in srgb, var(--accent) 50%, transparent);
+  background: var(--db-glass-bg-strong);
+}
+
+/* ----- 詳細/関連パネルの境界をヘアラインに ----- */
+.db-root .db-grid-detail-panel,
+.db-root .db-related-panel {
+  border-color: var(--db-glass-border);
+}
+
+/* ----- グリッド UX: セル詳細パネルと列フィルタ ----- */
+.db-root .db-grid-detail-panel {
+  border-top: 1px solid var(--db-glass-border);
+  background: var(--db-glass-bg);
+  -webkit-backdrop-filter: var(--db-glass-blur);
+  backdrop-filter: var(--db-glass-blur);
+}
+.db-root .db-grid-detail-header {
+  background: transparent;
+  border-bottom: 1px solid var(--db-glass-border);
+  padding: 6px 12px;
+  gap: 8px;
+}
+.db-root .db-grid-detail-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+.db-root .db-grid-detail-content {
+  padding: 12px 16px;
+}
+.db-root .db-grid-detail-json {
+  border: 1px solid var(--db-glass-border);
+  border-radius: 8px;
+  background: var(--db-glass-bg-strong);
+  padding: 10px 12px;
+}
+/* 列ごとのフィルタ入力。未フォーカス時は淡く、フォーカスでリング。 */
+.db-root .db-grid-col-filter {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.db-root .db-grid-col-filter:hover {
+  background: var(--db-glass-bg-strong);
+  border-color: var(--db-glass-border);
+}
+.db-root .db-grid-col-filter:focus {
+  outline: none;
+  background: var(--db-glass-bg-strong);
+  border-color: var(--accent);
+  box-shadow: var(--db-focus-ring);
+}
+.db-root .db-grid-filter-spacer {
+  background: transparent;
 }

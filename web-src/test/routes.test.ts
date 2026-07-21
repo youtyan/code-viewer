@@ -129,25 +129,35 @@ describe("routes", () => {
         task: "t-1",
         range,
       }),
-    ).toBe("/journal?tab=tasks&date=2026-07-02&label=ai-ready&task=t-1");
+    ).toBe("/journal?date=2026-07-02&label=ai-ready&task=t-1");
+    expect(
+      buildRoute({
+        screen: "journal",
+        tab: "journal",
+        date: "2026-07-02",
+        label: "ai-ready",
+        task: "t-1",
+        range,
+      }),
+    ).toBe("/journal?tab=journal&date=2026-07-02&label=ai-ready&task=t-1");
   });
 
   test("round-trips journal route params", () => {
     const route = parseRoute(
       "/journal",
-      "?tab=tasks&date=2026-07-02&label=ai-ready&task=t-1",
+      "?tab=journal&date=2026-07-02&label=ai-ready&task=t-1",
       defaultRange,
     );
     expect(route).toEqual({
       screen: "journal",
-      tab: "tasks",
+      tab: "journal",
       date: "2026-07-02",
       label: "ai-ready",
       task: "t-1",
       range: defaultRange,
     });
     expect(buildRoute(route)).toBe(
-      "/journal?tab=tasks&date=2026-07-02&label=ai-ready&task=t-1",
+      "/journal?tab=journal&date=2026-07-02&label=ai-ready&task=t-1",
     );
   });
 

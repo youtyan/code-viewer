@@ -441,6 +441,43 @@ describe("file view shell routing", () => {
     expect(preferredTabs).toEqual([]);
   });
 
+  test("file detail header includes the repository web action", () => {
+    const { sticky } = createFileShellSticky(
+      {
+        currentRange: () => RANGE,
+        setRoute() {
+          /* not exercised */
+        },
+        setPreferredSourceTab() {
+          /* not exercised */
+        },
+        createFileBreadcrumb(path: string) {
+          const span = document.createElement("span");
+          span.textContent = path;
+          return span;
+        },
+        createRepositoryWebLink(target) {
+          const link = document.createElement("a");
+          link.className = "gdp-repo-web-link";
+          link.href = `https://github.com/example/sample/blob/main/${target.path}`;
+          link.textContent = "Open on GitHub";
+          return link;
+        },
+      },
+      { path: "src/example.ts", ref: "worktree" },
+      "code",
+    );
+    document.body.appendChild(sticky);
+
+    const link = document.querySelector<HTMLAnchorElement>(
+      ".gdp-file-detail-header .gdp-repo-web-link",
+    );
+    expect(link?.textContent).toBe("Open on GitHub");
+    expect(link?.href).toBe(
+      "https://github.com/example/sample/blob/main/src/example.ts",
+    );
+  });
+
   test.each([
     {
       name: "png shows Preview only (no Code tab) with Preview active",

@@ -306,6 +306,27 @@ export function createTableGrid(
   const body = document.createElement("div");
   body.className = "db-grid-body";
 
+  // 幅不足で省略 (…) されたセルだけ、ホバー時に全文をネイティブ tooltip で
+  // 見せる。セルごとに title を仕込むとノイズ＆再描画コストになるので、
+  // body 上のイベント委譲 + その場測定にする。編集ヒント等の既存 title は
+  // 触らない (自分が付けた分は data 属性で区別して毎回張り直す)。
+  body.addEventListener("mouseover", (e) => {
+    const cell = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+      ".db-grid-cell",
+    );
+    if (!cell || !body.contains(cell)) return;
+    if (cell.dataset.gridTooltip) {
+      delete cell.dataset.gridTooltip;
+      cell.removeAttribute("title");
+    }
+    if (cell.title) return;
+    if (cell.querySelector("input, textarea, select")) return;
+    if (cell.scrollWidth > cell.clientWidth + 1) {
+      cell.title = cell.textContent ?? "";
+      cell.dataset.gridTooltip = "1";
+    }
+  });
+
   const filteredEmpty = document.createElement("div");
   filteredEmpty.className = "db-pane-empty";
   filteredEmpty.hidden = true;
@@ -611,8 +632,24 @@ export function createTableGrid(
     }
   }
 
+  // 保存済み幅がない列の初期幅。タイムスタンプや JSON が 180px 固定で
+  // 常に省略表示になるのを避けるため、カラム型から推定する。ヘッダ名が
+  // 長い列はヘッダが読める幅を下限にする (ソートアイコン + padding 分込み)。
+  function defaultColWidth(colName: string): number {
+    const type = (
+      columns.find((c) => c.name === colName)?.type ?? ""
+    ).toLowerCase();
+    let w = DEFAULT_COL_WIDTH;
+    if (/timestamp|datetime/.test(type)) w = 210;
+    else if (/^(date|time|year)/.test(type)) w = 120;
+    else if (/bool|tinyint\(1\)/.test(type)) w = 80;
+    else if (/int|decimal|numeric|float|double|real/.test(type)) w = 110;
+    else if (/text|json|xml|blob/.test(type)) w = 260;
+    return Math.max(w, Math.min(240, colName.length * 7.5 + 34));
+  }
+
   function getColWidth(colName: string): number {
-    return colWidths.get(colName) ?? DEFAULT_COL_WIDTH;
+    return colWidths.get(colName) ?? defaultColWidth(colName);
   }
 
   function applyColWidth(colName: string, index: number) {

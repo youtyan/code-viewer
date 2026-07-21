@@ -86,6 +86,7 @@ export type SourceViewDeps = {
   ): Promise<unknown> | unknown;
   placeSidebarToggle(): void;
   createFileBreadcrumb(path: string, ref?: string): HTMLElement;
+  createRepositoryWebLink?(target: SourceFileTarget): HTMLAnchorElement | null;
   createFileDetailMeta(
     target: SourceFileTarget,
     meta: RawFileInfo,
@@ -130,6 +131,7 @@ export function createSourceView(deps: SourceViewDeps) {
     renderRepoBlobSidebar,
     placeSidebarToggle,
     createFileBreadcrumb,
+    createRepositoryWebLink,
     createFileDetailMeta,
     createOpenPathButton,
     createMoveToTrashButton,
@@ -190,10 +192,19 @@ export function createSourceView(deps: SourceViewDeps) {
     const preview = document.querySelector<HTMLElement>(
       "#content .gdp-markdown-preview:not([hidden])",
     );
-    const lineHeight = Number.parseFloat(
-      getComputedStyle(preview || document.body).lineHeight,
+    if (preview) {
+      const previewLineHeight = Number.parseFloat(
+        getComputedStyle(preview).lineHeight,
+      );
+      if (Number.isFinite(previewLineHeight) && previewLineHeight > 0)
+        return previewLineHeight;
+    }
+    const configuredLineHeight = Number.parseFloat(
+      getComputedStyle(document.body).getPropertyValue("--code-line-height"),
     );
-    return Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 20;
+    return Number.isFinite(configuredLineHeight) && configuredLineHeight > 0
+      ? configuredLineHeight
+      : VIRTUAL_SOURCE_ROW_HEIGHT;
   }
 
   function hasVisibleSourceCodeSurface(): boolean {
@@ -266,11 +277,9 @@ export function createSourceView(deps: SourceViewDeps) {
 
   function visibleSourceLineFallback(): number {
     const scroller = findMainScrollTarget();
+    const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
     if (scroller)
-      return Math.max(
-        1,
-        Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) + 1,
-      );
+      return Math.max(1, Math.floor(scroller.scrollTop / rowHeight) + 1);
     const rows = $$<HTMLElement>("#content .gdp-source-table tr[data-line]");
     const contentTop =
       document.querySelector<HTMLElement>("#content")?.getBoundingClientRect()
@@ -310,8 +319,9 @@ export function createSourceView(deps: SourceViewDeps) {
   ) {
     const scroller = findMainScrollTarget();
     if (scroller) {
-      const top = (cursor.line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT;
-      const bottom = top + VIRTUAL_SOURCE_ROW_HEIGHT;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
+      const top = (cursor.line - 1) * rowHeight;
+      const bottom = top + rowHeight;
       const before = scroller.scrollTop;
       if (edge === "center")
         scroller.scrollTop = Math.max(
@@ -796,7 +806,6 @@ export function createSourceView(deps: SourceViewDeps) {
   function renderSourceInternalPath(
     card: DiffCardElement,
     target: SourceFileTarget,
-    kind: "code-viewer" | "git",
   ) {
     const body = card.querySelector<HTMLElement>(
       ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
@@ -804,25 +813,9 @@ export function createSourceView(deps: SourceViewDeps) {
     const info = createSourceFileInfo(target, "internal metadata", {
       loadMeta: false,
     });
-    const extraChildren: Node[] = [info];
-    // Only the code-viewer state directory is servable raw. /_file returns
-    // 404 for .git/* paths because server/preview.ts blocks git-internal
-    // reads.
-    if (kind === "code-viewer") {
-      const link = document.createElement("a");
-      link.className = "gdp-btn gdp-btn-sm gdp-source-download";
-      link.href = buildRawFileUrl(target);
-      link.textContent = "Download raw";
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      extraChildren.push(link);
-    }
     const view = renderUnsupportedPreview({
-      message:
-        kind === "code-viewer"
-          ? "This path is managed by code-viewer and is not previewed from the file viewer."
-          : "Git internal metadata is not previewed from the file viewer.",
-      extraChildren,
+      message: "Git internal metadata is not previewed from the file viewer.",
+      extraChildren: [info],
     });
     if (body) body.replaceWith(view);
     else card.appendChild(view);
@@ -897,7 +890,9 @@ export function createSourceView(deps: SourceViewDeps) {
       target,
       active,
       {
-        includeFileTabs: STATE.route.screen === "file",
+        includeFileTabs:
+          STATE.route.screen === "file" &&
+          sourceInternalPathKind(target.path) !== "code-viewer",
         previewable: !!options.previewable || active === "preview",
         sourceTabClick: "manual",
         ...(textValue != null
@@ -1509,12 +1504,14 @@ export function createSourceView(deps: SourceViewDeps) {
           count.textContent = matches.length
             ? `${active + 1} / ${matches.length}`
             : "0 / 0";
-          if (active >= 0)
+          if (active >= 0) {
+            const rowHeight =
+              sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
             scroller.scrollTop = Math.max(
               0,
-              (matches[active].line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT -
-                VIRTUAL_SOURCE_ROW_HEIGHT * 3,
+              (matches[active].line - 1) * rowHeight - rowHeight * 3,
             );
+          }
           renderFn();
         })
         .catch(() => {
@@ -1533,10 +1530,10 @@ export function createSourceView(deps: SourceViewDeps) {
       if (!matches.length) return;
       active = (active + direction + matches.length) % matches.length;
       count.textContent = `${active + 1} / ${matches.length}`;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
       scroller.scrollTop = Math.max(
         0,
-        (matches[active].line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT -
-          VIRTUAL_SOURCE_ROW_HEIGHT * 3,
+        (matches[active].line - 1) * rowHeight - rowHeight * 3,
       );
       renderFn();
     };
@@ -1650,7 +1647,10 @@ export function createSourceView(deps: SourceViewDeps) {
     scroller.setAttribute("aria-label", `${target.path} source code`);
     const spacer = document.createElement("div");
     spacer.className = "gdp-source-virtual-spacer";
-    spacer.style.height = `${Math.max(1, lines.length * VIRTUAL_SOURCE_ROW_HEIGHT)}px`;
+    spacer.style.height = `${Math.max(
+      1,
+      lines.length * (sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT),
+    )}px`;
     const windowEl = document.createElement("div");
     windowEl.className = "gdp-source-virtual-window";
     spacer.appendChild(windowEl);
@@ -1660,26 +1660,33 @@ export function createSourceView(deps: SourceViewDeps) {
     let raf = 0;
     let renderedStart = -1;
     let renderedEnd = -1;
+    let renderedRowHeight = -1;
     let search: VirtualSourceSearchHandle | null = null;
     const render = () => {
       raf = 0;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
+      spacer.style.height = `${Math.max(1, lines.length * rowHeight)}px`;
       const viewportHeight = scroller.clientHeight || window.innerHeight;
       const overscan = 20;
       const start = Math.max(
         0,
-        Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) - overscan,
+        Math.floor(scroller.scrollTop / rowHeight) - overscan,
       );
       const end = Math.min(
         lines.length,
-        Math.ceil(
-          (scroller.scrollTop + viewportHeight) / VIRTUAL_SOURCE_ROW_HEIGHT,
-        ) + overscan,
+        Math.ceil((scroller.scrollTop + viewportHeight) / rowHeight) + overscan,
       );
-      if (start === renderedStart && end === renderedEnd) return;
+      if (
+        start === renderedStart &&
+        end === renderedEnd &&
+        rowHeight === renderedRowHeight
+      )
+        return;
       renderedStart = start;
       renderedEnd = end;
+      renderedRowHeight = rowHeight;
       windowEl.replaceChildren();
-      windowEl.style.transform = `translateY(${start * VIRTUAL_SOURCE_ROW_HEIGHT}px)`;
+      windowEl.style.transform = `translateY(${start * rowHeight}px)`;
       const fragment = document.createDocumentFragment();
       for (let index = start; index < end; index++) {
         const row = document.createElement("div");
@@ -1861,7 +1868,8 @@ export function createSourceView(deps: SourceViewDeps) {
         " lines loaded from " +
         formatBytes(size) +
         ". More rows load as you scroll.";
-      spacer.style.height = `${Math.max(1, totalRows * VIRTUAL_SOURCE_ROW_HEIGHT)}px`;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
+      spacer.style.height = `${Math.max(1, totalRows * rowHeight)}px`;
     };
 
     const loadPage = (line: number) => {
@@ -1908,27 +1916,34 @@ export function createSourceView(deps: SourceViewDeps) {
     let raf = 0;
     let renderedStart = -1;
     let renderedEnd = -1;
+    let renderedRowHeight = -1;
     let search: VirtualSourceSearchHandle | null = null;
     let searchController: AbortController | null = null;
     const render = () => {
       raf = 0;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
+      spacer.style.height = `${Math.max(1, totalRows * rowHeight)}px`;
       const viewportHeight = scroller.clientHeight || window.innerHeight;
       const overscan = 20;
       const start = Math.max(
         0,
-        Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) - overscan,
+        Math.floor(scroller.scrollTop / rowHeight) - overscan,
       );
       const end = Math.min(
         totalRows,
-        Math.ceil(
-          (scroller.scrollTop + viewportHeight) / VIRTUAL_SOURCE_ROW_HEIGHT,
-        ) + overscan,
+        Math.ceil((scroller.scrollTop + viewportHeight) / rowHeight) + overscan,
       );
-      if (start === renderedStart && end === renderedEnd) return;
+      if (
+        start === renderedStart &&
+        end === renderedEnd &&
+        rowHeight === renderedRowHeight
+      )
+        return;
       renderedStart = start;
       renderedEnd = end;
+      renderedRowHeight = rowHeight;
       windowEl.replaceChildren();
-      windowEl.style.transform = `translateY(${start * VIRTUAL_SOURCE_ROW_HEIGHT}px)`;
+      windowEl.style.transform = `translateY(${start * rowHeight}px)`;
       const fragment = document.createDocumentFragment();
       for (let index = start; index < end; index++) {
         const lineNumber = index + 1;
@@ -2281,6 +2296,7 @@ export function createSourceView(deps: SourceViewDeps) {
         setRoute,
         setPreferredSourceTab,
         createFileBreadcrumb,
+        createRepositoryWebLink,
       },
       target,
       activeTab,
@@ -2304,7 +2320,7 @@ export function createSourceView(deps: SourceViewDeps) {
         }),
       );
     }
-    if (!internalKind) {
+    if (internalKind !== "git") {
       loadRawFileInfo(target).then((meta) => {
         if (
           req !== SOURCE_REQ_SEQ ||
@@ -2340,8 +2356,8 @@ export function createSourceView(deps: SourceViewDeps) {
       card,
       repoTarget,
     );
-    if (internalKind) {
-      renderSourceInternalPath(card, target, internalKind);
+    if (internalKind === "git") {
+      renderSourceInternalPath(card, target);
       return;
     }
     const controller = new AbortController();
@@ -2514,11 +2530,11 @@ export function createSourceView(deps: SourceViewDeps) {
       ".gdp-source-virtual-scroller",
     );
     if (virtualScroller) {
-      const centeredOffset =
-        virtualScroller.clientHeight / 2 - VIRTUAL_SOURCE_ROW_HEIGHT / 2;
+      const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
+      const centeredOffset = virtualScroller.clientHeight / 2 - rowHeight / 2;
       virtualScroller.scrollTop = Math.max(
         0,
-        (line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT - Math.max(0, centeredOffset),
+        (line - 1) * rowHeight - Math.max(0, centeredOffset),
       );
       (
         virtualScroller as HTMLElement & {

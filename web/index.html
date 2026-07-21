@@ -22,7 +22,7 @@
     <a class="brand" href="/" aria-label="Repository home">
       <img class="brand-icon" src="/favicon.png" alt="" width="20" height="20" />
       <span class="title" id="project-title">repository</span>
-      <span id="project-branch" class="project-branch" hidden></span>
+      <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
     </a>
     <nav class="app-menu" aria-label="Views">
       <a class="app-menu-item active" data-route="repo" href="/">Repository</a>
@@ -35,23 +35,24 @@
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations"><span class="goi-icon" aria-hidden="true"></span><span id="annotations-count" hidden></span></button>
       <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
       <button id="doctor-btn" class="global-icon-action" title="environment doctor" aria-label="environment doctor"><span class="goi-icon" aria-hidden="true"></span><span id="doctor-badge" class="doctor-badge" hidden></span></button>
-      <button id="copy-ai-context" class="global-icon-action ai-context-action" title="Copy AI context" aria-label="Copy AI context"><span class="goi-icon" aria-hidden="true"></span><span class="ai-context-label"></span></button>
+      <span class="global-actions-sep" aria-hidden="true"></span>
+      <button id="copy-ai-context" class="global-icon-action" title="Copy AI context" aria-label="Copy AI context"><span class="goi-icon" aria-hidden="true"></span></button>
       <span id="copy-ai-context-feedback" class="goi-feedback" role="status" hidden></span>
-      <button id="auto-update" class="global-icon-action active" title="auto update on file change" aria-label="auto update on file change"><span class="goi-icon" aria-hidden="true"></span><span class="auto-update-label"></span></button>
+      <button id="auto-update" class="global-icon-action active" title="auto update on file change" aria-label="auto update on file change"><span class="goi-icon" aria-hidden="true"></span></button>
       <button id="cancel-requests" class="global-icon-action" title="no in-flight requests" aria-label="no in-flight requests" disabled><span class="goi-icon" aria-hidden="true"></span></button>
       <button id="theme" title="toggle theme" aria-label="toggle theme"></button>
+      <span class="global-actions-sep" aria-hidden="true"></span>
       <span id="status" class="status" role="status" aria-live="polite"><span class="status-label"></span></span>
-      <a id="repo-web-link" class="global-help-link" href="#" target="_blank" rel="noopener" hidden>GitHub</a>
-      <button id="quick-help-btn" class="global-icon-action quick-help-btn" title="quick help (shortcuts)" aria-label="quick help (shortcuts)">?</button>
-      <a class="global-help-link" data-route="help" href="/help">Help</a>
-      <span class="product-label" aria-hidden="true">code viewer</span>
+      <a id="repo-web-link" class="global-icon-link" href="#" target="_blank" rel="noopener" hidden><span class="goi-icon" aria-hidden="true"></span></a>
+      <button id="quick-help-btn" class="global-icon-action" title="quick help (shortcuts)" aria-label="quick help (shortcuts)"><span class="goi-icon" aria-hidden="true"></span></button>
+      <a class="global-icon-link" data-route="help" href="/help"><span class="goi-icon" aria-hidden="true"></span></a>
     </div>
   </header>
   <header id="topbar">
     <div id="meta"></div>
     <div class="ref-pickers">
       <span data-ref-selector-mount data-ref-id="ref-from" data-placeholder="from..."></span>
-      <span class="ref-dots">…</span>
+      <span class="ref-dots" aria-hidden="true"><span class="goi-icon"></span></span>
       <span data-ref-selector-mount data-ref-id="ref-to" data-placeholder="to..."></span>
       <button id="ref-reset" title="reset to HEAD .. worktree" aria-label="reset to HEAD .. worktree"></button>
       <button id="reload-prom" title="reload diff (R)" aria-label="reload diff (R)"></button>
@@ -142,7 +143,7 @@
         <option value="en">English</option>
         <option value="ja">日本語</option>
       </select>
-      <label for="sidebar-font-size">File list font size</label>
+      <label for="sidebar-font-size">UI font size</label>
       <select id="sidebar-font-size">
         <option value="compact">Small</option>
         <option value="regular">Regular</option>

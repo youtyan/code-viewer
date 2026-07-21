@@ -68,6 +68,7 @@ export type BlameViewDeps = {
   ): void;
   setPreferredSourceTab(tab: SourceBlobTab): void;
   createFileBreadcrumb(path: string, ref?: string): HTMLElement;
+  createRepositoryWebLink?(target: SourceFileTarget): HTMLAnchorElement | null;
   removeStandaloneSource(): void;
   placeSidebarToggle(): void;
   escapeHtml(s: unknown): string;
@@ -316,6 +317,7 @@ export function createBlameView(deps: BlameViewDeps) {
         setRoute: deps.setRoute,
         setPreferredSourceTab: deps.setPreferredSourceTab,
         createFileBreadcrumb: deps.createFileBreadcrumb,
+        createRepositoryWebLink: deps.createRepositoryWebLink,
       },
       target,
       "blame",

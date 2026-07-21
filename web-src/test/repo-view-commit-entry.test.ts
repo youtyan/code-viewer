@@ -49,7 +49,12 @@ function makeRepoView(
   overrides: Partial<
     Pick<
       RepoViewDeps,
-      "emptyDirectoryLabel" | "sortColumnLabels" | "commitEntryMeta"
+      | "emptyDirectoryLabel"
+      | "sortColumnLabels"
+      | "commitEntryMeta"
+      | "repositoryWebTarget"
+      | "openGithubLabel"
+      | "openRepositoryWebLabel"
     >
   > = {},
 ) {
@@ -163,6 +168,9 @@ function makeRepoView(
             label: "gitlink",
             title: "Git commit entry is not directly browsable at this ref",
           },
+    repositoryWebTarget: () => null,
+    openGithubLabel: () => "Open on GitHub",
+    openRepositoryWebLabel: () => "Open repository web page",
     fileBadge: (status) => {
       const span = document.createElement("span");
       span.className = `badge ${status || "M"}`;
@@ -430,6 +438,42 @@ describe("repo view commit entries", () => {
 });
 
 describe("repo view localized labels", () => {
+  test("shows the injected repository web target in the toolbar", async () => {
+    setupDom();
+    const root: RepoTreeResponse = {
+      ref: "worktree",
+      path: "src",
+      project: "sample-repo",
+      entries: [],
+    };
+    globalThis.fetch = (async () => response(root)) as unknown as typeof fetch;
+
+    const { view } = makeRepoView(
+      {
+        screen: "repo",
+        ref: "worktree",
+        path: "src",
+        range,
+      },
+      {
+        repositoryWebTarget: () => ({
+          url: "https://github.com/example/sample/tree/main/src",
+          provider: "github",
+        }),
+        openGithubLabel: () => "Open on GitHub",
+      },
+    );
+
+    await view.loadRepo();
+
+    const link = document.querySelector<HTMLAnchorElement>(
+      ".gdp-repo-toolbar .gdp-repo-web-link",
+    );
+    expect(link?.href).toBe("https://github.com/example/sample/tree/main/src");
+    expect(link?.textContent).toBe("Open on GitHub");
+    expect(link?.target).toBe("_blank");
+  });
+
   test("sort headers and the empty-directory message use injected labels", async () => {
     setupDom();
     const root: RepoTreeResponse = {

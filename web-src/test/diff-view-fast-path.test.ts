@@ -2,6 +2,7 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   test,
@@ -103,7 +104,14 @@ const defaultDiffText: DiffViewText = {
 function createDiffViewForShellTest(
   text: DiffViewText = defaultDiffText,
   overrides: Partial<
-    Pick<DiffViewDeps, "getDiffRoot" | "getHljs" | "inferLang"> & {
+    Pick<
+      DiffViewDeps,
+      | "applySourceRouteToShell"
+      | "getDiffRoot"
+      | "getHljs"
+      | "inferLang"
+      | "setRoute"
+    > & {
       syntaxHighlight: boolean;
     }
   > = {},
@@ -129,9 +137,11 @@ function createDiffViewForShellTest(
   }> = [];
   const view = createDiffView({
     STATE: state,
-    setRoute() {
-      /* noop */
-    },
+    setRoute:
+      overrides.setRoute ??
+      (() => {
+        /* noop */
+      }),
     currentRange: () => route.range,
     escapeHtml: (value) => String(value ?? ""),
     trackLoad: (promise) => promise,
@@ -144,9 +154,11 @@ function createDiffViewForShellTest(
       return typeof line === "number" ? line : line.start;
     },
     fileSourceTarget: (file) => ({ path: file.path, ref: "head" }),
-    applySourceRouteToShell() {
-      /* noop */
-    },
+    applySourceRouteToShell:
+      overrides.applySourceRouteToShell ??
+      (() => {
+        /* noop */
+      }),
     setupHunkExpand() {
       /* noop */
     },
@@ -788,6 +800,113 @@ describe("diff view fast path", () => {
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
+  });
+});
+
+describe("diff view preview shortcut", () => {
+  let originalDiff2Html: typeof window.Diff2HtmlUI;
+
+  beforeEach(() => {
+    originalDiff2Html = window.Diff2HtmlUI;
+    window.Diff2HtmlUI = class {
+      constructor(
+        private readonly element: HTMLElement,
+        _diff: string,
+        _options: unknown,
+      ) {}
+
+      draw() {
+        this.element.innerHTML = `
+          <div class="d2h-file-wrapper">
+            <div class="d2h-file-header">
+              <span class="d2h-file-name-wrapper">sample</span>
+            </div>
+            <div class="d2h-file-diff"></div>
+          </div>
+        `;
+      }
+
+      highlightCode() {
+        /* noop */
+      }
+    } as unknown as typeof window.Diff2HtmlUI;
+  });
+
+  afterEach(() => {
+    window.Diff2HtmlUI = originalDiff2Html;
+  });
+
+  test.each([
+    { name: "Markdown", path: "README.md", expected: true },
+    { name: "HTML", path: "web/index.html", expected: true },
+    { name: "TypeScript", path: "web-src/app.ts", expected: false },
+    { name: "image", path: "web/icon.png", expected: false },
+  ])("shows the preview shortcut for $name files: $expected", ({
+    path,
+    expected,
+  }) => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+    const file = makeFile(
+      path,
+      1,
+      0,
+      `/file_diff?path=${encodeURIComponent(path)}`,
+    );
+    const card = document.createElement("article") as DiffCardElement;
+    card.className = "gdp-file-shell";
+    card.innerHTML =
+      '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+    document.querySelector("#diff")?.appendChild(card);
+
+    view.renderFile(
+      file,
+      { path, status: "M", diff: `diff --git a/${path} b/${path}\n` },
+      card,
+    );
+
+    expect(card.querySelector(".gdp-preview-file") !== null).toBe(expected);
+  });
+
+  test("opens a Markdown file directly in the rendered preview", () => {
+    setupDiffDom();
+    const routes: AppRoute[] = [];
+    let sourceRouteApplications = 0;
+    const { view } = createDiffViewForShellTest(defaultDiffText, {
+      setRoute: (route) => routes.push(route),
+      applySourceRouteToShell: () => {
+        sourceRouteApplications++;
+      },
+    });
+    const file = makeFile("README.md", 1, 0, "/file_diff?path=README.md");
+    const card = document.createElement("article") as DiffCardElement;
+    card.className = "gdp-file-shell";
+    card.innerHTML =
+      '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+    document.querySelector("#diff")?.appendChild(card);
+    view.renderFile(
+      file,
+      {
+        path: "README.md",
+        status: "M",
+        diff: "diff --git a/README.md b/README.md\n",
+      },
+      card,
+    );
+
+    card.querySelector<HTMLButtonElement>(".gdp-preview-file")?.click();
+
+    expect(routes).toEqual([
+      {
+        screen: "file",
+        path: "README.md",
+        ref: "head",
+        view: "blob",
+        preview: true,
+        range: { from: "base", to: "head" },
+      },
+    ]);
+    expect(sourceRouteApplications).toBe(1);
   });
 });
 

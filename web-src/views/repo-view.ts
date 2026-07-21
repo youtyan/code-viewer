@@ -30,6 +30,7 @@ import type {
   SidebarItem,
   UndoActionResponse,
 } from "../core/types";
+import { createRepositoryWebLink as renderRepositoryWebLink } from "./repository-web-link";
 import { sidebarAncestorDirs } from "./sidebar";
 import {
   showAlertDialog,
@@ -97,6 +98,12 @@ export type RepoViewDeps = {
     label: string;
     title: string;
   };
+  repositoryWebTarget(
+    path: string,
+    ref: string,
+  ): { url: string; provider: "github" | "web" } | null;
+  openGithubLabel(): string;
+  openRepositoryWebLabel(): string;
   fileBadge(status?: string): HTMLElement;
   $: <T extends Element = HTMLElement>(sel: string) => T;
   STATE: {
@@ -154,6 +161,9 @@ export function createRepoView(deps: RepoViewDeps) {
     repositoryFallback,
     repositoryRootFallback,
     commitEntryMeta,
+    repositoryWebTarget,
+    openGithubLabel,
+    openRepositoryWebLabel,
     fileBadge,
   } = deps;
 
@@ -367,6 +377,19 @@ export function createRepoView(deps: RepoViewDeps) {
       }
     });
     return button;
+  }
+
+  function createRepositoryWebLink(
+    path: string,
+    ref: string,
+  ): HTMLAnchorElement | null {
+    const target = repositoryWebTarget(path, ref);
+    if (!target) return null;
+    const label =
+      target.provider === "github"
+        ? openGithubLabel()
+        : openRepositoryWebLabel();
+    return renderRepositoryWebLink(target, label);
   }
 
   function showRepoContextMenu(
@@ -673,6 +696,11 @@ export function createRepoView(deps: RepoViewDeps) {
       ),
     );
     toolbar.appendChild(pathHeader);
+    const repositoryWebLink = createRepositoryWebLink(
+      meta.path || "",
+      meta.ref,
+    );
+    if (repositoryWebLink) toolbar.appendChild(repositoryWebLink);
     if (canTrashWorktreeRef(meta.ref)) {
       toolbar.appendChild(
         createNewFolderButton(meta.path || "", () => loadRepo()),

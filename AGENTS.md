@@ -55,6 +55,15 @@ Trusted Publisher setup verification, or npm-specific troubleshooting.
 - Interactive controls must keep stable box dimensions across idle, hover, focus, loading, success, warning, disabled, and updated states. Never change button labels, padding, borders, or result text in a way that shifts the clickable target after the user acts. Reserve fixed space up front or use icon-only state indicators.
 - Add new UI patterns only when they are truly necessary. First verify that existing classes cannot solve the requirement in combination.
 
+## Datastore Page Glass Theme
+
+- The datastore page (`.db-root`) has a scoped "premium glass" decoration layer at the end of `web/style.css` (search for "Datastore page — premium glass theme").
+- All glass colors derive from the existing theme tokens via `color-mix`, so light/dark follow automatically. Do not hardcode hex colors there.
+- Shared glass recipes live in custom properties on `.db-root`: `--db-glass-bg`, `--db-glass-bg-strong`, `--db-glass-border`, `--db-glass-blur`, `--db-glass-shadow`, `--db-focus-ring`. Reuse them instead of inventing new values.
+- Elements attached outside `.db-root` (e.g. `.s3-key-tooltip` on `document.body`) do not inherit those variables; give each `var()` a fallback.
+- State changes (hover/active/focus) must stay background/box-shadow/color only — never change padding or borders, per the stable-box rule above.
+- A second "aurora & glow boost" layer follows it: an animated `.db-root::before` aurora (kept behind content via `isolation: isolate` + `z-index: -1`, disabled under `prefers-reduced-motion`) plus accent glows on active tabs/rows. Keep its selectors layout-neutral as well.
+
 ## Desktop-Only UI Scope
 
 - This app is a local desktop tool. Do not spend implementation effort on phone or narrow mobile layouts unless the user explicitly asks for mobile support in that specific task.

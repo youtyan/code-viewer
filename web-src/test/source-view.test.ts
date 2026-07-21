@@ -23,6 +23,7 @@ afterAll(() => {
 
 afterEach(() => {
   document.body.innerHTML = "";
+  document.body.removeAttribute("style");
 });
 
 function createSourceViewForCursorTest(
@@ -101,6 +102,7 @@ describe("source view cursor", () => {
           </tbody></table>
         </main>
       `,
+      bodyStyle: "--code-line-height: 24px",
       expected: 20,
     },
     {
@@ -113,10 +115,18 @@ describe("source view cursor", () => {
           <div class="gdp-markdown-preview" style="line-height: 31px">preview</div>
         </main>
       `,
+      bodyStyle: "--code-line-height: 24px",
       expected: 31,
     },
-  ])("reads the row height from the $name", ({ html, expected }) => {
+    {
+      name: "configured code line height when no source surface is mounted",
+      html: '<main id="content"></main>',
+      bodyStyle: "--code-line-height: 24px",
+      expected: 24,
+    },
+  ])("reads the row height from the $name", ({ html, bodyStyle, expected }) => {
     document.body.innerHTML = html;
+    document.body.style.cssText = bodyStyle;
     const route: AppRoute = {
       screen: "file",
       path: "src/example.ts",
@@ -127,6 +137,46 @@ describe("source view cursor", () => {
     const view = createSourceViewForCursorTest(route);
 
     expect(view.sourceLineScrollAmount()).toBe(expected);
+  });
+
+  test("sizes the virtual source spacer from the configured code line height", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    document.body.style.setProperty("--code-line-height", "24px");
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/file_range") {
+          return new Response(
+            JSON.stringify({
+              path: "big.txt",
+              ref: "worktree",
+              start: 1,
+              end: 100,
+              lines: ["line one"],
+              total: 100,
+              complete: true,
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
+    });
+    const view = createSourceViewForCursorTest(blobRoute("big.txt"), {
+      loadRawFileInfo: async () => ({ size: 2 * 1024 * 1024 }),
+    });
+
+    await view.renderStandaloneSource({ path: "big.txt", ref: "worktree" });
+
+    expect(
+      document.querySelector<HTMLElement>(".gdp-source-virtual-spacer")?.style
+        .height,
+    ).toBe("2400px");
   });
 
   test("updates only rendered source rows when syncing the cursor", () => {
@@ -212,6 +262,49 @@ function installRawFileFetchMock(responses?: { failFirst?: boolean }): {
   });
   return { calls: () => calls };
 }
+
+describe("internal source paths", () => {
+  test.each([
+    {
+      name: "tool-managed state is rendered as source",
+      path: ".code-viewer/view-state.json",
+      expectedRawFileCalls: 1,
+      expectedCode: "line one",
+      expectedUnavailable: false,
+    },
+    {
+      name: "git internals remain unavailable",
+      path: ".git/config",
+      expectedRawFileCalls: 0,
+      expectedCode: null,
+      expectedUnavailable: true,
+    },
+  ])("$name", async ({
+    path,
+    expectedRawFileCalls,
+    expectedCode,
+    expectedUnavailable,
+  }) => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    const fetchMock = installRawFileFetchMock();
+    const view = createSourceViewForCursorTest(blobRoute(path));
+
+    await view.renderStandaloneSource({ path, ref: "worktree" });
+
+    expect(fetchMock.calls()).toBe(expectedRawFileCalls);
+    expect(
+      document.querySelector<HTMLElement>(".gdp-source-line-code")
+        ?.textContent ?? null,
+    ).toBe(expectedCode);
+    expect(
+      document.querySelector(".gdp-source-viewer.unsupported") !== null,
+    ).toBe(expectedUnavailable);
+    expect(
+      document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+        .sourceState,
+    ).toBe("done");
+  });
+});
 
 describe("renderStandaloneSource idempotency", () => {
   test("re-invoking with the mounted target is a no-op (single load, single card)", async () => {

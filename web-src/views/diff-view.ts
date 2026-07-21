@@ -13,6 +13,7 @@ import {
   iconSvg,
 } from "../core/icons";
 import type { AppRoute, SourceLineTarget } from "../core/routes";
+import { isPreviewableSource } from "../core/source-meta";
 import type {
   DiffCardElement,
   DiffMeta,
@@ -252,7 +253,9 @@ export function createDiffView(deps: DiffViewDeps) {
     const el = document.querySelector<HTMLElement>("#project-branch");
     if (!el) return;
     el.hidden = !branch;
-    el.textContent = branch;
+    // Keep the static icon markup intact; only the name text changes.
+    const name = el.querySelector<HTMLElement>(".project-branch-name");
+    if (name) name.textContent = branch;
     el.title = branch ? `Current branch: ${branch}` : "";
   }
 
@@ -1314,8 +1317,11 @@ export function createDiffView(deps: DiffViewDeps) {
     }
     const unfold = card.querySelector<HTMLButtonElement>(".gdp-file-unfold");
     if (unfold) unfold.disabled = collapsed;
-    const viewFile = card.querySelector<HTMLButtonElement>(".gdp-view-file");
-    if (viewFile) viewFile.disabled = collapsed;
+    card
+      .querySelectorAll<HTMLButtonElement>(".gdp-preview-file, .gdp-view-file")
+      .forEach((button) => {
+        button.disabled = collapsed;
+      });
   }
 
   function setViewFileButtonState(
@@ -1549,6 +1555,30 @@ export function createDiffView(deps: DiffViewDeps) {
       wrap.appendChild(box);
     }
     header.appendChild(wrap);
+    if (
+      !header.querySelector(".gdp-preview-file") &&
+      isPreviewableSource(fileSourceTarget(file).path)
+    ) {
+      const previewFile = document.createElement("button");
+      previewFile.type = "button";
+      previewFile.className = "gdp-preview-file gdp-btn gdp-btn-sm";
+      previewFile.textContent = "Preview";
+      previewFile.title = "Preview rendered file";
+      previewFile.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const target = fileSourceTarget(file);
+        setRoute({
+          screen: "file",
+          path: target.path,
+          ref: target.ref,
+          view: "blob",
+          preview: true,
+          range: currentRange(),
+        });
+        applySourceRouteToShell();
+      });
+      header.appendChild(previewFile);
+    }
     if (!header.querySelector(".gdp-view-file")) {
       const viewFile = document.createElement("button");
       viewFile.type = "button";

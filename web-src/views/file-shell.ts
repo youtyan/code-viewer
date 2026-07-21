@@ -25,6 +25,7 @@ export type FileViewTabDeps = {
 
 export type FileShellStickyDeps = FileViewTabDeps & {
   createFileBreadcrumb(path: string, ref?: string): HTMLElement;
+  createRepositoryWebLink?(target: SourceFileTarget): HTMLAnchorElement | null;
 };
 
 export type FileViewTabsOptions = {
@@ -230,6 +231,8 @@ export function createFileShellSticky(
   name.appendChild(deps.createFileBreadcrumb(target.path, target.ref));
   name.appendChild(createFilePathCopyButton(target));
   header.appendChild(name);
+  const repositoryWebLink = deps.createRepositoryWebLink?.(target);
+  if (repositoryWebLink) header.appendChild(repositoryWebLink);
   sticky.appendChild(header);
   const tabsHost = document.createElement("div");
   tabsHost.className = "gdp-file-detail-tabs";

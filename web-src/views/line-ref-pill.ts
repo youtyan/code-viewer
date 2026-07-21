@@ -10,6 +10,12 @@ import {
   fileReferenceWithCodeClipboardText,
 } from "../core/file-path-copy";
 import { escapeHtml } from "../core/html-escape";
+import {
+  COPY_16_PATHS,
+  iconSvg,
+  MARK_GITHUB_16_PATH,
+  OPEN_EXTERNAL_16_PATH,
+} from "../core/icons";
 import { EXT_TO_LANG } from "../core/source-meta";
 
 export type LineRefPill = {
@@ -23,6 +29,15 @@ export type LineRefPillDeps = {
   // route's line param, or clear a diff drag-selection). This module stays
   // route-agnostic and only renders/hides the pill itself.
   onClose: () => void;
+  githubUrlForSelection: (
+    path: string,
+    start: number,
+    end: number,
+  ) => string | null;
+  copyReferenceLabel: () => string;
+  lineCountLabel: (count: number) => string;
+  githubOpenTitle: () => string;
+  githubCopyTitle: () => string;
 };
 
 const COPY_ICON =
@@ -114,8 +129,6 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
   const copyButton = document.createElement("button");
   copyButton.id = "line-ref-pill-copy";
   copyButton.type = "button";
-  copyButton.title =
-    "選択行の参照をコピー（Claude Code / Codex に貼り付け用）。Shift+Click でコード本体も添付。";
 
   const closeButton = document.createElement("button");
   closeButton.id = "line-ref-pill-close";
@@ -124,15 +137,56 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
   closeButton.setAttribute("aria-label", "選択を解除");
   closeButton.textContent = "×";
 
-  pill.appendChild(copyButton);
-  pill.appendChild(closeButton);
+  const githubActions = document.createElement("div");
+  githubActions.id = "line-ref-pill-github-actions";
+  githubActions.hidden = true;
+
+  const githubOpen = document.createElement("a");
+  githubOpen.id = "line-ref-pill-github-open";
+  githubOpen.target = "_blank";
+  githubOpen.rel = "noopener";
+  githubOpen.innerHTML =
+    iconSvg("octicon-mark-github", MARK_GITHUB_16_PATH) +
+    '<span class="lrp-github-open-label"></span>' +
+    iconSvg("octicon-link-external", OPEN_EXTERNAL_16_PATH);
+
+  const githubCopy = document.createElement("button");
+  githubCopy.id = "line-ref-pill-github-copy";
+  githubCopy.type = "button";
+  githubCopy.innerHTML =
+    `<span class="lrp-github-copy-icon">${iconSvg("octicon-copy", COPY_16_PATHS)}</span>` +
+    '<span class="lrp-github-copy-label"></span>';
+
+  githubActions.append(githubOpen, githubCopy);
+  pill.append(copyButton, githubActions, closeButton);
   document.body.appendChild(pill);
 
   let refText = "";
   let currentPath = "";
   let currentStart = 0;
   let currentEnd = 0;
+  let githubUrl = "";
   let feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+  let githubFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function renderGithubActions() {
+    const openTitle = deps.githubOpenTitle();
+    const copyTitle = deps.githubCopyTitle();
+    githubOpen.title = openTitle;
+    githubOpen.setAttribute("aria-label", openTitle);
+    githubCopy.title = copyTitle;
+    githubCopy.setAttribute("aria-label", copyTitle);
+    const openLabel = githubOpen.querySelector<HTMLElement>(
+      ".lrp-github-open-label",
+    );
+    if (openLabel) openLabel.textContent = openTitle;
+    const copyLabel = githubCopy.querySelector<HTMLElement>(
+      ".lrp-github-copy-label",
+    );
+    if (copyLabel) copyLabel.textContent = copyTitle;
+    githubOpen.href = githubUrl || "#";
+    githubActions.hidden = !githubUrl;
+  }
 
   // Lines spanned by the active selection. Only meaningful once `show()` has
   // set currentStart/currentEnd; callers gate display on count > 1 so a
@@ -145,32 +199,24 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     const count = selectionLineCount();
     if (count <= 1) return "";
     const warn = count >= AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD;
-    return `<span class="lrp-count${warn ? " lrp-count-warn" : ""}">${count} lines</span>`;
+    return `<span class="lrp-count${warn ? " lrp-count-warn" : ""}">${escapeHtml(deps.lineCountLabel(count))}</span>`;
   }
 
   function render(state: "ready" | "copied" | "copied-code" | "failed") {
-    pill.classList.toggle(
+    copyButton.classList.toggle(
       "copied",
       state === "copied" || state === "copied-code",
     );
-    if (state === "copied") {
-      copyButton.innerHTML = `${CHECK_ICON}<span class="lrp-label">Copied!</span>`;
-      return;
-    }
-    if (state === "copied-code") {
-      const count = selectionLineCount();
-      const suffix = count > 1 ? ` (${count} lines)` : "";
-      copyButton.innerHTML = `${CHECK_ICON}<span class="lrp-label">Copied + code${suffix}</span>`;
-      return;
-    }
-    if (state === "failed") {
-      copyButton.innerHTML = `${COPY_ICON}<span class="lrp-label">copy failed</span>`;
-      return;
-    }
+    copyButton.classList.toggle("failed", state === "failed");
+    const icon =
+      state === "copied" || state === "copied-code" ? CHECK_ICON : COPY_ICON;
+    const label = deps.copyReferenceLabel();
     copyButton.innerHTML =
-      `${COPY_ICON}<span class="lrp-label">Copy</span>` +
+      `${icon}<span class="lrp-label">${escapeHtml(label)}</span>` +
       `<span class="lrp-ref">${escapeHtml(refText)}</span>` +
       countBadgeHtml();
+    copyButton.title = label;
+    copyButton.setAttribute("aria-label", label);
   }
 
   copyButton.addEventListener("click", async (event) => {
@@ -204,6 +250,29 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     }, 1200);
   });
 
+  githubCopy.addEventListener("click", async () => {
+    if (!githubUrl) return;
+    try {
+      await navigator.clipboard.writeText(githubUrl);
+      githubCopy.classList.add("copied");
+      const icon = githubCopy.querySelector<HTMLElement>(
+        ".lrp-github-copy-icon",
+      );
+      if (icon) icon.innerHTML = CHECK_ICON;
+    } catch {
+      githubCopy.classList.add("failed");
+    }
+    if (githubFeedbackTimer) clearTimeout(githubFeedbackTimer);
+    githubFeedbackTimer = setTimeout(() => {
+      githubFeedbackTimer = null;
+      githubCopy.classList.remove("copied", "failed");
+      const icon = githubCopy.querySelector<HTMLElement>(
+        ".lrp-github-copy-icon",
+      );
+      if (icon) icon.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+    }, 1200);
+  });
+
   closeButton.addEventListener("click", () => {
     deps.onClose();
   });
@@ -217,6 +286,9 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
       currentPath = path;
       currentStart = Math.max(1, Math.floor(Math.min(start, end)));
       currentEnd = Math.max(1, Math.floor(Math.max(start, end)));
+      githubUrl =
+        deps.githubUrlForSelection(currentPath, currentStart, currentEnd) || "";
+      renderGithubActions();
       if (feedbackTimer) {
         clearTimeout(feedbackTimer);
         feedbackTimer = null;
@@ -235,6 +307,8 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
       currentPath = "";
       currentStart = 0;
       currentEnd = 0;
+      githubUrl = "";
+      githubActions.hidden = true;
       pill.hidden = true;
     },
   };
