@@ -6187,6 +6187,21 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   color: var(--fg-subtle);
   white-space: nowrap;
 }
+.annotation-session-count {
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 6px;
+}
+.annotation-session.active .annotation-session-count {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .annotation-entries {
   list-style: none;
   margin: 0;
@@ -6222,16 +6237,34 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   min-width: 0;
 }
 .annotation-entry-open::before {
+  /* Step number rendered as a chip so the reading order is scannable.
+     Neutral by default, accent-tinted inside the active session, solid
+     accent on the currently open entry. */
   content: counter(annotation-step);
   grid-row: 1 / span 3;
-  color: var(--fg-subtle);
-  font-size: 11px;
-  line-height: 1.6;
+  align-self: start;
+  margin-top: 5px;
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
   text-align: center;
 }
-.annotation-entries li.active .annotation-entry-open::before {
+.annotation-session.active .annotation-entry-open::before {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
   color: var(--accent);
-  font-weight: 600;
+}
+.annotation-entries li.active .annotation-entry-open::before {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
 }
 .annotation-entry-location {
   grid-column: 2;
@@ -6314,8 +6347,18 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   white-space: nowrap;
 }
 #annotation-detail-step {
+  /* Matches the step chips on the inline comment boxes so the reader can
+     tell at a glance which walkthrough step is open. */
+  flex: none;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-subtle);
+  color: var(--accent);
   font-size: 11px;
-  color: var(--fg-subtle);
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 8px;
+  white-space: nowrap;
 }
 #annotation-detail-time {
   flex: none;
@@ -6395,9 +6438,46 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   border-left-color: var(--attn);
   box-shadow: 0 0 0 1px var(--attn) inset;
 }
-.gdp-annotation-inline-title {
-  display: block;
+.gdp-annotation-inline-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 6px;
+}
+.gdp-annotation-inline-title {
+  flex: 1;
+  min-width: 0;
+}
+.gdp-annotation-step {
+  /* Step chip on the inline comment box: shows "n/total" so the
+     walkthrough order is visible right inside the code, and doubles as
+     the button that opens the entry in the detail dock. */
+  flex: none;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.gdp-annotation-step:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.gdp-annotation-row.active .gdp-annotation-step,
+.gdp-db-annotation-inline.active .gdp-annotation-step {
+  border-color: var(--attn);
+  color: var(--attn);
+  background: transparent;
+}
+.gdp-annotation-row.active .gdp-annotation-step:hover,
+.gdp-db-annotation-inline.active .gdp-annotation-step:hover {
+  background: var(--attn);
+  color: #fff;
 }
 .gdp-annotation-inline-body pre {
   max-width: 100%;
@@ -6440,8 +6520,8 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   border-color: var(--danger);
 }
 .gdp-annotation-inline-copy {
-  float: right;
-  margin-left: 8px;
+  flex: none;
+  margin-left: auto;
 }
 .annotation-edit-form {
   display: flex;

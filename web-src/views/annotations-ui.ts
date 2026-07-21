@@ -40,6 +40,8 @@ import { diffRowHasAfterChange } from "./diff-line-select";
 import { showConfirmDialog, showPromptDialog } from "./ui-dialog";
 
 export const ANNOTATION_SESSION_PARAM = "annotationSession";
+const ANNOTATION_PANEL_PARAM = "annotations";
+const ANNOTATION_ENTRY_PARAM = "annotation";
 
 export type AnnotationsUiDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -90,7 +92,7 @@ export type AnnotationsUi = {
   refreshAnnotations(): Promise<void>;
   /** Handle a raw `annotations` SSE payload. */
   handleSse(raw: string): void;
-  /** Append/remove the annotationSession query param on a URL. */
+  /** Append/remove annotation panel and selection query params on a URL. */
   withSessionParam(rawUrl: string): string;
   /** Re-read the session param from location (popstate) and re-render. */
   restoreSessionFromUrl(): void;
@@ -117,14 +119,17 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
 
   let ANNOTATIONS: AnnotationsState = { version: 1, sessions: [] };
   let annotationFollow = deps.getAnnotationFollow();
-  let activeAnnotationId: string | null = null;
+  const initialUrlParams = new URLSearchParams(window.location.search);
+  let activeAnnotationId: string | null = initialUrlParams.get(
+    ANNOTATION_ENTRY_PARAM,
+  );
   let refreshAnnotationsInFlight: Promise<void> | null = null;
   let inlineAnnotationsMounted = false;
   let databaseAnnotationsMounted = false;
   let annotationPanelDismissed = false;
-  let activeSessionId: string | null = new URLSearchParams(
-    window.location.search,
-  ).get(ANNOTATION_SESSION_PARAM);
+  let activeSessionId: string | null = initialUrlParams.get(
+    ANNOTATION_SESSION_PARAM,
+  );
   const annotationsChangedCallbacks: Array<() => void> = [];
   function notifyAnnotationsChanged() {
     for (const cb of annotationsChangedCallbacks) cb();
@@ -193,8 +198,14 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       const qhPanel = document.getElementById("query-history-panel");
       if (qhPanel) qhPanel.hidden = true;
       document.body.classList.remove("query-history-panel-open");
+    } else if (activeAnnotationId) {
+      activeAnnotationId = null;
+      annotationDetail.hidden = true;
+      updateActiveHighlights();
+      syncInlineAnnotationActive();
     }
     deps.setAnnotationPanelOpenState(open);
+    syncSessionUrl();
     applyInlineAnnotations();
   }
 
@@ -241,18 +252,48 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
 
   function withSessionParam(rawUrl: string): string {
     const url = new URL(rawUrl, window.location.origin);
+    if (!annotationPanel.hidden)
+      url.searchParams.set(ANNOTATION_PANEL_PARAM, "open");
+    else url.searchParams.delete(ANNOTATION_PANEL_PARAM);
     if (activeSessionId)
       url.searchParams.set(ANNOTATION_SESSION_PARAM, activeSessionId);
     else url.searchParams.delete(ANNOTATION_SESSION_PARAM);
+    if (activeAnnotationId)
+      url.searchParams.set(ANNOTATION_ENTRY_PARAM, activeAnnotationId);
+    else url.searchParams.delete(ANNOTATION_ENTRY_PARAM);
     return url.pathname + url.search;
   }
 
   // Inline annotation rows: the explanation is rendered directly under its
   // target code line (diff or standalone source) so the reader does not have
   // to glance back and forth between code and the side panel.
+  // Step chip shared by the inline row and the DB annotation head: clicking
+  // it opens the entry in the detail dock, so the walkthrough order is
+  // navigable straight from the code. The label matches the panel list
+  // numbering and the detail dock's "n/total" counter.
+  function createStepChip(
+    entry: AnnotationEntry,
+    step: { index: number; total: number },
+  ): HTMLButtonElement {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "gdp-annotation-step";
+    chip.textContent = `${step.index + 1}/${step.total}`;
+    chip.title = `open step ${step.index + 1} of ${step.total}`;
+    chip.setAttribute(
+      "aria-label",
+      `open annotation step ${step.index + 1} of ${step.total}`,
+    );
+    chip.addEventListener("click", () => {
+      void openAnnotationEntry(entry.id);
+    });
+    return chip;
+  }
+
   function buildInlineAnnotationRow(
     entry: AnnotationEntry,
     colSpan: number,
+    step: { index: number; total: number },
   ): HTMLTableRowElement {
     const tr = document.createElement("tr");
     tr.className = "gdp-annotation-row";
@@ -262,13 +303,17 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     td.colSpan = colSpan;
     const box = document.createElement("div");
     box.className = "gdp-annotation-inline";
+    const head = document.createElement("div");
+    head.className = "gdp-annotation-inline-head";
+    head.appendChild(createStepChip(entry, step));
     if (entry.title) {
       const heading = document.createElement("strong");
       heading.className = "gdp-annotation-inline-title";
       heading.textContent = entry.title;
-      box.appendChild(heading);
+      head.appendChild(heading);
     }
-    box.appendChild(createCopyRefButton(entry, "gdp-annotation-inline-copy"));
+    head.appendChild(createCopyRefButton(entry, "gdp-annotation-inline-copy"));
+    box.appendChild(head);
     const markdown = document.createElement("div");
     markdown.className = "gdp-annotation-inline-body";
     ensureMarkdownHighlighter();
@@ -283,7 +328,10 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     return tr;
   }
 
-  function buildDatabaseAnnotationBlock(entry: AnnotationEntry): HTMLElement {
+  function buildDatabaseAnnotationBlock(
+    entry: AnnotationEntry,
+    step: { index: number; total: number },
+  ): HTMLElement {
     const box = document.createElement("div");
     box.className = "gdp-db-annotation-inline";
     box.dataset.annotationId = entry.id;
@@ -300,7 +348,12 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     const location = document.createElement("span");
     location.className = "gdp-db-annotation-inline-location";
     location.textContent = annotationLocationLabel(entry);
-    head.append(title, location, createCopyRefButton(entry));
+    head.append(
+      createStepChip(entry, step),
+      title,
+      location,
+      createCopyRefButton(entry),
+    );
     const markdown = document.createElement("div");
     markdown.className = "gdp-db-annotation-inline-body";
     ensureMarkdownHighlighter();
@@ -331,7 +384,12 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     strip.className = "gdp-db-annotation-strip";
     strip.setAttribute("aria-label", "Datastore annotations");
     for (const entry of matches) {
-      strip.appendChild(buildDatabaseAnnotationBlock(entry));
+      strip.appendChild(
+        buildDatabaseAnnotationBlock(entry, {
+          index: session.entries.indexOf(entry),
+          total: session.entries.length,
+        }),
+      );
     }
     root.prepend(strip);
     databaseAnnotationsMounted = true;
@@ -423,17 +481,24 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     applyDatabaseAnnotations(session);
     if (!session) return;
     let mountedInlineRows = false;
-    for (const entry of session.entries) {
-      if (entry.target?.kind === "database") continue;
+    session.entries.forEach((entry, index) => {
+      // The index is over ALL session entries (DB targets included) so the
+      // chip numbering matches the panel list and the detail dock counter.
+      if (entry.target?.kind === "database") return;
       const target = inlineAnnotationTargetRow(entry);
-      if (!target) continue;
+      if (!target) return;
       // Keep document order when several annotations land on the same line.
       let anchor: HTMLTableRowElement = target;
       while (
         anchor.nextElementSibling?.classList.contains("gdp-annotation-row")
       )
         anchor = anchor.nextElementSibling as HTMLTableRowElement;
-      anchor.after(buildInlineAnnotationRow(entry, target.cells.length));
+      anchor.after(
+        buildInlineAnnotationRow(entry, target.cells.length, {
+          index,
+          total: session.entries.length,
+        }),
+      );
       const sibling = siblingSideRow(target);
       if (sibling) {
         let sibAnchor: HTMLTableRowElement = sibling;
@@ -444,7 +509,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         sibAnchor.after(buildInlineSpacerRow(entry, sibling.cells.length));
       }
       mountedInlineRows = true;
-    }
+    });
     inlineAnnotationsMounted = mountedInlineRows;
     syncInlineAnnotationWidths();
   }
@@ -499,17 +564,24 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   function setActiveSession(sessionId: string | null) {
     if (activeSessionId === sessionId) return;
     activeSessionId = sessionId;
+    activeAnnotationId = null;
+    annotationDetail.hidden = true;
     syncSessionUrl();
     updateActiveHighlights();
+    syncInlineAnnotationActive();
     applyInlineAnnotations();
     notifyAnnotationsChanged();
   }
 
   function restoreSessionFromUrl() {
-    activeSessionId = new URLSearchParams(window.location.search).get(
-      ANNOTATION_SESSION_PARAM,
+    const params = new URLSearchParams(window.location.search);
+    activeSessionId = params.get(ANNOTATION_SESSION_PARAM);
+    activeAnnotationId = params.get(ANNOTATION_ENTRY_PARAM);
+    setAnnotationPanelOpen(
+      params.get(ANNOTATION_PANEL_PARAM) === "open" || !!activeAnnotationId,
     );
     renderAnnotationPanel();
+    restoreAnnotationDetailFromState();
     applyInlineAnnotations();
   }
 
@@ -659,9 +731,8 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       syncSessionUrl();
     }
     renderAnnotationPanel();
+    restoreAnnotationDetailFromState();
     applyInlineAnnotations();
-    if (activeAnnotationId && !findAnnotation(activeAnnotationId))
-      hideAnnotationDetail();
     notifyAnnotationsChanged();
   }
 
@@ -845,6 +916,12 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       time.className = "annotation-session-time";
       time.textContent = annotationTimeLabel(session.created_at);
       time.title = session.created_at;
+      // Total step count, visible before opening the session so the reader
+      // knows how long the walkthrough is.
+      const count = document.createElement("span");
+      count.className = "annotation-session-count";
+      count.textContent = String(session.entries.length);
+      count.title = `${session.entries.length} steps`;
       title.addEventListener("click", () => {
         // Click toggles: selecting shows this session inline, re-clicking
         // the active session clears the inline walkthrough.
@@ -888,7 +965,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         if (!ok) return;
         void postAnnotationAction({ action: "delete", id: session.id });
       });
-      head.append(title, time, rename, del);
+      head.append(title, count, time, rename, del);
       sessionEl.appendChild(head);
 
       const list = document.createElement("ol");
@@ -964,6 +1041,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   function hideAnnotationDetail() {
     activeAnnotationId = null;
     annotationDetail.hidden = true;
+    syncSessionUrl();
     updateActiveHighlights();
     syncInlineAnnotationActive();
   }
@@ -1022,6 +1100,26 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     setAnnotationPanelOpen(true);
     updateActiveHighlights();
     syncInlineAnnotationActive();
+  }
+
+  function restoreAnnotationDetailFromState() {
+    if (!activeAnnotationId) {
+      annotationDetail.hidden = true;
+      updateActiveHighlights();
+      syncInlineAnnotationActive();
+      return;
+    }
+    const found = findAnnotation(activeAnnotationId);
+    if (!found) {
+      activeAnnotationId = null;
+      annotationDetail.hidden = true;
+      syncSessionUrl();
+      updateActiveHighlights();
+      syncInlineAnnotationActive();
+      return;
+    }
+    activeSessionId = found.session.id;
+    showAnnotationDetail(found.session, found.entry, found.index);
   }
 
   // In-place retarget of the source line highlight, used when an entry
@@ -1299,8 +1397,14 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     if (persist) deps.setAnnotationPanelWidth(clamped);
   }
 
-  // Restore the panel open/closed state and width across reloads.
-  if (deps.getAnnotationPanelOpen()) setAnnotationPanelOpen(true);
+  // URL state wins on reload; the persisted preference remains the fallback
+  // for URLs that do not carry annotation state yet.
+  if (
+    initialUrlParams.get(ANNOTATION_PANEL_PARAM) === "open" ||
+    activeAnnotationId ||
+    deps.getAnnotationPanelOpen()
+  )
+    setAnnotationPanelOpen(true);
   applyAnnotationPanelWidth(
     deps.getAnnotationPanelWidth() ?? ANNOTATION_PANEL_DEFAULT_WIDTH,
     false,

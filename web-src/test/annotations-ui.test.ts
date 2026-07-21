@@ -12,7 +12,7 @@ import { createAnnotationsUi } from "../views/annotations-ui";
 import { deferred, q } from "./_test-helpers";
 
 beforeAll(() => {
-  GlobalRegistrator.register();
+  GlobalRegistrator.register({ url: "http://localhost/" });
 });
 
 afterAll(() => {
@@ -56,7 +56,7 @@ function createDeps(
 ): AnnotationsUiDeps {
   return {
     $: <T extends Element = HTMLElement>(sel: string) => q<T>(document, sel),
-    diffCardSelector: () => "",
+    diffCardSelector: () => ".missing-diff-card",
     diffRowLineNumber: () => null,
     focusDiffLine: () => false,
     scrollDiffElementIntoView: () => undefined,
@@ -102,6 +102,119 @@ describe("annotations detail panel nav buttons", () => {
     expect(next.getAttribute("aria-label")).toBe("next annotation");
     expect(prev.title).toBe("previous annotation");
     expect(next.title).toBe("next annotation");
+  });
+});
+
+describe("annotation URL state", () => {
+  test("writes panel and selected annotation state into the current URL", async () => {
+    setupDom();
+    window.history.replaceState(null, "", "/file?path=sample.ts");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          version: 1,
+          sessions: [
+            {
+              id: "session-1",
+              title: "Sample session",
+              created_at: "2026-01-01T00:00:00.000Z",
+              entries: [
+                {
+                  id: "entry-1",
+                  path: "sample.ts",
+                  line: { start: 2, end: 2 },
+                  range: { from: "HEAD", to: "worktree" },
+                  title: "Sample note",
+                  body: "Sample body",
+                  created_at: "2026-01-01T00:00:00.000Z",
+                },
+              ],
+            },
+          ],
+        }),
+      }) as Response) as unknown as typeof fetch;
+    try {
+      const ui = createAnnotationsUi(createDeps());
+      await ui.refreshAnnotations();
+
+      q<HTMLButtonElement>(document, "#annotations-toggle").click();
+      expect(
+        new URLSearchParams(window.location.search).get("annotations"),
+      ).toBe("open");
+
+      await ui.openAnnotationEntry("entry-1");
+      const selectedParams = new URLSearchParams(window.location.search);
+      expect(selectedParams.get("annotations")).toBe("open");
+      expect(selectedParams.get("annotationSession")).toBe("session-1");
+      expect(selectedParams.get("annotation")).toBe("entry-1");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test.each([
+    {
+      name: "open panel",
+      url: "/file?path=sample.ts&annotations=open",
+      expectedDetailHidden: true,
+      expectedActiveEntry: null,
+    },
+    {
+      name: "selected annotation",
+      url: "/file?path=sample.ts&annotations=open&annotationSession=session-1&annotation=entry-1",
+      expectedDetailHidden: false,
+      expectedActiveEntry: "entry-1",
+    },
+  ])("restores $name after reload", async ({
+    url,
+    expectedDetailHidden,
+    expectedActiveEntry,
+  }) => {
+    setupDom();
+    window.history.replaceState(null, "", url);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          version: 1,
+          sessions: [
+            {
+              id: "session-1",
+              title: "Sample session",
+              created_at: "2026-01-01T00:00:00.000Z",
+              entries: [
+                {
+                  id: "entry-1",
+                  path: "sample.ts",
+                  line: { start: 2, end: 2 },
+                  range: { from: "HEAD", to: "worktree" },
+                  title: "Sample note",
+                  body: "Sample body",
+                  created_at: "2026-01-01T00:00:00.000Z",
+                },
+              ],
+            },
+          ],
+        }),
+      }) as Response) as unknown as typeof fetch;
+    try {
+      const ui = createAnnotationsUi(createDeps());
+      await ui.refreshAnnotations();
+
+      expect(q<HTMLElement>(document, "#annotation-panel").hidden).toBe(false);
+      expect(q<HTMLElement>(document, "#annotation-detail").hidden).toBe(
+        expectedDetailHidden,
+      );
+      expect(
+        document.querySelector<HTMLElement>(".annotation-entries li.active")
+          ?.dataset.entryId ?? null,
+      ).toBe(expectedActiveEntry);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
@@ -202,6 +315,109 @@ describe("inline annotation rendering", () => {
       expect(q<HTMLElement>(document, "#annotation-panel").hidden).toBe(false);
       const row = q<HTMLElement>(document, ".gdp-annotation-row");
       expect(row.textContent?.includes("Inline body")).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("shows the walkthrough order on inline rows and the session head", async () => {
+    setupDom();
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `
+        <article class="gdp-file-shell loaded" data-path="sample.ts">
+          <table class="d2h-diff-table">
+            <tbody>
+              <tr><td class="d2h-code-linenumber d2h-ins"><span class="line-num2">1</span></td><td>one</td></tr>
+              <tr><td class="d2h-code-linenumber d2h-ins"><span class="line-num2">2</span></td><td>two</td></tr>
+            </tbody>
+          </table>
+        </article>
+      `,
+    );
+    const entry = (id: string, line: number, body: string) => ({
+      id,
+      path: "sample.ts",
+      line: { start: line, end: line },
+      range: { from: "HEAD", to: "worktree" },
+      title: "",
+      body,
+      created_at: "2026-01-01T00:00:00.000Z",
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          version: 1,
+          sessions: [
+            {
+              id: "session-1",
+              title: "Sample session",
+              created_at: "2026-01-01T00:00:00.000Z",
+              entries: [
+                entry("entry-1", 1, "First body"),
+                entry("entry-2", 2, "Second body"),
+              ],
+            },
+          ],
+        }),
+      }) as Response) as unknown as typeof fetch;
+    try {
+      const ui = createAnnotationsUi(
+        createDeps({
+          diffCardSelector: () => ".gdp-file-shell",
+          diffRowLineNumber: (row) => {
+            const raw =
+              row.querySelector<HTMLElement>(".line-num2")?.textContent || "";
+            const line = Number(raw.trim());
+            return Number.isInteger(line) && line > 0 ? line : null;
+          },
+          getFiles: () => [
+            {
+              path: "sample.ts",
+              additions: 1,
+              deletions: 0,
+              load_url: "/file_diff?path=sample.ts",
+            },
+          ],
+        }),
+      );
+
+      await ui.refreshAnnotations();
+      await ui.openAnnotationEntry("entry-2");
+
+      // Each inline box carries a "n/total" chip in session order.
+      const rows = [
+        ...document.querySelectorAll<HTMLElement>(
+          ".gdp-annotation-row:not(.gdp-annotation-spacer)",
+        ),
+      ];
+      expect(rows.length).toBe(2);
+      const chips = rows.map((row) =>
+        row.querySelector<HTMLButtonElement>(".gdp-annotation-step"),
+      );
+      expect(chips.map((chip) => chip?.textContent)).toEqual(["1/2", "2/2"]);
+      expect(rows[0].classList.contains("active")).toBe(false);
+      expect(rows[1].classList.contains("active")).toBe(true);
+
+      // Clicking the first chip opens that entry in the detail dock.
+      chips[0]?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(q<HTMLElement>(document, "#annotation-detail").hidden).toBe(false);
+      expect(
+        q<HTMLElement>(document, "#annotation-detail-step").textContent,
+      ).toBe("1/2");
+      // Inline rows are rebuilt on navigation; re-query the active one.
+      const activeRow = document.querySelector<HTMLElement>(
+        ".gdp-annotation-row.active",
+      );
+      expect(activeRow?.dataset.annotationId).toBe("entry-1");
+
+      // The session head shows the total step count.
+      expect(
+        q<HTMLElement>(document, ".annotation-session-count").textContent,
+      ).toBe("2");
     } finally {
       globalThis.fetch = originalFetch;
     }
