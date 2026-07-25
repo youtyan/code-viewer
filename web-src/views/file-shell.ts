@@ -59,6 +59,35 @@ export function isBlobOrBlameFileRoute(
   );
 }
 
+// ツリー / サイドバーから別ファイルへ移るとき、いま開いているタブ
+// (Preview / Code / Blame / History) を引き継いだ file route を作る。
+// Preview はプレビューできないファイルでは成立しないので Code に落とす。
+// line / commit はファイル固有の状態なので引き継がない。
+export function fileRouteKeepingActiveView(
+  currentRoute: AppRoute,
+  target: SourceFileTarget,
+  range: DiffRange,
+): Extract<AppRoute, { screen: "file" }> {
+  const base = {
+    screen: "file" as const,
+    path: target.path,
+    ref: target.ref,
+    range,
+  };
+  if (currentRoute.screen !== "file") return { ...base, view: "blob" };
+  if (currentRoute.view === "blame" || currentRoute.view === "history")
+    return { ...base, view: currentRoute.view };
+  const keepPreview =
+    currentRoute.view === "blob" &&
+    !!currentRoute.preview &&
+    (isPreviewableSource(target.path) || isMediaPreviewOnlySource(target.path));
+  return {
+    ...base,
+    view: "blob",
+    ...(keepPreview ? { preview: true as const } : {}),
+  };
+}
+
 export function createFileViewTabButton(
   deps: FileViewTabDeps,
   target: SourceFileTarget,

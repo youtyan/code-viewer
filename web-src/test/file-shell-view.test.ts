@@ -12,9 +12,11 @@ import { deferred, waitFor } from "./_test-helpers";
 GlobalRegistrator.register();
 
 const { createBlameView } = await import("../views/blame-view");
-const { createFileShellSticky, isBlobOrBlameFileRoute } = await import(
-  "../views/file-shell"
-);
+const {
+  createFileShellSticky,
+  fileRouteKeepingActiveView,
+  isBlobOrBlameFileRoute,
+} = await import("../views/file-shell");
 
 const RANGE: DiffRange = { from: "HEAD", to: "worktree" };
 const SHA = "1111111111111111111111111111111111111111";
@@ -634,5 +636,233 @@ describe("file view shell routing", () => {
     expect(document.querySelector(".gdp-blame-summary")?.textContent).toBe(
       "Newer render",
     );
+  });
+});
+
+describe("fileRouteKeepingActiveView", () => {
+  const TARGET_TS = { path: "web-src/app.ts", ref: "worktree" };
+  const TARGET_MD = { path: "docs/guide.md", ref: "worktree" };
+  const TARGET_PNG = { path: "assets/photo.png", ref: "worktree" };
+
+  test.each([
+    {
+      name: "repo screen opens the file as Code",
+      currentRoute: {
+        screen: "repo",
+        ref: "worktree",
+        path: "web-src",
+        range: RANGE,
+      } satisfies AppRoute,
+      target: TARGET_TS,
+      expected: {
+        screen: "file",
+        path: "web-src/app.ts",
+        ref: "worktree",
+        view: "blob",
+        range: RANGE,
+      },
+    },
+    {
+      name: "diff screen opens even a previewable file as Code",
+      currentRoute: { screen: "diff", range: RANGE } satisfies AppRoute,
+      target: TARGET_MD,
+      expected: {
+        screen: "file",
+        path: "docs/guide.md",
+        ref: "worktree",
+        view: "blob",
+        range: RANGE,
+      },
+    },
+    {
+      name: "Code tab stays Code for a previewable file",
+      currentRoute: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blob",
+        range: RANGE,
+      } satisfies AppRoute,
+      target: TARGET_MD,
+      expected: {
+        screen: "file",
+        path: "docs/guide.md",
+        ref: "worktree",
+        view: "blob",
+        range: RANGE,
+      },
+    },
+    {
+      name: "Preview tab stays Preview for a previewable file",
+      currentRoute: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blob",
+        preview: true,
+        range: RANGE,
+      } satisfies AppRoute,
+      target: TARGET_MD,
+      expected: {
+        screen: "file",
+        path: "docs/guide.md",
+        ref: "worktree",
+        view: "blob",
+        preview: true,
+        range: RANGE,
+      },
+    },
+    {
+      name: "Preview tab falls back to Code for a non-previewable file",
+      currentRoute: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blob",
+        preview: true,
+        range: RANGE,
+      } satisfies AppRoute,
+      target: TARGET_TS,
+      expected: {
+        screen: "file",
+        path: "web-src/app.ts",
+        ref: "worktree",
+        view: "blob",
+        range: RANGE,
+      },
+    },
+    {
+      name: "Preview tab stays Preview for a media-only file",
+      currentRoute: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blob",
+        preview: true,
+        range: RANGE,
+      } satisfies AppRoute,
+      target: TARGET_PNG,
+      expected: {
+        screen: "file",
+        path: "assets/photo.png",
+        ref: "worktree",
+        view: "blob",
+        preview: true,
+        range: RANGE,
+      },
+    },
+    {
+      name: "Blame tab carries Blame to the next file",
+      currentRoute: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blame",
+        range: RANGE,
+      } satisfies AppRoute,
+      target: TARGET_TS,
+      expected: {
+        screen: "file",
+        path: "web-src/app.ts",
+        ref: "worktree",
+        view: "blame",
+        range: RANGE,
+      },
+    },
+    {
+      name: "Blame tab carries Blame even to a media file",
+      currentRoute: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blame",
+        range: RANGE,
+      } satisfies AppRoute,
+      target: TARGET_PNG,
+      expected: {
+        screen: "file",
+        path: "assets/photo.png",
+        ref: "worktree",
+        view: "blame",
+        range: RANGE,
+      },
+    },
+    {
+      name: "History tab carries History and drops the selected commit",
+      currentRoute: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "history",
+        commit: SHA,
+        range: RANGE,
+      } satisfies AppRoute,
+      target: TARGET_TS,
+      expected: {
+        screen: "file",
+        path: "web-src/app.ts",
+        ref: "worktree",
+        view: "history",
+        range: RANGE,
+      },
+    },
+    {
+      name: "detail view falls back to Code",
+      currentRoute: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "detail",
+        range: RANGE,
+      } satisfies AppRoute,
+      target: TARGET_TS,
+      expected: {
+        screen: "file",
+        path: "web-src/app.ts",
+        ref: "worktree",
+        view: "blob",
+        range: RANGE,
+      },
+    },
+    {
+      name: "line selection is not carried to the next file",
+      currentRoute: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blob",
+        line: 12,
+        range: RANGE,
+      } satisfies AppRoute,
+      target: TARGET_TS,
+      expected: {
+        screen: "file",
+        path: "web-src/app.ts",
+        ref: "worktree",
+        view: "blob",
+        range: RANGE,
+      },
+    },
+  ])("$name", ({ currentRoute, target, expected }) => {
+    expect(fileRouteKeepingActiveView(currentRoute, target, RANGE)).toEqual(
+      expected as AppRoute,
+    );
+  });
+
+  test("preview flag is omitted (not undefined) when falling back to Code", () => {
+    const route = fileRouteKeepingActiveView(
+      {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blob",
+        preview: true,
+        range: RANGE,
+      },
+      TARGET_TS,
+      RANGE,
+    );
+    expect("preview" in route).toBe(false);
+    expect(buildRoute(route).includes("preview=1")).toBe(false);
   });
 });

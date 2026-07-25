@@ -30,6 +30,7 @@ import type {
   SidebarItem,
   UndoActionResponse,
 } from "../core/types";
+import { fileRouteKeepingActiveView } from "./file-shell";
 import { createRepositoryWebLink as renderRepositoryWebLink } from "./repository-web-link";
 import { sidebarAncestorDirs } from "./sidebar";
 import {
@@ -976,14 +977,15 @@ export function createRepoView(deps: RepoViewDeps) {
             loadRepo();
             return;
           }
-          setRoute({
-            screen: "file",
-            path: file.path,
-            ref: normalizedRef,
-            view: "blob",
-            range: currentRange(),
-          });
-          renderStandaloneSource({ path: file.path, ref: normalizedRef });
+          const fileRoute = fileRouteKeepingActiveView(
+            STATE.route,
+            { path: file.path, ref: normalizedRef },
+            currentRange(),
+          );
+          setRoute(fileRoute);
+          // blame / history は setRoute 内の dispatchFileRoute が描画する。
+          if (fileRoute.view === "blob")
+            renderStandaloneSource({ path: file.path, ref: normalizedRef });
         });
         await activateRepoSidebarPath(currentPath);
       })

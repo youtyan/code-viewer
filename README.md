@@ -152,7 +152,9 @@ A file detail page lays out up to four tabs — **Preview**, **Code**,
 preview. Media files (images, video, audio, PDF) show a **Preview** tab only
 — there is no Code tab for binary media. `Blame` and `History` each have
 their own canonical URL (`view=blame`, `view=history`), so deep links and
-the browser back/forward stay in sync. The Blame tab reuses the source
+the browser back/forward stay in sync. Opening another file from the
+repository tree keeps the active tab (a file that cannot be previewed falls
+back to Code). The Blame tab reuses the source
 view's row component, so line numbers, drag-selection of `line=` ranges,
 syntax highlighting and the Viewer Settings code font size all match the
 Code tab.

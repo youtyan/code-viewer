@@ -129,7 +129,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "A file detail page exposes up to four tabs — Preview, Code, Blame, History. For text files Code is the default and ?preview=1 opts in to the Markdown / HTML preview; media files (images, video, audio, PDF) show a Preview tab only, with no Code tab. Blame and History have their own canonical URLs (view=blame, view=history) so deep links and the browser back/forward stay in sync, and they keep the Repository sidebar visible.",
+                text: "A file detail page exposes up to four tabs — Preview, Code, Blame, History. For text files Code is the default and ?preview=1 opts in to the Markdown / HTML preview; media files (images, video, audio, PDF) show a Preview tab only, with no Code tab. Blame and History have their own canonical URLs (view=blame, view=history) so deep links and the browser back/forward stay in sync, and they keep the Repository sidebar visible. Opening another file from the repository tree keeps the active tab (a file that cannot be previewed falls back to Code).",
               },
               {
                 kind: "paragraph",
@@ -825,7 +825,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "ファイル詳細ページには最大 4 つのタブ (Preview / Code / Blame / History) があります。テキストファイルは Code がデフォルトで、?preview=1 を付けると Markdown / HTML プレビューに切り替わります。画像・動画・音声・PDF などのメディアファイルは Preview タブのみ表示され、Code タブは表示されません。Blame と History はそれぞれ専用 URL (view=blame, view=history) を持つため、ディープリンクとブラウザの戻る / 進むが同期し、いずれも Repository サイドバーは表示されたままです。",
+                text: "ファイル詳細ページには最大 4 つのタブ (Preview / Code / Blame / History) があります。テキストファイルは Code がデフォルトで、?preview=1 を付けると Markdown / HTML プレビューに切り替わります。画像・動画・音声・PDF などのメディアファイルは Preview タブのみ表示され、Code タブは表示されません。Blame と History はそれぞれ専用 URL (view=blame, view=history) を持つため、ディープリンクとブラウザの戻る / 進むが同期し、いずれも Repository サイドバーは表示されたままです。ツリーから別のファイルを開いても選択中のタブは維持されます (プレビューできないファイルでは Code に戻ります)。",
               },
               {
                 kind: "paragraph",
