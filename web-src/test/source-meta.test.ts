@@ -65,6 +65,7 @@ describe("source metadata", () => {
     expect(EXT_TO_LANG.adoc).toBe("asciidoc");
     expect(EXT_TO_LANG.asciidoc).toBe("asciidoc");
     expect(EXT_TO_LANG.jsonc).toBe("jsonc");
+    expect(EXT_TO_LANG.gd).toBe("gdscript");
   });
 
   test("maps secondary TypeScript, Kotlin, and C++ extensions to their shiki highlighter", () => {

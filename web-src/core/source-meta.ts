@@ -151,6 +151,7 @@ export const EXT_TO_LANG: Record<string, string> = {
   kts: "kotlin",
   cxx: "cpp",
   hxx: "cpp",
+  gd: "gdscript",
 };
 
 const TEXT_SOURCE_EXTENSIONS = new Set([

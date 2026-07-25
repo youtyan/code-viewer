@@ -1,14 +1,40 @@
 import { describe, expect, test } from "bun:test";
-import { ensureTerraformHighlightLanguage } from "../core/highlight-languages";
+import {
+  ensureGdscriptHighlightLanguage,
+  ensureTerraformHighlightLanguage,
+} from "../core/highlight-languages";
 import type { HljsApi } from "../core/types";
 
+const LANGUAGE_CASES = [
+  {
+    language: "terraform",
+    ensure: ensureTerraformHighlightLanguage,
+    displayName: "Terraform",
+    aliases: ["tf", "tfvars", "hcl"],
+    keywordSample: "resource",
+  },
+  {
+    language: "gdscript",
+    ensure: ensureGdscriptHighlightLanguage,
+    displayName: "GDScript",
+    aliases: ["gd"],
+    keywordSample: "func",
+  },
+];
+
 describe("highlight language registration", () => {
-  test("registers Terraform aliases for tf diffs", () => {
+  test.each(LANGUAGE_CASES)("registers $language with its aliases for diffs", ({
+    language,
+    ensure,
+    displayName,
+    aliases,
+    keywordSample,
+  }) => {
     let grammar: Record<string, unknown> | null = null;
     const api: HljsApi = {
-      getLanguage: (language) => (language === "terraform" ? grammar : null),
-      registerLanguage: (language, languageDefinition) => {
-        expect(language).toBe("terraform");
+      getLanguage: (requested) => (requested === language ? grammar : null),
+      registerLanguage: (requested, languageDefinition) => {
+        expect(requested).toBe(language);
         grammar = languageDefinition({
           COMMENT: (begin: string | RegExp, end: string | RegExp) => ({
             scope: "comment",
@@ -21,27 +47,30 @@ describe("highlight language registration", () => {
       },
     };
 
-    ensureTerraformHighlightLanguage(api);
+    ensure(api);
 
-    expect(grammar?.name).toBe("Terraform");
-    expect(grammar?.aliases).toEqual(["tf", "tfvars", "hcl"]);
+    expect(grammar?.name).toBe(displayName);
+    expect(grammar?.aliases).toEqual(aliases);
     expect(
       (grammar?.keywords as Record<string, string>).keyword.includes(
-        "resource",
+        keywordSample,
       ),
     ).toBe(true);
   });
 
-  test("does not register Terraform twice", () => {
+  test.each(LANGUAGE_CASES)("does not register $language twice", ({
+    ensure,
+    displayName,
+  }) => {
     let calls = 0;
     const api: HljsApi = {
-      getLanguage: () => ({ name: "Terraform" }),
+      getLanguage: () => ({ name: displayName }),
       registerLanguage: () => {
         calls++;
       },
     };
 
-    ensureTerraformHighlightLanguage(api);
+    ensure(api);
 
     expect(calls).toBe(0);
   });

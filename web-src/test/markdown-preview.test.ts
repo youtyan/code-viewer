@@ -162,64 +162,42 @@ describe("markdown preview", () => {
     expect(html.includes('data-lang="typescript"')).toBe(true);
   });
 
-  test("normalizes common fenced language aliases before Shiki rendering", () => {
+  test.each([
+    { fence: "sh", code: "echo hello", expected: "bash" },
+    { fence: "tsx", code: "return value;", expected: "typescript" },
+    { fence: "jsx", code: "return value;", expected: "javascript" },
+    {
+      fence: "tf",
+      code: 'resource "null_resource" "example" {}',
+      expected: "terraform",
+    },
+    {
+      fence: "tfvars",
+      code: 'region = "ap-northeast-1"',
+      expected: "terraform",
+    },
+    { fence: "gd", code: "func _ready():", expected: "gdscript" },
+    { fence: "godot", code: "func _ready():", expected: "gdscript" },
+    { fence: "gdscript", code: "func _ready():", expected: "gdscript" },
+  ])("normalizes a $fence fence to the $expected Shiki language", ({
+    fence,
+    code,
+    expected,
+  }) => {
     const seen: string[] = [];
     const highlighter = {
       codeToHtml: (_code: string, options: { lang: string }) => {
         seen.push(options.lang);
-        return '<pre class="shiki"><code><span class="line">echo hello</span></code></pre>';
+        return '<pre class="shiki"><code><span class="line">x</span></code></pre>';
       },
     };
     const html = renderMarkdownHtml(
-      "```sh\necho hello\n```",
+      "```" + fence + "\n" + code + "\n```",
       { path: "README.md", ref: "worktree" },
       highlighter,
     );
-    expect(seen).toEqual(["bash"]);
+    expect(seen).toEqual([expected]);
     expect(html.includes('class="shiki"')).toBe(true);
-  });
-
-  test("normalizes TypeScript and JSX-style fenced language aliases", () => {
-    const seen: string[] = [];
-    const highlighter = {
-      codeToHtml: (_code: string, options: { lang: string }) => {
-        seen.push(options.lang);
-        return '<pre class="shiki"><code><span class="line">return value;</span></code></pre>';
-      },
-    };
-    renderMarkdownHtml(
-      "```tsx\nreturn value;\n```",
-      { path: "README.md", ref: "worktree" },
-      highlighter,
-    );
-    renderMarkdownHtml(
-      "```jsx\nreturn value;\n```",
-      { path: "README.md", ref: "worktree" },
-      highlighter,
-    );
-    expect(seen).toEqual(["typescript", "javascript"]);
-  });
-
-  test("normalizes Terraform fenced language aliases", () => {
-    const seen: string[] = [];
-    const highlighter = {
-      codeToHtml: (_code: string, options: { lang: string }) => {
-        seen.push(options.lang);
-        return '<pre class="shiki"><code><span class="line">resource</span></code></pre>';
-      },
-    };
-    renderMarkdownHtml(
-      '```tf\nresource "null_resource" "example" {}\n```',
-      { path: "README.md", ref: "worktree" },
-      highlighter,
-    );
-    renderMarkdownHtml(
-      '```tfvars\nregion = "ap-northeast-1"\n```',
-      { path: "README.md", ref: "worktree" },
-      highlighter,
-    );
-
-    expect(seen).toEqual(["terraform", "terraform"]);
   });
 
   test("slugifies Japanese and duplicate-safe heading ids deterministically", () => {
