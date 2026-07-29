@@ -6,8 +6,20 @@
 //   network-activity / repo-view-race / file-shell-view で同形だった)
 // - makeDiffMeta(files): files から totals を集計した DiffMeta を作る
 //   (diff-view-fast-path / ai-context-copy で同形だった)
+// - captureErrorAsync(fn): 投げられたエラーのメッセージを取り出す
+//   (プロジェクトの bun:test 型は toThrow / rejects を持たないため)
 
 import type { DiffMeta, FileMeta } from "../core/types";
+
+// 同期・非同期どちらの throw も拾う。呼び出しが投げなければテストを失敗させる。
+export async function captureErrorAsync(fn: () => unknown): Promise<string> {
+  try {
+    await fn();
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  throw new Error("expected function to throw, but it did not");
+}
 
 export function makeDiffMeta(
   files: FileMeta[],

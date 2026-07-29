@@ -525,7 +525,7 @@ describe("supabase CLI database discovery", () => {
     try {
       writeSupabaseConfig(
         dir,
-        "hojo",
+        "sample_project",
         `
 [db]
 port = 54322
@@ -535,11 +535,11 @@ shadow_port = 54320
 
       const results = await discoverSupabaseCliProjectsAsync(dir, []);
       expect(results).toHaveLength(1);
-      expect(results[0]?.projectId).toBe("hojo");
+      expect(results[0]?.projectId).toBe("sample_project");
       expect(results[0]?.dbPort).toBe("54322");
       expect(results[0]?.kind).toBe("postgresql");
-      expect(results[0]?.id).toBe("supabase:hojo");
-      expect(results[0]?.name).toMatch(/hojo/);
+      expect(results[0]?.id).toBe("supabase:sample_project");
+      expect(results[0]?.name).toMatch(/sample_project/);
       expect(results[0]?.name).toMatch(/54322/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -641,21 +641,21 @@ port = 55000
 
 describe("parseSupabaseDbId", () => {
   test("parses a root-level id", () => {
-    expect(parseSupabaseDbId("supabase:hojo")).toEqual({
-      projectId: "hojo",
+    expect(parseSupabaseDbId("supabase:sample_project")).toEqual({
+      projectId: "sample_project",
       relDir: "",
     });
   });
 
   test("parses a nested id with an encoded relDir", () => {
-    expect(parseSupabaseDbId("supabase:hojo@apps%2Fdb")).toEqual({
-      projectId: "hojo",
+    expect(parseSupabaseDbId("supabase:sample_project@apps%2Fdb")).toEqual({
+      projectId: "sample_project",
       relDir: "apps/db",
     });
   });
 
   test("rejects ids without the supabase: prefix", () => {
-    expect(parseSupabaseDbId("docker:hojo")).toBeNull();
+    expect(parseSupabaseDbId("docker:sample_project")).toBeNull();
   });
 
   test("rejects unsafe project ids", () => {
@@ -664,7 +664,9 @@ describe("parseSupabaseDbId", () => {
 
   test("rejects malformed relDir traversal", () => {
     expect(
-      parseSupabaseDbId(`supabase:hojo@${encodeURIComponent("../evil")}`),
+      parseSupabaseDbId(
+        `supabase:sample_project@${encodeURIComponent("../evil")}`,
+      ),
     ).toBeNull();
   });
 });

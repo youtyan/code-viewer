@@ -553,18 +553,19 @@ describe("supabase CLI container resolution", () => {
       calls.push(args);
       return {
         status: 0,
-        stdout: dockerPsSuccess(["supabase_db_hojo"]),
+        stdout: dockerPsSuccess(["supabase_db_sample_project"]),
         stderr: "",
       };
     }) as unknown as SpawnSyncLike);
 
-    const containerName = await resolveRunningSupabaseDbContainerAsync("hojo");
-    expect(containerName).toBe("supabase_db_hojo");
+    const containerName =
+      await resolveRunningSupabaseDbContainerAsync("sample_project");
+    expect(containerName).toBe("supabase_db_sample_project");
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.includes("name=^/supabase_db_hojo$")).toBe(true);
-    expect(calls[0]?.includes("label=com.supabase.cli.project=hojo")).toBe(
-      true,
-    );
+    expect(calls[0]?.includes("name=^/supabase_db_sample_project$")).toBe(true);
+    expect(
+      calls[0]?.includes("label=com.supabase.cli.project=sample_project"),
+    ).toBe(true);
   });
 
   test("dedupes concurrent lookups for the same projectId into a single docker ps spawn", async () => {
@@ -573,20 +574,20 @@ describe("supabase CLI container resolution", () => {
       calls++;
       return {
         status: 0,
-        stdout: dockerPsSuccess(["supabase_db_hojo"]),
+        stdout: dockerPsSuccess(["supabase_db_sample_project"]),
         stderr: "",
       };
     }) as unknown as SpawnSyncLike);
 
     const results = await Promise.all([
-      resolveRunningSupabaseDbContainerAsync("hojo"),
-      resolveRunningSupabaseDbContainerAsync("hojo"),
-      resolveRunningSupabaseDbContainerAsync("hojo"),
+      resolveRunningSupabaseDbContainerAsync("sample_project"),
+      resolveRunningSupabaseDbContainerAsync("sample_project"),
+      resolveRunningSupabaseDbContainerAsync("sample_project"),
     ]);
     expect(results).toEqual([
-      "supabase_db_hojo",
-      "supabase_db_hojo",
-      "supabase_db_hojo",
+      "supabase_db_sample_project",
+      "supabase_db_sample_project",
+      "supabase_db_sample_project",
     ]);
     expect(calls).toBe(1);
   });
@@ -598,7 +599,9 @@ describe("supabase CLI container resolution", () => {
       stderr: "",
     })) as unknown as SpawnSyncLike);
 
-    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBeNull();
+    expect(
+      await resolveRunningSupabaseDbContainerAsync("sample_project"),
+    ).toBeNull();
   });
 
   test("caches positive lookups for 15 seconds and negative for 3 seconds", async () => {
@@ -610,35 +613,41 @@ describe("supabase CLI container resolution", () => {
       calls++;
       return {
         status: 0,
-        stdout: dockerPsSuccess(running ? ["supabase_db_hojo"] : []),
+        stdout: dockerPsSuccess(running ? ["supabase_db_sample_project"] : []),
         stderr: "",
       };
     }) as unknown as SpawnSyncLike);
 
-    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBeNull();
-    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBeNull();
+    expect(
+      await resolveRunningSupabaseDbContainerAsync("sample_project"),
+    ).toBeNull();
+    expect(
+      await resolveRunningSupabaseDbContainerAsync("sample_project"),
+    ).toBeNull();
     expect(calls).toBe(1);
 
     now.value += 2_999;
     running = true;
-    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBeNull();
+    expect(
+      await resolveRunningSupabaseDbContainerAsync("sample_project"),
+    ).toBeNull();
     expect(calls).toBe(1);
 
     now.value += 2;
-    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBe(
-      "supabase_db_hojo",
+    expect(await resolveRunningSupabaseDbContainerAsync("sample_project")).toBe(
+      "supabase_db_sample_project",
     );
     expect(calls).toBe(2);
 
     now.value += 14_999;
-    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBe(
-      "supabase_db_hojo",
+    expect(await resolveRunningSupabaseDbContainerAsync("sample_project")).toBe(
+      "supabase_db_sample_project",
     );
     expect(calls).toBe(2);
 
     now.value += 2;
-    expect(await resolveRunningSupabaseDbContainerAsync("hojo")).toBe(
-      "supabase_db_hojo",
+    expect(await resolveRunningSupabaseDbContainerAsync("sample_project")).toBe(
+      "supabase_db_sample_project",
     );
     expect(calls).toBe(3);
   });
@@ -652,7 +661,7 @@ describe("supabase CLI container resolution", () => {
 
     let error: unknown;
     try {
-      await resolveRunningSupabaseDbContainerOrThrowAsync("hojo");
+      await resolveRunningSupabaseDbContainerOrThrowAsync("sample_project");
     } catch (err) {
       error = err;
     }
@@ -665,7 +674,7 @@ describe("supabase CLI container resolution", () => {
 
     let error: unknown;
     try {
-      await resolveRunningSupabaseDbContainerAsync("hojo");
+      await resolveRunningSupabaseDbContainerAsync("sample_project");
     } catch (err) {
       error = err;
     }

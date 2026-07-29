@@ -3,7 +3,7 @@ import { isAbortLikeError } from "./adapters/abort";
 import { asAsync } from "./adapters/async-facade";
 import type { DatabaseAdapter } from "./adapters/types";
 import { serializeDbRow, serializeDbValue } from "./serialize";
-import { escapeSqlString, sanitizeIdentifier } from "./sql-utils";
+import { escapeSqlString, type SqlKind, sanitizeIdentifier } from "./sql-utils";
 
 export type SearchHit = {
   table: string;
@@ -51,7 +51,9 @@ export async function searchTableAsync(
   pkColumns: string[],
   signal?: AbortSignal,
 ): Promise<SearchHit[]> {
-  const kind = adapter.kind as "sqlite" | "postgresql" | "mysql";
+  // D1 は SQLite なので方言 (識別子クォート / CAST / ? バインド) は sqlite 扱い。
+  const kind: SqlKind =
+    adapter.kind === "d1" ? "sqlite" : (adapter.kind as SqlKind);
   const searchCols = includeNonText
     ? columns.filter(
         (c) =>

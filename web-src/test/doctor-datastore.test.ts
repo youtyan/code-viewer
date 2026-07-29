@@ -135,12 +135,12 @@ describe("defaultDatastoreProbe (Supabase CLI source)", () => {
       mkdirSync(join(dir, "supabase"), { recursive: true });
       writeFileSync(
         join(dir, "supabase", "config.toml"),
-        'project_id = "hojo"\n\n[db]\nport = 54322\n',
+        'project_id = "sample_project"\n\n[db]\nport = 54322\n',
       );
       __setDockerComposeSpawnSyncForTest((() => ({
         status: 0,
         stdout: JSON.stringify([
-          { Names: "supabase_db_hojo", State: "running" },
+          { Names: "supabase_db_sample_project", State: "running" },
         ]),
         stderr: "",
       })) as unknown as SpawnSyncLike);
@@ -152,9 +152,9 @@ describe("defaultDatastoreProbe (Supabase CLI source)", () => {
 
       const controller = new AbortController();
       const file: DbFileInfo = {
-        id: "supabase:hojo",
+        id: "supabase:sample_project",
         path: "supabase/config.toml",
-        name: "hojo (Supabase CLI, postgres@127.0.0.1:54322/postgres)",
+        name: "sample_project (Supabase CLI, postgres@127.0.0.1:54322/postgres)",
         sizeBytes: 0,
         kind: "postgresql",
       };

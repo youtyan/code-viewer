@@ -18,15 +18,31 @@ function dialogButtons(): HTMLButtonElement[] {
   );
 }
 
-function inputFor(labelText: string): HTMLInputElement {
+function fieldRow(labelText: string): HTMLLabelElement {
   const label = Array.from(
     getOpenDialog().querySelectorAll<HTMLLabelElement>(".db-connection-field"),
   ).find((candidate) =>
     candidate.firstElementChild?.textContent?.startsWith(labelText),
   );
-  const input = label?.querySelector<HTMLInputElement>("input");
-  if (!input) throw new Error(`input missing: ${labelText}`);
-  return input;
+  if (!label) throw new Error(`field missing: ${labelText}`);
+  return label;
+}
+
+function fieldControl<T extends Element>(
+  labelText: string,
+  selector: string,
+): T {
+  const control = fieldRow(labelText).querySelector<T>(selector);
+  if (!control) throw new Error(`control missing: ${labelText}`);
+  return control;
+}
+
+function inputFor(labelText: string): HTMLInputElement {
+  return fieldControl<HTMLInputElement>(labelText, "input");
+}
+
+function selectFor(labelText: string): HTMLSelectElement {
+  return fieldControl<HTMLSelectElement>(labelText, "select");
 }
 
 function requiredVisibleLabels(): string[] {
@@ -91,6 +107,16 @@ describe("datastore connection dialog required fields", () => {
         "Endpoint URL",
         "Region",
         "Access key ID",
+      ],
+    },
+    {
+      kind: "d1",
+      labels: [
+        "Display name",
+        "Type",
+        "Cloudflare account ID",
+        "Database ID",
+        "API token",
       ],
     },
   ])("marks the visible $kind requirements", async ({ kind, labels }) => {
@@ -316,6 +342,209 @@ describe("datastore connection test action", () => {
     expect(requestedUrl).toBe("/_db/connections/test");
     expect(status.textContent).toBe("Connection successful");
     expect(getOpenDialog().isConnected).toBe(true);
+    dialogButtons()[0].click();
+    expect(await promise).toBeNull();
+  });
+});
+
+// 保存された接続の PUT ペイロードを取り出す。ダイアログの保存ボタンを押した
+// 結果として送られる body だけを見るので、フォームの内部表現には依存しない。
+async function submitAndCapturePayload(
+  fill: () => void,
+  id?: string,
+  existing?: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  let saved: Record<string, unknown> | null = null;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === "/_db/connections" && init?.method === "PUT") {
+      saved = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ connection: { id: id ?? "new" } }), {
+        status: 200,
+      });
+    }
+    return new Response(
+      JSON.stringify({ connections: existing ? [existing] : [] }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+  const promise = showDatastoreConnectionDialog(
+    { language: "en", trackLoad: (load) => load },
+    id,
+  );
+  await tick();
+  fill();
+  dialogButtons()[1].click();
+  await promise;
+  if (!saved) throw new Error("connection was not saved");
+  return saved;
+}
+
+describe("Cloudflare R2 provider preset", () => {
+  test("derives the R2 endpoint and auto region from the account id", async () => {
+    const payload = await submitAndCapturePayload(() => {
+      selectFor("Type").value = "s3";
+      selectFor("Type").dispatchEvent(new Event("change"));
+      selectFor("Provider").value = "r2";
+      selectFor("Provider").dispatchEvent(new Event("change"));
+      inputFor("Display name").value = "Example object storage";
+      inputFor("Cloudflare account ID").value = "example-account";
+      inputFor("Access key ID").value = "example-access-key";
+      inputFor("Secret access key").value = "example-secret";
+    });
+
+    expect(payload.kind).toBe("s3");
+    expect(payload.endpoint).toBe(
+      "https://example-account.r2.cloudflarestorage.com",
+    );
+    expect(payload.region).toBe("auto");
+  });
+
+  test("hides the endpoint and region fields the preset fills in", async () => {
+    const promise = showDatastoreConnectionDialog({
+      language: "en",
+      trackLoad: (load) => load,
+    });
+    await tick();
+    selectFor("Type").value = "s3";
+    selectFor("Type").dispatchEvent(new Event("change"));
+
+    expect(fieldRow("Provider").hidden).toBe(false);
+    expect(fieldRow("Endpoint URL").hidden).toBe(false);
+    expect(fieldRow("Cloudflare account ID").hidden).toBe(true);
+
+    selectFor("Provider").value = "r2";
+    selectFor("Provider").dispatchEvent(new Event("change"));
+
+    expect(fieldRow("Endpoint URL").hidden).toBe(true);
+    expect(fieldRow("Region").hidden).toBe(true);
+    expect(fieldRow("Cloudflare account ID").hidden).toBe(false);
+    expect(fieldRow("Access key ID").hidden).toBe(false);
+
+    dialogButtons()[0].click();
+    expect(await promise).toBeNull();
+  });
+
+  test("keeps the provider row out of non-s3 datastores", async () => {
+    const promise = showDatastoreConnectionDialog({
+      language: "en",
+      trackLoad: (load) => load,
+    });
+    await tick();
+    for (const kind of ["postgresql", "dynamodb", "d1"]) {
+      selectFor("Type").value = kind;
+      selectFor("Type").dispatchEvent(new Event("change"));
+      expect(fieldRow("Provider").hidden).toBe(true);
+    }
+
+    dialogButtons()[0].click();
+    expect(await promise).toBeNull();
+  });
+
+  test.each([
+    {
+      name: "an R2 endpoint reopens on the R2 preset",
+      id: "connection:3333333333333333",
+      endpoint: "https://example-account.r2.cloudflarestorage.com",
+      region: "auto",
+      provider: "r2",
+      accountIdHidden: false,
+      accountIdValue: "example-account",
+      endpointHidden: true,
+    },
+    {
+      name: "a MinIO-style endpoint stays on the custom preset",
+      id: "connection:4444444444444444",
+      endpoint: "http://127.0.0.1:9000",
+      region: "us-east-1",
+      provider: "custom",
+      accountIdHidden: true,
+      accountIdValue: "",
+      endpointHidden: false,
+    },
+  ])("$name", async (scenario) => {
+    globalThis.fetch = (async (
+      _input: RequestInfo | URL,
+      _init?: RequestInit,
+    ) =>
+      new Response(
+        JSON.stringify({
+          connections: [
+            {
+              id: scenario.id,
+              name: "Example object storage",
+              kind: "s3",
+              endpoint: scenario.endpoint,
+              region: scenario.region,
+            },
+          ],
+        }),
+        { status: 200 },
+      )) as typeof fetch;
+    const promise = showDatastoreConnectionDialog(
+      { language: "en", trackLoad: (load) => load },
+      scenario.id,
+    );
+    await tick();
+
+    expect(selectFor("Provider").value).toBe(scenario.provider);
+    expect(inputFor("Cloudflare account ID").value).toBe(
+      scenario.accountIdValue,
+    );
+    expect(fieldRow("Cloudflare account ID").hidden).toBe(
+      scenario.accountIdHidden,
+    );
+    expect(fieldRow("Endpoint URL").hidden).toBe(scenario.endpointHidden);
+    if (!scenario.endpointHidden) {
+      expect(inputFor("Endpoint URL").value).toBe(scenario.endpoint);
+    }
+
+    dialogButtons()[0].click();
+    expect(await promise).toBeNull();
+  });
+});
+
+describe("Cloudflare D1 connection", () => {
+  test("sends the account, database and token", async () => {
+    const payload = await submitAndCapturePayload(() => {
+      selectFor("Type").value = "d1";
+      selectFor("Type").dispatchEvent(new Event("change"));
+      inputFor("Display name").value = "Example D1";
+      inputFor("Cloudflare account ID").value = "example-account";
+      inputFor("Database ID").value = "example-database";
+      inputFor("API token").value = "example-token";
+    });
+
+    expect(payload).toEqual({
+      name: "Example D1",
+      kind: "d1",
+      accountId: "example-account",
+      databaseId: "example-database",
+      apiToken: "example-token",
+    });
+  });
+
+  test("hides host, port and endpoint fields that do not apply", async () => {
+    const promise = showDatastoreConnectionDialog({
+      language: "en",
+      trackLoad: (load) => load,
+    });
+    await tick();
+    selectFor("Type").value = "d1";
+    selectFor("Type").dispatchEvent(new Event("change"));
+
+    for (const label of [
+      "Host",
+      "Port",
+      "Endpoint URL",
+      "Region",
+      "Password",
+    ]) {
+      expect(fieldRow(label).hidden).toBe(true);
+    }
+    for (const label of ["Cloudflare account ID", "Database ID", "API token"]) {
+      expect(fieldRow(label).hidden).toBe(false);
+    }
+
     dialogButtons()[0].click();
     expect(await promise).toBeNull();
   });

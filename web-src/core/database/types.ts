@@ -2,6 +2,7 @@ export type DbKind =
   | "sqlite"
   | "postgresql"
   | "mysql"
+  | "d1"
   | "redis"
   | "elasticsearch"
   | "s3"

@@ -1,5 +1,9 @@
 import type { DbKind } from "../../core/database/types";
-import { showConfirmDialog, showFormDialog } from "../ui-dialog";
+import {
+  showAlertDialog,
+  showConfirmDialog,
+  showFormDialog,
+} from "../ui-dialog";
 
 type PublicConnection = {
   id: string;
@@ -11,6 +15,8 @@ type PublicConnection = {
   schema?: string;
   endpoint?: string;
   region?: string;
+  accountId?: string;
+  databaseId?: string;
   tls?: boolean;
 };
 
@@ -22,11 +28,29 @@ type ConnectionDialogDeps = {
 const KINDS: Array<Exclude<DbKind, "sqlite">> = [
   "postgresql",
   "mysql",
+  "d1",
   "redis",
   "elasticsearch",
   "s3",
   "dynamodb",
 ];
+
+// S3 互換ストレージのプロバイダ preset。kind は "s3" のまま (MinIO / LocalStack
+// と同じ扱い) で、エンドポイントとリージョンの入れ方だけを変える。
+const S3_PROVIDERS = ["custom", "r2"] as const;
+
+const R2_ENDPOINT_RE = /^https:\/\/([a-z0-9-]+)\.r2\.cloudflarestorage\.com$/i;
+// R2 は署名リージョンとして "auto" を要求する (空文字と us-east-1 も auto に
+// エイリアスされる)。
+const R2_REGION = "auto";
+
+function r2EndpointFor(accountId: string): string {
+  return `https://${accountId}.r2.cloudflarestorage.com`;
+}
+
+function r2AccountIdFromEndpoint(endpoint: string | undefined): string | null {
+  return endpoint ? (R2_ENDPOINT_RE.exec(endpoint)?.[1] ?? null) : null;
+}
 
 function text(language: "en" | "ja") {
   return language === "ja"
@@ -42,6 +66,12 @@ function text(language: "en" | "ja") {
         password: "パスワード",
         database: "データベース",
         schema: "既定スキーマ（任意）",
+        provider: "プロバイダ",
+        providerCustom: "S3 互換（AWS / MinIO / LocalStack）",
+        providerR2: "Cloudflare R2",
+        accountId: "Cloudflare アカウント ID",
+        databaseId: "データベース ID",
+        apiToken: "API トークン",
         endpoint: "エンドポイント URL",
         region: "リージョン",
         accessKeyId: "アクセスキー ID",
@@ -62,6 +92,9 @@ function text(language: "en" | "ja") {
         deleteBody:
           "この接続情報を削除します。タブやスナップショットのデータは削除されません。",
         delete: "削除",
+        secretsLeftTitle: "資格情報がキーチェーンに残りました",
+        secretsLeftBody:
+          "接続は削除しましたが、キーチェーンから資格情報を削除できませんでした。キーチェーンがロックされている可能性があります。ロックを解除して「キーチェーンアクセス」から code-viewer の項目を削除してください。",
       }
     : {
         titleAdd: "Add datastore connection",
@@ -75,6 +108,12 @@ function text(language: "en" | "ja") {
         password: "Password",
         database: "Database",
         schema: "Default schema (optional)",
+        provider: "Provider",
+        providerCustom: "S3-compatible (AWS / MinIO / LocalStack)",
+        providerR2: "Cloudflare R2",
+        accountId: "Cloudflare account ID",
+        databaseId: "Database ID",
+        apiToken: "API token",
         endpoint: "Endpoint URL",
         region: "Region",
         accessKeyId: "Access key ID",
@@ -95,6 +134,9 @@ function text(language: "en" | "ja") {
         deleteBody:
           "This removes the saved connection. Tabs and snapshot data are not deleted.",
         delete: "Delete",
+        secretsLeftTitle: "Credentials left in the keychain",
+        secretsLeftBody:
+          "The connection was removed, but its credentials could not be deleted from the keychain — it may be locked. Unlock it and remove the code-viewer item from Keychain Access.",
       };
 }
 
@@ -172,6 +214,22 @@ export async function showDatastoreConnectionDialog(
   database.value = current?.database ?? "";
   const schema = input();
   schema.value = current?.schema ?? "";
+  const provider = document.createElement("select");
+  for (const value of S3_PROVIDERS) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent =
+      value === "r2" ? labels.providerR2 : labels.providerCustom;
+    provider.appendChild(option);
+  }
+  const currentR2AccountId = r2AccountIdFromEndpoint(current?.endpoint);
+  provider.value = currentR2AccountId ? "r2" : "custom";
+  const accountId = input();
+  accountId.value = current?.accountId ?? currentR2AccountId ?? "";
+  const databaseId = input();
+  databaseId.value = current?.databaseId ?? "";
+  const apiToken = input("password");
+  apiToken.autocomplete = "new-password";
   const endpoint = input("url");
   endpoint.value = current?.endpoint ?? "http://127.0.0.1:9200";
   const region = input();
@@ -194,6 +252,15 @@ export async function showDatastoreConnectionDialog(
     password: field(labels.password, password),
     database: field(labels.database, database, true, labels.requiredField),
     schema: field(labels.schema, schema),
+    provider: field(labels.provider, provider),
+    accountId: field(labels.accountId, accountId, true, labels.requiredField),
+    databaseId: field(
+      labels.databaseId,
+      databaseId,
+      true,
+      labels.requiredField,
+    ),
+    apiToken: field(labels.apiToken, apiToken, true, labels.requiredField),
     endpoint: field(labels.endpoint, endpoint, true, labels.requiredField),
     region: field(labels.region, region, true, labels.requiredField),
     accessKeyId: field(
@@ -208,21 +275,31 @@ export async function showDatastoreConnectionDialog(
   };
   form.append(...Object.values(rows));
 
+  const isR2 = () => kind.value === "s3" && provider.value === "r2";
+
   const syncKind = () => {
     const value = kind.value;
     const sql = value === "postgresql" || value === "mysql";
     const redis = value === "redis";
     const http = value === "elasticsearch";
     const aws = value === "s3" || value === "dynamodb";
+    const d1 = value === "d1";
+    // R2 はアカウント ID からエンドポイントを組み立て、リージョンは "auto" に
+    // 固定するので、その 2 行は隠す。
+    const r2 = isR2();
     rows.host.hidden = !sql && !redis;
     rows.port.hidden = !sql && !redis;
     rows.user.hidden = !sql;
     rows.username.hidden = !redis && !http;
-    rows.password.hidden = aws;
+    rows.password.hidden = aws || d1;
     rows.database.hidden = !sql;
     rows.schema.hidden = value !== "postgresql";
-    rows.endpoint.hidden = !http && !aws;
-    rows.region.hidden = !aws;
+    rows.provider.hidden = value !== "s3";
+    rows.accountId.hidden = !d1 && !r2;
+    rows.databaseId.hidden = !d1;
+    rows.apiToken.hidden = !d1;
+    rows.endpoint.hidden = (!http && !aws) || r2;
+    rows.region.hidden = !aws || r2;
     rows.accessKeyId.hidden = !aws;
     rows.secretAccessKey.hidden = !aws;
     rows.sessionToken.hidden = !aws;
@@ -239,8 +316,10 @@ export async function showDatastoreConnectionDialog(
           ? "http://127.0.0.1:9200"
           : "http://127.0.0.1:4566";
     }
+    if (!current && aws) region.value = r2 ? R2_REGION : "us-east-1";
   };
   kind.addEventListener("change", syncKind);
+  provider.addEventListener("change", syncKind);
   syncKind();
 
   const validateConnection = (): string | null => {
@@ -259,15 +338,28 @@ export async function showDatastoreConnectionDialog(
     ) {
       return labels.required;
     }
+    // 資格情報はディスクに残らない (プロセス内保持) ので、S3 のアクセスキーと
+    // 同じく編集時も API トークンを入れ直してもらう。
     if (
-      (value === "elasticsearch" || value === "s3" || value === "dynamodb") &&
+      value === "d1" &&
+      (!accountId.value.trim() || !databaseId.value.trim() || !apiToken.value)
+    ) {
+      return labels.required;
+    }
+    if (isR2() && !accountId.value.trim()) {
+      return labels.required;
+    }
+    if (
+      (value === "elasticsearch" ||
+        (value === "s3" && !isR2()) ||
+        value === "dynamodb") &&
       !endpoint.value.trim()
     ) {
       return labels.required;
     }
     if (
       (value === "s3" || value === "dynamodb") &&
-      (!region.value.trim() || !accessKeyId.value.trim())
+      ((!isR2() && !region.value.trim()) || !accessKeyId.value.trim())
     ) {
       return labels.required;
     }
@@ -309,10 +401,20 @@ export async function showDatastoreConnectionDialog(
           : {}),
         ...(password.value || !current ? { password: password.value } : {}),
       });
+    } else if (value === "d1") {
+      Object.assign(payload, {
+        accountId: accountId.value.trim(),
+        databaseId: databaseId.value.trim(),
+        apiToken: apiToken.value,
+      });
     } else {
       Object.assign(payload, {
-        endpoint: endpoint.value.trim(),
-        region: region.value.trim(),
+        // R2 は kind "s3" のまま保存し、アカウント ID から組み立てた
+        // エンドポイントと固定リージョンを入れる。
+        endpoint: isR2()
+          ? r2EndpointFor(accountId.value.trim())
+          : endpoint.value.trim(),
+        region: isR2() ? R2_REGION : region.value.trim(),
         ...(accessKeyId.value.trim() || !current
           ? { accessKeyId: accessKeyId.value.trim() }
           : {}),
@@ -442,5 +544,16 @@ export async function deleteDatastoreConnectionFromUi(
   );
   if (!response.ok)
     throw new Error((await response.text()) || labels.requestFailed);
+  // 接続は消えたがキーチェーン項目が残った場合 (ロック中など) は黙って
+  // 成功扱いにしない。残った資格情報の存在をユーザーに知らせる。
+  const body = (await response.json().catch(() => ({}))) as {
+    secretsRemoved?: boolean;
+  };
+  if (body.secretsRemoved === false) {
+    await showAlertDialog({
+      title: labels.secretsLeftTitle,
+      body: labels.secretsLeftBody,
+    });
+  }
   return true;
 }

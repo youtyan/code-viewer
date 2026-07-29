@@ -285,6 +285,8 @@ function dbKindDisplayName(kind: DbKind): string {
       return "MySQL";
     case "sqlite":
       return "SQLite";
+    case "d1":
+      return "Cloudflare D1";
   }
 }
 

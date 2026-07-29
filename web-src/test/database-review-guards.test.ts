@@ -622,11 +622,11 @@ describe("supabase CLI datasource route wiring", () => {
   test("createDbFilesResponse lists the supabase CLI project without touching docker", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-files-"));
     try {
-      writeSupabaseConfig(dir, "hojo");
+      writeSupabaseConfig(dir, "sample_project");
 
       const body = await createDbFilesResponse(dir, []);
       expect(body.files).toHaveLength(1);
-      expect(body.files[0]?.id).toBe("supabase:hojo");
+      expect(body.files[0]?.id).toBe("supabase:sample_project");
       expect(body.files[0]?.kind).toBe("postgresql");
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -636,12 +636,15 @@ describe("supabase CLI datasource route wiring", () => {
   test("supabase query routes return startup guidance instead of a generic 500", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-down-"));
     try {
-      writeSupabaseConfig(dir, "hojo");
+      writeSupabaseConfig(dir, "sample_project");
       mockNoRunningSupabaseContainer();
       const req = new Request("http://localhost/_db/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ db: "supabase:hojo", sql: "SELECT 1" }),
+        body: JSON.stringify({
+          db: "supabase:sample_project",
+          sql: "SELECT 1",
+        }),
       });
       const res = await handleDatabaseRoute(
         req,
@@ -653,7 +656,7 @@ describe("supabase CLI datasource route wiring", () => {
       if (!res) throw new Error("route did not match");
       expect(res.status).toBe(503);
       expect(await res.text()).toBe(
-        'Supabase local DB container for project "hojo" is not running. Start it with: supabase start',
+        'Supabase local DB container for project "sample_project" is not running. Start it with: supabase start',
       );
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -664,13 +667,13 @@ describe("supabase CLI datasource route wiring", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-close-"));
     let psCalls = 0;
     try {
-      writeSupabaseConfig(dir, "hojo");
+      writeSupabaseConfig(dir, "sample_project");
       __setDockerComposeSpawnSyncForTest((() => {
         psCalls++;
         return {
           status: 0,
           stdout: JSON.stringify([
-            { Names: "supabase_db_hojo", State: "running" },
+            { Names: "supabase_db_sample_project", State: "running" },
           ]),
           stderr: "",
         };
@@ -686,7 +689,7 @@ describe("supabase CLI datasource route wiring", () => {
 
       const query = async () => {
         const req = new Request(
-          "http://localhost/_db/table?db=supabase:hojo&schema=public&table=users&offset=0&limit=1",
+          "http://localhost/_db/table?db=supabase:sample_project&schema=public&table=users&offset=0&limit=1",
         );
         const res = await handleDatabaseRoute(
           req,
@@ -703,7 +706,7 @@ describe("supabase CLI datasource route wiring", () => {
         const closeReq = new Request("http://localhost/_db/close", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ db: "supabase:hojo" }),
+          body: JSON.stringify({ db: "supabase:sample_project" }),
         });
         const closeRes = await handleDatabaseRoute(
           closeReq,
@@ -746,11 +749,11 @@ describe("supabase CLI datasource route wiring", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-supabase-table-"));
     const sqls: string[] = [];
     try {
-      writeSupabaseConfig(dir, "hojo");
+      writeSupabaseConfig(dir, "sample_project");
       __setDockerComposeSpawnSyncForTest((() => ({
         status: 0,
         stdout: JSON.stringify([
-          { Names: "supabase_db_hojo", State: "running" },
+          { Names: "supabase_db_sample_project", State: "running" },
         ]),
         stderr: "",
       })) as unknown as SpawnSyncLike);
@@ -765,7 +768,7 @@ describe("supabase CLI datasource route wiring", () => {
       }) as unknown as SpawnSyncLike);
 
       const req = new Request(
-        "http://localhost/_db/table?db=supabase:hojo&schema=public&table=users&offset=0&limit=1",
+        "http://localhost/_db/table?db=supabase:sample_project&schema=public&table=users&offset=0&limit=1",
       );
       const res = await handleDatabaseRoute(
         req,
