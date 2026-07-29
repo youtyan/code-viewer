@@ -119,6 +119,7 @@ function makeRepoView(
     },
     repoFileTargetFromRoute: () => null,
     trackLoad: (promise) => promise,
+    isAbortError: () => false,
     setRepoSidebarRef() {
       /* noop */
     },

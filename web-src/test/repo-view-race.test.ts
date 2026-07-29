@@ -141,6 +141,7 @@ function makeRepoView(
         ? state.route.ref
         : null,
     trackLoad: (promise) => promise,
+    isAbortError: () => false,
     setRepoSidebarRef(ref) {
       repoSidebarRef = ref;
     },

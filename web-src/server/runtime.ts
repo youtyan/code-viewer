@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { createReadStream, promises as fs } from "node:fs";
+import { createReadStream, promises as fs, statSync } from "node:fs";
 import {
   createServer,
   type IncomingMessage,
@@ -228,7 +228,26 @@ function appendProcessError(stderr: string, err: Error | undefined): string {
   return `${stderr}${stderr ? "\n" : ""}${err.message}`;
 }
 
+// createReadStream() opens a directory (and other non-regular files) happily and
+// only fails once the first read runs, from inside the stream. By then the body
+// is already handed to Readable.fromWeb()/pipe(), where the EISDIR surfaces as an
+// unhandled rejection and takes the whole process down instead of failing one
+// request. Fail synchronously at the call site so the caller's catch sees it.
+function assertReadableRegularFile(path: string): void {
+  const stats = statSync(path) as unknown as {
+    isFile(): boolean;
+    isDirectory(): boolean;
+  };
+  if (stats.isFile()) return;
+  const error = new Error(`not a regular file: ${path}`) as Error & {
+    code?: string;
+  };
+  error.code = stats.isDirectory() ? "EISDIR" : "EINVAL";
+  throw error;
+}
+
 export function fileReadableStream(path: string): ReadableStream<Uint8Array> {
+  assertReadableRegularFile(path);
   return Readable.toWeb(
     createReadStream(path),
   ) as unknown as ReadableStream<Uint8Array>;
@@ -239,6 +258,7 @@ export function fileByteRangeResponseBody(
   start: number,
   endInclusive: number,
 ): ReadableStream<Uint8Array> {
+  assertReadableRegularFile(path);
   return Readable.toWeb(
     createReadStream(path, { start, end: endInclusive }),
   ) as unknown as ReadableStream<Uint8Array>;

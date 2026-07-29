@@ -54,6 +54,10 @@ import {
   type SourceBlobTab,
 } from "./file-shell";
 import {
+  type MarkdownLinkNavigationDeps,
+  openMarkdownLink,
+} from "./markdown-link-navigation";
+import {
   appendMediaEmbed,
   renderHtmlPreviewFrame,
   renderUnsupportedPreview,
@@ -143,6 +147,18 @@ export function createSourceView(deps: SourceViewDeps) {
     focusMainSurface,
     isPaletteOpen,
   } = deps;
+
+  function markdownLinkNavigationDeps(): MarkdownLinkNavigationDeps {
+    return {
+      setRoute,
+      currentRange,
+      loadRepo,
+      repoRoute,
+      renderStandaloneSource,
+      trackLoad,
+      isAbortError,
+    };
+  }
 
   const VIRTUAL_SOURCE_LINE_THRESHOLD = 3000;
 
@@ -557,16 +573,8 @@ export function createSourceView(deps: SourceViewDeps) {
         {
           syntaxHighlight: true,
           signal,
-          onNavigateMarkdown: (path, ref) => {
-            setRoute({
-              screen: "file",
-              path,
-              ref,
-              view: "blob",
-              range: currentRange(),
-            });
-            renderStandaloneSource({ path, ref });
-          },
+          onNavigateMarkdown: (link) =>
+            void openMarkdownLink(link, markdownLinkNavigationDeps()),
         },
       )
         .then((next) => {
@@ -967,16 +975,8 @@ export function createSourceView(deps: SourceViewDeps) {
                 {
                   syntaxHighlight: false,
                   signal,
-                  onNavigateMarkdown: (path, ref) => {
-                    setRoute({
-                      screen: "file",
-                      path,
-                      ref,
-                      view: "blob",
-                      range: currentRange(),
-                    });
-                    renderStandaloneSource({ path, ref });
-                  },
+                  onNavigateMarkdown: (link) =>
+                    void openMarkdownLink(link, markdownLinkNavigationDeps()),
                 },
               );
         if (signal?.aborted) return false;
@@ -1103,16 +1103,8 @@ export function createSourceView(deps: SourceViewDeps) {
               {
                 syntaxHighlight: false,
                 signal,
-                onNavigateMarkdown: (path, ref) => {
-                  setRoute({
-                    screen: "file",
-                    path,
-                    ref,
-                    view: "blob",
-                    range: currentRange(),
-                  });
-                  renderStandaloneSource({ path, ref });
-                },
+                onNavigateMarkdown: (link) =>
+                  void openMarkdownLink(link, markdownLinkNavigationDeps()),
               },
             );
       if (signal?.aborted) return false;

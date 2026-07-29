@@ -4,7 +4,7 @@ import {
   markdownSlugify,
   renderMarkdownHtml,
   resolveMarkdownAssetPath,
-  resolveMarkdownRelativePath,
+  resolveMarkdownLinkTarget,
 } from "../core/markdown-preview";
 import { sourceFixture } from "./source-fixture";
 
@@ -47,28 +47,143 @@ describe("markdown preview", () => {
     expect(markdown.includes('rel", "noopener noreferrer"')).toBe(true);
   });
 
-  test("resolves relative markdown links inside the repository", () => {
-    expect(
-      resolveMarkdownRelativePath("docs/guide/intro.md", "./next.md"),
-    ).toBe("docs/guide/next.md");
-    expect(
-      resolveMarkdownRelativePath(
-        "docs/guide/intro.md",
-        "../README.markdown#top",
-      ),
-    ).toBe("docs/README.markdown");
-    expect(
-      resolveMarkdownRelativePath(
-        "docs/guide/intro.md",
-        "https://example.com/a.md",
-      ),
-    ).toBe(null);
-    expect(
-      resolveMarkdownRelativePath("docs/guide/intro.md", "./image.png"),
-    ).toBe(null);
-    expect(
-      resolveMarkdownRelativePath("docs/guide/intro.md", "../../../README.md"),
-    ).toBe(null);
+  // GitHub の markdown で辿れる相対リンクは md 同士に限らない。ディレクトリ
+  // も md 以外のファイルも同じ行き先になるので、解決対象から外れると SPA を
+  // 抜けて 404 になる。
+  test.each([
+    {
+      name: "同じディレクトリの md",
+      currentPath: "docs/guide/intro.md",
+      href: "./next.md",
+      expected: { path: "docs/guide/next.md", hash: "", directory: false },
+    },
+    {
+      name: "親ディレクトリの md + アンカー",
+      currentPath: "docs/guide/intro.md",
+      href: "../README.markdown#top",
+      expected: { path: "docs/README.markdown", hash: "top", directory: false },
+    },
+    {
+      name: "md 以外のファイル",
+      currentPath: "docs/README.md",
+      href: "./assets/data.json",
+      expected: { path: "docs/assets/data.json", hash: "", directory: false },
+    },
+    {
+      name: "リポジトリ外の階層へ出ないソースファイル",
+      currentPath: "docs/README.md",
+      href: "../src/app.ts",
+      expected: { path: "src/app.ts", hash: "", directory: false },
+    },
+    {
+      name: "末尾スラッシュ付きディレクトリ",
+      currentPath: "docs/README.md",
+      href: "./sub/",
+      expected: { path: "docs/sub", hash: "", directory: true },
+    },
+    {
+      name: "末尾スラッシュなしのディレクトリ候補",
+      currentPath: "docs/README.md",
+      href: "./sub",
+      expected: { path: "docs/sub", hash: "", directory: false },
+    },
+    {
+      name: "親ディレクトリそのもの",
+      currentPath: "docs/guide/intro.md",
+      href: "../",
+      expected: { path: "docs", hash: "", directory: true },
+    },
+    {
+      name: "リポジトリルート",
+      currentPath: "docs/README.md",
+      href: "../",
+      expected: { path: "", hash: "", directory: true },
+    },
+    {
+      name: "クエリとアンカーの両方",
+      currentPath: "docs/README.md",
+      href: "./guide.md?plain=1#section-two",
+      expected: {
+        path: "docs/guide.md",
+        hash: "section-two",
+        directory: false,
+      },
+    },
+    {
+      name: "percent-encoded なパス",
+      currentPath: "docs/README.md",
+      href: "./a%20b.md",
+      expected: { path: "docs/a b.md", hash: "", directory: false },
+    },
+    {
+      name: "壊れた percent-encoding はそのまま扱う",
+      currentPath: "docs/README.md",
+      href: "./a%zz.md",
+      expected: { path: "docs/a%zz.md", hash: "", directory: false },
+    },
+    {
+      name: "リポジトリルート起点の絶対パス",
+      currentPath: "docs/guide/intro.md",
+      href: "/README.md",
+      expected: { path: "README.md", hash: "", directory: false },
+    },
+  ])("resolves a repository link: $name", ({ currentPath, href, expected }) => {
+    expect(resolveMarkdownLinkTarget(currentPath, href)).toEqual(expected);
+  });
+
+  test.each([
+    {
+      name: "外部 URL",
+      currentPath: "docs/guide/intro.md",
+      href: "https://example.com/a.md",
+    },
+    {
+      name: "プロトコル相対 URL",
+      currentPath: "docs/guide/intro.md",
+      href: "//example.com/a.md",
+    },
+    {
+      name: "mailto",
+      currentPath: "docs/README.md",
+      href: "mailto:someone@example.com",
+    },
+    {
+      name: "ページ内アンカーだけ",
+      currentPath: "docs/guide/intro.md",
+      href: "#section",
+    },
+    {
+      name: "リポジトリルートより上",
+      currentPath: "docs/guide/intro.md",
+      href: "../../../README.md",
+    },
+    { name: "空の href", currentPath: "docs/guide/intro.md", href: "" },
+    { name: "クエリだけ", currentPath: "docs/README.md", href: "?plain=1" },
+  ])("leaves a non-repository link alone: $name", ({ currentPath, href }) => {
+    expect(resolveMarkdownLinkTarget(currentPath, href)).toBe(null);
+  });
+
+  test("marks directory and non-markdown links for in-app navigation", () => {
+    const html = renderMarkdownHtml(
+      [
+        "- [dir](./sub/)",
+        "- [json](./assets/data.json)",
+        "- [anchor](./guide.md#section-two)",
+        "- [external](https://example.com)",
+      ].join("\n"),
+      { path: "docs/README.md", ref: "worktree" },
+      null,
+    );
+    expect(html.includes('data-gdp-md-link="docs/sub"')).toBe(true);
+    expect(html.includes('data-gdp-md-dir="1"')).toBe(true);
+    expect(html.includes('data-gdp-md-link="docs/assets/data.json"')).toBe(
+      true,
+    );
+    expect(html.includes('data-gdp-md-hash="section-two"')).toBe(true);
+    // 素の相対 href が残ると SPA を抜けてサーバーの 404 に飛んでしまう。
+    expect(html.includes('href="./sub/"')).toBe(false);
+    expect(html.includes('href="./assets/data.json"')).toBe(false);
+    expect(html.includes('href="https://example.com"')).toBe(true);
   });
 
   test("resolves relative markdown image assets through raw file URLs", () => {

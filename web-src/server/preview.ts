@@ -1684,6 +1684,8 @@ async function handleFileRange(url: URL) {
   if (ref === "worktree" || ref === "") {
     const full = safeWorktreePath(path);
     if (!full) return text("no file", 404);
+    // Same reason as /_file: a directory must not reach the read stream.
+    if ((await rawFileSize(path, ref)) == null) return text("no file", 404);
     const responseGeneration = generation;
     const result = await collectIndexedWorktreeLineRange(full, start, end);
     const body: FileRangeResponse = {
@@ -1843,7 +1845,15 @@ async function rawFileSize(path: string, ref: string): Promise<number | null> {
   const full = safeWorktreePath(path);
   if (!full) return null;
   try {
-    return (statSync(full) as unknown as { size: number }).size;
+    const stats = statSync(full) as unknown as {
+      isFile(): boolean;
+      size: number;
+    };
+    // A directory (or a fifo/socket) stats fine but reading it throws from
+    // inside the response stream, which crashes the whole server process.
+    // Report anything but a regular file as missing so /_file answers 404 -
+    // the client uses that to tell a directory link apart from a file link.
+    return stats.isFile() ? stats.size : null;
   } catch {
     return null;
   }
@@ -3134,6 +3144,24 @@ async function shutdown(exitCode = 0) {
   }
   process.exit(exitCode);
 }
+
+// Last line of defence: a local viewer must not die because one request hit an
+// unexpected error. Node/Bun turn an unhandled 'error' from a stream that is
+// already piped to the response (e.g. reading a directory yields EISDIR) into a
+// process-wide crash, which takes down every other open tab with it. Log it and
+// keep serving; the request itself is already lost either way.
+process.on("uncaughtException", (error) => {
+  console.error(
+    "[code-viewer] uncaught exception (server kept running):",
+    error,
+  );
+});
+process.on("unhandledRejection", (reason) => {
+  console.error(
+    "[code-viewer] unhandled rejection (server kept running):",
+    reason,
+  );
+});
 
 process.on("exit", () => {
   removeServerRegistry(cwd, process.pid);

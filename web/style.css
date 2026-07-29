@@ -3766,10 +3766,12 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   border-radius: 6px;
 }
 .gdp-upload-panel {
-  display: flex;
+  /* Grid, not space-between flex: the always-present error node would
+     otherwise take the right edge and strand the button in the middle. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 6px 12px;
   margin: 12px 14px;
   padding: 10px 14px;
   border: 1px dashed var(--border);
@@ -3789,10 +3791,14 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   border-color: var(--danger);
 }
 .gdp-upload-error {
-  min-height: 18px;
+  /* Second row, full width, so showing an error never shifts the button. */
+  grid-column: 1 / -1;
   color: var(--danger);
   font-size: var(--ui-font-base);
   line-height: 18px;
+}
+.gdp-upload-error:empty {
+  display: none;
 }
 .gdp-upload-copy {
   min-width: 0;

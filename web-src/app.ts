@@ -1109,6 +1109,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     renderStandaloneSource,
     repoFileTargetFromRoute,
     trackLoad,
+    isAbortError,
     syncSidebarHeaderHeight,
     clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
     getProjectName: () => PROJECT_NAME,

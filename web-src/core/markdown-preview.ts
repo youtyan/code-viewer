@@ -6,10 +6,22 @@ import markdownItFootnote from "markdown-it-footnote";
 import { isImeComposing } from "./keyboard";
 import { buildRawFileUrl, type SourceFileTarget } from "./routes";
 
+/** Markdown 内リンクのクリックで開くリポジトリ内の行き先。GitHub の
+ * markdown と同じく、md 以外のファイルとディレクトリも遷移先になる。 */
+export type MarkdownNavigationTarget = {
+  /** repo-relative path。空文字はリポジトリルート。 */
+  path: string;
+  ref: string;
+  /** リンク末尾の #fragment (無ければ空文字)。 */
+  hash: string;
+  /** href が末尾スラッシュでディレクトリを明示していた。 */
+  directory: boolean;
+};
+
 export type MarkdownPreviewOptions = {
   syntaxHighlight: boolean;
   signal?: AbortSignal;
-  onNavigateMarkdown?: (path: string, ref: string) => void;
+  onNavigateMarkdown?: (target: MarkdownNavigationTarget) => void;
   resolveAssetUrl?: (path: string, rawSrc: string) => string | null;
 };
 
@@ -95,18 +107,38 @@ export function markdownSlugify(text: string): string {
   );
 }
 
-// ai-dup-check: allow -- fn(string, string)→null|string と signature が
+// GitHub 上で辿れる相対リンクは md 同士だけではない。ディレクトリ
+// (`./sub/`)・md 以外のファイル (`./api.json`)・アンカー付き
+// (`./guide.md#section`) も同じように辿れるので、md 拡張子で絞らずに
+// リポジトリ内の行き先として解決する。ここで null を返したリンクは素の
+// <a href> のまま残り、クリックすると SPA を抜けて 404 になる。
+//
+// ai-dup-check: allow -- ok:fn(string, string)→object|null と signature が
 // 偶然一致するだけ (validateDbPath 等)。本体は Markdown 内の相対 href を
-// repo-relative md ファイルパスに解決する処理で別ドメイン。
-export function resolveMarkdownRelativePath(
+// repo-relative な行き先に解決する処理で別ドメイン。
+export function resolveMarkdownLinkTarget(
   currentPath: string,
   href: string,
-): string | null {
+): Omit<MarkdownNavigationTarget, "ref"> | null {
   if (!href || href.startsWith("#")) return null;
   if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) return null;
-  const cleanHref = href.replace(/[?#].*$/, "");
-  if (!/\.(md|markdown|mdown|mkd|mkdn|mdx)$/i.test(cleanHref)) return null;
-  return resolveRepoRelative(currentPath, decodeURIComponent(cleanHref));
+  const hashAt = href.indexOf("#");
+  const hash = hashAt < 0 ? "" : href.slice(hashAt + 1);
+  const cleanHref = (hashAt < 0 ? href : href.slice(0, hashAt)).replace(
+    /\?.*$/,
+    "",
+  );
+  if (!cleanHref) return null;
+  const path = resolveRepoRelative(
+    currentPath,
+    decodeUriComponentSafe(cleanHref),
+  );
+  if (path == null) return null;
+  return {
+    path,
+    hash: decodeUriComponentSafe(hash),
+    directory: cleanHref.endsWith("/"),
+  };
 }
 
 // ai-dup-check: allow -- fn(string, string)→null|string が偶然一致するだけ。
@@ -120,6 +152,16 @@ export function resolveMarkdownAssetPath(
     return null;
   const cleanSrc = src.split(/[?#]/, 1)[0];
   return resolveRepoRelative(currentPath, cleanSrc);
+}
+
+/** Markdown 内の href/fragment は手書きなので、壊れた %xx で
+ * decodeURIComponent が投げてもリンク解決ごと落とさない。 */
+function decodeUriComponentSafe(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function resolveRepoRelative(
@@ -244,11 +286,15 @@ function createMarkdownIt(
   md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
     const token = tokens[idx];
     const href = token.attrGet("href") || "";
-    const mdPath = resolveMarkdownRelativePath(target.path, href);
-    if (mdPath) {
+    const link = resolveMarkdownLinkTarget(target.path, href);
+    if (link) {
       token.attrSet("href", "#");
-      token.attrSet("data-gdp-md-link", mdPath);
+      // path はリポジトリルートを指すとき空文字になる。属性の有無で拾える
+      // よう、値ではなく data-gdp-md-link の存在で判定すること。
+      token.attrSet("data-gdp-md-link", link.path);
       token.attrSet("data-gdp-md-ref", target.ref || "worktree");
+      if (link.hash) token.attrSet("data-gdp-md-hash", link.hash);
+      if (link.directory) token.attrSet("data-gdp-md-dir", "1");
     } else if (/^(?:https?:)?\/\//i.test(href)) {
       token.attrSet("target", "_blank");
       token.attrSet("rel", "noopener noreferrer");
@@ -402,11 +448,16 @@ function wireMarkdownInteractions(
       "a[data-gdp-md-link]",
     );
     if (!link) return;
+    // ルート宛リンクは path が空文字になるので !path で弾かない。
     const path = link.dataset.gdpMdLink;
-    const ref = link.dataset.gdpMdRef || target.ref;
-    if (!path) return;
+    if (path == null) return;
     e.preventDefault();
-    options.onNavigateMarkdown?.(path, ref);
+    options.onNavigateMarkdown?.({
+      path,
+      ref: link.dataset.gdpMdRef || target.ref,
+      hash: link.dataset.gdpMdHash || "",
+      directory: link.dataset.gdpMdDir === "1",
+    });
   });
   setupMarkdownScrollSpy(root);
   setupMermaidLightbox(root);
@@ -504,12 +555,7 @@ function scrollInitialMarkdownHash(root: HTMLElement) {
 }
 
 function decodeHashFragment(hash: string): string {
-  const value = hash.startsWith("#") ? hash.slice(1) : hash;
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
+  return decodeUriComponentSafe(hash.startsWith("#") ? hash.slice(1) : hash);
 }
 
 function scrollMarkdownSectionIntoView(
