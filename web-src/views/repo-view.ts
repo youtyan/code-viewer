@@ -31,6 +31,10 @@ import type {
   UndoActionResponse,
 } from "../core/types";
 import { fileRouteKeepingActiveView } from "./file-shell";
+import {
+  type MarkdownLinkNavigationDeps,
+  openMarkdownLink,
+} from "./markdown-link-navigation";
 import { createRepositoryWebLink as renderRepositoryWebLink } from "./repository-web-link";
 import { sidebarAncestorDirs } from "./sidebar";
 import {
@@ -69,6 +73,7 @@ export type RepoViewDeps = {
   renderStandaloneSource(target: SourceFileTarget): Promise<unknown>;
   repoFileTargetFromRoute(): string | null;
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;
+  isAbortError(err: unknown): boolean;
   setRepoSidebarRef(ref: string | null): void;
   getSidebarOnFileClick(): unknown;
   syncHeaderMenu(): void;
@@ -140,6 +145,7 @@ export function createRepoView(deps: RepoViewDeps) {
     renderStandaloneSource,
     repoFileTargetFromRoute,
     trackLoad,
+    isAbortError,
     syncSidebarHeaderHeight,
     clearLoadQueue,
     getProjectName,
@@ -616,6 +622,18 @@ export function createRepoView(deps: RepoViewDeps) {
     };
   }
 
+  function markdownLinkNavigationDeps(): MarkdownLinkNavigationDeps {
+    return {
+      setRoute,
+      currentRange,
+      loadRepo,
+      repoRoute,
+      renderStandaloneSource,
+      trackLoad,
+      isAbortError,
+    };
+  }
+
   function createRepoBreadcrumb(target: string, path: string): HTMLElement {
     const nav = document.createElement("nav");
     nav.className = "gdp-file-breadcrumb gdp-repo-breadcrumb";
@@ -866,16 +884,8 @@ export function createRepoView(deps: RepoViewDeps) {
             { path: meta.readme.path, ref: meta.ref },
             {
               syntaxHighlight: STATE.syntaxHighlight,
-              onNavigateMarkdown: (path, ref) => {
-                setRoute({
-                  screen: "file",
-                  path,
-                  ref,
-                  view: "blob",
-                  range: currentRange(),
-                });
-                renderStandaloneSource({ path, ref });
-              },
+              onNavigateMarkdown: (link) =>
+                void openMarkdownLink(link, markdownLinkNavigationDeps()),
             },
           ),
         );
