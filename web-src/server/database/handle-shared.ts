@@ -1,5 +1,6 @@
 import type { DbKind } from "../../core/database/types";
 import { abortError, isAbortLikeError } from "./adapters/abort";
+import { isD1HttpError } from "./adapters/d1";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import {
   type DatastoreConnection,
@@ -469,6 +470,12 @@ export function handleError(
   const message = err instanceof Error ? err.message : String(err);
   console.error(`[code-viewer] ${prefix} error:`, message);
   if (isDockerComposeServiceUnavailableError(err)) {
+    return textError(message, err.status);
+  }
+  // D1 は SQL 系の共通ルートを通るので、S3/DynamoDB のような専用ハンドラが
+  // 無い。Cloudflare が返した実ステータス (401 認証失敗など) を 500 に
+  // 潰さず、そのままクライアントへ伝える。
+  if (isD1HttpError(err)) {
     return textError(message, err.status);
   }
   if (isFilesystemAccessError(err)) {

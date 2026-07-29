@@ -7,17 +7,7 @@ import {
   buildInsertSql,
   buildUpdateSql,
 } from "../server/database/sql-utils";
-
-// プロジェクトの bun:test 型は toThrow を持たないため、投げられたメッセージを
-// 取り出して toMatch で検証する小さなヘルパー。
-function captureError(fn: () => unknown): string {
-  try {
-    fn();
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err);
-  }
-  throw new Error("expected function to throw, but it did not");
-}
+import { captureErrorAsync } from "./_test-helpers";
 
 describe("coerceDbValue", () => {
   test("null stays null", () => {
@@ -262,9 +252,9 @@ const columns: DbColumn[] = [
 ];
 
 describe("buildMutationStatements validation", () => {
-  test("rejects unknown columns", () => {
+  test("rejects unknown columns", async () => {
     expect(
-      captureError(() =>
+      await captureErrorAsync(() =>
         buildMutationStatements(
           "users",
           [{ kind: "insert", values: [{ column: "ghost", value: "x" }] }],
@@ -275,9 +265,9 @@ describe("buildMutationStatements validation", () => {
     ).toMatch(/unknown column/);
   });
 
-  test("rejects update with missing primary key", () => {
+  test("rejects update with missing primary key", async () => {
     expect(
-      captureError(() =>
+      await captureErrorAsync(() =>
         buildMutationStatements(
           "users",
           [
@@ -294,9 +284,9 @@ describe("buildMutationStatements validation", () => {
     ).toMatch(/primary key/);
   });
 
-  test("rejects non-pk column used as pk condition", () => {
+  test("rejects non-pk column used as pk condition", async () => {
     expect(
-      captureError(() =>
+      await captureErrorAsync(() =>
         buildMutationStatements(
           "users",
           [{ kind: "delete", pk: [{ column: "name", value: "x" }] }],
@@ -307,7 +297,7 @@ describe("buildMutationStatements validation", () => {
     ).toMatch(/primary key/);
   });
 
-  test("rejects update/delete on a table without a primary key", () => {
+  test("rejects update/delete on a table without a primary key", async () => {
     const noPk: DbColumn[] = [
       {
         name: "a",
@@ -318,7 +308,7 @@ describe("buildMutationStatements validation", () => {
       },
     ];
     expect(
-      captureError(() =>
+      await captureErrorAsync(() =>
         buildMutationStatements(
           "t",
           [{ kind: "delete", pk: [{ column: "a", value: "x" }] }],
@@ -350,9 +340,9 @@ describe("buildMutationStatements validation", () => {
     expect(stmts[2].sql).toMatch("DELETE FROM");
   });
 
-  test("rejects an empty mutation list", () => {
+  test("rejects an empty mutation list", async () => {
     expect(
-      captureError(() =>
+      await captureErrorAsync(() =>
         buildMutationStatements("users", [], columns, "sqlite"),
       ),
     ).toMatch(/no mutations/);

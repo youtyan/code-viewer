@@ -205,8 +205,29 @@ type TabPaneInternal = {
 // から渡してもらう形にして、タブごとの独立性を担保する。
 type TabPaneInitial = Partial<Omit<TabState, "id">>;
 
+// SQL モードの UI (テーブル一覧 / グリッド / クエリエディタ / スキーマ / ER) を
+// 出すデータストア。
+const SQL_KINDS = new Set<DbFileInfo["kind"]>([
+  "sqlite",
+  "postgresql",
+  "mysql",
+  "d1",
+]);
+
+// そのうち行の編集 / 追加 / 削除まで対応するもの。D1 は閲覧専用なので外す
+// (サーバ側の adapter も applyMutations を実装していない)。
+const ROW_EDITABLE_KINDS = new Set<DbFileInfo["kind"]>([
+  "sqlite",
+  "postgresql",
+  "mysql",
+]);
+
 function isSqlKind(kind: DbFileInfo["kind"] | undefined): boolean {
-  return kind === "sqlite" || kind === "postgresql" || kind === "mysql";
+  return !!kind && SQL_KINDS.has(kind);
+}
+
+function isRowEditableKind(kind: DbFileInfo["kind"] | undefined): boolean {
+  return !!kind && ROW_EDITABLE_KINDS.has(kind);
 }
 
 function isPostgresKind(kind: DbFileInfo["kind"] | undefined): boolean {
@@ -703,9 +724,9 @@ function createTabPane(
       cb.onStateChange();
     },
     getText: () => paneText(),
-    // 書き込み対応データストア (SQL 系: SQLite / PostgreSQL / MySQL) で
-    // 編集 UI を出す。これらは adapter.applyMutations + /_db/mutate に対応。
-    getEditable: () => isSqlKind(currentDbInfo?.kind),
+    // 書き込み対応データストア (SQLite / PostgreSQL / MySQL) で編集 UI を
+    // 出す。これらは adapter.applyMutations + /_db/mutate に対応。
+    getEditable: () => isRowEditableKind(currentDbInfo?.kind),
     applyMutations: (mutations) => applyRowMutations(mutations),
     onRefreshComplete: ({ table, filters }) => {
       if (filters.length === 0) {

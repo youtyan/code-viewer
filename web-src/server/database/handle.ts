@@ -18,6 +18,7 @@ import { makeId } from "../../core/id";
 import { loadDbUiState, patchDbUiState } from "../state-store";
 import { isAbortLikeError } from "./adapters/abort";
 import { asAsync } from "./adapters/async-facade";
+import { createD1Adapter } from "./adapters/d1";
 import {
   createSqlCliAdapter,
   listDockerDatabasesAsync,
@@ -41,6 +42,7 @@ import {
 } from "./connection-pool";
 import {
   connectionToFileInfo,
+  type D1Connection,
   deleteDatastoreConnection,
   findDatastoreConnection,
   loadDatastoreConnections,
@@ -115,6 +117,12 @@ async function getAdapter(
   _cwd: string,
   signal?: AbortSignal,
 ): Promise<DatabaseAdapter> {
+  if (r.d1) {
+    const connection = r.d1;
+    return dockerAdapterCache.getOrOpenAsync(r.dbId, () =>
+      createD1Adapter(connection),
+    );
+  }
   if (r.saved) {
     const cacheKey = r.schema ? `${r.dbId}\0schema=${r.schema}` : r.dbId;
     return dockerAdapterCache.getOrOpenAsync(cacheKey, () =>
@@ -159,6 +167,7 @@ type ResolvedDb = {
   docker?: DockerDbInfo;
   supabase?: SupabaseCliDbInfo;
   saved?: SqlConnection;
+  d1?: D1Connection;
   schema?: string;
 };
 
@@ -263,6 +272,11 @@ async function resolveDb(
   if (dbParam.startsWith("connection:")) {
     const connection = await findDatastoreConnection(cwd, dbParam);
     if (!connection) return textError("datastore connection not found", 404);
+    if (connection.kind === "d1") {
+      // D1 は SQLite なのでスキーマ概念が無い。SQL 経路には載せるが
+      // schema パラメータは受け取らない。
+      return { resolved: dbParam, dbId: dbParam, d1: connection };
+    }
     if (connection.kind !== "postgresql" && connection.kind !== "mysql") {
       return textError(`${connection.kind} must use its datastore routes`, 400);
     }
@@ -2081,7 +2095,7 @@ async function handleDbUiGet(cwd: string): Promise<Response> {
 }
 
 function closeSavedConnection(id: string, kind: DbKind): void {
-  if (kind === "postgresql" || kind === "mysql") {
+  if (kind === "postgresql" || kind === "mysql" || kind === "d1") {
     dockerAdapterCache.close(id);
     dockerAdapterCache.closePrefix(`${id}\0`);
     return;
@@ -2123,9 +2137,12 @@ async function handleConnections(cwd: string, req: Request): Promise<Response> {
   }
   const existing = await findDatastoreConnection(cwd, id);
   if (!existing) return textError("datastore connection not found", 404);
-  await deleteDatastoreConnection(cwd, id);
+  const { secretsRemoved } = await deleteDatastoreConnection(cwd, id);
   closeSavedConnection(id, existing.kind);
-  return json({ ok: true });
+  // 接続自体は消えているので 200 だが、キーチェーンに資格情報が残った場合は
+  // その事実をクライアントに伝える (握り潰すとユーザーが「秘密は消えた」と
+  // 誤認する)。
+  return json({ ok: true, secretsRemoved });
 }
 
 async function probeDatastoreConnection(
@@ -2134,6 +2151,15 @@ async function probeDatastoreConnection(
 ): Promise<void> {
   if (connection.kind === "postgresql" || connection.kind === "mysql") {
     const adapter = createSqlCliAdapter(connection);
+    try {
+      await adapter.getTablesAsync(signal);
+    } finally {
+      adapter.close();
+    }
+    return;
+  }
+  if (connection.kind === "d1") {
+    const adapter = createD1Adapter(connection);
     try {
       await adapter.getTablesAsync(signal);
     } finally {
