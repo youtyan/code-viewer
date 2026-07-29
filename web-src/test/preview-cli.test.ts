@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -1408,4 +1409,61 @@ describe("preview CLI", () => {
       }
     },
   );
+
+  // Markdown 内のディレクトリリンクは /_file にディレクトリを渡す。stat は
+  // 成功するのでレスポンスストリームの read が EISDIR を投げ、以前はそこで
+  // サーバープロセスごと落ちて開いている全タブが死んでいた。
+  runOrSkip("answers 404 for a directory path and keeps serving", async () => {
+    const root = realpathSync(
+      mkdtempSync(join(tmpdir(), "code-viewer-dir-file-")),
+    );
+    tmpRoots.push(root);
+    mkdirSync(join(root, "docs"));
+    writeFileSync(join(root, "docs", "guide.md"), "# Guide\n");
+    git(root, ["init"]);
+    git(root, ["add", "-A"]);
+    git(root, [
+      "-c",
+      "user.email=t@example.com",
+      "-c",
+      "user.name=t",
+      "commit",
+      "-m",
+      "init",
+    ]);
+
+    const proc = spawn(
+      process.execPath,
+      ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+      {
+        cwd: join(import.meta.dir, "..", ".."),
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const exited = new Promise<number | null>((resolve) => {
+      proc.once("exit", (code) => resolve(code));
+    });
+    try {
+      const url = await Promise.race([
+        waitForPreviewUrl(proc),
+        sleep(5000).then(() => {
+          throw new Error("preview did not start");
+        }),
+      ]);
+      const directory = await fetchWithTimeout(
+        new URL("/_file?path=docs&ref=worktree", url).toString(),
+        2500,
+      );
+      expect(directory.status).toBe(404);
+      // 直後にファイルが読めることが「プロセスが生きている」証拠。
+      const file = await fetchWithTimeout(
+        new URL("/_file?path=docs/guide.md&ref=worktree", url).toString(),
+        2500,
+      );
+      expect(file.status).toBe(200);
+      expect(await file.text()).toBe("# Guide\n");
+    } finally {
+      await stopTestPreview(proc, exited);
+    }
+  });
 });
