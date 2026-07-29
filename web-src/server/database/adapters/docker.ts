@@ -45,6 +45,7 @@ import {
 } from "./docker-utils";
 import { spawnTextAsync } from "./spawn-runner";
 import { recordSql } from "./sql-capture";
+import { createTableMetaCache } from "./table-meta-cache";
 import type {
   DatabaseAdapter,
   MutationResult,
@@ -140,8 +141,6 @@ type DockerDatabasesCacheEntry = {
   expiresAt: number;
 };
 
-const COLUMNS_TTL_MS = 30_000;
-const ROWCOUNT_TTL_MS = 15_000;
 const DOCKER_DATABASES_POSITIVE_TTL_MS = 15_000;
 const DOCKER_DATABASES_NEGATIVE_TTL_MS = 3_000;
 const dockerDatabasesCache = new Map<string, DockerDatabasesCacheEntry>();
@@ -739,46 +738,6 @@ function buildTableSelectList(
     return `ST_AsText(${columnId}) AS ${columnId}`;
   });
   return hasSpatialColumn ? parts.join(", ") : "*";
-}
-
-function createTableMetaCache(now = () => Date.now()) {
-  const columns = new Map<string, { value: DbColumn[]; expires: number }>();
-  const rowCounts = new Map<string, { value: number; expires: number }>();
-  return {
-    async getColumns(
-      table: string,
-      fetch: () => DbColumn[] | Promise<DbColumn[]>,
-    ): Promise<DbColumn[]> {
-      const cached = columns.get(table);
-      const current = now();
-      if (cached && cached.expires > current) return cached.value;
-      const value = await fetch();
-      columns.set(table, { value, expires: now() + COLUMNS_TTL_MS });
-      return value;
-    },
-
-    async getRowCount(
-      table: string,
-      fetch: () => number | Promise<number>,
-    ): Promise<number> {
-      const cached = rowCounts.get(table);
-      const current = now();
-      if (cached && cached.expires > current) return cached.value;
-      const value = await fetch();
-      rowCounts.set(table, { value, expires: now() + ROWCOUNT_TTL_MS });
-      return value;
-    },
-
-    invalidate(table?: string): void {
-      if (table) {
-        columns.delete(table);
-        rowCounts.delete(table);
-        return;
-      }
-      columns.clear();
-      rowCounts.clear();
-    },
-  };
 }
 
 // A prefetch query may reject before later Promise.all joins it.

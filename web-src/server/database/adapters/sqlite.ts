@@ -25,6 +25,20 @@ import {
 } from "../sql-utils";
 import { loadSqliteClass } from "../sqlite-driver";
 import { recordSql } from "./sql-capture";
+import {
+  assertReadonlySqliteStatement,
+  SQLITE_INTROSPECTION_SQL,
+  type SqlitePragmaColumnRow,
+  sqliteColumnFromPragmaRow,
+  sqliteForeignKeyListSql,
+  sqliteIndexInfoSql,
+  sqliteIndexListSql,
+  sqliteRowCountSql,
+  sqliteRowCountUnionSql,
+  sqliteTableInfoFromRow,
+  sqliteTableInfoSql,
+  stripTrailingSemicolon,
+} from "./sqlite-introspection";
 import type {
   DatabaseAdapter,
   DatabaseAdapterFactory,
@@ -127,21 +141,9 @@ function queryRowsToResult(
 
 function queryColumns(db: SqliteDb, table: string): DbColumn[] {
   const rows = db
-    .prepare(`PRAGMA table_info(${sanitizeIdentifier(table)})`)
-    .all() as {
-    name: string;
-    type: string;
-    notnull: number;
-    dflt_value: string | null;
-    pk: number;
-  }[];
-  return rows.map((row) => ({
-    name: row.name,
-    type: row.type || "TEXT",
-    nullable: row.notnull === 0,
-    primaryKey: row.pk > 0,
-    defaultValue: row.dflt_value,
-  }));
+    .prepare(sqliteTableInfoSql(table))
+    .all() as SqlitePragmaColumnRow[];
+  return rows.map(sqliteColumnFromPragmaRow);
 }
 
 // db.prepare(sql) のたびに recordSql(sql) を呼ぶ Proxy。adapter 内で発行する
@@ -183,16 +185,11 @@ function createSqliteAdapter(
     capabilities: { snapshot: true },
 
     getTables(): DbTableInfo[] {
-      const rows = db
-        .prepare(
-          "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name",
-        )
-        .all() as { name: string; type: string }[];
-      return rows.map((row) => ({
-        name: row.name,
-        type: row.type as "table" | "view",
-        rowCount: null,
-      }));
+      const rows = db.prepare(SQLITE_INTROSPECTION_SQL.listTables).all() as {
+        name: string;
+        type: string;
+      }[];
+      return rows.map(sqliteTableInfoFromRow);
     },
 
     async getTablesAsync(): Promise<DbTableInfo[]> {
@@ -208,17 +205,16 @@ function createSqliteAdapter(
     },
 
     getIndexes(): DbIndexInfo[] {
-      const rows = db
-        .prepare(
-          "SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-        )
-        .all() as { name: string; tbl_name: string }[];
+      const rows = db.prepare(SQLITE_INTROSPECTION_SQL.listIndexes).all() as {
+        name: string;
+        tbl_name: string;
+      }[];
       return rows.map((row) => {
-        const info = db
-          .prepare(`PRAGMA index_info(${sanitizeIdentifier(row.name)})`)
-          .all() as { name: string }[];
+        const info = db.prepare(sqliteIndexInfoSql(row.name)).all() as {
+          name: string;
+        }[];
         const indexList = db
-          .prepare(`PRAGMA index_list(${sanitizeIdentifier(row.tbl_name)})`)
+          .prepare(sqliteIndexListSql(row.tbl_name))
           .all() as { name: string; unique: number }[];
         const entry = indexList.find((i) => i.name === row.name);
         return {
@@ -236,16 +232,16 @@ function createSqliteAdapter(
 
     getForeignKeys(): DbForeignKey[] {
       const tables = db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE '%VIRTUAL%' ORDER BY name",
-        )
+        .prepare(SQLITE_INTROSPECTION_SQL.listForeignKeyTables)
         .all() as { name: string }[];
       const fks: DbForeignKey[] = [];
       for (const t of tables) {
         try {
-          const rows = db
-            .prepare(`PRAGMA foreign_key_list(${sanitizeIdentifier(t.name)})`)
-            .all() as { table: string; from: string; to: string }[];
+          const rows = db.prepare(sqliteForeignKeyListSql(t.name)).all() as {
+            table: string;
+            from: string;
+            to: string;
+          }[];
           for (const row of rows) {
             fks.push({
               fromTable: t.name,
@@ -280,9 +276,9 @@ function createSqliteAdapter(
     },
 
     getTableRowCount(table: string): number {
-      const row = db
-        .prepare(`SELECT COUNT(*) AS cnt FROM ${sanitizeIdentifier(table)}`)
-        .get() as { cnt: number } | undefined;
+      const row = db.prepare(sqliteRowCountSql(table)).get() as
+        | { cnt: number }
+        | undefined;
       return row?.cnt ?? 0;
     },
 
@@ -293,21 +289,19 @@ function createSqliteAdapter(
     getTableRowCounts(tables: string[]): Map<string, number> {
       const result = new Map<string, number>();
       if (tables.length === 0) return result;
-      const parts = tables.map(
-        (t) =>
-          `SELECT '${t.replace(/'/g, "''")}' AS tbl, COUNT(*) AS cnt FROM ${sanitizeIdentifier(t)}`,
-      );
-      const sql = parts.join(" UNION ALL ");
       try {
-        const rows = db.prepare(sql).all() as { tbl: string; cnt: number }[];
+        const rows = db.prepare(sqliteRowCountUnionSql(tables)).all() as {
+          tbl: string;
+          cnt: number;
+        }[];
         for (const row of rows) {
           result.set(row.tbl, row.cnt);
         }
       } catch {
         for (const t of tables) {
-          const row = db
-            .prepare(`SELECT COUNT(*) AS cnt FROM ${sanitizeIdentifier(t)}`)
-            .get() as { cnt: number } | undefined;
+          const row = db.prepare(sqliteRowCountSql(t)).get() as
+            | { cnt: number }
+            | undefined;
           result.set(t, row?.cnt ?? 0);
         }
       }
@@ -417,25 +411,8 @@ function createSqliteAdapter(
       params?: DbValue[],
       maxRows = 1000,
     ): QueryResult {
-      const trimmed = sql.trim();
-      const upper = trimmed.toUpperCase();
-      const firstWord = upper.split(/\s/)[0];
-      if (
-        firstWord !== "SELECT" &&
-        firstWord !== "PRAGMA" &&
-        firstWord !== "EXPLAIN" &&
-        firstWord !== "WITH"
-      ) {
-        throw new Error(
-          "Only SELECT, PRAGMA, EXPLAIN, and WITH queries are allowed",
-        );
-      }
-      const BLOCKED_RE =
-        /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|DETACH|REPLACE|VACUUM|REINDEX|LOAD_EXTENSION)\b/;
-      if (BLOCKED_RE.test(upper)) {
-        throw new Error("Query contains a disallowed statement keyword");
-      }
-      const limited = trimmed.replace(/;\s*$/, "");
+      assertReadonlySqliteStatement(sql);
+      const limited = stripTrailingSemicolon(sql);
       const wrappedSql = `SELECT * FROM (${limited}) LIMIT ${maxRows + 1}`;
       let rows: Record<string, DbValue>[];
       try {
@@ -478,7 +455,7 @@ function createSqliteAdapter(
 
     getCreateStatement(table: string): string {
       const row = db
-        .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
+        .prepare(SQLITE_INTROSPECTION_SQL.createStatement)
         .get(table) as { sql: string } | undefined;
       return row?.sql ?? "";
     },
@@ -488,11 +465,10 @@ function createSqliteAdapter(
     },
 
     getTriggers(table: string): TriggerInfo[] {
-      const rows = db
-        .prepare(
-          "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?",
-        )
-        .all(table) as { name: string; sql: string }[];
+      const rows = db.prepare(SQLITE_INTROSPECTION_SQL.triggers).all(table) as {
+        name: string;
+        sql: string;
+      }[];
       return rows.map((row) => ({ name: row.name, sql: row.sql ?? "" }));
     },
 
