@@ -32,9 +32,9 @@ Requires Node.js 20 or newer when installed from npm. Development uses
 - Switch the viewer UI between English and Japanese from Viewer Settings —
   the language toggle live-updates every screen including the datastore
   viewer.
-- Browse SQLite, PostgreSQL, MySQL, Redis, Elasticsearch, DynamoDB, and
-  S3-compatible object storage (MinIO, LocalStack) with a built-in datastore
-  viewer.
+- Browse SQLite, PostgreSQL, MySQL, Cloudflare D1, Redis, Elasticsearch,
+  DynamoDB, and S3-compatible object storage (MinIO, LocalStack, Cloudflare R2)
+  with a built-in datastore viewer.
   Local Supabase CLI (`supabase start`) Postgres projects are auto-discovered
   too, without needing a `docker-compose.yml`.
   Table descriptions appear inside expanded table entries and in the Schema
@@ -274,7 +274,23 @@ global/local secondary indexes, and non-key attribute types inferred from
 loaded items) alongside scan or query items, `LastEvaluatedKey` pagination,
 and an item detail view with a copyable key. The explorer is read-only.
 
-**S3-compatible object storage** (MinIO, LocalStack): browse
+**Cloudflare D1** support: add a saved connection with a Cloudflare account ID,
+database ID, and API token (needs the `D1:Read` permission). The database is
+browsed over the D1 REST API (`POST /accounts/{account}/d1/database/{db}/raw`)
+and reuses the SQL screens — table list, row grid, query editor, schema, ER
+diagram, snapshots and diffs. D1 is SQLite, so the same `sqlite_master` and
+`PRAGMA table_info` / `index_list` / `foreign_key_list` introspection is used.
+The connection is read-only: the query editor accepts only
+`SELECT` / `PRAGMA` / `EXPLAIN` / `WITH`, and the grid's row editing is
+unavailable.
+
+**Cloudflare R2**: R2 speaks the S3 API, so it is a saved connection of type
+`s3` with the **Cloudflare R2** provider preset. Enter the account ID and an R2
+access key pair; the endpoint (`https://<account-id>.r2.cloudflarestorage.com`)
+and the required `auto` signing region are filled in for you. Everything in the
+object-storage section below applies.
+
+**S3-compatible object storage** (MinIO, LocalStack, Cloudflare R2): browse
 buckets as a folder tree, search by prefix or filename, sort scanned objects by
 update time, and preview images, video, audio, PDFs, Markdown, HTML, and text
 files. Edit text/markdown/JSON object bodies inline, upload new objects to any
@@ -291,27 +307,45 @@ table grid to insert, update, or delete rows inline. Edits queue as pending
 changes (shown with a yellow highlight on the affected row/cell) and are
 applied as a single transaction on commit. Row updates and deletes require the
 table to have a primary key. The whole batch rolls back on the first
-constraint violation.
+constraint violation. Cloudflare D1 is browsed read-only, so Edit mode is not
+offered there.
 
 ### Browser UI
 
 Open Datastores in the global navigation to access:
 
 - **Saved connections** — use the `+` action beside the datastore selector to
-  add PostgreSQL, MySQL, Redis, Elasticsearch, S3-compatible, or DynamoDB
-  endpoints that are not present in the repository's local discovery files.
+  add PostgreSQL, MySQL, Cloudflare D1, Redis, Elasticsearch, S3-compatible
+  (including Cloudflare R2), or DynamoDB endpoints that are not present in the
+  repository's local discovery files.
   Required fields are marked in the connection dialog, and **Test connection**
   verifies the current values before saving. Saved connections can be edited
   or deleted from the adjacent actions.
   PostgreSQL, MySQL, and Redis use Node.js drivers installed automatically with
-  this package, while Elasticsearch, S3, and DynamoDB use built-in HTTP
-  clients. No database CLI or `curl` installation is required for saved
-  connections.
-  Non-secret settings are stored in `.code-viewer/datastore-connections.json`.
-  User names, access key IDs, passwords, secret keys, and session tokens remain
-  in server memory only and are never written to that file or returned by
-  list/edit responses, so they must be entered again after restarting
-  code-viewer.
+  this package, while Cloudflare D1, Elasticsearch, S3, and DynamoDB use
+  built-in HTTP clients. No database CLI or `curl` installation is required for
+  saved connections.
+  Non-secret settings (host, endpoint, account/database id, region, …) are
+  stored in `.code-viewer/datastore-connections.json`. User names, access key
+  IDs, passwords, secret keys, session tokens, and API tokens are never written
+  to that file and are never returned by list/edit responses.
+
+  Those credentials are kept in the macOS Keychain (one generic-password item
+  per connection, service `code-viewer`) and reloaded on demand, so they
+  survive a restart without being stored anywhere in the repository. The
+  keychain item is written through `security -i`, which reads the command from
+  stdin, so the secret never appears in any process's argument list. Deleting a
+  connection also deletes its keychain item; if that fails (a locked keychain,
+  for example) the connection is still removed and the UI says the credentials
+  were left behind, so you can clear them from Keychain Access yourself.
+
+  Credentials are deliberately not encrypted into a file next to the data: a
+  file the app can decrypt unattended needs its key on the same disk, which is
+  no stronger than plaintext. Key protection is left to the OS.
+
+  On platforms without keychain integration (currently everything except
+  macOS), credentials stay in server memory only and must be entered again
+  after restarting code-viewer.
 
 - **Multi-DB tabs** — open multiple databases side by side, with their own
   sidebar, panes, and history. `+` adds an empty tab; `×` or middle-click

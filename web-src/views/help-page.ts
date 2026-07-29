@@ -384,7 +384,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "Datastores",
         title: "Datastore Viewer",
         intro:
-          "Browse SQLite files, Docker-hosted databases, Redis, Elasticsearch, DynamoDB, and S3-compatible object stores from one local viewer.",
+          "Browse SQLite files, Docker-hosted databases, Cloudflare D1, Redis, Elasticsearch, DynamoDB, and S3-compatible object stores (including Cloudflare R2) from one local viewer.",
         groups: [
           {
             title: "Supported datastores",
@@ -394,7 +394,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "Saved connections",
-                    "Use + beside the datastore selector to add an arbitrary PostgreSQL, MySQL, Redis, Elasticsearch, S3-compatible, or DynamoDB endpoint. Required fields are marked, and Test connection verifies the current values before saving. Drivers are included, so no database CLI or curl is required. Non-secret settings are saved locally; authentication values stay in server memory and must be entered again after a restart.",
+                    "Use + beside the datastore selector to add an arbitrary PostgreSQL, MySQL, Cloudflare D1, Redis, Elasticsearch, S3-compatible (including a Cloudflare R2 preset), or DynamoDB endpoint. Required fields are marked, and Test connection verifies the current values before saving. Drivers are included, so no database CLI or curl is required. Non-secret settings are saved locally; credentials are never written into the repository — on macOS they are kept in the Keychain so they survive a restart, and elsewhere they stay in server memory and must be entered again.",
                   ],
                   [
                     "SQLite",
@@ -409,6 +409,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                     "Detected from compose files. Multiple databases per server, plus a schema selector for switching schemas without reopening. Same inline row edit / insert / delete as SQLite. Local Supabase CLI (`supabase start`) projects are also auto-discovered from `supabase/config.toml`, without needing a docker-compose file.",
                   ],
                   [
+                    "Cloudflare D1",
+                    "Added as a saved connection with an account ID, database ID, and API token (needs D1:Read). Browsed over the D1 REST API and reuses the SQL screens — table list, row grid, query editor, schema, ER diagram, snapshots and diffs. Read-only: the query editor accepts SELECT / PRAGMA / EXPLAIN / WITH only, and grid Edit mode is not offered.",
+                  ],
+                  [
                     "Redis",
                     "Detected from compose files. Browse DB 0-15, SCAN keys, dedicated string/hash/list panes, JSON view for set/zset/stream. Edit values, delete keys, and create new keys (all types) via in-pane editors. Participates in snapshots and diffs.",
                   ],
@@ -421,8 +425,8 @@ code-viewer annotate add-db --db app.db --tab query \\
                     "Detected when DynamoDB is enabled on a LocalStack compose service. List tables, browse a Structure tab (key schema, GSI/LSI, and non-key attribute types inferred from loaded items), scan or query items, follow pagination tokens, and open item details with a copyable key. Browsing is read-only.",
                   ],
                   [
-                    "S3 / MinIO / LocalStack",
-                    "Detected from compose files. Folder-tree browse, prefix/filename search, updated-time sort, and previews for images, video, audio, PDF, Markdown, HTML, and text. Edit text/markdown/JSON object bodies inline, upload new objects, and delete existing ones. LocalStack falls back to `docker exec curl` when no host port is published; MinIO requires a published host port.",
+                    "S3 / MinIO / LocalStack / Cloudflare R2",
+                    "Detected from compose files, or added as a saved connection. R2 uses the Cloudflare R2 provider preset: enter the account ID and an R2 access key pair, and the endpoint and the required auto signing region are filled in. Folder-tree browse, prefix/filename search, updated-time sort, and previews for images, video, audio, PDF, Markdown, HTML, and text. Edit text/markdown/JSON object bodies inline, upload new objects, and delete existing ones. LocalStack falls back to `docker exec curl` when no host port is published; MinIO requires a published host port.",
                   ],
                 ],
               },
@@ -1080,7 +1084,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "データストア",
         title: "データストアビューア",
         intro:
-          "SQLite ファイル、Docker 上のデータベース、Redis、Elasticsearch、DynamoDB、S3 互換オブジェクトストアをローカルビューアで閲覧できます。",
+          "SQLite ファイル、Docker 上のデータベース、Cloudflare D1、Redis、Elasticsearch、DynamoDB、S3 互換オブジェクトストア (Cloudflare R2 を含む) をローカルビューアで閲覧できます。",
         groups: [
           {
             title: "対応データストア",
@@ -1090,7 +1094,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "保存済み接続",
-                    "データストア選択の横にある + から、任意の PostgreSQL、MySQL、Redis、Elasticsearch、S3 互換、DynamoDB エンドポイントを追加できます。必須項目にはマークが付き、保存前に「接続テスト」で入力内容を確認できます。ドライバーは同梱されているため、データベース CLI や curl は不要です。非機密設定はローカルに保存されますが、認証情報はサーバーメモリだけに保持され、再起動後は再入力が必要です。",
+                    "データストア選択の横にある + から、任意の PostgreSQL、MySQL、Cloudflare D1、Redis、Elasticsearch、S3 互換 (Cloudflare R2 プリセットあり)、DynamoDB エンドポイントを追加できます。必須項目にはマークが付き、保存前に「接続テスト」で入力内容を確認できます。ドライバーは同梱されているため、データベース CLI や curl は不要です。非機密設定はローカルに保存されます。資格情報はリポジトリ配下には一切書かれず、macOS ではキーチェーンに保存されるため再起動をまたいで保持されます (それ以外の OS ではサーバーメモリのみで、再起動後は再入力が必要です)。",
                   ],
                   [
                     "SQLite",
@@ -1105,6 +1109,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                     "compose ファイルから検出。同一サーバー上の複数データベースに対応し、スキーマ切替セレクターで再オープンせずスキーマを切り替えられます。SQLite と同じく行のインライン編集 / 追加 / 削除に対応。ローカルの Supabase CLI (`supabase start`) プロジェクトも `supabase/config.toml` から自動検出され、docker-compose ファイルは不要です。",
                   ],
                   [
+                    "Cloudflare D1",
+                    "アカウント ID・データベース ID・API トークン (D1:Read 権限が必要) を入力して保存済み接続として追加します。D1 REST API 経由で閲覧し、SQL 系の画面 (テーブル一覧・行グリッド・クエリエディタ・スキーマ・ER 図・スナップショット/差分) をそのまま使えます。閲覧専用で、クエリエディタは SELECT / PRAGMA / EXPLAIN / WITH のみ受け付け、グリッドの Edit モードは表示されません。",
+                  ],
+                  [
                     "Redis",
                     "compose ファイルから検出。DB 0-15 を SCAN し、string/hash/list は専用ペイン、set/zset/stream は JSON ビュー。値の編集 / キー削除 / 新規キー作成 (全タイプ) に対応。スナップショット/差分にも参加します。",
                   ],
@@ -1117,8 +1125,8 @@ code-viewer annotate add-db --db app.db --tab query \\
                     "LocalStack の compose サービスで DynamoDB が有効な場合に検出。テーブル一覧、構造タブ(キースキーマ・GSI/LSI・読み込み済みアイテムから推測した非キー属性の型)、scan / query、継続トークンによるページング、コピー可能なキー付きのアイテム詳細を表示します。閲覧専用です。",
                   ],
                   [
-                    "S3 / MinIO / LocalStack",
-                    "compose ファイルから検出。フォルダツリー型ブラウザ、prefix/ファイル名検索、更新日時順表示、画像/動画/音声/PDF/Markdown/HTML/テキストのプレビューに対応。テキスト/Markdown/JSON のインライン編集、新規オブジェクトアップロード、オブジェクト削除も可能。LocalStack はホストポート未公開時 `docker exec curl` にフォールバックしますが、MinIO はホストポート公開が必須です。",
+                    "S3 / MinIO / LocalStack / Cloudflare R2",
+                    "compose ファイルから検出するほか、保存済み接続としても追加できます。R2 は「Cloudflare R2」プロバイダプリセットを選び、アカウント ID と R2 のアクセスキーを入力すればエンドポイントと必須リージョン auto が自動で入ります。フォルダツリー型ブラウザ、prefix/ファイル名検索、更新日時順表示、画像/動画/音声/PDF/Markdown/HTML/テキストのプレビューに対応。テキスト/Markdown/JSON のインライン編集、新規オブジェクトアップロード、オブジェクト削除も可能。LocalStack はホストポート未公開時 `docker exec curl` にフォールバックしますが、MinIO はホストポート公開が必須です。",
                   ],
                 ],
               },

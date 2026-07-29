@@ -41,7 +41,9 @@ browser's Database > Search tab, so the human can review the same workflow.
    the sidebar — it lists every SQLite file plus PostgreSQL / MySQL / Redis
    / Elasticsearch / S3 service that any nearby `docker-compose` exposes, as
    well as any local Supabase CLI (`supabase start`) project found via a
-   `supabase/config.toml` (id form `supabase:<project_id>`).
+   `supabase/config.toml` (id form `supabase:<project_id>`) and any saved
+   connection added from the browser UI (id form `connection:<uuid>`,
+   including Cloudflare D1 and R2).
    Use the printed `id` as `--db` on every other command. Credentials and
    internal config are stripped server-side.
 
