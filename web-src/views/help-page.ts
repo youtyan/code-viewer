@@ -133,6 +133,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
+                text: "Relative links inside a Markdown preview lead to the same destinations as they do on GitHub: another Markdown file opens its file page, an #anchor opens the preview and scrolls to that heading, a non-Markdown file opens in the Code view, and a link to a directory opens that folder in the repository tree.",
+              },
+              {
+                kind: "paragraph",
                 text: "When the repository remote is on GitHub, repository and file headers can open the current path there. Selecting source lines also exposes separate actions to copy the AI reference, open the exact GitHub line range, or copy its URL. Markdown and HTML diff cards include a direct Preview shortcut.",
               },
               {
@@ -830,6 +834,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "ファイル詳細ページには最大 4 つのタブ (Preview / Code / Blame / History) があります。テキストファイルは Code がデフォルトで、?preview=1 を付けると Markdown / HTML プレビューに切り替わります。画像・動画・音声・PDF などのメディアファイルは Preview タブのみ表示され、Code タブは表示されません。Blame と History はそれぞれ専用 URL (view=blame, view=history) を持つため、ディープリンクとブラウザの戻る / 進むが同期し、いずれも Repository サイドバーは表示されたままです。ツリーから別のファイルを開いても選択中のタブは維持されます (プレビューできないファイルでは Code に戻ります)。",
+              },
+              {
+                kind: "paragraph",
+                text: "Markdown プレビュー内の相対リンクは GitHub と同じ行き先に解決されます。別の Markdown ファイルはそのファイルページを開き、#見出し 付きのリンクはプレビューを開いて該当見出しまでスクロールし、Markdown 以外のファイルは Code ビュー、ディレクトリへのリンクはリポジトリツリーのそのフォルダを開きます。",
               },
               {
                 kind: "paragraph",

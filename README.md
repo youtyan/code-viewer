@@ -144,7 +144,11 @@ metadata instead of dumping bytes as text.
 Markdown files use a dedicated preview tab. Relative links and images are
 resolved inside the repository, code blocks are highlighted with Shiki, and
 Mermaid diagrams are rendered lazily in the browser (click any diagram to
-open it in a lightbox).
+open it in a lightbox). Relative links lead to the same destinations as they
+do on GitHub: another Markdown file opens its file page, an `#anchor` opens
+the preview and scrolls to that heading, a non-Markdown file opens in the
+Code view, and a link to a directory opens that folder in the repository
+tree.
 
 A file detail page lays out up to four tabs — **Preview**, **Code**,
 **Blame**, **History** — modelled after the GitHub file view. For text files
