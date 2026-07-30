@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { supportsNativeRecursiveWatch } from "../server/worktree-watcher";
 import { runGit as git } from "./_git-fixture";
 
 const tmpRoots: string[] = [];
@@ -411,13 +412,19 @@ describe("preview CLI", () => {
         expect(responses.map((response) => response.status)).toEqual([
           200, 200, 200, 200,
         ]);
-        expect(
-          await waitForOutput(
-            () => stderrOutput,
-            /worktree watcher cap reached \(1\)/,
-            1000,
-          ),
-        ).toBe(true);
+        // A per-directory cap only exists where watching is per-directory.
+        // macOS and Windows collapse the tree into one recursive handle, so
+        // there is no cap to reach. The cap itself is covered by the
+        // worktree-watcher unit tests on every platform.
+        if (!supportsNativeRecursiveWatch(process.platform)) {
+          expect(
+            await waitForOutput(
+              () => stderrOutput,
+              /worktree watcher cap reached \(1\)/,
+              1000,
+            ),
+          ).toBe(true);
+        }
       } finally {
         proc.kill("SIGKILL");
         cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
@@ -426,6 +433,11 @@ describe("preview CLI", () => {
         throw new Error("preview process did not exit after SIGKILL");
       }
     },
+    // Creating the 700-directory fixture alone can take over 5s on a busy
+    // filesystem, which is pure setup cost. What this test actually asserts —
+    // responses arriving within 2500ms — is checked inside, so the outer budget
+    // only has to be large enough to cover the fixture.
+    20000,
   );
 
   runOrSkip("keeps an explicit non-git cwd as the project root", async () => {

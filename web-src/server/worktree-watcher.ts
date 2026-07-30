@@ -8,7 +8,7 @@ import { isSkippableSearchPath } from "./search";
 
 export type WatchFn = (
   path: string,
-  options: { persistent?: boolean },
+  options: { persistent?: boolean; recursive?: boolean },
   listener: (eventType: string, filename: string | Buffer | null) => void,
 ) => WatchHandle | unknown;
 
@@ -28,6 +28,11 @@ type WorktreeUpdateWatchOptions = {
   excludeNames: string[];
   watch?: WatchFn;
   initialScanMode?: "sync" | "async";
+  // macOS and Windows can watch a whole subtree through one OS-level handle.
+  // One recursive watcher instead of one per directory removes the O(n^2)
+  // FSEventStream rebuild libuv performs on every add and every close, which is
+  // what deadlocked the server against a busy fseventsd.
+  recursive?: boolean;
   maxWatchedDirectories?: number;
   readdirSync?: (path: string) => DirectoryEntry[];
   isDirectory?: (path: string) => boolean;
@@ -48,6 +53,17 @@ export type WorktreeUpdateWatch = {
 export const DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT = 1024;
 export const MIN_WORKTREE_WATCH_DIRECTORY_LIMIT = 1;
 export const MAX_WORKTREE_WATCH_DIRECTORY_LIMIT = 65536;
+
+// macOS and Windows watch a whole subtree through one OS handle: libuv passes
+// the recursive flag to FSEvents and to ReadDirectoryChangesW's bWatchSubtree.
+// Linux has no such handle — Node emulates `recursive: true` in JS by walking
+// the tree and calling fs.watch on every file *and* directory
+// (lib/internal/fs/recursive_watch.js), which is strictly more handles than the
+// per-directory watching done here with omit/exclude filtering already costs.
+// So only macOS and Windows benefit from collapsing to a single watcher.
+export function supportsNativeRecursiveWatch(platform: string): boolean {
+  return platform === "darwin" || platform === "win32";
+}
 
 function normalizeRelativePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "");
@@ -89,6 +105,7 @@ export function startWorktreeUpdateWatch(
   const setTimer = options.setTimeoutFn || setTimeout;
   const clearTimer = options.clearTimeoutFn || clearTimeout;
   const debounceMs = options.debounceMs ?? 250;
+  const recursive = options.recursive === true;
   const maxWatchedDirectories = Math.max(
     1,
     Math.floor(
@@ -108,6 +125,7 @@ export function startWorktreeUpdateWatch(
   let pathInspectionTimer: ReturnType<typeof setTimeout> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const pendingChangedPaths = new Set<string>();
+  let fullUpdatePending = false;
   let watchLimitReported = false;
 
   const ignored = (path: string) =>
@@ -126,14 +144,21 @@ export function startWorktreeUpdateWatch(
   };
 
   const scheduleUpdate = (changedPath?: string) => {
+    // No changedPath means "something changed but we were not told where". From
+    // that moment the pending set is no longer a complete description of the
+    // change, so a precise path arriving before the flush must not downgrade
+    // the update back to a partial one — that silently dropped refreshes.
     if (changedPath) pendingChangedPaths.add(changedPath);
+    else fullUpdatePending = true;
     if (timer) clearTimer(timer);
     timer = setTimer(() => {
       timer = null;
-      const paths = pendingChangedPaths.size
-        ? [...pendingChangedPaths]
-        : undefined;
+      const paths =
+        !fullUpdatePending && pendingChangedPaths.size
+          ? [...pendingChangedPaths]
+          : undefined;
       pendingChangedPaths.clear();
+      fullUpdatePending = false;
       options.onUpdate(paths);
     }, debounceMs);
   };
@@ -284,7 +309,7 @@ export function startWorktreeUpdateWatch(
 
     try {
       const watcher =
-        (watch(dir, { persistent: false }, (_event, filename) => {
+        (watch(dir, { persistent: false, recursive }, (_event, filename) => {
           if (!filename) {
             scheduleUpdate();
             return;
@@ -293,6 +318,14 @@ export function startWorktreeUpdateWatch(
           if (ignored(changed)) return;
           const fullChangedPath = join(options.root, changed);
           if (!isInsideRoot(options.root, fullChangedPath)) return;
+          // One recursive watcher already covers every descendant, so there is
+          // no per-directory bookkeeping: nothing new to start watching and
+          // nothing to close. That keeps close() out of the change hot path,
+          // which is exactly where the FSEvents deadlock happened.
+          if (recursive) {
+            scheduleUpdate(changed);
+            return;
+          }
           if (initialScanAsync) {
             queuePathInspection(changed, fullChangedPath);
             return;
@@ -319,6 +352,9 @@ export function startWorktreeUpdateWatch(
       return;
     }
 
+    // The single recursive handle is the whole watch set. Descending would add
+    // redundant handles and reintroduce the O(n^2) rebuild we are removing.
+    if (recursive) return;
     if (initialScanAsync && initialScan) {
       queueInitialChildren(dir);
       return;
