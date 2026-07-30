@@ -24,6 +24,7 @@ const distributedPackageRoots = [
   "mysql2",
   "pg",
   "shiki",
+  "yaml",
 ];
 
 const seen = new Map();

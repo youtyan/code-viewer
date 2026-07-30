@@ -3,6 +3,7 @@ dist/
 web/app.js
 web/mermaid.js
 web/shiki.js
+web/yaml.js
 web/vendor/highlight.js/highlight.min.js
 web/vendor/THIRD_PARTY_NOTICES.txt
 .code-viewer/
