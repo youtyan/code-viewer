@@ -1080,12 +1080,27 @@ async function handleTree(url: URL) {
   );
   // Committed refs are immutable - only the worktree can have pending
   // changes, so the status map (and its `git status` call) is worktree-only.
-  const statusMap =
-    target === "worktree" || target === ""
-      ? await git.repoStatusMapAsync(cwd)
-      : null;
+  // Ignore rules are worktree-only for the same reason: a committed ref
+  // holds only tracked content by definition.
+  const worktreeTarget = target === "worktree" || target === "";
+  const [statusMap, ignoredPaths] = worktreeTarget
+    ? await Promise.all([
+        git.repoStatusMapAsync(cwd),
+        git.ignoredPathsAsync(
+          entries.map((entry) => entry.path),
+          cwd,
+        ),
+      ])
+    : [null, null];
   const withStatus = (entry: git.GitTreeEntry): git.GitTreeEntry => {
-    const status = statusMap?.get(entry.path);
+    const found = statusMap && git.repoStatusForPath(statusMap, entry.path);
+    // A status record naming this entry wins. A code merely inherited from
+    // an untracked ancestor loses to an ignore rule that names the entry
+    // itself, so an ignored file inside a new directory reads as ignored.
+    const status =
+      ignoredPaths?.has(entry.path) && (!found || found.inherited)
+        ? "I"
+        : found?.code;
     return status ? { ...entry, status } : entry;
   };
   // Synthesized rows for files git status reports as deleted - they have no
@@ -1110,7 +1125,7 @@ async function handleTree(url: URL) {
           ...deletedEntries,
         ],
     readme: await readReadme(target, path),
-    upload_enabled: uploadEnabled && (target === "worktree" || target === ""),
+    upload_enabled: uploadEnabled && worktreeTarget,
   } satisfies RepoTreeResponse);
 }
 

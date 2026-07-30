@@ -254,8 +254,11 @@ describe("repository scope omit settings", () => {
     expect(server.includes("let uploadEnabled = true")).toBe(true);
     expect(
       server.includes(
-        'upload_enabled: uploadEnabled && (target === "worktree" || target === "")',
+        'const worktreeTarget = target === "worktree" || target === ""',
       ),
+    ).toBe(true);
+    expect(
+      server.includes("upload_enabled: uploadEnabled && worktreeTarget"),
     ).toBe(true);
     expect(server.includes("upload disabled by viewer settings")).toBe(true);
     expect(server.includes("uploadDisabledByConfig")).toBe(false);

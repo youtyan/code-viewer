@@ -68,7 +68,11 @@ describe("file metadata display", () => {
         "meta.textContent = entry.type === 'commit' ? 'submodule' : 'directory'",
       ),
     ).toBe(false);
-    expect(app.includes("row.append(icon, name, metaBlock, size)")).toBe(true);
+    // nameCell is the name span itself, except on a directory carrying a
+    // status badge, where it wraps both so the row keeps four grid columns.
+    expect(app.includes("row.append(icon, nameCell, metaBlock, size)")).toBe(
+      true,
+    );
     expect(
       app.includes("header.appendChild(createFileDetailMeta(target, meta))"),
     ).toBe(true);

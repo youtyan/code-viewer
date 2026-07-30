@@ -805,14 +805,27 @@ export function createRepoView(deps: RepoViewDeps) {
             ? `gdp-repo-row ${entry.type} symlink-row${brokenSymlink ? " symlink-broken-row gdp-row-disabled" : ""}`
             : `gdp-repo-row ${entry.type}`;
         if (deletedEntry) row.classList.add("gdp-row-disabled");
-        // A pending git change wins over the type icon, same precedence as
-        // sidebar.ts createTreeFileRow uses for the diff view.
-        const icon = entry.status
-          ? fileBadge(entry.status)
-          : repoEntryTypeIcon(entry, browsable, nonBrowsableCommit);
+        // A directory keeps its folder icon and carries the badge beside the
+        // name instead - a whole-directory status (untracked/ignored) must
+        // not cost the one cue that tells a folder from a file. For files the
+        // badge replaces the type icon, same precedence as sidebar.ts
+        // createTreeFileRow uses for the diff view.
+        const directoryRow = entry.type === "tree";
+        const icon =
+          entry.status && !directoryRow
+            ? fileBadge(entry.status)
+            : repoEntryTypeIcon(entry, browsable, nonBrowsableCommit);
         const name = document.createElement("span");
         name.className = "name";
         name.textContent = entry.name;
+        // The row is a fixed four-column grid, so a directory badge shares
+        // the name column rather than adding a fifth child.
+        let nameCell: HTMLElement = name;
+        if (directoryRow && entry.status) {
+          nameCell = document.createElement("span");
+          nameCell.className = "name-cell";
+          nameCell.append(name, fileBadge(entry.status));
+        }
         if (nonBrowsableCommit) {
           row.title = commitEntryMeta(entry.submodule).title;
           row.setAttribute("aria-disabled", "true");
@@ -821,7 +834,7 @@ export function createRepoView(deps: RepoViewDeps) {
         }
         const metaBlock = createRepoEntryMeta(entry, browsable);
         const size = createRepoEntrySize(entry);
-        row.append(icon, name, metaBlock, size);
+        row.append(icon, nameCell, metaBlock, size);
         row.addEventListener("click", () => {
           if (brokenSymlink || deletedEntry) return;
           if (browsable) {

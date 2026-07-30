@@ -201,7 +201,16 @@ export function createDiffView(deps: DiffViewDeps) {
     span.className = `badge ${ch}`;
     span.textContent = ch;
     span.title =
-      { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
+      {
+        M: "modified",
+        A: "added",
+        D: "deleted",
+        R: "renamed",
+        // Outside version control: U is in the worktree but not tracked by
+        // git, I is excluded by a .gitignore rule.
+        U: "untracked",
+        I: "ignored",
+      }[ch] || ch;
     return span;
   }
 

@@ -2721,11 +2721,19 @@ body.gdp-help-page #content {
 .badge.A { background: #ccffd866; color: var(--success); }
 .badge.D { background: #ffd7d566; color: var(--danger); }
 .badge.R { background: #d8b9ff66; color: var(--done); }
+/* Outside version control. U (untracked) takes the accent hue so it reads as
+   "not in git yet" rather than as one more shade of the staged-green A it
+   used to be collapsed into. I (ignored) stays deliberately colorless: an
+   ignored file is present but irrelevant to the repository. */
+.badge.U { background: var(--accent-subtle); color: var(--accent); }
+.badge.I { background: var(--bg-emph); color: var(--fg-muted); }
 
 [data-theme="dark"] .badge.M { background: rgba(210,153,34,0.20); color: var(--attn); }
 [data-theme="dark"] .badge.A { background: rgba(46,160,67,0.20); color: var(--success); }
 [data-theme="dark"] .badge.D { background: rgba(248,81,73,0.20); color: var(--danger); }
 [data-theme="dark"] .badge.R { background: rgba(163,113,247,0.20); color: var(--done); }
+[data-theme="dark"] .badge.U { background: rgba(56,139,253,0.20); color: var(--accent); }
+[data-theme="dark"] .badge.I { background: rgba(145,152,161,0.15); color: var(--fg-muted); }
 
 /* Sidebar row marker for files worth a second look before diving in:
    heavy diffs, binary/media files, or Git commit entries. Same semantics as
@@ -4791,6 +4799,16 @@ body.gdp-file-detail-page #empty {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
+}
+/* Holds the name plus a directory's status badge inside the single name
+   column of the row grid - same shape as the sidebar's .dir-label, which
+   pairs a directory name with its badges. */
+.gdp-repo-row .name-cell {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
 }
 .gdp-repo-row .kind {
   justify-self: end;
