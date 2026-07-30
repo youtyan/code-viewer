@@ -89,6 +89,9 @@ export type SettingsResponse = {
     watch_limit_default: number;
     watch_limit_min: number;
     watch_limit_max: number;
+    // True when the platform watches the whole tree through a single OS handle,
+    // which leaves no per-directory watchers for the limit to cap.
+    watch_recursive: boolean;
   };
 };
 

@@ -703,3 +703,171 @@ describe("withAlwaysWorktreeOmitDirNames", () => {
     expect(input).toEqual(["node_modules"]);
   });
 });
+
+type WatchOptions = Parameters<WatchFn>[1];
+
+function startForFakeWatch(
+  overrides: Partial<Parameters<typeof startWorktreeUpdateWatch>[0]> = {},
+) {
+  let listener: Parameters<WatchFn>[2] | null = null;
+  let scheduled: (() => void) | null = null;
+  let readdirCalls = 0;
+  const watchedPaths: string[] = [];
+  const watchedOptions: WatchOptions[] = [];
+  const received: Array<string[] | undefined> = [];
+
+  const handle = startWorktreeUpdateWatch({
+    root: "/repo",
+    omitDirNames: ["node_modules"],
+    excludeNames: [],
+    watch: ((path, options, next) => {
+      watchedPaths.push(path);
+      watchedOptions.push(options);
+      // Keep the root's listener: a child watcher resolves filenames relative
+      // to its own directory, which would shift every path in these cases.
+      if (listener === null) listener = next;
+    }) as WatchFn,
+    readdirSync: (path: string) => {
+      readdirCalls++;
+      // Only the root has a child, so the non-recursive walk terminates.
+      return path === "/repo" ? [{ name: "src", isDirectory: () => true }] : [];
+    },
+    isDirectory: () => false,
+    onUpdate: (paths) => {
+      received.push(paths);
+    },
+    setTimeoutFn: ((callback: () => void) => {
+      scheduled = callback;
+      return 1;
+    }) as typeof setTimeout,
+    clearTimeoutFn: (() => 0) as typeof clearTimeout,
+    ...overrides,
+  });
+
+  return {
+    handle,
+    notify: (event: string, filename: string | null) =>
+      listener?.(event, filename),
+    flush: () => scheduled?.(),
+    watchedPaths,
+    watchedOptions,
+    received,
+    readdirCalls: () => readdirCalls,
+  };
+}
+
+describe("worktree update watcher: 場所不明の通知", () => {
+  // libuv は FSEvents の取りこぼしフラグを JS へ渡さないため、filename が無い
+  // 通知は「どこが変わったか分からない」を意味する。その後に届いた具体パスは
+  // 完全な変更一覧ではないので、部分更新へ格下げしてはいけない。
+  test("場所不明の通知の後に具体パスが来ても全体更新のまま渡す", () => {
+    const { notify, flush, received } = startForFakeWatch();
+
+    notify("rename", null);
+    notify("change", "src/app.ts");
+    flush();
+
+    expect(received).toEqual([undefined]);
+  });
+
+  test("具体パスだけの通知は部分更新として渡す", () => {
+    const { notify, flush, received } = startForFakeWatch();
+
+    notify("change", "src/app.ts");
+    flush();
+
+    expect(received).toEqual([["src/app.ts"]]);
+  });
+
+  test("順序が逆でも全体更新が優先される", () => {
+    const { notify, flush, received } = startForFakeWatch();
+
+    notify("change", "src/app.ts");
+    notify("rename", null);
+    flush();
+
+    expect(received).toEqual([undefined]);
+  });
+
+  test("flush 後は次の通知から部分更新に戻る", () => {
+    const { notify, flush, received } = startForFakeWatch();
+
+    notify("rename", null);
+    flush();
+    notify("change", "src/app.ts");
+    flush();
+
+    expect(received).toEqual([undefined, ["src/app.ts"]]);
+  });
+});
+
+describe("worktree update watcher: 再帰モード", () => {
+  test.each([
+    {
+      name: "recursive 指定時は watch に recursive を渡す",
+      recursive: true,
+      expected: true,
+    },
+    {
+      name: "recursive 未指定時は watch に recursive を渡さない",
+      recursive: undefined,
+      expected: false,
+    },
+  ])("$name", ({ recursive, expected }) => {
+    const { watchedOptions } = startForFakeWatch({ recursive });
+    expect(watchedOptions[0].recursive).toBe(expected);
+  });
+
+  // 1024個の watcher を張ると libuv が close ごとに全パスを再登録するため
+  // O(n^2) になる。root 1個に畳むことがデッドロック対策の本体。
+  test("recursive では root だけを watch する", () => {
+    const { handle, watchedPaths } = startForFakeWatch({ recursive: true });
+
+    expect(watchedPaths).toEqual(["/repo"]);
+    expect(handle.started).toBe(true);
+  });
+
+  test("recursive では子ディレクトリを走査しない", () => {
+    const { readdirCalls } = startForFakeWatch({ recursive: true });
+
+    expect(readdirCalls()).toBe(0);
+  });
+
+  test("非 recursive では子ディレクトリも watch する", () => {
+    const { watchedPaths } = startForFakeWatch();
+
+    expect(watchedPaths).toEqual(["/repo", "/repo/src"]);
+  });
+
+  test("recursive では新しいディレクトリの通知でも watcher を増やさない", () => {
+    const { notify, watchedPaths } = startForFakeWatch({
+      recursive: true,
+      isDirectory: () => true,
+    });
+
+    notify("rename", "src/new-dir");
+
+    expect(watchedPaths).toEqual(["/repo"]);
+  });
+
+  test("recursive では深い階層の通知もそのまま更新対象として渡す", () => {
+    const { notify, flush, received } = startForFakeWatch({ recursive: true });
+
+    notify("change", "src/views/deep/nested.ts");
+    flush();
+
+    expect(received).toEqual([["src/views/deep/nested.ts"]]);
+  });
+
+  test("recursive でも除外対象のパスは無視する", () => {
+    const { notify, flush, received } = startForFakeWatch({
+      recursive: true,
+      omitDirNames: ["node_modules"],
+    });
+
+    notify("change", "node_modules/pkg/index.js");
+    flush();
+
+    expect(received).toEqual([]);
+  });
+});

@@ -3,6 +3,7 @@
 // re-anchoring, idle syntax highlight, and the diff meta header.
 // Extracted from app.ts.
 
+import { changedPathsCoverPath } from "../core/changed-paths";
 import { summarizeDiffFileKinds } from "../core/diff-file-kinds";
 import { filePathClipboardText } from "../core/file-path-copy";
 import {
@@ -667,7 +668,10 @@ export function createDiffView(deps: DiffViewDeps) {
       !card.classList.contains("loading")
     )
       return false;
-    if (changedPaths && !changedPaths.has(file.path)) return false;
+    // Scope match, not exact match: a change notification can name a directory
+    // (FSEvents coalesces bursts that way) and then it stands for everything
+    // under it. An exact lookup silently skipped those files.
+    if (!changedPathsCoverPath(changedPaths, file.path)) return false;
     card.dataset.reqId = String(++CLIENT_REQ_SEQ);
     // Stale-while-revalidate: keep the previous diff visible (dimmed by the
     // .pending style) while the fresh content loads. Wiping the body here
@@ -774,7 +778,7 @@ export function createDiffView(deps: DiffViewDeps) {
             const key = fileKey(file);
             return (
               prevCardSignatures.get(key) !== newCardSigs.get(key) ||
-              changedPaths.has(file.path)
+              changedPathsCoverPath(changedPaths, file.path)
             );
           })
         : false);
@@ -784,9 +788,6 @@ export function createDiffView(deps: DiffViewDeps) {
 
     if (listSame && domIntact) {
       // Fast path: file list structure unchanged — skip replaceChildren and renderSidebar.
-      // changedPaths === null means unknown (e.g. tick, parse failure, truncated paths)
-      // so treat all loaded cards as potentially stale.
-      const pathsUnknown = !changedPaths;
       // Index the cards once — a per-file linear scan from both loops below
       // is O(n²) on large diffs.
       const cardsByKey = collectDiffCardsByKey(target);
@@ -810,7 +811,9 @@ export function createDiffView(deps: DiffViewDeps) {
         const oldSig = prevCardSignatures.get(key);
         const newSig = newCardSigs.get(key) ?? computeCardSignature(f);
         const sigChanged = oldSig !== newSig;
-        const pathHint = pathsUnknown || changedPaths.has(f.path);
+        // changedPathsCoverPath treats a null set as "covers everything", which
+        // is the same meaning pathsUnknown carries here.
+        const pathHint = changedPathsCoverPath(changedPaths, f.path);
         if (!sigChanged && !pathHint) {
           continue;
         }

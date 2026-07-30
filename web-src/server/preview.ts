@@ -128,11 +128,12 @@ import {
 } from "./search-service";
 import { removeServerRegistry, writeServerRegistry } from "./server-registry";
 import { loadAppSettingsState } from "./state-store";
+import { startWatchSupervisor, type WatchSupervisor } from "./watch-supervisor";
 import {
   DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT,
   MAX_WORKTREE_WATCH_DIRECTORY_LIMIT,
   MIN_WORKTREE_WATCH_DIRECTORY_LIMIT,
-  startWorktreeUpdateWatch,
+  supportsNativeRecursiveWatch,
 } from "./worktree-watcher";
 
 const WEB_ROOT = join(ROOT, "web");
@@ -1129,6 +1130,10 @@ async function handleSettings() {
       watch_limit_default: DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT,
       watch_limit_min: MIN_WORKTREE_WATCH_DIRECTORY_LIMIT,
       watch_limit_max: MAX_WORKTREE_WATCH_DIRECTORY_LIMIT,
+      // With one recursive handle covering the tree there are no per-directory
+      // watchers to cap, so the UI hides the control rather than offering a
+      // setting that changes nothing.
+      watch_recursive: supportsNativeRecursiveWatch(process.platform),
     },
   } satisfies SettingsResponse);
 }
@@ -3126,7 +3131,10 @@ writeServerRegistry({
   root: cwd,
   started_at: new Date().toISOString(),
 });
-let worktreeWatch: ReturnType<typeof startWorktreeUpdateWatch> | null = null;
+// Watching runs in a child process. close() here kills that child; it never
+// touches an fs.watch handle, so unlike the old in-process watcher it cannot
+// block shutdown on libuv's FSEvents semaphore.
+let worktreeWatch: WatchSupervisor | null = null;
 let shuttingDown = false;
 
 async function shutdown(exitCode = 0) {
@@ -3196,21 +3204,22 @@ startDevAssetReload({
   sendReload: () => sendSse("reload"),
 });
 
-function startScopedWorktreeWatch(): ReturnType<
-  typeof startWorktreeUpdateWatch
-> {
+function startScopedWorktreeWatch(): WatchSupervisor {
   watchLimitReached = null;
-  return startWorktreeUpdateWatch({
+  return startWatchSupervisor({
     root: cwd,
     omitDirNames: scopeOmitDirNames,
     excludeNames: scopeExcludeNames,
-    watch,
-    initialScanMode: "async",
     maxWatchedDirectories: scopeWatchLimit,
     onUpdate: triggerUpdate,
     onWatchLimit: (limit) => {
       watchLimitReached = limit;
       sendSse("watch-limit", String(limit));
+    },
+    onPollOnly: () => {
+      console.warn(
+        "[code-viewer] file watching is unavailable; updates now come from periodic polling",
+      );
     },
     onError: (error) => {
       const message = error instanceof Error ? error.message : String(error);

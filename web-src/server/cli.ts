@@ -84,6 +84,12 @@ if (process.argv[2] === "agent-help") {
 } else if (process.argv[2] === "skill") {
   const { runSkillCli } = await import("./skill-cli");
   runSkillCli(process.argv.slice(3));
+} else if (process.argv[2] === "watch-child") {
+  // Internal: the preview server re-runs itself in this mode so file watching
+  // lives in a process it can SIGKILL. Not a user-facing command — a watcher
+  // stuck in libuv's FSEvents close would otherwise freeze the HTTP server.
+  const { runWatchChild } = await import("./watch-child");
+  await runWatchChild();
 } else if (process.argv[2] === "doctor") {
   const { runDoctorCli } = await import("./doctor-cli");
   await runDoctorCli(process.argv.slice(3));

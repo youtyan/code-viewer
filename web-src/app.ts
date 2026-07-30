@@ -8,6 +8,7 @@ import {
   shouldAutoLoadForRoute,
   shouldCatchUpDiff,
 } from "./core/catch-up";
+import { changedPathsCoverPath } from "./core/changed-paths";
 import { GdpExpandLogic } from "./core/expand-logic";
 import {
   findMainScrollTarget,
@@ -710,6 +711,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         SERVER_SCOPE_WATCH_LIMIT_MIN = settings.scope.watch_limit_min;
       if (typeof settings.scope.watch_limit_max === "number")
         SERVER_SCOPE_WATCH_LIMIT_MAX = settings.scope.watch_limit_max;
+      if (typeof settings.scope.watch_recursive === "boolean") {
+        // macOS and Windows watch the whole tree through one OS handle, so
+        // there are no per-directory watchers for this limit to cap. Hide the
+        // control rather than offer a setting that changes nothing.
+        const watchSection = document.querySelector<HTMLElement>(
+          "#watch-settings-section",
+        );
+        if (watchSection) watchSection.hidden = settings.scope.watch_recursive;
+      }
       return settings;
     } catch {
       return null;
@@ -5236,7 +5246,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!shouldAutoLoadCurrentRoute(route)) return;
     if (isBlobOrBlameFileRoute(route)) {
       const viewingPath = route.path;
-      if (paths && viewingPath && !paths.has(viewingPath)) return;
+      // Scope match: a directory-level notification stands for the files under
+      // it, so an exact lookup would skip the file being viewed.
+      if (viewingPath && !changedPathsCoverPath(paths, viewingPath)) return;
       // The viewed file changed on disk - bypass the idempotent-mount guard
       // so the fresh content actually renders.
       dispatchFileRoute(route, { refresh: true });
@@ -5288,7 +5300,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const route = STATE.route;
       if (isBlobOrBlameFileRoute(route)) {
         const viewingPath = route.path;
-        if (paths && viewingPath && !paths.has(viewingPath)) return;
+        if (viewingPath && !changedPathsCoverPath(paths, viewingPath)) return;
       }
       if (STATE.autoUpdate) {
         doSseLoad(paths);
