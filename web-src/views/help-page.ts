@@ -145,7 +145,11 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: 'Symlinks show a distinct icon and a "→ target" label so they are never mistaken for a regular file or folder, and clicking one navigates to its resolved target. A broken symlink is visually flagged and disabled. Files with pending git changes (new, modified, renamed, deleted) show a status badge in the tree instead of the regular type icon.',
+                text: 'Symlinks show a distinct icon and a "→ target" label so they are never mistaken for a regular file or folder, and clicking one navigates to its resolved target. A broken symlink is visually flagged and disabled.',
+              },
+              {
+                kind: "paragraph",
+                text: "Files with pending git changes show a status badge in the tree instead of the regular type icon: M (modified), A (added — staged for commit), D (deleted), R (renamed), U (untracked — in the worktree but not under version control yet), and I (ignored by a .gitignore rule). U and A stay separate so a file you have never run git add on does not look like one that is already staged. A wholly untracked or ignored directory is badged as a whole and keeps its folder icon, so it stays recognizable while collapsed; its contents inherit the badge unless an ignore rule names a file specifically.",
               },
             ],
           },
@@ -849,7 +853,11 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "シンボリックリンクは専用アイコンと「→ リンク先」ラベルで表示されるため通常のファイル/フォルダと区別でき、クリックするとリンク先に遷移します。リンク切れのシンボリックリンクは無効化されたことが分かる表示になります。未コミットの git 変更(新規・変更・リネーム・削除)があるファイルは、通常の種類アイコンの代わりにステータスバッジがツリーに表示されます。",
+                text: "シンボリックリンクは専用アイコンと「→ リンク先」ラベルで表示されるため通常のファイル/フォルダと区別でき、クリックするとリンク先に遷移します。リンク切れのシンボリックリンクは無効化されたことが分かる表示になります。",
+              },
+              {
+                kind: "paragraph",
+                text: "git の状態があるファイルは、通常の種類アイコンの代わりにステータスバッジがツリーに表示されます。M(変更)、A(追加 — コミット予定としてステージ済み)、D(削除)、R(リネーム)、U(未追跡 — ワークツリーにあるがまだバージョン管理下にない)、I(.gitignore の対象) の 6 種類です。U と A を分けているのは、git add をまだ一度もしていないファイルが、既にステージ済みのファイルと同じ見た目にならないようにするためです。丸ごと未追跡・無視のディレクトリにはディレクトリ単位でバッジが付き、フォルダアイコンは残るので折りたたんだままでも判別できます。配下のファイルはそのバッジを引き継ぎますが、無視ルールが個別に名指ししているファイルはそちらが優先されます。",
               },
             ],
           },
