@@ -22,6 +22,11 @@ export type RunBytesResult = {
 type RunOptions = {
   timeout?: number;
   maxBuffer?: number;
+  // Written to the child stdin and closed immediately. Only for commands
+  // whose input list can outgrow ARG_MAX (`git check-ignore --stdin` over a
+  // recursive listing), not as a general interactive channel - nothing reads
+  // back before the process exits.
+  stdin?: string;
 };
 
 export type StartedServer = {
@@ -86,8 +91,16 @@ export function runBytesAsync(
   return new Promise((resolve) => {
     const proc = spawn(args[0], args.slice(1), {
       cwd,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
+    if (options.stdin !== undefined) {
+      proc.stdin?.on("error", () => {
+        // A child that exits before draining its input (or a kill from the
+        // timeout/maxBuffer paths) closes the pipe mid-write - EPIPE here is
+        // expected, and the exit code still decides the result.
+      });
+      proc.stdin?.end(options.stdin);
+    }
     const stdoutChunks: Uint8Array[] = [];
     const stderrChunks: Uint8Array[] = [];
     let stdoutBytes = 0;

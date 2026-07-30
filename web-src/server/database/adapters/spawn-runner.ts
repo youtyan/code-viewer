@@ -1,11 +1,6 @@
 import { type SpawnOptions, spawn } from "node:child_process";
+import type { RunResult } from "../../runtime";
 import { abortError, throwIfAborted } from "./abort";
-
-export type SpawnTextResult = {
-  stdout: string;
-  stderr: string;
-  code: number;
-};
 
 export type SpawnCollectOptions = {
   command: string;
@@ -108,7 +103,7 @@ export function spawnCollectAsync(
 
 export async function spawnTextAsync(
   opts: SpawnCollectOptions,
-): Promise<SpawnTextResult> {
+): Promise<RunResult> {
   const result = await spawnCollectAsync(opts);
   return {
     stdout: result.stdout.toString("utf8"),

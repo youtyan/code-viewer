@@ -186,8 +186,24 @@ tree state survives navigation and refresh.
 Symlinks get a distinct icon and a "→ target" label instead of looking like a
 regular file, and clicking one navigates straight to its resolved target.
 Broken symlinks are flagged and disabled instead of erroring out. Files with
-pending git changes (new, modified, renamed, deleted) show a status badge in
-the tree in place of the regular type icon.
+pending git changes show a status badge in the tree in place of the regular
+type icon:
+
+| Badge | Meaning |
+|---|---|
+| `M` | Modified |
+| `A` | Added — staged for commit |
+| `D` | Deleted |
+| `R` | Renamed |
+| `U` | Untracked — in the worktree, not under version control yet |
+| `I` | Ignored — excluded by a `.gitignore` rule |
+
+`U` and `A` are deliberately separate: a file you have never run `git add` on
+reads differently from one already staged. A directory that is wholly
+untracked or ignored is badged as a whole, so it stays recognizable while
+collapsed; it keeps its folder icon and carries the badge next to its name.
+Inside an untracked directory the badge is inherited by its contents, except
+where an ignore rule names a file specifically.
 
 ## Uploads and Scope Settings
 

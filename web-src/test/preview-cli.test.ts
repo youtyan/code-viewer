@@ -773,6 +773,92 @@ describe("preview CLI", () => {
   );
 
   runOrSkip(
+    "/_tree distinguishes untracked and ignored entries from tracked ones",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-untracked-tree-"));
+      tmpRoots.push(root);
+      git(root, ["init"]);
+      git(root, ["config", "user.email", "test@example.com"]);
+      git(root, ["config", "user.name", "Test"]);
+      writeFileSync(join(root, ".gitignore"), "ignored.txt\nbuild/\n");
+      writeFileSync(join(root, "tracked.txt"), "tracked\n");
+      git(root, ["add", "-A"]);
+      git(root, ["commit", "-m", "initial"]);
+
+      writeFileSync(join(root, "staged.txt"), "staged\n");
+      git(root, ["add", "staged.txt"]);
+      writeFileSync(join(root, "untracked.txt"), "new\n");
+      writeFileSync(join(root, "ignored.txt"), "secret\n");
+      mkdirSync(join(root, "build"));
+      writeFileSync(join(root, "build", "out.js"), "generated\n");
+      // A brand-new directory holding a file the ignore rules also name: the
+      // directory reads untracked, the file inside it reads ignored.
+      mkdirSync(join(root, "fresh-dir"));
+      writeFileSync(join(root, "fresh-dir", "inside.txt"), "nested\n");
+      writeFileSync(join(root, "fresh-dir", "ignored.txt"), "nested secret\n");
+
+      const proc = spawn(
+        process.execPath,
+        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        {
+          cwd: join(import.meta.dir, "..", ".."),
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+
+      let cleanupTimedOut = false;
+      try {
+        const url = await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(5000).then(() => {
+            throw new Error("preview did not start");
+          }),
+        ]);
+
+        const statusAt = async (path: string) => {
+          const query = path
+            ? `/_tree?ref=worktree&path=${path}`
+            : "/_tree?ref=worktree";
+          const response = await fetchWithTimeout(
+            new URL(query, url).toString(),
+            1000,
+          );
+          const body = (await response.json()) as {
+            entries: Array<{ path: string; status?: string }>;
+          };
+          return new Map(body.entries.map((e) => [e.path, e.status]));
+        };
+
+        const rootStatus = await statusAt("");
+        expect(rootStatus.get("tracked.txt")).toBe(undefined);
+        expect(rootStatus.get("staged.txt")).toBe("A");
+        expect(rootStatus.get("untracked.txt")).toBe("U");
+        expect(rootStatus.get("ignored.txt")).toBe("I");
+        expect(rootStatus.get("build")).toBe("I");
+        expect(rootStatus.get("fresh-dir")).toBe("U");
+
+        // Descendants of the untracked directory inherit "U", except the one
+        // an ignore rule names for itself.
+        const freshStatus = await statusAt("fresh-dir");
+        expect(freshStatus.get("fresh-dir/inside.txt")).toBe("U");
+        expect(freshStatus.get("fresh-dir/ignored.txt")).toBe("I");
+
+        const buildStatus = await statusAt("build");
+        expect(buildStatus.get("build/out.js")).toBe("I");
+      } finally {
+        proc.kill("SIGKILL");
+        cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+      }
+      if (cleanupTimedOut) {
+        throw new Error("preview process did not exit after SIGKILL");
+      }
+    },
+  );
+
+  runOrSkip(
     "/_tree resolves a committed-ref directory symlink via resolved_path",
     async () => {
       const root = mkdtempSync(join(tmpdir(), "code-viewer-symlink-tree-"));

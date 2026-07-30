@@ -220,9 +220,11 @@ function run(
 function runGitAsync(
   args: string[],
   cwd: string,
+  options: { stdin?: string } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return runAsync(resolveGitArgs(args), cwd, {
     timeout: GIT_COMMAND_TIMEOUT_MS,
+    ...options,
   });
 }
 
@@ -355,6 +357,15 @@ const repoStatusMapCache = new Map<
 // untracked), for the tree explorer change badges. Distinct from
 // statusPorcelainForPathAsync, which only checks whether a single given
 // path has any uncommitted change (existence, not per-path codes).
+//
+// Untracked paths get "U", never "A" - "A" means staged-for-commit, and
+// collapsing the two would make a file git does not track yet
+// indistinguishable from one that is already in the index.
+//
+// A wholly untracked directory is stored under its own trailing-slash key
+// (`dir/`), exactly as `git status` reports it. Descendants of such a
+// directory are not listed individually; repoStatusForPath walks the
+// ancestors to badge them. Read the map through that helper, not `.get`.
 export async function repoStatusMapAsync(
   cwd: string,
   now = Date.now(),
@@ -370,11 +381,11 @@ export async function repoStatusMapAsync(
       "status",
       "--porcelain=v1",
       "-z",
-      // "all" (not "normal") so a brand-new untracked directory is expanded
-      // into its individual file paths (`?? dir/file` for each) instead of
-      // collapsing to one `?? dir/` record - the tree explorer needs a
-      // per-file status to badge each entry, not just the containing dir.
-      "--untracked-files=all",
+      // "normal" (not "all") keeps a brand-new untracked directory collapsed
+      // to a single `?? dir/` record instead of walking into it: the tree
+      // explorer badges its descendants by ancestor lookup anyway, and "all"
+      // would make git enumerate every file under it on each poll.
+      "--untracked-files=normal",
     ],
     cwd,
   );
@@ -386,7 +397,7 @@ export async function repoStatusMapAsync(
     const path = record.slice(3);
     if (!path) continue;
     if (xy === "??") {
-      map.set(path, "A");
+      map.set(path, "U");
       continue;
     }
     // Renames/copies emit "XY PATH" followed by a separate "ORIG_PATH"
@@ -404,6 +415,48 @@ export async function repoStatusMapAsync(
   }
   setTimedCacheEntry(repoStatusMapCache, cwd, { map }, now);
   return map;
+}
+
+// Status for one path out of a repoStatusMapAsync map. `inherited` marks a
+// code that came from an untracked ancestor directory rather than from a
+// record naming this path - callers that layer other classifications on top
+// (ignore rules) need to know which of the two they are overriding.
+export function repoStatusForPath(
+  map: Map<string, string>,
+  path: string,
+): { code: string; inherited: boolean } | undefined {
+  // A directory is keyed with the trailing slash git prints; a file is keyed
+  // bare. Neither form can collide, so trying both is unambiguous.
+  const own = map.get(path) ?? map.get(`${path}/`);
+  if (own) return { code: own, inherited: false };
+  for (
+    let slash = path.lastIndexOf("/");
+    slash > 0;
+    slash = path.lastIndexOf("/", slash - 1)
+  ) {
+    const ancestor = map.get(`${path.slice(0, slash)}/`);
+    if (ancestor) return { code: ancestor, inherited: true };
+  }
+  return undefined;
+}
+
+// Which of `paths` git would ignore, resolved in one `check-ignore` pass.
+// Tracked files never come back even when a pattern names them (check-ignore
+// consults the index), so this cannot mislabel a file that is under version
+// control. Paths go through stdin because a recursive listing can hold up to
+// WORKTREE_RECURSIVE_ENTRY_LIMIT entries - far past ARG_MAX as arguments.
+export async function ignoredPathsAsync(
+  paths: string[],
+  cwd: string,
+): Promise<Set<string>> {
+  if (!paths.length) return new Set();
+  const res = await runGitAsync(["git", "check-ignore", "-z", "--stdin"], cwd, {
+    stdin: paths.join("\0"),
+  });
+  // Exit 1 is "nothing matched", which is a normal answer, not a failure.
+  // Anything above that (128 = not a repository, missing git) yields none.
+  if (res.code !== 0 && res.code !== 1) return new Set();
+  return new Set(res.stdout.split("\0").filter(Boolean));
 }
 
 export function showAsync(

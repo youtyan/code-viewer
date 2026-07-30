@@ -12,7 +12,9 @@ import { CACHE_TTL_MS } from "../server/cache";
 import {
   type GitTreeEntry,
   gitSymlinkTargetMetadataAsync,
+  ignoredPathsAsync,
   listTreeAsync,
+  repoStatusForPath,
   repoStatusMapAsync,
   resolveSymlinkPath,
 } from "../server/git";
@@ -351,11 +353,14 @@ describe("repoStatusMapAsync", () => {
     rmSync(join(dir, "to-delete.txt"));
     runGit(dir, ["mv", "to-rename.txt", "renamed.txt"]);
     writeFileSync(join(dir, "untracked.txt"), "new\n");
-    // A brand-new directory: git collapses this to a single `?? new-dir/`
-    // record under --untracked-files=normal, which would leave individual
-    // files in it un-badged in the tree explorer.
-    mkdirSync(join(dir, "new-dir"));
+    writeFileSync(join(dir, "staged-add.txt"), "staged\n");
+    runGit(dir, ["add", "staged-add.txt"]);
+    // A brand-new directory: git reports it as a single `?? new-dir/` record
+    // under --untracked-files=normal, and repoStatusForPath badges what is
+    // inside it by walking up to that record.
+    mkdirSync(join(dir, "new-dir", "nested"), { recursive: true });
     writeFileSync(join(dir, "new-dir", "inside.txt"), "nested new file\n");
+    writeFileSync(join(dir, "new-dir", "nested", "deep.txt"), "deeper\n");
 
     statusMap = await repoStatusMapAsync(dir);
   });
@@ -368,10 +373,16 @@ describe("repoStatusMapAsync", () => {
     { path: "tracked.txt", expectedStatus: "M" },
     { path: "to-delete.txt", expectedStatus: "D" },
     { path: "renamed.txt", expectedStatus: "R" },
-    { path: "untracked.txt", expectedStatus: "A" },
-    { path: "new-dir/inside.txt", expectedStatus: "A" },
+    // Staged-for-commit keeps "A"; never-added keeps "U". Collapsing the two
+    // is exactly what made an untracked file indistinguishable in the tree.
+    { path: "staged-add.txt", expectedStatus: "A" },
+    { path: "untracked.txt", expectedStatus: "U" },
   ])("status for $path is $expectedStatus", ({ path, expectedStatus }) => {
     expect(statusMap.get(path)).toBe(expectedStatus);
+  });
+
+  test("a wholly untracked directory is recorded under its trailing-slash key", () => {
+    expect(statusMap.get("new-dir/")).toBe("U");
   });
 
   test("an unchanged tracked file has no status entry", () => {
@@ -380,6 +391,103 @@ describe("repoStatusMapAsync", () => {
 
   test("the old path of a rename is not reported as its own entry", () => {
     expect(statusMap.has("to-rename.txt")).toBe(false);
+  });
+
+  describe("repoStatusForPath", () => {
+    test.each([
+      {
+        name: "a file named by its own record",
+        path: "tracked.txt",
+        expected: { code: "M", inherited: false },
+      },
+      {
+        name: "an untracked directory addressed without the trailing slash",
+        path: "new-dir",
+        expected: { code: "U", inherited: false },
+      },
+      {
+        name: "a direct child of an untracked directory",
+        path: "new-dir/inside.txt",
+        expected: { code: "U", inherited: true },
+      },
+      {
+        name: "a deeper descendant of an untracked directory",
+        path: "new-dir/nested/deep.txt",
+        expected: { code: "U", inherited: true },
+      },
+      {
+        name: "an intermediate directory under an untracked directory",
+        path: "new-dir/nested",
+        expected: { code: "U", inherited: true },
+      },
+    ])("$name resolves to $expected.code", ({ path, expected }) => {
+      expect(repoStatusForPath(statusMap, path)).toEqual(expected);
+    });
+
+    test.each([
+      { name: "an unchanged tracked file", path: "untouched.txt" },
+      {
+        name: "a path that merely shares a prefix with an untracked directory",
+        path: "new-dir-sibling.txt",
+      },
+    ])("$name has no status", ({ path }) => {
+      expect(repoStatusForPath(statusMap, path)).toBeUndefined();
+    });
+  });
+});
+
+describe("ignoredPathsAsync", () => {
+  let dir: string;
+  let ignored: Set<string>;
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), "code-viewer-ignored-paths-"));
+    initGitIdentity(dir);
+    writeFileSync(join(dir, ".gitignore"), "secret.txt\nbuild/\n");
+    writeFileSync(join(dir, "tracked.txt"), "tracked\n");
+    // Added with -f despite matching an ignore rule: git tracks it, so it is
+    // under version control and must not be reported as ignored.
+    writeFileSync(join(dir, "secret.txt"), "forced\n");
+    runGit(dir, ["add", "-A", "-f"]);
+    runGit(dir, ["commit", "-m", "initial"]);
+    mkdirSync(join(dir, "build"));
+    writeFileSync(join(dir, "build", "out.js"), "generated\n");
+    writeFileSync(join(dir, "fresh.txt"), "new\n");
+
+    ignored = await ignoredPathsAsync(
+      ["tracked.txt", "secret.txt", "build", "build/out.js", "fresh.txt"],
+      dir,
+    );
+  });
+
+  afterAll(() => {
+    rmSync(dir, { force: true, recursive: true });
+  });
+
+  test.each([
+    { name: "an ignored directory", path: "build", expected: true },
+    {
+      name: "a file inside an ignored directory",
+      path: "build/out.js",
+      expected: true,
+    },
+    { name: "a tracked file", path: "tracked.txt", expected: false },
+    {
+      name: "a tracked file that also matches an ignore rule",
+      path: "secret.txt",
+      expected: false,
+    },
+    {
+      name: "an untracked file no rule names",
+      path: "fresh.txt",
+      expected: false,
+    },
+  ])("$name is ignored=$expected", ({ path, expected }) => {
+    expect(ignored.has(path)).toBe(expected);
+  });
+
+  test("an empty request skips the git call and returns nothing", async () => {
+    expect(await ignoredPathsAsync([], dir)).toEqual(new Set());
   });
 });
 

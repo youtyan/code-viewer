@@ -127,6 +127,11 @@ export function createSidebar(deps: SidebarDeps) {
     is_symlink?: true;
     symlink_target?: string;
     resolved_path?: string;
+    // Only set for directories the server reported as a whole - a wholly
+    // untracked ("U") or ignored ("I") directory. Directories synthesized
+    // from a file path stay undefined: their tracked/untracked mix is only
+    // knowable per file.
+    status?: string;
   };
 
   const VIRTUAL_SIDEBAR_THRESHOLD = 3000;
@@ -317,6 +322,55 @@ export function createSidebar(deps: SidebarDeps) {
     applySidebarHidden(!STATE.sidebarHidden);
   }
 
+  // Copies the directory-only facts of a `type: "tree"` entry onto the node
+  // that represents it. Shared by the two tree builders (full rebuild and
+  // incremental upsert) so a directory carries the same attributes however
+  // it entered the tree.
+  function applyDirEntryToNode(node: TreeNode, entry: SidebarItem) {
+    node.explicit = true;
+    if (entry.children_omitted === true) {
+      node.children_omitted = true;
+      node.children_omitted_reason = entry.children_omitted_reason;
+    }
+    if (entry.is_symlink) {
+      node.is_symlink = true;
+      node.symlink_target = entry.symlink_target;
+      node.resolved_path = entry.resolved_path;
+    }
+    if (entry.status) node.status = entry.status;
+  }
+
+  // The label span of a directory row: name, then the badges that qualify
+  // it. Shared by the plain and virtualized tree renderers so both stay
+  // identical. The status badge sits after the name rather than replacing
+  // the leading icon (as a file row does), because that icon is the
+  // expand/collapse target.
+  function createTreeDirLabel(dir: TreeNode): HTMLElement {
+    const label = document.createElement("span");
+    label.className = "dir-label";
+    const dn = document.createElement("span");
+    dn.className = "dir-name";
+    dn.textContent = dir.name;
+    dn.title = dir.path;
+    label.appendChild(dn);
+    if (dir.status) label.appendChild(fileBadge(dir.status));
+    if (dir.children_omitted) {
+      const omitted = document.createElement("span");
+      omitted.className =
+        "dir-omitted " +
+        (dir.children_omitted_reason === "heavy"
+          ? "dir-omitted-heavy"
+          : "dir-omitted-internal");
+      const badge = omittedDirectoryBadge(dir.children_omitted_reason);
+      omitted.textContent = badge.label;
+      omitted.title = badge.title;
+      label.appendChild(omitted);
+    }
+    const dirSymlinkLabel = symlinkTargetLabel(dir);
+    if (dirSymlinkLabel) label.appendChild(dirSymlinkLabel);
+    return label;
+  }
+
   function buildTree(files: SidebarItem[]): TreeNode {
     const root: TreeNode = {
       name: "",
@@ -348,16 +402,7 @@ export function createSidebar(deps: SidebarDeps) {
           node.minOrder = f.order;
       }
       if (f.type === "tree") {
-        node.explicit = true;
-        if (f.children_omitted === true) {
-          node.children_omitted = true;
-          node.children_omitted_reason = f.children_omitted_reason;
-        }
-        if (f.is_symlink) {
-          node.is_symlink = true;
-          node.symlink_target = f.symlink_target;
-          node.resolved_path = f.resolved_path;
-        }
+        applyDirEntryToNode(node, f);
         continue;
       }
       node.files.push(f);
@@ -446,28 +491,7 @@ export function createSidebar(deps: SidebarDeps) {
         const dirIcon = document.createElement("span");
         dirIcon.className = "dir-icon";
         li.appendChild(dirIcon);
-        const label = document.createElement("span");
-        label.className = "dir-label";
-        const dn = document.createElement("span");
-        dn.className = "dir-name";
-        dn.textContent = dir.name;
-        dn.title = dir.path;
-        label.appendChild(dn);
-        if (dir.children_omitted) {
-          const omitted = document.createElement("span");
-          omitted.className =
-            "dir-omitted " +
-            (dir.children_omitted_reason === "heavy"
-              ? "dir-omitted-heavy"
-              : "dir-omitted-internal");
-          const badge = omittedDirectoryBadge(dir.children_omitted_reason);
-          omitted.textContent = badge.label;
-          omitted.title = badge.title;
-          label.appendChild(omitted);
-        }
-        const dirSymlinkLabel = symlinkTargetLabel(dir);
-        if (dirSymlinkLabel) label.appendChild(dirSymlinkLabel);
-        li.appendChild(label);
+        li.appendChild(createTreeDirLabel(dir));
         li.appendChild(
           createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
         );
@@ -582,16 +606,7 @@ export function createSidebar(deps: SidebarDeps) {
       node.minOrder = Math.min(node.minOrder, order);
     }
     if (entry.type === "tree") {
-      node.explicit = true;
-      if (entry.children_omitted === true) {
-        node.children_omitted = true;
-        node.children_omitted_reason = entry.children_omitted_reason;
-      }
-      if (entry.is_symlink) {
-        node.is_symlink = true;
-        node.symlink_target = entry.symlink_target;
-        node.resolved_path = entry.resolved_path;
-      }
+      applyDirEntryToNode(node, entry);
       return;
     }
     if (!node.files.some((file) => file.path === entry.path))
@@ -701,28 +716,7 @@ export function createSidebar(deps: SidebarDeps) {
     const dirIcon = document.createElement("span");
     dirIcon.className = "dir-icon";
     li.appendChild(dirIcon);
-    const label = document.createElement("span");
-    label.className = "dir-label";
-    const dn = document.createElement("span");
-    dn.className = "dir-name";
-    dn.textContent = dir.name;
-    dn.title = dir.path;
-    label.appendChild(dn);
-    if (dir.children_omitted) {
-      const omitted = document.createElement("span");
-      omitted.className =
-        "dir-omitted " +
-        (dir.children_omitted_reason === "heavy"
-          ? "dir-omitted-heavy"
-          : "dir-omitted-internal");
-      const badge = omittedDirectoryBadge(dir.children_omitted_reason);
-      omitted.textContent = badge.label;
-      omitted.title = badge.title;
-      label.appendChild(omitted);
-    }
-    const dirSymlinkLabel = symlinkTargetLabel(dir);
-    if (dirSymlinkLabel) label.appendChild(dirSymlinkLabel);
-    li.appendChild(label);
+    li.appendChild(createTreeDirLabel(dir));
     li.appendChild(
       createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
     );
