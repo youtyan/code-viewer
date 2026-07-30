@@ -21,10 +21,8 @@ import {
 import { openElasticsearchAdapterAsync } from "./database/adapters/elasticsearch";
 import { openRedisExplorerAsync } from "./database/adapters/redis";
 import { openS3ExplorerAsync } from "./database/adapters/s3";
-import {
-  type SpawnTextResult,
-  spawnTextAsync,
-} from "./database/adapters/spawn-runner";
+import { spawnTextAsync } from "./database/adapters/spawn-runner";
+import type { RunResult } from "./runtime";
 import { sqliteAdapterFactory } from "./database/adapters/sqlite";
 import {
   type DockerDiscoveryResult,
@@ -78,21 +76,21 @@ const TIMEOUT = {
 
 type CacheEntry<T> = { value: T; expiresAt: number };
 
-const versionCache = new Map<string, CacheEntry<SpawnTextResult | null>>();
-const gitCache = new Map<string, CacheEntry<SpawnTextResult | null>>();
-const dockerInfoCache = new Map<string, CacheEntry<SpawnTextResult | null>>();
+const versionCache = new Map<string, CacheEntry<RunResult | null>>();
+const gitCache = new Map<string, CacheEntry<RunResult | null>>();
+const dockerInfoCache = new Map<string, CacheEntry<RunResult | null>>();
 
 // Non-printable separator: prevents argv-boundary collisions
 // (e.g. ["a","bc"] vs ["ab","c"]) when composing the cache key.
 const CACHE_KEY_SEP = "";
 const composeConfigCache = new Map<
   string,
-  CacheEntry<{ result: SpawnTextResult | null; services: string[] | null }>
+  CacheEntry<{ result: RunResult | null; services: string[] | null }>
 >();
 const composePsCache = new Map<
   string,
   CacheEntry<{
-    result: SpawnTextResult | null;
+    result: RunResult | null;
     parsed: ComposePsRow[] | null;
   }>
 >();
@@ -121,19 +119,19 @@ function computeWorst(groups: DoctorGroup[]): DoctorStatus {
 }
 
 async function runCached(
-  cache: Map<string, CacheEntry<SpawnTextResult | null>>,
+  cache: Map<string, CacheEntry<RunResult | null>>,
   ttl: number,
   command: string,
   args: string[],
   timeoutMs: number,
   signal: AbortSignal | undefined,
   cwd?: string,
-): Promise<SpawnTextResult | null> {
+): Promise<RunResult | null> {
   const key = [cwd || "", command, ...args].join(CACHE_KEY_SEP);
   const now = Date.now();
   const cached = cache.get(key);
   if (cached && cached.expiresAt > now) return cached.value;
-  let result: SpawnTextResult | null;
+  let result: RunResult | null;
   try {
     result = await spawnTextAsync({
       command,
@@ -744,7 +742,7 @@ async function checkComposeConfig(
   const cacheKey = `${cmd.binary}|${composeDir}`;
   const now = Date.now();
   const cached = composeConfigCache.get(cacheKey);
-  let result: SpawnTextResult | null;
+  let result: RunResult | null;
   let services: string[] | null;
   if (cached && cached.expiresAt > now) {
     result = cached.value.result;
@@ -858,7 +856,7 @@ async function checkComposePs(
   const cacheKey = `${cmd.binary}|ps|${composeDir}`;
   const now = Date.now();
   const cached = composePsCache.get(cacheKey);
-  let result: SpawnTextResult | null;
+  let result: RunResult | null;
   let parsed: ComposePsRow[] | null;
   if (cached && cached.expiresAt > now) {
     result = cached.value.result;
