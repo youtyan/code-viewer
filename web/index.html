@@ -30,6 +30,11 @@
       <a class="app-menu-item" data-route="history" href="/history">History</a>
       <a class="app-menu-item" data-route="journal" href="/journal">Work Log</a>
       <a class="app-menu-item" data-route="database" href="/database">Datastores</a>
+      <!-- Tools は画面遷移ではなくドロワーの開閉なので、リンクではなくボタン。
+           data-route はラベルのローカライズにだけ使う (SPA ナビの走査は
+           a.app-menu-item に限定してあるのでここは拾われない)。 -->
+      <button type="button" id="tools-btn" class="app-menu-item app-menu-action" data-route="tools" aria-pressed="false">Tools</button>
+      <a class="app-menu-item" data-route="help" href="/help">Help</a>
     </nav>
     <div class="global-actions">
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations"><span class="goi-icon" aria-hidden="true"></span><span id="annotations-count" hidden></span></button>
@@ -45,7 +50,6 @@
       <span id="status" class="status" role="status" aria-live="polite"><span class="status-label"></span></span>
       <a id="repo-web-link" class="global-icon-link" href="#" target="_blank" rel="noopener" hidden><span class="goi-icon" aria-hidden="true"></span></a>
       <button id="quick-help-btn" class="global-icon-action" title="quick help (shortcuts)" aria-label="quick help (shortcuts)"><span class="goi-icon" aria-hidden="true"></span></button>
-      <a class="global-icon-link" data-route="help" href="/help"><span class="goi-icon" aria-hidden="true"></span></a>
     </div>
   </header>
   <header id="topbar">
@@ -273,6 +277,8 @@
 
   <div id="doctor-sheet-overlay" class="doctor-sheet-overlay" hidden aria-hidden="true"></div>
   <aside id="doctor-sheet" class="doctor-sheet" hidden aria-hidden="true" inert aria-label="environment doctor"></aside>
+  <div id="tools-sheet-overlay" class="tools-sheet-overlay" hidden aria-hidden="true"></div>
+  <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
   <main id="content">
     <section id="history-commit-info" hidden></section>
     <div id="empty" class="empty hidden">

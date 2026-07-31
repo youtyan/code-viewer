@@ -472,6 +472,7 @@ function staticFile(pathname: string): Response | null {
     "/app.js": ["app.js", "application/javascript; charset=utf-8"],
     "/mermaid.js": ["mermaid.js", "application/javascript; charset=utf-8"],
     "/shiki.js": ["shiki.js", "application/javascript; charset=utf-8"],
+    "/yaml.js": ["yaml.js", "application/javascript; charset=utf-8"],
     "/vendor/diff2html/diff2html.min.css": [
       "vendor/diff2html/diff2html.min.css",
       "text/css; charset=utf-8",

@@ -1,4 +1,5 @@
 import type { GdpExpandLogic } from "./expand-logic";
+import type { ToolId } from "./tools";
 
 export type FileMeta = {
   order?: number;
@@ -157,6 +158,19 @@ export type DbUiState = {
    * テーブル名配列。サイズと値の sanitize は state-store 側で行う。 */
   snapshotSelectedTables?: Record<string, string[]>;
   prefs?: DbUiPrefs;
+};
+
+// tools.json に保存されるスクラッチパッドの状態。貼り付けた本文はブラウザを
+// 閉じても消えないほうが道具として使いやすいので、他の永続 UI 状態と同じく
+// .code-viewer 配下に置く (localStorage は使わない)。
+export type ToolsState = {
+  version: 1;
+  /** 最後に開いていたツール。次に開いたときの初期タブになる。 */
+  activeTool?: ToolId;
+  /** ドロワーの幅 (px)。左端のドラッグで変えた値を覚えておく。 */
+  width?: number;
+  /** ツールごとの入力本文。空文字は「下書き無し」として保存しない。 */
+  drafts?: Partial<Record<ToolId, string>>;
 };
 
 export type UndoActionResponse = {

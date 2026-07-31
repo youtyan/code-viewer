@@ -1,12 +1,20 @@
 import { join } from "node:path";
+import {
+  isToolId,
+  MAX_TOOLS_SHEET_WIDTH,
+  MIN_TOOLS_SHEET_WIDTH,
+  TOOL_IDS,
+  type ToolId,
+} from "../core/tools";
 import type {
   AppSettingsState,
   DbUiPrefs,
   DbUiState,
+  ToolsState,
   ViewerFontSizeSetting,
   ViewState,
 } from "../core/types";
-import { createJsonFileStore } from "./json-store";
+import { createJsonFileStore, type JsonFileStore } from "./json-store";
 import {
   MAX_WORKTREE_WATCH_DIRECTORY_LIMIT,
   MIN_WORKTREE_WATCH_DIRECTORY_LIMIT,
@@ -16,9 +24,16 @@ const CODE_VIEWER_DIR = ".code-viewer";
 const SETTINGS_FILE_NAME = "settings.json";
 const VIEW_STATE_FILE_NAME = "view-state.json";
 const DB_UI_FILE_NAME = "db-ui.json";
+const TOOLS_FILE_NAME = "tools.json";
 const MAX_SETTINGS_BYTES = 200_000;
 const MAX_VIEW_STATE_BYTES = 1_000_000;
 const MAX_DB_UI_BYTES = 1_000_000;
+// 1 ツールあたりの下書き上限 (UTF-16 コード単位)。
+const MAX_TOOL_DRAFT_LEN = 200_000;
+// 下書きは 3 ツール分あり、UTF-8 では 1 文字が最大 4 バイトになる。上限まで
+// 埋めた 3 ツール分 (最悪 2.4 MB) が JSON 化しても収まる大きさを取る。ここが
+// 足りないと、個別には許可した下書きの組合せが保存できなくなる。
+const MAX_TOOLS_BYTES = 4_000_000;
 const MAX_REF_LEN = 1024;
 const MAX_KEY_LEN = 2048;
 const MAX_VIEW_ITEMS = 20_000;
@@ -523,6 +538,77 @@ function mergeDbUiState(current: DbUiState, patch: unknown): DbUiState {
   });
 }
 
+function emptyToolsState(): ToolsState {
+  return { version: 1 };
+}
+
+function sanitizeToolsState(raw: unknown): ToolsState {
+  if (!isRecord(raw)) return emptyToolsState();
+  const out: ToolsState = { version: 1 };
+  if (isToolId(raw.activeTool)) out.activeTool = raw.activeTool;
+  const width = optionalNumber(
+    raw.width,
+    MIN_TOOLS_SHEET_WIDTH,
+    MAX_TOOLS_SHEET_WIDTH,
+  );
+  if (width !== undefined) out.width = width;
+  if (isRecord(raw.drafts)) {
+    const drafts: Partial<Record<ToolId, string>> = {};
+    for (const id of TOOL_IDS) {
+      const draft = raw.drafts[id];
+      if (typeof draft !== "string") continue;
+      // 空文字は「下書き無し」。長すぎるものは丸めずに捨てる (途中で切ると
+      // ユーザーの本文を壊したまま保存してしまう)。
+      if (draft.length === 0 || draft.length > MAX_TOOL_DRAFT_LEN) continue;
+      drafts[id] = draft;
+    }
+    if (Object.keys(drafts).length > 0) out.drafts = drafts;
+  }
+  return out;
+}
+
+function mergeToolsState(current: ToolsState, patch: unknown): ToolsState {
+  if (!isRecord(patch)) return current;
+  const next: ToolsState = { ...current, version: 1 };
+  // drafts と同じ扱い: null は削除、壊れた値は無視して既存値を残す。
+  if ("activeTool" in patch) {
+    if (patch.activeTool === null) delete next.activeTool;
+    else if (isToolId(patch.activeTool)) next.activeTool = patch.activeTool;
+  }
+  if ("width" in patch) {
+    if (patch.width === null) delete next.width;
+    else {
+      const width = optionalNumber(
+        patch.width,
+        MIN_TOOLS_SHEET_WIDTH,
+        MAX_TOOLS_SHEET_WIDTH,
+      );
+      if (width !== undefined) next.width = width;
+    }
+  }
+  if (isRecord(patch.drafts)) {
+    const drafts: Partial<Record<ToolId, string>> = { ...(next.drafts ?? {}) };
+    for (const id of TOOL_IDS) {
+      if (!(id in patch.drafts)) continue;
+      const value = patch.drafts[id];
+      // null と空文字はどちらも「この下書きを消す」。
+      if (value === null || value === "") {
+        delete drafts[id];
+        continue;
+      }
+      // 文字列以外は壊れた patch。既存の下書きを巻き添えにせず無視する。
+      if (typeof value !== "string") continue;
+      // 上限超えは sanitize で黙って捨てられて既存値まで消えるので、
+      // ここで弾いて 413 として返す。
+      if (value.length > MAX_TOOL_DRAFT_LEN)
+        throw new Error("tools state too large");
+      drafts[id] = value;
+    }
+    next.drafts = drafts;
+  }
+  return sanitizeToolsState(next);
+}
+
 const settingsStore = createJsonFileStore<AppSettingsState>({
   filePath: (root) => codeViewerPath(root, SETTINGS_FILE_NAME),
   empty: emptySettings,
@@ -549,6 +635,29 @@ const dbUiStore = createJsonFileStore<DbUiState>({
   backupSuffix: "corrupt",
   sizeErrorMessage: "db UI state too large",
 });
+
+const toolsStore = createJsonFileStore<ToolsState>({
+  filePath: (root) => codeViewerPath(root, TOOLS_FILE_NAME),
+  empty: emptyToolsState,
+  sanitize: sanitizeToolsState,
+  maxBytes: MAX_TOOLS_BYTES,
+  backupSuffix: "corrupt",
+  sizeErrorMessage: "tools state too large",
+});
+
+// 各 patch* は「読み込んだ現在値に merge して書き戻し、書き戻した値を返す」
+// という同一の手順なので、差し替わるのは merge 関数だけ。
+function patchJsonState<T>(
+  store: JsonFileStore<T>,
+  root: string,
+  patch: unknown,
+  merge: (current: T, patch: unknown) => T,
+): Promise<T> {
+  return store.update(root, (state) => {
+    const next = merge(state, patch);
+    return { state: next, result: next };
+  });
+}
 
 // ai-dup-check: allow -- exported test helper for this concrete JSON store.
 export function settingsFilePath(root: string): string {
@@ -587,10 +696,7 @@ export async function patchAppSettingsState(
   root: string,
   patch: unknown,
 ): Promise<AppSettingsState> {
-  return settingsStore.update(root, (state) => {
-    const next = mergeSettings(state, patch);
-    return { state: next, result: next };
-  });
+  return patchJsonState(settingsStore, root, patch, mergeSettings);
 }
 
 export async function loadViewState(root: string): Promise<ViewState> {
@@ -601,10 +707,7 @@ export async function patchViewState(
   root: string,
   patch: unknown,
 ): Promise<ViewState> {
-  return viewStateStore.update(root, (state) => {
-    const next = mergeViewState(state, patch);
-    return { state: next, result: next };
-  });
+  return patchJsonState(viewStateStore, root, patch, mergeViewState);
 }
 
 export async function loadDbUiState(root: string): Promise<DbUiState> {
@@ -615,8 +718,25 @@ export async function patchDbUiState(
   root: string,
   patch: unknown,
 ): Promise<DbUiState> {
-  return dbUiStore.update(root, (state) => {
-    const next = mergeDbUiState(state, patch);
-    return { state: next, result: next };
-  });
+  return patchJsonState(dbUiStore, root, patch, mergeDbUiState);
+}
+
+// ai-dup-check: allow -- ok:exported test helper for this concrete JSON store.
+export function toolsFilePath(root: string): string {
+  return codeViewerPath(root, TOOLS_FILE_NAME);
+}
+
+export function sanitizeTools(raw: unknown): ToolsState {
+  return sanitizeToolsState(raw);
+}
+
+export async function loadToolsState(root: string): Promise<ToolsState> {
+  return toolsStore.load(root);
+}
+
+export async function patchToolsState(
+  root: string,
+  patch: unknown,
+): Promise<ToolsState> {
+  return patchJsonState(toolsStore, root, patch, mergeToolsState);
 }

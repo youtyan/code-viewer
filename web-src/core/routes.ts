@@ -1,3 +1,5 @@
+import { isToolId, type ToolId } from "./tools";
+
 export type DiffRange = {
   from: string;
   to: string;
@@ -422,13 +424,35 @@ export function parseDoctorOverlay(pathname: string, search: string): boolean {
   return params.get("doctor") === "open";
 }
 
-export function withDoctorOverlay(url: string, open: boolean): string {
+// オーバーレイ系の状態は AppRoute とは独立した 1 個のクエリキーで表すので、
+// 「そのキーだけ差し替えて他は素通しする」操作を共有する。
+function withQueryParam(
+  url: string,
+  key: string,
+  value: string | null,
+): string {
   const queryIdx = url.indexOf("?");
   const base = queryIdx >= 0 ? url.slice(0, queryIdx) : url;
   const query = queryIdx >= 0 ? url.slice(queryIdx + 1) : "";
   const params = new URLSearchParams(query);
-  if (open) params.set("doctor", "open");
-  else params.delete("doctor");
+  if (value === null) params.delete(key);
+  else params.set(key, value);
   const qs = params.toString();
   return qs ? `${base}?${qs}` : base;
+}
+
+export function withDoctorOverlay(url: string, open: boolean): string {
+  return withQueryParam(url, "doctor", open ? "open" : null);
+}
+
+// Tools overlay is the same kind of AppRoute-independent state as the doctor
+// sheet, except the query value also carries which tool is on screen
+// (`?tools=markdown`). An unknown value counts as closed.
+export function parseToolsOverlay(search: string): ToolId | null {
+  const raw = new URLSearchParams(search).get("tools");
+  return isToolId(raw) ? raw : null;
+}
+
+export function withToolsOverlay(url: string, tool: ToolId | null): string {
+  return withQueryParam(url, "tools", tool);
 }
