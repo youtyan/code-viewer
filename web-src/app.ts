@@ -54,13 +54,17 @@ import {
   type DiffRange,
   parseDoctorOverlay,
   parseRoute,
+  parseTerminalOverlay,
   parseToolsOverlay,
   type SourceFileTarget,
   type SourceLineTarget,
+  type TerminalOverlayState,
   withDoctorOverlay,
+  withTerminalOverlay,
   withToolsOverlay,
 } from "./core/routes";
 import { sourceInternalPathKind } from "./core/source-meta";
+import type { TmuxPaneId } from "./core/tmux";
 import type { ToolId } from "./core/tools";
 import type {
   AppSettingsState,
@@ -116,6 +120,8 @@ import {
   createSourceView,
   type VirtualSourcePagingKeyboardEvent,
 } from "./views/source-view";
+import { terminalText } from "./views/terminal/i18n";
+import { createTerminalView } from "./views/terminal/terminal-view";
 import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
 
@@ -2128,6 +2134,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       .querySelector<HTMLElement>("#tools-sheet")
       ?.setAttribute("aria-label", toolsChrome.title);
     relocalizeTools?.();
+    const terminalChrome = terminalText(STATE.language);
+    const terminalBtn =
+      document.querySelector<HTMLButtonElement>("#terminal-btn");
+    if (terminalBtn) terminalBtn.title = terminalChrome.open;
+    document
+      .querySelector<HTMLElement>("#terminal-sheet")
+      ?.setAttribute("aria-label", terminalChrome.title);
+    relocalizeTerminal?.();
     const copyAiContext =
       document.querySelector<HTMLButtonElement>("#copy-ai-context");
     if (copyAiContext) {
@@ -2355,6 +2369,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let relocalizeHistory: (() => void) | null = null;
   let relocalizeJournal: (() => void) | null = null;
   let relocalizeTools: (() => void) | null = null;
+  let relocalizeTerminal: (() => void) | null = null;
   let relocalizeDatabase: (() => void) | null = null;
 
   // createQuickHelp 後に代入される (同じ遅延参照パターン)。
@@ -2968,12 +2983,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 瞬間にシートの状態が URL から消える。history に積む URL とヘッダメニューの
   // href の両方がこれを通る必要がある。
   function withOverlayState(url: string): string {
-    return withToolsOverlay(
-      withDoctorOverlay(
-        url,
-        parseDoctorOverlay(window.location.pathname, window.location.search),
+    return withTerminalOverlay(
+      withToolsOverlay(
+        withDoctorOverlay(
+          url,
+          parseDoctorOverlay(window.location.pathname, window.location.search),
+        ),
+        parseToolsOverlay(window.location.search),
       ),
-      parseToolsOverlay(window.location.search),
+      parseTerminalOverlay(window.location.search),
     );
   }
 
@@ -3231,6 +3249,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       const open = parseToolsOverlay(window.location.search) !== null;
       toolsBtn.classList.toggle("active", open);
       toolsBtn.setAttribute("aria-pressed", String(open));
+    }
+    // Terminal も同じくドロワーの開閉。押下状態は URL の ?terminal= から。
+    const terminalMenuBtn =
+      document.querySelector<HTMLButtonElement>("#terminal-btn");
+    if (terminalMenuBtn) {
+      const open = parseTerminalOverlay(window.location.search) !== null;
+      terminalMenuBtn.classList.toggle("active", open);
+      terminalMenuBtn.setAttribute("aria-pressed", String(open));
     }
     document
       .querySelectorAll<HTMLAnchorElement>(
@@ -3642,6 +3668,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#tools-btn")?.addEventListener("click", (event) => {
     event.preventDefault();
     toggleToolsSheet();
+  });
+  $("#terminal-btn")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleTerminalSheet();
   });
   let copyAiContextFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   $("#copy-ai-context")?.addEventListener("click", async (event) => {
@@ -4514,6 +4544,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncLineRefPill();
     syncDoctorSheetFromUrl();
     syncToolsSheetFromUrl();
+    syncTerminalSheetFromUrl();
   });
 
   // Ref picker (from / to)
@@ -4763,6 +4794,74 @@ window.GdpExpandLogic = GdpExpandLogic;
     closeToolsSheet();
   });
 
+  // Terminal sheet — tools sheet と同じ独立オーバーレイ。URL に載るのは
+  // 表示中の tmux ペイン ID (?terminal=%14)。ペインを選ぶ前は ?terminal=open。
+  const TERMINAL_VIEW = createTerminalView({
+    $: <T extends Element = HTMLElement>(sel: string) =>
+      document.querySelector<T>(sel),
+    trackLoad,
+    getLanguage: () => STATE.language,
+    actionHeaders,
+    onCloseRequest: () => closeTerminalSheet(),
+    onPaneChange: (pane) => updateUrlForTerminalOverlay(pane ?? "open"),
+  });
+  relocalizeTerminal = () => TERMINAL_VIEW.localize();
+
+  function updateUrlForTerminalOverlay(state: TerminalOverlayState): void {
+    const current = window.location.pathname + window.location.search;
+    const next = withTerminalOverlay(current, state);
+    if (next !== current) {
+      history.replaceState(history.state, "", next + window.location.hash);
+    }
+    // メニューの Terminal は URL の ?terminal= を見て押下状態を出す。
+    syncHeaderMenu();
+  }
+
+  function openTerminalSheet(pane?: TmuxPaneId | null): void {
+    const target = pane ?? TERMINAL_VIEW.getActivePane();
+    // 実際にどのペインを映すかは一覧を取った後に決まるが、「開いた」ことは
+    // その場で URL に出す。読み込みが止まっても URL と画面が食い違わない。
+    updateUrlForTerminalOverlay(target ?? "open");
+    void TERMINAL_VIEW.open(target);
+  }
+
+  function closeTerminalSheet(): void {
+    TERMINAL_VIEW.close();
+    updateUrlForTerminalOverlay(null);
+  }
+
+  function toggleTerminalSheet(): void {
+    if (
+      parseTerminalOverlay(window.location.search) ||
+      TERMINAL_VIEW.isOpen()
+    ) {
+      closeTerminalSheet();
+    } else {
+      openTerminalSheet();
+    }
+  }
+
+  function syncTerminalSheetFromUrl(): void {
+    const state = parseTerminalOverlay(window.location.search);
+    const open = TERMINAL_VIEW.isOpen();
+    const pane = state === "open" ? null : state;
+    if (state && (!open || (pane && TERMINAL_VIEW.getActivePane() !== pane))) {
+      void TERMINAL_VIEW.open(pane);
+    } else if (!state && open) {
+      TERMINAL_VIEW.close();
+    }
+  }
+
+  document
+    .getElementById("terminal-sheet-overlay")
+    ?.addEventListener("click", () => closeTerminalSheet());
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (!TERMINAL_VIEW.isOpen()) return;
+    event.preventDefault();
+    closeTerminalSheet();
+  });
+
   JOURNAL_VIEW = createJournalView({
     getRoute: () => STATE.route,
     setRoute,
@@ -4878,6 +4977,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncLineRefPill();
     syncDoctorSheetFromUrl();
     syncToolsSheetFromUrl();
+    syncTerminalSheetFromUrl();
     if (
       isSameBlobFileRoute(previousRoute, STATE.route) &&
       routeBlobPreview(previousRoute) !== routeBlobPreview(STATE.route) &&

@@ -25,6 +25,11 @@ const bundles = [
     outfile: "yaml.js",
   },
   {
+    entry: "web-src/xterm-entry.ts",
+    format: "esm",
+    outfile: "xterm.js",
+  },
+  {
     entry: "web-src/highlight-entry.ts",
     format: "iife",
     outfile: "highlight.min.js",

@@ -12,6 +12,9 @@
 <link rel="stylesheet" href="/vendor/diff2html/diff2html.min.css" />
 <link rel="stylesheet" href="/vendor/highlight.js/styles/github.min.css" id="hljs-light" />
 <link rel="stylesheet" href="/vendor/highlight.js/styles/github-dark.min.css" id="hljs-dark" disabled />
+<!-- xterm 本体 (web/xterm.js) は terminal ドロワーを開くまで読み込まないが、
+     スタイルは 7KB 程度なので他の vendor CSS と同じくここで読む。 -->
+<link rel="stylesheet" href="/vendor/xterm/xterm.css" />
 <script src="/vendor/diff2html/diff2html-ui.min.js"></script>
 
 <link rel="stylesheet" href="/style.css" />
@@ -34,6 +37,7 @@
            data-route はラベルのローカライズにだけ使う (SPA ナビの走査は
            a.app-menu-item に限定してあるのでここは拾われない)。 -->
       <button type="button" id="tools-btn" class="app-menu-item app-menu-action" data-route="tools" aria-pressed="false">Tools</button>
+      <button type="button" id="terminal-btn" class="app-menu-item app-menu-action" data-route="terminal" aria-pressed="false">Terminal</button>
       <a class="app-menu-item" data-route="help" href="/help">Help</a>
     </nav>
     <div class="global-actions">
@@ -279,6 +283,8 @@
   <aside id="doctor-sheet" class="doctor-sheet" hidden aria-hidden="true" inert aria-label="environment doctor"></aside>
   <div id="tools-sheet-overlay" class="tools-sheet-overlay" hidden aria-hidden="true"></div>
   <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
+  <div id="terminal-sheet-overlay" class="terminal-sheet-overlay" hidden aria-hidden="true"></div>
+  <aside id="terminal-sheet" class="terminal-sheet" hidden aria-hidden="true" inert aria-label="terminal"></aside>
   <main id="content">
     <section id="history-commit-info" hidden></section>
     <div id="empty" class="empty hidden">

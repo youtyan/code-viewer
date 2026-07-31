@@ -473,6 +473,11 @@ function staticFile(pathname: string): Response | null {
     "/mermaid.js": ["mermaid.js", "application/javascript; charset=utf-8"],
     "/shiki.js": ["shiki.js", "application/javascript; charset=utf-8"],
     "/yaml.js": ["yaml.js", "application/javascript; charset=utf-8"],
+    "/xterm.js": ["xterm.js", "application/javascript; charset=utf-8"],
+    "/vendor/xterm/xterm.css": [
+      "vendor/xterm/xterm.css",
+      "text/css; charset=utf-8",
+    ],
     "/vendor/diff2html/diff2html.min.css": [
       "vendor/diff2html/diff2html.min.css",
       "text/css; charset=utf-8",
@@ -3020,6 +3025,7 @@ applyPersistedSettings(await loadAppSettingsState(cwd));
 // Tracked so clients that connect after the cap was hit still learn about it.
 let watchLimitReached: number | null = null;
 const databaseHandleModule = import("./database/handle");
+const tmuxHandleModule = import("./tmux/handle");
 
 const server = await startServer({
   hostname: "127.0.0.1",
@@ -3063,6 +3069,16 @@ const server = await startServer({
         sendSse,
       );
       if (dbResponse) return dbResponse;
+    }
+    if (url.pathname.startsWith("/_tmux/")) {
+      const { handleTmuxRoute } = await tmuxHandleModule;
+      const tmuxResponse = await handleTmuxRoute(
+        req,
+        url,
+        cwd,
+        sideEffectRequestAllowed,
+      );
+      if (tmuxResponse) return tmuxResponse;
     }
     if (url.pathname.startsWith("/_state/")) {
       const { handleStateRoute } = await import("./state-route");
@@ -3160,6 +3176,12 @@ async function shutdown(exitCode = 0) {
   shuttingDown = true;
   removeServerRegistry(cwd, process.pid);
   closeSseClients();
+  try {
+    const { closeTmuxStreams } = await tmuxHandleModule;
+    closeTmuxStreams();
+  } catch (error) {
+    console.warn(`code-viewer tmux stream close skipped: ${String(error)}`);
+  }
   worktreeWatch?.close();
   try {
     await server.close();

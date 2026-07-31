@@ -1,3 +1,4 @@
+import { isTmuxPaneId, type TmuxPaneId } from "./tmux";
 import { isToolId, type ToolId } from "./tools";
 
 export type DiffRange = {
@@ -455,4 +456,27 @@ export function parseToolsOverlay(search: string): ToolId | null {
 
 export function withToolsOverlay(url: string, tool: ToolId | null): string {
   return withQueryParam(url, "tools", tool);
+}
+
+/**
+ * Terminal ドロワーの状態。tools と違い「開いているがまだペインを選んでいない」
+ * があるので、ペイン ID とは別に "open" を持つ。
+ */
+export type TerminalOverlayState = TmuxPaneId | "open" | null;
+
+// Terminal ドロワーも AppRoute から独立した 1 クエリキーで、値は表示中の
+// tmux ペイン (`?terminal=%14`)。キーが在ってペイン ID の形でないものは
+// 「開いているだけ」とみなす。閉じたペインの ID が URL に残ることはあるが、
+// 開いた時点で一覧と突き合わせるので、ここでは形だけ見る。
+export function parseTerminalOverlay(search: string): TerminalOverlayState {
+  const raw = new URLSearchParams(search).get("terminal");
+  if (raw === null) return null;
+  return isTmuxPaneId(raw) ? raw : "open";
+}
+
+export function withTerminalOverlay(
+  url: string,
+  state: TerminalOverlayState,
+): string {
+  return withQueryParam(url, "terminal", state);
 }

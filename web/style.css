@@ -13533,17 +13533,14 @@ body.db-resizing {
    開閉の作りは doctor sheet と同じ (hidden でも display を残したまま
    transform でスライドさせ、閉じている間は inert で無効化する)。違いは
    中身が入力 / 出力の 2 ペインなので、ドロワーを大きく取る点。 */
-.tools-sheet {
+.tools-sheet,
+.terminal-sheet {
   position: fixed;
   /* グローバルヘッダは隠さない。ドロワーを開いたままメニューを切り替えたり、
-     Tools をもう一度押して閉じたりできるようにする。 */
+     同じボタンをもう一度押して閉じたりできるようにする。 */
   top: var(--global-header-h);
   right: 0;
   bottom: 0;
-  /* 既定幅。左端のハンドルでドラッグすると --tools-sheet-width が入る。
-     画面に収める上限はここで掛けるので、記憶した幅は狭いウィンドウで開いても
-     縮まない (広い画面に戻せばそのまま復元される)。 */
-  width: min(var(--tools-sheet-width, 1180px), 96vw);
   max-width: 100vw;
   background: var(--bg, #fff);
   border-left: 1px solid var(--border, #d0d7de);
@@ -13556,14 +13553,26 @@ body.db-resizing {
   transform: translateX(100%);
   transition: transform 200ms ease;
 }
-.tools-sheet:not([hidden]) {
+/* 既定幅。左端のハンドルでドラッグすると --*-sheet-width が入る。
+   画面に収める上限はここで掛けるので、記憶した幅は狭いウィンドウで開いても
+   縮まない (広い画面に戻せばそのまま復元される)。 */
+.tools-sheet {
+  width: min(var(--tools-sheet-width, 1180px), 96vw);
+}
+.terminal-sheet {
+  width: min(var(--terminal-sheet-width, 1180px), 96vw);
+}
+.tools-sheet:not([hidden]),
+.terminal-sheet:not([hidden]) {
   transform: translateX(0);
 }
-.tools-sheet[hidden] {
+.tools-sheet[hidden],
+.terminal-sheet[hidden] {
   display: flex;
   pointer-events: none;
 }
-.tools-sheet-overlay {
+.tools-sheet-overlay,
+.terminal-sheet-overlay {
   position: fixed;
   inset: var(--global-header-h) 0 0 0;
   background: rgba(0, 0, 0, 0.28);
@@ -13572,11 +13581,13 @@ body.db-resizing {
   transition: opacity 200ms ease;
   pointer-events: none;
 }
-.tools-sheet-overlay:not([hidden]) {
+.tools-sheet-overlay:not([hidden]),
+.terminal-sheet-overlay:not([hidden]) {
   opacity: 1;
   pointer-events: auto;
 }
-.tools-sheet-overlay[hidden] {
+.tools-sheet-overlay[hidden],
+.terminal-sheet-overlay[hidden] {
   display: block;
   opacity: 0;
   pointer-events: none;
@@ -13584,7 +13595,8 @@ body.db-resizing {
 /* ドロワー左端の掴みしろ。annotation パネルのリサイザーと同じ作り (境界を
    またぐ 8px の透明な帯) だが、ドロワーが画面の大半を覆って端が分かりにくい
    ので、掴める位置を示すグリップを常時出す。 */
-.tools-sheet-resizer {
+.tools-sheet-resizer,
+.terminal-sheet-resizer {
   position: absolute;
   left: -4px;
   top: 0;
@@ -13594,7 +13606,8 @@ body.db-resizing {
   touch-action: none;
   z-index: 1;
 }
-.tools-sheet-resizer::before {
+.tools-sheet-resizer::before,
+.terminal-sheet-resizer::before {
   content: "";
   position: absolute;
   left: 2px;
@@ -13607,23 +13620,35 @@ body.db-resizing {
   opacity: 0.45;
 }
 .tools-sheet-resizer:hover,
-.tools-sheet-resizing .tools-sheet-resizer {
+.tools-sheet-resizing .tools-sheet-resizer,
+.terminal-sheet-resizer:hover,
+.terminal-sheet-resizing .terminal-sheet-resizer,
+.terminal-list-resizer:hover,
+.terminal-list-resizing .terminal-list-resizer {
   background: var(--accent-muted, rgba(9, 105, 218, 0.2));
 }
 .tools-sheet-resizer:hover::before,
-.tools-sheet-resizing .tools-sheet-resizer::before {
+.tools-sheet-resizing .tools-sheet-resizer::before,
+.terminal-sheet-resizer:hover::before,
+.terminal-sheet-resizing .terminal-sheet-resizer::before,
+.terminal-list-resizer:hover::before,
+.terminal-list-resizing .terminal-list-resizer::before {
   background: var(--accent, #0969da);
   opacity: 1;
 }
-.tools-sheet-resizer:focus-visible {
+.tools-sheet-resizer:focus-visible,
+.terminal-sheet-resizer:focus-visible,
+.terminal-list-resizer:focus-visible {
   outline: 2px solid var(--accent, #0969da);
   outline-offset: -2px;
 }
 /* ドラッグ中はスライドのトランジションを切る (追従が遅れて見えるため)。 */
-.tools-sheet-resizing {
+.tools-sheet-resizing,
+.terminal-sheet-resizing {
   transition: none;
 }
-.tools-header {
+.tools-header,
+.terminal-header {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -13631,14 +13656,16 @@ body.db-resizing {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border, #d0d7de);
 }
-.tools-header h1 {
+.tools-header h1,
+.terminal-header h1 {
   font-size: 16px;
   margin: 0;
 }
 .tools-tabs {
   margin-left: 4px;
 }
-.tools-close {
+.tools-close,
+.terminal-close {
   font: inherit;
   font-size: 18px;
   line-height: 1;
@@ -13650,6 +13677,11 @@ body.db-resizing {
   background: transparent;
   color: var(--fg-muted, #57606a);
   cursor: pointer;
+}
+/* terminal 側は閉じるボタンの左に他のアクションが並ぶので、余白の押し出しは
+   その並び (.terminal-header-actions) 側で行う。 */
+.terminal-close {
+  margin-left: 0;
 }
 .tools-close:hover {
   background: var(--bg-mute, #eaeef2);
@@ -13847,6 +13879,175 @@ html[data-theme="dark"] .tools-code span[style] {
 }
 .tools-pane-mermaid .tools-pane-body {
   padding: 8px;
+}
+
+/* ===== Terminal sheet (right-side drawer) =====
+   ドロワーの骨格 (位置・スライド・オーバーレイ・幅のハンドル) は tools sheet
+   と同じルールに相乗りしている。ここに置くのは「上にペイン一覧、下に
+   ターミナル本体」という中身のレイアウトだけ。 */
+.terminal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.terminal-reload {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted, #57606a);
+  cursor: pointer;
+}
+.terminal-reload:hover {
+  background: var(--bg-soft, #f6f8fa);
+  color: var(--fg, #1f2328);
+}
+/* 打鍵を tmux に送るかどうかのトグル。topbar のトグルと同じ見え方。
+   ラベルが「入力する」/「閲覧のみ」で入れ替わるので、min-width で
+   クリック位置が動かないようにしておく。 */
+.terminal-input-toggle {
+  font: inherit;
+  font-size: 12px;
+  min-width: 88px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #d0d7de);
+  background: var(--bg-soft, #f6f8fa);
+  color: var(--fg-muted, #57606a);
+  cursor: pointer;
+}
+.terminal-input-toggle.active {
+  background: var(--accent-muted, rgba(9, 105, 218, 0.14));
+  border-color: var(--accent, #0969da);
+  color: var(--accent, #0969da);
+}
+.terminal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.terminal-panes {
+  flex: 0 0 auto;
+  height: var(--terminal-list-height, 220px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border, #d0d7de);
+}
+.terminal-sessions {
+  flex: 0 0 auto;
+  margin: 8px 12px 4px;
+  overflow-x: auto;
+}
+.terminal-pane-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 8px;
+}
+.terminal-window-group + .terminal-window-group {
+  margin-top: 6px;
+}
+.terminal-window-name {
+  position: sticky;
+  top: 0;
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--fg-muted, #57606a);
+  background: var(--bg, #fff);
+}
+.terminal-pane-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  font: inherit;
+  padding: 5px 8px;
+  /* 状態で太さが変わらないよう、非選択時も同じ枠を確保しておく。 */
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg, #1f2328);
+  cursor: pointer;
+}
+.terminal-pane-item:hover {
+  background: var(--bg-soft, #f6f8fa);
+}
+.terminal-pane-item.active {
+  background: var(--accent-muted, rgba(9, 105, 218, 0.14));
+  border-color: var(--accent, #0969da);
+}
+/* tmux 側でアクティブなペイン。こちらの選択とは別の意味なので、左の線だけで
+   示す (枠線の太さは変えないので位置は動かない)。 */
+.terminal-pane-item.current {
+  border-left-color: var(--accent, #0969da);
+}
+.terminal-pane-title {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.terminal-pane-meta {
+  font-size: 10px;
+  color: var(--fg-muted, #57606a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.terminal-list-resizer {
+  flex: 0 0 auto;
+  position: relative;
+  height: 8px;
+  margin-top: -4px;
+  cursor: row-resize;
+  touch-action: none;
+  z-index: 1;
+}
+.terminal-list-resizer::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  width: 48px;
+  height: 4px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: var(--fg-muted, #57606a);
+  opacity: 0.45;
+}
+/* ターミナル本体。tmux ペインの実サイズのまま描くので、ドロワーが狭いときは
+   字を潰さず横スクロールに逃がす。背景は xterm 自身が塗る黒に合わせる
+   (映しているのはアプリの画面ではなく端末なので、テーマには追従させない)。 */
+.terminal-screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: #000;
+}
+.terminal-status {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--fg-muted, #57606a);
+  border-top: 1px solid var(--border, #d0d7de);
+}
+.terminal-empty {
+  margin: 0;
+  padding: 16px 12px;
+  font-size: 13px;
+  color: var(--fg-muted, #57606a);
 }
 
 /* ==========================================================================

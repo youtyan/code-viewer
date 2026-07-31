@@ -16,6 +16,8 @@ const outputPath = join(projectRoot, "web/vendor/THIRD_PARTY_NOTICES.txt");
 
 const distributedPackageRoots = [
   "@redis/client",
+  "@xterm/addon-fit",
+  "@xterm/xterm",
   "highlight.js",
   "markdown-it",
   "markdown-it-anchor",

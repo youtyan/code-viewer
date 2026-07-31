@@ -28,7 +28,7 @@
   ],
   "scripts": {
     "build": "bun run build:web && bun run build:server",
-    "build:web": "bun build --target=browser --format=iife --outfile=web/app.js web-src/app.ts && bun build --target=browser --format=esm --outfile=web/mermaid.js web-src/mermaid-entry.ts && bun build --target=browser --format=esm --outfile=web/shiki.js web-src/shiki-entry.ts && bun build --target=browser --format=esm --outfile=web/yaml.js web-src/yaml-entry.ts && bun build --target=browser --format=iife --outfile=web/vendor/highlight.js/highlight.min.js web-src/highlight-entry.ts && node scripts/generate-third-party-notices.mjs",
+    "build:web": "bun build --target=browser --format=iife --outfile=web/app.js web-src/app.ts && bun build --target=browser --format=esm --outfile=web/mermaid.js web-src/mermaid-entry.ts && bun build --target=browser --format=esm --outfile=web/shiki.js web-src/shiki-entry.ts && bun build --target=browser --format=esm --outfile=web/yaml.js web-src/yaml-entry.ts && bun build --target=browser --format=esm --outfile=web/xterm.js web-src/xterm-entry.ts && bun build --target=browser --format=iife --outfile=web/vendor/highlight.js/highlight.min.js web-src/highlight-entry.ts && node scripts/generate-third-party-notices.mjs",
     "build:server": "bun build --target=node --format=esm --outfile=dist/code-viewer.js --external pg --external mysql2/promise --external @redis/client web-src/server/cli.ts",
     "check": "bun run typecheck",
     "typecheck": "tsc --noEmit",
@@ -49,7 +49,7 @@
     "test:postgres:down": "docker compose -f data/test/postgresql/docker-compose.yml down -v",
     "test": "bun test",
     "lint": "biome lint web-src package.json biome.jsonc",
-    "verify": "bun run check && bun run lint && bun run check:format && bun run build && bun run check:bundle && bun run test && node --check web/app.js && node --check web/mermaid.js && node --check web/shiki.js && node --check web/yaml.js && node --check web/vendor/highlight.js/highlight.min.js && node --check dist/code-viewer.js && node dist/code-viewer.js --help && node scripts/node-smoke.mjs",
+    "verify": "bun run check && bun run lint && bun run check:format && bun run build && bun run check:bundle && bun run test && node --check web/app.js && node --check web/mermaid.js && node --check web/shiki.js && node --check web/yaml.js && node --check web/xterm.js && node --check web/vendor/highlight.js/highlight.min.js && node --check dist/code-viewer.js && node dist/code-viewer.js --help && node scripts/node-smoke.mjs",
     "pack:dry": "npm pack --dry-run",
     "prepack": "bun run build",
     "prepublishOnly": "bun run verify"
@@ -69,6 +69,8 @@
     "@types/bun": "1.3.13",
     "@types/markdown-it": "14.1.2",
     "@types/pg": "8.20.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "highlight.js": "11.9.0",
     "markdown-it": "14.1.1",
     "markdown-it-anchor": "9.2.0",

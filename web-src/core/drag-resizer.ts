@@ -1,5 +1,6 @@
-// 横方向のドラッグでサイズを変えるハンドルの共通配線。tools シート自身の幅と、
-// その中の入力 / 出力ペインの分割位置が同じ操作系を共有する。
+// ドラッグでサイズを変えるハンドルの共通配線。tools シート自身の幅、その中の
+// 入力 / 出力ペインの分割位置、terminal ドロワーの幅とペイン一覧の高さが同じ
+// 操作系を共有する。
 //
 // サイズのクランプと実際の適用は applySize に任せる (対象ごとに下限・上限や
 // 適用先の CSS プロパティが違うため)。ここが持つのはポインタとキーボードの
@@ -12,7 +13,15 @@ export type DragResizerOptions = {
   getSize: () => number;
   /** 算出したサイズを適用する。範囲のクランプは呼び出し側の責任。 */
   applySize: (size: number) => void;
-  /** ハンドルを右に動かしたときサイズが増えるなら 1、減るなら -1。 */
+  /**
+   * ハンドルを動かす向き。既定は "x" (左右にドラッグして幅を変える)。
+   * "y" にすると上下のドラッグと ArrowUp / ArrowDown を見る。
+   */
+  axis?: "x" | "y";
+  /**
+   * ハンドルを右 (axis: "y" なら下) に動かしたときサイズが増えるなら 1、
+   * 減るなら -1。
+   */
   direction: 1 | -1;
   /** ドラッグ / キー操作が終わったとき。永続化はここで行う。 */
   onEnd?: () => void;
@@ -28,8 +37,13 @@ const DEFAULT_KEYBOARD_STEP = 16;
 export function attachDragResizer(options: DragResizerOptions): () => void {
   const { handle } = options;
   const step = options.keyboardStep ?? DEFAULT_KEYBOARD_STEP;
+  const vertical = options.axis === "y";
+  const pointerPosition = (event: PointerEvent) =>
+    vertical ? event.clientY : event.clientX;
+  const increaseKey = vertical ? "ArrowDown" : "ArrowRight";
+  const decreaseKey = vertical ? "ArrowUp" : "ArrowLeft";
   let pointerId: number | null = null;
-  let startX = 0;
+  let startPosition = 0;
   let startSize = 0;
 
   function setActive(active: boolean): void {
@@ -40,7 +54,7 @@ export function attachDragResizer(options: DragResizerOptions): () => void {
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
     pointerId = event.pointerId;
-    startX = event.clientX;
+    startPosition = pointerPosition(event);
     startSize = options.getSize();
     try {
       // 捕捉できなくてもドラッグ自体は成立させる (ハンドル外に出たときの
@@ -55,7 +69,9 @@ export function attachDragResizer(options: DragResizerOptions): () => void {
 
   const onPointerMove = (event: PointerEvent) => {
     if (pointerId !== event.pointerId) return;
-    options.applySize(startSize + (event.clientX - startX) * options.direction);
+    options.applySize(
+      startSize + (pointerPosition(event) - startPosition) * options.direction,
+    );
   };
 
   const onPointerEnd = (event: PointerEvent) => {
@@ -66,8 +82,8 @@ export function attachDragResizer(options: DragResizerOptions): () => void {
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    const delta = (event.key === "ArrowRight" ? 1 : -1) * options.direction;
+    if (event.key !== decreaseKey && event.key !== increaseKey) return;
+    const delta = (event.key === increaseKey ? 1 : -1) * options.direction;
     options.applySize(
       options.getSize() + delta * step * (event.shiftKey ? 4 : 1),
     );
