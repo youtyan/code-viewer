@@ -167,6 +167,23 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             ],
           },
           {
+            title: "Terminal",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "The Terminal item in the header menu opens a drawer over the tmux panes you already have running. Sessions are tabs, and under the selected one every window and pane is listed with the title tmux shows for it — a coding agent running in a pane usually puts what it is doing there, so the list alone tells you which pane is busy. Pick one and its screen is rendered live with xterm.js.",
+              },
+              {
+                kind: "paragraph",
+                text: "Typing goes back to that pane, so you can answer a prompt without switching to the terminal. The toggle in the drawer header turns input off when you only want to watch. The pane on screen is part of the URL (?terminal=%12), so a reload comes back to it.",
+              },
+              {
+                kind: "paragraph",
+                text: "It never attaches to tmux. The screen is read with capture-pane and keystrokes are sent with send-keys, so the size and layout of the tmux clients you already have open are never changed. Because the screen is read rather than mirrored, there is no scrollback in the drawer — use tmux copy mode for history. The pane is drawn at its real size, and when that is wider than the drawer the terminal scrolls sideways instead of shrinking the text; drag the left edge to widen it. tmux has to be on PATH: without it the drawer says so instead of listing panes.",
+              },
+            ],
+          },
+          {
             title: "Environment doctor",
             blocks: [
               {
@@ -888,6 +905,23 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "各ツールの入力は .code-viewer/tools.json に保存されるので、開き直すと続きから使えます。開いているツールは URL（?tools=markdown）に載るので共有もリロードもでき、ドロワーの幅は左端のグリップをドラッグして変えられます。",
+              },
+            ],
+          },
+          {
+            title: "ターミナル",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "ヘッダメニューの Terminal は、すでに動いている tmux のペインを見るドロワーを開きます。セッションがタブになり、その中のウィンドウとペインが tmux 側のタイトル付きで並びます。ペインで動いているコーディングエージェントは作業内容をタイトルに出すので、一覧を見るだけでどのペインが動いているか分かります。選ぶと、その画面が xterm.js でライブ表示されます。",
+              },
+              {
+                kind: "paragraph",
+                text: "打ったキーはそのペインに届くので、ターミナルに切り替えずに返事ができます。見るだけにしたいときは、ドロワー右上のトグルで入力を切ってください。表示中のペインは URL（?terminal=%12）に載るので、リロードしても同じペインに戻ります。",
+              },
+              {
+                kind: "paragraph",
+                text: "tmux には attach しません。画面は capture-pane で読み、キーは send-keys で送るので、すでに開いている tmux クライアントのサイズやレイアウトを変えません。画面を読む方式なのでドロワー側にスクロールバックはありません（履歴は tmux のコピーモードで見てください）。ペインは実際のサイズのまま描くので、ドロワーより広いときは字を縮めず横スクロールになります。左端をドラッグすれば広げられます。tmux が PATH にない場合は、一覧の代わりにその旨を表示します。",
               },
             ],
           },

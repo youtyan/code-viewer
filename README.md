@@ -52,6 +52,16 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   validator and a JSON⇄YAML converter). Each tool keeps its own draft in
   `.code-viewer/tools.json`, and the drawer width is draggable from its left
   edge.
+- Watch and drive the tmux panes you already have running with the Terminal
+  drawer (the `Terminal` item in the header menu, or `?terminal=<pane>` on any
+  URL): sessions, windows and panes are listed with the title tmux shows for
+  each pane, and the selected pane is rendered live with xterm.js. Typing goes
+  back to that pane, so a coding agent running there can be answered from the
+  browser; the toggle in the drawer header turns input off when you only want
+  to watch. It never attaches to tmux — the screen comes from `capture-pane`
+  and keystrokes go through `send-keys` — so the size and layout of your
+  existing tmux clients are left alone. Needs `tmux` on `PATH`; the drawer
+  says so when it is missing.
 - Inspect the runtime with the Environment Doctor (right-side sheet,
   toggled by the 🩺 icon in the header): runtime (Node / Bun / ABI),
   `@youtyan/code-viewer` version and execution origin (npx cache vs
