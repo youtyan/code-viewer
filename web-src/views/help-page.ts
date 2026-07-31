@@ -154,6 +154,19 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             ],
           },
           {
+            title: "Scratch on pasted text",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "The Tools item in the header menu opens a drawer for text you paste, without leaving the screen you are on. It holds a Markdown preview (the same renderer as the file preview, so the table of contents, task lists, frontmatter, code highlighting and ```mermaid fences all work), a Mermaid preview with zoom and drag-pan, and a JSON / YAML tool that reads either format and re-emits it as formatted JSON or YAML — a validator and a converter in one.",
+              },
+              {
+                kind: "paragraph",
+                text: "Each tool keeps its own draft in .code-viewer/tools.json, so the drawer reopens where you left it. The open tool is part of the URL (?tools=markdown), which makes it shareable and survives a reload, and the drawer width is draggable from the grip on its left edge.",
+              },
+            ],
+          },
+          {
             title: "Environment doctor",
             blocks: [
               {
@@ -210,6 +223,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                   [
                     "db-ui.json",
                     "Datastore UI preferences — column widths per (DB, table, column) and toggle states such as Rails FK inference and the S3 tooltip.",
+                  ],
+                  [
+                    "tools.json",
+                    "Tools drawer state — the pasted draft for each tool (Markdown, Mermaid, JSON / YAML), the tool you used last, and the drawer width.",
                   ],
                   [
                     "annotations.json",
@@ -862,6 +879,19 @@ code-viewer annotate add-db --db app.db --tab query \\
             ],
           },
           {
+            title: "貼り付けたテキストを扱う",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "ヘッダメニューの Tools は、いま見ている画面を離れずに使える貼り付け用のドロワーを開きます。Markdown プレビュー（ファイルプレビューと同じ描画なので、目次・タスクリスト・frontmatter・コードハイライト・```mermaid フェンスがそのまま効きます）、ズームとドラッグ移動ができる Mermaid プレビュー、JSON と YAML のどちらでも読み取って整形し直す JSON / YAML ツール（検証と相互変換を兼ねます）が入っています。",
+              },
+              {
+                kind: "paragraph",
+                text: "各ツールの入力は .code-viewer/tools.json に保存されるので、開き直すと続きから使えます。開いているツールは URL（?tools=markdown）に載るので共有もリロードもでき、ドロワーの幅は左端のグリップをドラッグして変えられます。",
+              },
+            ],
+          },
+          {
             title: "環境ドクター",
             blocks: [
               {
@@ -918,6 +948,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                   [
                     "db-ui.json",
                     "データストア UI の設定 — (DB, テーブル, カラム) ごとの列幅、Rails FK 推測や S3 ツールチップなどのトグル状態。",
+                  ],
+                  [
+                    "tools.json",
+                    "ツールドロワーの状態 — 各ツール（Markdown / Mermaid / JSON・YAML）に貼り付けた下書き、最後に使ったツール、ドロワーの幅。",
                   ],
                   [
                     "annotations.json",
