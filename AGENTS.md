@@ -29,9 +29,14 @@
 Before opening a PR or reporting release readiness, run:
 
 ```sh
-bun run verify
+pnpm run verify
 npm pack --dry-run
 ```
+
+This project uses pnpm, not bun or npm, for dependency management and scripts.
+The pinned version is in `packageManager`. Bundles are built with esbuild
+(`scripts/bundles.mjs` holds the definitions), TypeScript is executed through
+tsx, and tests run on Vitest.
 
 For release-related work, also confirm:
 

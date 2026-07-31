@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { describe, expect, test } from "vitest";
 import { sourceFixture } from "./source-fixture";
 
 // Octicon path data lives in icons.ts; app.ts wires it into the sidebar.

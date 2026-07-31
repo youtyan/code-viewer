@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { toTmuxKeyBytes } from "../server/tmux/keys";
 
 // 制御文字はソースに直接置くと見た目で判別できないので、コード指定で作る。

@@ -1,8 +1,9 @@
 // ui-dialog の API 動作を happy-dom 上で検証する。
 // OK / Cancel / Escape / backdrop click が Promise を正しく解決すること、
 // prompt の入力 + Enter 確定 + validate ロックが想定通り動くことを確認する。
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, afterEach, describe, expect, test } from "vitest";
 import { closeOpenDialog, getOpenDialog } from "./_dialog-helpers";
 
 GlobalRegistrator.register();

@@ -1,4 +1,3 @@
-import { describe, expect, test } from "bun:test";
 import {
   mkdtempSync,
   readFileSync,
@@ -8,6 +7,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 import { isGitInternalPath } from "../server/git";
 import { safeWorktreePath } from "../server/search-service";
 import { runGit as git } from "./_git-fixture";

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { startDevAssetReload, type WatchFn } from "../server/dev-assets";
 
 describe("dev asset reload", () => {

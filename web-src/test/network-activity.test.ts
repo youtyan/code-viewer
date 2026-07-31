@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { createNetworkActivityTracker } from "../core/network-activity";
 import { deferred } from "./_test-helpers";
 

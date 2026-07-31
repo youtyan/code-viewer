@@ -1,3 +1,4 @@
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   afterAll,
   beforeAll,
@@ -5,8 +6,7 @@ import {
   describe,
   expect,
   test,
-} from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+} from "vitest";
 import { toolsText } from "../views/tools/i18n";
 import {
   createScratchpadPane,

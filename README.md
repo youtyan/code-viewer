@@ -2,8 +2,8 @@
 
 Local browser-based code and git diff viewer.
 
-Requires Node.js 20 or newer when installed from npm. Development uses
-[Bun](https://bun.sh/).
+Requires Node.js 20 or newer. Development uses
+[pnpm](https://pnpm.io/) (the version is pinned in `packageManager`).
 
 ## Features
 
@@ -965,21 +965,25 @@ extra process is needed beyond `code-viewer` already running.
 ## Development
 
 ```sh
-bun install
-bun run verify
-bun run preview --cwd /path/to/repo
+pnpm install
+pnpm run verify
+pnpm run preview --cwd /path/to/repo
 ```
 
-`bun run preview` (and the alias `bun run dev`) is the development runner. It
+`pnpm run preview` (and the alias `pnpm run dev`) is the development runner. It
 rebuilds the browser bundle when browser source files change, restarts the
 preview server when `web-src/server/*.ts` changes, and keeps the URL stable on
 `http://127.0.0.1:64160/` unless you pass `--port <port>`. Use
-`bun run preview:raw` to launch `preview.ts` directly without the dev watcher.
+`pnpm run preview:raw` to launch `preview.ts` directly without the dev watcher.
+
+TypeScript runs through [tsx](https://tsx.is/), bundles are built with
+[esbuild](https://esbuild.github.io/), and tests run on
+[Vitest](https://vitest.dev/).
 
 Before releasing:
 
 ```sh
-bun run verify
+pnpm run verify
 npm pack --dry-run
 ```
 

@@ -1,5 +1,5 @@
 // web-src/test/annotation-player-core.test.ts
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   createAnnotationPlayerCore,
   type PlayerCoreDeps,

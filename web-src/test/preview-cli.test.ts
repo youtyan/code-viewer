@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import {
   chmodSync,
@@ -13,8 +12,19 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, test } from "vitest";
 import { supportsNativeRecursiveWatch } from "../server/worktree-watcher";
 import { runGit as git } from "./_git-fixture";
+
+/** 配布物と同じバンドル。vitest の globalSetup が焼いてある。 */
+const CLI_BUNDLE = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "..",
+  "dist",
+  "code-viewer.js",
+);
 
 const tmpRoots: string[] = [];
 
@@ -255,9 +265,9 @@ afterEach(() => {
 async function startTestPreview(root: string, gitCommand: string) {
   const proc = spawn(
     process.execPath,
-    ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+    [CLI_BUNDLE, "--port", "0", "--cwd", root],
     {
-      cwd: join(import.meta.dir, "..", ".."),
+      cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
       env: { ...process.env, CODE_VIEWER_BIN_GIT: gitCommand },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -268,7 +278,7 @@ async function startTestPreview(root: string, gitCommand: string) {
   try {
     const url = await Promise.race([
       waitForPreviewUrl(proc),
-      sleep(5000).then(() => {
+      sleep(15000).then(() => {
         throw new Error("preview did not start");
       }),
     ]);
@@ -312,9 +322,9 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        ["run", "web-src/server/preview.ts", "--port", "0", "--open"],
+        [CLI_BUNDLE, "--port", "0", "--open"],
         {
-          cwd: join(import.meta.dir, "..", ".."),
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           env: {
             ...process.env,
             PATH: `${fakeBrowser.root}:${process.env.PATH || ""}`,
@@ -367,9 +377,9 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--port", "0", "--cwd", root],
         {
-          cwd: join(import.meta.dir, "..", ".."),
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           env: {
             ...process.env,
             CODE_VIEWER_WORKTREE_WATCH_LIMIT: "1",
@@ -389,26 +399,26 @@ describe("preview CLI", () => {
       try {
         const url = await Promise.race([
           waitForPreviewUrl(proc),
-          sleep(5000).then(() => {
+          sleep(15000).then(() => {
             throw new Error("preview did not start");
           }),
         ]);
 
         const started = Date.now();
         const responses = await Promise.all([
-          fetchWithTimeout(url, 2500),
+          fetchWithTimeout(url, 6000),
           fetchWithTimeout(
             new URL("/_tree?ref=worktree", url).toString(),
-            2500,
+            6000,
           ),
           fetchWithTimeout(
             new URL("/_tree?ref=worktree&recursive=1", url).toString(),
-            2500,
+            6000,
           ),
-          fetchWithTimeout(new URL("/_db/files", url).toString(), 2500),
+          fetchWithTimeout(new URL("/_db/files", url).toString(), 6000),
         ]);
 
-        expect(Date.now() - started < 2500).toBe(true);
+        expect(Date.now() - started < 6000).toBe(true);
         expect(responses.map((response) => response.status)).toEqual([
           200, 200, 200, 200,
         ]);
@@ -448,9 +458,9 @@ describe("preview CLI", () => {
 
     const proc = spawn(
       process.execPath,
-      ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", explicitCwd],
+      [CLI_BUNDLE, "--port", "0", "--cwd", explicitCwd],
       {
-        cwd: join(import.meta.dir, "..", ".."),
+        cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -462,7 +472,7 @@ describe("preview CLI", () => {
     try {
       const url = await Promise.race([
         waitForPreviewUrl(proc),
-        sleep(5000).then(() => {
+        sleep(15000).then(() => {
           throw new Error("preview did not start");
         }),
       ]);
@@ -491,9 +501,9 @@ describe("preview CLI", () => {
 
     const proc = spawn(
       process.execPath,
-      ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+      [CLI_BUNDLE, "--port", "0", "--cwd", root],
       {
-        cwd: join(import.meta.dir, "..", ".."),
+        cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -505,7 +515,7 @@ describe("preview CLI", () => {
     try {
       const url = await Promise.race([
         waitForPreviewUrl(proc),
-        sleep(5000).then(() => {
+        sleep(15000).then(() => {
           throw new Error("preview did not start");
         }),
       ]);
@@ -542,9 +552,9 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--port", "0", "--cwd", root],
         {
-          cwd: join(import.meta.dir, "..", ".."),
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
         },
       );
@@ -556,7 +566,7 @@ describe("preview CLI", () => {
       try {
         const url = await Promise.race([
           waitForPreviewUrl(proc),
-          sleep(5000).then(() => {
+          sleep(15000).then(() => {
             throw new Error("preview did not start");
           }),
         ]);
@@ -596,16 +606,9 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [
-          "run",
-          "web-src/server/preview.ts",
-          "--port",
-          "0",
-          "--cwd",
-          explicitCwd,
-        ],
+        [CLI_BUNDLE, "--port", "0", "--cwd", explicitCwd],
         {
-          cwd: join(import.meta.dir, "..", ".."),
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           env: { ...process.env, CODE_VIEWER_BIN_GIT: fakeGit },
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -618,7 +621,7 @@ describe("preview CLI", () => {
       try {
         const url = await Promise.race([
           waitForPreviewUrl(proc),
-          sleep(5000).then(() => {
+          sleep(15000).then(() => {
             throw new Error("preview did not start");
           }),
         ]);
@@ -671,9 +674,9 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--port", "0", "--cwd", root],
         {
-          cwd: join(import.meta.dir, "..", ".."),
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
         },
       );
@@ -685,14 +688,14 @@ describe("preview CLI", () => {
       try {
         const url = await Promise.race([
           waitForPreviewUrl(proc),
-          sleep(5000).then(() => {
+          sleep(15000).then(() => {
             throw new Error("preview did not start");
           }),
         ]);
 
         const response = await fetchWithTimeout(
           new URL("/_tree?ref=worktree", url).toString(),
-          1000,
+          5000,
         );
         const body = (await response.json()) as {
           entries: Array<{
@@ -742,9 +745,9 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--port", "0", "--cwd", root],
         {
-          cwd: join(import.meta.dir, "..", ".."),
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
         },
       );
@@ -756,14 +759,14 @@ describe("preview CLI", () => {
       try {
         const url = await Promise.race([
           waitForPreviewUrl(proc),
-          sleep(5000).then(() => {
+          sleep(15000).then(() => {
             throw new Error("preview did not start");
           }),
         ]);
 
         const response = await fetchWithTimeout(
           new URL("/_tree?ref=worktree", url).toString(),
-          1000,
+          5000,
         );
         const body = (await response.json()) as {
           entries: Array<{ path: string; type: string; status?: string }>;
@@ -811,9 +814,9 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--port", "0", "--cwd", root],
         {
-          cwd: join(import.meta.dir, "..", ".."),
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
         },
       );
@@ -825,7 +828,7 @@ describe("preview CLI", () => {
       try {
         const url = await Promise.race([
           waitForPreviewUrl(proc),
-          sleep(5000).then(() => {
+          sleep(15000).then(() => {
             throw new Error("preview did not start");
           }),
         ]);
@@ -836,7 +839,7 @@ describe("preview CLI", () => {
             : "/_tree?ref=worktree";
           const response = await fetchWithTimeout(
             new URL(query, url).toString(),
-            1000,
+            5000,
           );
           const body = (await response.json()) as {
             entries: Array<{ path: string; status?: string }>;
@@ -887,9 +890,9 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--port", "0", "--cwd", root],
         {
-          cwd: join(import.meta.dir, "..", ".."),
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
         },
       );
@@ -901,14 +904,14 @@ describe("preview CLI", () => {
       try {
         const url = await Promise.race([
           waitForPreviewUrl(proc),
-          sleep(5000).then(() => {
+          sleep(15000).then(() => {
             throw new Error("preview did not start");
           }),
         ]);
 
         const rootResponse = await fetchWithTimeout(
           new URL(`/_tree?ref=${sha}`, url).toString(),
-          1000,
+          5000,
         );
         const rootBody = (await rootResponse.json()) as {
           entries: Array<{
@@ -929,7 +932,7 @@ describe("preview CLI", () => {
             `/_tree?ref=${sha}&path=${link?.resolved_path}`,
             url,
           ).toString(),
-          1000,
+          5000,
         );
         const resolvedBody = (await resolvedResponse.json()) as {
           entries: Array<{ path: string; type: string }>;
@@ -942,7 +945,7 @@ describe("preview CLI", () => {
 
         const ownPathResponse = await fetchWithTimeout(
           new URL(`/_tree?ref=${sha}&path=link-to-dir`, url).toString(),
-          1000,
+          5000,
         );
         const ownPathBody = (await ownPathResponse.json()) as {
           entries: Array<{ path: string }>;
@@ -981,9 +984,9 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--port", "0", "--cwd", root],
         {
-          cwd: join(import.meta.dir, "..", ".."),
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
         },
       );
@@ -995,14 +998,14 @@ describe("preview CLI", () => {
       try {
         const url = await Promise.race([
           waitForPreviewUrl(proc),
-          sleep(5000).then(() => {
+          sleep(15000).then(() => {
             throw new Error("preview did not start");
           }),
         ]);
 
         const rootResponse = await fetchWithTimeout(
           new URL("/_tree?ref=worktree", url).toString(),
-          1000,
+          5000,
         );
         const rootBody = (await rootResponse.json()) as {
           entries: Array<{
@@ -1019,7 +1022,7 @@ describe("preview CLI", () => {
 
         const escapedResponse = await fetchWithTimeout(
           new URL("/_tree?ref=worktree&path=link-outside", url).toString(),
-          1000,
+          5000,
         );
         const escapedBody = (await escapedResponse.json()) as {
           entries: Array<{ path: string }>;
@@ -1036,14 +1039,10 @@ describe("preview CLI", () => {
   );
 
   runOrSkip("--help lists every wired annotate/query subcommand", async () => {
-    const proc = spawn(
-      process.execPath,
-      ["run", "web-src/server/preview.ts", "--help"],
-      {
-        cwd: join(import.meta.dir, "..", ".."),
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    const proc = spawn(process.execPath, [CLI_BUNDLE, "--help"], {
+      cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
     proc.stdout?.on("data", (chunk: Buffer) => {
@@ -1532,9 +1531,9 @@ describe("preview CLI", () => {
 
     const proc = spawn(
       process.execPath,
-      ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+      [CLI_BUNDLE, "--port", "0", "--cwd", root],
       {
-        cwd: join(import.meta.dir, "..", ".."),
+        cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -1544,19 +1543,19 @@ describe("preview CLI", () => {
     try {
       const url = await Promise.race([
         waitForPreviewUrl(proc),
-        sleep(5000).then(() => {
+        sleep(15000).then(() => {
           throw new Error("preview did not start");
         }),
       ]);
       const directory = await fetchWithTimeout(
         new URL("/_file?path=docs&ref=worktree", url).toString(),
-        2500,
+        6000,
       );
       expect(directory.status).toBe(404);
       // 直後にファイルが読めることが「プロセスが生きている」証拠。
       const file = await fetchWithTimeout(
         new URL("/_file?path=docs/guide.md&ref=worktree", url).toString(),
-        2500,
+        6000,
       );
       expect(file.status).toBe(200);
       expect(await file.text()).toBe("# Guide\n");

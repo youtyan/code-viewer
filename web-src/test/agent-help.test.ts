@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, test } from "vitest";
 import {
   AGENT_GUIDES,
   buildAgentHelpIndex,
@@ -16,6 +17,15 @@ import { SEARCH_AGENT_HELP } from "../server/search-cli";
 import { SKILL_AGENT_HELP } from "../server/skill-cli";
 import { STATUS_AGENT_HELP } from "../server/status-cli";
 
+/** 配布物と同じバンドル。vitest の globalSetup が焼いてある。 */
+const CLI_BUNDLE = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "..",
+  "dist",
+  "code-viewer.js",
+);
+
 const SUBCOMMANDS = [
   "status",
   "query",
@@ -26,7 +36,11 @@ const SUBCOMMANDS = [
   "skill",
   "doctor",
 ] as const;
-const REPO_ROOT = join(import.meta.dir, "..", "..");
+const REPO_ROOT = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "..",
+);
 
 function runCli(args: string[]): Promise<{
   code: number | null;
@@ -34,15 +48,11 @@ function runCli(args: string[]): Promise<{
   stderr: string;
 }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      process.execPath,
-      ["run", "web-src/server/cli.ts", ...args],
-      {
-        cwd: REPO_ROOT,
-        env: { ...process.env, NO_COLOR: "1" },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    const child = spawn(process.execPath, [CLI_BUNDLE, ...args], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, NO_COLOR: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk: Buffer) => {

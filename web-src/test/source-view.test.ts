@@ -1,12 +1,5 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-} from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 import type { SourceViewDeps } from "../views/source-view";
@@ -444,7 +437,9 @@ describe("renderStandaloneSource loading-state guard and paged retry", () => {
         () =>
           document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
             .sourceState === "done",
-        100,
+        // ハイライタは未解決のままなので、ここが成立する時点で「本文の描画が
+        // ハイライトを待っていない」ことは示せる。時間そのものは環境で揺れる。
+        1000,
       );
       const firstCode = document.querySelector<HTMLElement>(
         ".gdp-source-line-code",

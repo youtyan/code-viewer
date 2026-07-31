@@ -1,12 +1,5 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-} from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { RepoTreeResponse, SidebarItem } from "../core/types";
 import { createRepoView, type RepoViewDeps } from "../views/repo-view";

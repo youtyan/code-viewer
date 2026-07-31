@@ -22,7 +22,6 @@ import { openElasticsearchAdapterAsync } from "./database/adapters/elasticsearch
 import { openRedisExplorerAsync } from "./database/adapters/redis";
 import { openS3ExplorerAsync } from "./database/adapters/s3";
 import { spawnTextAsync } from "./database/adapters/spawn-runner";
-import type { RunResult } from "./runtime";
 import { sqliteAdapterFactory } from "./database/adapters/sqlite";
 import {
   type DockerDiscoveryResult,
@@ -40,6 +39,7 @@ import {
   loadSqliteClass,
   type SqliteDriverStatus,
 } from "./database/sqlite-driver";
+import type { RunResult } from "./runtime";
 
 export type {
   DoctorGroup,
@@ -269,10 +269,7 @@ export function sqliteStatusToRow(status: SqliteDriverStatus): DoctorRow {
       id: "sqlite.driver",
       title: `${status.driver} loaded`,
       status: "ok",
-      detail:
-        status.driver === "bun:sqlite"
-          ? "Using built-in Bun SQLite"
-          : "Using better-sqlite3 native binding",
+      detail: "Using better-sqlite3 native binding",
     };
   }
   if (status.kind === "abi-mismatch") {
@@ -1028,7 +1025,7 @@ async function checkDiscovery(
 // since doctor does not know the server URL — the CLI's auto-discovery
 // resolves it at paste time; Redis/ES/S3: cheapest read-only CLI command).
 //
-// `deps` is injectable so the bun:test suite can swap `listSources` and
+// `deps` is injectable so the test suite can swap `listSources` and
 // `probeSource` for fakes without requiring Docker / SQLite at test time.
 
 const DEFAULT_DATASTORE_PROBE_TIMEOUT_MS = 2000;

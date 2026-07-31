@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, test } from "vitest";
 
-const root = join(import.meta.dir, "..", "..");
+const root = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 
 describe("node cli package metadata", () => {
   test("publishes Node executable bins for npx", () => {

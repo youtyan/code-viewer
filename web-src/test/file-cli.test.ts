@@ -1,14 +1,7 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-} from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import {
   FILE_AGENT_HELP,
   FILE_DEFAULT_HISTORY_LIMIT,

@@ -1,3 +1,4 @@
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   afterAll,
   afterEach,
@@ -6,8 +7,7 @@ import {
   describe,
   expect,
   test,
-} from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+} from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { DiffCardElement, DiffMeta, FileMeta } from "../core/types";
 import {

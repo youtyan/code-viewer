@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { parseTerminalOverlay, withTerminalOverlay } from "../core/routes";
 
 describe("terminal overlay query parsing", () => {

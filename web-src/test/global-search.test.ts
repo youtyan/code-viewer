@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { DbColumn } from "../core/database/types";
 import type { DatabaseAdapter } from "../server/database/adapters/types";
 import { searchTableAsync } from "../server/database/global-search";

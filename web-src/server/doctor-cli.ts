@@ -9,11 +9,11 @@ import type {
   DoctorReport,
   DoctorStatus,
 } from "../core/doctor-types";
+import { takeGlobalCliOption } from "./cli-helpers";
 import {
   configureExternalCommands,
   type ExternalCommandOverride,
 } from "./command-resolver";
-import { takeGlobalCliOption } from "./cli-helpers";
 import { buildDoctorReport } from "./doctor";
 import { DOCTOR_AGENT_HELP } from "./doctor-agent-help";
 import { DEFAULT_WORKTREE_OMIT_DIR_NAMES } from "./git";

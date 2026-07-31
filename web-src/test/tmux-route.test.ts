@@ -2,7 +2,7 @@
 // 実際に tmux を叩くケースは環境依存になるので、ここでは扱わない
 // (ペイン一覧の中身は tmux-panes.test.ts でパーサ単体を検証している)。
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { handleTmuxRoute } from "../server/tmux/handle";
 
 const ALLOW_SIDE_EFFECTS = () => true;

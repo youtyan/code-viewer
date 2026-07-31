@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   createDatabaseView,
   TABLE_SELECT_FETCH_DELAY_MS,
@@ -712,6 +712,11 @@ describe("database view SQL error rendering", () => {
     ) as unknown as FakeElement;
     await refresh.click();
     await waitUntil(() => tableFetches === 2);
+    // 取得が 2 回走ったことと、その結果が件数表示に入ったことは別。
+    // 表示が変わるまで待つ (fetch の完了だけでは DOM はまだ古い)。
+    await waitUntil(
+      () => document.querySelector(".db-table-count")?.textContent === "3",
+    );
 
     expect(document.querySelector(".db-table-count")?.textContent).toBe("3");
     await leaveView(view);

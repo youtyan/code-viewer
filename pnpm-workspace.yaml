@@ -1,0 +1,10 @@
+# pnpm 11 の設定置き場 (package.json の "pnpm" フィールドは 11 で廃止された)。
+#
+# allowBuilds: インストール時にビルドスクリプトを実行してよい依存。既定では
+# 全て実行されないので、ネイティブモジュールはここで明示する。
+# - better-sqlite3: prebuild-install がネイティブバイナリを取得する。これが
+#   走らないと SQLite ビューアとスナップショットが使えない。
+# - esbuild: プラットフォーム別のバイナリを配置する。ビルド全体がこれに依存する。
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true

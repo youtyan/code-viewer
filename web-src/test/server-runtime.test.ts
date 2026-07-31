@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, test } from "vitest";
 import { collectLineRangeFromStream } from "../server/range";
 import {
   fileByteRangeResponseBody,
@@ -14,7 +15,12 @@ import {
   startServer,
 } from "../server/runtime";
 
-const tmpRoot = join(import.meta.dir, "..", "..", ".tmp-tests");
+const tmpRoot = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "..",
+  ".tmp-tests",
+);
 
 describe("server runtime compatibility helpers", () => {
   test.each([

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { DiffMeta, FileMeta, SidebarItem } from "../core/types";
 import { showEmptyHistoryDiffPane } from "../views/empty-diff-pane";
 

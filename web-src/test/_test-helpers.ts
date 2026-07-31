@@ -7,7 +7,7 @@
 // - makeDiffMeta(files): files から totals を集計した DiffMeta を作る
 //   (diff-view-fast-path / ai-context-copy で同形だった)
 // - captureErrorAsync(fn): 投げられたエラーのメッセージを取り出す
-//   (プロジェクトの bun:test 型は toThrow / rejects を持たないため)
+//   (投げられた側のメッセージを直接見たいケース向け)
 
 import type { DiffMeta, FileMeta } from "../core/types";
 
@@ -62,9 +62,11 @@ export function deferred<T>(): Deferred<T> {
 // predicate が true を返すまで定期 poll する。timeout 内に成立しなければ throw。
 // file-shell-view.test.ts と s3-explorer-ui.test.ts で同形実装になっていた
 // (await 名引数の差だけ) のを統合。
+// 既定値は「並列実行でテストファイルが混み合っても届く」ことを優先している。
+// 条件が満たされた時点で即座に返るので、緩めても通常の実行時間は伸びない。
 export async function waitFor(
   predicate: () => boolean,
-  timeoutMs = 2000,
+  timeoutMs = 8000,
 ): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {

@@ -1,7 +1,7 @@
-import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 import { runSnapshot } from "../server/database/snapshot-runner";
 import {
   computeDiffRows,

@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { describe, expect, test } from "vitest";
 import { rawFileHeaders } from "../server/raw-file-headers";
 import { sourceFixture } from "./source-fixture";
 

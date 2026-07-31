@@ -1,5 +1,5 @@
 // web-src/test/annotation-speech.test.ts
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   annotationDisplayMs,
   annotationSpeechText,

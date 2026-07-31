@@ -1,7 +1,7 @@
-import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 import {
   _parseSqliteAbiMismatchMessage,
   describeSqliteDriver,
@@ -60,7 +60,7 @@ describe("sqlite driver diagnostics", () => {
   });
 
   test("sqliteStatusToRow OK status maps to ok pill", () => {
-    const row = sqliteStatusToRow({ kind: "ok", driver: "bun:sqlite" });
+    const row = sqliteStatusToRow({ kind: "ok", driver: "better-sqlite3" });
     expect(row.status).toBe("ok");
   });
 });

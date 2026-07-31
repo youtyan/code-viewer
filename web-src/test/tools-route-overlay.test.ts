@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { parseToolsOverlay, withToolsOverlay } from "../core/routes";
 
 describe("tools overlay query parsing", () => {

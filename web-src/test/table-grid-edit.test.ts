@@ -1,8 +1,9 @@
 // 編集モードの「実描画」挙動を happy-dom 上で検証する。インラインセル編集 /
 // 新規行 / 削除マーク → コミットで、正しい RowMutation[] が applyMutations に
 // 渡されることを確認する (文字列存在ではなく挙動の検証)。
-import { afterAll, describe, expect, test } from "bun:test";
+
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, describe, expect, test } from "vitest";
 import { type Deferred, deferred, q, waitFor } from "./_test-helpers";
 
 GlobalRegistrator.register();

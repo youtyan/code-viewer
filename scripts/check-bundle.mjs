@@ -1,79 +1,44 @@
-import { spawnSync } from "node:child_process";
+// 同じ入力から 2 回焼いて、バイト単位で一致することを見る。
+//
+// 出力が実行ごとに変わると、配布物の差分がレビューできず、npm に上げた版と
+// 手元の版が同じか確かめられなくなる。バンドラの設定やプラグインを足したとき
+// に非決定性が混ざっていないかを、ここで機械的に落とす。
+
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-const bundles = [
-  {
-    entry: "web-src/app.ts",
-    format: "iife",
-    outfile: "app.js",
-  },
-  {
-    entry: "web-src/mermaid-entry.ts",
-    format: "esm",
-    outfile: "mermaid.js",
-  },
-  {
-    entry: "web-src/shiki-entry.ts",
-    format: "esm",
-    outfile: "shiki.js",
-  },
-  {
-    entry: "web-src/yaml-entry.ts",
-    format: "esm",
-    outfile: "yaml.js",
-  },
-  {
-    entry: "web-src/xterm-entry.ts",
-    format: "esm",
-    outfile: "xterm.js",
-  },
-  {
-    entry: "web-src/highlight-entry.ts",
-    format: "iife",
-    outfile: "highlight.min.js",
-  },
-];
+import { basename, join } from "node:path";
+import { buildServerBundle, buildWebBundle, WEB_BUNDLES } from "./bundles.mjs";
 
 const dirs = [
   mkdtempSync(join(tmpdir(), "code-viewer-bundle-a-")),
   mkdtempSync(join(tmpdir(), "code-viewer-bundle-b-")),
 ];
 
-function runBuild(dir) {
-  for (const bundle of bundles) {
-    const result = spawnSync(
-      "bun",
-      [
-        "build",
-        "--target=browser",
-        `--format=${bundle.format}`,
-        `--outfile=${join(dir, bundle.outfile)}`,
-        bundle.entry,
-      ],
-      { stdio: "inherit" },
-    );
-    if (result.status !== 0) {
-      process.exit(result.status ?? 1);
-    }
+/** 出力名だけを取り出す (WEB_BUNDLES の outfile はディレクトリを含む)。 */
+const outputs = [
+  ...WEB_BUNDLES.map((bundle) => basename(bundle.outfile)),
+  "code-viewer.js",
+];
+
+async function buildAll(dir) {
+  for (const bundle of WEB_BUNDLES) {
+    await buildWebBundle(bundle, join(dir, basename(bundle.outfile)));
   }
+  await buildServerBundle(join(dir, "code-viewer.js"));
 }
 
 try {
-  runBuild(dirs[0]);
-  runBuild(dirs[1]);
+  await buildAll(dirs[0]);
+  await buildAll(dirs[1]);
 
-  for (const bundle of bundles) {
-    const firstPath = join(dirs[0], bundle.outfile);
-    const secondPath = join(dirs[1], bundle.outfile);
+  for (const name of outputs) {
+    const firstPath = join(dirs[0], name);
+    const secondPath = join(dirs[1], name);
     if (!existsSync(firstPath) || !existsSync(secondPath)) {
-      throw new Error(`missing bundle output: ${bundle.outfile}`);
+      throw new Error(`missing bundle output: ${name}`);
     }
-    const first = readFileSync(firstPath);
-    const second = readFileSync(secondPath);
-    if (!first.equals(second)) {
-      throw new Error(`non-deterministic bundle output: ${bundle.outfile}`);
+    if (!readFileSync(firstPath).equals(readFileSync(secondPath))) {
+      throw new Error(`non-deterministic bundle output: ${name}`);
     }
   }
 } finally {

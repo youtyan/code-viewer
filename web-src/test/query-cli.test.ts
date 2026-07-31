@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, test } from "vitest";
 import { buildRoute } from "../core/routes";
 import {
   parseQueryArgs,
@@ -12,7 +13,11 @@ import {
 } from "../server/query-cli";
 import { extractDocumentedSubcommandInvocations } from "./_documented-cli-fixture";
 
-const REPO_ROOT = join(import.meta.dir, "..", "..");
+const REPO_ROOT = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "..",
+);
 
 describe("parseQueryArgs", () => {
   test("returns help on bare invocation, --help, and -h", () => {

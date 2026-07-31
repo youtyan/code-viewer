@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import { parseAnnotateArgs, runAnnotateCli } from "../server/annotate-cli";
 
 describe("parseAnnotateArgs", () => {

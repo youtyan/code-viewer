@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { DbColumn } from "../core/database/types";
 import { buildMutationStatements } from "../server/database/mutate";
 import { coerceDbValue } from "../server/database/serialize";

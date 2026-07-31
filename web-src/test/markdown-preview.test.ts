@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { describe, expect, test } from "vitest";
 import {
   markdownSlugify,
   renderMarkdownHtml,
@@ -28,6 +28,11 @@ const style = sourceFixture(
 );
 const pkg = readFileSync(
   new URL("../../package.json", import.meta.url),
+  "utf8",
+);
+// 遅延バンドルの定義はビルドスクリプト側にある。
+const bundles = readFileSync(
+  new URL("../../scripts/bundles.mjs", import.meta.url),
   "utf8",
 );
 
@@ -331,8 +336,8 @@ describe("markdown preview", () => {
   });
 
   test("mermaid is built as a lazy standalone asset and served by the preview server", () => {
-    expect(pkg.includes("web/mermaid.js")).toBe(true);
-    expect(pkg.includes("web-src/mermaid-entry.ts")).toBe(true);
+    expect(bundles.includes("web/mermaid.js")).toBe(true);
+    expect(bundles.includes("web-src/mermaid-entry.ts")).toBe(true);
     expect(
       server.includes(
         "'/mermaid.js': ['mermaid.js', 'application/javascript; charset=utf-8']",
@@ -350,8 +355,8 @@ describe("markdown preview", () => {
   });
 
   test("Shiki is built as a lazy standalone asset for markdown code blocks", () => {
-    expect(pkg.includes("web/shiki.js")).toBe(true);
-    expect(pkg.includes("web-src/shiki-entry.ts")).toBe(true);
+    expect(bundles.includes("web/shiki.js")).toBe(true);
+    expect(bundles.includes("web-src/shiki-entry.ts")).toBe(true);
     expect(pkg.includes('"shiki"')).toBe(true);
     expect(
       server.includes(
