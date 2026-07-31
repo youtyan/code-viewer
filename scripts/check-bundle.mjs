@@ -20,6 +20,11 @@ const bundles = [
     outfile: "shiki.js",
   },
   {
+    entry: "web-src/yaml-entry.ts",
+    format: "esm",
+    outfile: "yaml.js",
+  },
+  {
     entry: "web-src/highlight-entry.ts",
     format: "iife",
     outfile: "highlight.min.js",

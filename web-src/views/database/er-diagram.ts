@@ -1,4 +1,5 @@
 import type { DbColumn, DbSchemaResponse } from "../../core/database/types";
+import { createDiagramViewport } from "../../core/diagram-viewport";
 import { loadMermaid } from "../../core/mermaid-loader";
 import { type DbText, dbText } from "./i18n";
 
@@ -119,35 +120,20 @@ export function createErDiagram(
 
   toolbar.append(zoomIn, zoomOut, zoomReset, copyBtn);
 
-  const container = document.createElement("div");
-  container.className = "db-er-container";
-
-  const svgWrap = document.createElement("div");
-  svgWrap.className = "db-er-svg-wrap";
-  container.appendChild(svgWrap);
+  const viewport = createDiagramViewport({
+    containerClassName: "db-er-container",
+    contentClassName: "db-er-svg-wrap",
+  });
+  const container = viewport.container;
+  const svgWrap = viewport.content;
 
   el.append(toolbar, container);
 
-  let scale = 1;
   let lastMarkup = "";
 
-  function applyZoom() {
-    svgWrap.style.transform = `scale(${scale})`;
-    svgWrap.style.transformOrigin = "top left";
-  }
-
-  zoomIn.addEventListener("click", () => {
-    scale = Math.min(3, scale + 0.2);
-    applyZoom();
-  });
-  zoomOut.addEventListener("click", () => {
-    scale = Math.max(0.2, scale - 0.2);
-    applyZoom();
-  });
-  zoomReset.addEventListener("click", () => {
-    scale = 1;
-    applyZoom();
-  });
+  zoomIn.addEventListener("click", () => viewport.zoomIn());
+  zoomOut.addEventListener("click", () => viewport.zoomOut());
+  zoomReset.addEventListener("click", () => viewport.reset());
   copyBtn.addEventListener("click", () => {
     if (lastMarkup) {
       navigator.clipboard.writeText(lastMarkup).then(
@@ -162,53 +148,13 @@ export function createErDiagram(
     }
   });
 
-  let dragState: { x: number; y: number; sl: number; st: number } | null = null;
-  container.addEventListener("mousedown", (e) => {
-    if (e.button !== 0) return;
-    dragState = {
-      x: e.clientX,
-      y: e.clientY,
-      sl: container.scrollLeft,
-      st: container.scrollTop,
-    };
-    container.style.cursor = "grabbing";
-    e.preventDefault();
-  });
-  const onWindowMouseMove = (e: MouseEvent) => {
-    if (!dragState) return;
-    container.scrollLeft = dragState.sl - (e.clientX - dragState.x);
-    container.scrollTop = dragState.st - (e.clientY - dragState.y);
-  };
-  const onWindowMouseUp = () => {
-    if (dragState) {
-      dragState = null;
-      container.style.cursor = "";
-    }
-  };
-  window.addEventListener("mousemove", onWindowMouseMove);
-  window.addEventListener("mouseup", onWindowMouseUp);
-
-  container.addEventListener(
-    "wheel",
-    (e) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const delta = e.deltaY > 0 ? -0.1 : 0.1;
-        scale = Math.max(0.2, Math.min(3, scale + delta));
-        applyZoom();
-      }
-    },
-    { passive: false },
-  );
-
   async function render(
     schema: DbSchemaResponse,
     columnsMap: Map<string, DbColumn[]>,
   ) {
     el.hidden = false;
     svgWrap.innerHTML = "";
-    scale = 1;
-    applyZoom();
+    viewport.reset();
 
     const tables = schema.tables.filter((t) => t.type === "table");
     if (tables.length === 0) {
@@ -241,14 +187,11 @@ export function createErDiagram(
     el.hidden = true;
     svgWrap.innerHTML = "";
     lastMarkup = "";
-    dragState = null;
-    container.style.cursor = "";
   }
 
   function dispose(): void {
     clear();
-    window.removeEventListener("mousemove", onWindowMouseMove);
-    window.removeEventListener("mouseup", onWindowMouseUp);
+    viewport.dispose();
   }
 
   function localize(): void {

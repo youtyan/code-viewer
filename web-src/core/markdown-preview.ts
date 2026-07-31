@@ -520,10 +520,15 @@ function setupMarkdownScrollSpy(root: HTMLElement) {
         active = entry;
       else break;
     }
-    if (
-      window.innerHeight + scrollRoot.scrollTop >=
-      scrollRoot.scrollHeight - 4
-    ) {
+    // 末尾まで来たら最後の見出しを選ぶ。プレビューが独自のスクロール領域に
+    // 置かれている場合、ページ側は動かないので、そちらを基準にする。
+    const container = scrollableAncestor(root);
+    const atBottom = container
+      ? container.scrollTop + container.clientHeight >=
+        container.scrollHeight - 4
+      : window.innerHeight + scrollRoot.scrollTop >=
+        scrollRoot.scrollHeight - 4;
+    if (atBottom) {
       active = entries[entries.length - 1];
     }
     entries.forEach((entry) => {
@@ -534,8 +539,11 @@ function setupMarkdownScrollSpy(root: HTMLElement) {
   const schedule = () => {
     if (!raf) raf = requestAnimationFrame(update);
   };
-  window.addEventListener("scroll", schedule, {
+  // scroll はバブルしないので、内側のスクロール領域 (tools ドロワーの出力
+  // ペインなど) に置かれた場合も拾えるよう capture で受ける。
+  document.addEventListener("scroll", schedule, {
     passive: true,
+    capture: true,
     signal: controller.signal,
   });
   window.addEventListener("resize", schedule, { signal: controller.signal });
@@ -558,10 +566,34 @@ function decodeHashFragment(hash: string): string {
   return decodeUriComponentSafe(hash.startsWith("#") ? hash.slice(1) : hash);
 }
 
+/** プレビューが独自のスクロール領域 (tools ドロワーの出力ペインなど) に
+ * 置かれている場合の、実際に動かすべきコンテナ。無ければ null (= window)。 */
+function scrollableAncestor(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (
+      /(auto|scroll)/.test(style.overflowY) &&
+      node.scrollHeight > node.clientHeight
+    )
+      return node;
+  }
+  return null;
+}
+
 function scrollMarkdownSectionIntoView(
   section: HTMLElement,
   behavior: ScrollBehavior,
 ) {
+  const container = scrollableAncestor(section);
+  if (container) {
+    const top =
+      section.getBoundingClientRect().top -
+      container.getBoundingClientRect().top +
+      container.scrollTop -
+      12;
+    container.scrollTo({ top: Math.max(0, top), behavior });
+    return;
+  }
   const top =
     section.getBoundingClientRect().top +
     window.scrollY -

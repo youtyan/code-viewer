@@ -25,7 +25,6 @@ import {
 } from "./core/highlight-languages";
 import {
   ARROW_RIGHT_16_PATH,
-  BOOK_16_PATH,
   CHEVRON_DOWN_12_PATH,
   COMMENT_DISCUSSION_16_PATH,
   COPY_16_PATHS,
@@ -55,11 +54,14 @@ import {
   type DiffRange,
   parseDoctorOverlay,
   parseRoute,
+  parseToolsOverlay,
   type SourceFileTarget,
   type SourceLineTarget,
   withDoctorOverlay,
+  withToolsOverlay,
 } from "./core/routes";
 import { sourceInternalPathKind } from "./core/source-meta";
+import type { ToolId } from "./core/tools";
 import type {
   AppSettingsState,
   DiffCardElement,
@@ -114,6 +116,8 @@ import {
   createSourceView,
   type VirtualSourcePagingKeyboardEvent,
 } from "./views/source-view";
+import { toolsText } from "./views/tools/i18n";
+import { createToolsView } from "./views/tools/tools-view";
 
 window.GdpExpandLogic = GdpExpandLogic;
 
@@ -1210,7 +1214,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     ViewerLanguage,
     {
       nav: Record<
-        "repo" | "diff" | "history" | "journal" | "database" | "help",
+        "repo" | "diff" | "history" | "journal" | "database" | "tools" | "help",
         string
       >;
       global: {
@@ -1409,6 +1413,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         history: "History",
         journal: "Work Log",
         database: "Datastores",
+        tools: "Tools",
         help: "Help",
       },
       global: {
@@ -1722,6 +1727,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         history: "履歴",
         journal: "ワークログ",
         database: "データストア",
+        tools: "ツール",
         help: "ヘルプ",
       },
       global: {
@@ -2059,21 +2065,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   function localizeViewerChrome() {
     const text = uiText();
     document.documentElement.lang = STATE.language;
-    document
-      .querySelectorAll<HTMLAnchorElement>(".app-menu-item")
-      .forEach((link) => {
-        const route = link.dataset.route as keyof typeof text.nav;
-        if (route && text.nav[route]) link.textContent = text.nav[route];
-      });
-    // The help and repo links are icon-only; the label lives in
-    // title/aria-label instead of visible text.
-    const helpLink = document.querySelector<HTMLAnchorElement>(
-      ".global-icon-link[data-route='help']",
-    );
-    if (helpLink) {
-      helpLink.title = text.nav.help;
-      helpLink.setAttribute("aria-label", text.nav.help);
-    }
+    // Tools はリンクではなくボタンなので HTMLElement で拾う (ラベルの当て方は
+    // 他のメニュー項目と同じ data-route 経由)。
+    document.querySelectorAll<HTMLElement>(".app-menu-item").forEach((link) => {
+      const route = link.dataset.route as keyof typeof text.nav;
+      if (route && text.nav[route]) link.textContent = text.nav[route];
+    });
+    // The repo link is icon-only; the label lives in title/aria-label
+    // instead of visible text.
     const repoWebLink =
       document.querySelector<HTMLAnchorElement>("#repo-web-link");
     if (repoWebLink) {
@@ -2121,6 +2120,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     document
       .querySelector<HTMLElement>("#doctor-sheet")
       ?.setAttribute("aria-label", doctorTitle);
+    const toolsChrome = toolsText(STATE.language);
+    const toolsBtn = document.querySelector<HTMLButtonElement>("#tools-btn");
+    // ラベルは data-route 経由で入るので、ここでは補足説明の title だけ。
+    if (toolsBtn) toolsBtn.title = toolsChrome.open;
+    document
+      .querySelector<HTMLElement>("#tools-sheet")
+      ?.setAttribute("aria-label", toolsChrome.title);
+    relocalizeTools?.();
     const copyAiContext =
       document.querySelector<HTMLButtonElement>("#copy-ai-context");
     if (copyAiContext) {
@@ -2347,6 +2354,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // localizeViewerChrome より後 (init / 言語切替) に呼ばれるため遅延参照する。
   let relocalizeHistory: (() => void) | null = null;
   let relocalizeJournal: (() => void) | null = null;
+  let relocalizeTools: (() => void) | null = null;
   let relocalizeDatabase: (() => void) | null = null;
 
   // createQuickHelp 後に代入される (同じ遅延参照パターン)。
@@ -2955,11 +2963,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
   }
 
-  function urlForRoute(route: AppRoute): string {
-    return withDoctorOverlay(
-      withAnnotationSessionParam(buildRoute(route)),
-      parseDoctorOverlay(window.location.pathname, window.location.search),
+  // buildRoute は AppRoute しか知らないので、そこに乗らないオーバーレイの状態
+  // (doctor / tools) は現在の URL から明示的に引き継ぐ。落とすと画面を移動した
+  // 瞬間にシートの状態が URL から消える。history に積む URL とヘッダメニューの
+  // href の両方がこれを通る必要がある。
+  function withOverlayState(url: string): string {
+    return withToolsOverlay(
+      withDoctorOverlay(
+        url,
+        parseDoctorOverlay(window.location.pathname, window.location.search),
+      ),
+      parseToolsOverlay(window.location.search),
     );
+  }
+
+  function urlForRoute(route: AppRoute): string {
+    return withOverlayState(withAnnotationSessionParam(buildRoute(route)));
   }
 
   function historyStateForRoute(route: AppRoute): unknown {
@@ -2974,11 +2993,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function replaceUrlWithCurrentRoute(): void {
-    const base = withAnnotationSessionParam(buildRoute(STATE.route));
-    const url = withDoctorOverlay(
-      base,
-      parseDoctorOverlay(window.location.pathname, window.location.search),
-    );
+    const url = urlForRoute(STATE.route);
     const current = window.location.pathname + window.location.search;
     if (url !== current) {
       history.replaceState(
@@ -3209,8 +3224,18 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function syncHeaderMenu() {
+    // Tools はドロワーの開閉なので screen とは対応しない。押下状態は URL の
+    // ?tools= から決める (リンクではないので下の走査からも外れる)。
+    const toolsBtn = document.querySelector<HTMLButtonElement>("#tools-btn");
+    if (toolsBtn) {
+      const open = parseToolsOverlay(window.location.search) !== null;
+      toolsBtn.classList.toggle("active", open);
+      toolsBtn.setAttribute("aria-pressed", String(open));
+    }
     document
-      .querySelectorAll<HTMLAnchorElement>(".app-menu-item, .global-icon-link")
+      .querySelectorAll<HTMLAnchorElement>(
+        "a.app-menu-item, a.global-icon-link",
+      )
       .forEach((link) => {
         const fileRouteOwner =
           STATE.route.screen === "file" &&
@@ -3225,51 +3250,65 @@ window.GdpExpandLogic = GdpExpandLogic;
             link.dataset.route === fileRouteOwner);
         link.classList.toggle("active", active);
         link.setAttribute("aria-current", active ? "page" : "false");
+        // href にもオーバーレイの状態を載せる。載せないと、Tools や Doctor を
+        // 開いたままメニューを押した瞬間にシートが閉じたことになる。
         if (link.dataset.route === "repo") {
-          link.href = buildRoute({
-            screen: "repo",
-            ref: STATE.repoRef || "worktree",
-            path: "",
-            range: currentRange(),
-          });
+          link.href = withOverlayState(
+            buildRoute({
+              screen: "repo",
+              ref: STATE.repoRef || "worktree",
+              path: "",
+              range: currentRange(),
+            }),
+          );
         }
         if (link.dataset.route === "diff") {
           // On the history screen the live range tracks the selected commit;
           // the Diff Viewer link keeps the range the user picked before.
-          link.href = buildRoute({
-            screen: "diff",
-            range: preHistoryRange ?? currentRange(),
-          });
+          link.href = withOverlayState(
+            buildRoute({
+              screen: "diff",
+              range: preHistoryRange ?? currentRange(),
+            }),
+          );
         }
         if (link.dataset.route === "history") {
-          link.href = buildRoute({
-            screen: "history",
-            ref: "HEAD",
-            range: currentRange(),
-          });
+          link.href = withOverlayState(
+            buildRoute({
+              screen: "history",
+              ref: "HEAD",
+              range: currentRange(),
+            }),
+          );
         }
         if (link.dataset.route === "journal") {
-          link.href = buildRoute({
-            screen: "journal",
-            range: currentRange(),
-          });
+          link.href = withOverlayState(
+            buildRoute({
+              screen: "journal",
+              range: currentRange(),
+            }),
+          );
         }
         if (link.dataset.route === "database") {
-          link.href = buildRoute({
-            screen: "database",
-            range: currentRange(),
-          });
+          link.href = withOverlayState(
+            buildRoute({
+              screen: "database",
+              range: currentRange(),
+            }),
+          );
         }
         if (link.dataset.route === "help") {
-          link.href = buildRoute({
-            screen: "help",
-            lang:
-              STATE.route.screen === "help"
-                ? helpLanguageFromRoute(STATE.route)
-                : STATE.language,
-            section: helpSectionFromRoute(STATE.route),
-            range: currentRange(),
-          });
+          link.href = withOverlayState(
+            buildRoute({
+              screen: "help",
+              lang:
+                STATE.route.screen === "help"
+                  ? helpLanguageFromRoute(STATE.route)
+                  : STATE.language,
+              section: helpSectionFromRoute(STATE.route),
+              range: currentRange(),
+            }),
+          );
         }
       });
   }
@@ -3548,12 +3587,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (quickHelpIcon) {
       quickHelpIcon.innerHTML = iconSvg("octicon-question", QUESTION_16_PATH);
     }
-    const helpLinkIcon = document.querySelector<HTMLElement>(
-      ".global-icon-link[data-route='help'] .goi-icon",
-    );
-    if (helpLinkIcon) {
-      helpLinkIcon.innerHTML = iconSvg("octicon-book", BOOK_16_PATH);
-    }
     const branchIcon = document.querySelector<HTMLElement>(
       "#project-branch .goi-icon",
     );
@@ -3605,6 +3638,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#doctor-btn")?.addEventListener("click", (event) => {
     event.preventDefault();
     toggleDoctorSheet();
+  });
+  $("#tools-btn")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleToolsSheet();
   });
   let copyAiContextFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   $("#copy-ai-context")?.addEventListener("click", async (event) => {
@@ -4476,6 +4513,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     // selection in the copy pill on first paint too.
     syncLineRefPill();
     syncDoctorSheetFromUrl();
+    syncToolsSheetFromUrl();
   });
 
   // Ref picker (from / to)
@@ -4662,6 +4700,69 @@ window.GdpExpandLogic = GdpExpandLogic;
     closeDoctorSheet();
   });
 
+  // Tools sheet — doctor sheet と同じ「AppRoute から独立した 1 クエリキーの
+  // オーバーレイ」。違いは開いているツール名まで URL に載せる点だけ。
+  const TOOLS_VIEW = createToolsView({
+    $: <T extends Element = HTMLElement>(sel: string) =>
+      document.querySelector<T>(sel),
+    trackLoad,
+    getLanguage: () => STATE.language,
+    actionHeaders,
+    onCloseRequest: () => closeToolsSheet(),
+    onToolChange: (tool) => updateUrlForToolsOverlay(tool),
+  });
+  relocalizeTools = () => TOOLS_VIEW.localize();
+
+  function openToolsOverlay(): ToolId | null {
+    return parseToolsOverlay(window.location.search);
+  }
+
+  function updateUrlForToolsOverlay(tool: ToolId | null): void {
+    const current = window.location.pathname + window.location.search;
+    const next = withToolsOverlay(current, tool);
+    if (next !== current) {
+      history.replaceState(history.state, "", next + window.location.hash);
+    }
+    // メニューの Tools は URL の ?tools= を見て押下状態を出すので、URL を
+    // 書き換えたらその場で貼り直す。
+    syncHeaderMenu();
+  }
+
+  function openToolsSheet(tool?: ToolId): void {
+    // 実際に出すツールが決まるのは保存状態を読んだ後だが、「開いた」ことは
+    // その場で URL に出す。読み込みが止まっても URL と画面が食い違わない。
+    updateUrlForToolsOverlay(tool ?? TOOLS_VIEW.getActiveTool());
+    void TOOLS_VIEW.open(tool);
+  }
+
+  function closeToolsSheet(): void {
+    TOOLS_VIEW.close();
+    updateUrlForToolsOverlay(null);
+  }
+
+  function toggleToolsSheet(): void {
+    if (openToolsOverlay() || TOOLS_VIEW.isOpen()) closeToolsSheet();
+    else openToolsSheet();
+  }
+
+  function syncToolsSheetFromUrl(): void {
+    const tool = openToolsOverlay();
+    const open = TOOLS_VIEW.isOpen();
+    if (tool && (!open || TOOLS_VIEW.getActiveTool() !== tool))
+      void TOOLS_VIEW.open(tool);
+    else if (!tool && open) TOOLS_VIEW.close();
+  }
+
+  document
+    .getElementById("tools-sheet-overlay")
+    ?.addEventListener("click", () => closeToolsSheet());
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (!TOOLS_VIEW.isOpen()) return;
+    event.preventDefault();
+    closeToolsSheet();
+  });
+
   JOURNAL_VIEW = createJournalView({
     getRoute: () => STATE.route,
     setRoute,
@@ -4776,6 +4877,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncHeaderMenu();
     syncLineRefPill();
     syncDoctorSheetFromUrl();
+    syncToolsSheetFromUrl();
     if (
       isSameBlobFileRoute(previousRoute, STATE.route) &&
       routeBlobPreview(previousRoute) !== routeBlobPreview(STATE.route) &&
@@ -4851,7 +4953,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // notorious for); pushState + the shared route handler keeps the chrome
   // stable. Modified clicks (new tab etc.) keep native anchor behavior.
   document
-    .querySelectorAll<HTMLAnchorElement>(".app-menu-item, .global-icon-link")
+    .querySelectorAll<HTMLAnchorElement>("a.app-menu-item, a.global-icon-link")
     .forEach((link) => {
       // External links (the GitHub repo link) keep native anchor behavior;
       // hijacking them would push their pathname onto the local origin.

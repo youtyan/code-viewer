@@ -39,9 +39,19 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   too, without needing a `docker-compose.yml`.
   Table descriptions appear inside expanded table entries and in the Schema
   tab header when the database provides them.
-- Read the built-in Help page for getting started, the `.code-viewer/`
-  project files, AI annotations, datastores, the agent skill, and
-  keybindings.
+- Read the built-in Help page (last item in the header menu) for getting
+  started, the `.code-viewer/` project files, AI annotations, datastores,
+  the agent skill, and keybindings.
+- Scratch on pasted text without leaving the current screen with the Tools
+  drawer (the `Tools` item in the header menu, or `?tools=<tool>` on any
+  URL): Markdown
+  preview (same renderer as file preview, so table of contents, task lists,
+  frontmatter, code highlighting and ` ```mermaid ` fences all work),
+  Mermaid preview with zoom and drag-pan, and a JSON / YAML tool that
+  auto-detects the input and re-emits it as formatted JSON or YAML (also a
+  validator and a JSON⇄YAML converter). Each tool keeps its own draft in
+  `.code-viewer/tools.json`, and the drawer width is draggable from its left
+  edge.
 - Inspect the runtime with the Environment Doctor (right-side sheet,
   toggled by the 🩺 icon in the header): runtime (Node / Bun / ABI),
   `@youtyan/code-viewer` version and execution origin (npx cache vs
