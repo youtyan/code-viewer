@@ -228,6 +228,63 @@ describe("markdown preview", () => {
     ).toBe(true);
   });
 
+  test.each([
+    { tag: "<br>", label: "no-space br" },
+    { tag: "<br/>", label: "solidus br" },
+    { tag: "<br />", label: "spaced br" },
+    { tag: "<BR>", label: "uppercase br" },
+  ])("renders HTML $label tags as real line breaks", ({ tag }) => {
+    const html = renderMarkdownHtml(
+      `line1${tag}line2`,
+      { path: "README.md", ref: "worktree" },
+      null,
+    );
+    expect(html.includes("line1<br>line2")).toBe(true);
+    expect(html.includes("&lt;br")).toBe(false);
+  });
+
+  test("leaves HTML line break tags untouched inside code blocks", () => {
+    const html = renderMarkdownHtml(
+      "```\nline1<br />line2\n```",
+      { path: "README.md", ref: "worktree" },
+      null,
+    );
+    expect(html.includes("&lt;br /&gt;")).toBe(true);
+  });
+
+  test.each([
+    { type: "NOTE", label: "Note" },
+    { type: "TIP", label: "Tip" },
+    { type: "IMPORTANT", label: "Important" },
+    { type: "WARNING", label: "Warning" },
+    { type: "CAUTION", label: "Caution" },
+  ])("renders GitHub-style $type alert block", ({ type, label }) => {
+    const html = renderMarkdownHtml(
+      `> [!${type}]\n> body text\n`,
+      { path: "README.md", ref: "worktree" },
+      null,
+    );
+    expect(
+      html.includes(
+        `class="markdown-alert markdown-alert-${type.toLowerCase()}"`,
+      ),
+    ).toBe(true);
+    expect(html.includes(`<p class="markdown-alert-title">${label}</p>`)).toBe(
+      true,
+    );
+    expect(html.includes("body text")).toBe(true);
+    expect(html.includes(`[!${type}]`)).toBe(false);
+  });
+
+  test("does not turn a regular blockquote into an alert", () => {
+    const html = renderMarkdownHtml(
+      "> just a quote",
+      { path: "README.md", ref: "worktree" },
+      null,
+    );
+    expect(html.includes("markdown-alert")).toBe(false);
+  });
+
   test("renders task lists as list items that can be enhanced after parsing", () => {
     const html = renderMarkdownHtml(
       "- [x] done\n- [ ] todo\n",
@@ -399,6 +456,11 @@ describe("markdown preview", () => {
     expect(
       style.includes(
         ".gdp-markdown-toc a.active {\n  background: var(--accent-subtle);\n  border-left-color: var(--accent);\n  color: var(--fg);",
+      ),
+    ).toBe(true);
+    expect(
+      style.includes(
+        ".gdp-markdown-toc {\n  position: sticky;\n  top: calc(var(--global-header-h) + 16px);\n  max-height: calc(100vh - var(--global-header-h) - 40px);\n  overflow: auto;\n  padding: 12px;\n  border: 1px solid var(--border);\n  border-radius: 8px;\n  background: var(--bg-soft);",
       ),
     ).toBe(true);
     expect(style.includes(".gdp-markdown-preview table")).toBe(true);

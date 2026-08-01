@@ -5,6 +5,7 @@ import markdownItAnchor from "markdown-it-anchor";
 import markdownItFootnote from "markdown-it-footnote";
 import { isImeComposing } from "./keyboard";
 import { buildRawFileUrl, type SourceFileTarget } from "./routes";
+import { CHECK_16_PATHS, COPY_16_PATHS, iconSvg } from "./icons";
 
 /** Markdown 内リンクのクリックで開くリポジトリ内の行き先。GitHub の
  * markdown と同じく、md 以外のファイルとディレクトリも遷移先になる。 */
@@ -92,6 +93,16 @@ const MARKDOWN_SHIKI_LANGS = Array.from(
     "yaml",
   ]),
 );
+
+const ALERT_TYPES = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"] as const;
+type AlertType = Lowercase<(typeof ALERT_TYPES)[number]>;
+const ALERT_LABELS: Record<AlertType, string> = {
+  note: "Note",
+  tip: "Tip",
+  important: "Important",
+  warning: "Warning",
+  caution: "Caution",
+};
 
 // ai-dup-check: allow -- fn(string)→string と signature が偶然一致するだけ
 // (makeId / s3ObjectName / blameShortSha 等)。本体は Markdown 見出しの
@@ -185,6 +196,15 @@ function resolveRepoRelative(
   return resolved.join("/");
 }
 
+function findNextInlineToken(tokens: Token[], start: number): number | null {
+  for (let i = start + 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token.type === "inline") return i;
+    if (token.type === "blockquote_close") break;
+  }
+  return null;
+}
+
 function createMarkdownIt(
   target: SourceFileTarget,
   highlighter: ShikiHighlighter | null,
@@ -246,6 +266,108 @@ function createMarkdownIt(
           break;
         }
       }
+    }
+  });
+  md.core.ruler.after("inline", "gdp_line_breaks", (state) => {
+    const brRe = /<br\s*\/?>/gi;
+    for (const token of state.tokens) {
+      if (token.type !== "inline" || !token.children) continue;
+      const children: Token[] = [];
+      for (const child of token.children) {
+        if (child.type !== "text") {
+          children.push(child);
+          continue;
+        }
+        const content = child.content;
+        let lastIndex = 0;
+        brRe.lastIndex = 0;
+        for (
+          let match = brRe.exec(content);
+          match !== null;
+          match = brRe.exec(content)
+        ) {
+          if (match.index > lastIndex) {
+            const text = new state.Token("text", "", 0);
+            text.content = content.slice(lastIndex, match.index);
+            children.push(text);
+          }
+          const br = new state.Token("html_inline", "", 0);
+          br.content = "<br>";
+          children.push(br);
+          lastIndex = match.index + match[0].length;
+        }
+        if (lastIndex < content.length) {
+          const text = new state.Token("text", "", 0);
+          text.content = content.slice(lastIndex);
+          children.push(text);
+        }
+      }
+      token.children = children;
+    }
+  });
+  md.core.ruler.after("inline", "gdp_alerts", (state) => {
+    const markerRe = new RegExp(`^\\[!(${ALERT_TYPES.join("|")})\\]\\s*`, "i");
+    let i = 0;
+    while (i < state.tokens.length) {
+      const open = state.tokens[i];
+      if (open.type !== "blockquote_open") {
+        i++;
+        continue;
+      }
+      const inlineIdx = findNextInlineToken(state.tokens, i);
+      if (inlineIdx == null) {
+        i++;
+        continue;
+      }
+      const inline = state.tokens[inlineIdx];
+      if (!inline.children?.length) {
+        i++;
+        continue;
+      }
+      const first = inline.children[0];
+      if (first.type !== "text") {
+        i++;
+        continue;
+      }
+      const match = first.content.match(markerRe);
+      if (!match) {
+        i++;
+        continue;
+      }
+      const type = match[1].toLowerCase() as AlertType;
+      open.attrSet("class", `markdown-alert markdown-alert-${type}`);
+      const rest = first.content.slice(match[0].length);
+      if (rest) {
+        first.content = rest;
+      } else {
+        inline.children.shift();
+        if (inline.children[0]?.type === "softbreak") {
+          inline.children.shift();
+        }
+        if (!inline.children.length) {
+          const paraOpen = inlineIdx - 1;
+          let paraClose = inlineIdx + 1;
+          while (
+            paraClose < state.tokens.length &&
+            state.tokens[paraClose].type !== "blockquote_close" &&
+            state.tokens[paraClose].type !== "paragraph_close"
+          ) {
+            paraClose++;
+          }
+          if (
+            state.tokens[paraOpen]?.type === "paragraph_open" &&
+            state.tokens[paraClose]?.type === "paragraph_close"
+          ) {
+            state.tokens.splice(paraOpen, paraClose - paraOpen + 1);
+            i = paraOpen;
+          }
+        }
+      }
+      const title = new state.Token("html_block", "", 0);
+      title.content = `<p class="markdown-alert-title">${ALERT_LABELS[type]}</p>\n`;
+      title.block = true;
+      state.tokens.splice(i + 1, 0, title);
+      i += 2;
     }
   });
 
@@ -336,6 +458,7 @@ export async function renderMarkdownPreview(
   );
   if (options.signal?.aborted) return markdown;
   enhanceTaskLists(markdown);
+  enhanceCodeBlocks(markdown);
   const tocEntries = buildMarkdownToc(markdown);
   if (tocEntries.length) {
     const layout = document.createElement("div");
@@ -400,6 +523,32 @@ function enhanceTaskLists(root: HTMLElement) {
     input.checked = inline.dataset.gdpTask === "checked";
     li.prepend(input);
     inline.removeAttribute("data-gdp-task");
+  });
+}
+
+function enhanceCodeBlocks(root: HTMLElement) {
+  root.querySelectorAll<HTMLPreElement>("pre").forEach((pre) => {
+    const code = pre.querySelector<HTMLElement>("code");
+    const text = code?.textContent ?? pre.textContent ?? "";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mkdp-code-copy";
+    button.setAttribute("aria-label", "Copy code");
+    button.title = "Copy code";
+    button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        button.innerHTML = iconSvg("octicon-check", CHECK_16_PATHS);
+        window.setTimeout(() => {
+          button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+        }, 1500);
+      } catch {
+        // Clipboard access can fail in insecure contexts; leave the button
+        // untouched rather than spamming the console.
+      }
+    });
+    pre.appendChild(button);
   });
 }
 
