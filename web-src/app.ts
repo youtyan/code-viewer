@@ -9,6 +9,7 @@ import {
   shouldCatchUpDiff,
 } from "./core/catch-up";
 import { changedPathsCoverPath } from "./core/changed-paths";
+import { attachDragResizer } from "./core/drag-resizer";
 import { GdpExpandLogic } from "./core/expand-logic";
 import {
   findMainScrollTarget,
@@ -36,6 +37,7 @@ import {
   PULSE_16_PATH,
   QUESTION_16_PATH,
   SYNC_16_PATH,
+  TERMINAL_16_PATHS,
   TRIANGLE_DOWN_16_PATH,
   UNDO_16_PATH,
   X_16_PATH,
@@ -64,7 +66,8 @@ import {
   withToolsOverlay,
 } from "./core/routes";
 import { sourceInternalPathKind } from "./core/source-meta";
-import type { TmuxPaneId } from "./core/tmux";
+import { readStoredSize, writeStoredSize } from "./core/stored-size";
+import { clampTerminalFontSize } from "./core/tmux";
 import type { ToolId } from "./core/tools";
 import type {
   AppSettingsState,
@@ -2127,7 +2130,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       .querySelector<HTMLElement>("#doctor-sheet")
       ?.setAttribute("aria-label", doctorTitle);
     const toolsChrome = toolsText(STATE.language);
-    const toolsBtn = document.querySelector<HTMLButtonElement>("#tools-btn");
+    const toolsBtn =
+      document.querySelector<HTMLButtonElement>("#panel-tab-tools");
     // ラベルは data-route 経由で入るので、ここでは補足説明の title だけ。
     if (toolsBtn) toolsBtn.title = toolsChrome.open;
     document
@@ -2135,8 +2139,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       ?.setAttribute("aria-label", toolsChrome.title);
     relocalizeTools?.();
     const terminalChrome = terminalText(STATE.language);
-    const terminalBtn =
-      document.querySelector<HTMLButtonElement>("#terminal-btn");
+    const terminalBtn = document.querySelector<HTMLButtonElement>(
+      "#panel-tab-terminal",
+    );
     if (terminalBtn) terminalBtn.title = terminalChrome.open;
     document
       .querySelector<HTMLElement>("#terminal-sheet")
@@ -3242,22 +3247,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function syncHeaderMenu() {
-    // Tools はドロワーの開閉なので screen とは対応しない。押下状態は URL の
-    // ?tools= から決める (リンクではないので下の走査からも外れる)。
-    const toolsBtn = document.querySelector<HTMLButtonElement>("#tools-btn");
-    if (toolsBtn) {
-      const open = parseToolsOverlay(window.location.search) !== null;
-      toolsBtn.classList.toggle("active", open);
-      toolsBtn.setAttribute("aria-pressed", String(open));
-    }
-    // Terminal も同じくドロワーの開閉。押下状態は URL の ?terminal= から。
-    const terminalMenuBtn =
-      document.querySelector<HTMLButtonElement>("#terminal-btn");
-    if (terminalMenuBtn) {
-      const open = parseTerminalOverlay(window.location.search) !== null;
-      terminalMenuBtn.classList.toggle("active", open);
-      terminalMenuBtn.setAttribute("aria-pressed", String(open));
-    }
+    // Terminal / Tools はページ遷移ではなく下パネルの中身なので、ヘッダーの
+    // 並びには居ない。選択状態は URL (?terminal= / ?tools=) から決める。
+    syncAppPanel();
     document
       .querySelectorAll<HTMLAnchorElement>(
         "a.app-menu-item, a.global-icon-link",
@@ -3561,6 +3553,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   // alongside them (#annotations-count, #doctor-badge) which keep their own
   // sibling <span> so this never clobbers them.
   function setGlobalHeaderIcons() {
+    const panelToggleIcon = document.querySelector<HTMLElement>(
+      "#panel-toggle .goi-icon",
+    );
+    if (panelToggleIcon) {
+      panelToggleIcon.innerHTML = iconSvg(
+        "octicon-terminal",
+        TERMINAL_16_PATHS,
+      );
+    }
     const annotationsIcon = document.querySelector<HTMLElement>(
       "#annotations-toggle .goi-icon",
     );
@@ -3665,13 +3666,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     event.preventDefault();
     toggleDoctorSheet();
   });
-  $("#tools-btn")?.addEventListener("click", (event) => {
+  $("#panel-tab-tools")?.addEventListener("click", (event) => {
     event.preventDefault();
-    toggleToolsSheet();
+    openToolsSheet();
   });
-  $("#terminal-btn")?.addEventListener("click", (event) => {
+  $("#panel-tab-terminal")?.addEventListener("click", (event) => {
     event.preventDefault();
-    toggleTerminalSheet();
+    openTerminalSheet();
+  });
+  $("#app-panel-close")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    closeAppPanel();
+  });
+  // パネルが閉じているときの開き口。ページ移動の並びとは別の場所に置く。
+  $("#panel-toggle")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (isAppPanelOpen()) closeAppPanel();
+    else openTerminalSheet();
   });
   let copyAiContextFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   $("#copy-ai-context")?.addEventListener("click", async (event) => {
@@ -4759,21 +4770,131 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncHeaderMenu();
   }
 
+  /**
+   * 画面下のパネル。中身は Terminal と Tools で、出せるのは一度に 1 つ。
+   *
+   * 開いているかどうかは中身が持っている (それぞれの isOpen)。パネル自身は
+   * 器なので、状態を二重に持たずに中身から引き直す。ここを別々に持つと、
+   * URL から復元したときにタブと中身がずれる。
+   */
+  function isAppPanelOpen(): boolean {
+    return (
+      parseToolsOverlay(window.location.search) !== null ||
+      parseTerminalOverlay(window.location.search) !== null
+    );
+  }
+
+  function syncAppPanel(): void {
+    // 中身の open() は非同期なので、直後に isOpen() を見ると閉じたままに
+    // 見える。URL は開いた時点で同期的に入るので、そちらを正とする
+    // (ヘッダーのメニューが押下状態を出していたときと同じ決め方)。
+    const tools = parseToolsOverlay(window.location.search) !== null;
+    const terminal = parseTerminalOverlay(window.location.search) !== null;
+    const open = tools || terminal;
+    const panel = document.getElementById("app-panel");
+    if (panel) {
+      panel.hidden = !open;
+      panel.setAttribute("aria-hidden", String(!open));
+    }
+    for (const [id, selected] of [
+      ["#panel-tab-tools", tools],
+      ["#panel-tab-terminal", terminal],
+    ] as const) {
+      const tab = document.querySelector<HTMLButtonElement>(id);
+      if (!tab) continue;
+      tab.setAttribute("aria-selected", String(selected));
+    }
+    const toggle = document.querySelector<HTMLButtonElement>("#panel-toggle");
+    if (toggle) {
+      toggle.classList.toggle("active", open);
+      toggle.setAttribute("aria-pressed", String(open));
+    }
+  }
+
+  function closeAppPanel(): void {
+    if (
+      parseToolsOverlay(window.location.search) !== null ||
+      TOOLS_VIEW.isOpen()
+    )
+      closeToolsSheet();
+    if (
+      parseTerminalOverlay(window.location.search) !== null ||
+      TERMINAL_VIEW.isOpen()
+    )
+      closeTerminalSheet();
+  }
+
+  /** パネルの高さ (px) の許容範囲。上限は CSS の max-height が持つ。 */
+  const MIN_APP_PANEL_HEIGHT = 160;
+  const MAX_APP_PANEL_HEIGHT = 1400;
+  /** CSS 側の既定値 (--app-panel-height の fallback) と揃える。 */
+  const DEFAULT_APP_PANEL_HEIGHT = 420;
+  const APP_PANEL_HEIGHT_STORAGE_KEY = "code-viewer:app-panel-height";
+
+  /** 最後に適用した高さ。ドラッグが終わった時点でこれを保存する。 */
+  let appPanelHeight = DEFAULT_APP_PANEL_HEIGHT;
+
+  function applyAppPanelHeight(height: number): void {
+    appPanelHeight = Math.min(
+      MAX_APP_PANEL_HEIGHT,
+      Math.max(MIN_APP_PANEL_HEIGHT, Math.round(height)),
+    );
+    // 高さはパネル自身だけでなく #content の下余白も決める。パネル要素に
+    // 置くと兄弟の #content から見えないので、:root に置く。
+    document.documentElement.style.setProperty(
+      "--app-panel-height",
+      `${appPanelHeight}px`,
+    );
+  }
+
+  {
+    const panel = document.getElementById("app-panel");
+    const handle = document.getElementById("app-panel-resizer");
+    // 前回引き伸ばした高さで開く。パネルを出す前に当てておけば、開いた瞬間に
+    // 既定値からの跳ねが出ない。
+    applyAppPanelHeight(
+      readStoredSize(APP_PANEL_HEIGHT_STORAGE_KEY, DEFAULT_APP_PANEL_HEIGHT),
+    );
+    if (panel && handle) {
+      attachDragResizer({
+        handle,
+        getSize: () => panel.getBoundingClientRect().height,
+        // 上へ引くほど高くなる。ハンドルはパネルの上端にある。
+        direction: -1,
+        axis: "y",
+        applySize: (height) => {
+          applyAppPanelHeight(height);
+          // 高さが変わると端末の桁数・行数も変わる。追従させる。
+          TERMINAL_VIEW.refit();
+        },
+        // 保存はドラッグ / キー操作が終わった時だけ。動かしている間ずっと
+        // 書くと、1 回のドラッグで数十回 localStorage を叩くことになる。
+        onEnd: () =>
+          writeStoredSize(APP_PANEL_HEIGHT_STORAGE_KEY, appPanelHeight),
+        activeClassTarget: panel,
+        activeClassName: "app-panel-resizing",
+      });
+    }
+  }
+
   function openToolsSheet(tool?: ToolId): void {
+    // タブなので、もう一方は畳む。2 つ並べると 1 つあたりが狭くなりすぎる。
+    if (
+      parseTerminalOverlay(window.location.search) !== null ||
+      TERMINAL_VIEW.isOpen()
+    )
+      closeTerminalSheet();
     // 実際に出すツールが決まるのは保存状態を読んだ後だが、「開いた」ことは
     // その場で URL に出す。読み込みが止まっても URL と画面が食い違わない。
     updateUrlForToolsOverlay(tool ?? TOOLS_VIEW.getActiveTool());
     void TOOLS_VIEW.open(tool);
+    syncAppPanel();
   }
 
   function closeToolsSheet(): void {
     TOOLS_VIEW.close();
     updateUrlForToolsOverlay(null);
-  }
-
-  function toggleToolsSheet(): void {
-    if (openToolsOverlay() || TOOLS_VIEW.isOpen()) closeToolsSheet();
-    else openToolsSheet();
+    syncAppPanel();
   }
 
   function syncToolsSheetFromUrl(): void {
@@ -4782,11 +4903,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (tool && (!open || TOOLS_VIEW.getActiveTool() !== tool))
       void TOOLS_VIEW.open(tool);
     else if (!tool && open) TOOLS_VIEW.close();
+    syncAppPanel();
   }
 
-  document
-    .getElementById("tools-sheet-overlay")
-    ?.addEventListener("click", () => closeToolsSheet());
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     if (!TOOLS_VIEW.isOpen()) return;
@@ -4795,15 +4914,24 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   // Terminal sheet — tools sheet と同じ独立オーバーレイ。URL に載るのは
-  // 表示中の tmux ペイン ID (?terminal=%14)。ペインを選ぶ前は ?terminal=open。
+  // 映している対象の ID で、tmux ペイン (?terminal=%14) かこのドロワーから
+  // 開いたシェル (?terminal=shell-…)。何も選ぶ前は ?terminal=open。
   const TERMINAL_VIEW = createTerminalView({
     $: <T extends Element = HTMLElement>(sel: string) =>
       document.querySelector<T>(sel),
     trackLoad,
     getLanguage: () => STATE.language,
     actionHeaders,
+    // 文字サイズは他の表示設定と同じ置き場 (app settings) に持たせる。
+    // 保存の経路も codeFontSize などと同じ patchSettings に乗せる。
+    getFontSize: () => clampTerminalFontSize(APP_SETTINGS.terminalFontSize),
+    onFontSizeChange: (size) => {
+      const next = clampTerminalFontSize(size);
+      mergeLocalSettings({ terminalFontSize: next });
+      patchSettings({ terminalFontSize: next });
+    },
     onCloseRequest: () => closeTerminalSheet(),
-    onPaneChange: (pane) => updateUrlForTerminalOverlay(pane ?? "open"),
+    onTargetChange: (id) => updateUrlForTerminalOverlay(id ?? "open"),
   });
   relocalizeTerminal = () => TERMINAL_VIEW.localize();
 
@@ -4817,44 +4945,42 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncHeaderMenu();
   }
 
-  function openTerminalSheet(pane?: TmuxPaneId | null): void {
-    const target = pane ?? TERMINAL_VIEW.getActivePane();
-    // 実際にどのペインを映すかは一覧を取った後に決まるが、「開いた」ことは
-    // その場で URL に出す。読み込みが止まっても URL と画面が食い違わない。
+  function openTerminalSheet(id?: string | null): void {
+    // タブなので、もう一方は畳む。
+    if (
+      parseToolsOverlay(window.location.search) !== null ||
+      TOOLS_VIEW.isOpen()
+    )
+      closeToolsSheet();
+    const target = id ?? TERMINAL_VIEW.getActiveTarget();
+    // 実際に何を映すかは一覧を取った後に決まるが、「開いた」ことはその場で
+    // URL に出す。読み込みが止まっても URL と画面が食い違わない。
     updateUrlForTerminalOverlay(target ?? "open");
     void TERMINAL_VIEW.open(target);
+    syncAppPanel();
   }
 
   function closeTerminalSheet(): void {
     TERMINAL_VIEW.close();
     updateUrlForTerminalOverlay(null);
-  }
-
-  function toggleTerminalSheet(): void {
-    if (
-      parseTerminalOverlay(window.location.search) ||
-      TERMINAL_VIEW.isOpen()
-    ) {
-      closeTerminalSheet();
-    } else {
-      openTerminalSheet();
-    }
+    syncAppPanel();
   }
 
   function syncTerminalSheetFromUrl(): void {
     const state = parseTerminalOverlay(window.location.search);
     const open = TERMINAL_VIEW.isOpen();
-    const pane = state === "open" ? null : state;
-    if (state && (!open || (pane && TERMINAL_VIEW.getActivePane() !== pane))) {
-      void TERMINAL_VIEW.open(pane);
+    const target = state === "open" ? null : state;
+    if (
+      state &&
+      (!open || (target && TERMINAL_VIEW.getActiveTarget() !== target))
+    ) {
+      void TERMINAL_VIEW.open(target);
     } else if (!state && open) {
       TERMINAL_VIEW.close();
     }
+    syncAppPanel();
   }
 
-  document
-    .getElementById("terminal-sheet-overlay")
-    ?.addEventListener("click", () => closeTerminalSheet());
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     if (!TERMINAL_VIEW.isOpen()) return;

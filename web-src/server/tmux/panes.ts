@@ -4,12 +4,14 @@
 // ウィンドウ一覧を別々に引かない。並び順は tmux の出力順をそのまま保つ
 // (tmux 側がセッション名・ウィンドウ番号・ペイン番号の順で出す)。
 
-import type {
-  TmuxPane,
-  TmuxPanesResponse,
-  TmuxSession,
-  TmuxWindow,
+import {
+  isPathInsideAny,
+  type TmuxPane,
+  type TmuxPanesResponse,
+  type TmuxSession,
+  type TmuxWindow,
 } from "../../core/tmux";
+import { worktreePathsAsync } from "../git";
 import { runTmux } from "./command";
 
 /**
@@ -70,7 +72,14 @@ function toFlag(value: string | undefined): boolean {
  *
  * 列数が足りない行は捨てる。tmux の警告が stdout に混ざっても落ちない。
  */
-export function parseTmuxPanes(stdout: string): TmuxSession[] {
+export function parseTmuxPanes(
+  stdout: string,
+  /**
+   * このリポジトリの作業ツリー。空なら判定を諦め、全ペインを inRepo=true に
+   * する (絞り込めないことを理由に何も出さないより、全部見せるほうがまし)。
+   */
+  worktrees: string[] = [],
+): TmuxSession[] {
   const sessions: TmuxSession[] = [];
   const sessionByName = new Map<string, TmuxSession>();
   const windowByKey = new Map<string, TmuxWindow>();
@@ -119,6 +128,9 @@ export function parseTmuxPanes(stdout: string): TmuxSession[] {
       width: toInt(fields[FIELD.paneWidth]),
       height: toInt(fields[FIELD.paneHeight]),
       active: toFlag(fields[FIELD.paneActive]),
+      inRepo:
+        worktrees.length === 0 ||
+        isPathInsideAny(fields[FIELD.panePath] ?? "", worktrees),
     };
     window.panes.push(pane);
   }
@@ -128,7 +140,11 @@ export function parseTmuxPanes(stdout: string): TmuxSession[] {
 
 /** tmux が無い / サーバが動いていない場合も、例外ではなく空の一覧で返す。 */
 export async function listTmuxPanes(cwd: string): Promise<TmuxPanesResponse> {
-  const result = await runTmux(["list-panes", "-a", "-F", PANE_FORMAT], cwd);
+  // 作業ツリーの一覧は tmux とは独立に引けるので並行で取る。
+  const [result, worktrees] = await Promise.all([
+    runTmux(["list-panes", "-a", "-F", PANE_FORMAT], cwd),
+    worktreePathsAsync(cwd),
+  ]);
   if (result.status === "missing") {
     return { available: false, running: false, sessions: [] };
   }
@@ -145,6 +161,6 @@ export async function listTmuxPanes(cwd: string): Promise<TmuxPanesResponse> {
   return {
     available: true,
     running: true,
-    sessions: parseTmuxPanes(result.stdout),
+    sessions: parseTmuxPanes(result.stdout, worktrees),
   };
 }

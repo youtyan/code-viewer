@@ -33,11 +33,6 @@
       <a class="app-menu-item" data-route="history" href="/history">History</a>
       <a class="app-menu-item" data-route="journal" href="/journal">Work Log</a>
       <a class="app-menu-item" data-route="database" href="/database">Datastores</a>
-      <!-- Tools は画面遷移ではなくドロワーの開閉なので、リンクではなくボタン。
-           data-route はラベルのローカライズにだけ使う (SPA ナビの走査は
-           a.app-menu-item に限定してあるのでここは拾われない)。 -->
-      <button type="button" id="tools-btn" class="app-menu-item app-menu-action" data-route="tools" aria-pressed="false">Tools</button>
-      <button type="button" id="terminal-btn" class="app-menu-item app-menu-action" data-route="terminal" aria-pressed="false">Terminal</button>
       <a class="app-menu-item" data-route="help" href="/help">Help</a>
     </nav>
     <div class="global-actions">
@@ -53,6 +48,7 @@
       <span class="global-actions-sep" aria-hidden="true"></span>
       <span id="status" class="status" role="status" aria-live="polite"><span class="status-label"></span></span>
       <a id="repo-web-link" class="global-icon-link" href="#" target="_blank" rel="noopener" hidden><span class="goi-icon" aria-hidden="true"></span></a>
+      <button id="panel-toggle" class="global-icon-action" title="terminal and tools panel" aria-label="terminal and tools panel" aria-pressed="false"><span class="goi-icon" aria-hidden="true"></span></button>
       <button id="quick-help-btn" class="global-icon-action" title="quick help (shortcuts)" aria-label="quick help (shortcuts)"><span class="goi-icon" aria-hidden="true"></span></button>
     </div>
   </header>
@@ -281,10 +277,22 @@
 
   <div id="doctor-sheet-overlay" class="doctor-sheet-overlay" hidden aria-hidden="true"></div>
   <aside id="doctor-sheet" class="doctor-sheet" hidden aria-hidden="true" inert aria-label="environment doctor"></aside>
-  <div id="tools-sheet-overlay" class="tools-sheet-overlay" hidden aria-hidden="true"></div>
-  <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
-  <div id="terminal-sheet-overlay" class="terminal-sheet-overlay" hidden aria-hidden="true"></div>
-  <aside id="terminal-sheet" class="terminal-sheet" hidden aria-hidden="true" inert aria-label="terminal"></aside>
+  <!-- 画面下のパネル。IDE のターミナルパネルと同じで、タブで中身を切り替え、
+       上端のハンドルで高さを変える。中身 (#terminal-sheet / #tools-sheet) は
+       右ドロワーだった頃と同じ id のままなので、各ビューの実装は変わらない。 -->
+  <section id="app-panel" class="app-panel" hidden aria-hidden="true">
+    <div id="app-panel-resizer" class="app-panel-resizer" role="separator" tabindex="0" aria-orientation="horizontal" aria-label="resize panel"></div>
+    <div class="app-panel-tabs" role="tablist" aria-label="panel">
+      <button type="button" id="panel-tab-terminal" class="app-panel-tab" role="tab" data-panel="terminal" data-route="terminal" aria-selected="false">Terminal</button>
+      <button type="button" id="panel-tab-tools" class="app-panel-tab" role="tab" data-panel="tools" data-route="tools" aria-selected="false">Tools</button>
+      <span class="app-panel-spacer"></span>
+      <button type="button" id="app-panel-close" class="app-panel-close" title="close panel" aria-label="close panel">×</button>
+    </div>
+    <div class="app-panel-bodies">
+      <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
+      <aside id="terminal-sheet" class="terminal-sheet" hidden aria-hidden="true" inert aria-label="terminal"></aside>
+    </div>
+  </section>
   <main id="content">
     <section id="history-commit-info" hidden></section>
     <div id="empty" class="empty hidden">

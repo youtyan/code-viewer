@@ -109,6 +109,12 @@ export type AppSettingsState = {
   sidebarHidden?: boolean;
   sidebarFontSize?: ViewerFontSizeSetting;
   codeFontSize?: ViewerFontSizeSetting;
+  /**
+   * ターミナルの文字サイズ (px)。コードやサイドバーの段階値と違い、xterm は
+   * 実数の px を要るので数値で持つ。tmux ペインを映すときは、この値を上限と
+   * して実サイズに収まるところまで自動で縮む。
+   */
+  terminalFontSize?: number;
   syntaxHighlight?: boolean;
   autoUpdate?: boolean;
   queryHistoryPanelWidth?: number;
@@ -167,7 +173,10 @@ export type ToolsState = {
   version: 1;
   /** 最後に開いていたツール。次に開いたときの初期タブになる。 */
   activeTool?: ToolId;
-  /** ドロワーの幅 (px)。左端のドラッグで変えた値を覚えておく。 */
+  /**
+   * 右ドロワーだった頃の幅 (px)。下パネルに移して幅を持たなくなったので、
+   * もう書かない。古い保存値がそのまま読めるように型だけ残してある。
+   */
   width?: number;
   /** ツールごとの入力本文。空文字は「下書き無し」として保存しない。 */
   drafts?: Partial<Record<ToolId, string>>;

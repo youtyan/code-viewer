@@ -108,6 +108,12 @@ import {
   parseHttpByteRange,
 } from "./range";
 import { type FileMetadata, rawFileHeaders } from "./raw-file-headers";
+import {
+  type PublicOrigin,
+  parsePublicOrigin,
+  requestAllowed as requestAllowedForOrigin,
+  sideEffectRequestAllowed as sideEffectRequestAllowedForOrigin,
+} from "./request-origin";
 import { ROOT } from "./root";
 import {
   fileByteRangeResponseBody,
@@ -195,6 +201,7 @@ let cwd = process.cwd();
 let cliArgs = DEFAULT_ARGS;
 let listenPort = 0;
 let openAfterStart = false;
+let publicOrigin: PublicOrigin | null = null;
 const commandOverrides: ExternalCommandOverride[] = [];
 let cwdWasExplicit = false;
 let cwdHasGitRepository = false;
@@ -240,7 +247,7 @@ function parseCli() {
       console.log(`code-viewer ${VERSION}
 
 Usage:
-  code-viewer [--cwd <repo>] [--port <port>] [--open] [--bin <name>=<path>] [git-diff-args...]
+  code-viewer [--cwd <repo>] [--port <port>] [--public-origin <https-origin>] [--open] [--bin <name>=<path>] [git-diff-args...]
   code-viewer status [--cwd <repo>] [--bin git=<path>] [--ref <ref>] [--limit <N>] [--json]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
   code-viewer journal <list|add|edit|tasks|task-add|task-update|task-next|github-issues|task-link-issue|task-claim|task-done|task-delete> [options]
@@ -259,6 +266,7 @@ Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search
 Examples:
   code-viewer --open
   code-viewer --cwd /path/to/repo --open
+  code-viewer --port 64160 --public-origin https://terminal.example
   code-viewer HEAD~1 HEAD
   code-viewer --staged
   code-viewer status --json
@@ -273,6 +281,10 @@ Examples:
   code-viewer file history --path src/sample.ts --limit 10 --json
   code-viewer file show --path src/sample.ts --start 1 --end 40 --json
   code-viewer doctor --json
+
+Remote access:
+  --public-origin <https-origin> accepts one exact HTTPS origin through an
+  authenticated reverse proxy. The server still listens on 127.0.0.1.
 `);
       process.exit(0);
     } else if (arg === "--version" || arg === "-v") {
@@ -299,6 +311,18 @@ Examples:
         process.exit(1);
       }
       listenPort = parsed;
+    } else if (arg === "--public-origin") {
+      const next = process.argv[++i];
+      if (!next) {
+        console.error("--public-origin requires a value");
+        process.exit(1);
+      }
+      const parsed = parsePublicOrigin(next);
+      if (parsed.ok === false) {
+        console.error(parsed.error);
+        process.exit(1);
+      }
+      publicOrigin = parsed.value;
     } else if (arg === "--open") {
       openAfterStart = true;
     } else if (arg === "--bin") {
@@ -441,28 +465,12 @@ function text(body: string, status = 200) {
   });
 }
 
-function requestAllowed(req: Request) {
-  const host = req.headers.get("host") || "";
-  const origin = req.headers.get("origin");
-  const okHost = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/i.test(host);
-  const okOrigin =
-    !origin ||
-    origin === "null" ||
-    /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+$/i.test(origin);
-  return okHost && okOrigin;
+function requestAllowed(req: Request): boolean {
+  return requestAllowedForOrigin(req, publicOrigin);
 }
 
-function sideEffectRequestAllowed(req: Request) {
-  const host = req.headers.get("host") || "";
-  const origin = req.headers.get("origin");
-  const fetchSite = req.headers.get("sec-fetch-site");
-  const requestedBy = req.headers.get("x-code-viewer-action");
-  return (
-    /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/i.test(host) &&
-    origin === `http://${host}` &&
-    (!fetchSite || fetchSite === "same-origin") &&
-    requestedBy === "1"
-  );
+function sideEffectRequestAllowed(req: Request): boolean {
+  return sideEffectRequestAllowedForOrigin(req, publicOrigin);
 }
 
 function staticFile(pathname: string): Response | null {
@@ -3026,6 +3034,8 @@ applyPersistedSettings(await loadAppSettingsState(cwd));
 let watchLimitReached: number | null = null;
 const databaseHandleModule = import("./database/handle");
 const tmuxHandleModule = import("./tmux/handle");
+const shellHandleModule = import("./shell/handle");
+const agentHandleModule = import("./terminal/handle");
 
 const server = await startServer({
   hostname: "127.0.0.1",
@@ -3079,6 +3089,26 @@ const server = await startServer({
         sideEffectRequestAllowed,
       );
       if (tmuxResponse) return tmuxResponse;
+    }
+    if (url.pathname.startsWith("/_shell/")) {
+      const { handleShellRoute } = await shellHandleModule;
+      const shellResponse = await handleShellRoute(
+        req,
+        url,
+        cwd,
+        sideEffectRequestAllowed,
+      );
+      if (shellResponse) return shellResponse;
+    }
+    if (url.pathname.startsWith("/_agent/")) {
+      const { handleAgentRoute } = await agentHandleModule;
+      const agentResponse = await handleAgentRoute(
+        req,
+        url,
+        cwd,
+        sideEffectRequestAllowed,
+      );
+      if (agentResponse) return agentResponse;
     }
     if (url.pathname.startsWith("/_state/")) {
       const { handleStateRoute } = await import("./state-route");
@@ -3181,6 +3211,21 @@ async function shutdown(exitCode = 0) {
     closeTmuxStreams();
   } catch (error) {
     console.warn(`code-viewer tmux stream close skipped: ${String(error)}`);
+  }
+  try {
+    const [{ closeShellStreams }, { closeAllShellSessions }] =
+      await Promise.all([shellHandleModule, import("./shell/session")]);
+    closeShellStreams();
+    // ブラウザから開いたシェルはこのサーバの子。残したまま終わらない。
+    closeAllShellSessions();
+  } catch (error) {
+    console.warn(`code-viewer shell close skipped: ${String(error)}`);
+  }
+  try {
+    const { stopAgentActivityWatch } = await import("./terminal/activity");
+    stopAgentActivityWatch();
+  } catch (error) {
+    console.warn(`code-viewer agent watch stop skipped: ${String(error)}`);
   }
   worktreeWatch?.close();
   try {
@@ -3288,5 +3333,14 @@ function restartWorktreeWatch() {
 
 worktreeWatch = startScopedWorktreeWatch();
 
+// フックを入れていないセッションを、画面の動きだけで「稼働 / 停止」に
+// 振り分ける観測。申告のある対象には触らない (terminal/activity.ts 参照)。
+void import("./terminal/activity").then(({ startAgentActivityWatch }) =>
+  startAgentActivityWatch(cwd),
+);
+
 console.log(`GDP_LISTEN_URL=http://127.0.0.1:${server.port}/`);
+if (publicOrigin) {
+  console.log(`code-viewer public origin ${publicOrigin.origin}`);
+}
 console.log(`git-diff-preview serving ${cwd}`);

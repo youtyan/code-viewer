@@ -39,11 +39,26 @@ export type XtermTheme = {
   selectionBackground?: string;
 };
 
+/** バッファの 1 行。文字列に起こして中身を見るためだけに使う。 */
+export type XtermBufferLine = {
+  translateToString(trimRight?: boolean): string;
+};
+
+export type XtermBuffer = {
+  /** 画面の一番上がバッファの何行目か (スクロールで動く)。 */
+  readonly viewportY: number;
+  /** スクロールバックを除いた画面先頭の行番号。 */
+  readonly baseY: number;
+  readonly cursorY: number;
+  getLine(y: number): XtermBufferLine | undefined;
+};
+
 export type XtermTerminal = {
   readonly cols: number;
   readonly rows: number;
   readonly element: HTMLElement | undefined;
   readonly textarea: HTMLTextAreaElement | undefined;
+  readonly buffer: { readonly active: XtermBuffer };
   options: XtermOptions;
   open(parent: HTMLElement): void;
   write(data: string | Uint8Array, callback?: () => void): void;
@@ -59,6 +74,19 @@ export type XtermTerminal = {
     handler: (size: { cols: number; rows: number }) => void,
   ): XtermDisposable;
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void;
+  /**
+   * ホイールを xterm に処理させるか。false を返すと xterm は何もしない
+   * (preventDefault もしないので、外側のスクロール領域に流れる)。
+   */
+  attachCustomWheelEventHandler(handler: (event: WheelEvent) => boolean): void;
+  /** 表示位置を行単位で動かす。負で上 (過去) へ。 */
+  scrollLines(amount: number): void;
+  /** 表示位置が変わった。引数は画面先頭の行番号 (buffer.viewportY と同じ)。 */
+  onScroll(handler: (viewportY: number) => void): XtermDisposable;
+  /** 描画のたびに呼ばれる。重ねている DOM の置き直しはここで判断する。 */
+  onRender(
+    handler: (range: { start: number; end: number }) => void,
+  ): XtermDisposable;
 };
 
 export type XtermAddon = {

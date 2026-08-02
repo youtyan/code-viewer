@@ -4,40 +4,20 @@
 
 import { describe, expect, test } from "vitest";
 import { handleTmuxRoute } from "../server/tmux/handle";
+import { callRoute, postRoute } from "./_test-helpers";
 
-const ALLOW_SIDE_EFFECTS = () => true;
 const DENY_SIDE_EFFECTS = () => false;
 
-const ORIGIN = "http://127.0.0.1:0";
-
-function call(
+const call = (
   path: string,
-  init: RequestInit = {},
-  sideEffectAllowed = ALLOW_SIDE_EFFECTS,
-): Promise<Response | null> {
-  const url = new URL(`${ORIGIN}${path}`);
-  return handleTmuxRoute(
-    new Request(url, init),
-    url,
-    process.cwd(),
-    sideEffectAllowed,
-  );
-}
+  init?: RequestInit,
+  sideEffectAllowed?: (req: Request) => boolean,
+) => callRoute(handleTmuxRoute, path, init, sideEffectAllowed);
 
-function postKeys(
+const postKeys = (
   body: unknown,
-  sideEffectAllowed = ALLOW_SIDE_EFFECTS,
-): Promise<Response | null> {
-  return call(
-    "/_tmux/keys",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: typeof body === "string" ? body : JSON.stringify(body),
-    },
-    sideEffectAllowed,
-  );
-}
+  sideEffectAllowed?: (req: Request) => boolean,
+) => postRoute(handleTmuxRoute, "/_tmux/keys", body, sideEffectAllowed);
 
 describe("tmux route dispatch", () => {
   test("passes an unknown path through to the next handler", async () => {
@@ -70,6 +50,26 @@ describe("tmux stream pane validation", () => {
   ])("$name", async ({ query }) => {
     const res = await call(`/_tmux/stream${query}`);
     expect(res?.status).toBe(400);
+  });
+});
+
+describe("tmux history pane validation", () => {
+  // 有効な id を渡すと tmux を叩いてしまうので、ここでは弾かれる値だけを見る。
+  test.each([
+    { name: "rejects a missing pane", query: "" },
+    { name: "rejects an empty pane", query: "?pane=" },
+    { name: "rejects a pane without the prefix", query: "?pane=12" },
+    { name: "rejects a session target", query: "?pane=alpha:0.1" },
+    { name: "rejects a shell metacharacter", query: "?pane=%251;id" },
+    { name: "rejects a path traversal attempt", query: "?pane=../etc" },
+  ])("$name", async ({ query }) => {
+    const res = await call(`/_tmux/history${query}`);
+    expect(res?.status).toBe(400);
+  });
+
+  test("rejects POST on the history endpoint", async () => {
+    const res = await call("/_tmux/history?pane=%251", { method: "POST" });
+    expect(res?.status).toBe(405);
   });
 });
 

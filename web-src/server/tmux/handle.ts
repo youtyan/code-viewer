@@ -2,6 +2,9 @@
 //
 // - GET  /_tmux/panes            セッション → ウィンドウ → ペインの一覧
 // - GET  /_tmux/stream?pane=%14  そのペインの画面を SSE で流し続ける
+//                                fill=<行数> でその手前の履歴も一緒に流す
+//                                (ドロワーがペインより縦に長いときの埋め草)
+// - GET  /_tmux/history?pane=%14 スクロールバックを含む画面を 1 回だけ返す
 // - POST /_tmux/keys             そのペインへキー入力を送る
 //
 // ルーティングと副作用リクエストの認可は database/handle-shared の
@@ -27,7 +30,7 @@ import {
   parsePostJsonBody,
   textError,
 } from "../database/handle-shared";
-import { captureTmuxPane } from "./capture";
+import { captureTmuxPane, MAX_TMUX_HISTORY_LINES } from "./capture";
 import { sendTmuxKeys } from "./keys";
 import { listTmuxPanes } from "./panes";
 
@@ -52,7 +55,21 @@ export function closeTmuxStreams(): void {
   for (const stream of [...activeStreams]) stream.close();
 }
 
-function createPaneStreamResponse(paneId: TmuxPaneId, cwd: string): Response {
+/**
+ * 購読 1 回で一緒に流す履歴の上限。
+ *
+ * 用途は「ドロワーの表示領域がペインより縦に長いぶんを埋める」だけなので、
+ * 画面 1 枚に出せる行数を超える意味がない。ここを青天井にすると、1 秒に
+ * 8 回 5000 行を送ることになる。
+ */
+const MAX_TMUX_STREAM_FILL_LINES = 500;
+
+function createPaneStreamResponse(
+  paneId: TmuxPaneId,
+  cwd: string,
+  /** 画面の手前に何行ぶん付けるか。表示領域の余りぶんをクライアントが決める。 */
+  fillLines: number,
+): Response {
   const enc = new TextEncoder();
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -101,7 +118,7 @@ function createPaneStreamResponse(paneId: TmuxPaneId, cwd: string): Response {
     if (closed || inFlight) return;
     inFlight = true;
     try {
-      const result = await captureTmuxPane(paneId, cwd);
+      const result = await captureTmuxPane(paneId, cwd, fillLines);
       if (closed) return;
       if (result.status === "gone") {
         send("gone", "1");
@@ -159,10 +176,49 @@ function handlePanesGet(cwd: string): Promise<Response> {
   );
 }
 
+// ai-dup-check: allow -- fp:shell の同名ハンドラと似るのは「クエリを検証して
+// 購読を作る」3 行だけで、検証する識別子も作る購読も別物。共通化すると引数で
+// 分岐するだけの関数が増える。
 function handleStreamGet(url: URL, cwd: string): Response {
   const pane = url.searchParams.get("pane");
   if (!isTmuxPaneId(pane)) return textError("invalid pane id", 400);
-  return createPaneStreamResponse(pane, cwd);
+  return createPaneStreamResponse(
+    pane,
+    cwd,
+    clampLines(url.searchParams.get("fill"), MAX_TMUX_STREAM_FILL_LINES),
+  );
+}
+
+/** クエリの行数を 0..max に丸める。数値でなければ 0。 */
+function clampLines(raw: string | null, max: number): number {
+  const parsed = Number.parseInt(raw ?? "", 10);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(Math.max(parsed, 0), max);
+}
+
+/**
+ * スクロールバックを含む画面を 1 回だけ返す。
+ *
+ * 購読 (/_tmux/stream) が返すのは「今の画面」だけで、ドロワーは過去に流れた
+ * 行を持たない。人が遡りたくなったときにここへ取りに来る。毎フレーム履歴まで
+ * 送ると 1 回あたりが数 MB になるので、購読とは分けて明示的な 1 回きりの取得に
+ * している。
+ */
+async function handleHistoryGet(url: URL, cwd: string): Promise<Response> {
+  const pane = url.searchParams.get("pane");
+  if (!isTmuxPaneId(pane)) return textError("invalid pane id", 400);
+  const raw = url.searchParams.get("lines");
+  const lines =
+    raw === null
+      ? MAX_TMUX_HISTORY_LINES
+      : clampLines(raw, MAX_TMUX_HISTORY_LINES);
+  const result = await captureTmuxPane(pane, cwd, lines);
+  if (result.status === "gone") return textError("pane is gone", 410);
+  if (result.status === "error") {
+    console.error(`[code-viewer] tmux capture failed: ${result.message}`);
+    return textError("failed to capture pane", 500);
+  }
+  return json(result.screen);
 }
 
 async function handleKeysPost(req: Request, cwd: string): Promise<Response> {
@@ -201,6 +257,11 @@ export function handleTmuxRoute(
         methods: ["GET"],
         sideEffect: false,
         handler: () => handleStreamGet(url, cwd),
+      },
+      "/_tmux/history": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleHistoryGet(url, cwd),
       },
       "/_tmux/keys": {
         methods: ["POST"],

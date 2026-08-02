@@ -145,7 +145,57 @@ describe("parseTmuxPanes tree building", () => {
       width: 120,
       height: 40,
       active: true,
+      // 作業ツリーを渡していないので、絞り込みは諦めて全部このリポジトリ扱い。
+      inRepo: true,
     });
+  });
+});
+
+describe("parseTmuxPanes repository scoping", () => {
+  // ドロワーは既定でこのリポジトリのペインだけを出す。エージェントは worktree
+  // ごとに分けて走らせる前提なので、ルートの前方一致だけでは足りない。
+  const panePath = (path: string) => line({ id: "%1", path });
+
+  test.each([
+    {
+      name: "作業ツリーそのものは中",
+      path: "/w/repo",
+      worktrees: ["/w/repo"],
+      expected: true,
+    },
+    {
+      name: "作業ツリーの配下は中",
+      path: "/w/repo/src/deep",
+      worktrees: ["/w/repo"],
+      expected: true,
+    },
+    {
+      name: "別に切った worktree も中",
+      path: "/w/wt-board/src",
+      worktrees: ["/w/repo", "/w/wt-board"],
+      expected: true,
+    },
+    {
+      name: "名前が前方一致するだけの別ディレクトリは外",
+      path: "/w/repo-old/src",
+      worktrees: ["/w/repo"],
+      expected: false,
+    },
+    {
+      name: "無関係なパスは外",
+      path: "/other/project",
+      worktrees: ["/w/repo"],
+      expected: false,
+    },
+    {
+      name: "作業ツリーが分からなければ全部中",
+      path: "/other/project",
+      worktrees: [],
+      expected: true,
+    },
+  ])("$name", ({ path, worktrees, expected }) => {
+    const [session] = parseTmuxPanes(panePath(path), worktrees);
+    expect(session?.windows[0]?.panes[0]?.inRepo).toBe(expected);
   });
 });
 

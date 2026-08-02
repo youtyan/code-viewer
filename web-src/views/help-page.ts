@@ -179,7 +179,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "It never attaches to tmux. The screen is read with capture-pane and keystrokes are sent with send-keys, so the size and layout of the tmux clients you already have open are never changed. Because the screen is read rather than mirrored, there is no scrollback in the drawer — use tmux copy mode for history. The pane is drawn at its real size, and when that is wider than the drawer the terminal scrolls sideways instead of shrinking the text; drag the left edge to widen it. tmux has to be on PATH: without it the drawer says so instead of listing panes.",
+                text: "It never attaches to tmux. The screen is read with capture-pane and keystrokes are sent with send-keys, so the size and layout of the tmux clients you already have open are never changed. The pane is drawn at the size tmux gives it, so when the drawer is taller the space above is filled with that pane's recent scrollback and the prompt stays at the bottom. Scroll up in the terminal to read further back: the drawer fetches up to 5000 lines with capture-pane, pauses the live updates while you read, and follows the pane again once you scroll back to the bottom (typing also brings you back). The pane is drawn at its real size, and when that is wider than the drawer the terminal scrolls sideways instead of shrinking the text; drag the left edge to widen it. tmux has to be on PATH: without it the drawer says so instead of listing panes.",
               },
             ],
           },
@@ -921,7 +921,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "tmux には attach しません。画面は capture-pane で読み、キーは send-keys で送るので、すでに開いている tmux クライアントのサイズやレイアウトを変えません。画面を読む方式なのでドロワー側にスクロールバックはありません（履歴は tmux のコピーモードで見てください）。ペインは実際のサイズのまま描くので、ドロワーより広いときは字を縮めず横スクロールになります。左端をドラッグすれば広げられます。tmux が PATH にない場合は、一覧の代わりにその旨を表示します。",
+                text: "tmux には attach しません。画面は capture-pane で読み、キーは send-keys で送るので、すでに開いている tmux クライアントのサイズやレイアウトを変えません。ペインは tmux が決めたサイズで描くので、ドロワーのほうが縦に長いときは、余る上側をそのペインの直前の履歴で埋めます（入力行は下端に残ります）。上へスクロールすると、さらに前まで遡れます（capture-pane で最大 5000 行を取得します）。読んでいる間はライブ更新が止まり、一番下まで戻すと最新への追従が再開します（キーを打っても戻ります）。ペインは実際のサイズのまま描くので、ドロワーより広いときは字を縮めず横スクロールになります。左端をドラッグすれば広げられます。tmux が PATH にない場合は、一覧の代わりにその旨を表示します。",
               },
             ],
           },

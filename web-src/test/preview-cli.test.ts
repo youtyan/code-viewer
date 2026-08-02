@@ -10,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +69,40 @@ async function fetchWithTimeout(url: string, timeoutMs: number) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function requestWithHost(
+  url: string,
+  host: string,
+  origin?: string,
+): Promise<{ status: number; body: string }> {
+  const target = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname + target.search,
+        method: "GET",
+        headers: {
+          Host: host,
+          ...(origin === undefined ? {} : { Origin: origin }),
+        },
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => {
+          resolve({
+            status: response.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 async function waitForOutput(
@@ -262,10 +297,14 @@ afterEach(() => {
   }
 });
 
-async function startTestPreview(root: string, gitCommand: string) {
+async function startTestPreview(
+  root: string,
+  gitCommand: string,
+  extraArgs: string[] = [],
+) {
   const proc = spawn(
     process.execPath,
-    [CLI_BUNDLE, "--port", "0", "--cwd", root],
+    [CLI_BUNDLE, "--port", "0", "--cwd", root, ...extraArgs],
     {
       cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
       env: { ...process.env, CODE_VIEWER_BIN_GIT: gitCommand },
@@ -364,6 +403,36 @@ describe("preview CLI", () => {
       }
     },
   );
+
+  test.each([
+    {
+      name: "accepts the configured public host and origin",
+      host: "terminal.example",
+      origin: "https://terminal.example",
+      expectedStatus: 200,
+    },
+    {
+      name: "rejects a different public host",
+      host: "other.example",
+      origin: "https://terminal.example",
+      expectedStatus: 403,
+    },
+  ])("--public-origin $name", async ({ host, origin, expectedStatus }) => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-public-origin-"));
+    tmpRoots.push(root);
+    const preview = await startTestPreview(root, makeFakeMissingGitCommand(), [
+      "--public-origin",
+      "https://terminal.example",
+    ]);
+
+    try {
+      const response = await requestWithHost(preview.url, host, origin);
+      expect(response.status).toBe(expectedStatus);
+      expect(response.body.length > 0).toBe(true);
+    } finally {
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
 
   runOrSkip(
     "serves requests promptly while the worktree watcher scans a large tree",
@@ -1069,6 +1138,7 @@ describe("preview CLI", () => {
     expect(stdout).toMatch(
       /code-viewer status \[--cwd <repo>\] \[--bin git=<path>\] \[--ref <ref>\] \[--limit <N>\] \[--json\]/,
     );
+    expect(stdout).toMatch(/--public-origin <https-origin>/);
     expect(stdout).toMatch(
       /code-viewer annotate <start\|add\|add-db\|rename\|edit\|move\|list\|delete\|clear>/,
     );

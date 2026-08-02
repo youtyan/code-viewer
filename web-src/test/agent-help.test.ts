@@ -33,6 +33,7 @@ const SUBCOMMANDS = [
   "journal",
   "search",
   "file",
+  "terminal",
   "skill",
   "doctor",
 ] as const;
@@ -98,7 +99,7 @@ describe("buildAgentHelpIndex", () => {
 });
 
 describe("AGENT_GUIDES order is stable", () => {
-  test("matches the documented status / query / annotate / journal / search / file / skill / doctor sequence", () => {
+  test("matches the documented status / query / annotate / journal / search / file / terminal / skill / doctor sequence", () => {
     expect(AGENT_GUIDES.map((g) => g.name)).toEqual([...SUBCOMMANDS]);
   });
 });

@@ -6,6 +6,7 @@ import {
   TOOL_IDS,
   type ToolId,
 } from "../core/tools";
+import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from "../core/tmux";
 import type {
   AppSettingsState,
   DbUiPrefs,
@@ -172,6 +173,13 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   if (sidebarFontSize) out.sidebarFontSize = sidebarFontSize;
   const codeFontSize = optionalFontSize(raw.codeFontSize);
   if (codeFontSize) out.codeFontSize = codeFontSize;
+  // ターミナルは段階値ではなく px の実数。範囲は core と同じものを使う。
+  const terminalFontSize = optionalNumber(
+    raw.terminalFontSize,
+    MIN_TERMINAL_FONT_SIZE,
+    MAX_TERMINAL_FONT_SIZE,
+  );
+  if (terminalFontSize !== undefined) out.terminalFontSize = terminalFontSize;
   const syntaxHighlight = optionalBoolean(raw.syntaxHighlight);
   if (syntaxHighlight !== undefined) out.syntaxHighlight = syntaxHighlight;
   const autoUpdate = optionalBoolean(raw.autoUpdate);

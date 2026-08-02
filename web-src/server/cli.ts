@@ -81,6 +81,12 @@ if (process.argv[2] === "agent-help") {
   // environment the user can `npx @youtyan/code-viewer status` into.
   const { runStatusCli } = await import("./status-cli");
   await runStatusCli(process.argv.slice(3));
+} else if (process.argv[2] === "terminal") {
+  // `terminal` talks to a running code-viewer server (the terminal state and
+  // buffers only exist there). No SQLite of its own, so no preflight. Agent
+  // CLI hooks call this on every lifecycle event, so it must stay cheap.
+  const { runTerminalCli } = await import("./terminal-cli");
+  await runTerminalCli(process.argv.slice(3));
 } else if (process.argv[2] === "skill") {
   const { runSkillCli } = await import("./skill-cli");
   runSkillCli(process.argv.slice(3));

@@ -1,3 +1,4 @@
+import { isShellSessionId, type ShellSessionId } from "./shell";
 import { isTmuxPaneId, type TmuxPaneId } from "./tmux";
 import { isToolId, type ToolId } from "./tools";
 
@@ -459,10 +460,11 @@ export function withToolsOverlay(url: string, tool: ToolId | null): string {
 }
 
 /**
- * Terminal ドロワーの状態。tools と違い「開いているがまだペインを選んでいない」
- * があるので、ペイン ID とは別に "open" を持つ。
+ * Terminal ドロワーの状態。tools と違い「開いているがまだ何も選んでいない」
+ * があるので、映している対象の ID とは別に "open" を持つ。対象は tmux の
+ * ペイン (`%12`) か、ブラウザから開いたシェル (`shell-…`) のどちらか。
  */
-export type TerminalOverlayState = TmuxPaneId | "open" | null;
+export type TerminalOverlayState = TmuxPaneId | ShellSessionId | "open" | null;
 
 // Terminal ドロワーも AppRoute から独立した 1 クエリキーで、値は表示中の
 // tmux ペイン (`?terminal=%14`)。キーが在ってペイン ID の形でないものは
@@ -471,7 +473,8 @@ export type TerminalOverlayState = TmuxPaneId | "open" | null;
 export function parseTerminalOverlay(search: string): TerminalOverlayState {
   const raw = new URLSearchParams(search).get("terminal");
   if (raw === null) return null;
-  return isTmuxPaneId(raw) ? raw : "open";
+  if (isTmuxPaneId(raw) || isShellSessionId(raw)) return raw;
+  return "open";
 }
 
 export function withTerminalOverlay(

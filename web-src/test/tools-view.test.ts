@@ -224,10 +224,12 @@ describe("tools overlay shell", () => {
     expect(tabLabels()).toEqual(["Markdown", "Mermaid", "JSON / YAML"]);
   });
 
-  test("the close button asks the host to close", async () => {
+  // 閉じるボタンと見出しは下パネルのタブ列が持つようになったので、この
+  // ビュー自身は持たない。パネル側の開閉は app.ts の配線が担う。
+  test("does not render its own title or close button", async () => {
     await createView().open();
-    document.querySelector<HTMLButtonElement>(".tools-close")?.click();
-    expect(closeRequests).toBe(1);
+    expect(document.querySelector(".tools-close")).toBeNull();
+    expect(sheet().querySelector("h1")).toBeNull();
   });
 });
 
@@ -291,10 +293,12 @@ describe("tools overlay drafts", () => {
     expect(textareaFor("mermaid").value).toBe("");
   });
 
-  test("applies a stored drawer width", async () => {
+  // 幅は右ドロワーだった頃の設定。下パネルは高さだけを持つので、古い保存値が
+  // 残っていても読み飛ばす (型には残してあるが誰も使わない)。
+  test("ignores a stored drawer width", async () => {
     storedState = { version: 1, width: 900 };
     await createView().open();
-    expect(sheet().style.getPropertyValue("--tools-sheet-width")).toBe("900px");
+    expect(sheet().style.getPropertyValue("--tools-sheet-width")).toBe("");
   });
 
   test("closing flushes an edit that was still waiting to be saved", async () => {
@@ -408,35 +412,6 @@ describe("tools overlay drafts", () => {
     await opening;
 
     expect(view.getActiveTool()).toBe("mermaid");
-  });
-
-  test("keeps a width dragged while loading instead of restoring the stored one", async () => {
-    deferGet = true;
-    const view = createView();
-    const opening = view.open();
-    const handle = sheet().querySelector<HTMLElement>(".tools-sheet-resizer");
-    handle?.dispatchEvent(
-      new PointerEvent("pointerdown", {
-        bubbles: true,
-        button: 0,
-        pointerId: 1,
-        clientX: 500,
-      }),
-    );
-    handle?.dispatchEvent(
-      new PointerEvent("pointermove", {
-        bubbles: true,
-        button: 0,
-        pointerId: 1,
-        clientX: 200,
-      }),
-    );
-    const dragged = sheet().style.getPropertyValue("--tools-sheet-width");
-    resolveGet?.({ version: 1, width: 700 });
-    await opening;
-
-    expect(dragged).not.toBe("");
-    expect(sheet().style.getPropertyValue("--tools-sheet-width")).toBe(dragged);
   });
 
   test("does not start a second save while one is still in flight", async () => {

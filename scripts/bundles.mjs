@@ -31,9 +31,15 @@ export const WEB_BUNDLES = [
 export const SERVER_BUNDLE = {
   entry: "web-src/server/cli.ts",
   outfile: "dist/code-viewer.js",
-  // better-sqlite3 はネイティブモジュールなので束ねられない。他も任意依存 /
-  // 実行時解決なので、いずれも実行環境の解決に任せる。
-  external: ["pg", "mysql2/promise", "@redis/client", "better-sqlite3"],
+  // better-sqlite3 と @lydell/node-pty はネイティブモジュールなので束ねられ
+  // ない。他も任意依存 / 実行時解決なので、いずれも実行環境の解決に任せる。
+  external: [
+    "pg",
+    "mysql2/promise",
+    "@redis/client",
+    "better-sqlite3",
+    "@lydell/node-pty",
+  ],
 };
 
 /** 全バンドル共通。日本語をエスケープに潰さない。 */

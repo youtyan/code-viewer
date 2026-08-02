@@ -25,6 +25,7 @@ import {
 } from "../core/journal";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute, DiffRange } from "../core/routes";
+import { readStoredSize, writeStoredSize } from "../core/stored-size";
 import { showConfirmDialog } from "./ui-dialog";
 
 export type JournalViewText = {
@@ -524,26 +525,14 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
       `${clamped}px`,
     );
     if (!persist) return;
-    try {
-      window.localStorage.setItem(
-        TASK_EDITOR_WIDTH_STORAGE_KEY,
-        String(clamped),
-      );
-    } catch {
-      // localStorage can be unavailable in restricted browser contexts.
-    }
+    writeStoredSize(TASK_EDITOR_WIDTH_STORAGE_KEY, clamped);
   }
 
   function restoreTaskEditorWidth(): void {
-    let width = TASK_EDITOR_DEFAULT_WIDTH;
-    try {
-      const raw = window.localStorage.getItem(TASK_EDITOR_WIDTH_STORAGE_KEY);
-      const parsed = raw ? Number(raw) : NaN;
-      if (Number.isFinite(parsed)) width = parsed;
-    } catch {
-      width = TASK_EDITOR_DEFAULT_WIDTH;
-    }
-    applyTaskEditorWidth(width, false);
+    applyTaskEditorWidth(
+      readStoredSize(TASK_EDITOR_WIDTH_STORAGE_KEY, TASK_EDITOR_DEFAULT_WIDTH),
+      false,
+    );
   }
 
   function startTaskEditorResize(
