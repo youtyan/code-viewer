@@ -155,6 +155,10 @@ export function buildRgArgs(
   return args;
 }
 
+function normalizeRgPath(path: string): string {
+  return path.replace(/^(?:\.\/)+/, "");
+}
+
 export function parseRgOutput(
   stdout: string,
   max: number,
@@ -180,20 +184,21 @@ export function parseRgOutput(
         };
       };
       if (event.type !== "match") continue;
-      const path = event.data?.path?.text;
+      const rawPath = event.data?.path?.text;
       const lineText = event.data?.lines?.text;
       const lineNo = event.data?.line_number;
       const submatch = event.data?.submatches?.[0];
       const matchText = submatch?.match?.text;
       const byteStart = submatch?.start;
       if (
-        typeof path !== "string" ||
+        typeof rawPath !== "string" ||
         typeof lineText !== "string" ||
         typeof lineNo !== "number" ||
         typeof matchText !== "string" ||
         typeof byteStart !== "number"
       )
         continue;
+      const path = normalizeRgPath(rawPath);
       const preview = lineText.replace(/\r?\n$/, "");
       const column =
         Buffer.from(preview).subarray(0, byteStart).toString("utf8").length + 1;
@@ -216,7 +221,7 @@ export function parseRgOutput(
     }
     const parsed = /^(.*?):(\d+):(\d+):(.*)$/.exec(line);
     if (!parsed) continue;
-    const path = parsed[1];
+    const path = normalizeRgPath(parsed[1]);
     const lineNo = Number(parsed[2]);
     const column = Number(parsed[3]);
     const preview = parsed[4];

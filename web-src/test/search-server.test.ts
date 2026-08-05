@@ -271,11 +271,16 @@ describe("buildRgArgs", () => {
 });
 
 describe("grep output parsers", () => {
-  test("parses the exact ripgrep JSON match and converts its byte offset", () => {
+  test.each([
+    { name: "a current-directory prefix", inputPath: "./src/sample.ts" },
+    { name: "no current-directory prefix", inputPath: "src/sample.ts" },
+  ])("parses ripgrep JSON with $name and converts its byte offset", ({
+    inputPath,
+  }) => {
     const output = `${JSON.stringify({
       type: "match",
       data: {
-        path: { text: "src/sample.ts" },
+        path: { text: inputPath },
         lines: { text: "const 日本語 = 1;\n" },
         line_number: 7,
         submatches: [{ match: { text: "日本語" }, start: 6, end: 15 }],
@@ -293,8 +298,11 @@ describe("grep output parsers", () => {
     ]);
   });
 
-  test("parses ripgrep output path line column preview", () => {
-    expect(parseRgOutput("src/app.ts:10:3:const app = true\n", 10)).toEqual([
+  test.each([
+    { name: "a current-directory prefix", inputPath: "./src/app.ts" },
+    { name: "no current-directory prefix", inputPath: "src/app.ts" },
+  ])("parses plain output with $name", ({ inputPath }) => {
+    expect(parseRgOutput(`${inputPath}:10:3:const app = true\n`, 10)).toEqual([
       { path: "src/app.ts", line: 10, column: 3, preview: "const app = true" },
     ]);
   });
@@ -399,7 +407,7 @@ describe("search-service shared behavior", () => {
     {
       name: "worktree",
       ref: "worktree",
-      expected: ["./other_sample.ts", "./sample_file.ts"],
+      expected: ["other_sample.ts", "sample_file.ts"],
     },
     {
       name: "committed ref",
