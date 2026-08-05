@@ -79,7 +79,7 @@
     "mermaid": "11.14.0",
     "shiki": "4.0.2",
     "tsx": "^4.23.1",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vitest": "^4.1.10",
     "yaml": "2.9.0"
   },
