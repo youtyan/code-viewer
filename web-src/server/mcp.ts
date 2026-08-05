@@ -25,6 +25,12 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  AGENT_EVENTS,
+  isAgentEvent,
+  needsAttention,
+} from "../core/agent-state";
+import { formatErrorDetail } from "../core/error-detail";
 import { isGlobPathQuery, rankPathMatches } from "../core/fuzzy-search";
 import { AGENT_GUIDES, buildAgentHelpIndex } from "./agent-help";
 import { resolveRepoRootSafe } from "./cli-helpers";
@@ -75,6 +81,14 @@ import {
   STATUS_DEFAULT_REF,
   STATUS_HARD_CAP_LIMIT,
 } from "./status-cli";
+import { listAgentStates, recordAgentState } from "./terminal/agent-state";
+import {
+  captureTerminal,
+  clampHistoryLines,
+  DEFAULT_CAPTURE_HISTORY_LINES,
+  terminalKindOf,
+} from "./terminal/capture";
+import { MAX_TMUX_HISTORY_LINES } from "./tmux/capture";
 
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
 
@@ -151,6 +165,7 @@ export type McpDispatchResult =
 export type DefaultMcpToolsOptions = {
   cwd?: string;
   omitDirNames?: string[];
+  generation?: number;
 };
 
 // Build the default tool inventory. Exported so preview.ts can mount it
@@ -484,7 +499,7 @@ export function defaultMcpTools(
         additionalProperties: false,
       },
       run(input) {
-        return runSearchCodeTool(input, options.cwd);
+        return runSearchCodeTool(input, options.cwd, options.generation);
       },
     },
     {
@@ -712,7 +727,192 @@ export function defaultMcpTools(
         return runDatastoreHistoryTool(input, options);
       },
     },
+    {
+      name: "code_viewer_terminal_list",
+      title: "code-viewer terminal list",
+      description:
+        "Returns the state of every terminal this server knows about, the same payload `code-viewer terminal list --json` emits: { states: [{ target, state, source, updatedAt, lastPrompt, note }] }. state is working | waiting | done | idle, where done means the turn finished and nobody has read the output yet. source is hook when the agent reported it and activity when it was guessed. Read-only. Call this before asking the human anything — another agent may already be blocking them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          attentionOnly: {
+            type: "boolean",
+            description:
+              "Return only terminals in waiting or done, i.e. the ones the human still has to deal with.",
+          },
+        },
+        additionalProperties: false,
+      },
+      run(input) {
+        return runTerminalListTool(input);
+      },
+    },
+    {
+      name: "code_viewer_terminal_capture",
+      title: "code-viewer terminal capture",
+      description:
+        "Reads what another terminal is showing, the same payload `code-viewer terminal capture --json` emits: { target, kind, content, cursor, reset }. Pass the cursor from the previous call to receive only what was added since then, which keeps handovers small. reset=true means the previous position could not be followed and content is the whole buffer again, so treat it as overlapping what you already had. Read-only.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          target: {
+            type: "string",
+            description:
+              "tmux pane id such as %12, or a browser shell id such as shell-xxxx. Get these from code_viewer_terminal_list.",
+          },
+          cursor: {
+            type: "string",
+            description:
+              "Opaque cursor returned by a previous capture. Omit to read the whole buffer.",
+          },
+          history: {
+            type: "integer",
+            minimum: 0,
+            maximum: MAX_TMUX_HISTORY_LINES,
+            description: `Lines of scrollback to include for tmux panes. Default ${DEFAULT_CAPTURE_HISTORY_LINES}, max ${MAX_TMUX_HISTORY_LINES}. Ignored for browser shells, which always return their retained buffer.`,
+          },
+        },
+        required: ["target"],
+        additionalProperties: false,
+      },
+      run(input) {
+        return runTerminalCaptureTool(input, options);
+      },
+    },
+    {
+      name: "code_viewer_terminal_state",
+      title: "code-viewer terminal state",
+      description:
+        "Reports your own lifecycle state so the human's terminal board can show it, the same call `code-viewer terminal state` makes. Use this only if you cannot install the agent CLI hooks, which report the same events automatically. event is prompt | progress | ask | stop | exit. Identify yourself with the TMUX_PANE environment variable inside tmux, or CODE_VIEWER_SHELL_ID inside a shell this server opened.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          target: {
+            type: "string",
+            description:
+              "Your own tmux pane id ($TMUX_PANE) or browser shell id ($CODE_VIEWER_SHELL_ID).",
+          },
+          event: {
+            type: "string",
+            enum: [...AGENT_EVENTS],
+            description:
+              "prompt = the human sent an instruction, progress = you ran a tool, ask = you stopped to ask something, stop = your turn ended, exit = the session ended.",
+          },
+          lastPrompt: {
+            type: "string",
+            description:
+              "The instruction the human last gave. Kept until replaced.",
+          },
+          note: {
+            type: "string",
+            description: "One line about what you are doing right now.",
+          },
+        },
+        required: ["target", "event"],
+        additionalProperties: false,
+      },
+      run(input) {
+        return runTerminalStateTool(input);
+      },
+    },
   ];
+}
+
+function runTerminalListTool(input: unknown): McpToolRunReturn {
+  const params = isPlainObject(input) ? input : {};
+  const attentionOnly = params.attentionOnly;
+  if (attentionOnly !== undefined && typeof attentionOnly !== "boolean") {
+    return { text: "attentionOnly must be a boolean", isError: true };
+  }
+  const all = listAgentStates();
+  const states = attentionOnly
+    ? all.filter((record) => needsAttention(record.state))
+    : all;
+  return { text: JSON.stringify({ states }, null, 2) };
+}
+
+async function runTerminalCaptureTool(
+  input: unknown,
+  options: DefaultMcpToolsOptions,
+): Promise<McpToolRunReturn> {
+  const params = isPlainObject(input) ? input : {};
+  const target = params.target;
+  if (typeof target !== "string" || !terminalKindOf(target)) {
+    return {
+      text: "target must be a tmux pane id (%12) or a shell id (shell-xxxx)",
+      isError: true,
+    };
+  }
+  const cursorRaw = params.cursor;
+  if (cursorRaw !== undefined && typeof cursorRaw !== "string") {
+    return { text: "cursor must be a string", isError: true };
+  }
+  const historyRaw = params.history;
+  if (historyRaw !== undefined && typeof historyRaw !== "number") {
+    return { text: "history must be an integer", isError: true };
+  }
+  const result = await captureTerminal(
+    target,
+    typeof cursorRaw === "string" ? cursorRaw : null,
+    options.cwd ?? process.cwd(),
+    clampHistoryLines(historyRaw),
+  );
+  if (result.status === "invalid") {
+    return { text: "target is not a terminal id", isError: true };
+  }
+  if (result.status === "gone") {
+    return { text: `${target} is gone`, isError: true };
+  }
+  if (result.status === "error") {
+    return { text: formatErrorDetail(result.error), isError: true };
+  }
+  return {
+    text: JSON.stringify(
+      {
+        target,
+        kind: result.kind,
+        content: result.slice.content,
+        cursor: result.slice.cursor,
+        reset: result.slice.reset,
+      },
+      null,
+      2,
+    ),
+  };
+}
+
+function runTerminalStateTool(input: unknown): McpToolRunReturn {
+  const params = isPlainObject(input) ? input : {};
+  const target = params.target;
+  if (typeof target !== "string" || !terminalKindOf(target)) {
+    return {
+      text: "target must be a tmux pane id (%12) or a shell id (shell-xxxx)",
+      isError: true,
+    };
+  }
+  if (!isAgentEvent(params.event)) {
+    return {
+      text: `event must be one of: ${AGENT_EVENTS.join(", ")}`,
+      isError: true,
+    };
+  }
+  const lastPrompt = params.lastPrompt;
+  const note = params.note;
+  if (lastPrompt !== undefined && typeof lastPrompt !== "string") {
+    return { text: "lastPrompt must be a string", isError: true };
+  }
+  if (note !== undefined && typeof note !== "string") {
+    return { text: "note must be a string", isError: true };
+  }
+  const record = recordAgentState({
+    target,
+    event: params.event,
+    source: "hook",
+    lastPrompt: typeof lastPrompt === "string" ? lastPrompt : undefined,
+    note: typeof note === "string" ? note : undefined,
+  });
+  if (!record) return { text: "could not record state", isError: true };
+  return { text: JSON.stringify({ ok: true, state: record }, null, 2) };
 }
 
 async function runStatusTool(
@@ -1295,6 +1495,7 @@ async function runSearchFilesTool(
 async function runSearchCodeTool(
   input: unknown,
   defaultCwd?: string,
+  generation?: number,
 ): Promise<McpToolRunReturn> {
   const params = isPlainObject(input) ? input : {};
   const termRaw = params.term;
@@ -1369,7 +1570,13 @@ async function runSearchCodeTool(
   if (result.ok !== true) {
     return { text: result.error, isError: true };
   }
-  return { text: JSON.stringify(result.value, null, 2) };
+  return {
+    text: JSON.stringify(
+      generation === undefined ? result.value : { ...result.value, generation },
+      null,
+      2,
+    ),
+  };
 }
 
 async function runDatastoreSourcesTool(

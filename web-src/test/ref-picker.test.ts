@@ -1,13 +1,6 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-} from "bun:test";
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { AppRoute } from "../core/routes";
 import { createRefPicker } from "../views/ref-picker";
 import { waitFor } from "./_test-helpers";

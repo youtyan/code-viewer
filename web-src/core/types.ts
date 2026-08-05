@@ -1,4 +1,5 @@
 import type { GdpExpandLogic } from "./expand-logic";
+import type { KeymapOverrides } from "./keymap";
 import type { ToolId } from "./tools";
 
 export type FileMeta = {
@@ -109,6 +110,14 @@ export type AppSettingsState = {
   sidebarHidden?: boolean;
   sidebarFontSize?: ViewerFontSizeSetting;
   codeFontSize?: ViewerFontSizeSetting;
+  /**
+   * ターミナルの文字サイズ (px)。コードやサイドバーの段階値と違い、xterm は
+   * 実数の px を要るので数値で持つ。字の大きさを変えると表示領域に入る
+   * 桁数・行数も変わるので、PTY のリサイズもここから連動する。
+   */
+  terminalFontSize?: number;
+  /** 下パネルを本文と高さを分けて表示する。false / 未設定なら重ねて表示。 */
+  appPanelDocked?: boolean;
   syntaxHighlight?: boolean;
   autoUpdate?: boolean;
   queryHistoryPanelWidth?: number;
@@ -119,10 +128,22 @@ export type AppSettingsState = {
   annotationRate?: number;
   ignoreWhitespace?: boolean;
   hideTests?: boolean;
+  fileSelectionHistory?: string[];
+  grepSelectionHistory?: string[];
+  grepRegex?: boolean;
+  grepGroupByFile?: boolean;
+  grepPaletteWidth?: number;
+  grepPaletteHeight?: number;
   scopeOmitDirs?: string[];
   scopeExcludeNames?: string[];
   scopeWatchLimit?: number;
   uploadEnabled?: boolean;
+  /**
+   * ユーザーが変更したキー割り当てだけを持つ差分。ここに無いアクションは
+   * デフォルトのまま動くので、後からデフォルトを変えても、触っていない
+   * ものは新しい割り当てに追従する。
+   */
+  keybindings?: KeymapOverrides;
   range?: {
     from: string;
     to: string;
@@ -167,7 +188,10 @@ export type ToolsState = {
   version: 1;
   /** 最後に開いていたツール。次に開いたときの初期タブになる。 */
   activeTool?: ToolId;
-  /** ドロワーの幅 (px)。左端のドラッグで変えた値を覚えておく。 */
+  /**
+   * 右ドロワーだった頃の幅 (px)。下パネルに移して幅を持たなくなったので、
+   * もう書かない。古い保存値がそのまま読めるように型だけ残してある。
+   */
   width?: number;
   /** ツールごとの入力本文。空文字は「下書き無し」として保存しない。 */
   drafts?: Partial<Record<ToolId, string>>;
@@ -195,6 +219,7 @@ export type GrepMatch = {
   line: number;
   column: number;
   preview: string;
+  matchText?: string;
 };
 
 export type GrepResponse = {
@@ -202,6 +227,7 @@ export type GrepResponse = {
   engine: "rg" | "git" | "fallback";
   truncated: boolean;
   matches: GrepMatch[];
+  generation?: number;
 };
 
 export type FileDiffResponse = {

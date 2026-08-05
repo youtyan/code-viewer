@@ -1,12 +1,5 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-} from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { MarkdownNavigationTarget } from "../core/markdown-preview";
 import type { AppRoute } from "../core/routes";
 import {

@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
@@ -9,6 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
 import { __setD1FetchForTest } from "../server/database/adapters/d1";
 import {
   __setSqlDriverFactoriesForTest,

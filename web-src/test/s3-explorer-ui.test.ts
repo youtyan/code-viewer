@@ -1,7 +1,8 @@
 // Explorer ツリー・種別バッジ・空状態・選択ハイライトの「実描画」挙動を
 // happy-dom 上で検証する。文字列存在ではなく DOM 構造と状態を確認する。
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import { waitFor } from "./_test-helpers";
 
 GlobalRegistrator.register();

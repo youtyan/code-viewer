@@ -1,13 +1,6 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-} from "bun:test";
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { createSidebar, type SidebarDeps } from "../views/sidebar";
 
 const styleCss = readFileSync("web/style.css", "utf8");

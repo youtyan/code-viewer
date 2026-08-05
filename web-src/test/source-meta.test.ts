@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   EXT_TO_LANG,
   FILENAME_TO_LANG,

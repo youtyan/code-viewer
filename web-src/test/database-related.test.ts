@@ -1,8 +1,8 @@
-import { Database } from "bun:sqlite";
-import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
+import { afterEach, describe, expect, test } from "vitest";
 import type {
   DbTableCountResponse,
   DbTableDataResponse,

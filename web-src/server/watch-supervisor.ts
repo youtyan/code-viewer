@@ -7,6 +7,7 @@
 // The parent abandons it and starts a replacement.
 import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { WatchChildConfig, WatchChildMessage } from "./watch-child";
 
 export type WatchSupervisorOptions = {
@@ -49,12 +50,19 @@ const WATCH_FAILURES_BEFORE_POLL_ONLY = 2;
 // entry is one bundled file that already dispatches subcommands; in dev the
 // server is started as preview.ts, which has no dispatch, so point at cli.ts
 // beside it.
+//
+// dev では .ts のまま起動されている。Node 自身は TypeScript を読めないので、
+// 親に渡っているローダ指定 (tsx の --import) を execArgv からそのまま引き継ぐ。
+// これが無いと子だけが素の node で立ち上がり、拡張子なしの import すら解決
+// できずに ERR_MODULE_NOT_FOUND で落ちる。
 export function watchChildCommand(): string[] {
   const entry = process.argv[1] ?? "";
-  const script = entry.endsWith(".ts")
-    ? join(import.meta.dir, "cli.ts")
+  const isTypeScriptEntry = entry.endsWith(".ts");
+  const script = isTypeScriptEntry
+    ? join(fileURLToPath(new URL(".", import.meta.url)), "cli.ts")
     : entry;
-  return [process.argv[0], script, "watch-child"];
+  const loaderArgs = isTypeScriptEntry ? process.execArgv : [];
+  return [process.argv[0], ...loaderArgs, script, "watch-child"];
 }
 
 export function startWatchSupervisor(

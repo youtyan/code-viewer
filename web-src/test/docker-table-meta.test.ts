@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   __setDockerSpawnSyncForTest,
+  __setDockerSpawnTextForTest,
   createDockerAdapter,
 } from "../server/database/adapters/docker";
 
@@ -20,16 +21,6 @@ type SpawnResult = {
   stderr?: string;
   code?: number;
   delayMs?: number;
-};
-
-type SpawnLike = (
-  args: string[],
-  opts?: Record<string, unknown>,
-) => {
-  exited: Promise<number>;
-  stdout: ReadableStream<Uint8Array> | null;
-  stderr: ReadableStream<Uint8Array> | null;
-  kill(signal?: string): void;
 };
 
 let activeHarness: SpawnHarness | null = null;
@@ -98,33 +89,34 @@ function postgresStdout(sql: string): string {
   return `1${PG_US}Ada${PG_RS}`;
 }
 
+/**
+ * docker CLI の呼び出しを差し替える。非同期の実行経路 (本番と同じ) のまま
+ * 差し替わるので、delayMs で実行の重なりや完了順を作れる。
+ */
 function installSpawnHarness(
   resultForSql: (sql: string) => string | SpawnResult = mysqlStdout,
 ): SpawnHarness {
-  const bunGlobal = globalThis as unknown as { Bun: { spawn: SpawnLike } };
-  const originalSpawn = bunGlobal.Bun.spawn;
   const calls: SpawnCall[] = [];
-  bunGlobal.Bun.spawn = ((args: string[]) => {
-    const sql = args[args.length - 1] || "";
+  __setDockerSpawnTextForTest(async (opts) => {
+    const all = [opts.command, ...opts.args];
+    const sql = all[all.length - 1] || "";
     const rawResult = resultForSql(sql);
     const result =
       typeof rawResult === "string" ? { stdout: rawResult } : rawResult;
-    calls.push({ args, sql, startedAt: performance.now() });
+    calls.push({ args: all, sql, startedAt: performance.now() });
+    if (result.delayMs) {
+      await new Promise((resolve) => setTimeout(resolve, result.delayMs));
+    }
     return {
-      exited: new Promise<number>((resolve) => {
-        setTimeout(() => resolve(result.code ?? 0), result.delayMs ?? 20);
-      }),
-      stdout: new Response(result.stdout).body,
-      stderr: new Response(result.stderr || "").body,
-      kill() {
-        /* noop */
-      },
+      stdout: result.stdout,
+      stderr: result.stderr || "",
+      code: result.code ?? 0,
     };
-  }) as SpawnLike;
+  });
   return {
     calls,
     restore() {
-      bunGlobal.Bun.spawn = originalSpawn;
+      __setDockerSpawnTextForTest(null);
     },
   };
 }

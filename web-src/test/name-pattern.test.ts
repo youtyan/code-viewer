@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { compileNamePatterns } from "../server/name-pattern";
 
 describe("compileNamePatterns", () => {

@@ -16,6 +16,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { normalizeNewDirectoryName } from "../core/directory-name";
+import { formatErrorDetail } from "../core/error-detail";
 import {
   collectJournalLabels,
   isJournalTaskPriority,
@@ -108,6 +109,10 @@ import {
   parseHttpByteRange,
 } from "./range";
 import { type FileMetadata, rawFileHeaders } from "./raw-file-headers";
+import {
+  requestAllowed as requestAllowedForOrigin,
+  sideEffectRequestAllowed as sideEffectRequestAllowedForOrigin,
+} from "./request-origin";
 import { ROOT } from "./root";
 import {
   fileByteRangeResponseBody,
@@ -249,7 +254,7 @@ Usage:
   code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json] [--bin git=<path>]
   code-viewer file <blame|history|show|diff> --path <p> [--ref <ref>] [...subcommand options] [--json] [--bin git=<path>]
   code-viewer skill install [--agent <list>] [--global]
-  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|docker|gh>=<path>]
+  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|rg|docker|gh|tmux>=<path>]
   code-viewer agent-help
   code-viewer help
 
@@ -273,6 +278,7 @@ Examples:
   code-viewer file history --path src/sample.ts --limit 10 --json
   code-viewer file show --path src/sample.ts --start 1 --end 40 --json
   code-viewer doctor --json
+
 `);
       process.exit(0);
     } else if (arg === "--version" || arg === "-v") {
@@ -441,28 +447,12 @@ function text(body: string, status = 200) {
   });
 }
 
-function requestAllowed(req: Request) {
-  const host = req.headers.get("host") || "";
-  const origin = req.headers.get("origin");
-  const okHost = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/i.test(host);
-  const okOrigin =
-    !origin ||
-    origin === "null" ||
-    /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+$/i.test(origin);
-  return okHost && okOrigin;
+function requestAllowed(req: Request): boolean {
+  return requestAllowedForOrigin(req);
 }
 
-function sideEffectRequestAllowed(req: Request) {
-  const host = req.headers.get("host") || "";
-  const origin = req.headers.get("origin");
-  const fetchSite = req.headers.get("sec-fetch-site");
-  const requestedBy = req.headers.get("x-code-viewer-action");
-  return (
-    /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/i.test(host) &&
-    origin === `http://${host}` &&
-    (!fetchSite || fetchSite === "same-origin") &&
-    requestedBy === "1"
-  );
+function sideEffectRequestAllowed(req: Request): boolean {
+  return sideEffectRequestAllowedForOrigin(req);
 }
 
 function staticFile(pathname: string): Response | null {
@@ -473,6 +463,11 @@ function staticFile(pathname: string): Response | null {
     "/mermaid.js": ["mermaid.js", "application/javascript; charset=utf-8"],
     "/shiki.js": ["shiki.js", "application/javascript; charset=utf-8"],
     "/yaml.js": ["yaml.js", "application/javascript; charset=utf-8"],
+    "/xterm.js": ["xterm.js", "application/javascript; charset=utf-8"],
+    "/vendor/xterm/xterm.css": [
+      "vendor/xterm/xterm.css",
+      "text/css; charset=utf-8",
+    ],
     "/vendor/diff2html/diff2html.min.css": [
       "vendor/diff2html/diff2html.min.css",
       "text/css; charset=utf-8",
@@ -1219,6 +1214,7 @@ async function handleFiles(url: URL) {
 }
 
 async function handleGrep(url: URL) {
+  const responseGeneration = generation;
   const query = url.searchParams.get("q") || "";
   const ref = url.searchParams.get("ref") || "worktree";
   const max = normalizeGrepMax(url.searchParams.get("max"));
@@ -1229,6 +1225,7 @@ async function handleGrep(url: URL) {
   const excludeNames = scopeExcludeNamesFromQuery(url);
   const paths = url.searchParams.getAll("path");
   const regex = url.searchParams.get("regex") === "1";
+  const excludeTests = url.searchParams.get("exclude_tests") === "1";
   const result = await grepRepoAsync(
     currentSearchEnv(omitDirNames, excludeNames),
     {
@@ -1237,10 +1234,11 @@ async function handleGrep(url: URL) {
       paths,
       regex,
       max,
+      excludeTests,
     },
   );
   if (result.ok !== true) return text(result.error, result.status ?? 400);
-  return json(result.value);
+  return json({ ...result.value, generation: responseGeneration });
 }
 
 async function handleRefCommits(url: URL) {
@@ -2134,7 +2132,7 @@ function triggerUpdate(changedPaths?: string[]) {
   generation++;
   clearMutableCaches();
   const data =
-    changedPaths && changedPaths.length && changedPaths.length <= 50
+    changedPaths?.length && changedPaths.length <= 50
       ? JSON.stringify({ generation, paths: changedPaths })
       : "tick";
   sendSse("update", data);
@@ -2479,7 +2477,11 @@ async function handleMcp(req: Request): Promise<Response> {
     return json(parsed.response);
   }
   const dispatched = await dispatchJsonRpc(parsed.value, {
-    tools: defaultMcpTools({ cwd, omitDirNames: scopeOmitDirNames }),
+    tools: defaultMcpTools({
+      cwd,
+      omitDirNames: scopeOmitDirNames,
+      generation,
+    }),
     instructions: MCP_INSTRUCTIONS,
   });
   if (dispatched.kind === "notification") {
@@ -3020,6 +3022,9 @@ applyPersistedSettings(await loadAppSettingsState(cwd));
 // Tracked so clients that connect after the cap was hit still learn about it.
 let watchLimitReached: number | null = null;
 const databaseHandleModule = import("./database/handle");
+const tmuxHandleModule = import("./tmux/handle");
+const shellHandleModule = import("./shell/handle");
+const agentHandleModule = import("./terminal/handle");
 
 const server = await startServer({
   hostname: "127.0.0.1",
@@ -3063,6 +3068,36 @@ const server = await startServer({
         sendSse,
       );
       if (dbResponse) return dbResponse;
+    }
+    if (url.pathname.startsWith("/_tmux/")) {
+      const { handleTmuxRoute } = await tmuxHandleModule;
+      const tmuxResponse = await handleTmuxRoute(
+        req,
+        url,
+        cwd,
+        sideEffectRequestAllowed,
+      );
+      if (tmuxResponse) return tmuxResponse;
+    }
+    if (url.pathname.startsWith("/_shell/")) {
+      const { handleShellRoute } = await shellHandleModule;
+      const shellResponse = await handleShellRoute(
+        req,
+        url,
+        cwd,
+        sideEffectRequestAllowed,
+      );
+      if (shellResponse) return shellResponse;
+    }
+    if (url.pathname.startsWith("/_agent/")) {
+      const { handleAgentRoute } = await agentHandleModule;
+      const agentResponse = await handleAgentRoute(
+        req,
+        url,
+        cwd,
+        sideEffectRequestAllowed,
+      );
+      if (agentResponse) return agentResponse;
     }
     if (url.pathname.startsWith("/_state/")) {
       const { handleStateRoute } = await import("./state-route");
@@ -3160,6 +3195,30 @@ async function shutdown(exitCode = 0) {
   shuttingDown = true;
   removeServerRegistry(cwd, process.pid);
   closeSseClients();
+  try {
+    const [{ closeShellStreams }, { closeAllShellSessions }] =
+      await Promise.all([shellHandleModule, import("./shell/session")]);
+    closeShellStreams();
+    // ブラウザから開いたシェルはこのサーバの子。残したまま終わらない。
+    const closeResult = await closeAllShellSessions();
+    if (closeResult.status === "error") {
+      exitCode = 1;
+      console.error(
+        `code-viewer shell close failed:\n${formatErrorDetail(closeResult.error)}`,
+      );
+    }
+  } catch (error) {
+    exitCode = 1;
+    console.error(
+      `code-viewer shell close failed:\n${formatErrorDetail(error)}`,
+    );
+  }
+  try {
+    const { stopAgentActivityWatch } = await import("./terminal/activity");
+    stopAgentActivityWatch();
+  } catch (error) {
+    console.warn(`code-viewer agent watch stop skipped: ${String(error)}`);
+  }
   worktreeWatch?.close();
   try {
     await server.close();
@@ -3265,6 +3324,12 @@ function restartWorktreeWatch() {
 }
 
 worktreeWatch = startScopedWorktreeWatch();
+
+// フックを入れていないセッションを、画面の動きだけで「稼働 / 停止」に
+// 振り分ける観測。申告のある対象には触らない (terminal/activity.ts 参照)。
+void import("./terminal/activity").then(({ startAgentActivityWatch }) =>
+  startAgentActivityWatch(cwd),
+);
 
 console.log(`GDP_LISTEN_URL=http://127.0.0.1:${server.port}/`);
 console.log(`git-diff-preview serving ${cwd}`);

@@ -1,3 +1,4 @@
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   afterAll,
   beforeAll,
@@ -5,8 +6,7 @@ import {
   describe,
   expect,
   test,
-} from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+} from "vitest";
 import { createLineRefPill } from "../views/line-ref-pill";
 
 beforeAll(() => {

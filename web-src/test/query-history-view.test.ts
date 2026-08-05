@@ -1,7 +1,8 @@
 // Query history pane の実DOM挙動を happy-dom 上で検証する。
 // 更新ボタンはサーバの履歴再取得を使い、更新中フィードバックを出す。
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, afterEach, describe, expect, test } from "vitest";
 import { q } from "./_test-helpers";
 
 GlobalRegistrator.register();

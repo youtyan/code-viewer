@@ -1,11 +1,17 @@
-import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { describe, expect, test } from "vitest";
 import {
   markdownSlugify,
   renderMarkdownHtml,
   resolveMarkdownAssetPath,
   resolveMarkdownLinkTarget,
 } from "../core/markdown-preview";
+import {
+  baseRules,
+  cascadedDeclarations,
+  loadStyleSheet,
+  resolveVar,
+} from "./_css-fixture";
 import { sourceFixture } from "./source-fixture";
 
 const markdown = sourceFixture(
@@ -28,6 +34,11 @@ const style = sourceFixture(
 );
 const pkg = readFileSync(
   new URL("../../package.json", import.meta.url),
+  "utf8",
+);
+// 遅延バンドルの定義はビルドスクリプト側にある。
+const bundles = readFileSync(
+  new URL("../../scripts/bundles.mjs", import.meta.url),
   "utf8",
 );
 
@@ -223,6 +234,63 @@ describe("markdown preview", () => {
     ).toBe(true);
   });
 
+  test.each([
+    { tag: "<br>", label: "no-space br" },
+    { tag: "<br/>", label: "solidus br" },
+    { tag: "<br />", label: "spaced br" },
+    { tag: "<BR>", label: "uppercase br" },
+  ])("renders HTML $label tags as real line breaks", ({ tag }) => {
+    const html = renderMarkdownHtml(
+      `line1${tag}line2`,
+      { path: "README.md", ref: "worktree" },
+      null,
+    );
+    expect(html.includes("line1<br>line2")).toBe(true);
+    expect(html.includes("&lt;br")).toBe(false);
+  });
+
+  test("leaves HTML line break tags untouched inside code blocks", () => {
+    const html = renderMarkdownHtml(
+      "```\nline1<br />line2\n```",
+      { path: "README.md", ref: "worktree" },
+      null,
+    );
+    expect(html.includes("&lt;br /&gt;")).toBe(true);
+  });
+
+  test.each([
+    { type: "NOTE", label: "Note" },
+    { type: "TIP", label: "Tip" },
+    { type: "IMPORTANT", label: "Important" },
+    { type: "WARNING", label: "Warning" },
+    { type: "CAUTION", label: "Caution" },
+  ])("renders GitHub-style $type alert block", ({ type, label }) => {
+    const html = renderMarkdownHtml(
+      `> [!${type}]\n> body text\n`,
+      { path: "README.md", ref: "worktree" },
+      null,
+    );
+    expect(
+      html.includes(
+        `class="markdown-alert markdown-alert-${type.toLowerCase()}"`,
+      ),
+    ).toBe(true);
+    expect(html.includes(`<p class="markdown-alert-title">${label}</p>`)).toBe(
+      true,
+    );
+    expect(html.includes("body text")).toBe(true);
+    expect(html.includes(`[!${type}]`)).toBe(false);
+  });
+
+  test("does not turn a regular blockquote into an alert", () => {
+    const html = renderMarkdownHtml(
+      "> just a quote",
+      { path: "README.md", ref: "worktree" },
+      null,
+    );
+    expect(html.includes("markdown-alert")).toBe(false);
+  });
+
   test("renders task lists as list items that can be enhanced after parsing", () => {
     const html = renderMarkdownHtml(
       "- [x] done\n- [ ] todo\n",
@@ -307,7 +375,7 @@ describe("markdown preview", () => {
       },
     };
     const html = renderMarkdownHtml(
-      "```" + fence + "\n" + code + "\n```",
+      `\`\`\`${fence}\n${code}\n\`\`\``,
       { path: "README.md", ref: "worktree" },
       highlighter,
     );
@@ -331,8 +399,8 @@ describe("markdown preview", () => {
   });
 
   test("mermaid is built as a lazy standalone asset and served by the preview server", () => {
-    expect(pkg.includes("web/mermaid.js")).toBe(true);
-    expect(pkg.includes("web-src/mermaid-entry.ts")).toBe(true);
+    expect(bundles.includes("web/mermaid.js")).toBe(true);
+    expect(bundles.includes("web-src/mermaid-entry.ts")).toBe(true);
     expect(
       server.includes(
         "'/mermaid.js': ['mermaid.js', 'application/javascript; charset=utf-8']",
@@ -350,8 +418,8 @@ describe("markdown preview", () => {
   });
 
   test("Shiki is built as a lazy standalone asset for markdown code blocks", () => {
-    expect(pkg.includes("web/shiki.js")).toBe(true);
-    expect(pkg.includes("web-src/shiki-entry.ts")).toBe(true);
+    expect(bundles.includes("web/shiki.js")).toBe(true);
+    expect(bundles.includes("web-src/shiki-entry.ts")).toBe(true);
     expect(pkg.includes('"shiki"')).toBe(true);
     expect(
       server.includes(
@@ -379,27 +447,64 @@ describe("markdown preview", () => {
       true,
     );
     expect(style.includes('content: "On this page";')).toBe(true);
-    expect(style.includes("top: calc(var(--global-header-h) + 16px);")).toBe(
-      true,
-    );
-    expect(
-      style.includes(
-        "max-height: calc(100vh - var(--global-header-h) - 40px);",
-      ),
-    ).toBe(true);
     expect(style.includes("scrollbar-gutter: stable;")).toBe(true);
     expect(style.includes("scrollbar-width: thin;")).toBe(true);
     expect(style.includes(".gdp-markdown-toc a:focus-visible")).toBe(true);
     expect(style.includes(".gdp-markdown-toc .level-4 > a")).toBe(true);
-    expect(
-      style.includes(
-        ".gdp-markdown-toc a.active {\n  background: var(--accent-subtle);\n  border-left-color: var(--accent);\n  color: var(--fg);",
-      ),
-    ).toBe(true);
     expect(style.includes(".gdp-markdown-preview table")).toBe(true);
     expect(style.includes(".gdp-markdown-preview .mermaid")).toBe(true);
     expect(style.includes(".mkdp-lightbox")).toBe(true);
     expect(style.includes(".mkdp-mermaid-error")).toBe(true);
+  });
+
+  // TOC の高さは「本文が使える高さ」(--content-h) から導く。100vh から直接引くと
+  // 下パネルが開いたときに画面外へはみ出す。
+  //
+  // 生文字列ではなくカスケードを解決して見るのは、同じ文字列が別の規則にも現れると
+  // 黙って無関係な規則を守り始めるため。実際この検査は以前 .app-panel の max-height を
+  // 守っており、TOC 側を変えても緑のままだった。
+  test("markdown TOC height follows the content envelope, not the raw viewport", () => {
+    // デスクトップ既定の見た目を見る。@media の上書きは対象外。
+    const rules = baseRules(loadStyleSheet());
+    // body から見た値を使う。カスタムプロパティの var() は宣言した要素で確定するので、
+    // ページごとの --chrome-h も docked の --app-panel-visible-height も body に載る。
+    const bodyVariables = cascadedDeclarations(
+      rules,
+      (selector) =>
+        selector === ":root" || selector === "html" || selector === "body",
+    );
+
+    // --content-h を :root だけで宣言すると、body 側の上書きが一切届かず、
+    // docked にしても本文の下端がパネルの裏に入る。実際にその事故を起こした。
+    const rootOnly = cascadedDeclarations(
+      rules,
+      (selector) => selector === ":root",
+    );
+    expect(rootOnly.has("--content-h")).toBe(false);
+    expect(bodyVariables.has("--content-h")).toBe(true);
+
+    const toc = cascadedDeclarations(
+      rules,
+      (selector) => selector === ".gdp-markdown-toc",
+    );
+
+    expect(toc.get("position")).toBe("sticky");
+    expect(toc.get("overflow")).toBe("auto");
+
+    const maxHeight = toc.get("max-height");
+    if (!maxHeight) throw new Error("Missing .gdp-markdown-toc max-height");
+
+    // 下パネルが占有する高さを変えると TOC の上限も変わること。
+    // 100vh からの直接引き算に戻すと、この 2 つが同じ値になって落ちる。
+    const panelClosed = resolveVar(
+      maxHeight,
+      new Map(bodyVariables).set("--app-panel-visible-height", "0px"),
+    );
+    const panelOpen = resolveVar(
+      maxHeight,
+      new Map(bodyVariables).set("--app-panel-visible-height", "320px"),
+    );
+    expect(panelClosed).not.toBe(panelOpen);
   });
 
   test("preview/code tabs can hide either rendered surface despite display-specific CSS", () => {

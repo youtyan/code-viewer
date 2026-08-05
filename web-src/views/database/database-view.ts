@@ -18,6 +18,10 @@ import type {
   TabsState,
 } from "../../core/database/types";
 import {
+  formatErrorDetail as errorMessage,
+  responseErrorMessage,
+} from "../../core/error-detail";
+import {
   PENCIL_16_PATH,
   PLUS_16_PATH,
   SEARCH_16_PATH,
@@ -151,18 +155,6 @@ type DbTabEntry = {
 function looksReadOnlySql(sql: string): boolean {
   const normalized = sql.replace(/^\s*(?:--.*\n|\/\*[\s\S]*?\*\/\s*)*/g, "");
   return /^(select|with|pragma|explain)\b/i.test(normalized);
-}
-
-async function responseErrorMessage(
-  res: Response,
-  fallback: string,
-): Promise<string> {
-  const text = await res.text().catch(() => "");
-  return text || `${fallback} (${res.status})`;
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 function isAbortError(err: unknown): boolean {
@@ -1448,6 +1440,8 @@ function createTabPane(
   //   (呼び出し側でメッセージ表示)。
   // - fetch 例外 (network) は session log に error 登録して再 throw。
   //   AbortError は無音 (user cancellation)。
+  const sessionLoggedErrors = new WeakSet<Error>();
+
   async function logSqlFetch<T extends { executedSql?: string[] }>(opts: {
     url: string;
     init?: RequestInit;
@@ -1481,7 +1475,7 @@ function createTabPane(
         // prefix を含まないと弾けず 2 重登録を起こすため、明示的フラグに
         // 切替えた。
         const err = new Error(message);
-        (err as { __sessionLogged?: boolean }).__sessionLogged = true;
+        sessionLoggedErrors.add(err);
         throw err;
       }
       const data = (await res.json()) as T;
@@ -1501,7 +1495,7 @@ function createTabPane(
     } catch (err) {
       if (!(err instanceof Error)) throw err;
       // すでに上で session log に登録済みなら素通し (2 重登録防止)。
-      if ((err as { __sessionLogged?: boolean }).__sessionLogged) throw err;
+      if (sessionLoggedErrors.has(err)) throw err;
       // ユーザー操作起因のキャンセルは無音 (画面遷移などで起きる)。
       if (err.name === "AbortError") throw err;
       outerDeps.sessionLog.add({

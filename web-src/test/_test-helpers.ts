@@ -7,7 +7,7 @@
 // - makeDiffMeta(files): files から totals を集計した DiffMeta を作る
 //   (diff-view-fast-path / ai-context-copy で同形だった)
 // - captureErrorAsync(fn): 投げられたエラーのメッセージを取り出す
-//   (プロジェクトの bun:test 型は toThrow / rejects を持たないため)
+//   (投げられた側のメッセージを直接見たいケース向け)
 
 import type { DiffMeta, FileMeta } from "../core/types";
 
@@ -62,9 +62,11 @@ export function deferred<T>(): Deferred<T> {
 // predicate が true を返すまで定期 poll する。timeout 内に成立しなければ throw。
 // file-shell-view.test.ts と s3-explorer-ui.test.ts で同形実装になっていた
 // (await 名引数の差だけ) のを統合。
+// 既定値は「並列実行でテストファイルが混み合っても届く」ことを優先している。
+// 条件が満たされた時点で即座に返るので、緩めても通常の実行時間は伸びない。
 export async function waitFor(
   predicate: () => boolean,
-  timeoutMs = 2000,
+  timeoutMs = 8000,
 ): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -91,4 +93,48 @@ export async function withTempDir<T>(
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** サーバのルートハンドラ (handleTmuxRoute / handleShellRoute 等) の形。 */
+export type RouteHandler = (
+  req: Request,
+  url: URL,
+  cwd: string,
+  sideEffectAllowed: (req: Request) => boolean,
+) => Promise<Response | null>;
+
+/**
+ * ルートハンドラを 1 本のリクエストで叩く。パスとメソッドの受け付け方、
+ * 副作用リクエストの認可、入力の検証だけを見たいテストのための入口。
+ *
+ * オリジンはポート 0 の localhost 固定。ハンドラ側は URL のパスとクエリしか
+ * 見ないので、実際に待ち受ける必要はない。
+ */
+export function callRoute(
+  handler: RouteHandler,
+  path: string,
+  init: RequestInit = {},
+  sideEffectAllowed: (req: Request) => boolean = () => true,
+): Promise<Response | null> {
+  const url = new URL(`http://127.0.0.1:0${path}`);
+  return handler(new Request(url, init), url, process.cwd(), sideEffectAllowed);
+}
+
+/** callRoute の POST 版。body はオブジェクトなら JSON 化する。 */
+export function postRoute(
+  handler: RouteHandler,
+  path: string,
+  body: unknown,
+  sideEffectAllowed: (req: Request) => boolean = () => true,
+): Promise<Response | null> {
+  return callRoute(
+    handler,
+    path,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    },
+    sideEffectAllowed,
+  );
 }

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { parseDocument, stringify } from "yaml";
 import type { YamlApi } from "../core/yaml-loader";
 import {

@@ -1,3 +1,5 @@
+import { createMediaPlayer } from "./media-player";
+
 export function renderHtmlPreviewFrame(
   title: string,
   html: string,
@@ -25,18 +27,8 @@ export function appendMediaEmbed(
     onImageLoad?: (img: HTMLImageElement) => void;
   },
 ): void {
-  if (opts.kind === "video") {
-    const video = document.createElement("video");
-    video.src = opts.url;
-    video.controls = true;
-    video.preload = "metadata";
-    view.appendChild(video);
-  } else if (opts.kind === "audio") {
-    const audio = document.createElement("audio");
-    audio.src = opts.url;
-    audio.controls = true;
-    audio.preload = "metadata";
-    view.appendChild(audio);
+  if (opts.kind === "video" || opts.kind === "audio") {
+    view.appendChild(createMediaPlayer(opts.url, opts.kind, opts.title));
   } else if (opts.kind === "pdf") {
     const frame = document.createElement("iframe");
     frame.src = opts.url;

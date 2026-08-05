@@ -51,6 +51,7 @@ export function fixedStringLineMatches(
       line: i + 1,
       column: column + 1,
       preview: line.slice(0, 500),
+      matchText: line.slice(column, column + query.length),
     });
   }
   return matches;
@@ -83,6 +84,7 @@ export function buildRgArgs(
   regex = false,
   omitDirNames: string[] = [],
   excludeNames: string[] = [],
+  excludeTests = false,
 ): string[] {
   const safePaths = paths.length ? paths : ["."];
   const omitGlobs = omitDirNames.flatMap((name) => [
@@ -98,9 +100,38 @@ export function buildRgArgs(
     `!**/${name}`,
   ]);
   const matchMode = regex ? [] : ["--fixed-strings"];
+  const testGlobs = excludeTests
+    ? [
+        "test",
+        "spec",
+        "__tests__",
+        "test.*",
+        "spec.*",
+        "test_*",
+        "spec_*",
+        "*.test",
+        "*.spec",
+        "*.test.*",
+        "*.spec.*",
+        "*_test",
+        "*_spec",
+        "*_test.*",
+        "*_spec.*",
+      ].flatMap((pattern) => [
+        "--glob",
+        `!${pattern}`,
+        "--glob",
+        `!**/${pattern}`,
+        "--glob",
+        `!${pattern}/**`,
+        "--glob",
+        `!**/${pattern}/**`,
+      ])
+    : [];
   const args = [
     "rg",
     "--no-config",
+    "--json",
     "--line-number",
     "--column",
     "--no-heading",
@@ -115,6 +146,7 @@ export function buildRgArgs(
     "2M",
     ...omitGlobs,
     ...excludeGlobs,
+    ...testGlobs,
     "-e",
     query,
     "--",
@@ -123,19 +155,73 @@ export function buildRgArgs(
   return args;
 }
 
+function normalizeRgPath(path: string): string {
+  return path.replace(/^(?:\.\/)+/, "");
+}
+
 export function parseRgOutput(
   stdout: string,
   max: number,
   omitDirNames: string[] = [],
   excludeNames: string[] = [],
+  includePath: (path: string) => boolean = () => true,
 ): GrepMatch[] {
   const matches: GrepMatch[] = [];
   for (const line of stdout.split("\n")) {
     if (!line) continue;
     if (matches.length >= max) break;
+    if (line.startsWith("{")) {
+      const event = JSON.parse(line) as {
+        type?: unknown;
+        data?: {
+          path?: { text?: unknown };
+          lines?: { text?: unknown };
+          line_number?: unknown;
+          submatches?: Array<{
+            match?: { text?: unknown };
+            start?: unknown;
+          }>;
+        };
+      };
+      if (event.type !== "match") continue;
+      const rawPath = event.data?.path?.text;
+      const lineText = event.data?.lines?.text;
+      const lineNo = event.data?.line_number;
+      const submatch = event.data?.submatches?.[0];
+      const matchText = submatch?.match?.text;
+      const byteStart = submatch?.start;
+      if (
+        typeof rawPath !== "string" ||
+        typeof lineText !== "string" ||
+        typeof lineNo !== "number" ||
+        typeof matchText !== "string" ||
+        typeof byteStart !== "number"
+      )
+        continue;
+      const path = normalizeRgPath(rawPath);
+      const preview = lineText.replace(/\r?\n$/, "");
+      const column =
+        Buffer.from(preview).subarray(0, byteStart).toString("utf8").length + 1;
+      if (
+        !path ||
+        !lineNo ||
+        !column ||
+        isSkippableSearchPath(path, omitDirNames, excludeNames) ||
+        !includePath(path)
+      )
+        continue;
+      matches.push({
+        path,
+        line: lineNo,
+        column,
+        preview: preview.slice(0, 500),
+        matchText,
+      });
+      continue;
+    }
     const parsed = /^(.*?):(\d+):(\d+):(.*)$/.exec(line);
     if (!parsed) continue;
-    const path = parsed[1];
+    const path = normalizeRgPath(parsed[1]);
     const lineNo = Number(parsed[2]);
     const column = Number(parsed[3]);
     const preview = parsed[4];
@@ -143,7 +229,8 @@ export function parseRgOutput(
       !path ||
       !lineNo ||
       !column ||
-      isSkippableSearchPath(path, omitDirNames, excludeNames)
+      isSkippableSearchPath(path, omitDirNames, excludeNames) ||
+      !includePath(path)
     )
       continue;
     matches.push({
@@ -162,11 +249,18 @@ export function parseGitGrepOutput(
   max: number,
   omitDirNames: string[] = [],
   excludeNames: string[] = [],
+  includePath: (path: string) => boolean = () => true,
 ): GrepMatch[] {
   const prefix = `${ref}:`;
   const normalized = stdout
     .split("\n")
     .map((line) => (line.startsWith(prefix) ? line.slice(prefix.length) : line))
     .join("\n");
-  return parseRgOutput(normalized, max, omitDirNames, excludeNames);
+  return parseRgOutput(
+    normalized,
+    max,
+    omitDirNames,
+    excludeNames,
+    includePath,
+  );
 }

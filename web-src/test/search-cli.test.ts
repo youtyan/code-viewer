@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   FILE_NAME_SEARCH_DEFAULT_MAX,
   parseSearchArgs,

@@ -1,7 +1,11 @@
 // Help page (keybindings reference), extracted from app.ts.
 
+import type { KeyBinding } from "../core/keymap";
 import type { AppRoute } from "../core/routes";
-import { buildHelpKeybindingGroups } from "./help-keybindings";
+import {
+  buildHelpKeybindingGroups,
+  type HelpKeybindingTableGroup,
+} from "./help-keybindings";
 
 export type HelpPageDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -14,12 +18,24 @@ export type HelpPageDeps = {
   currentRange(): { from: string; to: string };
   syncHeaderMenu(): void;
   getLanguage(): HelpLanguage;
-  setLanguage(language: HelpLanguage): void;
+  /** 設定セクションの中身。フォームの実体は views/viewer-settings.ts が持つ */
+  mountViewerSettings(host: HTMLElement): void;
+  /** ユーザーの差分を反映した、いま実際に効くバインド一覧 */
+  getKeyBindings(): KeyBinding[];
+  /**
+   * キーバインド表に変更ボタンとツールバーを足す。実体は
+   * views/help-keybinding-editor.ts が持つ。
+   */
+  decorateKeybindings(
+    article: HTMLElement,
+    groups: HelpKeybindingTableGroup[],
+  ): void;
 };
 
 export type HelpLanguage = "en" | "ja";
 
 export type HelpSection =
+  | "settings"
   | "overview"
   | "storage"
   | "annotations"
@@ -51,6 +67,7 @@ type HelpContent = {
 const HELP_LANGUAGES: HelpLanguage[] = ["en", "ja"];
 
 const HELP_SECTIONS: HelpSection[] = [
+  "settings",
   "overview",
   "storage",
   "annotations",
@@ -63,8 +80,15 @@ const HELP_SECTIONS: HelpSection[] = [
 const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
   en: {
     languageLabel: "Language",
-    title: "Help",
+    title: "Settings & Help",
     sections: {
+      settings: {
+        nav: "Settings",
+        title: "Settings",
+        intro:
+          "Viewer preferences for this project and this browser. Changes are saved as you make them.",
+        groups: [],
+      },
       overview: {
         nav: "Getting Started",
         title: "Getting Started",
@@ -167,6 +191,31 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             ],
           },
           {
+            title: "Terminal",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "The Terminal item in the header menu opens a bottom panel with a real shell in it. It is an ordinary login shell running on a PTY and drawn with xterm.js, so anything you would run in a terminal works here — including tmux. Run tmux inside it and it behaves exactly as it does in any other terminal, because the panel only resizes the PTY and whatever runs in it follows on its own.",
+              },
+              {
+                kind: "paragraph",
+                text: "Typing goes to that shell, so you can answer a prompt without switching to the terminal. The toggle in the panel header turns input off when you only want to watch. The shell on screen is part of the URL (?terminal=shell-ab12cd), so a reload comes back to it. Shells live as long as the server does; typing exit ends one, and so does the × on its row.",
+              },
+              {
+                kind: "paragraph",
+                text: "The left side starts with a Your turn section for terminals that are waiting for input or finished but unread. Below it, you can scope the session list to this repository or all tmux sessions, filter by state, and search by task, place, or id. Its two-tier tree puts shells opened by this panel at the top: a shell running tmux carries a terminal icon and its session name, and that session's windows and panes hang underneath it. The bottom tier is the tmux sessions no shell has opened yet. Each pane is labelled with the title tmux shows for it — a coding agent running in a pane usually puts what it is doing there, so the tree alone tells you which pane is busy.",
+              },
+              {
+                kind: "paragraph",
+                text: "Click a pane and the panel takes you to it. If a shell already has that session open, it switches to that shell and makes the pane current; otherwise a shell is opened and attached for you. A session moves up to the top tier the moment a shell opens it and drops back down when that shell closes, so you end up with one shell per tmux session rather than one per pane. Powerline separators and file icons render when a Nerd Font is installed on the machine running the browser; no font ships with the package. The tree needs tmux on PATH — without it the panel says so, and shells still work. Opening shells needs the optional @lydell/node-pty package.",
+              },
+              {
+                kind: "paragraph",
+                text: "One tmux caveat worth knowing: a tmux window can only have one size, so when the same session is attached from both this panel and another terminal, they share it. With tmux's default window-size latest the window snaps to whichever terminal you touched last, and the smaller one gets its right and bottom edges cut off. Setting window-size smallest makes every attached terminal show the whole window, at the cost of some empty space in the larger one.",
+              },
+            ],
+          },
+          {
             title: "Environment doctor",
             blocks: [
               {
@@ -175,11 +224,11 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Each row reports OK / WARN / ERROR with a remediation hint when relevant. The check groups are Runtime (Node / Bun / NODE_MODULE_VERSION), Package (version + execution origin including npx cache), SQLite driver, Snapshot store, Git, GitHub CLI, Discovery summary, Docker / Compose (CLI / v2 plugin / daemon / compose config dry-parse / compose ps health per discovered service), and Server. The most common hint is the npx cache fix for better-sqlite3 NODE_MODULE_VERSION mismatch (rm -rf ~/.npm/_npx then re-run with npx -y @youtyan/code-viewer@latest).",
+                text: "Each row reports OK / WARN / ERROR with a remediation hint when relevant. The check groups are Runtime (Node / Bun / NODE_MODULE_VERSION), Package (version + execution origin including npx cache), SQLite driver, Snapshot store, Git, Search (rg), GitHub CLI, Discovery summary, Docker / Compose (CLI / v2 plugin / daemon / compose config dry-parse / compose ps health per discovered service), Terminal (tmux and @lydell/node-pty), and Server. The most common hint is the npx cache fix for better-sqlite3 NODE_MODULE_VERSION mismatch (rm -rf ~/.npm/_npx then re-run with npx -y @youtyan/code-viewer@latest).",
               },
               {
                 kind: "paragraph",
-                text: 'From the terminal — and for AI agents or CI — the same report is available without a browser. `code-viewer doctor` prints a status summary; add `--json` for the full DoctorReport (matches the /_doctor endpoint). Use `--bin git=/absolute/path`, `--bin docker=/absolute/path`, or `--bin gh=/absolute/path` when PATH resolves the wrong tool. Exit code is 1 when worstStatus is "error", so it doubles as a CI gate.',
+                text: 'From the terminal — and for AI agents or CI — the same report is available without a browser. `code-viewer doctor` prints a status summary; add `--json` for the full DoctorReport (matches the /_doctor endpoint). Use `--bin <name>=/absolute/path` for git, rg, docker, gh, or tmux when PATH does not include the tool directory or resolves the wrong tool. Exit code is 1 when worstStatus is "error", so it doubles as a CI gate.',
               },
               {
                 kind: "command",
@@ -190,7 +239,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 kind: "command",
                 title: "Doctor JSON for agents and CI",
                 command:
-                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json\ncode-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --bin gh=/opt/bin/gh --json",
+                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json\ncode-viewer doctor --bin git=/opt/bin/git --bin rg=/opt/bin/rg --bin docker=/opt/bin/docker --bin gh=/opt/bin/gh --bin tmux=/opt/bin/tmux --json",
               },
             ],
           },
@@ -210,7 +259,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 rows: [
                   [
                     "settings.json",
-                    "Viewer Settings — diff layout, theme, language, sidebar/history widths, font sizes, syntax highlight, ignore-whitespace, hide-tests, scope overrides (omitted dirs / excluded names), upload toggle, annotation panel open/width/follow/mute/rate, and the last viewed diff range.",
+                    "Settings — diff layout, theme, language, sidebar/history widths, font sizes, syntax highlight, ignore-whitespace, hide-tests, scope overrides (omitted dirs / excluded names), upload toggle, annotation panel open/width/follow/mute/rate, and the last viewed diff range.",
                   ],
                   [
                     "view-state.json",
@@ -788,8 +837,15 @@ code-viewer annotate add-db --db app.db --tab query \\
   },
   ja: {
     languageLabel: "言語",
-    title: "ヘルプ",
+    title: "設定・ヘルプ",
     sections: {
+      settings: {
+        nav: "設定",
+        title: "設定",
+        intro:
+          "このプロジェクトとこのブラウザのビューア設定です。変更は自動で保存されます。",
+        groups: [],
+      },
       overview: {
         nav: "はじめに",
         title: "はじめに",
@@ -892,6 +948,31 @@ code-viewer annotate add-db --db app.db --tab query \\
             ],
           },
           {
+            title: "ターミナル",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "ヘッダメニューの Terminal は、シェルが動く下パネルを開きます。中身は PTY 上のふつうのログインシェルを xterm.js で描いたものなので、ターミナルでできることはそのままできます。tmux もそのひとつで、この中で tmux を起動すれば、他のターミナルで使うのと同じように動きます。パネルがやるのは PTY のリサイズだけで、中で動いているものはそれに自分で追従します。",
+              },
+              {
+                kind: "paragraph",
+                text: "打ったキーはそのシェルに届くので、ターミナルに切り替えずに返事ができます。見るだけにしたいときは、パネル右上のトグルで入力を切ってください。表示中のシェルは URL（?terminal=shell-ab12cd）に載るので、リロードしても同じシェルに戻ります。シェルはサーバが動いている間だけ生き、exit と打てば閉じます（行の × でも同じです）。",
+              },
+              {
+                kind: "paragraph",
+                text: "左側の先頭には、入力待ちと、終わったのにまだ見ていないターミナルを集める「あなたの番」があります。その下の一覧は、このリポジトリだけ、またはすべての tmux セッションに範囲を切り替え、状態で絞り込み、作業内容・場所・宛先で検索できます。2 段のツリーの上段はこのパネルが開いたシェルで、中で tmux が動いていれば端末の印とセッション名が付き、そのセッションのウィンドウとペインがその下にぶら下がります。下段は、まだどのシェルも開いていない tmux セッションです。ペインには tmux 側のタイトルが付きます。ペインで動いているコーディングエージェントは作業内容をタイトルに出すので、ツリーを見るだけでどのペインが動いているか分かります。",
+              },
+              {
+                kind: "paragraph",
+                text: "ペインを押すと、そこまで連れて行きます。そのセッションを既に開いているシェルがあれば、そのシェルに切り替えてペインをカレントにします。無ければ、こちらでシェルを開いて attach します。シェルで開いた瞬間にセッションは下段から上段へ移り、そのシェルを閉じると下段へ戻ります。つまりペインごとではなく、tmux のセッション 1 つにつきシェル 1 本になります。powerline のセパレータやファイルアイコンは、ブラウザを動かしている環境に Nerd Font が入っていれば表示されます（フォントはパッケージに同梱していません）。ツリーには tmux が PATH にあることが必要で、無い場合はその旨を表示します（シェルはそのまま使えます）。シェルを開くには任意依存の @lydell/node-pty が必要です。",
+              },
+              {
+                kind: "paragraph",
+                text: "tmux の性質でひとつ知っておくとよいこと。tmux のウィンドウは寸法を 1 つしか持てないので、同じセッションをこのパネルと別のターミナルの両方から開くと、寸法を共有します。tmux の既定（window-size latest）では最後に操作した側の寸法に合うため、小さいほうの端末では右と下が見切れます。window-size smallest にすると、どの端末でもウィンドウ全体が見えるようになります（大きいほうの端末には余白が出ます）。",
+              },
+            ],
+          },
+          {
             title: "環境ドクター",
             blocks: [
               {
@@ -900,11 +981,11 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "各項目は OK / WARN / ERROR で表示され、必要に応じて対処手順のヒントが付きます。診断グループは Runtime (Node / Bun / NODE_MODULE_VERSION)、Package (バージョン + 実行元: npx cache / global / local / bunx)、SQLite driver、Snapshot store、Git、GitHub CLI、Discovery summary、Docker / Compose (CLI / v2 plugin / daemon / compose config dry parse / compose ps による各サービスのヘルス)、Server (待ち受けポート) です。よくあるヒントは npx キャッシュ起因の better-sqlite3 NODE_MODULE_VERSION 不一致で、rm -rf ~/.npm/_npx の後に npx -y @youtyan/code-viewer@latest を再実行する手順を表示します。",
+                text: "各項目は OK / WARN / ERROR で表示され、必要に応じて対処手順のヒントが付きます。診断グループは Runtime (Node / Bun / NODE_MODULE_VERSION)、Package (バージョン + 実行元: npx cache / global / local / bunx)、SQLite driver、Snapshot store、Git、Search (rg)、GitHub CLI、Discovery summary、Docker / Compose (CLI / v2 plugin / daemon / compose config dry parse / compose ps による各サービスのヘルス)、Terminal (tmux / @lydell/node-pty)、Server (待ち受けポート) です。よくあるヒントは npx キャッシュ起因の better-sqlite3 NODE_MODULE_VERSION 不一致で、rm -rf ~/.npm/_npx の後に npx -y @youtyan/code-viewer@latest を再実行する手順を表示します。",
               },
               {
                 kind: "paragraph",
-                text: 'ターミナルからは `code-viewer doctor` で同じレポートを取得できます。AI エージェントや CI からは `--json` で /_doctor と同じ DoctorReport を受け取れます。PATH と別の実行ファイルを使いたい場合は `--bin git=/absolute/path`、`--bin docker=/absolute/path`、`--bin gh=/absolute/path` を指定できます。worstStatus が "error" なら exit code 1 を返すので CI ガードに直接使えます。',
+                text: 'ターミナルからは `code-viewer doctor` で同じレポートを取得できます。AI エージェントや CI からは `--json` で /_doctor と同じ DoctorReport を受け取れます。git / rg / docker / gh / tmux が PATH に含まれない場合や別の実行ファイルを使いたい場合は、`--bin <name>=/absolute/path` を指定できます。worstStatus が "error" なら exit code 1 を返すので CI ガードに直接使えます。',
               },
               {
                 kind: "command",
@@ -915,7 +996,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "AI / CI 用 doctor JSON",
                 command:
-                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json\ncode-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --bin gh=/opt/bin/gh --json",
+                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json\ncode-viewer doctor --bin git=/opt/bin/git --bin rg=/opt/bin/rg --bin docker=/opt/bin/docker --bin gh=/opt/bin/gh --bin tmux=/opt/bin/tmux --json",
               },
             ],
           },
@@ -935,7 +1016,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "settings.json",
-                    "Viewer Settings — diff レイアウト、テーマ、言語、サイドバー/履歴幅、フォントサイズ、シンタックスハイライト、whitespace 無視、テスト非表示、scope 上書き（除外ディレクトリ / 除外名）、アップロード許可、注釈パネルの開閉/幅/follow/ミュート/再生速度、最後に表示した diff 範囲を保存します。",
+                    "設定 — diff レイアウト、テーマ、言語、サイドバー/履歴幅、フォントサイズ、シンタックスハイライト、whitespace 無視、テスト非表示、scope 上書き（除外ディレクトリ / 除外名）、アップロード許可、注釈パネルの開閉/幅/follow/ミュート/再生速度、最後に表示した diff 範囲を保存します。",
                   ],
                   [
                     "view-state.json",
@@ -1528,7 +1609,7 @@ export function helpSectionFromRoute(route: AppRoute): HelpSection {
     : "overview";
 }
 
-export type OpenHelpKeybindingsDeps = Pick<
+export type OpenHelpSectionDeps = Pick<
   HelpPageDeps,
   | "getRoute"
   | "getLanguage"
@@ -1541,7 +1622,10 @@ export type OpenHelpKeybindingsDeps = Pick<
   setStatus(status: "live" | "refreshing" | "error" | null): void;
 };
 
-export function openHelpKeybindings(deps: OpenHelpKeybindingsDeps): void {
+export function openHelpSection(
+  deps: OpenHelpSectionDeps,
+  section: HelpSection,
+): void {
   const route = deps.getRoute();
   deps.cancelActiveSourceLoad("navigation");
   deps.setRoute({
@@ -1550,12 +1634,16 @@ export function openHelpKeybindings(deps: OpenHelpKeybindingsDeps): void {
       route.screen === "help"
         ? helpLanguageFromRoute(route)
         : deps.getLanguage(),
-    section: "keybindings",
+    section,
     range: deps.currentRange(),
   });
   deps.setPageMode();
   deps.renderHelpPage();
   deps.setStatus("live");
+}
+
+export function openHelpKeybindings(deps: OpenHelpSectionDeps): void {
+  openHelpSection(deps, "keybindings");
 }
 
 function renderHelpCommand(block: Extract<HelpBlock, { kind: "command" }>) {
@@ -1632,10 +1720,15 @@ export function createHelpPage(deps: HelpPageDeps) {
     const section = helpSectionFromRoute(deps.getRoute());
     const content = HELP_CONTENT[lang];
     const sectionContent = content.sections[section];
+    // ユーザーが割り当てを変えていれば、それを反映した一覧を出す。
+    const keybindingGroups =
+      section === "keybindings"
+        ? buildHelpKeybindingGroups(lang, deps.getKeyBindings())
+        : [];
     const sectionGroups =
       section === "keybindings"
         ? [
-            ...buildHelpKeybindingGroups(lang).map((group) => ({
+            ...keybindingGroups.map((group) => ({
               title: group.title,
               blocks: [{ kind: "table" as const, rows: group.rows }],
             })),
@@ -1649,21 +1742,9 @@ export function createHelpPage(deps: HelpPageDeps) {
     header.className = "gdp-help-header";
     const title = document.createElement("h1");
     title.textContent = content.title;
-    const langSelect = document.createElement("select");
-    langSelect.className = "gdp-help-language";
-    langSelect.setAttribute("aria-label", content.languageLabel);
-    HELP_LANGUAGES.forEach((optionLang) => {
-      const option = document.createElement("option");
-      option.value = optionLang;
-      option.textContent = optionLang.toUpperCase();
-      option.selected = optionLang === lang;
-      langSelect.appendChild(option);
-    });
-    langSelect.addEventListener("change", () => {
-      const nextLang = langSelect.value as HelpLanguage;
-      deps.setLanguage(nextLang);
-    });
-    header.append(title, langSelect);
+    // 表示言語の切り替えは設定セクションに一本化した。?lang= の URL は
+    // 引き続き効くので、別言語のヘルプへのリンクは共有したままで動く。
+    header.append(title);
 
     const layout = document.createElement("div");
     layout.className = "gdp-help-layout";
@@ -1694,9 +1775,13 @@ export function createHelpPage(deps: HelpPageDeps) {
     const intro = document.createElement("p");
     intro.textContent = sectionContent.intro;
     article.append(h2, intro);
-    sectionGroups.forEach((group) => {
+    sectionGroups.forEach((group, index) => {
       const groupSection = document.createElement("section");
       groupSection.className = "gdp-help-group";
+      // キー一覧のグループだけ印を付ける。後段の編集 UI が、静的な説明表と
+      // 取り違えずに変更ボタンを差せるようにするため。
+      if (index < keybindingGroups.length)
+        groupSection.classList.add("gdp-help-keybinding-group");
       const groupTitle = document.createElement("h3");
       groupTitle.textContent = group.title;
       groupSection.append(groupTitle);
@@ -1705,6 +1790,11 @@ export function createHelpPage(deps: HelpPageDeps) {
       });
       article.appendChild(groupSection);
     });
+    // フォーム部品は HelpBlock では表せないので、静的コンテンツを組んだ後で
+    // 差し込む。
+    if (section === "settings") deps.mountViewerSettings(article);
+    if (section === "keybindings")
+      deps.decorateKeybindings(article, keybindingGroups);
 
     layout.append(helpNav, article);
     shell.append(header, layout);

@@ -1491,7 +1491,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   // snapshots を取得してから showDiffInline する。
   async function restoreDiffFromRoute(): Promise<void> {
     const target = deps.getRouteDiff?.();
-    if (!target || !target.before || !target.after) return;
+    if (!target?.before || !target.after) return;
     // 既に同じ diff を表示中なら何もしない (entry が重複して走るのを防ぐ)。
     if (
       currentDiff &&

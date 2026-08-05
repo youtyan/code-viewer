@@ -1,7 +1,8 @@
 // Redis エクスプローラの編集 UI を happy-dom で検証する。文字列値の編集 / キー
 // 削除 / 新規キー作成が、正しい op で POST /_db/redis/write を呼ぶことを確認する。
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, afterEach, describe, expect, test } from "vitest";
 import {
   clickDialogCancel,
   clickDialogConfirm,

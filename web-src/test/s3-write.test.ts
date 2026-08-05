@@ -1,11 +1,12 @@
 // S3 オブジェクト書き込み (putObjectAsync / deleteObjectAsync) を検証する。
 // 公開ホストポート経由の直 fetch をモックし、Sig V4 の payload ハッシュ
 // (x-amz-content-sha256) が body の SHA256 と一致することを確認する。
-import { afterEach, describe, expect, test } from "bun:test";
+
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   __setS3SpawnSyncForTest,
   openS3ExplorerAsync,
@@ -146,7 +147,8 @@ function mockFetch(status: number): Captured {
       if (init?.body) {
         captured.body = new TextDecoder().decode(init.body as Uint8Array);
       }
-      return new Response("", { status });
+      // 204 はボディを持てない。空文字でも渡すと Response が構築できない。
+      return new Response(status === 204 ? null : "", { status });
     }) as typeof fetch,
   });
   return captured;

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { terminateChild } from "../server/dev-process";
 import { deferred } from "./_test-helpers";
 

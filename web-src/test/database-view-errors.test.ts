@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   createDatabaseView,
   TABLE_SELECT_FETCH_DELAY_MS,
 } from "../views/database/database-view";
 import { closestFor, removeListenerFrom } from "./_fake-dom";
+import { waitFor } from "./_test-helpers";
 
 const originalDocument = globalThis.document;
 const originalWindow = globalThis.window;
@@ -500,14 +501,6 @@ async function flushMicrotasks(count = 8) {
   for (let i = 0; i < count; i++) await Promise.resolve();
 }
 
-async function waitUntil(predicate: () => boolean, timeoutMs = 1000) {
-  const started = Date.now();
-  while (!predicate()) {
-    if (Date.now() - started > timeoutMs) return;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
-
 describe("database view SQL error rendering", () => {
   test("renders schema fetch errors in the table list and grid panes", async () => {
     installDatabaseDom();
@@ -529,9 +522,10 @@ describe("database view SQL error rendering", () => {
       document.querySelectorAll(".db-pane-error"),
     ) as unknown as FakeElement[];
     expect(errors).toHaveLength(2);
-    expect(errors.every((error) => error.textContent === "schema failed")).toBe(
-      true,
-    );
+    expect(errors.map((error) => error.textContent)).toEqual([
+      "Error: failed to fetch schema (HTTP 500): schema failed",
+      "Error: failed to fetch schema (HTTP 500): schema failed",
+    ]);
     await leaveView(view);
   });
 
@@ -614,7 +608,7 @@ describe("database view SQL error rendering", () => {
     expect(result.hidden).toBe(true);
 
     const refreshClick = refresh.click();
-    await waitUntil(() => filesFetches === 2);
+    await waitFor(() => filesFetches === 2);
     expect(refresh.disabled).toBe(true);
     expect(refresh.classList.contains("spinning")).toBe(true);
     expect(refresh.attributes["aria-busy"]).toBe("true");
@@ -622,7 +616,7 @@ describe("database view SQL error rendering", () => {
 
     resolveRefreshFiles?.();
     await refreshClick;
-    await waitUntil(() => refresh.attributes["aria-busy"] === "false");
+    await waitFor(() => refresh.attributes["aria-busy"] === "false");
 
     expect(filesFetches).toBe(2);
     expect(refresh.disabled).toBe(false);
@@ -673,7 +667,7 @@ describe("database view SQL error rendering", () => {
     ) as unknown as FakeElement;
     expect(action.textContent).toBe("Refresh datastores");
     const click = action.click();
-    await waitUntil(() => filesFetches === 2);
+    await waitFor(() => filesFetches === 2);
     await click;
 
     expect(filesFetches).toBe(2);
@@ -711,7 +705,12 @@ describe("database view SQL error rendering", () => {
       ".db-grid-refresh",
     ) as unknown as FakeElement;
     await refresh.click();
-    await waitUntil(() => tableFetches === 2);
+    await waitFor(() => tableFetches === 2);
+    // 取得が 2 回走ったことと、その結果が件数表示に入ったことは別。
+    // 表示が変わるまで待つ (fetch の完了だけでは DOM はまだ古い)。
+    await waitFor(
+      () => document.querySelector(".db-table-count")?.textContent === "3",
+    );
 
     expect(document.querySelector(".db-table-count")?.textContent).toBe("3");
     await leaveView(view);
@@ -763,14 +762,14 @@ describe("database view SQL error rendering", () => {
     ) as unknown as FakeElement;
     filter.value = "sample";
     await filter.input();
-    await waitUntil(() => tableFetches === 2);
+    await waitFor(() => tableFetches === 2);
     expect(document.querySelector(".db-table-count")?.textContent).toBe("3");
 
     const refresh = document.querySelector(
       ".db-grid-refresh",
     ) as unknown as FakeElement;
     await refresh.click();
-    await waitUntil(() => countFetches === 1);
+    await waitFor(() => countFetches === 1);
 
     expect(document.querySelector(".db-table-count")?.textContent).toBe("4");
     await leaveView(view);
@@ -831,14 +830,14 @@ describe("database view SQL error rendering", () => {
     expect(label.textContent).toBe("");
 
     refresh.click();
-    await waitUntil(() => schemaFetches === 2);
+    await waitFor(() => schemaFetches === 2);
     expect(refresh.disabled).toBe(true);
     expect(refresh.classList.contains("spinning")).toBe(true);
     expect(refresh.attributes["aria-busy"]).toBe("true");
     expect(label.textContent).toBe("");
 
     resolveRefreshSchema?.();
-    await waitUntil(() => {
+    await waitFor(() => {
       const doneRefresh = document.querySelector(
         ".db-schema-refresh",
       ) as unknown as FakeElement | null;
@@ -1517,7 +1516,7 @@ describe("database view SQL error rendering", () => {
 
     const view = createViewForTest();
     const entering = view.enter("docker:db", undefined, "users");
-    await waitUntil(() => tableRequests.length > 0);
+    await waitFor(() => tableRequests.length > 0);
 
     expect(tableRequests.map((req) => req.table)).toEqual(["users"]);
     const bookingsRow = Array.from(
@@ -1528,7 +1527,7 @@ describe("database view SQL error rendering", () => {
     expect(bookingsRow).toBeTruthy();
 
     const clicking = bookingsRow?.click();
-    await waitUntil(() => tableRequests.length > 1);
+    await waitFor(() => tableRequests.length > 1);
 
     expect(tableRequests[0].signal?.aborted).toBe(true);
     expect(tableRequests.map((req) => req.table)).toEqual([
@@ -1583,7 +1582,7 @@ describe("database view SQL error rendering", () => {
 
     const view = createViewForTest();
     const entering = view.enter("docker:db", undefined, "users");
-    await waitUntil(() => tableRequests.length > 0);
+    await waitFor(() => tableRequests.length > 0);
 
     const bookingsRow = Array.from(
       document.querySelectorAll(".db-table-item"),
@@ -1593,7 +1592,7 @@ describe("database view SQL error rendering", () => {
     expect(bookingsRow).toBeTruthy();
 
     const clicking = bookingsRow?.click();
-    await waitUntil(() => tableRequests.length > 1);
+    await waitFor(() => tableRequests.length > 1);
 
     tableRequests[1].resolve(
       jsonResponse({
@@ -1672,7 +1671,7 @@ describe("database view SQL error rendering", () => {
 
     const view = createViewForTest();
     const entering = view.enter("docker:db", undefined, "users");
-    await waitUntil(() => tableRequests.length === 1);
+    await waitFor(() => tableRequests.length === 1);
     expect(tableRequests.map((req) => req.table)).toEqual(["users"]);
     tableRequests[0].resolve(jsonResponse(baseTableResponse()));
     await entering;
@@ -1696,7 +1695,7 @@ describe("database view SQL error rendering", () => {
       );
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    await waitUntil(() => tableRequests.length >= 1);
+    await waitFor(() => tableRequests.length >= 1);
     expect(tableRequests.length > 0).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, noExtraFetchWindowMs));
 
@@ -1745,11 +1744,11 @@ describe("database view SQL error rendering", () => {
 
     const view = createViewForTest();
     await view.enter("docker:db");
-    await waitUntil(() => tabPuts.length === 1);
+    await waitFor(() => tabPuts.length === 1);
     expect(Boolean(tabPuts[0]?.keepalive)).toBe(false);
 
     windowListeners.beforeunload?.[0]?.();
-    await waitUntil(() => tabPuts.length === 2);
+    await waitFor(() => tabPuts.length === 2);
 
     expect(tabPuts[0]?.signal?.aborted).toBe(true);
     expect(tabPuts[1]?.keepalive).toBe(true);
@@ -1898,7 +1897,7 @@ describe("database view SQL error rendering", () => {
 
     const view = createViewForTest();
     const entering = view.enter();
-    await flushMicrotasks();
+    await waitFor(() => restoredTabLabels().length === 2);
 
     expect(restoredTabLabels()).toEqual(["db", "app.sqlite"]);
 
@@ -1996,7 +1995,7 @@ describe("database view SQL error rendering", () => {
       ".db-tabs-chip",
     )[0] as unknown as FakeElement;
     await mainTab.click();
-    await waitUntil(() => events.includes("table:docker:db:users"));
+    await waitFor(() => events.includes("table:docker:db:users"));
     expect(events).toEqual([
       "schema:docker:analytics",
       "table:docker:analytics:bookings",
@@ -2039,7 +2038,7 @@ describe("database view SQL error rendering", () => {
     await runButton?.click();
 
     expect(document.querySelector(".db-query-error")?.textContent).toBe(
-      "query failed",
+      "failed to execute query (HTTP 500): query failed",
     );
     await leaveView(view);
   });

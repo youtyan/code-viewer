@@ -1,11 +1,12 @@
 // /_db/* の response に乗る executedSql フィールドを検証する。サーバが
 // captureSql で集めた SQL がそのままクライアントへ返ることをエンドポイント
 // 単位で確認する (session log の SQL 表示のサーバ側契約)。
-import { Database } from "bun:sqlite";
-import { afterEach, describe, expect, test } from "bun:test";
+
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
+import { afterEach, describe, expect, test } from "vitest";
 import type {
   DbMutateResponse,
   DbQueryResponse,

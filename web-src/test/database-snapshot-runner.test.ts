@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 import { runSnapshot } from "../server/database/snapshot-runner";
 import {
   computeDiffTables,

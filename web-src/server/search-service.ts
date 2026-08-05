@@ -26,6 +26,7 @@ import type {
   GrepMatch,
   GrepResponse,
 } from "../core/types";
+import { isTestFilePath } from "../core/file-filter";
 import { commandForExternal } from "./command-resolver";
 import { spawnTextAsync } from "./database/adapters/spawn-runner";
 import * as git from "./git";
@@ -52,6 +53,7 @@ export type GrepRequest = {
   paths: string[];
   regex: boolean;
   max: number;
+  excludeTests?: boolean;
 };
 
 export type GrepRunResult =
@@ -137,12 +139,17 @@ export function safeWorktreePath(env: SearchEnv, path: string): string | null {
 // preview.ts did. The grep engines (rg + git grep + fallback) still
 // re-filter via safeWorktreePath afterwards, so this just removes the
 // obviously-wrong inputs early.
-function filterCallerPaths(env: SearchEnv, paths: string[]): string[] {
+function filterCallerPaths(
+  env: SearchEnv,
+  paths: string[],
+  excludeTests: boolean,
+): string[] {
   return paths.filter(
     (path) =>
       isSafePath(path) &&
       !git.isGitInternalPath(path) &&
-      !isSkippableSearchPath(path, env.omitDirNames, env.excludeNames),
+      !isSkippableSearchPath(path, env.omitDirNames, env.excludeNames) &&
+      (!excludeTests || !isTestFilePath(path)),
   );
 }
 
@@ -151,6 +158,7 @@ async function grepWorktreeFallback(
   query: string,
   max: number,
   paths: string[],
+  excludeTests: boolean,
 ): Promise<GrepMatch[]> {
   const candidates = paths.length
     ? paths
@@ -167,7 +175,8 @@ async function grepWorktreeFallback(
     if (
       !isSafePath(path) ||
       git.isGitInternalPath(path) ||
-      isSkippableSearchPath(path, env.omitDirNames, env.excludeNames)
+      isSkippableSearchPath(path, env.omitDirNames, env.excludeNames) ||
+      (excludeTests && isTestFilePath(path))
     )
       continue;
     const full = safeWorktreePath(env, path);
@@ -207,9 +216,26 @@ async function grepWorktreeAsync(
   env: SearchEnv,
   req: GrepRequest,
 ): Promise<GrepResponse> {
-  const paths = filterCallerPaths(env, req.paths);
+  const excludeTests = req.excludeTests === true;
+  const paths = filterCallerPaths(env, req.paths, excludeTests);
+  if (req.paths.length > 0 && paths.length === 0) {
+    return {
+      ref: "worktree",
+      engine: "fallback",
+      truncated: false,
+      matches: [],
+    };
+  }
   if (await rgAvailableAsync(env.cwd)) {
     const safePaths = paths.filter((path) => safeWorktreePath(env, path));
+    if (req.paths.length > 0 && safePaths.length === 0) {
+      return {
+        ref: "worktree",
+        engine: "rg",
+        truncated: false,
+        matches: [],
+      };
+    }
     const args = buildRgArgs(
       req.query,
       req.max,
@@ -217,6 +243,7 @@ async function grepWorktreeAsync(
       req.regex,
       env.omitDirNames,
       env.excludeNames,
+      excludeTests,
     );
     const proc = await spawnTextAsync({
       command: commandForExternal("rg"),
@@ -232,6 +259,7 @@ async function grepWorktreeAsync(
       req.max,
       env.omitDirNames,
       env.excludeNames,
+      excludeTests ? (path) => !isTestFilePath(path) : undefined,
     ).filter(
       (match) =>
         isSafePath(match.path) &&
@@ -258,7 +286,13 @@ async function grepWorktreeAsync(
       matches: [],
     };
   }
-  const matches = await grepWorktreeFallback(env, req.query, req.max, paths);
+  const matches = await grepWorktreeFallback(
+    env,
+    req.query,
+    req.max,
+    paths,
+    excludeTests,
+  );
   return {
     ref: "worktree",
     engine: "fallback",
@@ -271,7 +305,16 @@ async function grepTreeRefAsync(
   env: SearchEnv,
   req: GrepRequest,
 ): Promise<GrepResponse> {
-  const safePaths = filterCallerPaths(env, req.paths);
+  const excludeTests = req.excludeTests === true;
+  const safePaths = filterCallerPaths(env, req.paths, excludeTests);
+  if (req.paths.length > 0 && safePaths.length === 0) {
+    return {
+      ref: req.ref,
+      engine: "git",
+      truncated: false,
+      matches: [],
+    };
+  }
   const args = [
     "-c",
     "core.quotepath=false",
@@ -302,6 +345,7 @@ async function grepTreeRefAsync(
     req.max,
     env.omitDirNames,
     env.excludeNames,
+    excludeTests ? (path) => !isTestFilePath(path) : undefined,
   ).slice(0, req.max);
   return {
     ref: req.ref,

@@ -26,6 +26,7 @@ function clampScale(value: number): number {
 export function createDiagramViewport(options: {
   containerClassName: string;
   contentClassName: string;
+  onScaleChange?: (scale: number) => void;
 }): DiagramViewport {
   const container = document.createElement("div");
   container.className = options.containerClassName;
@@ -39,6 +40,7 @@ export function createDiagramViewport(options: {
     scale = clampScale(next);
     content.style.transform = `scale(${scale})`;
     content.style.transformOrigin = "top left";
+    if (options.onScaleChange) options.onScaleChange(scale);
   }
 
   let dragState: { x: number; y: number; sl: number; st: number } | null = null;

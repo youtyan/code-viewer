@@ -12,6 +12,7 @@ import { shellSingleQuote } from "./cli-helpers";
 import {
   commandForExternal,
   commandNotFoundDetail,
+  type ExternalCommandName,
   isCommandNotFoundResult,
 } from "./command-resolver";
 import {
@@ -22,7 +23,6 @@ import { openElasticsearchAdapterAsync } from "./database/adapters/elasticsearch
 import { openRedisExplorerAsync } from "./database/adapters/redis";
 import { openS3ExplorerAsync } from "./database/adapters/s3";
 import { spawnTextAsync } from "./database/adapters/spawn-runner";
-import type { RunResult } from "./runtime";
 import { sqliteAdapterFactory } from "./database/adapters/sqlite";
 import {
   type DockerDiscoveryResult,
@@ -40,6 +40,12 @@ import {
   loadSqliteClass,
   type SqliteDriverStatus,
 } from "./database/sqlite-driver";
+import type { RunResult } from "./runtime";
+import {
+  describeShellAvailability,
+  type ShellAvailability,
+} from "./shell/session";
+import { tmuxArgs } from "./tmux/command";
 
 export type {
   DoctorGroup,
@@ -82,7 +88,10 @@ const dockerInfoCache = new Map<string, CacheEntry<RunResult | null>>();
 
 // Non-printable separator: prevents argv-boundary collisions
 // (e.g. ["a","bc"] vs ["ab","c"]) when composing the cache key.
-const CACHE_KEY_SEP = "";
+//
+// 生の制御文字をソースに直接置くと、見た目が空文字と区別できず、消えていても
+// 気付けない。必ず String.fromCharCode の形で書く。
+const CACHE_KEY_SEP = String.fromCharCode(1);
 const composeConfigCache = new Map<
   string,
   CacheEntry<{ result: RunResult | null; services: string[] | null }>
@@ -152,6 +161,25 @@ async function runCached(
 
 function firstLine(text: string | undefined): string {
   return (text || "").trim().split(/\r?\n/)[0] || "";
+}
+
+function commandVersionFailureDetail(
+  command: ExternalCommandName,
+  args: string[],
+  result: RunResult | null,
+): string {
+  if (!result)
+    return `${command} version check failed before returning a result`;
+  if (isCommandNotFoundResult(command, result)) {
+    return commandNotFoundDetail(command);
+  }
+  return [
+    `${command} ${args.join(" ")} exited with ${result.code}`,
+    result.stderr ? `stderr: ${result.stderr}` : "",
+    result.stdout ? `stdout: ${result.stdout}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function checkRuntime(): DoctorGroup {
@@ -269,10 +297,7 @@ export function sqliteStatusToRow(status: SqliteDriverStatus): DoctorRow {
       id: "sqlite.driver",
       title: `${status.driver} loaded`,
       status: "ok",
-      detail:
-        status.driver === "bun:sqlite"
-          ? "Using built-in Bun SQLite"
-          : "Using better-sqlite3 native binding",
+      detail: "Using better-sqlite3 native binding",
     };
   }
   if (status.kind === "abi-mismatch") {
@@ -432,7 +457,7 @@ async function checkGit(
             versionRes && isCommandNotFoundResult("git", versionRes)
               ? commandNotFoundDetail("git")
               : "git command failed",
-          hint: "git is required for diff, history, and blame features. Install git and ensure it is on PATH.",
+          hint: "git is required for diff, history, and blame features. Install git, add its directory to PATH, or pass --bin git=/absolute/path.",
         },
       ],
     };
@@ -484,6 +509,40 @@ async function checkGit(
   return { id: "git", title: "Git", rows };
 }
 
+async function checkSearchTools(
+  signal: AbortSignal | undefined,
+): Promise<DoctorGroup> {
+  const args = ["--version"];
+  const versionRes = await runCached(
+    versionCache,
+    TTL.version,
+    commandForExternal("rg"),
+    args,
+    TIMEOUT.version,
+    signal,
+  );
+  const available = versionRes?.code === 0;
+  return {
+    id: "search",
+    title: "Search",
+    rows: [
+      {
+        id: "search.rg",
+        title: "rg binary",
+        status: available ? "ok" : "warn",
+        detail: available
+          ? firstLine(versionRes.stdout)
+          : commandVersionFailureDetail("rg", args, versionRes),
+        ...(available
+          ? {}
+          : {
+              hint: "Fast repository search and regular-expression search require rg. Install ripgrep, add its directory to PATH, or pass --bin rg=/absolute/path. Fixed-string search can use the built-in fallback.",
+            }),
+      },
+    ],
+  };
+}
+
 async function checkGithubCli(
   signal: AbortSignal | undefined,
 ): Promise<DoctorGroup> {
@@ -523,6 +582,64 @@ async function checkGithubCli(
         status: "ok",
         detail: firstLine(versionRes.stdout),
       },
+    ],
+  };
+}
+
+export function shellAvailabilityToRow(
+  availability: ShellAvailability,
+): DoctorRow {
+  if (availability.available) {
+    return {
+      id: "terminal.node-pty",
+      title: "@lydell/node-pty",
+      status: "ok",
+      detail: "available",
+    };
+  }
+  return {
+    id: "terminal.node-pty",
+    title: "@lydell/node-pty",
+    status: "warn",
+    detail: availability.reason,
+    hint: "Browser terminal shells require this optional dependency. Reinstall code-viewer with optional dependencies enabled and review any native-module installation error.",
+  };
+}
+
+async function checkTerminalTools(
+  signal: AbortSignal | undefined,
+): Promise<DoctorGroup> {
+  const tmuxCommand = tmuxArgs(["-V"]);
+  const [tmuxVersion, shellAvailability] = await Promise.all([
+    runCached(
+      versionCache,
+      TTL.version,
+      tmuxCommand[0],
+      tmuxCommand.slice(1),
+      TIMEOUT.version,
+      signal,
+    ),
+    describeShellAvailability(),
+  ]);
+  const tmuxAvailable = tmuxVersion?.code === 0;
+  return {
+    id: "terminal",
+    title: "Terminal",
+    rows: [
+      {
+        id: "terminal.tmux",
+        title: "tmux binary",
+        status: tmuxAvailable ? "ok" : "warn",
+        detail: tmuxAvailable
+          ? firstLine(tmuxVersion.stdout)
+          : commandVersionFailureDetail("tmux", ["-V"], tmuxVersion),
+        ...(tmuxAvailable
+          ? {}
+          : {
+              hint: "tmux is optional; browser terminal shells still work without it. To use the tmux session tree, install tmux, add its directory to PATH, or pass --bin tmux=/absolute/path.",
+            }),
+      },
+      shellAvailabilityToRow(shellAvailability),
     ],
   };
 }
@@ -643,8 +760,8 @@ async function checkDocker(
       ? {}
       : {
           hint: dockerSourcesPresent
-            ? "Compose files reference Docker services that need the docker CLI. Install Docker Desktop or the docker engine."
-            : "docker is optional unless this project uses Docker compose data sources.",
+            ? "Compose files reference Docker services that need the docker CLI. Install Docker Desktop or the docker engine, add docker to PATH, or pass --bin docker=/absolute/path."
+            : "docker is optional unless this project uses Docker compose data sources. If it is installed outside PATH, pass --bin docker=/absolute/path.",
         }),
   });
 
@@ -1028,7 +1145,7 @@ async function checkDiscovery(
 // since doctor does not know the server URL — the CLI's auto-discovery
 // resolves it at paste time; Redis/ES/S3: cheapest read-only CLI command).
 //
-// `deps` is injectable so the bun:test suite can swap `listSources` and
+// `deps` is injectable so the test suite can swap `listSources` and
 // `probeSource` for fakes without requiring Docker / SQLite at test time.
 
 const DEFAULT_DATASTORE_PROBE_TIMEOUT_MS = 2000;
@@ -1442,6 +1559,7 @@ export async function buildDoctorReport(
   const sqlite = await checkSqlite(ctx.cwd);
   const snapshot = checkSnapshotStore(ctx.cwd);
   const git = await checkGit(ctx.cwd, ctx.signal);
+  const search = await checkSearchTools(ctx.signal);
   const github = await checkGithubCli(ctx.signal);
   const discovery = await checkDiscovery(
     ctx.cwd,
@@ -1458,6 +1576,7 @@ export async function buildDoctorReport(
     ctx.scopeOmitDirNames,
     ctx.signal,
   );
+  const terminal = await checkTerminalTools(ctx.signal);
   const server = checkServer(ctx.listenPort);
   const groups: DoctorGroup[] = [
     runtime,
@@ -1465,10 +1584,12 @@ export async function buildDoctorReport(
     sqlite,
     snapshot,
     git,
+    search,
     github,
     discovery.group,
     datastore,
     docker,
+    terminal,
     server,
   ];
   return { generation, groups, worstStatus: computeWorst(groups) };

@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { describe, expect, test } from "vitest";
 
 const appSource = readFileSync("web-src/app.ts", "utf8");
 const sidebarSource = readFileSync("web-src/views/sidebar.ts", "utf8");

@@ -1,4 +1,6 @@
 // Behavior tests for the MCP adapter (web-src/server/mcp.ts).
+import { fileURLToPath } from "node:url";
+
 //
 // Layered to keep diagnosis cheap:
 //   1. dispatchJsonRpc: pure-input → pure-output. Anchors the JSON-RPC
@@ -14,11 +16,11 @@
 // No string-presence "implementation contains foo" assertions — every
 // check verifies an observable JSON shape or HTTP behavior.
 
-import { Database } from "bun:sqlite";
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { buildAgentHelpIndex } from "../server/agent-help";
 import { saveQueryHistoryAsync } from "../server/database/query-history";
 import {
@@ -33,6 +35,15 @@ import {
   parseJsonRpcBody,
 } from "../server/mcp";
 import { runGit as git } from "./_git-fixture";
+
+/** 配布物と同じバンドル。vitest の globalSetup が焼いてある。 */
+const CLI_BUNDLE = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "..",
+  "dist",
+  "code-viewer.js",
+);
 
 const TOOLS: readonly McpTool[] = defaultMcpTools();
 const INSTRUCTIONS = "test instructions text";
@@ -843,10 +854,14 @@ describe("/_mcp HTTP route", () => {
     seedSampleSqlite(repo, "datastore.db");
 
     const { spawn } = await import("node:child_process");
-    const repoRoot = join(import.meta.dir, "..", "..");
+    const repoRoot = join(
+      fileURLToPath(new URL(".", import.meta.url)),
+      "..",
+      "..",
+    );
     serverProc = spawn(
       process.execPath,
-      ["run", "web-src/server/preview.ts", "--cwd", repo, "--port", "0"],
+      [CLI_BUNDLE, "--cwd", repo, "--port", "0"],
       {
         cwd: repoRoot,
         env: { ...process.env, NO_COLOR: "1" },

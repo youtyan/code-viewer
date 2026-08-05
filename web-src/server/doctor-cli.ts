@@ -1,7 +1,7 @@
 // `code-viewer doctor` subcommand. Reuses buildDoctorReport from doctor.ts
 // and emits either a human-readable summary (default) or the raw
 // DoctorReport JSON (--json), so an AI agent can introspect the runtime,
-// SQLite driver, git, Docker discovery, and snapshot store status without
+// SQLite driver, external tools, Docker discovery, and snapshot store status without
 // scraping the HTTP /_doctor endpoint or the browser UI.
 
 import type {
@@ -9,11 +9,11 @@ import type {
   DoctorReport,
   DoctorStatus,
 } from "../core/doctor-types";
+import { takeGlobalCliOption } from "./cli-helpers";
 import {
   configureExternalCommands,
   type ExternalCommandOverride,
 } from "./command-resolver";
-import { takeGlobalCliOption } from "./cli-helpers";
 import { buildDoctorReport } from "./doctor";
 import { DOCTOR_AGENT_HELP } from "./doctor-agent-help";
 import { DEFAULT_WORKTREE_OMIT_DIR_NAMES } from "./git";
@@ -21,13 +21,13 @@ import { DEFAULT_WORKTREE_OMIT_DIR_NAMES } from "./git";
 const DOCTOR_HELP = `code-viewer doctor — diagnose the current environment
 
 Usage:
-  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|docker|gh>=<path>]
+  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|rg|docker|gh|tmux>=<path>]
   code-viewer doctor agent-help
 
 Options:
   --cwd <path>   Working directory to inspect (default: process.cwd()).
   --port <N>     Listening port to mention in the report (default: 0 = no server).
-  --bin <n>=<p>  Override git/docker/gh executable path. Repeatable.
+  --bin <n>=<p>  Override git/rg/docker/gh/tmux executable path. Repeatable.
   --json         Print the full DoctorReport as JSON instead of a summary.
   --help, -h     Show this help.
 
@@ -70,7 +70,7 @@ export function parseDoctorCliArgs(argv: string[]): DoctorCliParseResult {
       continue;
     }
     const global = takeGlobalCliOption(argv, i, {
-      allowedCommands: ["git", "docker", "gh"],
+      allowedCommands: ["git", "rg", "docker", "gh", "tmux"],
     });
     if (global.kind === "error") {
       return { kind: "error", message: global.error };
@@ -170,7 +170,7 @@ export async function runDoctorCli(argv: string[]): Promise<void> {
   const commandConfig = configureExternalCommands({
     cwd,
     cliOverrides: commandOverrides,
-    allowedNames: ["git", "docker", "gh"],
+    allowedNames: ["git", "rg", "docker", "gh", "tmux"],
   });
   if (commandConfig.ok === false) {
     process.stderr.write(`code-viewer doctor: ${commandConfig.error}\n`);

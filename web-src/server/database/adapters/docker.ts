@@ -124,18 +124,6 @@ export function __setSqlDriverFactoriesForTest(factories: {
     factories.mysql ?? ((config) => mysql.createPool(config) as MysqlPoolLike);
 }
 
-type BunSpawnResult = {
-  kill(signal?: string): void;
-  exited: Promise<number>;
-  stdout?: ReadableStream<Uint8Array>;
-  stderr?: ReadableStream<Uint8Array>;
-};
-
-type BunSpawnFn = (
-  args: string[],
-  opts?: Record<string, unknown>,
-) => BunSpawnResult;
-
 type DockerDatabasesCacheEntry = {
   value: string[];
   expiresAt: number;
@@ -484,78 +472,15 @@ function execInContainer(
   };
 }
 
-async function readStreamText(
-  stream?: ReadableStream<Uint8Array>,
-): Promise<string> {
-  if (!stream) return "";
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let text = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    text += decoder.decode(value, { stream: true });
-  }
-  text += decoder.decode();
-  return text;
-}
+// 非同期実行の差し替え口。同期版 (__setDockerSpawnSyncForTest) と違い、
+// 本番と同じ非同期の経路を通したまま docker の呼び出しだけを置き換えられる。
+// 実行の重なりや、待っている間に起きる失敗の扱いを見るテスト用。
+let spawnTextImpl = spawnTextAsync;
 
-async function execWithBunSpawn(
-  spawnFn: BunSpawnFn,
-  args: string[],
-  env: NodeJS.ProcessEnv,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<ExecResult> {
-  throwIfAborted(signal, "query aborted");
-  let proc: ReturnType<BunSpawnFn>;
-  try {
-    proc = spawnFn(args, {
-      env,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-  } catch (err) {
-    return {
-      code: 1,
-      stdout: "",
-      stderr: err instanceof Error ? err.message : String(err),
-    };
-  }
-  let timedOut = false;
-  let aborted = false;
-  const abort = () => {
-    aborted = true;
-    proc.kill("SIGKILL");
-  };
-  const timer = setTimeout(() => {
-    timedOut = true;
-    proc.kill("SIGKILL");
-  }, timeoutMs);
-  signal?.addEventListener("abort", abort, { once: true });
-  if (signal?.aborted) abort();
-  try {
-    const [code, stdout, stderr] = await Promise.all([
-      proc.exited,
-      readStreamText(proc.stdout),
-      readStreamText(proc.stderr),
-    ]);
-    if (code === 0 && !timedOut) {
-      return { code, stdout, stderr };
-    }
-    if (aborted) throw abortError("query aborted");
-    return {
-      code: timedOut || aborted ? 1 : code,
-      stdout,
-      stderr: timedOut
-        ? `${stderr}${stderr ? "\n" : ""}query timed out`
-        : stderr,
-    };
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", abort);
-  }
+export function __setDockerSpawnTextForTest(
+  spawnTextForTest: typeof spawnTextAsync | null,
+): void {
+  spawnTextImpl = spawnTextForTest ?? spawnTextAsync;
 }
 
 function execWithNodeSpawn(
@@ -564,7 +489,7 @@ function execWithNodeSpawn(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<ExecResult> {
-  return spawnTextAsync({
+  return spawnTextImpl({
     command: args[0],
     args: args.slice(1),
     env,
@@ -591,11 +516,7 @@ async function execInContainerAsync(
     return result;
   }
   const { args, env } = buildExecInvocation(config, sql);
-  const bunSpawn = (globalThis as unknown as { Bun?: { spawn?: BunSpawnFn } })
-    .Bun?.spawn;
-  result = bunSpawn
-    ? await execWithBunSpawn(bunSpawn, args, env, timeoutMs, signal)
-    : await execWithNodeSpawn(args, env, timeoutMs, signal);
+  result = await execWithNodeSpawn(args, env, timeoutMs, signal);
   if (config.containerName) throwIfDockerCommandUnavailableResult(result);
   return result;
 }

@@ -284,6 +284,31 @@ export function repoRoot(cwd: string): string | null {
   return runGitRefLookup(["git", "rev-parse", "--show-toplevel"], cwd);
 }
 
+/**
+ * このリポジトリに属する作業ツリーのパス一覧。本体と、切ってある worktree の
+ * 全部が入る。
+ *
+ * ターミナルドロワーが「このリポジトリのペインだけ」を出すために使う。
+ * エージェントを worktree ごとに分けて走らせる前提なので、リポジトリルートの
+ * 前方一致だけでは足りない (worktree はルートの外に置かれる)。
+ *
+ * git が無い / リポジトリでない場合は空。呼び出し側は「絞り込めない」として
+ * 全部出すか、絞り込みを諦めるかを決める。
+ */
+export async function worktreePathsAsync(cwd: string): Promise<string[]> {
+  const res = await runGitAsync(
+    ["git", "worktree", "list", "--porcelain"],
+    cwd,
+  );
+  if (res.code !== 0) return [];
+  const paths: string[] = [];
+  for (const line of res.stdout.split("\n")) {
+    // 出力は `worktree <path>` で始まるブロックの繰り返し。
+    if (line.startsWith("worktree ")) paths.push(line.slice(9).trimEnd());
+  }
+  return paths;
+}
+
 export function repoRootResult(
   cwd: string,
 ):

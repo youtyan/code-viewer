@@ -12,6 +12,9 @@
 <link rel="stylesheet" href="/vendor/diff2html/diff2html.min.css" />
 <link rel="stylesheet" href="/vendor/highlight.js/styles/github.min.css" id="hljs-light" />
 <link rel="stylesheet" href="/vendor/highlight.js/styles/github-dark.min.css" id="hljs-dark" disabled />
+<!-- xterm 本体 (web/xterm.js) は terminal ドロワーを開くまで読み込まないが、
+     スタイルは 7KB 程度なので他の vendor CSS と同じくここで読む。 -->
+<link rel="stylesheet" href="/vendor/xterm/xterm.css" />
 <script src="/vendor/diff2html/diff2html-ui.min.js"></script>
 
 <link rel="stylesheet" href="/style.css" />
@@ -30,15 +33,11 @@
       <a class="app-menu-item" data-route="history" href="/history">History</a>
       <a class="app-menu-item" data-route="journal" href="/journal">Work Log</a>
       <a class="app-menu-item" data-route="database" href="/database">Datastores</a>
-      <!-- Tools は画面遷移ではなくドロワーの開閉なので、リンクではなくボタン。
-           data-route はラベルのローカライズにだけ使う (SPA ナビの走査は
-           a.app-menu-item に限定してあるのでここは拾われない)。 -->
-      <button type="button" id="tools-btn" class="app-menu-item app-menu-action" data-route="tools" aria-pressed="false">Tools</button>
-      <a class="app-menu-item" data-route="help" href="/help">Help</a>
+      <span class="global-actions-sep app-menu-sep" aria-hidden="true"></span>
+      <a class="app-menu-item" data-route="help" href="/help">Settings &amp; Help</a>
     </nav>
     <div class="global-actions">
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations"><span class="goi-icon" aria-hidden="true"></span><span id="annotations-count" hidden></span></button>
-      <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
       <button id="doctor-btn" class="global-icon-action" title="environment doctor" aria-label="environment doctor"><span class="goi-icon" aria-hidden="true"></span><span id="doctor-badge" class="doctor-badge" hidden></span></button>
       <span class="global-actions-sep" aria-hidden="true"></span>
       <button id="copy-ai-context" class="global-icon-action" title="Copy AI context" aria-label="Copy AI context"><span class="goi-icon" aria-hidden="true"></span></button>
@@ -135,81 +134,6 @@
     <span class="sidebar-toggle-label">Files</span>
   </button>
 
-  <div id="scope-settings-popover" hidden>
-    <div class="scope-settings-head">
-      <strong>Viewer Settings</strong>
-      <button id="scope-settings-close" type="button" aria-label="close viewer settings">×</button>
-    </div>
-    <div class="scope-settings-section">
-      <strong class="scope-settings-section-title">Display</strong>
-      <label for="viewer-language">Language</label>
-      <select id="viewer-language">
-        <option value="en">English</option>
-        <option value="ja">日本語</option>
-      </select>
-      <label for="sidebar-font-size">UI font size</label>
-      <select id="sidebar-font-size">
-        <option value="compact">Small</option>
-        <option value="regular">Regular</option>
-        <option value="large">Large</option>
-        <option value="xlarge">Extra Large</option>
-      </select>
-      <p id="ui-font-size-help" class="scope-settings-help"></p>
-      <label for="code-font-size">Code font size</label>
-      <select id="code-font-size">
-        <option value="compact">Small</option>
-        <option value="regular">Regular</option>
-        <option value="large">Large</option>
-        <option value="xlarge">Extra Large</option>
-      </select>
-      <p id="display-settings-source">Applies to all projects in this browser.</p>
-    </div>
-    <div class="scope-settings-section">
-      <strong id="upload-section-title" class="scope-settings-section-title">Uploads</strong>
-      <label class="scope-settings-toggle">
-        <input id="upload-enabled" type="checkbox" />
-        <span id="upload-enabled-label">Allow file uploads into worktree folders</span>
-      </label>
-      <p id="upload-help" class="scope-settings-help"></p>
-    </div>
-    <div class="scope-settings-section">
-      <strong class="scope-settings-section-title">Excluded directories</strong>
-      <label for="scope-omit-dirs">Skip these directory names while browsing and searching</label>
-      <textarea id="scope-omit-dirs" rows="6" spellcheck="false"></textarea>
-      <p id="scope-omit-dirs-help" class="scope-settings-help"></p>
-      <label for="scope-exclude-names">Hide these file or directory names completely</label>
-      <textarea id="scope-exclude-names" rows="4" spellcheck="false"></textarea>
-      <p id="scope-exclude-names-help" class="scope-settings-help"></p>
-      <p id="scope-omit-source"></p>
-    </div>
-    <div class="scope-settings-section">
-      <strong id="datastore-section-title" class="scope-settings-section-title">Datastores</strong>
-      <label class="scope-settings-toggle">
-        <input id="datastore-infer-fk" type="checkbox" />
-        <span id="datastore-infer-fk-label">Infer FK from Rails-style naming</span>
-      </label>
-      <p id="datastore-infer-fk-help" class="scope-settings-help"></p>
-      <label class="scope-settings-toggle">
-        <input id="datastore-s3-tooltip" type="checkbox" />
-        <span id="datastore-s3-tooltip-label">Show S3 object preview tooltip on hover</span>
-      </label>
-      <p id="datastore-s3-tooltip-help" class="scope-settings-help"></p>
-    </div>
-    <div id="watch-settings-section" class="scope-settings-section">
-      <strong id="watch-section-title" class="scope-settings-section-title">File change watcher</strong>
-      <label for="scope-watch-limit">Maximum directories to watch</label>
-      <div class="scope-watch-limit-row">
-        <input id="scope-watch-limit-range" type="range" min="16" max="65536" step="16" aria-label="watch limit slider" />
-        <input id="scope-watch-limit" type="number" min="16" max="65536" step="1" />
-      </div>
-      <p id="scope-watch-limit-help" class="scope-settings-help"></p>
-    </div>
-    <div class="scope-settings-footer">
-      <p id="scope-settings-autosave-note" class="scope-settings-help"></p>
-      <button id="scope-omit-reset" type="button">Restore defaults</button>
-    </div>
-  </div>
-
   <div id="quick-help-popover" hidden role="dialog" aria-label="quick help" aria-modal="false">
     <div class="quick-help-head">
       <strong id="quick-help-title">Quick Help</strong>
@@ -217,6 +141,7 @@
     </div>
     <div id="quick-help-groups"></div>
     <div class="quick-help-foot">
+      <a id="quick-help-settings-link" href="/help?section=settings">Settings →</a>
       <a id="quick-help-full-link" href="/help?section=keybindings">View all keybindings →</a>
     </div>
   </div>
@@ -277,8 +202,26 @@
 
   <div id="doctor-sheet-overlay" class="doctor-sheet-overlay" hidden aria-hidden="true"></div>
   <aside id="doctor-sheet" class="doctor-sheet" hidden aria-hidden="true" inert aria-label="environment doctor"></aside>
-  <div id="tools-sheet-overlay" class="tools-sheet-overlay" hidden aria-hidden="true"></div>
-  <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
+  <!-- 画面下のパネル。IDE のターミナルパネルと同じで、タブで中身を切り替え、
+       上端のハンドルで高さを変える。中身 (#terminal-sheet / #tools-sheet) は
+       右ドロワーだった頃と同じ id のままなので、各ビューの実装は変わらない。 -->
+  <section id="app-panel" class="app-panel">
+    <div id="app-panel-resizer" class="app-panel-resizer" role="separator" tabindex="0" aria-orientation="horizontal" aria-label="resize panel"></div>
+    <div class="app-panel-tabs" role="tablist" aria-label="panel">
+      <button type="button" id="panel-tab-terminal" class="app-panel-tab" role="tab" data-panel="terminal" data-route="terminal" aria-selected="false">Terminal</button>
+      <button type="button" id="panel-tab-tools" class="app-panel-tab" role="tab" data-panel="tools" data-route="tools" aria-selected="false">Tools</button>
+      <span class="app-panel-spacer"></span>
+      <div class="seg app-panel-layout-switch" role="group" aria-label="panel layout">
+        <button type="button" data-panel-layout="overlay" class="active" aria-pressed="true">Overlay</button>
+        <button type="button" data-panel-layout="docked" aria-pressed="false">Docked</button>
+      </div>
+      <button type="button" id="app-panel-close" class="app-panel-close" title="close panel" aria-label="close panel">×</button>
+    </div>
+    <div class="app-panel-bodies">
+      <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
+      <aside id="terminal-sheet" class="terminal-sheet" hidden aria-hidden="true" inert aria-label="terminal"></aside>
+    </div>
+  </section>
   <main id="content">
     <section id="history-commit-info" hidden></section>
     <div id="empty" class="empty hidden">

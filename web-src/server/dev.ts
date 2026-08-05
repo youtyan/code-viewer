@@ -1,20 +1,22 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S npx tsx
 
+import { spawn } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
-import { terminateChild, terminateChildren } from "./dev-process";
+import { fileURLToPath } from "node:url";
+import { type BuildContext, context } from "esbuild";
+import { type DevChildProcess, terminateChild } from "./dev-process";
 
-const ROOT = normalize(join(import.meta.dir, "..", ".."));
+const HERE = fileURLToPath(new URL(".", import.meta.url));
+const ROOT = normalize(join(HERE, "..", ".."));
 const SERVER_ROOT = join(ROOT, "web-src", "server");
 const DEFAULT_DEV_PORT = 64160;
+/** 実行に使う TypeScript ローダ。npx を挟むと毎回の再起動が目に見えて遅い。 */
+const TSX = join(ROOT, "node_modules", ".bin", "tsx");
 
-type ChildProcess = {
-  kill(signal?: string): void;
-  exited: Promise<number>;
-};
-
-let server: ChildProcess | null = null;
-let build: ChildProcess | null = null;
+let server: DevChildProcess | null = null;
+/** ブラウザ側バンドルの watch。子プロセスではなく esbuild の常駐 context。 */
+let buildCtx: BuildContext | null = null;
 let restarting = false;
 let shuttingDown = false;
 let firstStart = true;
@@ -51,7 +53,7 @@ function walkTsFiles(dir: string): string[] {
     }
     if (isDir) {
       out.push(...walkTsFiles(full));
-    } else if (name.endsWith(".ts") && name !== "runtime.d.ts") {
+    } else if (name.endsWith(".ts")) {
       out.push(full);
     }
   }
@@ -78,30 +80,42 @@ function watchSignature() {
   return watchedFiles().map(fileSignature).join("|");
 }
 
-function startBuild() {
-  build = Bun.spawn(
-    [
-      "bun",
-      "build",
-      "--watch",
-      "--target=browser",
-      "--format=iife",
-      "--outfile=web/app.js",
-      "web-src/app.ts",
-    ],
-    { cwd: ROOT, stdout: "inherit", stderr: "inherit" },
-  ) as ChildProcess;
+/** Node の子プロセスを dev-process の扱える形 (kill / exited) に包む。 */
+function spawnDevChild(command: string, args: string[]): DevChildProcess {
+  const child = spawn(command, args, {
+    cwd: ROOT,
+    stdio: "inherit",
+    env: { ...process.env, CODE_VIEWER_DEV: "1" },
+  });
+  return {
+    kill: (signal?: string) => child.kill(signal as NodeJS.Signals | undefined),
+    exited: new Promise<number>((resolve) => {
+      child.on("close", (code) => resolve(code ?? 0));
+      child.on("error", () => resolve(1));
+    }),
+  };
+}
+
+async function startBuild() {
+  buildCtx = await context({
+    entryPoints: [join(ROOT, "web-src", "app.ts")],
+    bundle: true,
+    platform: "browser",
+    format: "iife",
+    outfile: join(ROOT, "web", "app.js"),
+    charset: "utf8",
+    logLevel: "info",
+  });
+  await buildCtx.watch();
 }
 
 function startServer() {
   const args = serverArgs();
   firstStart = false;
-  server = Bun.spawn(["bun", "run", "web-src/server/preview.ts", ...args], {
-    cwd: ROOT,
-    stdout: "inherit",
-    stderr: "inherit",
-    env: { ...process.env, CODE_VIEWER_DEV: "1" },
-  }) as ChildProcess;
+  server = spawnDevChild(TSX, [
+    join("web-src", "server", "preview.ts"),
+    ...args,
+  ]);
 }
 
 async function restartServer() {
@@ -118,12 +132,10 @@ async function restartServer() {
 
 function killChildren() {
   if (server) server.kill("SIGTERM");
-  if (build) build.kill("SIGTERM");
 }
 
 function forceKillChildren() {
   if (server) server.kill("SIGKILL");
-  if (build) build.kill("SIGKILL");
 }
 
 async function shutdown() {
@@ -132,12 +144,12 @@ async function shutdown() {
     process.exit(1);
   }
   shuttingDown = true;
-  const children = [server, build].filter((child): child is ChildProcess =>
-    Boolean(child),
-  );
+  const child = server;
   server = null;
-  build = null;
-  await terminateChildren(children).catch(() => undefined);
+  const ctx = buildCtx;
+  buildCtx = null;
+  if (child) await terminateChild(child).catch(() => undefined);
+  if (ctx) await ctx.dispose().catch(() => undefined);
   process.exit(0);
 }
 
@@ -149,7 +161,7 @@ process.on("SIGHUP", () => void shutdown());
 process.on("exit", killChildren);
 
 console.log(`code-viewer dev server watching ${SERVER_ROOT}`);
-startBuild();
+await startBuild();
 startServer();
 
 let sig = watchSignature();

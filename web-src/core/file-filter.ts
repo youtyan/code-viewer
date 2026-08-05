@@ -4,6 +4,12 @@ export function normalizeFileFilterQuery(
   return (value || "").toLowerCase().trim();
 }
 
+const TEST_FILE_PATH_RE = /(^|[/_.])(test|spec|__tests__)([/_.]|$)/i;
+
+export function isTestFilePath(path: string): boolean {
+  return TEST_FILE_PATH_RE.test(path);
+}
+
 export type CompiledFileFilter = {
   kind: "empty" | "substring" | "regex" | "invalid";
   match: (path: string) => boolean;

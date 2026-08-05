@@ -2,8 +2,8 @@
 
 Local browser-based code and git diff viewer.
 
-Requires Node.js 20 or newer when installed from npm. Development uses
-[Bun](https://bun.sh/).
+Requires Node.js 20 or newer. Development uses
+[pnpm](https://pnpm.io/) (the version is pinned in `packageManager`).
 
 ## Features
 
@@ -29,7 +29,7 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   be rendered.
 - Find files and grep across the repository with `Ctrl+K` (file palette) and
   `Ctrl+G` (text palette).
-- Switch the viewer UI between English and Japanese from Viewer Settings —
+- Switch the viewer UI between English and Japanese from Settings & Help —
   the language toggle live-updates every screen including the datastore
   viewer.
 - Browse SQLite, PostgreSQL, MySQL, Cloudflare D1, Redis, Elasticsearch,
@@ -39,7 +39,7 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   too, without needing a `docker-compose.yml`.
   Table descriptions appear inside expanded table entries and in the Schema
   tab header when the database provides them.
-- Read the built-in Help page (last item in the header menu) for getting
+- Read the built-in Settings & Help page (last item in the header menu) for getting
   started, the `.code-viewer/` project files, AI annotations, datastores,
   the agent skill, and keybindings.
 - Scratch on pasted text without leaving the current screen with the Tools
@@ -52,23 +52,57 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   validator and a JSON⇄YAML converter). Each tool keeps its own draft in
   `.code-viewer/tools.json`, and the drawer width is draggable from its left
   edge.
+- Run a real shell in the browser with the Terminal panel (the `Terminal` item
+  in the header menu, or `?terminal=<shell>` on any URL). It is an ordinary
+  login shell on a PTY, rendered with xterm.js, so `tmux` inside it behaves
+  exactly as it does in any other terminal — the panel resizes the PTY and
+  whatever runs in it follows on its own. The toggle in the panel header turns
+  input off when you only want to watch. Typing `exit` closes the shell, just
+  like any other terminal.
+- The left side of the panel starts with a **Your turn** section for terminals
+  that are waiting for input or finished but unread. Below it, the session list
+  can be scoped to this repository or all tmux sessions, filtered by state, and
+  searched by task, place, or id. Its two-tier tree puts shells opened by this
+  panel at the top; a shell running tmux carries a terminal icon and its
+  session name, and that session's windows and panes hang underneath it. The
+  bottom tier is the tmux sessions no shell has opened yet. Each pane is
+  labelled with the title tmux shows for it — a coding agent usually puts what
+  it is doing there, so the tree alone tells you which pane is busy.
+- Click a pane and the panel takes you to it. If a shell already has that
+  session open, it switches to that shell and makes the pane current; otherwise
+  a shell is opened and attached for you. A session moves up to the top tier the
+  moment a shell opens it and drops back down when that shell closes, so you end
+  up with one shell per tmux session rather than one per pane. Powerline
+  separators and file icons render when a Nerd Font is installed — the panel
+  asks for the common Nerd Font families before falling back to the usual
+  monospace stack, so no font ships with the package. The tree needs `tmux` on
+  `PATH`; it says so when it is missing, and shells still work without it.
+  Opening shells needs the optional `@lydell/node-pty` package.
+- One tmux caveat worth knowing: a tmux window can only have one size, so when
+  the same session is attached from both this panel and another terminal, they
+  share it. With tmux's default `window-size latest` the window snaps to
+  whichever terminal you touched last, and the smaller one gets its right and
+  bottom edges cut off. `set -g window-size smallest` makes every attached
+  terminal show the whole window at the cost of some empty space in the larger
+  one.
 - Inspect the runtime with the Environment Doctor (right-side sheet,
   toggled by the 🩺 icon in the header): runtime (Node / Bun / ABI),
   `@youtyan/code-viewer` version and execution origin (npx cache vs
-  local), SQLite driver and snapshot store, Git, discovery summary,
+  local), SQLite driver and snapshot store, Git, `rg`, GitHub CLI, discovery summary,
   per-source datastore connectivity (each discovered SQLite / docker
   SQL / Supabase CLI / Redis / Elasticsearch / S3 source gets one row
   with a 2s minimal-read probe; failure rows include a paste-safe retry
   hint),
   Docker / Compose health (config dry-parse + `compose ps` per service),
-  and the listening port. Useful when `npx` cache mismatch (e.g.
+  terminal dependencies (`tmux` and `@lydell/node-pty`), and the listening
+  port. Useful when `npx` cache mismatch (e.g.
   `NODE_MODULE_VERSION` errors) needs a remediation hint, or when a
   docker compose datastore is discovered but unreachable.
 - Open repository folders (and parent folders of files) in the OS file
   manager, create folders, and trash/restore files from localhost-only
   actions.
 - Upload files into worktree folders. Uploads are enabled by default for
-  worktree targets; toggle them off from Viewer Settings.
+  worktree targets; toggle them off from Settings & Help.
 - Expose a local, read-only MCP endpoint (`/_mcp`) on the running server so
   AI agents can call status, file, search, and datastore tools directly
   over JSON-RPC instead of spawning CLI subprocesses.
@@ -94,11 +128,10 @@ To inspect another repository, pass `--cwd`:
 npx @youtyan/code-viewer --cwd /path/to/repo
 ```
 
-Equivalent one-shot commands also work:
+The equivalent one-shot command with pnpm also works:
 
 ```sh
 pnpm dlx @youtyan/code-viewer
-bunx @youtyan/code-viewer
 ```
 
 Or install it globally:
@@ -108,8 +141,7 @@ npm install -g @youtyan/code-viewer
 code-viewer
 ```
 
-The published CLI runs on Node.js 20 or newer. Bun is supported as a package
-runner through `bunx`, but the npm package no longer requires Bun at runtime.
+The published CLI runs on Node.js 20 or newer.
 
 Common options:
 
@@ -117,11 +149,11 @@ Common options:
 - `--open` — open the printed URL in the default browser.
 - `--port <port>` — bind to a specific port (default: pick a free port).
 - `--bin <name>=<absolute-path>` — override an external command path
-  (`git`, `rg`, `docker`, or `gh`). The same values can be supplied through
+  (`git`, `rg`, `docker`, `gh`, or `tmux`). The same values can be supplied through
   `CODE_VIEWER_BIN_GIT`, `CODE_VIEWER_BIN_RG`, `CODE_VIEWER_BIN_DOCKER`, and
-  `CODE_VIEWER_BIN_GH`.
+  `CODE_VIEWER_BIN_GH`, and `CODE_VIEWER_BIN_TMUX`.
 - `--scope-omit-dir <name>` — skip a directory under the worktree (repeatable;
-  overrides the Viewer Settings list for this session).
+  overrides the settings list for this session).
 - `--version`, `-v` — print the installed version.
 - `--help`, `-h` — print full CLI help.
 
@@ -139,9 +171,9 @@ code-viewer --cwd /path/to/repo --staged
 PATH differs from the environment that starts code-viewer. Override paths must
 be absolute executable files outside the opened repository.
 
-Open **Viewer Settings** in the header to change display options such as
-theme, layout, sidebar mode, font sizes, and UI language. The language setting
-translates the viewer chrome itself, including the Help page, settings labels,
+Open **Settings & Help** from the header menu to change display options such
+as theme, layout, sidebar mode, font sizes, and UI language. The language
+setting translates the viewer chrome itself, including that page, settings labels,
 sidebars, history controls, datastore viewer, and annotation panel labels.
 
 ## Repository View
@@ -170,7 +202,7 @@ the browser back/forward stay in sync. Opening another file from the
 repository tree keeps the active tab (a file that cannot be previewed falls
 back to Code). The Blame tab reuses the source
 view's row component, so line numbers, drag-selection of `line=` ranges,
-syntax highlighting and the Viewer Settings code font size all match the
+syntax highlighting and the code font size from Settings & Help all match the
 Code tab.
 
 When the repository remote is hosted on GitHub, repository and file headers
@@ -185,7 +217,7 @@ the full non-virtual view.
 
 The worktree is watched and changes are pushed to every open tab over SSE so
 files reload as you edit. The directory watcher is capped at 1024 directories
-by default and can be tuned from Viewer Settings → **File change watcher**
+by default and can be tuned from Settings & Help → **File change watcher**
 (range slider + numeric input, 16–65536); when the cap is hit the viewer
 shows a banner so reloads are not silently missed.
 
@@ -218,7 +250,7 @@ where an ignore rule names a file specifically.
 ## Uploads and Scope Settings
 
 File uploads are available for the local worktree target by default. Git tree
-views remain read-only. Open **Viewer Settings** in the header to toggle
+views remain read-only. Open **Settings & Help** from the header menu to toggle
 uploads off, edit the directories to skip while browsing/searching, and hide
 files or directory names completely.
 
@@ -794,8 +826,9 @@ including the JSON contract for each subcommand.
 
 The same diagnostic report behind the Environment Doctor sheet (see
 Features above) is available from the terminal without a browser, so AI
-agents and CI can introspect the runtime, SQLite driver, Git, GitHub CLI,
-Docker discovery, and snapshot store status directly.
+agents and CI can introspect the runtime, SQLite driver, Git, search and
+terminal dependencies, GitHub CLI, Docker discovery, and snapshot store status
+directly.
 
 ```sh
 # Human-readable status summary.
@@ -804,7 +837,7 @@ code-viewer doctor
 # Full DoctorReport JSON (matches the /_doctor endpoint).
 code-viewer doctor --json
 code-viewer doctor --cwd /path/to/repo --port 64160 --json
-code-viewer doctor --bin git=/opt/bin/git --bin docker=/opt/bin/docker --bin gh=/opt/bin/gh --json
+code-viewer doctor --bin git=/opt/bin/git --bin rg=/opt/bin/rg --bin docker=/opt/bin/docker --bin gh=/opt/bin/gh --bin tmux=/opt/bin/tmux --json
 ```
 
 The exit code is `1` iff the worst check status is `"error"` (never on
@@ -891,7 +924,7 @@ to target a specific one. When `--before` or `--after` is used, the target
 session is inferred from that anchor annotation; a conflicting `--session`
 is rejected.
 
-The in-app Help page includes a dedicated annotations guide for AI agents,
+The in-app Settings & Help page includes a dedicated annotations guide for AI agents,
 covering when to start a session, how to choose focused line ranges, how to
 write concise Markdown explanations, and how to install the bundled agent skill.
 
@@ -955,21 +988,25 @@ extra process is needed beyond `code-viewer` already running.
 ## Development
 
 ```sh
-bun install
-bun run verify
-bun run preview --cwd /path/to/repo
+pnpm install
+pnpm run verify
+pnpm run preview --cwd /path/to/repo
 ```
 
-`bun run preview` (and the alias `bun run dev`) is the development runner. It
+`pnpm run preview` (and the alias `pnpm run dev`) is the development runner. It
 rebuilds the browser bundle when browser source files change, restarts the
 preview server when `web-src/server/*.ts` changes, and keeps the URL stable on
 `http://127.0.0.1:64160/` unless you pass `--port <port>`. Use
-`bun run preview:raw` to launch `preview.ts` directly without the dev watcher.
+`pnpm run preview:raw` to launch `preview.ts` directly without the dev watcher.
+
+TypeScript runs through [tsx](https://tsx.is/), bundles are built with
+[esbuild](https://esbuild.github.io/), and tests run on
+[Vitest](https://vitest.dev/).
 
 Before releasing:
 
 ```sh
-bun run verify
+pnpm run verify
 npm pack --dry-run
 ```
 

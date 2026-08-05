@@ -1,7 +1,9 @@
-// bun:sqlite (Bun ランタイム) と better-sqlite3 (Node 任意依存) のどちらかを
-// 動的に読み込んで SQLite Database constructor を返す。共通実装。
-// adapters/sqlite.ts と snapshot-store.ts の両方から使う (内部で持つ DbHandle
-// の型は呼び出し側ごとに少しずつ違うため generic で受ける)。
+// better-sqlite3 (任意依存) を動的に読み込んで SQLite Database constructor を
+// 返す。共通実装。adapters/sqlite.ts と snapshot-store.ts の両方から使う
+// (内部で持つ DbHandle の型は呼び出し側ごとに少しずつ違うため generic で受ける)。
+//
+// import は静的に解決させない。任意依存なので、入っていない環境でもサーバ自体
+// は起動できる必要がある。バンドル側では external にしてある。
 
 export type SqliteOpenOptions = {
   readonly?: boolean;
@@ -13,7 +15,7 @@ export type SqliteClassCtor<T = unknown> = new (
   options?: SqliteOpenOptions,
 ) => T;
 
-// Bun と Node のどちらでも constructor をプロセス内 1 度だけ load する。
+// constructor はプロセス内で 1 度だけ load する。
 let cachedDbClass: unknown = null;
 
 export async function loadSqliteClass<T = unknown>(): Promise<
@@ -21,31 +23,21 @@ export async function loadSqliteClass<T = unknown>(): Promise<
 > {
   if (cachedDbClass) return cachedDbClass as SqliteClassCtor<T>;
   try {
-    const mod = await import("bun:sqlite");
-    cachedDbClass = mod.Database as unknown as SqliteClassCtor<T>;
-    return cachedDbClass as SqliteClassCtor<T>;
-  } catch {
-    // not running in Bun
-  }
-  try {
-    // Keep this opaque to Bun's bundler; better-sqlite3 is a Node-only optional dependency.
-    const mod = await (Function(
-      'return import("better-sqlite3")',
-    )() as Promise<{ default?: unknown }>);
+    const mod = (await import("better-sqlite3")) as { default?: unknown };
     cachedDbClass = (mod.default || mod) as unknown as SqliteClassCtor<T>;
     return cachedDbClass as SqliteClassCtor<T>;
   } catch {
     // not installed
   }
   throw new Error(
-    "No SQLite driver available. Install better-sqlite3 or use the bun runtime.",
+    "No SQLite driver available. Install better-sqlite3 to use SQLite features.",
   );
 }
 
 export type SqliteDriverStatus =
   | {
       kind: "ok";
-      driver: "bun:sqlite" | "better-sqlite3";
+      driver: "better-sqlite3";
     }
   | {
       kind: "abi-mismatch";
@@ -71,7 +63,7 @@ const NPX_CACHE_GUIDE =
 
 const INSTALL_GUIDE =
   "better-sqlite3 is an optional dependency required for SQLite features (data viewer / snapshot). " +
-  "Install with `npm i better-sqlite3`, or run code-viewer under Bun (which provides bun:sqlite).";
+  "Install it with `npm i better-sqlite3`.";
 
 export function _parseSqliteAbiMismatchMessage(message: string): {
   compiledAbi: number;
@@ -101,16 +93,8 @@ function parseAbiMismatch(message: string): {
 }
 
 export async function describeSqliteDriver(): Promise<SqliteDriverStatus> {
-  if (typeof process !== "undefined" && process.versions?.bun) {
-    try {
-      await import("bun:sqlite");
-      return { kind: "ok", driver: "bun:sqlite" };
-    } catch {
-      // Bun reported but module load failed; fall through.
-    }
-  }
   try {
-    await (Function('return import("better-sqlite3")')() as Promise<unknown>);
+    await import("better-sqlite3");
     return { kind: "ok", driver: "better-sqlite3" };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

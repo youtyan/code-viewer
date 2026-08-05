@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import type { spawnSync } from "node:child_process";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   __clearDockerSchemaListCacheForTest,
   __setDockerSpawnSyncForTest,

@@ -16,6 +16,7 @@ import { QUERY_AGENT_HELP } from "./query-cli";
 import { SEARCH_AGENT_HELP } from "./search-cli";
 import { SKILL_AGENT_HELP } from "./skill-cli";
 import { STATUS_AGENT_HELP } from "./status-cli";
+import { TERMINAL_AGENT_HELP } from "./terminal-cli";
 
 export type AgentGuideEntry = {
   name:
@@ -25,6 +26,7 @@ export type AgentGuideEntry = {
     | "journal"
     | "search"
     | "file"
+    | "terminal"
     | "skill"
     | "doctor";
   signature: string;
@@ -71,6 +73,11 @@ export const AGENT_GUIDES: readonly AgentGuideEntry[] = [
     name: "file",
     signature: firstLine(FILE_AGENT_HELP),
     rerun: "code-viewer file agent-help",
+  },
+  {
+    name: "terminal",
+    signature: firstLine(TERMINAL_AGENT_HELP),
+    rerun: "code-viewer terminal agent-help",
   },
   {
     name: "skill",

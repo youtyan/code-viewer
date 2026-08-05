@@ -1,9 +1,10 @@
-import { describe, expect, test } from "bun:test";
 import type { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { describe, expect, test } from "vitest";
 import {
   startWatchSupervisor,
   type WatchSupervisorOptions,
+  watchChildCommand,
 } from "../server/watch-supervisor";
 
 class FakeStream extends EventEmitter {
@@ -342,5 +343,56 @@ describe("watch supervisor: 終了", () => {
     });
     expect(errors).toEqual(["spawn failed"]);
     supervisor.close();
+  });
+});
+
+// dev では .ts のまま起動されている。子を素の node で立ち上げると TypeScript
+// を読めず ERR_MODULE_NOT_FOUND で落ちるので、親のローダ指定を引き継ぐ。
+describe("watchChildCommand", () => {
+  function withProcessArgs<T>(
+    argv: string[],
+    execArgv: string[],
+    run: () => T,
+  ): T {
+    const originalArgv = process.argv;
+    const originalExecArgv = process.execArgv;
+    process.argv = argv;
+    process.execArgv = execArgv;
+    try {
+      return run();
+    } finally {
+      process.argv = originalArgv;
+      process.execArgv = originalExecArgv;
+    }
+  }
+
+  test("carries the loader flags when the entry is TypeScript", () => {
+    const command = withProcessArgs(
+      ["/usr/bin/node", "/repo/web-src/server/preview.ts"],
+      ["--import", "file:///repo/node_modules/tsx/dist/loader.mjs"],
+      watchChildCommand,
+    );
+
+    expect(command[0]).toBe("/usr/bin/node");
+    expect(command.slice(1, 3)).toEqual([
+      "--import",
+      "file:///repo/node_modules/tsx/dist/loader.mjs",
+    ]);
+    expect(command[command.length - 2]).toMatch(/cli\.ts$/);
+    expect(command[command.length - 1]).toBe("watch-child");
+  });
+
+  test("leaves the bundled entry alone", () => {
+    const command = withProcessArgs(
+      ["/usr/bin/node", "/repo/dist/code-viewer.js"],
+      ["--import", "file:///repo/node_modules/tsx/dist/loader.mjs"],
+      watchChildCommand,
+    );
+
+    expect(command).toEqual([
+      "/usr/bin/node",
+      "/repo/dist/code-viewer.js",
+      "watch-child",
+    ]);
   });
 });

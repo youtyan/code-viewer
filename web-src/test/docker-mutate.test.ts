@@ -1,7 +1,8 @@
 // PostgreSQL / MySQL の書き込みパス (applyMutations) を spawn モックで検証する。
 // 実 docker は不要。生成される「1 トランザクションにまとめた SQL」と、エラー時に
 // 例外へ変換されることを確認する (実行は CLI なのでリテラル埋め込み)。
-import { afterEach, describe, expect, test } from "bun:test";
+import type { spawnSync } from "node:child_process";
+import { afterEach, describe, expect, test } from "vitest";
 import type { RowMutation } from "../core/database/types";
 import {
   __setDockerSpawnSyncForTest,
@@ -11,18 +12,13 @@ import {
 const PG_RS = "\x1e";
 const PG_US = "\x1f";
 
-type SpawnLike = (
-  args: string[],
-  opts?: Record<string, unknown>,
-) => {
-  exited: Promise<number>;
-  stdout: ReadableStream<Uint8Array> | null;
-  stderr: ReadableStream<Uint8Array> | null;
-  kill(signal?: string): void;
-};
-
 type Harness = { calls: string[]; restore(): void };
 
+/**
+ * docker CLI の呼び出しを差し替える。__setDockerSpawnSyncForTest を入れると
+ * アダプタは同期実行の経路を通るので、実際に docker を起動せずに、渡された
+ * SQL と返す出力だけを見られる。
+ */
 function installSpawn(
   resultForSql: (sql: string) => {
     stdout?: string;
@@ -30,28 +26,22 @@ function installSpawn(
     code?: number;
   },
 ): Harness {
-  const bunGlobal = globalThis as unknown as { Bun: { spawn: SpawnLike } };
-  const original = bunGlobal.Bun.spawn;
   const calls: string[] = [];
-  bunGlobal.Bun.spawn = ((args: string[]) => {
-    const sql = args[args.length - 1] || "";
+  __setDockerSpawnSyncForTest(((command: string, args?: readonly string[]) => {
+    const all = [command, ...(args ?? [])];
+    const sql = all[all.length - 1] || "";
     calls.push(sql);
     const r = resultForSql(sql);
     return {
-      exited: new Promise<number>((resolve) =>
-        setTimeout(() => resolve(r.code ?? 0), 5),
-      ),
-      stdout: new Response(r.stdout ?? "").body,
-      stderr: new Response(r.stderr ?? "").body,
-      kill() {
-        /* noop */
-      },
+      stdout: r.stdout ?? "",
+      stderr: r.stderr ?? "",
+      status: r.code ?? 0,
     };
-  }) as SpawnLike;
+  }) as unknown as typeof spawnSync);
   return {
     calls,
     restore() {
-      bunGlobal.Bun.spawn = original;
+      __setDockerSpawnSyncForTest(null);
     },
   };
 }

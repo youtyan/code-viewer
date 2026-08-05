@@ -1,13 +1,35 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   compileFileFilter,
   filePathMatchesFilter,
+  isTestFilePath,
   normalizeFileFilterQuery,
 } from "../core/file-filter";
 
 describe("normalizeFileFilterQuery", () => {
   test("trims and lowercases file search text", () => {
     expect(normalizeFileFilterQuery("  WEB/App.TS  ")).toBe("web/app.ts");
+  });
+});
+
+describe("isTestFilePath", () => {
+  test.each([
+    { name: "dot test suffix", path: "src/sample.test.ts", expected: true },
+    {
+      name: "underscore spec suffix",
+      path: "src/sample_spec.rb",
+      expected: true,
+    },
+    { name: "test directory", path: "test/sample.ts", expected: true },
+    {
+      name: "nested test directory",
+      path: "src/__tests__/sample.ts",
+      expected: true,
+    },
+    { name: "ordinary source", path: "src/sample.ts", expected: false },
+    { name: "word containing test", path: "src/latest.ts", expected: false },
+  ])("recognizes $name", ({ path, expected }) => {
+    expect(isTestFilePath(path)).toBe(expected);
   });
 });
 

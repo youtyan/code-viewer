@@ -8,14 +8,7 @@
 // AbortController で包むので、追跡の有無に関わらず保存はナビゲーションで
 // 中断されうる。だから中断・失敗した保存は dirty のまま残して送り直す。
 
-import { attachDragResizer } from "../../core/drag-resizer";
-import {
-  DEFAULT_TOOL_ID,
-  MAX_TOOLS_SHEET_WIDTH,
-  MIN_TOOLS_SHEET_WIDTH,
-  TOOL_IDS,
-  type ToolId,
-} from "../../core/tools";
+import { DEFAULT_TOOL_ID, TOOL_IDS, type ToolId } from "../../core/tools";
 import type { ToolsState } from "../../core/types";
 import { type ToolsLang, type ToolsText, toolsText } from "./i18n";
 import { createJsonTool } from "./json-tool";
@@ -60,8 +53,6 @@ export type ToolsViewHandle = {
 export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
   let panes: Record<ToolId, ToolPane> | null = null;
   let tabs: Record<ToolId, HTMLButtonElement> | null = null;
-  let titleEl: HTMLElement | null = null;
-  let closeBtn: HTMLButtonElement | null = null;
   let activeTool: ToolId = DEFAULT_TOOL_ID;
   let stateLoaded = false;
   let savedActiveTool: ToolId | null = null;
@@ -85,11 +76,9 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
   let loadFailed = false;
   /** dispose 済み。後から返ってきた非同期処理が再開しないようにする。 */
   let disposed = false;
-  let sheetWidth: number | null = null;
   // GET を待つ間にユーザーが動かしたかどうか。動かしていたら、読み込んだ
   // 保存値でそれを巻き戻さない。
   let toolTouched = false;
-  let widthTouched = false;
   // open / loadState の世代。閉じたり開き直したりした後に、待っていた GET の
   // 続きがタブや URL を書き換えないようにする。
   let generation = 0;
@@ -168,7 +157,6 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
     const body = JSON.stringify({
       activeTool,
       drafts,
-      ...(sheetWidth === null ? {} : { width: sheetWidth }),
     });
     // keepalive のボディ上限は 64 KiB (Fetch Standard)。下書きはそれより
     // 大きくなりうるので、超えるときは keepalive を諦めて普通に送る
@@ -283,61 +271,19 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
     scheduleSave();
   }
 
-  // ドロワー幅。左端のハンドルを左に動かすほど広がるので direction は -1。
-  // 画面に収める上限は CSS 側の min(…, 96vw) が持つ。ここでウィンドウ幅まで
-  // 詰めてしまうと、小さいウィンドウで開いた瞬間に覚えていた幅が縮む。
-  function applySheetWidth(host: HTMLElement, width: number): void {
-    const clamped = Math.round(
-      Math.max(MIN_TOOLS_SHEET_WIDTH, Math.min(MAX_TOOLS_SHEET_WIDTH, width)),
-    );
-    sheetWidth = clamped;
-    host.style.setProperty("--tools-sheet-width", `${clamped}px`);
-  }
-
   function mount(host: HTMLElement): void {
     if (panes) return;
     const current = text();
     host.replaceChildren();
 
-    const sheetResizer = document.createElement("div");
-    sheetResizer.className = "tools-sheet-resizer";
-    sheetResizer.role = "separator";
-    sheetResizer.tabIndex = 0;
-    sheetResizer.setAttribute("aria-orientation", "vertical");
-    sheetResizer.setAttribute("aria-label", current.resizeSheet);
-    attachDragResizer({
-      handle: sheetResizer,
-      getSize: () => host.getBoundingClientRect().width,
-      applySize: (width) => {
-        // 読み込み中にドラッグされたら、保存値でその幅を巻き戻さない。
-        widthTouched = true;
-        applySheetWidth(host, width);
-      },
-      direction: -1,
-      onEnd: scheduleSave,
-      activeClassTarget: host,
-      activeClassName: "tools-sheet-resizing",
-    });
-
+    // 見出しと閉じるはパネルのタブ列が持つ。ここにはツールのタブだけ置く。
     const header = document.createElement("header");
     header.className = "tools-header";
-    titleEl = document.createElement("h1");
-    titleEl.textContent = current.title;
     const tabList = document.createElement("div");
     tabList.className = "seg tools-tabs";
     tabList.role = "group";
     tabList.setAttribute("aria-label", current.title);
-    closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "tools-close";
-    closeBtn.textContent = "×";
-    closeBtn.title = current.close;
-    closeBtn.setAttribute("aria-label", current.close);
-    closeBtn.addEventListener("click", (event) => {
-      event.preventDefault();
-      deps.onCloseRequest?.();
-    });
-    header.append(titleEl, tabList, closeBtn);
+    header.append(tabList);
 
     panes = createPanes(current);
     tabs = {} as Record<ToolId, HTMLButtonElement>;
@@ -360,7 +306,7 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
       body.appendChild(panes[id].el);
     }
 
-    host.append(sheetResizer, header, body);
+    host.append(header, body);
   }
 
   async function loadState(myGen: number): Promise<void> {
@@ -386,9 +332,6 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
       }
       // 待っている間にユーザーが動かした分は、保存値で巻き戻さない。
       if (!toolTouched) savedActiveTool = data.activeTool ?? null;
-      const host = getMount();
-      if (host && !widthTouched && typeof data.width === "number")
-        applySheetWidth(host, data.width);
       for (const id of TOOL_IDS) {
         const draft = data.drafts?.[id];
         if (typeof draft !== "string") continue;
@@ -453,11 +396,6 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
   function localize(): void {
     if (!panes || !tabs) return;
     const current = text();
-    if (titleEl) titleEl.textContent = current.title;
-    if (closeBtn) {
-      closeBtn.title = current.close;
-      closeBtn.setAttribute("aria-label", current.close);
-    }
     for (const id of TOOL_IDS) tabs[id].textContent = current.tabs[id];
     panes.markdown.localize(
       current,

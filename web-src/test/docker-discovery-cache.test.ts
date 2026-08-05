@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import type { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   configureExternalCommands,
   resetExternalCommandsForTest,

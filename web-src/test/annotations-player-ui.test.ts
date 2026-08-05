@@ -1,12 +1,5 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  test,
-} from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { AnnotationEntry } from "../core/types";
 import { createAnnotationsPlayer } from "../views/annotations-player";
 

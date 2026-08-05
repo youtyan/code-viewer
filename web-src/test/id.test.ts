@@ -1,5 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { makeTimedId } from "../core/id";
+
+// globalThis.crypto は Node では getter だけを持つ。代入では差し替えられない
+// ので、プロパティごと定義し直して元に戻す。
+function setCrypto(value: unknown): void {
+  Object.defineProperty(globalThis, "crypto", {
+    value,
+    configurable: true,
+    writable: true,
+  });
+}
 
 function withMockedCrypto<T>(bytes: number[], fn: () => T): T {
   const original = globalThis.crypto;
@@ -12,12 +22,10 @@ function withMockedCrypto<T>(bytes: number[], fn: () => T): T {
     },
   };
   try {
-    // biome-ignore lint/suspicious/noExplicitAny: test-only global override
-    (globalThis as any).crypto = fake;
+    setCrypto(fake);
     return fn();
   } finally {
-    // biome-ignore lint/suspicious/noExplicitAny: test-only global override
-    (globalThis as any).crypto = original;
+    setCrypto(original);
   }
 }
 
@@ -73,13 +81,11 @@ describe("makeTimedId", () => {
   test("falls back to Math.random when crypto.getRandomValues is unavailable", () => {
     const original = globalThis.crypto;
     try {
-      // biome-ignore lint/suspicious/noExplicitAny: test-only global override
-      (globalThis as any).crypto = undefined;
+      setCrypto(undefined);
       const id = withMockedNow(0, () => makeTimedId("s"));
       expect(id).toMatch(/^s-0[0-9a-z]{6}$/);
     } finally {
-      // biome-ignore lint/suspicious/noExplicitAny: test-only global override
-      (globalThis as any).crypto = original;
+      setCrypto(original);
     }
   });
 

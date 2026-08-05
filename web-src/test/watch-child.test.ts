@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { parsePorcelainV2 } from "../server/watch-child";
 import { supportsNativeRecursiveWatch } from "../server/worktree-watcher";
 

@@ -1,7 +1,8 @@
 // S3 エクスプローラの編集 UI を happy-dom で検証する。テキストオブジェクトの
 // 編集 / 削除 / 新規作成が正しい body で POST /_db/s3/write を呼ぶことを確認する。
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, afterEach, describe, expect, test } from "vitest";
 import { clickDialogConfirm } from "./_dialog-helpers";
 import { q } from "./_test-helpers";
 

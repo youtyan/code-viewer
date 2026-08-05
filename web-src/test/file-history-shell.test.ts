@@ -1,5 +1,5 @@
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import type { AppRoute, DiffRange } from "../core/routes";
 import {
   type FileHistoryRoute,

@@ -1,4 +1,3 @@
-import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -11,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 import { fileDiffCacheKey, worktreeFileSignature } from "../server/cache";
 import {
   listTreeAsync,

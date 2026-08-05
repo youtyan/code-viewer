@@ -2,6 +2,7 @@
 // Pure helpers extracted from app.ts — no app state involved.
 
 import type { FileMeta } from "../core/types";
+import { createMediaPlayer } from "./media-player";
 
 const MEDIA_RE =
   /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
@@ -23,15 +24,41 @@ export function isAudio(p: string): boolean {
 function fileURL(path: string, ref: string): string {
   return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
 }
-function mediaTag(path: string, ref: string): string {
+
+function createMediaElement(path: string, ref: string): HTMLElement {
   const url = fileURL(path, ref);
-  if (isVideo(path)) {
-    return `<video src="${url}" controls preload="metadata"></video>`;
+  if (isImage(path)) {
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = "";
+    img.loading = "lazy";
+    return img;
   }
-  if (isAudio(path)) {
-    return `<audio src="${url}" controls preload="metadata"></audio>`;
+  const kind = isVideo(path) ? "video" : "audio";
+  return createMediaPlayer(url, kind, path);
+}
+
+function createMediaSide(
+  path: string | null,
+  ref: string | null,
+  label: string,
+  labelType: "add" | "del",
+): HTMLElement {
+  const side = document.createElement("div");
+  side.className = "media-side";
+  const labelEl = document.createElement("div");
+  labelEl.className = `media-label ${labelType}`;
+  labelEl.textContent = label;
+  side.appendChild(labelEl);
+  if (path && ref) {
+    side.appendChild(createMediaElement(path, ref));
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "media-empty";
+    empty.textContent = label;
+    side.appendChild(empty);
   }
-  return `<img src="${url}" alt="" loading="lazy">`;
+  return side;
 }
 
 // Per-card media enhancer (replaces the global walk; only touches this card)
@@ -46,25 +73,17 @@ export function enhanceMediaCard(file: FileMeta, card: Element) {
   if (!body) return;
   const container = document.createElement("div");
   container.className = "gdp-media";
-  let leftHTML: string;
-  let rightHTML: string;
+
   if (file.status === "A") {
-    leftHTML = '<div class="media-empty">Not in HEAD</div>';
-    rightHTML = mediaTag(path, "worktree");
+    container.appendChild(createMediaSide(null, null, "Not in HEAD", "del"));
+    container.appendChild(createMediaSide(path, "worktree", "After", "add"));
   } else if (file.status === "D") {
-    leftHTML = mediaTag(path, "HEAD");
-    rightHTML = '<div class="media-empty">Deleted</div>';
+    container.appendChild(createMediaSide(path, "HEAD", "Before", "del"));
+    container.appendChild(createMediaSide(null, null, "Deleted", "add"));
   } else {
-    leftHTML = mediaTag(path, "HEAD");
-    rightHTML = mediaTag(path, "worktree");
+    container.appendChild(createMediaSide(path, "HEAD", "Before", "del"));
+    container.appendChild(createMediaSide(path, "worktree", "After", "add"));
   }
-  container.innerHTML =
-    '<div class="media-side"><div class="media-label del">Before</div>' +
-    leftHTML +
-    "</div>" +
-    '<div class="media-side"><div class="media-label add">After</div>' +
-    rightHTML +
-    "</div>";
   body.replaceWith(container);
 }
 

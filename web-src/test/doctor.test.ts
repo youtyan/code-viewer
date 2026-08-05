@@ -1,12 +1,16 @@
-import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 import {
   _parseSqliteAbiMismatchMessage,
   describeSqliteDriver,
 } from "../server/database/sqlite-driver";
-import { buildDoctorReport, sqliteStatusToRow } from "../server/doctor";
+import {
+  buildDoctorReport,
+  shellAvailabilityToRow,
+  sqliteStatusToRow,
+} from "../server/doctor";
 
 // Use a fresh empty directory as cwd so doctor's discovery (Sqlite files /
 // compose files) and docker daemon probes finish quickly inside the 5s
@@ -60,8 +64,35 @@ describe("sqlite driver diagnostics", () => {
   });
 
   test("sqliteStatusToRow OK status maps to ok pill", () => {
-    const row = sqliteStatusToRow({ kind: "ok", driver: "bun:sqlite" });
+    const row = sqliteStatusToRow({ kind: "ok", driver: "better-sqlite3" });
     expect(row.status).toBe("ok");
+  });
+});
+
+describe("terminal dependency diagnostics", () => {
+  test("reports the complete node-pty load failure with recovery guidance", () => {
+    const reason = [
+      "Error: failed to load the PTY module",
+      "Caused by: Error: native module unavailable",
+    ].join("\n");
+    const row = shellAvailabilityToRow({ available: false, reason });
+
+    expect(row).toEqual({
+      id: "terminal.node-pty",
+      title: "@lydell/node-pty",
+      status: "warn",
+      detail: reason,
+      hint: expect.stringContaining("optional dependencies"),
+    });
+  });
+
+  test("reports node-pty as available when its native module loads", () => {
+    expect(shellAvailabilityToRow({ available: true, reason: "" })).toEqual({
+      id: "terminal.node-pty",
+      title: "@lydell/node-pty",
+      status: "ok",
+      detail: "available",
+    });
   });
 });
 
@@ -71,6 +102,54 @@ describe("sqlite driver diagnostics", () => {
 const DOCTOR_TEST_TIMEOUT_MS = 30_000;
 
 describe("doctor report", () => {
+  test(
+    "explains PATH misses and absolute executable overrides",
+    async () => {
+      const originalPath = process.env.PATH;
+      process.env.PATH = TEST_CWD;
+      let report: Awaited<ReturnType<typeof buildDoctorReport>>;
+      try {
+        report = await buildDoctorReport({
+          cwd: TEST_CWD,
+          scopeOmitDirNames: [],
+          listenPort: 0,
+        });
+      } finally {
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+      }
+
+      const expectedRows = [
+        {
+          groupId: "git",
+          rowId: "git.binary",
+          detail: "git not found in PATH",
+          override: "--bin git=/absolute/path",
+        },
+        {
+          groupId: "search",
+          rowId: "search.rg",
+          detail: "rg not found in PATH",
+          override: "--bin rg=/absolute/path",
+        },
+        {
+          groupId: "terminal",
+          rowId: "terminal.tmux",
+          detail: "tmux not found in PATH",
+          override: "--bin tmux=/absolute/path",
+        },
+      ];
+      for (const expected of expectedRows) {
+        const row = report.groups
+          .find((group) => group.id === expected.groupId)
+          ?.rows.find((candidate) => candidate.id === expected.rowId);
+        expect(row?.detail).toBe(expected.detail);
+        expect(row?.hint).toContain(expected.override);
+      }
+    },
+    DOCTOR_TEST_TIMEOUT_MS,
+  );
+
   test(
     "includes all expected diagnostic groups",
     async () => {
@@ -86,10 +165,12 @@ describe("doctor report", () => {
         "sqlite",
         "snapshot",
         "git",
+        "search",
         "github",
         "discovery",
         "datastore",
         "docker",
+        "terminal",
         "server",
       ]) {
         expect(groupIds.has(id)).toBe(true);
@@ -98,15 +179,36 @@ describe("doctor report", () => {
       // discover -> connect -> compose health の順で読めるようにする位置決め)。
       const orderedIds = report.groups.map((g) => g.id);
       const gitIdx = orderedIds.indexOf("git");
+      const searchIdx = orderedIds.indexOf("search");
       const githubIdx = orderedIds.indexOf("github");
       const discoveryIdx = orderedIds.indexOf("discovery");
       const datastoreIdx = orderedIds.indexOf("datastore");
       const dockerIdx = orderedIds.indexOf("docker");
-      expect(githubIdx > gitIdx).toBe(true);
+      const terminalIdx = orderedIds.indexOf("terminal");
+      expect(searchIdx > gitIdx).toBe(true);
+      expect(githubIdx > searchIdx).toBe(true);
       expect(discoveryIdx > githubIdx).toBe(true);
       expect(discoveryIdx >= 0).toBe(true);
       expect(datastoreIdx > discoveryIdx).toBe(true);
       expect(dockerIdx > datastoreIdx).toBe(true);
+      expect(terminalIdx > dockerIdx).toBe(true);
+      const search = report.groups.find((g) => g.id === "search");
+      const rgRow = search?.rows.find((r) => r.id === "search.rg");
+      expect(Boolean(rgRow)).toBe(true);
+      expect(rgRow?.status === "ok" || rgRow?.status === "warn").toBe(true);
+      if (rgRow?.status === "warn") {
+        expect(rgRow.hint).toContain("--bin rg=/absolute/path");
+      }
+      const terminal = report.groups.find((g) => g.id === "terminal");
+      const tmuxRow = terminal?.rows.find((r) => r.id === "terminal.tmux");
+      const nodePtyRow = terminal?.rows.find(
+        (r) => r.id === "terminal.node-pty",
+      );
+      expect(Boolean(tmuxRow)).toBe(true);
+      expect(Boolean(nodePtyRow)).toBe(true);
+      if (tmuxRow?.status === "warn") {
+        expect(tmuxRow.hint).toContain("--bin tmux=/absolute/path");
+      }
       const github = report.groups.find((g) => g.id === "github");
       const ghRow = github?.rows.find((r) => r.id === "github.gh");
       expect(Boolean(ghRow)).toBe(true);

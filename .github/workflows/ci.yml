@@ -27,21 +27,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # pnpm を先に入れる。setup-node の cache: pnpm はこれが居ないと失敗する。
+      # 版は package.json の packageManager に従う。
+      - uses: pnpm/action-setup@v6
+
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
+          cache: pnpm
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - run: bun install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
 
       - name: Type check
-        run: bun run typecheck
+        run: pnpm run typecheck
 
       - name: Verify
-        run: bun run verify
+        run: pnpm run verify
 
       - name: Pack dry run
         run: npm pack --dry-run

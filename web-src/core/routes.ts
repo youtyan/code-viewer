@@ -1,3 +1,4 @@
+import { isShellSessionId, type ShellSessionId } from "./shell";
 import { isToolId, type ToolId } from "./tools";
 
 export type DiffRange = {
@@ -455,4 +456,33 @@ export function parseToolsOverlay(search: string): ToolId | null {
 
 export function withToolsOverlay(url: string, tool: ToolId | null): string {
   return withQueryParam(url, "tools", tool);
+}
+
+/**
+ * Terminal ドロワーの状態。tools と違い「開いているがまだ何も映していない」
+ * があるので、映しているシェルの ID とは別に "open" を持つ。
+ *
+ * 映せるのはこのドロワーが開いたシェル (`shell-…`) だけ。tmux ペインは
+ * シェルの中の tmux が見せているものなので、URL に載る識別子にはならない
+ * (どのペインを見ているかは tmux 側の状態で、開き直すと変わりうる)。
+ */
+export type TerminalOverlayState = ShellSessionId | "open" | null;
+
+// Terminal ドロワーも AppRoute から独立した 1 クエリキーで、値は映している
+// シェル (`?terminal=shell-ab12`)。キーが在ってシェル ID の形でないものは
+// 「開いているだけ」とみなす。閉じたシェルの ID が URL に残ることはあるが、
+// 開いた時点で一覧と突き合わせるので、ここでは形だけ見る。tmux ペイン ID が
+// 載った古い URL もこの経路で「開いているだけ」に落ちる。
+export function parseTerminalOverlay(search: string): TerminalOverlayState {
+  const raw = new URLSearchParams(search).get("terminal");
+  if (raw === null) return null;
+  if (isShellSessionId(raw)) return raw;
+  return "open";
+}
+
+export function withTerminalOverlay(
+  url: string,
+  state: TerminalOverlayState,
+): string {
+  return withQueryParam(url, "terminal", state);
 }

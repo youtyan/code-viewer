@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { nextVisibleFileIndex } from "../core/file-navigation";
 
 describe("nextVisibleFileIndex", () => {

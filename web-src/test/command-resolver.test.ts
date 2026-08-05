@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
   mkdirSync,
@@ -10,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   commandForExternal,
   configureExternalCommands,

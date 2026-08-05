@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, test } from "vitest";
 
-const root = join(import.meta.dir, "..", "..");
+const root = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 
 describe("node cli package metadata", () => {
   test("publishes Node executable bins for npx", () => {
@@ -27,6 +28,15 @@ describe("node cli package metadata", () => {
     );
 
     expect(offenders).toEqual([]);
+  });
+
+  test("third-party notices include transitive runtime dependencies", () => {
+    const notices = readFileSync(
+      join(root, "web", "vendor", "THIRD_PARTY_NOTICES.txt"),
+      "utf8",
+    );
+
+    expect(notices).toContain("\ncluster-key-slot@");
   });
 });
 
