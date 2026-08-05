@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -10,7 +11,6 @@ import { createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const outputPath = join(projectRoot, "web/vendor/THIRD_PARTY_NOTICES.txt");
 
@@ -33,19 +33,31 @@ const seen = new Map();
 const skippedOptional = [];
 
 function findPackageJson(packageName, baseDir) {
-  for (let dir = baseDir; ; dir = dirname(dir)) {
-    const candidate = join(dir, "node_modules", packageName, "package.json");
-    if (existsSync(candidate)) return candidate;
-    if (dir === dirname(dir)) break;
-  }
-
+  const baseRequire = createRequire(join(baseDir, "__package-resolver.cjs"));
+  let packageJsonError;
   try {
-    return require.resolve(`${packageName}/package.json`, { paths: [baseDir] });
-  } catch {
+    return realpathSync(baseRequire.resolve(`${packageName}/package.json`));
+  } catch (error) {
     // Some packages do not export package.json.
+    packageJsonError = error;
   }
 
-  const entry = require.resolve(packageName, { paths: [baseDir] });
+  for (const modulesDir of baseRequire.resolve.paths(packageName) ?? []) {
+    const candidate = join(modulesDir, packageName, "package.json");
+    if (existsSync(candidate)) return realpathSync(candidate);
+  }
+
+  let entry;
+  try {
+    entry = baseRequire.resolve(packageName);
+  } catch (error) {
+    throw new Error(`unable to resolve ${packageName} from ${baseDir}`, {
+      cause: new AggregateError(
+        [packageJsonError, error],
+        `package metadata and entrypoint resolution failed for ${packageName}`,
+      ),
+    });
+  }
   for (let dir = dirname(entry); ; dir = dirname(dir)) {
     const candidate = join(dir, "package.json");
     if (existsSync(candidate)) {
@@ -55,7 +67,9 @@ function findPackageJson(packageName, baseDir) {
     if (dir === dirname(dir)) break;
   }
 
-  throw new Error(`unable to resolve ${packageName} from ${baseDir}`);
+  throw new Error(`unable to resolve ${packageName} from ${baseDir}`, {
+    cause: packageJsonError,
+  });
 }
 
 function readPackage(packageName, baseDir) {

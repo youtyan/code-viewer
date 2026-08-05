@@ -87,7 +87,7 @@
     "@lydell/node-pty": "^1.2.0-beta.14",
     "better-sqlite3": "12.9.0"
   },
-  "packageManager": "pnpm@11.9.0",
+  "packageManager": "pnpm@10.34.0",
   "engines": {
     "node": ">=20.0.0"
   },

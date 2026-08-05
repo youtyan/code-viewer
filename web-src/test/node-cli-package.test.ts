@@ -29,6 +29,15 @@ describe("node cli package metadata", () => {
 
     expect(offenders).toEqual([]);
   });
+
+  test("third-party notices include transitive runtime dependencies", () => {
+    const notices = readFileSync(
+      join(root, "web", "vendor", "THIRD_PARTY_NOTICES.txt"),
+      "utf8",
+    );
+
+    expect(notices).toContain("\ncluster-key-slot@");
+  });
 });
 
 function productionServerFiles(dir: string): string[] {
