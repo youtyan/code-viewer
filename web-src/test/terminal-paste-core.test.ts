@@ -43,14 +43,29 @@ describe("isShiftEnter", () => {
 });
 
 describe("SHIFT_ENTER_SEQUENCE", () => {
-  test("LF (Ctrl+J) の 1 バイト", () => {
-    // CR を送ると送信されてしまう。ESC+CR も駄目で、受け側は ESC と Enter を
-    // 別々に読んで結局送信する。設定なしでどの端末でも通るのは Ctrl+J だけ。
-    expect(SHIFT_ENTER_SEQUENCE).toBe(String.fromCharCode(10));
-    expect(SHIFT_ENTER_SEQUENCE).toHaveLength(1);
+  const ESC = String.fromCharCode(27);
+  const LF = String.fromCharCode(10);
+
+  test("改行 1 つを bracketed paste で囲んで送る", () => {
+    // 素の LF で送ると、ターミナルの中で動いている tmux がこれを C-j キーと
+    // して解釈する。C-j にペイン移動を割り当てている設定は珍しくなく、その
+    // 環境では改行がバインドに食われてアプリに届かない。
+    // 貼り付けとして送れば tmux はキー解釈をしないので通り抜けられる。
+    expect(SHIFT_ENTER_SEQUENCE).toBe(`${ESC}[200~${LF}${ESC}[201~`);
+  });
+
+  test("中身は改行 1 つだけ", () => {
+    // 囲みを外した中身が改行そのもの。ここに余計な文字が混ざると、そのまま
+    // 本文に打ち込まれる。
+    const body = SHIFT_ENTER_SEQUENCE.replace(`${ESC}[200~`, "").replace(
+      `${ESC}[201~`,
+      "",
+    );
+    expect(body).toBe(LF);
   });
 
   test("CR を含まない", () => {
+    // CR が混ざると受け側が「送信」と解釈する。書きかけのまま送られてしまう。
     expect(SHIFT_ENTER_SEQUENCE).not.toContain(String.fromCharCode(13));
   });
 });

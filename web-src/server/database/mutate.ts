@@ -56,7 +56,7 @@ export function buildMutationStatements(
   const requireKnownColumns = (cells: DbCellInput[], label: string): void => {
     for (const cell of cells) {
       if (!columnNames.has(cell.column)) {
-        throw new Error(`unknown column: ${cell.column}`);
+        throw new Error(`${label}: unknown column: ${cell.column}`);
       }
     }
   };

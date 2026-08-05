@@ -56,13 +56,7 @@ export function attachDragResizer(options: DragResizerOptions): () => void {
     pointerId = event.pointerId;
     startPosition = pointerPosition(event);
     startSize = options.getSize();
-    try {
-      // 捕捉できなくてもドラッグ自体は成立させる (ハンドル外に出たときの
-      // 追従が甘くなるだけ)。ここで throw させて操作ごと落とさない。
-      handle.setPointerCapture?.(event.pointerId);
-    } catch {
-      // ignore
-    }
+    handle.setPointerCapture?.(event.pointerId);
     setActive(true);
     event.preventDefault();
   };

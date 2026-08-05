@@ -11,6 +11,8 @@ import {
 import { changedPathsCoverPath } from "./core/changed-paths";
 import { attachDragResizer } from "./core/drag-resizer";
 import { GdpExpandLogic } from "./core/expand-logic";
+import { isTestFilePath } from "./core/file-filter";
+import { filePathClipboardText } from "./core/file-path-copy";
 import {
   findMainScrollTarget,
   focusMainPanel,
@@ -37,15 +39,18 @@ import {
   PULSE_16_PATH,
   QUESTION_16_PATH,
   SYNC_16_PATH,
-  TERMINAL_16_PATHS,
   TRIANGLE_DOWN_16_PATH,
   UNDO_16_PATH,
   X_16_PATH,
 } from "./core/icons";
 import { isImeComposing } from "./core/keyboard";
 import {
+  DEFAULT_KEY_BINDINGS,
+  type KeyBinding,
   type KeymapAction,
+  type KeymapOverrides,
   type KeymapScope,
+  resolveKeyBindings,
   resolveKeymapAction,
 } from "./core/keymap";
 import { createNetworkActivityTracker } from "./core/network-activity";
@@ -95,11 +100,13 @@ import {
   renderFileHistoryShell as renderFileHistoryShellView,
 } from "./views/file-history-shell";
 import { isBlobOrBlameFileRoute } from "./views/file-shell";
+import { createHelpKeybindingEditor } from "./views/help-keybinding-editor";
 import {
   createHelpPage,
   helpLanguageFromRoute,
   helpSectionFromRoute,
   openHelpKeybindings,
+  openHelpSection,
 } from "./views/help-page";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
@@ -127,6 +134,10 @@ import { terminalText } from "./views/terminal/i18n";
 import { createTerminalView } from "./views/terminal/terminal-view";
 import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
+import {
+  createViewerSettings,
+  type ViewerSettingsText,
+} from "./views/viewer-settings";
 
 window.GdpExpandLogic = GdpExpandLogic;
 
@@ -170,7 +181,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   const HIGHLIGHT_SRC = "/vendor/highlight.js/highlight.min.js";
   const DEFAULT_RANGE: DiffRange = { from: "HEAD", to: "worktree" };
   // Keep in sync with .gdp-source-virtual-row height/line-height in web/style.css.
-  const TEST_RE = /(^|[/_.])(test|spec|__tests__)([/_.]|$)/i;
   let highlightLoadPromise: Promise<HljsApi | null> | null = null;
   let SERVER_SCOPE_OMIT_DIRS_DEFAULT: string[] = [];
   let SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT: string[] = [];
@@ -425,6 +435,21 @@ window.GdpExpandLogic = GdpExpandLogic;
     };
   }
 
+  // APP_SETTINGS はいくつもの経路で丸ごと差し替わるので、そのたびに再構築を
+  // 呼ぶのではなく、差分オブジェクトの同一性で覚えておく。参照が変われば
+  // 作り直し、変わらなければ前回の配列をそのまま返す。keydown ごとに
+  // 展開し直さずに済み、更新の呼び忘れも起きない。
+  let cachedKeymapOverrides: KeymapOverrides | undefined;
+  let cachedKeyBindings: KeyBinding[] = DEFAULT_KEY_BINDINGS;
+
+  function activeKeyBindings(): KeyBinding[] {
+    if (APP_SETTINGS.keybindings !== cachedKeymapOverrides) {
+      cachedKeymapOverrides = APP_SETTINGS.keybindings;
+      cachedKeyBindings = resolveKeyBindings(cachedKeymapOverrides);
+    }
+    return cachedKeyBindings;
+  }
+
   function patchSettings(
     patch: SettingsPatch,
     options: { keepalive?: boolean } = {},
@@ -437,6 +462,26 @@ window.GdpExpandLogic = GdpExpandLogic;
       body,
       keepalive: options.keepalive,
     }).catch(() => undefined);
+  }
+
+  async function persistGrepSettings(patch: {
+    fileSelectionHistory?: string[];
+    grepSelectionHistory?: string[];
+    grepRegex?: boolean;
+    hideTests?: boolean;
+    grepGroupByFile?: boolean;
+    grepPaletteWidth?: number;
+    grepPaletteHeight?: number;
+  }): Promise<void> {
+    const response = await trackLoad(
+      fetch("/_state/settings", {
+        method: "PATCH",
+        headers: actionHeaders(),
+        body: JSON.stringify(patch),
+      }),
+    );
+    if (!response.ok) throw new Error(await response.text());
+    APP_SETTINGS = (await response.json()) as AppSettingsState;
   }
 
   let pendingViewPatch: ViewPatch | null = null;
@@ -807,6 +852,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     applySidebarHidden(STATE.sidebarHidden, { persist: false });
     applyHistoryWidth(STATE.historyWidth, false);
     applySidebarWidth(STATE.sbWidth, { persist: false });
+    syncAppPanelLayout();
     ANNOTATIONS_UI?.applyAnnotationPanelWidth(
       APP_SETTINGS.annotationPanelWidth ?? 380,
       false,
@@ -958,7 +1004,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRepoSidebarRef: (ref: string | null) => {
       REPO_SIDEBAR_REF = ref;
     },
-    isTestPath: (path: string) => TEST_RE.test(path),
+    isTestPath: isTestFilePath,
     sidebarToggleTitle: (hidden) =>
       hidden ? uiText().sidebar.show : uiText().sidebar.hide,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
@@ -1215,6 +1261,25 @@ window.GdpExpandLogic = GdpExpandLogic;
     repoFileCacheKey,
     trackLoad,
     getServerGeneration: () => SERVER_GENERATION,
+    getSyntaxHighlight: () => STATE.syntaxHighlight,
+    inferLang: (path) => SOURCE_VIEW.inferLang(path),
+    loadSourceShikiHighlighter: (lang) =>
+      SOURCE_VIEW.loadSourceShikiHighlighter(lang),
+    sourceShikiLines: (textValue, lang, highlighter) =>
+      SOURCE_VIEW.sourceShikiLines(textValue, lang, highlighter),
+    getLanguage: () => STATE.language,
+    getFileSelectionHistory: () => APP_SETTINGS.fileSelectionHistory || [],
+    getGrepSelectionHistory: () => APP_SETTINGS.grepSelectionHistory || [],
+    getGrepRegex: () => APP_SETTINGS.grepRegex === true,
+    getGrepHideTests: () => STATE.hideTests,
+    getGrepGroupByFile: () => APP_SETTINGS.grepGroupByFile === true,
+    getGrepPaletteWidth: () => APP_SETTINGS.grepPaletteWidth,
+    getGrepPaletteHeight: () => APP_SETTINGS.grepPaletteHeight,
+    persistGrepSettings,
+    applyGrepHideTests: (hidden) => {
+      STATE.hideTests = hidden;
+      applyHideTests();
+    },
   });
   const { openSearchPalette, isPaletteOpen, paletteMode, clearRepoFileCache } =
     SEARCH_PALETTE;
@@ -1226,6 +1291,16 @@ window.GdpExpandLogic = GdpExpandLogic;
         "repo" | "diff" | "history" | "journal" | "database" | "tools" | "help",
         string
       >;
+      appPanel: {
+        tabs: string;
+        layout: string;
+        overlay: string;
+        overlayTitle: string;
+        docked: string;
+        dockedTitle: string;
+        close: string;
+        resize: string;
+      };
       global: {
         annotations: string;
         queryHistory: string;
@@ -1369,42 +1444,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         panelTitle: string;
         close: string;
         viewAll: string;
+        settings: string;
       };
-      settings: {
-        title: string;
-        close: string;
-        display: string;
-        language: string;
-        fileListFontSize: string;
-        fileListFontSizeHelp: string;
-        codeFontSize: string;
-        sizeSmall: string;
-        sizeRegular: string;
-        sizeLarge: string;
-        sizeExtraLarge: string;
-        displaySource: string;
-        excludedDirectories: string;
-        omitDirs: string;
-        omitDirsHelp: string;
-        excludeNames: string;
-        excludeNamesHelp: string;
-        reset: string;
-        autosaveNote: string;
-        scopeSource: (project: string, source: string) => string;
-        browserOverride: string;
-        serverDefault: string;
-        uploadsTitle: string;
-        uploadEnabledLabel: string;
-        uploadEnabledHelp: string;
-        datastoreTitle: string;
-        datastoreInferFkLabel: string;
-        datastoreInferFkHelp: string;
-        datastoreS3TooltipLabel: string;
-        datastoreS3TooltipHelp: string;
-        watchTitle: string;
-        watchLimit: string;
-        watchLimitHelp: (defaultLimit: number) => string;
-      };
+      // フォーム本体は views/viewer-settings.ts が持つので、文言の形も
+      // あちらの型に合わせる。ここで二重に並べると片方だけ増えて崩れる。
+      settings: ViewerSettingsText;
       annotations: {
         title: string;
         follow: string;
@@ -1423,7 +1467,17 @@ window.GdpExpandLogic = GdpExpandLogic;
         journal: "Work Log",
         database: "Datastores",
         tools: "Tools",
-        help: "Help",
+        help: "Settings & Help",
+      },
+      appPanel: {
+        tabs: "Panel",
+        layout: "Panel layout",
+        overlay: "Overlay",
+        overlayTitle: "Show the panel over the page",
+        docked: "Docked",
+        dockedTitle: "Keep the panel inside the window",
+        close: "Close panel",
+        resize: "Resize panel height",
       },
       global: {
         annotations: "code annotations",
@@ -1676,10 +1730,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         panelTitle: "Quick Help",
         close: "close quick help",
         viewAll: "View all keybindings →",
+        settings: "Settings →",
       },
       settings: {
-        title: "Viewer Settings",
-        close: "close viewer settings",
         display: "Display",
         language: "Language",
         fileListFontSize: "UI font size",
@@ -1737,7 +1790,17 @@ window.GdpExpandLogic = GdpExpandLogic;
         journal: "ワークログ",
         database: "データストア",
         tools: "ツール",
-        help: "ヘルプ",
+        help: "設定・ヘルプ",
+      },
+      appPanel: {
+        tabs: "パネル",
+        layout: "パネルの表示方法",
+        overlay: "重ねる",
+        overlayTitle: "本文に重ねて表示",
+        docked: "画面内",
+        dockedTitle: "本文と分けて画面内に表示",
+        close: "パネルを閉じる",
+        resize: "パネルの高さを変更",
       },
       global: {
         annotations: "コード注釈",
@@ -1993,10 +2056,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         panelTitle: "クイックヘルプ",
         close: "クイックヘルプを閉じる",
         viewAll: "すべてのキーバインドを見る →",
+        settings: "設定 →",
       },
       settings: {
-        title: "ビューア設定",
-        close: "ビューア設定を閉じる",
         display: "表示",
         language: "言語",
         fileListFontSize: "UIの文字サイズ",
@@ -2061,16 +2123,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (button) button.textContent = text;
   }
 
-  function setOptionText(
-    select: HTMLSelectElement | null,
-    labels: Record<string, string>,
-  ) {
-    select?.querySelectorAll<HTMLOptionElement>("option").forEach((option) => {
-      const label = labels[option.value];
-      if (label) option.textContent = label;
-    });
-  }
-
   function localizeViewerChrome() {
     const text = uiText();
     document.documentElement.lang = STATE.language;
@@ -2102,12 +2154,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       annotationsToggle.title = text.global.annotations;
       annotationsToggle.setAttribute("aria-label", text.global.annotations);
     }
-    const viewerSettings =
-      document.querySelector<HTMLButtonElement>("#viewer-settings");
-    if (viewerSettings) {
-      viewerSettings.title = text.global.settings;
-      viewerSettings.setAttribute("aria-label", text.global.settings);
-    }
     const theme = document.querySelector<HTMLButtonElement>("#theme");
     if (theme) {
       theme.title = text.global.theme;
@@ -2132,8 +2178,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     const toolsChrome = toolsText(STATE.language);
     const toolsBtn =
       document.querySelector<HTMLButtonElement>("#panel-tab-tools");
-    // ラベルは data-route 経由で入るので、ここでは補足説明の title だけ。
-    if (toolsBtn) toolsBtn.title = toolsChrome.open;
+    if (toolsBtn) {
+      toolsBtn.textContent = toolsChrome.title;
+      toolsBtn.title = toolsChrome.open;
+    }
     document
       .querySelector<HTMLElement>("#tools-sheet")
       ?.setAttribute("aria-label", toolsChrome.title);
@@ -2142,11 +2190,44 @@ window.GdpExpandLogic = GdpExpandLogic;
     const terminalBtn = document.querySelector<HTMLButtonElement>(
       "#panel-tab-terminal",
     );
-    if (terminalBtn) terminalBtn.title = terminalChrome.open;
+    if (terminalBtn) {
+      terminalBtn.textContent = terminalChrome.title;
+      terminalBtn.title = terminalChrome.open;
+    }
     document
       .querySelector<HTMLElement>("#terminal-sheet")
       ?.setAttribute("aria-label", terminalChrome.title);
     relocalizeTerminal?.();
+    document
+      .querySelector<HTMLElement>(".app-panel-tabs")
+      ?.setAttribute("aria-label", text.appPanel.tabs);
+    const panelLayout = document.querySelector<HTMLElement>(
+      ".app-panel-layout-switch",
+    );
+    panelLayout?.setAttribute("aria-label", text.appPanel.layout);
+    const overlayLayout = document.querySelector<HTMLButtonElement>(
+      '[data-panel-layout="overlay"]',
+    );
+    if (overlayLayout) {
+      overlayLayout.textContent = text.appPanel.overlay;
+      overlayLayout.title = text.appPanel.overlayTitle;
+    }
+    const dockedLayout = document.querySelector<HTMLButtonElement>(
+      '[data-panel-layout="docked"]',
+    );
+    if (dockedLayout) {
+      dockedLayout.textContent = text.appPanel.docked;
+      dockedLayout.title = text.appPanel.dockedTitle;
+    }
+    const panelClose =
+      document.querySelector<HTMLButtonElement>("#app-panel-close");
+    if (panelClose) {
+      panelClose.title = text.appPanel.close;
+      panelClose.setAttribute("aria-label", text.appPanel.close);
+    }
+    document
+      .querySelector<HTMLElement>("#app-panel-resizer")
+      ?.setAttribute("aria-label", text.appPanel.resize);
     const copyAiContext =
       document.querySelector<HTMLButtonElement>("#copy-ai-context");
     if (copyAiContext) {
@@ -2259,82 +2340,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
     relocalizeHistory?.();
     relocalizeJournal?.();
-
-    setElementText(".scope-settings-head strong", text.settings.title);
-    const settingsClose = document.querySelector<HTMLButtonElement>(
-      "#scope-settings-close",
-    );
-    settingsClose?.setAttribute("aria-label", text.settings.close);
-    const settingsSections = document.querySelectorAll<HTMLElement>(
-      ".scope-settings-section-title",
-    );
-    if (settingsSections[0])
-      settingsSections[0].textContent = text.settings.display;
-    if (settingsSections[1])
-      settingsSections[1].textContent = text.settings.uploadsTitle;
-    if (settingsSections[2])
-      settingsSections[2].textContent = text.settings.excludedDirectories;
-    if (settingsSections[3])
-      settingsSections[3].textContent = text.settings.datastoreTitle;
-    if (settingsSections[4])
-      settingsSections[4].textContent = text.settings.watchTitle;
-    setElementText(
-      "#datastore-infer-fk-label",
-      text.settings.datastoreInferFkLabel,
-    );
-    setElementText(
-      "#datastore-infer-fk-help",
-      text.settings.datastoreInferFkHelp,
-    );
-    setElementText(
-      "#datastore-s3-tooltip-label",
-      text.settings.datastoreS3TooltipLabel,
-    );
-    setElementText(
-      "#datastore-s3-tooltip-help",
-      text.settings.datastoreS3TooltipHelp,
-    );
-    setElementText("#upload-enabled-label", text.settings.uploadEnabledLabel);
-    setElementText("#upload-help", text.settings.uploadEnabledHelp);
-    setElementText("#scope-omit-dirs-help", text.settings.omitDirsHelp);
-    setElementText("#scope-exclude-names-help", text.settings.excludeNamesHelp);
-    setElementText(
-      "#scope-watch-limit-help",
-      text.settings.watchLimitHelp(SERVER_SCOPE_WATCH_LIMIT_DEFAULT),
-    );
-    const labelMap: Record<string, string> = {
-      "viewer-language": text.settings.language,
-      "sidebar-font-size": text.settings.fileListFontSize,
-      "code-font-size": text.settings.codeFontSize,
-      "scope-omit-dirs": text.settings.omitDirs,
-      "scope-exclude-names": text.settings.excludeNames,
-      "scope-watch-limit": text.settings.watchLimit,
-    };
-    Object.entries(labelMap).forEach(([id, label]) => {
-      const labelEl = document.querySelector<HTMLLabelElement>(
-        `label[for="${id}"]`,
-      );
-      if (labelEl) labelEl.textContent = label;
-    });
-    setOptionText(document.querySelector("#sidebar-font-size"), {
-      compact: text.settings.sizeSmall,
-      regular: text.settings.sizeRegular,
-      large: text.settings.sizeLarge,
-      xlarge: text.settings.sizeExtraLarge,
-    });
-    setOptionText(document.querySelector("#code-font-size"), {
-      compact: text.settings.sizeSmall,
-      regular: text.settings.sizeRegular,
-      large: text.settings.sizeLarge,
-      xlarge: text.settings.sizeExtraLarge,
-    });
-    setElementText("#ui-font-size-help", text.settings.fileListFontSizeHelp);
-    setElementText("#display-settings-source", text.settings.displaySource);
-    setElementText("#scope-settings-autosave-note", text.settings.autosaveNote);
-    setButtonLabel(
-      document.querySelector("#scope-omit-reset"),
-      text.settings.reset,
-    );
+    // 設定フォームの文言は viewer-settings.ts が自分で貼る。
+    relocalizeViewerSettings?.();
 
     setElementText(".annotation-panel-head strong", text.annotations.title);
     const followLabel = document.querySelector<HTMLElement>(
@@ -2374,6 +2381,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let relocalizeHistory: (() => void) | null = null;
   let relocalizeJournal: (() => void) | null = null;
   let relocalizeTools: (() => void) | null = null;
+  let relocalizeViewerSettings: (() => void) | null = null;
   let relocalizeTerminal: (() => void) | null = null;
   let relocalizeDatabase: (() => void) | null = null;
 
@@ -2567,94 +2575,41 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (target) renderRepoBlobSidebar(target.path, target.ref || "worktree");
   }
 
-  async function openScopeSettings() {
-    const pop = document.querySelector<HTMLElement>("#scope-settings-popover");
-    const input =
-      document.querySelector<HTMLTextAreaElement>("#scope-omit-dirs");
-    const excludeInput = document.querySelector<HTMLTextAreaElement>(
-      "#scope-exclude-names",
-    );
-    const sidebarFontSize =
-      document.querySelector<HTMLSelectElement>("#sidebar-font-size");
-    const codeFontSize =
-      document.querySelector<HTMLSelectElement>("#code-font-size");
-    const viewerLanguage =
-      document.querySelector<HTMLSelectElement>("#viewer-language");
-    const source = document.querySelector<HTMLElement>("#scope-omit-source");
-    if (
-      !pop ||
-      !input ||
-      !excludeInput ||
-      !sidebarFontSize ||
-      !codeFontSize ||
-      !viewerLanguage ||
-      !source
-    )
-      return;
-    await loadSettings();
-    localizeViewerChrome();
-    viewerLanguage.value = STATE.language;
-    sidebarFontSize.value = savedSidebarFontSize();
-    codeFontSize.value = savedCodeFontSize();
-    input.value = effectiveScopeOmitDirs().join("\n");
-    excludeInput.value = effectiveScopeExcludeNames().join("\n");
-    const watchLimitInput =
-      document.querySelector<HTMLInputElement>("#scope-watch-limit");
-    const watchLimitRange = document.querySelector<HTMLInputElement>(
-      "#scope-watch-limit-range",
-    );
-    const watchLimitValue = effectiveScopeWatchLimit();
-    if (watchLimitInput) {
-      watchLimitInput.min = String(SERVER_SCOPE_WATCH_LIMIT_MIN);
-      watchLimitInput.max = String(SERVER_SCOPE_WATCH_LIMIT_MAX);
-      watchLimitInput.value = String(watchLimitValue);
-    }
-    if (watchLimitRange) {
-      watchLimitRange.min = String(SERVER_SCOPE_WATCH_LIMIT_MIN);
-      watchLimitRange.max = String(SERVER_SCOPE_WATCH_LIMIT_MAX);
-      watchLimitRange.value = String(watchLimitValue);
-    }
-    const uploadToggle =
-      document.querySelector<HTMLInputElement>("#upload-enabled");
-    if (uploadToggle)
-      uploadToggle.checked = APP_SETTINGS.uploadEnabled !== false;
-    syncDatastoreToggles();
-    source.textContent = uiText().settings.scopeSource(
-      PROJECT_NAME || "default",
-      scopeOmitSourceLabel(),
-    );
-    pop.hidden = false;
-    viewerLanguage.focus();
-  }
-
-  function closeScopeSettings() {
-    const pop = document.querySelector<HTMLElement>("#scope-settings-popover");
-    if (pop) pop.hidden = true;
-  }
-
-  function toggleScopeSettings() {
-    const pop = document.querySelector<HTMLElement>("#scope-settings-popover");
-    if (pop && !pop.hidden) {
-      closeScopeSettings();
-      return;
-    }
-    void openScopeSettings();
-  }
-
-  function refreshScopeSourceLabel() {
-    const source = document.querySelector<HTMLElement>("#scope-omit-source");
-    if (!source) return;
-    source.textContent = uiText().settings.scopeSource(
-      PROJECT_NAME || "default",
-      scopeOmitSourceLabel(),
-    );
-  }
-
   function saveSidebarFontSize(value: string) {
     const next = normalizeViewerFontSize(value);
     mergeLocalSettings({ sidebarFontSize: next });
     applySidebarFontSize();
     patchSettings({ sidebarFontSize: next });
+  }
+
+  /** コードの文字サイズを 1 段ずつ動かす。端では止まる。 */
+  const CODE_FONT_STEPS: ViewerFontSize[] = [
+    "compact",
+    "regular",
+    "large",
+    "xlarge",
+  ];
+
+  function stepCodeFontSize(delta: number): void {
+    const current = CODE_FONT_STEPS.indexOf(savedCodeFontSize());
+    const from = current < 0 ? CODE_FONT_STEPS.indexOf("regular") : current;
+    const next =
+      CODE_FONT_STEPS[
+        Math.max(0, Math.min(CODE_FONT_STEPS.length - 1, from + delta))
+      ];
+    saveCodeFontSize(next);
+    VIEWER_SETTINGS.sync();
+  }
+
+  /** サイドバーで選ばれているファイルのパスをクリップボードへ。 */
+  function copyActiveFilePath(): boolean {
+    const active = document.querySelector<HTMLElement>(
+      "#filelist li.active[data-path]",
+    );
+    const path = active?.dataset.path;
+    if (!path) return false;
+    void navigator.clipboard.writeText(filePathClipboardText(path));
+    return true;
   }
 
   function saveCodeFontSize(value: string) {
@@ -2673,7 +2628,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     const next = normalizeScopeOmitDirs(value);
     mergeLocalSettings({ scopeOmitDirs: next });
     patchSettings({ scopeOmitDirs: next });
-    refreshScopeSourceLabel();
     refreshRepositoryTreeAfterSettings();
   }
 
@@ -2681,7 +2635,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     const next = normalizeScopeExcludeNames(value);
     mergeLocalSettings({ scopeExcludeNames: next });
     patchSettings({ scopeExcludeNames: next });
-    refreshScopeSourceLabel();
     refreshRepositoryTreeAfterSettings();
   }
 
@@ -2706,29 +2659,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     return saved ?? SERVER_SCOPE_WATCH_LIMIT_DEFAULT;
   }
 
-  function syncScopeWatchLimitInputs(value: number) {
-    const numberInput =
-      document.querySelector<HTMLInputElement>("#scope-watch-limit");
-    const rangeInput = document.querySelector<HTMLInputElement>(
-      "#scope-watch-limit-range",
-    );
-    if (numberInput && numberInput.value !== String(value))
-      numberInput.value = String(value);
-    if (rangeInput && rangeInput.value !== String(value))
-      rangeInput.value = String(value);
-  }
-
   function saveScopeWatchLimitField(value: string) {
     const next = normalizeScopeWatchLimit(value);
     const resolved = next ?? SERVER_SCOPE_WATCH_LIMIT_DEFAULT;
     mergeLocalSettings({ scopeWatchLimit: resolved });
     patchSettings({ scopeWatchLimit: resolved });
-    syncScopeWatchLimitInputs(resolved);
-  }
-
-  function previewScopeWatchLimit(value: string) {
-    const next = normalizeScopeWatchLimit(value);
-    if (next != null) syncScopeWatchLimitInputs(next);
   }
 
   function resetScopeSettings() {
@@ -2752,27 +2687,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       scopeWatchLimit: null,
       uploadEnabled: null,
     });
-    const sidebarFontSize =
-      document.querySelector<HTMLSelectElement>("#sidebar-font-size");
-    const codeFontSize =
-      document.querySelector<HTMLSelectElement>("#code-font-size");
-    const omitDirs =
-      document.querySelector<HTMLTextAreaElement>("#scope-omit-dirs");
-    const excludeNames = document.querySelector<HTMLTextAreaElement>(
-      "#scope-exclude-names",
-    );
-    const uploadToggle =
-      document.querySelector<HTMLInputElement>("#upload-enabled");
-    const viewerLanguage =
-      document.querySelector<HTMLSelectElement>("#viewer-language");
-    if (sidebarFontSize) sidebarFontSize.value = "regular";
-    if (codeFontSize) codeFontSize.value = "regular";
-    if (omitDirs) omitDirs.value = effectiveScopeOmitDirs().join("\n");
-    if (excludeNames)
-      excludeNames.value = effectiveScopeExcludeNames().join("\n");
-    if (uploadToggle) uploadToggle.checked = true;
-    if (viewerLanguage) viewerLanguage.value = STATE.language;
-    refreshScopeSourceLabel();
+    // フォームの表示は viewer-settings.ts が sync() で貼り直す。
     refreshRepositoryTreeAfterSettings();
   }
 
@@ -3181,6 +3096,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         STATE.route.view === "blame" ||
         STATE.route.view === "history");
     const repoSidebarRoute = STATE.route.screen === "repo" || fileRepoBlobRoute;
+    if (STATE.route.screen !== "help") {
+      document.querySelector(".gdp-help-shell")?.remove();
+    }
     document.body.classList.toggle(
       "gdp-file-detail-page",
       STATE.route.screen === "file",
@@ -3448,6 +3366,69 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!document.hidden) enqueueInitialLoads();
   });
 
+  // ---------- Viewer settings: extracted to viewer-settings.ts ----------
+  // 以前はヘッダの歯車から出るポップオーバーだった。今は Help ページの
+  // 設定セクションが唯一の置き場で、ここは値の出し入れだけを受け持つ。
+  const VIEWER_SETTINGS = createViewerSettings({
+    getText: () => uiText().settings,
+    getValues: () => ({
+      language: STATE.language,
+      sidebarFontSize: savedSidebarFontSize(),
+      codeFontSize: savedCodeFontSize(),
+      omitDirs: effectiveScopeOmitDirs().join("\n"),
+      excludeNames: effectiveScopeExcludeNames().join("\n"),
+      watchLimit: effectiveScopeWatchLimit(),
+      watchLimitMin: SERVER_SCOPE_WATCH_LIMIT_MIN,
+      watchLimitMax: SERVER_SCOPE_WATCH_LIMIT_MAX,
+      watchLimitDefault: SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
+      uploadEnabled: APP_SETTINGS.uploadEnabled !== false,
+      inferFkRails: DATABASE_VIEW.getDbUiPref("inferFkRails", false),
+      s3TooltipEnabled: DATABASE_VIEW.getDbUiPref("s3TooltipEnabled", true),
+      scopeSource: uiText().settings.scopeSource(
+        PROJECT_NAME || "default",
+        scopeOmitSourceLabel(),
+      ),
+    }),
+    refresh: async () => {
+      await loadSettings();
+    },
+    onLanguageChange: (value) => {
+      setViewerLanguage(normalizeViewerLanguage(value));
+      VIEWER_SETTINGS.sync();
+    },
+    onSidebarFontSizeChange: saveSidebarFontSize,
+    onCodeFontSizeChange: saveCodeFontSize,
+    onUploadEnabledChange: saveUploadEnabled,
+    onOmitDirsChange: (value) => {
+      saveScopeOmitDirsField(value);
+      VIEWER_SETTINGS.sync();
+    },
+    onExcludeNamesChange: (value) => {
+      saveScopeExcludeNamesField(value);
+      VIEWER_SETTINGS.sync();
+    },
+    onWatchLimitChange: saveScopeWatchLimitField,
+    onInferFkChange: (checked) =>
+      DATABASE_VIEW.setDbUiPref("inferFkRails", checked),
+    onS3TooltipChange: (checked) =>
+      DATABASE_VIEW.setDbUiPref("s3TooltipEnabled", checked),
+    onReset: resetScopeSettings,
+  });
+  relocalizeViewerSettings = () => VIEWER_SETTINGS.localize();
+
+  // ---------- Keybinding editor: extracted to help-keybinding-editor.ts ----
+  const KEYBINDING_EDITOR = createHelpKeybindingEditor({
+    getLanguage: () => STATE.language,
+    getOverrides: () => APP_SETTINGS.keybindings || {},
+    saveOverrides: (next) => {
+      // 差分が空になったら丸ごと消す。次に読んだときは素直にデフォルトへ。
+      patchSettings({
+        keybindings: Object.keys(next).length ? next : null,
+      });
+    },
+    onChanged: () => renderHelpPage(),
+  });
+
   // ---------- Help page: extracted to help-page.ts ----------
   const { renderHelpPage } = createHelpPage({
     $,
@@ -3460,7 +3441,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     syncHeaderMenu,
     getLanguage: () => STATE.language,
-    setLanguage: (language) => setViewerLanguage(language),
+    mountViewerSettings: (host) => VIEWER_SETTINGS.mount(host),
+    getKeyBindings: activeKeyBindings,
+    decorateKeybindings: (article, groups) =>
+      KEYBINDING_EDITOR.decorate(article, groups),
   });
 
   // ---------- Hunk expand: extracted to hunk-expand.ts ----------
@@ -3553,15 +3537,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   // alongside them (#annotations-count, #doctor-badge) which keep their own
   // sibling <span> so this never clobbers them.
   function setGlobalHeaderIcons() {
-    const panelToggleIcon = document.querySelector<HTMLElement>(
-      "#panel-toggle .goi-icon",
-    );
-    if (panelToggleIcon) {
-      panelToggleIcon.innerHTML = iconSvg(
-        "octicon-terminal",
-        TERMINAL_16_PATHS,
-      );
-    }
     const annotationsIcon = document.querySelector<HTMLElement>(
       "#annotations-toggle .goi-icon",
     );
@@ -3661,7 +3636,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#sb-collapse-all").addEventListener("click", () =>
     setAllSidebarDirsCollapsed(true),
   );
-  $("#viewer-settings")?.addEventListener("click", toggleScopeSettings);
   $("#doctor-btn")?.addEventListener("click", (event) => {
     event.preventDefault();
     toggleDoctorSheet();
@@ -3678,12 +3652,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     event.preventDefault();
     closeAppPanel();
   });
-  // パネルが閉じているときの開き口。ページ移動の並びとは別の場所に置く。
-  $("#panel-toggle")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    if (isAppPanelOpen()) closeAppPanel();
-    else openTerminalSheet();
-  });
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-panel-layout]")
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        setAppPanelDocked(button.dataset.panelLayout === "docked");
+      });
+    });
   let copyAiContextFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   $("#copy-ai-context")?.addEventListener("click", async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
@@ -3782,79 +3757,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     } catch {
       finish(false, false, 0);
     }
-  });
-  $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
-  $("#scope-omit-reset")?.addEventListener("click", resetScopeSettings);
-  $("#viewer-language")?.addEventListener("change", (event) => {
-    const select = event.currentTarget as HTMLSelectElement;
-    setViewerLanguage(normalizeViewerLanguage(select.value));
-    refreshScopeSourceLabel();
-  });
-  $("#sidebar-font-size")?.addEventListener("change", (event) => {
-    saveSidebarFontSize((event.currentTarget as HTMLSelectElement).value);
-  });
-  $("#code-font-size")?.addEventListener("change", (event) => {
-    saveCodeFontSize((event.currentTarget as HTMLSelectElement).value);
-  });
-  $("#upload-enabled")?.addEventListener("change", (event) => {
-    saveUploadEnabled((event.currentTarget as HTMLInputElement).checked);
-  });
-  // データストアセクションのトグル: db-ui pref に直接 PATCH する。
-  // 既存ロケーション (サイドバー prefs バー / S3 explorer 内) からは取り除き、
-  // ここに集約済み。
-  $("#datastore-infer-fk")?.addEventListener("change", (event) => {
-    DATABASE_VIEW.setDbUiPref(
-      "inferFkRails",
-      (event.currentTarget as HTMLInputElement).checked,
-    );
-  });
-  $("#datastore-s3-tooltip")?.addEventListener("change", (event) => {
-    DATABASE_VIEW.setDbUiPref(
-      "s3TooltipEnabled",
-      (event.currentTarget as HTMLInputElement).checked,
-    );
-  });
-
-  // 設定パネルが開かれた時 (loadSettings 経由) に最新の pref 値で
-  // checkbox を初期化するヘルパ。DATABASE_VIEW の宣言後に実行されるので
-  // 実行時参照は安全。
-  function syncDatastoreToggles(): void {
-    const inferToggle = document.querySelector<HTMLInputElement>(
-      "#datastore-infer-fk",
-    );
-    if (inferToggle) {
-      inferToggle.checked = DATABASE_VIEW.getDbUiPref("inferFkRails", false);
-    }
-    const tooltipToggle = document.querySelector<HTMLInputElement>(
-      "#datastore-s3-tooltip",
-    );
-    if (tooltipToggle) {
-      tooltipToggle.checked = DATABASE_VIEW.getDbUiPref(
-        "s3TooltipEnabled",
-        true,
-      );
-    }
-  }
-  $("#scope-omit-dirs")?.addEventListener("change", (event) => {
-    saveScopeOmitDirsField((event.currentTarget as HTMLTextAreaElement).value);
-  });
-  $("#scope-exclude-names")?.addEventListener("change", (event) => {
-    saveScopeExcludeNamesField(
-      (event.currentTarget as HTMLTextAreaElement).value,
-    );
-  });
-  $("#scope-watch-limit")?.addEventListener("change", (event) => {
-    saveScopeWatchLimitField((event.currentTarget as HTMLInputElement).value);
-  });
-  $("#scope-watch-limit-range")?.addEventListener("input", (event) => {
-    previewScopeWatchLimit((event.currentTarget as HTMLInputElement).value);
-  });
-  $("#scope-watch-limit-range")?.addEventListener("change", (event) => {
-    saveScopeWatchLimitField((event.currentTarget as HTMLInputElement).value);
-  });
-  $("#scope-settings-popover")?.addEventListener("keydown", (e) => {
-    if (isImeComposing(e)) return;
-    if (e.key === "Escape") closeScopeSettings();
   });
   localizeViewerChrome();
   prepareKeyboardPanels();
@@ -4050,6 +3952,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     action: KeymapAction,
     scope: KeymapScope,
     repeated = false,
+    target: Element | null = null,
   ): boolean {
     if (action !== "start-g-sequence") {
       PENDING_G_SCOPE = null;
@@ -4077,6 +3980,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "cancel-source-load") {
+      // Escape は手前にあるものから畳む。下パネルの中にいればパネルを閉じ、
+      // 行を選んでいればその解除、どちらでもなければ読み込みを止める。
+      if (scope === "panel") {
+        closeAppPanel();
+        return true;
+      }
+      if (clearLineSelection()) return true;
       cancelActiveSourceLoad("esc");
       return true;
     }
@@ -4242,6 +4152,98 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (DIFF_VIEW.scrollToNextUnviewedFile()) scheduleMainSurfaceFocus();
       return true;
     }
+    if (action === "previous-unviewed-file") {
+      if (DIFF_VIEW.scrollToPreviousUnviewedFile()) scheduleMainSurfaceFocus();
+      return true;
+    }
+    if (action === "toggle-viewed") return DIFF_VIEW.toggleActiveFileViewed();
+    if (action === "reload-diff") {
+      reloadDiffFromUi();
+      return true;
+    }
+    if (action === "next-hunk" || action === "previous-hunk")
+      return DIFF_VIEW.scrollToAdjacentHunk(action === "next-hunk" ? 1 : -1);
+    if (action === "goto-diff") {
+      navigateToRoute({ screen: "diff", range: currentRange() });
+      return true;
+    }
+    if (action === "goto-history") {
+      navigateToRoute({
+        screen: "history",
+        ref: "HEAD",
+        range: currentRange(),
+      });
+      return true;
+    }
+    if (action === "goto-repo") {
+      navigateToRoute({
+        screen: "repo",
+        ref: STATE.repoRef || "worktree",
+        path: "",
+        range: currentRange(),
+      });
+      return true;
+    }
+    if (action === "toggle-sidebar") {
+      applySidebarHidden(!STATE.sidebarHidden);
+      return true;
+    }
+    if (action === "toggle-terminal-panel") {
+      if (TERMINAL_VIEW.isOpen()) closeTerminalSheet();
+      else openTerminalSheet();
+      return true;
+    }
+    if (action === "undo-last-action") {
+      void undoLastAction();
+      return true;
+    }
+    if (action === "find-in-source")
+      return openVirtualSourceSearchFromKeyboard(target);
+    if (action === "goto-journal") {
+      navigateToRoute({ screen: "journal", range: currentRange() });
+      return true;
+    }
+    if (action === "goto-database") {
+      navigateToRoute({ screen: "database", range: currentRange() });
+      return true;
+    }
+    if (action === "nav-back") {
+      history.back();
+      return true;
+    }
+    if (action === "nav-forward") {
+      history.forward();
+      return true;
+    }
+    if (action === "copy-file-path") return copyActiveFilePath();
+    if (action === "toggle-annotations-panel") {
+      $("#annotations-toggle")?.click();
+      return true;
+    }
+    if (action === "toggle-ignore-whitespace") {
+      $("#ignore-ws")?.click();
+      return true;
+    }
+    if (action === "toggle-hide-tests") {
+      $("#hide-tests")?.click();
+      return true;
+    }
+    if (action === "open-settings") {
+      openHelpSection(helpSectionDeps(), "settings");
+      return true;
+    }
+    if (
+      action === "code-font-size-increase" ||
+      action === "code-font-size-decrease"
+    ) {
+      stepCodeFontSize(action === "code-font-size-increase" ? 1 : -1);
+      return true;
+    }
+    if (action === "code-font-size-reset") {
+      saveCodeFontSize("regular");
+      VIEWER_SETTINGS.sync();
+      return true;
+    }
     if (action === "open-help") {
       QUICK_HELP?.toggle();
       return true;
@@ -4261,46 +4263,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     if ((e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled)
       return;
     const targetEl = e.target as Element | null;
-    if (
-      e.key === "Escape" &&
-      !isEditableKeyTarget(targetEl) &&
-      clearLineSelection()
-    ) {
-      e.preventDefault();
-      return;
-    }
-    if (
-      (e.ctrlKey || e.metaKey) &&
-      !e.shiftKey &&
-      !e.altKey &&
-      e.key.toLowerCase() === "z" &&
-      !isEditableKeyTarget(targetEl)
-    ) {
-      if (await undoLastAction()) e.preventDefault();
-      return;
-    }
-    if (
-      (e.ctrlKey || e.metaKey) &&
-      e.key.toLowerCase() === "f" &&
-      !isEditableKeyTarget(targetEl)
-    ) {
-      if (openVirtualSourceSearchFromKeyboard(targetEl)) {
-        e.preventDefault();
-        return;
-      }
-    }
     const scope = keymapScope(targetEl);
-    const action = resolveKeymapAction(e, {
-      scope,
-      editable: isEditableKeyTarget(targetEl),
-      composing: isImeComposing(e),
-      paletteOpen: isPaletteOpen(),
-      pendingG:
-        PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL,
-      lightboxOpen: !!document.querySelector(".mkdp-lightbox"),
-    });
+    const action = resolveKeymapAction(
+      e,
+      {
+        scope,
+        editable: isEditableKeyTarget(targetEl),
+        composing: isImeComposing(e),
+        paletteOpen: isPaletteOpen(),
+        pendingG:
+          PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL,
+        lightboxOpen: !!document.querySelector(".mkdp-lightbox"),
+      },
+      activeKeyBindings(),
+    );
     if (!action) return;
-    if (dispatchKeymapAction(action, scope, e.repeat)) e.preventDefault();
+    if (dispatchKeymapAction(action, scope, e.repeat, targetEl))
+      e.preventDefault();
   });
 
   // ----- initial state + live updates -----
@@ -4657,22 +4636,25 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   relocalizeHistory = () => HISTORY_VIEW.localize();
 
+  function helpSectionDeps() {
+    return {
+      getRoute: () => STATE.route,
+      getLanguage: () => STATE.language,
+      currentRange,
+      setRoute,
+      setPageMode,
+      renderHelpPage,
+      setStatus,
+      cancelActiveSourceLoad,
+    };
+  }
+
   QUICK_HELP = createQuickHelp({
     $,
     getLanguage: () => STATE.language,
     getText: () => uiText().quickHelp,
-    openFullKeybindings: () => {
-      openHelpKeybindings({
-        getRoute: () => STATE.route,
-        getLanguage: () => STATE.language,
-        currentRange,
-        setRoute,
-        setPageMode,
-        renderHelpPage,
-        setStatus,
-        cancelActiveSourceLoad,
-      });
-    },
+    openFullKeybindings: () => openHelpKeybindings(helpSectionDeps()),
+    openSettings: () => openHelpSection(helpSectionDeps(), "settings"),
   });
 
   const DOCTOR_VIEW = createDoctorView({
@@ -4777,13 +4759,6 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 器なので、状態を二重に持たずに中身から引き直す。ここを別々に持つと、
    * URL から復元したときにタブと中身がずれる。
    */
-  function isAppPanelOpen(): boolean {
-    return (
-      parseToolsOverlay(window.location.search) !== null ||
-      parseTerminalOverlay(window.location.search) !== null
-    );
-  }
-
   function syncAppPanel(): void {
     // 中身の open() は非同期なので、直後に isOpen() を見ると閉じたままに
     // 見える。URL は開いた時点で同期的に入るので、そちらを正とする
@@ -4793,8 +4768,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const open = tools || terminal;
     const panel = document.getElementById("app-panel");
     if (panel) {
-      panel.hidden = !open;
-      panel.setAttribute("aria-hidden", String(!open));
+      panel.classList.toggle("app-panel-open", open);
     }
     for (const [id, selected] of [
       ["#panel-tab-tools", tools],
@@ -4804,11 +4778,26 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!tab) continue;
       tab.setAttribute("aria-selected", String(selected));
     }
-    const toggle = document.querySelector<HTMLButtonElement>("#panel-toggle");
-    if (toggle) {
-      toggle.classList.toggle("active", open);
-      toggle.setAttribute("aria-pressed", String(open));
+    syncAppPanelLayout();
+  }
+
+  function syncAppPanelLayout(): void {
+    const docked = APP_SETTINGS.appPanelDocked === true;
+    document.body.classList.toggle("app-panel-docked", docked);
+    for (const button of document.querySelectorAll<HTMLButtonElement>(
+      "[data-panel-layout]",
+    )) {
+      const active =
+        button.dataset.panelLayout === (docked ? "docked" : "overlay");
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
     }
+  }
+
+  function setAppPanelDocked(docked: boolean): void {
+    if ((APP_SETTINGS.appPanelDocked === true) === docked) return;
+    patchSettings({ appPanelDocked: docked });
+    syncAppPanelLayout();
   }
 
   function closeAppPanel(): void {
@@ -4906,13 +4895,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncAppPanel();
   }
 
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    if (!TOOLS_VIEW.isOpen()) return;
-    event.preventDefault();
-    closeToolsSheet();
-  });
-
   // Terminal sheet — tools sheet と同じ独立オーバーレイ。URL に載るのは
   // 映している対象の ID で、tmux ペイン (?terminal=%14) かこのドロワーから
   // 開いたシェル (?terminal=shell-…)。何も選ぶ前は ?terminal=open。
@@ -4981,13 +4963,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncAppPanel();
   }
 
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    if (!TERMINAL_VIEW.isOpen()) return;
-    event.preventDefault();
-    closeTerminalSheet();
-  });
-
   JOURNAL_VIEW = createJournalView({
     getRoute: () => STATE.route,
     setRoute,
@@ -5011,14 +4986,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   relocalizeDatabase = () => DATABASE_VIEW.localize();
 
   // 他経路 (例: SSE 経由 / 別タブからの設定変更) で db-ui pref が更新された
-  // 場合、開いている設定パネルの checkbox 表示を最新値に追従させる。
-  DATABASE_VIEW.onDbUiPrefChange(() => {
-    if (
-      !document.querySelector<HTMLElement>("#scope-settings-popover")?.hidden
-    ) {
-      syncDatastoreToggles();
-    }
-  });
+  // 場合、設定フォームの checkbox 表示を最新値に追従させる。sync() は
+  // フォームがまだ組まれていなければ何もしないので、開閉の判定は要らない。
+  DATABASE_VIEW.onDbUiPrefChange(() => VIEWER_SETTINGS.sync());
 
   const REF_PICKER = createRefPicker({
     $,
@@ -5045,6 +5015,16 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
+  /**
+   * キーボードから画面を移る。メニューのリンクを踏んだときと同じ経路を
+   * 通したいので、URL を積んでから applyRouteFromLocation に任せる。
+   */
+  function navigateToRoute(route: AppRoute): void {
+    history.pushState(historyStateForRoute(route), "", urlForRoute(route));
+    window.scrollTo(0, 0);
+    applyRouteFromLocation();
+  }
+
   function applyRouteFromLocation() {
     const previousRoute = STATE.route;
     // Leaving the history screen: bring back the range the user had picked
@@ -5174,12 +5154,16 @@ window.GdpExpandLogic = GdpExpandLogic;
   window.addEventListener("popstate", applyRouteFromLocation);
   window.addEventListener("pagehide", () => flushViewStatePatch(true));
 
-  // Header menu links navigate within the SPA. A full page load here
+  // Header logo and menu links navigate within the SPA. A full page load here
   // re-lays-out the whole app from scratch (the layout shift the menu was
   // notorious for); pushState + the shared route handler keeps the chrome
-  // stable. Modified clicks (new tab etc.) keep native anchor behavior.
+  // stable. The panel is independent from the page route, so carry its current
+  // state to the destination URL. Modified clicks (new tab etc.) keep native
+  // anchor behavior.
   document
-    .querySelectorAll<HTMLAnchorElement>("a.app-menu-item, a.global-icon-link")
+    .querySelectorAll<HTMLAnchorElement>(
+      "a.brand, a.app-menu-item, a.global-icon-link",
+    )
     .forEach((link) => {
       // External links (the GitHub repo link) keep native anchor behavior;
       // hijacking them would push their pathname onto the local origin.
@@ -5189,7 +5173,11 @@ window.GdpExpandLogic = GdpExpandLogic;
           return;
         e.preventDefault();
         const target = new URL(link.href, window.location.origin);
-        history.pushState(null, "", target.pathname + target.search);
+        history.pushState(
+          null,
+          "",
+          withOverlayState(target.pathname + target.search),
+        );
         // Mimic a fresh page load: menu navigation starts at the top.
         window.scrollTo(0, 0);
         applyRouteFromLocation();
@@ -5240,13 +5228,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     document
       .querySelectorAll<HTMLElement>(".gdp-file-shell")
       .forEach((card) => {
-        const isTest = TEST_RE.test(card.dataset.path || "");
+        const isTest = isTestFilePath(card.dataset.path || "");
         card.classList.toggle("hidden-by-tests", effective && isTest);
       });
     document
       .querySelectorAll<HTMLElement>("#filelist li[data-path]")
       .forEach((li) => {
-        const isTest = TEST_RE.test(li.dataset.path || "");
+        const isTest = isTestFilePath(li.dataset.path || "");
         li.classList.toggle("hidden-by-tests", effective && isTest);
       });
     if (isVirtualSidebarActive()) rerenderVirtualSidebar();
@@ -5263,7 +5251,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     let deletions = 0;
     const visibleFiles: FileMeta[] = [];
     for (const f of meta.files) {
-      if (TEST_RE.test(f.path || "")) continue;
+      if (isTestFilePath(f.path || "")) continue;
       additions += f.additions || 0;
       deletions += f.deletions || 0;
       visibleFiles.push(f);

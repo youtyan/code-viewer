@@ -9,7 +9,6 @@ import {
   COLLAPSE_ALL_16_PATHS,
   EXPAND_ALL_16_PATHS,
   FOLDER_ICON_PATHS,
-  GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
   iconSvg,
   LINK_16_PATH,
@@ -219,13 +218,10 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function setSidebarTreeActionIcons() {
-    const settings =
-      document.querySelector<HTMLButtonElement>("#viewer-settings");
     const sidebarToggle = ensureSidebarToggleButton();
     const expand = document.querySelector<HTMLButtonElement>("#sb-expand-all");
     const collapse =
       document.querySelector<HTMLButtonElement>("#sb-collapse-all");
-    if (settings) settings.innerHTML = iconSvg("octicon-gear", GEAR_16_PATH);
     syncSidebarToggleIcon(sidebarToggle);
     if (expand)
       expand.innerHTML = iconSvg("octicon-chevron-down", EXPAND_ALL_16_PATHS);

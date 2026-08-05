@@ -15,6 +15,7 @@
 // クエリで持ち回る。
 
 import { isAgentEvent } from "../../core/agent-state";
+import { formatErrorDetail } from "../../core/error-detail";
 import { MAX_PASTE_BODY_BYTES } from "../../core/terminal-paste";
 import {
   dispatchRoutes,
@@ -95,8 +96,8 @@ async function handleCaptureGet(url: URL, cwd: string): Promise<Response> {
   if (result.status === "invalid") return textError("invalid target", 400);
   if (result.status === "gone") return textError("target is gone", 410);
   if (result.status === "error") {
-    console.error(`[code-viewer] terminal capture failed: ${result.message}`);
-    return textError("failed to capture terminal", 500);
+    console.error("[code-viewer] terminal capture failed", result.error);
+    return textError(formatErrorDetail(result.error), 500);
   }
   return json({
     target,

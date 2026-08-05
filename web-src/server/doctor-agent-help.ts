@@ -7,7 +7,7 @@ bunch of probing commands or open the 🩺 browser panel.
 ## When to use
 
 - A previous command failed; you want to confirm Node / Bun / SQLite /
-  Docker / git / gh state before suggesting a fix.
+  Docker / git / rg / gh / tmux / node-pty state before suggesting a fix.
 - The human asks "is my environment OK", "why does install fail", or
   similar; \`code-viewer doctor\` is the single source of truth.
 - Pre-flight before a destructive step (DB snapshot reset, npx upgrade)
@@ -38,8 +38,8 @@ Stable JSON contract (see core/doctor-types.ts):
     "generation": number,         // monotonic, restart resets to 1
     "worstStatus": "ok"|"warn"|"error",
     "groups": [
-      { "id": "runtime"|"package"|"sqlite"|"snapshot"|"git"|"github"
-            |"discovery"|"datastore"|"docker"|"server",
+      { "id": "runtime"|"package"|"sqlite"|"snapshot"|"git"|"search"
+            |"github"|"discovery"|"datastore"|"docker"|"terminal"|"server",
         "title": string,
         "rows": [
           { "id": string, "title": string,
@@ -72,6 +72,14 @@ The exit code is 1 iff \`worstStatus === "error"\` — never on \`warn\`.
 - A \`github.gh\` row warning means GitHub Issue listing/linking cannot use
   the GitHub CLI yet. Install \`gh\` or pass \`--bin gh=/absolute/path\`.
   Doctor intentionally does not inspect GitHub auth metadata.
+- A \`search.rg\` row warning means fast search and regular-expression
+  search are unavailable. Fixed-string search can still use the built-in
+  fallback. Install \`rg\` or pass \`--bin rg=/absolute/path\`.
+- A \`terminal.tmux\` warning affects the tmux session tree, not ordinary
+  browser shells. Install \`tmux\` or pass \`--bin tmux=/absolute/path\`.
+- A \`terminal.node-pty\` warning means browser shells cannot open. This is
+  an optional npm dependency and should normally arrive with npx; follow the
+  row's native-module installation hint instead of looking for it on PATH.
 - A \`sqlite.*\` row failing usually points at npx cache; the hint shows
   the rm -rf ~/.npm/_npx workaround.
 - Docker rows are advisory — \`code-viewer\` works without Docker; warnings

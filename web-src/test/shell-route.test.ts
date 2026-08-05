@@ -2,7 +2,8 @@
 // 実際にシェルを起動するケースは環境依存になるので、ここでは扱わない
 // (プロセスの生成と入出力は手動のエンドツーエンド検証でカバーしている)。
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import * as shellSession from "../server/shell/session";
 import { handleShellRoute } from "../server/shell/handle";
 import { callRoute, postRoute } from "./_test-helpers";
 
@@ -139,5 +140,30 @@ describe("shell input validation", () => {
     const res = await post("/_shell/close", { id: "shell-missing1" });
     expect(res?.status).toBe(200);
     expect(await res?.json()).toEqual({ closed: false });
+  });
+
+  test("returns the complete shell close failure", async () => {
+    const closeError = Object.assign(new Error("close failed"), {
+      cause: new Error("kill failed"),
+    });
+    const close = vi
+      .spyOn(shellSession, "closeShellSession")
+      .mockResolvedValue({ status: "error", error: closeError });
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const res = await post("/_shell/close", { id: "shell-sample1" });
+
+      expect(res?.status).toBe(500);
+      expect(await res?.text()).toBe(
+        "Error: close failed\nCaused by: Error: kill failed",
+      );
+      expect(log).toHaveBeenCalledWith(
+        "[code-viewer] shell close failed",
+        closeError,
+      );
+    } finally {
+      close.mockRestore();
+      log.mockRestore();
+    }
   });
 });

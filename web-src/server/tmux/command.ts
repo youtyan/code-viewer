@@ -9,6 +9,7 @@
 // CODE_VIEWER_BIN_TMUX がそのまま効く)。シェルは経由せず、必ず引数配列で
 // 渡す。ペイン ID もキー入力も外から来た文字列なので、シェル展開に載せない。
 
+import { errorWithCause } from "../../core/error-detail";
 import {
   commandForExternal,
   isCommandNotFoundResult,
@@ -30,13 +31,26 @@ const NO_SERVER_MARKERS = [
 
 /**
  * 選んでいたペインが閉じられたときの stderr。ユーザーが tmux 側でペインを
- * 閉じただけなので、購読を静かに終わらせる合図として扱う。
+ * 閉じただけなので、静かに畳む合図として扱う。
+ *
+ * クライアントも同じ扱いにする。宛先にしていた端末の tmux が終了していれば
+ * 「もう居ない」だけで、こちらの異常ではない。
  */
 const NO_TARGET_MARKERS = [
   "can't find pane",
   "can't find window",
   "can't find session",
+  "can't find client",
 ];
+
+/**
+ * フィールド区切り。ASCII の Unit Separator (0x1F)。タブや空白と違い、
+ * ペインタイトルにもパスにも現れない。生の制御文字をソースに直接置くと、
+ * 見た目が空文字と区別できず、消えていても気付けない。必ずこの形で書く。
+ *
+ * 一覧を引く側 (panes.ts / clients.ts) が同じ区切りを使うようにここへ置く。
+ */
+export const TMUX_FIELD_SEP = String.fromCharCode(31);
 
 export type TmuxRunResult =
   | { status: "ok"; stdout: string }
@@ -46,7 +60,7 @@ export type TmuxRunResult =
   | { status: "no-server" }
   /** 指定したペイン / ウィンドウが既に閉じられている。 */
   | { status: "no-target" }
-  | { status: "error"; message: string };
+  | { status: "error"; error: Error };
 
 /** 実行ファイル名を解決した引数列。 */
 export function tmuxArgs(args: string[]): string[] {
@@ -62,9 +76,17 @@ export async function runTmux(
   args: string[],
   cwd: string,
 ): Promise<TmuxRunResult> {
-  const result = await runAsync(tmuxArgs(args), cwd, {
-    timeout: TMUX_TIMEOUT_MS,
-  });
+  let result: Awaited<ReturnType<typeof runAsync>>;
+  try {
+    result = await runAsync(tmuxArgs(args), cwd, {
+      timeout: TMUX_TIMEOUT_MS,
+    });
+  } catch (error) {
+    return {
+      status: "error",
+      error: errorWithCause("failed to execute tmux", error),
+    };
+  }
   if (result.code === 0) return { status: "ok", stdout: result.stdout };
   if (isCommandNotFoundResult("tmux", result)) return { status: "missing" };
   if (stderrIncludesAny(result.stderr, NO_SERVER_MARKERS)) {
@@ -75,6 +97,14 @@ export async function runTmux(
   }
   return {
     status: "error",
-    message: result.stderr.trim() || `tmux exited with ${result.code}`,
+    error: new Error(
+      [
+        `tmux exited with ${result.code}`,
+        result.stderr ? `stderr: ${result.stderr}` : "",
+        result.stdout ? `stdout: ${result.stdout}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    ),
   };
 }

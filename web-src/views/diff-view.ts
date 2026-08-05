@@ -334,17 +334,32 @@ export function createDiffView(deps: DiffViewDeps) {
   // its own copy of that filtering logic. A row counts as viewed if either
   // STATE.viewedFiles or its own DOM ".viewed" class says so - the DOM class
   // is what the user actually sees, so it wins if the two ever disagree.
-  function nextUnviewedFilePath(): string | null {
+  /** 「いまどこを見ているか」の基準線。topbar に隠れる分を避ける。 */
+  function scrollSpyScanY(): number {
+    const topbarH =
+      parseInt(
+        getComputedStyle(document.documentElement).getPropertyValue(
+          "--topbar-h",
+        ),
+        10,
+      ) || 56;
+    return topbarH + 24;
+  }
+
+  function unviewedFilePath(direction: 1 | -1): string | null {
     if (isRepositorySidebarMode()) return null;
     const items = $$<HTMLElement>(
       "#filelist li[data-path]:not(.hidden):not(.hidden-by-tests)",
     );
     if (items.length === 0) return null;
-    const currentIndex = items.findIndex((li) =>
-      li.classList.contains("active"),
-    );
+    const active = items.findIndex((li) => li.classList.contains("active"));
+    // まだどこも選んでいないときは、前へ探すなら末尾の手前から、次へ探すなら
+    // 先頭から始めたい。offset を足す前の位置をそれぞれの端に置く。
+    const start = active >= 0 ? active : direction === 1 ? -1 : 0;
     for (let offset = 1; offset <= items.length; offset++) {
-      const idx = (currentIndex + offset + items.length) % items.length;
+      const idx =
+        (((start + offset * direction) % items.length) + items.length) %
+        items.length;
       const li = items[idx];
       const path = li.dataset.path || "";
       const viewed =
@@ -354,10 +369,68 @@ export function createDiffView(deps: DiffViewDeps) {
     return null;
   }
 
-  function scrollToNextUnviewedFile(): boolean {
-    const path = nextUnviewedFilePath();
+  function nextUnviewedFilePath(): string | null {
+    return unviewedFilePath(1);
+  }
+
+  function scrollToUnviewedFile(direction: 1 | -1): boolean {
+    const path = unviewedFilePath(direction);
     if (!path) return false;
     scrollToFile(path, undefined, { reveal: true });
+    return true;
+  }
+
+  function scrollToNextUnviewedFile(): boolean {
+    return scrollToUnviewedFile(1);
+  }
+
+  function scrollToPreviousUnviewedFile(): boolean {
+    return scrollToUnviewedFile(-1);
+  }
+
+  /** サイドバーで選ばれているファイルの確認済みを入れ替える。 */
+  function toggleActiveFileViewed(): boolean {
+    if (isRepositorySidebarMode()) return false;
+    const active = document.querySelector<HTMLElement>(
+      "#filelist li.active[data-path]",
+    );
+    const path = active?.dataset.path;
+    if (!path) return false;
+    setFileViewed(path, !STATE.viewedFiles.has(path));
+    return true;
+  }
+
+  /**
+   * ハンクの見出し行。side-by-side では 1 行に 2 セル出るので行で束ねる。
+   * 行番号セル側の d2h-info は見出しではないので外す。
+   */
+  function hunkHeaderRows(): HTMLElement[] {
+    const cells = $$<HTMLElement>(
+      "#diff td.d2h-info:not(.d2h-code-linenumber):not(.d2h-code-side-linenumber)",
+    );
+    const rows: HTMLElement[] = [];
+    for (const cell of cells) {
+      const row = cell.closest("tr");
+      if (!(row instanceof HTMLElement)) continue;
+      if (row.offsetParent === null) continue;
+      if (!rows.includes(row)) rows.push(row);
+    }
+    return rows;
+  }
+
+  function scrollToAdjacentHunk(direction: 1 | -1): boolean {
+    const rows = hunkHeaderRows();
+    if (!rows.length) return false;
+    const anchor = scrollSpyScanY();
+    const target =
+      direction === 1
+        ? rows.find((row) => row.getBoundingClientRect().top > anchor + 1)
+        : rows
+            .slice()
+            .reverse()
+            .find((row) => row.getBoundingClientRect().top < anchor - 1);
+    if (!target) return false;
+    scrollDiffElementIntoView(target, "start");
     return true;
   }
 
@@ -1820,16 +1893,9 @@ export function createDiffView(deps: DiffViewDeps) {
       handler._raf = requestAnimationFrame(() => {
         handler._raf = null;
         if (performance.now() < SUPPRESS_SPY_UNTIL) return;
-        const topbarH =
-          parseInt(
-            getComputedStyle(document.documentElement).getPropertyValue(
-              "--topbar-h",
-            ),
-            10,
-          ) || 56;
         // Note: spy now targets .gdp-file-shell (placeholder + loaded both expose
         // data-path), instead of .d2h-file-wrapper which only exists post-render.
-        const scanY = topbarH + 24;
+        const scanY = scrollSpyScanY();
         const cards = document.querySelectorAll<HTMLElement>(".gdp-file-shell");
         for (const w of cards) {
           const r = w.getBoundingClientRect();
@@ -1898,6 +1964,9 @@ export function createDiffView(deps: DiffViewDeps) {
     scheduleIdleHighlight,
     scrollToFile,
     scrollToNextUnviewedFile,
+    scrollToPreviousUnviewedFile,
+    toggleActiveFileViewed,
+    scrollToAdjacentHunk,
     prefetchByPath,
     applyDiffRouteFocus,
     clearDiffLineFocus,

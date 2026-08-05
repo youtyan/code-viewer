@@ -10,6 +10,12 @@ export type HelpKeybindingLanguage = "en" | "ja";
 export type HelpKeybindingTableGroup = {
   title: string;
   rows: Array<[string, string]>;
+  /**
+   * rows と同じ並びで、その行が説明しているアクション。1 行が 2 つ以上の
+   * アクションをまとめて説明することがある (前へ / 次へ など) ので配列。
+   * キーの変更 UI は、この対応を使って行から編集対象を引く。
+   */
+  rowActions: KeymapAction[][];
 };
 
 type HelpText = Record<HelpKeybindingLanguage, string>;
@@ -102,10 +108,74 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
         },
       },
       {
-        selectors: [{ action: "next-unviewed-file" }],
+        selectors: [
+          { action: "previous-unviewed-file" },
+          { action: "next-unviewed-file" },
+        ],
         description: {
-          en: "Jump to the next unviewed file",
-          ja: "次の未確認ファイルへ移動",
+          en: "Jump to the previous / next unviewed file",
+          ja: "前 / 次の未確認ファイルへ移動",
+        },
+      },
+      {
+        selectors: [{ action: "toggle-viewed" }],
+        description: {
+          en: "Mark the current file viewed or not viewed",
+          ja: "現在のファイルの確認済みを切り替え",
+        },
+      },
+      {
+        selectors: [{ action: "reload-diff" }],
+        description: { en: "Reload the diff", ja: "差分を読み込み直す" },
+      },
+      {
+        selectors: [{ action: "undo-last-action" }],
+        description: {
+          en: "Undo the last action",
+          ja: "直前の操作を取り消す",
+        },
+      },
+      {
+        selectors: [{ action: "find-in-source" }],
+        description: {
+          en: "Find within the open file",
+          ja: "開いているファイル内を検索",
+        },
+      },
+      {
+        selectors: [{ action: "copy-file-path" }],
+        description: {
+          en: "Copy the current file path",
+          ja: "現在のファイルパスをコピー",
+        },
+      },
+      {
+        selectors: [{ action: "toggle-ignore-whitespace" }],
+        description: {
+          en: "Toggle ignore whitespace changes",
+          ja: "空白の差分を無視するかを切り替え",
+        },
+      },
+      {
+        selectors: [{ action: "toggle-hide-tests" }],
+        description: {
+          en: "Toggle hiding test files",
+          ja: "テストファイルの表示を切り替え",
+        },
+      },
+      {
+        selectors: [{ action: "open-settings" }],
+        description: { en: "Open settings", ja: "設定を開く" },
+      },
+      {
+        selectors: [
+          { action: "code-font-size-decrease" },
+          { action: "code-font-size-increase" },
+          { action: "code-font-size-reset" },
+        ],
+        description: {
+          en: "Shrink / grow / reset the code font size",
+          ja: "コードの文字サイズを縮小 / 拡大 / 既定に戻す",
         },
       },
       {
@@ -136,6 +206,71 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
         description: {
           en: "Focus main panel",
           ja: "メインパネルへフォーカス",
+        },
+      },
+      {
+        selectors: [{ action: "toggle-sidebar" }],
+        description: {
+          en: "Show or hide the sidebar",
+          ja: "サイドバーの表示を切り替え",
+        },
+      },
+      {
+        selectors: [{ action: "toggle-terminal-panel" }],
+        description: {
+          en: "Open or close the terminal panel",
+          ja: "ターミナルパネルを開閉",
+        },
+      },
+      {
+        selectors: [{ action: "toggle-annotations-panel" }],
+        description: {
+          en: "Open or close the annotations panel",
+          ja: "注釈パネルを開閉",
+        },
+      },
+    ],
+  },
+  {
+    title: { en: "Screens", ja: "画面" },
+    rows: [
+      {
+        selectors: [{ action: "goto-diff" }],
+        description: { en: "Go to the diff screen", ja: "差分画面へ移動" },
+      },
+      {
+        selectors: [{ action: "goto-history" }],
+        description: {
+          en: "Go to the history screen",
+          ja: "履歴画面へ移動",
+        },
+      },
+      {
+        selectors: [{ action: "goto-repo" }],
+        description: {
+          en: "Go to the repository screen",
+          ja: "リポジトリ画面へ移動",
+        },
+      },
+      {
+        selectors: [{ action: "goto-journal" }],
+        description: {
+          en: "Go to the journal screen",
+          ja: "ジャーナル画面へ移動",
+        },
+      },
+      {
+        selectors: [{ action: "goto-database" }],
+        description: {
+          en: "Go to the datastore screen",
+          ja: "データストア画面へ移動",
+        },
+      },
+      {
+        selectors: [{ action: "nav-back" }, { action: "nav-forward" }],
+        description: {
+          en: "Go back / forward through visited screens",
+          ja: "表示履歴を戻る / 進む",
         },
       },
     ],
@@ -257,6 +392,13 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
         },
       },
       {
+        selectors: [{ action: "previous-hunk" }, { action: "next-hunk" }],
+        description: {
+          en: "Move to the previous / next hunk",
+          ja: "前 / 次のハンクへ移動",
+        },
+      },
+      {
         selectors: [
           { action: "tab-preview", scope: "main", pendingG: true },
           { action: "tab-code", scope: "main", pendingG: true },
@@ -307,7 +449,7 @@ function formatKeyName(key: string, shifted: boolean): string {
   return key;
 }
 
-function formatKeyBinding(binding: KeyBinding): string {
+export function formatKeyBinding(binding: KeyBinding): string {
   const key = formatKeyName(
     binding.key,
     !!binding.shift || !!binding.ctrl || !!binding.meta || !!binding.alt,
@@ -366,6 +508,15 @@ function buildRow(
   return [labels.join(" / "), row.description[language]];
 }
 
+function rowActionList(row: HelpKeybindingDisplayRow): KeymapAction[] {
+  // バインドではなくセレクタから引く。ユーザーが無効にしたアクションも
+  // 編集対象として残さないと、戻す手段がなくなる。
+  const actions: KeymapAction[] = [];
+  for (const selector of row.selectors)
+    if (!actions.includes(selector.action)) actions.push(selector.action);
+  return actions;
+}
+
 export function buildHelpKeybindingGroups(
   language: HelpKeybindingLanguage,
   bindings: KeyBinding[] = DEFAULT_KEY_BINDINGS,
@@ -381,6 +532,7 @@ export function buildHelpKeybindingGroups(
   return groups.map((group) => ({
     title: group.title[language],
     rows: group.rows.map((row) => buildRow(row, language, bindings)),
+    rowActions: group.rows.map(rowActionList),
   }));
 }
 

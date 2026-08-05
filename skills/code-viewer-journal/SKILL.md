@@ -88,7 +88,7 @@ code-viewer journal task-claim <task-id> --by agent --wip-limit 1
 Mark the task done with a concrete verification note:
 
 ```sh
-code-viewer journal task-done <task-id> --by agent --note "Implemented and verified with bun test."
+code-viewer journal task-done <task-id> --by agent --note "Implemented and verified with pnpm test."
 ```
 
 ## GitHub Issues

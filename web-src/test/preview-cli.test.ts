@@ -1156,6 +1156,9 @@ describe("preview CLI", () => {
     expect(stdout).toMatch(
       /code-viewer file <blame\|history\|show\|diff> --path <p>/,
     );
+    expect(stdout).toMatch(
+      /code-viewer doctor .*--bin <git\|rg\|docker\|gh\|tmux>=<path>/,
+    );
     expect(/annotate <start\|add\|list\|delete\|clear>/.test(stdout)).toBe(
       false,
     );

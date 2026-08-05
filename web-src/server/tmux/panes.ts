@@ -4,6 +4,7 @@
 // ウィンドウ一覧を別々に引かない。並び順は tmux の出力順をそのまま保つ
 // (tmux 側がセッション名・ウィンドウ番号・ペイン番号の順で出す)。
 
+import { errorWithCause } from "../../core/error-detail";
 import {
   isPathInsideAny,
   type TmuxPane,
@@ -12,14 +13,7 @@ import {
   type TmuxWindow,
 } from "../../core/tmux";
 import { worktreePathsAsync } from "../git";
-import { runTmux } from "./command";
-
-/**
- * フィールド区切り。ASCII の Unit Separator (0x1F)。タブや空白と違い、
- * ペインタイトルにもパスにも現れない。生の制御文字をソースに直接置くと、
- * 見た目が空文字と区別できず、消えていても気付けない。必ずこの形で書く。
- */
-const FIELD_SEP = String.fromCharCode(31);
+import { TMUX_FIELD_SEP as FIELD_SEP, runTmux } from "./command";
 
 const PANE_FIELDS = [
   "#{pane_id}",
@@ -154,9 +148,7 @@ export async function listTmuxPanes(cwd: string): Promise<TmuxPanesResponse> {
     return { available: true, running: false, sessions: [] };
   }
   if (result.status === "error") {
-    // ローカルの閲覧ツールなので、tmux 側の不調で画面ごと落とさない。
-    console.warn(`[code-viewer] tmux list-panes failed: ${result.message}`);
-    return { available: true, running: false, sessions: [] };
+    throw errorWithCause("failed to list tmux panes", result.error);
   }
   return {
     available: true,

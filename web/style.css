@@ -56,6 +56,22 @@
   --sidebar-restore-rail-w: 44px;
   --annotation-panel-w: 380px;
   --journal-task-editor-w: 380px;
+  --app-panel-tabbar-height: 36px;
+  /* 下パネルが本文から奪っている高さ。既定は 0 で、docked のときだけ
+     body 側で実際の値に上書きされる (§ body.app-panel-docked)。 */
+  --app-panel-visible-height: 0px;
+  /* 下パネルをどれだけ引き伸ばしても、その上に必ず残す本文の高さ。 */
+  --app-panel-min-content-h: 40px;
+
+  /* --app-panel-max-h と --content-h は、ここ (:root) ではなく body 側で定義する。
+     理由は html, body ブロックのコメントを見ること。 */
+
+  /* ファイル詳細ページで、本文の中に居座るものの高さ。パンくず・
+     Code/Blame/History のタブ・その下の情報バー・余白の合計。
+
+     この下に来る箱を画面いっぱいに広げるときは --content-h からこれを引く。
+     タブや情報バーの見た目を変えたらこの 1 つを直す。 */
+  --file-detail-head-h: 136px;
   /* shadows */
   --shadow-sm: 0 1px 0 rgba(31,35,40,0.04);
   --shadow-md: 0 3px 6px rgba(140,149,159,0.15);
@@ -118,6 +134,24 @@ html, body {
   --ui-file-header-wrapped-h: 82px;
   --ui-history-dock-h: 28px;
   --chrome-h: calc(var(--global-header-h) + var(--topbar-h));
+
+  /* ここから 2 つは :root ではなく body に置く。**置き場所が仕様の一部**。
+
+     カスタムプロパティの var() は「宣言した要素」で確定し、その後は確定済みの
+     値として継承される。使う場所で解決し直されはしない。
+     つまり :root に置くと、body 側の上書き
+       - ページごとの --chrome-h (body.gdp-*-page)
+       - docked のときの --app-panel-visible-height (body.app-panel-docked)
+       - 表示密度ごとの --global-header-h (body[data-sidebar-font-size])
+     がどれも反映されない。実際 :root に置いていたときは、docked にしても
+     --content-h がパネル 0px・ツールバー込みのままで、本文の下端がパネルの裏に
+     入っていた。
+
+     上書きは全て body に載るので、この 2 つも body で定義する。 */
+  --app-panel-max-h: calc(100vh - var(--global-header-h) - var(--app-panel-min-content-h));
+  --content-h: calc(100vh - var(--chrome-h) - var(--app-panel-visible-height));
+
+
   --code-font-size: 12px;
   --code-line-height: 20px;
   --markdown-font-size: calc(var(--code-font-size) + 2px);
@@ -212,6 +246,7 @@ body[data-code-font-size="xlarge"] {
 }
 
 .gdp-palette {
+  position: relative;
   width: min(760px, calc(100vw - 32px));
   max-height: min(620px, calc(100vh - 48px));
   display: grid;
@@ -221,6 +256,50 @@ body[data-code-font-size="xlarge"] {
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 16px 48px rgba(31, 35, 40, 0.28);
+}
+
+.gdp-palette-backdrop-wide {
+  padding-top: min(4vh, 32px);
+}
+
+.gdp-palette-wide {
+  width: min(1320px, calc(100vw - 48px));
+  height: min(820px, calc(100vh - 48px));
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+}
+
+.gdp-palette-resizer {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+  outline: none;
+}
+
+.gdp-palette-resizer-x {
+  top: 0;
+  right: 0;
+  bottom: 8px;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.gdp-palette-resizer-y {
+  right: 8px;
+  bottom: 0;
+  left: 0;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.gdp-palette-resizer:hover,
+.gdp-palette-resizer:focus-visible,
+.gdp-palette-resizing .gdp-palette-resizer {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.gdp-palette-resizing {
+  user-select: none;
 }
 
 .gdp-palette-label {
@@ -277,6 +356,11 @@ body[data-code-font-size="xlarge"] {
   color: var(--accent);
 }
 
+.gdp-palette-mode-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .gdp-palette-mode-hint {
   color: var(--fg-muted);
   font-size: 12px;
@@ -285,6 +369,154 @@ body[data-code-font-size="xlarge"] {
 .gdp-palette-list {
   overflow: auto;
   padding: 6px;
+}
+
+.gdp-palette-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.gdp-palette-wide .gdp-palette-body {
+  grid-template-columns: minmax(340px, 40%) minmax(0, 1fr);
+}
+
+.gdp-palette-wide .gdp-palette-list {
+  border-right: 1px solid var(--border);
+}
+
+.gdp-palette-file-group + .gdp-palette-file-group {
+  margin-top: 6px;
+}
+
+.gdp-palette-file-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 10px;
+  color: var(--fg);
+  background: var(--bg-soft);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.gdp-palette-file-heading-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gdp-palette-file-heading-count {
+  flex: 0 0 auto;
+  min-width: 20px;
+  color: var(--fg-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.gdp-palette-file-matches {
+  position: relative;
+  margin-left: 14px;
+  padding-left: 12px;
+}
+
+.gdp-palette-file-matches::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 24px;
+  left: 0;
+  border-left: 1px solid var(--border);
+}
+
+.gdp-palette-file-matches .gdp-palette-row {
+  position: relative;
+  min-height: 46px;
+}
+
+.gdp-palette-file-matches .gdp-palette-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -12px;
+  width: 10px;
+  height: 50%;
+  border-bottom: 1px solid var(--border);
+}
+
+.gdp-palette-preview {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.gdp-palette-preview-header {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+
+.gdp-palette-preview-location {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gdp-palette-preview-code {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.gdp-palette-preview-meta {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.gdp-palette-preview-placeholder,
+.gdp-palette-preview-message {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--fg-muted);
+  text-align: center;
+  font-size: 13px;
+}
+
+.gdp-palette-preview .gdp-grep-match {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--accent) 82%, var(--bg) 18%);
+  color: var(--bg);
+  font-weight: 700;
+  box-shadow:
+    inset 0 -1px 0 color-mix(in oklab, var(--accent) 68%, var(--fg) 32%),
+    0 0 0 2px var(--accent-muted);
 }
 
 .gdp-palette-row {
@@ -417,7 +649,7 @@ body[data-code-font-size="xlarge"] {
 .app-menu {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   height: 100%;
   flex-shrink: 0;
 }
@@ -454,13 +686,11 @@ body[data-code-font-size="xlarge"] {
   display: block;
 }
 .app-menu-item {
-  /* Nav items sit one notch below the brand: smaller, muted, and the
-     active screen is a soft accent pill instead of an underline tab. */
+  position: relative;
   display: inline-flex;
   align-items: center;
-  height: var(--ui-control-sm);
-  padding: 0 10px;
-  border-radius: 6px;
+  height: 100%;
+  padding: 0 12px;
   color: var(--fg-muted);
   font-size: var(--ui-font-md);
   font-weight: 500;
@@ -470,13 +700,26 @@ body[data-code-font-size="xlarge"] {
 }
 .app-menu-item:hover {
   color: var(--fg);
-  background: var(--bg-mute);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
   text-decoration: none;
 }
 .app-menu-item.active {
-  background: var(--accent-subtle);
+  background: transparent;
   color: var(--accent);
   font-weight: 600;
+}
+.app-menu-item.active::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  bottom: 0;
+  left: 10px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
+.global-actions-sep.app-menu-sep {
+  margin: 0 10px;
 }
 /* メニューの中で唯一「画面遷移ではなく開閉」をする項目 (Tools)。見た目は
    リンクの項目と揃えたいので、button 由来の既定値だけ打ち消す。 */
@@ -1668,20 +1911,20 @@ body.gdp-history-page #history-commit-info:not([hidden]),
 .gdp-file-history-embed {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-  min-height: calc(100vh - var(--global-header-h) - 92px);
+  min-height: calc(var(--content-h) - var(--file-detail-head-h));
   /* No border-top: the sticky header above already supplies the separator
      (border-bottom), two borders would paint a 2px line. */
 }
 .gdp-file-history-panel {
   min-width: 0;
-  max-height: calc(100vh - var(--global-header-h) - 92px);
+  max-height: calc(var(--content-h) - var(--file-detail-head-h));
   overflow: auto;
   background: var(--bg-soft);
   border-right: 1px solid var(--border);
 }
 .gdp-file-history-diff-pane {
   min-width: 0;
-  max-height: calc(100vh - var(--global-header-h) - 92px);
+  max-height: calc(var(--content-h) - var(--file-detail-head-h));
   overflow: auto;
   background: var(--bg);
 }
@@ -2038,37 +2281,11 @@ body.gdp-history-resizing * {
   user-select: none !important;
 }
 
-#scope-settings-popover {
-  position: fixed;
-  right: 16px;
-  top: calc(var(--global-header-h) + 8px);
-  width: min(460px, calc(100vw - 32px));
-  max-width: calc(100vw - 32px);
-  /* Transient popover: must sit above the annotation panel (45). */
-  z-index: 70;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  box-shadow: var(--shadow);
+/* Help ページの設定セクションに置くフォーム。読みやすい行長で止める。 */
+.scope-settings {
+  max-width: 460px;
 }
-#scope-settings-popover[hidden] { display: none; }
-.scope-settings-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-#scope-settings-close {
-  border: 0;
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 20px;
-}
-#scope-settings-popover label {
+.scope-settings label {
   display: block;
   color: var(--fg-muted);
   font-size: 12px;
@@ -2269,14 +2486,21 @@ body.gdp-history-resizing * {
   text-decoration: underline;
 }
 
+/* topbar を隠すページなので、chrome の実寸から topbar を外す。
+   これを書かないと --chrome-h / --content-h が隠れているツールバー分だけ
+   大きいままになり、消費側を 1 つずつ手当てする羽目になる。 */
+body.gdp-help-page {
+  --chrome-h: var(--global-header-h);
+}
 body.gdp-help-page #topbar,
 body.gdp-help-page #sidebar,
 body.gdp-help-page #sidebar-resizer {
   display: none;
 }
 body.gdp-help-page #content {
+  --content-top-gap: 28px;
   margin-left: 0;
-  padding-top: calc(var(--global-header-h) + 28px);
+  padding-top: calc(var(--chrome-h) + var(--content-top-gap));
 }
 .gdp-help-shell {
   width: 100%;
@@ -2293,31 +2517,6 @@ body.gdp-help-page #content {
 .gdp-help-header h1 {
   margin: 0;
   font-size: 28px;
-}
-.gdp-help-language {
-  appearance: none;
-  min-width: 92px;
-  height: 34px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background:
-    linear-gradient(45deg, transparent 50%, var(--fg-muted) 50%) right 15px center / 5px 5px no-repeat,
-    linear-gradient(135deg, var(--fg-muted) 50%, transparent 50%) right 10px center / 5px 5px no-repeat,
-    var(--bg);
-  color: var(--fg);
-  padding: 0 34px 0 12px;
-  font: inherit;
-  font-size: 13px;
-  line-height: 32px;
-  cursor: pointer;
-}
-.gdp-help-language:hover {
-  border-color: var(--border-strong);
-}
-.gdp-help-language:focus {
-  border-color: var(--accent);
-  outline: none;
-  box-shadow: 0 0 0 3px var(--accent-muted);
 }
 .gdp-help-layout {
   display: grid;
@@ -2440,6 +2639,117 @@ body.gdp-help-page #content {
   color: var(--fg);
   font: 12px "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   text-align: center;
+}
+
+/* ===== Keybinding editor (Help > Keybindings) ===== */
+.gdp-help-keybinding-actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+/* 変更済みの印はボタンの外に置く。ラベルに混ぜると押す場所がずれる。 */
+.gdp-kbe-changed {
+  margin-right: 8px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+.gdp-kbe-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.gdp-kbe-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 380px;
+}
+.gdp-kbe-action {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gdp-kbe-action + .gdp-kbe-action {
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.gdp-kbe-action-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.gdp-kbe-action-head strong {
+  font: 12px "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+.gdp-kbe-default,
+.gdp-kbe-empty {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+.gdp-kbe-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+}
+.gdp-kbe-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.gdp-kbe-chip-remove {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 18px;
+}
+.gdp-kbe-chip-remove:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.gdp-kbe-gprefix {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.gdp-kbe-action-buttons {
+  display: flex;
+  gap: 8px;
+}
+/* 記録中はラベルが「キーを押してください…」に変わる。押す的が動かないよう
+   両方のラベルが収まる幅を先に取っておく (stable box)。 */
+.gdp-kbe-action-buttons .gdp-btn:first-child {
+  min-width: 12em;
+}
+.gdp-kbe-warnings {
+  min-height: 18px;
+  color: var(--attn);
+  font-size: 12px;
+}
+.gdp-kbe-warnings p {
+  margin: 0 0 4px;
+}
+.gdp-kbe-json textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 420px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--fg);
+  padding: 8px;
+  font: 12px "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  resize: vertical;
 }
 
 /* ===== Tree view ===== */
@@ -2816,20 +3126,25 @@ body.gdp-help-page #content {
 
 /* ===== Main content area ===== */
 #content {
+  --content-top-gap: 18px;
   margin-left: var(--sidebar-w);
-  padding: calc(var(--chrome-h) + 18px) 24px 80px;
-  min-height: calc(100vh - var(--chrome-h));
+  padding: calc(var(--chrome-h) + var(--content-top-gap)) 24px 80px;
+  min-height: var(--content-h);
 }
 
 #diff > *:first-child { margin-top: 0; }
 
-/* Scroll-past-end spacer so the sidebar can align the last diff file to the
-   top of the viewport. Not wanted on the history screen, where small
-   single-commit diffs would gain a screenful of dead scroll space. */
-body:not(.gdp-file-detail-page):not(.gdp-history-page) #diff::after {
+/* Diff viewer only: let the sidebar align the last diff file to the top of
+   the viewport. Other screens also mount under #diff, so page-class scoping
+   is required or they gain a screenful of dead scroll space. */
+body.gdp-diff-page {
+  /* 末尾の詰め物を画面ぴったりにせず、この分だけ短くする。 */
+  --diff-tail-inset: 40px;
+}
+body.gdp-diff-page #diff::after {
   content: "";
   display: block;
-  height: calc(100vh - var(--chrome-h) - 40px);
+  height: calc(var(--content-h) - var(--diff-tail-inset));
 }
 
 .empty {
@@ -3656,7 +3971,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 }
 .gdp-source-viewer.media.pdf iframe {
   flex: 1 1 auto;
-  height: max(520px, calc(100vh - var(--global-header-h) - 164px));
+  height: max(520px, calc(var(--content-h) - 164px));
   min-height: 0;
 }
 .gdp-source-meta {
@@ -3863,7 +4178,13 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-source-virtual {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  height: calc(100vh - var(--global-header-h) - 96px);
+  /* 下パネルを docked で開いている間は、その高さぶん本文が縮んでいる。
+     引かないと、この箱だけが画面の高さのまま残って下端がパネルの裏に
+     入り、最後の数十行が読めなくなる。
+
+     136px は、この箱より上にあるもの (パンくず・タブ・Virtual mode の情報
+     バー) と下の余白ぶん。実測で 96px では最終行が数 px 欠けたので広げた。 */
+  height: calc(var(--content-h) - var(--file-detail-head-h));
   min-height: 320px;
   background: var(--bg);
 }
@@ -4169,13 +4490,13 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 }
 .gdp-html-preview {
   width: 100%;
-  min-height: calc(100vh - var(--global-header-h) - 118px);
+  min-height: calc(var(--content-h) - var(--file-detail-head-h));
   background: var(--bg);
 }
 .gdp-html-preview iframe {
   display: block;
   width: 100%;
-  min-height: calc(100vh - var(--global-header-h) - 118px);
+  min-height: calc(var(--content-h) - var(--file-detail-head-h));
   border: 0;
   background: #fff;
 }
@@ -4188,7 +4509,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-markdown-toc {
   position: sticky;
   top: calc(var(--global-header-h) + 16px);
-  max-height: calc(100vh - var(--global-header-h) - 40px);
+  max-height: calc(var(--content-h) - 40px);
   overflow: auto;
   padding: 12px;
   border: 1px solid var(--border);
@@ -4727,15 +5048,14 @@ body.gdp-repo-page #load-bar {
 body.gdp-file-detail-page #content {
   margin-left: 0;
   padding-top: calc(var(--global-header-h) + 18px);
-  min-height: calc(100vh - var(--global-header-h));
 }
 body.gdp-file-detail-page.gdp-repo-blob-page #content {
   margin-left: var(--sidebar-w);
 }
 body.gdp-repo-page #content {
+  --content-top-gap: 24px;
   margin-left: var(--sidebar-w);
-  padding: calc(var(--global-header-h) + 24px) 32px 48px;
-  min-height: calc(100vh - var(--global-header-h));
+  padding: calc(var(--global-header-h) + var(--content-top-gap)) 32px 48px;
 }
 body.gdp-sidebar-hidden #sidebar,
 body.gdp-sidebar-hidden #sidebar-resizer {
@@ -5624,7 +5944,6 @@ body.gdp-file-detail-page #empty {
     gap: 4px;
   }
   #annotations-toggle,
-  #viewer-settings,
   #doctor-btn,
   #cancel-requests,
   #theme {
@@ -7170,14 +7489,15 @@ body.gdp-journal-page #load-bar {
 }
 
 .gdp-journal-page #content {
+  --content-top-gap: 0px;
   margin-left: 0;
-  padding: var(--global-header-h) 0 0;
+  padding: calc(var(--global-header-h) + var(--content-top-gap)) 0 0;
   min-height: 0;
   max-width: none;
 }
 
 .journal-page {
-  height: calc(100vh - var(--global-header-h));
+  height: var(--content-h);
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -7899,7 +8219,7 @@ body.gdp-journal-page #load-bar {
   top: calc(100% + 8px);
   right: 12px;
   width: min(680px, calc(100vw - 32px));
-  height: min(620px, calc(100vh - var(--global-header-h) - 140px));
+  height: min(620px, calc(var(--content-h) - 140px));
   min-width: 0;
   min-height: 260px;
   display: flex;
@@ -8659,7 +8979,7 @@ body.journal-task-editor-resizing * {
     right: 8px;
     left: 8px;
     width: auto;
-    height: min(560px, calc(100vh - var(--global-header-h) - 120px));
+    height: min(560px, calc(var(--content-h) - 120px));
   }
 
   .journal-github-controls {
@@ -13246,7 +13566,7 @@ body.db-resizing {
      `height: 100%` だと `.db-tab-host` が縮んで内側の history pane / main
      content が画面途中で切れる。Round 5 前の `.db-container` と同様、
      ここで viewport 基準の高さを明示する。 */
-  height: calc(100vh - var(--global-header-h));
+  height: var(--content-h);
   width: 100%;
   overflow: hidden;
   font-size: var(--db-font-base);
@@ -13709,8 +14029,8 @@ body.db-resizing {
 }
 
 /* ===== 画面下のパネル (Terminal / Tools) =====
-   IDE のターミナルパネルと同じ置き方。ページの上に重ねず、下に固定して高さを
-   持つ。中身はタブで 1 つだけ出す。
+   画面下に固定し、Overlay / Docked を切り替えられる。中身はタブで 1 つだけ
+   出す。
    ここに入る #terminal-sheet / #tools-sheet は、右ドロワーだった頃の id を
    そのまま使っている (各ビューの実装を変えないため)。位置と大きさだけを
    パネル側で決め直す。 */
@@ -13719,29 +14039,40 @@ body.db-resizing {
   left: 0;
   right: 0;
   bottom: 0;
-  height: var(--app-panel-height, 420px);
-  max-height: calc(100vh - var(--global-header-h) - 40px);
+  height: var(--app-panel-tabbar-height);
+  /* パネル自身の上限。式の中身と、自分を自分から引いてはいけない理由は
+     :root の --app-panel-max-h に書いてある。 */
+  max-height: var(--app-panel-max-h);
   background: var(--bg, #fff);
   border-top: 1px solid var(--border, #d0d7de);
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.12);
   z-index: 60;
   display: flex;
   flex-direction: column;
   min-height: 0;
   box-sizing: border-box;
 }
+.app-panel.app-panel-open {
+  height: var(--app-panel-height, 420px);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.12);
+}
 .app-panel[hidden] {
   display: none;
 }
-/* パネルはページに重なるので、開いている間はその分だけ下に余白を作る。
-   これが無いとページの一番下がパネルの裏に入り、スクロールしても出てこない。
-   パネル自身は max-height で頭打ちになるので、余白も同じ式で頭打ちにする
-   (保存してある高さが画面より大きいとき、余白だけが伸びないように)。 */
-body:has(.app-panel:not([hidden])) #content {
-  padding-bottom: min(
-    var(--app-panel-height, 420px),
-    calc(100vh - var(--global-header-h) - 40px)
-  );
+/* 閉じていてもタブ列はフッターとして残るので、その高さぶんは常に空ける。
+
+   「重ねる」はパネルを閉じているときと同じ本文表示のまま、パネルが上に乗るだけ。
+   だからパネルを開いても・引き伸ばしても、本文側の余白は変えない。
+   ここでパネルの高さぶん余白を広げると、フッターを動かすたびに本文の位置と
+   スクロール量が動いてしまい、「重ねる」ではなくなる。
+   覆われた部分は、パネルを縮めるか閉じるか、その箱の中をスクロールして見る。 */
+body:not(.app-panel-docked):has(.app-panel) #content {
+  padding-bottom: 36px;
+}
+/* 閉じたときに消すのは中身と、その中身のための操作だけ。タブ列は残す。 */
+.app-panel:not(.app-panel-open) .app-panel-resizer,
+.app-panel:not(.app-panel-open) .app-panel-bodies,
+.app-panel:not(.app-panel-open) .app-panel-close {
+  display: none;
 }
 /* 上端の掴みしろ。ドロワーのハンドルと同じ作り。 */
 .app-panel-resizer {
@@ -13785,6 +14116,8 @@ body:has(.app-panel:not([hidden])) #content {
   display: flex;
   align-items: stretch;
   gap: 2px;
+  height: var(--app-panel-tabbar-height);
+  box-sizing: border-box;
   padding: 0 8px;
   border-bottom: 1px solid var(--border, #d0d7de);
   background: var(--bg-soft, #f6f8fa);
@@ -13797,7 +14130,7 @@ body:has(.app-panel:not([hidden])) #content {
   color: var(--fg-muted, #57606a);
   font: inherit;
   font-size: 12px;
-  padding: 8px 12px;
+  padding: 0 12px;
   cursor: pointer;
 }
 .app-panel-tab:hover {
@@ -13810,6 +14143,16 @@ body:has(.app-panel:not([hidden])) #content {
 }
 .app-panel-spacer {
   flex: 1 1 auto;
+}
+.app-panel-layout-switch {
+  align-self: center;
+  height: 24px;
+  margin-right: 4px;
+}
+.app-panel-layout-switch button {
+  min-width: 60px;
+  padding-inline: 8px;
+  font-size: 11px;
 }
 .app-panel-close {
   appearance: none;
@@ -13829,6 +14172,86 @@ body:has(.app-panel:not([hidden])) #content {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
+}
+
+/* Docked は本文とパネルで表示領域を分ける。パネル自体は画面下に固定したまま、
+   本文と左右の固定パネルの下端を同じ位置まで縮める。 */
+body.app-panel-docked {
+  --app-panel-visible-height: var(--app-panel-tabbar-height);
+  overflow: hidden;
+}
+body.app-panel-docked:has(.app-panel.app-panel-open) {
+  --app-panel-visible-height: min(
+    var(--app-panel-height, 420px),
+    var(--app-panel-max-h)
+  );
+}
+body.app-panel-docked.gdp-diff-page #content,
+body.app-panel-docked.gdp-history-page #content,
+body.app-panel-docked.gdp-repo-page #content,
+body.app-panel-docked.gdp-file-detail-page #content,
+body.app-panel-docked.gdp-help-page #content {
+  position: relative;
+  top: var(--chrome-h);
+  height: var(--content-h);
+  min-height: 0;
+  padding-top: 0;
+  overflow: auto;
+}
+
+/* Keep the normal page-specific top gap without putting padding on the
+   scroll container. A sticky child otherwise adds that padding to its top
+   offset and leaves scrolled content visible above the file header. */
+body.app-panel-docked.gdp-diff-page #diff,
+body.app-panel-docked.gdp-history-page #diff,
+body.app-panel-docked.gdp-repo-page #diff,
+body.app-panel-docked.gdp-file-detail-page #diff,
+body.app-panel-docked.gdp-help-page #diff {
+  padding-top: var(--content-top-gap);
+}
+body.app-panel-docked.gdp-diff-page .d2h-file-header,
+body.app-panel-docked.gdp-diff-page .gdp-shell-header,
+body.app-panel-docked.gdp-history-page .d2h-file-header,
+body.app-panel-docked.gdp-history-page .gdp-shell-header,
+body.app-panel-docked.gdp-repo-page .d2h-file-header,
+body.app-panel-docked.gdp-repo-page .gdp-shell-header,
+body.app-panel-docked.gdp-file-detail-page .d2h-file-header,
+body.app-panel-docked.gdp-file-detail-page .gdp-shell-header,
+body.app-panel-docked.gdp-file-detail-page .gdp-file-detail-sticky {
+  top: 0;
+}
+body.app-panel-docked.gdp-diff-page .gdp-markdown-toc,
+body.app-panel-docked.gdp-history-page .gdp-markdown-toc,
+body.app-panel-docked.gdp-repo-page .gdp-markdown-toc,
+body.app-panel-docked.gdp-file-detail-page .gdp-markdown-toc {
+  top: 16px;
+}
+body.app-panel-docked.gdp-help-page .gdp-help-nav {
+  top: 20px;
+}
+body.app-panel-docked.gdp-diff-page .d2h-file-wrapper,
+body.app-panel-docked.gdp-diff-page .gdp-file-shell,
+body.app-panel-docked.gdp-history-page .d2h-file-wrapper,
+body.app-panel-docked.gdp-history-page .gdp-file-shell,
+body.app-panel-docked.gdp-repo-page .d2h-file-wrapper,
+body.app-panel-docked.gdp-repo-page .gdp-file-shell,
+body.app-panel-docked.gdp-file-detail-page .d2h-file-wrapper,
+body.app-panel-docked.gdp-file-detail-page .gdp-file-shell {
+  scroll-margin-top: 8px;
+}
+body.app-panel-docked #sidebar,
+body.app-panel-docked #sidebar-resizer,
+body.app-panel-docked #history-panel,
+body.app-panel-docked #history-resizer,
+body.app-panel-docked #annotation-panel {
+  bottom: var(--app-panel-visible-height);
+}
+body.app-panel-docked .app-panel.app-panel-open {
+  box-shadow: none;
+}
+body.app-panel-docked .journal-page,
+body.app-panel-docked .db-root {
+  height: 100%;
 }
 
 .tools-sheet,
@@ -14221,7 +14644,7 @@ html[data-theme="dark"] .tools-code span[style] {
   border-color: var(--accent, #0969da);
   color: var(--accent, #0969da);
 }
-/* 左が一覧、右がターミナル。 */
+/* 左がツリー、右がターミナル。 */
 .terminal-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -14234,7 +14657,7 @@ html[data-theme="dark"] .tools-code span[style] {
    いて 1px も動けない箱は、ブラウザがスクロールの相手に選ばずこの指定ごと
    読み飛ばすので、そちらは core/scroll-chaining.ts の wheel で止める。 */
 .terminal-board,
-.terminal-row-list,
+.terminal-tree,
 .terminal-screen,
 .terminal-screen .xterm-viewport,
 .terminal-lightbox-view {
@@ -14251,27 +14674,28 @@ html[data-theme="dark"] .tools-code span[style] {
 /* 左の一覧。幅はハンドルで変えられる。 */
 .terminal-lists {
   flex: 0 0 auto;
-  width: var(--terminal-list-width, 380px);
+  width: var(--terminal-list-width, 440px);
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border, #d0d7de);
 }
-/* 上半分は「あなたの番」+ 絞り込み + 一覧の 3 段。tmux ペインとシェルは
-   同じ表に並ぶので、種類ごとの枠は持たない。 */
+/* 上から「あなたの番」+ 絞り込み + ツリーの 3 段。ツリーはシェルの枝と
+   tmux セッションの枝が縦に並ぶ。 */
 .terminal-board {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow: hidden;
+  background: var(--bg, #fff);
 }
 .terminal-section-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px 4px;
+  gap: 6px;
+  padding: 10px 12px 6px;
   font-size: 12px;
   color: var(--fg-muted, #57606a);
 }
@@ -14281,7 +14705,10 @@ html[data-theme="dark"] .tools-code span[style] {
 }
 .terminal-section-count {
   font-variant-numeric: tabular-nums;
-  padding: 0 7px;
+  min-width: 20px;
+  padding: 1px 6px;
+  box-sizing: border-box;
+  text-align: center;
   border-radius: 999px;
   background: var(--bg-emph, #eef1f4);
   color: var(--fg, #1f2328);
@@ -14292,11 +14719,18 @@ html[data-theme="dark"] .tools-code span[style] {
   white-space: nowrap;
 }
 /* 入力待ちと未読だけを大きく出す区画。ここが空なら見るものは無い。 */
+.terminal-attention {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border, #d0d7de);
+}
+.terminal-attention.is-empty {
+  display: none;
+}
 .terminal-attention-cards {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
-  padding: 0 12px 10px;
+  padding: 0 12px 12px;
 }
 .terminal-card {
   border: 1px solid var(--border, #d0d7de);
@@ -14385,85 +14819,80 @@ html[data-theme="dark"] .tools-code span[style] {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 7px 8px;
   border-bottom: 1px solid var(--border, #d0d7de);
+  background: var(--bg-soft, #f6f8fa);
 }
-.terminal-scope-btn {
-  appearance: none;
-  padding: 3px 10px;
-  border: 1px solid var(--border, #d0d7de);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--fg-muted, #57606a);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.terminal-scope-btn.active {
-  background: var(--accent-subtle, #ddf4ff);
-  border-color: var(--accent, #0969da);
-  color: var(--accent, #0969da);
-  font-weight: 600;
+.terminal-scope-select {
+  flex: 0 1 132px;
+  min-width: 90px;
 }
 .terminal-scope-hint {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 11px;
   color: var(--fg-muted, #57606a);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* セッションの横タブ。既存の .seg をそのまま使う。 */
-.terminal-sessions {
-  flex: 0 0 auto;
-  margin: 6px 12px 0;
-  overflow-x: auto;
-}
-/* 絞り込みの帯。札は押すたびに入り切りするので、寸法は変えない。 */
+/* 状態は 1 つだけ選ぶため、4 枚の札を 1 個の select にまとめる。 */
 .terminal-filters {
   flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-top: 1px solid var(--border, #d0d7de);
-  border-bottom: 1px solid var(--border, #d0d7de);
-  flex-wrap: wrap;
-}
-.terminal-chip {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: minmax(72px, 0.72fr) minmax(0, 1.4fr) 28px;
   align-items: center;
   gap: 5px;
+  padding: 6px 8px 7px;
+  border-bottom: 1px solid var(--border, #d0d7de);
+  background: var(--bg-soft, #f6f8fa);
+}
+.terminal-scope-select,
+.terminal-state-select {
   appearance: none;
-  padding: 3px 9px;
+  min-width: 0;
+  width: 100%;
+  height: 26px;
+  box-sizing: border-box;
   border: 1px solid var(--border, #d0d7de);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--fg-muted, #57606a);
+  border-radius: 6px;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--fg-muted) 50%) right 10px center / 4px 4px no-repeat,
+    linear-gradient(135deg, var(--fg-muted) 50%, transparent 50%) right 7px center / 4px 4px no-repeat,
+    var(--bg, #fff);
+  color: var(--fg, #1f2328);
   font: inherit;
   font-size: 11px;
-  cursor: pointer;
-  white-space: nowrap;
+  padding: 0 22px 0 8px;
+  outline: none;
 }
-.terminal-chip:hover {
-  background: var(--bg-mute, #eaeef2);
-}
-.terminal-chip.on {
-  background: var(--accent-subtle, #ddf4ff);
+.terminal-scope-select:focus,
+.terminal-state-select:focus {
   border-color: var(--accent, #0969da);
-  color: var(--accent, #0969da);
+  box-shadow: 0 0 0 3px var(--accent-muted, rgba(9, 105, 218, 0.2));
 }
 .terminal-search {
-  flex: 1 1 140px;
-  min-width: 110px;
-  padding: 4px 8px;
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 9px;
   border-radius: 6px;
   border: 1px solid var(--border, #d0d7de);
   background: var(--bg, #fff);
   color: var(--fg, #1f2328);
   font: inherit;
   font-size: 12px;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.terminal-search::placeholder {
+  color: var(--fg-subtle, #6e7781);
+}
+.terminal-search:focus {
+  border-color: var(--accent, #0969da);
+  box-shadow: 0 0 0 3px var(--accent-muted, rgba(9, 105, 218, 0.2));
 }
 /* 状態の印。色だけに頼らないよう、形も状態ごとに変える。 */
 .terminal-mark {
@@ -14488,19 +14917,110 @@ html[data-theme="dark"] .tools-code span[style] {
   border: 1.5px solid var(--fg-muted, #57606a);
   border-radius: 50%;
 }
-.terminal-sessions-section {
+/* tmux の入れ子をそのまま出す枝。シェルの枝も同じ形で並ぶ。 */
+.terminal-tree {
   flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.terminal-row-list {
-  flex: 1 1 auto;
-  /* 上段のカードが増えても、一覧が潰れて 1 行も見えない状態にはしない。
+  /* 上段のカードが増えても、ツリーが潰れて 1 行も見えない状態にはしない。
      溢れる分は .terminal-board 側のスクロールに逃がす。 */
   min-height: 132px;
   overflow: auto;
-  padding: 0 6px 8px;
+  padding: 6px 8px 12px;
+  background: var(--bg, #fff);
+}
+.terminal-tree > .terminal-tree-group + .terminal-tree-group {
+  margin-top: 5px;
+}
+/* 見出しを押すと畳む。押せる範囲を枝の幅いっぱいに取る。 */
+.terminal-tree-head {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-muted, #57606a);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  min-height: 28px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.terminal-tree-head:hover {
+  background: var(--bg-mute, #eaeef2);
+}
+/* セッションの見出しはスクロールしても残す。どの枝を見ているかを見失わない。 */
+.terminal-tree-head-0 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: color-mix(in srgb, var(--bg-soft, #f6f8fa) 82%, var(--bg, #fff));
+  color: var(--fg, #1f2328);
+  font-size: 12px;
+}
+.terminal-tree-head-0:hover {
+  background: var(--bg-mute, #eaeef2);
+}
+.terminal-tree-head-1 {
+  color: var(--fg, #1f2328);
+  font-size: 11px;
+}
+.terminal-tree-head-2 {
+  min-height: 25px;
+  color: var(--fg-muted, #57606a);
+  font-weight: 500;
+}
+.terminal-tree-twisty {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--fg-muted, #57606a);
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.terminal-tree-twisty.collapsed {
+  transform: rotate(-90deg);
+}
+.terminal-tree-head:hover .terminal-tree-twisty {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: var(--fg, #1f2328);
+}
+.terminal-tree-twisty .octicon {
+  display: block;
+}
+.terminal-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-tree-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  font-size: 10px;
+  min-width: 20px;
+  padding: 1px 6px;
+  box-sizing: border-box;
+  text-align: center;
+  border-radius: 999px;
+  background: var(--bg-emph, #eef1f4);
+  color: var(--fg-muted, #57606a);
+}
+/* 子は 1 段ぶん右へ。深さが目で分かる。 */
+.terminal-tree-children {
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border, #d0d7de);
+}
+.terminal-tree-empty {
+  padding: 2px 10px 6px;
 }
 .terminal-row-index {
   font-size: 10px;
@@ -14512,19 +15032,35 @@ html[data-theme="dark"] .tools-code span[style] {
 .terminal-row-state {
   display: none;
 }
-/* ウィンドウの見出し。この下の行が、そのウィンドウのペイン。 */
-.terminal-window-name {
-  padding: 8px 10px 3px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--fg-muted, #57606a);
-  position: sticky;
-  top: 0;
-  background: var(--bg, #fff);
+/* そのシェルが映している tmux ペイン。行の右端に小さく添える。 */
+/* そのシェルが動かしている tmux セッション。端末の印と名前を並べる。 */
+.terminal-row-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--accent, #0969da);
+  white-space: nowrap;
 }
-.terminal-window-name + .terminal-row,
-.terminal-row + .terminal-row {
-  margin-left: 10px;
+.terminal-row-link .octicon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+/* シェルの行に付ける開閉ボタン。行そのものは押すと画面が切り替わるので、
+   開閉は独立した当たり判定にする。寸法は枝の見出しのツイスティと揃える。 */
+.terminal-tree-twisty-inline {
+  flex: none;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  align-self: center;
+}
+.terminal-tree-twisty-inline:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: var(--fg, #1f2328);
 }
 .terminal-row {
   display: flex;
@@ -14536,9 +15072,12 @@ html[data-theme="dark"] .tools-code span[style] {
   flex: 1 1 auto;
   min-width: 0;
   display: grid;
-  grid-template-columns: 12px 26px minmax(0, 1fr) 40px;
+  /* 印・位置・作業内容・映しているペイン・経過。映しているペインの列は
+     tmux 行では空になるが、列そのものは全行で持たせる (行ごとに列数が
+     変わると、その先の桁が行ごとにずれる)。 */
+  grid-template-columns: 10px 34px minmax(0, 1fr) auto 36px;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   appearance: none;
   border: 0;
   border-radius: 6px;
@@ -14546,15 +15085,27 @@ html[data-theme="dark"] .tools-code span[style] {
   color: inherit;
   font: inherit;
   text-align: left;
-  padding: 5px 8px;
+  min-height: 32px;
+  padding: 5px 7px;
   cursor: pointer;
+}
+.terminal-row-item-tmux {
+  grid-template-columns: 10px 18px minmax(0, 1fr) auto 36px;
 }
 .terminal-row-item:hover {
   background: var(--bg-mute, #eaeef2);
 }
 .terminal-row-item.active {
   background: var(--accent-subtle, #ddf4ff);
-  box-shadow: inset 2px 0 0 var(--accent, #0969da);
+  box-shadow: inset 3px 0 0 var(--accent, #0969da);
+}
+.terminal-row-item.active .terminal-row-task {
+  color: var(--accent, #0969da);
+  font-weight: 600;
+}
+.terminal-row-item.related-active {
+  background: color-mix(in srgb, var(--accent-subtle, #ddf4ff) 46%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent, #0969da) 48%, transparent);
 }
 .terminal-row-state {
   font-size: 11px;
@@ -14624,21 +15175,26 @@ html[data-theme="dark"] .tools-code span[style] {
   color: var(--success, #1a7f37);
 }
 .terminal-shell-new {
-  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
   appearance: none;
-  border: 1px dashed var(--border, #d0d7de);
+  border: 1px solid var(--border, #d0d7de);
   border-radius: 6px;
-  background: transparent;
-  color: var(--fg-muted, #57606a);
+  background: var(--bg, #fff);
+  color: var(--accent, #0969da);
   font: inherit;
-  font-size: 11px;
-  padding: 3px 10px;
+  padding: 0;
   cursor: pointer;
-  white-space: nowrap;
+}
+.terminal-shell-new .octicon {
+  display: block;
 }
 .terminal-shell-new:hover:not(:disabled) {
-  background: var(--bg-emph, #eef1f4);
-  color: var(--fg, #1f2328);
+  border-color: var(--accent, #0969da);
+  background: var(--accent-subtle, #ddf4ff);
 }
 .terminal-shell-new:disabled {
   opacity: 0.5;
@@ -14860,31 +15416,20 @@ html[data-theme="dark"] .tools-code span[style] {
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.6);
 }
-/* ターミナル本体。tmux ペインの実サイズのまま描くので、ドロワーが狭いときは
-   字を潰さず横スクロールに逃がす。背景は xterm 自身が塗る黒に合わせる
-   (映しているのはアプリの画面ではなく端末なので、テーマには追従させない)。 */
+/* ターミナル本体。背景は xterm 自身が塗る黒に合わせる (映しているのはアプリの
+   画面ではなく端末なので、テーマには追従させない)。
+
+   端末の桁数・行数はこの枠を測って決め、そのまま PTY に伝える。だから中身が
+   枠からはみ出す前提は無く、はみ出したら測り直しが追いついていないだけ。
+   その一瞬をスクロールに逃がすと、行の右端が枠の外に居座って見切れたままに
+   なる (tmux で左右に分割していると、右のペインが画面右端に接するので特に
+   目立つ)。hidden にして、正しい寸法が届くのを待つ。 */
 .terminal-screen {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   background: #000;
-  /* ペインが枠より短いときの余りを上に出すための箱。下は §.terminal-screen
-     > .xterm を参照。 */
-  display: flex;
-  flex-direction: column;
-}
-/* ペインが枠より短いとき、中身を下端に寄せる。
-
-   端末は入力行が下端にあるので、上詰めにすると入力行が枠の真ん中で浮く
-   (42 行のペインを 74 行ぶんの高さの枠に出すと、下に 500px 以上の黒が残る)。
-
-   余白を margin-top: auto で上に出すのが要点。はみ出しているときは auto が
-   0 になるので、そのまま普通にスクロールできる (justify-content: flex-end で
-   寄せると、はみ出した分が上に切れて掴めなくなる)。縮まないよう flex-shrink
-   も切る。 */
-.terminal-screen > .xterm {
-  flex: 0 0 auto;
-  margin-top: auto;
 }
 .terminal-status {
   flex: 0 0 auto;
@@ -15709,4 +16254,8 @@ html[data-theme="dark"] .tools-code span[style] {
 }
 .db-root .db-grid-filter-spacer {
   background: transparent;
+}
+.scope-settings-refresh-error {
+  color: var(--danger);
+  white-space: pre-wrap;
 }

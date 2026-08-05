@@ -294,7 +294,7 @@ describe("findPathAnchors", () => {
     {
       name: "そのまま出ている綴り",
       candidate: "docs/out.png",
-      expected: { candidate: "docs/out.png", row: 1, col: 6 },
+      expected: { candidate: "docs/out.png", row: 1, col: 6, span: 1 },
     },
     {
       name: "行またぎは始まっている行に置く",
@@ -303,6 +303,8 @@ describe("findPathAnchors", () => {
         candidate: "/tmp/session/scratchpad/band2.png",
         row: 2,
         col: 12,
+        // 2 行にまたがっているので、画像は 2 行目の下に置く。
+        span: 2,
       },
     },
   ])("$name", ({ candidate, expected }) => {
@@ -320,7 +322,7 @@ describe("findPathAnchors", () => {
     // 同じパスが何度も流れる画面で、全部に重ねると画面が埋まる。
     const screen = ["a docs/out.png", "b docs/out.png"];
     expect(findPathAnchors(screen, ["docs/out.png"])).toEqual([
-      { candidate: "docs/out.png", row: 0, col: 2 },
+      { candidate: "docs/out.png", row: 0, col: 2, span: 1 },
     ]);
   });
 
@@ -331,8 +333,13 @@ describe("findPathAnchors", () => {
         "/tmp/session/scratchpad/band2.png",
       ]),
     ).toEqual([
-      { candidate: "docs/out.png", row: 1, col: 6 },
-      { candidate: "/tmp/session/scratchpad/band2.png", row: 2, col: 12 },
+      { candidate: "docs/out.png", row: 1, col: 6, span: 1 },
+      {
+        candidate: "/tmp/session/scratchpad/band2.png",
+        row: 2,
+        col: 12,
+        span: 2,
+      },
     ]);
   });
 });

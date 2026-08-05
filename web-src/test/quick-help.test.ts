@@ -21,12 +21,14 @@ const EN_TEXT: QuickHelpText = {
   panelTitle: "Quick Help",
   close: "close quick help",
   viewAll: "View all keybindings",
+  settings: "Settings",
 };
 
 const JA_TEXT: QuickHelpText = {
   panelTitle: "クイックヘルプ",
   close: "クイックヘルプを閉じる",
   viewAll: "すべてのキーバインドを見る",
+  settings: "設定",
 };
 
 function installFixtureDom() {
@@ -38,13 +40,18 @@ function installFixtureDom() {
     '    <button id="quick-help-close"></button>',
     "  </div>",
     '  <div id="quick-help-groups"></div>',
+    '  <a id="quick-help-settings-link" href="/help?section=settings"></a>',
     '  <a id="quick-help-full-link" href="/help?section=keybindings"></a>',
     "</div>",
     '<div id="outside-marker"></div>',
   ].join("");
 }
 
-function makeQuickHelp(language: "en" | "ja" = "en", onOpenFull?: () => void) {
+function makeQuickHelp(
+  language: "en" | "ja" = "en",
+  onOpenFull?: () => void,
+  onOpenSettings?: () => void,
+) {
   installFixtureDom();
   return createQuickHelp({
     $: <T extends Element = HTMLElement>(sel: string): T => {
@@ -55,6 +62,7 @@ function makeQuickHelp(language: "en" | "ja" = "en", onOpenFull?: () => void) {
     getLanguage: () => language,
     getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
     openFullKeybindings: () => onOpenFull?.(),
+    openSettings: () => onOpenSettings?.(),
   });
 }
 
@@ -149,6 +157,7 @@ describe("quick help popover", () => {
       getLanguage: () => language,
       getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
       openFullKeybindings: () => undefined,
+      openSettings: () => undefined,
     });
 
     quickHelp.open();

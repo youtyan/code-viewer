@@ -1,6 +1,6 @@
 version: 2
 updates:
-  - package-ecosystem: "bun"
+  - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -9,7 +9,7 @@ updates:
       timezone: "Asia/Tokyo"
     open-pull-requests-limit: 5
     groups:
-      bun-minor-and-patch:
+      npm-minor-and-patch:
         patterns:
           - "*"
         update-types:

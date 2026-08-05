@@ -1,6 +1,8 @@
 // Search palette (Ctrl+K file / Ctrl+G grep): overlay UI, ranked file
 // matching, repo-wide grep, and result navigation. Extracted from app.ts.
 
+import { attachDragResizer } from "../core/drag-resizer";
+import { isTestFilePath } from "../core/file-filter";
 import {
   getPanelFocusScope,
   type PanelFocusScope,
@@ -18,14 +20,27 @@ import { isImeComposing } from "../core/keyboard";
 import type { AppRoute } from "../core/routes";
 import {
   limitPaletteResults,
+  MAX_GREP_PALETTE_HEIGHT,
+  MAX_GREP_PALETTE_WIDTH,
+  MIN_GREP_PALETTE_HEIGHT,
+  MIN_GREP_PALETTE_WIDTH,
   movePaletteSelection,
   PALETTE_RESULT_LIMIT,
+  rankPaletteResultsByHistory,
+  rememberPaletteSelection,
 } from "../core/search-palette";
+import type { ShikiHighlighter } from "../core/shiki-loader";
+import { normalizeSourceShikiLang } from "../core/source-meta";
 import type {
   FileMeta,
+  FileRangeResponse,
   FileSearchListResponse,
   GrepResponse,
 } from "../core/types";
+import {
+  type SearchPaletteLanguage,
+  searchPaletteText,
+} from "./search-palette-i18n";
 
 export type SearchPaletteDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;
@@ -42,6 +57,32 @@ export type SearchPaletteDeps = {
   repoFileCacheKey(ref: string): string;
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;
   getServerGeneration(): number;
+  getSyntaxHighlight(): boolean;
+  inferLang(path: string): string | null;
+  loadSourceShikiHighlighter(lang: string): Promise<ShikiHighlighter | null>;
+  sourceShikiLines(
+    textValue: string,
+    lang: string,
+    highlighter: ShikiHighlighter,
+  ): string[] | null;
+  getLanguage(): SearchPaletteLanguage;
+  getFileSelectionHistory(): string[];
+  getGrepSelectionHistory(): string[];
+  getGrepRegex(): boolean;
+  getGrepHideTests(): boolean;
+  getGrepGroupByFile(): boolean;
+  getGrepPaletteWidth(): number | undefined;
+  getGrepPaletteHeight(): number | undefined;
+  persistGrepSettings(patch: {
+    fileSelectionHistory?: string[];
+    grepSelectionHistory?: string[];
+    grepRegex?: boolean;
+    hideTests?: boolean;
+    grepGroupByFile?: boolean;
+    grepPaletteWidth?: number;
+    grepPaletteHeight?: number;
+  }): Promise<void>;
+  applyGrepHideTests(hidden: boolean): void;
   STATE: {
     route: AppRoute;
     files: FileMeta[];
@@ -64,6 +105,20 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     repoFileCacheKey,
     trackLoad,
     getServerGeneration,
+    getSyntaxHighlight,
+    inferLang,
+    loadSourceShikiHighlighter,
+    sourceShikiLines,
+    getLanguage,
+    getFileSelectionHistory,
+    getGrepSelectionHistory,
+    getGrepRegex,
+    getGrepHideTests,
+    getGrepGroupByFile,
+    getGrepPaletteWidth,
+    getGrepPaletteHeight,
+    persistGrepSettings,
+    applyGrepHideTests,
   } = deps;
 
   type PaletteMode = "file" | "grep";
@@ -84,6 +139,9 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     line: number;
     column: number;
     preview: string;
+    matchText?: string;
+    query: string;
+    regex: boolean;
     ref: string;
     source: "diff" | "repo";
   };
@@ -94,19 +152,55 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     controls: HTMLElement;
     list: HTMLElement;
     status: HTMLElement;
+    preview: HTMLElement;
     mode: PaletteMode;
     grepRegex: boolean;
+    grepHideTests: boolean;
+    grepGroupByFile: boolean;
+    grepPaletteWidth: number;
+    grepPaletteHeight: number;
+    fileHistory: string[];
+    grepHistory: string[];
     selected: number;
     items: PaletteItem[];
     composing: boolean;
     controller?: AbortController;
+    previewController?: AbortController;
+    previewGeneration: number;
+    previewKey: string;
+    settingsPending: boolean;
+    opening: boolean;
+    pointerClientX: number | null;
+    pointerClientY: number | null;
     debounce?: number;
     diffSnapshot: FileMeta[];
     previousFocusScope: PanelFocusScope | null;
+    detachResizers: Array<() => void>;
   };
   let PALETTE: PaletteState | null = null;
   let repoFileRequestGeneration = 0;
+  const GREP_CONTEXT_RADIUS = 5;
+  const FILE_PREVIEW_LINE_LIMIT = 200;
   const REPO_FILE_CACHE = new Map<string, FileSearchListResponse>();
+  const text = () => searchPaletteText(getLanguage());
+
+  function clampGrepPaletteWidth(width: number): number {
+    const viewportMax = Math.min(
+      MAX_GREP_PALETTE_WIDTH,
+      Math.max(1, window.innerWidth - 48),
+    );
+    const viewportMin = Math.min(MIN_GREP_PALETTE_WIDTH, viewportMax);
+    return Math.max(viewportMin, Math.min(viewportMax, Math.round(width)));
+  }
+
+  function clampGrepPaletteHeight(height: number): number {
+    const viewportMax = Math.min(
+      MAX_GREP_PALETTE_HEIGHT,
+      Math.max(1, window.innerHeight - 48),
+    );
+    const viewportMin = Math.min(MIN_GREP_PALETTE_HEIGHT, viewportMax);
+    return Math.max(viewportMin, Math.min(viewportMax, Math.round(height)));
+  }
 
   function paletteSource(): "diff" | "repo" {
     if (STATE.route.screen === "diff") return "diff";
@@ -127,6 +221,8 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     if (!PALETTE) return;
     const previousFocusScope = PALETTE.previousFocusScope;
     PALETTE.controller?.abort();
+    PALETTE.previewController?.abort();
+    for (const detach of PALETTE.detachResizers) detach();
     if (PALETTE.debounce) window.clearTimeout(PALETTE.debounce);
     PALETTE.root.remove();
     PALETTE = null;
@@ -140,19 +236,29 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     closeSearchPalette();
     const root = document.createElement("div");
     root.className = "gdp-palette-backdrop";
+    root.classList.add("gdp-palette-backdrop-wide");
     const dialog = document.createElement("div");
     dialog.className = "gdp-palette";
+    dialog.classList.add("gdp-palette-wide");
+    dialog.classList.toggle("gdp-palette-grep", mode === "grep");
     dialog.setAttribute("role", "dialog");
     dialog.setAttribute("aria-modal", "true");
+    const savedWidth = getGrepPaletteWidth();
+    const savedHeight = getGrepPaletteHeight();
+    if (savedWidth !== undefined)
+      dialog.style.width = `${clampGrepPaletteWidth(savedWidth)}px`;
+    if (savedHeight !== undefined)
+      dialog.style.height = `${clampGrepPaletteHeight(savedHeight)}px`;
     const label = document.createElement("div");
     label.className = "gdp-palette-label";
-    label.textContent = mode === "file" ? "Files" : "Grep";
+    label.textContent = mode === "file" ? text().files : text().grep;
     const input = document.createElement("input");
     input.className = "gdp-palette-input";
     input.type = "search";
     input.autocomplete = "off";
     input.spellcheck = false;
-    input.placeholder = mode === "file" ? "Search files" : "Search text";
+    input.placeholder =
+      mode === "file" ? text().searchFiles : text().searchText;
     input.setAttribute("role", "combobox");
     input.setAttribute("aria-expanded", "true");
     input.setAttribute("aria-controls", "gdp-palette-list");
@@ -164,24 +270,101 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     list.id = "gdp-palette-list";
     list.className = "gdp-palette-list";
     list.setAttribute("role", "listbox");
-    dialog.append(label, input, controls, status, list);
+    const preview = document.createElement("div");
+    preview.className = "gdp-palette-preview";
+    preview.setAttribute(
+      "aria-label",
+      mode === "grep" ? text().grepCodeContext : text().fileCodePreview,
+    );
+    const body = document.createElement("div");
+    body.className = "gdp-palette-body";
+    body.append(list, preview);
+    dialog.append(label, input, controls, status, body);
+    const resizeX = document.createElement("div");
+    const resizeY = document.createElement("div");
+    resizeX.className = "gdp-palette-resizer gdp-palette-resizer-x";
+    resizeX.role = "separator";
+    resizeX.tabIndex = 0;
+    resizeX.setAttribute("aria-orientation", "vertical");
+    resizeX.setAttribute("aria-label", text().resizeWidth);
+    resizeY.className = "gdp-palette-resizer gdp-palette-resizer-y";
+    resizeY.role = "separator";
+    resizeY.tabIndex = 0;
+    resizeY.setAttribute("aria-orientation", "horizontal");
+    resizeY.setAttribute("aria-label", text().resizeHeight);
+    dialog.append(resizeX, resizeY);
     root.appendChild(dialog);
     document.body.appendChild(root);
+    const dialogRect = dialog.getBoundingClientRect();
     const state: PaletteState = {
       root,
       input,
       controls,
       list,
       status,
+      preview,
       mode,
-      grepRegex: false,
+      grepRegex: getGrepRegex(),
+      grepHideTests: getGrepHideTests(),
+      grepGroupByFile: getGrepGroupByFile(),
+      grepPaletteWidth: clampGrepPaletteWidth(savedWidth ?? dialogRect.width),
+      grepPaletteHeight: clampGrepPaletteHeight(
+        savedHeight ?? dialogRect.height,
+      ),
+      fileHistory: [...getFileSelectionHistory()],
+      grepHistory: [...getGrepSelectionHistory()],
       selected: -1,
       items: [],
       composing: false,
+      previewGeneration: 0,
+      previewKey: "",
+      settingsPending: false,
+      opening: false,
+      pointerClientX: null,
+      pointerClientY: null,
       diffSnapshot: [...STATE.files],
       previousFocusScope,
+      detachResizers: [],
     };
     PALETTE = state;
+    state.detachResizers.push(
+      attachDragResizer({
+        handle: resizeX,
+        getSize: () => dialog.getBoundingClientRect().width,
+        applySize: (width) => {
+          state.grepPaletteWidth = clampGrepPaletteWidth(width);
+          dialog.style.width = `${state.grepPaletteWidth}px`;
+        },
+        direction: 1,
+        axis: "x",
+        onEnd: () =>
+          void persistGrepAppearance(
+            state,
+            { grepPaletteWidth: state.grepPaletteWidth },
+            text().windowWidth,
+          ),
+        activeClassTarget: dialog,
+        activeClassName: "gdp-palette-resizing",
+      }),
+      attachDragResizer({
+        handle: resizeY,
+        getSize: () => dialog.getBoundingClientRect().height,
+        applySize: (height) => {
+          state.grepPaletteHeight = clampGrepPaletteHeight(height);
+          dialog.style.height = `${state.grepPaletteHeight}px`;
+        },
+        direction: 1,
+        axis: "y",
+        onEnd: () =>
+          void persistGrepAppearance(
+            state,
+            { grepPaletteHeight: state.grepPaletteHeight },
+            text().windowHeight,
+          ),
+        activeClassTarget: dialog,
+        activeClassName: "gdp-palette-resizing",
+      }),
+    );
     setPanelFocusScope(null);
     root.addEventListener("mousedown", (e) => {
       if (e.target === root) closeSearchPalette();
@@ -199,46 +382,198 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     return state;
   }
 
+  function createExcludeTestsButton(state: PaletteState): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "gdp-palette-mode-button";
+    button.setAttribute("aria-pressed", String(state.grepHideTests));
+    button.textContent = text().excludeTests;
+    button.title = text().excludeTestsTitle;
+    button.disabled = state.settingsPending;
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      void updateGrepHideTests(state, !state.grepHideTests);
+    });
+    return button;
+  }
+
   function renderPaletteControls(state: PaletteState) {
     state.controls.innerHTML = "";
     if (state.mode === "file") {
       const hint = document.createElement("span");
       hint.className = "gdp-palette-mode-hint";
       hint.textContent = isGlobPathQuery(state.input.value)
-        ? "Glob: * ? []"
-        : "Fuzzy path search";
-      state.controls.appendChild(hint);
+        ? text().globHint
+        : text().fuzzyHint;
+      state.controls.append(createExcludeTestsButton(state), hint);
       return;
     }
     const plain = document.createElement("button");
     plain.type = "button";
     plain.className = "gdp-palette-mode-button";
     plain.setAttribute("aria-pressed", String(!state.grepRegex));
-    plain.textContent = "Plain";
+    plain.textContent = text().plain;
+    plain.disabled = state.settingsPending;
     plain.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      state.grepRegex = false;
-      renderPaletteControls(state);
-      updatePaletteResults(state);
-      state.input.focus();
+      void updateGrepRegex(state, false);
     });
     const regex = document.createElement("button");
     regex.type = "button";
     regex.className = "gdp-palette-mode-button";
     regex.setAttribute("aria-pressed", String(state.grepRegex));
-    regex.textContent = ".* Regex";
+    regex.textContent = text().regex;
     regex.title = "Alt+R";
+    regex.disabled = state.settingsPending;
     regex.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      state.grepRegex = true;
-      renderPaletteControls(state);
-      updatePaletteResults(state);
-      state.input.focus();
+      void updateGrepRegex(state, true);
+    });
+    const excludeTests = createExcludeTestsButton(state);
+    const groupFiles = document.createElement("button");
+    groupFiles.type = "button";
+    groupFiles.className = "gdp-palette-mode-button";
+    groupFiles.setAttribute("aria-pressed", String(state.grepGroupByFile));
+    groupFiles.textContent = text().groupFiles;
+    groupFiles.title = text().groupFilesTitle;
+    groupFiles.disabled = state.settingsPending;
+    groupFiles.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      void updateGrepGroupByFile(state, !state.grepGroupByFile);
     });
     const hint = document.createElement("span");
     hint.className = "gdp-palette-mode-hint";
-    hint.textContent = "Alt+R toggles regex";
-    state.controls.append(plain, regex, hint);
+    hint.textContent = text().regexHint;
+    state.controls.append(plain, regex, excludeTests, groupFiles, hint);
+  }
+
+  function errorMessage(err: unknown, fallback: string): string {
+    return err instanceof Error && err.message ? err.message : fallback;
+  }
+
+  function responseGenerationIsStale(
+    responseGeneration: number | undefined,
+  ): boolean {
+    const currentGeneration = getServerGeneration();
+    return (
+      responseGeneration !== undefined &&
+      currentGeneration > 0 &&
+      responseGeneration < currentGeneration
+    );
+  }
+
+  async function persistGrepAppearance(
+    state: PaletteState,
+    patch: {
+      grepGroupByFile?: boolean;
+      grepPaletteWidth?: number;
+      grepPaletteHeight?: number;
+    },
+    label: string,
+  ): Promise<void> {
+    try {
+      await persistGrepSettings(patch);
+    } catch (err) {
+      console.error(`Failed to save grep ${label}`, err);
+      if (PALETTE === state) {
+        state.status.textContent = text().saveFailed(
+          label,
+          errorMessage(err, text().unknownError),
+        );
+      }
+    }
+  }
+
+  async function updateGrepGroupByFile(
+    state: PaletteState,
+    grouped: boolean,
+  ): Promise<void> {
+    if (state.settingsPending || grouped === state.grepGroupByFile) return;
+    const previous = state.grepGroupByFile;
+    state.grepGroupByFile = grouped;
+    state.settingsPending = true;
+    renderPaletteControls(state);
+    renderPalette(state);
+    try {
+      await persistGrepSettings({ grepGroupByFile: grouped });
+    } catch (err) {
+      console.error("Failed to save grep grouping", err);
+      state.grepGroupByFile = previous;
+      if (PALETTE === state) {
+        state.status.textContent = text().saveFailed(
+          text().fileGrouping,
+          errorMessage(err, text().unknownError),
+        );
+        renderPalette(state);
+      }
+    } finally {
+      state.settingsPending = false;
+      if (PALETTE === state) {
+        renderPaletteControls(state);
+        state.input.focus();
+      }
+    }
+  }
+
+  async function updateGrepRegex(
+    state: PaletteState,
+    regex: boolean,
+  ): Promise<void> {
+    if (state.settingsPending || regex === state.grepRegex) return;
+    const previous = state.grepRegex;
+    state.grepRegex = regex;
+    state.settingsPending = true;
+    renderPaletteControls(state);
+    try {
+      await persistGrepSettings({ grepRegex: regex });
+      if (PALETTE === state) updatePaletteResults(state);
+    } catch (err) {
+      console.error("Failed to save grep regex mode", err);
+      state.grepRegex = previous;
+      if (PALETTE === state) {
+        state.status.textContent = text().saveFailed(
+          text().regexMode,
+          errorMessage(err, text().unknownError),
+        );
+      }
+    } finally {
+      state.settingsPending = false;
+      if (PALETTE === state) {
+        renderPaletteControls(state);
+        state.input.focus();
+      }
+    }
+  }
+
+  async function updateGrepHideTests(
+    state: PaletteState,
+    hidden: boolean,
+  ): Promise<void> {
+    if (state.settingsPending || hidden === state.grepHideTests) return;
+    const previous = state.grepHideTests;
+    state.grepHideTests = hidden;
+    state.settingsPending = true;
+    renderPaletteControls(state);
+    try {
+      await persistGrepSettings({ hideTests: hidden });
+      applyGrepHideTests(hidden);
+      if (PALETTE === state) updatePaletteResults(state);
+    } catch (err) {
+      console.error("Failed to save grep test exclusion", err);
+      state.grepHideTests = previous;
+      if (PALETTE === state) {
+        state.status.textContent = text().saveFailed(
+          text().testExclusion,
+          errorMessage(err, text().unknownError),
+        );
+      }
+    } finally {
+      state.settingsPending = false;
+      if (PALETTE === state) {
+        renderPaletteControls(state);
+        state.input.focus();
+      }
+    }
   }
 
   function regexQueryIsValid(query: string): boolean {
@@ -270,44 +605,374 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       parent.appendChild(document.createTextNode(path.slice(cursor)));
   }
 
+  function grepMatchRange(
+    lineText: string,
+    item: PaletteGrepItem,
+  ): { start: number; end: number } | null {
+    const matchText = item.matchText || (item.regex ? "" : item.query);
+    if (!matchText) return null;
+    const caseSensitive = item.regex || /[A-Z]/.test(item.query);
+    const haystack = caseSensitive ? lineText : lineText.toLowerCase();
+    const needle = caseSensitive ? matchText : matchText.toLowerCase();
+    const expectedStart = Math.max(0, item.column - 1);
+    let bestStart = -1;
+    let cursor = haystack.indexOf(needle);
+    while (cursor >= 0) {
+      if (
+        bestStart < 0 ||
+        Math.abs(cursor - expectedStart) < Math.abs(bestStart - expectedStart)
+      )
+        bestStart = cursor;
+      cursor = haystack.indexOf(needle, cursor + Math.max(1, needle.length));
+    }
+    return bestStart < 0
+      ? null
+      : { start: bestStart, end: bestStart + matchText.length };
+  }
+
+  function highlightGrepMatch(
+    cell: HTMLElement,
+    lineText: string,
+    item: PaletteGrepItem,
+  ): void {
+    const match = grepMatchRange(lineText, item);
+    if (!match) return;
+    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+    const parts: Array<{ node: Text; start: number; end: number }> = [];
+    let offset = 0;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const textNode = node as Text;
+      const nextOffset = offset + textNode.data.length;
+      const start = Math.max(match.start, offset);
+      const end = Math.min(match.end, nextOffset);
+      if (start < end)
+        parts.push({
+          node: textNode,
+          start: start - offset,
+          end: end - offset,
+        });
+      offset = nextOffset;
+    }
+    for (const part of parts.reverse()) {
+      const selected = part.node.splitText(part.start);
+      selected.splitText(part.end - part.start);
+      const mark = document.createElement("mark");
+      mark.className = "gdp-grep-match";
+      const parent = selected.parentNode;
+      if (!parent) throw new Error("grep match text is detached");
+      parent.insertBefore(mark, selected);
+      mark.appendChild(selected);
+    }
+  }
+
+  function palettePreviewTarget(item: PaletteItem): {
+    path: string;
+    ref: string;
+  } {
+    return item.kind === "file"
+      ? {
+          path: item.targetPath || item.path,
+          ref: item.targetRef || item.ref,
+        }
+      : { path: item.path, ref: item.ref };
+  }
+
+  function renderPalettePreviewFrame(
+    state: PaletteState,
+    item: PaletteItem,
+    message?: string,
+  ): HTMLElement {
+    state.preview.innerHTML = "";
+    const header = document.createElement("div");
+    header.className = "gdp-palette-preview-header";
+    const location = document.createElement("div");
+    location.className = "gdp-palette-preview-location";
+    const target = palettePreviewTarget(item);
+    location.textContent =
+      item.kind === "grep" ? `${item.path}:${item.line}` : target.path;
+    location.title =
+      item.kind === "grep"
+        ? `${item.path}:${item.line}:${item.column}`
+        : target.path;
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "gdp-btn gdp-btn-sm";
+    openButton.textContent = text().openFile;
+    openButton.addEventListener("mousedown", (event) => event.preventDefault());
+    openButton.addEventListener("click", () => {
+      void selectPaletteItem(state);
+    });
+    header.append(location, openButton);
+    const body = document.createElement("div");
+    body.className = "gdp-palette-preview-code";
+    if (message) {
+      const status = document.createElement("div");
+      status.className = "gdp-palette-preview-message";
+      status.textContent = message;
+      body.appendChild(status);
+    }
+    state.preview.append(header, body);
+    return body;
+  }
+
+  function clearPalettePreview(state: PaletteState, message: string): void {
+    state.previewController?.abort();
+    state.previewController = undefined;
+    state.previewKey = "";
+    state.preview.innerHTML = "";
+    const placeholder = document.createElement("div");
+    placeholder.className = "gdp-palette-preview-placeholder";
+    placeholder.textContent = message;
+    state.preview.appendChild(placeholder);
+  }
+
+  function palettePreviewIsCurrent(
+    state: PaletteState,
+    controller: AbortController,
+    previewGeneration: number,
+  ): boolean {
+    return (
+      PALETTE === state &&
+      !controller.signal.aborted &&
+      previewGeneration === state.previewGeneration
+    );
+  }
+
+  function renderPalettePreview(state: PaletteState): void {
+    const item = state.items[state.selected];
+    if (!item) {
+      clearPalettePreview(state, text().selectResult);
+      return;
+    }
+    const target = palettePreviewTarget(item);
+    const previewKey = `${item.kind}\0${target.ref}\0${target.path}\0${item.kind === "grep" ? item.line : ""}`;
+    if (previewKey === state.previewKey) return;
+    state.previewKey = previewKey;
+    state.previewController?.abort();
+    const controller = new AbortController();
+    state.previewController = controller;
+    const previewGeneration = ++state.previewGeneration;
+    const start =
+      item.kind === "grep" ? Math.max(1, item.line - GREP_CONTEXT_RADIUS) : 1;
+    const end =
+      item.kind === "grep"
+        ? item.line + GREP_CONTEXT_RADIUS
+        : FILE_PREVIEW_LINE_LIMIT;
+    renderPalettePreviewFrame(state, item, text().loadingCode);
+    const params = new URLSearchParams({
+      path: target.path,
+      ref: target.ref,
+      start: String(start),
+      end: String(end),
+    });
+    void trackLoad<FileRangeResponse>(
+      fetch(`/file_range?${params.toString()}`, {
+        signal: controller.signal,
+      }).then(async (response) => {
+        if (!response.ok) throw new Error(await response.text());
+        return response.json();
+      }),
+    )
+      .then(async (response) => {
+        if (!palettePreviewIsCurrent(state, controller, previewGeneration))
+          return;
+        if (responseGenerationIsStale(response.generation)) {
+          renderPalettePreviewFrame(state, item, text().fileChanged);
+          return;
+        }
+        const body = renderPalettePreviewFrame(state, item);
+        const meta = document.createElement("div");
+        meta.className = "gdp-palette-preview-meta";
+        meta.textContent = text().lines(
+          response.start,
+          Math.min(
+            response.end,
+            response.start + Math.max(0, response.lines.length - 1),
+          ),
+          response.complete ? response.total : undefined,
+        );
+        body.appendChild(meta);
+        const table = document.createElement("table");
+        table.className = "gdp-source-table";
+        const tbody = document.createElement("tbody");
+        response.lines.forEach((text, index) => {
+          const line = response.start + index;
+          const row = document.createElement("tr");
+          row.dataset.line = String(line);
+          row.classList.toggle(
+            "gdp-source-line-target",
+            item.kind === "grep" && line === item.line,
+          );
+          const number = document.createElement("td");
+          number.className = "gdp-source-line-number";
+          number.textContent = String(line);
+          const content = document.createElement("td");
+          content.className = "gdp-source-line-code";
+          content.textContent = text || " ";
+          if (item.kind === "grep" && line === item.line)
+            highlightGrepMatch(content, text, item);
+          row.append(number, content);
+          tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+        if (response.lines.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "gdp-palette-preview-message";
+          empty.textContent = text().noText;
+          body.appendChild(empty);
+        } else {
+          body.appendChild(table);
+        }
+        const lang = normalizeSourceShikiLang(inferLang(target.path));
+        if (!getSyntaxHighlight() || !lang || response.lines.length === 0)
+          return;
+        const highlighter = await loadSourceShikiHighlighter(lang);
+        if (
+          !highlighter ||
+          !table.isConnected ||
+          !palettePreviewIsCurrent(state, controller, previewGeneration)
+        )
+          return;
+        const highlightedLines = sourceShikiLines(
+          response.lines.join("\n"),
+          lang,
+          highlighter,
+        );
+        if (
+          !highlightedLines ||
+          !table.isConnected ||
+          !palettePreviewIsCurrent(state, controller, previewGeneration)
+        )
+          return;
+        table
+          .querySelectorAll<HTMLElement>(".gdp-source-line-code")
+          .forEach((cell, index) => {
+            if (highlightedLines[index] == null) return;
+            cell.innerHTML = highlightedLines[index] || " ";
+            cell.classList.add("shiki");
+            if (item.kind === "grep" && response.start + index === item.line)
+              highlightGrepMatch(cell, response.lines[index] || "", item);
+          });
+      })
+      .catch((err) => {
+        if (
+          isAbortError(err) ||
+          PALETTE !== state ||
+          controller.signal.aborted ||
+          previewGeneration !== state.previewGeneration
+        )
+          return;
+        console.error("Failed to load search code preview", err);
+        renderPalettePreviewFrame(
+          state,
+          item,
+          text().codeLoadFailed(errorMessage(err, text().unknownError)),
+        );
+      });
+  }
+
+  function createPaletteRow(
+    state: PaletteState,
+    item: PaletteItem,
+    index: number,
+    grouped: boolean,
+  ): HTMLButtonElement {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.id = `gdp-palette-item-${index}`;
+    row.dataset.paletteIndex = String(index);
+    row.className = "gdp-palette-row";
+    row.setAttribute("role", "option");
+    row.setAttribute(
+      "aria-selected",
+      index === state.selected ? "true" : "false",
+    );
+    const title = document.createElement("span");
+    title.className = "gdp-palette-row-title";
+    const detail = document.createElement("span");
+    detail.className = "gdp-palette-row-detail";
+    if (item.kind === "file") {
+      title.textContent = item.path.split("/").pop() || item.path;
+      appendHighlightedPath(detail, item.displayPath, item.ranges);
+      if (item.old_path && item.displayPath !== item.old_path) {
+        detail.appendChild(document.createTextNode(`  ${item.old_path}`));
+      }
+    } else {
+      title.textContent = grouped
+        ? text().line(item.line, item.column)
+        : `${item.path}:${item.line}`;
+      detail.textContent = item.preview;
+    }
+    row.append(title, detail);
+    row.addEventListener("mousemove", (event) => {
+      if (
+        state.pointerClientX === event.clientX &&
+        state.pointerClientY === event.clientY
+      )
+        return;
+      state.pointerClientX = event.clientX;
+      state.pointerClientY = event.clientY;
+      if (state.selected === index) return;
+      state.selected = index;
+      syncPaletteSelection(state);
+    });
+    row.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      state.selected = index;
+      syncPaletteSelection(state);
+    });
+    row.addEventListener("click", (e) => {
+      e.preventDefault();
+      state.selected = index;
+      syncPaletteSelection(state);
+      void selectPaletteItem(state);
+    });
+    return row;
+  }
+
   function renderPalette(state: PaletteState) {
     state.list.innerHTML = "";
-    state.items.forEach((item, index) => {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.id = `gdp-palette-item-${index}`;
-      row.className = "gdp-palette-row";
-      row.setAttribute("role", "option");
-      row.setAttribute(
-        "aria-selected",
-        index === state.selected ? "true" : "false",
-      );
-      const title = document.createElement("span");
-      title.className = "gdp-palette-row-title";
-      const detail = document.createElement("span");
-      detail.className = "gdp-palette-row-detail";
-      if (item.kind === "file") {
-        title.textContent = item.path.split("/").pop() || item.path;
-        appendHighlightedPath(detail, item.displayPath, item.ranges);
-        if (item.old_path && item.displayPath !== item.old_path) {
-          detail.appendChild(document.createTextNode(`  ${item.old_path}`));
+    if (state.mode === "grep" && state.grepGroupByFile) {
+      const grouped = new Map<
+        string,
+        Array<{ item: PaletteGrepItem; index: number }>
+      >();
+      state.items.forEach((item, index) => {
+        if (item.kind !== "grep") return;
+        const matches = grouped.get(item.path) ?? [];
+        matches.push({ item, index });
+        grouped.set(item.path, matches);
+      });
+      for (const [path, matches] of grouped) {
+        const group = document.createElement("section");
+        group.className = "gdp-palette-file-group";
+        group.setAttribute("role", "group");
+        group.setAttribute("aria-label", path);
+        const heading = document.createElement("div");
+        heading.className = "gdp-palette-file-heading";
+        const name = document.createElement("span");
+        name.className = "gdp-palette-file-heading-name";
+        name.textContent = path;
+        name.title = path;
+        const count = document.createElement("span");
+        count.className = "gdp-palette-file-heading-count";
+        count.textContent = String(matches.length);
+        heading.append(name, count);
+        const rows = document.createElement("div");
+        rows.className = "gdp-palette-file-matches";
+        for (const match of matches) {
+          rows.appendChild(
+            createPaletteRow(state, match.item, match.index, true),
+          );
         }
-      } else {
-        title.textContent = `${item.path}:${item.line}`;
-        detail.textContent = item.preview;
+        group.append(heading, rows);
+        state.list.appendChild(group);
       }
-      row.append(title, detail);
-      row.addEventListener("mouseenter", () => {
-        state.selected = index;
-        syncPaletteSelection(state);
+    } else {
+      state.items.forEach((item, index) => {
+        state.list.appendChild(createPaletteRow(state, item, index, false));
       });
-      row.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        state.selected = index;
-        selectPaletteItem(state);
-      });
-      state.list.appendChild(row);
-    });
+    }
     syncPaletteSelection(state);
   }
 
@@ -318,13 +983,23 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     );
     state.list
       .querySelectorAll<HTMLElement>(".gdp-palette-row")
-      .forEach((row, index) => {
+      .forEach((row) => {
+        const index = Number(row.dataset.paletteIndex);
         row.setAttribute(
           "aria-selected",
           index === state.selected ? "true" : "false",
         );
-        if (index === state.selected) row.scrollIntoView({ block: "nearest" });
+        if (index === state.selected) {
+          const group = row.closest<HTMLElement>(".gdp-palette-file-group");
+          if (group?.querySelector(".gdp-palette-row") === row) {
+            group
+              .querySelector<HTMLElement>(".gdp-palette-file-heading")
+              ?.scrollIntoView({ block: "nearest" });
+          }
+          row.scrollIntoView({ block: "nearest" });
+        }
       });
+    renderPalettePreview(state);
   }
 
   async function repoPaletteFiles(
@@ -337,8 +1012,11 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     params.set("ref", ref);
     appendScopeParams(params);
     const res = await trackLoad<FileSearchListResponse>(
-      fetch(`/_files?${params.toString()}`).then((r) => {
-        if (!r.ok) throw new Error("failed to load files");
+      fetch(`/_files?${params.toString()}`).then(async (r) => {
+        if (!r.ok)
+          throw new Error(
+            `file search request failed (${r.status}): ${await r.text()}`,
+          );
         return r.json();
       }),
     );
@@ -351,6 +1029,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
   ): PaletteFileItem[] {
     const matchPath = isGlobPathQuery(query) ? globMatchPath : fuzzyMatchPath;
     const candidates = state.diffSnapshot
+      .filter((file) => !state.grepHideTests || !isTestFilePath(file.path))
       .map((file) => {
         const current = matchPath(query, file.path);
         const old = file.old_path ? matchPath(query, file.old_path) : null;
@@ -376,17 +1055,22 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
           b.match.score - a.match.score ||
           a.file.path.localeCompare(b.file.path),
       );
-    return limitPaletteResults(candidates).map((candidate) => ({
-      kind: "file",
-      path: candidate.file.path,
-      old_path: candidate.file.old_path,
-      displayPath: candidate.displayPath,
-      ref: paletteRef("diff"),
-      targetPath: fileSourceTarget(candidate.file).path,
-      targetRef: fileSourceTarget(candidate.file).ref,
-      source: "diff",
-      ranges: candidate.match.ranges,
-    }));
+    return limitPaletteResults(
+      rankPaletteResultsByHistory(
+        candidates.map((candidate) => ({
+          kind: "file" as const,
+          path: candidate.file.path,
+          old_path: candidate.file.old_path,
+          displayPath: candidate.displayPath,
+          ref: paletteRef("diff"),
+          targetPath: fileSourceTarget(candidate.file).path,
+          targetRef: fileSourceTarget(candidate.file).ref,
+          source: "diff" as const,
+          ranges: candidate.match.ranges,
+        })),
+        state.fileHistory,
+      ),
+    );
   }
 
   async function updateFilePalette(state: PaletteState, query: string) {
@@ -395,34 +1079,40 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     if (!query.trim()) {
       const base =
         source === "diff"
-          ? state.diffSnapshot.map((file) => {
-              const target = fileSourceTarget(file);
-              return {
-                kind: "file" as const,
-                path: file.path,
-                old_path: file.old_path,
-                displayPath: file.path,
-                ref: paletteRef(source),
-                targetPath: target.path,
-                targetRef: target.ref,
-                source,
-                ranges: [],
-              };
-            })
+          ? state.diffSnapshot
+              .filter(
+                (file) => !state.grepHideTests || !isTestFilePath(file.path),
+              )
+              .map((file) => {
+                const target = fileSourceTarget(file);
+                return {
+                  kind: "file" as const,
+                  path: file.path,
+                  old_path: file.old_path,
+                  displayPath: file.path,
+                  ref: paletteRef(source),
+                  targetPath: target.path,
+                  targetRef: target.ref,
+                  source,
+                  ranges: [],
+                };
+              })
           : [];
-      state.items = limitPaletteResults(base);
+      state.items = limitPaletteResults(
+        rankPaletteResultsByHistory(base, state.fileHistory),
+      );
       state.selected = state.items.length ? 0 : -1;
       state.status.textContent =
         source === "diff"
-          ? `${state.diffSnapshot.length} diff files`
-          : "Type to search repository files";
+          ? text().diffFiles(base.length)
+          : text().typeToSearchFiles;
       renderPalette(state);
       return;
     }
     if (source === "diff") {
       state.items = diffFilePaletteItems(state, query);
     } else {
-      state.status.textContent = "Loading files...";
+      state.status.textContent = text().loadingFiles;
       const ref = paletteRef(source);
       const requestGeneration = ++repoFileRequestGeneration;
       let response: FileSearchListResponse;
@@ -439,21 +1129,29 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       )
         return;
       REPO_FILE_CACHE.set(repoFileCacheKey(ref), response);
+      const visibleFiles = response.files.filter(
+        (file) => !state.grepHideTests || !isTestFilePath(file.path),
+      );
       state.items = limitPaletteResults(
-        rankPathMatches(query, response.files, PALETTE_RESULT_LIMIT),
-      ).map((match) => ({
-        kind: "file",
-        path: match.item.path,
-        displayPath: match.item.path,
-        ref,
-        source,
-        ranges: match.ranges,
-      }));
+        rankPaletteResultsByHistory(
+          rankPathMatches(query, visibleFiles, PALETTE_RESULT_LIMIT).map(
+            (match) => ({
+              kind: "file" as const,
+              path: match.item.path,
+              displayPath: match.item.path,
+              ref,
+              source,
+              ranges: match.ranges,
+            }),
+          ),
+          state.fileHistory,
+        ),
+      );
     }
     state.selected = state.items.length ? 0 : -1;
     state.status.textContent = state.items.length
-      ? `${state.items.length} results`
-      : "No results";
+      ? text().results(state.items.length)
+      : text().noResults;
     renderPalette(state);
   }
 
@@ -464,7 +1162,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     if (!query.trim()) {
       state.items = [];
       state.selected = -1;
-      state.status.textContent = "Type to grep";
+      state.status.textContent = text().typeToGrep;
       renderPalette(state);
       return;
     }
@@ -472,19 +1170,25 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       state.controller?.abort();
       state.items = [];
       state.selected = -1;
-      state.status.textContent = "Invalid regular expression";
+      state.status.textContent = text().invalidRegex;
       renderPalette(state);
       return;
     }
-    state.status.textContent = "Searching...";
+    state.status.textContent = text().searching;
+    state.items = [];
+    state.selected = -1;
+    renderPalette(state);
     state.debounce = window.setTimeout(() => {
       const source = paletteSource();
       const ref = paletteRef(source);
+      const regex = state.grepRegex;
+      const hideTests = state.grepHideTests;
       const params = new URLSearchParams();
       params.set("ref", ref);
       params.set("q", query);
       params.set("max", "200");
-      if (state.grepRegex) params.set("regex", "1");
+      if (regex) params.set("regex", "1");
+      if (hideTests) params.set("exclude_tests", "1");
       appendScopeParams(params);
       if (source === "diff") {
         for (const file of state.diffSnapshot) params.append("path", file.path);
@@ -494,37 +1198,67 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       trackLoad<GrepResponse>(
         fetch(`/_grep?${params.toString()}`, {
           signal: controller.signal,
-        }).then((r) => {
-          if (!r.ok) throw new Error("grep failed");
+        }).then(async (r) => {
+          if (!r.ok)
+            throw new Error(
+              `grep request failed (${r.status}): ${await r.text()}`,
+            );
           return r.json();
         }),
       )
         .then((response) => {
-          if (PALETTE !== state || controller.signal.aborted) return;
+          if (
+            PALETTE !== state ||
+            controller.signal.aborted ||
+            state.input.value !== query ||
+            state.grepRegex !== regex ||
+            state.grepHideTests !== hideTests
+          )
+            return;
+          if (responseGenerationIsStale(response.generation)) {
+            state.items = [];
+            state.selected = -1;
+            state.status.textContent = text().repositoryChanged;
+            renderPalette(state);
+            return;
+          }
           state.items = limitPaletteResults(
-            response.matches.map((match) => ({
+            rankPaletteResultsByHistory(
+              response.matches,
+              state.grepHistory,
+            ).map((match) => ({
               kind: "grep" as const,
               path: match.path,
               line: match.line,
               column: match.column,
               preview: match.preview,
+              matchText: match.matchText,
+              query,
+              regex,
               ref,
               source,
             })),
           );
           state.selected = state.items.length ? 0 : -1;
-          state.status.textContent =
-            response.engine +
-            (state.grepRegex ? " regex" : " plain") +
-            (response.truncated ? " truncated" : "") +
-            " - " +
-            state.items.length +
-            " results";
+          state.status.textContent = text().grepSummary({
+            engine: response.engine,
+            regex,
+            testsExcluded: hideTests,
+            truncated: response.truncated,
+            count: state.items.length,
+          });
           renderPalette(state);
         })
         .catch((err) => {
           if (isAbortError(err)) return;
-          state.status.textContent = "Search failed";
+          if (PALETTE !== state || controller.signal.aborted) return;
+          console.error("Grep search failed", err);
+          state.items = [];
+          state.selected = -1;
+          state.status.textContent = text().searchFailed(
+            errorMessage(err, text().unknownError),
+          );
+          renderPalette(state);
         });
     }, 80);
   }
@@ -532,18 +1266,47 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
   function updatePaletteResults(state: PaletteState) {
     const query = state.input.value;
     if (state.mode === "file") {
-      updateFilePalette(state, query).catch(() => {
+      updateFilePalette(state, query).catch((err) => {
         if (PALETTE !== state || state.input.value !== query) return;
-        state.status.textContent = "Search failed";
+        console.error("File search failed", err);
+        state.status.textContent = text().searchFailed(
+          errorMessage(err, text().unknownError),
+        );
       });
     } else {
       updateGrepPalette(state, query);
     }
   }
 
-  function selectPaletteItem(state: PaletteState) {
+  async function selectPaletteItem(state: PaletteState): Promise<void> {
     const item = state.items[state.selected];
-    if (!item) return;
+    if (!item || state.opening) return;
+    const history =
+      item.kind === "file" ? state.fileHistory : state.grepHistory;
+    const nextHistory = rememberPaletteSelection(history, item.path);
+    if (nextHistory.join("\0") !== history.join("\0")) {
+      state.opening = true;
+      state.status.textContent = text().savingSelection;
+      try {
+        await persistGrepSettings(
+          item.kind === "file"
+            ? { fileSelectionHistory: nextHistory }
+            : { grepSelectionHistory: nextHistory },
+        );
+      } catch (err) {
+        console.error(`Failed to save ${item.kind} selection`, err);
+        state.opening = false;
+        if (PALETTE === state) {
+          state.status.textContent = text().selectionSaveFailed(
+            errorMessage(err, text().unknownError),
+          );
+        }
+        return;
+      }
+      if (item.kind === "file") state.fileHistory = nextHistory;
+      else state.grepHistory = nextHistory;
+    }
+    if (PALETTE !== state) return;
     closeSearchPalette();
     if (item.kind === "file") {
       if (item.source === "diff") {
@@ -566,7 +1329,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
           view: "blob",
           range: currentRange(),
         });
-        renderStandaloneSource({ path: item.path, ref: item.ref });
+        void renderStandaloneSource({ path: item.path, ref: item.ref });
       }
       return;
     }
@@ -587,7 +1350,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
         line: item.line,
         range: currentRange(),
       });
-      renderStandaloneSource({ path: item.path, ref: item.ref });
+      void renderStandaloneSource({ path: item.path, ref: item.ref });
     }
   }
 
@@ -601,13 +1364,12 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     if (e.key === "Enter") {
       if (state.composing) return;
       e.preventDefault();
-      selectPaletteItem(state);
+      void selectPaletteItem(state);
       return;
     }
     if (state.mode === "grep" && e.altKey && e.key.toLowerCase() === "r") {
       e.preventDefault();
-      state.grepRegex = !state.grepRegex;
-      updatePaletteResults(state);
+      void updateGrepRegex(state, !state.grepRegex);
       return;
     }
     const direction =

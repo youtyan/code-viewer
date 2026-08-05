@@ -1,5 +1,5 @@
 ---
-name: my-npm-publish-procedure
+name: project-npm-publish-procedure
 description: Use when preparing, publishing, or troubleshooting npm releases for this project, especially first publishes, npm OTP, Trusted Publisher setup, GitHub Releases, or registry visibility issues.
 ---
 
@@ -87,7 +87,7 @@ If any doc no longer matches the implementation:
 
 - Stop the release path.
 - Update the docs as part of the same release PR/commit set.
-- Re-run `bun run verify` and `npm pack --dry-run` so the updated docs ride into the published tarball.
+- Re-run `pnpm run verify` and `npm pack --dry-run` so the updated docs ride into the published tarball.
 
 How to detect drift without re-reading everything:
 
@@ -170,8 +170,8 @@ After Trusted Publisher is configured, releases should go through GitHub Actions
 2. Ensure `main` contains `.github/workflows/publish.yml`.
 3. Create a GitHub Release whose tag is exactly `v${package.json.version}`.
 4. The release workflow verifies:
-   - `bun install --frozen-lockfile`
-   - `bun run verify`
+   - `pnpm install --frozen-lockfile`
+   - `pnpm run verify`
    - tag version equals `package.json` version
    - `npm publish` with OIDC Trusted Publisher
 
@@ -188,7 +188,7 @@ permissions:
 For normal release readiness, verify only local build/test/package shape and GitHub repository state:
 
 ```sh
-bun run verify
+pnpm run verify
 npm pack --dry-run
 gh repo view youtyan/code-viewer --json defaultBranchRef,url
 git ls-remote --heads origin main
@@ -212,13 +212,13 @@ Do not run `npm whoami`, `npm access list packages`, `npm view`, or `npm publish
 Before reporting normal release readiness, verify local package shape and GitHub repository state, **and** confirm the Documentation Reflection Check above has been run for the release diff range:
 
 ```sh
-bun run verify
+pnpm run verify
 npm pack --dry-run
 gh repo view youtyan/code-viewer --json defaultBranchRef,url
 git ls-remote --heads origin main
 ```
 
-If `bun run verify` or `npm pack --dry-run` was passing before a doc update was applied, re-run both after the update so the published tarball contains the corrected `README.md`.
+If `pnpm run verify` or `npm pack --dry-run` was passing before a doc update was applied, re-run both after the update so the published tarball contains the corrected `README.md`.
 
 For first publish, Trusted Publisher setup, or npm-specific troubleshooting, additionally verify npm authentication/package access:
 

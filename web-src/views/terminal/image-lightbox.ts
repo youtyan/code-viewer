@@ -47,9 +47,13 @@ export function openImageLightbox(
   overlay.setAttribute("aria-modal", "true");
   overlay.setAttribute("aria-label", image.name);
 
+  let zoomReset: HTMLButtonElement | null = null;
   const viewport = createDiagramViewport({
     containerClassName: "terminal-lightbox-view",
     contentClassName: "terminal-lightbox-stage",
+    onScaleChange: (scale) => {
+      if (zoomReset) zoomReset.textContent = `${Math.round(scale * 100)}%`;
+    },
   });
   const picture = document.createElement("img");
   picture.src = image.url;
@@ -87,9 +91,10 @@ export function openImageLightbox(
     return el;
   };
 
+  zoomReset = button("100%", text.zoomReset, () => viewport.reset());
   actions.append(
     button("−", text.zoomOut, () => viewport.zoomOut()),
-    button("100%", text.zoomReset, () => viewport.reset()),
+    zoomReset,
     button("＋", text.zoomIn, () => viewport.zoomIn()),
     button("×", text.closeImage, close),
   );

@@ -53,6 +53,27 @@ export type TmuxPanesResponse = {
   sessions: TmuxSession[];
 };
 
+/**
+ * tmux に繋がっている端末 1 つ。
+ *
+ * ブラウザから開いたシェルの中で tmux を起動すると、その tmux クライアントは
+ * シェルと同じ端末に載る。つまり ShellSession.tty と tty を突き合わせれば
+ * 「このペインは今ブラウザのどのシェルで見えているか」が分かる。ツリーの印と
+ * サーバ側の宛先解決が同じ 1 つの型を参照するように core に置く。
+ */
+export type TmuxClient = {
+  /** 端末デバイス (`/dev/ttys012`)。 */
+  tty: string;
+  /** 見ているセッション名。 */
+  session: string;
+  /** 見ているペイン。 */
+  pane: TmuxPaneId;
+};
+
+export type TmuxClientsResponse = {
+  clients: TmuxClient[];
+};
+
 /** ペイン画面の 1 フレーム。 */
 export type TmuxScreen = {
   pane: TmuxPaneId;
@@ -79,17 +100,6 @@ export type TmuxScreen = {
  * クランプが同じ値を見るように core に置く。 */
 export const MIN_TERMINAL_SHEET_WIDTH = 480;
 export const MAX_TERMINAL_SHEET_WIDTH = 4000;
-
-/** 画面を取り直す間隔 (ms)。tmux の capture-pane は 1 ペインぶんの画面を
- * 読むだけなので、この頻度でも負荷にならない。 */
-export const TERMINAL_POLL_INTERVAL_MS = 120;
-
-/**
- * 遡って見るときに一度に取る行数。購読 (今の画面と、上を埋めるぶんだけ) とは
- * 別に、人が上へスクロールしたときだけ /_tmux/history へ取りに行く。サーバ側に
- * も上限があり、これを超える指定は丸められる。
- */
-export const TERMINAL_HISTORY_LINES = 5000;
 
 /**
  * ターミナルの文字サイズ (px) の許容範囲と既定。サーバ側の sanitize と

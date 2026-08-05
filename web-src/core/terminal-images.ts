@@ -55,8 +55,19 @@ export type TerminalImageRef = {
 
 export type TerminalImagesResponse = { images: TerminalImageRef[] };
 
-/** 画面のどこにその綴りが出ているか。row は画面の上から 0 始まり。 */
-export type PathAnchor = { candidate: string; row: number; col: number };
+/**
+ * 画面のどこにその綴りが出ているか。row は画面の上から 0 始まり。
+ *
+ * span は何行にまたがっているか (折り返していなければ 1)。画像を置くときは
+ * ここを見て最終行の下に出す。先頭行の下に出すと、続きの行に重なってパスが
+ * 読めなくなる。
+ */
+export type PathAnchor = {
+  candidate: string;
+  row: number;
+  col: number;
+  span: number;
+};
 
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);
@@ -279,14 +290,14 @@ function firstAnchor(lines: string[], candidate: string): PathAnchor | null {
   for (let row = 0; row < lines.length; row += 1) {
     const line = lines[row] ?? "";
     const direct = line.indexOf(candidate);
-    if (direct >= 0) return { candidate, row, col: direct };
+    if (direct >= 0) return { candidate, row, col: direct, span: 1 };
     // 行またぎ。組み立て方は joinBrokenPathLines と同じで、行末のパス片と
     // 次の行の先頭語を繋ぐ (間に挟まる注記や字下げは空白なので落ちる)。
     const head = lastPathFragment(line);
     if (!head) continue;
     const tail = firstWord(lines[row + 1] ?? "");
     if (tail && head.text + tail === candidate) {
-      return { candidate, row, col: head.index };
+      return { candidate, row, col: head.index, span: 2 };
     }
   }
   return null;

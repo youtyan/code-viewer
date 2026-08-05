@@ -11,6 +11,10 @@ import {
   type WatchFn,
 } from "../server/worktree-watcher";
 
+const WATCH_CLOSE_ERROR = new Error("watch close failed");
+const WATCH_EVENT_ERROR = new Error("watch event failed");
+const WATCH_HANDLE_CLOSE_ERROR = new Error("watch handle close failed");
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -27,26 +31,46 @@ async function waitUntil(
   return predicate();
 }
 
-async function canObserveNativeFsWatch(): Promise<boolean> {
+type NativeFsWatchProbeResult =
+  | { status: "available" }
+  | { status: "unavailable"; error: unknown };
+
+async function probeNativeFsWatch(): Promise<NativeFsWatchProbeResult> {
   const root = mkdtempSync(join(tmpdir(), "code-viewer-watch-probe-"));
   let observed = false;
-  const watcher = watch(root, { persistent: false }, () => {
-    observed = true;
-  });
+  let watchError: unknown;
+  let watcher: ReturnType<typeof watch> | null = null;
 
   try {
+    watcher = watch(root, { persistent: false }, () => {
+      observed = true;
+    });
+    watcher.on("error", (error) => {
+      watchError = error;
+    });
     await wait(100);
     writeFileSync(join(root, "probe.txt"), "probe");
-    return await waitUntil(() => observed, 1000);
-  } catch {
-    return false;
+    await waitUntil(() => observed || watchError !== undefined, 1000);
+    if (watchError !== undefined) {
+      return { status: "unavailable", error: watchError };
+    }
+    return observed
+      ? { status: "available" }
+      : {
+          status: "unavailable",
+          error: new Error("native file watcher did not report a probe change"),
+        };
+  } catch (error) {
+    return { status: "unavailable", error };
   } finally {
-    watcher.close();
+    watcher?.close();
     rmSync(root, { recursive: true, force: true });
   }
 }
 
-const realWatcherTest = (await canObserveNativeFsWatch()) ? test : test.skip;
+const nativeFsWatchProbe = await probeNativeFsWatch();
+const realWatcherTest =
+  nativeFsWatchProbe.status === "available" ? test : test.skip;
 
 describe("worktree update watcher", () => {
   test("debounces accepted worktree changes into one update", () => {
@@ -503,6 +527,104 @@ describe("worktree update watcher", () => {
 
     expect(closed).toEqual(["/repo/sub"]);
     expect(watched).toEqual(["/repo", "/repo/sub", "/repo/sub"]);
+  });
+
+  test.each([
+    {
+      name: "a normal target disappearance",
+      close: () => undefined,
+      expected: [] as unknown[],
+    },
+    {
+      name: "a watcher close failure",
+      close: () => {
+        throw WATCH_CLOSE_ERROR;
+      },
+      expected: [WATCH_CLOSE_ERROR] as unknown[],
+    },
+  ])("distinguishes $name", ({ close, expected }) => {
+    let rootListener: Parameters<WatchFn>[2] | null = null;
+    const errors: unknown[] = [];
+
+    startWorktreeUpdateWatch({
+      root: "/repo",
+      omitDirNames: [],
+      excludeNames: [],
+      watch: ((path, _options, next) => {
+        if (path === "/repo") rootListener = next;
+        return { close: path === "/repo/sub" ? close : () => undefined };
+      }) as WatchFn,
+      readdirSync: (path) =>
+        path === "/repo" ? [{ name: "sub", isDirectory: () => true }] : [],
+      isDirectory: () => false,
+      onUpdate: () => undefined,
+      onError: (error) => errors.push(error),
+    });
+
+    rootListener?.("rename", "sub");
+
+    expect(errors).toStrictEqual(expected);
+  });
+
+  test.each([
+    {
+      name: "an error event",
+      event: "error" as const,
+      argument: WATCH_EVENT_ERROR,
+      expected: [WATCH_EVENT_ERROR] as unknown[],
+    },
+    {
+      name: "a close event",
+      event: "close" as const,
+      argument: undefined,
+      expected: [] as unknown[],
+    },
+  ])("reports $name without confusing it with normal close", ({
+    event,
+    argument,
+    expected,
+  }) => {
+    const listeners = new Map<string, (error?: unknown) => void>();
+    const errors: unknown[] = [];
+
+    startWorktreeUpdateWatch({
+      root: "/repo",
+      omitDirNames: [],
+      excludeNames: [],
+      watch: (() => ({
+        on: (name: string, listener: (error?: unknown) => void) => {
+          listeners.set(name, listener);
+        },
+      })) as WatchFn,
+      readdirSync: () => [],
+      onUpdate: () => undefined,
+      onError: (error) => errors.push(error),
+    });
+
+    listeners.get(event)?.(argument);
+
+    expect(errors).toStrictEqual(expected);
+  });
+
+  test("reports close failures from the returned watch handle", () => {
+    const errors: unknown[] = [];
+    const handle = startWorktreeUpdateWatch({
+      root: "/repo",
+      omitDirNames: [],
+      excludeNames: [],
+      watch: (() => ({
+        close: () => {
+          throw WATCH_HANDLE_CLOSE_ERROR;
+        },
+      })) as WatchFn,
+      readdirSync: () => [],
+      onUpdate: () => undefined,
+      onError: (error) => errors.push(error),
+    });
+
+    handle.close();
+
+    expect(errors).toStrictEqual([WATCH_HANDLE_CLOSE_ERROR]);
   });
 
   test("keeps an existing directory watcher when another rename event mentions it", () => {

@@ -25,8 +25,8 @@ schema プルダウンを切り替えたときに、同じテーブル名でも�
 リポジトリのルートで:
 
 ```sh
-bun run test:postgres:up
-bun run preview --cwd data/test/postgresql
+pnpm run test:postgres:up
+pnpm run preview --cwd data/test/postgresql
 ```
 
 ブラウザでサイドバーの `pg-svc` を開く。PostgreSQL の Database 画面で
@@ -36,7 +36,7 @@ schema プルダウンに `public` / `tenant_a` / `tenant_b` / `analytics` が
 リポジトリ root を cwd にして起動しても、recursive compose discovery で拾える:
 
 ```sh
-bun run preview --cwd .
+pnpm run preview --cwd .
 ```
 
 この場合、service id は subdirectory 由来の
@@ -55,7 +55,7 @@ bun run preview --cwd .
 ## クリーンアップ
 
 ```sh
-bun run test:postgres:down
+pnpm run test:postgres:down
 ```
 
 `down -v` なので PostgreSQL volume も削除され、次回 `up` 時に fixture が

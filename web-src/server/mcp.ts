@@ -30,6 +30,7 @@ import {
   isAgentEvent,
   needsAttention,
 } from "../core/agent-state";
+import { formatErrorDetail } from "../core/error-detail";
 import { isGlobPathQuery, rankPathMatches } from "../core/fuzzy-search";
 import { AGENT_GUIDES, buildAgentHelpIndex } from "./agent-help";
 import { resolveRepoRootSafe } from "./cli-helpers";
@@ -164,6 +165,7 @@ export type McpDispatchResult =
 export type DefaultMcpToolsOptions = {
   cwd?: string;
   omitDirNames?: string[];
+  generation?: number;
 };
 
 // Build the default tool inventory. Exported so preview.ts can mount it
@@ -497,7 +499,7 @@ export function defaultMcpTools(
         additionalProperties: false,
       },
       run(input) {
-        return runSearchCodeTool(input, options.cwd);
+        return runSearchCodeTool(input, options.cwd, options.generation);
       },
     },
     {
@@ -862,7 +864,7 @@ async function runTerminalCaptureTool(
     return { text: `${target} is gone`, isError: true };
   }
   if (result.status === "error") {
-    return { text: result.message, isError: true };
+    return { text: formatErrorDetail(result.error), isError: true };
   }
   return {
     text: JSON.stringify(
@@ -1493,6 +1495,7 @@ async function runSearchFilesTool(
 async function runSearchCodeTool(
   input: unknown,
   defaultCwd?: string,
+  generation?: number,
 ): Promise<McpToolRunReturn> {
   const params = isPlainObject(input) ? input : {};
   const termRaw = params.term;
@@ -1567,7 +1570,13 @@ async function runSearchCodeTool(
   if (result.ok !== true) {
     return { text: result.error, isError: true };
   }
-  return { text: JSON.stringify(result.value, null, 2) };
+  return {
+    text: JSON.stringify(
+      generation === undefined ? result.value : { ...result.value, generation },
+      null,
+      2,
+    ),
+  };
 }
 
 async function runDatastoreSourcesTool(

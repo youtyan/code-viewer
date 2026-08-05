@@ -2,7 +2,7 @@
 //
 // 見たいのは 3 つ。開いたら画像が入っていること、閉じ方が全部効くこと、
 // 2 枚目を開いても 1 枚しか残らないこと。拡大縮小そのものは
-// core/diagram-viewport の持ち物なので、ここでは配線だけを見る。
+// core/diagram-viewport の持ち物なので、ここでは操作と倍率表示の配線を見る。
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
@@ -53,6 +53,33 @@ describe("画像の拡大表示", () => {
     // 覆いなので、支援技術にもダイアログとして伝える。
     expect(box?.getAttribute("role")).toBe("dialog");
     expect(box?.getAttribute("aria-modal")).toBe("true");
+  });
+
+  test("縮小すると現在倍率を表示し、倍率表示を押すと等倍に戻る", () => {
+    openImageLightbox(IMAGE, text());
+
+    const buttons = overlay()?.querySelectorAll<HTMLButtonElement>(
+      ".terminal-lightbox-actions button",
+    );
+    const stage = overlay()?.querySelector<HTMLElement>(
+      ".terminal-lightbox-stage",
+    );
+    if (!buttons || !stage)
+      throw new Error("lightbox controls were not mounted");
+    const zoomOut = buttons.item(0);
+    const zoomReset = buttons.item(1);
+    if (!zoomOut || !zoomReset)
+      throw new Error("lightbox zoom controls were not mounted");
+    expect(buttons).toHaveLength(4);
+    expect(zoomReset.textContent).toBe("100%");
+
+    zoomOut.click();
+    expect(stage.style.transform).toBe("scale(0.8)");
+    expect(zoomReset.textContent).toBe("80%");
+
+    zoomReset.click();
+    expect(stage.style.transform).toBe("scale(1)");
+    expect(zoomReset.textContent).toBe("100%");
   });
 
   test("返ってきた関数で閉じられる", () => {

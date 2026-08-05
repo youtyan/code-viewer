@@ -59,17 +59,24 @@ export function looksLikeBase64(value: unknown): value is string {
 }
 
 /**
- * Shift+Enter で送るバイト列。LF (Ctrl+J) 1 バイト。
+ * Shift+Enter で送るバイト列。改行 1 つを bracketed paste で囲んだもの。
  *
- * 対話型端末アプリは Ctrl+J を「送信せずに改行」として扱う。これは端末側の
- * 設定に依存しない並びなので、送信側だけで完結する。
+ * 素の LF (Ctrl+J) を送ってはいけない。ターミナルの中で tmux が動いていると、
+ * tmux はこれを「C-j キー」として解釈する。C-j にキーを割り当てている環境は
+ * 珍しくなく (ペイン移動などに割り当てられることがある)、その場合
+ * 改行はそのバインドに食われてアプリまで届かない。おまけにフォーカスまで
+ * 動く。tmux は貼り付けと判断した入力をキーとして解釈しないので、囲めばこの
+ * 経路を通り抜けられる。
  *
- * 端末が本来 Shift+Enter で送る拡張キー符号は、送り手と tmux の両方に設定が
- * 要る (tmux なら extended-keys on)。ここは自前で送る側なので、設定の要らない
- * Ctrl+J を選ぶ。ESC+CR (Option+Enter 相当) では駄目で、受け側は ESC と Enter
- * を別々に読み、そのまま送信してしまう。
+ * 意味の上でもこちらが正しい。「送信せずに改行を入れる」は「改行を含む本文を
+ * 貼り付けた」のと同じことで、AI CLI もシェルの行編集も、貼り付けの中の改行を
+ * 実行の合図としては扱わない。
+ *
+ * 拡張キー符号 (CSI u など) は使わない。送り手と tmux の両方に設定が要る
+ * (tmux なら extended-keys on)。ESC+CR も駄目で、受け側は ESC と Enter を
+ * 別々に読み、そのまま送信してしまう。
  */
-export const SHIFT_ENTER_SEQUENCE = String.fromCharCode(10);
+export const SHIFT_ENTER_SEQUENCE = `${String.fromCharCode(27)}[200~${String.fromCharCode(10)}${String.fromCharCode(27)}[201~`;
 
 /**
  * その打鍵が「送信しない改行」かどうか。

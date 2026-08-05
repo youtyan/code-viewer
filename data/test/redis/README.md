@@ -22,14 +22,14 @@ cd data/test/redis
 docker compose up -d
 ./seed.sh
 cd ../../..
-bun run preview --cwd data/test/redis
+pnpm run preview --cwd data/test/redis
 ```
 
 ブラウザでサイドバーに `redis-svc` と `redis-auth` が出てくる。
 それぞれをクリックすると DB 0–15 の一覧が見え、key の中身を確認できる。
 
 `data/test/elasticsearch/` も同時に立てておけば、リポジトリ root を cwd
-にして `bun run preview --cwd .` で起動するだけで Redis 2 つと ES が
+にして `pnpm run preview --cwd .` で起動するだけで Redis 2 つと ES が
 一画面に並ぶ (recursive compose discovery、サブディレクトリの compose
 も拾われる)。subdirectory 由来の service は id が `docker:<svc>@<relDir>`
 形式になる。
@@ -116,7 +116,7 @@ SQL 系のテストデータは置いていないので、別途 PG/MySQL の co
 
 ```sh
 cd <sqlite project>
-bun run preview --cwd .
+pnpm run preview --cwd .
 # ブラウザで Snapshot タブ → Take Snapshot → 一覧表示 → 2 つの diff
 ```
 

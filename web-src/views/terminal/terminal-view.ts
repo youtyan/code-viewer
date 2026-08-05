@@ -1,13 +1,13 @@
-// Terminal ドロワー。映せる対象は 2 種類ある。
+// Terminal ドロワー。映すのは PTY のシェル 1 本だけで、tmux はその中で
+// 普通に動く。
 //
-// - 既に動いている tmux のペイン。こちらは見て操作するだけで、tmux 側の
-//   セッションやレイアウトには触れない。
-// - このドロワーから開いたシェル。code-viewer の子プロセスなので、開くのも
-//   閉じるのもここでやる。
+// 左のツリーが「今 tmux がどうなっているか」を見せ、右がターミナル本体。
+// ツリーの tmux ペインを押すと、そのペインが見える状態にしてもらう
+// (今映しているシェルで tmux が動いていればそれを動かし、動いていなければ
+// サーバがシェルを 1 つ開いて attach する)。ドロワー自身は tmux の画面を
+// 描かないので、寸法合わせは PTY のリサイズだけで済む。
 //
-// 上部のタブが tmux のセッションとシェルを並べ、その下に対象の一覧、さらに
-// 下にターミナル本体が来る。開閉の作りは tools ドロワー
-// (views/tools/tools-view.ts) と同じ右ドロワー。
+// 開閉の作りは tools ドロワー (views/tools/tools-view.ts) と同じ右ドロワー。
 //
 // 一覧は開いている間だけ定期的に取り直す。tmux 上の AI CLI は作業内容を
 // ペインタイトルに出すので、一覧が固定だと「今どれが動いているか」が分から
@@ -16,20 +16,24 @@
 
 import type { AgentStateRecord } from "../../core/agent-state";
 import { attachDragResizer } from "../../core/drag-resizer";
-import { blockScrollChaining } from "../../core/scroll-chaining";
 import {
-  isShellSessionId,
-  type ShellListResponse,
-  type ShellSession,
-  type ShellSessionId,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../../core/error-detail";
+import { blockScrollChaining } from "../../core/scroll-chaining";
+import type {
+  ShellListResponse,
+  ShellSession,
+  ShellSessionId,
 } from "../../core/shell";
 import { readStoredSize, writeStoredSize } from "../../core/stored-size";
+import type { BoardRow } from "../../core/terminal-board";
 import {
   clampTerminalFontSize,
-  findTmuxPane,
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
   TERMINAL_FONT_SIZE_STEP,
+  type TmuxClientsResponse,
   type TmuxPanesResponse,
 } from "../../core/tmux";
 import { type TerminalLang, type TerminalText, terminalText } from "./i18n";
@@ -37,18 +41,16 @@ import { createSessionBoard, type SessionBoardHandle } from "./session-board";
 import {
   createTerminalScreen,
   type TerminalScreenHandle,
-  type TerminalTarget,
-  targetId,
 } from "./terminal-screen";
 
 /** 一覧を取り直す間隔。ペインタイトルの変化に追従するための頻度。 */
 const PANE_LIST_INTERVAL_MS = 3000;
 
 /** 左の一覧の幅 (px) の許容範囲。 */
-const MIN_LIST_WIDTH = 240;
+const MIN_LIST_WIDTH = 300;
 const MAX_LIST_WIDTH = 720;
 /** CSS 側の既定値 (--terminal-list-width の fallback) と揃える。 */
-const DEFAULT_LIST_WIDTH = 380;
+const DEFAULT_LIST_WIDTH = 440;
 const LIST_WIDTH_STORAGE_KEY = "code-viewer:terminal-list-width";
 
 export type TerminalViewDeps = {
@@ -80,11 +82,10 @@ export type TerminalViewHandle = {
 export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   let board: SessionBoardHandle | null = null;
   /**
-   * 最後に映していた対象。閉じても残す。
+   * 最後に映していたシェル。閉じても残す。
    *
    * パネルは Terminal と Tools がタブになっていて、切り替えると閉じる扱いに
-   * なる。ここを捨てると、戻ってきたときに「ペインを選んでください」に
-   * なってしまう。
+   * なる。ここを捨てると、戻ってきたときに「選んでください」になってしまう。
    */
   let lastTargetId: string | null = null;
   let states: AgentStateRecord[] = [];
@@ -97,9 +98,10 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   let listToggle: HTMLButtonElement | null = null;
   let statusEl: HTMLElement | null = null;
   let listEl: HTMLElement | null = null;
-  let attachedTarget: TerminalTarget | null = null;
+  let attached: ShellSession | null = null;
   let panes: TmuxPanesResponse | null = null;
   let shells: ShellListResponse | null = null;
+  let clients: TmuxClientsResponse | null = null;
   let inputEnabled = true;
   // 最後に適用した一覧の幅。ドラッグが終わった時点でこれを保存する。
   let listWidth = DEFAULT_LIST_WIDTH;
@@ -225,41 +227,44 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       : false;
   }
 
-  function selectTarget(target: TerminalTarget): void {
-    attachedTarget = target;
-    const id = targetId(target);
-    lastTargetId = id;
-    board?.setSelected(id);
-    deps.onTargetChange?.(id);
+  function selectShell(session: ShellSession): void {
+    attached = session;
+    lastTargetId = session.id;
+    board?.setSelected(session.id);
+    deps.onTargetChange?.(session.id);
     if (usesMobileTerminalLayout()) setMobileListHidden(true);
     // attach は xterm の読み込みを挟むので、完了を待たずに focus しても
     // ターミナルがまだ無い。待ってから当てる。待つ間に別の対象へ切り替え
     // られていたら、そちらの focus を横取りしない。
-    void screen?.attach(target).then(() => {
-      if (attachedTarget && targetId(attachedTarget) === id) screen?.focus();
-    });
+    const attaching = screen?.attach(session);
+    if (!attaching) return;
+    void attaching.then(
+      () => {
+        if (attached?.id === session.id) screen?.focus();
+      },
+      (error: unknown) => {
+        if (attached?.id !== session.id || disposed) return;
+        console.error("[code-viewer] terminal attach failed", error);
+        setStatus(`${text().loadFailed}\n${formatErrorDetail(error)}`);
+      },
+    );
   }
 
-  /** 一覧の中から id に一致する対象を探す。閉じられていれば null。 */
-  function findTarget(id: string): TerminalTarget | null {
-    if (isShellSessionId(id)) {
-      const session = shells?.sessions.find((item) => item.id === id);
-      return session ? { kind: "shell", session } : null;
-    }
-    const pane = findTmuxPane(panes?.sessions ?? [], id);
-    return pane ? { kind: "tmux", pane } : null;
+  /** 一覧の中から id に一致するシェルを探す。閉じられていれば null。 */
+  function findShell(id: string): ShellSession | null {
+    return shells?.sessions.find((item) => item.id === id) ?? null;
   }
 
-  /** tmux ペインとシェルを 1 つの表に流し込む。 */
   function renderLists(): void {
     board?.setData({
       panes,
       shells: shells?.sessions ?? [],
+      clients: clients?.clients ?? [],
       shellAvailable: shells?.available ?? true,
       shellUnavailableReason: shells?.reason ?? "",
       states,
     });
-    board?.setSelected(attachedTarget ? targetId(attachedTarget) : null);
+    board?.setSelected(attached?.id ?? null);
   }
 
   async function loadLists(myGen: number): Promise<void> {
@@ -268,39 +273,57 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     const stale = () =>
       myGen !== generation || myList !== listGeneration || disposed;
     try {
-      const [paneRes, shellRes, stateRes] = await Promise.all([
+      const [paneRes, shellRes, stateRes, clientRes] = await Promise.all([
         deps.trackLoad(fetch("/_tmux/panes")),
         deps.trackLoad(fetch("/_shell/list")),
         deps.trackLoad(fetch("/_agent/states")),
+        deps.trackLoad(fetch("/_tmux/clients")),
       ]);
       if (stale()) return;
-      const nextPanes = paneRes.ok
-        ? ((await paneRes.json()) as TmuxPanesResponse)
-        : panes;
-      const nextShells = shellRes.ok
-        ? ((await shellRes.json()) as ShellListResponse)
-        : shells;
-      const nextStates = stateRes.ok
-        ? ((await stateRes.json()) as { states: AgentStateRecord[] }).states
-        : states;
+      const failed = [
+        [paneRes, text().paneListFailed],
+        [shellRes, text().shellListFailed],
+        [stateRes, text().stateListFailed],
+        [clientRes, text().clientListFailed],
+      ] as const;
+      const messages = await Promise.all(
+        failed
+          .filter(([response]) => !response.ok)
+          .map(([response, operation]) =>
+            responseErrorMessage(response, operation),
+          ),
+      );
+      if (stale()) return;
+      if (messages.length > 0) {
+        setStatus(messages.join("\n\n"));
+        return;
+      }
+      const nextPanes = (await paneRes.json()) as TmuxPanesResponse;
+      const nextShells = (await shellRes.json()) as ShellListResponse;
+      const nextStates = (
+        (await stateRes.json()) as { states: AgentStateRecord[] }
+      ).states;
+      const nextClients = (await clientRes.json()) as TmuxClientsResponse;
       if (stale()) return;
       panes = nextPanes;
       shells = nextShells;
       states = nextStates ?? [];
+      clients = nextClients;
 
       renderLists();
 
-      // 映していた対象が無くなっていたら選択を解く。
-      if (attachedTarget && !findTarget(targetId(attachedTarget))) {
-        const wasShell = attachedTarget.kind === "shell";
-        attachedTarget = null;
+      // 映していたシェルが無くなっていたら選択を解く。
+      if (attached && !findShell(attached.id)) {
+        attached = null;
         screen?.detach();
         setMobileListHidden(false);
         deps.onTargetChange?.(null);
-        setStatus(wasShell ? text().shellClosed : text().paneClosed);
+        setStatus(text().shellClosed);
       }
-    } catch {
-      // 中断・通信断。次の周期で取り直す。
+    } catch (error) {
+      if (stale()) return;
+      console.error("[code-viewer] terminal list refresh failed", error);
+      setStatus(`${text().listLoadFailed}\n${formatErrorDetail(error)}`);
     }
   }
 
@@ -311,7 +334,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   async function markRead(target: string): Promise<void> {
     const myGen = generation;
     try {
-      await deps.trackLoad(
+      const res = await deps.trackLoad(
         fetch("/_agent/state", {
           method: "POST",
           headers: {
@@ -322,14 +345,91 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
         }),
       );
       if (myGen !== generation || disposed) return;
+      if (!res.ok) {
+        setStatus(await responseErrorMessage(res, text().markReadFailed));
+        return;
+      }
       await loadLists(myGen);
-    } catch {
-      // 通らなくても次の周期で取り直す。既読は失っても実害が小さい。
+    } catch (error) {
+      if (myGen !== generation || disposed) return;
+      console.error("[code-viewer] terminal mark-read failed", error);
+      setStatus(`${text().markReadFailed}\n${formatErrorDetail(error)}`);
+    }
+  }
+
+  /**
+   * tmux ペインを見える状態にしてもらう。
+   *
+   * 今映しているシェルの中で tmux が動いていればそれが動き、動いていなければ
+   * サーバが新しいシェルを開いて attach する。どちらになったかは応答の action
+   * で分かるが、こちらは返ってきたシェルを映すだけでよい (既に映しているものと
+   * 同じなら、画面はそのまま tmux が切り替わる)。
+   */
+  async function openPane(row: BoardRow): Promise<void> {
+    const myGen = generation;
+    const size = screen?.measure();
+    try {
+      const res = await deps.trackLoad(
+        fetch("/_tmux/open", {
+          method: "POST",
+          headers: {
+            ...deps.actionHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            pane: row.target,
+            shell: attached?.id ?? null,
+            cols: size?.cols,
+            rows: size?.rows,
+          }),
+        }),
+      );
+      if (myGen !== generation || disposed) return;
+      if (res.status === 410) {
+        setStatus(await responseErrorMessage(res, text().paneClosed));
+        await loadLists(myGen);
+        return;
+      }
+      if (res.status === 429) {
+        setStatus(await responseErrorMessage(res, text().shellLimitReached));
+        return;
+      }
+      if (!res.ok) {
+        setStatus(await responseErrorMessage(res, text().paneOpenFailed));
+        return;
+      }
+      const body = (await res.json()) as {
+        session: ShellSession;
+        action: "switched" | "attached";
+      };
+      if (myGen !== generation || disposed) return;
+      setStatus(null);
+      if (body.action === "attached") {
+        // 新しく開いたシェル。一覧に載せてから選ぶ (取り直しを待たない)。
+        shells = {
+          available: true,
+          sessions: [...(shells?.sessions ?? []), body.session],
+        };
+        renderLists();
+        selectShell(body.session);
+        return;
+      }
+      // 既にあるシェルの tmux が動いただけ。映しているものが同じなら画面は
+      // そのまま追従するので、選び直すのは別のシェルだったときだけ。
+      if (attached?.id !== body.session.id) selectShell(body.session);
+      // ツリーの「今出ている行」の印は、どのペインを映しているかで決まる。
+      // 切り替えたばかりの対応を反映するために取り直す。
+      await loadLists(myGen);
+    } catch (error) {
+      if (myGen !== generation || disposed) return;
+      console.error("[code-viewer] tmux pane open failed", error);
+      setStatus(`${text().paneOpenFailed}\n${formatErrorDetail(error)}`);
     }
   }
 
   async function createShell(): Promise<void> {
     const myGen = generation;
+    const size = screen?.measure();
     try {
       const res = await deps.trackLoad(
         fetch("/_shell/create", {
@@ -338,16 +438,16 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
             ...deps.actionHeaders(),
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ cols: size?.cols, rows: size?.rows }),
         }),
       );
       if (myGen !== generation || disposed) return;
       if (res.status === 429) {
-        setStatus(text().shellLimitReached);
+        setStatus(await responseErrorMessage(res, text().shellLimitReached));
         return;
       }
       if (!res.ok) {
-        setStatus(text().shellCreateFailed);
+        setStatus(await responseErrorMessage(res, text().shellCreateFailed));
         return;
       }
       const created = (await res.json()) as { session: ShellSession };
@@ -358,16 +458,18 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
         sessions: [...(shells?.sessions ?? []), created.session],
       };
       renderLists();
-      selectTarget({ kind: "shell", session: created.session });
-    } catch {
-      if (!disposed) setStatus(text().shellCreateFailed);
+      selectShell(created.session);
+    } catch (error) {
+      if (myGen !== generation || disposed) return;
+      console.error("[code-viewer] shell create failed", error);
+      setStatus(`${text().shellCreateFailed}\n${formatErrorDetail(error)}`);
     }
   }
 
   async function closeShell(id: ShellSessionId): Promise<void> {
     const myGen = generation;
     try {
-      await deps.trackLoad(
+      const res = await deps.trackLoad(
         fetch("/_shell/close", {
           method: "POST",
           headers: {
@@ -377,12 +479,20 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
           body: JSON.stringify({ id }),
         }),
       );
-    } catch {
-      // 閉じられなくても一覧の取り直しで実態に合う。
+      if (myGen !== generation || disposed) return;
+      if (!res.ok) {
+        setStatus(await responseErrorMessage(res, text().shellCloseFailed));
+        return;
+      }
+    } catch (error) {
+      if (myGen !== generation || disposed) return;
+      console.error("[code-viewer] shell close failed", error);
+      setStatus(`${text().shellCloseFailed}\n${formatErrorDetail(error)}`);
+      return;
     }
     if (myGen !== generation || disposed) return;
-    if (attachedTarget && targetId(attachedTarget) === id) {
-      attachedTarget = null;
+    if (attached?.id === id) {
+      attached = null;
       screen?.detach();
       deps.onTargetChange?.(null);
     }
@@ -460,10 +570,11 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
 
     board = createSessionBoard({
       getText: text,
-      onSelect: (row) => {
-        const target = findTarget(row.target);
-        if (target) selectTarget(target);
+      onSelectShell: (row) => {
+        const session = findShell(row.target);
+        if (session) selectShell(session);
       },
+      onOpenPane: (row) => void openPane(row),
       onCreateShell: () => void createShell(),
       onCloseShell: (id) => void closeShell(id),
       onMarkRead: (row) => void markRead(row.target),
@@ -517,7 +628,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     statusEl.role = "status";
     statusEl.hidden = true;
 
-    // 左に一覧、右にターミナル。縦積みだと一覧が数行しか見えず、どのペインを
+    // 左にツリー、右にターミナル。縦積みだとツリーが数行しか見えず、どれを
     // 選ぶかを決める前に画面が尽きる。
     const pane = document.createElement("div");
     pane.className = "terminal-pane";
@@ -566,14 +677,12 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     if (myGen !== generation || !isOpen() || disposed) return;
 
     if (id) {
-      const target = findTarget(id);
-      if (target) {
+      const session = findShell(id);
+      if (session) {
         renderLists();
-        selectTarget(target);
+        selectShell(session);
       } else {
-        setStatus(
-          isShellSessionId(id) ? text().shellClosed : text().paneClosed,
-        );
+        setStatus(text().shellClosed);
       }
     } else if (usesMobileTerminalLayout()) {
       setMobileListHidden(false);
@@ -595,14 +704,14 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     // 読み込み中だった GET と、その後の選択を無効化する。
     generation += 1;
     stopPolling();
-    // 閉じている間まで画面を取り続けない。シェル自体は残るので、開き直せば
+    // 閉じている間まで購読を続けない。シェル自体は残るので、開き直せば
     // 続きから見られる。
     //
     // 何を映していたかは覚えておく。Tools タブへ移って戻ったときに選び直させ
     // られると、毎回一覧から選ぶことになる。
-    if (attachedTarget) lastTargetId = targetId(attachedTarget);
+    if (attached) lastTargetId = attached.id;
     screen?.detach();
-    attachedTarget = null;
+    attached = null;
     setMobileListHidden(false);
   }
 
@@ -625,8 +734,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     open,
     close,
     isOpen,
-    getActiveTarget: () =>
-      attachedTarget ? targetId(attachedTarget) : lastTargetId,
+    getActiveTarget: () => attached?.id ?? lastTargetId,
     refit: () => screen?.refit(),
     localize,
     dispose() {

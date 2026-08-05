@@ -27,7 +27,6 @@ type PatchCall = { url: string; body: unknown; keepalive: boolean };
 
 let storedState: ToolsState;
 let patches: PatchCall[];
-let closeRequests: number;
 let toolChanges: ToolId[];
 // グローバルの fetch を差し替えるので、必ず同じテスト内で戻す。持ち越すと
 // 同一プロセスで動く他のテストファイル (実 HTTP を叩くもの) を巻き込む。
@@ -109,9 +108,6 @@ function createView(): ToolsViewHandle {
     trackLoad: (promise) => promise,
     getLanguage: () => "en",
     actionHeaders: () => ({ "Content-Type": "application/json" }),
-    onCloseRequest: () => {
-      closeRequests += 1;
-    },
     onToolChange: (tool) => {
       toolChanges.push(tool);
     },
@@ -168,7 +164,6 @@ function textareaFor(tool: ToolId): HTMLTextAreaElement {
 beforeEach(() => {
   storedState = { version: 1 };
   patches = [];
-  closeRequests = 0;
   toolChanges = [];
   deferGet = false;
   resolveGet = null;

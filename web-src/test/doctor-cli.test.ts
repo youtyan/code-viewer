@@ -49,6 +49,10 @@ describe("parseDoctorCliArgs", () => {
       "docker=/opt/bin/docker",
       "--bin",
       "gh=/opt/bin/gh",
+      "--bin",
+      "rg=/opt/bin/rg",
+      "--bin",
+      "tmux=/opt/bin/tmux",
     ]);
     expect(result.kind).toBe("run");
     if (result.kind === "run") {
@@ -56,6 +60,8 @@ describe("parseDoctorCliArgs", () => {
         { name: "git", path: "/opt/bin/git" },
         { name: "docker", path: "/opt/bin/docker" },
         { name: "gh", path: "/opt/bin/gh" },
+        { name: "rg", path: "/opt/bin/rg" },
+        { name: "tmux", path: "/opt/bin/tmux" },
       ]);
     }
   });
@@ -64,10 +70,6 @@ describe("parseDoctorCliArgs", () => {
     expect(parseDoctorCliArgs(["--bin", "psql=/opt/bin/psql"])).toEqual({
       kind: "error",
       message: "--bin unsupported command: psql",
-    });
-    expect(parseDoctorCliArgs(["--bin", "rg=/opt/bin/rg"])).toEqual({
-      kind: "error",
-      message: "--bin unsupported command: rg",
     });
   });
 

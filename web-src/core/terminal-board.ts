@@ -17,7 +17,7 @@ import type {
 } from "./agent-state";
 import { needsAttention } from "./agent-state";
 import type { ShellSession } from "./shell";
-import type { TmuxPanesResponse } from "./tmux";
+import type { TmuxClient, TmuxPanesResponse } from "./tmux";
 
 export type BoardRowKind = "tmux" | "shell";
 
@@ -46,6 +46,15 @@ export type BoardRow = {
   paneIndex: string;
   /** このリポジトリの作業ツリー配下か。シェルは常に true。 */
   inRepo: boolean;
+  /**
+   * ブラウザ側との対応。tmux ペインなら「今これを映しているシェルの ID」、
+   * シェルなら「そのシェルが今映している tmux ペインの ID」。無ければ空。
+   *
+   * ブラウザのターミナルは PTY のシェルで、tmux はその中で動く。だから
+   * 両者は別々の行として並ぶが、実際には同じ画面を指していることがある。
+   * どちらの行からでも相手が辿れるように、両方向を持たせる。
+   */
+  linkedTarget: string;
   /** 動いているコマンド名。 */
   agent: string;
   state: AgentState;
@@ -94,12 +103,42 @@ function toRow(
   };
 }
 
+/**
+ * ブラウザのシェルと tmux ペインの対応表を作る。
+ *
+ * シェルの端末 (tty) が tmux のクライアントとして繋がっていれば、その
+ * クライアントが見ているペインがそのシェルの映しているものになる。突き合わせ
+ * の鍵は tty だけなので、ここは 2 つの一覧を舐めるだけで済む。
+ *
+ * tty を持たないシェル (引けなかった環境) は数えない。空文字どうしが一致して
+ * 無関係なペインと結び付くのを防ぐ。
+ */
+function linkShellsAndPanes(
+  shells: ShellSession[],
+  clients: TmuxClient[],
+): { paneToShell: Map<string, string>; shellToPane: Map<string, string> } {
+  const paneToShell = new Map<string, string>();
+  const shellToPane = new Map<string, string>();
+  const clientByTty = new Map(clients.map((client) => [client.tty, client]));
+  for (const shell of shells) {
+    if (!shell.tty || shell.exited) continue;
+    const client = clientByTty.get(shell.tty);
+    if (!client?.pane) continue;
+    paneToShell.set(client.pane, shell.id);
+    shellToPane.set(shell.id, client.pane);
+  }
+  return { paneToShell, shellToPane };
+}
+
 export function buildBoardRows(
   panes: TmuxPanesResponse | null,
   shells: ShellSession[],
   states: AgentStateRecord[],
+  /** tmux に繋がっている端末。どのシェルがどのペインを映しているかの元。 */
+  clients: TmuxClient[] = [],
 ): BoardRow[] {
   const byTarget = new Map(states.map((record) => [record.target, record]));
+  const { paneToShell, shellToPane } = linkShellsAndPanes(shells, clients);
   const rows: BoardRow[] = [];
 
   // セッション → ウィンドウ → ペインの入れ子をそのまま辿る。平坦化すると
@@ -127,6 +166,7 @@ export function buildBoardRows(
               cols: pane.width,
               rows: pane.height,
               exited: false,
+              linkedTarget: paneToShell.get(pane.id) ?? "",
             },
             byTarget.get(pane.id),
           ),
@@ -154,6 +194,7 @@ export function buildBoardRows(
           cols: session.cols,
           rows: session.rows,
           exited: session.exited,
+          linkedTarget: shellToPane.get(session.id) ?? "",
         },
         byTarget.get(session.id),
       ),
@@ -207,7 +248,75 @@ export function filterByScope(rows: BoardRow[], scope: BoardScope): BoardRow[] {
   return scope === "all" ? rows : rows.filter((row) => row.inRepo);
 }
 
-/** 横タブに並べる見出し。tmux のセッション名を出現順に、重複なく返す。 */
+/** ツリーの枝。tmux のセッション 1 つぶん。 */
+export type BoardTreeSession = {
+  session: string;
+  windows: WindowGroup[];
+};
+
+/** ツリー上段の枝。このドロワーが開いたシェル 1 本ぶん。 */
+export type BoardShellBranch = {
+  /** シェルそのものの行。 */
+  shell: BoardRow;
+  /**
+   * その中で動いている tmux のセッション名。tmux を起動していなければ空。
+   * 空のときは windows も空になる (素のシェル)。
+   */
+  session: string;
+  /** そのセッションのウィンドウとペイン。 */
+  windows: WindowGroup[];
+};
+
+export type BoardTree = {
+  /** 上段。開いているシェルと、その中の tmux。 */
+  shells: BoardShellBranch[];
+  /** 下段。まだシェルで開いていない tmux セッション。 */
+  sessions: BoardTreeSession[];
+};
+
+/**
+ * ツリーを 2 段に組む。
+ *
+ * 上段はシェル。tmux を動かしているシェルには、そのセッションのウィンドウと
+ * ペインがぶら下がる。下段はどのシェルも開いていないセッション。
+ *
+ * 同じセッションが両方に出ることはない。シェルで開いた瞬間に下段から上段へ
+ * 移り、シェルを閉じれば下段へ戻る。置き場所は「そのセッションを見ている
+ * シェルが在るか」だけで決まるので、状態を別に持たなくても勝手にそうなる。
+ */
+export function buildBoardTree(rows: BoardRow[]): BoardTree {
+  /** ペイン ID からその行を引く。シェルの linkedTarget を辿るのに使う。 */
+  const paneById = new Map<string, BoardRow>();
+  for (const row of rows) {
+    if (row.kind === "tmux") paneById.set(row.target, row);
+  }
+
+  const shells: BoardShellBranch[] = [];
+  /** 上段に出したセッション。下段から除くのに使う。 */
+  const taken = new Set<string>();
+  for (const row of rows) {
+    if (row.kind !== "shell") continue;
+    // linkedTarget はそのシェルが映しているペイン。そこからセッションを辿る。
+    const session = row.linkedTarget
+      ? (paneById.get(row.linkedTarget)?.session ?? "")
+      : "";
+    if (session) taken.add(session);
+    shells.push({
+      shell: row,
+      session,
+      windows: session ? groupByWindow(rows, session) : [],
+    });
+  }
+
+  return {
+    shells,
+    sessions: sessionNames(rows)
+      .filter((session) => !taken.has(session))
+      .map((session) => ({ session, windows: groupByWindow(rows, session) })),
+  };
+}
+
+/** ツリーの見出しに並べるセッション名。tmux の出現順に、重複なく返す。 */
 export function sessionNames(rows: BoardRow[]): string[] {
   const names: string[] = [];
   for (const row of rows) {

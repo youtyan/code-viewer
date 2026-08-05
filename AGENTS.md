@@ -1,5 +1,25 @@
 # Project Instructions
 
+This file holds only two things: **invariants that are always true**, and **routing to the
+skills that hold the actual rules**.
+
+Implementation practice — UI, layout, server handlers, dependencies, diagnosis, tests — lives
+in `.agents/skills/project-rules/`. "Read AGENTS.md and you know everything" is
+deliberately given up: when a rule exists in two places, neither stays correct, and this
+repository has already shipped accidents caused by a rule that was written somewhere the work
+did not happen.
+
+## Skills
+
+| When | Read |
+|---|---|
+| Starting any implementation, investigation, or review in this repository | `.agents/skills/project-rules/SKILL.md` |
+| npm publish, releases, Trusted Publisher, registry issues | `.agents/skills/project-npm-publish-procedure/SKILL.md` |
+
+`project-rules` is the entry point; it routes to the area reference for the work at hand
+(orientation / ui-layout / ui-surface / server / dependencies / diagnose / testing).
+**Go through it before writing code.**
+
 ## Branch And PR Strategy
 
 - Treat `main` as the protected integration branch.
@@ -11,119 +31,65 @@
 - Keep commits meaningful. Avoid noisy checkpoint commits, vague messages, or unrelated file churn.
 - Do not use `git push --force`, `git push --force-with-lease`, `git commit --amend`, or `git stash`.
 
-## Release Strategy
-
-- npm package: `@youtyan/code-viewer`.
-- Normal releases are made from GitHub Releases, not local `npm publish`.
-- The release tag must match `package.json` exactly as `v${version}`.
-- `.github/workflows/publish.yml` publishes to npm through Trusted Publisher/OIDC.
-- Use local `npm publish --access public --provenance=false` only for first-publish recovery or other explicitly approved exceptional recovery work.
-
-## Publish Procedure Reference
-
-- For npm publish, first-publish, Trusted Publisher, OTP, provenance, or registry visibility issues, read:
-  `.agents/skills/my-npm-publish-procedure/SKILL.md`
-
 ## Required Verification
 
-Before opening a PR or reporting release readiness, run:
+Before opening a PR or reporting completion, run:
 
 ```sh
 pnpm run verify
 npm pack --dry-run
 ```
 
-This project uses pnpm, not bun or npm, for dependency management and scripts.
-The pinned version is in `packageManager`. Bundles are built with esbuild
-(`scripts/bundles.mjs` holds the definitions), TypeScript is executed through
-tsx, and tests run on Vitest.
-
-For release-related work, also confirm:
-
-```sh
-gh repo view youtyan/code-viewer --json defaultBranchRef,url
-git ls-remote --heads origin main
-```
-
-Do not run local npm authentication/registry commands such as `npm whoami`,
-`npm access list packages`, `npm view`, or `npm publish` for normal release
-readiness. Normal releases publish through GitHub Releases and Trusted
-Publisher/OIDC. Use local npm auth commands only for first-publish recovery,
-Trusted Publisher setup verification, or npm-specific troubleshooting.
-
-## UI Component Reuse
-
-- When adding new buttons or UI elements, do not write custom CSS from scratch. Find and reuse existing patterns first.
-- For buttons in the global header, use the `global-icon-action` class. For text buttons, keep changes limited to overrides such as `width: auto; padding: 0 8px;`.
-- For toggle buttons in the topbar, follow the existing `.controls > button` pattern used by `#ignore-ws` and `#hide-tests`.
-- For segmented buttons, use the `.seg` pattern.
-- Interactive controls must keep stable box dimensions across idle, hover, focus, loading, success, warning, disabled, and updated states. Never change button labels, padding, borders, or result text in a way that shifts the clickable target after the user acts. Reserve fixed space up front or use icon-only state indicators.
-- Add new UI patterns only when they are truly necessary. First verify that existing classes cannot solve the requirement in combination.
-
-## Datastore Page Glass Theme
-
-- The datastore page (`.db-root`) has a scoped "premium glass" decoration layer at the end of `web/style.css` (search for "Datastore page — premium glass theme").
-- All glass colors derive from the existing theme tokens via `color-mix`, so light/dark follow automatically. Do not hardcode hex colors there.
-- Shared glass recipes live in custom properties on `.db-root`: `--db-glass-bg`, `--db-glass-bg-strong`, `--db-glass-border`, `--db-glass-blur`, `--db-glass-shadow`, `--db-focus-ring`. Reuse them instead of inventing new values.
-- Elements attached outside `.db-root` (e.g. `.s3-key-tooltip` on `document.body`) do not inherit those variables; give each `var()` a fallback.
-- State changes (hover/active/focus) must stay background/box-shadow/color only — never change padding or borders, per the stable-box rule above.
-- A second "aurora & glow boost" layer follows it: an animated `.db-root::before` aurora (kept behind content via `isolation: isolate` + `z-index: -1`, disabled under `prefers-reduced-motion`) plus accent glows on active tabs/rows. Keep its selectors layout-neutral as well.
-
-## Desktop-Only UI Scope
-
-- This app is a local desktop tool. Do not spend implementation effort on phone or narrow mobile layouts unless the user explicitly asks for mobile support in that specific task.
-- Prefer dense desktop workflows, resizable panels, stable table/board dimensions, keyboard and pointer ergonomics, and wide-screen information layout over mobile stacking.
-
-## Design Reuse Discipline
-
-- Before designing a change, thoroughly inspect the existing codebase for reusable modules, components, helpers, styles, route patterns, rendering utilities, and tests.
-- Prefer extending or composing existing code over introducing parallel implementations.
-- In design notes or implementation summaries, call out the existing code that was considered for reuse and explain why any new abstraction is necessary.
+This project uses pnpm, not bun or npm. The pinned version is in `packageManager`.
 
 ## Public Repository Data Hygiene
 
 - Treat this repository as public. Never copy real project names, customer names, organization names, product names, external service account names, campaign names, table values, domain names, URLs, or other proper nouns observed from a local database, browser screenshot, API response, log, or developer environment into source code, tests, comments, documentation, snapshots, fixtures, or commit messages.
-- Local app data and screenshots are evidence for debugging only. They are not acceptable fixture content. When a test needs realistic data, replace it with neutral generic placeholders such as `sample_table`, `sample_column`, `example status`, or `Japanese column description`.
-- Do not preserve a real proper noun just because it is not a credential. Public repository hygiene covers business context and implementation context as well as secrets.
-- Before reporting completion, scan newly added or edited tests, docs, comments, and fixtures for proper nouns that came from observed runtime data. If any slipped in, replace them before handing off.
+- Local app data and screenshots are evidence for debugging only. They are not acceptable fixture content. Use neutral placeholders such as `sample_table`, `sample_column`, `example status`.
+- Do not preserve a real proper noun just because it is not a credential. Public repository hygiene covers business and implementation context as well as secrets.
+- Before reporting completion, scan newly added or edited tests, docs, comments, and fixtures for proper nouns that came from observed runtime data.
+
+This one stays here rather than in a skill because the failure is unrecoverable: it lands in
+git history.
+
+## Release Strategy
+
+- npm package: `@youtyan/code-viewer`.
+- Normal releases are made from GitHub Releases, not local `npm publish`. The release tag must match `package.json` exactly as `v${version}`.
+- Do not run local npm authentication/registry commands (`npm whoami`, `npm access list packages`, `npm view`, `npm publish`) for normal release readiness.
+- Everything else about releases is in `.agents/skills/project-npm-publish-procedure/SKILL.md`.
+
+## Desktop-Only Scope
+
+- This app is a local desktop tool. Do not spend implementation effort on phone or narrow mobile layouts unless the user explicitly asks for mobile support in that specific task.
+- Prefer dense desktop workflows, resizable panels, stable dimensions, keyboard and pointer ergonomics, and wide-screen information layout.
 
 ## Request Lifecycle Discipline (Anti-Stuck)
 
-Never reintroduce the "stuck UI / stale response wins" regression. Read this section before writing any new API handler, fetch call, or view-switch hook. **Reuse the existing primitives by name. Do not invent new wrappers, new deps, or new server-generation accessors.**
+Moved. The full rules — existing primitives (`trackLoad`, `cancelInFlightRequests`,
+`SERVER_GENERATION`, `NETWORK_ACTIVITY.installFetch`, the `generation` response field),
+idempotent view-switch functions, and loading-state terminators — now live in
+`.agents/skills/project-rules/references/server.md`.
 
-Existing primitives (do not duplicate):
+Source comments that say "see AGENTS.md Request Lifecycle Discipline" point there.
 
-- `let SERVER_GENERATION = 0` in `app.ts` (around line 1956) — the single authoritative server-generation counter. Bumped from one place in `app.ts`. Reused by every consumer.
-- `NETWORK_ACTIVITY.installFetch(window)` in `app.ts` (around line 148) — wraps every `fetch` in an `AbortController`. Already global, do not bypass.
-- `trackLoad<T>(promise): Promise<T>` in `app.ts` (around line 1960) — registers a promise so it participates in `cancelInFlightRequests`. View modules receive it as `deps.trackLoad`. **Always use this name.**
-- `cancelInFlightRequests()` in `app.ts` (around line 164) — aborts every tracked fetch. Invoke this on user-initiated navigation cancellations.
-- `handleFileDiff` in `preview.ts` (the `generation` field around line 1378) — the reference server-handler pattern. New handlers include `generation` in their JSON response, taken from the same module-level counter `generation` in `preview.ts`.
-- `history-view.ts` — the reference for client-side generation discarding. Bump a local `generation`, compare to the response, drop stale results.
+## How To Add A Rule
 
-Rules:
+Try top to bottom. **Lower is weaker.**
 
-- Every `fetch` is already wrapped by `installFetch`. Do not bypass it with raw `XMLHttpRequest`, worker-side fetch, or hand-rolled `AbortController`.
-- Every new fetch call goes through `deps.trackLoad(fetch(url)...)`. Do not invent a new deps name (`fetchWithCancel`, `loadGuarded`, etc.). The name is `trackLoad`.
-- Server handlers that can race with themselves or be re-entered include `generation` in the JSON response. Do not invent a new field name or wrap it under a sub-object.
-- The client checks `response.generation === myGeneration` before mounting the result. Do not add a new `getServerGeneration` / `setServerGeneration` accessor — view modules already track their own generation counter. The shared `SERVER_GENERATION` in `app.ts` is for SSE / diff-pipeline coordination; do not multiply it into per-view deps.
-- View-switch / enter functions (`enterHistory`, `renderBlamePage`, `applySourceRouteToShell`, etc.) must be idempotent.
-  - Re-invoking with the same parameters while the latest generation is already mounted is a no-op.
-  - Never bump generation without scheduling the matching refetch — that leaves the panel blank.
-- Every loading state must have a terminator. If you set `setStatusText("loading...")`, every code path (success, failure, cancellation, early `return`) clears it.
-- On SPA navigation (tab click, popstate, `setRoute`) cancel in-flight fetches via `cancelInFlightRequests` or invalidate them with the local generation counter. Never let a previous-view response overwrite the next view.
-- Implementations that skip these rules — or invent parallel primitives — are forbidden because they bring back the "stuck UI" regression. Reviewers must verify every new fetch / handler / view-switch against this section.
+| Condition | Where it goes |
+|---|---|
+| A machine can check it statically | a `biome.jsonc` rule, or a guard test in `web-src/test/` |
+| Not checkable, but it is a fixed procedure | the matching file under `.agents/skills/project-rules/references/` |
+| Not checkable, and it applies every turn because violating it is unrecoverable | this file, 1-2 lines |
+| It is the reason for one specific line | a comment above that line |
 
-## UI/Test Discipline
+"Writing a check is tedious, so I will write prose" is forbidden — that is the exact path that
+produced accidents here.
 
-- Useless tests waste both time and tokens. Never write tests that only prove an implementation contains a string, selector, function name, class name, or other incidental detail without verifying the user-visible behavior or the real contract.
-- Do not write or update tests before the intended behavior is clearly understood.
-- Do not use string-presence tests such as `source.includes(...)` to bless UI behavior or layout. They are acceptable only for narrow guardrails where DOM/browser verification is unnecessary and the assertion cannot mask a wrong specification.
-- For UI changes, verify the actual rendered screen with Browser Pilot before claiming the behavior is correct. Compare the relevant DOM structure and visual placement against the requested existing screen or component.
-- If the user points to an existing UI as the reference, inspect that reference implementation first and match its DOM/CSS structure instead of inventing a parallel layout.
-- Never adjust tests to match an implementation when the implementation is still disputed. Fix the implementation first, then add behavior-level tests that would fail for the wrong UI.
-- Do not put verbose transient status text in narrow chrome such as global headers, sidebars, topbars, compact toolbars, table filter rows, or beside small icon buttons. In constrained areas prefer icon-only buttons, dots, `aria-label`/`title`, disabled/busy states, or a reserved-width status slot that cannot move controls. Text like "no changes", "updated", or row-count deltas belongs in a wider content area only when it is genuinely useful. Even in wider areas, transient status text must not live inside a clickable control's own label; put it in a separate, non-interactive slot so the button hit target never moves.
+Two derived prohibitions:
 
-## Desktop Viewport Scope
-
-- This app is a local desktop workflow. Smartphone viewport support is not required for any screen unless the user explicitly requests it.
-- For UI work, prioritize desktop layouts, pointer/drag interactions, dense information display, and efficient local-tool workflows. Do not spend default verification effort optimizing or reworking smartphone layouts.
+- **A comment in file A does not bind file B.** A rule meant to hold repository-wide cannot be
+  expressed as a comment. Write a check, or put it in a reference.
+- **Never write line numbers in prose.** Refer to symbol names plus file names. Line numbers go
+  stale silently; every number that used to be in this file had drifted by hundreds of lines.

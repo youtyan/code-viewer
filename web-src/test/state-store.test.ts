@@ -42,6 +42,36 @@ describe("state store", () => {
       expected: { version: 1, sidebarWidth: 900 },
     },
     {
+      name: "keeps an in-range grep palette width",
+      input: { grepPaletteWidth: 1_120 },
+      expected: { version: 1, grepPaletteWidth: 1_120 },
+    },
+    {
+      name: "clamps a grep palette width below its minimum",
+      input: { grepPaletteWidth: 200 },
+      expected: { version: 1, grepPaletteWidth: 720 },
+    },
+    {
+      name: "clamps a grep palette width above its maximum",
+      input: { grepPaletteWidth: 9_999 },
+      expected: { version: 1, grepPaletteWidth: 2_400 },
+    },
+    {
+      name: "keeps an in-range grep palette height",
+      input: { grepPaletteHeight: 680 },
+      expected: { version: 1, grepPaletteHeight: 680 },
+    },
+    {
+      name: "clamps a grep palette height below its minimum",
+      input: { grepPaletteHeight: 100 },
+      expected: { version: 1, grepPaletteHeight: 420 },
+    },
+    {
+      name: "clamps a grep palette height above its maximum",
+      input: { grepPaletteHeight: 9_999 },
+      expected: { version: 1, grepPaletteHeight: 1_400 },
+    },
+    {
       name: "preserves an in-range floating-point setting",
       input: { annotationRate: 1.25 },
       expected: { version: 1, annotationRate: 1.25 },
@@ -59,6 +89,89 @@ describe("state store", () => {
   ])("settings numeric sanitizer $name", async ({ input, expected }) => {
     await withTempProject(async (dir) => {
       expect(await patchAppSettingsState(dir, input)).toEqual(expected);
+    });
+  });
+
+  test.each([
+    {
+      name: "keeps docked panel mode",
+      input: true,
+      expected: { version: 1, appPanelDocked: true },
+    },
+    {
+      name: "keeps overlay panel mode",
+      input: false,
+      expected: { version: 1, appPanelDocked: false },
+    },
+    {
+      name: "drops a non-boolean panel mode",
+      input: "docked",
+      expected: { version: 1 },
+    },
+  ])("settings panel mode sanitizer $name", async ({ input, expected }) => {
+    await withTempProject(async (dir) => {
+      expect(
+        await patchAppSettingsState(dir, { appPanelDocked: input }),
+      ).toEqual(expected);
+    });
+  });
+
+  test.each([
+    {
+      name: "keeps a valid override",
+      input: { "toggle-theme": [{ key: "x", ctrl: true }] },
+      expected: {
+        version: 1,
+        keybindings: { "toggle-theme": [{ key: "x", ctrl: true }] },
+      },
+    },
+    {
+      name: "keeps an empty list because it means disabled",
+      input: { "toggle-theme": [] },
+      expected: { version: 1, keybindings: { "toggle-theme": [] } },
+    },
+    {
+      name: "drops an unknown action",
+      input: { "not-an-action": [{ key: "x" }] },
+      expected: { version: 1 },
+    },
+    {
+      name: "drops a broken chord but keeps the rest of the action",
+      input: { "toggle-theme": [{ ctrl: true }, { key: "x" }] },
+      expected: { version: 1, keybindings: { "toggle-theme": [{ key: "x" }] } },
+    },
+    {
+      name: "writes nothing when the override set is empty",
+      input: {},
+      expected: { version: 1 },
+    },
+    {
+      name: "writes nothing when the value is not an object",
+      input: "toggle-theme",
+      expected: { version: 1 },
+    },
+  ])("settings keybinding sanitizer $name", async ({ input, expected }) => {
+    await withTempProject(async (dir) => {
+      expect(await patchAppSettingsState(dir, { keybindings: input })).toEqual(
+        expected,
+      );
+    });
+  });
+
+  test("keybinding overrides survive a reload and can be cleared", async () => {
+    await withTempProject(async (dir) => {
+      await patchAppSettingsState(dir, {
+        keybindings: { "toggle-theme": [{ key: "x" }] },
+      });
+
+      expect(await loadAppSettingsState(dir)).toEqual({
+        version: 1,
+        keybindings: { "toggle-theme": [{ key: "x" }] },
+      });
+
+      expect(await patchAppSettingsState(dir, { keybindings: null })).toEqual({
+        version: 1,
+      });
     });
   });
 
@@ -104,6 +217,62 @@ describe("state store", () => {
         annotationRate: 1.5,
         scopeOmitDirs: ["dist", "node_modules"],
       });
+    });
+  });
+
+  test("grep selection history keeps the newest one hundred valid paths", async () => {
+    await withTempProject(async (dir) => {
+      const paths = Array.from(
+        { length: 102 },
+        (_, index) => `src/file-${index}.ts`,
+      );
+      const state = await patchAppSettingsState(dir, {
+        grepSelectionHistory: ["", ...paths, paths[101]],
+      });
+      expect(state.grepSelectionHistory).toHaveLength(100);
+      expect(state.grepSelectionHistory?.[0]).toBe("src/file-2.ts");
+      expect(state.grepSelectionHistory?.[99]).toBe("src/file-101.ts");
+    });
+  });
+
+  test("file selection history keeps the newest one hundred valid paths", async () => {
+    await withTempProject(async (dir) => {
+      const paths = Array.from(
+        { length: 102 },
+        (_, index) => `src/sample-${index}.ts`,
+      );
+      const state = await patchAppSettingsState(dir, {
+        fileSelectionHistory: ["", ...paths, paths[101]],
+      });
+      expect(state.fileSelectionHistory).toHaveLength(100);
+      expect(state.fileSelectionHistory?.[0]).toBe("src/sample-2.ts");
+      expect(state.fileSelectionHistory?.[99]).toBe("src/sample-101.ts");
+    });
+  });
+
+  test.each([
+    { name: "enabled", input: true, expected: true },
+    { name: "disabled", input: false, expected: false },
+  ])("grep regex mode round-trips when $name", async ({ input, expected }) => {
+    await withTempProject(async (dir) => {
+      expect(await patchAppSettingsState(dir, { grepRegex: input })).toEqual({
+        version: 1,
+        grepRegex: expected,
+      });
+    });
+  });
+
+  test.each([
+    { name: "enabled", input: true, expected: true },
+    { name: "disabled", input: false, expected: false },
+  ])("grep file grouping round-trips when $name", async ({
+    input,
+    expected,
+  }) => {
+    await withTempProject(async (dir) => {
+      expect(
+        await patchAppSettingsState(dir, { grepGroupByFile: input }),
+      ).toEqual({ version: 1, grepGroupByFile: expected });
     });
   });
 

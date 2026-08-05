@@ -529,9 +529,10 @@ describe("database view SQL error rendering", () => {
       document.querySelectorAll(".db-pane-error"),
     ) as unknown as FakeElement[];
     expect(errors).toHaveLength(2);
-    expect(errors.every((error) => error.textContent === "schema failed")).toBe(
-      true,
-    );
+    expect(errors.map((error) => error.textContent)).toEqual([
+      "Error: failed to fetch schema (HTTP 500): schema failed",
+      "Error: failed to fetch schema (HTTP 500): schema failed",
+    ]);
     await leaveView(view);
   });
 
@@ -2044,7 +2045,7 @@ describe("database view SQL error rendering", () => {
     await runButton?.click();
 
     expect(document.querySelector(".db-query-error")?.textContent).toBe(
-      "query failed",
+      "failed to execute query (HTTP 500): query failed",
     );
     await leaveView(view);
   });

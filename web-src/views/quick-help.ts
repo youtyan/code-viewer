@@ -12,6 +12,7 @@ export type QuickHelpText = {
   panelTitle: string;
   close: string;
   viewAll: string;
+  settings: string;
 };
 
 export type QuickHelpDeps = {
@@ -19,6 +20,8 @@ export type QuickHelpDeps = {
   getLanguage(): HelpKeybindingLanguage;
   getText(): QuickHelpText;
   openFullKeybindings(): void;
+  // 歯車ボタンを廃止したので、設定へはここと Help のナビから辿る。
+  openSettings(): void;
 };
 
 export function createQuickHelp(deps: QuickHelpDeps) {
@@ -28,6 +31,7 @@ export function createQuickHelp(deps: QuickHelpDeps) {
   const closeBtn = deps.$<HTMLButtonElement>("#quick-help-close");
   const groupsHost = deps.$<HTMLElement>("#quick-help-groups");
   const fullLink = deps.$<HTMLAnchorElement>("#quick-help-full-link");
+  const settingsLink = deps.$<HTMLAnchorElement>("#quick-help-settings-link");
 
   function isOpen(): boolean {
     return !popover.hidden;
@@ -56,6 +60,7 @@ export function createQuickHelp(deps: QuickHelpDeps) {
     popover.setAttribute("aria-label", text.panelTitle);
     closeBtn.setAttribute("aria-label", text.close);
     fullLink.textContent = text.viewAll;
+    settingsLink.textContent = text.settings;
   }
 
   function open() {
@@ -81,6 +86,11 @@ export function createQuickHelp(deps: QuickHelpDeps) {
     e.preventDefault();
     close();
     deps.openFullKeybindings();
+  });
+  settingsLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    close();
+    deps.openSettings();
   });
   document.addEventListener("keydown", (e) => {
     if (isImeComposing(e)) return;

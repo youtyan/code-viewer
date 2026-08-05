@@ -12,6 +12,7 @@ import {
   type BoardScope,
   basenameOf,
   buildBoardRows,
+  buildBoardTree,
   countBoardStates,
   elapsedBucket,
   filterBoardRows,
@@ -25,6 +26,7 @@ import {
   DEFAULT_TERMINAL_FONT_SIZE,
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
+  type TmuxClient,
   type TmuxPanesResponse,
 } from "../core/tmux";
 
@@ -82,6 +84,7 @@ function shell(over: Partial<ShellSession> = {}): ShellSession {
     rows: 24,
     exited: false,
     exitCode: null,
+    tty: "",
     ...over,
   };
 }
@@ -112,6 +115,7 @@ function row(over: Partial<BoardRow> = {}): BoardRow {
     window: "0 · main",
     paneIndex: "0",
     inRepo: true,
+    linkedTarget: "",
     agent: "node",
     state: "idle",
     source: null,
@@ -220,6 +224,72 @@ describe("tmux の入れ子を保つ", () => {
     ],
   };
 
+  /** 下段の枝を、比べやすい素の形に均す。 */
+  function shapeOf(sessions: ReturnType<typeof buildBoardTree>["sessions"]) {
+    return sessions.map((session) => ({
+      session: session.session,
+      windows: session.windows.map((window) => ({
+        window: window.window,
+        panes: window.rows.map((row) => row.target),
+      })),
+    }));
+  }
+
+  test("ツリーはセッション → ウィンドウ → ペインの順を tmux のまま保つ", () => {
+    // 状態で並べ替えると、更新のたびに枝が入れ替わって狙った行を押せなくなる。
+    const tree = buildBoardTree(buildBoardRows(nested, [], []));
+
+    expect(shapeOf(tree.sessions)).toEqual([
+      {
+        session: "work",
+        windows: [
+          { window: "0 · main", panes: ["%1", "%2"] },
+          { window: "1 · test", panes: ["%3"] },
+        ],
+      },
+      // 名前の無いウィンドウは番号だけの見出しになる。
+      { session: "dev", windows: [{ window: "0", panes: ["%4"] }] },
+    ]);
+  });
+
+  test("tmux に繋がっていないシェルは、セッションを連れずに上段へ出る", () => {
+    // 素のシェルは tmux のセッションではない。混ざると、存在しないセッション名の
+    // 枝が下段に生える。
+    const tree = buildBoardTree(buildBoardRows(nested, [shell()], []));
+
+    expect(tree.shells).toHaveLength(1);
+    expect(tree.shells[0]?.session).toBe("");
+    expect(tree.shells[0]?.windows).toEqual([]);
+    // 下段の顔ぶれは変わらない。
+    expect(tree.sessions.map((s) => s.session)).toEqual(["work", "dev"]);
+  });
+
+  test("シェルが開いているセッションは上段へ移り、下段から消える", () => {
+    // 同じセッションが 2 か所に出ると、どちらを押せばよいのか分からなくなる。
+    const rows = buildBoardRows(
+      nested,
+      [shell({ id: "shell-aaa111", tty: "/dev/ttys001" })],
+      [],
+      [{ tty: "/dev/ttys001", session: "work", pane: "%2" }],
+    );
+    const tree = buildBoardTree(rows);
+
+    expect(tree.shells).toHaveLength(1);
+    expect(tree.shells[0]?.session).toBe("work");
+    // そのセッションのウィンドウとペインがシェルの下にぶら下がる。
+    expect(
+      tree.shells[0]?.windows.map((window) => ({
+        window: window.window,
+        panes: window.rows.map((row) => row.target),
+      })),
+    ).toEqual([
+      { window: "0 · main", panes: ["%1", "%2"] },
+      { window: "1 · test", panes: ["%3"] },
+    ]);
+    // 下段には残らない。
+    expect(tree.sessions.map((s) => s.session)).toEqual(["dev"]);
+  });
+
   test("セッション名を出現順に返す", () => {
     expect(sessionNames(buildBoardRows(nested, [], []))).toEqual([
       "work",
@@ -272,6 +342,88 @@ describe("tmux の入れ子を保つ", () => {
       [state("%4", "waiting", 500), state("%3", "done", 100)],
     );
     expect(attentionRows(rows).map((r) => r.target)).toEqual(["%3", "%4"]);
+  });
+});
+
+describe("シェルと tmux ペインの対応", () => {
+  // ブラウザのシェルの中で tmux を起動すると、その tmux クライアントは
+  // シェルと同じ端末に載る。tty を鍵にして両者を結び付ける。
+  const panes: TmuxPanesResponse = {
+    available: true,
+    running: true,
+    sessions: [
+      {
+        name: "work",
+        attached: true,
+        windows: [
+          {
+            index: 0,
+            name: "main",
+            active: true,
+            panes: [
+              pane({ id: "%1", paneIndex: 0 }),
+              pane({ id: "%2", paneIndex: 1 }),
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  function client(tty: string, pane: string): TmuxClient {
+    return { tty, session: "work", pane };
+  }
+
+  function linkOf(rows: BoardRow[], target: string): string {
+    return rows.find((row) => row.target === target)?.linkedTarget ?? "(なし)";
+  }
+
+  test("端末が一致する行どうしを両方向で結ぶ", () => {
+    const rows = buildBoardRows(
+      panes,
+      [shell({ id: "shell-aaa111", tty: "/dev/ttys001" })],
+      [],
+      [client("/dev/ttys001", "%2")],
+    );
+
+    // ペインからは「映しているシェル」、シェルからは「映しているペイン」。
+    expect(linkOf(rows, "%2")).toBe("shell-aaa111");
+    expect(linkOf(rows, "shell-aaa111")).toBe("%2");
+    // 映していないペインには何も付かない。
+    expect(linkOf(rows, "%1")).toBe("");
+  });
+
+  test("tty を引けなかったシェルは何とも結ばない", () => {
+    // 空の tty を素通しすると、tty が空のクライアントと当たって無関係な
+    // ペインに印が付く。
+    const rows = buildBoardRows(
+      panes,
+      [shell({ id: "shell-aaa111", tty: "" })],
+      [],
+      [client("", "%1")],
+    );
+
+    expect(linkOf(rows, "%1")).toBe("");
+    expect(linkOf(rows, "shell-aaa111")).toBe("");
+  });
+
+  test("終了したシェルは映しているものとして数えない", () => {
+    // プロセスが死んだ後も一覧には残る。端末だけ一致しても画面は出ていない。
+    const rows = buildBoardRows(
+      panes,
+      [shell({ id: "shell-aaa111", tty: "/dev/ttys001", exited: true })],
+      [],
+      [client("/dev/ttys001", "%1")],
+    );
+
+    expect(linkOf(rows, "%1")).toBe("");
+  });
+
+  test("クライアントを渡さなければ全て未接続として組む", () => {
+    // /_tmux/clients が落ちても、一覧そのものは出せる。
+    const rows = buildBoardRows(panes, [shell({ tty: "/dev/ttys001" })], []);
+
+    expect(rows.every((row) => row.linkedTarget === "")).toBe(true);
   });
 });
 

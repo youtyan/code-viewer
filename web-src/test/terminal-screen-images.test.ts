@@ -5,12 +5,12 @@
 //
 // 落とすと痛いのは 3 つ。
 //
-// - tmux は毎フレーム全画面を送ってくるので、同じパスで何度も問い合わせたり
-//   帯に並べたりしてはいけない
+// - 同じパスが何度流れても、問い合わせや帯を作り直してはいけない (シェルの
+//   中で全画面アプリが動くと、同じ画面が繰り返し届く)
 // - 「問い合わせた候補」と「もう帯に出した画像」を 1 つの集合で兼ねると、
 //   相対パスの候補は返ってくる相対パスと同じ文字列になるため、自分が入れた
 //   候補を「もう出した」と誤読して 1 枚も出せなくなる
-// - 応答を待つ間に別のペインへ切り替わったら、その帯に足してはいけない
+// - 応答を待つ間に別のシェルへ切り替わったら、その帯に足してはいけない
 //   (古い応答が勝つ再発)
 //
 // xterm 本体と EventSource は外の境界なので差し替える。差し替えないと
@@ -27,7 +27,7 @@ import {
   test,
   vi,
 } from "vitest";
-import type { TmuxPane, TmuxScreen } from "../core/tmux";
+import type { ShellSession } from "../core/shell";
 import { terminalText } from "../views/terminal/i18n";
 import {
   createTerminalScreen,
@@ -63,7 +63,10 @@ function overlays(handle: TerminalScreenHandle): HTMLAnchorElement[] {
 vi.mock("../core/xterm-loader", () => {
   const noop = () => undefined;
   const disposable = () => ({ dispose: noop });
-  const state: FakeTerminalState = { lines: [], cursorY: 0 };
+  const state: FakeTerminalState = {
+    lines: [],
+    cursorY: 0,
+  };
   (globalThis as Record<string, unknown>).__terminalScreenFakeState = state;
   class FakeTerminal {
     cols = 80;
@@ -138,7 +141,10 @@ vi.mock("../core/xterm-loader", () => {
   }
   return {
     loadXterm: () =>
-      Promise.resolve({ Terminal: FakeTerminal, FitAddon: FakeFitAddon }),
+      Promise.resolve({
+        Terminal: FakeTerminal,
+        FitAddon: FakeFitAddon,
+      }),
   };
 });
 
@@ -160,15 +166,17 @@ const IMAGE: ImageRef = {
   url: "/_agent/image?path=%2Frepo%2Fdocs%2Fout.png",
 };
 
-/** 開いた購読。テストから screen イベントを流し込むために持っておく。 */
+/** 開いた購読。テストから出力を流し込むために持っておく。 */
 type OpenedSource = {
   url: string;
-  emitScreen(screen: TmuxScreen): void;
+  emitOutput(data: string): void;
 };
 
 let sources: OpenedSource[] = [];
 let requestedUrls: string[] = [];
 let requestedBodies: Array<string | null> = [];
+let statusMessages: Array<string | null> = [];
+let failingUrl: string | null = null;
 /** /_agent/images が返す画像。 */
 let respond: () => ImageRef[];
 /** 保留にした応答を返す関数。世代照合を見るテストで使う。 */
@@ -184,9 +192,9 @@ function installFakes(): void {
     constructor(url: string) {
       sources.push({
         url,
-        emitScreen: (screen) => {
-          this.handlers.get("screen")?.({
-            data: JSON.stringify(screen),
+        emitOutput: (data) => {
+          this.handlers.get("output")?.({
+            data: JSON.stringify({ data }),
           } as MessageEvent<string>);
         },
       });
@@ -219,6 +227,14 @@ function installFakes(): void {
     value: (input: string, init?: RequestInit) => {
       requestedUrls.push(String(input));
       requestedBodies.push(typeof init?.body === "string" ? init.body : null);
+      if (String(input) === failingUrl) {
+        return Promise.resolve(
+          new Response('{"errors":[{"code":"E1"},{"code":"E2"}]}', {
+            status: 503,
+            statusText: "Service Unavailable",
+          }),
+        );
+      }
       const body = { images: respond() };
       const res = { ok: true, status: 200, json: () => Promise.resolve(body) };
       if (!holdResponses) return Promise.resolve(res);
@@ -229,32 +245,23 @@ function installFakes(): void {
   });
 }
 
-const PANE: TmuxPane = {
-  id: "%1",
-  label: "0:0.0",
-  paneIndex: 0,
-  title: "agent",
-  command: "zsh",
-  path: "/repo",
-  width: 80,
-  height: 24,
-  active: true,
-  inRepo: true,
+const SHELL: ShellSession = {
+  id: "shell-abc123",
+  command: "/bin/zsh",
+  cwd: "/repo",
+  createdAt: "2026-08-01T09:41:58.000Z",
+  cols: 80,
+  rows: 24,
+  exited: false,
+  exitCode: null,
+  tty: "/dev/ttys001",
 };
 
-const OTHER_PANE: TmuxPane = { ...PANE, id: "%2", label: "0:0.1" };
-
-function frame(content: string, pane = PANE.id): TmuxScreen {
-  return {
-    pane,
-    content,
-    width: 80,
-    height: 24,
-    cursorX: 0,
-    cursorY: 0,
-    historyLines: 0,
-  };
-}
+const OTHER_SHELL: ShellSession = {
+  ...SHELL,
+  id: "shell-def456",
+  tty: "/dev/ttys002",
+};
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -282,6 +289,8 @@ beforeEach(() => {
   sources = [];
   requestedUrls = [];
   requestedBodies = [];
+  statusMessages = [];
+  failingUrl = null;
   pendingResponses = [];
   holdResponses = false;
   respond = () => [IMAGE];
@@ -294,7 +303,7 @@ beforeEach(() => {
     trackLoad: (promise) => promise,
     actionHeaders: () => ({}),
     getText: () => terminalText("en"),
-    onStatus: () => undefined,
+    onStatus: (message) => statusMessages.push(message),
     onTargetGone: () => undefined,
     getFontSize: () => 14,
   });
@@ -306,8 +315,8 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-async function attachPane(pane: TmuxPane): Promise<OpenedSource> {
-  await handle.attach({ kind: "tmux", pane });
+async function attachShell(session: ShellSession): Promise<OpenedSource> {
+  await handle.attach(session);
   const source = sources[sources.length - 1];
   if (!source) throw new Error("no subscription opened");
   return source;
@@ -315,8 +324,8 @@ async function attachPane(pane: TmuxPane): Promise<OpenedSource> {
 
 describe("画面に出た画像パス", () => {
   test("パスが出ている行のすぐ下に画像を重ねる", async () => {
-    const source = await attachPane(PANE);
-    source.emitScreen(frame("wrote docs/out.png\n"));
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
     await flush();
 
     expect(imageRequests()).toEqual(["/_agent/images?path=docs%2Fout.png"]);
@@ -336,12 +345,12 @@ describe("画面に出た画像パス", () => {
 
   test("同じ画面が何度届いても問い合わせも重ねも作り直さない", async () => {
     // tmux は 120ms ごとに全画面を送ってくる。毎回作り直すと点滅する。
-    const source = await attachPane(PANE);
-    source.emitScreen(frame("wrote docs/out.png\n"));
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
     await flush();
     const first = overlays(handle)[0];
     for (let i = 0; i < 5; i += 1) {
-      source.emitScreen(frame("wrote docs/out.png\n"));
+      source.emitOutput("wrote docs/out.png\n");
       await flush();
     }
 
@@ -352,41 +361,41 @@ describe("画面に出た画像パス", () => {
   });
 
   test("パスが画面から消えたら重ねたものも消える", async () => {
-    const source = await attachPane(PANE);
-    source.emitScreen(frame("wrote docs/out.png\n"));
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
     await flush();
     expect(overlays(handle)).toHaveLength(1);
 
     // 画面が流れてパスが見えなくなった。
     fakeState().lines = ["$ make chart", "done", ""];
-    source.emitScreen(frame("done\n"));
+    source.emitOutput("done\n");
     await flush();
 
     expect(overlays(handle)).toEqual([]);
-    // 重ねたぶんは消えるが、帯には残る。出力が流れるペインでは数秒で見え
+    // 重ねたぶんは消えるが、帯には残る。出力が流れる端末では数秒で見え
     // なくなるので、残らないと開き直せない。
     expect(bandNames(handle)).toEqual(["out.png"]);
   });
 
   test("画像パスが無い画面では問い合わせない", async () => {
     fakeState().lines = ["$ ls -la", "total 0", ""];
-    const source = await attachPane(PANE);
-    source.emitScreen(frame("$ ls -la\ntotal 0\n"));
+    const source = await attachShell(SHELL);
+    source.emitOutput("$ ls -la\ntotal 0\n");
     await flush();
 
     expect(imageRequests()).toEqual([]);
     expect(overlays(handle)).toEqual([]);
   });
 
-  test("別のペインへ切り替えたら重ねたものは消え、また拾い直せる", async () => {
-    const first = await attachPane(PANE);
-    first.emitScreen(frame("wrote docs/out.png\n"));
+  test("別のシェルへ切り替えたら重ねたものは消え、また拾い直せる", async () => {
+    const first = await attachShell(SHELL);
+    first.emitOutput("wrote docs/out.png\n");
     await flush();
     expect(overlays(handle)).toHaveLength(1);
 
-    const second = await attachPane(OTHER_PANE);
+    const second = await attachShell(OTHER_SHELL);
     expect(overlays(handle)).toEqual([]);
-    second.emitScreen(frame("wrote docs/out.png\n", OTHER_PANE.id));
+    second.emitOutput("wrote docs/out.png\n");
     await flush();
 
     expect(imageRequests()).toHaveLength(2);
@@ -394,8 +403,8 @@ describe("画面に出た画像パス", () => {
   });
 
   test("帯のサムネイルを押すと拡大表示が開く", async () => {
-    const source = await attachPane(PANE);
-    source.emitScreen(frame("wrote docs/out.png\n"));
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
     await flush();
 
     handle.el
@@ -408,8 +417,8 @@ describe("画面に出た画像パス", () => {
   });
 
   test("重ねた画像を押すと拡大表示が開く", async () => {
-    const source = await attachPane(PANE);
-    source.emitScreen(frame("wrote docs/out.png\n"));
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
     await flush();
 
     const overlay = overlays(handle)[0];
@@ -419,18 +428,18 @@ describe("画面に出た画像パス", () => {
     box?.querySelector<HTMLButtonElement>("button:last-of-type")?.click();
   });
 
-  test("同じペインへ戻ったら、覚えていた画像を帯に戻す", async () => {
+  test("同じシェルへ戻ったら、覚えていた画像を帯に戻す", async () => {
     // パネルは Terminal と Tools がタブなので、切り替えるたびに detach される。
     // 覚えていないと、パスが流れた後は二度と開けない。
-    const source = await attachPane(PANE);
-    source.emitScreen(frame("wrote docs/out.png\n"));
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
     await flush();
     expect(bandNames(handle)).toEqual(["out.png"]);
 
     handle.detach();
     expect(bandNames(handle)).toEqual([]);
 
-    await attachPane(PANE);
+    await attachShell(SHELL);
     expect(bandNames(handle)).toEqual(["out.png"]);
     // 覚えている綴りは聞き直さない。
     expect(imageRequests()).toHaveLength(1);
@@ -438,30 +447,30 @@ describe("画面に出た画像パス", () => {
 
   test("覚えていた画像が読めなければ、帯から外して忘れる", async () => {
     // 実体が消えた画像を、開くたびに壊れた枠で並べない。
-    const source = await attachPane(PANE);
-    source.emitScreen(frame("wrote docs/out.png\n"));
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
     await flush();
 
     const picture = handle.el.querySelector(".terminal-attachment img");
     picture?.dispatchEvent(new Event("error"));
     expect(bandNames(handle)).toEqual([]);
 
-    // 別のペインを経由して戻ってきても、外したものは戻らない。
-    await attachPane(OTHER_PANE);
-    await attachPane(PANE);
+    // 別のシェルを経由して戻ってきても、外したものは戻らない。
+    await attachShell(OTHER_SHELL);
+    await attachShell(SHELL);
     expect(bandNames(handle)).toEqual([]);
   });
 
   test("応答を待つ間に切り替わったら、新しい画面には重ねない", async () => {
-    // 古い応答が後から勝って、別のペインの画面に前のペインの画像が出るのを
+    // 古い応答が後から勝って、別のシェルの画面に前のシェルの画像が出るのを
     // 防ぐ。
     holdResponses = true;
-    const source = await attachPane(PANE);
-    source.emitScreen(frame("wrote docs/out.png\n"));
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
     await flush();
     expect(imageRequests()).toHaveLength(1);
 
-    await attachPane(OTHER_PANE);
+    await attachShell(OTHER_SHELL);
     for (const resolve of pendingResponses) resolve();
     await flush();
 
@@ -500,7 +509,7 @@ describe("スマホの端末補助キー", () => {
       expected: `${String.fromCharCode(27)}[C`,
     },
   ])("$name sends the terminal sequence", async ({ key, expected }) => {
-    await attachPane(PANE);
+    await attachShell(SHELL);
     const button = handle.el.querySelector<HTMLButtonElement>(
       `.terminal-shortcut-btn[data-key="${key}"]`,
     );
@@ -509,17 +518,33 @@ describe("スマホの端末補助キー", () => {
     button.click();
     await flush();
 
-    expect(requestedUrls[requestedUrls.length - 1]).toBe("/_tmux/keys");
+    expect(requestedUrls[requestedUrls.length - 1]).toBe("/_shell/keys");
     expect(
       JSON.parse(requestedBodies[requestedBodies.length - 1] ?? "null"),
     ).toEqual({
-      pane: "%1",
+      id: "shell-abc123",
       data: expected,
     });
   });
 
+  test("送信失敗では HTTP 状態とレスポンス本文をすべて表示する", async () => {
+    await attachShell(SHELL);
+    failingUrl = "/_shell/keys";
+    const button = handle.el.querySelector<HTMLButtonElement>(
+      '.terminal-shortcut-btn[data-key="escape"]',
+    );
+    if (!button) throw new Error("escape shortcut button is missing");
+
+    button.click();
+    await flush();
+
+    expect(statusMessages[statusMessages.length - 1]).toBe(
+      'Failed to send input. (HTTP 503 Service Unavailable): {"errors":[{"code":"E1"},{"code":"E2"}]}',
+    );
+  });
+
   test("Ctrl is a stable one-shot toggle", async () => {
-    await attachPane(PANE);
+    await attachShell(SHELL);
     const button = handle.el.querySelector<HTMLButtonElement>(
       '.terminal-shortcut-btn[data-key="control"]',
     );

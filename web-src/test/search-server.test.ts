@@ -39,8 +39,20 @@ describe("fixedStringLineMatches", () => {
       10,
     );
     expect(matches).toEqual([
-      { path: "src/app.ts", line: 1, column: 1, preview: "Alpha" },
-      { path: "src/app.ts", line: 2, column: 6, preview: "beta alpha" },
+      {
+        path: "src/app.ts",
+        line: 1,
+        column: 1,
+        preview: "Alpha",
+        matchText: "Alpha",
+      },
+      {
+        path: "src/app.ts",
+        line: 2,
+        column: 6,
+        preview: "beta alpha",
+        matchText: "alpha",
+      },
     ]);
   });
 
@@ -221,6 +233,7 @@ describe("buildRgArgs", () => {
     expect(buildRgArgs("needle", 20, ["src/app.ts"])).toEqual([
       "rg",
       "--no-config",
+      "--json",
       "--line-number",
       "--column",
       "--no-heading",
@@ -258,6 +271,28 @@ describe("buildRgArgs", () => {
 });
 
 describe("grep output parsers", () => {
+  test("parses the exact ripgrep JSON match and converts its byte offset", () => {
+    const output = `${JSON.stringify({
+      type: "match",
+      data: {
+        path: { text: "src/sample.ts" },
+        lines: { text: "const 日本語 = 1;\n" },
+        line_number: 7,
+        submatches: [{ match: { text: "日本語" }, start: 6, end: 15 }],
+      },
+    })}\n`;
+
+    expect(parseRgOutput(output, 10)).toEqual([
+      {
+        path: "src/sample.ts",
+        line: 7,
+        column: 7,
+        preview: "const 日本語 = 1;",
+        matchText: "日本語",
+      },
+    ]);
+  });
+
   test("parses ripgrep output path line column preview", () => {
     expect(parseRgOutput("src/app.ts:10:3:const app = true\n", 10)).toEqual([
       { path: "src/app.ts", line: 10, column: 3, preview: "const app = true" },
@@ -320,6 +355,10 @@ describe("search-service shared behavior", () => {
     git(repo, ["config", "user.name", "sample-author"]);
     writeFileSync(join(repo, "sample_file.ts"), "export const sample = 1;\n");
     writeFileSync(join(repo, "other_sample.ts"), "export const sample = 2;\n");
+    writeFileSync(
+      join(repo, "sample_file.test.ts"),
+      "export const sample = 3;\n",
+    );
     writeFileSync(join(repo, ".DS_Store"), "sample\n");
     git(repo, ["add", "."]);
     git(repo, ["commit", "-m", "sample initial commit"]);
@@ -336,6 +375,7 @@ describe("search-service shared behavior", () => {
     expect(result.value.generation).toBe(7);
     expect(result.value.files.map((file) => file.path).sort()).toEqual([
       "other_sample.ts",
+      "sample_file.test.ts",
       "sample_file.ts",
     ]);
   });
@@ -353,6 +393,45 @@ describe("search-service shared behavior", () => {
     expect(result.value.matches.map((match) => match.path)).toEqual([
       "sample_file.ts",
     ]);
+  });
+
+  test.each([
+    {
+      name: "worktree",
+      ref: "worktree",
+      expected: ["./other_sample.ts", "./sample_file.ts"],
+    },
+    {
+      name: "committed ref",
+      ref: "main",
+      expected: ["other_sample.ts", "sample_file.ts"],
+    },
+  ])("grep excludes test files for $name", async ({ ref, expected }) => {
+    const result = await grepRepoAsync(env(), {
+      query: "sample",
+      ref,
+      paths: [],
+      regex: false,
+      max: 10,
+      excludeTests: true,
+    });
+    if (result.ok !== true) throw new Error(result.error);
+    expect(result.value.matches.map((match) => match.path).sort()).toEqual(
+      expected,
+    );
+  });
+
+  test("a test-only path restriction stays empty instead of widening to the repository", async () => {
+    const result = await grepRepoAsync(env(), {
+      query: "sample",
+      ref: "worktree",
+      paths: ["sample_file.test.ts"],
+      regex: false,
+      max: 10,
+      excludeTests: true,
+    });
+    if (result.ok !== true) throw new Error(result.error);
+    expect(result.value.matches).toEqual([]);
   });
 
   test("safeWorktreePath rejects git internals and accepts normal files", () => {

@@ -137,7 +137,6 @@ describe("sidebar tree bulk actions", () => {
     expect(html.includes('id="sb-expand-all"')).toBe(true);
     expect(html.includes('id="sb-collapse-all"')).toBe(true);
     expect(html.includes('id="sidebar-toggle"')).toBe(true);
-    expect(html.includes('id="viewer-settings"')).toBe(true);
     expect(html.includes('class="sb-actions"')).toBe(true);
     expect(html.includes('class="sb-icon-action sb-tree-action"')).toBe(true);
     expect(
@@ -145,17 +144,7 @@ describe("sidebar tree bulk actions", () => {
     ).toBe(true);
     expect(app.includes("function setSidebarTreeActionIcons()")).toBe(true);
     expect(
-      app.includes(
-        "const settings = document.querySelector<HTMLButtonElement>('#viewer-settings')",
-      ),
-    ).toBe(true);
-    expect(
       app.includes("const sidebarToggle = ensureSidebarToggleButton()"),
-    ).toBe(true);
-    expect(
-      app.includes(
-        "settings.innerHTML = iconSvg('octicon-gear', GEAR_16_PATH)",
-      ),
     ).toBe(true);
     expect(
       app.includes("function syncSidebarToggleIcon(button: HTMLButtonElement)"),
@@ -281,15 +270,6 @@ describe("search palette shortcuts", () => {
 
   test("palette keeps keyboard selection scrolled into view", () => {
     expect(app.includes("row.scrollIntoView({ block: 'nearest' })")).toBe(true);
-  });
-
-  test("palette exposes glob and explicit regex modes", () => {
-    expect(app.includes("'Glob: * ? []'")).toBe(true);
-    expect(app.includes("'Fuzzy path search'")).toBe(true);
-    expect(app.includes("grepRegex: false")).toBe(true);
-    expect(app.includes("params.set('regex', '1')")).toBe(true);
-    expect(app.includes("Invalid regular expression")).toBe(true);
-    expect(app.includes("Alt+R toggles regex")).toBe(true);
   });
 
   test("file line route highlights target source lines", () => {

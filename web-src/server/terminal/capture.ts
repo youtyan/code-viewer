@@ -26,7 +26,7 @@ export type TerminalCaptureResult =
   /** ペインが閉じられた / シェルが片付いた。 */
   | { status: "gone" }
   | { status: "invalid" }
-  | { status: "error"; message: string };
+  | { status: "error"; error: Error };
 
 export function terminalKindOf(target: string): TerminalKind | null {
   if (isShellSessionId(target)) return "shell";
@@ -56,7 +56,7 @@ async function captureTmux(
   const result = await captureTmuxPane(paneId, cwd, historyLines);
   if (result.status === "gone") return { status: "gone" };
   if (result.status === "error") {
-    return { status: "error", message: result.message };
+    return result;
   }
   return {
     status: "ok",

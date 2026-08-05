@@ -2,8 +2,8 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
   DEFAULT_KEY_BINDINGS,
+  KEYMAP_SCOPES,
   type KeyBinding,
-  type KeymapScope,
   resolveKeymapAction,
 } from "../core/keymap";
 import type { AppRoute } from "../core/routes";
@@ -14,9 +14,12 @@ import {
   documentedHelpKeybindingActions,
   HIDDEN_HELP_KEYBINDING_ACTIONS,
 } from "../views/help-keybindings";
-import { createHelpPage, openHelpKeybindings } from "../views/help-page";
+import {
+  createHelpPage,
+  type HelpSection,
+  openHelpKeybindings,
+} from "../views/help-page";
 
-const KEYMAP_SCOPES: KeymapScope[] = ["global", "sidebar", "main"];
 const EXPECTED_QUERY_DIFF_COMMANDS = [
   "code-viewer query diff tables --before snap-abc123 --after snap-def456 --json",
   "code-viewer query diff rows --before snap-abc123 --after snap-def456 --table users --limit 50",
@@ -115,8 +118,11 @@ describe("help page navigation", () => {
   });
 });
 
-describe("help page database CLI reference", () => {
-  function renderDatabaseHelp(lang: "en" | "ja"): {
+describe("help page CLI reference", () => {
+  function renderHelp(
+    lang: "en" | "ja",
+    section: HelpSection = "database",
+  ): {
     text: string;
     commands: string[];
   } {
@@ -130,7 +136,7 @@ describe("help page database CLI reference", () => {
     let route: AppRoute = {
       screen: "help",
       lang,
-      section: "database",
+      section,
       range: { from: "HEAD", to: "worktree" },
     };
     const page = createHelpPage({
@@ -150,7 +156,9 @@ describe("help page database CLI reference", () => {
       currentRange: () => ({ from: "HEAD", to: "worktree" }),
       syncHeaderMenu: () => undefined,
       getLanguage: () => lang,
-      setLanguage: () => undefined,
+      mountViewerSettings: () => undefined,
+      getKeyBindings: () => DEFAULT_KEY_BINDINGS,
+      decorateKeybindings: () => undefined,
     });
     page.renderHelpPage();
     const root = document.querySelector("#diff");
@@ -171,7 +179,7 @@ describe("help page database CLI reference", () => {
 
   test("documents only wired query diff CLI commands in both languages", () => {
     for (const lang of ["en", "ja"] as const) {
-      const { text, commands } = renderDatabaseHelp(lang);
+      const { text, commands } = renderHelp(lang);
       const diffCommands = commands.filter((command) =>
         command.startsWith("code-viewer query diff "),
       );
@@ -184,6 +192,17 @@ describe("help page database CLI reference", () => {
       expect(text.includes("code-viewer query diff delete")).toBe(false);
       expect(text.includes("code-viewer query diff tables --id")).toBe(false);
       expect(text.includes("code-viewer query diff rows --id")).toBe(false);
+    }
+  });
+
+  test("documents Doctor checks and command overrides in both languages", () => {
+    for (const lang of ["en", "ja"] as const) {
+      const { text, commands } = renderHelp(lang, "overview");
+      expect(text).toContain("rg");
+      expect(text).toContain("tmux");
+      expect(text).toContain("@lydell/node-pty");
+      expect(commands.join("\n")).toContain("--bin rg=/opt/bin/rg");
+      expect(commands.join("\n")).toContain("--bin tmux=/opt/bin/tmux");
     }
   });
 });

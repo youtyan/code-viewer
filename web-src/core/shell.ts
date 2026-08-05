@@ -30,6 +30,15 @@ export type ShellSession = {
   /** プロセスが終了済みか。終了後も一覧には残し、閉じるまで出力を見られる。 */
   exited: boolean;
   exitCode: number | null;
+  /**
+   * この PTY の端末デバイス (`/dev/ttys012`)。引けなかった環境では空。
+   *
+   * このシェルの中で tmux を起動すると、その tmux クライアントは同じ端末に
+   * 載る。つまりこの名前が tmux 側の `#{client_tty}` と一致するので、
+   * 「どのシェルがどのセッションを映しているか」をこれ 1 つで突き合わせ
+   * られる。tmux へ的を絞った指示を出すときの宛先でもある。
+   */
+  tty: string;
 };
 
 export type ShellListResponse = {
@@ -54,8 +63,11 @@ export const MAX_SHELL_COLS = 1000;
 export const MIN_SHELL_ROWS = 5;
 export const MAX_SHELL_ROWS = 500;
 
-/** 同時に開けるシェルの数。取り違えではなく資源の歯止め。 */
-export const MAX_SHELL_SESSIONS = 8;
+// 同時に開ける数の上限は持たない。tmux のセッション 1 つにつきシェル 1 本と
+// いう対応にしてあるので、本数はユーザーが立てているセッションの数で決まる
+// (数十個立てる使い方が普通にある)。上限を置くと、渡り歩いているうちに
+// 「多すぎます」で開けなくなる。1 本あたりの負担は PTY と溜め置き
+// (REPLAY_BUFFER_LIMIT) だけで、tmux クライアント 1 台ぶんと変わらない。
 
 export function isShellSessionId(value: unknown): value is ShellSessionId {
   return typeof value === "string" && /^shell-[0-9a-z]{6,}$/.test(value);

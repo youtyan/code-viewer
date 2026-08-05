@@ -3,9 +3,9 @@ import type Renderer from "markdown-it/lib/renderer.mjs";
 import type Token from "markdown-it/lib/token.mjs";
 import markdownItAnchor from "markdown-it-anchor";
 import markdownItFootnote from "markdown-it-footnote";
+import { CHECK_16_PATHS, COPY_16_PATHS, iconSvg } from "./icons";
 import { isImeComposing } from "./keyboard";
 import { buildRawFileUrl, type SourceFileTarget } from "./routes";
-import { CHECK_16_PATHS, COPY_16_PATHS, iconSvg } from "./icons";
 
 /** Markdown 内リンクのクリックで開くリポジトリ内の行き先。GitHub の
  * markdown と同じく、md 以外のファイルとディレクトリも遷移先になる。 */
@@ -877,7 +877,7 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
   const apply = () => {
     svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
   };
-  const fit = () => {
+  const fitImage = () => {
     const vw = Math.max(1, window.innerWidth - 128);
     const vh = Math.max(1, window.innerHeight - 128);
     scale = Math.min(vw / bbox.width, vh / bbox.height, 4);
@@ -913,12 +913,12 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
     window.removeEventListener("keydown", onKey);
     window.removeEventListener("mousemove", onMove);
     window.removeEventListener("mouseup", onUp);
-    window.removeEventListener("resize", fit);
+    window.removeEventListener("resize", fitImage);
     overlay.remove();
   };
   button("+", "zoom in", () => zoomCentered(1.25));
   button("-", "zoom out", () => zoomCentered(1 / 1.25));
-  button("fit", "fit", fit);
+  button("fit", "fit", fitImage);
   button("x", "close", close);
 
   overlay.addEventListener(
@@ -955,21 +955,21 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
   const onKey = (e: KeyboardEvent) => {
     if (isImeComposing(e)) return;
     if (e.key === "Escape") close();
-    else if (e.key === "0") fit();
+    else if (e.key === "0") fitImage();
     else if (e.key === "+" || e.key === "=") zoomCentered(1.25);
     else if (e.key === "-") zoomCentered(1 / 1.25);
   };
   window.addEventListener("mousemove", onMove);
   window.addEventListener("mouseup", onUp);
   window.addEventListener("keydown", onKey);
-  window.addEventListener("resize", fit);
+  window.addEventListener("resize", fitImage);
   overlay.addEventListener("dblclick", (e) => {
-    if (!(e.target as Element).closest(".mkdp-lightbox-toolbar")) fit();
+    if (!(e.target as Element).closest(".mkdp-lightbox-toolbar")) fitImage();
   });
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay || e.target === stage) close();
   });
-  fit();
+  fitImage();
 }
 
 function safeSvgBox(svg: SVGSVGElement): { width: number; height: number } {

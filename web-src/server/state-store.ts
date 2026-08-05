@@ -1,4 +1,12 @@
 import { join } from "node:path";
+import { sanitizeKeymapOverrides } from "../core/keymap";
+import {
+  MAX_GREP_PALETTE_HEIGHT,
+  MAX_GREP_PALETTE_WIDTH,
+  MIN_GREP_PALETTE_HEIGHT,
+  MIN_GREP_PALETTE_WIDTH,
+} from "../core/search-palette";
+import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from "../core/tmux";
 import {
   isToolId,
   MAX_TOOLS_SHEET_WIDTH,
@@ -6,7 +14,6 @@ import {
   TOOL_IDS,
   type ToolId,
 } from "../core/tools";
-import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from "../core/tmux";
 import type {
   AppSettingsState,
   DbUiPrefs,
@@ -38,6 +45,7 @@ const MAX_TOOLS_BYTES = 4_000_000;
 const MAX_REF_LEN = 1024;
 const MAX_KEY_LEN = 2048;
 const MAX_VIEW_ITEMS = 20_000;
+const MAX_GREP_SELECTION_HISTORY_ITEMS = 100;
 const MAX_DB_UI_DBS = 200;
 const MAX_DB_UI_TABLES = 500;
 const MAX_DB_UI_COLUMNS = 1000;
@@ -180,6 +188,8 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     MAX_TERMINAL_FONT_SIZE,
   );
   if (terminalFontSize !== undefined) out.terminalFontSize = terminalFontSize;
+  const appPanelDocked = optionalBoolean(raw.appPanelDocked);
+  if (appPanelDocked !== undefined) out.appPanelDocked = appPanelDocked;
   const syntaxHighlight = optionalBoolean(raw.syntaxHighlight);
   if (syntaxHighlight !== undefined) out.syntaxHighlight = syntaxHighlight;
   const autoUpdate = optionalBoolean(raw.autoUpdate);
@@ -211,6 +221,37 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   if (ignoreWhitespace !== undefined) out.ignoreWhitespace = ignoreWhitespace;
   const hideTests = optionalBoolean(raw.hideTests);
   if (hideTests !== undefined) out.hideTests = hideTests;
+  const grepRegex = optionalBoolean(raw.grepRegex);
+  if (grepRegex !== undefined) out.grepRegex = grepRegex;
+  const grepGroupByFile = optionalBoolean(raw.grepGroupByFile);
+  if (grepGroupByFile !== undefined) out.grepGroupByFile = grepGroupByFile;
+  const grepPaletteWidth = optionalNumber(
+    raw.grepPaletteWidth,
+    MIN_GREP_PALETTE_WIDTH,
+    MAX_GREP_PALETTE_WIDTH,
+  );
+  if (grepPaletteWidth !== undefined) out.grepPaletteWidth = grepPaletteWidth;
+  const grepPaletteHeight = optionalNumber(
+    raw.grepPaletteHeight,
+    MIN_GREP_PALETTE_HEIGHT,
+    MAX_GREP_PALETTE_HEIGHT,
+  );
+  if (grepPaletteHeight !== undefined)
+    out.grepPaletteHeight = grepPaletteHeight;
+  const grepSelectionHistory = normalizeStringList(raw.grepSelectionHistory, {
+    maxItems: MAX_GREP_SELECTION_HISTORY_ITEMS,
+    maxLen: MAX_KEY_LEN,
+    keepLast: true,
+    sort: false,
+  });
+  if (grepSelectionHistory) out.grepSelectionHistory = grepSelectionHistory;
+  const fileSelectionHistory = normalizeStringList(raw.fileSelectionHistory, {
+    maxItems: MAX_GREP_SELECTION_HISTORY_ITEMS,
+    maxLen: MAX_KEY_LEN,
+    keepLast: true,
+    sort: false,
+  });
+  if (fileSelectionHistory) out.fileSelectionHistory = fileSelectionHistory;
   const scopeOmitDirs = normalizeStringList(raw.scopeOmitDirs, {
     maxItems: 100,
     maxLen: 64,
@@ -231,6 +272,10 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   if (scopeWatchLimit !== undefined) out.scopeWatchLimit = scopeWatchLimit;
   const uploadEnabled = optionalBoolean(raw.uploadEnabled);
   if (uploadEnabled !== undefined) out.uploadEnabled = uploadEnabled;
+  // 差分が空なら書かない。全部デフォルトに戻したときにファイルへ {} が
+  // 残らないので、次に読んだときは素直に「未設定」として扱える。
+  const keybindings = sanitizeKeymapOverrides(raw.keybindings);
+  if (Object.keys(keybindings).length) out.keybindings = keybindings;
   if (isRecord(raw.range)) {
     const from = optionalString(raw.range.from, MAX_REF_LEN);
     const to = optionalString(raw.range.to, MAX_REF_LEN);

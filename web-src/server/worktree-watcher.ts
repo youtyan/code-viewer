@@ -14,7 +14,10 @@ export type WatchFn = (
 
 type WatchHandle = {
   close?: () => void;
-  on?: (event: "error" | "close", listener: () => void) => unknown;
+  on?: (
+    event: "error" | "close",
+    listener: (error?: unknown) => void,
+  ) => unknown;
 };
 
 type DirectoryEntry = {
@@ -177,13 +180,17 @@ export function startWorktreeUpdateWatch(
   const closeSubtree = (dir: string) => {
     for (const [watchedDir, watcher] of [...watchers]) {
       if (watchedDir !== dir && !watchedDir.startsWith(`${dir}/`)) continue;
+      let closeFailed = false;
+      let closeError: unknown;
       try {
         watcher.close?.();
-      } catch {
-        /* best-effort cleanup */
+      } catch (error) {
+        closeFailed = true;
+        closeError = error;
       }
       watchers.delete(watchedDir);
       signatures.delete(watchedDir);
+      if (closeFailed) options.onError?.(closeError);
     }
   };
 
@@ -198,15 +205,17 @@ export function startWorktreeUpdateWatch(
     }
     initialScanQueue.length = 0;
     pendingPathInspections.clear();
+    const closeErrors: unknown[] = [];
     for (const watcher of [...watchers.values()]) {
       try {
         watcher.close?.();
-      } catch {
-        /* best-effort cleanup */
+      } catch (error) {
+        closeErrors.push(error);
       }
     }
     watchers.clear();
     signatures.clear();
+    for (const error of closeErrors) options.onError?.(error);
   };
 
   const readChildDirectories = (dir: string): string[] => {
@@ -335,11 +344,14 @@ export function startWorktreeUpdateWatch(
       watchers.set(dir, watcher);
       const signature = directorySignature(dir);
       if (signature) signatures.set(dir, signature);
-      watcher.on?.("error", () => {
+      watcher.on?.("error", (error) => {
         if (watchers.get(dir) === watcher) {
           watchers.delete(dir);
           signatures.delete(dir);
         }
+        options.onError?.(
+          error ?? new Error(`worktree watcher failed for ${dir}`),
+        );
       });
       watcher.on?.("close", () => {
         if (watchers.get(dir) === watcher) {

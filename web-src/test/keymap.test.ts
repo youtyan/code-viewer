@@ -1,8 +1,16 @@
 import { describe, expect, test } from "vitest";
 import {
   DEFAULT_KEY_BINDINGS,
+  findKeymapConflicts,
+  type KeyBinding,
+  type KeyChord,
+  type KeymapAction,
+  type KeymapConflict,
+  type KeymapOverrides,
   type KeymapScope,
+  resolveKeyBindings,
   resolveKeymapAction,
+  sanitizeKeymapOverrides,
 } from "../core/keymap";
 
 function key(
@@ -176,9 +184,10 @@ describe("keymap action resolution", () => {
     expect(
       resolveKeymapAction(key("g"), { scope: "main", editable: false }),
     ).toBe("start-g-sequence");
+    // 画面の行き先も g から始めるので、global でも g を受ける。
     expect(
       resolveKeymapAction(key("g"), { scope: "global", editable: false }),
-    ).toBe(null);
+    ).toBe("start-g-sequence");
     expect(
       resolveKeymapAction(key("g"), {
         scope: "main",
@@ -307,5 +316,418 @@ describe("keymap action resolution", () => {
         composing: true,
       }),
     ).toBe(null);
+  });
+});
+
+type ExpansionCase = {
+  name: string;
+  action: KeymapAction;
+  chords: KeyChord[];
+  expected: KeyBinding[];
+};
+
+describe("resolveKeyBindings", () => {
+  test("hands back the defaults when nothing was overridden", () => {
+    expect(resolveKeyBindings(undefined)).toBe(DEFAULT_KEY_BINDINGS);
+  });
+
+  test.each<ExpansionCase>([
+    {
+      name: "an action bound in two scopes gets the new key in both",
+      action: "sidebar-next",
+      chords: [{ key: "e" }],
+      expected: [
+        { action: "sidebar-next", key: "e", scope: "sidebar" },
+        { action: "sidebar-next", key: "e", scope: "global" },
+      ],
+    },
+    {
+      name: "an action bound in three scopes gets the new key in all three",
+      action: "scroll-main-page-down",
+      chords: [{ key: "e" }],
+      expected: [
+        { action: "scroll-main-page-down", key: "e", scope: "main" },
+        { action: "scroll-main-page-down", key: "e", scope: "global" },
+        { action: "scroll-main-page-down", key: "e", scope: "sidebar" },
+      ],
+    },
+    {
+      name: "Ctrl and Meta rows share one condition, so one chord yields one row",
+      action: "open-file-palette",
+      chords: [{ key: "e", alt: true }],
+      expected: [
+        {
+          action: "open-file-palette",
+          key: "e",
+          alt: true,
+          allowEditable: true,
+          allowPaletteOpen: true,
+        },
+      ],
+    },
+    {
+      name: "two chords on a single-condition action yield two rows",
+      action: "open-file-palette",
+      chords: [
+        { key: "e", ctrl: true },
+        { key: "e", meta: true },
+      ],
+      expected: [
+        {
+          action: "open-file-palette",
+          key: "e",
+          ctrl: true,
+          allowEditable: true,
+          allowPaletteOpen: true,
+        },
+        {
+          action: "open-file-palette",
+          key: "e",
+          meta: true,
+          allowEditable: true,
+          allowPaletteOpen: true,
+        },
+      ],
+    },
+    {
+      name: "the lightbox guard is carried over from the default row",
+      action: "cancel-source-load",
+      chords: [{ key: "q" }],
+      expected: [
+        {
+          action: "cancel-source-load",
+          key: "q",
+          requires: { lightboxClosed: true },
+        },
+      ],
+    },
+    {
+      name: "the g prefix comes from the chord, not from the default row",
+      action: "tab-preview",
+      chords: [{ key: "e" }],
+      expected: [{ action: "tab-preview", key: "e", scope: "main" }],
+    },
+    {
+      name: "a chord can add the g prefix back",
+      action: "tab-preview",
+      chords: [{ key: "e", pendingG: true }],
+      expected: [
+        { action: "tab-preview", key: "e", scope: "main", pendingG: true },
+      ],
+    },
+    {
+      name: "keys are lowercased so they match event.key",
+      action: "toggle-theme",
+      chords: [{ key: "E" }],
+      expected: [{ action: "toggle-theme", key: "e" }],
+    },
+    {
+      name: "an empty list disables the action entirely",
+      action: "toggle-theme",
+      chords: [],
+      expected: [],
+    },
+  ])("$name", ({ action, chords, expected }) => {
+    const bindings = resolveKeyBindings({ [action]: chords });
+
+    expect(bindings.filter((binding) => binding.action === action)).toEqual(
+      expected,
+    );
+  });
+
+  test("leaves every other action exactly where it was", () => {
+    const bindings = resolveKeyBindings({ "toggle-theme": [{ key: "x" }] });
+
+    expect(
+      bindings.filter((binding) => binding.action !== "toggle-theme"),
+    ).toEqual(
+      DEFAULT_KEY_BINDINGS.filter(
+        (binding) => binding.action !== "toggle-theme",
+      ),
+    );
+  });
+
+  test("keeps the overridden action at its original position", () => {
+    const bindings = resolveKeyBindings({
+      "focus-file-filter": [{ key: "x" }],
+    });
+    const actions = bindings.map((binding) => binding.action);
+
+    expect(actions.indexOf("focus-file-filter")).toBe(
+      DEFAULT_KEY_BINDINGS.map((binding) => binding.action).indexOf(
+        "focus-file-filter",
+      ),
+    );
+  });
+
+  test("resolves a custom chord through resolveKeymapAction", () => {
+    const bindings = resolveKeyBindings({ "toggle-theme": [{ key: "x" }] });
+
+    expect(
+      resolveKeymapAction(
+        key("x"),
+        { scope: "main", editable: false },
+        bindings,
+      ),
+    ).toBe("toggle-theme");
+    expect(
+      resolveKeymapAction(
+        key("t"),
+        { scope: "main", editable: false },
+        bindings,
+      ),
+    ).toBe(null);
+  });
+
+  test("a disabled action stops resolving", () => {
+    const bindings = resolveKeyBindings({ "toggle-theme": [] });
+
+    expect(
+      resolveKeymapAction(
+        key("t"),
+        { scope: "main", editable: false },
+        bindings,
+      ),
+    ).toBe(null);
+  });
+});
+
+type ConflictCase = {
+  name: string;
+  bindings: KeyBinding[];
+  expected: KeymapConflict[];
+};
+
+describe("findKeymapConflicts", () => {
+  test("finds nothing wrong with the shipped defaults", () => {
+    expect(findKeymapConflicts()).toEqual([]);
+  });
+
+  test.each<ConflictCase>([
+    {
+      name: "two actions on the same chord in the same scope collide",
+      bindings: [
+        { action: "toggle-theme", key: "x", scope: "main" },
+        { action: "layout-split", key: "x", scope: "main" },
+      ],
+      expected: [
+        {
+          scope: "main",
+          chord: { key: "x" },
+          actions: ["toggle-theme", "layout-split"],
+        },
+      ],
+    },
+    {
+      name: "a scoped binding collides with an unscoped one in that scope only",
+      bindings: [
+        { action: "toggle-theme", key: "x" },
+        { action: "layout-split", key: "x", scope: "main" },
+      ],
+      expected: [
+        {
+          scope: "main",
+          chord: { key: "x" },
+          actions: ["toggle-theme", "layout-split"],
+        },
+      ],
+    },
+    {
+      name: "two unscoped bindings collide in every scope",
+      bindings: [
+        { action: "toggle-theme", key: "x" },
+        { action: "layout-split", key: "x" },
+      ],
+      expected: [
+        {
+          scope: "global",
+          chord: { key: "x" },
+          actions: ["toggle-theme", "layout-split"],
+        },
+        {
+          scope: "sidebar",
+          chord: { key: "x" },
+          actions: ["toggle-theme", "layout-split"],
+        },
+        {
+          scope: "main",
+          chord: { key: "x" },
+          actions: ["toggle-theme", "layout-split"],
+        },
+        {
+          scope: "panel",
+          chord: { key: "x" },
+          actions: ["toggle-theme", "layout-split"],
+        },
+      ],
+    },
+    {
+      name: "different scopes never collide",
+      bindings: [
+        { action: "toggle-theme", key: "x", scope: "main" },
+        { action: "layout-split", key: "x", scope: "sidebar" },
+      ],
+      expected: [],
+    },
+    {
+      name: "a differing modifier is a different chord",
+      bindings: [
+        { action: "toggle-theme", key: "x", scope: "main" },
+        { action: "layout-split", key: "x", scope: "main", ctrl: true },
+      ],
+      expected: [],
+    },
+    {
+      name: "a differing g prefix is a different chord",
+      bindings: [
+        { action: "toggle-theme", key: "x", scope: "main" },
+        { action: "layout-split", key: "x", scope: "main", pendingG: true },
+      ],
+      expected: [],
+    },
+    {
+      name: "the same action listed twice is not a conflict",
+      bindings: [
+        { action: "toggle-theme", key: "x", scope: "main" },
+        { action: "toggle-theme", key: "x", scope: "main" },
+      ],
+      expected: [],
+    },
+    {
+      name: "differing guards still count as a conflict",
+      bindings: [
+        { action: "toggle-theme", key: "x", scope: "main" },
+        {
+          action: "layout-split",
+          key: "x",
+          scope: "main",
+          allowEditable: true,
+        },
+      ],
+      expected: [
+        {
+          scope: "main",
+          chord: { key: "x" },
+          actions: ["toggle-theme", "layout-split"],
+        },
+      ],
+    },
+  ])("$name", ({ bindings, expected }) => {
+    expect(findKeymapConflicts(bindings)).toEqual(expected);
+  });
+});
+
+type SanitizeCase = {
+  name: string;
+  raw: unknown;
+  expected: KeymapOverrides;
+};
+
+describe("sanitizeKeymapOverrides", () => {
+  test.each<SanitizeCase>([
+    { name: "null becomes an empty set", raw: null, expected: {} },
+    {
+      name: "a string becomes an empty set",
+      raw: "toggle-theme",
+      expected: {},
+    },
+    {
+      name: "an array becomes an empty set",
+      raw: [{ key: "x" }],
+      expected: {},
+    },
+    {
+      name: "an unknown action is dropped",
+      raw: { "not-an-action": [{ key: "x" }] },
+      expected: {},
+    },
+    {
+      name: "a non-array value is dropped",
+      raw: { "toggle-theme": { key: "x" } },
+      expected: {},
+    },
+    {
+      name: "an empty list survives because it means disabled",
+      raw: { "toggle-theme": [] },
+      expected: { "toggle-theme": [] },
+    },
+    {
+      name: "keys are lowercased and trimmed",
+      raw: { "toggle-theme": [{ key: "  X  " }] },
+      expected: { "toggle-theme": [{ key: "x" }] },
+    },
+    {
+      name: "modifiers are kept only when they are exactly true",
+      raw: {
+        "toggle-theme": [
+          { key: "x", ctrl: true, meta: "yes", alt: 1, shift: null },
+        ],
+      },
+      expected: { "toggle-theme": [{ key: "x", ctrl: true }] },
+    },
+    {
+      name: "the g prefix survives",
+      raw: { "toggle-theme": [{ key: "x", pendingG: true }] },
+      expected: { "toggle-theme": [{ key: "x", pendingG: true }] },
+    },
+    {
+      name: "a missing key drops that chord but keeps the others",
+      raw: { "toggle-theme": [{ ctrl: true }, { key: "x" }] },
+      expected: { "toggle-theme": [{ key: "x" }] },
+    },
+    {
+      name: "an empty key drops that chord",
+      raw: { "toggle-theme": [{ key: "   " }] },
+      expected: { "toggle-theme": [] },
+    },
+    {
+      name: "a 64 character key is accepted",
+      raw: { "toggle-theme": [{ key: "a".repeat(64) }] },
+      expected: { "toggle-theme": [{ key: "a".repeat(64) }] },
+    },
+    {
+      name: "a 65 character key is rejected",
+      raw: { "toggle-theme": [{ key: "a".repeat(65) }] },
+      expected: { "toggle-theme": [] },
+    },
+    {
+      name: "eight chords are kept",
+      raw: {
+        "toggle-theme": ["a", "b", "c", "d", "e", "f", "g", "h"].map((key) => ({
+          key,
+        })),
+      },
+      expected: {
+        "toggle-theme": ["a", "b", "c", "d", "e", "f", "g", "h"].map((key) => ({
+          key,
+        })),
+      },
+    },
+    {
+      name: "a ninth chord is cut",
+      raw: {
+        "toggle-theme": ["a", "b", "c", "d", "e", "f", "g", "h", "i"].map(
+          (key) => ({ key }),
+        ),
+      },
+      expected: {
+        "toggle-theme": ["a", "b", "c", "d", "e", "f", "g", "h"].map((key) => ({
+          key,
+        })),
+      },
+    },
+  ])("$name", ({ raw, expected }) => {
+    expect(sanitizeKeymapOverrides(raw)).toEqual(expected);
+  });
+
+  test("survives a round trip through JSON", () => {
+    const overrides: KeymapOverrides = {
+      "toggle-theme": [{ key: "x", ctrl: true }],
+      "layout-split": [],
+    };
+
+    expect(
+      sanitizeKeymapOverrides(JSON.parse(JSON.stringify(overrides))),
+    ).toEqual(overrides);
   });
 });

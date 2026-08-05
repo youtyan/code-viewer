@@ -16,6 +16,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { normalizeNewDirectoryName } from "../core/directory-name";
+import { formatErrorDetail } from "../core/error-detail";
 import {
   collectJournalLabels,
   isJournalTaskPriority,
@@ -256,7 +257,7 @@ Usage:
   code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json] [--bin git=<path>]
   code-viewer file <blame|history|show|diff> --path <p> [--ref <ref>] [...subcommand options] [--json] [--bin git=<path>]
   code-viewer skill install [--agent <list>] [--global]
-  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|docker|gh>=<path>]
+  code-viewer doctor [--cwd <path>] [--port <N>] [--json] [--bin <git|rg|docker|gh|tmux>=<path>]
   code-viewer agent-help
   code-viewer help
 
@@ -1232,6 +1233,7 @@ async function handleFiles(url: URL) {
 }
 
 async function handleGrep(url: URL) {
+  const responseGeneration = generation;
   const query = url.searchParams.get("q") || "";
   const ref = url.searchParams.get("ref") || "worktree";
   const max = normalizeGrepMax(url.searchParams.get("max"));
@@ -1242,6 +1244,7 @@ async function handleGrep(url: URL) {
   const excludeNames = scopeExcludeNamesFromQuery(url);
   const paths = url.searchParams.getAll("path");
   const regex = url.searchParams.get("regex") === "1";
+  const excludeTests = url.searchParams.get("exclude_tests") === "1";
   const result = await grepRepoAsync(
     currentSearchEnv(omitDirNames, excludeNames),
     {
@@ -1250,10 +1253,11 @@ async function handleGrep(url: URL) {
       paths,
       regex,
       max,
+      excludeTests,
     },
   );
   if (result.ok !== true) return text(result.error, result.status ?? 400);
-  return json(result.value);
+  return json({ ...result.value, generation: responseGeneration });
 }
 
 async function handleRefCommits(url: URL) {
@@ -2147,7 +2151,7 @@ function triggerUpdate(changedPaths?: string[]) {
   generation++;
   clearMutableCaches();
   const data =
-    changedPaths && changedPaths.length && changedPaths.length <= 50
+    changedPaths?.length && changedPaths.length <= 50
       ? JSON.stringify({ generation, paths: changedPaths })
       : "tick";
   sendSse("update", data);
@@ -2492,7 +2496,11 @@ async function handleMcp(req: Request): Promise<Response> {
     return json(parsed.response);
   }
   const dispatched = await dispatchJsonRpc(parsed.value, {
-    tools: defaultMcpTools({ cwd, omitDirNames: scopeOmitDirNames }),
+    tools: defaultMcpTools({
+      cwd,
+      omitDirNames: scopeOmitDirNames,
+      generation,
+    }),
     instructions: MCP_INSTRUCTIONS,
   });
   if (dispatched.kind === "notification") {
@@ -3207,19 +3215,22 @@ async function shutdown(exitCode = 0) {
   removeServerRegistry(cwd, process.pid);
   closeSseClients();
   try {
-    const { closeTmuxStreams } = await tmuxHandleModule;
-    closeTmuxStreams();
-  } catch (error) {
-    console.warn(`code-viewer tmux stream close skipped: ${String(error)}`);
-  }
-  try {
     const [{ closeShellStreams }, { closeAllShellSessions }] =
       await Promise.all([shellHandleModule, import("./shell/session")]);
     closeShellStreams();
     // ブラウザから開いたシェルはこのサーバの子。残したまま終わらない。
-    closeAllShellSessions();
+    const closeResult = await closeAllShellSessions();
+    if (closeResult.status === "error") {
+      exitCode = 1;
+      console.error(
+        `code-viewer shell close failed:\n${formatErrorDetail(closeResult.error)}`,
+      );
+    }
   } catch (error) {
-    console.warn(`code-viewer shell close skipped: ${String(error)}`);
+    exitCode = 1;
+    console.error(
+      `code-viewer shell close failed:\n${formatErrorDetail(error)}`,
+    );
   }
   try {
     const { stopAgentActivityWatch } = await import("./terminal/activity");

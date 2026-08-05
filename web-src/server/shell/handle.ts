@@ -12,11 +12,8 @@
 // るのに対し、こちらは PTY が吐いた分だけを順に流す。だから poll を持たず、
 // onData をそのまま SSE へ橋渡しする。
 
-import {
-  isShellSessionId,
-  MAX_SHELL_SESSIONS,
-  type ShellSessionId,
-} from "../../core/shell";
+import { formatErrorDetail } from "../../core/error-detail";
+import { isShellSessionId, type ShellSessionId } from "../../core/shell";
 import {
   dispatchRoutes,
   handleError,
@@ -155,12 +152,9 @@ async function handleCreate(req: Request, cwd: string): Promise<Response> {
   if (result.status === "unavailable") {
     return textError(result.reason, 501);
   }
-  if (result.status === "too-many") {
-    return textError(`too many shells (max ${MAX_SHELL_SESSIONS})`, 429);
-  }
   if (result.status === "error") {
-    console.error(`[code-viewer] shell spawn failed: ${result.message}`);
-    return textError("failed to open a shell", 500);
+    console.error("[code-viewer] shell spawn failed", result.error);
+    return textError(formatErrorDetail(result.error), 500);
   }
   return json({ session: result.session });
 }
@@ -195,8 +189,8 @@ async function handleKeys(req: Request): Promise<Response> {
   const result = writeToShell(parsed.id, data);
   if (result.status === "gone") return textError("shell is gone", 410);
   if (result.status === "error") {
-    console.error(`[code-viewer] shell write failed: ${result.message}`);
-    return textError("failed to send input", 500);
+    console.error("[code-viewer] shell write failed", result.error);
+    return textError(formatErrorDetail(result.error), 500);
   }
   return json({ ok: true });
 }
@@ -217,8 +211,8 @@ async function handleResize(req: Request): Promise<Response> {
   // 失敗を成功として返すと、呼び出し側が「このサイズで通った」と記録して
   // 二度と送り直さなくなる。表示は続けられるが、桁数はずれたままになる。
   if (result.status === "error") {
-    console.warn(`[code-viewer] shell resize failed: ${result.message}`);
-    return textError("failed to resize shell", 500);
+    console.error("[code-viewer] shell resize failed", result.error);
+    return textError(formatErrorDetail(result.error), 500);
   }
   return json({ ok: true });
 }
@@ -226,7 +220,12 @@ async function handleResize(req: Request): Promise<Response> {
 async function handleClose(req: Request): Promise<Response> {
   const parsed = await readShellBody<{ id?: unknown }>(req);
   if (parsed instanceof Response) return parsed;
-  return json({ closed: closeShellSession(parsed.id) });
+  const result = await closeShellSession(parsed.id);
+  if (result.status === "error") {
+    console.error("[code-viewer] shell close failed", result.error);
+    return textError(formatErrorDetail(result.error), 500);
+  }
+  return json({ closed: result.status === "ok" });
 }
 
 export function handleShellRoute(
