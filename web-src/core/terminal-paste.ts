@@ -100,18 +100,6 @@ export function isShiftEnter(event: {
   );
 }
 
-/** スマホの Ctrl ラッチと、その直後に入力された 1 文字を制御文字へ変える。 */
-export function controlSequenceForInput(input: string): string | null {
-  if (input.length !== 1) return null;
-  if (input === " ") return String.fromCharCode(0);
-  if (input === "?") return String.fromCharCode(127);
-  const upper = input.toUpperCase();
-  if (upper.length !== 1) return null;
-  const code = upper.charCodeAt(0);
-  if (code < 64 || code > 95) return null;
-  return String.fromCharCode(code & 31);
-}
-
 /** base64 の文字数から、デコード後のバイト数を出す。 */
 export function base64ByteLength(value: string): number {
   const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;

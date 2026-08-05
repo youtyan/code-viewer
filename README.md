@@ -145,8 +145,6 @@ Common options:
 - `--cwd <dir>` — repository to view (default: current working directory).
 - `--open` — open the printed URL in the default browser.
 - `--port <port>` — bind to a specific port (default: pick a free port).
-- `--public-origin <https-origin>` — accept one exact HTTPS origin from an
-  authenticated reverse proxy while keeping the server bound to localhost.
 - `--bin <name>=<absolute-path>` — override an external command path
   (`git`, `rg`, `docker`, `gh`, or `tmux`). The same values can be supplied through
   `CODE_VIEWER_BIN_GIT`, `CODE_VIEWER_BIN_RG`, `CODE_VIEWER_BIN_DOCKER`, and
@@ -174,30 +172,6 @@ Open **Settings & Help** from the header menu to change display options such
 as theme, layout, sidebar mode, font sizes, and UI language. The language
 setting translates the viewer chrome itself, including that page, settings labels,
 sidebars, history controls, datastore viewer, and annotation panel labels.
-
-### Remote terminal from a phone
-
-Run code-viewer on a fixed local port and name the exact public HTTPS origin:
-
-```sh
-code-viewer --port 64160 --public-origin https://terminal.example
-```
-
-Put an identity-aware HTTPS tunnel or reverse proxy in front of
-`http://127.0.0.1:64160`. The proxy must authenticate every path, preserve the
-public `Host` header, and support long-lived `text/event-stream` responses.
-The server remains localhost-only; `--public-origin` does not open a network
-port by itself. Requests for any other host or browser origin receive `403`.
-
-On screens up to 700px wide, the Terminal panel uses the full viewport. After
-selecting a terminal, the list collapses so the terminal gets the available
-space. The list button restores it. A fixed key row supplies Escape, Control,
-Tab, and arrow keys that software keyboards usually omit; Control stays armed
-for the next supported ASCII key.
-
-Do not put this application behind a public proxy without an authentication
-policy. Anyone who can reach the Terminal panel can type into the attached
-terminal and act with the permissions of the local user running code-viewer.
 
 ## Repository View
 

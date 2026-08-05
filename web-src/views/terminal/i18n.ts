@@ -69,10 +69,6 @@ export type TerminalText = {
   readOnlyTitle: string;
   writable: string;
   writableTitle: string;
-  showSessions: string;
-  hideSessions: string;
-  shortcutBar: string;
-  controlUnsupported: string;
   /** 上段の見出し。入力待ちと未読をまとめた区画。 */
   yourTurn: string;
   yourTurnHint: string;
@@ -194,10 +190,6 @@ const EN: TerminalText = {
   readOnlyTitle: "input is not sent",
   writable: "input on",
   writableTitle: "keystrokes are sent to the attached terminal",
-  showSessions: "show terminal list",
-  hideSessions: "hide terminal list",
-  shortcutBar: "terminal shortcut keys",
-  controlUnsupported: "Ctrl expects one ASCII letter or symbol.",
   yourTurn: "Your turn",
   yourTurnHint: "waiting for input, or finished and unread",
   yourTurnEmpty: "Nothing needs you right now.",
@@ -278,11 +270,6 @@ const JA: TerminalText = {
   readOnlyTitle: "キー入力を送りません",
   writable: "入力する",
   writableTitle: "キー入力を接続中のターミナルに送ります",
-  showSessions: "ターミナル一覧を表示",
-  hideSessions: "ターミナル一覧を隠す",
-  shortcutBar: "ターミナル補助キー",
-  controlUnsupported:
-    "Ctrl の後には半角英字または対応する記号を1文字入力してください。",
   yourTurn: "あなたの番",
   yourTurnHint: "入力待ちと、終わったのにまだ見ていないもの",
   yourTurnEmpty: "いま手を入れるものはありません。",

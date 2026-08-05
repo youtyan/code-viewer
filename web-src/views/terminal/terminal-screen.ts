@@ -28,7 +28,6 @@ import {
   type TerminalImagesResponse,
 } from "../../core/terminal-images";
 import {
-  controlSequenceForInput,
   isShiftEnter,
   type PasteImageResponse,
   SHIFT_ENTER_SEQUENCE,
@@ -40,8 +39,6 @@ import {
 } from "../../core/xterm-loader";
 import type { TerminalText } from "./i18n";
 import { openImageLightbox } from "./image-lightbox";
-
-const ESC = String.fromCharCode(27);
 
 /** シェルの scrollback 行数。 */
 const SHELL_SCROLLBACK = 5000;
@@ -128,7 +125,6 @@ export type TerminalScreenHandle = {
   refit(): void;
   focus(): void;
   setInputEnabled(enabled: boolean): void;
-  localize(): void;
   dispose(): void;
   /** 今映しているシェル。tmux へ「このペインを開いて」と頼む宛先になる。 */
   getAttached(): ShellSession | null;
@@ -153,10 +149,7 @@ export function createTerminalScreen(
   const screenEl = document.createElement("div");
   screenEl.className = "terminal-screen";
 
-  const shortcutBar = document.createElement("div");
-  shortcutBar.className = "terminal-shortcuts";
-  shortcutBar.role = "toolbar";
-  el.append(attachments, screenEl, shortcutBar);
+  el.append(attachments, screenEl);
 
   let term: XtermTerminal | null = null;
   let fitAddon: XtermFitAddon | null = null;
@@ -165,7 +158,6 @@ export function createTerminalScreen(
   let resizeObserver: ResizeObserver | null = null;
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
   let inputEnabled = true;
-  let controlArmed = false;
   let disposed = false;
   // attach の世代。読み込みを待つ間に別の対象へ切り替えられたら、後から
   // 返ってきた初期化で画面を作り直さない。
@@ -206,73 +198,10 @@ export function createTerminalScreen(
   /** 出力の走査で持ち越している末尾。 */
   let shellScanTail = "";
 
-  const shortcutDefinitions = [
-    { key: "escape", label: "Esc", aria: "Escape", sequence: ESC },
-    { key: "control", label: "Ctrl", aria: "Control", sequence: null },
-    { key: "tab", label: "Tab", aria: "Tab", sequence: "\t" },
-    { key: "up", label: "↑", aria: "Arrow up", sequence: `${ESC}[A` },
-    { key: "down", label: "↓", aria: "Arrow down", sequence: `${ESC}[B` },
-    { key: "left", label: "←", aria: "Arrow left", sequence: `${ESC}[D` },
-    { key: "right", label: "→", aria: "Arrow right", sequence: `${ESC}[C` },
-  ] as const;
-  const shortcutButtons = new Map<string, HTMLButtonElement>();
-
-  for (const shortcut of shortcutDefinitions) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "terminal-font-btn terminal-shortcut-btn";
-    button.dataset.key = shortcut.key;
-    button.textContent = shortcut.label;
-    button.setAttribute("aria-label", shortcut.aria);
-    button.addEventListener("pointerdown", (event) => event.preventDefault());
-    button.addEventListener("click", () => {
-      if (shortcut.key === "control") {
-        setControlArmed(!controlArmed);
-      } else if (shortcut.sequence !== null) {
-        setControlArmed(false);
-        enqueueInput(shortcut.sequence);
-      }
-      term?.focus();
-    });
-    shortcutButtons.set(shortcut.key, button);
-    shortcutBar.appendChild(button);
-  }
-  syncShortcutControls();
-
-  function setControlArmed(armed: boolean): void {
-    controlArmed = armed && inputEnabled && attached !== null && !disposed;
-    syncShortcutControls();
-  }
-
-  function syncShortcutControls(): void {
-    shortcutBar.setAttribute("aria-label", deps.getText().shortcutBar);
-    const disabled = !inputEnabled || attached === null || disposed;
-    for (const button of shortcutButtons.values()) button.disabled = disabled;
-    const control = shortcutButtons.get("control");
-    if (control) {
-      control.classList.toggle("active", controlArmed);
-      control.setAttribute("aria-pressed", String(controlArmed));
-    }
-  }
-
   function enqueueInput(data: string): void {
     if (!inputEnabled || !attached || disposed || data.length === 0) return;
     pendingInput += data;
     void flushInput();
-  }
-
-  function enqueueKeyboardInput(data: string): void {
-    if (!controlArmed) {
-      enqueueInput(data);
-      return;
-    }
-    const control = controlSequenceForInput(data);
-    if (control === null) {
-      deps.onStatus(deps.getText().controlUnsupported);
-      return;
-    }
-    setControlArmed(false);
-    enqueueInput(control);
   }
 
   /**
@@ -832,7 +761,7 @@ export function createTerminalScreen(
     (created.element?.querySelector(".xterm-screen") ?? screenEl).appendChild(
       inlineLayer,
     );
-    created.onData(enqueueKeyboardInput);
+    created.onData(enqueueInput);
     // Shift+Enter は「送信せずに改行」。xterm の既定では Enter と同じ CR に
     // なってしまい、書きかけのまま送信されるので、ここで横取りする。
     created.attachCustomKeyEventHandler((event) => {
@@ -842,7 +771,6 @@ export function createTerminalScreen(
       // (それが「Shift+Enter なのに送信される」の正体)。3 つとも握り潰し、
       // 送るのは keydown の 1 回だけにする。
       if (event.type === "keydown" && inputEnabled && attached) {
-        setControlArmed(false);
         enqueueInput(SHIFT_ENTER_SEQUENCE);
       }
       return false;
@@ -928,8 +856,6 @@ export function createTerminalScreen(
     // 同じ対象へ戻ってきたなら、前に見つけた画像を帯へ戻す。タブを行き来した
     // だけで消えると、パスが流れた後は二度と開けない。
     restoreRememberedImages(session);
-    setControlArmed(false);
-    syncShortcutControls();
     deps.onStatus(deps.getText().connecting);
 
     const created = await ensureTerminal(myGen);
@@ -968,8 +894,6 @@ export function createTerminalScreen(
     clearAttachments();
     closeSource();
     attached = null;
-    setControlArmed(false);
-    syncShortcutControls();
     pendingInput = "";
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = null;
@@ -992,11 +916,6 @@ export function createTerminalScreen(
     },
     setInputEnabled(enabled: boolean) {
       inputEnabled = enabled;
-      if (!enabled) setControlArmed(false);
-      syncShortcutControls();
-    },
-    localize() {
-      syncShortcutControls();
     },
     getAttached: () => attached,
     measure() {

@@ -95,7 +95,6 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   let fontLarger: HTMLButtonElement | null = null;
   let fontValue: HTMLElement | null = null;
   let inputToggle: HTMLButtonElement | null = null;
-  let listToggle: HTMLButtonElement | null = null;
   let statusEl: HTMLElement | null = null;
   let listEl: HTMLElement | null = null;
   let attached: ShellSession | null = null;
@@ -198,41 +197,11 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       : current.readOnlyTitle;
   }
 
-  function mobileListHidden(): boolean {
-    return (
-      getMount()?.classList.contains("terminal-mobile-list-hidden") ?? false
-    );
-  }
-
-  function syncListToggle(): void {
-    if (!listToggle) return;
-    const hidden = mobileListHidden();
-    const label = hidden ? text().showSessions : text().hideSessions;
-    listToggle.title = label;
-    listToggle.setAttribute("aria-label", label);
-    listToggle.setAttribute("aria-pressed", String(!hidden));
-  }
-
-  function setMobileListHidden(hidden: boolean): void {
-    const host = getMount();
-    if (!host) return;
-    host.classList.toggle("terminal-mobile-list-hidden", hidden);
-    syncListToggle();
-    screen?.refit();
-  }
-
-  function usesMobileTerminalLayout(): boolean {
-    return typeof window.matchMedia === "function"
-      ? window.matchMedia("(max-width: 700px)").matches
-      : false;
-  }
-
   function selectShell(session: ShellSession): void {
     attached = session;
     lastTargetId = session.id;
     board?.setSelected(session.id);
     deps.onTargetChange?.(session.id);
-    if (usesMobileTerminalLayout()) setMobileListHidden(true);
     // attach は xterm の読み込みを挟むので、完了を待たずに focus しても
     // ターミナルがまだ無い。待ってから当てる。待つ間に別の対象へ切り替え
     // られていたら、そちらの focus を横取りしない。
@@ -316,7 +285,6 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       if (attached && !findShell(attached.id)) {
         attached = null;
         screen?.detach();
-        setMobileListHidden(false);
         deps.onTargetChange?.(null);
         setStatus(text().shellClosed);
       }
@@ -557,15 +525,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       void loadLists(generation);
     });
 
-    listToggle = document.createElement("button");
-    listToggle.type = "button";
-    listToggle.className = "terminal-reload terminal-list-toggle";
-    listToggle.textContent = "☷";
-    listToggle.addEventListener("click", () => {
-      setMobileListHidden(!mobileListHidden());
-    });
-
-    actions.append(listToggle, fontGroup, inputToggle, reloadBtn);
+    actions.append(fontGroup, inputToggle, reloadBtn);
     header.append(actions);
 
     board = createSessionBoard({
@@ -643,7 +603,6 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     host.append(header, body);
     syncInputToggle();
     syncFontSize();
-    syncListToggle();
   }
 
   function isOpen(): boolean {
@@ -684,8 +643,6 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       } else {
         setStatus(text().shellClosed);
       }
-    } else if (usesMobileTerminalLayout()) {
-      setMobileListHidden(false);
     }
   }
 
@@ -712,7 +669,6 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     if (attached) lastTargetId = attached.id;
     screen?.detach();
     attached = null;
-    setMobileListHidden(false);
   }
 
   function localize(): void {
@@ -724,8 +680,6 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     }
     syncInputToggle();
     syncFontSize();
-    syncListToggle();
-    screen?.localize();
     board.localize();
     renderLists();
   }

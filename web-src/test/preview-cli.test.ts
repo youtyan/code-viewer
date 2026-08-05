@@ -297,14 +297,10 @@ afterEach(() => {
   }
 });
 
-async function startTestPreview(
-  root: string,
-  gitCommand: string,
-  extraArgs: string[] = [],
-) {
+async function startTestPreview(root: string, gitCommand: string) {
   const proc = spawn(
     process.execPath,
-    [CLI_BUNDLE, "--port", "0", "--cwd", root, ...extraArgs],
+    [CLI_BUNDLE, "--port", "0", "--cwd", root],
     {
       cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
       env: { ...process.env, CODE_VIEWER_BIN_GIT: gitCommand },
@@ -404,30 +400,18 @@ describe("preview CLI", () => {
     },
   );
 
-  test.each([
-    {
-      name: "accepts the configured public host and origin",
-      host: "terminal.example",
-      origin: "https://terminal.example",
-      expectedStatus: 200,
-    },
-    {
-      name: "rejects a different public host",
-      host: "other.example",
-      origin: "https://terminal.example",
-      expectedStatus: 403,
-    },
-  ])("--public-origin $name", async ({ host, origin, expectedStatus }) => {
-    const root = mkdtempSync(join(tmpdir(), "code-viewer-public-origin-"));
+  test("rejects requests with a non-loopback Host", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-request-host-"));
     tmpRoots.push(root);
-    const preview = await startTestPreview(root, makeFakeMissingGitCommand(), [
-      "--public-origin",
-      "https://terminal.example",
-    ]);
+    const preview = await startTestPreview(root, makeFakeMissingGitCommand());
 
     try {
-      const response = await requestWithHost(preview.url, host, origin);
-      expect(response.status).toBe(expectedStatus);
+      const response = await requestWithHost(
+        preview.url,
+        "example.invalid",
+        "https://example.invalid",
+      );
+      expect(response.status).toBe(403);
       expect(response.body.length > 0).toBe(true);
     } finally {
       await stopTestPreview(preview.proc, preview.exited);
@@ -1138,7 +1122,6 @@ describe("preview CLI", () => {
     expect(stdout).toMatch(
       /code-viewer status \[--cwd <repo>\] \[--bin git=<path>\] \[--ref <ref>\] \[--limit <N>\] \[--json\]/,
     );
-    expect(stdout).toMatch(/--public-origin <https-origin>/);
     expect(stdout).toMatch(
       /code-viewer annotate <start\|add\|add-db\|rename\|edit\|move\|list\|delete\|clear>/,
     );

@@ -6,7 +6,6 @@
 import { describe, expect, test } from "vitest";
 import {
   base64ByteLength,
-  controlSequenceForInput,
   isShiftEnter,
   looksLikeBase64,
   MAX_PASTE_BODY_BYTES,
@@ -67,30 +66,6 @@ describe("SHIFT_ENTER_SEQUENCE", () => {
   test("CR を含まない", () => {
     // CR が混ざると受け側が「送信」と解釈する。書きかけのまま送られてしまう。
     expect(SHIFT_ENTER_SEQUENCE).not.toContain(String.fromCharCode(13));
-  });
-});
-
-describe("controlSequenceForInput", () => {
-  test.each([
-    { name: "lowercase letter", input: "c", expectedCode: 3 },
-    { name: "uppercase letter", input: "Z", expectedCode: 26 },
-    { name: "at sign", input: "@", expectedCode: 0 },
-    { name: "opening bracket", input: "[", expectedCode: 27 },
-    { name: "question mark", input: "?", expectedCode: 127 },
-    { name: "space", input: " ", expectedCode: 0 },
-  ])("maps $name to its control byte", ({ input, expectedCode }) => {
-    expect(controlSequenceForInput(input)).toBe(
-      String.fromCharCode(expectedCode),
-    );
-  });
-
-  test.each([
-    { name: "empty input", input: "" },
-    { name: "multiple characters", input: "ab" },
-    { name: "non-ASCII letter", input: "あ" },
-    { name: "unsupported punctuation", input: "!" },
-  ])("rejects $name", ({ input }) => {
-    expect(controlSequenceForInput(input)).toBeNull();
   });
 });
 

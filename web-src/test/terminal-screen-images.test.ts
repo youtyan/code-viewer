@@ -40,6 +40,7 @@ type FakeTerminalState = {
   /** 画面に見えている行。production はここを読んでパスの位置を決める。 */
   lines: string[];
   cursorY: number;
+  inputHandler(data: string): void;
 };
 const FAKE_STATE_KEY = "__terminalScreenFakeState";
 
@@ -66,6 +67,7 @@ vi.mock("../core/xterm-loader", () => {
   const state: FakeTerminalState = {
     lines: [],
     cursorY: 0,
+    inputHandler: () => undefined,
   };
   (globalThis as Record<string, unknown>).__terminalScreenFakeState = state;
   class FakeTerminal {
@@ -128,7 +130,10 @@ vi.mock("../core/xterm-loader", () => {
     reset = noop;
     dispose = noop;
     loadAddon = noop;
-    onData = disposable;
+    onData = (handler: (data: string) => void) => {
+      state.inputHandler = handler;
+      return disposable();
+    };
     onResize = disposable;
     attachCustomKeyEventHandler = noop;
     attachCustomWheelEventHandler = noop;
@@ -479,43 +484,11 @@ describe("画面に出た画像パス", () => {
   });
 });
 
-describe("スマホの端末補助キー", () => {
-  test("接続前は入力を送れない", () => {
-    const buttons = handle.el.querySelectorAll<HTMLButtonElement>(
-      ".terminal-shortcut-btn",
-    );
-
-    expect(buttons.length).toBe(7);
-    expect([...buttons].every((button) => button.disabled)).toBe(true);
-  });
-
-  test.each([
-    { name: "Escape", key: "escape", expected: String.fromCharCode(27) },
-    { name: "Tab", key: "tab", expected: "\t" },
-    { name: "up arrow", key: "up", expected: `${String.fromCharCode(27)}[A` },
-    {
-      name: "down arrow",
-      key: "down",
-      expected: `${String.fromCharCode(27)}[B`,
-    },
-    {
-      name: "left arrow",
-      key: "left",
-      expected: `${String.fromCharCode(27)}[D`,
-    },
-    {
-      name: "right arrow",
-      key: "right",
-      expected: `${String.fromCharCode(27)}[C`,
-    },
-  ])("$name sends the terminal sequence", async ({ key, expected }) => {
+describe("ターミナル入力", () => {
+  test("xterm の入力を接続中のシェルへ送る", async () => {
     await attachShell(SHELL);
-    const button = handle.el.querySelector<HTMLButtonElement>(
-      `.terminal-shortcut-btn[data-key="${key}"]`,
-    );
-    if (!button) throw new Error(`shortcut button is missing: ${key}`);
 
-    button.click();
+    fakeState().inputHandler("ls\n");
     await flush();
 
     expect(requestedUrls[requestedUrls.length - 1]).toBe("/_shell/keys");
@@ -523,39 +496,19 @@ describe("スマホの端末補助キー", () => {
       JSON.parse(requestedBodies[requestedBodies.length - 1] ?? "null"),
     ).toEqual({
       id: "shell-abc123",
-      data: expected,
+      data: "ls\n",
     });
   });
 
-  test("送信失敗では HTTP 状態とレスポンス本文をすべて表示する", async () => {
+  test("入力の送信失敗では HTTP 状態とレスポンス本文をすべて表示する", async () => {
     await attachShell(SHELL);
     failingUrl = "/_shell/keys";
-    const button = handle.el.querySelector<HTMLButtonElement>(
-      '.terminal-shortcut-btn[data-key="escape"]',
-    );
-    if (!button) throw new Error("escape shortcut button is missing");
 
-    button.click();
+    fakeState().inputHandler("x");
     await flush();
 
     expect(statusMessages[statusMessages.length - 1]).toBe(
       'Failed to send input. (HTTP 503 Service Unavailable): {"errors":[{"code":"E1"},{"code":"E2"}]}',
     );
-  });
-
-  test("Ctrl is a stable one-shot toggle", async () => {
-    await attachShell(SHELL);
-    const button = handle.el.querySelector<HTMLButtonElement>(
-      '.terminal-shortcut-btn[data-key="control"]',
-    );
-    if (!button) throw new Error("control shortcut button is missing");
-
-    button.click();
-    expect(button.getAttribute("aria-pressed")).toBe("true");
-    expect(button.classList.contains("active")).toBe(true);
-
-    button.click();
-    expect(button.getAttribute("aria-pressed")).toBe("false");
-    expect(button.classList.contains("active")).toBe(false);
   });
 });

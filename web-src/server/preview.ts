@@ -110,8 +110,6 @@ import {
 } from "./range";
 import { type FileMetadata, rawFileHeaders } from "./raw-file-headers";
 import {
-  type PublicOrigin,
-  parsePublicOrigin,
   requestAllowed as requestAllowedForOrigin,
   sideEffectRequestAllowed as sideEffectRequestAllowedForOrigin,
 } from "./request-origin";
@@ -202,7 +200,6 @@ let cwd = process.cwd();
 let cliArgs = DEFAULT_ARGS;
 let listenPort = 0;
 let openAfterStart = false;
-let publicOrigin: PublicOrigin | null = null;
 const commandOverrides: ExternalCommandOverride[] = [];
 let cwdWasExplicit = false;
 let cwdHasGitRepository = false;
@@ -248,7 +245,7 @@ function parseCli() {
       console.log(`code-viewer ${VERSION}
 
 Usage:
-  code-viewer [--cwd <repo>] [--port <port>] [--public-origin <https-origin>] [--open] [--bin <name>=<path>] [git-diff-args...]
+  code-viewer [--cwd <repo>] [--port <port>] [--open] [--bin <name>=<path>] [git-diff-args...]
   code-viewer status [--cwd <repo>] [--bin git=<path>] [--ref <ref>] [--limit <N>] [--json]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
   code-viewer journal <list|add|edit|tasks|task-add|task-update|task-next|github-issues|task-link-issue|task-claim|task-done|task-delete> [options]
@@ -267,7 +264,6 @@ Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search
 Examples:
   code-viewer --open
   code-viewer --cwd /path/to/repo --open
-  code-viewer --port 64160 --public-origin https://terminal.example
   code-viewer HEAD~1 HEAD
   code-viewer --staged
   code-viewer status --json
@@ -283,9 +279,6 @@ Examples:
   code-viewer file show --path src/sample.ts --start 1 --end 40 --json
   code-viewer doctor --json
 
-Remote access:
-  --public-origin <https-origin> accepts one exact HTTPS origin through an
-  authenticated reverse proxy. The server still listens on 127.0.0.1.
 `);
       process.exit(0);
     } else if (arg === "--version" || arg === "-v") {
@@ -312,18 +305,6 @@ Remote access:
         process.exit(1);
       }
       listenPort = parsed;
-    } else if (arg === "--public-origin") {
-      const next = process.argv[++i];
-      if (!next) {
-        console.error("--public-origin requires a value");
-        process.exit(1);
-      }
-      const parsed = parsePublicOrigin(next);
-      if (parsed.ok === false) {
-        console.error(parsed.error);
-        process.exit(1);
-      }
-      publicOrigin = parsed.value;
     } else if (arg === "--open") {
       openAfterStart = true;
     } else if (arg === "--bin") {
@@ -467,11 +448,11 @@ function text(body: string, status = 200) {
 }
 
 function requestAllowed(req: Request): boolean {
-  return requestAllowedForOrigin(req, publicOrigin);
+  return requestAllowedForOrigin(req);
 }
 
 function sideEffectRequestAllowed(req: Request): boolean {
-  return sideEffectRequestAllowedForOrigin(req, publicOrigin);
+  return sideEffectRequestAllowedForOrigin(req);
 }
 
 function staticFile(pathname: string): Response | null {
@@ -3351,7 +3332,4 @@ void import("./terminal/activity").then(({ startAgentActivityWatch }) =>
 );
 
 console.log(`GDP_LISTEN_URL=http://127.0.0.1:${server.port}/`);
-if (publicOrigin) {
-  console.log(`code-viewer public origin ${publicOrigin.origin}`);
-}
 console.log(`git-diff-preview serving ${cwd}`);
