@@ -195,23 +195,23 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "The Terminal item in the header menu opens a drawer with a real shell in it. It is an ordinary login shell running on a PTY and drawn with xterm.js, so anything you would run in a terminal works here — including tmux. Run tmux inside it and it behaves exactly as it does in any other terminal, because the drawer only resizes the PTY and whatever runs in it follows on its own.",
+                text: "The Terminal item in the header menu opens a bottom panel with a real shell in it. It is an ordinary login shell running on a PTY and drawn with xterm.js, so anything you would run in a terminal works here — including tmux. Run tmux inside it and it behaves exactly as it does in any other terminal, because the panel only resizes the PTY and whatever runs in it follows on its own.",
               },
               {
                 kind: "paragraph",
-                text: "Typing goes to that shell, so you can answer a prompt without switching to the terminal. The toggle in the drawer header turns input off when you only want to watch. The shell on screen is part of the URL (?terminal=shell-ab12cd), so a reload comes back to it. Shells live as long as the server does; typing exit ends one, and so does the × on its row.",
+                text: "Typing goes to that shell, so you can answer a prompt without switching to the terminal. The toggle in the panel header turns input off when you only want to watch. The shell on screen is part of the URL (?terminal=shell-ab12cd), so a reload comes back to it. Shells live as long as the server does; typing exit ends one, and so does the × on its row.",
               },
               {
                 kind: "paragraph",
-                text: "The left side is a two-tier tree. The top tier is the shells this drawer opened: a shell running tmux carries a terminal icon and its session name, and that session's windows and panes hang underneath it. The bottom tier is the tmux sessions no shell has opened yet. Each pane is labelled with the title tmux shows for it — a coding agent running in a pane usually puts what it is doing there, so the tree alone tells you which pane is busy.",
+                text: "The left side starts with a Your turn section for terminals that are waiting for input or finished but unread. Below it, you can scope the session list to this repository or all tmux sessions, filter by state, and search by task, place, or id. Its two-tier tree puts shells opened by this panel at the top: a shell running tmux carries a terminal icon and its session name, and that session's windows and panes hang underneath it. The bottom tier is the tmux sessions no shell has opened yet. Each pane is labelled with the title tmux shows for it — a coding agent running in a pane usually puts what it is doing there, so the tree alone tells you which pane is busy.",
               },
               {
                 kind: "paragraph",
-                text: "Click a pane and the drawer takes you to it. If a shell already has that session open, it switches to that shell and makes the pane current; otherwise a shell is opened and attached for you. A session moves up to the top tier the moment a shell opens it and drops back down when that shell closes, so you end up with one shell per tmux session rather than one per pane. Powerline separators and file icons render when a Nerd Font is installed on the machine running the browser; no font ships with the package. The tree needs tmux on PATH — without it the drawer says so, and shells still work. Opening shells needs the optional @lydell/node-pty package.",
+                text: "Click a pane and the panel takes you to it. If a shell already has that session open, it switches to that shell and makes the pane current; otherwise a shell is opened and attached for you. A session moves up to the top tier the moment a shell opens it and drops back down when that shell closes, so you end up with one shell per tmux session rather than one per pane. Powerline separators and file icons render when a Nerd Font is installed on the machine running the browser; no font ships with the package. The tree needs tmux on PATH — without it the panel says so, and shells still work. Opening shells needs the optional @lydell/node-pty package.",
               },
               {
                 kind: "paragraph",
-                text: "One tmux caveat worth knowing: a tmux window can only have one size, so when the same session is attached from both this drawer and another terminal, they share it. With tmux's default window-size latest the window snaps to whichever terminal you touched last, and the smaller one gets its right and bottom edges cut off. Setting window-size smallest makes every attached terminal show the whole window, at the cost of some empty space in the larger one.",
+                text: "One tmux caveat worth knowing: a tmux window can only have one size, so when the same session is attached from both this panel and another terminal, they share it. With tmux's default window-size latest the window snaps to whichever terminal you touched last, and the smaller one gets its right and bottom edges cut off. Setting window-size smallest makes every attached terminal show the whole window, at the cost of some empty space in the larger one.",
               },
             ],
           },
@@ -259,7 +259,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 rows: [
                   [
                     "settings.json",
-                    "Settings — diff layout, theme, language, sidebar/history widths, font sizes, the terminal drawer's fit-pane toggle, syntax highlight, ignore-whitespace, hide-tests, scope overrides (omitted dirs / excluded names), upload toggle, annotation panel open/width/follow/mute/rate, and the last viewed diff range.",
+                    "Settings — diff layout, theme, language, sidebar/history widths, font sizes, syntax highlight, ignore-whitespace, hide-tests, scope overrides (omitted dirs / excluded names), upload toggle, annotation panel open/width/follow/mute/rate, and the last viewed diff range.",
                   ],
                   [
                     "view-state.json",
@@ -952,15 +952,15 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "ヘッダメニューの Terminal は、シェルが動くドロワーを開きます。中身は PTY 上のふつうのログインシェルを xterm.js で描いたものなので、ターミナルでできることはそのままできます。tmux もそのひとつで、この中で tmux を起動すれば、他のターミナルで使うのと同じように動きます。ドロワーがやるのは PTY のリサイズだけで、中で動いているものはそれに自分で追従します。",
+                text: "ヘッダメニューの Terminal は、シェルが動く下パネルを開きます。中身は PTY 上のふつうのログインシェルを xterm.js で描いたものなので、ターミナルでできることはそのままできます。tmux もそのひとつで、この中で tmux を起動すれば、他のターミナルで使うのと同じように動きます。パネルがやるのは PTY のリサイズだけで、中で動いているものはそれに自分で追従します。",
               },
               {
                 kind: "paragraph",
-                text: "打ったキーはそのシェルに届くので、ターミナルに切り替えずに返事ができます。見るだけにしたいときは、ドロワー右上のトグルで入力を切ってください。表示中のシェルは URL（?terminal=shell-ab12cd）に載るので、リロードしても同じシェルに戻ります。シェルはサーバが動いている間だけ生き、exit と打てば閉じます（行の × でも同じです）。",
+                text: "打ったキーはそのシェルに届くので、ターミナルに切り替えずに返事ができます。見るだけにしたいときは、パネル右上のトグルで入力を切ってください。表示中のシェルは URL（?terminal=shell-ab12cd）に載るので、リロードしても同じシェルに戻ります。シェルはサーバが動いている間だけ生き、exit と打てば閉じます（行の × でも同じです）。",
               },
               {
                 kind: "paragraph",
-                text: "左側は 2 段のツリーです。上段はこのドロワーが開いたシェルで、中で tmux が動いていれば端末の印とセッション名が付き、そのセッションのウィンドウとペインがその下にぶら下がります。下段は、まだどのシェルも開いていない tmux セッションです。ペインには tmux 側のタイトルが付きます。ペインで動いているコーディングエージェントは作業内容をタイトルに出すので、ツリーを見るだけでどのペインが動いているか分かります。",
+                text: "左側の先頭には、入力待ちと、終わったのにまだ見ていないターミナルを集める「あなたの番」があります。その下の一覧は、このリポジトリだけ、またはすべての tmux セッションに範囲を切り替え、状態で絞り込み、作業内容・場所・宛先で検索できます。2 段のツリーの上段はこのパネルが開いたシェルで、中で tmux が動いていれば端末の印とセッション名が付き、そのセッションのウィンドウとペインがその下にぶら下がります。下段は、まだどのシェルも開いていない tmux セッションです。ペインには tmux 側のタイトルが付きます。ペインで動いているコーディングエージェントは作業内容をタイトルに出すので、ツリーを見るだけでどのペインが動いているか分かります。",
               },
               {
                 kind: "paragraph",
@@ -968,7 +968,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "tmux の性質でひとつ知っておくとよいこと。tmux のウィンドウは寸法を 1 つしか持てないので、同じセッションをこのドロワーと別のターミナルの両方から開くと、寸法を共有します。tmux の既定（window-size latest）では最後に操作した側の寸法に合うため、小さいほうの端末では右と下が見切れます。window-size smallest にすると、どの端末でもウィンドウ全体が見えるようになります（大きいほうの端末には余白が出ます）。",
+                text: "tmux の性質でひとつ知っておくとよいこと。tmux のウィンドウは寸法を 1 つしか持てないので、同じセッションをこのパネルと別のターミナルの両方から開くと、寸法を共有します。tmux の既定（window-size latest）では最後に操作した側の寸法に合うため、小さいほうの端末では右と下が見切れます。window-size smallest にすると、どの端末でもウィンドウ全体が見えるようになります（大きいほうの端末には余白が出ます）。",
               },
             ],
           },
@@ -1016,7 +1016,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "settings.json",
-                    "設定 — diff レイアウト、テーマ、言語、サイドバー/履歴幅、フォントサイズ、ターミナルのペイン合わせトグル、シンタックスハイライト、whitespace 無視、テスト非表示、scope 上書き（除外ディレクトリ / 除外名）、アップロード許可、注釈パネルの開閉/幅/follow/ミュート/再生速度、最後に表示した diff 範囲を保存します。",
+                    "設定 — diff レイアウト、テーマ、言語、サイドバー/履歴幅、フォントサイズ、シンタックスハイライト、whitespace 無視、テスト非表示、scope 上書き（除外ディレクトリ / 除外名）、アップロード許可、注釈パネルの開閉/幅/follow/ミュート/再生速度、最後に表示した diff 範囲を保存します。",
                   ],
                   [
                     "view-state.json",

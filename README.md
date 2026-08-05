@@ -52,31 +52,34 @@ Requires Node.js 20 or newer. Development uses
   validator and a JSON⇄YAML converter). Each tool keeps its own draft in
   `.code-viewer/tools.json`, and the drawer width is draggable from its left
   edge.
-- Run a real shell in the browser with the Terminal drawer (the `Terminal` item
+- Run a real shell in the browser with the Terminal panel (the `Terminal` item
   in the header menu, or `?terminal=<shell>` on any URL). It is an ordinary
   login shell on a PTY, rendered with xterm.js, so `tmux` inside it behaves
-  exactly as it does in any other terminal — the drawer resizes the PTY and
-  whatever runs in it follows on its own. The toggle in the drawer header turns
+  exactly as it does in any other terminal — the panel resizes the PTY and
+  whatever runs in it follows on its own. The toggle in the panel header turns
   input off when you only want to watch. Typing `exit` closes the shell, just
   like any other terminal.
-- The left side of the drawer is a two-tier tree. The top tier is the shells
-  this drawer opened; a shell running tmux carries a terminal icon and its
+- The left side of the panel starts with a **Your turn** section for terminals
+  that are waiting for input or finished but unread. Below it, the session list
+  can be scoped to this repository or all tmux sessions, filtered by state, and
+  searched by task, place, or id. Its two-tier tree puts shells opened by this
+  panel at the top; a shell running tmux carries a terminal icon and its
   session name, and that session's windows and panes hang underneath it. The
   bottom tier is the tmux sessions no shell has opened yet. Each pane is
   labelled with the title tmux shows for it — a coding agent usually puts what
   it is doing there, so the tree alone tells you which pane is busy.
-- Click a pane and the drawer takes you to it. If a shell already has that
+- Click a pane and the panel takes you to it. If a shell already has that
   session open, it switches to that shell and makes the pane current; otherwise
   a shell is opened and attached for you. A session moves up to the top tier the
   moment a shell opens it and drops back down when that shell closes, so you end
   up with one shell per tmux session rather than one per pane. Powerline
-  separators and file icons render when a Nerd Font is installed — the drawer
+  separators and file icons render when a Nerd Font is installed — the panel
   asks for the common Nerd Font families before falling back to the usual
   monospace stack, so no font ships with the package. The tree needs `tmux` on
   `PATH`; it says so when it is missing, and shells still work without it.
   Opening shells needs the optional `@lydell/node-pty` package.
 - One tmux caveat worth knowing: a tmux window can only have one size, so when
-  the same session is attached from both this drawer and another terminal, they
+  the same session is attached from both this panel and another terminal, they
   share it. With tmux's default `window-size latest` the window snaps to
   whichever terminal you touched last, and the smaller one gets its right and
   bottom edges cut off. `set -g window-size smallest` makes every attached
