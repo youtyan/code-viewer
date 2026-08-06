@@ -28,6 +28,7 @@ import {
 } from "../../core/source-meta";
 import {
   appendMediaEmbed,
+  renderDelimitedPreview,
   renderHtmlPreviewFrame,
   renderUnsupportedPreview,
 } from "../source-preview-elements";
@@ -873,6 +874,8 @@ export function createS3Explorer(
         data.text,
         "s3-html-preview",
       );
+    } else if (previewKind === "csv" || previewKind === "tsv") {
+      body = renderDelimitedPreview(data.text, previewKind);
     } else if (previewKind === "markdown") {
       body = await renderMarkdownPreview(
         data.text,

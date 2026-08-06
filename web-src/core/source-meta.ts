@@ -17,7 +17,7 @@ export function normalizeSourceShikiLang(lang: string | null): string | null {
 }
 
 export function isPreviewableSource(path: string): boolean {
-  return /\.(md|markdown|mdown|mkdn|mdx|html|htm)$/i.test(path);
+  return /\.(md|markdown|mdown|mkdn|mdx|html|htm|csv|tsv)$/i.test(path);
 }
 
 export function sourceInternalPathKind(
@@ -31,9 +31,13 @@ export function sourceInternalPathKind(
   return null;
 }
 
-export function sourcePreviewKind(path: string): "markdown" | "html" | null {
+export function sourcePreviewKind(
+  path: string,
+): "markdown" | "html" | "csv" | "tsv" | null {
   if (/\.(md|markdown|mdown|mkdn|mdx)$/i.test(path)) return "markdown";
   if (/\.(html|htm)$/i.test(path)) return "html";
+  if (/\.csv$/i.test(path)) return "csv";
+  if (/\.tsv$/i.test(path)) return "tsv";
   return null;
 }
 

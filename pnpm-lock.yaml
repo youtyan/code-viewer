@@ -27,6 +27,9 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
+      '@types/d3-dsv':
+        specifier: 3.0.7
+        version: 3.0.7
       '@types/markdown-it':
         specifier: 14.1.2
         version: 14.1.2
@@ -39,6 +42,9 @@ importers:
       '@xterm/xterm':
         specifier: ^6.0.0
         version: 6.0.0
+      d3-dsv:
+        specifier: 3.0.1
+        version: 3.0.1
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1

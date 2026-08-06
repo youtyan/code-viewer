@@ -80,6 +80,7 @@ function createSourceViewForCursorTest(
       /* noop */
     },
     isPaletteOpen: () => false,
+    getLanguage: () => "en",
     ...overrides,
   });
 }
@@ -397,6 +398,181 @@ describe("renderStandaloneSource idempotency", () => {
       document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
         .sourceState,
     ).toBe("done");
+  });
+
+  test.each([
+    {
+      name: "CSV",
+      path: "data/sample.csv",
+      body: 'name,note\nalpha,"one, two"\n',
+      expectedCells: ["alpha", "one, two"],
+    },
+    {
+      name: "TSV",
+      path: "data/sample.tsv",
+      body: 'name\tnote\nalpha\t"one\ttwo"\n',
+      expectedCells: ["alpha", "one\ttwo"],
+    },
+  ])("a $name target renders a table in the active Preview tab", async ({
+    path,
+    body,
+    expectedCells,
+  }) => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async () =>
+        new Response(body, {
+          status: 200,
+        })) as typeof fetch,
+    });
+    const route = {
+      ...blobRoute(path),
+      preview: true as const,
+    };
+    let markdownRenderCalls = 0;
+    const view = createSourceViewForCursorTest(route, {
+      STATE: {
+        route,
+        from: "HEAD",
+        to: "worktree",
+        syntaxHighlight: true,
+      },
+      loadRawFileInfo: async () => ({ size: body.length }),
+      renderMarkdownPreview: async () => {
+        markdownRenderCalls++;
+        return document.createElement("div");
+      },
+    });
+
+    await view.renderStandaloneSource({
+      path,
+      ref: "worktree",
+    });
+
+    expect(
+      Array.from(
+        document.querySelectorAll<HTMLButtonElement>(
+          ".gdp-source-tabs button[data-source-tab]",
+        ),
+      ).map((button) => button.textContent),
+    ).toEqual(["Preview", "Code", "Blame", "History"]);
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        ".gdp-source-tabs button.active",
+      )?.textContent,
+    ).toBe("Preview");
+    expect(
+      Array.from(
+        document.querySelectorAll(".gdp-csv-table tbody td"),
+        (cell) => cell.textContent,
+      ),
+    ).toEqual(expectedCells);
+    expect(
+      document.querySelector<HTMLElement>(
+        '.gdp-source-table[data-source-pane="code"]',
+      )?.hidden,
+    ).toBe(true);
+    expect(markdownRenderCalls).toBe(0);
+  });
+});
+
+describe("preferred source tab across files", () => {
+  test("restores Preview after temporarily showing Code for a non-previewable file", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    installRawFileFetchMock();
+    const state: SourceViewDeps["STATE"] = {
+      route: blobRoute("first.md"),
+      from: "HEAD",
+      to: "worktree",
+      syntaxHighlight: false,
+    };
+    const view = createSourceViewForCursorTest(state.route, {
+      STATE: state,
+      setRoute(nextRoute) {
+        state.route = nextRoute;
+      },
+    });
+
+    await view.renderStandaloneSource({ path: "first.md", ref: "worktree" });
+    document
+      .querySelector<HTMLButtonElement>('[data-source-tab="preview"]')
+      ?.click();
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        ".gdp-source-tabs button.active",
+      )?.dataset.sourceTab,
+    ).toBe("preview");
+
+    state.route = blobRoute("plain.ts");
+    await view.renderStandaloneSource({ path: "plain.ts", ref: "worktree" });
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        ".gdp-source-tabs button.active",
+      )?.dataset.sourceTab,
+    ).toBe("code");
+
+    state.route = blobRoute("next.md");
+    await view.renderStandaloneSource({ path: "next.md", ref: "worktree" });
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        ".gdp-source-tabs button.active",
+      )?.dataset.sourceTab,
+    ).toBe("preview");
+
+    state.route = blobRoute("another.md");
+    await view.renderStandaloneSource({ path: "another.md", ref: "worktree" });
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        ".gdp-source-tabs button.active",
+      )?.dataset.sourceTab,
+    ).toBe("preview");
+  });
+
+  test("keeps Code selected when the next file also supports Preview", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    installRawFileFetchMock();
+    const state: SourceViewDeps["STATE"] = {
+      route: {
+        screen: "file",
+        path: "first.md",
+        ref: "worktree",
+        view: "blob",
+        preview: true,
+        range: { from: "HEAD", to: "worktree" },
+      },
+      from: "HEAD",
+      to: "worktree",
+      syntaxHighlight: false,
+    };
+    const view = createSourceViewForCursorTest(state.route, {
+      STATE: state,
+      setRoute(nextRoute) {
+        state.route = nextRoute;
+      },
+    });
+
+    await view.renderStandaloneSource({ path: "first.md", ref: "worktree" });
+    document
+      .querySelector<HTMLButtonElement>('[data-source-tab="code"]')
+      ?.click();
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        ".gdp-source-tabs button.active",
+      )?.dataset.sourceTab,
+    ).toBe("code");
+
+    state.route = blobRoute("plain.ts");
+    await view.renderStandaloneSource({ path: "plain.ts", ref: "worktree" });
+
+    state.route = blobRoute("next.md");
+    await view.renderStandaloneSource({ path: "next.md", ref: "worktree" });
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        ".gdp-source-tabs button.active",
+      )?.dataset.sourceTab,
+    ).toBe("code");
   });
 });
 

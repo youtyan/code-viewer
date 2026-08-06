@@ -23,7 +23,11 @@ const FOLDERS: Record<string, FolderLevel> = {
   "videos/": { folders: [], objects: [{ key: "videos/clip.mp4" }] },
 };
 
-const LIST_OBJECTS = [{ key: "a.png" }, { key: "notes.txt" }];
+const LIST_OBJECTS = [
+  { key: "a.png" },
+  { key: "notes.txt" },
+  { key: "sample.csv" },
+];
 
 function json(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -65,6 +69,14 @@ function installFetchMock(): void {
           bucket: "media",
           key: url.searchParams.get("key"),
           sizeBytes: 0,
+        });
+      if (p === "/_db/s3/text")
+        return json({
+          dbId: "mock",
+          bucket: "media",
+          key: url.searchParams.get("key"),
+          text: 'name,note\nalpha,"one, two"',
+          truncated: false,
         });
       return json({});
     }) as typeof fetch,
@@ -212,5 +224,33 @@ describe("S3 explorer UI", () => {
     expect(empty?.querySelector(".db-pane-empty-title")?.textContent).toBe(
       "Select an object to preview.",
     );
+  });
+
+  test("CSV オブジェクトを表形式でプレビューする", async () => {
+    const view = await mountExplorer();
+    await waitFor(
+      () =>
+        !!view.sidebarSlot.querySelector(
+          '.s3-object-item[data-key="sample.csv"]',
+        ),
+    );
+
+    click(
+      view.sidebarSlot.querySelector('.s3-object-item[data-key="sample.csv"]'),
+    );
+    await waitFor(() => !!view.el.querySelector(".gdp-csv-table"));
+
+    expect(
+      Array.from(
+        view.el.querySelectorAll(".gdp-csv-table thead tr:first-child th"),
+        (cell) => cell.textContent,
+      ),
+    ).toEqual(["", "name", "note"]);
+    expect(
+      Array.from(
+        view.el.querySelectorAll(".gdp-csv-table tbody td"),
+        (cell) => cell.textContent,
+      ),
+    ).toEqual(["alpha", "one, two"]);
   });
 });

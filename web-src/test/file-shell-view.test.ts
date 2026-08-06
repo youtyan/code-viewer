@@ -517,6 +517,13 @@ describe("file view shell routing", () => {
       active: "Code",
     },
     {
+      name: "CSV keeps the Preview/Code pair with Code active",
+      path: "data/sample.csv",
+      activeTab: "code" as const,
+      labels: ["Preview", "Code", "Blame", "History"],
+      active: "Code",
+    },
+    {
       name: "plain source keeps Code only with Code active",
       path: "web-src/app.ts",
       activeTab: "code" as const,
