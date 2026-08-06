@@ -19,7 +19,7 @@ Use this when:
 - creating GitHub Releases that should publish through `.github/workflows/publish.yml`
 - checking whether npm and GitHub are aligned before a release
 
-Do not use this for `@youtyan/browser-pilot`; that package has different scripts and release behavior.
+Do not use this procedure for unrelated packages; each package has its own scripts and release behavior.
 
 ## Preconditions
 
@@ -39,7 +39,7 @@ Expected:
 }
 ```
 
-Never continue if `npm pkg get name` returns another package, especially `@youtyan/browser-pilot`.
+Never continue if `npm pkg get name` returns another package.
 Never continue if the version is not the exact version intended for the release.
 
 ## Public Repository Audit
@@ -200,7 +200,7 @@ Do not run `npm whoami`, `npm access list packages`, `npm view`, or `npm publish
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `@youtyan/browser-pilot` appears in publish output | command was run in the wrong repository | stop; `cd <repo-root>` (back to this repository); rerun `npm pkg get name version` |
+| An unrelated package appears in publish output | command was run in the wrong repository | stop; `cd <repo-root>` (back to this repository); rerun `npm pkg get name version` |
 | `Automatic provenance generation not supported for provider: null` | local publish used provenance outside GitHub Actions | first publish only: use `npm publish --access public --provenance=false` |
 | `EOTP` | npm requires one-time auth for publish or settings changes | authenticate in the browser or rerun with local OTP; never expose OTP in chat |
 | package access page says `Not Found` | package has not been published yet | perform first publish, then configure Trusted Publisher |
