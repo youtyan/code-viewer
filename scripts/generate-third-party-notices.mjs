@@ -18,6 +18,7 @@ const distributedPackageRoots = [
   "@redis/client",
   "@xterm/addon-fit",
   "@xterm/xterm",
+  "d3-dsv",
   "highlight.js",
   "markdown-it",
   "markdown-it-anchor",

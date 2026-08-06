@@ -157,6 +157,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
+                text: "CSV and TSV previews provide all-column search, per-column filters, three-state column sorting (ascending, descending, then source order), a visible-row count, and a reset action. Filtering and sorting keep each row's original file row number.",
+              },
+              {
+                kind: "paragraph",
                 text: "Relative links inside a Markdown preview lead to the same destinations as they do on GitHub: another Markdown file opens its file page, an #anchor opens the preview and scrolls to that heading, a non-Markdown file opens in the Code view, and a link to a directory opens that folder in the repository tree.",
               },
               {
@@ -911,6 +915,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "ファイル詳細ページには最大 4 つのタブ (Preview / Code / Blame / History) があります。テキストファイルは Code がデフォルトで、?preview=1 を付けると Markdown / HTML プレビューに切り替わります。画像・動画・音声・PDF などのメディアファイルは Preview タブのみ表示され、Code タブは表示されません。Blame と History はそれぞれ専用 URL (view=blame, view=history) を持つため、ディープリンクとブラウザの戻る / 進むが同期し、いずれも Repository サイドバーは表示されたままです。ツリーから別のファイルを開いても選択中のタブは維持されます (プレビューできないファイルでは Code に戻ります)。",
+              },
+              {
+                kind: "paragraph",
+                text: "CSV・TSVプレビューでは、全列検索、列ごとの絞り込み、昇順・降順・元の順番の3段階ソート、表示件数、リセットを利用できます。絞り込みや並べ替えの後も、各行には元ファイル上の行番号が表示されます。",
               },
               {
                 kind: "paragraph",

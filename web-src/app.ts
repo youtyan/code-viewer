@@ -1105,6 +1105,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     scrollMainPanel,
     focusMainSurface,
     isPaletteOpen: () => SEARCH_PALETTE.isPaletteOpen(),
+    getLanguage: () => STATE.language,
   });
   const {
     renderStandaloneSource,
@@ -2342,6 +2343,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     relocalizeJournal?.();
     // 設定フォームの文言は viewer-settings.ts が自分で貼る。
     relocalizeViewerSettings?.();
+    SOURCE_VIEW.localize();
 
     setElementText(".annotation-panel-head strong", text.annotations.title);
     const followLabel = document.querySelector<HTMLElement>(

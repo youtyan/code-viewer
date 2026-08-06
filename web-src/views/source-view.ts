@@ -59,9 +59,15 @@ import {
 } from "./markdown-link-navigation";
 import {
   appendMediaEmbed,
+  type DelimitedPreviewElement,
+  renderDelimitedPreview,
   renderHtmlPreviewFrame,
   renderUnsupportedPreview,
 } from "./source-preview-elements";
+import {
+  type DelimitedPreviewLanguage,
+  delimitedPreviewText,
+} from "./source-preview-i18n";
 
 export type VirtualSourcePagingKeyboardEvent = KeyboardEvent & {
   __gdpVirtualSourcePagingHandled?: boolean;
@@ -117,6 +123,7 @@ export type SourceViewDeps = {
   ): void;
   focusMainSurface(): void;
   isPaletteOpen(): boolean;
+  getLanguage(): DelimitedPreviewLanguage;
 };
 
 export function createSourceView(deps: SourceViewDeps) {
@@ -146,6 +153,7 @@ export function createSourceView(deps: SourceViewDeps) {
     scrollMainPanel,
     focusMainSurface,
     isPaletteOpen,
+    getLanguage,
   } = deps;
 
   function markdownLinkNavigationDeps(): MarkdownLinkNavigationDeps {
@@ -599,20 +607,15 @@ export function createSourceView(deps: SourceViewDeps) {
     PREFERRED_SOURCE_TAB = tab;
   }
 
-  function consumePreferredSourceTab(previewable: boolean): SourceBlobTab {
-    if (!previewable) {
-      PREFERRED_SOURCE_TAB = null;
-      return "code";
-    }
+  function preferredSourceTabFor(previewable: boolean): SourceBlobTab {
+    if (!previewable) return "code";
     const routeTab =
       STATE.route.screen === "file" &&
       STATE.route.view === "blob" &&
       STATE.route.preview
         ? "preview"
         : "code";
-    const tab = PREFERRED_SOURCE_TAB || routeTab;
-    PREFERRED_SOURCE_TAB = null;
-    return tab;
+    return PREFERRED_SOURCE_TAB || routeTab;
   }
 
   let SOURCE_REQ_SEQ = 0;
@@ -944,7 +947,7 @@ export function createSourceView(deps: SourceViewDeps) {
     if (signal?.aborted) return false;
     const previewable = isPreviewableSource(target.path);
     const previewKind = sourcePreviewKind(target.path);
-    const initialSourceTab = consumePreferredSourceTab(previewable);
+    const initialSourceTab = preferredSourceTabFor(previewable);
     const tabsHost = card.querySelector<HTMLElement>(".gdp-file-detail-tabs");
     if (usesVirtualSource) {
       const virtualCode = renderVirtualSource(
@@ -969,22 +972,26 @@ export function createSourceView(deps: SourceViewDeps) {
         let preview =
           previewKind === "html"
             ? renderHtmlPreview(target, textValue)
-            : await (deps.renderMarkdownPreview ?? renderMarkdownPreview)(
-                textValue,
-                target,
-                {
-                  syntaxHighlight: false,
-                  signal,
-                  onNavigateMarkdown: (link) =>
-                    void openMarkdownLink(link, markdownLinkNavigationDeps()),
-                },
-              );
+            : previewKind === "csv" || previewKind === "tsv"
+              ? renderDelimitedPreview(textValue, previewKind, () =>
+                  delimitedPreviewText(getLanguage(), previewKind),
+                )
+              : await (deps.renderMarkdownPreview ?? renderMarkdownPreview)(
+                  textValue,
+                  target,
+                  {
+                    syntaxHighlight: false,
+                    signal,
+                    onNavigateMarkdown: (link) =>
+                      void openMarkdownLink(link, markdownLinkNavigationDeps()),
+                  },
+                );
         if (signal?.aborted) return false;
         preview.dataset.sourcePane = "preview";
         let previewHighlightScheduled = false;
         const ensurePreviewHighlight = () => {
           if (
-            previewKind === "html" ||
+            previewKind !== "markdown" ||
             !STATE.syntaxHighlight ||
             previewHighlightScheduled
           )
@@ -1097,22 +1104,26 @@ export function createSourceView(deps: SourceViewDeps) {
       let preview =
         previewKind === "html"
           ? renderHtmlPreview(target, textValue)
-          : await (deps.renderMarkdownPreview ?? renderMarkdownPreview)(
-              textValue,
-              target,
-              {
-                syntaxHighlight: false,
-                signal,
-                onNavigateMarkdown: (link) =>
-                  void openMarkdownLink(link, markdownLinkNavigationDeps()),
-              },
-            );
+          : previewKind === "csv" || previewKind === "tsv"
+            ? renderDelimitedPreview(textValue, previewKind, () =>
+                delimitedPreviewText(getLanguage(), previewKind),
+              )
+            : await (deps.renderMarkdownPreview ?? renderMarkdownPreview)(
+                textValue,
+                target,
+                {
+                  syntaxHighlight: false,
+                  signal,
+                  onNavigateMarkdown: (link) =>
+                    void openMarkdownLink(link, markdownLinkNavigationDeps()),
+                },
+              );
       if (signal?.aborted) return false;
       preview.dataset.sourcePane = "preview";
       let previewHighlightScheduled = false;
       const ensurePreviewHighlight = () => {
         if (
-          previewKind === "html" ||
+          previewKind !== "markdown" ||
           !STATE.syntaxHighlight ||
           previewHighlightScheduled
         )
@@ -2609,6 +2620,14 @@ export function createSourceView(deps: SourceViewDeps) {
     handleVirtualSourcePagingKey(e, e.target as Element | null);
   }
 
+  function localize(): void {
+    document
+      .querySelectorAll<DelimitedPreviewElement>(".gdp-csv-preview")
+      .forEach((preview) => {
+        preview.localize();
+      });
+  }
+
   return {
     renderStandaloneSource,
     applySourceRouteToShell,
@@ -2644,5 +2663,6 @@ export function createSourceView(deps: SourceViewDeps) {
     sourceShikiLines,
     shouldVirtualizeSource,
     inferLang,
+    localize,
   };
 }

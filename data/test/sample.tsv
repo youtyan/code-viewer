@@ -1,0 +1,6 @@
+id	name	status	note
+1	alpha	ready	"contains	a tab"
+2	beta	pending	"said ""hello"""
+3	gamma	done	"first line
+second line"
+4	delta	archived	""

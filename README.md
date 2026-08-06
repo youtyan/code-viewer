@@ -183,6 +183,11 @@ visible, and file pages show a preview when the browser can safely render the
 file. Unsupported binary files show a clear unavailable state with file
 metadata instead of dumping bytes as text.
 
+CSV and TSV files open as a table with all-column search, per-column filters, and
+three-state column sorting (ascending, descending, then source order). The
+visible-row count and reset action stay above the table while original file row
+numbers remain attached to their data after filtering or sorting.
+
 Markdown files use a dedicated preview tab. Relative links and images are
 resolved inside the repository, code blocks are highlighted with Shiki, and
 Mermaid diagrams are rendered lazily in the browser (click any diagram to

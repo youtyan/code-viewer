@@ -4,11 +4,49 @@ import {
   FILENAME_TO_LANG,
   isDotenvName,
   isLikelyTextBytes,
+  isPreviewableSource,
   sourceDisplayKind,
   sourceInternalPathKind,
+  sourcePreviewKind,
 } from "../core/source-meta";
 
 describe("source metadata", () => {
+  test.each([
+    {
+      name: "CSV extension",
+      path: "data/sample.csv",
+      previewable: true,
+      kind: "csv",
+    },
+    {
+      name: "uppercase CSV extension",
+      path: "data/sample.CSV",
+      previewable: true,
+      kind: "csv",
+    },
+    {
+      name: "TSV extension",
+      path: "data/sample.tsv",
+      previewable: true,
+      kind: "tsv",
+    },
+    {
+      name: "uppercase TSV extension",
+      path: "data/sample.TSV",
+      previewable: true,
+      kind: "tsv",
+    },
+    {
+      name: "plain TypeScript source",
+      path: "src/example.ts",
+      previewable: false,
+      kind: null,
+    },
+  ])("classifies $name for preview", ({ path, previewable, kind }) => {
+    expect(isPreviewableSource(path)).toBe(previewable);
+    expect(sourcePreviewKind(path)).toBe(kind);
+  });
+
   test("treats dotenv examples and variants as text sources", () => {
     expect(sourceDisplayKind("apps/mastra/.env.example")).toBe("text");
     expect(sourceDisplayKind(".env.local")).toBe("text");

@@ -1,6 +1,6 @@
 {
   "name": "@youtyan/code-viewer",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Local browser-based code and git diff viewer",
   "type": "module",
   "bin": {
@@ -67,10 +67,12 @@
     "@biomejs/biome": "2.4.14",
     "@happy-dom/global-registrator": "^20.10.6",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/d3-dsv": "3.0.7",
     "@types/markdown-it": "14.1.2",
     "@types/pg": "8.20.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "d3-dsv": "3.0.1",
     "esbuild": "^0.28.1",
     "highlight.js": "11.9.0",
     "markdown-it": "14.1.1",
