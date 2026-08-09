@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 // テストは web-src/test/ に集約している。DOM が要るテストは各ファイルの中で
@@ -5,6 +6,36 @@ import { defineConfig } from "vitest/config";
 // node のままにする (全ファイルに DOM を被せると、node 側のテストが本来
 // 存在しないはずのグローバルを掴んでしまう)。
 export default defineConfig({
+  resolve: {
+    // ブラウザでは preview server が配る実行時URL。Vitestではソースまたは
+    // 専用stubへ向け、UIテストが別バンドル読込を実行しても未処理拒否にしない。
+    alias: [
+      {
+        find: /^\/mermaid\.js$/,
+        replacement: fileURLToPath(
+          new URL("./web-src/mermaid-entry.ts", import.meta.url),
+        ),
+      },
+      {
+        find: /^\/shiki\.js$/,
+        replacement: fileURLToPath(
+          new URL("./web-src/test/shiki-entry-stub.ts", import.meta.url),
+        ),
+      },
+      {
+        find: /^\/yaml\.js$/,
+        replacement: fileURLToPath(
+          new URL("./web-src/yaml-entry.ts", import.meta.url),
+        ),
+      },
+      {
+        find: /^\/xterm\.js$/,
+        replacement: fileURLToPath(
+          new URL("./web-src/xterm-entry.ts", import.meta.url),
+        ),
+      },
+    ],
+  },
   test: {
     include: ["web-src/test/**/*.test.ts"],
     environment: "node",

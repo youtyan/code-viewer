@@ -7,7 +7,9 @@
 // 評価されないため、複数 view が異なる lang セットで呼んでも shiki.js の
 // バンドル本体は使い回される。
 //
-// ロード失敗時は null を返す (呼び出し側は plain text フォールバック)。
+// ロード失敗時は原因を呼び出し側へ伝播する。
+
+import { createBundleLoader } from "./lazy-bundle";
 
 export type ShikiHighlighter = {
   codeToHtml: (
@@ -49,11 +51,12 @@ export function highlightToInnerHtml(
   return pre ? pre.innerHTML : "";
 }
 
-const cache = new Map<string, Promise<ShikiHighlighter | null>>();
+const loadShikiModule = createBundleLoader<ShikiModule>("shiki.js");
+const cache = new Map<string, Promise<ShikiHighlighter>>();
 
 export function loadShikiHighlighter(
   options: ShikiLoaderOptions,
-): Promise<ShikiHighlighter | null> {
+): Promise<ShikiHighlighter> {
   // langs は順序差を消した上で key 化する (["sql","bash"] と ["bash","sql"]
   // を同じキャッシュエントリと見なす)。
   const key = JSON.stringify({
@@ -62,16 +65,12 @@ export function loadShikiHighlighter(
   });
   const cached = cache.get(key);
   if (cached) return cached;
-  // Keep the import specifier non-literal so Bun does not pull shiki into
-  // the main bundle.
-  const promise = import(`/${"shiki.js"}`)
-    .then((mod: unknown) =>
-      (mod as ShikiModule).createHighlighter({
-        themes: options.themes,
-        langs: options.langs,
-      }),
-    )
-    .catch(() => null);
+  const promise = loadShikiModule().then((mod) =>
+    mod.createHighlighter({
+      themes: options.themes,
+      langs: options.langs,
+    }),
+  );
   cache.set(key, promise);
   return promise;
 }

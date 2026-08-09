@@ -1,19 +1,11 @@
 import {
-  closeSync,
-  constants,
   existsSync,
-  lstatSync,
   mkdirSync,
-  openSync,
   readFileSync,
   realpathSync,
-  renameSync,
   statSync,
-  unlinkSync,
   watch,
-  writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { normalizeNewDirectoryName } from "../core/directory-name";
 import { formatErrorDetail } from "../core/error-detail";
@@ -65,6 +57,7 @@ import {
 } from "./command-resolver";
 import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
+import { writeUploadedFiles } from "./file-upload";
 import * as git from "./git";
 import {
   GithubIssueListError,
@@ -96,6 +89,8 @@ import {
   dispatchJsonRpc,
   parseJsonRpcBody,
 } from "./mcp";
+import { openDirectoryInOs, openUrlInOs } from "./os-opener";
+import { movePathToTrash, restorePathFromTrash } from "./os-trash";
 import {
   buildLineOffsetIndexFromStream,
   collectByteRangeFromStream,
@@ -118,8 +113,6 @@ import {
   fileByteRangeResponseBody,
   fileReadableStream,
   readFileTextRange,
-  runAsync,
-  spawnDetached,
   startServer,
 } from "./runtime";
 import { DEFAULT_EXCLUDE_NAMES, normalizeGrepMax } from "./search";
@@ -1937,15 +1930,6 @@ function safeUploadFileName(name: string): string | null {
   return trimmed;
 }
 
-function uploadOpenFlags() {
-  return (
-    constants.O_WRONLY |
-    constants.O_CREAT |
-    constants.O_EXCL |
-    (constants.O_NOFOLLOW || 0)
-  );
-}
-
 async function handleUploadFiles(req: Request) {
   if (!uploadEnabled) return text("upload disabled by viewer settings", 403);
   if (req.method !== "POST") return text("method not allowed", 405);
@@ -2002,28 +1986,12 @@ async function handleUploadFiles(req: Request) {
     uploads.push({ file, name: safeName, target });
   }
 
-  const written: string[] = [];
   try {
-    for (const upload of uploads) {
-      const fd = openSync(upload.target, uploadOpenFlags(), 0o644);
-      try {
-        writeFileSync(fd, new Uint8Array(await upload.file.arrayBuffer()));
-      } finally {
-        closeSync(fd);
-      }
-      written.push(upload.target);
-    }
+    await writeUploadedFiles(uploads);
   } catch (error) {
-    for (const path of written) {
-      try {
-        unlinkSync(path);
-      } catch {
-        /* best-effort cleanup */
-      }
-    }
     if ((error as { code?: string }).code === "EEXIST")
-      return text("file exists", 409);
-    return text("upload failed", 500);
+      return text(formatErrorDetail(error), 409);
+    return text(formatErrorDetail(error), 500);
   }
 
   // アップロードしたファイルのパスを SSE に載せる。パス無しの "tick" を送ると
@@ -2036,86 +2004,6 @@ async function handleUploadFiles(req: Request) {
     files: uploads.map((upload) => upload.name),
     generation,
   });
-}
-
-function openOsPath(path: string) {
-  const cmd =
-    process.platform === "darwin"
-      ? ["open", "--", path]
-      : process.platform === "win32"
-        ? ["explorer.exe", path]
-        : ["xdg-open", path];
-  spawnDetached(cmd);
-}
-
-function windowsTrashScript(path: string): string {
-  const quotedPath = path.replace(/'/g, "''");
-  return [
-    "$ErrorActionPreference = 'Stop';",
-    `$path = '${quotedPath}';`,
-    "Add-Type -TypeDefinition @'",
-    "using System;",
-    "using System.Runtime.InteropServices;",
-    "public static class CodeViewerRecycleBin {",
-    "  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]",
-    "  public struct SHFILEOPSTRUCT {",
-    "    public IntPtr hwnd;",
-    "    public uint wFunc;",
-    "    public string pFrom;",
-    "    public string pTo;",
-    "    public ushort fFlags;",
-    "    [MarshalAs(UnmanagedType.Bool)] public bool fAnyOperationsAborted;",
-    "    public IntPtr hNameMappings;",
-    "    public string lpszProgressTitle;",
-    "  }",
-    '  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]',
-    "  private static extern int SHFileOperationW(ref SHFILEOPSTRUCT lpFileOp);",
-    "  public static void MoveToRecycleBin(string path) {",
-    "    const uint FO_DELETE = 0x0003;",
-    "    const ushort FOF_SILENT = 0x0004;",
-    "    const ushort FOF_NOCONFIRMATION = 0x0010;",
-    "    const ushort FOF_ALLOWUNDO = 0x0040;",
-    "    const ushort FOF_NOERRORUI = 0x0400;",
-    "    var op = new SHFILEOPSTRUCT {",
-    "      hwnd = IntPtr.Zero,",
-    "      wFunc = FO_DELETE,",
-    '      pFrom = path + "\\0\\0",',
-    "      pTo = null,",
-    "      fFlags = (ushort)(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT),",
-    "      fAnyOperationsAborted = false,",
-    "      hNameMappings = IntPtr.Zero,",
-    "      lpszProgressTitle = null",
-    "    };",
-    "    int result = SHFileOperationW(ref op);",
-    '    if (result != 0) throw new InvalidOperationException("SHFileOperationW failed: " + result);',
-    '    if (op.fAnyOperationsAborted) throw new OperationCanceledException("SHFileOperationW aborted");',
-    "  }",
-    "}",
-    "'@;",
-    "[CodeViewerRecycleBin]::MoveToRecycleBin($path);",
-  ].join(" ");
-}
-
-function windowsRestoreTrashScript(originalPath: string): string {
-  const quotedPath = originalPath.replace(/'/g, "''");
-  return [
-    "$ErrorActionPreference = 'Stop';",
-    `$original = '${quotedPath}';`,
-    "$parent = [System.IO.Path]::GetDirectoryName($original);",
-    "$name = [System.IO.Path]::GetFileName($original);",
-    "$shell = New-Object -ComObject Shell.Application;",
-    "$bin = $shell.Namespace(10);",
-    "$restored = $false;",
-    "foreach ($item in $bin.Items()) {",
-    "  $deletedFrom = $item.ExtendedProperty('System.Recycle.DeletedFrom');",
-    "  if ($item.Name -eq $name -and $deletedFrom -eq $parent) {",
-    "    $item.InvokeVerb('ESTORE');",
-    "    $restored = $true;",
-    "    break;",
-    "  }",
-    "}",
-    "if (-not $restored) { throw 'recycle bin item not found'; }",
-  ].join(" ");
 }
 
 function makeUndoId(): string {
@@ -2136,112 +2024,6 @@ function triggerUpdate(changedPaths?: string[]) {
       ? JSON.stringify({ generation, paths: changedPaths })
       : "tick";
   sendSse("update", data);
-}
-
-function moveMacPathIntoTrash(path: string): {
-  ok: boolean;
-  trashPath?: string;
-  error?: string;
-} {
-  const trashDir = join(homedir(), ".Trash");
-  const base = basename(path) || "code-viewer-trash-item";
-  const target = join(
-    trashDir,
-    `${base}-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`,
-  );
-  try {
-    mkdirSync(trashDir, { recursive: true });
-    renameSync(path, target);
-    return { ok: true, trashPath: target };
-  } catch (error) {
-    return { ok: false, error: String(error) };
-  }
-}
-
-async function movePathToTrash(path: string): Promise<{
-  ok: boolean;
-  trashPath?: string;
-  error?: string;
-}> {
-  lstatSync(path);
-  if (process.platform === "darwin") {
-    return moveMacPathIntoTrash(path);
-  }
-  if (process.platform === "win32") {
-    const res = await runAsync(
-      [
-        "powershell.exe",
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        windowsTrashScript(path),
-      ],
-      cwd,
-      { timeout: 60000 },
-    );
-    return res.code === 0
-      ? { ok: true }
-      : { ok: false, error: res.stderr || res.stdout };
-  }
-  return { ok: false, error: "trash unsupported" };
-}
-
-async function restoreTrashPath(
-  originalPath: string,
-  trashPath?: string,
-): Promise<{
-  ok: boolean;
-  error?: string;
-}> {
-  const parent = parentRepoPath(originalPath);
-  const parentFullPath = safeOpenWorktreePath(parent);
-  if (!parentFullPath) return { ok: false, error: "invalid restore target" };
-  const original = worktreePath(originalPath);
-  if (existsSync(original))
-    return { ok: false, error: "restore target exists" };
-  if (trashPath) {
-    if (process.platform !== "darwin")
-      return { ok: false, error: "invalid trash handle" };
-    if (!existsSync(trashPath))
-      return { ok: false, error: "trash item not found" };
-    try {
-      const trashRoot = join(homedir(), ".Trash");
-      const trashRelative = relative(trashRoot, trashPath);
-      if (
-        trashRelative === "" ||
-        trashRelative.startsWith("..") ||
-        trashRelative.startsWith("/") ||
-        trashRelative.startsWith("\\")
-      )
-        return { ok: false, error: "invalid trash handle" };
-      mkdirSync(dirname(original), { recursive: true });
-      renameSync(trashPath, original);
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, error: String(error) };
-    }
-  }
-  if (process.platform === "win32") {
-    const res = await runAsync(
-      [
-        "powershell.exe",
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        windowsRestoreTrashScript(original),
-      ],
-      cwd,
-      { timeout: 60000 },
-    );
-    return res.code === 0
-      ? { ok: true }
-      : { ok: false, error: res.stderr || res.stdout };
-  }
-  return { ok: false, error: "undo unavailable for this trash operation" };
 }
 
 async function handleOpenPath(req: Request) {
@@ -2277,7 +2059,12 @@ async function handleOpenPath(req: Request) {
 
   const stats = statSync(target) as unknown as { isDirectory(): boolean };
   if (!stats.isDirectory()) return text("not a directory", 400);
-  openOsPath(target);
+  try {
+    await openDirectoryInOs(target);
+  } catch (error) {
+    console.error("[code-viewer] failed to open path in OS:", error);
+    return text(formatErrorDetail(error), 500);
+  }
   return json({ ok: true });
 }
 
@@ -2303,7 +2090,8 @@ async function handleTrashPath(req: Request) {
     typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
   if (!path) return text("invalid path", 400);
   if (!safeRepoPath(path)) return text("invalid path", 400);
-  if (git.isGitInternalPath(path)) return text("forbidden", 403);
+  if (git.isGitInternalPath(path) || isCodeViewerInternalPath(path))
+    return text("forbidden", 403);
   const originalFullPath = safeWorktreePath(path);
   if (!originalFullPath) return text("not found", 404);
   // 単一ファイルの trash は変更パス付きで通知する。ディレクトリは配下を
@@ -2314,11 +2102,15 @@ async function handleTrashPath(req: Request) {
       isDirectory(): boolean;
     };
     if (!stats.isDirectory()) changedPaths = [path];
-  } catch {
-    /* keep the full tick */
+  } catch (error) {
+    return text(formatErrorDetail(error), 500);
   }
-  const moved = await movePathToTrash(worktreePath(path));
-  if (!moved.ok) return text(moved.error || "trash failed", 500);
+  let moved: Awaited<ReturnType<typeof movePathToTrash>>;
+  try {
+    moved = await movePathToTrash(worktreePath(path), cwd);
+  } catch (error) {
+    return text(formatErrorDetail(error), 500);
+  }
   const undo: UndoActionResponse = {
     id: makeUndoId(),
     type: "trash",
@@ -2408,18 +2200,28 @@ async function handleRestoreTrash(req: Request) {
   const trashPath = typeof body.trashPath === "string" ? body.trashPath : "";
   if (!originalPath || !safeRepoPath(originalPath))
     return text("invalid restore target", 400);
-  if (git.isGitInternalPath(originalPath)) return text("forbidden", 403);
-  const restored = await restoreTrashPath(originalPath, trashPath || undefined);
-  if (!restored.ok) return text(restored.error || "undo failed", 409);
+  if (
+    git.isGitInternalPath(originalPath) ||
+    isCodeViewerInternalPath(originalPath)
+  )
+    return text("forbidden", 403);
+  const parent = parentRepoPath(originalPath);
+  if (!safeOpenWorktreePath(parent)) return text("invalid restore target", 400);
+  const original = worktreePath(originalPath);
+  try {
+    await restorePathFromTrash(original, trashPath || undefined, cwd);
+  } catch (error) {
+    return text(formatErrorDetail(error), 409);
+  }
   // 単一ファイルの復元は変更パス付きで通知する (trash 側と同じ理由)。
   let changedPaths: string[] | undefined;
   try {
-    const stats = statSync(worktreePath(originalPath)) as unknown as {
+    const stats = statSync(original) as unknown as {
       isDirectory(): boolean;
     };
     if (!stats.isDirectory()) changedPaths = [originalPath];
-  } catch {
-    /* keep the full tick */
+  } catch (error) {
+    return text(formatErrorDetail(error), 500);
   }
   triggerUpdate(changedPaths);
   return json({ ok: true, generation });
@@ -3005,16 +2807,6 @@ function closeSseClients() {
   }
 }
 
-function openBrowser(url: string) {
-  const cmd =
-    process.platform === "darwin"
-      ? ["open", url]
-      : process.platform === "win32"
-        ? ["cmd.exe", "/c", "start", "", url]
-        : ["xdg-open", url];
-  spawnDetached(cmd);
-}
-
 parseCli();
 applyPersistedSettings(await loadAppSettingsState(cwd));
 
@@ -3173,7 +2965,7 @@ const server = await startServer({
 listenPort = server.port;
 
 if (openAfterStart) {
-  openBrowser(`http://127.0.0.1:${server.port}/`);
+  await openUrlInOs(`http://127.0.0.1:${server.port}/`, cwd);
 }
 
 writeServerRegistry({

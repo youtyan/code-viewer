@@ -26,6 +26,9 @@ const mermaidLoader = sourceFixture(
 const shikiLoader = sourceFixture(
   readFileSync(new URL("../core/shiki-loader.ts", import.meta.url), "utf8"),
 );
+const lazyBundle = sourceFixture(
+  readFileSync(new URL("../core/lazy-bundle.ts", import.meta.url), "utf8"),
+);
 const server = sourceFixture(
   readFileSync(new URL("../server/preview.ts", import.meta.url), "utf8"),
 );
@@ -410,7 +413,8 @@ describe("markdown preview", () => {
     // 側は loader を呼ぶだけで、bundle 抑止のための非リテラル import 文字列は
     // loader にある。
     expect(mermaidLoader.includes('"mermaid.js"')).toBe(true);
-    expect(mermaidLoader.includes('import(`/${"mermaid.js"}`)')).toBe(true);
+    expect(mermaidLoader.includes("createBundleLoader")).toBe(true);
+    expect(lazyBundle.includes("/* @vite-ignore */")).toBe(true);
     expect(mermaidLoader.includes('securityLevel: "strict"')).toBe(true);
     // mermaid の lightbox / error 描画は markdown-preview 側のまま。
     expect(markdown.includes("openMermaidLightbox")).toBe(true);
@@ -428,7 +432,8 @@ describe("markdown preview", () => {
     ).toBe(true);
     // lazy import 本体は shiki-loader.ts に切り出し済み。
     expect(shikiLoader.includes('"shiki.js"')).toBe(true);
-    expect(shikiLoader.includes('import(`/${"shiki.js"}`)')).toBe(true);
+    expect(shikiLoader.includes("createBundleLoader")).toBe(true);
+    expect(lazyBundle.includes("/* @vite-ignore */")).toBe(true);
     // markdown は loader を `themes: ["github-light","github-dark"]` で
     // 呼び出す側。
     expect(markdown.includes('"github-light", "github-dark"')).toBe(true);
