@@ -19,6 +19,7 @@ import type {
 } from "../../core/database/types";
 import {
   formatErrorDetail as errorMessage,
+  errorWithCause,
   responseErrorMessage,
 } from "../../core/error-detail";
 import {
@@ -87,10 +88,6 @@ type DatabasePaneDeps = DatabaseViewDeps & {
     key: K,
     fallback: NonNullable<DbUiPrefs[K]>,
   ): NonNullable<DbUiPrefs[K]>;
-  setDbUiPref<K extends keyof DbUiPrefs>(
-    key: K,
-    value: NonNullable<DbUiPrefs[K]>,
-  ): void;
   onDbUiPrefChange(listener: (state: DbUiState) => void): () => void;
   loadSqlHistory(dbId: string | null, schema: string | null): Promise<string[]>;
   refreshDatastores(): Promise<void>;
@@ -115,16 +112,17 @@ export type DatabaseView = {
   localize: () => void;
   refresh: () => Promise<void>;
   // ビューア設定パネルなど外部から db-ui pref を読み書きするための公開 API。
-  // ensureDbUiState はバックグラウンドで保証されている前提 (DatabaseView が
-  // mount された後に呼ばれる)。
+  // 設定画面は loadDbUiPrefs を完了してから getter の値を表示する。
   getDbUiPref: <K extends keyof DbUiPrefs>(
     key: K,
     fallback: NonNullable<DbUiPrefs[K]>,
   ) => NonNullable<DbUiPrefs[K]>;
-  setDbUiPref: <K extends keyof DbUiPrefs>(
-    key: K,
-    value: NonNullable<DbUiPrefs[K]>,
-  ) => void;
+  loadDbUiPrefs: () => Promise<void>;
+  saveDbUiPrefs: (
+    patch: Partial<{
+      [K in keyof DbUiPrefs]: NonNullable<DbUiPrefs[K]> | null;
+    }>,
+  ) => Promise<void>;
   onDbUiPrefChange: (listener: (state: DbUiState) => void) => () => void;
 };
 
@@ -2581,16 +2579,31 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   async function ensureDbUiState(): Promise<void> {
     if (dbUiLoadPromise) return dbUiLoadPromise;
-    dbUiLoadPromise = fetch("/_db/ui")
-      .then(async (res) => {
-        if (!res.ok) return;
-        // applyDbUiState 経由で listeners を起こす。直接代入だと「ロード完了
-        // 後にトグル UI に色が反映されない」回帰 (Rails FK 推測トグルで報告)
-        // の原因になる。
-        applyDbUiState((await res.json()) as DbUiState);
-      })
-      .catch(() => undefined);
-    return dbUiLoadPromise;
+    const operation = (async () => {
+      const response = await deps.trackLoad(fetch("/_db/ui"));
+      if (!response.ok) {
+        throw new Error(
+          await responseErrorMessage(response, "load database UI settings"),
+        );
+      }
+      let state: DbUiState;
+      try {
+        state = (await response.json()) as DbUiState;
+      } catch (error) {
+        throw errorWithCause(
+          "load database UI settings: response is not valid JSON",
+          error,
+        );
+      }
+      applyDbUiState(state);
+    })();
+    dbUiLoadPromise = operation;
+    try {
+      await operation;
+    } catch (error) {
+      if (dbUiLoadPromise === operation) dbUiLoadPromise = null;
+      throw error;
+    }
   }
 
   function getColumnWidths(
@@ -2697,19 +2710,35 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const v = dbUiState.prefs?.[key];
     return v === undefined ? fallback : (v as NonNullable<DbUiPrefs[K]>);
   }
-  function setDbUiPref<K extends keyof DbUiPrefs>(
-    key: K,
-    value: NonNullable<DbUiPrefs[K]>,
-  ): void {
-    const nextPrefs: DbUiPrefs = { ...(dbUiState.prefs ?? {}), [key]: value };
-    applyDbUiState({ ...dbUiState, prefs: nextPrefs });
-    // PATCH のレスポンスは local state に再適用しない (setColumnWidths と
-    // 同様の race 対策)。
-    void fetch("/_db/ui", {
-      method: "PATCH",
-      headers: actionHeaders(),
-      body: JSON.stringify({ prefs: { [key]: value } }),
-    }).catch(() => undefined);
+  async function saveDbUiPrefs(
+    patch: Partial<{
+      [K in keyof DbUiPrefs]: NonNullable<DbUiPrefs[K]> | null;
+    }>,
+  ): Promise<void> {
+    const response = await deps.trackLoad(
+      fetch("/_db/ui", {
+        method: "PATCH",
+        headers: actionHeaders(),
+        body: JSON.stringify({ prefs: patch }),
+      }),
+    );
+    if (!response.ok) {
+      throw new Error(
+        await responseErrorMessage(response, "save database UI settings"),
+      );
+    }
+    let saved: DbUiState;
+    try {
+      saved = (await response.json()) as DbUiState;
+    } catch (error) {
+      throw errorWithCause(
+        "save database UI settings: response is not valid JSON",
+        error,
+      );
+    }
+    // 列幅など別系統の同時編集は現在の値を維持し、今回サーバーが確定した
+    // prefs だけを反映する。古い PATCH 応答で無関係な状態を巻き戻さない。
+    applyDbUiState({ ...dbUiState, prefs: saved.prefs });
   }
   function onDbUiPrefChange(listener: (state: DbUiState) => void): () => void {
     dbUiPrefListeners.add(listener);
@@ -3205,7 +3234,6 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         getSnapshotSelectedTables,
         setSnapshotSelectedTables,
         getDbUiPref,
-        setDbUiPref,
         onDbUiPrefChange,
         loadSqlHistory,
         refreshDatastores,
@@ -3698,7 +3726,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     localize,
     refresh: refreshDatastores,
     getDbUiPref,
-    setDbUiPref,
+    loadDbUiPrefs: ensureDbUiState,
+    saveDbUiPrefs,
     onDbUiPrefChange,
   };
 }

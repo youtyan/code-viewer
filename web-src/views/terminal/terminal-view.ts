@@ -14,7 +14,11 @@
 // なくなる。取り直しは generation で世代を照合し、切り替え後に届いた古い
 // レスポンスで画面を巻き戻さない。
 
-import type { AgentStateRecord } from "../../core/agent-state";
+import type {
+  AgentStateObservationError,
+  AgentStateRecord,
+  AgentStatesResponse,
+} from "../../core/agent-state";
 import { attachDragResizer } from "../../core/drag-resizer";
 import {
   formatErrorDetail,
@@ -89,6 +93,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
    */
   let lastTargetId: string | null = null;
   let states: AgentStateRecord[] = [];
+  let stateErrors: AgentStateObservationError[] = [];
   let screen: TerminalScreenHandle | null = null;
   let reloadBtn: HTMLButtonElement | null = null;
   let fontSmaller: HTMLButtonElement | null = null;
@@ -232,6 +237,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       shellAvailable: shells?.available ?? true,
       shellUnavailableReason: shells?.reason ?? "",
       states,
+      stateErrors,
     });
     board?.setSelected(attached?.id ?? null);
   }
@@ -269,14 +275,13 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       }
       const nextPanes = (await paneRes.json()) as TmuxPanesResponse;
       const nextShells = (await shellRes.json()) as ShellListResponse;
-      const nextStates = (
-        (await stateRes.json()) as { states: AgentStateRecord[] }
-      ).states;
+      const nextStateResponse = (await stateRes.json()) as AgentStatesResponse;
       const nextClients = (await clientRes.json()) as TmuxClientsResponse;
       if (stale()) return;
       panes = nextPanes;
       shells = nextShells;
-      states = nextStates ?? [];
+      states = nextStateResponse.states ?? [];
+      stateErrors = nextStateResponse.errors ?? [];
       clients = nextClients;
 
       renderLists();

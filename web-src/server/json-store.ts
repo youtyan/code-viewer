@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { errorWithCause, errorWithCauses } from "../core/error-detail";
 
 export type JsonStoreOptions<T> = {
   filePath: (root: string) => string;
@@ -10,11 +11,13 @@ export type JsonStoreOptions<T> = {
   backupSuffix?: string;
   sizeErrorMessage?: string;
   serialize?: (state: T) => string;
+  invalidFileBehavior?: "empty" | "throw";
 };
 
 export type JsonFileStore<T> = {
   load(root: string): Promise<T>;
   save(root: string, state: T): Promise<void>;
+  remove(root: string): Promise<boolean>;
   update<R>(
     root: string,
     updater: (
@@ -31,12 +34,13 @@ function tmpPath(file: string): string {
   return `${file}.tmp-${process.pid}-${Date.now()}-${randomBytes(4).toString("hex")}`;
 }
 
-async function backupInvalidFile(file: string, suffix: string): Promise<void> {
-  try {
-    await rename(file, `${file}.${suffix}-${Date.now()}`);
-  } catch {
-    // best effort only
-  }
+async function backupInvalidFile(
+  file: string,
+  suffix: string,
+): Promise<string> {
+  const backup = `${file}.${suffix}-${Date.now()}`;
+  await rename(file, backup);
+  return backup;
 }
 
 export function createJsonFileStore<T>(
@@ -44,6 +48,7 @@ export function createJsonFileStore<T>(
 ): JsonFileStore<T> {
   const queues = new Map<string, Promise<void>>();
   const backupSuffix = options.backupSuffix ?? "corrupt";
+  const invalidFileBehavior = options.invalidFileBehavior ?? "empty";
   const serialize =
     options.serialize ?? ((state: T) => `${JSON.stringify(state, null, 2)}\n`);
 
@@ -58,8 +63,25 @@ export function createJsonFileStore<T>(
     }
     try {
       return options.sanitize(JSON.parse(raw));
-    } catch {
-      await backupInvalidFile(file, backupSuffix);
+    } catch (invalidError) {
+      let backup: string;
+      try {
+        backup = await backupInvalidFile(file, backupSuffix);
+      } catch (backupError) {
+        throw errorWithCauses("invalid JSON state could not be backed up", [
+          invalidError,
+          backupError,
+        ]);
+      }
+      const recovered = Object.assign(
+        errorWithCause("invalid JSON state was moved aside", invalidError),
+        { backup },
+      );
+      if (invalidFileBehavior === "throw") throw recovered;
+      console.error(
+        "[code-viewer] invalid JSON state was moved aside",
+        recovered,
+      );
       return options.empty();
     }
   }
@@ -79,34 +101,62 @@ export function createJsonFileStore<T>(
     try {
       await writeFile(tmp, content, "utf8");
       await rename(tmp, file);
-    } catch (err) {
-      await unlink(tmp).catch(() => undefined);
-      throw err;
+    } catch (writeError) {
+      try {
+        await unlink(tmp);
+      } catch (cleanupError) {
+        if (!isEnoent(cleanupError)) {
+          throw errorWithCauses(
+            "failed to save JSON state and remove the temporary file",
+            [writeError, cleanupError],
+          );
+        }
+      }
+      throw errorWithCause("failed to save JSON state", writeError);
     }
   }
 
-  async function load(root: string): Promise<T> {
-    const pendingWrite = queues.get(options.filePath(root));
-    if (pendingWrite) await pendingWrite.catch(() => undefined);
-    return loadUnqueued(root);
-  }
-
-  async function save(root: string, state: T): Promise<void> {
+  function enqueue<R>(root: string, operation: () => Promise<R>): Promise<R> {
     const file = options.filePath(root);
     const previous = queues.get(file) ?? Promise.resolve();
-    const run = previous
-      .catch(() => undefined)
-      .then(() => saveUnqueued(root, state));
-    const queued = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    queues.set(file, queued);
-    try {
-      await run;
-    } finally {
-      if (queues.get(file) === queued) queues.delete(file);
-    }
+    const gateState: { release: () => void } = {
+      release: () => {
+        throw new Error("JSON store queue gate was not initialized");
+      },
+    };
+    const gate = new Promise<void>((resolve) => {
+      gateState.release = resolve;
+    });
+    const tail = previous.then(() => gate);
+    queues.set(file, tail);
+    return previous.then(async () => {
+      try {
+        return await operation();
+      } finally {
+        gateState.release();
+        if (queues.get(file) === tail) queues.delete(file);
+      }
+    });
+  }
+
+  function load(root: string): Promise<T> {
+    return enqueue(root, () => loadUnqueued(root));
+  }
+
+  function save(root: string, state: T): Promise<void> {
+    return enqueue(root, () => saveUnqueued(root, state));
+  }
+
+  function remove(root: string): Promise<boolean> {
+    return enqueue(root, async () => {
+      try {
+        await unlink(options.filePath(root));
+        return true;
+      } catch (error) {
+        if (isEnoent(error)) return false;
+        throw errorWithCause("failed to remove JSON state", error);
+      }
+    });
   }
 
   async function update<R>(
@@ -115,27 +165,13 @@ export function createJsonFileStore<T>(
       state: T,
     ) => { state: T; result: R } | Promise<{ state: T; result: R }>,
   ): Promise<R> {
-    const file = options.filePath(root);
-    const previous = queues.get(file) ?? Promise.resolve();
-    const run = previous
-      .catch(() => undefined)
-      .then(async () => {
-        const current = await loadUnqueued(root);
-        const updated = await updater(current);
-        await saveUnqueued(root, updated.state);
-        return updated.result;
-      });
-    const queued = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    queues.set(file, queued);
-    try {
-      return await run;
-    } finally {
-      if (queues.get(file) === queued) queues.delete(file);
-    }
+    return enqueue(root, async () => {
+      const current = await loadUnqueued(root);
+      const updated = await updater(current);
+      await saveUnqueued(root, updated.state);
+      return updated.result;
+    });
   }
 
-  return { load, save, update };
+  return { load, save, remove, update };
 }

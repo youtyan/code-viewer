@@ -24,6 +24,7 @@
 
 import {
   type AgentState,
+  type AgentStateObservationError,
   type AgentStateRecord,
   isAgentState,
 } from "../../core/agent-state";
@@ -68,6 +69,7 @@ export type SessionBoardData = {
   shellAvailable: boolean;
   shellUnavailableReason: string;
   states: AgentStateRecord[];
+  stateErrors: AgentStateObservationError[];
 };
 
 export type SessionBoardHandle = {
@@ -123,6 +125,11 @@ export function createSessionBoard(deps: SessionBoardDeps): SessionBoardHandle {
   attentionEmpty.className = "terminal-empty";
   attentionSection.append(attentionHead, attentionCards, attentionEmpty);
 
+  const observationErrors = document.createElement("pre");
+  observationErrors.className = "terminal-observation-errors";
+  observationErrors.setAttribute("role", "alert");
+  observationErrors.hidden = true;
+
   const filters = document.createElement("div");
   filters.className = "terminal-filters";
   const stateSelect = document.createElement("select");
@@ -144,7 +151,7 @@ export function createSessionBoard(deps: SessionBoardDeps): SessionBoardHandle {
   const treeEmpty = document.createElement("p");
   treeEmpty.className = "terminal-empty";
 
-  el.append(scopeBar, attentionSection, filters, tree);
+  el.append(scopeBar, observationErrors, attentionSection, filters, tree);
 
   let data: SessionBoardData = {
     panes: null,
@@ -153,6 +160,7 @@ export function createSessionBoard(deps: SessionBoardDeps): SessionBoardHandle {
     shellAvailable: true,
     shellUnavailableReason: "",
     states: [],
+    stateErrors: [],
   };
   let selected: string | null = null;
   let stateFilter: AgentState | null = null;
@@ -337,7 +345,7 @@ export function createSessionBoard(deps: SessionBoardDeps): SessionBoardHandle {
     button.title = [
       row.task,
       row.kind === "tmux" ? `${row.locator} · ${row.place}` : row.place,
-      row.source === "activity" ? text.guessed : "",
+      row.source && row.source !== "hook" ? text.guessed : "",
       row.lastPrompt ? `${text.lastPrompt}: ${row.lastPrompt}` : "",
     ]
       .filter(Boolean)
@@ -613,6 +621,16 @@ export function createSessionBoard(deps: SessionBoardDeps): SessionBoardHandle {
       data.clients,
     );
     const scoped = filterByScope(all, scope);
+
+    observationErrors.textContent = data.stateErrors
+      .map((error) => {
+        const target = error.target ? ` ${error.target}` : "";
+        return `[${error.operation}${target}]\n${error.detail}${
+          error.stack ? `\n${error.stack}` : ""
+        }`;
+      })
+      .join("\n\n");
+    observationErrors.hidden = data.stateErrors.length === 0;
 
     renderScope(all, scoped);
 

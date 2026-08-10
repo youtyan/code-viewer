@@ -86,7 +86,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
         nav: "Settings",
         title: "Settings",
         intro:
-          "Viewer preferences for this project and this browser. Changes are saved as you make them.",
+          "Viewer preferences for this project and this browser. Edits remain a draft until you select Save changes.",
         groups: [],
       },
       overview: {
@@ -211,6 +211,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
+                text: "Status first uses lifecycle reports when they are available. Otherwise it evaluates every enabled screen rule against the live terminal title and recent visible lines, then uses the highest-priority match. A terminal is tracked only after a report or a visible rule identifies it; screen motion then provides the working/idle fallback. Working matches expire when the title and screen stop changing, so stale status text does not stay active. Settings & Help → Settings contains the full JSON rule set, including regions, priorities, contains checks, regular expressions, and nested all/any/not conditions. Regular expressions use a bounded safe subset: groups, alternation, and backreferences are rejected, and AND/OR belongs in all/any. Saving validates the whole set and shows every error without replacing the active rules. Restoring the built-in rules removes the saved override so updated defaults can arrive with later releases.",
+              },
+              {
+                kind: "paragraph",
                 text: "Click a pane and the panel takes you to it. If a shell already has that session open, it switches to that shell and makes the pane current; otherwise a shell is opened and attached for you. A session moves up to the top tier the moment a shell opens it and drops back down when that shell closes, so you end up with one shell per tmux session rather than one per pane. Powerline separators and file icons render when a Nerd Font is installed on the machine running the browser; no font ships with the package. The tree needs tmux on PATH — without it the panel says so, and shells still work. Opening shells needs the optional @lydell/node-pty package.",
               },
               {
@@ -264,6 +268,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                   [
                     "settings.json",
                     "Settings — diff layout, theme, language, sidebar/history widths, font sizes, syntax highlight, ignore-whitespace, hide-tests, scope overrides (omitted dirs / excluded names), upload toggle, annotation panel open/width/follow/mute/rate, and the last viewed diff range.",
+                  ],
+                  [
+                    "agent-screen-rules.json",
+                    "Terminal status screen rules saved from Settings. Removing the override restores the built-in rules.",
                   ],
                   [
                     "view-state.json",
@@ -847,7 +855,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "設定",
         title: "設定",
         intro:
-          "このプロジェクトとこのブラウザのビューア設定です。変更は自動で保存されます。",
+          "このプロジェクトとこのブラウザのビューア設定です。「変更を保存」を押すまで編集内容は下書きのままです。",
         groups: [],
       },
       overview: {
@@ -972,6 +980,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
+                text: "状態変更の申告がある場合はそれを先に使います。申告が無い場合は、現在のターミナルタイトルと画面下端の表示に対して全ルールを評価し、優先度が最大の一致から「作業中」「入力待ち」「待機中」「直前の状態を維持」を決めます。申告か見えているルールで対象を識別した後だけ、画面の変化量を作業中・待機中の補助判定に使います。作業中ルールの文字が残っていても、タイトルと画面が変化しなくなれば待機中へ移ります。設定・ヘルプ → 設定では、見る範囲、優先度、contains、正規表現、入れ子の all/any/not を含むJSONルール集を編集できます。正規表現は処理時間を抑えた範囲だけを許可し、グループ・選択・後方参照は使えません。AND/OR は all/any で表します。保存時は全ルールを検証し、エラーはすべて表示して適用中のルールを置き換えません。組み込みルールへ戻すと保存済みの上書きを削除するため、以後の更新で新しい既定ルールを受け取れます。",
+              },
+              {
+                kind: "paragraph",
                 text: "ペインを押すと、そこまで連れて行きます。そのセッションを既に開いているシェルがあれば、そのシェルに切り替えてペインをカレントにします。無ければ、こちらでシェルを開いて attach します。シェルで開いた瞬間にセッションは下段から上段へ移り、そのシェルを閉じると下段へ戻ります。つまりペインごとではなく、tmux のセッション 1 つにつきシェル 1 本になります。powerline のセパレータやファイルアイコンは、ブラウザを動かしている環境に Nerd Font が入っていれば表示されます（フォントはパッケージに同梱していません）。ツリーには tmux が PATH にあることが必要で、無い場合はその旨を表示します（シェルはそのまま使えます）。シェルを開くには任意依存の @lydell/node-pty が必要です。",
               },
               {
@@ -1025,6 +1037,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                   [
                     "settings.json",
                     "設定 — diff レイアウト、テーマ、言語、サイドバー/履歴幅、フォントサイズ、シンタックスハイライト、whitespace 無視、テスト非表示、scope 上書き（除外ディレクトリ / 除外名）、アップロード許可、注釈パネルの開閉/幅/follow/ミュート/再生速度、最後に表示した diff 範囲を保存します。",
+                  ],
+                  [
+                    "agent-screen-rules.json",
+                    "設定画面で保存したターミナル状態の画面判定ルール。上書きを削除すると組み込みルールへ戻ります。",
                   ],
                   [
                     "view-state.json",

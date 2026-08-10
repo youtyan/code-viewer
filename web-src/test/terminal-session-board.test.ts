@@ -8,10 +8,14 @@ import {
   test,
   vi,
 } from "vitest";
-import type { AgentStateRecord } from "../core/agent-state";
+import type {
+  AgentStateObservationError,
+  AgentStateRecord,
+} from "../core/agent-state";
 import type { TmuxPanesResponse } from "../core/tmux";
 import { terminalText } from "../views/terminal/i18n";
 import { createSessionBoard } from "../views/terminal/session-board";
+import { q } from "./_test-helpers";
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -68,7 +72,11 @@ function states(values: Array<AgentStateRecord["state"]>): AgentStateRecord[] {
   }));
 }
 
-function createBoard(inRepo: boolean[], agentStates: AgentStateRecord[]) {
+function createBoard(
+  inRepo: boolean[],
+  agentStates: AgentStateRecord[],
+  stateErrors: AgentStateObservationError[] = [],
+) {
   const board = createSessionBoard({
     getText: () => terminalText("ja"),
     onSelectShell: vi.fn(),
@@ -84,9 +92,39 @@ function createBoard(inRepo: boolean[], agentStates: AgentStateRecord[]) {
     shellAvailable: true,
     shellUnavailableReason: "",
     states: agentStates,
+    stateErrors,
   });
   return board;
 }
+
+test("観測エラーを全件・詳細・スタック付きで表示する", () => {
+  const board = createBoard(
+    [],
+    [],
+    [
+      {
+        operation: "list_terminals",
+        target: "",
+        at: 1,
+        detail: 'Error: first failure\nDetails: {"reason":"one"}',
+        stack: "Error: first failure\n  at first.ts:1:1",
+      },
+      {
+        operation: "capture_screen",
+        target: "%2",
+        at: 2,
+        detail: "Error: second failure",
+        stack: "Error: second failure\n  at second.ts:2:2",
+      },
+    ],
+  );
+  const error = q<HTMLElement>(board.el, ".terminal-observation-errors");
+  expect(error.hidden).toBe(false);
+  expect(error.textContent).toContain("list_terminals");
+  expect(error.textContent).toContain("reason");
+  expect(error.textContent).toContain("capture_screen %2");
+  expect(error.textContent).toContain("second.ts:2:2");
+});
 
 function selectValue(select: HTMLSelectElement, value: string): void {
   select.value = value;

@@ -68,6 +68,18 @@ Requires Node.js 20 or newer. Development uses
   bottom tier is the tmux sessions no shell has opened yet. Each pane is
   labelled with the title tmux shows for it — a coding agent usually puts what
   it is doing there, so the tree alone tells you which pane is busy.
+- Terminal status combines lifecycle reports with priority-based matching of
+  the live terminal title and recent visible lines. Matching rules can report
+  working, waiting, idle, or keep the previous state. A target is tracked only
+  after a lifecycle report or a visible rule identifies it; screen motion is
+  then used as a fallback. A working match expires when its title and screen
+  stop changing, so a stale status line does not stay active. Edit the complete
+  JSON rule set under Settings & Help → Settings. Its regular expressions use a
+  bounded safe subset; combine conditions with `all` / `any`. Invalid changes
+  list every validation error and do not replace the active rules; restoring
+  the built-in set removes the saved override so later releases can supply
+  updated defaults. The editor includes an expandable field guide, a valid
+  example, and live JSON syntax highlighting.
 - Click a pane and the panel takes you to it. If a shell already has that
   session open, it switches to that shell and makes the pane current; otherwise
   a shell is opened and attached for you. A session moves up to the top tier the
@@ -264,7 +276,8 @@ palette, Ctrl+G grep palette, the Datastores browser, and the file change
 watcher — the same list applies to all five. Both the skip list and the hide
 list accept gitignore-style wildcards (`*`, `?`, `[abc]`, `[!abc]`) in
 addition to exact names. Everything you change in Viewer
-Settings is saved on the server under `.code-viewer/settings.json` (no
+Settings remains a local draft until you select **Save changes**, then it is
+saved on the server under `.code-viewer/settings.json` (no
 separate project-level config file). `.DS_Store` and a broad set of
 build/cache directories (`node_modules`, `dist`, `build`, `.next`, `.turbo`,
 `.parcel-cache`, `.vite`, `.angular`, `.dart_tool`, `.venv`, …) are hidden by

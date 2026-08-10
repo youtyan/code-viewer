@@ -164,8 +164,12 @@ describe("state report and readback", () => {
     await post("/_agent/state", { target: PANE, event: "ask" });
     await post("/_agent/state", { target: SHELL, event: "prompt" });
     const res = await call("/_agent/states");
-    const body = (await res?.json()) as { states: { target: string }[] };
+    const body = (await res?.json()) as {
+      states: { target: string }[];
+      errors: unknown[];
+    };
     expect(body.states.map((s) => s.target).sort()).toEqual([PANE, SHELL]);
+    expect(body.errors).toEqual([]);
   });
 
   test("reports an unknown target as missing", async () => {
@@ -275,10 +279,58 @@ describe("hook reports win over guesses", () => {
     expect(getAgentState(PANE)?.source).toBe("activity");
   });
 
+  test("明示的な画面ルールは取りこぼされた申告状態を更新する", () => {
+    recordAgentState({ target: PANE, event: "prompt", source: "hook" });
+    recordAgentState({
+      target: PANE,
+      state: "waiting",
+      source: "screen",
+      override: true,
+    });
+    expect(getAgentState(PANE)?.state).toBe("waiting");
+    expect(getAgentState(PANE)?.source).toBe("screen");
+  });
+
+  test("画面判定が同じ状態の間は状態変更時刻を動かさない", () => {
+    recordAgentState({
+      target: PANE,
+      state: "working",
+      source: "screen",
+      at: 1000,
+    });
+    recordAgentState({
+      target: PANE,
+      state: "working",
+      source: "screen",
+      at: 2000,
+    });
+    expect(getAgentState(PANE)?.updatedAt).toBe(1000);
+    recordAgentState({
+      target: PANE,
+      state: "idle",
+      source: "screen",
+      at: 3000,
+    });
+    expect(getAgentState(PANE)?.updatedAt).toBe(3000);
+  });
+
   test("a later hook report overwrites an earlier one", () => {
     recordAgentState({ target: PANE, event: "ask", source: "hook" });
     recordAgentState({ target: PANE, event: "stop", source: "hook" });
     expect(getAgentState(PANE)?.state).toBe("done");
+  });
+
+  test("画面の待機判定は未読の完了状態を消さない", () => {
+    recordAgentState({ target: PANE, event: "stop", source: "hook" });
+    recordAgentState({
+      target: PANE,
+      state: "idle",
+      source: "screen",
+      override: true,
+    });
+
+    expect(getAgentState(PANE)?.state).toBe("done");
+    expect(getAgentState(PANE)?.source).toBe("hook");
   });
 
   // 申告が一度入ったきり更新されないと、そのセッションは永久に「あなたの番」

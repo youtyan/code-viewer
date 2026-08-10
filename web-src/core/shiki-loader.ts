@@ -7,7 +7,8 @@
 // 評価されないため、複数 view が異なる lang セットで呼んでも shiki.js の
 // バンドル本体は使い回される。
 //
-// ロード失敗時は null を返す (呼び出し側は plain text フォールバック)。
+// 通常はロード失敗時に null を返す。失敗を画面へ出す必要がある入力欄は
+// failureMode: "throw" を使い、元の失敗を呼び出し側で保持する。
 
 export type ShikiHighlighter = {
   codeToHtml: (
@@ -23,6 +24,8 @@ export type ShikiHighlighter = {
 export type ShikiLoaderOptions = {
   themes: string[];
   langs: string[];
+  /** fallback は従来どおり null、throw は呼び出し側へ元の失敗を返す。 */
+  failureMode?: "fallback" | "throw";
 };
 
 type ShikiModule = {
@@ -59,19 +62,20 @@ export function loadShikiHighlighter(
   const key = JSON.stringify({
     themes: [...options.themes].sort(),
     langs: [...options.langs].sort(),
+    failureMode: options.failureMode ?? "fallback",
   });
   const cached = cache.get(key);
   if (cached) return cached;
   // Keep the import specifier non-literal so Bun does not pull shiki into
   // the main bundle.
-  const promise = import(`/${"shiki.js"}`)
-    .then((mod: unknown) =>
-      (mod as ShikiModule).createHighlighter({
-        themes: options.themes,
-        langs: options.langs,
-      }),
-    )
-    .catch(() => null);
+  const load = import(`/${"shiki.js"}`).then((mod: unknown) =>
+    (mod as ShikiModule).createHighlighter({
+      themes: options.themes,
+      langs: options.langs,
+    }),
+  );
+  const promise =
+    options.failureMode === "throw" ? load : load.catch(() => null);
   cache.set(key, promise);
   return promise;
 }

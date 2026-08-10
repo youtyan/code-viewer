@@ -417,6 +417,7 @@ function jsonResponse(body: unknown): Response {
 
 function mockFetch(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+  options: { handleDbUi?: boolean } = {},
 ) {
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
@@ -428,6 +429,11 @@ function mockFetch(
           : input instanceof URL
             ? input.toString()
             : input.url;
+      if (url === "/_db/ui" && options.handleDbUi !== true) {
+        return Promise.resolve(
+          jsonResponse({ version: 1, columnWidths: {}, prefs: {} }),
+        );
+      }
       return Promise.resolve(handler(url, init));
     }) as typeof fetch,
   });
@@ -2040,6 +2046,119 @@ describe("database view SQL error rendering", () => {
     expect(document.querySelector(".db-query-error")?.textContent).toBe(
       "failed to execute query (HTTP 500): query failed",
     );
+    await leaveView(view);
+  });
+
+  test("loads and saves database UI preferences as one explicit operation", async () => {
+    installDatabaseDom();
+    let savedBody = "";
+    let trackedRequests = 0;
+    mockFetch(
+      (url, init) => {
+        if (url !== "/_db/ui")
+          return new Response("unexpected request", { status: 500 });
+        if (init?.method === "PATCH") {
+          savedBody = String(init.body);
+          return jsonResponse({
+            version: 1,
+            columnWidths: {},
+            prefs: { inferFkRails: true, s3TooltipEnabled: false },
+          });
+        }
+        return jsonResponse({
+          version: 1,
+          columnWidths: {},
+          prefs: { inferFkRails: false, s3TooltipEnabled: true },
+        });
+      },
+      { handleDbUi: true },
+    );
+    const view = createViewForTest({
+      trackLoad: async (promise) => {
+        trackedRequests++;
+        return await promise;
+      },
+    });
+
+    await view.loadDbUiPrefs();
+    expect(view.getDbUiPref("inferFkRails", true)).toBe(false);
+    await view.saveDbUiPrefs({
+      inferFkRails: true,
+      s3TooltipEnabled: false,
+    });
+
+    expect(JSON.parse(savedBody)).toEqual({
+      prefs: { inferFkRails: true, s3TooltipEnabled: false },
+    });
+    expect(view.getDbUiPref("inferFkRails", false)).toBe(true);
+    expect(view.getDbUiPref("s3TooltipEnabled", true)).toBe(false);
+    expect(trackedRequests).toBe(2);
+    await leaveView(view);
+  });
+
+  test("surfaces every database UI preference save error detail", async () => {
+    installDatabaseDom();
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            errors: [
+              { code: "invalid_pref", field: "prefs.inferFkRails" },
+              {
+                code: "invalid_value",
+                field: "prefs.s3TooltipEnabled",
+              },
+            ],
+          }),
+          {
+            status: 422,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      { handleDbUi: true },
+    );
+    const view = createViewForTest();
+    let failure: unknown;
+    try {
+      await view.saveDbUiPrefs({ inferFkRails: true });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toMatchObject({
+      message: expect.stringContaining("invalid_pref"),
+    });
+    expect(failure).toMatchObject({
+      message: expect.stringContaining("invalid_value"),
+    });
+    await leaveView(view);
+  });
+
+  test("retries a database UI preference load after preserving its failure", async () => {
+    installDatabaseDom();
+    let requestCount = 0;
+    mockFetch(
+      () => {
+        requestCount++;
+        if (requestCount === 1)
+          return new Response("temporary load failure", { status: 503 });
+        return jsonResponse({
+          version: 1,
+          columnWidths: {},
+          prefs: { inferFkRails: true },
+        });
+      },
+      { handleDbUi: true },
+    );
+    const view = createViewForTest();
+
+    await expect(view.loadDbUiPrefs()).rejects.toThrow(
+      "temporary load failure",
+    );
+    await view.loadDbUiPrefs();
+
+    expect(requestCount).toBe(2);
+    expect(view.getDbUiPref("inferFkRails", false)).toBe(true);
     await leaveView(view);
   });
 });
