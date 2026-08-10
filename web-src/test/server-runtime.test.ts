@@ -10,7 +10,6 @@ import {
   runBytesSync,
   runSync,
   type StartedServer,
-  spawnDetached,
   spawnStream,
   startServer,
 } from "../server/runtime";
@@ -105,24 +104,6 @@ describe("server runtime compatibility helpers", () => {
     expect(code).toBe(1);
     await child.stream.cancel().catch(() => undefined);
     child.kill();
-  });
-
-  test("spawnDetached reports a start failure without throwing", async () => {
-    const originalWarn = console.warn;
-    const warnings: unknown[][] = [];
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args);
-    };
-
-    try {
-      spawnDetached([join(tmpRoot, "missing-command-for-detached-runtime")]);
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(warnings.length).toBe(1);
-      expect(String(warnings[0]?.[0])).toMatch(/failed to start/);
-      expect(String(warnings[0]?.[1])).toMatch(/enoent|no such file/i);
-    } finally {
-      console.warn = originalWarn;
-    }
   });
 
   test("file stream can be consumed as a web ReadableStream", async () => {

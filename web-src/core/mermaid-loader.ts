@@ -1,6 +1,8 @@
 // mermaid を lazy import する共通ローダ。markdown preview (fence ```mermaid)
 // と DB の ER 図描画から呼ばれる。プロセス内で 1 度だけ load + initialize する。
-// 失敗時は null (呼び出し側で fallback)。
+// 失敗時は原因を呼び出し側へ伝播する。
+
+import { createBundleLoader } from "./lazy-bundle";
 
 export type MermaidApi = {
   initialize(config: Record<string, unknown>): void;
@@ -22,21 +24,20 @@ const DEFAULT_CONFIG = {
   er: { useMaxWidth: false },
 };
 
-let mermaidPromise: Promise<MermaidApi | null> | null = null;
+const loadMermaidModule = createBundleLoader<MermaidModule>("mermaid.js");
+let mermaidPromise: Promise<MermaidApi> | null = null;
 let initialized = false;
 
-export function loadMermaid(): Promise<MermaidApi | null> {
+export function loadMermaid(): Promise<MermaidApi> {
   if (!mermaidPromise) {
-    mermaidPromise = import(`/${"mermaid.js"}`)
-      .then((mod: unknown) => {
-        const mermaid = (mod as MermaidModule).default;
-        if (!initialized) {
-          mermaid.initialize(DEFAULT_CONFIG);
-          initialized = true;
-        }
-        return mermaid;
-      })
-      .catch(() => null);
+    mermaidPromise = loadMermaidModule().then((mod) => {
+      const mermaid = mod.default;
+      if (!initialized) {
+        mermaid.initialize(DEFAULT_CONFIG);
+        initialized = true;
+      }
+      return mermaid;
+    });
   }
   return mermaidPromise;
 }

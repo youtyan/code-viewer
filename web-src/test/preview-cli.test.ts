@@ -122,19 +122,17 @@ function makeFakeBrowserCommand() {
   const root = mkdtempSync(join(tmpdir(), "code-viewer-open-"));
   tmpRoots.push(root);
   const log = join(root, "open.log");
-  const commandName =
-    process.platform === "darwin"
-      ? "open"
-      : process.platform === "win32"
-        ? null
-        : "xdg-open";
-  if (!commandName) return null;
-  const command = join(root, commandName);
-  writeFileSync(
-    command,
-    `#!/bin/sh\nprintf '%s\\n' "$@" > "${log}.tmp" && mv "${log}.tmp" "${log}"\n`,
-  );
-  chmodSync(command, 0o755);
+  if (process.platform === "win32") return null;
+  const commandNames =
+    process.platform === "darwin" ? ["open"] : ["xdg-open", "gio", "cmd.exe"];
+  for (const commandName of commandNames) {
+    const command = join(root, commandName);
+    writeFileSync(
+      command,
+      `#!/bin/sh\nlast=''\nfor arg do last=$arg; done\nprintf '%s\\n' "$last" > "${log}.tmp" && mv "${log}.tmp" "${log}"\n`,
+    );
+    chmodSync(command, 0o755);
+  }
   return { root, log };
 }
 

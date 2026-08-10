@@ -1,7 +1,7 @@
 // xterm.js を lazy import する共通ローダ。terminal ドロワーからだけ呼ばれる。
 // mermaid / shiki / yaml と同じく別バンドル (web/xterm.js) にしてあるので、
 // ドロワーを開くまでターミナルエミュレータのコードは落ちてこない。
-// 失敗時は null (呼び出し側で fallback)。
+// 失敗時は原因を呼び出し側へ伝播する。
 //
 // 型は @xterm/xterm の d.ts をそのまま使わず、ここで使う分だけを写している
 // (mermaid-loader / shiki-loader と同じ扱い)。ローダの利用側が xterm の型に
