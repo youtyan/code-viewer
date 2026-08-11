@@ -188,20 +188,6 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
   return out;
 }
 
-export function spawnDetached(args: string[]): void {
-  const child = spawn(args[0], args.slice(1), {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.on("error", (err) => {
-    console.warn(
-      "[code-viewer] failed to start detached command:",
-      err.message,
-    );
-  });
-  child.unref();
-}
-
 export function spawnStream(
   args: string[],
   cwd: string,

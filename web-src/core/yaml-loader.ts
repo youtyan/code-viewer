@@ -1,6 +1,6 @@
 // yaml を lazy import する共通ローダ。JSON/YAML ツールからだけ呼ばれる。
 // mermaid / shiki と同じく別バンドル (web/yaml.js) にしてあるので、ツールを
-// 開くまでパーサのコードは落ちてこない。失敗時は null (呼び出し側で fallback)。
+// 開くまでパーサのコードは落ちてこない。失敗時は原因を呼び出し側へ伝播する。
 
 import { createBundleLoader } from "./lazy-bundle";
 

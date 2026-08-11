@@ -64,13 +64,12 @@ describe("open path in OS action", () => {
     ).toBe(true);
   });
 
-  test("server validates repo-relative paths before spawning the OS opener", () => {
+  test("server validates repo-relative paths before opening the directory", () => {
     expect(
       server.includes(
         "function safeOpenWorktreePath(path: string): string | null",
       ),
     ).toBe(true);
-    expect(server.includes("spawnDetached(cmd)")).toBe(true);
   });
 
   test("server forbids browsing Git internal tree paths", () => {

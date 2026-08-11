@@ -10,6 +10,8 @@
 // 通常はロード失敗時に null を返す。失敗を画面へ出す必要がある入力欄は
 // failureMode: "throw" を使い、元の失敗を呼び出し側で保持する。
 
+import { createBundleLoader } from "./lazy-bundle";
+
 export type ShikiHighlighter = {
   codeToHtml: (
     code: string,
@@ -52,6 +54,7 @@ export function highlightToInnerHtml(
   return pre ? pre.innerHTML : "";
 }
 
+const loadShikiModule = createBundleLoader<ShikiModule>("shiki.js");
 const cache = new Map<string, Promise<ShikiHighlighter | null>>();
 
 export function loadShikiHighlighter(
@@ -66,10 +69,8 @@ export function loadShikiHighlighter(
   });
   const cached = cache.get(key);
   if (cached) return cached;
-  // Keep the import specifier non-literal so Bun does not pull shiki into
-  // the main bundle.
-  const load = import(`/${"shiki.js"}`).then((mod: unknown) =>
-    (mod as ShikiModule).createHighlighter({
+  const load = loadShikiModule().then((mod) =>
+    mod.createHighlighter({
       themes: options.themes,
       langs: options.langs,
     }),

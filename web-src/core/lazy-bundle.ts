@@ -2,15 +2,15 @@
 //
 // mermaid / shiki / yaml / xterm は重いので app.js には焼き込まず、独立した
 // バンドルとして build:web が出力している。それを「初回呼び出しで 1 度だけ
-// import し、以後は同じ Promise を返し、失敗したら null」という同じ形で読む
+// import し、以後は同じ Promise を返す」という同じ形で読む
 // ローダが並ぶので、その形をここに 1 つだけ持つ。
 //
 // import specifier をテンプレートリテラル経由にしているのは bundler に静的
 // 解決させないため。ここを素の文字列リテラルにすると bun build が対象を
 // app.js へ巻き込み、分割した意味がなくなる。
 
-/** バンドルを読み込む関数。失敗時は null (呼び出し側で fallback)。 */
-export type BundleLoader<T> = () => Promise<T | null>;
+/** バンドルを読み込む関数。import / 初期化の失敗は呼び出し側へ伝播する。 */
+export type BundleLoader<T> = () => Promise<T>;
 
 /**
  * `web/<bundleFile>` を動的 import するローダを作る。
@@ -23,12 +23,14 @@ export function createBundleLoader<T>(
   bundleFile: string,
   init?: (mod: unknown) => T | Promise<T>,
 ): BundleLoader<T> {
-  let pending: Promise<T | null> | null = null;
+  let pending: Promise<T> | null = null;
   return () => {
     if (!pending) {
-      pending = import(`/${bundleFile}`)
-        .then((mod: unknown) => (init ? init(mod) : (mod as T)))
-        .catch(() => null);
+      // 配布時に web/ 直下から取得する実行時 URL。ビルド対象の相対 import
+      // ではないため、Vite の静的解析には渡さない。
+      pending = import(/* @vite-ignore */ `/${bundleFile}`).then(
+        (mod: unknown) => (init ? init(mod) : (mod as T)),
+      );
     }
     return pending;
   };
