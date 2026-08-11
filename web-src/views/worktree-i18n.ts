@@ -172,6 +172,11 @@ export type WorktreeText = {
     missingBody: (name: string) => string;
     missingNote: string;
     /**
+     * ロックされた登録は git worktree prune が黙って飛ばす (終了コードは 0)。
+     * 押しても消えないことを先に言う。
+     */
+    lockedNote: string;
+    /**
      * prune は対象を 1 本に絞れないので、同じ状態の登録が他にあるなら
      * まとめて消えることを件数つきで伝える。
      */
@@ -353,6 +358,8 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       missingBody: (name) => `Remove the entry for "${name}"?`,
       missingNote:
         "Its folder is already gone from disk; only the git entry is removed.",
+      lockedNote:
+        "This entry is locked, so git will leave it in place. Unlock it first.",
       missingOthers: (n) =>
         n === 1
           ? "1 other entry whose folder is gone will be cleaned up at the same time."
@@ -510,6 +517,8 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       missingBody: (name) => `作業ツリー「${name}」の登録を消しますか。`,
       missingNote:
         "フォルダは既にディスク上にありません。git の管理情報だけを消します。",
+      lockedNote:
+        "この登録はロックされているので、git はそのまま残します。先にロックを外してください。",
       missingOthers: (n) =>
         `フォルダが無くなっている他の登録 ${n} 件も、同時に整理されます。`,
       submit: "削除する",

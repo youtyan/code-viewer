@@ -563,6 +563,22 @@ describe("worktree remove", () => {
     expect(branches).toContain("feature-x");
     expect(branches).toContain("feature-y");
   });
+
+  test("refuses to report success when prune leaves a locked entry behind", async () => {
+    await post("/_worktree/add", { name: "feature-x" });
+    const added = await listedPath((entry) => entry.name === "feature-x");
+    runGit(repo, ["worktree", "lock", added]);
+    rmSync(added, { recursive: true, force: true });
+
+    // git worktree prune はロックされた登録を黙って飛ばして 0 を返す。
+    // 終了コードだけで成功と言うと、消えていないのに消えたことになる。
+    const res = await post("/_worktree/remove", { path: added });
+    expect(res?.status).toBe(409);
+    expect(await res?.text()).toContain("locked");
+
+    const body = await listWorktrees();
+    expect(body.worktrees.map((entry) => entry.name)).toContain("feature-x");
+  });
 });
 
 describe("last touched", () => {

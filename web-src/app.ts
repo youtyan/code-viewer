@@ -5409,7 +5409,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setPageMode,
     syncHeaderMenu,
     setStatus,
-    openPathInOs,
+    createOpenPathButton,
   });
   relocalizeWorktree = () => WORKTREE_VIEW?.localize();
 

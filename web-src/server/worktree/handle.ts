@@ -268,13 +268,32 @@ async function handleRemovePost(req: Request, cwd: string): Promise<Response> {
 
   // フォルダが既に無いエントリは、git によっては remove を拒否される。
   // 消すものは管理情報だけなので prune に切り替える。
-  const result = existsSync(resolved.path)
-    ? await worktreeRemoveResultAsync(resolved.root, {
+  const pruning = !existsSync(resolved.path);
+  const result = pruning
+    ? await worktreePruneResultAsync(resolved.root)
+    : await worktreeRemoveResultAsync(resolved.root, {
         path: resolved.path,
         force: body.force === true,
-      })
-    : await worktreePruneResultAsync(resolved.root);
+      });
   if (result.error) return textError(result.error, result.status ?? 500);
+
+  // **prune の終了コードを成功とみなさない。** git worktree prune は
+  // ロックされた登録を黙って飛ばしたうえで 0 を返す (実測: lock したまま
+  // フォルダを消した作業ツリーは、prune -v が何も出さず 0 で終わった後も
+  // git worktree list に残り続ける)。消えたことを確かめてから成功と言う。
+  if (pruning) {
+    const after = await worktreeListResultAsync(resolved.root);
+    if (after.error) return textError(after.error, after.status ?? 500);
+    if (findWorktree(after.worktrees, resolved.path)) {
+      return textError(
+        resolved.ref.locked
+          ? "the entry is locked, so git worktree prune left it in place; unlock it first"
+          : "git worktree prune left the entry in place",
+        409,
+      );
+    }
+  }
+
   try {
     await stopWorktreeServer(resolved.path);
   } catch (error) {

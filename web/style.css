@@ -7981,7 +7981,10 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   font-size: var(--ui-font-sm);
 }
 
-/* 2 段目のフォルダの場所。パスは末尾が肝心なので、長いときは頭側を省略する。 */
+/* 2 段目のフォルダの場所。パスは末尾が肝心なので、長いときは頭側を省略する。
+   direction: rtl は #filelist li .name と同じ手で、::before の LRM
+   (U+200E) まで込みで 1 組。これが無いと、末尾が記号で終わるパスで並びが
+   崩れる。 */
 .worktree-row-path {
   display: block;
   direction: rtl;
@@ -7992,6 +7995,9 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   color: var(--fg-muted);
   font-size: var(--ui-font-sm);
   margin-top: 2px;
+}
+.worktree-row-path::before {
+  content: "\200E";
 }
 
 /* 4 段目に添える「取り込むコマンドをコピー」。文字側 (.author) だけが縮んで
@@ -8119,6 +8125,10 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   white-space: nowrap;
   color: var(--fg);
   font-family: var(--mono, monospace);
+}
+/* .worktree-row-path と同じ理由の LRM。rtl と 1 組で使う。 */
+.worktree-target-path::before {
+  content: "\200E";
 }
 
 /* 作るかどうかの判断に要らない注記 (.gitignore の話) を本文から下ろす先。

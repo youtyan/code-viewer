@@ -18,7 +18,6 @@ import {
   COPY_16_PATHS,
   FOLDER_ICON_PATHS,
   iconSvg,
-  OPEN_EXTERNAL_16_PATH,
 } from "../core/icons";
 import type { AppRoute } from "../core/routes";
 import type {
@@ -62,12 +61,16 @@ export type WorktreeViewDeps = {
   setPageMode(): void;
   syncHeaderMenu(): void;
   setStatus(status: "live" | "refreshing" | "error" | null): void;
-  /** app.ts の既存の仕組み (/_open_path) でフォルダを OS から開く。 */
-  openPathInOs(
+  /**
+   * フォルダを OS のファイルマネージャで開くボタン。Repository / Diff /
+   * サイドバー / ソースの各画面と同じ app.ts の共有ファクトリを受け取る
+   * (アイコン・クラス・失敗時の扱いを 1 箇所に保つため)。
+   */
+  createOpenPathButton(
     path: string,
     kind: "directory" | "file-parent",
-    button?: HTMLButtonElement,
-  ): Promise<void>;
+    title?: string,
+  ): HTMLButtonElement;
 };
 
 export type WorktreeView = PageView & {
@@ -569,10 +572,16 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     if (item.missing) {
       body.appendChild(el("p", "", t.removeDialog.missingBody(item.name)));
       body.appendChild(el("p", "worktree-hint", t.removeDialog.missingNote));
+      // ロックされた登録は prune が黙って飛ばす (サーバが 409 で返す)。
+      // 押す前に理由が分かるようにする。
+      if (item.locked) {
+        body.appendChild(el("p", "worktree-warn", t.removeDialog.lockedNote));
+      }
       // prune は対象を 1 本に絞れないので、同じ状態の登録が他にあれば
-      // まとめて消えることを先に伝える。
+      // まとめて消えることを先に伝える。飛ばされるロック済みは数に入れない。
       const otherMissing = (data?.worktrees || []).filter(
-        (candidate) => candidate.missing && candidate.id !== item.id,
+        (candidate) =>
+          candidate.missing && !candidate.locked && candidate.id !== item.id,
       ).length;
       if (otherMissing > 0) {
         body.appendChild(
@@ -734,34 +743,27 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /**
-   * 「フォルダを開く」。行の中ではアイコンだけ、案内カードでは文字つき。
-   * 実体は app.ts が持つ /_open_path の呼び出しで、Finder / Explorer が開く。
+   * 「フォルダを開く」。中身は app.ts の共有ファクトリがそのまま作る
+   * (Repository / Diff / サイドバー / ソースと同じもの)。
+   *
+   * 案内カードでは文字つきにしたいので、同じボタンにラベルを足して枠だけ
+   * 差し替える。**ここでボタンを作り直さない。** アイコン・失敗時の扱いが
+   * app.ts 側だけ直されて、この画面が取り残される。
    */
   function openFolderButton(
     item: WorktreeItem,
     withLabel: boolean,
   ): HTMLButtonElement {
     const t = text();
-    const button = el(
-      "button",
-      withLabel
-        ? "gdp-btn gdp-btn-sm gdp-open-path"
-        : "gdp-file-header-icon gdp-open-path",
-      withLabel ? t.actions.openFolder : undefined,
+    const button = deps.createOpenPathButton(
+      item.path,
+      "directory",
+      t.actions.openFolderTitle,
     );
-    button.type = "button";
-    button.title = t.actions.openFolderTitle;
-    button.setAttribute("aria-label", t.actions.openFolderTitle);
-    if (!withLabel) {
-      button.innerHTML = iconSvg(
-        "octicon-link-external",
-        OPEN_EXTERNAL_16_PATH,
-      );
+    if (withLabel) {
+      button.className = "gdp-btn gdp-btn-sm gdp-open-path";
+      button.textContent = t.actions.openFolder;
     }
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      void deps.openPathInOs(item.path, "directory", button);
-    });
     return button;
   }
 
@@ -1032,7 +1034,11 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
 
       // 3 段目: ブランチ・変更数・最終コミット。
       const meta = el("span", "meta2");
-      meta.appendChild(el("span", "sha", item.branch || t.badges.detached));
+      // ブランチ名の枠。ブランチが無い作業ツリーはその旨を出し、他のバッジと
+      // 同じように理由を title に添える。
+      const branchName = el("span", "sha", item.branch || t.badges.detached);
+      if (!item.branch) branchName.title = t.badges.detachedTitle;
+      meta.appendChild(branchName);
       meta.appendChild(
         el(
           "span",
@@ -1396,7 +1402,6 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     shell: HTMLElement,
   ): Promise<void> {
     const seq = lifecycle;
-    const serverGeneration = acceptedServerGeneration;
     const renderKey = diffKey(item);
     const t = text();
     const body = shell.querySelector<HTMLElement>(".gdp-shell-body");

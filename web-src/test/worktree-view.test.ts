@@ -302,7 +302,17 @@ async function mountWith(
     setPageMode: () => undefined,
     syncHeaderMenu: () => undefined,
     setStatus: () => undefined,
-    openPathInOs: () => Promise.resolve(),
+    // 実物 (app.ts) と同じ形のボタンを返す。中身の挙動はここでは見ない。
+    createOpenPathButton: (_path, _kind, title) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-file-header-icon gdp-open-path";
+      if (title) {
+        button.title = title;
+        button.setAttribute("aria-label", title);
+      }
+      return button;
+    },
   });
   await view.enter();
   // 差分は「見えたものから」読む。IntersectionObserver の無い環境では全部
@@ -788,6 +798,49 @@ describe("remove dialog", () => {
     expect(openDialog().textContent).toContain(
       TEXT.removeDialog.missingOthers(1),
     );
+  });
+
+  test("leaves locked entries out of the count, because prune skips them", async () => {
+    await openRemoveDialog(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "feature-x",
+          path: "/repo/.worktrees/feature-x",
+          branch: "feature-x",
+          missing: true,
+        }),
+        item({
+          name: "feature-y",
+          path: "/repo/.worktrees/feature-y",
+          branch: "feature-y",
+          missing: true,
+          locked: true,
+        }),
+      ]),
+      "/repo/.worktrees/feature-x",
+    );
+    // ロックされた登録は prune が飛ばすので、まとめて消える数に入れない。
+    expect(openDialog().textContent).not.toContain(
+      TEXT.removeDialog.missingOthers(1),
+    );
+  });
+
+  test("says up front that a locked entry will not go away", async () => {
+    await openRemoveDialog(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "feature-x",
+          path: "/repo/.worktrees/feature-x",
+          branch: "feature-x",
+          missing: true,
+          locked: true,
+        }),
+      ]),
+      "/repo/.worktrees/feature-x",
+    );
+    expect(openDialog().textContent).toContain(TEXT.removeDialog.lockedNote);
   });
 });
 
