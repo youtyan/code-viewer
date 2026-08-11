@@ -18,6 +18,7 @@ import {
   COPY_16_PATHS,
   FOLDER_ICON_PATHS,
   iconSvg,
+  KEBAB_16_PATH,
 } from "../core/icons";
 import type { AppRoute } from "../core/routes";
 import type {
@@ -27,6 +28,11 @@ import type {
 } from "../core/types";
 import type { WorktreeFileChange, WorktreeItem } from "../core/worktree";
 import { worktreeBranchError, worktreeNameError } from "../core/worktree";
+import {
+  type ContextMenuItem,
+  closeContextMenu,
+  showContextMenu,
+} from "./context-menu";
 import type { PageView } from "./page-view";
 import { showFormDialog } from "./ui-dialog";
 import type { WorktreeText } from "./worktree-i18n";
@@ -268,6 +274,8 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   function suspend(): void {
     // 進行中の読み込みの結果を捨てる。画面を離れた後に書き換えない。
     lifecycle++;
+    // 開いたままのメニューは body 直下に居るので、この画面を畳んでも残る。
+    closeContextMenu();
     observer?.disconnect();
     observer = null;
     diffFor = null;
@@ -791,20 +799,28 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     button.addEventListener("click", async (event) => {
       event.stopPropagation();
       button.classList.remove("copied", "failed");
-      try {
-        await navigator.clipboard.writeText(value);
-        button.classList.add("copied");
-      } catch (error) {
-        // 見た目だけで終わらせない。権限拒否などの理由はコンソールに残す。
-        console.error("[code-viewer] failed to copy to clipboard", error);
-        button.classList.add("failed");
-      }
+      button.classList.add((await copyText(value)) ? "copied" : "failed");
       window.setTimeout(
         () => button.classList.remove("copied", "failed"),
         1200,
       );
     });
     return button;
+  }
+
+  /**
+   * クリップボードへ写す。**失敗を握り潰さない。** 呼び出し側が見た目を
+   * 変えられるように成否を返し、理由はコンソールに残す (権限拒否など、
+   * 画面の色だけでは何も分からないため)。
+   */
+  async function copyText(value: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch (error) {
+      console.error("[code-viewer] failed to copy to clipboard", error);
+      return false;
+    }
   }
 
   /** 「パスをコピー」。cd して作業を始めるためのもの。 */
@@ -821,18 +837,30 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /**
-   * 取り込むコマンドのコピー。**実行はしない。** このアプリは見るためのもの
-   * なので、リポジトリを書き換える操作は持たない。そのまま入る作業ツリーに
-   * だけ出す (衝突する行に出しても押す意味が無い)。
+   * 取り込むコマンド。**このアプリは実行しない。** 見るためのものなので、
+   * リポジトリを書き換える操作は持たない。そのまま入る作業ツリーにだけ出す
+   * (衝突する行に出しても押す意味が無い)。
    */
-  function copyMergeButton(item: WorktreeItem): HTMLButtonElement | null {
+  function mergeCommand(
+    item: WorktreeItem,
+  ): { base: string; branch: string; command: string } | null {
     const divergence = item.divergence;
     if (!divergence || divergence.mergeState !== "clean") return null;
     if (!item.branch || !divergence.base) return null;
+    return {
+      base: divergence.base,
+      branch: item.branch,
+      command: `git switch ${divergence.base} && git merge ${item.branch}`,
+    };
+  }
+
+  function copyMergeButton(item: WorktreeItem): HTMLButtonElement | null {
+    const merge = mergeCommand(item);
+    if (!merge) return null;
     const t = text();
     return copyButton(
-      `git switch ${divergence.base} && git merge ${item.branch}`,
-      t.actions.copyMergeTitle(divergence.base, item.branch),
+      merge.command,
+      t.actions.copyMergeTitle(merge.base, merge.branch),
     );
   }
 
@@ -861,64 +889,98 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /**
-   * 選んでいる作業ツリーへの操作。**一覧の上に固定して出す。**
+   * 行ごとの操作メニュー。**行の中にボタンを並べない。**
    *
-   * 行の中に置いていたことがあるが、選んだ瞬間にクリックした場所へボタンが
-   * 現れるので誤爆が怖い、という声が実際に出た。位置を動かさないことを優先し、
-   * 「どれへの操作か」は行の位置ではなく先頭の見出し (headingFor) で示す。
-   * 同じ名前が複数あるときは worktreeLabel がパスを添える。
+   * 選んだ行の中に並べたら、選んだ瞬間にクリックした場所へボタンが現れて
+   * 誤爆が怖いと言われ、一覧の上に固定したら今度は削除が画面の一番目立つ
+   * ところに居座った。開くまで何も出さないメニューなら、どちらも起きない。
+   *
+   * 選択とは独立しているので、行を選ばずにその行の操作ができる。
    */
-  function selectedActions(item: WorktreeItem): HTMLElement {
+  function rowMenuItems(item: WorktreeItem): ContextMenuItem[] {
     const t = text();
-    const panel = el("div", "worktree-actions");
-    panel.appendChild(
-      el(
-        "span",
-        "worktree-actions-for",
-        t.actions.headingFor(worktreeLabel(item.id)),
-      ),
-    );
-    const actions = el("div", "worktree-actions-buttons");
-    panel.appendChild(actions);
+    const items: ContextMenuItem[] = [];
     if (!item.missing && !item.bare) {
-      actions.appendChild(openFolderButton(item, false));
-      actions.appendChild(copyPathButton(item, false));
-      const open = headButton(t.open, t.openTitle, () => {
-        void openWorktree(item);
+      items.push({
+        label: t.actions.openFolder,
+        title: t.actions.openFolderTitle,
+        onSelect: () => {
+          // 共有ファクトリのボタンをそのまま押す。開き方と失敗時の扱いを
+          // app.ts 側と 1 つに保つため、ここで fetch を書かない。
+          openFolderButton(item, false).click();
+        },
       });
-      open.disabled = !!busyPath;
-      open.setAttribute("aria-busy", busyPath === item.path ? "true" : "false");
-      actions.appendChild(open);
+      items.push({
+        label: t.actions.copyPath,
+        title: t.actions.copyPathTitle,
+        onSelect: () => {
+          copyPathButton(item, false).click();
+        },
+      });
+      items.push({
+        label: t.open,
+        title: t.openTitle,
+        disabled: !!busyPath,
+        onSelect: () => {
+          void openWorktree(item);
+        },
+      });
     }
     // 起こしたサーバは親より長く生きる。止める口をここに置かないと、
     // 開いた本人にも止め方が無い。自分自身は止めさせない (サーバも 409)。
     if (item.serverUrl && !item.current) {
-      const stop = headButton(
-        t.actions.stopServer,
-        t.actions.stopServerTitle,
-        () => {
+      items.push({
+        label: t.actions.stopServer,
+        title: t.actions.stopServerTitle,
+        disabled: !!busyPath,
+        onSelect: () => {
           void stopWorktreeServer(item);
         },
-      );
-      stop.disabled = !!busyPath;
-      actions.appendChild(stop);
+      });
+    }
+    const merge = mergeCommand(item);
+    if (merge) {
+      items.push({
+        label: t.actions.copyMerge,
+        title: t.actions.copyMergeTitle(merge.base, merge.branch),
+        onSelect: () => {
+          void copyText(merge.command);
+        },
+      });
     }
     // 自分が映している作業ツリーは外させない。サーバも 409 で拒否する。
     if (!item.current) {
-      // **取り返しのつかない操作を、よく使う操作と同じ段・同じ強さで置かない。**
-      // 赤い枠のボタンとして並べたことがあるが、画面の一番上で一番目立つ塊に
-      // なってしまった。段を分け、普段は沈めて、ホバーで初めて赤くする。
-      // 押した後は確認ダイアログ (フルパスと「元に戻せません」つき) が出る。
-      const remove = el("button", "worktree-actions-remove", t.remove);
-      remove.type = "button";
-      remove.title = t.removeTitle;
-      remove.disabled = !!busyPath;
-      remove.addEventListener("click", () => {
-        void removeWorktree(item);
+      if (items.length) items.push({ kind: "separator" });
+      items.push({
+        label: t.remove,
+        title: t.removeTitle,
+        danger: true,
+        disabled: !!busyPath,
+        onSelect: () => {
+          void removeWorktree(item);
+        },
       });
-      panel.appendChild(remove);
     }
-    return panel;
+    return items;
+  }
+
+  /** 行の右端に置く「…」。押すまで操作は 1 つも見えない。 */
+  function rowMenuButton(item: WorktreeItem): HTMLButtonElement | null {
+    const items = rowMenuItems(item);
+    if (!items.length) return null;
+    const t = text();
+    const button = el("button", "worktree-row-menu");
+    button.type = "button";
+    button.title = t.actions.menuTitle;
+    button.setAttribute("aria-label", t.actions.menuFor(item.name));
+    button.setAttribute("aria-haspopup", "menu");
+    button.innerHTML = iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH);
+    button.addEventListener("click", (event) => {
+      // 行のクリック (選択) と混ぜない。メニューを開くだけ。
+      event.stopPropagation();
+      showContextMenu(button, rowMenuItems(item));
+    });
+    return button;
   }
 
   function note(body: string, isError = false): HTMLElement {
@@ -949,11 +1011,6 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       }),
     );
     listPanel.appendChild(head);
-
-    // 選んでいる作業ツリーへの操作は、行の中ではなくここに固定する。行に
-    // 入れると選んだ瞬間にクリックした場所へボタンが現れて誤爆する。
-    const picked = selectedWorktree();
-    if (picked) listPanel.appendChild(selectedActions(picked));
 
     worktreeFilterInput.placeholder = t.panes.filterWorktrees;
     const filterWrap = el("div", "history-filter-wrap");
@@ -1028,6 +1085,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         });
         head.appendChild(wrap);
       }
+      // 操作は「…」の中だけ。行を選ばなくても、その行に対して実行できる。
+      const menu = rowMenuButton(item);
+      if (menu) head.appendChild(menu);
       row.appendChild(head);
 
       // 2 段目: フォルダの場所。「それはどこのフォルダなのか」が一番知りたい

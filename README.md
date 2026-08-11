@@ -29,12 +29,11 @@ Requires Node.js 20 or newer. Development uses
   uncommitted work and commits made since the branch point, and a banner lists
   every file that more than one worktree is changing, which is the conflict you
   would otherwise only find at merge time. Each row carries the folder it lives
-  in and when its files were last touched, and the actions for the picked one
-  sit in a fixed strip above the list — open that folder, copy its path, view it
-  in a new tab, stop the server it started, or delete it. Create a worktree
-  under `.worktrees/` (the dialog shows the exact path before you commit to it),
-  delete one (its folder is deleted from disk; the branch is kept), or copy the
-  command that merges it back.
+  in, when its files were last touched, and a "…" holding every action for that
+  worktree — open the folder, copy its path, view it in a new tab, stop the
+  server it started, copy the command that merges it back, or delete it. Create
+  a worktree under `.worktrees/` (the dialog shows the exact path before you
+  commit to it); deleting one removes its folder from disk and keeps the branch.
 - Open files directly from the repository or diff view, including text-like
   config/prompt files and large generated files (virtualized source viewer
   with copy/open-full-view).

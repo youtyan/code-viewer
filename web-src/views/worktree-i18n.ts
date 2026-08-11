@@ -96,8 +96,9 @@ export type WorktreeText = {
    * 実際の声があった。位置を固定し、対象は名前で示す。
    */
   actions: {
-    /** 誰に対する操作かを言う見出し。行の位置では示せなくなるため。 */
-    headingFor: (name: string) => string;
+    /** 行の右端の「…」。押すまで操作は 1 つも出さない。 */
+    menuTitle: string;
+    menuFor: (name: string) => string;
     openFolder: string;
     openFolderTitle: string;
     copyPath: string;
@@ -110,6 +111,7 @@ export type WorktreeText = {
      * そのまま入る作業ツリーだけに出す、取り込むコマンドのコピー。
      * 実行はしない (このアプリはリポジトリを書き換えない)。
      */
+    copyMerge: string;
     copyMergeTitle: (base: string, branch: string) => string;
   };
   /** 変更がまだ無い作業ツリーの右ペイン。次にやることを書く。 */
@@ -289,14 +291,16 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     noCommit: "no commit",
     lastTouched: (when) => `updated ${when}`,
     actions: {
-      headingFor: (name) => `Selected: ${name}`,
+      menuTitle: "Actions for this worktree",
+      menuFor: (name) => `Actions for ${name}`,
       openFolder: "Open folder",
       openFolderTitle: "Open this folder in the OS file manager",
       copyPath: "Copy path",
       copyPathTitle: "Copy the path to this folder",
-      stopServer: "Stop",
+      stopServer: "Stop its server",
       stopServerTitle: "Stop the code-viewer running for this folder",
       stopFailed: "Failed to stop the server.",
+      copyMerge: "Copy merge command",
       copyMergeTitle: (base, branch) =>
         `Copy the command that merges ${branch} into ${base}`,
     },
@@ -451,14 +455,16 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     noCommit: "コミットなし",
     lastTouched: (when) => `最終更新 ${when}`,
     actions: {
-      headingFor: (name) => `${name} に対して`,
+      menuTitle: "この作業ツリーへの操作",
+      menuFor: (name) => `${name} への操作`,
       openFolder: "フォルダを開く",
       openFolderTitle: "このフォルダをファイルマネージャで開きます",
       copyPath: "パスをコピー",
       copyPathTitle: "このフォルダの場所をコピーします",
-      stopServer: "止める",
+      stopServer: "サーバを止める",
       stopServerTitle: "このフォルダで動いている code-viewer を止めます",
       stopFailed: "サーバを止められませんでした。",
+      copyMerge: "マージのコマンドをコピー",
       copyMergeTitle: (base, branch) =>
         `${branch} を ${base} に取り込むコマンドをコピーします`,
     },

@@ -347,6 +347,28 @@ function texts(root: ParentNode, selector: string): string[] {
   );
 }
 
+/** 行の「…」を押してメニューを開き、並んだ項目の文言を返す。 */
+function openRowMenu(panel: HTMLElement, rowIndex: number): string[] {
+  const buttons = panel.querySelectorAll<HTMLButtonElement>(
+    ".history-item .worktree-row-menu",
+  );
+  const button = buttons[rowIndex];
+  if (!button) throw new Error(`row ${rowIndex} has no menu button`);
+  button.click();
+  const menu = document.querySelector(".gdp-context-menu");
+  if (!menu) throw new Error("the menu did not open");
+  return texts(menu, "button");
+}
+
+/** 開いているメニューの項目を文言で取る。 */
+function menuItem(label: string): HTMLButtonElement {
+  const found = Array.from(
+    document.querySelectorAll<HTMLButtonElement>(".gdp-context-menu button"),
+  ).find((button) => button.textContent === label);
+  if (!found) throw new Error(`the menu has no "${label}"`);
+  return found;
+}
+
 function lastRoute(routes: AppRoute[]): AppRoute | undefined {
   return routes[routes.length - 1];
 }
@@ -513,24 +535,26 @@ describe("worktree list panel", () => {
     );
   });
 
-  test("offers open and remove for the picked worktree only", async () => {
+  test("offers every action from the row's own menu, without picking it", async () => {
     const { panel } = await mountWith(
       response([
         item({ name: "repo", current: true }),
         item({ name: "other", path: "/repo/.worktrees/other" }),
       ]),
-      { route: { wt: "/repo/.worktrees/other" } },
     );
-    expect(texts(panel, "button.worktree-head-btn")).toContain(TEXT.open);
-    expect(texts(panel, ".worktree-actions-remove")).toContain(TEXT.remove);
+    // 選んでいない行でも、その行の「…」から操作できる。
+    const labels = openRowMenu(panel, 1);
+    expect(labels).toContain(TEXT.open);
+    expect(labels).toContain(TEXT.actions.openFolder);
+    expect(labels).toContain(TEXT.actions.copyPath);
+    expect(labels).toContain(TEXT.remove);
   });
 
   test("never offers to remove the worktree this server serves", async () => {
     const { panel } = await mountWith(
       response([item({ name: "repo", current: true })]),
-      { route: { wt: "/repo" } },
     );
-    expect(panel.querySelector(".worktree-actions-remove")).toBeNull();
+    expect(openRowMenu(panel, 0)).not.toContain(TEXT.remove);
   });
 
   test("offers to stop a running server, and asks the server to stop it", async () => {
@@ -543,13 +567,9 @@ describe("worktree list panel", () => {
           serverUrl: "http://127.0.0.1:5050/",
         }),
       ]),
-      { route: { wt: "/repo/.worktrees/other" } },
     );
-    const stop = Array.from(
-      panel.querySelectorAll<HTMLButtonElement>("button.worktree-head-btn"),
-    ).find((button) => button.textContent === TEXT.actions.stopServer);
-    if (!stop) throw new Error("stop button is missing");
-    stop.click();
+    openRowMenu(panel, 1);
+    menuItem(TEXT.actions.stopServer).click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(posts).toContainEqual({
       url: "/_worktree/stop",
@@ -566,11 +586,22 @@ describe("worktree list panel", () => {
           serverUrl: "http://127.0.0.1:64160/",
         }),
       ]),
-      { route: { wt: "/repo" } },
     );
-    expect(texts(panel, "button.worktree-head-btn")).not.toContain(
-      TEXT.actions.stopServer,
+    expect(openRowMenu(panel, 0)).not.toContain(TEXT.actions.stopServer);
+  });
+
+  test("closes the menu when the screen goes away", async () => {
+    const { panel, view } = await mountWith(
+      response([
+        item({ name: "repo", current: true }),
+        item({ name: "other", path: "/repo/.worktrees/other" }),
+      ]),
     );
+    openRowMenu(panel, 1);
+    expect(document.querySelector(".gdp-context-menu")).not.toBeNull();
+    // メニューは body 直下に居るので、畳んだ画面と一緒には消えない。
+    view.suspend();
+    expect(document.querySelector(".gdp-context-menu")).toBeNull();
   });
 });
 
@@ -673,10 +704,14 @@ describe("remove dialog", () => {
     wt: string,
   ): Promise<Mounted> {
     const mounted = await mountWith(list, { route: { wt } });
-    const button = mounted.panel.querySelector<HTMLButtonElement>(
-      ".worktree-actions-remove",
+    // 削除はその行のメニューの中にある。
+    const rows = Array.from(
+      mounted.panel.querySelectorAll<HTMLElement>(".history-item"),
     );
-    if (!button) throw new Error("remove button is missing");
+    const index = rows.findIndex((row) => row.dataset.wt === wt);
+    if (index < 0) throw new Error(`no row for ${wt}`);
+    openRowMenu(mounted.panel, index);
+    const button = menuItem(TEXT.remove);
     button.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     return mounted;
@@ -853,7 +888,7 @@ describe("remove dialog", () => {
 });
 
 describe("row actions", () => {
-  test("keeps the actions above the list so picking a row moves nothing", async () => {
+  test("shows no action until the menu is opened", async () => {
     const { panel } = await mountWith(
       response([
         item({ name: "repo", current: true }),
@@ -865,64 +900,34 @@ describe("row actions", () => {
       ]),
       { route: { wt: "/repo/.worktrees/other" } },
     );
-    // 行の中にボタンを置かない。選んだ瞬間にクリックした場所へ現れるため。
+    // 行に並ぶボタンは「…」だけ。選んだ瞬間にボタンが増えると誤爆する。
     for (const row of panel.querySelectorAll(".history-item")) {
-      expect(row.querySelector("button")).toBeNull();
+      expect(texts(row, "button")).toEqual([""]);
+      expect(row.querySelector(".worktree-row-menu")).not.toBeNull();
     }
-    const actions = panel.querySelector(".worktree-actions");
-    if (!actions) throw new Error("actions are missing");
-    // 位置で示せないぶん、誰への操作かを名前で言う。
-    expect(actions.querySelector(".worktree-actions-for")?.textContent).toBe(
-      TEXT.actions.headingFor("other"),
-    );
-    const labels = texts(actions, "button");
-    expect(labels).toContain(TEXT.open);
-    expect(labels).toContain(TEXT.remove);
-    // アイコンだけのボタンは aria-label で何が起きるかを伝える。
-    const iconLabels = Array.from(
-      actions.querySelectorAll("button.gdp-file-header-icon"),
-    ).map((button) => button.getAttribute("aria-label"));
-    expect(iconLabels).toEqual([
-      TEXT.actions.openFolderTitle,
-      TEXT.actions.copyPathTitle,
-    ]);
+    // 一覧の上に固定した帯も持たない (削除が画面で一番目立つ位置に居座る)。
+    expect(panel.querySelector(".worktree-actions")).toBeNull();
+    expect(document.querySelector(".gdp-context-menu")).toBeNull();
   });
 
-  test("keeps delete out of the row of everyday buttons", async () => {
+  test("puts delete below a separator, away from the everyday actions", async () => {
     const { panel } = await mountWith(
       response([
         item({ name: "repo", current: true }),
         item({ name: "other", path: "/repo/.worktrees/other" }),
       ]),
-      { route: { wt: "/repo/.worktrees/other" } },
     );
-    // 取り返しのつかない操作を、よく使う操作と同じ段に並べない。
-    const everyday = panel.querySelector(".worktree-actions-buttons");
-    if (!everyday) throw new Error("action buttons are missing");
-    expect(texts(everyday, "button")).not.toContain(TEXT.remove);
-    const remove = panel.querySelector(".worktree-actions-remove");
-    expect(remove?.textContent).toBe(TEXT.remove);
-    expect(remove?.parentElement).toBe(
-      panel.querySelector(".worktree-actions"),
+    openRowMenu(panel, 1);
+    const menu = document.querySelector(".gdp-context-menu");
+    if (!menu) throw new Error("the menu did not open");
+    const nodes = Array.from(menu.children);
+    const separator = nodes.findIndex((node) =>
+      node.classList.contains("gdp-context-menu-sep"),
     );
-  });
-
-  test("shows nothing above the list until a worktree is picked", async () => {
-    const { panel } = await mountWith(
-      response([item({ name: "repo", current: true })]),
-    );
-    expect(panel.querySelector(".worktree-actions")).toBeNull();
-  });
-
-  test("keeps the remove button off the worktree this server serves", async () => {
-    const { panel } = await mountWith(
-      response([item({ name: "repo", current: true })]),
-      { route: { wt: "/repo" } },
-    );
-    const actions = panel.querySelector(".worktree-actions");
-    if (!actions) throw new Error("actions are missing");
-    expect(actions.querySelector(".worktree-actions-remove")).toBeNull();
-    expect(texts(actions, "button")).toContain(TEXT.open);
+    const remove = nodes.findIndex((node) => node.textContent === TEXT.remove);
+    expect(separator).toBeGreaterThan(-1);
+    expect(remove).toBeGreaterThan(separator);
+    expect(menuItem(TEXT.remove).classList.contains("danger")).toBe(true);
   });
 
   test("selects the worktree it just created", async () => {
@@ -1744,12 +1749,8 @@ describe("event wiring", () => {
       }),
     });
     try {
-      const openButton = Array.from(
-        mounted.panel.querySelectorAll<HTMLButtonElement>(
-          "button.worktree-head-btn",
-        ),
-      ).find((button) => button.textContent === TEXT.open);
-      openButton?.click();
+      openRowMenu(mounted.panel, 0);
+      menuItem(TEXT.open).click();
       await new Promise((resolve) => setTimeout(resolve, 0));
       mounted.view.suspend();
       if (!finishAction) throw new Error("open action did not start");
