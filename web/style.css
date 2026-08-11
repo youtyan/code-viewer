@@ -8010,6 +8010,36 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   margin-top: 8px;
 }
 
+/* まだ 1 本も作っていないときの説明カード (右ペイン)。 */
+.worktree-intro {
+  padding: 24px;
+  max-width: 46em;
+  line-height: 1.7;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-base);
+}
+.worktree-intro-title {
+  color: var(--fg);
+  font-weight: 600;
+  font-size: var(--ui-font-md);
+  margin-bottom: 4px;
+}
+.worktree-intro p {
+  margin: 0 0 10px;
+}
+.worktree-intro button {
+  margin-top: 4px;
+}
+
+/* ⇄ の意味。重なりが 1 件も無いときは出さない。 */
+#filelist .worktree-overlap-legend {
+  display: block;
+  padding: 8px 12px 2px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  cursor: default;
+}
+
 /* 追加 / 削除ダイアログの中身。データストアの接続ダイアログ
    (.db-connection-form) と同じで、入力欄そのものは共通の
    .gdp-dialog-input を使い、並べ方だけをここで決める。 */

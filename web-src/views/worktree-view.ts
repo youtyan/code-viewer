@@ -966,6 +966,31 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       navigate({ wt: id, file: undefined, origin: undefined });
     });
     listPanel.appendChild(list);
+
+    // メインの 1 本しか無いときは、この一覧に何が並ぶかを 1 行で伝える。
+    if (data.worktrees.length === 1) {
+      listPanel.appendChild(note(t.intro.listNote));
+    }
+  }
+
+  /**
+   * まだ 1 本も作っていないときの説明カード。何も無い右ペインに出すので
+   * 説明がノイズにならず、2 本目を作った時点で二度と出ない (永続化しない)。
+   */
+  function introCard(): HTMLElement {
+    const t = text();
+    const card = el("div", "worktree-intro");
+    card.appendChild(el("p", "worktree-intro-title", t.intro.cardTitle));
+    card.appendChild(el("p", "", t.intro.cardWhat));
+    card.appendChild(el("p", "", t.intro.cardWhy));
+    card.appendChild(el("p", "", t.intro.cardHow));
+    const button = el("button", "gdp-btn gdp-btn-sm", t.intro.cardButton);
+    button.type = "button";
+    button.addEventListener("click", () => {
+      void addWorktree();
+    });
+    card.appendChild(button);
+    return card;
   }
 
   /**
@@ -1152,6 +1177,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     if (!shown.length) {
       list.appendChild(note(t.panes.noFileMatch));
       return;
+    }
+    // ⇄ が 1 つでも出るなら、その意味を先頭に置く。出ないなら置かない。
+    if (shown.some((entry) => overlapOthers(item, entry).length > 0)) {
+      list.appendChild(
+        el("li", "worktree-overlap-legend", t.intro.overlapLegend),
+      );
     }
     // ツリー用の CSS は #filelist.tree にぶら下がっている。
     for (const group of ["uncommitted", "committed"] as const) {
@@ -1341,7 +1372,13 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     restoredRouteKey = null;
     diff.replaceChildren();
     if (!item) {
-      diff.appendChild(el("div", "gdp-info", t.panes.selectWorktree));
+      // 1 本も作られていない (= メインだけ) なら、これが何の画面かの説明を
+      // 出す。2 本目があるのに未選択なら、いつもの案内。
+      if (data && data.worktrees.length === 1) {
+        diff.appendChild(introCard());
+      } else {
+        diff.appendChild(el("div", "gdp-info", t.panes.selectWorktree));
+      }
       diffFor = "";
       return;
     }

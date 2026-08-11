@@ -99,6 +99,19 @@ export type WorktreeText = {
     title: string;
     body: (path: string) => string;
   };
+  /** まだ 1 本も作っていないときの説明。永続化はしない。 */
+  intro: {
+    /** 右ペインのカード。 */
+    cardTitle: string;
+    cardWhat: string;
+    cardWhy: string;
+    cardHow: string;
+    cardButton: string;
+    /** 左パネルのメイン行の下に出す 1 行。 */
+    listNote: string;
+    /** ⇄ の意味。重なりが 1 件も無いときは出さない。 */
+    overlapLegend: string;
+  };
   open: string;
   openTitle: string;
   opening: string;
@@ -254,6 +267,19 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       title: "No changes yet.",
       body: (path) => `Edit files in ${path} and the diffs will show up here.`,
     },
+    intro: {
+      cardTitle: "What is a worktree?",
+      cardWhat:
+        "A worktree (git worktree) is a second checkout of this repository, in a separate folder on a separate branch.",
+      cardWhy:
+        "Keep main open here while a bugfix branch stays open over there — no branch switching, no stashing.",
+      cardHow:
+        'When you click "Create": a new folder appears at .worktrees/<name>, with the branch checked out in it. Edit files there as usual. The changes show up on this screen as diffs.',
+      cardButton: "Create a worktree",
+      listNote:
+        "This is the only folder right now. New worktrees will appear here.",
+      overlapLegend: "⇄ = another worktree is changing this file too",
+    },
     open: "Open in a new tab",
     openTitle: "Start a code-viewer for this folder and open it in a new tab",
     opening: "Starting…",
@@ -389,6 +415,19 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     emptyDiff: {
       title: "まだ変更はありません。",
       body: (path) => `${path} でファイルを編集すると、ここに差分が出ます。`,
+    },
+    intro: {
+      cardTitle: "作業ツリー（git worktree）とは",
+      cardWhat:
+        "同じリポジトリを、ブランチを切り替えずに別フォルダでもう 1 つ開く仕組みです。",
+      cardWhy:
+        "main で作業しながら、別フォルダで修正用のブランチを開いておけます。2 つの作業を並べて進められます。",
+      cardHow:
+        "「作る」を押すと .worktrees/〈名前〉 にフォルダができ、指定したブランチがそこに展開されます。あとはそのフォルダで普通に編集してください。変更はこの画面に差分として出ます。",
+      cardButton: "作業ツリーを作る",
+      listNote:
+        "いまはこのフォルダだけです。作業ツリーを作ると、ここに並びます。",
+      overlapLegend: "⇄ = 他の作業ツリーも同じファイルを触っている",
     },
     open: "別タブで見る",
     openTitle: "このフォルダ専用の code-viewer を起動して新しいタブで開きます",

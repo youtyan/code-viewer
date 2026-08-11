@@ -743,6 +743,89 @@ describe("empty diff guidance", () => {
   });
 });
 
+describe("first-run introduction", () => {
+  test("shows the intro card only when there is exactly one worktree", async () => {
+    const { diff } = await mountWith(
+      response([item({ name: "repo", current: true })]),
+    );
+    const card = diff.querySelector(".worktree-intro");
+    if (!card) throw new Error("intro card is missing");
+    expect(card.textContent).toContain(TEXT.intro.cardTitle);
+    expect(texts(card, "button")).toContain(TEXT.intro.cardButton);
+  });
+
+  test("falls back to the plain prompt once a second worktree exists", async () => {
+    const { diff } = await mountWith(
+      response([
+        item({ name: "repo", current: true }),
+        item({ name: "other", path: "/repo/.worktrees/other" }),
+      ]),
+    );
+    expect(diff.querySelector(".worktree-intro")).toBeNull();
+    expect(diff.textContent).toContain(TEXT.panes.selectWorktree);
+  });
+
+  test("says under the list that new worktrees will appear there", async () => {
+    const { panel } = await mountWith(
+      response([item({ name: "repo", current: true })]),
+    );
+    expect(texts(panel, ".history-status")).toContain(TEXT.intro.listNote);
+  });
+
+  test("opens the add dialog from the card", async () => {
+    const { diff } = await mountWith(
+      response([item({ name: "repo", current: true })]),
+    );
+    const button = Array.from(
+      diff.querySelectorAll<HTMLButtonElement>(".worktree-intro button"),
+    ).find((candidate) => candidate.textContent === TEXT.intro.cardButton);
+    if (!button) throw new Error("intro button is missing");
+    button.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      document.querySelector(".gdp-dialog-backdrop")?.textContent,
+    ).toContain(TEXT.addDialog.title);
+  });
+});
+
+describe("overlap legend", () => {
+  test("explains the mark when any file is shared, and stays quiet otherwise", async () => {
+    const shared = await mountWith(
+      response(
+        [
+          item({
+            name: "repo",
+            current: true,
+            files: [file()],
+          }),
+          item({ name: "other", path: "/repo/.worktrees/other" }),
+        ],
+        {
+          overlaps: [
+            {
+              path: "src/sample.ts",
+              worktreeIds: ["/repo", "/repo/.worktrees/other"],
+            },
+          ],
+        },
+      ),
+      { route: { wt: "/repo" } },
+    );
+    expect(texts(shared.filelist, ".worktree-overlap-legend")).toEqual([
+      TEXT.intro.overlapLegend,
+    ]);
+
+    const quiet = await mountWith(
+      response([
+        item({ name: "repo", current: true, files: [file()] }),
+        item({ name: "other", path: "/repo/.worktrees/other" }),
+      ]),
+      { route: { wt: "/repo" } },
+    );
+    expect(quiet.filelist.querySelector(".worktree-overlap-legend")).toBeNull();
+  });
+});
+
 describe("divergence summary", () => {
   test.each([
     {
@@ -1048,7 +1131,13 @@ describe("diffs", () => {
   });
 
   test("asks for a worktree before loading anything", async () => {
-    const { diff, diffUrls } = await mountWith(twoFiles());
+    // 2 本あれば初回説明ではなく、いつもの選択プロンプトが出る。
+    const { diff, diffUrls } = await mountWith(
+      response([
+        item({ name: "repo" }),
+        item({ name: "other", path: "/repo/.worktrees/other" }),
+      ]),
+    );
     expect(diff.textContent).toContain(TEXT.panes.selectWorktree);
     expect(diffUrls).toEqual([]);
   });
@@ -1134,6 +1223,7 @@ describe("page level state", () => {
               conflicts: [],
             },
           }),
+          item({ name: "other", path: "/repo/.worktrees/other" }),
         ],
         { baseBranch: "main" },
       ),
