@@ -1566,7 +1566,9 @@ body.gdp-history-page #repo-target-wrap {
   background: transparent;
   transition: background 0.12s;
 }
-body.gdp-history-page #history-resizer {
+/* 一覧パネルを持つページ (data-history-list-panel。履歴・作業ツリー) でだけ
+   つまみを出す。 */
+body[data-history-list-panel] #history-resizer {
   display: block;
 }
 #history-resizer:hover,
@@ -14699,11 +14701,10 @@ body.app-panel-docked:has(.app-panel.app-panel-open) {
     var(--app-panel-max-h)
   );
 }
-body.app-panel-docked.gdp-diff-page #content,
-body.app-panel-docked.gdp-history-page #content,
-body.app-panel-docked.gdp-repo-page #content,
-body.app-panel-docked.gdp-file-detail-page #content,
-body.app-panel-docked.gdp-help-page #content {
+/* #content がスクロール容器になるかはページの属性で決まる。属性は app.ts の
+   setPageMode がページクラスと同じ場所で立てる。ページクラスの列挙はしない
+   (ui-layout.md「ページクラスの列挙をレイアウト規則に書かない」)。 */
+body.app-panel-docked[data-content-scrolls-when-docked] #content {
   position: relative;
   top: var(--chrome-h);
   height: var(--content-h);
@@ -14715,41 +14716,22 @@ body.app-panel-docked.gdp-help-page #content {
 /* Keep the normal page-specific top gap without putting padding on the
    scroll container. A sticky child otherwise adds that padding to its top
    offset and leaves scrolled content visible above the file header. */
-body.app-panel-docked.gdp-diff-page #diff,
-body.app-panel-docked.gdp-history-page #diff,
-body.app-panel-docked.gdp-repo-page #diff,
-body.app-panel-docked.gdp-file-detail-page #diff,
-body.app-panel-docked.gdp-help-page #diff {
+body.app-panel-docked[data-content-scrolls-when-docked] #diff {
   padding-top: var(--content-top-gap);
 }
-body.app-panel-docked.gdp-diff-page .d2h-file-header,
-body.app-panel-docked.gdp-diff-page .gdp-shell-header,
-body.app-panel-docked.gdp-history-page .d2h-file-header,
-body.app-panel-docked.gdp-history-page .gdp-shell-header,
-body.app-panel-docked.gdp-repo-page .d2h-file-header,
-body.app-panel-docked.gdp-repo-page .gdp-shell-header,
-body.app-panel-docked.gdp-file-detail-page .d2h-file-header,
-body.app-panel-docked.gdp-file-detail-page .gdp-shell-header,
-body.app-panel-docked.gdp-file-detail-page .gdp-file-detail-sticky {
+body.app-panel-docked[data-content-scrolls-when-docked] .d2h-file-header,
+body.app-panel-docked[data-content-scrolls-when-docked] .gdp-shell-header,
+body.app-panel-docked[data-content-scrolls-when-docked] .gdp-file-detail-sticky {
   top: 0;
 }
-body.app-panel-docked.gdp-diff-page .gdp-markdown-toc,
-body.app-panel-docked.gdp-history-page .gdp-markdown-toc,
-body.app-panel-docked.gdp-repo-page .gdp-markdown-toc,
-body.app-panel-docked.gdp-file-detail-page .gdp-markdown-toc {
+body.app-panel-docked[data-content-scrolls-when-docked] .gdp-markdown-toc {
   top: 16px;
 }
-body.app-panel-docked.gdp-help-page .gdp-help-nav {
+body.app-panel-docked[data-content-scrolls-when-docked] .gdp-help-nav {
   top: 20px;
 }
-body.app-panel-docked.gdp-diff-page .d2h-file-wrapper,
-body.app-panel-docked.gdp-diff-page .gdp-file-shell,
-body.app-panel-docked.gdp-history-page .d2h-file-wrapper,
-body.app-panel-docked.gdp-history-page .gdp-file-shell,
-body.app-panel-docked.gdp-repo-page .d2h-file-wrapper,
-body.app-panel-docked.gdp-repo-page .gdp-file-shell,
-body.app-panel-docked.gdp-file-detail-page .d2h-file-wrapper,
-body.app-panel-docked.gdp-file-detail-page .gdp-file-shell {
+body.app-panel-docked[data-content-scrolls-when-docked] .d2h-file-wrapper,
+body.app-panel-docked[data-content-scrolls-when-docked] .gdp-file-shell {
   scroll-margin-top: 8px;
 }
 body.app-panel-docked #sidebar,
@@ -14763,7 +14745,7 @@ body.app-panel-docked .app-panel.app-panel-open {
   box-shadow: none;
 }
 /* docked のときに `.journal-page` / `.db-root` を `height: 100%` で上書きしない。
-   この 2 ページは `body.app-panel-docked.gdp-*-page #content` の列挙に入っておらず、
+   この 2 ページは data-content-scrolls-when-docked を持たず、
    親の `#content` が高さを持たないので、100% は解決先を失って auto に落ち、ページ
    全体が中身の高さまで縮む (中身が空のとき画面途中で切れる形で表面化した)。両者は
    既に `height: var(--content-h)` を持ち、--content-h は docked ではパネル占有分が

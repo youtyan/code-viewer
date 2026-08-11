@@ -3521,6 +3521,25 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-worktree-page",
       STATE.route.screen === "worktree",
     );
+    // docked の下パネルと場所を分け合うとき、#content がスクロール容器になる
+    // ページ。style.css の body.app-panel-docked[data-content-scrolls-when-docked]
+    // 規則群がこの属性だけを見る (ページクラスの列挙はしない)。
+    // journal / database は自分の箱が --content-h から高さを取るので立てない。
+    document.body.toggleAttribute(
+      "data-content-scrolls-when-docked",
+      STATE.route.screen === "diff" ||
+        STATE.route.screen === "history" ||
+        STATE.route.screen === "repo" ||
+        STATE.route.screen === "file" ||
+        STATE.route.screen === "help" ||
+        STATE.route.screen === "worktree",
+    );
+    // 左に --history-w の一覧パネル (#history-panel / #worktree-panel) を持つ
+    // ページ。#history-resizer の表示がこの属性を見る。
+    document.body.toggleAttribute(
+      "data-history-list-panel",
+      historyPanelRoute || STATE.route.screen === "worktree",
+    );
     const repoTargetWrap =
       document.querySelector<HTMLElement>("#repo-target-wrap");
     if (!repoSidebarRoute && repoTargetWrap) {
