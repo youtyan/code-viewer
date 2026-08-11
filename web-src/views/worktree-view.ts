@@ -769,10 +769,14 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   function openFolderButton(
     item: WorktreeItem,
     withLabel: boolean,
-  ): HTMLButtonElement {
+  ): HTMLButtonElement | null {
+    // 渡すのはリポジトリからの相対パス (openPathArg の説明を読むこと)。
+    // 開けない作業ツリーではボタンごと出さない。
+    const arg = openPathArg(item);
+    if (arg === null) return null;
     const t = text();
     const button = deps.createOpenPathButton(
-      item.path,
+      arg,
       "directory",
       t.actions.openFolderTitle,
     );
@@ -913,6 +917,24 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /**
+   * `/_open_path` に渡す引数。
+   *
+   * **あのエンドポイントが取るのはリポジトリからの相対パスで、絶対パスは
+   * 受け付けない** (`isSafePath` が `/` 始まりを弾き、先頭の `/` を削った
+   * 結果を `<repoRoot>/…` として解決するため、絶対パスを渡すと必ず 404)。
+   * 実パスをそのまま渡していて、ずっと開けていなかった。
+   *
+   * リポジトリの外に在る作業ツリー (displayPath が絶対パスのまま) は、この
+   * 口では開けない。null を返し、メニューにも出さない。
+   */
+  function openPathArg(item: WorktreeItem): string | null {
+    const shown = item.displayPath;
+    if (shown === ".") return ""; // 本体はリポジトリのルート
+    if (!shown || shown.startsWith("/") || shown.startsWith("\\")) return null;
+    return shown;
+  }
+
+  /**
    * 行ごとの操作メニュー。**行の中にボタンを並べない。**
    *
    * 選んだ行の中に並べたら、選んだ瞬間にクリックした場所へボタンが現れて
@@ -925,18 +947,23 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     const t = text();
     const items: ContextMenuItem[] = [];
     if (!item.missing && !item.bare) {
-      items.push({
-        label: t.actions.openFolder,
-        title: t.actions.openFolderTitle,
-        onSelect: () => {
-          // メニューにはボタンが無いので、色を変えて伝えることができない。
-          // 失敗はこの画面のメッセージ欄に出す (黙って何も起きないのが一番困る)。
-          void runAction(
-            () => deps.openPathInOs(item.path, "directory"),
-            t.actions.openFolderFailed,
-          );
-        },
-      });
+      const openArg = openPathArg(item);
+      // リポジトリの外に在る作業ツリーは /_open_path では開けない。押せば
+      // 必ず失敗するので、項目そのものを出さない (パスのコピーは出す)。
+      if (openArg !== null) {
+        items.push({
+          label: t.actions.openFolder,
+          title: t.actions.openFolderTitle,
+          onSelect: () => {
+            // メニューにはボタンが無いので、色を変えて伝えることができない。
+            // 失敗はこの画面のメッセージ欄に出す (黙って終わるのが一番困る)。
+            void runAction(
+              () => deps.openPathInOs(openArg, "directory"),
+              t.actions.openFolderFailed,
+            );
+          },
+        });
+      }
       items.push({
         label: t.actions.copyPath,
         title: t.actions.copyPathTitle,
@@ -950,6 +977,18 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         disabled: !!busyPath,
         onSelect: () => {
           void openWorktree(item);
+        },
+      });
+    }
+    // 開いたタブが拡張などに阻まれることがある (ERR_BLOCKED_BY_CLIENT)。
+    // その場合アプリ側からは何も分からないので、アドレスだけは必ず取り出せる
+    // ようにしておく。別のブラウザやターミナルから開ける。
+    if (item.serverUrl) {
+      items.push({
+        label: t.actions.copyServerUrl,
+        title: t.actions.copyServerUrlTitle(item.serverUrl),
+        onSelect: () => {
+          void runAction(() => copyText(item.serverUrl), t.actions.copyFailed);
         },
       });
     }
@@ -1628,7 +1667,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       card.appendChild(el("p", "", t.emptyDiff.body(item.path)));
       if (!item.missing && !item.bare) {
         const buttons = el("span", "worktree-empty-diff-actions");
-        buttons.appendChild(openFolderButton(item, true));
+        // リポジトリの外に在る作業ツリーは OS で開けない (パスは写せる)。
+        const openFolder = openFolderButton(item, true);
+        if (openFolder) buttons.appendChild(openFolder);
         buttons.appendChild(copyPathButton(item, true));
         card.appendChild(buttons);
       }

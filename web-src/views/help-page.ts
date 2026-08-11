@@ -244,7 +244,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: 'Every row carries a "…" on the right, and every action for that worktree lives in it — no button appears just because you picked a row, and the row you act on is the row you opened the menu from, whether or not it is the one being shown. "Open in a new tab" starts a second code-viewer for that worktree, because a server stays on the working tree it started in; an already-running server is reused instead of started again. Those servers outlive this one, so "Stop its server" is in the same menu — the Server group in doctor still lists them all, and `kill <pid>` works too, with the pid in ~/.cache/code-viewer/servers/. A worktree that merges cleanly also offers to copy the `git switch` / `git merge` command; code-viewer copies it and never runs it.',
+                text: 'Every row carries a "…" on the right, and every action for that worktree lives in it — no button appears just because you picked a row, and the row you act on is the row you opened the menu from, whether or not it is the one being shown. "Open in a new tab" starts a second code-viewer for that worktree, because a server stays on the working tree it started in; an already-running server is reused instead of started again. Those servers outlive this one, so "Stop its server" is in the same menu — the Server group in doctor still lists them all, and `kill <pid>` works too, with the pid in ~/.cache/code-viewer/servers/. A worktree that merges cleanly also offers to copy the `git switch` / `git merge` command; code-viewer copies it and never runs it. "Copy its address" is there because a new tab can be stopped by a browser extension before it loads (Chrome reports ERR_BLOCKED_BY_CLIENT) — the address still works in another browser or from a terminal. "Open folder" only appears for worktrees inside the repository, since that is the only place code-viewer will open on your behalf.',
               },
             ],
           },
@@ -1038,7 +1038,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "各行の右端に「…」があり、その作業ツリーへの操作は全部その中にあります。行を選んだからといってボタンが現れることはなく、操作の相手は「…」を開いた行です（いま映している行である必要はありません）。「別タブで見る」はその作業ツリーで code-viewer をもう 1 本起こします。サーバは起動したときの作業ツリーから動けないためです。既に動いているサーバがあれば使い回します。起こしたサーバはこのサーバより長く生きるので、「サーバを止める」を同じメニューに置いてあります。doctor の Server グループには変わらず一覧が出ますし、`kill <pid>` でも止まります（pid は ~/.cache/code-viewer/servers/）。そのままマージできる作業ツリーには、取り込むコマンドのコピーも出ます。コピーするだけで、code-viewer が実行することはありません。",
+                text: "各行の右端に「…」があり、その作業ツリーへの操作は全部その中にあります。行を選んだからといってボタンが現れることはなく、操作の相手は「…」を開いた行です（いま映している行である必要はありません）。「別タブで見る」はその作業ツリーで code-viewer をもう 1 本起こします。サーバは起動したときの作業ツリーから動けないためです。既に動いているサーバがあれば使い回します。起こしたサーバはこのサーバより長く生きるので、「サーバを止める」を同じメニューに置いてあります。doctor の Server グループには変わらず一覧が出ますし、`kill <pid>` でも止まります（pid は ~/.cache/code-viewer/servers/）。そのままマージできる作業ツリーには、取り込むコマンドのコピーも出ます。コピーするだけで、code-viewer が実行することはありません。「アドレスをコピー」があるのは、開いたタブがブラウザ拡張に止められることがあるためです（Chrome は ERR_BLOCKED_BY_CLIENT と出します）。アドレスさえ手元にあれば、別のブラウザやターミナルから開けます。「フォルダを開く」はリポジトリの中にある作業ツリーにだけ出ます。code-viewer が代わりに開くのはそこまでだからです。",
               },
             ],
           },

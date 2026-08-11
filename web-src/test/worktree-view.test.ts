@@ -924,15 +924,23 @@ describe("row actions", () => {
     expect(document.querySelector(".gdp-context-menu")).toBeNull();
   });
 
-  test("actually asks to open the folder, and says so when it fails", async () => {
+  test("asks to open the folder with a repo-relative path, not an absolute one", async () => {
     const { panel } = await mountWith(
-      response([item({ name: "other", path: "/repo/.worktrees/other" })]),
+      response([
+        item({
+          name: "other",
+          path: "/repo/.worktrees/other",
+          displayPath: ".worktrees/other",
+        }),
+      ]),
     );
     openRowMenu(panel, 0);
     menuItem(TEXT.actions.openFolder).click();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    // /_open_path は "/" 始まりを弾き、残りを <repoRoot>/… として解決する。
+    // 実パスを渡すと必ず 404 になる。
     expect(openedPaths).toEqual([
-      { path: "/repo/.worktrees/other", kind: "directory" },
+      { path: ".worktrees/other", kind: "directory" },
     ]);
     // 成功したときに、余計な文言を出さない。
     expect(texts(panel, ".history-status")).not.toContain(
@@ -948,6 +956,76 @@ describe("row actions", () => {
     expect(texts(panel, ".history-status")).toContain(
       TEXT.actions.openFolderFailed,
     );
+  });
+
+  test("opens the repository root itself for the main worktree", async () => {
+    const { panel } = await mountWith(
+      response([
+        item({ name: "repo", path: "/repo", displayPath: ".", current: true }),
+      ]),
+    );
+    openRowMenu(panel, 0);
+    menuItem(TEXT.actions.openFolder).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // "." ではなく空文字。/_open_path は空文字をリポジトリのルートとして扱う。
+    expect(openedPaths).toEqual([{ path: "", kind: "directory" }]);
+  });
+
+  test("hands out the server address so a blocked tab is not a dead end", async () => {
+    const writes: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (value: string) => {
+          writes.push(value);
+          return Promise.resolve();
+        },
+      },
+    });
+    const { panel } = await mountWith(
+      response([
+        item({
+          name: "other",
+          path: "/repo/.worktrees/other",
+          displayPath: ".worktrees/other",
+          serverUrl: "http://127.0.0.1:5050/",
+        }),
+      ]),
+    );
+    openRowMenu(panel, 0);
+    menuItem(TEXT.actions.copyServerUrl).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writes).toEqual(["http://127.0.0.1:5050/"]);
+  });
+
+  test("keeps the address out of the menu when nothing is running", async () => {
+    const { panel } = await mountWith(
+      response([
+        item({
+          name: "other",
+          path: "/repo/.worktrees/other",
+          displayPath: ".worktrees/other",
+        }),
+      ]),
+    );
+    expect(openRowMenu(panel, 0)).not.toContain(TEXT.actions.copyServerUrl);
+  });
+
+  test("hides the open action for a worktree outside the repository", async () => {
+    const { panel } = await mountWith(
+      response([
+        item({
+          name: "elsewhere",
+          path: "/somewhere/else",
+          // リポジトリの外に在ると displayPath は絶対パスのまま返る。
+          displayPath: "/somewhere/else",
+        }),
+      ]),
+    );
+    // 押せば必ず失敗する項目を並べない。パスのコピーは残す。
+    const labels = openRowMenu(panel, 0);
+    expect(labels).not.toContain(TEXT.actions.openFolder);
+    expect(labels).toContain(TEXT.actions.copyPath);
   });
 
   test("copies the path, and says so when the clipboard refuses", async () => {

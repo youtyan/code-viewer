@@ -111,6 +111,12 @@ export type WorktreeText = {
     stopServerTitle: string;
     stopFailed: string;
     /**
+     * 起動中のサーバの URL。開いたタブが拡張などに阻まれても、ここから
+     * 拾って別の方法で開ける。
+     */
+    copyServerUrl: string;
+    copyServerUrlTitle: (url: string) => string;
+    /**
      * そのまま入る作業ツリーだけに出す、取り込むコマンドのコピー。
      * 実行はしない (このアプリはリポジトリを書き換えない)。
      */
@@ -305,6 +311,8 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       stopServer: "Stop its server",
       stopServerTitle: "Stop the code-viewer running for this folder",
       stopFailed: "Failed to stop the server.",
+      copyServerUrl: "Copy its address",
+      copyServerUrlTitle: (url) => `Copy ${url}`,
       copyMerge: "Copy merge command",
       copyMergeTitle: (base, branch) =>
         `Copy the command that merges ${branch} into ${base}`,
@@ -471,6 +479,8 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       stopServer: "サーバを止める",
       stopServerTitle: "このフォルダで動いている code-viewer を止めます",
       stopFailed: "サーバを止められませんでした。",
+      copyServerUrl: "アドレスをコピー",
+      copyServerUrlTitle: (url) => `${url} をコピーします`,
       copyMerge: "マージのコマンドをコピー",
       copyMergeTitle: (base, branch) =>
         `${branch} を ${base} に取り込むコマンドをコピーします`,
