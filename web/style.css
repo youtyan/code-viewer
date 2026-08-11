@@ -7952,6 +7952,48 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   font-weight: 400;
 }
 
+/* .meta2 の子は長いと行を横に押し広げる。ブランチ名は自由長なので、
+   溢れるなら省略する (履歴画面の行も同じクラス)。 */
+.history-item .meta2 > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 作業ツリー行の 1 段目: 名前と状態バッジを両端に。 */
+.history-item .worktree-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.history-item .worktree-row-head .subject {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.worktree-row-badges {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+}
+
+/* 2 段目のフォルダの場所。パスは末尾が肝心なので、長いときは頭側を省略する。 */
+.worktree-row-path {
+  display: block;
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  margin-top: 2px;
+}
+
 /* 追加 / 削除ダイアログの中身。データストアの接続ダイアログ
    (.db-connection-form) と同じで、入力欄そのものは共通の
    .gdp-dialog-input を使い、並べ方だけをここで決める。 */

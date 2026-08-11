@@ -417,6 +417,43 @@ describe("worktree list panel", () => {
     });
   });
 
+  test("shows the folder path on its own line with the full path on hover", async () => {
+    const { panel } = await mountWith(
+      response([
+        item({
+          name: "feature-x",
+          path: "/repo/.worktrees/feature-x",
+          displayPath: ".worktrees/feature-x",
+        }),
+      ]),
+    );
+    const line = panel.querySelector<HTMLElement>(".worktree-row-path");
+    expect(line?.textContent).toBe(".worktrees/feature-x");
+    expect(line?.title).toBe("/repo/.worktrees/feature-x");
+  });
+
+  test("explains each badge on hover", async () => {
+    const { panel } = await mountWith(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "other",
+          path: "/repo/.worktrees/other",
+          branch: "",
+          detached: true,
+        }),
+      ]),
+    );
+    const rows = panel.querySelectorAll(".history-item");
+    const badge = rows[0].querySelector<HTMLElement>(".worktree-badge");
+    expect(badge?.textContent).toBe(TEXT.badges.current);
+    expect(badge?.title).toBe(TEXT.badges.currentTitle);
+    // detached の行はブランチ名の代わりに「ブランチなし」を出す。
+    expect(rows[1].querySelector(".sha")?.textContent).toBe(
+      TEXT.badges.detached,
+    );
+  });
+
   test("offers open and remove for the picked worktree only", async () => {
     const { panel } = await mountWith(
       response([
@@ -577,7 +614,7 @@ describe("divergence summary", () => {
         mergeState: "clean" as const,
         conflicts: [],
       },
-      expected: `${TEXT.diverge.ahead(3)} · ${TEXT.diverge.behind(2)} · ${TEXT.merge.clean("main")}`,
+      expected: `${TEXT.merge.clean} · ${TEXT.diverge.ahead(3, "main")} · ${TEXT.diverge.behind(2, "main")}`,
     },
     {
       name: "says up to date when neither side moved",
@@ -588,7 +625,7 @@ describe("divergence summary", () => {
         mergeState: "clean" as const,
         conflicts: [],
       },
-      expected: `${TEXT.diverge.even} · ${TEXT.merge.clean("main")}`,
+      expected: `${TEXT.merge.clean} · ${TEXT.diverge.even("main")}`,
     },
     {
       name: "names how many files would conflict",
@@ -599,7 +636,7 @@ describe("divergence summary", () => {
         mergeState: "conflict" as const,
         conflicts: ["a.ts", "b.ts"],
       },
-      expected: `${TEXT.diverge.ahead(1)} · ${TEXT.merge.conflict(2, "main")}`,
+      expected: `${TEXT.merge.conflict(2)} · ${TEXT.diverge.ahead(1, "main")}`,
     },
     {
       // 調べられなかったものを「衝突しない」に寄せない。
@@ -611,7 +648,7 @@ describe("divergence summary", () => {
         mergeState: "unknown" as const,
         conflicts: [],
       },
-      expected: `${TEXT.diverge.ahead(1)} · ${TEXT.merge.unknown}`,
+      expected: `${TEXT.merge.unknown} · ${TEXT.diverge.ahead(1, "main")}`,
     },
   ])("$name", async ({ divergence, expected }) => {
     const { panel } = await mountWith(response([item({ divergence })]));
@@ -944,20 +981,33 @@ describe("page level state", () => {
     );
   });
 
-  test.each([
-    {
-      name: "names the base branch it compared against",
-      baseBranch: "main",
-      expected: TEXT.baseLabel("main"),
-    },
-    {
-      name: "says when no base branch could be found",
-      baseBranch: "",
-      expected: TEXT.baseUnknown,
-    },
-  ])("$name", async ({ baseBranch, expected }) => {
-    const { panel } = await mountWith(response([item()], { baseBranch }));
-    expect(texts(panel, ".history-status")).toContain(expected);
+  test("names the base branch on each row instead of a note above the list", async () => {
+    const { panel } = await mountWith(
+      response(
+        [
+          item({
+            divergence: {
+              base: "main",
+              ahead: 1,
+              behind: 0,
+              mergeState: "clean",
+              conflicts: [],
+            },
+          }),
+        ],
+        { baseBranch: "main" },
+      ),
+    );
+    expect(texts(panel, ".history-item .author")).toContain(
+      `${TEXT.merge.clean} · ${TEXT.diverge.ahead(1, "main")}`,
+    );
+    // 上部に「main と比較」の行は出さない。同じ情報が各行に載るため。
+    expect(texts(panel, ".history-status")).toHaveLength(0);
+  });
+
+  test("says when no base branch could be found", async () => {
+    const { panel } = await mountWith(response([item()], { baseBranch: "" }));
+    expect(texts(panel, ".history-status")).toContain(TEXT.baseUnknown);
   });
 
   test("says so when the repository has no worktrees at all", async () => {

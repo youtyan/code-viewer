@@ -616,20 +616,51 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     const divergence = item.divergence;
     if (!divergence) return t.diverge.notComparable;
     const parts: string[] = [];
-    if (divergence.ahead > 0) parts.push(t.diverge.ahead(divergence.ahead));
-    if (divergence.behind > 0) parts.push(t.diverge.behind(divergence.behind));
-    if (!parts.length) parts.push(t.diverge.even);
+    // 狭い行で省略されても、一番大事な「マージできるか」が先に読めるように
+    // 可否を前、位置関係を後に置く。
     // 「調べられなかった」を「衝突しない」と混ぜない。
     if (divergence.mergeState === "clean") {
-      parts.push(t.merge.clean(divergence.base));
+      parts.push(t.merge.clean);
     } else if (divergence.mergeState === "conflict") {
-      parts.push(
-        t.merge.conflict(divergence.conflicts.length, divergence.base),
-      );
+      parts.push(t.merge.conflict(divergence.conflicts.length));
     } else {
       parts.push(t.merge.unknown);
     }
+    if (divergence.ahead > 0) {
+      parts.push(t.diverge.ahead(divergence.ahead, divergence.base));
+    }
+    if (divergence.behind > 0) {
+      parts.push(t.diverge.behind(divergence.behind, divergence.base));
+    }
+    if (!divergence.ahead && !divergence.behind) {
+      parts.push(t.diverge.even(divergence.base));
+    }
     return parts.join(" · ");
+  }
+
+  /** 1 段目の右に出す状態バッジ。理由は title に入る。 */
+  function worktreeBadges(
+    item: WorktreeItem,
+  ): Array<{ label: string; title: string }> {
+    const t = text();
+    const badges: Array<{ label: string; title: string }> = [];
+    if (item.current) {
+      badges.push({ label: t.badges.current, title: t.badges.currentTitle });
+    }
+    if (item.serverUrl) {
+      badges.push({ label: t.badges.running, title: t.badges.runningTitle });
+    }
+    if (item.missing) badges.push({ label: t.badges.missing, title: "" });
+    if (item.bare) {
+      badges.push({ label: t.badges.bare, title: t.badges.bareTitle });
+    }
+    if (item.locked) {
+      badges.push({ label: t.badges.locked, title: item.lockedReason });
+    }
+    if (item.prunable) {
+      badges.push({ label: t.badges.prunable, title: t.badges.prunableTitle });
+    }
+    return badges;
   }
 
   function headButton(
@@ -680,10 +711,10 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     filterWrap.appendChild(worktreeFilterInput);
     listPanel.appendChild(filterWrap);
 
-    if (data) {
-      listPanel.appendChild(
-        note(data.baseBranch ? t.baseLabel(data.baseBranch) : t.baseUnknown),
-      );
+    // 基準ブランチ名は各行の 4 段目に載るので、見つからなかったときだけ
+    // 理由をここに出す。
+    if (data && !data.baseBranch) {
+      listPanel.appendChild(note(t.baseUnknown));
     }
     if (message) listPanel.appendChild(note(message, messageIsError));
 
@@ -731,10 +762,32 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       if (item.divergence?.mergeState === "conflict") {
         row.classList.add("worktree-conflict");
       }
-      const subject = el("span", "subject", item.name);
-      subject.title = item.displayPath;
-      row.appendChild(subject);
 
+      // 1 段目: 名前 + 状態バッジ (右寄せ)。
+      const head = el("span", "worktree-row-head");
+      const subject = el("span", "subject", item.name);
+      subject.title = item.path;
+      head.appendChild(subject);
+      const badges = worktreeBadges(item);
+      if (badges.length) {
+        const wrap = el("span", "worktree-row-badges");
+        badges.forEach((badge, index) => {
+          if (index) wrap.appendChild(document.createTextNode(" · "));
+          const node = el("span", "worktree-badge", badge.label);
+          node.title = badge.title;
+          wrap.appendChild(node);
+        });
+        head.appendChild(wrap);
+      }
+      row.appendChild(head);
+
+      // 2 段目: フォルダの場所。「それはどこのフォルダなのか」が一番知りたい
+      // 情報なのでホバーに隠さない。長いときは頭側を省略し、フルパスは title。
+      const pathLine = el("span", "worktree-row-path", item.displayPath);
+      pathLine.title = item.path;
+      row.appendChild(pathLine);
+
+      // 3 段目: ブランチ・変更数・最終コミット。
       const meta = el("span", "meta2");
       meta.appendChild(el("span", "sha", item.branch || t.badges.detached));
       meta.appendChild(
@@ -758,17 +811,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       }
       row.appendChild(meta);
 
+      // 4 段目: マージできるか + 位置関係。フル文は title に。
       const second = el("span", "meta2");
-      second.appendChild(el("span", "author", divergenceSummary(item)));
-      const badges: string[] = [];
-      if (item.current) badges.push(t.badges.current);
-      if (item.serverUrl) badges.push(t.badges.running);
-      if (item.missing) badges.push(t.badges.missing);
-      if (item.bare) badges.push(t.badges.bare);
-      if (item.locked) badges.push(t.badges.locked);
-      if (item.prunable) badges.push(t.badges.prunable);
-      if (badges.length)
-        second.appendChild(el("span", "when", badges.join(" · ")));
+      const summary = divergenceSummary(item);
+      const summaryText = el("span", "author", summary);
+      summaryText.title = summary;
+      second.appendChild(summaryText);
       row.appendChild(second);
 
       if (item.error) {

@@ -14,8 +14,7 @@ export type WorktreeText = {
   refresh: string;
   refreshTitle: string;
   count: (n: number) => string;
-  /** 位置関係の基準にしているブランチ。 */
-  baseLabel: (branch: string) => string;
+  /** 比較の基準にしているブランチが取れなかったときの注意。 */
   baseUnknown: string;
   addParentHint: (path: string) => string;
   /**
@@ -26,26 +25,31 @@ export type WorktreeText = {
   gitignoreHint: string;
   badges: {
     current: string;
+    currentTitle: string;
     detached: string;
+    detachedTitle: string;
     bare: string;
+    bareTitle: string;
+    /** title は git が返すロック理由 (lockedReason) をそのまま出す。 */
     locked: string;
     prunable: string;
+    prunableTitle: string;
     missing: string;
     running: string;
+    runningTitle: string;
   };
-  /** 基準ブランチとの位置関係。 */
+  /** 基準ブランチとの位置関係。基準名はこちらが持つ。 */
   diverge: {
-    ahead: (n: number) => string;
-    behind: (n: number) => string;
-    even: string;
-    aheadTitle: (n: number, base: string) => string;
-    behindTitle: (n: number, base: string) => string;
+    ahead: (n: number, base: string) => string;
+    behind: (n: number, base: string) => string;
+    even: (base: string) => string;
     /** 基準そのもの、または比べられない行。 */
     notComparable: string;
   };
   merge: {
-    clean: (base: string) => string;
-    conflict: (n: number, base: string) => string;
+    /** 基準名は diverge 側が言うので、こちらは可否だけを言う。 */
+    clean: string;
+    conflict: (n: number) => string;
     unknown: string;
     conflictListLabel: string;
   };
@@ -151,36 +155,38 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     refresh: "Reload",
     refreshTitle: "Reload the worktree list",
     count: (n) => (n === 1 ? "1 worktree" : `${n} worktrees`),
-    baseLabel: (branch) => `compared with ${branch}`,
     baseUnknown: "no base branch found",
     addParentHint: (path) => `New worktrees are created under ${path}`,
     gitignoreHint:
       "Git sees that directory as untracked. Add .worktrees/ to .gitignore to keep it out of git status.",
     badges: {
-      current: "this server",
-      detached: "detached",
+      current: "this folder",
+      currentTitle: "This code-viewer is serving this folder",
+      detached: "no branch",
+      detachedTitle: "Not attached to any branch (detached HEAD)",
       bare: "bare",
+      bareTitle: "A storage-only repository with no working files",
       locked: "locked",
-      prunable: "prunable",
-      missing: "missing",
+      prunable: "stale entry",
+      prunableTitle: "Only the git entry remains (e.g. the folder is gone)",
+      missing: "folder is gone",
       running: "running",
+      runningTitle: "A code-viewer for this folder is running on another port",
     },
     diverge: {
-      ahead: (n) => `${n} ahead`,
-      behind: (n) => `${n} behind`,
-      even: "up to date",
-      aheadTitle: (n, base) =>
-        `${n} commit(s) here that ${base} does not have yet`,
-      behindTitle: (n, base) =>
-        `${n} commit(s) on ${base} that are missing here`,
+      ahead: (n, base) =>
+        n === 1 ? `1 commit ahead of ${base}` : `${n} commits ahead of ${base}`,
+      behind: (n, base) =>
+        n === 1 ? `1 commit behind ${base}` : `${n} commits behind ${base}`,
+      even: (base) => `same point as ${base}`,
       notComparable: "not compared",
     },
     merge: {
-      clean: (base) => `merges into ${base} cleanly`,
-      conflict: (n, base) =>
+      clean: "merges cleanly",
+      conflict: (n) =>
         n === 1
-          ? `1 file would conflict with ${base}`
-          : `${n} files would conflict with ${base}`,
+          ? "1 file would conflict on merge"
+          : `${n} files would conflict on merge`,
       unknown: "could not check the merge",
       conflictListLabel: "Conflicting files",
     },
@@ -279,32 +285,33 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     refresh: "再読み込み",
     refreshTitle: "一覧を読み直す",
     count: (n) => `${n} 本`,
-    baseLabel: (branch) => `${branch} と比較`,
     baseUnknown: "比較の基準になるブランチが見つかりません",
     addParentHint: (path) => `追加した作業ツリーは ${path} に作られます`,
     gitignoreHint:
       "このディレクトリは git から未追跡に見えます。.worktrees/ を .gitignore に入れると git status に出なくなります。",
     badges: {
-      current: "この画面",
-      detached: "detached",
+      current: "このフォルダ",
+      currentTitle: "この code-viewer が開いているフォルダです",
+      detached: "ブランチなし",
+      detachedTitle: "どのブランチにも紐づいていません（detached HEAD）",
       bare: "bare",
+      bareTitle: "作業ファイルを持たない保管用のリポジトリです",
       locked: "ロック中",
-      prunable: "整理対象",
-      missing: "ディレクトリなし",
+      prunable: "掃除できます",
+      prunableTitle: "フォルダが無い等で管理情報だけ残っています",
+      missing: "フォルダがありません",
       running: "起動中",
+      runningTitle: "このフォルダ専用の code-viewer が別ポートで動いています",
     },
     diverge: {
-      ahead: (n) => `${n} 進んでいる`,
-      behind: (n) => `${n} 遅れている`,
-      even: "差はありません",
-      aheadTitle: (n, base) => `${base} にまだ無いコミットが ${n} 件あります`,
-      behindTitle: (n, base) =>
-        `${base} にあってここに無いコミットが ${n} 件あります`,
+      ahead: (n, base) => `${base} より ${n} コミット進んでいます`,
+      behind: (n, base) => `${base} より ${n} コミット遅れています`,
+      even: (base) => `${base} と同じ地点です`,
       notComparable: "比較なし",
     },
     merge: {
-      clean: (base) => `${base} にそのまま入ります`,
-      conflict: (n, base) => `${base} と ${n} ファイルで衝突します`,
+      clean: "そのままマージできます",
+      conflict: (n) => `マージすると ${n} ファイルで衝突します`,
       unknown: "マージできるか確かめられませんでした",
       conflictListLabel: "衝突するファイル",
     },
