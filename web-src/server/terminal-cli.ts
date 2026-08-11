@@ -16,6 +16,7 @@ import {
   AGENT_EVENTS,
   type AgentEvent,
   type AgentStateRecord,
+  type AgentStatesResponse,
   isAgentEvent,
   needsAttention,
 } from "../core/agent-state";
@@ -254,12 +255,16 @@ export function parseTerminalArgs(argv: string[]): TerminalParseResult {
 export function formatStateLine(record: AgentStateRecord): string {
   const mark = needsAttention(record.state) ? "*" : " ";
   const state = record.state.padEnd(7, " ");
-  const source = record.source === "hook" ? "hook" : "gues";
+  const source =
+    record.source === "hook"
+      ? "hook  "
+      : record.source === "screen"
+        ? "screen"
+        : "motion";
   const text = record.note || record.lastPrompt || "";
-  return `${mark} ${state} ${source}  ${record.target.padEnd(16, " ")} ${text}`;
+  return `${mark} ${state} ${source} ${record.target.padEnd(16, " ")} ${text}`;
 }
 
-type StatesResponse = { states?: AgentStateRecord[] };
 type CaptureResponse = {
   target?: string;
   kind?: string;
@@ -315,14 +320,21 @@ export async function runTerminalCli(argv: string[]): Promise<void> {
       "GET",
       undefined,
       "terminal list",
-    )) as StatesResponse;
+    )) as AgentStatesResponse;
     const all = response.states ?? [];
     const states = command.attentionOnly
       ? all.filter((record) => needsAttention(record.state))
       : all;
     if (command.json) {
-      console.log(JSON.stringify({ states }, null, 2));
+      console.log(
+        JSON.stringify({ states, errors: response.errors ?? [] }, null, 2),
+      );
       return;
+    }
+    for (const error of response.errors ?? []) {
+      const target = error.target ? ` ${error.target}` : "";
+      console.error(`[${error.operation}${target}] ${error.detail}`);
+      if (error.stack) console.error(error.stack);
     }
     if (states.length === 0) {
       console.log("no terminals are reporting a state.");

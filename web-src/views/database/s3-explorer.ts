@@ -162,7 +162,7 @@ export function createS3Explorer(
 
   // ホバー tooltip ON/OFF はビューア設定パネル (#datastore-s3-tooltip) に
   // 集約済み。pref 値の変動は callbacks.getTooltipEnabled() で読み取る
-  // (パネルから setDbUiPref → onDbUiPrefChange 経由でこの explorer に届く)。
+  // (設定保存後、onDbUiPrefChange 経由でこの explorer に届く)。
   sidebarSlot.appendChild(bucketRow);
 
   // List/Explorer 共通: 検索バー / モード / sort / オブジェクトリスト /

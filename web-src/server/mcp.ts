@@ -81,6 +81,7 @@ import {
   STATUS_DEFAULT_REF,
   STATUS_HARD_CAP_LIMIT,
 } from "./status-cli";
+import { getAgentActivityErrors } from "./terminal/activity";
 import { listAgentStates, recordAgentState } from "./terminal/agent-state";
 import {
   captureTerminal,
@@ -731,7 +732,7 @@ export function defaultMcpTools(
       name: "code_viewer_terminal_list",
       title: "code-viewer terminal list",
       description:
-        "Returns the state of every terminal this server knows about, the same payload `code-viewer terminal list --json` emits: { states: [{ target, state, source, updatedAt, lastPrompt, note }] }. state is working | waiting | done | idle, where done means the turn finished and nobody has read the output yet. source is hook when the agent reported it and activity when it was guessed. Read-only. Call this before asking the human anything — another agent may already be blocking them.",
+        "Returns the state of every terminal this server knows about, plus every observation error, using the same payload `code-viewer terminal list --json` emits: { states: [{ target, state, source, updatedAt, lastPrompt, note }], errors: [{ operation, target, at, detail, stack }] }. state is working | waiting | done | idle, where done means the turn finished and nobody has read the output yet. source is hook for a reported event, screen for a visible matched rule, and activity for the motion fallback. Read-only. Call this before asking the human anything — another agent may already be blocking them.",
       inputSchema: {
         type: "object",
         properties: {
@@ -828,7 +829,9 @@ function runTerminalListTool(input: unknown): McpToolRunReturn {
   const states = attentionOnly
     ? all.filter((record) => needsAttention(record.state))
     : all;
-  return { text: JSON.stringify({ states }, null, 2) };
+  return {
+    text: JSON.stringify({ states, errors: getAgentActivityErrors() }, null, 2),
+  };
 }
 
 async function runTerminalCaptureTool(

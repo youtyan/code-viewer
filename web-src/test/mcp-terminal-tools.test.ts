@@ -122,7 +122,7 @@ describe("code_viewer_terminal_list", () => {
 
   test("returns an empty list when nothing has reported", async () => {
     const result = await runTool("code_viewer_terminal_list", {});
-    expect(parseText(result.text)).toEqual({ states: [] });
+    expect(parseText(result.text)).toEqual({ states: [], errors: [] });
   });
 });
 

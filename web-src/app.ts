@@ -1,4 +1,10 @@
 import {
+  type AgentScreenRuleIssue,
+  type AgentScreenRulesResponse,
+  DEFAULT_AGENT_SCREEN_RULES,
+  formatAgentScreenRuleSet,
+} from "./core/agent-screen";
+import {
   AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD,
   aiContextClipboardText,
   resolveSelectionTarget,
@@ -10,6 +16,12 @@ import {
 } from "./core/catch-up";
 import { changedPathsCoverPath } from "./core/changed-paths";
 import { attachDragResizer } from "./core/drag-resizer";
+import {
+  errorWithCause,
+  errorWithCauses,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "./core/error-detail";
 import { GdpExpandLogic } from "./core/expand-logic";
 import { isTestFilePath } from "./core/file-filter";
 import { filePathClipboardText } from "./core/file-path-copy";
@@ -136,6 +148,7 @@ import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
 import {
   createViewerSettings,
+  type ViewerSettingsDraft,
   type ViewerSettingsText,
 } from "./views/viewer-settings";
 
@@ -196,6 +209,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   let REPO_WEB_URL: string | null = null;
 
   let APP_SETTINGS: AppSettingsState = { version: 1 };
+  let AGENT_SCREEN_RULES = formatAgentScreenRuleSet(DEFAULT_AGENT_SCREEN_RULES);
+  let AGENT_SCREEN_RULES_SOURCE: AgentScreenRulesResponse["source"] = "default";
+  let AGENT_SCREEN_RULE_ERRORS: AgentScreenRuleIssue[] = [];
+  let AGENT_SCREEN_RULES_GENERATION = 0;
+  let AGENT_SCREEN_RULE_REQUEST_GENERATION = 0;
   let VIEW_STATE: ViewState = {
     version: 1,
     collapsedDirs: [],
@@ -435,6 +453,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     };
   }
 
+  function reportPersistenceError(operation: string, error: unknown): void {
+    const failure = errorWithCause(`${operation} failed`, error);
+    console.error(failure);
+    setStatus("error");
+    const statusEl = document.querySelector<HTMLElement>("#status");
+    if (statusEl) statusEl.title = formatErrorDetail(failure);
+  }
+
   // APP_SETTINGS はいくつもの経路で丸ごと差し替わるので、そのたびに再構築を
   // 呼ぶのではなく、差分オブジェクトの同一性で覚えておく。参照が変われば
   // 作り直し、変わらなければ前回の配列をそのまま返す。keydown ごとに
@@ -450,42 +476,107 @@ window.GdpExpandLogic = GdpExpandLogic;
     return cachedKeyBindings;
   }
 
-  function patchSettings(
-    patch: SettingsPatch,
-    options: { keepalive?: boolean } = {},
-  ): void {
-    mergeLocalSettings(patch);
-    const body = JSON.stringify(patch);
-    void fetch("/_state/settings", {
-      method: "PATCH",
-      headers: actionHeaders(),
-      body,
-      keepalive: options.keepalive,
-    }).catch(() => undefined);
+  let pendingSettingsPatch: SettingsPatch | null = null;
+  let pendingSettingsKeepalive = false;
+  let settingsPatchInFlight: Promise<void> | null = null;
+
+  async function flushSettingsPatch(): Promise<void> {
+    if (settingsPatchInFlight) {
+      await settingsPatchInFlight;
+      if (pendingSettingsPatch) await flushSettingsPatch();
+      return;
+    }
+    if (!pendingSettingsPatch) return;
+    const patch = pendingSettingsPatch;
+    const keepalive = pendingSettingsKeepalive;
+    pendingSettingsPatch = null;
+    pendingSettingsKeepalive = false;
+    const operation = sendSettingsPatch(patch, keepalive).then(() => undefined);
+    settingsPatchInFlight = operation;
+    try {
+      await operation;
+    } catch (error) {
+      pendingSettingsPatch = {
+        ...patch,
+        ...(pendingSettingsPatch || {}),
+      };
+      pendingSettingsKeepalive ||= keepalive;
+      throw error;
+    } finally {
+      if (settingsPatchInFlight === operation) settingsPatchInFlight = null;
+    }
+    if (pendingSettingsPatch) await flushSettingsPatch();
   }
 
-  async function persistGrepSettings(patch: {
-    fileSelectionHistory?: string[];
-    grepSelectionHistory?: string[];
-    grepRegex?: boolean;
-    hideTests?: boolean;
-    grepGroupByFile?: boolean;
-    grepPaletteWidth?: number;
-    grepPaletteHeight?: number;
-  }): Promise<void> {
+  async function sendSettingsPatch(
+    patch: SettingsPatch,
+    keepalive = false,
+  ): Promise<AppSettingsState> {
     const response = await trackLoad(
       fetch("/_state/settings", {
         method: "PATCH",
         headers: actionHeaders(),
         body: JSON.stringify(patch),
+        keepalive,
       }),
     );
-    if (!response.ok) throw new Error(await response.text());
-    APP_SETTINGS = (await response.json()) as AppSettingsState;
+    if (!response.ok) {
+      throw new Error(
+        await responseErrorMessage(response, "save viewer settings"),
+      );
+    }
+    try {
+      return (await response.json()) as AppSettingsState;
+    } catch (error) {
+      throw errorWithCause(
+        "save viewer settings: response is not valid JSON",
+        error,
+      );
+    }
+  }
+
+  function patchSettings(
+    patch: SettingsPatch,
+    options: { keepalive?: boolean } = {},
+  ): void {
+    mergeLocalSettings(patch);
+    pendingSettingsPatch = {
+      ...(pendingSettingsPatch || {}),
+      ...patch,
+    };
+    pendingSettingsKeepalive ||= options.keepalive === true;
+    if (!settingsPatchInFlight) {
+      void flushSettingsPatch().catch((error) => {
+        reportPersistenceError("save viewer settings", error);
+      });
+    }
+  }
+
+  async function persistSettingsPatch(patch: SettingsPatch): Promise<void> {
+    await flushSettingsPatch();
+    while (settingsPatchInFlight) await settingsPatchInFlight;
+
+    const operation = sendSettingsPatch(patch).then((state) => {
+      APP_SETTINGS = state;
+      if (pendingSettingsPatch) mergeLocalSettings(pendingSettingsPatch);
+    });
+    settingsPatchInFlight = operation;
+    try {
+      await operation;
+    } finally {
+      if (settingsPatchInFlight === operation) settingsPatchInFlight = null;
+      if (pendingSettingsPatch) {
+        void flushSettingsPatch().catch((error) => {
+          reportPersistenceError("save viewer settings", error);
+        });
+      }
+    }
   }
 
   let pendingViewPatch: ViewPatch | null = null;
   let pendingViewTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingViewKeepalive = false;
+  let viewPatchInFlight = false;
 
   function mergePathDelta(
     next: ViewPatch,
@@ -560,6 +651,38 @@ window.GdpExpandLogic = GdpExpandLogic;
     };
   }
 
+  async function sendPendingViewPatch(): Promise<void> {
+    if (viewPatchInFlight || !pendingViewPatch) return;
+    const patch = pendingViewPatch;
+    const keepalive = pendingViewKeepalive;
+    pendingViewPatch = null;
+    pendingViewKeepalive = false;
+    viewPatchInFlight = true;
+    let saved = false;
+    try {
+      const response = await trackLoad(
+        fetch("/_state/view", {
+          method: "PATCH",
+          headers: actionHeaders(),
+          body: JSON.stringify(patch),
+          keepalive,
+        }),
+      );
+      if (!response.ok) {
+        throw new Error(
+          await responseErrorMessage(response, "save viewer state"),
+        );
+      }
+      saved = true;
+    } catch (error) {
+      pendingViewPatch = mergeViewPatch(patch, pendingViewPatch || {});
+      reportPersistenceError("save viewer state", error);
+    } finally {
+      viewPatchInFlight = false;
+    }
+    if (saved && pendingViewPatch) void sendPendingViewPatch();
+  }
+
   function patchViewState(
     patch: ViewPatch,
     options: { debounce?: boolean; keepalive?: boolean } = {},
@@ -568,14 +691,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     pendingViewPatch = mergeViewPatch(pendingViewPatch, patch);
     const send = (keepalive = false) => {
       if (!pendingViewPatch) return;
-      const body = JSON.stringify(pendingViewPatch);
-      pendingViewPatch = null;
-      void fetch("/_state/view", {
-        method: "PATCH",
-        headers: actionHeaders(),
-        body,
-        keepalive,
-      }).catch(() => undefined);
+      pendingViewKeepalive ||= keepalive;
+      void sendPendingViewPatch();
     };
     if (options.keepalive) {
       if (pendingViewTimer !== null) clearTimeout(pendingViewTimer);
@@ -600,14 +717,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!pendingViewPatch) return;
     if (pendingViewTimer !== null) clearTimeout(pendingViewTimer);
     pendingViewTimer = null;
-    const body = JSON.stringify(pendingViewPatch);
-    pendingViewPatch = null;
-    void fetch("/_state/view", {
-      method: "PATCH",
-      headers: actionHeaders(),
-      body,
-      keepalive,
-    }).catch(() => undefined);
+    pendingViewKeepalive ||= keepalive;
+    void sendPendingViewPatch();
   }
 
   function savedScopeOmitDirs(): string[] | null {
@@ -743,60 +854,179 @@ window.GdpExpandLogic = GdpExpandLogic;
     return `${ref}\0${omit ? omit.join("\0") : "server"}\0${exclude ? exclude.join("\0") : "server"}`;
   }
 
-  async function loadSettings(): Promise<SettingsResponse | null> {
+  async function loadSettings(): Promise<SettingsResponse> {
+    const res = await trackLoad(fetch("/_settings"));
+    if (!res.ok) {
+      throw new Error(
+        await responseErrorMessage(res, "settings request failed"),
+      );
+    }
+    let settings: SettingsResponse;
     try {
-      const res = await fetch("/_settings");
-      if (!res.ok) return null;
-      const settings = (await res.json()) as SettingsResponse;
-      setProjectName(settings.project || "");
-      setProjectBranch(settings.branch || "");
-      REPO_WEB_URL = settings.repo_web_url;
-      const repoLink =
-        document.querySelector<HTMLAnchorElement>("#repo-web-link");
-      if (repoLink) {
-        repoLink.href = settings.repo_web_url || "#";
-        repoLink.hidden = !settings.repo_web_url;
-      }
-      SERVER_SCOPE_OMIT_DIRS_DEFAULT = normalizeScopeOmitDirs(
-        settings.scope.omit_dirs_effective,
+      settings = (await res.json()) as SettingsResponse;
+    } catch (error) {
+      throw errorWithCause("settings response is not valid JSON", error);
+    }
+    setProjectName(settings.project || "");
+    setProjectBranch(settings.branch || "");
+    REPO_WEB_URL = settings.repo_web_url;
+    const repoLink =
+      document.querySelector<HTMLAnchorElement>("#repo-web-link");
+    if (repoLink) {
+      repoLink.href = settings.repo_web_url || "#";
+      repoLink.hidden = !settings.repo_web_url;
+    }
+    SERVER_SCOPE_OMIT_DIRS_DEFAULT = normalizeScopeOmitDirs(
+      settings.scope.omit_dirs_effective,
+    );
+    SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = normalizeScopeExcludeNames(
+      settings.scope.exclude_names_effective,
+    );
+    if (typeof settings.scope.watch_limit_default === "number")
+      SERVER_SCOPE_WATCH_LIMIT_DEFAULT = settings.scope.watch_limit_default;
+    if (typeof settings.scope.watch_limit_min === "number")
+      SERVER_SCOPE_WATCH_LIMIT_MIN = settings.scope.watch_limit_min;
+    if (typeof settings.scope.watch_limit_max === "number")
+      SERVER_SCOPE_WATCH_LIMIT_MAX = settings.scope.watch_limit_max;
+    if (typeof settings.scope.watch_recursive === "boolean") {
+      // macOS and Windows watch the whole tree through one OS handle, so
+      // there are no per-directory watchers for this limit to cap. Hide the
+      // control rather than offer a setting that changes nothing.
+      const watchSection = document.querySelector<HTMLElement>(
+        "#watch-settings-section",
       );
-      SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = normalizeScopeExcludeNames(
-        settings.scope.exclude_names_effective,
+      if (watchSection) watchSection.hidden = settings.scope.watch_recursive;
+    }
+    return settings;
+  }
+
+  function agentScreenRuleErrorsText(errors: AgentScreenRuleIssue[]): string {
+    return errors
+      .map(
+        (error) =>
+          `${error.path} [${error.code}] ${error.message}${
+            error.stack ? `\n${error.stack}` : ""
+          }`,
+      )
+      .join("\n\n");
+  }
+
+  async function agentScreenRuleResponse(
+    response: Response,
+  ): Promise<AgentScreenRulesResponse> {
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch (error) {
+      throw errorWithCause(
+        `terminal rule request returned ${response.status} with invalid JSON`,
+        error,
       );
-      if (typeof settings.scope.watch_limit_default === "number")
-        SERVER_SCOPE_WATCH_LIMIT_DEFAULT = settings.scope.watch_limit_default;
-      if (typeof settings.scope.watch_limit_min === "number")
-        SERVER_SCOPE_WATCH_LIMIT_MIN = settings.scope.watch_limit_min;
-      if (typeof settings.scope.watch_limit_max === "number")
-        SERVER_SCOPE_WATCH_LIMIT_MAX = settings.scope.watch_limit_max;
-      if (typeof settings.scope.watch_recursive === "boolean") {
-        // macOS and Windows watch the whole tree through one OS handle, so
-        // there are no per-directory watchers for this limit to cap. Hide the
-        // control rather than offer a setting that changes nothing.
-        const watchSection = document.querySelector<HTMLElement>(
-          "#watch-settings-section",
-        );
-        if (watchSection) watchSection.hidden = settings.scope.watch_recursive;
-      }
-      return settings;
-    } catch {
-      return null;
+    }
+    if (!response.ok) {
+      throw Object.assign(
+        new Error(
+          `terminal rule request failed with status ${response.status}`,
+        ),
+        { status: response.status, response: body },
+      );
+    }
+    if (!body || typeof body !== "object" || !("rules" in body)) {
+      throw Object.assign(new Error("terminal rule response is incomplete"), {
+        response: body,
+      });
+    }
+    if (
+      !("generation" in body) ||
+      typeof (body as { generation?: unknown }).generation !== "number"
+    ) {
+      throw Object.assign(
+        new Error("terminal rule response has no generation"),
+        { response: body },
+      );
+    }
+    return body as AgentScreenRulesResponse;
+  }
+
+  function applyAgentScreenRuleResponse(
+    response: AgentScreenRulesResponse,
+  ): void {
+    if (response.generation < AGENT_SCREEN_RULES_GENERATION) return;
+    AGENT_SCREEN_RULES = formatAgentScreenRuleSet(response.rules);
+    AGENT_SCREEN_RULES_SOURCE = response.source;
+    AGENT_SCREEN_RULE_ERRORS = response.errors;
+    AGENT_SCREEN_RULES_GENERATION = response.generation;
+  }
+
+  async function loadAgentScreenRules(): Promise<void> {
+    const generation = ++AGENT_SCREEN_RULE_REQUEST_GENERATION;
+    const response = await agentScreenRuleResponse(
+      await trackLoad(fetch("/_agent/rules")),
+    );
+    if (generation !== AGENT_SCREEN_RULE_REQUEST_GENERATION) return;
+    applyAgentScreenRuleResponse(response);
+  }
+
+  async function saveAgentScreenRules(value: string): Promise<void> {
+    let rules: unknown;
+    try {
+      rules = JSON.parse(value);
+    } catch (error) {
+      throw errorWithCause("terminal rules are not valid JSON", error);
+    }
+    const generation = ++AGENT_SCREEN_RULE_REQUEST_GENERATION;
+    const response = await agentScreenRuleResponse(
+      await trackLoad(
+        fetch("/_agent/rules", {
+          method: "PUT",
+          headers: actionHeaders(),
+          body: JSON.stringify(rules),
+        }),
+      ),
+    );
+    if (generation !== AGENT_SCREEN_RULE_REQUEST_GENERATION) return;
+    applyAgentScreenRuleResponse(response);
+  }
+
+  async function resetAgentScreenRuleSettings(): Promise<void> {
+    const generation = ++AGENT_SCREEN_RULE_REQUEST_GENERATION;
+    const response = await agentScreenRuleResponse(
+      await trackLoad(
+        fetch("/_agent/rules", {
+          method: "DELETE",
+          headers: actionHeaders(),
+        }),
+      ),
+    );
+    if (generation !== AGENT_SCREEN_RULE_REQUEST_GENERATION) return;
+    applyAgentScreenRuleResponse(response);
+  }
+
+  async function loadStateResponse<T>(
+    url: string,
+    operation: string,
+  ): Promise<T> {
+    const response = await trackLoad(fetch(url));
+    if (!response.ok) {
+      throw new Error(await responseErrorMessage(response, operation));
+    }
+    try {
+      return (await response.json()) as T;
+    } catch (error) {
+      throw errorWithCause(`${operation}: response is not valid JSON`, error);
     }
   }
 
   async function loadPersistedState(): Promise<void> {
     const [settings, view] = await Promise.all([
-      fetch("/_state/settings")
-        .then((res) =>
-          res.ok ? (res.json() as Promise<AppSettingsState>) : null,
-        )
-        .catch(() => null),
-      fetch("/_state/view")
-        .then((res) => (res.ok ? (res.json() as Promise<ViewState>) : null))
-        .catch(() => null),
+      loadStateResponse<AppSettingsState>(
+        "/_state/settings",
+        "settings state request failed",
+      ),
+      loadStateResponse<ViewState>("/_state/view", "view state request failed"),
     ]);
-    if (settings) APP_SETTINGS = settings;
-    if (view) VIEW_STATE = view;
+    APP_SETTINGS = settings;
+    VIEW_STATE = view;
   }
 
   function routeFromLocation(): AppRoute {
@@ -1276,7 +1506,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     getGrepGroupByFile: () => APP_SETTINGS.grepGroupByFile === true,
     getGrepPaletteWidth: () => APP_SETTINGS.grepPaletteWidth,
     getGrepPaletteHeight: () => APP_SETTINGS.grepPaletteHeight,
-    persistGrepSettings,
+    persistGrepSettings: persistSettingsPatch,
     applyGrepHideTests: (hidden) => {
       STATE.hideTests = hidden;
       applyHideTests();
@@ -1752,7 +1982,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         excludeNamesHelp:
           "Removes matching files or directories from the sidebar, search, and grep results entirely. Unlike Skip, the names themselves disappear from the UI. Supports gitignore-style wildcards (*, ?, [abc], [!abc]).",
         reset: "Restore defaults",
-        autosaveNote: "Changes save automatically.",
+        save: "Save changes",
+        saving: "Saving…",
+        saved: "Saved.",
+        unsaved: "Unsaved changes.",
+        saveNote: "Edits are not applied until you select Save changes.",
+        watchLimitInvalid: (min, max) =>
+          `Enter a whole number from ${min} to ${max}.`,
         scopeSource: (project, source) =>
           `Saved for project "${project}" in this browser. Source: ${source}. Used by the sidebar, Ctrl+K, Ctrl+G, Datastores, and the file change watcher. Restore defaults removes the browser override.`,
         browserOverride: "Browser override",
@@ -1773,6 +2009,38 @@ window.GdpExpandLogic = GdpExpandLogic;
         watchLimit: "Maximum directories to watch",
         watchLimitHelp: (defaultLimit) =>
           `Higher values reduce missed updates in deep trees at the cost of file handles. Combine with the Skip list above to keep heavy folders (node_modules, .git, dist...) out of the watch budget. Default: ${defaultLimit}.`,
+        agentRulesTitle: "Terminal status detection",
+        agentRulesLabel: "Screen matching rules (JSON)",
+        agentRulesHelp:
+          "Rules can report working, waiting, idle, or skip. Configure priority, region, contains, regex, lineRegex, and nested all/any/not conditions. contains ignores letter case; regex accepts a leading (?i) for case-insensitive matching. To keep matching responsive, regex allows at most one variable-length repetition and rejects groups, alternation, and backreferences; express AND/OR with all/any. The highest-priority match wins; equal priorities keep the earlier rule. Save validates every rule before replacing the active set.",
+        agentRulesGuideTitle: "JSON format and example",
+        agentRulesGuideIntro:
+          "Enter one object with version 1 and a rules array. Each rule needs the required fields listed below plus at least one matcher.",
+        agentRulesGuideFields:
+          "Required fields: id (unique name), state (working, waiting, idle, or skip), priority (higher wins), and region. lines is also required when region is bottom_non_empty.",
+        agentRulesGuideMatchers:
+          "Matchers: contains and regex test the selected region; lineRegex tests each line. Combine matcher objects with all, any, and not.",
+        agentRulesGuideRegions:
+          "Regions: osc_title checks the terminal title, whole_recent checks the recent screen, bottom_non_empty checks the last non-empty lines, and last_non_empty checks only the final non-empty line.",
+        agentRulesGuideExample: `{
+  "version": 1,
+  "rules": [
+    {
+      "id": "waiting_for_confirmation",
+      "state": "waiting",
+      "priority": 900,
+      "region": "bottom_non_empty",
+      "lines": 12,
+      "contains": ["enter to confirm"],
+      "not": [{ "contains": ["finished"] }]
+    }
+  ]
+}`,
+        agentRulesSave: "Validate and save",
+        agentRulesReset: "Use built-in rules",
+        agentRulesSaving: "Validating and saving…",
+        agentRulesSourceDefault: "Source: built-in rules",
+        agentRulesSourceSaved: "Source: saved rules (active immediately)",
       },
       annotations: {
         title: "Code annotations",
@@ -2078,7 +2346,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         excludeNamesHelp:
           "リスト中の名前に一致するファイル/ディレクトリを、サイドバー・検索結果・grep 結果から完全に消します。Skip と違い、名前自体が UI に出なくなります。gitignore方式のワイルドカード（*, ?, [abc], [!abc]）に対応しています。",
         reset: "デフォルトに戻す",
-        autosaveNote: "変更は自動で保存されます。",
+        save: "変更を保存",
+        saving: "保存しています…",
+        saved: "保存しました。",
+        unsaved: "未保存の変更があります。",
+        saveNote: "「変更を保存」を押すまで、編集内容は適用されません。",
+        watchLimitInvalid: (min, max) =>
+          `${min}〜${max}の整数を入力してください。`,
         scopeSource: (project, source) =>
           `このブラウザのプロジェクト "${project}" に保存されます。ソース: ${source}。サイドバー、Ctrl+K、Ctrl+G、Datastores、File change watcher で使われます。「デフォルトに戻す」でブラウザ側の上書きを削除します。`,
         browserOverride: "ブラウザ側の上書き",
@@ -2099,6 +2373,38 @@ window.GdpExpandLogic = GdpExpandLogic;
         watchLimit: "監視するディレクトリ数の上限",
         watchLimitHelp: (defaultLimit) =>
           `値を大きくすると深いツリーの変更を取りこぼしにくくなりますが、ファイルハンドル数を消費します。上の Skip リストと併用すると、重いフォルダ（node_modules, .git, dist など）を監視枠から外せます。既定値: ${defaultLimit}。`,
+        agentRulesTitle: "ターミナルのAI状態判定",
+        agentRulesLabel: "画面の一致ルール（JSON）",
+        agentRulesHelp:
+          "各ルールで working（作業中）・waiting（入力待ち）・idle（待機中）・skip（状態を維持）を指定できます。priority、region、contains、regex、lineRegex、入れ子の all/any/not を編集できます。contains は大文字小文字を区別せず、regex は先頭の (?i) による大小無視に対応します。判定処理を止めないため、regex の可変長の繰返しは1個までで、グループ・選択・後方参照は使えません。AND/OR は all/any で表します。優先度が最大の一致が採用され、同点は上にあるルールが優先されます。保存前に全ルールを検証します。",
+        agentRulesGuideTitle: "JSONの書式と入力例",
+        agentRulesGuideIntro:
+          "version が 1、rules が配列のJSONオブジェクトを入力します。各ルールには下記の必須項目と、1個以上の一致条件が必要です。",
+        agentRulesGuideFields:
+          "必須項目: id（一意の名前）、state（working / waiting / idle / skip）、priority（大きい値を優先）、region。region が bottom_non_empty の場合は lines も必要です。",
+        agentRulesGuideMatchers:
+          "一致条件: contains と regex は選択した領域全体、lineRegex は各行を調べます。一致条件のオブジェクトは all / any / not で組み合わせられます。",
+        agentRulesGuideRegions:
+          "region: osc_title はターミナルタイトル、whole_recent は直近の画面全体、bottom_non_empty は末尾の非空行、last_non_empty は最後の非空行だけを調べます。",
+        agentRulesGuideExample: `{
+  "version": 1,
+  "rules": [
+    {
+      "id": "waiting_for_confirmation",
+      "state": "waiting",
+      "priority": 900,
+      "region": "bottom_non_empty",
+      "lines": 12,
+      "contains": ["enter to confirm"],
+      "not": [{ "contains": ["finished"] }]
+    }
+  ]
+}`,
+        agentRulesSave: "検証して保存",
+        agentRulesReset: "組み込みルールに戻す",
+        agentRulesSaving: "検証して保存しています…",
+        agentRulesSourceDefault: "適用中: 組み込みルール",
+        agentRulesSourceSaved: "適用中: 保存したルール（即時反映）",
       },
       annotations: {
         title: "コード注釈",
@@ -2577,13 +2883,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (target) renderRepoBlobSidebar(target.path, target.ref || "worktree");
   }
 
-  function saveSidebarFontSize(value: string) {
-    const next = normalizeViewerFontSize(value);
-    mergeLocalSettings({ sidebarFontSize: next });
-    applySidebarFontSize();
-    patchSettings({ sidebarFontSize: next });
-  }
-
   /** コードの文字サイズを 1 段ずつ動かす。端では止まる。 */
   const CODE_FONT_STEPS: ViewerFontSize[] = [
     "compact",
@@ -2621,25 +2920,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     patchSettings({ codeFontSize: next });
   }
 
-  function saveUploadEnabled(checked: boolean) {
-    mergeLocalSettings({ uploadEnabled: checked });
-    patchSettings({ uploadEnabled: checked });
-  }
-
-  function saveScopeOmitDirsField(value: string) {
-    const next = normalizeScopeOmitDirs(value);
-    mergeLocalSettings({ scopeOmitDirs: next });
-    patchSettings({ scopeOmitDirs: next });
-    refreshRepositoryTreeAfterSettings();
-  }
-
-  function saveScopeExcludeNamesField(value: string) {
-    const next = normalizeScopeExcludeNames(value);
-    mergeLocalSettings({ scopeExcludeNames: next });
-    patchSettings({ scopeExcludeNames: next });
-    refreshRepositoryTreeAfterSettings();
-  }
-
   function normalizeScopeWatchLimit(value: unknown): number | null {
     const parsed =
       typeof value === "number"
@@ -2661,36 +2941,111 @@ window.GdpExpandLogic = GdpExpandLogic;
     return saved ?? SERVER_SCOPE_WATCH_LIMIT_DEFAULT;
   }
 
-  function saveScopeWatchLimitField(value: string) {
-    const next = normalizeScopeWatchLimit(value);
-    const resolved = next ?? SERVER_SCOPE_WATCH_LIMIT_DEFAULT;
-    mergeLocalSettings({ scopeWatchLimit: resolved });
-    patchSettings({ scopeWatchLimit: resolved });
+  function defaultViewerSettingsDraft(): ViewerSettingsDraft {
+    return {
+      language: "en",
+      sidebarFontSize: "regular",
+      codeFontSize: "regular",
+      omitDirs: serverScopeOmitDirsDefault().join("\n"),
+      excludeNames: serverScopeExcludeNamesDefault().join("\n"),
+      watchLimit: SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
+      uploadEnabled: true,
+      inferFkRails: false,
+      s3TooltipEnabled: true,
+    };
   }
 
-  function resetScopeSettings() {
-    setViewerLanguage("en", false);
-    mergeLocalSettings({
-      sidebarFontSize: null,
-      codeFontSize: null,
-      scopeOmitDirs: null,
-      scopeExcludeNames: null,
-      scopeWatchLimit: null,
-      uploadEnabled: null,
-    });
-    applySidebarFontSize("regular");
-    applyCodeFontSize("regular");
-    patchSettings({
-      language: STATE.language,
-      sidebarFontSize: null,
-      codeFontSize: null,
-      scopeOmitDirs: null,
-      scopeExcludeNames: null,
-      scopeWatchLimit: null,
-      uploadEnabled: null,
-    });
-    // フォームの表示は viewer-settings.ts が sync() で貼り直す。
-    refreshRepositoryTreeAfterSettings();
+  async function saveViewerSettings(
+    draft: ViewerSettingsDraft,
+    options: {
+      restoreDefaults: boolean;
+      changedFields: readonly (keyof ViewerSettingsDraft)[];
+    },
+  ): Promise<void> {
+    const normalizedLanguage = normalizeViewerLanguage(draft.language);
+    const normalizedSidebarFontSize = normalizeViewerFontSize(
+      draft.sidebarFontSize,
+    );
+    const normalizedCodeFontSize = normalizeViewerFontSize(draft.codeFontSize);
+    const normalizedOmitDirs = normalizeScopeOmitDirs(draft.omitDirs);
+    const normalizedExcludeNames = normalizeScopeExcludeNames(
+      draft.excludeNames,
+    );
+    const normalized: ViewerSettingsDraft = {
+      language: normalizedLanguage,
+      sidebarFontSize: normalizedSidebarFontSize,
+      codeFontSize: normalizedCodeFontSize,
+      omitDirs: normalizedOmitDirs.join("\n"),
+      excludeNames: normalizedExcludeNames.join("\n"),
+      watchLimit:
+        normalizeScopeWatchLimit(draft.watchLimit) ??
+        SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
+      uploadEnabled: draft.uploadEnabled,
+      inferFkRails: draft.inferFkRails,
+      s3TooltipEnabled: draft.s3TooltipEnabled,
+    };
+    const changed = new Set(options.changedFields);
+    const appPatch: SettingsPatch = {};
+    const dbPrefsPatch: {
+      inferFkRails?: boolean | null;
+      s3TooltipEnabled?: boolean | null;
+    } = {};
+    if (options.restoreDefaults) {
+      Object.assign(appPatch, {
+        language: "en",
+        sidebarFontSize: null,
+        codeFontSize: null,
+        scopeOmitDirs: null,
+        scopeExcludeNames: null,
+        scopeWatchLimit: null,
+        uploadEnabled: null,
+      });
+      dbPrefsPatch.inferFkRails = null;
+      dbPrefsPatch.s3TooltipEnabled = null;
+    } else {
+      if (changed.has("language")) appPatch.language = normalizedLanguage;
+      if (changed.has("sidebarFontSize"))
+        appPatch.sidebarFontSize = normalizedSidebarFontSize;
+      if (changed.has("codeFontSize"))
+        appPatch.codeFontSize = normalizedCodeFontSize;
+      if (changed.has("omitDirs")) appPatch.scopeOmitDirs = normalizedOmitDirs;
+      if (changed.has("excludeNames"))
+        appPatch.scopeExcludeNames = normalizedExcludeNames;
+      if (changed.has("watchLimit"))
+        appPatch.scopeWatchLimit = normalized.watchLimit;
+      if (changed.has("uploadEnabled"))
+        appPatch.uploadEnabled = normalized.uploadEnabled;
+      if (changed.has("inferFkRails"))
+        dbPrefsPatch.inferFkRails = normalized.inferFkRails;
+      if (changed.has("s3TooltipEnabled"))
+        dbPrefsPatch.s3TooltipEnabled = normalized.s3TooltipEnabled;
+    }
+    const operations: Promise<void>[] = [];
+    if (Object.keys(appPatch).length > 0)
+      operations.push(persistSettingsPatch(appPatch));
+    if (Object.keys(dbPrefsPatch).length > 0)
+      operations.push(DATABASE_VIEW.saveDbUiPrefs(dbPrefsPatch));
+    const results = await Promise.allSettled(operations);
+    const errors = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (errors.length > 0) {
+      throw errorWithCauses("save viewer settings failed", errors);
+    }
+
+    if (options.restoreDefaults || changed.has("language"))
+      setViewerLanguage(normalizedLanguage, false);
+    if (options.restoreDefaults || changed.has("sidebarFontSize"))
+      applySidebarFontSize();
+    if (options.restoreDefaults || changed.has("codeFontSize"))
+      applyCodeFontSize();
+    if (
+      options.restoreDefaults ||
+      changed.has("omitDirs") ||
+      changed.has("excludeNames")
+    ) {
+      refreshRepositoryTreeAfterSettings();
+    }
   }
 
   // Build a directory trie from server tree entries. Explicit directory
@@ -3390,31 +3745,21 @@ window.GdpExpandLogic = GdpExpandLogic;
         PROJECT_NAME || "default",
         scopeOmitSourceLabel(),
       ),
+      agentRulesJson: AGENT_SCREEN_RULES,
+      agentRulesSource: AGENT_SCREEN_RULES_SOURCE,
+      agentRulesErrors: agentScreenRuleErrorsText(AGENT_SCREEN_RULE_ERRORS),
     }),
+    getDefaultValues: defaultViewerSettingsDraft,
     refresh: async () => {
-      await loadSettings();
+      await Promise.all([
+        loadSettings(),
+        loadAgentScreenRules(),
+        DATABASE_VIEW.loadDbUiPrefs(),
+      ]);
     },
-    onLanguageChange: (value) => {
-      setViewerLanguage(normalizeViewerLanguage(value));
-      VIEWER_SETTINGS.sync();
-    },
-    onSidebarFontSizeChange: saveSidebarFontSize,
-    onCodeFontSizeChange: saveCodeFontSize,
-    onUploadEnabledChange: saveUploadEnabled,
-    onOmitDirsChange: (value) => {
-      saveScopeOmitDirsField(value);
-      VIEWER_SETTINGS.sync();
-    },
-    onExcludeNamesChange: (value) => {
-      saveScopeExcludeNamesField(value);
-      VIEWER_SETTINGS.sync();
-    },
-    onWatchLimitChange: saveScopeWatchLimitField,
-    onInferFkChange: (checked) =>
-      DATABASE_VIEW.setDbUiPref("inferFkRails", checked),
-    onS3TooltipChange: (checked) =>
-      DATABASE_VIEW.setDbUiPref("s3TooltipEnabled", checked),
-    onReset: resetScopeSettings,
+    onSave: saveViewerSettings,
+    onAgentRulesSave: saveAgentScreenRules,
+    onAgentRulesReset: resetAgentScreenRuleSettings,
   });
   relocalizeViewerSettings = () => VIEWER_SETTINGS.localize();
 

@@ -8,6 +8,7 @@ import { describe, expect, test } from "vitest";
 import {
   ACTIVITY_IDLE_AFTER_MS,
   nextActivityState,
+  nextObservedState,
   OVERRIDE_CHANGE_STREAK,
   rotateForSweep,
 } from "../server/terminal/activity";
@@ -63,6 +64,251 @@ describe("nextActivityState", () => {
     ];
     expect(states).not.toContain("waiting");
     expect(states).not.toContain("done");
+  });
+});
+
+describe("nextObservedState", () => {
+  test.each([
+    {
+      name: "確認フォームは入力待ち",
+      content: "Review\nEnter to confirm\nEsc to cancel",
+      state: "waiting",
+      ruleId: "interactive_form",
+      override: true,
+    },
+    {
+      name: "入力欄は待機中",
+      content: "────────\n❯ Ask something\n────────",
+      state: "idle",
+      ruleId: "prompt_box",
+      override: true,
+    },
+    {
+      name: "初回の作業表示は明示ルールで作業中",
+      content: "• Working (2s · esc to interrupt)",
+      state: "working",
+      ruleId: "live_working_status",
+      override: false,
+    },
+  ])("$name", ({ content, state, ruleId, override }) => {
+    expect(nextObservedState(undefined, content, undefined, AT)).toMatchObject({
+      kind: "record",
+      state,
+      ruleId,
+      override,
+    });
+  });
+
+  test("履歴表示中は直前の状態を更新しない", () => {
+    expect(
+      nextObservedState(
+        undefined,
+        "Showing detailed transcript",
+        undefined,
+        AT,
+      ),
+    ).toMatchObject({ kind: "skip", ruleId: "transcript_view" });
+  });
+
+  test("一致ルールも申告も無い通常画面には状態を付けない", () => {
+    const rules = { version: 1 as const, rules: [] };
+    const first = nextObservedState(
+      undefined,
+      "ordinary output",
+      undefined,
+      AT,
+      rules,
+    );
+    expect(first).toMatchObject({
+      kind: "unidentified",
+    });
+  });
+
+  test("一度識別済みなら一致ルールが無い画面を変化量で判定する", () => {
+    const rules = { version: 1 as const, rules: [] };
+    const first = nextObservedState(
+      undefined,
+      "ordinary output",
+      undefined,
+      AT,
+      rules,
+      "working",
+    );
+    expect(first).toMatchObject({
+      kind: "record",
+      state: "working",
+      ruleId: null,
+    });
+    const quiet = nextObservedState(
+      first.seen,
+      "ordinary output",
+      undefined,
+      AT + ACTIVITY_IDLE_AFTER_MS,
+      rules,
+      "working",
+    );
+    expect(quiet).toMatchObject({
+      kind: "record",
+      state: "idle",
+      ruleId: null,
+    });
+  });
+
+  test("作業ルールの文字が残っていても静止時間を超えたら待機中", () => {
+    const content =
+      "✢ Thinking… (12s · 120 tokens)\n────────\n❯ Continue\n────────";
+    const first = nextObservedState(undefined, content, undefined, AT);
+    const quiet = nextObservedState(
+      first.seen,
+      content,
+      undefined,
+      AT + ACTIVITY_IDLE_AFTER_MS,
+      undefined,
+      "working",
+    );
+
+    expect(quiet).toMatchObject({
+      kind: "record",
+      state: "idle",
+      ruleId: null,
+      override: false,
+    });
+  });
+
+  test.each([
+    {
+      name: "古い作業行が残っていても画面が静止すれば待機中",
+      previousContent:
+        "• Working (2s · esc to interrupt)\n› Continue\nexample status",
+      content: "• Working (2s · esc to interrupt)\n› Continue\nexample status",
+      elapsed: ACTIVITY_IDLE_AFTER_MS,
+      expected: {
+        kind: "record",
+        state: "idle",
+        ruleId: null,
+        override: false,
+      },
+    },
+    {
+      name: "古い作業行が残っていても画面が変化中なら作業中",
+      previousContent:
+        "• Working (2s · esc to interrupt)\n› Continue\nexample status",
+      content: "• Working (2s · esc to interrupt)\n› Continue\nupdated status",
+      elapsed: 1,
+      expected: {
+        kind: "record",
+        state: "working",
+        ruleId: "live_working_status",
+        override: false,
+      },
+    },
+  ])("$name", ({ previousContent, content, elapsed, expected }) => {
+    const previous = nextObservedState(
+      undefined,
+      previousContent,
+      undefined,
+      AT,
+      undefined,
+      "working",
+    );
+    const result = nextObservedState(
+      previous.seen,
+      content,
+      undefined,
+      AT + elapsed,
+      undefined,
+      "working",
+    );
+
+    expect(result).toMatchObject(expected);
+  });
+
+  test.each([
+    {
+      name: "タイトルのスピナーが静止すれば待機中",
+      previousTitle: "⠋ Working",
+      title: "⠋ Working",
+      elapsed: ACTIVITY_IDLE_AFTER_MS,
+      expected: {
+        kind: "record",
+        state: "idle",
+        ruleId: null,
+        override: false,
+      },
+    },
+    {
+      name: "タイトルのスピナーが回転中なら作業中",
+      previousTitle: "⠋ Working",
+      title: "⠙ Working",
+      elapsed: 1,
+      expected: {
+        kind: "record",
+        state: "working",
+        ruleId: "title_spinner",
+        override: false,
+      },
+    },
+  ])("$name", ({ previousTitle, title, elapsed, expected }) => {
+    const content = "› Continue\nexample status";
+    const previous = nextObservedState(
+      undefined,
+      content,
+      previousTitle,
+      AT,
+      undefined,
+      "working",
+    );
+    const result = nextObservedState(
+      previous.seen,
+      content,
+      title,
+      AT + elapsed,
+      undefined,
+      "working",
+    );
+
+    expect(result).toMatchObject(expected);
+  });
+
+  test.each([
+    {
+      name: "作業中から変化した待機表示は1回維持する",
+      previousContent: "• Working (2s · esc to interrupt)",
+      previousState: "working" as const,
+      content: "────────\n❯ Continue\n────────",
+      expected: { kind: "hold", ruleId: "prompt_box" },
+    },
+    {
+      name: "作業中でも同じ待機表示が続けば待機を確定する",
+      previousContent: "────────\n❯ Continue\n────────",
+      previousState: "working" as const,
+      content: "────────\n❯ Continue\n────────",
+      expected: { kind: "record", state: "idle", ruleId: "prompt_box" },
+    },
+    {
+      name: "すでに待機中なら入力による画面変化を維持しない",
+      previousContent: "────────\n❯ Previous\n────────",
+      previousState: "idle" as const,
+      content: "────────\n❯ Continue\n────────",
+      expected: { kind: "record", state: "idle", ruleId: "prompt_box" },
+    },
+  ])("$name", ({ previousContent, previousState, content, expected }) => {
+    const previous = nextObservedState(
+      undefined,
+      previousContent,
+      undefined,
+      AT,
+    );
+    const result = nextObservedState(
+      previous.seen,
+      content,
+      undefined,
+      AT + 1,
+      undefined,
+      previousState,
+    );
+
+    expect(result).toMatchObject(expected);
   });
 });
 

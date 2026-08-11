@@ -62,12 +62,10 @@ export type RecordAgentStateInput = {
    */
   at?: number;
   /**
-   * 当て推量が申告を上書きしてよい、という合図。
+   * 画面観測が申告を上書きしてよい、という合図。
    *
-   * 使うのは「画面が動き続けているのに申告は入力待ちのまま」という、申告が
-   * 事実と食い違っている場合だけ (terminal/activity.ts が判定する)。申告を
-   * 入れたきり二度と報告が来ないセッションが、永久に「あなたの番」へ居座る
-   * のを解く唯一の経路。
+   * 文字ルールに明示的に一致した場合と、画面が連続して動いて申告を作業中へ
+   * 戻す場合だけ terminal/activity.ts が指定する。
    */
   override?: boolean;
   lastPrompt?: string;
@@ -79,9 +77,8 @@ export type RecordAgentStateInput = {
  *
  * 2 つ捨てる場合がある。
  *
- * - 申告済みの対象への当て推量。フックは状態が変わった瞬間に届くので、画面が
- *   静かでも「待ち」のままでいるのが正しい。当て推量で上書きすると、待って
- *   いるものが idle に化けて見落としになる。
+ * - 申告済みの対象への根拠の弱い変化量判定。明示的な画面ルールか、連続変化
+ *   による作業中への復帰だけが上書きできる。
  * - 既に記録した申告より古い申告。progress が stop より遅れて着いたときに、
  *   終わった対象が稼働中へ戻るのを防ぐ。
  */
@@ -96,15 +93,18 @@ export function recordAgentState(
       : null);
   if (!next) return null;
 
-  // 当て推量は原則として申告に触らない。フックは状態が変わった瞬間に届く
-  // ので、画面が静かでも「待ち」のままでいるのが正しい。
-  //
-  // 例外は「稼働へ上げる」ときだけ。画面が動き続けているなら入力待ちでは
-  // ありえないので、そこは事実を採る。逆向き (待ちを停止へ落とす) は許さない。
-  // 落とすと、長く待たせているものが一覧から消えて本当に見落とす。
-  if (input.source === "activity" && previous?.source === "hook") {
-    const promoting = input.override === true && next === "working";
-    if (!promoting) return previous;
+  // 文字ルールの一致は画面に見えている状態として採用する。文字ルールに一致
+  // しない変化量だけの判定は、連続して動いたときの作業中への復帰に限る。
+  if (input.source !== "hook" && previous?.source === "hook") {
+    // 未読の完了状態を解けるのは read / 新しい hook だけ。画面には直前の
+    // 作業表示や入力欄が残りうるため、それを根拠に done を消してはいけない。
+    if (previous.state === "done") return previous;
+    const visibleRule = input.source === "screen" && input.override === true;
+    const motionPromoting =
+      input.source === "activity" &&
+      input.override === true &&
+      next === "working";
+    if (!visibleRule && !motionPromoting) return previous;
   }
 
   const at = Number.isFinite(input.at) ? (input.at as number) : Date.now();
@@ -124,7 +124,10 @@ export function recordAgentState(
     target: input.target,
     state: next,
     source: input.source,
-    updatedAt: at,
+    updatedAt:
+      input.source !== "hook" && previous?.state === next
+        ? previous.updatedAt
+        : at,
     // 添え物は送られてこなければ前の値を残す。ターンの途中で毎回指示文を
     // 送り直させないため。
     lastPrompt: clip(input.lastPrompt ?? previous?.lastPrompt ?? ""),

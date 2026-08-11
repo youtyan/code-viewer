@@ -1,10 +1,8 @@
 // ターミナルで動いているコーディングエージェントの状態。
 //
-// 画面の文字を読んで当てるのではなく、エージェント自身に申告させる。CLI の
-// フック (claude なら UserPromptSubmit / PreToolUse / Stop / Notification、
-// codex なら hooks.json) が `code-viewer terminal state` を呼び、そこから
-// サーバへ届く。申告が無いセッションのために、出力が動いているかどうかだけ
-// を見る当て推量も持つ。両方あるのは、片方だけでは足りないため:
+// 状態変更の申告、画面に見えている入力・作業表示、画面の変化量を順に使う。
+// 申告が無い対象でも画面表示から入力待ちと作業中を拾い、どのルールにも
+// 一致しないときだけ変化量から作業中か待機中かを推測する。
 //
 // - 申告だけ  → フックを入れていない人には何も出ない
 // - 当て推量だけ → 「入力待ち」と「終わったが未読」を区別できない
@@ -31,8 +29,8 @@ export function isAgentState(value: unknown): value is AgentState {
 /**
  * エージェントのフックが送ってくる出来事。CLI の `--event` がそのまま入る。
  *
- * claude と codex でフック名は違うが、意味は次の 4 つに畳める。名前を揃えて
- * おかないと、エージェントが増えるたびに遷移表が増える。
+ * 実行環境ごとにフック名は違うが、意味は次の出来事に畳める。名前を揃えて
+ * おかないと、対応対象が増えるたびに遷移表が増える。
  */
 export const AGENT_EVENTS = [
   /** 人間が指示を出した。ここからターンが始まる。 */
@@ -82,7 +80,7 @@ export function agentStateForEvent(
 }
 
 /** 状態の出どころ。UI で「申告なので確か」と「当て推量」を区別するために持つ。 */
-export type AgentStateSource = "hook" | "activity";
+export type AgentStateSource = "hook" | "screen" | "activity";
 
 export type AgentStateRecord = {
   /** tmux ペイン ID か、ブラウザシェルのセッション ID。 */
@@ -95,6 +93,21 @@ export type AgentStateRecord = {
   lastPrompt: string;
   /** エージェント側の一言。フックが送ってきたときだけ入る。 */
   note: string;
+};
+
+export type AgentStateObservationError = {
+  operation: "list_terminals" | "capture_screen";
+  target: string;
+  at: number;
+  /** Error の cause と独自フィールドを保持した表示用詳細。 */
+  detail: string;
+  /** Error が持つ場合は省略せず返す。 */
+  stack: string;
+};
+
+export type AgentStatesResponse = {
+  states: AgentStateRecord[];
+  errors: AgentStateObservationError[];
 };
 
 /**

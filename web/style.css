@@ -1381,12 +1381,35 @@ body.gdp-diff-page #repo-target-wrap {
   background: var(--fg-subtle);
   transition: background 0.2s ease, box-shadow 0.2s ease;
 }
-#status.live::before { background: #2ea043; box-shadow: 0 0 0 3px rgba(46,160,67,0.20); }
+#status.live::before {
+  background: #2ea043;
+  box-shadow: 0 0 0 3px rgba(46,160,67,0.20);
+  animation: status-live-pulse 1.6s ease-out infinite;
+}
 #status.refreshing::before { background: #d29922; box-shadow: 0 0 0 3px rgba(210,153,34,0.25); }
 #status.error::before { background: var(--danger); box-shadow: 0 0 0 3px rgba(207,34,46,0.20); }
 #status.live { color: var(--success); }
 #status.refreshing { color: var(--attn); }
 #status.error { color: var(--danger); }
+@keyframes status-live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(46, 160, 67, 0.42);
+    transform: scale(0.92);
+  }
+  55% {
+    box-shadow: 0 0 0 6px rgba(46, 160, 67, 0);
+    transform: scale(1.08);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(46, 160, 67, 0);
+    transform: scale(0.92);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #status.live::before {
+    animation: none;
+  }
+}
 
 /* ===== Top-edge loading bar (indeterminate) ===== */
 #load-bar {
@@ -2283,7 +2306,7 @@ body.gdp-history-resizing * {
 
 /* Help ページの設定セクションに置くフォーム。読みやすい行長で止める。 */
 .scope-settings {
-  max-width: 460px;
+  max-width: 760px;
 }
 .scope-settings label {
   display: block;
@@ -2356,6 +2379,118 @@ body.gdp-history-resizing * {
   padding: 8px;
   font: 13px/19px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+.agent-screen-rules-section {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.agent-screen-rules-guide {
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-soft) 76%, transparent);
+}
+.agent-screen-rules-guide summary {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.agent-screen-rules-guide .scope-settings-help {
+  margin-top: 6px;
+}
+.agent-screen-rules-guide-example {
+  margin: 8px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  tab-size: 2;
+}
+.agent-screen-rules-editor {
+  position: relative;
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+}
+.agent-screen-rules-editor:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+.agent-screen-rules-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 8px;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  pointer-events: none;
+  background: var(--bg-soft);
+  color: var(--fg);
+  font: 13px/19px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 2;
+}
+.agent-screen-rules-highlight code {
+  font: inherit;
+}
+.agent-screen-rules-highlight code::after {
+  content: "\200b";
+  display: inline-block;
+  height: 19px;
+}
+.agent-screen-rules-highlight span[style] {
+  color: var(--shiki-light);
+}
+@media (prefers-color-scheme: dark) {
+  .agent-screen-rules-highlight span[style] {
+    color: var(--shiki-dark);
+  }
+}
+html[data-theme="light"] .agent-screen-rules-highlight span[style] {
+  color: var(--shiki-light);
+}
+html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
+  color: var(--shiki-dark);
+}
+#agent-screen-rules {
+  position: relative;
+  z-index: 1;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 420px;
+  margin: 0;
+  padding: 8px;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  resize: vertical;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--fg);
+  font: 13px/19px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 2;
+}
+#agent-screen-rules::selection {
+  background: var(--accent);
+  color: var(--fg-onemphasis);
+}
+#agent-screen-rules:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
 #scope-omit-source {
   margin: 8px 0 0;
   color: var(--fg-subtle);
@@ -2400,17 +2535,16 @@ body.gdp-history-resizing * {
   margin: 0;
 }
 .scope-settings-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
 }
 .scope-settings-footer .scope-settings-help {
-  margin: 0;
-  flex: 1;
+  margin: 4px 0 0;
+}
+#scope-settings-save-status {
+  min-height: 15px;
+  color: var(--fg-muted);
 }
 .scope-settings-actions button {
   border: 1px solid var(--border);
@@ -2423,6 +2557,22 @@ body.gdp-history-resizing * {
 .scope-settings-actions button:hover {
   border-color: var(--border-strong);
   background: var(--bg-mute);
+}
+.scope-settings-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.scope-settings-actions .scope-settings-primary-action {
+  inline-size: 12em;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.scope-settings-actions .scope-settings-primary-action:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 88%, var(--fg));
 }
 
 #quick-help-popover {
@@ -15681,6 +15831,20 @@ html[data-theme="dark"] .tools-code span[style] {
   padding: 16px 12px;
   font-size: 13px;
   color: var(--fg-muted, #57606a);
+}
+
+.terminal-observation-errors {
+  max-height: 12rem;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  border-radius: 6px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg));
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ==========================================================================

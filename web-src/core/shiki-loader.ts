@@ -7,7 +7,8 @@
 // 評価されないため、複数 view が異なる lang セットで呼んでも shiki.js の
 // バンドル本体は使い回される。
 //
-// ロード失敗時は原因を呼び出し側へ伝播する。
+// 通常はロード失敗時に null を返す。失敗を画面へ出す必要がある入力欄は
+// failureMode: "throw" を使い、元の失敗を呼び出し側で保持する。
 
 import { createBundleLoader } from "./lazy-bundle";
 
@@ -25,6 +26,8 @@ export type ShikiHighlighter = {
 export type ShikiLoaderOptions = {
   themes: string[];
   langs: string[];
+  /** fallback は従来どおり null、throw は呼び出し側へ元の失敗を返す。 */
+  failureMode?: "fallback" | "throw";
 };
 
 type ShikiModule = {
@@ -52,25 +55,28 @@ export function highlightToInnerHtml(
 }
 
 const loadShikiModule = createBundleLoader<ShikiModule>("shiki.js");
-const cache = new Map<string, Promise<ShikiHighlighter>>();
+const cache = new Map<string, Promise<ShikiHighlighter | null>>();
 
 export function loadShikiHighlighter(
   options: ShikiLoaderOptions,
-): Promise<ShikiHighlighter> {
+): Promise<ShikiHighlighter | null> {
   // langs は順序差を消した上で key 化する (["sql","bash"] と ["bash","sql"]
   // を同じキャッシュエントリと見なす)。
   const key = JSON.stringify({
     themes: [...options.themes].sort(),
     langs: [...options.langs].sort(),
+    failureMode: options.failureMode ?? "fallback",
   });
   const cached = cache.get(key);
   if (cached) return cached;
-  const promise = loadShikiModule().then((mod) =>
+  const load = loadShikiModule().then((mod) =>
     mod.createHighlighter({
       themes: options.themes,
       langs: options.langs,
     }),
   );
+  const promise =
+    options.failureMode === "throw" ? load : load.catch(() => null);
   cache.set(key, promise);
   return promise;
 }

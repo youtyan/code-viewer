@@ -6,13 +6,29 @@ import {
   describe,
   expect,
   test,
+  vi,
 } from "vitest";
 import {
   createViewerSettings,
+  type ViewerSettingsDraft,
   type ViewerSettingsText,
   type ViewerSettingsValues,
 } from "../views/viewer-settings";
-import { q } from "./_test-helpers";
+import {
+  baseRules,
+  cascadedDeclarations,
+  loadStyleSheet,
+} from "./_css-fixture";
+import { deferred, q } from "./_test-helpers";
+
+const shikiMock = vi.hoisted(() => ({ load: vi.fn() }));
+const styleRules = baseRules(loadStyleSheet());
+
+vi.mock("../core/shiki-loader", () => ({
+  loadShikiHighlighter: shikiMock.load,
+  highlightToInnerHtml: (code: string) =>
+    `<code><span class="tok">${code}</span></code>`,
+}));
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -39,7 +55,12 @@ const EN_TEXT: ViewerSettingsText = {
   excludeNames: "Hide these names completely",
   excludeNamesHelp: "Removed from every list.",
   reset: "Restore defaults",
-  autosaveNote: "Changes are saved automatically.",
+  save: "Save changes",
+  saving: "Saving…",
+  saved: "Saved.",
+  unsaved: "Unsaved changes.",
+  saveNote: "Edits are not applied until you save.",
+  watchLimitInvalid: (min, max) => `Use an integer from ${min} to ${max}.`,
   scopeSource: (project, source) => `${project} / ${source}`,
   browserOverride: "browser override",
   serverDefault: "server default",
@@ -54,6 +75,22 @@ const EN_TEXT: ViewerSettingsText = {
   watchTitle: "File change watcher",
   watchLimit: "Maximum directories to watch",
   watchLimitHelp: (limit) => `Default is ${limit}.`,
+  agentRulesTitle: "Terminal state detection",
+  agentRulesLabel: "Rules",
+  agentRulesHelp: "Edit JSON rules.",
+  agentRulesGuideTitle: "JSON format and example",
+  agentRulesGuideIntro: "Use version 1 and a rules array.",
+  agentRulesGuideFields: "Rule fields: id, state, priority, region, lines.",
+  agentRulesGuideMatchers:
+    "Matchers: contains, regex, lineRegex, all, any, not.",
+  agentRulesGuideRegions:
+    "Regions: osc_title, whole_recent, bottom_non_empty, last_non_empty.",
+  agentRulesGuideExample: '{"version":1,"rules":[]}',
+  agentRulesSave: "Save rules",
+  agentRulesReset: "Use defaults",
+  agentRulesSaving: "Saving rules…",
+  agentRulesSourceDefault: "Built-in rules",
+  agentRulesSourceSaved: "Saved rules",
 };
 
 const JA_TEXT: ViewerSettingsText = {
@@ -62,6 +99,7 @@ const JA_TEXT: ViewerSettingsText = {
   language: "言語",
   sizeRegular: "標準",
   reset: "デフォルトに戻す",
+  save: "変更を保存",
 };
 
 function defaultValues(): ViewerSettingsValues {
@@ -79,26 +117,34 @@ function defaultValues(): ViewerSettingsValues {
     inferFkRails: false,
     s3TooltipEnabled: true,
     scopeSource: "sample-project / server default",
+    agentRulesJson: '{\n  "version": 1,\n  "rules": []\n}\n',
+    agentRulesSource: "saved",
+    agentRulesErrors: "",
   };
 }
 
 type Recorded = {
-  language: string[];
-  sidebarFontSize: string[];
-  codeFontSize: string[];
-  uploadEnabled: boolean[];
-  omitDirs: string[];
-  excludeNames: string[];
-  watchLimit: string[];
-  inferFk: boolean[];
-  s3Tooltip: boolean[];
-  reset: number;
+  save: Array<{ draft: ViewerSettingsDraft; restoreDefaults: boolean }>;
+  agentRulesSave: string[];
+  agentRulesReset: number;
   refresh: number;
   getValues: number;
 };
 
 function setup(
-  options: { language?: "en" | "ja"; refresh?: () => Promise<void> } = {},
+  options: {
+    language?: "en" | "ja";
+    refresh?: () => Promise<void>;
+    save?: (
+      draft: ViewerSettingsDraft,
+      options: {
+        restoreDefaults: boolean;
+        changedFields: readonly (keyof ViewerSettingsDraft)[];
+      },
+    ) => Promise<void>;
+    saveRules?: (value: string) => Promise<void>;
+    resetRules?: () => Promise<void>;
+  } = {},
 ) {
   document.body.innerHTML = '<div id="host"></div>';
   const host = document.querySelector<HTMLElement>("#host");
@@ -106,17 +152,21 @@ function setup(
 
   let language: "en" | "ja" = options.language ?? "en";
   const values = defaultValues();
+  const defaults: ViewerSettingsDraft = {
+    language: "en",
+    sidebarFontSize: "regular",
+    codeFontSize: "regular",
+    omitDirs: "node_modules",
+    excludeNames: ".DS_Store",
+    watchLimit: 4096,
+    uploadEnabled: true,
+    inferFkRails: false,
+    s3TooltipEnabled: true,
+  };
   const calls: Recorded = {
-    language: [],
-    sidebarFontSize: [],
-    codeFontSize: [],
-    uploadEnabled: [],
-    omitDirs: [],
-    excludeNames: [],
-    watchLimit: [],
-    inferFk: [],
-    s3Tooltip: [],
-    reset: 0,
+    save: [],
+    agentRulesSave: [],
+    agentRulesReset: 0,
     refresh: 0,
     getValues: 0,
   };
@@ -127,23 +177,34 @@ function setup(
       calls.getValues++;
       return { ...values };
     },
+    getDefaultValues: () => ({ ...defaults }),
     refresh:
       options.refresh ??
       (async () => {
         calls.refresh++;
       }),
-    onLanguageChange: (value) => calls.language.push(value),
-    onSidebarFontSizeChange: (value) => calls.sidebarFontSize.push(value),
-    onCodeFontSizeChange: (value) => calls.codeFontSize.push(value),
-    onUploadEnabledChange: (checked) => calls.uploadEnabled.push(checked),
-    onOmitDirsChange: (value) => calls.omitDirs.push(value),
-    onExcludeNamesChange: (value) => calls.excludeNames.push(value),
-    onWatchLimitChange: (value) => calls.watchLimit.push(value),
-    onInferFkChange: (checked) => calls.inferFk.push(checked),
-    onS3TooltipChange: (checked) => calls.s3Tooltip.push(checked),
-    onReset: () => {
-      calls.reset++;
-    },
+    onSave:
+      options.save ??
+      (async (draft, saveOptions) => {
+        calls.save.push({
+          draft: { ...draft },
+          restoreDefaults: saveOptions.restoreDefaults,
+        });
+        Object.assign(values, draft);
+      }),
+    onAgentRulesSave:
+      options.saveRules ??
+      (async (value) => {
+        calls.agentRulesSave.push(value);
+      }),
+    onAgentRulesReset:
+      options.resetRules ??
+      (async () => {
+        calls.agentRulesReset++;
+        values.agentRulesJson =
+          '{\n  "version": 1,\n  "rules": ["default"]\n}\n';
+        values.agentRulesSource = "default";
+      }),
   });
 
   return {
@@ -164,10 +225,12 @@ function fire(target: HTMLElement, type: "change" | "input"): void {
 describe("viewer settings form", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
+    shikiMock.load.mockReset();
+    shikiMock.load.mockResolvedValue({ codeToHtml: () => "" });
   });
 
   test("shows the saved values when it is mounted", () => {
-    const { settings, host } = setup();
+    const { settings, host, values } = setup();
 
     settings.mount(host);
 
@@ -185,6 +248,61 @@ describe("viewer settings form", () => {
     expect(q<HTMLElement>(document, "#scope-omit-source").textContent).toBe(
       "sample-project / server default",
     );
+    expect(q<HTMLTextAreaElement>(document, "#agent-screen-rules").value).toBe(
+      values.agentRulesJson,
+    );
+    expect(
+      q<HTMLElement>(document, "#agent-screen-rules-source").textContent,
+    ).toBe("Saved rules");
+  });
+
+  test("判定ルールをボタンで保存する", async () => {
+    const { settings, host, calls } = setup();
+    settings.mount(host);
+    const editor = q<HTMLTextAreaElement>(document, "#agent-screen-rules");
+    editor.value = '{"version":1,"rules":[]}';
+    q<HTMLButtonElement>(document, "#agent-screen-rules-save").click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls.agentRulesSave).toEqual(['{"version":1,"rules":[]}']);
+    expect(editor.disabled).toBe(false);
+  });
+
+  test("判定ルールを既定へ戻して表示を同期する", async () => {
+    const { settings, host, calls } = setup();
+    settings.mount(host);
+    q<HTMLButtonElement>(document, "#agent-screen-rules-reset").click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls.agentRulesReset).toBe(1);
+    expect(
+      q<HTMLTextAreaElement>(document, "#agent-screen-rules").value,
+    ).toContain('"default"');
+    expect(
+      q<HTMLElement>(document, "#agent-screen-rules-source").textContent,
+    ).toBe("Built-in rules");
+  });
+
+  test("判定ルールの保存失敗を原因まで表示する", async () => {
+    const harness = setup({
+      saveRules: () =>
+        Promise.reject(
+          Object.assign(new Error("rule validation failed"), {
+            errors: [
+              { path: "rules[0].regex[0]", code: "invalid_regex" },
+              { path: "rules[1].state", code: "invalid_state" },
+            ],
+          }),
+        ),
+    });
+    harness.settings.mount(harness.host);
+    q<HTMLButtonElement>(document, "#agent-screen-rules-save").click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const error = q<HTMLElement>(document, "#agent-screen-rules-error");
+    expect(error.hidden).toBe(false);
+    expect(error.textContent).toContain("rules[0].regex[0]");
+    expect(error.textContent).toContain("rules[1].state");
   });
 
   test.each([
@@ -192,38 +310,33 @@ describe("viewer settings form", () => {
       name: "language",
       selector: "#viewer-language",
       value: "ja",
-      read: (calls: Recorded) => calls.language,
-      expected: ["ja"],
+      event: "change" as const,
     },
     {
       name: "UI font size",
       selector: "#sidebar-font-size",
       value: "large",
-      read: (calls: Recorded) => calls.sidebarFontSize,
-      expected: ["large"],
+      event: "change" as const,
     },
     {
       name: "code font size",
       selector: "#code-font-size",
       value: "compact",
-      read: (calls: Recorded) => calls.codeFontSize,
-      expected: ["compact"],
+      event: "change" as const,
     },
     {
       name: "excluded directories",
       selector: "#scope-omit-dirs",
       value: "vendor",
-      read: (calls: Recorded) => calls.omitDirs,
-      expected: ["vendor"],
+      event: "input" as const,
     },
     {
       name: "hidden names",
       selector: "#scope-exclude-names",
       value: "Thumbs.db",
-      read: (calls: Recorded) => calls.excludeNames,
-      expected: ["Thumbs.db"],
+      event: "input" as const,
     },
-  ])("changing $name reports the new value once", (testCase) => {
+  ])("editing $name does not save it", (testCase) => {
     const { settings, host, calls } = setup();
     settings.mount(host);
 
@@ -232,9 +345,12 @@ describe("viewer settings form", () => {
       testCase.selector,
     );
     target.value = testCase.value;
-    fire(target, "change");
+    fire(target, testCase.event);
 
-    expect(testCase.read(calls)).toEqual(testCase.expected);
+    expect(calls.save).toEqual([]);
+    expect(
+      q<HTMLButtonElement>(document, "#scope-settings-save").disabled,
+    ).toBe(false);
   });
 
   test.each([
@@ -242,24 +358,18 @@ describe("viewer settings form", () => {
       name: "uploads",
       selector: "#upload-enabled",
       checked: false,
-      read: (calls: Recorded) => calls.uploadEnabled,
-      expected: [false],
     },
     {
       name: "Rails FK inference",
       selector: "#datastore-infer-fk",
       checked: true,
-      read: (calls: Recorded) => calls.inferFk,
-      expected: [true],
     },
     {
       name: "the S3 hover preview",
       selector: "#datastore-s3-tooltip",
       checked: false,
-      read: (calls: Recorded) => calls.s3Tooltip,
-      expected: [false],
     },
-  ])("toggling $name reports its state", (testCase) => {
+  ])("toggling $name does not save it", (testCase) => {
     const { settings, host, calls } = setup();
     settings.mount(host);
 
@@ -267,10 +377,70 @@ describe("viewer settings form", () => {
     toggle.checked = testCase.checked;
     fire(toggle, "change");
 
-    expect(testCase.read(calls)).toEqual(testCase.expected);
+    expect(calls.save).toEqual([]);
   });
 
-  test("mounting again does not register the handlers twice", () => {
+  test("the save button submits all edited settings once", async () => {
+    const { settings, host, calls } = setup();
+    settings.mount(host);
+
+    const language = q<HTMLSelectElement>(document, "#viewer-language");
+    language.value = "ja";
+    fire(language, "change");
+    const omitDirs = q<HTMLTextAreaElement>(document, "#scope-omit-dirs");
+    omitDirs.value = "vendor";
+    fire(omitDirs, "input");
+    const upload = q<HTMLInputElement>(document, "#upload-enabled");
+    upload.checked = false;
+    fire(upload, "change");
+    q<HTMLButtonElement>(document, "#scope-settings-save").click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(calls.save).toEqual([
+      {
+        draft: {
+          language: "ja",
+          sidebarFontSize: "regular",
+          codeFontSize: "regular",
+          omitDirs: "vendor",
+          excludeNames: ".DS_Store",
+          watchLimit: 2048,
+          uploadEnabled: false,
+          inferFkRails: false,
+          s3TooltipEnabled: true,
+        },
+        restoreDefaults: false,
+      },
+    ]);
+    expect(
+      q<HTMLButtonElement>(document, "#scope-settings-save").disabled,
+    ).toBe(true);
+  });
+
+  test("the save operation identifies only fields edited by the user", async () => {
+    let changedFields: readonly (keyof ViewerSettingsDraft)[] = [];
+    const { settings, host } = setup({
+      save: async (_draft, options) => {
+        changedFields = options.changedFields;
+      },
+    });
+    settings.mount(host);
+    const fontSize = q<HTMLSelectElement>(document, "#sidebar-font-size");
+    fontSize.value = "large";
+    fire(fontSize, "change");
+    const upload = q<HTMLInputElement>(document, "#upload-enabled");
+    upload.checked = false;
+    fire(upload, "change");
+
+    q<HTMLButtonElement>(document, "#scope-settings-save").click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(changedFields).toEqual(["sidebarFontSize", "uploadEnabled"]);
+  });
+
+  test("mounting again does not register the save handler twice", async () => {
     const { settings, host, calls } = setup();
     settings.mount(host);
     settings.mount(host);
@@ -278,18 +448,21 @@ describe("viewer settings form", () => {
     const select = q<HTMLSelectElement>(document, "#viewer-language");
     select.value = "ja";
     fire(select, "change");
+    q<HTMLButtonElement>(document, "#scope-settings-save").click();
+    await Promise.resolve();
+    await Promise.resolve();
 
-    expect(calls.language).toEqual(["ja"]);
+    expect(calls.save).toHaveLength(1);
     expect(document.querySelectorAll("#viewer-language")).toHaveLength(1);
   });
 
-  test("keeps what is being typed when the form is mounted again", () => {
+  test("keeps an unsaved draft when the form is mounted again", () => {
     const { settings, host } = setup();
     settings.mount(host);
 
     const omitDirs = q<HTMLTextAreaElement>(document, "#scope-omit-dirs");
-    omitDirs.focus();
     omitDirs.value = "half-typed";
+    fire(omitDirs, "input");
 
     settings.mount(host);
 
@@ -322,10 +495,10 @@ describe("viewer settings form", () => {
     expect(q<HTMLInputElement>(document, "#scope-watch-limit").value).toBe(
       "8192",
     );
-    expect(calls.watchLimit).toEqual([]);
+    expect(calls.save).toEqual([]);
   });
 
-  test("releasing the watch limit slider saves it", () => {
+  test("releasing the watch limit slider only marks the draft unsaved", () => {
     const { settings, host, calls } = setup();
     settings.mount(host);
 
@@ -333,10 +506,13 @@ describe("viewer settings form", () => {
     range.value = "8192";
     fire(range, "change");
 
-    expect(calls.watchLimit).toEqual(["8192"]);
+    expect(calls.save).toEqual([]);
+    expect(
+      q<HTMLButtonElement>(document, "#scope-settings-save").disabled,
+    ).toBe(false);
   });
 
-  test("typing a watch limit saves it and moves the slider", () => {
+  test("typing a watch limit moves the slider without saving", () => {
     const { settings, host, calls } = setup();
     settings.mount(host);
 
@@ -344,24 +520,160 @@ describe("viewer settings form", () => {
     number.value = "512";
     fire(number, "change");
 
-    expect(calls.watchLimit).toEqual(["512"]);
+    expect(calls.save).toEqual([]);
     expect(
       q<HTMLInputElement>(document, "#scope-watch-limit-range").value,
     ).toBe("512");
   });
 
-  test("restore defaults asks the app to reset and then shows the new values", () => {
-    const { settings, host, calls, values } = setup();
+  test("restore defaults stages values until the save button is pressed", async () => {
+    const { settings, host, calls } = setup();
     settings.mount(host);
 
     q<HTMLTextAreaElement>(document, "#scope-omit-dirs").value = "stale";
-    values.omitDirs = "node_modules";
     q<HTMLButtonElement>(document, "#scope-omit-reset").click();
 
-    expect(calls.reset).toBe(1);
+    expect(calls.save).toEqual([]);
     expect(q<HTMLTextAreaElement>(document, "#scope-omit-dirs").value).toBe(
       "node_modules",
     );
+    q<HTMLButtonElement>(document, "#scope-settings-save").click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls.save[0]?.restoreDefaults).toBe(true);
+  });
+
+  test("an invalid watch limit stays unsaved and shows its bounds", async () => {
+    const { settings, host, calls } = setup();
+    settings.mount(host);
+    const number = q<HTMLInputElement>(document, "#scope-watch-limit");
+    number.value = "15";
+    fire(number, "input");
+
+    q<HTMLButtonElement>(document, "#scope-settings-save").click();
+    await Promise.resolve();
+
+    expect(calls.save).toEqual([]);
+    expect(
+      q<HTMLElement>(document, "#scope-settings-save-error").textContent,
+    ).toBe("Use an integer from 16 to 65536.");
+  });
+
+  test("a failed save keeps the draft and shows the complete cause", async () => {
+    const harness = setup({
+      save: () =>
+        Promise.reject(
+          Object.assign(new Error("settings save failed"), {
+            cause: new TypeError("response body failed"),
+          }),
+        ),
+    });
+    harness.settings.mount(harness.host);
+    const omitDirs = q<HTMLTextAreaElement>(document, "#scope-omit-dirs");
+    omitDirs.value = "half-typed";
+    fire(omitDirs, "input");
+
+    q<HTMLButtonElement>(document, "#scope-settings-save").click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(omitDirs.value).toBe("half-typed");
+    expect(
+      q<HTMLElement>(document, "#scope-settings-save-error").textContent,
+    ).toBe(
+      "Error: settings save failed\nCaused by: TypeError: response body failed",
+    );
+    expect(
+      q<HTMLButtonElement>(document, "#scope-settings-save").disabled,
+    ).toBe(false);
+  });
+
+  test("a server refresh cannot overwrite an unsaved draft", async () => {
+    const refresh = deferred<void>();
+    const harness = setup({ refresh: () => refresh.promise });
+    harness.settings.mount(harness.host);
+    const omitDirs = q<HTMLTextAreaElement>(document, "#scope-omit-dirs");
+    omitDirs.value = "draft-value";
+    fire(omitDirs, "input");
+    harness.values.omitDirs = "server-value";
+
+    refresh.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(omitDirs.value).toBe("draft-value");
+  });
+
+  test("the JSON editor shows a format guide and highlighted input", async () => {
+    const { settings, host } = setup();
+    settings.mount(host);
+    const editor = q<HTMLTextAreaElement>(document, "#agent-screen-rules");
+    editor.value = '{"state":"working"}';
+    fire(editor, "input");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      q<HTMLElement>(document, "#agent-screen-rules-guide").textContent,
+    ).toContain("Rule fields: id, state, priority, region, lines.");
+    expect(
+      q<HTMLElement>(document, ".agent-screen-rules-highlight").innerHTML,
+    ).toContain('<span class="tok">');
+  });
+
+  test("the JSON editor keeps the textarea and highlighted layer aligned", () => {
+    const highlight = cascadedDeclarations(
+      styleRules,
+      (selector) => selector === ".agent-screen-rules-highlight",
+    );
+    const highlightedTrailingLine = cascadedDeclarations(
+      styleRules,
+      (selector) => selector === ".agent-screen-rules-highlight code::after",
+    );
+    const textarea = cascadedDeclarations(
+      styleRules,
+      (selector) => selector === "#agent-screen-rules",
+    );
+
+    expect(textarea.get("display")).toBe("block");
+    expect(highlight.get("overflow-y")).toBe("scroll");
+    expect(textarea.get("overflow-y")).toBe("scroll");
+    expect(highlight.get("scrollbar-gutter")).toBe("stable");
+    expect(textarea.get("scrollbar-gutter")).toBe("stable");
+    expect(highlightedTrailingLine.get("content")).toBe('"\\200b"');
+    expect(highlightedTrailingLine.get("display")).toBe("inline-block");
+    expect(highlightedTrailingLine.get("height")).toBe("19px");
+  });
+
+  test("the JSON editor keeps selected text readable", () => {
+    const selection = cascadedDeclarations(
+      styleRules,
+      (selector) => selector === "#agent-screen-rules::selection",
+    );
+
+    expect(selection.get("background")).toBe("var(--accent)");
+    expect(selection.get("color")).toBe("var(--fg-onemphasis)");
+  });
+
+  test("a JSON highlighter failure is visible without losing the input", async () => {
+    shikiMock.load.mockRejectedValue(new Error("highlighter asset failed"));
+    const logged = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { settings, host, values } = setup();
+    settings.mount(host);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      q<HTMLElement>(document, "#agent-screen-rules-highlight-error")
+        .textContent,
+    ).toContain("highlighter asset failed");
+    expect(q<HTMLTextAreaElement>(document, "#agent-screen-rules").value).toBe(
+      values.agentRulesJson,
+    );
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
   });
 
   // アプリ起動時の一括ローカライズはフォームを開く前にも走る。その時点では
@@ -429,5 +741,25 @@ describe("viewer settings form", () => {
     expect(error.textContent).toBe(
       "Error: settings request failed\nCaused by: TypeError: response body failed",
     );
+  });
+
+  test("保存開始前の古い読込エラーを保存後の画面へ出さない", async () => {
+    const refresh = deferred<void>();
+    const harness = setup({ refresh: () => refresh.promise });
+    harness.settings.mount(harness.host);
+
+    const language = q<HTMLSelectElement>(document, "#viewer-language");
+    language.value = "ja";
+    fire(language, "change");
+    q<HTMLButtonElement>(document, "#scope-settings-save").click();
+    await Promise.resolve();
+    await Promise.resolve();
+    refresh.reject(new Error("stale refresh failed"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      q<HTMLElement>(document, "#scope-settings-refresh-error").hidden,
+    ).toBe(true);
   });
 });

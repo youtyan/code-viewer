@@ -14,7 +14,8 @@
 // 本文の取得を GET にしてあるのは、読み取りしか行わないため。カーソルは
 // クエリで持ち回る。
 
-import { isAgentEvent } from "../../core/agent-state";
+import type { AgentScreenRuleIssue } from "../../core/agent-screen";
+import { type AgentStatesResponse, isAgentEvent } from "../../core/agent-state";
 import { formatErrorDetail } from "../../core/error-detail";
 import { MAX_PASTE_BODY_BYTES } from "../../core/terminal-paste";
 import {
@@ -27,6 +28,7 @@ import {
 } from "../database/handle-shared";
 import { rawFileHeaders } from "../raw-file-headers";
 import { fileReadableStream } from "../runtime";
+import { getAgentActivityErrors } from "./activity";
 import {
   getAgentState,
   listAgentStates,
@@ -35,6 +37,12 @@ import {
 import { captureTerminal, clampHistoryLines, terminalKindOf } from "./capture";
 import { resolveTerminalImage, resolveTerminalImages } from "./images";
 import { savePastedImage } from "./paste";
+import {
+  MAX_AGENT_SCREEN_RULES_BYTES,
+  reloadAgentScreenRules,
+  resetAgentScreenRules,
+  saveAgentScreenRules,
+} from "./rules";
 
 /** 申告 1 件の本文上限。指示文が丸ごと来ても収まる程度。 */
 const MAX_STATE_TEXT = 2000;
@@ -76,13 +84,57 @@ async function handleStatePost(req: Request): Promise<Response> {
 }
 
 function handleStatesGet(url: URL): Response {
+  const errors = getAgentActivityErrors();
   const target = url.searchParams.get("target");
   if (target) {
     const record = getAgentState(target);
     if (!record) return textError("unknown target", 404);
-    return json({ states: [record] });
+    return json({ states: [record], errors } satisfies AgentStatesResponse);
   }
-  return json({ states: listAgentStates() });
+  return json({
+    states: listAgentStates(),
+    errors,
+  } satisfies AgentStatesResponse);
+}
+
+function ruleOperationError(code: string, error: unknown): Response {
+  console.error(`[code-viewer] terminal rule ${code} failed`, error);
+  const errors: AgentScreenRuleIssue[] = [
+    {
+      path: "$",
+      code,
+      message: formatErrorDetail(error),
+      ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+    },
+  ];
+  return json({ errors }, 500);
+}
+
+async function handleRulesGet(cwd: string): Promise<Response> {
+  return json(await reloadAgentScreenRules(cwd));
+}
+
+async function handleRulesPut(req: Request, cwd: string): Promise<Response> {
+  const body = await parseBoundedJsonBody(
+    req,
+    MAX_AGENT_SCREEN_RULES_BYTES,
+    "terminal rules body too large",
+  );
+  if (body instanceof Response) return body;
+  try {
+    const result = await saveAgentScreenRules(cwd, body);
+    return json(result, "source" in result ? 200 : 400);
+  } catch (error) {
+    return ruleOperationError("save_failed", error);
+  }
+}
+
+async function handleRulesDelete(cwd: string): Promise<Response> {
+  try {
+    return json(await resetAgentScreenRules(cwd));
+  } catch (error) {
+    return ruleOperationError("reset_failed", error);
+  }
 }
 
 async function handleCaptureGet(url: URL, cwd: string): Promise<Response> {
@@ -177,6 +229,15 @@ export function handleAgentRoute(
         methods: ["GET"],
         sideEffect: false,
         handler: () => Promise.resolve(handleStatesGet(url)),
+      },
+      "/_agent/rules": {
+        methods: ["GET", "PUT", "DELETE"],
+        sideEffect: (method) => method !== "GET",
+        handler: () => {
+          if (req.method === "GET") return handleRulesGet(cwd);
+          if (req.method === "DELETE") return handleRulesDelete(cwd);
+          return handleRulesPut(req, cwd);
+        },
       },
       "/_agent/capture": {
         methods: ["GET"],
