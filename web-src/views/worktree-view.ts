@@ -1105,6 +1105,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       if (!res.diff.trim()) {
         body.appendChild(el("div", "gdp-info", t.panes.diffEmpty));
       } else {
+        // 差分が描けたら自前の見出しは畳む。diff2html が同じ内容の見出し
+        // (パス・CHANGED・Viewed) を出すので、残すと 2 段になる。Diff
+        // ビューアも描画後に .gdp-shell-header を隠している。
+        // 読み込み中とエラー時は、どのファイルの話か分かるように残す。
+        const head = shell.querySelector<HTMLElement>(".gdp-shell-header");
+        if (head) head.style.display = "none";
         if (res.truncated) {
           body.appendChild(
             el(
