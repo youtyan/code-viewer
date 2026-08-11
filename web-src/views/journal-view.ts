@@ -26,6 +26,7 @@ import {
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute, DiffRange } from "../core/routes";
 import { readStoredSize, writeStoredSize } from "../core/stored-size";
+import type { PageView } from "./page-view";
 import { showConfirmDialog } from "./ui-dialog";
 
 export type JournalViewText = {
@@ -115,12 +116,7 @@ export type JournalViewDeps = {
   setStatus(status: "live" | "refreshing" | "error" | null): void;
 };
 
-export type JournalView = {
-  enter(): Promise<void>;
-  suspend(): void;
-  handleSse(): void;
-  localize(): void;
-};
+export type JournalView = PageView;
 
 type ActiveTab = "journal" | "tasks";
 type EditorMode = "write" | "preview" | "split";

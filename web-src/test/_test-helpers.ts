@@ -115,9 +115,12 @@ export function callRoute(
   path: string,
   init: RequestInit = {},
   sideEffectAllowed: (req: Request) => boolean = () => true,
+  // 既定はこのリポジトリ。作業ツリーそのものが検証対象のハンドラだけが、
+  // 使い捨てのリポジトリを渡してくる。
+  cwd: string = process.cwd(),
 ): Promise<Response | null> {
   const url = new URL(`http://127.0.0.1:0${path}`);
-  return handler(new Request(url, init), url, process.cwd(), sideEffectAllowed);
+  return handler(new Request(url, init), url, cwd, sideEffectAllowed);
 }
 
 /** callRoute の POST 版。body はオブジェクトなら JSON 化する。 */
@@ -126,6 +129,7 @@ export function postRoute(
   path: string,
   body: unknown,
   sideEffectAllowed: (req: Request) => boolean = () => true,
+  cwd: string = process.cwd(),
 ): Promise<Response | null> {
   return callRoute(
     handler,
@@ -136,5 +140,6 @@ export function postRoute(
       body: typeof body === "string" ? body : JSON.stringify(body),
     },
     sideEffectAllowed,
+    cwd,
   );
 }

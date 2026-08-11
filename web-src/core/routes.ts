@@ -33,6 +33,16 @@ export type AppRoute =
       virtual?: "off";
     }
   | { screen: "help"; range: DiffRange; lang: string; section: string }
+  | {
+      screen: "worktree";
+      /** 選んでいる作業ツリーの一意な id。 */
+      wt?: string;
+      /** その作業ツリーの中で開いているファイル。 */
+      file?: string;
+      /** その差分が未コミットぶんか、基準ブランチから分かれた後のぶんか。 */
+      origin?: "uncommitted" | "committed";
+      range: DiffRange;
+    }
   | { screen: "history"; ref: string; commit?: string; range: DiffRange }
   | {
       screen: "journal";
@@ -70,6 +80,7 @@ export const SPA_PATHS = [
   "/history",
   "/journal",
   "/database",
+  "/worktree",
   "/doctor",
 ] as const;
 export const APP_ENTRY_PATHS = ["/", "/index.html"] as const;
@@ -212,6 +223,22 @@ export function parseRoute(
         lang: params.get("lang") || "en",
         section: params.get("section") || "overview",
       };
+    case "/worktree": {
+      const wt = params.get("wt") || "";
+      const file = params.get("file") || "";
+      const rawOrigin = params.get("origin");
+      const origin =
+        rawOrigin === "committed" || rawOrigin === "uncommitted"
+          ? rawOrigin
+          : undefined;
+      return {
+        screen: "worktree",
+        ...(wt ? { wt } : {}),
+        ...(file ? { file } : {}),
+        ...(origin ? { origin } : {}),
+        range,
+      };
+    }
     case "/doctor":
       return {
         screen: "repo",
@@ -357,6 +384,15 @@ export function buildRoute(route: AppRoute): string {
           ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
           : "")
       );
+    case "worktree": {
+      const params = new URLSearchParams();
+      if (route.wt) params.set("wt", route.wt);
+      if (route.file) params.set("file", route.file);
+      // origin は file とセットのときだけ意味を持つ。
+      if (route.file && route.origin) params.set("origin", route.origin);
+      const qs = params.toString();
+      return `/worktree${qs ? `?${qs}` : ""}`;
+    }
     case "help": {
       const params = new URLSearchParams();
       if (route.lang && route.lang !== "en") params.set("lang", route.lang);

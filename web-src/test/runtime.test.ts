@@ -21,4 +21,19 @@ describe("runAsync", () => {
     const result = await child;
     expect(result.code).toBe(0);
   });
+
+  test("stops the child when the caller aborts", async () => {
+    const controller = new AbortController();
+    const child = runAsync(
+      [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+      process.cwd(),
+      { signal: controller.signal },
+    );
+
+    controller.abort();
+
+    const result = await child;
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/abort/i);
+  });
 });

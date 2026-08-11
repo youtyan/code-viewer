@@ -619,8 +619,11 @@ async function computePayload(
     : [...extras, ...args];
   const metaResult = await git.fileMetaResultAsync(fullArgs, cwd, false);
   const files = metaResult.files;
+  let metaError = metaResult.error;
   if (!metaResult.error && includeUntracked(range, refs)) {
-    files.push(...(await git.untrackedMetaAsync(cwd)));
+    const untracked = await git.untrackedMetaAsync(cwd);
+    files.push(...untracked.files);
+    metaError = untracked.error;
   }
   const filteredFiles = pathFilter
     ? files.filter(
@@ -660,7 +663,7 @@ async function computePayload(
     project: basename(cwd),
     branch: await currentBranchMetadata(),
     generation: responseGeneration,
-    ...(metaResult.error ? { error: metaResult.error } : {}),
+    ...(metaError ? { error: metaError } : {}),
   };
 }
 
@@ -1124,6 +1127,7 @@ async function handleSettings() {
     project: basename(cwd),
     branch: await currentBranchMetadata(),
     repo_web_url: cwdHasGitRepository ? await git.remoteWebUrlAsync(cwd) : null,
+    server: { pid: process.pid, root: cwd },
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
       omit_dirs_built_in: git.DEFAULT_WORKTREE_OMIT_DIR_NAMES,
@@ -2817,6 +2821,7 @@ const databaseHandleModule = import("./database/handle");
 const tmuxHandleModule = import("./tmux/handle");
 const shellHandleModule = import("./shell/handle");
 const agentHandleModule = import("./terminal/handle");
+const worktreeHandleModule = import("./worktree/handle");
 
 const server = await startServer({
   hostname: "127.0.0.1",
@@ -2833,6 +2838,7 @@ const server = await startServer({
         cwd,
         scopeOmitDirNames,
         listenPort,
+        signal: req.signal,
       });
     if (url.pathname === "/_tree") return await handleTree(url);
     if (url.pathname === "/_files") return await handleFiles(url);
@@ -2870,6 +2876,17 @@ const server = await startServer({
         sideEffectRequestAllowed,
       );
       if (tmuxResponse) return tmuxResponse;
+    }
+    if (url.pathname.startsWith("/_worktree/")) {
+      const { handleWorktreeRoute } = await worktreeHandleModule;
+      const worktreeResponse = await handleWorktreeRoute(
+        req,
+        url,
+        cwd,
+        generation,
+        sideEffectRequestAllowed,
+      );
+      if (worktreeResponse) return worktreeResponse;
     }
     if (url.pathname.startsWith("/_shell/")) {
       const { handleShellRoute } = await shellHandleModule;
@@ -2979,13 +2996,26 @@ writeServerRegistry({
 // block shutdown on libuv's FSEvents semaphore.
 let worktreeWatch: WatchSupervisor | null = null;
 let shuttingDown = false;
+let registryCleanupAttempted = false;
+
+function removeOwnServerRegistry(): void {
+  registryCleanupAttempted = true;
+  removeServerRegistry(cwd, process.pid);
+}
 
 async function shutdown(exitCode = 0) {
   if (shuttingDown) {
     process.exit(1);
   }
   shuttingDown = true;
-  removeServerRegistry(cwd, process.pid);
+  try {
+    removeOwnServerRegistry();
+  } catch (error) {
+    exitCode = 1;
+    console.error(
+      `code-viewer registry cleanup failed:\n${formatErrorDetail(error)}`,
+    );
+  }
   closeSseClients();
   try {
     const [{ closeShellStreams }, { closeAllShellSessions }] =
@@ -3039,7 +3069,16 @@ process.on("unhandledRejection", (reason) => {
 });
 
 process.on("exit", () => {
-  removeServerRegistry(cwd, process.pid);
+  if (!registryCleanupAttempted) {
+    try {
+      removeOwnServerRegistry();
+    } catch (error) {
+      process.exitCode = 1;
+      console.error(
+        `code-viewer registry cleanup failed:\n${formatErrorDetail(error)}`,
+      );
+    }
+  }
   closeSseClients();
   worktreeWatch?.close();
 });

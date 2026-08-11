@@ -33,6 +33,7 @@
       <a class="app-menu-item" data-route="history" href="/history">History</a>
       <a class="app-menu-item" data-route="journal" href="/journal">Work Log</a>
       <a class="app-menu-item" data-route="database" href="/database">Datastores</a>
+      <a class="app-menu-item" data-route="worktree" href="/worktree">Worktrees</a>
       <span class="global-actions-sep app-menu-sep" aria-hidden="true"></span>
       <a class="app-menu-item" data-route="help" href="/help">Settings &amp; Help</a>
     </nav>
@@ -109,6 +110,10 @@
 
   <aside id="history-panel" hidden></aside>
   <div id="history-resizer" aria-hidden="true"></div>
+  <!-- 作業ツリー画面の一覧。中身は worktree-view が入れる。見た目は
+       #history-panel と同じ規則を共有している。変更ファイルは Repository と
+       同じ #sidebar、差分は #diff を使うので、増える箱はこれだけ。 -->
+  <aside id="worktree-panel" hidden></aside>
   <aside id="sidebar">
     <div class="sb-head">
       <span class="sb-title">Files</span>

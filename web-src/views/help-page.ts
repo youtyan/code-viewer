@@ -224,6 +224,31 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             ],
           },
           {
+            title: "Worktrees",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "The Worktrees item in the header menu lists every worktree of this repository — the main one and every linked worktree — in the same three-pane shape as History: pick a worktree on the left, its changed files in the middle, the diff on the right. Running one coding agent per worktree makes that spread invisible from inside a single checkout, and this screen is where it becomes visible again. The selection lives in the URL (?wt=…&file=…), so a reload comes back to the same diff.",
+              },
+              {
+                kind: "paragraph",
+                text: 'Every row in the left pane answers two things. How far the branch has drifted from the base branch (how many commits ahead and behind), and whether it still merges: code-viewer runs git merge-tree without touching any working tree, so a row says either that it merges cleanly, or how many files would conflict, or that the check could not run — the last one is kept separate from the first, because "not checked" is not "safe". The middle pane then splits that worktree\'s files into work that is not committed yet and commits made since the branch point, with added and deleted line counts; the diff itself is rendered by the same viewer the Diff screen uses, from git run inside that worktree.',
+              },
+              {
+                kind: "paragraph",
+                text: "The banner above the cards is the one to read first. It names every file that more than one worktree is currently changing, and the same files are marked inside each card. Two agents editing the same file is invisible until one of them merges; this is where it shows up before that happens. The base branch is whatever origin/HEAD points at, falling back to main and then master; the header names the one it used.",
+              },
+              {
+                kind: "paragraph",
+                text: "Add creates a worktree under .worktrees/ in the repository root. You give it a directory name, and the branch defaults to that same name; an existing branch is checked out, otherwise a new one is created. Because that directory sits inside the repository, git reports it as untracked until you add .worktrees/ to .gitignore — code-viewer says so in the dialog but does not edit .gitignore for you. Remove runs git worktree remove and keeps the branch. Git refuses while uncommitted changes are still there, so the dialog carries a checkbox for when you mean it anyway. The worktree this server is serving cannot be removed from here.",
+              },
+              {
+                kind: "paragraph",
+                text: "Open starts a second code-viewer for that worktree and opens it in a new tab, because a server stays on the working tree it started in. An already-running server is reused instead of started again. Those servers outlive this one: the Server group in doctor lists them, and `kill <pid>` stops one — the pid is in ~/.cache/code-viewer/servers/.",
+              },
+            ],
+          },
+          {
             title: "Environment doctor",
             blocks: [
               {
@@ -989,6 +1014,31 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "tmux の性質でひとつ知っておくとよいこと。tmux のウィンドウは寸法を 1 つしか持てないので、同じセッションをこのパネルと別のターミナルの両方から開くと、寸法を共有します。tmux の既定（window-size latest）では最後に操作した側の寸法に合うため、小さいほうの端末では右と下が見切れます。window-size smallest にすると、どの端末でもウィンドウ全体が見えるようになります（大きいほうの端末には余白が出ます）。",
+              },
+            ],
+          },
+          {
+            title: "作業ツリー",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "ヘッダメニューの「作業ツリー」は、このリポジトリの作業ツリーを本体ぶんも含めて並べます。画面の形は履歴と同じ 3 つの列で、左で作業ツリーを選び、中央にその変更ファイル、右に差分が出ます。コーディングエージェントを作業ツリーごとに走らせると、1 つのチェックアウトの中からは全体が見えなくなります。この画面はそれを見えるようにするためのものです。選んだものは URL に載る (?wt=…&file=…) ので、読み込み直しても同じ差分に戻ります。",
+              },
+              {
+                kind: "paragraph",
+                text: "左の 1 行が答えるのは 2 つです。基準ブランチからどれだけ離れているか（進んだぶん・遅れたぶんのコミット数）。そしてまだマージできるか — 作業ツリーを一切触らない git merge-tree で試し、「そのまま入る」「何ファイルで衝突する」「確かめられなかった」を出し分けます。最後のものは 1 番目と混ぜません。「確かめていない」は「安全」ではないからです。中央の列は、その作業ツリーが触っているファイルを、まだコミットしていないぶんと分岐した後のコミットに分けて、追加・削除の行数つきで出します。差分そのものは Diff ビューアと同じ描画で、その作業ツリーの中で走らせた git の結果です。",
+              },
+              {
+                kind: "paragraph",
+                text: "カードの上の帯を最初に読んでください。2 本以上の作業ツリーが今まさに触っているファイルを名指しで挙げ、同じファイルは各カードの中にも印が付きます。2 つのエージェントが同じファイルを書いていることは、どちらかをマージするまで表に出ません。ここはそれが起きる前に出る場所です。基準ブランチは origin/HEAD が指す先で、無ければ main、次に master を使います。どれを使ったかはヘッダに出ます。",
+              },
+              {
+                kind: "paragraph",
+                text: "「追加」はリポジトリ直下の .worktrees/ の下に作業ツリーを作ります。入力するのはディレクトリ名で、ブランチは同じ名前が既定です。既にあるブランチならそれをチェックアウトし、無ければ新しく作ります。この置き場所はリポジトリの中なので、.worktrees/ を .gitignore に入れるまでは git から未追跡として見えます。ダイアログにその案内は出ますが、code-viewer が .gitignore を書き換えることはしません。「削除」は git worktree remove を実行し、ブランチは残します。コミットしていない変更があると git が拒否するので、それでも外したいときのためのチェックボックスがダイアログにあります。このサーバが映している作業ツリーはここからは外せません。",
+              },
+              {
+                kind: "paragraph",
+                text: "「開く」はその作業ツリーで code-viewer をもう 1 本起こし、新しいタブで開きます。サーバは起動したときの作業ツリーから動けないためです。既に動いているサーバがあれば、それを使い回して二重に起動しません。起こしたサーバはこのサーバより長く生きます。doctor の Server グループに一覧が出るので、止めるときは `kill <pid>` を使ってください。pid は ~/.cache/code-viewer/servers/ にあります。",
               },
             ],
           },

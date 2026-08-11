@@ -20,6 +20,17 @@ Requires Node.js 20 or newer. Development uses
   same commit list and diff renderer used by `/history` inside the file's
   tab shell, filtered to that path. Both tabs keep the Repository sidebar
   visible.
+- Browse every worktree of the repository from the `Worktrees` item in the
+  header menu, in the same three-pane shape as History: worktrees on the left,
+  the picked one's changed files in the middle, the diff on the right. Each row
+  shows how far its branch has drifted from the base branch (ahead / behind) and
+  whether it still merges cleanly — checked with `git merge-tree`, so no working
+  tree is touched — or which files would conflict. Files are split into
+  uncommitted work and commits made since the branch point, and a banner lists
+  every file that more than one worktree is changing, which is the conflict you
+  would otherwise only find at merge time. Add a worktree under `.worktrees/`,
+  remove one (the branch is kept), or open a second code-viewer for it in a new
+  tab.
 - Open files directly from the repository or diff view, including text-like
   config/prompt files and large generated files (virtualized source viewer
   with copy/open-full-view).

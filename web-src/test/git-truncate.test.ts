@@ -308,19 +308,21 @@ describe("repository tree helpers", () => {
       symlinkSync("target-dir", join(dir, "link-dir"));
 
       const result = await untrackedMetaAsync(dir);
-      const normal = result.find((file) => file.path === "normal.txt");
-      const binary = result.find((file) => file.path === "binary.bin");
-      const link = result.find((file) => file.path === "link.txt");
+      const normal = result.files.find((file) => file.path === "normal.txt");
+      const binary = result.files.find((file) => file.path === "binary.bin");
+      const link = result.files.find((file) => file.path === "link.txt");
 
       expect(normal?.status).toBe("A");
       expect(normal?.additions).toBe(2);
       expect(binary?.binary).toBe(true);
       expect(binary?.additions).toBe(0);
-      expect(result.some((file) => file.path === "link.txt")).toBe(true);
+      expect(result.files.some((file) => file.path === "link.txt")).toBe(true);
       expect(link?.additions).toBe(2);
       expect(existsSync(join(dir, "nested-repo"))).toBe(true);
-      expect(result.some((file) => file.path === "nested-repo/")).toBe(false);
-      expect(result.some((file) => file.path === "link-dir")).toBe(false);
+      expect(result.files.some((file) => file.path === "nested-repo/")).toBe(
+        false,
+      );
+      expect(result.files.some((file) => file.path === "link-dir")).toBe(false);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
@@ -333,11 +335,27 @@ describe("repository tree helpers", () => {
       writeFileSync(join(dir, "large.txt"), "line\n".repeat(200_000));
 
       const result = await untrackedMetaAsync(dir);
-      const large = result.find((file) => file.path === "large.txt");
+      const large = result.files.find((file) => file.path === "large.txt");
 
       expect(large?.status).toBe("A");
       expect(large?.binary).toBe(false);
       expect(large?.additions).toBe(200_000);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("reports an untracked file that disappears during metadata scan", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-untracked-broken-"));
+    try {
+      git(dir, ["init"]);
+      symlinkSync("missing-target.txt", join(dir, "broken-link.txt"));
+
+      const result = await untrackedMetaAsync(dir);
+
+      expect(result.files).toEqual([]);
+      expect(result.error).toContain("broken-link.txt");
+      expect(result.error).toMatch(/ENOENT|no such file/i);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
@@ -354,22 +372,22 @@ describe("repository tree helpers", () => {
       writeFileSync(join(dir, "stable.txt"), "a\nb\nc\n");
 
       const first = await untrackedMetaAsync(dir);
-      expect(first.find((file) => file.path === "edited.txt")?.additions).toBe(
-        1,
-      );
-      expect(first.find((file) => file.path === "stable.txt")?.additions).toBe(
-        3,
-      );
+      expect(
+        first.files.find((file) => file.path === "edited.txt")?.additions,
+      ).toBe(1);
+      expect(
+        first.files.find((file) => file.path === "stable.txt")?.additions,
+      ).toBe(3);
 
       writeFileSync(join(dir, "edited.txt"), "one\ntwo\nthree\n");
 
       const second = await untrackedMetaAsync(dir);
-      expect(second.find((file) => file.path === "edited.txt")?.additions).toBe(
-        3,
-      );
-      expect(second.find((file) => file.path === "stable.txt")?.additions).toBe(
-        3,
-      );
+      expect(
+        second.files.find((file) => file.path === "edited.txt")?.additions,
+      ).toBe(3);
+      expect(
+        second.files.find((file) => file.path === "stable.txt")?.additions,
+      ).toBe(3);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }

@@ -255,6 +255,8 @@ describe("diff sidebar repository target", () => {
     );
     if (!input || !clearButton || !alpha || !beta)
       throw new Error("missing sidebar filter test elements");
+    let inputEvents = 0;
+    input.addEventListener("input", () => inputEvents++);
 
     sidebar.syncSidebarFilterClearButton();
     expect(clearButton.hidden).toBe(true);
@@ -273,6 +275,7 @@ describe("diff sidebar repository target", () => {
     expect(alpha.classList.contains("hidden")).toBe(false);
     expect(beta.classList.contains("hidden")).toBe(false);
     expect(document.activeElement).toBe(input);
+    expect(inputEvents).toBe(1);
   });
 });
 

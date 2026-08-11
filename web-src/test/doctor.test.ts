@@ -1,4 +1,10 @@
-import { mkdtempSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -8,9 +14,12 @@ import {
 } from "../server/database/sqlite-driver";
 import {
   buildDoctorReport,
+  checkServer,
   shellAvailabilityToRow,
   sqliteStatusToRow,
 } from "../server/doctor";
+import { serverRegistryFilePath } from "../server/server-registry";
+import { runGit } from "./_git-fixture";
 
 // Use a fresh empty directory as cwd so doctor's discovery (Sqlite files /
 // compose files) and docker daemon probes finish quickly inside the 5s
@@ -102,6 +111,38 @@ describe("terminal dependency diagnostics", () => {
 const DOCTOR_TEST_TIMEOUT_MS = 30_000;
 
 describe("doctor report", () => {
+  test("excludes the current worktree when cwd is one of its subdirectories", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-doctor-worktree-"));
+    const registry = mkdtempSync(
+      join(tmpdir(), "code-viewer-doctor-registry-"),
+    );
+    const originalRegistry = process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR;
+    process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR = registry;
+    try {
+      runGit(root, ["init", "-q", "-b", "main", "."]);
+      const subdirectory = join(root, "nested");
+      mkdirSync(subdirectory);
+      const canonicalRoot = realpathSync(root);
+      writeFileSync(serverRegistryFilePath(canonicalRoot), "invalid json\n");
+
+      const server = await checkServer(12345, subdirectory);
+      const worktrees = server.rows.find(
+        (row) => row.id === "server.worktrees",
+      );
+
+      expect(worktrees?.status).toBe("ok");
+      expect(worktrees?.detail).toContain("no other code-viewer");
+    } finally {
+      if (originalRegistry === undefined) {
+        delete process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR;
+      } else {
+        process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR = originalRegistry;
+      }
+      rmSync(root, { recursive: true, force: true });
+      rmSync(registry, { recursive: true, force: true });
+    }
+  });
+
   test(
     "explains PATH misses and absolute executable overrides",
     async () => {
