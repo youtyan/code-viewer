@@ -792,7 +792,7 @@ describe("remove dialog", () => {
 });
 
 describe("row actions", () => {
-  test("puts the actions inside the picked row, not at the list bottom", async () => {
+  test("keeps the actions above the list so picking a row moves nothing", async () => {
     const { panel } = await mountWith(
       response([
         item({ name: "repo", current: true }),
@@ -804,10 +804,16 @@ describe("row actions", () => {
       ]),
       { route: { wt: "/repo/.worktrees/other" } },
     );
-    const rows = panel.querySelectorAll(".history-item");
-    expect(rows[0].querySelector(".worktree-row-actions")).toBeNull();
-    const actions = rows[1].querySelector(".worktree-row-actions");
-    if (!actions) throw new Error("row actions are missing");
+    // 行の中にボタンを置かない。選んだ瞬間にクリックした場所へ現れるため。
+    for (const row of panel.querySelectorAll(".history-item")) {
+      expect(row.querySelector("button")).toBeNull();
+    }
+    const actions = panel.querySelector(".worktree-actions");
+    if (!actions) throw new Error("actions are missing");
+    // 位置で示せないぶん、誰への操作かを名前で言う。
+    expect(actions.querySelector(".worktree-actions-for")?.textContent).toBe(
+      TEXT.actions.headingFor("other"),
+    );
     const labels = texts(actions, "button");
     expect(labels).toContain(TEXT.open);
     expect(labels).toContain(TEXT.remove);
@@ -821,13 +827,35 @@ describe("row actions", () => {
     ]);
   });
 
+  test("marks delete as the one action that cannot be undone", async () => {
+    const { panel } = await mountWith(
+      response([
+        item({ name: "repo", current: true }),
+        item({ name: "other", path: "/repo/.worktrees/other" }),
+      ]),
+      { route: { wt: "/repo/.worktrees/other" } },
+    );
+    const danger = panel.querySelectorAll(
+      ".worktree-actions button.gdp-dialog-danger",
+    );
+    expect(danger).toHaveLength(1);
+    expect(danger[0].textContent).toBe(TEXT.remove);
+  });
+
+  test("shows nothing above the list until a worktree is picked", async () => {
+    const { panel } = await mountWith(
+      response([item({ name: "repo", current: true })]),
+    );
+    expect(panel.querySelector(".worktree-actions")).toBeNull();
+  });
+
   test("keeps the remove button off the worktree this server serves", async () => {
     const { panel } = await mountWith(
       response([item({ name: "repo", current: true })]),
       { route: { wt: "/repo" } },
     );
-    const actions = panel.querySelector(".worktree-row-actions");
-    if (!actions) throw new Error("row actions are missing");
+    const actions = panel.querySelector(".worktree-actions");
+    if (!actions) throw new Error("actions are missing");
     expect(texts(actions, "button")).not.toContain(TEXT.remove);
     expect(texts(actions, "button")).toContain(TEXT.open);
   });

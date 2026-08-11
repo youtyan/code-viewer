@@ -859,14 +859,25 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /**
-   * 選んだ行の内側に出す操作。行とボタンの間に距離があると「どれへの操作か」
-   * を読み取らせることになるので、対象の行の中に入れる。
+   * 選んでいる作業ツリーへの操作。**一覧の上に固定して出す。**
+   *
+   * 行の中に置いていたことがあるが、選んだ瞬間にクリックした場所へボタンが
+   * 現れるので誤爆が怖い、という声が実際に出た。位置を動かさないことを優先し、
+   * 「どれへの操作か」は行の位置ではなく先頭の見出し (headingFor) で示す。
+   * 同じ名前が複数あるときは worktreeLabel がパスを添える。
    */
-  function rowActions(item: WorktreeItem): HTMLElement {
+  function selectedActions(item: WorktreeItem): HTMLElement {
     const t = text();
-    const actions = el("span", "worktree-row-actions");
-    // 行そのもののクリック (選択) とボタンのクリックを分ける。
-    actions.addEventListener("click", (event) => event.stopPropagation());
+    const panel = el("div", "worktree-actions");
+    panel.appendChild(
+      el(
+        "span",
+        "worktree-actions-for",
+        t.actions.headingFor(worktreeLabel(item.id)),
+      ),
+    );
+    const actions = el("div", "worktree-actions-buttons");
+    panel.appendChild(actions);
     if (!item.missing && !item.bare) {
       actions.appendChild(openFolderButton(item, false));
       actions.appendChild(copyPathButton(item, false));
@@ -895,10 +906,13 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       const remove = headButton(t.remove, t.removeTitle, () => {
         void removeWorktree(item);
       });
+      // 取り返しのつかない操作だけ、他のボタンと見た目を分ける。押した後は
+      // 今までどおり確認ダイアログが出る (フルパスと「元に戻せません」つき)。
+      remove.classList.add("gdp-dialog-danger");
       remove.disabled = !!busyPath;
       actions.appendChild(remove);
     }
-    return actions;
+    return panel;
   }
 
   function note(body: string, isError = false): HTMLElement {
@@ -929,6 +943,11 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       }),
     );
     listPanel.appendChild(head);
+
+    // 選んでいる作業ツリーへの操作は、行の中ではなくここに固定する。行に
+    // 入れると選んだ瞬間にクリックした場所へボタンが現れて誤爆する。
+    const picked = selectedWorktree();
+    if (picked) listPanel.appendChild(selectedActions(picked));
 
     worktreeFilterInput.placeholder = t.panes.filterWorktrees;
     const filterWrap = el("div", "history-filter-wrap");
@@ -1074,7 +1093,6 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       }
 
       // 操作は選んだ行の内側にだけ出す。
-      if (item.id === selected) row.appendChild(rowActions(item));
       list.appendChild(row);
     }
     list.addEventListener("click", (event) => {

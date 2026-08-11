@@ -89,8 +89,15 @@ export type WorktreeText = {
   noCommit: string;
   /** 3 段目の「最終更新 X」。mtime ベースなのでコミット無しでも動く。 */
   lastTouched: (when: string) => string;
-  /** 選んだ行の内側に出す操作。 */
+  /**
+   * 選んでいる作業ツリーへの操作。一覧の上に固定して出す。
+   *
+   * 行の中に置くと、選んだ瞬間にその場へボタンが現れて誤爆が怖い、という
+   * 実際の声があった。位置を固定し、対象は名前で示す。
+   */
   actions: {
+    /** 誰に対する操作かを言う見出し。行の位置では示せなくなるため。 */
+    headingFor: (name: string) => string;
     openFolder: string;
     openFolderTitle: string;
     copyPath: string;
@@ -277,6 +284,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     noCommit: "no commit",
     lastTouched: (when) => `updated ${when}`,
     actions: {
+      headingFor: (name) => `Selected: ${name}`,
       openFolder: "Open folder",
       openFolderTitle: "Open this folder in the OS file manager",
       copyPath: "Copy path",
@@ -436,6 +444,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     noCommit: "コミットなし",
     lastTouched: (when) => `最終更新 ${when}`,
     actions: {
+      headingFor: (name) => `${name} に対して`,
       openFolder: "フォルダを開く",
       openFolderTitle: "このフォルダをファイルマネージャで開きます",
       copyPath: "パスをコピー",

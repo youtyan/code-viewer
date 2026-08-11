@@ -8001,13 +8001,37 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   align-self: center;
 }
 
-/* 選んだ行の内側に出す操作。対象が位置で自明になるようにするため、
-   一覧の末尾には置かない。 */
-.worktree-row-actions {
+/* 選んでいる作業ツリーへの操作。一覧の上に固定する。
+   行の中に置くと、選んだ瞬間にクリックした場所へボタンが現れて誤爆する
+   (実際にそういう声が出た)。ここなら行を選び直しても位置が動かない。 */
+.worktree-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* 位置で示せなくなる「どれへの操作か」を、名前で言う行。 */
+.worktree-actions-for {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+}
+
+.worktree-actions-buttons {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
-  margin-top: 6px;
+}
+
+/* 取り返しのつかない操作だけ、他から離して置く。 */
+.worktree-actions-buttons .gdp-dialog-danger {
+  margin-left: auto;
 }
 
 /* 変更がまだ無い作業ツリーの案内 (右ペイン)。次にやることをその場に置く。 */
