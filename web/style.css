@@ -14762,10 +14762,13 @@ body.app-panel-docked #annotation-panel {
 body.app-panel-docked .app-panel.app-panel-open {
   box-shadow: none;
 }
-body.app-panel-docked .journal-page,
-body.app-panel-docked .db-root {
-  height: 100%;
-}
+/* docked のときに `.journal-page` / `.db-root` を `height: 100%` で上書きしない。
+   この 2 ページは `body.app-panel-docked.gdp-*-page #content` の列挙に入っておらず、
+   親の `#content` が高さを持たないので、100% は解決先を失って auto に落ち、ページ
+   全体が中身の高さまで縮む (中身が空のとき画面途中で切れる形で表面化した)。両者は
+   既に `height: var(--content-h)` を持ち、--content-h は docked ではパネル占有分が
+   引かれた値になるので、そもそも上書きが要らない。検査は
+   `web-src/test/docked-page-height.test.ts`。 */
 
 .tools-sheet,
 .terminal-sheet {
