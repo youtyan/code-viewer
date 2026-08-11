@@ -30,8 +30,8 @@ import {
 } from "./command-resolver";
 import { compileNamePatterns, type NamePatternSet } from "./name-pattern";
 import {
-  runAsync,
   type RunAsyncOptions,
+  runAsync,
   runBytesAsync,
   runSync,
   spawnStream,
@@ -512,6 +512,22 @@ export async function worktreeRemoveResultAsync(
   const res = await runGitAsync(args, cwd);
   if (res.code !== 0) {
     return gitFailureResult(res, "git worktree remove failed");
+  }
+  return {};
+}
+
+/**
+ * 消えた作業ツリーの管理情報を掃除する。フォルダが既に無いエントリに
+ * `git worktree remove` を受け付けない git があるため、missing なエントリの
+ * 削除はこちらに切り替える。特定の 1 本だけを掃除する形は git に無く、
+ * 壊れた登録は全て対象になる (壊れた登録はどうせ消すしかないもの)。
+ */
+export async function worktreePruneResultAsync(
+  cwd: string,
+): Promise<Partial<GitErrorResult>> {
+  const res = await runGitAsync(["git", "worktree", "prune"], cwd);
+  if (res.code !== 0) {
+    return gitFailureResult(res, "git worktree prune failed");
   }
   return {};
 }

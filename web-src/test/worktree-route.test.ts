@@ -508,6 +508,25 @@ describe("worktree remove", () => {
     expect(res?.status).toBe(200);
     expect(existsSync(added)).toBe(false);
   });
+
+  test("unregisters a worktree whose folder is already gone", async () => {
+    await post("/_worktree/add", { name: "feature-x" });
+    const added = await listedPath((entry) => entry.name === "feature-x");
+    rmSync(added, { recursive: true, force: true });
+
+    // フォルダが無いエントリに `git worktree remove` を受け付けない git が
+    // あるので、サーバは prune に切り替える。どちらの git でも登録が消える。
+    const res = await post("/_worktree/remove", { path: added });
+    expect(res?.status).toBe(200);
+
+    const body = await listWorktrees();
+    expect(body.worktrees.map((entry) => entry.name)).not.toContain(
+      "feature-x",
+    );
+    // 登録を消してもブランチは残る。
+    const branches = runGit(repo, ["branch", "--list", "feature-x"]).stdout;
+    expect(branches).toContain("feature-x");
+  });
 });
 
 describe("diff endpoint hardening", () => {

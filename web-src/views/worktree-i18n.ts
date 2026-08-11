@@ -104,9 +104,18 @@ export type WorktreeText = {
   removeDialog: {
     title: string;
     body: (name: string) => string;
+    /** フォルダのフルパスを伝える行。「元に戻せません」を必ず含める。 */
+    diskNote: (path: string) => string;
     branchNote: (branch: string) => string;
     dirtyNote: (count: number) => string;
+    /** dirtyNote の 2 行目。変更を失うことそのものを伝える。 */
+    dirtyLose: string;
     force: string;
+    /** 変更があるのにチェック無しで確定しようとしたときの検証メッセージ。 */
+    forceRequired: string;
+    /** フォルダが既に無い行の文面。「消えます」とは言えないので別にする。 */
+    missingBody: (name: string) => string;
+    missingNote: string;
     submit: string;
   };
   removeFailed: string;
@@ -230,19 +239,27 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       submit: "Create",
     },
     remove: "Remove",
-    removeTitle: "Remove this worktree",
+    removeTitle: "Delete this worktree",
     removeDialog: {
-      title: "Remove worktree",
-      body: (name) => `Remove the worktree "${name}"?`,
-      branchNote: (branch) => `The branch ${branch} is kept.`,
+      title: "Delete worktree",
+      body: (name) => `Delete the worktree "${name}"?`,
+      diskNote: (path) =>
+        `The folder ${path} and everything in it will be deleted from disk. This cannot be undone.`,
+      branchNote: (branch) =>
+        `The branch ${branch} and its committed work are kept.`,
       dirtyNote: (count) =>
         count === 1
-          ? "It has 1 uncommitted change, so git will refuse unless you force it."
-          : `It has ${count} uncommitted changes, so git will refuse unless you force it.`,
-      force: "Remove even with uncommitted changes",
-      submit: "Remove",
+          ? "1 file has uncommitted changes."
+          : `${count} files have uncommitted changes.`,
+      dirtyLose: "Deleting the worktree will lose them.",
+      force: "Delete even with uncommitted changes",
+      forceRequired: "To delete it anyway, check the box first.",
+      missingBody: (name) => `Remove the entry for "${name}"?`,
+      missingNote:
+        "Its folder is already gone from disk; only the git entry is removed.",
+      submit: "Delete",
     },
-    removeFailed: "Failed to remove the worktree.",
+    removeFailed: "Failed to delete the worktree.",
     cancel: "Cancel",
     nameErrors: {
       empty: "Enter a name.",
@@ -343,17 +360,24 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       submit: "作成",
     },
     remove: "削除",
-    removeTitle: "この作業ツリーを外す",
+    removeTitle: "この作業ツリーを削除する",
     removeDialog: {
       title: "作業ツリーの削除",
-      body: (name) => `作業ツリー「${name}」を外しますか。`,
-      branchNote: (branch) => `ブランチ ${branch} は残ります。`,
-      dirtyNote: (count) =>
-        `コミットしていない変更が ${count} 件あります。強制しない限り git が拒否します。`,
-      force: "コミットしていない変更があっても外す",
-      submit: "削除",
+      body: (name) => `作業ツリー「${name}」を削除しますか。`,
+      diskNote: (path) =>
+        `フォルダ ${path} とその中身はディスクから消えます。元に戻せません。`,
+      branchNote: (branch) =>
+        `ブランチ ${branch} と、コミット済みの内容は残ります。`,
+      dirtyNote: (count) => `コミットしていない変更が ${count} 件あります。`,
+      dirtyLose: "削除するとこれらの変更は失われます。",
+      force: "変更が残っていても削除する",
+      forceRequired: "変更を捨てて削除するには、チェックを入れてください。",
+      missingBody: (name) => `作業ツリー「${name}」の登録を消しますか。`,
+      missingNote:
+        "フォルダは既にディスク上にありません。git の管理情報だけを消します。",
+      submit: "削除する",
     },
-    removeFailed: "作業ツリーを外せませんでした。",
+    removeFailed: "作業ツリーを削除できませんでした。",
     cancel: "キャンセル",
     nameErrors: {
       empty: "名前を入力してください。",

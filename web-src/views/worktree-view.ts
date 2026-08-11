@@ -518,30 +518,49 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     const seq = lifecycle;
     const t = text();
     const body = el("div", "worktree-form");
-    body.appendChild(el("p", "", t.removeDialog.body(item.name)));
+    // フォルダが無い行は「消えます」とは言えない。管理情報の掃除であることを
+    // 伝える別文面にする (サーバ側も remove ではなく prune に切り替わる)。
+    if (item.missing) {
+      body.appendChild(el("p", "", t.removeDialog.missingBody(item.name)));
+      body.appendChild(el("p", "worktree-hint", t.removeDialog.missingNote));
+    } else {
+      body.appendChild(el("p", "", t.removeDialog.body(item.name)));
+      body.appendChild(el("p", "", t.removeDialog.diskNote(item.path)));
+    }
     if (item.branch) {
       body.appendChild(
         el("p", "worktree-hint", t.removeDialog.branchNote(item.branch)),
       );
     }
-    if (item.changedCount > 0) {
-      body.appendChild(
-        el("p", "worktree-hint", t.removeDialog.dirtyNote(item.changedCount)),
+    let force: HTMLInputElement | null = null;
+    if (!item.missing && item.changedCount > 0) {
+      // 警告は最初から見せる。チェックを入れたときに出現する形だと、
+      // 読む前に押せてしまう。
+      const warn = el("p", "worktree-warn");
+      warn.appendChild(
+        el("span", "", `⚠ ${t.removeDialog.dirtyNote(item.changedCount)}`),
       );
+      warn.appendChild(document.createElement("br"));
+      warn.appendChild(el("span", "", t.removeDialog.dirtyLose));
+      body.appendChild(warn);
+      const forceWrap = document.createElement("label");
+      forceWrap.className = "worktree-check";
+      force = document.createElement("input");
+      force.type = "checkbox";
+      forceWrap.append(force, el("span", "", t.removeDialog.force));
+      body.appendChild(forceWrap);
     }
-    const forceWrap = document.createElement("label");
-    forceWrap.className = "worktree-check";
-    const force = document.createElement("input");
-    force.type = "checkbox";
-    forceWrap.append(force, el("span", "", t.removeDialog.force));
-    body.appendChild(forceWrap);
 
     const submitted = await showFormDialog<{ force: boolean }>({
       title: t.removeDialog.title,
       body,
       submitLabel: t.removeDialog.submit,
       cancelLabel: t.cancel,
-      submit: () => ({ force: force.checked }),
+      // フォルダごと消える不可逆の操作なので、確定は常に危険色。
+      danger: true,
+      validate: () =>
+        force && !force.checked ? t.removeDialog.forceRequired : null,
+      submit: () => ({ force: force?.checked ?? false }),
     });
     if (!submitted) return;
     if (!isCurrent(seq)) return;

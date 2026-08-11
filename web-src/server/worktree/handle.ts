@@ -45,6 +45,7 @@ import {
   untrackedFileDiffAsync,
   worktreeAddResultAsync,
   worktreeListResultAsync,
+  worktreePruneResultAsync,
   worktreeRemoveResultAsync,
 } from "../git";
 import { isSafePath } from "../search-service";
@@ -265,10 +266,14 @@ async function handleRemovePost(req: Request, cwd: string): Promise<Response> {
     return textError("cannot remove the worktree this server is serving", 409);
   }
 
-  const result = await worktreeRemoveResultAsync(resolved.root, {
-    path: resolved.path,
-    force: body.force === true,
-  });
+  // フォルダが既に無いエントリは、git によっては remove を拒否される。
+  // 消すものは管理情報だけなので prune に切り替える。
+  const result = existsSync(resolved.path)
+    ? await worktreeRemoveResultAsync(resolved.root, {
+        path: resolved.path,
+        force: body.force === true,
+      })
+    : await worktreePruneResultAsync(resolved.root);
   if (result.error) return textError(result.error, result.status ?? 500);
   try {
     await stopWorktreeServer(resolved.path);

@@ -7976,6 +7976,13 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   font-size: 11px;
 }
 
+/* 削除ダイアログの警告。未コミット変更を失うことを、チェックを入れる前に
+   読める位置に出す。 */
+.worktree-warn {
+  color: var(--danger);
+  font-size: 12px;
+}
+
 .worktree-check {
   display: flex;
   align-items: center;

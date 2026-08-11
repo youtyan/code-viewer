@@ -183,13 +183,24 @@ type DiffPayload = {
 function stubFetch(
   list: WorktreesResponse | { status: number; body: string },
   diff?: DiffPayload | { status: number; body: string },
-): { diffUrls: string[] } {
+): { diffUrls: string[]; posts: Array<{ url: string; body: unknown }> } {
   const diffUrls: string[] = [];
+  const posts: Array<{ url: string; body: unknown }> = [];
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
     writable: true,
-    value: (async (input: RequestInfo | URL) => {
+    value: (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (init?.method === "POST") {
+        posts.push({
+          url,
+          body: init.body ? JSON.parse(String(init.body)) : null,
+        });
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       if (url.startsWith("/_worktree/diff")) {
         diffUrls.push(url);
         if (!diff) return new Response("no diff stubbed", { status: 500 });
@@ -218,7 +229,7 @@ function stubFetch(
       });
     }) as typeof fetch,
   });
-  return { diffUrls };
+  return { diffUrls, posts };
 }
 
 type Mounted = {
@@ -227,6 +238,7 @@ type Mounted = {
   diff: HTMLElement;
   routes: AppRoute[];
   diffUrls: string[];
+  posts: Array<{ url: string; body: unknown }>;
   view: WorktreeView;
   setCurrentRoute(route: AppRoute): void;
   setDisplayOptions(
@@ -253,7 +265,7 @@ async function mountWith(
 ): Promise<Mounted> {
   installDiff2Html();
   installIntersectionObserver();
-  const { diffUrls } = stubFetch(list, options.diff);
+  const { diffUrls, posts } = stubFetch(list, options.diff);
   let current: WorktreeRoute = {
     screen: "worktree",
     range: RANGE,
@@ -299,6 +311,7 @@ async function mountWith(
     diff,
     routes,
     diffUrls,
+    posts,
     view,
     setCurrentRoute(next) {
       if (next.screen === "worktree") current = next;
@@ -423,6 +436,133 @@ describe("worktree list panel", () => {
       { route: { wt: "/repo" } },
     );
     expect(texts(panel, "button.worktree-head-btn")).not.toContain(TEXT.remove);
+  });
+});
+
+describe("remove dialog", () => {
+  function openDialog(): HTMLElement {
+    const backdrop = document.querySelector<HTMLElement>(
+      ".gdp-dialog-backdrop",
+    );
+    if (!backdrop) throw new Error("no dialog open");
+    return backdrop;
+  }
+
+  async function openRemoveDialog(
+    list: WorktreesResponse,
+    wt: string,
+  ): Promise<Mounted> {
+    const mounted = await mountWith(list, { route: { wt } });
+    const button = Array.from(
+      mounted.panel.querySelectorAll<HTMLButtonElement>(
+        "button.worktree-head-btn",
+      ),
+    ).find((candidate) => candidate.textContent === TEXT.remove);
+    if (!button) throw new Error("remove button is missing");
+    button.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return mounted;
+  }
+
+  function dialogSubmit(dialog: HTMLElement): HTMLButtonElement {
+    const buttons = dialog.querySelectorAll<HTMLButtonElement>(
+      ".gdp-dialog-actions button",
+    );
+    const submit = buttons[buttons.length - 1];
+    if (!submit) throw new Error("submit button is missing");
+    return submit;
+  }
+
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 8; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  test("says the folder is deleted from disk and cannot be undone", async () => {
+    await openRemoveDialog(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "feature-x",
+          path: "/repo/.worktrees/feature-x",
+          branch: "feature-x",
+        }),
+      ]),
+      "/repo/.worktrees/feature-x",
+    );
+    const dialog = openDialog();
+    const text = dialog.textContent || "";
+    expect(text).toContain('Delete the worktree "feature-x"?');
+    expect(text).toContain("/repo/.worktrees/feature-x");
+    expect(text).toContain("cannot be undone");
+    expect(text).toContain("The branch feature-x");
+    // 削除は不可逆なので確定ボタンは常に危険色。
+    expect(dialogSubmit(dialog).classList.contains("gdp-dialog-danger")).toBe(
+      true,
+    );
+    // 変更が無いのに強制の選択肢は出さない。
+    expect(dialog.querySelector("input[type=checkbox]")).toBeNull();
+  });
+
+  test("blocks the submit until the dirty checkbox is checked", async () => {
+    const mounted = await openRemoveDialog(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "feature-x",
+          path: "/repo/.worktrees/feature-x",
+          branch: "feature-x",
+          files: [file()],
+        }),
+      ]),
+      "/repo/.worktrees/feature-x",
+    );
+    const dialog = openDialog();
+    // 警告は最初から出ている。チェックで出現させない。
+    expect(dialog.textContent).toContain("will lose them");
+    const checkbox = dialog.querySelector<HTMLInputElement>(
+      "input[type=checkbox]",
+    );
+    if (!checkbox) throw new Error("force checkbox is missing");
+    const submit = dialogSubmit(dialog);
+
+    submit.click();
+    await flush();
+    expect(dialog.querySelector(".gdp-dialog-error")?.textContent).toBe(
+      TEXT.removeDialog.forceRequired,
+    );
+    expect(mounted.posts).toHaveLength(0);
+
+    checkbox.checked = true;
+    submit.click();
+    await flush();
+    expect(mounted.posts).toEqual([
+      {
+        url: "/_worktree/remove",
+        body: { path: "/repo/.worktrees/feature-x", force: true },
+      },
+    ]);
+  });
+
+  test("says only the git entry is removed when the folder is gone", async () => {
+    await openRemoveDialog(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "feature-x",
+          path: "/repo/.worktrees/feature-x",
+          branch: "feature-x",
+          missing: true,
+        }),
+      ]),
+      "/repo/.worktrees/feature-x",
+    );
+    const text = openDialog().textContent || "";
+    expect(text).toContain('Remove the entry for "feature-x"?');
+    expect(text).toContain("already gone from disk");
+    // ディスクから消えるとは言えないので、不可逆の文言も出さない。
+    expect(text).not.toContain("cannot be undone");
   });
 });
 
