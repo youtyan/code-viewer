@@ -511,21 +511,27 @@ describe("worktree remove", () => {
 
   test("unregisters a worktree whose folder is already gone", async () => {
     await post("/_worktree/add", { name: "feature-x" });
-    const added = await listedPath((entry) => entry.name === "feature-x");
-    rmSync(added, { recursive: true, force: true });
+    await post("/_worktree/add", { name: "feature-y" });
+    const addedX = await listedPath((entry) => entry.name === "feature-x");
+    const addedY = await listedPath((entry) => entry.name === "feature-y");
+    rmSync(addedX, { recursive: true, force: true });
+    rmSync(addedY, { recursive: true, force: true });
 
     // フォルダが無いエントリに `git worktree remove` を受け付けない git が
     // あるので、サーバは prune に切り替える。どちらの git でも登録が消える。
-    const res = await post("/_worktree/remove", { path: added });
+    const res = await post("/_worktree/remove", { path: addedX });
     expect(res?.status).toBe(200);
 
     const body = await listWorktrees();
-    expect(body.worktrees.map((entry) => entry.name)).not.toContain(
-      "feature-x",
-    );
+    const names = body.worktrees.map((entry) => entry.name);
+    expect(names).not.toContain("feature-x");
+    // prune は対象を絞れないので、同じ状態の登録はまとめて消える。
+    // ダイアログ側はこの件数を文面に出している。
+    expect(names).not.toContain("feature-y");
     // 登録を消してもブランチは残る。
-    const branches = runGit(repo, ["branch", "--list", "feature-x"]).stdout;
+    const branches = runGit(repo, ["branch", "--list", "feature-*"]).stdout;
     expect(branches).toContain("feature-x");
+    expect(branches).toContain("feature-y");
   });
 });
 

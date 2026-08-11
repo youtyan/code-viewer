@@ -120,6 +120,11 @@ export type WorktreeText = {
     /** フォルダが既に無い行の文面。「消えます」とは言えないので別にする。 */
     missingBody: (name: string) => string;
     missingNote: string;
+    /**
+     * prune は対象を 1 本に絞れないので、同じ状態の登録が他にあるなら
+     * まとめて消えることを件数つきで伝える。
+     */
+    missingOthers: (n: number) => string;
     submit: string;
   };
   removeFailed: string;
@@ -263,6 +268,10 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       missingBody: (name) => `Remove the entry for "${name}"?`,
       missingNote:
         "Its folder is already gone from disk; only the git entry is removed.",
+      missingOthers: (n) =>
+        n === 1
+          ? "1 other entry whose folder is gone will be cleaned up at the same time."
+          : `${n} other entries whose folders are gone will be cleaned up at the same time.`,
       submit: "Delete",
     },
     removeFailed: "Failed to delete the worktree.",
@@ -382,6 +391,8 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       missingBody: (name) => `作業ツリー「${name}」の登録を消しますか。`,
       missingNote:
         "フォルダは既にディスク上にありません。git の管理情報だけを消します。",
+      missingOthers: (n) =>
+        `フォルダが無くなっている他の登録 ${n} 件も、同時に整理されます。`,
       submit: "削除する",
     },
     removeFailed: "作業ツリーを削除できませんでした。",

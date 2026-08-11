@@ -523,6 +523,16 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     if (item.missing) {
       body.appendChild(el("p", "", t.removeDialog.missingBody(item.name)));
       body.appendChild(el("p", "worktree-hint", t.removeDialog.missingNote));
+      // prune は対象を 1 本に絞れないので、同じ状態の登録が他にあれば
+      // まとめて消えることを先に伝える。
+      const otherMissing = (data?.worktrees || []).filter(
+        (candidate) => candidate.missing && candidate.id !== item.id,
+      ).length;
+      if (otherMissing > 0) {
+        body.appendChild(
+          el("p", "worktree-hint", t.removeDialog.missingOthers(otherMissing)),
+        );
+      }
     } else {
       body.appendChild(el("p", "", t.removeDialog.body(item.name)));
       body.appendChild(el("p", "", t.removeDialog.diskNote(item.path)));

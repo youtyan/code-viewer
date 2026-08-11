@@ -601,6 +601,31 @@ describe("remove dialog", () => {
     // ディスクから消えるとは言えないので、不可逆の文言も出さない。
     expect(text).not.toContain("cannot be undone");
   });
+
+  test("counts the other stale entries that prune will also remove", async () => {
+    await openRemoveDialog(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "feature-x",
+          path: "/repo/.worktrees/feature-x",
+          branch: "feature-x",
+          missing: true,
+        }),
+        item({
+          name: "feature-y",
+          path: "/repo/.worktrees/feature-y",
+          branch: "feature-y",
+          missing: true,
+        }),
+      ]),
+      "/repo/.worktrees/feature-x",
+    );
+    // prune は対象を絞れないので、まとめて消える件数を先に伝える。
+    expect(openDialog().textContent).toContain(
+      TEXT.removeDialog.missingOthers(1),
+    );
+  });
 });
 
 describe("divergence summary", () => {
