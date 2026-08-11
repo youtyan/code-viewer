@@ -77,6 +77,14 @@ export type WorktreeViewDeps = {
     kind: "directory" | "file-parent",
     title?: string,
   ): HTMLButtonElement;
+  /**
+   * 同じ操作を、ボタンを介さずに実行する。メニューの項目にはボタンが無いので
+   * こちらを使う。**成否が返る**ので、失敗をこの画面のメッセージ欄に出せる。
+   */
+  openPathInOs(
+    path: string,
+    kind: "directory" | "file-parent",
+  ): Promise<boolean>;
 };
 
 export type WorktreeView = PageView & {
@@ -809,6 +817,22 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /**
+   * メニューから走らせる 1 回きりの操作。**失敗を黙って終わらせない。**
+   * メニューの項目は押した瞬間に消えるので、色や disabled で結果を示せない。
+   * 失敗したらこの画面のメッセージ欄に理由を出す。
+   */
+  async function runAction(
+    run: () => Promise<boolean>,
+    failure: string,
+  ): Promise<void> {
+    const seq = lifecycle;
+    if (await run()) return;
+    if (!isCurrent(seq)) return;
+    setMessage(failure, true);
+    renderList();
+  }
+
+  /**
    * クリップボードへ写す。**失敗を握り潰さない。** 呼び出し側が見た目を
    * 変えられるように成否を返し、理由はコンソールに残す (権限拒否など、
    * 画面の色だけでは何も分からないため)。
@@ -905,16 +929,19 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         label: t.actions.openFolder,
         title: t.actions.openFolderTitle,
         onSelect: () => {
-          // 共有ファクトリのボタンをそのまま押す。開き方と失敗時の扱いを
-          // app.ts 側と 1 つに保つため、ここで fetch を書かない。
-          openFolderButton(item, false).click();
+          // メニューにはボタンが無いので、色を変えて伝えることができない。
+          // 失敗はこの画面のメッセージ欄に出す (黙って何も起きないのが一番困る)。
+          void runAction(
+            () => deps.openPathInOs(item.path, "directory"),
+            t.actions.openFolderFailed,
+          );
         },
       });
       items.push({
         label: t.actions.copyPath,
         title: t.actions.copyPathTitle,
         onSelect: () => {
-          copyPathButton(item, false).click();
+          void runAction(() => copyText(item.path), t.actions.copyFailed);
         },
       });
       items.push({
@@ -944,7 +971,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         label: t.actions.copyMerge,
         title: t.actions.copyMergeTitle(merge.base, merge.branch),
         onSelect: () => {
-          void copyText(merge.command);
+          void runAction(() => copyText(merge.command), t.actions.copyFailed);
         },
       });
     }

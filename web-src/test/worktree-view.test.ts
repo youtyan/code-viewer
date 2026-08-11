@@ -116,6 +116,11 @@ function installDom(): void {
   `;
 }
 
+/** OS でフォルダを開く要求。何をどう呼んだかを見る。 */
+const openedPaths: Array<{ path: string; kind: string }> = [];
+/** その要求が成功したことにするか。失敗時の見せ方を見るときに false にする。 */
+let openPathResult = true;
+
 /** diff2html に何を渡したか。実物は DOM を作るので描画そのものは見ない。 */
 const draws: Array<{
   host: HTMLElement;
@@ -313,6 +318,11 @@ async function mountWith(
       }
       return button;
     },
+    // 何をどう呼んだかを記録する。成否は openPathResult で差し替える。
+    openPathInOs: (path, kind) => {
+      openedPaths.push({ path, kind });
+      return Promise.resolve(openPathResult);
+    },
   });
   await view.enter();
   // 差分は「見えたものから」読む。IntersectionObserver の無い環境では全部
@@ -375,6 +385,10 @@ function lastRoute(routes: AppRoute[]): AppRoute | undefined {
 
 beforeEach(() => {
   installDom();
+  openedPaths.length = 0;
+  openPathResult = true;
+  // メニューは body 直下に出る。前のテストの残りを持ち越さない。
+  document.querySelector(".gdp-context-menu")?.remove();
 });
 
 describe("worktree list panel", () => {
@@ -908,6 +922,60 @@ describe("row actions", () => {
     // 一覧の上に固定した帯も持たない (削除が画面で一番目立つ位置に居座る)。
     expect(panel.querySelector(".worktree-actions")).toBeNull();
     expect(document.querySelector(".gdp-context-menu")).toBeNull();
+  });
+
+  test("actually asks to open the folder, and says so when it fails", async () => {
+    const { panel } = await mountWith(
+      response([item({ name: "other", path: "/repo/.worktrees/other" })]),
+    );
+    openRowMenu(panel, 0);
+    menuItem(TEXT.actions.openFolder).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(openedPaths).toEqual([
+      { path: "/repo/.worktrees/other", kind: "directory" },
+    ]);
+    // 成功したときに、余計な文言を出さない。
+    expect(texts(panel, ".history-status")).not.toContain(
+      TEXT.actions.openFolderFailed,
+    );
+
+    // メニューは押した瞬間に消えるので、色や disabled では結果を示せない。
+    // 失敗したことは画面のどこかに出ないと、押した人には何も分からない。
+    openPathResult = false;
+    openRowMenu(panel, 0);
+    menuItem(TEXT.actions.openFolder).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(texts(panel, ".history-status")).toContain(
+      TEXT.actions.openFolderFailed,
+    );
+  });
+
+  test("copies the path, and says so when the clipboard refuses", async () => {
+    const writes: string[] = [];
+    let allow = true;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (value: string) => {
+          if (!allow) return Promise.reject(new Error("denied"));
+          writes.push(value);
+          return Promise.resolve();
+        },
+      },
+    });
+    const { panel } = await mountWith(
+      response([item({ name: "other", path: "/repo/.worktrees/other" })]),
+    );
+    openRowMenu(panel, 0);
+    menuItem(TEXT.actions.copyPath).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writes).toEqual(["/repo/.worktrees/other"]);
+
+    allow = false;
+    openRowMenu(panel, 0);
+    menuItem(TEXT.actions.copyPath).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(texts(panel, ".history-status")).toContain(TEXT.actions.copyFailed);
   });
 
   test("puts delete below a separator, away from the everyday actions", async () => {

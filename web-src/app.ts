@@ -3671,11 +3671,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
   }
 
+  /**
+   * OS のファイルマネージャでそのパスを開く。
+   *
+   * **成否を返す。** ボタンを渡さない呼び出し (メニューの項目など) では、
+   * ここで握り潰すと利用者に何も伝わらない — 成功しても失敗しても画面が
+   * 無反応になる。失敗の理由はコンソールにも残す。
+   */
   async function openPathInOs(
     path: string,
     kind: "directory" | "file-parent",
     button?: HTMLButtonElement,
-  ) {
+  ): Promise<boolean> {
     const oldTitle = button?.title;
     if (button) {
       button.disabled = true;
@@ -3695,7 +3702,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       setTimeout(() => {
         button?.classList.remove("opened");
       }, 1200);
-    } catch {
+      return true;
+    } catch (error) {
+      console.error("[code-viewer] failed to open path in OS", error);
       if (button) {
         button.classList.add("failed");
         button.title = "failed to open in OS";
@@ -3704,6 +3713,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           button.title = oldTitle || "open in OS";
         }, 1600);
       }
+      return false;
     } finally {
       if (button) button.disabled = false;
     }
@@ -5410,6 +5420,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncHeaderMenu,
     setStatus,
     createOpenPathButton,
+    openPathInOs: (path, kind) => openPathInOs(path, kind),
   });
   relocalizeWorktree = () => WORKTREE_VIEW?.localize();
 

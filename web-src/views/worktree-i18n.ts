@@ -101,8 +101,11 @@ export type WorktreeText = {
     menuFor: (name: string) => string;
     openFolder: string;
     openFolderTitle: string;
+    /** メニューには色を変える先が無いので、失敗はメッセージ欄に出す。 */
+    openFolderFailed: string;
     copyPath: string;
     copyPathTitle: string;
+    copyFailed: string;
     /** 「開く」で起こしたサーバを止める。起動中の行にだけ出す。 */
     stopServer: string;
     stopServerTitle: string;
@@ -295,8 +298,10 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       menuFor: (name) => `Actions for ${name}`,
       openFolder: "Open folder",
       openFolderTitle: "Open this folder in the OS file manager",
+      openFolderFailed: "Could not open that folder.",
       copyPath: "Copy path",
       copyPathTitle: "Copy the path to this folder",
+      copyFailed: "Could not copy to the clipboard.",
       stopServer: "Stop its server",
       stopServerTitle: "Stop the code-viewer running for this folder",
       stopFailed: "Failed to stop the server.",
@@ -459,8 +464,10 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       menuFor: (name) => `${name} への操作`,
       openFolder: "フォルダを開く",
       openFolderTitle: "このフォルダをファイルマネージャで開きます",
+      openFolderFailed: "そのフォルダを開けませんでした。",
       copyPath: "パスをコピー",
       copyPathTitle: "このフォルダの場所をコピーします",
+      copyFailed: "クリップボードにコピーできませんでした。",
       stopServer: "サーバを止める",
       stopServerTitle: "このフォルダで動いている code-viewer を止めます",
       stopFailed: "サーバを止められませんでした。",
