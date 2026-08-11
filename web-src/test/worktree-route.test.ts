@@ -10,6 +10,7 @@ import {
   mkdtempSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -538,6 +539,46 @@ describe("worktree remove", () => {
     const branches = runGit(repo, ["branch", "--list", "feature-*"]).stdout;
     expect(branches).toContain("feature-x");
     expect(branches).toContain("feature-y");
+  });
+});
+
+describe("last touched", () => {
+  test("uses the newest mtime of the changed files", async () => {
+    await post("/_worktree/add", { name: "feature-x" });
+    const added = await listedPath((entry) => entry.name === "feature-x");
+    writeFileSync(join(added, "touched.txt"), "new\n");
+    const expected = statSync(join(added, "touched.txt")).mtimeMs;
+
+    const body = await listWorktrees();
+    const entry = body.worktrees.find(
+      (candidate) => candidate.name === "feature-x",
+    );
+    expect(entry?.lastTouched).toBeTruthy();
+    const got = Date.parse(entry?.lastTouched || "");
+    expect(Math.abs(got - expected)).toBeLessThan(1500);
+  });
+
+  test("falls back to the last commit time when nothing is changed", async () => {
+    await post("/_worktree/add", { name: "feature-x" });
+    const body = await listWorktrees();
+    const entry = body.worktrees.find(
+      (candidate) => candidate.name === "feature-x",
+    );
+    expect(entry?.fileCount).toBe(0);
+    expect(entry?.lastTouched).toBe(entry?.lastCommit?.when);
+  });
+
+  test("is null for a worktree whose folder is gone", async () => {
+    await post("/_worktree/add", { name: "feature-x" });
+    const added = await listedPath((entry) => entry.name === "feature-x");
+    rmSync(added, { recursive: true, force: true });
+
+    const body = await listWorktrees();
+    const entry = body.worktrees.find(
+      (candidate) => candidate.name === "feature-x",
+    );
+    expect(entry?.missing).toBe(true);
+    expect(entry?.lastTouched).toBeNull();
   });
 });
 

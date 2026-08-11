@@ -10,6 +10,7 @@
 // する理由は無い。
 
 import { existsSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { formatErrorDetail } from "../../core/error-detail";
 import type { WorktreesResponse } from "../../core/types";
@@ -138,6 +139,38 @@ export async function collectFiles(
   };
 }
 
+/**
+ * その作業ツリーで最後にファイルが書き変わった時刻。変更ファイルの mtime の
+ * 最新を取る。コミットされずに置かれた作業ツリーは最終コミットの時刻が
+ * 動かないので、「最後に触ったのはいつか」はこちらでしか分からない。
+ *
+ * 消されたファイル (D) は mtime を持たないので対象外。stat までの間に消えた
+ * ファイルも「無い」として読み飛ばすが、権限などそれ以外の失敗は握り潰さず
+ * error に返す。
+ */
+async function lastTouchedMs(
+  ref: WorktreeRef,
+  files: WorktreeFileChange[],
+): Promise<{ at: number | null; error?: string }> {
+  const targets = files.filter((file) => file.status !== "D");
+  const errors: string[] = [];
+  const mtimes = await mapWithConcurrency(targets, 8, async (file) => {
+    try {
+      return (await stat(join(ref.path, file.path))).mtimeMs;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        errors.push(formatErrorDetail(error));
+      }
+      return null;
+    }
+  });
+  const valid = mtimes.filter((value): value is number => value !== null);
+  return {
+    at: valid.length ? Math.max(...valid) : null,
+    ...(errors.length ? { error: errors.join("\n") } : {}),
+  };
+}
+
 /** 基準ブランチとの位置関係。基準そのものと detached では測らない。 */
 async function collectDivergence(
   root: string,
@@ -175,6 +208,7 @@ function emptyItem(root: string, ref: WorktreeRef): WorktreeItem {
     changedCount: 0,
     error: "",
     lastCommit: null,
+    lastTouched: null,
     serverUrl: "",
     divergence: null,
     files: [],
@@ -199,6 +233,7 @@ async function buildItem(
     runningServerResult(ref.path),
   ]);
   const commit = history.commits[0];
+  const touched = await lastTouchedMs(ref, changes.files);
   return {
     ...item,
     changedCount: changes.files.filter((file) => file.origin === "uncommitted")
@@ -207,6 +242,7 @@ async function buildItem(
       changes.error,
       divergence.error,
       history.error,
+      touched.error,
       server.status === "invalid" || server.status === "unreachable"
         ? formatErrorDetail(server.error)
         : undefined,
@@ -219,6 +255,11 @@ async function buildItem(
           when: commit.when,
         }
       : null,
+    // 変更が 1 つも無い作業ツリーは、最後のコミットの時刻に落とす。
+    lastTouched:
+      touched.at !== null
+        ? new Date(touched.at).toISOString()
+        : (commit?.when ?? null),
     serverUrl: server.status === "running" ? server.url : "",
     divergence: divergence.divergence,
     files: changes.files,

@@ -64,6 +64,7 @@ function item(overrides: Partial<WorktreeItem> = {}): WorktreeItem {
     changedCount: files.filter((f) => f.origin === "uncommitted").length,
     error: "",
     lastCommit: null,
+    lastTouched: null,
     serverUrl: "",
     divergence: null,
     fileCount: files.length,
@@ -459,6 +460,35 @@ describe("worktree list panel", () => {
     // detached の行はブランチ名の代わりに「ブランチなし」を出す。
     expect(rows[1].querySelector(".sha")?.textContent).toBe(
       TEXT.badges.detached,
+    );
+  });
+
+  test("shows when files were last touched, next to the last commit", async () => {
+    const touchedIso = new Date().toISOString();
+    const { panel } = await mountWith(
+      response([
+        item({
+          lastTouched: touchedIso,
+          lastCommit: {
+            sha: "abc1234def",
+            subject: "sample subject",
+            author: "sample author",
+            when: "2026-08-10T00:00:00.000Z",
+          },
+        }),
+      ]),
+    );
+    const whens = panel.querySelectorAll<HTMLElement>(".history-item .when");
+    // 最終コミットの相対時刻と、mtime ベースの最終更新の両方が出る。
+    expect(whens).toHaveLength(2);
+    expect(whens[1].textContent).toBe(TEXT.lastTouched("just now"));
+    expect(whens[1].title).toBe(
+      new Date(Date.parse(touchedIso)).toLocaleString(),
+    );
+    // 最終コミットの title は件名と絶対日時の両方を持つ。
+    expect(whens[0].title).toContain("sample subject");
+    expect(whens[0].title).toContain(
+      new Date("2026-08-10T00:00:00.000Z").toLocaleString(),
     );
   });
 

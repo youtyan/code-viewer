@@ -87,6 +87,8 @@ export type WorktreeText = {
     diffTruncated: (shown: number, total: number) => string;
   };
   noCommit: string;
+  /** 3 段目の「最終更新 X」。mtime ベースなのでコミット無しでも動く。 */
+  lastTouched: (when: string) => string;
   /** 選んだ行の内側に出す操作。 */
   actions: {
     openFolder: string;
@@ -257,6 +259,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
         `showing ${shown} of ${total} hunks — open the worktree in a new tab for the whole file`,
     },
     noCommit: "no commit",
+    lastTouched: (when) => `updated ${when}`,
     actions: {
       openFolder: "Open folder",
       openFolderTitle: "Open this folder in the OS file manager",
@@ -406,6 +409,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
         `${total} 個のうち ${shown} 個のかたまりを表示しています。全部見るには、その作業ツリーを別タブで見てください`,
     },
     noCommit: "コミットなし",
+    lastTouched: (when) => `最終更新 ${when}`,
     actions: {
       openFolder: "フォルダを開く",
       openFolderTitle: "このフォルダをファイルマネージャで開きます",

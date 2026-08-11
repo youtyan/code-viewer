@@ -931,7 +931,25 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
             ? blameRelativeTime(Math.round(parsed / 1000))
             : item.lastCommit.when,
         );
-        when.title = item.lastCommit.subject;
+        // ホバーでは件名と絶対日時の両方を出す。
+        when.title = Number.isFinite(parsed)
+          ? `${item.lastCommit.subject}\n${new Date(parsed).toLocaleString()}`
+          : item.lastCommit.subject;
+        meta.appendChild(when);
+      }
+      // 最終更新は mtime ベース。コミットせずに置かれた作業ツリーでも動く。
+      if (item.lastTouched) {
+        const parsed = Date.parse(item.lastTouched);
+        const when = el(
+          "span",
+          "when",
+          Number.isFinite(parsed)
+            ? t.lastTouched(blameRelativeTime(Math.round(parsed / 1000)))
+            : t.lastTouched(item.lastTouched),
+        );
+        when.title = Number.isFinite(parsed)
+          ? new Date(parsed).toLocaleString()
+          : item.lastTouched;
         meta.appendChild(when);
       }
       row.appendChild(meta);

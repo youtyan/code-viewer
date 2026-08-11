@@ -102,6 +102,13 @@ export type WorktreeItem = WorktreeRef & {
    */
   error: string;
   lastCommit: CommitMeta | null;
+  /**
+   * その作業ツリーで最後にファイルが書き変わった時刻 (ISO 8601)。
+   * 変更ファイルの mtime の最新で、コミットせずに置かれた作業ツリーでも
+   * 動く。取れなければ最終コミットの時刻に落ち、それも無ければ null
+   * (読み取りに失敗したなら、その理由は error に入る)。
+   */
+  lastTouched: string | null;
   /** そのパスで動いている code-viewer の URL。無ければ空。 */
   serverUrl: string;
   /** 基準ブランチとの位置関係。基準そのものの行と、調べられなかった行は null。 */
