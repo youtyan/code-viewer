@@ -436,7 +436,7 @@ describe("worktree list panel", () => {
     });
   });
 
-  test("shows the folder path on its own line with the full path on hover", async () => {
+  test("shows the folder path on its own line, in full, not relative", async () => {
     const { panel } = await mountWith(
       response([
         item({
@@ -446,9 +446,20 @@ describe("worktree list panel", () => {
         }),
       ]),
     );
+    // 相対パスだと、リポジトリがどこにあるかを知っている人にしか読めない。
     const line = panel.querySelector<HTMLElement>(".worktree-row-path");
-    expect(line?.textContent).toBe(".worktrees/feature-x");
+    expect(line?.textContent).toBe("/repo/.worktrees/feature-x");
     expect(line?.title).toBe("/repo/.worktrees/feature-x");
+  });
+
+  test("shows a real path for the main worktree too, not a bare dot", async () => {
+    const { panel } = await mountWith(
+      response([item({ name: "repo", path: "/repo", displayPath: "." })]),
+    );
+    // displayPath はリポジトリルート自身に "." を返す。それを出すと、
+    // 本体の行だけ場所が分からない行になる。
+    const line = panel.querySelector<HTMLElement>(".worktree-row-path");
+    expect(line?.textContent).toBe("/repo");
   });
 
   test("explains each badge on hover", async () => {
@@ -510,9 +521,8 @@ describe("worktree list panel", () => {
       ]),
       { route: { wt: "/repo/.worktrees/other" } },
     );
-    const labels = texts(panel, "button.worktree-head-btn");
-    expect(labels).toContain(TEXT.open);
-    expect(labels).toContain(TEXT.remove);
+    expect(texts(panel, "button.worktree-head-btn")).toContain(TEXT.open);
+    expect(texts(panel, ".worktree-actions-remove")).toContain(TEXT.remove);
   });
 
   test("never offers to remove the worktree this server serves", async () => {
@@ -520,7 +530,7 @@ describe("worktree list panel", () => {
       response([item({ name: "repo", current: true })]),
       { route: { wt: "/repo" } },
     );
-    expect(texts(panel, "button.worktree-head-btn")).not.toContain(TEXT.remove);
+    expect(panel.querySelector(".worktree-actions-remove")).toBeNull();
   });
 
   test("offers to stop a running server, and asks the server to stop it", async () => {
@@ -663,11 +673,9 @@ describe("remove dialog", () => {
     wt: string,
   ): Promise<Mounted> {
     const mounted = await mountWith(list, { route: { wt } });
-    const button = Array.from(
-      mounted.panel.querySelectorAll<HTMLButtonElement>(
-        "button.worktree-head-btn",
-      ),
-    ).find((candidate) => candidate.textContent === TEXT.remove);
+    const button = mounted.panel.querySelector<HTMLButtonElement>(
+      ".worktree-actions-remove",
+    );
     if (!button) throw new Error("remove button is missing");
     button.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -880,7 +888,7 @@ describe("row actions", () => {
     ]);
   });
 
-  test("marks delete as the one action that cannot be undone", async () => {
+  test("keeps delete out of the row of everyday buttons", async () => {
     const { panel } = await mountWith(
       response([
         item({ name: "repo", current: true }),
@@ -888,11 +896,15 @@ describe("row actions", () => {
       ]),
       { route: { wt: "/repo/.worktrees/other" } },
     );
-    const danger = panel.querySelectorAll(
-      ".worktree-actions button.gdp-dialog-danger",
+    // 取り返しのつかない操作を、よく使う操作と同じ段に並べない。
+    const everyday = panel.querySelector(".worktree-actions-buttons");
+    if (!everyday) throw new Error("action buttons are missing");
+    expect(texts(everyday, "button")).not.toContain(TEXT.remove);
+    const remove = panel.querySelector(".worktree-actions-remove");
+    expect(remove?.textContent).toBe(TEXT.remove);
+    expect(remove?.parentElement).toBe(
+      panel.querySelector(".worktree-actions"),
     );
-    expect(danger).toHaveLength(1);
-    expect(danger[0].textContent).toBe(TEXT.remove);
   });
 
   test("shows nothing above the list until a worktree is picked", async () => {
@@ -909,7 +921,7 @@ describe("row actions", () => {
     );
     const actions = panel.querySelector(".worktree-actions");
     if (!actions) throw new Error("actions are missing");
-    expect(texts(actions, "button")).not.toContain(TEXT.remove);
+    expect(actions.querySelector(".worktree-actions-remove")).toBeNull();
     expect(texts(actions, "button")).toContain(TEXT.open);
   });
 

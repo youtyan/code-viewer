@@ -8035,9 +8035,30 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   gap: 6px;
 }
 
-/* 取り返しのつかない操作だけ、他から離して置く。 */
-.worktree-actions-buttons .gdp-dialog-danger {
-  margin-left: auto;
+/* 取り返しのつかない操作は、よく使う操作と同じ段に並べない。枠も背景も
+   与えず、普段は沈めておく。赤い枠のボタンとして並べたことがあるが、
+   画面の一番上で一番目立つ塊になってしまった。 */
+.worktree-actions-remove {
+  align-self: flex-start;
+  margin-top: 2px;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--ui-font-sm);
+  color: var(--fg-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.worktree-actions-remove:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.worktree-actions-remove:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* 変更がまだ無い作業ツリーの案内 (右ペイン)。次にやることをその場に置く。 */

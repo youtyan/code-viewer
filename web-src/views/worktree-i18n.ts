@@ -339,7 +339,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       gitignoreLabel: "About this folder and git status",
       submit: "Create",
     },
-    remove: "Remove",
+    remove: "Delete this worktree",
     removeTitle: "Delete this worktree and its folder",
     removeDialog: {
       title: "Delete worktree",
@@ -501,7 +501,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       gitignoreLabel: "このフォルダと git status について",
       submit: "作る",
     },
-    remove: "削除",
+    remove: "この作業ツリーを削除",
     removeTitle: "この作業ツリーをフォルダごと削除します",
     removeDialog: {
       title: "作業ツリーの削除",

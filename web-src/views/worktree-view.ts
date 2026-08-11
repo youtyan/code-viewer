@@ -905,14 +905,18 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     }
     // 自分が映している作業ツリーは外させない。サーバも 409 で拒否する。
     if (!item.current) {
-      const remove = headButton(t.remove, t.removeTitle, () => {
+      // **取り返しのつかない操作を、よく使う操作と同じ段・同じ強さで置かない。**
+      // 赤い枠のボタンとして並べたことがあるが、画面の一番上で一番目立つ塊に
+      // なってしまった。段を分け、普段は沈めて、ホバーで初めて赤くする。
+      // 押した後は確認ダイアログ (フルパスと「元に戻せません」つき) が出る。
+      const remove = el("button", "worktree-actions-remove", t.remove);
+      remove.type = "button";
+      remove.title = t.removeTitle;
+      remove.disabled = !!busyPath;
+      remove.addEventListener("click", () => {
         void removeWorktree(item);
       });
-      // 取り返しのつかない操作だけ、他のボタンと見た目を分ける。押した後は
-      // 今までどおり確認ダイアログが出る (フルパスと「元に戻せません」つき)。
-      remove.classList.add("gdp-dialog-danger");
-      remove.disabled = !!busyPath;
-      actions.appendChild(remove);
+      panel.appendChild(remove);
     }
     return panel;
   }
@@ -1027,8 +1031,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       row.appendChild(head);
 
       // 2 段目: フォルダの場所。「それはどこのフォルダなのか」が一番知りたい
-      // 情報なのでホバーに隠さない。長いときは頭側を省略し、フルパスは title。
-      const pathLine = el("span", "worktree-row-path", item.displayPath);
+      // 情報なのでホバーに隠さない。
+      //
+      // **displayPath (リポジトリからの相対) ではなく実パスを出す。** 相対だと
+      // 本体の行が "." だけになり、他の行も「リポジトリがどこにあるか」を
+      // 知っている人にしか読めない。長いので頭側を省略し、全体は title に。
+      const pathLine = el("span", "worktree-row-path", item.path);
       pathLine.title = item.path;
       row.appendChild(pathLine);
 
