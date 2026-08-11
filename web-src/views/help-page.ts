@@ -240,7 +240,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Add creates a worktree under .worktrees/ in the repository root. You give it a directory name, and the branch defaults to that same name; an existing branch is checked out, otherwise a new one is created. Because that directory sits inside the repository, git reports it as untracked until you add .worktrees/ to .gitignore — code-viewer says so in the dialog but does not edit .gitignore for you. Remove deletes the worktree's folder from disk — the dialog says so, with the full path and a note that it cannot be undone — and keeps the branch and its committed work. With uncommitted changes the dialog also shows a warning and requires a checkbox before it deletes. An entry whose folder is already gone is cleaned from git's bookkeeping instead (git worktree prune), and the dialog says how many such entries will go. The worktree this server is serving cannot be removed from here.",
+                text: "Create makes a worktree under .worktrees/ in the repository root. You give it a folder name and the dialog shows the exact path it will create as you type; the branch defaults to that same name, so an existing branch is checked out and otherwise a new one starts from where you are. Because that folder sits inside the repository, git reports it as untracked until you add .worktrees/ to .gitignore — the dialog keeps that note behind a ? mark, and code-viewer never edits .gitignore for you. Remove deletes the worktree's folder from disk — the dialog says so, with the full path and a note that it cannot be undone — and keeps the branch and its committed work. With uncommitted changes the dialog also shows a warning and requires a checkbox before it deletes. An entry whose folder is already gone is cleaned from git's bookkeeping instead (git worktree prune), and the dialog says how many such entries will go. The worktree this server is serving cannot be removed from here.",
               },
               {
                 kind: "paragraph",
@@ -1034,7 +1034,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "「追加」はリポジトリ直下の .worktrees/ の下に作業ツリーを作ります。入力するのはディレクトリ名で、ブランチは同じ名前が既定です。既にあるブランチならそれをチェックアウトし、無ければ新しく作ります。この置き場所はリポジトリの中なので、.worktrees/ を .gitignore に入れるまでは git から未追跡として見えます。ダイアログにその案内は出ますが、code-viewer が .gitignore を書き換えることはしません。「削除」はその作業ツリーのフォルダをディスクから消します。ダイアログにはフルパスと「元に戻せません」が出ます。ブランチとコミット済みの内容は残します。コミットしていない変更があるときは警告が出て、チェックを入れないと削除できません。フォルダが既に無い登録は git の管理情報の掃除 (git worktree prune) になり、同じ状態の登録が他にもあれば件数を出します。このサーバが映している作業ツリーはここからは消せません。",
+                text: "「作る」はリポジトリ直下の .worktrees/ の下に作業ツリーを作ります。入力するのはフォルダ名で、打つそばから作られるパスがダイアログに出ます。ブランチは同じ名前が既定で、既にあるブランチならそれを開き、無ければいまの地点から新しく作ります。この置き場所はリポジトリの中なので、.worktrees/ を .gitignore に入れるまでは git から未追跡として見えます。その案内はダイアログの「?」に入れてあり、code-viewer が .gitignore を書き換えることはしません。「削除」はその作業ツリーのフォルダをディスクから消します。ダイアログにはフルパスと「元に戻せません」が出ます。ブランチとコミット済みの内容は残します。コミットしていない変更があるときは警告が出て、チェックを入れないと削除できません。フォルダが既に無い登録は git の管理情報の掃除 (git worktree prune) になり、同じ状態の登録が他にもあれば件数を出します。このサーバが映している作業ツリーはここからは消せません。",
               },
               {
                 kind: "paragraph",

@@ -286,6 +286,32 @@ async function handleRemovePost(req: Request, cwd: string): Promise<Response> {
   return actionJson({});
 }
 
+/**
+ * 「開く」で起こしたサーバを止める。起こす口だけあって止める口が無いと、
+ * 開いた本人にも止め方が分からないまま増え続ける。
+ */
+async function handleStopPost(req: Request, cwd: string): Promise<Response> {
+  const parsed = await parseBoundedJsonBody(
+    req,
+    BODY_MAX_BYTES,
+    "body too large",
+  );
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as Record<string, unknown>;
+
+  const resolved = await resolveListedPath(cwd, bodyString(body, "path"));
+  if (resolved instanceof Response) return resolved;
+  // 自分自身は止めさせない。止めた瞬間この画面の相手が居なくなる。
+  if (resolved.current) {
+    return textError("cannot stop the server serving this worktree", 409);
+  }
+
+  // 止められなかった理由はそのまま上へ返す (dispatchRoutes が 500 にする)。
+  // 黙って成功扱いにすると、一覧に「起動中」が残ったままになる。
+  await stopWorktreeServer(resolved.path);
+  return actionJson({});
+}
+
 async function handleOpenPost(req: Request, cwd: string): Promise<Response> {
   const parsed = await parseBoundedJsonBody(
     req,
@@ -345,6 +371,11 @@ export function handleWorktreeRoute(
         methods: ["POST"],
         sideEffect: true,
         handler: () => handleOpenPost(req, cwd),
+      },
+      "/_worktree/stop": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleStopPost(req, cwd),
       },
     },
     sideEffectAllowed,

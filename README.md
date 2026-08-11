@@ -28,9 +28,12 @@ Requires Node.js 20 or newer. Development uses
   tree is touched — or which files would conflict. Files are split into
   uncommitted work and commits made since the branch point, and a banner lists
   every file that more than one worktree is changing, which is the conflict you
-  would otherwise only find at merge time. Add a worktree under `.worktrees/`,
-  remove one (its folder is deleted from disk; the branch is kept), or open a
-  second code-viewer for it in a new tab.
+  would otherwise only find at merge time. Each row also carries the folder it
+  lives in, when its files were last touched, and — once picked — buttons to
+  open that folder, copy its path, view it in a new tab, or delete it. Create a
+  worktree under `.worktrees/` (the dialog shows the exact path before you
+  commit to it), delete one (its folder is deleted from disk; the branch is
+  kept), or copy the command that merges it back.
 - Open files directly from the repository or diff view, including text-like
   config/prompt files and large generated files (virtualized source viewer
   with copy/open-full-view).

@@ -97,6 +97,7 @@ describe("worktree route dispatch", () => {
     { name: "rejects GET on add", path: "/_worktree/add" },
     { name: "rejects GET on remove", path: "/_worktree/remove" },
     { name: "rejects GET on open", path: "/_worktree/open" },
+    { name: "rejects GET on stop", path: "/_worktree/stop" },
   ])("$name", async ({ path }) => {
     const res = await call(path);
     expect(res?.status).toBe(405);
@@ -106,6 +107,7 @@ describe("worktree route dispatch", () => {
     { name: "guards add", path: "/_worktree/add", body: { name: "x" } },
     { name: "guards remove", path: "/_worktree/remove", body: { path: "/x" } },
     { name: "guards open", path: "/_worktree/open", body: { path: "/x" } },
+    { name: "guards stop", path: "/_worktree/stop", body: { path: "/x" } },
   ])("$name against cross-origin writes", async ({ path, body }) => {
     const res = await post(path, body, () => false);
     expect(res?.status).toBe(403);
@@ -480,6 +482,27 @@ describe("worktree remove", () => {
     const res = await post("/_worktree/remove", { path: current });
     expect(res?.status).toBe(409);
     expect(existsSync(join(repo, "sample.txt"))).toBe(true);
+  });
+
+  test("refuses to stop the server that is serving this worktree", async () => {
+    const current = await listedPath((entry) => entry.current);
+    const res = await post("/_worktree/stop", { path: current });
+    expect(res?.status).toBe(409);
+  });
+
+  test("stops a worktree that has no server without complaining", async () => {
+    await post("/_worktree/add", { name: "feature-x" });
+    const added = await listedPath((entry) => entry.name === "feature-x");
+    // 起こしていないものを止めても失敗にしない (結果は同じ「動いていない」)。
+    const res = await post("/_worktree/stop", { path: added });
+    expect(res?.status).toBe(200);
+  });
+
+  test("refuses to stop a path that is not in the worktree list", async () => {
+    const res = await post("/_worktree/stop", {
+      path: join(repo, "not-a-worktree"),
+    });
+    expect(res?.status).toBe(404);
   });
 
   test("refuses a path that is not in the worktree list", async () => {

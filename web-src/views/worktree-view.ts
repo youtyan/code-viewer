@@ -469,6 +469,8 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     const seq = lifecycle;
     const t = text();
     const body = el("div", "worktree-form");
+    // 何のための操作かを先に 1 行。未経験者はここで初めて意味を知る。
+    body.appendChild(el("p", "worktree-hint", t.addDialog.intro));
     const name = labeledInput(
       t.addDialog.nameLabel,
       t.addDialog.namePlaceholder,
@@ -479,14 +481,41 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       t.addDialog.branchHint,
     );
     body.append(name.wrap, branch.wrap);
-    if (data) {
-      body.appendChild(
-        el("p", "worktree-hint", t.addParentHint(data.addParent)),
+
+    // 押す前に「どこに何ができるか」を実パスで見せる。置き場所はサーバ側で
+    // <repoRoot>/.worktrees に固定なので、ここに出る値が確定した結果になる。
+    // 取れていないときは行ごと出さない (嘘のパスを見せない)。
+    const parent = data?.addParent || "";
+    if (parent) {
+      const targetRow = el("div", "worktree-target");
+      targetRow.appendChild(
+        el("span", "worktree-target-label", t.addDialog.targetLabel),
       );
+      const targetPath = el("span", "worktree-target-path");
+      targetRow.appendChild(targetPath);
+      // 追加先はリポジトリの中なので、放っておくと git status に未追跡として
+      // 出続ける。.gitignore を書き換えるのはリポジトリ側の判断なので伝える
+      // だけにするが、作るかどうかの判断には要らないので本文に並べない。
+      const hint = el("span", "worktree-hint-mark", "?");
+      hint.title = t.gitignoreHint;
+      hint.tabIndex = 0;
+      hint.setAttribute("role", "note");
+      hint.setAttribute(
+        "aria-label",
+        `${t.addDialog.gitignoreLabel}: ${t.gitignoreHint}`,
+      );
+      targetRow.appendChild(hint);
+      body.appendChild(targetRow);
+      const syncTarget = () => {
+        const value = name.input.value.trim();
+        targetPath.textContent = value
+          ? `${parent}/${value}`
+          : t.addDialog.targetPending(parent);
+        targetPath.title = targetPath.textContent;
+      };
+      name.input.addEventListener("input", syncTarget);
+      syncTarget();
     }
-    // 追加先はリポジトリの中なので、放っておくと git status に未追跡として
-    // 出続ける。.gitignore を書き換えるのはリポジトリ側の判断なので伝えるだけ。
-    body.appendChild(el("p", "worktree-hint", t.gitignoreHint));
 
     const submitted = await showFormDialog<{ name: string; branch: string }>({
       title: t.addDialog.title,
@@ -736,32 +765,36 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     return button;
   }
 
-  /** 「パスをコピー」。cd して作業を始めるためのもの。 */
-  function copyPathButton(
-    item: WorktreeItem,
-    withLabel: boolean,
+  /**
+   * 文字列 1 つをクリップボードへ写すボタン。押した後に変わるのは色だけで、
+   * 箱の寸法は変えない (ui-surface「箱の寸法を状態で変えない」)。
+   * label を渡すと文字つき、渡さなければアイコンだけになる。
+   */
+  function copyButton(
+    value: string,
+    title: string,
+    label?: string,
   ): HTMLButtonElement {
-    const t = text();
     const button = el(
       "button",
-      withLabel
+      label
         ? "gdp-btn gdp-btn-sm gdp-copy-path"
         : "gdp-file-header-icon gdp-copy-path",
-      withLabel ? t.actions.copyPath : undefined,
+      label,
     );
     button.type = "button";
-    button.title = t.actions.copyPathTitle;
-    button.setAttribute("aria-label", t.actions.copyPathTitle);
-    if (!withLabel) {
-      button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-    }
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    if (!label) button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
     button.addEventListener("click", async (event) => {
       event.stopPropagation();
       button.classList.remove("copied", "failed");
       try {
-        await navigator.clipboard.writeText(item.path);
+        await navigator.clipboard.writeText(value);
         button.classList.add("copied");
-      } catch {
+      } catch (error) {
+        // 見た目だけで終わらせない。権限拒否などの理由はコンソールに残す。
+        console.error("[code-viewer] failed to copy to clipboard", error);
         button.classList.add("failed");
       }
       window.setTimeout(
@@ -770,6 +803,59 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       );
     });
     return button;
+  }
+
+  /** 「パスをコピー」。cd して作業を始めるためのもの。 */
+  function copyPathButton(
+    item: WorktreeItem,
+    withLabel: boolean,
+  ): HTMLButtonElement {
+    const t = text();
+    return copyButton(
+      item.path,
+      t.actions.copyPathTitle,
+      withLabel ? t.actions.copyPath : undefined,
+    );
+  }
+
+  /**
+   * 取り込むコマンドのコピー。**実行はしない。** このアプリは見るためのもの
+   * なので、リポジトリを書き換える操作は持たない。そのまま入る作業ツリーに
+   * だけ出す (衝突する行に出しても押す意味が無い)。
+   */
+  function copyMergeButton(item: WorktreeItem): HTMLButtonElement | null {
+    const divergence = item.divergence;
+    if (!divergence || divergence.mergeState !== "clean") return null;
+    if (!item.branch || !divergence.base) return null;
+    const t = text();
+    return copyButton(
+      `git switch ${divergence.base} && git merge ${item.branch}`,
+      t.actions.copyMergeTitle(divergence.base, item.branch),
+    );
+  }
+
+  /** 「開く」で起こしたサーバを止める。起動中の行にだけ出す。 */
+  async function stopWorktreeServer(item: WorktreeItem): Promise<void> {
+    if (busyPath) return;
+    const seq = lifecycle;
+    busyPath = item.path;
+    renderList();
+    try {
+      await deps.trackLoad(
+        postWorktreeAction("/_worktree/stop", { path: item.path }),
+      );
+      if (isCurrent(seq)) setMessage("");
+    } catch (error) {
+      if (isCurrent(seq)) {
+        setMessage(
+          error instanceof Error ? error.message : text().actions.stopFailed,
+          true,
+        );
+      }
+    } finally {
+      busyPath = "";
+      if (isCurrent(seq)) await refresh();
+    }
   }
 
   /**
@@ -790,6 +876,19 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       open.disabled = !!busyPath;
       open.setAttribute("aria-busy", busyPath === item.path ? "true" : "false");
       actions.appendChild(open);
+    }
+    // 起こしたサーバは親より長く生きる。止める口をここに置かないと、
+    // 開いた本人にも止め方が無い。自分自身は止めさせない (サーバも 409)。
+    if (item.serverUrl && !item.current) {
+      const stop = headButton(
+        t.actions.stopServer,
+        t.actions.stopServerTitle,
+        () => {
+          void stopWorktreeServer(item);
+        },
+      );
+      stop.disabled = !!busyPath;
+      actions.appendChild(stop);
     }
     // 自分が映している作業ツリーは外させない。サーバも 409 で拒否する。
     if (!item.current) {
@@ -960,6 +1059,10 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       const summaryText = el("span", "author", summary);
       summaryText.title = summary;
       second.appendChild(summaryText);
+      // そのまま入る行にだけ、取り込むコマンドのコピーを添える。文字は
+      // 増やさずアイコンだけにする (この段は既に省略が効く狭さのため)。
+      const merge = copyMergeButton(item);
+      if (merge) second.appendChild(merge);
       row.appendChild(second);
 
       if (item.error) {

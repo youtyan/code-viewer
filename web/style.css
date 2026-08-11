@@ -7994,6 +7994,13 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   margin-top: 2px;
 }
 
+/* 4 段目に添える「取り込むコマンドをコピー」。文字側 (.author) だけが縮んで
+   省略されるように、ボタンは縮ませない。 */
+.history-item .meta2 > .gdp-copy-path {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
 /* 選んだ行の内側に出す操作。対象が位置で自明になるようにするため、
    一覧の末尾には置かない。 */
 .worktree-row-actions {
@@ -8062,6 +8069,49 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
 .worktree-hint {
   color: var(--fg-muted);
   font-size: 11px;
+}
+
+/* 追加ダイアログの「作成先」。入力に連動して実パスを出す行。パスは長いので
+   1 行に固定し、頭側を省略する (行が折り返すと下のボタンが動く)。 */
+.worktree-target {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.worktree-target-label {
+  flex: 0 0 auto;
+}
+
+.worktree-target-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-family: var(--mono, monospace);
+}
+
+/* 作るかどうかの判断に要らない注記 (.gitignore の話) を本文から下ろす先。
+   押しても何も起きない印なので、寸法も位置も変わらない。 */
+.worktree-hint-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--fg-muted);
+  cursor: help;
 }
 
 /* 削除ダイアログの警告。未コミット変更を失うことを、チェックを入れる前に

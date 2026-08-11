@@ -16,11 +16,11 @@ export type WorktreeText = {
   count: (n: number) => string;
   /** 比較の基準にしているブランチが取れなかったときの注意。 */
   baseUnknown: string;
-  addParentHint: (path: string) => string;
   /**
    * 追加先はリポジトリの中なので、git からは未追跡ディレクトリに見える。
    * .gitignore を書き換えるかどうかはリポジトリ側の判断なので、こちらでは
-   * 触らずに伝えるだけにする。
+   * 触らずに伝えるだけにする。作るかどうかの判断には要らないので、ダイアログ
+   * では本文に並べず「?」の title に逃がす。
    */
   gitignoreHint: string;
   badges: {
@@ -95,6 +95,15 @@ export type WorktreeText = {
     openFolderTitle: string;
     copyPath: string;
     copyPathTitle: string;
+    /** 「開く」で起こしたサーバを止める。起動中の行にだけ出す。 */
+    stopServer: string;
+    stopServerTitle: string;
+    stopFailed: string;
+    /**
+     * そのまま入る作業ツリーだけに出す、取り込むコマンドのコピー。
+     * 実行はしない (このアプリはリポジトリを書き換えない)。
+     */
+    copyMergeTitle: (base: string, branch: string) => string;
   };
   /** 変更がまだ無い作業ツリーの右ペイン。次にやることを書く。 */
   emptyDiff: {
@@ -123,11 +132,19 @@ export type WorktreeText = {
   addFailed: string;
   addDialog: {
     title: string;
+    /** 何のための操作かを 1 行で。未経験者はここで初めて意味を知る。 */
+    intro: string;
     nameLabel: string;
     namePlaceholder: string;
     branchLabel: string;
     branchPlaceholder: string;
     branchHint: string;
+    /** 入力に連動して「どこに何ができるか」を実パスで見せる行の見出し。 */
+    targetLabel: string;
+    /** 名前を入れる前の作成先。末尾がまだ決まっていないことを示す。 */
+    targetPending: (parent: string) => string;
+    /** gitignore の注記を出す「?」の aria-label。中身は gitignoreHint。 */
+    gitignoreLabel: string;
     submit: string;
   };
   remove: string;
@@ -188,7 +205,6 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     refreshTitle: "Reload the worktree list",
     count: (n) => (n === 1 ? "1 worktree" : `${n} worktrees`),
     baseUnknown: "no base branch found",
-    addParentHint: (path) => `New worktrees are created under ${path}`,
     gitignoreHint:
       "Git sees that directory as untracked. Add .worktrees/ to .gitignore to keep it out of git status.",
     badges: {
@@ -265,6 +281,11 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       openFolderTitle: "Open this folder in the OS file manager",
       copyPath: "Copy path",
       copyPathTitle: "Copy the path to this folder",
+      stopServer: "Stop",
+      stopServerTitle: "Stop the code-viewer running for this folder",
+      stopFailed: "Failed to stop the server.",
+      copyMergeTitle: (base, branch) =>
+        `Copy the command that merges ${branch} into ${base}`,
     },
     emptyDiff: {
       title: "No changes yet.",
@@ -287,17 +308,22 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     openTitle: "Start a code-viewer for this folder and open it in a new tab",
     opening: "Starting…",
     openFailed: "Failed to open this worktree.",
-    add: "Add",
+    add: "Create",
     addTitle: "Create a new worktree",
     addFailed: "Failed to create the worktree.",
     addDialog: {
-      title: "Add worktree",
-      nameLabel: "Directory name",
+      title: "Create a worktree",
+      intro:
+        "Work on two things side by side, in separate folders, without switching branches.",
+      nameLabel: "Folder name",
       namePlaceholder: "feature-x",
       branchLabel: "Branch",
-      branchPlaceholder: "same as the directory name",
+      branchPlaceholder: "same as the folder name",
       branchHint:
-        "An existing branch is checked out; a new one is created otherwise.",
+        "An existing branch name opens that branch. Otherwise a new one starts from where you are now.",
+      targetLabel: "Creates",
+      targetPending: (parent) => `${parent}/…`,
+      gitignoreLabel: "About this folder and git status",
       submit: "Create",
     },
     remove: "Remove",
@@ -346,7 +372,6 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     refreshTitle: "一覧を読み直す",
     count: (n) => `${n} 本`,
     baseUnknown: "比較の基準になるブランチが見つかりません",
-    addParentHint: (path) => `追加した作業ツリーは ${path} に作られます`,
     gitignoreHint:
       "このディレクトリは git から未追跡に見えます。.worktrees/ を .gitignore に入れると git status に出なくなります。",
     badges: {
@@ -415,6 +440,11 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       openFolderTitle: "このフォルダをファイルマネージャで開きます",
       copyPath: "パスをコピー",
       copyPathTitle: "このフォルダの場所をコピーします",
+      stopServer: "止める",
+      stopServerTitle: "このフォルダで動いている code-viewer を止めます",
+      stopFailed: "サーバを止められませんでした。",
+      copyMergeTitle: (base, branch) =>
+        `${branch} を ${base} に取り込むコマンドをコピーします`,
     },
     emptyDiff: {
       title: "まだ変更はありません。",
@@ -437,18 +467,23 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     openTitle: "このフォルダ専用の code-viewer を起動して新しいタブで開きます",
     opening: "起動中…",
     openFailed: "この作業ツリーを開けませんでした。",
-    add: "追加",
+    add: "作る",
     addTitle: "作業ツリーを新しく作る",
     addFailed: "作業ツリーを作れませんでした。",
     addDialog: {
-      title: "作業ツリーの追加",
-      nameLabel: "ディレクトリ名",
+      title: "作業ツリーを作る",
+      intro:
+        "ブランチを切り替えずに、別フォルダで 2 つの作業を並べて進められます。",
+      nameLabel: "フォルダ名",
       namePlaceholder: "feature-x",
       branchLabel: "ブランチ",
-      branchPlaceholder: "ディレクトリ名と同じ",
+      branchPlaceholder: "フォルダ名と同じ",
       branchHint:
-        "既にあるブランチならそれをチェックアウトし、無ければ新しく作ります。",
-      submit: "作成",
+        "既にあるブランチ名ならそれを開きます。無ければ、いまの地点から新しく作ります。",
+      targetLabel: "作成先",
+      targetPending: (parent) => `${parent}/…`,
+      gitignoreLabel: "このフォルダと git status について",
+      submit: "作る",
     },
     remove: "削除",
     removeTitle: "この作業ツリーをフォルダごと削除します",

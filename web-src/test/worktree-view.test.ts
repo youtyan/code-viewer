@@ -512,6 +512,131 @@ describe("worktree list panel", () => {
     );
     expect(texts(panel, "button.worktree-head-btn")).not.toContain(TEXT.remove);
   });
+
+  test("offers to stop a running server, and asks the server to stop it", async () => {
+    const { panel, posts } = await mountWith(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "other",
+          path: "/repo/.worktrees/other",
+          serverUrl: "http://127.0.0.1:5050/",
+        }),
+      ]),
+      { route: { wt: "/repo/.worktrees/other" } },
+    );
+    const stop = Array.from(
+      panel.querySelectorAll<HTMLButtonElement>("button.worktree-head-btn"),
+    ).find((button) => button.textContent === TEXT.actions.stopServer);
+    if (!stop) throw new Error("stop button is missing");
+    stop.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(posts).toContainEqual({
+      url: "/_worktree/stop",
+      body: { path: "/repo/.worktrees/other" },
+    });
+  });
+
+  test("never offers to stop the server that is serving this screen", async () => {
+    const { panel } = await mountWith(
+      response([
+        item({
+          name: "repo",
+          current: true,
+          serverUrl: "http://127.0.0.1:64160/",
+        }),
+      ]),
+      { route: { wt: "/repo" } },
+    );
+    expect(texts(panel, "button.worktree-head-btn")).not.toContain(
+      TEXT.actions.stopServer,
+    );
+  });
+});
+
+describe("merge command", () => {
+  const clean = {
+    base: "main",
+    ahead: 2,
+    behind: 0,
+    mergeState: "clean" as const,
+    conflicts: [],
+  };
+
+  function mergeButtons(panel: HTMLElement): HTMLButtonElement[] {
+    return Array.from(
+      panel.querySelectorAll<HTMLButtonElement>(".meta2 > .gdp-copy-path"),
+    );
+  }
+
+  test("copies the command that merges a clean worktree back", async () => {
+    const writes: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (value: string) => {
+          writes.push(value);
+          return Promise.resolve();
+        },
+      },
+    });
+    const { panel } = await mountWith(
+      response([
+        item({
+          name: "other",
+          path: "/repo/.worktrees/other",
+          branch: "feature-x",
+          divergence: clean,
+        }),
+      ]),
+    );
+    const [button] = mergeButtons(panel);
+    if (!button) throw new Error("merge copy button is missing");
+    expect(button.title).toBe(TEXT.actions.copyMergeTitle("main", "feature-x"));
+    button.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writes).toEqual(["git switch main && git merge feature-x"]);
+  });
+
+  test("stays out of rows that would conflict or cannot be compared", async () => {
+    const { panel } = await mountWith(
+      response([
+        item({
+          name: "conflicting",
+          path: "/repo/.worktrees/conflicting",
+          branch: "feature-y",
+          divergence: {
+            ...clean,
+            mergeState: "conflict",
+            conflicts: ["src/sample.ts"],
+          },
+        }),
+        item({
+          name: "unknown",
+          path: "/repo/.worktrees/unknown",
+          branch: "feature-z",
+          divergence: { ...clean, mergeState: "unknown" },
+        }),
+        item({ name: "plain", path: "/repo/.worktrees/plain" }),
+      ]),
+    );
+    expect(mergeButtons(panel)).toHaveLength(0);
+  });
+
+  test("stays out of a detached worktree, which has no branch to merge", async () => {
+    const { panel } = await mountWith(
+      response([
+        item({
+          name: "detached",
+          path: "/repo/.worktrees/detached",
+          branch: "",
+          detached: true,
+          divergence: clean,
+        }),
+      ]),
+    );
+    expect(mergeButtons(panel)).toHaveLength(0);
+  });
 });
 
 describe("remove dialog", () => {
@@ -815,6 +940,30 @@ describe("first-run introduction", () => {
     expect(
       document.querySelector(".gdp-dialog-backdrop")?.textContent,
     ).toContain(TEXT.addDialog.title);
+  });
+
+  test("shows where the folder will be created, as the name is typed", async () => {
+    const { panel } = await mountWith(
+      response([item({ name: "repo", current: true })]),
+    );
+    const add = Array.from(
+      panel.querySelectorAll<HTMLButtonElement>("button.worktree-head-btn"),
+    ).find((button) => button.textContent === TEXT.add);
+    if (!add) throw new Error("add button is missing");
+    add.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const target = document.querySelector<HTMLElement>(".worktree-target-path");
+    const name = document.querySelector<HTMLInputElement>(
+      ".worktree-field .gdp-dialog-input",
+    );
+    if (!target || !name) throw new Error("add dialog is missing its fields");
+    // 名前を入れる前は、末尾がまだ決まっていないことが分かる形で出す。
+    expect(target.textContent).toBe(
+      TEXT.addDialog.targetPending("/repo/.worktrees"),
+    );
+    name.value = "feature-x";
+    name.dispatchEvent(new Event("input"));
+    expect(target.textContent).toBe("/repo/.worktrees/feature-x");
   });
 });
 
