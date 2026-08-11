@@ -7994,6 +7994,22 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   margin-top: 2px;
 }
 
+/* 選んだ行の内側に出す操作。対象が位置で自明になるようにするため、
+   一覧の末尾には置かない。 */
+.worktree-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* 変更がまだ無い作業ツリーの案内 (右ペイン)。次にやることをその場に置く。 */
+.worktree-empty-diff .worktree-empty-diff-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* 追加 / 削除ダイアログの中身。データストアの接続ダイアログ
    (.db-connection-form) と同じで、入力欄そのものは共通の
    .gdp-dialog-input を使い、並べ方だけをここで決める。 */

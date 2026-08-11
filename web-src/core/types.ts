@@ -131,6 +131,8 @@ export type WorktreeActionResponse = {
   url?: string;
   /** open がサーバを起動した (既存を再利用したなら false)。 */
   started?: boolean;
+  /** add のとき、作った作業ツリーのパス。作ったものをそのまま選ぶために使う。 */
+  path?: string;
 };
 
 export type WorktreeDiffResponse = {

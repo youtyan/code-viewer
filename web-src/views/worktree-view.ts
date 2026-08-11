@@ -15,8 +15,10 @@
 import { blameRelativeTime } from "../core/blame";
 import {
   CHEVRON_DOWN_16_PATH,
+  COPY_16_PATHS,
   FOLDER_ICON_PATHS,
   iconSvg,
+  OPEN_EXTERNAL_16_PATH,
 } from "../core/icons";
 import type { AppRoute } from "../core/routes";
 import type {
@@ -60,6 +62,12 @@ export type WorktreeViewDeps = {
   setPageMode(): void;
   syncHeaderMenu(): void;
   setStatus(status: "live" | "refreshing" | "error" | null): void;
+  /** app.ts の既存の仕組み (/_open_path) でフォルダを OS から開く。 */
+  openPathInOs(
+    path: string,
+    kind: "directory" | "file-parent",
+    button?: HTMLButtonElement,
+  ): Promise<void>;
 };
 
 export type WorktreeView = PageView & {
@@ -502,13 +510,22 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     if (!submitted) return;
     if (!isCurrent(seq)) return;
 
+    let createdPath = "";
     try {
-      await deps.trackLoad(postWorktreeAction("/_worktree/add", submitted));
+      const result = await deps.trackLoad(
+        postWorktreeAction("/_worktree/add", submitted),
+      );
       if (isCurrent(seq)) setMessage("");
+      createdPath = result.path || "";
     } catch (error) {
       if (isCurrent(seq)) {
         setMessage(error instanceof Error ? error.message : t.addFailed, true);
       }
+    }
+    // 作ったものをそのまま選ぶ。refresh が世代を進めるので先に選び、
+    // 来た一覧がそれを選択状態で描く。
+    if (isCurrent(seq) && createdPath) {
+      navigate({ wt: createdPath });
     }
     if (isCurrent(seq)) await refresh();
   }
@@ -687,6 +704,104 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     return button;
   }
 
+  /**
+   * 「フォルダを開く」。行の中ではアイコンだけ、案内カードでは文字つき。
+   * 実体は app.ts が持つ /_open_path の呼び出しで、Finder / Explorer が開く。
+   */
+  function openFolderButton(
+    item: WorktreeItem,
+    withLabel: boolean,
+  ): HTMLButtonElement {
+    const t = text();
+    const button = el(
+      "button",
+      withLabel
+        ? "gdp-btn gdp-btn-sm gdp-open-path"
+        : "gdp-file-header-icon gdp-open-path",
+      withLabel ? t.actions.openFolder : undefined,
+    );
+    button.type = "button";
+    button.title = t.actions.openFolderTitle;
+    button.setAttribute("aria-label", t.actions.openFolderTitle);
+    if (!withLabel) {
+      button.innerHTML = iconSvg(
+        "octicon-link-external",
+        OPEN_EXTERNAL_16_PATH,
+      );
+    }
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void deps.openPathInOs(item.path, "directory", button);
+    });
+    return button;
+  }
+
+  /** 「パスをコピー」。cd して作業を始めるためのもの。 */
+  function copyPathButton(
+    item: WorktreeItem,
+    withLabel: boolean,
+  ): HTMLButtonElement {
+    const t = text();
+    const button = el(
+      "button",
+      withLabel
+        ? "gdp-btn gdp-btn-sm gdp-copy-path"
+        : "gdp-file-header-icon gdp-copy-path",
+      withLabel ? t.actions.copyPath : undefined,
+    );
+    button.type = "button";
+    button.title = t.actions.copyPathTitle;
+    button.setAttribute("aria-label", t.actions.copyPathTitle);
+    if (!withLabel) {
+      button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+    }
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      button.classList.remove("copied", "failed");
+      try {
+        await navigator.clipboard.writeText(item.path);
+        button.classList.add("copied");
+      } catch {
+        button.classList.add("failed");
+      }
+      window.setTimeout(
+        () => button.classList.remove("copied", "failed"),
+        1200,
+      );
+    });
+    return button;
+  }
+
+  /**
+   * 選んだ行の内側に出す操作。行とボタンの間に距離があると「どれへの操作か」
+   * を読み取らせることになるので、対象の行の中に入れる。
+   */
+  function rowActions(item: WorktreeItem): HTMLElement {
+    const t = text();
+    const actions = el("span", "worktree-row-actions");
+    // 行そのもののクリック (選択) とボタンのクリックを分ける。
+    actions.addEventListener("click", (event) => event.stopPropagation());
+    if (!item.missing && !item.bare) {
+      actions.appendChild(openFolderButton(item, false));
+      actions.appendChild(copyPathButton(item, false));
+      const open = headButton(t.open, t.openTitle, () => {
+        void openWorktree(item);
+      });
+      open.disabled = !!busyPath;
+      open.setAttribute("aria-busy", busyPath === item.path ? "true" : "false");
+      actions.appendChild(open);
+    }
+    // 自分が映している作業ツリーは外させない。サーバも 409 で拒否する。
+    if (!item.current) {
+      const remove = headButton(t.remove, t.removeTitle, () => {
+        void removeWorktree(item);
+      });
+      remove.disabled = !!busyPath;
+      actions.appendChild(remove);
+    }
+    return actions;
+  }
+
   function note(body: string, isError = false): HTMLElement {
     const node = el("div", "history-status", body);
     node.hidden = false;
@@ -836,6 +951,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         error.appendChild(detail);
         row.appendChild(error);
       }
+
+      // 操作は選んだ行の内側にだけ出す。
+      if (item.id === selected) row.appendChild(rowActions(item));
       list.appendChild(row);
     }
     list.addEventListener("click", (event) => {
@@ -848,28 +966,6 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       navigate({ wt: id, file: undefined, origin: undefined });
     });
     listPanel.appendChild(list);
-
-    // 開く / 削除は選んでいる 1 本にだけ。行ごとに置くと History の行から外れる。
-    const item = selectedWorktree();
-    if (!item) return;
-    const actions = el("div", "history-head");
-    if (!item.missing && !item.bare) {
-      const open = headButton(t.open, t.openTitle, () => {
-        void openWorktree(item);
-      });
-      open.disabled = !!busyPath;
-      open.setAttribute("aria-busy", busyPath === item.path ? "true" : "false");
-      actions.appendChild(open);
-    }
-    // 自分が映している作業ツリーは外させない。サーバも 409 で拒否する。
-    if (!item.current) {
-      const remove = headButton(t.remove, t.removeTitle, () => {
-        void removeWorktree(item);
-      });
-      remove.disabled = !!busyPath;
-      actions.appendChild(remove);
-    }
-    if (actions.childElementCount) listPanel.appendChild(actions);
   }
 
   /**
@@ -1250,7 +1346,17 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       return;
     }
     if (!item.fileCount) {
-      diff.appendChild(el("div", "gdp-info", t.files.none));
+      // 空のままにせず、次にやること (そのフォルダで編集する) を書く。
+      const card = el("div", "gdp-info worktree-empty-diff");
+      card.appendChild(el("p", "", t.emptyDiff.title));
+      card.appendChild(el("p", "", t.emptyDiff.body(item.path)));
+      if (!item.missing && !item.bare) {
+        const buttons = el("span", "worktree-empty-diff-actions");
+        buttons.appendChild(openFolderButton(item, true));
+        buttons.appendChild(copyPathButton(item, true));
+        card.appendChild(buttons);
+      }
+      diff.appendChild(card);
       diffFor = diffKey(item);
       return;
     }

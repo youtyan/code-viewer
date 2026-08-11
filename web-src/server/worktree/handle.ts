@@ -246,7 +246,7 @@ async function handleAddPost(req: Request, cwd: string): Promise<Response> {
     createBranch: !exists.exists,
   });
   if (result.error) return textError(result.error, result.status ?? 500);
-  return actionJson({});
+  return actionJson({ path });
 }
 
 async function handleRemovePost(req: Request, cwd: string): Promise<Response> {

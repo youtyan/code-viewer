@@ -236,15 +236,15 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "The banner above the cards is the one to read first. It names every file that more than one worktree is currently changing, and the same files are marked inside each card. Two agents editing the same file is invisible until one of them merges; this is where it shows up before that happens. The base branch is whatever origin/HEAD points at, falling back to main and then master; the header names the one it used.",
+                text: "The banner above the cards is the one to read first. It names every file that more than one worktree is currently changing, and the same files are marked inside each card. Two agents editing the same file is invisible until one of them merges; this is where it shows up before that happens. The base branch is whatever origin/HEAD points at, falling back to main and then master; each row names the one it used.",
               },
               {
                 kind: "paragraph",
-                text: "Add creates a worktree under .worktrees/ in the repository root. You give it a directory name, and the branch defaults to that same name; an existing branch is checked out, otherwise a new one is created. Because that directory sits inside the repository, git reports it as untracked until you add .worktrees/ to .gitignore — code-viewer says so in the dialog but does not edit .gitignore for you. Remove runs git worktree remove and keeps the branch. Git refuses while uncommitted changes are still there, so the dialog carries a checkbox for when you mean it anyway. The worktree this server is serving cannot be removed from here.",
+                text: "Add creates a worktree under .worktrees/ in the repository root. You give it a directory name, and the branch defaults to that same name; an existing branch is checked out, otherwise a new one is created. Because that directory sits inside the repository, git reports it as untracked until you add .worktrees/ to .gitignore — code-viewer says so in the dialog but does not edit .gitignore for you. Remove deletes the worktree's folder from disk — the dialog says so, with the full path and a note that it cannot be undone — and keeps the branch and its committed work. With uncommitted changes the dialog also shows a warning and requires a checkbox before it deletes. An entry whose folder is already gone is cleaned from git's bookkeeping instead (git worktree prune), and the dialog says how many such entries will go. The worktree this server is serving cannot be removed from here.",
               },
               {
                 kind: "paragraph",
-                text: "Open starts a second code-viewer for that worktree and opens it in a new tab, because a server stays on the working tree it started in. An already-running server is reused instead of started again. Those servers outlive this one: the Server group in doctor lists them, and `kill <pid>` stops one — the pid is in ~/.cache/code-viewer/servers/.",
+                text: '"Open in a new tab" starts a second code-viewer for that worktree and opens it in a new tab, because a server stays on the working tree it started in. An already-running server is reused instead of started again. Those servers outlive this one: the Server group in doctor lists them, and `kill <pid>` stops one — the pid is in ~/.cache/code-viewer/servers/.',
               },
             ],
           },
@@ -1026,19 +1026,19 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "左の 1 行が答えるのは 2 つです。基準ブランチからどれだけ離れているか（進んだぶん・遅れたぶんのコミット数）。そしてまだマージできるか — 作業ツリーを一切触らない git merge-tree で試し、「そのまま入る」「何ファイルで衝突する」「確かめられなかった」を出し分けます。最後のものは 1 番目と混ぜません。「確かめていない」は「安全」ではないからです。中央の列は、その作業ツリーが触っているファイルを、まだコミットしていないぶんと分岐した後のコミットに分けて、追加・削除の行数つきで出します。差分そのものは Diff ビューアと同じ描画で、その作業ツリーの中で走らせた git の結果です。",
+                text: "左の 1 行が答えるのは 2 つです。基準ブランチからどれだけ離れているか（進んだぶん・遅れたぶんのコミット数）。そしてまだマージできるか — 作業ツリーを一切触らない git merge-tree で試し、「そのままマージできます」「マージすると何ファイルで衝突するか」「確かめられなかった」を出し分けます。最後のものは 1 番目と混ぜません。「確かめていない」は「安全」ではないからです。中央の列は、その作業ツリーが触っているファイルを、まだコミットしていないぶんと分岐した後のコミットに分けて、追加・削除の行数つきで出します。差分そのものは Diff ビューアと同じ描画で、その作業ツリーの中で走らせた git の結果です。",
               },
               {
                 kind: "paragraph",
-                text: "カードの上の帯を最初に読んでください。2 本以上の作業ツリーが今まさに触っているファイルを名指しで挙げ、同じファイルは各カードの中にも印が付きます。2 つのエージェントが同じファイルを書いていることは、どちらかをマージするまで表に出ません。ここはそれが起きる前に出る場所です。基準ブランチは origin/HEAD が指す先で、無ければ main、次に master を使います。どれを使ったかはヘッダに出ます。",
+                text: "カードの上の帯を最初に読んでください。2 本以上の作業ツリーが今まさに触っているファイルを名指しで挙げ、同じファイルは各カードの中にも印が付きます。2 つのエージェントが同じファイルを書いていることは、どちらかをマージするまで表に出ません。ここはそれが起きる前に出る場所です。基準ブランチは origin/HEAD が指す先で、無ければ main、次に master を使います。どれを使ったかは各行に出ます。",
               },
               {
                 kind: "paragraph",
-                text: "「追加」はリポジトリ直下の .worktrees/ の下に作業ツリーを作ります。入力するのはディレクトリ名で、ブランチは同じ名前が既定です。既にあるブランチならそれをチェックアウトし、無ければ新しく作ります。この置き場所はリポジトリの中なので、.worktrees/ を .gitignore に入れるまでは git から未追跡として見えます。ダイアログにその案内は出ますが、code-viewer が .gitignore を書き換えることはしません。「削除」は git worktree remove を実行し、ブランチは残します。コミットしていない変更があると git が拒否するので、それでも外したいときのためのチェックボックスがダイアログにあります。このサーバが映している作業ツリーはここからは外せません。",
+                text: "「追加」はリポジトリ直下の .worktrees/ の下に作業ツリーを作ります。入力するのはディレクトリ名で、ブランチは同じ名前が既定です。既にあるブランチならそれをチェックアウトし、無ければ新しく作ります。この置き場所はリポジトリの中なので、.worktrees/ を .gitignore に入れるまでは git から未追跡として見えます。ダイアログにその案内は出ますが、code-viewer が .gitignore を書き換えることはしません。「削除」はその作業ツリーのフォルダをディスクから消します。ダイアログにはフルパスと「元に戻せません」が出ます。ブランチとコミット済みの内容は残します。コミットしていない変更があるときは警告が出て、チェックを入れないと削除できません。フォルダが既に無い登録は git の管理情報の掃除 (git worktree prune) になり、同じ状態の登録が他にもあれば件数を出します。このサーバが映している作業ツリーはここからは消せません。",
               },
               {
                 kind: "paragraph",
-                text: "「開く」はその作業ツリーで code-viewer をもう 1 本起こし、新しいタブで開きます。サーバは起動したときの作業ツリーから動けないためです。既に動いているサーバがあれば、それを使い回して二重に起動しません。起こしたサーバはこのサーバより長く生きます。doctor の Server グループに一覧が出るので、止めるときは `kill <pid>` を使ってください。pid は ~/.cache/code-viewer/servers/ にあります。",
+                text: "「別タブで見る」はその作業ツリーで code-viewer をもう 1 本起こし、新しいタブで開きます。サーバは起動したときの作業ツリーから動けないためです。既に動いているサーバがあれば、それを使い回して二重に起動しません。起こしたサーバはこのサーバより長く生きます。doctor の Server グループに一覧が出るので、止めるときは `kill <pid>` を使ってください。pid は ~/.cache/code-viewer/servers/ にあります。",
               },
             ],
           },

@@ -183,6 +183,7 @@ type DiffPayload = {
 function stubFetch(
   list: WorktreesResponse | { status: number; body: string },
   diff?: DiffPayload | { status: number; body: string },
+  postResponse: Record<string, unknown> = {},
 ): { diffUrls: string[]; posts: Array<{ url: string; body: unknown }> } {
   const diffUrls: string[] = [];
   const posts: Array<{ url: string; body: unknown }> = [];
@@ -196,7 +197,7 @@ function stubFetch(
           url,
           body: init.body ? JSON.parse(String(init.body)) : null,
         });
-        return new Response(JSON.stringify({}), {
+        return new Response(JSON.stringify(postResponse), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -256,6 +257,8 @@ async function mountWith(
   options: {
     route?: Partial<WorktreeRoute>;
     diff?: DiffPayload | { status: number; body: string };
+    /** POST の応答 (add が返す path など)。 */
+    postResponse?: Record<string, unknown>;
     /** topbar の「テスト非表示」。 */
     hideTests?: boolean;
     /** サイドバーの ツリー / 一覧。 */
@@ -265,7 +268,11 @@ async function mountWith(
 ): Promise<Mounted> {
   installDiff2Html();
   installIntersectionObserver();
-  const { diffUrls, posts } = stubFetch(list, options.diff);
+  const { diffUrls, posts } = stubFetch(
+    list,
+    options.diff,
+    options.postResponse ?? {},
+  );
   let current: WorktreeRoute = {
     screen: "worktree",
     range: RANGE,
@@ -294,6 +301,7 @@ async function mountWith(
     setPageMode: () => undefined,
     syncHeaderMenu: () => undefined,
     setStatus: () => undefined,
+    openPathInOs: () => Promise.resolve(),
   });
   await view.enter();
   // 差分は「見えたものから」読む。IntersectionObserver の無い環境では全部
@@ -625,6 +633,113 @@ describe("remove dialog", () => {
     expect(openDialog().textContent).toContain(
       TEXT.removeDialog.missingOthers(1),
     );
+  });
+});
+
+describe("row actions", () => {
+  test("puts the actions inside the picked row, not at the list bottom", async () => {
+    const { panel } = await mountWith(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "other",
+          path: "/repo/.worktrees/other",
+          branch: "other",
+        }),
+      ]),
+      { route: { wt: "/repo/.worktrees/other" } },
+    );
+    const rows = panel.querySelectorAll(".history-item");
+    expect(rows[0].querySelector(".worktree-row-actions")).toBeNull();
+    const actions = rows[1].querySelector(".worktree-row-actions");
+    if (!actions) throw new Error("row actions are missing");
+    const labels = texts(actions, "button");
+    expect(labels).toContain(TEXT.open);
+    expect(labels).toContain(TEXT.remove);
+    // アイコンだけのボタンは aria-label で何が起きるかを伝える。
+    const iconLabels = Array.from(
+      actions.querySelectorAll("button.gdp-file-header-icon"),
+    ).map((button) => button.getAttribute("aria-label"));
+    expect(iconLabels).toEqual([
+      TEXT.actions.openFolderTitle,
+      TEXT.actions.copyPathTitle,
+    ]);
+  });
+
+  test("keeps the remove button off the worktree this server serves", async () => {
+    const { panel } = await mountWith(
+      response([item({ name: "repo", current: true })]),
+      { route: { wt: "/repo" } },
+    );
+    const actions = panel.querySelector(".worktree-row-actions");
+    if (!actions) throw new Error("row actions are missing");
+    expect(texts(actions, "button")).not.toContain(TEXT.remove);
+    expect(texts(actions, "button")).toContain(TEXT.open);
+  });
+
+  test("selects the worktree it just created", async () => {
+    const mounted = await mountWith(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "new-one",
+          path: "/repo/.worktrees/new-one",
+          branch: "new-one",
+        }),
+      ]),
+      { postResponse: { path: "/repo/.worktrees/new-one" } },
+    );
+    const add = Array.from(
+      mounted.panel.querySelectorAll<HTMLButtonElement>(
+        "button.worktree-head-btn",
+      ),
+    ).find((candidate) => candidate.textContent === TEXT.add);
+    if (!add) throw new Error("add button is missing");
+    add.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const dialog = document.querySelector<HTMLElement>(".gdp-dialog-backdrop");
+    if (!dialog) throw new Error("no dialog open");
+    const input = dialog.querySelector<HTMLInputElement>("input");
+    if (!input) throw new Error("name input is missing");
+    input.value = "new-one";
+    input.dispatchEvent(new Event("input"));
+    const buttons = dialog.querySelectorAll<HTMLButtonElement>(
+      ".gdp-dialog-actions button",
+    );
+    buttons[buttons.length - 1].click();
+    for (let i = 0; i < 8; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(lastRoute(mounted.routes)).toEqual({
+      screen: "worktree",
+      wt: "/repo/.worktrees/new-one",
+      range: RANGE,
+    });
+  });
+});
+
+describe("empty diff guidance", () => {
+  test("tells what to do next when a worktree has no changes yet", async () => {
+    const { diff } = await mountWith(
+      response([
+        item({ name: "repo", current: true }),
+        item({
+          name: "fresh",
+          path: "/repo/.worktrees/fresh",
+          branch: "fresh",
+        }),
+      ]),
+      { route: { wt: "/repo/.worktrees/fresh" } },
+    );
+    const card = diff.querySelector(".worktree-empty-diff");
+    if (!card) throw new Error("empty diff card is missing");
+    expect(card.textContent).toContain(TEXT.emptyDiff.title);
+    expect(card.textContent).toContain("/repo/.worktrees/fresh");
+    const labels = texts(card, "button");
+    expect(labels).toContain(TEXT.actions.openFolder);
+    expect(labels).toContain(TEXT.actions.copyPath);
   });
 });
 

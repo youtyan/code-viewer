@@ -5409,6 +5409,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setPageMode,
     syncHeaderMenu,
     setStatus,
+    openPathInOs,
   });
   relocalizeWorktree = () => WORKTREE_VIEW?.localize();
 

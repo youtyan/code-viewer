@@ -406,12 +406,18 @@ describe("worktree add", () => {
   test("creates the worktree and a branch of the same name", async () => {
     const res = await post("/_worktree/add", { name: "feature-x" });
     expect(res?.status).toBe(200);
+    // 作ったものをそのまま選べるよう、パスを返す。
+    const created = (await res?.json()) as { path?: string };
+    const added = await listedPath((entry) => entry.name === "feature-x");
+    expect(created.path).toBe(added);
 
     const body = await listWorktrees();
-    const added = body.worktrees.find((entry) => entry.name === "feature-x");
-    expect(added?.branch).toBe("feature-x");
-    expect(added?.current).toBe(false);
-    expect(added?.displayPath).toBe(join(".worktrees", "feature-x"));
+    const entry = body.worktrees.find(
+      (candidate) => candidate.name === "feature-x",
+    );
+    expect(entry?.branch).toBe("feature-x");
+    expect(entry?.current).toBe(false);
+    expect(entry?.displayPath).toBe(join(".worktrees", "feature-x"));
     expect(existsSync(join(repo, ".worktrees", "feature-x"))).toBe(true);
   });
 

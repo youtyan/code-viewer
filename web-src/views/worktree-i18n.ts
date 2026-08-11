@@ -87,6 +87,18 @@ export type WorktreeText = {
     diffTruncated: (shown: number, total: number) => string;
   };
   noCommit: string;
+  /** 選んだ行の内側に出す操作。 */
+  actions: {
+    openFolder: string;
+    openFolderTitle: string;
+    copyPath: string;
+    copyPathTitle: string;
+  };
+  /** 変更がまだ無い作業ツリーの右ペイン。次にやることを書く。 */
+  emptyDiff: {
+    title: string;
+    body: (path: string) => string;
+  };
   open: string;
   openTitle: string;
   opening: string;
@@ -229,11 +241,21 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       diffEmpty: "No textual diff (binary, or the file is unchanged).",
       diffFailed: "Failed to load the diff.",
       diffTruncated: (shown, total) =>
-        `showing ${shown} of ${total} hunks — open the worktree for the whole file`,
+        `showing ${shown} of ${total} hunks — open the worktree in a new tab for the whole file`,
     },
     noCommit: "no commit",
-    open: "Open",
-    openTitle: "Open code-viewer for this worktree in a new tab",
+    actions: {
+      openFolder: "Open folder",
+      openFolderTitle: "Open this folder in the OS file manager",
+      copyPath: "Copy path",
+      copyPathTitle: "Copy the path to this folder",
+    },
+    emptyDiff: {
+      title: "No changes yet.",
+      body: (path) => `Edit files in ${path} and the diffs will show up here.`,
+    },
+    open: "Open in a new tab",
+    openTitle: "Start a code-viewer for this folder and open it in a new tab",
     opening: "Starting…",
     openFailed: "Failed to open this worktree.",
     add: "Add",
@@ -250,7 +272,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       submit: "Create",
     },
     remove: "Remove",
-    removeTitle: "Delete this worktree",
+    removeTitle: "Delete this worktree and its folder",
     removeDialog: {
       title: "Delete worktree",
       body: (name) => `Delete the worktree "${name}"?`,
@@ -355,11 +377,21 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       diffEmpty: "テキストの差分はありません（バイナリか、変更なし）。",
       diffFailed: "差分を読み込めませんでした。",
       diffTruncated: (shown, total) =>
-        `${total} 個のうち ${shown} 個のかたまりを表示しています。全部見るにはその作業ツリーを開いてください`,
+        `${total} 個のうち ${shown} 個のかたまりを表示しています。全部見るには、その作業ツリーを別タブで見てください`,
     },
     noCommit: "コミットなし",
-    open: "開く",
-    openTitle: "この作業ツリーの code-viewer を新しいタブで開く",
+    actions: {
+      openFolder: "フォルダを開く",
+      openFolderTitle: "このフォルダをファイルマネージャで開きます",
+      copyPath: "パスをコピー",
+      copyPathTitle: "このフォルダの場所をコピーします",
+    },
+    emptyDiff: {
+      title: "まだ変更はありません。",
+      body: (path) => `${path} でファイルを編集すると、ここに差分が出ます。`,
+    },
+    open: "別タブで見る",
+    openTitle: "このフォルダ専用の code-viewer を起動して新しいタブで開きます",
     opening: "起動中…",
     openFailed: "この作業ツリーを開けませんでした。",
     add: "追加",
@@ -376,7 +408,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       submit: "作成",
     },
     remove: "削除",
-    removeTitle: "この作業ツリーを削除する",
+    removeTitle: "この作業ツリーをフォルダごと削除します",
     removeDialog: {
       title: "作業ツリーの削除",
       body: (name) => `作業ツリー「${name}」を削除しますか。`,
