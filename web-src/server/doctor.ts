@@ -8,6 +8,7 @@ import type {
   DoctorRow,
   DoctorStatus,
 } from "../core/doctor-types";
+import { formatErrorDetail } from "../core/error-detail";
 import { shellSingleQuote } from "./cli-helpers";
 import {
   commandForExternal,
@@ -40,12 +41,19 @@ import {
   loadSqliteClass,
   type SqliteDriverStatus,
 } from "./database/sqlite-driver";
+import { worktreeListResultAsync } from "./git";
 import type { RunResult } from "./runtime";
 import {
   describeShellAvailability,
   type ShellAvailability,
 } from "./shell/session";
 import { tmuxArgs } from "./tmux/command";
+import {
+  mapWithConcurrency,
+  serverWorktreeRoot,
+  WORKTREE_LIST_CONCURRENCY,
+} from "./worktree/list";
+import { runningServerResult } from "./worktree/open";
 
 export type {
   DoctorGroup,
@@ -1534,7 +1542,19 @@ export async function checkDatastoreConnectivity(
   return { id: "datastore", title: "Datastore connectivity", rows };
 }
 
-function checkServer(listenPort: number): DoctorGroup {
+/**
+ * この 2 行目は worktree 画面の「開く」が残す状態の検出。
+ *
+ * 「開く」は別の作業ツリーで code-viewer をもう 1 本起こし、そのプロセスは
+ * このサーバが終わっても生き残る。コードから機能を消しても、ユーザーの環境で
+ * 動いているプロセスは消えないので、この行は機能より長く残す
+ * (server.md「外部状態を変える機能には、戻す経路と検出を付ける」)。
+ */
+export async function checkServer(
+  listenPort: number,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<DoctorGroup> {
   const rows: DoctorRow[] = [
     {
       id: "server.port",
@@ -1546,6 +1566,57 @@ function checkServer(listenPort: number): DoctorGroup {
           : "port not yet bound",
     },
   ];
+  const root = serverWorktreeRoot(cwd);
+  const listed = await worktreeListResultAsync(root, {
+    timeout: TIMEOUT.git,
+    signal,
+  });
+  if (listed.error) {
+    rows.push({
+      id: "server.worktrees",
+      title: "Worktree servers",
+      status: "warn",
+      detail: `could not list worktrees: ${listed.error}`,
+    });
+    return { id: "server", title: "Server", rows };
+  }
+  const checked = await mapWithConcurrency(
+    listed.worktrees.filter((entry) => entry.path !== root),
+    WORKTREE_LIST_CONCURRENCY,
+    async (entry) => ({
+      path: entry.path,
+      server: await runningServerResult(entry.path, {
+        signal,
+        timeoutMs: TIMEOUT.git,
+      }),
+    }),
+  );
+  const running = checked.flatMap((entry) =>
+    entry.server.status === "running"
+      ? [{ path: entry.path, url: entry.server.url }]
+      : [],
+  );
+  const serverErrors = checked.flatMap((entry) =>
+    entry.server.status === "invalid" || entry.server.status === "unreachable"
+      ? [`${entry.path}: ${formatErrorDetail(entry.server.error)}`]
+      : [],
+  );
+  rows.push({
+    id: "server.worktrees",
+    title: "Worktree servers",
+    status: serverErrors.length ? "warn" : "ok",
+    detail: [
+      ...(running.length
+        ? running.map((entry) => `${entry.url} ${entry.path}`)
+        : ["no other code-viewer is running for this repository's worktrees"]),
+      ...serverErrors,
+    ].join("\n"),
+    ...(running.length
+      ? {
+          hint: "stop one with `kill <pid>`; the pid is in ~/.cache/code-viewer/servers/",
+        }
+      : {}),
+  });
   return { id: "server", title: "Server", rows };
 }
 
@@ -1577,7 +1648,7 @@ export async function buildDoctorReport(
     ctx.signal,
   );
   const terminal = await checkTerminalTools(ctx.signal);
-  const server = checkServer(ctx.listenPort);
+  const server = await checkServer(ctx.listenPort, ctx.cwd, ctx.signal);
   const groups: DoctorGroup[] = [
     runtime,
     packageGroup,

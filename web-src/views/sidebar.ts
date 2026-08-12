@@ -1576,6 +1576,8 @@ export function createSidebar(deps: SidebarDeps) {
     const input = document.querySelector<HTMLInputElement>("#sb-filter");
     if (!input?.value) return;
     input.value = "";
+    // Repository 以外の画面も同じ入力の input event を購読している。
+    input.dispatchEvent(new Event("input", { bubbles: true }));
     syncSidebarFilterClearButton();
     flushSidebarFilter();
     applyFilter();

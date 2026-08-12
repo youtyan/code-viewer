@@ -15,6 +15,7 @@ import type {
   RowMutation,
 } from "../../core/database/types";
 import { makeId } from "../../core/id";
+import { createLinkedAbortController } from "../abort";
 import { loadDbUiState, patchDbUiState } from "../state-store";
 import { isAbortLikeError } from "./adapters/abort";
 import { asAsync } from "./adapters/async-facade";
@@ -882,27 +883,6 @@ async function handleTableCount(
 
 function makeHistoryId(): string {
   return makeId("qh");
-}
-
-function createLinkedAbortController(parent?: AbortSignal): {
-  signal: AbortSignal;
-  abort(): void;
-  cleanup(): void;
-} {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  if (parent?.aborted) {
-    controller.abort();
-  } else {
-    parent?.addEventListener("abort", abort, { once: true });
-  }
-  return {
-    signal: controller.signal,
-    abort,
-    cleanup() {
-      parent?.removeEventListener("abort", abort);
-    },
-  };
 }
 
 function unquoteSqlIdentifier(raw: string): string {

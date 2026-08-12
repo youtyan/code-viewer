@@ -29,6 +29,11 @@ type RunOptions = {
   stdin?: string;
 };
 
+export type RunAsyncOptions = RunOptions & {
+  /** Stops the child when its owning request is cancelled. */
+  signal?: AbortSignal;
+};
+
 export type StartedServer = {
   port: number;
   close(): Promise<void>;
@@ -50,7 +55,7 @@ export function runSync(
 export function runAsync(
   args: string[],
   cwd: string,
-  options: RunOptions = {},
+  options: RunAsyncOptions = {},
 ): Promise<RunResult> {
   return runBytesAsync(args, cwd, options).then((proc) => ({
     code: proc.code,
@@ -85,13 +90,14 @@ export function runBytesSync(
 export function runBytesAsync(
   args: string[],
   cwd: string,
-  options: RunOptions = {},
+  options: RunAsyncOptions = {},
 ): Promise<RunBytesResult> {
   const maxBuffer = options.maxBuffer ?? 64 * 1024 * 1024;
   return new Promise((resolve) => {
     const proc = spawn(args[0], args.slice(1), {
       cwd,
       stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+      signal: options.signal,
     });
     if (options.stdin !== undefined) {
       proc.stdin?.on("error", () => {

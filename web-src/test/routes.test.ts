@@ -161,6 +161,37 @@ describe("routes", () => {
     );
   });
 
+  test("round-trips the worktree route without a selection", () => {
+    const route = parseRoute("/worktree", "", defaultRange);
+    expect(route).toEqual({ screen: "worktree", range: defaultRange });
+    expect(buildRoute(route)).toBe("/worktree");
+  });
+
+  test("round-trips a worktree, file, and origin selection", () => {
+    const route = parseRoute(
+      "/worktree",
+      "?wt=%2Frepo%2F.worktrees%2Ftopic&file=src%2Fsample.ts&origin=committed",
+      defaultRange,
+    );
+    expect(route).toEqual({
+      screen: "worktree",
+      wt: "/repo/.worktrees/topic",
+      file: "src/sample.ts",
+      origin: "committed",
+      range: defaultRange,
+    });
+    expect(buildRoute(route)).toBe(
+      "/worktree?wt=%2Frepo%2F.worktrees%2Ftopic&file=src%2Fsample.ts&origin=committed",
+    );
+  });
+
+  test("drops query params the worktree screen does not use", () => {
+    // worktree 選択に使わない余分なパラメータは URL に残さない。
+    const route = parseRoute("/worktree", "?tab=x&path=y", defaultRange);
+    expect(route).toEqual({ screen: "worktree", range: defaultRange });
+    expect(buildRoute(route)).toBe("/worktree");
+  });
+
   test("round-trips database schema route params", () => {
     const range = { from: "HEAD", to: "worktree" };
     const route = parseRoute(

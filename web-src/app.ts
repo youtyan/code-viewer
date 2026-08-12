@@ -151,6 +151,8 @@ import {
   type ViewerSettingsDraft,
   type ViewerSettingsText,
 } from "./views/viewer-settings";
+import { worktreeText } from "./views/worktree-i18n";
+import { createWorktreeView, type WorktreeView } from "./views/worktree-view";
 
 window.GdpExpandLogic = GdpExpandLogic;
 
@@ -1519,7 +1521,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     ViewerLanguage,
     {
       nav: Record<
-        "repo" | "diff" | "history" | "journal" | "database" | "tools" | "help",
+        | "repo"
+        | "diff"
+        | "history"
+        | "journal"
+        | "database"
+        | "worktree"
+        | "tools"
+        | "help",
         string
       >;
       appPanel: {
@@ -1697,6 +1706,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         history: "History",
         journal: "Work Log",
         database: "Datastores",
+        worktree: "Worktrees",
         tools: "Tools",
         help: "Settings & Help",
       },
@@ -2058,6 +2068,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         history: "履歴",
         journal: "ワークログ",
         database: "データストア",
+        worktree: "作業ツリー",
         tools: "ツール",
         help: "設定・ヘルプ",
       },
@@ -2647,6 +2658,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
     relocalizeHistory?.();
     relocalizeJournal?.();
+    relocalizeWorktree?.();
     // 設定フォームの文言は viewer-settings.ts が自分で貼る。
     relocalizeViewerSettings?.();
     SOURCE_VIEW.localize();
@@ -2688,6 +2700,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // localizeViewerChrome より後 (init / 言語切替) に呼ばれるため遅延参照する。
   let relocalizeHistory: (() => void) | null = null;
   let relocalizeJournal: (() => void) | null = null;
+  let relocalizeWorktree: (() => void) | null = null;
   let relocalizeTools: (() => void) | null = null;
   let relocalizeViewerSettings: (() => void) | null = null;
   let relocalizeTerminal: (() => void) | null = null;
@@ -2821,7 +2834,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     // "history" also renders diff cards via the same load() pipeline as
     // "diff" once a commit is selected (HISTORY_VIEW.applyCommitRange calls
     // the shared load()), so it needs the highlighter just as much.
-    if (route.screen === "diff" || route.screen === "history") return true;
+    // worktree 画面も同じ diff2html のカードを積むので、同じく要る。
+    if (
+      route.screen === "diff" ||
+      route.screen === "history" ||
+      route.screen === "worktree"
+    )
+      return true;
     return (
       route.screen === "file" && sourceInternalPathKind(route.path) === null
     );
@@ -2832,6 +2851,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     loadSyntaxHighlighter().then((hljsRef) => {
       if (!hljsRef) return;
       rerenderLoadedDiffs();
+      WORKTREE_VIEW?.displayOptionsChanged();
     });
   }
 
@@ -2856,6 +2876,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         }
         scheduleIdleHighlight(card, file);
       });
+    WORKTREE_VIEW?.displayOptionsChanged();
   }
 
   function setChevronIcon(el: HTMLElement) {
@@ -3246,6 +3267,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // that (setRoute, lazy diff renders) go through this late-bound handle.
   let ANNOTATIONS_UI: AnnotationsUi | null = null;
   let JOURNAL_VIEW: JournalView | null = null;
+  let WORKTREE_VIEW: WorktreeView | null = null;
 
   function applyInlineAnnotations() {
     ANNOTATIONS_UI?.applyInlineAnnotations();
@@ -3395,6 +3417,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (previousRoute.screen === "journal" && nextRoute.screen !== "journal") {
       JOURNAL_VIEW?.suspend();
     }
+    if (
+      previousRoute.screen === "worktree" &&
+      nextRoute.screen !== "worktree"
+    ) {
+      WORKTREE_VIEW?.suspend();
+    }
     STATE.route = nextRoute;
     STATE.from = nextRoute.range.from;
     STATE.to = nextRoute.range.to;
@@ -3429,6 +3457,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       setPageMode();
       removeStandaloneSource();
       void JOURNAL_VIEW?.enter();
+    }
+    if (nextRoute.screen === "worktree") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      removeStandaloneSource();
+      void WORKTREE_VIEW?.enter();
     }
   }
 
@@ -3482,6 +3516,29 @@ window.GdpExpandLogic = GdpExpandLogic;
     document.body.classList.toggle(
       "gdp-journal-page",
       STATE.route.screen === "journal",
+    );
+    document.body.classList.toggle(
+      "gdp-worktree-page",
+      STATE.route.screen === "worktree",
+    );
+    // docked の下パネルと場所を分け合うとき、#content がスクロール容器になる
+    // ページ。style.css の body.app-panel-docked[data-content-scrolls-when-docked]
+    // 規則群がこの属性だけを見る (ページクラスの列挙はしない)。
+    // journal / database は自分の箱が --content-h から高さを取るので立てない。
+    document.body.toggleAttribute(
+      "data-content-scrolls-when-docked",
+      STATE.route.screen === "diff" ||
+        STATE.route.screen === "history" ||
+        STATE.route.screen === "repo" ||
+        STATE.route.screen === "file" ||
+        STATE.route.screen === "help" ||
+        STATE.route.screen === "worktree",
+    );
+    // 左に --history-w の一覧パネル (#history-panel / #worktree-panel) を持つ
+    // ページ。#history-resizer の表示がこの属性を見る。
+    document.body.toggleAttribute(
+      "data-history-list-panel",
+      historyPanelRoute || STATE.route.screen === "worktree",
     );
     const repoTargetWrap =
       document.querySelector<HTMLElement>("#repo-target-wrap");
@@ -3590,6 +3647,14 @@ window.GdpExpandLogic = GdpExpandLogic;
             }),
           );
         }
+        if (link.dataset.route === "worktree") {
+          link.href = withOverlayState(
+            buildRoute({
+              screen: "worktree",
+              range: currentRange(),
+            }),
+          );
+        }
         if (link.dataset.route === "help") {
           link.href = withOverlayState(
             buildRoute({
@@ -3606,11 +3671,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
   }
 
+  /**
+   * OS のファイルマネージャでそのパスを開く。
+   *
+   * **成否を返す。** ボタンを渡さない呼び出し (メニューの項目など) では、
+   * ここで握り潰すと利用者に何も伝わらない — 成功しても失敗しても画面が
+   * 無反応になる。失敗の理由はコンソールにも残す。
+   */
   async function openPathInOs(
     path: string,
     kind: "directory" | "file-parent",
     button?: HTMLButtonElement,
-  ) {
+  ): Promise<boolean> {
     const oldTitle = button?.title;
     if (button) {
       button.disabled = true;
@@ -3630,7 +3702,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       setTimeout(() => {
         button?.classList.remove("opened");
       }, 1200);
-    } catch {
+      return true;
+    } catch (error) {
+      console.error("[code-viewer] failed to open path in OS", error);
       if (button) {
         button.classList.add("failed");
         button.title = "failed to open in OS";
@@ -3639,6 +3713,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           button.title = oldTitle || "open in OS";
         }, 1600);
       }
+      return false;
     } finally {
       if (button) button.disabled = false;
     }
@@ -4273,10 +4348,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         moveActiveSidebarItem(e.key === "ArrowDown" ? 1 : -1);
       } else if (e.key === "Escape") {
         if (sbFilter.value) {
-          sbFilter.value = "";
-          syncSidebarFilterClearButton();
-          flushSidebarFilter();
-          applyFilter();
+          clearSidebarFilter();
         } else {
           sbFilter.blur();
         }
@@ -4796,6 +4868,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       return Promise.resolve(null);
     }
+    if (STATE.route.screen === "worktree") {
+      return (WORKTREE_VIEW?.reload() ?? Promise.resolve()).then(() => null);
+    }
     if (
       STATE.route.screen === "file" &&
       !(isFileHistoryRoute(STATE.route) && activeHistoryPathFilter) &&
@@ -4875,6 +4950,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     } else if (STATE.route.screen === "journal") {
       setStatus("live");
       void JOURNAL_VIEW?.enter();
+    } else if (STATE.route.screen === "worktree") {
+      void WORKTREE_VIEW?.enter();
     } else load();
     // Deep links land here without going through setRoute; reflect a line=
     // selection in the copy pill on first paint too.
@@ -5322,6 +5399,31 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   relocalizeJournal = () => JOURNAL_VIEW?.localize();
 
+  WORKTREE_VIEW = createWorktreeView({
+    getRoute: () => STATE.route,
+    // topbar のトグルは Diff ビューアと同じものを使う。値の出所も同じ STATE。
+    getOptions: () => ({
+      layout: STATE.layout,
+      ignoreWs: STATE.ignoreWs,
+      hideTests: STATE.hideTests,
+      syntax: STATE.syntaxHighlight,
+    }),
+    isTestPath: isTestFilePath,
+    getSidebarView: () => STATE.sbView,
+    // ハイライタは遅延バンドル。差分を描く直前に読み込ませる。
+    loadHljs: loadSyntaxHighlighter,
+    setRoute,
+    currentRange,
+    trackLoad,
+    getText: () => worktreeText(STATE.language),
+    setPageMode,
+    syncHeaderMenu,
+    setStatus,
+    createOpenPathButton,
+    openPathInOs: (path, kind) => openPathInOs(path, kind),
+  });
+  relocalizeWorktree = () => WORKTREE_VIEW?.localize();
+
   const DATABASE_VIEW = createDatabaseView({
     setRoute,
     setPageMode,
@@ -5403,6 +5505,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       DATABASE_VIEW.suspend();
     if (previousRoute.screen === "journal" && nextRoute.screen !== "journal")
       JOURNAL_VIEW?.suspend();
+    if (previousRoute.screen === "worktree" && nextRoute.screen !== "worktree")
+      WORKTREE_VIEW?.suspend();
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
       HISTORY_VIEW.leaveHistory();
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
@@ -5486,6 +5590,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       return;
     }
+    if (STATE.route.screen === "worktree") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      removeStandaloneSource();
+      void WORKTREE_VIEW?.enter();
+      return;
+    }
     if (STATE.route.screen !== "file") {
       cancelActiveSourceLoad("navigation");
       setPageMode();
@@ -5552,6 +5663,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       ensureSyntaxHighlighterForRoute();
     } else {
       rerenderLoadedDiffs();
+      WORKTREE_VIEW?.displayOptionsChanged();
     }
   }
 
@@ -5588,6 +5700,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     else updateTreeDirVisibility();
     if (typeof applyViewedState === "function") applyViewedState();
     applyHideTestsToMeta();
+    WORKTREE_VIEW?.displayOptionsChanged();
   }
 
   function visibleDiffMetaForBrief(meta: DiffMeta): DiffMeta {
@@ -6008,6 +6121,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         }
       }
       if (isHistoryPanelRoute(STATE.route)) HISTORY_VIEW.notePossibleUpdate();
+      // 作業ツリー一覧は変更数を出しているので、ファイルが動いたら引き直す。
+      // 専用イベントは無い (watcher が見ているのはこのサーバの作業ツリーだけ)。
+      if (STATE.route.screen === "worktree") WORKTREE_VIEW?.handleSse();
       scheduleSseLoad(paths);
     });
     es.addEventListener("watch-limit", (event) => {

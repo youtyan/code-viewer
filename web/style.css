@@ -1523,7 +1523,10 @@ body.gdp-diff-page #repo-target-wrap {
 .gdp-banner-dismiss:hover { color: var(--fg); }
 
 /* ===== Commit history panel ===== */
-#history-panel {
+/* 作業ツリー画面の 2 枚のパネルも同じ箱を使う。位置だけ Worktrees セクションで
+   上書きし、見た目はここ 1 箇所で決まる。 */
+#history-panel,
+#worktree-panel {
   display: none;
   position: fixed;
   left: 0;
@@ -1563,7 +1566,9 @@ body.gdp-history-page #repo-target-wrap {
   background: transparent;
   transition: background 0.12s;
 }
-body.gdp-history-page #history-resizer {
+/* 一覧パネルを持つページ (data-history-list-panel。履歴・作業ツリー) でだけ
+   つまみを出す。 */
+body[data-history-list-panel] #history-resizer {
   display: block;
 }
 #history-resizer:hover,
@@ -1576,7 +1581,8 @@ body.gdp-history-resizing #history-resizer {
 body.gdp-history-page #topbar .ref-pickers {
   display: none;
 }
-#history-panel[hidden] {
+#history-panel[hidden],
+#worktree-panel[hidden] {
   display: none !important;
 }
 .history-head {
@@ -7853,6 +7859,313 @@ body.gdp-database-page {
 
 body.gdp-database-page #load-bar {
   top: var(--global-header-h);
+}
+
+/* ============================================================
+   Worktrees
+   ============================================================ */
+
+/* 骨格は History と同じ。左の一覧は #history-panel と同じ箱 (セレクタに
+   #worktree-panel を足してある)、中央は Repository と同じ #sidebar の
+   ファイル一覧、右は #diff の差分カード。行の見た目 (.history-item /
+   .subject / .meta2 / .tree-file / .badge / .name / .gdp-file-shell) も
+   全部そのまま使うので、この画面のために作る見た目は下の配置だけ。 */
+
+/* --chrome-h は上書きしない。この画面は History と同じく上部バーを出すので、
+   基底の「ヘッダ + 上部バー」がそのまま正しい。ヘッダだけに縮めると、
+   左右のパネルと本文が上部バーの下に潜り込む。 */
+
+body.gdp-worktree-page #query-history-panel {
+  display: none !important;
+}
+
+/* topbar は出す。統合 / 分割・空白・構文・テスト非表示は、この画面の差分にも
+   そのまま効く。from/to のピッカーだけは Diff ビューアのもので、ここでは
+   比較する対象を作業ツリー側が決めるので出さない (History と同じ扱い)。 */
+body.gdp-worktree-page #topbar .ref-pickers {
+  display: none;
+}
+
+body.gdp-worktree-page #worktree-panel {
+  display: flex;
+}
+
+/* 以下 4 つは History 画面と同じ並べ方 (左パネル → サイドバー → 本文)。 */
+body.gdp-worktree-page #sidebar {
+  left: var(--history-w);
+}
+
+body.gdp-worktree-page main#content {
+  margin-left: calc(var(--history-w) + var(--sidebar-w));
+}
+
+body.gdp-worktree-page.gdp-sidebar-hidden main#content {
+  margin-left: var(--history-w);
+}
+
+body.gdp-worktree-page #sidebar-resizer {
+  left: calc(var(--history-w) + var(--sidebar-w) - 4px);
+}
+
+/* サイドバーで意味を持たないのは「対象 ref」だけ。ツリー / 一覧の切替と
+   全展開・全折りたたみはこの画面でも効く。 */
+body.gdp-worktree-page #repo-target-wrap {
+  display: none !important;
+}
+
+/* 頭のボタンは残り幅の右端に寄せる。 */
+body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
+  margin-left: auto;
+}
+
+/* 基準ブランチへそのまま入らない作業ツリーだけ、一覧の中で色を変える。
+   .history-item.active と同じ左罫線の仕組みに乗る。 */
+.history-item.worktree-conflict {
+  border-left-color: var(--danger);
+}
+
+/* 未コミット / コミット済み の区切り。ファイル行ではないので、ツリーの
+   省略ルールから外して 1 行の見出しとして出す。 */
+#filelist .worktree-file-group,
+#filelist.tree .worktree-file-group {
+  /* #filelist の li は flex 前提なので、文字だけの見出しは block に戻す。
+     flex のままだと匿名アイテムになって幅を持てず、日本語が縦に潰れる。 */
+  display: block;
+  padding: 8px 12px 2px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+/* 他の作業ツリーも触っているファイル。何本と重なっているかを行末の数で出す。
+   ファイル名の色は変えない (重なりが多いと一覧がまるごと染まるため)。
+   誰と重なっているかは title に入る。 */
+.worktree-overlap-count {
+  color: var(--attn);
+  font-weight: 600;
+}
+
+.worktree-overlap-count::before {
+  content: "⇄";
+  margin-right: 2px;
+  font-weight: 400;
+}
+
+/* .meta2 の子は長いと行を横に押し広げる。ブランチ名は自由長なので、
+   溢れるなら省略する (履歴画面の行も同じクラス)。 */
+.history-item .meta2 > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 作業ツリー行の 1 段目: 名前と状態バッジを両端に。 */
+.history-item .worktree-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.history-item .worktree-row-head .subject {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.worktree-row-badges {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+}
+
+/* 2 段目のフォルダの場所。パスは末尾が肝心なので、長いときは頭側を省略する。
+   direction: rtl は #filelist li .name と同じ手で、::before の LRM
+   (U+200E) まで込みで 1 組。これが無いと、末尾が記号で終わるパスで並びが
+   崩れる。 */
+.worktree-row-path {
+  display: block;
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  margin-top: 2px;
+}
+.worktree-row-path::before {
+  content: "\200E";
+}
+
+/* 4 段目に添える「取り込むコマンドをコピー」。文字側 (.author) だけが縮んで
+   省略されるように、ボタンは縮ませない。 */
+.history-item .meta2 > .gdp-copy-path {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+/* 行の右端の「…」。押すまで操作は 1 つも出さない。
+   ボタンを行に並べると、選んだ瞬間にクリックした場所へ現れて誤爆する。
+   一覧の上に固定すると、今度は削除が画面で一番目立つ場所に居座る。
+   開くまで何も出さないメニューなら、どちらも起きない。 */
+.worktree-row-menu {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  /* 行を選んでも消えない。位置が動かないので押し間違えない。 */
+  opacity: 0.55;
+  transition: opacity 0.12s, background 0.12s;
+}
+
+.worktree-row-menu:hover,
+.worktree-row-menu:focus-visible {
+  opacity: 1;
+  background: var(--bg-soft);
+}
+
+.history-item.active .worktree-row-menu {
+  opacity: 1;
+}
+
+/* メニューの区切り。取り返しのつかない操作を、よく使う操作と続けて置かない。 */
+.gdp-context-menu-sep {
+  margin: 4px 2px;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* 変更がまだ無い作業ツリーの案内 (右ペイン)。次にやることをその場に置く。 */
+.worktree-empty-diff .worktree-empty-diff-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* まだ 1 本も作っていないときの説明カード (右ペイン)。 */
+.worktree-intro {
+  padding: 24px;
+  max-width: 46em;
+  line-height: 1.7;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-base);
+}
+.worktree-intro-title {
+  color: var(--fg);
+  font-weight: 600;
+  font-size: var(--ui-font-md);
+  margin-bottom: 4px;
+}
+.worktree-intro p {
+  margin: 0 0 10px;
+}
+.worktree-intro button {
+  margin-top: 4px;
+}
+
+/* ⇄ の意味。重なりが 1 件も無いときは出さない。 */
+#filelist .worktree-overlap-legend {
+  display: block;
+  padding: 8px 12px 2px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  cursor: default;
+}
+
+/* 追加 / 削除ダイアログの中身。データストアの接続ダイアログ
+   (.db-connection-form) と同じで、入力欄そのものは共通の
+   .gdp-dialog-input を使い、並べ方だけをここで決める。 */
+.worktree-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 340px;
+  margin-top: 6px;
+}
+
+.worktree-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.worktree-hint {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+/* 追加ダイアログの「作成先」。入力に連動して実パスを出す行。パスは長いので
+   1 行に固定し、頭側を省略する (行が折り返すと下のボタンが動く)。 */
+.worktree-target {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.worktree-target-label {
+  flex: 0 0 auto;
+}
+
+.worktree-target-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-family: var(--mono, monospace);
+}
+/* .worktree-row-path と同じ理由の LRM。rtl と 1 組で使う。 */
+.worktree-target-path::before {
+  content: "\200E";
+}
+
+/* 作るかどうかの判断に要らない注記 (.gitignore の話) を本文から下ろす先。
+   押しても何も起きない印なので、寸法も位置も変わらない。 */
+.worktree-hint-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--fg-muted);
+  cursor: help;
+}
+
+/* 削除ダイアログの警告。未コミット変更を失うことを、チェックを入れる前に
+   読める位置に出す。 */
+.worktree-warn {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.worktree-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
 }
 
 /* ============================================================
@@ -14573,11 +14886,10 @@ body.app-panel-docked:has(.app-panel.app-panel-open) {
     var(--app-panel-max-h)
   );
 }
-body.app-panel-docked.gdp-diff-page #content,
-body.app-panel-docked.gdp-history-page #content,
-body.app-panel-docked.gdp-repo-page #content,
-body.app-panel-docked.gdp-file-detail-page #content,
-body.app-panel-docked.gdp-help-page #content {
+/* #content がスクロール容器になるかはページの属性で決まる。属性は app.ts の
+   setPageMode がページクラスと同じ場所で立てる。ページクラスの列挙はしない
+   (ui-layout.md「ページクラスの列挙をレイアウト規則に書かない」)。 */
+body.app-panel-docked[data-content-scrolls-when-docked] #content {
   position: relative;
   top: var(--chrome-h);
   height: var(--content-h);
@@ -14589,41 +14901,22 @@ body.app-panel-docked.gdp-help-page #content {
 /* Keep the normal page-specific top gap without putting padding on the
    scroll container. A sticky child otherwise adds that padding to its top
    offset and leaves scrolled content visible above the file header. */
-body.app-panel-docked.gdp-diff-page #diff,
-body.app-panel-docked.gdp-history-page #diff,
-body.app-panel-docked.gdp-repo-page #diff,
-body.app-panel-docked.gdp-file-detail-page #diff,
-body.app-panel-docked.gdp-help-page #diff {
+body.app-panel-docked[data-content-scrolls-when-docked] #diff {
   padding-top: var(--content-top-gap);
 }
-body.app-panel-docked.gdp-diff-page .d2h-file-header,
-body.app-panel-docked.gdp-diff-page .gdp-shell-header,
-body.app-panel-docked.gdp-history-page .d2h-file-header,
-body.app-panel-docked.gdp-history-page .gdp-shell-header,
-body.app-panel-docked.gdp-repo-page .d2h-file-header,
-body.app-panel-docked.gdp-repo-page .gdp-shell-header,
-body.app-panel-docked.gdp-file-detail-page .d2h-file-header,
-body.app-panel-docked.gdp-file-detail-page .gdp-shell-header,
-body.app-panel-docked.gdp-file-detail-page .gdp-file-detail-sticky {
+body.app-panel-docked[data-content-scrolls-when-docked] .d2h-file-header,
+body.app-panel-docked[data-content-scrolls-when-docked] .gdp-shell-header,
+body.app-panel-docked[data-content-scrolls-when-docked] .gdp-file-detail-sticky {
   top: 0;
 }
-body.app-panel-docked.gdp-diff-page .gdp-markdown-toc,
-body.app-panel-docked.gdp-history-page .gdp-markdown-toc,
-body.app-panel-docked.gdp-repo-page .gdp-markdown-toc,
-body.app-panel-docked.gdp-file-detail-page .gdp-markdown-toc {
+body.app-panel-docked[data-content-scrolls-when-docked] .gdp-markdown-toc {
   top: 16px;
 }
-body.app-panel-docked.gdp-help-page .gdp-help-nav {
+body.app-panel-docked[data-content-scrolls-when-docked] .gdp-help-nav {
   top: 20px;
 }
-body.app-panel-docked.gdp-diff-page .d2h-file-wrapper,
-body.app-panel-docked.gdp-diff-page .gdp-file-shell,
-body.app-panel-docked.gdp-history-page .d2h-file-wrapper,
-body.app-panel-docked.gdp-history-page .gdp-file-shell,
-body.app-panel-docked.gdp-repo-page .d2h-file-wrapper,
-body.app-panel-docked.gdp-repo-page .gdp-file-shell,
-body.app-panel-docked.gdp-file-detail-page .d2h-file-wrapper,
-body.app-panel-docked.gdp-file-detail-page .gdp-file-shell {
+body.app-panel-docked[data-content-scrolls-when-docked] .d2h-file-wrapper,
+body.app-panel-docked[data-content-scrolls-when-docked] .gdp-file-shell {
   scroll-margin-top: 8px;
 }
 body.app-panel-docked #sidebar,
@@ -14636,10 +14929,13 @@ body.app-panel-docked #annotation-panel {
 body.app-panel-docked .app-panel.app-panel-open {
   box-shadow: none;
 }
-body.app-panel-docked .journal-page,
-body.app-panel-docked .db-root {
-  height: 100%;
-}
+/* docked のときに `.journal-page` / `.db-root` を `height: 100%` で上書きしない。
+   この 2 ページは data-content-scrolls-when-docked を持たず、
+   親の `#content` が高さを持たないので、100% は解決先を失って auto に落ち、ページ
+   全体が中身の高さまで縮む (中身が空のとき画面途中で切れる形で表面化した)。両者は
+   既に `height: var(--content-h)` を持ち、--content-h は docked ではパネル占有分が
+   引かれた値になるので、そもそも上書きが要らない。検査は
+   `web-src/test/docked-page-height.test.ts`。 */
 
 .tools-sheet,
 .terminal-sheet {

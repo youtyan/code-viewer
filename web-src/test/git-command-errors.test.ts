@@ -8,12 +8,17 @@ import {
 } from "../server/command-resolver";
 import {
   commitHistoryAsync,
+  defaultBranchResultAsync,
+  localBranchExistsResultAsync,
   refCommitPageResultAsync,
   refsResultAsync,
+  untrackedMetaAsync,
   verifyTreeRefResultAsync,
+  worktreeListResultAsync,
 } from "../server/git";
 import { defaultMcpTools, dispatchJsonRpc } from "../server/mcp";
 import { grepRepoAsync, listRepoFilesAsync } from "../server/search-service";
+import { runGit } from "./_git-fixture";
 
 const tmpRoots: string[] = [];
 
@@ -48,6 +53,14 @@ function fakeFailingGit(): string {
     path,
     "#!/bin/sh\nprintf 'fatal: simulated git failure\\n' >&2\nexit 2\n",
   );
+  chmodSync(path, 0o755);
+  return path;
+}
+
+function fakeSlowGit(): string {
+  const root = tempRoot("code-viewer-slow-git-bin-");
+  const path = join(root, "git");
+  writeFileSync(path, "#!/bin/sh\nexec /bin/sleep 10\n");
   chmodSync(path, 0o755);
   return path;
 }
@@ -90,6 +103,36 @@ async function callMcpTool(name: string, args: Record<string, unknown>) {
 }
 
 describe("git command failures", () => {
+  test("applies caller cancellation and a dedicated timeout to worktree listing", async () => {
+    const cwd = tempRoot("code-viewer-worktree-list-cwd-");
+    let configured = configureExternalCommands({
+      cwd,
+      env: {},
+      cliOverrides: [{ name: "git", path: fakeSlowGit() }],
+      allowedNames: ["git"],
+    });
+    expect(configured).toEqual({ ok: true });
+
+    const controller = new AbortController();
+    controller.abort();
+    const aborted = await worktreeListResultAsync(cwd, {
+      signal: controller.signal,
+      timeout: 5_000,
+    });
+    expect(aborted.error).toMatch(/abort/i);
+
+    resetExternalCommandsForTest();
+    configured = configureExternalCommands({
+      cwd,
+      env: {},
+      cliOverrides: [{ name: "git", path: fakeSlowGit() }],
+      allowedNames: ["git"],
+    });
+    expect(configured).toEqual({ ok: true });
+    const timedOut = await worktreeListResultAsync(cwd, { timeout: 10 });
+    expect(timedOut.error).toMatch(/ETIMEDOUT/);
+  });
+
   test("preserves and logs stderr from an ordinary git failure", async () => {
     const cwd = tempRoot("code-viewer-failing-git-cwd-");
     configureFailingGit(cwd);
@@ -173,6 +216,34 @@ describe("git command failures", () => {
     const refs = await refsResultAsync(cwd);
     expect(refs.status).toBe(503);
     expect(refs.error).toMatch(/git binary not found|git not found/);
+  });
+
+  test("distinguishes a missing branch from a failed git lookup", async () => {
+    const repository = tempRoot("code-viewer-branch-lookup-");
+    runGit(repository, ["init", "-q", "-b", "main", "."]);
+    runGit(repository, ["config", "user.email", "test@example.com"]);
+    runGit(repository, ["config", "user.name", "test"]);
+    runGit(repository, ["commit", "--allow-empty", "-qm", "initial"]);
+    expect(
+      await localBranchExistsResultAsync(repository, "missing-branch"),
+    ).toEqual({ exists: false });
+    expect(await defaultBranchResultAsync(repository)).toEqual({
+      branch: "main",
+    });
+
+    const failed = tempRoot("code-viewer-branch-lookup-failed-");
+    configureMissingGit(failed);
+    const branch = await localBranchExistsResultAsync(failed, "main");
+    const defaultBranch = await defaultBranchResultAsync(failed);
+    const untracked = await untrackedMetaAsync(failed);
+
+    expect(branch.exists).toBe(false);
+    expect(branch.status).toBe(503);
+    expect(branch.error).toMatch(/git binary not found|git not found/);
+    expect(defaultBranch.status).toBe(503);
+    expect(defaultBranch.error).toMatch(/git binary not found|git not found/);
+    expect(untracked.status).toBe(503);
+    expect(untracked.error).toMatch(/git binary not found|git not found/);
   });
 
   test("propagates command-not-found through MCP search tools", async () => {

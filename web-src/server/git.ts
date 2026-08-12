@@ -10,6 +10,13 @@ import {
 } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { dirname, join, posix, relative } from "node:path";
+import { formatErrorDetail } from "../core/error-detail";
+import {
+  parseAheadBehind,
+  parseMergeTreeConflicts,
+  parseWorktreeList,
+  type WorktreeRef,
+} from "../core/worktree";
 import {
   cacheFresh,
   fileSignatureFromStats,
@@ -22,7 +29,13 @@ import {
   isCommandNotFoundResult,
 } from "./command-resolver";
 import { compileNamePatterns, type NamePatternSet } from "./name-pattern";
-import { runAsync, runBytesAsync, runSync, spawnStream } from "./runtime";
+import {
+  type RunAsyncOptions,
+  runAsync,
+  runBytesAsync,
+  runSync,
+  spawnStream,
+} from "./runtime";
 
 export type GitFileMeta = {
   order?: number;
@@ -39,6 +52,7 @@ export type GitFileMeta = {
 export type GitFileMetaResult = {
   files: GitFileMeta[];
   error?: string;
+  status?: number;
 };
 
 export type GitErrorResult = {
@@ -220,11 +234,11 @@ function run(
 function runGitAsync(
   args: string[],
   cwd: string,
-  options: { stdin?: string } = {},
+  options: Pick<RunAsyncOptions, "signal" | "stdin" | "timeout"> = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return runAsync(resolveGitArgs(args), cwd, {
-    timeout: GIT_COMMAND_TIMEOUT_MS,
     ...options,
+    timeout: options.timeout ?? GIT_COMMAND_TIMEOUT_MS,
   });
 }
 
@@ -285,28 +299,237 @@ export function repoRoot(cwd: string): string | null {
 }
 
 /**
- * このリポジトリに属する作業ツリーのパス一覧。本体と、切ってある worktree の
- * 全部が入る。
+ * このリポジトリに属する作業ツリーの全体。本体と、切ってある worktree の
+ * 全部が入る。ブランチ・detached・locked・prunable まで持つのはこちらで、
+ * パスだけで足りる呼び出し側は worktreePathsAsync を使う。
+ *
+ * 失敗は握り潰さず error に載せて返す。worktree 画面はそれをそのまま出す。
+ */
+export async function worktreeListResultAsync(
+  cwd: string,
+  options: Pick<RunAsyncOptions, "signal" | "timeout"> = {},
+): Promise<{ worktrees: WorktreeRef[] } & Partial<GitErrorResult>> {
+  const res = await runGitAsync(
+    ["git", "worktree", "list", "--porcelain", "-z"],
+    cwd,
+    options,
+  );
+  if (res.code !== 0) {
+    return {
+      worktrees: [],
+      ...gitFailureResult(res, "git worktree list failed"),
+    };
+  }
+  return { worktrees: parseWorktreeList(res.stdout) };
+}
+
+/**
+ * このリポジトリに属する作業ツリーのパス一覧。
  *
  * ターミナルドロワーが「このリポジトリのペインだけ」を出すために使う。
  * エージェントを worktree ごとに分けて走らせる前提なので、リポジトリルートの
  * 前方一致だけでは足りない (worktree はルートの外に置かれる)。
  *
  * git が無い / リポジトリでない場合は空。呼び出し側は「絞り込めない」として
- * 全部出すか、絞り込みを諦めるかを決める。
+ * 全部出すか、絞り込みを諦めるかを決める。**エラーを知りたい呼び出し側は
+ * worktreeListResultAsync を使う。**
  */
 export async function worktreePathsAsync(cwd: string): Promise<string[]> {
-  const res = await runGitAsync(
-    ["git", "worktree", "list", "--porcelain"],
+  const res = await worktreeListResultAsync(cwd);
+  return res.worktrees.map((entry) => entry.path);
+}
+
+/** ローカルブランチとして既に在るか。worktree 追加で -b を付けるかの判断に使う。 */
+export async function localBranchExistsResultAsync(
+  cwd: string,
+  branch: string,
+): Promise<{ exists: boolean } & Partial<GitErrorResult>> {
+  const result = await runGitAsync(
+    ["git", "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`],
     cwd,
   );
-  if (res.code !== 0) return [];
-  const paths: string[] = [];
-  for (const line of res.stdout.split("\n")) {
-    // 出力は `worktree <path>` で始まるブロックの繰り返し。
-    if (line.startsWith("worktree ")) paths.push(line.slice(9).trimEnd());
+  if (result.code === 0) return { exists: true };
+  if (result.code === 1) return { exists: false };
+  return {
+    exists: false,
+    ...gitFailureResult(result, "git branch lookup failed"),
+  };
+}
+
+/**
+ * 位置関係を測る基準ブランチ。origin/HEAD が指す先を最優先にし、無ければ
+ * main / master の順で在るものを使う。どれも無ければ空 (比較しない)。
+ *
+ * リモートを見に行かない。ここで fetch を走らせると、画面を開くだけで
+ * ネットワークが動くことになる。
+ */
+export async function defaultBranchResultAsync(
+  cwd: string,
+): Promise<{ branch: string } & Partial<GitErrorResult>> {
+  const headResult = await runGitAsync(
+    ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+    cwd,
+  );
+  if (headResult.code !== 0 && headResult.code !== 1) {
+    return {
+      branch: "",
+      ...gitFailureResult(headResult, "git default branch lookup failed"),
+    };
   }
-  return paths;
+  const head = headResult.code === 0 ? headResult.stdout.trimEnd() : "";
+  const fromRemote = head?.startsWith("origin/")
+    ? head.slice("origin/".length)
+    : head;
+  if (fromRemote) {
+    const exists = await localBranchExistsResultAsync(cwd, fromRemote);
+    if (exists.error) {
+      return { branch: "", error: exists.error, status: exists.status };
+    }
+    if (exists.exists) return { branch: fromRemote };
+  }
+  for (const name of ["main", "master"]) {
+    const exists = await localBranchExistsResultAsync(cwd, name);
+    if (exists.error) {
+      return { branch: "", error: exists.error, status: exists.status };
+    }
+    if (exists.exists) return { branch: name };
+  }
+  return { branch: "" };
+}
+
+/**
+ * base から見てどれだけ進んでいて、どれだけ遅れているか。
+ *
+ * ブランチ名はそのまま繋ぐと `-` 始まりの名前がオプションに化けるので、必ず
+ * `refs/heads/` を付けて完全な ref にしてから渡す。
+ */
+export async function worktreeDivergenceResultAsync(
+  cwd: string,
+  base: string,
+  ref: string,
+): Promise<{ behind: number; ahead: number } & Partial<GitErrorResult>> {
+  const res = await runGitAsync(
+    [
+      "git",
+      "rev-list",
+      "--left-right",
+      "--count",
+      `refs/heads/${base}...refs/heads/${ref}`,
+    ],
+    cwd,
+  );
+  if (res.code !== 0) {
+    return {
+      behind: 0,
+      ahead: 0,
+      ...gitFailureResult(res, "git rev-list failed"),
+    };
+  }
+  const parsed = parseAheadBehind(res.stdout);
+  if (!parsed) {
+    return {
+      behind: 0,
+      ahead: 0,
+      error: `unexpected rev-list output: ${res.stdout.trim()}`,
+    };
+  }
+  return parsed;
+}
+
+/**
+ * base に取り込んだら衝突するかを、作業ツリーを一切触らずに試す。
+ *
+ * `merge-tree` の終了コードは 0 が「衝突なし」、1 が「衝突あり」、それ以外が
+ * 「試せなかった」。**試せなかったものを衝突なしに寄せない**ので、画面は
+ * unknown をそのまま出せる。
+ */
+export async function mergePreviewResultAsync(
+  cwd: string,
+  base: string,
+  ref: string,
+): Promise<{
+  state: "clean" | "conflict" | "unknown";
+  conflicts: string[];
+  error?: string;
+}> {
+  const res = await runGitAsync(
+    [
+      "git",
+      "merge-tree",
+      "--write-tree",
+      "--name-only",
+      `refs/heads/${base}`,
+      `refs/heads/${ref}`,
+    ],
+    cwd,
+  );
+  if (res.code === 0) return { state: "clean", conflicts: [] };
+  if (res.code === 1) {
+    return {
+      state: "conflict",
+      conflicts: parseMergeTreeConflicts(res.stdout),
+    };
+  }
+  return {
+    state: "unknown",
+    conflicts: [],
+    error: gitFailureMessage(res, "git merge-tree failed"),
+  };
+}
+
+/**
+ * 作業ツリーを 1 本増やす。`createBranch` なら `-b` でブランチも作る。
+ *
+ * path は呼び出し側が組み立てた絶対パスで、branch は worktreeBranchError を
+ * 通ったものであること。どちらも `-` 始まりでないことが前提 (git worktree add
+ * は `--` によるオプション終端を取らない)。
+ */
+export async function worktreeAddResultAsync(
+  cwd: string,
+  options: { path: string; branch: string; createBranch: boolean },
+): Promise<Partial<GitErrorResult>> {
+  const args = options.createBranch
+    ? ["git", "worktree", "add", "-b", options.branch, options.path]
+    : ["git", "worktree", "add", options.path, options.branch];
+  const res = await runGitAsync(args, cwd);
+  if (res.code !== 0) return gitFailureResult(res, "git worktree add failed");
+  return {};
+}
+
+/**
+ * 作業ツリーを 1 本外す。ブランチは消さない (git worktree remove の挙動)。
+ *
+ * path は `git worktree list` に載っていたものだけを渡すこと。未コミットの
+ * 変更が残っていると git が拒否するので、それを承知で消すときだけ force。
+ */
+export async function worktreeRemoveResultAsync(
+  cwd: string,
+  options: { path: string; force: boolean },
+): Promise<Partial<GitErrorResult>> {
+  const args = ["git", "worktree", "remove"];
+  if (options.force) args.push("--force");
+  args.push("--", options.path);
+  const res = await runGitAsync(args, cwd);
+  if (res.code !== 0) {
+    return gitFailureResult(res, "git worktree remove failed");
+  }
+  return {};
+}
+
+/**
+ * 消えた作業ツリーの管理情報を掃除する。フォルダが既に無いエントリに
+ * `git worktree remove` を受け付けない git があるため、missing なエントリの
+ * 削除はこちらに切り替える。特定の 1 本だけを掃除する形は git に無く、
+ * 壊れた登録は全て対象になる (壊れた登録はどうせ消すしかないもの)。
+ */
+export async function worktreePruneResultAsync(
+  cwd: string,
+): Promise<Partial<GitErrorResult>> {
+  const res = await runGitAsync(["git", "worktree", "prune"], cwd);
+  if (res.code !== 0) {
+    return gitFailureResult(res, "git worktree prune failed");
+  }
+  return {};
 }
 
 export function repoRootResult(
@@ -391,31 +614,25 @@ const repoStatusMapCache = new Map<
 // (`dir/`), exactly as `git status` reports it. Descendants of such a
 // directory are not listed individually; repoStatusForPath walks the
 // ancestors to badge them. Read the map through that helper, not `.get`.
-export async function repoStatusMapAsync(
-  cwd: string,
-  now = Date.now(),
-): Promise<Map<string, string>> {
-  const cached = repoStatusMapCache.get(cwd);
-  if (cacheFresh(cached, now)) return cached.map;
+const STATUS_PORCELAIN_ARGS = [
+  "git",
+  "-c",
+  "core.quotepath=false",
+  "status",
+  "--porcelain=v1",
+  "-z",
+  // "normal" (not "all") keeps a brand-new untracked directory collapsed
+  // to a single `?? dir/` record instead of walking into it: the tree
+  // explorer badges its descendants by ancestor lookup anyway, and "all"
+  // would make git enumerate every file under it on each poll.
+  "--untracked-files=normal",
+];
+
+// `git status --porcelain=v1 -z` の出力を path -> code の map にする。git を
+// 呼ばない純粋な変換なので、コマンドを叩く側が何本あっても解釈は 1 つで済む。
+function parseStatusPorcelainZ(stdout: string): Map<string, string> {
   const map = new Map<string, string>();
-  const res = await runGitAsync(
-    [
-      "git",
-      "-c",
-      "core.quotepath=false",
-      "status",
-      "--porcelain=v1",
-      "-z",
-      // "normal" (not "all") keeps a brand-new untracked directory collapsed
-      // to a single `?? dir/` record instead of walking into it: the tree
-      // explorer badges its descendants by ancestor lookup anyway, and "all"
-      // would make git enumerate every file under it on each poll.
-      "--untracked-files=normal",
-    ],
-    cwd,
-  );
-  if (res.code !== 0) return map;
-  const records = res.stdout.split("\0").filter(Boolean);
+  const records = stdout.split("\0").filter(Boolean);
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
     const xy = record.slice(0, 2);
@@ -438,6 +655,18 @@ export async function repoStatusMapAsync(
     const code = xy[0] !== " " ? xy[0] : xy[1];
     if (code && code !== " ") map.set(path, code);
   }
+  return map;
+}
+
+export async function repoStatusMapAsync(
+  cwd: string,
+  now = Date.now(),
+): Promise<Map<string, string>> {
+  const cached = repoStatusMapCache.get(cwd);
+  if (cacheFresh(cached, now)) return cached.map;
+  const res = await runGitAsync(STATUS_PORCELAIN_ARGS, cwd);
+  if (res.code !== 0) return new Map<string, string>();
+  const map = parseStatusPorcelainZ(res.stdout);
   setTimedCacheEntry(repoStatusMapCache, cwd, { map }, now);
   return map;
 }
@@ -1328,15 +1557,22 @@ export async function blameAsync(
 export async function untrackedAsync(
   cwd: string,
   path = "",
-): Promise<string[]> {
-  const args = ["git", "ls-files", "--others", "--exclude-standard"];
+): Promise<{ paths: string[] } & Partial<GitErrorResult>> {
+  const args = ["git", "ls-files", "-z", "--others", "--exclude-standard"];
   if (path) args.push("--", `${path}/`);
   const res = await runGitAsync(args, cwd);
-  if (res.code !== 0) return [];
-  return res.stdout
-    .split("\n")
-    .filter(Boolean)
-    .filter((entry) => !isToolInternalPath(entry));
+  if (res.code !== 0) {
+    return {
+      paths: [],
+      ...gitFailureResult(res, "git untracked file lookup failed"),
+    };
+  }
+  return {
+    paths: res.stdout
+      .split("\0")
+      .filter(Boolean)
+      .filter((entry) => !isToolInternalPath(entry)),
+  };
 }
 
 function normalizeTreePath(path: string): string {
@@ -1822,11 +2058,18 @@ async function scanFileBinaryAndNewlinesAsync(
   return { binary: false, newlines };
 }
 
-export async function untrackedMetaAsync(cwd: string): Promise<GitFileMeta[]> {
-  const paths = await untrackedAsync(cwd);
+export async function untrackedMetaAsync(
+  cwd: string,
+): Promise<GitFileMetaResult> {
+  const listed = await untrackedAsync(cwd);
+  if (listed.error) {
+    return { files: [], error: listed.error, status: listed.status };
+  }
+  const paths = listed.paths;
   const previous = untrackedScanCache.get(cwd);
   const next = new Map<string, { signature: string; scan: UntrackedScan }>();
   const results: (GitFileMeta | null)[] = new Array(paths.length).fill(null);
+  const errors: (string | null)[] = new Array(paths.length).fill(null);
   let cursor = 0;
   const worker = async () => {
     while (cursor < paths.length) {
@@ -1836,7 +2079,9 @@ export async function untrackedMetaAsync(cwd: string): Promise<GitFileMeta[]> {
       let stats: Awaited<ReturnType<typeof stat>>;
       try {
         stats = await stat(full);
-      } catch {
+      } catch (error) {
+        errors[index] =
+          `failed to stat untracked file ${path}: ${formatErrorDetail(error)}`;
         continue;
       }
       if (!stats.isFile()) continue;
@@ -1848,7 +2093,9 @@ export async function untrackedMetaAsync(cwd: string): Promise<GitFileMeta[]> {
       } else {
         try {
           scan = await scanFileBinaryAndNewlinesAsync(full);
-        } catch {
+        } catch (error) {
+          errors[index] =
+            `failed to read untracked file ${path}: ${formatErrorDetail(error)}`;
           continue;
         }
       }
@@ -1865,7 +2112,12 @@ export async function untrackedMetaAsync(cwd: string): Promise<GitFileMeta[]> {
     ),
   );
   untrackedScanCache.set(cwd, next);
-  return results.filter((meta): meta is GitFileMeta => meta !== null);
+  return {
+    files: results.filter((meta): meta is GitFileMeta => meta !== null),
+    ...(errors.some(Boolean)
+      ? { error: errors.filter((error): error is string => !!error).join("\n") }
+      : {}),
+  };
 }
 
 export async function fileMetaResultAsync(
@@ -1896,10 +2148,13 @@ export async function fileMetaResultAsync(
       binary: stats?.binary || false,
     };
   });
+  if (!includeUntracked) return { files };
+  const untracked = await untrackedMetaAsync(cwd);
   return {
-    files: includeUntracked
-      ? files.concat(await untrackedMetaAsync(cwd))
-      : files,
+    files: files.concat(untracked.files),
+    ...(untracked.error
+      ? { error: untracked.error, status: untracked.status }
+      : {}),
   };
 }
 
@@ -1946,7 +2201,12 @@ export async function untrackedFileDiffAsync(
       "--no-index",
       ...extras,
       "/dev/null",
-      path,
+      // `--no-index` は `--` によるオプション終端を受け付けない (usage エラー
+      // になる) ので、`./` を前置してオプションに見えなくする。これが無いと
+      // path が `--output=/tmp/x` のときに git がオプションとして解釈し、
+      // **任意の場所へファイルを書けてしまう** (再現確認済み)。
+      // 呼び出し側でのパス検証と合わせた二重の防御。
+      path.startsWith("./") ? path : `./${path}`,
     ],
     cwd,
   );

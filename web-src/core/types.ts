@@ -1,6 +1,11 @@
 import type { GdpExpandLogic } from "./expand-logic";
 import type { KeymapOverrides } from "./keymap";
 import type { ToolId } from "./tools";
+import type {
+  WorktreeFileOrigin,
+  WorktreeItem,
+  WorktreeOverlap,
+} from "./worktree";
 
 export type FileMeta = {
   order?: number;
@@ -81,6 +86,11 @@ export type SettingsResponse = {
   project: string;
   branch?: string;
   repo_web_url: string | null;
+  /** Registry clients use this to prove that a loopback server owns the entry. */
+  server: {
+    pid: number;
+    root: string;
+  };
   scope: {
     omit_dirs_effective: string[];
     omit_dirs_built_in: string[];
@@ -95,6 +105,44 @@ export type SettingsResponse = {
     // which leaves no per-directory watchers for the limit to cap.
     watch_recursive: boolean;
   };
+};
+
+export type WorktreesResponse = {
+  worktrees: WorktreeItem[];
+  repoRoot: string;
+  /** 追加時に作られる場所。画面の説明文に出す。 */
+  addParent: string;
+  /** 位置関係の基準にしたブランチ。決められなかったときは空。 */
+  baseBranch: string;
+  /** 2 本以上が同じファイルを触っている箇所。無ければ空。 */
+  overlaps: WorktreeOverlap[];
+  /**
+   * 自分自身と競合しうる一覧なので、応答が古いかどうかをクライアントが
+   * 判定できるようにする (server.md の Request Lifecycle Discipline)。
+   */
+  generation: number;
+  /** 一覧そのものを取れなかった理由。取れているなら無い。 */
+  error?: string;
+};
+
+/** 追加・削除・起動の結果。失敗は HTTP ステータスとテキストで返す。 */
+export type WorktreeActionResponse = {
+  /** open のとき、開くべき URL。 */
+  url?: string;
+  /** open がサーバを起動した (既存を再利用したなら false)。 */
+  started?: boolean;
+  /** add のとき、作った作業ツリーのパス。作ったものをそのまま選ぶために使う。 */
+  path?: string;
+};
+
+export type WorktreeDiffResponse = {
+  file: string;
+  origin: WorktreeFileOrigin;
+  diff: string;
+  totalHunks: number;
+  renderedHunks: number;
+  truncated: boolean;
+  generation: number;
 };
 
 export type ViewerFontSizeSetting = "compact" | "regular" | "large" | "xlarge";

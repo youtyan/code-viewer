@@ -290,6 +290,8 @@ export type FormDialogOptions<T> = {
   validate?: () => string | null;
   submitLabel?: string;
   cancelLabel?: string;
+  // 確定ボタンを破壊的アクション (赤系) として表示する。
+  danger?: boolean;
   focusTarget?: HTMLElement | null;
   focusReturnTarget?: HTMLElement | null;
 };
@@ -307,6 +309,7 @@ export function showFormDialog<T>(
     const submit = document.createElement("button");
     submit.type = "button";
     submit.className = "gdp-btn gdp-btn-sm";
+    if (opts.danger) submit.classList.add("gdp-dialog-danger");
     submit.textContent = opts.submitLabel ?? "Save";
     const error = document.createElement("div");
     error.className = "gdp-dialog-error";
