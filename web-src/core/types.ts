@@ -398,6 +398,10 @@ export type DiffCardElement = HTMLElement & {
   _diffData?: FileDiffResponse | null;
   _file?: FileMeta | null;
   _loadPromise?: Promise<void>;
+  // 静かな再検証 (silent revalidation) の比較基準。最後に既定 URL から取得した
+  // 応答の署名と、その URL (generation クエリ除去済み)。展開読み込みでは更新しない。
+  _loadedSig?: string | null;
+  _loadedSigUrl?: string | null;
 };
 
 export type RefResponse = {
@@ -509,4 +513,7 @@ export type RawFileInfo = {
   created_at?: string;
   updated_at?: string;
   commit_updated_at?: string;
+  // HEAD /_file が 404 を返した (ファイルがその ref に存在しない) ことの明示。
+  // ネットワーク失敗・中断の {} と区別するために立てる。
+  missing?: boolean;
 };

@@ -26,6 +26,10 @@ import { GdpExpandLogic } from "./core/expand-logic";
 import { isTestFilePath } from "./core/file-filter";
 import { filePathClipboardText } from "./core/file-path-copy";
 import {
+  fileSignatureUnchanged,
+  rawFileInfoSignature,
+} from "./core/file-refresh";
+import {
   findMainScrollTarget,
   focusMainPanel,
   focusSidebarPanel,
@@ -3321,6 +3325,74 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
+  // blob / blame ビューの SSE 再描画ゲート。変更通知は tick やディレクトリ丸めで
+  // パス精度を失うため、通知だけを根拠に再描画すると、見ているファイルと無関係な
+  // 更新 (ログファイル等) でも画面が「読み込み中」に置き換わる。HEAD /_file の
+  // メタデータ署名を表示時に控えておき、署名が動いたときだけ再描画する。
+  let fileRouteSignature: { key: string; sig: string } | null = null;
+  let fileRouteSignatureSeed: Promise<void> | null = null;
+  let fileRouteSignatureCheck: Promise<void> | null = null;
+
+  function fileRouteSignatureKey(
+    route: Extract<AppRoute, { screen: "file" }>,
+  ): string {
+    return `${route.view || "blob"}\0${route.path}\0${route.ref || "worktree"}`;
+  }
+
+  async function readFileRouteSignature(
+    route: Extract<AppRoute, { screen: "file" }>,
+  ): Promise<string | null> {
+    const info = await REPO_VIEW.loadRawFileInfo({
+      path: route.path,
+      ref: route.ref || "worktree",
+    });
+    return rawFileInfoSignature(info);
+  }
+
+  function seedFileRouteSignature(
+    route: Extract<AppRoute, { screen: "file" }>,
+  ): void {
+    const key = fileRouteSignatureKey(route);
+    const seed = trackLoad(readFileRouteSignature(route)).then((sig) => {
+      if (fileRouteSignatureSeed === seed) fileRouteSignatureSeed = null;
+      if (sig === null) return;
+      fileRouteSignature = { key, sig };
+    });
+    fileRouteSignatureSeed = seed;
+  }
+
+  function refreshFileRouteIfChanged(
+    route: Extract<AppRoute, { screen: "file" }>,
+  ): void {
+    if (fileRouteSignatureCheck) return;
+    const key = fileRouteSignatureKey(route);
+    // 表示直後の seed がまだ飛行中なら先に待つ。待たないと「基準が無い」だけで
+    // 変化ありと誤判定し、開いた直後の無関係な通知で画面を作り直してしまう。
+    const pendingSeed = fileRouteSignatureSeed ?? Promise.resolve();
+    fileRouteSignatureCheck = pendingSeed
+      .then(() => trackLoad(readFileRouteSignature(route)))
+      .then((sig) => {
+        fileRouteSignatureCheck = null;
+        // 署名が取れない (HEAD 失敗 / 中断) のは判定不能であって変化ではない。
+        // 画面には触れず、次の変更通知で再検証する。
+        if (sig === null) return;
+        const routeNow = STATE.route;
+        if (
+          routeNow.screen !== "file" ||
+          !isBlobOrBlameFileRoute(routeNow) ||
+          fileRouteSignatureKey(routeNow) !== key
+        )
+          return;
+        if (fileSignatureUnchanged(fileRouteSignature, key, sig)) return;
+        fileRouteSignature = { key, sig };
+        dispatchFileRoute(routeNow, { refresh: true });
+      });
+    // 中断 (cancelInFlightRequests) は再描画しない。次の通知で再検証する。
+    fileRouteSignatureCheck.catch(() => {
+      fileRouteSignatureCheck = null;
+    });
+  }
+
   function dispatchFileRoute(
     route: Extract<AppRoute, { screen: "file" }>,
     options: { refresh?: boolean } = {},
@@ -3330,6 +3402,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       removeFileHistoryShell();
       BLAME_VIEW.removeBlamePage();
       applySourceRouteToShell(options);
+      seedFileRouteSignature(route);
       return true;
     }
     if (route.view === "blame") {
@@ -3337,6 +3410,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       cancelActiveSourceLoad("navigation");
       removeFileHistoryShell();
       void BLAME_VIEW.renderBlamePage({ path: route.path, ref: route.ref });
+      seedFileRouteSignature(route);
       return true;
     }
     if (route.view === "history") {
@@ -6025,9 +6099,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       // Scope match: a directory-level notification stands for the files under
       // it, so an exact lookup would skip the file being viewed.
       if (viewingPath && !changedPathsCoverPath(paths, viewingPath)) return;
-      // The viewed file changed on disk - bypass the idempotent-mount guard
-      // so the fresh content actually renders.
-      dispatchFileRoute(route, { refresh: true });
+      // 通知がパス精度を失っていても (tick / ディレクトリ丸め)、見ている
+      // ファイルが実際に変わったときだけ再描画する。変わっていなければ
+      // 画面には一切触れない。
+      refreshFileRouteIfChanged(route);
       return;
     }
     if (route.screen === "repo") {

@@ -689,6 +689,24 @@ export function createDiffView(deps: DiffViewDeps) {
       .join("\n");
   }
 
+  // load_url / preview_url はサーバ世代 (generation) をクエリに含み、世代は
+  // 無関係なファイルの更新でも進む。署名に世代を混ぜると SSE のたびに全カードが
+  // 「変更あり」になり、変更パスのスコープ判定が機能しなくなるので取り除く。
+  function stripLoadUrlGeneration(url: string): string {
+    const queryStart = url.indexOf("?");
+    if (queryStart === -1) return url;
+    const params = new URLSearchParams(url.slice(queryStart + 1));
+    if (!params.has("generation")) return url;
+    params.delete("generation");
+    const s = params.toString();
+    return s ? `${url.slice(0, queryStart)}?${s}` : url.slice(0, queryStart);
+  }
+
+  // 応答中の generation はサーバ世代であって内容ではないので、内容比較から外す。
+  function diffResponseSignature(data: FileDiffResponse): string {
+    return JSON.stringify({ ...data, generation: undefined });
+  }
+
   function computeCardSignature(f: FileMeta): string {
     return [
       fileKey(f),
@@ -700,11 +718,20 @@ export function createDiffView(deps: DiffViewDeps) {
       f.size_class || "small",
       f.force_layout || "",
       f.highlight ? 1 : 0,
-      f.load_url,
-      f.preview_url || "",
+      stripLoadUrlGeneration(f.load_url),
+      f.preview_url ? stripLoadUrlGeneration(f.preview_url) : "",
       f.estimated_height_px || 0,
       f.untracked ? 1 : 0,
     ].join("\0");
+  }
+
+  // 読み込みを開始してよいカードか。loaded でも stale マーク付きなら再検証が
+  // 要る。loading / staleLoading は取得中なので重ねない。
+  function cardNeedsLoad(card: DiffCardElement): boolean {
+    if (card.classList.contains("loading")) return false;
+    if (card.dataset.staleLoading === "1") return false;
+    if (card.classList.contains("loaded")) return card.dataset.stale === "1";
+    return true;
   }
 
   function ensureLazyObserver(): IntersectionObserver {
@@ -714,11 +741,7 @@ export function createDiffView(deps: DiffViewDeps) {
           for (const entry of entries) {
             if (!entry.isIntersecting) continue;
             const card = entry.target as DiffCardElement;
-            if (
-              card.classList.contains("loaded") ||
-              card.classList.contains("loading")
-            )
-              continue;
+            if (!cardNeedsLoad(card)) continue;
             const f =
               card._file ||
               STATE.files.find((x) => x.path === card.dataset.path);
@@ -755,6 +778,9 @@ export function createDiffView(deps: DiffViewDeps) {
     // under it. An exact lookup silently skipped those files.
     if (!changedPathsCoverPath(changedPaths, file.path)) return false;
     card.dataset.reqId = String(++CLIENT_REQ_SEQ);
+    // 可視インバリデーションは進行中の静かな再検証を引き継ぐ。
+    delete card.dataset.stale;
+    delete card.dataset.staleLoading;
     // Stale-while-revalidate: keep the previous diff visible (dimmed by the
     // .pending style) while the fresh content loads. Wiping the body here
     // collapsed every loaded card into a spinner on each SSE tick, which
@@ -764,8 +790,27 @@ export function createDiffView(deps: DiffViewDeps) {
     card.classList.remove("loaded", "loading", "error");
     card.classList.add("pending");
     card._diffData = null;
+    card._loadedSig = null;
+    card._loadedSigUrl = null;
     const indicator = card.querySelector<HTMLElement>(".loading-indicator");
     if (indicator) indicator.hidden = false;
+    activatePendingCard(card, file);
+    return true;
+  }
+
+  // パス精度の無い通知 (tick / ディレクトリ丸め) 用。署名が変わっていない
+  // カードは「変わったかもしれない」だけなので、見た目 (クラス・インジケータ・
+  // minHeight) を一切変えずに再取得を予約し、応答が前回と同一なら DOM に触れない。
+  // 古い応答が画面を上書きしないよう reqId は進める (server.md の
+  // Request Lifecycle Discipline)。
+  function revalidateCardSilently(
+    card: DiffCardElement,
+    file: FileMeta,
+  ): boolean {
+    if (!card.classList.contains("loaded")) return false;
+    card.dataset.reqId = String(++CLIENT_REQ_SEQ);
+    card.dataset.stale = "1";
+    card._file = file;
     activatePendingCard(card, file);
     return true;
   }
@@ -801,8 +846,12 @@ export function createDiffView(deps: DiffViewDeps) {
     delete card.dataset.manualRendered;
     delete card.dataset.manualLoad;
     delete card.dataset.manualMode;
+    delete card.dataset.stale;
+    delete card.dataset.staleLoading;
     card.style.minHeight = `${file.estimated_height_px || 80}px`;
     card._diffData = null;
+    card._loadedSig = null;
+    card._loadedSigUrl = null;
     card._file = file;
   }
 
@@ -909,7 +958,9 @@ export function createDiffView(deps: DiffViewDeps) {
           activatePendingCard(card, f);
           invalidatedCards++;
           sidebarNeedsStatsUpdate = true;
-        } else {
+        } else if (sigChanged) {
+          // 署名の変化は「内容が変わった」ことが確定している。従来どおり
+          // stale-while-revalidate で可視インバリデーションする。
           const stats = card.querySelector(".gdp-shell-header .stats");
           if (stats) {
             stats.innerHTML =
@@ -921,22 +972,36 @@ export function createDiffView(deps: DiffViewDeps) {
               "</span>";
           }
           card._file = f;
-          const didInvalidate = sigChanged
-            ? invalidateLoadedCard(card, f, null, measuredHeights.get(key))
-            : invalidateLoadedCard(
-                card,
-                f,
-                changedPaths,
-                measuredHeights.get(key),
-              );
+          const didInvalidate = invalidateLoadedCard(
+            card,
+            f,
+            null,
+            measuredHeights.get(key),
+          );
           if (didInvalidate) invalidatedCards++;
-          else if (
-            (sigChanged || pathHint) &&
-            card.classList.contains("pending")
-          ) {
+          else if (card.classList.contains("pending")) {
             activatePendingCard(card, f);
           }
-          if (sigChanged) sidebarNeedsStatsUpdate = true;
+          sidebarNeedsStatsUpdate = true;
+        } else {
+          // pathHint のみ: 署名は同一で、通知はパス精度を失っている可能性が
+          // ある (tick / ディレクトリ丸め)。見た目を変えずに再検証し、内容が
+          // 同じなら DOM に一切触れない。loading 中のカードだけは従来の可視
+          // インバリデーションに任せる (既にスピナー表示中で、新しい視覚変化
+          // は生まれない)。
+          card._file = f;
+          if (!revalidateCardSilently(card, f)) {
+            const didInvalidate = invalidateLoadedCard(
+              card,
+              f,
+              changedPaths,
+              measuredHeights.get(key),
+            );
+            if (didInvalidate) invalidatedCards++;
+            else if (card.classList.contains("pending")) {
+              activatePendingCard(card, f);
+            }
+          }
         }
       }
       if (sidebarNeedsStatsUpdate && canUpdateSidebar)
@@ -1077,11 +1142,7 @@ export function createDiffView(deps: DiffViewDeps) {
         entries.forEach((entry) => {
           if (!entry.isIntersecting) return;
           const card = entry.target as DiffCardElement;
-          if (
-            card.classList.contains("loaded") ||
-            card.classList.contains("loading")
-          )
-            return;
+          if (!cardNeedsLoad(card)) return;
           const f =
             card._file || STATE.files.find((x) => x.path === card.dataset.path);
           if (!f) return;
@@ -1137,11 +1198,7 @@ export function createDiffView(deps: DiffViewDeps) {
     while (ACTIVE_LOADS < MAX_PARALLEL && LOAD_QUEUE.length) {
       const item = LOAD_QUEUE.shift();
       if (item.epoch !== LOAD_EPOCH) continue;
-      if (
-        item.card.classList.contains("loaded") ||
-        item.card.classList.contains("loading")
-      )
-        continue;
+      if (!cardNeedsLoad(item.card)) continue;
       ACTIVE_LOADS++;
       loadFile(item.file, item.card).finally(() => {
         if (item.epoch === LOAD_EPOCH) {
@@ -1252,11 +1309,19 @@ export function createDiffView(deps: DiffViewDeps) {
     urlOverride?: string,
     options?: { immediate?: boolean },
   ): Promise<void> {
-    card.classList.remove("pending");
-    card.classList.add("loading");
-    if (lazyObserver) lazyObserver.unobserve(card);
+    // 静かな再検証: loaded のまま stale マークが付いたカードは、見た目を一切
+    // 変えずに取得だけ行い、内容が前回と違うときだけ描き直す。
+    const silent =
+      card.classList.contains("loaded") && card.dataset.stale === "1";
     const indicator = card.querySelector<HTMLElement>(".loading-indicator");
-    if (indicator) indicator.hidden = false;
+    if (silent) {
+      card.dataset.staleLoading = "1";
+    } else {
+      card.classList.remove("pending");
+      card.classList.add("loading");
+      if (indicator) indicator.hidden = false;
+    }
+    if (lazyObserver) lazyObserver.unobserve(card);
 
     const url =
       urlOverride ||
@@ -1269,9 +1334,14 @@ export function createDiffView(deps: DiffViewDeps) {
 
     const retryStale = () => {
       if (String(myReq) !== card.dataset.reqId) return;
-      card.classList.remove("loading");
-      card.classList.add("pending");
-      if (indicator) indicator.hidden = true;
+      if (silent) {
+        // stale マークは残し、次の enqueue でもう一度静かに検証する。
+        delete card.dataset.staleLoading;
+      } else {
+        card.classList.remove("loading");
+        card.classList.add("pending");
+        if (indicator) indicator.hidden = true;
+      }
       const fresh =
         card._file || STATE.files.find((x) => x.path === card.dataset.path);
       if (fresh && card.isConnected) enqueueLoad(fresh, card, 0);
@@ -1293,12 +1363,36 @@ export function createDiffView(deps: DiffViewDeps) {
           retryStale();
           return;
         }
+        const strippedUrl = stripLoadUrlGeneration(url);
+        if (silent) {
+          const sig = diffResponseSignature(data);
+          if (card._loadedSigUrl === strippedUrl && card._loadedSig === sig) {
+            // 内容は前回と同一。DOM に触れずレイアウトを 1px も動かさない。
+            delete card.dataset.staleLoading;
+            delete card.dataset.stale;
+            return;
+          }
+        }
         if (!options?.immediate) await nextIdle();
         if (String(myReq) !== card.dataset.reqId) return;
+        if (silent) {
+          delete card.dataset.staleLoading;
+          delete card.dataset.stale;
+        }
+        card._loadedSig = diffResponseSignature(data);
+        card._loadedSigUrl = strippedUrl;
         renderFile(file, data, card);
       })
       .catch((error) => {
         if (String(myReq) !== card.dataset.reqId) return;
+        if (silent) {
+          // 静かな再検証の失敗で表示中の内容を壊さない。マークを外して表示は
+          // 保持し、次の変更通知で再検証する。
+          delete card.dataset.staleLoading;
+          delete card.dataset.stale;
+          console.error("[code-viewer] silent diff revalidation failed", error);
+          return;
+        }
         console.error("[code-viewer] failed to load diff", error);
         card.classList.remove("loading");
         card.classList.add("error");
