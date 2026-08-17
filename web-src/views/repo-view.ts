@@ -1194,6 +1194,9 @@ export function createRepoView(deps: RepoViewDeps) {
   ): Promise<RawFileInfo> {
     try {
       const res = await fetch(buildRawFileUrl(target), { method: "HEAD" });
+      // 404 は「その ref にファイルが無い」という確定状態。取得失敗の {} と
+      // 区別して返す (SSE 再描画ゲートが削除を変化として検知するため)。
+      if (res.status === 404) return { missing: true };
       if (!res.ok) return {};
       const rawSize = res.headers.get("content-length");
       const size = rawSize == null ? NaN : Number(rawSize);

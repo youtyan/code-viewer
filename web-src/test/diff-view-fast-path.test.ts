@@ -7,6 +7,7 @@ import {
   describe,
   expect,
   test,
+  vi,
 } from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { DiffCardElement, DiffMeta, FileMeta } from "../core/types";
@@ -1296,5 +1297,229 @@ describe("diff view next-unviewed-file navigation", () => {
       document.querySelector<HTMLButtonElement>("#meta .chip-next-unviewed")
         ?.disabled,
     ).toBe(true);
+  });
+});
+
+describe("diff view silent revalidation", () => {
+  let originalObserver: typeof globalThis.IntersectionObserver;
+  let originalRect: typeof HTMLElement.prototype.getBoundingClientRect;
+  let originalFetch: typeof globalThis.fetch;
+  let originalDiff2Html: typeof window.Diff2HtmlUI;
+  let requests: string[];
+  let responders: Array<ReturnType<typeof deferred<Response>>>;
+
+  beforeEach(() => {
+    setupDiffDom();
+    originalObserver = globalThis.IntersectionObserver;
+    originalRect = HTMLElement.prototype.getBoundingClientRect;
+    originalFetch = globalThis.fetch;
+    originalDiff2Html = window.Diff2HtmlUI;
+    requests = [];
+    responders = [];
+    globalThis.IntersectionObserver = class {
+      observe() {
+        /* noop */
+      }
+      disconnect() {
+        /* noop */
+      }
+      unobserve() {
+        /* noop */
+      }
+    } as unknown as typeof IntersectionObserver;
+    HTMLElement.prototype.getBoundingClientRect = () =>
+      ({
+        top: 0,
+        bottom: 100,
+        left: 0,
+        right: 0,
+        width: 100,
+        height: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      requests.push(String(input));
+      const response = deferred<Response>();
+      responders.push(response);
+      return response.promise;
+    }) as typeof fetch;
+    window.Diff2HtmlUI = class {
+      constructor(
+        private readonly element: HTMLElement,
+        private readonly diff: string,
+        _options: unknown,
+      ) {}
+
+      draw() {
+        this.element.innerHTML = `<div class="d2h-file-wrapper">${this.diff}</div>`;
+      }
+
+      highlightCode() {
+        /* noop */
+      }
+    } as unknown as typeof window.Diff2HtmlUI;
+  });
+
+  afterEach(() => {
+    globalThis.IntersectionObserver = originalObserver;
+    HTMLElement.prototype.getBoundingClientRect = originalRect;
+    globalThis.fetch = originalFetch;
+    window.Diff2HtmlUI = originalDiff2Html;
+  });
+
+  const DIFF_V1 = "diff --git a/src/a.ts b/src/a.ts\ncontent-v1";
+  const DIFF_V2 = "diff --git a/src/a.ts b/src/a.ts\ncontent-v2";
+
+  function respondJson(index: number, data: unknown) {
+    responders[index].resolve({
+      ok: true,
+      json: async () => data,
+    } as Response);
+  }
+
+  // 実パイプライン (renderShell → 遅延読み込み → renderFile) で loaded カードを作る。
+  async function renderLoadedCard(
+    view: ReturnType<typeof createDiffViewForShellTest>["view"],
+  ): Promise<DiffCardElement> {
+    view.renderShell(
+      makeDiffMeta(
+        [makeFile("src/a.ts", 1, 0, "/file_diff?generation=1&path=src%2Fa.ts")],
+        { generation: 1 },
+      ),
+      null,
+    );
+    await waitFor(() => requests.length === 1);
+    respondJson(0, {
+      path: "src/a.ts",
+      status: "M",
+      diff: DIFF_V1,
+      generation: 1,
+    });
+    const card = document.querySelector<DiffCardElement>(
+      '.gdp-file-shell[data-path="src/a.ts"]',
+    );
+    if (!card) throw new Error("missing src/a.ts card");
+    await waitFor(() => card.classList.contains("loaded"));
+    return card;
+  }
+
+  test("leaves the card fully untouched when changed paths do not cover it, even though load_url generation rolled", async () => {
+    const { view } = createDiffViewForShellTest();
+    const card = await renderLoadedCard(view);
+    const body = card.querySelector<HTMLElement>(".gdp-shell-body");
+    if (!body) throw new Error("missing card body");
+    const bodyBefore = body.innerHTML;
+    const reqIdBefore = card.dataset.reqId;
+
+    // 無関係なログファイルだけが変わり、サーバ世代が進んで全 load_url の
+    // generation クエリが動いた、という SSE 後の /diff.json 再取得を再現する。
+    const result = view.renderShell(
+      makeDiffMeta(
+        [makeFile("src/a.ts", 1, 0, "/file_diff?generation=2&path=src%2Fa.ts")],
+        { generation: 2 },
+      ),
+      new Set(["logs/app.log"]),
+    );
+
+    expect(result.preservedDom).toBe(true);
+    expect(result.invalidatedCards).toBe(0);
+    expect(card.classList.contains("loaded")).toBe(true);
+    expect(card.classList.contains("pending")).toBe(false);
+    expect(card.dataset.stale).toBeUndefined();
+    expect(card.dataset.reqId).toBe(reqIdBefore);
+    expect(body.innerHTML).toBe(bodyBefore);
+
+    // 遅延経路 (nextIdle の 50ms タイマー) からも何も起きないことを確かめる。
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(requests.length).toBe(1);
+  });
+
+  test.each([
+    {
+      name: "revalidates silently and leaves the DOM alone when the content is unchanged",
+      respond: "same" as const,
+      expectSameBody: true,
+    },
+    {
+      name: "revalidates silently and re-renders only when the content actually changed",
+      respond: "changed" as const,
+      expectSameBody: false,
+    },
+    {
+      name: "keeps the current content when the silent revalidation fetch fails",
+      respond: "reject" as const,
+      expectSameBody: true,
+    },
+  ])("$name", async ({ respond, expectSameBody }) => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const { view } = createDiffViewForShellTest();
+      const card = await renderLoadedCard(view);
+      const body = card.querySelector<HTMLElement>(".gdp-shell-body");
+      if (!body) throw new Error("missing card body");
+      const bodyBefore = body.innerHTML;
+
+      // パス無し (tick) の通知: どのファイルが変わったか分からない。
+      const result = view.renderShell(
+        makeDiffMeta(
+          [
+            makeFile(
+              "src/a.ts",
+              1,
+              0,
+              "/file_diff?generation=2&path=src%2Fa.ts",
+            ),
+          ],
+          { generation: 2 },
+        ),
+        null,
+      );
+
+      // 再検証中も見た目は一切変わらない。
+      expect(result.preservedDom).toBe(true);
+      expect(result.invalidatedCards).toBe(0);
+      expect(card.classList.contains("loaded")).toBe(true);
+      expect(card.classList.contains("pending")).toBe(false);
+      expect(card.classList.contains("loading")).toBe(false);
+      expect(card.dataset.stale).toBe("1");
+      expect(body.innerHTML).toBe(bodyBefore);
+
+      await waitFor(() => requests.length === 2);
+      if (respond === "same") {
+        respondJson(1, {
+          path: "src/a.ts",
+          status: "M",
+          diff: DIFF_V1,
+          generation: 2,
+        });
+      } else if (respond === "changed") {
+        respondJson(1, {
+          path: "src/a.ts",
+          status: "M",
+          diff: DIFF_V2,
+          generation: 2,
+        });
+      } else {
+        responders[1].reject(new Error("network down"));
+      }
+
+      await waitFor(() => card.dataset.stale === undefined);
+      await waitFor(() => (body.innerHTML === bodyBefore) === expectSameBody);
+      expect(card.classList.contains("loaded")).toBe(true);
+      expect(card.classList.contains("pending")).toBe(false);
+      expect(card.querySelector(".gdp-error")).toBeNull();
+      if (respond === "changed") {
+        expect(body.innerHTML.includes("content-v2")).toBe(true);
+      }
+      if (respond === "reject") {
+        expect(errorSpy).toHaveBeenCalled();
+      }
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
