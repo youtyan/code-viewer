@@ -49,6 +49,11 @@ This project uses pnpm, not bun or npm. The pinned version is in `packageManager
 - Do not preserve a real proper noun just because it is not a credential. Public repository hygiene covers business and implementation context as well as secrets.
 - Before reporting completion, scan newly added or edited tests, docs, comments, and fixtures for proper nouns that came from observed runtime data.
 
+The identifier half of this is machine-checked by `web-src/test/public-repo-hygiene.test.ts`
+(a ratchet over `web-src/test/`, `web/style.css`, `skills/`, and this file). It catches
+database-shaped `snake_case` names that are not on the reviewed list; it does **not** catch
+proper nouns that are not identifiers, or column values. A green run is not an audit.
+
 This one stays here rather than in a skill because the failure is unrecoverable: it lands in
 git history.
 

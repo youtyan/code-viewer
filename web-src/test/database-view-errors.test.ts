@@ -1019,7 +1019,7 @@ describe("database view SQL error rendering", () => {
             {
               id: "docker",
               dbId: "docker:db",
-              table: "course_categories",
+              table: "sample_categories",
               view: "data",
             },
           ],
@@ -1030,11 +1030,11 @@ describe("database view SQL error rendering", () => {
           ...baseSchemaResponse(),
           tables: [
             { name: "users", type: "table", rowCount: 1 },
-            { name: "course_categories", type: "table", rowCount: 52 },
+            { name: "sample_categories", type: "table", rowCount: 52 },
           ],
           columnsMap: {
             users: [{ name: "id", type: "integer", primaryKey: true }],
-            course_categories: [
+            sample_categories: [
               { name: "id", type: "integer", primaryKey: true },
             ],
           },
@@ -1042,7 +1042,7 @@ describe("database view SQL error rendering", () => {
       if (url.startsWith("/_db/table"))
         return jsonResponse({
           ...baseTableResponse(),
-          table: "course_categories",
+          table: "sample_categories",
         });
       return new Response("unexpected request", { status: 500 });
     });
@@ -1061,7 +1061,7 @@ describe("database view SQL error rendering", () => {
     expect(routes[routes.length - 1]).toEqual({
       screen: "database",
       db: "docker:db",
-      table: "course_categories",
+      table: "sample_categories",
       tab: undefined,
       range: { from: "HEAD", to: "worktree" },
     });
@@ -1144,11 +1144,11 @@ describe("database view SQL error rendering", () => {
           ...baseSchemaResponse(),
           tables: [
             { name: "users", type: "table", rowCount: 1 },
-            { name: "course_categories", type: "table", rowCount: 52 },
+            { name: "sample_categories", type: "table", rowCount: 52 },
           ],
           columnsMap: {
             users: [{ name: "id", type: "integer", primaryKey: true }],
-            course_categories: [
+            sample_categories: [
               { name: "id", type: "integer", primaryKey: true },
             ],
           },
@@ -1168,7 +1168,7 @@ describe("database view SQL error rendering", () => {
         routes.push(route);
       },
     });
-    await view.enter("docker:db", undefined, "course_categories");
+    await view.enter("docker:db", undefined, "sample_categories");
 
     const sawRestoredSearchRoute = routes.some(
       (route) =>
@@ -1177,12 +1177,12 @@ describe("database view SQL error rendering", () => {
         (route as { tab?: unknown }).tab === "search",
     );
     expect(document.querySelectorAll(".db-tabs-chip")).toHaveLength(1);
-    expect(fetchedTables.includes("course_categories")).toBe(true);
+    expect(fetchedTables.includes("sample_categories")).toBe(true);
     expect(sawRestoredSearchRoute).toBe(false);
     expect(routes[routes.length - 1]).toEqual({
       screen: "database",
       db: "docker:db",
-      table: "course_categories",
+      table: "sample_categories",
       tab: undefined,
       range: { from: "HEAD", to: "worktree" },
     });
@@ -1240,7 +1240,7 @@ describe("database view SQL error rendering", () => {
             {
               id: "postgres",
               dbId: "docker:postgres:demo_app",
-              table: "queue_locks",
+              table: "sample_locks",
               view: "data",
             },
             {
@@ -1283,11 +1283,11 @@ describe("database view SQL error rendering", () => {
           schema: "public",
           tables: [
             { name: "users", type: "table", rowCount: 1 },
-            { name: "queue_locks", type: "table", rowCount: 0 },
+            { name: "sample_locks", type: "table", rowCount: 0 },
           ],
           columnsMap: {
             users: [{ name: "id", type: "integer", primaryKey: true }],
-            queue_locks: [{ name: "id", type: "integer", primaryKey: true }],
+            sample_locks: [{ name: "id", type: "integer", primaryKey: true }],
           },
         });
       if (url.startsWith("/_db/table")) {
@@ -1305,12 +1305,12 @@ describe("database view SQL error rendering", () => {
     });
 
     const view = createViewForTest();
-    await view.enter("docker:postgres:demo_app", "public", "queue_locks");
+    await view.enter("docker:postgres:demo_app", "public", "sample_locks");
 
-    expect(fetchedTables).toEqual(["queue_locks"]);
+    expect(fetchedTables).toEqual(["sample_locks"]);
     expect(
       document.querySelector(".db-table-item.active")?.textContent,
-    ).toMatch(/queue_locks/);
+    ).toMatch(/sample_locks/);
     expect(document.querySelector(".db-grid-status")?.textContent).toMatch(
       /0 rows/,
     );
@@ -1333,7 +1333,7 @@ describe("database view SQL error rendering", () => {
               id: "postgres",
               dbId: "docker:postgres:demo_app",
               schema: null,
-              table: "queue_locks",
+              table: "sample_locks",
               view: "data",
             },
           ],
@@ -1359,9 +1359,9 @@ describe("database view SQL error rendering", () => {
         return jsonResponse({
           ...baseSchemaResponse(),
           schema: "public",
-          tables: [{ name: "queue_locks", type: "table", rowCount: 0 }],
+          tables: [{ name: "sample_locks", type: "table", rowCount: 0 }],
           columnsMap: {
-            queue_locks: [{ name: "id", type: "integer", primaryKey: true }],
+            sample_locks: [{ name: "id", type: "integer", primaryKey: true }],
           },
         });
       if (url.startsWith("/_db/table")) {
@@ -1384,10 +1384,10 @@ describe("database view SQL error rendering", () => {
         routeSyncs.push(route);
       },
     });
-    await view.enter("docker:postgres:demo_app", "public", "queue_locks");
+    await view.enter("docker:postgres:demo_app", "public", "sample_locks");
 
     expect(routeSyncs).toEqual([]);
-    expect(fetchedTables).toEqual(["queue_locks"]);
+    expect(fetchedTables).toEqual(["sample_locks"]);
     expect(document.querySelector(".db-grid-status")?.textContent).toMatch(
       /0 rows/,
     );
@@ -1409,7 +1409,7 @@ describe("database view SQL error rendering", () => {
             {
               id: "postgres",
               dbId: "docker:postgres:demo_app",
-              table: "queue_locks",
+              table: "sample_locks",
               view: "data",
             },
             {
@@ -1459,9 +1459,9 @@ describe("database view SQL error rendering", () => {
         return jsonResponse({
           ...baseSchemaResponse(),
           schema: "public",
-          tables: [{ name: "queue_locks", type: "table", rowCount: 0 }],
+          tables: [{ name: "sample_locks", type: "table", rowCount: 0 }],
           columnsMap: {
-            queue_locks: [{ name: "id", type: "integer", primaryKey: true }],
+            sample_locks: [{ name: "id", type: "integer", primaryKey: true }],
           },
         });
       }
@@ -1469,7 +1469,7 @@ describe("database view SQL error rendering", () => {
         sqlRequests.push(url);
         return jsonResponse({
           ...baseTableResponse(),
-          table: "queue_locks",
+          table: "sample_locks",
           rows: [],
           totalRows: 0,
         });
@@ -1828,7 +1828,7 @@ describe("database view SQL error rendering", () => {
             {
               id: "stale",
               dbId: ".code-viewer/db-snapshots.sqlite",
-              table: "cancel_bookings",
+              table: "sample_bookings",
               view: "data",
             },
           ],
@@ -1878,7 +1878,7 @@ describe("database view SQL error rendering", () => {
     await view.enter(
       ".code-viewer/db-snapshots.sqlite",
       undefined,
-      "cancel_bookings",
+      "sample_bookings",
     );
 
     expect(fetchedTables).toEqual([]);
