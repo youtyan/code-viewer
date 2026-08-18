@@ -4,6 +4,7 @@
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, describe, expect, test } from "vitest";
+import { tableData } from "./_table-grid-fixture";
 import { type Deferred, deferred, q, waitFor } from "./_test-helpers";
 
 GlobalRegistrator.register();
@@ -37,7 +38,7 @@ const COLUMNS: DbColumn[] = [
 ];
 
 function initialData(): DbTableDataResponse {
-  return {
+  return tableData({
     dbId: "app.db",
     table: "users",
     columns: COLUMNS,
@@ -45,11 +46,7 @@ function initialData(): DbTableDataResponse {
       [1, "Alice"],
       [2, "Bob"],
     ],
-    totalRows: 2,
-    offset: 0,
-    limit: 200,
-    hasMore: false,
-  };
+  });
 }
 
 function setup() {

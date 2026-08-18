@@ -456,7 +456,14 @@ Open Datastores in the global navigation to access:
 - **Detail footer and related panel** — click any cell to open a resizable
   detail footer; foreign-key cells open a related panel showing the
   referenced or referencing rows, with multi-step drill-down breadcrumbs.
-  Cells that match the focused row are highlighted in both panels.
+  Cells that match the focused row are highlighted in both panels. Once the
+  grid has focus, arrow keys move the active cell from data cell to data cell
+  and the detail footer follows it, `Enter` follows a foreign key (arrow keys
+  alone never fire a related-table query), `Escape` closes whichever panel is
+  open, and `Tab` / `Shift+Tab` move between the main grid and the related
+  grid. The related panel's reference list keeps each entry on one line with
+  the full table name and condition in a tooltip, and its width can be dragged
+  and is remembered.
 - **Footer dock with Query History & Session log** — JetBrains-style bottom
   dock that hosts two tabs: the per-database **Query History** (master/detail
   list of saved queries, SSE-synced across tabs) and a **Session log** that

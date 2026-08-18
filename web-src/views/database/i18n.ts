@@ -65,6 +65,7 @@ export type DbText = {
     exportAction: string;
     foreignKeyHint: string;
     relatedEmpty: string;
+    relatedListResize: string;
     filteredEmptyTitle: (count: number) => string;
     filteredEmptyHint: string;
     filteredEmptyAction: string;
@@ -447,6 +448,7 @@ const EN: DbText = {
     exportAction: "Export",
     foreignKeyHint: "Foreign key — click to view related rows",
     relatedEmpty: "No matching row in the referenced table",
+    relatedListResize: "Resize the related-reference list",
     filteredEmptyTitle: (count) =>
       `No rows match ${count} active filter${count === 1 ? "" : "s"}`,
     filteredEmptyHint:
@@ -834,6 +836,7 @@ const JA: DbText = {
     exportAction: "エクスポート",
     foreignKeyHint: "外部キー: クリックして関連データを表示",
     relatedEmpty: "参照先に該当する行がありません",
+    relatedListResize: "関連参照リストの幅を変える",
     filteredEmptyTitle: (count) =>
       `フィルタ ${count} 件に一致する行がありません`,
     filteredEmptyHint:

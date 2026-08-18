@@ -10464,6 +10464,14 @@ body.journal-task-editor-resizing * {
 .db-grid-header-wrap {
   flex-shrink: 0;
   overflow: hidden;
+  /* 本文 (.db-grid-viewport) の縦スクロールバーが食う幅を、右端に透明な
+     border として空ける。空けないと「見える幅」が本文だけ狭くなり、本文が
+     右へ余分にスクロールできてしまう。ヘッダは scrollLeft を同期しても
+     そこまで追随できず、右端で列がスクロールバー幅ぶんずれる。
+     scrollbar-gutter は overflow:hidden だと見た目の幅しか縮まず、
+     スクロール範囲は縮まないので使えない (実測済み)。
+     幅は table-grid.ts が実測して --db-grid-scrollbar-w に入れる。 */
+  border-right: var(--db-grid-scrollbar-w, 0px) solid transparent;
   border-bottom: 2px solid var(--border);
   background: var(--bg-soft);
 }
@@ -10508,6 +10516,20 @@ body.journal-task-editor-resizing * {
   flex: 1;
   overflow: auto;
   position: relative;
+  /* 行が少なくて縦スクロールバーが出ないときも幅を変えない。ここを可変に
+     すると、ヘッダ / フィルタ行に渡す --db-grid-scrollbar-w が行数やフィルタで
+     変わり、列の位置が動く。 */
+  scrollbar-gutter: stable;
+}
+/* 矢印キーでセルを移動するため viewport 自体がフォーカスを受け取る
+   (tabIndex=0)。セルをクリックするたびに枠が出ると常時ノイズになるので、
+   キーボードで到達したときだけリングを出す。親の .db-grid が
+   overflow:hidden なので外側に描くと切れる → inset で内側に描く。 */
+.db-grid-viewport:focus {
+  outline: none;
+}
+.db-grid-viewport:focus-visible {
+  box-shadow: inset var(--db-focus-ring);
 }
 
 .db-grid-spacer {
@@ -11097,6 +11119,8 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 .db-grid-filter-row-wrap {
   flex-shrink: 0;
   overflow: hidden;
+  /* ヘッダと同じ理由でスクロールバー幅を空ける (.db-grid-header-wrap 参照)。 */
+  border-right: var(--db-grid-scrollbar-w, 0px) solid transparent;
   border-bottom: 1px solid var(--border);
   background: var(--bg-soft);
 }
@@ -11373,11 +11397,30 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 }
 
 .db-related-list {
-  width: 200px;
+  /* 既定 / 下限 / 上限は table-grid.ts が持つ。ここは JS 実行前の初回描画用の
+     fallback だけ (ui-layout: CSS と TS に同じ数値を書かない)。 */
+  width: var(--db-related-list-w, 200px);
   flex-shrink: 0;
   overflow: auto;
-  border-right: 1px solid var(--border);
   padding: 4px;
+}
+
+/* リストとグリッドの間の掴みしろ。境界線の役目も兼ねるので、リスト側の
+   border-right はこちらへ移してある (二重線にしない)。 */
+.db-related-list-resize {
+  flex: 0 0 auto;
+  width: 5px;
+  cursor: col-resize;
+  background: var(--border);
+  background-clip: content-box;
+  border-left: 2px solid transparent;
+  border-right: 2px solid transparent;
+}
+.db-related-list-resize:hover,
+.db-related-list-resize:focus-visible,
+.db-related-panel.db-related-list-resizing .db-related-list-resize {
+  background: var(--accent);
+  outline: none;
 }
 
 .db-related-list-item {
@@ -11410,6 +11453,17 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
+  /* 項目の幅を超えたら省略記号にする。min-width:0 が無いと flex 子は
+     内容幅より縮まず、はみ出したまま折り返す。 */
+  max-width: 100%;
+  min-width: 0;
+}
+
+.db-related-list-table {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* 方向アイコンを name の前に出す: outgoing は → (自分→他テーブル)、
    incoming は ← (他テーブル→自分の PK)。テキスト 1 文字なのでフォントに
@@ -11430,7 +11484,12 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 .db-related-list-via {
   font-size: 11px;
   color: var(--fg-muted);
-  word-break: break-all;
+  /* break-all だと "shops_course_categories.co / urse_category_id = 14" の
+     ように語の途中で折り返って読めなくなる。1 行で省略し、全文は title で出す。 */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .db-related-grid-host {
