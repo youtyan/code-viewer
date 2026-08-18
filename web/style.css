@@ -11501,7 +11501,7 @@ html[data-theme="dark"] .db-grid-detail-json span[style] {
 .db-related-list-via {
   font-size: 11px;
   color: var(--fg-muted);
-  /* break-all だと "shops_course_categories.co / urse_category_id = 14" の
+  /* break-all だと "sample_association_table.sa / mple_column_id = 12" の
      ように語の途中で折り返って読めなくなる。1 行で省略し、全文は title で出す。 */
   max-width: 100%;
   overflow: hidden;
