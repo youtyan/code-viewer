@@ -454,7 +454,8 @@ Open Datastores in the global navigation to access:
   row-count changes. Double-click a cell to edit inline when Edit mode is on;
   the whole pending edit batch commits atomically.
 - **Detail footer and related panel** — click any cell to open a resizable
-  detail footer; foreign-key cells open a related panel showing the
+  detail footer, where JSON values are pretty-printed and syntax-highlighted;
+  foreign-key cells open a related panel showing the
   referenced or referencing rows, with multi-step drill-down breadcrumbs.
   Cells that match the focused row are highlighted in both panels. Once the
   grid has focus, arrow keys move the active cell from data cell to data cell

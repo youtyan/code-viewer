@@ -11300,6 +11300,23 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* shiki は `<span style="--shiki-light:#xxx;--shiki-dark:#yyy">` の inline
+   CSS 変数で token 色を出すので、light / dark でそれぞれ参照する。
+   明示テーマ (html[data-theme]) を OS 設定より後に置いて優先させる。 */
+.db-grid-detail-json span[style] {
+  color: var(--shiki-light);
+}
+@media (prefers-color-scheme: dark) {
+  .db-grid-detail-json span[style] {
+    color: var(--shiki-dark);
+  }
+}
+html[data-theme="light"] .db-grid-detail-json span[style] {
+  color: var(--shiki-light);
+}
+html[data-theme="dark"] .db-grid-detail-json span[style] {
+  color: var(--shiki-dark);
+}
 
 /* ---------- Foreign-key related data ---------- */
 .db-grid-header-fk-icon {

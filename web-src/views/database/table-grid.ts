@@ -17,6 +17,11 @@ import {
   SYNC_16_PATH,
 } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
+import {
+  highlightToInnerHtml,
+  loadShikiHighlighter,
+  type ShikiHighlighter,
+} from "../../core/shiki-loader";
 import { readStoredSize, writeStoredSize } from "../../core/stored-size";
 import type { AnnotationDatabaseDataState } from "../../core/types";
 import { showConfirmDialog } from "../ui-dialog";
@@ -33,6 +38,10 @@ const MAX_PAGE_CACHE_PAGES = 32;
 const FILTER_DEBOUNCE_MS = 300;
 const DEFAULT_COL_WIDTH = 180;
 const CELL_PREVIEW_MAX_CHARS = 4000;
+// 詳細フッタの JSON をハイライトする上限。矢印キーでセルを移動すると 1 打ごとに
+// フッタを組み直すので、極端に大きい値では色付けを諦めて素のテキストで出す
+// (表示内容は変わらない)。
+const DETAIL_JSON_HIGHLIGHT_MAX_CHARS = 100000;
 const RELATED_PANEL_DEFAULT_HEIGHT = 320;
 const RELATED_PANEL_MIN_HEIGHT = 60;
 const DETAIL_PANEL_DEFAULT_HEIGHT = 200;
@@ -1621,10 +1630,55 @@ export function createTableGrid(
     }
   }
 
+  // 詳細フッタの JSON ハイライト用 shiki。JSON セルを最初に開いたときだけ
+  // lazy bundle を読む (グリッドを開いただけでは読み込まない)。
+  let jsonHighlighter: ShikiHighlighter | null = null;
+  let jsonHighlighterRequested = false;
+  // いまフッタに出している JSON。非同期ロードが終わった時点でも「まだ同じ値を
+  // 出しているか」を見てから塗り直す (矢印キーで既に別セルへ移っていることがある)。
+  let detailJsonPre: HTMLElement | null = null;
+  let detailJsonText = "";
+
+  function paintJsonHighlight(pre: HTMLElement, json: string): boolean {
+    if (json.length > DETAIL_JSON_HIGHLIGHT_MAX_CHARS) return false;
+    const inner = highlightToInnerHtml(json, "json", jsonHighlighter);
+    if (!inner) return false;
+    pre.innerHTML = inner;
+    return true;
+  }
+
+  function showJsonDetail(pre: HTMLElement, json: string) {
+    detailJsonPre = pre;
+    detailJsonText = json;
+    if (paintJsonHighlight(pre, json)) return;
+    // ロード前・ロード失敗・巨大すぎるときは素のテキストで出す。色が付かない
+    // だけで中身は欠けない。
+    pre.textContent = json;
+    if (json.length > DETAIL_JSON_HIGHLIGHT_MAX_CHARS) return;
+    ensureJsonHighlighter();
+  }
+
+  function ensureJsonHighlighter() {
+    if (jsonHighlighterRequested) return;
+    jsonHighlighterRequested = true;
+    void loadShikiHighlighter({
+      themes: ["github-light", "github-dark"],
+      langs: ["json"],
+    }).then((highlighter) => {
+      jsonHighlighter = highlighter;
+      if (!highlighter || !detailJsonPre?.isConnected) return;
+      paintJsonHighlight(detailJsonPre, detailJsonText);
+    });
+  }
+
   function showCellDetail(colIndex: number, value: DbValue) {
     const colName = columnNames[colIndex];
     const colType = columns[colIndex]?.type || "";
 
+    // 前のセルの JSON への参照を切る (遅れて届くハイライトが古い pre を
+    // 塗るのを防ぐ)。JSON セルならこの後 showJsonDetail が入れ直す。
+    detailJsonPre = null;
+    detailJsonText = "";
     // 単一値詳細とは排他。関連パネルを閉じるだけでなく、進行中の関連ロードも
     // 中断する（hideRelatedPanel が abort + stack クリア + 埋め込み grid.clear）。
     hideRelatedPanel();
@@ -1687,7 +1741,7 @@ export function createTableGrid(
           const parsed = JSON.parse(str);
           const pre = document.createElement("pre");
           pre.className = "db-grid-detail-json";
-          pre.textContent = JSON.stringify(parsed, null, 2);
+          showJsonDetail(pre, JSON.stringify(parsed, null, 2));
           content.appendChild(pre);
         } catch {
           content.textContent = str;

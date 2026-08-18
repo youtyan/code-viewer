@@ -563,7 +563,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Detail footer & related panel",
-                    "Click any cell to open a resizable detail footer. Once the grid has focus, arrow keys move the active cell from data cell to data cell and the footer follows the value under it, scrolling only as far as needed; Enter follows a foreign key (arrow keys alone never fire a related-table query), Escape closes whichever panel is open, and Tab / Shift+Tab move between the main grid and the related grid. Foreign-key cells open a related-rows panel with multi-step drill-down breadcrumbs, supporting both outgoing (FK → PK) and incoming (PK ← FK) navigation. Its reference list keeps each entry on one line with the full table name and condition in a tooltip, and the list width can be dragged and is remembered.",
+                    "Click any cell to open a resizable detail footer; JSON values are pretty-printed and syntax-highlighted there. Once the grid has focus, arrow keys move the active cell from data cell to data cell and the footer follows the value under it, scrolling only as far as needed; Enter follows a foreign key (arrow keys alone never fire a related-table query), Escape closes whichever panel is open, and Tab / Shift+Tab move between the main grid and the related grid. Foreign-key cells open a related-rows panel with multi-step drill-down breadcrumbs, supporting both outgoing (FK → PK) and incoming (PK ← FK) navigation. Its reference list keeps each entry on one line with the full table name and condition in a tooltip, and the list width can be dragged and is remembered.",
                   ],
                   [
                     "Schema tab",
@@ -1357,7 +1357,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "詳細フッタ・関連パネル",
-                    "セルをクリックするとリサイズ可能な詳細フッタが開きます。グリッドにフォーカスがある間は矢印キーでデータセル間を移動でき、詳細フッタもその値に追従します（スクロールは見える位置まで必要なぶんだけ）。Enter で外部キーを辿り（矢印キーだけでは関連テーブルへのクエリは飛びません）、Escape で開いているパネルを閉じ、Tab / Shift+Tab でメイングリッドと関連グリッドを行き来できます。外部キー値からは関連行パネルが開き、ブレッドクラム付きで多段ドリルダウン可能。outgoing (FK→PK) と incoming (PK←FK) の両方向に対応。左の参照リストは各項目を1行に保ち、テーブル名と条件の全文は tooltip で確認できます。リスト幅はドラッグで変更でき、次回も保持されます。",
+                    "セルをクリックするとリサイズ可能な詳細フッタが開きます。JSON 値は整形してシンタックスハイライト付きで表示されます。グリッドにフォーカスがある間は矢印キーでデータセル間を移動でき、詳細フッタもその値に追従します（スクロールは見える位置まで必要なぶんだけ）。Enter で外部キーを辿り（矢印キーだけでは関連テーブルへのクエリは飛びません）、Escape で開いているパネルを閉じ、Tab / Shift+Tab でメイングリッドと関連グリッドを行き来できます。外部キー値からは関連行パネルが開き、ブレッドクラム付きで多段ドリルダウン可能。outgoing (FK→PK) と incoming (PK←FK) の両方向に対応。左の参照リストは各項目を1行に保ち、テーブル名と条件の全文は tooltip で確認できます。リスト幅はドラッグで変更でき、次回も保持されます。",
                   ],
                   [
                     "Schema タブ",
