@@ -7,6 +7,8 @@ import type {
   DbValue,
   RowMutation,
 } from "../../core/database/types";
+import { attachDragResizer } from "../../core/drag-resizer";
+import { isEditableKeyTarget } from "../../core/focus-scope";
 import {
   DOWNLOAD_16_PATHS,
   iconSvg,
@@ -15,17 +17,31 @@ import {
   SYNC_16_PATH,
 } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
+import {
+  highlightToInnerHtml,
+  loadShikiHighlighter,
+  type ShikiHighlighter,
+} from "../../core/shiki-loader";
+import { readStoredSize, writeStoredSize } from "../../core/stored-size";
 import type { AnnotationDatabaseDataState } from "../../core/types";
 import { showConfirmDialog } from "../ui-dialog";
 import { type DbText, dbText } from "./i18n";
 
 const ROW_HEIGHT = 28;
+// 行番号列の幅。CSS の .db-grid-rownum (flex: 0 0 50px) と対で維持する。
+// ROW_HEIGHT が .db-grid-row の height と対になっているのと同じ扱いで、
+// 矢印キー移動で「移動先の列が見えているか」を測るのに使う。
+const ROWNUM_WIDTH = 50;
 const OVERSCAN = 20;
 const PAGE_SIZE = 200;
 const MAX_PAGE_CACHE_PAGES = 32;
 const FILTER_DEBOUNCE_MS = 300;
 const DEFAULT_COL_WIDTH = 180;
 const CELL_PREVIEW_MAX_CHARS = 4000;
+// 詳細フッタの JSON をハイライトする上限。矢印キーでセルを移動すると 1 打ごとに
+// フッタを組み直すので、極端に大きい値では色付けを諦めて素のテキストで出す
+// (表示内容は変わらない)。
+const DETAIL_JSON_HIGHLIGHT_MAX_CHARS = 100000;
 const RELATED_PANEL_DEFAULT_HEIGHT = 320;
 const RELATED_PANEL_MIN_HEIGHT = 60;
 const DETAIL_PANEL_DEFAULT_HEIGHT = 200;
@@ -35,6 +51,21 @@ const DETAIL_PANEL_MIN_HEIGHT = 40;
 // 最低残し量」。resize handle 自体は panel 上端にあるので、reserve が極小でも
 // ハンドル自体は掴める。
 const PANEL_MAX_RESERVE = 20;
+// 関連パネル左リストの幅。既定 / 下限 / 上限はここが出所で、CSS 側は
+// var(--db-related-list-w, ...) の fallback だけを持つ (JS 実行前の初回描画用)。
+const RELATED_LIST_DEFAULT_WIDTH = 200;
+const RELATED_LIST_MIN_WIDTH = 120;
+const RELATED_LIST_MAX_WIDTH = 480;
+const RELATED_LIST_WIDTH_KEY = "code-viewer:db-related-list-width";
+
+// 矢印キー 1 打あたりの移動量。データセル間だけを動き、行番号列と
+// 新規行ドラフトには入らない。
+const ARROW_STEP: Record<string, { row: number; col: number }> = {
+  ArrowUp: { row: -1, col: 0 },
+  ArrowDown: { row: 1, col: 0 },
+  ArrowLeft: { row: 0, col: -1 },
+  ArrowRight: { row: 0, col: 1 },
+};
 
 export type GridSort = {
   column: string;
@@ -112,6 +143,11 @@ export type TableGridCallbacks = {
   getEditable?: () => boolean;
   /** 保留中の変更をサーバへ適用する。失敗時は throw (メッセージを表示する)。 */
   applyMutations?: (mutations: RowMutation[]) => Promise<void>;
+  /**
+   * 埋め込みグリッドで Shift+Tab が押されたとき、親グリッドへフォーカスを戻す。
+   * 関連パネルに入ったキーボード操作が出られなくなるのを防ぐ。
+   */
+  onFocusParentGrid?: () => void;
   /** ユーザー操作のリロードが成功したとき、親ビューへ件数同期の機会を通知する。 */
   onRefreshComplete?: (event: {
     table: string;
@@ -127,6 +163,8 @@ export type TableGridOptions = {
 
 export type TableGrid = {
   el: HTMLElement;
+  /** グリッド本体へフォーカスを移す (矢印キーの受け手を切り替える)。 */
+  focusGrid: () => void;
   load: (table: string, initialData?: DbTableDataResponse) => void;
   refresh: () => Promise<void>;
   showError: (message: string) => void;
@@ -299,6 +337,9 @@ export function createTableGrid(
 
   const viewport = document.createElement("div");
   viewport.className = "db-grid-viewport";
+  // 矢印キーでセルを移動するために、viewport 自体をフォーカス対象にする。
+  // セルは div なので、セルをクリックするとフォーカスはここへ上がってくる。
+  viewport.tabIndex = 0;
 
   const spacer = document.createElement("div");
   spacer.className = "db-grid-spacer";
@@ -436,6 +477,216 @@ export function createTableGrid(
     setActiveCell(-1, -1);
   }
 
+  // ヘッダ / フィルタ行の横位置を本文に合わせる。scroll イベントだけで呼ぶと、
+  // 本文がスクロールしないまま両者がずれた場合 (ヘッダ再構築での scrollLeft
+  // リセット、フィルタ入力へのフォーカスによる自動スクロール、幅変化に伴う
+  // clamp) にずれたままになるので、描画のたびに引き直す。
+  function syncHorizontalScroll() {
+    headerWrap.scrollLeft = viewport.scrollLeft;
+    filterRowWrap.scrollLeft = viewport.scrollLeft;
+  }
+
+  // クリックでも矢印キーでも「いまどのセルに居るか」をここで確定する。
+  // viewport へフォーカスを移すのは、直後の矢印キーをこのグリッドで
+  // 受けるため (viewport は tabIndex=0)。
+  function focusCell(
+    rowIndex: number,
+    row: HTMLElement | null,
+    colIndex: number,
+  ) {
+    setSelectedRow(rowIndex, row);
+    setActiveCell(rowIndex, colIndex);
+    viewport.focus({ preventScroll: true });
+  }
+
+  // 指定セルを現在地にし、見える位置まで寄せて、詳細フッタを合わせる。
+  // 仮想スクロール中は移動先の行が未描画のことがあるが、setActiveCell /
+  // setSelectedRow は state を持つので、次の renderViewport で色が付く。
+  function moveActiveCell(rowIndex: number, colIndex: number) {
+    const rendered = body.children[rowIndex - renderStartRow] as
+      | HTMLElement
+      | undefined;
+    focusCell(rowIndex, rendered ?? null, colIndex);
+    scrollCellIntoView(rowIndex, colIndex);
+    showDetailForActiveCell();
+  }
+
+  // 移動先が隠れているときだけ、見える位置まで寄せる (中央寄せはしない。
+  // 1 セルずつ動かすたびに画面が飛ぶため)。clientHeight / clientWidth が 0
+  // のとき (非表示・レイアウト前) は測れないので何もしない。
+  function scrollCellIntoView(rowIndex: number, colIndex: number) {
+    const viewHeight = viewport.clientHeight;
+    if (viewHeight > 0) {
+      const top = rowIndex * ROW_HEIGHT;
+      const bottom = top + ROW_HEIGHT;
+      if (top < viewport.scrollTop) viewport.scrollTop = top;
+      else if (bottom > viewport.scrollTop + viewHeight) {
+        viewport.scrollTop = bottom - viewHeight;
+      }
+    }
+    const viewWidth = viewport.clientWidth;
+    if (viewWidth <= 0) return;
+    let left = ROWNUM_WIDTH;
+    for (let c = 0; c < colIndex; c++) left += getColWidth(columnNames[c]);
+    const right = left + getColWidth(columnNames[colIndex]);
+    if (left < viewport.scrollLeft) {
+      // 先頭列へ戻ったときは行番号列も見せる (行番号列は sticky ではない)。
+      viewport.scrollLeft = colIndex === 0 ? 0 : left;
+    } else if (right > viewport.scrollLeft + viewWidth) {
+      viewport.scrollLeft = right - viewWidth;
+    }
+  }
+
+  // キャッシュ済みページから 1 行を取り出す。未読込なら undefined。
+  function cachedRow(rowIndex: number): DbValue[] | undefined {
+    const pageStart = Math.floor(rowIndex / PAGE_SIZE) * PAGE_SIZE;
+    return getCachedPage(pageStart)?.[rowIndex - pageStart];
+  }
+
+  // キャッシュ済みページからセル値を取り出す。未読込は undefined を返す
+  // (SQL の NULL は null で返るので、未読込と区別が付く)。
+  function cachedCellValue(
+    rowIndex: number,
+    colIndex: number,
+  ): DbValue | undefined {
+    const row = cachedRow(rowIndex);
+    return row ? row[colIndex] : undefined;
+  }
+
+  // active セルの強調は「詳細フッタ / 関連パネルに出している値の元セル」を
+  // 意味するので、現在地が動いたらフッタも同じセルへ合わせる。移動先の
+  // ページが未読込なら、取得を待ってから出す (待つ間に別のセルへ移って
+  // いたら、そのときの結果を優先して捨てる)。
+  function showDetailForActiveCell() {
+    const rowIndex = activeCellRowIndex;
+    const colIndex = activeCellColIndex;
+    if (rowIndex < 0 || colIndex < 0) return;
+    const value = cachedCellValue(rowIndex, colIndex);
+    if (value !== undefined) {
+      showCellDetail(colIndex, value);
+      return;
+    }
+    const pageStart = Math.floor(rowIndex / PAGE_SIZE) * PAGE_SIZE;
+    void ensurePage(pageStart).then(() => {
+      if (activeCellRowIndex !== rowIndex || activeCellColIndex !== colIndex) {
+        return;
+      }
+      const loaded = cachedCellValue(rowIndex, colIndex);
+      if (loaded !== undefined) showCellDetail(colIndex, loaded);
+    });
+  }
+
+  // Tab / Shift+Tab で、メイングリッドと関連パネルの埋め込みグリッドの間を
+  // 行き来する。引き受けたら true。関連パネルが閉じているときや、戻り先が
+  // 無いときは false を返してブラウザ既定のフォーカス移動に任せる。
+  function moveGridFocus(back: boolean): boolean {
+    if (back) {
+      if (!embedded || !callbacks.onFocusParentGrid) return false;
+      callbacks.onFocusParentGrid();
+      return true;
+    }
+    if (embedded || !relatedPanel || relatedPanel.hidden || !embeddedGrid) {
+      return false;
+    }
+    embeddedGrid.focusGrid();
+    return true;
+  }
+
+  // Escape は「いま開いている方」を閉じる。どちらも閉じているなら何もせず
+  // false を返す (アプリ側の Escape を潰さない)。
+  function closeOpenPanel(): boolean {
+    if (relatedPanel && !relatedPanel.hidden) {
+      hideRelatedPanel();
+      clearActiveCell();
+      return true;
+    }
+    if (!detailPanel.hidden) {
+      detailPanel.hidden = true;
+      clearDetailContent();
+      clearActiveCell();
+      return true;
+    }
+    return false;
+  }
+
+  // Enter は「いまのセルをクリックしたのと同じ」。矢印キーの移動では FK を
+  // 辿らない (1 打ごとに参照先へクエリが飛ぶため) ので、辿る操作はここに置く。
+  function activateActiveCell(): boolean {
+    const rowIndex = activeCellRowIndex;
+    const colIndex = activeCellColIndex;
+    if (rowIndex < 0 || colIndex < 0) return false;
+    const rowValues = cachedRow(rowIndex);
+    if (!rowValues) return false;
+    const colName = columnNames[colIndex];
+    const fkClickable =
+      fkColumns.has(colName) &&
+      (!embedded || !!callbacks.onForeignKeyCellClick);
+    if (!fkClickable) {
+      showDetailForActiveCell();
+      return true;
+    }
+    if (embedded) {
+      callbacks.onForeignKeyCellClick?.(
+        currentTable,
+        columnNames,
+        rowValues,
+        colName,
+      );
+    } else {
+      openRelatedForRow(currentTable, columnNames, rowValues, colName);
+    }
+    return true;
+  }
+
+  // viewport にフォーカスがある間、矢印キーでデータセル間を移動する。
+  // FK セルへ移動しても関連パネル (= 参照先テーブルの取得) は開かない。
+  // キーを 1 打するたびにクエリが飛ぶのを避けるため、FK を辿る操作は
+  // クリック側に残してある。
+  function onViewportKeydown(e: KeyboardEvent) {
+    if (isImeComposing(e)) return;
+    // セル入力・フィルタ入力の中ではブラウザ既定の操作が優先。
+    if (isEditableKeyTarget(e.target as Element | null)) return;
+    // Tab はメイングリッドと関連パネルの行き来にだけ使う。引き受けられない
+    // ときは既定のフォーカス移動に任せる (グリッドから出られなくしない)。
+    if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (moveGridFocus(e.shiftKey)) e.preventDefault();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    if (e.key === "Escape") {
+      if (closeOpenPanel()) e.preventDefault();
+      return;
+    }
+    if (e.key === "Enter") {
+      if (activateActiveCell()) e.preventDefault();
+      return;
+    }
+    const step = ARROW_STEP[e.key];
+    if (!step) return;
+    const lastRow = totalRows - 1;
+    const lastCol = columnNames.length - 1;
+    if (lastRow < 0 || lastCol < 0) return;
+    // ここから先はグリッドが矢印キーを引き受ける。端で止まるときも
+    // viewport の既定スクロールは起こさない。
+    e.preventDefault();
+    if (activeCellRowIndex < 0 || activeCellColIndex < 0) {
+      // 現在地が無い状態の 1 打目は「グリッドに入る」だけにする。
+      moveActiveCell(Math.min(Math.max(selectedRowIndex, 0), lastRow), 0);
+      return;
+    }
+    const nextRow = Math.min(
+      Math.max(activeCellRowIndex + step.row, 0),
+      lastRow,
+    );
+    const nextCol = Math.min(
+      Math.max(activeCellColIndex + step.col, 0),
+      lastCol,
+    );
+    if (nextRow === activeCellRowIndex && nextCol === activeCellColIndex)
+      return;
+    moveActiveCell(nextRow, nextCol);
+  }
+
   // detailPanel.innerHTML = "" を直に呼ぶと resize handle まで消えてしまう
   // ので、resize 以外の子だけ削除するヘルパを通す。
   function clearDetailContent() {
@@ -571,6 +822,7 @@ export function createTableGrid(
   };
   let relatedPanel: HTMLElement | null = null;
   let relatedListEl: HTMLElement | null = null;
+  let relatedListResizeEl: HTMLElement | null = null;
   let relatedGridHost: HTMLElement | null = null;
   // 参照先が 0 件のときに出す空表示。
   let relatedEmptyEl: HTMLElement | null = null;
@@ -595,6 +847,26 @@ export function createTableGrid(
           Math.min(panelMaxHeight(), savedRelatedHeight),
         )
       : RELATED_PANEL_DEFAULT_HEIGHT;
+  // 関連パネル左リストの幅。ドラッグで変えた値は localStorage に覚える
+  // (「その画面でどれくらい引き伸ばしたか」はブラウザ側の都合なので)。
+  let relatedListWidth = clampRelatedListWidth(
+    readStoredSize(RELATED_LIST_WIDTH_KEY, RELATED_LIST_DEFAULT_WIDTH),
+  );
+  let relatedListResizeDetach: (() => void) | null = null;
+
+  function clampRelatedListWidth(width: number): number {
+    return Math.max(
+      RELATED_LIST_MIN_WIDTH,
+      Math.min(RELATED_LIST_MAX_WIDTH, Math.round(width)),
+    );
+  }
+
+  // 幅は要素の style.width ではなく CSS 変数へ書く (ui-layout)。
+  function applyRelatedListWidth(width: number): void {
+    relatedListWidth = clampRelatedListWidth(width);
+    el.style.setProperty("--db-related-list-w", `${relatedListWidth}px`);
+  }
+
   if (!embedded) {
     relatedPanel = document.createElement("div");
     relatedPanel.className = "db-related-panel";
@@ -810,6 +1082,10 @@ export function createTableGrid(
   function resetSelectionAndDetail() {
     selectedRowIndex = -1;
     selectedRowElement = null;
+    // active セルも落とす。並べ替え / 再読込で同じ行 index が別の行を
+    // 指すので、残すと「フッタは閉じているのにセルだけ光っている」状態
+    // になり、矢印キーの現在地も前のデータの位置から始まってしまう。
+    clearActiveCell();
     detailPanel.hidden = true;
     clearDetailContent();
   }
@@ -1080,6 +1356,26 @@ export function createTableGrid(
     bodyRow.className = "db-related-body";
     relatedListEl = document.createElement("div");
     relatedListEl.className = "db-related-list";
+    // リストは幅が固定だとテーブル名 + 条件が読めないので、右端を掴んで
+    // 広げられるようにする (ドラッグの配線は core/drag-resizer と共有)。
+    const listResize = document.createElement("div");
+    listResize.className = "db-related-list-resize";
+    listResize.tabIndex = 0;
+    listResize.setAttribute("role", "separator");
+    listResize.setAttribute("aria-orientation", "vertical");
+    listResize.setAttribute("aria-label", text().grid.relatedListResize);
+    relatedListResizeEl = listResize;
+    applyRelatedListWidth(relatedListWidth);
+    relatedListResizeDetach = attachDragResizer({
+      handle: listResize,
+      getSize: () => relatedListWidth,
+      applySize: applyRelatedListWidth,
+      direction: 1,
+      axis: "x",
+      onEnd: () => writeStoredSize(RELATED_LIST_WIDTH_KEY, relatedListWidth),
+      activeClassTarget: relatedPanel,
+      activeClassName: "db-related-list-resizing",
+    });
     relatedGridHost = document.createElement("div");
     relatedGridHost.className = "db-related-grid-host";
 
@@ -1106,6 +1402,8 @@ export function createTableGrid(
         // 埋め込みグリッドの FK クリックで 1 段潜る。
         onForeignKeyCellClick: (sourceTable, colNames, rowData, clicked) =>
           drillIntoRelated(sourceTable, colNames, rowData, clicked),
+        // 埋め込み側で Shift+Tab を押したらメイングリッドへ戻す。
+        onFocusParentGrid: () => viewport.focus({ preventScroll: true }),
       },
       { embedded: true },
     );
@@ -1117,7 +1415,7 @@ export function createTableGrid(
     relatedEmptyEl.hidden = true;
     relatedGridHost.appendChild(relatedEmptyEl);
 
-    bodyRow.append(relatedListEl, relatedGridHost);
+    bodyRow.append(relatedListEl, listResize, relatedGridHost);
     relatedPanel.append(resizer, header, bodyRow);
   }
 
@@ -1264,7 +1562,13 @@ export function createTableGrid(
       const name = document.createElement("span");
       name.className = "db-related-list-name";
       // outgoing は参照先テーブル、incoming は参照元テーブル。
-      name.textContent = relatedDrillTable(target);
+      // テーブル名は別要素にする。span 直下のテキストのままだと、幅が
+      // 足りないときに省略記号を出せず、語の途中で折り返してしまう。
+      const tableName = document.createElement("span");
+      tableName.className = "db-related-list-table";
+      tableName.textContent = relatedDrillTable(target);
+      tableName.title = relatedDrillTable(target);
+      name.appendChild(tableName);
       if (target.fk.inferred) {
         const badge = document.createElement("span");
         badge.className = "db-related-list-inferred-badge";
@@ -1277,10 +1581,13 @@ export function createTableGrid(
       // outgoing: this row's FK 列 = value (= parent の PK)
       // incoming: parent の側で column = value となる行を見せる、ので
       //   "<fromTable>.<fromColumn> = <value>" と完全形で出す。
-      via.textContent =
+      const condition =
         target.direction === "outgoing"
           ? `${target.fk.fromColumn} = ${target.value}`
           : `${target.fk.fromTable}.${target.fk.fromColumn} = ${target.value}`;
+      via.textContent = condition;
+      // 1 行に収まらないときは省略表示になるので、全文は tooltip で出す。
+      via.title = condition;
       item.append(name, via);
       item.addEventListener("click", () => selectRelatedTarget(i));
       relatedListEl?.appendChild(item);
@@ -1323,10 +1630,55 @@ export function createTableGrid(
     }
   }
 
+  // 詳細フッタの JSON ハイライト用 shiki。JSON セルを最初に開いたときだけ
+  // lazy bundle を読む (グリッドを開いただけでは読み込まない)。
+  let jsonHighlighter: ShikiHighlighter | null = null;
+  let jsonHighlighterRequested = false;
+  // いまフッタに出している JSON。非同期ロードが終わった時点でも「まだ同じ値を
+  // 出しているか」を見てから塗り直す (矢印キーで既に別セルへ移っていることがある)。
+  let detailJsonPre: HTMLElement | null = null;
+  let detailJsonText = "";
+
+  function paintJsonHighlight(pre: HTMLElement, json: string): boolean {
+    if (json.length > DETAIL_JSON_HIGHLIGHT_MAX_CHARS) return false;
+    const inner = highlightToInnerHtml(json, "json", jsonHighlighter);
+    if (!inner) return false;
+    pre.innerHTML = inner;
+    return true;
+  }
+
+  function showJsonDetail(pre: HTMLElement, json: string) {
+    detailJsonPre = pre;
+    detailJsonText = json;
+    if (paintJsonHighlight(pre, json)) return;
+    // ロード前・ロード失敗・巨大すぎるときは素のテキストで出す。色が付かない
+    // だけで中身は欠けない。
+    pre.textContent = json;
+    if (json.length > DETAIL_JSON_HIGHLIGHT_MAX_CHARS) return;
+    ensureJsonHighlighter();
+  }
+
+  function ensureJsonHighlighter() {
+    if (jsonHighlighterRequested) return;
+    jsonHighlighterRequested = true;
+    void loadShikiHighlighter({
+      themes: ["github-light", "github-dark"],
+      langs: ["json"],
+    }).then((highlighter) => {
+      jsonHighlighter = highlighter;
+      if (!highlighter || !detailJsonPre?.isConnected) return;
+      paintJsonHighlight(detailJsonPre, detailJsonText);
+    });
+  }
+
   function showCellDetail(colIndex: number, value: DbValue) {
     const colName = columnNames[colIndex];
     const colType = columns[colIndex]?.type || "";
 
+    // 前のセルの JSON への参照を切る (遅れて届くハイライトが古い pre を
+    // 塗るのを防ぐ)。JSON セルならこの後 showJsonDetail が入れ直す。
+    detailJsonPre = null;
+    detailJsonText = "";
     // 単一値詳細とは排他。関連パネルを閉じるだけでなく、進行中の関連ロードも
     // 中断する（hideRelatedPanel が abort + stack クリア + 埋め込み grid.clear）。
     hideRelatedPanel();
@@ -1389,7 +1741,7 @@ export function createTableGrid(
           const parsed = JSON.parse(str);
           const pre = document.createElement("pre");
           pre.className = "db-grid-detail-json";
-          pre.textContent = JSON.stringify(parsed, null, 2);
+          showJsonDetail(pre, JSON.stringify(parsed, null, 2));
           content.appendChild(pre);
         } catch {
           content.textContent = str;
@@ -1468,6 +1820,7 @@ export function createTableGrid(
     }
     renderFilterRow();
     syncContentWidth();
+    syncHorizontalScroll();
   }
 
   function startResize(colIndex: number, startEvent: MouseEvent) {
@@ -1558,9 +1911,44 @@ export function createTableGrid(
     }, FILTER_DEBOUNCE_MS);
   }
 
+  // 本文の縦スクロールバーが食う幅。ヘッダ / フィルタ行はこの幅ぶんを右端に
+  // 空けることで、横スクロールできる範囲を本文と一致させる (空けないと本文
+  // だけ余分に右へスクロールでき、右端で列がずれる)。viewport 側は
+  // scrollbar-gutter: stable なので、行数やフィルタで値が動かない。
+  let scrollbarGutterPx = -1;
+  function syncScrollbarGutter() {
+    // 非表示のタブやレイアウト前は 0 しか返らないので、両方が実寸を返す
+    // ときだけ更新する。片方でも欠けた値で計算すると、前回測った正しい値を
+    // 壊してしまう。
+    const outer = viewport.offsetWidth;
+    const inner = viewport.clientWidth;
+    if (!(outer > 0) || !(inner > 0)) return;
+    const gutter = outer - inner;
+    if (gutter === scrollbarGutterPx) return;
+    scrollbarGutterPx = gutter;
+    el.style.setProperty("--db-grid-scrollbar-w", `${gutter}px`);
+  }
+
+  // 列の合計幅 = ヘッダセルの実寸の合計。
+  // headerRow.scrollWidth を使ってはいけない。.db-grid-header は
+  // min-width:100% なので、列より枠が広いときはコンテナ幅まで膨らんだ値を
+  // 返す。それを本文 / フィルタ行 / spacer の min-width へ焼くと、あとで枠が
+  // 狭くなっても本文だけ広いまま残り (min-width は縮まない)、本文の方が
+  // 余分に横スクロールできてヘッダが取り残される。ヘッダ側には min-width を
+  // 焼かない (焼くと次の測定が縮まなくなる) ので、ずれはヘッダ対本文の
+  // 食い違いとして出る。
+  function measureContentWidth(): number {
+    let total = 0;
+    for (const cell of headerRow.children) {
+      total += cell.getBoundingClientRect().width;
+    }
+    return total;
+  }
+
   function syncContentWidth() {
     requestAnimationFrame(() => {
-      const w = headerRow.scrollWidth;
+      syncScrollbarGutter();
+      const w = measureContentWidth();
       if (w > 0) {
         spacer.style.minWidth = `${w}px`;
         body.style.minWidth = `${w}px`;
@@ -1832,8 +2220,7 @@ export function createTableGrid(
         // シングルクリック時のハンドラ。read-only モードと同じく、行/アクティブ
         // セルを更新し、FK セルなら関連パネル、その他なら詳細フッタを開く。
         const activate = () => {
-          setSelectedRow(rowIndex, row);
-          setActiveCell(rowIndex, cellColIndex);
+          focusCell(rowIndex, row, cellColIndex);
           if (fkClickable) {
             if (embedded) {
               callbacks.onForeignKeyCellClick?.(
@@ -1942,9 +2329,8 @@ export function createTableGrid(
       }
       cell.addEventListener("click", (e) => {
         e.stopPropagation();
-        setSelectedRow(rowIndex, row);
         // 詳細フッタ / 関連パネルに表示する対象セルを覚えておく。
-        setActiveCell(rowIndex, cellColIndex);
+        focusCell(rowIndex, row, cellColIndex);
         // FK セルは関連テーブルをパネルに開く（埋め込みは親へ通知して
         // 1 段潜る）。それ以外は従来どおり単一値の詳細を表示する。
         if (fkClickable) {
@@ -2091,6 +2477,9 @@ export function createTableGrid(
         );
       }
       syncFilteredEmptyState();
+      // 行を組み直すとヘッダ側の scrollLeft が clamp されることがあるので、
+      // 幅が確定したこのタイミングで横位置を引き直す。
+      syncHorizontalScroll();
 
       if (focusRestore) {
         const next = body.querySelector<HTMLInputElement>(
@@ -2267,11 +2656,27 @@ export function createTableGrid(
   });
 
   const onViewportScroll = () => {
-    headerWrap.scrollLeft = viewport.scrollLeft;
-    filterRowWrap.scrollLeft = viewport.scrollLeft;
+    syncHorizontalScroll();
     renderViewport();
   };
+  // ヘッダ / フィルタ行のラップは overflow:hidden だが、中の列フィルタ入力に
+  // フォーカスが入ると、ブラウザがそれを見せようとしてラップ自身を横スクロール
+  // させる。放っておくとフィルタ行だけが本文とずれたまま残る (本文がスクロール
+  // するまで直らない)。この場合の正しい挙動は「グリッド全体をその列まで動かす」
+  // ことなので、本文側へ反映して 3 つを同じ位置に揃え直す。
+  const onWrapScroll = (wrap: HTMLElement) => () => {
+    if (wrap.scrollLeft === viewport.scrollLeft) return;
+    viewport.scrollLeft = wrap.scrollLeft;
+    syncHorizontalScroll();
+  };
+  const onHeaderWrapScroll = onWrapScroll(headerWrap);
+  const onFilterWrapScroll = onWrapScroll(filterRowWrap);
   viewport.addEventListener("scroll", onViewportScroll, { passive: true });
+  viewport.addEventListener("keydown", onViewportKeydown);
+  headerWrap.addEventListener("scroll", onHeaderWrapScroll, { passive: true });
+  filterRowWrap.addEventListener("scroll", onFilterWrapScroll, {
+    passive: true,
+  });
 
   // 編集セル入力の IME 変換境界を捕捉する (composition イベントは body から
   // バブリングする)。変換中は renderViewport をスキップし、確定後に再描画する。
@@ -2289,7 +2694,12 @@ export function createTableGrid(
     clear();
     embeddedGrid?.destroy();
     embeddedGrid = null;
+    relatedListResizeDetach?.();
+    relatedListResizeDetach = null;
     viewport.removeEventListener("scroll", onViewportScroll);
+    viewport.removeEventListener("keydown", onViewportKeydown);
+    headerWrap.removeEventListener("scroll", onHeaderWrapScroll);
+    filterRowWrap.removeEventListener("scroll", onFilterWrapScroll);
     body.removeEventListener("compositionstart", onCompositionStart);
     body.removeEventListener("compositionend", onCompositionEnd);
     // ドラッグ中の window リスナーが残らないよう、teardown 時に外す。
@@ -2316,6 +2726,10 @@ export function createTableGrid(
       updateStatus();
     }
     renderRelatedCrumbs();
+    renderRelatedList();
+    if (relatedListResizeEl) {
+      relatedListResizeEl.setAttribute("aria-label", t.grid.relatedListResize);
+    }
     embeddedGrid?.localize();
   }
 
@@ -2633,6 +3047,7 @@ export function createTableGrid(
 
   return {
     el,
+    focusGrid: () => viewport.focus({ preventScroll: true }),
     load,
     refresh: refreshCurrentTable,
     showError,

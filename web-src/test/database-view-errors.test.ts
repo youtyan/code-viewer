@@ -102,6 +102,26 @@ class FakeText {
   }
 }
 
+// 本物の style は setProperty を持つ。プレーンなオブジェクトのままだと
+// CSS 変数を書くコード (table-grid の --db-grid-scrollbar-w など) が
+// TypeError で落ちるので、最低限の API を実装しておく。
+class FakeStyle {
+  [key: string]: unknown;
+
+  setProperty(name: string, value: string) {
+    this[name] = value;
+  }
+
+  getPropertyValue(name: string): string {
+    const value = this[name];
+    return typeof value === "string" ? value : "";
+  }
+
+  removeProperty(name: string) {
+    delete this[name];
+  }
+}
+
 class FakeElement {
   readonly nodeType = 1;
   children: FakeNode[] = [];
@@ -109,7 +129,7 @@ class FakeElement {
   dataset: Record<string, string> = {};
   attributes: Record<string, string> = {};
   parentElement: FakeElement | null = null;
-  style: Record<string, string> = {};
+  style = new FakeStyle();
   title = "";
   type = "";
   value = "";
