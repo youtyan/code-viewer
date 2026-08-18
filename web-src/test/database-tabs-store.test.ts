@@ -183,13 +183,13 @@ describe("database tabs store", () => {
           {
             id: "internal",
             dbId: ".code-viewer/db-snapshots.sqlite",
-            table: "cancel_bookings",
+            table: "sample_bookings",
             view: "data",
           },
           {
             id: "valid",
             dbId: "docker:db",
-            table: "cancel_bookings",
+            table: "sample_bookings",
             view: "data",
           },
         ],
@@ -202,7 +202,7 @@ describe("database tabs store", () => {
           {
             id: "valid",
             dbId: "docker:db",
-            table: "cancel_bookings",
+            table: "sample_bookings",
             view: "data",
           },
         ],
