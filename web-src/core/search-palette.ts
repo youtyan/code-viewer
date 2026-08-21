@@ -51,3 +51,24 @@ export function isTextInputTarget(target: EventTarget | null): boolean {
   const tag = target.tagName.toLowerCase();
   return tag === "input" || tag === "textarea" || target.isContentEditable;
 }
+
+// Grep palette query syntax: "path:<file|dir|glob>" tokens narrow the
+// search; everything else is the text to look for (joined back with single
+// spaces, so "foo  bar" and "foo bar" search the same phrase). A bare
+// "path:" with no value is ignored rather than treated as text.
+export type ParsedGrepQuery = { term: string; paths: string[] };
+
+export function parseGrepQuery(raw: string): ParsedGrepQuery {
+  const paths: string[] = [];
+  const words: string[] = [];
+  for (const token of raw.trim().split(/\s+/)) {
+    if (!token) continue;
+    const scoped = /^path:(.*)$/.exec(token);
+    if (scoped) {
+      if (scoped[1]) paths.push(scoped[1]);
+      continue;
+    }
+    words.push(token);
+  }
+  return { term: words.join(" "), paths };
+}

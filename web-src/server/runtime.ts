@@ -292,8 +292,21 @@ export function startServer(options: {
   fetch: (req: Request) => Response | Promise<Response>;
 }): Promise<StartedServer> {
   const server = createServer(async (req, res) => {
+    // Handlers read `request.signal` to stop long external processes (rg,
+    // git) when the browser abandons the request. Node's IncomingMessage
+    // has no such signal, so derive one from the response closing before
+    // it finished: that is the client-went-away case.
+    const abort = new AbortController();
+    res.on("close", () => {
+      if (!res.writableFinished) abort.abort();
+    });
     try {
-      const request = nodeRequestToWeb(req, options.hostname, server.address());
+      const request = nodeRequestToWeb(
+        req,
+        options.hostname,
+        server.address(),
+        abort.signal,
+      );
       const response = await options.fetch(request);
       await writeWebResponse(res, response);
     } catch (error) {
@@ -354,6 +367,7 @@ function nodeRequestToWeb(
   req: IncomingMessage,
   hostname: string,
   address: ReturnType<ReturnType<typeof createServer>["address"]>,
+  signal?: AbortSignal,
 ): Request {
   const port = typeof address === "object" && address ? address.port : 0;
   const host = req.headers.host || `${hostname}:${port}`;
@@ -375,6 +389,7 @@ function nodeRequestToWeb(
       ? (Readable.toWeb(req) as unknown as ReadableStream<Uint8Array>)
       : undefined,
     duplex: hasBody ? "half" : undefined,
+    signal,
   } as RequestInit);
 }
 

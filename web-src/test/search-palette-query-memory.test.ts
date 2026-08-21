@@ -100,6 +100,8 @@ async function setup(options: {
     getFileSelectionHistory: () => options.fileSelectionHistory ?? [],
     getGrepSelectionHistory: () => [],
     getGrepRegex: () => false,
+    getGrepCaseSensitive: () => false,
+    getGrepWholeWord: () => false,
     getGrepHideTests: () => false,
     getGrepGroupByFile: () => false,
     getGrepPaletteWidth: () => undefined,

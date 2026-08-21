@@ -21,13 +21,15 @@
 import { existsSync, realpathSync } from "node:fs";
 import { lstat, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { isTestFilePath } from "../core/file-filter";
+import { globMatchPath, isGlobPathQuery } from "../core/fuzzy-search";
 import type {
   FileSearchListResponse,
   GrepMatch,
   GrepResponse,
 } from "../core/types";
-import { isTestFilePath } from "../core/file-filter";
 import { commandForExternal } from "./command-resolver";
+import { throwIfAborted } from "./database/adapters/abort";
 import { spawnTextAsync } from "./database/adapters/spawn-runner";
 import * as git from "./git";
 import { compileNamePatterns } from "./name-pattern";
@@ -36,6 +38,7 @@ import {
   buildRgArgs,
   fixedStringLineMatches,
   GREP_MAX_FILE_BYTES,
+  type GrepMatchOptions,
   isSkippableSearchPath,
   parseGitGrepOutput,
   parseRgOutput,
@@ -50,10 +53,17 @@ export type SearchEnv = {
 export type GrepRequest = {
   query: string;
   ref: string; // "worktree" or a git ref
+  // Repo-relative files / directories, or globs ("src/**/*.ts"). Globs are
+  // routed to the engine's include filter; plain paths to its positional
+  // arguments. Unsafe entries are dropped.
   paths: string[];
   regex: boolean;
   max: number;
   excludeTests?: boolean;
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  // Lets a handler stop the external process when the client goes away.
+  signal?: AbortSignal;
 };
 
 export type GrepRunResult =
@@ -153,30 +163,98 @@ function filterCallerPaths(
   );
 }
 
+// Caller paths come in two shapes: concrete files / directories, and glob
+// patterns. Engines treat them differently, so split once here.
+function splitCallerPaths(
+  env: SearchEnv,
+  paths: string[],
+  excludeTests: boolean,
+): { plain: string[]; globs: string[] } {
+  const plain: string[] = [];
+  const globs: string[] = [];
+  for (const path of paths) {
+    if (!isSafePath(path) || git.isGitInternalPath(path)) continue;
+    if (isGlobPathQuery(path)) {
+      globs.push(path);
+      continue;
+    }
+    if (
+      isSkippableSearchPath(path, env.omitDirNames, env.excludeNames) ||
+      (excludeTests && isTestFilePath(path))
+    )
+      continue;
+    plain.push(path);
+  }
+  return { plain, globs };
+}
+
+function matchesAnyGlob(path: string, globs: string[]): boolean {
+  return (
+    globs.length === 0 || globs.some((glob) => !!globMatchPath(glob, path))
+  );
+}
+
+// Expand caller directories into their files so the fallback scanner can
+// walk them like rg / git grep do with positional directory arguments.
+async function fallbackCandidatePaths(
+  env: SearchEnv,
+  paths: string[],
+): Promise<string[]> {
+  if (paths.length === 0) {
+    const tree = await git.listTreeAsync("worktree", "", env.cwd, {
+      recursive: true,
+      omitDirNames: env.omitDirNames,
+      excludeNames: env.excludeNames,
+    });
+    return tree.entries.map((entry) => entry.path);
+  }
+  const candidates: string[] = [];
+  for (const path of paths) {
+    const full = safeWorktreePath(env, path);
+    if (!full) continue;
+    let stat: Awaited<ReturnType<typeof lstat>>;
+    try {
+      stat = await lstat(full);
+    } catch {
+      continue;
+    }
+    if (!stat.isDirectory()) {
+      candidates.push(path);
+      continue;
+    }
+    const tree = await git.listTreeAsync("worktree", path, env.cwd, {
+      recursive: true,
+      omitDirNames: env.omitDirNames,
+      excludeNames: env.excludeNames,
+    });
+    for (const entry of tree.entries) {
+      if (entry.type === "blob") candidates.push(entry.path);
+    }
+  }
+  return candidates;
+}
+
 async function grepWorktreeFallback(
   env: SearchEnv,
   query: string,
   max: number,
   paths: string[],
+  globs: string[],
   excludeTests: boolean,
+  options: GrepMatchOptions,
+  signal?: AbortSignal,
 ): Promise<GrepMatch[]> {
-  const candidates = paths.length
-    ? paths
-    : (
-        await git.listTreeAsync("worktree", "", env.cwd, {
-          recursive: true,
-          omitDirNames: env.omitDirNames,
-          excludeNames: env.excludeNames,
-        })
-      ).entries.map((entry) => entry.path);
+  const candidates = await fallbackCandidatePaths(env, paths);
   const matches: GrepMatch[] = [];
   for (const path of candidates) {
     if (matches.length >= max) break;
+    throwIfAborted(signal, "grep aborted");
     if (
       !isSafePath(path) ||
       git.isGitInternalPath(path) ||
       isSkippableSearchPath(path, env.omitDirNames, env.excludeNames) ||
-      (excludeTests && isTestFilePath(path))
+      (excludeTests && isTestFilePath(path)) ||
+      !matchesAnyGlob(path, globs)
     )
       continue;
     const full = safeWorktreePath(env, path);
@@ -206,10 +284,18 @@ async function grepWorktreeFallback(
         data.toString("utf8"),
         query,
         max - matches.length,
+        options,
       ),
     );
   }
   return matches;
+}
+
+function matchOptions(req: GrepRequest): GrepMatchOptions {
+  return {
+    caseSensitive: req.caseSensitive === true,
+    wholeWord: req.wholeWord === true,
+  };
 }
 
 async function grepWorktreeAsync(
@@ -217,8 +303,9 @@ async function grepWorktreeAsync(
   req: GrepRequest,
 ): Promise<GrepResponse> {
   const excludeTests = req.excludeTests === true;
-  const paths = filterCallerPaths(env, req.paths, excludeTests);
-  if (req.paths.length > 0 && paths.length === 0) {
+  const { plain, globs } = splitCallerPaths(env, req.paths, excludeTests);
+  const paths = filterCallerPaths(env, plain, excludeTests);
+  if (req.paths.length > 0 && paths.length === 0 && globs.length === 0) {
     return {
       ref: "worktree",
       engine: "fallback",
@@ -228,7 +315,7 @@ async function grepWorktreeAsync(
   }
   if (await rgAvailableAsync(env.cwd)) {
     const safePaths = paths.filter((path) => safeWorktreePath(env, path));
-    if (req.paths.length > 0 && safePaths.length === 0) {
+    if (plain.length > 0 && safePaths.length === 0) {
       return {
         ref: "worktree",
         engine: "rg",
@@ -244,12 +331,14 @@ async function grepWorktreeAsync(
       env.omitDirNames,
       env.excludeNames,
       excludeTests,
+      { ...matchOptions(req), pathGlobs: globs },
     );
     const proc = await spawnTextAsync({
       command: commandForExternal("rg"),
       args: args.slice(1),
       cwd: env.cwd,
       timeoutMs: 5000,
+      signal: req.signal,
       abortMessage: "grep aborted",
       timeoutMessage: "grep timed out after 5000ms",
       rejectOnError: false,
@@ -291,7 +380,10 @@ async function grepWorktreeAsync(
     req.query,
     req.max,
     paths,
+    globs,
     excludeTests,
+    matchOptions(req),
+    req.signal,
   );
   return {
     ref: "worktree",
@@ -306,8 +398,9 @@ async function grepTreeRefAsync(
   req: GrepRequest,
 ): Promise<GrepResponse> {
   const excludeTests = req.excludeTests === true;
-  const safePaths = filterCallerPaths(env, req.paths, excludeTests);
-  if (req.paths.length > 0 && safePaths.length === 0) {
+  const { plain, globs } = splitCallerPaths(env, req.paths, excludeTests);
+  const safePaths = filterCallerPaths(env, plain, excludeTests);
+  if (req.paths.length > 0 && safePaths.length === 0 && globs.length === 0) {
     return {
       ref: req.ref,
       engine: "git",
@@ -315,26 +408,39 @@ async function grepTreeRefAsync(
       matches: [],
     };
   }
+  const options = matchOptions(req);
+  // ":(glob)" gives git the "**" reading rg uses for --glob ("a/**/b" also
+  // matches "a/b"). Under that magic a slash-less pattern such as "*.ts"
+  // would only match at the top level, so it is widened with a leading
+  // "**/" — the any-depth meaning gitignore and rg give it.
+  const pathspecs = [
+    ...safePaths,
+    ...globs.map((glob) =>
+      glob.includes("/") ? `:(glob)${glob}` : `:(glob)**/${glob}`,
+    ),
+  ];
   const args = [
     "-c",
     "core.quotepath=false",
     "grep",
     "-n",
     "--column",
-    "-i",
+    ...(options.caseSensitive ? [] : ["-i"]),
+    ...(options.wholeWord ? ["-w"] : []),
     req.regex ? "-E" : "-F",
     "--no-color",
     "-e",
     req.query,
     req.ref,
     "--",
-    ...safePaths,
+    ...pathspecs,
   ];
   const proc = await spawnTextAsync({
     command: commandForExternal("git"),
     args,
     cwd: env.cwd,
     timeoutMs: 5000,
+    signal: req.signal,
     abortMessage: "git grep aborted",
     timeoutMessage: "git grep timed out after 5000ms",
     rejectOnError: false,

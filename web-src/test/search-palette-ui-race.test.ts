@@ -98,6 +98,8 @@ async function setup() {
     getFileSelectionHistory: () => [],
     getGrepSelectionHistory: () => [],
     getGrepRegex: () => false,
+    getGrepCaseSensitive: () => false,
+    getGrepWholeWord: () => false,
     getGrepHideTests: () => false,
     getGrepGroupByFile: () => false,
     getGrepPaletteWidth: () => undefined,
@@ -279,6 +281,8 @@ async function setupFilePalette(
     getFileSelectionHistory: () => options.history || [],
     getGrepSelectionHistory: () => [],
     getGrepRegex: () => false,
+    getGrepCaseSensitive: () => false,
+    getGrepWholeWord: () => false,
     getGrepHideTests: () => options.hideTests === true,
     getGrepGroupByFile: () => false,
     getGrepPaletteWidth: () => options.paletteWidth,
@@ -391,6 +395,8 @@ async function setupGrep(
     matches?: GrepResponse["matches"];
     groupByFile?: boolean;
     regex?: boolean;
+    caseSensitive?: boolean;
+    wholeWord?: boolean;
     paletteWidth?: number;
     paletteHeight?: number;
     language?: "en" | "ja";
@@ -401,6 +407,8 @@ async function setupGrep(
     fileSelectionHistory?: string[];
     grepSelectionHistory?: string[];
     grepRegex?: boolean;
+    grepCaseSensitive?: boolean;
+    grepWholeWord?: boolean;
     hideTests?: boolean;
     grepGroupByFile?: boolean;
     grepPaletteWidth?: number;
@@ -507,6 +515,8 @@ async function setupGrep(
     getFileSelectionHistory: () => [],
     getGrepSelectionHistory: () => options.history || [],
     getGrepRegex: () => options.regex === true,
+    getGrepCaseSensitive: () => options.caseSensitive === true,
+    getGrepWholeWord: () => options.wholeWord === true,
     getGrepHideTests: () => options.hideTests === true,
     getGrepGroupByFile: () => options.groupByFile === true,
     getGrepPaletteWidth: () => options.paletteWidth,
@@ -553,7 +563,14 @@ describe("grep search palette master/detail behavior", () => {
             ".gdp-palette-controls .gdp-palette-mode-button",
           ),
         ).map((button) => button.textContent),
-      ).toEqual(["通常", ".* 正規表現", "テスト除外", "ファイル別"]);
+      ).toEqual([
+        "通常",
+        ".* 正規表現",
+        "Aa",
+        "単語",
+        "テスト除外",
+        "ファイル別",
+      ]);
       expect(
         Array.from(
           document.querySelectorAll<HTMLElement>(
@@ -1160,6 +1177,100 @@ describe("grep search palette master/detail behavior", () => {
         q(document, ".gdp-source-line-target .gdp-source-line-code.shiki")
           .textContent,
       ).toBe("latest selected context");
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+});
+
+describe("grep search palette match options and path: scopes", () => {
+  test("path: tokens leave the query and become path params; the term is what is sent", async () => {
+    const { input, palette, urls } = await setupGrep();
+    try {
+      input.value = "path:src/ needle path:*.md";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await waitFor(
+        () => urls.filter((u) => u.startsWith("/_grep?")).length === 2,
+      );
+      const last = new URL(
+        urls.filter((u) => u.startsWith("/_grep?")).pop() || "",
+        "http://localhost",
+      );
+      expect(last.searchParams.get("q")).toBe("needle");
+      expect(last.searchParams.getAll("path")).toEqual(["src/", "*.md"]);
+      expect(q(document, ".gdp-palette-status").textContent).toContain(
+        "in src/ *.md",
+      );
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
+  test("a scope without a term asks for a term instead of searching", async () => {
+    const { input, palette, urls } = await setupGrep();
+    try {
+      const before = urls.filter((u) => u.startsWith("/_grep?")).length;
+      input.value = "path:src/";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(q(document, ".gdp-palette-status").textContent).toBe(
+        "Type to grep",
+      );
+      expect(urls.filter((u) => u.startsWith("/_grep?")).length).toBe(before);
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
+  test.each([
+    {
+      name: "Alt+C toggles match case",
+      key: "c",
+      patch: { grepCaseSensitive: true },
+      param: "case",
+      label: "Aa",
+    },
+    {
+      name: "Alt+W toggles whole word",
+      key: "w",
+      patch: { grepWholeWord: true },
+      param: "word",
+      label: "Word",
+    },
+  ])("$name", async ({ key, patch, param, label }) => {
+    const { input, palette, urls, patches } = await setupGrep();
+    try {
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key, altKey: true, bubbles: true }),
+      );
+      await waitFor(() => patches.length === 1);
+      expect(patches[0]).toEqual(patch);
+      const button = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(
+          ".gdp-palette-controls .gdp-palette-mode-button",
+        ),
+      ).find((b) => b.textContent === label);
+      expect(button?.getAttribute("aria-pressed")).toBe("true");
+      await waitFor(
+        () =>
+          new URL(
+            urls.filter((u) => u.startsWith("/_grep?")).pop() || "",
+            "http://localhost",
+          ).searchParams.get(param) === "1",
+      );
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
+  test("a saved match-case setting is sent from the first search", async () => {
+    const { palette, urls } = await setupGrep({ caseSensitive: true });
+    try {
+      const first = new URL(
+        urls.find((u) => u.startsWith("/_grep?")) || "",
+        "http://localhost",
+      );
+      expect(first.searchParams.get("case")).toBe("1");
+      expect(first.searchParams.get("word")).toBeNull();
     } finally {
       palette.closeSearchPalette();
     }

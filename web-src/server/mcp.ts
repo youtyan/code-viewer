@@ -477,12 +477,22 @@ export function defaultMcpTools(
             type: "array",
             items: { type: "string" },
             description:
-              "Optional list of repo-relative paths to restrict the search to. Unsafe paths are dropped silently.",
+              "Optional list of repo-relative files, directories, or globs (e.g. 'src/**/*.ts') to restrict the search to. Unsafe paths are dropped silently.",
           },
           regex: {
             type: "boolean",
             description:
               "Treat `term` as an extended regex instead of a fixed string. Defaults to false.",
+          },
+          caseSensitive: {
+            type: "boolean",
+            description:
+              "Match case. Defaults to false (case-insensitive on every engine).",
+          },
+          wholeWord: {
+            type: "boolean",
+            description:
+              "Match whole words only (rg -w / git grep -w semantics). Defaults to false.",
           },
           max: {
             type: "integer",
@@ -1541,6 +1551,14 @@ async function runSearchCodeTool(
     return { text: "regex must be a boolean", isError: true };
   }
   const regex = regexRaw === true;
+  const caseSensitiveRaw = params.caseSensitive;
+  if (caseSensitiveRaw !== undefined && typeof caseSensitiveRaw !== "boolean") {
+    return { text: "caseSensitive must be a boolean", isError: true };
+  }
+  const wholeWordRaw = params.wholeWord;
+  if (wholeWordRaw !== undefined && typeof wholeWordRaw !== "boolean") {
+    return { text: "wholeWord must be a boolean", isError: true };
+  }
 
   const maxParsed = validateMcpIntegerLimit(
     params.max,
@@ -1568,6 +1586,8 @@ async function runSearchCodeTool(
     ref: refParsed.ref,
     paths,
     regex,
+    caseSensitive: caseSensitiveRaw === true,
+    wholeWord: wholeWordRaw === true,
     max: maxParsed.value,
   });
   if (result.ok !== true) {

@@ -179,6 +179,8 @@ export type AppSettingsState = {
   fileSelectionHistory?: string[];
   grepSelectionHistory?: string[];
   grepRegex?: boolean;
+  grepCaseSensitive?: boolean;
+  grepWholeWord?: boolean;
   grepGroupByFile?: boolean;
   grepPaletteWidth?: number;
   grepPaletteHeight?: number;

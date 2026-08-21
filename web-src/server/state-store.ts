@@ -223,6 +223,11 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   if (hideTests !== undefined) out.hideTests = hideTests;
   const grepRegex = optionalBoolean(raw.grepRegex);
   if (grepRegex !== undefined) out.grepRegex = grepRegex;
+  const grepCaseSensitive = optionalBoolean(raw.grepCaseSensitive);
+  if (grepCaseSensitive !== undefined)
+    out.grepCaseSensitive = grepCaseSensitive;
+  const grepWholeWord = optionalBoolean(raw.grepWholeWord);
+  if (grepWholeWord !== undefined) out.grepWholeWord = grepWholeWord;
   const grepGroupByFile = optionalBoolean(raw.grepGroupByFile);
   if (grepGroupByFile !== undefined) out.grepGroupByFile = grepGroupByFile;
   const grepPaletteWidth = optionalNumber(

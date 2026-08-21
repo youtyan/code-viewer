@@ -15,14 +15,20 @@ export type SearchPaletteText = {
   fuzzyHint: string;
   plain: string;
   regex: string;
+  matchCase: string;
+  matchCaseTitle: string;
+  wholeWord: string;
+  wholeWordTitle: string;
   excludeTests: string;
   excludeTestsTitle: string;
   groupFiles: string;
   groupFilesTitle: string;
-  regexHint: string;
+  grepHint: string;
   windowWidth: string;
   windowHeight: string;
   regexMode: string;
+  caseSensitivity: string;
+  wordMatching: string;
   fileGrouping: string;
   testExclusion: string;
   saveFailed: (label: string, error: string) => string;
@@ -51,9 +57,12 @@ export type SearchPaletteText = {
   grepSummary: (options: {
     engine: string;
     regex: boolean;
+    caseSensitive: boolean;
+    wholeWord: boolean;
     testsExcluded: boolean;
     truncated: boolean;
     count: number;
+    paths: string[];
   }) => string;
   searchFailed: (error: string) => string;
   savingSelection: string;
@@ -76,14 +85,20 @@ const EN: SearchPaletteText = {
   fuzzyHint: "Fuzzy path search",
   plain: "Plain",
   regex: ".* Regex",
+  matchCase: "Aa",
+  matchCaseTitle: "Match case (Alt+C)",
+  wholeWord: "Word",
+  wholeWordTitle: "Match whole words only (Alt+W)",
   excludeTests: "No test",
   excludeTestsTitle: "Exclude test/spec files",
   groupFiles: "Group files",
   groupFilesTitle: "Group matching lines by file",
-  regexHint: "Alt+R regex",
+  grepHint: "path:<dir or glob> narrows · Alt+R regex",
   windowWidth: "window width",
   windowHeight: "window height",
   regexMode: "regex mode",
+  caseSensitivity: "case sensitivity",
+  wordMatching: "whole-word matching",
   fileGrouping: "file grouping",
   testExclusion: "test exclusion",
   saveFailed: (label, error) => `Failed to save ${label}: ${error}`,
@@ -110,10 +125,22 @@ const EN: SearchPaletteText = {
   invalidRegex: "Invalid regular expression",
   searching: "Searching...",
   repositoryChanged: "Repository changed; search again",
-  grepSummary: ({ engine, regex, testsExcluded, truncated, count }) =>
+  grepSummary: ({
+    engine,
+    regex,
+    caseSensitive,
+    wholeWord,
+    testsExcluded,
+    truncated,
+    count,
+    paths,
+  }) =>
     engine +
     (regex ? " regex" : " plain") +
+    (caseSensitive ? " · match case" : "") +
+    (wholeWord ? " · whole word" : "") +
     (testsExcluded ? " · tests excluded" : "") +
+    (paths.length ? ` · in ${paths.join(" ")}` : "") +
     (truncated ? " truncated" : "") +
     ` - ${count} results`,
   searchFailed: (error) => `Search failed: ${error}`,
@@ -137,14 +164,20 @@ const JA: SearchPaletteText = {
   fuzzyHint: "パスのあいまい検索",
   plain: "通常",
   regex: ".* 正規表現",
+  matchCase: "Aa",
+  matchCaseTitle: "大文字と小文字を区別 (Alt+C)",
+  wholeWord: "単語",
+  wholeWordTitle: "単語単位で一致 (Alt+W)",
   excludeTests: "テスト除外",
   excludeTestsTitle: "test/spec ファイルを除外",
   groupFiles: "ファイル別",
   groupFilesTitle: "一致した行をファイル別に表示",
-  regexHint: "Alt+R 正規表現",
+  grepHint: "path:<ディレクトリ or glob> で絞り込み · Alt+R 正規表現",
   windowWidth: "ウィンドウの幅",
   windowHeight: "ウィンドウの高さ",
   regexMode: "正規表現モード",
+  caseSensitivity: "大文字小文字の区別",
+  wordMatching: "単語単位の一致",
   fileGrouping: "ファイル別表示",
   testExclusion: "テスト除外",
   saveFailed: (label, error) => `${label}を保存できませんでした: ${error}`,
@@ -170,10 +203,22 @@ const JA: SearchPaletteText = {
   invalidRegex: "正規表現が正しくありません",
   searching: "検索中...",
   repositoryChanged: "リポジトリが変更されました。もう一度検索してください",
-  grepSummary: ({ engine, regex, testsExcluded, truncated, count }) =>
+  grepSummary: ({
+    engine,
+    regex,
+    caseSensitive,
+    wholeWord,
+    testsExcluded,
+    truncated,
+    count,
+    paths,
+  }) =>
     engine +
     (regex ? "・正規表現" : "・通常") +
+    (caseSensitive ? "・大文字小文字を区別" : "") +
+    (wholeWord ? "・単語単位" : "") +
     (testsExcluded ? "・テスト除外" : "") +
+    (paths.length ? `・${paths.join(" ")} 内` : "") +
     (truncated ? "・一部表示" : "") +
     ` - ${count} 件`,
   searchFailed: (error) => `検索に失敗しました: ${error}`,

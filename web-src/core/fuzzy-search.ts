@@ -322,8 +322,15 @@ export function globToRegExp(query: string): RegExp | null {
     const ch = pattern[i];
     if (ch === "*") {
       if (pattern[i + 1] === "*") {
-        source += ".*";
-        i++;
+        // "**/" spans zero or more directories (so "src/**/*.ts" also
+        // matches "src/a.ts"), matching gitignore / rg --glob semantics.
+        if (pattern[i + 2] === "/") {
+          source += "(?:.*/)?";
+          i += 2;
+        } else {
+          source += ".*";
+          i++;
+        }
       } else {
         source += "[^/]*";
       }

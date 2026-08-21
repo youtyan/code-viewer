@@ -42,7 +42,16 @@ Requires Node.js 20 or newer. Development uses
 - Preview browser-safe media and show metadata for binary files that cannot
   be rendered.
 - Find files and grep across the repository with `Ctrl+K` (file palette) and
-  `Ctrl+G` (text palette).
+  `Ctrl+G` (text palette). The two palettes share one window: `Ctrl+K` /
+  `Ctrl+G` (or the Files / Grep buttons in its label row) switch modes while
+  keeping what you typed, and reopening a palette restores its last query,
+  selected so typing replaces it. With an empty query the file palette lists
+  the files you opened most recently, and its result count says when the
+  ranking was cut at 50 (`50 of 1,234 results`). The text palette has
+  match-case (`Alt+C`) and whole-word (`Alt+W`) toggles next to the regex
+  one, and `path:<dir or glob>` tokens in the query narrow the search
+  (`path:src/ path:*.md needle`); matching is case-insensitive on every
+  engine unless you turn match-case on.
 - Switch the viewer UI between English and Japanese from Settings & Help —
   the language toggle live-updates every screen including the datastore
   viewer.
@@ -769,13 +778,21 @@ code-viewer search code --term "TODO" --json
 # extended-regex search, restricted to two subtrees, on the `main` ref.
 code-viewer search code --term "fn handler" --regex \
     --path src --path tests --ref main --json
+
+# exact case and whole words only; --path also accepts globs.
+code-viewer search code --term "Token" --case-sensitive --word \
+    --path "src/**/*.ts" --json
 ```
 
 Default text output is `path:line:column<TAB>preview`, one line per
 match. An empty result prints `no matches` to stderr and exits 0.
 Parse errors and unreachable servers exit 1. `--max` accepts a positive
 integer up to the server's hard cap; `truncated=true` in the JSON
-response means more matches exist beyond the cap. Run
+response means more matches exist beyond the cap. Matching is
+case-insensitive on every engine unless `--case-sensitive` is given;
+`--word` keeps only hits on word boundaries (`rg -w` / `git grep -w`, and
+the same rule in the fallback scanner). `--path` takes a file, a
+directory, or a glob such as `src/**/*.ts`. Run
 `code-viewer search agent-help` for the full AI-agent guide.
 
 `code-viewer search files` is the sister command for **filename**

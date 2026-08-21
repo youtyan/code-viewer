@@ -1508,6 +1508,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     getFileSelectionHistory: () => APP_SETTINGS.fileSelectionHistory || [],
     getGrepSelectionHistory: () => APP_SETTINGS.grepSelectionHistory || [],
     getGrepRegex: () => APP_SETTINGS.grepRegex === true,
+    getGrepCaseSensitive: () => APP_SETTINGS.grepCaseSensitive === true,
+    getGrepWholeWord: () => APP_SETTINGS.grepWholeWord === true,
     getGrepHideTests: () => STATE.hideTests,
     getGrepGroupByFile: () => APP_SETTINGS.grepGroupByFile === true,
     getGrepPaletteWidth: () => APP_SETTINGS.grepPaletteWidth,

@@ -27,6 +27,7 @@ import {
   MIN_GREP_PALETTE_WIDTH,
   movePaletteSelection,
   PALETTE_RESULT_LIMIT,
+  parseGrepQuery,
   rankPaletteResultsByHistory,
   rememberPaletteSelection,
 } from "../core/search-palette";
@@ -70,6 +71,8 @@ export type SearchPaletteDeps = {
   getFileSelectionHistory(): string[];
   getGrepSelectionHistory(): string[];
   getGrepRegex(): boolean;
+  getGrepCaseSensitive(): boolean;
+  getGrepWholeWord(): boolean;
   getGrepHideTests(): boolean;
   getGrepGroupByFile(): boolean;
   getGrepPaletteWidth(): number | undefined;
@@ -78,6 +81,8 @@ export type SearchPaletteDeps = {
     fileSelectionHistory?: string[];
     grepSelectionHistory?: string[];
     grepRegex?: boolean;
+    grepCaseSensitive?: boolean;
+    grepWholeWord?: boolean;
     hideTests?: boolean;
     grepGroupByFile?: boolean;
     grepPaletteWidth?: number;
@@ -114,6 +119,8 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     getFileSelectionHistory,
     getGrepSelectionHistory,
     getGrepRegex,
+    getGrepCaseSensitive,
+    getGrepWholeWord,
     getGrepHideTests,
     getGrepGroupByFile,
     getGrepPaletteWidth,
@@ -141,8 +148,11 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     column: number;
     preview: string;
     matchText?: string;
+    // Raw input (with any path: scopes) and the text actually searched.
     query: string;
+    term: string;
     regex: boolean;
+    caseSensitive: boolean;
     ref: string;
     source: "diff" | "repo";
   };
@@ -156,6 +166,8 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     preview: HTMLElement;
     mode: PaletteMode;
     grepRegex: boolean;
+    grepCaseSensitive: boolean;
+    grepWholeWord: boolean;
     grepHideTests: boolean;
     grepGroupByFile: boolean;
     grepPaletteWidth: number;
@@ -328,6 +340,8 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       preview,
       mode,
       grepRegex: getGrepRegex(),
+      grepCaseSensitive: getGrepCaseSensitive(),
+      grepWholeWord: getGrepWholeWord(),
       grepHideTests: getGrepHideTests(),
       grepGroupByFile: getGrepGroupByFile(),
       grepPaletteWidth: clampGrepPaletteWidth(savedWidth ?? dialogRect.width),
@@ -455,6 +469,38 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       e.preventDefault();
       void updateGrepRegex(state, true);
     });
+    const matchCase = document.createElement("button");
+    matchCase.type = "button";
+    matchCase.className = "gdp-palette-mode-button";
+    matchCase.setAttribute("aria-pressed", String(state.grepCaseSensitive));
+    matchCase.textContent = text().matchCase;
+    matchCase.title = text().matchCaseTitle;
+    matchCase.disabled = state.settingsPending;
+    matchCase.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      void updateGrepFlag(
+        state,
+        "grepCaseSensitive",
+        !state.grepCaseSensitive,
+        text().caseSensitivity,
+      );
+    });
+    const wholeWord = document.createElement("button");
+    wholeWord.type = "button";
+    wholeWord.className = "gdp-palette-mode-button";
+    wholeWord.setAttribute("aria-pressed", String(state.grepWholeWord));
+    wholeWord.textContent = text().wholeWord;
+    wholeWord.title = text().wholeWordTitle;
+    wholeWord.disabled = state.settingsPending;
+    wholeWord.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      void updateGrepFlag(
+        state,
+        "grepWholeWord",
+        !state.grepWholeWord,
+        text().wordMatching,
+      );
+    });
     const excludeTests = createExcludeTestsButton(state);
     const groupFiles = document.createElement("button");
     groupFiles.type = "button";
@@ -469,8 +515,55 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     });
     const hint = document.createElement("span");
     hint.className = "gdp-palette-mode-hint";
-    hint.textContent = text().regexHint;
-    state.controls.append(plain, regex, excludeTests, groupFiles, hint);
+    hint.textContent = text().grepHint;
+    state.controls.append(
+      plain,
+      regex,
+      matchCase,
+      wholeWord,
+      excludeTests,
+      groupFiles,
+      hint,
+    );
+  }
+
+  // Match-case / whole-word share one persistence path: flip, save, rerun
+  // the search, and roll back if the save fails (same contract as the
+  // regex toggle).
+  async function updateGrepFlag(
+    state: PaletteState,
+    flag: "grepCaseSensitive" | "grepWholeWord",
+    value: boolean,
+    label: string,
+  ): Promise<void> {
+    if (state.settingsPending || value === state[flag]) return;
+    const previous = state[flag];
+    state[flag] = value;
+    state.settingsPending = true;
+    renderPaletteControls(state);
+    try {
+      await persistGrepSettings(
+        flag === "grepCaseSensitive"
+          ? { grepCaseSensitive: value }
+          : { grepWholeWord: value },
+      );
+      if (PALETTE === state) updatePaletteResults(state);
+    } catch (err) {
+      console.error(`Failed to save grep ${label}`, err);
+      state[flag] = previous;
+      if (PALETTE === state) {
+        state.status.textContent = text().saveFailed(
+          label,
+          errorMessage(err, text().unknownError),
+        );
+      }
+    } finally {
+      state.settingsPending = false;
+      if (PALETTE === state) {
+        renderPaletteControls(state);
+        state.input.focus();
+      }
+    }
   }
 
   function errorMessage(err: unknown, fallback: string): string {
@@ -635,9 +728,9 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     lineText: string,
     item: PaletteGrepItem,
   ): { start: number; end: number } | null {
-    const matchText = item.matchText || (item.regex ? "" : item.query);
+    const matchText = item.matchText || (item.regex ? "" : item.term);
     if (!matchText) return null;
-    const caseSensitive = item.regex || /[A-Z]/.test(item.query);
+    const caseSensitive = item.caseSensitive;
     const haystack = caseSensitive ? lineText : lineText.toLowerCase();
     const needle = caseSensitive ? matchText : matchText.toLowerCase();
     const expectedStart = Math.max(0, item.column - 1);
@@ -1255,18 +1348,32 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     renderPalette(state);
   }
 
+  // "path:src/" narrows the diff-scoped search the same way the repository
+  // search is narrowed server-side: a scope is a file, a directory prefix,
+  // or a glob.
+  function diffPathInScope(path: string, scopes: string[]): boolean {
+    if (scopes.length === 0) return true;
+    return scopes.some((scope) =>
+      isGlobPathQuery(scope)
+        ? !!globMatchPath(scope, path)
+        : path === scope || path.startsWith(`${scope.replace(/\/+$/, "")}/`),
+    );
+  }
+
   function updateGrepPalette(state: PaletteState, query: string) {
     renderPaletteControls(state);
     state.controller?.abort();
     if (state.debounce) window.clearTimeout(state.debounce);
-    if (!query.trim()) {
+    const parsed = parseGrepQuery(query);
+    const term = parsed.term;
+    if (!term) {
       state.items = [];
       state.selected = -1;
       state.status.textContent = text().typeToGrep;
       renderPalette(state);
       return;
     }
-    if (state.grepRegex && !regexQueryIsValid(query)) {
+    if (state.grepRegex && !regexQueryIsValid(term)) {
       state.controller?.abort();
       state.items = [];
       state.selected = -1;
@@ -1282,16 +1389,29 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       const source = paletteSource();
       const ref = paletteRef(source);
       const regex = state.grepRegex;
+      const caseSensitive = state.grepCaseSensitive;
+      const wholeWord = state.grepWholeWord;
       const hideTests = state.grepHideTests;
       const params = new URLSearchParams();
       params.set("ref", ref);
-      params.set("q", query);
+      params.set("q", term);
       params.set("max", "200");
       if (regex) params.set("regex", "1");
+      if (caseSensitive) params.set("case", "1");
+      if (wholeWord) params.set("word", "1");
       if (hideTests) params.set("exclude_tests", "1");
       appendScopeParams(params);
       if (source === "diff") {
-        for (const file of state.diffSnapshot) params.append("path", file.path);
+        const scoped = state.diffSnapshot.filter((file) =>
+          diffPathInScope(file.path, parsed.paths),
+        );
+        if (scoped.length === 0) {
+          state.status.textContent = text().noResults;
+          return;
+        }
+        for (const file of scoped) params.append("path", file.path);
+      } else {
+        for (const scope of parsed.paths) params.append("path", scope);
       }
       const controller = new AbortController();
       state.controller = controller;
@@ -1312,6 +1432,8 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
             controller.signal.aborted ||
             state.input.value !== query ||
             state.grepRegex !== regex ||
+            state.grepCaseSensitive !== caseSensitive ||
+            state.grepWholeWord !== wholeWord ||
             state.grepHideTests !== hideTests
           )
             return;
@@ -1334,7 +1456,9 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
               preview: match.preview,
               matchText: match.matchText,
               query,
+              term,
               regex,
+              caseSensitive,
               ref,
               source,
             })),
@@ -1343,9 +1467,12 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
           state.status.textContent = text().grepSummary({
             engine: response.engine,
             regex,
+            caseSensitive,
+            wholeWord,
             testsExcluded: hideTests,
             truncated: response.truncated,
             count: state.items.length,
+            paths: parsed.paths,
           });
           renderPalette(state);
         })
@@ -1470,6 +1597,26 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     if (state.mode === "grep" && e.altKey && e.key.toLowerCase() === "r") {
       e.preventDefault();
       void updateGrepRegex(state, !state.grepRegex);
+      return;
+    }
+    if (state.mode === "grep" && e.altKey && e.key.toLowerCase() === "c") {
+      e.preventDefault();
+      void updateGrepFlag(
+        state,
+        "grepCaseSensitive",
+        !state.grepCaseSensitive,
+        text().caseSensitivity,
+      );
+      return;
+    }
+    if (state.mode === "grep" && e.altKey && e.key.toLowerCase() === "w") {
+      e.preventDefault();
+      void updateGrepFlag(
+        state,
+        "grepWholeWord",
+        !state.grepWholeWord,
+        text().wordMatching,
+      );
       return;
     }
     const direction =

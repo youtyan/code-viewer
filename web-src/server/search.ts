@@ -32,19 +32,57 @@ export function isSkippableSearchPath(
   });
 }
 
+// Shared by the rg / git grep / fallback engines so the three agree on what
+// "match case" and "whole word" mean. Defaults (both off) are the
+// case-insensitive substring search the palette always had.
+export type GrepMatchOptions = {
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+};
+
+const WORD_CHAR_RE = /[\p{L}\p{N}_]/u;
+
+function isWordBoundary(line: string, start: number, end: number): boolean {
+  const before = start > 0 ? line[start - 1] : "";
+  const after = end < line.length ? line[end] : "";
+  return !WORD_CHAR_RE.test(before) && !WORD_CHAR_RE.test(after);
+}
+
+// First occurrence of `needle` in `line` that satisfies the word rule, or -1.
+export function fixedStringColumn(
+  line: string,
+  query: string,
+  options: GrepMatchOptions = {},
+): number {
+  if (!query) return -1;
+  const haystack = options.caseSensitive ? line : line.toLowerCase();
+  const needle = options.caseSensitive ? query : query.toLowerCase();
+  let from = 0;
+  for (;;) {
+    const column = haystack.indexOf(needle, from);
+    if (column < 0) return -1;
+    if (
+      !options.wholeWord ||
+      isWordBoundary(line, column, column + needle.length)
+    )
+      return column;
+    from = column + 1;
+  }
+}
+
 export function fixedStringLineMatches(
   path: string,
   text: string,
   query: string,
   max: number,
+  options: GrepMatchOptions = {},
 ): GrepMatch[] {
-  const needle = query.toLowerCase();
-  if (!needle) return [];
+  if (!query) return [];
   const matches: GrepMatch[] = [];
   const lines = text.split("\n");
   for (let i = 0; i < lines.length && matches.length < max; i++) {
     const line = lines[i];
-    const column = line.toLowerCase().indexOf(needle);
+    const column = fixedStringColumn(line, query, options);
     if (column < 0) continue;
     matches.push({
       path,
@@ -85,8 +123,15 @@ export function buildRgArgs(
   omitDirNames: string[] = [],
   excludeNames: string[] = [],
   excludeTests = false,
+  options: GrepMatchOptions & { pathGlobs?: string[] } = {},
 ): string[] {
   const safePaths = paths.length ? paths : ["."];
+  // "path:src/**/*.ts" scopes arrive as include globs; rg's positional
+  // arguments only take real files / directories.
+  const includeGlobs = (options.pathGlobs ?? []).flatMap((pattern) => [
+    "--glob",
+    pattern,
+  ]);
   const omitGlobs = omitDirNames.flatMap((name) => [
     "--glob",
     `!${name}/**`,
@@ -138,12 +183,14 @@ export function buildRgArgs(
     "--with-filename",
     "--color",
     "never",
-    "--smart-case",
+    options.caseSensitive ? "--case-sensitive" : "--ignore-case",
+    ...(options.wholeWord ? ["--word-regexp"] : []),
     ...matchMode,
     "--max-count",
     String(max),
     "--max-filesize",
     "2M",
+    ...includeGlobs,
     ...omitGlobs,
     ...excludeGlobs,
     ...testGlobs,

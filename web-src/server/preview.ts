@@ -55,6 +55,7 @@ import {
   type ExternalCommandOverride,
   parseExternalCommandOverride,
 } from "./command-resolver";
+import { isAbortLikeError } from "./database/adapters/abort";
 import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
 import { writeUploadedFiles } from "./file-upload";
@@ -1210,7 +1211,7 @@ async function handleFiles(url: URL) {
   return json(result.value);
 }
 
-async function handleGrep(url: URL) {
+async function handleGrep(url: URL, signal?: AbortSignal) {
   const responseGeneration = generation;
   const query = url.searchParams.get("q") || "";
   const ref = url.searchParams.get("ref") || "worktree";
@@ -1223,17 +1224,29 @@ async function handleGrep(url: URL) {
   const paths = url.searchParams.getAll("path");
   const regex = url.searchParams.get("regex") === "1";
   const excludeTests = url.searchParams.get("exclude_tests") === "1";
-  const result = await grepRepoAsync(
-    currentSearchEnv(omitDirNames, excludeNames),
-    {
+  const caseSensitive = url.searchParams.get("case") === "1";
+  const wholeWord = url.searchParams.get("word") === "1";
+  let result: Awaited<ReturnType<typeof grepRepoAsync>>;
+  try {
+    result = await grepRepoAsync(currentSearchEnv(omitDirNames, excludeNames), {
       query,
       ref,
       paths,
       regex,
       max,
       excludeTests,
-    },
-  );
+      caseSensitive,
+      wholeWord,
+      signal,
+    });
+  } catch (err) {
+    // The palette aborts the previous request on every keystroke; the rg /
+    // git child is killed through `signal` and nobody is waiting for the
+    // answer. Anything else is a real failure and must surface.
+    if (isAbortLikeError(err, signal))
+      return text("client closed request", 499);
+    throw err;
+  }
   if (result.ok !== true) return text(result.error, result.status ?? 400);
   return json({ ...result.value, generation: responseGeneration });
 }
@@ -2842,7 +2855,7 @@ const server = await startServer({
       });
     if (url.pathname === "/_tree") return await handleTree(url);
     if (url.pathname === "/_files") return await handleFiles(url);
-    if (url.pathname === "/_grep") return await handleGrep(url);
+    if (url.pathname === "/_grep") return await handleGrep(url, req.signal);
     if (url.pathname === "/_commits") return await handleRefCommits(url);
     if (url.pathname === "/_log") return await handleLog(url);
     if (url.pathname === "/_file_blame") return await handleFileBlame(url);

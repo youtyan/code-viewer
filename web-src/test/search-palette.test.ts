@@ -3,6 +3,7 @@ import {
   limitPaletteResults,
   movePaletteSelection,
   PALETTE_RESULT_LIMIT,
+  parseGrepQuery,
   rankGrepResultsByHistory,
   rememberGrepSelection,
 } from "../core/search-palette";
@@ -99,5 +100,56 @@ describe("grep selection history", () => {
       { path: "src/older.ts", line: 3 },
       { path: "src/plain.ts", line: 1 },
     ]);
+  });
+});
+
+describe("parseGrepQuery", () => {
+  test.each([
+    { name: "plain text", raw: "needle", term: "needle", paths: [] },
+    {
+      name: "multiple words collapse to one phrase",
+      raw: "  foo   bar ",
+      term: "foo bar",
+      paths: [],
+    },
+    {
+      name: "a leading path: scope",
+      raw: "path:src/ needle",
+      term: "needle",
+      paths: ["src/"],
+    },
+    {
+      name: "a trailing path: scope",
+      raw: "needle path:lib/a.ts",
+      term: "needle",
+      paths: ["lib/a.ts"],
+    },
+    {
+      name: "several scopes, in order",
+      raw: "path:src path:*.md needle",
+      term: "needle",
+      paths: ["src", "*.md"],
+    },
+    {
+      name: "scope only leaves an empty term",
+      raw: "path:src/",
+      term: "",
+      paths: ["src/"],
+    },
+    {
+      name: "a bare path: is dropped, not searched",
+      raw: "path: needle",
+      term: "needle",
+      paths: [],
+    },
+    {
+      name: "path: inside a word is ordinary text",
+      raw: "urlpath:foo",
+      term: "urlpath:foo",
+      paths: [],
+    },
+    { name: "empty input", raw: "", term: "", paths: [] },
+  ])("$name", ({ raw, term, paths }) => {
+    expect(parseGrepQuery(raw)).toEqual({ term, paths });
   });
 });
