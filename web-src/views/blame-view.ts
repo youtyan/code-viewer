@@ -323,6 +323,7 @@ export function createBlameView(deps: BlameViewDeps) {
         setPreferredSourceTab: deps.setPreferredSourceTab,
         createFileBreadcrumb: deps.createFileBreadcrumb,
         createRepositoryWebLink: deps.createRepositoryWebLink,
+        createRevisionNav: deps.createRevisionNav,
       },
       target,
       "blame",

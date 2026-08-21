@@ -3962,7 +3962,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const make = (title: string, paths: string[]): HTMLButtonElement => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "gdp-btn gdp-btn-sm gdp-file-revision-btn";
+      button.className = "gdp-file-header-icon gdp-file-revision-btn";
       button.title = title;
       button.setAttribute("aria-label", title);
       button.disabled = true;

@@ -1868,7 +1868,8 @@ body.gdp-history-page #topbar .ref-pickers {
 }
 .history-item .meta2 {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   color: var(--fg-muted);
   font-size: var(--ui-font-sm);
   margin-top: 2px;
@@ -1876,11 +1877,13 @@ body.gdp-history-page #topbar .ref-pickers {
 .history-item .sha { font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
 /* Branch / tag decorations and the merge marker on a commit row. Chips
    share the .rp-chip pill idiom; colour only, so the row height is stable. */
+/* Chips take their own line under sha / author / date so the meta row keeps
+   its width and the chips flow horizontally in the narrow panel. */
 .history-item .history-refs {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-left: auto;
+  flex-basis: 100%;
   min-width: 0;
 }
 .history-ref {
@@ -1915,16 +1918,20 @@ body.gdp-history-page #topbar .ref-pickers {
 .history-item-in-range {
   background: color-mix(in srgb, var(--accent-subtle) 35%, transparent);
 }
-/* Older / newer revision stepper in the file header: icon-only, fixed box. */
+/* Older / newer revision stepper in the file header. Same icon-button idiom
+   as the path copy button; a disabled side only fades (no size change). */
 .gdp-file-revision-nav {
   display: inline-flex;
-  gap: 4px;
+  gap: 2px;
   margin-left: 6px;
 }
-.gdp-file-revision-btn {
-  width: 26px;
-  padding: 0;
-  justify-content: center;
+.gdp-file-revision-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.gdp-file-revision-btn:disabled:hover {
+  background: transparent;
+  color: var(--fg-muted);
 }
 #history-commit-info .hci-actions,
 .history-commit-info .hci-actions {
