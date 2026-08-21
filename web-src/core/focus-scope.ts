@@ -18,7 +18,7 @@ export function keymapScope(target: Element | null): KeymapScope {
   // ここを分けておかないと、パネルのタブにフォーカスがあるときに j や k が
   // サイドバーの移動として発火してしまう。
   if (target?.closest("#app-panel")) return "panel";
-  // The commit list of the history screen, or the one embedded in a file's
+  // The commit list of the history screen, or the one embedded in a file
   // History tab (inside #content), so it must be checked before "main".
   if (target?.closest("#history-panel, .gdp-file-history-panel"))
     return "history";

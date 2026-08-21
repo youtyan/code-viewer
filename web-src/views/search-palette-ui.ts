@@ -750,7 +750,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       parent.appendChild(document.createTextNode(path.slice(cursor)));
   }
 
-  // The literal text a grep hit highlights: the engine's match text when
+  // The literal text a grep hit highlights: the match text the engine reported when
   // it reported one, else the fixed-string term (a regex pattern is not a
   // literal, so nothing is marked for regex hits without match text).
   function grepHighlightText(item: PaletteGrepItem): string {

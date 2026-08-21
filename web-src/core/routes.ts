@@ -36,7 +36,7 @@ export type AppRoute =
       line?: SourceLineTarget;
       commit?: string;
       /** view=history: diff the selected commit against this sha instead of
-       * its first parent (Shift+click range, or a merge's second parent). */
+       * its first parent (Shift+click range, or the second parent of a merge). */
       compare?: string;
       /** view=history: the commit filter text. */
       q?: string;
@@ -62,7 +62,7 @@ export type AppRoute =
       ref: string;
       commit?: string;
       /** Diff the selected commit against this sha instead of its first
-       * parent (Shift+click range, or a merge's second parent). */
+       * parent (Shift+click range, or the second parent of a merge). */
       compare?: string;
       /** Commit filter text (author: / path: / since: ... syntax). */
       q?: string;

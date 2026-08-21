@@ -456,7 +456,7 @@ export function createRefPicker(deps: RefPickerDeps) {
     const pickedTarget = popTarget;
     pickedTarget.value = val;
     closePopover();
-    // The input's change listener records the ref (see wireRefSelectorInput).
+    // The change listener of the input records the ref (see wireRefSelectorInput).
     pickedTarget.dispatchEvent(new Event("change"));
   }
   popBody.addEventListener("click", (e) => {

@@ -725,7 +725,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   // Rows covered by the current Shift+click range: from the selected (newer)
-  // commit down to the commit whose first parent is `compareSha`. A merge's
+  // commit down to the commit whose first parent is `compareSha`. A merge
   // parent comparison has no such run and highlights nothing.
   function rangeShas(): Set<string> {
     const shas = new Set<string>();

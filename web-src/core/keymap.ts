@@ -1,5 +1,5 @@
-// "history" is the commit list (history screen or a file's History tab):
-// j / k step commits there without stealing the sidebar's j / k.
+// "history" is the commit list (history screen or the History tab of a file):
+// j / k step commits there without stealing the j / k of the sidebar.
 export const KEYMAP_SCOPES = [
   "global",
   "sidebar",

@@ -1,6 +1,6 @@
 // Wrap a character range of a rendered line in <mark>, even when the cell
 // already holds syntax-highlight markup (the range may span several text
-// nodes). Shared by the search palette's code preview and the source view's
+// nodes). Shared by the code preview of the search palette and the source view
 // "hl=" target marking so both read the same way.
 
 export function findTextRange(
