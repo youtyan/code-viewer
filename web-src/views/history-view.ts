@@ -5,10 +5,12 @@
 import {
   commitDiffRange,
   EMPTY_TREE_SHA,
+  formatHistoryLineRange,
   HISTORY_PAGE_SIZE,
   type HistoryAuthorsResponse,
   type HistoryCommit,
   type HistoryCommitRef,
+  type HistoryLineRange,
   type HistoryLogResponse,
   historyGroupLabel,
   shouldContinueAutoLoad,
@@ -41,6 +43,7 @@ export type HistoryText = {
   filterTitle: string;
   commitsTitle: string;
   commitsIn: (path: string) => string;
+  commitsForLines: (start: number, end: number) => string;
   copyShaTitle: string;
   copiedTitle: string;
   copyFailedTitle: string;
@@ -69,6 +72,10 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
       'Filter commits. Words match the message ("quoted" keeps spaces), sha prefixes match commits, author:<name>, path:<part>, since:/after:<date>, until:/before:<date>, code:<text> (lines added or removed), merges:no / merges:only. Kinds combine with AND.',
     commitsTitle: "Commits",
     commitsIn: (path) => `Commits · ${path}`,
+    commitsForLines: (start, end) =>
+      start === end
+        ? `Commits · line ${start}`
+        : `Commits · lines ${start}-${end}`,
     copyShaTitle: "Copy full commit sha",
     copiedTitle: "Copied",
     copyFailedTitle: "Copy failed",
@@ -98,6 +105,10 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
       'コミットを絞り込みます。語はメッセージに一致（"引用" で空白を含む句）、sha の前方一致、author:<名前>、path:<一部>、since:/after:<日付>、until:/before:<日付>、code:<文字列>（追加・削除された行）、merges:no / merges:only。種類が違う条件は AND。',
     commitsTitle: "コミット",
     commitsIn: (path) => `コミット · ${path}`,
+    commitsForLines: (start, end) =>
+      start === end
+        ? `コミット · ${start} 行目`
+        : `コミット · ${start}-${end} 行`,
     copyShaTitle: "コミットの sha をコピー",
     copiedTitle: "コピーしました",
     copyFailedTitle: "コピーに失敗しました",
@@ -428,6 +439,8 @@ export function createHistoryView(deps: HistoryViewDeps) {
   // second parent of a merge.
   let compareSha = "";
   let authorsLoadedFor = "";
+  // git log -L range when the log is restricted to a few lines of a file.
+  let lineRange: HistoryLineRange | undefined;
 
   type HistoryScope = {
     mode: "history" | "file";
@@ -435,9 +448,14 @@ export function createHistoryView(deps: HistoryViewDeps) {
     routeRef: string;
     pathFilter: string;
     query: string;
+    lines?: HistoryLineRange;
     commit?: string;
     compare?: string;
   };
+
+  function lineRangeKey(range: HistoryLineRange | undefined): string {
+    return range ? formatHistoryLineRange(range) : "";
+  }
 
   function historyScopeFromRoute(route = deps.getRoute()): HistoryScope | null {
     if (route.screen === "history") {
@@ -448,6 +466,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
         routeRef: nextRef,
         pathFilter: route.path || "",
         query: route.q || "",
+        lines: route.path ? route.lines : undefined,
         commit: route.commit,
         compare: route.compare,
       };
@@ -460,6 +479,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
         routeRef: nextRouteRef,
         pathFilter: route.path,
         query: route.q || "",
+        lines: route.lines,
         commit: route.commit,
         compare: route.compare,
       };
@@ -491,6 +511,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
         ...(commit ? { commit } : {}),
         ...(compare ? { compare } : {}),
         ...(q ? { q } : {}),
+        ...(lineRange ? { lines: lineRange } : {}),
         range,
       };
     }
@@ -498,6 +519,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       screen: "history",
       ref: options.ref ?? ref,
       ...(pathFilter ? { path: pathFilter } : {}),
+      ...(pathFilter && lineRange ? { lines: lineRange } : {}),
       ...(commit ? { commit } : {}),
       ...(compare ? { compare } : {}),
       ...(q ? { q } : {}),
@@ -523,6 +545,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       scope.logRef,
       scope.routeRef,
       scope.pathFilter,
+      lineRangeKey(scope.lines),
       query,
     ].join("\0");
   }
@@ -639,6 +662,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (query) params.set("q", query);
     if (pathFilter) {
       params.set("path", pathFilter);
+      if (lineRange) params.set("lines", formatHistoryLineRange(lineRange));
       if (routeRef === "worktree") params.set("worktree", "1");
     }
     const url = `/_log?${params.toString()}`;
@@ -1186,6 +1210,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       scope.logRef !== ref ||
       scope.routeRef !== routeRef ||
       scope.pathFilter !== pathFilter ||
+      lineRangeKey(scope.lines) !== lineRangeKey(lineRange) ||
       scope.query !== query ||
       scope.mode !== mode;
     if (scopeChanged || force || commits.length === 0) {
@@ -1194,6 +1219,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       ref = scope.logRef;
       routeRef = scope.routeRef;
       pathFilter = scope.pathFilter;
+      lineRange = scope.lines;
       query = scope.query;
       mode = scope.mode;
       compareSha = "";
@@ -1473,8 +1499,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const title = panel.querySelector?.<HTMLElement>(".history-title");
     if (!title) return;
     const text = historyText(deps.getLanguage());
-    title.textContent =
-      mode === "history" && pathFilter
+    title.textContent = lineRange
+      ? text.commitsForLines(lineRange.start, lineRange.end)
+      : mode === "history" && pathFilter
         ? text.commitsIn(pathFilter)
         : text.commitsTitle;
   }

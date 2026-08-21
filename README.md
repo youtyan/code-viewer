@@ -29,7 +29,12 @@ Requires Node.js 20 or newer. Development uses
   screen, `j` / `k` do when the commit list has focus, `g h` opens the
   history of the ref you are viewing, and every folder page has a History
   button that opens the log restricted to that folder
-  (`/history?path=<dir>/`).
+  (`/history?path=<dir>/`). Select lines in a file and the line-reference
+  pill offers **Line history**: the History tab restricted to commits that
+  changed those lines (`git log -L`, `?lines=<start>-<end>`). File pages
+  carry older / newer revision buttons that step through the commits that
+  touched that file, and the ref picker remembers the refs you picked last
+  as quick chips.
 - Open per-file Blame and History tabs on a file detail page (GitHub-style):
   Blame groups consecutive lines from the same commit with an Older→Newer
   colour bar and lets you jump to the originating commit; History embeds the
@@ -69,7 +74,9 @@ Requires Node.js 20 or newer. Development uses
   match-case (`Alt+C`) and whole-word (`Alt+W`) toggles next to the regex
   one, and `path:<dir or glob>` tokens in the query narrow the search
   (`path:src/ path:*.md needle`); matching is case-insensitive on every
-  engine unless you turn match-case on.
+  engine unless you turn match-case on. Opening a hit marks the matched
+  text on the target line (`?hl=`), and in large virtualized files it
+  pre-fills the in-file find bar with it.
 - Switch the viewer UI between English and Japanese from Settings & Help —
   the language toggle live-updates every screen including the datastore
   viewer.

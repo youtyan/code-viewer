@@ -29,6 +29,32 @@ export type HistoryLogResponse = {
 
 export type HistoryAuthor = { name: string; count: number };
 
+/** Inclusive 1-based line range for `git log -L` (line-range history). */
+export type HistoryLineRange = { start: number; end: number };
+
+export function parseHistoryLineRange(
+  value: string | null | undefined,
+): HistoryLineRange | undefined {
+  const match = /^(\d+)-(\d+)$/.exec(value || "");
+  if (!match) return undefined;
+  const a = Number(match[1]);
+  const b = Number(match[2]);
+  if (!(a > 0) || !(b > 0)) return undefined;
+  return { start: Math.min(a, b), end: Math.max(a, b) };
+}
+
+export function formatHistoryLineRange(range: HistoryLineRange): string {
+  return `${range.start}-${range.end}`;
+}
+
+// Neighbouring revisions of one file: the commit before `ref` that touched
+// it, and the next one towards HEAD. null = no such commit.
+export type FileRevisionNeighbors = {
+  previous: string | null;
+  next: string | null;
+  generation?: number;
+};
+
 export type HistoryAuthorsResponse = {
   authors: HistoryAuthor[];
   generation?: number;

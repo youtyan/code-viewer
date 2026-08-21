@@ -90,3 +90,48 @@ describe("line reference pill repository actions", () => {
     ).toBe(true);
   });
 });
+
+describe("line reference pill line history action", () => {
+  test("opens the line history for the selected range", () => {
+    const opened: Array<[string, number, number]> = [];
+    const pill = createLineRefPill({
+      onClose() {
+        /* noop */
+      },
+      githubUrlForSelection: () => null,
+      copyReferenceLabel: () => "Copy AI reference",
+      lineCountLabel: (count) => `${count} lines`,
+      githubOpenTitle: () => "Open on GitHub",
+      githubCopyTitle: () => "Copy GitHub link",
+      lineHistoryTitle: () => "Line history",
+      openLineHistory: (path, start, end) => {
+        opened.push([path, start, end]);
+      },
+    });
+    pill.show("src/index.ts", 12, 10);
+    const button = document.querySelector<HTMLButtonElement>(
+      "#line-ref-pill-history",
+    );
+    expect(button?.hidden).toBe(false);
+    expect(button?.getAttribute("aria-label")).toBe("Line history");
+    button?.click();
+    expect(opened).toEqual([["src/index.ts", 10, 12]]);
+  });
+
+  test("stays hidden when the host does not provide line history", () => {
+    createLineRefPill({
+      onClose() {
+        /* noop */
+      },
+      githubUrlForSelection: () => null,
+      copyReferenceLabel: () => "Copy AI reference",
+      lineCountLabel: (count) => `${count} lines`,
+      githubOpenTitle: () => "Open on GitHub",
+      githubCopyTitle: () => "Copy GitHub link",
+    });
+    expect(
+      document.querySelector<HTMLButtonElement>("#line-ref-pill-history")
+        ?.hidden,
+    ).toBe(true);
+  });
+});

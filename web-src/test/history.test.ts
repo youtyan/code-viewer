@@ -1826,6 +1826,43 @@ describe("history view commit rows, filter URL and compare", () => {
     expect(title.textContent).toBe("Commits · src/");
   });
 
+  test("a line range restricts the log (lines=) and shows up in the title", async () => {
+    const title = new FakeElement();
+    title.className = "history-title";
+    const { view, dom, mount, fetched, routes, applied } = makeView({
+      commits: [second, first],
+      route: {
+        screen: "file",
+        path: "src/a.ts",
+        ref: "worktree",
+        view: "history",
+        lines: { start: 10, end: 20 },
+        range: { from: "HEAD", to: "worktree" },
+      },
+    });
+    dom.panel.appendChild(title);
+    await view.enterHistory({ mount });
+    const firstUrl = new URL(fetched[0], "http://localhost");
+    expect(firstUrl.searchParams.get("path")).toBe("src/a.ts");
+    expect(firstUrl.searchParams.get("lines")).toBe("10-20");
+    expect(title.textContent).toBe("Commits · lines 10-20");
+    const row = dom.list
+      .querySelectorAll(".history-item")
+      .find((item) => item.dataset.sha === "aaa111");
+    dom.list.dispatch("click", { target: row });
+    await waitFor(() => applied.length === 1);
+    // The selection keeps the line range in the URL.
+    expect(routes[routes.length - 1].route).toEqual({
+      screen: "file",
+      path: "src/a.ts",
+      ref: "worktree",
+      view: "history",
+      commit: "aaa111",
+      lines: { start: 10, end: 20 },
+      range: { from: "bbb111", to: "aaa111" },
+    });
+  });
+
   test("Shift+click diffs from the older commit's parent up to the newer one and marks the range", async () => {
     const { view, dom, routes, applied } = makeView({
       commits: [merge, second, first],

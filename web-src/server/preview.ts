@@ -9,6 +9,7 @@ import {
 import { basename, dirname, extname, join, relative } from "node:path";
 import { normalizeNewDirectoryName } from "../core/directory-name";
 import { formatErrorDetail } from "../core/error-detail";
+import { parseHistoryLineRange } from "../core/history";
 import {
   collectJournalLabels,
   isJournalTaskPriority,
@@ -1272,6 +1273,21 @@ async function handleRefCommits(url: URL) {
   return json({ commits: result.commits, hasMore: result.hasMore });
 }
 
+async function handleFileRevisions(url: URL) {
+  const responseGeneration = generation;
+  const path = url.searchParams.get("path") || "";
+  if (!path || !safePath(path)) return text("invalid path", 400);
+  if (git.isGitInternalPath(path)) return text("forbidden", 403);
+  const ref = url.searchParams.get("ref") || "HEAD";
+  const result = await git.fileRevisionNeighborsAsync(cwd, { path, ref });
+  if (result.error) return text(result.error, result.status ?? 400);
+  return json({
+    previous: result.previous,
+    next: result.next,
+    generation: responseGeneration,
+  });
+}
+
 async function handleAuthors(url: URL) {
   const responseGeneration = generation;
   const ref = url.searchParams.get("ref") || "HEAD";
@@ -1287,12 +1303,14 @@ async function handleLog(url: URL) {
   const limit = Number(url.searchParams.get("limit") || "50");
   const path = url.searchParams.get("path") || "";
   if (path && !safePath(path)) return text("invalid path", 400);
+  const lines = parseHistoryLineRange(url.searchParams.get("lines"));
   const result = await git.commitHistoryAsync(cwd, {
     ref,
     skip: Number.isFinite(skip) ? skip : 0,
     limit: Number.isFinite(limit) ? limit : 50,
     query: url.searchParams.get("q") || "",
     ...(path ? { path } : {}),
+    ...(path && lines ? { lines } : {}),
   });
   if (result.error) return text(result.error, result.status ?? 400);
   // ref=worktree (or worktree=1) with a path filter prepends a "Working tree"
@@ -2876,6 +2894,8 @@ const server = await startServer({
     if (url.pathname === "/_commits") return await handleRefCommits(url);
     if (url.pathname === "/_log") return await handleLog(url);
     if (url.pathname === "/_authors") return await handleAuthors(url);
+    if (url.pathname === "/_file_revisions")
+      return await handleFileRevisions(url);
     if (url.pathname === "/_file_blame") return await handleFileBlame(url);
     if (url.pathname === "/file_diff") return await handleFileDiff(url);
     if (url.pathname === "/file_range") return handleFileRange(url);

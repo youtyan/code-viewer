@@ -49,6 +49,7 @@ import type {
 import {
   appendFileViewTabs,
   createFileShellSticky,
+  type FileViewTab,
   isMediaPreviewOnlySource,
   mountFileShellCard,
   type SourceBlobTab,
@@ -68,6 +69,7 @@ import {
   type DelimitedPreviewLanguage,
   delimitedPreviewText,
 } from "./source-preview-i18n";
+import { markNeedleInCell } from "./text-mark";
 
 export type VirtualSourcePagingKeyboardEvent = KeyboardEvent & {
   __gdpVirtualSourcePagingHandled?: boolean;
@@ -97,6 +99,10 @@ export type SourceViewDeps = {
   placeSidebarToggle(): void;
   createFileBreadcrumb(path: string, ref?: string): HTMLElement;
   createRepositoryWebLink?(target: SourceFileTarget): HTMLAnchorElement | null;
+  createRevisionNav?(
+    target: SourceFileTarget,
+    activeTab: FileViewTab,
+  ): HTMLElement | null;
   createFileDetailMeta(
     target: SourceFileTarget,
     meta: RawFileInfo,
@@ -187,7 +193,7 @@ export function createSourceView(deps: SourceViewDeps) {
   type VirtualSourceSearchMatch = { line: number; start: number; end: number };
 
   type VirtualSourceSearchHandle = {
-    open: () => void;
+    open: (query?: string) => void;
     query: () => string;
     activeRange: () => VirtualSourceSearchMatch | null;
   };
@@ -548,10 +554,17 @@ export function createSourceView(deps: SourceViewDeps) {
           const cells = table.querySelectorAll<HTMLElement>(
             ".gdp-source-line-code",
           );
+          const sourceLines = textValue.split("\n");
           cells.forEach((cell, index) => {
             if (highlightedLines[index] == null) return;
             cell.innerHTML = highlightedLines[index] || " ";
             cell.classList.add("shiki");
+            markSourceHighlightTerm(
+              cell,
+              sourceLines[index] ?? "",
+              index + 1,
+              target,
+            );
           });
         })
         .catch((err: unknown) => {
@@ -1081,6 +1094,7 @@ export function createSourceView(deps: SourceViewDeps) {
       const code = document.createElement("td");
       code.className = "gdp-source-line-code";
       code.textContent = line || " ";
+      markSourceHighlightTerm(code, line, index + 1, target);
       tr.appendChild(num);
       tr.appendChild(code);
       tbody.appendChild(tr);
@@ -1272,6 +1286,33 @@ export function createSourceView(deps: SourceViewDeps) {
       STATE.route.screen === "file"
       ? STATE.route.line
       : undefined;
+  }
+
+  // "hl=" on the file route: the text (a grep hit) to mark on the target
+  // line(s). Only meaningful together with a line target.
+  function currentSourceHighlightTerm(
+    target: SourceFileTarget,
+  ): string | undefined {
+    const routeTarget = sourceTargetFromRoute();
+    return sourceTargetsEqual(routeTarget, target) &&
+      STATE.route.screen === "file" &&
+      STATE.route.line &&
+      STATE.route.hl
+      ? STATE.route.hl
+      : undefined;
+  }
+
+  function markSourceHighlightTerm(
+    cell: HTMLElement,
+    lineText: string,
+    lineNumber: number,
+    target: SourceFileTarget,
+  ): void {
+    const term = currentSourceHighlightTerm(target);
+    if (!term) return;
+    if (!lineInSourceTarget(lineNumber, currentSourceLineTarget(target)))
+      return;
+    markNeedleInCell(cell, lineText, term, "gdp-grep-match");
   }
 
   function lineTargetStart(
@@ -1558,8 +1599,9 @@ export function createSourceView(deps: SourceViewDeps) {
     next.addEventListener("click", () => move(1));
     close.addEventListener("click", hide);
     return {
-      open: () => {
+      open: (query?: string) => {
         bar.hidden = false;
+        if (query !== undefined) input.value = query;
         input.focus();
         input.select();
         sync();
@@ -1760,6 +1802,15 @@ export function createSourceView(deps: SourceViewDeps) {
       render,
     );
     wrap.__gdpVirtualSourceSearch = search;
+    // A grep hit opened into a virtual file: the find bar carries the term,
+    // which also highlights it on the rendered rows.
+    const initialHighlightTerm = currentSourceHighlightTerm(target);
+    if (initialHighlightTerm) {
+      const searchHandle = search;
+      setTimeout(() => {
+        if (wrap.isConnected) searchHandle.open(initialHighlightTerm);
+      }, 0);
+    }
     let resizeObserver: ResizeObserver | null = null;
     resizeObserver =
       typeof ResizeObserver === "function"
@@ -2069,6 +2120,15 @@ export function createSourceView(deps: SourceViewDeps) {
       render,
     );
     wrap.__gdpVirtualSourceSearch = search;
+    // A grep hit opened into a virtual file: the find bar carries the term,
+    // which also highlights it on the rendered rows.
+    const initialHighlightTerm = currentSourceHighlightTerm(target);
+    if (initialHighlightTerm) {
+      const searchHandle = search;
+      setTimeout(() => {
+        if (wrap.isConnected) searchHandle.open(initialHighlightTerm);
+      }, 0);
+    }
     let resizeObserver: ResizeObserver | null = null;
     resizeObserver =
       typeof ResizeObserver === "function"

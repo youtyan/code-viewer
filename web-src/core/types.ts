@@ -184,6 +184,8 @@ export type AppSettingsState = {
   grepGroupByFile?: boolean;
   grepPaletteWidth?: number;
   grepPaletteHeight?: number;
+  /** Refs picked in the ref picker, most recent last. */
+  recentRefs?: string[];
   scopeOmitDirs?: string[];
   scopeExcludeNames?: string[];
   scopeWatchLimit?: number;

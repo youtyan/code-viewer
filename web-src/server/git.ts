@@ -14,6 +14,7 @@ import { formatErrorDetail } from "../core/error-detail";
 import {
   type HistoryAuthor,
   type HistoryCommitRef,
+  type HistoryLineRange,
   tokenizeHistoryQuery,
 } from "../core/history";
 import {
@@ -1259,6 +1260,73 @@ export function historyQueryArgs(query: string): {
   };
 }
 
+// The commit before `ref` that touched `path`, and the next one towards
+// HEAD. Drives the "older / newer revision" buttons on a file page.
+export async function fileRevisionNeighborsAsync(
+  cwd: string,
+  options: { path: string; ref: string },
+): Promise<{
+  previous: string | null;
+  next: string | null;
+  error?: string;
+  status?: number;
+}> {
+  const path = options.path.trim();
+  if (!path || path.includes("\0") || path.startsWith("-"))
+    return { previous: null, next: null, error: "invalid path" };
+  const rawRef = (options.ref || "HEAD").trim();
+  const ref = rawRef === "worktree" ? "HEAD" : rawRef;
+  if (!ref || ref.startsWith("-") || ref.includes("\0"))
+    return { previous: null, next: null, error: "invalid ref" };
+  const verified = await runGitAsync(
+    ["git", "rev-parse", "--verify", `${ref}^{commit}`],
+    cwd,
+  );
+  if (verified.code !== 0)
+    return {
+      previous: null,
+      next: null,
+      ...gitFailureResult(verified, "unknown ref"),
+    };
+  const sha = verified.stdout.trim();
+  // Newest two commits at or before `ref` that touched the path. When the
+  // viewed ref itself touched it, [0] is that commit and [1] the older one;
+  // otherwise [0] already is the older one.
+  const older = await runGitAsync(
+    ["git", "log", "--format=%H", "--max-count=2", sha, "--", path],
+    cwd,
+  );
+  if (older.code !== 0)
+    return {
+      previous: null,
+      next: null,
+      ...gitFailureResult(older, "git log failed"),
+    };
+  const olderShas = older.stdout.split("\n").filter(Boolean);
+  const previous =
+    olderShas[0] && olderShas[0] !== sha
+      ? olderShas[0]
+      : (olderShas[1] ?? null);
+  // Commits after `ref` on the way to HEAD that touched the path (newest
+  // first, as git prints them); the last line is the next revision.
+  // --max-count cannot be used here: git applies it before --reverse, so it
+  // would keep the newest commit instead of the oldest. Viewing the
+  // worktree / HEAD itself yields none.
+  const newer = await runGitAsync(
+    ["git", "log", "--format=%H", `${sha}..HEAD`, "--", path],
+    cwd,
+  );
+  if (newer.code !== 0)
+    return {
+      previous: null,
+      next: null,
+      ...gitFailureResult(newer, "git log failed"),
+    };
+  const newerShas = newer.stdout.split("\n").filter(Boolean);
+  const next = newerShas.length ? newerShas[newerShas.length - 1] : null;
+  return { previous, next };
+}
+
 // Distinct author names under `ref`, most commits first. Feeds the
 // "author:" suggestions of the history filter.
 export async function commitAuthorsAsync(
@@ -1306,6 +1374,10 @@ export async function commitHistoryAsync(
     limit: number;
     query?: string;
     path?: string;
+    // With `path`: restrict to commits that changed these lines
+    // (git log -L start,end:path). Pathspecs cannot be combined with -L,
+    // so path: filter tokens are ignored in that mode.
+    lines?: HistoryLineRange;
   },
 ): Promise<{
   commits: GitHistoryCommit[];
@@ -1335,13 +1407,21 @@ export async function commitHistoryAsync(
     options.query || "",
   );
   const pathFilter = (options.path || "").trim();
-  const specs = [...pathspec];
+  const safePathFilter =
+    pathFilter && !pathFilter.includes("\0") && !pathFilter.startsWith("-")
+      ? pathFilter
+      : "";
+  const lineRange =
+    options.lines && safePathFilter && !safePathFilter.endsWith("/")
+      ? options.lines
+      : undefined;
+  const specs = lineRange ? [] : [...pathspec];
   let follow = false;
-  if (pathFilter && !pathFilter.includes("\0") && !pathFilter.startsWith("-")) {
-    specs.push(pathFilter);
+  if (safePathFilter && !lineRange) {
+    specs.push(safePathFilter);
     // --follow (rename tracking) only works with exactly one pathspec and
     // only makes sense for a file; a trailing "/" marks a directory.
-    follow = !pathFilter.endsWith("/") && specs.length === 1;
+    follow = !safePathFilter.endsWith("/") && specs.length === 1;
   }
   const res = await runGitAsync(
     [
@@ -1353,6 +1433,11 @@ export async function commitHistoryAsync(
       `--format=${HISTORY_FORMAT}`,
       ...filterArgs,
       ...(follow ? ["--follow"] : []),
+      // -L prints patches by default; -s keeps the output to the headers
+      // our parser expects.
+      ...(lineRange
+        ? [`-L${lineRange.start},${lineRange.end}:${safePathFilter}`, "-s"]
+        : []),
       verified.stdout.trim(),
       ...(specs.length ? ["--", ...specs] : []),
     ],

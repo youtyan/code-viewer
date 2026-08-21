@@ -42,6 +42,7 @@ import {
   ensureGdscriptHighlightLanguage,
   ensureTerraformHighlightLanguage,
 } from "./core/highlight-languages";
+import type { FileRevisionNeighbors } from "./core/history";
 import {
   ARROW_RIGHT_16_PATH,
   CHEVRON_DOWN_12_PATH,
@@ -51,7 +52,9 @@ import {
   iconSvg,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
+  NEXT_16_PATHS,
   OPEN_EXTERNAL_16_PATH,
+  PREVIOUS_16_PATHS,
   PULSE_16_PATH,
   QUESTION_16_PATH,
   SEARCH_16_PATH,
@@ -87,6 +90,7 @@ import {
   withTerminalOverlay,
   withToolsOverlay,
 } from "./core/routes";
+import { rememberPaletteSelection } from "./core/search-palette";
 import { sourceInternalPathKind } from "./core/source-meta";
 import { readStoredSize, writeStoredSize } from "./core/stored-size";
 import { clampTerminalFontSize } from "./core/tmux";
@@ -116,7 +120,7 @@ import {
   removeFileHistoryShell as removeRenderedFileHistoryShell,
   renderFileHistoryShell as renderFileHistoryShellView,
 } from "./views/file-history-shell";
-import { isBlobOrBlameFileRoute } from "./views/file-shell";
+import { type FileViewTab, isBlobOrBlameFileRoute } from "./views/file-shell";
 import { createHelpKeybindingEditor } from "./views/help-keybinding-editor";
 import {
   createHelpPage,
@@ -435,6 +439,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   type SettingsPatch = Partial<Omit<AppSettingsState, "version">> &
     Record<string, unknown>;
+  // Mirrors the server-side cap in state-store.ts (normalizeStringList).
+  const MAX_RECENT_REFS = 8;
   type ViewPatch = {
     addedViewedFiles?: string[];
     removedViewedFiles?: string[];
@@ -1162,6 +1168,24 @@ window.GdpExpandLogic = GdpExpandLogic;
     lineCountLabel: (count) => uiText().global.selectedLineCount(count),
     githubOpenTitle: () => uiText().global.githubSelectionOpen,
     githubCopyTitle: () => uiText().global.githubSelectionCopy,
+    lineHistoryTitle: () => uiText().global.lineHistory,
+    openLineHistory: (path, start, end) => {
+      const route = STATE.route;
+      const ref =
+        route.screen === "file"
+          ? route.commit || route.ref || "worktree"
+          : route.screen === "diff" && route.range.to
+            ? route.range.to
+            : "worktree";
+      navigateToRoute({
+        screen: "file",
+        path,
+        ref,
+        view: "history",
+        lines: { start, end },
+        range: currentRange(),
+      });
+    },
   });
   const DIFF_LINE_SELECT = createDiffLineSelect({ pill: LINE_REF_PILL });
 
@@ -1331,6 +1355,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     createFileBreadcrumb: (path, ref) =>
       DIFF_VIEW.createFileBreadcrumb(path, ref),
     createRepositoryWebLink: createFileRepositoryWebLink,
+    createRevisionNav: createFileRevisionNav,
     createFileDetailMeta: (target, meta) =>
       REPO_VIEW.createFileDetailMeta(target, meta),
     createOpenPathButton,
@@ -1384,6 +1409,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     createFileBreadcrumb: (path, ref) =>
       DIFF_VIEW.createFileBreadcrumb(path, ref),
     createRepositoryWebLink: createFileRepositoryWebLink,
+    createRevisionNav: createFileRevisionNav,
     removeStandaloneSource,
     placeSidebarToggle,
     escapeHtml,
@@ -1567,6 +1593,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         settings: string;
         theme: string;
         search: string;
+        lineHistory: string;
+        recentRef: string;
+        olderRevision: string;
+        newerRevision: string;
         copyAiContext: string;
         copyAiContextCopied: string;
         copyAiContextCopiedWithCode: (lines: number) => string;
@@ -1750,6 +1780,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         settings: "viewer settings",
         theme: "toggle theme",
         search: "Search files (Ctrl+K) · Shift+click: grep (Ctrl+G)",
+        lineHistory: "Line history",
+        recentRef: "Recently used ref",
+        olderRevision: "Older revision of this file",
+        newerRevision: "Newer revision of this file",
         copyAiContext: "Copy AI context (Shift+Click to include code)",
         copyAiContextCopied: "Copied AI context",
         copyAiContextCopiedWithCode: (lines) =>
@@ -2117,6 +2151,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         settings: "ビューア設定",
         theme: "テーマ切り替え",
         search: "ファイルを検索 (Ctrl+K)・Shift+クリックで grep (Ctrl+G)",
+        lineHistory: "この行の履歴",
+        recentRef: "最近使った ref",
+        olderRevision: "このファイルの 1 つ前のリビジョン",
+        newerRevision: "このファイルの 1 つ後のリビジョン",
         copyAiContext:
           "AI 用コンテキストをコピー（Shift+Click でコードも添付）",
         copyAiContextCopied: "コピーしました",
@@ -3305,6 +3343,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         createFileBreadcrumb: (path, ref) =>
           DIFF_VIEW.createFileBreadcrumb(path, ref),
         createRepositoryWebLink: createFileRepositoryWebLink,
+        createRevisionNav: createFileRevisionNav,
         emptyText: () => uiText().diff,
       },
       historyRoute,
@@ -3887,6 +3926,73 @@ window.GdpExpandLogic = GdpExpandLogic;
       openPathInOs(path, kind, button);
     });
     return button;
+  }
+
+  // Older / newer revision stepper on a file page. The neighbours come from
+  // /_file_revisions; until they arrive (or when there is none) the button
+  // is disabled, so the header never reflows.
+  function createFileRevisionNav(
+    target: SourceFileTarget,
+    activeTab: FileViewTab,
+  ): HTMLElement | null {
+    if (activeTab === "history") return null;
+    const nav = document.createElement("span");
+    nav.className = "gdp-file-revision-nav";
+    const text = uiText().global;
+    const make = (title: string, paths: string[]): HTMLButtonElement => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-btn gdp-btn-sm gdp-file-revision-btn";
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.disabled = true;
+      button.innerHTML = iconSvg("octicon-revision", paths);
+      return button;
+    };
+    const older = make(text.olderRevision, PREVIOUS_16_PATHS);
+    const newer = make(text.newerRevision, NEXT_16_PATHS);
+    nav.append(older, newer);
+    const goTo = (sha: string) => {
+      const view =
+        STATE.route.screen === "file" && STATE.route.view === "blame"
+          ? "blame"
+          : "blob";
+      navigateToRoute({
+        screen: "file",
+        path: target.path,
+        ref: sha,
+        view,
+        range: currentRange(),
+      });
+    };
+    const params = new URLSearchParams({
+      path: target.path,
+      ref: target.ref || "worktree",
+    });
+    void trackLoad<FileRevisionNeighbors>(
+      fetch(`/_file_revisions?${params.toString()}`).then(async (r) => {
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      }),
+    )
+      .then((neighbors) => {
+        if (!nav.isConnected) return;
+        if (neighbors.previous) {
+          const sha = neighbors.previous;
+          older.disabled = false;
+          older.addEventListener("click", () => goTo(sha));
+        }
+        if (neighbors.next) {
+          const sha = neighbors.next;
+          newer.disabled = false;
+          newer.addEventListener("click", () => goTo(sha));
+        }
+      })
+      .catch((err: unknown) => {
+        if (isAbortError(err)) return;
+        console.error("Failed to load file revision neighbours", err);
+      });
+    return nav;
   }
 
   function createFileRepositoryWebLink(
@@ -5612,6 +5718,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     getTo: () => STATE.to,
     getRepoRef: () => STATE.repoRef,
     getRoute: () => STATE.route,
+    getRecentRefs: () => APP_SETTINGS.recentRefs || [],
+    rememberRecentRef: (ref) => {
+      const current = APP_SETTINGS.recentRefs || [];
+      const next = rememberPaletteSelection(current, ref).slice(
+        -MAX_RECENT_REFS,
+      );
+      if (next.join("\0") === current.join("\0")) return;
+      patchSettings({ recentRefs: next });
+    },
+    recentRefTitle: () => uiText().global.recentRef,
   });
   if (REF_PICKER) {
     const historyRefInput =

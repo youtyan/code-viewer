@@ -1067,6 +1067,21 @@ body.gdp-diff-page #repo-target-wrap {
   padding: 10px 10px 0;
   background: var(--bg);
 }
+/* Recently picked refs, same pill idiom as the quick chips. */
+.rp-recent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 0;
+  background: var(--bg);
+}
+.rp-recent[hidden] { display: none; }
+.rp-chip-recent {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .rp-chip {
   /* Compact quick-fill pills; .current uses the same tinted-active idiom
      as the topbar toggles and header nav. */
@@ -1899,6 +1914,17 @@ body.gdp-history-page #topbar .ref-pickers {
    accent bar. */
 .history-item-in-range {
   background: color-mix(in srgb, var(--accent-subtle) 35%, transparent);
+}
+/* Older / newer revision stepper in the file header: icon-only, fixed box. */
+.gdp-file-revision-nav {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+}
+.gdp-file-revision-btn {
+  width: 26px;
+  padding: 0;
+  justify-content: center;
 }
 #history-commit-info .hci-actions,
 .history-commit-info .hci-actions {
@@ -3798,6 +3824,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 #line-ref-pill-github-actions[hidden] {
   display: none;
 }
+#line-ref-pill-history,
 #line-ref-pill-github-open,
 #line-ref-pill-github-copy {
   display: inline-flex;

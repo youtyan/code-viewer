@@ -540,6 +540,79 @@ describe("routes", () => {
     expect(buildRoute(parsed)).toBe(url);
   });
 
+  test.each([
+    {
+      name: "history route with a file path and line range",
+      pathname: "/history",
+      search: "?path=src%2Fa.ts&lines=10-20",
+      route: {
+        screen: "history",
+        ref: "HEAD",
+        path: "src/a.ts",
+        lines: { start: 10, end: 20 },
+      },
+      url: "/history?path=src%2Fa.ts&lines=10-20",
+    },
+    {
+      name: "lines without a path are dropped",
+      pathname: "/history",
+      search: "?lines=10-20",
+      route: { screen: "history", ref: "HEAD" },
+      url: "/history",
+    },
+    {
+      name: "reversed line range is normalised",
+      pathname: "/history",
+      search: "?path=a.ts&lines=20-10",
+      route: {
+        screen: "history",
+        ref: "HEAD",
+        path: "a.ts",
+        lines: { start: 10, end: 20 },
+      },
+      url: "/history?path=a.ts&lines=10-20",
+    },
+    {
+      name: "file history tab with a line range",
+      pathname: "/file",
+      search: "?path=a.ts&target=worktree&view=history&lines=3-3",
+      route: {
+        screen: "file",
+        path: "a.ts",
+        ref: "worktree",
+        view: "history",
+        lines: { start: 3, end: 3 },
+      },
+      url: "/file?path=a.ts&target=worktree&view=history&lines=3-3",
+    },
+    {
+      name: "blob view with a highlighted term on the target line",
+      pathname: "/file",
+      search: "?path=a.ts&target=worktree&view=blob&line=7&hl=needle%20x",
+      route: {
+        screen: "file",
+        path: "a.ts",
+        ref: "worktree",
+        view: "blob",
+        line: 7,
+        hl: "needle x",
+      },
+      url: "/file?path=a.ts&target=worktree&view=blob&line=7&hl=needle%20x",
+    },
+    {
+      name: "hl without a line is ignored",
+      pathname: "/file",
+      search: "?path=a.ts&target=worktree&view=blob&hl=needle",
+      route: { screen: "file", path: "a.ts", ref: "worktree", view: "blob" },
+      url: "/file?path=a.ts&target=worktree&view=blob",
+    },
+  ])("round-trips $name", ({ pathname, search, route, url }) => {
+    const fallback = { from: "HEAD", to: "worktree" };
+    const parsed = parseRoute(pathname, search, fallback);
+    expect(parsed).toEqual({ ...route, range: fallback });
+    expect(buildRoute(parsed)).toBe(url);
+  });
+
   test("file history routes carry the filter text and compare sha", () => {
     const fallback = { from: "HEAD", to: "worktree" };
     const parsed = parseRoute(

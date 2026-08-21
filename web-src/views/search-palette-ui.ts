@@ -43,6 +43,7 @@ import {
   type SearchPaletteLanguage,
   searchPaletteText,
 } from "./search-palette-i18n";
+import { markNeedleInCell } from "./text-mark";
 
 export type SearchPaletteDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;
@@ -724,29 +725,11 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       parent.appendChild(document.createTextNode(path.slice(cursor)));
   }
 
-  function grepMatchRange(
-    lineText: string,
-    item: PaletteGrepItem,
-  ): { start: number; end: number } | null {
-    const matchText = item.matchText || (item.regex ? "" : item.term);
-    if (!matchText) return null;
-    const caseSensitive = item.caseSensitive;
-    const haystack = caseSensitive ? lineText : lineText.toLowerCase();
-    const needle = caseSensitive ? matchText : matchText.toLowerCase();
-    const expectedStart = Math.max(0, item.column - 1);
-    let bestStart = -1;
-    let cursor = haystack.indexOf(needle);
-    while (cursor >= 0) {
-      if (
-        bestStart < 0 ||
-        Math.abs(cursor - expectedStart) < Math.abs(bestStart - expectedStart)
-      )
-        bestStart = cursor;
-      cursor = haystack.indexOf(needle, cursor + Math.max(1, needle.length));
-    }
-    return bestStart < 0
-      ? null
-      : { start: bestStart, end: bestStart + matchText.length };
+  // The literal text a grep hit highlights: the engine's match text when
+  // it reported one, else the fixed-string term (a regex pattern is not a
+  // literal, so nothing is marked for regex hits without match text).
+  function grepHighlightText(item: PaletteGrepItem): string {
+    return item.matchText || (item.regex ? "" : item.term);
   }
 
   function highlightGrepMatch(
@@ -754,34 +737,12 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     lineText: string,
     item: PaletteGrepItem,
   ): void {
-    const match = grepMatchRange(lineText, item);
-    if (!match) return;
-    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
-    const parts: Array<{ node: Text; start: number; end: number }> = [];
-    let offset = 0;
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const textNode = node as Text;
-      const nextOffset = offset + textNode.data.length;
-      const start = Math.max(match.start, offset);
-      const end = Math.min(match.end, nextOffset);
-      if (start < end)
-        parts.push({
-          node: textNode,
-          start: start - offset,
-          end: end - offset,
-        });
-      offset = nextOffset;
-    }
-    for (const part of parts.reverse()) {
-      const selected = part.node.splitText(part.start);
-      selected.splitText(part.end - part.start);
-      const mark = document.createElement("mark");
-      mark.className = "gdp-grep-match";
-      const parent = selected.parentNode;
-      if (!parent) throw new Error("grep match text is detached");
-      parent.insertBefore(mark, selected);
-      mark.appendChild(selected);
-    }
+    const needle = grepHighlightText(item);
+    if (!needle) return;
+    markNeedleInCell(cell, lineText, needle, "gdp-grep-match", {
+      caseSensitive: item.caseSensitive,
+      nearColumn: item.column,
+    });
   }
 
   function palettePreviewTarget(item: PaletteItem): {
@@ -1569,12 +1530,16 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       });
       scrollToFile(item.path, item.line);
     } else {
+      // hl= lets the source view mark the hit text on the target line, so
+      // the eye lands on the column, not just the line.
+      const hl = grepHighlightText(item);
       setRoute({
         screen: "file",
         path: item.path,
         ref: item.ref,
         view: "blob",
         line: item.line,
+        ...(hl ? { hl } : {}),
         range: currentRange(),
       });
       void renderStandaloneSource({ path: item.path, ref: item.ref });

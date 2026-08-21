@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
   commitAuthorsAsync,
   commitHistoryAsync,
+  fileRevisionNeighborsAsync,
   historyQueryArgs,
   parseHistoryDecorations,
   parseRemoteWebUrl,
@@ -280,6 +281,82 @@ describe("commitHistory", () => {
     });
     expect(res.error).toBeUndefined();
     expect(res.commits.length).toBe(5);
+  });
+
+  test("lines: restricts the log to commits that changed those lines (git log -L)", async () => {
+    const res = await commitHistoryAsync(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 10,
+      path: "file.txt",
+      lines: { start: 1, end: 1 },
+    });
+    expect(res.error).toBeUndefined();
+    expect(res.commits.map((c) => c.subject)).toEqual([
+      "commit 4",
+      "commit 3",
+      "commit 2",
+      "commit 1",
+      "commit 0",
+    ]);
+    const paged = await commitHistoryAsync(repo, {
+      ref: "HEAD",
+      skip: 3,
+      limit: 1,
+      path: "file.txt",
+      lines: { start: 1, end: 1 },
+    });
+    expect(paged.commits.map((c) => c.subject)).toEqual(["commit 1"]);
+    expect(paged.hasMore).toBe(true);
+  });
+
+  test.each([
+    {
+      name: "a middle revision has both neighbours",
+      refIndex: 2,
+      previousIndex: 1,
+      nextIndex: 3,
+    },
+    {
+      name: "the first revision has no older one",
+      refIndex: 0,
+      previousIndex: null,
+      nextIndex: 1,
+    },
+    {
+      name: "the tip has no newer one",
+      refIndex: 4,
+      previousIndex: 3,
+      nextIndex: null,
+    },
+  ])("fileRevisionNeighborsAsync: $name", async ({
+    refIndex,
+    previousIndex,
+    nextIndex,
+  }) => {
+    const res = await fileRevisionNeighborsAsync(repo, {
+      path: "file.txt",
+      ref: shas[refIndex],
+    });
+    expect(res.error).toBeUndefined();
+    expect(res.previous).toBe(
+      previousIndex === null ? null : shas[previousIndex],
+    );
+    expect(res.next).toBe(nextIndex === null ? null : shas[nextIndex]);
+  });
+
+  test("fileRevisionNeighborsAsync treats worktree as HEAD and rejects unknown refs", async () => {
+    const res = await fileRevisionNeighborsAsync(repo, {
+      path: "file.txt",
+      ref: "worktree",
+    });
+    expect(res.previous).toBe(shas[3]);
+    expect(res.next).toBeNull();
+    const bad = await fileRevisionNeighborsAsync(repo, {
+      path: "file.txt",
+      ref: "no-such-ref",
+    });
+    expect(bad.error).toBeTruthy();
   });
 
   test("decorations arrive as structured refs", async () => {

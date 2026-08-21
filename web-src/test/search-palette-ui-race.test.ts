@@ -1276,3 +1276,30 @@ describe("grep search palette match options and path: scopes", () => {
     }
   });
 });
+
+describe("grep palette hands the hit text to the source view", () => {
+  test("opening a repository grep hit sets line and hl on the file route", async () => {
+    const { input, palette, routes } = await setupGrep();
+    try {
+      await waitFor(
+        () => document.querySelectorAll(".gdp-palette-row").length > 0,
+      );
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+      await waitFor(() => routes.length === 1);
+      const route = routes[0] as {
+        screen: string;
+        line?: number;
+        hl?: string;
+        path?: string;
+      };
+      expect(route.screen).toBe("file");
+      expect(route.path).toBe("src/plain.ts");
+      expect(route.line).toBe(2);
+      expect(route.hl).toBe("needle");
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+});

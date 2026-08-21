@@ -46,6 +46,7 @@ const MAX_REF_LEN = 1024;
 const MAX_KEY_LEN = 2048;
 const MAX_VIEW_ITEMS = 20_000;
 const MAX_GREP_SELECTION_HISTORY_ITEMS = 100;
+const MAX_RECENT_REFS = 8;
 const MAX_DB_UI_DBS = 200;
 const MAX_DB_UI_TABLES = 500;
 const MAX_DB_UI_COLUMNS = 1000;
@@ -257,6 +258,13 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     sort: false,
   });
   if (fileSelectionHistory) out.fileSelectionHistory = fileSelectionHistory;
+  const recentRefs = normalizeStringList(raw.recentRefs, {
+    maxItems: MAX_RECENT_REFS,
+    maxLen: MAX_REF_LEN,
+    keepLast: true,
+    sort: false,
+  });
+  if (recentRefs) out.recentRefs = recentRefs;
   const scopeOmitDirs = normalizeStringList(raw.scopeOmitDirs, {
     maxItems: 100,
     maxLen: 64,

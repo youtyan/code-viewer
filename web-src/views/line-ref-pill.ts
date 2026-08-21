@@ -12,6 +12,7 @@ import {
 import { escapeHtml } from "../core/html-escape";
 import {
   COPY_16_PATHS,
+  GIT_BRANCH_16_PATH,
   iconSvg,
   MARK_GITHUB_16_PATH,
   OPEN_EXTERNAL_16_PATH,
@@ -38,6 +39,10 @@ export type LineRefPillDeps = {
   lineCountLabel: (count: number) => string;
   githubOpenTitle: () => string;
   githubCopyTitle: () => string;
+  // "Line history": open the commits that changed the selected lines
+  // (git log -L). Optional so hosts without history (e.g. tests) can omit it.
+  lineHistoryTitle?: () => string;
+  openLineHistory?: (path: string, start: number, end: number) => void;
 };
 
 const COPY_ICON =
@@ -158,7 +163,14 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     '<span class="lrp-github-copy-label"></span>';
 
   githubActions.append(githubOpen, githubCopy);
-  pill.append(copyButton, githubActions, closeButton);
+  const historyButton = document.createElement("button");
+  historyButton.id = "line-ref-pill-history";
+  historyButton.type = "button";
+  historyButton.hidden = !deps.openLineHistory;
+  historyButton.innerHTML =
+    iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH) +
+    '<span class="lrp-history-label"></span>';
+  pill.append(copyButton, githubActions, historyButton, closeButton);
   document.body.appendChild(pill);
 
   let refText = "";
@@ -168,6 +180,16 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
   let githubUrl = "";
   let feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   let githubFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function renderHistoryAction() {
+    if (!deps.openLineHistory) return;
+    const title = deps.lineHistoryTitle?.() ?? "Line history";
+    historyButton.title = title;
+    historyButton.setAttribute("aria-label", title);
+    const label =
+      historyButton.querySelector<HTMLElement>(".lrp-history-label");
+    if (label) label.textContent = title;
+  }
 
   function renderGithubActions() {
     const openTitle = deps.githubOpenTitle();
@@ -273,6 +295,11 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     }, 1200);
   });
 
+  historyButton.addEventListener("click", () => {
+    if (!currentPath || !deps.openLineHistory) return;
+    deps.openLineHistory(currentPath, currentStart, currentEnd);
+  });
+
   closeButton.addEventListener("click", () => {
     deps.onClose();
   });
@@ -289,6 +316,7 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
       githubUrl =
         deps.githubUrlForSelection(currentPath, currentStart, currentEnd) || "";
       renderGithubActions();
+      renderHistoryAction();
       if (feedbackTimer) {
         clearTimeout(feedbackTimer);
         feedbackTimer = null;

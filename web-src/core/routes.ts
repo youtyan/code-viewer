@@ -1,3 +1,8 @@
+import {
+  formatHistoryLineRange,
+  type HistoryLineRange,
+  parseHistoryLineRange,
+} from "./history";
 import { isShellSessionId, type ShellSessionId } from "./shell";
 import { isToolId, type ToolId } from "./tools";
 
@@ -35,6 +40,10 @@ export type AppRoute =
       compare?: string;
       /** view=history: the commit filter text. */
       q?: string;
+      /** view=history: only commits that changed these lines (git log -L). */
+      lines?: HistoryLineRange;
+      /** Text to mark inside the `line` target (e.g. the grep hit). */
+      hl?: string;
       virtual?: "off";
     }
   | { screen: "help"; range: DiffRange; lang: string; section: string }
@@ -59,6 +68,8 @@ export type AppRoute =
       q?: string;
       /** Restrict the log to this path; a trailing "/" means a directory. */
       path?: string;
+      /** With a file `path`: only commits that changed these lines. */
+      lines?: HistoryLineRange;
       range: DiffRange;
     }
   | {
@@ -185,6 +196,7 @@ export function parseRoute(
         };
       const rawView = params.get("view");
       const preview = params.get("preview") === "1";
+      const hl = params.get("hl") || "";
       if (rawView === "blob") {
         return {
           screen: "file",
@@ -194,6 +206,7 @@ export function parseRoute(
           view: "blob",
           ...(preview ? { preview: true as const } : {}),
           ...(line ? { line } : {}),
+          ...(line && hl ? { hl } : {}),
           ...(params.get("virtual") === "off"
             ? { virtual: "off" as const }
             : {}),
@@ -223,6 +236,9 @@ export function parseRoute(
             ? { compare: params.get("compare") || "" }
             : {}),
           ...(params.get("q") ? { q: params.get("q") || "" } : {}),
+          ...(parseHistoryLineRange(params.get("lines"))
+            ? { lines: parseHistoryLineRange(params.get("lines")) }
+            : {}),
           ...(line ? { line } : {}),
         };
       }
@@ -272,6 +288,7 @@ export function parseRoute(
       const compare = params.get("compare") || "";
       const q = params.get("q") || "";
       const path = params.get("path") || "";
+      const lines = parseHistoryLineRange(params.get("lines"));
       return {
         screen: "history",
         ref: params.get("ref") || "HEAD",
@@ -279,6 +296,7 @@ export function parseRoute(
         ...(compare ? { compare } : {}),
         ...(q ? { q } : {}),
         ...(path ? { path } : {}),
+        ...(path && lines ? { lines } : {}),
         range,
       };
     }
@@ -357,6 +375,9 @@ export function buildRoute(route: AppRoute): string {
           (route.line
             ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
             : "") +
+          (route.line && route.hl
+            ? `&hl=${encodeURIComponent(route.hl)}`
+            : "") +
           (route.virtual === "off" ? "&virtual=off" : "")
         );
       }
@@ -385,6 +406,9 @@ export function buildRoute(route: AppRoute): string {
             ? `&compare=${encodeURIComponent(route.compare)}`
             : "") +
           (route.q ? `&q=${encodeURIComponent(route.q)}` : "") +
+          (route.lines
+            ? `&lines=${encodeURIComponent(formatHistoryLineRange(route.lines))}`
+            : "") +
           (route.line
             ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
             : "")
@@ -436,6 +460,8 @@ export function buildRoute(route: AppRoute): string {
       const params = new URLSearchParams();
       if (route.ref && route.ref !== "HEAD") params.set("ref", route.ref);
       if (route.path) params.set("path", route.path);
+      if (route.path && route.lines)
+        params.set("lines", formatHistoryLineRange(route.lines));
       if (route.commit) params.set("commit", route.commit);
       if (route.compare) params.set("compare", route.compare);
       if (route.q) params.set("q", route.q);
