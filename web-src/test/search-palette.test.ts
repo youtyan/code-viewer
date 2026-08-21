@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  buildGrepRequestParams,
   limitPaletteResults,
   movePaletteSelection,
   PALETTE_RESULT_LIMIT,
@@ -151,5 +152,50 @@ describe("parseGrepQuery", () => {
     { name: "empty input", raw: "", term: "", paths: [] },
   ])("$name", ({ raw, term, paths }) => {
     expect(parseGrepQuery(raw)).toEqual({ term, paths });
+  });
+});
+
+describe("buildGrepRequestParams", () => {
+  test.each([
+    {
+      name: "plain defaults send only ref / q / max",
+      options: {
+        regex: false,
+        caseSensitive: false,
+        wholeWord: false,
+        hideTests: false,
+      },
+      expected: "ref=worktree&q=needle&max=200",
+    },
+    {
+      name: "every flag on",
+      options: {
+        regex: true,
+        caseSensitive: true,
+        wholeWord: true,
+        hideTests: true,
+      },
+      expected:
+        "ref=worktree&q=needle&max=200&regex=1&case=1&word=1&exclude_tests=1",
+    },
+    {
+      name: "only match case",
+      options: {
+        regex: false,
+        caseSensitive: true,
+        wholeWord: false,
+        hideTests: false,
+      },
+      expected: "ref=worktree&q=needle&max=200&case=1",
+    },
+  ])("$name", ({ options, expected }) => {
+    expect(
+      buildGrepRequestParams({
+        term: "needle",
+        ref: "worktree",
+        max: 200,
+        ...options,
+      }).toString(),
+    ).toBe(expected);
   });
 });

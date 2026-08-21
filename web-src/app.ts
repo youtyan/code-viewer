@@ -81,12 +81,14 @@ import {
   type DiffRange,
   parseDoctorOverlay,
   parseRoute,
+  parseSearchResultsOverlay,
   parseTerminalOverlay,
   parseToolsOverlay,
   type SourceFileTarget,
   type SourceLineTarget,
   type TerminalOverlayState,
   withDoctorOverlay,
+  withSearchResultsOverlay,
   withTerminalOverlay,
   withToolsOverlay,
 } from "./core/routes";
@@ -145,7 +147,9 @@ import { createQuickHelp } from "./views/quick-help";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
 import { createRepositoryWebLink } from "./views/repository-web-link";
+import { searchPaletteText } from "./views/search-palette-i18n";
 import { createSearchPalette } from "./views/search-palette-ui";
+import { createSearchResultsView } from "./views/search-results-view";
 import { createSidebar, type ViewerFontSize } from "./views/sidebar";
 import {
   createSourceView,
@@ -1559,6 +1563,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.hideTests = hidden;
       applyHideTests();
     },
+    openSearchResults: (query) => openSearchSheet(query),
   });
   const { openSearchPalette, isPaletteOpen, paletteMode, clearRepoFileCache } =
     SEARCH_PALETTE;
@@ -2593,6 +2598,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       .querySelector<HTMLElement>("#terminal-sheet")
       ?.setAttribute("aria-label", terminalChrome.title);
     relocalizeTerminal?.();
+    const searchChrome = searchPaletteText(STATE.language);
+    const searchTabBtn =
+      document.querySelector<HTMLButtonElement>("#panel-tab-search");
+    if (searchTabBtn) {
+      searchTabBtn.textContent = searchChrome.resultsTitle;
+      searchTabBtn.title = searchChrome.resultsOpen;
+    }
+    relocalizeSearchResults?.();
     document
       .querySelector<HTMLElement>(".app-panel-tabs")
       ?.setAttribute("aria-label", text.appPanel.tabs);
@@ -2781,6 +2794,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let relocalizeTools: (() => void) | null = null;
   let relocalizeViewerSettings: (() => void) | null = null;
   let relocalizeTerminal: (() => void) | null = null;
+  let relocalizeSearchResults: (() => void) | null = null;
   let relocalizeDatabase: (() => void) | null = null;
 
   // createQuickHelp 後に代入される (同じ遅延参照パターン)。
@@ -3374,15 +3388,21 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 瞬間にシートの状態が URL から消える。history に積む URL とヘッダメニューの
   // href の両方がこれを通る必要がある。
   function withOverlayState(url: string): string {
-    return withTerminalOverlay(
-      withToolsOverlay(
-        withDoctorOverlay(
-          url,
-          parseDoctorOverlay(window.location.pathname, window.location.search),
+    return withSearchResultsOverlay(
+      withTerminalOverlay(
+        withToolsOverlay(
+          withDoctorOverlay(
+            url,
+            parseDoctorOverlay(
+              window.location.pathname,
+              window.location.search,
+            ),
+          ),
+          parseToolsOverlay(window.location.search),
         ),
-        parseToolsOverlay(window.location.search),
+        parseTerminalOverlay(window.location.search),
       ),
-      parseTerminalOverlay(window.location.search),
+      parseSearchResultsOverlay(window.location.search),
     );
   }
 
@@ -4305,6 +4325,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     event.preventDefault();
     openTerminalSheet();
   });
+  $("#panel-tab-search")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    openSearchSheet();
+  });
   $("#app-panel-close")?.addEventListener("click", (event) => {
     event.preventDefault();
     closeAppPanel();
@@ -5212,6 +5236,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncDoctorSheetFromUrl();
     syncToolsSheetFromUrl();
     syncTerminalSheetFromUrl();
+    syncSearchSheetFromUrl();
   });
 
   // Ref picker (from / to)
@@ -5456,7 +5481,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     // (ヘッダーのメニューが押下状態を出していたときと同じ決め方)。
     const tools = parseToolsOverlay(window.location.search) !== null;
     const terminal = parseTerminalOverlay(window.location.search) !== null;
-    const open = tools || terminal;
+    const search = parseSearchResultsOverlay(window.location.search) !== null;
+    const open = tools || terminal || search;
     const panel = document.getElementById("app-panel");
     if (panel) {
       panel.classList.toggle("app-panel-open", open);
@@ -5464,6 +5490,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     for (const [id, selected] of [
       ["#panel-tab-tools", tools],
       ["#panel-tab-terminal", terminal],
+      ["#panel-tab-search", search],
     ] as const) {
       const tab = document.querySelector<HTMLButtonElement>(id);
       if (!tab) continue;
@@ -5492,6 +5519,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function closeAppPanel(): void {
+    if (
+      parseSearchResultsOverlay(window.location.search) !== null ||
+      SEARCH_RESULTS_VIEW.isOpen()
+    )
+      closeSearchSheet();
     if (
       parseToolsOverlay(window.location.search) !== null ||
       TOOLS_VIEW.isOpen()
@@ -5558,12 +5590,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function openToolsSheet(tool?: ToolId): void {
-    // タブなので、もう一方は畳む。2 つ並べると 1 つあたりが狭くなりすぎる。
+    // タブなので、他は畳む。2 つ並べると 1 つあたりが狭くなりすぎる。
     if (
       parseTerminalOverlay(window.location.search) !== null ||
       TERMINAL_VIEW.isOpen()
     )
       closeTerminalSheet();
+    if (
+      parseSearchResultsOverlay(window.location.search) !== null ||
+      SEARCH_RESULTS_VIEW.isOpen()
+    )
+      closeSearchSheet();
     // 実際に出すツールが決まるのは保存状態を読んだ後だが、「開いた」ことは
     // その場で URL に出す。読み込みが止まっても URL と画面が食い違わない。
     updateUrlForToolsOverlay(tool ?? TOOLS_VIEW.getActiveTool());
@@ -5583,6 +5620,94 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (tool && (!open || TOOLS_VIEW.getActiveTool() !== tool))
       void TOOLS_VIEW.open(tool);
     else if (!tool && open) TOOLS_VIEW.close();
+    syncAppPanel();
+  }
+
+  // Search results sheet — same independent overlay as tools; the URL holds
+  // the grep query (?results=<query>) so a reload re-runs it.
+  const SEARCH_RESULTS_VIEW = createSearchResultsView({
+    $: <T extends Element = HTMLElement>(sel: string) =>
+      document.querySelector<T>(sel),
+    trackLoad,
+    getLanguage: () => STATE.language,
+    appendScopeParams,
+    getRef: () => {
+      const route = STATE.route;
+      if (route.screen === "repo" || route.screen === "file")
+        return route.ref || "worktree";
+      return STATE.repoRef || "worktree";
+    },
+    getServerGeneration: () => SERVER_GENERATION,
+    isAbortError,
+    getGrepRegex: () => APP_SETTINGS.grepRegex === true,
+    getGrepCaseSensitive: () => APP_SETTINGS.grepCaseSensitive === true,
+    getGrepWholeWord: () => APP_SETTINGS.grepWholeWord === true,
+    getGrepHideTests: () => STATE.hideTests,
+    persistGrepSettings: async (patch) => {
+      await persistSettingsPatch(patch);
+      if (patch.hideTests !== undefined) {
+        STATE.hideTests = patch.hideTests;
+        applyHideTests();
+      }
+    },
+    openMatch: ({ path, line, hl }) => {
+      const route = STATE.route;
+      const ref =
+        route.screen === "repo" || route.screen === "file"
+          ? route.ref || "worktree"
+          : STATE.repoRef || "worktree";
+      setRoute({
+        screen: "file",
+        path,
+        ref,
+        view: "blob",
+        line,
+        ...(hl ? { hl } : {}),
+        range: currentRange(),
+      });
+      void renderStandaloneSource({ path, ref });
+    },
+    onQueryChange: (query) => updateUrlForSearchResultsOverlay(query),
+  });
+  relocalizeSearchResults = () => SEARCH_RESULTS_VIEW.localize();
+
+  function updateUrlForSearchResultsOverlay(query: string | null): void {
+    const current = window.location.pathname + window.location.search;
+    const next = withSearchResultsOverlay(current, query);
+    if (next !== current) {
+      history.replaceState(history.state, "", next + window.location.hash);
+    }
+    syncHeaderMenu();
+  }
+
+  function openSearchSheet(query?: string): void {
+    if (
+      parseTerminalOverlay(window.location.search) !== null ||
+      TERMINAL_VIEW.isOpen()
+    )
+      closeTerminalSheet();
+    if (
+      parseToolsOverlay(window.location.search) !== null ||
+      TOOLS_VIEW.isOpen()
+    )
+      closeToolsSheet();
+    updateUrlForSearchResultsOverlay(query ?? SEARCH_RESULTS_VIEW.getQuery());
+    SEARCH_RESULTS_VIEW.open(query);
+    syncAppPanel();
+  }
+
+  function closeSearchSheet(): void {
+    SEARCH_RESULTS_VIEW.close();
+    updateUrlForSearchResultsOverlay(null);
+    syncAppPanel();
+  }
+
+  function syncSearchSheetFromUrl(): void {
+    const query = parseSearchResultsOverlay(window.location.search);
+    const open = SEARCH_RESULTS_VIEW.isOpen();
+    if (query !== null && (!open || SEARCH_RESULTS_VIEW.getQuery() !== query))
+      SEARCH_RESULTS_VIEW.open(query);
+    else if (query === null && open) SEARCH_RESULTS_VIEW.close();
     syncAppPanel();
   }
 
@@ -5619,12 +5744,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function openTerminalSheet(id?: string | null): void {
-    // タブなので、もう一方は畳む。
+    // タブなので、他は畳む。
     if (
       parseToolsOverlay(window.location.search) !== null ||
       TOOLS_VIEW.isOpen()
     )
       closeToolsSheet();
+    if (
+      parseSearchResultsOverlay(window.location.search) !== null ||
+      SEARCH_RESULTS_VIEW.isOpen()
+    )
+      closeSearchSheet();
     const target = id ?? TERMINAL_VIEW.getActiveTarget();
     // 実際に何を映すかは一覧を取った後に決まるが、「開いた」ことはその場で
     // URL に出す。読み込みが止まっても URL と画面が食い違わない。
@@ -5812,6 +5942,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncDoctorSheetFromUrl();
     syncToolsSheetFromUrl();
     syncTerminalSheetFromUrl();
+    syncSearchSheetFromUrl();
     if (
       isSameBlobFileRoute(previousRoute, STATE.route) &&
       routeBlobPreview(previousRoute) !== routeBlobPreview(STATE.route) &&

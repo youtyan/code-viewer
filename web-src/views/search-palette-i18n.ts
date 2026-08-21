@@ -68,6 +68,15 @@ export type SearchPaletteText = {
   savingSelection: string;
   selectionSaveFailed: (error: string) => string;
   unknownError: string;
+  // Results sheet (bottom panel tab that keeps a grep result list open).
+  pinResults: string;
+  pinResultsTitle: string;
+  resultsTitle: string;
+  resultsOpen: string;
+  resultsRun: string;
+  resultsPlaceholder: string;
+  resultsIdle: string;
+  resultsScope: (ref: string) => string;
 };
 
 const EN: SearchPaletteText = {
@@ -147,6 +156,15 @@ const EN: SearchPaletteText = {
   savingSelection: "Saving selection...",
   selectionSaveFailed: (error) => `Failed to save selection: ${error}`,
   unknownError: "unknown error",
+  pinResults: "Pin",
+  pinResultsTitle:
+    "Keep these results open in the bottom panel while you browse (Ctrl+Enter)",
+  resultsTitle: "Search",
+  resultsOpen: "Open the search results panel",
+  resultsRun: "Search",
+  resultsPlaceholder: "Search text (path:<dir or glob> narrows)",
+  resultsIdle: "Type a search and press Enter",
+  resultsScope: (ref) => `in ${ref}`,
 };
 
 const JA: SearchPaletteText = {
@@ -225,6 +243,15 @@ const JA: SearchPaletteText = {
   savingSelection: "選択履歴を保存中...",
   selectionSaveFailed: (error) => `選択履歴を保存できませんでした: ${error}`,
   unknownError: "不明なエラー",
+  pinResults: "固定",
+  pinResultsTitle: "この結果を下パネルに出したまま閲覧を続ける (Ctrl+Enter)",
+  resultsTitle: "検索",
+  resultsOpen: "検索結果パネルを開く",
+  resultsRun: "検索",
+  resultsPlaceholder:
+    "検索するコード（path:<ディレクトリ or glob> で絞り込み）",
+  resultsIdle: "検索語を入力して Enter",
+  resultsScope: (ref) => `${ref} 内`,
 };
 
 export function searchPaletteText(

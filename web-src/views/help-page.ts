@@ -186,7 +186,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "Ctrl+K opens the file palette and Ctrl+G the text palette; the search button at the left of the header icons does the same (Shift+click for text). The two share one window: switching keeps what you typed, and reopening restores the last query, selected so typing replaces it. With an empty query the file palette lists the files you opened most recently, and the result line says when the ranking was cut at 50. The text palette has regex (Alt+R), match-case (Alt+C) and whole-word (Alt+W) toggles, and path:<dir or glob> tokens in the query narrow the search; matching is case-insensitive on every engine unless match-case is on. Opening a hit marks the matched text on the target line, and in a large virtualized file it pre-fills the in-file find bar.",
+                text: "Ctrl+K opens the file palette and Ctrl+G the text palette; the search button at the left of the header icons does the same (Shift+click for text). The two share one window: switching keeps what you typed, and reopening restores the last query, selected so typing replaces it. With an empty query the file palette lists the files you opened most recently, and the result line says when the ranking was cut at 50. The text palette has regex (Alt+R), match-case (Alt+C) and whole-word (Alt+W) toggles, and path:<dir or glob> tokens in the query narrow the search; matching is case-insensitive on every engine unless match-case is on. Opening a hit marks the matched text on the target line, and in a large virtualized file it pre-fills the in-file find bar. Pin (or Ctrl+Enter) moves the query into the bottom panel's Search tab, where the grouped result list stays open while you browse files; the query is part of the URL (?results=) so a reload re-runs it.",
               },
               {
                 kind: "paragraph",
@@ -997,7 +997,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "Ctrl+K でファイルパレット、Ctrl+G でコード検索パレットが開きます。ヘッダのアイコン列の左端にある検索ボタンでも同じです（Shift+クリックでコード検索）。2 つは 1 つのウィンドウを共有し、切り替えても入力中の検索語は残り、閉じて開き直すと前回の検索語が選択状態で戻ります。ファイルパレットは空のとき最近開いたファイルを並べ、結果が 50 件で切られたときはその旨を表示します。コード検索には正規表現（Alt+R）・大文字小文字の区別（Alt+C）・単語単位（Alt+W）の切り替えがあり、検索語の中の path:<ディレクトリ or glob> で対象を絞れます。大文字小文字は「区別する」を押さない限りどのエンジンでも区別しません。ヒットを開くと該当行の一致箇所が強調され、大きな仮想表示のファイルではファイル内検索バーに検索語が入ります。",
+                text: "Ctrl+K でファイルパレット、Ctrl+G でコード検索パレットが開きます。ヘッダのアイコン列の左端にある検索ボタンでも同じです（Shift+クリックでコード検索）。2 つは 1 つのウィンドウを共有し、切り替えても入力中の検索語は残り、閉じて開き直すと前回の検索語が選択状態で戻ります。ファイルパレットは空のとき最近開いたファイルを並べ、結果が 50 件で切られたときはその旨を表示します。コード検索には正規表現（Alt+R）・大文字小文字の区別（Alt+C）・単語単位（Alt+W）の切り替えがあり、検索語の中の path:<ディレクトリ or glob> で対象を絞れます。大文字小文字は「区別する」を押さない限りどのエンジンでも区別しません。ヒットを開くと該当行の一致箇所が強調され、大きな仮想表示のファイルではファイル内検索バーに検索語が入ります。「固定」（または Ctrl+Enter）を押すと検索語が下パネルの「検索」タブに移り、ファイルを開いて回る間も結果一覧が残ります。検索語は URL（?results=）に載るのでリロードしても同じ検索が走ります。",
               },
               {
                 kind: "paragraph",

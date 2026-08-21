@@ -582,3 +582,17 @@ export function withTerminalOverlay(
 ): string {
   return withQueryParam(url, "terminal", state);
 }
+
+// Search results sheet (third tab of the bottom panel). The query key holds
+// the grep query so a reload re-runs the same search; an empty value means
+// "open, nothing searched yet". Same AppRoute-independent shape as ?tools=.
+export function parseSearchResultsOverlay(search: string): string | null {
+  return new URLSearchParams(search).get("results");
+}
+
+export function withSearchResultsOverlay(
+  url: string,
+  query: string | null,
+): string {
+  return withQueryParam(url, "results", query);
+}

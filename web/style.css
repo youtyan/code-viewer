@@ -15114,6 +15114,7 @@ body.app-panel-docked .app-panel.app-panel-open {
    `web-src/test/docked-page-height.test.ts`。 */
 
 .tools-sheet,
+.search-sheet,
 .terminal-sheet {
   flex: 1 1 auto;
   min-width: 0;
@@ -15126,8 +15127,41 @@ body.app-panel-docked .app-panel.app-panel-open {
 /* パネルの中ではタブで 1 つだけ出す。閉じている側は本当に消す
    (右ドロワーの頃はスライドのために display を残していた)。 */
 .tools-sheet[hidden],
+.search-sheet[hidden],
 .terminal-sheet[hidden] {
   display: none;
+}
+/* Search results sheet: query row, palette-style controls, scrolling list. */
+.search-results-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 10px 0;
+}
+.search-results-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--ui-control-md);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  padding: 0 10px;
+  outline: none;
+}
+.search-results-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+.search-results-controls { padding: 6px 10px 0; }
+.search-results-status { padding: 6px 10px; }
+.search-results-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 /* ドロワー左端の掴みしろ。annotation パネルのリサイザーと同じ作り (境界を

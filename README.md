@@ -76,7 +76,11 @@ Requires Node.js 20 or newer. Development uses
   (`path:src/ path:*.md needle`); matching is case-insensitive on every
   engine unless you turn match-case on. Opening a hit marks the matched
   text on the target line (`?hl=`), and in large virtualized files it
-  pre-fills the in-file find bar with it.
+  pre-fills the in-file find bar with it. **Pin** (or `Ctrl+Enter`) moves
+  the query into the bottom panel's **Search** tab, where the grouped
+  result list stays open while you browse files; the query rides in the
+  URL (`?results=<query>`) so a reload re-runs it, and the Search tab can
+  also be opened directly from the panel's tab row.
 - Switch the viewer UI between English and Japanese from Settings & Help —
   the language toggle live-updates every screen including the datastore
   viewer.

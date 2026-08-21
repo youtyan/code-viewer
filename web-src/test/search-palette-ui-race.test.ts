@@ -400,6 +400,7 @@ async function setupGrep(
     paletteWidth?: number;
     paletteHeight?: number;
     language?: "en" | "ja";
+    openSearchResults?: (query: string) => void;
   } = {},
 ) {
   const urls: string[] = [];
@@ -525,6 +526,7 @@ async function setupGrep(
       patches.push(patch);
     },
     applyGrepHideTests: () => undefined,
+    openSearchResults: options.openSearchResults,
   });
   palette.openSearchPalette("grep");
   const input = q<HTMLInputElement>(document, ".gdp-palette-input");
@@ -1298,6 +1300,57 @@ describe("grep palette hands the hit text to the source view", () => {
       expect(route.path).toBe("src/plain.ts");
       expect(route.line).toBe(2);
       expect(route.hl).toBe("needle");
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+});
+
+describe("grep palette pin to results sheet", () => {
+  test("the Pin button hands the live query to the results sheet and closes the palette", async () => {
+    const pinned: string[] = [];
+    const { input, palette } = await setupGrep({
+      openSearchResults: (query) => pinned.push(query),
+    });
+    input.value = "needle path:src/";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const pin = q<HTMLButtonElement>(document, ".gdp-palette-pin");
+    pin.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(pinned).toEqual(["needle path:src/"]);
+    expect(palette.isPaletteOpen()).toBe(false);
+  });
+
+  test("Ctrl+Enter pins as well", async () => {
+    const pinned: string[] = [];
+    const { input, palette } = await setupGrep({
+      openSearchResults: (query) => pinned.push(query),
+    });
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        ctrlKey: true,
+        bubbles: true,
+      }),
+    );
+    expect(pinned).toEqual(["needle"]);
+    expect(palette.isPaletteOpen()).toBe(false);
+  });
+
+  test("without a results sheet there is no Pin button and Ctrl+Enter opens the hit", async () => {
+    const { input, palette, routes } = await setupGrep();
+    try {
+      expect(document.querySelector(".gdp-palette-pin")).toBeNull();
+      await waitFor(
+        () => document.querySelectorAll(".gdp-palette-row").length > 0,
+      );
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          ctrlKey: true,
+          bubbles: true,
+        }),
+      );
+      await waitFor(() => routes.length === 1);
     } finally {
       palette.closeSearchPalette();
     }

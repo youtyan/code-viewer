@@ -1022,7 +1022,7 @@ export function createSidebar(deps: SidebarDeps) {
     syncSidebarFilterCount(filterActive, visibleFiles, totalFiles);
   }
 
-  // "#totals" normally shows the sidebar's own summary ("12 files"). While a
+  // "#totals" normally shows the sidebar summary ("12 files"). While a
   // filter is active it shows "matching / all" instead, and the original text
   // comes back when the filter clears. Only the text this function wrote is
   // replaced, so a later writer (e.g. "Cannot load tree") is never clobbered.

@@ -72,3 +72,26 @@ export function parseGrepQuery(raw: string): ParsedGrepQuery {
   }
   return { term: words.join(" "), paths };
 }
+
+// Wire parameters of /_grep shared by the palette and the results sheet, so
+// both send the same flags for the same toggles. Scope params (omit dirs /
+// exclude names) and path restrictions are appended by the caller.
+export function buildGrepRequestParams(options: {
+  term: string;
+  ref: string;
+  regex: boolean;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  hideTests: boolean;
+  max: number;
+}): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set("ref", options.ref);
+  params.set("q", options.term);
+  params.set("max", String(options.max));
+  if (options.regex) params.set("regex", "1");
+  if (options.caseSensitive) params.set("case", "1");
+  if (options.wholeWord) params.set("word", "1");
+  if (options.hideTests) params.set("exclude_tests", "1");
+  return params;
+}

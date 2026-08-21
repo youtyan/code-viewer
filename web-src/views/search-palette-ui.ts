@@ -20,6 +20,7 @@ import {
 import { isImeComposing } from "../core/keyboard";
 import type { AppRoute } from "../core/routes";
 import {
+  buildGrepRequestParams,
   limitPaletteResults,
   MAX_GREP_PALETTE_HEIGHT,
   MAX_GREP_PALETTE_WIDTH,
@@ -90,6 +91,8 @@ export type SearchPaletteDeps = {
     grepPaletteHeight?: number;
   }): Promise<void>;
   applyGrepHideTests(hidden: boolean): void;
+  /** "Pin": hand the current query to the results sheet in the bottom panel. */
+  openSearchResults?(query: string): void;
   STATE: {
     route: AppRoute;
     files: FileMeta[];
@@ -128,6 +131,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     getGrepPaletteHeight,
     persistGrepSettings,
     applyGrepHideTests,
+    openSearchResults,
   } = deps;
 
   type PaletteMode = "file" | "grep";
@@ -524,8 +528,29 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       wholeWord,
       excludeTests,
       groupFiles,
-      hint,
     );
+    if (openSearchResults) {
+      const pin = document.createElement("button");
+      pin.type = "button";
+      pin.className = "gdp-palette-mode-button gdp-palette-pin";
+      pin.textContent = text().pinResults;
+      pin.title = text().pinResultsTitle;
+      pin.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        pinResults(state);
+      });
+      state.controls.append(pin);
+    }
+    state.controls.append(hint);
+  }
+
+  // Move the query to the results sheet, which keeps the list open while
+  // files are browsed; the palette itself closes.
+  function pinResults(state: PaletteState) {
+    if (!openSearchResults) return;
+    const query = state.input.value;
+    closeSearchPalette();
+    openSearchResults(query);
   }
 
   // Match-case / whole-word share one persistence path: flip, save, rerun
@@ -1353,14 +1378,15 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       const caseSensitive = state.grepCaseSensitive;
       const wholeWord = state.grepWholeWord;
       const hideTests = state.grepHideTests;
-      const params = new URLSearchParams();
-      params.set("ref", ref);
-      params.set("q", term);
-      params.set("max", "200");
-      if (regex) params.set("regex", "1");
-      if (caseSensitive) params.set("case", "1");
-      if (wholeWord) params.set("word", "1");
-      if (hideTests) params.set("exclude_tests", "1");
+      const params = buildGrepRequestParams({
+        term,
+        ref,
+        regex,
+        caseSensitive,
+        wholeWord,
+        hideTests,
+        max: 200,
+      });
       appendScopeParams(params);
       if (source === "diff") {
         const scoped = state.diffSnapshot.filter((file) =>
@@ -1556,6 +1582,14 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     if (e.key === "Enter") {
       if (state.composing) return;
       e.preventDefault();
+      if (
+        state.mode === "grep" &&
+        (e.ctrlKey || e.metaKey) &&
+        openSearchResults
+      ) {
+        pinResults(state);
+        return;
+      }
       void selectPaletteItem(state);
       return;
     }
