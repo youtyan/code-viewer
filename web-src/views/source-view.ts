@@ -1303,6 +1303,45 @@ export function createSourceView(deps: SourceViewDeps) {
       : undefined;
   }
 
+  // Same file, new hit: drop the previous <mark>s and mark the new target
+  // line. A virtual file re-opens its find bar with the new term instead,
+  // which re-renders its rows.
+  function syncSourceHighlightMarks(
+    card: HTMLElement,
+    target: SourceFileTarget,
+  ): void {
+    card
+      .querySelectorAll<HTMLElement>("mark.gdp-grep-match")
+      .forEach((mark) => {
+        const parent = mark.parentElement;
+        if (!parent) return;
+        while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+        parent.removeChild(mark);
+        parent.normalize();
+      });
+    const term = currentSourceHighlightTerm(target);
+    const virtual = card.querySelector<VirtualSourceSearchRoot>(
+      ".gdp-source-virtual",
+    );
+    if (virtual?.__gdpVirtualSourceSearch) {
+      if (term) virtual.__gdpVirtualSourceSearch.open(term);
+      return;
+    }
+    if (!term) return;
+    card
+      .querySelectorAll<HTMLElement>(".gdp-source-table tr[data-line]")
+      .forEach((row) => {
+        const cell = row.querySelector<HTMLElement>(".gdp-source-line-code");
+        if (!cell) return;
+        markSourceHighlightTerm(
+          cell,
+          cell.textContent ?? "",
+          Number(row.dataset.line || "0"),
+          target,
+        );
+      });
+  }
+
   function markSourceHighlightTerm(
     cell: HTMLElement,
     lineText: string,
@@ -2319,7 +2358,11 @@ export function createSourceView(deps: SourceViewDeps) {
       const mounted = mountedStandaloneSourceCard(target);
       const state = mounted?.dataset.sourceState;
       if (mounted && state === "done") {
-        // Same target already on screen: honor a line jump, skip the reload.
+        // Same target already on screen (another hit of the same file from
+        // the palette or the results sheet): move the target-line class and
+        // the hl= mark to the new line, then scroll. No reload.
+        syncRenderedSourceLineHighlights(mounted, target);
+        syncSourceHighlightMarks(mounted, target);
         scrollStandaloneSourceLine(
           mounted,
           lineTargetStart(
