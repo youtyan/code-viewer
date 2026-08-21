@@ -60,6 +60,9 @@ export function createSearchResultsView(
   let generation = 0;
   let settingsPending = false;
   let lastResponse: { response: GrepResponse; term: string } | null = null;
+  // "path\0line" of the hit opened last, so the list shows where you are;
+  // kept across re-runs of the same search when that hit is still listed.
+  let activeKey = "";
 
   const text = () => searchPaletteText(deps.getLanguage());
 
@@ -178,7 +181,7 @@ export function createSearchResultsView(
     head.append(input, runButton);
     list = document.createElement("div");
     list.className = "gdp-palette-list search-results-list";
-    list.setAttribute("role", "list");
+    list.setAttribute("role", "listbox");
     el.append(head, controls, status, list);
     localize();
   }
@@ -215,10 +218,13 @@ export function createSearchResultsView(
       const rows = document.createElement("div");
       rows.className = "gdp-palette-file-matches";
       for (const match of matches) {
+        const key = `${match.path}\0${match.line}`;
         const row = document.createElement("button");
         row.type = "button";
         row.className = "gdp-palette-row";
-        row.setAttribute("role", "listitem");
+        row.setAttribute("role", "option");
+        row.dataset.resultKey = key;
+        row.setAttribute("aria-selected", String(key === activeKey));
         const title = document.createElement("span");
         title.className = "gdp-palette-row-title";
         title.textContent = text().line(match.line, match.column);
@@ -227,6 +233,7 @@ export function createSearchResultsView(
         detail.textContent = match.preview;
         row.append(title, detail);
         row.addEventListener("click", () => {
+          setActiveRow(key);
           const hl = match.matchText || (deps.getGrepRegex() ? "" : term);
           deps.openMatch({
             path: match.path,
@@ -239,6 +246,14 @@ export function createSearchResultsView(
       group.append(heading, rows);
       list.appendChild(group);
     }
+  }
+
+  // Mark the opened hit in place (no list rebuild, so scroll stays put).
+  function setActiveRow(key: string): void {
+    activeKey = key;
+    list?.querySelectorAll<HTMLElement>(".gdp-palette-row").forEach((row) => {
+      row.setAttribute("aria-selected", String(row.dataset.resultKey === key));
+    });
   }
 
   function run(nextQuery?: string): void {

@@ -125,6 +125,32 @@ describe("search results sheet", () => {
     ]);
   });
 
+  test("the opened hit stays marked as the current row, also after the same search is re-run", async () => {
+    const { view } = setup();
+    view.open("needle");
+    await waitFor(
+      () => document.querySelectorAll(".gdp-palette-row").length === 3,
+    );
+    const rows = () =>
+      Array.from(
+        document.querySelectorAll<HTMLButtonElement>(".gdp-palette-row"),
+      );
+    const selected = () =>
+      rows().map((row) => row.getAttribute("aria-selected"));
+    expect(selected()).toEqual(["false", "false", "false"]);
+    rows()[1].click();
+    expect(selected()).toEqual(["false", "true", "false"]);
+    rows()[2].click();
+    expect(selected()).toEqual(["false", "false", "true"]);
+    // Re-running rebuilds the rows; the current hit is still marked.
+    q<HTMLButtonElement>(document, ".search-results-run").click();
+    await waitFor(() => rows().length === 3 && selected()[2] === "true");
+    expect(selected()).toEqual(["false", "false", "true"]);
+    expect(q(document, ".search-results-list").getAttribute("role")).toBe(
+      "listbox",
+    );
+  });
+
   test("a regex hit without engine match text is opened without hl", async () => {
     const { view, opened } = setup({
       regex: true,
