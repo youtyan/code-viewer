@@ -497,6 +497,71 @@ describe("routes", () => {
     ).toBe("/history?commit=worktree");
   });
 
+  test.each([
+    {
+      name: "filter text",
+      search: "?q=author%3Aalice+fix",
+      route: { q: "author:alice fix" },
+      url: "/history?q=author%3Aalice+fix",
+    },
+    {
+      name: "directory path scope",
+      search: "?path=src%2F",
+      route: { path: "src/" },
+      url: "/history?path=src%2F",
+    },
+    {
+      name: "selected commit compared against another sha",
+      search: "?commit=abc1234&compare=def5678",
+      route: { commit: "abc1234", compare: "def5678" },
+      url: "/history?commit=abc1234&compare=def5678",
+    },
+    {
+      name: "everything at once keeps a stable parameter order",
+      search: "?ref=main&path=src%2F&commit=abc1234&compare=def5678&q=fix",
+      route: {
+        ref: "main",
+        path: "src/",
+        commit: "abc1234",
+        compare: "def5678",
+        q: "fix",
+      },
+      url: "/history?ref=main&path=src%2F&commit=abc1234&compare=def5678&q=fix",
+    },
+  ])("history route round-trips $name", ({ search, route, url }) => {
+    const fallback = { from: "HEAD", to: "worktree" };
+    const parsed = parseRoute("/history", search, fallback);
+    expect(parsed).toEqual({
+      screen: "history",
+      ref: "HEAD",
+      ...route,
+      range: fallback,
+    });
+    expect(buildRoute(parsed)).toBe(url);
+  });
+
+  test("file history routes carry the filter text and compare sha", () => {
+    const fallback = { from: "HEAD", to: "worktree" };
+    const parsed = parseRoute(
+      "/file",
+      "?path=README.md&target=main&view=history&commit=abc1234&compare=def5678&q=fix",
+      fallback,
+    );
+    expect(parsed).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "main",
+      range: fallback,
+      view: "history",
+      commit: "abc1234",
+      compare: "def5678",
+      q: "fix",
+    });
+    expect(buildRoute(parsed)).toBe(
+      "/file?path=README.md&target=main&view=history&commit=abc1234&compare=def5678&q=fix",
+    );
+  });
+
   test("parses and builds file blame routes", () => {
     const fallback = { from: "HEAD", to: "worktree" };
     expect(

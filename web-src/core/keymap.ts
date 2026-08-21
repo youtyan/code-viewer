@@ -1,4 +1,12 @@
-export const KEYMAP_SCOPES = ["global", "sidebar", "main", "panel"] as const;
+// "history" is the commit list (history screen or a file's History tab):
+// j / k step commits there without stealing the sidebar's j / k.
+export const KEYMAP_SCOPES = [
+  "global",
+  "sidebar",
+  "main",
+  "panel",
+  "history",
+] as const;
 
 export type KeymapScope = (typeof KEYMAP_SCOPES)[number];
 
@@ -43,6 +51,8 @@ export const KEYMAP_ACTIONS = [
   "previous-hunk",
   "goto-diff",
   "goto-history",
+  "history-next-commit",
+  "history-previous-commit",
   "goto-repo",
   "toggle-terminal-panel",
   "toggle-sidebar",
@@ -239,6 +249,10 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "previous-hunk", key: "{", shift: true },
   { action: "goto-diff", key: "d", pendingG: true },
   { action: "goto-history", key: "h", pendingG: true },
+  { action: "history-next-commit", key: "arrowdown" },
+  { action: "history-previous-commit", key: "arrowup" },
+  { action: "history-next-commit", key: "j", scope: "history" },
+  { action: "history-previous-commit", key: "k", scope: "history" },
   { action: "goto-repo", key: "r", pendingG: true },
   { action: "toggle-sidebar", key: "b" },
   { action: "toggle-terminal-panel", key: "`", ctrl: true },

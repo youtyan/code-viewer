@@ -30,6 +30,11 @@ export type AppRoute =
       preview?: true;
       line?: SourceLineTarget;
       commit?: string;
+      /** view=history: diff the selected commit against this sha instead of
+       * its first parent (Shift+click range, or a merge's second parent). */
+      compare?: string;
+      /** view=history: the commit filter text. */
+      q?: string;
       virtual?: "off";
     }
   | { screen: "help"; range: DiffRange; lang: string; section: string }
@@ -43,7 +48,19 @@ export type AppRoute =
       origin?: "uncommitted" | "committed";
       range: DiffRange;
     }
-  | { screen: "history"; ref: string; commit?: string; range: DiffRange }
+  | {
+      screen: "history";
+      ref: string;
+      commit?: string;
+      /** Diff the selected commit against this sha instead of its first
+       * parent (Shift+click range, or a merge's second parent). */
+      compare?: string;
+      /** Commit filter text (author: / path: / since: ... syntax). */
+      q?: string;
+      /** Restrict the log to this path; a trailing "/" means a directory. */
+      path?: string;
+      range: DiffRange;
+    }
   | {
       screen: "journal";
       tab?: "journal" | "tasks";
@@ -202,6 +219,10 @@ export function parseRoute(
           ...(params.get("commit")
             ? { commit: params.get("commit") || "" }
             : {}),
+          ...(params.get("compare")
+            ? { compare: params.get("compare") || "" }
+            : {}),
+          ...(params.get("q") ? { q: params.get("q") || "" } : {}),
           ...(line ? { line } : {}),
         };
       }
@@ -248,10 +269,16 @@ export function parseRoute(
       };
     case "/history": {
       const commit = params.get("commit") || "";
+      const compare = params.get("compare") || "";
+      const q = params.get("q") || "";
+      const path = params.get("path") || "";
       return {
         screen: "history",
         ref: params.get("ref") || "HEAD",
         ...(commit ? { commit } : {}),
+        ...(compare ? { compare } : {}),
+        ...(q ? { q } : {}),
+        ...(path ? { path } : {}),
         range,
       };
     }
@@ -354,6 +381,10 @@ export function buildRoute(route: AppRoute): string {
           encodeURIComponent(route.ref || "worktree") +
           "&view=history" +
           (route.commit ? `&commit=${encodeURIComponent(route.commit)}` : "") +
+          (route.compare
+            ? `&compare=${encodeURIComponent(route.compare)}`
+            : "") +
+          (route.q ? `&q=${encodeURIComponent(route.q)}` : "") +
           (route.line
             ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
             : "")
@@ -404,7 +435,10 @@ export function buildRoute(route: AppRoute): string {
     case "history": {
       const params = new URLSearchParams();
       if (route.ref && route.ref !== "HEAD") params.set("ref", route.ref);
+      if (route.path) params.set("path", route.path);
       if (route.commit) params.set("commit", route.commit);
+      if (route.compare) params.set("compare", route.compare);
+      if (route.q) params.set("q", route.q);
       const qs = params.toString();
       return `/history${qs ? `?${qs}` : ""}`;
     }

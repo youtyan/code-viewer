@@ -1473,6 +1473,17 @@ window.GdpExpandLogic = GdpExpandLogic;
       }),
     openGithubLabel: () => uiText().repo.openGithub,
     openRepositoryWebLabel: () => uiText().repo.openRepositoryWeb,
+    folderHistoryLabel: () => uiText().repo.folderHistory,
+    folderHistoryTitle: () => uiText().repo.folderHistoryTitle,
+    openFolderHistory: (ref, path) => {
+      const dir = path.replace(/\/+$/, "");
+      navigateToRoute({
+        screen: "history",
+        ref: ref && ref !== "worktree" ? ref : "HEAD",
+        ...(dir ? { path: `${dir}/` } : {}),
+        range: currentRange(),
+      });
+    },
     fileBadge: (status) => DIFF_VIEW.fileBadge(status),
   });
   const {
@@ -1682,6 +1693,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         submoduleTitle: string;
         openGithub: string;
         openRepositoryWeb: string;
+        folderHistory: string;
+        folderHistoryTitle: string;
       };
       history: {
         title: string;
@@ -1874,6 +1887,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         submoduleTitle: "Git submodule pinned to a commit",
         openGithub: "Open on GitHub",
         openRepositoryWeb: "Open repository web page",
+        folderHistory: "History",
+        folderHistoryTitle: "Commits that touched this folder",
       },
       history: {
         title: "Commits",
@@ -2241,6 +2256,8 @@ window.GdpExpandLogic = GdpExpandLogic;
           "Git サブモジュール: 特定のコミットに固定されています。直接は開けません。",
         openGithub: "GitHubで開く",
         openRepositoryWeb: "リポジトリのウェブページを開く",
+        folderHistory: "履歴",
+        folderHistoryTitle: "このフォルダを変更したコミット",
       },
       history: {
         title: "コミット",
@@ -3214,6 +3231,20 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
   function isHistoryPanelRoute(route: AppRoute): boolean {
     return route.screen === "history" || isFileHistoryRoute(route);
+  }
+  // `g h` opens the log of what the user is looking at: the ref of the
+  // repository / file page, the "to" side of a diff, else HEAD.
+  function historyRefForCurrentView(): string {
+    const route = STATE.route;
+    if (route.screen === "history") return route.ref || "HEAD";
+    if (route.screen === "repo" || route.screen === "file") {
+      return route.ref && route.ref !== "worktree" ? route.ref : "HEAD";
+    }
+    if (route.screen === "diff") {
+      const to = route.range.to;
+      return to && to !== "worktree" ? to : "HEAD";
+    }
+    return "HEAD";
   }
   function normalizeInternalFileRoute(route: AppRoute): AppRoute {
     if (route.screen !== "file") return route;
@@ -4695,9 +4726,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (action === "goto-history") {
       navigateToRoute({
         screen: "history",
-        ref: "HEAD",
+        ref: historyRefForCurrentView(),
         range: currentRange(),
       });
+      return true;
+    }
+    if (
+      action === "history-next-commit" ||
+      action === "history-previous-commit"
+    ) {
+      if (!isHistoryPanelRoute(STATE.route)) return false;
+      void HISTORY_VIEW.moveCommitSelection(
+        action === "history-next-commit" ? 1 : -1,
+      );
       return true;
     }
     if (action === "goto-repo") {
@@ -5163,6 +5204,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     getSyntaxHighlight: () => STATE.syntaxHighlight,
     getLanguage: () => STATE.language,
     trackLoad,
+    commitWebLink: (sha) => {
+      const target = buildRepositoryWebTarget(REPO_WEB_URL, {
+        ref: sha,
+        kind: "commit",
+      });
+      if (!target) return null;
+      return createRepositoryWebLink(
+        target,
+        target.provider === "github"
+          ? uiText().repo.openGithub
+          : uiText().repo.openRepositoryWeb,
+      );
+    },
+    copyText: (text) => navigator.clipboard.writeText(text),
   });
   relocalizeHistory = () => HISTORY_VIEW.localize();
 

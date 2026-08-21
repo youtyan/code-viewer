@@ -110,6 +110,10 @@ export type RepoViewDeps = {
   ): { url: string; provider: "github" | "web" } | null;
   openGithubLabel(): string;
   openRepositoryWebLabel(): string;
+  folderHistoryLabel(): string;
+  folderHistoryTitle(): string;
+  // Opens the commit log restricted to `path` (a directory; "" = root).
+  openFolderHistory(ref: string, path: string): void;
   fileBadge(status?: string): HTMLElement;
   $: <T extends Element = HTMLElement>(sel: string) => T;
   STATE: {
@@ -171,6 +175,9 @@ export function createRepoView(deps: RepoViewDeps) {
     repositoryWebTarget,
     openGithubLabel,
     openRepositoryWebLabel,
+    folderHistoryLabel,
+    folderHistoryTitle,
+    openFolderHistory,
     fileBadge,
   } = deps;
 
@@ -720,6 +727,15 @@ export function createRepoView(deps: RepoViewDeps) {
       meta.ref,
     );
     if (repositoryWebLink) toolbar.appendChild(repositoryWebLink);
+    const historyButton = document.createElement("button");
+    historyButton.type = "button";
+    historyButton.className = "gdp-btn gdp-btn-sm gdp-repo-history-btn";
+    historyButton.textContent = folderHistoryLabel();
+    historyButton.title = folderHistoryTitle();
+    historyButton.addEventListener("click", () => {
+      openFolderHistory(meta.ref, meta.path || "");
+    });
+    toolbar.appendChild(historyButton);
     if (canTrashWorktreeRef(meta.ref)) {
       toolbar.appendChild(
         createNewFolderButton(meta.path || "", () => loadRepo()),

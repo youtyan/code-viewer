@@ -16,7 +16,20 @@ Requires Node.js 20 or newer. Development uses
   state, ignore-whitespace and hide-tests toggles, and dismissible per-line
   "reference pills" that copy `@path#start-end` for AI agents.
 - Browse commit history per branch and open any commit's changed files and
-  diff, with shareable `/history?ref=<branch>&commit=<sha>` links.
+  diff, with shareable `/history?ref=<branch>&commit=<sha>` links. The
+  filter understands message words (`"quoted"` keeps spaces), sha prefixes,
+  `author:<name>`, `path:<part>`, `since:`/`after:`/`until:`/`before:<date>`,
+  `code:<text>` (lines added or removed, `git log -S`) and `merges:no` /
+  `merges:only`; kinds combine with AND, `author:` offers the repository's
+  authors as suggestions, and the text rides in the URL (`?q=`). Rows carry
+  branch / tag labels and a merge marker. The selected commit has a copy-sha
+  button and an "Open on GitHub" link; Shift+click a second commit to diff the
+  whole range between them (`?compare=<sha>`), and a merge commit lets you
+  pick the parent to compare against. `↑` / `↓` step commits anywhere on the
+  screen, `j` / `k` do when the commit list has focus, `g h` opens the
+  history of the ref you are viewing, and every folder page has a History
+  button that opens the log restricted to that folder
+  (`/history?path=<dir>/`).
 - Open per-file Blame and History tabs on a file detail page (GitHub-style):
   Blame groups consecutive lines from the same commit with an Older→Newer
   colour bar and lets you jump to the originating commit; History embeds the

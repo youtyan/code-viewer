@@ -411,6 +411,7 @@ function installHistoryViewDom() {
   const sha = new FakeElement();
   const author = new FakeElement();
   const date = new FakeElement();
+  const actions = new FakeElement();
   const subject = new FakeElement();
   const body = new FakeElement();
   info.id = "history-commit-info";
@@ -418,6 +419,7 @@ function installHistoryViewDom() {
   sha.className = "hci-sha";
   author.className = "hci-author";
   date.className = "hci-date";
+  actions.className = "hci-actions";
   subject.className = "hci-subject";
   body.className = "hci-body";
   refreshButton.className = "history-refresh";
@@ -425,7 +427,7 @@ function installHistoryViewDom() {
   refreshResult.className = "db-refresh-result history-refresh-result";
   refreshResult.hidden = true;
   refreshButton.appendChild(refreshLabel);
-  head.append(sha, author, date);
+  head.append(sha, author, date, actions);
   info.append(head, subject, body);
 
   globalThis.document = {
@@ -461,6 +463,7 @@ function installHistoryViewDom() {
   } as unknown as typeof IntersectionObserver;
 
   return {
+    actions,
     panel,
     list,
     banner,
@@ -1363,9 +1366,8 @@ describe("history view lifecycle", () => {
     expect(status.textContent).toBe("");
   });
 
-  test("arrow keys select commits in file history mode without leaving the /file route", async () => {
-    const { panel, list, banner, status, sentinel, keyDownDocument } =
-      installHistoryViewDom();
+  test("keyboard commit stepping in file history mode stays on the /file route", async () => {
+    const { panel, list, banner, status, sentinel } = installHistoryViewDom();
     const commits = [
       {
         sha: "aaa111",
@@ -1427,9 +1429,9 @@ describe("history view lifecycle", () => {
 
     await view.enterHistory();
 
-    const firstKey = keyDownDocument("ArrowDown");
-    await Promise.resolve();
-    expect(firstKey.preventDefaultCount).toBe(1);
+    // Arrow / j-k keys reach the view through the keymap action handler
+    // (history-next-commit), which calls this.
+    await view.moveCommitSelection(1);
     expect(routes[0]).toEqual({
       screen: "file",
       path: "README.md",
@@ -1444,8 +1446,7 @@ describe("history view lifecycle", () => {
       pathFilter: "README.md",
     });
 
-    keyDownDocument("ArrowDown");
-    await Promise.resolve();
+    await view.moveCommitSelection(1);
     expect(routes[1]).toEqual({
       screen: "file",
       path: "README.md",
@@ -1652,5 +1653,298 @@ describe("tokenizeHistoryQuery", () => {
     },
   ])("$name", ({ raw, expected }) => {
     expect(tokenizeHistoryQuery(raw)).toEqual(expected);
+  });
+});
+
+describe("history view commit rows, filter URL and compare", () => {
+  function makeView(options: {
+    commits: Array<Record<string, unknown>>;
+    route: AppRoute;
+    copyText?: (text: string) => Promise<void>;
+    commitWebLink?: (sha: string) => HTMLAnchorElement | null;
+  }) {
+    const dom = installHistoryViewDom();
+    const filterInput = new FakeElement();
+    const filterClearButton = new FakeElement();
+    const fetched: string[] = [];
+    globalThis.fetch = ((url: string) => {
+      fetched.push(url);
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ commits: options.commits, hasMore: false }),
+          { status: 200 },
+        ),
+      );
+    }) as unknown as typeof fetch;
+    let route = options.route;
+    const routes: Array<{ route: AppRoute; replace?: boolean }> = [];
+    const applied: Array<{ from: string; to: string; pathFilter?: string }> =
+      [];
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return dom.panel as unknown as never;
+        if (selector === "#history-list") return dom.list as unknown as never;
+        if (selector === "#history-banner")
+          return dom.banner as unknown as never;
+        if (selector === "#history-status")
+          return dom.status as unknown as never;
+        if (selector === "#history-sentinel")
+          return dom.sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: (next, replace) => {
+        route = next;
+        routes.push({ route: next, replace });
+      },
+      applyCommitRange: async (range, pathFilter) => {
+        applied.push({ ...range, pathFilter });
+      },
+      showEmptyDiffPane: () => undefined,
+      getSyntaxHighlight: () => false,
+      getLanguage: () => "en",
+      trackLoad: (promise) => promise,
+      copyText: options.copyText,
+      commitWebLink: options.commitWebLink,
+    });
+    const mount = {
+      panel: dom.panel as unknown as HTMLElement,
+      list: dom.list as unknown as HTMLOListElement,
+      banner: dom.banner as unknown as HTMLElement,
+      status: dom.status as unknown as HTMLElement,
+      sentinel: dom.sentinel as unknown as HTMLElement,
+      filterInput: filterInput as unknown as HTMLInputElement,
+      filterClearButton: filterClearButton as unknown as HTMLButtonElement,
+      commitInfo: document.querySelector(
+        "#history-commit-info",
+      ) as HTMLElement | null,
+    };
+    return {
+      view,
+      dom,
+      mount,
+      filterInput,
+      fetched,
+      routes,
+      applied,
+      getRoute: () => route,
+    };
+  }
+
+  const now = new Date().toISOString();
+  const merge = {
+    sha: "mmm111",
+    parents: ["aaa111", "ttt111"],
+    subject: "merge topic",
+    body: "",
+    author: "Alice",
+    when: now,
+    refs: [
+      { name: "main", kind: "branch", head: true },
+      { name: "v1.0", kind: "tag" },
+    ],
+  };
+  const second = {
+    sha: "aaa111",
+    parents: ["bbb111"],
+    subject: "second",
+    body: "",
+    author: "Alice",
+    when: now,
+    refs: [],
+  };
+  const first = {
+    sha: "bbb111",
+    parents: [],
+    subject: "first",
+    body: "",
+    author: "Bob",
+    when: now,
+  };
+  const historyRoute: AppRoute = {
+    screen: "history",
+    ref: "HEAD",
+    range: { from: "HEAD", to: "worktree" },
+  };
+
+  test("rows show branch / tag decorations and a merge marker", async () => {
+    const { view, dom } = makeView({
+      commits: [merge, second, first],
+      route: historyRoute,
+    });
+    await view.enterHistory();
+    const rows = dom.list.querySelectorAll(".history-item");
+    const mergeRow = rows.find((row) => row.dataset.sha === "mmm111");
+    const plainRow = rows.find((row) => row.dataset.sha === "aaa111");
+    expect(mergeRow?.textContent).toContain("main");
+    expect(mergeRow?.textContent).toContain("v1.0");
+    expect(mergeRow?.textContent).toContain("merge");
+    expect(plainRow?.textContent).not.toContain("merge");
+  });
+
+  test("typing a filter reloads the list and writes ?q= into the route", async () => {
+    const { view, mount, filterInput, fetched, routes, getRoute } = makeView({
+      commits: [second, first],
+      route: historyRoute,
+    });
+    await view.enterHistory({ mount });
+    filterInput.value = "author:alice fix";
+    filterInput.dispatch("input", { target: filterInput });
+    await waitFor(() => fetched.some((url) => url.includes("q=")));
+    const last = new URL(fetched[fetched.length - 1], "http://localhost");
+    expect(last.searchParams.get("q")).toBe("author:alice fix");
+    expect(routes[routes.length - 1]).toEqual({
+      route: { ...historyRoute, q: "author:alice fix" },
+      replace: true,
+    });
+    expect(getRoute()).toEqual({ ...historyRoute, q: "author:alice fix" });
+  });
+
+  test("entering with ?q= preloads the filter input and sends it to the server", async () => {
+    const { view, mount, filterInput, fetched } = makeView({
+      commits: [second, first],
+      route: { ...historyRoute, q: "path:src" },
+    });
+    await view.enterHistory({ mount });
+    expect(filterInput.value).toBe("path:src");
+    const firstUrl = new URL(fetched[0], "http://localhost");
+    expect(firstUrl.searchParams.get("q")).toBe("path:src");
+  });
+
+  test("a directory path scope is sent to the log and shown in the title", async () => {
+    const title = new FakeElement();
+    title.className = "history-title";
+    const { view, dom, mount, fetched } = makeView({
+      commits: [second, first],
+      route: { ...historyRoute, path: "src/" },
+    });
+    dom.panel.appendChild(title);
+    await view.enterHistory({ mount });
+    const firstUrl = new URL(fetched[0], "http://localhost");
+    expect(firstUrl.searchParams.get("path")).toBe("src/");
+    expect(title.textContent).toBe("Commits · src/");
+  });
+
+  test("Shift+click diffs from the older commit's parent up to the newer one and marks the range", async () => {
+    const { view, dom, routes, applied } = makeView({
+      commits: [merge, second, first],
+      route: historyRoute,
+    });
+    await view.enterHistory();
+    const rows = () => dom.list.querySelectorAll(".history-item");
+    const rowOf = (sha: string) =>
+      rows().find((row) => row.dataset.sha === sha);
+    dom.list.dispatch("click", { target: rowOf("aaa111") });
+    await waitFor(() => applied.length === 1);
+    expect(applied[0]).toEqual({
+      from: "bbb111",
+      to: "aaa111",
+      pathFilter: undefined,
+    });
+    dom.list.dispatch("click", { target: rowOf("mmm111"), shiftKey: true });
+    await waitFor(() => applied.length === 2);
+    // older = aaa111 (parent bbb111), newer = mmm111
+    expect(applied[1]).toEqual({
+      from: "bbb111",
+      to: "mmm111",
+      pathFilter: undefined,
+    });
+    expect(routes[routes.length - 1].route).toEqual({
+      ...historyRoute,
+      commit: "mmm111",
+      compare: "bbb111",
+      range: { from: "bbb111", to: "mmm111" },
+    });
+    expect(rowOf("mmm111")?.classList.contains("history-item-in-range")).toBe(
+      true,
+    );
+    expect(rowOf("aaa111")?.classList.contains("history-item-in-range")).toBe(
+      true,
+    );
+    expect(rowOf("bbb111")?.classList.contains("history-item-in-range")).toBe(
+      false,
+    );
+    // A plain click clears the range again.
+    dom.list.dispatch("click", { target: rowOf("aaa111") });
+    await waitFor(() => applied.length === 3);
+    expect(applied[2]).toEqual({
+      from: "bbb111",
+      to: "aaa111",
+      pathFilter: undefined,
+    });
+    expect(rowOf("mmm111")?.classList.contains("history-item-in-range")).toBe(
+      false,
+    );
+  });
+
+  test("a merge commit offers its parents; picking the second one changes the diff base", async () => {
+    const { view, dom, applied, routes } = makeView({
+      commits: [merge, second, first],
+      route: historyRoute,
+    });
+    await view.enterHistory();
+    const mergeRow = dom.list
+      .querySelectorAll(".history-item")
+      .find((row) => row.dataset.sha === "mmm111");
+    dom.list.dispatch("click", { target: mergeRow });
+    await waitFor(() => applied.length === 1);
+    const parents = dom.actions.querySelectorAll(".hci-parent");
+    expect(parents.map((b) => b.textContent)).toEqual([
+      "parent 1 (aaa111)",
+      "parent 2 (ttt111)",
+    ]);
+    expect(parents.map((b) => b.attributes["aria-pressed"])).toEqual([
+      "true",
+      "false",
+    ]);
+    parents[1].click();
+    await waitFor(() => applied.length === 2);
+    expect(applied[1]).toEqual({
+      from: "ttt111",
+      to: "mmm111",
+      pathFilter: undefined,
+    });
+    expect(routes[routes.length - 1].route).toEqual({
+      ...historyRoute,
+      commit: "mmm111",
+      compare: "ttt111",
+      range: { from: "ttt111", to: "mmm111" },
+    });
+    const refreshed = dom.actions.querySelectorAll(".hci-parent");
+    expect(refreshed.map((b) => b.attributes["aria-pressed"])).toEqual([
+      "false",
+      "true",
+    ]);
+  });
+
+  test("the copy button copies the full sha and the web link points at the commit", async () => {
+    const copied: string[] = [];
+    const { view, dom, applied } = makeView({
+      commits: [second, first],
+      route: historyRoute,
+      copyText: async (text) => {
+        copied.push(text);
+      },
+      commitWebLink: (sha) => {
+        const link = new FakeElement() as unknown as HTMLAnchorElement;
+        (link as unknown as FakeElement).attributes.href =
+          `https://example.test/commit/${sha}`;
+        return link;
+      },
+    });
+    await view.enterHistory();
+    const row = dom.list
+      .querySelectorAll(".history-item")
+      .find((item) => item.dataset.sha === "aaa111");
+    dom.list.dispatch("click", { target: row });
+    await waitFor(() => applied.length === 1);
+    const copy = dom.actions.querySelector(".hci-copy");
+    expect(copy).not.toBeNull();
+    copy?.click();
+    await waitFor(() => copied.length === 1);
+    expect(copied).toEqual(["aaa111"]);
+    const link = dom.actions.querySelector(".hci-link");
+    expect(link?.attributes.href).toBe("https://example.test/commit/aaa111");
   });
 });

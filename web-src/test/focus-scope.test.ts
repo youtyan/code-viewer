@@ -27,6 +27,32 @@ describe("focus scope helpers", () => {
     expect(keymapScope(target("BODY"))).toBe("global");
   });
 
+  test.each([
+    {
+      name: "history screen panel",
+      closest: { "#history-panel, .gdp-file-history-panel": true },
+      expected: "history",
+    },
+    {
+      name: "file History tab panel wins over #content",
+      closest: {
+        "#history-panel, .gdp-file-history-panel": true,
+        "#content": true,
+      },
+      expected: "history",
+    },
+    {
+      name: "app panel still wins over everything",
+      closest: {
+        "#app-panel": true,
+        "#history-panel, .gdp-file-history-panel": true,
+      },
+      expected: "panel",
+    },
+  ])("keymap scope: $name", ({ closest, expected }) => {
+    expect(keymapScope(target("LI", closest))).toBe(expected);
+  });
+
   test("detects editable keyboard targets", () => {
     expect(isEditableKeyTarget(target("INPUT"))).toBe(true);
     expect(isEditableKeyTarget(target("TEXTAREA"))).toBe(true);

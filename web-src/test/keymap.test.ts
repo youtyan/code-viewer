@@ -72,6 +72,65 @@ describe("keymap action resolution", () => {
     expect(action("u", "sidebar", { ctrl: true })).toBe("sidebar-page-up");
   });
 
+  test.each([
+    {
+      name: "ArrowDown in global",
+      keyValue: "arrowdown",
+      scope: "global" as const,
+      expected: "history-next-commit",
+    },
+    {
+      name: "ArrowUp in main",
+      keyValue: "arrowup",
+      scope: "main" as const,
+      expected: "history-previous-commit",
+    },
+    {
+      name: "ArrowDown in sidebar",
+      keyValue: "arrowdown",
+      scope: "sidebar" as const,
+      expected: "history-next-commit",
+    },
+    {
+      name: "j in history scope",
+      keyValue: "j",
+      scope: "history" as const,
+      expected: "history-next-commit",
+    },
+    {
+      name: "k in history scope",
+      keyValue: "k",
+      scope: "history" as const,
+      expected: "history-previous-commit",
+    },
+    {
+      name: "j in global stays sidebar",
+      keyValue: "j",
+      scope: "global" as const,
+      expected: "sidebar-next",
+    },
+    {
+      name: "j in main stays scroll",
+      keyValue: "j",
+      scope: "main" as const,
+      expected: "scroll-main-down",
+    },
+  ])("steps commits: $name", ({ keyValue, scope, expected }) => {
+    expect(action(keyValue, scope)).toBe(expected);
+  });
+
+  test("commit stepping keys stay out of editable fields", () => {
+    expect(
+      resolveKeymapAction(key("arrowdown"), {
+        scope: "global",
+        editable: true,
+      }),
+    ).toBeNull();
+    expect(
+      resolveKeymapAction(key("j"), { scope: "history", editable: true }),
+    ).toBeNull();
+  });
+
   test("scrolls the main panel with paging keys in main scope", () => {
     expect(action("PageDown", "main")).toBe("scroll-main-page-down");
     expect(action("PageUp", "main")).toBe("scroll-main-page-up");
@@ -556,6 +615,11 @@ describe("findKeymapConflicts", () => {
         },
         {
           scope: "panel",
+          chord: { key: "x" },
+          actions: ["toggle-theme", "layout-split"],
+        },
+        {
+          scope: "history",
           chord: { key: "x" },
           actions: ["toggle-theme", "layout-split"],
         },

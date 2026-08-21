@@ -4,13 +4,21 @@
 
 import {
   commitDiffRange,
+  EMPTY_TREE_SHA,
   HISTORY_PAGE_SIZE,
+  type HistoryAuthorsResponse,
   type HistoryCommit,
+  type HistoryCommitRef,
   type HistoryLogResponse,
   historyGroupLabel,
   shouldContinueAutoLoad,
 } from "../core/history";
-import { iconSvg, SYNC_16_PATH } from "../core/icons";
+import {
+  CHECK_16_PATHS,
+  COPY_16_PATHS,
+  iconSvg,
+  SYNC_16_PATH,
+} from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute } from "../core/routes";
@@ -29,6 +37,19 @@ export type HistoryText = {
   refreshTitlePending: string;
   filterClearLabel: string;
   filterClearTitle: string;
+  filterPlaceholder: string;
+  filterTitle: string;
+  commitsTitle: string;
+  commitsIn: (path: string) => string;
+  copyShaTitle: string;
+  copiedTitle: string;
+  copyFailedTitle: string;
+  mergeBadge: string;
+  compareWith: string;
+  parentLabel: (index: number, shortSha: string) => string;
+  comparing: (from: string, to: string) => string;
+  clearCompare: string;
+  refTitle: (kind: HistoryCommitRef["kind"], name: string) => string;
 };
 
 type HistoryRefreshStatus = { type: "none" } | { type: "pending" };
@@ -43,6 +64,25 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     refreshTitlePending: "History may have changed. Refresh",
     filterClearLabel: "Clear",
     filterClearTitle: "Clear commit filter",
+    filterPlaceholder: "filter… text author: path: since: code:",
+    filterTitle:
+      'Filter commits. Words match the message ("quoted" keeps spaces), sha prefixes match commits, author:<name>, path:<part>, since:/after:<date>, until:/before:<date>, code:<text> (lines added or removed), merges:no / merges:only. Kinds combine with AND.',
+    commitsTitle: "Commits",
+    commitsIn: (path) => `Commits · ${path}`,
+    copyShaTitle: "Copy full commit sha",
+    copiedTitle: "Copied",
+    copyFailedTitle: "Copy failed",
+    mergeBadge: "merge",
+    compareWith: "Compare with",
+    parentLabel: (index, shortSha) => `parent ${index} (${shortSha})`,
+    comparing: (from, to) => `Comparing ${from}..${to}`,
+    clearCompare: "Clear",
+    refTitle: (kind, name) =>
+      kind === "tag"
+        ? `Tag ${name}`
+        : kind === "head"
+          ? "HEAD"
+          : `Branch ${name}`,
   },
   ja: {
     worktreeLabel: "未コミット変更 (Working tree)",
@@ -53,6 +93,25 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     refreshTitlePending: "新しい履歴がある可能性があります。更新",
     filterClearLabel: "解除",
     filterClearTitle: "コミットフィルタを解除",
+    filterPlaceholder: "絞り込み… 文字列 author: path: since: code:",
+    filterTitle:
+      'コミットを絞り込みます。語はメッセージに一致（"引用" で空白を含む句）、sha の前方一致、author:<名前>、path:<一部>、since:/after:<日付>、until:/before:<日付>、code:<文字列>（追加・削除された行）、merges:no / merges:only。種類が違う条件は AND。',
+    commitsTitle: "コミット",
+    commitsIn: (path) => `コミット · ${path}`,
+    copyShaTitle: "コミットの sha をコピー",
+    copiedTitle: "コピーしました",
+    copyFailedTitle: "コピーに失敗しました",
+    mergeBadge: "merge",
+    compareWith: "比較対象",
+    parentLabel: (index, shortSha) => `親 ${index} (${shortSha})`,
+    comparing: (from, to) => `${from}..${to} を比較中`,
+    clearCompare: "解除",
+    refTitle: (kind, name) =>
+      kind === "tag"
+        ? `タグ ${name}`
+        : kind === "head"
+          ? "HEAD"
+          : `ブランチ ${name}`,
   },
 };
 
@@ -79,6 +138,10 @@ export type HistoryViewDeps = {
   getSyntaxHighlight(): boolean;
   getLanguage(): HistoryLang;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
+  // "Open on GitHub" style link for a commit, or null when the remote is
+  // not a web host. Optional so tests and minimal hosts can omit it.
+  commitWebLink?(sha: string): HTMLAnchorElement | null;
+  copyText?(text: string): Promise<void>;
 };
 
 export type HistoryViewMount = {
@@ -89,6 +152,7 @@ export type HistoryViewMount = {
   sentinel: HTMLElement;
   filterInput?: HTMLInputElement | null;
   filterClearButton?: HTMLButtonElement | null;
+  authorList?: HTMLDataListElement | null;
   refreshButton?: HTMLButtonElement | null;
   refreshResult?: HTMLElement | null;
   commitInfo?: HTMLElement | null;
@@ -111,6 +175,8 @@ export function buildHistoryPanelDom(
     panel.className = "gdp-file-history-panel";
   }
   panel.setAttribute("aria-label", "Commit history");
+  // Focusable so j / k land in the "history" keymap scope after a click.
+  panel.tabIndex = -1;
 
   const panelHead = document.createElement("div");
   panelHead.className = "history-head";
@@ -150,10 +216,15 @@ export function buildHistoryPanelDom(
   if (page) filterInput.id = "history-filter";
   else filterInput.className = "history-filter";
   filterInput.type = "search";
-  filterInput.placeholder = page
-    ? "filter commits… (message, sha, author:name, path:file)"
-    : "filter commits… (message, sha, author:name)";
+  filterInput.placeholder = HISTORY_TEXT.en.filterPlaceholder;
+  filterInput.title = HISTORY_TEXT.en.filterTitle;
   filterInput.autocomplete = "off";
+  // "author:<name>" suggestions, filled from /_authors on first focus.
+  const authorList = document.createElement("datalist");
+  authorList.id = page
+    ? "history-filter-authors"
+    : `history-filter-authors-${Math.random().toString(36).slice(2, 8)}`;
+  filterInput.setAttribute("list", authorList.id);
   const filterClearButton = document.createElement("button");
   filterClearButton.type = "button";
   if (page) filterClearButton.id = "history-filter-clear";
@@ -165,7 +236,7 @@ export function buildHistoryPanelDom(
     "aria-label",
     HISTORY_TEXT.en.filterClearTitle,
   );
-  filterWrap.append(filterInput, filterClearButton);
+  filterWrap.append(filterInput, filterClearButton, authorList);
 
   const banner = document.createElement("div");
   if (page) banner.id = "history-banner";
@@ -197,6 +268,7 @@ export function buildHistoryPanelDom(
     sentinel,
     filterInput,
     filterClearButton,
+    authorList,
     refreshButton,
     refreshResult,
   };
@@ -229,7 +301,11 @@ export function buildHistoryCommitInfoDom(
   const date = document.createElement("span");
   if (page) date.id = "hci-date";
   date.className = "hci-date";
-  head.append(sha, author, date);
+  // Per-commit actions (copy sha, web link, parent / range compare). Filled
+  // by the view on selection so they always describe the shown commit.
+  const actions = document.createElement("span");
+  actions.className = "hci-actions";
+  head.append(sha, author, date, actions);
   const subject = document.createElement("h2");
   if (page) subject.id = "hci-subject";
   subject.className = "hci-subject";
@@ -347,13 +423,20 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let pathFilter = "";
   let refreshStatus: HistoryRefreshStatus = { type: "none" };
   let freshSha = "";
+  // Non-empty while the selected commit is diffed against something other
+  // than its first parent: the "from" sha of a Shift+click range, or the
+  // second parent of a merge.
+  let compareSha = "";
+  let authorsLoadedFor = "";
 
   type HistoryScope = {
     mode: "history" | "file";
     logRef: string;
     routeRef: string;
     pathFilter: string;
+    query: string;
     commit?: string;
+    compare?: string;
   };
 
   function historyScopeFromRoute(route = deps.getRoute()): HistoryScope | null {
@@ -363,8 +446,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
         mode: "history",
         logRef: nextRef,
         routeRef: nextRef,
-        pathFilter: "",
+        pathFilter: route.path || "",
+        query: route.q || "",
         commit: route.commit,
+        compare: route.compare,
       };
     }
     if (route.screen === "file" && route.view === "history") {
@@ -374,10 +459,60 @@ export function createHistoryView(deps: HistoryViewDeps) {
         logRef: nextRouteRef === "worktree" ? "HEAD" : nextRouteRef,
         routeRef: nextRouteRef,
         pathFilter: route.path,
+        query: route.q || "",
         commit: route.commit,
+        compare: route.compare,
       };
     }
     return null;
+  }
+
+  // The route that describes the current panel state. `commit` omitted means
+  // "nothing selected"; `compare` is carried only when it is in effect.
+  function routeFor(options: {
+    commit?: string;
+    compare?: string;
+    query?: string;
+    ref?: string;
+  }): AppRoute {
+    const commit = options.commit;
+    const compare = options.compare || undefined;
+    const q = (options.query ?? query) || undefined;
+    const range =
+      commit && commit !== HISTORY_WORKTREE_COMMIT
+        ? diffRangeFor(commit, compare)
+        : worktreeDiffRange();
+    if (mode === "file") {
+      return {
+        screen: "file",
+        path: pathFilter,
+        ref: options.ref ?? routeRef,
+        view: "history",
+        ...(commit ? { commit } : {}),
+        ...(compare ? { compare } : {}),
+        ...(q ? { q } : {}),
+        range,
+      };
+    }
+    return {
+      screen: "history",
+      ref: options.ref ?? ref,
+      ...(pathFilter ? { path: pathFilter } : {}),
+      ...(commit ? { commit } : {}),
+      ...(compare ? { compare } : {}),
+      ...(q ? { q } : {}),
+      range,
+    };
+  }
+
+  function diffRangeFor(sha: string, compare?: string) {
+    const commit = commits.find((item) => item.sha === sha);
+    if (compare) return { from: compare, to: sha };
+    return commit ? commitDiffRange(commit) : { from: `${sha}^`, to: sha };
+  }
+
+  function shortSha(sha: string): string {
+    return sha.slice(0, 7);
   }
 
   function currentRefreshScopeKey(): string {
@@ -523,19 +658,62 @@ export function createHistoryView(deps: HistoryViewDeps) {
       });
   }
 
-  function commitRow(commit: HistoryCommit): string {
+  function refChipsHtml(commit: HistoryCommit): string {
+    const text = historyText(deps.getLanguage());
+    const chips: string[] = [];
+    for (const ref of commit.refs ?? []) {
+      const classes = [
+        "history-ref",
+        `history-ref-${ref.kind}`,
+        ref.head ? "history-ref-head" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      chips.push(
+        `<span class="${classes}" title="${deps.escapeHtml(text.refTitle(ref.kind, ref.name))}">${deps.escapeHtml(ref.name)}</span>`,
+      );
+    }
+    if (commit.parents.length > 1) {
+      chips.push(
+        `<span class="history-ref history-ref-merge" title="${deps.escapeHtml(text.mergeBadge)}">${deps.escapeHtml(text.mergeBadge)}</span>`,
+      );
+    }
+    return chips.length
+      ? `<span class="history-refs">${chips.join("")}</span>`
+      : "";
+  }
+
+  function commitRow(commit: HistoryCommit, inRange: boolean): string {
     const active = commit.sha === selectedSha ? " active" : "";
     const fresh = commit.sha === freshSha ? " history-item-fresh" : "";
+    const ranged = inRange ? " history-item-in-range" : "";
     return (
-      `<li class="history-item${active}${fresh}" data-sha="${deps.escapeHtml(commit.sha)}">` +
+      `<li class="history-item${active}${fresh}${ranged}" data-sha="${deps.escapeHtml(commit.sha)}">` +
       `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` +
       `<span class="meta2">` +
-      `<span class="sha">${deps.escapeHtml(commit.sha.slice(0, 7))}</span>` +
+      `<span class="sha">${deps.escapeHtml(shortSha(commit.sha))}</span>` +
       `<span class="author">${deps.escapeHtml(commit.author)}</span>` +
       `<span class="when">${deps.escapeHtml(displayWhen(commit.when))}</span>` +
+      refChipsHtml(commit) +
       `</span>` +
       `</li>`
     );
+  }
+
+  // Rows covered by the current Shift+click range: from the selected (newer)
+  // commit down to the commit whose first parent is `compareSha`. A merge's
+  // parent comparison has no such run and highlights nothing.
+  function rangeShas(): Set<string> {
+    const shas = new Set<string>();
+    if (!compareSha || !selectedSha) return shas;
+    const start = commits.findIndex((commit) => commit.sha === selectedSha);
+    if (start < 0) return shas;
+    const end = commits.findIndex(
+      (commit, index) => index >= start && commit.parents[0] === compareSha,
+    );
+    if (end < 0) return shas;
+    for (let index = start; index <= end; index++) shas.add(commits[index].sha);
+    return shas;
   }
 
   function worktreeRow(): string {
@@ -556,6 +734,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     syncRefreshResult(activeMount.refreshResult);
     const now = new Date();
     const html: string[] = mode === "history" ? [worktreeRow()] : [];
+    const inRange = rangeShas();
     let lastGroup = "";
     for (const commit of commits) {
       if (commit.sha === HISTORY_WORKTREE_COMMIT) {
@@ -569,7 +748,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
         );
         lastGroup = group;
       }
-      html.push(commitRow(commit));
+      html.push(commitRow(commit, inRange.has(commit.sha)));
     }
     list.innerHTML = html.join("");
     activeHistoryRow = list.querySelector<HTMLElement>(".history-item.active");
@@ -625,6 +804,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     info.querySelector<HTMLElement>(".hci-head")?.removeAttribute("hidden");
     set(".hci-sha", commit.sha);
     set(".hci-author", commit.author);
+    renderCommitActions(info, commit);
     const t = Date.parse(commit.when);
     set(
       ".hci-date",
@@ -650,6 +830,84 @@ export function createHistoryView(deps: HistoryViewDeps) {
       }
     }
     info.hidden = false;
+  }
+
+  function renderCommitActions(info: HTMLElement, commit: HistoryCommit) {
+    const actions = info.querySelector<HTMLElement>(".hci-actions");
+    if (!actions) return;
+    actions.replaceChildren();
+    const text = historyText(deps.getLanguage());
+    if (deps.copyText) {
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "gdp-btn gdp-btn-sm hci-copy";
+      copy.title = text.copyShaTitle;
+      copy.setAttribute("aria-label", text.copyShaTitle);
+      copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+      let resetTimer: ReturnType<typeof setTimeout> | null = null;
+      const copyText = deps.copyText;
+      copy.addEventListener("click", () => {
+        void copyText(commit.sha)
+          .then(() => {
+            copy.innerHTML = iconSvg("octicon-check", CHECK_16_PATHS);
+            copy.title = text.copiedTitle;
+            copy.classList.add("copied");
+          })
+          .catch((err: unknown) => {
+            console.error("Failed to copy commit sha", err);
+            copy.title = text.copyFailedTitle;
+            copy.classList.add("failed");
+          })
+          .finally(() => {
+            if (resetTimer) clearTimeout(resetTimer);
+            resetTimer = setTimeout(() => {
+              copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+              copy.title = text.copyShaTitle;
+              copy.classList.remove("copied", "failed");
+            }, 1200);
+          });
+      });
+      actions.appendChild(copy);
+    }
+    const link = deps.commitWebLink?.(commit.sha);
+    if (link) {
+      link.classList.add("hci-link");
+      actions.appendChild(link);
+    }
+    if (commit.parents.length > 1) {
+      const label = document.createElement("span");
+      label.className = "hci-compare-label";
+      label.textContent = text.compareWith;
+      actions.appendChild(label);
+      commit.parents.forEach((parent, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "gdp-btn gdp-btn-sm hci-parent";
+        button.textContent = text.parentLabel(index + 1, shortSha(parent));
+        const active = compareSha ? compareSha === parent : index === 0;
+        button.setAttribute("aria-pressed", String(active));
+        button.addEventListener("click", () => {
+          void selectCommit(commit, { compare: index === 0 ? "" : parent });
+        });
+        actions.appendChild(button);
+      });
+    }
+    if (compareSha && !commit.parents.includes(compareSha)) {
+      const label = document.createElement("span");
+      label.className = "hci-compare-label";
+      label.textContent = text.comparing(
+        shortSha(compareSha),
+        shortSha(commit.sha),
+      );
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.className = "gdp-btn gdp-btn-sm hci-compare-clear";
+      clear.textContent = text.clearCompare;
+      clear.addEventListener("click", () => {
+        void selectCommit(commit, { compare: "" });
+      });
+      actions.append(label, clear);
+    }
   }
 
   function updateWorktreeInfo() {
@@ -685,16 +943,19 @@ export function createHistoryView(deps: HistoryViewDeps) {
       ? list.querySelector<HTMLElement>(historyItemSelector(selectedSha))
       : null;
     activeHistoryRow?.classList.add("active");
+    updateRangeRows();
   }
 
-  function isEditableTarget(target: EventTarget | null): boolean {
-    return (
-      typeof Element === "function" &&
-      target instanceof Element &&
-      !!target.closest(
-        'input, textarea, select, button, [contenteditable="true"]',
-      )
-    );
+  // Toggle the Shift+click range tint in place (no list rebuild, so row
+  // references and scroll position survive a selection change).
+  function updateRangeRows() {
+    const inRange = rangeShas();
+    list.querySelectorAll<HTMLElement>(".history-item").forEach((row) => {
+      row.classList.toggle(
+        "history-item-in-range",
+        inRange.has(row.dataset.sha || ""),
+      );
+    });
   }
 
   function selectableShas(): string[] {
@@ -761,71 +1022,62 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return page.commits.length > 0;
   }
 
+  // `compare` ("" = first parent, the default) decides what the commit is
+  // diffed against. It is explicit on every caller so a plain click always
+  // clears a previous range / parent choice.
   async function selectCommit(
     commit: HistoryCommit,
-    options: { updateUrl?: boolean } = {},
+    options: { updateUrl?: boolean; compare?: string } = {},
   ) {
     const selectionGen = ++selectionGeneration;
     const gen = generation;
     selectedSha = commit.sha;
+    compareSha = options.compare ?? "";
+    if (compareSha === commit.parents[0]) compareSha = "";
     updateActiveRow();
     await updateCommitInfo(commit);
     if (selectionGen !== selectionGeneration || gen !== generation) return;
+    const range = compareSha
+      ? { from: compareSha, to: commit.sha }
+      : commitDiffRange(commit);
     if (options.updateUrl !== false) {
-      const range = commitDiffRange(commit);
-      if (mode === "file") {
-        deps.setRoute(
-          {
-            screen: "file",
-            path: pathFilter,
-            ref: routeRef,
-            view: "history",
-            commit: commit.sha,
-            range,
-          },
-          true,
-        );
-      } else {
-        deps.setRoute(
-          { screen: "history", ref, commit: commit.sha, range },
-          true,
-        );
-      }
+      deps.setRoute(
+        routeFor({ commit: commit.sha, compare: compareSha }),
+        true,
+      );
     }
     if (selectionGen !== selectionGeneration || gen !== generation) return;
-    await deps.applyCommitRange(
-      commitDiffRange(commit),
-      pathFilter || undefined,
-    );
+    await deps.applyCommitRange(range, pathFilter || undefined);
     if (selectionGen !== selectionGeneration || gen !== generation) return;
+  }
+
+  // Shift+click: diff from the older of (selected, clicked) back to its
+  // first parent, up to the newer one — every commit in between inclusive.
+  async function selectRange(clicked: HistoryCommit) {
+    const anchor = commits.find((item) => item.sha === selectedSha);
+    if (!anchor || anchor.sha === clicked.sha) {
+      await selectCommit(clicked, { compare: "" });
+      return;
+    }
+    const anchorIndex = commits.indexOf(anchor);
+    const clickedIndex = commits.indexOf(clicked);
+    const newer = anchorIndex < clickedIndex ? anchor : clicked;
+    const older = newer === anchor ? clicked : anchor;
+    await selectCommit(newer, {
+      compare: older.parents[0] || EMPTY_TREE_SHA,
+    });
   }
 
   async function selectWorktree(options: { updateUrl?: boolean } = {}) {
     const selectionGen = ++selectionGeneration;
     const gen = generation;
     selectedSha = HISTORY_WORKTREE_COMMIT;
+    compareSha = "";
     updateActiveRow();
     updateWorktreeInfo();
     const range = worktreeDiffRange();
     if (options.updateUrl !== false) {
-      if (mode === "file") {
-        deps.setRoute(
-          {
-            screen: "file",
-            path: pathFilter,
-            ref: routeRef,
-            view: "history",
-            commit: selectedSha,
-            range,
-          },
-          true,
-        );
-      } else {
-        deps.setRoute(
-          { screen: "history", ref, commit: selectedSha, range },
-          true,
-        );
-      }
+      deps.setRoute(routeFor({ commit: selectedSha }), true);
     }
     if (selectionGen !== selectionGeneration || gen !== generation) return;
     await deps.applyCommitRange(range, pathFilter || undefined);
@@ -870,10 +1122,11 @@ export function createHistoryView(deps: HistoryViewDeps) {
     } else {
       pagesLoaded = 1;
     }
+    const compare = historyScopeFromRoute()?.compare || "";
     for (;;) {
       const found = commits.find((c) => c.sha.startsWith(sha));
       if (found) {
-        await selectCommit(found, { updateUrl: false });
+        await selectCommit(found, { updateUrl: false, compare });
         scrollToSelected();
         return;
       }
@@ -899,7 +1152,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     setBanner(`showing commit outside the loaded ${ref} log`);
     commits = [single, ...commits];
     renderList();
-    await selectCommit(single, { updateUrl: false });
+    await selectCommit(single, { updateUrl: false, compare });
     scrollToSelected();
   }
 
@@ -933,6 +1186,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       scope.logRef !== ref ||
       scope.routeRef !== routeRef ||
       scope.pathFilter !== pathFilter ||
+      scope.query !== query ||
       scope.mode !== mode;
     if (scopeChanged || force || commits.length === 0) {
       generation++;
@@ -940,7 +1194,11 @@ export function createHistoryView(deps: HistoryViewDeps) {
       ref = scope.logRef;
       routeRef = scope.routeRef;
       pathFilter = scope.pathFilter;
+      query = scope.query;
       mode = scope.mode;
+      compareSha = "";
+      syncFilterInputValue();
+      syncPanelTitle();
       commits = [];
       hasMore = false;
       loading = false;
@@ -971,27 +1229,13 @@ export function createHistoryView(deps: HistoryViewDeps) {
 
   function onRefPicked(nextRef: string) {
     const value = nextRef && nextRef !== "worktree" ? nextRef : "HEAD";
-    if (mode === "file" && pathFilter) {
-      deps.setRoute(
-        {
-          screen: "file",
-          path: pathFilter,
-          ref: nextRef || "worktree",
-          view: "history",
-          range: { from: "HEAD", to: "worktree" },
-        },
-        false,
-      );
-    } else {
-      deps.setRoute(
-        {
-          screen: "history",
-          ref: value,
-          range: { from: "HEAD", to: "worktree" },
-        },
-        false,
-      );
-    }
+    // Keep the filter text and path scope; only the ref changes.
+    deps.setRoute(
+      routeFor({
+        ref: mode === "file" ? nextRef || "worktree" : value,
+      }),
+      false,
+    );
     // Force a reload even if the picked ref equals the current one.
     void enterHistory({ force: true });
   }
@@ -1000,6 +1244,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     generation++;
     loading = false;
     inFlight = null;
+    compareSha = "";
     if (filterTimer) {
       clearTimeout(filterTimer);
       filterTimer = undefined;
@@ -1015,21 +1260,39 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function handleListClick(e: MouseEvent) {
     const row = (e.target as Element).closest<HTMLElement>(".history-item");
     if (!row?.dataset.sha) return;
+    // Keyboard focus follows the click so j / k act on this list.
+    panel.focus?.();
     if (row.dataset.sha === HISTORY_WORKTREE_COMMIT) {
       void selectWorktree();
       return;
     }
     const commit = commits.find((c) => c.sha === row.dataset.sha);
-    if (commit) selectCommit(commit);
+    if (!commit) return;
+    if (e.shiftKey && selectedSha && selectedSha !== HISTORY_WORKTREE_COMMIT) {
+      void selectRange(commit);
+      return;
+    }
+    void selectCommit(commit, { compare: "" });
   }
 
-  // Server-side filter: message text by default, sha prefix for hex terms,
-  // plus "author:" and "path:" prefixes. Keeps the selected commit and the
-  // diff pane untouched; only the list reloads.
+  // Server-side filter (syntax: core/history.ts tokenizeHistoryQuery). Keeps
+  // the selected commit and the diff pane untouched; only the list reloads.
+  // The text also lives in the URL (?q=) so a reload or a shared link
+  // restores it.
   function applyFilter(next: string) {
     const value = next.trim();
     if (value === query) return;
     query = value;
+    if (historyScopeFromRoute()) {
+      deps.setRoute(
+        routeFor({
+          commit: selectedSha || undefined,
+          compare: compareSha,
+          query: value,
+        }),
+        true,
+      );
+    }
     generation++;
     selectionGeneration++;
     clearRefreshResult();
@@ -1128,6 +1391,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       attachedFilterInput.removeEventListener("input", handleFilterInput);
       attachedFilterInput.removeEventListener("change", handleFilterInput);
       attachedFilterInput.removeEventListener("keydown", handleFilterKeydown);
+      attachedFilterInput.removeEventListener("focus", handleFilterFocus);
       attachedFilterInput = null;
     }
     if (attachedFilterClearButton) {
@@ -1162,8 +1426,11 @@ export function createHistoryView(deps: HistoryViewDeps) {
       input.addEventListener("input", handleFilterInput);
       input.addEventListener("change", handleFilterInput);
       input.addEventListener("keydown", handleFilterKeydown);
+      input.addEventListener("focus", handleFilterFocus);
       attachedFilterInput = input;
     }
+    syncPanelTitle();
+    syncFilterChrome();
     const filterClearButton = mount.filterClearButton ?? null;
     if (filterClearButton) {
       syncFilterClearButton(filterClearButton);
@@ -1188,16 +1455,64 @@ export function createHistoryView(deps: HistoryViewDeps) {
     observer.observe(sentinel);
   }
 
+  function syncFilterInputValue() {
+    const input = activeMount.filterInput ?? null;
+    if (input && input.value !== query) input.value = query;
+    syncFilterClearButton();
+  }
+
+  function syncFilterChrome() {
+    const input = activeMount.filterInput ?? null;
+    if (!input) return;
+    const text = historyText(deps.getLanguage());
+    input.placeholder = text.filterPlaceholder;
+    input.title = text.filterTitle;
+  }
+
+  function syncPanelTitle() {
+    const title = panel.querySelector?.<HTMLElement>(".history-title");
+    if (!title) return;
+    const text = historyText(deps.getLanguage());
+    title.textContent =
+      mode === "history" && pathFilter
+        ? text.commitsIn(pathFilter)
+        : text.commitsTitle;
+  }
+
+  // "author:<name>" suggestions for the filter, loaded once per ref the
+  // first time the field gets focus.
+  function handleFilterFocus() {
+    const list = activeMount.authorList ?? null;
+    if (!list || typeof fetch !== "function") return;
+    const key = ref;
+    if (authorsLoadedFor === key) return;
+    authorsLoadedFor = key;
+    void deps
+      .trackLoad(
+        fetch(`/_authors?ref=${encodeURIComponent(ref)}`).then(async (r) => {
+          if (!r.ok) throw new Error(await r.text());
+          return (await r.json()) as HistoryAuthorsResponse;
+        }),
+      )
+      .then((res) => {
+        if (activeMount.authorList !== list || key !== ref) return;
+        list.replaceChildren(
+          ...res.authors.map((author) => {
+            const option = document.createElement("option");
+            option.value = `author:${author.name}`;
+            return option;
+          }),
+        );
+      })
+      .catch((err: unknown) => {
+        authorsLoadedFor = "";
+        console.error("Failed to load history authors", err);
+      });
+  }
+
   const docWithEvents = document as Document & {
     addEventListener?: Document["addEventListener"];
   };
-  docWithEvents.addEventListener?.("keydown", (e) => {
-    if (isImeComposing(e) || isEditableTarget(e.target)) return;
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    if (!historyScopeFromRoute()) return;
-    e.preventDefault();
-    void moveSelection(e.key === "ArrowDown" ? 1 : -1);
-  });
   docWithEvents.addEventListener?.("input", (e) => {
     if (e.target !== activeMount.filterInput) return;
     handleFilterInput(e);
@@ -1217,8 +1532,13 @@ export function createHistoryView(deps: HistoryViewDeps) {
       syncRefreshButton(activeMount.refreshButton);
       syncRefreshResult(activeMount.refreshResult);
       syncFilterClearButton(activeMount.filterClearButton);
+      syncFilterChrome();
+      syncPanelTitle();
       renderList();
     },
+    // Keyboard stepping through the commit list (keymap actions
+    // history-next-commit / history-previous-commit).
+    moveCommitSelection: (delta: 1 | -1) => moveSelection(delta),
     // Called from the SSE "update" listener when a history panel is on
     // screen. Only updates existing local UI hints — no fetch, no list redraw,
     // no generation bump, so it can't race with trackLoad/cancelInFlightRequests.

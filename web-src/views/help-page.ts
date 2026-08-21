@@ -182,6 +182,23 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             ],
           },
           {
+            title: "Search and history",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "Ctrl+K opens the file palette and Ctrl+G the text palette; the search button at the left of the header icons does the same (Shift+click for text). The two share one window: switching keeps what you typed, and reopening restores the last query, selected so typing replaces it. With an empty query the file palette lists the files you opened most recently, and the result line says when the ranking was cut at 50. The text palette has regex (Alt+R), match-case (Alt+C) and whole-word (Alt+W) toggles, and path:<dir or glob> tokens in the query narrow the search; matching is case-insensitive on every engine unless match-case is on.",
+              },
+              {
+                kind: "paragraph",
+                text: "The sidebar filter takes plain text (anywhere in the path), /pattern/ for a regex, ~text for a fuzzy match and *.ts or src/** for a glob, and shows matching / all file counts while active.",
+              },
+              {
+                kind: "paragraph",
+                text: 'The History screen filter understands words (message text, "quoted" keeps spaces), sha prefixes, author:<name>, path:<part>, since:/after:<date>, until:/before:<date>, code:<text> (lines added or removed) and merges:no / merges:only; different kinds combine with AND, author: offers the repository\'s authors as suggestions, and the filter is part of the URL (?q=) so a reload or shared link keeps it. Rows show branch and tag labels and a merge marker. The selected commit can be copied (sha) or opened on GitHub, Shift+click a second commit to diff the whole range between them, and a merge commit lets you pick which parent to compare against. ↑ / ↓ step commits anywhere on the screen, j / k do when the commit list has focus, and g h opens the history of the ref you are looking at. A folder page has a History button that opens the log restricted to that folder.',
+              },
+            ],
+          },
+          {
             title: "Scratch on pasted text",
             blocks: [
               {
@@ -972,6 +989,23 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "git の状態があるファイルは、通常の種類アイコンの代わりにステータスバッジがツリーに表示されます。M(変更)、A(追加 — コミット予定としてステージ済み)、D(削除)、R(リネーム)、U(未追跡 — ワークツリーにあるがまだバージョン管理下にない)、I(.gitignore の対象) の 6 種類です。U と A を分けているのは、git add をまだ一度もしていないファイルが、既にステージ済みのファイルと同じ見た目にならないようにするためです。丸ごと未追跡・無視のディレクトリにはディレクトリ単位でバッジが付き、フォルダアイコンは残るので折りたたんだままでも判別できます。配下のファイルはそのバッジを引き継ぎますが、無視ルールが個別に名指ししているファイルはそちらが優先されます。",
+              },
+            ],
+          },
+          {
+            title: "検索と履歴",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "Ctrl+K でファイルパレット、Ctrl+G でコード検索パレットが開きます。ヘッダのアイコン列の左端にある検索ボタンでも同じです（Shift+クリックでコード検索）。2 つは 1 つのウィンドウを共有し、切り替えても入力中の検索語は残り、閉じて開き直すと前回の検索語が選択状態で戻ります。ファイルパレットは空のとき最近開いたファイルを並べ、結果が 50 件で切られたときはその旨を表示します。コード検索には正規表現（Alt+R）・大文字小文字の区別（Alt+C）・単語単位（Alt+W）の切り替えがあり、検索語の中の path:<ディレクトリ or glob> で対象を絞れます。大文字小文字は「区別する」を押さない限りどのエンジンでも区別しません。",
+              },
+              {
+                kind: "paragraph",
+                text: "サイドバーの絞り込みは文字列（パスの部分一致）、/pattern/（正規表現）、~text（あいまい一致）、*.ts や src/**（glob）を受け付け、絞り込み中は「一致 / 全体」の件数を表示します。",
+              },
+              {
+                kind: "paragraph",
+                text: '履歴画面の絞り込みは、語（メッセージ本文。"引用" で空白を含む句）、sha の前方一致、author:<名前>、path:<一部>、since:/after:<日付>、until:/before:<日付>、code:<文字列>（追加・削除された行）、merges:no / merges:only を解釈し、種類の違う条件は AND で組み合わさります。author: にはリポジトリの著者名が候補として出て、絞り込みは URL（?q=）に載るのでリロードや共有でも残ります。各行にはブランチ / タグのラベルとマージ印が付きます。選択したコミットは sha をコピーしたり GitHub で開いたりでき、別のコミットを Shift+クリックするとその区間全体の差分、マージコミットでは比較する親を選べます。↑ / ↓ は画面のどこでも、j / k はコミット一覧にフォーカスがあるときにコミットを送り、g h は見ている ref の履歴を開きます。フォルダページの「履歴」ボタンでそのフォルダに絞った履歴が開きます。',
               },
             ],
           },

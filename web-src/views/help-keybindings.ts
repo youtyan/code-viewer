@@ -241,8 +241,28 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
       {
         selectors: [{ action: "goto-history" }],
         description: {
-          en: "Go to the history screen",
-          ja: "履歴画面へ移動",
+          en: "Go to the history screen (keeps the ref you are viewing)",
+          ja: "履歴画面へ移動（見ている ref を引き継ぐ）",
+        },
+      },
+      {
+        selectors: [
+          { action: "history-next-commit", key: "arrowdown" },
+          { action: "history-previous-commit", key: "arrowup" },
+        ],
+        description: {
+          en: "Select the next / previous commit in the history list",
+          ja: "履歴一覧で次 / 前のコミットを選ぶ",
+        },
+      },
+      {
+        selectors: [
+          { action: "history-next-commit", scope: "history" },
+          { action: "history-previous-commit", scope: "history" },
+        ],
+        description: {
+          en: "Same, while the commit list has focus",
+          ja: "同上（コミット一覧にフォーカスがあるとき）",
         },
       },
       {
