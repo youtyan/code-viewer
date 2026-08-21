@@ -3,7 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { AppRoute } from "../core/routes";
 import { createRefPicker } from "../views/ref-picker";
-import { waitFor } from "./_test-helpers";
+import { q, waitFor } from "./_test-helpers";
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -156,5 +156,109 @@ describe("repository ref picker", () => {
       },
     ]);
     expect(repoLoads()).toBe(1);
+  });
+});
+
+describe("ref picker recent refs", () => {
+  function installFetch() {
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ commits: [], hasMore: false }), {
+            headers: { "content-type": "application/json" },
+          }),
+        ),
+    });
+  }
+
+  function createPickerWithRecent(recent: string[]) {
+    const remembered: string[] = [];
+    const picker = createRefPicker({
+      $: <T extends Element = HTMLElement>(selector: string): T => {
+        const el = document.querySelector(selector);
+        if (!el) throw new Error(`missing ${selector}`);
+        return el as T;
+      },
+      escapeHtml: (value) => String(value),
+      currentRange: () => ({ from: "HEAD", to: "worktree" }),
+      setRange: () => undefined,
+      setRoute: () => undefined,
+      loadRepo: async () => undefined,
+      renderStandaloneSource: async () => undefined,
+      getFrom: () => "HEAD",
+      getTo: () => "worktree",
+      getRepoRef: () => "worktree",
+      getRoute: () => ({
+        screen: "diff",
+        range: { from: "HEAD", to: "worktree" },
+      }),
+      getRecentRefs: () => recent,
+      rememberRecentRef: (ref) => {
+        remembered.push(ref);
+      },
+      recentRefTitle: () => "Recently used ref",
+    });
+    if (!picker) throw new Error("picker not created");
+    return { picker, remembered };
+  }
+
+  test("shows remembered refs newest first, skipping the quick values", () => {
+    installRefPickerDom();
+    installFetch();
+    const { picker } = createPickerWithRecent([
+      "v1.0",
+      "HEAD",
+      "feature/x",
+      "main",
+    ]);
+    picker.openPopover(q<HTMLInputElement>(document, "#ref-from"));
+    const chips = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(".rp-recent .rp-chip"),
+    );
+    expect(chips.map((chip) => chip.textContent)).toEqual([
+      "main",
+      "feature/x",
+      "v1.0",
+    ]);
+    expect(chips[0].title).toBe("Recently used ref");
+  });
+
+  test("hides the row when nothing was picked yet", () => {
+    installRefPickerDom();
+    installFetch();
+    const { picker } = createPickerWithRecent([]);
+    picker.openPopover(q<HTMLInputElement>(document, "#ref-from"));
+    expect(document.querySelector<HTMLElement>(".rp-recent")?.hidden).toBe(
+      true,
+    );
+  });
+
+  test.each([
+    {
+      name: "a branch picked from a chip is remembered",
+      pick: "main",
+      remembered: ["main"],
+    },
+    {
+      name: "the HEAD quick value is not remembered",
+      pick: "HEAD",
+      remembered: [],
+    },
+  ])("$name", ({ pick, remembered: expected }) => {
+    installRefPickerDom();
+    installFetch();
+    const { picker, remembered } = createPickerWithRecent(["main"]);
+    const input = q<HTMLInputElement>(document, "#ref-from");
+    picker.openPopover(input);
+    if (pick === "HEAD") {
+      input.value = "HEAD";
+      input.dispatchEvent(new Event("change"));
+    } else {
+      q<HTMLButtonElement>(document, ".rp-recent .rp-chip").click();
+    }
+    expect(remembered).toEqual(expected);
+    if (pick !== "HEAD") expect(input.value).toBe("main");
   });
 });

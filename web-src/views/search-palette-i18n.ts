@@ -3,6 +3,8 @@ export type SearchPaletteLanguage = "en" | "ja";
 export type SearchPaletteText = {
   files: string;
   grep: string;
+  switchToFiles: string;
+  switchToGrep: string;
   searchFiles: string;
   searchText: string;
   fileCodePreview: string;
@@ -13,14 +15,20 @@ export type SearchPaletteText = {
   fuzzyHint: string;
   plain: string;
   regex: string;
+  matchCase: string;
+  matchCaseTitle: string;
+  wholeWord: string;
+  wholeWordTitle: string;
   excludeTests: string;
   excludeTestsTitle: string;
   groupFiles: string;
   groupFilesTitle: string;
-  regexHint: string;
+  grepHint: string;
   windowWidth: string;
   windowHeight: string;
   regexMode: string;
+  caseSensitivity: string;
+  wordMatching: string;
   fileGrouping: string;
   testExclusion: string;
   saveFailed: (label: string, error: string) => string;
@@ -34,8 +42,13 @@ export type SearchPaletteText = {
   line: (line: number, column: number) => string;
   diffFiles: (count: number) => string;
   typeToSearchFiles: string;
+  recentFiles: (count: number) => string;
   loadingFiles: string;
-  results: (count: number) => string;
+  results: (
+    count: number,
+    total?: number,
+    candidatesTruncated?: boolean,
+  ) => string;
   noResults: string;
   typeToGrep: string;
   invalidRegex: string;
@@ -44,19 +57,33 @@ export type SearchPaletteText = {
   grepSummary: (options: {
     engine: string;
     regex: boolean;
+    caseSensitive: boolean;
+    wholeWord: boolean;
     testsExcluded: boolean;
     truncated: boolean;
     count: number;
+    paths: string[];
   }) => string;
   searchFailed: (error: string) => string;
   savingSelection: string;
   selectionSaveFailed: (error: string) => string;
   unknownError: string;
+  // Results sheet (bottom panel tab that keeps a grep result list open).
+  pinResults: string;
+  pinResultsTitle: string;
+  resultsTitle: string;
+  resultsOpen: string;
+  resultsRun: string;
+  resultsPlaceholder: string;
+  resultsIdle: string;
+  resultsScope: (ref: string) => string;
 };
 
 const EN: SearchPaletteText = {
   files: "Files",
   grep: "Grep",
+  switchToFiles: "Switch to file search (Ctrl+K)",
+  switchToGrep: "Switch to text search (Ctrl+G)",
   searchFiles: "Search files",
   searchText: "Search text",
   fileCodePreview: "File code preview",
@@ -67,14 +94,20 @@ const EN: SearchPaletteText = {
   fuzzyHint: "Fuzzy path search",
   plain: "Plain",
   regex: ".* Regex",
+  matchCase: "Aa",
+  matchCaseTitle: "Match case (Alt+C)",
+  wholeWord: "Word",
+  wholeWordTitle: "Match whole words only (Alt+W)",
   excludeTests: "No test",
   excludeTestsTitle: "Exclude test/spec files",
   groupFiles: "Group files",
   groupFilesTitle: "Group matching lines by file",
-  regexHint: "Alt+R regex",
+  grepHint: "path:<dir or glob> narrows · Alt+R regex",
   windowWidth: "window width",
   windowHeight: "window height",
   regexMode: "regex mode",
+  caseSensitivity: "case sensitivity",
+  wordMatching: "whole-word matching",
   fileGrouping: "file grouping",
   testExclusion: "test exclusion",
   saveFailed: (label, error) => `Failed to save ${label}: ${error}`,
@@ -89,28 +122,56 @@ const EN: SearchPaletteText = {
   line: (line, column) => `Line ${line}:${column}`,
   diffFiles: (count) => `${count} diff files`,
   typeToSearchFiles: "Type to search repository files",
+  recentFiles: (count) => `Recent files - ${count}`,
   loadingFiles: "Loading files...",
-  results: (count) => `${count} results`,
+  results: (count, total, candidatesTruncated) =>
+    (total === undefined
+      ? `${count} results`
+      : `${count} of ${total} results`) +
+    (candidatesTruncated ? " · file list truncated" : ""),
   noResults: "No results",
   typeToGrep: "Type to grep",
   invalidRegex: "Invalid regular expression",
   searching: "Searching...",
   repositoryChanged: "Repository changed; search again",
-  grepSummary: ({ engine, regex, testsExcluded, truncated, count }) =>
+  grepSummary: ({
+    engine,
+    regex,
+    caseSensitive,
+    wholeWord,
+    testsExcluded,
+    truncated,
+    count,
+    paths,
+  }) =>
     engine +
     (regex ? " regex" : " plain") +
+    (caseSensitive ? " · match case" : "") +
+    (wholeWord ? " · whole word" : "") +
     (testsExcluded ? " · tests excluded" : "") +
+    (paths.length ? ` · in ${paths.join(" ")}` : "") +
     (truncated ? " truncated" : "") +
     ` - ${count} results`,
   searchFailed: (error) => `Search failed: ${error}`,
   savingSelection: "Saving selection...",
   selectionSaveFailed: (error) => `Failed to save selection: ${error}`,
   unknownError: "unknown error",
+  pinResults: "Pin",
+  pinResultsTitle:
+    "Keep these results open in the bottom panel while you browse (Ctrl+Enter)",
+  resultsTitle: "Search",
+  resultsOpen: "Open the search results panel",
+  resultsRun: "Search",
+  resultsPlaceholder: "Search text (path:<dir or glob> narrows)",
+  resultsIdle: "Type a search and press Enter",
+  resultsScope: (ref) => `in ${ref}`,
 };
 
 const JA: SearchPaletteText = {
   files: "ファイル",
   grep: "GREP",
+  switchToFiles: "ファイル名検索に切り替え (Ctrl+K)",
+  switchToGrep: "コード検索に切り替え (Ctrl+G)",
   searchFiles: "ファイルを検索",
   searchText: "コードを検索",
   fileCodePreview: "ファイルのコード表示",
@@ -121,14 +182,20 @@ const JA: SearchPaletteText = {
   fuzzyHint: "パスのあいまい検索",
   plain: "通常",
   regex: ".* 正規表現",
+  matchCase: "Aa",
+  matchCaseTitle: "大文字と小文字を区別 (Alt+C)",
+  wholeWord: "単語",
+  wholeWordTitle: "単語単位で一致 (Alt+W)",
   excludeTests: "テスト除外",
   excludeTestsTitle: "test/spec ファイルを除外",
   groupFiles: "ファイル別",
   groupFilesTitle: "一致した行をファイル別に表示",
-  regexHint: "Alt+R 正規表現",
+  grepHint: "path:<ディレクトリ or glob> で絞り込み · Alt+R 正規表現",
   windowWidth: "ウィンドウの幅",
   windowHeight: "ウィンドウの高さ",
   regexMode: "正規表現モード",
+  caseSensitivity: "大文字小文字の区別",
+  wordMatching: "単語単位の一致",
   fileGrouping: "ファイル別表示",
   testExclusion: "テスト除外",
   saveFailed: (label, error) => `${label}を保存できませんでした: ${error}`,
@@ -144,23 +211,47 @@ const JA: SearchPaletteText = {
   line: (line, column) => `${line} 行:${column}`,
   diffFiles: (count) => `差分ファイル ${count} 件`,
   typeToSearchFiles: "リポジトリ内のファイル名を入力してください",
+  recentFiles: (count) => `最近開いたファイル - ${count} 件`,
   loadingFiles: "ファイルを読み込み中...",
-  results: (count) => `${count} 件`,
+  results: (count, total, candidatesTruncated) =>
+    (total === undefined ? `${count} 件` : `${total} 件中 ${count} 件`) +
+    (candidatesTruncated ? "・ファイル一覧は上限で打ち切り" : ""),
   noResults: "該当なし",
   typeToGrep: "検索するコードを入力してください",
   invalidRegex: "正規表現が正しくありません",
   searching: "検索中...",
   repositoryChanged: "リポジトリが変更されました。もう一度検索してください",
-  grepSummary: ({ engine, regex, testsExcluded, truncated, count }) =>
+  grepSummary: ({
+    engine,
+    regex,
+    caseSensitive,
+    wholeWord,
+    testsExcluded,
+    truncated,
+    count,
+    paths,
+  }) =>
     engine +
     (regex ? "・正規表現" : "・通常") +
+    (caseSensitive ? "・大文字小文字を区別" : "") +
+    (wholeWord ? "・単語単位" : "") +
     (testsExcluded ? "・テスト除外" : "") +
+    (paths.length ? `・${paths.join(" ")} 内` : "") +
     (truncated ? "・一部表示" : "") +
     ` - ${count} 件`,
   searchFailed: (error) => `検索に失敗しました: ${error}`,
   savingSelection: "選択履歴を保存中...",
   selectionSaveFailed: (error) => `選択履歴を保存できませんでした: ${error}`,
   unknownError: "不明なエラー",
+  pinResults: "固定",
+  pinResultsTitle: "この結果を下パネルに出したまま閲覧を続ける (Ctrl+Enter)",
+  resultsTitle: "検索",
+  resultsOpen: "検索結果パネルを開く",
+  resultsRun: "検索",
+  resultsPlaceholder:
+    "検索するコード（path:<ディレクトリ or glob> で絞り込み）",
+  resultsIdle: "検索語を入力して Enter",
+  resultsScope: (ref) => `${ref} 内`,
 };
 
 export function searchPaletteText(

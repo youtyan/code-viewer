@@ -151,3 +151,31 @@ describe("rankFuzzyPaths", () => {
     expect(bounded.length).toBe(limit);
   });
 });
+
+describe("glob ** semantics", () => {
+  test.each([
+    { name: "zero directories", glob: "src/**/*.ts", path: "src/a.ts" },
+    { name: "one directory", glob: "src/**/*.ts", path: "src/ui/a.ts" },
+    { name: "two directories", glob: "src/**/*.ts", path: "src/ui/x/a.ts" },
+    { name: "leading ** matches root files", glob: "**/a.ts", path: "a.ts" },
+    {
+      name: "leading ** matches nested files",
+      glob: "**/a.ts",
+      path: "x/a.ts",
+    },
+    {
+      name: "trailing ** matches everything below",
+      glob: "src/**",
+      path: "src/x/y",
+    },
+  ])("$name: $glob matches $path", ({ glob, path }) => {
+    expect(globMatchPath(glob, path)).not.toBeNull();
+  });
+
+  test.each([
+    { name: "different extension", glob: "src/**/*.ts", path: "src/a.js" },
+    { name: "outside the prefix", glob: "src/**/*.ts", path: "lib/a.ts" },
+  ])("$name: $glob rejects $path", ({ glob, path }) => {
+    expect(globMatchPath(glob, path)).toBeNull();
+  });
+});

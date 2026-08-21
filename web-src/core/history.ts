@@ -2,6 +2,14 @@
 
 import type { DiffRange } from "./routes";
 
+// One decoration from `git log --format=%D`: a branch / tag pointing at the
+// commit. `head` marks the branch HEAD is on; kind "head" is a detached HEAD.
+export type HistoryCommitRef = {
+  name: string;
+  kind: "branch" | "tag" | "head";
+  head?: true;
+};
+
 export type HistoryCommit = {
   sha: string;
   subject: string;
@@ -9,6 +17,7 @@ export type HistoryCommit = {
   when: string;
   parents: string[];
   body: string;
+  refs?: HistoryCommitRef[];
 };
 
 export type HistoryLogResponse = {
@@ -17,6 +26,116 @@ export type HistoryLogResponse = {
   generation?: number;
   hasWorktree?: boolean;
 };
+
+export type HistoryAuthor = { name: string; count: number };
+
+/** Inclusive 1-based line range for `git log -L` (line-range history). */
+export type HistoryLineRange = { start: number; end: number };
+
+export function parseHistoryLineRange(
+  value: string | null | undefined,
+): HistoryLineRange | undefined {
+  const match = /^(\d+)-(\d+)$/.exec(value || "");
+  if (!match) return undefined;
+  const a = Number(match[1]);
+  const b = Number(match[2]);
+  if (!(a > 0) || !(b > 0)) return undefined;
+  return { start: Math.min(a, b), end: Math.max(a, b) };
+}
+
+export function formatHistoryLineRange(range: HistoryLineRange): string {
+  return `${range.start}-${range.end}`;
+}
+
+// Neighbouring revisions of one file: the commit before `ref` that touched
+// it, and the next one towards HEAD. null = no such commit.
+export type FileRevisionNeighbors = {
+  previous: string | null;
+  next: string | null;
+  generation?: number;
+};
+
+export type HistoryAuthorsResponse = {
+  authors: HistoryAuthor[];
+  generation?: number;
+};
+
+// ---- filter query syntax (shared by the history view, the file history
+// tab, `code-viewer file history --query`, and the MCP tool) ----
+//
+//   free words            message text (one phrase; "quoted text" keeps spaces)
+//   author:<name>         author contains (repeatable, OR)
+//   path:<part>           touched path contains (repeatable, OR)
+//   since:<date> after:   committed on / after that date (git date syntax)
+//   until:<date> before:  committed on / before that date
+//   code:<text>           added / removed lines contain (git log -S)
+//   merges:no | no-merges hide merge commits;  merges:only  show only them
+//
+// Different kinds combine with AND. A 4-40 hex word on its own also tries a
+// sha prefix. Unknown prefixes ("fix:", "http://...") stay ordinary text.
+export type HistoryQueryToken =
+  | { kind: "text"; value: string }
+  | { kind: "author" | "path" | "since" | "until" | "code"; value: string }
+  | { kind: "merges"; value: "no" | "only" };
+
+export const HISTORY_QUERY_PREFIXES = [
+  "author",
+  "path",
+  "since",
+  "after",
+  "until",
+  "before",
+  "code",
+  "merges",
+] as const;
+
+export function tokenizeHistoryQuery(raw: string): HistoryQueryToken[] {
+  const tokens: HistoryQueryToken[] = [];
+  const known = new Set<string>(HISTORY_QUERY_PREFIXES);
+  for (const match of raw
+    .trim()
+    .matchAll(/(?:([A-Za-z-]+):)?("([^"]*)"|(\S+))/g)) {
+    const prefix = (match[1] || "").toLowerCase();
+    const value = match[3] !== undefined ? match[3] : (match[4] ?? "");
+    if (!prefix) {
+      if (value === "no-merges") {
+        tokens.push({ kind: "merges", value: "no" });
+        continue;
+      }
+      // "author:" with nothing after it is an unfinished prefix, not text.
+      if (value.endsWith(":") && known.has(value.slice(0, -1).toLowerCase()))
+        continue;
+      if (value) tokens.push({ kind: "text", value });
+      continue;
+    }
+    if (!known.has(prefix)) {
+      tokens.push({ kind: "text", value: `${match[1]}:${value}` });
+      continue;
+    }
+    if (!value) continue;
+    switch (prefix) {
+      case "author":
+      case "path":
+      case "code":
+        tokens.push({ kind: prefix, value });
+        break;
+      case "since":
+      case "after":
+        tokens.push({ kind: "since", value });
+        break;
+      case "until":
+      case "before":
+        tokens.push({ kind: "until", value });
+        break;
+      case "merges":
+        if (value === "no" || value === "only")
+          tokens.push({ kind: "merges", value });
+        else tokens.push({ kind: "text", value: `merges:${value}` });
+        break;
+    }
+  }
+  return tokens;
+}
 
 // git's well-known empty tree object: diff target for root commits.
 export const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";

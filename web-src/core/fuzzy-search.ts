@@ -141,10 +141,15 @@ export function fuzzyMatchPath(query: string, path: string): FuzzyMatch | null {
   return match ? { score: match.score, ranges: match.ranges } : null;
 }
 
+// Optional out-param for callers that need to know how many candidates
+// matched before `limit` sliced the list (the palette shows "50 of 1,234").
+export type PathMatchStats = { total: number };
+
 export function rankFuzzyPaths<T extends { path: string }>(
   query: string,
   items: T[],
   limit?: number,
+  stats?: PathMatchStats,
 ): RankedFuzzyPath<T>[] {
   const bounded =
     Number.isInteger(limit) && limit !== undefined && limit > 0
@@ -158,7 +163,7 @@ export function rankFuzzyPaths<T extends { path: string }>(
     b.score - a.score ||
     a.item.path.localeCompare(b.item.path);
   if (!bounded) {
-    return items
+    const ranked = items
       .map((item) => {
         const match = computeFuzzyMatch(query, item.path);
         return match
@@ -170,12 +175,16 @@ export function rankFuzzyPaths<T extends { path: string }>(
       )
       .sort(compare)
       .map(({ item, score, ranges }) => ({ item, score, ranges }));
+    if (stats) stats.total = ranked.length;
+    return ranked;
   }
 
   const top: Array<RankedFuzzyPath<T> & { tier: number }> = [];
+  let total = 0;
   for (const item of items) {
     const match = computeFuzzyMatch(query, item.path);
     if (!match) continue;
+    total++;
     const ranked = {
       item,
       score: match.score,
@@ -184,6 +193,7 @@ export function rankFuzzyPaths<T extends { path: string }>(
     };
     pushBoundedTop(top, ranked, bounded, compare);
   }
+  if (stats) stats.total = total;
   return top
     .sort(compare)
     .map(({ item, score, ranges }) => ({ item, score, ranges }));
@@ -231,9 +241,13 @@ function rankGlobPathMatches<T extends { path: string }>(
   query: string,
   items: T[],
   limit?: number,
+  stats?: PathMatchStats,
 ): RankedPathMatch<T>[] {
   const matchPath = createGlobPathMatcher(query);
-  if (!matchPath) return [];
+  if (!matchPath) {
+    if (stats) stats.total = 0;
+    return [];
+  }
   const bounded =
     Number.isInteger(limit) && limit !== undefined && limit > 0
       ? Math.floor(limit)
@@ -241,7 +255,7 @@ function rankGlobPathMatches<T extends { path: string }>(
   const compare = (a: RankedPathMatch<T>, b: RankedPathMatch<T>) =>
     b.score - a.score || a.item.path.localeCompare(b.item.path);
   if (!bounded) {
-    return items
+    const ranked = items
       .map((item): RankedPathMatch<T> | null => {
         const match = matchPath(item.path);
         return match
@@ -255,12 +269,16 @@ function rankGlobPathMatches<T extends { path: string }>(
       })
       .filter((item): item is RankedPathMatch<T> => item !== null)
       .sort(compare);
+    if (stats) stats.total = ranked.length;
+    return ranked;
   }
 
   const top: RankedPathMatch<T>[] = [];
+  let total = 0;
   for (const item of items) {
     const match = matchPath(item.path);
     if (!match) continue;
+    total++;
     const ranked = {
       item,
       score: match.score,
@@ -269,6 +287,7 @@ function rankGlobPathMatches<T extends { path: string }>(
     };
     pushBoundedTop(top, ranked, bounded, compare);
   }
+  if (stats) stats.total = total;
   return top.sort(compare);
 }
 
@@ -276,11 +295,12 @@ export function rankPathMatches<T extends { path: string }>(
   query: string,
   items: T[],
   limit?: number,
+  stats?: PathMatchStats,
 ): RankedPathMatch<T>[] {
   if (isGlobPathQuery(query)) {
-    return rankGlobPathMatches(query, items, limit);
+    return rankGlobPathMatches(query, items, limit, stats);
   }
-  return rankFuzzyPaths(query, items, limit).map((item) => ({
+  return rankFuzzyPaths(query, items, limit, stats).map((item) => ({
     ...item,
     mode: "fuzzy" as const,
   }));
@@ -302,8 +322,15 @@ export function globToRegExp(query: string): RegExp | null {
     const ch = pattern[i];
     if (ch === "*") {
       if (pattern[i + 1] === "*") {
-        source += ".*";
-        i++;
+        // "**/" spans zero or more directories (so "src/**/*.ts" also
+        // matches "src/a.ts"), matching gitignore / rg --glob semantics.
+        if (pattern[i + 2] === "/") {
+          source += "(?:.*/)?";
+          i += 2;
+        } else {
+          source += ".*";
+          i++;
+        }
       } else {
         source += "[^/]*";
       }

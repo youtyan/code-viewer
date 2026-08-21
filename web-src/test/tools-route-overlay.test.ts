@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { parseToolsOverlay, withToolsOverlay } from "../core/routes";
+import {
+  parseSearchResultsOverlay,
+  parseToolsOverlay,
+  withSearchResultsOverlay,
+  withToolsOverlay,
+} from "../core/routes";
 
 describe("tools overlay query parsing", () => {
   test.each([
@@ -93,5 +98,52 @@ describe("tools overlay url building", () => {
       const url = withToolsOverlay("/history?ref=main", tool);
       expect(parseToolsOverlay(url.slice(url.indexOf("?")))).toBe(tool);
     }
+  });
+});
+
+describe("search results overlay query", () => {
+  test.each([
+    { name: "missing param is closed", search: "?from=HEAD", expected: null },
+    {
+      name: "empty value is open without a query",
+      search: "?results=",
+      expected: "",
+    },
+    {
+      name: "the value is the grep query",
+      search: "?results=needle%20path%3Asrc%2F",
+      expected: "needle path:src/",
+    },
+  ])("parse: $name", ({ search, expected }) => {
+    expect(parseSearchResultsOverlay(search)).toBe(expected);
+  });
+
+  test.each([
+    {
+      name: "adds the query",
+      url: "/file?path=a.ts",
+      query: "needle",
+      expected: "/file?path=a.ts&results=needle",
+    },
+    {
+      name: "replaces an existing query",
+      url: "/file?results=old&path=a.ts",
+      query: "new",
+      expected: "/file?results=new&path=a.ts",
+    },
+    {
+      name: "removes it when closed",
+      url: "/history?results=x&ref=main",
+      query: null,
+      expected: "/history?ref=main",
+    },
+    {
+      name: "keeps an empty value as open",
+      url: "/",
+      query: "",
+      expected: "/?results=",
+    },
+  ])("with: $name", ({ url, query, expected }) => {
+    expect(withSearchResultsOverlay(url, query)).toBe(expected);
   });
 });

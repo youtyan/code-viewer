@@ -96,6 +96,8 @@ describe("parseSearchArgs", () => {
           ref: "main",
           paths: [],
           regex: true,
+          caseSensitive: false,
+          wholeWord: false,
           max: 50,
           json: true,
         },
@@ -221,6 +223,47 @@ describe("parseSearchArgs", () => {
     expect(parseSearchArgs(["code", "--term", "x", "--path"])).toEqual({
       ok: false,
       error: "--path requires a value",
+    });
+  });
+});
+
+describe("parseSearchArgs code match options", () => {
+  test.each([
+    {
+      name: "--case-sensitive alone",
+      argv: ["code", "--term", "Token", "--case-sensitive"],
+      caseSensitive: true,
+      wholeWord: false,
+    },
+    {
+      name: "--word alone",
+      argv: ["code", "--term", "Token", "--word"],
+      caseSensitive: false,
+      wholeWord: true,
+    },
+    {
+      name: "both flags, any order",
+      argv: ["code", "--word", "--term", "Token", "--case-sensitive"],
+      caseSensitive: true,
+      wholeWord: true,
+    },
+  ])("$name", ({ argv, caseSensitive, wholeWord }) => {
+    const result = parseSearchArgs(argv);
+    if (result.ok !== true) throw new Error(result.error);
+    const command = result.args.command;
+    if (command.kind !== "code") throw new Error(`unexpected ${command.kind}`);
+    expect(command.caseSensitive).toBe(caseSensitive);
+    expect(command.wholeWord).toBe(wholeWord);
+  });
+
+  test.each([
+    { flag: "--regex" },
+    { flag: "--case-sensitive" },
+    { flag: "--word" },
+  ])("search files rejects the code-only flag $flag", ({ flag }) => {
+    expect(parseSearchArgs(["files", "--term", "x", flag])).toEqual({
+      ok: false,
+      error: `search files does not accept ${flag}`,
     });
   });
 });

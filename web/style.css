@@ -303,6 +303,9 @@ body[data-code-font-size="xlarge"] {
 }
 
 .gdp-palette-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 12px 16px 0;
   color: var(--fg-muted);
   font-size: 12px;
@@ -1063,6 +1066,21 @@ body.gdp-diff-page #repo-target-wrap {
   gap: 6px;
   padding: 10px 10px 0;
   background: var(--bg);
+}
+/* Recently picked refs, same pill idiom as the quick chips. */
+.rp-recent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 0;
+  background: var(--bg);
+}
+.rp-recent[hidden] { display: none; }
+.rp-chip-recent {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .rp-chip {
   /* Compact quick-fill pills; .current uses the same tinted-active idiom
@@ -1850,12 +1868,100 @@ body.gdp-history-page #topbar .ref-pickers {
 }
 .history-item .meta2 {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   color: var(--fg-muted);
   font-size: var(--ui-font-sm);
   margin-top: 2px;
 }
 .history-item .sha { font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+/* Branch / tag decorations and the merge marker on a commit row. Chips
+   share the .rp-chip pill idiom; colour only, so the row height is stable. */
+/* Chips take their own line under sha / author / date so the meta row keeps
+   its width and the chips flow horizontally in the narrow panel. */
+.history-item .history-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex-basis: 100%;
+  min-width: 0;
+}
+.history-ref {
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  line-height: 16px;
+}
+.history-ref-head {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+.history-ref-tag {
+  border-color: color-mix(in srgb, var(--warning, #9a6700) 55%, var(--border));
+  color: var(--warning, #9a6700);
+}
+.history-ref-merge {
+  font-style: italic;
+}
+/* Rows inside a Shift+click range: tint only, the selected row keeps its
+   accent bar. */
+.history-item-in-range {
+  background: color-mix(in srgb, var(--accent-subtle) 35%, transparent);
+}
+/* Older / newer revision stepper in the file header. Same icon-button idiom
+   as the path copy button; a disabled side only fades (no size change). */
+.gdp-file-revision-nav {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 6px;
+}
+.gdp-file-revision-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.gdp-file-revision-btn:disabled:hover {
+  background: transparent;
+  color: var(--fg-muted);
+}
+#history-commit-info .hci-actions,
+.history-commit-info .hci-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+#history-commit-info .hci-copy,
+.history-commit-info .hci-copy {
+  width: 26px;
+  padding: 0;
+  justify-content: center;
+}
+#history-commit-info .hci-copy.copied,
+.history-commit-info .hci-copy.copied { color: var(--success, var(--accent)); }
+#history-commit-info .hci-copy.failed,
+.history-commit-info .hci-copy.failed { color: var(--danger); }
+#history-commit-info .hci-parent[aria-pressed="true"],
+.history-commit-info .hci-parent[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+#history-commit-info .hci-compare-label,
+.history-commit-info .hci-compare-label {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
 .history-status {
   padding: 10px 14px;
   color: var(--fg-muted);
@@ -3725,6 +3831,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 #line-ref-pill-github-actions[hidden] {
   display: none;
 }
+#line-ref-pill-history,
 #line-ref-pill-github-open,
 #line-ref-pill-github-copy {
   display: inline-flex;
@@ -15014,6 +15121,7 @@ body.app-panel-docked .app-panel.app-panel-open {
    `web-src/test/docked-page-height.test.ts`。 */
 
 .tools-sheet,
+.search-sheet,
 .terminal-sheet {
   flex: 1 1 auto;
   min-width: 0;
@@ -15026,8 +15134,41 @@ body.app-panel-docked .app-panel.app-panel-open {
 /* パネルの中ではタブで 1 つだけ出す。閉じている側は本当に消す
    (右ドロワーの頃はスライドのために display を残していた)。 */
 .tools-sheet[hidden],
+.search-sheet[hidden],
 .terminal-sheet[hidden] {
   display: none;
+}
+/* Search results sheet: query row, palette-style controls, scrolling list. */
+.search-results-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 10px 0;
+}
+.search-results-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--ui-control-md);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  padding: 0 10px;
+  outline: none;
+}
+.search-results-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+.search-results-controls { padding: 6px 10px 0; }
+.search-results-status { padding: 6px 10px; }
+.search-results-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 /* ドロワー左端の掴みしろ。annotation パネルのリサイザーと同じ作り (境界を

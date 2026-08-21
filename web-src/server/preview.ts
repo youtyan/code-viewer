@@ -9,6 +9,7 @@ import {
 import { basename, dirname, extname, join, relative } from "node:path";
 import { normalizeNewDirectoryName } from "../core/directory-name";
 import { formatErrorDetail } from "../core/error-detail";
+import { parseHistoryLineRange } from "../core/history";
 import {
   collectJournalLabels,
   isJournalTaskPriority,
@@ -55,6 +56,7 @@ import {
   type ExternalCommandOverride,
   parseExternalCommandOverride,
 } from "./command-resolver";
+import { isAbortLikeError } from "./database/adapters/abort";
 import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
 import { writeUploadedFiles } from "./file-upload";
@@ -625,10 +627,18 @@ async function computePayload(
     files.push(...untracked.files);
     metaError = untracked.error;
   }
+  // A trailing "/" means "everything under this directory" (folder history);
+  // otherwise the filter names exactly one file (or its pre-rename path).
   const filteredFiles = pathFilter
-    ? files.filter(
-        (file) => file.path === pathFilter || file.old_path === pathFilter,
-      )
+    ? pathFilter.endsWith("/")
+      ? files.filter(
+          (file) =>
+            file.path.startsWith(pathFilter) ||
+            (file.old_path ?? "").startsWith(pathFilter),
+        )
+      : files.filter(
+          (file) => file.path === pathFilter || file.old_path === pathFilter,
+        )
     : files;
   filteredFiles.sort((a, b) =>
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
@@ -1210,7 +1220,7 @@ async function handleFiles(url: URL) {
   return json(result.value);
 }
 
-async function handleGrep(url: URL) {
+async function handleGrep(url: URL, signal?: AbortSignal) {
   const responseGeneration = generation;
   const query = url.searchParams.get("q") || "";
   const ref = url.searchParams.get("ref") || "worktree";
@@ -1223,17 +1233,29 @@ async function handleGrep(url: URL) {
   const paths = url.searchParams.getAll("path");
   const regex = url.searchParams.get("regex") === "1";
   const excludeTests = url.searchParams.get("exclude_tests") === "1";
-  const result = await grepRepoAsync(
-    currentSearchEnv(omitDirNames, excludeNames),
-    {
+  const caseSensitive = url.searchParams.get("case") === "1";
+  const wholeWord = url.searchParams.get("word") === "1";
+  let result: Awaited<ReturnType<typeof grepRepoAsync>>;
+  try {
+    result = await grepRepoAsync(currentSearchEnv(omitDirNames, excludeNames), {
       query,
       ref,
       paths,
       regex,
       max,
       excludeTests,
-    },
-  );
+      caseSensitive,
+      wholeWord,
+      signal,
+    });
+  } catch (err) {
+    // The palette aborts the previous request on every keystroke; the rg /
+    // git child is killed through `signal` and nobody is waiting for the
+    // answer. Anything else is a real failure and must surface.
+    if (isAbortLikeError(err, signal))
+      return text("client closed request", 499);
+    throw err;
+  }
   if (result.ok !== true) return text(result.error, result.status ?? 400);
   return json({ ...result.value, generation: responseGeneration });
 }
@@ -1251,6 +1273,29 @@ async function handleRefCommits(url: URL) {
   return json({ commits: result.commits, hasMore: result.hasMore });
 }
 
+async function handleFileRevisions(url: URL) {
+  const responseGeneration = generation;
+  const path = url.searchParams.get("path") || "";
+  if (!path || !safePath(path)) return text("invalid path", 400);
+  if (git.isGitInternalPath(path)) return text("forbidden", 403);
+  const ref = url.searchParams.get("ref") || "HEAD";
+  const result = await git.fileRevisionNeighborsAsync(cwd, { path, ref });
+  if (result.error) return text(result.error, result.status ?? 400);
+  return json({
+    previous: result.previous,
+    next: result.next,
+    generation: responseGeneration,
+  });
+}
+
+async function handleAuthors(url: URL) {
+  const responseGeneration = generation;
+  const ref = url.searchParams.get("ref") || "HEAD";
+  const result = await git.commitAuthorsAsync(cwd, ref);
+  if (result.error) return text(result.error, result.status ?? 400);
+  return json({ authors: result.authors, generation: responseGeneration });
+}
+
 async function handleLog(url: URL) {
   const responseGeneration = generation;
   const ref = url.searchParams.get("ref") || "HEAD";
@@ -1258,12 +1303,14 @@ async function handleLog(url: URL) {
   const limit = Number(url.searchParams.get("limit") || "50");
   const path = url.searchParams.get("path") || "";
   if (path && !safePath(path)) return text("invalid path", 400);
+  const lines = parseHistoryLineRange(url.searchParams.get("lines"));
   const result = await git.commitHistoryAsync(cwd, {
     ref,
     skip: Number.isFinite(skip) ? skip : 0,
     limit: Number.isFinite(limit) ? limit : 50,
     query: url.searchParams.get("q") || "",
     ...(path ? { path } : {}),
+    ...(path && lines ? { lines } : {}),
   });
   if (result.error) return text(result.error, result.status ?? 400);
   // ref=worktree (or worktree=1) with a path filter prepends a "Working tree"
@@ -1289,6 +1336,7 @@ async function handleLog(url: URL) {
             when: "",
             parents: [],
             body: "",
+            refs: [],
           },
           ...commits,
         ];
@@ -2842,9 +2890,12 @@ const server = await startServer({
       });
     if (url.pathname === "/_tree") return await handleTree(url);
     if (url.pathname === "/_files") return await handleFiles(url);
-    if (url.pathname === "/_grep") return await handleGrep(url);
+    if (url.pathname === "/_grep") return await handleGrep(url, req.signal);
     if (url.pathname === "/_commits") return await handleRefCommits(url);
     if (url.pathname === "/_log") return await handleLog(url);
+    if (url.pathname === "/_authors") return await handleAuthors(url);
+    if (url.pathname === "/_file_revisions")
+      return await handleFileRevisions(url);
     if (url.pathname === "/_file_blame") return await handleFileBlame(url);
     if (url.pathname === "/file_diff") return await handleFileDiff(url);
     if (url.pathname === "/file_range") return handleFileRange(url);

@@ -301,7 +301,7 @@ export function defaultMcpTools(
       name: "code_viewer_file_history",
       title: "code-viewer file history",
       description:
-        "Returns the same JSON payload `code-viewer file history --json` emits: path, ref, limit, skip, optional query, and result (commits with sha/author/when/subject, hasMore, optional error). Read-only. ref defaults to 'HEAD'. Follows renames for file paths. Use `query` for the same 'author:' / 'path:' / sha-prefix filters the browser history view accepts.",
+        "Returns the same JSON payload `code-viewer file history --json` emits: path, ref, limit, skip, optional query, and result (commits with sha/author/when/subject/refs, hasMore, optional error). Read-only. ref defaults to 'HEAD'. Follows renames for file paths. `query` uses the browser history filter syntax: free words (message), author:<name>, path:<part>, since:/after:<date>, until:/before:<date>, code:<text> (git log -S), merges:no / merges:only; kinds AND together and a lone hex word tries a sha prefix.",
       inputSchema: {
         type: "object",
         properties: {
@@ -329,7 +329,7 @@ export function defaultMcpTools(
           query: {
             type: "string",
             description:
-              "Optional git log filter, passed verbatim to commitHistory. Supports the 'author:' and 'path:' prefixes the browser history view uses. Single-line, no NUL.",
+              "Optional git log filter in the browser history syntax: free words, author:<name>, path:<part>, since:/after:<date>, until:/before:<date>, code:<text>, merges:no|only. Single-line, no NUL.",
           },
           cwd: {
             type: "string",
@@ -477,12 +477,22 @@ export function defaultMcpTools(
             type: "array",
             items: { type: "string" },
             description:
-              "Optional list of repo-relative paths to restrict the search to. Unsafe paths are dropped silently.",
+              "Optional list of repo-relative files, directories, or globs (e.g. 'src/**/*.ts') to restrict the search to. Unsafe paths are dropped silently.",
           },
           regex: {
             type: "boolean",
             description:
               "Treat `term` as an extended regex instead of a fixed string. Defaults to false.",
+          },
+          caseSensitive: {
+            type: "boolean",
+            description:
+              "Match case. Defaults to false (case-insensitive on every engine).",
+          },
+          wholeWord: {
+            type: "boolean",
+            description:
+              "Match whole words only (rg -w / git grep -w semantics). Defaults to false.",
           },
           max: {
             type: "integer",
@@ -1541,6 +1551,14 @@ async function runSearchCodeTool(
     return { text: "regex must be a boolean", isError: true };
   }
   const regex = regexRaw === true;
+  const caseSensitiveRaw = params.caseSensitive;
+  if (caseSensitiveRaw !== undefined && typeof caseSensitiveRaw !== "boolean") {
+    return { text: "caseSensitive must be a boolean", isError: true };
+  }
+  const wholeWordRaw = params.wholeWord;
+  if (wholeWordRaw !== undefined && typeof wholeWordRaw !== "boolean") {
+    return { text: "wholeWord must be a boolean", isError: true };
+  }
 
   const maxParsed = validateMcpIntegerLimit(
     params.max,
@@ -1568,6 +1586,8 @@ async function runSearchCodeTool(
     ref: refParsed.ref,
     paths,
     regex,
+    caseSensitive: caseSensitiveRaw === true,
+    wholeWord: wholeWordRaw === true,
     max: maxParsed.value,
   });
   if (result.ok !== true) {

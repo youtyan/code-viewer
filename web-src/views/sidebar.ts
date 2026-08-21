@@ -70,6 +70,8 @@ export type SidebarDeps = {
   getRepoSidebarRef(): string | null;
   setRepoSidebarRef(ref: string | null): void;
   isTestPath(path: string): boolean;
+  // Tooltip for the "matching / all files" count shown while filtering.
+  filterCountTitle(visible: number, total: number): string;
   sidebarToggleTitle(hidden: boolean): string;
   openDirectoryInOsTitle(): string;
   omittedDirectoryBadge(reason: RepoTreeEntry["children_omitted_reason"]): {
@@ -959,6 +961,8 @@ export function createSidebar(deps: SidebarDeps) {
     input.title = invalid ? filter.error || "invalid regular expression" : "";
     const filterActive = filter.kind !== "empty" && !invalid;
     const matches = invalid ? () => true : filter.match;
+    let totalFiles = 0;
+    let visibleFiles = 0;
     const walk = (
       node: TreeNode,
       depth: number,
@@ -998,7 +1002,9 @@ export function createSidebar(deps: SidebarDeps) {
             !isRepositorySidebarMode() &&
             isTestPath(item.file.path || "");
           const visible = !testHidden && matches(item.file.path || "");
+          if (!testHidden) totalFiles++;
           if (visible) {
+            visibleFiles++;
             rows.push({
               kind: "file",
               path: item.file.path,
@@ -1013,6 +1019,40 @@ export function createSidebar(deps: SidebarDeps) {
       return { visible: subtreeVisible, rows };
     };
     SIDEBAR_VISIBLE_ROWS = walk(SIDEBAR_TREE_ROOT, 0).rows;
+    syncSidebarFilterCount(filterActive, visibleFiles, totalFiles);
+  }
+
+  // "#totals" normally shows the sidebar summary ("12 files"). While a
+  // filter is active it shows "matching / all" instead, and the original text
+  // comes back when the filter clears. Only the text this function wrote is
+  // replaced, so a later writer (e.g. "Cannot load tree") is never clobbered.
+  let SIDEBAR_TOTALS_BASE = "";
+  let SIDEBAR_TOTALS_FILTER_TEXT = "";
+  function setSidebarTotals(text: string) {
+    SIDEBAR_TOTALS_BASE = text;
+    const el = $("#totals");
+    if (el.textContent === SIDEBAR_TOTALS_FILTER_TEXT) el.textContent = text;
+    if (!SIDEBAR_TOTALS_FILTER_TEXT) el.textContent = text;
+  }
+  function syncSidebarFilterCount(
+    active: boolean,
+    visible: number,
+    total: number,
+  ) {
+    const el = document.querySelector<HTMLElement>("#totals");
+    if (!el) return;
+    if (!active) {
+      if (SIDEBAR_TOTALS_FILTER_TEXT) {
+        if (el.textContent === SIDEBAR_TOTALS_FILTER_TEXT)
+          el.textContent = SIDEBAR_TOTALS_BASE;
+        el.removeAttribute("title");
+        SIDEBAR_TOTALS_FILTER_TEXT = "";
+      }
+      return;
+    }
+    SIDEBAR_TOTALS_FILTER_TEXT = `${visible} / ${total}`;
+    el.textContent = SIDEBAR_TOTALS_FILTER_TEXT;
+    el.title = deps.filterCountTitle(visible, total);
   }
 
   function sidebarVirtualRange() {
@@ -1350,10 +1390,11 @@ export function createSidebar(deps: SidebarDeps) {
     } else {
       renderFlat(files, ul, onFileClick);
     }
-    $("#totals").textContent =
+    setSidebarTotals(
       !repoSidebar && files.length
         ? `${files.length} file${files.length === 1 ? "" : "s"}`
-        : "";
+        : "",
+    );
     // Update view-toggle visual
     const effectiveView = treeMode ? "tree" : STATE.sbView;
     $$(".sb-view-seg button").forEach((b) => {
@@ -1491,10 +1532,16 @@ export function createSidebar(deps: SidebarDeps) {
     input.title = invalid ? filter.error || "invalid regular expression" : "";
     const matches = invalid ? () => true : filter.match;
     const filterActive = filter.kind !== "empty" && !invalid;
+    let totalFiles = 0;
+    let visibleFiles = 0;
     $$("#filelist li[data-path]").forEach((li) => {
       const match = matches(li.dataset.path || "");
       li.classList.toggle("hidden", !match);
+      if (li.classList.contains("hidden-by-tests")) return;
+      totalFiles++;
+      if (match) visibleFiles++;
     });
+    syncSidebarFilterCount(filterActive, visibleFiles, totalFiles);
     if (!isRepositorySidebarMode()) {
       document
         .querySelectorAll<HTMLElement>(".gdp-file-shell")

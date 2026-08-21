@@ -497,6 +497,144 @@ describe("routes", () => {
     ).toBe("/history?commit=worktree");
   });
 
+  test.each([
+    {
+      name: "filter text",
+      search: "?q=author%3Aalice+fix",
+      route: { q: "author:alice fix" },
+      url: "/history?q=author%3Aalice+fix",
+    },
+    {
+      name: "directory path scope",
+      search: "?path=src%2F",
+      route: { path: "src/" },
+      url: "/history?path=src%2F",
+    },
+    {
+      name: "selected commit compared against another sha",
+      search: "?commit=abc1234&compare=def5678",
+      route: { commit: "abc1234", compare: "def5678" },
+      url: "/history?commit=abc1234&compare=def5678",
+    },
+    {
+      name: "everything at once keeps a stable parameter order",
+      search: "?ref=main&path=src%2F&commit=abc1234&compare=def5678&q=fix",
+      route: {
+        ref: "main",
+        path: "src/",
+        commit: "abc1234",
+        compare: "def5678",
+        q: "fix",
+      },
+      url: "/history?ref=main&path=src%2F&commit=abc1234&compare=def5678&q=fix",
+    },
+  ])("history route round-trips $name", ({ search, route, url }) => {
+    const fallback = { from: "HEAD", to: "worktree" };
+    const parsed = parseRoute("/history", search, fallback);
+    expect(parsed).toEqual({
+      screen: "history",
+      ref: "HEAD",
+      ...route,
+      range: fallback,
+    });
+    expect(buildRoute(parsed)).toBe(url);
+  });
+
+  test.each([
+    {
+      name: "history route with a file path and line range",
+      pathname: "/history",
+      search: "?path=src%2Fa.ts&lines=10-20",
+      route: {
+        screen: "history",
+        ref: "HEAD",
+        path: "src/a.ts",
+        lines: { start: 10, end: 20 },
+      },
+      url: "/history?path=src%2Fa.ts&lines=10-20",
+    },
+    {
+      name: "lines without a path are dropped",
+      pathname: "/history",
+      search: "?lines=10-20",
+      route: { screen: "history", ref: "HEAD" },
+      url: "/history",
+    },
+    {
+      name: "reversed line range is normalised",
+      pathname: "/history",
+      search: "?path=a.ts&lines=20-10",
+      route: {
+        screen: "history",
+        ref: "HEAD",
+        path: "a.ts",
+        lines: { start: 10, end: 20 },
+      },
+      url: "/history?path=a.ts&lines=10-20",
+    },
+    {
+      name: "file history tab with a line range",
+      pathname: "/file",
+      search: "?path=a.ts&target=worktree&view=history&lines=3-3",
+      route: {
+        screen: "file",
+        path: "a.ts",
+        ref: "worktree",
+        view: "history",
+        lines: { start: 3, end: 3 },
+      },
+      url: "/file?path=a.ts&target=worktree&view=history&lines=3-3",
+    },
+    {
+      name: "blob view with a highlighted term on the target line",
+      pathname: "/file",
+      search: "?path=a.ts&target=worktree&view=blob&line=7&hl=needle%20x",
+      route: {
+        screen: "file",
+        path: "a.ts",
+        ref: "worktree",
+        view: "blob",
+        line: 7,
+        hl: "needle x",
+      },
+      url: "/file?path=a.ts&target=worktree&view=blob&line=7&hl=needle%20x",
+    },
+    {
+      name: "hl without a line is ignored",
+      pathname: "/file",
+      search: "?path=a.ts&target=worktree&view=blob&hl=needle",
+      route: { screen: "file", path: "a.ts", ref: "worktree", view: "blob" },
+      url: "/file?path=a.ts&target=worktree&view=blob",
+    },
+  ])("round-trips $name", ({ pathname, search, route, url }) => {
+    const fallback = { from: "HEAD", to: "worktree" };
+    const parsed = parseRoute(pathname, search, fallback);
+    expect(parsed).toEqual({ ...route, range: fallback });
+    expect(buildRoute(parsed)).toBe(url);
+  });
+
+  test("file history routes carry the filter text and compare sha", () => {
+    const fallback = { from: "HEAD", to: "worktree" };
+    const parsed = parseRoute(
+      "/file",
+      "?path=README.md&target=main&view=history&commit=abc1234&compare=def5678&q=fix",
+      fallback,
+    );
+    expect(parsed).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "main",
+      range: fallback,
+      view: "history",
+      commit: "abc1234",
+      compare: "def5678",
+      q: "fix",
+    });
+    expect(buildRoute(parsed)).toBe(
+      "/file?path=README.md&target=main&view=history&commit=abc1234&compare=def5678&q=fix",
+    );
+  });
+
   test("parses and builds file blame routes", () => {
     const fallback = { from: "HEAD", to: "worktree" };
     expect(

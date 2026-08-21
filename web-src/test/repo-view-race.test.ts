@@ -195,6 +195,9 @@ function makeRepoView(
     repositoryWebTarget: () => null,
     openGithubLabel: () => "Open on GitHub",
     openRepositoryWebLabel: () => "Open repository web page",
+    folderHistoryLabel: () => "",
+    folderHistoryTitle: () => "",
+    openFolderHistory: () => undefined,
     fileBadge: () => {
       throw new Error("stale repository render touched the DOM");
     },

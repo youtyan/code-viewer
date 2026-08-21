@@ -1,10 +1,17 @@
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
   buildFileSearchList,
   buildRgArgs,
+  fixedStringColumn,
   fixedStringLineMatches,
   GREP_ABSOLUTE_MAX,
   GREP_DEFAULT_MAX,
@@ -240,7 +247,7 @@ describe("buildRgArgs", () => {
       "--with-filename",
       "--color",
       "never",
-      "--smart-case",
+      "--ignore-case",
       "--fixed-strings",
       "--max-count",
       "20",
@@ -368,6 +375,14 @@ describe("search-service shared behavior", () => {
       "export const sample = 3;\n",
     );
     writeFileSync(join(repo, ".DS_Store"), "sample\n");
+    // Case / word / scope matrix material: one nested directory with a
+    // mixed-case token that also appears as a prefix of a longer word.
+    mkdirSync(join(repo, "nested", "deep"), { recursive: true });
+    writeFileSync(
+      join(repo, "nested", "sample_case.ts"),
+      "const Token = 1;\nconst tokenizer = 2;\nconst token = 3;\n",
+    );
+    writeFileSync(join(repo, "nested", "deep", "readme.md"), "Token here\n");
     git(repo, ["add", "."]);
     git(repo, ["commit", "-m", "sample initial commit"]);
   });
@@ -382,6 +397,8 @@ describe("search-service shared behavior", () => {
     expect(result.value.ref).toBe("worktree");
     expect(result.value.generation).toBe(7);
     expect(result.value.files.map((file) => file.path).sort()).toEqual([
+      "nested/deep/readme.md",
+      "nested/sample_case.ts",
       "other_sample.ts",
       "sample_file.test.ts",
       "sample_file.ts",
@@ -462,5 +479,194 @@ describe("search-service shared behavior", () => {
       error: "fatal: Needed a single revision",
       status: undefined,
     });
+  });
+
+  // The three engines (rg / git grep / fallback) must agree on what
+  // "match case" and "whole word" mean, so the same table runs against the
+  // worktree (rg or fallback, whichever this machine has) and a committed
+  // ref (git grep) and expects identical line sets.
+  describe.each([
+    { ref: "worktree" },
+    { ref: "main" },
+  ])("grep case / word options on $ref", ({ ref }) => {
+    test.each([
+      {
+        name: "default: case-insensitive substring",
+        caseSensitive: false,
+        wholeWord: false,
+        expected: [1, 2, 3],
+      },
+      {
+        name: "match case keeps only the capitalised line",
+        caseSensitive: true,
+        wholeWord: false,
+        expected: [1],
+      },
+      {
+        name: "whole word drops the tokenizer line",
+        caseSensitive: false,
+        wholeWord: true,
+        expected: [1, 3],
+      },
+      {
+        name: "match case + whole word",
+        caseSensitive: true,
+        wholeWord: true,
+        expected: [1],
+      },
+    ])("$name", async ({ caseSensitive, wholeWord, expected }) => {
+      const result = await grepRepoAsync(env(), {
+        query: "Token",
+        ref,
+        paths: ["nested/sample_case.ts"],
+        regex: false,
+        max: 10,
+        caseSensitive,
+        wholeWord,
+      });
+      if (result.ok !== true) throw new Error(result.error);
+      expect(result.value.matches.map((match) => match.line)).toEqual(expected);
+    });
+
+    test.each([
+      {
+        name: "a directory scope walks into it",
+        paths: ["nested"],
+        expected: ["nested/deep/readme.md", "nested/sample_case.ts"],
+      },
+      {
+        name: "a glob scope selects by pattern",
+        paths: ["*.md"],
+        expected: ["nested/deep/readme.md"],
+      },
+      {
+        name: "a deep glob scope",
+        paths: ["nested/**/*.ts"],
+        expected: ["nested/sample_case.ts"],
+      },
+    ])("$name", async ({ paths, expected }) => {
+      const result = await grepRepoAsync(env(), {
+        query: "token",
+        ref,
+        paths,
+        regex: false,
+        max: 10,
+      });
+      if (result.ok !== true) throw new Error(result.error);
+      expect(
+        [...new Set(result.value.matches.map((match) => match.path))].sort(),
+      ).toEqual(expected);
+    });
+  });
+});
+
+describe("fixedStringColumn", () => {
+  test.each([
+    {
+      name: "case-insensitive by default",
+      line: "const Token = 1;",
+      query: "token",
+      options: {},
+      expected: 6,
+    },
+    {
+      name: "match case rejects a different casing",
+      line: "const token = 1;",
+      query: "Token",
+      options: { caseSensitive: true },
+      expected: -1,
+    },
+    {
+      name: "match case accepts the exact casing",
+      line: "const Token = 1;",
+      query: "Token",
+      options: { caseSensitive: true },
+      expected: 6,
+    },
+    {
+      name: "whole word skips a prefix hit and finds a later bounded one",
+      line: "tokenizer token",
+      query: "token",
+      options: { wholeWord: true },
+      expected: 10,
+    },
+    {
+      name: "whole word: underscore counts as a word character",
+      line: "sample_token",
+      query: "token",
+      options: { wholeWord: true },
+      expected: -1,
+    },
+    {
+      name: "whole word: punctuation is a boundary",
+      line: "x.token(",
+      query: "token",
+      options: { wholeWord: true },
+      expected: 2,
+    },
+    {
+      name: "whole word: line start and end are boundaries",
+      line: "token",
+      query: "token",
+      options: { wholeWord: true },
+      expected: 0,
+    },
+    {
+      name: "whole word: unicode letters are word characters",
+      line: "étoken",
+      query: "token",
+      options: { wholeWord: true },
+      expected: -1,
+    },
+    {
+      name: "empty query never matches",
+      line: "anything",
+      query: "",
+      options: {},
+      expected: -1,
+    },
+  ])("$name", ({ line, query, options, expected }) => {
+    expect(fixedStringColumn(line, query, options)).toBe(expected);
+  });
+});
+
+describe("buildRgArgs options", () => {
+  test.each([
+    {
+      name: "default is case-insensitive without word matching",
+      options: {},
+      present: ["--ignore-case"],
+      absent: ["--case-sensitive", "--word-regexp", "--smart-case"],
+    },
+    {
+      name: "match case",
+      options: { caseSensitive: true },
+      present: ["--case-sensitive"],
+      absent: ["--ignore-case", "--word-regexp"],
+    },
+    {
+      name: "whole word",
+      options: { wholeWord: true },
+      present: ["--ignore-case", "--word-regexp"],
+      absent: ["--case-sensitive"],
+    },
+  ])("$name", ({ options, present, absent }) => {
+    const args = buildRgArgs("needle", 20, [], false, [], [], false, options);
+    for (const flag of present) expect(args).toContain(flag);
+    for (const flag of absent) expect(args).not.toContain(flag);
+  });
+
+  test("path globs become include globs while plain paths stay positional", () => {
+    const args = buildRgArgs("needle", 20, ["src"], false, [], [], false, {
+      pathGlobs: ["*.md", "lib/**/*.ts"],
+    });
+    expect(args.slice(args.indexOf("--") + 1)).toEqual(["src"]);
+    const globIndex = args.indexOf("--glob");
+    expect(args.slice(globIndex, globIndex + 4)).toEqual([
+      "--glob",
+      "*.md",
+      "--glob",
+      "lib/**/*.ts",
+    ]);
   });
 });

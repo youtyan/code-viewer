@@ -81,3 +81,39 @@ describe("buildRepositoryWebTarget", () => {
     ).toBeNull();
   });
 });
+
+describe("buildRepositoryWebTarget commit pages", () => {
+  test.each([
+    {
+      name: "a sha links the GitHub commit page",
+      repoWebUrl: "https://github.com/example/sample",
+      ref: "0123abcd0123abcd0123abcd0123abcd0123abcd",
+      expected: {
+        url: "https://github.com/example/sample/commit/0123abcd0123abcd0123abcd0123abcd0123abcd",
+        provider: "github" as const,
+      },
+    },
+    {
+      name: "the worktree pseudo commit falls back to the repository root",
+      repoWebUrl: "https://github.com/example/sample",
+      ref: "worktree",
+      expected: {
+        url: "https://github.com/example/sample",
+        provider: "github" as const,
+      },
+    },
+    {
+      name: "non-GitHub hosts keep the plain web url",
+      repoWebUrl: "https://git.example.test/group/sample",
+      ref: "0123abcd",
+      expected: {
+        url: "https://git.example.test/group/sample",
+        provider: "web" as const,
+      },
+    },
+  ])("$name", ({ repoWebUrl, ref, expected }) => {
+    expect(
+      buildRepositoryWebTarget(repoWebUrl, { ref, kind: "commit" }),
+    ).toEqual(expected);
+  });
+});

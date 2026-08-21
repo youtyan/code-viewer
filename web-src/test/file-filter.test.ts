@@ -81,3 +81,74 @@ describe("compileFileFilter", () => {
     expect(filter.match("web-src/app.ts")).toBe(false);
   });
 });
+
+describe("compileFileFilter syntax matrix", () => {
+  test.each([
+    { name: "empty", query: "", kind: "empty" },
+    { name: "only spaces", query: "   ", kind: "empty" },
+    { name: "plain word", query: "app", kind: "substring" },
+    { name: "slash regex", query: "/app|git/", kind: "regex" },
+    { name: "unfinished slash", query: "/web-src", kind: "substring" },
+    { name: "tilde fuzzy", query: "~wsa", kind: "fuzzy" },
+    { name: "tilde alone is empty", query: "~", kind: "empty" },
+    { name: "star glob", query: "*.ts", kind: "glob" },
+    { name: "question glob", query: "app.??", kind: "glob" },
+    { name: "deep glob", query: "web-src/**/*.ts", kind: "glob" },
+    { name: "broken regex", query: "/[/", kind: "invalid" },
+  ])("$name -> $kind", ({ query, kind }) => {
+    expect(compileFileFilter(query).kind).toBe(kind);
+  });
+
+  test.each([
+    {
+      name: "fuzzy: subsequence across path segments",
+      query: "~wsa",
+      path: "web-src/app.ts",
+      expected: true,
+    },
+    {
+      name: "fuzzy: letters out of order do not match",
+      query: "~asw",
+      path: "web-src/app.ts",
+      expected: false,
+    },
+    {
+      name: "glob: extension at any depth",
+      query: "*.ts",
+      path: "web-src/server/git.ts",
+      expected: true,
+    },
+    {
+      name: "glob: extension mismatch",
+      query: "*.ts",
+      path: "README.md",
+      expected: false,
+    },
+    {
+      name: "glob: ** spans zero directories",
+      query: "web-src/**/*.ts",
+      path: "web-src/app.ts",
+      expected: true,
+    },
+    {
+      name: "glob: ** spans several directories",
+      query: "web-src/**/*.ts",
+      path: "web-src/server/database/x.ts",
+      expected: true,
+    },
+    {
+      name: "glob: prefix mismatch",
+      query: "web-src/**/*.ts",
+      path: "scripts/build.ts",
+      expected: false,
+    },
+    {
+      name: "substring still wins for plain text containing a dot",
+      query: "app.ts",
+      path: "web-src/app.ts",
+      expected: true,
+    },
+  ])("$name", ({ query, path, expected }) => {
+    expect(compileFileFilter(query).match(path)).toBe(expected);
+  });
+});

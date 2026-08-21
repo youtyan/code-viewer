@@ -1,3 +1,5 @@
+import { fuzzyMatchPath, globMatchPath, isGlobPathQuery } from "./fuzzy-search";
+
 export function normalizeFileFilterQuery(
   value: string | null | undefined,
 ): string {
@@ -10,8 +12,14 @@ export function isTestFilePath(path: string): boolean {
   return TEST_FILE_PATH_RE.test(path);
 }
 
+// Sidebar filter syntax, cheapest reading first:
+//   ""            -> every file
+//   "/re/flags"   -> regular expression
+//   "~text"       -> fuzzy subsequence (same matcher as the Ctrl+K palette)
+//   "*.ts" "src/**" -> glob (same matcher as the palette)
+//   anything else -> case-insensitive substring
 export type CompiledFileFilter = {
-  kind: "empty" | "substring" | "regex" | "invalid";
+  kind: "empty" | "substring" | "regex" | "fuzzy" | "glob" | "invalid";
   match: (path: string) => boolean;
   error?: string;
 };
@@ -46,6 +54,15 @@ export function compileFileFilter(
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  if (raw.startsWith("~")) {
+    const needle = raw.slice(1).trim();
+    if (!needle) return { kind: "empty", match: () => true };
+    return { kind: "fuzzy", match: (path) => !!fuzzyMatchPath(needle, path) };
+  }
+  if (isGlobPathQuery(raw)) {
+    return { kind: "glob", match: (path) => !!globMatchPath(raw, path) };
   }
 
   const q = normalizeFileFilterQuery(raw.startsWith("/") ? raw.slice(1) : raw);

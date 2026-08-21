@@ -38,6 +38,8 @@ export type SearchCommand =
       ref?: string;
       paths: string[];
       regex: boolean;
+      caseSensitive: boolean;
+      wholeWord: boolean;
       max?: number;
       json: boolean;
     }
@@ -84,7 +86,8 @@ export const SEARCH_HELP = `code-viewer search — text and filename search acro
 
 Usage:
   code-viewer search code --term <text> [--ref <ref>] [--path <path>...]
-                          [--regex] [--max <n>] [--json]
+                          [--regex] [--case-sensitive] [--word]
+                          [--max <n>] [--json]
                           [--cwd <dir>] [--server <url>] [--bin <name>=<path>]
   code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json]
                            [--cwd <dir>] [--server <url>] [--bin <name>=<path>]
@@ -105,8 +108,12 @@ Common options:
   --help, -h        Show this help.
 
 search code only:
-  --path <path>     Restrict the search to a sub-path. Repeatable.
+  --path <path>     Restrict the search to a file, a directory, or a glob
+                    such as "src/**/*.ts". Repeatable.
   --regex           Treat --term as an extended regex instead of a fixed string.
+  --case-sensitive  Match case. Default: case-insensitive on every engine.
+  --word            Match whole words only (rg -w / git grep -w; the
+                    fallback scanner applies the same boundary rule).
 
 search files:
   --term auto-switches between fuzzy and glob matching:
@@ -155,6 +162,8 @@ environments. Results are NOT persisted on the server; this is a pure read.
   code-viewer search code --term "TODO" --json
   code-viewer search code --term "fn handler" --regex --json
   code-viewer search code --term "config" --path src --path tests --json
+  code-viewer search code --term "Token" --case-sensitive --word --json
+  code-viewer search code --term "config" --path "src/**/*.ts" --json
   code-viewer search code --term "release" --ref main --json
 
   code-viewer search files --term "sample"
@@ -213,6 +222,10 @@ Parse failures and unreachable servers exit 1.
 - search code: engine=fallback with regex=true returns zero matches by
   design — the fallback path does not support regex. Install ripgrep or
   use a fixed string instead.
+- search code: matching is case-insensitive on every engine unless you
+  pass --case-sensitive; --word requires the hit to sit on word
+  boundaries. --path accepts globs ("src/**/*.ts", "*.md") as well as
+  files and directories.
 - search files: --term containing * or ? triggers glob mode (e.g.
   "src/**/*.test.ts"). Bare words use fuzzy ranking (e.g. "auth",
   "userId"). The /_files list is shared with the browser Ctrl+K palette,
@@ -225,7 +238,7 @@ Parse failures and unreachable servers exit 1.
 
 const VALUE_FLAGS = new Set(["--term", "--ref", "--max"]);
 const REPEATABLE_VALUE_FLAGS = new Set(["--path"]);
-const BOOL_FLAGS = new Set(["--regex", "--json"]);
+const BOOL_FLAGS = new Set(["--regex", "--case-sensitive", "--word", "--json"]);
 
 function parseSearchMax(
   raw: string | undefined,
@@ -319,11 +332,13 @@ export function parseSearchArgs(argv: string[]): SearchParseResult {
 
   if (subcommand === "files") {
     // Reject code-only flags explicitly so command mix-ups are visible.
-    if (flags.has("--regex")) {
-      return {
-        ok: false,
-        error: "search files does not accept --regex",
-      };
+    for (const codeOnly of ["--regex", "--case-sensitive", "--word"]) {
+      if (flags.has(codeOnly)) {
+        return {
+          ok: false,
+          error: `search files does not accept ${codeOnly}`,
+        };
+      }
     }
     if (paths.length > 0) {
       return {
@@ -367,6 +382,8 @@ export function parseSearchArgs(argv: string[]): SearchParseResult {
         ref: options.get("--ref"),
         paths,
         regex: flags.has("--regex"),
+        caseSensitive: flags.has("--case-sensitive"),
+        wholeWord: flags.has("--word"),
         max: parsedMax.value,
         json: flags.has("--json"),
       },
@@ -387,6 +404,8 @@ function buildGrepPath(
   if (command.ref) params.set("ref", command.ref);
   if (command.max !== undefined) params.set("max", String(command.max));
   if (command.regex) params.set("regex", "1");
+  if (command.caseSensitive) params.set("case", "1");
+  if (command.wholeWord) params.set("word", "1");
   for (const path of command.paths) params.append("path", path);
   return `/_grep?${params.toString()}`;
 }

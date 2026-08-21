@@ -179,9 +179,13 @@ export type AppSettingsState = {
   fileSelectionHistory?: string[];
   grepSelectionHistory?: string[];
   grepRegex?: boolean;
+  grepCaseSensitive?: boolean;
+  grepWholeWord?: boolean;
   grepGroupByFile?: boolean;
   grepPaletteWidth?: number;
   grepPaletteHeight?: number;
+  /** Refs picked in the ref picker, most recent last. */
+  recentRefs?: string[];
   scopeOmitDirs?: string[];
   scopeExcludeNames?: string[];
   scopeWatchLimit?: number;

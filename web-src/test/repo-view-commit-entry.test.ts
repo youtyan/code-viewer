@@ -165,6 +165,9 @@ function makeRepoView(
     repositoryWebTarget: () => null,
     openGithubLabel: () => "Open on GitHub",
     openRepositoryWebLabel: () => "Open repository web page",
+    folderHistoryLabel: () => "",
+    folderHistoryTitle: () => "",
+    openFolderHistory: () => undefined,
     fileBadge: (status) => {
       const span = document.createElement("span");
       span.className = `badge ${status || "M"}`;

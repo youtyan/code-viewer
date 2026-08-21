@@ -7,7 +7,8 @@ export type RepositoryWebTargetOptions = {
   ref?: string;
   fallbackRef?: string;
   path?: string;
-  kind: "tree" | "blob";
+  // "commit" links the commit page; `ref` is then the commit sha.
+  kind: "tree" | "blob" | "commit";
   start?: number;
   end?: number;
 };
@@ -45,6 +46,15 @@ export function buildRepositoryWebTarget(
   const base = remote.toString().replace(/\/$/, "");
   if (remote.hostname.toLowerCase() !== "github.com") {
     return { url: base, provider: "web" };
+  }
+
+  if (options.kind === "commit") {
+    const sha = (options.ref || "").trim();
+    if (!sha || sha === "worktree") return { url: base, provider: "github" };
+    return {
+      url: `${base}/commit/${encodeURIComponent(sha)}`,
+      provider: "github",
+    };
   }
 
   const ref = encodePath(resolvedRef(options.ref, options.fallbackRef));

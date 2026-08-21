@@ -169,6 +169,65 @@ describe("server runtime compatibility helpers", () => {
     }
   });
 
+  test("request.signal aborts when the client disconnects before the response", async () => {
+    let server: StartedServer | undefined;
+    let observedAbort: Promise<boolean> | undefined;
+    try {
+      server = await startServer({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch(req) {
+          observedAbort = new Promise<boolean>((resolve) => {
+            const timer = setTimeout(() => resolve(false), 5000);
+            req.signal.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer);
+                resolve(true);
+              },
+              { once: true },
+            );
+          });
+          // Hold the response until the client gives up.
+          return observedAbort.then(() => new Response("late"));
+        },
+      });
+      const controller = new AbortController();
+      const pending = fetch(`http://127.0.0.1:${server.port}/slow`, {
+        signal: controller.signal,
+      });
+      // Wait until the handler has been entered before aborting.
+      while (!observedAbort) await new Promise((r) => setTimeout(r, 5));
+      controller.abort();
+      await pending.catch(() => undefined);
+      expect(await observedAbort).toBe(true);
+    } finally {
+      await server?.close().catch(() => undefined);
+    }
+  });
+
+  test("request.signal stays quiet for a request that completes normally", async () => {
+    let server: StartedServer | undefined;
+    let signal: AbortSignal | undefined;
+    try {
+      server = await startServer({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch(req) {
+          signal = req.signal;
+          return new Response("done");
+        },
+      });
+      const response = await fetch(`http://127.0.0.1:${server.port}/ok`);
+      expect(await response.text()).toBe("done");
+      // Give the 'close' event a tick to fire after the response finished.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(signal?.aborted).toBe(false);
+    } finally {
+      await server?.close().catch(() => undefined);
+    }
+  });
+
   test("close resolves even when a streaming response is still open", async () => {
     let server: StartedServer | undefined;
     let streamController:

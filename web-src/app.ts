@@ -42,6 +42,7 @@ import {
   ensureGdscriptHighlightLanguage,
   ensureTerraformHighlightLanguage,
 } from "./core/highlight-languages";
+import type { FileRevisionNeighbors } from "./core/history";
 import {
   ARROW_RIGHT_16_PATH,
   CHEVRON_DOWN_12_PATH,
@@ -51,9 +52,12 @@ import {
   iconSvg,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
+  NEXT_16_PATHS,
   OPEN_EXTERNAL_16_PATH,
+  PREVIOUS_16_PATHS,
   PULSE_16_PATH,
   QUESTION_16_PATH,
+  SEARCH_16_PATH,
   SYNC_16_PATH,
   TRIANGLE_DOWN_16_PATH,
   UNDO_16_PATH,
@@ -77,15 +81,18 @@ import {
   type DiffRange,
   parseDoctorOverlay,
   parseRoute,
+  parseSearchResultsOverlay,
   parseTerminalOverlay,
   parseToolsOverlay,
   type SourceFileTarget,
   type SourceLineTarget,
   type TerminalOverlayState,
   withDoctorOverlay,
+  withSearchResultsOverlay,
   withTerminalOverlay,
   withToolsOverlay,
 } from "./core/routes";
+import { rememberPaletteSelection } from "./core/search-palette";
 import { sourceInternalPathKind } from "./core/source-meta";
 import { readStoredSize, writeStoredSize } from "./core/stored-size";
 import { clampTerminalFontSize } from "./core/tmux";
@@ -115,7 +122,7 @@ import {
   removeFileHistoryShell as removeRenderedFileHistoryShell,
   renderFileHistoryShell as renderFileHistoryShellView,
 } from "./views/file-history-shell";
-import { isBlobOrBlameFileRoute } from "./views/file-shell";
+import { type FileViewTab, isBlobOrBlameFileRoute } from "./views/file-shell";
 import { createHelpKeybindingEditor } from "./views/help-keybinding-editor";
 import {
   createHelpPage,
@@ -140,7 +147,9 @@ import { createQuickHelp } from "./views/quick-help";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
 import { createRepositoryWebLink } from "./views/repository-web-link";
+import { searchPaletteText } from "./views/search-palette-i18n";
 import { createSearchPalette } from "./views/search-palette-ui";
+import { createSearchResultsView } from "./views/search-results-view";
 import { createSidebar, type ViewerFontSize } from "./views/sidebar";
 import {
   createSourceView,
@@ -434,6 +443,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   type SettingsPatch = Partial<Omit<AppSettingsState, "version">> &
     Record<string, unknown>;
+  // Mirrors the server-side cap in state-store.ts (normalizeStringList).
+  const MAX_RECENT_REFS = 8;
   type ViewPatch = {
     addedViewedFiles?: string[];
     removedViewedFiles?: string[];
@@ -1161,6 +1172,24 @@ window.GdpExpandLogic = GdpExpandLogic;
     lineCountLabel: (count) => uiText().global.selectedLineCount(count),
     githubOpenTitle: () => uiText().global.githubSelectionOpen,
     githubCopyTitle: () => uiText().global.githubSelectionCopy,
+    lineHistoryTitle: () => uiText().global.lineHistory,
+    openLineHistory: (path, start, end) => {
+      const route = STATE.route;
+      const ref =
+        route.screen === "file"
+          ? route.commit || route.ref || "worktree"
+          : route.screen === "diff" && route.range.to
+            ? route.range.to
+            : "worktree";
+      navigateToRoute({
+        screen: "file",
+        path,
+        ref,
+        view: "history",
+        lines: { start, end },
+        range: currentRange(),
+      });
+    },
   });
   const DIFF_LINE_SELECT = createDiffLineSelect({ pill: LINE_REF_PILL });
 
@@ -1241,6 +1270,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       REPO_SIDEBAR_REF = ref;
     },
     isTestPath: isTestFilePath,
+    filterCountTitle: (visible, total) =>
+      uiText().sidebar.filterCountTitle(visible, total),
     sidebarToggleTitle: (hidden) =>
       hidden ? uiText().sidebar.show : uiText().sidebar.hide,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
@@ -1328,6 +1359,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     createFileBreadcrumb: (path, ref) =>
       DIFF_VIEW.createFileBreadcrumb(path, ref),
     createRepositoryWebLink: createFileRepositoryWebLink,
+    createRevisionNav: createFileRevisionNav,
     createFileDetailMeta: (target, meta) =>
       REPO_VIEW.createFileDetailMeta(target, meta),
     createOpenPathButton,
@@ -1381,6 +1413,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     createFileBreadcrumb: (path, ref) =>
       DIFF_VIEW.createFileBreadcrumb(path, ref),
     createRepositoryWebLink: createFileRepositoryWebLink,
+    createRevisionNav: createFileRevisionNav,
     removeStandaloneSource,
     placeSidebarToggle,
     escapeHtml,
@@ -1470,6 +1503,17 @@ window.GdpExpandLogic = GdpExpandLogic;
       }),
     openGithubLabel: () => uiText().repo.openGithub,
     openRepositoryWebLabel: () => uiText().repo.openRepositoryWeb,
+    folderHistoryLabel: () => uiText().repo.folderHistory,
+    folderHistoryTitle: () => uiText().repo.folderHistoryTitle,
+    openFolderHistory: (ref, path) => {
+      const dir = path.replace(/\/+$/, "");
+      navigateToRoute({
+        screen: "history",
+        ref: ref && ref !== "worktree" ? ref : "HEAD",
+        ...(dir ? { path: `${dir}/` } : {}),
+        range: currentRange(),
+      });
+    },
     fileBadge: (status) => DIFF_VIEW.fileBadge(status),
   });
   const {
@@ -1508,6 +1552,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     getFileSelectionHistory: () => APP_SETTINGS.fileSelectionHistory || [],
     getGrepSelectionHistory: () => APP_SETTINGS.grepSelectionHistory || [],
     getGrepRegex: () => APP_SETTINGS.grepRegex === true,
+    getGrepCaseSensitive: () => APP_SETTINGS.grepCaseSensitive === true,
+    getGrepWholeWord: () => APP_SETTINGS.grepWholeWord === true,
     getGrepHideTests: () => STATE.hideTests,
     getGrepGroupByFile: () => APP_SETTINGS.grepGroupByFile === true,
     getGrepPaletteWidth: () => APP_SETTINGS.grepPaletteWidth,
@@ -1517,6 +1563,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.hideTests = hidden;
       applyHideTests();
     },
+    openSearchResults: (query) => openSearchSheet(query),
   });
   const { openSearchPalette, isPaletteOpen, paletteMode, clearRepoFileCache } =
     SEARCH_PALETTE;
@@ -1550,6 +1597,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         queryHistory: string;
         settings: string;
         theme: string;
+        search: string;
+        lineHistory: string;
+        recentRef: string;
+        olderRevision: string;
+        newerRevision: string;
         copyAiContext: string;
         copyAiContextCopied: string;
         copyAiContextCopiedWithCode: (lines: number) => string;
@@ -1639,6 +1691,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         flatTitle: string;
         filter: string;
         filterTitle: string;
+        filterCountTitle: (visible: number, total: number) => string;
         filterClear: string;
         filterClearTitle: string;
         hide: string;
@@ -1675,6 +1728,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         submoduleTitle: string;
         openGithub: string;
         openRepositoryWeb: string;
+        folderHistory: string;
+        folderHistoryTitle: string;
       };
       history: {
         title: string;
@@ -1729,6 +1784,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         queryHistory: "query history",
         settings: "viewer settings",
         theme: "toggle theme",
+        search: "Search files (Ctrl+K) · Shift+click: grep (Ctrl+G)",
+        lineHistory: "Line history",
+        recentRef: "Recently used ref",
+        olderRevision: "Older revision of this file",
+        newerRevision: "Newer revision of this file",
         copyAiContext: "Copy AI context (Shift+Click to include code)",
         copyAiContextCopied: "Copied AI context",
         copyAiContextCopiedWithCode: (lines) =>
@@ -1825,7 +1885,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         flatTitle: "flat list",
         filter: "Filter files…  /  ⌘K",
         filterTitle:
-          "Filter files. Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help.",
+          "Filter files. Plain text matches anywhere in the path; /pattern/ is a regex, ~text is a fuzzy match, *.ts or src/** is a glob. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help.",
+        filterCountTitle: (visible, total) =>
+          `${visible} of ${total} files match the filter`,
         filterClear: "Clear",
         filterClearTitle: "Clear file filter",
         hide: "hide sidebar",
@@ -1864,6 +1926,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         submoduleTitle: "Git submodule pinned to a commit",
         openGithub: "Open on GitHub",
         openRepositoryWeb: "Open repository web page",
+        folderHistory: "History",
+        folderHistoryTitle: "Commits that touched this folder",
       },
       history: {
         title: "Commits",
@@ -2091,6 +2155,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         queryHistory: "クエリ履歴",
         settings: "ビューア設定",
         theme: "テーマ切り替え",
+        search: "ファイルを検索 (Ctrl+K)・Shift+クリックで grep (Ctrl+G)",
+        lineHistory: "この行の履歴",
+        recentRef: "最近使った ref",
+        olderRevision: "このファイルの 1 つ前のリビジョン",
+        newerRevision: "このファイルの 1 つ後のリビジョン",
         copyAiContext:
           "AI 用コンテキストをコピー（Shift+Click でコードも添付）",
         copyAiContextCopied: "コピーしました",
@@ -2185,7 +2254,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         flatTitle: "一覧表示",
         filter: "ファイル絞り込み…  /  ⌘K",
         filterTitle:
-          "ファイルを絞り込みます。/pattern/ は正規表現。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でヘルプ。",
+          "ファイルを絞り込みます。文字列はパスの部分一致、/pattern/ は正規表現、~text はあいまい一致、*.ts や src/** は glob。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でヘルプ。",
+        filterCountTitle: (visible, total) =>
+          `${total} ファイル中 ${visible} 件が一致`,
         filterClear: "解除",
         filterClearTitle: "ファイル絞り込みを解除",
         hide: "サイドバーを隠す",
@@ -2228,6 +2299,8 @@ window.GdpExpandLogic = GdpExpandLogic;
           "Git サブモジュール: 特定のコミットに固定されています。直接は開けません。",
         openGithub: "GitHubで開く",
         openRepositoryWeb: "リポジトリのウェブページを開く",
+        folderHistory: "履歴",
+        folderHistoryTitle: "このフォルダを変更したコミット",
       },
       history: {
         title: "コミット",
@@ -2487,6 +2560,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       quickHelpBtn.title = text.quickHelp.buttonTitle;
       quickHelpBtn.setAttribute("aria-label", text.quickHelp.buttonTitle);
     }
+    const searchBtn = document.querySelector<HTMLButtonElement>("#search-btn");
+    if (searchBtn) {
+      searchBtn.title = text.global.search;
+      searchBtn.setAttribute("aria-label", text.global.search);
+    }
     QUICK_HELP?.localize();
     const doctorTitle = doctorText(STATE.language).title;
     const doctorBtn = document.querySelector<HTMLButtonElement>("#doctor-btn");
@@ -2520,6 +2598,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       .querySelector<HTMLElement>("#terminal-sheet")
       ?.setAttribute("aria-label", terminalChrome.title);
     relocalizeTerminal?.();
+    const searchChrome = searchPaletteText(STATE.language);
+    const searchTabBtn =
+      document.querySelector<HTMLButtonElement>("#panel-tab-search");
+    if (searchTabBtn) {
+      searchTabBtn.textContent = searchChrome.resultsTitle;
+      searchTabBtn.title = searchChrome.resultsOpen;
+    }
+    relocalizeSearchResults?.();
     document
       .querySelector<HTMLElement>(".app-panel-tabs")
       ?.setAttribute("aria-label", text.appPanel.tabs);
@@ -2708,6 +2794,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let relocalizeTools: (() => void) | null = null;
   let relocalizeViewerSettings: (() => void) | null = null;
   let relocalizeTerminal: (() => void) | null = null;
+  let relocalizeSearchResults: (() => void) | null = null;
   let relocalizeDatabase: (() => void) | null = null;
 
   // createQuickHelp 後に代入される (同じ遅延参照パターン)。
@@ -3197,6 +3284,20 @@ window.GdpExpandLogic = GdpExpandLogic;
   function isHistoryPanelRoute(route: AppRoute): boolean {
     return route.screen === "history" || isFileHistoryRoute(route);
   }
+  // `g h` opens the log of what the user is looking at: the ref of the
+  // repository / file page, the "to" side of a diff, else HEAD.
+  function historyRefForCurrentView(): string {
+    const route = STATE.route;
+    if (route.screen === "history") return route.ref || "HEAD";
+    if (route.screen === "repo" || route.screen === "file") {
+      return route.ref && route.ref !== "worktree" ? route.ref : "HEAD";
+    }
+    if (route.screen === "diff") {
+      const to = route.range.to;
+      return to && to !== "worktree" ? to : "HEAD";
+    }
+    return "HEAD";
+  }
   function normalizeInternalFileRoute(route: AppRoute): AppRoute {
     if (route.screen !== "file") return route;
     if (sourceInternalPathKind(route.path) === null) return route;
@@ -3256,6 +3357,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         createFileBreadcrumb: (path, ref) =>
           DIFF_VIEW.createFileBreadcrumb(path, ref),
         createRepositoryWebLink: createFileRepositoryWebLink,
+        createRevisionNav: createFileRevisionNav,
         emptyText: () => uiText().diff,
       },
       historyRoute,
@@ -3286,15 +3388,21 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 瞬間にシートの状態が URL から消える。history に積む URL とヘッダメニューの
   // href の両方がこれを通る必要がある。
   function withOverlayState(url: string): string {
-    return withTerminalOverlay(
-      withToolsOverlay(
-        withDoctorOverlay(
-          url,
-          parseDoctorOverlay(window.location.pathname, window.location.search),
+    return withSearchResultsOverlay(
+      withTerminalOverlay(
+        withToolsOverlay(
+          withDoctorOverlay(
+            url,
+            parseDoctorOverlay(
+              window.location.pathname,
+              window.location.search,
+            ),
+          ),
+          parseToolsOverlay(window.location.search),
         ),
-        parseToolsOverlay(window.location.search),
+        parseTerminalOverlay(window.location.search),
       ),
-      parseTerminalOverlay(window.location.search),
+      parseSearchResultsOverlay(window.location.search),
     );
   }
 
@@ -3840,6 +3948,73 @@ window.GdpExpandLogic = GdpExpandLogic;
     return button;
   }
 
+  // Older / newer revision stepper on a file page. The neighbours come from
+  // /_file_revisions; until they arrive (or when there is none) the button
+  // is disabled, so the header never reflows.
+  function createFileRevisionNav(
+    target: SourceFileTarget,
+    activeTab: FileViewTab,
+  ): HTMLElement | null {
+    if (activeTab === "history") return null;
+    const nav = document.createElement("span");
+    nav.className = "gdp-file-revision-nav";
+    const text = uiText().global;
+    const make = (title: string, paths: string[]): HTMLButtonElement => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-file-header-icon gdp-file-revision-btn";
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.disabled = true;
+      button.innerHTML = iconSvg("octicon-revision", paths);
+      return button;
+    };
+    const older = make(text.olderRevision, PREVIOUS_16_PATHS);
+    const newer = make(text.newerRevision, NEXT_16_PATHS);
+    nav.append(older, newer);
+    const goTo = (sha: string) => {
+      const view =
+        STATE.route.screen === "file" && STATE.route.view === "blame"
+          ? "blame"
+          : "blob";
+      navigateToRoute({
+        screen: "file",
+        path: target.path,
+        ref: sha,
+        view,
+        range: currentRange(),
+      });
+    };
+    const params = new URLSearchParams({
+      path: target.path,
+      ref: target.ref || "worktree",
+    });
+    void trackLoad<FileRevisionNeighbors>(
+      fetch(`/_file_revisions?${params.toString()}`).then(async (r) => {
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      }),
+    )
+      .then((neighbors) => {
+        if (!nav.isConnected) return;
+        if (neighbors.previous) {
+          const sha = neighbors.previous;
+          older.disabled = false;
+          older.addEventListener("click", () => goTo(sha));
+        }
+        if (neighbors.next) {
+          const sha = neighbors.next;
+          newer.disabled = false;
+          newer.addEventListener("click", () => goTo(sha));
+        }
+      })
+      .catch((err: unknown) => {
+        if (isAbortError(err)) return;
+        console.error("Failed to load file revision neighbours", err);
+      });
+    return nav;
+  }
+
   function createFileRepositoryWebLink(
     target: SourceFileTarget,
   ): HTMLAnchorElement | null {
@@ -4085,6 +4260,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (quickHelpIcon) {
       quickHelpIcon.innerHTML = iconSvg("octicon-question", QUESTION_16_PATH);
     }
+    const searchIcon = document.querySelector<HTMLElement>(
+      "#search-btn .goi-icon",
+    );
+    if (searchIcon) {
+      searchIcon.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
+    }
     const branchIcon = document.querySelector<HTMLElement>(
       "#project-branch .goi-icon",
     );
@@ -4143,6 +4324,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#panel-tab-terminal")?.addEventListener("click", (event) => {
     event.preventDefault();
     openTerminalSheet();
+  });
+  $("#panel-tab-search")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    openSearchSheet();
   });
   $("#app-panel-close")?.addEventListener("click", (event) => {
     event.preventDefault();
@@ -4435,6 +4620,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncSidebarFilterClearButton();
     sbFilterClear.addEventListener("click", clearSidebarFilter);
   }
+  // Header search button: the palettes were keyboard-only before this, so a
+  // mouse user had no way to discover them. Plain click = files, Shift+click
+  // = grep; either palette can switch to the other from its label row.
+  document
+    .querySelector<HTMLButtonElement>("#search-btn")
+    ?.addEventListener("click", (event) => {
+      openSearchPalette(event.shiftKey ? "grep" : "file");
+    });
   function focusFileFilter() {
     const input = $<HTMLInputElement>("#sb-filter");
     input.focus();
@@ -4663,9 +4856,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (action === "goto-history") {
       navigateToRoute({
         screen: "history",
-        ref: "HEAD",
+        ref: historyRefForCurrentView(),
         range: currentRange(),
       });
+      return true;
+    }
+    if (
+      action === "history-next-commit" ||
+      action === "history-previous-commit"
+    ) {
+      if (!isHistoryPanelRoute(STATE.route)) return false;
+      void HISTORY_VIEW.moveCommitSelection(
+        action === "history-next-commit" ? 1 : -1,
+      );
       return true;
     }
     if (action === "goto-repo") {
@@ -5033,6 +5236,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncDoctorSheetFromUrl();
     syncToolsSheetFromUrl();
     syncTerminalSheetFromUrl();
+    syncSearchSheetFromUrl();
   });
 
   // Ref picker (from / to)
@@ -5131,6 +5335,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     getSyntaxHighlight: () => STATE.syntaxHighlight,
     getLanguage: () => STATE.language,
     trackLoad,
+    commitWebLink: (sha) => {
+      const target = buildRepositoryWebTarget(REPO_WEB_URL, {
+        ref: sha,
+        kind: "commit",
+      });
+      if (!target) return null;
+      return createRepositoryWebLink(
+        target,
+        target.provider === "github"
+          ? uiText().repo.openGithub
+          : uiText().repo.openRepositoryWeb,
+      );
+    },
+    copyText: (text) => navigator.clipboard.writeText(text),
   });
   relocalizeHistory = () => HISTORY_VIEW.localize();
 
@@ -5263,7 +5481,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     // (ヘッダーのメニューが押下状態を出していたときと同じ決め方)。
     const tools = parseToolsOverlay(window.location.search) !== null;
     const terminal = parseTerminalOverlay(window.location.search) !== null;
-    const open = tools || terminal;
+    const search = parseSearchResultsOverlay(window.location.search) !== null;
+    const open = tools || terminal || search;
     const panel = document.getElementById("app-panel");
     if (panel) {
       panel.classList.toggle("app-panel-open", open);
@@ -5271,6 +5490,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     for (const [id, selected] of [
       ["#panel-tab-tools", tools],
       ["#panel-tab-terminal", terminal],
+      ["#panel-tab-search", search],
     ] as const) {
       const tab = document.querySelector<HTMLButtonElement>(id);
       if (!tab) continue;
@@ -5299,6 +5519,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function closeAppPanel(): void {
+    if (
+      parseSearchResultsOverlay(window.location.search) !== null ||
+      SEARCH_RESULTS_VIEW.isOpen()
+    )
+      closeSearchSheet();
     if (
       parseToolsOverlay(window.location.search) !== null ||
       TOOLS_VIEW.isOpen()
@@ -5365,12 +5590,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function openToolsSheet(tool?: ToolId): void {
-    // タブなので、もう一方は畳む。2 つ並べると 1 つあたりが狭くなりすぎる。
+    // タブなので、他は畳む。2 つ並べると 1 つあたりが狭くなりすぎる。
     if (
       parseTerminalOverlay(window.location.search) !== null ||
       TERMINAL_VIEW.isOpen()
     )
       closeTerminalSheet();
+    if (
+      parseSearchResultsOverlay(window.location.search) !== null ||
+      SEARCH_RESULTS_VIEW.isOpen()
+    )
+      closeSearchSheet();
     // 実際に出すツールが決まるのは保存状態を読んだ後だが、「開いた」ことは
     // その場で URL に出す。読み込みが止まっても URL と画面が食い違わない。
     updateUrlForToolsOverlay(tool ?? TOOLS_VIEW.getActiveTool());
@@ -5390,6 +5620,94 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (tool && (!open || TOOLS_VIEW.getActiveTool() !== tool))
       void TOOLS_VIEW.open(tool);
     else if (!tool && open) TOOLS_VIEW.close();
+    syncAppPanel();
+  }
+
+  // Search results sheet — same independent overlay as tools; the URL holds
+  // the grep query (?results=<query>) so a reload re-runs it.
+  const SEARCH_RESULTS_VIEW = createSearchResultsView({
+    $: <T extends Element = HTMLElement>(sel: string) =>
+      document.querySelector<T>(sel),
+    trackLoad,
+    getLanguage: () => STATE.language,
+    appendScopeParams,
+    getRef: () => {
+      const route = STATE.route;
+      if (route.screen === "repo" || route.screen === "file")
+        return route.ref || "worktree";
+      return STATE.repoRef || "worktree";
+    },
+    getServerGeneration: () => SERVER_GENERATION,
+    isAbortError,
+    getGrepRegex: () => APP_SETTINGS.grepRegex === true,
+    getGrepCaseSensitive: () => APP_SETTINGS.grepCaseSensitive === true,
+    getGrepWholeWord: () => APP_SETTINGS.grepWholeWord === true,
+    getGrepHideTests: () => STATE.hideTests,
+    persistGrepSettings: async (patch) => {
+      await persistSettingsPatch(patch);
+      if (patch.hideTests !== undefined) {
+        STATE.hideTests = patch.hideTests;
+        applyHideTests();
+      }
+    },
+    openMatch: ({ path, line, hl }) => {
+      const route = STATE.route;
+      const ref =
+        route.screen === "repo" || route.screen === "file"
+          ? route.ref || "worktree"
+          : STATE.repoRef || "worktree";
+      setRoute({
+        screen: "file",
+        path,
+        ref,
+        view: "blob",
+        line,
+        ...(hl ? { hl } : {}),
+        range: currentRange(),
+      });
+      void renderStandaloneSource({ path, ref });
+    },
+    onQueryChange: (query) => updateUrlForSearchResultsOverlay(query),
+  });
+  relocalizeSearchResults = () => SEARCH_RESULTS_VIEW.localize();
+
+  function updateUrlForSearchResultsOverlay(query: string | null): void {
+    const current = window.location.pathname + window.location.search;
+    const next = withSearchResultsOverlay(current, query);
+    if (next !== current) {
+      history.replaceState(history.state, "", next + window.location.hash);
+    }
+    syncHeaderMenu();
+  }
+
+  function openSearchSheet(query?: string): void {
+    if (
+      parseTerminalOverlay(window.location.search) !== null ||
+      TERMINAL_VIEW.isOpen()
+    )
+      closeTerminalSheet();
+    if (
+      parseToolsOverlay(window.location.search) !== null ||
+      TOOLS_VIEW.isOpen()
+    )
+      closeToolsSheet();
+    updateUrlForSearchResultsOverlay(query ?? SEARCH_RESULTS_VIEW.getQuery());
+    SEARCH_RESULTS_VIEW.open(query);
+    syncAppPanel();
+  }
+
+  function closeSearchSheet(): void {
+    SEARCH_RESULTS_VIEW.close();
+    updateUrlForSearchResultsOverlay(null);
+    syncAppPanel();
+  }
+
+  function syncSearchSheetFromUrl(): void {
+    const query = parseSearchResultsOverlay(window.location.search);
+    const open = SEARCH_RESULTS_VIEW.isOpen();
+    if (query !== null && (!open || SEARCH_RESULTS_VIEW.getQuery() !== query))
+      SEARCH_RESULTS_VIEW.open(query);
+    else if (query === null && open) SEARCH_RESULTS_VIEW.close();
     syncAppPanel();
   }
 
@@ -5426,12 +5744,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function openTerminalSheet(id?: string | null): void {
-    // タブなので、もう一方は畳む。
+    // タブなので、他は畳む。
     if (
       parseToolsOverlay(window.location.search) !== null ||
       TOOLS_VIEW.isOpen()
     )
       closeToolsSheet();
+    if (
+      parseSearchResultsOverlay(window.location.search) !== null ||
+      SEARCH_RESULTS_VIEW.isOpen()
+    )
+      closeSearchSheet();
     const target = id ?? TERMINAL_VIEW.getActiveTarget();
     // 実際に何を映すかは一覧を取った後に決まるが、「開いた」ことはその場で
     // URL に出す。読み込みが止まっても URL と画面が食い違わない。
@@ -5525,6 +5848,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     getTo: () => STATE.to,
     getRepoRef: () => STATE.repoRef,
     getRoute: () => STATE.route,
+    getRecentRefs: () => APP_SETTINGS.recentRefs || [],
+    rememberRecentRef: (ref) => {
+      const current = APP_SETTINGS.recentRefs || [];
+      const next = rememberPaletteSelection(current, ref).slice(
+        -MAX_RECENT_REFS,
+      );
+      if (next.join("\0") === current.join("\0")) return;
+      patchSettings({ recentRefs: next });
+    },
+    recentRefTitle: () => uiText().global.recentRef,
   });
   if (REF_PICKER) {
     const historyRefInput =
@@ -5609,6 +5942,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncDoctorSheetFromUrl();
     syncToolsSheetFromUrl();
     syncTerminalSheetFromUrl();
+    syncSearchSheetFromUrl();
     if (
       isSameBlobFileRoute(previousRoute, STATE.route) &&
       routeBlobPreview(previousRoute) !== routeBlobPreview(STATE.route) &&

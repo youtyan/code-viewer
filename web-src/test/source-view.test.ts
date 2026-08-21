@@ -478,6 +478,49 @@ describe("renderStandaloneSource idempotency", () => {
   });
 });
 
+describe("renderStandaloneSource same-file hit navigation", () => {
+  test("a second hit in the same file moves the target line and the hl mark without reloading", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    const fetchMock = installRawFileFetchMock();
+    const route = {
+      ...blobRoute("a.txt"),
+      line: 1,
+      hl: "one",
+    } as Extract<AppRoute, { screen: "file" }>;
+    const view = createSourceViewForCursorTest(route);
+    const target = { path: "a.txt", ref: "worktree" };
+
+    await view.renderStandaloneSource(target);
+    const rows = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>(
+          ".gdp-source-table tr[data-line]",
+        ),
+      );
+    const targets = () =>
+      rows()
+        .filter((row) => row.classList.contains("gdp-source-line-target"))
+        .map((row) => row.dataset.line);
+    const marks = () =>
+      Array.from(document.querySelectorAll("mark.gdp-grep-match")).map(
+        (mark) => mark.textContent,
+      );
+    expect(targets()).toEqual(["1"]);
+    expect(marks()).toEqual(["one"]);
+
+    // The palette / results sheet update the route, then re-render the
+    // already mounted file.
+    route.line = 2;
+    route.hl = "two";
+    await view.renderStandaloneSource(target);
+
+    expect(fetchMock.calls()).toBe(1);
+    expect(targets()).toEqual(["2"]);
+    expect(marks()).toEqual(["two"]);
+    expect(rows()[0].textContent).toContain("line one");
+  });
+});
+
 describe("preferred source tab across files", () => {
   test("restores Preview after temporarily showing Code for a non-previewable file", async () => {
     document.body.innerHTML = '<div id="diff"></div>';

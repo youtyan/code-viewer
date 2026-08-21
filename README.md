@@ -8,12 +8,33 @@ Requires Node.js 20 or newer. Development uses
 ## Features
 
 - Browse repository files and folders in a persistent sidebar with live
-  worktree change updates over SSE.
+  worktree change updates over SSE. The sidebar filter takes plain text
+  (substring), `/pattern/` (regex), `~text` (fuzzy, same matcher as the file
+  palette) and globs such as `*.ts` or `src/**`, and shows
+  `matching / all` file counts in the header while it is active.
 - View git diffs with unified or split layout, lazy loading, viewed-file
   state, ignore-whitespace and hide-tests toggles, and dismissible per-line
   "reference pills" that copy `@path#start-end` for AI agents.
 - Browse commit history per branch and open any commit's changed files and
-  diff, with shareable `/history?ref=<branch>&commit=<sha>` links.
+  diff, with shareable `/history?ref=<branch>&commit=<sha>` links. The
+  filter understands message words (`"quoted"` keeps spaces), sha prefixes,
+  `author:<name>`, `path:<part>`, `since:`/`after:`/`until:`/`before:<date>`,
+  `code:<text>` (lines added or removed, `git log -S`) and `merges:no` /
+  `merges:only`; kinds combine with AND, `author:` offers the repository's
+  authors as suggestions, and the text rides in the URL (`?q=`). Rows carry
+  branch / tag labels and a merge marker. The selected commit has a copy-sha
+  button and an "Open on GitHub" link; Shift+click a second commit to diff the
+  whole range between them (`?compare=<sha>`), and a merge commit lets you
+  pick the parent to compare against. `↑` / `↓` step commits anywhere on the
+  screen, `j` / `k` do when the commit list has focus, `g h` opens the
+  history of the ref you are viewing, and every folder page has a History
+  button that opens the log restricted to that folder
+  (`/history?path=<dir>/`). Select lines in a file and the line-reference
+  pill offers **Line history**: the History tab restricted to commits that
+  changed those lines (`git log -L`, `?lines=<start>-<end>`). File pages
+  carry older / newer revision buttons that step through the commits that
+  touched that file, and the ref picker remembers the refs you picked last
+  as quick chips.
 - Open per-file Blame and History tabs on a file detail page (GitHub-style):
   Blame groups consecutive lines from the same commit with an Older→Newer
   colour bar and lets you jump to the originating commit; History embeds the
@@ -42,7 +63,24 @@ Requires Node.js 20 or newer. Development uses
 - Preview browser-safe media and show metadata for binary files that cannot
   be rendered.
 - Find files and grep across the repository with `Ctrl+K` (file palette) and
-  `Ctrl+G` (text palette).
+  `Ctrl+G` (text palette), or from the search button at the left of the
+  header icons (plain click: files, Shift+click: grep). The two palettes
+  share one window: `Ctrl+K` /
+  `Ctrl+G` (or the Files / Grep buttons in its label row) switch modes while
+  keeping what you typed, and reopening a palette restores its last query,
+  selected so typing replaces it. With an empty query the file palette lists
+  the files you opened most recently, and its result count says when the
+  ranking was cut at 50 (`50 of 1,234 results`). The text palette has
+  match-case (`Alt+C`) and whole-word (`Alt+W`) toggles next to the regex
+  one, and `path:<dir or glob>` tokens in the query narrow the search
+  (`path:src/ path:*.md needle`); matching is case-insensitive on every
+  engine unless you turn match-case on. Opening a hit marks the matched
+  text on the target line (`?hl=`), and in large virtualized files it
+  pre-fills the in-file find bar with it. **Pin** (or `Ctrl+Enter`) moves
+  the query into the bottom panel's **Search** tab, where the grouped
+  result list stays open while you browse files; the query rides in the
+  URL (`?results=<query>`) so a reload re-runs it, and the Search tab can
+  also be opened directly from the panel's tab row.
 - Switch the viewer UI between English and Japanese from Settings & Help —
   the language toggle live-updates every screen including the datastore
   viewer.
@@ -769,13 +807,21 @@ code-viewer search code --term "TODO" --json
 # extended-regex search, restricted to two subtrees, on the `main` ref.
 code-viewer search code --term "fn handler" --regex \
     --path src --path tests --ref main --json
+
+# exact case and whole words only; --path also accepts globs.
+code-viewer search code --term "Token" --case-sensitive --word \
+    --path "src/**/*.ts" --json
 ```
 
 Default text output is `path:line:column<TAB>preview`, one line per
 match. An empty result prints `no matches` to stderr and exits 0.
 Parse errors and unreachable servers exit 1. `--max` accepts a positive
 integer up to the server's hard cap; `truncated=true` in the JSON
-response means more matches exist beyond the cap. Run
+response means more matches exist beyond the cap. Matching is
+case-insensitive on every engine unless `--case-sensitive` is given;
+`--word` keeps only hits on word boundaries (`rg -w` / `git grep -w`, and
+the same rule in the fallback scanner). `--path` takes a file, a
+directory, or a glob such as `src/**/*.ts`. Run
 `code-viewer search agent-help` for the full AI-agent guide.
 
 `code-viewer search files` is the sister command for **filename**

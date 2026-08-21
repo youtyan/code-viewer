@@ -21,7 +21,15 @@ export type RefPickerDeps = {
   getTo(): string;
   getRepoRef(): string;
   getRoute(): AppRoute;
+  // Most recently picked refs (oldest first) and how to remember a new one.
+  // Optional so hosts without settings persistence can omit the feature.
+  getRecentRefs?(): string[];
+  rememberRecentRef?(ref: string): void;
+  recentRefTitle?(): string;
 };
+
+// The quick chips are always offered; picking one is not worth remembering.
+const QUICK_REF_VALUES = new Set(["worktree", "HEAD", "--staged"]);
 
 export function createRefPicker(deps: RefPickerDeps) {
   function wireRefSelectorInput(
@@ -45,6 +53,42 @@ export function createRefPicker(deps: RefPickerDeps) {
     });
     if (onPick)
       input.addEventListener("change", () => onPick(input.value || "worktree"));
+    input.addEventListener("change", () => rememberRef(input.value));
+  }
+
+  function rememberRef(value: string) {
+    const ref = (value || "").trim();
+    if (!ref || QUICK_REF_VALUES.has(ref)) return;
+    deps.rememberRecentRef?.(ref);
+  }
+
+  // "Recent" chips: the refs picked before, newest first, above the tabs.
+  function renderRecentChips(current: string) {
+    let row = popover.querySelector<HTMLElement>(".rp-recent");
+    const recent = (deps.getRecentRefs?.() ?? [])
+      .filter((ref) => ref && !QUICK_REF_VALUES.has(ref))
+      .reverse();
+    if (!row) {
+      row = document.createElement("div");
+      row.className = "rp-recent";
+      const quick = popover.querySelector<HTMLElement>(".rp-quick");
+      if (quick) quick.after(row);
+      else popover.prepend(row);
+    }
+    row.replaceChildren();
+    row.hidden = recent.length === 0;
+    const title = deps.recentRefTitle?.() ?? "";
+    for (const ref of recent) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "rp-chip rp-chip-recent";
+      chip.dataset.val = ref;
+      chip.textContent = ref;
+      if (title) chip.title = title;
+      chip.classList.toggle("current", ref === current);
+      chip.addEventListener("click", () => handlePicked(ref));
+      row.appendChild(chip);
+    }
   }
 
   // ---- Ref picker popover ----
@@ -349,6 +393,7 @@ export function createRefPicker(deps: RefPickerDeps) {
     popover.querySelectorAll<HTMLElement>(".rp-chip").forEach((c) => {
       c.classList.toggle("current", c.dataset.val === cur);
     });
+    renderRecentChips(cur);
     popover.hidden = false;
     const r = input.getBoundingClientRect();
     const popWidth = Math.min(560, Math.floor(window.innerWidth * 0.9));
@@ -411,6 +456,7 @@ export function createRefPicker(deps: RefPickerDeps) {
     const pickedTarget = popTarget;
     pickedTarget.value = val;
     closePopover();
+    // The change listener of the input records the ref (see wireRefSelectorInput).
     pickedTarget.dispatchEvent(new Event("change"));
   }
   popBody.addEventListener("click", (e) => {

@@ -26,6 +26,12 @@ export type FileViewTabDeps = {
 export type FileShellStickyDeps = FileViewTabDeps & {
   createFileBreadcrumb(path: string, ref?: string): HTMLElement;
   createRepositoryWebLink?(target: SourceFileTarget): HTMLAnchorElement | null;
+  // "Older / newer revision" stepper for the file; null when not applicable
+  // (the History tab has its own commit list).
+  createRevisionNav?(
+    target: SourceFileTarget,
+    activeTab: FileViewTab,
+  ): HTMLElement | null;
 };
 
 export type FileViewTabsOptions = {
@@ -262,6 +268,8 @@ export function createFileShellSticky(
   header.appendChild(name);
   const repositoryWebLink = deps.createRepositoryWebLink?.(target);
   if (repositoryWebLink) header.appendChild(repositoryWebLink);
+  const revisionNav = deps.createRevisionNav?.(target, activeTab);
+  if (revisionNav) header.appendChild(revisionNav);
   sticky.appendChild(header);
   const tabsHost = document.createElement("div");
   tabsHost.className = "gdp-file-detail-tabs";

@@ -20,6 +20,7 @@ import type {
 import { normalizeSourceShikiLang } from "../core/source-meta";
 import {
   createFileShellSticky,
+  type FileViewTab,
   mountFileShellCard,
   type SourceBlobTab,
 } from "./file-shell";
@@ -69,6 +70,10 @@ export type BlameViewDeps = {
   setPreferredSourceTab(tab: SourceBlobTab): void;
   createFileBreadcrumb(path: string, ref?: string): HTMLElement;
   createRepositoryWebLink?(target: SourceFileTarget): HTMLAnchorElement | null;
+  createRevisionNav?(
+    target: SourceFileTarget,
+    activeTab: FileViewTab,
+  ): HTMLElement | null;
   removeStandaloneSource(): void;
   placeSidebarToggle(): void;
   escapeHtml(s: unknown): string;
@@ -318,6 +323,7 @@ export function createBlameView(deps: BlameViewDeps) {
         setPreferredSourceTab: deps.setPreferredSourceTab,
         createFileBreadcrumb: deps.createFileBreadcrumb,
         createRepositoryWebLink: deps.createRepositoryWebLink,
+        createRevisionNav: deps.createRevisionNav,
       },
       target,
       "blame",

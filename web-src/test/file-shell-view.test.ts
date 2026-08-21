@@ -873,3 +873,55 @@ describe("fileRouteKeepingActiveView", () => {
     expect(buildRoute(route).includes("preview=1")).toBe(false);
   });
 });
+
+describe("file shell revision navigation", () => {
+  test.each([
+    {
+      name: "code tab shows the stepper",
+      tab: "code" as const,
+      expected: true,
+    },
+    {
+      name: "blame tab shows the stepper",
+      tab: "blame" as const,
+      expected: true,
+    },
+    {
+      name: "history tab has its own commit list",
+      tab: "history" as const,
+      expected: false,
+    },
+  ])("$name", ({ tab, expected }) => {
+    document.body.innerHTML = "";
+    const asked: Array<[string, string]> = [];
+    const { sticky } = createFileShellSticky(
+      {
+        currentRange: () => RANGE,
+        setRoute() {
+          /* not exercised */
+        },
+        setPreferredSourceTab() {
+          /* not exercised */
+        },
+        createFileBreadcrumb(path: string) {
+          const span = document.createElement("span");
+          span.textContent = path;
+          return span;
+        },
+        createRevisionNav(target, activeTab) {
+          asked.push([target.path, activeTab]);
+          if (activeTab === "history") return null;
+          const nav = document.createElement("span");
+          nav.className = "gdp-file-revision-nav";
+          return nav;
+        },
+      },
+      { path: "src/sample.ts", ref: "worktree" },
+      tab,
+      { includeFileTabs: true, previewable: false },
+    );
+    document.body.appendChild(sticky);
+    expect(asked).toEqual([["src/sample.ts", tab]]);
+    expect(!!sticky.querySelector(".gdp-file-revision-nav")).toBe(expected);
+  });
+});

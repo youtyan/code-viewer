@@ -133,8 +133,12 @@ blame options:
 history options:
   --limit <n>     1..${FILE_HISTORY_HARD_CAP} (default: ${FILE_DEFAULT_HISTORY_LIMIT}).
   --skip <n>      Non-negative. Used to paginate.
-  --query <text>  git log filter passed verbatim to git.commitHistory
-                  (supports the "author:" / "path:" prefixes the browser uses).
+  --query <text>  git log filter, same syntax as the browser history filter:
+                  free words match the message ("quoted" keeps spaces),
+                  author:<name>, path:<part>, since:/after:<date>,
+                  until:/before:<date>, code:<text> (git log -S),
+                  merges:no (or no-merges), merges:only. Kinds AND together;
+                  a lone 4-40 hex word also tries a sha prefix.
 
 show options:
   --start <line>  1-indexed start line (inclusive). Requires --end.
@@ -199,6 +203,7 @@ Diff Viewer views.
   code-viewer file blame --path src/sample.ts --base HEAD --json
   code-viewer file history --path src/sample.ts --limit 10 --json
   code-viewer file history --path src/sample.ts --query "author:tester" --json
+  code-viewer file history --path src/sample.ts --query "since:2024-01-01 code:handler merges:no" --json
   code-viewer file show --path src/sample.ts --json
   code-viewer file show --path src/sample.ts --start 100 --end 150 --json
   code-viewer file show --path src/sample.ts --ref main --json
