@@ -8,7 +8,10 @@ Requires Node.js 20 or newer. Development uses
 ## Features
 
 - Browse repository files and folders in a persistent sidebar with live
-  worktree change updates over SSE.
+  worktree change updates over SSE. The sidebar filter takes plain text
+  (substring), `/pattern/` (regex), `~text` (fuzzy, same matcher as the file
+  palette) and globs such as `*.ts` or `src/**`, and shows
+  `matching / all` file counts in the header while it is active.
 - View git diffs with unified or split layout, lazy loading, viewed-file
   state, ignore-whitespace and hide-tests toggles, and dismissible per-line
   "reference pills" that copy `@path#start-end` for AI agents.
@@ -42,7 +45,9 @@ Requires Node.js 20 or newer. Development uses
 - Preview browser-safe media and show metadata for binary files that cannot
   be rendered.
 - Find files and grep across the repository with `Ctrl+K` (file palette) and
-  `Ctrl+G` (text palette). The two palettes share one window: `Ctrl+K` /
+  `Ctrl+G` (text palette), or from the search button at the left of the
+  header icons (plain click: files, Shift+click: grep). The two palettes
+  share one window: `Ctrl+K` /
   `Ctrl+G` (or the Files / Grep buttons in its label row) switch modes while
   keeping what you typed, and reopening a palette restores its last query,
   selected so typing replaces it. With an empty query the file palette lists

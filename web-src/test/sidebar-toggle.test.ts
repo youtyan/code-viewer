@@ -230,6 +230,7 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
       /* noop */
     },
     isTestPath: () => false,
+    filterCountTitle: () => "",
     sidebarToggleTitle: (hidden) => (hidden ? "show sidebar" : "hide sidebar"),
     openDirectoryInOsTitle: () => "open this folder in OS",
     omittedDirectoryBadge: (reason) =>

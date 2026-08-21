@@ -54,6 +54,7 @@ import {
   OPEN_EXTERNAL_16_PATH,
   PULSE_16_PATH,
   QUESTION_16_PATH,
+  SEARCH_16_PATH,
   SYNC_16_PATH,
   TRIANGLE_DOWN_16_PATH,
   UNDO_16_PATH,
@@ -1241,6 +1242,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       REPO_SIDEBAR_REF = ref;
     },
     isTestPath: isTestFilePath,
+    filterCountTitle: (visible, total) =>
+      uiText().sidebar.filterCountTitle(visible, total),
     sidebarToggleTitle: (hidden) =>
       hidden ? uiText().sidebar.show : uiText().sidebar.hide,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
@@ -1552,6 +1555,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         queryHistory: string;
         settings: string;
         theme: string;
+        search: string;
         copyAiContext: string;
         copyAiContextCopied: string;
         copyAiContextCopiedWithCode: (lines: number) => string;
@@ -1641,6 +1645,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         flatTitle: string;
         filter: string;
         filterTitle: string;
+        filterCountTitle: (visible: number, total: number) => string;
         filterClear: string;
         filterClearTitle: string;
         hide: string;
@@ -1731,6 +1736,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         queryHistory: "query history",
         settings: "viewer settings",
         theme: "toggle theme",
+        search: "Search files (Ctrl+K) · Shift+click: grep (Ctrl+G)",
         copyAiContext: "Copy AI context (Shift+Click to include code)",
         copyAiContextCopied: "Copied AI context",
         copyAiContextCopiedWithCode: (lines) =>
@@ -1827,7 +1833,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         flatTitle: "flat list",
         filter: "Filter files…  /  ⌘K",
         filterTitle:
-          "Filter files. Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help.",
+          "Filter files. Plain text matches anywhere in the path; /pattern/ is a regex, ~text is a fuzzy match, *.ts or src/** is a glob. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help.",
+        filterCountTitle: (visible, total) =>
+          `${visible} of ${total} files match the filter`,
         filterClear: "Clear",
         filterClearTitle: "Clear file filter",
         hide: "hide sidebar",
@@ -2093,6 +2101,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         queryHistory: "クエリ履歴",
         settings: "ビューア設定",
         theme: "テーマ切り替え",
+        search: "ファイルを検索 (Ctrl+K)・Shift+クリックで grep (Ctrl+G)",
         copyAiContext:
           "AI 用コンテキストをコピー（Shift+Click でコードも添付）",
         copyAiContextCopied: "コピーしました",
@@ -2187,7 +2196,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         flatTitle: "一覧表示",
         filter: "ファイル絞り込み…  /  ⌘K",
         filterTitle:
-          "ファイルを絞り込みます。/pattern/ は正規表現。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でヘルプ。",
+          "ファイルを絞り込みます。文字列はパスの部分一致、/pattern/ は正規表現、~text はあいまい一致、*.ts や src/** は glob。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でヘルプ。",
+        filterCountTitle: (visible, total) =>
+          `${total} ファイル中 ${visible} 件が一致`,
         filterClear: "解除",
         filterClearTitle: "ファイル絞り込みを解除",
         hide: "サイドバーを隠す",
@@ -2488,6 +2499,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (quickHelpBtn) {
       quickHelpBtn.title = text.quickHelp.buttonTitle;
       quickHelpBtn.setAttribute("aria-label", text.quickHelp.buttonTitle);
+    }
+    const searchBtn = document.querySelector<HTMLButtonElement>("#search-btn");
+    if (searchBtn) {
+      searchBtn.title = text.global.search;
+      searchBtn.setAttribute("aria-label", text.global.search);
     }
     QUICK_HELP?.localize();
     const doctorTitle = doctorText(STATE.language).title;
@@ -4087,6 +4103,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (quickHelpIcon) {
       quickHelpIcon.innerHTML = iconSvg("octicon-question", QUESTION_16_PATH);
     }
+    const searchIcon = document.querySelector<HTMLElement>(
+      "#search-btn .goi-icon",
+    );
+    if (searchIcon) {
+      searchIcon.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
+    }
     const branchIcon = document.querySelector<HTMLElement>(
       "#project-branch .goi-icon",
     );
@@ -4437,6 +4459,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncSidebarFilterClearButton();
     sbFilterClear.addEventListener("click", clearSidebarFilter);
   }
+  // Header search button: the palettes were keyboard-only before this, so a
+  // mouse user had no way to discover them. Plain click = files, Shift+click
+  // = grep; either palette can switch to the other from its label row.
+  document
+    .querySelector<HTMLButtonElement>("#search-btn")
+    ?.addEventListener("click", (event) => {
+      openSearchPalette(event.shiftKey ? "grep" : "file");
+    });
   function focusFileFilter() {
     const input = $<HTMLInputElement>("#sb-filter");
     input.focus();
