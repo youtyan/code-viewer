@@ -14,6 +14,7 @@ import {
   fuzzyMatchPath,
   globMatchPath,
   isGlobPathQuery,
+  type PathMatchStats,
   rankPathMatches,
 } from "../core/fuzzy-search";
 import { isImeComposing } from "../core/keyboard";
@@ -178,6 +179,10 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     detachResizers: Array<() => void>;
   };
   let PALETTE: PaletteState | null = null;
+  // Last query typed per mode. Reopening a palette restores it (selected, so
+  // typing replaces it); switching Ctrl+K <-> Ctrl+G carries the live query
+  // over instead. Session-scoped on purpose: not persisted to settings.
+  const LAST_QUERY: Record<PaletteMode, string> = { file: "", grep: "" };
   let repoFileRequestGeneration = 0;
   const GREP_CONTEXT_RADIUS = 5;
   const FILE_PREVIEW_LINE_LIMIT = 200;
@@ -219,6 +224,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
 
   function closeSearchPalette() {
     if (!PALETTE) return;
+    LAST_QUERY[PALETTE.mode] = PALETTE.input.value;
     const previousFocusScope = PALETTE.previousFocusScope;
     PALETTE.controller?.abort();
     PALETTE.previewController?.abort();
@@ -233,6 +239,9 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     const previousFocusScope = PALETTE
       ? PALETTE.previousFocusScope
       : getPanelFocusScope();
+    // Mode switch while open: keep what the user typed. Fresh open: restore
+    // the last query of that mode.
+    const initialQuery = PALETTE ? PALETTE.input.value : LAST_QUERY[mode];
     closeSearchPalette();
     const root = document.createElement("div");
     root.className = "gdp-palette-backdrop";
@@ -251,7 +260,20 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       dialog.style.height = `${clampGrepPaletteHeight(savedHeight)}px`;
     const label = document.createElement("div");
     label.className = "gdp-palette-label";
-    label.textContent = mode === "file" ? text().files : text().grep;
+    for (const switchMode of ["file", "grep"] as const) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-palette-mode-button gdp-palette-mode-switch";
+      button.setAttribute("aria-pressed", String(switchMode === mode));
+      button.textContent = switchMode === "file" ? text().files : text().grep;
+      button.title =
+        switchMode === "file" ? text().switchToFiles : text().switchToGrep;
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        if (switchMode !== mode) createPalette(switchMode);
+      });
+      label.appendChild(button);
+    }
     const input = document.createElement("input");
     input.className = "gdp-palette-input";
     input.type = "search";
@@ -262,6 +284,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     input.setAttribute("role", "combobox");
     input.setAttribute("aria-expanded", "true");
     input.setAttribute("aria-controls", "gdp-palette-list");
+    input.value = initialQuery;
     const status = document.createElement("div");
     status.className = "gdp-palette-status";
     const controls = document.createElement("div");
@@ -378,6 +401,9 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     input.addEventListener("input", () => updatePaletteResults(state));
     input.addEventListener("keydown", (e) => handlePaletteKeydown(e, state));
     input.focus();
+    // A restored / carried query is selected so typing starts over while
+    // Enter still opens the first result of the previous query.
+    if (input.value) input.select();
     updatePaletteResults(state);
     return state;
   }
@@ -1026,7 +1052,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
   function diffFilePaletteItems(
     state: PaletteState,
     query: string,
-  ): PaletteFileItem[] {
+  ): { items: PaletteFileItem[]; total: number } {
     const matchPath = isGlobPathQuery(query) ? globMatchPath : fuzzyMatchPath;
     const candidates = state.diffSnapshot
       .filter((file) => !state.grepHideTests || !isTestFilePath(file.path))
@@ -1055,28 +1081,91 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
           b.match.score - a.match.score ||
           a.file.path.localeCompare(b.file.path),
       );
-    return limitPaletteResults(
-      rankPaletteResultsByHistory(
-        candidates.map((candidate) => ({
-          kind: "file" as const,
-          path: candidate.file.path,
-          old_path: candidate.file.old_path,
-          displayPath: candidate.displayPath,
-          ref: paletteRef("diff"),
-          targetPath: fileSourceTarget(candidate.file).path,
-          targetRef: fileSourceTarget(candidate.file).ref,
-          source: "diff" as const,
-          ranges: candidate.match.ranges,
-        })),
-        state.fileHistory,
+    return {
+      total: candidates.length,
+      items: limitPaletteResults(
+        rankPaletteResultsByHistory(
+          candidates.map((candidate) => ({
+            kind: "file" as const,
+            path: candidate.file.path,
+            old_path: candidate.file.old_path,
+            displayPath: candidate.displayPath,
+            ref: paletteRef("diff"),
+            targetPath: fileSourceTarget(candidate.file).path,
+            targetRef: fileSourceTarget(candidate.file).ref,
+            source: "diff" as const,
+            ranges: candidate.match.ranges,
+          })),
+          state.fileHistory,
+        ),
       ),
+    };
+  }
+
+  // Empty-query view of the repository palette: the files the user opened
+  // most recently (newest first), limited to paths that still exist on the
+  // current ref so a stale entry cannot open a 404.
+  async function updateRecentFilePalette(
+    state: PaletteState,
+    source: "repo",
+  ): Promise<void> {
+    const recent = [...state.fileHistory].reverse();
+    if (recent.length === 0) {
+      state.items = [];
+      state.selected = -1;
+      state.status.textContent = text().typeToSearchFiles;
+      renderPalette(state);
+      return;
+    }
+    state.status.textContent = text().loadingFiles;
+    const ref = paletteRef(source);
+    const requestGeneration = ++repoFileRequestGeneration;
+    let response: FileSearchListResponse;
+    try {
+      response = await repoPaletteFiles(ref);
+    } catch (err) {
+      if (requestGeneration !== repoFileRequestGeneration) return;
+      throw err;
+    }
+    if (
+      PALETTE !== state ||
+      state.input.value.trim() !== "" ||
+      requestGeneration !== repoFileRequestGeneration
+    )
+      return;
+    REPO_FILE_CACHE.set(repoFileCacheKey(ref), response);
+    const existing = new Set(response.files.map((file) => file.path));
+    state.items = limitPaletteResults(
+      recent
+        .filter(
+          (path) =>
+            existing.has(path) &&
+            (!state.grepHideTests || !isTestFilePath(path)),
+        )
+        .map((path) => ({
+          kind: "file" as const,
+          path,
+          displayPath: path,
+          ref,
+          source,
+          ranges: [],
+        })),
     );
+    state.selected = state.items.length ? 0 : -1;
+    state.status.textContent = state.items.length
+      ? text().recentFiles(state.items.length)
+      : text().typeToSearchFiles;
+    renderPalette(state);
   }
 
   async function updateFilePalette(state: PaletteState, query: string) {
     renderPaletteControls(state);
     const source = paletteSource();
     if (!query.trim()) {
+      if (source === "repo") {
+        await updateRecentFilePalette(state, source);
+        return;
+      }
       const base =
         source === "diff"
           ? state.diffSnapshot
@@ -1109,8 +1198,12 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       renderPalette(state);
       return;
     }
+    let totalMatches = 0;
+    let candidatesTruncated = false;
     if (source === "diff") {
-      state.items = diffFilePaletteItems(state, query);
+      const ranked = diffFilePaletteItems(state, query);
+      state.items = ranked.items;
+      totalMatches = ranked.total;
     } else {
       state.status.textContent = text().loadingFiles;
       const ref = paletteRef(source);
@@ -1132,9 +1225,10 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       const visibleFiles = response.files.filter(
         (file) => !state.grepHideTests || !isTestFilePath(file.path),
       );
+      const stats: PathMatchStats = { total: 0 };
       state.items = limitPaletteResults(
         rankPaletteResultsByHistory(
-          rankPathMatches(query, visibleFiles, PALETTE_RESULT_LIMIT).map(
+          rankPathMatches(query, visibleFiles, PALETTE_RESULT_LIMIT, stats).map(
             (match) => ({
               kind: "file" as const,
               path: match.item.path,
@@ -1147,10 +1241,16 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
           state.fileHistory,
         ),
       );
+      totalMatches = stats.total;
+      candidatesTruncated = response.truncated;
     }
     state.selected = state.items.length ? 0 : -1;
     state.status.textContent = state.items.length
-      ? text().results(state.items.length)
+      ? text().results(
+          state.items.length,
+          totalMatches > state.items.length ? totalMatches : undefined,
+          candidatesTruncated,
+        )
       : text().noResults;
     renderPalette(state);
   }

@@ -3,6 +3,8 @@ export type SearchPaletteLanguage = "en" | "ja";
 export type SearchPaletteText = {
   files: string;
   grep: string;
+  switchToFiles: string;
+  switchToGrep: string;
   searchFiles: string;
   searchText: string;
   fileCodePreview: string;
@@ -34,8 +36,13 @@ export type SearchPaletteText = {
   line: (line: number, column: number) => string;
   diffFiles: (count: number) => string;
   typeToSearchFiles: string;
+  recentFiles: (count: number) => string;
   loadingFiles: string;
-  results: (count: number) => string;
+  results: (
+    count: number,
+    total?: number,
+    candidatesTruncated?: boolean,
+  ) => string;
   noResults: string;
   typeToGrep: string;
   invalidRegex: string;
@@ -57,6 +64,8 @@ export type SearchPaletteText = {
 const EN: SearchPaletteText = {
   files: "Files",
   grep: "Grep",
+  switchToFiles: "Switch to file search (Ctrl+K)",
+  switchToGrep: "Switch to text search (Ctrl+G)",
   searchFiles: "Search files",
   searchText: "Search text",
   fileCodePreview: "File code preview",
@@ -89,8 +98,13 @@ const EN: SearchPaletteText = {
   line: (line, column) => `Line ${line}:${column}`,
   diffFiles: (count) => `${count} diff files`,
   typeToSearchFiles: "Type to search repository files",
+  recentFiles: (count) => `Recent files - ${count}`,
   loadingFiles: "Loading files...",
-  results: (count) => `${count} results`,
+  results: (count, total, candidatesTruncated) =>
+    (total === undefined
+      ? `${count} results`
+      : `${count} of ${total} results`) +
+    (candidatesTruncated ? " · file list truncated" : ""),
   noResults: "No results",
   typeToGrep: "Type to grep",
   invalidRegex: "Invalid regular expression",
@@ -111,6 +125,8 @@ const EN: SearchPaletteText = {
 const JA: SearchPaletteText = {
   files: "ファイル",
   grep: "GREP",
+  switchToFiles: "ファイル名検索に切り替え (Ctrl+K)",
+  switchToGrep: "コード検索に切り替え (Ctrl+G)",
   searchFiles: "ファイルを検索",
   searchText: "コードを検索",
   fileCodePreview: "ファイルのコード表示",
@@ -144,8 +160,11 @@ const JA: SearchPaletteText = {
   line: (line, column) => `${line} 行:${column}`,
   diffFiles: (count) => `差分ファイル ${count} 件`,
   typeToSearchFiles: "リポジトリ内のファイル名を入力してください",
+  recentFiles: (count) => `最近開いたファイル - ${count} 件`,
   loadingFiles: "ファイルを読み込み中...",
-  results: (count) => `${count} 件`,
+  results: (count, total, candidatesTruncated) =>
+    (total === undefined ? `${count} 件` : `${total} 件中 ${count} 件`) +
+    (candidatesTruncated ? "・ファイル一覧は上限で打ち切り" : ""),
   noResults: "該当なし",
   typeToGrep: "検索するコードを入力してください",
   invalidRegex: "正規表現が正しくありません",

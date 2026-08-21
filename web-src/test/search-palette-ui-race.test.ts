@@ -549,9 +549,18 @@ describe("grep search palette master/detail behavior", () => {
       expect(input.placeholder).toBe("コードを検索");
       expect(
         Array.from(
-          document.querySelectorAll<HTMLElement>(".gdp-palette-mode-button"),
+          document.querySelectorAll<HTMLElement>(
+            ".gdp-palette-controls .gdp-palette-mode-button",
+          ),
         ).map((button) => button.textContent),
       ).toEqual(["通常", ".* 正規表現", "テスト除外", "ファイル別"]);
+      expect(
+        Array.from(
+          document.querySelectorAll<HTMLElement>(
+            ".gdp-palette-label .gdp-palette-mode-switch",
+          ),
+        ).map((button) => button.textContent),
+      ).toEqual(["ファイル", "GREP"]);
       expect(q(document, ".gdp-palette-status").textContent).toContain("2 件");
     } finally {
       palette.closeSearchPalette();

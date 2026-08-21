@@ -303,6 +303,9 @@ body[data-code-font-size="xlarge"] {
 }
 
 .gdp-palette-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 12px 16px 0;
   color: var(--fg-muted);
   font-size: 12px;
