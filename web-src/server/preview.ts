@@ -626,10 +626,18 @@ async function computePayload(
     files.push(...untracked.files);
     metaError = untracked.error;
   }
+  // A trailing "/" means "everything under this directory" (folder history);
+  // otherwise the filter names exactly one file (or its pre-rename path).
   const filteredFiles = pathFilter
-    ? files.filter(
-        (file) => file.path === pathFilter || file.old_path === pathFilter,
-      )
+    ? pathFilter.endsWith("/")
+      ? files.filter(
+          (file) =>
+            file.path.startsWith(pathFilter) ||
+            (file.old_path ?? "").startsWith(pathFilter),
+        )
+      : files.filter(
+          (file) => file.path === pathFilter || file.old_path === pathFilter,
+        )
     : files;
   filteredFiles.sort((a, b) =>
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
@@ -1264,6 +1272,14 @@ async function handleRefCommits(url: URL) {
   return json({ commits: result.commits, hasMore: result.hasMore });
 }
 
+async function handleAuthors(url: URL) {
+  const responseGeneration = generation;
+  const ref = url.searchParams.get("ref") || "HEAD";
+  const result = await git.commitAuthorsAsync(cwd, ref);
+  if (result.error) return text(result.error, result.status ?? 400);
+  return json({ authors: result.authors, generation: responseGeneration });
+}
+
 async function handleLog(url: URL) {
   const responseGeneration = generation;
   const ref = url.searchParams.get("ref") || "HEAD";
@@ -1302,6 +1318,7 @@ async function handleLog(url: URL) {
             when: "",
             parents: [],
             body: "",
+            refs: [],
           },
           ...commits,
         ];
@@ -2858,6 +2875,7 @@ const server = await startServer({
     if (url.pathname === "/_grep") return await handleGrep(url, req.signal);
     if (url.pathname === "/_commits") return await handleRefCommits(url);
     if (url.pathname === "/_log") return await handleLog(url);
+    if (url.pathname === "/_authors") return await handleAuthors(url);
     if (url.pathname === "/_file_blame") return await handleFileBlame(url);
     if (url.pathname === "/file_diff") return await handleFileDiff(url);
     if (url.pathname === "/file_range") return handleFileRange(url);

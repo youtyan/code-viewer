@@ -12,6 +12,11 @@ import { open, stat } from "node:fs/promises";
 import { dirname, join, posix, relative } from "node:path";
 import { formatErrorDetail } from "../core/error-detail";
 import {
+  type HistoryAuthor,
+  type HistoryCommitRef,
+  tokenizeHistoryQuery,
+} from "../core/history";
+import {
   parseAheadBehind,
   parseMergeTreeConflicts,
   parseWorktreeList,
@@ -1134,10 +1139,41 @@ export async function remoteWebUrlAsync(cwd: string): Promise<string | null> {
 export type GitHistoryCommit = GitCommitMeta & {
   parents: string[];
   body: string;
+  refs: HistoryCommitRef[];
 };
 
-const HISTORY_FORMAT = "%H%x00%s%x00%an%x00%aI%x00%P%x00%b";
+// %D is last: it is the only field that may legitimately be empty, and the
+// body before it is trimmed anyway.
+const HISTORY_FORMAT = "%H%x00%s%x00%an%x00%aI%x00%P%x00%D%x00%b";
 const MAX_HISTORY_LIMIT = 200;
+const MAX_HISTORY_AUTHOR_SCAN = 5000;
+
+// "HEAD -> main, origin/main, tag: v1.2.0" -> structured refs.
+export function parseHistoryDecorations(raw: string): HistoryCommitRef[] {
+  const refs: HistoryCommitRef[] = [];
+  for (const part of raw.split(",")) {
+    const item = part.trim();
+    if (!item) continue;
+    if (item === "HEAD") {
+      refs.push({ name: "HEAD", kind: "head" });
+      continue;
+    }
+    if (item.startsWith("HEAD -> ")) {
+      refs.push({
+        name: item.slice("HEAD -> ".length),
+        kind: "branch",
+        head: true,
+      });
+      continue;
+    }
+    if (item.startsWith("tag: ")) {
+      refs.push({ name: item.slice("tag: ".length), kind: "tag" });
+      continue;
+    }
+    refs.push({ name: item, kind: "branch" });
+  }
+  return refs;
+}
 
 function parseHistoryLog(stdout: string): GitHistoryCommit[] {
   const parts = stdout.split("\0");
@@ -1152,6 +1188,7 @@ function parseHistoryLog(stdout: string): GitHistoryCommit[] {
     const author = parts[index++] || "";
     const when = parts[index++] || "";
     const parentsRaw = (parts[index++] || "").trim();
+    const decorations = (parts[index++] || "").trim();
     const body = (parts[index++] || "").trim();
     if (sha)
       commits.push({
@@ -1161,50 +1198,104 @@ function parseHistoryLog(stdout: string): GitHistoryCommit[] {
         when,
         parents: parentsRaw ? parentsRaw.split(/\s+/) : [],
         body,
+        refs: parseHistoryDecorations(decorations),
       });
   }
   return commits;
 }
 
-// "author:foo" / "path:foo" switch the search target; anything else matches
-// the commit message (and, for hex-looking terms, a sha prefix).
-function historyQueryArgs(query: string): {
+// Maps the shared query syntax (core/history.ts tokenizeHistoryQuery) onto
+// git log arguments. Exported for table tests; commitHistoryAsync is the
+// only production caller.
+export function historyQueryArgs(query: string): {
   filterArgs: string[];
   pathspec: string[];
   shaTerm: string;
 } {
   const trimmed = query.trim().slice(0, 200).replace(/\0/g, "");
   if (!trimmed) return { filterArgs: [], pathspec: [], shaTerm: "" };
-  const prefixed = /^(author|path):(.*)$/.exec(trimmed);
-  if (prefixed) {
-    const term = prefixed[2].trim();
-    if (!term) return { filterArgs: [], pathspec: [], shaTerm: "" };
-    if (prefixed[1] === "author") {
-      return {
-        filterArgs: [
-          "--regexp-ignore-case",
-          "--fixed-strings",
-          `--author=${term}`,
-        ],
-        pathspec: [],
-        shaTerm: "",
-      };
+  const filterArgs: string[] = [];
+  const pathspec: string[] = [];
+  const texts: string[] = [];
+  let needsTextFlags = false;
+  for (const token of tokenizeHistoryQuery(trimmed)) {
+    switch (token.kind) {
+      case "text":
+        texts.push(token.value);
+        break;
+      case "author":
+        needsTextFlags = true;
+        filterArgs.push(`--author=${token.value}`);
+        break;
+      case "path":
+        pathspec.push(`:(icase)*${token.value}*`);
+        break;
+      case "since":
+        filterArgs.push(`--since=${token.value}`);
+        break;
+      case "until":
+        filterArgs.push(`--until=${token.value}`);
+        break;
+      case "code":
+        filterArgs.push(`-S${token.value}`);
+        break;
+      case "merges":
+        filterArgs.push(token.value === "no" ? "--no-merges" : "--merges");
+        break;
     }
-    return {
-      filterArgs: [],
-      pathspec: ["--", `:(icase)*${term}*`],
-      shaTerm: "",
-    };
   }
+  const phrase = texts.join(" ");
+  if (phrase) {
+    needsTextFlags = true;
+    filterArgs.push(`--grep=${phrase}`);
+  }
+  if (needsTextFlags)
+    filterArgs.unshift("--regexp-ignore-case", "--fixed-strings");
   return {
-    filterArgs: [
-      "--regexp-ignore-case",
-      "--fixed-strings",
-      `--grep=${trimmed}`,
-    ],
-    pathspec: [],
-    shaTerm: /^[0-9a-f]{4,40}$/i.test(trimmed) ? trimmed : "",
+    filterArgs,
+    pathspec,
+    shaTerm:
+      texts.length === 1 && /^[0-9a-f]{4,40}$/i.test(texts[0]) ? texts[0] : "",
   };
+}
+
+// Distinct author names under `ref`, most commits first. Feeds the
+// "author:" suggestions of the history filter.
+export async function commitAuthorsAsync(
+  cwd: string,
+  ref: string,
+): Promise<{ authors: HistoryAuthor[]; error?: string; status?: number }> {
+  const target = (ref || "HEAD").trim();
+  if (!target || target.startsWith("-") || target.includes("\0"))
+    return { authors: [], error: "invalid ref" };
+  const verified = await runGitAsync(
+    ["git", "rev-parse", "--verify", `${target}^{commit}`],
+    cwd,
+  );
+  if (verified.code !== 0)
+    return { authors: [], ...gitFailureResult(verified, "unknown ref") };
+  const res = await runGitAsync(
+    [
+      "git",
+      "log",
+      "--format=%an",
+      `--max-count=${MAX_HISTORY_AUTHOR_SCAN}`,
+      verified.stdout.trim(),
+    ],
+    cwd,
+  );
+  if (res.code !== 0)
+    return { authors: [], ...gitFailureResult(res, "git log failed") };
+  const counts = new Map<string, number>();
+  for (const line of res.stdout.split("\n")) {
+    const name = line.trim();
+    if (!name) continue;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const authors = [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  return { authors };
 }
 
 export async function commitHistoryAsync(
@@ -1244,10 +1335,13 @@ export async function commitHistoryAsync(
     options.query || "",
   );
   const pathFilter = (options.path || "").trim();
-  const pathArgs: string[] = [];
+  const specs = [...pathspec];
+  let follow = false;
   if (pathFilter && !pathFilter.includes("\0") && !pathFilter.startsWith("-")) {
-    if (!pathFilter.endsWith("/")) pathArgs.push("--follow");
-    pathArgs.push("--", pathFilter);
+    specs.push(pathFilter);
+    // --follow (rename tracking) only works with exactly one pathspec and
+    // only makes sense for a file; a trailing "/" marks a directory.
+    follow = !pathFilter.endsWith("/") && specs.length === 1;
   }
   const res = await runGitAsync(
     [
@@ -1258,9 +1352,9 @@ export async function commitHistoryAsync(
       `--max-count=${limit + 1}`,
       `--format=${HISTORY_FORMAT}`,
       ...filterArgs,
+      ...(follow ? ["--follow"] : []),
       verified.stdout.trim(),
-      ...pathspec,
-      ...pathArgs,
+      ...(specs.length ? ["--", ...specs] : []),
     ],
     cwd,
   );

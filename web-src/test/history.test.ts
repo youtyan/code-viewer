@@ -5,6 +5,7 @@ import {
   HISTORY_AUTO_LOAD_MAX_PAGES,
   historyGroupLabel,
   shouldContinueAutoLoad,
+  tokenizeHistoryQuery,
 } from "../core/history";
 import { renderMarkdownHtml } from "../core/markdown-preview";
 import type { AppRoute } from "../core/routes";
@@ -1570,5 +1571,86 @@ describe("history view lifecycle", () => {
     const latestUrl = fetchedUrls[fetchedUrls.length - 1] || "";
     const latestParams = new URLSearchParams(latestUrl.split("?")[1] || "");
     expect(latestParams.has("q")).toBe(false);
+  });
+});
+
+describe("tokenizeHistoryQuery", () => {
+  test.each([
+    { name: "empty", raw: "", expected: [] },
+    {
+      name: "free words stay separate tokens",
+      raw: "fix bug",
+      expected: [
+        { kind: "text", value: "fix" },
+        { kind: "text", value: "bug" },
+      ],
+    },
+    {
+      name: "quoted text keeps its spaces",
+      raw: '"fix the bug" author:alice',
+      expected: [
+        { kind: "text", value: "fix the bug" },
+        { kind: "author", value: "alice" },
+      ],
+    },
+    {
+      name: "every prefix",
+      raw: "author:a path:src since:2024-01-01 until:2024-02-01 code:handler merges:no",
+      expected: [
+        { kind: "author", value: "a" },
+        { kind: "path", value: "src" },
+        { kind: "since", value: "2024-01-01" },
+        { kind: "until", value: "2024-02-01" },
+        { kind: "code", value: "handler" },
+        { kind: "merges", value: "no" },
+      ],
+    },
+    {
+      name: "after / before aliases",
+      raw: "after:2024-01-01 before:2024-02-01",
+      expected: [
+        { kind: "since", value: "2024-01-01" },
+        { kind: "until", value: "2024-02-01" },
+      ],
+    },
+    {
+      name: "quoted date with spaces",
+      raw: 'since:"2 weeks ago"',
+      expected: [{ kind: "since", value: "2 weeks ago" }],
+    },
+    {
+      name: "no-merges bare word and merges:only",
+      raw: "no-merges merges:only",
+      expected: [
+        { kind: "merges", value: "no" },
+        { kind: "merges", value: "only" },
+      ],
+    },
+    {
+      name: "merges with an unknown value is text",
+      raw: "merges:maybe",
+      expected: [{ kind: "text", value: "merges:maybe" }],
+    },
+    {
+      name: "unfinished prefix is dropped",
+      raw: "author: fix",
+      expected: [{ kind: "text", value: "fix" }],
+    },
+    {
+      name: "unknown prefix stays literal text with its original case",
+      raw: "Fix: crash http://example.test/x",
+      expected: [
+        { kind: "text", value: "Fix:" },
+        { kind: "text", value: "crash" },
+        { kind: "text", value: "http://example.test/x" },
+      ],
+    },
+    {
+      name: "prefix match is case-insensitive",
+      raw: "AUTHOR:bob",
+      expected: [{ kind: "author", value: "bob" }],
+    },
+  ])("$name", ({ raw, expected }) => {
+    expect(tokenizeHistoryQuery(raw)).toEqual(expected);
   });
 });

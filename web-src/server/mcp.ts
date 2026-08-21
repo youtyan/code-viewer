@@ -301,7 +301,7 @@ export function defaultMcpTools(
       name: "code_viewer_file_history",
       title: "code-viewer file history",
       description:
-        "Returns the same JSON payload `code-viewer file history --json` emits: path, ref, limit, skip, optional query, and result (commits with sha/author/when/subject, hasMore, optional error). Read-only. ref defaults to 'HEAD'. Follows renames for file paths. Use `query` for the same 'author:' / 'path:' / sha-prefix filters the browser history view accepts.",
+        "Returns the same JSON payload `code-viewer file history --json` emits: path, ref, limit, skip, optional query, and result (commits with sha/author/when/subject/refs, hasMore, optional error). Read-only. ref defaults to 'HEAD'. Follows renames for file paths. `query` uses the browser history filter syntax: free words (message), author:<name>, path:<part>, since:/after:<date>, until:/before:<date>, code:<text> (git log -S), merges:no / merges:only; kinds AND together and a lone hex word tries a sha prefix.",
       inputSchema: {
         type: "object",
         properties: {
@@ -329,7 +329,7 @@ export function defaultMcpTools(
           query: {
             type: "string",
             description:
-              "Optional git log filter, passed verbatim to commitHistory. Supports the 'author:' and 'path:' prefixes the browser history view uses. Single-line, no NUL.",
+              "Optional git log filter in the browser history syntax: free words, author:<name>, path:<part>, since:/after:<date>, until:/before:<date>, code:<text>, merges:no|only. Single-line, no NUL.",
           },
           cwd: {
             type: "string",
