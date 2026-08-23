@@ -128,6 +128,7 @@ import {
 } from "./search-service";
 import { removeServerRegistry, writeServerRegistry } from "./server-registry";
 import { loadAppSettingsState } from "./state-store";
+import type { ListTmuxPanesOptions } from "./tmux/panes";
 import { startWatchSupervisor, type WatchSupervisor } from "./watch-supervisor";
 import {
   DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT,
@@ -197,7 +198,14 @@ let listenPort = 0;
 let openAfterStart = false;
 const commandOverrides: ExternalCommandOverride[] = [];
 let cwdWasExplicit = false;
-let cwdHasGitRepository = false;
+// cwd が git 管理下か。"unknown" は git が無い・所有権エラー等で判定できなかった
+// 状態で、従来どおり git を叩いてその失敗を表に出す (握り潰さない)。
+// "outside" だけが「git を呼んでも失敗すると分かっている」状態で、diff と
+// tmux ペイン一覧の worktree 絞り込みはこれを見て git を呼ばない。
+type GitRepositoryState = "inside" | "outside" | "unknown";
+let gitRepositoryState: GitRepositoryState = "unknown";
+// 最後に判定したときの <cwd>/.git の stat 署名。同じ署名のままなら再判定しない。
+let probedGitDirSignature: string | null = null;
 let scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES;
 let scopeOmitDirCliOverride: string[] | null = null;
 let scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
@@ -339,8 +347,10 @@ Examples:
     console.error(commandConfig.error);
     process.exit(1);
   }
-  const candidate = git.repoRoot(cwd);
-  cwdHasGitRepository = !!candidate;
+  const rootResult = git.repoRootResult(cwd);
+  gitRepositoryState = classifyGitRepository(rootResult);
+  probedGitDirSignature = gitDirSignature();
+  const candidate = rootResult.kind === "root" ? rootResult.root : null;
   if (cwdWasExplicit) {
     // --cwd で明示された path が git repo の toplevel そのものなら
     // それを使う。サブディレクトリ指定や非 git ディレクトリの場合は
@@ -370,6 +380,52 @@ function warnIfLegacyConfigPresent() {
     // best effort only
   }
 }
+
+function classifyGitRepository(
+  result: ReturnType<typeof git.repoRootResult>,
+): GitRepositoryState {
+  if (result.kind === "root") return "inside";
+  if (result.kind === "outside") return "outside";
+  return "unknown";
+}
+
+// stat に失敗したら .git は見えないものとして扱う (ENOENT が本命。権限エラー
+// 等でも状態は変えない)。
+function gitDirSignature(): string | null {
+  try {
+    const stats = statSync(join(cwd, ".git"));
+    return `${stats.ino}:${stats.mtimeMs}:${stats.size}`;
+  } catch {
+    return null;
+  }
+}
+
+// 起動時に判定するが、管理外だったディレクトリに後から .git が現れたら (内蔵
+// ターミナルで git init した等) その場で判定し直す。.git は watcher が常に
+// 読み飛ばすので、SSE の update では拾えない。サブディレクトリを --cwd にして
+// いて親にリポジトリが作られた場合までは追わない (再起動で拾う)。
+function currentGitRepositoryState(): GitRepositoryState {
+  if (gitRepositoryState !== "outside") return gitRepositoryState;
+  const signature = gitDirSignature();
+  if (signature === null || signature === probedGitDirSignature) {
+    return gitRepositoryState;
+  }
+  probedGitDirSignature = signature;
+  gitRepositoryState = classifyGitRepository(git.repoRootResult(cwd));
+  // 管理外として答えてきた diff / branch はもう古い。世代を進めて取り直させる。
+  if (gitRepositoryState !== "outside") triggerUpdate();
+  return gitRepositoryState;
+}
+
+// tmux ペイン一覧 (ドロワーの /_tmux/panes と terminal/activity の巡回) が
+// 「このリポジトリの作業ツリー」を引く入口。管理外なら git を叩かず絞り込み
+// 無しにする。関数なので、後から .git が現れれば次の一覧から git に戻る。
+const tmuxPaneListOptions: ListTmuxPanesOptions = {
+  worktreePaths: (root) =>
+    currentGitRepositoryState() === "outside"
+      ? Promise.resolve([])
+      : git.worktreePathsAsync(root),
+};
 
 function applyPersistedSettings(state: AppSettingsState) {
   const prevOmit = scopeOmitDirNames;
@@ -605,17 +661,19 @@ async function computePayload(
   pathFilter = "",
   responseGeneration = generation,
 ): Promise<DiffMeta> {
-  if (isSameWorktreeRange(range)) {
-    return {
-      files: [],
-      totals: { files: 0, additions: 0, deletions: 0 },
-      range: "worktree .. worktree",
-      project: basename(cwd),
-      branch: await currentBranchMetadata(),
-      generation: responseGeneration,
-    };
-  }
+  if (isSameWorktreeRange(range))
+    return emptyDiffPayload("worktree .. worktree", responseGeneration);
   const { args, refs } = buildRangeArgs(range);
+  const toWorktree = !range.to || range.to === "worktree";
+  const label =
+    (refs.length
+      ? `${refs.join(" .. ")}${toWorktree && refs.length === 1 ? " .. worktree" : ""}`
+      : cliArgs.join(" ")) || "HEAD";
+  // git 管理外のディレクトリに diff は無く、そこで `git diff` を呼ぶと usage
+  // 全文が stderr に出る (読み込みと SSE の tick のたびに)。git を起動せずに
+  // 空で答える。
+  if (currentGitRepositoryState() === "outside")
+    return emptyDiffPayload(label, responseGeneration);
   const fullArgs = pathFilter
     ? [...extras, ...args, "--", pathFilter]
     : [...extras, ...args];
@@ -662,18 +720,28 @@ async function computePayload(
     },
     { files: meta.length, additions: 0, deletions: 0 },
   );
-  const toWorktree = !range.to || range.to === "worktree";
-  const label = refs.length
-    ? `${refs.join(" .. ")}${toWorktree && refs.length === 1 ? " .. worktree" : ""}`
-    : cliArgs.join(" ");
   return {
     files: meta,
     totals,
-    range: label || "HEAD",
+    range: label,
     project: basename(cwd),
     branch: await currentBranchMetadata(),
     generation: responseGeneration,
     ...(metaError ? { error: metaError } : {}),
+  };
+}
+
+async function emptyDiffPayload(
+  label: string,
+  responseGeneration: number,
+): Promise<DiffMeta> {
+  return {
+    files: [],
+    totals: { files: 0, additions: 0, deletions: 0 },
+    range: label,
+    project: basename(cwd),
+    branch: await currentBranchMetadata(),
+    generation: responseGeneration,
   };
 }
 
@@ -1136,7 +1204,10 @@ async function handleSettings() {
   return json({
     project: basename(cwd),
     branch: await currentBranchMetadata(),
-    repo_web_url: cwdHasGitRepository ? await git.remoteWebUrlAsync(cwd) : null,
+    repo_web_url:
+      currentGitRepositoryState() === "inside"
+        ? await git.remoteWebUrlAsync(cwd)
+        : null,
     server: { pid: process.pid, root: cwd },
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
@@ -1185,7 +1256,7 @@ function currentSearchEnv(
 }
 
 async function currentBranchMetadata(): Promise<string | undefined> {
-  if (!cwdHasGitRepository) return undefined;
+  if (currentGitRepositoryState() !== "inside") return undefined;
   return (await git.currentBranchAsync(cwd)) || undefined;
 }
 
@@ -2925,6 +2996,7 @@ const server = await startServer({
         url,
         cwd,
         sideEffectRequestAllowed,
+        tmuxPaneListOptions,
       );
       if (tmuxResponse) return tmuxResponse;
     }
@@ -3210,7 +3282,7 @@ worktreeWatch = startScopedWorktreeWatch();
 // フックを入れていないセッションを、画面の動きだけで「稼働 / 停止」に
 // 振り分ける観測。申告のある対象には触らない (terminal/activity.ts 参照)。
 void import("./terminal/activity").then(({ startAgentActivityWatch }) =>
-  startAgentActivityWatch(cwd),
+  startAgentActivityWatch(cwd, tmuxPaneListOptions),
 );
 
 console.log(`GDP_LISTEN_URL=http://127.0.0.1:${server.port}/`);

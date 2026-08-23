@@ -1,4 +1,10 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -12,6 +18,7 @@ import {
   localBranchExistsResultAsync,
   refCommitPageResultAsync,
   refsResultAsync,
+  repoRootResult,
   untrackedMetaAsync,
   verifyTreeRefResultAsync,
   worktreeListResultAsync,
@@ -57,6 +64,28 @@ function fakeFailingGit(): string {
   return path;
 }
 
+// A git that localizes "not a git repository" unless asked for the C locale,
+// the way a translated git does for a non-English LANG.
+function fakeTranslatedGit(): string {
+  const root = tempRoot("code-viewer-translated-git-bin-");
+  const path = join(root, "git");
+  writeFileSync(
+    path,
+    [
+      "#!/bin/sh",
+      'if [ "$LC_ALL" = "C" ]; then',
+      "  printf 'fatal: not a git repository (or any of the parent directories): .git\\n' >&2",
+      "else",
+      "  printf 'fatal: localized message placeholder: .git\\n' >&2",
+      "fi",
+      "exit 128",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
+
 function fakeSlowGit(): string {
   const root = tempRoot("code-viewer-slow-git-bin-");
   const path = join(root, "git");
@@ -80,6 +109,16 @@ function configureFailingGit(cwd: string): void {
     cwd,
     env: {},
     cliOverrides: [{ name: "git", path: fakeFailingGit() }],
+    allowedNames: ["git"],
+  });
+  expect(configured).toEqual({ ok: true });
+}
+
+function configureTranslatedGit(cwd: string): void {
+  const configured = configureExternalCommands({
+    cwd,
+    env: {},
+    cliOverrides: [{ name: "git", path: fakeTranslatedGit() }],
     allowedNames: ["git"],
   });
   expect(configured).toEqual({ ok: true });
@@ -265,5 +304,53 @@ describe("git command failures", () => {
     });
     expect(code.isError).toBe(true);
     expect(code.content[0].text).toMatch(/git binary not found|git not found/);
+  });
+});
+
+// preview.ts はこの分類で「git を呼んでも失敗すると分かっている (outside)」と
+// 「判定できない (error → 従来どおり git を呼ぶ)」を分ける。outside の誤判定は
+// 本物のエラーを隠し、error 側への誤判定は管理外で git を叩き続ける。
+describe("repository root probe", () => {
+  test.each([
+    {
+      name: "a directory outside any repository is outside",
+      configure: (_cwd: string) => {
+        // PATH 上の本物の git をそのまま使う
+      },
+      expected: { kind: "outside" },
+    },
+    {
+      name: "a git that localizes its message is still read as outside",
+      configure: configureTranslatedGit,
+      expected: { kind: "outside" },
+    },
+    {
+      name: "another fatal error stays an error with its message",
+      configure: configureFailingGit,
+      expected: { kind: "error", error: "fatal: simulated git failure" },
+    },
+  ])("$name", ({ configure, expected }) => {
+    const cwd = tempRoot("code-viewer-repo-root-probe-");
+    configure(cwd);
+    expect(repoRootResult(cwd)).toEqual(expected);
+  });
+
+  test("the top of a repository is root with its real path", () => {
+    const cwd = tempRoot("code-viewer-repo-root-probe-root-");
+    runGit(cwd, ["init", "-q", "-b", "main", "."]);
+    expect(repoRootResult(cwd)).toEqual({
+      kind: "root",
+      root: realpathSync(cwd),
+    });
+  });
+
+  test("a missing git binary is an error, not outside", () => {
+    const cwd = tempRoot("code-viewer-repo-root-probe-missing-");
+    configureMissingGit(cwd);
+    const result = repoRootResult(cwd);
+    expect(result.kind).toBe("error");
+    if (result.kind === "error") {
+      expect(result.error).toMatch(/git binary not found|git not found/);
+    }
   });
 });

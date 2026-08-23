@@ -19,7 +19,7 @@ export type RunBytesResult = {
   stderr: string;
 };
 
-type RunOptions = {
+export type RunOptions = {
   timeout?: number;
   maxBuffer?: number;
   // Written to the child stdin and closed immediately. Only for commands
@@ -27,6 +27,9 @@ type RunOptions = {
   // recursive listing), not as a general interactive channel - nothing reads
   // back before the process exits.
   stdin?: string;
+  // Replaces the child environment wholesale (spawn semantics), so callers
+  // spread process.env themselves when they only want to add a variable.
+  env?: NodeJS.ProcessEnv;
 };
 
 export type RunAsyncOptions = RunOptions & {
@@ -71,6 +74,7 @@ export function runBytesSync(
 ): RunBytesResult {
   const proc = spawnSync(args[0], args.slice(1), {
     cwd,
+    env: options.env,
     encoding: "buffer",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: options.timeout,
@@ -96,6 +100,7 @@ export function runBytesAsync(
   return new Promise((resolve) => {
     const proc = spawn(args[0], args.slice(1), {
       cwd,
+      env: options.env,
       stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       signal: options.signal,
     });

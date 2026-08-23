@@ -132,12 +132,26 @@ export function parseTmuxPanes(
   return sessions;
 }
 
+export type ListTmuxPanesOptions = {
+  /**
+   * ペインを「このリポジトリのもの」に絞るための作業ツリー一覧。既定は git に
+   * 訊く (worktreePathsAsync)。サーバ側で cwd が git 管理外だと分かっている
+   * ときは、失敗すると分かっている git を毎回の一覧・巡回で叩かないよう、
+   * 空を返す関数を渡す (絞り込み無し = 全ペインが inRepo)。
+   */
+  worktreePaths?: (cwd: string) => Promise<string[]>;
+};
+
 /** tmux が無い / サーバが動いていない場合も、例外ではなく空の一覧で返す。 */
-export async function listTmuxPanes(cwd: string): Promise<TmuxPanesResponse> {
+export async function listTmuxPanes(
+  cwd: string,
+  options: ListTmuxPanesOptions = {},
+): Promise<TmuxPanesResponse> {
+  const worktreePaths = options.worktreePaths ?? worktreePathsAsync;
   // 作業ツリーの一覧は tmux とは独立に引けるので並行で取る。
   const [result, worktrees] = await Promise.all([
     runTmux(["list-panes", "-a", "-F", PANE_FORMAT], cwd),
-    worktreePathsAsync(cwd),
+    worktreePaths(cwd),
   ]);
   if (result.status === "missing") {
     return { available: false, running: false, sessions: [] };
