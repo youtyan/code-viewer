@@ -37,6 +37,7 @@ import {
 import { compileNamePatterns, type NamePatternSet } from "./name-pattern";
 import {
   type RunAsyncOptions,
+  type RunOptions,
   runAsync,
   runBytesAsync,
   runSync,
@@ -231,8 +232,10 @@ const GIT_COMMAND_TIMEOUT_MS = 20_000;
 function run(
   args: string[],
   cwd: string,
+  options: Pick<RunOptions, "env"> = {},
 ): { code: number; stdout: string; stderr: string } {
   return runSync(resolveGitArgs(args), cwd, {
+    ...options,
     timeout: GIT_COMMAND_TIMEOUT_MS,
   });
 }
@@ -544,7 +547,14 @@ export function repoRootResult(
   | { kind: "root"; root: string }
   | { kind: "outside" }
   | { kind: "error"; error: string } {
-  const res = run(["git", "rev-parse", "--show-toplevel"], cwd);
+  // "outside" is told apart from other fatal errors by git's own wording, so
+  // this one probe asks git for untranslated messages: a localized git would
+  // otherwise turn every non-repository directory into an "error" (and the
+  // server would keep calling git there as if it might start working). Only
+  // this probe; the git errors shown to the user stay in their locale.
+  const res = run(["git", "rev-parse", "--show-toplevel"], cwd, {
+    env: { ...process.env, LC_ALL: "C" },
+  });
   if (res.code === 0) return { kind: "root", root: res.stdout.trimEnd() };
   if (isCommandNotFoundResult("git", res)) {
     return { kind: "error", error: commandNotFoundDetail("git") };

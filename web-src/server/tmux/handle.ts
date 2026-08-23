@@ -26,11 +26,14 @@ import {
 } from "../database/handle-shared";
 import { openTmuxPaneInShell } from "../terminal/open";
 import { listTmuxClients } from "./clients";
-import { listTmuxPanes } from "./panes";
+import { type ListTmuxPanesOptions, listTmuxPanes } from "./panes";
 
-function handlePanesGet(cwd: string): Promise<Response> {
+function handlePanesGet(
+  cwd: string,
+  options: ListTmuxPanesOptions,
+): Promise<Response> {
   return jsonLoadResponse(
-    () => listTmuxPanes(cwd),
+    () => listTmuxPanes(cwd, options),
     "tmux",
     "failed to list tmux panes",
   );
@@ -87,6 +90,7 @@ export function handleTmuxRoute(
   url: URL,
   cwd: string,
   sideEffectAllowed: (req: Request) => boolean,
+  options: ListTmuxPanesOptions = {},
 ): Promise<Response | null> {
   return dispatchRoutes(
     req,
@@ -95,7 +99,7 @@ export function handleTmuxRoute(
       "/_tmux/panes": {
         methods: ["GET"],
         sideEffect: false,
-        handler: () => handlePanesGet(cwd),
+        handler: () => handlePanesGet(cwd, options),
       },
       "/_tmux/clients": {
         methods: ["GET"],

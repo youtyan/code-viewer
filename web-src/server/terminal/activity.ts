@@ -31,7 +31,7 @@ import { hashLine } from "../../core/terminal-capture";
 import { flattenTmuxPanes } from "../../core/tmux";
 import { listShellSessions, readShellBuffer } from "../shell/session";
 import { captureTmuxPane } from "../tmux/capture";
-import { listTmuxPanes } from "../tmux/panes";
+import { type ListTmuxPanesOptions, listTmuxPanes } from "../tmux/panes";
 import {
   getAgentState,
   recordAgentState,
@@ -246,11 +246,14 @@ export function rotateForSweep<T>(
   return { batch, nextOffset: (start + take) % items.length };
 }
 
-async function sweep(cwd: string): Promise<void> {
+async function sweep(
+  cwd: string,
+  paneListOptions: ListTmuxPanesOptions,
+): Promise<void> {
   if (inFlight) return;
   inFlight = true;
   try {
-    const panes = await listTmuxPanes(cwd);
+    const panes = await listTmuxPanes(cwd, paneListOptions);
     activityErrors.delete(activityErrorKey("list_terminals", ""));
     const shells = listShellSessions();
     const allPanes = panes.running ? flattenTmuxPanes(panes.sessions) : [];
@@ -314,10 +317,16 @@ async function sweep(cwd: string): Promise<void> {
   }
 }
 
-export function startAgentActivityWatch(cwd: string): void {
+export function startAgentActivityWatch(
+  cwd: string,
+  paneListOptions: ListTmuxPanesOptions = {},
+): void {
   if (timer) return;
   void reloadAgentScreenRules(cwd);
-  timer = setInterval(() => void sweep(cwd), ACTIVITY_POLL_INTERVAL_MS);
+  timer = setInterval(
+    () => void sweep(cwd, paneListOptions),
+    ACTIVITY_POLL_INTERVAL_MS,
+  );
   // 観測のためにプロセスを生かし続けない。
   timer.unref?.();
 }

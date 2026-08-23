@@ -540,6 +540,95 @@ describe("preview CLI", () => {
     }
   });
 
+  // git 管理外のディレクトリでは、diff と tmux ペイン一覧 (とその裏の巡回) が
+  // 失敗する git を毎回起動して usage 全文でログを埋めていた。git を呼ばずに
+  // 空で答えること、そして後から git init したら再起動なしで拾うことを見る。
+  runOrSkip(
+    "stays quiet outside a git repository and picks the repository up once it appears",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-outside-git-"));
+      tmpRoots.push(root);
+      writeFileSync(join(root, "sample.txt"), "sample\n");
+
+      const proc = spawn(
+        process.execPath,
+        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        {
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const output: string[] = [];
+      const collect = (chunk: Buffer) => {
+        output.push(chunk.toString("utf8"));
+      };
+      proc.stdout?.on("data", collect);
+      proc.stderr?.on("data", collect);
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+      const gitFailureLines = () =>
+        output
+          .join("")
+          .split("\n")
+          .filter((line) => line.includes("(git exit"));
+
+      let cleanupTimedOut = false;
+      try {
+        const url = await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(15000).then(() => {
+            throw new Error("preview did not start");
+          }),
+        ]);
+
+        const settings = (await (
+          await fetchWithTimeout(`${url}_settings`, 5000)
+        ).json()) as { branch?: string };
+        expect(settings.branch).toBeUndefined();
+
+        const diffRes = await fetchWithTimeout(`${url}diff.json`, 5000);
+        expect(diffRes.status).toBe(200);
+        const diff = (await diffRes.json()) as {
+          files: unknown[];
+          range?: string;
+          error?: string;
+        };
+        expect(diff.files).toEqual([]);
+        expect(diff.range).toBe("HEAD");
+        expect(diff.error).toBeUndefined();
+
+        const panesRes = await fetchWithTimeout(`${url}_tmux/panes`, 5000);
+        expect(panesRes.status).toBe(200);
+        expect(gitFailureLines()).toEqual([]);
+
+        git(root, ["init", "-b", "main"]);
+        git(root, ["config", "user.email", "sample-author"]);
+        git(root, ["config", "user.name", "sample-author"]);
+        git(root, ["add", "sample.txt"]);
+        git(root, ["commit", "-m", "sample initial commit"]);
+
+        const after = (await (
+          await fetchWithTimeout(`${url}_settings`, 5000)
+        ).json()) as { branch?: string };
+        expect(after.branch).toBe("main");
+        const diffAfter = (await (
+          await fetchWithTimeout(`${url}diff.json?nocache=1`, 5000)
+        ).json()) as { files: unknown[]; branch?: string; error?: string };
+        expect(diffAfter.branch).toBe("main");
+        expect(diffAfter.files).toEqual([]);
+        expect(diffAfter.error).toBeUndefined();
+        expect(gitFailureLines()).toEqual([]);
+      } finally {
+        proc.kill("SIGKILL");
+        cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+      }
+      if (cleanupTimedOut) {
+        throw new Error("preview process did not exit after SIGKILL");
+      }
+    },
+  );
+
   runOrSkip("serves ranged raw files from a committed ref", async () => {
     const root = mkdtempSync(join(tmpdir(), "code-viewer-ref-raw-"));
     tmpRoots.push(root);
