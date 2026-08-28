@@ -29,6 +29,18 @@ afterAll(() => {
 });
 
 afterEach(() => {
+  const scrollSpy = window.__gdpScrollSpy as
+    | (EventListener & { _raf?: number | null })
+    | undefined;
+  if (scrollSpy) {
+    window.removeEventListener("scroll", scrollSpy);
+    document
+      .getElementById("content")
+      ?.removeEventListener("scroll", scrollSpy);
+    if (scrollSpy._raf != null) cancelAnimationFrame(scrollSpy._raf);
+  }
+  delete window.__gdpScrollSpy;
+  delete window.__gdpSidebarTouchedAt;
   document.body.innerHTML = "";
 });
 
@@ -50,10 +62,13 @@ function target(children: Element[]): Element {
 
 function setupDiffDom() {
   document.body.innerHTML = `
-    <div id="meta"></div>
-    <div id="diff"></div>
-    <div id="empty"></div>
-    <ul id="filelist"></ul>
+    <header id="topbar"></header>
+    <aside id="sidebar"><ul id="filelist"></ul></aside>
+    <main id="content">
+      <div id="meta"></div>
+      <div id="diff"></div>
+      <div id="empty"></div>
+    </main>
   `;
 }
 
@@ -801,6 +816,116 @@ describe("diff view fast path", () => {
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
+  });
+});
+
+describe("diff view scroll spy", () => {
+  test.each([
+    {
+      name: "window scrolling",
+      target: "window" as const,
+      sidebarTouched: false,
+      expectedOptions: { reveal: true },
+    },
+    {
+      name: "docked #content scrolling",
+      target: "content" as const,
+      sidebarTouched: false,
+      expectedOptions: { reveal: true },
+    },
+    {
+      name: "window scrolling while the sidebar is being used",
+      target: "window" as const,
+      sidebarTouched: true,
+      expectedOptions: undefined,
+    },
+    {
+      name: "docked #content scrolling while the sidebar is being used",
+      target: "content" as const,
+      sidebarTouched: true,
+      expectedOptions: undefined,
+    },
+  ])("follows the visible file during $name", async ({
+    target,
+    sidebarTouched,
+    expectedOptions,
+  }) => {
+    setupDiffDom();
+    const first = document.createElement("article");
+    first.className = "gdp-file-shell";
+    first.dataset.path = "src/first.ts";
+    const second = document.createElement("article");
+    second.className = "gdp-file-shell";
+    second.dataset.path = "src/second.ts";
+    document.getElementById("diff")?.append(first, second);
+
+    let afterScroll = false;
+    first.getBoundingClientRect = () =>
+      new DOMRect(0, afterScroll ? -200 : 0, 100, 200);
+    second.getBoundingClientRect = () =>
+      new DOMRect(0, afterScroll ? 0 : 200, 100, 200);
+    const { view, markActiveCalls } = createDiffViewForShellTest();
+    view.setupScrollSpy();
+    await waitFor(() => markActiveCalls().length === 1);
+    markActiveCalls().length = 0;
+
+    afterScroll = true;
+    if (sidebarTouched) window.__gdpSidebarTouchedAt = performance.now();
+    const scrollTarget =
+      target === "window" ? window : document.getElementById("content");
+    scrollTarget?.dispatchEvent(new Event("scroll"));
+
+    await waitFor(() => markActiveCalls().length > 0);
+    expect(markActiveCalls()).toEqual([
+      { path: "src/second.ts", options: expectedOptions },
+    ]);
+  });
+
+  test("uses the visible area below the fixed bars as its scan position", async () => {
+    setupDiffDom();
+    const topbar = document.getElementById("topbar");
+    if (!topbar) throw new Error("missing #topbar");
+    topbar.getBoundingClientRect = () => new DOMRect(0, 48, 100, 56);
+    const aboveContent = document.createElement("article");
+    aboveContent.className = "gdp-file-shell";
+    aboveContent.dataset.path = "src/above.ts";
+    aboveContent.getBoundingClientRect = () => new DOMRect(0, 0, 100, 100);
+    const visible = document.createElement("article");
+    visible.className = "gdp-file-shell";
+    visible.dataset.path = "src/visible.ts";
+    visible.getBoundingClientRect = () => new DOMRect(0, 100, 100, 200);
+    document.getElementById("diff")?.append(aboveContent, visible);
+
+    const { view, markActiveCalls } = createDiffViewForShellTest();
+    view.setupScrollSpy();
+
+    await waitFor(() => markActiveCalls().length === 1);
+    expect(markActiveCalls()).toEqual([
+      { path: "src/visible.ts", options: { reveal: true } },
+    ]);
+  });
+
+  test("replaces the previous #content listener when the spy is installed again", async () => {
+    setupDiffDom();
+    const card = document.createElement("article");
+    card.className = "gdp-file-shell";
+    card.dataset.path = "src/sample.ts";
+    card.getBoundingClientRect = () => new DOMRect(0, 0, 100, 200);
+    document.getElementById("diff")?.append(card);
+    const { view, markActiveCalls } = createDiffViewForShellTest();
+    view.setupScrollSpy();
+    await waitFor(() => markActiveCalls().length === 1);
+    markActiveCalls().length = 0;
+    view.setupScrollSpy();
+    await waitFor(() => markActiveCalls().length === 1);
+    markActiveCalls().length = 0;
+
+    document.getElementById("content")?.dispatchEvent(new Event("scroll"));
+
+    await waitFor(() => markActiveCalls().length > 0);
+    expect(markActiveCalls()).toEqual([
+      { path: "src/sample.ts", options: { reveal: true } },
+    ]);
   });
 });
 

@@ -334,16 +334,18 @@ export function createDiffView(deps: DiffViewDeps) {
   // its own copy of that filtering logic. A row counts as viewed if either
   // STATE.viewedFiles or its own DOM ".viewed" class says so - the DOM class
   // is what the user actually sees, so it wins if the two ever disagree.
-  /** 「いまどこを見ているか」の基準線。topbar に隠れる分を避ける。 */
+  /** 「いまどこを見ているか」の基準線。固定バーに隠れる分を避ける。 */
   function scrollSpyScanY(): number {
+    const topbarBottom =
+      document.querySelector<HTMLElement>("#topbar")?.getBoundingClientRect()
+        .bottom || 0;
+    if (topbarBottom > 0) return topbarBottom + 24;
+    const bodyStyle = getComputedStyle(document.body);
+    const globalHeaderH =
+      Number.parseFloat(bodyStyle.getPropertyValue("--global-header-h")) || 0;
     const topbarH =
-      parseInt(
-        getComputedStyle(document.documentElement).getPropertyValue(
-          "--topbar-h",
-        ),
-        10,
-      ) || 56;
-    return topbarH + 24;
+      Number.parseFloat(bodyStyle.getPropertyValue("--topbar-h")) || 0;
+    return globalHeaderH + topbarH + 24;
   }
 
   function unviewedFilePath(direction: 1 | -1): string | null {
@@ -1981,8 +1983,15 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   function setupScrollSpy() {
+    const content = document.querySelector<HTMLElement>("#content");
+    const previous = window.__gdpScrollSpy as ScrollSpyHandler | undefined;
+    if (previous) {
+      window.removeEventListener("scroll", previous);
+      content?.removeEventListener("scroll", previous);
+      if (previous._raf != null) cancelAnimationFrame(previous._raf);
+    }
     const handler: ScrollSpyHandler = () => {
-      if (handler._raf) return;
+      if (handler._raf != null) return;
       if (performance.now() < SUPPRESS_SPY_UNTIL) return;
       handler._raf = requestAnimationFrame(() => {
         handler._raf = null;
@@ -1996,39 +2005,23 @@ export function createDiffView(deps: DiffViewDeps) {
           if (r.top <= scanY && r.bottom > scanY) {
             const best = w.dataset.path || "";
             if (best) {
-              markActive(best);
-              // Auto-scroll sidebar so the active item stays visible — but
-              // only when the user is NOT currently interacting with the
-              // sidebar. Otherwise lazy-render of huge diffs (40k+ lines)
-              // fires window scroll, the spy yanks `li` into view, and
-              // the user's manual sidebar scroll position is lost.
+              const sidebarTouchedAt = window.__gdpSidebarTouchedAt || 0;
               const recentlyTouched =
-                performance.now() - (window.__gdpSidebarTouchedAt || 0) < 1500;
-              if (!recentlyTouched) {
-                const li = document.querySelector<HTMLElement>(
-                  `#filelist li[data-path="${CSS.escape(best)}"]`,
-                );
-                if (li) {
-                  const sb = document.querySelector<HTMLElement>("#sidebar");
-                  if (!sb) return;
-                  const lr = li.getBoundingClientRect();
-                  const sr = sb.getBoundingClientRect();
-                  if (lr.top < sr.top + 40 || lr.bottom > sr.bottom - 40) {
-                    li.scrollIntoView({ block: "nearest" });
-                  }
-                }
-              }
+                sidebarTouchedAt > 0 &&
+                performance.now() - sidebarTouchedAt < 1500;
+              // Keep the existing manual-sidebar-scroll guard, but delegate
+              // both regular and virtual tree revealing to sidebar.ts.
+              if (recentlyTouched) markActive(best);
+              else markActive(best, { reveal: true });
             }
             return;
           }
         }
       });
     };
-    // Remove previous listeners (avoid duplicates after re-render)
-    if (window.__gdpScrollSpy)
-      window.removeEventListener("scroll", window.__gdpScrollSpy);
     window.__gdpScrollSpy = handler;
     window.addEventListener("scroll", handler, { passive: true });
+    content?.addEventListener("scroll", handler, { passive: true });
     handler(new Event("scroll"));
   }
 
