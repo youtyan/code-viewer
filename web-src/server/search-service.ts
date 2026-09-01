@@ -74,6 +74,8 @@ export type FileListResult =
   | { ok: true; value: FileSearchListResponse }
   | { ok: false; error: string; status?: number };
 
+type GrepEngineFailure = { error: string; status: 500 };
+
 // rg availability does not depend on cwd in practice (it is a PATH
 // question), so we keep a single boolean cache shared by every call.
 // `resetRgAvailableCache` exists so tests can re-probe between runs.
@@ -301,7 +303,7 @@ function matchOptions(req: GrepRequest): GrepMatchOptions {
 async function grepWorktreeAsync(
   env: SearchEnv,
   req: GrepRequest,
-): Promise<GrepResponse> {
+): Promise<GrepResponse | GrepEngineFailure> {
   const excludeTests = req.excludeTests === true;
   const { plain, globs } = splitCallerPaths(env, req.paths, excludeTests);
   const paths = filterCallerPaths(env, plain, excludeTests);
@@ -343,6 +345,12 @@ async function grepWorktreeAsync(
       timeoutMessage: "grep timed out after 5000ms",
       rejectOnError: false,
     });
+    if (proc.code > 1) {
+      const fallback = `rg grep failed with exit code ${proc.code}`;
+      const error = proc.stderr.trim() || fallback;
+      console.error(`[code-viewer] ${fallback}: ${error}`);
+      return { error, status: 500 };
+    }
     const matches = parseRgOutput(
       proc.stdout,
       req.max,
@@ -396,7 +404,7 @@ async function grepWorktreeAsync(
 async function grepTreeRefAsync(
   env: SearchEnv,
   req: GrepRequest,
-): Promise<GrepResponse> {
+): Promise<GrepResponse | GrepEngineFailure> {
   const excludeTests = req.excludeTests === true;
   const { plain, globs } = splitCallerPaths(env, req.paths, excludeTests);
   const safePaths = filterCallerPaths(env, plain, excludeTests);
@@ -445,6 +453,12 @@ async function grepTreeRefAsync(
     timeoutMessage: "git grep timed out after 5000ms",
     rejectOnError: false,
   });
+  if (proc.code !== 0 && proc.code !== 1) {
+    return {
+      error: git.gitFailureMessage(proc, "git grep failed"),
+      status: 500,
+    };
+  }
   const matches = parseGitGrepOutput(
     proc.stdout,
     req.ref,
@@ -492,9 +506,15 @@ export async function grepRepoAsync(
     };
   }
   if (isWorktree) {
-    return { ok: true, value: await grepWorktreeAsync(env, req) };
+    const result = await grepWorktreeAsync(env, req);
+    return "error" in result
+      ? { ok: false, ...result }
+      : { ok: true, value: result };
   }
-  return { ok: true, value: await grepTreeRefAsync(env, req) };
+  const result = await grepTreeRefAsync(env, req);
+  return "error" in result
+    ? { ok: false, ...result }
+    : { ok: true, value: result };
 }
 
 // List every blob/commit entry under `ref`. Used by /_files (with a

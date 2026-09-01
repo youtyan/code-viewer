@@ -481,6 +481,33 @@ describe("search-service shared behavior", () => {
     });
   });
 
+  test("git grep reports an invalid regular expression as an engine failure", async () => {
+    const originalError = console.error;
+    const logged: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+
+    try {
+      const result = await grepRepoAsync(env(), {
+        query: "(",
+        ref: "main",
+        paths: [],
+        regex: true,
+        max: 10,
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok === false) {
+        expect(result.status).toBe(500);
+        expect(result.error.length > 0).toBe(true);
+        expect(result.error).not.toBe("git grep failed");
+      }
+      expect(logged.flat().join(" ")).toContain("git grep failed");
+    } finally {
+      console.error = originalError;
+    }
+  });
+
   // The three engines (rg / git grep / fallback) must agree on what
   // "match case" and "whole word" mean, so the same table runs against the
   // worktree (rg or fallback, whichever this machine has) and a committed
