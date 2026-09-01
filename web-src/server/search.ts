@@ -1,4 +1,5 @@
 import type { FileSearchListResponse, GrepMatch } from "../core/types";
+import { isWordBoundary } from "../core/word-boundary";
 import type { GitTreeEntry } from "./git";
 import { compileNamePatterns } from "./name-pattern";
 
@@ -39,14 +40,6 @@ export type GrepMatchOptions = {
   caseSensitive?: boolean;
   wholeWord?: boolean;
 };
-
-const WORD_CHAR_RE = /[\p{L}\p{N}_]/u;
-
-function isWordBoundary(line: string, start: number, end: number): boolean {
-  const before = start > 0 ? line[start - 1] : "";
-  const after = end < line.length ? line[end] : "";
-  return !WORD_CHAR_RE.test(before) && !WORD_CHAR_RE.test(after);
-}
 
 // First occurrence of `needle` in `line` that satisfies the word rule, or -1.
 export function fixedStringColumn(
