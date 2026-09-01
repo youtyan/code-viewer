@@ -9,7 +9,7 @@ import {
   vi,
 } from "vitest";
 import type { AppRoute } from "../core/routes";
-import type { GrepMatch, GrepResponse } from "../core/types";
+import type { FileRangeResponse, GrepMatch, GrepResponse } from "../core/types";
 import { closeContextMenu, showContextMenu } from "../views/context-menu";
 import {
   createDefinitionJump,
@@ -88,6 +88,95 @@ describe("context menu extension", () => {
 
     expect(onSelect).toHaveBeenCalledOnce();
     expect(menu.isConnected).toBe(false);
+  });
+
+  test("reports highlighted original item indexes for focus and pointer entry", () => {
+    const anchor = document.createElement("button");
+    const onHighlight = vi.fn();
+    document.body.appendChild(anchor);
+    const menu = showContextMenu(
+      anchor,
+      [
+        { label: "Unavailable", disabled: true, onSelect: vi.fn() },
+        { kind: "separator" },
+        { label: "Open", onSelect: vi.fn() },
+      ],
+      { onHighlight },
+    );
+
+    expect(onHighlight).toHaveBeenCalledWith(2);
+    q<HTMLButtonElement>(menu, "button:disabled").dispatchEvent(
+      new Event("pointerenter"),
+    );
+    expect(onHighlight).toHaveBeenLastCalledWith(0);
+  });
+
+  test.each([
+    {
+      name: "selection",
+      close: (menu: HTMLElement) =>
+        q<HTMLButtonElement>(menu, "button").click(),
+    },
+    {
+      name: "outside pointerdown",
+      close: () =>
+        document.dispatchEvent(new Event("pointerdown", { bubbles: true })),
+    },
+    {
+      name: "Escape",
+      close: () =>
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        ),
+    },
+    {
+      name: "scroll",
+      close: () => window.dispatchEvent(new Event("scroll")),
+    },
+    {
+      name: "resize",
+      close: () => window.dispatchEvent(new Event("resize")),
+    },
+    { name: "direct close", close: () => closeContextMenu() },
+    {
+      name: "replacement",
+      close: (_menu: HTMLElement, anchor: HTMLElement) =>
+        showContextMenu(anchor, [{ label: "Replacement", onSelect: vi.fn() }]),
+    },
+  ])("calls onClose once after $name", ({ close }) => {
+    const anchor = document.createElement("button");
+    const onClose = vi.fn();
+    document.body.appendChild(anchor);
+    const menu = showContextMenu(
+      anchor,
+      [{ label: "Open", onSelect: vi.fn() }],
+      { onClose },
+    );
+
+    close(menu, anchor);
+    closeContextMenu();
+
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(menu.isConnected).toBe(false);
+  });
+
+  test("cleans up the menu before propagating an onClose failure", () => {
+    const anchor = document.createElement("button");
+    const failure = new Error("sample close failure");
+    document.body.appendChild(anchor);
+    const menu = showContextMenu(
+      anchor,
+      [{ label: "Open", onSelect: vi.fn() }],
+      {
+        onClose: () => {
+          throw failure;
+        },
+      },
+    );
+
+    expect(() => closeContextMenu()).toThrow(failure);
+    expect(menu.isConnected).toBe(false);
+    expect(() => closeContextMenu()).not.toThrow();
   });
 });
 
@@ -299,6 +388,22 @@ function definitionMatch(
   return { path, line, column: 10, preview, matchText: "sampleThing" };
 }
 
+function previewResponse(path: string, line: number): Response {
+  const body: FileRangeResponse = {
+    path,
+    ref: "sample-ref",
+    start: line,
+    end: line,
+    lines: ["function sampleThing() {}"],
+    total: 40,
+    complete: true,
+    generation: 1,
+  };
+  return new Response(JSON.stringify(body), {
+    headers: { "content-type": "application/json" },
+  });
+}
+
 function defaultFileRoute(): AppRoute {
   return {
     screen: "file",
@@ -315,6 +420,10 @@ function setupDefinitionFlow(
     route?: AppRoute;
     html?: string;
     cellSelector?: string;
+    previewResponse?: (
+      request: RecordedRequest,
+      index: number,
+    ) => Promise<Response>;
   } = {},
 ) {
   document.body.innerHTML =
@@ -333,6 +442,7 @@ function setupDefinitionFlow(
   if (!textNode) throw new Error("missing sample symbol text node");
 
   const requests: RecordedRequest[] = [];
+  const previewRequests: RecordedRequest[] = [];
   const loads: Promise<unknown>[] = [];
   const scopeAppends = { count: 0 };
   const opened: Array<{
@@ -359,6 +469,29 @@ function setupDefinitionFlow(
         url: new URL(String(input), "http://localhost/"),
         signal: init.signal,
       };
+      if (request.url.pathname === "/file_range") {
+        previewRequests.push(request);
+        if (options.previewResponse) {
+          return options.previewResponse(request, previewRequests.length - 1);
+        }
+        const start = Number(request.url.searchParams.get("start"));
+        const end = Number(request.url.searchParams.get("end"));
+        const body: FileRangeResponse = {
+          path: request.url.searchParams.get("path") ?? "src/sample.ts",
+          ref: request.url.searchParams.get("ref") ?? "sample-ref",
+          start,
+          end,
+          lines: [],
+          total: 0,
+          complete: true,
+          generation: 1,
+        };
+        return Promise.resolve(
+          new Response(JSON.stringify(body), {
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
       requests.push(request);
       return fetchResponse(request, requests.length - 1);
     },
@@ -375,6 +508,9 @@ function setupDefinitionFlow(
       scopeAppends.count += 1;
     },
     inferLang: () => "typescript",
+    getSyntaxHighlight: () => false,
+    loadSourceShikiHighlighter: async () => null,
+    sourceShikiLines: () => null,
     openMatch: (match) => opened.push(match),
     openSearchSheet: (query) => searchSheets.push(query),
     caretFromPoint: () => ({ node: textNode, offset: 3 }),
@@ -387,6 +523,7 @@ function setupDefinitionFlow(
     jump,
     loads,
     opened,
+    previewRequests,
     requests,
     searchSheets,
     scopeAppends,
@@ -463,6 +600,183 @@ describe("definition search flow", () => {
         ),
       ).map((button) => button.textContent),
     ).toEqual(["src/sample-a.ts:4", "src/sample-b.ts:9"]);
+  });
+
+  test.each([
+    {
+      name: "definition candidates",
+      grepResponses: () => [
+        grepResponse([
+          definitionMatch("src/sample-a.ts", 4),
+          definitionMatch("src/sample-b.ts", 9),
+        ]),
+      ],
+      expectedPath: "src/sample-a.ts",
+      expectedLine: 4,
+    },
+    {
+      name: "reference fallback candidates",
+      grepResponses: () => [
+        grepResponse([]),
+        grepResponse([
+          definitionMatch("src/sample-use.ts", 30, "sampleThing();"),
+        ]),
+      ],
+      expectedPath: "src/sample-use.ts",
+      expectedLine: 30,
+    },
+  ])("previews the initially highlighted $name", async ({
+    grepResponses,
+    expectedPath,
+    expectedLine,
+  }) => {
+    const responses = grepResponses();
+    const flow = setupDefinitionFlow(
+      async () => {
+        const response = responses.shift();
+        if (!response) throw new Error("missing sample grep response");
+        return response;
+      },
+      {
+        previewResponse: async () =>
+          previewResponse(expectedPath, expectedLine),
+      },
+    );
+
+    flow.click();
+    await waitFor(() => flow.previewRequests.length === 1);
+    await waitFor(
+      () =>
+        document.querySelector(".gdp-code-preview-location")?.textContent ===
+        `${expectedPath}:${expectedLine}`,
+    );
+
+    expect(flow.previewRequests[0]?.url.searchParams.get("path")).toBe(
+      expectedPath,
+    );
+    expect(q(document, ".gdp-grep-match").textContent).toBe("sampleThing");
+    expect(
+      q(document, ".gdp-definition-preview-flyout").hasAttribute("hidden"),
+    ).toBe(false);
+  });
+
+  test("switches previews on highlight and deduplicates the same candidate", async () => {
+    const flow = setupDefinitionFlow(async () =>
+      grepResponse([
+        definitionMatch("src/sample-a.ts", 4),
+        definitionMatch("src/sample-b.ts", 9),
+      ]),
+    );
+    flow.click();
+    await waitFor(() => flow.previewRequests.length === 1);
+    const second = document.querySelectorAll<HTMLButtonElement>(
+      ".gdp-context-menu button:not(:disabled)",
+    )[1];
+    if (!second) throw new Error("missing second definition candidate");
+
+    second.dispatchEvent(new Event("pointerenter"));
+    second.dispatchEvent(new Event("pointerenter"));
+    await waitFor(() => flow.previewRequests.length === 2);
+
+    expect(flow.previewRequests[0]?.signal.aborted).toBe(true);
+    expect(flow.previewRequests[1]?.url.searchParams.get("path")).toBe(
+      "src/sample-b.ts",
+    );
+    expect(flow.previewRequests).toHaveLength(2);
+  });
+
+  test("closing the menu aborts and removes its preview", async () => {
+    const pending = deferred<Response>();
+    const flow = setupDefinitionFlow(
+      async () =>
+        grepResponse([
+          definitionMatch("src/sample-a.ts", 4),
+          definitionMatch("src/sample-b.ts", 9),
+        ]),
+      { previewResponse: async () => pending.promise },
+    );
+    flow.click();
+    await waitFor(() => flow.previewRequests.length === 1);
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+
+    expect(flow.previewRequests[0]?.signal.aborted).toBe(true);
+    expect(document.querySelector(".gdp-definition-preview-flyout")).toBeNull();
+  });
+
+  test("shows the complete preview HTTP error in the flyout", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const flow = setupDefinitionFlow(
+      async () =>
+        grepResponse([
+          definitionMatch("src/sample-a.ts", 4),
+          definitionMatch("src/sample-b.ts", 9),
+        ]),
+      {
+        previewResponse: async () =>
+          new Response("sample preview detail", {
+            status: 503,
+            statusText: "Service Unavailable",
+          }),
+      },
+    );
+    flow.click();
+    await waitFor(
+      () =>
+        document
+          .querySelector(".gdp-code-preview-message")
+          ?.textContent?.includes("sample preview detail") === true,
+    );
+
+    expect(q(document, ".gdp-code-preview-message").textContent).toContain(
+      "HTTP 503 Service Unavailable",
+    );
+  });
+
+  test.each([
+    {
+      name: "right side when it fits",
+      menuRect: { x: 100, y: 80, width: 200, height: 240 },
+      expectedLeft: "308px",
+    },
+    {
+      name: "left side when the right does not fit",
+      menuRect: { x: 700, y: 80, width: 200, height: 240 },
+      expectedLeft: "292px",
+    },
+  ])("places the flyout on the $name", async ({ menuRect, expectedLeft }) => {
+    const measuredMenu = new DOMRect(
+      menuRect.x,
+      menuRect.y,
+      menuRect.width,
+      menuRect.height,
+    );
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function () {
+        if (this.classList.contains("gdp-context-menu")) return measuredMenu;
+        if (this.classList.contains("gdp-definition-preview-flyout"))
+          return new DOMRect(0, 0, 400, 320);
+        return new DOMRect(0, 0, 20, 20);
+      },
+    );
+    const flow = setupDefinitionFlow(async () =>
+      grepResponse([
+        definitionMatch("src/sample-a.ts", 4),
+        definitionMatch("src/sample-b.ts", 9),
+      ]),
+    );
+
+    flow.click();
+    await waitFor(() => flow.previewRequests.length === 1);
+
+    expect(
+      q<HTMLElement>(document, ".gdp-definition-preview-flyout").style.left,
+    ).toBe(expectedLeft);
+    expect(
+      q<HTMLElement>(document, ".gdp-definition-preview-flyout").style.top,
+    ).toBe("80px");
   });
 
   test("falls back to references and opens the search panel by symbol name", async () => {

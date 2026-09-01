@@ -26,6 +26,7 @@ export type ContextMenuItem =
 type OpenMenu = {
   element: HTMLElement;
   cleanup(): void;
+  onClose?(): void;
 };
 
 let open: OpenMenu | null = null;
@@ -36,6 +37,7 @@ export function closeContextMenu(): void {
   open = null;
   closing.cleanup();
   closing.element.remove();
+  closing.onClose?.();
 }
 
 export function isContextMenuOpen(): boolean {
@@ -53,6 +55,8 @@ export function showContextMenu(
   options: {
     at?: { x: number; y: number };
     focusReturn?: HTMLElement | null;
+    onHighlight?: (index: number) => void;
+    onClose?: () => void;
   } = {},
 ): HTMLElement {
   closeContextMenu();
@@ -61,12 +65,12 @@ export function showContextMenu(
   menu.className = "gdp-context-menu";
   menu.setAttribute("role", "menu");
 
-  for (const item of items) {
+  items.forEach((item, index) => {
     if (item.kind === "separator") {
       const line = document.createElement("hr");
       line.className = "gdp-context-menu-sep";
       menu.appendChild(line);
-      continue;
+      return;
     }
     const button = document.createElement("button");
     button.type = "button";
@@ -75,12 +79,14 @@ export function showContextMenu(
     if (item.title) button.title = item.title;
     if (item.danger) button.classList.add("danger");
     button.disabled = !!item.disabled;
+    button.addEventListener("focus", () => options.onHighlight?.(index));
+    button.addEventListener("pointerenter", () => options.onHighlight?.(index));
     button.addEventListener("click", () => {
       closeContextMenu();
       item.onSelect();
     });
     menu.appendChild(button);
-  }
+  });
 
   document.body.appendChild(menu);
 
@@ -125,6 +131,7 @@ export function showContextMenu(
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onScroll);
     },
+    onClose: options.onClose,
   };
 
   menu.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();

@@ -1,6 +1,12 @@
-export type SearchPaletteLanguage = "en" | "ja";
+import {
+  type CodePreviewLanguage,
+  type CodePreviewText,
+  codePreviewText,
+} from "./code-preview-i18n";
 
-export type SearchPaletteText = {
+export type SearchPaletteLanguage = CodePreviewLanguage;
+
+export type SearchPaletteText = CodePreviewText & {
   files: string;
   grep: string;
   switchToFiles: string;
@@ -34,11 +40,6 @@ export type SearchPaletteText = {
   saveFailed: (label: string, error: string) => string;
   openFile: string;
   selectResult: string;
-  loadingCode: string;
-  fileChanged: string;
-  lines: (start: number, end: number, total?: number) => string;
-  noText: string;
-  codeLoadFailed: (error: string) => string;
   line: (line: number, column: number) => string;
   diffFiles: (count: number) => string;
   typeToSearchFiles: string;
@@ -67,7 +68,6 @@ export type SearchPaletteText = {
   searchFailed: (error: string) => string;
   savingSelection: string;
   selectionSaveFailed: (error: string) => string;
-  unknownError: string;
   // Results sheet (bottom panel tab that keeps a grep result list open).
   pinResults: string;
   pinResultsTitle: string;
@@ -80,6 +80,7 @@ export type SearchPaletteText = {
 };
 
 const EN: SearchPaletteText = {
+  ...codePreviewText("en"),
   files: "Files",
   grep: "Grep",
   switchToFiles: "Switch to file search (Ctrl+K)",
@@ -113,12 +114,6 @@ const EN: SearchPaletteText = {
   saveFailed: (label, error) => `Failed to save ${label}: ${error}`,
   openFile: "Open file",
   selectResult: "Select a result to preview its code context",
-  loadingCode: "Loading code context...",
-  fileChanged: "The file changed. Move the selection to refresh this context.",
-  lines: (start, end, total) =>
-    `Lines ${start}-${end}${total === undefined ? "" : ` of ${total}`}`,
-  noText: "No text is available for this range.",
-  codeLoadFailed: (error) => `Failed to load code context: ${error}`,
   line: (line, column) => `Line ${line}:${column}`,
   diffFiles: (count) => `${count} diff files`,
   typeToSearchFiles: "Type to search repository files",
@@ -155,7 +150,6 @@ const EN: SearchPaletteText = {
   searchFailed: (error) => `Search failed: ${error}`,
   savingSelection: "Saving selection...",
   selectionSaveFailed: (error) => `Failed to save selection: ${error}`,
-  unknownError: "unknown error",
   pinResults: "Pin",
   pinResultsTitle:
     "Keep these results open in the bottom panel while you browse (Ctrl+Enter)",
@@ -168,6 +162,7 @@ const EN: SearchPaletteText = {
 };
 
 const JA: SearchPaletteText = {
+  ...codePreviewText("ja"),
   files: "ファイル",
   grep: "GREP",
   switchToFiles: "ファイル名検索に切り替え (Ctrl+K)",
@@ -201,13 +196,6 @@ const JA: SearchPaletteText = {
   saveFailed: (label, error) => `${label}を保存できませんでした: ${error}`,
   openFile: "ファイルを開く",
   selectResult: "結果を選ぶとコードの前後を表示します",
-  loadingCode: "コードの前後を読み込み中...",
-  fileChanged:
-    "ファイルが変更されました。選択を動かして再読み込みしてください。",
-  lines: (start, end, total) =>
-    `${start}-${end} 行${total === undefined ? "" : ` / 全 ${total} 行`}`,
-  noText: "この範囲に表示できるテキストはありません。",
-  codeLoadFailed: (error) => `コードの前後を読み込めませんでした: ${error}`,
   line: (line, column) => `${line} 行:${column}`,
   diffFiles: (count) => `差分ファイル ${count} 件`,
   typeToSearchFiles: "リポジトリ内のファイル名を入力してください",
@@ -242,7 +230,6 @@ const JA: SearchPaletteText = {
   searchFailed: (error) => `検索に失敗しました: ${error}`,
   savingSelection: "選択履歴を保存中...",
   selectionSaveFailed: (error) => `選択履歴を保存できませんでした: ${error}`,
-  unknownError: "不明なエラー",
   pinResults: "固定",
   pinResultsTitle: "この結果を下パネルに出したまま閲覧を続ける (Ctrl+Enter)",
   resultsTitle: "検索",

@@ -11,8 +11,10 @@ import {
 import { errorWithCause, responseErrorMessage } from "../core/error-detail";
 import type { AppRoute } from "../core/routes";
 import { buildGrepRequestParams } from "../core/search-palette";
+import type { ShikiHighlighter } from "../core/shiki-loader";
 import type { DiffCardElement, GrepMatch, GrepResponse } from "../core/types";
 import { expandWordAt, WORD_CHAR_RE } from "../core/word-boundary";
+import { createCodePreview } from "./code-preview";
 import {
   type ContextMenuItem,
   closeContextMenu,
@@ -141,6 +143,13 @@ export type DefinitionJumpDeps = {
   isAbortError(err: unknown): boolean;
   appendScopeParams(params: URLSearchParams): void;
   inferLang(path: string): string | null;
+  getSyntaxHighlight(): boolean;
+  loadSourceShikiHighlighter(lang: string): Promise<ShikiHighlighter | null>;
+  sourceShikiLines(
+    textValue: string,
+    lang: string,
+    highlighter: ShikiHighlighter,
+  ): string[] | null;
   openMatch(match: {
     path: string;
     ref: string;
@@ -356,11 +365,79 @@ function triggerForCell(
 function openSearchMenu(
   trigger: SearchTrigger,
   items: ContextMenuItem[],
+  preview?: {
+    deps: DefinitionJumpDeps;
+    matches: Array<GrepMatch | null>;
+  },
 ): HTMLElement {
-  return showContextMenu(trigger.anchor, items, {
+  if (!preview) {
+    return showContextMenu(trigger.anchor, items, {
+      at: trigger.at,
+      focusReturn: trigger.focusReturn,
+    });
+  }
+
+  const flyout = document.createElement("div");
+  flyout.className = "gdp-definition-preview-flyout";
+  flyout.hidden = true;
+  flyout.setAttribute("aria-hidden", "true");
+  document.body.appendChild(flyout);
+  const codePreview = createCodePreview(flyout, {
+    trackLoad: preview.deps.trackLoad,
+    isAbortError: preview.deps.isAbortError,
+    getLanguage: () => preview.deps.STATE.language,
+    getSyntaxHighlight: preview.deps.getSyntaxHighlight,
+    inferLang: preview.deps.inferLang,
+    loadSourceShikiHighlighter: preview.deps.loadSourceShikiHighlighter,
+    sourceShikiLines: preview.deps.sourceShikiLines,
+  });
+  let menu: HTMLElement | null = null;
+  let pendingPosition = false;
+  const positionFlyout = () => {
+    if (!menu || flyout.hidden) return;
+    pendingPosition = false;
+    const menuRect = menu.getBoundingClientRect();
+    const flyoutRect = flyout.getBoundingClientRect();
+    const right = menuRect.right + 8;
+    const left = menuRect.left - flyoutRect.width - 8;
+    const fitsRight = right + flyoutRect.width <= window.innerWidth - 8;
+    const maxLeft = Math.max(8, window.innerWidth - flyoutRect.width - 8);
+    const maxTop = Math.max(8, window.innerHeight - flyoutRect.height - 8);
+    flyout.style.left = `${Math.max(8, Math.min(fitsRight ? right : left, maxLeft))}px`;
+    flyout.style.top = `${Math.max(8, Math.min(menuRect.top, maxTop))}px`;
+  };
+  const highlight = (index: number) => {
+    const match = preview.matches[index];
+    if (!match) {
+      codePreview.clear("");
+      flyout.hidden = true;
+      return;
+    }
+    flyout.hidden = false;
+    codePreview.show({
+      target: {
+        path: match.path,
+        ref: trigger.context.ref,
+        line: match.line,
+        column: match.column,
+      },
+      match: { text: trigger.symbol, caseSensitive: true },
+    });
+    if (menu) positionFlyout();
+    else pendingPosition = true;
+  };
+
+  menu = showContextMenu(trigger.anchor, items, {
     at: trigger.at,
     focusReturn: trigger.focusReturn,
+    onHighlight: highlight,
+    onClose: () => {
+      codePreview.dispose();
+      flyout.remove();
+    },
   });
+  if (pendingPosition) positionFlyout();
+  return menu;
 }
 
 function createDefinitionSearchRunner(
@@ -465,22 +542,26 @@ function createDefinitionSearchRunner(
           return;
         }
         if (candidates.length > 1) {
-          const visible = candidates
-            .slice(0, 20)
-            .map((match) =>
-              matchMenuItem(
-                match,
-                trigger.context.ref,
-                trigger.symbol,
-                deps.openMatch,
-              ),
-            );
+          const visibleMatches = candidates.slice(0, 20);
+          const visible = visibleMatches.map((match) =>
+            matchMenuItem(
+              match,
+              trigger.context.ref,
+              trigger.symbol,
+              deps.openMatch,
+            ),
+          );
+          const previewMatches: Array<GrepMatch | null> = [...visibleMatches];
           if (candidates.length > visible.length) {
             visible.push(
               disabledMenuItem(`+${candidates.length - visible.length}`),
             );
+            previewMatches.push(null);
           }
-          ownMenu = openSearchMenu(trigger, visible);
+          ownMenu = openSearchMenu(trigger, visible, {
+            deps,
+            matches: previewMatches,
+          });
           return;
         }
 
@@ -525,7 +606,10 @@ function createDefinitionSearchRunner(
             onSelect: () => deps.openSearchSheet(trigger.symbol),
           },
         ];
-        ownMenu = openSearchMenu(trigger, items);
+        ownMenu = openSearchMenu(trigger, items, {
+          deps,
+          matches: [null, ...references.matches.slice(0, 10), null, null],
+        });
       } catch (err) {
         if (deps.isAbortError(err) || abort.signal.aborted) {
           if (myGeneration === generation) closeOwnMenu();

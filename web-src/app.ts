@@ -1396,6 +1396,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     isAbortError,
     appendScopeParams,
     inferLang: SOURCE_VIEW.inferLang,
+    getSyntaxHighlight: () => STATE.syntaxHighlight,
+    loadSourceShikiHighlighter: (lang) =>
+      SOURCE_VIEW.loadSourceShikiHighlighter(lang),
+    sourceShikiLines: (textValue, lang, highlighter) =>
+      SOURCE_VIEW.sourceShikiLines(textValue, lang, highlighter),
     openMatch: ({ path, ref, line, hl }) => {
       setRoute({
         screen: "file",
