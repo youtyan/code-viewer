@@ -2,10 +2,7 @@ import { errorWithCause, responseErrorMessage } from "../core/error-detail";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 import { normalizeSourceShikiLang } from "../core/source-meta";
 import type { FileRangeResponse } from "../core/types";
-import {
-  type CodePreviewLanguage,
-  codePreviewText,
-} from "./code-preview-i18n";
+import { type CodePreviewLanguage, codePreviewText } from "./code-preview-i18n";
 import { markNeedleInCell } from "./text-mark";
 
 export type CodePreviewRequest = {
@@ -133,9 +130,7 @@ export function createCodePreview(
     controller = abort;
     const myGeneration = ++generation;
     const { target } = request;
-    const start = target.line
-      ? Math.max(1, target.line - CONTEXT_RADIUS)
-      : 1;
+    const start = target.line ? Math.max(1, target.line - CONTEXT_RADIUS) : 1;
     const end = target.line ? target.line + CONTEXT_RADIUS : FILE_LINE_LIMIT;
     renderFrame(request, codePreviewText(deps.getLanguage()).loadingCode);
     const params = new URLSearchParams({
