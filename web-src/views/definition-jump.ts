@@ -159,6 +159,13 @@ type SearchTrigger = {
   focusReturn: HTMLElement | null;
 };
 
+type CellSymbol = {
+  symbol: string;
+  context: DefinitionCellContext;
+  start: number;
+  end: number;
+};
+
 const CODE_CELL_SELECTOR =
   ".gdp-source-line-code, .gdp-source-virtual-line-code, .d2h-code-line-ctn";
 
@@ -219,6 +226,54 @@ function defaultCaretFromPoint(
     : null;
 }
 
+function symbolInCell(
+  deps: DefinitionJumpDeps,
+  cell: HTMLElement,
+  node: Node,
+  nodeOffset: number,
+): CellSymbol | null {
+  const context = contextForCell(cell, deps.STATE);
+  if (!context) return null;
+  const offset = offsetInCell(cell, node, nodeOffset);
+  const expanded = expandWordAt(cell.textContent ?? "", offset);
+  const lang = definitionLangOf(deps.inferLang(context.path));
+  if (!expanded || !isJumpableSymbol(expanded.word, lang)) return null;
+  return { symbol: expanded.word, context, ...expanded };
+}
+
+function rangeInCell(
+  cell: HTMLElement,
+  start: number,
+  end: number,
+): Range | null {
+  if (start < 0 || end <= start) return null;
+  const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+  let startNode: Text | null = null;
+  let startOffset = 0;
+  let endNode: Text | null = null;
+  let endOffset = 0;
+  let offset = 0;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const textNode = node as Text;
+    const nextOffset = offset + textNode.data.length;
+    if (!startNode && start >= offset && start <= nextOffset) {
+      startNode = textNode;
+      startOffset = start - offset;
+    }
+    if (end >= offset && end <= nextOffset) {
+      endNode = textNode;
+      endOffset = end - offset;
+      break;
+    }
+    offset = nextOffset;
+  }
+  if (!startNode || !endNode) return null;
+  const range = document.createRange();
+  range.setStart(startNode, startOffset);
+  range.setEnd(endNode, endOffset);
+  return range;
+}
+
 function disabledMenuItem(label: string): ContextMenuItem {
   return { label, disabled: true, onSelect: () => undefined };
 }
@@ -245,7 +300,6 @@ function grepRequest(
     regex: boolean;
     wholeWord: boolean;
     max: number;
-    paths?: string[];
   },
   signal: AbortSignal,
 ): Promise<GrepResponse> {
@@ -259,7 +313,6 @@ function grepRequest(
     max: options.max,
   });
   deps.appendScopeParams(params);
-  for (const path of options.paths ?? []) params.append("path", path);
   return deps.trackLoad<GrepResponse>(
     fetch(`/_grep?${params.toString()}`, { signal }).then(async (response) => {
       if (!response.ok) {
@@ -289,15 +342,11 @@ function triggerForCell(
   nodeOffset: number,
   at: { x: number; y: number },
 ): SearchTrigger | null {
-  const context = contextForCell(cell, deps.STATE);
-  if (!context) return null;
-  const offset = offsetInCell(cell, node, nodeOffset);
-  const expanded = expandWordAt(cell.textContent ?? "", offset);
-  const lang = definitionLangOf(deps.inferLang(context.path));
-  if (!expanded || !isJumpableSymbol(expanded.word, lang)) return null;
+  const resolved = symbolInCell(deps, cell, node, nodeOffset);
+  if (!resolved) return null;
   return {
-    symbol: expanded.word,
-    context,
+    symbol: resolved.symbol,
+    context: resolved.context,
     anchor: cell.closest<HTMLElement>("tr, [data-line]") ?? cell,
     at,
     focusReturn: focusReturnFor(cell),
@@ -375,7 +424,6 @@ function createDefinitionSearchRunner(
             regex: true,
             wholeWord: false,
             max: 50,
-            paths: query.globs,
           },
           abort.signal,
         );
@@ -389,7 +437,6 @@ function createDefinitionSearchRunner(
               regex: false,
               wholeWord: true,
               max: 200,
-              paths: query.globs,
             },
             abort.signal,
           );
@@ -402,6 +449,7 @@ function createDefinitionSearchRunner(
             symbol: trigger.symbol,
             currentPath: trigger.context.path,
             currentLine: trigger.context.line,
+            lang,
           },
           query.classifiers,
         );
@@ -506,6 +554,114 @@ export function createDefinitionJump(deps: DefinitionJumpDeps): {
 } {
   const installed = new WeakSet<HTMLElement>();
   const runDefinitionSearch = createDefinitionSearchRunner(deps);
+  let globalHoverListenersInstalled = false;
+  let metaPressed = false;
+  let controlPressed = false;
+  let hoverFrame: number | null = null;
+  let hoverTarget: {
+    cell: HTMLElement;
+    x: number;
+    y: number;
+  } | null = null;
+  let underline: HTMLElement | null = null;
+
+  const modifierPressed = () => metaPressed || controlPressed;
+  const cancelHoverFrame = () => {
+    if (hoverFrame !== null) window.cancelAnimationFrame(hoverFrame);
+    hoverFrame = null;
+    hoverTarget = null;
+  };
+  const hideUnderline = () => {
+    if (underline) underline.hidden = true;
+  };
+  const clearHover = () => {
+    cancelHoverFrame();
+    hideUnderline();
+  };
+  const syncModifierClass = () => {
+    document.body.classList.toggle("gdp-def-mod", modifierPressed());
+    if (!modifierPressed()) clearHover();
+  };
+  const showUnderline = (rect: DOMRect) => {
+    if (
+      !Number.isFinite(rect.left) ||
+      !Number.isFinite(rect.top) ||
+      rect.width <= 0 ||
+      rect.height <= 0
+    ) {
+      hideUnderline();
+      return;
+    }
+    if (!underline) {
+      underline = document.createElement("div");
+      underline.className = "gdp-def-underline";
+      underline.setAttribute("aria-hidden", "true");
+    }
+    if (!underline.isConnected) document.body.appendChild(underline);
+    underline.style.left = `${rect.left}px`;
+    underline.style.top = `${rect.top}px`;
+    underline.style.width = `${rect.width}px`;
+    underline.style.height = `${rect.height}px`;
+    underline.hidden = false;
+  };
+  const scheduleUnderline = (cell: HTMLElement, x: number, y: number) => {
+    hoverTarget = { cell, x, y };
+    if (hoverFrame !== null) return;
+    hoverFrame = window.requestAnimationFrame(() => {
+      hoverFrame = null;
+      const target = hoverTarget;
+      hoverTarget = null;
+      if (!modifierPressed() || !target?.cell.isConnected) {
+        hideUnderline();
+        return;
+      }
+      const caret = (deps.caretFromPoint ?? defaultCaretFromPoint)(
+        target.x,
+        target.y,
+      );
+      if (!caret) {
+        hideUnderline();
+        return;
+      }
+      const resolved = symbolInCell(
+        deps,
+        target.cell,
+        caret.node,
+        caret.offset,
+      );
+      const range = resolved
+        ? rangeInCell(target.cell, resolved.start, resolved.end)
+        : null;
+      if (!range) {
+        hideUnderline();
+        return;
+      }
+      showUnderline(range.getBoundingClientRect());
+    });
+  };
+
+  function installGlobalHoverListeners(): void {
+    if (globalHoverListenersInstalled) return;
+    globalHoverListenersInstalled = true;
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Meta") metaPressed = true;
+      else if (event.key === "Control") controlPressed = true;
+      else return;
+      syncModifierClass();
+    });
+    window.addEventListener("keyup", (event) => {
+      if (event.key === "Meta") metaPressed = false;
+      else if (event.key === "Control") controlPressed = false;
+      else return;
+      syncModifierClass();
+    });
+    window.addEventListener("blur", () => {
+      metaPressed = false;
+      controlPressed = false;
+      syncModifierClass();
+    });
+    window.addEventListener("scroll", clearHover, true);
+  }
 
   function triggerFromKeyboard(): boolean {
     const selection = window.getSelection();
@@ -557,6 +713,16 @@ export function createDefinitionJump(deps: DefinitionJumpDeps): {
     install(content) {
       if (installed.has(content)) return;
       installed.add(content);
+      installGlobalHoverListeners();
+      content.addEventListener("mousemove", (event) => {
+        if (!modifierPressed()) return;
+        const cell = cellFromNode(event.target as Node | null);
+        if (!cell) {
+          clearHover();
+          return;
+        }
+        scheduleUnderline(cell, event.clientX, event.clientY);
+      });
       content.addEventListener("click", (event) => {
         if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey)
           return;

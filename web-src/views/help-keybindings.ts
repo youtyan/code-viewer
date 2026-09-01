@@ -239,6 +239,13 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
         description: { en: "Go to the diff screen", ja: "差分画面へ移動" },
       },
       {
+        selectors: [{ action: "goto-definition" }],
+        description: {
+          en: "Jump to definition of the symbol at the caret / selection",
+          ja: "カーソル位置・選択中のシンボルの定義へジャンプ",
+        },
+      },
+      {
         selectors: [{ action: "goto-history" }],
         description: {
           en: "Go to the history screen (keeps the ref you are viewing)",

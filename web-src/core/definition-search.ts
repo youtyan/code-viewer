@@ -31,7 +31,6 @@ type PatternTemplate = (symbol: string, vocab: Vocab) => string;
 export type DefinitionQuery = {
   pattern: string;
   classifiers: RegExp[];
-  globs: string[];
 };
 
 export type DefinitionCandidate = GrepMatch & {
@@ -252,7 +251,6 @@ export function buildDefinitionQuery(
     classifiers: templates.map(
       (template) => new RegExp(template(escaped, JS_VOCAB)),
     ),
-    globs: lang ? [...LANG_FAMILY_GLOBS[lang]] : [],
   };
 }
 
@@ -317,6 +315,7 @@ export function rankDefinitionMatches(
     symbol: string;
     currentPath: string;
     currentLine: number | null;
+    lang: DefinitionLang | null;
   },
   classifiers: RegExp[],
 ): DefinitionCandidate[] {
@@ -324,6 +323,9 @@ export function rankDefinitionMatches(
   const seen = new Set<string>();
 
   for (const match of matches) {
+    if (ctx.lang !== null && definitionLangForPath(match.path) !== ctx.lang) {
+      continue;
+    }
     if (isCommentLine(match.path, match.preview)) continue;
     const patternIndex = classifiers.findIndex((classifier) =>
       classifier.test(match.preview),

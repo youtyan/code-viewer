@@ -190,6 +190,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
+                text: "Cmd/Ctrl+click a function, class, or variable in source or diff code to jump to its definition; with a caret or selected symbol, g . performs the same lookup. When several definitions match, choose one from the candidate menu. If no definition matches, the menu falls back to references and can open the symbol name in the search panel.",
+              },
+              {
+                kind: "paragraph",
                 text: "The sidebar filter takes plain text (anywhere in the path), /pattern/ for a regex, ~text for a fuzzy match and *.ts or src/** for a glob, and shows matching / all file counts while active.",
               },
               {
@@ -998,6 +1002,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "Ctrl+K でファイルパレット、Ctrl+G でコード検索パレットが開きます。ヘッダのアイコン列の左端にある検索ボタンでも同じです（Shift+クリックでコード検索）。2 つは 1 つのウィンドウを共有し、切り替えても入力中の検索語は残り、閉じて開き直すと前回の検索語が選択状態で戻ります。ファイルパレットは空のとき最近開いたファイルを並べ、結果が 50 件で切られたときはその旨を表示します。コード検索には正規表現（Alt+R）・大文字小文字の区別（Alt+C）・単語単位（Alt+W）の切り替えがあり、検索語の中の path:<ディレクトリ or glob> で対象を絞れます。大文字小文字は「区別する」を押さない限りどのエンジンでも区別しません。ヒットを開くと該当行の一致箇所が強調され、大きな仮想表示のファイルではファイル内検索バーに検索語が入ります。「固定」（または Ctrl+Enter）を押すと検索語が下パネルの「検索」タブに移り、ファイルを開いて回る間も結果一覧が残ります。検索語は URL（?results=）に載るのでリロードしても同じ検索が走ります。",
+              },
+              {
+                kind: "paragraph",
+                text: "ソースまたは diff の関数・クラス・変数を Cmd/Ctrl+クリックすると定義へ移動できます。カーソル位置または選択中のシンボルには g . でも同じ検索を実行します。定義候補が複数ある場合は候補メニューから選択でき、定義が見つからない場合は参照箇所へフォールバックし、そのシンボル名を検索パネルで開けます。",
               },
               {
                 kind: "paragraph",

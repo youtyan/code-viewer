@@ -32,6 +32,7 @@ afterAll(() => {
 });
 
 afterEach(() => {
+  window.dispatchEvent(new Event("blur"));
   closeContextMenu();
   document.body.innerHTML = "";
   Object.defineProperty(globalThis, "fetch", {
@@ -435,16 +436,7 @@ describe("definition search flow", () => {
       caseSensitive: "1",
       wholeWord: null,
       max: "50",
-      paths: [
-        "*.ts",
-        "*.tsx",
-        "*.mts",
-        "*.cts",
-        "*.js",
-        "*.jsx",
-        "*.mjs",
-        "*.cjs",
-      ],
+      paths: [],
     });
     expect(flow.scopeAppends.count).toBe(1);
   });
@@ -530,17 +522,17 @@ describe("definition search flow", () => {
     const first = flow.requests[0].url.searchParams;
     const second = flow.requests[1].url.searchParams;
     expect({
+      firstPaths: first.getAll("path"),
       regex: second.get("regex"),
       wholeWord: second.get("word"),
       max: second.get("max"),
-      samePaths:
-        JSON.stringify(second.getAll("path")) ===
-        JSON.stringify(first.getAll("path")),
+      secondPaths: second.getAll("path"),
     }).toEqual({
+      firstPaths: [],
       regex: null,
       wholeWord: "1",
       max: "200",
-      samePaths: true,
+      secondPaths: [],
     });
   });
 
@@ -700,5 +692,118 @@ describe("definition search flow", () => {
 
     expect(click.defaultPrevented).toBe(false);
     expect(flow.requests).toEqual([]);
+  });
+});
+
+describe("definition hover affordance", () => {
+  test.each([
+    { name: "Meta", key: "Meta" },
+    { name: "Control", key: "Control" },
+  ])("toggles the body modifier class for $name", ({ key }) => {
+    setupDefinitionFlow(async () => grepResponse([]));
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+    expect(document.body.classList.contains("gdp-def-mod")).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent("keyup", { key }));
+    expect(document.body.classList.contains("gdp-def-mod")).toBe(false);
+  });
+
+  test("does not render a queued underline after the modifier is released", () => {
+    const frames: FrameRequestCallback[] = [];
+    const cancel = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => undefined);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const flow = setupDefinitionFlow(async () => grepResponse([]));
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Meta" }));
+    flow.cell.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 80, clientY: 40 }),
+    );
+    const queued = frames[0];
+    if (!queued) throw new Error("missing queued hover frame");
+    window.dispatchEvent(new KeyboardEvent("keyup", { key: "Meta" }));
+    queued(16);
+
+    expect(cancel).toHaveBeenCalledWith(1);
+    expect(document.querySelector(".gdp-def-underline")).toBeNull();
+  });
+
+  test("draws one throttled Range overlay without changing code markup and hides it at lifecycle boundaries", () => {
+    const frames: FrameRequestCallback[] = [];
+    let frameId = 0;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      frameId += 1;
+      return frameId;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(
+      () => undefined,
+    );
+    vi.spyOn(Range.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(24, 32, 88, 18),
+    );
+    const flow = setupDefinitionFlow(async () => grepResponse([]));
+    const originalMarkup = flow.cell.innerHTML;
+    const moveOverSymbol = () =>
+      flow.cell.dispatchEvent(
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          clientX: 80,
+          clientY: 40,
+        }),
+      );
+    const flushFrame = () => {
+      const callback = frames.shift();
+      if (!callback) throw new Error("missing queued hover frame");
+      callback(16);
+    };
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Meta" }));
+    moveOverSymbol();
+    moveOverSymbol();
+    expect(frames).toHaveLength(1);
+    flushFrame();
+
+    const underline = q<HTMLElement>(document, ".gdp-def-underline");
+    expect({
+      left: underline.style.left,
+      top: underline.style.top,
+      width: underline.style.width,
+      height: underline.style.height,
+      hidden: underline.hidden,
+      overlays: document.querySelectorAll(".gdp-def-underline").length,
+      markup: flow.cell.innerHTML,
+    }).toEqual({
+      left: "24px",
+      top: "32px",
+      width: "88px",
+      height: "18px",
+      hidden: false,
+      overlays: 1,
+      markup: originalMarkup,
+    });
+
+    flow.content.dispatchEvent(new Event("scroll"));
+    expect(underline.hidden).toBe(true);
+
+    moveOverSymbol();
+    flushFrame();
+    flow.content.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 4, clientY: 4 }),
+    );
+    expect(underline.hidden).toBe(true);
+
+    moveOverSymbol();
+    flushFrame();
+    window.dispatchEvent(new Event("blur"));
+    expect({
+      hidden: underline.hidden,
+      modifierClass: document.body.classList.contains("gdp-def-mod"),
+    }).toEqual({ hidden: true, modifierClass: false });
   });
 });

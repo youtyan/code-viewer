@@ -81,6 +81,9 @@ Requires Node.js 20 or newer. Development uses
   result list stays open while you browse files; the query rides in the
   URL (`?results=<query>`) so a reload re-runs it, and the Search tab can
   also be opened directly from the panel's tab row.
+- Jump from a function, class, or variable in source and diff code to its
+  definition with `Cmd/Ctrl+click` or `g .`; choose from ranked candidates when
+  several definitions match, with references available as a fallback.
 - Switch the viewer UI between English and Japanese from Settings & Help —
   the language toggle live-updates every screen including the datastore
   viewer.

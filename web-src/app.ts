@@ -114,6 +114,7 @@ import {
 } from "./views/annotations-ui";
 import { createBlameView } from "./views/blame-view";
 import { createDatabaseView } from "./views/database/database-view";
+import { createDefinitionJump } from "./views/definition-jump";
 import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
 import { createDoctorView, doctorText } from "./views/doctor-view";
@@ -1388,6 +1389,28 @@ window.GdpExpandLogic = GdpExpandLogic;
     handleVirtualSourcePagingKeydown,
     openVirtualSourceSearchFromKeyboard,
   } = SOURCE_VIEW;
+
+  const DEFINITION_JUMP = createDefinitionJump({
+    STATE,
+    trackLoad,
+    isAbortError,
+    appendScopeParams,
+    inferLang: SOURCE_VIEW.inferLang,
+    openMatch: ({ path, ref, line, hl }) => {
+      setRoute({
+        screen: "file",
+        path,
+        ref,
+        view: "blob",
+        line,
+        ...(hl ? { hl } : {}),
+        range: currentRange(),
+      });
+      void renderStandaloneSource({ path, ref });
+    },
+    openSearchSheet,
+  });
+  DEFINITION_JUMP.install($("#content"));
 
   const BLAME_VIEW = createBlameView({
     $,
@@ -4779,6 +4802,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (action === "tab-preview" || action === "tab-code") {
       return switchSourceTab(action === "tab-preview" ? "preview" : "code");
     }
+    if (action === "goto-definition")
+      return DEFINITION_JUMP.triggerFromKeyboard();
     if (action === "annotation-next" || action === "annotation-previous") {
       ANNOTATIONS_UI?.stepAnnotation(action === "annotation-next" ? 1 : -1);
       // Hand focus to the code surface so j / k scroll the jumped-to code

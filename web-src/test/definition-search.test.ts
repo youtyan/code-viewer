@@ -155,6 +155,7 @@ describe("definition patterns", () => {
         symbol: "sampleThing",
         currentPath: "src/current.txt",
         currentLine: null,
+        lang,
       },
       query.classifiers,
     );
@@ -175,20 +176,6 @@ describe("definition patterns", () => {
     expect(query.classifiers.every((item) => item instanceof RegExp)).toBe(
       true,
     );
-  });
-
-  test.each([
-    [
-      "js",
-      ["*.ts", "*.tsx", "*.mts", "*.cts", "*.js", "*.jsx", "*.mjs", "*.cjs"],
-    ],
-    ["c", ["*.c", "*.h", "*.cc", "*.cpp", "*.hpp", "*.cxx", "*.hxx"]],
-    ["shell", ["*.sh", "*.bash", "*.zsh"]],
-    [null, []],
-  ] as Array<
-    [DefinitionLang | null, string[]]
-  >)("returns static globs for %s", (lang, expected) => {
-    expect(buildDefinitionQuery(lang, "sampleThing").globs).toEqual(expected);
   });
 });
 
@@ -239,6 +226,7 @@ describe("definition search inputs", () => {
 
 type RankingCase = {
   name: string;
+  lang: DefinitionLang | null;
   currentPath: string;
   currentLine?: number;
   matches: GrepMatch[];
@@ -250,6 +238,7 @@ describe("rankDefinitionMatches", () => {
   const cases: RankingCase[] = [
     {
       name: "self removal",
+      lang: "js",
       currentPath: "src/current.ts",
       currentLine: 5,
       matches: [match("src/current.ts", 5, fn), match("src/other.ts", 2, fn)],
@@ -257,12 +246,14 @@ describe("rankDefinitionMatches", () => {
     },
     {
       name: "same file",
+      lang: "js",
       currentPath: "src/current.ts",
       matches: [match("src/other.ts", 2, fn), match("src/current.ts", 8, fn)],
       expected: ["src/current.ts:8", "src/other.ts:2"],
     },
     {
       name: "test penalty",
+      lang: "js",
       currentPath: "src/current.ts",
       matches: [
         match("src/sample.test.ts", 2, fn),
@@ -272,6 +263,7 @@ describe("rankDefinitionMatches", () => {
     },
     {
       name: "pattern priority",
+      lang: "js",
       currentPath: "src/current.ts",
       matches: [
         match("src/variable.ts", 2, "const sampleThing = 1;"),
@@ -281,6 +273,7 @@ describe("rankDefinitionMatches", () => {
     },
     {
       name: "common directory",
+      lang: "js",
       currentPath: "src/feature/current.ts",
       matches: [
         match("src/other/sample.ts", 2, fn),
@@ -290,12 +283,14 @@ describe("rankDefinitionMatches", () => {
     },
     {
       name: "dedupe",
+      lang: "js",
       currentPath: "src/current.ts",
       matches: [match("src/sample.ts", 2, fn), match("src/sample.ts", 2, fn)],
       expected: ["src/sample.ts:2"],
     },
     {
       name: "comment removal",
+      lang: "js",
       currentPath: "src/current.ts",
       matches: [
         match("src/comment.ts", 1, `// ${fn}`),
@@ -305,6 +300,7 @@ describe("rankDefinitionMatches", () => {
     },
     {
       name: "stable tie order",
+      lang: "js",
       currentPath: "current.ts",
       matches: [
         match("src/z.ts", 3, fn),
@@ -313,9 +309,24 @@ describe("rankDefinitionMatches", () => {
       ],
       expected: ["src/a.ts:2", "src/a.ts:4", "src/z.ts:3"],
     },
+    {
+      name: "language family removal",
+      lang: "js",
+      currentPath: "src/current.ts",
+      matches: [match("src/sample.py", 2, fn), match("src/sample.ts", 2, fn)],
+      expected: ["src/sample.ts:2"],
+    },
+    {
+      name: "null language keeps every family",
+      lang: null,
+      currentPath: "src/current.txt",
+      matches: [match("src/sample.ts", 2, fn), match("src/sample.py", 2, fn)],
+      expected: ["src/sample.py:2", "src/sample.ts:2"],
+    },
   ];
 
   test.each(cases)("orders by $name", ({
+    lang,
     currentPath,
     currentLine,
     matches,
@@ -323,7 +334,12 @@ describe("rankDefinitionMatches", () => {
   }) => {
     const ranked = rankDefinitionMatches(
       matches,
-      { symbol: "sampleThing", currentPath, currentLine: currentLine ?? null },
+      {
+        symbol: "sampleThing",
+        currentPath,
+        currentLine: currentLine ?? null,
+        lang,
+      },
       buildDefinitionQuery("js", "sampleThing").classifiers,
     );
     expect(ranked.map((item) => `${item.path}:${item.line}`)).toEqual(expected);

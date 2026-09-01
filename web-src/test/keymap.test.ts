@@ -267,6 +267,13 @@ describe("keymap action resolution", () => {
         pendingG: true,
       }),
     ).toBe("goto-bottom");
+    expect(
+      resolveKeymapAction(key("."), {
+        scope: "main",
+        editable: false,
+        pendingG: true,
+      }),
+    ).toBe("goto-definition");
   });
 
   test("does not capture Escape for source load cancellation while a lightbox is open", () => {
