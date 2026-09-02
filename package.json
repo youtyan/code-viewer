@@ -95,7 +95,7 @@
   },
   "dependencies": {
     "@redis/client": "6.1.0",
-    "mysql2": "3.22.6",
+    "mysql2": "3.23.1",
     "pg": "8.22.0"
   }
 }
