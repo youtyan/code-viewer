@@ -83,7 +83,8 @@ Requires Node.js 20 or newer. Development uses
   also be opened directly from the panel's tab row.
 - Jump from a function, class, or variable in source and diff code to its
   definition with `Cmd/Ctrl+click` or `g .`; choose from ranked candidates when
-  several definitions match, with references available as a fallback.
+  several definitions match — a code preview of the highlighted candidate
+  appears beside the menu — with references available as a fallback.
 - Switch the viewer UI between English and Japanese from Settings & Help —
   the language toggle live-updates every screen including the datastore
   viewer.
