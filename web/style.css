@@ -528,6 +528,10 @@ body[data-code-font-size="xlarge"] {
   width: min(620px, calc(100vw - 32px));
   height: min(460px, calc(100vh - 32px));
   overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.18);
   pointer-events: none;
 }
 
