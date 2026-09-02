@@ -148,6 +148,18 @@ function makeFakeMissingGitCommand(): string {
   return command;
 }
 
+function makeFailingSearchRgCommand(): string {
+  const root = mkdtempSync(join(tmpdir(), "code-viewer-failing-rg-bin-"));
+  tmpRoots.push(root);
+  const command = join(root, "rg");
+  writeFileSync(
+    command,
+    '#!/bin/sh\n[ "$1" = "--version" ] && exit 0\nprintf \'sample rg regex failure\\n\' >&2\nexit 2\n',
+  );
+  chmodSync(command, 0o755);
+  return command;
+}
+
 function makePathspecRequiredGitCommand(requiredPath: string): string {
   const root = mkdtempSync(join(tmpdir(), "code-viewer-pathspec-git-"));
   tmpRoots.push(root);
@@ -295,13 +307,21 @@ afterEach(() => {
   }
 });
 
-async function startTestPreview(root: string, gitCommand: string) {
+async function startTestPreview(
+  root: string,
+  gitCommand: string,
+  rgCommand?: string,
+) {
   const proc = spawn(
     process.execPath,
     [CLI_BUNDLE, "--port", "0", "--cwd", root],
     {
       cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
-      env: { ...process.env, CODE_VIEWER_BIN_GIT: gitCommand },
+      env: {
+        ...process.env,
+        CODE_VIEWER_BIN_GIT: gitCommand,
+        ...(rgCommand ? { CODE_VIEWER_BIN_RG: rgCommand } : {}),
+      },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -411,6 +431,47 @@ describe("preview CLI", () => {
       );
       expect(response.status).toBe(403);
       expect(response.body.length > 0).toBe(true);
+    } finally {
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
+  test("/_grep returns rg regular-expression failures as HTTP 500", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-grep-failure-"));
+    tmpRoots.push(root);
+    const preview = await startTestPreview(
+      root,
+      makeFakeMissingGitCommand(),
+      makeFailingSearchRgCommand(),
+    );
+
+    try {
+      const response = await fetchWithTimeout(
+        new URL("/_grep?q=%28&regex=1", preview.url).toString(),
+        5000,
+      );
+      expect(response.status).toBe(500);
+      expect(await response.text()).toBe("sample rg regex failure");
+    } finally {
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
+  test("/_grep keeps an unknown ref as a client error", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-grep-ref-"));
+    tmpRoots.push(root);
+    git(root, ["init", "-b", "main"]);
+    const preview = await startTestPreview(
+      root,
+      makePathspecRequiredGitCommand("sample.txt"),
+    );
+
+    try {
+      const response = await fetchWithTimeout(
+        new URL("/_grep?ref=sample-missing&q=sample", preview.url).toString(),
+        5000,
+      );
+      expect(response.status).toBe(400);
     } finally {
       await stopTestPreview(preview.proc, preview.exited);
     }

@@ -24,13 +24,18 @@ import {
   worktreeListResultAsync,
 } from "../server/git";
 import { defaultMcpTools, dispatchJsonRpc } from "../server/mcp";
-import { grepRepoAsync, listRepoFilesAsync } from "../server/search-service";
+import {
+  grepRepoAsync,
+  listRepoFilesAsync,
+  resetRgAvailableCache,
+} from "../server/search-service";
 import { runGit } from "./_git-fixture";
 
 const tmpRoots: string[] = [];
 
 afterEach(() => {
   resetExternalCommandsForTest();
+  resetRgAvailableCache();
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -94,6 +99,29 @@ function fakeSlowGit(): string {
   return path;
 }
 
+function fakeRg(mode: "search-failure" | "unavailable"): string {
+  const root = tempRoot(`code-viewer-${mode}-rg-bin-`);
+  const path = join(root, "rg");
+  writeFileSync(
+    path,
+    mode === "search-failure"
+      ? '#!/bin/sh\n[ "$1" = "--version" ] && exit 0\nprintf \'sample rg regex failure\\n\' >&2\nexit 2\n'
+      : "#!/bin/sh\nprintf 'sample rg unavailable\\n' >&2\nexit 127\n",
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
+
+function configureRg(cwd: string, mode: "search-failure" | "unavailable") {
+  const configured = configureExternalCommands({
+    cwd,
+    env: {},
+    cliOverrides: [{ name: "rg", path: fakeRg(mode) }],
+    allowedNames: ["rg"],
+  });
+  expect(configured).toEqual({ ok: true });
+}
+
 function configureMissingGit(cwd: string): void {
   const configured = configureExternalCommands({
     cwd,
@@ -142,6 +170,71 @@ async function callMcpTool(name: string, args: Record<string, unknown>) {
 }
 
 describe("git command failures", () => {
+  test("returns rg stderr when the search process exits above one", async () => {
+    const cwd = tempRoot("code-viewer-rg-search-failure-cwd-");
+    configureRg(cwd, "search-failure");
+    const originalError = console.error;
+    const logged: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+
+    try {
+      const result = await grepRepoAsync(
+        { cwd, omitDirNames: [], excludeNames: [] },
+        {
+          query: "(",
+          ref: "worktree",
+          paths: [],
+          regex: true,
+          max: 10,
+        },
+      );
+      expect(result).toEqual({
+        ok: false,
+        error: "sample rg regex failure",
+        status: 500,
+      });
+      expect(logged).toEqual([
+        [
+          "[code-viewer] rg grep failed with exit code 2: sample rg regex failure",
+        ],
+      ]);
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  test("keeps fixed-string fallback search when rg is unavailable", async () => {
+    const cwd = tempRoot("code-viewer-rg-unavailable-cwd-");
+    writeFileSync(join(cwd, "sample_file.ts"), "const sample_value = 1;\n");
+    configureRg(cwd, "unavailable");
+
+    const result = await grepRepoAsync(
+      { cwd, omitDirNames: [], excludeNames: [] },
+      {
+        query: "sample_value",
+        ref: "worktree",
+        paths: ["sample_file.ts"],
+        regex: false,
+        max: 10,
+        caseSensitive: true,
+        wholeWord: true,
+      },
+    );
+    if (result.ok !== true) throw new Error(result.error);
+    expect(result.value.engine).toBe("fallback");
+    expect(result.value.matches).toEqual([
+      {
+        path: "sample_file.ts",
+        line: 1,
+        column: 7,
+        preview: "const sample_value = 1;",
+        matchText: "sample_value",
+      },
+    ]);
+  });
+
   test("applies caller cancellation and a dedicated timeout to worktree listing", async () => {
     const cwd = tempRoot("code-viewer-worktree-list-cwd-");
     let configured = configureExternalCommands({

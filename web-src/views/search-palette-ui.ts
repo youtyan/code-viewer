@@ -33,18 +33,16 @@ import {
   rememberPaletteSelection,
 } from "../core/search-palette";
 import type { ShikiHighlighter } from "../core/shiki-loader";
-import { normalizeSourceShikiLang } from "../core/source-meta";
 import type {
   FileMeta,
-  FileRangeResponse,
   FileSearchListResponse,
   GrepResponse,
 } from "../core/types";
+import { type CodePreview, createCodePreview } from "./code-preview";
 import {
   type SearchPaletteLanguage,
   searchPaletteText,
 } from "./search-palette-i18n";
-import { markNeedleInCell } from "./text-mark";
 
 export type SearchPaletteDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;
@@ -168,7 +166,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     controls: HTMLElement;
     list: HTMLElement;
     status: HTMLElement;
-    preview: HTMLElement;
+    codePreview: CodePreview;
     mode: PaletteMode;
     grepRegex: boolean;
     grepCaseSensitive: boolean;
@@ -183,9 +181,6 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     items: PaletteItem[];
     composing: boolean;
     controller?: AbortController;
-    previewController?: AbortController;
-    previewGeneration: number;
-    previewKey: string;
     settingsPending: boolean;
     opening: boolean;
     pointerClientX: number | null;
@@ -201,8 +196,6 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
   // over instead. Session-scoped on purpose: not persisted to settings.
   const LAST_QUERY: Record<PaletteMode, string> = { file: "", grep: "" };
   let repoFileRequestGeneration = 0;
-  const GREP_CONTEXT_RADIUS = 5;
-  const FILE_PREVIEW_LINE_LIMIT = 200;
   const REPO_FILE_CACHE = new Map<string, FileSearchListResponse>();
   const text = () => searchPaletteText(getLanguage());
 
@@ -244,7 +237,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     LAST_QUERY[PALETTE.mode] = PALETTE.input.value;
     const previousFocusScope = PALETTE.previousFocusScope;
     PALETTE.controller?.abort();
-    PALETTE.previewController?.abort();
+    PALETTE.codePreview.dispose();
     for (const detach of PALETTE.detachResizers) detach();
     if (PALETTE.debounce) window.clearTimeout(PALETTE.debounce);
     PALETTE.root.remove();
@@ -310,15 +303,14 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     list.id = "gdp-palette-list";
     list.className = "gdp-palette-list";
     list.setAttribute("role", "listbox");
-    const preview = document.createElement("div");
-    preview.className = "gdp-palette-preview";
-    preview.setAttribute(
+    const previewHost = document.createElement("div");
+    previewHost.setAttribute(
       "aria-label",
       mode === "grep" ? text().grepCodeContext : text().fileCodePreview,
     );
     const body = document.createElement("div");
     body.className = "gdp-palette-body";
-    body.append(list, preview);
+    body.append(list, previewHost);
     dialog.append(label, input, controls, status, body);
     const resizeX = document.createElement("div");
     const resizeY = document.createElement("div");
@@ -336,13 +328,23 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     root.appendChild(dialog);
     document.body.appendChild(root);
     const dialogRect = dialog.getBoundingClientRect();
+    const codePreview = createCodePreview(previewHost, {
+      trackLoad,
+      isAbortError,
+      getLanguage,
+      getSyntaxHighlight,
+      inferLang,
+      loadSourceShikiHighlighter,
+      sourceShikiLines,
+      isStaleGeneration: responseGenerationIsStale,
+    });
     const state: PaletteState = {
       root,
       input,
       controls,
       list,
       status,
-      preview,
+      codePreview,
       mode,
       grepRegex: getGrepRegex(),
       grepCaseSensitive: getGrepCaseSensitive(),
@@ -358,8 +360,6 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       selected: -1,
       items: [],
       composing: false,
-      previewGeneration: 0,
-      previewKey: "",
       settingsPending: false,
       opening: false,
       pointerClientX: null,
@@ -757,19 +757,6 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     return item.matchText || (item.regex ? "" : item.term);
   }
 
-  function highlightGrepMatch(
-    cell: HTMLElement,
-    lineText: string,
-    item: PaletteGrepItem,
-  ): void {
-    const needle = grepHighlightText(item);
-    if (!needle) return;
-    markNeedleInCell(cell, lineText, needle, "gdp-grep-match", {
-      caseSensitive: item.caseSensitive,
-      nearColumn: item.column,
-    });
-  }
-
   function palettePreviewTarget(item: PaletteItem): {
     path: string;
     ref: string;
@@ -782,198 +769,31 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       : { path: item.path, ref: item.ref };
   }
 
-  function renderPalettePreviewFrame(
-    state: PaletteState,
-    item: PaletteItem,
-    message?: string,
-  ): HTMLElement {
-    state.preview.innerHTML = "";
-    const header = document.createElement("div");
-    header.className = "gdp-palette-preview-header";
-    const location = document.createElement("div");
-    location.className = "gdp-palette-preview-location";
-    const target = palettePreviewTarget(item);
-    location.textContent =
-      item.kind === "grep" ? `${item.path}:${item.line}` : target.path;
-    location.title =
-      item.kind === "grep"
-        ? `${item.path}:${item.line}:${item.column}`
-        : target.path;
-    const openButton = document.createElement("button");
-    openButton.type = "button";
-    openButton.className = "gdp-btn gdp-btn-sm";
-    openButton.textContent = text().openFile;
-    openButton.addEventListener("mousedown", (event) => event.preventDefault());
-    openButton.addEventListener("click", () => {
-      void selectPaletteItem(state);
-    });
-    header.append(location, openButton);
-    const body = document.createElement("div");
-    body.className = "gdp-palette-preview-code";
-    if (message) {
-      const status = document.createElement("div");
-      status.className = "gdp-palette-preview-message";
-      status.textContent = message;
-      body.appendChild(status);
-    }
-    state.preview.append(header, body);
-    return body;
-  }
-
-  function clearPalettePreview(state: PaletteState, message: string): void {
-    state.previewController?.abort();
-    state.previewController = undefined;
-    state.previewKey = "";
-    state.preview.innerHTML = "";
-    const placeholder = document.createElement("div");
-    placeholder.className = "gdp-palette-preview-placeholder";
-    placeholder.textContent = message;
-    state.preview.appendChild(placeholder);
-  }
-
-  function palettePreviewIsCurrent(
-    state: PaletteState,
-    controller: AbortController,
-    previewGeneration: number,
-  ): boolean {
-    return (
-      PALETTE === state &&
-      !controller.signal.aborted &&
-      previewGeneration === state.previewGeneration
-    );
-  }
-
   function renderPalettePreview(state: PaletteState): void {
     const item = state.items[state.selected];
     if (!item) {
-      clearPalettePreview(state, text().selectResult);
+      state.codePreview.clear(text().selectResult);
       return;
     }
     const target = palettePreviewTarget(item);
-    const previewKey = `${item.kind}\0${target.ref}\0${target.path}\0${item.kind === "grep" ? item.line : ""}`;
-    if (previewKey === state.previewKey) return;
-    state.previewKey = previewKey;
-    state.previewController?.abort();
-    const controller = new AbortController();
-    state.previewController = controller;
-    const previewGeneration = ++state.previewGeneration;
-    const start =
-      item.kind === "grep" ? Math.max(1, item.line - GREP_CONTEXT_RADIUS) : 1;
-    const end =
-      item.kind === "grep"
-        ? item.line + GREP_CONTEXT_RADIUS
-        : FILE_PREVIEW_LINE_LIMIT;
-    renderPalettePreviewFrame(state, item, text().loadingCode);
-    const params = new URLSearchParams({
-      path: target.path,
-      ref: target.ref,
-      start: String(start),
-      end: String(end),
+    const needle = item.kind === "grep" ? grepHighlightText(item) : "";
+    state.codePreview.show({
+      target: {
+        ...target,
+        ...(item.kind === "grep"
+          ? { line: item.line, column: item.column }
+          : {}),
+      },
+      ...(item.kind === "grep" && needle
+        ? { match: { text: needle, caseSensitive: item.caseSensitive } }
+        : {}),
+      action: {
+        label: text().openFile,
+        onSelect: () => {
+          void selectPaletteItem(state);
+        },
+      },
     });
-    void trackLoad<FileRangeResponse>(
-      fetch(`/file_range?${params.toString()}`, {
-        signal: controller.signal,
-      }).then(async (response) => {
-        if (!response.ok) throw new Error(await response.text());
-        return response.json();
-      }),
-    )
-      .then(async (response) => {
-        if (!palettePreviewIsCurrent(state, controller, previewGeneration))
-          return;
-        if (responseGenerationIsStale(response.generation)) {
-          renderPalettePreviewFrame(state, item, text().fileChanged);
-          return;
-        }
-        const body = renderPalettePreviewFrame(state, item);
-        const meta = document.createElement("div");
-        meta.className = "gdp-palette-preview-meta";
-        meta.textContent = text().lines(
-          response.start,
-          Math.min(
-            response.end,
-            response.start + Math.max(0, response.lines.length - 1),
-          ),
-          response.complete ? response.total : undefined,
-        );
-        body.appendChild(meta);
-        const table = document.createElement("table");
-        table.className = "gdp-source-table";
-        const tbody = document.createElement("tbody");
-        response.lines.forEach((text, index) => {
-          const line = response.start + index;
-          const row = document.createElement("tr");
-          row.dataset.line = String(line);
-          row.classList.toggle(
-            "gdp-source-line-target",
-            item.kind === "grep" && line === item.line,
-          );
-          const number = document.createElement("td");
-          number.className = "gdp-source-line-number";
-          number.textContent = String(line);
-          const content = document.createElement("td");
-          content.className = "gdp-source-line-code";
-          content.textContent = text || " ";
-          if (item.kind === "grep" && line === item.line)
-            highlightGrepMatch(content, text, item);
-          row.append(number, content);
-          tbody.appendChild(row);
-        });
-        table.appendChild(tbody);
-        if (response.lines.length === 0) {
-          const empty = document.createElement("div");
-          empty.className = "gdp-palette-preview-message";
-          empty.textContent = text().noText;
-          body.appendChild(empty);
-        } else {
-          body.appendChild(table);
-        }
-        const lang = normalizeSourceShikiLang(inferLang(target.path));
-        if (!getSyntaxHighlight() || !lang || response.lines.length === 0)
-          return;
-        const highlighter = await loadSourceShikiHighlighter(lang);
-        if (
-          !highlighter ||
-          !table.isConnected ||
-          !palettePreviewIsCurrent(state, controller, previewGeneration)
-        )
-          return;
-        const highlightedLines = sourceShikiLines(
-          response.lines.join("\n"),
-          lang,
-          highlighter,
-        );
-        if (
-          !highlightedLines ||
-          !table.isConnected ||
-          !palettePreviewIsCurrent(state, controller, previewGeneration)
-        )
-          return;
-        table
-          .querySelectorAll<HTMLElement>(".gdp-source-line-code")
-          .forEach((cell, index) => {
-            if (highlightedLines[index] == null) return;
-            cell.innerHTML = highlightedLines[index] || " ";
-            cell.classList.add("shiki");
-            if (item.kind === "grep" && response.start + index === item.line)
-              highlightGrepMatch(cell, response.lines[index] || "", item);
-          });
-      })
-      .catch((err) => {
-        if (
-          isAbortError(err) ||
-          PALETTE !== state ||
-          controller.signal.aborted ||
-          previewGeneration !== state.previewGeneration
-        )
-          return;
-        console.error("Failed to load search code preview", err);
-        renderPalettePreviewFrame(
-          state,
-          item,
-          text().codeLoadFailed(errorMessage(err, text().unknownError)),
-        );
-      });
   }
 
   function createPaletteRow(

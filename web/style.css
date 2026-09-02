@@ -453,7 +453,7 @@ body[data-code-font-size="xlarge"] {
   border-bottom: 1px solid var(--border);
 }
 
-.gdp-palette-preview {
+.gdp-code-preview {
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -462,7 +462,7 @@ body[data-code-font-size="xlarge"] {
   background: var(--bg);
 }
 
-.gdp-palette-preview-header {
+.gdp-code-preview-header {
   min-height: 46px;
   display: flex;
   align-items: center;
@@ -472,7 +472,7 @@ body[data-code-font-size="xlarge"] {
   background: var(--bg-soft);
 }
 
-.gdp-palette-preview-location {
+.gdp-code-preview-location {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -483,13 +483,13 @@ body[data-code-font-size="xlarge"] {
   font-weight: 600;
 }
 
-.gdp-palette-preview-code {
+.gdp-code-preview-code {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
 }
 
-.gdp-palette-preview-meta {
+.gdp-code-preview-meta {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -500,8 +500,8 @@ body[data-code-font-size="xlarge"] {
   font-size: 11px;
 }
 
-.gdp-palette-preview-placeholder,
-.gdp-palette-preview-message {
+.gdp-code-preview-placeholder,
+.gdp-code-preview-message {
   min-height: 100%;
   display: grid;
   place-items: center;
@@ -511,7 +511,7 @@ body[data-code-font-size="xlarge"] {
   font-size: 13px;
 }
 
-.gdp-palette-preview .gdp-grep-match {
+.gdp-code-preview .gdp-grep-match {
   padding: 0 2px;
   border-radius: 3px;
   background: color-mix(in oklab, var(--accent) 82%, var(--bg) 18%);
@@ -520,6 +520,23 @@ body[data-code-font-size="xlarge"] {
   box-shadow:
     inset 0 -1px 0 color-mix(in oklab, var(--accent) 68%, var(--fg) 32%),
     0 0 0 2px var(--accent-muted);
+}
+
+.gdp-definition-preview-flyout {
+  position: fixed;
+  z-index: 999;
+  width: min(620px, calc(100vw - 32px));
+  height: min(460px, calc(100vh - 32px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.18);
+  pointer-events: none;
+}
+
+.gdp-definition-preview-flyout[hidden] {
+  display: none;
 }
 
 .gdp-palette-row {
@@ -5769,6 +5786,9 @@ body.gdp-file-detail-page #empty {
   position: fixed;
   z-index: 1000;
   min-width: 180px;
+  max-width: 480px;
+  max-height: 60vh;
+  overflow-y: auto;
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -5786,6 +5806,9 @@ body.gdp-file-detail-page #empty {
   font: inherit;
   font-size: 13px;
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
 }
 .gdp-context-menu button:hover {
@@ -5793,6 +5816,20 @@ body.gdp-file-detail-page #empty {
 }
 .gdp-context-menu .danger {
   color: var(--danger);
+}
+body.gdp-def-mod #content .gdp-source-line-code:hover,
+body.gdp-def-mod #content .gdp-source-virtual-line-code:hover,
+body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
+  cursor: pointer;
+}
+.gdp-def-underline {
+  position: fixed;
+  z-index: 999;
+  pointer-events: none;
+  box-sizing: border-box;
+  background: var(--accent-muted);
+  border-bottom: 1.5px solid var(--accent);
+  border-radius: 2px;
 }
 .gdp-dialog-backdrop {
   position: fixed;

@@ -326,7 +326,7 @@ describe("file search palette master/detail behavior", () => {
       expect(q(document, ".gdp-palette-row-title").textContent).toBe(
         "recent.ts",
       );
-      expect(q(document, ".gdp-palette-preview-location").textContent).toBe(
+      expect(q(document, ".gdp-code-preview-location").textContent).toBe(
         "src/recent.ts",
       );
       expect(q(document, ".gdp-source-line-code.shiki .tok").textContent).toBe(
