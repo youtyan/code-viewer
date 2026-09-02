@@ -190,7 +190,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Cmd/Ctrl+click a function, class, or variable in source or diff code to jump to its definition; with a caret or selected symbol, g . performs the same lookup. When several definitions match, choose one from the candidate menu. If no definition matches, the menu falls back to references and can open the symbol name in the search panel.",
+                text: "Cmd/Ctrl+click a function, class, or variable in source or diff code to jump to its definition; with a caret or selected symbol, g . performs the same lookup. When several definitions match, choose one from the candidate menu; a code preview of the highlighted candidate appears beside the menu. If no definition matches, the menu falls back to references and can open the symbol name in the search panel.",
               },
               {
                 kind: "paragraph",
@@ -1005,7 +1005,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "ソースまたは diff の関数・クラス・変数を Cmd/Ctrl+クリックすると定義へ移動できます。カーソル位置または選択中のシンボルには g . でも同じ検索を実行します。定義候補が複数ある場合は候補メニューから選択でき、定義が見つからない場合は参照箇所へフォールバックし、そのシンボル名を検索パネルで開けます。",
+                text: "ソースまたは diff の関数・クラス・変数を Cmd/Ctrl+クリックすると定義へ移動できます。カーソル位置または選択中のシンボルには g . でも同じ検索を実行します。定義候補が複数ある場合は候補メニューから選択でき、選択中の候補のコードはメニューの隣にプレビュー表示されます。定義が見つからない場合は参照箇所へフォールバックし、そのシンボル名を検索パネルで開けます。",
               },
               {
                 kind: "paragraph",
