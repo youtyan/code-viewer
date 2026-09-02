@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  type AppRoute,
   buildRawFileUrl,
   buildRoute,
   parseDoctorOverlay,
@@ -495,6 +496,19 @@ describe("routes", () => {
         range: fallback,
       }),
     ).toBe("/history?commit=worktree");
+    const withSource: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      commit: "abc1234",
+      source: "src/a.ts",
+      range: fallback,
+    };
+    expect(buildRoute(withSource)).toBe(
+      "/history?commit=abc1234&source=src%2Fa.ts",
+    );
+    expect(
+      parseRoute("/history", "?commit=abc1234&source=src%2Fa.ts", fallback),
+    ).toEqual(withSource);
   });
 
   test.each([

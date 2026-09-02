@@ -19,6 +19,56 @@ afterEach(() => {
   document.body.removeAttribute("style");
 });
 
+const HISTORY_SOURCE_RANGE = { from: "p1", to: "abc1234" };
+const HISTORY_SOURCE_FILES = [
+  { path: "src/kept.ts", status: "M", additions: 1, deletions: 0 },
+  {
+    path: "src/gone.ts",
+    old_path: "src/gone.ts",
+    status: "D",
+    additions: 0,
+    deletions: 1,
+  },
+] as SourceViewDeps["STATE"]["files"];
+
+function historySourceRoute(source?: string): AppRoute {
+  return {
+    screen: "history",
+    ref: "main",
+    commit: "abc1234",
+    ...(source ? { source } : {}),
+    range: HISTORY_SOURCE_RANGE,
+  };
+}
+
+describe("sourceTargetFromRoute on the history screen", () => {
+  test.each([
+    [
+      "a modified file reads the commit side",
+      "src/kept.ts",
+      { path: "src/kept.ts", ref: "abc1234" },
+    ],
+    [
+      "a deleted file reads the parent side",
+      "src/gone.ts",
+      { path: "src/gone.ts", ref: "p1" },
+    ],
+    ["a file outside the diff resolves to nothing", "src/other.ts", null],
+    ["no source keeps the diff cards", undefined, null],
+  ])("%s", (_label, source, expected) => {
+    const view = createSourceViewForCursorTest(historySourceRoute(source), {
+      STATE: {
+        route: historySourceRoute(source),
+        from: HISTORY_SOURCE_RANGE.from,
+        to: HISTORY_SOURCE_RANGE.to,
+        files: HISTORY_SOURCE_FILES,
+        syntaxHighlight: false,
+      },
+    });
+    expect(view.sourceTargetFromRoute()).toEqual(expected);
+  });
+});
+
 function createSourceViewForCursorTest(
   route: AppRoute,
   overrides: Partial<SourceViewDeps> = {},
@@ -27,6 +77,7 @@ function createSourceViewForCursorTest(
     route,
     from: "HEAD",
     to: "worktree",
+    files: [],
     syntaxHighlight: false,
   };
   return createSourceView({
@@ -437,6 +488,7 @@ describe("renderStandaloneSource idempotency", () => {
         route,
         from: "HEAD",
         to: "worktree",
+        files: [],
         syntaxHighlight: true,
       },
       loadRawFileInfo: async () => ({ size: body.length }),
@@ -529,6 +581,7 @@ describe("preferred source tab across files", () => {
       route: blobRoute("first.md"),
       from: "HEAD",
       to: "worktree",
+      files: [],
       syntaxHighlight: false,
     };
     const view = createSourceViewForCursorTest(state.route, {
@@ -587,6 +640,7 @@ describe("preferred source tab across files", () => {
       },
       from: "HEAD",
       to: "worktree",
+      files: [],
       syntaxHighlight: false,
     };
     const view = createSourceViewForCursorTest(state.route, {
@@ -628,6 +682,7 @@ describe("renderStandaloneSource loading-state guard and paged retry", () => {
       route,
       from: "HEAD",
       to: "worktree",
+      files: [],
       syntaxHighlight: true,
     };
     const highlighter = deferred<ShikiHighlighter | null>();
@@ -711,6 +766,7 @@ describe("renderStandaloneSource loading-state guard and paged retry", () => {
       route: blobRoute("first.ts"),
       from: "HEAD",
       to: "worktree",
+      files: [],
       syntaxHighlight: true,
     };
     const highlighter = deferred<ShikiHighlighter | null>();

@@ -188,9 +188,10 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
       hideTests: false,
       viewedFiles: new Set(),
     },
-    scrollToFile() {
+    openDiffFile() {
       /* noop */
     },
+    sidebarItemHref: () => null,
     prefetchByPath() {
       /* noop */
     },

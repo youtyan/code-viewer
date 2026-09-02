@@ -55,9 +55,10 @@ function createSidebarForTest() {
   };
   return createSidebar({
     STATE: state,
-    scrollToFile() {
+    openDiffFile() {
       /* noop */
     },
+    sidebarItemHref: () => null,
     prefetchByPath() {
       /* noop */
     },

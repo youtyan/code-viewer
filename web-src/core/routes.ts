@@ -70,6 +70,9 @@ export type AppRoute =
       path?: string;
       /** With a file `path`: only commits that changed these lines. */
       lines?: HistoryLineRange;
+      /** A changed file of the selected commit whose full source is shown in
+       * place of the diff cards ("View File"). The commit list stays. */
+      source?: string;
       range: DiffRange;
     }
   | {
@@ -289,6 +292,7 @@ export function parseRoute(
       const q = params.get("q") || "";
       const path = params.get("path") || "";
       const lines = parseHistoryLineRange(params.get("lines"));
+      const source = params.get("source") || "";
       return {
         screen: "history",
         ref: params.get("ref") || "HEAD",
@@ -297,6 +301,7 @@ export function parseRoute(
         ...(q ? { q } : {}),
         ...(path ? { path } : {}),
         ...(path && lines ? { lines } : {}),
+        ...(source ? { source } : {}),
         range,
       };
     }
@@ -465,6 +470,7 @@ export function buildRoute(route: AppRoute): string {
       if (route.commit) params.set("commit", route.commit);
       if (route.compare) params.set("compare", route.compare);
       if (route.q) params.set("q", route.q);
+      if (route.source) params.set("source", route.source);
       const qs = params.toString();
       return `/history${qs ? `?${qs}` : ""}`;
     }

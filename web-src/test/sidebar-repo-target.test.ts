@@ -42,6 +42,8 @@ function installSidebarDom() {
       </div>
       <ul id="filelist"></ul>
     </aside>
+    <div id="sidebar-resizer"></div>
+    <aside id="history-panel"></aside>
   `;
 }
 
@@ -51,23 +53,30 @@ function installStyleCss() {
   document.head.appendChild(style);
 }
 
-function repoTargetDisplayForBodyClass(className: string) {
+function computedDisplayForBodyClass(selector: string, className: string) {
   document.body.innerHTML = "";
   document.head.innerHTML = "";
   document.body.className = className;
   installSidebarDom();
   installStyleCss();
-  const wrap = document.querySelector<HTMLElement>("#repo-target-wrap");
-  if (!wrap) throw new Error("missing repo target wrap");
-  wrap.hidden = false;
-  return getComputedStyle(wrap).display;
+  const el = document.querySelector<HTMLElement>(selector);
+  if (!el) throw new Error(`missing ${selector}`);
+  el.hidden = false;
+  return getComputedStyle(el).display;
+}
+
+function repoTargetDisplayForBodyClass(className: string) {
+  return computedDisplayForBodyClass("#repo-target-wrap", className);
 }
 
 function createSidebarForTest(
   overrides: Partial<
     Pick<
       SidebarDeps,
-      "omittedDirectoryBadge" | "openDirectoryInOsTitle" | "commitEntryBadge"
+      | "omittedDirectoryBadge"
+      | "openDirectoryInOsTitle"
+      | "commitEntryBadge"
+      | "openDiffFile"
     >
   > = {},
 ) {
@@ -84,9 +93,8 @@ function createSidebarForTest(
   };
   return createSidebar({
     STATE: state,
-    scrollToFile() {
-      /* noop */
-    },
+    openDiffFile: overrides.openDiffFile ?? (() => undefined),
+    sidebarItemHref: (item, mode) => `/link/${mode}/${item.path}`,
     prefetchByPath() {
       /* noop */
     },
@@ -234,6 +242,119 @@ describe("diff sidebar repository target", () => {
     expect(
       repoTargetDisplayForBodyClass("gdp-file-detail-page gdp-repo-blob-page"),
     ).toBe("flex");
+  });
+
+  // The diff file list stays on screen in the source view opened from the
+  // diff ("View File"); only the user's toggle and pages without a file
+  // list hide it.
+  test.each([
+    ["", "block"],
+    ["gdp-diff-page", "block"],
+    ["gdp-file-detail-page", "block"],
+    ["gdp-file-detail-page gdp-repo-blob-page", "block"],
+    ["gdp-history-page gdp-file-detail-page", "block"],
+    ["gdp-file-detail-page gdp-sidebar-hidden", "none"],
+    ["gdp-help-page", "none"],
+  ])("sidebar display for body class %j", (className, display) => {
+    expect(computedDisplayForBodyClass("#sidebar", className)).toBe(display);
+    expect(computedDisplayForBodyClass("#sidebar-resizer", className)).toBe(
+      display,
+    );
+  });
+
+  // Rows carry their route as a real link so the browser can open it in a
+  // new tab (Cmd/Ctrl/middle click); the app keeps only the plain click.
+  const repoClick = () => undefined;
+  test.each([
+    [
+      "diff sidebar file",
+      undefined,
+      'li[data-path="src/alpha.ts"] a.name',
+      "/link/diff/src/alpha.ts",
+    ],
+    [
+      "repository sidebar file",
+      repoClick,
+      'li[data-path="src/alpha.ts"] a.name',
+      "/link/repo/src/alpha.ts",
+    ],
+    [
+      "repository sidebar directory",
+      repoClick,
+      '.tree-dir[data-dirpath="src"] a.dir-name',
+      "/link/repo/src",
+    ],
+  ])("%s carries its route as href", (_label, onFileClick, selector, href) => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+    sidebar.renderSidebar(
+      [{ path: "src/alpha.ts", type: "blob", status: "M" }],
+      onFileClick,
+    );
+    expect(
+      document.querySelector(`#filelist ${selector}`)?.getAttribute("href"),
+    ).toBe(href);
+  });
+
+  test.each([
+    [
+      "diff sidebar directory (a click only folds it)",
+      undefined,
+      { path: "src/alpha.ts", status: "M" },
+      '.tree-dir[data-dirpath="src"] .dir-name',
+    ],
+    [
+      "deleted repository entry",
+      repoClick,
+      { path: "src/alpha.ts", type: "blob" as const, status: "D" },
+      'li[data-path="src/alpha.ts"] .name',
+    ],
+  ])("%s stays plain text", (_label, onFileClick, item, selector) => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+    sidebar.renderSidebar([item], onFileClick);
+    const label = document.querySelector(`#filelist ${selector}`);
+    expect(label?.tagName).toBe("SPAN");
+  });
+
+  test.each([
+    ["plain click", {}, 1, true],
+    ["Cmd+click", { metaKey: true }, 0, false],
+    ["Ctrl+click", { ctrlKey: true }, 0, false],
+    ["Shift+click", { shiftKey: true }, 0, false],
+    ["middle click", { button: 1 }, 0, false],
+  ])("%s on a row: opened %i time(s), default prevented %s", (_label, init, opens, prevented) => {
+    installSidebarDom();
+    const opened: string[] = [];
+    const sidebar = createSidebarForTest({
+      openDiffFile: (path) => {
+        opened.push(path);
+      },
+    });
+    sidebar.renderSidebar([{ path: "src/alpha.ts", status: "M" }]);
+    const link = document.querySelector(
+      '#filelist li[data-path="src/alpha.ts"] a.name',
+    );
+    if (!link) throw new Error("missing row link");
+    const event = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    link.dispatchEvent(event);
+    expect(opened).toHaveLength(opens);
+    expect(event.defaultPrevented).toBe(prevented);
+  });
+
+  // The commit list stays while the history screen shows a source view.
+  test.each([
+    ["gdp-history-page", "flex"],
+    ["gdp-history-page gdp-file-detail-page", "flex"],
+    ["gdp-file-detail-page", "none"],
+  ])("history panel display for body class %j", (className, display) => {
+    expect(computedDisplayForBodyClass("#history-panel", className)).toBe(
+      display,
+    );
   });
 
   test("clears the file filter and restores hidden sidebar rows", () => {
