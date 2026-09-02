@@ -189,11 +189,34 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   function shouldSyncSourceRouteToShell(): boolean {
-    return STATE.route.screen === "file" && STATE.route.view !== "history";
+    const route = STATE.route;
+    return (
+      (route.screen === "file" && route.view !== "history") ||
+      (route.screen === "history" && !!route.source)
+    );
   }
 
   function syncSourceRouteToShell(): void {
-    if (shouldSyncSourceRouteToShell()) applySourceRouteToShell();
+    if (!shouldSyncSourceRouteToShell()) return;
+    applySourceRouteToShell();
+    markOpenSourceRow();
+  }
+
+  // The file list stays on screen next to the source view, so its current
+  // row follows the open file on paths that bypass openDiffFile (a deep
+  // link, Back, an SSE reload).
+  function markOpenSourceRow(): void {
+    const route = STATE.route;
+    if (route.screen === "history") {
+      if (route.source) markActive(route.source);
+      return;
+    }
+    if (route.screen !== "file") return;
+    const open = STATE.files.find((f) => {
+      const target = fileSourceTarget(f);
+      return target.path === route.path && target.ref === route.ref;
+    });
+    if (open) markActive(open.path);
   }
 
   function fileBadge(status?: string) {
@@ -642,6 +665,37 @@ export function createDiffView(deps: DiffViewDeps) {
     if (!line || !focusDiffLine(card, line)) {
       scrollDiffElementIntoView(card, "start");
     }
+  }
+
+  // The source view opened from a diff card stays on the page that hosts the
+  // diff: the history screen keeps its route and only names the file, so the
+  // commit list and the file sidebar remain on screen.
+  function sourceRouteForDiffFile(file: FileMeta): AppRoute {
+    if (STATE.route.screen === "history")
+      return { ...STATE.route, source: file.path };
+    const target = fileSourceTarget(file);
+    return {
+      screen: "file",
+      path: target.path,
+      ref: target.ref,
+      range: currentRange(),
+    };
+  }
+
+  // The diff sidebar and the palette share this rule: while the source view
+  // opened from the diff ("View File") is on screen, picking another changed
+  // file switches the source view to it. Scrolling would target a diff card
+  // that body.gdp-file-detail-page keeps hidden.
+  function openDiffFile(path: string) {
+    if (STATE.route.screen !== "file" && !shouldSyncSourceRouteToShell()) {
+      scrollToFile(path);
+      return;
+    }
+    const file = STATE.files.find((x) => x.path === path);
+    if (!file) throw new Error(`file is not in the diff file list: ${path}`);
+    markActive(path);
+    setRoute(sourceRouteForDiffFile(file));
+    applySourceRouteToShell();
   }
 
   function applyViewedState() {
@@ -1257,13 +1311,7 @@ export function createDiffView(deps: DiffViewDeps) {
     openFileBtn.textContent = "Open as file";
     openFileBtn.title = "Open this file in the virtualized source viewer";
     openFileBtn.addEventListener("click", () => {
-      const target = fileSourceTarget(file);
-      setRoute({
-        screen: "file",
-        path: target.path,
-        ref: target.ref,
-        range: currentRange(),
-      });
+      setRoute(sourceRouteForDiffFile(file));
       applySourceRouteToShell();
     });
 
@@ -1767,13 +1815,7 @@ export function createDiffView(deps: DiffViewDeps) {
       setViewFileButtonState(viewFile, false);
       viewFile.addEventListener("click", (e) => {
         e.stopPropagation();
-        const target = fileSourceTarget(file);
-        setRoute({
-          screen: "file",
-          path: target.path,
-          ref: target.ref,
-          range: currentRange(),
-        });
+        setRoute(sourceRouteForDiffFile(file));
         applySourceRouteToShell();
       });
       header.appendChild(viewFile);
@@ -2050,6 +2092,7 @@ export function createDiffView(deps: DiffViewDeps) {
     addExpandHunksUI,
     scheduleIdleHighlight,
     scrollToFile,
+    openDiffFile,
     scrollToNextUnviewedFile,
     scrollToPreviousUnviewedFile,
     toggleActiveFileViewed,

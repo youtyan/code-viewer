@@ -82,6 +82,7 @@ export type SourceViewDeps = {
     route: AppRoute;
     from: string;
     to: string;
+    files: FileMeta[];
     syntaxHighlight: boolean;
   };
   setRoute(route: AppRoute, replace?: boolean): void;
@@ -678,9 +679,15 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function sourceTargetFromRoute(): SourceFileTarget | null {
-    return STATE.route.screen === "file"
-      ? { path: STATE.route.path, ref: STATE.route.ref }
-      : null;
+    const route = STATE.route;
+    if (route.screen === "file") return { path: route.path, ref: route.ref };
+    if (route.screen === "history" && route.source) {
+      // Resolved through the loaded diff so a deleted file reads from the
+      // parent side, exactly as the View File button computed it.
+      const file = STATE.files.find((f) => f.path === route.source);
+      return file ? fileSourceTarget(file) : null;
+    }
+    return null;
   }
 
   function removeStandaloneSource() {
@@ -2444,7 +2451,12 @@ export function createSourceView(deps: SourceViewDeps) {
       back.className = "gdp-view-file gdp-btn gdp-btn-sm";
       setViewFileButtonState(back, true);
       back.addEventListener("click", () => {
-        setRoute({ screen: "diff", range: currentRange() });
+        const route = STATE.route;
+        setRoute(
+          route.screen === "history"
+            ? { ...route, source: undefined }
+            : { screen: "diff", range: currentRange() },
+        );
         setPageMode();
         removeStandaloneSource();
       });

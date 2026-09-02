@@ -5,6 +5,7 @@
 import { classifyDiffFileKind } from "../core/diff-file-kinds";
 import { compileFileFilter } from "../core/file-filter";
 import { nextVisibleFileIndex } from "../core/file-navigation";
+import { isNativeLinkClick } from "../core/link-click";
 import {
   COLLAPSE_ALL_16_PATHS,
   EXPAND_ALL_16_PATHS,
@@ -44,7 +45,9 @@ export type SidebarDeps = {
     viewedFiles: Set<string>;
     lazyExpandedDirs: Set<string>;
   };
-  scrollToFile(path: string, line?: unknown): void;
+  openDiffFile(path: string): void;
+  /** The URL a row leads to, so the browser can open it in a new tab. */
+  sidebarItemHref(item: SidebarItem, mode: "diff" | "repo"): string | null;
   prefetchByPath(path: string): void;
   fileBadge(status?: string): HTMLElement;
   fileEntryIcon(): string;
@@ -91,7 +94,8 @@ export function createSidebar(deps: SidebarDeps) {
     $,
     $$,
     STATE,
-    scrollToFile,
+    openDiffFile,
+    sidebarItemHref,
     prefetchByPath,
     fileBadge,
     fileEntryIcon,
@@ -343,11 +347,59 @@ export function createSidebar(deps: SidebarDeps) {
   // identical. The status badge sits after the name rather than replacing
   // the leading icon (as a file row does), because that icon is the
   // expand/collapse target.
-  function createTreeDirLabel(dir: TreeNode): HTMLElement {
+  // Rows are real links so the browser keeps its own handling of modified
+  // and non-primary clicks (new tab / window, middle click, context menu);
+  // only a plain primary click stays in the app. The target is resolved
+  // again when the pointer goes down so it follows the current range / ref
+  // even when the row itself was not re-rendered.
+  function createRowLink(
+    className: string,
+    resolveHref: () => string | null,
+  ): HTMLElement {
+    const href = resolveHref();
+    if (href === null) {
+      const label = document.createElement("span");
+      label.className = className;
+      return label;
+    }
+    const link = document.createElement("a");
+    link.className = className;
+    link.href = href;
+    link.tabIndex = -1;
+    link.draggable = false;
+    link.addEventListener("pointerdown", () => {
+      const current = resolveHref();
+      if (current !== null) link.href = current;
+    });
+    return link;
+  }
+
+  // Internal git metadata and truncated listings have nothing to open.
+  function dirRowOpensNothing(dir: TreeNode): boolean {
+    return (
+      dir.children_omitted_reason === "internal" ||
+      dir.children_omitted_reason === "truncated"
+    );
+  }
+
+  function dirRowHref(
+    dir: TreeNode,
+    onFileClick?: (file: SidebarItem) => void,
+  ): string | null {
+    if (!onFileClick || dirRowOpensNothing(dir)) return null;
+    return sidebarItemHref(
+      { path: dir.path, type: "tree", resolved_path: dir.resolved_path },
+      "repo",
+    );
+  }
+
+  function createTreeDirLabel(
+    dir: TreeNode,
+    onFileClick?: (file: SidebarItem) => void,
+  ): HTMLElement {
     const label = document.createElement("span");
     label.className = "dir-label";
-    const dn = document.createElement("span");
-    dn.className = "dir-name";
+    const dn = createRowLink("dir-name", () => dirRowHref(dir, onFileClick));
     dn.textContent = dir.name;
     dn.title = dir.path;
     label.appendChild(dn);
@@ -489,7 +541,7 @@ export function createSidebar(deps: SidebarDeps) {
         const dirIcon = document.createElement("span");
         dirIcon.className = "dir-icon";
         li.appendChild(dirIcon);
-        li.appendChild(createTreeDirLabel(dir));
+        li.appendChild(createTreeDirLabel(dir, onFileClick));
         li.appendChild(
           createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
         );
@@ -520,12 +572,10 @@ export function createSidebar(deps: SidebarDeps) {
         }
         if (onFileClick) {
           li.addEventListener("click", (e) => {
+            if (isNativeLinkClick(e)) return;
+            e.preventDefault();
             e.stopPropagation();
-            if (
-              dir.children_omitted_reason === "internal" ||
-              dir.children_omitted_reason === "truncated"
-            )
-              return;
+            if (dirRowOpensNothing(dir)) return;
             onFileClick({
               path: dir.path,
               display_path: dir.path,
@@ -714,7 +764,7 @@ export function createSidebar(deps: SidebarDeps) {
     const dirIcon = document.createElement("span");
     dirIcon.className = "dir-icon";
     li.appendChild(dirIcon);
-    li.appendChild(createTreeDirLabel(dir));
+    li.appendChild(createTreeDirLabel(dir, onFileClick));
     li.appendChild(
       createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
     );
@@ -776,12 +826,10 @@ export function createSidebar(deps: SidebarDeps) {
     }
     if (onFileClick) {
       li.addEventListener("click", (e) => {
+        if (isNativeLinkClick(e)) return;
+        e.preventDefault();
         e.stopPropagation();
-        if (
-          dir.children_omitted_reason === "internal" ||
-          dir.children_omitted_reason === "truncated"
-        )
-          return;
+        if (dirRowOpensNothing(dir)) return;
         onFileClick({
           path: dir.path,
           display_path: dir.path,
@@ -893,8 +941,11 @@ export function createSidebar(deps: SidebarDeps) {
       icon.innerHTML = sidebarEntryIcon(f);
       li.appendChild(icon);
     }
-    const name = document.createElement("span");
-    name.className = "name";
+    const name = createRowLink("name", () =>
+      brokenSymlink || deletedEntry
+        ? null
+        : sidebarItemHref(f, onFileClick ? "repo" : "diff"),
+    );
     name.textContent = f.path.split("/").pop();
     name.title = f.path;
     li.appendChild(name);
@@ -902,10 +953,12 @@ export function createSidebar(deps: SidebarDeps) {
     if (symlinkLabel) li.appendChild(symlinkLabel);
     const kindTag = fileKindTag(f);
     if (kindTag) li.appendChild(kindTag);
-    li.addEventListener("click", () => {
+    li.addEventListener("click", (e) => {
+      if (isNativeLinkClick(e)) return;
+      e.preventDefault();
       if (brokenSymlink || deletedEntry) return;
       if (onFileClick) onFileClick(f);
-      else scrollToFile(f.path);
+      else openDiffFile(f.path);
       scheduleMainSurfaceFocus();
     });
     if (!onFileClick && !brokenSymlink)
@@ -1328,16 +1381,19 @@ export function createSidebar(deps: SidebarDeps) {
         icon.innerHTML = sidebarEntryIcon(f);
         li.appendChild(icon);
       }
-      const name = document.createElement("span");
-      name.className = "name";
+      const name = createRowLink("name", () =>
+        sidebarItemHref(f, onFileClick ? "repo" : "diff"),
+      );
       name.textContent = f.path;
       name.title = f.path;
       li.appendChild(name);
       const kindTag = fileKindTag(f);
       if (kindTag) li.appendChild(kindTag);
-      li.addEventListener("click", () => {
+      li.addEventListener("click", (e) => {
+        if (isNativeLinkClick(e)) return;
+        e.preventDefault();
         if (onFileClick) onFileClick(f);
-        else scrollToFile(f.path);
+        else openDiffFile(f.path);
         scheduleMainSurfaceFocus();
       });
       if (!onFileClick)

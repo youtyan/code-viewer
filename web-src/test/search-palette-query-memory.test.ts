@@ -86,7 +86,7 @@ async function setup(options: {
     appendScopeParams: () => undefined,
     isAbortError: () => false,
     scrollToFile: () => undefined,
-    applySourceRouteToShell: () => undefined,
+    openDiffFile: () => undefined,
     fileSourceTarget: (file) => ({ path: file.path, ref: "worktree" }),
     renderStandaloneSource: async () => undefined,
     repoFileCacheKey: (ref) => ref,

@@ -11,12 +11,17 @@ Requires Node.js 20 or newer. Development uses
   worktree change updates over SSE. The sidebar filter takes plain text
   (substring), `/pattern/` (regex), `~text` (fuzzy, same matcher as the file
   palette) and globs such as `*.ts` or `src/**`, and shows
-  `matching / all` file counts in the header while it is active.
+  `matching / all` file counts in the header while it is active. Rows are
+  real links: Cmd/Ctrl+click or middle-click opens a file in a new tab.
 - View git diffs with unified or split layout, lazy loading, viewed-file
   state, ignore-whitespace and hide-tests toggles, and dismissible per-line
-  "reference pills" that copy `@path#start-end` for AI agents.
+  "reference pills" that copy `@path#start-end` for AI agents. View File on
+  a diff card shows the full source in place while the file list stays on
+  screen; View Diff returns to the diff.
 - Browse commit history per branch and open any commit's changed files and
-  diff, with shareable `/history?ref=<branch>&commit=<sha>` links. The
+  diff, with shareable `/history?ref=<branch>&commit=<sha>` links
+  (`&source=<path>` while a file is open with View File; the commit list
+  stays). The
   filter understands message words (`"quoted"` keeps spaces), sha prefixes,
   `author:<name>`, `path:<part>`, `since:`/`after:`/`until:`/`before:<date>`,
   `code:<text>` (lines added or removed, `git log -S`) and `merges:no` /

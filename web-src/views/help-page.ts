@@ -149,7 +149,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "Use the sidebar or file palette to open source files, Markdown previews, images, PDFs, and other browser-safe media. Large text files automatically switch to virtual mode.",
+                text: "Use the sidebar or file palette to open source files, Markdown previews, images, PDFs, and other browser-safe media. Large text files automatically switch to virtual mode. Sidebar rows are links: Cmd/Ctrl+click or middle-click opens a file in a new tab. View File on a diff card shows the full source in place and keeps the file list (and, on the History screen, the commit list) on screen; View Diff returns to the diff.",
               },
               {
                 kind: "paragraph",
@@ -198,7 +198,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: 'The History screen filter understands words (message text, "quoted" keeps spaces), sha prefixes, author:<name>, path:<part>, since:/after:<date>, until:/before:<date>, code:<text> (lines added or removed) and merges:no / merges:only; different kinds combine with AND, author: offers the repository\'s authors as suggestions, and the filter is part of the URL (?q=) so a reload or shared link keeps it. Rows show branch and tag labels and a merge marker. The selected commit can be copied (sha) or opened on GitHub, Shift+click a second commit to diff the whole range between them, and a merge commit lets you pick which parent to compare against. ↑ / ↓ step commits anywhere on the screen, j / k do when the commit list has focus, and g h opens the history of the ref you are looking at. A folder page has a History button that opens the log restricted to that folder; selected source lines offer a Line history action (git log -L) in the line-reference pill, file pages have older / newer revision buttons that step through the commits that touched that file, and the ref picker keeps the refs you picked last as quick chips.',
+                text: 'The History screen filter understands words (message text, "quoted" keeps spaces), sha prefixes, author:<name>, path:<part>, since:/after:<date>, until:/before:<date>, code:<text> (lines added or removed) and merges:no / merges:only; different kinds combine with AND, author: offers the repository\'s authors as suggestions, and the filter is part of the URL (?q=) so a reload or shared link keeps it. Rows show branch and tag labels and a merge marker. The selected commit can be copied (sha) or opened on GitHub, Shift+click a second commit to diff the whole range between them, and a merge commit lets you pick which parent to compare against. ↑ / ↓ step commits anywhere on the screen, j / k do when the commit list has focus, and g h opens the history of the ref you are looking at. A folder page has a History button that opens the log restricted to that folder; selected source lines offer a Line history action (git log -L) in the line-reference pill, file pages have older / newer revision buttons that step through the commits that touched that file, and the ref picker keeps the refs you picked last as quick chips. A file opened with View File rides in the URL too (&source=<path>).',
               },
             ],
           },
@@ -964,7 +964,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "サイドバーやファイルパレットから、ソース、Markdown プレビュー、画像、PDF などを開けます。大きいテキストファイルは自動で軽量な仮想表示に切り替わります。",
+                text: "サイドバーやファイルパレットから、ソース、Markdown プレビュー、画像、PDF などを開けます。大きいテキストファイルは自動で軽量な仮想表示に切り替わります。サイドバーの行はリンクなので、Cmd/Ctrl+クリックや中クリックで別タブに開けます。diff カードの View File はファイル一覧（履歴画面ではコミット一覧も）を残したままファイル全体を表示し、View Diff で差分に戻ります。",
               },
               {
                 kind: "paragraph",
@@ -1013,7 +1013,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: '履歴画面の絞り込みは、語（メッセージ本文。"引用" で空白を含む句）、sha の前方一致、author:<名前>、path:<一部>、since:/after:<日付>、until:/before:<日付>、code:<文字列>（追加・削除された行）、merges:no / merges:only を解釈し、種類の違う条件は AND で組み合わさります。author: にはリポジトリの著者名が候補として出て、絞り込みは URL（?q=）に載るのでリロードや共有でも残ります。各行にはブランチ / タグのラベルとマージ印が付きます。選択したコミットは sha をコピーしたり GitHub で開いたりでき、別のコミットを Shift+クリックするとその区間全体の差分、マージコミットでは比較する親を選べます。↑ / ↓ は画面のどこでも、j / k はコミット一覧にフォーカスがあるときにコミットを送り、g h は見ている ref の履歴を開きます。フォルダページの「履歴」ボタンでそのフォルダに絞った履歴が開きます。ソースの行を選択すると行参照ピルに「この行の履歴」（git log -L）が出て、ファイルページには前後のリビジョンへ移るボタン、ref ピッカーには最近使った ref のチップが並びます。',
+                text: '履歴画面の絞り込みは、語（メッセージ本文。"引用" で空白を含む句）、sha の前方一致、author:<名前>、path:<一部>、since:/after:<日付>、until:/before:<日付>、code:<文字列>（追加・削除された行）、merges:no / merges:only を解釈し、種類の違う条件は AND で組み合わさります。author: にはリポジトリの著者名が候補として出て、絞り込みは URL（?q=）に載るのでリロードや共有でも残ります。各行にはブランチ / タグのラベルとマージ印が付きます。選択したコミットは sha をコピーしたり GitHub で開いたりでき、別のコミットを Shift+クリックするとその区間全体の差分、マージコミットでは比較する親を選べます。↑ / ↓ は画面のどこでも、j / k はコミット一覧にフォーカスがあるときにコミットを送り、g h は見ている ref の履歴を開きます。フォルダページの「履歴」ボタンでそのフォルダに絞った履歴が開きます。ソースの行を選択すると行参照ピルに「この行の履歴」（git log -L）が出て、ファイルページには前後のリビジョンへ移るボタン、ref ピッカーには最近使った ref のチップが並びます。View File で開いたファイルも URL（&source=<path>）に載ります。',
               },
             ],
           },

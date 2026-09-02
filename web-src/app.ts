@@ -16,6 +16,7 @@ import {
 } from "./core/catch-up";
 import { changedPathsCoverPath } from "./core/changed-paths";
 import { attachDragResizer } from "./core/drag-resizer";
+import { isNativeLinkClick } from "./core/link-click";
 import {
   errorWithCause,
   errorWithCauses,
@@ -123,7 +124,11 @@ import {
   removeFileHistoryShell as removeRenderedFileHistoryShell,
   renderFileHistoryShell as renderFileHistoryShellView,
 } from "./views/file-history-shell";
-import { type FileViewTab, isBlobOrBlameFileRoute } from "./views/file-shell";
+import {
+  type FileViewTab,
+  fileRouteKeepingActiveView,
+  isBlobOrBlameFileRoute,
+} from "./views/file-shell";
 import { createHelpKeybindingEditor } from "./views/help-keybinding-editor";
 import {
   createHelpPage,
@@ -1237,8 +1242,29 @@ window.GdpExpandLogic = GdpExpandLogic;
     $,
     $$,
     STATE,
-    scrollToFile: (path, line) =>
-      DIFF_VIEW.scrollToFile(path, line as SourceLineTarget | undefined),
+    openDiffFile: (path) => DIFF_VIEW.openDiffFile(path),
+    // Where a plain click on the row takes the app; mirrors the diff sidebar
+    // (openDiffFile) and the repository sidebar handler in repo-view.ts.
+    sidebarItemHref: (item, mode) => {
+      if (mode === "diff")
+        return buildRoute({
+          screen: "diff",
+          range: currentRange(),
+          path: item.path,
+        });
+      const ref = REPO_SIDEBAR_REF || STATE.repoRef || "worktree";
+      if (item.type === "tree")
+        return buildRoute(
+          REPO_VIEW.repoRoute(ref, item.resolved_path ?? item.path),
+        );
+      return buildRoute(
+        fileRouteKeepingActiveView(
+          STATE.route,
+          { path: item.path, ref },
+          currentRange(),
+        ),
+      );
+    },
     prefetchByPath: (path) => DIFF_VIEW.prefetchByPath(path),
     fileBadge: (status) => DIFF_VIEW.fileBadge(status),
     fileEntryIcon: () => REPO_VIEW.fileEntryIcon(),
@@ -1564,7 +1590,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     isAbortError,
     scrollToFile: (path, line) =>
       DIFF_VIEW.scrollToFile(path, line as SourceLineTarget | undefined),
-    applySourceRouteToShell,
+    openDiffFile: (path) => DIFF_VIEW.openDiffFile(path),
     fileSourceTarget,
     renderStandaloneSource,
     repoFileCacheKey,
@@ -3651,6 +3677,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     else history.pushState(state, "", url);
     syncHeaderMenu();
     syncLineRefPill();
+    // Picking another commit (or clearing the file) on the history screen
+    // closes the source view its diff cards had opened; the cards come back.
+    if (
+      previousRoute.screen === "history" &&
+      previousRoute.source &&
+      !(nextRoute.screen === "history" && nextRoute.source)
+    ) {
+      setPageMode();
+      removeStandaloneSource();
+    }
     if (
       isSameBlobFileRoute(previousRoute, nextRoute) &&
       routeBlobPreview(previousRoute) !== routeBlobPreview(nextRoute)
@@ -3700,9 +3736,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.route.screen !== "help") {
       document.querySelector(".gdp-help-shell")?.remove();
     }
+    // The source view a diff-hosting page keeps open in place ("View File"
+    // on the history screen) gets the file-detail chrome too: the topbar
+    // and the diff cards go away while the panels of the page stay.
+    const hostedSourceOpen =
+      STATE.route.screen === "history" &&
+      !!STATE.route.source &&
+      SOURCE_VIEW.sourceTargetFromRoute() !== null;
     document.body.classList.toggle(
       "gdp-file-detail-page",
-      STATE.route.screen === "file",
+      STATE.route.screen === "file" || hostedSourceOpen,
     );
     document.body.classList.toggle("gdp-repo-blob-page", fileRepoBlobRoute);
     document.body.classList.toggle(
@@ -5053,8 +5096,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function navigateToEmptyDiffHistory(event: MouseEvent): void {
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
-      return;
+    if (isNativeLinkClick(event)) return;
     event.preventDefault();
     const route = emptyDiffHistoryRoute();
     history.pushState(historyStateForRoute(route), "", urlForRoute(route));
@@ -6065,8 +6107,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       // hijacking them would push their pathname onto the local origin.
       if (link.target === "_blank") return;
       link.addEventListener("click", (e) => {
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0)
-          return;
+        if (isNativeLinkClick(e)) return;
         e.preventDefault();
         const target = new URL(link.href, window.location.origin);
         history.pushState(

@@ -3135,6 +3135,7 @@ body.gdp-help-page #content {
   line-height: calc(var(--sidebar-dir-font) + 7px);
   color: var(--fg);
   font-weight: 400;
+  text-decoration: none;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 #filelist.tree .tree-dir.children-omitted .dir-name {
@@ -3279,6 +3280,8 @@ body.gdp-help-page #content {
 #filelist li .name {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   direction: rtl; text-align: left;
+  /* The name is a real link (new-tab clicks); it must not read as one. */
+  color: inherit; text-decoration: none;
 }
 #filelist li .name::before { content: "\200E"; }
 #filelist li .stat {
@@ -5456,17 +5459,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   }
 }
 
-body.gdp-file-detail-page #sidebar,
-body.gdp-file-detail-page #sidebar-resizer {
-  display: none;
-}
-body.gdp-file-detail-page.gdp-repo-blob-page #sidebar {
-  display: block;
-}
 body.gdp-repo-page #sidebar {
-  display: block;
-}
-body.gdp-file-detail-page.gdp-repo-blob-page #sidebar-resizer {
   display: block;
 }
 body.gdp-repo-page #sidebar-resizer {
@@ -5562,13 +5555,6 @@ body.gdp-file-detail-page #load-bar {
 body.gdp-repo-page #load-bar {
   top: var(--global-header-h);
 }
-body.gdp-file-detail-page #content {
-  margin-left: 0;
-  padding-top: calc(var(--global-header-h) + 18px);
-}
-body.gdp-file-detail-page.gdp-repo-blob-page #content {
-  margin-left: var(--sidebar-w);
-}
 body.gdp-repo-page #content {
   --content-top-gap: 24px;
   margin-left: var(--sidebar-w);
@@ -5579,8 +5565,7 @@ body.gdp-sidebar-hidden #sidebar-resizer {
   display: none !important;
 }
 body.gdp-sidebar-hidden #content,
-body.gdp-sidebar-hidden.gdp-repo-page #content,
-body.gdp-sidebar-hidden.gdp-file-detail-page.gdp-repo-blob-page #content {
+body.gdp-sidebar-hidden.gdp-repo-page #content {
   margin-left: 0;
 }
 body.gdp-repo-page:not(.gdp-sidebar-hidden) .gdp-repo-toolbar > .ref-selector,

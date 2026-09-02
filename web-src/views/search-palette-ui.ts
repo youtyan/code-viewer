@@ -50,7 +50,7 @@ export type SearchPaletteDeps = {
   appendScopeParams(params: URLSearchParams): void;
   isAbortError(err: unknown): boolean;
   scrollToFile(path: string, line?: unknown): void;
-  applySourceRouteToShell(): void;
+  openDiffFile(path: string): void;
   fileSourceTarget(file: FileMeta): { path: string; ref: string };
   renderStandaloneSource(target: {
     path: string;
@@ -107,7 +107,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     appendScopeParams,
     isAbortError,
     scrollToFile,
-    applySourceRouteToShell,
+    openDiffFile,
     fileSourceTarget,
     renderStandaloneSource,
     repoFileCacheKey,
@@ -1344,17 +1344,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     closeSearchPalette();
     if (item.kind === "file") {
       if (item.source === "diff") {
-        if (STATE.route.screen === "file") {
-          setRoute({
-            screen: "file",
-            path: item.targetPath || item.path,
-            ref: item.targetRef || item.ref,
-            range: currentRange(),
-          });
-          applySourceRouteToShell();
-        } else {
-          scrollToFile(item.path);
-        }
+        openDiffFile(item.path);
       } else {
         setRoute({
           screen: "file",

@@ -1034,6 +1034,108 @@ describe("diff view preview shortcut", () => {
     ]);
     expect(sourceRouteApplications).toBe(1);
   });
+
+  const historyRoute: AppRoute = {
+    screen: "history",
+    ref: "main",
+    commit: "abc1234",
+    source: "src/a.ts",
+    range: { from: "base", to: "head" },
+  };
+  test.each([
+    [
+      "file page",
+      {
+        screen: "file",
+        path: "src/a.ts",
+        ref: "head",
+        range: { from: "base", to: "head" },
+      } as AppRoute,
+      {
+        screen: "file",
+        path: "src/b.ts",
+        ref: "head",
+        range: { from: "base", to: "head" },
+      } as AppRoute,
+    ],
+    [
+      "history page with an open source",
+      historyRoute,
+      { ...historyRoute, source: "src/b.ts" },
+    ],
+  ])("openDiffFile switches the open source view to the picked file on the %s", (_label, initial, expected) => {
+    setupDiffDom();
+    const routes: AppRoute[] = [];
+    let sourceRouteApplications = 0;
+    const { view, state, markActiveCalls } = createDiffViewForShellTest(
+      defaultDiffText,
+      {
+        setRoute: (route) => routes.push(route),
+        applySourceRouteToShell: () => {
+          sourceRouteApplications++;
+        },
+      },
+    );
+    state.files = [makeFile("src/b.ts", 1, 0, "/file_diff?path=src/b.ts")];
+    state.route = initial;
+
+    view.openDiffFile("src/b.ts");
+
+    expect(routes).toEqual([expected]);
+    expect(sourceRouteApplications).toBe(1);
+    expect(markActiveCalls()).toEqual([
+      { path: "src/b.ts", options: undefined },
+    ]);
+  });
+
+  test("View File on the history screen keeps the history route and names the file", () => {
+    setupDiffDom();
+    const routes: AppRoute[] = [];
+    const { view, state } = createDiffViewForShellTest(defaultDiffText, {
+      setRoute: (route) => routes.push(route),
+    });
+    state.route = { ...historyRoute, source: undefined };
+    const file = makeFile("README.md", 1, 0, "/file_diff?path=README.md");
+    const card = document.createElement("article") as DiffCardElement;
+    card.className = "gdp-file-shell";
+    card.innerHTML =
+      '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+    document.querySelector("#diff")?.appendChild(card);
+    view.renderFile(
+      file,
+      {
+        path: "README.md",
+        status: "M",
+        diff: "diff --git a/README.md b/README.md\n",
+      },
+      card,
+    );
+
+    card.querySelector<HTMLButtonElement>(".gdp-view-file")?.click();
+
+    expect(routes).toEqual([{ ...historyRoute, source: "README.md" }]);
+  });
+
+  test("openDiffFile scrolls to the diff card on the diff screen", () => {
+    setupDiffDom();
+    const routes: AppRoute[] = [];
+    const { view, markActiveCalls } = createDiffViewForShellTest(
+      defaultDiffText,
+      { setRoute: (route) => routes.push(route) },
+    );
+    const { card } = installSidebarFileRow("src/b.ts");
+    if (!card) throw new Error("missing diff card");
+    let scrolls = 0;
+    card.scrollIntoView = () => {
+      scrolls++;
+    };
+
+    view.openDiffFile("src/b.ts");
+
+    expect(routes).toEqual([]);
+    expect(scrolls).toBe(1);
+    expect(markActiveCalls().map((call) => call.path)).toEqual(["src/b.ts"]);
+  });
 });
 
 describe("diff view meta stat strip", () => {

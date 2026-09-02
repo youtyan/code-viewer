@@ -576,6 +576,84 @@ describe("history view lifecycle", () => {
     expect(body.hidden).toBe(true);
   });
 
+  test("the open source file follows a re-selection of its commit and closes on another", async () => {
+    const { panel, list, banner, status, sentinel } = installHistoryViewDom();
+    const when = new Date().toISOString();
+    const commits = [
+      {
+        sha: "aaaa111",
+        parents: ["p1"],
+        subject: "a",
+        body: "",
+        author: "A",
+        when,
+      },
+      {
+        sha: "bbbb222",
+        parents: ["p2"],
+        subject: "b",
+        body: "",
+        author: "B",
+        when,
+      },
+    ];
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ commits, hasMore: false }), {
+          status: 200,
+        }),
+      )) as unknown as typeof fetch;
+    let route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      commit: "aaaa111",
+      source: "src/a.ts",
+      range: { from: "p1", to: "aaaa111" },
+    };
+    const routes: AppRoute[] = [];
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: (next) => {
+        route = next;
+        routes.push(next);
+      },
+      applyCommitRange: async () => undefined,
+      showEmptyDiffPane: () => undefined,
+      getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+    const rows = list.querySelectorAll(".history-item");
+    expect(rows.map((row) => row.dataset.sha)).toEqual([
+      HISTORY_WORKTREE_COMMIT,
+      "aaaa111",
+      "bbbb222",
+    ]);
+    list.dispatch("click", { target: rows[1] });
+    await waitFor(() => routes.length === 1);
+    list.dispatch("click", { target: rows[2] });
+    await waitFor(() => routes.length === 2);
+
+    expect(
+      routes.map((r) => (r.screen === "history" ? [r.commit, r.source] : r)),
+    ).toEqual([
+      ["aaaa111", "src/a.ts"],
+      ["bbbb222", undefined],
+    ]);
+  });
+
   test("deep link commit=worktree restores the worktree selection", async () => {
     const { panel, list, banner, status, sentinel } = installHistoryViewDom();
     globalThis.fetch = (() =>

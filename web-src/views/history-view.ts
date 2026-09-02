@@ -515,6 +515,14 @@ export function createHistoryView(deps: HistoryViewDeps) {
         range,
       };
     }
+    // The source view opened from the diff cards of the commit ("View File")
+    // belongs to that commit: a filter change or a re-selection of the same
+    // commit keeps it, picking another commit closes it.
+    const current = deps.getRoute();
+    const source =
+      current.screen === "history" && commit && current.commit === commit
+        ? current.source
+        : undefined;
     return {
       screen: "history",
       ref: options.ref ?? ref,
@@ -523,6 +531,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       ...(commit ? { commit } : {}),
       ...(compare ? { compare } : {}),
       ...(q ? { q } : {}),
+      ...(source ? { source } : {}),
       range,
     };
   }
