@@ -134,7 +134,7 @@ function installDiff2Html(): void {
   (window as unknown as { Diff2HtmlUI: unknown }).Diff2HtmlUI =
     class FakeDiff2HtmlUI {
       constructor(
-        host: HTMLElement,
+        private readonly host: HTMLElement,
         diffInput: string,
         options: { outputFormat: string; highlight: boolean },
       ) {
@@ -146,7 +146,13 @@ function installDiff2Html(): void {
         });
       }
       draw(): void {
-        // 実物は DOM を組み立てる。ここで見たいのは「何を渡したか」だけ。
+        this.host.innerHTML = `
+          <div class="d2h-wrapper">
+            <div class="d2h-file-wrapper">
+              <div class="d2h-file-diff"></div>
+            </div>
+          </div>
+        `;
       }
       highlightCode(): void {
         // 同上。
@@ -1485,6 +1491,80 @@ describe("diffs", () => {
     });
     expect(draws).toHaveLength(2);
     expect(draws[0].diff).toBe("@@ -1 +1 @@\n-a\n+b\n");
+  });
+
+  test.each([
+    [
+      "modified media shows before and after",
+      "M",
+      "uncommitted",
+      ["before", "after"],
+    ],
+    ["added media shows only after", "A", "committed", ["after"]],
+    ["deleted media shows only before", "D", "uncommitted", ["before"]],
+    ["untracked media shows only after", "U", "uncommitted", ["after"]],
+    ["renamed media shows only the new path", "R", "committed", ["after"]],
+    ["copied media shows only the new path", "C", "committed", ["after"]],
+  ] as const)("%s", async (_name, status, origin, sides) => {
+    const { diff } = await mountWith(
+      response([
+        item({
+          name: "repo",
+          files: [file({ path: "sample.png", status, origin })],
+        }),
+      ]),
+      {
+        route: { wt: "/repo" },
+        diff: { diff: "Binary files differ\n" },
+      },
+    );
+
+    expect(
+      Array.from(diff.querySelectorAll<HTMLImageElement>(".gdp-media img")).map(
+        (image) => image.getAttribute("src"),
+      ),
+    ).toEqual(
+      sides.map(
+        (side) =>
+          `/_worktree/file?path=%2Frepo&file=sample.png&origin=${origin}&side=${side}`,
+      ),
+    );
+  });
+
+  test("does not add a media card for a source file", async () => {
+    const { diff } = await mountWith(
+      response([item({ name: "repo", files: [file()] })]),
+      {
+        route: { wt: "/repo" },
+        diff: { diff: "@@ -1 +1 @@\n-a\n+b\n" },
+      },
+    );
+
+    expect(diff.querySelector(".gdp-media")).toBeNull();
+  });
+
+  test("shows a media load failure inside the affected side", async () => {
+    const { diff } = await mountWith(
+      response([
+        item({
+          name: "repo",
+          files: [file({ path: "sample.png", status: "A" })],
+        }),
+      ]),
+      {
+        route: { wt: "/repo" },
+        diff: { diff: "Binary files differ\n" },
+      },
+    );
+    const image = diff.querySelector<HTMLImageElement>(".gdp-media img");
+    if (!image) throw new Error("media image was not rendered");
+
+    image.dispatchEvent(new Event("error"));
+
+    const failure = diff.querySelector<HTMLElement>(
+      '.gdp-media .media-empty[role="alert"]',
+    );
+    expect(failure?.textContent).toBe(TEXT.panes.mediaUnavailable);
   });
 
   test.each([

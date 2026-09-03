@@ -48,7 +48,9 @@ Requires Node.js 20 or newer. Development uses
   visible.
 - Browse every worktree of the repository from the `Worktrees` item in the
   header menu, in the same three-pane shape as History: worktrees on the left,
-  the picked one's changed files in the middle, the diff on the right. Each row
+  the picked one's changed files in the middle, the diff on the right. Changed
+  images, video, and audio show a before / after preview there too, with the
+  same media card as the Diff Viewer, read from that worktree. Each row
   shows how far its branch has drifted from the base branch (ahead / behind) and
   whether it still merges cleanly — checked with `git merge-tree`, so no working
   tree is touched — or which files would conflict. Files are split into

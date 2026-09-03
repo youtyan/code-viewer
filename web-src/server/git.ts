@@ -407,6 +407,26 @@ export async function defaultBranchResultAsync(
 }
 
 /**
+ * 3-dot diff が基準にする共通祖先。呼び出し側は完全な ref 名を渡す。
+ */
+export async function mergeBaseResultAsync(
+  cwd: string,
+  left: string,
+  right: string,
+): Promise<{ oid: string } & Partial<GitErrorResult>> {
+  const res = await runGitAsync(["git", "merge-base", left, right], cwd);
+  if (res.code !== 0) {
+    return {
+      oid: "",
+      ...gitFailureResult(res, "git merge-base failed"),
+    };
+  }
+  const oid = res.stdout.trim();
+  if (!oid) return { oid: "", error: "git merge-base returned no commit" };
+  return { oid };
+}
+
+/**
  * base から見てどれだけ進んでいて、どれだけ遅れているか。
  *
  * ブランチ名はそのまま繋ぐと `-` 始まりの名前がオプションに化けるので、必ず

@@ -84,6 +84,7 @@ export type WorktreeText = {
     diffLoading: string;
     diffEmpty: string;
     diffFailed: string;
+    mediaUnavailable: string;
     diffTruncated: (shown: number, total: number) => string;
   };
   noCommit: string;
@@ -294,6 +295,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       diffLoading: "Loading the diff…",
       diffEmpty: "No textual diff (binary, or the file is unchanged).",
       diffFailed: "Failed to load the diff.",
+      mediaUnavailable: "Media not available",
       diffTruncated: (shown, total) =>
         `showing ${shown} of ${total} hunks — open the worktree in a new tab for the whole file`,
     },
@@ -462,6 +464,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       diffLoading: "差分を読み込んでいます…",
       diffEmpty: "テキストの差分はありません（バイナリか、変更なし）。",
       diffFailed: "差分を読み込めませんでした。",
+      mediaUnavailable: "メディアを読み込めませんでした。",
       diffTruncated: (shown, total) =>
         `${total} 個のうち ${shown} 個のかたまりを表示しています。全部見るには、その作業ツリーを別タブで見てください`,
     },
