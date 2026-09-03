@@ -24,6 +24,12 @@ import { runGit } from "./_git-fixture";
 import { callRoute, postRoute, type RouteHandler } from "./_test-helpers";
 
 const GENERATION = 7;
+const BASE_MEDIA_BYTES = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01,
+]);
+const UPDATED_MEDIA_BYTES = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x02, 0x03,
+]);
 
 // handleWorktreeRoute は generation も受け取るので、共有ヘルパが期待する
 // 4 引数の形に畳んでから渡す。
@@ -75,7 +81,8 @@ beforeEach(() => {
   runGit(repo, ["config", "user.email", "test@example.com"]);
   runGit(repo, ["config", "user.name", "test"]);
   writeFileSync(join(repo, "sample.txt"), "sample\n");
-  runGit(repo, ["add", "sample.txt"]);
+  writeFileSync(join(repo, "sample.png"), BASE_MEDIA_BYTES);
+  runGit(repo, ["add", "sample.txt", "sample.png"]);
   runGit(repo, ["commit", "-qm", "initial commit"]);
 });
 
@@ -672,5 +679,244 @@ describe("diff endpoint hardening", () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+});
+
+describe("worktree media files", () => {
+  async function mediaOf(
+    params: Record<string, string>,
+    init?: RequestInit,
+  ): Promise<Response> {
+    const query = new URLSearchParams(params).toString();
+    const res = await call(`/_worktree/file?${query}`, init);
+    if (!res) throw new Error("worktree file route did not answer");
+    return res;
+  }
+
+  test.each([
+    {
+      name: "returns the worktree bytes for the uncommitted after side",
+      side: "after",
+      expected: UPDATED_MEDIA_BYTES,
+    },
+    {
+      name: "returns the HEAD blob for the uncommitted before side",
+      side: "before",
+      expected: BASE_MEDIA_BYTES,
+    },
+  ])("$name", async ({ side, expected }) => {
+    await post("/_worktree/add", { name: "sample-branch" });
+    const added = await listedPath((entry) => entry.name === "sample-branch");
+    writeFileSync(join(added, "sample.png"), UPDATED_MEDIA_BYTES);
+
+    const res = await mediaOf({
+      path: added,
+      file: "sample.png",
+      origin: "uncommitted",
+      side,
+    });
+
+    expect(res.status).toBe(200);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(expected);
+    expect(res.headers.get("Content-Type")).toBe("image/png");
+  });
+
+  test("returns the HEAD blob for a deleted uncommitted media file", async () => {
+    await post("/_worktree/add", { name: "sample-branch" });
+    const added = await listedPath((entry) => entry.name === "sample-branch");
+    rmSync(join(added, "sample.png"));
+
+    const res = await mediaOf({
+      path: added,
+      file: "sample.png",
+      origin: "uncommitted",
+      side: "before",
+    });
+
+    expect(res.status).toBe(200);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(BASE_MEDIA_BYTES);
+  });
+
+  test.each([
+    { name: "added tracked media", file: "added.png", staged: true },
+    { name: "untracked media", file: "untracked.png", staged: false },
+  ])("returns the after bytes for $name", async ({ file, staged }) => {
+    const current = await listedPath((entry) => entry.current);
+    writeFileSync(join(current, file), UPDATED_MEDIA_BYTES);
+    if (staged) runGit(current, ["add", file]);
+
+    const res = await mediaOf({
+      path: current,
+      file,
+      origin: "uncommitted",
+      side: "after",
+    });
+
+    expect(res.status).toBe(200);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(
+      UPDATED_MEDIA_BYTES,
+    );
+  });
+
+  test.each([
+    {
+      name: "returns the branch blob for the committed after side",
+      side: "after",
+      expected: UPDATED_MEDIA_BYTES,
+    },
+    {
+      name: "returns the merge-base blob for the committed before side",
+      side: "before",
+      expected: BASE_MEDIA_BYTES,
+    },
+  ])("$name", async ({ side, expected }) => {
+    await post("/_worktree/add", { name: "sample-branch" });
+    const added = await listedPath((entry) => entry.name === "sample-branch");
+    writeFileSync(join(added, "sample.png"), UPDATED_MEDIA_BYTES);
+    runGit(added, ["commit", "-qam", "update media on branch"]);
+    writeFileSync(
+      join(repo, "sample.png"),
+      Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x04]),
+    );
+    runGit(repo, ["commit", "-qam", "update media on base"]);
+    writeFileSync(
+      join(added, "sample.png"),
+      Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x05]),
+    );
+
+    const res = await mediaOf({
+      path: added,
+      file: "sample.png",
+      origin: "committed",
+      side,
+    });
+
+    expect(res.status).toBe(200);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(expected);
+  });
+
+  test.each([
+    { name: "worktree file", side: "after", size: 10 },
+    { name: "git blob", side: "before", size: 9 },
+  ])("supports byte ranges for a $name", async ({ side, size }) => {
+    const current = await listedPath((entry) => entry.current);
+    writeFileSync(join(current, "sample.png"), UPDATED_MEDIA_BYTES);
+
+    const res = await mediaOf(
+      {
+        path: current,
+        file: "sample.png",
+        origin: "uncommitted",
+        side,
+      },
+      { headers: { Range: "bytes=1-3" } },
+    );
+
+    expect(res.status).toBe(206);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(
+      Uint8Array.from([0x50, 0x4e, 0x47]),
+    );
+    expect(res.headers.get("Content-Range")).toBe(`bytes 1-3/${size}`);
+    expect(res.headers.get("Content-Length")).toBe("3");
+  });
+
+  test.each([
+    { name: "PNG", file: "added.png", contentType: "image/png" },
+    { name: "AVIF", file: "added.avif", contentType: "image/avif" },
+    { name: "BMP", file: "added.bmp", contentType: "image/bmp" },
+    {
+      name: "ICO",
+      file: "added.ico",
+      contentType: "image/vnd.microsoft.icon",
+    },
+    { name: "video", file: "added.mp4", contentType: "video/mp4" },
+    { name: "audio", file: "added.mp3", contentType: "audio/mpeg" },
+  ])("returns the expected Content-Type for $name", async ({
+    file,
+    contentType,
+  }) => {
+    const current = await listedPath((entry) => entry.current);
+    writeFileSync(join(current, file), UPDATED_MEDIA_BYTES);
+
+    const res = await mediaOf({
+      path: current,
+      file,
+      origin: "uncommitted",
+      side: "after",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe(contentType);
+  });
+
+  test.each([
+    {
+      name: "rejects a parent traversal",
+      params: { file: "../sample.png", origin: "uncommitted", side: "after" },
+      expected: 400,
+    },
+    {
+      name: "rejects an option-shaped path",
+      params: { file: "--sample.png", origin: "uncommitted", side: "after" },
+      expected: 400,
+    },
+    {
+      name: "refuses a git-internal path",
+      params: { file: ".git/sample.png", origin: "uncommitted", side: "after" },
+      expected: 403,
+    },
+    {
+      name: "rejects an unknown origin",
+      params: { file: "sample.png", origin: "other", side: "after" },
+      expected: 400,
+    },
+    {
+      name: "rejects an unknown side",
+      params: { file: "sample.png", origin: "uncommitted", side: "other" },
+      expected: 400,
+    },
+  ])("$name", async ({ params, expected }) => {
+    const current = await listedPath((entry) => entry.current);
+    const res = await mediaOf({ path: current, ...params });
+    expect(res.status).toBe(expected);
+  });
+
+  test("refuses a media file that is not in the current change list", async () => {
+    const current = await listedPath((entry) => entry.current);
+    const res = await mediaOf({
+      path: current,
+      file: "sample.png",
+      origin: "uncommitted",
+      side: "after",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  test("returns the change-list failure reason", async () => {
+    await post("/_worktree/add", { name: "sample-branch" });
+    const added = await listedPath((entry) => entry.name === "sample-branch");
+    writeFileSync(join(added, ".git"), "gitdir: missing-git-dir\n");
+
+    const res = await mediaOf({
+      path: added,
+      file: "sample.png",
+      origin: "uncommitted",
+      side: "after",
+    });
+
+    expect(res.status).toBe(500);
+    expect(await res.text()).toMatch(/^could not collect changed files: .+/s);
+  });
+
+  test("refuses a changed file that is not media", async () => {
+    const current = await listedPath((entry) => entry.current);
+    writeFileSync(join(current, "sample.txt"), "updated\n");
+    const res = await mediaOf({
+      path: current,
+      file: "sample.txt",
+      origin: "uncommitted",
+      side: "after",
+    });
+    expect(res.status).toBe(404);
   });
 });

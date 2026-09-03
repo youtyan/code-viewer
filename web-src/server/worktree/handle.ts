@@ -1,6 +1,7 @@
 // worktree 画面の HTTP 入口。
 //
 // - GET  /_worktree/list    作業ツリーの一覧 (ブランチ・変更数・最終コミット)
+// - GET  /_worktree/file    変更されたメディアの before / after
 // - POST /_worktree/add     作業ツリーを 1 本増やす
 // - POST /_worktree/remove  作業ツリーを 1 本外す
 // - POST /_worktree/open    その作業ツリーで code-viewer を開く
@@ -15,8 +16,10 @@
 // dispatchRoutes に任せる (tmux/handle.ts と同じ使い方)。
 
 import { existsSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
+import { sourceDisplayKind } from "../../core/source-meta";
 import type {
   WorktreeActionResponse,
   WorktreeDiffResponse,
@@ -37,10 +40,14 @@ import {
 } from "../database/handle-shared";
 import { safeWorktreePathFromRoot } from "../file-cli";
 import {
+  catFileBlobStream,
   defaultBranchResultAsync,
   fileDiffTextAsync,
   isGitInternalPath,
   localBranchExistsResultAsync,
+  mergeBaseResultAsync,
+  objectByteSizeAsync,
+  objectIdAsync,
   truncateToNHunks,
   untrackedFileDiffAsync,
   worktreeAddResultAsync,
@@ -48,6 +55,9 @@ import {
   worktreePruneResultAsync,
   worktreeRemoveResultAsync,
 } from "../git";
+import { collectByteRangeFromStream, parseHttpByteRange } from "../range";
+import { rawFileHeaders } from "../raw-file-headers";
+import { fileByteRangeResponseBody, fileReadableStream } from "../runtime";
 import { isSafePath } from "../search-service";
 import {
   buildWorktreeList,
@@ -216,6 +226,200 @@ async function handleDiffGet(
   return json(response);
 }
 
+type MediaResponseBody = ReadableStream<Uint8Array> | ArrayBuffer;
+
+type MediaResponseSource = {
+  full(): MediaResponseBody;
+  range(
+    start: number,
+    end: number,
+  ): MediaResponseBody | Response | Promise<MediaResponseBody | Response>;
+};
+
+function byteRangeBody(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+}
+
+async function mediaResponse(
+  req: Request,
+  file: string,
+  size: number,
+  source: MediaResponseSource,
+): Promise<Response> {
+  const rangeResult = req.headers.get("range")
+    ? parseHttpByteRange(req.headers.get("range"), size)
+    : null;
+  if (rangeResult?.kind === "unsatisfiable") {
+    return new Response(null, {
+      status: 416,
+      headers: {
+        ...rawFileHeaders(file, { size }),
+        "Content-Range": `bytes */${size}`,
+        "Content-Length": "0",
+      },
+    });
+  }
+  if (rangeResult?.kind === "range") {
+    const range = rangeResult.range;
+    const body = await source.range(range.start, range.end);
+    if (body instanceof Response) return body;
+    return new Response(body, {
+      status: 206,
+      headers: rawFileHeaders(file, { size, range }),
+    });
+  }
+  return new Response(source.full(), {
+    headers: rawFileHeaders(file, { size }),
+  });
+}
+
+async function worktreeMediaResponse(
+  req: Request,
+  file: string,
+  full: string,
+): Promise<Response> {
+  const metadata = await stat(full);
+  if (!metadata.isFile()) return textError("media is not a regular file", 404);
+  return mediaResponse(req, file, metadata.size, {
+    full: () => fileReadableStream(full),
+    range: (start, end) => fileByteRangeResponseBody(full, start, end),
+  });
+}
+
+async function blobMediaResponse(
+  req: Request,
+  file: string,
+  ref: string,
+  cwd: string,
+): Promise<Response> {
+  const object = await objectIdAsync(ref, file, cwd);
+  if (object.code !== 0 || !object.oid) {
+    return textError(
+      object.stderr.trim() || "media is not available in ref",
+      404,
+    );
+  }
+  const size = await objectByteSizeAsync(object.oid, cwd);
+  if (size.code !== 0) {
+    return textError(size.stderr.trim() || "cannot read media size", 500);
+  }
+  return mediaResponse(req, file, size.size, {
+    full: () => catFileBlobStream(object.oid, cwd).stream,
+    range: async (start, end) => {
+      const shown = catFileBlobStream(object.oid, cwd);
+      const bytes = await collectByteRangeFromStream(
+        shown.stream,
+        start,
+        end + 1,
+      );
+      const code = await shown.exited;
+      if (code !== 0) {
+        return textError(`git cat-file failed with exit code ${code}`, 500);
+      }
+      const expectedLength = end - start + 1;
+      if (bytes.byteLength !== expectedLength) {
+        return textError(
+          `git cat-file returned ${bytes.byteLength} of ${expectedLength} requested bytes`,
+          500,
+        );
+      }
+      return byteRangeBody(bytes);
+    },
+  });
+}
+
+/**
+ * Worktree の変更一覧に載っているメディアだけを before / after で返す。
+ * committed の before は 3-dot diff と同じ merge-base を使う。
+ */
+async function handleFileGet(
+  req: Request,
+  url: URL,
+  cwd: string,
+): Promise<Response> {
+  const file = url.searchParams.get("file") || "";
+  if (!file) return textError("file is required", 400);
+  if (!isSafePath(file)) return textError("invalid file path", 400);
+  if (file.startsWith("-")) return textError("invalid file path", 400);
+  if (isGitInternalPath(file)) return textError("forbidden", 403);
+
+  const origin = url.searchParams.get("origin");
+  if (origin !== "uncommitted" && origin !== "committed") {
+    return textError("invalid origin", 400);
+  }
+  const side = url.searchParams.get("side");
+  if (side !== "before" && side !== "after") {
+    return textError("invalid side", 400);
+  }
+
+  const resolved = await resolveListedPath(
+    cwd,
+    url.searchParams.get("path") || "",
+  );
+  if (resolved instanceof Response) return resolved;
+
+  const baseResult =
+    origin === "committed"
+      ? await defaultBranchResultAsync(resolved.root)
+      : { branch: "" };
+  if (baseResult.error) {
+    return textError(baseResult.error, baseResult.status ?? 500);
+  }
+  const base = baseResult.branch;
+  if (
+    origin === "committed" &&
+    (!base || !resolved.branch || base === resolved.branch)
+  ) {
+    return textError("nothing to compare against", 409);
+  }
+
+  const changes = await collectFiles(resolved.ref, base);
+  if (changes.error) {
+    return textError(`could not collect changed files: ${changes.error}`, 500);
+  }
+  const listedFile = changes.files.find(
+    (change) => change.path === file && change.origin === origin,
+  );
+  if (!listedFile) return textError("file is not changed here", 404);
+  const displayKind = sourceDisplayKind(file);
+  if (
+    displayKind !== "image" &&
+    displayKind !== "video" &&
+    displayKind !== "audio"
+  ) {
+    return textError("file is not media", 404);
+  }
+
+  if (origin === "uncommitted" && side === "after") {
+    const full = safeWorktreePathFromRoot(resolved.path, file);
+    if (!full) return textError("media is not available", 404);
+    return worktreeMediaResponse(req, file, full);
+  }
+
+  let ref = "HEAD";
+  if (origin === "committed") {
+    const branchRef = `refs/heads/${resolved.branch}`;
+    if (side === "after") {
+      ref = branchRef;
+    } else {
+      const baseRef = `refs/heads/${base}`;
+      const mergeBase = await mergeBaseResultAsync(
+        resolved.path,
+        baseRef,
+        branchRef,
+      );
+      if (mergeBase.error) {
+        return textError(mergeBase.error, mergeBase.status ?? 500);
+      }
+      ref = mergeBase.oid;
+    }
+  }
+  return blobMediaResponse(req, file, ref, resolved.path);
+}
+
 async function handleAddPost(req: Request, cwd: string): Promise<Response> {
   const parsed = await parseBoundedJsonBody(
     req,
@@ -375,6 +579,11 @@ export function handleWorktreeRoute(
         methods: ["GET"],
         sideEffect: false,
         handler: () => handleDiffGet(url, cwd, generation),
+      },
+      "/_worktree/file": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleFileGet(req, url, cwd),
       },
       "/_worktree/add": {
         methods: ["POST"],

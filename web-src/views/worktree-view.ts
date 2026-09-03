@@ -33,6 +33,7 @@ import {
   closeContextMenu,
   showContextMenu,
 } from "./context-menu";
+import { enhanceMediaCard } from "./media-embed";
 import type { PageView } from "./page-view";
 import { showFormDialog } from "./ui-dialog";
 import type { WorktreeText } from "./worktree-i18n";
@@ -1624,6 +1625,37 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           hljs as ConstructorParameters<typeof window.Diff2HtmlUI>[3],
         );
         ui.draw();
+        enhanceMediaCard(
+          {
+            path: file.path,
+            status:
+              file.status === "A" ||
+              file.status === "U" ||
+              file.status === "R" ||
+              file.status === "C"
+                ? "A"
+                : file.status,
+          },
+          shell,
+          {
+            fileUrl: (side) =>
+              `/_worktree/file?${new URLSearchParams({
+                path: item.path,
+                file: file.path,
+                origin: file.origin,
+                side,
+              }).toString()}`,
+            onMediaError: (_side, media) => {
+              const failure = el(
+                "div",
+                "media-empty",
+                t.panes.mediaUnavailable,
+              );
+              failure.setAttribute("role", "alert");
+              media.replaceWith(failure);
+            },
+          },
+        );
       }
       shell.classList.add("loaded");
     } catch (error) {
