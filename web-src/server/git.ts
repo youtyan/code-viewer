@@ -1402,6 +1402,8 @@ export async function commitHistoryAsync(
     ref: string;
     skip: number;
     limit: number;
+    /** この ref から到達できるコミットを結果から除く。 */
+    excludeRef?: string;
     query?: string;
     path?: string;
     // With `path`: restrict to commits that changed these lines
@@ -1428,6 +1430,23 @@ export async function commitHistoryAsync(
       hasMore: false,
       ...gitFailureResult(verified, "unknown ref"),
     };
+  const excludeRef = (options.excludeRef || "").trim();
+  if (excludeRef && (excludeRef.startsWith("-") || excludeRef.includes("\0"))) {
+    return { commits: [], hasMore: false, error: "invalid exclude ref" };
+  }
+  const excluded = excludeRef
+    ? await runGitAsync(
+        ["git", "rev-parse", "--verify", `${excludeRef}^{commit}`],
+        cwd,
+      )
+    : null;
+  if (excluded && excluded.code !== 0) {
+    return {
+      commits: [],
+      hasMore: false,
+      ...gitFailureResult(excluded, "unknown exclude ref"),
+    };
+  }
   const skip = Math.max(0, Math.floor(options.skip) || 0);
   const limit = Math.max(
     1,
@@ -1469,6 +1488,7 @@ export async function commitHistoryAsync(
         ? [`-L${lineRange.start},${lineRange.end}:${safePathFilter}`, "-s"]
         : []),
       verified.stdout.trim(),
+      ...(excluded ? [`^${excluded.stdout.trim()}`] : []),
       ...(specs.length ? ["--", ...specs] : []),
     ],
     cwd,
@@ -1480,7 +1500,7 @@ export async function commitHistoryAsync(
       ...gitFailureResult(res, "git log failed"),
     };
   let parsed = parseHistoryLog(res.stdout);
-  if (shaTerm && skip === 0) {
+  if (shaTerm && skip === 0 && !excluded) {
     const bySha = await runGitAsync(
       ["git", "rev-parse", "--verify", `${shaTerm}^{commit}`],
       cwd,

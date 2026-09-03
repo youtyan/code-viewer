@@ -1,6 +1,7 @@
 // worktree 画面の HTTP 入口。
 //
 // - GET  /_worktree/list    作業ツリーの一覧 (ブランチ・変更数・最終コミット)
+// - GET  /_worktree/commits 基準ブランチに無いコミット
 // - GET  /_worktree/file    変更されたメディアの before / after
 // - POST /_worktree/add     作業ツリーを 1 本増やす
 // - POST /_worktree/remove  作業ツリーを 1 本外す
@@ -20,8 +21,10 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { sourceDisplayKind } from "../../core/source-meta";
+import { HISTORY_PAGE_SIZE } from "../../core/history";
 import type {
   WorktreeActionResponse,
+  WorktreeCommitsResponse,
   WorktreeDiffResponse,
   WorktreesResponse,
 } from "../../core/types";
@@ -41,6 +44,7 @@ import {
 import { safeWorktreePathFromRoot } from "../file-cli";
 import {
   catFileBlobStream,
+  commitHistoryAsync,
   defaultBranchResultAsync,
   fileDiffTextAsync,
   isGitInternalPath,
@@ -92,6 +96,53 @@ async function handleListGet(
 ): Promise<Response> {
   const list = await buildWorktreeList(serverWorktreeRoot(cwd));
   const response: WorktreesResponse = { ...list, generation };
+  return json(response);
+}
+
+async function handleCommitsGet(
+  url: URL,
+  cwd: string,
+  generation: number,
+): Promise<Response> {
+  const resolved = await resolveListedPath(
+    cwd,
+    url.searchParams.get("path") || "",
+  );
+  if (resolved instanceof Response) return resolved;
+
+  const baseResult = await defaultBranchResultAsync(resolved.root);
+  if (baseResult.error) {
+    return textError(baseResult.error, baseResult.status ?? 500);
+  }
+  const base = baseResult.branch;
+  if (!base || !resolved.branch || base === resolved.branch) {
+    const response: WorktreeCommitsResponse = {
+      commits: [],
+      hasMore: false,
+      generation,
+    };
+    return json(response);
+  }
+
+  const result = await commitHistoryAsync(resolved.path, {
+    ref: `refs/heads/${resolved.branch}`,
+    excludeRef: `refs/heads/${base}`,
+    skip: 0,
+    limit: HISTORY_PAGE_SIZE,
+  });
+  if (result.error) {
+    return textError(result.error, result.status ?? 500);
+  }
+  const response: WorktreeCommitsResponse = {
+    commits: result.commits.map(({ sha, subject, author, when }) => ({
+      sha,
+      subject,
+      author,
+      when,
+    })),
+    hasMore: result.hasMore,
+    generation,
+  };
   return json(response);
 }
 
@@ -574,6 +625,11 @@ export function handleWorktreeRoute(
         methods: ["GET"],
         sideEffect: false,
         handler: () => handleListGet(cwd, generation),
+      },
+      "/_worktree/commits": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleCommitsGet(url, cwd, generation),
       },
       "/_worktree/diff": {
         methods: ["GET"],

@@ -188,6 +188,43 @@ describe("divergence from the base branch", () => {
     expect(entry?.divergence?.behind).toBe(1);
   });
 
+  test("lists only commits that are ahead of the base", async () => {
+    await post("/_worktree/add", { name: "feature-x" });
+    const added = await listedPath((entry) => entry.name === "feature-x");
+    writeFileSync(join(added, "branch-first.txt"), "first\n");
+    runGit(added, ["add", "branch-first.txt"]);
+    runGit(added, ["commit", "-qm", "branch first"]);
+
+    writeFileSync(join(repo, "base-only.txt"), "base\n");
+    runGit(repo, ["add", "base-only.txt"]);
+    runGit(repo, ["commit", "-qm", "base only"]);
+    runGit(added, ["merge", "-m", "merge base", "main"]);
+
+    writeFileSync(join(added, "branch-second.txt"), "second\n");
+    runGit(added, ["add", "branch-second.txt"]);
+    runGit(added, ["commit", "-qm", "branch second"]);
+
+    const res = await call(
+      `/_worktree/commits?${new URLSearchParams({ path: added }).toString()}`,
+    );
+    expect(res?.status).toBe(200);
+    const body = (await res?.json()) as {
+      commits: Array<{ subject: string }>;
+      hasMore: boolean;
+      generation: number;
+    };
+    expect(body.commits.map((commit) => commit.subject)).toEqual([
+      "branch second",
+      "merge base",
+      "branch first",
+    ]);
+    expect(body.commits.map((commit) => commit.subject)).not.toContain(
+      "base only",
+    );
+    expect(body.hasMore).toBe(false);
+    expect(body.generation).toBe(GENERATION);
+  });
+
   test("reports a clean merge when the branches touch different files", async () => {
     await post("/_worktree/add", { name: "feature-x" });
     const added = await listedPath((entry) => entry.name === "feature-x");

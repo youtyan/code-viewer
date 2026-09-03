@@ -22,7 +22,9 @@ import {
 } from "../core/icons";
 import type { AppRoute } from "../core/routes";
 import type {
+  CommitMeta,
   WorktreeActionResponse,
+  WorktreeCommitsResponse,
   WorktreeDiffResponse,
   WorktreesResponse,
 } from "../core/types";
@@ -168,6 +170,11 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   let refreshLoop: Promise<void> | null = null;
   let worktreeFilter = "";
   let fileFilter = "";
+  let commitsFor = "";
+  let commits: CommitMeta[] = [];
+  let commitsHasMore = false;
+  let commitsLoading = false;
+  let commitsError = "";
   /**
    * 今 #diff に積んであるもの (作業ツリー + 表示設定)。積み直すかの判断に使う。
    * null は「まだ一度も積んでいない」で、"" (未選択) とは別物。表示設定を
@@ -288,6 +295,11 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     observer?.disconnect();
     observer = null;
     diffFor = null;
+    commitsFor = "";
+    commits = [];
+    commitsHasMore = false;
+    commitsLoading = false;
+    commitsError = "";
     restoredRouteKey = null;
     if (sseTimer !== null) {
       window.clearTimeout(sseTimer);
@@ -392,6 +404,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       if (isCurrent(seq)) {
         // 一覧が変われば中身も変わる。積み直す。
         diffFor = null;
+        commitsFor = "";
         render();
       }
     }
@@ -1421,6 +1434,119 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     }
   }
 
+  async function loadCommits(
+    item: WorktreeItem,
+    key: string,
+    seq: number,
+  ): Promise<void> {
+    try {
+      const next = await deps.trackLoad(
+        fetch(
+          `/_worktree/commits?${new URLSearchParams({ path: item.path }).toString()}`,
+        ).then(async (res) => {
+          if (!res.ok) throw new Error((await res.text()) || `${res.status}`);
+          return (await res.json()) as WorktreeCommitsResponse;
+        }),
+      );
+      if (
+        !isCurrent(seq) ||
+        selectedWorktree()?.id !== item.id ||
+        commitsFor !== key
+      ) {
+        return;
+      }
+      if (
+        !Number.isInteger(next.generation) ||
+        next.generation < acceptedServerGeneration
+      ) {
+        throw new Error(
+          `stale worktree commit response generation ${next.generation}; current is ${acceptedServerGeneration}`,
+        );
+      }
+      commits = next.commits;
+      commitsHasMore = next.hasMore;
+    } catch (error) {
+      if (
+        !isCurrent(seq) ||
+        selectedWorktree()?.id !== item.id ||
+        commitsFor !== key
+      ) {
+        return;
+      }
+      commitsError =
+        error instanceof Error ? error.message : text().commits.loadFailed;
+    } finally {
+      if (
+        isCurrent(seq) &&
+        selectedWorktree()?.id === item.id &&
+        commitsFor === key
+      ) {
+        commitsLoading = false;
+        renderFiles();
+      }
+    }
+  }
+
+  function renderCommits(list: HTMLElement, item: WorktreeItem): void {
+    const divergence = item.divergence;
+    if (!divergence || divergence.ahead < 1) return;
+    const key = `${item.id}|${item.branch}|${divergence.base}|${acceptedServerGeneration}`;
+    if (commitsFor !== key) {
+      commitsFor = key;
+      commits = [];
+      commitsHasMore = false;
+      commitsLoading = true;
+      commitsError = "";
+      void loadCommits(item, key, lifecycle);
+    }
+
+    const t = text();
+    list.appendChild(
+      el("li", "worktree-file-group", t.commits.heading(divergence.base)),
+    );
+    if (commitsLoading) {
+      list.appendChild(note(t.commits.loading));
+      return;
+    }
+    if (commitsError) {
+      const failure = note(commitsError);
+      failure.style.color = "var(--danger)";
+      list.appendChild(failure);
+      return;
+    }
+    if (!commits.length) {
+      list.appendChild(note(t.commits.none));
+      return;
+    }
+    for (const commit of commits) {
+      const row = el("li", "history-item worktree-commit");
+      const subject = el("span", "subject", commit.subject);
+      subject.title = commit.subject;
+      const meta = el("span", "meta2");
+      meta.appendChild(el("span", "sha", commit.sha.slice(0, 7)));
+      meta.appendChild(el("span", "author", commit.author));
+      const parsed = Date.parse(commit.when);
+      const when = el(
+        "span",
+        "when",
+        Number.isFinite(parsed)
+          ? blameRelativeTime(Math.round(parsed / 1000))
+          : commit.when,
+      );
+      when.title = Number.isFinite(parsed)
+        ? new Date(parsed).toLocaleString()
+        : commit.when;
+      meta.appendChild(when);
+      row.append(subject, meta);
+      list.appendChild(row);
+    }
+    if (commitsHasMore) {
+      list.appendChild(
+        note(t.commits.truncated(commits.length, divergence.ahead)),
+      );
+    }
+  }
+
   function renderFiles(): void {
     const t = text();
     const list = document.getElementById("filelist");
@@ -1449,6 +1575,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       list.appendChild(note(t.panes.selectWorktree));
       return;
     }
+    renderCommits(list, item);
     if (!item.fileCount) {
       list.appendChild(note(t.files.none));
       return;

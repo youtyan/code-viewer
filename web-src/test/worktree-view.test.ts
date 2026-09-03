@@ -10,7 +10,7 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import type { AppRoute, DiffRange } from "../core/routes";
-import type { WorktreesResponse } from "../core/types";
+import type { CommitMeta, WorktreesResponse } from "../core/types";
 import type { WorktreeFileChange, WorktreeItem } from "../core/worktree";
 import { worktreeText } from "../views/worktree-i18n";
 import {
@@ -192,11 +192,19 @@ type DiffPayload = {
   truncated?: boolean;
 };
 
+type CommitPayload = CommitMeta[] | { status: number; body: string };
+
 function stubFetch(
   list: WorktreesResponse | { status: number; body: string },
   diff?: DiffPayload | { status: number; body: string },
   postResponse: Record<string, unknown> = {},
-): { diffUrls: string[]; posts: Array<{ url: string; body: unknown }> } {
+  commits: CommitPayload = [],
+): {
+  commitUrls: string[];
+  diffUrls: string[];
+  posts: Array<{ url: string; body: unknown }>;
+} {
+  const commitUrls: string[] = [];
   const diffUrls: string[] = [];
   const posts: Array<{ url: string; body: unknown }> = [];
   Object.defineProperty(globalThis, "fetch", {
@@ -213,6 +221,20 @@ function stubFetch(
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
+      }
+      if (url.startsWith("/_worktree/commits")) {
+        commitUrls.push(url);
+        if ("status" in commits) {
+          return new Response(commits.body, { status: commits.status });
+        }
+        return new Response(
+          JSON.stringify({
+            commits,
+            hasMore: false,
+            generation: "status" in list ? 0 : list.generation,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
       }
       if (url.startsWith("/_worktree/diff")) {
         diffUrls.push(url);
@@ -242,7 +264,7 @@ function stubFetch(
       });
     }) as typeof fetch,
   });
-  return { diffUrls, posts };
+  return { commitUrls, diffUrls, posts };
 }
 
 type Mounted = {
@@ -250,6 +272,7 @@ type Mounted = {
   filelist: HTMLElement;
   diff: HTMLElement;
   routes: AppRoute[];
+  commitUrls: string[];
   diffUrls: string[];
   posts: Array<{ url: string; body: unknown }>;
   view: WorktreeView;
@@ -276,14 +299,16 @@ async function mountWith(
     /** サイドバーの ツリー / 一覧。 */
     sidebarView?: "tree" | "flat";
     highlighter?: unknown;
+    commits?: CommitPayload;
   } = {},
 ): Promise<Mounted> {
   installDiff2Html();
   installIntersectionObserver();
-  const { diffUrls, posts } = stubFetch(
+  const { commitUrls, diffUrls, posts } = stubFetch(
     list,
     options.diff,
     options.postResponse ?? {},
+    options.commits,
   );
   let current: WorktreeRoute = {
     screen: "worktree",
@@ -345,6 +370,7 @@ async function mountWith(
     filelist,
     diff,
     routes,
+    commitUrls,
     diffUrls,
     posts,
     view,
@@ -1371,6 +1397,96 @@ describe("sidebar file list", () => {
     });
     const groups = texts(filelist, ".worktree-file-group");
     expect(groups).toEqual([TEXT.files.uncommitted, TEXT.files.committed]);
+  });
+
+  test("shows the selected worktree commits before its changed files", async () => {
+    const commits: CommitMeta[] = [
+      {
+        sha: "1234567890abcdef",
+        subject: "second sample change",
+        author: "Example Author",
+        when: "2026-08-12T09:30:00.000Z",
+      },
+      {
+        sha: "abcdef1234567890",
+        subject: "first sample change",
+        author: "Example Author",
+        when: "2026-08-11T08:15:00.000Z",
+      },
+    ];
+    const selected = item({
+      name: "topic",
+      branch: "topic",
+      divergence: {
+        base: "main",
+        ahead: 2,
+        behind: 0,
+        mergeState: "clean",
+        conflicts: [],
+      },
+      files: [file()],
+    });
+    const { filelist, commitUrls } = await mountWith(response([selected]), {
+      route: { wt: selected.id },
+      commits,
+    });
+
+    expect(commitUrls).toEqual([
+      `/_worktree/commits?${new URLSearchParams({ path: selected.path }).toString()}`,
+    ]);
+    expect(texts(filelist, ".worktree-file-group")[0]).toBe(
+      TEXT.commits.heading("main"),
+    );
+    expect(texts(filelist, ".worktree-commit .subject")).toEqual([
+      "second sample change",
+      "first sample change",
+    ]);
+    expect(texts(filelist, ".worktree-commit .sha")).toEqual([
+      "1234567",
+      "abcdef1",
+    ]);
+    expect(texts(filelist, ".worktree-commit .author")).toEqual([
+      "Example Author",
+      "Example Author",
+    ]);
+    expect(
+      filelist.querySelector<HTMLElement>(".worktree-commit .when")?.title,
+    ).toBe(new Date("2026-08-12T09:30:00.000Z").toLocaleString());
+    const commitRow = filelist.querySelector(".worktree-commit");
+    const fileRow = filelist.querySelector(".tree-file[data-key]");
+    expect(
+      commitRow && fileRow
+        ? commitRow.compareDocumentPosition(fileRow) &
+            Node.DOCUMENT_POSITION_FOLLOWING
+        : 0,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  test("shows a commit load failure and retries it on reload", async () => {
+    const selected = item({
+      name: "topic",
+      branch: "topic",
+      divergence: {
+        base: "main",
+        ahead: 1,
+        behind: 0,
+        mergeState: "clean",
+        conflicts: [],
+      },
+      files: [file()],
+    });
+    const { filelist, commitUrls, view } = await mountWith(
+      response([selected]),
+      {
+        route: { wt: selected.id },
+        commits: { status: 500, body: "git log failed" },
+      },
+    );
+
+    expect(filelist.textContent).toContain("git log failed");
+    expect(filelist.textContent).not.toContain(TEXT.commits.loading);
+    await view.reload();
+    expect(commitUrls).toHaveLength(2);
   });
 
   test("filters through the sidebar's own search box", async () => {
