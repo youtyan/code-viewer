@@ -53,15 +53,17 @@ Requires Node.js 20 or newer. Development uses
   same media card as the Diff Viewer, read from that worktree. Each row
   shows how far its branch has drifted from the base branch (ahead / behind) and
   whether it still merges cleanly — checked with `git merge-tree`, so no working
-  tree is touched — or which files would conflict. Files are split into
-  uncommitted work and commits made since the branch point, and a banner lists
-  every file that more than one worktree is changing, which is the conflict you
-  would otherwise only find at merge time. Each row carries the folder it lives
-  in, when its files were last touched, and a "…" holding every action for that
-  worktree — open the folder, copy its path, view it in a new tab, stop the
-  server it started, copy the command that merges it back, or delete it. Create
-  a worktree under `.worktrees/` (the dialog shows the exact path before you
-  commit to it); deleting one removes its folder from disk and keeps the branch.
+  tree is touched — or which files would conflict. For a branch ahead of its
+  base, the middle pane lists those commits above the changed files, with their
+  subjects, authors, and timestamps. Files are split into uncommitted work and
+  commits made since the branch point, and a banner lists every file that more
+  than one worktree is changing, which is the conflict you would otherwise only
+  find at merge time. Each row carries the folder it lives in, when its files
+  were last touched, and a "…" holding every action for that worktree — open the
+  folder, copy its path, view it in a new tab, stop the server it started, copy
+  the command that merges it back, or delete it. Create a worktree under
+  `.worktrees/` (the dialog shows the exact path before you commit to it);
+  deleting one removes its folder from disk and keeps the branch.
 - Open files directly from the repository or diff view, including text-like
   config/prompt files and large generated files (virtualized source viewer
   with copy/open-full-view).

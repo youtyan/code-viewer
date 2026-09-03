@@ -8067,6 +8067,19 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   cursor: default;
 }
 
+/* 選択中の worktree にだけ出すコミット。履歴画面の行を再利用するが、
+   ここでは選択操作を持たないので hover と pointer は付けない。 */
+#filelist .worktree-commit,
+#filelist.tree .worktree-commit {
+  display: block;
+  padding: 8px 12px;
+  border-left-width: 2px;
+  cursor: default;
+}
+#filelist .worktree-commit:hover {
+  background: transparent;
+}
+
 /* 他の作業ツリーも触っているファイル。何本と重なっているかを行末の数で出す。
    ファイル名の色は変えない (重なりが多いと一覧がまるごと染まるため)。
    誰と重なっているかは title に入る。 */

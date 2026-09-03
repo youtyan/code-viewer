@@ -125,6 +125,13 @@ export type WorktreesResponse = {
   error?: string;
 };
 
+/** 選択中の worktree にだけ必要な、基準ブランチに無いコミット。 */
+export type WorktreeCommitsResponse = {
+  commits: CommitMeta[];
+  hasMore: boolean;
+  generation: number;
+};
+
 /** 追加・削除・起動の結果。失敗は HTTP ステータスとテキストで返す。 */
 export type WorktreeActionResponse = {
   /** open のとき、開くべき URL。 */

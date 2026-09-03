@@ -65,6 +65,13 @@ export type WorktreeText = {
     overlapTitle: (others: string[]) => string;
     statusTitles: Record<string, string>;
   };
+  commits: {
+    heading: (base: string) => string;
+    loading: string;
+    none: string;
+    loadFailed: string;
+    truncated: (shown: number, total: number) => string;
+  };
   overlaps: {
     heading: (n: number) => string;
     intro: string;
@@ -273,6 +280,13 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       overlapTitle: (others) => `Also changed in: ${others.join(", ")}`,
       statusTitles: EN_STATUS_TITLES,
     },
+    commits: {
+      heading: (base) => `Commits ahead of ${base}`,
+      loading: "Loading commits…",
+      none: "No commits found.",
+      loadFailed: "Failed to load commits.",
+      truncated: (shown, total) => `showing ${shown} of ${total}`,
+    },
     overlaps: {
       heading: (n) =>
         n === 1
@@ -445,6 +459,13 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       overlapTitle: (others) =>
         `同じファイルを触っている: ${others.join("、")}`,
       statusTitles: JA_STATUS_TITLES,
+    },
+    commits: {
+      heading: (base) => `${base} に未マージのコミット`,
+      loading: "コミットを読み込んでいます…",
+      none: "コミットがありません。",
+      loadFailed: "コミットを読み込めませんでした。",
+      truncated: (shown, total) => `${total} 件のうち ${shown} 件を表示`,
     },
     overlaps: {
       heading: (n) => `${n} 個のファイルを 2 本以上が触っています`,
