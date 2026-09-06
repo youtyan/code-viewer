@@ -7,8 +7,16 @@
 
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 
-export function runGit(cwd: string, args: string[]): SpawnSyncReturns<string> {
-  const proc = spawnSync("git", args, { cwd, encoding: "utf8" });
+export function runGit(
+  cwd: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): SpawnSyncReturns<string> {
+  const proc = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    env: env ? { ...process.env, ...env } : process.env,
+  });
   if (proc.status !== 0) {
     throw new Error(
       `git ${args.join(" ")} failed: ${proc.stderr || proc.stdout}`,

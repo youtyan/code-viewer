@@ -8,6 +8,8 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { request as httpRequest } from "node:http";
@@ -15,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
+import type { RepoTreeResponse } from "../core/types";
 import { supportsNativeRecursiveWatch } from "../server/worktree-watcher";
 import { runGit as git } from "./_git-fixture";
 
@@ -56,7 +59,7 @@ function waitForPreviewUrl(proc: ReturnType<typeof spawn>): Promise<string> {
     proc.stdout?.on("data", onData);
     proc.stderr?.on("data", onData);
     proc.once("exit", (code) =>
-      reject(new Error(`preview exited before listening: ${code}`)),
+      reject(new Error(`preview exited before listening: ${code}\n${output}`)),
     );
   });
 }
@@ -309,7 +312,7 @@ afterEach(() => {
 
 async function startTestPreview(
   root: string,
-  gitCommand: string,
+  gitCommand?: string,
   rgCommand?: string,
 ) {
   const proc = spawn(
@@ -319,7 +322,7 @@ async function startTestPreview(
       cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
       env: {
         ...process.env,
-        CODE_VIEWER_BIN_GIT: gitCommand,
+        ...(gitCommand ? { CODE_VIEWER_BIN_GIT: gitCommand } : {}),
         ...(rgCommand ? { CODE_VIEWER_BIN_RG: rgCommand } : {}),
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -365,6 +368,99 @@ async function refreshPreview(url: string): Promise<Response> {
 }
 
 describe("preview CLI", () => {
+  test.each([
+    {
+      ref: "worktree",
+      latest: "2025-02-03T04:05:06+09:00",
+      modified: "2030-01-01T00:00:00.000Z",
+      deleted: "D",
+    },
+    {
+      ref: "HEAD",
+      latest: "2025-02-03T04:05:06+09:00",
+      modified: "2025-01-02T03:04:05+09:00",
+      deleted: undefined,
+    },
+    {
+      ref: "HEAD~1",
+      latest: "2025-01-02T03:04:05+09:00",
+      modified: "2025-01-02T03:04:05+09:00",
+      deleted: undefined,
+    },
+  ])("lists commit dates independently of filesystem dates at $ref", async ({
+    ref,
+    latest,
+    modified,
+    deleted,
+  }) => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-commit-dates-"));
+    tmpRoots.push(root);
+    git(root, ["init"]);
+    git(root, ["config", "user.name", "Sample"]);
+    git(root, ["config", "user.email", "sample@example.test"]);
+    mkdirSync(join(root, "sub"));
+    for (const path of [
+      "early.txt",
+      "edited.txt",
+      "deleted.txt",
+      "literal[1].txt",
+      "literal1.txt",
+      "sub/item.txt",
+    ])
+      writeFileSync(join(root, path), "first\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "initial"], {
+      GIT_AUTHOR_DATE: "1999-01-01T00:00:00Z",
+      GIT_COMMITTER_DATE: "2025-01-02T03:04:05+09:00",
+    });
+    for (const path of ["edited.txt", "literal1.txt", "sub/item.txt"])
+      writeFileSync(join(root, path), "second\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "update"], {
+      GIT_AUTHOR_DATE: "1999-02-01T00:00:00Z",
+      GIT_COMMITTER_DATE: "2025-02-03T04:05:06+09:00",
+    });
+    writeFileSync(join(root, "edited.txt"), "local edit\n");
+    writeFileSync(join(root, "untracked.txt"), "new\n");
+    unlinkSync(join(root, "deleted.txt"));
+    utimesSync(
+      join(root, "early.txt"),
+      new Date("2030-01-01T00:00:00Z"),
+      new Date("2030-01-01T00:00:00Z"),
+    );
+    const preview = await startTestPreview(root);
+    try {
+      const response = await fetchWithTimeout(
+        new URL(`/_tree?ref=${ref}`, preview.url).toString(),
+        5000,
+      );
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as RepoTreeResponse;
+      const entries = new Map(data.entries.map((entry) => [entry.path, entry]));
+      expect(entries.get("early.txt")).toMatchObject({
+        commit_updated_at: "2025-01-02T03:04:05+09:00",
+        updated_at: modified,
+      });
+      expect(entries.get("edited.txt")).toMatchObject({
+        commit_updated_at: latest,
+      });
+      expect(entries.get("literal[1].txt")).toMatchObject({
+        commit_updated_at: "2025-01-02T03:04:05+09:00",
+      });
+      expect(entries.get("literal1.txt")).toMatchObject({
+        commit_updated_at: latest,
+      });
+      expect(entries.get("sub")).toMatchObject({ commit_updated_at: latest });
+      expect(entries.get("deleted.txt")).toMatchObject({
+        commit_updated_at: "2025-01-02T03:04:05+09:00",
+      });
+      expect(entries.get("deleted.txt")?.status).toBe(deleted);
+      expect(entries.get("untracked.txt")?.commit_updated_at).toBeUndefined();
+    } finally {
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
   const runOrSkip = process.platform === "win32" ? test.skip : test;
 
   runOrSkip(

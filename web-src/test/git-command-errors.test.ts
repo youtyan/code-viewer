@@ -15,12 +15,14 @@ import {
 import {
   commitHistoryAsync,
   defaultBranchResultAsync,
+  lastCommitDateForPathAsync,
   localBranchExistsResultAsync,
   refCommitPageResultAsync,
   refsResultAsync,
   repoRootResult,
   untrackedMetaAsync,
   verifyTreeRefResultAsync,
+  worktreeCommitDatesAsync,
   worktreeListResultAsync,
 } from "../server/git";
 import { defaultMcpTools, dispatchJsonRpc } from "../server/mcp";
@@ -445,5 +447,62 @@ describe("repository root probe", () => {
     if (result.kind === "error") {
       expect(result.error).toMatch(/git binary not found|git not found/);
     }
+  });
+});
+
+describe("commit date failures", () => {
+  test("reports no history for an unborn HEAD and reads new commits without stale dates", async () => {
+    const root = tempRoot("code-viewer-commit-date-history-");
+    runGit(root, ["init"]);
+    runGit(root, ["config", "user.name", "Sample"]);
+    runGit(root, ["config", "user.email", "sample@example.test"]);
+    writeFileSync(join(root, "sample.txt"), "first\n");
+    expect(await worktreeCommitDatesAsync(["sample.txt"], root)).toEqual(
+      new Map(),
+    );
+    runGit(root, ["add", "sample.txt"]);
+    runGit(root, ["commit", "-m", "first"], {
+      GIT_AUTHOR_DATE: "2000-01-01T00:00:00+09:00",
+      GIT_COMMITTER_DATE: "2025-01-01T00:00:00+09:00",
+    });
+    expect(
+      await worktreeCommitDatesAsync(["sample.txt", "absent.txt"], root),
+    ).toEqual(new Map([["sample.txt", "2025-01-01T00:00:00+09:00"]]));
+    writeFileSync(join(root, "sample.txt"), "second\n");
+    runGit(root, ["commit", "-am", "second"], {
+      GIT_AUTHOR_DATE: "2000-01-01T00:00:00+09:00",
+      GIT_COMMITTER_DATE: "2025-02-01T00:00:00+09:00",
+    });
+    expect(await worktreeCommitDatesAsync(["sample.txt"], root)).toEqual(
+      new Map([["sample.txt", "2025-02-01T00:00:00+09:00"]]),
+    );
+  });
+
+  test.each([
+    {
+      name: "missing executable",
+      configure: configureMissingGit,
+      code: 127,
+      stderr: "spawn git ENOENT\n",
+    },
+    {
+      name: "command failure",
+      configure: configureFailingGit,
+      code: 2,
+      stderr: "fatal: simulated git failure\n",
+    },
+  ])("preserves $name instead of returning no history", async ({
+    configure,
+    code,
+    stderr,
+  }) => {
+    const root = tempRoot("code-viewer-commit-date-errors-");
+    configure(root);
+    await expect(
+      lastCommitDateForPathAsync("HEAD", "sample.txt", root),
+    ).rejects.toMatchObject({ cause: { code, stderr } });
+    await expect(
+      worktreeCommitDatesAsync(["sample.txt"], root),
+    ).rejects.toMatchObject({ cause: { code, stderr } });
   });
 });

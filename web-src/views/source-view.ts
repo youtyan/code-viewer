@@ -68,6 +68,7 @@ import {
 import {
   type DelimitedPreviewLanguage,
   delimitedPreviewText,
+  SOURCE_READING_TEXT,
 } from "./source-preview-i18n";
 import { markNeedleInCell } from "./text-mark";
 
@@ -131,6 +132,7 @@ export type SourceViewDeps = {
   focusMainSurface(): void;
   isPaletteOpen(): boolean;
   getLanguage(): DelimitedPreviewLanguage;
+  onSourceRendered?(): void;
 };
 
 export function createSourceView(deps: SourceViewDeps) {
@@ -908,6 +910,42 @@ export function createSourceView(deps: SourceViewDeps) {
     return copy;
   }
 
+  function createSourceLineJump(target: SourceFileTarget): HTMLElement {
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    const form = document.createElement("form");
+    form.className = "gdp-source-line-jump";
+    const label = document.createElement("label");
+    label.textContent = text.line;
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "1";
+    input.step = "1";
+    input.required = true;
+    input.value = String(lineTargetStart(currentSourceLineTarget(target)) || 1);
+    input.setAttribute("aria-label", text.line);
+    const total = SOURCE_CURSOR_TOTALS.get(sourceCursorKey(target));
+    if (total) input.max = String(total);
+    label.appendChild(input);
+    const button = document.createElement("button");
+    button.type = "submit";
+    button.className = "gdp-btn gdp-btn-sm";
+    button.textContent = text.go;
+    const count = document.createElement("span");
+    count.className = "gdp-source-line-count";
+    count.textContent = total ? text.total(total) : "";
+    form.append(count, label, button);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!input.reportValidity()) return;
+      const cursor = ensureSourceCursor(target);
+      cursor.line = input.valueAsNumber;
+      syncSourceCursorRows(target);
+      scrollSourceCursorIntoView(cursor, "center");
+      focusMainSurface();
+    });
+    return form;
+  }
+
   function createSourceTabs(
     target: SourceFileTarget,
     active: SourceBlobTab,
@@ -932,6 +970,7 @@ export function createSourceView(deps: SourceViewDeps) {
           : {}),
       },
     );
+    tabs.appendChild(createSourceLineJump(target));
     return { tabs, codeButton, previewButton };
   }
 
@@ -2236,6 +2275,11 @@ export function createSourceView(deps: SourceViewDeps) {
     );
     if (!initial) return false;
     if (signal?.aborted) return false;
+    SOURCE_CURSOR_TOTALS.set(
+      sourceCursorKey(target),
+      Math.max(1, initial.total, lineTarget),
+    );
+    resetSourceCursorForTarget(target, Math.max(1, initial.total, lineTarget));
     const tabsHost = card.querySelector<HTMLElement>(".gdp-file-detail-tabs");
     if (tabsHost) {
       tabsHost.hidden = false;
@@ -2245,11 +2289,6 @@ export function createSourceView(deps: SourceViewDeps) {
         }).tabs,
       );
     }
-    SOURCE_CURSOR_TOTALS.set(
-      sourceCursorKey(target),
-      Math.max(1, initial.total, lineTarget),
-    );
-    resetSourceCursorForTarget(target, Math.max(1, initial.total, lineTarget));
     const virtualCode = renderPagedVirtualSource(
       target,
       size,
@@ -2355,6 +2394,9 @@ export function createSourceView(deps: SourceViewDeps) {
     state: "loading" | "done" | "error" | "cancelled",
   ) {
     card.dataset.sourceState = state;
+    // Notes can arrive before the file on reload. Notify after the source
+    // rows exist, including refreshes that replace the previous table.
+    if (state === "done") deps.onSourceRendered?.();
   }
 
   async function renderStandaloneSource(
@@ -2738,6 +2780,20 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function localize(): void {
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    document
+      .querySelectorAll<HTMLFormElement>(".gdp-source-line-jump")
+      .forEach((form) => {
+        const label = form.querySelector("label");
+        const input = form.querySelector("input");
+        const button = form.querySelector("button");
+        const count = form.querySelector(".gdp-source-line-count");
+        if (label?.firstChild) label.firstChild.textContent = text.line;
+        input?.setAttribute("aria-label", text.line);
+        if (button) button.textContent = text.go;
+        if (count && input?.max)
+          count.textContent = text.total(Number(input.max));
+      });
     document
       .querySelectorAll<DelimitedPreviewElement>(".gdp-csv-preview")
       .forEach((preview) => {

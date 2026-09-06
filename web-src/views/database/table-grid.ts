@@ -7,6 +7,9 @@ import type {
   DbValue,
   RowMutation,
 } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
+import { createDetailTable } from "./detail-table";
+import { createDetailTabs } from "./detail-tabs";
 import { attachDragResizer } from "../../core/drag-resizer";
 import { isEditableKeyTarget } from "../../core/focus-scope";
 import {
@@ -529,9 +532,9 @@ export function createTableGrid(
     let left = ROWNUM_WIDTH;
     for (let c = 0; c < colIndex; c++) left += getColWidth(columnNames[c]);
     const right = left + getColWidth(columnNames[colIndex]);
-    if (left < viewport.scrollLeft) {
-      // 先頭列へ戻ったときは行番号列も見せる (行番号列は sticky ではない)。
-      viewport.scrollLeft = colIndex === 0 ? 0 : left;
+    if (left < viewport.scrollLeft + ROWNUM_WIDTH) {
+      // 固定した行番号の右側まで戻し、選択セルがその裏に隠れないようにする。
+      viewport.scrollLeft = left - ROWNUM_WIDTH;
     } else if (right > viewport.scrollLeft + viewWidth) {
       viewport.scrollLeft = right - viewWidth;
     }
@@ -766,6 +769,7 @@ export function createTableGrid(
   let selectedRowElement: HTMLElement | null = null;
   // 詳細フッタ or 関連パネルに「いまどのセルの値を出してるか」を覚えておく。
   // renderViewport / 再描画でも色が維持されるよう、行/列 index を state に持つ。
+  let detailMode: "cell" | "row" = "cell";
   let activeCellRowIndex = -1;
   let activeCellColIndex = -1;
   let activeCellElement: Element | null = null;
@@ -1674,6 +1678,8 @@ export function createTableGrid(
   function showCellDetail(colIndex: number, value: DbValue) {
     const colName = columnNames[colIndex];
     const colType = columns[colIndex]?.type || "";
+    const row = cachedRow(activeCellRowIndex);
+    const t = text().detail;
 
     // 前のセルの JSON への参照を切る (遅れて届くハイライトが古い pre を
     // 塗るのを防ぐ)。JSON セルならこの後 showJsonDetail が入れ直す。
@@ -1690,24 +1696,44 @@ export function createTableGrid(
 
     const title = document.createElement("span");
     title.className = "db-grid-detail-title";
-    title.textContent = `${colName} (${colType})`;
+    title.textContent =
+      detailMode === "row"
+        ? t.rowTitle(activeCellRowIndex + 1)
+        : `${colName} (${colType})`;
+    title.title = title.textContent;
+    const tabs = createDetailTabs(
+      [
+        { id: "cell", label: t.cell },
+        { id: "row", label: t.row },
+      ],
+      detailMode,
+      (mode) => {
+        detailMode = mode;
+        showDetailForActiveCell();
+        viewport.focus({ preventScroll: true });
+      },
+    );
 
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
     copyBtn.className = "db-btn db-grid-detail-copy";
-    copyBtn.textContent = "Copy";
-    const copyText = formatValueForCopy(value);
+    copyBtn.textContent = t.copy;
+    const copyText =
+      detailMode === "row"
+        ? // 列名が重複するクエリ結果でも、列と値の対応を欠かさずコピーする。
+          JSON.stringify({ columns: columnNames, values: row }, null, 2)
+        : formatValueForCopy(value);
+    const copyStatus = document.createElement("span");
+    copyStatus.className = "db-grid-detail-copy-status";
+    copyStatus.setAttribute("role", "status");
     copyBtn.addEventListener("click", () => {
       navigator.clipboard.writeText(copyText).then(
         () => {
-          const original = copyBtn.textContent;
-          copyBtn.textContent = "Copied";
-          setTimeout(() => {
-            copyBtn.textContent = original;
-          }, 800);
+          copyStatus.textContent = t.copied;
         },
-        () => {
-          copyBtn.textContent = "Copy failed";
+        (error: unknown) => {
+          console.error(error);
+          copyStatus.textContent = `${t.copyFailed}: ${formatErrorDetail(error)}`;
         },
       );
     });
@@ -1716,18 +1742,36 @@ export function createTableGrid(
     closeBtn.type = "button";
     closeBtn.className = "db-btn db-btn-icon db-grid-detail-close";
     closeBtn.textContent = "×";
+    closeBtn.title = t.close;
+    closeBtn.setAttribute("aria-label", t.close);
     closeBtn.addEventListener("click", () => {
       detailPanel.hidden = true;
       // 関連パネルも閉じていればフッタ表示中のセル色も落とす。
       if (!relatedPanel || relatedPanel.hidden) clearActiveCell();
     });
 
-    header.append(title, copyBtn, closeBtn);
+    header.append(tabs.tabsEl, title, copyBtn, closeBtn);
 
-    const content = document.createElement("div");
-    content.className = "db-grid-detail-content";
+    const content = tabs.bodies[detailMode];
+    content.classList.add("db-grid-detail-content");
 
-    if (value === null) {
+    if (detailMode === "row" && row) {
+      content.classList.add("db-grid-row-detail");
+      content.appendChild(
+        createDetailTable(
+          [t.column, t.value],
+          columnNames.map((name, index) => [
+            name,
+            row[index] === null
+              ? "NULL"
+              : row[index] === ""
+                ? t.emptyString
+                : formatValueForCopy(row[index]),
+          ]),
+          "",
+        ),
+      );
+    } else if (value === null) {
       content.textContent = "NULL";
       content.classList.add("null");
     } else if (value instanceof Uint8Array) {
@@ -1747,11 +1791,11 @@ export function createTableGrid(
           content.textContent = str;
         }
       } else {
-        content.textContent = str;
+        content.textContent = str || t.emptyString;
       }
     }
 
-    detailPanel.append(header, content);
+    detailPanel.append(header, copyStatus, tabs.bodies.cell, tabs.bodies.row);
   }
 
   function renderHeader() {
@@ -2730,6 +2774,7 @@ export function createTableGrid(
     if (relatedListResizeEl) {
       relatedListResizeEl.setAttribute("aria-label", t.grid.relatedListResize);
     }
+    if (!detailPanel.hidden) showDetailForActiveCell();
     embeddedGrid?.localize();
   }
 

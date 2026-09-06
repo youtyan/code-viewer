@@ -674,6 +674,35 @@ describe("preferred source tab across files", () => {
 });
 
 describe("renderStandaloneSource loading-state guard and paged retry", () => {
+  test.each([
+    { refresh: false, expected: 1 },
+    { refresh: true, expected: 2 },
+  ])("notifies inline readers after source rows mount, refresh=$refresh", async ({
+    refresh,
+    expected,
+  }) => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    installRawFileFetchMock();
+    const rendered: string[][] = [];
+    const view = createSourceViewForCursorTest(blobRoute("sample.ts"), {
+      onSourceRendered: () => {
+        rendered.push(
+          [...document.querySelectorAll(".gdp-source-line-code")].map(
+            (cell) => cell.textContent || "",
+          ),
+        );
+      },
+    });
+    await view.renderStandaloneSource({ path: "sample.ts", ref: "worktree" });
+    await view.renderStandaloneSource(
+      { path: "sample.ts", ref: "worktree" },
+      { refresh },
+    );
+    expect(rendered).toHaveLength(expected);
+    for (const rows of rendered)
+      expect(rows).toEqual(["line one", "line two", " "]);
+  });
+
   test("finishes plain source first and applies syntax highlighting later", async () => {
     document.body.innerHTML = '<div id="diff"></div>';
     installRawFileFetchMock();
@@ -891,5 +920,53 @@ describe("renderStandaloneSource loading-state guard and paged retry", () => {
       document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
         .sourceState,
     ).toBe("done");
+  });
+});
+
+describe("visible source line navigation", () => {
+  test.each([
+    ["1", 1],
+    ["2", 2],
+    ["3", 3],
+    ["0", 1],
+    ["4", 1],
+    ["1.5", 1],
+    ["", 1],
+  ])("validates line %s before moving to %s", async (value, expected) => {
+    document.body.innerHTML = '<main id="content"><div id="diff"></div></main>';
+    installRawFileFetchMock();
+    const target = { path: "sample.txt", ref: "worktree" };
+    const view = createSourceViewForCursorTest(blobRoute(target.path));
+    await view.renderStandaloneSource(target);
+    const input = document.querySelector<HTMLInputElement>(
+      ".gdp-source-line-jump input",
+    );
+    if (!input) throw new Error("missing line navigation input");
+    expect(input.max).toBe("3");
+    input.value = value;
+    input.form?.dispatchEvent(new Event("submit", { cancelable: true }));
+    expect(view.ensureSourceCursor(target).line).toBe(expected);
+  });
+
+  test("localizes the visible line controls without clearing the chosen line", async () => {
+    document.body.innerHTML = '<main id="content"><div id="diff"></div></main>';
+    installRawFileFetchMock();
+    let language: "en" | "ja" = "en";
+    const view = createSourceViewForCursorTest(blobRoute("sample.txt"), {
+      getLanguage: () => language,
+    });
+    await view.renderStandaloneSource({ path: "sample.txt", ref: "worktree" });
+    const input = document.querySelector<HTMLInputElement>(
+      ".gdp-source-line-jump input",
+    );
+    if (!input) throw new Error("missing line navigation input");
+    input.value = "2";
+    language = "ja";
+    view.localize();
+    expect(input.value).toBe("2");
+    expect(input.getAttribute("aria-label")).toBe("行へ移動");
+    expect(document.querySelector(".gdp-source-line-count")?.textContent).toBe(
+      "3 行",
+    );
   });
 });

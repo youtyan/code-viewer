@@ -535,6 +535,7 @@ function createTabPane(
   }
 
   const tableList = createTableList({
+    getLanguage: () => outerDeps.getLanguage?.() ?? "en",
     onSelectTable: (table) => selectTable(table),
     onViewCreateTable: (table) => showDdl(table),
     onViewDefinition: (table) => showSchema(table),
@@ -571,7 +572,7 @@ function createTabPane(
     return Number.isFinite(n) && n > 0 ? n : null;
   })();
 
-  // ----- サイドバー上端のアイコンツールバー (案 B 改: TablePlus / Beekeeper 風) -----
+  // ----- サイドバー上端のアイコンツールバー -----
   // 縦並びの大きな枠線ボタンは「DB ビューア UI として普通じゃない」と
   // ユーザーから指摘を受けた。アイコンツールバーに置き換えて、サイドバー
   // 最上端に集約する。kind === redis / elasticsearch ではこのツールバーごと
@@ -2451,6 +2452,7 @@ function createTabPane(
     for (const fn of paneLocalizers) fn();
     if (noDatastoresAvailable) renderNoDatastoresEmpty();
     grid.localize();
+    tableList.localize();
     schemaView.localize();
     erDiagram.localize();
     historyView.localize();

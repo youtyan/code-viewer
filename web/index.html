@@ -29,11 +29,11 @@
     </a>
     <nav class="app-menu" aria-label="Views">
       <a class="app-menu-item active" data-route="repo" href="/">Repository</a>
+      <a class="app-menu-item" data-route="database" href="/database">Datastores</a>
       <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
       <a class="app-menu-item" data-route="history" href="/history">History</a>
       <a class="app-menu-item" data-route="worktree" href="/worktree">Worktrees</a>
       <a class="app-menu-item" data-route="journal" href="/journal">Work Log</a>
-      <a class="app-menu-item" data-route="database" href="/database">Datastores</a>
       <span class="global-actions-sep app-menu-sep" aria-hidden="true"></span>
       <a class="app-menu-item" data-route="help" href="/help">Settings &amp; Help</a>
     </nav>
@@ -156,12 +156,13 @@
     <div id="annotation-panel-resizer" aria-hidden="true"></div>
     <div class="annotation-panel-head">
       <strong>Code annotations</strong>
+      <button id="annotation-add" class="gdp-btn gdp-btn-sm annotation-primary" type="button"></button>
+      <button id="annotation-panel-close" class="annotation-icon-btn" type="button">Close panel</button>
+    </div>
+    <div class="annotation-panel-options">
       <label class="annotation-follow-label" title="jump to new annotations as they arrive">
         <input type="checkbox" id="annotation-follow" checked /> follow
       </label>
-      <button id="annotation-capture-db" class="annotation-icon-btn" type="button" title="pin current datastore view" aria-label="pin current datastore view" hidden></button>
-      <button id="annotation-clear" type="button" title="delete all annotations">clear</button>
-      <button id="annotation-panel-close" type="button">close</button>
     </div>
     <div id="annotation-player" hidden>
       <button id="annotation-player-toggle" type="button" title="Play annotation playback" aria-label="Play annotation playback"></button>
@@ -183,6 +184,7 @@
       <span id="annotation-list-count"></span>
     </div>
     <div id="annotation-sessions"></div>
+    <div class="annotation-library-footer"><button id="annotation-clear" type="button">Delete all notes</button></div>
     <div id="annotation-detail" hidden>
       <div class="annotation-detail-head">
         <span id="annotation-detail-session"></span>

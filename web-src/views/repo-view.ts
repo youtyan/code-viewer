@@ -2,7 +2,9 @@
 // new-folder / move-to-trash actions, upload panel, and the repo blob
 // sidebar. Extracted from app.ts as a deps-injected factory.
 
+import { isImeComposing } from "../core/keyboard";
 import { normalizeNewDirectoryName } from "../core/directory-name";
+import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import {
   fileNameClipboardText,
   filePathClipboardText,
@@ -97,7 +99,19 @@ export type RepoViewDeps = {
     count: number,
     target: string,
   ): { title: string; body: string; confirmLabel: string };
-  sortColumnLabels(): { name: string; updated: string; size: string };
+  sortColumnLabels(): {
+    name: string;
+    updated: string;
+    committed: string;
+    size: string;
+    committedHint: string;
+    updatedHint: string;
+    noCommit: string;
+    filterPlaceholder: string;
+    clearFilter: string;
+    noMatches: string;
+    entryCount: (visible: number, total: number) => string;
+  };
   repositoryFallback(): string;
   repositoryRootFallback(): string;
   commitEntryMeta(submodule: RepoTreeEntry["submodule"]): {
@@ -181,7 +195,7 @@ export function createRepoView(deps: RepoViewDeps) {
     fileBadge,
   } = deps;
 
-  type RepoSortKey = "name" | "updated" | "size";
+  type RepoSortKey = "name" | "updated" | "committed" | "size";
 
   type RepoSortDirection = "asc" | "desc";
 
@@ -756,13 +770,24 @@ export function createRepoView(deps: RepoViewDeps) {
     listCard.className = "gdp-file-shell loaded gdp-repo-list-shell";
     const listWrapper = document.createElement("div");
     listWrapper.className = "d2h-file-wrapper";
-    if (meta.ref === "worktree" || meta.ref === "") {
-      listWrapper.appendChild(createRepoUploadPanel(meta.path || ""));
-    }
     const sortHost = document.createElement("div");
     sortHost.className = "gdp-repo-sort-host";
     const list = document.createElement("div");
     list.className = "gdp-source-viewer gdp-repo-file-list";
+    const location = `${meta.ref || "worktree"}\0${meta.path || ""}`;
+    const previousFilter =
+      location === REPO_RENDER_LOCATION
+        ? target.querySelector<HTMLInputElement>(".gdp-repo-filter")?.value ||
+          ""
+        : "";
+    const filter = createRepoFilter(
+      previousFilter,
+      () => renderRepoRows(),
+      list,
+    );
+    if (meta.ref === "worktree" || meta.ref === "") {
+      filter.el.appendChild(createRepoUploadPanel(meta.path || ""));
+    }
     const renderRepoRows = (focusSortKey?: RepoSortKey) => {
       sortHost.replaceChildren(createRepoSortHeader(renderRepoRows));
       if (focusSortKey) {
@@ -789,14 +814,29 @@ export function createRepoView(deps: RepoViewDeps) {
         parentKind.textContent = "";
         const parentSize = document.createElement("span");
         parentSize.className = "size";
-        row.append(parentIcon, parentName, parentKind, parentSize);
+        row.append(
+          parentIcon,
+          parentName,
+          document.createElement("span"),
+          parentKind,
+          parentSize,
+        );
         row.addEventListener("click", () => {
           setRoute(repoRoute(meta.ref, parent));
           loadRepo();
         });
         list.appendChild(row);
       }
-      sortedRepoEntries(meta.entries, meta.ref).forEach((entry) => {
+      const query = filter.input.value.trim().toLowerCase();
+      const entries = meta.entries.filter((entry) =>
+        entry.name.toLowerCase().includes(query),
+      );
+      filter.count.textContent = sortColumnLabels().entryCount(
+        entries.length,
+        meta.entries.length,
+      );
+      filter.clear.disabled = !filter.input.value;
+      sortedRepoEntries(entries, meta.ref).forEach((entry) => {
         const browsable = canBrowseRepoEntry(entry, meta.ref);
         // commit 型で非 browsable (submodule または非 worktree ref) は、見た目は
         // フォルダ/ファイルに近いが実際には開けない。通常行と混同されないよう
@@ -834,8 +874,8 @@ export function createRepoView(deps: RepoViewDeps) {
         const name = document.createElement("span");
         name.className = "name";
         name.textContent = entry.name;
-        // The row is a fixed four-column grid, so a directory badge shares
-        // the name column rather than adding a fifth child.
+        name.title = entry.path;
+        // Keep status badges beside the name so date columns stay aligned.
         let nameCell: HTMLElement = name;
         if (directoryRow && entry.status) {
           nameCell = document.createElement("span");
@@ -848,9 +888,19 @@ export function createRepoView(deps: RepoViewDeps) {
         } else if (brokenSymlink || deletedEntry) {
           row.setAttribute("aria-disabled", "true");
         }
-        const metaBlock = createRepoEntryMeta(entry, browsable);
+        const metaBlock = createRepoEntryMeta(entry, browsable, meta.ref);
+        const committed = document.createElement("time");
+        committed.className = "commit-date";
+        const labels = sortColumnLabels();
+        committed.textContent =
+          formatFileDate(entry.commit_updated_at) || labels.noCommit;
+        committed.title = labels.committedHint;
+        if (entry.commit_updated_at) {
+          committed.dateTime = entry.commit_updated_at;
+          committed.title += `\n${entry.commit_updated_at}`;
+        }
         const size = createRepoEntrySize(entry);
-        row.append(icon, nameCell, metaBlock, size);
+        row.append(icon, nameCell, committed, metaBlock, size);
         row.addEventListener("click", () => {
           if (brokenSymlink || deletedEntry) return;
           if (browsable) {
@@ -875,13 +925,16 @@ export function createRepoView(deps: RepoViewDeps) {
         );
         list.appendChild(row);
       });
-      if (!meta.entries.length) {
+      if (!entries.length) {
         const empty = document.createElement("div");
         empty.className = "gdp-repo-empty";
-        empty.textContent = emptyDirectoryLabel();
+        empty.textContent = query
+          ? sortColumnLabels().noMatches
+          : emptyDirectoryLabel();
         list.appendChild(empty);
       }
     };
+    listWrapper.appendChild(filter.el);
     listWrapper.appendChild(sortHost);
     renderRepoRows();
     listWrapper.appendChild(list);
@@ -940,7 +993,6 @@ export function createRepoView(deps: RepoViewDeps) {
     // shell を組み立て終えてから一括で差し替える。先に消してしまうと README の
     // markdown レンダリング待ちの間ページが白抜けしてガクつく。
     REPO_RENDER_SIGNATURE = signature;
-    const location = `${meta.ref || "worktree"}\0${meta.path || ""}`;
     const sameLocation = location === REPO_RENDER_LOCATION;
     REPO_RENDER_LOCATION = location;
     const savedScroll = window.scrollY;
@@ -1077,6 +1129,7 @@ export function createRepoView(deps: RepoViewDeps) {
   function createRepoEntryMeta(
     entry: RepoTreeEntry,
     browsable: boolean,
+    ref: string,
   ): HTMLElement {
     const meta = document.createElement("span");
     meta.className = "meta";
@@ -1099,19 +1152,22 @@ export function createRepoView(deps: RepoViewDeps) {
         : `Symlink → ${entry.symlink_target || ""}`;
       return meta;
     }
-    const updated = formatFileDate(entry.updated_at || entry.commit_updated_at);
+    const updated = formatFileDate(
+      ref === "worktree" || ref === "" ? entry.updated_at : undefined,
+    );
     const created = formatFileDate(entry.created_at);
+    meta.title = sortColumnLabels().updatedHint;
     if (browsable && updated) {
       meta.textContent = updated;
-      if (created) meta.title = `Created ${created}`;
+      if (created) meta.title += `\nCreated ${created}`;
       return meta;
     }
     if (entry.type !== "blob") {
       meta.textContent = "-";
       return meta;
     }
-    meta.textContent = updated ? updated : created ? created : "-";
-    if (created) meta.title = `Created ${created}`;
+    meta.textContent = updated || "-";
+    if (created) meta.title += `\nCreated ${created}`;
     return meta;
   }
 
@@ -1125,8 +1181,13 @@ export function createRepoView(deps: RepoViewDeps) {
     return size;
   }
 
-  function repoEntryUpdatedTime(entry: RepoTreeEntry): number {
-    const raw = entry.updated_at || entry.commit_updated_at || entry.created_at;
+  function repoEntryDateTime(entry: RepoTreeEntry, ref: string): number {
+    const raw =
+      REPO_SORT.key === "committed"
+        ? entry.commit_updated_at
+        : ref === "worktree" || ref === ""
+          ? entry.updated_at
+          : undefined;
     if (!raw) return -1;
     const time = new Date(raw).getTime();
     return Number.isNaN(time) ? -1 : time;
@@ -1145,9 +1206,9 @@ export function createRepoView(deps: RepoViewDeps) {
         if (bBrowsable) return 1;
       }
       let result = 0;
-      if (REPO_SORT.key === "updated") {
-        const aTime = repoEntryUpdatedTime(a);
-        const bTime = repoEntryUpdatedTime(b);
+      if (REPO_SORT.key === "updated" || REPO_SORT.key === "committed") {
+        const aTime = repoEntryDateTime(a, ref);
+        const bTime = repoEntryDateTime(b, ref);
         if (aTime < 0 && bTime >= 0) return 1;
         if (bTime < 0 && aTime >= 0) return -1;
         result = aTime - bTime;
@@ -1163,6 +1224,55 @@ export function createRepoView(deps: RepoViewDeps) {
     });
   }
 
+  function createRepoFilter(
+    value: string,
+    onChange: () => void,
+    list: HTMLElement,
+  ) {
+    const labels = sortColumnLabels();
+    const el = document.createElement("div");
+    el.className = "gdp-repo-search-bar";
+    const input = document.createElement("input");
+    input.type = "search";
+    input.className = "gdp-repo-filter";
+    input.placeholder = labels.filterPlaceholder;
+    input.setAttribute("aria-label", labels.filterPlaceholder);
+    input.value = value;
+    const count = document.createElement("span");
+    count.className = "gdp-repo-result-count";
+    count.setAttribute("aria-live", "polite");
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "gdp-btn gdp-btn-sm gdp-repo-filter-clear";
+    clear.textContent = labels.clearFilter;
+    const reset = () => {
+      input.value = "";
+      onChange();
+      input.focus();
+    };
+    clear.addEventListener("click", reset);
+    input.addEventListener("input", onChange);
+    input.addEventListener("keydown", (event) => {
+      if (isImeComposing(event)) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        reset();
+      } else if (event.key === "ArrowDown" || event.key === "Enter") {
+        const first = list.querySelector<HTMLButtonElement>(
+          ".gdp-repo-row:not(.parent):not([aria-disabled='true'])",
+        );
+        if (!first) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.key === "Enter") first.click();
+        else first.focus();
+      }
+    });
+    el.append(input, count, clear);
+    return { el, input, count, clear };
+  }
+
   function createRepoSortHeader(
     onSortChange: (focusSortKey?: RepoSortKey) => void,
   ): HTMLElement {
@@ -1174,6 +1284,7 @@ export function createRepoView(deps: RepoViewDeps) {
     const sortLabels = sortColumnLabels();
     const columns: Array<{ key: RepoSortKey; label: string }> = [
       { key: "name", label: sortLabels.name },
+      { key: "committed", label: sortLabels.committed },
       { key: "updated", label: sortLabels.updated },
       { key: "size", label: sortLabels.size },
     ];
@@ -1181,6 +1292,8 @@ export function createRepoView(deps: RepoViewDeps) {
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.repoSort = column.key;
+      if (column.key === "committed") button.title = sortLabels.committedHint;
+      if (column.key === "updated") button.title = sortLabels.updatedHint;
       button.textContent =
         column.label +
         (REPO_SORT.key === column.key
@@ -1261,8 +1374,10 @@ export function createRepoView(deps: RepoViewDeps) {
     return wrap;
   }
 
+  let repoLoadSequence = 0;
   function loadRepo(): Promise<void> {
     if (STATE.route.screen !== "repo") return Promise.resolve();
+    const myLoad = ++repoLoadSequence;
     setStatus("refreshing");
     const routeRef = STATE.route.ref || "worktree";
     const routePath = STATE.route.path || "";
@@ -1271,20 +1386,43 @@ export function createRepoView(deps: RepoViewDeps) {
     if (routePath) params.set("path", routePath);
     appendScopeParams(params);
     return trackLoad<RepoTreeResponse>(
-      fetch(`/_tree?${params.toString()}`).then((r) => {
-        if (!r.ok) throw new Error("failed to load repository tree");
+      fetch(`/_tree?${params.toString()}`).then(async (r) => {
+        if (!r.ok)
+          throw errorWithCause(
+            `Repository listing failed (${r.status}): ${routeRef}:${routePath}`,
+            await r.text(),
+          );
         return r.json();
       }),
     )
       .then(async (data) => {
-        if (!isActiveRepoRoute(routeRef, routePath)) return;
+        if (
+          myLoad !== repoLoadSequence ||
+          !isActiveRepoRoute(routeRef, routePath)
+        )
+          return;
         await renderRepo(data);
         setStatus("live");
         syncHeaderMenu();
       })
-      .catch(() => {
-        if (!isActiveRepoRoute(routeRef, routePath)) return;
+      .catch((error) => {
+        if (
+          myLoad !== repoLoadSequence ||
+          !isActiveRepoRoute(routeRef, routePath)
+        )
+          return;
+        if (isAbortError(error)) {
+          setStatus(null);
+          return;
+        }
         setStatus("error");
+        console.error(error);
+        const detail = document.createElement("pre");
+        detail.className = "gdp-repo-error";
+        detail.setAttribute("role", "alert");
+        detail.textContent = formatErrorDetail(error);
+        $("#diff").querySelector(".gdp-repo-error")?.remove();
+        $("#diff").prepend(detail);
       });
   }
 

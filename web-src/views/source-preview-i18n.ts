@@ -59,3 +59,16 @@ export function delimitedPreviewText(
 ): DelimitedPreviewText {
   return DELIMITED_PREVIEW_TEXT[language](format);
 }
+
+export const SOURCE_READING_TEXT = {
+  en: {
+    line: "Go to line",
+    go: "Go",
+    total: (n: number) => `${n.toLocaleString()} lines`,
+  },
+  ja: {
+    line: "行へ移動",
+    go: "移動",
+    total: (n: number) => `${n.toLocaleString()} 行`,
+  },
+};

@@ -1,26 +1,26 @@
-/* git-diff-preview — GitHub-Primer-aligned theme
- * Light + dark, color tokens borrowed from GitHub Primer.
+/* Code viewer — reading workspace theme.
+ * Shared light and dark colors for code, data, and navigation.
  */
 
 :root {
   /* canvas */
   --bg:        #ffffff;
-  --bg-soft:   #f6f8fa;   /* subtle */
-  --bg-mute:   #eaeef2;   /* inset */
+  --bg-soft:   #f4f6fa;   /* subtle */
+  --bg-mute:   #e9edf4;   /* inset */
   --bg-emph:   #d0d7de;
   /* borders */
-  --border:        #d0d7de;
-  --border-muted:  #d8dee4;
+  --border:        #d7deea;
+  --border-muted:  #e6eaf1;
   --border-strong: #afb8c1;
   /* text */
-  --fg:        #1f2328;
-  --fg-muted:  #59636e;
-  --fg-subtle: #6e7781;
+  --fg:        #202b3d;
+  --fg-muted:  #53627a;
+  --fg-subtle: #65748a;
   --fg-onemphasis: #ffffff;
   /* accent */
-  --accent:        #0969da;
-  --accent-emph:   #0550ae;
-  --accent-subtle: #ddf4ff;
+  --accent:        #315fc5;
+  --accent-emph:   #254da6;
+  --accent-subtle: #e9effd;
   --accent-muted:  #54aeff66;
   /* sidebar tree */
   --tree-guide:    color-mix(in srgb, var(--fg-subtle) 22%, transparent);
@@ -46,7 +46,7 @@
   --diff-del-word-bg:   #ff818266;
   --diff-hunk-bg:       #ddf4ff;
   --diff-hunk-fg:       #0550ae;
-  --blob-tab-active:    #fd8c73;
+  --blob-tab-active:    var(--accent);
   /* sizing */
   --global-header-h: 48px;
   --topbar-h: 56px;
@@ -78,18 +78,18 @@
 }
 
 [data-theme="dark"] {
-  --bg:        #0d1117;
-  --bg-soft:   #161b22;
-  --bg-mute:   #21262d;
+  --bg:        #111722;
+  --bg-soft:   #171f2d;
+  --bg-mute:   #222e40;
   --bg-emph:   #30363d;
-  --border:        #30363d;
-  --border-muted:  #21262d;
+  --border:        #2d3a4e;
+  --border-muted:  #233044;
   --border-strong: #6e7681;
   --fg:        #e6edf3;
-  --fg-muted:  #9198a1;
-  --fg-subtle: #6e7681;
+  --fg-muted:  #a2b0c6;
+  --fg-subtle: #8798b1;
   --fg-onemphasis: #ffffff;
-  --accent:        #2f81f7;
+  --accent:        #83aaff;
   --accent-emph:   #1f6feb;
   --accent-subtle: rgba(56,139,253,0.10);
   --accent-muted:  rgba(56,139,253,0.40);
@@ -113,7 +113,7 @@
   --diff-del-word-bg:   rgba(248,81,73,0.40);
   --diff-hunk-bg:       rgba(56,139,253,0.10);
   --diff-hunk-fg:       #58a6ff;
-  --blob-tab-active:    #ec775c;
+  --blob-tab-active:    var(--accent);
 }
 
 /* ===== Reset / base ===== */
@@ -152,8 +152,8 @@ html, body {
   --content-h: calc(100vh - var(--chrome-h) - var(--app-panel-visible-height));
 
 
-  --code-font-size: 12px;
-  --code-line-height: 20px;
+  --code-font-size: 13px;
+  --code-line-height: 22px;
   --markdown-font-size: calc(var(--code-font-size) + 2px);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
                Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
@@ -219,12 +219,12 @@ body[data-code-font-size="compact"] {
   --code-line-height: 19px;
 }
 body[data-code-font-size="large"] {
-  --code-font-size: 13.5px;
-  --code-line-height: 22px;
+  --code-font-size: 14px;
+  --code-line-height: 24px;
 }
 body[data-code-font-size="xlarge"] {
   --code-font-size: 15px;
-  --code-line-height: 24px;
+  --code-line-height: 26px;
 }
 
 /* Window scrolls; global header + topbar + sidebar are fixed */
@@ -589,9 +589,9 @@ body[data-code-font-size="xlarge"] {
   height: var(--global-header-h);
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
   padding: 0 18px;
-  background: var(--bg-soft);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
   z-index: 60;
 }
@@ -669,9 +669,12 @@ body[data-code-font-size="xlarge"] {
 .app-menu {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 3px;
   height: 100%;
-  flex-shrink: 0;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 .global-icon-link {
   /* Icon-only header links (help page, repository web page): same 28x28
@@ -709,11 +712,13 @@ body[data-code-font-size="xlarge"] {
   position: relative;
   display: inline-flex;
   align-items: center;
-  height: 100%;
-  padding: 0 12px;
+  height: var(--ui-control-md);
+  flex-shrink: 0;
+  padding: 0 10px;
+  border-radius: 7px;
   color: var(--fg-muted);
   font-size: var(--ui-font-md);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1;
   text-decoration: none;
   white-space: nowrap;
@@ -724,7 +729,7 @@ body[data-code-font-size="xlarge"] {
   text-decoration: none;
 }
 .app-menu-item.active {
-  background: transparent;
+  background: var(--accent-subtle);
   color: var(--accent);
   font-weight: 600;
 }
@@ -732,14 +737,14 @@ body[data-code-font-size="xlarge"] {
   content: "";
   position: absolute;
   right: 10px;
-  bottom: 0;
+  bottom: 1px;
   left: 10px;
   height: 2px;
   border-radius: 2px 2px 0 0;
   background: var(--accent);
 }
 .global-actions-sep.app-menu-sep {
-  margin: 0 10px;
+  margin: 0 6px;
 }
 /* メニューの中で唯一「画面遷移ではなく開閉」をする項目 (Tools)。見た目は
    リンクの項目と揃えたいので、button 由来の既定値だけ打ち消す。 */
@@ -773,9 +778,9 @@ body[data-code-font-size="xlarge"] {
   justify-content: center;
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
   border-radius: 6px;
   cursor: pointer;
   font-size: var(--ui-font-md);
@@ -4292,7 +4297,9 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   color: var(--fg);
 }
 .gdp-source-tabs button.active {
-  color: var(--fg);
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-radius: 6px 6px 0 0;
   border-bottom-color: var(--blob-tab-active);
 }
 .gdp-source-tabs .gdp-copy-source {
@@ -4430,9 +4437,9 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   min-width: 50px;
   padding: 0 8px;
   text-align: right;
-  color: var(--fg-muted);
-  background: var(--bg);
-  box-shadow: inset -1px 0 0 var(--border);
+  color: var(--fg-subtle);
+  background: var(--bg-soft);
+  box-shadow: inset -1px 0 0 var(--border-muted);
   font-variant-numeric: tabular-nums;
   user-select: none;
   white-space: nowrap;
@@ -4589,9 +4596,9 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   z-index: 1;
   padding: 0 8px;
   text-align: right;
-  color: var(--fg-muted);
-  background: var(--bg);
-  box-shadow: inset -1px 0 0 var(--border);
+  color: var(--fg-subtle);
+  background: var(--bg-soft);
+  box-shadow: inset -1px 0 0 var(--border-muted);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   user-select: none;
@@ -4640,8 +4647,8 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  min-height: 34px;
+  gap: 6px 12px;
+  min-height: var(--ui-control-md);
   margin-bottom: 0;
   padding: 8px 0 10px;
   border: 0;
@@ -4671,7 +4678,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   overflow: hidden;
   color: var(--fg);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
-  font-size: 16px;
+  font-size: var(--ui-font-title);
   font-weight: 500;
   line-height: 24px;
 }
@@ -4682,6 +4689,8 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   white-space: nowrap;
 }
 .gdp-file-breadcrumb-part {
+  max-width: 16ch;
+  flex: 0 10 auto;
   font-weight: 500;
 }
 .gdp-file-breadcrumb button.gdp-file-breadcrumb-part {
@@ -4699,6 +4708,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   text-decoration: underline;
 }
 .gdp-file-breadcrumb-current {
+  flex: 0 1 auto;
   color: var(--fg);
   font-weight: 600;
 }
@@ -4729,13 +4739,16 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-repo-web-link svg {
   display: block;
 }
+/* Metadata gets its own row so timestamps cannot squeeze the file name. */
 .gdp-file-detail-meta {
+  flex-basis: 100%;
+  order: 10;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--ui-font-sm);
   line-height: 18px;
 }
 .gdp-file-detail-meta-item {
@@ -4754,12 +4767,12 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   padding-right: 0;
 }
 .gdp-file-detail-meta-item .label {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--ui-font-sm);
+  font-weight: 500;
   color: var(--fg-subtle);
 }
 .gdp-file-detail-meta-item .value {
-  color: var(--fg);
+  color: var(--fg-muted);
   font-weight: 500;
 }
 .gdp-markdown-preview {
@@ -5618,9 +5631,79 @@ body.gdp-file-detail-page #empty {
   padding: 0;
   overflow: hidden;
 }
+/* Search stays beside the listing; upload remains a compact secondary action. */
+.gdp-repo-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.gdp-repo-filter {
+  flex: 1;
+  min-width: 12ch;
+  height: var(--ui-control-md);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--ui-font-base);
+}
+.gdp-repo-filter:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.gdp-repo-result-count {
+  min-width: 12ch;
+  text-align: right;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-base);
+  font-variant-numeric: tabular-nums;
+}
+.gdp-repo-filter-clear { flex: 0 0 auto; }
+.gdp-repo-search-bar .gdp-upload-panel {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  grid-template-columns: auto;
+}
+.gdp-repo-search-bar .gdp-upload-copy { display: none; }
+.gdp-repo-search-bar .gdp-upload-error { max-width: 26ch; white-space: normal; }
+.gdp-repo-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-subtle);
+}
+.gdp-source-line-jump {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-base);
+}
+.gdp-source-tabs:has([data-source-tab="code"].active) .gdp-source-line-jump { display: flex; }
+.gdp-source-line-jump label { display: inline-flex; align-items: center; gap: 6px; }
+.gdp-source-line-jump input {
+  width: 9ch;
+  min-height: var(--ui-control-sm);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+}
+.gdp-source-line-jump input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gdp-source-line-count { font-variant-numeric: tabular-nums; padding-right: 8px; border-right: 1px solid var(--border); }
 .gdp-repo-sort-header {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) minmax(150px, 220px) 80px;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(18ch, 23ch) minmax(18ch, 23ch) 8ch;
   column-gap: 8px;
   align-items: center;
   min-height: var(--ui-control-md);
@@ -5657,7 +5740,7 @@ body.gdp-file-detail-page #empty {
 }
 .gdp-repo-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) minmax(150px, 220px) 80px;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(18ch, 23ch) minmax(18ch, 23ch) 8ch;
   align-items: center;
   column-gap: 8px;
   width: 100%;
@@ -5718,7 +5801,8 @@ body.gdp-file-detail-page #empty {
   color: var(--fg-muted);
   font-size: var(--ui-font-base);
 }
-.gdp-repo-row .meta {
+.gdp-repo-row .meta,
+.gdp-repo-row .commit-date {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5726,6 +5810,9 @@ body.gdp-file-detail-page #empty {
   font-size: var(--ui-font-base);
   font-variant-numeric: tabular-nums;
 }
+.gdp-repo-row .commit-date { color: var(--fg); }
+.gdp-repo-row .commit-date:not([datetime]) { color: var(--fg-subtle); }
+.gdp-repo-error { color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
 .gdp-repo-row .size {
   justify-self: end;
   min-width: 0;
@@ -7369,37 +7456,99 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 12px;
+  flex: none;
   border-bottom: 1px solid var(--border);
 }
 .annotation-panel-head strong {
   flex: 1;
-  font-size: 13px;
+  min-width: 0;
+  font-size: var(--ui-font-md);
+}
+#annotation-panel .annotation-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: none;
+  border: 1px solid var(--accent-emph);
+  background: var(--accent-emph);
+  color: #fff;
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: var(--ui-font-sm);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+#annotation-panel .annotation-primary:hover { filter: brightness(.92); }
+#annotation-panel .annotation-primary svg { width: 14px; height: 14px; }
+.annotation-panel-options {
+  display: flex;
+  padding: 8px 12px;
+  flex: none;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
 }
 .annotation-follow-label {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: var(--ui-font-sm);
   color: var(--fg-muted);
-  white-space: nowrap;
   cursor: pointer;
 }
-#annotation-clear,
-#annotation-panel-close {
-  border: 1px solid var(--border);
+.annotation-follow-label input { accent-color: var(--accent); margin: 0; }
+#annotation-clear {
+  border: 0;
   border-radius: 6px;
-  background: var(--bg-soft);
+  background: transparent;
   color: var(--fg-muted);
-  font-size: 12px;
-  padding: 2px 8px;
+  font-size: var(--ui-font-xs);
+  padding: 6px 8px;
   cursor: pointer;
 }
-#annotation-clear:hover,
-#annotation-panel-close:hover {
-  color: var(--danger);
-  border-color: var(--danger);
+#annotation-clear:hover { color: var(--danger); background: var(--bg-soft); }
+.annotation-library-footer { padding: 4px 8px; flex: none; border-top: 1px solid var(--border); }
+.annotation-library-footer:has([hidden]) { display: none; }
+.annotation-search-toolbar { padding: 12px; display: grid; gap: 10px; flex: none; }
+.annotation-search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 4px 6px 4px 10px;
+  color: var(--fg-muted);
 }
+.annotation-search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-subtle); }
+.annotation-search-box > svg { width: 14px; height: 14px; flex: none; }
+#annotation-search {
+  width: 100%; min-width: 0; border: 0; outline: 0; padding: 4px 0;
+  background: transparent; color: var(--fg); font: inherit; font-size: var(--ui-font-sm);
+}
+#annotation-search::-webkit-search-cancel-button { display: none; }
+#annotation-search-clear { border-color: transparent; padding: 4px; }
+#annotation-search-clear:disabled { visibility: hidden; }
+.annotation-search-scopes { display: flex; gap: 4px; }
+.annotation-search-scopes button,
+.annotation-editor-tabs button {
+  border: 1px solid transparent; border-radius: 6px; padding: 5px 10px;
+  background: transparent; color: var(--fg-muted); font: inherit; font-size: var(--ui-font-sm); cursor: pointer;
+}
+.annotation-search-scopes button[aria-pressed="true"],
+.annotation-editor-tabs button[aria-pressed="true"] { background: var(--accent-subtle); color: var(--accent); border-color: var(--border); }
+#annotation-panel button:disabled { opacity: .45; cursor: default; }
+#annotation-panel :is(button, a, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#annotation-error {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px;
+  padding: 12px; border-bottom: 1px solid var(--danger); background: var(--bg-soft);
+  flex: none; max-height: 35%; overflow: auto; font-size: var(--ui-font-sm);
+}
+#annotation-error > strong { color: var(--danger); }
+#annotation-error > details { grid-column: 1 / -1; }
+#annotation-error pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--ui-font-xs); }
+#annotation-error > button:last-child { justify-self: start; }
 /* ---- Annotation playback toolbar ---- */
 #annotation-player {
   display: flex;
@@ -7468,340 +7617,168 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 }
 /* ---- end annotation playback toolbar ---- */
 #annotation-sessions {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 12px 16px;
+  flex: 1; min-height: 0; overflow: auto; padding: 0 12px 12px;
+  scrollbar-gutter: stable;
 }
 .annotation-list-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px 0;
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; padding: 12px 12px 0; flex: none;
 }
-.annotation-list-head strong {
-  font-size: 12px;
-}
-#annotation-list-count {
-  color: var(--fg-subtle);
-  font-size: 11px;
-  white-space: nowrap;
-}
-.annotation-empty {
-  color: var(--fg-subtle);
-  font-size: 12px;
-}
-.annotation-session {
-  /* Each session is a distinct card: a bordered group whose header doubles
-     as the "show this walkthrough inline" toggle. */
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  margin-bottom: 12px;
-  overflow: hidden;
-}
-.annotation-session.active {
-  border-color: var(--accent);
-}
-.annotation-session-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  padding: 4px 6px;
-  background: var(--bg-soft);
-  border-bottom: 1px solid var(--border);
-}
-.annotation-session.active .annotation-session-head {
-  background: var(--accent-subtle);
-  border-bottom-color: var(--accent);
-}
+.annotation-list-head strong { font-size: var(--ui-font-sm); }
+#annotation-list-count { color: var(--fg-muted); font-size: var(--ui-font-xs); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.annotation-empty { padding: 28px 8px; color: var(--fg-muted); font-size: var(--ui-font-sm); line-height: 1.75; }
+.annotation-empty h3 { color: var(--fg); font-size: var(--ui-font-md); line-height: 1.5; margin: 0 0 12px; }
+.annotation-empty p { margin: 0 0 16px; }
+.annotation-empty .annotation-empty-hint { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); font-size: var(--ui-font-xs); }
+.annotation-session { border: 1px solid var(--border); border-radius: 9px; background: var(--bg); margin-bottom: 10px; overflow: hidden; }
+.annotation-session.active { border-color: var(--accent); }
+.annotation-session-head { display: flex; align-items: center; gap: 4px; padding: 7px 6px; background: var(--bg-soft); }
+.annotation-session.active .annotation-session-head { background: var(--accent-subtle); }
 .annotation-session-select {
-  flex: 1;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
-  padding: 3px 4px;
-  border-radius: 6px;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 1; min-width: 0; border: 0; background: none; color: inherit; font: inherit; font-size: var(--ui-font-sm);
+  font-weight: 600; text-align: left; padding: 4px 2px; border-radius: 4px; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.annotation-session.active .annotation-session-select {
-  color: var(--accent);
-}
-.annotation-session-time {
-  flex: none;
-  font-size: 10px;
-  color: var(--fg-subtle);
-  white-space: nowrap;
-}
-.annotation-session-count {
-  flex: none;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg);
-  color: var(--fg-muted);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1;
-  padding: 2px 6px;
-}
-.annotation-session.active .annotation-session-count {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.annotation-entries {
-  list-style: none;
-  margin: 0;
-  padding: 4px;
-  counter-reset: annotation-step;
-}
-.annotation-entries li {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  border-radius: 6px;
-  counter-increment: annotation-step;
-}
-.annotation-entries li:hover {
-  background: var(--bg-soft);
-}
-.annotation-entries li.active {
-  background: var(--accent-subtle);
-}
+.annotation-session.active .annotation-session-select { color: var(--accent); }
+.annotation-session-time { display: block; margin-top: 3px; font-size: var(--ui-font-xs); font-weight: 400; color: var(--fg-muted); }
+.annotation-session-count { flex: none; border-radius: 5px; background: var(--bg); color: var(--fg-muted); font-size: var(--ui-font-xs); padding: 2px 6px; font-variant-numeric: tabular-nums; }
+#annotation-panel .annotation-session-collapse { border: 0; background: transparent; padding: 4px; opacity: 1; }
+.annotation-session-collapse[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.annotation-entries { list-style: none; margin: 0; padding: 4px; border-top: 1px solid var(--border); }
+.annotation-entries li { display: flex; align-items: center; gap: 4px; border-radius: 6px; }
+.annotation-entries li + li { border-top: 1px solid var(--border); }
+.annotation-entries li:hover { background: var(--bg-soft); }
+.annotation-entries li.active { background: var(--accent-subtle); }
 .annotation-entry-open {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  grid-template-rows: auto auto auto;
-  column-gap: 4px;
-  row-gap: 1px;
-  text-align: left;
-  border: 0;
-  background: none;
-  padding: 5px 6px;
-  cursor: pointer;
-  color: inherit;
-  min-width: 0;
+  flex: 1; display: grid; grid-template-columns: 24px minmax(0, 1fr);
+  column-gap: 8px; row-gap: 4px; text-align: left; border: 0; background: none;
+  padding: 10px 6px; cursor: pointer; color: inherit; min-width: 0;
 }
 .annotation-entry-open::before {
-  /* Step number rendered as a chip so the reading order is scannable.
-     Neutral by default, accent-tinted inside the active session, solid
-     accent on the currently open entry. */
-  content: counter(annotation-step);
-  grid-row: 1 / span 3;
-  align-self: start;
-  margin-top: 5px;
-  width: 18px;
-  height: 18px;
-  box-sizing: border-box;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: var(--bg-soft);
-  color: var(--fg-muted);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 16px;
-  text-align: center;
+  /* The original step is retained when search hides earlier entries. */
+  content: attr(data-step); grid-row: 1 / span 3; align-self: start;
+  box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-soft); color: var(--fg-muted); font-size: var(--ui-font-xs);
+  font-weight: 600; line-height: 22px; text-align: center;
 }
-.annotation-session.active .annotation-entry-open::before {
-  border-color: var(--accent);
-  background: var(--accent-subtle);
-  color: var(--accent);
-}
-.annotation-entries li.active .annotation-entry-open::before {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-}
-.annotation-entry-location {
-  grid-column: 2;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  font-size: 11px;
-  color: var(--accent);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.annotation-entry-summary {
-  grid-column: 2;
-  display: block;
-  font-size: 12px;
-  color: var(--fg-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.annotation-entry-time {
-  grid-column: 2;
-  display: block;
-  font-size: 10px;
-  color: var(--fg-subtle);
-  white-space: nowrap;
-}
-/* Per-row actions stay quiet until the row (or the panel item) is hovered,
-   so the list reads as content, not as a wall of trash cans. */
+.annotation-session.active .annotation-entry-open::before { color: var(--accent); background: var(--accent-subtle); }
+.annotation-entry-location { grid-column: 2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--ui-font-xs); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.annotation-entry-summary { grid-column: 2; font-size: var(--ui-font-sm); font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.annotation-entry-time { grid-column: 2; font-size: var(--ui-font-xs); color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
 .annotation-session-head .annotation-icon-btn,
-.annotation-entries li .annotation-icon-btn {
-  opacity: 0;
-  transition: opacity 0.12s;
-}
+.annotation-entries li .annotation-icon-btn { opacity: .55; border-color: transparent; background: transparent; }
 .annotation-session-head:hover .annotation-icon-btn,
 .annotation-entries li:hover .annotation-icon-btn,
-.annotation-icon-btn:focus-visible {
-  opacity: 1;
-}
-.annotation-entries li .annotation-icon-btn {
-  margin-right: 4px;
-}
-.annotation-delete {
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg-subtle);
-  font-size: 11px;
-  cursor: pointer;
-  padding: 3px 6px;
-}
-.annotation-delete:hover {
-  color: var(--danger);
-  border-color: var(--danger);
-}
+.annotation-icon-btn:focus-visible { opacity: 1; }
+.annotation-entries li .annotation-icon-btn { margin-right: 4px; }
 
-#annotation-detail {
-  /* Docked under the session list with a FIXED height: the list above never
-     moves when the entry body is longer or shorter, so click targets stay
-     put while stepping through a walkthrough. */
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  height: 45%;
-  min-height: 220px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-soft);
-}
-.annotation-detail-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-}
-#annotation-detail-session {
-  flex: 1;
-  font-size: 12px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-#annotation-detail-step {
-  /* Matches the step chips on the inline comment boxes so the reader can
-     tell at a glance which walkthrough step is open. */
-  flex: none;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  background: var(--accent-subtle);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  padding: 3px 8px;
-  white-space: nowrap;
-}
-#annotation-detail-time {
-  flex: none;
-  font-size: 11px;
-  color: var(--fg-subtle);
-  white-space: nowrap;
-}
-#annotation-detail-close {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg-muted);
-  font-size: 13px;
-  line-height: 1;
-  padding: 2px 8px;
-  cursor: pointer;
-}
-#annotation-detail-prev:disabled,
-#annotation-detail-next:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-#annotation-detail-location {
-  display: block;
-  padding: 0 12px;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  font-size: 11px;
-  color: var(--accent);
-  text-decoration: none;
-  word-break: break-all;
-}
-#annotation-detail-location:hover {
-  text-decoration: underline;
-}
-#annotation-detail-body {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 8px 12px 12px;
-  font-size: 13px;
-}
-#annotation-detail-body pre {
-  max-width: 100%;
-  overflow-x: auto;
-}
-.annotation-detail-title {
-  display: block;
-  margin-bottom: 6px;
-}
-/* Inline annotation rows under the annotated code line */
-.gdp-annotation-row td {
+/* Reading and editing own the remaining panel height; returning preserves the library scroll. */
+#annotation-panel:has(#annotation-detail:not([hidden])) > :is(.annotation-list-head, .annotation-search-toolbar, #annotation-sessions, .annotation-library-footer) { display: none; }
+#annotation-detail { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.annotation-detail-head { display: flex; align-items: center; flex: none; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.annotation-detail-meta { display: flex; align-items: baseline; gap: 8px; padding: 14px 14px 8px; flex: none; }
+#annotation-detail-session { flex: 1; min-width: 0; font-size: var(--ui-font-xs); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-muted); }
+#annotation-detail-step { margin-right: auto; color: var(--fg-muted); font-size: var(--ui-font-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#annotation-detail-time { flex: none; font-size: var(--ui-font-xs); color: var(--fg-subtle); white-space: nowrap; }
+#annotation-detail-close { border: 0; border-radius: 6px; background: transparent; color: var(--accent); font: inherit; font-size: var(--ui-font-sm); padding: 4px 0; cursor: pointer; white-space: nowrap; }
+#annotation-detail-location { display: block; flex: none; margin: 0 14px; padding: 8px 10px; border-radius: 6px; background: var(--bg-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--ui-font-xs); color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+#annotation-detail-location:empty { display: none; }
+#annotation-detail-location:hover { text-decoration: underline; }
+#annotation-detail-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 14px; font-size: var(--ui-font-md); line-height: 1.75; }
+#annotation-detail-body pre { max-width: 100%; overflow-x: auto; }
+.annotation-detail-title { display: block; font-size: var(--ui-font-lg); line-height: 1.5; margin-bottom: 16px; }
+#annotation-panel.annotation-editing :is(#annotation-detail-prev, #annotation-detail-next, #annotation-detail-step, #annotation-player, #annotation-add) { display: none; }
+#annotation-panel [hidden] { display: none; }
+/* Inline notes inherit prose typography, independently of the code table. */
+.gdp-annotation-row > td {
   padding: 0;
   background: var(--bg-soft);
 }
 .gdp-annotation-inline {
-  /* The code table can scroll horizontally; keep the note pinned to the
-     visible area (width is synced to the scroll container in
-     annotations-ui.ts). */
+  /* Width follows the visible code scroller, even when code lines are wider. */
   position: sticky;
   left: 8px;
   box-sizing: border-box;
-  margin: 4px 8px;
-  padding: 8px 12px;
+  margin: 8px;
+  padding: 12px 16px 16px;
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg);
-  font-size: 13px;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica,
-    Arial, sans-serif;
-  line-height: 1.5;
+  box-shadow: var(--shadow-sm);
+  color: var(--fg);
+  font: var(--ui-font-lg)/1.8 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
   white-space: normal;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .gdp-annotation-row.active .gdp-annotation-inline {
-  border-left-color: var(--attn);
-  box-shadow: 0 0 0 1px var(--attn) inset;
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm);
 }
 .gdp-annotation-inline-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--ui-font-sm);
+  line-height: 1.5;
+}
+.gdp-annotation-inline-location {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.gdp-annotation-inline-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
 }
 .gdp-annotation-inline-title {
-  flex: 1;
-  min-width: 0;
+  display: block;
+  max-width: 80ch;
+  margin: 0 0 12px;
+  font-size: var(--ui-font-title);
+  font-weight: 650;
+  line-height: 1.6;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
+.gdp-annotation-inline:has(.gdp-annotation-inline-body[hidden]) .gdp-annotation-inline-title { margin-bottom: 0; }
+.gdp-annotation-prose {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 80ch;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+  overflow-wrap: anywhere;
+}
+.gdp-annotation-prose :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.25em 0 0.6em;
+  padding: 0;
+  border: 0;
+  color: var(--fg);
+  font-size: 1.1em;
+  line-height: 1.6;
+}
+.gdp-annotation-prose h3::before { display: none; }
+.gdp-annotation-prose > :first-child { margin-top: 0; }
+.gdp-annotation-prose > :last-child { margin-bottom: 0; }
+.gdp-annotation-prose :is(p, ul, ol, blockquote, pre, table) { margin-bottom: 1em; }
+.gdp-annotation-prose li + li { margin-top: 0.3em; }
+.gdp-annotation-prose :is(ul, ol) { padding-left: 1.6em; }
+.gdp-annotation-prose blockquote { margin-left: 0; margin-right: 0; }
+.gdp-annotation-prose blockquote > :last-child { margin-bottom: 0; }
+.gdp-annotation-prose pre { font-size: var(--ui-font-md); line-height: 1.65; }
+.gdp-annotation-prose table { display: block; width: max-content; max-width: 100%; overflow-x: auto; }
+.gdp-annotation-prose :is(th, td) { padding: 8px 12px; }
+.gdp-annotation-prose .anchor { display: none; }
+.gdp-annotation-expand[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.gdp-annotation-expand { flex: none; }
+.gdp-annotation-inline-body[hidden], .gdp-db-annotation-inline-body[hidden] { display: none; }
 .gdp-annotation-step {
   /* Step chip on the inline comment box: shows "n/total" so the
      walkthrough order is visible right inside the code, and doubles as
@@ -7842,9 +7819,6 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 }
 
 /* Annotation editing + AI-ready reference copy */
-.gdp-annotation-inline {
-  position: sticky;
-}
 .annotation-icon-btn {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -7873,37 +7847,39 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   color: var(--danger);
   border-color: var(--danger);
 }
-.gdp-annotation-inline-copy {
-  flex: none;
-  margin-left: auto;
+.gdp-annotation-inline .annotation-icon-btn {
+  min-height: var(--ui-control-sm);
+  gap: 4px;
+  padding: 3px 6px;
+  font: inherit;
 }
-.annotation-edit-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  height: 100%;
+.gdp-annotation-inline :is(.gdp-annotation-read, .annotation-icon-btn, .gdp-annotation-step):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
-.annotation-edit-form input,
-.annotation-edit-form textarea {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 12px;
-  padding: 6px 8px;
+.gdp-annotation-inline .gdp-annotation-step {
+  border-color: var(--border);
+  border-radius: 5px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-size: var(--ui-font-sm);
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
-.annotation-edit-form textarea {
-  flex: 1;
-  resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-}
-.annotation-edit-buttons {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
+.gdp-annotation-inline .gdp-annotation-step:hover { background: var(--bg-mute); }
+.gdp-annotation-inline-copy { flex: none; }
+.annotation-edit-form { display: flex; flex-direction: column; gap: 12px; min-height: 100%; }
+.annotation-edit-fields { display: flex; flex-direction: column; gap: 12px; padding: 0; margin: 0; border: 0; flex: 1; min-width: 0; }
+.annotation-edit-fields label { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: var(--ui-font-xs); color: var(--fg-muted); }
+.annotation-edit-fields :is(input, textarea, select) { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: var(--ui-font-sm); padding: 8px 10px; }
+.annotation-edit-fields :is(input, textarea, select):focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.annotation-line-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.annotation-editor-content { display: flex; flex-direction: column; flex: 1; min-height: 220px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.annotation-editor-tabs { display: flex; gap: 4px; padding: 5px; border-bottom: 1px solid var(--border); background: var(--bg-soft); }
+.annotation-edit-fields textarea { flex: 1; resize: vertical; border: 0; border-radius: 0; min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.65; }
+.annotation-editor-preview { flex: 1; padding: 10px; overflow-wrap: anywhere; font-size: var(--ui-font-sm); }
+.annotation-edit-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: flex-end; position: sticky; bottom: -14px; margin: 0 -14px -14px; padding: 10px 14px; background: var(--bg); border-top: 1px solid var(--border); }
+.annotation-edit-buttons small { flex-basis: 100%; font-size: var(--ui-font-xs); color: var(--fg-muted); }
 
 .gdp-annotation-spacer td {
   padding: 0;
@@ -16395,143 +16371,75 @@ html[data-theme="dark"] .tools-code span[style] {
   overflow-wrap: anywhere;
 }
 
-/* ==========================================================================
-   Datastore page — premium glass theme
-   データストアページ (.db-root) 全体にスコープした装飾レイヤ。
-   既存トークン (--bg/--fg/--accent ...) から color-mix で導出するため、
-   ライト/ダーク両テーマに自動追従する。状態変化で box dimensions が
-   動かないよう、hover/active は background / box-shadow / color のみで
-   表現する (padding/border の変更禁止)。
-   ========================================================================== */
+/* ===== Datastore workspace =====
+   Opaque surfaces keep cell values readable under both themes. The shared
+   surface variables also serve previews and popovers outside the grid. */
 .db-root {
-  /* ガラス面の下に敷くキャンバス。ごく薄い色相のグラデーション。 */
-  background:
-    radial-gradient(
-      1100px 480px at 88% -12%,
-      color-mix(in srgb, var(--done) 14%, transparent),
-      transparent 62%
-    ),
-    radial-gradient(
-      900px 520px at -8% 112%,
-      color-mix(in srgb, var(--accent) 16%, transparent),
-      transparent 58%
-    ),
-    radial-gradient(
-      700px 420px at -6% -10%,
-      color-mix(in srgb, var(--accent) 9%, transparent),
-      transparent 60%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg-soft) 60%, var(--bg)) 0%,
-      var(--bg) 46%
-    );
-  /* ガラス素材の共通レシピ */
-  --db-glass-bg: color-mix(in srgb, var(--bg) 76%, transparent);
-  --db-glass-bg-strong: color-mix(in srgb, var(--bg) 90%, transparent);
-  --db-glass-border: color-mix(in srgb, var(--border) 62%, transparent);
-  --db-glass-blur: blur(18px) saturate(1.45);
-  --db-glass-shadow:
-    0 1px 2px color-mix(in srgb, var(--fg) 6%, transparent),
-    0 8px 24px -12px color-mix(in srgb, var(--fg) 22%, transparent);
+  background: var(--bg);
+  --db-glass-bg: var(--bg-soft);
+  --db-glass-bg-strong: var(--bg);
+  --db-glass-border: var(--border);
+  --db-glass-blur: none;
+  --db-glass-shadow: var(--shadow-sm);
   --db-focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent);
 }
-
-/* ----- スリムなスクロールバー (ページ内のガラス質感を揃える) ----- */
 .db-root ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 .db-root ::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--fg) 18%, transparent);
-  border: 3px solid transparent;
-  border-radius: 999px;
-  background-clip: padding-box;
+  background: color-mix(in srgb, var(--fg) 24%, transparent);
+  border: 2px solid var(--bg);
+  border-radius: 6px;
 }
 .db-root ::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--fg) 32%, transparent);
-  border: 3px solid transparent;
-  background-clip: padding-box;
+  background: var(--fg-muted);
 }
 .db-root ::-webkit-scrollbar-track,
 .db-root ::-webkit-scrollbar-corner {
-  background: transparent;
+  background: var(--bg);
 }
-
-/* ----- 最上段のタブバー (db / s3 / +) : フローティングピル ----- */
 .db-root .db-tabs-bar {
-  background: transparent;
+  background: var(--bg-soft);
   border-bottom: 1px solid var(--db-glass-border);
   align-items: center;
-  min-height: 40px;
+  min-height: var(--ui-control-md);
 }
 .db-root .db-tabs-list {
-  gap: 2px;
-  padding: 4px 8px;
-  /* 「+」を最後のタブの直後に寄せるため、中身の幅だけ取る (溢れたら
-     この中で横スクロール)。flex:1 だと「+」が右端に吸い寄せられる。 */
+  gap: 4px;
+  padding: 5px 8px;
   flex: 0 1 auto;
   min-width: 0;
 }
 .db-root .db-tabs-chip {
-  border-right: none;
-  border-radius: 8px;
+  border: 1px solid var(--db-glass-border);
+  border-radius: 6px;
   margin: 0;
   padding: 4px 8px 4px 12px;
-  /* 非アクティブも「タブのかたまり」に見えるよう、うっすらした面と
-     輪郭を常時表示する (完全透明だとテキストの羅列に見える)。 */
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-  border: 1px solid var(--db-glass-border);
-  transition:
-    background-color 0.15s ease,
-    box-shadow 0.15s ease,
-    color 0.15s ease;
-}
-.db-root .db-tabs-chip:hover {
-  background: color-mix(in srgb, var(--fg) 7%, transparent);
-}
-.db-root .db-tabs-chip.active {
-  background: var(--db-glass-bg-strong);
-  border-bottom: 1px solid var(--db-glass-border);
-  margin-bottom: 0;
-  box-shadow:
-    inset 0 -2px 0 var(--accent),
-    var(--db-glass-shadow);
+  background: var(--bg-soft);
   font-weight: 600;
 }
+.db-root .db-tabs-chip.active {
+  background: var(--bg);
+  color: var(--accent);
+  margin-bottom: 0;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.db-root .db-tabs-chip:hover,
 .db-root .db-tabs-chip.drop-target {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--accent-subtle);
 }
-.db-root .db-tabs-chip-close {
-  border-radius: 6px;
-}
-/* 「+」はタブと混同しないよう、破線のゴーストボタンにする。 */
+.db-root .db-tabs-chip-close { border-radius: 4px; }
 .db-root .db-tabs-new-btn {
-  border: 1px dashed color-mix(in srgb, var(--fg) 25%, transparent);
-  border-radius: 8px;
+  border: 1px solid var(--db-glass-border);
+  border-radius: 6px;
   margin: 4px 8px 4px 4px;
   align-self: center;
-  min-height: 26px;
-  background: transparent;
+  min-height: var(--ui-control-sm);
+  background: var(--bg);
   color: var(--fg-muted);
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
 }
-.db-root .db-tabs-new-btn:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--accent);
-}
-
-/* ----- サイドバー: ガラス面 ----- */
-.db-root .db-sidebar {
-  background: var(--db-glass-bg);
-  -webkit-backdrop-filter: var(--db-glass-blur);
-  backdrop-filter: var(--db-glass-blur);
-  border-right: 1px solid var(--db-glass-border);
-}
+.db-root .db-sidebar { background: var(--bg-soft); }
 .db-root .db-toolbar,
 .db-root .db-icon-toolbar,
 .db-root .db-prefs-bar,
@@ -16539,165 +16447,83 @@ html[data-theme="dark"] .tools-code span[style] {
   border-bottom-color: var(--db-glass-border);
   background: transparent;
 }
-
-/* ----- 入力コントロール: ガラスの入力面 + ソフトなフォーカスリング ----- */
 .db-root .db-file-select,
 .db-root .db-table-filter,
 .db-root .s3-bucket-select,
 .db-root .s3-sort-select,
 .db-root .s3-search-input,
 .db-root .s3-edit-textarea,
-.db-root .s3-new-object-key {
+.db-root .s3-new-object-key,
+.db-root .db-grid-filter-input {
   border: 1px solid var(--db-glass-border);
-  border-radius: 8px;
-  background: var(--db-glass-bg-strong);
-  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--fg) 4%, transparent);
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    background-color 0.15s ease;
-}
-.db-root .db-file-select:hover,
-.db-root .s3-bucket-select:hover,
-.db-root .s3-sort-select:hover,
-.db-root .s3-search-input:hover {
-  border-color: color-mix(in srgb, var(--border-strong) 70%, transparent);
-}
-.db-root .db-file-select:focus,
-.db-root .db-table-filter:focus,
-.db-root .s3-bucket-select:focus,
-.db-root .s3-sort-select:focus,
-.db-root .s3-search-input:focus,
-.db-root .s3-edit-textarea:focus,
-.db-root .s3-new-object-key:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow:
-    inset 0 1px 2px color-mix(in srgb, var(--fg) 4%, transparent),
-    var(--db-focus-ring);
-}
-
-/* ----- ボタン: 丸みと立体感。primary はアクセントのグラデーション ----- */
-.db-root .db-btn {
-  border: 1px solid var(--db-glass-border);
-  border-radius: 8px;
-  background: var(--db-glass-bg-strong);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--fg) 6%, transparent);
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    color 0.15s ease;
-}
-.db-root .db-btn:hover {
+  border-radius: 6px;
   background: var(--bg);
-  border-color: color-mix(in srgb, var(--border-strong) 70%, transparent);
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--fg) 10%, transparent);
 }
-.db-root .db-btn:focus-visible {
-  outline: none;
-  box-shadow:
-    0 1px 2px color-mix(in srgb, var(--fg) 6%, transparent),
-    var(--db-focus-ring);
+.db-root :is(input, select, textarea):focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
-.db-root .db-btn-primary,
+.db-root .db-btn,
+.db-root .db-icon-btn,
+.db-root .db-refresh-btn,
+.db-root .db-connection-action {
+  border: 1px solid var(--db-glass-border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: var(--shadow-sm);
+}
+.db-root :is(.db-btn, .db-icon-btn, .db-refresh-btn, .db-connection-action, .db-tabs-new-btn):hover {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+.db-root button:focus-visible,
+.app-menu-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .db-root .db-btn.db-btn-primary {
-  border-color: color-mix(in srgb, var(--accent-emph) 80%, transparent);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent) 92%, #ffffff 8%) 0%,
-    var(--accent-emph) 100%
-  );
-  color: #ffffff;
-  box-shadow:
-    0 1px 2px color-mix(in srgb, var(--accent-emph) 45%, transparent),
-    0 6px 16px -8px color-mix(in srgb, var(--accent) 55%, transparent);
-}
-.db-root .db-btn-primary:hover,
-.db-root .db-btn.db-btn-primary:hover {
-  background: linear-gradient(
-    180deg,
-    var(--accent) 0%,
-    var(--accent-emph) 100%
-  );
+  background: var(--accent-emph);
+  color: var(--fg-onemphasis);
   border-color: var(--accent-emph);
 }
-
-/* ----- セグメントコントロール: ガラスのトラック + 浮き上がる選択片 ----- */
+.db-root .db-btn.db-btn-primary:hover {
+  background: color-mix(in srgb, var(--accent-emph) 88%, var(--fg));
+}
 .db-root .seg {
   border: 1px solid var(--db-glass-border);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  border-radius: 6px;
+  background: var(--bg-soft);
   padding: 2px;
   height: auto;
-  overflow: visible;
 }
 .db-root .seg button {
-  border-radius: 7px;
+  border-radius: 4px;
   padding: 3px 11px;
-  transition:
-    background-color 0.15s ease,
-    box-shadow 0.15s ease,
-    color 0.15s ease;
-}
-.db-root .seg button + button {
-  border-left: none;
-}
-.db-root .seg button:hover {
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-}
-.db-root .seg button.active {
-  background: var(--db-glass-bg-strong);
-  color: var(--fg);
   font-weight: 600;
-  box-shadow:
-    inset 0 0 0 1px var(--db-glass-border),
-    0 1px 3px color-mix(in srgb, var(--fg) 14%, transparent);
 }
-
-/* ----- サイドバーのテーブルリスト: 丸みのある行 ----- */
+.db-root .seg button + button { border-left: none; }
+.db-root .seg button.active {
+  background: var(--bg);
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
 .db-root .db-table-item {
   border-left: none;
-  border-radius: 8px;
-  margin: 1px 6px;
-  padding: 4px 6px 4px 11px; /* 旧 border-left 3px 分を padding に移し位置不変 */
-  transition:
-    background-color 0.12s ease,
-    box-shadow 0.12s ease;
+  border-radius: 5px;
+  margin: 2px 6px;
+  padding: 4px 6px 4px 11px;
 }
-.db-root .db-table-item:hover {
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
-}
+.db-root .db-table-item:hover { background: var(--bg-mute); }
 .db-root .db-table-item.active {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--accent-subtle);
+  color: var(--accent);
   box-shadow: inset 2px 0 0 var(--accent);
-  font-weight: 600;
 }
-.db-root .db-table-node {
-  border-bottom-color: var(--db-glass-border);
-}
-
-/* ----- S3: サイドバースロット ----- */
-.db-root .s3-sidebar-slot {
-  padding: 10px;
-  gap: 10px;
-}
-.db-root .s3-object-status {
-  padding: 0 2px;
-  min-height: 18px;
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-  color: var(--fg-subtle);
-}
-.db-root .s3-object-status.warn {
-  background: color-mix(in srgb, var(--attn) 12%, transparent);
-  color: var(--attn);
-  border-radius: 6px;
-  padding: 2px 6px;
-}
-
-/* ----- S3: オブジェクトリストをカード列に ----- */
-.db-root .s3-object-list {
+.db-root .db-table-count { font-variant-numeric: tabular-nums; }
+.db-root .db-table-node { border-bottom-color: var(--border-muted); }
+.db-root .s3-sidebar-slot { padding: 10px; gap: 10px; }
+.db-root .s3-object-list,
+.db-root .s3-tree {
   margin: 0;
   padding: 4px 2px;
   border-top: 1px solid var(--db-glass-border);
@@ -16705,388 +16531,118 @@ html[data-theme="dark"] .tools-code span[style] {
 .db-root .s3-object-item {
   border-left: none;
   border-bottom: none;
-  border-radius: 8px;
+  border-radius: 5px;
   padding: 7px 10px;
   margin: 1px 0;
-  transition:
-    background-color 0.12s ease,
-    box-shadow 0.12s ease;
 }
-.db-root .s3-object-item:hover {
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
-}
-.db-root .s3-object-item.active {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
-    inset 2px 0 0 var(--accent);
-}
-.db-root .s3-object-more-btn {
-  margin: 4px 0 0;
-  border: 1px solid var(--db-glass-border);
-  border-radius: 8px;
-  background: var(--db-glass-bg-strong);
-  transition:
-    background-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
-.db-root .s3-object-more-btn:hover {
-  background: var(--bg);
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--fg) 10%, transparent);
-}
-
-/* ----- S3: Explorer ツリーも同じ丸みの行に ----- */
-.db-root .s3-tree {
-  margin: 0;
-  padding: 4px 2px;
-  border-top: 1px solid var(--db-glass-border);
-}
-.db-root .s3-tree .tree-dir {
-  border-radius: 8px;
-}
-.db-root .s3-tree .tree-file {
-  border-left: none;
-  border-radius: 8px;
-  padding-right: 10px;
-  transition:
-    background-color 0.12s ease,
-    box-shadow 0.12s ease;
-}
+.db-root .s3-tree .tree-dir,
+.db-root .s3-tree .tree-file { border-radius: 5px; }
+.db-root .s3-object-item.active,
 .db-root .s3-tree .tree-file.active {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
-    inset 2px 0 0 var(--accent);
+  background: var(--accent-subtle);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
-
-/* ----- S3: kind バッジに微かな発光 ----- */
-.db-root .s3-kind-badge {
-  height: 17px;
-  letter-spacing: 0.04em;
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--fg) 6%, transparent);
-}
-
-/* ----- S3: プレビューペイン。ヘッダを浮いたガラスカードに ----- */
-.db-root .s3-explorer,
-.db-root .db-main-content {
-  background: transparent;
-}
-.db-root .s3-preview-pane {
-  padding: 12px 14px;
-  gap: 12px;
-}
-.db-root .s3-preview-header {
+.db-root .s3-preview-pane { padding: 12px 14px; gap: 12px; }
+.db-root .s3-preview-header,
+.db-root .s3-preview-body {
   border: 1px solid var(--db-glass-border);
-  border-radius: 12px;
-  background: var(--db-glass-bg-strong);
-  -webkit-backdrop-filter: var(--db-glass-blur);
-  backdrop-filter: var(--db-glass-blur);
-  box-shadow: var(--db-glass-shadow);
+  border-radius: 8px;
+  background: var(--bg);
   padding: 12px 16px;
 }
-.db-root .s3-preview-title {
-  font-size: 13px;
-  letter-spacing: 0.01em;
-}
-.db-root .s3-preview-body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  border: 1px solid var(--db-glass-border);
-  border-radius: 12px;
-  background: var(--db-glass-bg-strong);
-  box-shadow: var(--db-glass-shadow);
-  padding: 16px;
-}
-
-/* ----- ホバーのキーツールチップ: ガラスカード ----- */
-/* tooltip は document.body 直下に attach されるため .db-root の変数を
-   継承しない。各 var() にフォールバックを明示する。 */
+.db-root .s3-preview-body { flex: 1; min-height: 0; overflow: auto; }
 .s3-key-tooltip {
-  background: var(--db-glass-bg-strong, color-mix(in srgb, var(--bg) 90%, transparent));
-  -webkit-backdrop-filter: var(--db-glass-blur, blur(18px) saturate(1.45));
-  backdrop-filter: var(--db-glass-blur, blur(18px) saturate(1.45));
-  border: 1px solid var(--db-glass-border, color-mix(in srgb, var(--border) 62%, transparent));
-  border-radius: 10px;
-  box-shadow:
-    0 4px 12px color-mix(in srgb, var(--fg) 10%, transparent),
-    0 16px 40px -12px color-mix(in srgb, var(--fg) 30%, transparent);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
 }
-.s3-key-tooltip .s3-key-tooltip-image {
-  border-radius: 6px;
-}
-.s3-key-tooltip .s3-key-tooltip-meta {
-  border-top-color: var(--db-glass-border);
-}
-
-/* ----- ビュー切替タブ (Table / Query / ER ...) : ピルタブ ----- */
+.s3-key-tooltip .s3-key-tooltip-image { border-radius: 4px; }
+.s3-key-tooltip .s3-key-tooltip-meta { border-top-color: var(--border); }
 .db-root .db-tab-bar {
-  background: transparent;
+  background: var(--bg);
   border-bottom: 1px solid var(--db-glass-border);
-  gap: 2px;
-  padding: 4px 10px;
+  gap: 4px;
+  padding: 5px 10px;
   align-items: center;
 }
 .db-root .db-tab {
   border-bottom: none;
   margin-bottom: 0;
-  border-radius: 8px;
+  border-radius: 5px;
   padding: 5px 14px;
-  transition:
-    background-color 0.15s ease,
-    box-shadow 0.15s ease,
-    color 0.15s ease;
-}
-.db-root .db-tab:hover {
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-}
-.db-root .db-tab.active {
-  background: var(--db-glass-bg-strong);
-  box-shadow:
-    inset 0 0 0 1px var(--db-glass-border),
-    inset 0 -2px 0 var(--accent),
-    var(--db-glass-shadow);
   font-weight: 600;
 }
-
-/* ----- アイコンボタン / ツールボタンも丸みを統一 ----- */
-.db-root .db-icon-btn,
-.db-root .db-refresh-btn,
-.db-root .db-connection-action {
-  border-radius: 8px;
-  border-color: var(--db-glass-border);
-  background: var(--db-glass-bg-strong);
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    color 0.15s ease;
-}
-.db-root .db-icon-btn:hover,
-.db-root .db-refresh-btn:hover,
-.db-root .db-connection-action:hover {
-  border-color: color-mix(in srgb, var(--border-strong) 70%, transparent);
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--fg) 10%, transparent);
-}
-.db-root .db-tool-btn {
-  border-radius: 8px;
-  border-color: var(--db-glass-border);
-  transition:
-    background-color 0.15s ease,
-    box-shadow 0.15s ease,
-    color 0.15s ease;
-}
-
-/* ==========================================================================
-   Datastore page — aurora & glow boost
-   ガラステーマの上に「気分が上がる」演出層を重ねる。ゆっくり漂うオーロラ
-   背景と、アクティブ要素へのグロー。色はすべてテーマトークン由来で
-   ライト/ダークに追従。レイアウトに影響する寸法は一切変更しない。
-   ========================================================================== */
-
-/* ----- 漂うオーロラ。キャンバス (::before) を stacking context の最背面に ----- */
-.db-root {
-  position: relative;
-  isolation: isolate;
-}
-.db-root::before {
-  content: "";
-  position: absolute;
-  inset: -12%;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(
-      38% 42% at 82% 4%,
-      color-mix(in srgb, var(--done) 20%, transparent),
-      transparent 70%
-    ),
-    radial-gradient(
-      36% 42% at 6% 98%,
-      color-mix(in srgb, var(--accent) 22%, transparent),
-      transparent 70%
-    ),
-    radial-gradient(
-      26% 30% at 2% 2%,
-      color-mix(in srgb, var(--success) 12%, transparent),
-      transparent 70%
-    ),
-    radial-gradient(
-      30% 34% at 98% 90%,
-      color-mix(in srgb, var(--attn) 10%, transparent),
-      transparent 70%
-    );
-  animation: db-aurora-drift 30s ease-in-out infinite alternate;
-  will-change: transform;
-}
-@keyframes db-aurora-drift {
-  from {
-    transform: translate3d(-1.5%, -1%, 0) scale(1);
-  }
-  to {
-    transform: translate3d(1.5%, 1.5%, 0) scale(1.05);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .db-root::before {
-    animation: none;
-  }
-}
-
-/* ----- アクティブなタブ/チップにアクセントのグロー ----- */
-.db-root .db-tabs-chip.active {
-  box-shadow:
-    inset 0 0 0 1px var(--db-glass-border),
-    inset 0 -2px 0 var(--accent),
-    0 0 18px -6px color-mix(in srgb, var(--accent) 55%, transparent),
-    var(--db-glass-shadow);
-}
+.db-root .db-tab:hover { background: var(--bg-soft); }
 .db-root .db-tab.active {
-  box-shadow:
-    inset 0 0 0 1px var(--db-glass-border),
-    inset 0 -2px 0 var(--accent),
-    0 0 18px -6px color-mix(in srgb, var(--accent) 55%, transparent),
-    var(--db-glass-shadow);
-}
-
-/* ----- primary ボタン: 光沢 + 強めの発光 ----- */
-.db-root .db-btn-primary,
-.db-root .db-btn.db-btn-primary {
-  text-shadow: 0 1px 1px color-mix(in srgb, #000000 22%, transparent);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #ffffff 28%, transparent),
-    0 1px 2px color-mix(in srgb, var(--accent-emph) 45%, transparent),
-    0 8px 20px -6px color-mix(in srgb, var(--accent) 60%, transparent);
-}
-
-/* ----- テーブルアイコン: アクセント→パープルのグラデーション ----- */
-.db-root .db-table-icon {
-  background: linear-gradient(
-    150deg,
-    var(--accent) 0%,
-    color-mix(in srgb, var(--done) 70%, var(--accent)) 100%
-  );
-  box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--accent) 60%, transparent);
-}
-.db-root .db-table-item[data-type="view"] .db-table-icon {
-  background: linear-gradient(
-    150deg,
-    var(--scope-accent) 0%,
-    color-mix(in srgb, var(--attn) 70%, var(--scope-accent)) 100%
-  );
-  box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--scope-accent) 60%, transparent);
-}
-
-/* ----- データグリッド: ガラス化 + 選択/ホバーのグロー ----- */
-.db-root .db-grid-filter-bar {
-  background: transparent;
-  border-bottom: 1px solid var(--db-glass-border);
-}
-.db-root .db-grid-filter-input {
-  border: 1px solid var(--db-glass-border);
-  border-radius: 8px;
-  background: var(--db-glass-bg-strong);
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
-.db-root .db-grid-filter-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: var(--db-focus-ring);
-}
-.db-root .db-grid-header-wrap {
-  background: var(--db-glass-bg);
-  -webkit-backdrop-filter: var(--db-glass-blur);
-  backdrop-filter: var(--db-glass-blur);
-  border-bottom: 1px solid var(--db-glass-border);
-}
-.db-root .db-grid-header-cell {
-  transition:
-    background-color 0.12s ease,
-    box-shadow 0.12s ease;
-}
-.db-root .db-grid-header-cell:hover {
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
-}
-.db-root .db-grid-header-cell.sorted {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: var(--accent-subtle);
+  color: var(--accent);
   box-shadow: inset 0 -2px 0 var(--accent);
 }
-.db-root .db-grid-header-cell.sorted .db-grid-header-label {
-  color: var(--accent);
+.db-root .db-grid-filter-bar {
+  background: var(--bg);
+  border-bottom: 1px solid var(--db-glass-border);
 }
-.db-root .db-grid-row.alt {
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
+.db-root .db-grid-header-wrap {
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--db-glass-border);
 }
-.db-root .db-grid-row:hover {
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
+.db-root .db-grid-header-cell:hover { background: var(--bg-mute); }
+.db-root .db-grid-header-cell.sorted {
+  background: var(--accent-subtle);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
+.db-root .db-grid-header-cell.sorted .db-grid-header-label { color: var(--accent); }
+.db-root .db-grid-row { border-bottom-color: var(--border-muted); }
+.db-root .db-grid-cell { border-right-color: var(--border-muted); }
+.db-root .db-grid-row.alt { background: color-mix(in srgb, var(--bg-soft) 55%, var(--bg)); }
+.db-root .db-grid-row:hover { background: var(--accent-subtle); }
 .db-root .db-grid-row.selected {
-  background: color-mix(in srgb, var(--accent) 13%, transparent) !important;
+  background: var(--accent-subtle) !important;
   outline: none;
-  box-shadow:
-    inset 2px 0 0 var(--accent),
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
+/* Keep row coordinates visible while wide tables scroll horizontally. */
 .db-root .db-grid-rownum-header,
 .db-root .db-grid-rownum {
-  background: transparent;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  box-shadow: 1px 0 0 var(--border);
+}
+.db-root .db-grid-row.selected .db-grid-rownum {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  color: var(--accent);
 }
 .db-root .db-grid-status {
-  background: transparent;
+  background: var(--bg-soft);
   border-top: 1px solid var(--db-glass-border);
-  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
 }
-
-/* ----- クエリ履歴 / ログ dock: ガラス + ピルタブ ----- */
-.db-root .db-history-pane {
-  background: var(--db-glass-bg);
-  -webkit-backdrop-filter: var(--db-glass-blur);
-  backdrop-filter: var(--db-glass-blur);
-  border-top: 1px solid var(--db-glass-border);
-}
+.db-root .db-history-pane,
+.db-root .db-history-dock { background: var(--bg-soft); }
 .db-root .db-history-dock {
-  background: transparent;
   border-top: 1px solid var(--db-glass-border);
-  gap: 2px;
+  gap: 4px;
   padding: 2px 8px;
   align-items: center;
 }
-.db-root .db-history-dock-tab {
-  border-radius: 7px;
-  padding: 3px 12px;
-  transition:
-    background-color 0.15s ease,
-    box-shadow 0.15s ease,
-    color 0.15s ease;
-}
-.db-root .db-history-dock-tab:hover {
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-}
+.db-root .db-history-dock-tab { border-radius: 4px; padding: 3px 12px; }
 .db-root .db-history-dock.open .db-history-dock-tab.active {
-  box-shadow:
-    inset 0 0 0 1px var(--db-glass-border),
-    inset 0 -2px 0 var(--accent),
-    0 0 14px -6px color-mix(in srgb, var(--accent) 50%, transparent);
-  background: var(--db-glass-bg-strong);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  background: var(--bg);
+  color: var(--accent);
 }
-
-/* ----- 詳細/関連パネルの境界をヘアラインに ----- */
 .db-root .db-grid-detail-panel,
 .db-root .db-related-panel {
   border-color: var(--db-glass-border);
-}
-
-/* ----- グリッド UX: セル詳細パネルと列フィルタ ----- */
-.db-root .db-grid-detail-panel {
-  border-top: 1px solid var(--db-glass-border);
-  background: var(--db-glass-bg);
-  -webkit-backdrop-filter: var(--db-glass-blur);
-  backdrop-filter: var(--db-glass-blur);
+  background: var(--bg);
 }
 .db-root .db-grid-detail-header {
-  background: transparent;
+  background: var(--bg-soft);
   border-bottom: 1px solid var(--db-glass-border);
   padding: 6px 12px;
   gap: 8px;
@@ -17097,41 +16653,78 @@ html[data-theme="dark"] .tools-code span[style] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  letter-spacing: 0.01em;
 }
-.db-root .db-grid-detail-content {
-  padding: 12px 16px;
-}
+.db-root .db-grid-detail-content { padding: 12px 16px; }
 .db-root .db-grid-detail-json {
   border: 1px solid var(--db-glass-border);
-  border-radius: 8px;
-  background: var(--db-glass-bg-strong);
+  border-radius: 6px;
+  background: var(--bg-soft);
   padding: 10px 12px;
 }
-/* 列ごとのフィルタ入力。未フォーカス時は淡く、フォーカスでリング。 */
 .db-root .db-grid-col-filter {
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
 }
-.db-root .db-grid-col-filter:hover {
-  background: var(--db-glass-bg-strong);
-  border-color: var(--db-glass-border);
+.db-root .db-grid-col-filter:not(:placeholder-shown) {
+  background: var(--accent-subtle);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
-.db-root .db-grid-col-filter:focus {
-  outline: none;
-  background: var(--db-glass-bg-strong);
-  border-color: var(--accent);
-  box-shadow: var(--db-focus-ring);
-}
-.db-root .db-grid-filter-spacer {
-  background: transparent;
-}
+
 .scope-settings-refresh-error {
   color: var(--danger);
   white-space: pre-wrap;
 }
+
+
+/* Keep navigation and detail controls readable at every desktop density. */
+.db-table-list-summary {
+  padding: 0 12px 8px;
+  color: var(--fg-muted);
+  font-size: var(--db-font-sm);
+  font-variant-numeric: tabular-nums;
+}
+.db-table-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-subtle);
+}
+.db-grid-detail-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.db-grid-detail-header .db-detail-tabs {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.db-grid-detail-header .db-detail-tab {
+  min-height: var(--ui-control-sm);
+  padding: 2px 12px;
+  white-space: nowrap;
+}
+.db-grid-detail-header .db-detail-tab.active {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+.db-grid-row-detail { white-space: normal; }
+.db-grid-row-detail .db-detail-table { width: 100%; table-layout: fixed; }
+.db-grid-row-detail th:first-child { width: 24%; }
+.db-grid-row-detail td {
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.db-grid-row-detail .db-detail-table-muted { color: var(--fg); }
+.db-grid-detail-copy-status:empty { display: none; }
+.db-grid-detail-copy-status {
+  display: block;
+  padding: 6px 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--db-font-sm);
+}
+
+.gdp-source-tabs .gdp-copy-source { order: 2; margin-left: 0; }
+.gdp-source-line-jump { order: 1; }

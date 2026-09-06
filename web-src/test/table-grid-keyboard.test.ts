@@ -126,6 +126,64 @@ describe("table-grid arrow-key cell navigation", () => {
     GlobalRegistrator.unregister();
   });
 
+  test("row details show every column and follow the active row", async () => {
+    const { grid } = setup();
+    await tick();
+    clickCell(grid.el, 0, 2);
+    q<HTMLButtonElement>(grid.el, ".db-detail-tab:nth-child(2)").click();
+    const values = () =>
+      Array.from(
+        grid.el.querySelectorAll(".db-grid-row-detail tbody tr"),
+        (row) => Array.from(row.children, (cell) => cell.textContent),
+      );
+    expect(values()).toEqual([
+      ["id", "1"],
+      ["owner_id", "10"],
+      ["label", "alpha"],
+    ]);
+    expect(document.activeElement).toBe(q(grid.el, ".db-grid-viewport"));
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+    );
+    expect(values()).toEqual([
+      ["id", "2"],
+      ["owner_id", "11"],
+      ["label", "bravo"],
+    ]);
+    expect(q(grid.el, ".db-grid-detail-title").textContent).toBe("Row 2");
+    q<HTMLButtonElement>(grid.el, ".db-detail-tab:first-child").click();
+    expect(q(grid.el, ".db-grid-detail-content").textContent).toBe("bravo");
+    grid.destroy();
+    grid.el.remove();
+  });
+
+  test.each([
+    [null, "NULL"],
+    ["", "(empty string)"],
+    [false, "false"],
+    [0, "0"],
+  ])("row details preserve %s as %s", async (value, expected) => {
+    const { grid } = setup();
+    grid.load(
+      "sample_table",
+      tableData({
+        dbId: "sample.db",
+        table: "sample_table",
+        columns: COLUMNS,
+        rows: [[1, 10, value]],
+      }),
+    );
+    await tick();
+    clickCell(grid.el, 0, 2);
+    q<HTMLButtonElement>(grid.el, ".db-detail-tab:nth-child(2)").click();
+    expect(
+      q(grid.el, ".db-grid-row-detail tbody tr:last-child td:last-child")
+        .textContent,
+    ).toBe(expected);
+    grid.destroy();
+    grid.el.remove();
+  });
+
   test("the first arrow press enters the grid at the first data cell", async () => {
     const { grid } = setup();
     await tick();
@@ -193,6 +251,31 @@ describe("table-grid arrow-key cell navigation", () => {
       "bravo",
     );
     grid.destroy();
+  });
+
+  test.each([
+    ["before the pinned gutter", 2, "ArrowLeft", 109, 109],
+    ["at the pinned gutter", 2, "ArrowLeft", 110, 110],
+    ["one pixel behind the gutter", 2, "ArrowLeft", 111, 110],
+    ["partly behind the gutter", 2, "ArrowLeft", 140, 110],
+    ["outside the left edge", 2, "ArrowLeft", 200, 110],
+    ["back to the first column", 1, "ArrowLeft", 110, 0],
+    ["outside the right edge", 0, "ArrowRight", 0, 70],
+  ])("keeps the active cell visible: %s", async (_name, column, key, offset, expected) => {
+    const { grid } = setup();
+    try {
+      await expect
+        .poll(() => grid.el.querySelectorAll(".db-grid-row").length)
+        .toBe(4);
+      const viewport = q<HTMLElement>(grid.el, ".db-grid-viewport");
+      Object.defineProperty(viewport, "clientWidth", { value: 200 });
+      clickCell(grid.el, 0, column);
+      viewport.scrollLeft = offset;
+      press(grid.el, key);
+      expect(viewport.scrollLeft).toBe(expected);
+    } finally {
+      grid.destroy();
+    }
   });
 
   // Ctrl / Meta / Alt / Shift 付きの矢印はアプリ側のスクロール等に予約されて
