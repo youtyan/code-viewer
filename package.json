@@ -75,7 +75,7 @@
     "d3-dsv": "3.0.1",
     "esbuild": "^0.28.1",
     "highlight.js": "11.9.0",
-    "markdown-it": "14.1.1",
+    "markdown-it": "14.2.0",
     "markdown-it-anchor": "9.2.0",
     "markdown-it-footnote": "4.0.0",
     "mermaid": "11.14.0",
