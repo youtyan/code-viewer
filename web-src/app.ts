@@ -16,7 +16,6 @@ import {
 } from "./core/catch-up";
 import { changedPathsCoverPath } from "./core/changed-paths";
 import { attachDragResizer } from "./core/drag-resizer";
-import { isNativeLinkClick } from "./core/link-click";
 import {
   errorWithCause,
   errorWithCauses,
@@ -74,6 +73,7 @@ import {
   resolveKeyBindings,
   resolveKeymapAction,
 } from "./core/keymap";
+import { isNativeLinkClick } from "./core/link-click";
 import { createNetworkActivityTracker } from "./core/network-activity";
 import { buildRepositoryWebTarget } from "./core/repository-web-url";
 import {
@@ -110,6 +110,9 @@ import type {
 } from "./core/types";
 import { createAnnotationsPlayer } from "./views/annotations-player";
 import {
+  ANNOTATION_ENTRY_PARAM,
+  ANNOTATION_PANEL_PARAM,
+  ANNOTATION_SESSION_PARAM,
   type AnnotationsUi,
   createAnnotationsUi,
 } from "./views/annotations-ui";
@@ -1401,6 +1404,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     focusMainSurface,
     isPaletteOpen: () => SEARCH_PALETTE.isPaletteOpen(),
     getLanguage: () => STATE.language,
+    onSourceRendered: applyInlineAnnotations,
   });
   const {
     renderStandaloneSource,
@@ -1537,6 +1541,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       return {
         name: text.sortName,
         updated: text.sortUpdated,
+        committed: text.sortCommitted,
+        committedHint: text.committedHint,
+        updatedHint: text.updatedHint,
+        noCommit: text.noCommit,
+        filterPlaceholder: text.filterPlaceholder,
+        clearFilter: text.clearFilter,
+        noMatches: text.noMatches,
+        entryCount: text.entryCount,
         size: text.sortSize,
       };
     },
@@ -1773,6 +1785,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         uploadConfirmLabel: string;
         sortName: string;
         sortUpdated: string;
+        sortCommitted: string;
+        committedHint: string;
+        updatedHint: string;
+        noCommit: string;
+        filterPlaceholder: string;
+        clearFilter: string;
+        noMatches: string;
+        entryCount: (visible: number, total: number) => string;
         sortSize: string;
         repositoryFallback: string;
         repositoryRootFallback: string;
@@ -1970,7 +1990,17 @@ window.GdpExpandLogic = GdpExpandLogic;
           `Upload ${count} file${count === 1 ? "" : "s"} into ${target}?`,
         uploadConfirmLabel: "Upload",
         sortName: "Name",
-        sortUpdated: "Updated",
+        sortUpdated: "Local modified",
+        sortCommitted: "Last committed",
+        committedHint:
+          "Last commit that changed this path, at HEAD for the worktree or at the selected revision. Folders include changes inside them. Local edits do not change this date.",
+        updatedHint:
+          "Filesystem modification time. Checkout, copy, and extraction can change this independently of Git history.",
+        noCommit: "No commit history",
+        filterPlaceholder: "Filter this folder…",
+        clearFilter: "Clear filter",
+        noMatches: "No files match this filter.",
+        entryCount: (visible, total) => `${visible} / ${total} items`,
         sortSize: "Size",
         repositoryFallback: "repository",
         repositoryRootFallback: "repository root",
@@ -2175,9 +2205,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         agentRulesSourceSaved: "Source: saved rules (active immediately)",
       },
       annotations: {
-        title: "Code annotations",
-        follow: "follow",
-        followTitle: "jump to new annotations as they arrive",
+        title: "Annotations",
+        follow: "Follow new notes",
+        followTitle: "Jump to new notes as they arrive; paused while editing",
         clear: "clear",
         close: "close",
         sessions: "Sessions",
@@ -2341,7 +2371,17 @@ window.GdpExpandLogic = GdpExpandLogic;
           `${target} に ${count} 件のファイルをアップロードしますか？`,
         uploadConfirmLabel: "アップロード",
         sortName: "名前",
-        sortUpdated: "更新日時",
+        sortUpdated: "ローカル更新日時",
+        sortCommitted: "最終コミット日時",
+        committedHint:
+          "このパスを最後に変更したコミットの日時。作業ツリーではHEAD、過去の版では選択した版が基準です。フォルダは配下の変更を含みます。未コミットの編集では変わりません。",
+        updatedHint:
+          "ファイルシステム上の更新日時。チェックアウト・コピー・展開でも変わるため、Git履歴の日時とは異なります。",
+        noCommit: "コミット履歴なし",
+        filterPlaceholder: "このフォルダ内を絞り込み…",
+        clearFilter: "絞り込みを解除",
+        noMatches: "一致するファイルがありません。",
+        entryCount: (visible, total) => `${visible} / ${total} 件`,
         sortSize: "サイズ",
         repositoryFallback: "リポジトリ",
         repositoryRootFallback: "リポジトリのルート",
@@ -2549,9 +2589,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         agentRulesSourceSaved: "適用中: 保存したルール（即時反映）",
       },
       annotations: {
-        title: "コード注釈",
-        follow: "追従",
-        followTitle: "新しい注釈が届いたら移動する",
+        title: "注釈",
+        follow: "新しい注釈へ自動移動",
+        followTitle:
+          "新しい注釈が届いたら移動します。編集中は自動移動を停止します。",
         clear: "削除",
         close: "閉じる",
         sessions: "セッション",
@@ -2826,6 +2867,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       text.annotations.close,
     );
     setElementText(".annotation-list-head strong", text.annotations.sessions);
+    ANNOTATIONS_UI?.localize();
 
     setElementText(
       ".query-history-panel-head strong",
@@ -3434,7 +3476,20 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function withAnnotationSessionParam(rawUrl: string): string {
-    return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
+    if (ANNOTATIONS_UI) return ANNOTATIONS_UI.withSessionParam(rawUrl);
+    // Repository startup can canonicalize the route before the panel mounts.
+    // Keep its incoming selection until the annotation UI can own the URL.
+    const url = new URL(rawUrl, window.location.origin);
+    const initial = new URLSearchParams(window.location.search);
+    for (const key of [
+      ANNOTATION_PANEL_PARAM,
+      ANNOTATION_SESSION_PARAM,
+      ANNOTATION_ENTRY_PARAM,
+    ]) {
+      const value = initial.get(key);
+      if (value !== null) url.searchParams.set(key, value);
+    }
+    return url.pathname + url.search;
   }
 
   // buildRoute は AppRoute しか知らないので、そこに乗らないオーバーレイの状態
@@ -6221,6 +6276,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // Panel + inline rows live in annotations-ui.ts; this wires it to the app.
   ANNOTATIONS_UI = createAnnotationsUi({
     $,
+    getLanguage: () => STATE.language,
     diffCardSelector,
     diffRowLineNumber,
     focusDiffLine,
@@ -6308,6 +6364,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   createAnnotationsPlayer({
     $,
+    getLanguage: () => STATE.language,
     getActiveSessionEntries: () =>
       ANNOTATIONS_UI?.getActiveSessionEntries() ?? [],
     openAnnotationEntry: (id) =>

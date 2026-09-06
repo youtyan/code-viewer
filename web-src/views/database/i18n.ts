@@ -49,6 +49,28 @@ export type DbText = {
     inferredBadge: string;
     inferredBadgeTitle: string;
   };
+  tableList: {
+    filter: string;
+    clear: string;
+    empty: string;
+    noMatches: string;
+    tables: string;
+    views: string;
+    keyboardHint: string;
+    result: (visible: number, total: number) => string;
+  };
+  detail: {
+    cell: string;
+    row: string;
+    rowTitle: (row: number) => string;
+    column: string;
+    value: string;
+    emptyString: string;
+    copy: string;
+    copied: string;
+    copyFailed: string;
+    close: string;
+  };
   // データグリッド本体。
   grid: {
     searchPlaceholder: string;
@@ -424,6 +446,28 @@ const EN: DbText = {
     inferFkTitle: "Infer FK from Rails-style <name>_id → <names>.id",
     inferredBadge: "inferred",
     inferredBadgeTitle: "Inferred from Rails-style naming, not declared in DB",
+  },
+  tableList: {
+    filter: "Filter tables…",
+    clear: "Clear filter",
+    empty: "No tables found",
+    noMatches: "No matching tables",
+    tables: "Tables",
+    views: "Views",
+    keyboardHint: "↑ ↓ Select · Enter Open · → Expand · Esc Clear",
+    result: (visible, total) => `${visible} / ${total} tables`,
+  },
+  detail: {
+    cell: "Cell",
+    row: "Row",
+    rowTitle: (row) => `Row ${row}`,
+    column: "Column",
+    value: "Value",
+    emptyString: "(empty string)",
+    copy: "Copy",
+    copied: "Copied",
+    copyFailed: "Copy failed",
+    close: "Close details",
   },
   grid: {
     searchPlaceholder: "Search all columns…",
@@ -814,6 +858,28 @@ const JA: DbText = {
     inferredBadge: "推測",
     inferredBadgeTitle:
       "Rails 命名規約から推測した FK (DB の宣言ではありません)",
+  },
+  tableList: {
+    filter: "テーブルを絞り込み…",
+    clear: "絞り込みを解除",
+    empty: "テーブルがありません",
+    noMatches: "一致するテーブルがありません",
+    tables: "テーブル",
+    views: "ビュー",
+    keyboardHint: "↑ ↓ 選択 · Enter 開く · → 列を展開 · Esc 解除",
+    result: (visible, total) => `${visible} / ${total} テーブル`,
+  },
+  detail: {
+    cell: "セル",
+    row: "行全体",
+    rowTitle: (row) => `${row} 行目`,
+    column: "カラム",
+    value: "値",
+    emptyString: "（空文字）",
+    copy: "コピー",
+    copied: "コピーしました",
+    copyFailed: "コピーに失敗しました",
+    close: "詳細を閉じる",
   },
   grid: {
     searchPlaceholder: "全カラムを検索…",

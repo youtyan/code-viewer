@@ -149,6 +149,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
+                text: "Filter this folder narrows filenames and shows matching / total counts. Down focuses a result, Enter opens the first result, and Escape clears the filter. Code provides a visible Go to line control and total line count. Folder listings show Last committed separately from Local modified, with independent date sorting. Commit dates use HEAD for the worktree or the selected revision and include changes inside folders. Uncommitted edits do not change them; paths without history are labeled explicitly. Local modified is filesystem metadata and can change during checkout, copying, or extraction.",
+              },
+              {
+                kind: "paragraph",
                 text: "Use the sidebar or file palette to open source files, Markdown previews, images, PDFs, and other browser-safe media. Large text files automatically switch to virtual mode. Sidebar rows are links: Cmd/Ctrl+click or middle-click opens a file in a new tab. View File on a diff card shows the full source in place and keeps the file list (and, on the History screen, the commit list) on screen; View Diff returns to the diff.",
               },
               {
@@ -453,6 +457,22 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "table",
                 rows: [
                   [
+                    "Add and edit notes",
+                    "Add note captures selected code lines or the current datastore view. Choose a session, write Markdown, preview it, and save with Cmd/Ctrl+Enter. A failed save keeps your input and shows the full error.",
+                  ],
+                  [
+                    "Find and read",
+                    "Search titles, full bodies, paths and session names, or filter to this location. Collapse sessions to tidy the library. A note opens in a full-height reader; All notes returns to the same search and scroll position.",
+                  ],
+                  [
+                    "Draft protection",
+                    "Background updates and automatic follow cannot replace an open editor. Closing the panel retains your draft in this tab; leaving the editor asks before discarding changes.",
+                  ],
+                  [
+                    "Read below the code",
+                    "Inline notes show their target lines, full title and formatted Markdown at a comfortable reading width. Bodies start expanded; the Note button collapses them individually and keeps your choice through panel changes and updates. Read in panel opens the full-height reader.",
+                  ],
+                  [
                     "Follow checkbox",
                     "When on, every new annotation makes the active tab jump to its location. Turn it off to read at your own pace.",
                   ],
@@ -584,7 +604,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Detail footer & related panel",
-                    "Click any cell to open a resizable detail footer; JSON values are pretty-printed and syntax-highlighted there. Once the grid has focus, arrow keys move the active cell from data cell to data cell and the footer follows the value under it, scrolling only as far as needed; Enter follows a foreign key (arrow keys alone never fire a related-table query), Escape closes whichever panel is open, and Tab / Shift+Tab move between the main grid and the related grid. Foreign-key cells open a related-rows panel with multi-step drill-down breadcrumbs, supporting both outgoing (FK → PK) and incoming (PK ← FK) navigation. Its reference list keeps each entry on one line with the full table name and condition in a tooltip, and the list width can be dragged and is remembered.",
+                    "Filter table names and use Up/Down to select, Enter to open, and Left/Right to expand or collapse. Row mode in the detail footer lists every column vertically and follows the active row. NULL, empty strings, false, and zero remain distinct. Click any cell to open a resizable detail footer; JSON values are pretty-printed and syntax-highlighted there. Once the grid has focus, arrow keys move the active cell from data cell to data cell and the footer follows the value under it, scrolling only as far as needed. Row numbers remain visible during horizontal scrolling, and active column filters are highlighted; Enter follows a foreign key (arrow keys alone never fire a related-table query), Escape closes whichever panel is open, and Tab / Shift+Tab move between the main grid and the related grid. Foreign-key cells open a related-rows panel with multi-step drill-down breadcrumbs, supporting both outgoing (FK → PK) and incoming (PK ← FK) navigation. Its reference list keeps each entry on one line with the full table name and condition in a tooltip, and the list width can be dragged and is remembered.",
                   ],
                   [
                     "Schema tab",
@@ -964,6 +984,10 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
+                text: "フォルダ内のファイル名を絞り込み、表示件数を確認できます。検索欄で下矢印を押すと結果に移り、Enterで先頭の結果を開き、Escapeで解除します。Codeタブの「行へ移動」から指定行を開けます。フォルダ一覧には「最終コミット日時」と「ローカル更新日時」を別々に表示し、それぞれの列で並べ替えできます。コミット日時は、作業ツリーではHEAD、過去の版では選択した版が基準です。フォルダは配下の変更を含み、未コミットの編集では日時が変わりません。履歴がないパスは「コミット履歴なし」と表示します。ローカル更新日時はファイルシステム上の値で、チェックアウト・コピー・展開でも変わります。",
+              },
+              {
+                kind: "paragraph",
                 text: "サイドバーやファイルパレットから、ソース、Markdown プレビュー、画像、PDF などを開けます。大きいテキストファイルは自動で軽量な仮想表示に切り替わります。サイドバーの行はリンクなので、Cmd/Ctrl+クリックや中クリックで別タブに開けます。diff カードの View File はファイル一覧（履歴画面ではコミット一覧も）を残したままファイル全体を表示し、View Diff で差分に戻ります。",
               },
               {
@@ -1268,6 +1292,22 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "table",
                 rows: [
                   [
+                    "注釈の追加・編集",
+                    "「注釈を追加」で選択中のコード行、または現在のデータ画面を保存できます。セッションを選び、Markdownを編集・プレビュー。⌘ / Ctrl + Enter で保存でき、保存失敗時も入力とエラーの詳細が残ります。",
+                  ],
+                  [
+                    "探して読む",
+                    "タイトル・本文全文・パス・セッション名を検索し、「この場所」で表示中の対象に絞れます。セッションは折りたたみ可能。詳細はパネル全体で読み、「一覧へ」で検索とスクロール位置を保ったまま戻れます。",
+                  ],
+                  [
+                    "入力の保護",
+                    "編集中は自動追従を停止し、届いた更新で入力を消しません。パネルを閉じても同じタブに入力が残り、編集を終了するときは破棄する前に確認します。",
+                  ],
+                  [
+                    "コード下で読む",
+                    "対象行・タイトル全文・Markdownの本文を、読みやすい幅で表示します。本文は最初から展開され、「注釈」ボタンで個別に折りたためます。パネルの開閉や更新でも手動の選択を保持。「パネルで読む」で縦長の詳細表示に移れます。",
+                  ],
+                  [
                     "follow チェックボックス",
                     "オンにすると新しい注釈が追加されるたびにアクティブタブが注釈先へ自動で移動します。落ち着いて読みたいときはオフに。",
                   ],
@@ -1399,7 +1439,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "詳細フッタ・関連パネル",
-                    "セルをクリックするとリサイズ可能な詳細フッタが開きます。JSON 値は整形してシンタックスハイライト付きで表示されます。グリッドにフォーカスがある間は矢印キーでデータセル間を移動でき、詳細フッタもその値に追従します（スクロールは見える位置まで必要なぶんだけ）。Enter で外部キーを辿り（矢印キーだけでは関連テーブルへのクエリは飛びません）、Escape で開いているパネルを閉じ、Tab / Shift+Tab でメイングリッドと関連グリッドを行き来できます。外部キー値からは関連行パネルが開き、ブレッドクラム付きで多段ドリルダウン可能。outgoing (FK→PK) と incoming (PK←FK) の両方向に対応。左の参照リストは各項目を1行に保ち、テーブル名と条件の全文は tooltip で確認できます。リスト幅はドラッグで変更でき、次回も保持されます。",
+                    "テーブル一覧は名前の絞り込みと件数表示に対応し、上下矢印で選択、Enterで開く、左右矢印で展開・折りたたみができます。セルをクリックするとリサイズ可能な詳細フッタが開きます。「行全体」で全カラムを縦に表示し、矢印キーで移動した行に追従します。NULL・空文字・false・0は区別して表示します。JSON 値は整形してシンタックスハイライト付きで表示されます。グリッドにフォーカスがある間は矢印キーでデータセル間を移動でき、詳細フッタもその値に追従します（スクロールは見える位置まで必要なぶんだけ）。横スクロール中も行番号が表示され、絞り込み中の列は色で強調されます。Enter で外部キーを辿り（矢印キーだけでは関連テーブルへのクエリは飛びません）、Escape で開いているパネルを閉じ、Tab / Shift+Tab でメイングリッドと関連グリッドを行き来できます。外部キー値からは関連行パネルが開き、ブレッドクラム付きで多段ドリルダウン可能。outgoing (FK→PK) と incoming (PK←FK) の両方向に対応。左の参照リストは各項目を1行に保ち、テーブル名と条件の全文は tooltip で確認できます。リスト幅はドラッグで変更でき、次回も保持されます。",
                   ],
                   [
                     "Schema タブ",

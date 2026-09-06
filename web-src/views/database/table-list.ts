@@ -1,8 +1,10 @@
 import type { DbColumn, DbTableInfo } from "../../core/database/types";
 import { COPY_16_PATHS, iconSvg, X_16_PATH } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
+import { type DbLang, dbText } from "./i18n";
 
 export type TableListCallbacks = {
+  getLanguage?: () => DbLang;
   onSelectTable: (table: string) => void;
   onViewCreateTable?: (table: string) => void;
   onViewDefinition?: (table: string) => void;
@@ -17,9 +19,11 @@ export type TableList = {
   setActive: (table: string | null) => void;
   updateRowCount: (table: string, rowCount: number | null) => void;
   dispose: () => void;
+  localize: () => void;
 };
 
 export function createTableList(callbacks: TableListCallbacks): TableList {
+  const text = () => dbText(callbacks.getLanguage?.() ?? "en").tableList;
   const wrapper = document.createElement("div");
   wrapper.className = "db-table-list-wrapper";
   wrapper.style.display = "flex";
@@ -31,13 +35,15 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
   filterWrap.className = "db-table-filter-wrap";
   const filterInput = document.createElement("input");
   filterInput.className = "db-table-filter";
-  filterInput.type = "text";
-  filterInput.placeholder = "Filter tables...";
+  filterInput.type = "search";
+  filterInput.placeholder = text().filter;
+  filterInput.setAttribute("aria-label", text().filter);
+  filterInput.title = text().keyboardHint;
   const filterClear = document.createElement("button");
   filterClear.className = "db-table-filter-clear";
   filterClear.type = "button";
-  filterClear.title = "Clear table filter";
-  filterClear.setAttribute("aria-label", "Clear table filter");
+  filterClear.title = text().clear;
+  filterClear.setAttribute("aria-label", text().clear);
   filterClear.innerHTML = iconSvg("octicon-x", X_16_PATH);
   filterClear.hidden = true;
   filterWrap.append(filterInput, filterClear);
@@ -45,7 +51,11 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
   const el = document.createElement("div");
   el.className = "db-table-list";
 
-  wrapper.append(filterWrap, el);
+  const summary = document.createElement("div");
+  summary.className = "db-table-list-summary";
+  summary.setAttribute("aria-live", "polite");
+  summary.title = text().keyboardHint;
+  wrapper.append(filterWrap, summary, el);
 
   let activeTable: string | null = null;
   let allTables: DbTableInfo[] = [];
@@ -212,6 +222,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     columnsHost: HTMLElement,
   ) {
     const expanded = expandedTables.has(tableName);
+    arrow.setAttribute("aria-expanded", String(!expanded));
     if (expanded) {
       expandedTables.delete(tableName);
       children.hidden = true;
@@ -247,19 +258,20 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
           t.name.toLowerCase().includes(filter.toLowerCase()),
         )
       : tables;
+    summary.textContent = text().result(filtered.length, tables.length);
     if (filtered.length === 0) {
       const empty = document.createElement("div");
       empty.className = "db-table-list-empty";
-      empty.textContent = filter ? "No matching tables" : "No tables found";
+      empty.textContent = filter ? text().noMatches : text().empty;
       if (filter) {
         const actions = document.createElement("div");
         actions.className = "db-pane-empty-actions db-table-list-empty-actions";
         const clear = document.createElement("button");
         clear.type = "button";
         clear.className = "db-btn db-btn-sm";
-        clear.textContent = "Clear filter";
-        clear.title = "Clear table filter";
-        clear.setAttribute("aria-label", "Clear table filter");
+        clear.textContent = text().clear;
+        clear.title = text().clear;
+        clear.setAttribute("aria-label", text().clear);
         clear.addEventListener("click", clearFilter);
         actions.appendChild(clear);
         empty.appendChild(actions);
@@ -267,6 +279,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
       el.appendChild(empty);
       return;
     }
+    const activeVisible = filtered.some((entry) => entry.name === activeTable);
     const groups: Record<string, DbTableInfo[]> = { table: [], view: [] };
     for (const t of filtered) {
       (groups[t.type] || groups.table).push(t);
@@ -275,7 +288,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
       if (items.length === 0) continue;
       const header = document.createElement("div");
       header.className = "db-table-group-header";
-      header.textContent = type === "view" ? "Views" : "Tables";
+      header.textContent = `${type === "view" ? text().views : text().tables} · ${items.length}`;
       el.appendChild(header);
       for (const table of items) {
         const node = document.createElement("div");
@@ -286,9 +299,21 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
         row.className = "db-table-item";
         if (table.name === activeTable) row.classList.add("active");
         row.dataset.table = table.name;
+        row.tabIndex =
+          table.name === activeTable ||
+          (!activeVisible && table === filtered[0])
+            ? 0
+            : -1;
+        row.setAttribute("role", "button");
+        row.setAttribute("aria-label", table.name);
+        row.title = table.name;
 
         const arrow = document.createElement("span");
         arrow.className = "db-table-arrow";
+        arrow.setAttribute(
+          "aria-expanded",
+          String(expandedTables.has(table.name)),
+        );
         if (expandedTables.has(table.name)) arrow.classList.add("expanded");
 
         const icon = document.createElement("span");
@@ -362,6 +387,53 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     renderFiltered(allTables, filterInput.value);
   }
 
+  function handleListKey(event: KeyboardEvent) {
+    if (isImeComposing(event) || event.altKey || event.ctrlKey || event.metaKey)
+      return;
+    const rows = Array.from(el.querySelectorAll<HTMLElement>(".db-table-item"));
+    const row = (event.target as Element).closest<HTMLElement>(
+      ".db-table-item",
+    );
+    if (event.target !== filterInput && event.target !== row) return;
+    const index = row ? rows.indexOf(row) : -1;
+    let next: HTMLElement | undefined;
+    if (event.key === "Escape") {
+      clearFilter();
+    } else if (event.key === "ArrowDown")
+      next = rows[Math.min(index + 1, rows.length - 1)];
+    else if (event.key === "ArrowUp") next = rows[Math.max(0, index - 1)];
+    else if (event.key === "Home" && row) next = rows[0];
+    else if (event.key === "End" && row) next = rows[rows.length - 1];
+    else if (event.key === "Enter" || (event.key === " " && row))
+      (row || rows[0])?.click();
+    else if ((event.key === "ArrowRight" || event.key === "ArrowLeft") && row) {
+      const arrow = row.querySelector<HTMLElement>(".db-table-arrow");
+      if (
+        arrow?.classList.contains("expanded") !==
+        (event.key === "ArrowRight")
+      )
+        arrow?.click();
+    } else return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (next) {
+      for (const item of rows) item.tabIndex = item === next ? 0 : -1;
+      next.focus();
+      next.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function localize() {
+    filterInput.placeholder = text().filter;
+    filterInput.setAttribute("aria-label", text().filter);
+    filterInput.title = text().keyboardHint;
+    filterClear.title = text().clear;
+    filterClear.setAttribute("aria-label", text().clear);
+    summary.title = text().keyboardHint;
+    renderFiltered(allTables, filterInput.value);
+  }
+
+  wrapper.addEventListener("keydown", handleListKey);
   filterInput.addEventListener("input", handleFilterInput);
   filterClear.addEventListener("click", clearFilter);
 
@@ -369,6 +441,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     activeTable = table;
     el.querySelectorAll<HTMLElement>(".db-table-item").forEach((item) => {
       item.classList.toggle("active", item.dataset.table === table);
+      item.tabIndex = item.dataset.table === table ? 0 : -1;
     });
   }
 
@@ -386,6 +459,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
 
   function dispose(): void {
     closeContextMenu();
+    wrapper.removeEventListener("keydown", handleListKey);
     allTables = [];
     expandedTables.clear();
     columnCache.clear();
@@ -394,7 +468,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     filterClear.removeEventListener("click", clearFilter);
   }
 
-  return { el: wrapper, render, setActive, updateRowCount, dispose };
+  return { el: wrapper, render, setActive, updateRowCount, dispose, localize };
 }
 
 function formatRowCount(n: number): string {

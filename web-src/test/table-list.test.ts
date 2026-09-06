@@ -191,7 +191,7 @@ describe("database table list", () => {
       ".db-table-list-empty-actions button",
     );
     expect(emptyClear?.textContent).toBe("Clear filter");
-    expect(emptyClear?.getAttribute("aria-label")).toBe("Clear table filter");
+    expect(emptyClear?.getAttribute("aria-label")).toBe("Clear filter");
 
     emptyClear?.click();
 
@@ -240,5 +240,83 @@ describe("database table list", () => {
       (count) => count.textContent,
     );
     expect(counts).toEqual(["12.5K", "9"]);
+  });
+});
+
+describe("table list keyboard navigation", () => {
+  test.each([
+    ["ArrowDown", "ArrowDown", "beta"],
+    ["ArrowDown", "ArrowUp", "alpha"],
+    ["ArrowDown", "End", "gamma"],
+    ["ArrowUp", "Home", "alpha"],
+  ])("moves using %s then %s and opens %s", (first, second, expected) => {
+    const selected: string[] = [];
+    const view = createTableList({
+      onSelectTable: (name) => selected.push(name),
+    });
+    document.body.appendChild(view.el);
+    view.render(
+      ["alpha", "beta", "gamma"].map((name) => ({
+        name,
+        type: "table",
+        rowCount: 1,
+      })),
+    );
+    const filter = view.el.querySelector<HTMLInputElement>("input");
+    filter?.focus();
+    filter?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: first, bubbles: true }),
+    );
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: second, bubbles: true }),
+    );
+    expect(document.activeElement?.getAttribute("data-table")).toBe(expected);
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    expect(selected).toEqual([expected]);
+    expect(view.el.querySelectorAll('[tabindex="0"]')).toHaveLength(1);
+    view.dispose();
+  });
+
+  test("preserves filtered results on localization and ignores composition Enter", () => {
+    const selected: string[] = [];
+    let language: "en" | "ja" = "en";
+    const view = createTableList({
+      getLanguage: () => language,
+      onSelectTable: (name) => selected.push(name),
+    });
+    document.body.appendChild(view.el);
+    view.render(
+      ["alpha", "beta"].map((name) => ({ name, type: "table", rowCount: 1 })),
+    );
+    const input = view.el.querySelector<HTMLInputElement>("input");
+    if (!input) throw new Error("missing table filter");
+    input.value = "ALPHA";
+    input.dispatchEvent(new Event("input"));
+    language = "ja";
+    view.localize();
+    expect(input.placeholder).toBe("テーブルを絞り込み…");
+    expect(view.el.querySelector(".db-table-list-summary")?.textContent).toBe(
+      "1 / 2 テーブル",
+    );
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+      }),
+    );
+    expect(selected).toEqual([]);
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    expect(selected).toEqual(["alpha"]);
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect(input.value).toBe("");
+    expect(view.el.querySelectorAll(".db-table-item")).toHaveLength(2);
+    view.dispose();
   });
 });

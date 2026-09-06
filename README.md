@@ -260,6 +260,18 @@ visible, and file pages show a preview when the browser can safely render the
 file. Unsupported binary files show a clear unavailable state with file
 metadata instead of dumping bytes as text.
 
+Folder listings show **Last committed** separately from **Local modified**,
+with independent date sorting. Commit dates come from the last commit that
+changed each path, using HEAD for the worktree or the selected revision.
+Folders include changes to their contents; uncommitted edits do not change
+the commit date. Paths without history are labeled explicitly. Local modified
+is filesystem metadata and can change during checkout, copying, or extraction.
+
+The folder filter matches filenames without regard to case, shows matching / total
+counts, and stays applied while sorting. Press Down to focus a result, Enter to
+open the first result, or Escape to clear. The Code tab shows a line count and
+**Go to line** control, including for large files.
+
 CSV and TSV files open as a table with all-column search, per-column filters, and
 three-state column sorting (ascending, descending, then source order). The
 visible-row count and reset action stay above the table while original file row
@@ -373,6 +385,14 @@ state rather than hand-edited configuration. Add `.code-viewer/` to
 `.gitignore` if you do not want to share its contents through git.
 
 ## Datastore Viewer
+
+SQL table lists support filtering, matching counts, and keyboard selection:
+Up/Down to move, Enter to open, Left/Right to collapse/expand, and Escape to
+clear the filter. Cell details offer **Cell** and **Row** modes. Row mode lists
+every column vertically and follows arrow-key navigation in the grid, keeping
+NULL, empty strings, false, and zero distinct. The detail panel can be resized;
+copying a row preserves column order and duplicate column names.
+
 
 code-viewer auto-discovers local datastores in your repository and provides a
 browser-based viewer for exploring their contents.
@@ -500,7 +520,8 @@ Open Datastores in the global navigation to access:
   the database.
 - **Table browser** — paginated data grid with column sort, text filter, cell
   copy, and CSV/JSON export (capped at 100,000 rows; export respects current
-  filter/sort). Reload just the current table from the search bar while
+  filter/sort). Row numbers stay visible during horizontal scrolling, and
+  active column filters are highlighted. Reload just the current table from the search bar while
   keeping global search and column filters, with a result chip that calls out
   row-count changes. Double-click a cell to edit inline when Edit mode is on;
   the whole pending edit batch commits atomically.
@@ -516,7 +537,7 @@ Open Datastores in the global navigation to access:
   grid. The related panel's reference list keeps each entry on one line with
   the full table name and condition in a tooltip, and its width can be dragged
   and is remembered.
-- **Footer dock with Query History & Session log** — JetBrains-style bottom
+- **Footer dock with Query History & Session log** — bottom
   dock that hosts two tabs: the per-database **Query History** (master/detail
   list of saved queries, SSE-synced across tabs) and a **Session log** that
   records every SQL the server runs in this browser session (read fetches,
@@ -995,17 +1016,31 @@ survives reloads and server restarts. See **Uploads and Scope Settings**
 above for how `.code-viewer/` is treated by the viewer and how to opt out of
 sharing it through git.
 
-In the browser, the annotation icon in the header opens the side panel. The
-current explanation is rendered at the top of the panel while the code stays
-visible next to it, with the annotated lines highlighted. The side panel is
-resizable and remembers its width per project. The history below groups
-annotations by session, shows when each session and entry was created, and
-keeps inline code notes out of the way while the panel is open. Clicking an
-entry jumps back to its location, and entries and sessions can be deleted
-there too. The "follow" checkbox controls whether the tab jumps automatically
-when an agent adds a new annotation. A built-in player can speak the current
-annotation aloud with play/pause, previous/next, mute, and rate controls (TTS
-state is saved per project).
+In the browser, the annotation icon in the header opens a searchable library.
+Search titles, full Markdown bodies, file paths, and session names, or show only
+notes for the current file or datastore location. Sessions can be collapsed,
+renamed, or deleted; original step numbers remain stable when filtering.
+Opening a note gives its Markdown the full panel height, with previous/next
+controls and a clickable location. Returning to the library keeps the search
+and scroll position. The panel is resizable and remembers its width.
+
+**Add note** creates a note directly from the browser. Select code line numbers
+first to prefill the file and line range, or capture the current datastore view
+including its filters. Choose an existing session or name a new one. The editor
+supports Markdown preview and Cmd/Ctrl+Enter to save. Failed saves keep the draft
+and display error details; background updates cannot replace the editor or
+navigate away while you write. Closing the panel keeps an unfinished draft in
+that tab; leaving the editor asks before discarding changes.
+
+The follow checkbox controls automatic navigation to newly posted notes. A
+built-in player reads annotations aloud with play/pause, previous/next, mute,
+and rate controls. Playback stops while editing; rate and mute are saved per
+project. Inline notes are readable directly below the target code, with line
+ranges, wrapping titles, and formatted Markdown. Paragraphs keep a comfortable
+reading width; code examples and wide tables scroll within the note. Notes start
+expanded even when the panel is open. Toggle **Note** to collapse an individual
+body, or use **Read in panel** for the full-height reader. Explicit collapse
+choices remain in effect as you open the panel or receive background updates.
 
 A copy button on each annotation produces a paste-ready prompt block that
 references the annotation by URL for sharing back into the originating agent.

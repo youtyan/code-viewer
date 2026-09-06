@@ -1180,6 +1180,16 @@ async function handleTree(url: URL) {
   // the rest of this listing.
   const deletedEntries =
     !recursive && statusMap ? deletedTreeEntriesForPath(statusMap, path) : [];
+  const listing = [...entries, ...deletedEntries].map(withStatus);
+  const commitDates =
+    !recursive && worktreeTarget && currentGitRepositoryState() !== "outside"
+      ? await git.worktreeCommitDatesAsync(
+          listing
+            .filter((entry) => entry.status !== "U" && entry.status !== "I")
+            .map((entry) => entry.path),
+          cwd,
+        )
+      : new Map<string, string>();
   return json({
     ref: target,
     path,
@@ -1187,14 +1197,16 @@ async function handleTree(url: URL) {
     branch: await currentBranchMetadata(),
     entries: recursive
       ? entries.map(withStatus)
-      : [
-          ...(await Promise.all(
-            entries.map((entry) =>
-              attachTreeEntryMetadata(target, entry).then(withStatus),
-            ),
-          )),
-          ...deletedEntries,
-        ],
+      : await Promise.all(
+          listing.map(async (entry) => ({
+            ...(entry.status === "D"
+              ? entry
+              : await attachTreeEntryMetadata(target, entry)),
+            ...(worktreeTarget
+              ? { commit_updated_at: commitDates.get(entry.path) }
+              : {}),
+          })),
+        ),
     readme: await readReadme(target, path),
     upload_enabled: uploadEnabled && worktreeTarget,
   } satisfies RepoTreeResponse);
@@ -2959,7 +2971,14 @@ const server = await startServer({
         listenPort,
         signal: req.signal,
       });
-    if (url.pathname === "/_tree") return await handleTree(url);
+    if (url.pathname === "/_tree") {
+      try {
+        return await handleTree(url);
+      } catch (error) {
+        console.error(error);
+        return text(formatErrorDetail(error), 500);
+      }
+    }
     if (url.pathname === "/_files") return await handleFiles(url);
     if (url.pathname === "/_grep") return await handleGrep(url, req.signal);
     if (url.pathname === "/_commits") return await handleRefCommits(url);

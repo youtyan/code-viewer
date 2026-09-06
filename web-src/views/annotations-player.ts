@@ -20,8 +20,10 @@ import {
   VOLUME_UNMUTED_16_PATHS,
 } from "../core/icons";
 import type { AnnotationEntry } from "../core/types";
+import { annotationText } from "./annotations/i18n";
 
 export type AnnotationsPlayerDeps = {
+  getLanguage?(): "en" | "ja";
   $: <T extends Element>(sel: string) => T;
   getActiveSessionEntries(): AnnotationEntry[];
   openAnnotationEntry(entryId: string): Promise<void>;
@@ -111,34 +113,30 @@ export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
   }
 
   function render(state: PlayerState) {
+    const text = annotationText(deps.getLanguage?.() || "en");
+    rateSel.title = text.speed;
+    rateSel.setAttribute("aria-label", text.speed);
     bar.classList.toggle("playing", state.status === "playing");
     setIconButton(
       toggleBtn,
-      state.status === "playing"
-        ? "Pause annotation playback"
-        : "Play annotation playback",
+      state.status === "playing" ? text.pause : text.play,
       state.status === "playing" ? "octicon-pause" : "octicon-play",
       state.status === "playing" ? PAUSE_16_PATHS : PLAY_16_PATH,
     );
     setIconButton(
       prevBtn,
-      "Previous annotation",
+      text.previous,
       "octicon-skip-back",
       PREVIOUS_16_PATHS,
     );
-    setIconButton(
-      nextBtn,
-      "Next annotation",
-      "octicon-skip-forward",
-      NEXT_16_PATHS,
-    );
+    setIconButton(nextBtn, text.next, "octicon-skip-forward", NEXT_16_PATHS);
     progress.textContent =
       state.status === "idle" || state.index < 0
         ? `${state.total}`
         : `${state.index + 1}/${state.total}`;
     setIconButton(
       muteBtn,
-      state.muted ? "Unmute annotation playback" : "Mute annotation playback",
+      state.muted ? text.unmute : text.mute,
       state.muted ? "octicon-volume-muted" : "octicon-volume-unmuted",
       state.muted ? VOLUME_MUTED_16_PATHS : VOLUME_UNMUTED_16_PATHS,
     );

@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { dirname, join, posix, relative } from "node:path";
-import { formatErrorDetail } from "../core/error-detail";
+import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import {
   type HistoryAuthor,
   type HistoryCommitRef,
@@ -858,10 +858,48 @@ export async function lastCommitDateForPathAsync(
   path: string,
   cwd: string,
 ): Promise<string | null> {
-  const args = ["git", "log", "-1", "--format=%cI", ref, "--", path];
+  const args = [
+    "git",
+    "--literal-pathspecs",
+    "log",
+    "-1",
+    "--format=%cI",
+    ref,
+    "--",
+    path,
+  ];
   const res = await runGitAsync(args, cwd);
-  if (res.code !== 0) return null;
+  if (res.code !== 0)
+    throw errorWithCause(`Last commit lookup failed for ${ref}:${path}`, res);
   return res.stdout.trim() || null;
+}
+
+export async function worktreeCommitDatesAsync(
+  paths: string[],
+  cwd: string,
+): Promise<Map<string, string>> {
+  const dates = new Map<string, string>();
+  if (!paths.length) return dates;
+  const head = await runGitAsync(
+    ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+    cwd,
+  );
+  // An unborn HEAD has no history; other failures must not look like that state.
+  if (head.code === 1 && !head.stderr.trim()) return dates;
+  if (head.code !== 0)
+    throw errorWithCause("Cannot resolve HEAD for file commit dates", head);
+  const sha = head.stdout.trim();
+  const pending = paths.values();
+  // Pin every lookup to one commit and bound the process count for wide directories.
+  await Promise.all(
+    Array.from({ length: Math.min(8, paths.length) }, async () => {
+      for (const path of pending) {
+        const date = await lastCommitDateForPathAsync(sha, path, cwd);
+        if (date) dates.set(path, date);
+      }
+    }),
+  );
+  return dates;
 }
 
 export async function objectIdAsync(
