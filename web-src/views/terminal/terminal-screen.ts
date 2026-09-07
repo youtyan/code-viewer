@@ -39,6 +39,7 @@ import {
 } from "../../core/xterm-loader";
 import type { TerminalText } from "./i18n";
 import { openImageLightbox } from "./image-lightbox";
+import { createScreenTools } from "./screen-tools";
 
 /** シェルの scrollback 行数。 */
 const SHELL_SCROLLBACK = 5000;
@@ -103,6 +104,8 @@ const INLINE_IMAGE_COLS = 30;
 const INLINE_IMAGE_ROWS = 8;
 
 export type TerminalScreenDeps = {
+  onOpenPath: Parameters<typeof createScreenTools>[0]["onOpenPath"];
+  onCreateShell(): void;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
   /** 副作用リクエスト用のヘッダ (app.ts の actionHeaders)。 */
   actionHeaders(): HeadersInit;
@@ -116,6 +119,7 @@ export type TerminalScreenDeps = {
 };
 
 export type TerminalScreenHandle = {
+  localize(): void;
   el: HTMLElement;
   /** 文字サイズが変わった。作り直さずに今の端末へ当て直す。 */
   applyFontSize(): void;
@@ -165,6 +169,10 @@ export function createTerminalScreen(
   // 送信待ちの打鍵。POST の往復中に打たれた分をここに溜め、1 本ずつ順に
   // 送る。並走させると届く順が入れ替わる。
   let pendingInput = "";
+  let pendingReceipts: Array<{
+    resolve(): void;
+    reject(error: unknown): void;
+  }> = [];
   let sending = false;
   // 出力から拾ったパスのうち、もう問い合わせたもの。attach ごとに作り直す
   // (clear するのではなく作り直すのは、飛んでいる問い合わせが次の対象の
@@ -198,10 +206,41 @@ export function createTerminalScreen(
   /** 出力の走査で持ち越している末尾。 */
   let shellScanTail = "";
 
+  const tools = createScreenTools({
+    ...deps,
+    getTerminal: () => term,
+    sendKey: enqueueInput,
+  });
+  el.prepend(tools.toolbar, tools.search, tools.empty);
+  screenEl.hidden = true;
+
+  function queueInput(data: string): Promise<void> {
+    if (!inputEnabled || !attached || attached.exited || disposed)
+      return Promise.reject(new Error(deps.getText().inputUnavailable));
+    return new Promise((resolve, reject) => {
+      pendingInput += data;
+      pendingReceipts.push({ resolve, reject });
+      void flushInput();
+    });
+  }
+
+  function discardPendingInput(): void {
+    pendingInput = "";
+    for (const receipt of pendingReceipts)
+      receipt.reject(new Error(deps.getText().inputUnavailable));
+    pendingReceipts = [];
+  }
+
   function enqueueInput(data: string): void {
-    if (!inputEnabled || !attached || disposed || data.length === 0) return;
-    pendingInput += data;
-    void flushInput();
+    if (data.length === 0) return;
+    const myGen = generation;
+    void queueInput(data).catch((error: unknown) => {
+      console.error("[code-viewer] shell input request failed", error);
+      if (!disposed && myGen === generation)
+        deps.onStatus(
+          `${deps.getText().sendFailed}\n${formatErrorDetail(error)}`,
+        );
+    });
   }
 
   /**
@@ -274,7 +313,10 @@ export function createTerminalScreen(
     sending = true;
     const target = attached;
     const data = pendingInput;
+    const receipts = pendingReceipts;
+    const myGen = generation;
     pendingInput = "";
+    pendingReceipts = [];
     try {
       const res = await deps.trackLoad(
         fetch("/_shell/keys", {
@@ -286,27 +328,18 @@ export function createTerminalScreen(
           body: JSON.stringify({ id: target.id, data }),
         }),
       );
-      if (disposed) return;
       if (res.status === 410) {
-        deps.onStatus(
-          await responseErrorMessage(res, deps.getText().shellClosed),
-        );
-        deps.onTargetGone(target);
-        return;
+        if (!disposed && myGen === generation) deps.onTargetGone(target);
       }
       if (!res.ok) {
-        deps.onStatus(
+        throw new Error(
           await responseErrorMessage(res, deps.getText().sendFailed),
         );
       }
+      for (const receipt of receipts) receipt.resolve();
     } catch (error) {
-      // 中断 (ナビゲーション) と通信断。打った内容は失われるので伝える。
-      if (!disposed) {
-        console.error("[code-viewer] shell input request failed", error);
-        deps.onStatus(
-          `${deps.getText().sendFailed}\n${formatErrorDetail(error)}`,
-        );
-      }
+      for (const receipt of receipts) receipt.reject(error);
+      if (myGen === generation) discardPendingInput();
     } finally {
       sending = false;
       if (pendingInput) void flushInput();
@@ -340,6 +373,7 @@ export function createTerminalScreen(
     image.alt = name;
     // 実体が消えていれば読めない。壊れた枠を残さず外し、記憶からも落とす。
     image.addEventListener("error", () => {
+      deps.onStatus(`${deps.getText().imageLoadFailed}\n${path}`);
       item.remove();
       attachments.hidden = attachments.childElementCount === 0;
       if (!attached) return;
@@ -645,7 +679,8 @@ export function createTerminalScreen(
    * (勝手に送ると、画像だけが単独で送信されてしまう)。
    */
   async function pasteImage(file: File): Promise<void> {
-    if (!attached) return;
+    if (!attached || !inputEnabled || attached.exited) return;
+    const myGen = generation;
     let read: { base64: string; url: string };
     try {
       read = await readAsBase64(file);
@@ -667,7 +702,7 @@ export function createTerminalScreen(
           body: JSON.stringify({ mime: file.type, data: read.base64 }),
         }),
       );
-      if (disposed) return;
+      if (disposed || myGen !== generation || !inputEnabled) return;
       if (!res.ok) {
         deps.onStatus(
           await responseErrorMessage(res, deps.getText().pasteFailed),
@@ -675,17 +710,17 @@ export function createTerminalScreen(
         return;
       }
       const saved = (await res.json()) as PasteImageResponse;
-      if (disposed || !attached) return;
+      if (disposed || !attached || myGen !== generation || !inputEnabled)
+        return;
       addAttachment(read.url, saved.name, saved.path);
       // このパスはこの後端末へ打ち込まれ、画面に出る。拾い直すと同じ画像が
       // 帯に 2 枚並ぶので、問い合わせ済みにしておく。
       queriedImagePaths.add(saved.path);
       // パスに空白は入らない命名にしてあるが、引用しておけば将来変えても壊れない。
-      pendingInput += `'${saved.path}' `;
-      void flushInput();
+      await queueInput(`'${saved.path}' `);
       deps.onStatus(null);
     } catch (error) {
-      if (!disposed) {
+      if (!disposed && myGen === generation) {
         console.error("[code-viewer] pasted image save failed", error);
         deps.onStatus(
           `${deps.getText().pasteFailed}\n${formatErrorDetail(error)}`,
@@ -711,7 +746,7 @@ export function createTerminalScreen(
   // 捕捉フェーズで受けるのが要点。xterm の paste ハンドラは 1 行目で
   // stopPropagation() を呼ぶので、浮上フェーズで待っていると一生届かない。
   // 捕捉は根から降りてくる順なので、深い位置にある xterm より先に見られる。
-  el.addEventListener(
+  screenEl.addEventListener(
     "paste",
     (event) => {
       const file = firstImage(event.clipboardData);
@@ -750,6 +785,19 @@ export function createTerminalScreen(
       fontFamily: TERMINAL_FONT_FAMILY,
       scrollback: SHELL_SCROLLBACK,
       cursorBlink: true,
+      lineHeight: 1.2,
+      theme: {
+        background: "#101318",
+        foreground: "#e6edf3",
+        cursor: "#a5b4fc",
+        selectionBackground: "#34436b",
+      },
+      disableStdin: !inputEnabled,
+      linkHandler: {
+        activate: (_event, value) => {
+          void tools.openLink({ kind: "url", value });
+        },
+      },
     });
     const fit = new api.FitAddon();
     created.loadAddon(fit);
@@ -762,9 +810,11 @@ export function createTerminalScreen(
       inlineLayer,
     );
     created.onData(enqueueInput);
+    tools.install(created);
     // Shift+Enter は「送信せずに改行」。xterm の既定では Enter と同じ CR に
     // なってしまい、書きかけのまま送信されるので、ここで横取りする。
     created.attachCustomKeyEventHandler((event) => {
+      if (!tools.handleKey(event)) return false;
       if (!isShiftEnter(event)) return true;
       // このハンドラは keydown / keypress / keyup の全部で呼ばれる。keydown
       // だけを止めても、続く keypress を xterm が拾って CR を送ってしまう
@@ -801,9 +851,8 @@ export function createTerminalScreen(
         const payload = JSON.parse((event as MessageEvent<string>).data) as {
           data: string;
         };
-        term.write(payload.data);
+        term.write(payload.data, () => tools.onOutput());
         scanShellOutput(payload.data);
-        deps.onStatus(null);
       } catch (error) {
         console.error("[code-viewer] terminal output event failed", error);
         deps.onStatus(
@@ -829,21 +878,33 @@ export function createTerminalScreen(
         return;
       }
       deps.onStatus(deps.getText().shellExited(code));
+      tools.setConnected(false);
+      if (attached) attached.exited = true;
       closeSource();
     });
     stream.addEventListener("gone", () => {
       if (stale()) return;
       deps.onStatus(deps.getText().shellClosed);
+      tools.setConnected(false);
       closeSource();
       deps.onTargetGone(session);
     });
     stream.onerror = () => {
       // EventSource は自動で繋ぎ直す。落ちたままなら状態表示だけ残す。
       if (stale()) return;
+      tools.setConnected(false);
+      deps.onStatus(deps.getText().connecting);
       if (stream.readyState === EventSource.CLOSED) {
         deps.onStatus(deps.getText().screenFailed);
       }
     };
+    stream.addEventListener("open", () => {
+      if (stale()) return;
+      tools.setConnected(!session.exited);
+      deps.onStatus(
+        session.exited ? deps.getText().shellExited(session.exitCode) : null,
+      );
+    });
   }
 
   async function attach(session: ShellSession): Promise<void> {
@@ -851,8 +912,10 @@ export function createTerminalScreen(
     const myGen = ++generation;
     clearAttachments();
     closeSource();
-    pendingInput = "";
+    discardPendingInput();
     attached = session;
+    tools.setTarget(session);
+    screenEl.hidden = false;
     // 同じ対象へ戻ってきたなら、前に見つけた画像を帯へ戻す。タブを行き来した
     // だけで消えると、パスが流れた後は二度と開けない。
     restoreRememberedImages(session);
@@ -870,6 +933,7 @@ export function createTerminalScreen(
     // 前のシェルの中身を残さない。購読が始まると、溜まっていた出力が最初に
     // まとめて流れてくる。
     created.reset();
+    created.options.disableStdin = !inputEnabled;
     // 表示領域がサイズを決める。購読前に PTY へ伝えておく。
     fitShellToContainer();
     openSource(session, myGen);
@@ -894,13 +958,16 @@ export function createTerminalScreen(
     clearAttachments();
     closeSource();
     attached = null;
-    pendingInput = "";
+    discardPendingInput();
+    tools.setTarget(null);
+    screenEl.hidden = true;
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = null;
     deps.onStatus(null);
   }
 
   return {
+    localize: tools.localize,
     el,
     applyFontSize() {
       if (!term) return;
@@ -916,6 +983,9 @@ export function createTerminalScreen(
     },
     setInputEnabled(enabled: boolean) {
       inputEnabled = enabled;
+      if (term) term.options.disableStdin = !enabled;
+      tools.setInputEnabled(enabled);
+      if (!enabled) discardPendingInput();
     },
     getAttached: () => attached,
     measure() {
@@ -926,6 +996,8 @@ export function createTerminalScreen(
     dispose() {
       disposed = true;
       generation += 1;
+      discardPendingInput();
+      tools.dispose();
       closeSource();
       clearInlineImages();
       if (resizeTimer) clearTimeout(resizeTimer);

@@ -12,7 +12,6 @@
 // 作業ツリーとは無関係 (server/worktree/handle.ts の handleDiffGet)。だから
 // 1 つのサーバから全部の作業ツリーの中身が読める。
 
-import { blameRelativeTime } from "../core/blame";
 import {
   CHEVRON_DOWN_16_PATH,
   COPY_16_PATHS,
@@ -20,7 +19,9 @@ import {
   iconSvg,
   KEBAB_16_PATH,
 } from "../core/icons";
+import { formatRelativeTime } from "../core/relative-time";
 import type { AppRoute } from "../core/routes";
+import { blockScrollChaining } from "../core/scroll-chaining";
 import type {
   CommitMeta,
   WorktreeActionResponse,
@@ -28,8 +29,16 @@ import type {
   WorktreeDiffResponse,
   WorktreesResponse,
 } from "../core/types";
-import type { WorktreeFileChange, WorktreeItem } from "../core/worktree";
-import { worktreeBranchError, worktreeNameError } from "../core/worktree";
+import type {
+  WorktreeFileChange,
+  WorktreeItem,
+  WorktreeStatusKind,
+} from "../core/worktree";
+import {
+  worktreeBranchError,
+  worktreeNameError,
+  worktreeStatusKind,
+} from "../core/worktree";
 import {
   type ContextMenuItem,
   closeContextMenu,
@@ -58,6 +67,14 @@ export type WorktreeViewDeps = {
   isTestPath(path: string): boolean;
   /** サイドバーの ツリー / 一覧。Repository のトグルと同じ値。 */
   getSidebarView(): "tree" | "flat";
+  /** 絞り込み中の「合致 / 全部」に付ける説明。共通サイドバーと同じ文言。 */
+  filterCountTitle(visible: number, total: number): string;
+  /**
+   * 共通のサイドバー絞り込みを掛け直す。差分カードの出し入れはあちらが持って
+   * いるので、カードを積み直した直後に呼ぶ (呼ばないと、絞り込んだままの
+   * 画面に全部のカードが出る)。
+   */
+  applySidebarFilter(): void;
   /**
    * 構文強調のハイライタを読み込む。遅延バンドルなので Promise で返る。
    * 読めなければ null。
@@ -896,14 +913,79 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     };
   }
 
-  function copyMergeButton(item: WorktreeItem): HTMLButtonElement | null {
-    const merge = mergeCommand(item);
-    if (!merge) return null;
-    const t = text();
-    return copyButton(
-      merge.command,
-      t.actions.copyMergeTitle(merge.base, merge.branch),
+  /**
+   * 基準を自分に取り込むコマンド。遅れている行と衝突する行の「次の一手」。
+   * こちらは作業ツリーの中で走らせるものなので、cd を先頭に付けて場所を
+   * 間違えないようにする。パスは常に引用する (空白入りのパスで壊れない)。
+   */
+  function catchUpCommand(item: WorktreeItem): string | null {
+    const base = item.divergence?.base;
+    if (!base || item.missing || item.bare) return null;
+    return `cd "${item.path}" && git merge ${base}`;
+  }
+
+  /** この行の状態。ラベル・色・次の一手・凡例は全部この 1 値から決める。 */
+  function statusKind(item: WorktreeItem): WorktreeStatusKind {
+    return worktreeStatusKind(item, data?.baseBranch || "");
+  }
+
+  /**
+   * 状態チップ。行・要約カード・凡例で同じものを使う。押せないので寸法は
+   * 状態で変わらない (色だけが変わる)。フル文は title に入れる。
+   */
+  function statusChip(
+    kind: WorktreeStatusKind,
+    base: string,
+    title: string,
+  ): HTMLElement {
+    const chip = el(
+      "span",
+      `worktree-status-chip ${kind}`,
+      text().status.label[kind](base),
     );
+    chip.title = title;
+    return chip;
+  }
+
+  /** チップの title。位置関係の文が無い 3 種はそれ用の文、他は既存の 1 文。 */
+  function statusTitle(item: WorktreeItem, kind: WorktreeStatusKind): string {
+    const t = text();
+    const base = item.divergence?.base || data?.baseBranch || "";
+    if (kind === "base") return t.status.baseTitle;
+    if (kind === "no-branch") return t.status.noBranchTitle;
+    if (kind === "unchecked" && !item.divergence) {
+      return [t.status.uncheckedTitle(base), item.error]
+        .filter(Boolean)
+        .join("\n");
+    }
+    return divergenceSummary(item);
+  }
+
+  /** 「2 ahead · 1 behind」。0 のものは出さず、両方 0 なら null。 */
+  function driftText(item: WorktreeItem): string | null {
+    const divergence = item.divergence;
+    if (!divergence) return null;
+    const t = text();
+    const parts = [
+      divergence.ahead > 0 ? t.status.driftAhead(divergence.ahead) : "",
+      divergence.behind > 0 ? t.status.driftBehind(divergence.behind) : "",
+    ].filter(Boolean);
+    return parts.length ? parts.join(" · ") : null;
+  }
+
+  /**
+   * ISO 時刻を「20 時間前」と、ホバー用の絶対時刻に。表示言語に追従する
+   * (以前は英語の "20h ago" が日本語の行に混ざっていた)。読めない文字列は
+   * そのまま返す (嘘の時刻を作らない)。
+   */
+  function relativeWhen(iso: string): { text: string; title: string } {
+    const parsed = Date.parse(iso);
+    if (!Number.isFinite(parsed)) return { text: iso, title: iso };
+    const t = text();
+    return {
+      text: formatRelativeTime(parsed, Date.now(), t.lang),
+      title: new Date(parsed).toLocaleString(),
+    };
   }
 
   /** 「開く」で起こしたサーバを止める。起動中の行にだけ出す。 */
@@ -1180,63 +1262,78 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       pathLine.title = item.path;
       row.appendChild(pathLine);
 
-      // 3 段目: ブランチ・変更数・最終コミット。
+      // 3 段目: ブランチと変更したファイルの数。**値には全部ラベルを付ける。**
+      // 裸の「main」「25 件」では、ブランチ名なのかフォルダ名なのか、何が 25
+      // なのか読めなかった。
       const meta = el("span", "meta2");
+      const branchFact = el("span", "worktree-row-fact");
+      branchFact.appendChild(
+        el("span", "worktree-row-label", t.row.branchLabel),
+      );
       // ブランチ名の枠。ブランチが無い作業ツリーはその旨を出し、他のバッジと
       // 同じように理由を title に添える。
       const branchName = el("span", "sha", item.branch || t.badges.detached);
       if (!item.branch) branchName.title = t.badges.detachedTitle;
-      meta.appendChild(branchName);
+      branchFact.appendChild(branchName);
+      meta.appendChild(branchFact);
       meta.appendChild(
         el(
           "span",
           "author",
-          item.fileCount ? t.files.heading(item.fileCount) : t.files.none,
+          item.fileCount ? t.row.files(item.fileCount) : t.row.noFiles,
         ),
       );
+      row.appendChild(meta);
+
+      // 4 段目: 時刻。「最終コミット」「最終更新」と言葉を付け、相対時刻は
+      // 表示言語で出す。3 段目と分けるのは、狭い幅で折り返す位置を予測できる
+      // ようにするため (1 段に詰めると途中で折れて読みにくい)。
+      const times = el("span", "meta2");
       if (item.lastCommit) {
-        const parsed = Date.parse(item.lastCommit.when);
-        const when = el(
-          "span",
-          "when",
-          Number.isFinite(parsed)
-            ? blameRelativeTime(Math.round(parsed / 1000))
-            : item.lastCommit.when,
-        );
+        const shown = relativeWhen(item.lastCommit.when);
+        const when = el("span", "when", t.lastCommitted(shown.text));
         // ホバーでは件名と絶対日時の両方を出す。
-        when.title = Number.isFinite(parsed)
-          ? `${item.lastCommit.subject}\n${new Date(parsed).toLocaleString()}`
-          : item.lastCommit.subject;
-        meta.appendChild(when);
+        when.title = `${item.lastCommit.subject}\n${shown.title}`;
+        times.appendChild(when);
       }
       // 最終更新は mtime ベース。コミットせずに置かれた作業ツリーでも動く。
       if (item.lastTouched) {
-        const parsed = Date.parse(item.lastTouched);
-        const when = el(
-          "span",
-          "when",
-          Number.isFinite(parsed)
-            ? t.lastTouched(blameRelativeTime(Math.round(parsed / 1000)))
-            : t.lastTouched(item.lastTouched),
-        );
-        when.title = Number.isFinite(parsed)
-          ? new Date(parsed).toLocaleString()
-          : item.lastTouched;
-        meta.appendChild(when);
+        const shown = relativeWhen(item.lastTouched);
+        const when = el("span", "when", t.lastTouched(shown.text));
+        when.title = shown.title;
+        times.appendChild(when);
       }
-      row.appendChild(meta);
+      if (times.childElementCount) row.appendChild(times);
 
-      // 4 段目: マージできるか + 位置関係。フル文は title に。
-      const second = el("span", "meta2");
-      const summary = divergenceSummary(item);
-      const summaryText = el("span", "author", summary);
-      summaryText.title = summary;
-      second.appendChild(summaryText);
-      // そのまま入る行にだけ、取り込むコマンドのコピーを添える。文字は
-      // 増やさずアイコンだけにする (この段は既に省略が効く狭さのため)。
-      const merge = copyMergeButton(item);
-      if (merge) second.appendChild(merge);
-      row.appendChild(second);
+      // 4 段目: 状態チップ + 位置関係の数。
+      //
+      // 以前は「マージ可否 · N commits ahead · N commits behind」の 1 文を
+      // 置いていたが、この幅では末尾が切れ、一番大事な「衝突するか」が
+      // 読めなかった。数語のチップにして、フル文は title に回す。
+      // マージコマンドのコピーも、ラベル無しのアイコンで浮いていたのを
+      // やめ、「…」メニューと本文の要約カード (文字つき) に寄せた。
+      const kind = statusKind(item);
+      const status = el("span", "worktree-row-status");
+      status.appendChild(
+        statusChip(
+          kind,
+          item.divergence?.base || data?.baseBranch || "",
+          statusTitle(item, kind),
+        ),
+      );
+      const drift = driftText(item);
+      if (drift) {
+        const driftNode = el("span", "worktree-row-drift", drift);
+        driftNode.title = divergenceSummary(item);
+        status.appendChild(driftNode);
+      }
+      row.appendChild(status);
+      // 基準ブランチの行だけ、チップの意味を 1 行で添える。他の行のチップは
+      // 「main にマージできます」のように文になっているが、「基準ブランチ」は
+      // 語なので、初めての人には何のことか分からない。
+      if (kind === "base") {
+        row.appendChild(el("span", "worktree-row-note", t.row.baseNote));
+      }
 
       if (item.error) {
         const error = el("span", "meta2");
@@ -1287,17 +1384,210 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /**
+   * 2 本以上あるのに何も選んでいないときの案内。intro は 1 本しか無いときの
+   * ものなので、2 本目ができた瞬間に「この画面をどう読むか」の説明が無く
+   * なっていた。行に出る状態チップと同じものを並べ、意味を添える。
+   */
+  function overviewCard(): HTMLElement {
+    const t = text();
+    const base = data?.baseBranch || t.overview.baseWord;
+    const card = el("div", "worktree-intro worktree-overview");
+    card.appendChild(el("p", "worktree-intro-title", t.overview.title));
+    card.appendChild(el("p", "", t.intro.cardWhat));
+    card.appendChild(el("p", "", t.overview.pick));
+    card.appendChild(el("p", "worktree-legend-title", t.overview.legendTitle));
+    const legend = el("ul", "worktree-legend");
+    const entry = (terms: HTMLElement[], body: string) => {
+      const li = el("li", "");
+      const termWrap = el("span", "worktree-legend-terms");
+      for (const term of terms) termWrap.appendChild(term);
+      li.append(termWrap, el("span", "worktree-legend-body", body));
+      legend.appendChild(li);
+    };
+    const chip = (kind: WorktreeStatusKind) =>
+      statusChip(kind, base, t.status.label[kind](base));
+    entry([chip("ready")], t.overview.legend.ready);
+    entry([chip("conflict")], t.overview.legend.conflict);
+    entry([chip("even"), chip("behind")], t.overview.legend.quiet);
+    entry([chip("unchecked")], t.overview.legend.unchecked);
+    entry(
+      [el("span", "worktree-legend-term", t.files.heading(3))],
+      t.overview.legend.files,
+    );
+    const current = el("span", "worktree-badge", t.badges.current);
+    current.title = t.badges.currentTitle;
+    entry([current], t.overview.legend.current);
+    card.appendChild(legend);
+    card.appendChild(el("p", "worktree-hint", t.overview.createHint));
+    return card;
+  }
+
+  /**
+   * 選んだ作業ツリーの要約。本文 (#diff) の一番上に置く。
+   *
+   * 差分カードだけを積むと「このフォルダは今どういう状態で、次に何をすれば
+   * いいか」がどこにも無い。状態チップ・フォルダ・ブランチ・変更の数と、
+   * 状態ごとの次の一手 (必要ならコピーできるコマンド) をここに集める。
+   * コマンドは**コピーするだけで実行しない** (このアプリはリポジトリを
+   * 書き換えない)。
+   *
+   * コミットのカードと同じく、既に在れば中身だけ差し替える (SSE のたびに
+   * 作り直すと、押した直後のコピーの色が消える)。
+   */
+  function renderSummary(): void {
+    const diff = document.getElementById("diff");
+    if (!diff) return;
+    const item = selectedWorktree();
+    const existing = diff.querySelector<HTMLElement>(
+      ":scope > .worktree-summary",
+    );
+    if (!item) {
+      existing?.remove();
+      return;
+    }
+    const t = text();
+    const kind = statusKind(item);
+    const base = item.divergence?.base || data?.baseBranch || "";
+    const card = existing ?? el("section", "worktree-summary");
+    card.replaceChildren();
+
+    const head = el("div", "worktree-summary-head");
+    head.appendChild(el("span", "worktree-summary-name", item.name));
+    head.appendChild(statusChip(kind, base, statusTitle(item, kind)));
+    const drift = driftText(item);
+    if (drift) {
+      const driftNode = el("span", "worktree-summary-drift", drift);
+      driftNode.title = divergenceSummary(item);
+      head.appendChild(driftNode);
+    }
+    card.appendChild(head);
+
+    const facts = el("dl", "worktree-summary-facts");
+    const fact = (label: string, ...values: Array<HTMLElement | null>) => {
+      facts.appendChild(el("dt", "", label));
+      const dd = el("dd", "");
+      for (const value of values) if (value) dd.appendChild(value);
+      facts.appendChild(dd);
+    };
+    const pathNode = el("span", "worktree-summary-path", item.path);
+    pathNode.title = item.path;
+    // フォルダを開く / パスをコピー。以前は「変更なし」の案内カードにだけ
+    // 置いていたが、変更があっても cd したい場面は同じだけある。
+    const canOpen = !item.missing && !item.bare;
+    fact(
+      t.summary.folder,
+      pathNode,
+      canOpen ? openFolderButton(item, false) : null,
+      canOpen ? copyPathButton(item, false) : null,
+    );
+    const branchNode = el("span", "sha", item.branch || t.badges.detached);
+    if (!item.branch) branchNode.title = t.badges.detachedTitle;
+    fact(t.summary.branch, branchNode);
+    if (kind !== "base" && kind !== "no-branch" && base) {
+      fact(t.summary.comparedWith, el("span", "sha", base));
+    }
+    const uncommitted = item.files.filter(
+      (file) => file.origin === "uncommitted",
+    ).length;
+    const committed = item.files.length - uncommitted;
+    const changes = [
+      uncommitted ? t.summary.uncommitted(uncommitted) : "",
+      committed ? t.summary.committed(committed, base) : "",
+    ].filter(Boolean);
+    fact(
+      t.summary.changes,
+      el(
+        "span",
+        "",
+        changes.length ? changes.join(" · ") : t.summary.noChanges,
+      ),
+    );
+    card.appendChild(facts);
+
+    const next = el("div", "worktree-summary-next");
+    next.appendChild(
+      el("span", "worktree-summary-next-title", t.summary.nextTitle),
+    );
+    const say = (body: string) =>
+      next.appendChild(el("p", "worktree-summary-next-body", body));
+    const command = (value: string, title: string) => {
+      const row = el("div", "worktree-summary-command");
+      const code = el("code", "", value);
+      code.title = value;
+      row.appendChild(code);
+      row.appendChild(copyButton(value, title, t.summary.copyCommand));
+      next.appendChild(row);
+    };
+    const merge = mergeCommand(item);
+    const catchUp = catchUpCommand(item);
+    if (kind === "base") {
+      say(t.summary.next.base(item.branch));
+    } else if (kind === "no-branch") {
+      say(t.summary.next.noBranch);
+    } else if (kind === "unchecked") {
+      say(t.summary.next.unchecked(base));
+      if (item.error) {
+        const reason = el("p", "worktree-summary-error", item.error);
+        reason.setAttribute("role", "alert");
+        next.appendChild(reason);
+      }
+    } else if (kind === "even") {
+      say(
+        uncommitted
+          ? t.summary.next.evenUncommitted(uncommitted)
+          : t.summary.next.even(base),
+      );
+    } else if (kind === "behind") {
+      say(t.summary.next.behind(item.divergence?.behind ?? 0, base));
+      if (catchUp) command(catchUp, t.summary.copyCommand);
+    } else if (kind === "ready") {
+      say(t.summary.next.ready(base));
+      if (merge) {
+        command(
+          merge.command,
+          t.actions.copyMergeTitle(merge.base, merge.branch),
+        );
+      }
+      if (uncommitted) {
+        next.appendChild(
+          el(
+            "p",
+            "worktree-summary-note",
+            t.summary.next.readyUncommitted(uncommitted),
+          ),
+        );
+      }
+    } else {
+      say(t.summary.next.conflict(item.divergence?.conflicts ?? [], base));
+      if (catchUp) command(catchUp, t.summary.copyCommand);
+    }
+    card.appendChild(next);
+
+    if (!existing) diff.prepend(card);
+  }
+
+  /**
    * 画面に出すファイル。サイドバーの絞り込みと、topbar の「テスト非表示」を
    * 両方かけた結果。**一覧と差分で同じものを使う**ので、片方にだけテストが
    * 残るようなずれが起きない。
    */
+  /**
+   * 差分カードとして積む対象。**サイドバーの絞り込みは掛けない。**
+   *
+   * カードの出し入れは共通のサイドバー絞り込みが `hidden-by-filter` で行う
+   * (`applySidebarFilter`)。ここでも絞ると、絞り込み中に積み直しが走った時点で
+   * 残りのカードが DOM から消え、絞り込みを外しても戻らなくなる (実測)。
+   */
   function visibleFiles(item: WorktreeItem): WorktreeFileChange[] {
     const hideTests = deps.getOptions().hideTests;
     return item.files.filter(
-      (file) =>
-        matches(file.path, fileFilter) &&
-        !(hideTests && deps.isTestPath(file.path)),
+      (file) => !(hideTests && deps.isTestPath(file.path)),
     );
+  }
+
+  /** サイドバーに並べる対象。こちらは絞り込みも掛かる (一覧はこの view のもの)。 */
+  function listedFiles(item: WorktreeItem): WorktreeFileChange[] {
+    return visibleFiles(item).filter((file) => matches(file.path, fileFilter));
   }
 
   // ---- 中央: サイドバーの変更ファイル一覧 ----
@@ -1482,14 +1772,34 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         commitsFor === key
       ) {
         commitsLoading = false;
-        renderFiles();
+        renderCommits();
       }
     }
   }
 
-  function renderCommits(list: HTMLElement, item: WorktreeItem): void {
-    const divergence = item.divergence;
-    if (!divergence || divergence.ahead < 1) return;
+  /**
+   * 基準ブランチより先のコミット。本文 (#diff) の先頭にカードとして置く。
+   *
+   * **サイドバー (#filelist) には置かない。** あそこは変更ファイルの一覧で、
+   * 見出しの件数もサイドバーの絞り込みもファイルにしか掛からない。コミットを
+   * 同じ list に積むと、並んでいる行の過半が「N changed files」にも数えられず
+   * 絞り込みにも反応しない一覧になる (実際にそうなっていた)。
+   *
+   * 差分カードとは寿命が違う (コミットは後から届き、差分は積み直さない) ので、
+   * 既に在るカードは中身だけ差し替える。
+   */
+  function renderCommits(): void {
+    const diff = document.getElementById("diff");
+    if (!diff) return;
+    const item = selectedWorktree();
+    const divergence = item?.divergence;
+    const existing = diff.querySelector<HTMLElement>(
+      ":scope > .worktree-commits",
+    );
+    if (!item || !divergence || divergence.ahead < 1) {
+      existing?.remove();
+      return;
+    }
     const key = `${item.id}|${item.branch}|${divergence.base}|${acceptedServerGeneration}`;
     if (commitsFor !== key) {
       commitsFor = key;
@@ -1501,49 +1811,65 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     }
 
     const t = text();
-    list.appendChild(
-      el("li", "worktree-file-group", t.commits.heading(divergence.base)),
+    const card = existing ?? el("section", "worktree-commits");
+    // SSE の描き直しでスクロール位置を巻き戻さない。
+    const scrolled =
+      existing?.querySelector<HTMLElement>(".worktree-commits-list")
+        ?.scrollTop ?? 0;
+    card.replaceChildren();
+    const head = el("div", "worktree-commits-head");
+    head.appendChild(
+      el("span", "worktree-commits-title", t.commits.heading(divergence.base)),
     );
+    card.appendChild(head);
     if (commitsLoading) {
-      list.appendChild(note(t.commits.loading));
-      return;
-    }
-    if (commitsError) {
-      const failure = note(commitsError);
-      failure.style.color = "var(--danger)";
-      list.appendChild(failure);
-      return;
-    }
-    if (!commits.length) {
-      list.appendChild(note(t.commits.none));
-      return;
-    }
-    for (const commit of commits) {
-      const row = el("li", "history-item worktree-commit");
-      const subject = el("span", "subject", commit.subject);
-      subject.title = commit.subject;
-      const meta = el("span", "meta2");
-      meta.appendChild(el("span", "sha", commit.sha.slice(0, 7)));
-      meta.appendChild(el("span", "author", commit.author));
-      const parsed = Date.parse(commit.when);
-      const when = el(
-        "span",
-        "when",
-        Number.isFinite(parsed)
-          ? blameRelativeTime(Math.round(parsed / 1000))
-          : commit.when,
+      card.appendChild(el("p", "worktree-commits-note", t.commits.loading));
+    } else if (commitsError) {
+      const failure = el(
+        "p",
+        "worktree-commits-note worktree-commits-error",
+        commitsError,
       );
-      when.title = Number.isFinite(parsed)
-        ? new Date(parsed).toLocaleString()
-        : commit.when;
-      meta.appendChild(when);
-      row.append(subject, meta);
-      list.appendChild(row);
+      failure.setAttribute("role", "alert");
+      card.appendChild(failure);
+    } else if (!commits.length) {
+      card.appendChild(el("p", "worktree-commits-note", t.commits.none));
+    } else {
+      const list = el("ol", "worktree-commits-list");
+      for (const commit of commits) {
+        const row = el("li", "worktree-commit");
+        row.appendChild(el("span", "sha", commit.sha.slice(0, 7)));
+        const subject = el("span", "subject", commit.subject);
+        subject.title = commit.subject;
+        row.appendChild(subject);
+        row.appendChild(el("span", "author", commit.author));
+        const shown = relativeWhen(commit.when);
+        const when = el("span", "when", shown.text);
+        when.title = shown.title;
+        row.appendChild(when);
+        list.appendChild(row);
+      }
+      // 本文の中の入れ子スクロール。端まで来ても後ろの差分を動かさない。
+      blockScrollChaining(list);
+      list.scrollTop = scrolled;
+      card.appendChild(list);
+      if (commitsHasMore) {
+        card.appendChild(
+          el(
+            "p",
+            "worktree-commits-note",
+            t.commits.truncated(commits.length, divergence.ahead),
+          ),
+        );
+      }
     }
-    if (commitsHasMore) {
-      list.appendChild(
-        note(t.commits.truncated(commits.length, divergence.ahead)),
+    if (!existing) {
+      // 要約カードの下、差分カードの上。要約が無ければ先頭。
+      const summary = diff.querySelector<HTMLElement>(
+        ":scope > .worktree-summary",
       );
+      if (summary) summary.after(card);
+      else diff.prepend(card);
     }
   }
 
@@ -1566,21 +1892,31 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       button.disabled = !tree;
     }
     if (title) title.textContent = t.panes.files;
+    // 行を組み立てるのも絞り込むのもこの view なので、件数もここが出す。
+    // 共通のサイドバー絞り込みに数えさせると、既にここで絞った後の行だけを
+    // 数えて「1 / 1」になる (sidebar.ts の applyFilter がこの印を見ている)。
+    list.dataset.filterOwner = "view";
     const item = selectedWorktree();
-    if (totals) {
-      totals.textContent = item ? t.files.heading(item.fileCount) : "";
-    }
     list.replaceChildren();
     if (!item) {
+      if (totals) totals.textContent = "";
       list.appendChild(note(t.panes.selectWorktree));
       return;
     }
-    renderCommits(list, item);
+    if (totals) totals.textContent = t.files.heading(item.fileCount);
     if (!item.fileCount) {
       list.appendChild(note(t.files.none));
       return;
     }
-    const shown = visibleFiles(item);
+    const shown = listedFiles(item);
+    // 絞り込み中は「合致 / 全部」。母数はこの作業ツリーの変更ファイル全部で、
+    // 絞り込みを消せば元の「N changed files」に戻る。
+    if (totals && fileFilter) {
+      totals.textContent = `${shown.length} / ${item.fileCount}`;
+      totals.title = deps.filterCountTitle(shown.length, item.fileCount);
+    } else if (totals) {
+      totals.removeAttribute("title");
+    }
     if (!shown.length) {
       list.appendChild(note(t.panes.noFileMatch));
       return;
@@ -1654,7 +1990,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       options.ignoreWs ? "w" : "",
       options.hideTests ? "t" : "",
       options.syntax ? "s" : "",
-      fileFilter,
+      // 絞り込みは入れない。カードの出し入れは共通のサイドバー絞り込みが
+      // class で行うので、打つたびに積み直す必要がない (積み直すと読み込み
+      // 済みの差分が捨てられ、絞り込みを外しても戻らない)。
     ].join("|");
   }
 
@@ -1810,9 +2148,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     diff.replaceChildren();
     if (!item) {
       // 1 本も作られていない (= メインだけ) なら、これが何の画面かの説明を
-      // 出す。2 本目があるのに未選択なら、いつもの案内。
+      // 出す。2 本目があるのに未選択なら、行の読み方の凡例つきの案内。
+      // 一覧がまだ無い (読み込み中・失敗) ときだけ、いつもの 1 行。
       if (data && data.worktrees.length === 1) {
         diff.appendChild(introCard());
+      } else if (data && data.worktrees.length > 1) {
+        diff.appendChild(overviewCard());
       } else {
         diff.appendChild(el("div", "gdp-info", t.panes.selectWorktree));
       }
@@ -1821,17 +2162,11 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     }
     if (!item.fileCount) {
       // 空のままにせず、次にやること (そのフォルダで編集する) を書く。
+      // フォルダを開く / パスをコピーは上の要約カードに在るので、ここには
+      // 置かない (同じボタンが 2 段に並ぶ)。
       const card = el("div", "gdp-info worktree-empty-diff");
       card.appendChild(el("p", "", t.emptyDiff.title));
       card.appendChild(el("p", "", t.emptyDiff.body(item.path)));
-      if (!item.missing && !item.bare) {
-        const buttons = el("span", "worktree-empty-diff-actions");
-        // リポジトリの外に在る作業ツリーは OS で開けない (パスは写せる)。
-        const openFolder = openFolderButton(item, true);
-        if (openFolder) buttons.appendChild(openFolder);
-        buttons.appendChild(copyPathButton(item, true));
-        card.appendChild(buttons);
-      }
       diff.appendChild(card);
       diffFor = diffKey(item);
       return;
@@ -1864,6 +2199,8 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       pending.set(shell, file);
     }
     diffFor = diffKey(item);
+    // 積み直した直後のカードは絞り込みを知らない。掛かっているなら掛け直す。
+    deps.applySidebarFilter();
 
     // 見えたものから読む。History と同じで、全部を一度に取りに行かない。
     if (typeof IntersectionObserver === "undefined") {
@@ -1893,6 +2230,10 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     const item = selectedWorktree();
     // 同じ作業ツリーを映しているなら積み直さない (読み込み済みが消える)。
     if (diffKey(item) !== diffFor) renderDiffs();
+    // renderDiffs は #diff を空にするので、その後に置き直す。要約 → コミット
+    // の順 (コミットのカードは要約の直後に入る)。
+    renderSummary();
+    renderCommits();
     restoreRouteSelection();
   }
 
@@ -1928,9 +2269,16 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       if (!mounted) return this.enter();
       return refresh();
     },
+    /**
+     * 表示設定が変わったかもしれない、という通知。**変わっていなければ何も
+     * 積み直さない。** app.ts はこれを経路が動くたびに呼ぶ (ハイライタの
+     * 読み込み完了経由) ので、無条件に積み直すと、サイドバーでファイルを
+     * 選ぶたびに読み込み済みの差分を捨てて全ファイルを取り直し、飛んだ先の
+     * 位置も失う (実測: クリックの 11ms 後に 9 本の再取得)。
+     * 実際に変わったかは diffKey が持っている。
+     */
     displayOptionsChanged(): void {
       if (!mounted) return;
-      diffFor = null;
       render();
     },
     handleSse(): void {

@@ -1,11 +1,13 @@
 // worktree 画面の文言。アプリ全体の言語設定 (app.ts の STATE.language) と
 // 同じ値で切り替える。切替時のライブ反映は worktree-view の localize() が担当。
 
-import type { WorktreeNameError } from "../core/worktree";
+import type { WorktreeNameError, WorktreeStatusKind } from "../core/worktree";
 
 export type WorktreeLang = "en" | "ja";
 
 export type WorktreeText = {
+  /** この表の言語。Intl (相対時刻) に渡すために表自身が持つ。 */
+  lang: WorktreeLang;
   title: string;
   ariaLabel: string;
   loading: string;
@@ -97,6 +99,85 @@ export type WorktreeText = {
   noCommit: string;
   /** 3 段目の「最終更新 X」。mtime ベースなのでコミット無しでも動く。 */
   lastTouched: (when: string) => string;
+  /**
+   * 同じ段の「最終コミット X」。時刻だけが裸で並び、隣の「最終更新」と何が
+   * 違うのか読めなかったので、こちらにも言葉を付ける。
+   */
+  lastCommitted: (when: string) => string;
+  /**
+   * 行の 3 段目・4 段目。**値には全部ラベルを付ける。** 裸の「main」「25 件」
+   * では、ブランチ名なのかフォルダ名なのか、何が 25 なのか読めなかった。
+   */
+  row: {
+    branchLabel: string;
+    files: (n: number) => string;
+    noFiles: string;
+    /** 基準ブランチの行だけに添える 1 行。他の行はチップの文で足りる。 */
+    baseNote: string;
+  };
+  /**
+   * 行と要約カードに出す状態チップ。**1 文ではなく数語。** 狭い行では 1 文が
+   * 途中で切れ、一番大事な「衝突するか」が読めなかった。フル文は title に回す
+   * (even 以降は diverge / merge の文をそのまま使う)。
+   */
+  status: {
+    label: Record<WorktreeStatusKind, (base: string) => string>;
+    /** 位置関係の文が無い 3 種は、title もここで持つ。 */
+    baseTitle: string;
+    noBranchTitle: string;
+    uncheckedTitle: (base: string) => string;
+    /** チップの隣に添える「2 ahead」「1 behind」。0 のものは出さない。 */
+    driftAhead: (n: number) => string;
+    driftBehind: (n: number) => string;
+  };
+  /**
+   * 選んだ作業ツリーの要約。本文の先頭に置き、「どこのフォルダで、どういう
+   * 状態で、次に何をするか」を書く。差分カードだけでは状態が読めなかった。
+   */
+  summary: {
+    folder: string;
+    branch: string;
+    comparedWith: string;
+    changes: string;
+    uncommitted: (n: number) => string;
+    committed: (n: number, base: string) => string;
+    noChanges: string;
+    nextTitle: string;
+    /** 状態ごとの次の一手。コマンドが続くものは末尾を「:」で止める。 */
+    next: {
+      base: (base: string) => string;
+      noBranch: string;
+      unchecked: (base: string) => string;
+      even: (base: string) => string;
+      evenUncommitted: (n: number) => string;
+      behind: (n: number, base: string) => string;
+      ready: (base: string) => string;
+      readyUncommitted: (n: number) => string;
+      conflict: (files: string[], base: string) => string;
+    };
+    copyCommand: string;
+  };
+  /**
+   * 2 本以上あるのに何も選んでいないときの案内。intro は 1 本しか無いときの
+   * もので、2 本目ができた瞬間に消える。その先で行の読み方を説明する場所が
+   * 無かったので、ここに凡例を置く。
+   */
+  overview: {
+    title: string;
+    pick: string;
+    legendTitle: string;
+    /** 基準ブランチ名が取れないときに、凡例のチップに入れる語。 */
+    baseWord: string;
+    legend: {
+      ready: string;
+      conflict: string;
+      quiet: string;
+      unchecked: string;
+      files: string;
+      current: string;
+    };
+    createHint: string;
+  };
   /**
    * 選んでいる作業ツリーへの操作。一覧の上に固定して出す。
    *
@@ -227,6 +308,7 @@ const JA_STATUS_TITLES: Record<string, string> = {
 
 const TEXT: Record<WorktreeLang, WorktreeText> = {
   en: {
+    lang: "en",
     title: "Worktrees",
     ariaLabel: "Git worktrees",
     loading: "Loading worktrees…",
@@ -239,8 +321,8 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     gitignoreHint:
       "Git sees that directory as untracked. Add .worktrees/ to .gitignore to keep it out of git status.",
     badges: {
-      current: "this folder",
-      currentTitle: "This code-viewer is serving this folder",
+      current: "viewing now",
+      currentTitle: "The folder this code-viewer is showing right now",
       detached: "no branch",
       detachedTitle: "Not attached to any branch (detached HEAD)",
       bare: "bare",
@@ -315,6 +397,89 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     },
     noCommit: "no commit",
     lastTouched: (when) => `updated ${when}`,
+    lastCommitted: (when) => `last commit ${when}`,
+    row: {
+      branchLabel: "branch",
+      files: (n) => (n === 1 ? "1 changed file" : `${n} changed files`),
+      noFiles: "no changes",
+      baseNote: "The other worktrees branch off from here and merge back here.",
+    },
+    status: {
+      label: {
+        base: () => "base branch",
+        "no-branch": () => "no branch",
+        unchecked: () => "not checked",
+        even: (base) => `up to date with ${base}`,
+        behind: (base) => `behind ${base}`,
+        ready: (base) => `can merge into ${base}`,
+        conflict: (base) => `conflicts with ${base}`,
+      },
+      baseTitle:
+        "The other worktrees are compared with this branch and merge into it.",
+      noBranchTitle:
+        "No branch is checked out here, so there is nothing to merge.",
+      uncheckedTitle: (base) => `Could not compare with ${base}.`,
+      driftAhead: (n) => `${n} ahead`,
+      driftBehind: (n) => `${n} behind`,
+    },
+    summary: {
+      folder: "Folder",
+      branch: "Branch",
+      comparedWith: "Compared with",
+      changes: "Changes",
+      uncommitted: (n) =>
+        n === 1
+          ? "1 file edited, not committed yet"
+          : `${n} files edited, not committed yet`,
+      committed: (n, base) =>
+        n === 1
+          ? `1 file in commits not yet in ${base}`
+          : `${n} files in commits not yet in ${base}`,
+      noChanges: "nothing changed yet",
+      nextTitle: "What to do next",
+      next: {
+        base: (base) =>
+          `This is ${base}, the branch the other worktrees are compared with. Merging a worktree brings its commits here.`,
+        noBranch:
+          "No branch is checked out here, so its commits have nowhere to go. Create a branch inside this folder first (git switch -c <name>).",
+        unchecked: (base) =>
+          `Could not compare this branch with ${base}, so whether it merges is unknown. The reason is on its row.`,
+        even: (base) =>
+          `Same commits as ${base}, so there is nothing to merge yet. Edit and commit inside this folder; the commits will show up here as ahead of ${base}.`,
+        evenUncommitted: (n) =>
+          n === 1
+            ? "1 edited file is not committed yet. Commit it inside this folder to make it mergeable."
+            : `${n} edited files are not committed yet. Commit them inside this folder to make them mergeable.`,
+        behind: (n, base) =>
+          `${base} has ${n === 1 ? "1 new commit" : `${n} new commits`} this branch does not have, and this branch has no commits of its own. Nothing to merge yet. To catch up, run inside this folder:`,
+        ready: (base) =>
+          `This branch can be merged into ${base} without conflicts. Run from the ${base} folder:`,
+        readyUncommitted: (n) =>
+          n === 1
+            ? "1 edited file is not committed and will not be included."
+            : `${n} edited files are not committed and will not be included.`,
+        conflict: (files, base) =>
+          `Merging into ${base} would conflict in ${files.length === 1 ? "1 file" : `${files.length} files`}: ${files.join(", ")}. Bring ${base} into this branch first and resolve the conflicts, then merge. Run inside this folder:`,
+      },
+      copyCommand: "Copy command",
+    },
+    overview: {
+      title: "Pick a worktree on the left",
+      pick: "Each row is one folder with its own branch checked out. Pick one to see which files it changes and whether it can be merged back.",
+      legendTitle: "How to read a row",
+      baseWord: "the base branch",
+      legend: {
+        ready:
+          "Its commits go into the base branch without conflicts. The merge command is in the summary card.",
+        conflict: "Merging would conflict. The row also gets a red edge.",
+        quiet: "Nothing to merge yet: the branch has no commits of its own.",
+        unchecked: "The comparison could not run. The row says why.",
+        files:
+          "The files it changes: edits not committed yet, plus commits not in the base branch.",
+        current: "The folder this code-viewer is showing.",
+      },
+      createHint: "Create adds a new worktree under .worktrees/.",
+    },
     actions: {
       menuTitle: "Actions for this worktree",
       menuFor: (name) => `Actions for ${name}`,
@@ -411,6 +576,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     },
   },
   ja: {
+    lang: "ja",
     title: "作業ツリー",
     ariaLabel: "git の作業ツリー",
     loading: "作業ツリーを読み込んでいます…",
@@ -423,8 +589,8 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     gitignoreHint:
       "このディレクトリは git から未追跡に見えます。.worktrees/ を .gitignore に入れると git status に出なくなります。",
     badges: {
-      current: "このフォルダ",
-      currentTitle: "この code-viewer が開いているフォルダです",
+      current: "いま見ているフォルダ",
+      currentTitle: "この code-viewer がいま映しているフォルダです",
       detached: "ブランチなし",
       detachedTitle: "どのブランチにも紐づいていません（detached HEAD）",
       bare: "bare",
@@ -491,6 +657,80 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     },
     noCommit: "コミットなし",
     lastTouched: (when) => `最終更新 ${when}`,
+    lastCommitted: (when) => `最終コミット ${when}`,
+    row: {
+      branchLabel: "ブランチ",
+      files: (n) => `変更したファイル ${n} 件`,
+      noFiles: "変更なし",
+      baseNote: "他の作業ツリーはここから分かれ、ここに戻ります。",
+    },
+    status: {
+      label: {
+        base: () => "基準ブランチ",
+        "no-branch": () => "ブランチなし",
+        unchecked: () => "未確認",
+        even: (base) => `${base} と同じ`,
+        behind: (base) => `${base} より遅れ`,
+        ready: (base) => `${base} にマージできます`,
+        conflict: (base) => `${base} と衝突`,
+      },
+      baseTitle:
+        "他の作業ツリーはこのブランチと比べられ、ここにマージされます。",
+      noBranchTitle: "ブランチが無いので、マージするものがありません。",
+      uncheckedTitle: (base) => `${base} と比べられませんでした。`,
+      driftAhead: (n) => `${n} 先行`,
+      driftBehind: (n) => `${n} 遅れ`,
+    },
+    summary: {
+      folder: "フォルダ",
+      branch: "ブランチ",
+      comparedWith: "比較先",
+      changes: "変更",
+      uncommitted: (n) => `編集中で未コミットが ${n} ファイル`,
+      committed: (n, base) => `${base} にまだ無いコミットで ${n} ファイル`,
+      noChanges: "まだ変更はありません",
+      nextTitle: "次にやること",
+      next: {
+        base: (base) =>
+          `これは ${base} です。他の作業ツリーはこのブランチと比べられ、マージするとここにコミットが入ります。`,
+        noBranch:
+          "ブランチが無いので、コミットの行き先がありません。先にこのフォルダの中でブランチを作ってください (git switch -c 名前)。",
+        unchecked: (base) =>
+          `${base} と比べられなかったので、マージできるかは分かりません。理由は左の行に出ています。`,
+        even: (base) =>
+          `${base} と同じコミットなので、マージするものはまだありません。このフォルダで編集してコミットすると、${base} より進んだコミットとしてここに出ます。`,
+        evenUncommitted: (n) =>
+          `編集した ${n} ファイルがまだコミットされていません。このフォルダの中でコミットすると、マージできるようになります。`,
+        behind: (n, base) =>
+          `${base} には、このブランチに無い新しいコミットが ${n} 件あります。このブランチ自身のコミットは無いので、マージするものはまだありません。追いつくには、このフォルダの中で次を実行します:`,
+        ready: (base) =>
+          `このブランチは衝突なく ${base} にマージできます。${base} のフォルダで次を実行します:`,
+        readyUncommitted: (n) =>
+          `編集した ${n} ファイルは未コミットなので、マージには含まれません。`,
+        conflict: (files, base) =>
+          `${base} にマージすると ${files.length} ファイルで衝突します: ${files.join("、")}。先に ${base} をこのブランチに取り込んで衝突を直し、そのあとマージします。このフォルダの中で次を実行します:`,
+      },
+      copyCommand: "コマンドをコピー",
+    },
+    overview: {
+      title: "左の一覧から作業ツリーを選んでください",
+      pick: "1 行が 1 つのフォルダで、それぞれ別のブランチが展開されています。選ぶと、どのファイルを変えているか、元のブランチにマージできるかが出ます。",
+      legendTitle: "行の読み方",
+      baseWord: "基準ブランチ",
+      legend: {
+        ready:
+          "コミットが衝突なく基準ブランチに入ります。マージのコマンドは要約カードにあります。",
+        conflict: "マージすると衝突します。行の左端も赤くなります。",
+        quiet:
+          "マージするものがまだありません。このブランチ自身のコミットが無い状態です。",
+        unchecked: "比較できませんでした。理由は行に出ます。",
+        files:
+          "そのフォルダが変えているファイル。未コミットの編集と、基準ブランチに無いコミットの両方です。",
+        current: "この code-viewer が映しているフォルダです。",
+      },
+      createHint:
+        "「作る」を押すと .worktrees/ の下に新しい作業ツリーができます。",
+    },
     actions: {
       menuTitle: "この作業ツリーへの操作",
       menuFor: (name) => `${name} への操作`,

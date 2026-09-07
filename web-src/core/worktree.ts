@@ -306,3 +306,47 @@ export function findWorktreeOverlaps(
   );
   return overlaps;
 }
+
+/**
+ * 1 行の状態を、初心者が読める 7 つの言葉に潰したもの。
+ *
+ * 画面はこれまで「マージ可否 · N commits ahead · N commits behind」という 1 文を
+ * 組んでいたが、狭い行では末尾が切れ、一番大事な「衝突するか」が読めなかった
+ * (実測)。1 文ではなく種類を返し、ラベル・色・次にやること・凡例を全部この
+ * 1 値から決める。
+ *
+ * - base:      比較の基準そのもの (他の行はこのブランチと比べている)
+ * - no-branch: ブランチが無い (detached / bare)。マージする先が無い
+ * - unchecked: 比べられなかった、またはマージ可否を確かめられなかった
+ * - even:      基準と同じ地点。マージするものがまだ無い
+ * - behind:    基準だけが進んだ。マージするものがまだ無い
+ * - ready:     基準に無いコミットがあり、そのまま入る
+ * - conflict:  基準に無いコミットがあり、入れると衝突する
+ *
+ * **ahead が 0 なら mergeState を見ない。** 自分のコミットが 1 つも無ければ
+ * マージしても何も起きないので、merge-tree の結果が何であれ利用者のやることは
+ * 変わらない。逆に ahead > 0 で unknown は "unchecked" に落とし、「衝突しない」
+ * と混ぜない (調べられなかったことは安全ではない)。
+ */
+export type WorktreeStatusKind =
+  | "base"
+  | "no-branch"
+  | "unchecked"
+  | "even"
+  | "behind"
+  | "ready"
+  | "conflict";
+
+export function worktreeStatusKind(
+  item: { branch: string; divergence: WorktreeDivergence | null },
+  baseBranch: string,
+): WorktreeStatusKind {
+  if (!item.branch) return "no-branch";
+  if (baseBranch && item.branch === baseBranch) return "base";
+  const divergence = item.divergence;
+  if (!divergence) return "unchecked";
+  if (divergence.ahead === 0) return divergence.behind > 0 ? "behind" : "even";
+  if (divergence.mergeState === "clean") return "ready";
+  if (divergence.mergeState === "conflict") return "conflict";
+  return "unchecked";
+}

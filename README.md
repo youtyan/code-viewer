@@ -51,11 +51,17 @@ Requires Node.js 20 or newer. Development uses
   the picked one's changed files in the middle, the diff on the right. Changed
   images, video, and audio show a before / after preview there too, with the
   same media card as the Diff Viewer, read from that worktree. Each row
-  shows how far its branch has drifted from the base branch (ahead / behind) and
-  whether it still merges cleanly — checked with `git merge-tree`, so no working
-  tree is touched — or which files would conflict. For a branch ahead of its
-  base, the middle pane lists those commits above the changed files, with their
-  subjects, authors, and timestamps. Files are split into uncommitted work and
+  carries a plain-words status label (can merge into main, conflicts with main,
+  behind main, up to date, not checked, base branch) with the ahead / behind
+  counts beside it; the merge check uses `git merge-tree`, so no working tree
+  is touched. Picking a row puts a summary card above the diffs: folder,
+  branch, base, how many files are uncommitted or sit in unmerged commits, and
+  what to do next, with the command to copy — merge into the base, or bring the
+  base into the worktree first when it would conflict or is behind. For a
+  branch ahead of its base, a card below the summary lists those commits with
+  their subjects, authors, and timestamps; the file pane stays a list of files.
+  With several worktrees and none picked, the right pane shows a legend of the
+  labels. Files are split into uncommitted work and
   commits made since the branch point, and a banner lists every file that more
   than one worktree is changing, which is the conflict you would otherwise only
   find at merge time. Each row carries the folder it lives in, when its files
@@ -133,6 +139,15 @@ Requires Node.js 20 or newer. Development uses
   bottom tier is the tmux sessions no shell has opened yet. Each pane is
   labelled with the title tmux shows for it — a coding agent usually puts what
   it is doing there, so the tree alone tells you which pane is busy.
+- Click absolute paths, `~/` paths, and `file://` links in output. Repository
+  files open in the viewer at their `:line:column` or `#Lline` location;
+  directories open in the repository list, and external paths reveal their
+  containing folder in the OS. Quote paths containing spaces. HTTP/HTTPS links
+  open in a new tab.
+- Search terminal output with **Cmd/Ctrl+F** (while the terminal has focus),
+  move between matches with **Enter / Shift+Enter**, and close with **Esc**.
+  Copy selected text or all buffered output, jump to the latest output, send
+  **Ctrl+C**, and hide the session list using the terminal controls.
 - Terminal status combines lifecycle reports with priority-based matching of
   the live terminal title and recent visible lines. Matching rules can report
   working, waiting, idle, or keep the previous state. A target is tracked only

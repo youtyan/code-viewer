@@ -1,6 +1,10 @@
 import type { GdpExpandLogic } from "./expand-logic";
 import type { KeymapOverrides } from "./keymap";
 import type { ToolId } from "./tools";
+
+export type TerminalPathResponse =
+  | { kind: "file" | "directory"; path: string }
+  | { kind: "external" };
 import type {
   WorktreeFileOrigin,
   WorktreeItem,

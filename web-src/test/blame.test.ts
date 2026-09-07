@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 import {
   BLAME_ZERO_SHA,
   type BlameCommit,
-  blameRelativeTime,
   blameShortSha,
   blameTimeBins,
   groupBlameLines,
@@ -96,33 +95,6 @@ describe("blameTimeBins", () => {
     );
     expect(bins.a).toBe(4);
     expect(bins.b).toBe(4);
-  });
-});
-
-describe("blameRelativeTime", () => {
-  test("renders human-readable durations", () => {
-    // Pick a "now" comfortably past the largest delta we test (~400 days).
-    const now = 60 * 60 * 24 * 365 * 100;
-    expect(blameRelativeTime(now - 10, now * 1000)).toBe("just now");
-    expect(blameRelativeTime(now - 60 * 5, now * 1000)).toBe("5m ago");
-    expect(blameRelativeTime(now - 60 * 60 * 3, now * 1000)).toBe("3h ago");
-    expect(blameRelativeTime(now - 60 * 60 * 24, now * 1000)).toBe("yesterday");
-    expect(blameRelativeTime(now - 60 * 60 * 24 * 3, now * 1000)).toBe(
-      "3 days ago",
-    );
-    expect(blameRelativeTime(now - 60 * 60 * 24 * 30, now * 1000)).toBe(
-      "last month",
-    );
-    expect(blameRelativeTime(now - 60 * 60 * 24 * 60, now * 1000)).toBe(
-      "2 months ago",
-    );
-    expect(blameRelativeTime(now - 60 * 60 * 24 * 400, now * 1000)).toBe(
-      "last year",
-    );
-  });
-
-  test("returns empty when authorTime is missing", () => {
-    expect(blameRelativeTime(0)).toBe("");
   });
 });
 

@@ -6,11 +6,14 @@ import {
   BLAME_TIME_BIN_COUNT,
   type BlameCommit,
   type BlameResponse,
-  blameRelativeTime,
   blameShortSha,
   blameTimeBins,
   groupBlameLines,
 } from "../core/blame";
+import {
+  formatRelativeTime,
+  type RelativeTimeLang,
+} from "../core/relative-time";
 import type {
   AppRoute,
   DiffRange,
@@ -38,6 +41,8 @@ type SourceShikiHighlighter = {
 
 export type BlameViewDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
+  /** 相対時刻の言語。無ければ英語 (テストや最小構成のホスト用)。 */
+  getLanguage?(): RelativeTimeLang;
   STATE: { route: AppRoute };
   setRoute(route: AppRoute, replace?: boolean): void;
   applyRouteFromLocation?(): void;
@@ -241,9 +246,16 @@ export function createBlameView(deps: BlameViewDeps) {
           meta.className = "gdp-blame-meta";
           const time = document.createElement("span");
           time.className = "gdp-blame-time";
+          // 時刻が取れていないコミットは空のまま (0 秒を「56 年前」にしない)。
           time.textContent = group.commit.isUncommitted
             ? "Uncommitted"
-            : blameRelativeTime(group.commit.authorTime);
+            : group.commit.authorTime > 0
+              ? formatRelativeTime(
+                  group.commit.authorTime * 1000,
+                  Date.now(),
+                  deps.getLanguage?.() ?? "en",
+                )
+              : "";
           meta.appendChild(time);
           const author = document.createElement("span");
           author.className = "gdp-blame-author";

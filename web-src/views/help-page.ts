@@ -224,6 +224,15 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
+                text: "Click an absolute path, ~/ path, or file:// link in output to open it. Files inside this repository open in the viewer, including :line:column and #Lline locations. Directories inside the repository open in the file list; external paths open their containing folder in the OS. Quote paths containing spaces. HTTP and HTTPS URLs open in a new tab. The folder beside the connection dot is the folder where the shell started.",
+              },
+              {
+                kind: "paragraph",
+                text: "Use the search icon or Cmd/Ctrl+F while the terminal is focused to search output. Enter and Shift+Enter move between matches; Escape closes search. Copy uses the selected text, or all buffered output if nothing is selected. The down arrow returns to the latest output. Hide the session list with the top-left button to gain more space, or use the stop button to send Ctrl+C.",
+              },
+
+              {
+                kind: "paragraph",
                 text: "The Terminal item in the header menu opens a bottom panel with a real shell in it. It is an ordinary login shell running on a PTY and drawn with xterm.js, so anything you would run in a terminal works here — including tmux. Run tmux inside it and it behaves exactly as it does in any other terminal, because the panel only resizes the PTY and whatever runs in it follows on its own.",
               },
               {
@@ -257,7 +266,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: 'Every row in the left pane answers two things. How far the branch has drifted from the base branch (how many commits ahead and behind), and whether it still merges: code-viewer runs git merge-tree without touching any working tree, so a row says either that it merges cleanly, or how many files would conflict, or that the check could not run — the last one is kept separate from the first, because "not checked" is not "safe". For a branch ahead of its base, the middle pane lists those commits above the changed files, with their subjects, authors, and timestamps. It then splits that worktree\'s files into work that is not committed yet and commits made since the branch point, with added and deleted line counts; the diff itself is rendered by the same viewer the Diff screen uses, from git run inside that worktree. Changed images, video, and audio show the same before / after preview card as the Diff screen; the bytes are read from that worktree, so a file that exists only there still renders.',
+                text: 'Every row in the left pane carries a status label in plain words: "can merge into main", "conflicts with main", "behind main", "up to date with main", "not checked", or "base branch" for the branch the others are compared with. Next to it, "2 ahead · 1 behind" counts the commits only this branch has and the commits the base has that it lacks; hovering shows the full sentence. code-viewer runs git merge-tree without touching any working tree, so "conflicts" is a real result, and "not checked" is kept apart from "can merge" because "not checked" is not "safe". Picking a row puts a summary card at the top of the right pane: the folder (with open and copy buttons), the branch, the base it is compared with, how many files are edited but not committed and how many sit in commits not yet merged, and what to do next for that state, with the command to copy when there is one — the merge command for a clean branch, or the command that brings the base into the worktree for a conflicting or lagging one. code-viewer copies commands and never runs them. For a branch ahead of its base, a card below the summary lists those commits with their subjects, authors, and timestamps; the middle pane stays a list of files, so filtering and its file count cover everything in it. It splits that worktree\'s files into work that is not committed yet and commits made since the branch point, with added and deleted line counts; the diff itself is rendered by the same viewer the Diff screen uses, from git run inside that worktree. Changed images, video, and audio show the same before / after preview card as the Diff screen; the bytes are read from that worktree, so a file that exists only there still renders. With nothing picked and more than one worktree, the right pane shows a legend of those labels; with only the main worktree, it explains what a worktree is and offers to create one.',
               },
               {
                 kind: "paragraph",
@@ -1059,6 +1068,15 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
+                text: "出力の絶対パス、~/ から始まるパス、file:// リンクをクリックすると開けます。リポジトリ内のファイルはアプリ内で開き、:行:列 や #L行 があればその行へ移動します。リポジトリ内のフォルダはファイル一覧で、外のパスはOSの保存先フォルダで開きます。空白のあるパスは引用符で囲んでください。HTTP・HTTPSのURLは別タブで開きます。接続を示す点の横には、シェルを開いたときのフォルダを表示します。",
+              },
+              {
+                kind: "paragraph",
+                text: "検索アイコン、または端末にフォーカスした状態で Cmd/Ctrl+F を押すと出力を検索できます。Enter・Shift+Enter で一致箇所を移動し、Esc で検索を閉じます。コピーは選択範囲、未選択なら保持中の出力全体が対象です。下矢印で最新の出力へ戻れます。左上のボタンで一覧を隠すと端末を広く使えます。停止ボタンは Ctrl+C を送ります。",
+              },
+
+              {
+                kind: "paragraph",
                 text: "ヘッダメニューの Terminal は、シェルが動く下パネルを開きます。中身は PTY 上のふつうのログインシェルを xterm.js で描いたものなので、ターミナルでできることはそのままできます。tmux もそのひとつで、この中で tmux を起動すれば、他のターミナルで使うのと同じように動きます。パネルがやるのは PTY のリサイズだけで、中で動いているものはそれに自分で追従します。",
               },
               {
@@ -1092,7 +1110,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "左の 1 行が答えるのは 2 つです。基準ブランチからどれだけ離れているか（進んだぶん・遅れたぶんのコミット数）。そしてまだマージできるか — 作業ツリーを一切触らない git merge-tree で試し、「そのままマージできます」「マージすると何ファイルで衝突するか」「確かめられなかった」を出し分けます。最後のものは 1 番目と混ぜません。「確かめていない」は「安全」ではないからです。基準ブランチより先に進んだブランチでは、中央の列の変更ファイルより上に、コミットの件名・作者・時刻を並べます。その下で、その作業ツリーが触っているファイルを、まだコミットしていないぶんと分岐した後のコミットに分けて、追加・削除の行数つきで出します。差分そのものは Diff ビューアと同じ描画で、その作業ツリーの中で走らせた git の結果です。画像・動画・音声の変更は、Diff ビューアと同じ before / after のプレビューカードで出ます。中身はその作業ツリーから読むので、そこにしかないファイルも見えます。",
+                text: "左の 1 行には、状態が短い言葉で出ます。「main にマージできます」「main と衝突」「main より遅れ」「main と同じ」「未確認」、そして他の行の比較先になっているブランチには「基準ブランチ」です。隣の「2 先行 · 1 遅れ」は、このブランチにしか無いコミットの数と、基準にあってこちらに無いコミットの数で、ホバーすると 1 文の説明が出ます。マージできるかは、作業ツリーを一切触らない git merge-tree で試した結果です。「未確認」は「マージできます」と混ぜません。「確かめていない」は「安全」ではないからです。行を選ぶと、右の列の一番上に要約カードが出ます。フォルダ（開く・パスをコピーのボタンつき）、ブランチ、比較先、編集中で未コミットのファイル数と未マージのコミットに入っているファイル数、そしてその状態で次にやることです。コマンドがあるものはコピーできます（そのまま入るブランチにはマージのコマンド、衝突する・遅れているブランチには基準を作業ツリーに取り込むコマンド）。code-viewer はコピーするだけで、実行はしません。基準ブランチより先に進んだブランチでは、要約の下のカードにコミットの件名・作者・時刻を並べます。中央の列は変更ファイルの一覧のままなので、絞り込みも件数もそこに並んでいるもの全部に掛かります。その作業ツリーが触っているファイルは、まだコミットしていないぶんと分岐した後のコミットに分けて、追加・削除の行数つきで出します。差分そのものは Diff ビューアと同じ描画で、その作業ツリーの中で走らせた git の結果です。画像・動画・音声の変更は、Diff ビューアと同じ before / after のプレビューカードで出ます。中身はその作業ツリーから読むので、そこにしかないファイルも見えます。何も選んでいなくて作業ツリーが 2 本以上あるときは、右の列にこれらのラベルの凡例が出ます。本体の 1 本しか無いときは、作業ツリーとは何かの説明と「作る」ボタンが出ます。",
               },
               {
                 kind: "paragraph",

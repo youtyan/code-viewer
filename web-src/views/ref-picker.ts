@@ -3,6 +3,7 @@
 // #repo-target input at construction time.
 
 import { isImeComposing } from "../core/keyboard";
+import { describeWhen, type RelativeTimeLang } from "../core/relative-time";
 import type { AppRoute, DiffRange } from "../core/routes";
 import type { RefCommitResponse, RefResponse } from "../core/types";
 
@@ -26,6 +27,8 @@ export type RefPickerDeps = {
   getRecentRefs?(): string[];
   rememberRecentRef?(ref: string): void;
   recentRefTitle?(): string;
+  /** 相対時刻の言語。無ければ英語 (テストや最小構成のホスト用)。 */
+  getLanguage?(): RelativeTimeLang;
 };
 
 // The quick chips are always offered; picking one is not worth remembering.
@@ -217,34 +220,9 @@ export function createRefPicker(deps: RefPickerDeps) {
     fetchCommitRefs(commitQuery, { append: true });
   }
 
-  function relativeWhen(iso: string): string {
-    const t = Date.parse(iso);
-    if (!Number.isFinite(t)) return iso;
-    const sec = Math.round((Date.now() - t) / 1000);
-    if (sec < 60) return "just now";
-    const min = Math.round(sec / 60);
-    if (min < 60) return `${min}m ago`;
-    const hour = Math.round(min / 60);
-    if (hour < 24) return `${hour}h ago`;
-    const day = Math.round(hour / 24);
-    if (day < 30) return `${day}d ago`;
-    return iso.slice(0, 10);
-  }
-
-  function absoluteWhen(iso: string): string {
-    const t = Date.parse(iso);
-    if (!Number.isFinite(t)) return iso;
-    const d = new Date(t);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-
+  /** 「yesterday (2026-09-06 09:05)」。history の一覧と同じ core の実装。 */
   function displayWhen(iso: string): string {
-    const relative = relativeWhen(iso);
-    const absolute = absoluteWhen(iso);
-    if (relative === absolute || relative === absolute.slice(0, 10))
-      return absolute;
-    return `${relative} (${absolute})`;
+    return describeWhen(iso, Date.now(), deps.getLanguage?.() ?? "en");
   }
 
   function buildPopBody(query: string) {
