@@ -5,7 +5,6 @@
 import { classifyDiffFileKind } from "../core/diff-file-kinds";
 import { compileFileFilter } from "../core/file-filter";
 import { nextVisibleFileIndex } from "../core/file-navigation";
-import { isNativeLinkClick } from "../core/link-click";
 import {
   COLLAPSE_ALL_16_PATHS,
   EXPAND_ALL_16_PATHS,
@@ -16,6 +15,7 @@ import {
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
 } from "../core/icons";
+import { isNativeLinkClick } from "../core/link-click";
 import type {
   FileMeta,
   RepoTreeEntry,
@@ -1588,16 +1588,24 @@ export function createSidebar(deps: SidebarDeps) {
     input.title = invalid ? filter.error || "invalid regular expression" : "";
     const matches = invalid ? () => true : filter.match;
     const filterActive = filter.kind !== "empty" && !invalid;
-    let totalFiles = 0;
-    let visibleFiles = 0;
-    $$("#filelist li[data-path]").forEach((li) => {
-      const match = matches(li.dataset.path || "");
-      li.classList.toggle("hidden", !match);
-      if (li.classList.contains("hidden-by-tests")) return;
-      totalFiles++;
-      if (match) visibleFiles++;
-    });
-    syncSidebarFilterCount(filterActive, visibleFiles, totalFiles);
+    // #filelist を別の view (worktree) が自分で組み立てる画面では、行の出し入れも
+    // 件数もその view が持つ。ここで数えると、既にその view が絞り込んだ後の行
+    // だけを数えて「1 / 1」になる (母数が消える)。差分カードの出し入れは共通の
+    // ままでよい。あれは #diff にあって、この関数だけが面倒を見ている。
+    const listOwnedByView =
+      document.getElementById("filelist")?.dataset.filterOwner === "view";
+    if (!listOwnedByView) {
+      let totalFiles = 0;
+      let visibleFiles = 0;
+      $$("#filelist li[data-path]").forEach((li) => {
+        const match = matches(li.dataset.path || "");
+        li.classList.toggle("hidden", !match);
+        if (li.classList.contains("hidden-by-tests")) return;
+        totalFiles++;
+        if (match) visibleFiles++;
+      });
+      syncSidebarFilterCount(filterActive, visibleFiles, totalFiles);
+    }
     if (!isRepositorySidebarMode()) {
       document
         .querySelectorAll<HTMLElement>(".gdp-file-shell")
@@ -1606,7 +1614,7 @@ export function createSidebar(deps: SidebarDeps) {
           card.classList.toggle("hidden-by-filter", !match);
         });
     }
-    updateTreeDirVisibility(matches, filterActive);
+    if (!listOwnedByView) updateTreeDirVisibility(matches, filterActive);
     if (!isRepositorySidebarMode() && typeof applyViewedState === "function")
       applyViewedState();
   }

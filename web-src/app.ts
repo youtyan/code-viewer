@@ -1456,6 +1456,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     trackLoad,
     getSyntaxHighlight: () => STATE.syntaxHighlight,
+    getLanguage: () => STATE.language,
     loadSourceShikiHighlighter: (lang) =>
       SOURCE_VIEW.loadSourceShikiHighlighter(lang),
     sourceShikiLines: (textValue, lang, highlighter) =>
@@ -5842,6 +5843,25 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 映している対象の ID で、tmux ペイン (?terminal=%14) かこのドロワーから
   // 開いたシェル (?terminal=shell-…)。何も選ぶ前は ?terminal=open。
   const TERMINAL_VIEW = createTerminalView({
+    onOpenPath: (target, line) => {
+      if (target.kind === "directory") {
+        setRoute({
+          screen: "repo",
+          path: target.path,
+          ref: "worktree",
+          range: currentRange(),
+        });
+      } else {
+        setRoute({
+          screen: "file",
+          path: target.path,
+          ref: "worktree",
+          view: "blob",
+          line,
+          range: currentRange(),
+        });
+      }
+    },
     $: <T extends Element = HTMLElement>(sel: string) =>
       document.querySelector<T>(sel),
     trackLoad,
@@ -5934,6 +5954,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     }),
     isTestPath: isTestFilePath,
     getSidebarView: () => STATE.sbView,
+    filterCountTitle: (visible, total) =>
+      uiText().sidebar.filterCountTitle(visible, total),
+    applySidebarFilter: () => SIDEBAR.applyFilter(),
     // ハイライタは遅延バンドル。差分を描く直前に読み込ませる。
     loadHljs: loadSyntaxHighlighter,
     setRoute,
@@ -5985,6 +6008,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       patchSettings({ recentRefs: next });
     },
     recentRefTitle: () => uiText().global.recentRef,
+    getLanguage: () => STATE.language,
   });
   if (REF_PICKER) {
     const historyRefInput =

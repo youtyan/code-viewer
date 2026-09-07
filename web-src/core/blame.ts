@@ -106,30 +106,6 @@ export function blameTimeBins(
   return result;
 }
 
-export function blameRelativeTime(
-  authorTimeSec: number,
-  nowMs: number = Date.now(),
-): string {
-  if (!authorTimeSec || authorTimeSec <= 0) return "";
-  const sec = Math.max(0, Math.round(nowMs / 1000 - authorTimeSec));
-  if (sec < 60) return "just now";
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hour = Math.round(min / 60);
-  if (hour < 24) return `${hour}h ago`;
-  const day = Math.round(hour / 24);
-  if (day === 1) return "yesterday";
-  if (day < 7) return `${day} days ago`;
-  if (day < 14) return "last week";
-  if (day < 30) return `${Math.round(day / 7)} weeks ago`;
-  const month = Math.round(day / 30);
-  if (month === 1) return "last month";
-  if (month < 12) return `${month} months ago`;
-  const year = Math.round(month / 12);
-  if (year === 1) return "last year";
-  return `${year} years ago`;
-}
-
 // ai-dup-check: allow -- 7-char short SHA helper, intentionally a thin string utility.
 export function blameShortSha(sha: string): string {
   if (!sha || sha === BLAME_ZERO_SHA) return "0000000";

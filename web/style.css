@@ -3798,7 +3798,7 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 #line-ref-pill {
   position: fixed;
   left: 50%;
-  bottom: 24px;
+  bottom: calc(var(--app-panel-visible-height) + 24px);
   transform: translateX(-50%);
   z-index: 400;
   display: inline-flex;
@@ -7980,6 +7980,12 @@ body.gdp-database-page #load-bar {
    基底の「ヘッダ + 上部バー」がそのまま正しい。ヘッダだけに縮めると、
    左右のパネルと本文が上部バーの下に潜り込む。 */
 
+body.gdp-worktree-page {
+  /* 本文の先頭に置くコミット一覧の上限。超えたぶんはそのカードの中で
+     スクロールさせ、後ろの差分カードは押し下げない。 */
+  --worktree-commits-max-h: 320px;
+}
+
 body.gdp-worktree-page #query-history-panel {
   display: none !important;
 }
@@ -8043,17 +8049,288 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   cursor: default;
 }
 
-/* 選択中の worktree にだけ出すコミット。履歴画面の行を再利用するが、
-   ここでは選択操作を持たないので hover と pointer は付けない。 */
-#filelist .worktree-commit,
-#filelist.tree .worktree-commit {
-  display: block;
-  padding: 8px 12px;
-  border-left-width: 2px;
-  cursor: default;
+/* 基準ブランチより先のコミット。差分カードの上に、同じ .gdp-file-shell の
+   見た目で 1 枚だけ置く。サイドバーには置かない (そこはファイルの一覧で、
+   件数も絞り込みもファイルにしか掛からない)。 */
+.worktree-commits {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0 0 16px;
+  overflow: hidden;
 }
-#filelist .worktree-commit:hover {
-  background: transparent;
+.worktree-commits-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--ui-font-md);
+}
+.worktree-commits-title {
+  font-weight: 600;
+}
+.worktree-commits-note {
+  margin: 0;
+  padding: 8px 14px;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+}
+.worktree-commits-error {
+  color: var(--danger);
+}
+.worktree-commits-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* 差分カードを画面外へ押し出さないための上限。コミットは基準ブランチとの
+     差なので 50 件返ることがあり、そのまま並べると本文の先頭が全部これになる。 */
+  max-height: var(--worktree-commits-max-h);
+  overflow-y: auto;
+}
+.worktree-commit {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+}
+.worktree-commits-list > .worktree-commit:first-child {
+  border-top: 0;
+}
+.worktree-commit .sha {
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: var(--ui-font-sm);
+  color: var(--accent);
+}
+.worktree-commit .subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ui-font-md);
+}
+.worktree-commit .author,
+.worktree-commit .when {
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+
+/* 状態チップ。左の行・本文の要約カード・凡例で同じものを使う。押せないので
+   hover は無く、状態で変わるのは色だけ (寸法は変えない)。
+   以前の 1 文 (「merges cleanly · 2 commits ahead of main · …」) は行の幅で
+   末尾が切れ、一番大事な「衝突するか」が読めなかった。 */
+.worktree-status-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 色はテーマトークンから導く。light / dark の追従を壊さないため hex は書かない。 */
+.worktree-status-chip.ready {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  background: color-mix(in srgb, var(--success) 9%, var(--bg));
+}
+.worktree-status-chip.conflict {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 9%, var(--bg));
+}
+.worktree-status-chip.unchecked {
+  color: var(--attn);
+  border-color: color-mix(in srgb, var(--attn) 45%, var(--border));
+  background: color-mix(in srgb, var(--attn) 9%, var(--bg));
+}
+.worktree-status-chip.base {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-subtle);
+}
+
+/* 行の 3 段目の「ブランチ main」。ラベルは薄く、値は等幅のまま。 */
+.history-item .worktree-row-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+.worktree-row-label {
+  flex: 0 0 auto;
+  color: var(--fg-subtle);
+}
+/* 基準ブランチの行だけに添える 1 行。折り返してよい (.meta2 の省略ルールには
+   乗せない。乗せると末尾の「戻ります」が消える)。 */
+.history-item .worktree-row-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  line-height: 1.5;
+}
+
+/* 行の 4 段目: チップと「2 ahead · 1 behind」。 */
+.history-item .worktree-row-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 5px;
+}
+.worktree-row-drift,
+.worktree-summary-drift {
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+
+/* 選んだ作業ツリーの要約。差分カードの上に 1 枚。枠はコミットのカードと同じ。 */
+.worktree-summary {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0 0 16px;
+  padding: 12px 16px 14px;
+  font-size: var(--ui-font-base);
+}
+.worktree-summary-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.worktree-summary-name {
+  font-weight: 600;
+  font-size: var(--ui-font-md);
+}
+.worktree-summary-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 14px;
+  margin: 0;
+}
+.worktree-summary-facts dt {
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.worktree-summary-facts dd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+.worktree-summary-facts .sha {
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+/* パスは末尾が肝心。.worktree-row-path と同じ手で頭側を省略する。 */
+.worktree-summary-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+.worktree-summary-path::before {
+  content: "\200E";
+}
+.worktree-summary-next {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.worktree-summary-next-title {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
+}
+.worktree-summary-next p {
+  margin: 0 0 8px;
+  max-width: 72em;
+  line-height: 1.6;
+}
+.worktree-summary-note {
+  color: var(--fg-muted);
+}
+.worktree-summary-error {
+  color: var(--danger);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* コピーできるコマンド。コードの箱は縮み、ボタンは縮まない。 */
+.worktree-summary-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  margin-bottom: 8px;
+}
+.worktree-summary-command code {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--bg-mute);
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: var(--ui-font-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.worktree-summary-command .gdp-btn {
+  flex: 0 0 auto;
+}
+
+/* 何も選んでいないときの凡例 (.worktree-intro と同じカードの中)。 */
+.worktree-legend-title {
+  color: var(--fg);
+  font-weight: 600;
+  margin-top: 14px;
+}
+.worktree-legend {
+  list-style: none;
+  margin: 6px 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.worktree-legend li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.worktree-legend-terms {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.worktree-legend-term,
+.worktree-intro .worktree-badge {
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+.worktree-legend-body {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* 他の作業ツリーも触っているファイル。何本と重なっているかを行末の数で出す。
@@ -16340,9 +16617,68 @@ html[data-theme="dark"] .tools-code span[style] {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #000;
+  background: #101318;
 }
+/* FitAddon subtracts the terminal's own padding when measuring usable cells. */
+.terminal-screen > .xterm {
+  padding: 10px 12px;
+  box-sizing: border-box;
+}
+/* Terminal controls share the app's theme; the terminal keeps an ANSI-friendly canvas. */
+.terminal-header { justify-content: space-between; background: var(--bg-soft); }
+.terminal-list-hidden .terminal-lists,
+.terminal-list-hidden .terminal-list-resizer { display: none; }
+.terminal-screen[hidden],
+.terminal-welcome[hidden],
+.terminal-output-search[hidden] { display: none; }
+.terminal-action { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.terminal-action svg { width: 16px; height: 16px; fill: currentColor; }
+.terminal-action:disabled { opacity: .4; cursor: default; }
+.terminal-action:focus-visible,
+.terminal-context:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.terminal-action.active { color: var(--accent); background: var(--accent-muted); }
+.terminal-screen-toolbar {
+  display: flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  min-width: 0; padding: 4px 12px; border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.terminal-context {
+  display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;
+  padding: 0; height: var(--ui-control-md); border: 0; background: none;
+  color: var(--fg-muted); font: inherit; font-size: var(--ui-font-sm);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; cursor: pointer;
+}
+.terminal-context::before {
+  content: ''; width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--fg-muted);
+}
+.terminal-screen-toolbar[data-connected="true"] .terminal-context::before { background: var(--success, #238636); }
+.terminal-context:hover:enabled { color: var(--accent); }
+.terminal-output-search {
+  display: flex; align-items: center; flex: 0 0 auto; gap: 6px;
+  padding: 6px 12px; background: var(--bg-soft); border-bottom: 1px solid var(--border);
+}
+.terminal-match-count { flex: 0 0 70px; text-align: center; font-size: var(--ui-font-sm); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.terminal-welcome {
+  display: flex; flex: 1 1 auto; min-height: 0; overflow: auto;
+  align-items: center; justify-content: center; flex-direction: column;
+  padding: 20px; box-sizing: border-box; gap: 12px; text-align: center;
+  background: radial-gradient(ellipse at 50% 20%, var(--accent-muted), transparent 70%), var(--bg);
+  color: var(--fg);
+}
+.terminal-welcome-icon {
+  display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--accent);
+}
+.terminal-welcome-icon svg { width: 24px; height: 24px; fill: currentColor; }
+.terminal-welcome strong { font-size: var(--ui-font-lg); }
+.terminal-welcome p { max-width: 450px; margin: 0; line-height: 1.7; font-size: var(--ui-font-md); color: var(--fg-muted); }
+.terminal-welcome-create { width: auto; height: var(--ui-control-lg); padding: 0 16px; }
 .terminal-status {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 8rem;
+  overflow: auto;
   flex: 0 0 auto;
   margin: 0;
   padding: 6px 12px;

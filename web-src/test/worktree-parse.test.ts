@@ -6,7 +6,11 @@
 // <reason> は、実際にその状態を作って確かめた形)。
 
 import { describe, expect, test } from "vitest";
-import type { WorktreeFileChange } from "../core/worktree";
+import type {
+  WorktreeDivergence,
+  WorktreeFileChange,
+  WorktreeStatusKind,
+} from "../core/worktree";
 import {
   findWorktree,
   findWorktreeOverlaps,
@@ -15,6 +19,7 @@ import {
   parseWorktreeList,
   worktreeBranchError,
   worktreeNameError,
+  worktreeStatusKind,
 } from "../core/worktree";
 
 /** 生の制御文字はソースに直書きしない (server.md)。 */
@@ -463,5 +468,198 @@ describe("worktreeBranchError", () => {
     },
   ])("$name", ({ input, expected }) => {
     expect(worktreeBranchError(input)).toBe(expected);
+  });
+});
+
+describe("worktreeStatusKind", () => {
+  function divergence(
+    overrides: Partial<WorktreeDivergence> = {},
+  ): WorktreeDivergence {
+    return {
+      base: "main",
+      ahead: 1,
+      behind: 0,
+      mergeState: "clean",
+      conflicts: [],
+      ...overrides,
+    };
+  }
+
+  // ブランチと基準の組み合わせ。位置関係より先に決まる。
+  test.each([
+    {
+      name: "no branch at all (detached), whatever the comparison says",
+      branch: "",
+      base: "main",
+      divergence: divergence(),
+      expected: "no-branch",
+    },
+    {
+      name: "no branch and no base either",
+      branch: "",
+      base: "",
+      divergence: null,
+      expected: "no-branch",
+    },
+    {
+      name: "the base branch itself",
+      branch: "main",
+      base: "main",
+      divergence: null,
+      expected: "base",
+    },
+    {
+      name: "the base branch itself, even with a comparison attached",
+      branch: "main",
+      base: "main",
+      divergence: divergence(),
+      expected: "base",
+    },
+    {
+      name: "a branch when no base branch could be found",
+      branch: "main",
+      base: "",
+      divergence: null,
+      expected: "unchecked",
+    },
+    {
+      name: "a branch whose comparison failed",
+      branch: "topic",
+      base: "main",
+      divergence: null,
+      expected: "unchecked",
+    },
+  ])("$name", ({ branch, base, divergence, expected }) => {
+    expect(worktreeStatusKind({ branch, divergence }, base)).toBe(expected);
+  });
+
+  // 位置関係の軸。ブランチは基準と別のもの。
+  test.each([
+    {
+      name: "level and clean",
+      ahead: 0,
+      behind: 0,
+      mergeState: "clean",
+      expected: "even",
+    },
+    // ahead が 0 なら確かめられなくても「マージするものが無い」が先。
+    {
+      name: "level but unchecked",
+      ahead: 0,
+      behind: 0,
+      mergeState: "unknown",
+      expected: "even",
+    },
+    {
+      name: "only behind",
+      ahead: 0,
+      behind: 1,
+      mergeState: "clean",
+      expected: "behind",
+    },
+    {
+      name: "only behind, merge state irrelevant",
+      ahead: 0,
+      behind: 3,
+      mergeState: "conflict",
+      expected: "behind",
+    },
+    {
+      name: "ahead and clean",
+      ahead: 1,
+      behind: 0,
+      mergeState: "clean",
+      expected: "ready",
+    },
+    // 遅れていても、そのまま入るなら ready。遅れは妨げにならない。
+    {
+      name: "ahead, behind, and clean",
+      ahead: 1,
+      behind: 2,
+      mergeState: "clean",
+      expected: "ready",
+    },
+    {
+      name: "ahead and conflicting",
+      ahead: 1,
+      behind: 0,
+      mergeState: "conflict",
+      expected: "conflict",
+    },
+    {
+      name: "ahead, behind, and conflicting",
+      ahead: 2,
+      behind: 2,
+      mergeState: "conflict",
+      expected: "conflict",
+    },
+    // 「調べられなかった」を「衝突しない」に寄せない。
+    {
+      name: "ahead but unchecked",
+      ahead: 1,
+      behind: 0,
+      mergeState: "unknown",
+      expected: "unchecked",
+    },
+    {
+      name: "far ahead but unchecked",
+      ahead: 3,
+      behind: 1,
+      mergeState: "unknown",
+      expected: "unchecked",
+    },
+  ] as const)("$name", ({ ahead, behind, mergeState, expected }) => {
+    expect(
+      worktreeStatusKind(
+        {
+          branch: "topic",
+          divergence: divergence({ ahead, behind, mergeState }),
+        },
+        "main",
+      ),
+    ).toBe(expected);
+  });
+
+  // 入力空間の全数: ブランチ 3 種 × 基準 2 種 × 位置関係 13 種 = 78 通り。
+  // 上の表は代表値。ここは仕様文を 1 つずつ不変条件にして全部に当てる。
+  test("every combination lands on exactly the kind the rules name", () => {
+    const branches = ["", "main", "topic"];
+    const bases = ["", "main"];
+    const shapes: Array<WorktreeDivergence | null> = [null];
+    for (const ahead of [0, 1]) {
+      for (const behind of [0, 1]) {
+        for (const mergeState of ["clean", "conflict", "unknown"] as const) {
+          shapes.push(divergence({ ahead, behind, mergeState }));
+        }
+      }
+    }
+    let seen = 0;
+    for (const branch of branches) {
+      for (const base of bases) {
+        for (const shape of shapes) {
+          seen++;
+          const kind: WorktreeStatusKind = worktreeStatusKind(
+            { branch, divergence: shape },
+            base,
+          );
+          if (!branch) {
+            expect(kind).toBe("no-branch");
+          } else if (base && branch === base) {
+            expect(kind).toBe("base");
+          } else if (!shape) {
+            expect(kind).toBe("unchecked");
+          } else if (shape.ahead === 0) {
+            expect(kind).toBe(shape.behind > 0 ? "behind" : "even");
+          } else if (shape.mergeState === "clean") {
+            expect(kind).toBe("ready");
+          } else if (shape.mergeState === "conflict") {
+            expect(kind).toBe("conflict");
+          } else {
+            expect(kind).toBe("unchecked");
+          }
+        }
+      }
+    }
+    expect(seen).toBe(78);
   });
 });

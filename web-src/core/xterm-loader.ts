@@ -28,6 +28,7 @@ export type XtermOptions = {
   /** capture-pane の出力は行末に改行しか持たないので CR を補う。 */
   convertEol?: boolean;
   theme?: XtermTheme;
+  linkHandler?: { activate(event: MouseEvent, text: string): void };
 };
 
 /** xterm の ITheme のうち、こちらで指定する色だけ。 */
@@ -41,10 +42,13 @@ export type XtermTheme = {
 
 /** バッファの 1 行。文字列に起こして中身を見るためだけに使う。 */
 export type XtermBufferLine = {
+  readonly isWrapped: boolean;
+  getCell(x: number): { getChars(): string; getWidth(): number } | undefined;
   translateToString(trimRight?: boolean): string;
 };
 
 export type XtermBuffer = {
+  readonly length: number;
   /** 画面の一番上がバッファの何行目か (スクロールで動く)。 */
   readonly viewportY: number;
   /** スクロールバックを除いた画面先頭の行番号。 */
@@ -70,6 +74,14 @@ export type XtermTerminal = {
   dispose(): void;
   loadAddon(addon: XtermAddon): void;
   onData(handler: (data: string) => void): XtermDisposable;
+  getSelection(): string;
+  clearSelection(): void;
+  select(column: number, row: number, length: number): void;
+  scrollToLine(line: number): void;
+  scrollToBottom(): void;
+  registerLinkProvider(provider: {
+    provideLinks(row: number, callback: (links: XtermLink[]) => void): void;
+  }): XtermDisposable;
   onResize(
     handler: (size: { cols: number; rows: number }) => void,
   ): XtermDisposable;
@@ -87,6 +99,14 @@ export type XtermTerminal = {
   onRender(
     handler: (range: { start: number; end: number }) => void,
   ): XtermDisposable;
+};
+
+export type XtermLink = {
+  text: string;
+  range: { start: { x: number; y: number }; end: { x: number; y: number } };
+  activate(event: MouseEvent, text: string): void;
+  hover?(event: MouseEvent, text: string): void;
+  leave?(): void;
 };
 
 export type XtermAddon = {

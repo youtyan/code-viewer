@@ -41,6 +41,12 @@ type FakeTerminalState = {
   lines: string[];
   cursorY: number;
   inputHandler(data: string): void;
+  keyHandler(event: KeyboardEvent): boolean;
+  selection: string;
+  selected: { col: number; row: number; length: number } | null;
+  scrolled: number;
+  links: import("../core/xterm-loader").XtermLink[];
+  provideLinks(row: number): void;
 };
 const FAKE_STATE_KEY = "__terminalScreenFakeState";
 
@@ -68,6 +74,12 @@ vi.mock("../core/xterm-loader", () => {
     lines: [],
     cursorY: 0,
     inputHandler: () => undefined,
+    keyHandler: () => true,
+    selection: "",
+    selected: null,
+    scrolled: 0,
+    links: [],
+    provideLinks: () => undefined,
   };
   (globalThis as Record<string, unknown>).__terminalScreenFakeState = state;
   class FakeTerminal {
@@ -78,15 +90,48 @@ vi.mock("../core/xterm-loader", () => {
     options: Record<string, unknown>;
     buffer = {
       active: {
+        get length() {
+          return state.lines.length;
+        },
         viewportY: 0,
         baseY: 0,
         get cursorY() {
           return state.cursorY;
         },
         getLine: (y: number) => ({
+          isWrapped: false,
+          getCell: (x: number) => ({
+            getWidth: () => 1,
+            getChars: () => state.lines[y]?.[x] ?? "",
+          }),
           translateToString: () => state.lines[y] ?? "",
         }),
       },
+    };
+    getSelection = () => state.selection;
+    clearSelection = () => {
+      state.selected = null;
+    };
+    select = (col: number, row: number, length: number) => {
+      state.selected = { col, row, length };
+    };
+    scrollToLine = (row: number) => {
+      state.scrolled = row;
+    };
+    scrollToBottom = () => {
+      state.scrolled = state.lines.length;
+    };
+    registerLinkProvider = (provider: {
+      provideLinks(
+        row: number,
+        callback: (links: import("../core/xterm-loader").XtermLink[]) => void,
+      ): void;
+    }) => {
+      state.provideLinks = (row) =>
+        provider.provideLinks(row, (links) => {
+          state.links = links;
+        });
+      return disposable();
     };
     constructor(options: Record<string, unknown>) {
       this.options = { ...options };
@@ -115,7 +160,8 @@ vi.mock("../core/xterm-loader", () => {
       parent.appendChild(root);
       this.element = root;
     };
-    write = () => {
+    write = (_data: string, callback?: () => void) => {
+      callback?.();
       for (const handler of this.renderHandlers) {
         handler({ start: 0, end: this.rows - 1 });
       }
@@ -135,7 +181,11 @@ vi.mock("../core/xterm-loader", () => {
       return disposable();
     };
     onResize = disposable;
-    attachCustomKeyEventHandler = noop;
+    attachCustomKeyEventHandler = (
+      handler: (event: KeyboardEvent) => boolean,
+    ) => {
+      state.keyHandler = handler;
+    };
     attachCustomWheelEventHandler = noop;
   }
   class FakeFitAddon {
@@ -175,6 +225,7 @@ const IMAGE: ImageRef = {
 type OpenedSource = {
   url: string;
   emitOutput(data: string): void;
+  emitOpen(): void;
 };
 
 let sources: OpenedSource[] = [];
@@ -197,6 +248,9 @@ function installFakes(): void {
     constructor(url: string) {
       sources.push({
         url,
+        emitOpen: () => {
+          this.handlers.get("open")?.({ data: "ok" } as MessageEvent<string>);
+        },
         emitOutput: (data) => {
           this.handlers.get("output")?.({
             data: JSON.stringify({ data }),
@@ -303,8 +357,13 @@ beforeEach(() => {
   // 画面に出ている行。production はここを読んで、どの行の上に重ねるかを決める。
   state.lines = ["$ make chart", "wrote docs/out.png", ""];
   state.cursorY = 2;
+  state.selection = "";
+  state.selected = null;
+  state.scrolled = 0;
   installFakes();
   handle = createTerminalScreen({
+    onOpenPath: () => undefined,
+    onCreateShell: () => undefined,
     trackLoad: (promise) => promise,
     actionHeaders: () => ({}),
     getText: () => terminalText("en"),
@@ -324,6 +383,7 @@ async function attachShell(session: ShellSession): Promise<OpenedSource> {
   await handle.attach(session);
   const source = sources[sources.length - 1];
   if (!source) throw new Error("no subscription opened");
+  source.emitOpen();
   return source;
 }
 
@@ -500,15 +560,56 @@ describe("ターミナル入力", () => {
     });
   });
 
-  test("入力の送信失敗では HTTP 状態とレスポンス本文をすべて表示する", async () => {
-    await attachShell(SHELL);
+  test("入力の送信失敗は後続の出力でも消えず、HTTP 状態と本文をすべて表示する", async () => {
+    const source = await attachShell(SHELL);
     failingUrl = "/_shell/keys";
 
     fakeState().inputHandler("x");
     await flush();
+    source.emitOutput("still running");
 
     expect(statusMessages[statusMessages.length - 1]).toBe(
-      'Failed to send input. (HTTP 503 Service Unavailable): {"errors":[{"code":"E1"},{"code":"E2"}]}',
+      'Failed to send input.\nError: Failed to send input. (HTTP 503 Service Unavailable): {"errors":[{"code":"E1"},{"code":"E2"}]}',
     );
+  });
+});
+
+describe("terminal workspace controls", () => {
+  test("search selects output, navigates between matches and closes on Escape", async () => {
+    await attachShell(SHELL);
+    fakeState().lines = ["first sample", "second sample", "other"];
+    expect(
+      fakeState().keyHandler(
+        new KeyboardEvent("keydown", { key: "f", ctrlKey: true }),
+      ),
+    ).toBe(false);
+    const query = handle.el.querySelector<HTMLInputElement>(
+      ".terminal-output-search input",
+    );
+    if (!query) throw new Error("search missing");
+    query.value = "sample";
+    query.dispatchEvent(new Event("input"));
+    expect(fakeState().selected).toEqual({ col: 6, row: 0, length: 6 });
+    query.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    expect(fakeState().selected).toEqual({ col: 7, row: 1, length: 6 });
+    query.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(
+      handle.el.querySelector<HTMLElement>(".terminal-output-search")?.hidden,
+    ).toBe(true);
+    expect(fakeState().selected).toBeNull();
+  });
+
+  test("absolute paths use terminal link coordinates", async () => {
+    await attachShell(SHELL);
+    fakeState().lines = ["at /repo/sample.ts:12:3"];
+    fakeState().provideLinks(1);
+    expect(
+      fakeState().links.map(({ text, range }) => ({ text, range })),
+    ).toEqual([
+      {
+        text: "/repo/sample.ts",
+        range: { start: { x: 4, y: 1 }, end: { x: 23, y: 1 } },
+      },
+    ]);
   });
 });

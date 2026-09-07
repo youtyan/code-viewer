@@ -24,6 +24,11 @@ import {
   formatErrorDetail,
   responseErrorMessage,
 } from "../../core/error-detail";
+import {
+  iconSvg,
+  SIDEBAR_HIDE_16_PATHS,
+  SIDEBAR_SHOW_16_PATHS,
+} from "../../core/icons";
 import { blockScrollChaining } from "../../core/scroll-chaining";
 import type {
   ShellListResponse,
@@ -58,6 +63,7 @@ const DEFAULT_LIST_WIDTH = 440;
 const LIST_WIDTH_STORAGE_KEY = "code-viewer:terminal-list-width";
 
 export type TerminalViewDeps = {
+  onOpenPath: Parameters<typeof createTerminalScreen>[0]["onOpenPath"];
   $: <T extends Element = HTMLElement>(sel: string) => T | null;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
   /** 副作用リクエスト用のヘッダ (app.ts の actionHeaders)。 */
@@ -100,6 +106,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   let fontLarger: HTMLButtonElement | null = null;
   let fontValue: HTMLElement | null = null;
   let inputToggle: HTMLButtonElement | null = null;
+  let listToggle: HTMLButtonElement | null = null;
+  let listHidden = false;
   let statusEl: HTMLElement | null = null;
   let listEl: HTMLElement | null = null;
   let attached: ShellSession | null = null;
@@ -200,6 +208,19 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     inputToggle.title = inputEnabled
       ? current.writableTitle
       : current.readOnlyTitle;
+  }
+
+  function syncListToggle(): void {
+    if (!listToggle) return;
+    const label = listHidden ? text().showSessions : text().hideSessions;
+    listToggle.title = label;
+    listToggle.setAttribute("aria-label", label);
+    listToggle.setAttribute("aria-expanded", String(!listHidden));
+    listToggle.innerHTML = iconSvg(
+      "",
+      listHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS,
+    );
+    getMount()?.classList.toggle("terminal-list-hidden", listHidden);
   }
 
   function selectShell(session: ShellSession): void {
@@ -497,6 +518,15 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     // 見出しと閉じるはパネルのタブ列が持つ。ここには中身固有の操作だけ置く。
     const header = document.createElement("header");
     header.className = "terminal-header";
+    listToggle = document.createElement("button");
+    listToggle.type = "button";
+    listToggle.className = "terminal-reload terminal-action";
+    listToggle.addEventListener("click", () => {
+      listHidden = !listHidden;
+      syncListToggle();
+      screen?.refit();
+    });
+    header.append(listToggle);
 
     const actions = document.createElement("div");
     actions.className = "terminal-header-actions";
@@ -577,6 +607,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     });
 
     screen = createTerminalScreen({
+      onOpenPath: deps.onOpenPath,
+      onCreateShell: () => void createShell(),
       trackLoad: deps.trackLoad,
       actionHeaders: deps.actionHeaders,
       getText: text,
@@ -608,6 +640,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     host.append(header, body);
     syncInputToggle();
     syncFontSize();
+    syncListToggle();
   }
 
   function isOpen(): boolean {
@@ -685,6 +718,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     }
     syncInputToggle();
     syncFontSize();
+    syncListToggle();
+    screen?.localize();
     board.localize();
     renderLists();
   }

@@ -14,6 +14,7 @@
 
 import { formatErrorDetail } from "../../core/error-detail";
 import { isShellSessionId, type ShellSessionId } from "../../core/shell";
+import { handleTerminalOpenPath } from "../terminal/open-path";
 import {
   dispatchRoutes,
   handleError,
@@ -238,6 +239,11 @@ export function handleShellRoute(
     req,
     url,
     {
+      "/_shell/open-path": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleTerminalOpenPath(req, cwd),
+      },
       "/_shell/list": {
         methods: ["GET"],
         sideEffect: false,

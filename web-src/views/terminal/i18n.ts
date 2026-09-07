@@ -5,6 +5,25 @@
 export type TerminalLang = "en" | "ja";
 
 export type TerminalText = {
+  searchOutput: string;
+  copyOutput: string;
+  scrollLatest: string;
+  previousMatch: string;
+  nextMatch: string;
+  closeSearch: string;
+  interrupt: string;
+  openPathFailed: string;
+  copyFailed: string;
+  copiedOutput: string;
+  openWorkingDirectory: string;
+  welcomeTitle: string;
+  welcomeHint: string;
+  openLink: string;
+  hideSessions: string;
+  showSessions: string;
+  imageLoadFailed: string;
+  inputUnavailable: string;
+
   title: string;
   open: string;
   close: string;
@@ -144,6 +163,26 @@ function elapsedFormatter(
 }
 
 const EN: TerminalText = {
+  searchOutput: "Find in output · ⌘/Ctrl+F",
+  copyOutput: "Copy selection or output",
+  scrollLatest: "Jump to latest output",
+  previousMatch: "Previous match · Shift+Enter",
+  nextMatch: "Next match · Enter",
+  closeSearch: "Close search · Esc",
+  interrupt: "Interrupt · Ctrl+C",
+  openPathFailed: "Could not open this path.",
+  copyFailed: "Could not copy the output.",
+  copiedOutput: "Copied to clipboard.",
+  openWorkingDirectory: "Open shell starting folder",
+  welcomeTitle: "Your workspace, ready to go",
+  welcomeHint:
+    "Open a shell or choose a session on the left. Search output and open file paths directly from the terminal.",
+  openLink: "Click to open",
+  hideSessions: "Hide session list",
+  showSessions: "Show session list",
+  imageLoadFailed: "Could not display this image.",
+  inputUnavailable: "Terminal input is unavailable.",
+
   title: "Terminal",
   open: "tmux panes",
   close: "close",
@@ -224,6 +263,26 @@ const EN: TerminalText = {
 };
 
 const JA: TerminalText = {
+  searchOutput: "出力内を検索 · ⌘/Ctrl+F",
+  copyOutput: "選択範囲・出力をコピー",
+  scrollLatest: "最新の出力へ移動",
+  previousMatch: "前の一致 · Shift+Enter",
+  nextMatch: "次の一致 · Enter",
+  closeSearch: "検索を閉じる · Esc",
+  interrupt: "実行を中断 · Ctrl+C",
+  openPathFailed: "このパスを開けませんでした。",
+  copyFailed: "出力をコピーできませんでした。",
+  copiedOutput: "クリップボードにコピーしました。",
+  openWorkingDirectory: "シェルを開いたフォルダを表示",
+  welcomeTitle: "ここから作業をはじめよう",
+  welcomeHint:
+    "シェルを開くか、左の一覧から選んでください。出力を検索したり、パスをクリックして開いたりできます。",
+  openLink: "クリックで開く",
+  hideSessions: "セッション一覧を隠す",
+  showSessions: "セッション一覧を表示",
+  imageLoadFailed: "画像を表示できませんでした。",
+  inputUnavailable: "端末に入力できません。",
+
   title: "ターミナル",
   open: "tmux ペイン",
   close: "閉じる",
