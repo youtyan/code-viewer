@@ -214,6 +214,7 @@ function setup(
         values.agentRulesSource = "default";
       }),
     agentHooksSection: document.createElement("div"),
+    agentAccountsSection: document.createElement("div"),
   });
 
   return {

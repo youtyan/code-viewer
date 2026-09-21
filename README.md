@@ -83,6 +83,18 @@ Requires Node.js 20 or newer. Development uses
   Finished turns then show as "Finished · unread", and agents that cannot be
   recognized by process name are listed too. codex runs a new hook only after
   you trust it in `/hooks`.
+- Keep several claude and codex accounts from Settings → Accounts. An account
+  is a settings directory (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`); code-viewer can
+  create one that links your settings from the default directory (you choose
+  what to share; sign-in, account identity, history and caches can never be
+  shared) or register one you already
+  have, showing what will be created and linked first. Sign in once per account
+  with the official command, opened in a new tmux window. The Agents list then
+  shows which account each agent runs with, a band of account cards with the
+  5-hour and weekly usage (codex from its session logs; claude through an
+  optional status line wrapper that returns your status line unchanged), and
+  New agent starts claude or codex with a chosen account and project in a new
+  tmux window.
 - Open files directly from the repository or diff view, including text-like
   config/prompt files and large generated files (virtualized source viewer
   with copy/open-full-view).

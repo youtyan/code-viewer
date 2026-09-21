@@ -12,6 +12,7 @@ import type { AgentKind } from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
 import { elapsedBucket } from "../../core/terminal-board";
 import { terminalText } from "../terminal/i18n";
+import { ACCOUNTS_EN, ACCOUNTS_JA, type AccountsText } from "./accounts-i18n";
 
 export type AgentsLang = "en" | "ja";
 
@@ -92,6 +93,8 @@ export type AgentsText = {
   hookHintClose: string;
   /** 設定画面の「エージェント連携」。 */
   hooks: AgentHooksText;
+  /** アカウント・使用量・起動。 */
+  accounts: AccountsText;
 };
 
 export type AgentHooksText = {
@@ -425,6 +428,7 @@ const EN: AgentsText = {
   hookHintOpen: "Set up",
   hookHintClose: "Hide this",
   hooks: HOOKS_EN,
+  accounts: ACCOUNTS_EN,
 };
 
 const JA: AgentsText = {
@@ -504,6 +508,7 @@ const JA: AgentsText = {
   hookHintOpen: "設定する",
   hookHintClose: "閉じる",
   hooks: HOOKS_JA,
+  accounts: ACCOUNTS_JA,
 };
 
 const TEXT: Record<AgentsLang, AgentsText> = { en: EN, ja: JA };

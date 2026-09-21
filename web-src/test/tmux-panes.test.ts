@@ -24,6 +24,7 @@ type PaneFields = {
   height: string;
   command: string;
   path: string;
+  pid: string;
   title: string;
 };
 
@@ -40,6 +41,7 @@ const BASE: PaneFields = {
   height: "24",
   command: "shell",
   path: "/tmp/sample",
+  pid: "4242",
   title: "sample title",
 };
 
@@ -59,6 +61,7 @@ function line(overrides: Partial<PaneFields> = {}): string {
     f.height,
     f.command,
     f.path,
+    f.pid,
     f.title,
   ].join(SEP);
 }
@@ -142,6 +145,7 @@ describe("parseTmuxPanes tree building", () => {
       title: "example task",
       command: "editor",
       path: "/tmp/example",
+      pid: 4242,
       width: 120,
       height: 40,
       active: true,

@@ -10,6 +10,8 @@
 // - GET  /_agent/hooks/plan     入れる・外すと何が変わるか (書かない)
 // - POST /_agent/hooks/apply    確認した計画を実行する
 // - DELETE /_agent/hooks/failures 失敗の記録を消す
+// - /_agent/accounts・/_agent/launch・/_agent/statusline/* はアカウントの
+//   入口 (accounts/handle.ts)
 //
 // ルーティングと副作用リクエストの認可は tmux/handle.ts と同じ dispatchRoutes
 // に任せる。申告は状態を書き換えるので sideEffect: true。CLI からの POST は
@@ -34,6 +36,16 @@ import {
 import { formatErrorDetail } from "../../core/error-detail";
 import { MAX_PASTE_BODY_BYTES } from "../../core/terminal-paste";
 import {
+  handleAccountsGet,
+  handleAccountsPlanGet,
+  handleAccountsPost,
+  handleLaunchPost,
+  handleLoginPost,
+  handleStatusLineApplyPost,
+  handleStatusLineFailuresDelete,
+  handleStatusLinePlanGet,
+} from "../accounts/handle";
+import {
   dispatchRoutes,
   handleError,
   json,
@@ -53,10 +65,10 @@ import { captureTerminal, clampHistoryLines, terminalKindOf } from "./capture";
 import {
   AgentHookError,
   type AgentHookTarget,
+  agentHookFile,
   agentHooksOverview,
   applyAgentHooks,
   clearHookFailures,
-  agentHookFile,
   currentHookLauncher,
   defaultAgentConfigDir,
   planAgentHooks,
@@ -444,6 +456,46 @@ export function handleAgentRoute(
         methods: ["DELETE"],
         sideEffect: true,
         handler: () => Promise.resolve(handleHookFailuresDelete()),
+      },
+      "/_agent/accounts": {
+        methods: ["GET", "POST"],
+        sideEffect: (method) => method !== "GET",
+        handler: () =>
+          req.method === "GET"
+            ? handleAccountsGet(url, cwd)
+            : handleAccountsPost(req),
+      },
+      "/_agent/accounts/plan": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => Promise.resolve(handleAccountsPlanGet(url)),
+      },
+      // tmux にウィンドウを作る。同一オリジンからしか通らない。
+      "/_agent/accounts/login": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleLoginPost(req, cwd),
+      },
+      "/_agent/launch": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleLaunchPost(req),
+      },
+      "/_agent/statusline/plan": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => Promise.resolve(handleStatusLinePlanGet(url)),
+      },
+      // claude の設定ファイルを書き換える。同一オリジンからしか通らない。
+      "/_agent/statusline/apply": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleStatusLineApplyPost(req),
+      },
+      "/_agent/statusline/failures": {
+        methods: ["DELETE"],
+        sideEffect: true,
+        handler: () => Promise.resolve(handleStatusLineFailuresDelete()),
       },
       // ファイルを作るので副作用。同一オリジンからしか通らない。
       "/_agent/paste": {

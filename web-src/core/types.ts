@@ -206,6 +206,8 @@ export type AppSettingsState = {
   agentNotifyDone?: boolean;
   /** エージェント一覧の「フックを入れられます」の案内を閉じた。 */
   agentHookHintDismissed?: boolean;
+  /** エージェント一覧のアカウントの帯を畳んだ。 */
+  agentAccountsCollapsed?: boolean;
   /**
    * ユーザーが変更したキー割り当てだけを持つ差分。ここに無いアクションは
    * デフォルトのまま動くので、後からデフォルトを変えても、触っていない

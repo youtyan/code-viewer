@@ -109,6 +109,8 @@ export type ViewerSettingsDeps = {
    * 持ち主 (views/agents/agent-hooks-settings.ts) が行う。
    */
   agentHooksSection: HTMLElement;
+  /** エージェント連携の前に置く節 (アカウント)。持ち主は accounts-settings.ts。 */
+  agentAccountsSection: HTMLElement;
 };
 
 const FONT_SIZE_VALUES = ["compact", "regular", "large", "xlarge"] as const;
@@ -431,6 +433,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       display,
       uploads,
       agentNotify,
+      deps.agentAccountsSection,
       deps.agentHooksSection,
       excluded,
       datastores,

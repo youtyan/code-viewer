@@ -5912,7 +5912,11 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: min(14vh, 120px);
+  /* 確認の画面の上端の位置と、下に残す余白。高さの上限 (.gdp-dialog-wide) も
+     同じ値から求める。 */
+  --gdp-dialog-top: min(14vh, 120px);
+  --gdp-dialog-bottom-gap: 16px;
+  padding-top: var(--gdp-dialog-top);
   background: rgba(31, 35, 40, 0.18);
 }
 [data-theme="dark"] .gdp-dialog-backdrop {
@@ -16847,6 +16851,15 @@ html[data-theme="dark"] .tools-code span[style] {
    overlay なので viewport 基準でよい)。 */
 .gdp-dialog-wide {
   width: min(720px, calc(100vw - 32px));
+  /* 中身が長くても押すボタンが画面の外に出ないよう、本文だけを
+     スクロールさせる (画面中央の overlay なので viewport 基準でよい)。 */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - var(--gdp-dialog-top) - var(--gdp-dialog-bottom-gap));
+}
+.gdp-dialog-wide .gdp-dialog-body {
+  min-height: 0;
+  overflow: auto;
 }
 .agent-hooks-dialog {
   display: flex;
@@ -17510,4 +17523,349 @@ body:not(.app-panel-docked):has(.app-panel) .agents-page {
 }
 .agent-status-error {
   color: var(--danger);
+}
+
+/* アカウントの帯 (views/agents/accounts-band.ts)。一覧の上、ヘッダの下。
+   カードは横に並べて折り返す。状態の変化は色と文字だけで、カードの寸法は
+   変えない。80% 以上は注意の色に「注意」の文字を添える (色だけに頼らない)。 */
+.agents-accounts {
+  flex: 0 0 auto;
+  margin: 8px var(--agents-gutter) 0;
+  font-size: var(--ui-font-base);
+}
+/* 既定だけで使用量も無いときの入口。騒がしくしない。 */
+.agents-accounts.entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agents-accounts-entry,
+.agents-accounts-manage,
+.agents-account-name {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.agents-accounts-entry {
+  font-size: var(--ui-font-sm);
+}
+.agents-accounts-entry::after {
+  content: " ›";
+}
+.agents-accounts-entry:hover,
+.agents-accounts-manage:hover,
+.agents-account-name:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.agents-accounts-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agents-accounts-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 6px 2px 0;
+  cursor: pointer;
+}
+.agents-accounts-toggle:hover {
+  background: var(--bg-soft);
+}
+.agents-accounts-title {
+  font-weight: 600;
+}
+.agents-accounts-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+.agents-account-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.agents-account-card.warn {
+  border-color: color-mix(in srgb, var(--attn) 55%, var(--border));
+  background: color-mix(in srgb, var(--attn) 6%, var(--bg));
+}
+.agents-account-card-unregistered {
+  border-style: dashed;
+}
+.agents-account-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.agents-account-card-head .agents-kind {
+  flex: 0 0 auto;
+}
+.agents-account-card-head .gdp-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.agents-account-name {
+  min-width: 0;
+  color: var(--fg);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agents-account-login {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-account-login-logged-in .agent-hooks-mark {
+  border-color: var(--success);
+  background: var(--success);
+}
+.agents-account-login-logged-out {
+  color: var(--attn);
+}
+.agents-account-login-logged-out .agent-hooks-mark {
+  border-color: var(--attn);
+}
+.agents-account-login-unknown .agent-hooks-mark,
+.agents-account-login-no-config-dir .agent-hooks-mark {
+  border-style: dashed;
+}
+.agents-account-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+}
+.agents-account-window {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.agents-account-window-value {
+  color: var(--fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.agents-account-window.warn .agents-account-window-value,
+.agents-account-warn {
+  color: var(--attn);
+}
+.agents-account-warn {
+  font-weight: 700;
+}
+.agents-account-window.expired .agents-account-window-value {
+  color: var(--fg-subtle);
+  text-decoration: line-through;
+}
+.agents-account-reset {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agents-account-usage-none {
+  color: var(--fg);
+}
+.agents-account-usage-why {
+  color: var(--fg-subtle);
+  font-size: var(--ui-font-xs);
+  line-height: 1.4;
+}
+.agents-account-foot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--fg-subtle);
+  font-size: var(--ui-font-xs);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.agents-account-observed.stale {
+  color: var(--attn);
+}
+.agents-accounts-message {
+  margin: 6px 0 0;
+}
+.agents-launch {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.agents-project-launch {
+  flex: 0 0 auto;
+  appearance: none;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  line-height: 1;
+  cursor: pointer;
+}
+.agents-project-launch:hover {
+  border-color: var(--border);
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+/* 行のアカウント名。登録アカウントがあるか、既定以外で動くものがあるとき
+   だけ列を足す (既定だけの人には列ごと出さない)。 */
+.agents-list.with-accounts .agents-row {
+  grid-template-columns: 8px 128px 76px 96px minmax(0, 1fr) minmax(0, max-content) minmax(0, 180px) 44px;
+}
+.agents-account {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-account-unregistered {
+  color: var(--attn);
+}
+.agents-account-unknown {
+  color: var(--fg-subtle);
+}
+
+/* 設定画面の「アカウント」(views/agents/accounts-settings.ts)。行の見た目は
+   エージェント連携の行 (.agent-hooks-row) と同じで、名前と操作の列を足す。 */
+.agent-accounts-row,
+.agent-accounts-usage-row {
+  grid-template-columns: 5em 9em 16em minmax(0, 1fr) auto;
+}
+.agent-accounts-name {
+  min-width: 0;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-accounts-row .agent-hooks-state,
+.agent-accounts-usage-row .agent-hooks-state {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-accounts-actions {
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.agent-accounts-add {
+  margin-top: 8px;
+}
+.agent-accounts-subtitle {
+  display: block;
+  margin-top: 16px;
+  font-size: 12px;
+}
+.agent-accounts-commands {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+.agent-accounts-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.agent-accounts-command .gdp-dialog-input {
+  width: 16em;
+  height: var(--ui-control-sm);
+  margin-top: 0;
+}
+/* 入力の画面に置く排他の選択 (.seg) は中身の幅にする (欄いっぱいに伸ばさない)。 */
+.worktree-field > .seg {
+  align-self: flex-start;
+}
+.worktree-field[hidden] {
+  display: none;
+}
+/* アカウントの設定ディレクトリは末尾 (アカウントの名前) が大事なので、
+   頭側を省略する。.worktree-target-path と同じ LRM と rtl の組。 */
+.agent-accounts-row .agent-hooks-path {
+  direction: rtl;
+  text-align: left;
+}
+.agent-accounts-row .agent-hooks-path::before {
+  content: "\200E";
+}
+
+/* アカウントを作る確認の画面で、共有するものを選ぶまとまり
+   (views/agents/accounts-dialogs.ts)。項目が多くても画面を埋めないよう、
+   一覧の中だけをスクロールさせる。 */
+.agent-accounts-share {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-accounts-share-list {
+  max-height: 180px;
+  overflow: auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+}
+.agent-accounts-share-item {
+  display: grid;
+  /* 名前の列は幅を揃える (長い名前は省略し、全体はツールチップ)。 */
+  grid-template-columns: auto 14em minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 8px;
+  padding: 2px 0;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+.agent-accounts-share-item .terminal-mono {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-accounts-share-item input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.agent-accounts-share-why {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 16px;
 }

@@ -263,6 +263,14 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 kind: "paragraph",
                 text: "Settings → Agent integration adds hooks to claude (<settings dir>/settings.json, CLAUDE_CONFIG_DIR or ~/.claude) and codex (<CODEX_HOME>/hooks.json, ~/.codex) so they report their own state: when an agent finishes, the row shows Finished · unread until you open it, and permission prompts show as Needs input without waiting for the screen. Agents that cannot be recognized by process name (claude running under node) also appear. Each button first shows the exact file, what is added or removed, where the backup goes, and how many existing hooks stay; other hooks in the file are never removed or reordered. The hooks call a small launcher in code-viewer's state directory, which runs code-viewer terminal hook and reports to every running code-viewer; it always exits 0, and reports that did not arrive are listed in the same settings section. codex runs a new hook only after you trust it in /hooks.",
               },
+              {
+                kind: "paragraph",
+                text: "Settings → Accounts keeps several claude and codex accounts. An account is a settings directory (CLAUDE_CONFIG_DIR for claude, CODEX_HOME for codex); the default ones (~/.claude, ~/.codex) are always listed. Add account either creates a directory under code-viewer's state directory that links your settings from the default one (settings, instructions, skills, commands, keybindings; codex: config.toml, AGENTS.md, hooks.json, rules — on by default and can be turned off; other items such as plugins or your own scripts can be turned on after you check them; sign-in credentials, account identity, history, sessions and caches can never be shared) — or registers a directory you already have without touching it. Both show what will be created and linked before anything is written. Sign in opens the official sign-in (claude auth login / codex login) for that account in a new tmux window; you approve it in the browser, and code-viewer never sees the credentials. Removing an account only takes it off the list.",
+              },
+              {
+                kind: "paragraph",
+                text: "Once more than the default accounts exist, the Agents list shows which account each claude or codex runs with (read from that process's CLAUDE_CONFIG_DIR / CODEX_HOME only), and a band of account cards above the list shows sign-in state, the 5-hour and weekly usage with reset times and when the value was received (80% and above is marked High), how many agents run with it, and its hooks. codex usage comes from its session logs. claude reports usage only to its status line, so Settings → Accounts → claude usage can wrap your statusLine command: the wrapper keeps the data it receives and returns your command's output unchanged; turning it off restores the original. New agent (on the Agents toolbar, or + on a project) starts claude or codex with the chosen account and project in a new tmux window, without typing into any shell; the command can be changed under Launch commands (it runs in your interactive shell, so shell functions work).",
+              },
             ],
           },
           {
@@ -1114,6 +1122,14 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "設定 → エージェント連携 で、claude (<設定ディレクトリ>/settings.json。CLAUDE_CONFIG_DIR か ~/.claude) と codex (<CODEX_HOME>/hooks.json。~/.codex) に、自分の状態を申告するフックを入れられます。入れると、終わったエージェントは開くまで「完了・未読」と出て、許可を求めたときは画面を待たずに入力待ちになります。プロセス名では見分けられないエージェント (node として動く claude など) も一覧に出ます。ボタンを押すと、先に対象のファイル・足すもの・消すもの・バックアップの場所・残る既存のフックの数を見せ、確認してから書きます。ファイルにあるほかのフックは消さず、順序も変えません。フックは code-viewer の状態ディレクトリにある小さな起動スクリプトを呼び、そこから code-viewer terminal hook が動いている全部の code-viewer に申告します。終了コードは常に 0 で、届かなかった申告は同じ設定の節に並びます。codex は /hooks で信頼するまで新しいフックを実行しません。",
+              },
+              {
+                kind: "paragraph",
+                text: "設定 → アカウント で、claude と codex のアカウントを複数持てます。アカウントは設定ディレクトリ (claude は CLAUDE_CONFIG_DIR、codex は CODEX_HOME) で、既定のもの (~/.claude、~/.codex) は常に一覧にあります。「アカウントを追加」は、code-viewer の状態ディレクトリにディレクトリを作って既定の設定をリンクで共有するか (settings・指示・スキル・コマンド・キー割り当て。codex は config.toml・AGENTS.md・hooks.json・rules。既定でオンで、外すこともできます。プラグインや自分で置いたスクリプトなどは、確かめたうえでオンにできます。ログインの認証情報・アカウントの識別情報・履歴・セッション・キャッシュは共有できません)、既にあるディレクトリをそのまま登録します。どちらも、書く前に何が作られ何がリンクされるかを見せます。「ログイン」は、そのアカウントの公式のログイン (claude auth login / codex login) を tmux の新しいウィンドウで開きます。承認はブラウザで行い、code-viewer は認証情報に触れません。「外す」は一覧から外すだけです。",
+              },
+              {
+                kind: "paragraph",
+                text: "既定以外のアカウントがあると、エージェント一覧の各行に、その claude / codex がどのアカウントで動いているかが出ます (そのプロセスの CLAUDE_CONFIG_DIR / CODEX_HOME だけを読みます)。一覧の上にはアカウントの帯が出て、ログインの状態・5時間枠と週枠の使用量とリセットまでの時間・いつの値か (80% 以上は「注意」)・そのアカウントで動いているエージェントの数・フックの状態が並びます。codex の使用量はセッション記録から読みます。claude は使用量をステータスラインにだけ渡すので、設定 → アカウント → claude の使用量 でステータスラインのコマンドを包めます。包むスクリプトは受け取ったデータを保存し、あなたのコマンドの出力をそのまま返します。無効にすると元に戻ります。「新しいエージェント」(一覧のツールバー、またはプロジェクトの +) は、選んだアカウントとプロジェクトで claude か codex を tmux の新しいウィンドウに起動します。シェルにキー入力を送ることはしません。コマンドは「起動コマンド」で変えられます (対話シェルで動くので、シェルの関数も使えます)。",
               },
             ],
           },

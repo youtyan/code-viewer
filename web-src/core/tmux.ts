@@ -20,6 +20,8 @@ export type TmuxPane = {
   /** そのペインで動いているコマンド名 (`zsh`, `node`, ...)。 */
   command: string;
   path: string;
+  /** ペインで最初に起動したプロセス (ふつうはシェル) の pid。 */
+  pid: number;
   /** 桁数と行数。xterm 側をこのサイズに合わせると capture がずれない。 */
   width: number;
   height: number;

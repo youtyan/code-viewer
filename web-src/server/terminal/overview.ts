@@ -13,6 +13,7 @@
 
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
+import { isAccountAgent, type PaneAccount } from "../../core/agent-accounts";
 import {
   type AgentOverviewResponse,
   type AgentPane,
@@ -30,6 +31,10 @@ import type { ShellSession } from "../../core/shell";
 import { basenameOf, linkShellsAndPanes } from "../../core/terminal-board";
 import type { TmuxClient, TmuxPanesResponse } from "../../core/tmux";
 import { flattenTmuxPanes } from "../../core/tmux";
+import {
+  type PaneAccountTarget,
+  sharedAccountService,
+} from "../accounts/service";
 import { projectRootResultAsync } from "../git";
 import { listShellSessions } from "../shell/session";
 import { listTmuxClients } from "../tmux/clients";
@@ -66,6 +71,13 @@ export type AgentOverviewDeps = {
    */
   firstListed: Map<string, number>;
   findServer(root: string): Promise<AgentProjectServer>;
+  /**
+   * claude / codex の行がどのアカウントで動いているか。プロセスの調査は
+   * accounts/process-env.ts が頻度を抑えて行う。
+   */
+  paneAccounts(
+    targets: readonly PaneAccountTarget[],
+  ): Promise<Map<string, PaneAccount>>;
   now(): number;
 };
 
@@ -141,6 +153,23 @@ export async function buildAgentOverview(
   const states = new Map(
     deps.listStates().map((record) => [record.target, record]),
   );
+  const kinds = new Map(
+    tmuxPanes.map((pane) => {
+      const record = states.get(pane.id) ?? null;
+      return [
+        pane.id,
+        agentKindOf(pane.command, record?.source ?? null, record),
+      ] as const;
+    }),
+  );
+  const accounts = await deps.paneAccounts(
+    tmuxPanes.map((pane) => ({
+      id: pane.id,
+      pid: pane.pid,
+      command: pane.command,
+      kind: kinds.get(pane.id) ?? null,
+    })),
+  );
   const result: AgentPane[] = [];
   const sessionOf = new Map<string, string>();
   for (const session of panes.sessions) {
@@ -176,7 +205,7 @@ export async function buildAgentOverview(
       title: pane.title,
       command: pane.command,
       path: pane.path,
-      kind: agentKindOf(pane.command, source, record ?? null),
+      kind: kinds.get(pane.id) ?? null,
       state: record?.state ?? "idle",
       source,
       updatedAt: record?.changeObserved ? record.updatedAt : 0,
@@ -191,6 +220,12 @@ export async function buildAgentOverview(
           ? basenameOf(resolution.toplevel)
           : "",
       shownInShell: paneToShell.get(pane.id) ?? "",
+      account: isAccountAgent(kinds.get(pane.id))
+        ? (accounts.get(pane.id) ?? {
+            kind: "unknown",
+            reason: "the account of this pane was not resolved",
+          })
+        : null,
     });
   }
 
@@ -293,6 +328,7 @@ export function defaultAgentOverviewDeps(cwd: string): AgentOverviewDeps {
         if (found.status === "absent") return { status: "absent" };
         return { status: found.status, detail: formatErrorDetail(found.error) };
       }),
+    paneAccounts: (targets) => sharedAccountService().paneAccounts(targets),
     now: Date.now,
   };
 }

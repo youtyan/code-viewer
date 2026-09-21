@@ -293,6 +293,9 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   const agentHookHintDismissed = optionalBoolean(raw.agentHookHintDismissed);
   if (agentHookHintDismissed !== undefined)
     out.agentHookHintDismissed = agentHookHintDismissed;
+  const agentAccountsCollapsed = optionalBoolean(raw.agentAccountsCollapsed);
+  if (agentAccountsCollapsed !== undefined)
+    out.agentAccountsCollapsed = agentAccountsCollapsed;
   // 差分が空なら書かない。全部デフォルトに戻したときにファイルへ {} が
   // 残らないので、次に読んだときは素直に「未設定」として扱える。
   const keybindings = sanitizeKeymapOverrides(raw.keybindings);

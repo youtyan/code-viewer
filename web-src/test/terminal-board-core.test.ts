@@ -46,6 +46,7 @@ function pane(
     title: over.title ?? "テーブルを実装する",
     command: "node",
     path: over.path ?? "/home/me/work/board",
+    pid: 0,
     width: 120,
     height: 40,
     active: false,

@@ -16,6 +16,10 @@
 // (/_tmux/open と同じ経路。新しい接続は作らない)。
 
 import {
+  type AccountsResponse,
+  showPaneAccounts,
+} from "../../core/agent-accounts";
+import {
   type AgentHooksResponse,
   agentsNeedingHooks,
 } from "../../core/agent-hooks";
@@ -31,6 +35,7 @@ import {
 } from "../../core/agent-overview";
 import { CHEVRON_DOWN_16_PATH, iconSvg } from "../../core/icons";
 import type { PageView } from "../page-view";
+import type { AccountsBand } from "./accounts-band";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
 
@@ -50,6 +55,14 @@ export type AgentsViewDeps = {
   dismissHookHint(): void;
   /** 設定画面のエージェント連携の節へ。 */
   openHookSettings(): void;
+  /** 一覧の上に出すアカウントの帯。 */
+  accountsBand: AccountsBand;
+  /** アカウントの一覧 (まだ取っていなければ null)。行の名前に使う。 */
+  getAccounts(): AccountsResponse | null;
+  /** 「新しいエージェント」の画面を開く。project は選んでおくプロジェクト。 */
+  launch(project?: string): void;
+  /** 一覧に入った・出たとき (アカウントの取り直しを始める・止める)。 */
+  onVisibilityChange(visible: boolean): void;
 };
 
 export type AgentsView = PageView;
@@ -101,6 +114,10 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
   spacer.className = "agents-spacer";
   const notifyBox = document.createElement("div");
   notifyBox.className = "agents-notify";
+  const launchButton = document.createElement("button");
+  launchButton.type = "button";
+  launchButton.className = "gdp-btn gdp-btn-sm agents-launch";
+  launchButton.addEventListener("click", () => deps.launch());
   const refreshButton = document.createElement("button");
   refreshButton.type = "button";
   refreshButton.className = "agents-refresh";
@@ -113,6 +130,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     hint,
     spacer,
     notifyBox,
+    launchButton,
     refreshButton,
   );
 
@@ -150,7 +168,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
   list.role = "tree";
   list.addEventListener("keydown", onListKeydown);
 
-  root.append(header, hookHint, problems, list);
+  root.append(header, deps.accountsBand.element, hookHint, problems, list);
 
   let mounted = false;
   let stateFilter: AgentStateFilter = "all";
@@ -162,6 +180,8 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
   let lastSignature = "";
   let unsubscribe: (() => void) | null = null;
   let notifyRequestError = "";
+  /** 行にアカウント名を出すか (renderBody で決める)。 */
+  let showAccounts = false;
 
   function text(): AgentsText {
     return deps.getText();
@@ -221,6 +241,8 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     task.className = "agents-task";
     task.textContent = paneTaskText(pane);
 
+    const account = showAccounts ? accountLabel(pane) : null;
+
     const worktree = document.createElement("span");
     worktree.className = "agents-worktree";
     if (pane.worktree) {
@@ -248,7 +270,9 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
           : current.elapsedJustWatched;
     }
 
-    row.append(dot, state, kind, task, worktree, place, age);
+    row.append(dot, state, kind);
+    if (account) row.appendChild(account);
+    row.append(task, worktree, place, age);
     row.title = [
       pane.title || pane.command,
       `${pane.label} · ${pane.command}`,
@@ -261,6 +285,36 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       .join("\n");
     row.addEventListener("click", () => select(pane));
     return row;
+  }
+
+  /** 行に出すアカウント名。既定だけを使っている間は出さない (showAccounts)。 */
+  function accountLabel(pane: AgentPane): HTMLElement {
+    const t = text().accounts;
+    const label = document.createElement("span");
+    label.className = "agents-account";
+    const account = pane.account;
+    if (!account) return label;
+    const data = deps.getAccounts();
+    if (account.kind === "default" || account.kind === "registered") {
+      const entry = data?.accounts.find((item) => item.id === account.id);
+      label.textContent =
+        account.kind === "default"
+          ? t.defaultName
+          : (entry?.name ?? account.id);
+      label.title = t.paneAccountTitle(
+        label.textContent,
+        entry?.configDir ?? "",
+      );
+    } else if (account.kind === "unregistered") {
+      label.classList.add("agents-account-unregistered");
+      label.textContent = t.unregistered;
+      label.title = t.unregisteredTitle(account.configDir);
+    } else {
+      label.classList.add("agents-account-unknown");
+      label.textContent = t.unknownAccount;
+      label.title = t.unknownAccountTitle(account.reason);
+    }
+    return label;
   }
 
   function projectServer(group: AgentProjectGroup): HTMLElement | null {
@@ -354,6 +408,16 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     }
     const server = projectServer(group);
     if (server) head.appendChild(server);
+    if (group.info.git) {
+      const launch = document.createElement("button");
+      launch.type = "button";
+      launch.className = "agents-project-launch";
+      launch.textContent = "+";
+      launch.title = current.accounts.launchProjectTitle(group.info.name);
+      launch.setAttribute("aria-label", launch.title);
+      launch.addEventListener("click", () => deps.launch(group.info.root));
+      head.appendChild(launch);
+    }
 
     const rows = document.createElement("div");
     rows.className = "agents-rows";
@@ -541,6 +605,12 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       );
       return;
     }
+    showAccounts = showPaneAccounts(
+      (deps.getAccounts()?.accounts ?? []).filter((item) => !item.builtin)
+        .length,
+      panes,
+    );
+    list.classList.toggle("with-accounts", showAccounts);
     const visible = filterAgentPanes(panes, { allPanes, state: stateFilter });
     if (visible.length === 0) {
       list.appendChild(
@@ -579,6 +649,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       deps.monitor.permission(),
       deps.hookHintDismissed(),
       deps.getHookStatus(),
+      deps.accountsBand.signature(),
       snapshot.overview,
       // 経過時間は分単位でしか変わらない。
       Math.floor(now / 60_000),
@@ -609,8 +680,11 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     allPanesInput.checked = allPanes;
     hint.textContent = current.keyboardHint;
     refreshButton.title = current.refresh;
+    launchButton.textContent = `+ ${current.accounts.launchButton}`;
+    launchButton.title = current.accounts.launchButtonTitle;
     refreshButton.setAttribute("aria-label", current.refresh);
     renderNotify();
+    deps.accountsBand.render();
     renderHookHint();
     renderBody();
 
@@ -683,6 +757,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     deps.setPageMode();
     deps.syncHeaderMenu();
     unsubscribe = deps.monitor.subscribe(() => render());
+    deps.onVisibilityChange(true);
   }
 
   async function enter(): Promise<void> {
@@ -703,6 +778,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
   }
 
   function suspend(): void {
+    if (mounted) deps.onVisibilityChange(false);
     unsubscribe?.();
     unsubscribe = null;
     root.remove();

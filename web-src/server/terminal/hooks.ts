@@ -13,33 +13,18 @@
 //
 // 検出は doctor の agent-hooks グループ (server/doctor.ts)。
 //
-// 設定ファイルの扱いの約束:
-//
-// - 書く前に読む。JSON として読めない・想定外の形なら書かない
-// - 確認画面に出した差分は、そのとき読んだ中身のハッシュと一緒に返す。
-//   書くときに読み直してハッシュが違えば書かない (見せたものと書くものを
-//   ずらさない)
-// - 書く直前に同じディレクトリへバックアップを作る。失敗したら書かない
-// - 一時ファイルに書いてから置き換える。元の権限を保つ
-// - シンボリックリンクはリンクのまま残し、リンク先を書き換える
+// 設定ファイルの扱いの約束 (読めなければ書かない・ハッシュの照合・
+// バックアップ・一時ファイルで置き換え・リンクのまま) は settings-file.ts。
 
-import { createHash, randomUUID } from "node:crypto";
 import {
-  accessSync,
   appendFileSync,
-  chmodSync,
-  constants,
-  lstatSync,
   mkdirSync,
   readFileSync,
-  realpathSync,
-  renameSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   AGENT_HOOK_MARKER,
   type AgentHookFailure,
@@ -58,12 +43,20 @@ import {
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { shellSingleQuote } from "../cli-helpers";
 import { ROOT } from "../root";
+import { codeViewerStateDir } from "../user-state-dir";
+import {
+  backupPathFor,
+  commitJsonSettingsChange,
+  contentHash,
+  DEFAULT_WRITE_OPS,
+  errno,
+  readJsonSettingsFile,
+  type SettingsWriteOps,
+  writeBlockedReason,
+  writeFileAtomic,
+} from "./settings-file";
 
 type Env = Record<string, string | undefined>;
-
-function errno(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException | undefined)?.code;
-}
 
 /**
  * 設定ディレクトリの既定。エージェント自身と同じ環境変数を見る
@@ -92,12 +85,7 @@ export function agentHookStateDir(
   env: Env = process.env,
   home: string = homedir(),
 ): string {
-  // Test-only override; keeps tests from writing to the user's state dir.
-  const override = env.CODE_VIEWER_TEST_STATE_DIR;
-  const base = override
-    ? override
-    : join(env.XDG_STATE_HOME || join(home, ".local", "state"), "code-viewer");
-  return join(base, "agent-hooks");
+  return join(codeViewerStateDir(env, home), "agent-hooks");
 }
 
 /** 起動スクリプトが呼ぶもの。 */
@@ -125,7 +113,7 @@ export function currentHookLauncher(
 }
 
 /** 空白などを含むときだけ引用符で囲む。フックの設定を読みやすく保つため。 */
-function shellWord(value: string): string {
+export function shellWord(value: string): string {
   return /^[A-Za-z0-9_./@%+=:,-]+$/.test(value)
     ? value
     : shellSingleQuote(value);
@@ -223,29 +211,6 @@ export function launcherHealth(launcher: HookLauncher): LauncherHealth {
   };
 }
 
-function writeFileAtomic(path: string, text: string, mode: number): void {
-  const temp = join(
-    dirname(path),
-    `.${basename(path)}.code-viewer-${randomUUID()}.tmp`,
-  );
-  writeFileSync(temp, text, { encoding: "utf8", flag: "wx", mode });
-  try {
-    // umask で落ちた権限を元に戻す。
-    chmodSync(temp, mode);
-    renameSync(temp, path);
-  } catch (error) {
-    try {
-      unlinkSync(temp);
-    } catch (cleanupError) {
-      throw errorWithCause(
-        `failed to replace ${path}, and the temporary file ${temp} could not be removed`,
-        { error, cleanupError },
-      );
-    }
-    throw error;
-  }
-}
-
 /**
  * 起動スクリプトだけを書く (書き直す)。設定ファイルは触らない。
  *
@@ -277,125 +242,6 @@ function ensureLauncher(launcher: HookLauncher): boolean {
   return true;
 }
 
-type HookFileRead =
-  | { kind: "missing-dir" }
-  | { kind: "missing"; realPath: string }
-  | { kind: "unreadable"; realPath: string; symlink: boolean; detail: string }
-  | {
-      kind: "ok";
-      realPath: string;
-      symlink: boolean;
-      text: string;
-      root: Record<string, unknown>;
-      mode: number;
-    };
-
-function readHookFile(configDir: string, path: string): HookFileRead {
-  let symlink = false;
-  try {
-    symlink = lstatSync(path).isSymbolicLink();
-  } catch (error) {
-    if (errno(error) !== "ENOENT") {
-      return {
-        kind: "unreadable",
-        realPath: path,
-        symlink,
-        detail: formatErrorDetail(error),
-      };
-    }
-    try {
-      if (!statSync(configDir).isDirectory()) {
-        return {
-          kind: "unreadable",
-          realPath: path,
-          symlink,
-          detail: `${configDir} is not a directory`,
-        };
-      }
-    } catch (dirError) {
-      if (errno(dirError) === "ENOENT") return { kind: "missing-dir" };
-      return {
-        kind: "unreadable",
-        realPath: path,
-        symlink,
-        detail: formatErrorDetail(dirError),
-      };
-    }
-    return { kind: "missing", realPath: path };
-  }
-  let realPath = path;
-  try {
-    realPath = realpathSync(path);
-    const text = readFileSync(realPath, "utf8");
-    const mode = statSync(realPath).mode & 0o7777;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch (error) {
-      return {
-        kind: "unreadable",
-        realPath,
-        symlink,
-        detail: `not valid JSON: ${formatErrorDetail(error)}`,
-      };
-    }
-    const issues = checkHookShape(parsed);
-    if (issues.length > 0) {
-      return {
-        kind: "unreadable",
-        realPath,
-        symlink,
-        detail: issues
-          .map((issue) => `${issue.path}: ${issue.message}`)
-          .join("\n"),
-      };
-    }
-    return {
-      kind: "ok",
-      realPath,
-      symlink,
-      text,
-      root: parsed as Record<string, unknown>,
-      mode,
-    };
-  } catch (error) {
-    return {
-      kind: "unreadable",
-      realPath,
-      symlink,
-      detail: formatErrorDetail(error),
-    };
-  }
-}
-
-function writable(path: string): string {
-  try {
-    accessSync(path, constants.W_OK);
-    return "";
-  } catch (error) {
-    return `${path} is not writable (${errno(error) ?? formatErrorDetail(error)})`;
-  }
-}
-
-/** 書けない理由。書けるなら空。 */
-function writeBlockedReason(path: string, read: HookFileRead): string {
-  if (read.kind === "missing-dir" || read.kind === "unreadable") return "";
-  const reasons = [writable(dirname(read.realPath))];
-  if (read.kind === "ok") {
-    reasons.push(writable(read.realPath));
-    // バックアップはリンクの側 (設定ディレクトリ) に置く。
-    if (dirname(path) !== dirname(read.realPath)) {
-      reasons.push(writable(dirname(path)));
-    }
-  }
-  return reasons.filter(Boolean).join("\n");
-}
-
-function contentHash(read: HookFileRead): string {
-  const text = read.kind === "ok" ? read.text : `<${read.kind}>`;
-  return createHash("sha256").update(text).digest("hex");
-}
-
 export type AgentHookTarget = {
   agent: HookAgent;
   configDir: string;
@@ -403,7 +249,7 @@ export type AgentHookTarget = {
 
 function describe(target: AgentHookTarget, launcher: HookLauncher) {
   const path = agentHookFile(target.agent, target.configDir);
-  const read = readHookFile(target.configDir, path);
+  const read = readJsonSettingsFile(target.configDir, path, checkHookShape);
   const command = agentHookCommand(launcher, target.agent);
   return { path, read, command, specs: HOOK_SPECS[target.agent] };
 }
@@ -447,13 +293,6 @@ export function agentHookStatus(
     };
   }
   return { ...base, state: entries, detail: "", kept };
-}
-
-/** バックアップの名前。時刻は手元の時計で、秒まで。 */
-export function backupPathFor(path: string, now: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  return join(dirname(path), `${basename(path)}.code-viewer-backup-${stamp}`);
 }
 
 export class AgentHookError extends Error {
@@ -523,38 +362,6 @@ export type AgentHookApplyResult = {
   launcherWritten: boolean;
 };
 
-export type AgentHookWriteOps = {
-  /** バックアップを書く。既にあれば失敗させる。 */
-  writeBackup(path: string, text: string, mode: number): void;
-};
-
-const DEFAULT_WRITE_OPS: AgentHookWriteOps = {
-  writeBackup(path, text, mode) {
-    writeFileSync(path, text, { encoding: "utf8", flag: "wx", mode });
-  },
-};
-
-function writeBackupUnique(
-  ops: AgentHookWriteOps,
-  path: string,
-  now: Date,
-  text: string,
-  mode: number,
-): string {
-  const first = backupPathFor(path, now);
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const candidate = attempt === 0 ? first : `${first}-${attempt + 1}`;
-    try {
-      ops.writeBackup(candidate, text, mode);
-      return candidate;
-    } catch (error) {
-      if (errno(error) === "EEXIST") continue;
-      throw error;
-    }
-  }
-  throw new Error(`too many backups named ${first}`);
-}
-
 /**
  * 確認画面で見せた計画を実行する。
  *
@@ -567,7 +374,7 @@ export function applyAgentHooks(
   launcher: HookLauncher,
   baseHash: string,
   now: Date = new Date(),
-  ops: AgentHookWriteOps = DEFAULT_WRITE_OPS,
+  ops: SettingsWriteOps = DEFAULT_WRITE_OPS,
 ): AgentHookApplyResult {
   const plan = planAgentHooks(target, action, launcher, now);
   if (plan.baseHash !== baseHash) {
@@ -592,50 +399,30 @@ export function applyAgentHooks(
       launcherWritten,
     };
   }
-  const read = readHookFile(target.configDir, plan.path);
-  if (
-    (read.kind !== "ok" && read.kind !== "missing") ||
-    contentHash(read) !== baseHash
-  ) {
-    throw new AgentHookError(
-      `${plan.path} changed while it was being written; nothing was changed. Review it again.`,
-      "conflict",
-    );
-  }
-  let backupPath: string | null = null;
-  if (read.kind === "ok") {
-    try {
-      backupPath = writeBackupUnique(ops, plan.path, now, read.text, read.mode);
-    } catch (error) {
-      throw new AgentHookError(
-        `failed to back up ${plan.path}; nothing was changed.`,
-        "failed",
-        { cause: error },
-      );
-    }
-  }
-  const root = read.kind === "ok" ? read.root : null;
-  const next = planHookChange(
-    root,
-    action,
-    HOOK_SPECS[target.agent],
-    agentHookCommand(launcher, target.agent),
-  ).next;
-  try {
-    writeFileAtomic(
-      read.realPath,
-      serializeHookFile(next, read.kind === "ok" ? read.text : null),
-      read.kind === "ok" ? read.mode : 0o600,
-    );
-  } catch (error) {
-    throw new AgentHookError(
-      `failed to write ${read.realPath}. ${
-        backupPath ? `The previous content is in ${backupPath}.` : ""
-      }`,
-      "failed",
-      { cause: error },
-    );
-  }
+  const { backupPath } = commitJsonSettingsChange({
+    configDir: target.configDir,
+    path: plan.path,
+    check: checkHookShape,
+    baseHash,
+    next: (root, text) =>
+      serializeHookFile(
+        planHookChange(
+          root,
+          action,
+          HOOK_SPECS[target.agent],
+          agentHookCommand(launcher, target.agent),
+        ).next,
+        text,
+      ),
+    now,
+    ops,
+    error: (code, message, cause) =>
+      new AgentHookError(
+        message,
+        code,
+        cause === undefined ? undefined : { cause },
+      ),
+  });
   return {
     path: plan.path,
     changed: true,

@@ -1,6 +1,7 @@
 import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { accountEntries, emptyAccountRegistry } from "../core/agent-accounts";
 import { AGENT_HOOK_MARKER, HOOK_AGENTS } from "../core/agent-hooks";
 import type { DbFileInfo, DbFilesResponse } from "../core/database/types";
 import type {
@@ -10,6 +11,11 @@ import type {
   DoctorStatus,
 } from "../core/doctor-types";
 import { formatErrorDetail } from "../core/error-detail";
+import {
+  type AccountPaths,
+  accountPaths,
+  readAccountRegistry,
+} from "./accounts/registry";
 import { shellSingleQuote } from "./cli-helpers";
 import {
   commandForExternal,
@@ -56,6 +62,11 @@ import {
   type HookLauncher,
   launcherHealth,
 } from "./terminal/hooks";
+import {
+  STATUSLINE_MARKER,
+  statusLineStatus,
+  statusLineWrapperPath,
+} from "./terminal/statusline";
 import { tmuxArgs } from "./tmux/command";
 import {
   mapWithConcurrency,
@@ -707,6 +718,68 @@ export function checkAgentHooks(
         }),
   });
   return { id: "agent-hooks", title: "Agent hooks", rows };
+}
+
+/**
+ * アカウントの登録簿と、claude の statusLine を包んだもの
+ * (accounts/registry.ts・terminal/statusline.ts)。ユーザーの状態ディレクトリと
+ * エージェントの設定ファイルに残るので、機能を消しても最低 1 リリースは
+ * この検出を残す (server.md)。読むだけで書かない。
+ */
+export function checkAgentAccounts(
+  paths: AccountPaths = accountPaths(),
+): DoctorGroup {
+  const read = readAccountRegistry(paths.registry);
+  const rows: DoctorRow[] = [];
+  if (read.ok === false) {
+    rows.push({
+      id: "agent-accounts.registry",
+      title: "Account registry",
+      status: "warn",
+      detail: read.error,
+      hint: `code-viewer does not overwrite it. Fix or move ${paths.registry}; without it only the default accounts are listed.`,
+    });
+  } else {
+    const managed = read.registry.accounts.filter((account) => account.managed);
+    rows.push({
+      id: "agent-accounts.registry",
+      title: "Account registry",
+      status: "ok",
+      detail: `${read.registry.accounts.length} registered: ${paths.registry}`,
+      ...(read.registry.accounts.length === 0
+        ? {}
+        : {
+            hint: `Remove entries from Settings > Accounts, or delete ${paths.registry}. Settings directories are kept${
+              managed.length > 0
+                ? `; the ones code-viewer created are under ${paths.managedRoot} (they hold that account's login and history, delete them with rm -r only if you no longer need it)`
+                : ""
+            }.`,
+          }),
+    });
+  }
+  const accounts = accountEntries(
+    read.ok ? read.registry : emptyAccountRegistry(),
+    paths.home,
+    { claude: "default", codex: "default" },
+  ).filter((account) => account.agent === "claude");
+  for (const account of accounts) {
+    const status = statusLineStatus(account.configDir, paths.usageDir);
+    const ours = status.state === "wrapped" || status.state === "added";
+    if (!ours && status.state !== "unreadable") continue;
+    rows.push({
+      id: `agent-accounts.statusline.${account.id}`,
+      title: `claude statusLine (${account.name})`,
+      status:
+        status.state === "unreadable" || status.wrapperMissing ? "warn" : "ok",
+      detail: `${status.state}: ${status.path}${status.detail ? `\n${status.detail}` : ""}${
+        status.wrapperMissing
+          ? `\nthe wrapper is missing: ${statusLineWrapperPath(paths.usageDir)}`
+          : ""
+      }`,
+      hint: `To restore: Settings > Accounts > Usage > Remove, or set statusLine.command in ${status.path} back to the quoted command after "${STATUSLINE_MARKER}" (remove statusLine if nothing follows it). Earlier content is kept next to it as settings.json.code-viewer-backup-*.`,
+    });
+  }
+  return { id: "agent-accounts", title: "Agent accounts", rows };
 }
 
 type DockerCmd = { binary: string; subcommand: string[] };
@@ -1707,6 +1780,7 @@ export async function buildDoctorReport(
   const terminal = await checkTerminalTools(ctx.signal);
   const server = await checkServer(ctx.listenPort, ctx.cwd, ctx.signal);
   const agentHooks = checkAgentHooks();
+  const agentAccounts = checkAgentAccounts();
   const groups: DoctorGroup[] = [
     runtime,
     packageGroup,
@@ -1720,6 +1794,7 @@ export async function buildDoctorReport(
     docker,
     terminal,
     agentHooks,
+    agentAccounts,
     server,
   ];
   return { generation, groups, worstStatus: computeWorst(groups) };

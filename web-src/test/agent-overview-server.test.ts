@@ -107,6 +107,7 @@ function panesResponse(
               title: item.title ?? "",
               command: item.command,
               path: item.path,
+              pid: 0,
               width: 80,
               height: 24,
               active: index === 0,
@@ -185,12 +186,42 @@ function deps(over: Partial<AgentOverviewDeps> = {}): AgentOverviewDeps {
       root === "/work/another-repo"
         ? { status: "running", url: "http://127.0.0.1:64172/" }
         : { status: "absent" },
+    paneAccounts: async () => new Map(),
     now: () => 5000,
     ...over,
   };
 }
 
 describe("buildAgentOverview", () => {
+  test("claude / codex の行にアカウントを付け、それ以外の行は null", async () => {
+    const asked: string[] = [];
+    const overview = await buildAgentOverview(
+      deps({
+        paneAccounts: async (targets) => {
+          asked.push(...targets.map((target) => `${target.id}:${target.kind}`));
+          return new Map([
+            ["%1", { kind: "default", id: "claude:default" }],
+            ["%2", { kind: "unregistered", configDir: "/work/codex-home" }],
+          ]);
+        },
+      }),
+    );
+    expect(asked).toEqual(["%1:claude", "%2:codex", "%3:claude", "%4:null"]);
+    expect(overview.panes.map((item) => [item.id, item.account])).toEqual([
+      ["%1", { kind: "default", id: "claude:default" }],
+      ["%2", { kind: "unregistered", configDir: "/work/codex-home" }],
+      // 求められなかった行は、理由つきで「分からない」。
+      [
+        "%3",
+        {
+          kind: "unknown",
+          reason: "the account of this pane was not resolved",
+        },
+      ],
+      ["%4", null],
+    ]);
+  });
+
   test("ペインを本体のルートでまとめ、worktree 名・種類・状態を付ける", async () => {
     const overview = await buildAgentOverview(deps());
     expect(

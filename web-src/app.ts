@@ -1,11 +1,11 @@
+import type { AgentHooksResponse } from "./core/agent-hooks";
+import { type AgentPane, titleWithUnread } from "./core/agent-overview";
 import {
   type AgentScreenRuleIssue,
   type AgentScreenRulesResponse,
   DEFAULT_AGENT_SCREEN_RULES,
   formatAgentScreenRuleSet,
 } from "./core/agent-screen";
-import type { AgentHooksResponse } from "./core/agent-hooks";
-import { type AgentPane, titleWithUnread } from "./core/agent-overview";
 import {
   AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD,
   aiContextClipboardText,
@@ -110,6 +110,21 @@ import type {
   UndoActionResponse,
   ViewState,
 } from "./core/types";
+import { createAccountsBand } from "./views/agents/accounts-band";
+import { createAccountsClient } from "./views/agents/accounts-client";
+import { createAccountDialogs } from "./views/agents/accounts-dialogs";
+import {
+  ACCOUNTS_SECTION_ID,
+  createAccountsSettings,
+} from "./views/agents/accounts-settings";
+import {
+  AGENT_HOOKS_SECTION_ID,
+  createAgentHooksSettings,
+} from "./views/agents/agent-hooks-settings";
+import { createAgentMonitor } from "./views/agents/agent-monitor";
+import { mountAgentStatus } from "./views/agents/agent-status";
+import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
+import { agentsText } from "./views/agents/i18n";
 import { createAnnotationsPlayer } from "./views/annotations-player";
 import {
   ANNOTATION_ENTRY_PARAM,
@@ -142,14 +157,6 @@ import {
   openHelpKeybindings,
   openHelpSection,
 } from "./views/help-page";
-import {
-  AGENT_HOOKS_SECTION_ID,
-  createAgentHooksSettings,
-} from "./views/agents/agent-hooks-settings";
-import { createAgentMonitor } from "./views/agents/agent-monitor";
-import { mountAgentStatus } from "./views/agents/agent-status";
-import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
-import { agentsText } from "./views/agents/i18n";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
 import {
@@ -4250,6 +4257,25 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
   });
 
+  // ---------- Accounts: views/agents/accounts-*.ts ----------
+  // エージェント一覧の帯と設定画面の節が同じ結果を見る。取り直すのは、
+  // どちらかが画面にある間だけ (retain)。
+  const ACCOUNTS_CLIENT = createAccountsClient({ trackLoad, actionHeaders });
+  const ACCOUNT_DIALOGS = createAccountDialogs({
+    client: ACCOUNTS_CLIENT,
+    getText: () => agentsText(STATE.language).accounts,
+    // 一覧の監視役と画面の関数は後で作られる。押されたときにだけ呼ぶ。
+    openPane: (pane) => openAgentPane(pane),
+    getOverview: () => AGENT_MONITOR.snapshot().overview,
+    serverRoot: () => ACCOUNTS_CLIENT.snapshot().data?.serverRoot ?? "",
+    refreshOverview: () => AGENT_MONITOR.refresh(),
+  });
+  const ACCOUNTS_SETTINGS = createAccountsSettings({
+    client: ACCOUNTS_CLIENT,
+    dialogs: ACCOUNT_DIALOGS,
+    getText: () => agentsText(STATE.language).accounts,
+  });
+
   // ---------- Viewer settings: extracted to viewer-settings.ts ----------
   // 以前はヘッダの歯車から出るポップオーバーだった。今は Help ページの
   // 設定セクションが唯一の置き場で、ここは値の出し入れだけを受け持つ。
@@ -4285,16 +4311,19 @@ window.GdpExpandLogic = GdpExpandLogic;
         loadAgentScreenRules(),
         DATABASE_VIEW.loadDbUiPrefs(),
         AGENT_HOOKS_SETTINGS.refresh(),
+        ACCOUNTS_SETTINGS.refresh(),
       ]);
     },
     onSave: saveViewerSettings,
     onAgentRulesSave: saveAgentScreenRules,
     onAgentRulesReset: resetAgentScreenRuleSettings,
     agentHooksSection: AGENT_HOOKS_SETTINGS.element,
+    agentAccountsSection: ACCOUNTS_SETTINGS.element,
   });
   relocalizeViewerSettings = () => {
     VIEWER_SETTINGS.localize();
     AGENT_HOOKS_SETTINGS.localize();
+    ACCOUNTS_SETTINGS.localize();
   };
 
   // ---------- Keybinding editor: extracted to help-keybinding-editor.ts ----
@@ -6073,6 +6102,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   }
 
+  let releaseAccounts: (() => void) | null = null;
+  const ACCOUNTS_BAND = createAccountsBand({
+    client: ACCOUNTS_CLIENT,
+    dialogs: ACCOUNT_DIALOGS,
+    getText: () => agentsText(STATE.language).accounts,
+    hookStateLabel: (state) => agentsText(STATE.language).hooks.state[state],
+    getOverview: () => AGENT_MONITOR.snapshot().overview,
+    isCollapsed: () => APP_SETTINGS.agentAccountsCollapsed === true,
+    setCollapsed: (collapsed) => {
+      void patchSettings({ agentAccountsCollapsed: collapsed });
+      AGENTS_VIEW?.localize();
+    },
+    openSettings: () => openSettingsAt(ACCOUNTS_SECTION_ID),
+    requestRender: () => AGENTS_VIEW?.localize(),
+  });
+  ACCOUNTS_CLIENT.subscribe(() => AGENTS_VIEW?.localize());
+
   AGENTS_VIEW = createAgentsView({
     monitor: AGENT_MONITOR,
     getText: () => agentsText(STATE.language),
@@ -6086,6 +6132,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     hookHintDismissed: () => APP_SETTINGS.agentHookHintDismissed === true,
     dismissHookHint: () => patchSettings({ agentHookHintDismissed: true }),
     openHookSettings: () => openSettingsAt(AGENT_HOOKS_SECTION_ID),
+    accountsBand: ACCOUNTS_BAND,
+    getAccounts: () => ACCOUNTS_CLIENT.snapshot().data,
+    launch: (project) => {
+      ACCOUNT_DIALOGS.launch({ project }).then(
+        () => AGENTS_VIEW?.localize(),
+        (error: unknown) =>
+          console.error("[code-viewer] launch dialog failed", error),
+      );
+    },
+    onVisibilityChange: (visible) => {
+      releaseAccounts?.();
+      releaseAccounts = null;
+      if (visible) {
+        releaseAccounts = ACCOUNTS_CLIENT.retain();
+        void ACCOUNTS_CLIENT.load();
+      }
+    },
   });
   relocalizeAgents = () => {
     AGENTS_VIEW?.localize();

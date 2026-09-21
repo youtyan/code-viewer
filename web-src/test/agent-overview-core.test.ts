@@ -41,6 +41,7 @@ function pane(over: Partial<AgentPane> & { id: string }): AgentPane {
     project: "/work/sample-repo",
     worktree: "",
     shownInShell: "",
+    account: null,
     ...over,
   };
 }

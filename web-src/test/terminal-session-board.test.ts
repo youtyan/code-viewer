@@ -49,6 +49,7 @@ function panes(inRepo: boolean[]): TmuxPanesResponse {
               title: `sample task ${index + 1}`,
               command: "shell",
               path: `/workspace/sample-${index + 1}`,
+              pid: 0,
               width: 80,
               height: 24,
               active: index === 0,

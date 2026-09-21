@@ -8,6 +8,7 @@
 // DOM にもブラウザ API にも触らないので、束ね方・並び順・未読・通知の条件は
 // ここだけで確かめられる。
 
+import type { PaneAccount } from "./agent-accounts";
 import type {
   AgentState,
   AgentStateObservationError,
@@ -91,6 +92,11 @@ export type AgentPane = {
    * 無ければ空。「そのペインをいま見ているか」の判定に使う。
    */
   shownInShell: string;
+  /**
+   * claude / codex の行だけ。どのアカウントで動いているか (エージェントの
+   * プロセスの CLAUDE_CONFIG_DIR / CODEX_HOME から)。それ以外の行は null。
+   */
+  account: PaneAccount | null;
 };
 
 /**
