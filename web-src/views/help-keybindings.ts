@@ -301,6 +301,13 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
         },
       },
       {
+        selectors: [{ action: "switch-project" }],
+        description: {
+          en: "Switch to another registered project (the repository name in the header)",
+          ja: "登録したプロジェクトへ切り替える (ヘッダのリポジトリ名)",
+        },
+      },
+      {
         selectors: [{ action: "nav-back" }, { action: "nav-forward" }],
         description: {
           en: "Go back / forward through visited screens",

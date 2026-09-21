@@ -318,13 +318,25 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
             ...deps.actionHeaders(),
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ target, event: "read", at: Date.now() }),
+          // relay: ほかの code-viewer サーバにも伝える (server/terminal/read-relay.ts)。
+          body: JSON.stringify({
+            target,
+            event: "read",
+            at: Date.now(),
+            relay: true,
+          }),
         }),
       );
       if (myGen !== generation || disposed) return;
       if (!res.ok) {
         setStatus(await responseErrorMessage(res, text().markReadFailed));
         return;
+      }
+      const body = (await res.json()) as { relay?: { failures: string[] } };
+      if (myGen !== generation || disposed) return;
+      const failures = body.relay?.failures ?? [];
+      if (failures.length > 0) {
+        setStatus(`${text().markReadFailed}\n${failures.join("\n")}`);
       }
       await loadLists(myGen);
     } catch (error) {

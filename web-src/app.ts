@@ -150,6 +150,7 @@ import {
   isBlobOrBlameFileRoute,
 } from "./views/file-shell";
 import { createHelpKeybindingEditor } from "./views/help-keybinding-editor";
+import { formatKeyBinding } from "./views/help-keybindings";
 import {
   createHelpPage,
   helpLanguageFromRoute,
@@ -169,6 +170,11 @@ import {
   langFromPath,
   readRenderedLines,
 } from "./views/line-ref-pill";
+import { createProjectActions } from "./views/projects/project-actions";
+import {
+  mountProjectSwitcher,
+  type ProjectSwitcher,
+} from "./views/projects/project-switcher";
 import { createQuickHelp } from "./views/quick-help";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
@@ -1706,7 +1712,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         statusInFlightTitle: (count: number, cancellable: number) => string;
         cancelRequestsActiveTitle: (count: number) => string;
         cancelRequestsInactiveTitle: string;
-        brandHome: string;
         menuViews: string;
         repoWebLink: string;
         copyLineReference: string;
@@ -1907,7 +1912,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         cancelRequestsActiveTitle: (count) =>
           `cancel ${count} in-flight request${count === 1 ? "" : "s"}`,
         cancelRequestsInactiveTitle: "no in-flight requests",
-        brandHome: "Repository home",
         menuViews: "Views",
         repoWebLink: "open repository web page",
         copyLineReference: "Copy AI reference",
@@ -2162,7 +2166,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         sizeRegular: "Regular",
         sizeLarge: "Large",
         sizeExtraLarge: "Extra Large",
-        displaySource: "Applies to all projects in this browser.",
+        displaySource:
+          "Theme, language, font sizes, key bindings, notifications and dismissed hints are shared by all projects. Excluded directories and the settings below them apply to this repository only.",
+        sharedTag: "All projects",
+        sharedTagTitle:
+          "Shared by all projects: changing it here changes it everywhere, and it stays the same when you switch projects.",
+        userSettingsError: (detail) =>
+          `The settings shared by all projects cannot be used, so this repository's settings are shown. Changes to them are not saved until this is fixed:\n${detail}`,
         excludedDirectories: "Excluded directories",
         omitDirs: "Skip these directory names while browsing and searching",
         omitDirsHelp:
@@ -2294,7 +2304,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         cancelRequestsActiveTitle: (count) =>
           `実行中のリクエストを${count}件キャンセル`,
         cancelRequestsInactiveTitle: "実行中のリクエストはありません",
-        brandHome: "リポジトリホーム",
         menuViews: "ビュー切り替え",
         repoWebLink: "リポジトリのウェブページを開く",
         copyLineReference: "AI参照をコピー",
@@ -2553,7 +2562,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         sizeRegular: "標準",
         sizeLarge: "大",
         sizeExtraLarge: "特大",
-        displaySource: "このブラウザのすべてのプロジェクトに適用されます。",
+        displaySource:
+          "テーマ・言語・文字サイズ・キー割り当て・通知・閉じた案内は、全プロジェクト共通です。除外ディレクトリから下の設定は、このリポジトリだけの設定です。",
+        sharedTag: "全プロジェクト共通",
+        sharedTagTitle:
+          "全プロジェクト共通: ここで変えるとどのプロジェクトでも変わり、プロジェクトを移っても同じです。",
+        userSettingsError: (detail) =>
+          `全プロジェクト共通の設定を使えないため、このリポジトリの設定で表示しています。直るまで、この節の変更は保存されません:\n${detail}`,
         excludedDirectories: "除外ディレクトリ",
         omitDirs: "閲覧と検索でスキップするディレクトリ名",
         omitDirsHelp:
@@ -2669,9 +2684,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       repoWebLink.title = text.global.repoWebLink;
       repoWebLink.setAttribute("aria-label", text.global.repoWebLink);
     }
-    document
-      .querySelector<HTMLAnchorElement>(".brand")
-      ?.setAttribute("aria-label", text.global.brandHome);
     document
       .querySelector<HTMLElement>(".app-menu")
       ?.setAttribute("aria-label", text.global.menuViews);
@@ -3522,6 +3534,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let JOURNAL_VIEW: JournalView | null = null;
   let WORKTREE_VIEW: WorktreeView | null = null;
   let AGENTS_VIEW: AgentsView | null = null;
+  let PROJECT_SWITCHER: ProjectSwitcher | null = null;
 
   function applyInlineAnnotations() {
     ANNOTATIONS_UI?.applyInlineAnnotations();
@@ -4282,6 +4295,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   const VIEWER_SETTINGS = createViewerSettings({
     getText: () => uiText().settings,
     getValues: () => ({
+      userSettingsError: APP_SETTINGS.userSettingsError ?? "",
       language: STATE.language,
       sidebarFontSize: savedSidebarFontSize(),
       codeFontSize: savedCodeFontSize(),
@@ -5171,6 +5185,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     if (action === "open-settings") {
       openHelpSection(helpSectionDeps(), "settings");
+      return true;
+    }
+    if (action === "switch-project") {
+      if (!PROJECT_SWITCHER) return false;
+      PROJECT_SWITCHER.toggle();
       return true;
     }
     if (
@@ -6119,7 +6138,40 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   ACCOUNTS_CLIENT.subscribe(() => AGENTS_VIEW?.localize());
 
+  const PROJECT_ACTIONS = createProjectActions({
+    getText: () => agentsText(STATE.language).projects,
+    trackLoad,
+    actionHeaders,
+    refresh: () => AGENT_MONITOR.refresh(),
+    navigate: (url) => window.location.assign(url),
+  });
+
+  const projectSwitcherButton =
+    document.querySelector<HTMLElement>("#project-switcher");
+  PROJECT_SWITCHER = projectSwitcherButton
+    ? mountProjectSwitcher({
+        button: projectSwitcherButton,
+        actions: PROJECT_ACTIONS,
+        getText: () => agentsText(STATE.language).projects,
+        getOverview: () => AGENT_MONITOR.snapshot().overview,
+        subscribe: (listener) => AGENT_MONITOR.subscribe(listener),
+        // 移った先でも同じ画面を開く (ナビで選ばれている画面の入口)。
+        currentPath: () =>
+          document
+            .querySelector<HTMLAnchorElement>("a.app-menu-item.active")
+            ?.getAttribute("href") ?? "/",
+        currentName: () => PROJECT_NAME,
+        shortcutLabel: () => {
+          const binding = activeKeyBindings().find(
+            (item) => item.action === "switch-project",
+          );
+          return binding ? formatKeyBinding(binding) : "";
+        },
+      })
+    : null;
+
   AGENTS_VIEW = createAgentsView({
+    projects: PROJECT_ACTIONS,
     monitor: AGENT_MONITOR,
     getText: () => agentsText(STATE.language),
     setPageMode,
@@ -6151,6 +6203,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
   });
   relocalizeAgents = () => {
+    PROJECT_SWITCHER?.localize();
     AGENTS_VIEW?.localize();
     AGENT_STATUS?.localize();
   };
@@ -6409,9 +6462,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // state to the destination URL. Modified clicks (new tab etc.) keep native
   // anchor behavior.
   document
-    .querySelectorAll<HTMLAnchorElement>(
-      "a.brand, a.app-menu-item, a.global-icon-link",
-    )
+    .querySelectorAll<HTMLAnchorElement>("a.app-menu-item, a.global-icon-link")
     .forEach((link) => {
       // External links (the GitHub repo link) keep native anchor behavior;
       // hijacking them would push their pathname onto the local origin.

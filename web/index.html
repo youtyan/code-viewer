@@ -22,11 +22,12 @@
 <body>
 <div id="app">
   <header id="global-header">
-    <a class="brand" href="/" aria-label="Repository home">
+    <!-- リポジトリ名 = プロジェクトの切替 (views/projects/project-switcher.ts)。 -->
+    <button id="project-switcher" class="brand" type="button" aria-label="Switch project">
       <img class="brand-icon" src="/favicon.png" alt="" width="20" height="20" />
       <span class="title" id="project-title">repository</span>
       <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
-    </a>
+    </button>
     <nav class="app-menu" aria-label="Views">
       <a class="app-menu-item active" data-route="repo" href="/">Repository</a>
       <a class="app-menu-item" data-route="database" href="/database">Datastores</a>

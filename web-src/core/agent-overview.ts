@@ -15,6 +15,10 @@ import type {
   AgentStateRecord,
   AgentStateSource,
 } from "./agent-state";
+import type {
+  ProjectRegistrySnapshot,
+  RegisteredProjectInfo,
+} from "./projects";
 import { basenameOf } from "./terminal-board";
 import type { TmuxPaneId } from "./tmux";
 
@@ -127,7 +131,8 @@ export function abbreviateHome(path: string, home: string): string {
 export type AgentProjectServer =
   /** この画面を出しているサーバ自身。 */
   | { status: "current" }
-  | { status: "running"; url: string }
+  /** launched: code-viewer が起こしたサーバ (一覧のメニューから止められる)。 */
+  | { status: "running"; url: string; launched: boolean }
   /** 動いていない。 */
   | { status: "absent" }
   /** 登録はあるが確かめられなかった。理由を出す。 */
@@ -149,6 +154,11 @@ export type AgentProjectInfo = {
   /** git を呼べなかったときの理由。空なら問題なし。 */
   error: string;
   server: AgentProjectServer;
+  /**
+   * 登録したプロジェクトなら、その登録 (表示名は name に反映済み)。
+   * 登録していなければ null。
+   */
+  registered: RegisteredProjectInfo | null;
 };
 
 export type AgentOverviewResponse = {
@@ -167,9 +177,15 @@ export type AgentOverviewResponse = {
     error: string;
   };
   panes: AgentPane[];
+  /**
+   * ペインから見つかったプロジェクトと、登録したプロジェクト (エージェントが
+   * 居なくても載る) を合わせたもの。同じ git ルートは 1 つ。
+   */
   projects: AgentProjectInfo[];
   /** 画面観測の失敗 (/_agent/states と同じもの)。 */
   errors: AgentStateObservationError[];
+  /** 登録簿そのもの (読めなかった理由を含む)。 */
+  registry: ProjectRegistrySnapshot;
 };
 
 /**
@@ -257,15 +273,45 @@ export function countAgentStates(
 }
 
 /**
+ * 並びの段。人間の番のもの (入力待ち・完了) と作業中を含むプロジェクトが
+ * 先 (0)。それ以外は、登録したプロジェクト (利用者が決めた順, 1) →
+ * 登録していないプロジェクト (2)。
+ */
+function projectTier(group: AgentProjectGroup): number {
+  const [head] = group.panes;
+  if (head && head.state !== "idle") return 0;
+  return group.info.registered ? 1 : 2;
+}
+
+function compareGroups(a: AgentProjectGroup, b: AgentProjectGroup): number {
+  const tier = projectTier(a) - projectTier(b);
+  if (tier !== 0) return tier;
+  const [headA] = a.panes;
+  const [headB] = b.panes;
+  if (projectTier(a) === 1) {
+    const order =
+      (a.info.registered?.order ?? 0) - (b.info.registered?.order ?? 0);
+    if (order !== 0) return order;
+  } else if (headA && headB) {
+    const byHead = comparePanes(headA, headB);
+    if (byHead !== 0) return byHead;
+  }
+  return a.info.name.localeCompare(b.info.name);
+}
+
+/**
  * ペインをプロジェクトごとに束ねて並べる。
  *
- * プロジェクトの並びは、中の一番上の行と同じ規則で決める (入力待ちを含む
- * もの → 作業中を含むもの → それ以外、同じなら新しく変わった順)。それでも
- * 並ばなければ名前順。ペインが 1 つも残らないプロジェクトは出さない。
+ * プロジェクトの並びは compareGroups (入力待ち・完了・作業中を含むものが
+ * 中の一番上の行と同じ規則で先、次に登録順、最後に登録していないもの)。
+ *
+ * ペインが 1 つも残らないプロジェクトは、登録したものだけ includeEmpty の
+ * ときに見出しだけで出す (絞り込み中は出さない)。
  */
 export function groupAgentPanes(
   panes: AgentPane[],
   projects: AgentProjectInfo[],
+  options: { includeEmptyRegistered?: boolean } = {},
 ): AgentProjectGroup[] {
   const infoByRoot = new Map(projects.map((info) => [info.root, info]));
   const byRoot = new Map<string, AgentPane[]>();
@@ -274,34 +320,30 @@ export function groupAgentPanes(
     if (list) list.push(pane);
     else byRoot.set(pane.project, [pane]);
   }
-  const heads: { group: AgentProjectGroup; head: AgentPane }[] = [];
+  const groups: AgentProjectGroup[] = [];
   for (const [root, list] of byRoot) {
     const sorted = [...list].sort(comparePanes);
-    const [head] = sorted;
-    if (!head) continue;
-    heads.push({
-      head,
-      group: {
-        info: infoByRoot.get(root) ?? {
-          root,
-          name: basenameOf(root),
-          displayRoot: root,
-          git: false,
-          error: "",
-          server: { status: "none" },
-        },
-        panes: sorted,
-        counts: countAgentStates(sorted),
+    groups.push({
+      info: infoByRoot.get(root) ?? {
+        root,
+        name: basenameOf(root),
+        displayRoot: root,
+        git: false,
+        error: "",
+        server: { status: "none" },
+        registered: null,
       },
+      panes: sorted,
+      counts: countAgentStates(sorted),
     });
   }
-  return heads
-    .sort(
-      (a, b) =>
-        comparePanes(a.head, b.head) ||
-        a.group.info.name.localeCompare(b.group.info.name),
-    )
-    .map((entry) => entry.group);
+  if (options.includeEmptyRegistered) {
+    for (const info of projects) {
+      if (!info.registered || byRoot.has(info.root)) continue;
+      groups.push({ info, panes: [], counts: countAgentStates([]) });
+    }
+  }
+  return groups.sort(compareGroups);
 }
 
 /** ヘッダの件数表示に出す数。エージェントのペインだけを数える。 */

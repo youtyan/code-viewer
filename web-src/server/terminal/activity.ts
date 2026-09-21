@@ -47,6 +47,37 @@ import { getActiveAgentScreenRules, reloadAgentScreenRules } from "./rules";
  */
 export const ACTIVITY_POLL_INTERVAL_MS = 1500;
 
+/**
+ * 誰も見ていないサーバの巡回の間隔。
+ *
+ * プロジェクトごとにサーバが立つので、見られていないサーバまで 1.5 秒で
+ * 回すと tmux の呼び出しがサーバの数だけ増える (1 本で毎秒約 45 回)。
+ * 一覧の取得が来ない間はこの間隔に落とし、フックの申告はそのまま受ける。
+ */
+export const ACTIVITY_IDLE_POLL_INTERVAL_MS = 15_000;
+
+/** 一覧 (/_agent/overview・/_agent/states) の取得がこれだけ来なければ「誰も見ていない」。 */
+export const ACTIVITY_UNWATCHED_AFTER_MS = 30_000;
+
+/**
+ * 次の巡回までの間隔。最後に一覧を取りに来てから ACTIVITY_UNWATCHED_AFTER_MS
+ * 以内なら速い巡回、それ以上なら遅い巡回。
+ */
+export function activityPollDelay(now: number, lastWatchedAt: number): number {
+  return now - lastWatchedAt <= ACTIVITY_UNWATCHED_AFTER_MS
+    ? ACTIVITY_POLL_INTERVAL_MS
+    : ACTIVITY_IDLE_POLL_INTERVAL_MS;
+}
+
+/**
+ * 取得が来たとき、答える前に巡回し直すか。最後の巡回がこれより古ければ、
+ * 覚えている状態は遅い巡回のもの (最大 ACTIVITY_IDLE_POLL_INTERVAL_MS 前) なので、
+ * 今の状態のように見せない。
+ */
+export function activityIsStale(now: number, lastSweepAt: number): boolean {
+  return now - lastSweepAt > ACTIVITY_POLL_INTERVAL_MS * 2;
+}
+
 /** これだけ画面が動かなければ止まったとみなす。 */
 export const ACTIVITY_IDLE_AFTER_MS = 15000;
 
@@ -86,8 +117,14 @@ export type ActivitySeen = {
 };
 
 const seen = new Map<string, ActivitySeen>();
-let timer: ReturnType<typeof setInterval> | null = null;
-let inFlight = false;
+let timer: ReturnType<typeof setTimeout> | null = null;
+/** 走っている巡回。重ねて走らせず、取得はこれを待つ。 */
+let inFlight: Promise<void> | null = null;
+let watching: { cwd: string; options: ListTmuxPanesOptions } | null = null;
+/** 最後に一覧を取りに来た時刻。 */
+let lastWatchedAt = 0;
+/** 最後に巡回を終えた時刻。 */
+let lastSweepAt = 0;
 const activityErrors = new Map<string, AgentStateObservationError>();
 /** 巡回の再開位置。ペインが増減しても偏らないように持ち回る。 */
 let sweepOffset = 0;
@@ -268,12 +305,21 @@ export function rotateForSweep<T>(
   return { batch, nextOffset: (start + take) % items.length };
 }
 
-async function sweep(
+function sweep(
   cwd: string,
   paneListOptions: ListTmuxPanesOptions,
 ): Promise<void> {
-  if (inFlight) return;
-  inFlight = true;
+  inFlight ??= sweepOnce(cwd, paneListOptions).finally(() => {
+    lastSweepAt = Date.now();
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+async function sweepOnce(
+  cwd: string,
+  paneListOptions: ListTmuxPanesOptions,
+): Promise<void> {
   try {
     const panes = await listTmuxPanes(cwd, paneListOptions);
     activityErrors.delete(activityErrorKey("list_terminals", ""));
@@ -334,29 +380,60 @@ async function sweep(
       activityErrorKey("list_terminals", ""),
       observationError("list_terminals", "", error),
     );
-  } finally {
-    inFlight = false;
   }
+}
+
+function schedule(): void {
+  if (!watching) return;
+  if (timer) clearTimeout(timer);
+  const { cwd, options } = watching;
+  timer = setTimeout(
+    () => {
+      timer = null;
+      void sweep(cwd, options).finally(schedule);
+    },
+    activityPollDelay(Date.now(), lastWatchedAt),
+  );
+  // 観測のためにプロセスを生かし続けない。
+  timer.unref?.();
 }
 
 export function startAgentActivityWatch(
   cwd: string,
   paneListOptions: ListTmuxPanesOptions = {},
 ): void {
-  if (timer) return;
+  if (watching) return;
+  watching = { cwd, options: paneListOptions };
+  // 起動した直後は見られている扱い (開いたタブがすぐ取りに来る)。
+  lastWatchedAt = Date.now();
   void reloadAgentScreenRules(cwd);
-  timer = setInterval(
-    () => void sweep(cwd, paneListOptions),
-    ACTIVITY_POLL_INTERVAL_MS,
-  );
-  // 観測のためにプロセスを生かし続けない。
-  timer.unref?.();
+  schedule();
+}
+
+/**
+ * 一覧を取りに来た。速い巡回に戻し、覚えている状態が遅い巡回の古いもの
+ * なら、答える前に巡回し直す (古い状態を今の状態のように見せない)。
+ */
+export async function noteAgentListWatched(): Promise<void> {
+  const now = Date.now();
+  const wasUnwatched = now - lastWatchedAt > ACTIVITY_UNWATCHED_AFTER_MS;
+  lastWatchedAt = now;
+  if (!watching) return;
+  if (activityIsStale(now, lastSweepAt) || inFlight) {
+    await sweep(watching.cwd, watching.options);
+    schedule();
+    return;
+  }
+  // 遅い巡回の待ちに入っていたら、速い間隔で組み直す。
+  if (wasUnwatched) schedule();
 }
 
 export function stopAgentActivityWatch(): void {
-  if (timer) clearInterval(timer);
+  if (timer) clearTimeout(timer);
   timer = null;
+  watching = null;
   seen.clear();
   activityErrors.clear();
   sweepOffset = 0;
+  lastSweepAt = 0;
 }

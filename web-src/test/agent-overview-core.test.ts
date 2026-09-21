@@ -54,6 +54,7 @@ function project(root: string, name: string): AgentProjectInfo {
     git: true,
     error: "",
     server: { status: "absent" },
+    registered: null,
   };
 }
 
@@ -374,6 +375,7 @@ describe("groupAgentPanes", () => {
       git: false,
       error: "",
       server: { status: "none" },
+      registered: null,
     });
   });
 

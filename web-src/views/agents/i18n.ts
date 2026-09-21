@@ -11,6 +11,11 @@ import type {
 import type { AgentKind } from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
 import { elapsedBucket } from "../../core/terminal-board";
+import {
+  PROJECTS_EN,
+  PROJECTS_JA,
+  type ProjectsText,
+} from "../projects/projects-i18n";
 import { terminalText } from "../terminal/i18n";
 import { ACCOUNTS_EN, ACCOUNTS_JA, type AccountsText } from "./accounts-i18n";
 
@@ -95,6 +100,9 @@ export type AgentsText = {
   hooks: AgentHooksText;
   /** アカウント・使用量・起動。 */
   accounts: AccountsText;
+  projects: ProjectsText;
+  /** 「読んだ」をほかの code-viewer サーバへ伝えられなかった。 */
+  readRelayFailed: string;
 };
 
 export type AgentHooksText = {
@@ -429,6 +437,9 @@ const EN: AgentsText = {
   hookHintClose: "Hide this",
   hooks: HOOKS_EN,
   accounts: ACCOUNTS_EN,
+  projects: PROJECTS_EN,
+  readRelayFailed:
+    "Marked as read here, but some other code-viewer servers were not told (they may still show it as unread):",
 };
 
 const JA: AgentsText = {
@@ -509,6 +520,9 @@ const JA: AgentsText = {
   hookHintClose: "閉じる",
   hooks: HOOKS_JA,
   accounts: ACCOUNTS_JA,
+  projects: PROJECTS_JA,
+  readRelayFailed:
+    "ここでは既読にしましたが、ほかの code-viewer サーバの一部に伝えられませんでした (そちらでは未読のまま見えることがあります):",
 };
 
 const TEXT: Record<AgentsLang, AgentsText> = { en: EN, ja: JA };

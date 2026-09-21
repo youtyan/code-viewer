@@ -20,6 +20,10 @@ export type ViewerSettingsText = {
   sizeLarge: string;
   sizeExtraLarge: string;
   displaySource: string;
+  /** 全プロジェクト共通の項目を持つ節の見出しに添える札。 */
+  sharedTag: string;
+  sharedTagTitle: string;
+  userSettingsError: (detail: string) => string;
   excludedDirectories: string;
   omitDirs: string;
   omitDirsHelp: string;
@@ -81,6 +85,8 @@ export type ViewerSettingsDraft = {
 };
 
 export type ViewerSettingsValues = ViewerSettingsDraft & {
+  /** 全プロジェクト共通の設定を読めなかった理由。空なら読めた。 */
+  userSettingsError: string;
   watchLimitMin: number;
   watchLimitMax: number;
   watchLimitDefault: number;
@@ -144,6 +150,20 @@ function sectionTitle(): HTMLElement {
   return strong;
 }
 
+/** 見出しの横の「全プロジェクト共通」。見出しの文字を書き換えても残るよう別の要素。 */
+function sharedTag(): HTMLSpanElement {
+  const tag = document.createElement("span");
+  tag.className = "scope-settings-shared";
+  return tag;
+}
+
+function titleRow(title: HTMLElement, tag: HTMLElement): HTMLDivElement {
+  const row = document.createElement("div");
+  row.className = "scope-settings-title-row";
+  row.append(title, tag);
+  return row;
+}
+
 function fieldLabel(htmlFor: string): HTMLLabelElement {
   const label = document.createElement("label");
   label.htmlFor = htmlFor;
@@ -200,6 +220,11 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   const codeFontSize = fontSizeSelect("code-font-size");
   const uiFontSizeHelp = helpText("ui-font-size-help");
   const displaySource = document.createElement("p");
+  const userSettingsError = helpText("user-settings-error");
+  userSettingsError.classList.add("scope-settings-refresh-error");
+  userSettingsError.hidden = true;
+  const displayShared = sharedTag();
+  const agentNotifyShared = sharedTag();
   const upload = toggleRow("upload-enabled");
   const uploadHelp = helpText("upload-help");
   const agentNotifyWaiting = toggleRow("agent-notify-waiting");
@@ -297,7 +322,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     displaySource.id = "display-settings-source";
     const display = section();
     display.append(
-      displayTitle,
+      titleRow(displayTitle, displayShared),
       languageLabel,
       language,
       sidebarFontSizeLabel,
@@ -306,6 +331,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       codeFontSizeLabel,
       codeFontSize,
       displaySource,
+      userSettingsError,
     );
 
     uploadsTitle.id = "upload-section-title";
@@ -316,7 +342,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     agentNotifyTitle.id = "agent-notify-section-title";
     const agentNotify = section();
     agentNotify.append(
-      agentNotifyTitle,
+      titleRow(agentNotifyTitle, agentNotifyShared),
       agentNotifyWaiting.wrap,
       agentNotifyDone.wrap,
       agentNotifyHelp,
@@ -743,6 +769,14 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     agentRulesLabel.textContent = text.agentRulesLabel;
     uiFontSizeHelp.textContent = text.fileListFontSizeHelp;
     displaySource.textContent = text.displaySource;
+    for (const tag of [displayShared, agentNotifyShared]) {
+      tag.textContent = text.sharedTag;
+      tag.title = text.sharedTagTitle;
+    }
+    userSettingsError.hidden = !values.userSettingsError;
+    userSettingsError.textContent = values.userSettingsError
+      ? text.userSettingsError(values.userSettingsError)
+      : "";
     upload.text.textContent = text.uploadEnabledLabel;
     uploadHelp.textContent = text.uploadEnabledHelp;
     agentNotifyWaiting.text.textContent = text.agentNotifyWaitingLabel;

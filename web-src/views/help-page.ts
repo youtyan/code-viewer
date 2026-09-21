@@ -86,7 +86,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
         nav: "Settings",
         title: "Settings",
         intro:
-          "Viewer preferences for this project and this browser. Edits remain a draft until you select Save changes.",
+          "Viewer preferences. Sections marked All projects are shared by every project; the others apply to this repository. Edits remain a draft until you select Save changes.",
         groups: [],
       },
       overview: {
@@ -270,6 +270,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               {
                 kind: "paragraph",
                 text: "Once more than the default accounts exist, the Agents list shows which account each claude or codex runs with (read from that process's CLAUDE_CONFIG_DIR / CODEX_HOME only), and a band of account cards above the list shows sign-in state, the 5-hour and weekly usage with reset times and when the value was received (80% and above is marked High), how many agents run with it, and its hooks. codex usage comes from its session logs. claude reports usage only to its status line, so Settings → Accounts → claude usage can wrap your statusLine command: the wrapper keeps the data it receives and returns your command's output unchanged; turning it off restores the original. New agent (on the Agents toolbar, or + on a project) starts claude or codex with the chosen account and project in a new tmux window, without typing into any shell; the command can be changed under Launch commands (it runs in your interactive shell, so shell functions work).",
+              },
+              {
+                kind: "paragraph",
+                text: "Register your projects to keep them in the Agents list even when no agent runs in them, in the order you choose (⋯ on a project heading: register, rename, move up / down, remove from projects — the repository itself is never touched). Open (on a heading) goes to that project's code-viewer in the same tab; if none is running for a registered project, code-viewer starts one first and remembers its port, so the address (and the browser's notification permission) stays the same next time. If that port is taken it starts on another one and tells you. Servers that code-viewer started can be stopped from the ⋯ menu; servers you started yourself and the one showing this screen cannot. The repository name at the left of the header (p) switches between registered projects from any screen and keeps the screen you are on; type to filter, ↑↓ and Enter to go. Theme, language, font sizes, key bindings, notifications and dismissed hints are shared by all projects (Settings shows which sections), so switching does not change how code-viewer looks.",
               },
             ],
           },
@@ -946,7 +950,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "設定",
         title: "設定",
         intro:
-          "このプロジェクトとこのブラウザのビューア設定です。「変更を保存」を押すまで編集内容は下書きのままです。",
+          "ビューアの設定です。「全プロジェクト共通」の節はどのプロジェクトでも同じで、それ以外はこのリポジトリだけの設定です。「変更を保存」を押すまで編集内容は下書きのままです。",
         groups: [],
       },
       overview: {
@@ -1130,6 +1134,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "既定以外のアカウントがあると、エージェント一覧の各行に、その claude / codex がどのアカウントで動いているかが出ます (そのプロセスの CLAUDE_CONFIG_DIR / CODEX_HOME だけを読みます)。一覧の上にはアカウントの帯が出て、ログインの状態・5時間枠と週枠の使用量とリセットまでの時間・いつの値か (80% 以上は「注意」)・そのアカウントで動いているエージェントの数・フックの状態が並びます。codex の使用量はセッション記録から読みます。claude は使用量をステータスラインにだけ渡すので、設定 → アカウント → claude の使用量 でステータスラインのコマンドを包めます。包むスクリプトは受け取ったデータを保存し、あなたのコマンドの出力をそのまま返します。無効にすると元に戻ります。「新しいエージェント」(一覧のツールバー、またはプロジェクトの +) は、選んだアカウントとプロジェクトで claude か codex を tmux の新しいウィンドウに起動します。シェルにキー入力を送ることはしません。コマンドは「起動コマンド」で変えられます (対話シェルで動くので、シェルの関数も使えます)。",
+              },
+              {
+                kind: "paragraph",
+                text: "プロジェクトを登録すると、エージェントが居なくてもエージェント一覧に、好きな順で常に並びます (見出しの ⋯ から登録・名前を変える・上へ / 下へ・登録を外す。リポジトリには触りません)。見出しの「開く」は、そのプロジェクトの code-viewer へ同じタブで移ります。登録したプロジェクトで動いていなければ、先に起動してから移ります。起動したポートを覚えて次も同じポートで起動するので、アドレス (とブラウザの通知の許可) は変わりません。そのポートが使われていれば別のポートで起動し、そのことを知らせます。code-viewer が起動したサーバは ⋯ から止められます。自分で起動したサーバと、この画面のサーバは止められません。ヘッダ左端のリポジトリ名 (p) から、どの画面でも登録したプロジェクトへ切り替えられます。いまの画面のまま移ります。文字を打つと絞り込み、↑↓ と Enter で移ります。テーマ・言語・文字サイズ・キー割り当て・通知・閉じた案内は全プロジェクト共通なので (設定画面にどの節かを表示します)、移っても見た目は変わりません。",
               },
             ],
           },

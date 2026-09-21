@@ -207,16 +207,31 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
 
   async function markReadOnServer(pane: TmuxPaneId): Promise<void> {
     // 申告の done は、読んだと伝えるまでサーバ側で残り続ける (ターミナルの
-    // 「読んだ」ボタンと同じ経路)。
+    // 「読んだ」ボタンと同じ経路)。relay: このサーバからほかの code-viewer
+    // サーバにも伝える (別のプロジェクトを開いたとき未読がよみがえらない)。
     const res = await fetch("/_agent/state", {
       method: "POST",
       headers: {
         ...deps.actionHeaders(),
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ target: pane, event: "read", at: Date.now() }),
+      body: JSON.stringify({
+        target: pane,
+        event: "read",
+        at: Date.now(),
+        relay: true,
+      }),
     });
     if (!res.ok) throw new Error(await responseErrorMessage(res, "read"));
+    const body = (await res.json()) as {
+      relay?: { reached: number; failures: string[] };
+    };
+    const failures = body.relay?.failures ?? [];
+    if (failures.length > 0) {
+      throw new Error(
+        `${deps.getText().readRelayFailed}\n${failures.join("\n")}`,
+      );
+    }
   }
 
   return {

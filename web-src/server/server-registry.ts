@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   mkdirSync,
   readdirSync,
@@ -10,23 +10,21 @@ import { readdir, readFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { errorWithCause } from "../core/error-detail";
+import { type FileLock, processAlive, tryAcquireFileLock } from "./file-lock";
 
 export type ServerRegistryEntry = {
   url: string;
   pid: number;
   root: string;
   started_at: string;
+  /**
+   * code-viewer が起こしたサーバ (作業ツリーやプロジェクトを開いたとき)。
+   * 利用者が自分で起動したサーバには無い。一覧から止めてよいかの判定に使う。
+   */
+  launched?: boolean;
 };
 
-export type ServerStartLock = {
-  release(): void;
-};
-
-type ServerStartLockEntry = {
-  token: string;
-  pid: number;
-  createdAt: number;
-};
+export type ServerStartLock = FileLock;
 
 const SERVER_START_LOCK_STALE_MS = 30_000;
 
@@ -37,63 +35,21 @@ export function registryDir(): string {
   return join(homedir(), ".cache", "code-viewer", "servers");
 }
 
+/** リポジトリのルートごとのファイル名に使う短いハッシュ。 */
+export function rootFileKey(root: string): string {
+  return createHash("sha256").update(root).digest("hex").slice(0, 16);
+}
+
 export function serverRegistryFilePath(root: string): string {
-  const hash = createHash("sha256").update(root).digest("hex").slice(0, 16);
-  return join(registryDir(), `${hash}.json`);
+  return join(registryDir(), `${rootFileKey(root)}.json`);
 }
 
 function serverStartLockFilePath(root: string): string {
-  const hash = createHash("sha256").update(root).digest("hex").slice(0, 16);
-  return join(registryDir(), `${hash}.start.lock`);
+  return join(registryDir(), `${rootFileKey(root)}.start.lock`);
 }
 
 function errno(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException).code;
-}
-
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (errno(error) === "ESRCH") return false;
-    if (errno(error) === "EPERM") return true;
-    throw error;
-  }
-}
-
-function readServerStartLock(root: string): ServerStartLockEntry | null {
-  const file = serverStartLockFilePath(root);
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(file, "utf8"));
-  } catch (error) {
-    if (errno(error) === "ENOENT") return null;
-    throw errorWithCause(`failed to read server start lock for ${root}`, error);
-  }
-  if (!raw || typeof raw !== "object") {
-    throw new Error(
-      `invalid server start lock for ${root}: expected an object`,
-    );
-  }
-  const entry = raw as Record<string, unknown>;
-  if (
-    typeof entry.token !== "string" ||
-    !entry.token ||
-    !Number.isInteger(entry.pid) ||
-    (entry.pid as number) < 1 ||
-    typeof entry.createdAt !== "number" ||
-    !Number.isFinite(entry.createdAt)
-  ) {
-    throw new Error(
-      `invalid server start lock for ${root}: missing required fields`,
-    );
-  }
-  return {
-    token: entry.token,
-    pid: entry.pid as number,
-    createdAt: entry.createdAt,
-  };
 }
 
 /**
@@ -105,48 +61,10 @@ export function acquireServerStartLock(
   now = Date.now(),
 ): ServerStartLock | null {
   mkdirSync(registryDir(), { recursive: true });
-  const file = serverStartLockFilePath(root);
-  const token = randomUUID();
-  const entry: ServerStartLockEntry = {
-    token,
-    pid: process.pid,
-    createdAt: now,
-  };
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      writeFileSync(file, `${JSON.stringify(entry)}\n`, {
-        encoding: "utf8",
-        flag: "wx",
-        mode: 0o600,
-      });
-      return {
-        release() {
-          const current = readServerStartLock(root);
-          if (!current || current.token !== token) return;
-          try {
-            unlinkSync(file);
-          } catch (error) {
-            if (errno(error) === "ENOENT") return;
-            throw error;
-          }
-        },
-      };
-    } catch (error) {
-      if (errno(error) !== "EEXIST") throw error;
-    }
-    const current = readServerStartLock(root);
-    if (!current) continue;
-    const stale =
-      now - current.createdAt > SERVER_START_LOCK_STALE_MS ||
-      !processAlive(current.pid);
-    if (!stale) return null;
-    try {
-      unlinkSync(file);
-    } catch (error) {
-      if (errno(error) !== "ENOENT") throw error;
-    }
-  }
-  throw new Error(`server start lock kept changing for ${root}`);
+  return tryAcquireFileLock(serverStartLockFilePath(root), {
+    staleMs: SERVER_START_LOCK_STALE_MS,
+    now,
+  });
 }
 
 export function writeServerRegistry(entry: ServerRegistryEntry): void {
@@ -180,11 +98,17 @@ function parseServerRegistryEntry(
       `invalid server registry for ${label}: missing required fields`,
     );
   }
+  if (entry.launched !== undefined && typeof entry.launched !== "boolean") {
+    throw new Error(
+      `invalid server registry for ${label}: launched is not a boolean`,
+    );
+  }
   return {
     url: entry.url,
     pid: entry.pid as number,
     root: entry.root,
     started_at: entry.started_at,
+    ...(entry.launched === true ? { launched: true } : {}),
   };
 }
 

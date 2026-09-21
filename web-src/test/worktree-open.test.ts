@@ -66,6 +66,9 @@ function fakeSpawn(onTerminate: () => void) {
     onError(listener: (error: Error) => void) {
       void listener;
     },
+    onExit(listener: (code: number | null, signal: string | null) => void) {
+      void listener;
+    },
     async terminate() {
       onTerminate();
     },
@@ -86,6 +89,7 @@ describe("runningServerResult", () => {
       status: "running",
       url,
       pid: process.pid,
+      launched: false,
     });
   });
 

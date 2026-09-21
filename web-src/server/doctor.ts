@@ -49,6 +49,7 @@ import {
   type SqliteDriverStatus,
 } from "./database/sqlite-driver";
 import { worktreeListResultAsync } from "./git";
+import { projectRegistryPath, readProjectRegistry } from "./projects/registry";
 import type { RunResult } from "./runtime";
 import {
   describeShellAvailability,
@@ -68,6 +69,7 @@ import {
   statusLineWrapperPath,
 } from "./terminal/statusline";
 import { tmuxArgs } from "./tmux/command";
+import { readUserSettings, userSettingsPath } from "./user-settings";
 import {
   mapWithConcurrency,
   serverWorktreeRoot,
@@ -780,6 +782,65 @@ export function checkAgentAccounts(
     });
   }
   return { id: "agent-accounts", title: "Agent accounts", rows };
+}
+
+/**
+ * プロジェクトの登録簿と、全プロジェクト共通の設定 (projects/registry.ts・
+ * user-settings.ts)。どちらもユーザーの状態ディレクトリに残るので、機能を
+ * 消しても最低 1 リリースはこの検出を残す (server.md)。読むだけで書かない。
+ */
+export function checkProjects(
+  registryPath: string = projectRegistryPath(),
+  settingsPath: string = userSettingsPath(),
+): DoctorGroup {
+  const rows: DoctorRow[] = [];
+  const read = readProjectRegistry(registryPath);
+  rows.push(
+    read.ok === false
+      ? {
+          id: "projects.registry",
+          title: "Project registry",
+          status: "warn",
+          detail: read.error,
+          hint: `code-viewer does not overwrite it. Fix or move ${registryPath}; until then no project is registered.`,
+        }
+      : {
+          id: "projects.registry",
+          title: "Project registry",
+          status: "ok",
+          detail: `${read.registry.projects.length} registered: ${registryPath}`,
+          ...(read.registry.projects.length === 0
+            ? {}
+            : {
+                hint: `Remove entries from the Agents list (⋯ > Remove from projects), or delete ${registryPath}. Repositories are never touched.`,
+              }),
+        },
+  );
+  let settingsRow: DoctorRow;
+  try {
+    const settings = readUserSettings(settingsPath);
+    settingsRow = {
+      id: "projects.user-settings",
+      title: "Settings shared by all projects",
+      status: "ok",
+      detail: settings ? settingsPath : `not created yet: ${settingsPath}`,
+      ...(settings
+        ? {
+            hint: `Delete ${settingsPath} to take them over again from the next repository you open. Repository settings (.code-viewer/settings.json) are not changed by it.`,
+          }
+        : {}),
+    };
+  } catch (error) {
+    settingsRow = {
+      id: "projects.user-settings",
+      title: "Settings shared by all projects",
+      status: "warn",
+      detail: formatErrorDetail(error),
+      hint: `code-viewer does not overwrite it and shows each repository's own settings meanwhile. Fix or delete ${settingsPath}.`,
+    };
+  }
+  rows.push(settingsRow);
+  return { id: "projects", title: "Projects", rows };
 }
 
 type DockerCmd = { binary: string; subcommand: string[] };
@@ -1781,6 +1842,7 @@ export async function buildDoctorReport(
   const server = await checkServer(ctx.listenPort, ctx.cwd, ctx.signal);
   const agentHooks = checkAgentHooks();
   const agentAccounts = checkAgentAccounts();
+  const projects = checkProjects();
   const groups: DoctorGroup[] = [
     runtime,
     packageGroup,
@@ -1795,6 +1857,7 @@ export async function buildDoctorReport(
     terminal,
     agentHooks,
     agentAccounts,
+    projects,
     server,
   ];
   return { generation, groups, worstStatus: computeWorst(groups) };

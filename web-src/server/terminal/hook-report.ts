@@ -47,15 +47,6 @@ export type HookReportOutcome =
   | { kind: "reported"; event: AgentEvent; servers: string[] }
   | { kind: "failed"; failures: AgentHookFailure[] };
 
-function connectionRefused(error: unknown): boolean {
-  let current: unknown = error;
-  for (let depth = 0; depth < 4 && current; depth += 1) {
-    if ((current as { code?: unknown }).code === "ECONNREFUSED") return true;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return false;
-}
-
 function targetOf(env: Record<string, string | undefined>): string | null {
   for (const value of [env.TMUX_PANE, env.CODE_VIEWER_SHELL_ID]) {
     if (value && terminalKindOf(value)) return value;
@@ -211,6 +202,38 @@ export async function reportAgentHook(
   return { kind: "reported", event, servers: reached.sort() };
 }
 
+/**
+ * ほかの code-viewer サーバへ状態を知らせる POST。サーバは同一オリジンの
+ * 副作用要求しか通さないので、相手のオリジンと X-Code-Viewer-Action を付ける。
+ */
+export function postToServer(
+  url: string,
+  body: unknown,
+  signal: AbortSignal,
+): Promise<Response> {
+  const origin = new URL(url).origin;
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: origin,
+      "X-Code-Viewer-Action": "1",
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+/** 接続を断られた = そのサーバはもう居ない (登録簿の残り)。失敗ではない。 */
+export function connectionRefused(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current; depth += 1) {
+    if ((current as { code?: unknown }).code === "ECONNREFUSED") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 export function defaultHookReportDeps(
   recordFailure: (failure: AgentHookFailure) => void,
 ): HookReportDeps {
@@ -218,19 +241,7 @@ export function defaultHookReportDeps(
     now: () => Date.now(),
     env: process.env,
     listServers: listServerRegistry,
-    post: (url, body, signal) => {
-      const origin = new URL(url).origin;
-      return fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Origin: origin,
-          "X-Code-Viewer-Action": "1",
-        },
-        body: JSON.stringify(body),
-        signal,
-      });
-    },
+    post: postToServer,
     recordFailure,
   };
 }

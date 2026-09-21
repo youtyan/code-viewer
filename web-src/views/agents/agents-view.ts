@@ -33,8 +33,11 @@ import {
   matchesStateFilter,
   paneTaskText,
 } from "../../core/agent-overview";
-import { CHEVRON_DOWN_16_PATH, iconSvg } from "../../core/icons";
+import { CHEVRON_DOWN_16_PATH, iconSvg, KEBAB_16_PATH } from "../../core/icons";
+import { canStopProjectServer } from "../../core/projects";
+import { type ContextMenuItem, showContextMenu } from "../context-menu";
 import type { PageView } from "../page-view";
+import type { ProjectActions } from "../projects/project-actions";
 import type { AccountsBand } from "./accounts-band";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
@@ -63,6 +66,8 @@ export type AgentsViewDeps = {
   launch(project?: string): void;
   /** 一覧に入った・出たとき (アカウントの取り直しを始める・止める)。 */
   onVisibilityChange(visible: boolean): void;
+  /** プロジェクトの登録・開く・止める (ヘッダの切替と共通)。 */
+  projects: ProjectActions;
 };
 
 export type AgentsView = PageView;
@@ -317,19 +322,15 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     return label;
   }
 
+  /**
+   * 見出しの「開く」(同じタブで移る)。この画面のサーバなら文字だけ。
+   * 起こしている間もボタンの大きさは変えず、押せなくするだけ (進み具合は
+   * 見出しの下の行に出す)。
+   */
   function projectServer(group: AgentProjectGroup): HTMLElement | null {
     const current = text();
-    const server = group.info.server;
-    if (server.status === "running") {
-      const link = document.createElement("a");
-      link.className = "agents-server-link";
-      link.href = server.url;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.textContent = current.openServer;
-      link.title = current.openServerTitle(server.url);
-      return link;
-    }
+    const info = group.info;
+    const server = info.server;
     if (server.status === "current") {
       const here = document.createElement("span");
       here.className = "agents-server-here";
@@ -345,7 +346,107 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       warn.setAttribute("aria-label", warn.title);
       return warn;
     }
-    return null;
+    if (!info.git) return null;
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "agents-server-link";
+    open.textContent = current.openServer;
+    const starting = deps.projects.activity(info.root)?.kind === "starting";
+    open.disabled = starting;
+    open.setAttribute("aria-busy", String(starting));
+    open.title =
+      server.status === "running"
+        ? current.projects.openTitle(info.name)
+        : info.registered
+          ? current.projects.openStoppedTitle(info.name)
+          : current.projects.openUnregisteredTitle(info.name);
+    if (server.status !== "running") open.classList.add("stopped");
+    // 一覧から移るときは、移り先の既定の画面 (リポジトリ) へ。同じ一覧に
+    // 移っても、見ている中身 (全体のエージェント) は変わらないため。
+    open.addEventListener("click", () => void deps.projects.open(info, "/"));
+    return open;
+  }
+
+  function projectMenu(group: AgentProjectGroup, anchor: HTMLElement): void {
+    const t = text().projects;
+    const info = group.info;
+    const registered = info.registered;
+    const items: ContextMenuItem[] = [];
+    if (!registered) {
+      items.push({
+        label: t.register,
+        title: t.registerTitle,
+        disabled: !info.git,
+        onSelect: () => void deps.projects.registerRoot(info.root),
+      });
+    } else {
+      const last =
+        (deps.monitor.snapshot().overview?.registry.projects.length ?? 0) - 1;
+      items.push(
+        {
+          label: t.rename,
+          onSelect: () => void deps.projects.rename(info),
+        },
+        {
+          label: t.moveUp,
+          disabled: registered.order <= 0,
+          onSelect: () => void deps.projects.move(info, -1),
+        },
+        {
+          label: t.moveDown,
+          disabled: registered.order >= last,
+          onSelect: () => void deps.projects.move(info, 1),
+        },
+        {
+          label: t.unregister,
+          title: t.unregisterTitle,
+          onSelect: () => void deps.projects.unregister(info),
+        },
+      );
+    }
+    const stoppable = canStopProjectServer(info.server);
+    items.push(
+      { kind: "separator" },
+      {
+        label: t.stopServer,
+        title: stoppable ? t.stopServerTitle : t.stopServerNotLaunched,
+        danger: true,
+        disabled: !stoppable,
+        onSelect: () => void deps.projects.stop(info),
+      },
+    );
+    showContextMenu(anchor, items);
+  }
+
+  /** 起こしている最中・失敗を、見出しのすぐ下に出す (失敗は理由の全文)。 */
+  function projectActivity(root: string, name: string): HTMLElement | null {
+    const t = text().projects;
+    const activity = deps.projects.activity(root);
+    if (!activity) return null;
+    const box = document.createElement("div");
+    box.className = `agents-project-activity agents-project-${activity.kind}`;
+    box.setAttribute("role", activity.kind === "failed" ? "alert" : "status");
+    if (activity.kind === "starting") {
+      box.textContent = t.startingTitle(name);
+      return box;
+    }
+    const head = document.createElement("div");
+    head.className = "agents-project-activity-head";
+    const title = document.createElement("strong");
+    title.textContent = activity.title;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "agents-hook-hint-close";
+    close.textContent = "×";
+    close.title = t.dismiss;
+    close.setAttribute("aria-label", t.dismiss);
+    close.addEventListener("click", () => deps.projects.dismiss(root));
+    head.append(title, close);
+    const detail = document.createElement("pre");
+    detail.className = "terminal-observation-errors";
+    detail.textContent = activity.detail;
+    box.append(head, detail);
+    return box;
   }
 
   function createProject(group: AgentProjectGroup): HTMLElement {
@@ -418,13 +519,35 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       launch.addEventListener("click", () => deps.launch(group.info.root));
       head.appendChild(launch);
     }
+    const menu = document.createElement("button");
+    menu.type = "button";
+    menu.className = "agents-project-launch agents-project-menu";
+    menu.innerHTML = iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH);
+    menu.title = current.projects.menuTitle(group.info.name);
+    menu.setAttribute("aria-label", menu.title);
+    menu.setAttribute("aria-haspopup", "menu");
+    menu.addEventListener("click", (event) => {
+      // 文書全体の click で閉じる処理 (リポジトリ画面のメニュー) に、開いた
+      // ばかりのメニューを閉じさせない。作業ツリー画面の ⋯ と同じ。
+      event.stopPropagation();
+      projectMenu(group, menu);
+    });
+    head.appendChild(menu);
 
+    section.appendChild(head);
+    const activity = projectActivity(group.info.root, group.info.name);
+    if (activity) section.appendChild(activity);
+    // エージェントの居ない登録プロジェクトは見出し 1 行だけ。
+    if (group.panes.length === 0) {
+      section.classList.add("agents-project-empty");
+      return section;
+    }
     const rows = document.createElement("div");
     rows.className = "agents-rows";
     rows.role = "group";
     rows.hidden = isCollapsed;
     for (const pane of group.panes) rows.appendChild(createRow(pane));
-    section.append(head, rows);
+    section.appendChild(rows);
     return section;
   }
 
@@ -550,6 +673,9 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
 
     const problemLines = [
       ...(error ? [error] : []),
+      ...(overview?.registry.error
+        ? [current.projects.registryProblem(overview.registry.error)]
+        : []),
       ...(overview?.tmux.error
         ? [`${current.tmuxFailed}\n${overview.tmux.error}`]
         : []),
@@ -567,11 +693,26 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     if (overview?.tmux.error || (error && !overview)) problems.open = true;
 
     list.replaceChildren();
+    // どのプロジェクトにも属さない失敗 (パスを入力しての登録など)。
+    const general = projectActivity("", "");
+    if (general) list.appendChild(general);
     if (!overview) {
       if (!error) list.appendChild(emptyState(current.loading, ""));
       return;
     }
-    if (overview.tmux.error) return;
+    // 登録したプロジェクトは、エージェントが居なくても (tmux が無くても)
+    // 見出しだけで並べる。案内の箱はその上に出す。
+    const registeredOnly = () => {
+      for (const group of groupAgentPanes([], overview.projects, {
+        includeEmptyRegistered: true,
+      })) {
+        list.appendChild(createProject(group));
+      }
+    };
+    if (overview.tmux.error) {
+      registeredOnly();
+      return;
+    }
     if (!overview.tmux.available) {
       list.appendChild(
         emptyState(
@@ -579,12 +720,14 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
           current.emptyNotInstalledBody,
         ),
       );
+      registeredOnly();
       return;
     }
     if (!overview.tmux.running) {
       list.appendChild(
         emptyState(current.emptyNoTmuxTitle, current.emptyNoTmuxBody),
       );
+      registeredOnly();
       return;
     }
     if (scoped.length === 0) {
@@ -603,6 +746,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
               },
         ),
       );
+      registeredOnly();
       return;
     }
     showAccounts = showPaneAccounts(
@@ -628,7 +772,11 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       );
       return;
     }
-    for (const group of groupAgentPanes(visible, overview.projects)) {
+    // 絞り込み中は、エージェントの居ない登録プロジェクトを出さない
+    // (「入力待ちだけ」を見たいときに、関係の無い見出しが並ばないように)。
+    for (const group of groupAgentPanes(visible, overview.projects, {
+      includeEmptyRegistered: stateFilter === "all",
+    })) {
       list.appendChild(createProject(group));
     }
   }
@@ -650,6 +798,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       deps.hookHintDismissed(),
       deps.getHookStatus(),
       deps.accountsBand.signature(),
+      deps.projects.signature(),
       snapshot.overview,
       // 経過時間は分単位でしか変わらない。
       Math.floor(now / 60_000),
@@ -756,7 +905,12 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     document.body.classList.add("gdp-agents-page");
     deps.setPageMode();
     deps.syncHeaderMenu();
-    unsubscribe = deps.monitor.subscribe(() => render());
+    const offMonitor = deps.monitor.subscribe(() => render());
+    const offProjects = deps.projects.subscribe(() => render());
+    unsubscribe = () => {
+      offMonitor();
+      offProjects();
+    };
     deps.onVisibilityChange(true);
   }
 

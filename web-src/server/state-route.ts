@@ -1,4 +1,6 @@
+import { formatErrorDetail } from "../core/error-detail";
 import type { AppSettingsState } from "../core/types";
+import { splitSettingsPatch, withUserSettings } from "../core/user-settings";
 import {
   dispatchRoutes,
   handleError,
@@ -15,6 +17,12 @@ import {
   patchToolsState,
   patchViewState,
 } from "./state-store";
+import {
+  ensureUserSettings,
+  patchUserSettings,
+  UserSettingsError,
+  userSettingsPath,
+} from "./user-settings";
 
 const MAX_STATE_PATCH_BODY_BYTES = 1_000_000;
 // tools の下書きは 1 ツール 200,000 コード単位 × 3 ツールで、UTF-8 では最悪
@@ -60,16 +68,57 @@ async function handleStatePatch<T>(
     const message = err instanceof Error ? err.message : String(err);
     if (message === tooLargeMessage) return textError(message, 413);
     console.error("[code-viewer] state error:", err);
-    return textError(saveFailedMessage, 500);
+    // 理由を捨てない。画面の保存失敗の表示 (reportPersistenceError) に全文が出る。
+    return textError(`${saveFailedMessage}: ${formatErrorDetail(err)}`, 500);
+  }
+}
+
+/**
+ * 画面に返す設定。人に付く項目はユーザー単位の設定 (user-settings.ts) から、
+ * それ以外はリポジトリの設定から。ユーザー単位の設定が壊れていれば
+ * リポジトリの設定で表示し、読めない理由を userSettingsError で返す。
+ */
+async function settingsForScreen(cwd: string): Promise<AppSettingsState> {
+  const repo = await loadAppSettingsState(cwd);
+  try {
+    return withUserSettings(
+      repo,
+      await ensureUserSettings(userSettingsPath(), repo),
+    );
+  } catch (error) {
+    if (!(error instanceof UserSettingsError)) throw error;
+    console.error("[code-viewer] user settings are not used:", error);
+    return { ...repo, userSettingsError: formatErrorDetail(error) };
   }
 }
 
 async function handleSettingsGet(cwd: string): Promise<Response> {
   return jsonLoadResponse(
-    () => loadAppSettingsState(cwd),
+    () => settingsForScreen(cwd),
     "state",
     "failed to load settings state",
   );
+}
+
+/** 人に付く項目はユーザー単位へ、残りはリポジトリの設定へ書く。 */
+async function patchSettingsForScreen(
+  cwd: string,
+  patch: unknown,
+): Promise<AppSettingsState> {
+  const { user, repo } = splitSettingsPatch(
+    patch && typeof patch === "object" && !Array.isArray(patch)
+      ? (patch as Record<string, unknown>)
+      : {},
+  );
+  const repoState =
+    Object.keys(repo).length > 0
+      ? await patchAppSettingsState(cwd, repo)
+      : await loadAppSettingsState(cwd);
+  const userState =
+    Object.keys(user).length > 0
+      ? await patchUserSettings(userSettingsPath(), user, repoState)
+      : await ensureUserSettings(userSettingsPath(), repoState);
+  return withUserSettings(repoState, userState);
 }
 
 async function handleSettingsPatch(
@@ -80,7 +129,7 @@ async function handleSettingsPatch(
   return handleStatePatch(
     cwd,
     req,
-    patchAppSettingsState,
+    patchSettingsForScreen,
     "settings state too large",
     "failed to save settings state",
     MAX_STATE_PATCH_BODY_BYTES,

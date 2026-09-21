@@ -49,7 +49,12 @@ import {
   type ShareSelectionIssue,
   type StoredAccount,
 } from "../../core/agent-accounts";
-import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
+import { errorWithCause } from "../../core/error-detail";
+import {
+  cachedRegistryReader,
+  type RegistryFileRead,
+  readRegistryFile,
+} from "../registry-file";
 import { errno, writeFileAtomic } from "../terminal/settings-file";
 import { codeViewerStateDir } from "../user-state-dir";
 
@@ -98,58 +103,16 @@ export class AccountError extends Error {
   }
 }
 
-export type RegistryRead =
-  | { ok: true; registry: AccountRegistry }
-  | { ok: false; error: string };
+export type RegistryRead = RegistryFileRead<AccountRegistry>;
 
 /** 読む。無ければ空。読めない・形が違えば ok: false と理由の全文。 */
 export function readAccountRegistry(path: string): RegistryRead {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch (error) {
-    if (errno(error) === "ENOENT") {
-      return { ok: true, registry: emptyAccountRegistry() };
-    }
-    return {
-      ok: false,
-      error: `cannot read ${path}: ${formatErrorDetail(error)}`,
-    };
-  }
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch (error) {
-    return {
-      ok: false,
-      error: `${path} is not valid JSON: ${formatErrorDetail(error)}`,
-    };
-  }
-  const parsed = parseAccountRegistry(raw);
-  if (parsed.ok === false) {
-    return { ok: false, error: `${path}:\n${parsed.issues.join("\n")}` };
-  }
-  return parsed;
+  return readRegistryFile(path, parseAccountRegistry, emptyAccountRegistry);
 }
 
 /** 一覧の取り直しのたびに読むので、変わっていなければ前回の結果を使う。 */
-const readCache = new Map<string, { key: string; read: RegistryRead }>();
-
-export function readAccountRegistryCached(path: string): RegistryRead {
-  let key: string;
-  try {
-    const stat = statSync(path);
-    key = `${stat.size}:${stat.mtimeMs}`;
-  } catch (error) {
-    if (errno(error) === "ENOENT") key = "missing";
-    else return readAccountRegistry(path);
-  }
-  const hit = readCache.get(path);
-  if (hit && hit.key === key) return hit.read;
-  const read = readAccountRegistry(path);
-  readCache.set(path, { key, read });
-  return read;
-}
+export const readAccountRegistryCached =
+  cachedRegistryReader(readAccountRegistry);
 
 function registryOrThrow(path: string): AccountRegistry {
   const read = readAccountRegistry(path);

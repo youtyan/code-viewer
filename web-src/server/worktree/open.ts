@@ -1,12 +1,27 @@
-// 別の作業ツリーで code-viewer を開く。
+// 別の作業ツリー (と、登録したプロジェクト) で code-viewer を開く。
 //
 // 起動したサーバは親より長く動くため、registry で本人確認し、worktree 削除時に
 // 停止する。起動途中の Promise は実パスごとに共有し、同じ要求が重なっても
 // 子プロセスは 1 本だけ作る。
+//
+// 起こしたサーバには LAUNCHED_BY_ENV を渡す。サーバはそれを登録簿に
+// `launched: true` として残し (preview.ts)、エージェント一覧は「code-viewer が
+// 起こしたサーバ」だけを止められるようにする。
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { errorWithCause, errorWithCauses } from "../../core/error-detail";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
+import { dirname } from "node:path";
+import {
+  errorWithCause,
+  errorWithCauses,
+  formatErrorDetail,
+} from "../../core/error-detail";
 import type { SettingsResponse } from "../../core/types";
 import { createLinkedAbortController } from "../abort";
 import {
@@ -16,6 +31,9 @@ import {
   type ServerRegistryEntry,
 } from "../server-registry";
 
+/** 起こしたサーバに渡す印。サーバは読んだらすぐ自分の環境から消す。 */
+export const LAUNCHED_BY_ENV = "CODE_VIEWER_LAUNCHED_BY";
+
 export type WorktreeOpenResult =
   | { status: "ok"; url: string; started: boolean }
   | { status: "missing" }
@@ -23,7 +41,7 @@ export type WorktreeOpenResult =
   | { status: "error"; error: unknown };
 
 export type RunningWorktreeServerResult =
-  | { status: "running"; url: string; pid: number }
+  | { status: "running"; url: string; pid: number; launched: boolean }
   | { status: "absent" }
   | { status: "unreachable"; error: unknown }
   | { status: "invalid"; error: unknown };
@@ -33,8 +51,20 @@ export type RunningWorktreeServerOptions = {
   timeoutMs?: number;
 };
 
+export type SpawnOptions = {
+  /** 待ち受けるポート。無ければ 0 (OS が選ぶ)。 */
+  port?: number;
+  /**
+   * 子の標準出力とエラー出力を書くファイル。起動に失敗したとき、その末尾を
+   * 理由として返す。無ければ捨てる。
+   */
+  logFile?: string;
+};
+
 type SpawnedServer = {
   onError(listener: (error: Error) => void): void;
+  /** 登録簿に出る前に終わったことを知る。 */
+  onExit(listener: (code: number | null, signal: string | null) => void): void;
   terminate(): Promise<void>;
   unref(): void;
 };
@@ -44,7 +74,7 @@ type WorktreeServerRuntime = {
   fetch(input: string, init: RequestInit): Promise<Response>;
   now(): number;
   pollIntervalMs: number;
-  spawnServer(path: string): SpawnedServer;
+  spawnServer(path: string, options: SpawnOptions): SpawnedServer;
   startTimeoutMs: number;
   terminatePid(pid: number): Promise<void>;
 };
@@ -153,21 +183,66 @@ async function terminateChild(child: ChildProcess): Promise<void> {
   }
 }
 
-function spawnServer(path: string): SpawnedServer {
+function spawnServer(path: string, options: SpawnOptions): SpawnedServer {
   const entry = process.argv[1];
   if (!entry) throw new Error("cannot locate code-viewer entry point");
-  const child = spawn(
-    process.execPath,
-    [...process.execArgv, entry, "--cwd", path, "--port", "0"],
-    { cwd: path, detached: true, stdio: "ignore", env: process.env },
-  );
+  const out = options.logFile ? openLogFile(options.logFile) : "ignore";
+  let child: ChildProcess;
+  try {
+    child = spawn(
+      process.execPath,
+      [
+        ...process.execArgv,
+        entry,
+        "--cwd",
+        path,
+        "--port",
+        String(options.port ?? 0),
+      ],
+      {
+        cwd: path,
+        detached: true,
+        stdio: ["ignore", out, out],
+        env: { ...process.env, [LAUNCHED_BY_ENV]: "code-viewer" },
+      },
+    );
+  } finally {
+    // 子が自分の複製を持ったので、親の分は閉じる。
+    if (typeof out === "number") closeSync(out);
+  }
   return {
     onError(listener) {
       child.once("error", listener);
     },
+    onExit(listener) {
+      child.once("exit", listener);
+    },
     terminate: () => terminateChild(child),
     unref: () => child.unref(),
   };
+}
+
+function openLogFile(file: string): number {
+  mkdirSync(dirname(file), { recursive: true });
+  return openSync(file, "w", 0o600);
+}
+
+/** 起動に失敗したときの理由に添える、子の出力の末尾。 */
+const LOG_TAIL_BYTES = 8_000;
+
+function logTail(file: string | undefined): string {
+  if (!file) return "";
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (error) {
+    return `(the server output ${file} could not be read: ${formatErrorDetail(error)})`;
+  }
+  const tail =
+    text.length > LOG_TAIL_BYTES ? text.slice(-LOG_TAIL_BYTES) : text;
+  return tail.trim()
+    ? `server output (${file}):\n${tail.trimEnd()}`
+    : `the server wrote nothing to ${file}`;
 }
 
 async function signalProcess(
@@ -281,12 +356,18 @@ export function createWorktreeServerController(
         ),
       };
     }
-    return { status: "running", url: url.href, pid: entry.pid };
+    return {
+      status: "running",
+      url: url.href,
+      pid: entry.pid,
+      launched: entry.launched === true,
+    };
   }
 
   async function spawnWhileLocked(
     key: string,
     deadline: number,
+    options: SpawnOptions,
   ): Promise<WorktreeOpenResult> {
     const existing = await runningServerResult(key);
     if (existing.status === "running") {
@@ -298,13 +379,28 @@ export function createWorktreeServerController(
 
     let child: SpawnedServer;
     try {
-      child = runtime.spawnServer(key);
+      child = runtime.spawnServer(key, options);
     } catch (error) {
       return { status: "error", error };
     }
     let spawnError: Error | null = null;
     child.onError((error) => {
       spawnError = error;
+    });
+    // 登録簿に出る前に終わった (ポートが使えない・リポジトリが読めない等)。
+    // 時間切れまで待たず、子の出力の末尾を理由にしてすぐ返す。
+    let exited: Error | null = null;
+    child.onExit((code, signal) => {
+      exited = new Error(
+        [
+          `the code-viewer server for ${key} exited before it was ready (${
+            signal ? `signal ${signal}` : `exit code ${code}`
+          })`,
+          logTail(options.logFile),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
     });
     child.unref();
 
@@ -335,6 +431,7 @@ export function createWorktreeServerController(
         if (spawnError) {
           return stopAfterFailure({ status: "error", error: spawnError });
         }
+        if (exited) return { status: "error", error: exited };
         const found = await runningServerResult(key);
         if (found.status === "running") {
           return { status: "ok", url: found.url, started: true };
@@ -343,13 +440,26 @@ export function createWorktreeServerController(
           return stopAfterFailure({ status: "error", error: found.error });
         }
       }
-      return stopAfterFailure({ status: "timeout" });
+      const tail = logTail(options.logFile);
+      return stopAfterFailure(
+        tail
+          ? {
+              status: "error",
+              error: new Error(
+                `the code-viewer server for ${key} was not ready within ${Math.round(runtime.startTimeoutMs / 1000)} seconds\n${tail}`,
+              ),
+            }
+          : { status: "timeout" },
+      );
     } catch (error) {
       return stopAfterFailure({ status: "error", error });
     }
   }
 
-  async function doOpen(path: string): Promise<WorktreeOpenResult> {
+  async function doOpen(
+    path: string,
+    options: SpawnOptions,
+  ): Promise<WorktreeOpenResult> {
     let key: string;
     try {
       key = realpathSync(path);
@@ -384,7 +494,7 @@ export function createWorktreeServerController(
 
       let result: WorktreeOpenResult;
       try {
-        result = await spawnWhileLocked(key, deadline);
+        result = await spawnWhileLocked(key, deadline, options);
       } catch (error) {
         result = { status: "error", error };
       }
@@ -410,7 +520,10 @@ export function createWorktreeServerController(
     return { status: "timeout" };
   }
 
-  function openWorktreeServer(path: string): Promise<WorktreeOpenResult> {
+  function openWorktreeServer(
+    path: string,
+    options: SpawnOptions = {},
+  ): Promise<WorktreeOpenResult> {
     let key: string;
     try {
       key = registryKey(path);
@@ -419,7 +532,7 @@ export function createWorktreeServerController(
     }
     const pending = opening.get(key);
     if (pending) return pending;
-    const started = doOpen(path).finally(() => {
+    const started = doOpen(path, options).finally(() => {
       if (opening.get(key) === started) opening.delete(key);
     });
     opening.set(key, started);

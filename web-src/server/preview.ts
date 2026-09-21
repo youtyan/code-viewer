@@ -134,6 +134,7 @@ import {
 import { loadAppSettingsState } from "./state-store";
 import type { ListTmuxPanesOptions } from "./tmux/panes";
 import { startWatchSupervisor, type WatchSupervisor } from "./watch-supervisor";
+import { LAUNCHED_BY_ENV } from "./worktree/open";
 import {
   DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT,
   MAX_WORKTREE_WATCH_DIRECTORY_LIMIT,
@@ -2947,6 +2948,10 @@ function closeSseClients() {
 }
 
 parseCli();
+// code-viewer が起こしたサーバか (worktree/open.ts)。読んだらすぐ消す。残すと
+// このサーバのブラウザシェルから利用者が起動したサーバにまで引き継がれる。
+const launchedByCodeViewer = process.env[LAUNCHED_BY_ENV] === "code-viewer";
+delete process.env[LAUNCHED_BY_ENV];
 applyPersistedSettings(await loadAppSettingsState(cwd));
 
 // Directory count the worktree watcher capped at, or null while under the cap.
@@ -3136,6 +3141,7 @@ writeServerRegistry({
   pid: process.pid,
   root: cwd,
   started_at: new Date().toISOString(),
+  ...(launchedByCodeViewer ? { launched: true } : {}),
 });
 // 落ちたサーバの登録を片付ける。起動を待たせず、失敗しても起動は止めない
 // (どの登録がなぜ残ったかは全部ログに出す)。

@@ -620,6 +620,60 @@ body[data-code-font-size="xlarge"] {
   text-decoration: none;
 }
 .brand:hover { color: var(--fg); text-decoration: none; }
+/* リポジトリ名はプロジェクトの切替のボタン。リンクだったときと同じ大きさの
+   まま (ヘッダの幅を増やさない)。押せることは hover の下地で示す。 */
+button.brand {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* いつも薄い面を敷いて「押せる」ことを示す。面は box-shadow で外へ広げるので
+   寸法は変わらない。ホバー・開いている間は一段濃く。 */
+button.brand {
+  background: var(--bg-soft);
+  box-shadow: 0 0 0 4px var(--bg-soft);
+}
+button.brand:hover,
+button.brand[aria-expanded="true"] {
+  background: var(--bg-mute);
+  box-shadow: 0 0 0 4px var(--bg-mute);
+}
+/* 入口の印の分だけ、ブランドの中の間隔とナビとの間隔を詰める (ヘッダの幅を
+   増やさない。ナビの項目は自分の左右の余白を持つので、見た目の間隔は残る)。 */
+button.brand {
+  gap: 5px;
+  margin-right: -10px;
+}
+.brand-chevron {
+  display: inline-flex;
+  flex: none;
+  margin-left: -2px;
+  color: var(--fg-muted);
+}
+.brand-chevron svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+button.brand:hover .brand-chevron,
+button.brand:focus-visible .brand-chevron,
+button.brand[aria-expanded="true"] .brand-chevron {
+  color: var(--fg);
+}
+button.brand[aria-expanded="true"] .brand-chevron svg {
+  transform: rotate(180deg);
+}
+button.brand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .brand-icon {
   width: calc(var(--ui-font-title) + 5px);
   height: calc(var(--ui-font-title) + 5px);
@@ -2457,7 +2511,8 @@ body.gdp-history-resizing * {
   color: var(--fg);
   font-size: 12px;
 }
-.scope-settings-section-title + label {
+.scope-settings-section-title + label,
+.scope-settings-title-row + label {
   margin-top: 0;
 }
 .scope-settings-section + .scope-settings-section {
@@ -2531,6 +2586,27 @@ body.gdp-history-resizing * {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+/* 節の見出しと「全プロジェクト共通」の札。 */
+.scope-settings-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.scope-settings-title-row > .scope-settings-section-title {
+  margin-bottom: 0;
+}
+.scope-settings-shared {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-xs);
+  line-height: 1.6;
+  white-space: nowrap;
+  cursor: help;
 }
 .agent-screen-rules-guide .scope-settings-help {
   margin-top: 6px;
@@ -5891,6 +5967,14 @@ body.gdp-file-detail-page #empty {
 .gdp-context-menu .danger {
   color: var(--danger);
 }
+/* 押せない項目 (理由は title)。危険な操作の色より優先して、押せないと分かる色に。 */
+.gdp-context-menu button:disabled {
+  color: var(--fg-subtle);
+  cursor: default;
+}
+.gdp-context-menu button:disabled:hover {
+  background: transparent;
+}
 body.gdp-def-mod #content .gdp-source-line-code:hover,
 body.gdp-def-mod #content .gdp-source-virtual-line-code:hover,
 body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
@@ -8210,6 +8294,139 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   opacity: 1;
 }
 
+/* ヘッダのプロジェクトの切替 (views/projects/project-switcher.ts)。ヘッダの
+   上に浮く overlay なので、寸法は画面基準でよい (ui-layout.md の例外)。 */
+.project-switcher {
+  position: fixed;
+  z-index: 1000;
+  width: min(480px, calc(100vw - 16px));
+  max-height: min(70vh, 560px);
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.18);
+  font-size: var(--ui-font-base);
+}
+.project-switcher-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 6px;
+}
+.project-switcher-hint {
+  color: var(--fg-subtle);
+  font-size: var(--ui-font-xs);
+  white-space: nowrap;
+}
+.project-switcher-input {
+  flex: 0 0 auto;
+  height: var(--ui-control-sm);
+  margin: 0 0 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+.project-switcher-input[hidden] {
+  display: none;
+}
+.project-switcher-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.project-switcher-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--ui-dense-row-h, 30px);
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.project-switcher-row.active {
+  background: var(--bg-soft);
+}
+.project-switcher-row.current .project-switcher-name::before {
+  content: "● ";
+  color: var(--accent);
+}
+.project-switcher-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-switcher-path {
+  min-width: 0;
+  color: var(--fg-subtle);
+  font-size: var(--ui-font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-switcher-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.project-switcher-note {
+  color: var(--fg-subtle);
+}
+.project-switcher-message {
+  margin: 4px 8px 8px;
+  color: var(--fg-muted);
+}
+.project-switcher-error {
+  margin: 6px 4px 0;
+  color: var(--danger);
+}
+.project-switcher-error pre {
+  margin: 4px 0 0;
+  max-height: 10em;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--fg);
+}
+.project-switcher-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.project-switcher-action {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.project-switcher-action:hover,
+.project-switcher-action:focus-visible {
+  background: var(--accent-subtle);
+}
 /* メニューの区切り。取り返しのつかない操作を、よく使う操作と続けて置かない。 */
 .gdp-context-menu-sep {
   margin: 4px 2px;
@@ -17300,14 +17517,29 @@ body:not(.app-panel-docked):has(.app-panel) .agents-page {
   white-space: nowrap;
 }
 .agents-server-link {
+  appearance: none;
   padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
+  background: transparent;
   color: var(--accent);
+  font: inherit;
+  font-size: var(--ui-font-sm);
   text-decoration: none;
+  cursor: pointer;
 }
 .agents-server-link:hover {
   background: var(--accent-subtle);
+}
+/* 動いていないプロジェクトの「開く」(押すと起こしてから移る)。 */
+.agents-server-link.stopped {
+  color: var(--fg-muted);
+}
+/* 起こしている間。大きさは変えず、押せなくして色だけ変える。 */
+.agents-server-link:disabled {
+  cursor: progress;
+  background: var(--bg-soft);
+  color: var(--fg-subtle);
 }
 .agents-server-here {
   color: var(--fg-subtle);
@@ -17737,6 +17969,53 @@ body:not(.app-panel-docked):has(.app-panel) .agents-page {
   border-color: var(--border);
   background: var(--bg-soft);
   color: var(--fg);
+}
+.agents-project-menu {
+  display: inline-grid;
+  place-items: center;
+}
+.agents-project-menu svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+/* エージェントの居ない登録プロジェクト: 見出し 1 行だけ。畳む印は出さない。 */
+.agents-project-empty .terminal-tree-twisty {
+  visibility: hidden;
+}
+.agents-project-empty .agents-project-name {
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+/* 起こしている最中・失敗。見出しのすぐ下に、行と同じ字下げで出す。 */
+.agents-project-activity {
+  margin: 0 var(--agents-gutter) 6px
+    calc(var(--agents-gutter) + var(--agents-row-indent));
+  font-size: var(--ui-font-sm);
+  color: var(--fg-muted);
+}
+.agents-project-starting::before {
+  content: "◌ ";
+  color: var(--accent);
+}
+.agents-project-failed {
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--danger) 6%, var(--bg));
+}
+.agents-project-activity-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--danger);
+}
+.agents-project-failed pre {
+  margin: 6px 0 0;
+  max-height: 12em;
+  overflow: auto;
+  white-space: pre-wrap;
 }
 /* 行のアカウント名。登録アカウントがあるか、既定以外で動くものがあるとき
    だけ列を足す (既定だけの人には列ごと出さない)。 */

@@ -48,6 +48,9 @@ const EN_TEXT: ViewerSettingsText = {
   sizeRegular: "Regular",
   sizeLarge: "Large",
   sizeExtraLarge: "Extra Large",
+  sharedTag: "All projects",
+  sharedTagTitle: "Shared by all projects",
+  userSettingsError: (detail) => `Shared settings cannot be used: ${detail}`,
   displaySource: "Applies to all projects in this browser.",
   excludedDirectories: "Excluded directories",
   omitDirs: "Skip these directory names",
@@ -108,6 +111,7 @@ const JA_TEXT: ViewerSettingsText = {
 
 function defaultValues(): ViewerSettingsValues {
   return {
+    userSettingsError: "",
     language: "en",
     sidebarFontSize: "regular",
     codeFontSize: "regular",

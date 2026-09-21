@@ -218,6 +218,11 @@ export type AppSettingsState = {
     from: string;
     to: string;
   };
+  /**
+   * 応答にだけ載る。全プロジェクト共通の設定を読めなかった理由 (その間は
+   * リポジトリの設定で表示している)。保存はしない。
+   */
+  userSettingsError?: string;
 };
 
 export type ViewState = {

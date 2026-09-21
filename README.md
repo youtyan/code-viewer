@@ -95,6 +95,13 @@ Requires Node.js 20 or newer. Development uses
   optional status line wrapper that returns your status line unchanged), and
   New agent starts claude or codex with a chosen account and project in a new
   tmux window.
+- Register your projects so they stay in the Agents list (in your order) even
+  with no agent running, and switch between them from the repository name at
+  the left of the header (`p`) on any screen. Open goes to that project's
+  code-viewer in the same tab, starting one first for a registered project and
+  reusing its port next time; servers that code-viewer started can be stopped
+  from the list. Theme, language, font sizes, key bindings and notifications
+  are shared by all projects, so switching does not change how it looks.
 - Open files directly from the repository or diff view, including text-like
   config/prompt files and large generated files (virtualized source viewer
   with copy/open-full-view).

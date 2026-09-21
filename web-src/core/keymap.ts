@@ -62,6 +62,7 @@ export const KEYMAP_ACTIONS = [
   "goto-journal",
   "goto-database",
   "goto-agents",
+  "switch-project",
   "nav-back",
   "nav-forward",
   "copy-file-path",
@@ -275,6 +276,8 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "goto-journal", key: "j", pendingG: true },
   { action: "goto-database", key: "b", pendingG: true },
   { action: "goto-agents", key: "a", pendingG: true },
+  // ヘッダ左端のリポジトリ名 (プロジェクトの切替) を開く。
+  { action: "switch-project", key: "p" },
   { action: "nav-back", key: "[", ctrl: true },
   { action: "nav-forward", key: "]", ctrl: true },
   { action: "copy-file-path", key: "y", pendingG: true },

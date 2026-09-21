@@ -184,9 +184,16 @@ function deps(over: Partial<AgentOverviewDeps> = {}): AgentOverviewDeps {
       resolutions[path] ?? { kind: "error", error: `unknown ${path}` },
     findServer: async (root): Promise<AgentProjectServer> =>
       root === "/work/another-repo"
-        ? { status: "running", url: "http://127.0.0.1:64172/" }
+        ? { status: "running", url: "http://127.0.0.1:64172/", launched: false }
         : { status: "absent" },
     paneAccounts: async () => new Map(),
+    readRegistry: () => ({
+      projects: [],
+      error: "",
+      path: "/work/projects.json",
+    }),
+    rootExists: () => true,
+    forgetServer: () => undefined,
     now: () => 5000,
     ...over,
   };
@@ -246,6 +253,7 @@ describe("buildAgentOverview", () => {
         git: true,
         error: "",
         server: { status: "current" },
+        registered: null,
       },
       {
         root: "/work/another-repo",
@@ -253,7 +261,12 @@ describe("buildAgentOverview", () => {
         displayRoot: "~/another-repo",
         git: true,
         error: "",
-        server: { status: "running", url: "http://127.0.0.1:64172/" },
+        server: {
+          status: "running",
+          url: "http://127.0.0.1:64172/",
+          launched: false,
+        },
+        registered: null,
       },
       {
         root: "/work/notes",
@@ -262,6 +275,7 @@ describe("buildAgentOverview", () => {
         git: false,
         error: "",
         server: { status: "none" },
+        registered: null,
       },
     ]);
     expect(overview.errors).toEqual([]);
@@ -425,6 +439,71 @@ describe("buildAgentOverview", () => {
       ["%3", ""],
       ["%4", ""],
     ]);
+  });
+});
+
+describe("registered projects in the overview", () => {
+  function registeredInfo(root: string, name: string, order: number) {
+    return { root, name, order, port: null };
+  }
+
+  test("the same git root is one project with the registered name; registered-only projects are listed without panes", async () => {
+    const overview = await buildAgentOverview(
+      deps({
+        readRegistry: () => ({
+          projects: [
+            registeredInfo("/work/another-repo", "Another", 0),
+            registeredInfo("/work/quiet-repo", "quiet-repo", 1),
+            registeredInfo("/work/gone-repo", "gone-repo", 2),
+          ],
+          error: "",
+          path: "/work/projects.json",
+        }),
+        rootExists: (root) => root !== "/work/gone-repo",
+      }),
+    );
+    const byRoot = new Map(overview.projects.map((info) => [info.root, info]));
+    expect(overview.projects.map((info) => info.root)).toEqual([
+      "/work/sample-repo",
+      "/work/another-repo",
+      "/work/notes",
+      "/work/quiet-repo",
+      "/work/gone-repo",
+    ]);
+    expect(byRoot.get("/work/another-repo")).toMatchObject({
+      name: "Another",
+      registered: { order: 0 },
+    });
+    expect(
+      overview.panes.filter((pane) => pane.project === "/work/another-repo"),
+    ).toHaveLength(1);
+    expect(byRoot.get("/work/quiet-repo")).toMatchObject({
+      name: "quiet-repo",
+      displayRoot: "~/quiet-repo",
+      git: true,
+      error: "",
+      server: { status: "absent" },
+    });
+    expect(byRoot.get("/work/gone-repo")?.error).toBe(
+      "/work/gone-repo does not exist",
+    );
+    expect(byRoot.get("/work/sample-repo")?.registered).toBeNull();
+  });
+
+  test("an unreadable registry keeps the list and reports the reason", async () => {
+    const overview = await buildAgentOverview(
+      deps({
+        readRegistry: () => ({
+          projects: [],
+          error: "/work/projects.json is not valid JSON",
+          path: "/work/projects.json",
+        }),
+      }),
+    );
+    expect(overview.panes).toHaveLength(4);
+    expect(overview.registry.error).toBe(
+      "/work/projects.json is not valid JSON",
+    );
   });
 });
 

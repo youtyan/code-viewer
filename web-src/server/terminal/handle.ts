@@ -12,6 +12,8 @@
 // - DELETE /_agent/hooks/failures 失敗の記録を消す
 // - /_agent/accounts・/_agent/launch・/_agent/statusline/* はアカウントの
 //   入口 (accounts/handle.ts)
+// - /_agent/projects・/_agent/projects/open・/_agent/projects/stop は
+//   プロジェクトの登録簿と、そのサーバを開く・止める入口 (projects/handle.ts)
 //
 // ルーティングと副作用リクエストの認可は tmux/handle.ts と同じ dispatchRoutes
 // に任せる。申告は状態を書き換えるので sideEffect: true。CLI からの POST は
@@ -53,9 +55,14 @@ import {
   parsePostJsonBody,
   textError,
 } from "../database/handle-shared";
+import {
+  handleProjectOpenPost,
+  handleProjectStopPost,
+  handleProjectsPost,
+} from "../projects/handle";
 import { rawFileHeaders } from "../raw-file-headers";
 import { fileReadableStream } from "../runtime";
-import { getAgentActivityErrors } from "./activity";
+import { getAgentActivityErrors, noteAgentListWatched } from "./activity";
 import {
   getAgentState,
   listAgentStates,
@@ -81,6 +88,7 @@ import {
   defaultAgentOverviewDeps,
 } from "./overview";
 import { savePastedImage } from "./paste";
+import { relayAgentRead } from "./read-relay";
 import {
   MAX_AGENT_SCREEN_RULES_BYTES,
   reloadAgentScreenRules,
@@ -104,6 +112,7 @@ async function handleStatePost(req: Request): Promise<Response> {
     lastPrompt?: unknown;
     note?: unknown;
     agent?: unknown;
+    relay?: unknown;
   }>(req);
   if (body instanceof Response) return body;
 
@@ -119,6 +128,9 @@ async function handleStatePost(req: Request): Promise<Response> {
     return textError("invalid agent", 400);
   }
 
+  if (body.relay !== undefined && body.relay !== true) {
+    return textError("invalid relay", 400);
+  }
   const record = recordAgentState({
     target,
     event: body.event,
@@ -129,10 +141,17 @@ async function handleStatePost(req: Request): Promise<Response> {
     agent: isReportedAgent(body.agent) ? body.agent : undefined,
   });
   if (!record) return textError("invalid event", 400);
+  // 画面で「読んだ」ときは、ほかのサーバにも伝える (read-relay.ts)。送り先
+  // からは relay を付けずに送るので、送り返されない。
+  if (body.event === "read" && body.relay === true) {
+    const relay = await relayAgentRead(target, record.updatedAt);
+    return json({ ok: true, state: record, relay });
+  }
   return json({ ok: true, state: record });
 }
 
-function handleStatesGet(url: URL): Response {
+async function handleStatesGet(url: URL): Promise<Response> {
+  await noteAgentListWatched();
   const errors = getAgentActivityErrors();
   const target = url.searchParams.get("target");
   if (target) {
@@ -383,8 +402,17 @@ function handleHookFailuresDelete(): Response {
 let overviewDeps: AgentOverviewDeps | null = null;
 
 async function handleOverviewGet(cwd: string): Promise<Response> {
+  await noteAgentListWatched();
   overviewDeps ??= defaultAgentOverviewDeps(cwd);
   return json(await buildAgentOverview(overviewDeps));
+}
+
+/**
+ * サーバを起こした・止めた後は、一覧が覚えているそのプロジェクトのサーバの
+ * 状態を捨てる (次の取り直しで古い「動いていない」を出さない)。
+ */
+function forgetServer(root: string): void {
+  overviewDeps?.forgetServer(root);
 }
 
 export function handleAgentRoute(
@@ -405,7 +433,7 @@ export function handleAgentRoute(
       "/_agent/states": {
         methods: ["GET"],
         sideEffect: false,
-        handler: () => Promise.resolve(handleStatesGet(url)),
+        handler: () => handleStatesGet(url),
       },
       "/_agent/overview": {
         methods: ["GET"],
@@ -496,6 +524,22 @@ export function handleAgentRoute(
         methods: ["DELETE"],
         sideEffect: true,
         handler: () => Promise.resolve(handleStatusLineFailuresDelete()),
+      },
+      "/_agent/projects": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleProjectsPost(req, cwd),
+      },
+      // サーバのプロセスを起こす・止める。同一オリジンからしか通らない。
+      "/_agent/projects/open": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleProjectOpenPost(req, forgetServer),
+      },
+      "/_agent/projects/stop": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleProjectStopPost(req, cwd, forgetServer),
       },
       // ファイルを作るので副作用。同一オリジンからしか通らない。
       "/_agent/paste": {

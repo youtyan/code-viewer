@@ -11,7 +11,7 @@
 // 短い間だけ覚えておく。一覧は数秒おきに取り直されるので、毎回 30 本の git を
 // 立てないため。失敗は覚えた結果ごと応答の errors に載せ、黙って消さない。
 
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAccountAgent, type PaneAccount } from "../../core/agent-accounts";
 import {
@@ -27,6 +27,7 @@ import type {
   AgentStateRecord,
 } from "../../core/agent-state";
 import { formatErrorDetail } from "../../core/error-detail";
+import type { ProjectRegistrySnapshot } from "../../core/projects";
 import type { ShellSession } from "../../core/shell";
 import { basenameOf, linkShellsAndPanes } from "../../core/terminal-board";
 import type { TmuxClient, TmuxPanesResponse } from "../../core/tmux";
@@ -36,6 +37,10 @@ import {
   sharedAccountService,
 } from "../accounts/service";
 import { projectRootResultAsync } from "../git";
+import {
+  projectRegistryPath,
+  projectRegistrySnapshot,
+} from "../projects/registry";
 import { listShellSessions } from "../shell/session";
 import { listTmuxClients } from "../tmux/clients";
 import { listTmuxPanes } from "../tmux/panes";
@@ -71,6 +76,12 @@ export type AgentOverviewDeps = {
    */
   firstListed: Map<string, number>;
   findServer(root: string): Promise<AgentProjectServer>;
+  /** findServer の覚えた結果を捨てる。 */
+  forgetServer(root: string): void;
+  /** 登録したプロジェクト (エージェントが居なくても一覧に載せる)。 */
+  readRegistry(): ProjectRegistrySnapshot;
+  /** 登録したフォルダがまだ在るか (消えたものは見出しに理由を出す)。 */
+  rootExists(root: string): boolean;
   /**
    * claude / codex の行がどのアカウントで動いているか。プロセスの調査は
    * accounts/process-env.ts が頻度を抑えて行う。
@@ -116,6 +127,7 @@ export async function buildAgentOverview(
       panes: [],
       projects: [],
       errors,
+      registry: deps.readRegistry(),
     };
   }
   const tmuxPanes = panes.running ? flattenTmuxPanes(panes.sessions) : [];
@@ -191,6 +203,7 @@ export async function buildAgentOverview(
         git: resolution.kind === "root",
         error: resolution.kind === "error" ? resolution.error : "",
         server: { status: "none" },
+        registered: null,
       });
       if (resolution.kind === "error") {
         errors.push(error("resolve_project", pane.path, resolution.error, now));
@@ -229,6 +242,29 @@ export async function buildAgentOverview(
     });
   }
 
+  // 登録したプロジェクトを合わせる。同じ git ルートなら 1 つにまとめ、
+  // 表示名は登録の名前にする。エージェントの居ないものは行の無い見出しになる。
+  const registry = deps.readRegistry();
+  for (const registered of registry.projects) {
+    const found = projects.get(registered.root);
+    if (found) {
+      found.registered = registered;
+      found.name = registered.name;
+      continue;
+    }
+    projects.set(registered.root, {
+      root: registered.root,
+      name: registered.name,
+      displayRoot: abbreviateHome(registered.root, deps.home),
+      git: true,
+      error: deps.rootExists(registered.root)
+        ? ""
+        : `${registered.root} does not exist`,
+      server: { status: "none" },
+      registered,
+    });
+  }
+
   await Promise.all(
     [...projects.values()]
       .filter((info) => info.git)
@@ -257,6 +293,7 @@ export async function buildAgentOverview(
     panes: result,
     projects: [...projects.values()],
     errors,
+    registry,
   };
 }
 
@@ -267,7 +304,7 @@ export function createTtlCache<T>(
   maxEntries = 500,
 ) {
   const entries = new Map<string, { at: number; value: Promise<T> }>();
-  return (key: string, load: () => Promise<T>): Promise<T> => {
+  const cached = (key: string, load: () => Promise<T>): Promise<T> => {
     const hit = entries.get(key);
     if (hit && now() - hit.at < ttlMs) return hit.value;
     const value = load();
@@ -280,6 +317,9 @@ export function createTtlCache<T>(
     }
     return value;
   };
+  /** 覚えた結果を捨てる (起こした・止めた直後に古い結果を出さない)。 */
+  cached.forget = (key: string) => entries.delete(key);
+  return cached;
 }
 
 /** ペインの cwd → プロジェクト。cwd はそう頻繁に変わらないので 30 秒。 */
@@ -324,11 +364,18 @@ export function defaultAgentOverviewDeps(cwd: string): AgentOverviewDeps {
           timeoutMs: SERVER_HEALTH_TIMEOUT_MS,
         });
         if (found.status === "running")
-          return { status: "running", url: found.url };
+          return {
+            status: "running",
+            url: found.url,
+            launched: found.launched,
+          };
         if (found.status === "absent") return { status: "absent" };
         return { status: found.status, detail: formatErrorDetail(found.error) };
       }),
+    forgetServer: (root) => serverCache.forget(root),
     paneAccounts: (targets) => sharedAccountService().paneAccounts(targets),
+    readRegistry: () => projectRegistrySnapshot(projectRegistryPath()),
+    rootExists: existsSync,
     now: Date.now,
   };
 }
