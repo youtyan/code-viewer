@@ -96,6 +96,13 @@ export type TerminalText = {
   /** 文字サイズの増減。 */
   fontSmaller: string;
   fontLarger: string;
+  /** 見出しの行のセッションの一覧の開閉。 */
+  sessionsShow: string;
+  sessionsHide: string;
+  /** 見出しの行に出す、何も映していないときの札。 */
+  noTarget: string;
+  /** ただのシェル (エージェントではない) を映しているときの札。 */
+  shellTarget: string;
   /** 貼り付けた画像を帯から外す。 */
   removeAttachment: string;
   /** 画像を大きく開く。 */
@@ -153,7 +160,8 @@ const EN: TerminalText = {
   reload: "reload pane list",
   notInstalled: "tmux is not installed.",
   noSessions: "No tmux session is running.",
-  selectPane: "Open a shell, or pick a tmux pane to jump to.",
+  selectPane:
+    "Pick an agent in the sidebar, or open the session list to start a shell.",
   connecting: "Connecting…",
   paneClosed: "This pane has been closed.",
   paneOpenFailed: "Could not open this pane.",
@@ -206,6 +214,10 @@ const EN: TerminalText = {
   openTarget: "open",
   fontSmaller: "smaller text",
   fontLarger: "larger text",
+  sessionsShow: "Show sessions and tmux panes",
+  sessionsHide: "Hide sessions and tmux panes",
+  noTarget: "Nothing open",
+  shellTarget: "Shell",
   removeAttachment: "remove this image",
   openImage: "open larger",
   zoomIn: "zoom in",
@@ -233,7 +245,8 @@ const JA: TerminalText = {
   reload: "ペイン一覧を再取得",
   notInstalled: "tmux がインストールされていません。",
   noSessions: "起動中の tmux セッションがありません。",
-  selectPane: "シェルを開くか、移動したい tmux ペインを選んでください。",
+  selectPane:
+    "サイドバーでエージェントを選ぶか、セッションの一覧を開いてシェルを始めてください。",
   connecting: "接続しています…",
   paneClosed: "このペインは閉じられました。",
   paneOpenFailed: "このペインを開けませんでした。",
@@ -286,6 +299,10 @@ const JA: TerminalText = {
   openTarget: "開く",
   fontSmaller: "文字を小さく",
   fontLarger: "文字を大きく",
+  sessionsShow: "セッションと tmux のペインを表示",
+  sessionsHide: "セッションと tmux のペインを隠す",
+  noTarget: "何も開いていません",
+  shellTarget: "シェル",
   removeAttachment: "この画像を外す",
   openImage: "大きく開く",
   zoomIn: "拡大",

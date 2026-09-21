@@ -133,8 +133,8 @@
 
      この下に来る箱を画面いっぱいに広げるときは --content-h からこれを引く。
      タブや情報バーの見た目を変えたらこの 1 つを直す。
-     いまはパンくずと切替が 1 行、その下に情報の行 (文書の面の余白の節)。 */
-  --file-detail-head-h: 101px;
+     いまはパンくず・情報のボタン・切替が 1 行 (文書の面の余白の節)。 */
+  --file-detail-head-h: 75px;
   /* shadows */
   --shadow-sm: 0 1px 0 var(--color-shadow);
   --shadow-md: 0 3px 6px var(--color-shadow);
@@ -254,8 +254,10 @@ html, body {
   --ui-file-header-h: 46px;
   --ui-file-header-wrapped-h: 82px;
   --ui-history-dock-h: 28px;
-  /* 左のサイドバーの 1 行 (プロジェクト・エージェント)。 */
-  --ui-nav-row-h: 30px;
+  /* 一覧の 1 行の高さ。左のサイドバー・ファイルのツリー・目次・変更ファイルの
+     一覧で共有する。出所は views/shell/row-height.ts (表示密度ごとの値を
+     applySidebarFontSize が body に書く)。ここは JS 実行前の初回描画用の既定。 */
+  --ui-row-h: 30px;
   /* 余白の段階。部品はこの名前だけを使う (段階の外の px を書かない)。
      密度で --space-unit だけが変わり、全部の段階が比例して変わる。
      ここ (html, body) に置くのは、body の密度の上書きを反映させるため
@@ -320,7 +322,6 @@ body[data-sidebar-font-size="compact"] {
   --space-unit: 3.5px;
   --global-header-h: 40px;
   --statusbar-h: 26px;
-  --ui-nav-row-h: 28px;
   --topbar-h: 52px;
   --ui-font-xs: 9px;
   --ui-font-sm: 10px;
@@ -339,7 +340,6 @@ body[data-sidebar-font-size="large"] {
   --space-unit: 4.5px;
   --global-header-h: 50px;
   --statusbar-h: 32px;
-  --ui-nav-row-h: 34px;
   --topbar-h: 62px;
   --ui-font-xs: 11px;
   --ui-font-sm: 12px;
@@ -358,7 +358,6 @@ body[data-sidebar-font-size="xlarge"] {
   --space-unit: 5px;
   --global-header-h: 56px;
   --statusbar-h: 36px;
-  --ui-nav-row-h: 38px;
   --topbar-h: 68px;
   --ui-font-xs: 12px;
   --ui-font-sm: 13px;
@@ -18474,7 +18473,7 @@ html[data-nav-collapsed] #app-nav {
   position: relative;
   display: flex;
   align-items: center;
-  height: var(--ui-nav-row-h);
+  height: var(--ui-row-h);
   padding-left: calc(var(--pad-text) - var(--pad-face));
   border-radius: var(--radius-md);
 }
@@ -18550,11 +18549,13 @@ html[data-nav-collapsed] #app-nav {
 .nav-project-head.current .nav-project-icon {
   color: var(--color-accent);
 }
-/* いま見ているプロジェクト。選んでいる行と同じ面と光 (名前の太さも変える)。 */
+/* 選択は 2 段。いま見ているプロジェクト = 控えめな面だけ (枠も光も無し、
+   名前の太さで補う)。ターミナルで開いているエージェントの行 = 強い選択
+   (.nav-agent.active: 面 + 細い枠 + 内側の光)。強い選択は縦に 1 つだけ。 */
 .nav-project-head.current,
 .nav-project-head.current:hover {
-  background: var(--color-select);
-  box-shadow: var(--glow-select);
+  background: color-mix(in srgb, var(--color-select) 45%, transparent);
+  box-shadow: none;
 }
 .nav-project-head.current .nav-project-toggle {
   cursor: default;
@@ -18603,8 +18604,8 @@ html[data-nav-collapsed] #app-nav {
 .nav-row-action {
   display: inline-grid;
   place-items: center;
-  width: calc(var(--ui-nav-row-h) - var(--space-2));
-  height: calc(var(--ui-nav-row-h) - var(--space-2));
+  width: calc(var(--ui-row-h) - var(--space-2));
+  height: calc(var(--ui-row-h) - var(--space-2));
   padding: 0;
   border: 0;
   border-radius: var(--radius-sm);
@@ -18643,7 +18644,7 @@ html[data-nav-collapsed] #app-nav {
   grid-template-columns: var(--icon-md) auto minmax(0, 1fr) auto auto;
   align-items: center;
   column-gap: var(--space-2);
-  height: var(--ui-nav-row-h);
+  height: var(--ui-row-h);
   padding: 0 calc(var(--pad-text) - var(--pad-face)) 0 calc(var(--pad-text) - var(--pad-face) + var(--indent-step));
   border: 0;
   border-radius: var(--radius-md);
@@ -18725,7 +18726,7 @@ html[data-nav-collapsed] #app-nav {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  height: var(--ui-nav-row-h);
+  height: var(--ui-row-h);
   padding: 0 calc(var(--pad-text) - var(--pad-face));
   border: 0;
   border-radius: var(--radius-md);
@@ -19240,25 +19241,31 @@ button.brand[aria-expanded="true"] {
 }
 
 /* ---- 文書の面 (ファイルの表示) の余白と基準線 ----
-   面の内側の余白は --pad-doc。パンくず・情報の行・目次の見出しと項目・本文の
-   始まりの文字の左端は全部この線にそろえる。選択や hover の面は線より外へ
-   広げて描き、文字は線に乗せる。右上のアイコンは押せる領域の右端を線に乗せる。
-   パンくずと Preview / Code / Blame / History の切替は同じ行 (絵のとおり)、
-   大きさや日時は主役の行から外して小さく 2 行目に置く。 */
+   面の内側の余白は --pad-doc。パンくずと本文の文字の左端はこの線にそろえる。
+   選択や hover の面は線より外へ広げて描き、文字は線に乗せる。右上のアイコンは
+   押せる領域の右端を線に乗せる。パンくず・情報のボタン・表示の切替・前後・
+   削除は 1 行 (絵のとおり)。大きさと日時は情報のボタンの中 (行としては出さない)。
+   目次は本文の右の細い列 (--toc-w)。面が狭いときは畳む。 */
 .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
-  grid-template-areas:
-    "path tabs nav trash"
-    "meta meta meta meta";
+  grid-template-columns: auto minmax(0, max-content) auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas: "toggle path info . tabs nav trash";
   align-items: center;
   column-gap: var(--space-2);
-  row-gap: var(--space-1);
-  padding: var(--space-4) var(--pad-doc) var(--space-3);
+  padding: var(--space-4) var(--pad-doc) var(--space-2);
   border-bottom: 0;
+}
+/* ツリーを隠していないとき (切替のボタンが無いとき) は、空の列の間隔で
+   パンくずが基準線から右へずれないよう、列そのものを持たない。 */
+.gdp-file-detail-wrapper > .gdp-file-detail-sticky:not(:has(#sidebar-toggle)) {
+  grid-template-columns: minmax(0, max-content) auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas: "path info . tabs nav trash";
 }
 .gdp-file-detail-wrapper > .gdp-file-detail-sticky > .gdp-file-detail-header {
   display: contents;
+}
+.gdp-file-detail-sticky #sidebar-toggle {
+  grid-area: toggle;
 }
 .gdp-file-detail-sticky .gdp-file-detail-path {
   grid-area: path;
@@ -19273,12 +19280,76 @@ button.brand[aria-expanded="true"] {
 .gdp-file-detail-sticky .gdp-file-detail-header > .gdp-trash-path {
   grid-area: trash;
 }
+/* 情報のボタン: パンくずの行の中の小さな丸。hover / フォーカスで大きさと日時の
+   小さな面が下に出る (押せる領域の寸法は状態で変えない)。 */
 .gdp-file-detail-sticky .gdp-file-detail-meta {
-  grid-area: meta;
+  grid-area: info;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  order: 0;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  border-radius: var(--radius-sm);
   color: var(--color-text-3);
+  cursor: default;
+  outline: none;
 }
-.gdp-file-detail-sticky .gdp-file-detail-meta-item:first-child {
-  padding-left: 0;
+.gdp-file-detail-sticky .gdp-file-detail-meta[hidden] {
+  display: none;
+}
+.gdp-file-detail-sticky .gdp-file-detail-meta:hover,
+.gdp-file-detail-sticky .gdp-file-detail-meta:focus-visible {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.gdp-file-detail-sticky .gdp-file-detail-meta:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+.gdp-file-detail-meta-icon {
+  display: inline-grid;
+  place-items: center;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  font-family: var(--font-ui);
+  font-size: var(--ui-font-xs);
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
+}
+.gdp-file-detail-meta-list {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  z-index: 40;
+  display: none;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: max-content;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  box-shadow: var(--shadow-pop);
+}
+.gdp-file-detail-sticky .gdp-file-detail-meta:hover > .gdp-file-detail-meta-list,
+.gdp-file-detail-sticky .gdp-file-detail-meta:focus-within > .gdp-file-detail-meta-list {
+  display: flex;
+}
+.gdp-file-detail-meta-list .gdp-file-detail-meta-item {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0;
+  border: 0;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+}
+.gdp-file-detail-meta-list .gdp-file-detail-meta-item .label {
+  min-width: calc(var(--space-unit) * 16);
+  color: var(--color-text-3);
 }
 .gdp-file-detail-sticky .gdp-file-breadcrumb {
   padding-top: 0;
@@ -19316,36 +19387,90 @@ button.brand[aria-expanded="true"] {
   color: var(--color-text);
   box-shadow: var(--glow-select);
 }
-/* 本文: 目次と本文の列の外側の余白も --pad-doc。本文は目次から 1 段広く離す。 */
+/* 本文: 左端はパンくずと同じ --pad-doc の線。目次は右の細い列。 */
+.gdp-source-viewer:has(> .gdp-markdown-layout) {
+  container: doc-view / inline-size;
+}
 .gdp-source-viewer .gdp-markdown-layout {
+  --toc-w: calc(var(--space-unit) * 52);
+  grid-template-columns: minmax(0, 1fr) var(--toc-w);
   gap: var(--space-6);
-  /* 目次の列は面の線から始める (選んでいる項目の面が文字の外へ出る分)。
-     目次は overflow の箱なので、負の余白で外へ出すと面が切れる。 */
-  padding: var(--space-5) var(--pad-doc) var(--space-6)
-    calc(var(--pad-doc) - var(--pad-face));
+  padding: var(--space-4) var(--pad-doc) var(--space-6);
 }
 .gdp-source-viewer .gdp-markdown-layout > .gdp-markdown-preview {
+  grid-column: 1;
+  grid-row: 1;
   padding: 0;
 }
 .gdp-source-viewer .gdp-markdown-toc {
   --toc-mark-w: 2px;
+  grid-column: 2;
+  grid-row: 1;
   top: calc(var(--global-header-h) + var(--space-4));
   padding: 0;
+  font-size: var(--ui-font-sm);
 }
 .gdp-source-viewer .gdp-markdown-toc::before {
   margin: 0 0 var(--space-2);
-  padding: 0 0 0 var(--pad-face);
+  padding: 0 0 0 var(--space-3);
   border-bottom: 0;
+  font-size: var(--ui-font-xs);
 }
-.gdp-source-viewer .gdp-markdown-toc li > a {
-  padding-left: calc(var(--pad-face) - var(--toc-mark-w));
-  border-left-width: var(--toc-mark-w);
+/* 目次の項目: 文字は補助の色、選んでいる項目は左の細い線だけ (面は付けない)。 */
+.gdp-source-viewer .gdp-markdown-toc li > a,
+.gdp-source-viewer .gdp-markdown-toc li > a:hover,
+.gdp-source-viewer .gdp-markdown-toc li > a.active {
+  display: flex;
+  align-items: center;
+  min-height: var(--ui-row-h);
+  padding: 0 0 0 calc(var(--space-3) - var(--toc-mark-w));
+  border-left: var(--toc-mark-w) solid var(--color-line-soft);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text-3);
+  font-weight: 400;
+}
+.gdp-source-viewer .gdp-markdown-toc li > a:hover {
+  color: var(--color-text);
+}
+.gdp-source-viewer .gdp-markdown-toc li > a.active {
+  border-left-color: var(--color-accent);
+  color: var(--color-text);
 }
 .gdp-source-viewer .gdp-markdown-toc li.level-2 > a {
-  padding-left: calc(var(--pad-face) - var(--toc-mark-w) + var(--indent-step));
+  padding-left: calc(var(--space-3) - var(--toc-mark-w) + var(--indent-step));
 }
 .gdp-source-viewer .gdp-markdown-toc li.level-3 > a {
-  padding-left: calc(var(--pad-face) - var(--toc-mark-w) + var(--indent-step) * 2);
+  padding-left: calc(var(--space-3) - var(--toc-mark-w) + var(--indent-step) * 2);
+}
+/* 面が狭いときは、ファイル名を削らないよう表示の切替を 2 行目へ回す。 */
+.gdp-file-detail-wrapper {
+  container: doc-head / inline-size;
+}
+@container doc-head (max-width: 760px) {
+  .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
+    grid-template-areas:
+      "toggle path info . nav trash tabs-end"
+      "tabs tabs tabs tabs tabs tabs tabs";
+  }
+  .gdp-file-detail-wrapper > .gdp-file-detail-sticky:not(:has(#sidebar-toggle)) {
+    grid-template-areas:
+      "path info . nav trash tabs-end"
+      "tabs tabs tabs tabs tabs tabs";
+    row-gap: var(--space-2);
+  }
+  .gdp-file-detail-sticky .gdp-file-detail-tabs {
+    justify-self: start;
+  }
+}
+/* 面が狭いときは目次を畳み、本文だけにする。 */
+@container doc-view (max-width: 900px) {
+  .gdp-source-viewer .gdp-markdown-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gdp-source-viewer .gdp-markdown-toc {
+    display: none;
+  }
 }
 
 /* ファイルのツリーの行も面の線から描く (仮想表示の行は絶対配置なので、
@@ -19406,7 +19531,7 @@ button.brand[aria-expanded="true"] {
   gap: var(--space-2);
 }
 .nav-project-activity-detail {
-  max-height: calc(var(--ui-nav-row-h) * 4);
+  max-height: calc(var(--ui-row-h) * 4);
   margin: var(--space-1) 0 0;
   overflow: auto;
   color: var(--color-text-2);
@@ -19414,4 +19539,382 @@ button.brand[aria-expanded="true"] {
   font-size: var(--ui-font-xs);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* ---- 行の高さを 1 つの値に (--ui-row-h。出所は views/shell/row-height.ts) ---- */
+#filelist.tree.tree-virtual .tree-dir,
+#filelist.tree.tree-virtual .tree-file,
+#filelist.tree .tree-dir,
+#filelist.tree .tree-file,
+#filelist li {
+  height: var(--ui-row-h);
+  min-height: var(--ui-row-h);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* ---- ファイルのツリーの頭は 2 段 ----
+   1 段目: 「FILES」の見出し・対象の ref (既定の worktree はアイコンだけ、ほかを
+   選んでいるときは値を出す)・全部開く / 全部畳む・tree / flat・ツリーを隠す。
+   2 段目: 絞り込み。見出しの文字は文字の線、右端の押せる領域は面の線。 */
+#sidebar .sb-head,
+body.gdp-repo-page #sidebar .sb-head,
+body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head {
+  display: grid;
+  grid-template:
+    "title ref totals actions view toggle" var(--ui-control-sm)
+    "filter filter filter filter filter filter" auto
+    / auto minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  column-gap: var(--space-1);
+  row-gap: var(--space-2);
+  padding: var(--space-3) var(--pad-face) var(--space-2) var(--pad-text);
+}
+#sidebar .sb-head > .sb-title {
+  grid-area: title;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+#sidebar .sb-head > #totals {
+  grid-area: totals;
+  justify-self: end;
+}
+#sidebar .sb-head > #repo-target-wrap {
+  grid-area: ref;
+  justify-self: start;
+  max-width: 100%;
+}
+#sidebar .sb-head > .sb-actions {
+  grid-area: actions;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  border: 0;
+  background: transparent;
+}
+#sidebar .sb-head > .sb-view-seg {
+  grid-area: view;
+  margin: 0;
+}
+#sidebar .sb-head > #sidebar-toggle {
+  grid-area: toggle;
+}
+#sidebar .sb-head > .sb-filter-wrap {
+  grid-area: filter;
+  padding: 0;
+  margin-left: calc(var(--pad-face) - var(--pad-text));
+}
+#sidebar .sb-head .sb-icon-action,
+#sidebar .sb-head > #sidebar-toggle {
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-3);
+}
+#sidebar .sb-head .sb-icon-action:hover,
+#sidebar .sb-head > #sidebar-toggle:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+#sidebar .sb-head .sb-view-seg button {
+  height: calc(var(--ui-control-sm) - var(--space-1));
+  padding: 0 var(--space-1);
+  font-size: var(--ui-font-xs);
+}
+/* 対象の ref: 小さな面。既定のときはアイコンだけの押せる領域 (入力欄は面の
+   上に重ねたまま透明にして、押すと今までどおり選ぶ一覧が開く)。 */
+#sidebar .sb-head .ref-selector.ref-selector-in-grid {
+  position: relative;
+  width: auto;
+  max-width: 100%;
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  gap: var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--color-inset);
+}
+#sidebar .sb-head .ref-selector.ref-selector-in-grid input {
+  min-width: 0;
+  width: calc(var(--space-unit) * 18);
+  font-size: var(--ui-font-sm);
+}
+#sidebar .sb-head .ref-selector.ref-selector-in-grid[data-default-ref="true"] {
+  width: var(--ui-control-sm);
+  padding: 0;
+  justify-content: center;
+  background: transparent;
+}
+#sidebar .sb-head .ref-selector.ref-selector-in-grid[data-default-ref="true"] input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  color: transparent;
+  background: transparent;
+  cursor: pointer;
+}
+#sidebar .sb-head .ref-selector.ref-selector-in-grid[data-default-ref="true"] .ref-selector-caret {
+  display: none;
+}
+
+/* ---- 下パネルの見出しの細い 1 行 ----
+   左: Terminal と、映しているペインの種類・作業内容・状態 (#app-panel-context)、
+   控えめな Tools / Search。右: そのペインのプロジェクト (#app-panel-place)、
+   映しているビューの小さな操作、「⋯」、開く / 畳むの山形。 */
+.app-panel-tabs {
+  align-items: center;
+  gap: var(--space-1);
+}
+.app-panel-tab {
+  height: 100%;
+}
+.app-panel-tab-quiet {
+  padding: 0 var(--space-2);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.app-panel-context {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-right: var(--space-3);
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-base);
+  white-space: nowrap;
+}
+.app-panel-context[hidden],
+.app-panel-place[hidden],
+.app-panel-view-actions[hidden],
+.app-panel-layout-switch[hidden],
+.terminal-readonly-badge[hidden] {
+  display: none;
+}
+.app-panel-context-kind {
+  color: var(--color-text-2);
+}
+.app-panel-context-task {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-3);
+  text-overflow: ellipsis;
+}
+.app-panel-context-muted {
+  color: var(--color-text-3);
+}
+.app-panel-context-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-2);
+}
+.app-panel-context-waiting {
+  color: var(--color-waiting);
+}
+.app-panel-context-working {
+  color: var(--color-working);
+}
+.app-panel-context-done {
+  color: var(--color-done);
+}
+.app-panel-place {
+  flex: none;
+  margin-right: var(--space-2);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+.app-panel-view-actions {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space-1) / 2);
+}
+.app-panel-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-3);
+  cursor: pointer;
+}
+.app-panel-icon:hover,
+.app-panel-icon.active {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.app-panel-icon:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.app-panel-icon svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  display: block;
+  transition: transform var(--motion-fast);
+}
+/* 畳んでいる間も山形は出す (上向き。押すとターミナルが開く)。 */
+.app-panel:not(.app-panel-open) .app-panel-close {
+  display: inline-grid;
+}
+.app-panel:not(.app-panel-open) .app-panel-close svg {
+  transform: rotate(180deg);
+}
+.terminal-readonly-badge {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-waiting) 16%, transparent);
+  color: var(--color-waiting);
+  font-size: var(--ui-font-xs);
+  line-height: var(--ui-control-sm);
+}
+
+/* ---- ターミナル: セッションの一覧は既定で畳む ---- */
+.terminal-sheet:not(.terminal-lists-open) .terminal-lists,
+.terminal-sheet:not(.terminal-lists-open) .terminal-list-resizer {
+  display: none;
+}
+/* 何も映していないとき: 画面の代わりに案内を真ん中に。 */
+.terminal-pane-body:has(> .terminal-screen:empty) {
+  display: none;
+}
+.terminal-pane:has(.terminal-screen:empty) > .terminal-status {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  padding: var(--space-5);
+  border: 0;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-md);
+  text-align: center;
+}
+.terminal-status {
+  padding: var(--space-1) var(--pad-text);
+  border-top: 1px solid var(--color-line-soft);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+}
+
+/* ---- セッションの一覧: 行はサイドバーのエージェントの行と同じ部品 ---- */
+.terminal-attention-cards {
+  gap: calc(var(--space-1) / 2);
+  padding: 0 var(--pad-face) var(--space-2);
+}
+.terminal-card,
+.terminal-card-waiting,
+.terminal-card-done {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+.terminal-card:hover {
+  background: color-mix(in srgb, var(--color-raised) 70%, transparent);
+}
+.terminal-card-open,
+.terminal-card-open-waiting,
+.terminal-card-open-done,
+.terminal-card-open-working,
+.terminal-card-open-idle {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: var(--icon-md) auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  min-width: 0;
+  height: var(--ui-row-h);
+  padding: 0 calc(var(--pad-text) - var(--pad-face));
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+.terminal-card-open:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.terminal-card-agent {
+  color: var(--color-text);
+  white-space: nowrap;
+}
+.terminal-card-task {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-base);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-card-age {
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-sm);
+}
+.terminal-card-read {
+  flex: none;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-done);
+  cursor: pointer;
+}
+.terminal-card-read:hover {
+  background: var(--color-raised);
+}
+.terminal-section-head {
+  padding: var(--space-3) var(--pad-text) var(--space-1);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.terminal-lists {
+  border-right: 1px solid var(--color-line-soft);
+}
+
+/* 端末の画面の内側の余白 (文字が面の端に接しない)。fit は親の余白を引いて
+   桁数を決めるので、ここに付ければ桁数の計算もそろう。 */
+.terminal-pane-body > .terminal-screen {
+  padding: var(--space-2) var(--pad-text);
+}
+#sidebar .sb-head .sb-view-seg {
+  align-self: center;
+}
+#sidebar .sb-head .sb-view-seg button {
+  display: inline-grid;
+  place-items: center;
+  line-height: 1;
+}
+.terminal-section-head b,
+.terminal-section-head strong {
+  font-size: inherit;
+}
+/* リポジトリの表示ではツリーに固定される (sidebar.ts の treeMode) ので、効かない
+   tree / flat の切替は出さず、その幅を対象の ref の値に回す。 */
+body.gdp-repo-page #sidebar .sb-head > .sb-view-seg,
+body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head > .sb-view-seg {
+  display: none;
 }

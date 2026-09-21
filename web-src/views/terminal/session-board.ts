@@ -209,59 +209,53 @@ export function createSessionBoard(deps: SessionBoardDeps): SessionBoardHandle {
    * シェル (linkedTarget) が選ばれていれば出ている。ツリー上でどれが目の前の
    * 画面なのかが分かるように、同じ扱いにする。
    */
+  /**
+   * 「あなたの番」の 1 行。左のサイドバーのエージェントの行と同じ部品
+   * (状態の印・種類・作業内容・経過) で、押すとその対象を映す。直前の指示と
+   * 状態の補足はツールチップに入れる (行の高さを揃えるため)。完了・未読は
+   * 行の右に「読んだ」の小さなボタンを出す。
+   */
   function createCard(row: BoardRow): HTMLElement {
     const text = deps.getText();
     const card = document.createElement("div");
     card.className = `terminal-card terminal-card-${row.state}`;
 
-    const task = document.createElement("div");
-    task.className = "terminal-card-task";
-    task.textContent = row.task;
-
-    const meta = document.createElement("div");
-    meta.className = "terminal-card-meta";
-    const where = document.createElement("span");
-    where.className = "terminal-tag terminal-mono";
-    // どのセッションのどのウィンドウのどのペインか。カードからでも辿れる。
-    where.textContent = row.kind === "tmux" ? row.locator : text.shells;
-    const place = document.createElement("span");
-    place.className = "terminal-tag";
-    place.textContent = row.place;
-    const agent = document.createElement("span");
-    agent.textContent = `${row.agent} · ${elapsedText(row)}`;
-    meta.append(where, place, agent);
-    card.append(task, meta);
-
-    for (const [label, body] of [
-      [text.lastPrompt, row.lastPrompt],
-      [stateLabel(row.state), row.note],
-    ] as const) {
-      if (!body) continue;
-      const quote = document.createElement("div");
-      quote.className = "terminal-card-quote";
-      const head = document.createElement("span");
-      head.textContent = label;
-      quote.append(head, document.createTextNode(body));
-      card.appendChild(quote);
-    }
-
-    const actions = document.createElement("div");
-    actions.className = "terminal-card-actions";
     const open = document.createElement("button");
     open.type = "button";
     open.className = `terminal-card-open terminal-card-open-${row.state}`;
-    open.textContent = text.openTarget;
+    const agent = document.createElement("span");
+    agent.className = "terminal-card-agent";
+    agent.textContent = row.agent;
+    const task = document.createElement("span");
+    task.className = "terminal-card-task";
+    task.textContent = row.task;
+    const age = document.createElement("span");
+    age.className = "terminal-card-age";
+    age.textContent = elapsedText(row);
+    open.append(stateMark(row.state), agent, task, age);
+    open.title = [
+      `${stateLabel(row.state)} · ${row.task}`,
+      // どのセッションのどのウィンドウのどのペインか。
+      `${row.kind === "tmux" ? row.locator : text.shells} · ${row.place}`,
+      row.lastPrompt ? `${text.lastPrompt}: ${row.lastPrompt}` : "",
+      row.note ? `${stateLabel(row.state)}: ${row.note}` : "",
+      text.openTarget,
+    ]
+      .filter(Boolean)
+      .join("\n");
     open.addEventListener("click", () => activate(row));
-    actions.appendChild(open);
+    card.appendChild(open);
+
     if (row.state === "done") {
       const read = document.createElement("button");
       read.type = "button";
       read.className = "terminal-card-read";
-      read.textContent = text.markRead;
+      read.textContent = "✓";
+      read.title = text.markRead;
+      read.setAttribute("aria-label", text.markRead);
       read.addEventListener("click", () => deps.onMarkRead(row));
-      actions.appendChild(read);
+      card.appendChild(read);
     }
-    card.appendChild(actions);
     return card;
   }
 

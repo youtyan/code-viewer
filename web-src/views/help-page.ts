@@ -228,11 +228,11 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Typing goes to that shell, so you can answer a prompt without switching to the terminal. The toggle in the panel header turns input off when you only want to watch. The shell on screen is part of the URL (?terminal=shell-ab12cd), so a reload comes back to it. Shells live as long as the server does; typing exit ends one, and so does the × on its row.",
+                text: "Typing goes to that shell, so you can answer a prompt without switching to the terminal. The ⋯ menu at the right of the panel header turns input off when you only want to watch (the header then shows read only); the same menu changes the text size and switches between Overlay and Docked. The header itself reads what is on screen: the agent, its task and its state, and on the right the project. The shell on screen is part of the URL (?terminal=shell-ab12cd), so a reload comes back to it. Shells live as long as the server does; typing exit ends one, and so does the × on its row.",
               },
               {
                 kind: "paragraph",
-                text: "The left side starts with a Your turn section for terminals that are waiting for input or finished but unread. Below it, you can scope the session list to this repository or all tmux sessions, filter by state, and search by task, place, or id. Its two-tier tree puts shells opened by this panel at the top: a shell running tmux carries a terminal icon and its session name, and that session's windows and panes hang underneath it. The bottom tier is the tmux sessions no shell has opened yet. Each pane is labelled with the title tmux shows for it — a coding agent running in a pane usually puts what it is doing there, so the tree alone tells you which pane is busy.",
+                text: "The session list opens from the button at the right of the panel header (it starts folded; agents are also in the left sidebar). It starts with a Your turn section for terminals that are waiting for input or finished but unread. Below it, you can scope the session list to this repository or all tmux sessions, filter by state, and search by task, place, or id. Its two-tier tree puts shells opened by this panel at the top: a shell running tmux carries a terminal icon and its session name, and that session's windows and panes hang underneath it. The bottom tier is the tmux sessions no shell has opened yet. Each pane is labelled with the title tmux shows for it — a coding agent running in a pane usually puts what it is doing there, so the tree alone tells you which pane is busy.",
               },
               {
                 kind: "paragraph",
@@ -1092,11 +1092,11 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "打ったキーはそのシェルに届くので、ターミナルに切り替えずに返事ができます。見るだけにしたいときは、パネル右上のトグルで入力を切ってください。表示中のシェルは URL（?terminal=shell-ab12cd）に載るので、リロードしても同じシェルに戻ります。シェルはサーバが動いている間だけ生き、exit と打てば閉じます（行の × でも同じです）。",
+                text: "打ったキーはそのシェルに届くので、ターミナルに切り替えずに返事ができます。見るだけにしたいときは、パネルの見出しの右の「⋯」で入力を切ってください (見出しに「閲覧のみ」と出ます)。同じメニューで文字の大きさと、重ねる / 画面内を切り替えられます。見出しには、映しているエージェント・作業内容・状態と、右にそのプロジェクトが出ます。表示中のシェルは URL（?terminal=shell-ab12cd）に載るので、リロードしても同じシェルに戻ります。シェルはサーバが動いている間だけ生き、exit と打てば閉じます（行の × でも同じです）。",
               },
               {
                 kind: "paragraph",
-                text: "左側の先頭には、入力待ちと、終わったのにまだ見ていないターミナルを集める「あなたの番」があります。その下の一覧は、このリポジトリだけ、またはすべての tmux セッションに範囲を切り替え、状態で絞り込み、作業内容・場所・宛先で検索できます。2 段のツリーの上段はこのパネルが開いたシェルで、中で tmux が動いていれば端末の印とセッション名が付き、そのセッションのウィンドウとペインがその下にぶら下がります。下段は、まだどのシェルも開いていない tmux セッションです。ペインには tmux 側のタイトルが付きます。ペインで動いているコーディングエージェントは作業内容をタイトルに出すので、ツリーを見るだけでどのペインが動いているか分かります。",
+                text: "セッションの一覧は、パネルの見出しの右のボタンで開きます (最初は畳んであります。エージェントは左のサイドバーからも開けます)。一覧の先頭には、入力待ちと、終わったのにまだ見ていないターミナルを集める「あなたの番」があります。その下の一覧は、このリポジトリだけ、またはすべての tmux セッションに範囲を切り替え、状態で絞り込み、作業内容・場所・宛先で検索できます。2 段のツリーの上段はこのパネルが開いたシェルで、中で tmux が動いていれば端末の印とセッション名が付き、そのセッションのウィンドウとペインがその下にぶら下がります。下段は、まだどのシェルも開いていない tmux セッションです。ペインには tmux 側のタイトルが付きます。ペインで動いているコーディングエージェントは作業内容をタイトルに出すので、ツリーを見るだけでどのペインが動いているか分かります。",
               },
               {
                 kind: "paragraph",

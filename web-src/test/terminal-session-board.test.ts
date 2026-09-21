@@ -222,3 +222,27 @@ describe("terminal elapsed labels", () => {
     expect(terminalText(lang).filterPlaceholder).toBe(expected);
   });
 });
+
+describe("your turn rows", () => {
+  // 「あなたの番」は左のサイドバーのエージェントの行と同じ部品 (状態の印・
+  // 種類・作業内容・経過) の 1 行。行を押すと映し、完了・未読だけ「読んだ」の
+  // 小さなボタンが付く。
+  test("each entry is one row with the state mark, and only done rows can be marked read", () => {
+    const board = createBoard([true, true], states(["waiting", "done"]));
+    document.body.append(board.el);
+    const cards = [...board.el.querySelectorAll<HTMLElement>(".terminal-card")];
+    expect(cards.map((card) => card.className)).toEqual([
+      "terminal-card terminal-card-waiting",
+      "terminal-card terminal-card-done",
+    ]);
+    for (const card of cards) {
+      const open = q<HTMLButtonElement>(card, ".terminal-card-open");
+      expect(open.querySelector(".terminal-mark")).not.toBeNull();
+      expect(open.querySelector(".terminal-card-task")?.textContent).toMatch(
+        /^sample task /,
+      );
+    }
+    expect(cards[0]?.querySelector(".terminal-card-read")).toBeNull();
+    expect(cards[1]?.querySelector(".terminal-card-read")).not.toBeNull();
+  });
+});

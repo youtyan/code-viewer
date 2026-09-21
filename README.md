@@ -168,10 +168,14 @@ Requires Node.js 20 or newer. Development uses
   of the bottom panel, or `?terminal=<shell>` on any URL). It is an ordinary
   login shell on a PTY, rendered with xterm.js, so `tmux` inside it behaves
   exactly as it does in any other terminal — the panel resizes the PTY and
-  whatever runs in it follows on its own. The toggle in the panel header turns
-  input off when you only want to watch. Typing `exit` closes the shell, just
+  whatever runs in it follows on its own. The panel header is one line: the
+  agent on screen with its task and state, and its project on the right. Its ⋯
+  menu turns input off when you only want to watch, changes the text size, and
+  switches between Overlay and Docked. Typing `exit` closes the shell, just
   like any other terminal.
-- The left side of the panel starts with a **Your turn** section for terminals
+- The session list opens from the button at the right of the panel header (it
+  starts folded; agents are also in the left sidebar). It starts with a
+  **Your turn** section for terminals
   that are waiting for input or finished but unread. Below it, the session list
   can be scoped to this repository or all tmux sessions, filtered by state, and
   searched by task, place, or id. Its two-tier tree puts shells opened by this

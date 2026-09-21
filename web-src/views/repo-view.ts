@@ -2,7 +2,6 @@
 // new-folder / move-to-trash actions, upload panel, and the repo blob
 // sidebar. Extracted from app.ts as a deps-injected factory.
 
-import { isImeComposing } from "../core/keyboard";
 import { normalizeNewDirectoryName } from "../core/directory-name";
 import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import {
@@ -18,6 +17,7 @@ import {
   PLUS_16_PATH,
   TRASH_16_PATH,
 } from "../core/icons";
+import { isImeComposing } from "../core/keyboard";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import {
   type AppRoute,
@@ -224,6 +224,9 @@ export function createRepoView(deps: RepoViewDeps) {
     if (!input || !wrap) return;
     const activeRef = activeRepoTreeRef();
     input.value = activeRef || ref || "worktree";
+    // 既定 (worktree) のときはツリーの頭で小さなアイコンだけにし、ほかの ref を
+    // 選んでいるときは値を出す (style.css のツリーの頭の節)。
+    wrap.dataset.defaultRef = String(input.value === "worktree");
     wrap.hidden = activeRef == null;
     wrap.style.display = activeRef == null ? "none" : "";
     syncSidebarHeaderHeight();
@@ -1346,8 +1349,20 @@ export function createRepoView(deps: RepoViewDeps) {
     target: SourceFileTarget,
     meta: RawFileInfo,
   ): HTMLElement {
+    // 大きさ・日時は補助の情報なので行としては出さず、パンくずの横の小さな
+    // 情報のボタンに入れる (hover かフォーカスで一覧が出る。style.css の
+    // 文書の面の節)。
     const wrap = document.createElement("div");
     wrap.className = "gdp-file-detail-meta";
+    wrap.tabIndex = 0;
+    wrap.setAttribute("aria-label", "File details");
+    const icon = document.createElement("span");
+    icon.className = "gdp-file-detail-meta-icon";
+    icon.textContent = "i";
+    icon.setAttribute("aria-hidden", "true");
+    const list = document.createElement("span");
+    list.className = "gdp-file-detail-meta-list";
+    wrap.append(icon, list);
     const addItem = (label: string, value: string) => {
       if (!value) return;
       const item = document.createElement("span");
@@ -1359,7 +1374,7 @@ export function createRepoView(deps: RepoViewDeps) {
       valueEl.className = "value";
       valueEl.textContent = value;
       item.append(labelEl, valueEl);
-      wrap.appendChild(item);
+      list.appendChild(item);
     };
     addItem("Size", meta.size == null ? "" : formatBytes(meta.size));
     addItem(
@@ -1367,7 +1382,7 @@ export function createRepoView(deps: RepoViewDeps) {
       formatFileDate(meta.updated_at || meta.commit_updated_at),
     );
     addItem("Created", formatFileDate(meta.created_at));
-    if (!wrap.childElementCount) {
+    if (!list.childElementCount) {
       wrap.hidden = true;
       wrap.dataset.path = target.path;
     }

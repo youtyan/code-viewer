@@ -1,5 +1,9 @@
 import type { AgentHooksResponse } from "./core/agent-hooks";
-import { type AgentPane, titleWithUnread } from "./core/agent-overview";
+import {
+  type AgentPane,
+  paneTaskText,
+  titleWithUnread,
+} from "./core/agent-overview";
 import {
   type AgentScreenRuleIssue,
   type AgentScreenRulesResponse,
@@ -49,11 +53,13 @@ import {
   APPS_16_PATH,
   ARROW_RIGHT_16_PATH,
   CHEVRON_DOWN_12_PATH,
+  CHEVRON_DOWN_16_PATH,
   COMMENT_DISCUSSION_16_PATH,
   COPY_16_PATHS,
   GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
   iconSvg,
+  KEBAB_16_PATH,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
   NEXT_16_PATHS,
@@ -151,6 +157,7 @@ import {
   createAnnotationsUi,
 } from "./views/annotations-ui";
 import { createBlameView } from "./views/blame-view";
+import { type ContextMenuItem, showContextMenu } from "./views/context-menu";
 import { createDatabaseView } from "./views/database/database-view";
 import { createDefinitionJump } from "./views/definition-jump";
 import { createDiffLineSelect } from "./views/diff-line-select";
@@ -2826,11 +2833,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       dockedLayout.textContent = text.appPanel.docked;
       dockedLayout.title = text.appPanel.dockedTitle;
     }
-    const panelClose =
-      document.querySelector<HTMLButtonElement>("#app-panel-close");
-    if (panelClose) {
-      panelClose.title = text.appPanel.close;
-      panelClose.setAttribute("aria-label", text.appPanel.close);
+    const panelMenu =
+      document.querySelector<HTMLButtonElement>("#app-panel-menu");
+    if (panelMenu) {
+      panelMenu.title = text.appPanel.layout;
+      panelMenu.setAttribute("aria-label", text.appPanel.layout);
     }
     document
       .querySelector<HTMLElement>("#app-panel-resizer")
@@ -3596,6 +3603,12 @@ window.GdpExpandLogic = GdpExpandLogic;
   let WORKTREE_VIEW: WorktreeView | null = null;
   let AGENTS_VIEW: AgentsView | null = null;
   let APP_NAV: AppNav | null = null;
+  /**
+   * 下パネルの見出しの行に、映しているペインの種類・作業内容・状態と、その
+   * プロジェクトを書く。エージェントの状態の取り直しができてから本物に差し
+   * 替える (それまでは何もしない)。
+   */
+  let renderPanelContext: () => void = () => undefined;
   let AGENTS_SIDEBAR: AgentsSidebar | null = null;
   let PROJECT_SWITCHER: ProjectSwitcher | null = null;
 
@@ -4601,6 +4614,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       quickHelpIcon.innerHTML = iconSvg("octicon-question", QUESTION_16_PATH);
     }
     const navIcons: [string, string, string | string[]][] = [
+      ["#app-panel-menu", "octicon-kebab-horizontal", KEBAB_16_PATH],
+      ["#app-panel-close", "octicon-chevron-down", CHEVRON_DOWN_16_PATH],
       ["#nav-collapse", "octicon-sidebar-collapse", SIDEBAR_HIDE_16_PATHS],
       ["#nav-expand", "octicon-sidebar-expand", SIDEBAR_SHOW_16_PATHS],
       ["#nav-board-link", "octicon-apps", APPS_16_PATH],
@@ -4680,9 +4695,36 @@ window.GdpExpandLogic = GdpExpandLogic;
     event.preventDefault();
     openSearchSheet();
   });
+  // 見出しの行の山形: 開いていれば畳み、畳んでいればターミナルを開く。
   $("#app-panel-close")?.addEventListener("click", (event) => {
     event.preventDefault();
-    closeAppPanel();
+    if (
+      document.getElementById("app-panel")?.classList.contains("app-panel-open")
+    )
+      closeAppPanel();
+    else openTerminalSheet();
+  });
+  // 見出しの行の「⋯」: 表示の仕方 (重ねる / 画面内) と、映しているビューの操作。
+  $("#app-panel-menu")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const button = event.currentTarget as HTMLElement;
+    const text = uiText().appPanel;
+    const docked = APP_SETTINGS.appPanelDocked === true;
+    const items: ContextMenuItem[] = [
+      {
+        label: `${docked ? "" : "✓ "}${text.overlay}`,
+        title: text.overlayTitle,
+        onSelect: () => setAppPanelDocked(false),
+      },
+      {
+        label: `${docked ? "✓ " : ""}${text.docked}`,
+        title: text.dockedTitle,
+        onSelect: () => setAppPanelDocked(true),
+      },
+    ];
+    const viewItems = TERMINAL_VIEW.menuItems();
+    if (viewItems.length > 0) items.push({ kind: "separator" }, ...viewItems);
+    showContextMenu(button, items);
   });
   document
     .querySelectorAll<HTMLButtonElement>("[data-panel-layout]")
@@ -5873,7 +5915,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!tab) continue;
       tab.setAttribute("aria-selected", String(selected));
     }
+    const toggle =
+      document.querySelector<HTMLButtonElement>("#app-panel-close");
+    if (toggle) {
+      const label = open
+        ? uiText().appPanel.close
+        : terminalText(STATE.language).title;
+      toggle.title = label;
+      toggle.setAttribute("aria-label", label);
+      toggle.setAttribute("aria-expanded", String(open));
+    }
     syncAppPanelLayout();
+    renderPanelContext();
   }
 
   function syncAppPanelLayout(): void {
@@ -6108,7 +6161,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       patchSettings({ terminalFontSize: next });
     },
     onCloseRequest: () => closeTerminalSheet(),
-    onTargetChange: (id) => updateUrlForTerminalOverlay(id ?? "open"),
+    onTargetChange: (id) => {
+      updateUrlForTerminalOverlay(id ?? "open");
+      renderPanelContext();
+    },
   });
   relocalizeTerminal = () => TERMINAL_VIEW.localize();
 
@@ -6287,6 +6343,62 @@ window.GdpExpandLogic = GdpExpandLogic;
         console.error("[code-viewer] launch dialog failed", error),
     );
   }
+
+  renderPanelContext = () => {
+    const context = document.getElementById("app-panel-context");
+    const place = document.getElementById("app-panel-place");
+    if (!context || !place) return;
+    const terminalOpen = parseTerminalOverlay(window.location.search) !== null;
+    context.hidden = !terminalOpen;
+    place.hidden = true;
+    if (!terminalOpen) return;
+    const t = terminalText(STATE.language);
+    const a = agentsText(STATE.language);
+    const piece = (className: string, text: string) => {
+      const el = document.createElement("span");
+      el.className = className;
+      el.textContent = text;
+      return el;
+    };
+    const target = TERMINAL_VIEW.getActiveTarget();
+    const overview = AGENT_MONITOR.snapshot().overview;
+    const pane = target
+      ? overview?.panes.find(
+          (item) => item.shownInShell !== "" && item.shownInShell === target,
+        )
+      : undefined;
+    if (!target) {
+      context.replaceChildren(piece("app-panel-context-muted", t.noTarget));
+      return;
+    }
+    if (!pane?.kind) {
+      context.replaceChildren(piece("app-panel-context-kind", t.shellTarget));
+      return;
+    }
+    const mark = document.createElement("i");
+    mark.className = `terminal-mark terminal-mark-${pane.state}`;
+    mark.setAttribute("aria-hidden", "true");
+    const state = document.createElement("span");
+    state.className = `app-panel-context-state app-panel-context-${pane.state}`;
+    state.append(mark, a.state[pane.state]);
+    context.replaceChildren(
+      piece("app-panel-context-kind", a.kind[pane.kind]),
+      piece("app-panel-context-task", paneTaskText(pane)),
+      state,
+    );
+    // そのペインのプロジェクトと、分かる範囲の枝 (作業ツリーの名前か、
+    // この画面のプロジェクトならヘッダのブランチ)。
+    const info = overview?.projects.find((item) => item.root === pane.project);
+    const branch =
+      pane.worktree ||
+      (info?.server.status === "current"
+        ? (document.querySelector(".project-branch-name")?.textContent ?? "")
+        : "");
+    const text = [info?.name ?? "", branch].filter(Boolean).join(" · ");
+    place.textContent = text;
+    place.hidden = text === "";
+  };
+  AGENT_MONITOR.subscribe(() => renderPanelContext());
 
   /** いまターミナルで見ているエージェントのペイン (サイドバーの選択の印)。 */
   function viewingAgentPane(): string | null {

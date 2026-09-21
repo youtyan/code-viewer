@@ -22,6 +22,7 @@ import type {
   RepoTreeResponse,
   SidebarItem,
 } from "../core/types";
+import { rowHeightFor } from "./shell/row-height";
 import { treeLevelPad } from "./tree-indent";
 
 export type ViewerFontSize = "compact" | "regular" | "large" | "xlarge";
@@ -142,7 +143,10 @@ export function createSidebar(deps: SidebarDeps) {
 
   const VIRTUAL_SIDEBAR_THRESHOLD = 3000;
 
-  const VIRTUAL_SIDEBAR_ROW_HEIGHT = 29;
+  /** 仮想表示の 1 行の高さ (px)。値の出所は views/shell/row-height.ts。 */
+  function virtualRowHeight(): number {
+    return rowHeightFor(savedSidebarFontSize());
+  }
 
   const VIRTUAL_SIDEBAR_OVERSCAN = 16;
 
@@ -187,6 +191,7 @@ export function createSidebar(deps: SidebarDeps) {
 
   function applySidebarFontSize(size: ViewerFontSize = savedSidebarFontSize()) {
     document.body.dataset.sidebarFontSize = size;
+    document.body.style.setProperty("--ui-row-h", `${rowHeightFor(size)}px`);
   }
 
   function syncSidebarHeaderHeight() {
@@ -1113,15 +1118,14 @@ export function createSidebar(deps: SidebarDeps) {
     const sidebar = document.querySelector<HTMLElement>("#sidebar");
     const scrollTop = sidebar?.scrollTop || 0;
     const height = sidebar?.clientHeight || window.innerHeight;
+    const rowHeight = virtualRowHeight();
     const start = Math.max(
       0,
-      Math.floor(scrollTop / VIRTUAL_SIDEBAR_ROW_HEIGHT) -
-        VIRTUAL_SIDEBAR_OVERSCAN,
+      Math.floor(scrollTop / rowHeight) - VIRTUAL_SIDEBAR_OVERSCAN,
     );
     const end = Math.min(
       SIDEBAR_VISIBLE_ROWS.length,
-      Math.ceil((scrollTop + height) / VIRTUAL_SIDEBAR_ROW_HEIGHT) +
-        VIRTUAL_SIDEBAR_OVERSCAN,
+      Math.ceil((scrollTop + height) / rowHeight) + VIRTUAL_SIDEBAR_OVERSCAN,
     );
     return { start, end };
   }
@@ -1130,6 +1134,7 @@ export function createSidebar(deps: SidebarDeps) {
     const ul = $("#filelist");
     if (!ul.classList.contains("tree-virtual")) return;
     const { start, end } = sidebarVirtualRange();
+    const rowHeight = virtualRowHeight();
     const fragment = document.createDocumentFragment();
     for (let i = start; i < end; i++) {
       const row = SIDEBAR_VISIBLE_ROWS[i];
@@ -1142,13 +1147,13 @@ export function createSidebar(deps: SidebarDeps) {
       if (!li) continue;
       li.classList.toggle("active", row.path === SIDEBAR_VIRTUAL_ACTIVE_PATH);
       li.style.position = "absolute";
-      li.style.top = `${i * VIRTUAL_SIDEBAR_ROW_HEIGHT}px`;
+      li.style.top = `${i * rowHeight}px`;
       li.style.left = "0";
       li.style.right = "0";
       fragment.appendChild(li);
     }
     ul.replaceChildren(fragment);
-    ul.style.height = `${SIDEBAR_VISIBLE_ROWS.length * VIRTUAL_SIDEBAR_ROW_HEIGHT}px`;
+    ul.style.height = `${SIDEBAR_VISIBLE_ROWS.length * rowHeight}px`;
   }
 
   function scrollVirtualSidebarPathIntoView(path: string) {
@@ -1157,8 +1162,9 @@ export function createSidebar(deps: SidebarDeps) {
     const sidebar = document.querySelector<HTMLElement>("#sidebar");
     if (!sidebar) return;
     const ul = $("#filelist");
-    const top = index * VIRTUAL_SIDEBAR_ROW_HEIGHT;
-    const bottom = top + VIRTUAL_SIDEBAR_ROW_HEIGHT;
+    const rowHeight = virtualRowHeight();
+    const top = index * rowHeight;
+    const bottom = top + rowHeight;
     const sidebarRect = sidebar.getBoundingClientRect();
     const stickyBottom = Math.max(
       sidebarRect.top,
@@ -1920,7 +1926,7 @@ export function createSidebar(deps: SidebarDeps) {
         Math.floor(
           (sidebar?.clientHeight || window.innerHeight) /
             2 /
-            VIRTUAL_SIDEBAR_ROW_HEIGHT,
+            virtualRowHeight(),
         ),
       );
       const current = virtualSidebarActiveIndex();

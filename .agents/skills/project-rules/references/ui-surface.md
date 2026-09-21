@@ -14,6 +14,8 @@
 | 左のサイドバー (`#app-nav`) の下端の項目 | `nav-foot-item` (アイコン + 文字)。見出しの横の小さな操作は `nav-icon-action` |
 | 左のサイドバーの行の操作 (hover で出る) | `nav-row-action`。場所を確保せず行の上に重ねる (`.nav-project-actions`) |
 | 最下段のバー (`#statusbar`) | 押せる塊は `usage-status-item` / `statusbar-icon-action`。流動的な文言は幅を固定した塊の中だけ |
+| 下パネルの見出しの行 (`.app-panel-tabs`) | 1 行だけ。ビュー固有の小さな操作は `#app-panel-view-actions` に置き (`app-panel-icon`)、それ以外の操作は「⋯」(`#app-panel-menu`) に入れる。ビューは `menuItems()` で項目を渡す (例: `TerminalViewHandle.menuItems`)。行を 2 段にしない |
+| 補助の情報 (大きさ・日時など) | 行にしない。情報のボタン (`.gdp-file-detail-meta` の形: 押せる領域は固定、hover / フォーカスで小さな面) に入れる |
 | topbar のトグルボタン | `.controls > button` パターン（`#ignore-ws` `#hide-tests` が実例） |
 | セグメント（排他選択） | `.seg` パターン |
 | 確認 / 入力ダイアログ | `views/ui-dialog.ts` の `showConfirmDialog` / `showAlertDialog` / `showPromptDialog` / `showFormDialog` |
@@ -37,7 +39,7 @@
 | アクセントと状態 | `--color-accent` / `--color-accent-strong`、`--color-waiting` `--color-working` `--color-done` `--color-failed` `--color-idle` |
 | 選んでいる行の光 | `--glow-select` (内側の box-shadow。箱の寸法を変えない) |
 | 余白 / 角丸 | `--space-1`〜`--space-6` (4〜32px) / `--radius-sm` `--radius-md` `--radius-lg` |
-| 文字の大きさ・行の高さ | 密度の段階 (T0): `--ui-font-*`・`--ui-control-*`・`--ui-nav-row-h` (`ui-layout.md`) |
+| 文字の大きさ・行の高さ | 密度の段階 (T0): `--ui-font-*`・`--ui-control-*`・`--ui-row-h` (`ui-layout.md`) |
 | 文字の家族 | `--font-ui` / `--font-mono` |
 
 - テーマは同じ名前の値を差し替えるだけ: `html[data-theme="light"|"dark"]` × `html[data-palette]`
@@ -78,6 +80,12 @@
    役割の変わるところ (見出し → 本文) は 1 段広く。**区切りの線を足す前に間隔で区切る**
 6. 補助の情報 (大きさ・日時) は主役の行から外して小さく (`--color-text-3`)。絵に無い行を足して
    絵の密度を壊さない
+7. **一覧の行の高さは `--ui-row-h` の 1 つだけ** (サイドバー・ファイルのツリー・目次・変更ファイル・
+   セッションの一覧)。出所は `views/shell/row-height.ts` (表示密度ごと)。ファイルのツリーの仮想表示も
+   ここを読む。行の高さを別の数値で書かない
+8. **選択の強さは 2 段。** 強い選択 (`--color-select` + `--glow-select`) は画面の同じ列に 1 つだけ
+   (いまターミナルで開いている行など)。「いまここ」を示すだけのもの (いま見ているプロジェクト) は
+   控えめな面だけにする
 
 確かめ方: 面ごとに、各行の文字の左端・押せる領域の端を `getBoundingClientRect` で読み、
 面の左端からの距離が上の表の値になっていることを見る (文字の左端は、行の中の最初の

@@ -24,6 +24,7 @@ import {
   formatErrorDetail,
   responseErrorMessage,
 } from "../../core/error-detail";
+import { iconSvg, SIDEBAR_SHOW_16_PATHS } from "../../core/icons";
 import { blockScrollChaining } from "../../core/scroll-chaining";
 import type {
   ShellListResponse,
@@ -39,6 +40,7 @@ import {
   type TmuxClientsResponse,
   type TmuxPanesResponse,
 } from "../../core/tmux";
+import type { ContextMenuItem } from "../context-menu";
 import { type TerminalLang, type TerminalText, terminalText } from "./i18n";
 import { createSessionBoard, type SessionBoardHandle } from "./session-board";
 import {
@@ -83,6 +85,11 @@ export type TerminalViewHandle = {
   getActiveTarget(): string | null;
   /** 器の大きさが変わったとき。端末の桁数・行数を測り直す。 */
   refit(): void;
+  /**
+   * パネルの見出しの行の「⋯」に入れる、ターミナルの操作 (文字の大きさ・入力の
+   * オンオフ・一覧の取り直し)。開いていないときは空。
+   */
+  menuItems(): ContextMenuItem[];
   localize(): void;
   dispose(): void;
 };
@@ -99,11 +106,15 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   let states: AgentStateRecord[] = [];
   let stateErrors: AgentStateObservationError[] = [];
   let screen: TerminalScreenHandle | null = null;
-  let reloadBtn: HTMLButtonElement | null = null;
-  let fontSmaller: HTMLButtonElement | null = null;
-  let fontLarger: HTMLButtonElement | null = null;
-  let fontValue: HTMLElement | null = null;
-  let inputToggle: HTMLButtonElement | null = null;
+  /** 見出しの行 (パネルのタブの行) に置く、このビューの小さな操作。 */
+  let viewActions: HTMLElement | null = null;
+  let sessionsToggle: HTMLButtonElement | null = null;
+  let readOnlyBadge: HTMLElement | null = null;
+  /**
+   * セッションの一覧 (左の列) を開いているか。既定は畳む: エージェントは常設の
+   * サイドバーから開けるので、一覧は必要なときだけ見出しのボタンで出す。
+   */
+  let listsOpen = false;
   let statusEl: HTMLElement | null = null;
   let listEl: HTMLElement | null = null;
   let attached: ShellSession | null = null;
@@ -152,20 +163,9 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     host.style.setProperty("--terminal-list-width", `${listWidth}px`);
   }
 
-  function createFontButton(label: string): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "terminal-font-btn";
-    button.textContent = label;
-    return button;
-  }
-
   /**
-   * 文字サイズを 1 段変える。
-   *
-   * 上限・下限に当たったらボタンを無効にするだけで、押しても寸法は動かない
-   * (無効時に消すと押し損ねる)。値の表示は桁を固定してあるので、2 桁と 1 桁で
-   * 隣のボタンがずれることもない。
+   * 文字サイズを 1 段変える。上限・下限では何もしない (メニューの項目は
+   * そのとき押せなくしてある)。
    */
   function stepFontSize(direction: 1 | -1): void {
     const next = clampTerminalFontSize(
@@ -174,36 +174,67 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     if (next === clampTerminalFontSize(deps.getFontSize())) return;
     deps.onFontSizeChange(next);
     screen?.applyFontSize();
-    syncFontSize();
   }
 
-  function syncFontSize(): void {
+  function setInputEnabled(enabled: boolean): void {
+    inputEnabled = enabled;
+    screen?.setInputEnabled(inputEnabled);
+    syncViewActions();
+  }
+
+  function setListsOpen(open: boolean): void {
+    listsOpen = open;
+    getMount()?.classList.toggle("terminal-lists-open", open);
+    syncViewActions();
+    // 画面の幅が変わるので桁数を測り直す。
+    screen?.refit();
+  }
+
+  /** 見出しの行の操作の文言と状態。開いていない間は出さない。 */
+  function syncViewActions(): void {
+    if (!viewActions) return;
+    const current = text();
+    viewActions.hidden = !isOpen();
+    if (sessionsToggle) {
+      const label = listsOpen ? current.sessionsHide : current.sessionsShow;
+      sessionsToggle.title = label;
+      sessionsToggle.setAttribute("aria-label", label);
+      sessionsToggle.setAttribute("aria-pressed", String(listsOpen));
+      sessionsToggle.classList.toggle("active", listsOpen);
+    }
+    if (readOnlyBadge) {
+      // 入力を止めているときだけ、止まっていることを見出しの行に出す。
+      readOnlyBadge.hidden = inputEnabled;
+      readOnlyBadge.textContent = current.readOnly;
+      readOnlyBadge.title = current.readOnlyTitle;
+    }
+  }
+
+  function menuItems(): ContextMenuItem[] {
+    if (!isOpen()) return [];
+    const current = text();
     const size = clampTerminalFontSize(deps.getFontSize());
-    const current = text();
-    if (fontValue) fontValue.textContent = String(size);
-    if (fontSmaller) {
-      fontSmaller.disabled = size <= MIN_TERMINAL_FONT_SIZE;
-      fontSmaller.title = current.fontSmaller;
-      fontSmaller.setAttribute("aria-label", current.fontSmaller);
-    }
-    if (fontLarger) {
-      fontLarger.disabled = size >= MAX_TERMINAL_FONT_SIZE;
-      fontLarger.title = current.fontLarger;
-      fontLarger.setAttribute("aria-label", current.fontLarger);
-    }
-  }
-
-  function syncInputToggle(): void {
-    if (!inputToggle) return;
-    const current = text();
-    inputToggle.classList.toggle("active", inputEnabled);
-    inputToggle.setAttribute("aria-pressed", String(inputEnabled));
-    inputToggle.textContent = inputEnabled
-      ? current.writable
-      : current.readOnly;
-    inputToggle.title = inputEnabled
-      ? current.writableTitle
-      : current.readOnlyTitle;
+    return [
+      {
+        label: `${current.fontLarger} (${size})`,
+        disabled: size >= MAX_TERMINAL_FONT_SIZE,
+        onSelect: () => stepFontSize(1),
+      },
+      {
+        label: `${current.fontSmaller} (${size})`,
+        disabled: size <= MIN_TERMINAL_FONT_SIZE,
+        onSelect: () => stepFontSize(-1),
+      },
+      {
+        label: inputEnabled ? current.readOnly : current.writable,
+        title: inputEnabled ? current.readOnlyTitle : current.writableTitle,
+        onSelect: () => setInputEnabled(!inputEnabled),
+      },
+      {
+        label: current.reload,
+        onSelect: () => void loadLists(generation),
+      },
+    ];
   }
 
   function selectShell(session: ShellSession): void {
@@ -510,44 +541,28 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     const current = text();
     host.replaceChildren();
 
-    // 見出しと閉じるはパネルのタブ列が持つ。ここには中身固有の操作だけ置く。
-    const header = document.createElement("header");
-    header.className = "terminal-header";
-
-    const actions = document.createElement("div");
-    actions.className = "terminal-header-actions";
-
-    inputToggle = document.createElement("button");
-    inputToggle.type = "button";
-    inputToggle.className = "terminal-input-toggle";
-    inputToggle.addEventListener("click", () => {
-      inputEnabled = !inputEnabled;
-      screen?.setInputEnabled(inputEnabled);
-      syncInputToggle();
-    });
-
-    fontSmaller = createFontButton("−");
-    fontSmaller.addEventListener("click", () => stepFontSize(-1));
-    fontValue = document.createElement("span");
-    fontValue.className = "terminal-font-value";
-    fontLarger = createFontButton("+");
-    fontLarger.addEventListener("click", () => stepFontSize(1));
-    const fontGroup = document.createElement("div");
-    fontGroup.className = "terminal-font-size";
-    fontGroup.append(fontSmaller, fontValue, fontLarger);
-
-    reloadBtn = document.createElement("button");
-    reloadBtn.type = "button";
-    reloadBtn.className = "terminal-reload";
-    reloadBtn.textContent = "⟳";
-    reloadBtn.title = current.reload;
-    reloadBtn.setAttribute("aria-label", current.reload);
-    reloadBtn.addEventListener("click", () => {
-      void loadLists(generation);
-    });
-
-    actions.append(fontGroup, inputToggle, reloadBtn);
-    header.append(actions);
+    // 見出しと閉じるはパネルのタブの行が持つ。このビューの操作はその行の
+    // 右の枠 (#app-panel-view-actions) に置く: セッションの一覧の開閉と、
+    // 入力を止めているときの札。文字の大きさ・入力のオンオフ・取り直しは
+    // その行の「⋯」(menuItems)。
+    const actionsHost = deps.$<HTMLElement>("#app-panel-view-actions");
+    if (actionsHost) {
+      actionsHost.replaceChildren();
+      readOnlyBadge = document.createElement("span");
+      readOnlyBadge.className = "terminal-readonly-badge";
+      readOnlyBadge.hidden = true;
+      sessionsToggle = document.createElement("button");
+      sessionsToggle.type = "button";
+      sessionsToggle.className = "app-panel-icon terminal-sessions-toggle";
+      sessionsToggle.innerHTML = iconSvg(
+        "octicon-sidebar-expand",
+        SIDEBAR_SHOW_16_PATHS,
+      );
+      sessionsToggle.addEventListener("click", () => setListsOpen(!listsOpen));
+      actionsHost.append(readOnlyBadge, sessionsToggle);
+      viewActions = actionsHost;
+    }
+    host.classList.toggle("terminal-lists-open", listsOpen);
 
     board = createSessionBoard({
       getText: text,
@@ -621,9 +636,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     // 組み立てるたびに作り直す箱なので、ここで付ければ二重に登録されない。
     blockScrollChaining(body);
 
-    host.append(header, body);
-    syncInputToggle();
-    syncFontSize();
+    host.append(body);
+    syncViewActions();
   }
 
   function isOpen(): boolean {
@@ -647,6 +661,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       overlay.setAttribute("aria-hidden", "false");
     }
     document.body.classList.add("terminal-sheet-open");
+    syncViewActions();
     // 既定の幅と一覧の高さは CSS 側の fallback 値が受け持つ。ここで初期値を
     // 書き込むと、ドラッグで変えた値を開き直すたびに巻き戻してしまう。
     startPolling();
@@ -679,6 +694,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       overlay.setAttribute("aria-hidden", "true");
     }
     document.body.classList.remove("terminal-sheet-open");
+    syncViewActions();
     // 読み込み中だった GET と、その後の選択を無効化する。
     generation += 1;
     stopPolling();
@@ -694,13 +710,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
 
   function localize(): void {
     if (!board) return;
-    const current = text();
-    if (reloadBtn) {
-      reloadBtn.title = current.reload;
-      reloadBtn.setAttribute("aria-label", current.reload);
-    }
-    syncInputToggle();
-    syncFontSize();
+    syncViewActions();
     board.localize();
     renderLists();
   }
@@ -718,6 +728,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     isOpen,
     getActiveTarget: () => attached?.id ?? lastTargetId,
     refit: () => screen?.refit(),
+    menuItems,
     localize,
     dispose() {
       disposed = true;

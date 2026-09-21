@@ -246,16 +246,25 @@
        右ドロワーだった頃と同じ id のままなので、各ビューの実装は変わらない。 -->
   <section id="app-panel" class="app-panel">
     <div id="app-panel-resizer" class="app-panel-resizer" role="separator" tabindex="0" aria-orientation="horizontal" aria-label="resize panel"></div>
+    <!-- 見出しの細い 1 行: 左にタブ (Terminal / Tools / Search) と、映しているペインの
+         種類・作業内容・状態。右に、そのペインのプロジェクト、映しているビューの小さな
+         操作、「⋯」(表示の仕方・文字の大きさなど)、開く / 畳むの山形。 -->
     <div class="app-panel-tabs" role="tablist" aria-label="panel">
       <button type="button" id="panel-tab-terminal" class="app-panel-tab" role="tab" data-panel="terminal" data-route="terminal" aria-selected="false">Terminal</button>
-      <button type="button" id="panel-tab-tools" class="app-panel-tab" role="tab" data-panel="tools" data-route="tools" aria-selected="false">Tools</button>
-      <button type="button" id="panel-tab-search" class="app-panel-tab" role="tab" data-panel="search" data-route="search" aria-selected="false">Search</button>
+      <div id="app-panel-context" class="app-panel-context" hidden></div>
+      <button type="button" id="panel-tab-tools" class="app-panel-tab app-panel-tab-quiet" role="tab" data-panel="tools" data-route="tools" aria-selected="false">Tools</button>
+      <button type="button" id="panel-tab-search" class="app-panel-tab app-panel-tab-quiet" role="tab" data-panel="search" data-route="search" aria-selected="false">Search</button>
       <span class="app-panel-spacer"></span>
-      <div class="seg app-panel-layout-switch" role="group" aria-label="panel layout">
+      <span id="app-panel-place" class="app-panel-place" hidden></span>
+      <div id="app-panel-view-actions" class="app-panel-view-actions" hidden></div>
+      <!-- 表示の仕方 (重ねる / 画面内) の切替そのもの。見出しの行では「⋯」の中に
+           入れるので隠してあるが、状態 (active / aria-pressed) はここが持つ。 -->
+      <div class="seg app-panel-layout-switch" role="group" aria-label="panel layout" hidden>
         <button type="button" data-panel-layout="overlay" class="active" aria-pressed="true">Overlay</button>
         <button type="button" data-panel-layout="docked" aria-pressed="false">Docked</button>
       </div>
-      <button type="button" id="app-panel-close" class="app-panel-close" title="close panel" aria-label="close panel">×</button>
+      <button type="button" id="app-panel-menu" class="app-panel-icon" aria-haspopup="menu" title="panel options" aria-label="panel options"><span class="goi-icon" aria-hidden="true"></span></button>
+      <button type="button" id="app-panel-close" class="app-panel-icon app-panel-close" title="close panel" aria-label="close panel"><span class="goi-icon" aria-hidden="true"></span></button>
     </div>
     <div class="app-panel-bodies">
       <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
