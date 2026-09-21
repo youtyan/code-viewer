@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const bundle = readFileSync("dist/code-viewer.js", "utf8");
 if (bundle.includes("Bun.")) {
@@ -7,11 +9,24 @@ if (bundle.includes("Bun.")) {
   process.exit(1);
 }
 
+// 起こすサーバの登録簿と状態ディレクトリは一時ディレクトリに向ける。
+// 向けないと開発者の ~/.cache/code-viewer/servers に登録を書き、サーバの
+// 起動時の片付け (落ちたサーバの登録を消す) がそこを触る。
+const isolated = mkdtempSync(join(tmpdir(), "code-viewer-smoke-"));
+process.on("exit", () => {
+  rmSync(isolated, { recursive: true, force: true });
+});
+
 const child = spawn(
   process.execPath,
   ["dist/code-viewer.js", "--cwd", ".", "--port", "0"],
   {
     cwd: process.cwd(),
+    env: {
+      ...process.env,
+      CODE_VIEWER_TEST_SERVER_REGISTRY_DIR: join(isolated, "servers"),
+      CODE_VIEWER_TEST_STATE_DIR: join(isolated, "state"),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   },
 );

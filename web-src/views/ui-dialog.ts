@@ -294,6 +294,8 @@ export type FormDialogOptions<T> = {
   danger?: boolean;
   focusTarget?: HTMLElement | null;
   focusReturnTarget?: HTMLElement | null;
+  /** 本文に整形済みの長い中身 (JSON など) を出すとき、横幅を広げる。 */
+  wide?: boolean;
 };
 
 export function showFormDialog<T>(
@@ -383,6 +385,11 @@ export function showFormDialog<T>(
       submit,
     ]);
     body.append(opts.body, error);
+    if (opts.wide) {
+      backdrop
+        .querySelector(`.${DIALOG_CLASS}`)
+        ?.classList.add("gdp-dialog-wide");
+    }
     backdrop.addEventListener("pointerdown", (event) => {
       if (event.target === backdrop && !busy) done(null);
     });

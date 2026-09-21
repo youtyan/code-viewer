@@ -253,11 +253,15 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "The Agents item in the header menu (g a) lists every tmux pane on this machine where a coding agent runs, grouped by project — the git repository a pane's folder belongs to, with worktrees folded into their repository and folders outside git kept as their own group. It is the same list from whichever code-viewer you open it in. A row reads state, agent kind (claude, codex, or an agent that reports its state through a hook), how long it has been in that state, what it is doing (the pane title), and where it lives in tmux (session:window.pane). Needs input comes first, then Working, then the rest; Enter or a click opens that pane in the Terminal panel below. Plain shells show up only with All panes.",
+                text: "The Agents item in the header menu (g a) lists every tmux pane on this machine where a coding agent runs, grouped by project — the git repository a pane's folder belongs to, with worktrees folded into their repository and folders outside git kept as their own group. It is the same list from whichever code-viewer you open it in. A row reads state, agent kind (claude, codex, or an agent that reports its state through a hook), how long it has been in that state, what it is doing (the pane title), and where it lives in tmux (session:window.pane). Needs input comes first, then Finished · unread, then Working, then the rest; Enter or a click opens that pane in the Terminal panel below. Plain shells show up only with All panes.",
               },
               {
                 kind: "paragraph",
                 text: "The counter at the right of the header shows how many agents need input and how many are working, on every screen; it turns amber only when something needs input, and clicking it opens the list (or the pane directly, when exactly one needs input). When an agent goes from working to needing input, or from working to stopped, the row gets an unread dot and the tab title gets the unread count; opening or selecting the pane clears it. Desktop notifications are opt-in: press Enable notifications on the Agents screen, and choose which changes notify you under Settings → Agent notifications. Nothing is notified for a pane you are looking at in the Terminal panel. States come from the same screen rules the Terminal panel uses.",
+              },
+              {
+                kind: "paragraph",
+                text: "Settings → Agent integration adds hooks to claude (<settings dir>/settings.json, CLAUDE_CONFIG_DIR or ~/.claude) and codex (<CODEX_HOME>/hooks.json, ~/.codex) so they report their own state: when an agent finishes, the row shows Finished · unread until you open it, and permission prompts show as Needs input without waiting for the screen. Agents that cannot be recognized by process name (claude running under node) also appear. Each button first shows the exact file, what is added or removed, where the backup goes, and how many existing hooks stay; other hooks in the file are never removed or reordered. The hooks call a small launcher in code-viewer's state directory, which runs code-viewer terminal hook and reports to every running code-viewer; it always exits 0, and reports that did not arrive are listed in the same settings section. codex runs a new hook only after you trust it in /hooks.",
               },
             ],
           },
@@ -1101,11 +1105,15 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "ヘッダメニューの「エージェント」(g a) は、このマシンの tmux でコーディングエージェントが動いているペインを、プロジェクトごとに並べます。プロジェクトはペインのフォルダが属する git リポジトリで、作業ツリーは本体にまとめ、git 管理外のフォルダはそのフォルダで 1 つにします。どのリポジトリで開いた code-viewer からでも同じ一覧です。1 行に、状態・種類 (claude、codex、フックで状態を申告するエージェント)・その状態になってからの時間・作業内容 (ペインのタイトル)・tmux 上の場所 (セッション:ウィンドウ.ペイン) が並びます。入力待ちが先頭、次に作業中、その後にそれ以外。Enter かクリックで、下のターミナルパネルにそのペインが開きます。ただのシェルは「すべてのペイン」にしたときだけ出ます。",
+                text: "ヘッダメニューの「エージェント」(g a) は、このマシンの tmux でコーディングエージェントが動いているペインを、プロジェクトごとに並べます。プロジェクトはペインのフォルダが属する git リポジトリで、作業ツリーは本体にまとめ、git 管理外のフォルダはそのフォルダで 1 つにします。どのリポジトリで開いた code-viewer からでも同じ一覧です。1 行に、状態・種類 (claude、codex、フックで状態を申告するエージェント)・その状態になってからの時間・作業内容 (ペインのタイトル)・tmux 上の場所 (セッション:ウィンドウ.ペイン) が並びます。入力待ちが先頭、次に完了・未読、作業中、その後にそれ以外。Enter かクリックで、下のターミナルパネルにそのペインが開きます。ただのシェルは「すべてのペイン」にしたときだけ出ます。",
               },
               {
                 kind: "paragraph",
                 text: "ヘッダ右側の件数は、どの画面にいても入力待ちと作業中の数を出します。注意の色になるのは入力待ちがあるときだけです。押すと一覧へ、入力待ちが 1 件だけならそのペインを直接開きます。作業中から入力待ちに、または作業中から止まったに変わると、その行に未読の印が付き、タブのタイトルの先頭に未読の数が出ます。そのペインを開くか一覧で選ぶと消えます。デスクトップ通知は、エージェント画面の「通知を有効にする」を押したときだけ許可を求めます。どの変化で通知するかは 設定 → エージェントの通知 で選べます。ターミナルパネルでいま見ているペインは通知しません。状態の判定はターミナルパネルと同じ画面ルールです。",
+              },
+              {
+                kind: "paragraph",
+                text: "設定 → エージェント連携 で、claude (<設定ディレクトリ>/settings.json。CLAUDE_CONFIG_DIR か ~/.claude) と codex (<CODEX_HOME>/hooks.json。~/.codex) に、自分の状態を申告するフックを入れられます。入れると、終わったエージェントは開くまで「完了・未読」と出て、許可を求めたときは画面を待たずに入力待ちになります。プロセス名では見分けられないエージェント (node として動く claude など) も一覧に出ます。ボタンを押すと、先に対象のファイル・足すもの・消すもの・バックアップの場所・残る既存のフックの数を見せ、確認してから書きます。ファイルにあるほかのフックは消さず、順序も変えません。フックは code-viewer の状態ディレクトリにある小さな起動スクリプトを呼び、そこから code-viewer terminal hook が動いている全部の code-viewer に申告します。終了コードは常に 0 で、届かなかった申告は同じ設定の節に並びます。codex は /hooks で信頼するまで新しいフックを実行しません。",
               },
             ],
           },

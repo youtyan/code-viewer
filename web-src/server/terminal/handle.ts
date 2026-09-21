@@ -6,6 +6,10 @@
 // - GET  /_agent/capture  ターミナル本文を前回の続きから取る
 // - GET  /_agent/images   出力から拾った画像パスを配信できる形に直す
 // - GET  /_agent/image    その 1 枚を配る (/_file は worktree 限定なので別口)
+// - GET  /_agent/hooks          claude / codex のフックの状態と直近の失敗
+// - GET  /_agent/hooks/plan     入れる・外すと何が変わるか (書かない)
+// - POST /_agent/hooks/apply    確認した計画を実行する
+// - DELETE /_agent/hooks/failures 失敗の記録を消す
 //
 // ルーティングと副作用リクエストの認可は tmux/handle.ts と同じ dispatchRoutes
 // に任せる。申告は状態を書き換えるので sideEffect: true。CLI からの POST は
@@ -15,8 +19,18 @@
 // 本文の取得を GET にしてあるのは、読み取りしか行わないため。カーソルは
 // クエリで持ち回る。
 
+import {
+  type AgentHookApplyResponse,
+  HOOK_AGENTS,
+  type HookAction,
+  isHookAgent,
+} from "../../core/agent-hooks";
 import type { AgentScreenRuleIssue } from "../../core/agent-screen";
-import { type AgentStatesResponse, isAgentEvent } from "../../core/agent-state";
+import {
+  type AgentStatesResponse,
+  isAgentEvent,
+  isReportedAgent,
+} from "../../core/agent-state";
 import { formatErrorDetail } from "../../core/error-detail";
 import { MAX_PASTE_BODY_BYTES } from "../../core/terminal-paste";
 import {
@@ -36,6 +50,18 @@ import {
   recordAgentState,
 } from "./agent-state";
 import { captureTerminal, clampHistoryLines, terminalKindOf } from "./capture";
+import {
+  AgentHookError,
+  type AgentHookTarget,
+  agentHooksOverview,
+  applyAgentHooks,
+  clearHookFailures,
+  agentHookFile,
+  currentHookLauncher,
+  defaultAgentConfigDir,
+  planAgentHooks,
+  writeHookLauncher,
+} from "./hooks";
 import { resolveTerminalImage, resolveTerminalImages } from "./images";
 import {
   type AgentOverviewDeps,
@@ -65,6 +91,7 @@ async function handleStatePost(req: Request): Promise<Response> {
     at?: unknown;
     lastPrompt?: unknown;
     note?: unknown;
+    agent?: unknown;
   }>(req);
   if (body instanceof Response) return body;
 
@@ -76,6 +103,9 @@ async function handleStatePost(req: Request): Promise<Response> {
   // {event:"stop", state:"working"} のような食い違いが通ってしまう。
   // 状態を直接置けるのは画面観測 (terminal/activity.ts) だけ。
   if (!isAgentEvent(body.event)) return textError("invalid event", 400);
+  if (body.agent !== undefined && !isReportedAgent(body.agent)) {
+    return textError("invalid agent", 400);
+  }
 
   const record = recordAgentState({
     target,
@@ -84,6 +114,7 @@ async function handleStatePost(req: Request): Promise<Response> {
     at: typeof body.at === "number" ? body.at : undefined,
     lastPrompt: textField(body.lastPrompt),
     note: textField(body.note),
+    agent: isReportedAgent(body.agent) ? body.agent : undefined,
   });
   if (!record) return textError("invalid event", 400);
   return json({ ok: true, state: record });
@@ -216,6 +247,123 @@ async function handlePastePost(req: Request, cwd: string): Promise<Response> {
   });
 }
 
+/** フックの入れ外しの本文上限。種類・動作・ハッシュだけが来る。 */
+const MAX_HOOK_APPLY_BYTES = 4096;
+
+function isHookAction(value: unknown): value is HookAction {
+  return value === "install" || value === "uninstall";
+}
+
+/**
+ * 対象の設定ディレクトリ。今は既定の場所だけ (環境変数か ~/.claude・
+ * ~/.codex)。hooks.ts の関数はディレクトリを引数で受けるので、別の場所を
+ * 足すときはここで選ぶ。
+ */
+function hookTarget(agent: (typeof HOOK_AGENTS)[number]): AgentHookTarget {
+  return { agent, configDir: defaultAgentConfigDir(agent) };
+}
+
+function hookError(error: unknown): Response {
+  const detail = formatErrorDetail(error);
+  if (error instanceof AgentHookError) {
+    const status =
+      error.code === "conflict" || error.code === "blocked"
+        ? 409
+        : error.code === "unreadable"
+          ? 422
+          : 500;
+    if (status === 500)
+      console.error("[code-viewer] agent hook write failed", error);
+    return json({ error: detail, code: error.code }, status);
+  }
+  console.error("[code-viewer] agent hook request failed", error);
+  return json({ error: detail, code: "failed" }, 500);
+}
+
+function handleHooksGet(): Response {
+  try {
+    return json(
+      agentHooksOverview(HOOK_AGENTS.map(hookTarget), currentHookLauncher()),
+    );
+  } catch (error) {
+    return hookError(error);
+  }
+}
+
+function handleHooksPlanGet(url: URL): Response {
+  const agent = url.searchParams.get("agent");
+  const action = url.searchParams.get("action");
+  if (!isHookAgent(agent)) return textError("invalid agent", 400);
+  if (!isHookAction(action)) return textError("invalid action", 400);
+  try {
+    return json(
+      planAgentHooks(hookTarget(agent), action, currentHookLauncher()),
+    );
+  } catch (error) {
+    return hookError(error);
+  }
+}
+
+async function handleHooksApplyPost(req: Request): Promise<Response> {
+  const body = await parseBoundedJsonBody(
+    req,
+    MAX_HOOK_APPLY_BYTES,
+    "hook request too large",
+  );
+  if (body instanceof Response) return body;
+  if (!body || typeof body !== "object") {
+    return textError("invalid hook request", 400);
+  }
+  const { agent, action, baseHash, launcherOnly } = body as Record<
+    string,
+    unknown
+  >;
+  if (!isHookAgent(agent)) return textError("invalid agent", 400);
+  if (!isHookAction(action)) return textError("invalid action", 400);
+  if (launcherOnly !== undefined && typeof launcherOnly !== "boolean") {
+    return textError("invalid launcherOnly", 400);
+  }
+  if (launcherOnly) {
+    // 設定ファイルは書かず、フックが呼ぶ起動スクリプトだけを用意する
+    // (設定ファイルが書けず、利用者が自分で写す場合)。
+    try {
+      const target = hookTarget(agent);
+      return json({
+        path: agentHookFile(agent, target.configDir),
+        changed: false,
+        backupPath: null,
+        launcherWritten: writeHookLauncher(currentHookLauncher()),
+      } satisfies AgentHookApplyResponse);
+    } catch (error) {
+      return hookError(error);
+    }
+  }
+  if (typeof baseHash !== "string" || !/^[0-9a-f]{64}$/.test(baseHash)) {
+    return textError("invalid baseHash", 400);
+  }
+  try {
+    return json(
+      applyAgentHooks(
+        hookTarget(agent),
+        action,
+        currentHookLauncher(),
+        baseHash,
+      ),
+    );
+  } catch (error) {
+    return hookError(error);
+  }
+}
+
+function handleHookFailuresDelete(): Response {
+  try {
+    clearHookFailures(currentHookLauncher().failureLog);
+    return json({ ok: true });
+  } catch (error) {
+    return hookError(error);
+  }
+}
+
 /**
  * 一覧の問い合わせ先。git とサーバ登録簿の結果を短く覚えておくので、
  * リクエストごとに作り直さずプロセスで 1 つ持つ (cwd はプロセスの間変わらない)。
@@ -275,6 +423,27 @@ export function handleAgentRoute(
         methods: ["GET"],
         sideEffect: false,
         handler: () => Promise.resolve(handleImageGet(url, cwd)),
+      },
+      "/_agent/hooks": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleHooksGet(),
+      },
+      "/_agent/hooks/plan": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleHooksPlanGet(url),
+      },
+      // エージェントの設定ファイルを書き換える。同一オリジンからしか通らない。
+      "/_agent/hooks/apply": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleHooksApplyPost(req),
+      },
+      "/_agent/hooks/failures": {
+        methods: ["DELETE"],
+        sideEffect: true,
+        handler: () => Promise.resolve(handleHookFailuresDelete()),
       },
       // ファイルを作るので副作用。同一オリジンからしか通らない。
       "/_agent/paste": {

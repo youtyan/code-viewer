@@ -1,5 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { readdir, readFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { errorWithCause } from "../core/error-detail";
@@ -23,7 +30,7 @@ type ServerStartLockEntry = {
 
 const SERVER_START_LOCK_STALE_MS = 30_000;
 
-function registryDir(): string {
+export function registryDir(): string {
   // Test-only override; keeps registry tests from writing to the user's cache.
   const override = process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR;
   if (override) return override;
@@ -151,17 +158,12 @@ export function writeServerRegistry(entry: ServerRegistryEntry): void {
   );
 }
 
-export function readServerRegistry(root: string): ServerRegistryEntry | null {
-  const file = serverRegistryFilePath(root);
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(file, "utf8"));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw errorWithCause(`failed to read server registry for ${root}`, error);
-  }
+function parseServerRegistryEntry(
+  raw: unknown,
+  label: string,
+): ServerRegistryEntry {
   if (!raw || typeof raw !== "object") {
-    throw new Error(`invalid server registry for ${root}: expected an object`);
+    throw new Error(`invalid server registry for ${label}: expected an object`);
   }
   const entry = raw as Record<string, unknown>;
   if (
@@ -175,7 +177,7 @@ export function readServerRegistry(root: string): ServerRegistryEntry | null {
     !entry.started_at
   ) {
     throw new Error(
-      `invalid server registry for ${root}: missing required fields`,
+      `invalid server registry for ${label}: missing required fields`,
     );
   }
   return {
@@ -184,6 +186,123 @@ export function readServerRegistry(root: string): ServerRegistryEntry | null {
     root: entry.root,
     started_at: entry.started_at,
   };
+}
+
+export function readServerRegistry(root: string): ServerRegistryEntry | null {
+  const file = serverRegistryFilePath(root);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw errorWithCause(`failed to read server registry for ${root}`, error);
+  }
+  return parseServerRegistryEntry(raw, root);
+}
+
+export type ServerRegistryListing = {
+  /** 登録されていて、プロセスが生きているサーバ。 */
+  servers: ServerRegistryEntry[];
+  /** 読めなかった登録。1 つ読めなくても残りは返す。 */
+  errors: { file: string; error: unknown }[];
+};
+
+/**
+ * 動いている全部のサーバ。エージェントのフックは、どのリポジトリの
+ * サーバが自分のペインを見ているかを知らないので、全部に知らせる。
+ * プロセスが既に居ない登録 (落ちたサーバの残り) は飛ばす。
+ */
+export function listServerRegistry(): ServerRegistryListing {
+  const dir = registryDir();
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch (error) {
+    if (errno(error) === "ENOENT") return { servers: [], errors: [] };
+    throw errorWithCause(`failed to list server registry ${dir}`, error);
+  }
+  const servers: ServerRegistryEntry[] = [];
+  const errors: ServerRegistryListing["errors"] = [];
+  for (const name of names.sort()) {
+    if (!name.endsWith(".json")) continue;
+    const file = join(dir, name);
+    try {
+      const entry = parseServerRegistryEntry(
+        JSON.parse(readFileSync(file, "utf8")),
+        file,
+      );
+      if (processAlive(entry.pid)) servers.push(entry);
+    } catch (error) {
+      // 読んでいる間に消えた登録 (サーバの終了) は失敗ではない。
+      if (errno(error) === "ENOENT") continue;
+      errors.push({ file, error });
+    }
+  }
+  return { servers, errors };
+}
+
+export type ServerRegistryPruneResult = {
+  /** プロセスが居ないと確かめて消した登録。 */
+  removed: string[];
+  /** 残した登録の数 (プロセスが居るもの)。 */
+  kept: number;
+  /** 読めない・消せなかった登録。消していない。 */
+  errors: { file: string; error: unknown }[];
+};
+
+/**
+ * 落ちたサーバの登録を片付ける。
+ *
+ * 登録が消えるのは、サーバが自分で終わるとき (shutdown と、作業ツリーの
+ * サーバを止めたとき) だけ。強制終了や落ちたサーバの登録は残り続け、
+ * フックが呼ばれるたびの全件の読み込みが遅くなる。起動したサーバが
+ * ここを呼んで片付ける。
+ *
+ * 消すのは「その pid のプロセスが存在しない」(ESRCH) と確かめられた登録
+ * だけ。pid が別のプロセスに使い回されて生きて見える登録、読めない登録は
+ * 残す (読めないのは書いている途中かもしれない)。消す直前に読み直し、
+ * pid が変わっていたら (同じリポジトリのサーバが起動し直した) 消さない。
+ */
+export async function pruneDeadServerRegistry(): Promise<ServerRegistryPruneResult> {
+  const dir = registryDir();
+  const result: ServerRegistryPruneResult = {
+    removed: [],
+    kept: 0,
+    errors: [],
+  };
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch (error) {
+    if (errno(error) === "ENOENT") return result;
+    result.errors.push({ file: dir, error });
+    return result;
+  }
+  const readPid = async (file: string): Promise<number> =>
+    parseServerRegistryEntry(JSON.parse(await readFile(file, "utf8")), file)
+      .pid;
+  for (const name of names.sort()) {
+    if (!name.endsWith(".json")) continue;
+    const file = join(dir, name);
+    try {
+      const pid = await readPid(file);
+      if (processAlive(pid)) {
+        result.kept += 1;
+        continue;
+      }
+      if ((await readPid(file)) !== pid) {
+        result.kept += 1;
+        continue;
+      }
+      await unlink(file);
+      result.removed.push(file);
+    } catch (error) {
+      // 読んでいる間に消えた (そのサーバが自分で片付けた) のは失敗ではない。
+      if (errno(error) === "ENOENT") continue;
+      result.errors.push({ file, error });
+    }
+  }
+  return result;
 }
 
 export function removeServerRegistry(root: string, pid: number): void {

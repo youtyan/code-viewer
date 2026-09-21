@@ -6,6 +6,7 @@
 import { describe, expect, test } from "vitest";
 import {
   type AgentKind,
+  type AgentKindReport,
   type AgentListFilter,
   type AgentPane,
   type AgentProjectInfo,
@@ -60,6 +61,7 @@ describe("agentKindOf", () => {
     name: string;
     command: string;
     source: AgentStateSource | null;
+    report?: AgentKindReport;
     expected: AgentKind | null;
   }>([
     {
@@ -112,8 +114,36 @@ describe("agentKindOf", () => {
       source: "hook",
       expected: "claude",
     },
-  ])("$name", ({ command, source, expected }) => {
-    expect(agentKindOf(command, source)).toBe(expected);
+    {
+      name: "node として動く claude はフックが名乗った種類",
+      command: "node",
+      source: "hook",
+      report: { agent: "claude" },
+      expected: "claude",
+    },
+    {
+      name: "名乗った種類は画面観測に変わっても残る",
+      command: "node",
+      source: "screen",
+      report: { agent: "codex" },
+      expected: "codex",
+    },
+    {
+      name: "セッションを終えたペインはシェルに戻る",
+      command: "zsh",
+      source: "hook",
+      report: { agent: "claude", ended: true },
+      expected: null,
+    },
+    {
+      name: "コマンド名で分かるものは終了の印より優先",
+      command: "codex",
+      source: "hook",
+      report: { ended: true },
+      expected: "codex",
+    },
+  ])("$name", ({ command, source, report, expected }) => {
+    expect(agentKindOf(command, source, report ?? null)).toBe(expected);
   });
 });
 
@@ -306,7 +336,7 @@ describe("groupAgentPanes", () => {
     ]);
   });
 
-  test("プロジェクトの中は 入力待ち → 作業中 → 完了 → 待機、同じ状態は新しい順、時刻不明は最後", () => {
+  test("プロジェクトの中は 入力待ち → 完了 (未読) → 作業中 → 待機、同じ状態は新しい順、時刻不明は最後", () => {
     const [group] = groupAgentPanes(
       [
         pane({ id: "%1", state: "idle", updatedAt: 500 }),
@@ -321,9 +351,9 @@ describe("groupAgentPanes", () => {
     );
     expect(group?.panes.map((item) => item.id)).toEqual([
       "%4",
+      "%6",
       "%5",
       "%2",
-      "%6",
       "%7",
       "%1",
       "%3",
@@ -381,6 +411,11 @@ describe("agentTransition", () => {
     { previous: "waiting", next: "idle", expected: null },
     { previous: "done", next: "idle", expected: null },
     { previous: undefined, next: "waiting", expected: null },
+    // 完了は申告でしか出ないので、作業中を見逃していても変化として拾う。
+    { previous: "idle", next: "done", expected: "finished" },
+    { previous: "waiting", next: "done", expected: "finished" },
+    { previous: "done", next: "done", expected: null },
+    { previous: undefined, next: "done", expected: null },
   ])("$previous → $next は $expected", ({ previous, next, expected }) => {
     expect(agentTransition(previous, next)).toBe(expected);
   });

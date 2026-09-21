@@ -11,34 +11,46 @@
 import type {
   AgentState,
   AgentStateObservationError,
+  AgentStateRecord,
   AgentStateSource,
 } from "./agent-state";
 import { basenameOf } from "./terminal-board";
 import type { TmuxPaneId } from "./tmux";
 
 /**
- * エージェントの種類。claude / codex はペインで動いているコマンド名で見分け、
- * それ以外でも状態を申告してきたもの (フックを入れたエージェント) は
- * other にする。どれにも当たらないペインはただのシェルなどで、種類は null。
+ * エージェントの種類。claude / codex はペインで動いているコマンド名か、
+ * フックが名乗った種類で見分ける。それ以外でも状態を申告してきたもの
+ * (フックを入れたエージェント) は other にする。どれにも当たらないペインは
+ * ただのシェルなどで、種類は null。
  */
 export const AGENT_KINDS = ["claude", "codex", "other"] as const;
 
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
+/** 申告の記録のうち、種類の判定に使う部分。 */
+export type AgentKindReport = Pick<AgentStateRecord, "agent" | "ended">;
+
 /**
- * コマンド名から種類を決める。
+ * コマンド名と申告から種類を決める。
  *
  * claude の単体版は、版番号の名前を持つ実行ファイル (`2.1.0` など) として
  * 起動するので、tmux の pane_current_command には版番号がそのまま出る。
- * 数字 3 つの形だけを claude とみなす。
+ * 数字 3 つの形だけを claude とみなす。npm 版は node として動くので、
+ * コマンド名からは分からない。フックが名乗った種類で補う。
+ *
+ * 最後の申告がセッションの終了なら、名乗った種類は使わない (そのペインは
+ * もうシェルに戻っている)。
  */
 export function agentKindOf(
   command: string,
   source: AgentStateSource | null,
+  report: AgentKindReport | null = null,
 ): AgentKind | null {
   const name = command.trim().toLowerCase();
   if (name === "claude" || /^\d+\.\d+\.\d+$/.test(name)) return "claude";
   if (name === "codex") return "codex";
+  if (report?.ended) return null;
+  if (report?.agent) return report.agent;
   return source === "hook" ? "other" : null;
 }
 
@@ -155,13 +167,13 @@ export type AgentOverviewResponse = {
 };
 
 /**
- * 並べるときの状態の順位。小さいほど上。入力待ちが先頭、次に作業中。
- * done (終わったが未読) は、待機よりは上に置く。
+ * 並べるときの状態の順位。小さいほど上。人間の番のもの (入力待ち、
+ * 終わったが未読) が先、次に作業中。
  */
 const STATE_RANK: Record<AgentState, number> = {
   waiting: 0,
-  working: 1,
-  done: 2,
+  done: 1,
+  working: 2,
   idle: 3,
 };
 
@@ -311,6 +323,11 @@ export function agentTransition(
   previous: AgentState | undefined,
   next: AgentState,
 ): AgentTransition | null {
+  // 完了は申告でしか出ないので、作業中を見逃していても確かな変化として扱う
+  // (1.5 秒おきの取り直しの間に始まって終わったターンも拾う)。
+  if (next === "done" && previous !== undefined && previous !== "done") {
+    return "finished";
+  }
   if (previous !== "working") return null;
   if (next === "waiting") return "waiting";
   if (next === "idle" || next === "done") return "finished";

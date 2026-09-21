@@ -16,6 +16,10 @@
 // (/_tmux/open と同じ経路。新しい接続は作らない)。
 
 import {
+  type AgentHooksResponse,
+  agentsNeedingHooks,
+} from "../../core/agent-hooks";
+import {
   AGENT_STATE_FILTERS,
   type AgentPane,
   type AgentProjectGroup,
@@ -39,6 +43,13 @@ export type AgentsViewDeps = {
   openPane(pane: string): void;
   /** 設定画面の通知の項目へ。 */
   openNotificationSettings(): void;
+  /** フックの状態。まだ取っていなければ null。 */
+  getHookStatus(): AgentHooksResponse | null;
+  refreshHookStatus(): Promise<void>;
+  hookHintDismissed(): boolean;
+  dismissHookHint(): void;
+  /** 設定画面のエージェント連携の節へ。 */
+  openHookSettings(): void;
 };
 
 export type AgentsView = PageView;
@@ -105,6 +116,27 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     refreshButton,
   );
 
+  // フックが未設定のときだけ出す 1 行。通知の許可ボタンとは離して、
+  // ヘッダの下に置く (ヘッダの右端に操作を並べて騒がしくしない)。
+  const hookHint = document.createElement("div");
+  hookHint.className = "agents-hook-hint";
+  hookHint.hidden = true;
+  const hookHintText = document.createElement("span");
+  hookHintText.className = "agents-hook-hint-text";
+  const hookHintOpen = document.createElement("button");
+  hookHintOpen.type = "button";
+  hookHintOpen.className = "agents-hook-hint-open";
+  hookHintOpen.addEventListener("click", () => deps.openHookSettings());
+  const hookHintClose = document.createElement("button");
+  hookHintClose.type = "button";
+  hookHintClose.className = "agents-hook-hint-close";
+  hookHintClose.textContent = "×";
+  hookHintClose.addEventListener("click", () => {
+    deps.dismissHookHint();
+    render(true);
+  });
+  hookHint.append(hookHintText, hookHintOpen, hookHintClose);
+
   const problems = document.createElement("details");
   problems.className = "agents-problems";
   const problemsSummary = document.createElement("summary");
@@ -118,7 +150,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
   list.role = "tree";
   list.addEventListener("keydown", onListKeydown);
 
-  root.append(header, problems, list);
+  root.append(header, hookHint, problems, list);
 
   let mounted = false;
   let stateFilter: AgentStateFilter = "all";
@@ -417,6 +449,23 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     }
   }
 
+  function renderHookHint(): void {
+    const current = text();
+    const panes = deps.monitor.snapshot().overview?.panes ?? [];
+    const agents = deps.hookHintDismissed()
+      ? []
+      : agentsNeedingHooks(
+          panes.map((pane) => pane.kind),
+          deps.getHookStatus(),
+        );
+    hookHint.hidden = agents.length === 0;
+    if (agents.length === 0) return;
+    hookHintText.textContent = current.hookHint(agents.join(" / "));
+    hookHintOpen.textContent = current.hookHintOpen;
+    hookHintClose.title = current.hookHintClose;
+    hookHintClose.setAttribute("aria-label", current.hookHintClose);
+  }
+
   function renderBody(): void {
     const current = text();
     const { overview, error } = deps.monitor.snapshot();
@@ -528,6 +577,8 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       snapshot.notifyError,
       notifyRequestError,
       deps.monitor.permission(),
+      deps.hookHintDismissed(),
+      deps.getHookStatus(),
       snapshot.overview,
       // 経過時間は分単位でしか変わらない。
       Math.floor(now / 60_000),
@@ -560,6 +611,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     refreshButton.title = current.refresh;
     refreshButton.setAttribute("aria-label", current.refresh);
     renderNotify();
+    renderHookHint();
     renderBody();
 
     const navs = navItems();
@@ -647,7 +699,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
         });
       }
     }
-    await deps.monitor.refresh();
+    await Promise.all([deps.monitor.refresh(), deps.refreshHookStatus()]);
   }
 
   function suspend(): void {

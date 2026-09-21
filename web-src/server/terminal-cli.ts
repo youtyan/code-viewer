@@ -2,16 +2,18 @@
 //
 // 2 つの相手を想定している。
 //
-// - エージェントのフック: `terminal state` を呼んで自分の状態を申告する。
-//   claude なら UserPromptSubmit / PreToolUse / Stop / Notification、codex なら
-//   hooks.json の同等の口から呼ぶ。サーバの場所は cli-helpers の探索に任せる
-//   ので、フック側はポートを知らなくてよい。
+// - エージェントのフック: 設定画面の「エージェント連携」で入れたフックは
+//   `terminal hook --agent <claude|codex>` を呼ぶ (起動スクリプト経由)。
+//   フックに渡された JSON から出来事を決め、動いている全部のサーバへ申告する
+//   (terminal/hook-report.ts)。手で書いたフックからは `terminal state` で
+//   このリポジトリのサーバへ直接申告してもよい。
 // - 別のエージェント: `terminal list` で誰が何をしているかを見て、
 //   `terminal capture` で他のセッションの本文を前回の続きから受け取る。
 //
 // 構成は status-cli / search-cli と同じ「parse して run」。サーバへの往復は
 // cli-helpers の ensureServerUrl と requestJson をそのまま使う。
 
+import { HOOK_AGENTS, type HookAgent, isHookAgent } from "../core/agent-hooks";
 import {
   AGENT_EVENTS,
   type AgentEvent,
@@ -20,13 +22,17 @@ import {
   isAgentEvent,
   needsAttention,
 } from "../core/agent-state";
+import { formatErrorDetail } from "../core/error-detail";
 import {
   ensureServerUrl,
+  readStdin,
   requestJson,
   resolveRepoRoot,
   takeGlobalCliOption,
   takeValue,
 } from "./cli-helpers";
+import { defaultHookReportDeps, reportAgentHook } from "./terminal/hook-report";
+import { appendHookFailure, currentHookLauncher } from "./terminal/hooks";
 
 /** サーバ探索に使う疎通先。この経路自体が読み取り専用なので使い回せる。 */
 const HEALTH_PATH = "/_agent/states";
@@ -48,7 +54,8 @@ export type TerminalCommand =
       event: AgentEvent;
       prompt: string | null;
       note: string | null;
-    };
+    }
+  | { mode: "hook"; agent: HookAgent; log: string | null };
 
 export type TerminalArgs = {
   command: TerminalCommand;
@@ -66,11 +73,15 @@ Usage:
   code-viewer terminal list [--attention] [--json]
   code-viewer terminal capture --target <id> [--cursor <cursor>] [--history <n>] [--json]
   code-viewer terminal state --target <id> --event <event> [--prompt <text>] [--note <text>]
+  code-viewer terminal hook --agent <agent> [--log <path>]
 
 Commands:
   list      Show every terminal the server knows a state for.
   capture   Read a terminal's text. With --cursor only what is new since then.
   state     Report a state change. Meant to be called from an agent CLI hook.
+  hook      Read an agent hook's JSON from stdin and report it to every
+            running code-viewer server. Installed by Settings > Agent
+            integration; always exits 0 and logs failures instead.
 
 Options:
   --target <id>     tmux pane id (%12) or browser shell id (shell-xxxx).
@@ -81,6 +92,8 @@ Options:
   --history <n>     Lines of scrollback to include (tmux only). Default 500.
   --prompt <text>   The instruction the human last gave. Kept until replaced.
   --note <text>     One line from the agent about what it is doing.
+  --agent <agent>   ${HOOK_AGENTS.join(" | ")} (hook only)
+  --log <path>      Where hook failures are appended (hook only).
   --attention       Only terminals waiting for you or finished but unread.
   --json            Machine-readable output.
   --cwd <path>      Repository to talk to. Default: current directory.
@@ -106,6 +119,7 @@ Reporting your own state (hooks)
     ask       you stopped to ask something   -> waiting
     stop      your turn ended                -> done (unread)
     exit      the session ended              -> idle
+    ready     the session started, or you were interrupted -> idle
   Identify yourself with $TMUX_PANE (inside tmux) or $CODE_VIEWER_SHELL_ID
   (inside a shell this server opened). Nothing else is needed; the CLI finds
   the running server by itself.
@@ -156,6 +170,7 @@ export function parseTerminalArgs(argv: string[]): TerminalParseResult {
       },
     };
   }
+  if (sub === "hook") return parseHookArgs(argv.slice(1));
   if (sub !== "list" && sub !== "capture" && sub !== "state") {
     return { ok: false, error: `unknown terminal subcommand: ${sub}` };
   }
@@ -251,6 +266,77 @@ export function parseTerminalArgs(argv: string[]): TerminalParseResult {
   };
 }
 
+function parseHookArgs(argv: string[]): TerminalParseResult {
+  let agent: HookAgent | null = null;
+  let log: string | null = null;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i] as string;
+    if (arg !== "--agent" && arg !== "--log") {
+      return { ok: false, error: `unknown option: ${arg}` };
+    }
+    const taken = takeValue(argv, i, arg);
+    if ("error" in taken) return { ok: false, error: taken.error };
+    i = taken.next;
+    if (arg === "--log") {
+      log = taken.value;
+    } else if (isHookAgent(taken.value)) {
+      agent = taken.value;
+    } else {
+      return {
+        ok: false,
+        error: `--agent must be one of: ${HOOK_AGENTS.join(", ")}`,
+      };
+    }
+  }
+  if (!agent) return { ok: false, error: "--agent is required" };
+  return {
+    ok: true,
+    args: {
+      command: { mode: "hook", agent, log },
+      cwd: undefined,
+      server: undefined,
+    },
+  };
+}
+
+/**
+ * フックとして 1 回申告する。どう失敗しても終了コードは 0 のまま
+ * (エージェントを止めない)。失敗は記録に残し、stderr にも出す。
+ */
+async function runHook(agent: HookAgent, log: string | null): Promise<void> {
+  const logPath = log ?? currentHookLauncher().failureLog;
+  const record = (failure: Parameters<typeof appendHookFailure>[1]) => {
+    console.error(
+      `[code-viewer hook] ${failure.stage}${failure.server ? ` ${failure.server}` : ""}: ${failure.detail}`,
+    );
+    try {
+      appendHookFailure(logPath, failure);
+    } catch (error) {
+      console.error(
+        `[code-viewer hook] could not write the failure log ${logPath}`,
+        error,
+      );
+    }
+  };
+  try {
+    const stdin = await readStdin();
+    await reportAgentHook(agent, stdin, defaultHookReportDeps(record));
+  } catch (error) {
+    record({
+      at: Date.now(),
+      agent,
+      hookEvent: "",
+      event: "",
+      target: "",
+      server: "",
+      stage: "unexpected",
+      detail: `${formatErrorDetail(error)}${
+        error instanceof Error && error.stack ? `\n${error.stack}` : ""
+      }`,
+    });
+  }
+}
+
 /** 一覧の 1 行。人間が読むときは幅を揃えたいので、ここで整える。 */
 export function formatStateLine(record: AgentStateRecord): string {
   const mark = needsAttention(record.state) ? "*" : " ";
@@ -287,6 +373,10 @@ export async function runTerminalCli(argv: string[]): Promise<void> {
   }
   if (command.mode === "agent-help") {
     console.log(TERMINAL_AGENT_HELP);
+    return;
+  }
+  if (command.mode === "hook") {
+    await runHook(command.agent, command.log);
     return;
   }
 

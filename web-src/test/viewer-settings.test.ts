@@ -213,6 +213,7 @@ function setup(
           '{\n  "version": 1,\n  "rules": ["default"]\n}\n';
         values.agentRulesSource = "default";
       }),
+    agentHooksSection: document.createElement("div"),
   });
 
   return {

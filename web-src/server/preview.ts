@@ -126,7 +126,11 @@ import {
   type SearchEnv,
   safeWorktreePath as safeWorktreePathInEnv,
 } from "./search-service";
-import { removeServerRegistry, writeServerRegistry } from "./server-registry";
+import {
+  pruneDeadServerRegistry,
+  removeServerRegistry,
+  writeServerRegistry,
+} from "./server-registry";
 import { loadAppSettingsState } from "./state-store";
 import type { ListTmuxPanesOptions } from "./tmux/panes";
 import { startWatchSupervisor, type WatchSupervisor } from "./watch-supervisor";
@@ -3133,6 +3137,27 @@ writeServerRegistry({
   root: cwd,
   started_at: new Date().toISOString(),
 });
+// 落ちたサーバの登録を片付ける。起動を待たせず、失敗しても起動は止めない
+// (どの登録がなぜ残ったかは全部ログに出す)。
+void pruneDeadServerRegistry().then(
+  (pruned) => {
+    if (pruned.removed.length > 0) {
+      console.log(
+        `code-viewer removed ${pruned.removed.length} server registry entries of servers that are gone`,
+      );
+    }
+    for (const failure of pruned.errors) {
+      console.error(
+        `code-viewer could not clean up the server registry entry ${failure.file}:\n${formatErrorDetail(failure.error)}`,
+      );
+    }
+  },
+  (error: unknown) => {
+    console.error(
+      `code-viewer server registry cleanup failed:\n${formatErrorDetail(error)}`,
+    );
+  },
+);
 // Watching runs in a child process. close() here kills that child; it never
 // touches an fs.watch handle, so unlike the old in-process watcher it cannot
 // block shutdown on libuv's FSEvents semaphore.

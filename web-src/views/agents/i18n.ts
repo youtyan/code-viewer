@@ -2,6 +2,12 @@
 // (app.ts の STATE.language) で切り替える。切替時のライブ反映は agents-view と
 // agent-status の localize() が担当する。
 
+import type {
+  AgentHookState,
+  HookAction,
+  HookAgent,
+  HookRowAction,
+} from "../../core/agent-hooks";
 import type { AgentKind } from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
 import { elapsedBucket } from "../../core/terminal-board";
@@ -80,6 +86,264 @@ export type AgentsText = {
   headerTitle: (waiting: number, working: number) => string;
   headerFailed: (detail: string) => string;
   keyboardHint: string;
+  /** フックが未設定のときに一覧の上に出す 1 行。 */
+  hookHint: (agents: string) => string;
+  hookHintOpen: string;
+  hookHintClose: string;
+  /** 設定画面の「エージェント連携」。 */
+  hooks: AgentHooksText;
+};
+
+export type AgentHooksText = {
+  title: string;
+  intro: string;
+  state: Record<AgentHookState, string>;
+  action: Record<HookRowAction["kind"], string>;
+  actionTitle: (agent: HookAgent, action: string) => string;
+  loading: string;
+  loadFailed: string;
+  symlinkTo: (target: string) => string;
+  /** 読めるが書けない (生成された) 設定ファイルの行に出す 1 文。 */
+  generated: string;
+  noConfigDir: (dir: string) => string;
+  broken: (detail: string) => string;
+  dialogTitle: (agent: HookAgent, action: HookAction) => string;
+  dialogFile: string;
+  dialogLinkTarget: string;
+  dialogAdded: string;
+  dialogRemoved: string;
+  dialogNothing: string;
+  dialogBackup: (path: string) => string;
+  dialogNewFile: string;
+  dialogKept: (count: number) => string;
+  dialogFormatting: string;
+  dialogLauncher: (path: string) => string;
+  /** 生成された設定ファイルのとき、確認の画面の代わりに出す手順。 */
+  guideTitle: (agent: HookAgent, action: HookAction) => string;
+  guideSteps: Record<HookAction, readonly string[]>;
+  guideLauncher: (path: string) => string;
+  guideDetails: string;
+  dialogCopy: string;
+  dialogCopied: string;
+  run: Record<HookAction, string>;
+  cancel: string;
+  close: string;
+  planFailed: string;
+  applied: Record<HookAction, string>;
+  unchanged: string;
+  backupAt: (path: string) => string;
+  launcherWritten: (path: string) => string;
+  applyFailed: string;
+  /** どの時点から効くか。公式ドキュメントの記述に合わせる。 */
+  effect: Record<HookAgent, Record<HookAction, string>>;
+  failures: (count: number) => string;
+  failuresLog: (path: string) => string;
+  failuresClear: string;
+  failuresClearFailed: string;
+  failureLine: (time: string, stage: string, where: string) => string;
+};
+
+const HOOKS_EN: AgentHooksText = {
+  title: "Agent integration",
+  intro:
+    "Adds hooks to claude and codex that tell code-viewer what they are doing. With them, the agent list shows reliably when an agent finishes or asks for permission, and also lists agents it cannot recognize by process name. Other hooks in the file are kept as they are.",
+  state: {
+    "no-config-dir": "Not used",
+    unreadable: "File unreadable",
+    none: "Not set up",
+    partial: "Partly set up",
+    installed: "Set up",
+    broken: "Hook target missing",
+  },
+  action: {
+    install: "Set up",
+    uninstall: "Remove",
+    repair: "Repair",
+    "guide-install": "Show how to set up",
+    "guide-uninstall": "Show how to remove",
+  },
+  actionTitle: (agent, action) =>
+    `${action} the code-viewer hooks for ${agent}`,
+  loading: "Checking…",
+  loadFailed: "Could not check the agent hooks.",
+  symlinkTo: (target) => `link to ${target}`,
+  generated:
+    "This settings file is generated elsewhere, so code-viewer cannot write it. Paste the hooks into where it is generated from.",
+  noConfigDir: (dir) => `${dir} does not exist.`,
+  broken: (detail) =>
+    `The hooks are there but what they call is gone. Repair rewrites it.\n${detail}`,
+  dialogTitle: (agent, action) =>
+    action === "install"
+      ? `Set up hooks for ${agent}`
+      : `Remove the code-viewer hooks from ${agent}`,
+  dialogFile: "File",
+  dialogLinkTarget: "Link target",
+  dialogAdded: "Added (at the end of each event)",
+  dialogRemoved: "Removed",
+  dialogNothing:
+    "The file already has exactly these hooks. Nothing in it changes.",
+  dialogBackup: (path) =>
+    `The current content is saved to ${path} before writing.`,
+  dialogNewFile:
+    "The file does not exist yet and will be created (nothing to back up).",
+  dialogKept: (count) =>
+    count === 0
+      ? "There are no other hooks in this file."
+      : `The ${count} existing hook${count === 1 ? "" : "s"} from other tools stay as they are.`,
+  dialogFormatting:
+    "The file is re-indented when written (the settings themselves do not change).",
+  dialogLauncher: (path) => `Writes the launcher the hooks call: ${path}`,
+  guideTitle: (agent, action) =>
+    action === "install"
+      ? `Set up hooks for ${agent} in your generated settings`
+      : `Remove the code-viewer hooks for ${agent} from your generated settings`,
+  guideSteps: {
+    install: [
+      "Copy the hooks below.",
+      "Add them to the hooks of wherever this settings file is generated from (your dotfiles, for example).",
+      "Regenerate the settings file. Once it has the hooks, this row changes to Set up by itself.",
+    ],
+    uninstall: [
+      "Copy the hooks below.",
+      "Remove them from the hooks of wherever this settings file is generated from.",
+      "Regenerate the settings file. Once they are gone, this row changes to Not set up by itself.",
+    ],
+  },
+  guideLauncher: (path) =>
+    `Copying also writes the launcher these hooks call: ${path}`,
+  guideDetails: "Details: why code-viewer cannot write this file",
+  dialogCopy: "Copy the hooks",
+  dialogCopied: "Copied",
+  run: { install: "Set up", uninstall: "Remove" },
+  cancel: "Cancel",
+  close: "Close",
+  planFailed: "Could not prepare the change.",
+  applied: { install: "Set up.", uninstall: "Removed." },
+  unchanged: "Nothing needed to change.",
+  backupAt: (path) => `Backup: ${path}`,
+  launcherWritten: (path) => `Launcher written: ${path}`,
+  applyFailed: "Could not change the settings file. Nothing was written.",
+  effect: {
+    claude: {
+      install:
+        "Running claude sessions normally pick this up on their own (claude watches its settings file). If one does not, check /hooks in it or restart it.",
+      uninstall:
+        "Running claude sessions normally stop calling the hooks on their own.",
+    },
+    codex: {
+      install:
+        "codex runs a new hook only after you trust it: open /hooks in codex and trust the code-viewer hooks. The codex documentation does not say whether running sessions pick up new hooks, so count on sessions started from now on.",
+      uninstall:
+        "Sessions started from now on no longer call the hooks. Already running ones may keep them until restarted.",
+    },
+  },
+  failures: (count) =>
+    `${count} hook report${count === 1 ? "" : "s"} did not reach code-viewer`,
+  failuresLog: (path) => `Full log: ${path}`,
+  failuresClear: "Clear",
+  failuresClearFailed: "Could not clear the log.",
+  failureLine: (time, stage, where) =>
+    `${time}  ${stage}${where ? `  ${where}` : ""}`,
+};
+
+const HOOKS_JA: AgentHooksText = {
+  title: "エージェント連携",
+  intro:
+    "claude と codex に、いまの状態を code-viewer へ知らせるフックを入れます。入れると、エージェントが終わったこと・許可を求めていることを一覧で確実に出せます。プロセス名では見分けられないエージェントも一覧に出ます。ファイルにあるほかのフックはそのまま残ります。",
+  state: {
+    "no-config-dir": "使っていません",
+    unreadable: "ファイルが読めません",
+    none: "未設定",
+    partial: "一部だけ設定済み",
+    installed: "設定済み",
+    broken: "呼び先がありません",
+  },
+  action: {
+    install: "入れる",
+    uninstall: "外す",
+    repair: "直す",
+    "guide-install": "入れ方を見る",
+    "guide-uninstall": "外し方を見る",
+  },
+  actionTitle: (agent, action) => `${agent} の code-viewer のフックを${action}`,
+  loading: "確認しています…",
+  loadFailed: "エージェントのフックを確認できませんでした。",
+  symlinkTo: (target) => `${target} へのリンク`,
+  generated:
+    "この設定ファイルは別の場所から生成されているため、code-viewer からは書き込めません。生成元に貼り付けてください。",
+  noConfigDir: (dir) => `${dir} がありません。`,
+  broken: (detail) =>
+    `フックはありますが、呼び先がなくなっています。「直す」で書き直せます。\n${detail}`,
+  dialogTitle: (agent, action) =>
+    action === "install"
+      ? `${agent} にフックを入れる`
+      : `${agent} から code-viewer のフックを外す`,
+  dialogFile: "ファイル",
+  dialogLinkTarget: "リンク先",
+  dialogAdded: "足すもの (各出来事の末尾に追加)",
+  dialogRemoved: "消すもの",
+  dialogNothing:
+    "このファイルには既にこのとおりのフックがあります。中身は変わりません。",
+  dialogBackup: (path) => `書く前の中身を ${path} に残します。`,
+  dialogNewFile:
+    "ファイルがまだ無いので、新しく作ります (バックアップするものはありません)。",
+  dialogKept: (count) =>
+    count === 0
+      ? "このファイルにほかのフックはありません。"
+      : `既にあるフック ${count} 件はそのまま残ります。`,
+  dialogFormatting:
+    "書くときに字下げが整え直されます (設定の中身は変わりません)。",
+  dialogLauncher: (path) => `フックが呼ぶ起動スクリプトを書きます: ${path}`,
+  guideTitle: (agent, action) =>
+    action === "install"
+      ? `${agent} のフックを生成元に入れる`
+      : `${agent} の code-viewer のフックを生成元から外す`,
+  guideSteps: {
+    install: [
+      "下のフックをコピーします。",
+      "この設定ファイルを生成している元 (dotfiles など) の hooks に足します。",
+      "設定ファイルを生成し直します。フックが入ると、この行は自動で「設定済み」に変わります。",
+    ],
+    uninstall: [
+      "下のフックをコピーします。",
+      "この設定ファイルを生成している元の hooks から消します。",
+      "設定ファイルを生成し直します。フックが消えると、この行は自動で「未設定」に変わります。",
+    ],
+  },
+  guideLauncher: (path) =>
+    `コピーするときに、フックが呼ぶ起動スクリプトも用意します: ${path}`,
+  guideDetails: "詳細: code-viewer がこのファイルに書き込めない理由",
+  dialogCopy: "フックをコピー",
+  dialogCopied: "コピーしました",
+  run: { install: "入れる", uninstall: "外す" },
+  cancel: "取消",
+  close: "閉じる",
+  planFailed: "変更の内容を用意できませんでした。",
+  applied: { install: "入れました。", uninstall: "外しました。" },
+  unchanged: "変更は必要ありませんでした。",
+  backupAt: (path) => `バックアップ: ${path}`,
+  launcherWritten: (path) => `起動スクリプトを書きました: ${path}`,
+  applyFailed: "設定ファイルを変更できませんでした。何も書いていません。",
+  effect: {
+    claude: {
+      install:
+        "動いている claude にも、通常はそのまま効きます (claude が設定ファイルの変更を読み直すため)。効かないときは claude の /hooks で確かめるか、起動し直してください。",
+      uninstall: "動いている claude からも、通常はそのまま外れます。",
+    },
+    codex: {
+      install:
+        "codex は、フックを信頼するまで実行しません。codex で /hooks を開き、code-viewer のフックを信頼してください。動いている codex に効くかは公式の説明に書かれていないため、確実なのはこれから起動するものです。",
+      uninstall:
+        "これから起動する codex では呼ばれません。動いているものには、起動し直すまで残ることがあります。",
+    },
+  },
+  failures: (count) =>
+    `フックの申告が code-viewer に届かなかったことが ${count} 件あります`,
+  failuresLog: (path) => `記録の全体: ${path}`,
+  failuresClear: "記録を消す",
+  failuresClearFailed: "記録を消せませんでした。",
+  failureLine: (time, stage, where) =>
+    `${time}  ${stage}${where ? `  ${where}` : ""}`,
 };
 
 const EN: AgentsText = {
@@ -88,7 +352,7 @@ const EN: AgentsText = {
   state: {
     waiting: "Needs input",
     working: "Working",
-    done: "Finished",
+    done: "Finished · unread",
     idle: "Idle",
   },
   kind: { claude: "claude", codex: "codex", other: "agent" },
@@ -156,6 +420,11 @@ const EN: AgentsText = {
     `Agents: ${waiting} need input, ${working} working. Open the agent list (g a)`,
   headerFailed: (detail) => `Could not read the agent list: ${detail}`,
   keyboardHint: "↑↓ move · Enter open",
+  hookHint: (agents) =>
+    `Finish detection is off for ${agents}. Hooks make it reliable.`,
+  hookHintOpen: "Set up",
+  hookHintClose: "Hide this",
+  hooks: HOOKS_EN,
 };
 
 const JA: AgentsText = {
@@ -164,7 +433,7 @@ const JA: AgentsText = {
   state: {
     waiting: "入力待ち",
     working: "作業中",
-    done: "完了",
+    done: "完了・未読",
     idle: "待機",
   },
   kind: { claude: "claude", codex: "codex", other: "エージェント" },
@@ -230,6 +499,11 @@ const JA: AgentsText = {
     `エージェント: 入力待ち ${waiting} · 作業中 ${working}。一覧を開く (g a)`,
   headerFailed: (detail) => `エージェント一覧を取得できませんでした: ${detail}`,
   keyboardHint: "↑↓ 移動 · Enter 開く",
+  hookHint: (agents) =>
+    `${agents} の完了の検知を有効にできます (フックが未設定です)。`,
+  hookHintOpen: "設定する",
+  hookHintClose: "閉じる",
+  hooks: HOOKS_JA,
 };
 
 const TEXT: Record<AgentsLang, AgentsText> = { en: EN, ja: JA };

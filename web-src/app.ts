@@ -4,6 +4,7 @@ import {
   DEFAULT_AGENT_SCREEN_RULES,
   formatAgentScreenRuleSet,
 } from "./core/agent-screen";
+import type { AgentHooksResponse } from "./core/agent-hooks";
 import { type AgentPane, titleWithUnread } from "./core/agent-overview";
 import {
   AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD,
@@ -141,6 +142,10 @@ import {
   openHelpKeybindings,
   openHelpSection,
 } from "./views/help-page";
+import {
+  AGENT_HOOKS_SECTION_ID,
+  createAgentHooksSettings,
+} from "./views/agents/agent-hooks-settings";
 import { createAgentMonitor } from "./views/agents/agent-monitor";
 import { mountAgentStatus } from "./views/agents/agent-status";
 import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
@@ -4231,6 +4236,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!document.hidden) enqueueInitialLoads();
   });
 
+  // ---------- Agent integration (hooks): agent-hooks-settings.ts ----------
+  // 設定画面の節と、エージェント一覧の案内が同じ状態を見る。取り直すのは
+  // 設定画面の節と一覧に入ったときだけ (周期では取らない)。
+  let AGENT_HOOK_STATUS: AgentHooksResponse | null = null;
+  const AGENT_HOOKS_SETTINGS = createAgentHooksSettings({
+    getText: () => agentsText(STATE.language).hooks,
+    trackLoad,
+    actionHeaders,
+    onChanged: (status) => {
+      AGENT_HOOK_STATUS = status;
+      AGENTS_VIEW?.localize();
+    },
+  });
+
   // ---------- Viewer settings: extracted to viewer-settings.ts ----------
   // 以前はヘッダの歯車から出るポップオーバーだった。今は Help ページの
   // 設定セクションが唯一の置き場で、ここは値の出し入れだけを受け持つ。
@@ -4265,13 +4284,18 @@ window.GdpExpandLogic = GdpExpandLogic;
         loadSettings(),
         loadAgentScreenRules(),
         DATABASE_VIEW.loadDbUiPrefs(),
+        AGENT_HOOKS_SETTINGS.refresh(),
       ]);
     },
     onSave: saveViewerSettings,
     onAgentRulesSave: saveAgentScreenRules,
     onAgentRulesReset: resetAgentScreenRuleSettings,
+    agentHooksSection: AGENT_HOOKS_SETTINGS.element,
   });
-  relocalizeViewerSettings = () => VIEWER_SETTINGS.localize();
+  relocalizeViewerSettings = () => {
+    VIEWER_SETTINGS.localize();
+    AGENT_HOOKS_SETTINGS.localize();
+  };
 
   // ---------- Keybinding editor: extracted to help-keybinding-editor.ts ----
   const KEYBINDING_EDITOR = createHelpKeybindingEditor({
@@ -6041,20 +6065,27 @@ window.GdpExpandLogic = GdpExpandLogic;
       })
     : null;
 
+  /** 設定画面を開き、指定の見出しまで送る。 */
+  function openSettingsAt(headingId: string): void {
+    openHelpSection(helpSectionDeps(), "settings");
+    requestAnimationFrame(() =>
+      document.getElementById(headingId)?.scrollIntoView({ block: "start" }),
+    );
+  }
+
   AGENTS_VIEW = createAgentsView({
     monitor: AGENT_MONITOR,
     getText: () => agentsText(STATE.language),
     setPageMode,
     syncHeaderMenu,
     openPane: openAgentPane,
-    openNotificationSettings: () => {
-      openHelpSection(helpSectionDeps(), "settings");
-      requestAnimationFrame(() =>
-        document
-          .getElementById("agent-notify-section-title")
-          ?.scrollIntoView({ block: "start" }),
-      );
-    },
+    openNotificationSettings: () =>
+      openSettingsAt("agent-notify-section-title"),
+    getHookStatus: () => AGENT_HOOK_STATUS,
+    refreshHookStatus: AGENT_HOOKS_SETTINGS.refresh,
+    hookHintDismissed: () => APP_SETTINGS.agentHookHintDismissed === true,
+    dismissHookHint: () => patchSettings({ agentHookHintDismissed: true }),
+    openHookSettings: () => openSettingsAt(AGENT_HOOKS_SECTION_ID),
   });
   relocalizeAgents = () => {
     AGENTS_VIEW?.localize();

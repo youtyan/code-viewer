@@ -176,7 +176,7 @@ export async function buildAgentOverview(
       title: pane.title,
       command: pane.command,
       path: pane.path,
-      kind: agentKindOf(pane.command, source),
+      kind: agentKindOf(pane.command, source, record ?? null),
       state: record?.state ?? "idle",
       source,
       updatedAt: record?.changeObserved ? record.updatedAt : 0,

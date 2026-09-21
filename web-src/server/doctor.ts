@@ -1,6 +1,7 @@
 import { accessSync, constants, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AGENT_HOOK_MARKER, HOOK_AGENTS } from "../core/agent-hooks";
 import type { DbFileInfo, DbFilesResponse } from "../core/database/types";
 import type {
   DoctorGroup,
@@ -47,6 +48,14 @@ import {
   describeShellAvailability,
   type ShellAvailability,
 } from "./shell/session";
+import {
+  type AgentHookTarget,
+  agentHookStatus,
+  currentHookLauncher,
+  defaultAgentConfigDir,
+  type HookLauncher,
+  launcherHealth,
+} from "./terminal/hooks";
 import { tmuxArgs } from "./tmux/command";
 import {
   mapWithConcurrency,
@@ -650,6 +659,54 @@ async function checkTerminalTools(
       shellAvailabilityToRow(shellAvailability),
     ],
   };
+}
+
+/**
+ * 設定画面の「エージェント連携」で入れたフック (terminal/hooks.ts)。
+ * エージェントの設定ファイルと状態ディレクトリに残るものなので、機能を
+ * 消しても最低 1 リリースはこの検出を残す (server.md)。読むだけで書かない。
+ */
+export function checkAgentHooks(
+  targets: AgentHookTarget[] = HOOK_AGENTS.map((agent) => ({
+    agent,
+    configDir: defaultAgentConfigDir(agent),
+  })),
+  launcher: HookLauncher = currentHookLauncher(),
+): DoctorGroup {
+  const removeHint = (path: string) =>
+    `To remove: Settings > Agent integration > Remove, or delete the hooks whose command contains "${AGENT_HOOK_MARKER}" from ${path}. Earlier content is kept next to it as ${basename(path)}.code-viewer-backup-*.`;
+  const rows: DoctorRow[] = targets.map((target) => {
+    const status = agentHookStatus(target, launcher);
+    const problem =
+      status.state === "partial" ||
+      status.state === "broken" ||
+      status.state === "unreadable";
+    return {
+      id: `agent-hooks.${target.agent}`,
+      title: `${target.agent} state hooks`,
+      status: problem ? "warn" : "ok",
+      detail: `${status.state}: ${status.path}${status.detail ? `\n${status.detail}` : ""}`,
+      ...(status.state === "none" || status.state === "no-config-dir"
+        ? {}
+        : { hint: removeHint(status.path) }),
+    };
+  });
+  const health = launcherHealth(launcher);
+  rows.push({
+    id: "agent-hooks.launcher",
+    title: "Agent hook launcher",
+    status:
+      health.state === "target-missing" || health.state === "unreadable"
+        ? "warn"
+        : "ok",
+    detail: `${health.state}: ${health.path}${health.detail ? `\n${health.detail}` : ""}`,
+    ...(health.state === "missing"
+      ? {}
+      : {
+          hint: `Written by Settings > Agent integration. Safe to delete once no agent settings file names it; "Repair" rewrites it.`,
+        }),
+  });
+  return { id: "agent-hooks", title: "Agent hooks", rows };
 }
 
 type DockerCmd = { binary: string; subcommand: string[] };
@@ -1649,6 +1706,7 @@ export async function buildDoctorReport(
   );
   const terminal = await checkTerminalTools(ctx.signal);
   const server = await checkServer(ctx.listenPort, ctx.cwd, ctx.signal);
+  const agentHooks = checkAgentHooks();
   const groups: DoctorGroup[] = [
     runtime,
     packageGroup,
@@ -1661,6 +1719,7 @@ export async function buildDoctorReport(
     datastore,
     docker,
     terminal,
+    agentHooks,
     server,
   ];
   return { generation, groups, worstStatus: computeWorst(groups) };

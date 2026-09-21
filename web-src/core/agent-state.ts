@@ -45,6 +45,11 @@ export const AGENT_EVENTS = [
   "read",
   /** セッションが閉じた。 */
   "exit",
+  /**
+   * セッションが始まった、または作業を中断して入力を待てる状態に戻った。
+   * 閉じたのではないので、種類 (claude など) はそのまま覚えておく。
+   */
+  "ready",
 ] as const;
 
 export type AgentEvent = (typeof AGENT_EVENTS)[number];
@@ -68,6 +73,7 @@ const STATE_BY_EVENT: Record<Exclude<AgentEvent, "read">, AgentState> = {
   ask: "waiting",
   stop: "done",
   exit: "idle",
+  ready: "idle",
 };
 
 export function agentStateForEvent(
@@ -77,6 +83,21 @@ export function agentStateForEvent(
   if (event === "read")
     return current === "done" ? "idle" : (current ?? "idle");
   return STATE_BY_EVENT[event];
+}
+
+/**
+ * フックが名乗ってきたエージェントの種類。プロセス名から見分けられない
+ * もの (node として動く claude など) を一覧に出すために使う。
+ */
+export const REPORTED_AGENTS = ["claude", "codex"] as const;
+
+export type ReportedAgent = (typeof REPORTED_AGENTS)[number];
+
+export function isReportedAgent(value: unknown): value is ReportedAgent {
+  return (
+    typeof value === "string" &&
+    (REPORTED_AGENTS as readonly string[]).includes(value)
+  );
 }
 
 /** 状態の出どころ。UI で「申告なので確か」と「当て推量」を区別するために持つ。 */
@@ -102,6 +123,13 @@ export type AgentStateRecord = {
   lastPrompt: string;
   /** エージェント側の一言。フックが送ってきたときだけ入る。 */
   note: string;
+  /** フックが名乗った種類。名乗っていなければ無い。 */
+  agent?: ReportedAgent;
+  /**
+   * 最後の申告がセッションの終了 (exit) だった。そのペインではもう
+   * エージェントが動いていないので、一覧では種類を持たないペインに戻す。
+   */
+  ended?: boolean;
 };
 
 export type AgentStateObservationError = {

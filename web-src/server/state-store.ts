@@ -290,6 +290,9 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     out.agentNotifyWaiting = agentNotifyWaiting;
   const agentNotifyDone = optionalBoolean(raw.agentNotifyDone);
   if (agentNotifyDone !== undefined) out.agentNotifyDone = agentNotifyDone;
+  const agentHookHintDismissed = optionalBoolean(raw.agentHookHintDismissed);
+  if (agentHookHintDismissed !== undefined)
+    out.agentHookHintDismissed = agentHookHintDismissed;
   // 差分が空なら書かない。全部デフォルトに戻したときにファイルへ {} が
   // 残らないので、次に読んだときは素直に「未設定」として扱える。
   const keybindings = sanitizeKeymapOverrides(raw.keybindings);

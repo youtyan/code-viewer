@@ -14,6 +14,7 @@ import {
   runningServerResult,
 } from "../server/worktree/open";
 
+const ORIGINAL_REGISTRY_DIR = process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR;
 let registryDir = "";
 let worktree = "";
 let identityServer: StartedServer | null = null;
@@ -27,7 +28,13 @@ beforeEach(() => {
 afterEach(async () => {
   await identityServer?.close();
   identityServer = null;
-  delete process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR;
+  // テスト全体の一時登録簿 (vitest-global-setup) に戻す。消すと、この後に
+  // 同じプロセスで走るテストが開発者の ~/.cache に登録を書く。
+  if (ORIGINAL_REGISTRY_DIR === undefined) {
+    delete process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR;
+  } else {
+    process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR = ORIGINAL_REGISTRY_DIR;
+  }
   rmSync(registryDir, { recursive: true, force: true });
   rmSync(worktree, { recursive: true, force: true });
 });

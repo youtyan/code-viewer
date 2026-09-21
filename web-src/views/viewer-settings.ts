@@ -104,6 +104,11 @@ export type ViewerSettingsDeps = {
   ): Promise<void>;
   onAgentRulesSave(value: string): Promise<void>;
   onAgentRulesReset(): Promise<void>;
+  /**
+   * 通知の節の次に置く節 (エージェント連携)。中身と取得・文言の切り替えは
+   * 持ち主 (views/agents/agent-hooks-settings.ts) が行う。
+   */
+  agentHooksSection: HTMLElement;
 };
 
 const FONT_SIZE_VALUES = ["compact", "regular", "large", "xlarge"] as const;
@@ -426,6 +431,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       display,
       uploads,
       agentNotify,
+      deps.agentHooksSection,
       excluded,
       datastores,
       watch,

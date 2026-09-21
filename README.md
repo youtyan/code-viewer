@@ -73,6 +73,16 @@ Requires Node.js 20 or newer. Development uses
   shows needs-input and working agents on every screen, changed rows get an
   unread dot and the tab title an unread count, and desktop notifications can
   be enabled from that screen (choose which changes notify under Settings).
+- Turn on reliable finish detection from Settings → Agent integration. It adds
+  hooks to claude (`settings.json` in `CLAUDE_CONFIG_DIR` or `~/.claude`) and
+  codex (`hooks.json` in `CODEX_HOME` or `~/.codex`) after showing the exact
+  file, what is added, where the backup goes, and how many existing hooks stay
+  (other hooks are never removed or reordered). The hooks run
+  `code-viewer terminal hook`, which reports to every running code-viewer and
+  always exits 0; reports that did not arrive are listed in the same section.
+  Finished turns then show as "Finished · unread", and agents that cannot be
+  recognized by process name are listed too. codex runs a new hook only after
+  you trust it in `/hooks`.
 - Open files directly from the repository or diff view, including text-like
   config/prompt files and large generated files (virtualized source viewer
   with copy/open-full-view).

@@ -13,6 +13,7 @@ import type {
   AgentState,
   AgentStateRecord,
   AgentStateSource,
+  ReportedAgent,
 } from "../../core/agent-state";
 import { agentStateForEvent, needsAttention } from "../../core/agent-state";
 
@@ -70,6 +71,8 @@ export type RecordAgentStateInput = {
   override?: boolean;
   lastPrompt?: string;
   note?: string;
+  /** フックが名乗った種類。送られてこなければ前の値を残す。 */
+  agent?: ReportedAgent;
 };
 
 /**
@@ -141,6 +144,12 @@ export function recordAgentState(
     lastPrompt: clip(input.lastPrompt ?? previous?.lastPrompt ?? ""),
     note: clip(input.note ?? previous?.note ?? ""),
   };
+  // 種類と終了の印は申告だけが決める。画面観測の記録でも前の値を引き継ぐ。
+  const agent = input.agent ?? previous?.agent;
+  if (agent) record.agent = agent;
+  const ended =
+    input.source === "hook" ? input.event === "exit" : previous?.ended;
+  if (ended) record.ended = true;
   states.set(input.target, record);
   evictOldest();
   return record;

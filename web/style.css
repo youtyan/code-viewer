@@ -2451,6 +2451,8 @@ body.gdp-history-resizing * {
 }
 .scope-settings-section-title {
   display: block;
+  /* 一覧の案内などから見出しへ送ったとき、固定ヘッダの下に隠れない。 */
+  scroll-margin-top: calc(var(--chrome-h) + 12px);
   margin-bottom: 6px;
   color: var(--fg);
   font-size: 12px;
@@ -16723,6 +16725,191 @@ html[data-theme="dark"] .tools-code span[style] {
   white-space: pre-wrap;
 }
 
+/* 設定画面の「エージェント連携」(views/agents/agent-hooks-settings.ts)。
+   列の幅は固定し、状態やボタンの文言が変わっても行の中身が動かない。 */
+.agent-hooks-rows {
+  margin-top: 8px;
+  border-top: 1px solid var(--border-muted);
+}
+.agent-hooks-row {
+  display: grid;
+  grid-template-columns: 5em 13em minmax(0, 1fr) 8em;
+  align-items: center;
+  column-gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.agent-hooks-name {
+  color: var(--fg);
+  font-weight: 600;
+}
+.agent-hooks-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.agent-hooks-mark {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--fg-subtle);
+  box-sizing: border-box;
+}
+.agent-hooks-state-installed {
+  color: var(--fg);
+}
+.agent-hooks-state-installed .agent-hooks-mark {
+  border-color: var(--success);
+  background: var(--success);
+}
+.agent-hooks-state-partial .agent-hooks-mark,
+.agent-hooks-state-broken .agent-hooks-mark {
+  border-color: var(--attn);
+  background: var(--attn);
+}
+.agent-hooks-state-partial,
+.agent-hooks-state-broken {
+  color: var(--attn);
+}
+.agent-hooks-state-unreadable {
+  color: var(--danger);
+}
+.agent-hooks-state-unreadable .agent-hooks-mark {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+.agent-hooks-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+.agent-hooks-action {
+  justify-self: stretch;
+}
+/* 押せる動作が無い行でも列の場所は取っておき、箱は見せない。 */
+.agent-hooks-action[hidden] {
+  display: block;
+  visibility: hidden;
+}
+.agent-hooks-detail,
+.agent-hooks-result {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--fg-muted);
+}
+.agent-hooks-detail-problem,
+.agent-hooks-result-error {
+  color: var(--danger);
+}
+.agent-hooks-result-ok {
+  color: var(--success);
+}
+.agent-hooks-failures {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.agent-hooks-failures summary {
+  color: var(--attn);
+  cursor: pointer;
+  font-weight: 600;
+}
+.agent-hooks-failures pre {
+  max-height: 240px;
+  margin-top: 6px;
+  overflow: auto;
+}
+.agent-hooks-failures-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+}
+.agent-hooks-failures-footer .scope-settings-help {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 確認の画面。書き込む JSON をそのまま見せるので横に広げる (画面中央の
+   overlay なので viewport 基準でよい)。 */
+.gdp-dialog-wide {
+  width: min(720px, calc(100vw - 32px));
+}
+.agent-hooks-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-hooks-dialog-field {
+  display: grid;
+  grid-template-columns: 11em minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+.agent-hooks-dialog-field code {
+  overflow-wrap: anywhere;
+  color: var(--fg);
+  font-size: 12px;
+}
+.agent-hooks-dialog-label {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.agent-hooks-dialog-code {
+  max-height: 260px;
+  margin: 4px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 18px;
+  /* 書く中身を横スクロールなしで全部読めるように折り返す。コピーする
+     文字列は元の JSON なので、折り返しの影響を受けない。 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-hooks-dialog-steps {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--fg);
+}
+.agent-hooks-dialog-steps li + li {
+  margin-top: 4px;
+}
+.agent-hooks-dialog-details summary {
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.agent-hooks-dialog-details > * + * {
+  margin-top: 6px;
+}
+.agent-hooks-dialog-notes {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--fg);
+}
+.agent-hooks-dialog-notes li + li {
+  margin-top: 4px;
+}
+
 
 /* Keep navigation and detail controls readable at every desktop density. */
 .db-table-list-summary {
@@ -16945,6 +17132,61 @@ body:not(.app-panel-docked):has(.app-panel) .agents-page {
   color: var(--fg);
 }
 
+/* フックが未設定のときだけ出す 1 行 (agents-view.ts の hookHint)。 */
+.agents-hook-hint {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px var(--agents-gutter) 0;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--accent-muted);
+  border-radius: 6px;
+  background: var(--accent-subtle);
+  color: var(--fg);
+  font-size: var(--ui-font-base);
+}
+.agents-hook-hint[hidden] {
+  display: none;
+}
+.agents-hook-hint-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-hook-hint-open {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.agents-hook-hint-open:hover {
+  text-decoration: underline;
+}
+.agents-hook-hint-close {
+  appearance: none;
+  flex: 0 0 auto;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  margin-left: auto;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-md);
+  cursor: pointer;
+}
+.agents-hook-hint-close:hover {
+  background: var(--bg-mute);
+  color: var(--fg);
+}
+
 .agents-problems {
   flex: 0 0 auto;
   margin: 8px var(--agents-gutter) 0;
@@ -17068,7 +17310,7 @@ body:not(.app-panel-docked):has(.app-panel) .agents-page {
 .agents-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 8px 92px 76px minmax(0, 1fr) minmax(0, max-content) minmax(0, 180px) 44px;
+  grid-template-columns: 8px 128px 76px minmax(0, 1fr) minmax(0, max-content) minmax(0, 180px) 44px;
   align-items: center;
   gap: 10px;
   min-height: 30px;
