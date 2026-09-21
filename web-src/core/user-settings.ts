@@ -27,6 +27,7 @@ export const USER_SETTING_KEYS = [
   "agentNotifyDone",
   "agentHookHintDismissed",
   "agentAccountsCollapsed",
+  "terminalImageShelfCollapsed",
   "navCollapsed",
   "navWidth",
   "navCollapsedProjects",

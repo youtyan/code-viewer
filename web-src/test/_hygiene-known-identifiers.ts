@@ -137,6 +137,7 @@ export const KNOWN_SNAKE_CASE_IDENTIFIERS: readonly string[] = [
   "osc_title",
   "other_sample",
   "owner_id",
+  "pane_current_path",
   "pane_id",
   "payload_hash",
   "payload_json",

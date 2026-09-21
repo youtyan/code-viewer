@@ -6160,6 +6160,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       mergeLocalSettings({ terminalFontSize: next });
       patchSettings({ terminalFontSize: next });
     },
+    // 画像の棚を畳んだかは人に付く設定 (プロジェクトを移っても同じ)。
+    isImageShelfCollapsed: () =>
+      APP_SETTINGS.terminalImageShelfCollapsed === true,
+    onImageShelfCollapsedChange: (collapsed) => {
+      mergeLocalSettings({ terminalImageShelfCollapsed: collapsed });
+      patchSettings({ terminalImageShelfCollapsed: collapsed });
+    },
     onCloseRequest: () => closeTerminalSheet(),
     onTargetChange: (id) => {
       updateUrlForTerminalOverlay(id ?? "open");

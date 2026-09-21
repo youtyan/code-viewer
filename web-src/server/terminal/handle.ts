@@ -5,6 +5,7 @@
 // - GET  /_agent/overview tmux の全ペインを状態・種類・プロジェクト付きで返す
 // - GET  /_agent/capture  ターミナル本文を前回の続きから取る
 // - GET  /_agent/images   出力から拾った画像パスを配信できる形に直す
+// - GET  /_agent/images/history  繋いだとき、ペインの履歴から画像パスを拾う
 // - GET  /_agent/image    その 1 枚を配る (/_file は worktree 限定なので別口)
 // - GET  /_agent/hooks          claude / codex のフックの状態と直近の失敗
 // - GET  /_agent/hooks/plan     入れる・外すと何が変わるか (書かない)
@@ -36,6 +37,14 @@ import {
   isReportedAgent,
 } from "../../core/agent-state";
 import { formatErrorDetail } from "../../core/error-detail";
+import { isShellSessionId } from "../../core/shell";
+import {
+  findImagePathsNewestFirst,
+  MAX_TERMINAL_IMAGE_PATHS,
+  stripAnsi,
+  type TerminalImageHistoryResponse,
+  type TerminalImagesResponse,
+} from "../../core/terminal-images";
 import { MAX_PASTE_BODY_BYTES } from "../../core/terminal-paste";
 import {
   handleAccountsGet,
@@ -62,6 +71,7 @@ import {
 } from "../projects/handle";
 import { rawFileHeaders } from "../raw-file-headers";
 import { fileReadableStream } from "../runtime";
+import { captureTmuxPane, MAX_TMUX_HISTORY_LINES } from "../tmux/capture";
 import { getAgentActivityErrors, noteAgentListWatched } from "./activity";
 import {
   getAgentState,
@@ -81,7 +91,12 @@ import {
   planAgentHooks,
   writeHookLauncher,
 } from "./hooks";
-import { resolveTerminalImage, resolveTerminalImages } from "./images";
+import { terminalImageBase } from "./image-base";
+import {
+  resolveTerminalImage,
+  resolveTerminalImages,
+  terminalImageVersion,
+} from "./images";
 import {
   type AgentOverviewDeps,
   buildAgentOverview,
@@ -229,29 +244,126 @@ async function handleCaptureGet(url: URL, cwd: string): Promise<Response> {
 }
 
 /**
+ * 繋いだときにさかのぼる tmux の履歴の行数。tmux から取れる上限
+ * (MAX_TMUX_HISTORY_LINES) と同じにしてある。1 回だけなので、画面から
+ * 流れた古い画像まで棚に戻せるほうを取る。
+ */
+export const TERMINAL_IMAGE_HISTORY_LINES = MAX_TMUX_HISTORY_LINES;
+
+/** クエリの shell。無ければ null、形が違えば 400 の応答。 */
+function shellParam(url: URL): string | null | Response {
+  const shell = url.searchParams.get("shell");
+  if (shell === null) return null;
+  if (!isShellSessionId(shell)) return textError("invalid shell", 400);
+  return shell;
+}
+
+/**
  * 出力から拾った候補を、配信できる 1 枚に直して返す。
  *
  * 読み取りしかしないので GET。候補はまとめて渡せる (tmux は毎フレーム全画面
- * が届くので、1 枚ずつ往復させると同じフレームで何本も飛ぶ)。
+ * が届くので、1 枚ずつ往復させると同じフレームで何本も飛ぶ)。shell を渡すと、
+ * 相対パスはそのシェルが映しているペインの作業場所から解く (image-base.ts)。
  */
-function handleImagesGet(url: URL, cwd: string): Response {
+async function handleImagesGet(url: URL, cwd: string): Promise<Response> {
+  const shell = shellParam(url);
+  if (shell instanceof Response) return shell;
+  const { base } = await terminalImageBase(cwd, shell);
   const candidates = url.searchParams.getAll("path");
-  return json({ images: resolveTerminalImages(cwd, candidates) });
+  const body: TerminalImagesResponse = {
+    ...resolveTerminalImages(base.cwd, candidates),
+    base,
+  };
+  return json(body);
 }
+
+/**
+ * 繋いだときに 1 回だけ、シェルが映している tmux のペインの履歴をさかのぼって
+ * 画像パスを拾う。出力の流れを走査するだけだと、画面から流れた過去のパスは
+ * 拾えない (tmux は繋いだときに今の画面を描き直すだけ)。
+ *
+ * tmux を映していないシェルでは何も拾わない (そのシェルの溜め置きは購読の
+ * 始めに流れてくるので、ブラウザ側の走査が拾う)。
+ */
+async function handleImagesHistoryGet(
+  url: URL,
+  cwd: string,
+): Promise<Response> {
+  const shell = shellParam(url);
+  if (shell instanceof Response) return shell;
+  if (shell === null) return textError("shell is required", 400);
+  const { base, pane } = await terminalImageBase(cwd, shell);
+  const empty: TerminalImageHistoryResponse = {
+    images: [],
+    rejected: [],
+    base,
+    pane: null,
+    candidates: [],
+    lines: 0,
+  };
+  if (!pane) return json(empty);
+  const capture = await captureTmuxPane(
+    pane,
+    cwd,
+    TERMINAL_IMAGE_HISTORY_LINES,
+  );
+  // 引く間にペインが閉じられた。
+  if (capture.status === "gone") return json(empty);
+  if (capture.status === "error") {
+    console.error(
+      `[code-viewer] terminal image history capture failed (pane ${pane})`,
+      capture.error,
+    );
+    return textError(formatErrorDetail(capture.error), 500);
+  }
+  const { screen } = capture;
+  const candidates = findImagePathsNewestFirst(
+    stripAnsi(screen.content),
+    screen.width,
+  );
+  const body: TerminalImageHistoryResponse = {
+    ...resolveTerminalImages(base.cwd, candidates, MAX_TERMINAL_IMAGE_PATHS),
+    base,
+    pane,
+    candidates,
+    lines: screen.historyLines + screen.height,
+  };
+  return json(body);
+}
+
+/**
+ * ブラウザに覚えさせてよい期間。URL の v (更新時刻と大きさ) が今の実体と
+ * 一致するときだけ付ける。上書きされれば URL が変わるので、古い版を見せ続け
+ * ることはない。
+ */
+const TERMINAL_IMAGE_CACHE_CONTROL = "private, max-age=31536000, immutable";
 
 /**
  * 解決済みの 1 枚を配る。
  *
  * クライアントが持って回った URL は信用せず、ここでもう一度同じ判定を通す
- * (拡張子・通常ファイル・上限バイト数)。ヘッダの組み立ては /_file と同じ
- * raw-file-headers に任せるので、Content-Type の表は 1 つのまま。
+ * (拡張子・通常ファイル・上限バイト数・読めるか)。ヘッダの組み立ては
+ * /_file と同じ raw-file-headers に任せるので、Content-Type の表は 1 つのまま。
+ * 配れないときは 404 で、本文に理由 (TerminalImageRejectReason) を返す。
  */
 function handleImageGet(url: URL, cwd: string): Response {
-  const image = resolveTerminalImage(cwd, url.searchParams.get("path"));
-  if (!image) return textError("not found", 404);
-  return new Response(fileReadableStream(image.path), {
-    headers: rawFileHeaders(image.path, { size: image.bytes }),
-  });
+  const result = resolveTerminalImage(cwd, url.searchParams.get("path"));
+  if (result.status === "rejected") {
+    return textError(`not found: ${result.reason}`, 404);
+  }
+  const { image } = result;
+  const headers: Record<string, string> = {
+    ...(rawFileHeaders(image.path, { size: image.bytes }) as Record<
+      string,
+      string
+    >),
+  };
+  // 棚のサムネイルは描き直すたびに同じ URL を読む。no-store のままだと、
+  // そのたびに原寸を取り直す。
+  if (url.searchParams.get("v") === terminalImageVersion(image)) {
+    headers["Cache-Control"] = TERMINAL_IMAGE_CACHE_CONTROL;
+  }
+  return new Response(fileReadableStream(image.path), { headers });
 }
 
 async function handlePastePost(req: Request, cwd: string): Promise<Response> {
@@ -457,7 +569,12 @@ export function handleAgentRoute(
       "/_agent/images": {
         methods: ["GET"],
         sideEffect: false,
-        handler: () => Promise.resolve(handleImagesGet(url, cwd)),
+        handler: () => handleImagesGet(url, cwd),
+      },
+      "/_agent/images/history": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleImagesHistoryGet(url, cwd),
       },
       "/_agent/image": {
         methods: ["GET"],

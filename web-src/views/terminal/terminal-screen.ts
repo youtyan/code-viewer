@@ -19,12 +19,11 @@ import {
   type ShellSessionId,
 } from "../../core/shell";
 import {
-  findImagePathsInText,
-  findPathAnchors,
+  findImagePathLinks,
+  findImagePathsNewestFirst,
   MAX_TERMINAL_IMAGE_QUERY,
-  type PathAnchor,
   stripAnsi,
-  type TerminalImageRef,
+  type TerminalImageHistoryResponse,
   type TerminalImagesResponse,
 } from "../../core/terminal-images";
 import {
@@ -34,12 +33,22 @@ import {
 } from "../../core/terminal-paste";
 import {
   loadXterm,
+  type XtermBufferLine,
   type XtermFitAddon,
+  type XtermLink,
   type XtermTerminal,
   type XtermTheme,
 } from "../../core/xterm-loader";
 import type { TerminalText } from "./i18n";
 import { openImageLightbox } from "./image-lightbox";
+import { createImageShelf } from "./image-shelf";
+import {
+  mergeShelf,
+  type ShelfEntry,
+  type ShelfUpdate,
+  shelfEntryByCandidate,
+  shelfGallery,
+} from "./image-shelf-list";
 
 /** シェルの scrollback 行数。 */
 const SHELL_SCROLLBACK = 5000;
@@ -76,15 +85,8 @@ const TERMINAL_FONT_FAMILY = [
 ].join(", ");
 
 /**
- * 出力から拾って帯に出す画像の上限。ビルドログのように画像パスが何十個も
- * 流れるものがあるので、帯が埋まる前に止める。貼り付けた画像は数えない
- * (人が明示的に置いたものなので、機械が拾ったぶんで押し出さない)。
- */
-const MAX_DETECTED_IMAGES = 12;
-
-/**
- * 画像を覚えておく対象の数。タブを行き来しても帯が空にならないようにする
- * ためのもので、シェルを渡り歩く使い方でも際限なく溜めない。
+ * 棚を覚えておく対象の数。パネルのタブを行き来しても棚が空にならないように
+ * するためのもので、シェルを渡り歩く使い方でも際限なく溜めない。
  */
 const MAX_REMEMBERED_TARGETS = 8;
 
@@ -95,13 +97,11 @@ const MAX_REMEMBERED_TARGETS = 8;
 const SHELL_SCAN_TAIL = 512;
 
 /**
- * 画面に重ねる画像の大きさ (端末のマス目の数)。
- *
- * 端末の中身を隠す前提なので、パスの行が読める程度に小さく取る。開きたい
- * ときは押せば元のサイズで別タブに出る。
+ * 同じ綴りを聞き直すまでの間。同じパスがもう一度出力に出たら、上書きされた
+ * かもしれないので聞き直す (更新時刻が変わっていれば棚の先頭へ上がる)。
+ * 全画面を描き直すアプリの下では同じ画面が続けて届くので、間を空ける。
  */
-const INLINE_IMAGE_COLS = 30;
-const INLINE_IMAGE_ROWS = 8;
+const IMAGE_REQUERY_MS = 3000;
 
 export type TerminalScreenDeps = {
   trackLoad<T>(promise: Promise<T>): Promise<T>;
@@ -114,6 +114,10 @@ export type TerminalScreenDeps = {
   onTargetGone(session: ShellSession): void;
   /** 人が選んだ文字サイズ (px)。 */
   getFontSize(): number;
+  /** 画像の棚を畳んでいるか (ユーザー単位の設定)。 */
+  isImageShelfCollapsed(): boolean;
+  /** 棚を畳んだ・開いた。保存は呼び出し側。 */
+  setImageShelfCollapsed(collapsed: boolean): void;
 };
 
 export type TerminalScreenHandle = {
@@ -131,6 +135,8 @@ export type TerminalScreenHandle = {
   getAttached(): ShellSession | null;
   /** 表示領域に入る桁数・行数。新しいシェルを開くときの寸法に使う。 */
   measure(): { cols: number; rows: number } | null;
+  /** 言語が変わった。棚の文言を当て直す。 */
+  localize(): void;
 };
 
 /**
@@ -165,10 +171,10 @@ export function createTerminalScreen(
   const el = document.createElement("div");
   el.className = "terminal-pane-body";
 
-  // 貼り付けた画像と、出力から拾った画像の帯。ターミナルの上に置く。
+  // 貼り付けた画像の帯。ターミナルの上に置く。
   //
   // xterm のマス目の中に描かないのは、スクロールで流れても残したいから。
-  // 外に出しておけば、パスが画面から消えた後でも開き直せる。
+  // 出力から拾った画像は帯ではなく右の棚に並ぶ。
   const attachments = document.createElement("div");
   attachments.className = "terminal-attachments";
   attachments.hidden = true;
@@ -176,7 +182,22 @@ export function createTerminalScreen(
   const screenEl = document.createElement("div");
   screenEl.className = "terminal-screen";
 
-  el.append(attachments, screenEl);
+  // 画像の棚。ターミナルの画面の右に、別の列として場所を取る (文字の上に
+  // 重ねない)。棚が出る・畳まれると画面の幅が変わるので、screenEl を見ている
+  // ResizeObserver が桁数を測り直して PTY に伝える。
+  const shelf = createImageShelf({
+    getText: () => deps.getText(),
+    isCollapsed: () => deps.isImageShelfCollapsed(),
+    setCollapsed: (collapsed) => deps.setImageShelfCollapsed(collapsed),
+    onOpen: (entry) => openShelfEntry(entry),
+    onImageError: (entry) => recheckShelfEntry(entry),
+  });
+
+  const screenRow = document.createElement("div");
+  screenRow.className = "terminal-screen-row";
+  screenRow.append(screenEl, shelf.el);
+
+  el.append(attachments, screenRow);
 
   let term: XtermTerminal | null = null;
   let fitAddon: XtermFitAddon | null = null;
@@ -194,35 +215,32 @@ export function createTerminalScreen(
   // 送る。並走させると届く順が入れ替わる。
   let pendingInput = "";
   let sending = false;
-  // 出力から拾ったパスのうち、もう問い合わせたもの。attach ごとに作り直す
+  // 出力から拾った綴りと、最後に問い合わせた時刻。attach ごとに作り直す
   // (clear するのではなく作り直すのは、飛んでいる問い合わせが次の対象の
-  // 集合を触らないようにするため)。
-  let queriedImagePaths = new Set<string>();
-  // 帯に出したリポジトリ相対パス。問い合わせ済みの集合とは別に持つ。端末に
-  // 出た綴り (相対・絶対・./ 付き) と、返ってくる相対パスは同じ文字列になる
-  // ことがあり、1 つの集合で兼ねると「自分で入れた候補」を「もう出した画像」
-  // と取り違えて 1 枚も出せなくなる。
-  let shownImagePaths = new Set<string>();
-  // 画面に重ねている画像。鍵は「画面に出ている綴り」で、実体のパスではない
-  // (/tmp と /private/tmp のように食い違う)。同じ 1 枚が別々の綴りで 2 か所に
-  // 出ていれば、その 2 か所どちらにも重ねる。
-  let inlineImages = new Map<string, TerminalImageRef>();
-  /** 画面に重ねる層。xterm の画面と同じ箱に敷くので、位置がそのまま合う。 */
-  let inlineLayer: HTMLElement | null = null;
-  /** 綴りごとに使い回している要素。作り直すと画像が読み込み直しになる。 */
-  const inlineElements = new Map<string, HTMLAnchorElement>();
-  /** 最後に置いた位置と大きさ。同じなら触らない (触ると点滅する)。 */
-  let inlineLayout = "";
+  // 表を触らないようにするため)。
+  let queriedImagePaths = new Map<string, number>();
+  // 貼り付けたパス。この後端末に打ち込まれて出力に出るが、帯に出してあるので
+  // 棚には拾わない。
+  let pastedImagePaths = new Set<string>();
+  /** 棚の中身 (新しい順)。 */
+  let shelfEntries: ShelfEntry[] = [];
+  /** 見つけた順番の最後。新しく見つけたものほど大きい番号を振る。 */
+  let shelfSeq = 0;
+  /** ペインの作業場所を引けなかったことを、この attach で伝えたか。 */
+  let baseErrorShown = false;
+  /** 読めなかったサムネイルのうち、もう聞き直した URL (聞き直しの繰り返しを止める)。 */
+  let recheckedUrls = new Set<string>();
   /**
-   * 対象ごとに、これまで見つけた画像。
+   * 対象ごとの棚。
    *
    * パネルは Terminal と Tools がタブになっていて、切り替えると detach する。
-   * 覚えていないと、戻ってきたときに帯が空になり、パスが既に流れていれば
-   * 二度と出せない。
+   * 覚えていないと、戻ってきたときに棚が空になり、パスが既に流れていれば
+   * 履歴の走査で拾える範囲しか戻らない。
    */
-  const rememberedImages = new Map<string, TerminalImageRef[]>();
-  /** 見つけた検出画像の枚数。MAX_DETECTED_IMAGES まで。 */
-  let detectedImages = 0;
+  const rememberedShelves = new Map<
+    string,
+    { entries: ShelfEntry[]; seq: number }
+  >();
   /** 出力の走査で持ち越している末尾。 */
   let shellScanTail = "";
 
@@ -240,6 +258,10 @@ export function createTerminalScreen(
    */
   function fitShellToContainer(): void {
     if (!term || !fitAddon || !attached) return;
+    // 箱が畳まれて幅 0 のときに測ると、最小の桁数が PTY に伝わり、利用者の
+    // tmux のウィンドウまで縮む。見えるようになってから測り直す。
+    const box = screenEl.getBoundingClientRect();
+    if (box.width < 1 || box.height < 1) return;
     fitAddon.fit();
     const size = clampShellSize(term.cols, term.rows);
     if (size.cols === attached.cols && size.rows === attached.rows) return;
@@ -342,11 +364,8 @@ export function createTerminalScreen(
   }
 
   /**
-   * 画像を 1 枚ぶん帯に足す。
-   *
-   * src は 2 通り。貼り付けた画像はブラウザが既に持っている data URL を使う
-   * (サーバへ取りに行き直す必要が無く、保存が終わる前でも出せる)。出力から
-   * 拾った画像は、リポジトリのファイルなので /_file の URL を使う。
+   * 貼り付けた画像を 1 枚ぶん帯に足す。src はブラウザが既に持っている data URL
+   * (サーバへ取りに行き直す必要が無く、保存が終わる前でも出せる)。
    */
   function addAttachment(src: string, name: string, path: string): void {
     const item = document.createElement("div");
@@ -366,19 +385,6 @@ export function createTerminalScreen(
     const image = document.createElement("img");
     image.src = src;
     image.alt = name;
-    // 実体が消えていれば読めない。壊れた枠を残さず外し、記憶からも落とす。
-    image.addEventListener("error", () => {
-      item.remove();
-      attachments.hidden = attachments.childElementCount === 0;
-      if (!attached) return;
-      const list = rememberedImages.get(attached.id);
-      if (list) {
-        rememberedImages.set(
-          attached.id,
-          list.filter((entry) => entry.path !== path),
-        );
-      }
-    });
     open.appendChild(image);
 
     const label = document.createElement("span");
@@ -402,56 +408,97 @@ export function createTerminalScreen(
     attachments.hidden = false;
   }
 
+  /** 棚の中身を差し替えて描き直し、対象ごとの記憶にも残す。 */
+  function setShelf(entries: ShelfEntry[]): void {
+    shelfEntries = entries;
+    shelf.render(entries);
+    if (!attached) return;
+    rememberedShelves.delete(attached.id);
+    rememberedShelves.set(attached.id, { entries, seq: shelfSeq });
+    // 対象がいくつも入れ替わる使い方でも際限なく溜めない。
+    if (rememberedShelves.size > MAX_REMEMBERED_TARGETS) {
+      const oldest = rememberedShelves.keys().next().value;
+      if (oldest !== undefined) rememberedShelves.delete(oldest);
+    }
+  }
+
   /**
-   * 拾ったパスをサーバに問い合わせ、配れるものを画面に重ねる対象に加える。
+   * 出力から新しく見つけた分を入れる。後に出てきたものほど新しい。
    *
-   * 実在しないもの・画像でないものはサーバ側で落ちている。取りにいく URL も
-   * サーバが決めるので、こちらは組み立てない。
+   * @param order 問い合わせた候補 (古い順)
+   */
+  function mergeLiveUpdate(update: ShelfUpdate, order: string[]): void {
+    setShelf(
+      mergeShelf(
+        shelfEntries,
+        update,
+        {
+          added: () => {
+            shelfSeq += 1;
+            return shelfSeq;
+          },
+          changed: () => {
+            shelfSeq += 1;
+            return shelfSeq;
+          },
+        },
+        order,
+      ),
+    );
+  }
+
+  /** 応答の base に失敗の理由があれば、この attach で 1 回だけ伝える。 */
+  function reportBase(body: TerminalImagesResponse): void {
+    if (!body.base?.error || baseErrorShown) return;
+    baseErrorShown = true;
+    console.error(
+      "[code-viewer] terminal image base fell back",
+      body.base.source,
+      body.base.error,
+    );
+    deps.onStatus(`${deps.getText().imageBaseFailed}\n${body.base.error}`);
+  }
+
+  /**
+   * 拾ったパスをサーバに問い合わせ、結果を棚に入れる。
    *
-   * @param queried 問い合わせ済みの候補。attach ごとに作り直されるので、途中
-   *   で対象が変わっても前の集合を掴んだまま片付けられる
+   * 相対パスは、このシェルが映しているペインの作業場所から解いてもらう
+   * (shell を渡す)。取りにいく URL もサーバが決めるので、こちらは組み立てない。
+   *
+   * @param queried 問い合わせ済みの表。attach ごとに作り直されるので、途中
+   *   で対象が変わっても前の表を掴んだまま片付けられる
    */
   async function resolveImagePaths(
     paths: string[],
     myGen: number,
-    queried: Set<string>,
+    queried: Map<string, number>,
   ): Promise<void> {
+    const target = attached;
+    if (!target) return;
     const params = new URLSearchParams();
+    params.set("shell", target.id);
     for (const path of paths) params.append("path", path);
     try {
       const res = await deps.trackLoad(
         fetch(`/_agent/images?${params.toString()}`),
       );
       if (disposed || myGen !== generation) return;
-      // 配れない候補は 200 の空配列で返る。ここに来るのはサーバ側の異常だけ
-      // なので、覚えたままにして聞き直さない。
+      // 配れない候補は 200 の rejected で返る。ここに来るのはサーバ側の異常
+      // だけ。
       if (!res.ok) {
+        for (const path of paths) queried.delete(path);
         deps.onStatus(
           await responseErrorMessage(res, deps.getText().imageListFailed),
         );
         return;
       }
       const body = (await res.json()) as TerminalImagesResponse;
-      // 応答を待つ間に別の対象へ切り替わっていたら、その画面には重ねない。
+      // 応答を待つ間に別の対象へ切り替わっていたら、その棚には入れない。
       if (disposed || myGen !== generation) return;
-      for (const image of body.images ?? []) {
-        if (detectedImages >= MAX_DETECTED_IMAGES) break;
-        // 同じ 1 枚でも綴りが違えば別の場所に出ているので、綴りごとに持つ。
-        if (inlineImages.has(image.candidate)) continue;
-        if (!shownImagePaths.has(image.path)) {
-          shownImagePaths.add(image.path);
-          detectedImages += 1;
-          // 帯にも 1 枚だけ残す。画面に重ねたぶんはパスの行に紐づいていて、
-          // 出力が流れてパスが見えなくなると一緒に消える。見た画像を後から
-          // 開き直せるように、残るほうも要る。
-          addAttachment(image.url, image.name, image.path);
-        }
-        rememberImage(image);
-        inlineImages.set(image.candidate, image);
-      }
-      refreshInlineImages();
+      reportBase(body);
+      mergeLiveUpdate(body, paths);
     } catch (error) {
-      // 中断 (ナビゲーション) と通信断。覚えたままにすると二度と拾えないので
+      // 中断 (ナビゲーション) と通信断。覚えたままにすると聞き直せないので
       // 忘れる。同じパスがまた流れれば拾い直せる。
       for (const path of paths) queried.delete(path);
       if (!disposed && myGen === generation) {
@@ -463,172 +510,103 @@ export function createTerminalScreen(
     }
   }
 
-  /** 見つけた画像を対象ごとに覚える。同じ 1 枚は 1 回だけ。 */
-  function rememberImage(image: TerminalImageRef): void {
-    if (!attached) return;
-    const list = rememberedImages.get(attached.id) ?? [];
-    if (list.some((entry) => entry.path === image.path)) return;
-    list.push(image);
-    rememberedImages.set(attached.id, list);
-    // 対象がいくつも入れ替わる使い方でも際限なく溜めない。
-    if (rememberedImages.size > MAX_REMEMBERED_TARGETS) {
-      const oldest = rememberedImages.keys().next().value;
-      if (oldest !== undefined) rememberedImages.delete(oldest);
+  /**
+   * 繋いだときに 1 回、ペインの tmux の履歴をさかのぼって拾う。出力の流れを
+   * 走査するだけでは、画面から流れた過去のパスは拾えない。
+   *
+   * 履歴で見つけたものは、繋いでから出力で見つけたものより古い扱いにする
+   * (負の番号を振る)。応答は新しい順。
+   */
+  async function loadImageHistory(
+    session: ShellSession,
+    myGen: number,
+  ): Promise<void> {
+    try {
+      const res = await deps.trackLoad(
+        fetch(`/_agent/images/history?shell=${encodeURIComponent(session.id)}`),
+      );
+      if (disposed || myGen !== generation) return;
+      if (!res.ok) {
+        deps.onStatus(
+          await responseErrorMessage(res, deps.getText().imageHistoryFailed),
+        );
+        return;
+      }
+      const body = (await res.json()) as TerminalImageHistoryResponse;
+      if (disposed || myGen !== generation) return;
+      reportBase(body);
+      setShelf(
+        mergeShelf(
+          shelfEntries,
+          body,
+          {
+            added: (index) => -(index + 1),
+            changed: () => {
+              shelfSeq += 1;
+              return shelfSeq;
+            },
+          },
+          body.candidates,
+        ),
+      );
+    } catch (error) {
+      if (!disposed && myGen === generation) {
+        console.error("[code-viewer] terminal image history failed", error);
+        deps.onStatus(
+          `${deps.getText().imageHistoryFailed}\n${formatErrorDetail(error)}`,
+        );
+      }
     }
   }
 
   /**
-   * 同じ対象へ戻ってきたとき、覚えていた画像を帯へ戻す。
-   *
-   * パネルは Terminal と Tools がタブなので、切り替えるだけで detach される。
-   * そこで消えると、パスが既に流れていた場合に開き直せない。
+   * 棚の項目を開く。画像のタブができたら開き先をここで差し替える (開く口は
+   * これ 1 つ)。読めなかった項目は、押すと確かめ直す。
    */
-  function restoreRememberedImages(session: ShellSession): void {
-    for (const image of rememberedImages.get(session.id) ?? []) {
-      if (detectedImages >= MAX_DETECTED_IMAGES) break;
-      if (shownImagePaths.has(image.path)) continue;
-      shownImagePaths.add(image.path);
-      detectedImages += 1;
-      addAttachment(image.url, image.name, image.path);
-      // 画面にまだパスが残っていれば、そのまま重ね直せる。問い合わせ済みに
-      // しておけば、同じ綴りをもう一度サーバへ聞きにいかない。
-      inlineImages.set(image.candidate, image);
-      queriedImagePaths.add(image.candidate);
-    }
-  }
-
-  /** 重ねているものを全部外す。 */
-  function clearInlineImages(): void {
-    for (const element of inlineElements.values()) element.remove();
-    inlineElements.clear();
-    inlineLayout = "";
-  }
-
-  /**
-   * マス目 1 つぶんの大きさ。画面の実寸を桁数・行数で割って出す。
-   *
-   * 字の大きさやドロワーの幅で変わるので、そのつど測る。まだ描かれていない
-   * (実寸が 0) 間は置けないので null を返す。
-   */
-  function cellSize(): { width: number; height: number } | null {
-    if (!term || !inlineLayer) return null;
-    // 測るのは層を敷いた箱 (xterm の画面) のほう。層は inset: 0 で重なって
-    // いるだけなので、大きさの出どころは親に持たせる。
-    const rect = (
-      inlineLayer.parentElement ?? inlineLayer
-    ).getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return null;
-    if (term.cols <= 0 || term.rows <= 0) return null;
-    return { width: rect.width / term.cols, height: rect.height / term.rows };
-  }
-
-  /**
-   * いま画面に出ている画像パスの上に、その画像を重ね直す。
-   *
-   * 画面の上に自前の層を 1 枚重ね、そこへ絶対位置で置く。xterm の decoration
-   * (行に紐づく DOM) は使わない。全画面を描き直すアプリ (tmux, vim) の下では
-   * 行に打った目印がそのつど捨てられ、画像が作り直されて点滅する。自前の層
-   * なら、位置が変わらない限り何も触らない。
-   *
-   * 置くのはパスの 1 行下。パスの文字自体は隠さない。
-   */
-  function refreshInlineImages(): void {
-    if (!term || !inlineLayer || inlineImages.size === 0) {
-      if (inlineElements.size > 0) clearInlineImages();
+  function openShelfEntry(entry: ShelfEntry): void {
+    if (!entry.image) {
+      recheckShelfEntry(entry);
       return;
     }
-    const cell = cellSize();
-    if (!cell) return;
-    const buffer = term.buffer.active;
-    const lines: string[] = [];
-    for (let row = 0; row < term.rows; row += 1) {
-      lines.push(
-        buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "",
-      );
-    }
-    const anchors = findPathAnchors(lines, [...inlineImages.keys()]);
-    const layout = anchors
-      .map(
-        (anchor) =>
-          `${anchor.candidate}@${anchor.row}+${anchor.span},${anchor.col}`,
-      )
-      .join("|");
-    // 描画のたびに呼ばれる。位置も大きさも同じなら何も触らない。作り直すと
-    // 画像が読み込み直されて点滅する。
-    const shape = `${layout}#${Math.round(cell.width * 100)}x${Math.round(cell.height * 100)}`;
-    if (shape === inlineLayout) return;
-    inlineLayout = shape;
+    const gallery = shelfGallery(shelfEntries);
+    const index = gallery.findIndex((image) => image.path === entry.key);
+    openImageLightbox(
+      { images: gallery, index: Math.max(index, 0) },
+      deps.getText(),
+    );
+  }
 
-    const keep = new Set<string>();
-    for (const anchor of anchors) {
-      const image = inlineImages.get(anchor.candidate);
-      if (!image) continue;
-      keep.add(anchor.candidate);
-      placeInlineImage(image, anchor, cell);
+  /** その項目をもう一度問い合わせる (消えた・読めるようになった、を知る)。 */
+  function recheckShelfEntry(entry: ShelfEntry): void {
+    if (!attached) return;
+    const url = entry.image?.url;
+    if (url) {
+      // 同じ URL で何度も失敗して聞き直し続けない。
+      if (recheckedUrls.has(url)) return;
+      recheckedUrls.add(url);
     }
-    // 画面から消えた綴りのぶんは外す。
-    for (const [candidate, element] of inlineElements) {
-      if (keep.has(candidate)) continue;
-      element.remove();
-      inlineElements.delete(candidate);
-    }
+    queriedImagePaths.set(entry.path, Date.now());
+    void resolveImagePaths([entry.path], generation, queriedImagePaths);
   }
 
   /**
-   * 1 枚を置く / 置き直す。要素は綴りごとに使い回す。
+   * まだ問い合わせていない (か、しばらく聞いていない) 候補をサーバへ回す。
    *
-   * 作り直すと img が読み込み直しになるので、既にあるものは位置だけ書き換える。
+   * @param paths 候補 (古い順)。1 回で聞ける数を超えたら新しいほうを聞く
    */
-  function placeInlineImage(
-    image: TerminalImageRef,
-    anchor: PathAnchor,
-    cell: { width: number; height: number },
-  ): void {
-    if (!inlineLayer) return;
-    let element = inlineElements.get(anchor.candidate);
-    if (!element) {
-      element = document.createElement("a");
-      element.className = "terminal-inline-image";
-      // href は残す (中クリックや「新しいタブで開く」がそのまま効く)。ふつうの
-      // 左クリックは横取りして、その場で拡大表示にする。
-      element.href = image.url;
-      element.rel = "noopener";
-      element.title = image.path;
-      element.addEventListener("click", (event) => {
-        if (
-          event.metaKey ||
-          event.ctrlKey ||
-          event.shiftKey ||
-          event.button !== 0
-        ) {
-          return;
-        }
-        event.preventDefault();
-        openImageLightbox(image, deps.getText());
-      });
-      const picture = document.createElement("img");
-      picture.src = image.url;
-      picture.alt = image.name;
-      element.appendChild(picture);
-      inlineLayer.appendChild(element);
-      inlineElements.set(anchor.candidate, element);
-    }
-    element.style.left = `${anchor.col * cell.width}px`;
-    // 折り返しているパスは最終行の下に置く。先頭行の下だと続きに重なる。
-    element.style.top = `${(anchor.row + anchor.span) * cell.height}px`;
-    element.style.width = `${INLINE_IMAGE_COLS * cell.width}px`;
-    element.style.height = `${INLINE_IMAGE_ROWS * cell.height}px`;
-  }
-
-  /** まだ問い合わせていない候補だけをサーバへ回す。 */
   function queueImagePaths(paths: string[]): void {
-    if (!attached || detectedImages >= MAX_DETECTED_IMAGES) return;
+    if (!attached) return;
+    const now = Date.now();
     const fresh = paths
-      .filter((path) => !queriedImagePaths.has(path))
-      .slice(0, MAX_TERMINAL_IMAGE_QUERY);
+      .filter((path) => !pastedImagePaths.has(path))
+      .filter((path) => {
+        const last = queriedImagePaths.get(path);
+        return last === undefined || now - last >= IMAGE_REQUERY_MS;
+      })
+      .slice(-MAX_TERMINAL_IMAGE_QUERY);
     if (fresh.length === 0) return;
     const queried = queriedImagePaths;
-    for (const path of fresh) queried.add(path);
+    for (const path of fresh) queried.set(path, now);
     void resolveImagePaths(fresh, generation, queried);
   }
 
@@ -637,11 +615,113 @@ export function createTerminalScreen(
    *
    * 端末側の折り返しは PTY のバイト列に入らないので幅は渡さない。CLI が自分で
    * 折り返した行は、幅と無関係に findImagePathsInText が組み直す。
+   *
+   * 並びは最後に出てきた位置の古い順 (繋いだ直後やアプリの描き直しでは画面
+   * 全体が 1 回で届くので、書き直して出し直したパスを新しい扱いにする)。
    */
   function scanShellOutput(chunk: string): void {
     const text = shellScanTail + stripAnsi(chunk);
     shellScanTail = text.slice(-SHELL_SCAN_TAIL);
-    queueImagePaths(findImagePathsInText(text));
+    queueImagePaths(findImagePathsNewestFirst(text, 0).reverse());
+  }
+
+  /**
+   * バッファの 1 行を文字列にし、文字列の添字 → マス目の桁の表も作る。全角の
+   * 字は 2 マスを取るので、添字と桁は一致しない。
+   */
+  function readRow(line: XtermBufferLine | undefined): {
+    text: string;
+    cells: number[];
+    widths: number[];
+  } {
+    if (!line) return { text: "", cells: [], widths: [] };
+    let text = "";
+    const cells: number[] = [];
+    const widths: number[] = [];
+    for (let x = 0; x < line.length; x += 1) {
+      const cell = line.getCell(x);
+      if (!cell) break;
+      const width = cell.getWidth();
+      // 全角の字の後ろ半分。字は前の桁が持っている。
+      if (width === 0) continue;
+      const chars = cell.getChars() || " ";
+      for (let i = 0; i < chars.length; i += 1) {
+        cells.push(x);
+        widths.push(width);
+      }
+      text += chars;
+    }
+    const trimmed = text.replace(/\s+$/, "");
+    return {
+      text: trimmed,
+      cells: cells.slice(0, trimmed.length),
+      widths: widths.slice(0, trimmed.length),
+    };
+  }
+
+  /**
+   * xterm のリンク。棚にある画像のパスに下線を引き、カーソルが載ったら棚の
+   * 同じ画像を強調する。文字の上には何も出さない。押すと拡大表示。
+   *
+   * 1 行ぶんを聞かれるので、前後 1 行も合わせて見る (折り返し・CLI が割った
+   * 行は 2 行にまたがる)。
+   */
+  function provideImageLinks(
+    bufferLineNumber: number,
+    callback: (links: XtermLink[] | undefined) => void,
+  ): void {
+    if (!term || shelfEntries.length === 0) {
+      callback(undefined);
+      return;
+    }
+    const buffer = term.buffer.active;
+    const y = bufferLineNumber - 1;
+    const first = Math.max(0, y - 1);
+    const rows = [first, first + 1, first + 2].map((index) => ({
+      index,
+      ...readRow(buffer.getLine(index)),
+    }));
+    const known = new Set<string>();
+    for (const entry of shelfEntries) {
+      for (const candidate of entry.candidates) known.add(candidate);
+    }
+    const links: XtermLink[] = [];
+    for (const link of findImagePathLinks(
+      rows.map((row) => row.text),
+      term.cols,
+      (candidate) => known.has(candidate),
+    )) {
+      const start = rows[link.start.row];
+      const end = rows[link.end.row];
+      if (!start || !end) continue;
+      if (start.index > y || end.index < y) continue;
+      const lastIndex = link.end.col - 1;
+      const startX = start.cells[link.start.col];
+      const endCell = end.cells[lastIndex];
+      if (startX === undefined || endCell === undefined) continue;
+      const entry = shelfEntryByCandidate(shelfEntries, link.candidate);
+      if (!entry) continue;
+      links.push({
+        range: {
+          start: { x: startX + 1, y: start.index + 1 },
+          end: { x: endCell + (end.widths[lastIndex] ?? 1), y: end.index + 1 },
+        },
+        text: link.candidate,
+        decorations: { pointerCursor: true, underline: true },
+        activate: (event) => {
+          // 修飾キー付きの押し方は xterm の選択などに任せる。
+          if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+          const current = shelfEntryByCandidate(shelfEntries, link.candidate);
+          if (current) openShelfEntry(current);
+        },
+        hover: () => {
+          const current = shelfEntryByCandidate(shelfEntries, link.candidate);
+          shelf.highlight(current?.key ?? null);
+        },
+        leave: () => shelf.highlight(null),
+      });
+    }
+    callback(links.length > 0 ? links : undefined);
   }
 
   /** File を base64 にする。data URL の接頭辞は落として本体だけ返す。 */
@@ -705,9 +785,9 @@ export function createTerminalScreen(
       const saved = (await res.json()) as PasteImageResponse;
       if (disposed || !attached) return;
       addAttachment(read.url, saved.name, saved.path);
-      // このパスはこの後端末へ打ち込まれ、画面に出る。拾い直すと同じ画像が
-      // 帯に 2 枚並ぶので、問い合わせ済みにしておく。
-      queriedImagePaths.add(saved.path);
+      // このパスはこの後端末へ打ち込まれ、画面に出る。帯に出してあるので、
+      // 棚には拾わない。
+      pastedImagePaths.add(saved.path);
       // パスに空白は入らない命名にしてあるが、引用しておけば将来変えても壊れない。
       pendingInput += `'${saved.path}' `;
       void flushInput();
@@ -758,10 +838,6 @@ export function createTerminalScreen(
   }
 
   function destroyTerminal(): void {
-    // 重ねた画像は端末の DOM ごと消えるので、こちらの記録も捨てる。
-    inlineElements.clear();
-    inlineLayer = null;
-    inlineLayout = "";
     term?.dispose();
     term = null;
     fitAddon = null;
@@ -791,13 +867,7 @@ export function createTerminalScreen(
     const fit = new api.FitAddon();
     created.loadAddon(fit);
     created.open(screenEl);
-    // 画像を重ねる層。xterm の画面と同じ箱に入れるので、桁と行から出した
-    // 座標がそのまま使えるうえ、枠のスクロールにも同じだけ乗る。
-    inlineLayer = document.createElement("div");
-    inlineLayer.className = "terminal-inline-layer";
-    (created.element?.querySelector(".xterm-screen") ?? screenEl).appendChild(
-      inlineLayer,
-    );
+    created.registerLinkProvider({ provideLinks: provideImageLinks });
     created.onData(enqueueInput);
     // Shift+Enter は「送信せずに改行」。xterm の既定では Enter と同じ CR に
     // なってしまい、書きかけのまま送信されるので、ここで横取りする。
@@ -812,9 +882,6 @@ export function createTerminalScreen(
       }
       return false;
     });
-    // 重ねている画像の置き直しは描画のたびに見る。全画面を描き直すアプリの
-    // 下ではパスの居場所がフレームごとに変わりうる。
-    created.onRender(() => refreshInlineImages());
     term = created;
     fitAddon = fit;
     if (!resizeObserver) {
@@ -890,9 +957,11 @@ export function createTerminalScreen(
     closeSource();
     pendingInput = "";
     attached = session;
-    // 同じ対象へ戻ってきたなら、前に見つけた画像を帯へ戻す。タブを行き来した
-    // だけで消えると、パスが流れた後は二度と開けない。
-    restoreRememberedImages(session);
+    // 同じ対象へ戻ってきたなら、前の棚を戻す。タブを行き来しただけで消えると、
+    // 流れた後のパスは開き直せない。
+    const remembered = rememberedShelves.get(session.id);
+    shelfSeq = remembered?.seq ?? 0;
+    setShelf(remembered?.entries ?? []);
     deps.onStatus(deps.getText().connecting);
 
     const created = await ensureTerminal(myGen);
@@ -910,19 +979,23 @@ export function createTerminalScreen(
     // 表示領域がサイズを決める。購読前に PTY へ伝えておく。
     fitShellToContainer();
     openSource(session, myGen);
+    void loadImageHistory(session, myGen);
   }
 
   function clearAttachments(): void {
     attachments.replaceChildren();
     attachments.hidden = true;
-    // 帯と重ねた画像を消したら、拾い直せる状態にも戻す。集合は作り直す
-    // (飛んでいる問い合わせが持っているのは前の集合なので、そちらを消しても
-    // 影響しない)。
-    clearInlineImages();
-    inlineImages = new Map<string, TerminalImageRef>();
-    queriedImagePaths = new Set<string>();
-    shownImagePaths = new Set<string>();
-    detectedImages = 0;
+    // 帯と棚を空にしたら、拾い直せる状態にも戻す。表は作り直す (飛んでいる
+    // 問い合わせが持っているのは前の表なので、そちらを消しても影響しない)。
+    // 棚の中身は対象ごとの記憶に残っている。
+    shelfEntries = [];
+    shelfSeq = 0;
+    shelf.render([]);
+    shelf.highlight(null);
+    queriedImagePaths = new Map<string, number>();
+    pastedImagePaths = new Set<string>();
+    recheckedUrls = new Set<string>();
+    baseErrorShown = false;
     shellScanTail = "";
   }
 
@@ -957,14 +1030,27 @@ export function createTerminalScreen(
     getAttached: () => attached,
     measure() {
       const box = fitAddon?.proposeDimensions();
-      if (!box || box.cols <= 0 || box.rows <= 0) return null;
+      // 見えていない箱を測ると NaN が返る。そのまま丸めると最小の桁数に
+      // なってしまうので、測れなかったことにする。
+      if (
+        !box ||
+        !Number.isFinite(box.cols) ||
+        !Number.isFinite(box.rows) ||
+        box.cols <= 0 ||
+        box.rows <= 0
+      ) {
+        return null;
+      }
       return clampShellSize(box.cols, box.rows);
+    },
+    localize() {
+      shelf.localize();
     },
     dispose() {
       disposed = true;
       generation += 1;
       closeSource();
-      clearInlineImages();
+      shelf.dispose();
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = null;
       resizeObserver?.disconnect();

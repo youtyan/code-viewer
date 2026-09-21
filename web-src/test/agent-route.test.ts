@@ -5,6 +5,9 @@
 // 落とすと、待っているセッションが停止扱いになって見落としに直結する。
 
 import {
+  accessSync,
+  chmodSync,
+  constants,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -486,11 +489,14 @@ describe("capture validation", () => {
 
 describe("出力から拾った画像の解決", () => {
   // 候補は端末に流れた文字列そのもの。置き場は問わないが、配れるのは
-  // 「許可した拡張子・通常のファイル・上限バイト数まで」の 3 つを満たすものだけ。
+  // 「許可した拡張子・通常のファイル・上限バイト数まで・空でない・読める」
+  // ものだけ。配れないときは理由を区別して返す。
   let repo = "";
   let outside = "";
   /** repo の 1 つ上にある画像。リポジトリの外も配ることを見るのに使う。 */
   let parentImage = "";
+  /** 権限を外した画像。root で走っていると読めてしまうので、そのときは見ない。 */
+  let lockedReadable = false;
 
   beforeAll(() => {
     repo = mkdtempSync(join(tmpdir(), "code-viewer-terminal-image-"));
@@ -499,10 +505,12 @@ describe("出力から拾った画像の解決", () => {
     writeFileSync(join(repo, "..", parentImage), "png");
     mkdirSync(join(repo, "docs"));
     mkdirSync(join(repo, "dir.png"));
+    mkdirSync(join(repo, "my shots"));
     mkdirSync(join(repo, ".code-viewer", "pasted"), { recursive: true });
     mkdirSync(join(repo, ".git"));
     writeFileSync(join(repo, "shot.png"), "png");
     writeFileSync(join(repo, "docs", "inner.png"), "png");
+    writeFileSync(join(repo, "my shots", "a b.png"), "png");
     writeFileSync(join(repo, ".code-viewer", "pasted", "paste-1.png"), "png");
     writeFileSync(join(repo, ".git", "internal.png"), "png");
     writeFileSync(join(repo, "notes.txt"), "text");
@@ -512,11 +520,21 @@ describe("出力から拾った画像の解決", () => {
       join(repo, "huge.png"),
       Buffer.alloc(MAX_PASTE_IMAGE_BYTES + 1),
     );
+    writeFileSync(join(repo, "locked.png"), "png");
+    chmodSync(join(repo, "locked.png"), 0o000);
+    try {
+      accessSync(join(repo, "locked.png"), constants.R_OK);
+      lockedReadable = true;
+    } catch {
+      lockedReadable = false;
+    }
     writeFileSync(join(outside, "outside.png"), "png");
     symlinkSync(join(outside, "outside.png"), join(repo, "escape.png"));
+    symlinkSync(join(outside, "gone.png"), join(repo, "dangling.png"));
   });
 
   afterAll(() => {
+    chmodSync(join(repo, "locked.png"), 0o644);
     rmSync(join(repo, "..", parentImage), { force: true });
     rmSync(repo, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
@@ -524,112 +542,219 @@ describe("出力から拾った画像の解決", () => {
 
   /** 実体のパス。mkdtemp は symlink 越し (/tmp → /private/tmp) のことがある。 */
   const real = (...parts: string[]) => realpathSync(join(...parts));
+  const ok = (path: string, bytes = 3) => ({
+    status: "ok",
+    image: { path, bytes, mtimeMs: statSync(path).mtimeMs },
+  });
 
   test.each([
     {
       name: "リポジトリ相対のパス",
       candidate: () => "shot.png",
-      expected: () => ({ path: real(repo, "shot.png"), bytes: 3 }),
+      expected: () => ok(real(repo, "shot.png")),
     },
     {
       name: "絶対パスでも同じ 1 枚",
       candidate: () => join(repo, "shot.png"),
-      expected: () => ({ path: real(repo, "shot.png"), bytes: 3 }),
+      expected: () => ok(real(repo, "shot.png")),
     },
     {
       name: "./ 付き",
       candidate: () => "./shot.png",
-      expected: () => ({ path: real(repo, "shot.png"), bytes: 3 }),
+      expected: () => ok(real(repo, "shot.png")),
     },
     {
       name: "下の階層",
       candidate: () => "docs/inner.png",
-      expected: () => ({ path: real(repo, "docs", "inner.png"), bytes: 3 }),
+      expected: () => ok(real(repo, "docs", "inner.png")),
+    },
+    {
+      name: "空白を含むパス",
+      candidate: () => "my shots/a b.png",
+      expected: () => ok(real(repo, "my shots", "a b.png")),
     },
     {
       name: "貼り付けの置き場 (gitignore されていても配る)",
       candidate: () => ".code-viewer/pasted/paste-1.png",
-      expected: () => ({
-        path: real(repo, ".code-viewer", "pasted", "paste-1.png"),
-        bytes: 3,
-      }),
+      expected: () => ok(real(repo, ".code-viewer", "pasted", "paste-1.png")),
     },
     {
       name: "リポジトリ外の絶対パス (エージェントの作業用ディレクトリ)",
       candidate: () => join(outside, "outside.png"),
-      expected: () => ({ path: real(outside, "outside.png"), bytes: 3 }),
+      expected: () => ok(real(outside, "outside.png")),
     },
     {
       name: ".. でリポジトリの外へ出るパス",
       candidate: () => `../${parentImage}`,
-      expected: () => ({ path: real(repo, "..", parentImage), bytes: 3 }),
+      expected: () => ok(real(repo, "..", parentImage)),
     },
     {
       name: "symlink は実体のパスで返す",
       candidate: () => "escape.png",
-      expected: () => ({ path: real(outside, "outside.png"), bytes: 3 }),
+      expected: () => ok(real(outside, "outside.png")),
     },
     {
       name: ".git の中も置き場としては区別しない",
       candidate: () => ".git/internal.png",
-      expected: () => ({ path: real(repo, ".git", "internal.png"), bytes: 3 }),
+      expected: () => ok(real(repo, ".git", "internal.png")),
     },
     {
       name: "実在しない",
       candidate: () => "missing.png",
-      expected: () => null,
+      expected: () => ({
+        status: "rejected",
+        reason: "missing",
+        path: join(repo, "missing.png"),
+      }),
     },
-    { name: "画像でない", candidate: () => "notes.txt", expected: () => null },
+    {
+      name: "先の無い symlink は実在しない扱い",
+      candidate: () => "dangling.png",
+      expected: () => ({
+        status: "rejected",
+        reason: "missing",
+        path: join(repo, "dangling.png"),
+      }),
+    },
+    {
+      name: "画像でない",
+      candidate: () => "notes.txt",
+      expected: () => ({
+        status: "rejected",
+        reason: "unsupported",
+        path: join(repo, "notes.txt"),
+      }),
+    },
     {
       name: "SVG は配らない",
       candidate: () => "diagram.svg",
-      expected: () => null,
+      expected: () => ({
+        status: "rejected",
+        reason: "unsupported",
+        path: join(repo, "diagram.svg"),
+      }),
+    },
+    {
+      name: "拡張子が無い",
+      candidate: () => "Makefile",
+      expected: () => ({
+        status: "rejected",
+        reason: "unsupported",
+        path: join(repo, "Makefile"),
+      }),
     },
     {
       name: "空のファイル",
       candidate: () => "empty.png",
-      expected: () => null,
+      expected: () => ({
+        status: "rejected",
+        reason: "empty",
+        path: real(repo, "empty.png"),
+        bytes: 0,
+      }),
     },
     {
       name: "上限を超えた大きさ",
       candidate: () => "huge.png",
-      expected: () => null,
+      expected: () => ({
+        status: "rejected",
+        reason: "too-large",
+        path: real(repo, "huge.png"),
+        bytes: MAX_PASTE_IMAGE_BYTES + 1,
+      }),
     },
     {
       name: "拡張子がそう見えるディレクトリ",
       candidate: () => "dir.png",
-      expected: () => null,
+      expected: () => ({
+        status: "rejected",
+        reason: "not-file",
+        path: real(repo, "dir.png"),
+      }),
     },
-    { name: "空文字", candidate: () => "", expected: () => null },
+    {
+      name: "空文字",
+      candidate: () => "",
+      expected: () => ({ status: "rejected", reason: "invalid", path: "" }),
+    },
     {
       name: "NUL 入り",
       candidate: () => `shot${String.fromCharCode(0)}.png`,
-      expected: () => null,
+      expected: () => ({ status: "rejected", reason: "invalid", path: "" }),
+    },
+    {
+      name: "文字列でない",
+      candidate: () => 42,
+      expected: () => ({ status: "rejected", reason: "invalid", path: "" }),
     },
   ])("$name", ({ candidate, expected }) => {
     expect(resolveTerminalImage(repo, candidate())).toEqual(expected());
   });
 
+  test("読めないファイルは理由と OS のエラーを返す", () => {
+    const result = resolveTerminalImage(repo, "locked.png");
+    // root で走っていると権限を外しても読める。そのときは配れることを見る。
+    if (lockedReadable) {
+      expect(result).toMatchObject({ status: "ok" });
+      return;
+    }
+    expect(result).toEqual({
+      status: "rejected",
+      reason: "unreadable",
+      path: real(repo, "locked.png"),
+      detail: expect.stringMatching(/^EACCES: /),
+    });
+  });
+
+  test("~/ はホームから解く", () => {
+    const previous = process.env.HOME;
+    process.env.HOME = repo;
+    try {
+      expect(resolveTerminalImage(outside, "~/shot.png")).toEqual(
+        ok(real(repo, "shot.png")),
+      );
+    } finally {
+      process.env.HOME = previous;
+    }
+  });
+
+  test("相対パスは渡された起点 (ペインの作業場所) から解く", () => {
+    // 起点が repo/docs なら inner.png はそこにある。repo から解くと無い。
+    expect(resolveTerminalImage(join(repo, "docs"), "inner.png")).toEqual(
+      ok(real(repo, "docs", "inner.png")),
+    );
+    expect(resolveTerminalImage(repo, "inner.png")).toMatchObject({
+      status: "rejected",
+      reason: "missing",
+    });
+  });
+
   test("同じ 1 枚を指す綴りが並んでも 1 つだけ返す", () => {
     // symlink 経由の綴りも実体で突き合わせるので、同じ 1 枚に畳まれる。
-    const images = resolveTerminalImages(repo, [
+    const path = real(repo, "shot.png");
+    const { mtimeMs } = statSync(path);
+    const { images, rejected } = resolveTerminalImages(repo, [
       "shot.png",
       "./shot.png",
       join(repo, "shot.png"),
     ]);
+    expect(rejected).toEqual([]);
     expect(images).toEqual([
       {
-        path: real(repo, "shot.png"),
+        path,
         // 画面で探すのは最初に見つけた綴り。実体のパスとは別に返す。
         candidate: "shot.png",
         name: "shot.png",
-        url: `/_agent/image?path=${encodeURIComponent(real(repo, "shot.png"))}`,
+        // URL に更新時刻と大きさを入れる (上書きされれば URL が変わる)。
+        url: `/_agent/image?path=${encodeURIComponent(path)}&v=${Math.trunc(mtimeMs)}-3`,
+        bytes: 3,
+        mtimeMs,
       },
     ]);
   });
 
   test("symlink と実体を両方渡しても 1 枚", () => {
-    const images = resolveTerminalImages(repo, [
+    const { images } = resolveTerminalImages(repo, [
       "escape.png",
       join(outside, "outside.png"),
     ]);
@@ -638,9 +763,28 @@ describe("出力から拾った画像の解決", () => {
     ]);
   });
 
-  test("配れないものは黙って落とす", () => {
-    const images = resolveTerminalImages(repo, ["missing.png", "shot.png"]);
+  test("配れないものは理由つきで別に返す", () => {
+    const { images, rejected } = resolveTerminalImages(repo, [
+      "missing.png",
+      "shot.png",
+      "huge.png",
+    ]);
     expect(images.map((image) => image.name)).toEqual(["shot.png"]);
+    expect(rejected).toEqual([
+      {
+        candidate: "missing.png",
+        path: join(repo, "missing.png"),
+        name: "missing.png",
+        reason: "missing",
+      },
+      {
+        candidate: "huge.png",
+        path: real(repo, "huge.png"),
+        name: "huge.png",
+        reason: "too-large",
+        bytes: MAX_PASTE_IMAGE_BYTES + 1,
+      },
+    ]);
   });
 
   test("上限を超えて渡された分は見ない", () => {
@@ -650,7 +794,9 @@ describe("出力から拾った画像の解決", () => {
       { length: MAX_TERMINAL_IMAGE_QUERY },
       (_, index) => `missing-${index}.png`,
     );
-    expect(resolveTerminalImages(repo, [...filler, "shot.png"])).toEqual([]);
+    const result = resolveTerminalImages(repo, [...filler, "shot.png"]);
+    expect(result.images).toEqual([]);
+    expect(result.rejected).toHaveLength(MAX_TERMINAL_IMAGE_QUERY);
   });
 });
 
@@ -663,12 +809,17 @@ describe("/_agent/images", () => {
   test("候補が無ければ空で返す", async () => {
     const res = await call("/_agent/images");
     expect(res?.status).toBe(200);
-    expect(await res?.json()).toEqual({ images: [] });
+    expect(await res?.json()).toEqual({
+      images: [],
+      rejected: [],
+      base: { source: "repo", cwd: process.cwd() },
+    });
   });
 
   test("リポジトリの画像を実体のパスと URL で返す", async () => {
     // テストの cwd はこのリポジトリ。追跡されている画像で確かめる。
     const path = realpathSync(join(process.cwd(), "web/favicon.png"));
+    const { size, mtimeMs } = statSync(path);
     const res = await call("/_agent/images?path=web%2Ffavicon.png");
     expect(await res?.json()).toEqual({
       images: [
@@ -676,9 +827,13 @@ describe("/_agent/images", () => {
           path,
           candidate: "web/favicon.png",
           name: "favicon.png",
-          url: `/_agent/image?path=${encodeURIComponent(path)}`,
+          url: `/_agent/image?path=${encodeURIComponent(path)}&v=${Math.trunc(mtimeMs)}-${size}`,
+          bytes: size,
+          mtimeMs,
         },
       ],
+      rejected: [],
+      base: { source: "repo", cwd: process.cwd() },
     });
   });
 
@@ -689,19 +844,59 @@ describe("/_agent/images", () => {
       writeFileSync(join(outside, "outside.png"), "png");
       const path = realpathSync(join(outside, "outside.png"));
       const res = await call(`/_agent/images?path=${encodeURIComponent(path)}`);
-      expect(await res?.json()).toEqual({
-        images: [
-          {
-            path,
-            candidate: path,
-            name: "outside.png",
-            url: `/_agent/image?path=${encodeURIComponent(path)}`,
-          },
-        ],
-      });
+      const body = await res?.json();
+      expect(body.images).toEqual([
+        expect.objectContaining({ path, candidate: path, name: "outside.png" }),
+      ]);
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  test.each([
+    { name: "shell の形が違う", query: "?shell=%2512&path=a.png" },
+    { name: "shell が空", query: "?shell=&path=a.png" },
+  ])("$name ときは 400", async ({ query }) => {
+    const res = await call(`/_agent/images${query}`);
+    expect(res?.status).toBe(400);
+  });
+
+  test("もう無いシェルならリポジトリの根から解く", async () => {
+    const res = await call(
+      `/_agent/images?shell=${SHELL}&path=web%2Ffavicon.png`,
+    );
+    const body = await res?.json();
+    expect(body.base).toEqual({ source: "repo", cwd: process.cwd() });
+    expect(body.images).toHaveLength(1);
+  });
+});
+
+describe("/_agent/images/history", () => {
+  test("POST は受け付けない", async () => {
+    const res = await call("/_agent/images/history", { method: "POST" });
+    expect(res?.status).toBe(405);
+  });
+
+  test.each([
+    { name: "shell が無い", query: "" },
+    { name: "shell の形が違う", query: "?shell=%2512" },
+  ])("$name ときは 400", async ({ query }) => {
+    const res = await call(`/_agent/images/history${query}`);
+    expect(res?.status).toBe(400);
+  });
+
+  test("もう無いシェルは何も拾わない", async () => {
+    // シェルはこのプロセス内にしか無いので、tmux を触らずに確かめられる。
+    const res = await call(`/_agent/images/history?shell=${SHELL}`);
+    expect(res?.status).toBe(200);
+    expect(await res?.json()).toEqual({
+      images: [],
+      rejected: [],
+      base: { source: "repo", cwd: process.cwd() },
+      pane: null,
+      candidates: [],
+      lines: 0,
+    });
   });
 });
 
@@ -716,18 +911,88 @@ describe("/_agent/image", () => {
     const res = await call(`/_agent/image?path=${encodeURIComponent(path)}`);
     expect(res?.status).toBe(200);
     expect(res?.headers.get("Content-Type")).toBe("image/png");
+    expect(res?.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res?.headers.get("Content-Security-Policy")).toBe("sandbox");
     const body = await res?.arrayBuffer();
     expect(body?.byteLength).toBe(statSync(path).size);
   });
 
   test.each([
-    { name: "パスが無い", query: "" },
-    { name: "実在しない", query: "?path=%2Ftmp%2Fmissing-image.png" },
-    { name: "画像でないもの", query: "?path=package.json" },
-    { name: "SVG", query: "?path=web%2Ffavicon.svg" },
-  ])("$name ときは 404", async ({ query }) => {
+    {
+      name: "版の指定が無い",
+      version: () => null,
+      expected: "no-store",
+    },
+    {
+      name: "版が今の実体と一致する",
+      version: (size: number, mtimeMs: number) =>
+        `${Math.trunc(mtimeMs)}-${size}`,
+      expected: "private, max-age=31536000, immutable",
+    },
+    {
+      name: "版が古い (上書きされた後)",
+      version: (size: number, mtimeMs: number) =>
+        `${Math.trunc(mtimeMs) - 1000}-${size}`,
+      expected: "no-store",
+    },
+  ])("$name ときの Cache-Control", async ({ version, expected }) => {
+    // 棚は描き直すたびに同じ URL を読む。覚えさせてよいのは、URL の版が
+    // 今の実体と同じときだけ。
+    const path = realpathSync(join(process.cwd(), "web/favicon.png"));
+    const { size, mtimeMs } = statSync(path);
+    const v = version(size, mtimeMs);
+    const res = await call(
+      `/_agent/image?path=${encodeURIComponent(path)}${v ? `&v=${v}` : ""}`,
+    );
+    expect(res?.status).toBe(200);
+    expect(res?.headers.get("Cache-Control")).toBe(expected);
+  });
+
+  test.each([
+    { name: "パスが無い", query: "", reason: "invalid" },
+    {
+      name: "実在しない",
+      query: "?path=%2Ftmp%2Fmissing-image.png",
+      reason: "missing",
+    },
+    {
+      name: "画像でないもの",
+      query: "?path=package.json",
+      reason: "unsupported",
+    },
+    { name: "SVG", query: "?path=web%2Ffavicon.svg", reason: "unsupported" },
+    { name: "ディレクトリ", query: "?path=web", reason: "unsupported" },
+  ])("$name ときは 404 で理由を返す", async ({ query, reason }) => {
     // URL は持って回られるので、配る側でももう一度同じ判定を通す。
     const res = await call(`/_agent/image${query}`);
     expect(res?.status).toBe(404);
+    expect(await res?.text()).toContain(reason);
+  });
+
+  test.each([
+    { name: "大きすぎる", file: "huge.png", reason: "too-large" },
+    {
+      name: "拡張子がそう見えるディレクトリ",
+      file: "dir.png",
+      reason: "not-file",
+    },
+    { name: "空のファイル", file: "empty.png", reason: "empty" },
+  ])("$name ものは配らない", async ({ file, reason }) => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-image-reject-"));
+    try {
+      mkdirSync(join(dir, "dir.png"));
+      writeFileSync(join(dir, "empty.png"), "");
+      writeFileSync(
+        join(dir, "huge.png"),
+        Buffer.alloc(MAX_PASTE_IMAGE_BYTES + 1),
+      );
+      const res = await call(
+        `/_agent/image?path=${encodeURIComponent(join(dir, file))}`,
+      );
+      expect(res?.status).toBe(404);
+      expect(await res?.text()).toContain(reason);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

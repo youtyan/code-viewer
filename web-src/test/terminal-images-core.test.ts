@@ -10,9 +10,10 @@
 
 import { describe, expect, test } from "vitest";
 import {
+  findImagePathLinks,
   findImagePaths,
   findImagePathsInText,
-  findPathAnchors,
+  findImagePathsNewestFirst,
   findScreenImagePaths,
   joinBrokenPathLines,
   joinWrappedLines,
@@ -104,6 +105,31 @@ describe("findImagePaths", () => {
       name: "引用符に囲まれていても中身だけ",
       text: "open '/tmp/out.png'",
       expected: ["/tmp/out.png"],
+    },
+    {
+      name: "引用符の中の空白入りの絶対パスは 1 本",
+      text: "saved '/tmp/my shots/a b.png'",
+      expected: ["/tmp/my shots/a b.png"],
+    },
+    {
+      name: "二重引用符の ~ 付きパスも 1 本",
+      text: 'open "~/My Pictures/out.png" now',
+      expected: ["~/My Pictures/out.png"],
+    },
+    {
+      name: "パスで始まらない引用は文として扱い、ファイル名だけ拾う",
+      text: '"see the out.png file"',
+      expected: ["out.png"],
+    },
+    {
+      name: "\\ で書いた空白は外して 1 本",
+      text: "ls /tmp/my\\ shots/a.png",
+      expected: ["/tmp/my shots/a.png"],
+    },
+    {
+      name: "引用符と素の形が混ざっても出てきた順",
+      text: "b.png then './x y.png'",
+      expected: ["b.png", "./x y.png"],
     },
     {
       name: "括弧に囲まれていても中身だけ",
@@ -281,7 +307,8 @@ describe("findImagePathsInText", () => {
   });
 });
 
-describe("findPathAnchors", () => {
+describe("findImagePathLinks", () => {
+  // 棚にある綴りだけをリンクにする。位置は行の文字列の添字 (end は含まない)。
   const SCREEN = [
     "$ make chart",
     "wrote docs/out.png",
@@ -289,58 +316,154 @@ describe("findPathAnchors", () => {
     "            d2.png",
     "",
   ];
+  const known =
+    (...candidates: string[]) =>
+    (candidate: string) =>
+      candidates.includes(candidate);
 
   test.each([
     {
-      name: "そのまま出ている綴り",
-      candidate: "docs/out.png",
-      expected: { candidate: "docs/out.png", row: 1, col: 6, span: 1 },
+      name: "1 行にそのまま出ている綴り",
+      lines: SCREEN,
+      width: 0,
+      known: ["docs/out.png"],
+      expected: [
+        {
+          candidate: "docs/out.png",
+          start: { row: 1, col: 6 },
+          end: { row: 1, col: 18 },
+        },
+      ],
     },
     {
-      name: "行またぎは始まっている行に置く",
-      candidate: "/tmp/session/scratchpad/band2.png",
-      expected: {
-        candidate: "/tmp/session/scratchpad/band2.png",
-        row: 2,
-        col: 12,
-        // 2 行にまたがっているので、画像は 2 行目の下に置く。
-        span: 2,
-      },
+      name: "CLI が割った行は 2 行にまたがる",
+      lines: SCREEN,
+      width: 0,
+      known: ["/tmp/session/scratchpad/band2.png"],
+      expected: [
+        {
+          candidate: "/tmp/session/scratchpad/band2.png",
+          start: { row: 2, col: 12 },
+          end: { row: 3, col: 18 },
+        },
+      ],
     },
-  ])("$name", ({ candidate, expected }) => {
-    expect(findPathAnchors(SCREEN, [candidate])).toEqual([expected]);
+    {
+      name: "端末の幅で折り返された綴り",
+      lines: ["x /tmp/aaaa", "bb/x.png done"],
+      width: 11,
+      known: ["/tmp/aaaabb/x.png"],
+      expected: [
+        {
+          candidate: "/tmp/aaaabb/x.png",
+          start: { row: 0, col: 2 },
+          end: { row: 1, col: 8 },
+        },
+      ],
+    },
+    {
+      name: "引用符の中の空白入りのパス",
+      lines: ["saved '/tmp/my shots/a b.png' ok"],
+      width: 0,
+      known: ["/tmp/my shots/a b.png"],
+      expected: [
+        {
+          candidate: "/tmp/my shots/a b.png",
+          start: { row: 0, col: 7 },
+          end: { row: 0, col: 28 },
+        },
+      ],
+    },
+    {
+      name: "\\ で空白を書いたパスは綴りの長さで範囲を取る",
+      lines: ["ls: /tmp/my\\ shots/a.png"],
+      width: 0,
+      known: ["/tmp/my shots/a.png"],
+      expected: [
+        {
+          candidate: "/tmp/my shots/a.png",
+          start: { row: 0, col: 4 },
+          end: { row: 0, col: 24 },
+        },
+      ],
+    },
+    {
+      name: "同じ綴りが何か所にあっても全部",
+      lines: ["a docs/out.png", "b docs/out.png"],
+      width: 0,
+      known: ["docs/out.png"],
+      expected: [
+        {
+          candidate: "docs/out.png",
+          start: { row: 0, col: 2 },
+          end: { row: 0, col: 14 },
+        },
+        {
+          candidate: "docs/out.png",
+          start: { row: 1, col: 2 },
+          end: { row: 1, col: 14 },
+        },
+      ],
+    },
+    {
+      name: "棚に無い綴りはリンクにしない",
+      lines: SCREEN,
+      width: 0,
+      known: ["docs/missing.png"],
+      expected: [],
+    },
+    {
+      name: "次の行が空なら繋がない",
+      lines: ["x /tmp/aaaa", ""],
+      width: 11,
+      known: ["/tmp/aaaa"],
+      expected: [],
+    },
+  ])("$name", ({ lines, width, known: names, expected }) => {
+    expect(findImagePathLinks(lines, width, known(...names))).toEqual(expected);
   });
+});
 
+describe("findImagePathsNewestFirst", () => {
   test.each([
-    { name: "画面に無い綴り", candidate: "docs/missing.png" },
-    { name: "空文字", candidate: "" },
-  ])("$name は位置を返さない", ({ candidate }) => {
-    expect(findPathAnchors(SCREEN, [candidate])).toEqual([]);
-  });
-
-  test("最初に出てくる 1 か所だけを返す", () => {
-    // 同じパスが何度も流れる画面で、全部に重ねると画面が埋まる。
-    const screen = ["a docs/out.png", "b docs/out.png"];
-    expect(findPathAnchors(screen, ["docs/out.png"])).toEqual([
-      { candidate: "docs/out.png", row: 0, col: 2, span: 1 },
-    ]);
-  });
-
-  test("綴りごとに位置を返す", () => {
-    expect(
-      findPathAnchors(SCREEN, [
-        "docs/out.png",
-        "/tmp/session/scratchpad/band2.png",
-      ]),
-    ).toEqual([
-      { candidate: "docs/out.png", row: 1, col: 6, span: 1 },
-      {
-        candidate: "/tmp/session/scratchpad/band2.png",
-        row: 2,
-        col: 12,
-        span: 2,
-      },
-    ]);
+    {
+      name: "後に出てきたものが先",
+      text: "wrote a.png\nwrote b.png\nwrote c.png",
+      width: 0,
+      limit: 64,
+      expected: ["c.png", "b.png", "a.png"],
+    },
+    {
+      name: "同じパスは最後に出てきた位置で並ぶ",
+      text: "a.png\nb.png\na.png",
+      width: 0,
+      limit: 64,
+      expected: ["a.png", "b.png"],
+    },
+    {
+      name: "上限は新しいほうから取る",
+      text: "a.png\nb.png\nc.png",
+      width: 0,
+      limit: 2,
+      expected: ["c.png", "b.png"],
+    },
+    {
+      name: "折り返しを繋いだ候補も繋いだ位置で並ぶ",
+      text: "/tmp/aaaaa\nbbb/x.png\nlast.png",
+      width: 10,
+      limit: 64,
+      // 最後の 1 つは CLI が割った行として組み直した候補 (本文のどこにも
+      // そのままは無い)。最も古い扱いになる。
+      expected: [
+        "last.png",
+        "bbb/x.png",
+        "/tmp/aaaaabbb/x.png",
+        "bbb/x.pnglast.png",
+      ],
+    },
+    { name: "画像パスが無い", text: "$ ls", width: 0, limit: 64, expected: [] },
+  ])("$name", ({ text, width, limit, expected }) => {
+    expect(findImagePathsNewestFirst(text, width, limit)).toEqual(expected);
   });
 });
 

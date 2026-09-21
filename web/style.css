@@ -16586,7 +16586,7 @@ html[data-theme="dark"] .tools-code span[style] {
   background: var(--fg-muted, #57606a);
   opacity: 0.45;
 }
-/* ターミナルと、その上の添付の帯をまとめた入れ物。 */
+/* ターミナルと、その上の添付の帯・右の画像の棚をまとめた入れ物。 */
 .terminal-pane-body {
   flex: 1 1 auto;
   min-width: 0;
@@ -16738,31 +16738,6 @@ html[data-theme="dark"] .tools-code span[style] {
   pointer-events: none;
 }
 
-/* 端末の行に重ねる画像。層は xterm の画面と同じ箱に敷き、1 枚ずつをマス目
-   から出した座標で置く (位置と大きさは JS が px で書き込む)。層自体はクリック
-   を通し、画像だけが押せる。押すと元のサイズで別タブに出る。
-   端末の中身の上に載るので、枠を付けて「重ねたもの」だと分かるようにする。 */
-.terminal-inline-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.terminal-inline-image {
-  position: absolute;
-  display: block;
-  box-sizing: border-box;
-  padding: 2px;
-  pointer-events: auto;
-}
-.terminal-inline-image img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-}
 /* ターミナル本体。背景は xterm 自身が塗る黒に合わせる (映しているのはアプリの
    画面ではなく端末なので、テーマには追従させない)。
 
@@ -19785,7 +19760,7 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head {
   display: none;
 }
 /* 何も映していないとき: 画面の代わりに案内を真ん中に。 */
-.terminal-pane-body:has(> .terminal-screen:empty) {
+.terminal-pane-body:has(.terminal-screen:empty) {
   display: none;
 }
 .terminal-pane:has(.terminal-screen:empty) > .terminal-status {
@@ -19895,10 +19870,208 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head {
   border-right: 1px solid var(--color-line-soft);
 }
 
+/* 端末の画面と、その右の画像の棚を横に並べる行。 */
+.terminal-screen-row {
+  flex: 1 1 auto;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
 /* 端末の画面の内側の余白 (文字が面の端に接しない)。fit は親の余白を引いて
    桁数を決めるので、ここに付ければ桁数の計算もそろう。 */
-.terminal-pane-body > .terminal-screen {
+.terminal-screen-row > .terminal-screen {
   padding: var(--space-2) var(--pad-text);
+}
+
+/* ---- ターミナル: 画像の棚 (views/terminal/image-shelf.ts) ----
+   端末の文字の上に重ねず、画面の右に別の列として場所を取る。画像が無ければ
+   出さない。畳むと画像の印と件数のボタンだけの細い列になる。 */
+.terminal-image-shelf {
+  /* T3: サムネイルの枠 (既定の密度で 108×72)。--space-unit から作るので、
+     密度で余白と一緒に比例して変わる。棚の幅は枠 + 左右の余白。 */
+  --shelf-thumb-w: calc(var(--space-unit) * 27);
+  --shelf-thumb-h: calc(var(--space-unit) * 18);
+  --shelf-pad: var(--space-3);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: calc(var(--shelf-thumb-w) + 2 * var(--shelf-pad));
+  min-height: 0;
+  background: var(--color-nav);
+  color: var(--color-text);
+}
+.terminal-image-shelf[hidden],
+.terminal-image-shelf-head[hidden],
+.terminal-image-shelf-list[hidden],
+.terminal-image-shelf-expand[hidden] {
+  display: none;
+}
+.terminal-image-shelf[data-collapsed="true"] {
+  width: calc(var(--ui-control-sm) + 2 * var(--space-2));
+  padding: var(--space-2);
+}
+.terminal-image-shelf-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--space-6);
+  padding: 0 var(--shelf-pad);
+  font-size: var(--ui-font-base);
+}
+.terminal-image-shelf-title {
+  font-weight: 600;
+}
+.terminal-image-shelf-count {
+  color: var(--color-text-3);
+  font-variant-numeric: tabular-nums;
+}
+.terminal-image-shelf-toggle,
+.terminal-image-shelf-expand {
+  display: inline-grid;
+  place-items: center;
+  height: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-2);
+  font: inherit;
+  cursor: pointer;
+}
+.terminal-image-shelf-toggle {
+  width: var(--ui-control-sm);
+  margin-left: auto;
+}
+.terminal-image-shelf-expand {
+  grid-auto-flow: column;
+  gap: var(--space-1);
+  width: 100%;
+  font-size: var(--ui-font-sm);
+}
+.terminal-image-shelf-toggle:hover,
+.terminal-image-shelf-expand:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.terminal-image-shelf-toggle:focus-visible,
+.terminal-image-shelf-expand:focus-visible,
+.terminal-image-shelf-open:focus-visible .terminal-image-shelf-frame {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+/* 畳んでいる間にパスへカーソルが載った。幅は変えず、ボタンだけで応える。 */
+.terminal-image-shelf-expand[data-linked] {
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+  color: var(--color-accent-strong);
+}
+.terminal-image-shelf-icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  fill: currentColor;
+}
+.terminal-image-shelf-list {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--shelf-pad);
+  min-height: 0;
+  margin: 0;
+  padding: 0 var(--shelf-pad) var(--shelf-pad);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+.terminal-image-shelf-open {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: zoom-in;
+}
+.terminal-image-shelf-frame {
+  display: grid;
+  place-items: center;
+  width: var(--shelf-thumb-w);
+  height: var(--shelf-thumb-h);
+  margin-bottom: var(--space-1);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--color-term);
+}
+.terminal-image-shelf-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.terminal-image-shelf-open:hover .terminal-image-shelf-frame {
+  box-shadow: 0 0 0 1px var(--color-line-strong);
+}
+/* 文字の中のパスにカーソルが載った画像。棚の同じ列で強い選択は 1 つだけ。 */
+.terminal-image-shelf-item[data-linked] .terminal-image-shelf-frame {
+  box-shadow: 0 0 0 2px var(--color-accent-strong), var(--glow-select);
+}
+.terminal-image-shelf-name {
+  overflow: hidden;
+  font-size: var(--ui-font-base);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 寸法と「何分前」は塊ごとに折り返す (途中で省略しない)。 */
+.terminal-image-shelf-meta {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-2);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  font-variant-numeric: tabular-nums;
+}
+.terminal-image-shelf-meta > span {
+  white-space: nowrap;
+}
+/* 読めなかった項目: サムネイルの代わりに印、理由は折り返して全部読ませる。 */
+.terminal-image-shelf-item[data-failed="true"] .terminal-image-shelf-open {
+  cursor: pointer;
+}
+.terminal-image-shelf-item[data-failed="true"] .terminal-image-shelf-frame {
+  color: var(--color-text-3);
+}
+.terminal-image-shelf-failed-icon {
+  width: var(--space-5);
+  height: var(--space-5);
+  fill: currentColor;
+  opacity: 0.6;
+}
+.terminal-image-shelf-item[data-failed="true"] .terminal-image-shelf-meta > span {
+  color: var(--color-waiting);
+  white-space: normal;
+}
+
+/* 拡大表示の前へ・次へ・パスのコピー。 */
+.terminal-lightbox-nav {
+  flex: none;
+  display: flex;
+  gap: var(--space-1);
+}
+.terminal-lightbox-icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  fill: currentColor;
+  vertical-align: middle;
+}
+.terminal-lightbox .terminal-font-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.terminal-lightbox .terminal-lightbox-copy[data-copied] {
+  color: var(--color-working);
 }
 #sidebar .sb-head .sb-view-seg {
   align-self: center;

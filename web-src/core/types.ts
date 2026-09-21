@@ -214,6 +214,8 @@ export type AppSettingsState = {
   agentHookHintDismissed?: boolean;
   /** エージェント一覧のアカウントの帯を畳んだ。 */
   agentAccountsCollapsed?: boolean;
+  /** ターミナルの右の画像の棚を畳んだ。 */
+  terminalImageShelfCollapsed?: boolean;
   /** 左のサイドバー (プロジェクトとエージェント) を畳んだ。 */
   navCollapsed?: boolean;
   /** 左のサイドバーの幅 (px)。範囲は core/panel-sizes.ts の NAV_WIDTH。 */

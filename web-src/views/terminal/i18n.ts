@@ -2,6 +2,9 @@
 // (app.ts の STATE.language) で切り替える。言語切替時のライブ反映は
 // terminal-view の localize() が担当する。
 
+import { formatBytes } from "../../core/source-meta";
+import type { TerminalImageRejectReason } from "../../core/terminal-images";
+
 export type TerminalLang = "en" | "ja";
 
 export type TerminalText = {
@@ -114,6 +117,36 @@ export type TerminalText = {
   closeImage: string;
   /** 拡大表示の下に出す操作の説明。 */
   imageHint: string;
+  /** 拡大表示の、棚の並びの前へ・次へ。 */
+  previousImage: string;
+  nextImage: string;
+  /** 拡大表示の、パスのコピー。 */
+  copyImagePath: string;
+  imagePathCopied: string;
+  copyImagePathFailed: string;
+  /** 画像の棚の見出し。 */
+  imageShelfTitle: string;
+  /** 棚を畳む・開く。 */
+  imageShelfCollapse: string;
+  imageShelfExpand: (count: number) => string;
+  /** 棚の項目の寸法 (読み込めたら)。 */
+  imageSize: (width: number, height: number) => string;
+  /** 棚の項目の読めなかった理由。 */
+  imageRejected: (
+    reason: TerminalImageRejectReason,
+    bytes: number | null,
+  ) => string;
+  /** 棚の項目の「何分前」(ファイルの更新時刻から)。 */
+  imageAge: (bucket: {
+    unit: "now" | "minute" | "hour" | "day";
+    value: number;
+  }) => string;
+  /** 読めなかった項目を押したときの説明 (押すと確かめ直す)。 */
+  imageRecheck: string;
+  /** ペインの作業場所を引けず、別の場所から解いた。 */
+  imageBaseFailed: string;
+  /** 繋いだときの履歴の走査に失敗した。 */
+  imageHistoryFailed: string;
   /** 画像を貼り付けられなかった。 */
   pasteFailed: string;
   /** 出す範囲の切り替え。 */
@@ -224,7 +257,44 @@ const EN: TerminalText = {
   zoomOut: "zoom out",
   zoomReset: "fit",
   closeImage: "close",
-  imageHint: "drag to pan · ctrl+wheel to zoom · Esc to close",
+  imageHint: "drag to pan · ctrl+wheel to zoom · ← → to move · Esc to close",
+  previousImage: "previous image",
+  nextImage: "next image",
+  copyImagePath: "copy path",
+  imagePathCopied: "path copied",
+  copyImagePathFailed: "Could not copy the path.",
+  imageShelfTitle: "Images",
+  imageShelfCollapse: "collapse images",
+  imageShelfExpand: (count) => `show images (${count})`,
+  imageSize: (width, height) => `${width} × ${height}`,
+  imageRejected: (reason, bytes) => {
+    switch (reason) {
+      case "missing":
+        return "Not found (deleted?)";
+      case "too-large":
+        return bytes === null
+          ? "Too large to show"
+          : `Too large (${formatBytes(bytes)})`;
+      case "not-file":
+        return "Not a regular file";
+      case "empty":
+        return "Empty file";
+      case "unreadable":
+        return "Cannot be read";
+      case "unsupported":
+        return "Unsupported type";
+      case "invalid":
+        return "Invalid path";
+    }
+  },
+  imageAge: (bucket) =>
+    bucket.unit === "now"
+      ? "just now"
+      : `${elapsedFormatter("now", "m", "h", "d")(bucket)} ago`,
+  imageRecheck: "check again",
+  imageBaseFailed:
+    "Could not read the tmux pane's working directory; relative image paths are resolved from the shell's directory.",
+  imageHistoryFailed: "Could not scan the pane history for images.",
   pasteFailed: "Could not attach the pasted image.",
   scopeLabel: "terminal scope",
   scopeRepo: "this repository",
@@ -309,7 +379,45 @@ const JA: TerminalText = {
   zoomOut: "縮小",
   zoomReset: "等倍に戻す",
   closeImage: "閉じる",
-  imageHint: "ドラッグで移動 · ctrl+ホイールで拡大縮小 · Esc で閉じる",
+  imageHint:
+    "ドラッグで移動 · ctrl+ホイールで拡大縮小 · ← → で前後の画像 · Esc で閉じる",
+  previousImage: "前の画像",
+  nextImage: "次の画像",
+  copyImagePath: "パスをコピー",
+  imagePathCopied: "パスをコピーしました",
+  copyImagePathFailed: "パスをコピーできませんでした。",
+  imageShelfTitle: "画像",
+  imageShelfCollapse: "画像の棚を畳む",
+  imageShelfExpand: (count) => `画像の棚を開く (${count} 件)`,
+  imageSize: (width, height) => `${width} × ${height}`,
+  imageRejected: (reason, bytes) => {
+    switch (reason) {
+      case "missing":
+        return "見つかりません (削除された可能性)";
+      case "too-large":
+        return bytes === null
+          ? "大きすぎて表示しません"
+          : `大きすぎます (${formatBytes(bytes)})`;
+      case "not-file":
+        return "通常のファイルではありません";
+      case "empty":
+        return "空のファイルです";
+      case "unreadable":
+        return "読めません";
+      case "unsupported":
+        return "対象外の種類です";
+      case "invalid":
+        return "パスが正しくありません";
+    }
+  },
+  imageAge: (bucket) =>
+    bucket.unit === "now"
+      ? "たった今"
+      : `${elapsedFormatter("今", "分", "時間", "日")(bucket)}前`,
+  imageRecheck: "確かめ直す",
+  imageBaseFailed:
+    "tmux のペインの作業場所を読めませんでした。相対パスの画像はシェルの場所から探しています。",
+  imageHistoryFailed: "ペインの履歴から画像を探せませんでした。",
   pasteFailed: "貼り付けた画像を渡せませんでした。",
   scopeLabel: "表示範囲",
   scopeRepo: "このリポジトリ",

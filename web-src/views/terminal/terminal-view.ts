@@ -68,6 +68,10 @@ export type TerminalViewDeps = {
   getFontSize(): number;
   /** 文字サイズが変わった。保存は呼び出し側 (app.ts) が持つ。 */
   onFontSizeChange(size: number): void;
+  /** 画像の棚を畳んでいるか (ユーザー単位の設定)。 */
+  isImageShelfCollapsed(): boolean;
+  /** 棚を畳んだ・開いた。保存は呼び出し側 (app.ts) が持つ。 */
+  onImageShelfCollapsedChange(collapsed: boolean): void;
   onCloseRequest?: () => void;
   /** 映している対象が変わったとき。URL 同期に使う。 */
   onTargetChange?: (id: string | null) => void;
@@ -616,6 +620,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       onTargetGone: () => {
         void loadLists(generation);
       },
+      isImageShelfCollapsed: deps.isImageShelfCollapsed,
+      setImageShelfCollapsed: deps.onImageShelfCollapsedChange,
     });
     screen.setInputEnabled(inputEnabled);
 
@@ -712,6 +718,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     if (!board) return;
     syncViewActions();
     board.localize();
+    screen?.localize();
     renderLists();
   }
 

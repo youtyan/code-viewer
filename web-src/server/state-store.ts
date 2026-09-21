@@ -309,6 +309,11 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   const agentAccountsCollapsed = optionalBoolean(raw.agentAccountsCollapsed);
   if (agentAccountsCollapsed !== undefined)
     out.agentAccountsCollapsed = agentAccountsCollapsed;
+  const terminalImageShelfCollapsed = optionalBoolean(
+    raw.terminalImageShelfCollapsed,
+  );
+  if (terminalImageShelfCollapsed !== undefined)
+    out.terminalImageShelfCollapsed = terminalImageShelfCollapsed;
   const navCollapsed = optionalBoolean(raw.navCollapsed);
   if (navCollapsed !== undefined) out.navCollapsed = navCollapsed;
   const navWidth = optionalNumber(raw.navWidth, NAV_WIDTH.min, NAV_WIDTH.max);
