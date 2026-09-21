@@ -7,6 +7,8 @@
 import { describe, expect, test } from "vitest";
 import {
   ACTIVITY_IDLE_AFTER_MS,
+  ACTIVITY_POLL_INTERVAL_MS,
+  type ActivitySeen,
   nextActivityState,
   nextObservedState,
   OVERRIDE_CHANGE_STREAK,
@@ -341,6 +343,43 @@ describe("申告を上書きしてよいかの判定", () => {
     const result = nextActivityState(previous, "h1", AT + 1);
     expect(result.override).toBe(true);
     expect(result.state).toBe("working");
+  });
+
+  // 上書きの条件は「回数」ではなく「動き続けた時間」。巡回の間隔を変えても
+  // 時間が縮まないこと (時計や候補の一瞬の再描画で上書きしない) を見る。
+  test.each([
+    {
+      name: "間隔 1 回ぶん動いただけ",
+      motionMs: ACTIVITY_POLL_INTERVAL_MS,
+      override: false,
+    },
+    {
+      name: "11 秒台まで動き続けても上書きしない",
+      motionMs: 11_999,
+      override: false,
+    },
+    {
+      name: "12 秒動き続けたら上書きしてよい",
+      motionMs: 12_000,
+      override: true,
+    },
+  ])("$name", ({ motionMs, override }) => {
+    let seen: ActivitySeen | undefined = nextActivityState(
+      undefined,
+      "h0",
+      AT,
+    ).seen;
+    let result = nextActivityState(seen, "h0", AT);
+    // 巡回ごとに画面が変わり続けた、を motionMs に達するまで繰り返す。
+    for (
+      let at = AT + ACTIVITY_POLL_INTERVAL_MS, n = 1;
+      at <= AT + motionMs;
+      at += ACTIVITY_POLL_INTERVAL_MS, n += 1
+    ) {
+      result = nextActivityState(seen, `h${n}`, at);
+      seen = result.seen;
+    }
+    expect(result.override).toBe(override);
   });
 
   test("止まった瞬間に連続回数は 0 に戻る", () => {

@@ -198,6 +198,13 @@ export type AppSettingsState = {
   scopeWatchLimit?: number;
   uploadEnabled?: boolean;
   /**
+   * エージェントが作業中から入力待ちになったとき、ブラウザの通知を出すか。
+   * 未設定なら出す (通知そのものはブラウザの許可が要る)。
+   */
+  agentNotifyWaiting?: boolean;
+  /** エージェントが作業中から止まった (終わった) とき通知を出すか。未設定なら出す。 */
+  agentNotifyDone?: boolean;
+  /**
    * ユーザーが変更したキー割り当てだけを持つ差分。ここに無いアクションは
    * デフォルトのまま動くので、後からデフォルトを変えても、触っていない
    * ものは新しい割り当てに追従する。

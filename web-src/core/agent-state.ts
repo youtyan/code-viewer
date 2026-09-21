@@ -89,6 +89,15 @@ export type AgentStateRecord = {
   source: AgentStateSource;
   /** 最後に状態が変わった時刻 (epoch ms)。 */
   updatedAt: number;
+  /**
+   * updatedAt が「状態が変わった瞬間」を本当に捉えたものか。
+   *
+   * 申告 (hook) か、観測中に状態が変わったのを見たときだけ true。サーバが
+   * 見始めた時点で既にその状態だったもの (最初の観測) は false で、updatedAt は
+   * 「遅くともこの時刻からこの状態」という下限でしかない。これを経過時間として
+   * 出すと、何時間も前から待機しているものが「数分」と出る。
+   */
+  changeObserved: boolean;
   /** 人間が最後に出した指示。フックが送ってきたときだけ入る。 */
   lastPrompt: string;
   /** エージェント側の一言。フックが送ってきたときだけ入る。 */
@@ -96,7 +105,15 @@ export type AgentStateRecord = {
 };
 
 export type AgentStateObservationError = {
-  operation: "list_terminals" | "capture_screen";
+  operation:
+    | "list_terminals"
+    | "capture_screen"
+    /** エージェント一覧: どの端末がどのペインを映しているかを引けなかった。 */
+    | "list_clients"
+    /** エージェント一覧: ペインの cwd から git のルートを求められなかった。 */
+    | "resolve_project"
+    /** エージェント一覧: プロジェクトを開いているサーバを確かめられなかった。 */
+    | "find_server";
   target: string;
   at: number;
   /** Error の cause と独自フィールドを保持した表示用詳細。 */

@@ -38,6 +38,10 @@ export type ViewerSettingsText = {
   uploadsTitle: string;
   uploadEnabledLabel: string;
   uploadEnabledHelp: string;
+  agentNotifyTitle: string;
+  agentNotifyWaitingLabel: string;
+  agentNotifyDoneLabel: string;
+  agentNotifyHelp: string;
   datastoreTitle: string;
   datastoreInferFkLabel: string;
   datastoreInferFkHelp: string;
@@ -70,6 +74,8 @@ export type ViewerSettingsDraft = {
   excludeNames: string;
   watchLimit: number;
   uploadEnabled: boolean;
+  agentNotifyWaiting: boolean;
+  agentNotifyDone: boolean;
   inferFkRails: boolean;
   s3TooltipEnabled: boolean;
 };
@@ -113,6 +119,8 @@ const GENERAL_SETTING_FIELDS: readonly (keyof ViewerSettingsDraft)[] = [
   "excludeNames",
   "watchLimit",
   "uploadEnabled",
+  "agentNotifyWaiting",
+  "agentNotifyDone",
   "inferFkRails",
   "s3TooltipEnabled",
 ];
@@ -187,6 +195,9 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   const displaySource = document.createElement("p");
   const upload = toggleRow("upload-enabled");
   const uploadHelp = helpText("upload-help");
+  const agentNotifyWaiting = toggleRow("agent-notify-waiting");
+  const agentNotifyDone = toggleRow("agent-notify-done");
+  const agentNotifyHelp = helpText("agent-notify-help");
   const omitDirs = document.createElement("textarea");
   const omitDirsHelp = helpText("scope-omit-dirs-help");
   const excludeNames = document.createElement("textarea");
@@ -242,6 +253,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
 
   const displayTitle = sectionTitle();
   const uploadsTitle = sectionTitle();
+  const agentNotifyTitle = sectionTitle();
   const excludedTitle = sectionTitle();
   const datastoreTitle = sectionTitle();
   const watchTitle = sectionTitle();
@@ -292,6 +304,16 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     uploadsTitle.id = "upload-section-title";
     const uploads = section();
     uploads.append(uploadsTitle, upload.wrap, uploadHelp);
+
+    // エージェント一覧の「通知は有効です」から、この見出しへ飛んでくる。
+    agentNotifyTitle.id = "agent-notify-section-title";
+    const agentNotify = section();
+    agentNotify.append(
+      agentNotifyTitle,
+      agentNotifyWaiting.wrap,
+      agentNotifyDone.wrap,
+      agentNotifyHelp,
+    );
 
     omitDirs.id = "scope-omit-dirs";
     omitDirs.rows = 6;
@@ -403,6 +425,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     wrap.append(
       display,
       uploads,
+      agentNotify,
       excluded,
       datastores,
       watch,
@@ -424,6 +447,12 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     );
     upload.input.addEventListener("change", () =>
       markGeneralDirty("uploadEnabled"),
+    );
+    agentNotifyWaiting.input.addEventListener("change", () =>
+      markGeneralDirty("agentNotifyWaiting"),
+    );
+    agentNotifyDone.input.addEventListener("change", () =>
+      markGeneralDirty("agentNotifyDone"),
     );
     inferFk.input.addEventListener("change", () =>
       markGeneralDirty("inferFkRails"),
@@ -516,6 +545,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       sidebarFontSize,
       codeFontSize,
       upload.input,
+      agentNotifyWaiting.input,
+      agentNotifyDone.input,
       omitDirs,
       excludeNames,
       inferFk.input,
@@ -539,6 +570,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     setFieldValue(watchLimitNumber, String(values.watchLimit), force);
     setFieldValue(watchLimitRange, String(values.watchLimit), force);
     upload.input.checked = values.uploadEnabled;
+    agentNotifyWaiting.input.checked = values.agentNotifyWaiting;
+    agentNotifyDone.input.checked = values.agentNotifyDone;
     inferFk.input.checked = values.inferFkRails;
     s3Tooltip.input.checked = values.s3TooltipEnabled;
   }
@@ -570,6 +603,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       excludeNames: excludeNames.value,
       watchLimit,
       uploadEnabled: upload.input.checked,
+      agentNotifyWaiting: agentNotifyWaiting.input.checked,
+      agentNotifyDone: agentNotifyDone.input.checked,
       inferFkRails: inferFk.input.checked,
       s3TooltipEnabled: s3Tooltip.input.checked,
     };
@@ -685,6 +720,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     const values = deps.getValues();
     displayTitle.textContent = text.display;
     uploadsTitle.textContent = text.uploadsTitle;
+    agentNotifyTitle.textContent = text.agentNotifyTitle;
     excludedTitle.textContent = text.excludedDirectories;
     datastoreTitle.textContent = text.datastoreTitle;
     watchTitle.textContent = text.watchTitle;
@@ -700,6 +736,9 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     displaySource.textContent = text.displaySource;
     upload.text.textContent = text.uploadEnabledLabel;
     uploadHelp.textContent = text.uploadEnabledHelp;
+    agentNotifyWaiting.text.textContent = text.agentNotifyWaitingLabel;
+    agentNotifyDone.text.textContent = text.agentNotifyDoneLabel;
+    agentNotifyHelp.textContent = text.agentNotifyHelp;
     omitDirsHelp.textContent = text.omitDirsHelp;
     excludeNamesHelp.textContent = text.excludeNamesHelp;
     inferFk.text.textContent = text.datastoreInferFkLabel;

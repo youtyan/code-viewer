@@ -4,6 +4,7 @@ import {
   DEFAULT_AGENT_SCREEN_RULES,
   formatAgentScreenRuleSet,
 } from "./core/agent-screen";
+import { type AgentPane, titleWithUnread } from "./core/agent-overview";
 import {
   AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD,
   aiContextClipboardText,
@@ -140,6 +141,10 @@ import {
   openHelpKeybindings,
   openHelpSection,
 } from "./views/help-page";
+import { createAgentMonitor } from "./views/agents/agent-monitor";
+import { mountAgentStatus } from "./views/agents/agent-status";
+import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
+import { agentsText } from "./views/agents/i18n";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
 import {
@@ -429,10 +434,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       .sort((a, b) => a.localeCompare(b));
   }
 
+  /** エージェントの未読の数。タブのタイトルの先頭に出す。 */
+  let AGENT_UNREAD_COUNT = 0;
+
+  function applyDocumentTitle(): void {
+    const base = PROJECT_NAME ? `${PROJECT_NAME} - code viewer` : "code viewer";
+    document.title = titleWithUnread(base, AGENT_UNREAD_COUNT);
+  }
+
   function setProjectName(project: string) {
     if (!project) return;
     PROJECT_NAME = project;
-    document.title = `${project} - code viewer`;
+    applyDocumentTitle();
     const projectTitle = document.querySelector<HTMLElement>("#project-title");
     if (projectTitle) {
       projectTitle.textContent = project;
@@ -1644,6 +1657,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         | "journal"
         | "database"
         | "worktree"
+        | "agents"
         | "tools"
         | "help",
         string
@@ -1840,6 +1854,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         journal: "Work Log",
         database: "Datastores",
         worktree: "Worktrees",
+        agents: "Agents",
         tools: "Tools",
         help: "Settings & Help",
       },
@@ -2159,6 +2174,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         uploadEnabledLabel: "Allow file uploads into worktree folders",
         uploadEnabledHelp:
           "Disable to make the worktree read-only for everyone using this server.",
+        agentNotifyTitle: "Agent notifications",
+        agentNotifyWaitingLabel:
+          "Notify when an agent starts waiting for input",
+        agentNotifyDoneLabel: "Notify when an agent finishes working",
+        agentNotifyHelp:
+          "Desktop notifications from the Agents screen. The browser asks for permission once, from the Enable notifications button there. Nothing is shown while you are looking at that pane.",
         datastoreTitle: "Datastores",
         datastoreInferFkLabel:
           "Infer FK from Rails-style naming (<name>_id → <names>.id)",
@@ -2221,6 +2242,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         journal: "ワークログ",
         database: "データストア",
         worktree: "作業ツリー",
+        agents: "エージェント",
         tools: "ツール",
         help: "設定・ヘルプ",
       },
@@ -2543,6 +2565,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         uploadEnabledLabel: "ワークツリーへのファイルアップロードを許可する",
         uploadEnabledHelp:
           "オフにすると、このサーバを使う全員に対してワークツリーは読み取り専用になります。",
+        agentNotifyTitle: "エージェントの通知",
+        agentNotifyWaitingLabel: "エージェントが入力待ちになったら通知する",
+        agentNotifyDoneLabel: "エージェントの作業が終わったら通知する",
+        agentNotifyHelp:
+          "エージェント画面からデスクトップ通知を出します。ブラウザの許可は、その画面の「通知を有効にする」から 1 度だけ求めます。そのペインをいま見ているときは通知しません。",
         datastoreTitle: "データストア",
         datastoreInferFkLabel:
           "Rails 命名規約 (<name>_id → <names>.id) から FK を推測",
@@ -2844,6 +2871,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     relocalizeHistory?.();
     relocalizeJournal?.();
     relocalizeWorktree?.();
+    relocalizeAgents?.();
     // 設定フォームの文言は viewer-settings.ts が自分で貼る。
     relocalizeViewerSettings?.();
     SOURCE_VIEW.localize();
@@ -2887,6 +2915,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let relocalizeHistory: (() => void) | null = null;
   let relocalizeJournal: (() => void) | null = null;
   let relocalizeWorktree: (() => void) | null = null;
+  let relocalizeAgents: (() => void) | null = null;
   let relocalizeTools: (() => void) | null = null;
   let relocalizeViewerSettings: (() => void) | null = null;
   let relocalizeTerminal: (() => void) | null = null;
@@ -3158,6 +3187,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       excludeNames: serverScopeExcludeNamesDefault().join("\n"),
       watchLimit: SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
       uploadEnabled: true,
+      agentNotifyWaiting: true,
+      agentNotifyDone: true,
       inferFkRails: false,
       s3TooltipEnabled: true,
     };
@@ -3189,6 +3220,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         normalizeScopeWatchLimit(draft.watchLimit) ??
         SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
       uploadEnabled: draft.uploadEnabled,
+      agentNotifyWaiting: draft.agentNotifyWaiting,
+      agentNotifyDone: draft.agentNotifyDone,
       inferFkRails: draft.inferFkRails,
       s3TooltipEnabled: draft.s3TooltipEnabled,
     };
@@ -3207,6 +3240,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         scopeExcludeNames: null,
         scopeWatchLimit: null,
         uploadEnabled: null,
+        agentNotifyWaiting: null,
+        agentNotifyDone: null,
       });
       dbPrefsPatch.inferFkRails = null;
       dbPrefsPatch.s3TooltipEnabled = null;
@@ -3223,6 +3258,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         appPatch.scopeWatchLimit = normalized.watchLimit;
       if (changed.has("uploadEnabled"))
         appPatch.uploadEnabled = normalized.uploadEnabled;
+      if (changed.has("agentNotifyWaiting"))
+        appPatch.agentNotifyWaiting = normalized.agentNotifyWaiting;
+      if (changed.has("agentNotifyDone"))
+        appPatch.agentNotifyDone = normalized.agentNotifyDone;
       if (changed.has("inferFkRails"))
         dbPrefsPatch.inferFkRails = normalized.inferFkRails;
       if (changed.has("s3TooltipEnabled"))
@@ -3470,6 +3509,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let ANNOTATIONS_UI: AnnotationsUi | null = null;
   let JOURNAL_VIEW: JournalView | null = null;
   let WORKTREE_VIEW: WorktreeView | null = null;
+  let AGENTS_VIEW: AgentsView | null = null;
 
   function applyInlineAnnotations() {
     ANNOTATIONS_UI?.applyInlineAnnotations();
@@ -3714,6 +3754,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     ) {
       WORKTREE_VIEW?.suspend();
     }
+    if (previousRoute.screen === "agents" && nextRoute.screen !== "agents") {
+      AGENTS_VIEW?.suspend();
+    }
     STATE.route = nextRoute;
     STATE.from = nextRoute.range.from;
     STATE.to = nextRoute.range.to;
@@ -3764,6 +3807,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       setPageMode();
       removeStandaloneSource();
       void WORKTREE_VIEW?.enter();
+    }
+    if (nextRoute.screen === "agents") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      removeStandaloneSource();
+      void AGENTS_VIEW?.enter();
     }
   }
 
@@ -3828,6 +3877,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     document.body.classList.toggle(
       "gdp-worktree-page",
       STATE.route.screen === "worktree",
+    );
+    document.body.classList.toggle(
+      "gdp-agents-page",
+      STATE.route.screen === "agents",
     );
     // docked の下パネルと場所を分け合うとき、#content がスクロール容器になる
     // ページ。style.css の body.app-panel-docked[data-content-scrolls-when-docked]
@@ -3961,6 +4014,11 @@ window.GdpExpandLogic = GdpExpandLogic;
               screen: "worktree",
               range: currentRange(),
             }),
+          );
+        }
+        if (link.dataset.route === "agents") {
+          link.href = withOverlayState(
+            buildRoute({ screen: "agents", range: currentRange() }),
           );
         }
         if (link.dataset.route === "help") {
@@ -4189,6 +4247,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       watchLimitMax: SERVER_SCOPE_WATCH_LIMIT_MAX,
       watchLimitDefault: SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
       uploadEnabled: APP_SETTINGS.uploadEnabled !== false,
+      agentNotifyWaiting: APP_SETTINGS.agentNotifyWaiting !== false,
+      agentNotifyDone: APP_SETTINGS.agentNotifyDone !== false,
       inferFkRails: DATABASE_VIEW.getDbUiPref("inferFkRails", false),
       s3TooltipEnabled: DATABASE_VIEW.getDbUiPref("s3TooltipEnabled", true),
       scopeSource: uiText().settings.scopeSource(
@@ -5031,6 +5091,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       navigateToRoute({ screen: "database", range: currentRange() });
       return true;
     }
+    if (action === "goto-agents") {
+      navigateToRoute({ screen: "agents", range: currentRange() });
+      return true;
+    }
     if (action === "nav-back") {
       history.back();
       return true;
@@ -5275,6 +5339,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.route.screen === "worktree") {
       return (WORKTREE_VIEW?.reload() ?? Promise.resolve()).then(() => null);
     }
+    if (STATE.route.screen === "agents") {
+      void AGENTS_VIEW?.enter();
+      setStatus("live");
+      return Promise.resolve(null);
+    }
     if (
       STATE.route.screen === "file" &&
       !(isFileHistoryRoute(STATE.route) && activeHistoryPathFilter) &&
@@ -5356,6 +5425,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       void JOURNAL_VIEW?.enter();
     } else if (STATE.route.screen === "worktree") {
       void WORKTREE_VIEW?.enter();
+    } else if (STATE.route.screen === "agents") {
+      setStatus("live");
+      void AGENTS_VIEW?.enter();
     } else load();
     // Deep links land here without going through setRoute; reflect a line=
     // selection in the copy pill on first paint too.
@@ -5911,6 +5983,85 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncAppPanel();
   }
 
+  // エージェントの状態。どの画面にいても取り直し、ヘッダの件数・未読・通知に
+  // 流す。一覧の画面 (/agents) も同じ結果を描く。
+  function isViewingAgentPane(pane: AgentPane): boolean {
+    return (
+      document.visibilityState === "visible" &&
+      document.hasFocus() &&
+      TERMINAL_VIEW.isOpen() &&
+      pane.shownInShell !== "" &&
+      TERMINAL_VIEW.getActiveTarget() === pane.shownInShell
+    );
+  }
+
+  /** そのペインを下のターミナルパネルで開く。ツリーで押したときと同じ経路。 */
+  function openAgentPane(pane: string): void {
+    AGENT_MONITOR.markRead(pane);
+    if (
+      parseToolsOverlay(window.location.search) !== null ||
+      TOOLS_VIEW.isOpen()
+    )
+      closeToolsSheet();
+    if (
+      parseSearchResultsOverlay(window.location.search) !== null ||
+      SEARCH_RESULTS_VIEW.isOpen()
+    )
+      closeSearchSheet();
+    updateUrlForTerminalOverlay(TERMINAL_VIEW.getActiveTarget() ?? "open");
+    void TERMINAL_VIEW.openPane(pane);
+    syncAppPanel();
+  }
+
+  const AGENT_MONITOR = createAgentMonitor({
+    getText: () => agentsText(STATE.language),
+    getNotifySettings: () => ({
+      waiting: APP_SETTINGS.agentNotifyWaiting !== false,
+      finished: APP_SETTINGS.agentNotifyDone !== false,
+    }),
+    isViewing: isViewingAgentPane,
+    onUnreadCountChange: (count) => {
+      if (count === AGENT_UNREAD_COUNT) return;
+      AGENT_UNREAD_COUNT = count;
+      applyDocumentTitle();
+    },
+    onNotificationClick: (pane) => openAgentPane(pane.id),
+    actionHeaders,
+  });
+
+  const agentStatusButton =
+    document.querySelector<HTMLButtonElement>("#agent-status");
+  const AGENT_STATUS = agentStatusButton
+    ? mountAgentStatus(agentStatusButton, {
+        monitor: AGENT_MONITOR,
+        getText: () => agentsText(STATE.language),
+        openList: () =>
+          navigateToRoute({ screen: "agents", range: currentRange() }),
+        openPane: openAgentPane,
+      })
+    : null;
+
+  AGENTS_VIEW = createAgentsView({
+    monitor: AGENT_MONITOR,
+    getText: () => agentsText(STATE.language),
+    setPageMode,
+    syncHeaderMenu,
+    openPane: openAgentPane,
+    openNotificationSettings: () => {
+      openHelpSection(helpSectionDeps(), "settings");
+      requestAnimationFrame(() =>
+        document
+          .getElementById("agent-notify-section-title")
+          ?.scrollIntoView({ block: "start" }),
+      );
+    },
+  });
+  relocalizeAgents = () => {
+    AGENTS_VIEW?.localize();
+    AGENT_STATUS?.localize();
+  };
+  AGENT_MONITOR.start();
+
   JOURNAL_VIEW = createJournalView({
     getRoute: () => STATE.route,
     setRoute,
@@ -6041,6 +6192,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       JOURNAL_VIEW?.suspend();
     if (previousRoute.screen === "worktree" && nextRoute.screen !== "worktree")
       WORKTREE_VIEW?.suspend();
+    if (previousRoute.screen === "agents" && nextRoute.screen !== "agents")
+      AGENTS_VIEW?.suspend();
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
       HISTORY_VIEW.leaveHistory();
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
@@ -6130,6 +6283,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       setPageMode();
       removeStandaloneSource();
       void WORKTREE_VIEW?.enter();
+      return;
+    }
+    if (STATE.route.screen === "agents") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      removeStandaloneSource();
+      void AGENTS_VIEW?.enter();
+      setStatus("live");
       return;
     }
     if (STATE.route.screen !== "file") {

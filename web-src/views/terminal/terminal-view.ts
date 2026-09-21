@@ -31,7 +31,6 @@ import type {
   ShellSessionId,
 } from "../../core/shell";
 import { readStoredSize, writeStoredSize } from "../../core/stored-size";
-import type { BoardRow } from "../../core/terminal-board";
 import {
   clampTerminalFontSize,
   MAX_TERMINAL_FONT_SIZE,
@@ -74,6 +73,11 @@ export type TerminalViewDeps = {
 
 export type TerminalViewHandle = {
   open(targetId?: string | null): Promise<void>;
+  /**
+   * tmux ペインを開いてそれを映す。ツリーでペインを押したときと同じ経路
+   * (/_tmux/open) を通る。エージェント一覧から使う。
+   */
+  openPane(pane: string): Promise<void>;
   close(): void;
   isOpen(): boolean;
   getActiveTarget(): string | null;
@@ -338,7 +342,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
    * で分かるが、こちらは返ってきたシェルを映すだけでよい (既に映しているものと
    * 同じなら、画面はそのまま tmux が切り替わる)。
    */
-  async function openPane(row: BoardRow): Promise<void> {
+  async function openPane(pane: string): Promise<void> {
     const myGen = generation;
     const size = screen?.measure();
     try {
@@ -350,7 +354,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            pane: row.target,
+            pane,
             shell: attached?.id ?? null,
             cols: size?.cols,
             rows: size?.rows,
@@ -539,7 +543,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
         const session = findShell(row.target);
         if (session) selectShell(session);
       },
-      onOpenPane: (row) => void openPane(row),
+      onOpenPane: (row) => void openPane(row.target),
       onCreateShell: () => void createShell(),
       onCloseShell: (id) => void closeShell(id),
       onMarkRead: (row) => void markRead(row.target),
@@ -689,8 +693,15 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     renderLists();
   }
 
+  async function openPaneFromOutside(pane: string): Promise<void> {
+    if (!isOpen()) await open(null);
+    if (disposed || !isOpen()) return;
+    await openPane(pane);
+  }
+
   return {
     open,
+    openPane: openPaneFromOutside,
     close,
     isOpen,
     getActiveTarget: () => attached?.id ?? lastTargetId,

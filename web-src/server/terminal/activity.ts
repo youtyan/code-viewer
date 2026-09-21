@@ -39,22 +39,44 @@ import {
 } from "./agent-state";
 import { getActiveAgentScreenRules, reloadAgentScreenRules } from "./rules";
 
-/** 見に行く間隔。 */
-export const ACTIVITY_POLL_INTERVAL_MS = 3000;
+/**
+ * 見に行く間隔。エージェント一覧とヘッダの件数表示は、状態が変わってから
+ * 5 秒以内に出したい。作業中 → 待機は同じ画面を 2 回続けて見て初めて決まる
+ * (nextObservedState の hold) ので、2 周ぶん + 画面側の取り直し
+ * (AGENT_MONITOR_INTERVAL_MS) がそこに収まる値にする。
+ */
+export const ACTIVITY_POLL_INTERVAL_MS = 1500;
 
 /** これだけ画面が動かなければ止まったとみなす。 */
 export const ACTIVITY_IDLE_AFTER_MS = 15000;
 
 /**
- * 申告を「稼働」で上書きするのに必要な、連続して画面が変わった回数。
+ * 申告を「稼働」で上書きするのに要る、画面が動き続けた時間。
  *
- * 1 回では足りない。入力待ちの画面でも、時計や候補の再描画で一瞬だけ変わる
- * ことがある。数回続けて動いていれば、それは出力が流れているということ。
+ * 一瞬では足りない。入力待ちの画面でも、時計や候補の再描画で一瞬だけ変わる
+ * ことがある。これだけの間ずっと動いていれば、それは出力が流れているという
+ * こと。決めているのは回数ではなく時間 (元は 3 秒間隔 × 4 回 = 12 秒)。
  */
-export const OVERRIDE_CHANGE_STREAK = 4;
+export const OVERRIDE_MOTION_MS = 12_000;
 
-/** 1 周で capture-pane を掛けるペインの上限。続きは次の周で見る。 */
-export const MAX_PANES_PER_SWEEP = 12;
+/**
+ * 上の時間を、巡回 1 回ごとに数える回数に直したもの。間隔を変えても時間が
+ * 縮まないよう、間隔から導く。1 周で全ペインを見きれない (ペインが
+ * MAX_PANES_PER_SWEEP を超える) ときは 1 本を見る間隔が延びるので、実際の
+ * 時間はこれより長くなる側にしかずれない。
+ */
+export const OVERRIDE_CHANGE_STREAK = Math.ceil(
+  OVERRIDE_MOTION_MS / ACTIVITY_POLL_INTERVAL_MS,
+);
+
+/**
+ * 1 周で capture-pane を掛けるペインの上限。続きは次の周で見る。
+ *
+ * 1 本あたり 10ms 前後 (30 ペインで 1 周 0.3 秒弱、実測) なので、ふだんの
+ * 本数なら 1 周で全部を見る。上限はペインが極端に多いときに 1 周が間隔を
+ * 超えないための歯止め。
+ */
+export const MAX_PANES_PER_SWEEP = 40;
 
 export type ActivitySeen = {
   hash: string;

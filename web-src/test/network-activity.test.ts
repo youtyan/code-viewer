@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { createNetworkActivityTracker } from "../core/network-activity";
+import {
+  BACKGROUND_REQUEST_HEADER,
+  createNetworkActivityTracker,
+} from "../core/network-activity";
 import { deferred } from "./_test-helpers";
 
 describe("network activity tracker", () => {
@@ -17,6 +20,29 @@ describe("network activity tracker", () => {
     pending.resolve(new Response("ok"));
     await request;
     expect(tracker.getState()).toEqual({ inFlight: 0, cancellable: 0 });
+  });
+
+  test("background requests are neither counted nor cancelled", async () => {
+    const pending = deferred<Response>();
+    let requestSignal: AbortSignal | undefined | null;
+    const target = {
+      fetch: ((_input, init) => {
+        requestSignal = init?.signal;
+        return pending.promise;
+      }) as unknown as typeof fetch,
+    };
+    const tracker = createNetworkActivityTracker();
+    tracker.installFetch(target);
+
+    const request = target.fetch("/poll", {
+      headers: { [BACKGROUND_REQUEST_HEADER]: "1" },
+    });
+
+    expect(tracker.getState()).toEqual({ inFlight: 0, cancellable: 0 });
+    expect(tracker.cancelAll()).toBe(0);
+    expect(requestSignal).toBeUndefined();
+    pending.resolve(new Response("ok"));
+    expect(await (await request).text()).toBe("ok");
   });
 
   test("cancels active fetch calls", async () => {

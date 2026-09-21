@@ -33,11 +33,15 @@
       <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
       <a class="app-menu-item" data-route="history" href="/history">History</a>
       <a class="app-menu-item" data-route="worktree" href="/worktree">Worktrees</a>
+      <a class="app-menu-item" data-route="agents" href="/agents">Agents</a>
       <a class="app-menu-item" data-route="journal" href="/journal">Work Log</a>
       <span class="global-actions-sep app-menu-sep" aria-hidden="true"></span>
       <a class="app-menu-item" data-route="help" href="/help">Settings &amp; Help</a>
     </nav>
     <div class="global-actions">
+      <!-- エージェントの件数 (入力待ち / 作業中)。中身は views/agents/agent-status.ts が入れる。 -->
+      <button id="agent-status" class="agent-status" type="button" hidden></button>
+      <span class="global-actions-sep" aria-hidden="true"></span>
       <button id="search-btn" class="global-icon-action" title="search files (Ctrl+K) · Shift+click: grep (Ctrl+G)" aria-label="search files (Ctrl+K) · Shift+click: grep (Ctrl+G)"><span class="goi-icon" aria-hidden="true"></span></button>
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations"><span class="goi-icon" aria-hidden="true"></span><span id="annotations-count" hidden></span></button>
       <button id="doctor-btn" class="global-icon-action" title="environment doctor" aria-label="environment doctor"><span class="goi-icon" aria-hidden="true"></span><span id="doctor-badge" class="doctor-badge" hidden></span></button>

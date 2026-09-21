@@ -314,6 +314,59 @@ describe("hook reports win over guesses", () => {
     expect(getAgentState(PANE)?.updatedAt).toBe(3000);
   });
 
+  // 経過時間として出してよいのは、状態が変わった瞬間を見たときだけ。
+  // 見始めた時点で既にその状態だったもの (最初の観測) は下限でしかない。
+  test.each<{
+    name: string;
+    steps: {
+      state?: AgentState;
+      event?: AgentEvent;
+      source: "hook" | "screen" | "activity";
+    }[];
+    changeObserved: boolean;
+  }>([
+    {
+      name: "最初の画面観測は、変わった瞬間を見ていない",
+      steps: [{ state: "idle", source: "screen" }],
+      changeObserved: false,
+    },
+    {
+      name: "同じ状態を見続けても、見ていないまま",
+      steps: [
+        { state: "idle", source: "screen" },
+        { state: "idle", source: "activity" },
+      ],
+      changeObserved: false,
+    },
+    {
+      name: "観測中に状態が変わったら、変わった瞬間を見た",
+      steps: [
+        { state: "idle", source: "screen" },
+        { state: "working", source: "screen" },
+      ],
+      changeObserved: true,
+    },
+    {
+      name: "変わった後に同じ状態を見続けても、見たまま",
+      steps: [
+        { state: "idle", source: "screen" },
+        { state: "working", source: "screen" },
+        { state: "working", source: "activity" },
+      ],
+      changeObserved: true,
+    },
+    {
+      name: "申告は出来事の時刻なので、最初の 1 件でも見たことになる",
+      steps: [{ event: "ask", source: "hook" }],
+      changeObserved: true,
+    },
+  ])("changeObserved: $name", ({ steps, changeObserved }) => {
+    steps.forEach((step, index) => {
+      recordAgentState({ target: PANE, ...step, at: 1000 * (index + 1) });
+    });
+    expect(getAgentState(PANE)?.changeObserved).toBe(changeObserved);
+  });
+
   test("a later hook report overwrites an earlier one", () => {
     recordAgentState({ target: PANE, event: "ask", source: "hook" });
     recordAgentState({ target: PANE, event: "stop", source: "hook" });

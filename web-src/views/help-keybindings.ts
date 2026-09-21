@@ -294,6 +294,13 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
         },
       },
       {
+        selectors: [{ action: "goto-agents" }],
+        description: {
+          en: "Go to the agents screen",
+          ja: "エージェント画面へ移動",
+        },
+      },
+      {
         selectors: [{ action: "nav-back" }, { action: "nav-forward" }],
         description: {
           en: "Go back / forward through visited screens",

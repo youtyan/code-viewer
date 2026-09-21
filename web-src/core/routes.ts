@@ -76,6 +76,11 @@ export type AppRoute =
       range: DiffRange;
     }
   | {
+      /** tmux で動いているエージェントの一覧。全プロジェクトぶん。 */
+      screen: "agents";
+      range: DiffRange;
+    }
+  | {
       screen: "journal";
       tab?: "journal" | "tasks";
       date?: string;
@@ -112,6 +117,7 @@ export const SPA_PATHS = [
   "/journal",
   "/database",
   "/worktree",
+  "/agents",
   "/doctor",
 ] as const;
 export const APP_ENTRY_PATHS = ["/", "/index.html"] as const;
@@ -305,6 +311,8 @@ export function parseRoute(
         range,
       };
     }
+    case "/agents":
+      return { screen: "agents", range };
     case "/journal": {
       const tabRaw = params.get("tab");
       const tab =
@@ -474,6 +482,8 @@ export function buildRoute(route: AppRoute): string {
       const qs = params.toString();
       return `/history${qs ? `?${qs}` : ""}`;
     }
+    case "agents":
+      return "/agents";
     case "journal": {
       const params = new URLSearchParams();
       // "tasks" is the default tab, so only "journal" needs the explicit

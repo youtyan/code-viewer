@@ -243,7 +243,7 @@ function run(
 function runGitAsync(
   args: string[],
   cwd: string,
-  options: Pick<RunAsyncOptions, "signal" | "stdin" | "timeout"> = {},
+  options: Pick<RunAsyncOptions, "env" | "signal" | "stdin" | "timeout"> = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return runAsync(resolveGitArgs(args), cwd, {
     ...options,
@@ -582,6 +582,62 @@ export function repoRootResult(
   const stderr = res.stderr.trim();
   if (/not a git repository/i.test(stderr)) return { kind: "outside" };
   return { kind: "error", error: stderr || "git rev-parse failed" };
+}
+
+/**
+ * 任意のディレクトリが属するプロジェクト。エージェント一覧がペインの cwd を
+ * 束ねるのに使う。
+ *
+ * - root: 本体の作業ツリーのルート。worktree の中なら、その worktree ではなく
+ *   本体に寄せる (共通の .git の親)。bare や別置きの git ディレクトリで親が
+ *   決まらないときは、その作業ツリー自身
+ * - toplevel: そのディレクトリを含む作業ツリーのルート
+ *
+ * git 管理外と、git を呼べなかった場合を分けて返す (repoRootResult と同じく
+ * 英語のメッセージで見分ける)。ディレクトリが消えていても -C の失敗として
+ * error で返る。
+ */
+export async function projectRootResultAsync(
+  dir: string,
+  cwd: string,
+): Promise<
+  | { kind: "root"; root: string; toplevel: string }
+  | { kind: "outside" }
+  | { kind: "error"; error: string }
+> {
+  const res = await runGitAsync(
+    [
+      "git",
+      "-C",
+      dir,
+      "rev-parse",
+      "--path-format=absolute",
+      "--show-toplevel",
+      "--git-common-dir",
+    ],
+    cwd,
+    { env: { ...process.env, LC_ALL: "C" } },
+  );
+  if (res.code === 0) {
+    const [toplevel = "", commonDir = ""] = res.stdout.trimEnd().split("\n");
+    if (!toplevel || !commonDir) {
+      return {
+        kind: "error",
+        error: `unexpected git rev-parse output for ${dir}: ${JSON.stringify(res.stdout)}`,
+      };
+    }
+    const root = commonDir.endsWith("/.git") ? dirname(commonDir) : toplevel;
+    return { kind: "root", root, toplevel };
+  }
+  if (isCommandNotFoundResult("git", res)) {
+    return { kind: "error", error: commandNotFoundDetail("git") };
+  }
+  const stderr = res.stderr.trim();
+  if (/not a git repository/i.test(stderr)) return { kind: "outside" };
+  return {
+    kind: "error",
+    error: `git rev-parse failed for ${dir} (exit ${res.code}): ${stderr}`,
+  };
 }
 
 export function currentBranchAsync(cwd: string): Promise<string | null> {

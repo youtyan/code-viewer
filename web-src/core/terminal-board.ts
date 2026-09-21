@@ -113,7 +113,7 @@ function toRow(
  * tty を持たないシェル (引けなかった環境) は数えない。空文字どうしが一致して
  * 無関係なペインと結び付くのを防ぐ。
  */
-function linkShellsAndPanes(
+export function linkShellsAndPanes(
   shells: ShellSession[],
   clients: TmuxClient[],
 ): { paneToShell: Map<string, string>; shellToPane: Map<string, string> } {

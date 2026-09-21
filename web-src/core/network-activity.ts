@@ -11,6 +11,29 @@ type NetworkActivityOptions = {
   onChange?: (state: NetworkActivityState) => void;
 };
 
+/**
+ * 裏で定期的に取り直すだけのリクエストに付ける印 (値は "1")。
+ *
+ * これが付いた fetch は、通信中の表示 (#load-bar・取消ボタン) に数えず、
+ * 取消 (cancelAll) の対象にもしない。数秒おきの取り直しを数えると、どの画面
+ * にいても表示が点滅し続け、利用者が押した取消で関係の無い取り直しまで止まる。
+ * 付けてよいのは、失敗しても次の周期で取り直せる読み取りだけ。
+ */
+export const BACKGROUND_REQUEST_HEADER = "X-Code-Viewer-Background";
+
+function isBackgroundRequest(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+): boolean {
+  const fromInit = new Headers(init?.headers).get(BACKGROUND_REQUEST_HEADER);
+  if (fromInit === "1") return true;
+  return (
+    typeof Request !== "undefined" &&
+    input instanceof Request &&
+    input.headers.get(BACKGROUND_REQUEST_HEADER) === "1"
+  );
+}
+
 function abortReason(message: string): Error | DOMException {
   return typeof DOMException === "function"
     ? new DOMException(message, "AbortError")
@@ -77,6 +100,7 @@ export function createNetworkActivityTracker(
 
   function makeTrackedFetch(originalFetch: typeof fetch): typeof fetch {
     return ((input: RequestInfo | URL, init?: RequestInit) => {
+      if (isBackgroundRequest(input, init)) return originalFetch(input, init);
       const end = begin();
       const requestId = ++nextRequestId;
       const requestController = new AbortController();

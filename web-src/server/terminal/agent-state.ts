@@ -128,6 +128,14 @@ export function recordAgentState(
       input.source !== "hook" && previous?.state === next
         ? previous.updatedAt
         : at,
+    changeObserved:
+      input.source === "hook"
+        ? true
+        : previous === undefined
+          ? false
+          : previous.state === next
+            ? previous.changeObserved
+            : true,
     // 添え物は送られてこなければ前の値を残す。ターンの途中で毎回指示文を
     // 送り直させないため。
     lastPrompt: clip(input.lastPrompt ?? previous?.lastPrompt ?? ""),

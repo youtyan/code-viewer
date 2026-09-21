@@ -6373,6 +6373,53 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   }
 }
 
+/* ヘッダには「エージェント」のナビ項目と件数表示 (#agent-status) が加わり、
+   合わせて約 200px 増えた。その分だけ、下の 1100px / 900px で効いていた
+   ヘッダの詰め方を早めに効かせ、追加前にナビが収まっていた幅 (日本語・既定の
+   密度で 1257px 以上) では、追加後もナビが横スクロールにならないようにする。
+   1547px は、何も詰めないと追加後のナビがあふれ始める幅 (実測)。 */
+@media (max-width: 1547px) {
+  /* 件数表示そのものの詰め方は、その基本の規則より後 (Agents の節) に置く。 */
+  #agent-status + .global-actions-sep {
+    display: none;
+  }
+  #global-header {
+    gap: 10px;
+    padding-inline: 12px;
+  }
+  .app-menu {
+    gap: 1px;
+  }
+  .app-menu-item {
+    padding-inline: 7px;
+  }
+  .global-actions-sep.app-menu-sep {
+    margin-inline: 2px;
+  }
+  .global-actions {
+    gap: 4px;
+  }
+  .global-actions-sep {
+    margin-inline: 0;
+  }
+}
+/* 900px 以下で効いていた「稼働中」を点だけにする詰め方も、同じ理由で早める
+   (文字は title / aria-label に残る)。 */
+@media (max-width: 1400px) {
+  #status .status-label {
+    display: none;
+  }
+  #status {
+    padding: 0 6px 0 8px;
+  }
+  #status::before {
+    margin-right: 0;
+  }
+  .app-menu-item {
+    padding-inline: 6px;
+  }
+}
+
 @media (max-width: 1100px) {
   #global-header {
     gap: 10px;
@@ -16728,3 +16775,497 @@ html[data-theme="dark"] .tools-code span[style] {
 
 .gdp-source-tabs .gdp-copy-source { order: 2; margin-left: 0; }
 .gdp-source-line-jump { order: 1; }
+
+/* ============================================================
+   Agents — tmux で動いているエージェントの一覧 (/agents) と、
+   ヘッダの件数表示。状態の印・色は terminal の .terminal-mark /
+   .terminal-row-state-* をそのまま使い、ここでは並べ方だけを決める。
+   ============================================================ */
+
+.gdp-agents-page #topbar,
+.gdp-agents-page #sidebar,
+.gdp-agents-page #sidebar-toggle,
+.gdp-agents-page #sidebar-resizer,
+.gdp-agents-page #query-history-panel {
+  display: none !important;
+}
+
+body.gdp-agents-page {
+  --chrome-h: var(--global-header-h);
+}
+
+.gdp-agents-page #content {
+  margin-left: 0;
+  padding: var(--chrome-h) 0 0;
+  min-height: 0;
+  max-width: none;
+}
+
+.agents-page {
+  /* 見出し・ツールバー・行の左右の端に置く余白。どの箱も同じ値を使い、
+     左右で揃える。 */
+  --agents-gutter: 16px;
+  /* 行をプロジェクトの見出しより下げる幅 (見出しのツイスティの幅)。 */
+  --agents-row-indent: 20px;
+  height: var(--content-h);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* 重ねる表示では、下パネルのタブ列 (高さ固定、パネルの開閉に依存しない) が
+   常に画面の下端に乗り、#content はその分の padding-bottom を持つ
+   ("body:not(.app-panel-docked):has(.app-panel) #content")。この画面は自分の
+   箱の中でスクロールするので、箱をその分だけ短くしないと文書全体が
+   タブ列ぶん縦にあふれ、画面の右端に 2 本目のスクロールバーが出る。
+   画面内 (docked) では --content-h がタブ列を既に引いているので引かない。 */
+body:not(.app-panel-docked):has(.app-panel) .agents-page {
+  height: calc(var(--content-h) - var(--app-panel-tabbar-height));
+}
+
+.agents-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--ui-dense-row-h);
+  padding: 8px var(--agents-gutter);
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg-soft);
+  font-size: var(--ui-font-base);
+}
+.agents-title {
+  font-size: var(--ui-font-lg);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.agents-filter button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+/* 件数は 2 桁ぶんの幅を最初から持たせ、増減で札の幅が動かないようにする。 */
+.agents-filter-count {
+  min-width: 2ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+.agents-all-panes {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.agents-all-panes input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.agents-hint {
+  color: var(--fg-subtle);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+.agents-spacer {
+  flex: 1 1 auto;
+}
+.agents-notify {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.agents-notify-status {
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.agents-notify-denied {
+  color: var(--attn);
+  font-weight: 600;
+}
+.agents-notify-help {
+  min-width: 0;
+  max-width: 420px;
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-notify-on {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
+}
+.agents-notify-on::before {
+  content: "✓ ";
+  color: var(--success);
+}
+.agents-notify-on:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.agents-notify-error,
+.agents-server-problem {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg));
+  color: var(--danger);
+  font-size: var(--ui-font-xs);
+  font-weight: 700;
+  cursor: help;
+}
+.agents-refresh {
+  appearance: none;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: var(--ui-font-md);
+}
+.agents-refresh:hover {
+  background: var(--bg-mute);
+  color: var(--fg);
+}
+
+.agents-problems {
+  flex: 0 0 auto;
+  margin: 8px var(--agents-gutter) 0;
+  font-size: var(--ui-font-base);
+}
+.agents-problems summary {
+  color: var(--danger);
+  cursor: pointer;
+  font-weight: 600;
+}
+.agents-problems pre {
+  margin-top: 6px;
+}
+
+.agents-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  /* スクロールバーが出ても出なくても、行の右端の位置を変えない。 */
+  scrollbar-gutter: stable;
+  padding: 6px 0 12px;
+}
+
+.agents-project + .agents-project {
+  border-top: 1px solid var(--border-muted);
+}
+.agents-project-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px var(--agents-gutter);
+  background: var(--bg);
+}
+.agents-project-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  /* 左の余白は --agents-gutter が持つ。ここで足すと見出しだけ右へずれる。 */
+  padding: 4px 6px 4px 0;
+  cursor: pointer;
+}
+.agents-project-toggle:hover {
+  background: var(--bg-soft);
+}
+.agents-project-toggle:focus-visible,
+.agents-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.agents-project-name {
+  flex: 0 0 auto;
+  max-width: 40%;
+  font-size: var(--ui-font-md);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-project-path {
+  min-width: 0;
+  color: var(--fg-subtle);
+  font-size: var(--ui-font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-project-counts {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--ui-font-sm);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.agents-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.agents-server-link,
+.agents-server-here {
+  flex: 0 0 auto;
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+.agents-server-link {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.agents-server-link:hover {
+  background: var(--accent-subtle);
+}
+.agents-server-here {
+  color: var(--fg-subtle);
+}
+
+/* 行はプロジェクトのツイスティの分だけ字下げし、右は他と同じ余白。 */
+.agents-rows {
+  padding: 0 var(--agents-gutter) 6px
+    calc(var(--agents-gutter) + var(--agents-row-indent));
+}
+/* 1 行 = 1 ペイン。列: 未読・状態・種類・作業内容・作業ツリー・場所・経過。
+   列は全行で同じ幅を持たせ、空でも詰めない (詰めると行ごとに桁がずれる)。 */
+.agents-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 8px 92px 76px minmax(0, 1fr) minmax(0, max-content) minmax(0, 180px) 44px;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  padding: 4px 8px;
+  appearance: none;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--ui-font-base);
+  text-align: left;
+  cursor: pointer;
+}
+.agents-row:hover {
+  background: var(--bg-soft);
+}
+.agents-row.active {
+  background: var(--accent-subtle);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+/* 入力待ちの行だけを地の色で目立たせる。作業中・待機は印と文字だけ。 */
+.agents-row-waiting {
+  background: color-mix(in srgb, var(--attn) 9%, transparent);
+}
+.agents-row-waiting:hover {
+  background: color-mix(in srgb, var(--attn) 15%, transparent);
+}
+.agents-unread {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.agents-row.unread .agents-unread {
+  background: var(--accent);
+}
+.agents-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.agents-kind {
+  justify-self: start;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: var(--ui-font-xs);
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-kind-shell {
+  border-style: dashed;
+  color: var(--fg-subtle);
+}
+.agents-task,
+.agents-worktree,
+.agents-place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-task {
+  color: var(--fg);
+}
+.agents-row-idle .agents-task {
+  color: var(--fg-muted);
+}
+.agents-worktree {
+  max-width: 160px;
+  color: var(--accent);
+  font-size: var(--ui-font-sm);
+}
+.agents-place {
+  color: var(--fg-subtle);
+  font-size: var(--ui-font-sm);
+}
+.agents-age {
+  color: var(--fg-muted);
+  font-size: var(--ui-font-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.agents-empty {
+  max-width: 560px;
+  margin: 56px auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--ui-font-md);
+}
+.agents-empty strong {
+  font-size: var(--ui-font-title);
+}
+.agents-empty p {
+  margin: 0;
+  color: var(--fg-muted);
+  line-height: 1.6;
+}
+.agents-empty p:empty {
+  display: none;
+}
+
+/* ヘッダの件数表示。数字の桁は固定幅にして、件数が変わっても大きさが
+   動かないようにする。入力待ちが 1 件以上のときだけ注意の色にする。 */
+.agent-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--ui-control-sm);
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-subtle);
+  font: inherit;
+  font-size: var(--ui-font-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.agent-status[hidden] {
+  display: none;
+}
+.agent-status:hover {
+  background: var(--bg-mute);
+  border-color: var(--border-strong);
+  color: var(--fg-muted);
+}
+.agent-status:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.agent-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+/* ヘッダの詰め方 (max-width: 1547px、1100px の規則の前にある説明を参照) の
+   うち、件数表示の分。文字を畳んで印と数字だけにし (文字はツールチップに
+   残る)、間隔を詰める。基本の規則より後ろに置かないと効かない。 */
+@media (max-width: 1547px) {
+  .agent-status-label {
+    display: none;
+  }
+  .agent-status {
+    gap: 6px;
+    padding: 0 6px;
+  }
+  .agent-status-item {
+    gap: 3px;
+  }
+}
+.agent-status-count {
+  min-width: 2ch;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+/* 0 件のときは印も薄くしておく。常に色が付いていると誰も見なくなる。 */
+.agent-status .terminal-mark {
+  opacity: 0.45;
+}
+.agent-status-busy .agent-status-working {
+  color: var(--fg-muted);
+}
+.agent-status-busy .agent-status-working .terminal-mark {
+  opacity: 1;
+}
+.agent-status-attention {
+  border-color: color-mix(in srgb, var(--attn) 55%, var(--border));
+  background: color-mix(in srgb, var(--attn) 12%, var(--bg));
+  color: var(--fg);
+}
+.agent-status-attention:hover {
+  background: color-mix(in srgb, var(--attn) 20%, var(--bg));
+  border-color: var(--attn);
+  color: var(--fg);
+}
+.agent-status-attention .agent-status-waiting {
+  color: var(--attn);
+  font-weight: 700;
+}
+.agent-status-attention .agent-status-waiting .terminal-mark {
+  opacity: 1;
+}
+.agent-status-error {
+  color: var(--danger);
+}

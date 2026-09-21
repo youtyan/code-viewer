@@ -67,6 +67,7 @@ function states(values: Array<AgentStateRecord["state"]>): AgentStateRecord[] {
     state,
     source: "hook",
     updatedAt: 0,
+    changeObserved: true,
     lastPrompt: "",
     note: "",
   }));

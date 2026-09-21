@@ -742,7 +742,7 @@ export function defaultMcpTools(
       name: "code_viewer_terminal_list",
       title: "code-viewer terminal list",
       description:
-        "Returns the state of every terminal this server knows about, plus every observation error, using the same payload `code-viewer terminal list --json` emits: { states: [{ target, state, source, updatedAt, lastPrompt, note }], errors: [{ operation, target, at, detail, stack }] }. state is working | waiting | done | idle, where done means the turn finished and nobody has read the output yet. source is hook for a reported event, screen for a visible matched rule, and activity for the motion fallback. Read-only. Call this before asking the human anything — another agent may already be blocking them.",
+        "Returns the state of every terminal this server knows about, plus every observation error, using the same payload `code-viewer terminal list --json` emits: { states: [{ target, state, source, updatedAt, changeObserved, lastPrompt, note }], errors: [{ operation, target, at, detail, stack }] }. state is working | waiting | done | idle, where done means the turn finished and nobody has read the output yet. source is hook for a reported event, screen for a visible matched rule, and activity for the motion fallback. changeObserved is false when the state was already in place when this server first looked, so updatedAt is only a lower bound. Read-only. Call this before asking the human anything — another agent may already be blocking them.",
       inputSchema: {
         type: "object",
         properties: {

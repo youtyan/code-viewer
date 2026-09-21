@@ -2,6 +2,7 @@
 //
 // - POST /_agent/state    エージェントのフックが状態を申告する
 // - GET  /_agent/states   いま分かっている状態の一覧
+// - GET  /_agent/overview tmux の全ペインを状態・種類・プロジェクト付きで返す
 // - GET  /_agent/capture  ターミナル本文を前回の続きから取る
 // - GET  /_agent/images   出力から拾った画像パスを配信できる形に直す
 // - GET  /_agent/image    その 1 枚を配る (/_file は worktree 限定なので別口)
@@ -36,6 +37,11 @@ import {
 } from "./agent-state";
 import { captureTerminal, clampHistoryLines, terminalKindOf } from "./capture";
 import { resolveTerminalImage, resolveTerminalImages } from "./images";
+import {
+  type AgentOverviewDeps,
+  buildAgentOverview,
+  defaultAgentOverviewDeps,
+} from "./overview";
 import { savePastedImage } from "./paste";
 import {
   MAX_AGENT_SCREEN_RULES_BYTES,
@@ -210,6 +216,17 @@ async function handlePastePost(req: Request, cwd: string): Promise<Response> {
   });
 }
 
+/**
+ * 一覧の問い合わせ先。git とサーバ登録簿の結果を短く覚えておくので、
+ * リクエストごとに作り直さずプロセスで 1 つ持つ (cwd はプロセスの間変わらない)。
+ */
+let overviewDeps: AgentOverviewDeps | null = null;
+
+async function handleOverviewGet(cwd: string): Promise<Response> {
+  overviewDeps ??= defaultAgentOverviewDeps(cwd);
+  return json(await buildAgentOverview(overviewDeps));
+}
+
 export function handleAgentRoute(
   req: Request,
   url: URL,
@@ -229,6 +246,11 @@ export function handleAgentRoute(
         methods: ["GET"],
         sideEffect: false,
         handler: () => Promise.resolve(handleStatesGet(url)),
+      },
+      "/_agent/overview": {
+        methods: ["GET"],
+        sideEffect: false,
+        handler: () => handleOverviewGet(cwd),
       },
       "/_agent/rules": {
         methods: ["GET", "PUT", "DELETE"],

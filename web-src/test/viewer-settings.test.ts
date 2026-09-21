@@ -67,6 +67,10 @@ const EN_TEXT: ViewerSettingsText = {
   uploadsTitle: "Uploads",
   uploadEnabledLabel: "Allow uploads",
   uploadEnabledHelp: "Off means read-only.",
+  agentNotifyTitle: "Agent notifications",
+  agentNotifyWaitingLabel: "Notify when waiting",
+  agentNotifyDoneLabel: "Notify when finished",
+  agentNotifyHelp: "Needs browser permission.",
   datastoreTitle: "Datastores",
   datastoreInferFkLabel: "Infer FK",
   datastoreInferFkHelp: "Shows virtual links.",
@@ -114,6 +118,8 @@ function defaultValues(): ViewerSettingsValues {
     watchLimitMax: 65536,
     watchLimitDefault: 4096,
     uploadEnabled: true,
+    agentNotifyWaiting: true,
+    agentNotifyDone: true,
     inferFkRails: false,
     s3TooltipEnabled: true,
     scopeSource: "sample-project / server default",
@@ -160,6 +166,8 @@ function setup(
     excludeNames: ".DS_Store",
     watchLimit: 4096,
     uploadEnabled: true,
+    agentNotifyWaiting: true,
+    agentNotifyDone: true,
     inferFkRails: false,
     s3TooltipEnabled: true,
   };
@@ -393,6 +401,12 @@ describe("viewer settings form", () => {
     const upload = q<HTMLInputElement>(document, "#upload-enabled");
     upload.checked = false;
     fire(upload, "change");
+    const notifyWaiting = q<HTMLInputElement>(
+      document,
+      "#agent-notify-waiting",
+    );
+    notifyWaiting.checked = false;
+    fire(notifyWaiting, "change");
     q<HTMLButtonElement>(document, "#scope-settings-save").click();
     await Promise.resolve();
     await Promise.resolve();
@@ -407,6 +421,8 @@ describe("viewer settings form", () => {
           excludeNames: ".DS_Store",
           watchLimit: 2048,
           uploadEnabled: false,
+          agentNotifyWaiting: false,
+          agentNotifyDone: true,
           inferFkRails: false,
           s3TooltipEnabled: true,
         },

@@ -67,6 +67,7 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
 |---|---|---|
 | `SERVER_GENERATION` | `app.ts` | サーバ世代カウンタの唯一の権威。`app.ts` の 1 箇所からのみ更新 |
 | `NETWORK_ACTIVITY.installFetch(window)` | `app.ts` | 全 `fetch` を `AbortController` で包む。既にグローバル。迂回しない |
+| `BACKGROUND_REQUEST_HEADER` | `core/network-activity.ts` | 数秒おきの取り直し (読み取りのみ・失敗しても次の周期で取り直せるもの) に付ける印。`installFetch` の中で、通信中の表示と `cancelAll` の対象から外す。**迂回の口ではない。** 利用者の操作で始まる fetch に付けない |
 | `trackLoad<T>(promise): Promise<T>` | `app.ts` | promise を登録して `cancelInFlightRequests` の対象にする。view には `deps.trackLoad` で渡る。**この名前を使う** |
 | `cancelInFlightRequests()` | `app.ts` | 追跡中の fetch を全て abort する。ユーザー操作由来の中断で呼ぶ |
 | `handleFileDiff`（`generation` フィールド） | `preview.ts` | サーバハンドラの手本。モジュールレベルの `generation` カウンタを応答に載せる |

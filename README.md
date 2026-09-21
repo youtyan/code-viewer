@@ -64,6 +64,15 @@ Requires Node.js 20 or newer. Development uses
   the command that merges it back, or delete it. Create a worktree under
   `.worktrees/` (the dialog shows the exact path before you commit to it);
   deleting one removes its folder from disk and keeps the branch.
+- See every coding agent running in tmux on this machine from the `Agents`
+  item in the header menu (`g a`), grouped by project (the git repository of
+  each pane's folder; worktrees fold into their repository). Each row shows the
+  state (needs input / working / idle), the agent kind, how long it has been in
+  that state, the pane title, and its tmux location; needs-input rows come
+  first, and Enter opens the pane in the Terminal panel. A counter in the header
+  shows needs-input and working agents on every screen, changed rows get an
+  unread dot and the tab title an unread count, and desktop notifications can
+  be enabled from that screen (choose which changes notify under Settings).
 - Open files directly from the repository or diff view, including text-like
   config/prompt files and large generated files (virtualized source viewer
   with copy/open-full-view).

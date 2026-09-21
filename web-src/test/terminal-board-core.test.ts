@@ -99,6 +99,7 @@ function state(
     state: agentState,
     source: "hook",
     updatedAt,
+    changeObserved: true,
     lastPrompt: "",
     note: "",
   };
