@@ -41,7 +41,7 @@ import { getActiveAgentScreenRules, reloadAgentScreenRules } from "./rules";
 
 /**
  * 見に行く間隔。エージェント一覧とヘッダの件数表示は、状態が変わってから
- * 5 秒以内に出したい。作業中 → 待機は同じ画面を 2 回続けて見て初めて決まる
+ * 5 秒以内に出したい。作業中 → 待機は待機の表示を 2 回続けて見て初めて決まる
  * (nextObservedState の hold) ので、2 周ぶん + 画面側の取り直し
  * (AGENT_MONITOR_INTERVAL_MS) がそこに収まる値にする。
  */
@@ -114,6 +114,8 @@ export type ActivitySeen = {
   changedAt: number;
   /** 連続で画面が変わった回数。申告を上書きしてよいかの根拠になる。 */
   changeStreak: number;
+  /** 直前の観測で、作業中から待機への切替えを 1 回見送った。 */
+  held?: true;
 };
 
 const seen = new Map<string, ActivitySeen>();
@@ -196,14 +198,17 @@ export function nextObservedState(
   if (detected.kind === "state") {
     const contentChanged =
       previous !== undefined && previous.hash !== activity.seen.hash;
+    // 見送るのは 1 回だけ。待機中も飾りや時計で画面が動き続けるエージェントは
+    // 「同じ画面を 2 回」がいつまでも来ないので、2 回続けて待機の表示なら確定する。
     if (
       detected.state === "idle" &&
       previousState === "working" &&
-      contentChanged
+      contentChanged &&
+      !previous?.held
     ) {
       return {
         kind: "hold",
-        seen: activity.seen,
+        seen: { ...activity.seen, held: true },
         ruleId: detected.ruleId,
       };
     }
