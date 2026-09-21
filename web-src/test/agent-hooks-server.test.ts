@@ -410,6 +410,32 @@ describe("file properties", () => {
     expect(backups()).toEqual([]);
   });
 
+  test("a chain of links is judged at its end, not at the first hop", () => {
+    // 設定ファイルが「読み取り専用の場所にあるリンク」を経て、書ける実ファイルに
+    // 行き着く形。1 段目のリンク先だけを見て「書けない」と誤って伝えた経緯がある。
+    const writable = join(root, "writable");
+    mkdirSync(writable);
+    const real = join(writable, "settings.json");
+    writeFileSync(real, "{}\n", "utf8");
+    const readOnlyHop = join(root, "linked");
+    mkdirSync(readOnlyHop);
+    symlinkSync(real, join(readOnlyHop, "settings.json"));
+    chmodSync(readOnlyHop, 0o555);
+    symlinkSync(join(readOnlyHop, "settings.json"), settingsPath());
+
+    const status = agentHookStatus(target(), launcher);
+    expect(status.realPath).toBe(realpathSync(real));
+    expect(status.writeBlocked).toBe("");
+
+    const { result } = apply("install");
+    expect(lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(readOnlyHop, "settings.json")).isSymbolicLink()).toBe(
+      true,
+    );
+    expect(JSON.parse(readFileSync(real, "utf8")).hooks.Stop).toHaveLength(1);
+    expect(result.backupPath?.startsWith(configDir)).toBe(true);
+  });
+
   test("a formatting difference is announced before writing", () => {
     writeFileSync(settingsPath(), '{"model":"sample-model"}\n', "utf8");
     expect(

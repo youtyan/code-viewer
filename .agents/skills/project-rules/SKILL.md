@@ -1,6 +1,6 @@
 ---
 name: project-rules
-description: Use at the start of any implementation, investigation, or review in the code-viewer repository — before writing UI/CSS, a server route or CLI, a test, or adding a dependency. Entry point that routes to the area reference holding the actual rule; every rule here exists because this repository already had the accident it prevents. Triggers on "code-viewer", "プロジェクトルール", "style.css", "見切れ", "レイアウト", "エンドポイント追加", "ハンドラ", "テストが落ちた", "依存追加", "バンドル", "原因は", "dev サーバ", "project rules", "where does this live". 汎用の再利用スキャンは my-reuse-first、テストの網羅設計は my-writing-tests と併用する。
+description: Use at the start of any implementation, investigation, or review in the code-viewer repository — before writing UI/CSS, a server route or CLI, a test, or adding a dependency. Entry point that routes to the area reference holding the actual rule; every rule here exists because this repository already had the accident it prevents. Triggers on "code-viewer", "プロジェクトルール", "style.css", "見切れ", "レイアウト", "エンドポイント追加", "ハンドラ", "テストが落ちた", "依存追加", "バンドル", "原因は", "dev サーバ", "エージェント一覧", "状態判定", "フック", "アカウント", "プロジェクト切替", "project rules", "where does this live", "agents view". 汎用の再利用スキャンは my-reuse-first、テストの網羅設計は my-writing-tests と併用する。
 ---
 
 # code-viewer プロジェクトルール
@@ -34,6 +34,7 @@ description: Use at the start of any implementation, investigation, or review in
 | 依存を足す / 消す / 上げる。バンドル構成を変える | `.agents/skills/project-rules/references/dependencies.md` |
 | 「〜が原因だ」と口に出す・書く直前 | `.agents/skills/project-rules/references/diagnose.md` |
 | テストを書く / 落ちたテストを直す | `.agents/skills/project-rules/references/testing.md` |
+| エージェント一覧・状態判定・通知・フック・アカウント・使用量・起動・プロジェクトの登録と切替を触る / 調べる | `.agents/skills/project-rules/references/agents.md` |
 | リリース・npm publish・Trusted Publisher | `.agents/skills/project-npm-publish-procedure/SKILL.md` |
 
 複数に該当するなら複数読む。UI 変更はたいてい ui-layout か ui-surface のどちらか一方で足りる

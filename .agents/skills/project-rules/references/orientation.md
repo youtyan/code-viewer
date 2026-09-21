@@ -68,6 +68,9 @@
 | `pnpm test` | Vitest のみ |
 | `npm pack --dry-run` | 配布物の中身確認 |
 
+整形・lint の自動修正（`biome check --write` など）は、**自分が変えたファイルだけを指定して**掛ける。
+`web-src` のような広い範囲に掛けると、無関係なファイルの import の並びまで書き換わる（実際に 2 回起きた）。
+
 `pnpm run verify` の `check:bundle` は同じ入力から 2 回焼いてバイト一致を見る。
 非決定的な出力を持つ依存やプラグインはここで落ちる。
 
@@ -131,6 +134,12 @@ global の `my-reuse-first` に従う。ここに置くのは**このリポジ�
 | JSON をファイルに永続化 | `server/json-store.ts` `createJsonFileStore` |
 | CLI からサーバを叩く | `server/cli-helpers.ts` `requestJson` |
 | リクエスト元の検証 | `server/request-origin.ts` |
+| ユーザー単位（全リポジトリ・全サーバ共通）のファイルの置き場所 | `server/user-state-dir.ts` `codeViewerStateDir`（テストでは `CODE_VIEWER_TEST_STATE_DIR` で逃げる） |
+| 複数のサーバが同じファイルを読み書きするときの排他 | `server/file-lock.ts` `withFileLock` |
+| ユーザー単位の登録簿（JSON 1 ファイル）の読み方 | `server/registry-file.ts` `readRegistryFile` / `cachedRegistryReader` |
+| 利用者の設定ファイル（エージェントの settings.json など）を安全に書き換える | `server/terminal/settings-file.ts`（約束は `agents.md` の 4） |
+| 動いている全部の code-viewer サーバへ送る | `server/server-registry.ts` `listServerRegistry` + `server/terminal/hook-report.ts` `postToServer` |
+| 別のリポジトリのサーバを起こす・見つける・止める | `server/worktree/open.ts` `openWorktreeServer` / `runningServerResult` / `stopWorktreeServer` |
 | テストの共有ヘルパ | `web-src/test/_test-helpers.ts` / `_fake-dom.ts` / `_git-fixture.ts` / `_io-fixture.ts` / `_dialog-helpers.ts` |
 
 `alert` / `confirm` / `prompt` は `biome.jsonc` が error で落とすので書けない。
