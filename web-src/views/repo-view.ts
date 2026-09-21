@@ -1329,7 +1329,13 @@ export function createRepoView(deps: RepoViewDeps) {
       // 404 は「その ref にファイルが無い」という確定状態。取得失敗の {} と
       // 区別して返す (SSE 再描画ゲートが削除を変化として検知するため)。
       if (res.status === 404) return { missing: true };
-      if (!res.ok) return {};
+      if (!res.ok) {
+        // HEAD なので本文は無い。状態と対象を理由に残す。
+        return {
+          error:
+            `HEAD ${target.path} (${target.ref}) failed: ${res.status} ${res.statusText}`.trim(),
+        };
+      }
       const rawSize = res.headers.get("content-length");
       const size = rawSize == null ? NaN : Number(rawSize);
       return {
@@ -1340,8 +1346,13 @@ export function createRepoView(deps: RepoViewDeps) {
         commit_updated_at:
           res.headers.get("x-code-viewer-commit-updated-at") || undefined,
       };
-    } catch {
-      return {};
+    } catch (error) {
+      const failure = errorWithCause(
+        `could not read the details of ${target.path} (${target.ref})`,
+        error,
+      );
+      console.error("[code-viewer] file details failed", failure);
+      return { error: formatErrorDetail(failure) };
     }
   }
 
@@ -1382,6 +1393,11 @@ export function createRepoView(deps: RepoViewDeps) {
       formatFileDate(meta.updated_at || meta.commit_updated_at),
     );
     addItem("Created", formatFileDate(meta.created_at));
+    // 取れなかったことは「情報が無い」と区別して、ボタンの中に理由つきで出す。
+    if (meta.error) {
+      wrap.classList.add("failed");
+      addItem("Could not load details", meta.error);
+    }
     if (!list.childElementCount) {
       wrap.hidden = true;
       wrap.dataset.path = target.path;

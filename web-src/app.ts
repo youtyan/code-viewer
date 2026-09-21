@@ -6500,6 +6500,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         client: ACCOUNTS_CLIENT,
         getText: () => agentsText(STATE.language),
         openSettings: () => openSettingsAt(ACCOUNTS_SECTION_ID),
+        login: (account) => ACCOUNT_DIALOGS.login(account),
       })
     : null;
 

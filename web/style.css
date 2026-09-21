@@ -22,6 +22,7 @@
   --color-inset:        #efebf4;   /* 本文の中の一段沈んだ面 (コード・入力欄) */
   --color-raised:       #e6e1ee;   /* hover */
   --color-select:       #e0d6f2;   /* 選んでいる行 */
+  --color-overlay:      #fcfbfe;   /* 画面の上に浮く面 (ダイアログ・ポップオーバー) */
   --color-term:         #ede9f2;   /* ターミナル */
   --color-term-text:    #282331;
   --color-term-white:   #655c72;
@@ -149,6 +150,7 @@
   --color-inset:        #17151e;
   --color-raised:       #29243a;
   --color-select:       #342b48;
+  --color-overlay:      #28232f;
   --color-term:         #100f15;
   --color-term-text:    #e8e4ef;
   --color-term-select:  #9e87dd4d;
@@ -188,6 +190,7 @@
   --color-inset:        #141518;
   --color-raised:       #232428;
   --color-select:       #292b30;
+  --color-overlay:      #222327;
   --color-term:         #101113;
   --color-term-text:    #e6e7eb;
   --color-term-select:  #a9b8d040;
@@ -216,6 +219,7 @@
   --color-inset:        #1d1d1b;
   --color-raised:       #2e2e2a;
   --color-select:       #363631;
+  --color-overlay:      #2b2b27;
   --color-term:         #141413;
   --color-term-text:    #e9e7df;
   --color-term-select:  #b6c5b040;
@@ -281,6 +285,10 @@ html, body {
   --icon-md: calc(var(--space-unit) * 3.5);      /* 14 */
   --mark-size: calc(var(--space-unit) * 2.5);    /* 10: 状態の印 */
   --dot-size: calc(var(--space-unit) * 1.5);     /* 6:  未読・いま見ているの点 */
+  /* 画面の見出し (全体ボードの「Agents」) と節の見出し (「Accounts」)。
+     密度で比例させるため --space-unit から作る。 */
+  --ui-font-heading: calc(var(--space-unit) * 5.5);  /* 22 */
+  --ui-font-section: calc(var(--space-unit) * 4.5);  /* 18 */
   --chrome-h: calc(var(--global-header-h) + var(--topbar-h));
 
   /* ここから下の T2 は :root ではなく body に置く。**置き場所が仕様の一部**。
@@ -6154,80 +6162,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   background: var(--accent-muted);
   border-bottom: 1.5px solid var(--accent);
   border-radius: 2px;
-}
-.gdp-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1100;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  /* 確認の画面の上端の位置と、下に残す余白。高さの上限 (.gdp-dialog-wide) も
-     同じ値から求める。 */
-  --gdp-dialog-top: min(14vh, 120px);
-  --gdp-dialog-bottom-gap: 16px;
-  padding-top: var(--gdp-dialog-top);
-  background: rgba(31, 35, 40, 0.18);
-}
-[data-theme="dark"] .gdp-dialog-backdrop {
-  background: rgba(1, 4, 9, 0.45);
-}
-.gdp-dialog {
-  width: min(420px, calc(100vw - 32px));
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  box-shadow: 0 16px 48px rgba(31, 35, 40, 0.28);
-}
-.gdp-dialog-title {
-  padding: 14px 16px 0;
-  color: var(--fg);
-  font-size: 15px;
-  font-weight: 600;
-}
-.gdp-dialog-body {
-  padding: 8px 16px 14px;
-  color: var(--fg-muted);
-  font-size: 13px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-.gdp-dialog-input {
-  display: block;
-  width: 100%;
-  height: 32px;
-  margin-top: 10px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-}
-.gdp-dialog-input:focus {
-  outline: 2px solid var(--accent-subtle);
-  border-color: var(--accent);
-}
-.gdp-dialog-error {
-  min-height: 18px;
-  margin-top: 6px;
-  color: var(--danger);
-  font-size: 12px;
-  line-height: 18px;
-}
-.gdp-dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--border);
-}
-.gdp-dialog-danger {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-.gdp-dialog-danger:hover {
-  background: var(--diff-del-bg);
 }
 .db-connection-form {
   display: grid;
@@ -17205,81 +17139,6 @@ html[data-theme="dark"] .tools-code span[style] {
   overflow-wrap: anywhere;
 }
 
-/* 確認の画面。書き込む JSON をそのまま見せるので横に広げる (画面中央の
-   overlay なので viewport 基準でよい)。 */
-.gdp-dialog-wide {
-  width: min(720px, calc(100vw - 32px));
-  /* 中身が長くても押すボタンが画面の外に出ないよう、本文だけを
-     スクロールさせる (画面中央の overlay なので viewport 基準でよい)。 */
-  display: flex;
-  flex-direction: column;
-  max-height: calc(100vh - var(--gdp-dialog-top) - var(--gdp-dialog-bottom-gap));
-}
-.gdp-dialog-wide .gdp-dialog-body {
-  min-height: 0;
-  overflow: auto;
-}
-.agent-hooks-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.agent-hooks-dialog-field {
-  display: grid;
-  grid-template-columns: 11em minmax(0, 1fr);
-  gap: 8px;
-  align-items: baseline;
-}
-.agent-hooks-dialog-field code {
-  overflow-wrap: anywhere;
-  color: var(--fg);
-  font-size: 12px;
-}
-.agent-hooks-dialog-label {
-  color: var(--fg-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-.agent-hooks-dialog-code {
-  max-height: 260px;
-  margin: 4px 0 0;
-  padding: 8px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-soft);
-  color: var(--fg);
-  font-size: 12px;
-  line-height: 18px;
-  /* 書く中身を横スクロールなしで全部読めるように折り返す。コピーする
-     文字列は元の JSON なので、折り返しの影響を受けない。 */
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.agent-hooks-dialog-steps {
-  margin: 0;
-  padding-left: 20px;
-  color: var(--fg);
-}
-.agent-hooks-dialog-steps li + li {
-  margin-top: 4px;
-}
-.agent-hooks-dialog-details summary {
-  color: var(--fg-muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-.agent-hooks-dialog-details > * + * {
-  margin-top: 6px;
-}
-.agent-hooks-dialog-notes {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--fg);
-}
-.agent-hooks-dialog-notes li + li {
-  margin-top: 4px;
-}
 
 
 /* Keep navigation and detail controls readable at every desktop density. */
@@ -17357,459 +17216,6 @@ body.gdp-agents-page {
   padding: var(--chrome-h) 0 0;
   min-height: 0;
   max-width: none;
-}
-
-.agents-page {
-  /* 見出し・ツールバー・行の左右の端に置く余白。どの箱も同じ値を使い、
-     左右で揃える。 */
-  --agents-gutter: 16px;
-  /* 行をプロジェクトの見出しより下げる幅 (見出しのツイスティの幅)。 */
-  --agents-row-indent: 20px;
-  height: var(--content-h);
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-  color: var(--fg);
-}
-
-/* 重ねる表示では、下パネルのタブ列 (高さ固定、パネルの開閉に依存しない) が
-   常に画面の下端に乗り、#content はその分の padding-bottom を持つ
-   ("body:not(.app-panel-docked):has(.app-panel) #content")。この画面は自分の
-   箱の中でスクロールするので、箱をその分だけ短くしないと文書全体が
-   タブ列ぶん縦にあふれ、画面の右端に 2 本目のスクロールバーが出る。
-   画面内 (docked) では --content-h がタブ列を既に引いているので引かない。 */
-body:not(.app-panel-docked):has(.app-panel) .agents-page {
-  height: calc(var(--content-h) - var(--app-panel-tabbar-height));
-}
-
-.agents-header {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: var(--ui-dense-row-h);
-  padding: 8px var(--agents-gutter);
-  border-bottom: 1px solid var(--border-muted);
-  background: var(--bg-soft);
-  font-size: var(--ui-font-base);
-}
-.agents-title {
-  font-size: var(--ui-font-lg);
-  font-weight: 700;
-  white-space: nowrap;
-}
-.agents-filter button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-/* 件数は 2 桁ぶんの幅を最初から持たせ、増減で札の幅が動かないようにする。 */
-.agents-filter-count {
-  min-width: 2ch;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--fg-muted);
-  font-weight: 400;
-}
-.agents-all-panes {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--fg-muted);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.agents-all-panes input {
-  margin: 0;
-  accent-color: var(--accent);
-}
-.agents-hint {
-  color: var(--fg-subtle);
-  font-size: var(--ui-font-sm);
-  white-space: nowrap;
-}
-.agents-spacer {
-  flex: 1 1 auto;
-}
-.agents-notify {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.agents-notify-status {
-  color: var(--fg-muted);
-  white-space: nowrap;
-}
-.agents-notify-denied {
-  color: var(--attn);
-  font-weight: 600;
-}
-.agents-notify-help {
-  min-width: 0;
-  max-width: 420px;
-  color: var(--fg-muted);
-  font-size: var(--ui-font-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agents-notify-on {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--fg-muted);
-  font: inherit;
-  cursor: pointer;
-  padding: 0;
-  white-space: nowrap;
-}
-.agents-notify-on::before {
-  content: "✓ ";
-  color: var(--success);
-}
-.agents-notify-on:hover {
-  color: var(--accent);
-  text-decoration: underline;
-}
-.agents-notify-error,
-.agents-server-problem {
-  display: inline-grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--danger) 14%, var(--bg));
-  color: var(--danger);
-  font-size: var(--ui-font-xs);
-  font-weight: 700;
-  cursor: help;
-}
-.agents-refresh {
-  appearance: none;
-  width: var(--ui-control-sm);
-  height: var(--ui-control-sm);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg-muted);
-  cursor: pointer;
-  font-size: var(--ui-font-md);
-}
-.agents-refresh:hover {
-  background: var(--bg-mute);
-  color: var(--fg);
-}
-
-/* フックが未設定のときだけ出す 1 行 (agents-view.ts の hookHint)。 */
-.agents-hook-hint {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 8px var(--agents-gutter) 0;
-  padding: 4px 6px 4px 10px;
-  border: 1px solid var(--accent-muted);
-  border-radius: 6px;
-  background: var(--accent-subtle);
-  color: var(--fg);
-  font-size: var(--ui-font-base);
-}
-.agents-hook-hint[hidden] {
-  display: none;
-}
-.agents-hook-hint-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agents-hook-hint-open {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  font-weight: 600;
-  padding: 0;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.agents-hook-hint-open:hover {
-  text-decoration: underline;
-}
-.agents-hook-hint-close {
-  appearance: none;
-  flex: 0 0 auto;
-  width: var(--ui-control-sm);
-  height: var(--ui-control-sm);
-  margin-left: auto;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--fg-muted);
-  font-size: var(--ui-font-md);
-  cursor: pointer;
-}
-.agents-hook-hint-close:hover {
-  background: var(--bg-mute);
-  color: var(--fg);
-}
-
-.agents-problems {
-  flex: 0 0 auto;
-  margin: 8px var(--agents-gutter) 0;
-  font-size: var(--ui-font-base);
-}
-.agents-problems summary {
-  color: var(--danger);
-  cursor: pointer;
-  font-weight: 600;
-}
-.agents-problems pre {
-  margin-top: 6px;
-}
-
-.agents-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-  /* スクロールバーが出ても出なくても、行の右端の位置を変えない。 */
-  scrollbar-gutter: stable;
-  padding: 6px 0 12px;
-}
-
-.agents-project + .agents-project {
-  border-top: 1px solid var(--border-muted);
-}
-.agents-project-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px var(--agents-gutter);
-  background: var(--bg);
-}
-.agents-project-toggle {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  appearance: none;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  /* 左の余白は --agents-gutter が持つ。ここで足すと見出しだけ右へずれる。 */
-  padding: 4px 6px 4px 0;
-  cursor: pointer;
-}
-.agents-project-toggle:hover {
-  background: var(--bg-soft);
-}
-.agents-project-toggle:focus-visible,
-.agents-row:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-.agents-project-name {
-  flex: 0 0 auto;
-  max-width: 40%;
-  font-size: var(--ui-font-md);
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agents-project-path {
-  min-width: 0;
-  color: var(--fg-subtle);
-  font-size: var(--ui-font-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agents-project-counts {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-size: var(--ui-font-sm);
-  color: var(--fg-muted);
-  font-variant-numeric: tabular-nums;
-}
-.agents-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.agents-server-link,
-.agents-server-here {
-  flex: 0 0 auto;
-  font-size: var(--ui-font-sm);
-  white-space: nowrap;
-}
-.agents-server-link {
-  appearance: none;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  font-size: var(--ui-font-sm);
-  text-decoration: none;
-  cursor: pointer;
-}
-.agents-server-link:hover {
-  background: var(--accent-subtle);
-}
-/* 動いていないプロジェクトの「開く」(押すと起こしてから移る)。 */
-.agents-server-link.stopped {
-  color: var(--fg-muted);
-}
-/* 起こしている間。大きさは変えず、押せなくして色だけ変える。 */
-.agents-server-link:disabled {
-  cursor: progress;
-  background: var(--bg-soft);
-  color: var(--fg-subtle);
-}
-.agents-server-here {
-  color: var(--fg-subtle);
-}
-
-/* 行はプロジェクトのツイスティの分だけ字下げし、右は他と同じ余白。 */
-.agents-rows {
-  padding: 0 var(--agents-gutter) 6px
-    calc(var(--agents-gutter) + var(--agents-row-indent));
-}
-/* 1 行 = 1 ペイン。列: 未読・状態・種類・作業内容・作業ツリー・場所・経過。
-   列は全行で同じ幅を持たせ、空でも詰めない (詰めると行ごとに桁がずれる)。 */
-.agents-row {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 8px 128px 76px minmax(0, 1fr) minmax(0, max-content) minmax(0, 180px) 44px;
-  align-items: center;
-  gap: 10px;
-  min-height: 30px;
-  padding: 4px 8px;
-  appearance: none;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: var(--ui-font-base);
-  text-align: left;
-  cursor: pointer;
-}
-.agents-row:hover {
-  background: var(--bg-soft);
-}
-.agents-row.active {
-  background: var(--accent-subtle);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-/* 入力待ちの行だけを地の色で目立たせる。作業中・待機は印と文字だけ。 */
-.agents-row-waiting {
-  background: color-mix(in srgb, var(--attn) 9%, transparent);
-}
-.agents-row-waiting:hover {
-  background: color-mix(in srgb, var(--attn) 15%, transparent);
-}
-.agents-unread {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-.agents-row.unread .agents-unread {
-  background: var(--accent);
-}
-.agents-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--ui-font-sm);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.agents-kind {
-  justify-self: start;
-  max-width: 100%;
-  padding: 0 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg-muted);
-  font-size: var(--ui-font-xs);
-  line-height: 16px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agents-kind-shell {
-  border-style: dashed;
-  color: var(--fg-subtle);
-}
-.agents-task,
-.agents-worktree,
-.agents-place {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agents-task {
-  color: var(--fg);
-}
-.agents-row-idle .agents-task {
-  color: var(--fg-muted);
-}
-.agents-worktree {
-  max-width: 160px;
-  color: var(--accent);
-  font-size: var(--ui-font-sm);
-}
-.agents-place {
-  color: var(--fg-subtle);
-  font-size: var(--ui-font-sm);
-}
-.agents-age {
-  color: var(--fg-muted);
-  font-size: var(--ui-font-sm);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.agents-empty {
-  max-width: 560px;
-  margin: 56px auto;
-  padding: 0 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: var(--ui-font-md);
-}
-.agents-empty strong {
-  font-size: var(--ui-font-title);
-}
-.agents-empty p {
-  margin: 0;
-  color: var(--fg-muted);
-  line-height: 1.6;
-}
-.agents-empty p:empty {
-  display: none;
 }
 
 /* ヘッダの件数表示。数字の桁は固定幅にして、件数が変わっても大きさが
@@ -17896,286 +17302,6 @@ body:not(.app-panel-docked):has(.app-panel) .agents-page {
 }
 .agent-status-error {
   color: var(--danger);
-}
-
-/* アカウントの帯 (views/agents/accounts-band.ts)。一覧の上、ヘッダの下。
-   カードは横に並べて折り返す。状態の変化は色と文字だけで、カードの寸法は
-   変えない。80% 以上は注意の色に「注意」の文字を添える (色だけに頼らない)。 */
-.agents-accounts {
-  flex: 0 0 auto;
-  margin: 8px var(--agents-gutter) 0;
-  font-size: var(--ui-font-base);
-}
-/* 既定だけで使用量も無いときの入口。騒がしくしない。 */
-.agents-accounts.entry {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.agents-accounts-entry,
-.agents-accounts-manage,
-.agents-account-name {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--fg-muted);
-  font: inherit;
-  padding: 0;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.agents-accounts-entry {
-  font-size: var(--ui-font-sm);
-}
-.agents-accounts-entry::after {
-  content: " ›";
-}
-.agents-accounts-entry:hover,
-.agents-accounts-manage:hover,
-.agents-account-name:hover {
-  color: var(--accent);
-  text-decoration: underline;
-}
-.agents-accounts-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.agents-accounts-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  appearance: none;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  padding: 2px 6px 2px 0;
-  cursor: pointer;
-}
-.agents-accounts-toggle:hover {
-  background: var(--bg-soft);
-}
-.agents-accounts-title {
-  font-weight: 600;
-}
-.agents-accounts-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 8px;
-  margin-top: 6px;
-}
-.agents-account-card {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-}
-.agents-account-card.warn {
-  border-color: color-mix(in srgb, var(--attn) 55%, var(--border));
-  background: color-mix(in srgb, var(--attn) 6%, var(--bg));
-}
-.agents-account-card-unregistered {
-  border-style: dashed;
-}
-.agents-account-card-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.agents-account-card-head .agents-kind {
-  flex: 0 0 auto;
-}
-.agents-account-card-head .gdp-btn {
-  margin-left: auto;
-  flex: 0 0 auto;
-}
-.agents-account-name {
-  min-width: 0;
-  color: var(--fg);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.agents-account-login {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  color: var(--fg-muted);
-  font-size: var(--ui-font-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agents-account-login-logged-in .agent-hooks-mark {
-  border-color: var(--success);
-  background: var(--success);
-}
-.agents-account-login-logged-out {
-  color: var(--attn);
-}
-.agents-account-login-logged-out .agent-hooks-mark {
-  border-color: var(--attn);
-}
-.agents-account-login-unknown .agent-hooks-mark,
-.agents-account-login-no-config-dir .agent-hooks-mark {
-  border-style: dashed;
-}
-.agents-account-usage {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  color: var(--fg-muted);
-  font-size: var(--ui-font-sm);
-}
-.agents-account-window {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-  white-space: nowrap;
-}
-.agents-account-window-value {
-  color: var(--fg);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.agents-account-window.warn .agents-account-window-value,
-.agents-account-warn {
-  color: var(--attn);
-}
-.agents-account-warn {
-  font-weight: 700;
-}
-.agents-account-window.expired .agents-account-window-value {
-  color: var(--fg-subtle);
-  text-decoration: line-through;
-}
-.agents-account-reset {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.agents-account-usage-none {
-  color: var(--fg);
-}
-.agents-account-usage-why {
-  color: var(--fg-subtle);
-  font-size: var(--ui-font-xs);
-  line-height: 1.4;
-}
-.agents-account-foot {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  color: var(--fg-subtle);
-  font-size: var(--ui-font-xs);
-  white-space: nowrap;
-  overflow: hidden;
-}
-.agents-account-observed.stale {
-  color: var(--attn);
-}
-.agents-accounts-message {
-  margin: 6px 0 0;
-}
-.agents-launch {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-.agents-project-launch {
-  flex: 0 0 auto;
-  appearance: none;
-  width: var(--ui-control-sm);
-  height: var(--ui-control-sm);
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg-muted);
-  font: inherit;
-  font-size: var(--ui-font-md);
-  line-height: 1;
-  cursor: pointer;
-}
-.agents-project-launch:hover {
-  border-color: var(--border);
-  background: var(--bg-soft);
-  color: var(--fg);
-}
-.agents-project-menu {
-  display: inline-grid;
-  place-items: center;
-}
-.agents-project-menu svg {
-  width: 14px;
-  height: 14px;
-  fill: currentColor;
-}
-/* エージェントの居ない登録プロジェクト: 見出し 1 行だけ。畳む印は出さない。 */
-.agents-project-empty .terminal-tree-twisty {
-  visibility: hidden;
-}
-.agents-project-empty .agents-project-name {
-  font-weight: 600;
-  color: var(--fg-muted);
-}
-/* 起こしている最中・失敗。見出しのすぐ下に、行と同じ字下げで出す。 */
-.agents-project-activity {
-  margin: 0 var(--agents-gutter) 6px
-    calc(var(--agents-gutter) + var(--agents-row-indent));
-  font-size: var(--ui-font-sm);
-  color: var(--fg-muted);
-}
-.agents-project-starting::before {
-  content: "◌ ";
-  color: var(--accent);
-}
-.agents-project-failed {
-  padding: 6px 8px;
-  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--danger) 6%, var(--bg));
-}
-.agents-project-activity-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--danger);
-}
-.agents-project-failed pre {
-  margin: 6px 0 0;
-  max-height: 12em;
-  overflow: auto;
-  white-space: pre-wrap;
-}
-/* 行のアカウント名。登録アカウントがあるか、既定以外で動くものがあるとき
-   だけ列を足す (既定だけの人には列ごと出さない)。 */
-.agents-list.with-accounts .agents-row {
-  grid-template-columns: 8px 128px 76px 96px minmax(0, 1fr) minmax(0, max-content) minmax(0, 180px) 44px;
-}
-.agents-account {
-  min-width: 0;
-  color: var(--fg-muted);
-  font-size: var(--ui-font-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agents-account-unregistered {
-  color: var(--attn);
-}
-.agents-account-unknown {
-  color: var(--fg-subtle);
 }
 
 /* 設定画面の「アカウント」(views/agents/accounts-settings.ts)。行の見た目は
@@ -19363,21 +18489,25 @@ button.brand[aria-expanded="true"] {
   box-shadow: var(--glow-select);
 }
 /* 本文: 左端はパンくずと同じ --pad-doc の線。目次は右の細い列。 */
-.gdp-source-viewer:has(> .gdp-markdown-layout) {
+.gdp-source-viewer:has(> .gdp-markdown-layout),
+.gdp-repo-readme > .d2h-file-wrapper {
   container: doc-view / inline-size;
 }
-.gdp-source-viewer .gdp-markdown-layout {
+.gdp-source-viewer .gdp-markdown-layout,
+.gdp-repo-readme .gdp-markdown-layout {
   --toc-w: calc(var(--space-unit) * 52);
   grid-template-columns: minmax(0, 1fr) var(--toc-w);
   gap: var(--space-6);
   padding: var(--space-4) var(--pad-doc) var(--space-6);
 }
-.gdp-source-viewer .gdp-markdown-layout > .gdp-markdown-preview {
+.gdp-source-viewer .gdp-markdown-layout > .gdp-markdown-preview,
+.gdp-repo-readme .gdp-markdown-layout > .gdp-markdown-preview {
   grid-column: 1;
   grid-row: 1;
   padding: 0;
 }
-.gdp-source-viewer .gdp-markdown-toc {
+.gdp-source-viewer .gdp-markdown-toc,
+.gdp-repo-readme .gdp-markdown-toc {
   --toc-mark-w: 2px;
   grid-column: 2;
   grid-row: 1;
@@ -19385,7 +18515,8 @@ button.brand[aria-expanded="true"] {
   padding: 0;
   font-size: var(--ui-font-sm);
 }
-.gdp-source-viewer .gdp-markdown-toc::before {
+.gdp-source-viewer .gdp-markdown-toc::before,
+.gdp-repo-readme .gdp-markdown-toc::before {
   margin: 0 0 var(--space-2);
   padding: 0 0 0 var(--space-3);
   border-bottom: 0;
@@ -19394,7 +18525,10 @@ button.brand[aria-expanded="true"] {
 /* 目次の項目: 文字は補助の色、選んでいる項目は左の細い線だけ (面は付けない)。 */
 .gdp-source-viewer .gdp-markdown-toc li > a,
 .gdp-source-viewer .gdp-markdown-toc li > a:hover,
-.gdp-source-viewer .gdp-markdown-toc li > a.active {
+.gdp-source-viewer .gdp-markdown-toc li > a.active,
+.gdp-repo-readme .gdp-markdown-toc li > a,
+.gdp-repo-readme .gdp-markdown-toc li > a:hover,
+.gdp-repo-readme .gdp-markdown-toc li > a.active {
   display: flex;
   align-items: center;
   min-height: var(--ui-row-h);
@@ -19405,17 +18539,21 @@ button.brand[aria-expanded="true"] {
   color: var(--color-text-3);
   font-weight: 400;
 }
-.gdp-source-viewer .gdp-markdown-toc li > a:hover {
+.gdp-source-viewer .gdp-markdown-toc li > a:hover,
+.gdp-repo-readme .gdp-markdown-toc li > a:hover {
   color: var(--color-text);
 }
-.gdp-source-viewer .gdp-markdown-toc li > a.active {
+.gdp-source-viewer .gdp-markdown-toc li > a.active,
+.gdp-repo-readme .gdp-markdown-toc li > a.active {
   border-left-color: var(--color-accent);
   color: var(--color-text);
 }
-.gdp-source-viewer .gdp-markdown-toc li.level-2 > a {
+.gdp-source-viewer .gdp-markdown-toc li.level-2 > a,
+.gdp-repo-readme .gdp-markdown-toc li.level-2 > a {
   padding-left: calc(var(--space-3) - var(--toc-mark-w) + var(--indent-step));
 }
-.gdp-source-viewer .gdp-markdown-toc li.level-3 > a {
+.gdp-source-viewer .gdp-markdown-toc li.level-3 > a,
+.gdp-repo-readme .gdp-markdown-toc li.level-3 > a {
   padding-left: calc(var(--space-3) - var(--toc-mark-w) + var(--indent-step) * 2);
 }
 /* 面が狭いときは、ファイル名を削らないよう表示の切替を 2 行目へ回す。 */
@@ -19440,10 +18578,12 @@ button.brand[aria-expanded="true"] {
 }
 /* 面が狭いときは目次を畳み、本文だけにする。 */
 @container doc-view (max-width: 900px) {
-  .gdp-source-viewer .gdp-markdown-layout {
+  .gdp-source-viewer .gdp-markdown-layout,
+  .gdp-repo-readme .gdp-markdown-layout {
     grid-template-columns: minmax(0, 1fr);
   }
-  .gdp-source-viewer .gdp-markdown-toc {
+  .gdp-source-viewer .gdp-markdown-toc,
+  .gdp-repo-readme .gdp-markdown-toc {
     display: none;
   }
 }
@@ -20089,5 +19229,1393 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head {
    tree / flat の切替は出さず、その幅を対象の ref の値に回す。 */
 body.gdp-repo-page #sidebar .sb-head > .sb-view-seg,
 body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head > .sb-view-seg {
+  display: none;
+}
+
+/* ---- 全体ボード (/agents。views/agents/agents-view.ts・accounts-band.ts・usage-meter.ts) ----
+   面は 3 つ: 画面の地 (--color-ground)、アカウントのカード (--color-doc)、
+   表の行 (地のまま。hover と選択だけ面を付ける)。外周の線は引かない。
+   画面の左右の余白は --pad-doc。表とカードはその線から始め、表の中の文字は
+   さらに --pad-text 内側 (行の選択の面は表の端から描く)。 */
+.agents-page {
+  --agents-grid:
+    minmax(0, 1.3fr) minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 2fr)
+    minmax(0, 1fr) minmax(0, 0.7fr) var(--dot-size);
+  height: var(--content-h);
+  min-height: 0;
+  overflow: auto;
+  background: var(--color-ground);
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+  padding-bottom: var(--space-6);
+}
+/* 重ねる表示では、下パネルのタブ列 (高さ固定、パネルの開閉に依存しない) が
+   常に画面の下端に乗り、#content はその分の padding-bottom を持つ。この画面は
+   自分の箱の中でスクロールするので、箱をその分だけ短くする (2 本目の
+   スクロールバーを出さない)。画面内 (docked) では --content-h が引いてある。 */
+body:not(.app-panel-docked):has(.app-panel) .agents-page {
+  height: calc(var(--content-h) - var(--app-panel-tabbar-height));
+}
+.agents-spacer {
+  flex: 1 1 auto;
+}
+.agents-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(var(--space-unit) * 14);
+  padding: 0 var(--pad-doc);
+}
+.agents-title {
+  margin: 0;
+  font-size: var(--ui-font-heading);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.agents-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--ui-font-section);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+button.agents-section-title {
+  cursor: pointer;
+}
+button.agents-section-title:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+/* 件数の札。2 桁ぶんの幅を最初から持たせ、増減で並びが動かないようにする。 */
+.agents-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: calc(var(--space-unit) * 5.5);
+  height: calc(var(--space-unit) * 5.5);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-raised);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.agents-primary,
+.agents-secondary,
+.agents-text-action,
+.agents-icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.agents-primary {
+  height: var(--ui-control-md);
+  padding: 0 var(--space-4);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 600;
+}
+.agents-primary:hover {
+  background: var(--color-accent-strong);
+}
+.agents-primary-icon svg {
+  display: block;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  fill: currentColor;
+}
+.agents-secondary {
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-3);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  color: var(--color-text);
+}
+.agents-secondary:hover {
+  background: var(--color-raised);
+}
+.agents-secondary:disabled,
+.agents-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.agents-text-action {
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  background: none;
+  color: var(--color-text-2);
+}
+.agents-text-action:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.agents-icon-action {
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  padding: 0;
+  background: none;
+  color: var(--color-text-2);
+}
+.agents-icon-action:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.agents-icon-action svg {
+  display: block;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  fill: currentColor;
+}
+.agents-primary:focus-visible,
+.agents-secondary:focus-visible,
+.agents-text-action:focus-visible,
+.agents-icon-action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+/* 通知の許可。押せる塊は右上の操作と同じ高さ。 */
+.agents-notify {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-2);
+}
+.agents-notify-status {
+  color: var(--color-text-3);
+}
+.agents-notify-denied {
+  color: var(--color-waiting);
+}
+.agents-notify-help {
+  max-width: calc(var(--space-unit) * 80);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.agents-notify-error,
+.agents-server-problem {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: calc(var(--space-unit) * 4.5);
+  height: calc(var(--space-unit) * 4.5);
+  border-radius: 50%;
+  background: var(--color-failed);
+  color: var(--color-on-accent);
+  font-size: var(--ui-font-xs);
+  font-weight: 700;
+  cursor: help;
+}
+/* フックの案内 1 行。強い枠を付けず、カードと同じ面に文字を置く。 */
+.agents-hook-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 var(--pad-doc) var(--space-4);
+  padding: 0 var(--space-1) 0 var(--space-4);
+  min-height: var(--ui-control-md);
+  border-radius: var(--radius-md);
+  background: var(--color-doc);
+  color: var(--color-text-2);
+}
+.agents-hook-hint[hidden] {
+  display: none;
+}
+.agents-hook-hint-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-hook-hint-open {
+  padding: 0 var(--space-2);
+  height: var(--ui-control-sm);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.agents-hook-hint-open:hover {
+  background: var(--color-raised);
+}
+.agents-problems {
+  margin: 0 var(--pad-doc) var(--space-4);
+  color: var(--color-failed);
+}
+.agents-problems summary {
+  cursor: pointer;
+}
+.agents-problems pre {
+  margin: var(--space-2) 0 0;
+  white-space: pre-wrap;
+}
+/* ---- アカウントの帯 ---- */
+.agents-accounts {
+  padding: 0 var(--pad-doc);
+  margin-bottom: var(--space-6);
+}
+.agents-accounts.entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.agents-accounts-entry {
+  height: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-2);
+  font: inherit;
+  cursor: pointer;
+}
+.agents-accounts-entry:hover {
+  color: var(--color-text);
+}
+.agents-accounts-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--ui-control-md);
+  margin-bottom: var(--space-3);
+}
+.agents-project-twisty {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  color: var(--color-text-3);
+}
+.agents-project-twisty svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.agents-accounts-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.agents-account-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: calc(var(--space-unit) * 38);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-doc);
+}
+.agents-account-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.agents-account-kind {
+  font-size: var(--ui-font-section);
+  font-weight: 600;
+  line-height: 1.2;
+}
+.agents-account-name {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-2);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+button.agents-account-name:hover {
+  color: var(--color-text);
+}
+.agents-account-usage {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.agents-account-usage > .agents-secondary {
+  align-self: flex-start;
+}
+.agents-account-status {
+  color: var(--color-text-2);
+}
+.agents-account-usage-why,
+.agents-account-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-account-login-unknown,
+.agents-account-login-no-config-dir {
+  color: var(--color-waiting);
+}
+.agents-account-foot {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: auto;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.agents-account-observed {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-account-observed.stale {
+  color: var(--color-waiting);
+}
+.agents-account-running {
+  flex: 0 0 auto;
+}
+.agents-accounts-message {
+  margin-top: var(--space-2);
+}
+/* 使用量の 1 枠 (カードとポップオーバー共通)。名前・割合・バーの列をそろえる。 */
+.usage-meter {
+  display: grid;
+  grid-template-columns: calc(var(--space-unit) * 10) calc(var(--space-unit) * 16) minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-2);
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.usage-meter:has(.usage-meter-reset) {
+  grid-template-columns: calc(var(--space-unit) * 10) calc(var(--space-unit) * 16) minmax(0, 1fr) auto;
+}
+.usage-meter-name {
+  color: var(--color-text-2);
+}
+.usage-meter-value {
+  display: inline-flex;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+.usage-meter-warn,
+.usage-meter.warn .usage-meter-value {
+  color: var(--color-waiting);
+}
+.usage-meter.expired .usage-meter-value {
+  color: var(--color-text-3);
+}
+.usage-meter-bar {
+  display: block;
+  height: var(--space-1);
+  border-radius: var(--space-1);
+  background: var(--color-raised);
+  overflow: hidden;
+}
+.usage-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+}
+.usage-meter.warn .usage-meter-fill {
+  background: var(--color-waiting);
+}
+.usage-meter.expired .usage-meter-fill {
+  background: var(--color-text-3);
+}
+.usage-meter-reset {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  text-align: right;
+  white-space: nowrap;
+}
+/* ---- すべてのエージェント (表) ---- */
+.agents-board {
+  padding: 0 var(--pad-doc);
+}
+.agents-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: var(--ui-control-md);
+  margin-bottom: var(--space-3);
+}
+.agents-filter {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+.agents-filter button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-2);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.agents-filter button:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.agents-filter button.active {
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+  color: var(--color-text);
+}
+.agents-filter button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.agents-all-panes {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.agents-all-panes input {
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+.agents-hint {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+.agents-columns,
+.agents-row {
+  display: grid;
+  grid-template-columns: var(--agents-grid);
+  column-gap: var(--space-4);
+  align-items: center;
+  padding: 0 var(--pad-text);
+}
+.agents-columns {
+  height: var(--ui-control-md);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  box-shadow: inset 0 -1px 0 var(--color-line);
+}
+.agents-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-list {
+  display: flex;
+  flex-direction: column;
+}
+.agents-project-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--ui-row-h);
+  padding: 0 var(--pad-face) 0 var(--pad-text);
+  background: var(--color-inset);
+}
+.agents-project + .agents-project {
+  margin-top: 0;
+}
+.agents-project-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.agents-project-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+.agents-project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-project-empty .agents-project-name {
+  color: var(--color-text-2);
+}
+/* 開く・起動・⋯ は hover・フォーカスで出す。場所は最初から取っておく。 */
+.agents-project-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+  visibility: hidden;
+}
+.agents-project-head:hover .agents-project-actions,
+.agents-project-head:focus-within .agents-project-actions {
+  visibility: visible;
+}
+.agents-project-actions .agents-icon-action {
+  width: var(--ui-control-sm);
+  height: calc(var(--ui-row-h) - var(--space-1));
+}
+.agents-server-link {
+  height: calc(var(--ui-row-h) - var(--space-1));
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-2);
+  font: inherit;
+  cursor: pointer;
+}
+.agents-server-link:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.agents-server-link:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+.agents-server-here {
+  padding: 0 var(--space-2);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.agents-rows[hidden],
+.agents-project-none[hidden] {
+  display: none;
+}
+.agents-row {
+  width: 100%;
+  height: var(--ui-row-h);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.agents-row:hover {
+  background: var(--color-raised);
+}
+.agents-row.active {
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+}
+.agents-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.agents-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.agents-cell-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agents-task {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.agents-task-none {
+  color: var(--color-text-3);
+}
+.agents-worktree {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  text-overflow: ellipsis;
+}
+.agents-place,
+.agents-age {
+  color: var(--color-text-2);
+  font-variant-numeric: tabular-nums;
+}
+.agents-place {
+  font-size: var(--ui-font-sm);
+}
+.agents-account-unregistered,
+.agents-account-unknown {
+  color: var(--color-text-3);
+}
+.agents-unread {
+  width: var(--dot-size);
+  height: var(--dot-size);
+  border-radius: 50%;
+}
+.agents-row.unread .agents-unread {
+  background: var(--color-done);
+}
+.agents-project-none {
+  display: flex;
+  align-items: center;
+  height: var(--ui-row-h);
+  padding: 0 var(--pad-text);
+  color: var(--color-text-3);
+}
+.agents-project-activity {
+  margin: var(--space-1) 0 var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-doc);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+}
+.agents-project-failed {
+  color: var(--color-failed);
+}
+.agents-project-activity-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.agents-project-activity-head strong {
+  flex: 1 1 auto;
+}
+.agents-project-activity pre {
+  margin: var(--space-2) 0 0;
+  white-space: pre-wrap;
+}
+/* 空の状態 (tmux が無い・エージェントが居ない・絞り込みに合うものが無い)。
+   中央寄せの見出しと短い説明、操作は 1 つだけ。 */
+.agents-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: calc(var(--space-unit) * 150);
+  margin: var(--space-6) auto;
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+}
+.agents-empty strong {
+  font-size: var(--ui-font-section);
+  font-weight: 600;
+}
+.agents-empty p {
+  margin: 0;
+  color: var(--color-text-2);
+}
+.agents-empty p:empty {
+  display: none;
+}
+.agents-empty .agents-secondary {
+  margin-top: var(--space-2);
+}
+/* ---- 使用量のポップオーバー (views/agents/usage-status.ts) ----
+   最下段の使用量のすぐ上に、左端をそろえて開く。背景は暗くしない。
+   アカウントの間だけ薄い線で区切る。位置 (left / bottom) は JS が決める。 */
+.usage-popover {
+  position: fixed;
+  /* ヘッダのプロジェクトの切替と同じ層 (サイドバー・下パネルより上)。 */
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  width: min(calc(var(--space-unit) * 100), calc(100vw - var(--space-6)));
+  max-height: calc(100vh - var(--space-7) * 2);
+  margin-bottom: var(--space-2);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--color-overlay);
+  box-shadow: 0 0 0 1px var(--color-line-strong), var(--shadow-pop);
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+}
+.usage-popover:focus {
+  outline: none;
+}
+.usage-popover-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  box-shadow: inset 0 -1px 0 var(--color-line);
+}
+.usage-popover-title {
+  flex: 1 1 auto;
+  font-size: var(--ui-font-lg);
+  font-weight: 600;
+}
+.usage-popover-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.usage-popover-account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+.usage-popover-account + .usage-popover-account {
+  box-shadow: inset 0 1px 0 var(--color-line);
+}
+.usage-popover-account-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.usage-popover-account-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-popover-observed {
+  flex: 0 0 auto;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.usage-popover-observed.stale {
+  color: var(--color-waiting);
+}
+.usage-popover .usage-meter {
+  font-size: var(--ui-font-sm);
+}
+.usage-popover-login {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+.usage-popover-login-words {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+.usage-popover-status {
+  color: var(--color-text-2);
+}
+.usage-popover-hint {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.usage-popover-link {
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.usage-popover-link:hover {
+  background: var(--color-raised);
+}
+.usage-popover-link:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.usage-popover-error,
+.usage-popover-result {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--ui-font-sm);
+  white-space: pre-wrap;
+}
+.usage-popover-error {
+  color: var(--color-failed);
+}
+.usage-popover-result {
+  color: var(--color-text-2);
+}
+.usage-popover-manage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: calc(var(--space-unit) * 9);
+  padding: 0 var(--space-4);
+  border: 0;
+  background: none;
+  box-shadow: inset 0 1px 0 var(--color-line);
+  color: var(--color-text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.usage-popover-manage:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.usage-popover-link:focus-visible,
+.usage-popover-manage:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+/* ---- 確認・入力のダイアログの型 (views/ui-dialog.ts) ----
+   1 つの型にそろえる: 面 (--color-overlay)・内側の余白 (7 単位 = 28)・見出し・
+   本文・閉じるボタン・ボタンの並び。背景は暗く落とす。中身が長くても押す
+   ボタンが画面の外に出ないよう、箱の高さに上限を置いて本文だけをスクロール
+   させる (画面中央の overlay なので viewport 基準でよい。ui-layout.md)。 */
+.gdp-dialog-backdrop {
+  /* 上端の位置と、下に残す余白。高さの上限も同じ値から求める。 */
+  --gdp-dialog-top: min(14vh, calc(var(--space-unit) * 30));
+  --gdp-dialog-bottom-gap: var(--space-4);
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: var(--gdp-dialog-top);
+  background: var(--color-backdrop);
+}
+.gdp-dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(calc(var(--space-unit) * 120), calc(100vw - var(--space-6)));
+  max-height: calc(100vh - var(--gdp-dialog-top) - var(--gdp-dialog-bottom-gap));
+  padding: calc(var(--space-unit) * 7);
+  border-radius: var(--radius-lg);
+  background: var(--color-overlay);
+  box-shadow: var(--shadow-pop);
+  color: var(--color-text);
+  font-size: var(--ui-font-lg);
+}
+.gdp-dialog-wide {
+  width: min(calc(var(--space-unit) * 162), calc(100vw - var(--space-6)));
+}
+.gdp-dialog-title {
+  margin: 0;
+  padding-right: var(--space-6);
+  color: var(--color-text);
+  font-size: var(--ui-font-heading);
+  font-weight: 600;
+  line-height: 1.25;
+}
+.gdp-dialog-close {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+.gdp-dialog-close:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.gdp-dialog-close svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  fill: currentColor;
+}
+.gdp-dialog-body {
+  min-height: 0;
+  margin-top: var(--space-2);
+  overflow: auto;
+  color: var(--color-text-2);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.gdp-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-top: var(--space-5);
+}
+.gdp-dialog-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: calc(var(--space-unit) * 22);
+  height: calc(var(--space-unit) * 9);
+  padding: 0 var(--space-5);
+  border: 0;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.gdp-dialog-cancel {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.gdp-dialog-cancel:hover {
+  background: var(--color-select);
+}
+.gdp-dialog-confirm {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+.gdp-dialog-confirm:hover {
+  background: var(--color-accent-strong);
+}
+.gdp-dialog-confirm.gdp-dialog-danger {
+  background: var(--color-failed);
+  color: var(--color-on-accent);
+}
+.gdp-dialog-confirm.gdp-dialog-danger:hover {
+  background: color-mix(in srgb, var(--color-failed) 85%, var(--color-text));
+}
+.gdp-dialog-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.gdp-dialog-button:focus-visible,
+.gdp-dialog-close:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.gdp-dialog-input {
+  display: block;
+  width: 100%;
+  height: calc(var(--space-unit) * 9);
+  margin-top: var(--space-3);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  color: var(--color-text);
+  font: inherit;
+}
+.gdp-dialog-input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--color-accent), var(--focus-ring);
+}
+.gdp-dialog-error {
+  margin-top: var(--space-2);
+  color: var(--color-failed);
+  font-size: var(--ui-font-sm);
+  white-space: pre-wrap;
+}
+.gdp-dialog-error:empty {
+  display: none;
+}
+/* 本文の部品: 見出しつきの値 (対象のファイルなど)・コードの枠・箇条書き。
+   見出しは値の上に置き、値は沈んだ面の枠に入れる。 */
+.agent-hooks-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.agent-hooks-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.agent-hooks-dialog-label {
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+  font-weight: 500;
+}
+.agent-hooks-dialog-field code,
+.agent-hooks-dialog-code {
+  display: block;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-md);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.agent-hooks-dialog-code {
+  max-height: calc(var(--space-unit) * 55);
+  padding: var(--space-3) var(--space-4);
+  overflow: auto;
+  /* 書く中身を横スクロールなしで全部読めるように折り返す。コピーする
+     文字列は元の JSON なので、折り返しの影響を受けない。 */
+  white-space: pre-wrap;
+}
+.agent-hooks-dialog-steps,
+.agent-hooks-dialog-notes {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--color-text-2);
+}
+.agent-hooks-dialog-steps li + li,
+.agent-hooks-dialog-notes li + li {
+  margin-top: var(--space-1);
+}
+.agent-hooks-dialog-details summary {
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  cursor: pointer;
+}
+.agent-hooks-dialog-details > * + * {
+  margin-top: var(--space-2);
+}
+.gdp-dialog-description {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-2);
+}
+.gdp-dialog-description + .gdp-dialog-body {
+  margin-top: var(--space-5);
+}
+/* 「新しいエージェント」(views/agents/accounts-dialogs.ts の launch)。
+   左に見出し、右に選ぶもの。行の間は 4 単位。 */
+.agent-launch-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.agent-launch-row {
+  display: grid;
+  grid-template-columns: calc(var(--space-unit) * 36) minmax(0, 1fr);
+  align-items: start;
+  column-gap: var(--space-4);
+}
+.agent-launch-label {
+  display: flex;
+  align-items: center;
+  min-height: calc(var(--space-unit) * 9);
+  color: var(--color-text);
+}
+.agent-launch-value {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.agent-launch-value .gdp-dialog-input {
+  margin-top: 0;
+}
+.agent-launch-value .worktree-hint {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.agent-launch-value .worktree-hint:empty,
+.agent-launch-value .worktree-hint[hidden] {
+  display: none;
+}
+/* 種類の選択は欄いっぱいを 2 等分する。 */
+.agent-launch-value > .seg {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  height: calc(var(--space-unit) * 10);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  overflow: hidden;
+}
+.agent-launch-value > .seg button {
+  height: 100%;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-2);
+  font: inherit;
+}
+.agent-launch-value > .seg button + button {
+  border-left: 0;
+}
+.agent-launch-value > .seg button.active {
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+  color: var(--color-text);
+}
+.agent-launch-preview-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  box-shadow: inset 0 1px 0 var(--color-line);
+}
+.agent-launch-preview-block .agent-launch-label {
+  min-height: 0;
+}
+.agent-launch-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(var(--space-unit) * 10);
+  padding: 0 var(--space-1) 0 var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+}
+.agent-launch-preview-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+  white-space: pre;
+}
+.agent-launch-copy-result {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.agent-launch-copy-result:empty {
+  display: none;
+}
+/* 情報のボタン: 取得に失敗したとき。丸を失敗の色にし、面の中に理由を出す
+   (理由は長いことがあるので折り返す)。 */
+.gdp-file-detail-sticky .gdp-file-detail-meta.failed {
+  color: var(--color-failed);
+}
+.gdp-file-detail-meta.failed .gdp-file-detail-meta-list {
+  min-width: calc(var(--space-unit) * 80);
+  max-width: calc(var(--space-unit) * 120);
+}
+.gdp-file-detail-meta.failed .gdp-file-detail-meta-item {
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.gdp-file-detail-meta.failed .gdp-file-detail-meta-item .value {
+  color: var(--color-failed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* ---- Files のフォルダ表示 (views/repo-view.ts の renderRepo) ----
+   文書の面 (ファイルの表示) と同じ決まり: 1 枚の面 (--color-doc) の中に、
+   パンくずの行・絞り込みの行・一覧・README を縦に並べる。文字の線は --pad-doc、
+   行の hover・フォーカスの面はそこから --pad-face だけ外へ描く。一覧は枠線を
+   引かず、行の高さは --ui-row-h。README の目次は本文の右の細い列 (上の節)。 */
+.gdp-repo-shell {
+  padding: var(--space-4) 0 var(--space-6);
+  border-radius: var(--radius-lg);
+  background: var(--color-doc);
+}
+.gdp-repo-shell > .gdp-repo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--ui-control-md);
+  margin: 0 0 var(--space-3);
+  padding: 0 var(--pad-doc);
+  border: 0;
+  background: none;
+}
+.gdp-repo-shell > .gdp-repo-toolbar > .gdp-file-detail-path {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gdp-repo-shell .gdp-repo-list-shell,
+.gdp-repo-shell .gdp-repo-readme {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.gdp-repo-shell .gdp-repo-list-shell > .d2h-file-wrapper,
+.gdp-repo-shell .gdp-repo-readme > .d2h-file-wrapper {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.gdp-repo-shell .gdp-repo-search-bar {
+  gap: var(--space-2);
+  padding: 0 var(--pad-doc) var(--space-3);
+  border: 0;
+  background: none;
+}
+.gdp-repo-shell .gdp-repo-filter {
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line);
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+}
+.gdp-repo-shell .gdp-repo-filter:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--color-accent), var(--focus-ring);
+}
+.gdp-repo-shell .gdp-repo-result-count {
+  min-width: 0;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.gdp-repo-shell .gdp-repo-sort-header,
+.gdp-repo-shell .gdp-repo-row {
+  grid-template-columns:
+    var(--icon-md) minmax(0, 1fr) minmax(18ch, 23ch) minmax(18ch, 23ch)
+    8ch;
+  column-gap: var(--space-3);
+  padding: 0 var(--pad-face);
+}
+/* 行の面は文字の線から --pad-face だけ外。箱のほうをその線から始める。 */
+.gdp-repo-shell .gdp-repo-sort-host,
+.gdp-repo-shell .gdp-repo-file-list {
+  margin: 0 calc(var(--pad-doc) - var(--pad-face));
+}
+.gdp-repo-shell .gdp-repo-sort-header {
+  min-height: var(--ui-row-h);
+  border: 0;
+  background: none;
+}
+.gdp-repo-shell .gdp-repo-sort-header button {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.gdp-repo-shell .gdp-repo-sort-header button:hover,
+.gdp-repo-shell .gdp-repo-sort-header button.active {
+  color: var(--color-text-2);
+}
+.gdp-repo-shell .gdp-repo-file-list {
+  border-radius: 0;
+  background: none;
+}
+.gdp-repo-shell .gdp-repo-row {
+  width: 100%;
+  min-height: var(--ui-row-h);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+}
+.gdp-repo-shell .gdp-repo-row:hover {
+  background: var(--color-raised);
+}
+.gdp-repo-shell .gdp-repo-row:focus-visible {
+  outline: none;
+  background: var(--color-raised);
+  box-shadow: var(--focus-ring);
+}
+.gdp-repo-shell .gdp-repo-row .name {
+  font-weight: 400;
+}
+.gdp-repo-shell .gdp-repo-row .dir-icon,
+.gdp-repo-shell .gdp-repo-row .d2h-icon-wrapper {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+.gdp-repo-shell .gdp-repo-row .commit-date,
+.gdp-repo-shell .gdp-repo-row .meta {
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+}
+.gdp-repo-shell .gdp-repo-row .commit-date:not([datetime]),
+.gdp-repo-shell .gdp-repo-row .size {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.gdp-repo-shell .gdp-repo-readme {
+  margin-top: var(--space-6);
+}
+.gdp-repo-shell .gdp-repo-readme .d2h-file-header {
+  display: flex;
+  align-items: center;
+  min-height: var(--ui-control-sm);
+  padding: 0 var(--pad-doc);
+  border: 0;
+  background: none;
+}
+.gdp-repo-shell .gdp-repo-readme .d2h-file-name-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.gdp-repo-shell .gdp-repo-readme .d2h-file-name {
+  color: var(--color-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-sm);
+}
+/* 左のサイドバー: 登録したプロジェクトが 1 つも無いとき。見出し・短い説明・
+   いま見ているリポジトリを登録するボタン (文字はサイドバーの文字の線)。 */
+.nav-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-1) calc(var(--pad-text) - var(--pad-face)) var(--space-2);
+}
+.nav-empty-title {
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+  font-weight: 500;
+}
+.nav-empty-body {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.nav-empty-action {
+  margin-top: var(--space-2);
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.nav-empty-action:hover {
+  background: var(--color-accent-strong);
+}
+.nav-empty-action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+/* 表に行が 1 つも無いとき (tmux が無い・エージェントが居ない) は列の名前を出さない。 */
+.agents-board:not(:has(.agents-project)) .agents-columns {
   display: none;
 }

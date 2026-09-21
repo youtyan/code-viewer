@@ -2,11 +2,15 @@
 //
 // このマシンの tmux の全ペインを、ペインの cwd から求めたプロジェクトごとに
 // 束ねて並べる。1 行で「どのプロジェクトの・どの種類が・どの状態で・何を
-// しているか」が読めることを優先し、tmux の入れ子は場所の列に畳む。
+// しているか」が読めることを優先し、tmux の入れ子はペインの列に畳む。
 //
-//   [すべて 12][入力待ち 1][作業中 3][待機 8]  □すべてのペイン   [通知を有効にする]
-//   ▾ sample-repo  ~/work/sample-repo   ◆1 ●2        開く
-//       ● ◆ 入力待ち  claude  Fix the parser …   feature-x   work:1.0   3分
+//   Agents                                  [通知] ⟳ [+ New agent]
+//   Accounts                                            Manage
+//   ┌ claude  Default ┐ ┌ claude  Work ┐ ┌ codex ┐ ┌ codex Personal ┐
+//   All agents 3  [All][Needs input 1][Working 1][Idle 1]  □All panes
+//   Status        Agent   Account  Task          Pane      Elapsed
+//   sample-app                                       Open + ⋯
+//   ◆ Needs input claude  Default  Review plan   work:0.0  3m     •
 //
 // 取り直しは agent-monitor が持つ。ここは最新の結果を購読して描くだけ。
 // 描き直しても、選んでいる行・スクロール位置・畳んだプロジェクト・キーボード
@@ -15,10 +19,7 @@
 // 行を押す (Enter) と、既存のターミナルパネルでそのペインを開く
 // (/_tmux/open と同じ経路。新しい接続は作らない)。
 
-import {
-  type AccountsResponse,
-  showPaneAccounts,
-} from "../../core/agent-accounts";
+import type { AccountsResponse } from "../../core/agent-accounts";
 import {
   type AgentHooksResponse,
   agentsNeedingHooks,
@@ -33,7 +34,14 @@ import {
   matchesStateFilter,
   paneTaskText,
 } from "../../core/agent-overview";
-import { CHEVRON_DOWN_16_PATH, iconSvg, KEBAB_16_PATH } from "../../core/icons";
+import {
+  CHEVRON_DOWN_16_PATH,
+  iconSvg,
+  KEBAB_16_PATH,
+  PLUS_16_PATH,
+  SYNC_16_PATH,
+  X_16_PATH,
+} from "../../core/icons";
 import type { PageView } from "../page-view";
 import type { ProjectActions } from "../projects/project-actions";
 import { showProjectMenu } from "../projects/project-menu";
@@ -80,10 +88,71 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
 
   const header = document.createElement("header");
   header.className = "agents-header";
-  const title = document.createElement("strong");
+  const title = document.createElement("h1");
   title.className = "agents-title";
+  const spacer = document.createElement("span");
+  spacer.className = "agents-spacer";
+  const notifyBox = document.createElement("div");
+  notifyBox.className = "agents-notify";
+  const refreshButton = document.createElement("button");
+  refreshButton.type = "button";
+  refreshButton.className = "agents-icon-action agents-refresh";
+  refreshButton.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+  refreshButton.addEventListener("click", () => void deps.monitor.refresh());
+  const launchButton = document.createElement("button");
+  launchButton.type = "button";
+  launchButton.className = "agents-primary agents-launch";
+  const launchIcon = document.createElement("span");
+  launchIcon.className = "agents-primary-icon";
+  launchIcon.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
+  launchIcon.setAttribute("aria-hidden", "true");
+  const launchLabel = document.createElement("span");
+  launchButton.append(launchIcon, launchLabel);
+  launchButton.addEventListener("click", () => deps.launch());
+  header.append(title, spacer, notifyBox, refreshButton, launchButton);
+
+  // フックが未設定のときだけ出す 1 行。通知の許可ボタンとは離して、
+  // ヘッダの下に置く (ヘッダの右端に操作を並べて騒がしくしない)。
+  const hookHint = document.createElement("div");
+  hookHint.className = "agents-hook-hint";
+  hookHint.hidden = true;
+  const hookHintText = document.createElement("span");
+  hookHintText.className = "agents-hook-hint-text";
+  const hookHintOpen = document.createElement("button");
+  hookHintOpen.type = "button";
+  hookHintOpen.className = "agents-hook-hint-open";
+  hookHintOpen.addEventListener("click", () => deps.openHookSettings());
+  const hookHintClose = document.createElement("button");
+  hookHintClose.type = "button";
+  hookHintClose.className = "agents-icon-action agents-hook-hint-close";
+  hookHintClose.innerHTML = iconSvg("octicon-x", X_16_PATH);
+  hookHintClose.addEventListener("click", () => {
+    deps.dismissHookHint();
+    render(true);
+  });
+  hookHint.append(hookHintText, hookHintOpen, hookHintClose);
+
+  const problems = document.createElement("details");
+  problems.className = "agents-problems";
+  const problemsSummary = document.createElement("summary");
+  const problemsBody = document.createElement("pre");
+  problemsBody.className = "terminal-observation-errors";
+  problems.append(problemsSummary, problemsBody);
+  problems.hidden = true;
+
+  // 表の上の 1 行: 見出しと件数・状態の絞り込み・すべてのペイン・キーの案内。
+  const board = document.createElement("section");
+  board.className = "agents-board";
+  const toolbar = document.createElement("div");
+  toolbar.className = "agents-toolbar";
+  const boardTitle = document.createElement("h2");
+  boardTitle.className = "agents-section-title";
+  const boardTitleText = document.createElement("span");
+  const boardCount = document.createElement("span");
+  boardCount.className = "agents-chip";
+  boardTitle.append(boardTitleText, boardCount);
   const filterGroup = document.createElement("div");
-  filterGroup.className = "seg agents-filter";
+  filterGroup.className = "agents-filter";
   filterGroup.role = "group";
   const filterButtons = new Map<AgentStateFilter, HTMLButtonElement>();
   for (const filter of AGENT_STATE_FILTERS) {
@@ -93,7 +162,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     const label = document.createElement("span");
     label.className = "agents-filter-label";
     const count = document.createElement("span");
-    count.className = "agents-filter-count";
+    count.className = "agents-chip agents-filter-count";
     button.append(label, count);
     button.addEventListener("click", () => {
       stateFilter = filter;
@@ -112,67 +181,24 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     allPanes = allPanesInput.checked;
     render(true);
   });
+  const toolbarSpacer = document.createElement("span");
+  toolbarSpacer.className = "agents-spacer";
   const hint = document.createElement("span");
   hint.className = "agents-hint";
-  const spacer = document.createElement("span");
-  spacer.className = "agents-spacer";
-  const notifyBox = document.createElement("div");
-  notifyBox.className = "agents-notify";
-  const launchButton = document.createElement("button");
-  launchButton.type = "button";
-  launchButton.className = "gdp-btn gdp-btn-sm agents-launch";
-  launchButton.addEventListener("click", () => deps.launch());
-  const refreshButton = document.createElement("button");
-  refreshButton.type = "button";
-  refreshButton.className = "agents-refresh";
-  refreshButton.textContent = "⟳";
-  refreshButton.addEventListener("click", () => void deps.monitor.refresh());
-  header.append(
-    title,
-    filterGroup,
-    allPanesLabel,
-    hint,
-    spacer,
-    notifyBox,
-    launchButton,
-    refreshButton,
-  );
+  toolbar.append(boardTitle, filterGroup, allPanesLabel, toolbarSpacer, hint);
 
-  // フックが未設定のときだけ出す 1 行。通知の許可ボタンとは離して、
-  // ヘッダの下に置く (ヘッダの右端に操作を並べて騒がしくしない)。
-  const hookHint = document.createElement("div");
-  hookHint.className = "agents-hook-hint";
-  hookHint.hidden = true;
-  const hookHintText = document.createElement("span");
-  hookHintText.className = "agents-hook-hint-text";
-  const hookHintOpen = document.createElement("button");
-  hookHintOpen.type = "button";
-  hookHintOpen.className = "agents-hook-hint-open";
-  hookHintOpen.addEventListener("click", () => deps.openHookSettings());
-  const hookHintClose = document.createElement("button");
-  hookHintClose.type = "button";
-  hookHintClose.className = "agents-hook-hint-close";
-  hookHintClose.textContent = "×";
-  hookHintClose.addEventListener("click", () => {
-    deps.dismissHookHint();
-    render(true);
-  });
-  hookHint.append(hookHintText, hookHintOpen, hookHintClose);
-
-  const problems = document.createElement("details");
-  problems.className = "agents-problems";
-  const problemsSummary = document.createElement("summary");
-  const problemsBody = document.createElement("pre");
-  problemsBody.className = "terminal-observation-errors";
-  problems.append(problemsSummary, problemsBody);
-  problems.hidden = true;
+  // 列の名前。行と同じ格子に乗せる (見出しの文字の左端 = 行の文字の左端)。
+  const columns = document.createElement("div");
+  columns.className = "agents-columns";
+  columns.setAttribute("aria-hidden", "true");
 
   const list = document.createElement("div");
   list.className = "agents-list";
   list.role = "tree";
   list.addEventListener("keydown", onListKeydown);
+  board.append(toolbar, columns, list);
 
-  root.append(header, deps.accountsBand.element, hookHint, problems, list);
+  root.append(header, hookHint, problems, deps.accountsBand.element, board);
 
   let mounted = false;
   let stateFilter: AgentStateFilter = "all";
@@ -184,8 +210,6 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
   let lastSignature = "";
   let unsubscribe: (() => void) | null = null;
   let notifyRequestError = "";
-  /** 行にアカウント名を出すか (renderBody で決める)。 */
-  let showAccounts = false;
 
   function text(): AgentsText {
     return deps.getText();
@@ -225,41 +249,44 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     row.classList.toggle("unread", unread !== undefined);
     if (pane.id === selected) row.setAttribute("aria-current", "true");
 
-    const dot = document.createElement("span");
-    dot.className = "agents-unread";
-    if (unread) {
-      dot.title =
-        unread === "waiting" ? current.unreadWaiting : current.unreadFinished;
-      dot.setAttribute("aria-label", current.unread);
-    }
-
     const state = document.createElement("span");
-    state.className = `agents-state terminal-row-state-${pane.state}`;
-    state.append(stateMark(pane.state), current.state[pane.state]);
+    state.className = `agents-cell agents-state terminal-row-state-${pane.state}`;
+    const stateLabel = document.createElement("span");
+    stateLabel.className = "agents-cell-text";
+    stateLabel.textContent = current.state[pane.state];
+    state.append(stateMark(pane.state), stateLabel);
 
     const kind = document.createElement("span");
-    kind.className = `agents-kind agents-kind-${pane.kind ?? "shell"}`;
+    kind.className = `agents-cell agents-kind agents-kind-${pane.kind ?? "shell"}`;
     kind.textContent = pane.kind ? current.kind[pane.kind] : current.kindShell;
 
+    const account = accountLabel(pane);
+
+    // 作業の名前。無いときは種類の名前を繰り返さず「作業の名前なし」と薄く出す
+    // (コマンド名はツールチップにある)。worktree は作業の後ろに補助の色で。
     const task = document.createElement("span");
-    task.className = "agents-task";
-    task.textContent = paneTaskText(pane);
-
-    const account = showAccounts ? accountLabel(pane) : null;
-
-    const worktree = document.createElement("span");
-    worktree.className = "agents-worktree";
+    task.className = "agents-cell agents-task";
+    const taskText = document.createElement("span");
+    taskText.className = "agents-cell-text";
+    const titled =
+      pane.title.trim() !== "" && paneTaskText(pane) !== pane.command;
+    taskText.textContent = titled ? paneTaskText(pane) : current.board.noTask;
+    task.classList.toggle("agents-task-none", !titled);
+    task.appendChild(taskText);
     if (pane.worktree) {
+      const worktree = document.createElement("span");
+      worktree.className = "agents-worktree";
       worktree.textContent = pane.worktree;
       worktree.title = current.worktreeTitle(pane.worktree);
+      task.appendChild(worktree);
     }
 
     const place = document.createElement("span");
-    place.className = "agents-place terminal-mono";
+    place.className = "agents-cell agents-place terminal-mono";
     place.textContent = pane.label;
 
     const age = document.createElement("span");
-    age.className = "agents-age";
+    age.className = "agents-cell agents-age";
     // 変わった瞬間を見たものだけ時間を出す。それ以外は種類を問わず同じ
     // 「–」にして、分かっている下限だけをツールチップに書く。
     if (pane.updatedAt > 0) {
@@ -274,9 +301,16 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
           : current.elapsedJustWatched;
     }
 
-    row.append(dot, state, kind);
-    if (account) row.appendChild(account);
-    row.append(task, worktree, place, age);
+    // 未読の点は行の右端 (左のサイドバーの行と同じ位置)。
+    const dot = document.createElement("span");
+    dot.className = "agents-unread";
+    if (unread) {
+      dot.title =
+        unread === "waiting" ? current.unreadWaiting : current.unreadFinished;
+      dot.setAttribute("aria-label", current.unread);
+    }
+
+    row.append(state, kind, account, task, place, age, dot);
     row.title = [
       pane.title || pane.command,
       `${pane.label} · ${pane.command}`,
@@ -291,11 +325,11 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     return row;
   }
 
-  /** 行に出すアカウント名。既定だけを使っている間は出さない (showAccounts)。 */
+  /** 行に出すアカウント名。 */
   function accountLabel(pane: AgentPane): HTMLElement {
     const t = text().accounts;
     const label = document.createElement("span");
-    label.className = "agents-account";
+    label.className = "agents-cell agents-account";
     const account = pane.account;
     if (!account) return label;
     const data = deps.getAccounts();
@@ -393,8 +427,8 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     title.textContent = activity.title;
     const close = document.createElement("button");
     close.type = "button";
-    close.className = "agents-hook-hint-close";
-    close.textContent = "×";
+    close.className = "agents-icon-action";
+    close.innerHTML = iconSvg("octicon-x", X_16_PATH);
     close.title = t.dismiss;
     close.setAttribute("aria-label", t.dismiss);
     close.addEventListener("click", () => deps.projects.dismiss(root));
@@ -414,48 +448,42 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
 
     const head = document.createElement("div");
     head.className = "agents-project-head";
+    const summary: string[] = [];
+    for (const state of ["waiting", "working", "done", "idle"] as const) {
+      const n = group.counts[state];
+      if (n > 0) summary.push(`${current.state[state]} ${n}`);
+    }
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "agents-project-toggle";
     toggle.setAttribute(NAV_ATTR, `project:${group.info.root}`);
     toggle.tabIndex = -1;
     toggle.setAttribute("aria-expanded", String(!isCollapsed));
-    toggle.title = `${group.info.root}\n${current.toggleProject}`;
-    const twisty = document.createElement("span");
-    twisty.className = "terminal-tree-twisty";
-    twisty.classList.toggle("collapsed", isCollapsed);
-    twisty.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
-    twisty.setAttribute("aria-hidden", "true");
+    // 見出しは名前だけにする (絵のとおり)。パス・件数・Git の外かどうかは
+    // ツールチップに書く。
+    toggle.title = [
+      group.info.git
+        ? group.info.displayRoot
+        : `${group.info.displayRoot} · ${current.outsideGit}`,
+      current.board.projectCounts(summary.join(" · ")),
+      current.toggleProject,
+    ].join("\n");
     const name = document.createElement("span");
     name.className = "agents-project-name";
     name.textContent = group.info.name;
-    const path = document.createElement("span");
-    path.className = "agents-project-path terminal-mono";
-    path.textContent = group.info.git
-      ? group.info.displayRoot
-      : `${group.info.displayRoot} · ${current.outsideGit}`;
-    toggle.append(twisty, name, path);
+    const twisty = document.createElement("span");
+    twisty.className = "terminal-tree-twisty agents-project-twisty";
+    twisty.classList.toggle("collapsed", isCollapsed);
+    twisty.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
+    twisty.setAttribute("aria-hidden", "true");
+    toggle.append(name, twisty);
     toggle.addEventListener("click", () => {
       if (collapsed.has(group.info.root)) collapsed.delete(group.info.root);
       else collapsed.add(group.info.root);
       render(true);
     });
-
-    const counts = document.createElement("span");
-    counts.className = "agents-project-counts";
-    const summary: string[] = [];
-    for (const state of ["waiting", "working", "done", "idle"] as const) {
-      const n = group.counts[state];
-      if (n === 0) continue;
-      const chip = document.createElement("span");
-      chip.className = `agents-count agents-count-${state}`;
-      chip.append(stateMark(state), String(n));
-      counts.appendChild(chip);
-      summary.push(`${current.state[state]} ${n}`);
-    }
-    counts.title = summary.join(" · ");
-
-    head.append(toggle, counts);
+    head.appendChild(toggle);
+    // 失敗は隠さない (hover を待たずに常に出す)。
     if (group.info.error) {
       const error = document.createElement("span");
       error.className = "agents-server-problem";
@@ -464,21 +492,26 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       error.setAttribute("aria-label", error.title);
       head.appendChild(error);
     }
+
+    // 開く・起動・⋯ は、見出しに載ったとき (hover・フォーカス) に出す。場所は
+    // 最初から取っておき、出ても名前が動かない (左のサイドバーの見出しと同じ)。
+    const actions = document.createElement("span");
+    actions.className = "agents-project-actions";
     const server = projectServer(group);
-    if (server) head.appendChild(server);
+    if (server) actions.appendChild(server);
     if (group.info.git) {
       const launch = document.createElement("button");
       launch.type = "button";
-      launch.className = "agents-project-launch";
-      launch.textContent = "+";
+      launch.className = "agents-icon-action agents-project-launch";
+      launch.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
       launch.title = current.accounts.launchProjectTitle(group.info.name);
       launch.setAttribute("aria-label", launch.title);
       launch.addEventListener("click", () => deps.launch(group.info.root));
-      head.appendChild(launch);
+      actions.appendChild(launch);
     }
     const menu = document.createElement("button");
     menu.type = "button";
-    menu.className = "agents-project-launch agents-project-menu";
+    menu.className = "agents-icon-action agents-project-menu";
     menu.innerHTML = iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH);
     menu.title = current.projects.menuTitle(group.info.name);
     menu.setAttribute("aria-label", menu.title);
@@ -489,14 +522,20 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       event.stopPropagation();
       projectMenu(group, menu);
     });
-    head.appendChild(menu);
+    actions.appendChild(menu);
+    head.appendChild(actions);
 
     section.appendChild(head);
     const activity = projectActivity(group.info.root, group.info.name);
     if (activity) section.appendChild(activity);
-    // エージェントの居ない登録プロジェクトは見出し 1 行だけ。
+    // エージェントの居ない登録プロジェクトは見出しと「エージェントはいません」。
     if (group.panes.length === 0) {
       section.classList.add("agents-project-empty");
+      const none = document.createElement("div");
+      none.className = "agents-project-none";
+      none.textContent = current.board.noAgents;
+      none.hidden = isCollapsed;
+      section.appendChild(none);
       return section;
     }
     const rows = document.createElement("div");
@@ -523,7 +562,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     if (action) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "gdp-btn gdp-btn-sm";
+      button.className = "agents-secondary";
       button.textContent = action.label;
       button.addEventListener("click", action.run);
       box.appendChild(button);
@@ -540,7 +579,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     if (permission === "default") {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "gdp-btn gdp-btn-sm agents-notify-enable";
+      button.className = "agents-secondary agents-notify-enable";
       button.textContent = current.notifyEnable;
       button.title = current.notifyEnableTitle;
       button.addEventListener("click", () => {
@@ -565,7 +604,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     } else if (permission === "granted") {
       const link = document.createElement("button");
       link.type = "button";
-      link.className = "agents-notify-on";
+      link.className = "agents-text-action agents-notify-on";
       link.textContent = current.notifyOn;
       link.title = current.notifyOnTitle;
       link.addEventListener("click", () => deps.openNotificationSettings());
@@ -627,6 +666,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       button.classList.toggle("active", stateFilter === filter);
       button.setAttribute("aria-pressed", String(stateFilter === filter));
     }
+    boardCount.textContent = String(scoped.length);
 
     const problemLines = [
       ...(error ? [error] : []),
@@ -706,12 +746,6 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       registeredOnly();
       return;
     }
-    showAccounts = showPaneAccounts(
-      (deps.getAccounts()?.accounts ?? []).filter((item) => !item.builtin)
-        .length,
-      panes,
-    );
-    list.classList.toggle("with-accounts", showAccounts);
     const visible = filterAgentPanes(panes, { allPanes, state: stateFilter });
     if (visible.length === 0) {
       list.appendChild(
@@ -780,15 +814,34 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
 
     root.setAttribute("aria-label", current.ariaLabel);
     title.textContent = current.title;
+    boardTitleText.textContent = current.board.allAgents;
     filterGroup.setAttribute("aria-label", current.filterLabel);
     allPanesText.textContent = current.allPanes;
     allPanesLabel.title = current.allPanesTitle;
     allPanesInput.checked = allPanes;
     hint.textContent = current.keyboardHint;
     refreshButton.title = current.refresh;
-    launchButton.textContent = `+ ${current.accounts.launchButton}`;
-    launchButton.title = current.accounts.launchButtonTitle;
     refreshButton.setAttribute("aria-label", current.refresh);
+    launchLabel.textContent = current.accounts.launchButton;
+    launchButton.title = current.accounts.launchButtonTitle;
+    hookHintClose.title = current.hookHintClose;
+    hookHintClose.setAttribute("aria-label", current.hookHintClose);
+    const names = current.board.columns;
+    columns.replaceChildren(
+      ...[
+        names.status,
+        names.agent,
+        names.account,
+        names.task,
+        names.pane,
+        names.elapsed,
+      ].map((label) => {
+        const cell = document.createElement("span");
+        cell.className = "agents-cell";
+        cell.textContent = label;
+        return cell;
+      }),
+    );
     renderNotify();
     deps.accountsBand.render();
     renderHookHint();

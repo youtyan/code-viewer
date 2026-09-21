@@ -32,6 +32,18 @@ export type AccountsText = {
   loginStarted: (session: string) => string;
   loginFailed: string;
   window: (window: UsageWindow) => string;
+  /** 枠の名前だけ (5h / week)。割合は別の列に置く。 */
+  windowName: (window: UsageWindow) => string;
+  /** ログインの状態を確かめた時刻 (未ログインのカードの「いつの値か」)。 */
+  loginChecked: (ago: string) => string;
+  loginCheckedJustNow: string;
+  /** 未ログインのときに値の代わりに出す説明。 */
+  loggedOutHint: string;
+  // 最下段の使用量から開くポップオーバー
+  usagePopoverTitle: string;
+  usagePopoverRefresh: string;
+  usagePopoverManage: string;
+  usagePopoverOpen: string;
   resetsIn: (duration: string) => string;
   resetPassed: string;
   duration: (ms: number) => string;
@@ -147,8 +159,13 @@ export type AccountsText = {
   launchSession: string;
   launchSessionNew: string;
   launchSessionExisting: string;
-  /** 起動するコマンドを、環境変数を前に置いたシェルの書き方で見せる。 */
-  launchPreview: (commandLine: string) => string;
+  /** 起動の画面の見出しの下の 1 文。 */
+  launchIntro: string;
+  /** 起動するコマンド (環境変数を前に置いたシェルの書き方) の枠の見出し。 */
+  launchPreviewLabel: string;
+  launchCopy: string;
+  launchCopied: string;
+  launchCopyFailed: string;
   launchRun: string;
   launchStarted: (session: string) => string;
   launchRememberFailed: string;
@@ -221,6 +238,15 @@ export const ACCOUNTS_EN: AccountsText = {
       seven: "Week",
       minutes: (n) => `${n}m`,
     })} ${Math.round(window.usedPercent)}%`,
+  windowName: (window) =>
+    windowName(window, { five: "5h", seven: "week", minutes: (n) => `${n}m` }),
+  loginChecked: (ago) => `Checked ${ago} ago`,
+  loginCheckedJustNow: "Checked just now",
+  loggedOutHint: "Sign in to see usage and limits.",
+  usagePopoverTitle: "Account usage",
+  usagePopoverRefresh: "Check again",
+  usagePopoverManage: "Manage accounts",
+  usagePopoverOpen: "Show usage for every account",
   resetsIn: (duration) => `resets in ${duration}`,
   resetPassed: "window has reset; waiting for a new value",
   duration: durationFormatter({ minute: "m", hour: "h", day: "d", join: " " }),
@@ -389,7 +415,11 @@ export const ACCOUNTS_EN: AccountsText = {
   launchSession: "tmux session",
   launchSessionNew: "A new session is created.",
   launchSessionExisting: "Opens a new window in this session.",
-  launchPreview: (commandLine) => `Runs: ${commandLine}`,
+  launchIntro: "Start an agent in a project and a tmux session.",
+  launchPreviewLabel: "Command preview",
+  launchCopy: "Copy the command",
+  launchCopied: "Copied",
+  launchCopyFailed: "Could not copy the command",
   launchRun: "Start",
   launchStarted: (session) => `Started in ${session}.`,
   launchRememberFailed: "Started, but the choice could not be remembered:",
@@ -437,6 +467,19 @@ export const ACCOUNTS_JA: AccountsText = {
       seven: "週",
       minutes: (n) => `${n}分`,
     })} ${Math.round(window.usedPercent)}%`,
+  windowName: (window) =>
+    windowName(window, {
+      five: "5時間",
+      seven: "週",
+      minutes: (n) => `${n}分`,
+    }),
+  loginChecked: (ago) => `${ago}前に確認`,
+  loginCheckedJustNow: "たった今確認",
+  loggedOutHint: "ログインすると使用量と上限が見られます。",
+  usagePopoverTitle: "アカウントの使用量",
+  usagePopoverRefresh: "取り直す",
+  usagePopoverManage: "アカウントを管理",
+  usagePopoverOpen: "すべてのアカウントの使用量を見る",
   resetsIn: (duration) => `あと${duration}でリセット`,
   resetPassed: "リセット済み・新しい値を待っています",
   duration: durationFormatter({
@@ -610,7 +653,12 @@ export const ACCOUNTS_JA: AccountsText = {
   launchSession: "tmux のセッション",
   launchSessionNew: "新しいセッションを作ります。",
   launchSessionExisting: "このセッションに新しいウィンドウを開きます。",
-  launchPreview: (commandLine) => `実行: ${commandLine}`,
+  launchIntro:
+    "プロジェクトと tmux のセッションを選んでエージェントを起動します。",
+  launchPreviewLabel: "実行するコマンド",
+  launchCopy: "コマンドをコピー",
+  launchCopied: "コピーしました",
+  launchCopyFailed: "コマンドをコピーできませんでした",
   launchRun: "起動",
   launchStarted: (session) => `${session} で起動しました。`,
   launchRememberFailed: "起動しましたが、選んだものを覚えられませんでした:",

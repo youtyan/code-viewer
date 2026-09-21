@@ -20,6 +20,7 @@ import {
 } from "../../core/agent-accounts";
 import type { AgentOverviewResponse } from "../../core/agent-overview";
 import { abbreviateHome } from "../../core/agent-overview";
+import { COPY_16_PATHS, iconSvg } from "../../core/icons";
 import { showFormDialog } from "../ui-dialog";
 import type { AccountsClient } from "./accounts-client";
 import type { AccountsText } from "./accounts-i18n";
@@ -54,6 +55,30 @@ function field(label: string, control: HTMLElement, hint = ""): HTMLElement {
   wrap.append(el("span", "", label), control);
   if (hint) wrap.appendChild(el("span", "worktree-hint", hint));
   return wrap;
+}
+
+/** 起動の画面の 1 行: 左に見出し、右に選ぶもの (下に補足)。 */
+function launchRow(
+  label: string,
+  control: HTMLElement,
+  hint?: HTMLElement,
+): HTMLElement {
+  const row = el("label", "agent-launch-row");
+  const value = el("span", "agent-launch-value");
+  value.appendChild(control);
+  if (hint) value.appendChild(hint);
+  row.append(el("span", "agent-launch-label", label), value);
+  return row;
+}
+
+function launchPreviewBlock(
+  label: string,
+  frame: HTMLElement,
+  result: HTMLElement,
+): HTMLElement {
+  const box = el("div", "agent-launch-preview-block");
+  box.append(el("span", "agent-launch-label", label), frame, result);
+  return box;
 }
 
 function input(value = "", placeholder = ""): HTMLInputElement {
@@ -469,7 +494,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     const accounts = data?.accounts ?? [];
     const last = data?.lastLaunch ?? null;
     const projects = projectChoices();
-    const body = el("div", "worktree-form");
+    const body = el("div", "agent-launch-form");
     if (projects.length === 0) {
       body.appendChild(el("p", "worktree-hint", t.launchNoProjects));
     }
@@ -485,7 +510,30 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     const session = input();
     const sessionHint = el("span", "worktree-hint");
     const loginHint = el("span", "worktree-hint");
-    const preview = el("code", "terminal-mono worktree-hint");
+    // 実行するコマンド。途中を隠さず、長ければ枠の中で横にスクロールする。
+    const preview = el("code", "agent-launch-preview-text terminal-mono");
+    const previewFrame = el("div", "agent-launch-preview");
+    const copy = el("button", "agents-icon-action agent-launch-copy");
+    copy.type = "button";
+    copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+    copy.title = t.launchCopy;
+    copy.setAttribute("aria-label", t.launchCopy);
+    const copyResult = el("span", "worktree-hint agent-launch-copy-result");
+    copyResult.setAttribute("role", "status");
+    copy.addEventListener("click", () => {
+      navigator.clipboard.writeText(preview.textContent ?? "").then(
+        () => {
+          copyResult.textContent = t.launchCopied;
+        },
+        (error: unknown) => {
+          console.error("[code-viewer] copy launch command failed", error);
+          copyResult.textContent = `${t.launchCopyFailed}: ${
+            error instanceof Error ? error.message : String(error)
+          }`;
+        },
+      );
+    });
+    previewFrame.append(preview, copy);
     const kind = segmented<AccountAgent>(
       [
         { value: "claude", label: "claude" },
@@ -544,14 +592,13 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       const account = accounts.find((item) => item.id === accountSelect.value);
       const agent = kind.value();
       const command = data?.launchCommands[agent] ?? agent;
-      preview.textContent = t.launchPreview(
-        launchCommandLine(
-          agent,
-          !account || account.builtin ? null : account.configDir,
-          command,
-          data?.home ?? "",
-        ),
+      preview.textContent = launchCommandLine(
+        agent,
+        !account || account.builtin ? null : account.configDir,
+        command,
+        data?.home ?? "",
       );
+      copyResult.textContent = "";
       loginHint.textContent =
         account?.login.state === "logged-out" ? t.launchNeedsLogin : "";
       loginHint.hidden = loginHint.textContent === "";
@@ -570,17 +617,16 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       syncPreview();
     });
     body.append(
-      field(t.launchKind, kind.element),
-      field(t.launchAccount, accountSelect),
-      loginHint,
-      field(t.launchProject, projectSelect),
-      field(t.launchSession, session, ""),
-      sessionHint,
-      preview,
+      launchRow(t.launchKind, kind.element),
+      launchRow(t.launchAccount, accountSelect, loginHint),
+      launchRow(t.launchProject, projectSelect),
+      launchRow(t.launchSession, session, sessionHint),
+      launchPreviewBlock(t.launchPreviewLabel, previewFrame, copyResult),
     );
 
     return showFormDialog({
       title: t.launchTitle,
+      description: t.launchIntro,
       body,
       wide: true,
       submitLabel: t.launchRun,

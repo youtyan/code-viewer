@@ -92,6 +92,8 @@ export type AgentsText = {
   headerTitle: (waiting: number, working: number) => string;
   headerFailed: (detail: string) => string;
   keyboardHint: string;
+  /** 全体ボードの表 (見出しの行・列の名前・空のプロジェクト)。 */
+  board: AgentsBoardText;
   /** フックが未設定のときに一覧の上に出す 1 行。 */
   hookHint: (agents: string) => string;
   hookHintOpen: string;
@@ -105,6 +107,24 @@ export type AgentsText = {
   readRelayFailed: string;
   /** 左のサイドバー (views/agents/agents-sidebar.ts・views/shell/app-nav.ts)。 */
   sidebar: AgentsSidebarText;
+};
+
+export type AgentsBoardText = {
+  allAgents: string;
+  columns: {
+    status: string;
+    agent: string;
+    account: string;
+    task: string;
+    pane: string;
+    elapsed: string;
+  };
+  /** 登録してあるがエージェントの居ないプロジェクトの行。 */
+  noAgents: string;
+  /** タスクの名前が無いペイン。 */
+  noTask: string;
+  /** プロジェクトの見出しのツールチップに出す件数。 */
+  projectCounts: (summary: string) => string;
 };
 
 export type AgentsSidebarText = {
@@ -125,6 +145,9 @@ export type AgentsSidebarText = {
   detectedTitle: string;
   /** プロジェクトのサーバを起こしている最中 (見出しの中)。 */
   starting: string;
+  /** 登録したプロジェクトが 1 つも無いときの見出しと説明。 */
+  noProjectsTitle: string;
+  noProjectsBody: string;
   /** 一覧の下に出す 1 行の案内 (大きな箱は全体ボードに任せる)。 */
   noTmux: string;
   notInstalled: string;
@@ -461,6 +484,20 @@ const EN: AgentsText = {
     `Agents: ${waiting} need input, ${working} working. Open the agent list (g a)`,
   headerFailed: (detail) => `Could not read the agent list: ${detail}`,
   keyboardHint: "↑↓ move · Enter open",
+  board: {
+    allAgents: "All agents",
+    columns: {
+      status: "Status",
+      agent: "Agent",
+      account: "Account",
+      task: "Task",
+      pane: "Pane",
+      elapsed: "Elapsed",
+    },
+    noAgents: "No agents",
+    noTask: "No active task",
+    projectCounts: (summary) => summary || "No agents",
+  },
   hookHint: (agents) =>
     `Finish detection is off for ${agents}. Hooks make it reliable.`,
   hookHintOpen: "Set up",
@@ -486,13 +523,15 @@ const EN: AgentsText = {
     starting: "Starting…",
     detectedTitle:
       "Projects with agents in tmux that are not registered. Opening one registers it.",
+    noProjectsTitle: "No projects yet",
+    noProjectsBody: "Register a repository and it is listed here.",
     noTmux: "tmux is not running",
     notInstalled: "tmux was not found",
     noAgents: "No agents are running",
     problems: (count) =>
       `${count} problem${count === 1 ? "" : "s"} reading agents — open the board`,
     usageLabel: "Usage by account",
-    usageTitle: (lines) => [...lines, "Click to manage accounts"].join("\n"),
+    usageTitle: (lines) => lines.join("\n"),
   },
 };
 
@@ -568,6 +607,20 @@ const JA: AgentsText = {
     `エージェント: 入力待ち ${waiting} · 作業中 ${working}。一覧を開く (g a)`,
   headerFailed: (detail) => `エージェント一覧を取得できませんでした: ${detail}`,
   keyboardHint: "↑↓ 移動 · Enter 開く",
+  board: {
+    allAgents: "すべてのエージェント",
+    columns: {
+      status: "状態",
+      agent: "種類",
+      account: "アカウント",
+      task: "作業",
+      pane: "ペイン",
+      elapsed: "経過",
+    },
+    noAgents: "エージェントはいません",
+    noTask: "作業の名前なし",
+    projectCounts: (summary) => summary || "エージェントはいません",
+  },
   hookHint: (agents) =>
     `${agents} の完了の検知を有効にできます (フックが未設定です)。`,
   hookHintOpen: "設定する",
@@ -593,13 +646,15 @@ const JA: AgentsText = {
     starting: "起動中…",
     detectedTitle:
       "登録していないが tmux でエージェントが動いているプロジェクト。開くと登録されます。",
+    noProjectsTitle: "プロジェクトはまだありません",
+    noProjectsBody: "リポジトリを登録すると、ここに並びます。",
     noTmux: "tmux が動いていません",
     notInstalled: "tmux が見つかりません",
     noAgents: "エージェントが動いていません",
     problems: (count) =>
       `エージェントの読み取りで ${count} 件の問題 — ボードで確認`,
     usageLabel: "アカウントごとの使用量",
-    usageTitle: (lines) => [...lines, "押すとアカウントの設定へ"].join("\n"),
+    usageTitle: (lines) => lines.join("\n"),
   },
 };
 

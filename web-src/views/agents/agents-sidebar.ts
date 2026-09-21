@@ -413,9 +413,10 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     if (registered.length === 0) {
       // 登録が 1 つも無い: いま見ているリポジトリを登録する入口 (ヘッダの
       // 切替と同じ操作)。登録すると上の区画に 1 行で常に出る。
+      const empty = el("div", "nav-empty");
       const register = el(
         "button",
-        "nav-note nav-note-link",
+        "nav-note-link nav-empty-action",
         current.projects.switcherRegisterCurrent(deps.currentName()),
       );
       register.type = "button";
@@ -424,7 +425,12 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         "click",
         () => void deps.projects.registerCurrent(),
       );
-      root.appendChild(register);
+      empty.append(
+        el("strong", "nav-empty-title", current.sidebar.noProjectsTitle),
+        el("span", "nav-empty-body", current.sidebar.noProjectsBody),
+        register,
+      );
+      root.appendChild(empty);
     }
     if (detected.length > 0) {
       const section = el("div", "nav-detected");

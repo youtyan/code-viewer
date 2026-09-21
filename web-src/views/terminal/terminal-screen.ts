@@ -973,11 +973,17 @@ export function createTerminalScreen(
     }
     if (myGen !== generation || disposed) return;
 
-    // 前のシェルの中身を残さない。購読が始まると、溜まっていた出力が最初に
-    // まとめて流れてくる。
-    created.reset();
     // 表示領域がサイズを決める。購読前に PTY へ伝えておく。
     fitShellToContainer();
+    // 前のシェルの中身を残さない。購読が始まると、溜まっていた出力が最初に
+    // まとめて流れてくる。
+    //
+    // 寸法を合わせてから作り直す (順番が逆だと tmux の画面が崩れる)。xterm は
+    // 一度も使っていない代替画面 (tmux や vim が使う画面) を縮めても、その画面の
+    // 行数の上限を縮めない。作った直後の 24 行から箱の行数へ縮めた後に tmux が
+    // 代替画面へ入ると、画面に無いはずの行が溜まり、行の位置がずれて最後の行が
+    // 重複して並ぶ。reset は今の寸法で両方の画面を作り直すので、上限も揃う。
+    created.reset();
     openSource(session, myGen);
     void loadImageHistory(session, myGen);
   }

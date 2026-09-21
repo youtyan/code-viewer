@@ -8,9 +8,8 @@ import { closeOpenDialog, getOpenDialog } from "./_dialog-helpers";
 
 GlobalRegistrator.register();
 
-const { showAlertDialog, showConfirmDialog, showPromptDialog } = await import(
-  "../views/ui-dialog"
-);
+const { showAlertDialog, showConfirmDialog, showFormDialog, showPromptDialog } =
+  await import("../views/ui-dialog");
 
 const tick = () => new Promise((r) => setTimeout(r, 10));
 
@@ -133,5 +132,56 @@ describe("showAlertDialog", () => {
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
     );
     expect(await p).toBeUndefined();
+  });
+});
+
+// 右上の閉じるボタンは取り消しと同じ (確定の値を返さない)。4 つの型のどれでも
+// 同じ場所・同じ意味で、説明は取り消しのラベルを使う。
+describe("the close button in the corner cancels", () => {
+  function closeButton(): HTMLButtonElement {
+    const button =
+      getOpenDialog().querySelector<HTMLButtonElement>(".gdp-dialog-close");
+    if (!button) throw new Error("no close button");
+    return button;
+  }
+
+  test.each([
+    [
+      "confirm",
+      () => showConfirmDialog({ body: "Continue?", cancelLabel: "Keep" }),
+      false,
+      "Keep",
+    ],
+    [
+      "prompt",
+      () => showPromptDialog({ defaultValue: "x", cancelLabel: "Keep" }),
+      null,
+      "Keep",
+    ],
+    [
+      "form",
+      () =>
+        showFormDialog({
+          body: document.createElement("div"),
+          submit: () => "saved",
+          cancelLabel: "Keep",
+        }),
+      null,
+      "Keep",
+    ],
+    [
+      "alert",
+      () => showAlertDialog({ body: "Done", confirmLabel: "OK" }),
+      undefined,
+      "OK",
+    ],
+  ] as const)("%s", async (_name, open, expected, label) => {
+    const result = (open as () => Promise<unknown>)();
+    await tick();
+    const button = closeButton();
+    expect(button.getAttribute("aria-label")).toBe(label);
+    button.click();
+    expect(await result).toBe(expected);
+    expect(document.querySelector(".gdp-dialog-backdrop")).toBeNull();
   });
 });

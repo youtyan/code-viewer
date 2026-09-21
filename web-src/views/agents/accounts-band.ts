@@ -1,13 +1,12 @@
 // エージェント一覧の上に出す「アカウントの帯」。アカウント 1 つが 1 枚の
-// 小さなカード: 種類・表示名・ログインの状態・5 時間枠と週枠の % と
-// リセットまでの時間・いつの値か・そのアカウントで動いているエージェントの
-// 数・フックの状態。
+// カード (4 列): 種類・表示名・5 時間枠と週枠のバー・いつの値か・そのアカウント
+// で動いているエージェントの数。ログインの状態とフックの状態はツールチップ。
 //
-//   ▾ アカウント 4                                                   管理
-//   ┌ claude 既定 ● ログイン済み ┐ ┌ claude 仕事用 ○ 未ログイン [ログイン] ┐
-//   │ 5時間 42% あと2時間13分    │ │ 使用量を取得できません ⓘ            │
-//   │ 週 81% 注意                │ │                                     │
-//   │ 3分前の値 · 2 件実行中 · …  │ │ 0 件実行中 · フック: 未設定          │
+//   Accounts 4 ▾                                                  Manage
+//   ┌ claude       Default ┐ ┌ codex        Personal ┐
+//   │ 5h    42%   ▰▰▱▱▱▱   │ │ Not signed in          │
+//   │ week  81% High ▰▰▰▰▱ │ │ [Sign in]              │
+//   │ as of 15m ago  1 run │ │ Checked just now       │
 //
 // 何も登録していない (既定だけ) で使用量も取れていないときは、帯を出さずに
 // 「アカウントと使用量」への 1 行の入口だけにする (押し付けがましくしない)。
@@ -18,7 +17,6 @@ import {
   type AccountStatus,
   type AccountsResponse,
   showPaneAccounts,
-  usageIsStale,
   usageWindowViews,
 } from "../../core/agent-accounts";
 import type { AgentHookState } from "../../core/agent-hooks";
@@ -36,6 +34,7 @@ import {
   runningCount,
 } from "./accounts-dialogs";
 import type { AccountsText } from "./accounts-i18n";
+import { usageMeterRow, usageObservedText } from "./usage-meter";
 
 export type AccountsBandDeps = {
   client: AccountsClient;
@@ -94,36 +93,55 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
     }
   }
 
-  function loginLabel(account: AccountStatus): HTMLElement {
+  /** ログインの状態の説明 (ツールチップと、ログイン済み以外の行)。 */
+  function loginLines(account: AccountStatus): string[] {
     const t = text();
     const state = account.login.state;
-    const label = el(
-      "span",
-      `agents-account-login agents-account-login-${state}`,
-    );
-    const mark = el("i", "agent-hooks-mark");
-    mark.setAttribute("aria-hidden", "true");
-    label.append(mark, t.login[state]);
     const who =
       state === "logged-in"
         ? t.loginWho(account.login.who, account.login.method)
         : account.login.detail;
-    label.title = [
+    return [
       t.login[state],
       who,
       state === "logged-in" && !account.login.who ? t.loginUnknownWho : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    return label;
+    ].filter(Boolean);
   }
 
   function usageBlock(account: AccountStatus, now: number): HTMLElement {
     const t = text();
     const box = el("div", "agents-account-usage");
+    const state = account.login.state;
+    if (state === "logged-out") {
+      // 未ログインには値を作らない (0% や空のバーで代用しない)。
+      box.appendChild(el("span", "agents-account-status", t.login[state]));
+      const login = el(
+        "button",
+        "agents-secondary agents-account-login-button",
+        t.loginButton,
+      );
+      login.type = "button";
+      login.title = t.loginTitle(accountDisplayName(account, t));
+      login.disabled = busy;
+      login.addEventListener(
+        "click",
+        () => void run(() => deps.dialogs.login(account)),
+      );
+      box.appendChild(login);
+      return box;
+    }
+    if (state !== "logged-in") {
+      const line = el(
+        "span",
+        `agents-account-status agents-account-login-${state}`,
+        t.login[state],
+      );
+      line.title = loginLines(account).join("\n");
+      box.appendChild(line);
+    }
     const usage = account.usage;
     if (usage.status !== "ok") {
-      const line = el("span", "agents-account-usage-none", t.usageUnavailable);
+      const line = el("span", "agents-account-status", t.usageUnavailable);
       line.title = [t.usageReason[usage.reason], usage.detail]
         .filter(Boolean)
         .join("\n");
@@ -138,26 +156,7 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       return box;
     }
     for (const view of usageWindowViews(usage, now)) {
-      const row = el("span", "agents-account-window");
-      row.classList.toggle("warn", view.warn);
-      row.classList.toggle("expired", view.expired);
-      const value = el(
-        "span",
-        "agents-account-window-value",
-        t.window(view.window),
-      );
-      row.appendChild(value);
-      if (view.warn) row.appendChild(el("span", "agents-account-warn", t.warn));
-      const reset = view.expired
-        ? t.resetPassed
-        : view.window.resetsAt > 0
-          ? t.resetsIn(t.duration(view.window.resetsAt - now))
-          : "";
-      if (reset) row.appendChild(el("span", "agents-account-reset", reset));
-      if (view.window.resetsAt > 0) {
-        row.title = new Date(view.window.resetsAt).toLocaleString();
-      }
-      box.appendChild(row);
+      box.appendChild(usageMeterRow(view, now, t, { showReset: false }));
     }
     return box;
   }
@@ -172,63 +171,38 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
     box.classList.toggle("warn", warn);
 
     const head = el("div", "agents-account-card-head");
-    head.append(
-      el("span", `agents-kind agents-kind-${account.agent}`, account.agent),
-    );
+    head.appendChild(el("span", "agents-account-kind", account.agent));
     const name = el(
       "button",
       "agents-account-name",
       accountDisplayName(account, t),
     );
     name.type = "button";
-    name.title = `${abbreviateHome(account.configDir, data.home)}\n${t.bandManage}`;
+    name.title = [
+      abbreviateHome(account.configDir, data.home),
+      ...loginLines(account),
+      t.hooksShort(deps.hookStateLabel(account.hooks)),
+      t.bandManage,
+    ].join("\n");
     name.addEventListener("click", () => deps.openSettings());
-    head.append(name, loginLabel(account));
-    if (account.login.state === "logged-out") {
-      const login = el(
-        "button",
-        "gdp-btn gdp-btn-sm agents-account-login-button",
-        t.loginButton,
-      );
-      login.type = "button";
-      login.title = t.loginTitle(accountDisplayName(account, t));
-      login.disabled = busy;
-      login.addEventListener(
-        "click",
-        () => void run(() => deps.dialogs.login(account)),
-      );
-      head.appendChild(login);
-    }
+    head.appendChild(name);
     box.append(head, usageBlock(account, now));
 
     const foot = el("div", "agents-account-foot");
-    const parts: HTMLElement[] = [];
-    const observedAt = account.usage.observedAt;
-    if (observedAt > 0) {
-      const ago = t.duration(now - observedAt);
-      const stale = usageIsStale(observedAt, now);
-      const when = el(
-        "span",
-        `agents-account-observed${stale ? " stale" : ""}`,
-        stale
-          ? t.observedStale(ago)
-          : now - observedAt < 60_000
-            ? t.observedJustNow
-            : t.observed(ago),
-      );
-      when.title = t.observedTitle(new Date(observedAt).toLocaleString());
-      parts.push(when);
-    }
-    parts.push(
-      el("span", "", t.agentsCount(runningCount(deps.getOverview(), account))),
+    const observed = usageObservedText(account.usage, account.login, now, t);
+    const when = el(
+      "span",
+      `agents-account-observed${observed.stale ? " stale" : ""}`,
+      observed.text,
     );
-    parts.push(
-      el("span", "", t.hooksShort(deps.hookStateLabel(account.hooks))),
+    if (observed.title) when.title = observed.title;
+    const running = el(
+      "span",
+      "agents-account-running",
+      t.agentsCount(runningCount(deps.getOverview(), account)),
     );
-    for (const [index, part] of parts.entries()) {
-      if (index > 0) foot.appendChild(el("span", "agents-account-sep", "·"));
-      foot.appendChild(part);
-    }
+    running.title = t.hooksShort(deps.hookStateLabel(account.hooks));
+    foot.append(when, running);
     box.appendChild(foot);
     return box;
   }
@@ -257,14 +231,10 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       );
       const head = el("div", "agents-account-card-head");
       head.append(
-        el("span", `agents-kind agents-kind-${info.agent}`, info.agent),
+        el("span", "agents-account-kind", info.agent),
         el("span", "agents-account-name", t.unregistered),
       );
-      const register = el(
-        "button",
-        "gdp-btn gdp-btn-sm",
-        t.registerUnregistered,
-      );
+      const register = el("button", "agents-secondary", t.registerUnregistered);
       register.type = "button";
       register.title = t.registerUnregisteredTitle(path);
       register.disabled = busy;
@@ -272,14 +242,21 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
         "click",
         () => void run(() => deps.dialogs.add({ agent: info.agent, path })),
       );
-      head.appendChild(register);
-      const where = el(
-        "div",
-        "agents-account-usage terminal-mono",
-        abbreviateHome(path, home),
+      const where = el("div", "agents-account-usage");
+      where.appendChild(
+        el(
+          "span",
+          "agents-account-path terminal-mono",
+          abbreviateHome(path, home),
+        ),
       );
       where.title = path;
-      const foot = el("div", "agents-account-foot", t.agentsCount(info.count));
+      where.appendChild(register);
+      const foot = el("div", "agents-account-foot");
+      foot.append(
+        el("span", "agents-account-observed"),
+        el("span", "agents-account-running", t.agentsCount(info.count)),
+      );
       box.append(head, where, foot);
       return box;
     });
@@ -310,19 +287,19 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
     }
     const collapsed = deps.isCollapsed();
     const head = el("div", "agents-accounts-head");
-    const toggle = el("button", "agents-accounts-toggle");
+    const toggle = el("button", "agents-section-title agents-accounts-toggle");
     toggle.type = "button";
     toggle.setAttribute("aria-expanded", String(!collapsed));
     toggle.title = t.bandToggle(collapsed);
-    const twisty = el("span", "terminal-tree-twisty");
+    const twisty = el("span", "terminal-tree-twisty agents-project-twisty");
     twisty.classList.toggle("collapsed", collapsed);
     twisty.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
     twisty.setAttribute("aria-hidden", "true");
     const count = data ? data.accounts.length + unregistered.length : 0;
     toggle.append(
+      el("span", "", t.bandTitle),
+      el("span", "agents-chip", String(count)),
       twisty,
-      el("span", "agents-accounts-title", t.bandTitle),
-      el("span", "agents-filter-count", String(count)),
     );
     toggle.addEventListener("click", () => deps.setCollapsed(!collapsed));
     head.appendChild(toggle);
@@ -333,7 +310,7 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       head.appendChild(problem);
     }
     head.appendChild(el("span", "agents-spacer"));
-    const manage = el("button", "agents-accounts-manage", t.bandManage);
+    const manage = el("button", "agents-text-action", t.bandManage);
     manage.type = "button";
     manage.addEventListener("click", () => deps.openSettings());
     head.appendChild(manage);
