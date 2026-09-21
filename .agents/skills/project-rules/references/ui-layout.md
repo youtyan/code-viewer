@@ -20,9 +20,9 @@
 
 | 層 | 何か | 例 | 生の px |
 |---|---|---|---|
-| **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義 | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--code-line-height` | **可**（ここだけ） |
-| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--global-header-h` `--topbar-h` `--app-panel-visible-height` `--sidebar-w` `--history-w` `--annotation-panel-w` | **可**（その固定物の実寸なので） |
-| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` | **不可。T2 の式に px リテラルを書かない** |
+| **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義。余白・角丸の段階 (`--space-*` `--radius-*`) もここ | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--ui-nav-row-h` `--code-line-height` | **可**（ここだけ） |
+| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--global-header-h` (中央上の行) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--app-panel-visible-height` `--sidebar-w` `--history-w` `--annotation-panel-w` | **可**（その固定物の実寸なので） |
+| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--app-panel-max-h` | **不可。T2 の式に px リテラルを書かない** |
 | **T3** ローカルインセット | 「このエンベロープの内側に居座る家具の高さ」 | `--file-detail-head-h` | **可。ただし必ず命名し、ページスコープに宣言し、何の高さかコメントする** |
 
 ### 消費側の規則
@@ -62,6 +62,30 @@ grep -n "100vh\|100dvh" web/style.css \
 **ゼロが正しい状態。** 除外を `--content-h:` の決め打ちにしないこと。T2 が増えたときに
 正しいコードが違反として並び、逆に本物の違反が埋もれる。
 
+## 骨格 — 左と下の固定物
+
+画面は 4 つの固定物で囲まれている: 左のサイドバー (`#app-nav`、幅 `--nav-w`)、中央の上の
+1 行 (`#global-header`、`--global-header-h`)、画面ごとのツールバー (`#topbar`、`--topbar-h`)、
+最下段のバー (`#statusbar`、`--statusbar-h`)。下パネル (`.app-panel`) は最下段の上に乗る。
+
+- **左端に付く固定物は `left: var(--chrome-left)`、下端に付く固定物は
+  `bottom: var(--chrome-bottom)` だけを読む。** `--nav-w` や `--statusbar-h` を直接読まない。
+  左や下に固定物を足す / 消すときは、`html, body` ブロックの `--chrome-left` /
+  `--chrome-bottom` の式に項を足すだけ（下の「型」の横と下の版）
+- 本文 (窓のスクロール) は `body` の `padding-left: var(--chrome-left)` と
+  `padding-bottom: var(--chrome-bottom)` で固定物の内側に入る。`#content` の `margin-left`
+  は今までどおり `--sidebar-w` だけを見る
+- `--content-h` は `--chrome-bottom` も引く（最下段は本文と場所を分け合う）
+- 左のサイドバーを畳む = `html[data-nav-collapsed]` が `body` で `--nav-w: 0px` にする。
+  html の属性なのは、`index.html` の head のスクリプトが body より先に付けて、移った直後に
+  骨格が一瞬崩れないようにするため（控えは `views/shell/early-look.ts`）
+- 画面座標で線を引く JS (リサイズのプレビュー線) は、固定物の左端を
+  `getBoundingClientRect().left` で読む。`0` 起点の座標を書かない
+- 骨格の幅・高さ (`--nav-w`・下パネルの高さ) の既定・下限・上限は `core/panel-sizes.ts`
+  だけが持つ（画面とサーバの設定の検査が同じ値を使う）。保存先は全プロジェクト共通の設定
+  (`core/user-settings.ts` の `USER_SETTING_KEYS`)。**localStorage に置かない**: プロジェクトを
+  移る = 別のポートのページなので、移るたびに戻ってしまう
+
 ## 固定物を足す / 消すときの型
 
 **T1 は「既定 0 + 占有時に上書き」の形にする。** これは `--app-panel-visible-height` が
@@ -75,6 +99,8 @@ body.<その固定物が出ている状態> { --<surface>-visible-h: <実際の�
              - var(--app-panel-visible-height)
              - var(--<surface>-visible-h));          /* T2 に 1 項足すだけ */
 ```
+
+横と下の固定物も同じ形で、足す先の T2 が `--chrome-left` / `--chrome-bottom` になる。
 
 - **足すとき:** `:root` に 1 行、状態セレクタに 1 行、T2 の式に 1 項。消費側は 1 箇所も触らない
 - **消すとき:** その 3 つを消す。消費側は 1 箇所も触らない
@@ -259,10 +285,10 @@ grep -rh -A2 "setProperty(" web-src --include=*.ts | grep -oE '"--[a-z-]+"' | so
 
 ## 密度モードを壊さない
 
-`body[data-sidebar-font-size]` が `--global-header-h` / `--topbar-h` / `--ui-*` を
+`body[data-sidebar-font-size]` が `--global-header-h` / `--topbar-h` / `--statusbar-h` / `--ui-*` を
 **4 段階（既定 / compact / large / xlarge）で書き換える**。
 
-> **chrome の高さは定数ですらない。**「ヘッダは 48px」を前提にした引き算は、
+> **chrome の高さは定数ですらない。**「上の行は 44px」を前提にした引き算は、
 > 密度を変えた瞬間に全部ずれる。
 
 - ジオメトリの計算に出る px が「ヘッダの高さ」「コントロールの高さ」「行の高さ」の意味を
@@ -280,6 +306,7 @@ grep -rh -A2 "setProperty(" web-src --include=*.ts | grep -oE '"--[a-z-]+"' | so
 ## 完了チェックリスト
 
 - [ ] viewport 単位と chrome 変数を同じ `calc()` に書いていない（`--content-h` の定義を除く）
+- [ ] 左端 / 下端に付く固定物は `--chrome-left` / `--chrome-bottom` だけを読んでいる
 - [ ] 画面由来の項と px リテラルを同じ `calc()` に混ぜていない（混ぜるなら T3 として命名した）
 - [ ] 固定物を足した / 消したなら、消費側の CSS を 1 行も触っていない
 - [ ] レイアウト規則のセレクタに `gdp-*-page` を 2 つ以上並べていない

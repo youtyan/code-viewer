@@ -36,6 +36,7 @@ import {
   loadXterm,
   type XtermFitAddon,
   type XtermTerminal,
+  type XtermTheme,
 } from "../../core/xterm-loader";
 import type { TerminalText } from "./i18n";
 import { openImageLightbox } from "./image-lightbox";
@@ -132,6 +133,32 @@ export type TerminalScreenHandle = {
   measure(): { cols: number; rows: number } | null;
 };
 
+/**
+ * 端末の色。style.css 先頭の名前の層 (--color-term*) から読む。xterm は
+ * CSS 変数を読めないので、作るときとテーマが変わったときに値を渡す。
+ */
+function terminalTheme(): XtermTheme {
+  const style = getComputedStyle(document.documentElement);
+  const read = (name: string) => style.getPropertyValue(name).trim();
+  const background = read("--color-term");
+  const foreground = read("--color-term-text");
+  return {
+    background,
+    foreground,
+    cursor: read("--color-accent-strong"),
+    cursorAccent: background,
+    selectionBackground: read("--color-term-select"),
+    // 端末の中の色も状態の色と揃え、ライトの地でも読めるようにする
+    // (xterm の既定の ANSI の色は暗い地向け)。
+    red: read("--color-failed"),
+    green: read("--color-working"),
+    yellow: read("--color-waiting"),
+    magenta: read("--color-done"),
+    white: read("--color-term-white"),
+    brightWhite: read("--color-term-text"),
+  };
+}
+
 export function createTerminalScreen(
   deps: TerminalScreenDeps,
 ): TerminalScreenHandle {
@@ -156,6 +183,7 @@ export function createTerminalScreen(
   let source: EventSource | null = null;
   let attached: ShellSession | null = null;
   let resizeObserver: ResizeObserver | null = null;
+  let themeObserver: MutationObserver | null = null;
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
   let inputEnabled = true;
   let disposed = false;
@@ -750,6 +778,15 @@ export function createTerminalScreen(
       fontFamily: TERMINAL_FONT_FAMILY,
       scrollback: SHELL_SCROLLBACK,
       cursorBlink: true,
+      theme: terminalTheme(),
+    });
+    // テーマ (html の data-theme / data-palette) が変わったら色を当て直す。
+    themeObserver ??= new MutationObserver(() => {
+      if (term) term.options.theme = terminalTheme();
+    });
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme", "data-palette"],
     });
     const fit = new api.FitAddon();
     created.loadAddon(fit);
@@ -932,6 +969,8 @@ export function createTerminalScreen(
       resizeTimer = null;
       resizeObserver?.disconnect();
       resizeObserver = null;
+      themeObserver?.disconnect();
+      themeObserver = null;
       destroyTerminal();
       attached = null;
     },

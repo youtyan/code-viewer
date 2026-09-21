@@ -7,6 +7,7 @@ import {
   type AgentProjectInfo,
   type AgentProjectServer,
   groupAgentPanes,
+  groupAgentPanesByPlace,
 } from "../core/agent-overview";
 import type { AgentState } from "../core/agent-state";
 import {
@@ -25,6 +26,7 @@ import {
 } from "../core/projects";
 import type { AppSettingsState } from "../core/types";
 import {
+  isUserSettingKey,
   pickUserSettings,
   splitSettingsPatch,
   withUserSettings,
@@ -395,6 +397,121 @@ describe("groupAgentPanes with registered projects", () => {
   });
 });
 
+describe("groupAgentPanesByPlace (the sidebar order)", () => {
+  function info(root: string, order: number | null): AgentProjectInfo {
+    const name = root.slice(root.lastIndexOf("/") + 1);
+    return {
+      root,
+      name,
+      displayRoot: root,
+      git: true,
+      error: "",
+      server: { status: "absent" },
+      registered: order === null ? null : { root, name, order, port: null },
+    };
+  }
+  function pane(
+    id: string,
+    label: string,
+    project: string,
+    state: AgentState,
+  ): AgentPane {
+    return {
+      id,
+      label,
+      session: label.slice(0, label.indexOf(":")),
+      title: "",
+      command: "claude",
+      path: project,
+      kind: "claude",
+      state,
+      source: "screen",
+      updatedAt: 100,
+      watchedSince: 0,
+      project,
+      worktree: "",
+      shownInShell: "",
+      account: null,
+    };
+  }
+  const registered = [
+    info("/work/reg-first", 0),
+    info("/work/reg-second", 1),
+    info("/work/reg-third", 2),
+  ];
+  function order(panes: AgentPane[], projects: AgentProjectInfo[]) {
+    return groupAgentPanesByPlace(panes, projects, {
+      includeEmptyRegistered: true,
+    }).map((group) => [group.info.root, group.panes.map((item) => item.id)]);
+  }
+
+  test.each<{ name: string; states: [AgentState, AgentState, AgentState] }>([
+    { name: "all idle", states: ["idle", "idle", "idle"] },
+    { name: "the last one waits", states: ["idle", "idle", "waiting"] },
+    { name: "the middle one works", states: ["idle", "working", "idle"] },
+    { name: "the first one is done", states: ["done", "idle", "waiting"] },
+  ])("state changes do not move anything: $name", ({ states }) => {
+    const panes = [
+      pane("%3", "work:2.0", "/work/reg-third", states[2]),
+      pane("%2", "work:1.1", "/work/reg-second", states[1]),
+      pane("%1", "work:1.0", "/work/reg-second", states[0]),
+    ];
+    expect(order(panes, registered)).toEqual([
+      ["/work/reg-first", []],
+      ["/work/reg-second", ["%1", "%2"]],
+      ["/work/reg-third", ["%3"]],
+    ]);
+  });
+
+  test("rows follow the tmux place: session, then window, then pane (as numbers)", () => {
+    const panes = [
+      pane("%4", "beta:0.0", "/work/reg-first", "waiting"),
+      pane("%3", "alpha:10.0", "/work/reg-first", "idle"),
+      pane("%2", "alpha:2.1", "/work/reg-first", "working"),
+      pane("%1", "alpha:2.0", "/work/reg-first", "idle"),
+    ];
+    expect(order(panes, registered)[0]).toEqual([
+      "/work/reg-first",
+      ["%1", "%2", "%3", "%4"],
+    ]);
+  });
+
+  test("unregistered projects come and go without moving the registered ones", () => {
+    const base = [pane("%1", "work:0.0", "/work/reg-second", "idle")];
+    const withOthers = [
+      ...base,
+      pane("%9", "work:9.0", "/work/zeta", "waiting"),
+      pane("%8", "work:8.0", "/work/alpha", "idle"),
+    ];
+    const projects = [
+      ...registered,
+      info("/work/zeta", null),
+      info("/work/alpha", null),
+    ];
+    const registeredPart = (rows: ReturnType<typeof order>) => rows.slice(0, 3);
+    expect(registeredPart(order(withOthers, projects))).toEqual(
+      registeredPart(order(base, projects)),
+    );
+    // 登録していないものは登録したものの後に、名前の順で。
+    expect(order(withOthers, projects).slice(3)).toEqual([
+      ["/work/alpha", ["%8"]],
+      ["/work/zeta", ["%9"]],
+    ]);
+  });
+
+  test("unregistered projects with the same name are ordered by path", () => {
+    const projects = [info("/b/sample", null), info("/a/sample", null)];
+    const panes = [
+      pane("%1", "work:0.0", "/b/sample", "waiting"),
+      pane("%2", "work:1.0", "/a/sample", "idle"),
+    ];
+    expect(order(panes, projects).map(([root]) => root)).toEqual([
+      "/a/sample",
+      "/b/sample",
+    ]);
+  });
+});
+
 describe("user settings", () => {
   const repo: AppSettingsState = {
     version: 1,
@@ -406,6 +523,19 @@ describe("user settings", () => {
     ignoreWhitespace: true,
     scopeOmitDirs: ["node_modules"],
   };
+
+  // 移る = 別のポートのページへ移る。骨格の見た目を localStorage に置くと
+  // 移るたびに戻るので、全部ユーザー単位の項目でなければならない。
+  test.each([
+    "theme",
+    "palette",
+    "navCollapsed",
+    "navWidth",
+    "navCollapsedProjects",
+    "appPanelHeight",
+  ])("the workspace look %s is a per-person item", (key) => {
+    expect(isUserSettingKey(key)).toBe(true);
+  });
 
   test("the first run takes over only the per-person items", () => {
     expect(pickUserSettings(repo)).toEqual({

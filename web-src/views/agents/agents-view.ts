@@ -34,10 +34,9 @@ import {
   paneTaskText,
 } from "../../core/agent-overview";
 import { CHEVRON_DOWN_16_PATH, iconSvg, KEBAB_16_PATH } from "../../core/icons";
-import { canStopProjectServer } from "../../core/projects";
-import { type ContextMenuItem, showContextMenu } from "../context-menu";
 import type { PageView } from "../page-view";
 import type { ProjectActions } from "../projects/project-actions";
+import { showProjectMenu } from "../projects/project-menu";
 import type { AccountsBand } from "./accounts-band";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
@@ -368,54 +367,12 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
   }
 
   function projectMenu(group: AgentProjectGroup, anchor: HTMLElement): void {
-    const t = text().projects;
-    const info = group.info;
-    const registered = info.registered;
-    const items: ContextMenuItem[] = [];
-    if (!registered) {
-      items.push({
-        label: t.register,
-        title: t.registerTitle,
-        disabled: !info.git,
-        onSelect: () => void deps.projects.registerRoot(info.root),
-      });
-    } else {
-      const last =
-        (deps.monitor.snapshot().overview?.registry.projects.length ?? 0) - 1;
-      items.push(
-        {
-          label: t.rename,
-          onSelect: () => void deps.projects.rename(info),
-        },
-        {
-          label: t.moveUp,
-          disabled: registered.order <= 0,
-          onSelect: () => void deps.projects.move(info, -1),
-        },
-        {
-          label: t.moveDown,
-          disabled: registered.order >= last,
-          onSelect: () => void deps.projects.move(info, 1),
-        },
-        {
-          label: t.unregister,
-          title: t.unregisterTitle,
-          onSelect: () => void deps.projects.unregister(info),
-        },
-      );
-    }
-    const stoppable = canStopProjectServer(info.server);
-    items.push(
-      { kind: "separator" },
-      {
-        label: t.stopServer,
-        title: stoppable ? t.stopServerTitle : t.stopServerNotLaunched,
-        danger: true,
-        disabled: !stoppable,
-        onSelect: () => void deps.projects.stop(info),
-      },
-    );
-    showContextMenu(anchor, items);
+    showProjectMenu(anchor, group.info, {
+      actions: deps.projects,
+      text: text().projects,
+      registeredCount:
+        deps.monitor.snapshot().overview?.registry.projects.length ?? 0,
+    });
   }
 
   /** 起こしている最中・失敗を、見出しのすぐ下に出す (失敗は理由の全文)。 */

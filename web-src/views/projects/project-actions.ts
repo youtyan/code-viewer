@@ -47,8 +47,17 @@ export type ProjectActions = {
   signature(): string;
   dismiss(root: string): void;
   subscribe(listener: () => void): () => void;
-  /** path: 移り先の画面のパス (`/`・`/history` など)。 */
-  open(info: AgentProjectInfo, path: string): Promise<void>;
+  /**
+   * path: 移り先の画面のパス (`/`・`/history` など)。
+   * confirmRegister: 登録していないプロジェクトを「登録して開く」前に確かめる
+   * か (既定は確かめる)。左のサイドバーの名前は押しただけで移る入口なので
+   * 確かめない (登録は ⋯ のメニューから外せる)。
+   */
+  open(
+    info: AgentProjectInfo,
+    path: string,
+    options?: { confirmRegister?: boolean },
+  ): Promise<void>;
   registerCurrent(): Promise<void>;
   registerRoot(root: string): Promise<void>;
   registerByPath(): Promise<void>;
@@ -133,7 +142,11 @@ export function createProjectActions(deps: ProjectActionsDeps): ProjectActions {
     deps.navigate(projectDestination(opened.url, path));
   }
 
-  async function open(info: AgentProjectInfo, path: string): Promise<void> {
+  async function open(
+    info: AgentProjectInfo,
+    path: string,
+    options: { confirmRegister?: boolean } = {},
+  ): Promise<void> {
     if (activities.get(info.root)?.kind === "starting") return;
     const text = deps.getText();
     const decision = decideProjectOpen({
@@ -155,12 +168,14 @@ export function createProjectActions(deps: ProjectActionsDeps): ProjectActions {
       return;
     }
     if (decision.kind === "register-first") {
-      const ok = await showConfirmDialog({
-        title: text.registerFirstTitle,
-        body: text.registerFirstBody(info.name, info.root),
-        confirmLabel: text.registerAndOpen,
-        cancelLabel: text.cancel,
-      });
+      const ok =
+        options.confirmRegister === false ||
+        (await showConfirmDialog({
+          title: text.registerFirstTitle,
+          body: text.registerFirstBody(info.name, info.root),
+          confirmLabel: text.registerAndOpen,
+          cancelLabel: text.cancel,
+        }));
       if (!ok) return;
       if (!(await change(info.root, { action: "add", path: info.root }))) {
         return;

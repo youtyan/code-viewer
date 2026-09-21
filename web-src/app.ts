@@ -46,20 +46,25 @@ import {
 } from "./core/highlight-languages";
 import type { FileRevisionNeighbors } from "./core/history";
 import {
+  APPS_16_PATH,
   ARROW_RIGHT_16_PATH,
   CHEVRON_DOWN_12_PATH,
   COMMENT_DISCUSSION_16_PATH,
   COPY_16_PATHS,
+  GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
   iconSvg,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
   NEXT_16_PATHS,
   OPEN_EXTERNAL_16_PATH,
+  PLUS_16_PATH,
   PREVIOUS_16_PATHS,
   PULSE_16_PATH,
   QUESTION_16_PATH,
   SEARCH_16_PATH,
+  SIDEBAR_HIDE_16_PATHS,
+  SIDEBAR_SHOW_16_PATHS,
   SYNC_16_PATH,
   TRIANGLE_DOWN_16_PATH,
   UNDO_16_PATH,
@@ -77,6 +82,11 @@ import {
 } from "./core/keymap";
 import { isNativeLinkClick } from "./core/link-click";
 import { createNetworkActivityTracker } from "./core/network-activity";
+import {
+  APP_PANEL_HEIGHT,
+  clampPanelSize,
+  SIDEBAR_WIDTH,
+} from "./core/panel-sizes";
 import { buildRepositoryWebTarget } from "./core/repository-web-url";
 import {
   type AppRoute,
@@ -97,18 +107,20 @@ import {
 } from "./core/routes";
 import { rememberPaletteSelection } from "./core/search-palette";
 import { sourceInternalPathKind } from "./core/source-meta";
-import { readStoredSize, writeStoredSize } from "./core/stored-size";
+import { readStoredSize } from "./core/stored-size";
 import { clampTerminalFontSize } from "./core/tmux";
 import type { ToolId } from "./core/tools";
-import type {
-  AppSettingsState,
-  DiffCardElement,
-  DiffMeta,
-  FileMeta,
-  HljsApi,
-  SettingsResponse,
-  UndoActionResponse,
-  ViewState,
+import {
+  type AppSettingsState,
+  type DiffCardElement,
+  type DiffMeta,
+  type FileMeta,
+  type HljsApi,
+  type SettingsResponse,
+  THEME_PALETTES,
+  type ThemePalette,
+  type UndoActionResponse,
+  type ViewState,
 } from "./core/types";
 import { createAccountsBand } from "./views/agents/accounts-band";
 import { createAccountsClient } from "./views/agents/accounts-client";
@@ -123,8 +135,13 @@ import {
 } from "./views/agents/agent-hooks-settings";
 import { createAgentMonitor } from "./views/agents/agent-monitor";
 import { mountAgentStatus } from "./views/agents/agent-status";
+import {
+  type AgentsSidebar,
+  mountAgentsSidebar,
+} from "./views/agents/agents-sidebar";
 import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
 import { agentsText } from "./views/agents/i18n";
+import { mountUsageStatus } from "./views/agents/usage-status";
 import { createAnnotationsPlayer } from "./views/annotations-player";
 import {
   ANNOTATION_ENTRY_PARAM,
@@ -182,6 +199,8 @@ import { createRepositoryWebLink } from "./views/repository-web-link";
 import { searchPaletteText } from "./views/search-palette-i18n";
 import { createSearchPalette } from "./views/search-palette-ui";
 import { createSearchResultsView } from "./views/search-results-view";
+import { type AppNav, mountAppNav } from "./views/shell/app-nav";
+import { rememberEarlyLook } from "./views/shell/early-look";
 import { createSidebar, type ViewerFontSize } from "./views/sidebar";
 import {
   createSourceView,
@@ -878,12 +897,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       : "side-by-side";
   }
 
+  // 未設定ならダーク (既定のテーマ)。light / dark を保存している人はその値。
   function savedTheme(): ThemeMode {
-    return APP_SETTINGS.theme === "light" || APP_SETTINGS.theme === "dark"
-      ? APP_SETTINGS.theme
-      : matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
+    return APP_SETTINGS.theme === "light" ? "light" : "dark";
+  }
+
+  function savedPalette(): ThemePalette {
+    return (
+      THEME_PALETTES.find((value) => value === APP_SETTINGS.palette) ?? "violet"
+    );
   }
 
   function savedSidebarView(): SidebarView {
@@ -1112,7 +1134,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE.theme = savedTheme();
     STATE.language = savedLanguage;
     STATE.sbView = savedSidebarView();
-    STATE.sbWidth = savedNumber(APP_SETTINGS.sidebarWidth, 308, 180, 900);
+    STATE.sbWidth = savedNumber(
+      APP_SETTINGS.sidebarWidth,
+      SIDEBAR_WIDTH.default,
+      SIDEBAR_WIDTH.min,
+      SIDEBAR_WIDTH.max,
+    );
     STATE.historyWidth = savedNumber(APP_SETTINGS.historyWidth, 320, 220, 640);
     STATE.sidebarHidden = APP_SETTINGS.sidebarHidden === true;
     STATE.collapsedDirs = new Set(VIEW_STATE.collapsedDirs || []);
@@ -1146,6 +1173,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     setLayout(STATE.layout, false);
     applyTheme();
+    APP_NAV?.sync();
+    applyAppPanelHeight(savedAppPanelHeight());
+    AGENTS_SIDEBAR?.syncCollapsed();
     localizeViewerChrome();
   }
 
@@ -1158,7 +1188,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         viewerLanguageFromSearch(window.location.search) ||
         savedViewerLanguage(),
       sbView: savedSidebarView(),
-      sbWidth: savedNumber(APP_SETTINGS.sidebarWidth, 308, 180, 900),
+      sbWidth: savedNumber(
+        APP_SETTINGS.sidebarWidth,
+        SIDEBAR_WIDTH.default,
+        SIDEBAR_WIDTH.min,
+        SIDEBAR_WIDTH.max,
+      ),
       historyWidth: savedNumber(APP_SETTINGS.historyWidth, 320, 220, 640),
       sidebarHidden: APP_SETTINGS.sidebarHidden === true,
       collapsedDirs: new Set<string>(VIEW_STATE.collapsedDirs),
@@ -1865,11 +1900,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   > = {
     en: {
       nav: {
-        repo: "Repository",
-        diff: "Diff Viewer",
+        repo: "Files",
+        diff: "Diff",
         history: "History",
-        journal: "Work Log",
-        database: "Datastores",
+        journal: "Work log",
+        database: "Data",
         worktree: "Worktrees",
         agents: "Agents",
         tools: "Tools",
@@ -2158,6 +2193,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       },
       settings: {
         display: "Display",
+        theme: "Theme",
+        themeHelp:
+          "Applies right away. The T key switches between light and the dark theme you picked.",
+        themeNames: {
+          dark: "Dark (violet)",
+          graphite: "Dark (graphite)",
+          warm: "Dark (warm gray)",
+          light: "Light",
+        },
         language: "Language",
         fileListFontSize: "UI font size",
         fileListFontSizeHelp: "Applies to all UI except code content.",
@@ -2258,8 +2302,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     ja: {
       nav: {
-        repo: "リポジトリ",
-        diff: "Diff ビューア",
+        repo: "ファイル",
+        diff: "差分",
         history: "履歴",
         journal: "ワークログ",
         database: "データストア",
@@ -2554,6 +2598,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       },
       settings: {
         display: "表示",
+        theme: "テーマ",
+        themeHelp:
+          "選ぶとすぐに変わります。T キーでライトと、選んだダークを切り替えます。",
+        themeNames: {
+          dark: "ダーク (紫)",
+          graphite: "ダーク (無彩色)",
+          warm: "ダーク (暖かい灰色)",
+          light: "ライト",
+        },
         language: "言語",
         fileListFontSize: "UIの文字サイズ",
         fileListFontSizeHelp: "コード本文を除くUI全体に適用されます。",
@@ -2994,6 +3047,14 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function applyTheme() {
     document.documentElement.dataset.theme = STATE.theme;
+    // 既定の紫は属性なし。色違いはダークのときだけ効く (style.css 先頭)。
+    const palette = savedPalette();
+    if (palette === "violet") delete document.documentElement.dataset.palette;
+    else document.documentElement.dataset.palette = palette;
+    rememberEarlyLook({
+      theme: STATE.theme,
+      palette: palette === "violet" ? undefined : palette,
+    });
     $<HTMLLinkElement>("#hljs-light").disabled = STATE.theme === "dark";
     $<HTMLLinkElement>("#hljs-dark").disabled = STATE.theme !== "dark";
   }
@@ -3534,6 +3595,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   let JOURNAL_VIEW: JournalView | null = null;
   let WORKTREE_VIEW: WorktreeView | null = null;
   let AGENTS_VIEW: AgentsView | null = null;
+  let APP_NAV: AppNav | null = null;
+  let AGENTS_SIDEBAR: AgentsSidebar | null = null;
   let PROJECT_SWITCHER: ProjectSwitcher | null = null;
 
   function applyInlineAnnotations() {
@@ -3964,14 +4027,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyHideTests();
   }
 
+  /**
+   * 画面を移るリンク (中央上のタブ・左のサイドバーの全体ボードと設定・
+   * アイコンのリンク)。選択の印と、ページを読み直さない移動の対象。
+   */
+  const ROUTE_LINK_SELECTOR =
+    "a.app-menu-item, a.global-icon-link, a.nav-board-link, a.nav-foot-item";
+
   function syncHeaderMenu() {
     // Terminal / Tools はページ遷移ではなく下パネルの中身なので、ヘッダーの
     // 並びには居ない。選択状態は URL (?terminal= / ?tools=) から決める。
     syncAppPanel();
     document
-      .querySelectorAll<HTMLAnchorElement>(
-        "a.app-menu-item, a.global-icon-link",
-      )
+      .querySelectorAll<HTMLAnchorElement>(ROUTE_LINK_SELECTOR)
       .forEach((link) => {
         const fileRouteOwner =
           STATE.route.screen === "file" &&
@@ -4054,7 +4122,11 @@ window.GdpExpandLogic = GdpExpandLogic;
                 STATE.route.screen === "help"
                   ? helpLanguageFromRoute(STATE.route)
                   : STATE.language,
-              section: helpSectionFromRoute(STATE.route),
+              // 左下の「設定」は、いつも設定の節を開く入口。
+              section:
+                link.id === "nav-settings"
+                  ? "settings"
+                  : helpSectionFromRoute(STATE.route),
               range: currentRange(),
             }),
           );
@@ -4294,6 +4366,21 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 設定セクションが唯一の置き場で、ここは値の出し入れだけを受け持つ。
   const VIEWER_SETTINGS = createViewerSettings({
     getText: () => uiText().settings,
+    getTheme: () => {
+      if (STATE.theme === "light") return "light";
+      const palette = savedPalette();
+      return palette === "violet" ? "dark" : palette;
+    },
+    setTheme: (choice) => {
+      STATE.theme = choice === "light" ? "light" : "dark";
+      // ライトを選んでも、ダークの色違いの選択は残す (T で戻ったときに使う)。
+      const palette: ThemePalette | undefined =
+        choice === "light" ? undefined : choice === "dark" ? "violet" : choice;
+      patchSettings(
+        palette ? { theme: STATE.theme, palette } : { theme: STATE.theme },
+      );
+      applyTheme();
+    },
     getValues: () => ({
       userSettingsError: APP_SETTINGS.userSettingsError ?? "",
       language: STATE.language,
@@ -4512,6 +4599,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     if (quickHelpIcon) {
       quickHelpIcon.innerHTML = iconSvg("octicon-question", QUESTION_16_PATH);
+    }
+    const navIcons: [string, string, string | string[]][] = [
+      ["#nav-collapse", "octicon-sidebar-collapse", SIDEBAR_HIDE_16_PATHS],
+      ["#nav-expand", "octicon-sidebar-expand", SIDEBAR_SHOW_16_PATHS],
+      ["#nav-board-link", "octicon-apps", APPS_16_PATH],
+      ["#nav-launch", "octicon-plus", PLUS_16_PATH],
+      ["#nav-settings", "octicon-gear", GEAR_16_PATH],
+    ];
+    for (const [selector, className, paths] of navIcons) {
+      const icon = document.querySelector<HTMLElement>(`${selector} .goi-icon`);
+      if (icon) icon.innerHTML = iconSvg(className, paths);
     }
     const searchIcon = document.querySelector<HTMLElement>(
       "#search-btn .goi-icon",
@@ -4739,9 +4837,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     preview.id = "sidebar-resize-preview";
     document.body.appendChild(preview);
 
-    const MIN = 180,
-      MAX = 900;
-    const clamp = (w: number) => Math.max(MIN, Math.min(MAX, w));
+    const clamp = (w: number) =>
+      Math.max(SIDEBAR_WIDTH.min, Math.min(SIDEBAR_WIDTH.max, w));
     const sidebarLeft = () =>
       document.getElementById("sidebar")?.getBoundingClientRect().left || 0;
     let dragging = false,
@@ -4774,7 +4871,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       applySidebarWidth(currentW);
     });
     // double-click to reset
-    handle.addEventListener("dblclick", () => applySidebarWidth(308));
+    handle.addEventListener("dblclick", () =>
+      applySidebarWidth(SIDEBAR_WIDTH.default),
+    );
   })();
   (function setupHistoryResizer() {
     const handle = document.getElementById("history-resizer");
@@ -4786,9 +4885,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     const MIN = 220,
       MAX = 640;
     const clamp = (w: number) => Math.max(MIN, Math.min(MAX, w));
+    // 一覧は左のサイドバーの右から始まる。線は画面の座標で置く。
+    const historyLeft = () =>
+      document.getElementById("history-panel")?.getBoundingClientRect().left ||
+      document.getElementById("worktree-panel")?.getBoundingClientRect().left ||
+      0;
     let dragging = false,
       startX = 0,
       startW = 0,
+      startLeft = 0,
       currentW = 0;
 
     handle.addEventListener("mousedown", (e) => {
@@ -4797,14 +4902,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       startW = STATE.historyWidth;
       currentW = startW;
       document.body.classList.add("gdp-history-resizing");
+      startLeft = historyLeft();
       preview.style.display = "block";
-      preview.style.left = `${startW}px`;
+      preview.style.left = `${startLeft + startW}px`;
       e.preventDefault();
     });
     window.addEventListener("mousemove", (e) => {
       if (!dragging) return;
       currentW = clamp(startW + (e.clientX - startX));
-      preview.style.left = `${currentW}px`;
+      preview.style.left = `${startLeft + currentW}px`;
     });
     window.addEventListener("mouseup", () => {
       if (!dragging) return;
@@ -5807,21 +5913,26 @@ window.GdpExpandLogic = GdpExpandLogic;
       closeTerminalSheet();
   }
 
-  /** パネルの高さ (px) の許容範囲。上限は CSS の max-height が持つ。 */
-  const MIN_APP_PANEL_HEIGHT = 160;
-  const MAX_APP_PANEL_HEIGHT = 1400;
-  /** CSS 側の既定値 (--app-panel-height の fallback) と揃える。 */
-  const DEFAULT_APP_PANEL_HEIGHT = 420;
+  /**
+   * 以前の版が高さを覚えていた場所 (オリジンごとの localStorage)。いまは
+   * 全プロジェクト共通の設定 (appPanelHeight) に置く。設定がまだ無い人だけ、
+   * ここの値を引き継ぐ。範囲は core/panel-sizes.ts の APP_PANEL_HEIGHT
+   * (上限は CSS の max-height も持つ)。
+   */
   const APP_PANEL_HEIGHT_STORAGE_KEY = "code-viewer:app-panel-height";
 
   /** 最後に適用した高さ。ドラッグが終わった時点でこれを保存する。 */
-  let appPanelHeight = DEFAULT_APP_PANEL_HEIGHT;
+  let appPanelHeight = APP_PANEL_HEIGHT.default;
+
+  function savedAppPanelHeight(): number {
+    return (
+      APP_SETTINGS.appPanelHeight ??
+      readStoredSize(APP_PANEL_HEIGHT_STORAGE_KEY, APP_PANEL_HEIGHT.default)
+    );
+  }
 
   function applyAppPanelHeight(height: number): void {
-    appPanelHeight = Math.min(
-      MAX_APP_PANEL_HEIGHT,
-      Math.max(MIN_APP_PANEL_HEIGHT, Math.round(height)),
-    );
+    appPanelHeight = clampPanelSize(APP_PANEL_HEIGHT, Math.round(height));
     // 高さはパネル自身だけでなく #content の下余白も決める。パネル要素に
     // 置くと兄弟の #content から見えないので、:root に置く。
     document.documentElement.style.setProperty(
@@ -5835,9 +5946,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const handle = document.getElementById("app-panel-resizer");
     // 前回引き伸ばした高さで開く。パネルを出す前に当てておけば、開いた瞬間に
     // 既定値からの跳ねが出ない。
-    applyAppPanelHeight(
-      readStoredSize(APP_PANEL_HEIGHT_STORAGE_KEY, DEFAULT_APP_PANEL_HEIGHT),
-    );
+    applyAppPanelHeight(savedAppPanelHeight());
     if (panel && handle) {
       attachDragResizer({
         handle,
@@ -5851,9 +5960,8 @@ window.GdpExpandLogic = GdpExpandLogic;
           TERMINAL_VIEW.refit();
         },
         // 保存はドラッグ / キー操作が終わった時だけ。動かしている間ずっと
-        // 書くと、1 回のドラッグで数十回 localStorage を叩くことになる。
-        onEnd: () =>
-          writeStoredSize(APP_PANEL_HEIGHT_STORAGE_KEY, appPanelHeight),
+        // 書くと、1 回のドラッグで数十回設定を書き換えることになる。
+        onEnd: () => patchSettings({ appPanelHeight }),
         activeClassTarget: panel,
         activeClassName: "app-panel-resizing",
       });
@@ -6158,7 +6266,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         // 移った先でも同じ画面を開く (ナビで選ばれている画面の入口)。
         currentPath: () =>
           document
-            .querySelector<HTMLAnchorElement>("a.app-menu-item.active")
+            .querySelector<HTMLAnchorElement>(
+              "a.app-menu-item.active, a.nav-board-link.active",
+            )
             ?.getAttribute("href") ?? "/",
         currentName: () => PROJECT_NAME,
         shortcutLabel: () => {
@@ -6167,6 +6277,110 @@ window.GdpExpandLogic = GdpExpandLogic;
           );
           return binding ? formatKeyBinding(binding) : "";
         },
+      })
+    : null;
+
+  function launchAgent(project?: string): void {
+    ACCOUNT_DIALOGS.launch({ project }).then(
+      () => AGENTS_VIEW?.localize(),
+      (error: unknown) =>
+        console.error("[code-viewer] launch dialog failed", error),
+    );
+  }
+
+  /** いまターミナルで見ているエージェントのペイン (サイドバーの選択の印)。 */
+  function viewingAgentPane(): string | null {
+    if (!TERMINAL_VIEW.isOpen()) return null;
+    const target = TERMINAL_VIEW.getActiveTarget();
+    if (!target) return null;
+    return (
+      AGENT_MONITOR.snapshot().overview?.panes.find(
+        (pane) => pane.shownInShell !== "" && pane.shownInShell === target,
+      )?.id ?? null
+    );
+  }
+
+  const navProjectsRoot = document.querySelector<HTMLElement>("#nav-projects");
+  AGENTS_SIDEBAR = navProjectsRoot
+    ? mountAgentsSidebar({
+        root: navProjectsRoot,
+        monitor: AGENT_MONITOR,
+        projects: PROJECT_ACTIONS,
+        getText: () => agentsText(STATE.language),
+        openPane: openAgentPane,
+        viewingPane: viewingAgentPane,
+        launch: launchAgent,
+        openBoard: () =>
+          navigateToRoute({ screen: "agents", range: currentRange() }),
+        getCollapsed: () => APP_SETTINGS.navCollapsedProjects ?? [],
+        currentName: () => PROJECT_NAME,
+        saveCollapsed: (roots) =>
+          patchSettings({ navCollapsedProjects: roots }),
+      })
+    : null;
+  document
+    .querySelector<HTMLButtonElement>("#nav-launch")
+    ?.addEventListener("click", () => launchAgent());
+
+  const appNavElement = document.querySelector<HTMLElement>("#app-nav");
+  const appNavResizer = document.querySelector<HTMLElement>("#app-nav-resizer");
+  const navCollapse = document.querySelector<HTMLElement>("#nav-collapse");
+  const navExpand = document.querySelector<HTMLElement>("#nav-expand");
+  APP_NAV =
+    appNavElement && appNavResizer && navCollapse && navExpand
+      ? mountAppNav({
+          nav: appNavElement,
+          resizer: appNavResizer,
+          collapseButton: navCollapse,
+          expandButton: navExpand,
+          getWidth: () => APP_SETTINGS.navWidth,
+          isCollapsed: () => APP_SETTINGS.navCollapsed === true,
+          save: (patch) => patchSettings(patch),
+          // 下パネルの幅が変わるので端末の桁数を取り直す。
+          onResize: () => TERMINAL_VIEW.refit(),
+        })
+      : null;
+
+  /** 左のサイドバーの枠の文言 (中の一覧は AGENTS_SIDEBAR が貼る)。 */
+  function localizeAppNav(): void {
+    const t = agentsText(STATE.language).sidebar;
+    document
+      .querySelector<HTMLElement>("#app-nav")
+      ?.setAttribute("aria-label", t.ariaLabel);
+    setElementText(".nav-section-title", t.projects);
+    setElementText(".nav-search-label", t.search);
+    setElementText(
+      ".nav-search-key",
+      /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K",
+    );
+    setElementText("#nav-launch .nav-foot-label", t.newAgent);
+    setElementText("#nav-settings .nav-foot-label", t.settings);
+    setElementText("#quick-help-btn .nav-foot-label", t.help);
+    for (const [selector, label] of [
+      ["#nav-collapse", t.collapse],
+      ["#nav-expand", t.expand],
+      ["#nav-board-link", t.board],
+      ["#app-nav-resizer", t.resize],
+    ] as const) {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (!el) continue;
+      el.title = label;
+      el.setAttribute("aria-label", label);
+    }
+  }
+  localizeAppNav();
+
+  // 使用量は最下段に常に出すので、アカウントの一覧はずっと取り直す
+  // (周期の取り直しは通信中の表示の対象外。accounts-client.ts)。
+  ACCOUNTS_CLIENT.retain();
+  void ACCOUNTS_CLIENT.load({ background: true });
+  const usageStatusRoot = document.querySelector<HTMLElement>("#usage-status");
+  const USAGE_STATUS = usageStatusRoot
+    ? mountUsageStatus({
+        root: usageStatusRoot,
+        client: ACCOUNTS_CLIENT,
+        getText: () => agentsText(STATE.language),
+        openSettings: () => openSettingsAt(ACCOUNTS_SECTION_ID),
       })
     : null;
 
@@ -6186,13 +6400,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     openHookSettings: () => openSettingsAt(AGENT_HOOKS_SECTION_ID),
     accountsBand: ACCOUNTS_BAND,
     getAccounts: () => ACCOUNTS_CLIENT.snapshot().data,
-    launch: (project) => {
-      ACCOUNT_DIALOGS.launch({ project }).then(
-        () => AGENTS_VIEW?.localize(),
-        (error: unknown) =>
-          console.error("[code-viewer] launch dialog failed", error),
-      );
-    },
+    launch: launchAgent,
     onVisibilityChange: (visible) => {
       releaseAccounts?.();
       releaseAccounts = null;
@@ -6206,6 +6414,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     PROJECT_SWITCHER?.localize();
     AGENTS_VIEW?.localize();
     AGENT_STATUS?.localize();
+    AGENTS_SIDEBAR?.localize();
+    USAGE_STATUS?.localize();
+    localizeAppNav();
   };
   AGENT_MONITOR.start();
 
@@ -6462,7 +6673,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // state to the destination URL. Modified clicks (new tab etc.) keep native
   // anchor behavior.
   document
-    .querySelectorAll<HTMLAnchorElement>("a.app-menu-item, a.global-icon-link")
+    .querySelectorAll<HTMLAnchorElement>(ROUTE_LINK_SELECTOR)
     .forEach((link) => {
       // External links (the GitHub repo link) keep native anchor behavior;
       // hijacking them would push their pathname onto the local origin.

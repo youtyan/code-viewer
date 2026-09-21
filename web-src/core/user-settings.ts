@@ -12,8 +12,12 @@
 
 import type { AppSettingsState } from "./types";
 
+// 骨格の見た目 (左のサイドバーの幅・畳み・畳んだプロジェクト、下のパネルの
+// 高さ) もここに入れる。プロジェクトを移る = 別のポートのページへ移るので、
+// localStorage に置くと移るたびに見た目が戻ってしまう。
 export const USER_SETTING_KEYS = [
   "theme",
+  "palette",
   "language",
   /** 文字の大きさと、それに連動する表示の密度 (body[data-sidebar-font-size])。 */
   "sidebarFontSize",
@@ -23,6 +27,10 @@ export const USER_SETTING_KEYS = [
   "agentNotifyDone",
   "agentHookHintDismissed",
   "agentAccountsCollapsed",
+  "navCollapsed",
+  "navWidth",
+  "navCollapsedProjects",
+  "appPanelHeight",
 ] as const satisfies readonly (keyof AppSettingsState)[];
 
 export type UserSettingKey = (typeof USER_SETTING_KEYS)[number];

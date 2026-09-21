@@ -103,6 +103,36 @@ export type AgentsText = {
   projects: ProjectsText;
   /** 「読んだ」をほかの code-viewer サーバへ伝えられなかった。 */
   readRelayFailed: string;
+  /** 左のサイドバー (views/agents/agents-sidebar.ts・views/shell/app-nav.ts)。 */
+  sidebar: AgentsSidebarText;
+};
+
+export type AgentsSidebarText = {
+  ariaLabel: string;
+  projects: string;
+  board: string;
+  search: string;
+  collapse: string;
+  expand: string;
+  resize: string;
+  newAgent: string;
+  settings: string;
+  help: string;
+  /** いま見ているプロジェクトの印のツールチップ。 */
+  current: string;
+  /** 下の区画 (登録していないが tmux にエージェントが居るプロジェクト)。 */
+  detected: string;
+  detectedTitle: string;
+  /** プロジェクトのサーバを起こしている最中 (見出しの中)。 */
+  starting: string;
+  /** 一覧の下に出す 1 行の案内 (大きな箱は全体ボードに任せる)。 */
+  noTmux: string;
+  notInstalled: string;
+  noAgents: string;
+  problems: (count: number) => string;
+  /** 使用量 (最下段)。 */
+  usageLabel: string;
+  usageTitle: (lines: string[]) => string;
 };
 
 export type AgentHooksText = {
@@ -440,6 +470,30 @@ const EN: AgentsText = {
   projects: PROJECTS_EN,
   readRelayFailed:
     "Marked as read here, but some other code-viewer servers were not told (they may still show it as unread):",
+  sidebar: {
+    ariaLabel: "Projects and agents",
+    projects: "Projects",
+    board: "All agents (g a)",
+    search: "Search",
+    collapse: "Hide sidebar",
+    expand: "Show sidebar",
+    resize: "Resize sidebar",
+    newAgent: "New agent",
+    settings: "Settings",
+    help: "Help",
+    current: "This window shows this project",
+    detected: "Detected in tmux",
+    starting: "Starting…",
+    detectedTitle:
+      "Projects with agents in tmux that are not registered. Opening one registers it.",
+    noTmux: "tmux is not running",
+    notInstalled: "tmux was not found",
+    noAgents: "No agents are running",
+    problems: (count) =>
+      `${count} problem${count === 1 ? "" : "s"} reading agents — open the board`,
+    usageLabel: "Usage by account",
+    usageTitle: (lines) => [...lines, "Click to manage accounts"].join("\n"),
+  },
 };
 
 const JA: AgentsText = {
@@ -523,6 +577,30 @@ const JA: AgentsText = {
   projects: PROJECTS_JA,
   readRelayFailed:
     "ここでは既読にしましたが、ほかの code-viewer サーバの一部に伝えられませんでした (そちらでは未読のまま見えることがあります):",
+  sidebar: {
+    ariaLabel: "プロジェクトとエージェント",
+    projects: "プロジェクト",
+    board: "すべてのエージェント (g a)",
+    search: "検索",
+    collapse: "サイドバーを隠す",
+    expand: "サイドバーを表示",
+    resize: "サイドバーの幅を変える",
+    newAgent: "新しいエージェント",
+    settings: "設定",
+    help: "ヘルプ",
+    current: "この画面がこのプロジェクトです",
+    detected: "tmux で検出",
+    starting: "起動中…",
+    detectedTitle:
+      "登録していないが tmux でエージェントが動いているプロジェクト。開くと登録されます。",
+    noTmux: "tmux が動いていません",
+    notInstalled: "tmux が見つかりません",
+    noAgents: "エージェントが動いていません",
+    problems: (count) =>
+      `エージェントの読み取りで ${count} 件の問題 — ボードで確認`,
+    usageLabel: "アカウントごとの使用量",
+    usageTitle: (lines) => [...lines, "押すとアカウントの設定へ"].join("\n"),
+  },
 };
 
 const TEXT: Record<AgentsLang, AgentsText> = { en: EN, ja: JA };

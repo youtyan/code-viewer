@@ -10,6 +10,7 @@ import {
 } from "vitest";
 import {
   createViewerSettings,
+  type ThemeChoice,
   type ViewerSettingsDraft,
   type ViewerSettingsText,
   type ViewerSettingsValues,
@@ -40,6 +41,14 @@ afterAll(() => {
 
 const EN_TEXT: ViewerSettingsText = {
   display: "Display",
+  theme: "Theme",
+  themeHelp: "Applies right away.",
+  themeNames: {
+    dark: "Dark (violet)",
+    graphite: "Dark (graphite)",
+    warm: "Dark (warm gray)",
+    light: "Light",
+  },
   language: "Language",
   fileListFontSize: "UI font size",
   fileListFontSizeHelp: "Applies to everything except code.",
@@ -139,6 +148,7 @@ type Recorded = {
   agentRulesReset: number;
   refresh: number;
   getValues: number;
+  theme: ThemeChoice[];
 };
 
 function setup(
@@ -181,10 +191,17 @@ function setup(
     agentRulesReset: 0,
     refresh: 0,
     getValues: 0,
+    theme: [],
   };
+  let theme: ThemeChoice = "dark";
 
   const settings = createViewerSettings({
     getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
+    getTheme: () => theme,
+    setTheme: (choice) => {
+      calls.theme.push(choice);
+      theme = choice;
+    },
     getValues: () => {
       calls.getValues++;
       return { ...values };
@@ -392,6 +409,28 @@ describe("viewer settings form", () => {
     fire(toggle, "change");
 
     expect(calls.save).toEqual([]);
+  });
+
+  test("the theme applies as soon as it is picked, without the save button", () => {
+    const { settings, host, calls } = setup();
+    settings.mount(host);
+    const theme = q<HTMLSelectElement>(document, "#viewer-theme");
+    expect(theme.value).toBe("dark");
+    expect([...theme.options].map((option) => option.textContent)).toEqual([
+      "Dark (violet)",
+      "Dark (graphite)",
+      "Dark (warm gray)",
+      "Light",
+    ]);
+
+    theme.value = "warm";
+    fire(theme, "change");
+
+    expect(calls.theme).toEqual(["warm"]);
+    expect(calls.save).toEqual([]);
+    expect(
+      q<HTMLButtonElement>(document, "#scope-settings-save").disabled,
+    ).toBe(true);
   });
 
   test("the save button submits all edited settings once", async () => {

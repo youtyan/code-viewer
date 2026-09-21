@@ -37,6 +37,13 @@ export type XtermTheme = {
   cursor?: string;
   cursorAccent?: string;
   selectionBackground?: string;
+  /** ANSI の色。テーマの地に合わせて読める色へ差し替える分だけ。 */
+  red?: string;
+  green?: string;
+  yellow?: string;
+  magenta?: string;
+  white?: string;
+  brightWhite?: string;
 };
 
 /** バッファの 1 行。文字列に起こして中身を見るためだけに使う。 */

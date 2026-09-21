@@ -46,8 +46,8 @@ Requires Node.js 20 or newer. Development uses
   same commit list and diff renderer used by `/history` inside the file's
   tab shell, filtered to that path. Both tabs keep the Repository sidebar
   visible.
-- Browse every worktree of the repository from the `Worktrees` item in the
-  header menu, in the same three-pane shape as History: worktrees on the left,
+- Browse every worktree of the repository from the `Worktrees` tab in the
+  top bar, in the same three-pane shape as History: worktrees on the left,
   the picked one's changed files in the middle, the diff on the right. Changed
   images, video, and audio show a before / after preview there too, with the
   same media card as the Diff Viewer, read from that worktree. Each row
@@ -64,13 +64,22 @@ Requires Node.js 20 or newer. Development uses
   the command that merges it back, or delete it. Create a worktree under
   `.worktrees/` (the dialog shows the exact path before you commit to it);
   deleting one removes its folder from disk and keeps the branch.
-- See every coding agent running in tmux on this machine from the `Agents`
-  item in the header menu (`g a`), grouped by project (the git repository of
-  each pane's folder; worktrees fold into their repository). Each row shows the
+- Keep your projects and their agents in the left sidebar on every screen:
+  registered projects first, in your order, then projects found in tmux that
+  are not registered. Rows never reorder when states change; click a project
+  name to switch to it in the same tab (an unregistered one is registered
+  first), click an agent to open its pane in the Terminal panel. The sidebar
+  folds away and its width, folding and the panel height follow you across
+  projects.
+- See every coding agent running in tmux on this machine on the All agents
+  board (the button next to Projects in the sidebar, or `g a`), grouped by
+  project (the git repository of each pane's folder; worktrees fold into their
+  repository). Each row shows the
   state (needs input / working / idle), the agent kind, how long it has been in
   that state, the pane title, and its tmux location; needs-input rows come
-  first, and Enter opens the pane in the Terminal panel. A counter in the header
-  shows needs-input and working agents on every screen, changed rows get an
+  first, and Enter opens the pane in the Terminal panel. A counter in the bottom
+  bar shows needs-input and working agents on every screen, next to each
+  account's usage, changed rows get an
   unread dot and the tab title an unread count, and desktop notifications can
   be enabled from that screen (choose which changes notify under Settings).
 - Turn on reliable finish detection from Settings → Agent integration. It adds
@@ -96,8 +105,8 @@ Requires Node.js 20 or newer. Development uses
   New agent starts claude or codex with a chosen account and project in a new
   tmux window.
 - Register your projects so they stay in the Agents list (in your order) even
-  with no agent running, and switch between them from the repository name at
-  the left of the header (`p`) on any screen. Open goes to that project's
+  with no agent running, and switch between them from the project name at
+  the left of the top bar (`p`) or from the left sidebar on any screen. Open goes to that project's
   code-viewer in the same tab, starting one first for a registered project and
   reusing its port next time; servers that code-viewer started can be stopped
   from the list. Theme, language, font sizes, key bindings and notifications
@@ -110,8 +119,8 @@ Requires Node.js 20 or newer. Development uses
 - Preview browser-safe media and show metadata for binary files that cannot
   be rendered.
 - Find files and grep across the repository with `Ctrl+K` (file palette) and
-  `Ctrl+G` (text palette), or from the search button at the left of the
-  header icons (plain click: files, Shift+click: grep). The two palettes
+  `Ctrl+G` (text palette), or from the Search box at the top of the
+  left sidebar (plain click: files, Shift+click: grep). The two palettes
   share one window: `Ctrl+K` /
   `Ctrl+G` (or the Files / Grep buttons in its label row) switch modes while
   keeping what you typed, and reopening a palette restores its last query,
@@ -142,11 +151,11 @@ Requires Node.js 20 or newer. Development uses
   too, without needing a `docker-compose.yml`.
   Table descriptions appear inside expanded table entries and in the Schema
   tab header when the database provides them.
-- Read the built-in Settings & Help page (last item in the header menu) for getting
+- Read the built-in Settings & Help page (Settings and Help at the bottom of the left sidebar) for getting
   started, the `.code-viewer/` project files, AI annotations, datastores,
   the agent skill, and keybindings.
 - Scratch on pasted text without leaving the current screen with the Tools
-  drawer (the `Tools` item in the header menu, or `?tools=<tool>` on any
+  drawer (the `Tools` tab of the bottom panel, or `?tools=<tool>` on any
   URL): Markdown
   preview (same renderer as file preview, so table of contents, task lists,
   frontmatter, code highlighting and ` ```mermaid ` fences all work),
@@ -155,8 +164,8 @@ Requires Node.js 20 or newer. Development uses
   validator and a JSON⇄YAML converter). Each tool keeps its own draft in
   `.code-viewer/tools.json`, and the drawer width is draggable from its left
   edge.
-- Run a real shell in the browser with the Terminal panel (the `Terminal` item
-  in the header menu, or `?terminal=<shell>` on any URL). It is an ordinary
+- Run a real shell in the browser with the Terminal panel (the `Terminal` tab
+  of the bottom panel, or `?terminal=<shell>` on any URL). It is an ordinary
   login shell on a PTY, rendered with xterm.js, so `tmux` inside it behaves
   exactly as it does in any other terminal — the panel resizes the PTY and
   whatever runs in it follows on its own. The toggle in the panel header turns
@@ -201,7 +210,7 @@ Requires Node.js 20 or newer. Development uses
   terminal show the whole window at the cost of some empty space in the larger
   one.
 - Inspect the runtime with the Environment Doctor (right-side sheet,
-  toggled by the 🩺 icon in the header): runtime (Node / Bun / ABI),
+  toggled by the pulse icon in the bottom bar): runtime (Node / Bun / ABI),
   `@youtyan/code-viewer` version and execution origin (npx cache vs
   local), SQLite driver and snapshot store, Git, `rg`, GitHub CLI, discovery summary,
   per-source datastore connectivity (each discovered SQLite / docker
@@ -286,8 +295,8 @@ code-viewer --cwd /path/to/repo --staged
 PATH differs from the environment that starts code-viewer. Override paths must
 be absolute executable files outside the opened repository.
 
-Open **Settings & Help** from the header menu to change display options such
-as theme, layout, sidebar mode, font sizes, and UI language. The language
+Open **Settings** at the bottom of the left sidebar to change display options such
+as theme (dark in violet, graphite or warm gray, or light), layout, sidebar mode, font sizes, and UI language. The language
 setting translates the viewer chrome itself, including that page, settings labels,
 sidebars, history controls, datastore viewer, and annotation panel labels.
 
@@ -382,7 +391,7 @@ where an ignore rule names a file specifically.
 ## Uploads and Scope Settings
 
 File uploads are available for the local worktree target by default. Git tree
-views remain read-only. Open **Settings & Help** from the header menu to toggle
+views remain read-only. Open **Settings** at the bottom of the left sidebar to toggle
 uploads off, edit the directories to skip while browsing/searching, and hide
 files or directory names completely.
 
@@ -1054,7 +1063,7 @@ survives reloads and server restarts. See **Uploads and Scope Settings**
 above for how `.code-viewer/` is treated by the viewer and how to opt out of
 sharing it through git.
 
-In the browser, the annotation icon in the header opens a searchable library.
+In the browser, the annotation icon in the top bar opens a searchable library.
 Search titles, full Markdown bodies, file paths, and session names, or show only
 notes for the current file or datastore location. Sessions can be collapsed,
 renamed, or deleted; original step numbers remain stable when filtering.

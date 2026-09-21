@@ -34,14 +34,23 @@ function loadBarTopFor(bodyClass?: string): string {
   return resolveVar(top, bodyDeclarations);
 }
 
+/** :root の固定物の高さ。値そのものは固定しない (密度や骨格で変わる)。 */
+function rootLength(name: string): string {
+  const root = cascadedDeclarations(rules, (selector) => selector === ":root");
+  return resolveVar(`var(${name})`, root);
+}
+
 describe("load-bar layout", () => {
   test("keeps the global loading bar below visible diff chrome", () => {
-    expect(loadBarTopFor()).toBe("calc(48px + 56px)");
+    expect(loadBarTopFor()).toBe(
+      `calc(${rootLength("--global-header-h")} + ${rootLength("--topbar-h")})`,
+    );
   });
 
   test("places the loading bar directly below the header on pages without topbar", () => {
-    expect(loadBarTopFor("gdp-database-page")).toBe("48px");
-    expect(loadBarTopFor("gdp-file-detail-page")).toBe("48px");
-    expect(loadBarTopFor("gdp-repo-page")).toBe("48px");
+    const header = rootLength("--global-header-h");
+    expect(loadBarTopFor("gdp-database-page")).toBe(header);
+    expect(loadBarTopFor("gdp-file-detail-page")).toBe(header);
+    expect(loadBarTopFor("gdp-repo-page")).toBe(header);
   });
 });

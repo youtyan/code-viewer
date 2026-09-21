@@ -299,19 +299,12 @@ function compareGroups(a: AgentProjectGroup, b: AgentProjectGroup): number {
   return a.info.name.localeCompare(b.info.name);
 }
 
-/**
- * ペインをプロジェクトごとに束ねて並べる。
- *
- * プロジェクトの並びは compareGroups (入力待ち・完了・作業中を含むものが
- * 中の一番上の行と同じ規則で先、次に登録順、最後に登録していないもの)。
- *
- * ペインが 1 つも残らないプロジェクトは、登録したものだけ includeEmpty の
- * ときに見出しだけで出す (絞り込み中は出さない)。
- */
-export function groupAgentPanes(
+/** ペインをプロジェクトごとに束ねる (並べる前)。 */
+function collectAgentGroups(
   panes: AgentPane[],
   projects: AgentProjectInfo[],
-  options: { includeEmptyRegistered?: boolean } = {},
+  includeEmptyRegistered: boolean,
+  comparePane: (a: AgentPane, b: AgentPane) => number,
 ): AgentProjectGroup[] {
   const infoByRoot = new Map(projects.map((info) => [info.root, info]));
   const byRoot = new Map<string, AgentPane[]>();
@@ -322,7 +315,7 @@ export function groupAgentPanes(
   }
   const groups: AgentProjectGroup[] = [];
   for (const [root, list] of byRoot) {
-    const sorted = [...list].sort(comparePanes);
+    const sorted = [...list].sort(comparePane);
     groups.push({
       info: infoByRoot.get(root) ?? {
         root,
@@ -337,13 +330,85 @@ export function groupAgentPanes(
       counts: countAgentStates(sorted),
     });
   }
-  if (options.includeEmptyRegistered) {
+  if (includeEmptyRegistered) {
     for (const info of projects) {
       if (!info.registered || byRoot.has(info.root)) continue;
       groups.push({ info, panes: [], counts: countAgentStates([]) });
     }
   }
-  return groups.sort(compareGroups);
+  return groups;
+}
+
+/**
+ * ペインをプロジェクトごとに束ねて、急ぐ順に並べる (エージェントの全体ボード)。
+ *
+ * プロジェクトの並びは compareGroups (入力待ち・完了・作業中を含むものが
+ * 中の一番上の行と同じ規則で先、次に登録順、最後に登録していないもの)。
+ * 「いま手が要るものを上から片付ける」画面の並び。状態が変わると順が動く。
+ *
+ * ペインが 1 つも残らないプロジェクトは、登録したものだけ includeEmpty の
+ * ときに見出しだけで出す (絞り込み中は出さない)。
+ */
+export function groupAgentPanes(
+  panes: AgentPane[],
+  projects: AgentProjectInfo[],
+  options: { includeEmptyRegistered?: boolean } = {},
+): AgentProjectGroup[] {
+  return collectAgentGroups(
+    panes,
+    projects,
+    options.includeEmptyRegistered === true,
+    comparePanes,
+  ).sort(compareGroups);
+}
+
+/** tmux の場所 `session:window.pane` を、比べられる形に分ける。 */
+function panePlace(pane: AgentPane): [string, number, number] {
+  const match = /^(.*):(\d+)\.(\d+)$/.exec(pane.label);
+  if (!match) return [pane.label, 0, 0];
+  return [match[1] ?? "", Number(match[2]), Number(match[3])];
+}
+
+function comparePanePlace(a: AgentPane, b: AgentPane): number {
+  const [sessionA, windowA, paneA] = panePlace(a);
+  const [sessionB, windowB, paneB] = panePlace(b);
+  if (sessionA !== sessionB) return sessionA < sessionB ? -1 : 1;
+  return windowA - windowB || paneA - paneB || (a.id < b.id ? -1 : 1);
+}
+
+function compareGroupsByRegistry(
+  a: AgentProjectGroup,
+  b: AgentProjectGroup,
+): number {
+  const regA = a.info.registered;
+  const regB = b.info.registered;
+  if (regA && regB) return regA.order - regB.order;
+  if (regA) return -1;
+  if (regB) return 1;
+  const byName = a.info.name.localeCompare(b.info.name);
+  if (byName !== 0) return byName;
+  return a.info.root < b.info.root ? -1 : a.info.root > b.info.root ? 1 : 0;
+}
+
+/**
+ * ペインをプロジェクトごとに束ねて、動かない順に並べる (左のサイドバー)。
+ *
+ * 状態では並べ替えない。行が勝手に上下すると、押そうとしたものが逃げる。
+ * プロジェクトは登録順 → 登録していないもの (名前の順、同じ名前はパスの順)、
+ * 中の行は tmux の場所 (セッション名 → ウィンドウ番号 → ペイン番号) の順。
+ * 気づかせる役目は、行の状態の印・畳んだ見出しの印・件数・通知が持つ。
+ */
+export function groupAgentPanesByPlace(
+  panes: AgentPane[],
+  projects: AgentProjectInfo[],
+  options: { includeEmptyRegistered?: boolean } = {},
+): AgentProjectGroup[] {
+  return collectAgentGroups(
+    panes,
+    projects,
+    options.includeEmptyRegistered === true,
+    comparePanePlace,
+  ).sort(compareGroupsByRegistry);
 }
 
 /** ヘッダの件数表示に出す数。エージェントのペインだけを数える。 */

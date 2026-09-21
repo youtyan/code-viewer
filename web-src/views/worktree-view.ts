@@ -37,6 +37,7 @@ import {
 } from "./context-menu";
 import { enhanceMediaCard } from "./media-embed";
 import type { PageView } from "./page-view";
+import { treeLevelPad } from "./tree-indent";
 import { showFormDialog } from "./ui-dialog";
 import type { WorktreeText } from "./worktree-i18n";
 
@@ -1365,7 +1366,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     ) {
       row.classList.add("active");
     }
-    row.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+    row.style.setProperty("--lvl-pad", treeLevelPad(depth));
     row.appendChild(el("span", "chev-spacer"));
     const badge = el("span", `badge ${file.status}`, file.status);
     badge.title = t.files.statusTitles[file.status] || file.status;
@@ -1403,7 +1404,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       const li = el("li", "tree-dir");
       li.tabIndex = -1;
       li.dataset.type = "tree";
-      li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+      li.style.setProperty("--lvl-pad", treeLevelPad(depth));
       const chev = el("span", "chev");
       chev.innerHTML = chevronSvg();
       const icon = el("span", "dir-icon");

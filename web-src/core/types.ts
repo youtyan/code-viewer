@@ -152,12 +152,18 @@ export type WorktreeDiffResponse = {
   generation: number;
 };
 
+/** ダークテーマの色違い。既定は "violet"。 */
+export const THEME_PALETTES = ["violet", "graphite", "warm"] as const;
+export type ThemePalette = (typeof THEME_PALETTES)[number];
+
 export type ViewerFontSizeSetting = "compact" | "regular" | "large" | "xlarge";
 
 export type AppSettingsState = {
   version: 1;
   layout?: "side-by-side" | "line-by-line";
   theme?: "light" | "dark";
+  /** ダークの色違い。未設定なら既定 (紫)。ライトのときは使わない。 */
+  palette?: ThemePalette;
   language?: "en" | "ja";
   sidebarView?: "tree" | "flat";
   sidebarWidth?: number;
@@ -208,6 +214,14 @@ export type AppSettingsState = {
   agentHookHintDismissed?: boolean;
   /** エージェント一覧のアカウントの帯を畳んだ。 */
   agentAccountsCollapsed?: boolean;
+  /** 左のサイドバー (プロジェクトとエージェント) を畳んだ。 */
+  navCollapsed?: boolean;
+  /** 左のサイドバーの幅 (px)。範囲は core/panel-sizes.ts の NAV_WIDTH。 */
+  navWidth?: number;
+  /** 左のサイドバーで畳んだプロジェクト (プロジェクトの root)。 */
+  navCollapsedProjects?: string[];
+  /** 画面下のパネルの高さ (px)。範囲は core/panel-sizes.ts の APP_PANEL_HEIGHT。 */
+  appPanelHeight?: number;
   /**
    * ユーザーが変更したキー割り当てだけを持つ差分。ここに無いアクションは
    * デフォルトのまま動くので、後からデフォルトを変えても、触っていない

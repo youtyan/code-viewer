@@ -11,6 +11,9 @@ import {
 
 export type ViewerSettingsText = {
   display: string;
+  theme: string;
+  themeHelp: string;
+  themeNames: Record<ThemeChoice, string>;
   language: string;
   fileListFontSize: string;
   fileListFontSizeHelp: string;
@@ -96,8 +99,18 @@ export type ViewerSettingsValues = ViewerSettingsDraft & {
   agentRulesErrors: string;
 };
 
+/** 設定の「テーマ」の選択肢 (ライト 1 つとダークの色違い 3 つ)。 */
+export const THEME_CHOICES = ["dark", "graphite", "warm", "light"] as const;
+export type ThemeChoice = (typeof THEME_CHOICES)[number];
+
 export type ViewerSettingsDeps = {
   getText(): ViewerSettingsText;
+  /**
+   * テーマ。ほかの項目と違い、選んだ時点で当てて保存する (見比べて選ぶもの
+   * なので、保存ボタンを待たせない)。
+   */
+  getTheme(): ThemeChoice;
+  setTheme(choice: ThemeChoice): void;
   getValues(): ViewerSettingsValues;
   getDefaultValues(): ViewerSettingsDraft;
   refresh(): Promise<void>;
@@ -215,6 +228,8 @@ function setFieldValue(
 export function createViewerSettings(deps: ViewerSettingsDeps) {
   let root: HTMLElement | null = null;
 
+  const theme = document.createElement("select");
+  const themeHelp = helpText("viewer-theme-help");
   const language = document.createElement("select");
   const sidebarFontSize = fontSizeSelect("sidebar-font-size");
   const codeFontSize = fontSizeSelect("code-font-size");
@@ -290,6 +305,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   const datastoreTitle = sectionTitle();
   const watchTitle = sectionTitle();
   const agentRulesTitle = sectionTitle();
+  const themeLabel = fieldLabel("viewer-theme");
   const languageLabel = fieldLabel("viewer-language");
   const sidebarFontSizeLabel = fieldLabel("sidebar-font-size");
   const codeFontSizeLabel = fieldLabel("code-font-size");
@@ -312,6 +328,16 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     const wrap = document.createElement("div");
     wrap.className = "scope-settings";
 
+    theme.id = "viewer-theme";
+    for (const value of THEME_CHOICES) {
+      const option = document.createElement("option");
+      option.value = value;
+      theme.appendChild(option);
+    }
+    theme.addEventListener("change", () => {
+      const choice = THEME_CHOICES.find((value) => value === theme.value);
+      if (choice) deps.setTheme(choice);
+    });
     language.id = "viewer-language";
     for (const item of LANGUAGE_VALUES) {
       const option = document.createElement("option");
@@ -323,6 +349,9 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     const display = section();
     display.append(
       titleRow(displayTitle, displayShared),
+      themeLabel,
+      theme,
+      themeHelp,
       languageLabel,
       language,
       sidebarFontSizeLabel,
@@ -760,6 +789,12 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     datastoreTitle.textContent = text.datastoreTitle;
     watchTitle.textContent = text.watchTitle;
     agentRulesTitle.textContent = text.agentRulesTitle;
+    themeLabel.textContent = text.theme;
+    themeHelp.textContent = text.themeHelp;
+    for (const option of Array.from(theme.options)) {
+      option.textContent =
+        text.themeNames[option.value as ThemeChoice] ?? option.value;
+    }
     languageLabel.textContent = text.language;
     sidebarFontSizeLabel.textContent = text.fileListFontSize;
     codeFontSizeLabel.textContent = text.codeFontSize;
@@ -826,6 +861,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     watchLimitRange.min = String(values.watchLimitMin);
     watchLimitRange.max = String(values.watchLimitMax);
     if (!generalDirty && !generalSavePending) applyGeneralFields(values);
+    setFieldValue(theme, deps.getTheme());
     scopeSource.textContent = values.scopeSource;
     if (!agentRulesDirty && !agentRulesPending) {
       setFieldValue(agentRules, values.agentRulesJson);

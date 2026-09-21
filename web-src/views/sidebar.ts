@@ -5,7 +5,6 @@
 import { classifyDiffFileKind } from "../core/diff-file-kinds";
 import { compileFileFilter } from "../core/file-filter";
 import { nextVisibleFileIndex } from "../core/file-navigation";
-import { isNativeLinkClick } from "../core/link-click";
 import {
   COLLAPSE_ALL_16_PATHS,
   EXPAND_ALL_16_PATHS,
@@ -16,12 +15,14 @@ import {
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
 } from "../core/icons";
+import { isNativeLinkClick } from "../core/link-click";
 import type {
   FileMeta,
   RepoTreeEntry,
   RepoTreeResponse,
   SidebarItem,
 } from "../core/types";
+import { treeLevelPad } from "./tree-indent";
 
 export type ViewerFontSize = "compact" | "regular" | "large" | "xlarge";
 
@@ -528,7 +529,7 @@ export function createSidebar(deps: SidebarDeps) {
               ? "Large generated/vendor directory: open the detail pane to browse its contents"
               : "Internal Git metadata is not browsed";
         }
-        li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+        li.style.setProperty("--lvl-pad", treeLevelPad(depth));
         const chev = document.createElement("span");
         if (dir.children_omitted) {
           chev.className = "chev-spacer";
@@ -751,7 +752,7 @@ export function createSidebar(deps: SidebarDeps) {
           ? "Large generated/vendor directory: open the detail pane to browse its contents"
           : "Internal Git metadata is not browsed";
     }
-    li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+    li.style.setProperty("--lvl-pad", treeLevelPad(depth));
     const chev = document.createElement("span");
     if (dir.children_omitted) {
       chev.className = "chev-spacer";
@@ -929,7 +930,7 @@ export function createSidebar(deps: SidebarDeps) {
       "hidden-by-tests",
       STATE.hideTests && !isRepositorySidebarMode() && isTestPath(f.path || ""),
     );
-    li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+    li.style.setProperty("--lvl-pad", treeLevelPad(depth));
     const spacer = document.createElement("span");
     spacer.className = "chev-spacer";
     li.appendChild(spacer);

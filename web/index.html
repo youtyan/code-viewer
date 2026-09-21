@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -17,45 +17,71 @@
 <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
 <script src="/vendor/diff2html/diff2html-ui.min.js"></script>
 
+<!-- 前回の骨格の見た目 (テーマ・左のサイドバー) を CSS より先に当てる。
+     控えを書くのは web-src/views/shell/early-look.ts (キーと形はそちらと同じ)。
+     控えが無い・読めないときは既定 (ダーク・開いたサイドバー) のまま描く。 -->
+<script>
+(function () {
+  var raw = window.localStorage.getItem("code-viewer:early-look");
+  if (!raw) return;
+  var look = JSON.parse(raw);
+  var root = document.documentElement;
+  if (look.theme === "light" || look.theme === "dark") root.dataset.theme = look.theme;
+  if (look.palette) root.dataset.palette = look.palette;
+  if (look.navCollapsed) root.dataset.navCollapsed = "";
+  if (look.navWidth > 0) root.style.setProperty("--nav-w", look.navWidth + "px");
+})();
+</script>
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
 <div id="app">
+  <!-- 左のサイドバー: 検索の入口・プロジェクトとエージェントの一覧・
+       新しいエージェント / 設定 / ヘルプ。一覧の中身は
+       views/agents/agents-sidebar.ts、畳む・幅は views/shell/app-nav.ts。 -->
+  <aside id="app-nav" aria-label="Projects and agents">
+    <div class="nav-head">
+      <button id="search-btn" class="nav-search" type="button" title="search files (Ctrl+K) · Shift+click: grep (Ctrl+G)" aria-label="search files (Ctrl+K) · Shift+click: grep (Ctrl+G)"><span class="goi-icon" aria-hidden="true"></span><span class="nav-search-label">Search</span><kbd class="nav-search-key">⌘K</kbd></button>
+      <button id="nav-collapse" class="nav-icon-action" type="button" title="hide sidebar" aria-label="hide sidebar"><span class="goi-icon" aria-hidden="true"></span></button>
+    </div>
+    <div class="nav-section-head">
+      <span class="nav-section-title">Projects</span>
+      <a id="nav-board-link" class="nav-icon-action nav-board-link" data-route="agents" href="/agents" title="All agents" aria-label="All agents"><span class="goi-icon" aria-hidden="true"></span></a>
+    </div>
+    <div id="nav-projects" class="nav-projects"></div>
+    <div class="nav-foot">
+      <button id="nav-launch" class="nav-foot-item" type="button"><span class="goi-icon" aria-hidden="true"></span><span class="nav-foot-label">New agent</span></button>
+      <a id="nav-settings" class="nav-foot-item" data-route="help" href="/help?section=settings"><span class="goi-icon" aria-hidden="true"></span><span class="nav-foot-label">Settings</span></a>
+      <button id="quick-help-btn" class="nav-foot-item" type="button" title="quick help (shortcuts)" aria-label="quick help (shortcuts)"><span class="goi-icon" aria-hidden="true"></span><span class="nav-foot-label">Help</span></button>
+    </div>
+    <div id="app-nav-resizer" class="app-nav-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="resize sidebar"></div>
+  </aside>
+  <!-- 中央の上の 1 行: プロジェクト名とブランチ (= プロジェクトの切替、p)、
+       画面のタブ、見ている画面への操作。 -->
   <header id="global-header">
+    <button id="nav-expand" class="global-icon-action" type="button" title="show sidebar" aria-label="show sidebar" hidden><span class="goi-icon" aria-hidden="true"></span></button>
     <!-- リポジトリ名 = プロジェクトの切替 (views/projects/project-switcher.ts)。 -->
     <button id="project-switcher" class="brand" type="button" aria-label="Switch project">
-      <img class="brand-icon" src="/favicon.png" alt="" width="20" height="20" />
       <span class="title" id="project-title">repository</span>
       <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
     </button>
+    <span class="global-header-spacer"></span>
     <nav class="app-menu" aria-label="Views">
-      <a class="app-menu-item active" data-route="repo" href="/">Repository</a>
-      <a class="app-menu-item" data-route="database" href="/database">Datastores</a>
-      <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
+      <a class="app-menu-item active" data-route="repo" href="/">Files</a>
+      <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff</a>
       <a class="app-menu-item" data-route="history" href="/history">History</a>
       <a class="app-menu-item" data-route="worktree" href="/worktree">Worktrees</a>
-      <a class="app-menu-item" data-route="agents" href="/agents">Agents</a>
-      <a class="app-menu-item" data-route="journal" href="/journal">Work Log</a>
-      <span class="global-actions-sep app-menu-sep" aria-hidden="true"></span>
-      <a class="app-menu-item" data-route="help" href="/help">Settings &amp; Help</a>
+      <a class="app-menu-item" data-route="database" href="/database">Data</a>
+      <a class="app-menu-item" data-route="journal" href="/journal">Work log</a>
     </nav>
     <div class="global-actions">
-      <!-- エージェントの件数 (入力待ち / 作業中)。中身は views/agents/agent-status.ts が入れる。 -->
-      <button id="agent-status" class="agent-status" type="button" hidden></button>
-      <span class="global-actions-sep" aria-hidden="true"></span>
-      <button id="search-btn" class="global-icon-action" title="search files (Ctrl+K) · Shift+click: grep (Ctrl+G)" aria-label="search files (Ctrl+K) · Shift+click: grep (Ctrl+G)"><span class="goi-icon" aria-hidden="true"></span></button>
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations"><span class="goi-icon" aria-hidden="true"></span><span id="annotations-count" hidden></span></button>
-      <button id="doctor-btn" class="global-icon-action" title="environment doctor" aria-label="environment doctor"><span class="goi-icon" aria-hidden="true"></span><span id="doctor-badge" class="doctor-badge" hidden></span></button>
-      <span class="global-actions-sep" aria-hidden="true"></span>
       <button id="copy-ai-context" class="global-icon-action" title="Copy AI context" aria-label="Copy AI context"><span class="goi-icon" aria-hidden="true"></span></button>
       <span id="copy-ai-context-feedback" class="goi-feedback" role="status" hidden></span>
       <button id="auto-update" class="global-icon-action active" title="auto update on file change" aria-label="auto update on file change"><span class="goi-icon" aria-hidden="true"></span></button>
       <button id="cancel-requests" class="global-icon-action" title="no in-flight requests" aria-label="no in-flight requests" disabled><span class="goi-icon" aria-hidden="true"></span></button>
-      <button id="theme" title="toggle theme" aria-label="toggle theme"></button>
-      <span class="global-actions-sep" aria-hidden="true"></span>
-      <span id="status" class="status" role="status" aria-live="polite"><span class="status-label"></span></span>
+      <button id="theme" class="global-icon-action" title="toggle theme" aria-label="toggle theme"></button>
       <a id="repo-web-link" class="global-icon-link" href="#" target="_blank" rel="noopener" hidden><span class="goi-icon" aria-hidden="true"></span></a>
-      <button id="quick-help-btn" class="global-icon-action" title="quick help (shortcuts)" aria-label="quick help (shortcuts)"><span class="goi-icon" aria-hidden="true"></span></button>
     </div>
   </header>
   <header id="topbar">
@@ -260,6 +286,17 @@
     </div>
     <div id="diff"></div>
   </main>
+  <!-- 最下段: アカウントごとの使用量 (views/agents/usage-status.ts)、
+       エージェントの件数 (views/agents/agent-status.ts)、サーバの状態と診断。 -->
+  <footer id="statusbar">
+    <div id="usage-status" class="usage-status" role="group" aria-label="Usage"></div>
+    <span class="statusbar-spacer"></span>
+    <!-- エージェントの件数 (入力待ち / 作業中)。中身は views/agents/agent-status.ts が入れる。 -->
+    <button id="agent-status" class="agent-status" type="button" hidden></button>
+    <span class="statusbar-sep" aria-hidden="true"></span>
+    <span id="status" class="status" role="status" aria-live="polite"><span class="status-label"></span></span>
+    <button id="doctor-btn" class="statusbar-icon-action" type="button" title="environment doctor" aria-label="environment doctor"><span class="goi-icon" aria-hidden="true"></span><span id="doctor-badge" class="doctor-badge" hidden></span></button>
+  </footer>
 </div>
 
 <script src="/app.js"></script>

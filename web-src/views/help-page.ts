@@ -190,7 +190,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "Ctrl+K opens the file palette and Ctrl+G the text palette; the search button at the left of the header icons does the same (Shift+click for text). The two share one window: switching keeps what you typed, and reopening restores the last query, selected so typing replaces it. With an empty query the file palette lists the files you opened most recently, and the result line says when the ranking was cut at 50. The text palette has regex (Alt+R), match-case (Alt+C) and whole-word (Alt+W) toggles, and path:<dir or glob> tokens in the query narrow the search; matching is case-insensitive on every engine unless match-case is on. Opening a hit marks the matched text on the target line, and in a large virtualized file it pre-fills the in-file find bar. Pin (or Ctrl+Enter) moves the query into the bottom panel's Search tab, where the grouped result list stays open while you browse files; the query is part of the URL (?results=) so a reload re-runs it.",
+                text: "Ctrl+K opens the file palette and Ctrl+G the text palette; the Search box at the top of the left sidebar does the same (Shift+click for text). The two share one window: switching keeps what you typed, and reopening restores the last query, selected so typing replaces it. With an empty query the file palette lists the files you opened most recently, and the result line says when the ranking was cut at 50. The text palette has regex (Alt+R), match-case (Alt+C) and whole-word (Alt+W) toggles, and path:<dir or glob> tokens in the query narrow the search; matching is case-insensitive on every engine unless match-case is on. Opening a hit marks the matched text on the target line, and in a large virtualized file it pre-fills the in-file find bar. Pin (or Ctrl+Enter) moves the query into the bottom panel's Search tab, where the grouped result list stays open while you browse files; the query is part of the URL (?results=) so a reload re-runs it.",
               },
               {
                 kind: "paragraph",
@@ -211,7 +211,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "The Tools item in the header menu opens a drawer for text you paste, without leaving the screen you are on. It holds a Markdown preview (the same renderer as the file preview, so the table of contents, task lists, frontmatter, code highlighting and ```mermaid fences all work), a Mermaid preview with zoom and drag-pan, and a JSON / YAML tool that reads either format and re-emits it as formatted JSON or YAML — a validator and a converter in one.",
+                text: "The Tools tab of the bottom panel opens a drawer for text you paste, without leaving the screen you are on. It holds a Markdown preview (the same renderer as the file preview, so the table of contents, task lists, frontmatter, code highlighting and ```mermaid fences all work), a Mermaid preview with zoom and drag-pan, and a JSON / YAML tool that reads either format and re-emits it as formatted JSON or YAML — a validator and a converter in one.",
               },
               {
                 kind: "paragraph",
@@ -224,7 +224,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "The Terminal item in the header menu opens a bottom panel with a real shell in it. It is an ordinary login shell running on a PTY and drawn with xterm.js, so anything you would run in a terminal works here — including tmux. Run tmux inside it and it behaves exactly as it does in any other terminal, because the panel only resizes the PTY and whatever runs in it follows on its own.",
+                text: "The Terminal tab of the bottom panel opens a bottom panel with a real shell in it. It is an ordinary login shell running on a PTY and drawn with xterm.js, so anything you would run in a terminal works here — including tmux. Run tmux inside it and it behaves exactly as it does in any other terminal, because the panel only resizes the PTY and whatever runs in it follows on its own.",
               },
               {
                 kind: "paragraph",
@@ -253,11 +253,11 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "The Agents item in the header menu (g a) lists every tmux pane on this machine where a coding agent runs, grouped by project — the git repository a pane's folder belongs to, with worktrees folded into their repository and folders outside git kept as their own group. It is the same list from whichever code-viewer you open it in. A row reads state, agent kind (claude, codex, or an agent that reports its state through a hook), how long it has been in that state, what it is doing (the pane title), and where it lives in tmux (session:window.pane). Needs input comes first, then Finished · unread, then Working, then the rest; Enter or a click opens that pane in the Terminal panel below. Plain shells show up only with All panes.",
+                text: "The left sidebar lists your projects with the agents running in them, on every screen: registered projects first, in your order, and below them, under Found in tmux, projects that are not registered but have agents in tmux. Rows do not move when states change (the state mark, the counter at the bottom and notifications tell you what changed); agents inside a project follow their tmux place. Click a project name to switch to it (an unregistered one is registered first, without asking); click the chevron to fold it; click an agent to open its pane in the Terminal panel. The All agents board (the button next to Projects, or g a) lists every tmux pane on this machine where a coding agent runs, grouped by project — the git repository a pane's folder belongs to, with worktrees folded into their repository and folders outside git kept as their own group. It is the same list from whichever code-viewer you open it in. A row reads state, agent kind (claude, codex, or an agent that reports its state through a hook), how long it has been in that state, what it is doing (the pane title), and where it lives in tmux (session:window.pane). Needs input comes first, then Finished · unread, then Working, then the rest; Enter or a click opens that pane in the Terminal panel below. Plain shells show up only with All panes.",
               },
               {
                 kind: "paragraph",
-                text: "The counter at the right of the header shows how many agents need input and how many are working, on every screen; it turns amber only when something needs input, and clicking it opens the list (or the pane directly, when exactly one needs input). When an agent goes from working to needing input, or from working to stopped, the row gets an unread dot and the tab title gets the unread count; opening or selecting the pane clears it. Desktop notifications are opt-in: press Enable notifications on the Agents screen, and choose which changes notify you under Settings → Agent notifications. Nothing is notified for a pane you are looking at in the Terminal panel. States come from the same screen rules the Terminal panel uses.",
+                text: "The counter at the right of the bottom bar shows how many agents need input and how many are working, on every screen; it turns amber only when something needs input, and clicking it opens the list (or the pane directly, when exactly one needs input). When an agent goes from working to needing input, or from working to stopped, the row gets an unread dot and the tab title gets the unread count; opening or selecting the pane clears it. Desktop notifications are opt-in: press Enable notifications on the Agents screen, and choose which changes notify you under Settings → Agent notifications. Nothing is notified for a pane you are looking at in the Terminal panel. States come from the same screen rules the Terminal panel uses.",
               },
               {
                 kind: "paragraph",
@@ -273,7 +273,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Register your projects to keep them in the Agents list even when no agent runs in them, in the order you choose (⋯ on a project heading: register, rename, move up / down, remove from projects — the repository itself is never touched). Open (on a heading) goes to that project's code-viewer in the same tab; if none is running for a registered project, code-viewer starts one first and remembers its port, so the address (and the browser's notification permission) stays the same next time. If that port is taken it starts on another one and tells you. Servers that code-viewer started can be stopped from the ⋯ menu; servers you started yourself and the one showing this screen cannot. The repository name at the left of the header (p) switches between registered projects from any screen and keeps the screen you are on; type to filter, ↑↓ and Enter to go. Theme, language, font sizes, key bindings, notifications and dismissed hints are shared by all projects (Settings shows which sections), so switching does not change how code-viewer looks.",
+                text: "Register your projects to keep them in the Agents list even when no agent runs in them, in the order you choose (⋯ on a project heading: register, rename, move up / down, remove from projects — the repository itself is never touched). Open (on a heading) goes to that project's code-viewer in the same tab; if none is running for a registered project, code-viewer starts one first and remembers its port, so the address (and the browser's notification permission) stays the same next time. If that port is taken it starts on another one and tells you. Servers that code-viewer started can be stopped from the ⋯ menu; servers you started yourself and the one showing this screen cannot. The project name at the left of the top bar (p) switches between registered projects from any screen and keeps the screen you are on; type to filter, ↑↓ and Enter to go. Theme, language, font sizes, key bindings, notifications, dismissed hints and the layout (sidebar width and folding, panel height) are shared by all projects (Settings shows which sections), so switching does not change how code-viewer looks.",
               },
             ],
           },
@@ -282,7 +282,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "The Worktrees item in the header menu lists every worktree of this repository — the main one and every linked worktree — in the same three-pane shape as History: pick a worktree on the left, its changed files in the middle, the diff on the right. Running one coding agent per worktree makes that spread invisible from inside a single checkout, and this screen is where it becomes visible again. The selection lives in the URL (?wt=…&file=…), so a reload comes back to the same diff.",
+                text: "The Worktrees tab lists every worktree of this repository — the main one and every linked worktree — in the same three-pane shape as History: pick a worktree on the left, its changed files in the middle, the diff on the right. Running one coding agent per worktree makes that spread invisible from inside a single checkout, and this screen is where it becomes visible again. The selection lives in the URL (?wt=…&file=…), so a reload comes back to the same diff.",
               },
               {
                 kind: "paragraph",
@@ -307,7 +307,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "Toggle the 🩺 icon in the header to slide in a diagnostic sheet from the right. It works on top of any screen (Repository, Diff, History, Datastores) and the open state is preserved in the URL as ?doctor=open so links are reproducible.",
+                text: "Toggle the pulse icon at the right of the bottom bar to slide in a diagnostic sheet from the right. It works on top of any screen (Repository, Diff, History, Datastores) and the open state is preserved in the URL as ?doctor=open so links are reproducible.",
               },
               {
                 kind: "paragraph",
@@ -1054,7 +1054,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "Ctrl+K でファイルパレット、Ctrl+G でコード検索パレットが開きます。ヘッダのアイコン列の左端にある検索ボタンでも同じです（Shift+クリックでコード検索）。2 つは 1 つのウィンドウを共有し、切り替えても入力中の検索語は残り、閉じて開き直すと前回の検索語が選択状態で戻ります。ファイルパレットは空のとき最近開いたファイルを並べ、結果が 50 件で切られたときはその旨を表示します。コード検索には正規表現（Alt+R）・大文字小文字の区別（Alt+C）・単語単位（Alt+W）の切り替えがあり、検索語の中の path:<ディレクトリ or glob> で対象を絞れます。大文字小文字は「区別する」を押さない限りどのエンジンでも区別しません。ヒットを開くと該当行の一致箇所が強調され、大きな仮想表示のファイルではファイル内検索バーに検索語が入ります。「固定」（または Ctrl+Enter）を押すと検索語が下パネルの「検索」タブに移り、ファイルを開いて回る間も結果一覧が残ります。検索語は URL（?results=）に載るのでリロードしても同じ検索が走ります。",
+                text: "Ctrl+K でファイルパレット、Ctrl+G でコード検索パレットが開きます。左のサイドバーの上の「検索」でも同じです（Shift+クリックでコード検索）。2 つは 1 つのウィンドウを共有し、切り替えても入力中の検索語は残り、閉じて開き直すと前回の検索語が選択状態で戻ります。ファイルパレットは空のとき最近開いたファイルを並べ、結果が 50 件で切られたときはその旨を表示します。コード検索には正規表現（Alt+R）・大文字小文字の区別（Alt+C）・単語単位（Alt+W）の切り替えがあり、検索語の中の path:<ディレクトリ or glob> で対象を絞れます。大文字小文字は「区別する」を押さない限りどのエンジンでも区別しません。ヒットを開くと該当行の一致箇所が強調され、大きな仮想表示のファイルではファイル内検索バーに検索語が入ります。「固定」（または Ctrl+Enter）を押すと検索語が下パネルの「検索」タブに移り、ファイルを開いて回る間も結果一覧が残ります。検索語は URL（?results=）に載るのでリロードしても同じ検索が走ります。",
               },
               {
                 kind: "paragraph",
@@ -1075,7 +1075,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "ヘッダメニューの Tools は、いま見ている画面を離れずに使える貼り付け用のドロワーを開きます。Markdown プレビュー（ファイルプレビューと同じ描画なので、目次・タスクリスト・frontmatter・コードハイライト・```mermaid フェンスがそのまま効きます）、ズームとドラッグ移動ができる Mermaid プレビュー、JSON と YAML のどちらでも読み取って整形し直す JSON / YAML ツール（検証と相互変換を兼ねます）が入っています。",
+                text: "下パネルの Tools タブは、いま見ている画面を離れずに使える貼り付け用のドロワーを開きます。Markdown プレビュー（ファイルプレビューと同じ描画なので、目次・タスクリスト・frontmatter・コードハイライト・```mermaid フェンスがそのまま効きます）、ズームとドラッグ移動ができる Mermaid プレビュー、JSON と YAML のどちらでも読み取って整形し直す JSON / YAML ツール（検証と相互変換を兼ねます）が入っています。",
               },
               {
                 kind: "paragraph",
@@ -1088,7 +1088,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "ヘッダメニューの Terminal は、シェルが動く下パネルを開きます。中身は PTY 上のふつうのログインシェルを xterm.js で描いたものなので、ターミナルでできることはそのままできます。tmux もそのひとつで、この中で tmux を起動すれば、他のターミナルで使うのと同じように動きます。パネルがやるのは PTY のリサイズだけで、中で動いているものはそれに自分で追従します。",
+                text: "下パネルの Terminal タブは、シェルが動く下パネルを開きます。中身は PTY 上のふつうのログインシェルを xterm.js で描いたものなので、ターミナルでできることはそのままできます。tmux もそのひとつで、この中で tmux を起動すれば、他のターミナルで使うのと同じように動きます。パネルがやるのは PTY のリサイズだけで、中で動いているものはそれに自分で追従します。",
               },
               {
                 kind: "paragraph",
@@ -1117,11 +1117,11 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "ヘッダメニューの「エージェント」(g a) は、このマシンの tmux でコーディングエージェントが動いているペインを、プロジェクトごとに並べます。プロジェクトはペインのフォルダが属する git リポジトリで、作業ツリーは本体にまとめ、git 管理外のフォルダはそのフォルダで 1 つにします。どのリポジトリで開いた code-viewer からでも同じ一覧です。1 行に、状態・種類 (claude、codex、フックで状態を申告するエージェント)・その状態になってからの時間・作業内容 (ペインのタイトル)・tmux 上の場所 (セッション:ウィンドウ.ペイン) が並びます。入力待ちが先頭、次に完了・未読、作業中、その後にそれ以外。Enter かクリックで、下のターミナルパネルにそのペインが開きます。ただのシェルは「すべてのペイン」にしたときだけ出ます。",
+                text: "左のサイドバーは、どの画面でもプロジェクトとその中で動いているエージェントを並べます。上に登録したプロジェクト (好きな順)、その下の「tmux で検出」に、登録していないが tmux でエージェントが動いているプロジェクトが出ます。状態が変わっても行は動きません (変化は状態の印・最下段の件数・通知で分かります)。プロジェクトの中のエージェントは tmux の場所の順です。プロジェクト名を押すとそのプロジェクトへ移り (登録していなければ確かめずに登録してから)、左の山形で畳み、エージェントを押すと下のターミナルパネルにそのペインが開きます。「すべてのエージェント」のボード (「プロジェクト」の横のボタン、g a) は、このマシンの tmux でコーディングエージェントが動いているペインを、プロジェクトごとに並べます。プロジェクトはペインのフォルダが属する git リポジトリで、作業ツリーは本体にまとめ、git 管理外のフォルダはそのフォルダで 1 つにします。どのリポジトリで開いた code-viewer からでも同じ一覧です。1 行に、状態・種類 (claude、codex、フックで状態を申告するエージェント)・その状態になってからの時間・作業内容 (ペインのタイトル)・tmux 上の場所 (セッション:ウィンドウ.ペイン) が並びます。入力待ちが先頭、次に完了・未読、作業中、その後にそれ以外。Enter かクリックで、下のターミナルパネルにそのペインが開きます。ただのシェルは「すべてのペイン」にしたときだけ出ます。",
               },
               {
                 kind: "paragraph",
-                text: "ヘッダ右側の件数は、どの画面にいても入力待ちと作業中の数を出します。注意の色になるのは入力待ちがあるときだけです。押すと一覧へ、入力待ちが 1 件だけならそのペインを直接開きます。作業中から入力待ちに、または作業中から止まったに変わると、その行に未読の印が付き、タブのタイトルの先頭に未読の数が出ます。そのペインを開くか一覧で選ぶと消えます。デスクトップ通知は、エージェント画面の「通知を有効にする」を押したときだけ許可を求めます。どの変化で通知するかは 設定 → エージェントの通知 で選べます。ターミナルパネルでいま見ているペインは通知しません。状態の判定はターミナルパネルと同じ画面ルールです。",
+                text: "最下段の右の件数は、どの画面にいても入力待ちと作業中の数を出します。注意の色になるのは入力待ちがあるときだけです。押すと一覧へ、入力待ちが 1 件だけならそのペインを直接開きます。作業中から入力待ちに、または作業中から止まったに変わると、その行に未読の印が付き、タブのタイトルの先頭に未読の数が出ます。そのペインを開くか一覧で選ぶと消えます。デスクトップ通知は、エージェント画面の「通知を有効にする」を押したときだけ許可を求めます。どの変化で通知するかは 設定 → エージェントの通知 で選べます。ターミナルパネルでいま見ているペインは通知しません。状態の判定はターミナルパネルと同じ画面ルールです。",
               },
               {
                 kind: "paragraph",
@@ -1137,7 +1137,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "プロジェクトを登録すると、エージェントが居なくてもエージェント一覧に、好きな順で常に並びます (見出しの ⋯ から登録・名前を変える・上へ / 下へ・登録を外す。リポジトリには触りません)。見出しの「開く」は、そのプロジェクトの code-viewer へ同じタブで移ります。登録したプロジェクトで動いていなければ、先に起動してから移ります。起動したポートを覚えて次も同じポートで起動するので、アドレス (とブラウザの通知の許可) は変わりません。そのポートが使われていれば別のポートで起動し、そのことを知らせます。code-viewer が起動したサーバは ⋯ から止められます。自分で起動したサーバと、この画面のサーバは止められません。ヘッダ左端のリポジトリ名 (p) から、どの画面でも登録したプロジェクトへ切り替えられます。いまの画面のまま移ります。文字を打つと絞り込み、↑↓ と Enter で移ります。テーマ・言語・文字サイズ・キー割り当て・通知・閉じた案内は全プロジェクト共通なので (設定画面にどの節かを表示します)、移っても見た目は変わりません。",
+                text: "プロジェクトを登録すると、エージェントが居なくてもエージェント一覧に、好きな順で常に並びます (見出しの ⋯ から登録・名前を変える・上へ / 下へ・登録を外す。リポジトリには触りません)。見出しの「開く」は、そのプロジェクトの code-viewer へ同じタブで移ります。登録したプロジェクトで動いていなければ、先に起動してから移ります。起動したポートを覚えて次も同じポートで起動するので、アドレス (とブラウザの通知の許可) は変わりません。そのポートが使われていれば別のポートで起動し、そのことを知らせます。code-viewer が起動したサーバは ⋯ から止められます。自分で起動したサーバと、この画面のサーバは止められません。上の行の左端のプロジェクト名 (p) から、どの画面でも登録したプロジェクトへ切り替えられます。いまの画面のまま移ります。文字を打つと絞り込み、↑↓ と Enter で移ります。テーマ・言語・文字サイズ・キー割り当て・通知・閉じた案内・画面の配置 (サイドバーの幅と畳み、パネルの高さ) は全プロジェクト共通なので (設定画面にどの節かを表示します)、移っても見た目は変わりません。",
               },
             ],
           },
@@ -1146,7 +1146,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "ヘッダメニューの「作業ツリー」は、このリポジトリの作業ツリーを本体ぶんも含めて並べます。画面の形は履歴と同じ 3 つの列で、左で作業ツリーを選び、中央にその変更ファイル、右に差分が出ます。コーディングエージェントを作業ツリーごとに走らせると、1 つのチェックアウトの中からは全体が見えなくなります。この画面はそれを見えるようにするためのものです。選んだものは URL に載る (?wt=…&file=…) ので、読み込み直しても同じ差分に戻ります。",
+                text: "タブの「作業ツリー」は、このリポジトリの作業ツリーを本体ぶんも含めて並べます。画面の形は履歴と同じ 3 つの列で、左で作業ツリーを選び、中央にその変更ファイル、右に差分が出ます。コーディングエージェントを作業ツリーごとに走らせると、1 つのチェックアウトの中からは全体が見えなくなります。この画面はそれを見えるようにするためのものです。選んだものは URL に載る (?wt=…&file=…) ので、読み込み直しても同じ差分に戻ります。",
               },
               {
                 kind: "paragraph",
@@ -1171,7 +1171,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "ヘッダ右の 🩺 アイコンで、右からスライドする診断シートを開きます。Repository / Diff / History / Datastores などどの画面の上にも重ねて表示でき、開閉状態は URL の ?doctor=open に同期されるのでリンク共有で復元できます。",
+                text: "最下段の右の診断のアイコンで、右からスライドする診断シートを開きます。Repository / Diff / History / Datastores などどの画面の上にも重ねて表示でき、開閉状態は URL の ?doctor=open に同期されるのでリンク共有で復元できます。",
               },
               {
                 kind: "paragraph",
