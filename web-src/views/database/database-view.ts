@@ -1312,7 +1312,10 @@ function createTabPane(
   async function fetchDbFiles(): Promise<DbFilesResponse> {
     if (deps.fetchDbFiles) return deps.fetchDbFiles();
     const res = await deps.trackLoad(fetch(apiUrl("dbFiles")));
-    return readJsonResponse<DbFilesResponse>(res, "load datastores");
+    return readJsonResponse<DbFilesResponse>(
+      res,
+      paneText().failure.loadDatastores,
+    );
   }
 
   function withCurrentSchema(params: URLSearchParams): URLSearchParams {
@@ -2751,7 +2754,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       const response = await deps.trackLoad(fetch(apiUrl("dbUi")));
       if (!response.ok) {
         throw new Error(
-          await responseErrorMessage(response, "load database UI settings"),
+          await responseErrorMessage(
+            response,
+            outerText().failure.loadUiSettings,
+          ),
         );
       }
       let state: DbUiState;
@@ -2759,7 +2765,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         state = (await response.json()) as DbUiState;
       } catch (error) {
         throw errorWithCause(
-          "load database UI settings: response is not valid JSON",
+          `${outerText().failure.loadUiSettings}: response is not valid JSON`,
           error,
         );
       }
@@ -2798,7 +2804,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     // 側 merge は idempotent なので、各 PATCH が独立に届けば十分。
     void persistDbUiPatch(
       { columnWidths: { [dbId]: { [table]: widths } } },
-      "save database column widths",
+      outerText().failure.saveColumnWidths,
     );
   }
 
@@ -2829,7 +2835,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           [scopeKey]: nextTables.length > 0 ? nextTables : null,
         },
       },
-      `save database ${stateKey}`,
+      stateKey === "expandedTables"
+        ? outerText().failure.saveExpandedTables
+        : outerText().failure.saveSnapshotTables,
     );
   }
 
@@ -2890,7 +2898,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     );
     if (!response.ok) {
       throw new Error(
-        await responseErrorMessage(response, "save database UI settings"),
+        await responseErrorMessage(
+          response,
+          outerText().failure.saveUiSettings,
+        ),
       );
     }
     let saved: DbUiState;
@@ -2898,7 +2909,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       saved = (await response.json()) as DbUiState;
     } catch (error) {
       throw errorWithCause(
-        "save database UI settings: response is not valid JSON",
+        `${outerText().failure.saveUiSettings}: response is not valid JSON`,
         error,
       );
     }
@@ -2921,7 +2932,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const res = await fetch(`${apiUrl("dbHistory")}?${params}`);
     const state = await readJsonResponse<QueryHistoryState>(
       res,
-      "load query Local History",
+      outerText().failure.loadLocalHistory,
     );
     const seen = new Set<string>();
     const history: string[] = [];
@@ -2956,7 +2967,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       .then(async (res) => {
         const value = await readJsonResponse<DbFilesResponse>(
           res,
-          "load datastores",
+          outerText().failure.loadDatastores,
         );
         dbFilesCache = { value, expiresAt: Date.now() + 10_000 };
         return value;
@@ -3008,7 +3019,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           body: raw,
           keepalive: true,
         });
-        await requireOkResponse(response, "save database tabs on unload");
+        await requireOkResponse(
+          response,
+          outerText().failure.saveDatabaseTabsOnUnload,
+        );
         lastSavedTabsRaw = raw;
       } catch (error) {
         reportActivePaneError(
@@ -3042,7 +3056,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
             body: raw,
             signal: controller.signal,
           });
-          await requireOkResponse(response, "save database tabs");
+          await requireOkResponse(
+            response,
+            outerText().failure.saveDatabaseTabs,
+          );
           lastSavedTabsRaw = raw;
         } catch (error) {
           if (!isAbortError(error)) {
@@ -3074,7 +3091,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   async function fetchTabs(): Promise<TabsResponse> {
     const res = await fetch(apiUrl("dbTabs"));
-    return readJsonResponse<TabsResponse>(res, "load database tabs");
+    return readJsonResponse<TabsResponse>(
+      res,
+      outerText().failure.loadDatabaseTabs,
+    );
   }
 
   const tabsBar = document.createElement("div");
@@ -3202,7 +3222,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           headers,
           body,
         });
-        await requireOkResponse(response, `close datastore ${dbId}`);
+        await requireOkResponse(
+          response,
+          outerText().failure.closeDatastore(dbId),
+        );
       } catch (error) {
         reportActivePaneError(
           `Failed to close datastore ${dbId}`,

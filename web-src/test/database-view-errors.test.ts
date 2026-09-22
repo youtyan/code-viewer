@@ -742,6 +742,90 @@ describe("database view SQL error rendering", () => {
     await leaveView(view);
   });
 
+  // 直す前は日本語の設定でも、データストアの一覧・タブ・表示設定の読み込みの
+  // 失敗の詳細に英語の操作名が残っていた。英語の出力は今までどおり。
+  test.each([
+    {
+      language: "en" as const,
+      failing: "files",
+      operation: "load datastores",
+    },
+    {
+      language: "ja" as const,
+      failing: "files",
+      operation: "データストアの一覧を読み込めませんでした",
+    },
+    {
+      language: "en" as const,
+      failing: "tabs",
+      operation: "load database tabs",
+    },
+    {
+      language: "ja" as const,
+      failing: "tabs",
+      operation: "データストアのタブを読み込めませんでした",
+    },
+    {
+      language: "en" as const,
+      failing: "ui",
+      operation: "load database UI settings",
+    },
+    {
+      language: "ja" as const,
+      failing: "ui",
+      operation: "Data の表示設定を読み込めませんでした",
+    },
+  ])("names the failed $failing load in the display language: $language", async ({
+    language,
+    failing,
+    operation,
+  }) => {
+    installDatabaseDom();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const failure = () => new Response("sample failure", { status: 500 });
+    mockFetch(
+      (url, init) => {
+        if (url === "/_db/tabs" && init?.method === "PUT")
+          return jsonResponse({ ok: true });
+        if (url === "/_db/tabs")
+          return failing === "tabs" ? failure() : jsonResponse({ tabs: [] });
+        if (url === "/_db/files")
+          return failing === "files"
+            ? failure()
+            : jsonResponse(baseFilesResponse());
+        if (url === "/_db/ui")
+          return failing === "ui"
+            ? failure()
+            : jsonResponse({ version: 1, columnWidths: {}, prefs: {} });
+        if (url.startsWith("/_db/schema"))
+          return jsonResponse(baseSchemaResponse());
+        if (url.startsWith("/_db/table"))
+          return jsonResponse(baseTableResponse());
+        return new Response("unexpected request", { status: 500 });
+      },
+      { handleDbUi: true },
+    );
+
+    const view = createViewForTest({ getLanguage: () => language });
+    await view.enter("docker:db");
+    await flushMicrotasks();
+
+    const detail = `${operation} (HTTP 500): sample failure`;
+    const shown = (
+      Array.from(
+        document.querySelectorAll(".db-pane-error"),
+      ) as unknown as FakeElement[]
+    ).map((error) => String(error.textContent));
+    expect(shown.some((text) => text.includes(detail))).toBe(true);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ message: detail }),
+    );
+    await leaveView(view);
+  });
+
   test("keeps the normal schema and first table path rendering", async () => {
     installDatabaseDom();
     mockFetch((url, init) => {

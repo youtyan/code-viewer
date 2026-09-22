@@ -3,15 +3,16 @@
 // POST /_db/elasticsearch/write を呼ぶことを確認する。
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 import { clickDialogConfirm, closeOpenDialog } from "./_dialog-helpers";
-import { q } from "./_test-helpers";
+import { q, waitFor } from "./_test-helpers";
 
 GlobalRegistrator.register();
 
 const { createElasticsearchExplorer } = await import(
   "../views/database/elasticsearch-explorer"
 );
+const { dbText } = await import("../views/database/i18n");
 
 const tick = () => new Promise((r) => setTimeout(r, 20));
 
@@ -27,10 +28,12 @@ function jsonResponse(body: unknown): Response {
 
 const origFetch = globalThis.fetch;
 
-function installFetch() {
+function installFetch(fail?: (url: string) => Error | null) {
   writeCalls = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
+    const failure = fail?.(url);
+    if (failure) throw failure;
     if (url.includes("/_db/elasticsearch/indices")) {
       return jsonResponse({
         dbId: "docker:es",
@@ -78,8 +81,8 @@ afterAll(() => {
   GlobalRegistrator.unregister();
 });
 
-async function setupWithDoc() {
-  installFetch();
+async function setupWithDoc(fail?: (url: string) => Error | null) {
+  installFetch(fail);
   const view = createElasticsearchExplorer();
   document.body.appendChild(view.sidebarSlot);
   document.body.appendChild(view.el);
@@ -89,6 +92,233 @@ async function setupWithDoc() {
   await tick();
   return view;
 }
+
+type EsView = ReturnType<typeof createElasticsearchExplorer>;
+
+function failureWithCause(message: string): Error {
+  return Object.assign(new Error(message), {
+    cause: new Error("network is unreachable"),
+  });
+}
+
+async function expectReportedFailure(
+  operation: string,
+  failure: Error,
+  shown: () => string | null | undefined,
+  consoleError: { mock: { calls: unknown[][] } },
+): Promise<void> {
+  await waitFor(() => !!shown());
+  const text = shown() ?? "";
+  expect(text).toContain(failure.message);
+  expect(text).toContain("Caused by");
+  expect(text).toContain("network is unreachable");
+  const logs = consoleError.mock.calls.filter(
+    (args) => args[0] === `[code-viewer] Elasticsearch ${operation} failed`,
+  );
+  expect(logs.length).toBe(1);
+  expect(logs[0]?.[logs[0].length - 1]).toBe(failure);
+}
+
+// 直す前は err.message だけを出し、console にも cause にも何も残らなかった。
+describe("elasticsearch explorer failures", () => {
+  test.each([
+    {
+      operation: "index list",
+      fails: (url: string) => url.includes("/_db/elasticsearch/indices"),
+      open: async (_view: EsView) => {
+        // 開くだけ (load の中で失敗する)。
+      },
+      where: ".es-index-list .db-pane-error",
+    },
+    {
+      operation: "mapping",
+      fails: (url: string) => url.includes("/_db/elasticsearch/mapping"),
+      open: async (_view: EsView) => {
+        // 開くだけ (index を選んだところで失敗する)。
+      },
+      where: ".db-detail-pane .db-pane-error",
+    },
+    {
+      operation: "doc list",
+      fails: (url: string) => url.includes("/_db/elasticsearch/docs"),
+      open: async (_view: EsView) => {
+        // 開くだけ (index を選んだところで失敗する)。
+      },
+      where: ".es-doc-list .db-pane-error",
+    },
+    {
+      operation: "doc",
+      fails: (url: string) => url.includes("/_db/elasticsearch/doc?"),
+      open: async (view: EsView) => {
+        await waitFor(() => !!view.el.querySelector(".es-doc-item"));
+        q<HTMLElement>(view.el, ".es-doc-item").click();
+      },
+      where: ".db-detail-pane .db-pane-error",
+    },
+  ])("$operation の失敗は理由を cause ごと画面と console に出す", async ({
+    operation,
+    fails,
+    open,
+    where,
+  }) => {
+    const failure = failureWithCause(`${operation} request failed`);
+    installFetch((url) => (fails(url) ? failure : null));
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const view = createElasticsearchExplorer();
+    try {
+      document.body.append(view.sidebarSlot, view.el);
+      await view.load("docker:es", { index: "my-index" });
+      await open(view);
+      await expectReportedFailure(
+        operation,
+        failure,
+        () => document.body.querySelector(where)?.textContent,
+        consoleError,
+      );
+    } finally {
+      view.dispose();
+      document.body.innerHTML = "";
+      consoleError.mockRestore();
+    }
+  });
+
+  test.each([
+    {
+      operation: "doc write",
+      act: async (view: EsView) => {
+        q<HTMLButtonElement>(view.el, ".es-doc-actions .db-btn").click();
+        await tick();
+        q<HTMLButtonElement>(
+          view.el,
+          ".es-doc-edit-bar .db-btn-primary",
+        ).click();
+      },
+      where: ".es-doc-edit-status",
+    },
+    {
+      operation: "doc delete",
+      act: async (view: EsView) => {
+        const buttons = view.el.querySelectorAll<HTMLButtonElement>(
+          ".es-doc-actions .db-btn",
+        );
+        buttons[buttons.length - 1].click();
+        await tick();
+        clickDialogConfirm();
+      },
+      where: ".db-detail-pane .db-pane-error",
+    },
+    {
+      operation: "doc create",
+      act: async (view: EsView) => {
+        q<HTMLButtonElement>(view.el, ".es-new-doc-btn").click();
+        await tick();
+        q<HTMLInputElement>(view.el, ".es-new-doc-id").value = "d2";
+        q<HTMLTextAreaElement>(view.el, ".es-doc-edit-textarea").value =
+          '{ "b": 9 }';
+        q<HTMLButtonElement>(
+          view.el,
+          ".es-new-doc-form .db-btn-primary",
+        ).click();
+      },
+      where: ".es-new-doc-form .es-doc-edit-status",
+    },
+  ])("$operation の失敗は理由を cause ごと画面と console に出す", async ({
+    operation,
+    act,
+    where,
+  }) => {
+    const failure = failureWithCause(`${operation} request failed`);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const view = await setupWithDoc((url) =>
+      url.includes("/_db/elasticsearch/write") ? failure : null,
+    );
+    try {
+      await act(view);
+      await expectReportedFailure(
+        operation,
+        failure,
+        () => view.el.querySelector(where)?.textContent,
+        consoleError,
+      );
+    } finally {
+      view.dispose();
+      document.body.innerHTML = "";
+      consoleError.mockRestore();
+    }
+  });
+});
+
+// 直す前は日本語の設定でも、件数の札と読み込み中の表示が英語のままだった。
+describe("elasticsearch explorer text", () => {
+  test.each([
+    { language: "en" as const, meta: /^1 docs \/ / },
+    { language: "ja" as const, meta: /^1 件 \/ / },
+  ])("index の件数の札を表示の言語で描く: $language", async ({
+    language,
+    meta,
+  }) => {
+    installFetch();
+    const view = createElasticsearchExplorer({
+      getText: () => dbText(language),
+    });
+    document.body.append(view.sidebarSlot, view.el);
+    await view.load("docker:es");
+    expect(
+      view.sidebarSlot.querySelector(".es-index-meta")?.textContent,
+    ).toMatch(meta);
+    view.dispose();
+    document.body.innerHTML = "";
+  });
+
+  test("言語を切り替えると件数の札も描き直す", async () => {
+    installFetch();
+    let language: "en" | "ja" = "en";
+    const view = createElasticsearchExplorer({
+      getText: () => dbText(language),
+    });
+    document.body.append(view.sidebarSlot, view.el);
+    await view.load("docker:es");
+    language = "ja";
+    view.localize();
+    expect(
+      view.sidebarSlot.querySelector(".es-index-meta")?.textContent,
+    ).toMatch(/^1 件 \/ /);
+    view.dispose();
+    document.body.innerHTML = "";
+  });
+
+  test("読み込み中の表示を表示の言語で描く", async () => {
+    let release: (() => void) | undefined;
+    installFetch();
+    const fetchMock = globalThis.fetch;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      if (String(input).includes("/_db/elasticsearch/mapping")) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return fetchMock(input, init);
+    }) as typeof fetch;
+    const view = createElasticsearchExplorer({ getText: () => dbText("ja") });
+    document.body.append(view.sidebarSlot, view.el);
+    const loading = view.load("docker:es", { index: "my-index" });
+    await waitFor(() => release !== undefined);
+    expect(view.el.querySelector(".db-detail-pane")?.textContent).toContain(
+      "マッピングを読み込み中...",
+    );
+    release?.();
+    await loading;
+    view.dispose();
+    document.body.innerHTML = "";
+  });
+});
 
 describe("elasticsearch explorer edit UI", () => {
   test("editing a doc posts source with optimistic-lock seqNo/primaryTerm", async () => {

@@ -12,6 +12,7 @@ import { showConfirmDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
+import { reportDatastoreFailure } from "./report-failure";
 
 function isBinaryItem(item: RedisItem): item is { binaryBase64: string } {
   return typeof item === "object" && item !== null && "binaryBase64" in item;
@@ -276,7 +277,7 @@ export function createRedisExplorer(
       setPaneStatus(
         mainPane,
         text().common.saveError(
-          err instanceof Error ? err.message : String(err),
+          reportDatastoreFailure("Redis", "key delete", err, base.dbIndex, key),
         ),
         { error: true },
       );
@@ -319,7 +320,7 @@ export function createRedisExplorer(
         save.disabled = false;
         cancel.disabled = false;
         status.textContent = text().common.saveError(
-          err instanceof Error ? err.message : String(err),
+          reportDatastoreFailure("Redis", "key write", err, base.dbIndex, key),
         );
       }
     });
@@ -384,7 +385,13 @@ export function createRedisExplorer(
       } catch (err) {
         create.disabled = false;
         status.textContent = text().common.saveError(
-          err instanceof Error ? err.message : String(err),
+          reportDatastoreFailure(
+            "Redis",
+            "key create",
+            err,
+            base.dbIndex,
+            name,
+          ),
         );
       }
     });
@@ -392,7 +399,10 @@ export function createRedisExplorer(
 
   newKeyBtn.addEventListener("click", () => showNewKeyForm());
 
+  // 言語を切り替えたときに値を描き直すため、最後に描いた値を持つ。
+  let lastValue: { key: string; value: RedisValue } | null = null;
   function renderValue(key: string, value: RedisValue): void {
+    lastValue = { key, value };
     mainPane.innerHTML = "";
     const header = document.createElement("div");
     header.className = "redis-value-header";
@@ -436,7 +446,12 @@ export function createRedisExplorer(
       if (value.binaryBase64 !== undefined) {
         body.appendChild(
           makeNotice(
-            `(binary, base64; full size ${formatBytes(value.fullSize)}${value.truncated ? `, showing first ${formatBytes(64 * 1024)}` : ""})`,
+            value.truncated
+              ? text().redis.binaryTruncatedNotice(
+                  formatBytes(value.fullSize),
+                  formatBytes(64 * 1024),
+                )
+              : text().redis.binaryNotice(formatBytes(value.fullSize)),
             "warn",
           ),
         );
@@ -448,7 +463,10 @@ export function createRedisExplorer(
         if (value.truncated) {
           body.appendChild(
             makeNotice(
-              `(showing first ${formatBytes(64 * 1024)} of ${formatBytes(value.fullSize)})`,
+              text().redis.truncatedString(
+                formatBytes(64 * 1024),
+                formatBytes(value.fullSize),
+              ),
               "warn",
             ),
           );
@@ -462,7 +480,10 @@ export function createRedisExplorer(
       if (value.truncated) {
         body.appendChild(
           makeNotice(
-            `(showing ${Object.keys(value.fields).length} of ${value.total} fields, truncated)`,
+            text().redis.truncatedFields(
+              Object.keys(value.fields).length.toLocaleString(),
+              value.total.toLocaleString(),
+            ),
             "warn",
           ),
         );
@@ -471,7 +492,10 @@ export function createRedisExplorer(
       table.className = "redis-value-hash-table";
       const thead = document.createElement("thead");
       const headRow = document.createElement("tr");
-      for (const label of ["Field", "Value"]) {
+      for (const label of [
+        text().redis.fieldHeader,
+        text().redis.valueHeader,
+      ]) {
         const th = document.createElement("th");
         th.textContent = label;
         headRow.appendChild(th);
@@ -505,7 +529,10 @@ export function createRedisExplorer(
       if (value.truncated) {
         body.appendChild(
           makeNotice(
-            `(showing ${value.items.length} of ${value.total} items, truncated)`,
+            text().redis.truncatedItems(
+              value.items.length.toLocaleString(),
+              value.total.toLocaleString(),
+            ),
             "warn",
           ),
         );
@@ -535,7 +562,10 @@ export function createRedisExplorer(
               : value.entries.length;
         body.appendChild(
           makeNotice(
-            `(showing ${shown} of ${value.total} entries, truncated)`,
+            text().redis.truncatedEntries(
+              shown.toLocaleString(),
+              value.total.toLocaleString(),
+            ),
             "warn",
           ),
         );
@@ -557,7 +587,7 @@ export function createRedisExplorer(
     currentKey = name;
     notifySelectionChange();
     highlightActiveKey(name);
-    setPaneStatus(mainPane, "Loading value...");
+    setPaneStatus(mainPane, text().redis.loadingValue);
     try {
       const params = new URLSearchParams({
         db: requestDbId,
@@ -592,7 +622,7 @@ export function createRedisExplorer(
       if (requestRunId !== keyRunId || requestDbId !== currentDbId) return;
       setPaneStatus(
         mainPane,
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${reportDatastoreFailure("Redis", "value", err, requestDbIndex, name)}`,
         { error: true },
       );
     } finally {
@@ -621,7 +651,7 @@ export function createRedisExplorer(
     const requestDbId = currentDbId;
     const requestDbIndex = currentDbIndex;
     keyMoreBtn.disabled = true;
-    if (!append) setKeyStatus("Loading keys...");
+    if (!append) setKeyStatus(text().redis.loadingKeys);
     try {
       const params = new URLSearchParams({
         db: requestDbId,
@@ -666,7 +696,7 @@ export function createRedisExplorer(
       if (slot.isStale()) return;
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setKeyStatus(
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${reportDatastoreFailure("Redis", "key list", err, requestDbIndex, currentKeyFilter)}`,
         true,
       );
     } finally {
@@ -729,7 +759,7 @@ export function createRedisExplorer(
     activeKeyRow = null;
     keyMoreBtn.hidden = true;
     setPaneEmpty(mainPane, text().redis.selectKey);
-    setDbStatus("Loading databases...");
+    setDbStatus(text().redis.loadingDatabases);
     try {
       const res = await fetch(
         `${apiUrl("dbRedisDatabases")}?db=${encodeURIComponent(dbId)}`,
@@ -768,7 +798,15 @@ export function createRedisExplorer(
           keyRowsByName.clear();
           setPaneEmpty(mainPane, text().redis.selectKey);
           const valuePromise = initial.key
-            ? selectKey(initial.key).catch(() => undefined)
+            ? selectKey(initial.key).catch((err: unknown) => {
+                reportDatastoreFailure(
+                  "Redis",
+                  "key restore",
+                  err,
+                  initial.dbIndex,
+                  initial.key,
+                );
+              })
             : null;
           await loadKeys(false);
           if (currentDbId !== dbId) return;
@@ -784,7 +822,7 @@ export function createRedisExplorer(
     } catch (err) {
       if (slot.isStale()) return;
       setDbStatus(
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${reportDatastoreFailure("Redis", "database list", err, dbId)}`,
         true,
       );
     } finally {
@@ -843,6 +881,13 @@ export function createRedisExplorer(
         mainPane,
         currentDbId ? t.redis.selectKey : t.redis.selectDatabase,
       );
+    } else if (
+      lastValue?.key === currentKey &&
+      mainPane.querySelector(".redis-value-body") &&
+      !mainPane.querySelector(".redis-value-edit-textarea")
+    ) {
+      // 描画済みの値 (見出し・切り詰めの注記・操作ボタン) を描き直す。編集中は触らない。
+      renderValue(lastValue.key, lastValue.value);
     }
   }
 

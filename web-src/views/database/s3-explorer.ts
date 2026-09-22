@@ -14,7 +14,6 @@ import type {
   S3SortMode,
   S3ViewMode,
 } from "../../core/database/types";
-import { formatErrorDetail } from "../../core/error-detail";
 import {
   CHEVRON_DOWN_12_PATH,
   FOLDER_ICON_PATHS,
@@ -40,6 +39,7 @@ import { showConfirmDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
+import { reportDatastoreFailure } from "./report-failure";
 
 export type S3ExplorerCallbacks = {
   onSelectionChange?: (selection: S3ExplorerSelection) => void;
@@ -72,18 +72,6 @@ function buildS3RawUrl(dbId: string, bucket: string, key: string): string {
 
 function s3Uri(bucket: string, key: string): string {
   return `s3://${bucket}/${key}`;
-}
-
-// 失敗の理由を err.message だけに潰すと、どの操作のどの対象で何が起きたかが
-// 消える。console には error そのものと操作・対象を渡し、画面に出す文字列
-// として cause の連鎖ごとの全文を返す。
-function reportS3Failure(
-  operation: string,
-  error: unknown,
-  ...context: unknown[]
-): string {
-  console.error(`[code-viewer] S3 ${operation} failed`, ...context, error);
-  return formatErrorDetail(error);
 }
 
 function objectTypeLabel(key: string, contentType?: string): string {
@@ -415,20 +403,18 @@ export function createS3Explorer(
     bucketSelect.disabled = buckets.length === 0;
   }
 
+  // 言語を切り替えたときに状態の行を描き直すため、最後に描いた応答を持つ。
+  let lastStatusResponse: S3ObjectsResponse | null = null;
   function setObjectStatusFromResponse(resp: S3ObjectsResponse): void {
+    lastStatusResponse = resp;
     objectStatus.textContent = "";
+    const t = text();
     const parts = [
-      `${resp.objects.length.toLocaleString()} shown`,
-      `${resp.scannedObjects.toLocaleString()} scanned`,
-      resp.sort === "updated-desc"
-        ? "newest first in scanned objects"
-        : "sorted by key",
+      tCommon().shownCount(resp.objects.length.toLocaleString()),
+      tCommon().scannedCount(resp.scannedObjects.toLocaleString()),
+      resp.sort === "updated-desc" ? t.newestFirstInScan : t.sortedByKey,
     ];
-    if (resp.scanLimitReached) {
-      parts.push(
-        "scan cap reached; narrow the prefix to search more precisely",
-      );
-    }
+    if (resp.scanLimitReached) parts.push(t.scanCapReached);
     objectStatus.textContent = parts.join(" / ");
     objectStatus.classList.toggle("warn", !!resp.scanLimitReached);
   }
@@ -536,7 +522,7 @@ export function createS3Explorer(
       activeObjectRow = null;
       currentKey = null;
       currentNextToken = undefined;
-      setPaneStatus(objectList, "Loading objects...");
+      setPaneStatus(objectList, text().loadingObjects);
       setPaneEmpty(previewPane, text().selectObject);
     }
     try {
@@ -583,7 +569,7 @@ export function createS3Explorer(
         setPaneStatus(
           objectList,
           data.scanLimitReached
-            ? `(no matches in the first ${data.scannedObjects.toLocaleString()} scanned objects; narrow the prefix and search again)`
+            ? text().noMatchesInScan(data.scannedObjects.toLocaleString())
             : text().noObjects,
         );
       } else {
@@ -597,7 +583,7 @@ export function createS3Explorer(
       if (slot.isStale()) return;
       setPaneStatus(
         objectList,
-        `Error: ${reportS3Failure("object list", err, requestBucket, requestSearch)}`,
+        `Error: ${reportDatastoreFailure("S3", "object list", err, requestBucket, requestSearch)}`,
         { error: true },
       );
       objectStatus.textContent = "";
@@ -655,7 +641,13 @@ export function createS3Explorer(
       setPaneStatus(
         bodyEl,
         tCommon().saveError(
-          reportS3Failure("object text", err, currentBucket, object.key),
+          reportDatastoreFailure(
+            "S3",
+            "object text",
+            err,
+            currentBucket,
+            object.key,
+          ),
         ),
         { error: true },
       );
@@ -692,7 +684,13 @@ export function createS3Explorer(
         save.disabled = false;
         cancel.disabled = false;
         status.textContent = tCommon().saveError(
-          reportS3Failure("object write", err, currentBucket, object.key),
+          reportDatastoreFailure(
+            "S3",
+            "object write",
+            err,
+            currentBucket,
+            object.key,
+          ),
         );
       }
     });
@@ -721,7 +719,13 @@ export function createS3Explorer(
       setPaneStatus(
         previewPane,
         tCommon().saveError(
-          reportS3Failure("object delete", err, currentBucket, object.key),
+          reportDatastoreFailure(
+            "S3",
+            "object delete",
+            err,
+            currentBucket,
+            object.key,
+          ),
         ),
         { error: true },
       );
@@ -783,7 +787,13 @@ export function createS3Explorer(
       } catch (err) {
         create.disabled = false;
         status.textContent = tCommon().saveError(
-          reportS3Failure("object create", err, currentBucket, key),
+          reportDatastoreFailure(
+            "S3",
+            "object create",
+            err,
+            currentBucket,
+            key,
+          ),
         );
       }
     });
@@ -959,7 +969,7 @@ export function createS3Explorer(
     previewPane.appendChild(renderPreviewHeader(object));
     const body = document.createElement("div");
     body.className = "s3-preview-body";
-    setPaneStatus(body, "Loading preview...");
+    setPaneStatus(body, text().loadingPreview);
     previewPane.appendChild(body);
     try {
       const displayKind = sourceDisplayKind(object.key);
@@ -992,7 +1002,7 @@ export function createS3Explorer(
       if (slot.isStale()) return;
       setPaneStatus(
         body,
-        `Error: ${reportS3Failure("object preview", err, requestBucket, object.key)}`,
+        `Error: ${reportDatastoreFailure("S3", "object preview", err, requestBucket, object.key)}`,
         { error: true },
       );
     } finally {
@@ -1151,7 +1161,9 @@ export function createS3Explorer(
       explorerPagerByPrefix.delete(prefix);
     }
     if (!append && data.folders.length === 0 && data.objects.length === 0) {
-      parent.appendChild(makeTreeMessageRow("s3-tree-empty", depth, "(empty)"));
+      parent.appendChild(
+        makeTreeMessageRow("s3-tree-empty", depth, text().emptyFolder),
+      );
       if (currentKey) highlightActiveObject(currentKey);
       return;
     }
@@ -1201,7 +1213,7 @@ export function createS3Explorer(
             "s3-tree-error",
             depth,
             text().loadMoreFailed(
-              reportS3Failure("load more", err, bucket, prefix),
+              reportDatastoreFailure("S3", "load more", err, bucket, prefix),
             ),
           );
           more.after(failureRow);
@@ -1229,7 +1241,7 @@ export function createS3Explorer(
     const dbId = currentDbId;
     const bucket = currentBucket;
     childUl.replaceChildren(
-      makeTreeMessageRow("s3-tree-loading", depth, "Loading…"),
+      makeTreeMessageRow("s3-tree-loading", depth, text().loadingFolder),
     );
     const load = (async () => {
       try {
@@ -1252,7 +1264,7 @@ export function createS3Explorer(
           makeTreeMessageRow(
             "s3-tree-error",
             depth,
-            `Error: ${reportS3Failure("folder", err, bucket, prefix)}`,
+            `Error: ${reportDatastoreFailure("S3", "folder", err, bucket, prefix)}`,
           ),
         );
       } finally {
@@ -1271,7 +1283,7 @@ export function createS3Explorer(
     const bucket = currentBucket;
     explorerGuard.dispose();
     const slot = explorerGuard.start();
-    setPaneStatus(explorerTree, "Loading objects...");
+    setPaneStatus(explorerTree, text().loadingObjects);
     try {
       const data = await fetchFolder("");
       if (
@@ -1290,7 +1302,7 @@ export function createS3Explorer(
       if (slot.isStale() || isAbortError(err)) return;
       setPaneStatus(
         explorerTree,
-        `Error: ${reportS3Failure("folder tree", err, bucket)}`,
+        `Error: ${reportDatastoreFailure("S3", "folder tree", err, bucket)}`,
         { error: true },
       );
     } finally {
@@ -1466,7 +1478,7 @@ export function createS3Explorer(
     setPaneEmpty(previewPane, text().selectObject);
     setPaneStatus(
       initialView === "explorer" ? explorerTree : objectList,
-      "Loading buckets...",
+      text().loadingBuckets,
     );
     try {
       const res = await fetch(
@@ -1517,7 +1529,13 @@ export function createS3Explorer(
           ? fetchObjectHeadForSelection(initial.key, slot.signal).catch(
               (err: unknown) => {
                 if (!isAbortError(err)) {
-                  reportS3Failure("object head", err, selected, initial.key);
+                  reportDatastoreFailure(
+                    "S3",
+                    "object head",
+                    err,
+                    selected,
+                    initial.key,
+                  );
                 }
                 return null;
               },
@@ -1549,7 +1567,7 @@ export function createS3Explorer(
       if (slot.isStale()) return;
       setPaneStatus(
         objectList,
-        `Error: ${reportS3Failure("bucket list", err, dbId)}`,
+        `Error: ${reportDatastoreFailure("S3", "bucket list", err, dbId)}`,
         { error: true },
       );
     } finally {
@@ -1631,6 +1649,9 @@ export function createS3Explorer(
     searchInput.placeholder =
       currentMode === "prefix" ? t.prefixPlaceholder : t.containsPlaceholder;
     if (!currentKey) setPaneEmpty(previewPane, t.selectObject);
+    if (lastStatusResponse && objectStatus.textContent) {
+      setObjectStatusFromResponse(lastStatusResponse);
+    }
   }
 
   return {

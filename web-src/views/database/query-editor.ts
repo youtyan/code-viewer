@@ -327,8 +327,7 @@ export function createQueryEditor(
       resultArea.innerHTML = "";
       const errEl = document.createElement("pre");
       errEl.className = "db-query-error";
-      errEl.textContent =
-        err instanceof Error ? err.message : formatErrorDetail(err);
+      errEl.textContent = formatErrorDetail(err);
       resultArea.appendChild(errEl);
     } finally {
       explainBtn.disabled = false;

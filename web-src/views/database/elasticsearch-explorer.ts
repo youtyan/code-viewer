@@ -15,6 +15,7 @@ import { createDetailTable } from "./detail-table";
 import { createDetailTabs } from "./detail-tabs";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
+import { reportDatastoreFailure } from "./report-failure";
 
 export type ElasticsearchExplorerCallbacks = {
   // 選択中の index / query 文字列が変わったことを外側に通知する。タブ
@@ -174,7 +175,17 @@ export function createElasticsearchExplorer(
     });
   }
 
+  function indexMetaText(ix: EsIndicesResponse["indices"][number]): string {
+    return text().es.indexMeta(
+      ix.docCount.toLocaleString(),
+      formatBytes(ix.sizeBytes),
+    );
+  }
+
+  // 言語を切り替えたときに件数の札を描き直すため、最後に描いた一覧を持つ。
+  let lastIndices: EsIndicesResponse["indices"] = [];
   function renderIndices(indices: EsIndicesResponse["indices"]): void {
+    lastIndices = indices;
     indexList.innerHTML = "";
     indexRowsByName.clear();
     if (indices.length === 0) {
@@ -193,7 +204,7 @@ export function createElasticsearchExplorer(
       name.title = ix.name;
       const meta = document.createElement("span");
       meta.className = "es-index-meta";
-      meta.textContent = `${ix.docCount.toLocaleString()} docs / ${formatBytes(ix.sizeBytes)}`;
+      meta.textContent = indexMetaText(ix);
       item.append(name, meta);
       fragment.appendChild(item);
     }
@@ -271,7 +282,7 @@ export function createElasticsearchExplorer(
     const keys = Object.keys(props).sort();
     const rows = keys.map((key) => {
       const p = props[key];
-      return [key, p.type ?? (p.properties ? "object" : "(unknown)")];
+      return [key, p.type ?? (p.properties ? "object" : text().es.unknownType)];
     });
     mappingBody.appendChild(
       createDetailTable(
@@ -347,7 +358,13 @@ export function createElasticsearchExplorer(
         save.disabled = false;
         cancel.disabled = false;
         status.textContent = text().common.saveError(
-          err instanceof Error ? err.message : String(err),
+          reportDatastoreFailure(
+            "Elasticsearch",
+            "doc write",
+            err,
+            currentIndex,
+            resp.id,
+          ),
         );
       }
     });
@@ -376,7 +393,13 @@ export function createElasticsearchExplorer(
       setPaneStatus(
         docBody,
         text().common.saveError(
-          err instanceof Error ? err.message : String(err),
+          reportDatastoreFailure(
+            "Elasticsearch",
+            "doc delete",
+            err,
+            currentIndex,
+            resp.id,
+          ),
         ),
         { error: true },
       );
@@ -442,7 +465,13 @@ export function createElasticsearchExplorer(
       } catch (err) {
         create.disabled = false;
         status.textContent = text().common.saveError(
-          err instanceof Error ? err.message : String(err),
+          reportDatastoreFailure(
+            "Elasticsearch",
+            "doc create",
+            err,
+            currentIndex,
+            id,
+          ),
         );
       }
     });
@@ -496,7 +525,7 @@ export function createElasticsearchExplorer(
     const slot = mappingGuard.start();
     const requestRunId = loadRunId;
     const requestDbId = currentDbId;
-    setPaneStatus(mappingBody, "Loading mapping...");
+    setPaneStatus(mappingBody, text().es.loadingMapping);
     try {
       const params = new URLSearchParams({ db: requestDbId, index });
       const res = await fetch(`${apiUrl("dbElasticsearchMapping")}?${params}`, {
@@ -526,7 +555,7 @@ export function createElasticsearchExplorer(
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setPaneStatus(
         mappingBody,
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${reportDatastoreFailure("Elasticsearch", "mapping", err, index)}`,
         { error: true },
       );
     } finally {
@@ -544,7 +573,7 @@ export function createElasticsearchExplorer(
     docMoreBtn.disabled = true;
     if (!append) {
       lastSort = undefined;
-      setDocStatus("Loading docs...");
+      setDocStatus(text().es.loadingDocs);
       docRowsById.clear();
       activeDocRow = null;
     }
@@ -594,7 +623,7 @@ export function createElasticsearchExplorer(
       if (slot.isStale()) return;
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setDocStatus(
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${reportDatastoreFailure("Elasticsearch", "doc list", err, requestIndex, requestQuery)}`,
         true,
       );
     } finally {
@@ -625,7 +654,7 @@ export function createElasticsearchExplorer(
     const requestIndex = currentIndex;
     highlightActiveDoc(id);
     setDetailTab("doc");
-    setPaneStatus(docBody, "Loading doc...");
+    setPaneStatus(docBody, text().es.loadingDoc);
     try {
       const params = new URLSearchParams({
         db: requestDbId,
@@ -660,7 +689,7 @@ export function createElasticsearchExplorer(
       if (requestRunId !== docRunId || requestDbId !== currentDbId) return;
       setPaneStatus(
         docBody,
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${reportDatastoreFailure("Elasticsearch", "doc", err, requestIndex, id)}`,
         { error: true },
       );
     } finally {
@@ -785,7 +814,7 @@ export function createElasticsearchExplorer(
     } catch (err) {
       if (slot.isStale()) return;
       setIndexStatus(
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${reportDatastoreFailure("Elasticsearch", "index list", err, dbId)}`,
         true,
       );
     } finally {
@@ -851,6 +880,12 @@ export function createElasticsearchExplorer(
     searchBtn.textContent = t.common.search;
     docMoreBtn.textContent = t.common.loadMore;
     detailTabs.setLabels({ mapping: t.es.mapping, doc: t.es.doc });
+    for (const ix of lastIndices) {
+      const meta = indexRowsByName
+        .get(ix.name)
+        ?.querySelector<HTMLElement>(".es-index-meta");
+      if (meta) meta.textContent = indexMetaText(ix);
+    }
     if (!currentIndex) {
       setPaneEmpty(mappingBody, t.es.selectIndex);
     } else if (lastMapping && mappingBody.querySelector(".db-detail-table")) {

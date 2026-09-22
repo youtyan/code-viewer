@@ -2,6 +2,7 @@ import { apiUrl } from "../../core/api-url";
 import type { GlobalSearchHit } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
 import { type DbText, dbText } from "./i18n";
+import { reportDatastoreFailure } from "./report-failure";
 
 export type GlobalSearchViewDeps = {
   getDbId: () => string | null;
@@ -123,7 +124,7 @@ export function createGlobalSearchView(
       pollTimer = setInterval(() => pollStatus(), 500);
     } catch (err) {
       progress.textContent = text().search.error(
-        err instanceof Error ? err.message : String(err),
+        reportDatastoreFailure("SQL", "search start", err, dbId, term),
       );
       stopPolling();
     }

@@ -165,6 +165,138 @@ describe("S3 explorer UI", () => {
     }
   });
 
+  // 直す前は日本語の設定でも、状態の行・スキャン上限の文言・空のフォルダ・
+  // 読み込み中の表示が英語のままだった。英語の出力は今までどおり。
+  test.each([
+    {
+      language: "en" as const,
+      status: "3 shown / 3 scanned / newest first in scanned objects",
+    },
+    {
+      language: "ja" as const,
+      status: "3 件表示 / 3 件スキャン / スキャンした中で更新が新しい順",
+    },
+  ])("状態の行を表示の言語で描く: $language", async ({ language, status }) => {
+    const view = await mountExplorer({ getText: () => dbText(language) });
+    const line = () =>
+      view.sidebarSlot.querySelector(".s3-object-status")?.textContent;
+    await waitFor(() => !!line());
+    expect(line()).toBe(status);
+  });
+
+  test("言語を切り替えると状態の行も描き直す", async () => {
+    let language: "en" | "ja" = "en";
+    const view = await mountExplorer({ getText: () => dbText(language) });
+    const line = () =>
+      view.sidebarSlot.querySelector(".s3-object-status")?.textContent;
+    await waitFor(() => !!line());
+    language = "ja";
+    view.localize();
+    expect(line()).toBe(
+      "3 件表示 / 3 件スキャン / スキャンした中で更新が新しい順",
+    );
+  });
+
+  test.each([
+    {
+      language: "en" as const,
+      empty:
+        "(no matches in the first 1,000 scanned objects; narrow the prefix and search again)",
+      cap: "scan cap reached; narrow the prefix to search more precisely",
+    },
+    {
+      language: "ja" as const,
+      empty:
+        "(スキャンした先頭 1,000 件に一致するものがありません。プレフィックスを絞って検索し直してください)",
+      cap: "スキャンの上限に達しました。プレフィックスを絞るとより正確に検索できます",
+    },
+  ])("スキャン上限の文言を表示の言語で描く: $language", async ({
+    language,
+    empty,
+    cap,
+  }) => {
+    const fetchMock = globalThis.fetch;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/_db/s3/objects") {
+        return json({
+          dbId: "mock",
+          bucket: "media",
+          prefix: "",
+          search: "sample",
+          mode: "contains",
+          sort: "key",
+          objects: [],
+          truncated: true,
+          scannedObjects: 1000,
+          scannedPages: 1,
+          scanLimitReached: true,
+        });
+      }
+      return fetchMock(input, init);
+    }) as typeof fetch;
+    const view = await mountExplorer({ getText: () => dbText(language) });
+    const list = () =>
+      view.sidebarSlot.querySelector(".s3-object-list")?.textContent;
+    await waitFor(() => list() === empty);
+    expect(
+      view.sidebarSlot.querySelector(".s3-object-status")?.textContent,
+    ).toContain(cap);
+  });
+
+  test.each([
+    { language: "en" as const, loading: "Loading…", empty: "(empty)" },
+    { language: "ja" as const, loading: "読み込み中…", empty: "(空)" },
+  ])("フォルダの読み込み中と空の行を表示の言語で描く: $language", async ({
+    language,
+    loading,
+    empty,
+  }) => {
+    let release: (() => void) | undefined;
+    const fetchMock = globalThis.fetch;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = new URL(String(input), "http://localhost");
+      if (
+        url.pathname === "/_db/s3/folder" &&
+        url.searchParams.get("prefix") === "videos/"
+      ) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return json({
+          dbId: "mock",
+          bucket: "media",
+          prefix: "videos/",
+          folders: [],
+          objects: [],
+        });
+      }
+      return fetchMock(input, init);
+    }) as typeof fetch;
+    const view = await mountExplorer({ getText: () => dbText(language) });
+    await switchToExplorer(view);
+    click(
+      [...view.sidebarSlot.querySelectorAll(".s3-tree .tree-dir")].find(
+        (dir) => dir.querySelector(".dir-name")?.textContent === "videos",
+      ),
+    );
+    await waitFor(() => release !== undefined);
+    expect(
+      view.sidebarSlot.querySelector(".s3-tree-loading")?.textContent,
+    ).toContain(loading);
+    release?.();
+    await waitFor(() => !!view.sidebarSlot.querySelector(".s3-tree-empty"));
+    expect(
+      view.sidebarSlot.querySelector(".s3-tree-empty")?.textContent,
+    ).toContain(empty);
+  });
+
   test("Explorer に切り替えると List 専用の検索/ソート行が hidden になる", async () => {
     const view = await mountExplorer();
     const searchRow =

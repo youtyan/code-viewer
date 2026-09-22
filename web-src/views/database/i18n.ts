@@ -324,6 +324,20 @@ export type DbText = {
     fetchDdl: string;
     executeQuery: string;
     saveChanges: string;
+    loadDatastores: string;
+    loadDatabaseTabs: string;
+    saveDatabaseTabs: string;
+    saveDatabaseTabsOnUnload: string;
+    loadUiSettings: string;
+    saveUiSettings: string;
+    saveColumnWidths: string;
+    saveExpandedTables: string;
+    saveSnapshotTables: string;
+    closeDatastore: (dbId: string) => string;
+    loadLocalHistory: string;
+    refreshHistory: string;
+    deleteHistoryEntry: string;
+    clearHistory: string;
   };
   // データストアエクスプローラ (redis / elasticsearch / s3)。共通文言は
   // common に集約し、各データストア固有の文言を redis/es/s3 に分ける。
@@ -337,6 +351,8 @@ export type DbText = {
       delete: string;
       saving: string;
       saveError: (message: string) => string;
+      shownCount: (count: string) => string;
+      scannedCount: (count: string) => string;
     };
     redis: {
       databases: string;
@@ -355,6 +371,17 @@ export type DbText = {
       newKeyValuePlaceholder: string;
       confirmDeleteKey: (key: string) => string;
       create: string;
+      loadingDatabases: string;
+      loadingKeys: string;
+      loadingValue: string;
+      fieldHeader: string;
+      valueHeader: string;
+      binaryNotice: (fullSize: string) => string;
+      binaryTruncatedNotice: (fullSize: string, shownSize: string) => string;
+      truncatedString: (shownSize: string, fullSize: string) => string;
+      truncatedFields: (shown: string, total: string) => string;
+      truncatedItems: (shown: string, total: string) => string;
+      truncatedEntries: (shown: string, total: string) => string;
     };
     es: {
       indices: string;
@@ -377,6 +404,11 @@ export type DbText = {
       confirmDeleteDoc: (id: string) => string;
       invalidJson: string;
       create: string;
+      loadingMapping: string;
+      loadingDocs: string;
+      loadingDoc: string;
+      unknownType: string;
+      indexMeta: (docCount: string, size: string) => string;
     };
     s3: {
       bucket: string;
@@ -411,6 +443,15 @@ export type DbText = {
         string
       >;
       loadMoreFailed: (detail: string) => string;
+      loadingBuckets: string;
+      loadingObjects: string;
+      loadingPreview: string;
+      loadingFolder: string;
+      emptyFolder: string;
+      noMatchesInScan: (scanned: string) => string;
+      newestFirstInScan: string;
+      sortedByKey: string;
+      scanCapReached: string;
     };
     dynamodb: {
       table: string;
@@ -445,6 +486,7 @@ export type DbText = {
       projectionInclude: (attrs: string) => string;
       keySchemaOnlyHint: string;
       inferredAttributesNote: (count: number) => string;
+      loadingItems: string;
     };
   };
 };
@@ -781,6 +823,20 @@ const EN: DbText = {
     fetchDdl: "failed to fetch DDL",
     executeQuery: "failed to execute query",
     saveChanges: "failed to save changes",
+    loadDatastores: "load datastores",
+    loadDatabaseTabs: "load database tabs",
+    saveDatabaseTabs: "save database tabs",
+    saveDatabaseTabsOnUnload: "save database tabs on unload",
+    loadUiSettings: "load database UI settings",
+    saveUiSettings: "save database UI settings",
+    saveColumnWidths: "save database column widths",
+    saveExpandedTables: "save database expandedTables",
+    saveSnapshotTables: "save database snapshotSelectedTables",
+    closeDatastore: (dbId) => `close datastore ${dbId}`,
+    loadLocalHistory: "load query Local History",
+    refreshHistory: "refresh query history",
+    deleteHistoryEntry: "delete query history entry",
+    clearHistory: "clear query history",
   },
   explorer: {
     common: {
@@ -792,6 +848,8 @@ const EN: DbText = {
       delete: "Delete",
       saving: "Saving…",
       saveError: (message) => `Save failed: ${message}`,
+      shownCount: (count) => `${count} shown`,
+      scannedCount: (count) => `${count} scanned`,
     },
     redis: {
       databases: "Databases",
@@ -810,6 +868,22 @@ const EN: DbText = {
       newKeyValuePlaceholder: "value",
       confirmDeleteKey: (key) => `Delete key "${key}"?`,
       create: "Create",
+      loadingDatabases: "Loading databases...",
+      loadingKeys: "Loading keys...",
+      loadingValue: "Loading value...",
+      fieldHeader: "Field",
+      valueHeader: "Value",
+      binaryNotice: (fullSize) => `(binary, base64; full size ${fullSize})`,
+      binaryTruncatedNotice: (fullSize, shownSize) =>
+        `(binary, base64; full size ${fullSize}, showing first ${shownSize})`,
+      truncatedString: (shownSize, fullSize) =>
+        `(showing first ${shownSize} of ${fullSize})`,
+      truncatedFields: (shown, total) =>
+        `(showing ${shown} of ${total} fields, truncated)`,
+      truncatedItems: (shown, total) =>
+        `(showing ${shown} of ${total} items, truncated)`,
+      truncatedEntries: (shown, total) =>
+        `(showing ${shown} of ${total} entries, truncated)`,
     },
     es: {
       indices: "Indices",
@@ -832,6 +906,11 @@ const EN: DbText = {
       confirmDeleteDoc: (id) => `Delete document "${id}"?`,
       invalidJson: "Invalid JSON",
       create: "Create",
+      loadingMapping: "Loading mapping...",
+      loadingDocs: "Loading docs...",
+      loadingDoc: "Loading doc...",
+      unknownType: "(unknown)",
+      indexMeta: (docCount, size) => `${docCount} docs / ${size}`,
     },
     s3: {
       bucket: "Bucket",
@@ -870,6 +949,17 @@ const EN: DbText = {
         unsupported: "Binary",
       },
       loadMoreFailed: (detail) => `Load more failed: ${detail}`,
+      loadingBuckets: "Loading buckets...",
+      loadingObjects: "Loading objects...",
+      loadingPreview: "Loading preview...",
+      loadingFolder: "Loading…",
+      emptyFolder: "(empty)",
+      noMatchesInScan: (scanned) =>
+        `(no matches in the first ${scanned} scanned objects; narrow the prefix and search again)`,
+      newestFirstInScan: "newest first in scanned objects",
+      sortedByKey: "sorted by key",
+      scanCapReached:
+        "scan cap reached; narrow the prefix to search more precisely",
     },
     dynamodb: {
       table: "Table",
@@ -908,6 +998,7 @@ const EN: DbText = {
         `Attributes beyond the key schema are inferred from ${count.toLocaleString()} loaded item${
           count === 1 ? "" : "s"
         } and may not reflect every item.`,
+      loadingItems: "Loading items...",
     },
   },
 };
@@ -1246,6 +1337,21 @@ const JA: DbText = {
     fetchDdl: "DDL を取得できませんでした",
     executeQuery: "クエリを実行できませんでした",
     saveChanges: "変更を保存できませんでした",
+    loadDatastores: "データストアの一覧を読み込めませんでした",
+    loadDatabaseTabs: "データストアのタブを読み込めませんでした",
+    saveDatabaseTabs: "データストアのタブを保存できませんでした",
+    saveDatabaseTabsOnUnload:
+      "閉じる前にデータストアのタブを保存できませんでした",
+    loadUiSettings: "Data の表示設定を読み込めませんでした",
+    saveUiSettings: "Data の表示設定を保存できませんでした",
+    saveColumnWidths: "列幅を保存できませんでした",
+    saveExpandedTables: "展開したテーブルを保存できませんでした",
+    saveSnapshotTables: "スナップショットの対象テーブルを保存できませんでした",
+    closeDatastore: (dbId) => `データストア ${dbId} を閉じられませんでした`,
+    loadLocalHistory: "クエリのローカル履歴を読み込めませんでした",
+    refreshHistory: "クエリ履歴を更新できませんでした",
+    deleteHistoryEntry: "クエリ履歴の項目を削除できませんでした",
+    clearHistory: "クエリ履歴を消去できませんでした",
   },
   explorer: {
     common: {
@@ -1257,6 +1363,8 @@ const JA: DbText = {
       delete: "削除",
       saving: "保存中…",
       saveError: (message) => `保存に失敗しました: ${message}`,
+      shownCount: (count) => `${count} 件表示`,
+      scannedCount: (count) => `${count} 件スキャン`,
     },
     redis: {
       databases: "データベース",
@@ -1275,6 +1383,22 @@ const JA: DbText = {
       newKeyValuePlaceholder: "値",
       confirmDeleteKey: (key) => `キー "${key}" を削除しますか?`,
       create: "作成",
+      loadingDatabases: "データベースを読み込み中...",
+      loadingKeys: "キーを読み込み中...",
+      loadingValue: "値を読み込み中...",
+      fieldHeader: "フィールド",
+      valueHeader: "値",
+      binaryNotice: (fullSize) => `(バイナリ, base64。全体 ${fullSize})`,
+      binaryTruncatedNotice: (fullSize, shownSize) =>
+        `(バイナリ, base64。全体 ${fullSize} のうち先頭 ${shownSize} を表示)`,
+      truncatedString: (shownSize, fullSize) =>
+        `(${fullSize} のうち先頭 ${shownSize} を表示)`,
+      truncatedFields: (shown, total) =>
+        `(${total} フィールドのうち ${shown} 件を表示。残りは省略)`,
+      truncatedItems: (shown, total) =>
+        `(${total} 要素のうち ${shown} 件を表示。残りは省略)`,
+      truncatedEntries: (shown, total) =>
+        `(${total} 件のうち ${shown} 件を表示。残りは省略)`,
     },
     es: {
       indices: "インデックス",
@@ -1297,6 +1421,11 @@ const JA: DbText = {
       confirmDeleteDoc: (id) => `ドキュメント "${id}" を削除しますか?`,
       invalidJson: "JSON が不正です",
       create: "作成",
+      loadingMapping: "マッピングを読み込み中...",
+      loadingDocs: "ドキュメントを読み込み中...",
+      loadingDoc: "ドキュメントを読み込み中...",
+      unknownType: "(不明)",
+      indexMeta: (docCount, size) => `${docCount} 件 / ${size}`,
     },
     s3: {
       bucket: "バケット",
@@ -1335,6 +1464,17 @@ const JA: DbText = {
         unsupported: "バイナリ",
       },
       loadMoreFailed: (detail) => `続きを読み込めませんでした: ${detail}`,
+      loadingBuckets: "バケットを読み込み中...",
+      loadingObjects: "オブジェクトを読み込み中...",
+      loadingPreview: "プレビューを読み込み中...",
+      loadingFolder: "読み込み中…",
+      emptyFolder: "(空)",
+      noMatchesInScan: (scanned) =>
+        `(スキャンした先頭 ${scanned} 件に一致するものがありません。プレフィックスを絞って検索し直してください)`,
+      newestFirstInScan: "スキャンした中で更新が新しい順",
+      sortedByKey: "キー名順",
+      scanCapReached:
+        "スキャンの上限に達しました。プレフィックスを絞るとより正確に検索できます",
     },
     dynamodb: {
       table: "テーブル",
@@ -1371,6 +1511,7 @@ const JA: DbText = {
         "DynamoDBがスキーマとして強制するのはキー属性のみです。アイテムを読み込むと追加の属性がここに表示されます。",
       inferredAttributesNote: (count) =>
         `キー以外の属性は、読み込み済みの${count.toLocaleString()}件のアイテムから検出したものです (全アイテムを網羅するとは限りません)。`,
+      loadingItems: "アイテムを読み込み中...",
     },
   },
 };

@@ -35,6 +35,7 @@ import { showConfirmDialog } from "../ui-dialog";
 import { createDetailTable } from "./detail-table";
 import { createDetailTabs } from "./detail-tabs";
 import { type DbText, dbText } from "./i18n";
+import { reportDatastoreFailure } from "./report-failure";
 
 // 行の高さは一覧の行と同じ表示密度の値 (views/shell/row-height.ts)。CSS の
 // .db-grid-row は同じ値を --ui-row-h で読む。
@@ -1669,7 +1670,15 @@ export function createTableGrid(
       if (relatedEmptyEl) relatedEmptyEl.hidden = data.totalRows > 0;
     } catch (err) {
       if (gen !== relatedGen || isAbortError(err)) return;
-      grid.showError(err instanceof Error ? err.message : String(err));
+      grid.showError(
+        reportDatastoreFailure(
+          "SQL",
+          "related rows",
+          err,
+          drillTable,
+          relatedEq,
+        ),
+      );
     }
   }
 
@@ -2074,7 +2083,15 @@ export function createTableGrid(
       .catch((err) => {
         if (gen !== loadGeneration || isAbortError(err)) return;
         if (gen === loadGeneration) {
-          showError(err instanceof Error ? err.message : String(err));
+          showError(
+            reportDatastoreFailure(
+              "SQL",
+              "table page",
+              err,
+              currentTable,
+              pageStart,
+            ),
+          );
         }
       });
     const tracked = promise.finally(() => {
@@ -3166,7 +3183,9 @@ export function createTableGrid(
     } catch (err) {
       setEditStatus(
         text().edit.commitError(
-          err instanceof Error ? err.message : String(err),
+          reportDatastoreFailure("SQL", "save changes", err, currentTable, {
+            changes: mutations.length,
+          }),
         ),
       );
     } finally {

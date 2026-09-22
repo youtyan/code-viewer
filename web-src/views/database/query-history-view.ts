@@ -236,7 +236,10 @@ export function createQueryHistoryView(
     setRefreshBusy(true);
     const promise = (async () => {
       const res = await fetch(`${apiUrl("dbHistory")}${params}`);
-      const state = await parseHistoryResponse(res, "refresh query history");
+      const state = await parseHistoryResponse(
+        res,
+        text().failure.refreshHistory,
+      );
       if (currentRefreshParams().key !== refreshKey) return;
       entries = state.entries;
       if (previousEntries) setRefreshResult(previousEntries, entries);
@@ -508,7 +511,10 @@ export function createQueryHistoryView(
       });
       if (!response.ok) {
         throw new Error(
-          await responseErrorMessage(response, "delete query history entry"),
+          await responseErrorMessage(
+            response,
+            text().failure.deleteHistoryEntry,
+          ),
         );
       }
       entries = entries.filter((e) => e.id !== id);
@@ -564,7 +570,7 @@ export function createQueryHistoryView(
       });
       if (!response.ok) {
         throw new Error(
-          await responseErrorMessage(response, "clear query history"),
+          await responseErrorMessage(response, text().failure.clearHistory),
         );
       }
       entries = [];

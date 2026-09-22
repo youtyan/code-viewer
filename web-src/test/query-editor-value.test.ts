@@ -230,16 +230,21 @@ describe("query editor value display", () => {
       name: "Run",
       invoke: (editor: ReturnType<typeof createQueryEditor>) => editor.run(),
       expectedOperation: "Failed to execute query",
+      expectedScreen: "query request failed",
     },
     {
       name: "Explain",
       invoke: (editor: ReturnType<typeof createQueryEditor>) =>
         editor.explain(),
       expectedOperation: "Failed to explain query",
+      // 直す前は err.message だけを出し、cause が画面から消えていた。
+      expectedScreen:
+        "Error: query request failed\nCaused by: TypeError: database connection lost",
     },
   ])("$name keeps the screen message and complete error in the console", async ({
     invoke,
     expectedOperation,
+    expectedScreen,
   }) => {
     const cause = new TypeError("database connection lost");
     const failure = Object.assign(new Error("query request failed"), {
@@ -257,7 +262,7 @@ describe("query editor value display", () => {
     await invoke(editor);
 
     expect(editor.el.querySelector(".db-query-error")?.textContent).toBe(
-      "query request failed",
+      expectedScreen,
     );
     expect(consoleError).toHaveBeenCalledWith(expectedOperation, failure);
     expect(consoleError.mock.calls[0]?.[1]).toBe(failure);
