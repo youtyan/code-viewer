@@ -21,8 +21,8 @@
 | 層 | 何か | 例 | 生の px |
 |---|---|---|---|
 | **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義。余白・角丸の段階 (`--space-*` `--radius-*`) もここ。一覧の行の高さ `--ui-row-h` だけは出所が TS (`views/shell/row-height.ts`。仮想表示が位置の計算に使うため) で、CSS は初回描画用の既定。表の行の高さ `--ui-table-row-h` は仮想表示に使わないので CSS だけ (`ui-surface.md` の決まり 7) | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--ui-row-h` `--ui-table-row-h` `--code-line-height` | **可**（ここだけ） |
-| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--header-row-h` (中央上の行そのもの) `--main-tabs-h` (その直下のタブ列) `--global-header-h` (上に居座る固定物の合計 = 上の 2 つ。body で決める) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--app-panel-visible-height` `--sidebar-w` `--history-w` `--annotation-panel-w` | **可**（その固定物の実寸なので） |
-| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--app-panel-max-h` `--main-bottom` (メインの面の箱の下端。重ねるときも下パネルの見出しの行の上で止める) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) | **不可。T2 の式に px リテラルを書かない** |
+| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--left-head-h` (左の列の頭 `#left-head`) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--app-panel-visible-height` `--sidebar-w` `--history-w` `--annotation-panel-w` | **可**（その固定物の実寸なので） |
+| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--app-panel-max-h` `--main-bottom` (メインの面の箱の下端。重ねるときも下パネルの見出しの行の上で止める) `--main-pane-h` (面の箱の高さ) `--left-body-top` (左の列の本体の上端) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) | **不可。T2 の式に px リテラルを書かない** |
 | **T3** ローカルインセット | 「このエンベロープの内側に居座る家具の高さ」 | `--file-detail-head-h` | **可。ただし必ず命名し、ページスコープに宣言し、何の高さかコメントする** |
 
 ### 消費側の規則
@@ -64,23 +64,32 @@ grep -n "100vh\|100dvh" web/style.css \
 
 ## 骨格 — 左と下の固定物
 
-画面は 5 つの固定物で囲まれている: 左のサイドバー (`#app-nav`、幅 `--nav-w`)、中央の上の
-1 行 (`#global-header`、`--header-row-h`)、その直下のタブ列 (`#main-tabs`、`--main-tabs-h`)、
-画面ごとのツールバー (`#topbar`、`--topbar-h`)、最下段のバー (`#statusbar`、`--statusbar-h`)。
-下パネル (`.app-panel`) は最下段の上に乗る。
+画面は次の固定物で囲まれている: 左のサイドバー (`#app-nav`、幅 `--nav-w`)、最上段のタブ列
+(`#main-tabs`、`--main-tabs-h`。**上の行は無い**: `web/index.html` のコメントと da82d59)、その下で
+サイドバーの右の左の列 (頭が `#left-head`、高さ `--left-head-h`、幅 `--leftcol-shown`。本体は
+`--left-body-top` から)、画面ごとのツールバー (`#topbar`、`--topbar-h`)、最下段のバー
+(`#statusbar`、`--statusbar-h`)。下パネル (`.app-panel`) は最下段の上に乗る。左の列を畳むと
+(`body.gdp-sidebar-hidden`) `--leftcol-shown` が 0 になり、プロジェクト名と画面の入口
+(`#view-head`) はタブ列の左の `#tabs-lead` へ移る (`views/sidebar.ts` の `placeSidebarToggle`)。
 
-- **上に居座る固定物の高さは `--global-header-h` (= `--header-row-h` + `--main-tabs-h`) だけを読む。**
-  ツールバーの `top`・各ページの `--chrome-h` の上書き・sticky の `top` はこれを読むので、上に
-  固定物を足す / 消すときはこの式に項を足すだけ。上の行そのものの高さ (`#global-header` と、
-  高さをそろえる `.nav-head`) だけが `--header-row-h` を読む
+- **上に居座る固定物の高さは `--global-header-h` だけを読む。** 今はタブ列だけなので
+  `--global-header-h: var(--main-tabs-h)` (`style.css` の `html, body`)。ツールバーの `top`・各ページの
+  `--chrome-h` の上書き・sticky の `top`・面の箱の `top` はこれを読むので、上に固定物を足す / 消す
+  ときはこの式に項を足すだけ。左のサイドバーの頭 (`.nav-head`) はタブ列と高さをそろえるため
+  `--main-tabs-h` を読む
 - **本文まわりの固定物 (ツールバー・読み込みの帯・ファイルの木・履歴や作業ツリーの面・注釈の面・
-  `body` の左右の余白) の左右の端は `--page-left` / `--page-right` だけを読む。** メインの面を
-  左右 2 面に分けたとき、本文 (route の中身) は 1 つしか描けないので、本文を出す面の幅に収める
-  (`body.main-split` / `body.route-in-right` で T2 を上書き)。面の幅 `--split-left-w` / `--split-right-w`
-  / `--split-divider-w` と本文の幅 `--main-w` は TS (`views/main-tabs/main-tabs-view.ts` の
-  `applyGeometry`) が出所。上の行・タブ列・下パネル・最下段・面の箱は面をまたぐので `--chrome-left` のまま
-- `--main-tabs-h` と `--global-header-h` は `html, body` で決める (密度の `--space-unit` と
-  `--header-row-h` の上書きが body に載るため。下の「T2 を宣言する要素を間違えない」と同じ理由)
+  `body` の左右の余白) の左右の端は `--page-left` / `--page-right` だけを読む。**
+  `--page-left = --chrome-left + --leftcol-shown` (左の列の右から)。メインの面を左右 2 面に分けたとき
+  (`body.main-split`)、本文 (route の中身) は左の面にだけ描くので `--page-right` に右の面と境界の幅を
+  足す。面の幅 `--split-left-w` / `--split-right-w` / `--split-divider-w` と本文の幅 `--main-w` は TS
+  (`views/main-tabs/main-tabs-view.ts` の `applyGeometry`) が出所
+- **メインの面の箱 (`.main-pane-host`。`app.ts` の `PANE_HOSTS`) は `top: --global-header-h`・
+  `left: --page-left`・`bottom: --main-bottom`。** 左の列 (木) を覆わない。2 面では左の箱は
+  `--split-left-w` の幅、右の箱は残り。右の面のソース表示 (`.main-pane-source`) は本文の
+  `--content-h` ではなく `--main-pane-h` で箱を作る。タブ列・下パネル・最下段は面をまたぐので
+  `--chrome-left` のまま
+- `--main-tabs-h` と `--global-header-h` は `html, body` で決める (密度の `--space-unit` の上書きが
+  body に載るため。下の「T2 を宣言する要素を間違えない」と同じ理由)
 
 - **左端に付く固定物は `left: var(--chrome-left)`、下端に付く固定物は
   `bottom: var(--chrome-bottom)` だけを読む。** `--nav-w` や `--statusbar-h` を直接読まない。
@@ -132,7 +141,7 @@ body.<その固定物が出ている状態> { --<surface>-visible-h: <実際の�
 
 - ページごとの `--chrome-h`（`body.gdp-*-page`）
 - docked のときの `--app-panel-visible-height`（`body.app-panel-docked`）
-- 表示密度ごとの `--global-header-h`（`body[data-sidebar-font-size]`）
+- 表示密度ごとの `--space-unit` と、それから作る `--main-tabs-h`・`--global-header-h`（`body[data-sidebar-font-size]`）
 
 **規則: T1 の上書きが `body` に載るなら、その T1 を読む T2 も `body` で宣言する。**
 `:root` に置いてよいのは、`var()` を含まないか、上書きされない値だけ。
@@ -299,10 +308,10 @@ grep -rh -A2 "setProperty(" web-src --include=*.ts | grep -oE '"--[a-z-]+"' | so
 
 ## 密度モードを壊さない
 
-`body[data-sidebar-font-size]` が `--global-header-h` / `--topbar-h` / `--statusbar-h` / `--ui-*` を
+`body[data-sidebar-font-size]` が `--space-unit`（→ `--main-tabs-h`・`--global-header-h`）/ `--topbar-h` / `--statusbar-h` / `--ui-*` を
 **4 段階（既定 / compact / large / xlarge）で書き換える**。
 
-> **chrome の高さは定数ですらない。**「上の行は 44px」を前提にした引き算は、
+> **chrome の高さは定数ですらない。**「タブ列は 34px」を前提にした引き算は、
 > 密度を変えた瞬間に全部ずれる。
 
 - ジオメトリの計算に出る px が「ヘッダの高さ」「コントロールの高さ」「行の高さ」の意味を

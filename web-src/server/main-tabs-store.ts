@@ -13,7 +13,7 @@
 // 変える外部状態と戻し方: このファイルだけ。消せば、どのプロジェクトも空の
 // タブから始まる。
 
-import { mkdirSync, readFileSync } from "node:fs";
+import { constants, copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { formatErrorDetail } from "../core/error-detail";
 import { withFileLock } from "./file-lock";
@@ -85,6 +85,34 @@ function readMainTabsFile(path: string): MainTabsFile | null {
       `the saved main tabs (${path}) are not in the expected shape, so they are not used or overwritten:\n- ${problems.join("\n- ")}`,
     );
   return raw as MainTabsFile;
+}
+
+/**
+ * 画面が読めなかった (parseLayout が壊れていると判定した) 保存値を、上書きする
+ * 前に同じ場所へ写す: `main-tabs.json.broken-<時刻>`。ファイル全体を写すので
+ * 他のプロジェクトの配置も残る。写した先のパスを返す。写せなければ投げる
+ * (画面はそのとき上書きしない)。
+ */
+export async function backupMainTabs(
+  path: string,
+  now: number = Date.now(),
+): Promise<string> {
+  return withFileLock(`${path}.lock`, () => {
+    const stamp = new Date(now).toISOString().replace(/[:.]/g, "-");
+    for (let n = 1; ; n++) {
+      const target = `${path}.broken-${stamp}${n === 1 ? "" : `-${n}`}`;
+      try {
+        copyFileSync(path, target, constants.COPYFILE_EXCL);
+        return target;
+      } catch (error) {
+        if (errno(error) === "EEXIST") continue;
+        throw new MainTabsStoreError(
+          `cannot back up the saved main tabs (${path}) to ${target}: ${formatErrorDetail(error)}`,
+          error,
+        );
+      }
+    }
+  });
 }
 
 /** このプロジェクトの配置。保存が無ければ null。 */

@@ -8,7 +8,11 @@ import { changedPathsCoverPath } from "../core/changed-paths";
 import { hasControlCharacter } from "../core/control-chars";
 import { showCopyFailure } from "../core/copy-failure";
 import { summarizeDiffFileKinds } from "../core/diff-file-kinds";
-import { errorWithCause, formatErrorDetail } from "../core/error-detail";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 import {
   filePathClipboardText,
   filePathDisplayText,
@@ -1971,7 +1975,16 @@ export function createDiffView(deps: DiffViewDeps) {
         Promise.resolve()
           .then(() => (full ? file.load_url : buildPreviewUrl(file, count)))
           .then((url) => fetch(validatedFileDiffUrl(url)))
-          .then((response) => response.json()),
+          .then((response) =>
+            response.ok
+              ? response.json()
+              : responseErrorMessage(
+                  response,
+                  `load more hunks of ${file.path}`,
+                ).then((message) => {
+                  throw new Error(message);
+                }),
+          ),
       )
         .then((next) => {
           if (myGen !== getServerGeneration()) {
@@ -1990,9 +2003,16 @@ export function createDiffView(deps: DiffViewDeps) {
             addExpandHunksUI(file, next, card);
           }
         })
-        .catch(() => {
+        .catch((error: unknown) => {
+          // 失敗の理由を捨てない: console に全文、ボタンの title にも出す。
+          const failure = errorWithCause(
+            `loading more hunks of ${file.path} failed`,
+            error,
+          );
+          console.error(failure);
           moreBtn.disabled = allBtn.disabled = false;
           moreBtn.textContent = "Failed — retry";
+          moreBtn.title = formatErrorDetail(failure);
         });
     }
   }

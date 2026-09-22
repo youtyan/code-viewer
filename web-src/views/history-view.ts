@@ -1257,9 +1257,15 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const force = options.force === true;
     const mount = options.mount || (force ? activeMount : defaultMount);
     activateMount(mount);
+    // 1 回の失敗で後の enter が止まらないよう、列は失敗しても続ける。ただし
+    // 理由は捨てずに console とバナーへ出す。
     entering = entering
       .then(() => doEnterHistory(force))
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        const failure = errorWithCause("opening the history failed", error);
+        console.error(failure);
+        setBanner(formatErrorDetail(failure));
+      });
     return entering;
   }
 

@@ -42,10 +42,16 @@ const fileRoute = (path: string, line?: number): AppRoute => ({
 });
 
 /** 画面の route の移り変わりを、app.ts と同じ順 (移る → syncRoute) でまねる。 */
-function setup(loadSaved: () => Promise<unknown>, leftColumn?: HTMLElement) {
+function setup(
+  loadSaved: () => Promise<unknown>,
+  leftColumn?: HTMLElement,
+  backupSaved: () => Promise<string> = async () =>
+    "/state/main-tabs.json.broken-sample",
+) {
   const mount = document.createElement("nav");
   document.body.append(mount);
   const saves: SerializedLayout[] = [];
+  const backups: string[] = [];
   const fronts: string[] = [];
   const terminals: Array<{ open: string[]; closed: string[] }> = [];
   /** ＋ と、ターミナルのタブの右クリックから呼ばれたもの。 */
@@ -77,6 +83,10 @@ function setup(loadSaved: () => Promise<unknown>, leftColumn?: HTMLElement) {
     save: async (layout) => {
       saves.push(layout);
     },
+    backupSaved: async () => {
+      backups.push("backup");
+      return backupSaved();
+    },
     terminalInfo: (session) =>
       session === "shell-a1"
         ? { label: "claude · Working", state: "working" }
@@ -94,6 +104,7 @@ function setup(loadSaved: () => Promise<unknown>, leftColumn?: HTMLElement) {
     mount,
     handle,
     saves,
+    backups,
     fronts,
     terminals,
     calls,
@@ -164,7 +175,32 @@ describe("main tabs view: 読み戻し", () => {
     ]);
   });
 
-  test("壊れた保存値なら空から始め、理由を全部 console.error に出す", async () => {
+  test.each([
+    {
+      name: "退避できたら空から始め、以後は保存する",
+      backupSaved: async () => "/state/main-tabs.json.broken-sample",
+      saved: 1,
+      message: [
+        "the saved layout is broken; it was backed up to /state/main-tabs.json.broken-sample and this page starts from an empty layout",
+      ],
+    },
+    {
+      name: "退避できなければ上書きせず、このページでは保存しない",
+      backupSaved: async () => {
+        throw new Error("failed to back up main tabs: sample disk failure");
+      },
+      saved: 0,
+      message: [
+        "the saved layout is broken and could not be backed up, so it is kept as it is and tabs are not saved on this page",
+        "failed to back up main tabs: sample disk failure",
+      ],
+    },
+  ])("壊れた保存値: $name (理由は全部 console.error に)", async ({
+    backupSaved,
+    saved,
+    message,
+  }) => {
+    vi.useFakeTimers();
     const error = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
@@ -182,13 +218,24 @@ describe("main tabs view: 読み戻し", () => {
         },
       ],
     };
-    const { handle, names } = setup(async () => broken);
+    const { handle, names, saves, backups } = setup(
+      async () => broken,
+      undefined,
+      backupSaved,
+    );
     await handle.restore();
-    expect(names()).toEqual([">app.ts (preview)"]);
+    handle.syncRoute(fileRoute("src/other.ts"));
+    vi.advanceTimersByTime(1000);
+    vi.useRealTimers();
+    expect([backups.length, names(), Math.min(saves.length, 1)]).toEqual([
+      1,
+      [">other.ts (preview)"],
+      saved,
+    ]);
     const logged = error.mock.calls.map((call) => call.map(String).join(" "));
     expect(logged).toHaveLength(1);
     for (const reason of [
-      "the saved layout is broken; starting from an empty layout",
+      ...message,
       JSON.stringify(broken),
       "version is 0, expected one of 1, 2, 3",
       "panes[0] has 2 preview tabs (a, b); at most 1",
@@ -255,6 +302,31 @@ describe("main tabs view: 操作", () => {
       [">app.ts", "diff"],
       { kind: "file", path: "src/app.ts", line: 12 },
     ]);
+  });
+
+  test("名前の当て直し (数秒おきの描き直し) でも、キーボードでいたタブのフォーカスを失わない", async () => {
+    const { handle, mount } = setup(async () => savedLayout);
+    await handle.restore();
+    const second = mount.querySelectorAll<HTMLElement>(".main-tab")[1];
+    const id = second.dataset.tabId;
+    second.focus();
+    handle.localize();
+    const focused = document.activeElement as HTMLElement | null;
+    expect([
+      second.isConnected,
+      focused?.classList.contains("main-tab"),
+      focused?.dataset.tabId,
+    ]).toEqual([false, true, id]);
+  });
+
+  test("描き直しは、タブの外にあるフォーカスを動かさない", async () => {
+    const { handle } = setup(async () => savedLayout);
+    await handle.restore();
+    const input = document.createElement("input");
+    document.body.append(input);
+    input.focus();
+    handle.localize();
+    expect(document.activeElement).toBe(input);
   });
 
   test("選択中のタブを閉じたら直前のタブへ、最後の 1 つなら本文の既定 (フォルダ表示) へ", async () => {
@@ -601,6 +673,120 @@ describe("main tabs view: 左右 2 面", () => {
     const button = splitButton(mount);
     button?.click();
     expect([button?.disabled, panes(handle).split]).toEqual([true, false]);
+  });
+
+  test("狭い窓では右の面を隠して左だけにし、印を出し、広がれば戻す (保存は右の面ごと)", async () => {
+    // 窓の幅の変化を通知させる (happy-dom の ResizeObserver は通知しない)。
+    const observers: Array<() => void> = [];
+    const OriginalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(private readonly callback: ResizeObserverCallback) {
+        observers.push(() => this.callback([], this as never));
+      }
+      observe() {
+        /* 通知は observers から手で起こす */
+      }
+      unobserve() {
+        /* 同上 */
+      }
+      disconnect() {
+        /* 同上 */
+      }
+    } as unknown as typeof ResizeObserver;
+    try {
+      const saved = {
+        version: 3,
+        focused: "right",
+        split: 0.4,
+        panes: [
+          {
+            side: "left",
+            activeId: "a",
+            tabs: [
+              {
+                id: "a",
+                preview: false,
+                target: { kind: "file", path: "src/app.ts" },
+              },
+            ],
+          },
+          {
+            side: "right",
+            activeId: "t",
+            tabs: [
+              {
+                id: "t",
+                preview: false,
+                target: { kind: "terminal", session: "shell-a1" },
+              },
+            ],
+          },
+        ],
+      };
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: 600,
+      });
+      vi.useFakeTimers();
+      const { handle, mount, saves } = setup(async () => saved);
+      await handle.restore();
+      const indicator = () => ({
+        parked: splitButton(mount)?.classList.contains(
+          "main-tabs-action-parked",
+        ),
+        title: splitButton(mount)?.title,
+      });
+      const narrow = {
+        ...panes(handle),
+        ...indicator(),
+        rightSection: !!mount.querySelector(
+          '.main-tabs-pane[data-side="right"]',
+        ),
+      };
+      handle.syncRoute(fileRoute("src/other.ts"));
+      vi.advanceTimersByTime(1000);
+      const savedWhileNarrow = saves[saves.length - 1];
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: 1600,
+      });
+      for (const notify of observers) notify();
+      vi.useRealTimers();
+      expect([
+        narrow,
+        savedWhileNarrow?.panes.map((pane) => [pane.side, pane.activeId]),
+        savedWhileNarrow?.split,
+        { ...panes(handle), ...indicator() },
+      ]).toEqual([
+        {
+          split: false,
+          focused: "left",
+          routeSide: "left",
+          left: { kind: "file", path: "src/app.ts" },
+          right: undefined,
+          parked: true,
+          title:
+            "The right side (1 tab) is hidden because the window is too narrow for two sides. It comes back when the window is wide enough.",
+          rightSection: false,
+        },
+        [
+          ["left", expect.any(String)],
+          ["right", "t"],
+        ],
+        0.4,
+        {
+          split: true,
+          focused: "left",
+          routeSide: "left",
+          left: { kind: "file", path: "src/other.ts" },
+          right: { kind: "terminal", session: "shell-a1" },
+          parked: false,
+          title: expect.any(String),
+        },
+      ]);
+    } finally {
+      globalThis.ResizeObserver = OriginalResizeObserver;
+    }
   });
 
   // 面の最小幅 360 は本文 (左の列の右) の幅で数える。1 + 360 * 2 = 721px 要る。

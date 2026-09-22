@@ -48,6 +48,8 @@ import {
   PAGE_KINDS,
   type PageKind,
   type PaneSide,
+  type ParkedRight,
+  parkRight,
   parseLayout,
   prevTab,
   type SerializedLayout,
@@ -59,6 +61,7 @@ import {
   type Tab,
   type TabTarget,
   tabMenu,
+  unparkRight,
   unsplit,
 } from "../../core/main-tabs";
 import type { AppRoute } from "../../core/routes";
@@ -128,6 +131,11 @@ export type MainTabsDeps = {
   terminalMenuItems(): ContextMenuItem[];
   loadSaved(): Promise<unknown>;
   save(layout: SerializedLayout, keepalive: boolean): Promise<void>;
+  /**
+   * 読めなかった保存値を、上書きする前に同じ場所へ退避する
+   * (`main-tabs.json.broken-<時刻>`)。退避した先のパスを返す。
+   */
+  backupSaved(): Promise<string>;
   /** ターミナルのタブの名前と状態 (エージェントを映していれば、その状態)。 */
   terminalInfo(session: string): { label: string; state: AgentState | null };
   /**
@@ -296,6 +304,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let dragId: string | null = null;
   /**
+   * 窓が 2 面を出せる幅より狭い間、預かっている右の面 (fitToWidth)。この間の
+   * layout は 1 面で、操作・描画・キーは 1 面の決まりで動く。保存と、窓が
+   * 広がったときだけ戻す。
+   */
+  let parked: ParkedRight | null = null;
+  /**
    * 本文の面に合わせて route へ移るときの、元のフォーカス。移った先の
    * syncRoute がその route のタブの面へフォーカスを持って行かないようにする。
    */
@@ -445,6 +459,30 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     return Math.min(max, Math.max(MIN_PANE_WIDTH, Math.round(width * ratio)));
   }
 
+  /** 預かっている右の面を戻した配置 (保存とターミナルの数え方に使う)。 */
+  function fullLayout(): Layout {
+    return parked ? unparkRight(layout, parked) : layout;
+  }
+
+  /**
+   * 窓の幅に合わせて右の面を預ける・戻す。狭ければ左だけにし (右の面は隠す)、
+   * 2 面を出せる幅になれば戻す。変えたら true。
+   */
+  function fitToWidth(): boolean {
+    if (layout.panes.right && !splitAllowed()) {
+      const result = parkRight(layout);
+      layout = result.layout;
+      parked = result.parked;
+      return true;
+    }
+    if (parked && splitAllowed()) {
+      layout = unparkRight(layout, parked);
+      parked = null;
+      return true;
+    }
+    return false;
+  }
+
   /** 面の幅を CSS 変数に書く (TS が出所。ui-layout.md の「JS 側に出るジオメトリ」)。 */
   function applyGeometry(): void {
     const root = document.documentElement.style;
@@ -485,8 +523,20 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     activeClassName: "main-split-resizing",
   });
   const geometryObserver = new ResizeObserver(() => {
+    const before = panesView(layout);
+    if (!fitToWidth()) {
+      applyGeometry();
+      renderActions();
+      return;
+    }
+    // 右の面を隠した・戻した: 描き直して、面の変化を画面へ知らせる。
+    pruneRoutes();
     applyGeometry();
-    renderActions();
+    render();
+    scheduleSave();
+    const after = panesView(layout);
+    if (!sameView(before, after)) deps.onPanes(after, "stay");
+    followRouteSide("stay");
   });
   geometryObserver.observe(deps.mount);
   // 左の列の幅が変わる (畳む・幅を変える・History の一覧の幅) と本文の幅も変わる。
@@ -504,9 +554,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     if (!saveTimer) return;
     clearTimeout(saveTimer);
     saveTimer = null;
-    deps.save(serializeLayout(layout), keepalive).catch((error: unknown) => {
-      console.error("[code-viewer] main tabs could not be saved", error);
-    });
+    deps
+      .save(serializeLayout(fullLayout()), keepalive)
+      .catch((error: unknown) => {
+        console.error("[code-viewer] main tabs could not be saved", error);
+      });
   }
 
   /** モデルから消えたタブの route を忘れる。 */
@@ -528,13 +580,14 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
 
   function commit(next: Layout, how: FrontChange = "stay"): void {
     const before = panesView(layout);
-    const terminalsBefore = terminalsOf(layout);
+    const terminalsBefore = terminalsOf(fullLayout());
     layout = next;
+    fitToWidth();
     pruneRoutes();
     applyGeometry();
     render();
     scheduleSave();
-    const terminals = terminalsOf(layout);
+    const terminals = terminalsOf(fullLayout());
     const closed = [...terminalsBefore].filter((id) => !terminals.has(id));
     if (
       closed.length > 0 ||
@@ -982,11 +1035,16 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       strip.setAttribute("aria-label", current.tabList);
       newButton.title = current.newTab;
       newButton.setAttribute("aria-label", current.newTab);
-      // 左: 2 面のときと、狭くて置けないときは無効。右: 常に 1 面に戻せる。
-      splitButton.disabled = side === "left" && !allowed;
-      const label =
-        side === "right"
-          ? current.unsplit
+      // 右の面 (2 面のときだけある): 常に 1 面に戻せる。
+      // 左の面: 2 面のときと、狭くて置けないときは無効。右の面を隠している
+      // 間は、このボタンが「広げれば戻る」の印になる。
+      const left = side === "left";
+      splitButton.disabled = left && !allowed;
+      splitButton.classList.toggle("main-tabs-action-parked", left && !!parked);
+      const label = !left
+        ? current.unsplit
+        : parked
+          ? current.rightParked(parked.pane.tabs.length)
           : allowed
             ? current.splitRight
             : current.splitUnavailable;
@@ -1001,6 +1059,15 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const present = SIDES.filter((side) =>
       side === "left" ? true : !!layout.panes.right,
     );
+    // タブの要素は描くたびに作り直す (エージェントの状態が変わるたびに名前を
+    // 当て直すので数秒おき)。キーボードでタブにいた人のフォーカスが本文へ
+    // 落ちないよう、同じタブの新しい要素へ戻す。
+    const focusedTabId =
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement.classList.contains("main-tab") &&
+      deps.mount.contains(document.activeElement)
+        ? document.activeElement.dataset.tabId
+        : undefined;
     deps.mount.replaceChildren(...present.map((side) => sections[side].el));
     for (const side of present) {
       const pane = side === "left" ? layout.panes.left : layout.panes.right;
@@ -1025,6 +1092,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         ?.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
     renderActions();
+    if (focusedTabId !== undefined)
+      deps.mount
+        .querySelector<HTMLElement>(
+          `.main-tab[data-tab-id="${CSS.escape(focusedTabId)}"]`,
+        )
+        ?.focus({ preventScroll: true });
   }
 
   async function restore(
@@ -1057,8 +1130,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       openUrlRight();
       return;
     }
-    saveEnabled = true;
     if (saved === null || saved === undefined) {
+      saveEnabled = true;
       scheduleSave();
       openUrlRight();
       return;
@@ -1067,15 +1140,32 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     try {
       parsed = parseLayout(saved);
     } catch (error) {
+      // 壊れた保存値は、退避してから空で始める。退避できなければ上書きしない
+      // (このページでは保存しない)。
+      let backup: string;
+      try {
+        backup = await deps.backupSaved();
+      } catch (backupError) {
+        console.error(
+          "[code-viewer] main tabs: the saved layout is broken and could not be backed up, so it is kept as it is and tabs are not saved on this page. saved value:",
+          JSON.stringify(saved),
+          error,
+          backupError,
+        );
+        openUrlRight();
+        return;
+      }
       console.error(
-        "[code-viewer] main tabs: the saved layout is broken; starting from an empty layout. saved value:",
+        `[code-viewer] main tabs: the saved layout is broken; it was backed up to ${backup} and this page starts from an empty layout. saved value:`,
         JSON.stringify(saved),
         error,
       );
+      saveEnabled = true;
       scheduleSave();
       openUrlRight();
       return;
     }
+    saveEnabled = true;
     if (parsed.dropped.length > 0)
       console.error(
         `[code-viewer] main tabs: dropped ${parsed.dropped.length} saved tab(s) of an unknown kind:`,
@@ -1104,8 +1194,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     if (options.rightRoute) {
       // URL は右の面のファイル: 左の面 (本文) は保存した前面のまま。
       layout = restoredLayout;
+      fitToWidth();
       openRightRoute(options.rightRoute, "sync", true);
-      deps.onTerminals(terminalsOf(layout), []);
+      deps.onTerminals(terminalsOf(fullLayout()), []);
       deps.onPanes(panesView(layout), "sync");
       return;
     }
@@ -1126,6 +1217,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
               sameTarget(tab.target, target),
             )));
     layout = restoredLayout;
+    fitToWidth();
     if (home && agrees) {
       lastHome = urlRoute;
       commit(layout, "sync");
@@ -1137,7 +1229,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       commit(layout, "sync");
     } else syncRoute(urlRoute);
     // 読み戻した面をそのまま知らせる (前面のターミナルかどうかは URL が決める)。
-    deps.onTerminals(terminalsOf(layout), []);
+    deps.onTerminals(terminalsOf(fullLayout()), []);
     deps.onPanes(panesView(layout), "sync");
   }
 

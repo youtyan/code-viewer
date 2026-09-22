@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
+  backupMainTabs,
   loadProjectMainTabs,
   MAX_MAIN_TABS_LAYOUT_BYTES,
   MAX_MAIN_TABS_PROJECTS,
@@ -75,5 +76,35 @@ describe("main tabs store", () => {
     await expect(
       saveProjectMainTabs(path, "/work/sample-app", big),
     ).rejects.toThrow(`(at most ${MAX_MAIN_TABS_LAYOUT_BYTES})`);
+  });
+});
+
+describe("main tabs store: 壊れた保存値の退避", () => {
+  test("ファイル全体を同じ場所の main-tabs.json.broken-<時刻> へ写し、元は残す", async () => {
+    await saveProjectMainTabs(path, "/work/sample-app", layout, 1);
+    await saveProjectMainTabs(path, "/work/sample-lib", { other: true }, 2);
+    const before = readFileSync(path, "utf8");
+    const now = Date.UTC(2026, 8, 22, 12, 34, 56, 789);
+    const first = await backupMainTabs(path, now);
+    const second = await backupMainTabs(path, now);
+    expect([
+      first,
+      second,
+      readFileSync(first, "utf8"),
+      readFileSync(second, "utf8"),
+      readFileSync(path, "utf8"),
+    ]).toEqual([
+      `${path}.broken-2026-09-22T12-34-56-789Z`,
+      `${path}.broken-2026-09-22T12-34-56-789Z-2`,
+      before,
+      before,
+      before,
+    ]);
+  });
+
+  test("写せなければ理由つきで投げる (画面はそのとき上書きしない)", async () => {
+    await expect(backupMainTabs(path, 0)).rejects.toThrow(
+      `cannot back up the saved main tabs (${path}) to ${path}.broken-1970-01-01T00-00-00-000Z`,
+    );
   });
 });

@@ -13,6 +13,7 @@ import {
   open,
   openRight,
   openSide,
+  parkRight,
   parseLayout,
   prevTab,
   serializeLayout,
@@ -21,6 +22,7 @@ import {
   splitRight,
   type TabTarget,
   tabMenu,
+  unparkRight,
   unsplit,
 } from "../core/main-tabs";
 
@@ -307,6 +309,14 @@ describe("open", () => {
       before: layoutOf("[a]"),
       target: page("diff"),
       expected: "a [n1] (left)",
+    },
+    // 乱数の列 (main-tabs-random.test.ts の seed 43) が見つけた: 1 面で左に
+    // ある画像を右に開くと、右に 2 枚目を作っていた。
+    {
+      name: "1 面で左にある画像は右に作らず、左のタブを前面に出す",
+      before: layoutOf("[a] ~img"),
+      target: image("img"),
+      expected: "a [~img] (left)",
     },
   ])("openRight: $name", ({ before, target, expected }) => {
     const after = openRight(before, target, { preview: false, newId: ids() });
@@ -1316,5 +1326,76 @@ describe("左右の幅の比", () => {
         ],
       }),
     ).toThrow(`split is ${JSON.stringify(split)} (0 < split < 1)`);
+  });
+});
+
+describe("窓が狭い間の右の面の預かり (parkRight / unparkRight)", () => {
+  const terminal: TabTarget = { kind: "terminal", session: "shell-1" };
+  test("預けると左だけの 1 面になり、戻すと元の 2 面 (比も) に戻る", () => {
+    const before = { ...layoutOf("[a] b", "[c] ~img"), split: 0.3 };
+    const { layout: parked, parked: right } = parkRight(before);
+    assertLayout(parked);
+    expect(show(parked)).toBe("[a] b (left)");
+    if (!right) throw new Error("expected the right pane to be parked");
+    const back = unparkRight(parked, right);
+    assertLayout(back);
+    expect([show(back), back.split]).toEqual(["[a] b | [c] ~img (left)", 0.3]);
+  });
+
+  test("1 面なら何も預けない", () => {
+    const before = layoutOf("[a]");
+    expect(parkRight(before)).toEqual({ layout: before, parked: null });
+  });
+
+  test.each([
+    {
+      name: "左で同じファイルを開いても、ファイルは左右に置けるので戻る",
+      right: layoutOf("[z]", "[a] ~img"),
+      openLeft: file("a"),
+      expected: "z [a] | [a] ~img (left)",
+    },
+    {
+      name: "左で同じ画像を開いたら、右の画像は落とす (ファイル以外は全体で 1 つ)",
+      right: layoutOf("[z]", "c [~img]"),
+      openLeft: image("img"),
+      expected: "z [~img] | [c] (left)",
+    },
+    {
+      name: "右がその 1 枚だけなら 1 面のまま",
+      right: layoutOf("[z]", "[~img]"),
+      openLeft: image("img"),
+      expected: "z [~img] (left)",
+    },
+  ])("$name", ({ right, openLeft, expected }) => {
+    const { layout: parked, parked: stash } = parkRight(right);
+    if (!stash) throw new Error("expected the right pane to be parked");
+    const opened = open(parked, openLeft, { preview: false, newId: ids() });
+    const back = unparkRight(opened, stash);
+    assertLayout(back);
+    expect(show(back)).toBe(expected);
+  });
+
+  test("預かり中に左で同じシェルを開いたら、右のシェルは落とす", () => {
+    const before: Layout = {
+      panes: {
+        left: pane("[a]"),
+        right: {
+          tabs: [{ id: "t", target: terminal, preview: false }],
+          activeId: "t",
+          recent: ["t"],
+        },
+      },
+      focused: "right",
+      split: 0.5,
+    };
+    const { layout: parked, parked: stash } = parkRight(before);
+    if (!stash) throw new Error("expected the right pane to be parked");
+    const opened = open(parked, terminal, { newId: ids() });
+    const back = unparkRight(opened, stash);
+    assertLayout(back);
+    expect([back.panes.right, back.panes.left.tabs.length]).toEqual([
+      undefined,
+      2,
+    ]);
   });
 });

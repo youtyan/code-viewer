@@ -10,6 +10,7 @@ import {
   textError,
 } from "./database/handle-shared";
 import {
+  backupMainTabs,
   loadProjectMainTabs,
   mainTabsPath,
   saveProjectMainTabs,
@@ -210,6 +211,19 @@ async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
   }
 }
 
+/** 画面が読めなかった保存値を上書きの前に退避する。写した先のパスを返す。 */
+async function handleTabsBackup(): Promise<Response> {
+  try {
+    return json({ backup: await backupMainTabs(mainTabsPath()) });
+  } catch (error) {
+    console.error("[code-viewer] main tabs are not backed up:", error);
+    return textError(
+      `failed to back up main tabs: ${formatErrorDetail(error)}`,
+      500,
+    );
+  }
+}
+
 export async function handleStateRoute(
   req: Request,
   url: URL,
@@ -240,6 +254,11 @@ export async function handleStateRoute(
         sideEffect: (method) => method !== "GET",
         handler: () =>
           req.method === "GET" ? handleTabsGet(cwd) : handleTabsPut(cwd, req),
+      },
+      "/_state/tabs/backup": {
+        methods: ["POST"],
+        sideEffect: () => true,
+        handler: () => handleTabsBackup(),
       },
       "/_state/tools": {
         methods: ["GET", "PATCH"],

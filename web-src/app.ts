@@ -1442,6 +1442,22 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!response.ok)
         throw new Error(await responseErrorMessage(response, "save main tabs"));
     },
+    backupSaved: async () => {
+      const response = await fetch(apiUrl("stateTabsBackup"), {
+        method: "POST",
+        headers: actionHeaders(),
+      });
+      if (!response.ok)
+        throw new Error(
+          await responseErrorMessage(response, "back up the saved main tabs"),
+        );
+      const body = (await response.json()) as { backup?: unknown };
+      if (typeof body.backup !== "string")
+        throw new Error(
+          `back up the saved main tabs: the answer has no backup path: ${JSON.stringify(body)}`,
+        );
+      return body.backup;
+    },
     terminalInfo: (session) => terminalTabInfo(session),
     onPanes: (view, how) => showPanes(view, how),
     onTerminals: (_open, closed) => {

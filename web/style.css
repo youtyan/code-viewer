@@ -17503,6 +17503,12 @@ body.main-split .main-tabs-pane[data-side="left"] {
   opacity: 0.5;
   cursor: default;
 }
+/* 窓が狭くて右の面を隠している間の印 (分割のボタン。説明は title)。押せないが
+   薄くせず、アクセントの色で「隠しているものがある」と分かるようにする。 */
+.main-tabs-action.main-tabs-action-parked:disabled {
+  color: var(--color-accent);
+  opacity: 1;
+}
 .main-tabs-action svg {
   width: var(--icon-md);
   height: var(--icon-md);

@@ -640,6 +640,76 @@ describe("diff view fast path", () => {
     }
   });
 
+  test("a failed request for more hunks keeps the reason on the retry button", async () => {
+    setupDiffDom();
+    const originalDiff2Html = window.Diff2HtmlUI;
+    const originalFetch = globalThis.fetch;
+    window.Diff2HtmlUI = class {
+      constructor(private readonly element: HTMLElement) {}
+      draw() {
+        this.element.innerHTML =
+          '<div class="d2h-file-wrapper"><div class="d2h-file-header"></div></div>';
+      }
+      highlightCode() {
+        /* not used */
+      }
+    } as unknown as typeof window.Diff2HtmlUI;
+    globalThis.fetch = (async () =>
+      new Response("sample diff failure", {
+        status: 500,
+        statusText: "Internal Server Error",
+      })) as typeof fetch;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* asserted below */
+    });
+    try {
+      const { view } = createDiffViewForShellTest();
+      const card = document.createElement("div") as DiffCardElement;
+      card.className = "gdp-file-shell";
+      card.dataset.path = "src/sample.ts";
+      card.innerHTML =
+        '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+      document.querySelector("#diff")?.appendChild(card);
+      view.renderFile(
+        {
+          path: "src/sample.ts",
+          status: "M",
+          additions: 1,
+          deletions: 0,
+          size_class: "small",
+          load_url: "/file_diff?path=src%2Fsample.ts",
+        },
+        {
+          path: "src/sample.ts",
+          status: "M",
+          diff: "diff --git a/src/sample.ts b/src/sample.ts\n",
+          mode: "preview",
+          truncated: true,
+          hunk_count: 20,
+          rendered_hunk_count: 10,
+        },
+        card,
+      );
+      const more = card.querySelector<HTMLButtonElement>(".gdp-show-full");
+      // 「Show all」は load_url をそのまま使う (次の N 件は location から URL を
+      // 組み立てるが、happy-dom には origin が無い)。失敗の表示は同じボタン。
+      card
+        .querySelector<HTMLButtonElement>(".gdp-show-full.secondary")
+        ?.click();
+      await waitFor(() => more?.textContent === "Failed — retry");
+      expect(more?.title).toContain(
+        "loading more hunks of src/sample.ts failed",
+      );
+      expect(more?.title).toContain("HTTP 500 Internal Server Error");
+      expect(more?.title).toContain("sample diff failure");
+      expect(errorSpy).toHaveBeenCalledOnce();
+    } finally {
+      errorSpy.mockRestore();
+      globalThis.fetch = originalFetch;
+      window.Diff2HtmlUI = originalDiff2Html;
+    }
+  });
+
   test("resets a reused loaded card when full-path render changes its diff signature", () => {
     setupDiffDom();
     const originalObserver = globalThis.IntersectionObserver;

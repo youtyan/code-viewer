@@ -795,6 +795,61 @@ describe("history view lifecycle", () => {
     expect(errors.length > 0).toBe(logged);
   });
 
+  test("an unexpected failure while entering shows the reason and later enters still run", async () => {
+    const { panel, list, banner, status, sentinel } = installHistoryViewDom();
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ commits: [], hasMore: false }), {
+          status: 200,
+        }),
+      )) as unknown as typeof fetch;
+    let failRoute = true;
+    const route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const errors: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+    };
+    try {
+      const view = createHistoryView({
+        $: (selector) => {
+          if (selector === "#history-panel") return panel as unknown as never;
+          if (selector === "#history-list") return list as unknown as never;
+          if (selector === "#history-banner") return banner as unknown as never;
+          if (selector === "#history-status") return status as unknown as never;
+          if (selector === "#history-sentinel")
+            return sentinel as unknown as never;
+          throw new Error(`unexpected selector: ${selector}`);
+        },
+        escapeHtml: (value) => String(value),
+        getRoute: () => {
+          if (failRoute) throw new Error("sample route failure");
+          return route;
+        },
+        setRoute: () => undefined,
+        applyCommitRange: async () => undefined,
+        showEmptyDiffPane: () => undefined,
+        getSyntaxHighlight: () => false,
+        getLanguage: () => "ja",
+        trackLoad: (promise) => promise,
+      });
+      await view.enterHistory();
+      expect(banner.hidden).toBe(false);
+      expect(banner.textContent).toContain("opening the history failed");
+      expect(banner.textContent).toContain("Error: sample route failure");
+      expect(errors.length).toBe(1);
+      failRoute = false;
+      await view.enterHistory();
+      expect(errors.length).toBe(1);
+    } finally {
+      console.error = originalError;
+    }
+  });
+
   test("leaveHistory prevents an in-flight enter from showing stale empty diff state", async () => {
     const panel = new FakeElement();
     const list = new FakeElement();

@@ -20,6 +20,8 @@ export type MainTabsText = {
   splitUnavailable: string;
   /** 2 面のときの右の面のボタン: 右のタブを左へ移して 1 面に戻す。 */
   unsplit: string;
+  /** 窓が狭くて右の面を隠している間の、分割のボタンの説明。 */
+  rightParked: (count: number) => string;
   resizeSplit: string;
   dropToSplit: string;
   /** 画像のタブのメニュー: そのファイルの履歴。 */
@@ -45,6 +47,8 @@ const EN: MainTabsText = {
     "Split right (a file, terminal or image tab in front, one side, and a window wide enough for two)",
   unsplit:
     "Back to one side (moves the right tabs to the left; a file already open on the left closes on the right)",
+  rightParked: (count) =>
+    `The right side (${count} tab${count === 1 ? "" : "s"}) is hidden because the window is too narrow for two sides. It comes back when the window is wide enough.`,
   resizeSplit: "Resize the two sides",
   dropToSplit: "Drop to split right",
   fileHistory: "File history",
@@ -70,6 +74,8 @@ const JA: MainTabsText = {
     "右に分割 (前面がファイル・ターミナル・画像のタブ・1 面・2 面が置ける窓の幅のときに使えます)",
   unsplit:
     "1 面に戻す (右のタブを左へ移します。左で開いているファイルは右を閉じます)",
+  rightParked: (count) =>
+    `窓が 2 面を出せる幅より狭いので、右の面 (タブ ${count} 枚) を隠しています。2 面を出せる幅になれば戻ります。`,
   resizeSplit: "左右の幅を変える",
   dropToSplit: "ここに落とすと右に分割",
   fileHistory: "ファイルの履歴",

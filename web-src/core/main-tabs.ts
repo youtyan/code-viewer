@@ -344,8 +344,9 @@ function newTab(layout: Layout, target: TabTarget, opts: OpenOptions): Tab {
 
 /**
  * 右の面に開く (Alt+クリックの反対の面)。2 面なら右の面の中で open と同じ。
- * 1 面なら新しいタブだけの右の面を作る (左に同じ中身があっても動かさない:
- * 左右に同じファイルを並べられる)。右に置けない種類 (page) は左の面で open。
+ * 1 面なら新しいタブだけの右の面を作る (左に同じファイルがあっても動かさない:
+ * 左右に同じファイルを並べられる)。ファイル以外は全体で 1 つ (perPaneTarget)
+ * なので、左にあればそれを前面に出す。右に置けない種類 (page) は左の面で open。
  */
 export function openRight(
   layout: Layout,
@@ -356,6 +357,8 @@ export function openRight(
     return open(layout, target, { ...opts, pane: "left" });
   if (layout.panes.right)
     return open(layout, target, { ...opts, pane: "right" });
+  if (!perPaneTarget(target) && findTarget(layout, target))
+    return open(layout, target, opts);
   const tab = newTab(layout, target, opts);
   return {
     panes: {
@@ -364,6 +367,62 @@ export function openRight(
     },
     focused: "right",
     split: DEFAULT_SPLIT,
+  };
+}
+
+/** 窓が狭くて 2 面を出せない間、預かっておく右の面と比。 */
+export type ParkedRight = { pane: Pane; split: number };
+
+/**
+ * 右の面を預かりに外して 1 面にする (窓が 2 面を出せる幅より狭いとき)。
+ * 右の面が無ければ何もしない (parked は null)。フォーカスは左へ。
+ */
+export function parkRight(layout: Layout): {
+  layout: Layout;
+  parked: ParkedRight | null;
+} {
+  const right = layout.panes.right;
+  if (!right) return { layout, parked: null };
+  return {
+    layout: { panes: { left: layout.panes.left }, focused: "left" },
+    parked: { pane: right, split: layout.split ?? DEFAULT_SPLIT },
+  };
+}
+
+/**
+ * 預かった右の面を戻す (窓が広がった・保存するとき)。預かっている間に左で
+ * 開いたものと重なるタブは落とす: 同じ id、ファイル以外の同じ中身 (全体で 1 つ。
+ * perPaneTarget)、右に置けない種類。残りが無ければ 1 面のまま。
+ */
+export function unparkRight(layout: Layout, parked: ParkedRight): Layout {
+  if (layout.panes.right) return layout;
+  const left = layout.panes.left;
+  const tabs = parked.pane.tabs.filter(
+    (tab) =>
+      canPlace(tab.target, "right") &&
+      !left.tabs.some(
+        (item) =>
+          item.id === tab.id ||
+          (!perPaneTarget(tab.target) && sameTarget(item.target, tab.target)),
+      ),
+  );
+  if (tabs.length === 0) return layout;
+  const kept = new Set(tabs.map((tab) => tab.id));
+  const activeId =
+    parked.pane.activeId && kept.has(parked.pane.activeId)
+      ? parked.pane.activeId
+      : tabs[0].id;
+  return {
+    panes: {
+      left,
+      right: {
+        tabs,
+        activeId,
+        recent: parked.pane.recent.filter((id) => kept.has(id)),
+      },
+    },
+    focused: layout.focused,
+    split: parked.split,
   };
 }
 
