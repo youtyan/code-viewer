@@ -63,8 +63,20 @@ test.each([
   ["body.gdp-sidebar-hidden .panel-rail", "flex-direction", "column"],
   [".panel-rail > .view-strip", "flex-direction", "column"],
   ["body", "--panelcol-rail-w", "var(--ui-control-sm)"],
-  // プロジェクト名より先にブランチの名前が縮む (名前が「r…」になった)
-  [".brand .title", "flex", "0 0 auto"],
+  // プロジェクト名と枝の名前の幅は views/brand-fit.ts が分ける。枝は自然な幅
+  // (上限は約 40%) まで出して縮めず、名前が残りで省略する (枝が「m」になった)
+  [".brand .title", "max-width", "var(--brand-name-max, 60%)"],
+  [".project-branch", "flex", "0 0 auto"],
+  [".project-branch", "max-width", "var(--brand-branch-max, min(20vw, 260px))"],
+  // Tools の入力・出力の並べ方は面の実幅で決める。見出しの語は折らない
+  [".tools-body", "container", "tools-pane / inline-size"],
+  [".tools-pane-title", "white-space", "nowrap"],
+  // タブの最小幅は列の幅から決める (列が入れ物)。入らないときタブは縮む
+  [".main-tabs-strip", "container-type", "inline-size"],
+  [".main-tab", "flex", "0 1 auto"],
+  [".main-tab-icon", "flex", "0 0 auto"],
+  [".main-tab-close", "flex", "0 0 auto"],
+  [".main-tab-name", "text-overflow", "ellipsis"],
   // 木の見出しが狭い (日本語・特大) とき縮むのは題 (右端の切替を押し出さない)
   ["#sidebar .sb-head > .sb-title", "min-width", "0"],
   ["#sidebar .sb-head > .sb-title", "text-overflow", "ellipsis"],
@@ -118,4 +130,74 @@ test("account cards wrap instead of shrinking below their minimum width", () => 
     columns.replace(/\s+/g, " ").startsWith("repeat( auto-fill,"),
     columns.includes("var(--agents-account-card-min)"),
   ]).toEqual([true, true]);
+});
+
+// タブの最小幅: ふだん 120、列に全部が 120 で入らないときは列の幅をタブの数で
+// 割った幅まで、88 で止める (畳んだ 1280 の左の面でタブが 120 固定で 1.8 枚
+// しか見えなかった)。タブの数は main-tabs-view.ts が --main-tab-count へ書く。
+test("main tabs shrink to the strip width divided by the tab count, down to 88px", () => {
+  const minWidth = (
+    cascadedDeclarations(rules, (candidate) => candidate === ".main-tab").get(
+      "min-width",
+    ) ?? ""
+  ).replace(/\s+/g, " ");
+  expect(minWidth).toBe(
+    "clamp( calc(var(--space-unit) * 22), (100cqi - (var(--main-tab-count, 1) - 1) * 1px) / var(--main-tab-count, 1), calc(var(--space-unit) * 30) )",
+  );
+});
+
+// Tools の面が狭い (2 面の左の面 486px など) ときは入力を上、出力を下に積む。
+const narrowTools = allRules.filter(
+  (rule) => rule.atRule === "@container tools-pane (max-width: 560px)",
+);
+test.each([
+  [".tools-pane", "grid-template-columns", "minmax(0, 1fr)"],
+  [".tools-pane", "grid-template-rows", "minmax(0, 1fr) minmax(0, 1fr)"],
+  [".tools-pane-resizer", "display", "none"],
+  [".tools-pane-output", "border-left", "0"],
+])("narrow tools pane: %s has %s: %s", (selector, property, expected) => {
+  expect(
+    cascadedDeclarations(
+      narrowTools,
+      (candidate) => candidate === selector,
+    ).get(property),
+  ).toBe(expected);
+});
+
+// ファイルの見出しで、パンくずに 240px 残らない幅では操作 (コピー・OS で開く・
+// 情報・先頭/末尾・ごみ箱) を 2 段目へ下ろす。消さずに全部残す。
+const narrowDocHead = allRules.filter(
+  (rule) => rule.atRule === "@container doc-head (max-width: 509px)",
+);
+test.each([
+  [
+    ".gdp-file-detail-wrapper > .gdp-file-detail-sticky:not(:has(#sidebar-toggle))",
+    "grid-template-areas",
+    '"crumb crumb crumb crumb crumb crumb" "copy open info . nav trash" "tabs tabs tabs tabs tabs tabs"',
+  ],
+  [
+    ".gdp-file-detail-wrapper > .gdp-file-detail-sticky:has(#sidebar-toggle)",
+    "grid-template-areas",
+    '"toggle crumb crumb crumb crumb crumb crumb" "copy open info . . nav trash" "tabs tabs tabs tabs tabs tabs tabs"',
+  ],
+  [".gdp-file-detail-sticky .gdp-file-detail-path", "display", "contents"],
+  [
+    ".gdp-file-detail-sticky .gdp-file-detail-path > .gdp-copy-path",
+    "grid-area",
+    "copy",
+  ],
+  [
+    ".gdp-file-detail-sticky .gdp-file-detail-path > .gdp-open-path",
+    "grid-area",
+    "open",
+  ],
+])("narrow file head: %s has %s: %s", (selector, property, expected) => {
+  expect(
+    (
+      cascadedDeclarations(
+        narrowDocHead,
+        (candidate) => candidate === selector,
+      ).get(property) ?? ""
+    ).replace(/\s+/g, " "),
+  ).toBe(expected);
 });

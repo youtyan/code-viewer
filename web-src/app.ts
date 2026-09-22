@@ -186,6 +186,7 @@ import {
 } from "./views/annotations-ui";
 import { createBackendState } from "./views/backend-state";
 import { type BlameViewDeps, createBlameView } from "./views/blame-view";
+import { fitBrand } from "./views/brand-fit";
 import { type ContextMenuItem, showContextMenu } from "./views/context-menu";
 import { createDatabaseView } from "./views/database/database-view";
 import { createDefinitionJump } from "./views/definition-jump";
@@ -7562,6 +7563,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const projectSwitcherButton =
     document.querySelector<HTMLElement>("#project-switcher");
+  // 名前と枝の名前の幅を、置き場所の幅に合わせて分ける (枝を 1 文字にしない)。
+  if (projectSwitcherButton) fitBrand(projectSwitcherButton);
   PROJECT_SWITCHER = projectSwitcherButton
     ? mountProjectSwitcher({
         button: projectSwitcherButton,

@@ -1363,6 +1363,50 @@ describe("main tabs view: 左右 2 面", () => {
     expect(style.getPropertyValue("--split-right-w")).toBe("349px");
   });
 
+  // 背面のタブでは ResizeObserver が届かない。2 面のために右の列を畳んだあとも
+  // --split-left-w が畳む前の幅のまま残っていた (body の印の変化で合わせ直す)。
+  test("右の列を畳んで body の印が変わると、ResizeObserver を待たずに面の幅を書き直す", async () => {
+    Object.defineProperty(document.documentElement, "clientWidth", {
+      configurable: true,
+      value: 1280,
+    });
+    let column = 240;
+    const panelColumn = document.createElement("div");
+    panelColumn.getBoundingClientRect = () => new DOMRect(0, 0, column, 80);
+    const { handle, mount } = setup(async () => null, panelColumn);
+    await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
+    handle.openTerminal("shell-a1");
+    splitButton(mount)?.click();
+    const style = document.documentElement.style;
+    // 本文 1040px (右の列 240 を除く) = 520 + 1 + 519。
+    expect(style.getPropertyValue("--split-left-w")).toBe("520px");
+    column = 28;
+    document.body.classList.add("sample-column-hidden");
+    await Promise.resolve();
+    // 本文 1252px = 626 + 1 + 625。
+    expect([
+      style.getPropertyValue("--split-left-w"),
+      style.getPropertyValue("--split-right-w"),
+    ]).toEqual(["626px", "625px"]);
+    document.body.classList.remove("sample-column-hidden");
+  });
+
+  // タブの最小幅は列の幅をタブの数で割って決める (style.css の .main-tab)。
+  test("タブの列にタブの数を書く", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
+    handle.openTerminal("shell-a1");
+    const strip = mount.querySelector<HTMLElement>(
+      '.main-tabs-pane[data-side="left"] .main-tabs-strip',
+    );
+    expect([
+      strip?.style.getPropertyValue("--main-tab-count"),
+      strip?.querySelectorAll(".main-tab").length,
+    ]).toEqual(["3", 3]);
+  });
+
   test("右の面にフォーカスがあるとき左のタブを押すと、本文をそのタブの route に合わせる", async () => {
     const { handle, mount, current } = setup(async () => null);
     await handle.restore();

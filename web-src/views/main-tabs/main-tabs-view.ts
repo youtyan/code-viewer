@@ -591,7 +591,27 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     activeClassTarget: document.body,
     activeClassName: "main-split-resizing",
   });
-  const geometryObserver = new ResizeObserver(() => {
+  /**
+   * 前面のタブが列の外にあれば、列だけを横に送って見せる (scrollIntoView は
+   * 外側の箱まで動かすことがあるので使わない)。
+   */
+  function revealFront(strip: HTMLElement): void {
+    const tab = strip.querySelector<HTMLElement>(".main-tab-active");
+    if (!tab) return;
+    const box = strip.getBoundingClientRect();
+    const rect = tab.getBoundingClientRect();
+    if (rect.left < box.left) strip.scrollLeft -= box.left - rect.left;
+    else if (rect.right > box.right) strip.scrollLeft += rect.right - box.right;
+  }
+  // 列が狭くなると (窓・面・右の列の幅) 前面のタブが列の外へ出ることがある。
+  const stripObserver = new ResizeObserver((entries) => {
+    for (const entry of entries)
+      if (entry.target instanceof HTMLElement) revealFront(entry.target);
+  });
+  for (const side of SIDES) stripObserver.observe(sections[side].strip);
+
+  /** 窓・本文・右の列の寸法が変わったあとに、面の幅と 2 面の可否を合わせる。 */
+  function followGeometry(): void {
     const before = panesView(layout);
     if (!fitToWidth()) {
       applyGeometry();
@@ -606,10 +626,21 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const after = panesView(layout);
     if (!sameView(before, after)) deps.onPanes(after, "stay");
     followRouteSide("stay");
-  });
+  }
+  const geometryObserver = new ResizeObserver(followGeometry);
   geometryObserver.observe(deps.mount);
   // 右の列の幅が変わる (畳む・幅を変える・History の一覧の幅) と本文の幅も変わる。
   if (deps.panelColumn) geometryObserver.observe(deps.panelColumn);
+  // ResizeObserver は描画の段で届くので、背面のタブ (document.hidden) では前面に
+  // 戻るまで届かない。読み込み直後は面の幅を右の列が開いたまま (240px) で数え、
+  // そのあと 2 面のために右の列を畳む (body の印) ので、--split-left-w が畳む前の
+  // 幅 (1280 で 380px) のまま残り、面の中身だけが畳んだあとの幅で並んでいた。
+  // 右の列の開閉・画面の切替は body の印で起きるので、それも見て合わせ直す
+  // (MutationObserver は背面でも届く)。
+  new MutationObserver(followGeometry).observe(document.body, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
 
   // ---- 保存 ----
 
@@ -1211,13 +1242,13 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         ),
       );
       strip.scrollLeft = scrollLeft;
+      // タブの最小幅は列の幅をこの数で割って決める (style.css の .main-tab)。
+      strip.style.setProperty("--main-tab-count", String(pane.tabs.length));
       sections[side].el.classList.toggle(
         "main-tabs-pane-focused",
         layout.focused === side,
       );
-      strip
-        .querySelector<HTMLElement>(".main-tab-active")
-        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      revealFront(strip);
     }
     renderActions();
     if (focusedTabId !== undefined)

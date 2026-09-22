@@ -924,11 +924,12 @@ button.brand:focus-visible {
   outline-offset: 2px;
 }
 .brand .title {
-  /* 狭いとき先に縮むのはブランチの名前のほう。名前とブランチが同じ割合で
-     縮むと、短いプロジェクト名が「r…」の 1 文字になった (右の列の頭・畳んだ
-     ときのタブ列の左)。名前は長すぎるときだけ、この上限で省略する。 */
-  flex: 0 0 auto;
-  max-width: 60%;
+  /* 名前と枝の幅は views/brand-fit.ts が分ける: 枝は自然な幅 (上限は見出しの
+     約 40%) まで出し、残りを名前が使って省略する。どちらかだけを縮めない形に
+     すると、狭い見出しで名前が「r…」、枝が「m」の 1 文字になった。
+     変数が無い間 (JS の前) は今までの上限。 */
+  flex: 0 1 auto;
+  max-width: var(--brand-name-max, 60%);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -941,9 +942,10 @@ button.brand:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  flex: 0 1 auto;
+  /* 幅は views/brand-fit.ts が決めた上限まで (縮めない)。 */
+  flex: 0 0 auto;
   min-width: 0;
-  max-width: min(20vw, 260px);
+  max-width: var(--brand-branch-max, min(20vw, 260px));
   overflow: hidden;
   color: var(--fg-muted);
   font-size: var(--ui-font-sm);
@@ -15200,6 +15202,8 @@ body.db-resizing {
 .tools-body {
   flex: 1 1 auto;
   min-height: 0;
+  /* 入力と結果の並べ方は窓ではなく面の実幅で決める (2 面の左の面は 486px)。 */
+  container: tools-pane / inline-size;
 }
 .tools-pane {
   display: grid;
@@ -15229,6 +15233,9 @@ body.db-resizing {
   background: var(--bg-soft, #f6f8fa);
 }
 .tools-pane-title {
+  /* 見出しは折り返さない (狭い面で「プレビュー」が 3 行に折れた)。 */
+  flex: none;
+  white-space: nowrap;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -15341,6 +15348,27 @@ body.db-resizing {
 .tools-pane-resizer:focus-visible {
   outline: 2px solid var(--accent, #0969da);
   outline-offset: -2px;
+}
+/* 面が狭いとき (2 面の左の面など): 入力と結果を縦に積む。横に並べたままだと
+   どちらも 200px 余りになり、見出しが折れて結果が読めなかった。左右の幅を
+   変える掴みは使えないので隠す。状態の文言は幅を固定せず縮める。 */
+@container tools-pane (max-width: 560px) {
+  .tools-pane {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .tools-pane-resizer {
+    display: none;
+  }
+  .tools-pane-output {
+    border-left: 0;
+    border-top: 1px solid var(--border, #d0d7de);
+  }
+  .tools-pane-status {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
 }
 .tools-code {
   margin: 0;
@@ -16883,6 +16911,8 @@ body.main-split .main-tabs-pane[data-side="left"] {
   flex: 0 0 var(--split-left-w);
 }
 .main-tabs-strip {
+  /* タブの最小幅を列の幅から決める (.main-tab の min-width が 100cqi を読む)。 */
+  container-type: inline-size;
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
@@ -16896,12 +16926,20 @@ body.main-split .main-tabs-pane[data-side="left"] {
 }
 .main-tab {
   position: relative;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
   /* 絵と名前の間は 6 (絵の指定)。段階に無いので単位から作る。 */
   gap: calc(var(--space-unit) * 1.5);
-  min-width: calc(var(--space-unit) * 30);   /* 120 */
+  /* 最小幅はふだん 120。列に全部のタブが 120 で入らないときは、列の幅をタブの
+     数で割った幅まで縮め (名前を省略する)、88 で止める (絵と閉じるは残る)。
+     それでも入らなければ列を横に送る。タブの数は main-tabs-view.ts の render()
+     が列の --main-tab-count へ書く。 */
+  min-width: clamp(
+    calc(var(--space-unit) * 22),   /* 88 */
+    (100cqi - (var(--main-tab-count, 1) - 1) * 1px) / var(--main-tab-count, 1),
+    calc(var(--space-unit) * 30)    /* 120 */
+  );
   max-width: calc(var(--space-unit) * 45);   /* 180 */
   padding: 0 var(--space-3);
   background: var(--color-nav);
@@ -17987,6 +18025,39 @@ body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
   }
   .gdp-file-detail-sticky .gdp-file-detail-tabs {
     justify-self: start;
+  }
+}
+/* さらに狭いとき (2 面の右の面など、1 行目に並べるとパンくずに 240px も残らない
+   幅): パンくずに 1 行目を全部渡し、横の操作 (パスのコピー・OS で開く・情報・
+   前後・削除) は 2 行目に並べる。操作は同じ部品のまま (無くさない)。
+   510px = 左右の余白 48 + 操作 6 つと間 222 + パンくずの 240。 */
+@container doc-head (max-width: 509px) {
+  .gdp-file-detail-wrapper > .gdp-file-detail-sticky:not(:has(#sidebar-toggle)) {
+    grid-template-columns: auto auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "crumb crumb crumb crumb crumb crumb"
+      "copy open info . nav trash"
+      "tabs tabs tabs tabs tabs tabs";
+  }
+  .gdp-file-detail-wrapper > .gdp-file-detail-sticky:has(#sidebar-toggle) {
+    grid-template-columns: auto auto auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "toggle crumb crumb crumb crumb crumb crumb"
+      "copy open info . . nav trash"
+      "tabs tabs tabs tabs tabs tabs tabs";
+    row-gap: var(--space-2);
+  }
+  .gdp-file-detail-sticky .gdp-file-detail-path {
+    display: contents;
+  }
+  .gdp-file-detail-sticky .gdp-file-detail-path > .gdp-file-breadcrumb {
+    grid-area: crumb;
+  }
+  .gdp-file-detail-sticky .gdp-file-detail-path > .gdp-copy-path {
+    grid-area: copy;
+  }
+  .gdp-file-detail-sticky .gdp-file-detail-path > .gdp-open-path {
+    grid-area: open;
   }
 }
 /* 面が狭いときは目次を畳み、本文だけにする。 */
