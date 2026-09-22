@@ -18,6 +18,17 @@ export function isAppEntryPath(pathname: string): boolean {
 
 const STATIC_FILES: Record<string, readonly [string, string]> = {
   "/favicon.png": ["favicon.png", "image/png"],
+  // インストールした窓 (PWA) の名前・アイコン・色。入口の下 (/p/<鍵>/) の画面も
+  // 根のこの経路を読む (index.html の link が絶対パス)。
+  "/manifest.webmanifest": [
+    "manifest.webmanifest",
+    "application/manifest+json; charset=utf-8",
+  ],
+  "/icons/icon-192.png": ["icons/icon-192.png", "image/png"],
+  "/icons/icon-512.png": ["icons/icon-512.png", "image/png"],
+  "/icons/icon-maskable-192.png": ["icons/icon-maskable-192.png", "image/png"],
+  "/icons/icon-maskable-512.png": ["icons/icon-maskable-512.png", "image/png"],
+  "/icons/apple-touch-icon.png": ["icons/apple-touch-icon.png", "image/png"],
   "/style.css": ["style.css", "text/css; charset=utf-8"],
   "/app.js": ["app.js", "application/javascript; charset=utf-8"],
   "/mermaid.js": ["mermaid.js", "application/javascript; charset=utf-8"],

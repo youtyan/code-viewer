@@ -28,6 +28,7 @@ import {
 } from "../server/server-registry";
 import { supportsNativeRecursiveWatch } from "../server/worktree-watcher";
 import { runGit as git } from "./_git-fixture";
+import { fetchPwaAssets, SERVED_PWA_ICONS } from "./_pwa-fixture";
 
 /** 配布物と同じバンドル。vitest の globalSetup が焼いてある。 */
 const REPO_ROOT = join(
@@ -641,6 +642,26 @@ describe("preview CLI", () => {
       }
     },
   );
+
+  test("a standalone server serves the installed-window manifest and its icons", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-pwa-"));
+    tmpRoots.push(root);
+    const preview = await startTestPreview(root, makeFakeMissingGitCommand());
+    try {
+      const served = await fetchPwaAssets(preview.url);
+      expect([
+        served.contentType,
+        served.manifest.display,
+        served.icons,
+      ]).toEqual([
+        "application/manifest+json; charset=utf-8",
+        "standalone",
+        SERVED_PWA_ICONS,
+      ]);
+    } finally {
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
 
   test("rejects requests with a non-loopback Host", async () => {
     const root = mkdtempSync(join(tmpdir(), "code-viewer-request-host-"));

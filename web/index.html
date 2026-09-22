@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>code viewer</title>
 <link rel="icon" type="image/png" href="/favicon.png" />
+<!-- インストールした窓 (PWA)。色は骨格の地 (--color-ground)。キーの扱いは web-src/core/pwa.ts。 -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#101014" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#f3f1f7" media="(prefers-color-scheme: light)" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 
 <!-- diff2html/highlight.js assets are vendored so the preview works offline
      and does not make network requests from the browser. The highlighter JS is

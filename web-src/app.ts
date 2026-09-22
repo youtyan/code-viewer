@@ -107,6 +107,11 @@ import {
   HISTORY_WIDTH,
   SIDEBAR_WIDTH,
 } from "./core/panel-sizes";
+import {
+  lastTabNumber,
+  resolvePwaKey,
+  STANDALONE_MEDIA_QUERY,
+} from "./core/pwa";
 import { buildRepositoryWebTarget } from "./core/repository-web-url";
 import {
   type AppRoute,
@@ -5689,11 +5694,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     // 名前は下パネルにターミナルがあった頃のまま (保存したキー割り当てを
     // 壊さない)。いまはフォーカスのある面の「＋」のメニューを開く。
     if (action === "toggle-terminal-panel") {
-      newTabMenuFocusReturn =
-        document.activeElement instanceof HTMLElement
-          ? document.activeElement
-          : null;
-      MAIN_TABS.openNewTabMenu();
+      openNewTabMenuFromKeys();
       return true;
     }
     if (action === "undo-last-action") {
@@ -5824,6 +5825,48 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!action) return;
     if (dispatchKeymapAction(action, scope, e.repeat, targetEl))
       e.preventDefault();
+  });
+
+  // インストールした窓 (PWA) だけ、ブラウザのタブ操作のキー (⌘W・⌘T・⌘1〜9・
+  // Ctrl+Tab など) をメインの面のタブへ振り向ける。表と決まりは core/pwa.ts。
+  document.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
+    const targetEl = e.target as Element | null;
+    const outcome = resolvePwaKey(e, {
+      standalone: window.matchMedia(STANDALONE_MEDIA_QUERY).matches,
+      mac: /Mac|iPhone|iPad/.test(navigator.platform),
+      // Meta 付きとして聞くと、塞がるのはダイアログだけ (端末は下で分ける)。
+      target:
+        isPaletteOpen() || isPageKeymapBlockedKey(targetEl, true)
+          ? "blocked"
+          : targetEl?.closest(".xterm")
+            ? "terminal"
+            : "page",
+      composing: isImeComposing(e),
+    });
+    if (!outcome) return;
+    e.preventDefault();
+    if (outcome.kind === "swallow") return;
+    if (outcome.action === "main-tab-new-menu") {
+      openNewTabMenuFromKeys();
+      return;
+    }
+    if (outcome.action === "main-tab-reopen") {
+      // 開き直せるものが無ければ何もしない (窓は閉じさせない)。
+      if (MAIN_TABS.reopenClosed()) focusActiveMainTabSurface();
+      return;
+    }
+    if (outcome.action === "main-tab-last") {
+      MAIN_TABS.activateNth(lastTabNumber(MAIN_TABS.layout()));
+      focusActiveMainTabSurface();
+      return;
+    }
+    dispatchKeymapAction(
+      outcome.action,
+      keymapScope(targetEl),
+      e.repeat,
+      targetEl,
+    );
   });
 
   // ----- initial state + live updates -----
@@ -6946,6 +6989,15 @@ window.GdpExpandLogic = GdpExpandLogic;
    * タブ列の openNewTabMenu が同期で openNewTabMenu (下) を呼ぶ間だけ持つ。
    */
   let newTabMenuFocusReturn: HTMLElement | null = null;
+
+  /** キー (Ctrl+`・PWA の窓の ⌘/Ctrl+T) で、フォーカスのある面の「＋」のメニューを開く。 */
+  function openNewTabMenuFromKeys(): void {
+    newTabMenuFocusReturn =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    MAIN_TABS.openNewTabMenu();
+  }
 
   /**
    * タブ列の「＋」のメニュー: ファイルを開く・新しいシェル・既存のセッション

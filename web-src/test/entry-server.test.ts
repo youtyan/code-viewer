@@ -27,6 +27,7 @@ import { PROJECT_HEADER } from "../core/api-url";
 import { SSE_RETRY_MS } from "../server/runtime";
 import { rootFileKey } from "../server/server-registry";
 import { runGit } from "./_git-fixture";
+import { fetchPwaAssets, SERVED_PWA_ICONS } from "./_pwa-fixture";
 
 const REPO_ROOT = join(
   fileURLToPath(new URL(".", import.meta.url)),
@@ -325,6 +326,25 @@ describe("the entry server", () => {
       body: JSON.stringify({ path: root }),
     });
     expect(backendWorktreeOpen.status).toBe(404);
+  });
+
+  test("the installed-window manifest and icons are the same at the root and under /p/<key>/", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    const { url } = await startEntry(box, root);
+    const atRoot = await fetchPwaAssets(url);
+    // 画面は根の /manifest.webmanifest を読むが、/p/<鍵>/ の下 (裏が配る) でも同じものが引ける。
+    const underProject = await fetchPwaAssets(`${url}p/${rootFileKey(root)}/`);
+    expect([
+      atRoot.contentType,
+      atRoot.manifest.start_url,
+      atRoot.icons,
+    ]).toEqual([
+      "application/manifest+json; charset=utf-8",
+      "/",
+      SERVED_PWA_ICONS,
+    ]);
+    expect(underProject).toEqual(atRoot);
   });
 
   test("a stopped project process is 502 until restarted; a project that cannot start is 503", async () => {
