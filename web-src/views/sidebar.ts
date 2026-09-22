@@ -4,6 +4,7 @@ import { apiUrl } from "../core/api-url";
 // (width / font size / hide toggle). Extracted from app.ts.
 
 import { classifyDiffFileKind } from "../core/diff-file-kinds";
+import { responseErrorMessage } from "../core/error-detail";
 import { compileFileFilter } from "../core/file-filter";
 import { nextVisibleFileIndex } from "../core/file-navigation";
 import { filePathDisplayText } from "../core/file-path-copy";
@@ -24,6 +25,7 @@ import type {
   RepoTreeResponse,
   SidebarItem,
 } from "../core/types";
+import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
 import { rowHeightFor } from "./shell/row-height";
 import { treeLevelPad } from "./tree-indent";
 
@@ -698,12 +700,18 @@ export function createSidebar(deps: SidebarDeps) {
     const params = new URLSearchParams();
     params.set("ref", getRepoSidebarRef() || "worktree");
     params.set("path", dir.path);
+    params.set(...TREE_WITHOUT_COMMIT_DATES);
     appendScopeParams(params);
     return trackLoad<RepoTreeResponse>(
-      fetch(`${apiUrl("tree")}?${params.toString()}`).then((response) => {
-        if (!response.ok) throw new Error("failed to load repository tree");
-        return response.json();
-      }),
+      fetch(`${apiUrl("tree")}?${params.toString()}`).then((response) =>
+        response.ok
+          ? response.json()
+          : responseErrorMessage(response, `load folder ${dir.path}`).then(
+              (message) => {
+                throw new Error(message);
+              },
+            ),
+      ),
     ).then((meta) =>
       meta.entries.map(
         (entry, index) =>

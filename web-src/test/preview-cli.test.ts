@@ -18,7 +18,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
-import type { RepoTreeResponse } from "../core/types";
+import {
+  type RepoTreeResponse,
+  TREE_WITHOUT_COMMIT_DATES,
+} from "../core/types";
 import {
   readServerRegistry,
   serverRegistryFilePath,
@@ -499,6 +502,43 @@ describe("preview CLI", () => {
       });
       expect(entries.get("deleted.txt")?.status).toBe(deleted);
       expect(entries.get("untracked.txt")?.commit_updated_at).toBeUndefined();
+    } finally {
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
+  test("the sidebar request leaves out worktree commit dates and nothing else", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-tree-no-dates-"));
+    tmpRoots.push(root);
+    git(root, ["init"]);
+    git(root, ["config", "user.name", "Sample"]);
+    git(root, ["config", "user.email", "sample@example.test"]);
+    mkdirSync(join(root, "sub"));
+    for (const path of ["one.txt", "sub/two.txt"])
+      writeFileSync(join(root, path), "first\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "initial"]);
+    writeFileSync(join(root, "one.txt"), "edited\n");
+    const preview = await startTestPreview(root);
+    try {
+      const read = async (query: string) => {
+        const response = await fetchWithTimeout(
+          new URL(`/_tree?ref=worktree${query}`, preview.url).toString(),
+          5000,
+        );
+        expect(response.status).toBe(200);
+        return ((await response.json()) as RepoTreeResponse).entries;
+      };
+      const full = await read("");
+      const bare = await read(`&${TREE_WITHOUT_COMMIT_DATES.join("=")}`);
+      const dated = (entries: typeof full) =>
+        Object.fromEntries(
+          entries.map((entry) => [entry.path, !!entry.commit_updated_at]),
+        );
+      expect(dated(full)).toMatchObject({ "one.txt": true, sub: true });
+      expect(bare).toEqual(
+        full.map(({ commit_updated_at: _dropped, ...rest }) => rest),
+      );
     } finally {
       await stopTestPreview(preview.proc, preview.exited);
     }

@@ -10,6 +10,13 @@ import { Readable } from "node:stream";
 /** `/events` sends this often; the entry proxy allows three missed beats. */
 export const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
 
+/**
+ * `/events` asks the browser to reconnect this soon after the stream drops.
+ * The EventSource default (about 3 s in Chrome) was the whole of the wait
+ * after the entry server restarted (scripts/perf.mjs, sse.caughtUpMs).
+ */
+export const SSE_RETRY_MS = 500;
+
 export type RunResult = {
   code: number;
   stdout: string;

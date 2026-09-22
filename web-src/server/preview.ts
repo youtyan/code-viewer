@@ -30,6 +30,7 @@ import type {
   SettingsResponse,
   UndoActionResponse,
 } from "../core/types";
+import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
 import {
   ANNOTATION_BODY_MAX_BYTES,
   addAnnotationEntry,
@@ -123,6 +124,7 @@ import {
   fileReadableStream,
   readFileTextRange,
   SSE_HEARTBEAT_INTERVAL_MS,
+  SSE_RETRY_MS,
   startServer,
 } from "./runtime";
 import { DEFAULT_EXCLUDE_NAMES, normalizeGrepMax } from "./search";
@@ -1288,7 +1290,11 @@ async function handleTree(url: URL) {
     !recursive && statusMap ? deletedTreeEntriesForPath(statusMap, path) : [];
   const listing = [...entries, ...deletedEntries].map(withStatus);
   const commitDates =
-    !recursive && worktreeTarget && currentGitRepositoryState() !== "outside"
+    !recursive &&
+    worktreeTarget &&
+    url.searchParams.get(TREE_WITHOUT_COMMIT_DATES[0]) !==
+      TREE_WITHOUT_COMMIT_DATES[1] &&
+    currentGitRepositoryState() !== "outside"
       ? await git.worktreeCommitDatesAsync(
           listing
             .filter((entry) => entry.status !== "U" && entry.status !== "I")
@@ -3222,7 +3228,9 @@ const server = await startServer({
           start(controller) {
             ctrl = controller;
             sseClients.add(controller);
-            controller.enqueue(enc.encode("event: open\ndata: ok\n\n"));
+            controller.enqueue(
+              enc.encode(`retry: ${SSE_RETRY_MS}\nevent: open\ndata: ok\n\n`),
+            );
             if (watchLimitReached !== null) {
               controller.enqueue(
                 enc.encode(

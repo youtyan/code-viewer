@@ -37,6 +37,7 @@ import type {
   SidebarItem,
   UndoActionResponse,
 } from "../core/types";
+import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
 import { fileRouteKeepingActiveView } from "./file-shell";
 import {
   type MarkdownLinkNavigationDeps,
@@ -1081,13 +1082,19 @@ export function createRepoView(deps: RepoViewDeps) {
     }
     const params = new URLSearchParams();
     params.set("ref", normalizedRef);
+    params.set(...TREE_WITHOUT_COMMIT_DATES);
     appendScopeParams(params);
     REPO_SIDEBAR_LOAD_REF = normalizedRef;
     const load = trackLoad<RepoTreeResponse>(
-      fetch(`${apiUrl("tree")}?${params.toString()}`).then((r) => {
-        if (!r.ok) throw new Error("failed to load repository tree");
-        return r.json();
-      }),
+      // 成功時は r.json() をそのまま返す (async にすると 1 手遅れ、loadRepo の
+      // 直後に木がまだ描かれていない)。失敗時だけ本文を読んで理由にする。
+      fetch(`${apiUrl("tree")}?${params.toString()}`).then((r) =>
+        r.ok
+          ? r.json()
+          : responseErrorMessage(r, "load repository tree").then((message) => {
+              throw new Error(message);
+            }),
+      ),
     )
       .then(async (meta) => {
         if (!isActiveRepoTreeRef(normalizedRef)) return;
@@ -1580,6 +1587,7 @@ export function createRepoView(deps: RepoViewDeps) {
     try {
       const params = new URLSearchParams();
       params.set("ref", ref);
+      params.set(...TREE_WITHOUT_COMMIT_DATES);
       appendScopeParams(params);
       const meta = await trackLoad<RepoTreeResponse>(
         fetch(`${apiUrl("tree")}?${params.toString()}`).then(async (r) => {

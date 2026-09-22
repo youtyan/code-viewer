@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { PROJECT_HEADER } from "../core/api-url";
+import { SSE_RETRY_MS } from "../server/runtime";
 import { rootFileKey } from "../server/server-registry";
 import { runGit } from "./_git-fixture";
 
@@ -322,6 +323,22 @@ describe("the entry server", () => {
       "backend-start-failed",
     );
   });
+
+  test("the event stream through the entry tells the browser to reconnect quickly", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    const { url } = await startEntry(box, root);
+    const key = rootFileKey(root);
+    const leave = new AbortController();
+    const events = await fetch(`${url}p/${key}/events`, {
+      signal: leave.signal,
+    });
+    const first = await events.body?.getReader().read();
+    leave.abort();
+    expect(new TextDecoder().decode(first?.value)).toMatch(
+      new RegExp(`^retry: ${SSE_RETRY_MS}\n`),
+    );
+  }, 30_000);
 
   test("a project process nobody uses is stopped after --idle-stop, not treated as stopped, and started again by the next request", async () => {
     const box = sandbox();

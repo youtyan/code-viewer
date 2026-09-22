@@ -69,6 +69,13 @@ export type RepoTreeEntry = {
   status?: string;
 };
 
+/**
+ * The tree endpoint with `commit_dates=0` leaves out `commit_updated_at`. Each entry costs one
+ * `git log` process, so a 1,000-file folder took about 1.7 s; the file tree in
+ * the sidebar shows no dates and asks without them.
+ */
+export const TREE_WITHOUT_COMMIT_DATES = ["commit_dates", "0"] as const;
+
 export type RepoTreeResponse = {
   ref: string;
   path: string;

@@ -25,9 +25,9 @@ import {
   withoutProjectPrefix,
 } from "./core/api-url";
 import {
+  catchUpKind,
   createCatchUpGate,
   shouldAutoLoadForRoute,
-  shouldCatchUpDiff,
 } from "./core/catch-up";
 import { changedPathsCoverPath } from "./core/changed-paths";
 import { attachDragResizer } from "./core/drag-resizer";
@@ -8602,7 +8602,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         openedOnce = true;
         return;
       }
-      catchUpDiff();
+      catchUpMissedChanges();
     });
   }
 
@@ -8635,11 +8635,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   }
 
-  function catchUpDiff() {
+  function catchUpMissedChanges() {
     const historyWorktreeSelected = HISTORY_VIEW.isWorktreeSelected();
-    if (!shouldAutoLoadCurrentRoute()) return;
-    if (!shouldCatchUpDiff(STATE.route, { historyWorktreeSelected })) return;
+    const kind = catchUpKind(STATE.route, { historyWorktreeSelected });
+    if (!kind) return;
     if (!catchUpGate()) return;
+    if (kind === "files") {
+      scheduleSseLoad(null);
+      return;
+    }
     if (!STATE.autoUpdate) {
       showChangeBanner(null);
       return;
@@ -8653,12 +8657,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     scheduleEventSourceConnect();
-    catchUpDiff();
+    catchUpMissedChanges();
     void ANNOTATIONS_UI?.refreshAnnotations();
   });
   window.addEventListener("focus", () => {
     scheduleEventSourceConnect();
-    catchUpDiff();
+    catchUpMissedChanges();
     void ANNOTATIONS_UI?.refreshAnnotations();
   });
 })();

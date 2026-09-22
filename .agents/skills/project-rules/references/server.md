@@ -125,6 +125,13 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
   元のエラーを持つ 504 (`backend-timeout`) にする。見出しを受け取った後はダウンロードなどを
   通信停止で切らない。SSE は裏が 15 秒ごとに送る heartbeat の 3 倍、データが来なければ切る。
   ブラウザが要求を止めた場合は、これらの時間切れより先に裏への要求を止める
+- `/events` は最初に `retry:`（`server/runtime.ts` の `SSE_RETRY_MS`）を送り、切れた後の
+  ブラウザの繋ぎ直しを既定の約 3 秒より早める（入口を起動し直した後に画面が追いつくまでの
+  待ちの大半だった）。**切れていた間の変更は通知されない**ので、繋ぎ直し（`open`）・
+  タブが前面に戻ったとき・窓のフォーカスで `app.ts` の `catchUpMissedChanges` が取り直す。
+  どう取り直すかは `core/catch-up.ts` の `catchUpKind`（差分は読み直し、Files の木と blob は
+  変わったパスが不明な SSE の更新と同じ道）。取り直さない画面を足すと、そこでは次の変更まで
+  古い表示が残る
 - 裏に繋がらない = 502 (`backend-stopped`)、起きない = 503 (`backend-start-failed`)、
   応答を始めない = 504 (`backend-timeout`)。
   形は `core/types.ts` の `EntryBackendFailure`。画面は fetch の包み (`onResponse`) で
