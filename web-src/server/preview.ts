@@ -140,6 +140,8 @@ import {
   rootFileKey,
   writeServerRegistry,
 } from "./server-registry";
+import { createProcessShutdown, reportFatalAndShutdown } from "./shutdown";
+import { applySseClientOperation } from "./sse-clients";
 import { loadAppSettingsState } from "./state-store";
 import { staticFile, WEB_ROOT } from "./static-files";
 import type { ListTmuxPanesOptions } from "./tmux/panes";
@@ -248,6 +250,7 @@ const sseKeepalives = new Map<
   ReadableStreamDefaultController<Uint8Array>,
   ReturnType<typeof setInterval>
 >();
+let worktreeWatch: WatchSupervisor | null = null;
 const fileCache = new Map<string, TimedCacheEntry<{ diffText: string }>>();
 // blame result cache, keyed by base/ref/path (+mtime+size for worktree base).
 // Capped LRU to keep memory bounded across many edits and refs.
@@ -3018,13 +3021,9 @@ const isCodeViewerInternalPath = git.isToolInternalPath;
 
 function sendSse(event: string, data = "tick") {
   const payload = enc.encode(`event: ${event}\ndata: ${data}\n\n`);
-  for (const client of [...sseClients]) {
-    try {
-      client.enqueue(payload);
-    } catch {
-      removeSseClient(client);
-    }
-  }
+  applySseClientOperation([...sseClients], "send", removeSseClient, (client) =>
+    client.enqueue(payload),
+  );
 }
 
 function removeSseClient(ctrl: ReadableStreamDefaultController<Uint8Array>) {
@@ -3035,14 +3034,15 @@ function removeSseClient(ctrl: ReadableStreamDefaultController<Uint8Array>) {
 }
 
 function closeSseClients() {
-  for (const client of [...sseClients]) {
-    removeSseClient(client);
-    try {
+  applySseClientOperation(
+    [...sseClients],
+    "close",
+    removeSseClient,
+    (client) => {
+      removeSseClient(client);
       client.close();
-    } catch {
-      /* client may already be closed */
-    }
-  }
+    },
+  );
 }
 
 parseCli();
@@ -3231,11 +3231,12 @@ const server = await startServer({
               );
             }
             keepalive = setInterval(() => {
-              try {
-                controller.enqueue(enc.encode(": ping\n\n"));
-              } catch {
-                removeSseClient(controller);
-              }
+              applySseClientOperation(
+                [controller],
+                "heartbeat",
+                removeSseClient,
+                (client) => client.enqueue(enc.encode(": ping\n\n")),
+              );
             }, SSE_HEARTBEAT_INTERVAL_MS);
             keepalive.unref?.();
             sseKeepalives.set(controller, keepalive);
@@ -3302,8 +3303,6 @@ void pruneDeadServerRegistry().then(
 // Watching runs in a child process. close() here kills that child; it never
 // touches an fs.watch handle, so unlike the old in-process watcher it cannot
 // block shutdown on libuv's FSEvents semaphore.
-let worktreeWatch: WatchSupervisor | null = null;
-let shuttingDown = false;
 let registryCleanupAttempted = false;
 
 function removeOwnServerRegistry(): void {
@@ -3311,69 +3310,44 @@ function removeOwnServerRegistry(): void {
   removeServerRegistry(cwd, process.pid);
 }
 
-async function shutdown(exitCode = 0) {
-  if (shuttingDown) {
-    process.exit(1);
-  }
-  shuttingDown = true;
-  try {
-    removeOwnServerRegistry();
-  } catch (error) {
-    exitCode = 1;
-    console.error(
-      `code-viewer registry cleanup failed:\n${formatErrorDetail(error)}`,
-    );
-  }
-  closeSseClients();
-  try {
-    const [{ closeShellStreams }, { closeAllShellSessions }] =
-      await Promise.all([shellHandleModule, import("./shell/session")]);
-    closeShellStreams();
-    // ブラウザから開いたシェルはこのサーバの子。残したまま終わらない。
-    const closeResult = await closeAllShellSessions();
-    if (closeResult.status === "error") {
-      exitCode = 1;
-      console.error(
-        `code-viewer shell close failed:\n${formatErrorDetail(closeResult.error)}`,
-      );
-    }
-  } catch (error) {
-    exitCode = 1;
-    console.error(
-      `code-viewer shell close failed:\n${formatErrorDetail(error)}`,
-    );
-  }
-  try {
-    const { stopAgentActivityWatch } = await import("./terminal/activity");
-    stopAgentActivityWatch();
-  } catch (error) {
-    console.warn(`code-viewer agent watch stop skipped: ${String(error)}`);
-  }
-  worktreeWatch?.close();
-  try {
-    await server.close();
-  } catch (error) {
-    console.warn(`code-viewer server close skipped: ${String(error)}`);
-  }
-  process.exit(exitCode);
-}
+const shutdown = createProcessShutdown([
+  { label: "code-viewer registry cleanup", run: removeOwnServerRegistry },
+  { label: "code-viewer SSE client close", run: closeSseClients },
+  {
+    label: "code-viewer shell stream close",
+    run: async () => (await shellHandleModule).closeShellStreams(),
+  },
+  {
+    label: "code-viewer shell session close",
+    run: async () => {
+      // ブラウザから開いたシェルはこのサーバの子。残したまま終わらない。
+      const closed = await (
+        await import("./shell/session")
+      ).closeAllShellSessions();
+      if (closed.status === "error") throw closed.error;
+    },
+  },
+  {
+    label: "code-viewer agent watch stop",
+    run: async () =>
+      (await import("./terminal/activity")).stopAgentActivityWatch(),
+  },
+  {
+    label: "code-viewer worktree watch stop",
+    run: () => {
+      const watcher = worktreeWatch;
+      worktreeWatch = null;
+      watcher?.close();
+    },
+  },
+  { label: "code-viewer server close", run: () => server.close() },
+]);
 
-// Last line of defence: a local viewer must not die because one request hit an
-// unexpected error. Node/Bun turn an unhandled 'error' from a stream that is
-// already piped to the response (e.g. reading a directory yields EISDIR) into a
-// process-wide crash, which takes down every other open tab with it. Log it and
-// keep serving; the request itself is already lost either way.
 process.on("uncaughtException", (error) => {
-  console.error(
-    "[code-viewer] uncaught exception (server kept running):",
-    error,
-  );
+  reportFatalAndShutdown("uncaught exception", error, shutdown.run);
 });
 process.on("unhandledRejection", (reason) => {
-  console.error(
-    "[code-viewer] unhandled rejection (server kept running):",
-    reason,
-  );
+  reportFatalAndShutdown("unhandled rejection", reason, shutdown.run);
 });
 
 process.on("exit", () => {
@@ -3382,16 +3356,24 @@ process.on("exit", () => {
       removeOwnServerRegistry();
     } catch (error) {
       process.exitCode = 1;
-      console.error(
-        `code-viewer registry cleanup failed:\n${formatErrorDetail(error)}`,
-      );
+      console.error("code-viewer registry cleanup failed:", error);
     }
   }
-  closeSseClients();
-  worktreeWatch?.close();
+  try {
+    closeSseClients();
+  } catch (error) {
+    process.exitCode = 1;
+    console.error("code-viewer SSE client close failed:", error);
+  }
+  try {
+    worktreeWatch?.close();
+  } catch (error) {
+    process.exitCode = 1;
+    console.error("code-viewer worktree watch stop failed:", error);
+  }
 });
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-  process.on(signal, () => void shutdown(0));
+  process.on(signal, () => void shutdown.run(0));
 }
 
 // Under the dev wrapper, exit when the parent dies so a crashed or
@@ -3405,7 +3387,7 @@ if (process.env.CODE_VIEWER_DEV === "1") {
       process.kill(parentPid, 0);
     } catch {
       console.log("dev wrapper exited; shutting down preview server");
-      void shutdown(0);
+      void shutdown.run(0);
     }
   }, 1000).unref();
 }
@@ -3447,7 +3429,7 @@ if (backendMode && entryPid !== null && entryToken !== null) {
       console.log(
         `the code-viewer entry server (pid ${checkedPid}) could not be verified; shutting down this project process`,
       );
-      void shutdown(0);
+      void shutdown.run(0);
     })().finally(() => {
       ownerCheckRunning = false;
     });
@@ -3487,22 +3469,8 @@ function startScopedWorktreeWatch(): WatchSupervisor {
 }
 
 function restartWorktreeWatch() {
-  // Guard against being called during the synchronous startup phase, before
-  // `worktreeWatch` / `shuttingDown` are reached by their let declarations.
-  // Touching them inside the TDZ throws ReferenceError.
-  try {
-    if (shuttingDown) return;
-    if (!worktreeWatch) return;
-  } catch {
-    return;
-  }
-  try {
-    worktreeWatch.close();
-  } catch (error) {
-    console.warn(
-      `code-viewer worktree watch restart close skipped: ${String(error)}`,
-    );
-  }
+  if (shutdown.started() || !worktreeWatch) return;
+  worktreeWatch.close();
   worktreeWatch = startScopedWorktreeWatch();
 }
 

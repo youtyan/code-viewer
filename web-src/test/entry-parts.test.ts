@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   type BackendTarget,
   createEntryBackends,
@@ -21,7 +21,10 @@ import {
 } from "../server/entry/entry-file";
 import { createEntryProjects } from "../server/entry/projects";
 import { isConnectionFailure, proxyToBackend } from "../server/entry/proxy";
-import { proxyTimeoutResponse } from "../server/entry/server";
+import {
+  proxyTimeoutResponse,
+  registerLaunchRoot,
+} from "../server/entry/server";
 import { rootFileKey } from "../server/server-registry";
 import type { WorktreeOpenResult } from "../server/worktree/open";
 
@@ -42,9 +45,11 @@ describe("entry.json", () => {
     writeEntryRecord(record, file);
     expect(readEntryRecord(file)).toEqual({ ok: true, registry: record });
     expect(liveEntryUrl(file)).toBe("http://127.0.0.1:64620");
-    removeEntryRecord(process.pid + 1, file);
+    expect(removeEntryRecord(process.pid + 1, file)).toEqual({
+      status: "other-owner",
+    });
     expect(readEntryRecord(file)).toEqual({ ok: true, registry: record });
-    removeEntryRecord(process.pid, file);
+    expect(removeEntryRecord(process.pid, file)).toEqual({ status: "removed" });
     expect(readEntryRecord(file)).toEqual({ ok: true, registry: null });
   });
 
@@ -78,6 +83,11 @@ describe("entry.json", () => {
     expect(read.ok).toBe(false);
     expect(read.ok === false && read.error).toContain(reason);
     expect(() => liveEntryUrl(file)).toThrow(reason);
+    const removed = removeEntryRecord(process.pid, file);
+    expect(removed.status).toBe("unreadable");
+    expect(removed.status === "unreadable" && removed.error.message).toContain(
+      reason,
+    );
     expect(readFileSync(file, "utf8")).toBe(text);
   });
 
@@ -220,6 +230,7 @@ describe("the project processes the entry starts", () => {
       idleStopMs?: number;
       open?: () => Promise<WorktreeOpenResult>;
       stop?: () => Promise<void>;
+      registryEntry?: EntryBackendsDeps["registryEntry"];
     } = {},
   ) {
     const opens: unknown[] = [];
@@ -243,7 +254,13 @@ describe("the project processes the entry starts", () => {
       },
       logFile: () => "/state/server-logs/sample.log",
       logTail: () => "server output: sample tail",
-      registryEntry: () => ({ pid: 777, backend: options.backend ?? true }),
+      registryEntry:
+        options.registryEntry ??
+        (() => ({
+          status: "found",
+          pid: 777,
+          backend: options.backend ?? true,
+        })),
       serverArgs: () => ["--staged"],
       idleStopMs: options.idleStopMs ?? IDLE_MS,
       now: () => clock.now,
@@ -316,6 +333,35 @@ describe("the project processes the entry starts", () => {
     expect(target.status).toBe("failed");
     expect(target.detail).toContain(reason);
     expect(target.log).toBe("server output: sample tail");
+    expect(b.state(ROOT)).toBe("absent");
+  });
+
+  test.each([
+    {
+      name: "the registry entry is absent",
+      registry: { status: "absent" } as const,
+      reason: "did not register itself",
+    },
+    {
+      name: "the registry entry is unreadable",
+      registry: {
+        status: "unreadable",
+        error: new Error("sample registry read failed"),
+      } as const,
+      reason: "sample registry read failed",
+    },
+  ])("fails instead of starting with pid null when $name", async ({
+    registry,
+    reason,
+  }) => {
+    const { b } = backends([ok(65001)], {
+      registryEntry: () => registry,
+    });
+
+    const result = await b.target(ROOT);
+
+    expect(result.status).toBe("failed");
+    expect(result.status === "failed" && result.detail).toContain(reason);
     expect(b.state(ROOT)).toBe("absent");
   });
 
@@ -517,26 +563,26 @@ describe("the project processes the entry starts", () => {
     expect(opens).toHaveLength(2);
   });
 
-  test("when stopping fails, it stays running and the reason is not lost", async () => {
-    const { b, clock } = backends([ok(65001)], {
+  test("when stopping fails, it stays running, returns the reason, and retries next time", async () => {
+    const failure = new Error("sample: kill failed");
+    const { b, clock, stops } = backends([ok(65001)], {
       stop: async () => {
-        throw new Error("sample: kill failed");
+        throw failure;
       },
     });
     await b.target(ROOT);
     clock.now += IDLE_MS;
-    const logged = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    try {
-      await b.stopIdleBackends();
-      expect(b.state(ROOT)).toBe("running");
-      expect(String(logged.mock.calls[0]?.[0])).toContain(
-        "sample: kill failed",
-      );
-    } finally {
-      logged.mockRestore();
-    }
+    const first = await b.stopIdleBackends().catch((error: unknown) => error);
+    const second = await b.stopIdleBackends().catch((error: unknown) => error);
+
+    expect(b.state(ROOT)).toBe("running");
+    expect(stops).toEqual([ROOT, ROOT]);
+    expect((first as Error & { errors?: unknown[] }).errors).toEqual([
+      expect.objectContaining({ cause: failure }),
+    ]);
+    expect((second as Error & { errors?: unknown[] }).errors).toEqual([
+      expect.objectContaining({ cause: failure }),
+    ]);
   });
 
   test("an idle time of 0 never stops anything", async () => {
@@ -545,6 +591,20 @@ describe("the project processes the entry starts", () => {
     clock.now += 10 ** 12;
     await b.stopIdleBackends();
     expect(stops).toEqual([]);
+  });
+});
+
+describe("registering the launch root", () => {
+  test("returns a non-conflict registry failure to its caller with the cause", async () => {
+    const failure = new Error("sample project registry failure");
+    const caught = await registerLaunchRoot("/work/sample-app", {
+      repoRootResult: () => ({ kind: "root", root: "/work/sample-app" }),
+      register: async () => {
+        throw failure;
+      },
+    }).catch((error: unknown) => error);
+
+    expect(caught).toEqual(expect.objectContaining({ cause: failure }));
   });
 });
 

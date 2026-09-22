@@ -23,7 +23,11 @@
 // サーバは止めない。ターミナル・未読・フックは入口に居るので、裏を止めても
 // 消えない。
 
-import { formatErrorDetail } from "../../core/error-detail";
+import {
+  errorWithCause,
+  errorWithCauses,
+  formatErrorDetail,
+} from "../../core/error-detail";
 import type { EntryBackendState } from "../../core/types";
 import { serverLogFile } from "../projects/service";
 import { readServerRegistry } from "../server-registry";
@@ -34,7 +38,7 @@ import {
 } from "../worktree/open";
 
 export type BackendTarget =
-  | { status: "ok"; url: string; pid: number | null; started: boolean }
+  | { status: "ok"; url: string; pid: number; started: boolean }
   /** 取り次いでいた裏が落ちた。画面の再起動のボタンか、SSE の 1 回で起こす。 */
   | { status: "unreachable"; detail: string; log: string }
   /** 起こせなかった (時間切れ・起動直後に終わった・確かめられない)。 */
@@ -45,7 +49,7 @@ type BackendRecord =
   | {
       state: "running";
       url: string;
-      pid: number | null;
+      pid: number;
       /** 入口の裏か (登録簿の `backend`)。違えばアイドル停止しない。 */
       backend: boolean;
       since: number;
@@ -66,8 +70,13 @@ export type EntryBackendsDeps = {
   controller: Controller;
   logFile(root: string): string;
   logTail(file: string): string;
-  /** 登録簿の pid と、入口の裏 (`--backend`) か。記録が無ければ null。 */
-  registryEntry(root: string): { pid: number; backend: boolean } | null;
+  /** 登録簿の pid と、入口の裏 (`--backend`) か。無い・読めないを区別する。 */
+  registryEntry(
+    root: string,
+  ):
+    | { status: "found"; pid: number; backend: boolean }
+    | { status: "absent" }
+    | { status: "unreadable"; error: unknown };
   /** その根の裏に足す引数 (起動したディレクトリの `--bin` や git の差分の引数)。 */
   serverArgs(root: string): readonly string[];
   /** 使われていない裏を止めるまでの時間。0 なら止めない。 */
@@ -90,8 +99,14 @@ export function defaultEntryBackendsDeps(
     logFile: serverLogFile,
     logTail,
     registryEntry: (root) => {
-      const entry = readServerRegistry(root);
-      return entry ? { pid: entry.pid, backend: entry.backend === true } : null;
+      try {
+        const entry = readServerRegistry(root);
+        return entry
+          ? { status: "found", pid: entry.pid, backend: entry.backend === true }
+          : { status: "absent" };
+      } catch (error) {
+        return { status: "unreadable", error };
+      }
     },
     serverArgs,
     idleStopMs,
@@ -145,27 +160,32 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
     });
     touch(root);
     if (result.status === "ok") {
-      let registered: { pid: number; backend: boolean } | null = null;
-      try {
-        registered = deps.registryEntry(root);
-      } catch (error) {
-        // pid は落ちたかどうかの見分けに、backend はアイドル停止してよいかに
-        // 使う。読めなければ取り次ぎの失敗 (接続拒否) だけで見分け、止めない
-        // 側に倒す。理由はログに残す。
-        console.error(
-          `[code-viewer] entry: the server registry of ${root} could not be read`,
-          error,
-        );
+      const registered = deps.registryEntry(root);
+      if (registered.status !== "found") {
+        if (previous?.state === "unreachable") records.set(root, previous);
+        else records.delete(root);
+        return {
+          status: "failed",
+          detail:
+            registered.status === "absent"
+              ? `the project process for ${root} started but did not register itself`
+              : `the server registry of ${root} could not be read:\n${formatErrorDetail(registered.error)}`,
+          log: deps.logTail(deps.logFile(root)),
+        };
       }
-      const pid = registered?.pid ?? null;
       records.set(root, {
         state: "running",
         url: result.url,
-        pid,
-        backend: registered?.backend === true,
+        pid: registered.pid,
+        backend: registered.backend,
         since: deps.now(),
       });
-      return { status: "ok", url: result.url, pid, started: result.started };
+      return {
+        status: "ok",
+        url: result.url,
+        pid: registered.pid,
+        started: result.started,
+      };
     }
     // 落ちた後の起こし直し (SSE の 1 回) が失敗したら、落ちた印に戻す。
     // 戻さないと、次の普通の要求がまた起こしに行く。
@@ -324,7 +344,7 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
     const known = records.get(root);
     if (known?.state !== "running") return;
     // 止め終わるまでの Promise を「stopping」として置く。その間に来た要求は
-    // これを待ってから起こし直す。この Promise は失敗しない (中で拾う)。
+    // これを待ってから起こし直す。失敗時は running に戻して呼び出し元へ返す。
     const done = (async () => {
       try {
         await deps.controller.stopWorktreeServer(root);
@@ -333,12 +353,11 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
           `stopped the project process for ${root} (idle: no subscribers or streams for ${formatDuration(idleMs)}; it ran ${formatDuration(deps.now() - known.since)})`,
         );
       } catch (error) {
-        // 止められなかった。動いているものとして扱い続け、次に止めるのは
-        // もう 1 周期使われなかったとき。理由は全部ログに出す。
+        // 止められなかった。動いているものとして扱い続け、次の周期でも試す。
         records.set(root, known);
-        touch(root);
-        console.error(
-          `[code-viewer] entry: could not stop the idle project process for ${root}:\n${formatErrorDetail(error)}`,
+        throw errorWithCause(
+          `could not stop the idle project process for ${root}`,
+          error,
         );
       }
     })();
@@ -355,7 +374,15 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
       const idleMs = idleFor(root, now);
       if (idleMs !== null) idle.push([root, idleMs]);
     }
-    await Promise.all(idle.map(([root, idleMs]) => stopIdle(root, idleMs)));
+    const stopped = await Promise.allSettled(
+      idle.map(([root, idleMs]) => stopIdle(root, idleMs)),
+    );
+    const failures = stopped.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (failures.length > 0) {
+      throw errorWithCauses("failed to stop idle project processes", failures);
+    }
   }
 
   return {

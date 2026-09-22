@@ -24,7 +24,11 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { PROJECT_HEADER } from "../../core/api-url";
 import { hasControlCharacter } from "../../core/control-chars";
-import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
+import {
+  errorWithCause,
+  errorWithCauses,
+  formatErrorDetail,
+} from "../../core/error-detail";
 import type { ProjectOpenResponse } from "../../core/projects";
 import type {
   EntryBackendFailure,
@@ -50,6 +54,7 @@ import {
 import { requestAllowed, sideEffectRequestAllowed } from "../request-origin";
 import { ROOT } from "../root";
 import { startServer } from "../runtime";
+import { createProcessShutdown, reportFatalAndShutdown } from "../shutdown";
 import { loadAppSettingsState } from "../state-store";
 import { isAppEntryPath, staticFile } from "../static-files";
 import type { ListTmuxPanesOptions } from "../tmux/panes";
@@ -304,6 +309,19 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
       worktreePaths: (root) => git.worktreePathsAsync(root),
     },
   };
+  try {
+    await registerLaunchRoot(launchRoot);
+  } catch (error) {
+    try {
+      lock.release();
+    } catch (releaseError) {
+      throw errorWithCauses(
+        "project registration and entry start lock release both failed",
+        [error, releaseError],
+      );
+    }
+    throw error;
+  }
   let server: Awaited<ReturnType<typeof startServer>>;
   try {
     server = await startServer({
@@ -330,75 +348,52 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
   } finally {
     lock.release();
   }
-
-  await registerLaunchRoot(launchRoot);
-
-  let shuttingDown = false;
-  async function shutdown(exitCode = 0): Promise<void> {
-    if (shuttingDown) process.exit(1);
-    shuttingDown = true;
-    try {
-      removeEntryRecord(process.pid);
-    } catch (error) {
-      exitCode = 1;
-      console.error(
-        `code-viewer entry record cleanup failed:\n${formatErrorDetail(error)}`,
-      );
-    }
-    try {
-      const [{ closeShellStreams }, { closeAllShellSessions }] =
-        await Promise.all([
-          import("../shell/handle"),
-          import("../shell/session"),
-        ]);
-      closeShellStreams();
-      const closed = await closeAllShellSessions();
-      if (closed.status === "error") {
-        exitCode = 1;
-        console.error(
-          `code-viewer shell close failed:\n${formatErrorDetail(closed.error)}`,
-        );
-      }
-    } catch (error) {
-      exitCode = 1;
-      console.error(
-        `code-viewer shell close failed:\n${formatErrorDetail(error)}`,
-      );
-    }
-    const { stopAgentActivityWatch } = await import("../terminal/activity");
-    stopAgentActivityWatch();
-    try {
-      await server.close();
-    } catch (error) {
-      console.warn(`code-viewer entry server close skipped: ${String(error)}`);
-    }
-    process.exit(exitCode);
-  }
+  const shutdown = createProcessShutdown([
+    {
+      label: "code-viewer entry record cleanup",
+      run: () => {
+        const removed = removeEntryRecord(process.pid);
+        if (removed.status === "unreadable") throw removed.error;
+      },
+    },
+    {
+      label: "code-viewer shell stream close",
+      run: async () => (await import("../shell/handle")).closeShellStreams(),
+    },
+    {
+      label: "code-viewer shell session close",
+      run: async () => {
+        const closed = await (
+          await import("../shell/session")
+        ).closeAllShellSessions();
+        if (closed.status === "error") throw closed.error;
+      },
+    },
+    {
+      label: "code-viewer agent watch stop",
+      run: async () =>
+        (await import("../terminal/activity")).stopAgentActivityWatch(),
+    },
+    { label: "code-viewer entry server close", run: () => server.close() },
+  ]);
   process.on("uncaughtException", (error) => {
-    console.error(
-      "[code-viewer] uncaught exception (entry server kept running):",
-      error,
-    );
+    reportFatalAndShutdown("uncaught exception", error, shutdown.run);
   });
   process.on("unhandledRejection", (reason) => {
-    console.error(
-      "[code-viewer] unhandled rejection (entry server kept running):",
-      reason,
-    );
+    reportFatalAndShutdown("unhandled rejection", reason, shutdown.run);
   });
   process.on("exit", () => {
-    if (shuttingDown) return;
+    if (shutdown.started()) return;
     try {
-      removeEntryRecord(process.pid);
+      const removed = removeEntryRecord(process.pid);
+      if (removed.status === "unreadable") throw removed.error;
     } catch (error) {
       process.exitCode = 1;
-      console.error(
-        `code-viewer entry record cleanup failed:\n${formatErrorDetail(error)}`,
-      );
+      console.error("code-viewer entry record cleanup failed:", error);
     }
   });
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-    process.on(signal, () => void shutdown(0));
+    process.on(signal, () => void shutdown.run(0));
   }
   if (process.env.CODE_VIEWER_DEV === "1") {
     const parentPid = process.ppid;
@@ -407,7 +402,7 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
         process.kill(parentPid, 0);
       } catch {
         console.log("dev wrapper exited; shutting down the entry server");
-        void shutdown(0);
+        void shutdown.run(0);
       }
     }, 1000).unref();
   }
@@ -424,7 +419,8 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     setInterval(() => {
       backends.stopIdleBackends().catch((error: unknown) => {
         console.error(
-          `[code-viewer] entry: stopping idle project processes failed:\n${formatErrorDetail(error)}`,
+          "[code-viewer] entry: stopping idle project processes failed:",
+          error,
         );
       });
     }, everyMs).unref();
@@ -437,17 +433,26 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
 }
 
 /** 起動したディレクトリを登録簿に載せる (git の中なら。載っていればそのまま)。 */
-async function registerLaunchRoot(root: string): Promise<void> {
-  if (git.repoRootResult(root).kind !== "root") return;
+export async function registerLaunchRoot(
+  root: string,
+  deps: {
+    repoRootResult: typeof git.repoRootResult;
+    register(root: string): Promise<unknown>;
+  } = {
+    repoRootResult: git.repoRootResult,
+    register: (projectRoot) =>
+      changeProjects({ action: "add", path: projectRoot }, projectRoot),
+  },
+): Promise<void> {
+  if (deps.repoRootResult(root).kind !== "root") return;
   try {
-    await changeProjects({ action: "add", path: root }, root);
+    await deps.register(root);
   } catch (error) {
     if (error instanceof ProjectRegistryError && error.code === "conflict")
       return;
-    // 登録できなくても、起動したディレクトリは開ける (projects.allow 済み)。
-    // 理由は起動の出力に全部出す。
-    console.error(
-      `code-viewer could not register ${root} as a project:\n${formatErrorDetail(error)}`,
+    throw errorWithCause(
+      `code-viewer could not register ${root} as a project`,
+      error,
     );
   }
 }

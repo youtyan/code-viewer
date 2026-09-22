@@ -31,6 +31,10 @@ export type EntryRecord = {
   started_at: string;
 };
 
+export type EntryRecordRemovalResult =
+  | { status: "removed" | "absent" | "other-owner" }
+  | { status: "unreadable"; error: Error };
+
 export const ENTRY_IDENTITY_TIMEOUT_MS = 1500;
 
 export type EntryIdentityVerification =
@@ -121,15 +125,20 @@ export function writeEntryRecord(
 export function removeEntryRecord(
   pid: number,
   path: string = entryFilePath(),
-): void {
+): EntryRecordRemovalResult {
   const read = readEntryRecord(path);
-  if (read.ok === false || read.registry?.pid !== pid) return;
+  if (read.ok === false) {
+    return { status: "unreadable", error: new Error(read.error) };
+  }
+  if (!read.registry) return { status: "absent" };
+  if (read.registry.pid !== pid) return { status: "other-owner" };
   try {
     unlinkSync(path);
   } catch (error) {
-    if (errno(error) === "ENOENT") return;
+    if (errno(error) === "ENOENT") return { status: "absent" };
     throw error;
   }
+  return { status: "removed" };
 }
 
 /**
