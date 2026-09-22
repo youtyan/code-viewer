@@ -12,9 +12,10 @@ GlobalRegistrator.register();
 
 const { createTableGrid } = await import("../views/database/table-grid");
 const { dbText } = await import("../views/database/i18n");
+const { rowHeightFor } = await import("../views/shell/row-height");
 
-/** table-grid.ts の ROW_HEIGHT (行の高さの出所) と同じ値。 */
-const ROW = 28;
+/** 行の高さは表示密度の値 (views/shell/row-height.ts)。各テストで密度を決める。 */
+let ROW = rowHeightFor("regular");
 const tick = () => new Promise((r) => setTimeout(r, 20));
 
 function setup(rowCount: number, visibleRows: number) {
@@ -68,7 +69,14 @@ describe("table-grid pager", () => {
     GlobalRegistrator.unregister();
   });
 
-  test("shows the visible rows and moves one screen per button", async () => {
+  test.each([
+    "compact",
+    "regular",
+    "large",
+    "xlarge",
+  ] as const)("shows the visible rows and moves one screen per button at the $0 density", async (density) => {
+    document.body.dataset.sidebarFontSize = density;
+    ROW = rowHeightFor(density);
     const { grid, viewport, pager, scrollTo } = setup(50, 10);
     await scrollTo(0);
     expect(pager()).toEqual({
@@ -91,6 +99,26 @@ describe("table-grid pager", () => {
       prev: false,
       next: true,
     });
+    grid.destroy();
+    grid.el.remove();
+    delete document.body.dataset.sidebarFontSize;
+  });
+
+  test("follows a density change after the table is drawn", async () => {
+    document.body.dataset.sidebarFontSize = "regular";
+    ROW = rowHeightFor("regular");
+    const { grid, viewport, scrollTo } = setup(50, 10);
+    await scrollTo(0);
+    const spacer = q<HTMLElement>(grid.el, ".db-grid-spacer");
+    expect(spacer.style.height).toBe(`${50 * rowHeightFor("regular")}px`);
+    document.body.dataset.sidebarFontSize = "xlarge";
+    await tick();
+    expect(spacer.style.height).toBe(`${50 * rowHeightFor("xlarge")}px`);
+    q<HTMLButtonElement>(grid.el, ".db-grid-pager-next").click();
+    expect(viewport.scrollTop).toBe(10 * ROW - rowHeightFor("xlarge"));
+    grid.destroy();
+    grid.el.remove();
+    delete document.body.dataset.sidebarFontSize;
   });
 
   test("hides the pager for an empty table", async () => {

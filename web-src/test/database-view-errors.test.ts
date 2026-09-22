@@ -458,6 +458,20 @@ function installDatabaseDom() {
     writable: true,
     value: { TEXT_NODE: 3 },
   });
+  // 表は表示密度 (body の data-sidebar-font-size) の変化を見張る。この簡易 DOM
+  // では密度を変えないので、見張りは何もしない。
+  Object.defineProperty(globalThis, "MutationObserver", {
+    configurable: true,
+    writable: true,
+    value: class {
+      observe() {
+        /* 密度はこのテストでは変わらない */
+      }
+      disconnect() {
+        /* 同上 */
+      }
+    },
+  });
 
   return { body, windowListeners };
 }

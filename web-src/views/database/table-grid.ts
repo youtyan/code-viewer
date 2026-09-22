@@ -30,14 +30,15 @@ import {
   writeStoredSize,
 } from "../../core/stored-size";
 import type { AnnotationDatabaseDataState } from "../../core/types";
+import { currentRowHeight } from "../shell/row-height";
 import { showConfirmDialog } from "../ui-dialog";
 import { createDetailTable } from "./detail-table";
 import { createDetailTabs } from "./detail-tabs";
 import { type DbText, dbText } from "./i18n";
 
-const ROW_HEIGHT = 28;
+// 行の高さは一覧の行と同じ表示密度の値 (views/shell/row-height.ts)。CSS の
+// .db-grid-row は同じ値を --ui-row-h で読む。
 // 行番号列の幅。CSS の .db-grid-rownum (flex: 0 0 50px) と対で維持する。
-// ROW_HEIGHT が .db-grid-row の height と対になっているのと同じ扱いで、
 // 矢印キー移動で「移動先の列が見えているか」を測るのに使う。
 const ROWNUM_WIDTH = 50;
 const OVERSCAN = 20;
@@ -530,8 +531,8 @@ export function createTableGrid(
   function scrollCellIntoView(rowIndex: number, colIndex: number) {
     const viewHeight = viewport.clientHeight;
     if (viewHeight > 0) {
-      const top = rowIndex * ROW_HEIGHT;
-      const bottom = top + ROW_HEIGHT;
+      const top = rowIndex * currentRowHeight();
+      const bottom = top + currentRowHeight();
       if (top < viewport.scrollTop) viewport.scrollTop = top;
       else if (bottom > viewport.scrollTop + viewHeight) {
         viewport.scrollTop = bottom - viewHeight;
@@ -1152,7 +1153,7 @@ export function createTableGrid(
     const refreshFilterKey = JSON.stringify(collectFilters());
     const scrollTop = viewport.scrollTop;
     const pageStart =
-      Math.floor(scrollTop / ROW_HEIGHT / PAGE_SIZE) * PAGE_SIZE;
+      Math.floor(scrollTop / currentRowHeight() / PAGE_SIZE) * PAGE_SIZE;
     refreshBtn.disabled = true;
     refreshBtn.classList.add("spinning");
     isRefreshing = true;
@@ -2495,14 +2496,14 @@ export function createTableGrid(
       const viewHeight = viewport.clientHeight;
       const startRow = Math.max(
         0,
-        Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN,
+        Math.floor(scrollTop / currentRowHeight()) - OVERSCAN,
       );
       // setActiveCell が body 内インデックスを計算するために参照する。
       renderStartRow = startRow;
       // 編集モードでは末尾に新規行ドラフトを足すので表示行数が増える。
       const endRow = Math.min(
         displayRowCount(),
-        Math.ceil((scrollTop + viewHeight) / ROW_HEIGHT) + OVERSCAN,
+        Math.ceil((scrollTop + viewHeight) / currentRowHeight()) + OVERSCAN,
       );
 
       // ページ取得はデータ行 (< totalRows) の範囲だけ行う。
@@ -2547,7 +2548,7 @@ export function createTableGrid(
       body.innerHTML = "";
       selectedRowElement = null;
       activeCellElement = null;
-      body.style.transform = `translateY(${startRow * ROW_HEIGHT}px)`;
+      body.style.transform = `translateY(${startRow * currentRowHeight()}px)`;
 
       for (let i = startRow; i < endRow; i++) {
         body.appendChild(
@@ -2620,7 +2621,11 @@ export function createTableGrid(
       b.addEventListener("click", () => {
         // 1 画面ぶん (見えている最後の行が次の画面の先頭に残るよう 1 行引く)。
         viewport.scrollTop +=
-          direction * Math.max(ROW_HEIGHT, viewport.clientHeight - ROW_HEIGHT);
+          direction *
+          Math.max(
+            currentRowHeight(),
+            viewport.clientHeight - currentRowHeight(),
+          );
       });
       return b;
     };
@@ -2642,10 +2647,16 @@ export function createTableGrid(
     if (!pagerEl) return;
     const t = text().grid;
     const total = totalRows;
-    const first = Math.min(total, Math.floor(scrollTop / ROW_HEIGHT) + 1);
+    const first = Math.min(
+      total,
+      Math.floor(scrollTop / currentRowHeight()) + 1,
+    );
     const last = Math.min(
       total,
-      Math.max(first, Math.floor((scrollTop + viewHeight) / ROW_HEIGHT)),
+      Math.max(
+        first,
+        Math.floor((scrollTop + viewHeight) / currentRowHeight()),
+      ),
     );
     const key = `${t.pagerNext}:${first}:${last}:${total}`;
     if (key === pagerEl.shown) return;
@@ -2749,7 +2760,7 @@ export function createTableGrid(
     if (targetRowIndex >= 0) {
       await firstPage;
       selectedRowIndex = targetRowIndex;
-      viewport.scrollTop = Math.max(0, targetRowIndex * ROW_HEIGHT);
+      viewport.scrollTop = Math.max(0, targetRowIndex * currentRowHeight());
       renderViewport();
     }
   }
@@ -2831,7 +2842,18 @@ export function createTableGrid(
   body.addEventListener("compositionstart", onCompositionStart);
   body.addEventListener("compositionend", onCompositionEnd);
 
+  // 表示密度を変えると行の高さが変わるので、仮想表示の高さと位置を取り直す。
+  const densityObserver = new MutationObserver(() => {
+    syncSpacer();
+    renderViewport();
+  });
+  densityObserver.observe(document.body, {
+    attributes: true,
+    attributeFilter: ["data-sidebar-font-size"],
+  });
+
   function destroy() {
+    densityObserver.disconnect();
     clear();
     embeddedGrid?.destroy();
     embeddedGrid = null;
@@ -2960,7 +2982,7 @@ export function createTableGrid(
   }
 
   function syncSpacer(): void {
-    spacer.style.height = `${displayRowCount() * ROW_HEIGHT}px`;
+    spacer.style.height = `${displayRowCount() * currentRowHeight()}px`;
   }
 
   function setEditStatus(message: string): void {

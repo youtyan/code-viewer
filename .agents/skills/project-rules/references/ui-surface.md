@@ -28,7 +28,7 @@
 | 設定の節 (Help ページの設定) | `views/viewer-settings.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: general / appearance / agents / accounts / advanced) を 1 つ付ける (付けないと全部の分類に出る)。左の列・検索欄・見出しは `help-page.ts` が描く。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (分類も切り替わる) |
 | ⌘K のパレットの行き先 (ファイル以外) | `views/search-palette-ui.ts` の `PaletteCommand` (群 = projects / agents / sessions / actions。エージェントでないペインとシェルは sessions)。中身は `app.ts` の `paletteCommands()`、操作は `PALETTE_ACTIONS` (キー割り当てのある操作は `keymap` を書けばキーが右に出て、実行も同じ `dispatchKeymapAction`)。ファイルの絞り込み・grep の側には足さない |
 | 作業ツリーの一覧の行 | `views/worktree-view.ts`。何も選んでいないときは一覧だけの画面 (`body[data-worktree-overview]`、列は `--worktree-columns`)。行の「開く」はこのときだけ置き、選んだ後の狭い一覧は「…」だけ (選んだ瞬間にボタンを増やさない) |
-| Data の表の足元 | `views/database/table-grid.ts` の `db-grid-status` (件数) と `db-grid-pager` (見えている行の範囲と 1 画面ずつのページ送り)。表の行の高さ・列幅は TS (`ROW_HEIGHT`) が持つので、CSS は色と線だけ |
+| Data の表の足元 | `views/database/table-grid.ts` の `db-grid-status` (件数) と `db-grid-pager` (見えている行の範囲と 1 画面ずつのページ送り)。表の行の高さは表示密度の値 (`views/shell/row-height.ts` の `currentRowHeight`、CSS は `--ui-row-h`)、列幅は TS が持つので、CSS は色と線だけ |
 | アイコン SVG | `core/icons.ts` の path 定数 + `iconSvg(className, paths)` |
 
 `alert` / `confirm` / `prompt` は `biome.jsonc` が **error で落とす**ので、そもそも書けない。
@@ -95,7 +95,8 @@
 7. **行の高さは 2 種類だけ。どちらも名前で読み、別の数値で書かない。**
    - **一覧の行は `--ui-row-h`** (サイドバー・ファイルのツリー・目次・変更ファイル・セッションの一覧・
      全体ボードのプロジェクトの見出し・履歴の日付の見出し)。出所は `views/shell/row-height.ts`
-     (表示密度ごと)。ファイルのツリーの仮想表示もここを読む
+     (表示密度ごと)。ファイルのツリーの仮想表示もここを読む。Data の表 (`table-grid.ts` の仮想表示は
+     `currentRowHeight`、密度が変わると描き直す) と、Data の他の面の静的な表の行も同じ高さ
    - **表の行は `--ui-table-row-h`** (列を持つ行: 履歴のコミットの一覧・全体ボードのエージェントの行)。
      一覧の行より一段ゆったりさせ、列の文字が詰まって見えないようにする。仮想表示に使わないので
      出所は `style.css` の `html, body` ブロックだけ (`--space-unit` から作るので密度に比例する)。

@@ -18,3 +18,17 @@ export const ROW_HEIGHT: Record<ViewerFontSizeSetting, number> = {
 export function rowHeightFor(size: ViewerFontSizeSetting): number {
   return ROW_HEIGHT[size];
 }
+
+/**
+ * 今の表示密度の行の高さ。密度は applySidebarFontSize が body の
+ * data-sidebar-font-size に書く。まだ書かれていない (起動直後・テスト) ときは
+ * style.css の --ui-row-h の既定と同じ regular。知らない値は投げる。
+ */
+export function currentRowHeight(): number {
+  const size = document.body.dataset.sidebarFontSize;
+  if (size === undefined) return ROW_HEIGHT.regular;
+  if (!(size in ROW_HEIGHT)) {
+    throw new Error(`unknown display density on body: ${JSON.stringify(size)}`);
+  }
+  return ROW_HEIGHT[size as ViewerFontSizeSetting];
+}

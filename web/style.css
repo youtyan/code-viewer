@@ -10953,7 +10953,8 @@ body.journal-task-editor-resizing * {
 
 .db-grid-row {
   display: flex;
-  height: 28px;
+  /* 高さは table-grid.ts の仮想表示と同じ表示密度の値 (views/shell/row-height.ts)。 */
+  height: var(--ui-row-h);
   border-bottom: 1px solid var(--border);
   width: max-content;
   min-width: 100%;
@@ -10969,7 +10970,8 @@ body.journal-task-editor-resizing * {
   width: 180px;
   min-width: 80px;
   flex: 0 0 auto;
-  padding: 4px 8px;
+  /* 文字 (行の高さ 20px) を行の中で上下の真ん中に置く。行の下の線 1px を除く。 */
+  padding: calc((var(--ui-row-h) - 21px) / 2) var(--space-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -14059,6 +14061,11 @@ body.db-resizing {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+/* 並べ方の切替・並べ替え・New object は、左の列が狭い (既定の幅) と 1 行に
+   収まらず New object が右端で欠けた。収まらないときは次の行へ送る。 */
+.s3-options-row {
+  flex-wrap: wrap;
 }
 .s3-search-row[hidden],
 .s3-options-row[hidden] {
@@ -22338,8 +22345,8 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
    強い選択)、右に結果の表。表の面は --color-code、罫線は薄い線 1px、見出しは
    沈んだ面。行は縞にせず、選んだ行はわずかに明るく、選んだセルが主に分かる
    (面 + 2px の線)。データの状態の文字 (Ready など) は無彩色のまま。
-   **行の高さ・列の幅は table-grid.ts が持つ (ROW_HEIGHT・列幅の計算)。ここでは
-   寸法を変えず、面・線・文字の色だけを当てる** (ui-layout.md)。足元は行の範囲と
+   **行の高さは表示密度の値 (views/shell/row-height.ts。CSS は --ui-row-h)、列の幅は
+   table-grid.ts が持つ。ここでは寸法を変えず、面・線・文字の色だけを当てる** (ui-layout.md)。足元は行の範囲と
    ページ送り (1 画面ずつのスクロール)。 */
 .db-root {
   background: var(--color-doc);
