@@ -253,6 +253,54 @@ describe("the entry server", () => {
     expect(((await unknown.json()) as { code: string }).code).toBe(
       "unknown-project",
     );
+    // 知らない鍵の画面は、ただの 404 ではなく登録されていないことの案内。
+    const stranger = rootFileKey("/work/not-registered");
+    const pages = await Promise.all(
+      [`p/${stranger}`, `p/${stranger}/`, `p/${stranger}/history`].map(
+        async (path) => {
+          const res = await fetch(`${url}${path}`, { redirect: "manual" });
+          const body = await res.text();
+          return [
+            path,
+            res.status,
+            res.headers.get("content-type"),
+            body.includes("This project is not registered"),
+            body.includes("このプロジェクトは登録されていません"),
+            body.includes('<a href="/agents">'),
+            body.includes("code-viewer --cwd /path/to/repo"),
+          ];
+        },
+      ),
+    );
+    expect(pages).toEqual([
+      [
+        `p/${stranger}`,
+        404,
+        "text/html; charset=utf-8",
+        true,
+        true,
+        true,
+        true,
+      ],
+      [
+        `p/${stranger}/`,
+        404,
+        "text/html; charset=utf-8",
+        true,
+        true,
+        true,
+        true,
+      ],
+      [
+        `p/${stranger}/history`,
+        404,
+        "text/html; charset=utf-8",
+        true,
+        true,
+        true,
+        true,
+      ],
+    ]);
     // 裏は tmux・シェル・エージェントを受けない (入口が受ける)。
     const registry = JSON.parse(
       readFileSync(join(box.registryDir, `${key}.json`), "utf8"),

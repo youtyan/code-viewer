@@ -562,6 +562,38 @@ describe("main tabs view: 左右 2 面", () => {
     });
   });
 
+  test("2 面の右の面のボタンは 1 面に戻し、右のタブを左の末尾へ移して左の前面を残す", async () => {
+    const { handle, mount, current } = setup(async () => null);
+    await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
+    handle.openTerminal("shell-a1");
+    splitButton(mount)?.click();
+    const button = mount.querySelector<HTMLButtonElement>(
+      '.main-tabs-pane[data-side="right"] .main-tabs-action:nth-child(2)',
+    );
+    expect([button?.disabled, button?.getAttribute("aria-label")]).toEqual([
+      false,
+      "Back to one side (moves the right tabs to the left; a file already open on the left closes on the right)",
+    ]);
+    button?.click();
+    const kinds = [
+      ...mount.querySelectorAll<HTMLElement>(
+        '.main-tabs-pane[data-side="left"] .main-tab',
+      ),
+    ].map((tab) => tab.dataset.kind);
+    expect([panes(handle), kinds, current()]).toEqual([
+      {
+        split: false,
+        focused: "left",
+        routeSide: "left",
+        left: { kind: "page", page: "diff" },
+        right: undefined,
+      },
+      ["file", "page", "terminal"],
+      { screen: "diff", range },
+    ]);
+  });
+
   test("前面がファイルや画面のタブなら分割ボタンは押せない", async () => {
     const { handle, mount } = setup(async () => null);
     await handle.restore();

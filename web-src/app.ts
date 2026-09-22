@@ -45,7 +45,7 @@ import {
   focusMainPanel,
   focusSidebarPanel,
   isEditableKeyTarget,
-  isPageKeymapBlockedTarget,
+  isPageKeymapBlockedKey,
   keymapScope,
   prepareKeyboardPanels,
   setPanelFocusScope,
@@ -5812,7 +5812,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       {
         scope,
         editable: isEditableKeyTarget(targetEl),
-        pageKeymapBlocked: isPageKeymapBlockedTarget(targetEl),
+        pageKeymapBlocked: isPageKeymapBlockedKey(targetEl, e.metaKey),
         composing: isImeComposing(e),
         paletteOpen: isPaletteOpen(),
         pendingG:

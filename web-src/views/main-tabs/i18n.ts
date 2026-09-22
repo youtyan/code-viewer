@@ -18,6 +18,8 @@ export type MainTabsText = {
   stopSession: string;
   stopSessionTitle: string;
   splitUnavailable: string;
+  /** 2 面のときの右の面のボタン: 右のタブを左へ移して 1 面に戻す。 */
+  unsplit: string;
   resizeSplit: string;
   dropToSplit: string;
   /** 画像のタブのメニュー: そのファイルの履歴。 */
@@ -41,6 +43,8 @@ const EN: MainTabsText = {
     "End this shell (Close only hides the tab and keeps the shell running)",
   splitUnavailable:
     "Split right (a file, terminal or image tab in front, one side, and a window wide enough for two)",
+  unsplit:
+    "Back to one side (moves the right tabs to the left; a file already open on the left closes on the right)",
   resizeSplit: "Resize the two sides",
   dropToSplit: "Drop to split right",
   fileHistory: "File history",
@@ -64,6 +68,8 @@ const JA: MainTabsText = {
     "このシェルを終了します (閉じるはタブを隠すだけで、シェルは動き続けます)",
   splitUnavailable:
     "右に分割 (前面がファイル・ターミナル・画像のタブ・1 面・2 面が置ける窓の幅のときに使えます)",
+  unsplit:
+    "1 面に戻す (右のタブを左へ移します。左で開いているファイルは右を閉じます)",
   resizeSplit: "左右の幅を変える",
   dropToSplit: "ここに落とすと右に分割",
   fileHistory: "ファイルの履歴",

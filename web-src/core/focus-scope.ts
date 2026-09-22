@@ -13,16 +13,24 @@ export function isEditableKeyTarget(target: Element | null): boolean {
   );
 }
 
-// A terminal owns every key while it has focus. Modal dialogs do the same so
-// page-level shortcuts cannot run behind their local Escape / Enter / Tab
-// handling. The search palette is the one exception: Ctrl/Cmd+K and +G are
-// its documented mode-switch keys and are filtered by paletteOpen instead.
-export function isPageKeymapBlockedTarget(target: Element | null): boolean {
+// A terminal owns every key while it has focus, except keys with Meta (Cmd):
+// terminals on macOS do not use Cmd, so Cmd+K / Cmd+G still reach the page
+// keymap (Ctrl keys all stay in the terminal). Modal dialogs own every key,
+// Meta included, so page-level shortcuts cannot run behind their local
+// Escape / Enter / Tab handling. The search palette is not blocked: Ctrl/Cmd+K
+// and +G are its documented mode-switch keys and are filtered by paletteOpen.
+export function isPageKeymapBlockedKey(
+  target: Element | null,
+  metaKey: boolean,
+): boolean {
   if (!target || typeof target.closest !== "function") return false;
-  return (
-    target.closest(".xterm") !== null ||
-    target.closest('[role="dialog"]:not(.gdp-palette)') !== null
-  );
+  if (target.closest('[role="dialog"]:not(.gdp-palette)') !== null) return true;
+  return target.closest(".xterm") !== null && !metaKey;
+}
+
+/** 修飾キーを問わず塞がれる対象か (Meta の例外を含めない)。 */
+export function isPageKeymapBlockedTarget(target: Element | null): boolean {
+  return isPageKeymapBlockedKey(target, false);
 }
 
 export function keymapScope(target: Element | null): KeymapScope {

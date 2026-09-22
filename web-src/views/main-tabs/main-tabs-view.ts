@@ -59,6 +59,7 @@ import {
   type Tab,
   type TabTarget,
   tabMenu,
+  unsplit,
 } from "../../core/main-tabs";
 import type { AppRoute } from "../../core/routes";
 import { basenameOf } from "../../core/terminal-board";
@@ -357,11 +358,16 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const splitButton = document.createElement("button");
     splitButton.type = "button";
     splitButton.className = "main-tabs-action";
+    // 右の面は 2 面のときだけあるので、右の面のボタンは常に「1 面に戻す」。
     splitButton.innerHTML = iconSvg(
       "main-tabs-action-icon",
-      pageIconPaths("split"),
+      pageIconPaths(side === "right" ? "unsplit" : "split"),
     );
     splitButton.addEventListener("click", () => {
+      if (side === "right") {
+        changeAndGo(unsplit);
+        return;
+      }
       const front = frontOf(layout, "left");
       if (front && canSplitFront() && splitAllowed())
         changeAndGo((l) => splitRight(l, front.id));
@@ -976,9 +982,14 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       strip.setAttribute("aria-label", current.tabList);
       newButton.title = current.newTab;
       newButton.setAttribute("aria-label", current.newTab);
-      // 2 面のときと、狭くて置けないときは無効。
-      splitButton.disabled = !allowed;
-      const label = allowed ? current.splitRight : current.splitUnavailable;
+      // 左: 2 面のときと、狭くて置けないときは無効。右: 常に 1 面に戻せる。
+      splitButton.disabled = side === "left" && !allowed;
+      const label =
+        side === "right"
+          ? current.unsplit
+          : allowed
+            ? current.splitRight
+            : current.splitUnavailable;
       splitButton.title = label;
       splitButton.setAttribute("aria-label", label);
     }

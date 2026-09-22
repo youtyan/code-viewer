@@ -59,7 +59,8 @@
   <!-- 上の行は持たない: タブ列が最上段。プロジェクト名・ブランチと画面の入口
        (#view-head) は左の列の頭 (#left-head) に固定し、タブを切り替えても動かさない。
        利用者が左の列を畳んだときだけタブ列の左 (#tabs-lead) へ移す
-       (views/sidebar.ts の placeSidebarToggle)。 -->
+       (views/sidebar.ts の placeSidebarToggle)。畳んだ左の列は細い帯 (#left-rail)
+       になり、開くボタンだけを畳む前と同じ列の頭の右端に置く。 -->
   <div id="tabs-lead" class="tabs-lead">
     <button id="nav-expand" class="global-icon-action" type="button" title="show sidebar" aria-label="show sidebar" hidden><span class="goi-icon" aria-hidden="true"></span></button>
   </div>
@@ -84,6 +85,7 @@
         <a class="app-menu-item view-strip-item" data-route="journal" href="/journal"><span class="goi-icon" aria-hidden="true"></span></a>
       </nav>
     </div>
+    <div id="left-rail" class="left-rail"></div>
   </div>
   <!-- メインの面のタブ列 (最上段)。中身は views/main-tabs/main-tabs-view.ts。
        ファイル・各画面を開いたまま切り替える。高さは --main-tabs-h。 -->

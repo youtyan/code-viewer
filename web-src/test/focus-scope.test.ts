@@ -5,11 +5,13 @@ import {
   focusSidebarPanel,
   getPanelFocusScope,
   isEditableKeyTarget,
+  isPageKeymapBlockedKey,
   isPageKeymapBlockedTarget,
   keymapScope,
   restorePanelFocusScope,
   setPanelFocusScope,
 } from "../core/focus-scope";
+import { resolveKeymapAction } from "../core/keymap";
 
 function target(
   tagName: string,
@@ -73,6 +75,90 @@ describe("focus scope helpers", () => {
     ["ordinary button", {}, false],
   ])("blocks the page keymap for %s", (_name, closest, expected) => {
     expect(isPageKeymapBlockedTarget(target("BUTTON", closest))).toBe(expected);
+  });
+
+  // ターミナルは ⌘ (Meta) 付きのキーだけページの keymap に渡す。Ctrl は全部
+  // ターミナルへ。ダイアログは ⌘ も塞ぐ。
+  test.each([
+    {
+      name: "terminal Meta+K",
+      on: ".xterm",
+      key: "k",
+      ctrl: false,
+      meta: true,
+      action: "open-file-palette",
+    },
+    {
+      name: "terminal Meta+G",
+      on: ".xterm",
+      key: "g",
+      ctrl: false,
+      meta: true,
+      action: "open-grep-palette",
+    },
+    {
+      name: "terminal Ctrl+K",
+      on: ".xterm",
+      key: "k",
+      ctrl: true,
+      meta: false,
+      action: null,
+    },
+    {
+      name: "terminal Ctrl+C",
+      on: ".xterm",
+      key: "c",
+      ctrl: true,
+      meta: false,
+      action: null,
+    },
+    {
+      name: "terminal plain k",
+      on: ".xterm",
+      key: "k",
+      ctrl: false,
+      meta: false,
+      action: null,
+    },
+    {
+      name: "dialog Meta+K",
+      on: '[role="dialog"]:not(.gdp-palette)',
+      key: "k",
+      ctrl: false,
+      meta: true,
+      action: null,
+    },
+    {
+      name: "ordinary button Ctrl+K",
+      on: null,
+      key: "k",
+      ctrl: true,
+      meta: false,
+      action: "open-file-palette",
+    },
+  ])("$name reaches the page keymap as $action", ({
+    on,
+    key,
+    ctrl,
+    meta,
+    action,
+  }) => {
+    // xterm は textarea でキーを受ける (編集できる対象)。
+    const el = target("TEXTAREA", on ? { [on]: true } : {});
+    const event = {
+      key,
+      ctrlKey: ctrl,
+      metaKey: meta,
+      altKey: false,
+      shiftKey: false,
+    } as KeyboardEvent;
+    expect(
+      resolveKeymapAction(event, {
+        scope: "global",
+        editable: true,
+        pageKeymapBlocked: isPageKeymapBlockedKey(el, meta),
+      }),
+    ).toBe(action);
   });
 
   test("stores the active panel focus scope on the document body", () => {

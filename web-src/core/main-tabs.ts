@@ -539,6 +539,27 @@ export function moveToOtherSide(layout: Layout, id: string): Layout {
   return move(layout, id, other, dest.tabs.length).layout;
 }
 
+/**
+ * 1 面に戻す。右の面のタブを順に左の面の末尾へ移し、左に同じファイルがある
+ * ものは右を閉じる (ファイル以外の同じ中身は元から左右に 1 つ)。フォーカスと
+ * 前面は左の前面のまま。左に仮のタブがあれば、右から来た仮のタブは固定にする。
+ */
+export function unsplit(layout: Layout): Layout {
+  const right = layout.panes.right;
+  if (!right) return layout;
+  const left = layout.panes.left;
+  const hasPreview = left.tabs.some((tab) => tab.preview);
+  const moved = right.tabs
+    .filter((tab) => !left.tabs.some((t) => sameTarget(t.target, tab.target)))
+    .map((tab) =>
+      hasPreview && tab.preview ? { ...tab, preview: false } : tab,
+    );
+  return {
+    panes: { left: { ...left, tabs: [...left.tabs, ...moved] } },
+    focused: "left",
+  };
+}
+
 function stepTab(layout: Layout, delta: number): Layout {
   const pane = paneOf(layout, layout.focused) as Pane;
   if (pane.tabs.length === 0) return layout;

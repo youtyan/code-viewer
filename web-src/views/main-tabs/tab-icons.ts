@@ -9,6 +9,7 @@ import {
   PENCIL_16_PATH,
   PLUS_16_PATH,
   PULSE_16_PATH,
+  SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
   TERMINAL_16_PATHS,
   X_16_PATH,
@@ -19,7 +20,14 @@ export type PageIconPaths = string | string[];
 
 // repo はタブにしないが、Files の入口 (木の見出しの絵柄の列) が使う。
 const ICONS: Record<
-  PageKind | "repo" | "file" | "image" | "terminal" | "new" | "split",
+  | PageKind
+  | "repo"
+  | "file"
+  | "image"
+  | "terminal"
+  | "new"
+  | "split"
+  | "unsplit",
   PageIconPaths
 > = {
   repo: FOLDER_ICON_PATHS.closed,
@@ -35,6 +43,8 @@ const ICONS: Record<
   terminal: TERMINAL_16_PATHS,
   new: PLUS_16_PATH,
   split: SIDEBAR_SHOW_16_PATHS,
+  // 分割の逆 (矢印の向きが逆)。
+  unsplit: SIDEBAR_HIDE_16_PATHS,
 };
 
 export const CLOSE_ICON_PATH = X_16_PATH;

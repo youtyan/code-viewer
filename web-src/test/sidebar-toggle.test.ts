@@ -159,14 +159,16 @@ class FakeElement {
 function installFakeDom() {
   const body = new FakeElement("body");
   // 左の列の頭 (#left-head) の中のプロジェクト名・画面の入口 (#view-head) と、
-  // 名前の行 (.view-head-row)。利用者が左の列を畳んだときだけタブ列の左へ移る。
+  // 名前の行 (.view-head-row)。利用者が左の列を畳んだときだけタブ列の左へ移り、
+  // 左の列は細い帯 (#left-rail) になって開くボタンだけを置く。
   const tabsLead = new FakeElement("div", "tabs-lead");
   const leftHead = new FakeElement("div", "left-head");
   const viewHead = new FakeElement("div", "view-head");
   const nameRow = new FakeElement("div");
   nameRow.className = "view-head-row";
   viewHead.appendChild(nameRow);
-  leftHead.appendChild(viewHead);
+  const rail = new FakeElement("div", "left-rail");
+  leftHead.append(viewHead, rail);
   const topbar = new FakeElement("div", "topbar");
   const sidebar = new FakeElement("aside", "sidebar");
   const sidebarHead = new FakeElement("div");
@@ -196,6 +198,7 @@ function installFakeDom() {
     leftHead,
     viewHead,
     nameRow,
+    rail,
     sidebar,
     sidebarHead,
     topbar,
@@ -285,7 +288,8 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
 
 // 名前・ブランチ・画面の入口は左の列の頭に固定し、画面を切り替えても動かさない。
 // 動くのは利用者が左の列を畳んだとき (タブ列の左へ) だけ。木を畳む / 出す
-// ボタンは、どちらでも名前の行の右端 (ツールバーやタブ列へは行かない)。
+// ボタンは左の列の頭の右端: 出ているときは名前の行、畳んだときは左の列の細い帯
+// (ツールバーやタブ列へは行かない)。
 describe("project name and view entries placement", () => {
   test.each([
     {
@@ -293,20 +297,23 @@ describe("project name and view entries placement", () => {
       hidden: false,
       screenHidesTree: false,
       host: "leftHead" as const,
+      toggleHost: "nameRow" as const,
     },
     {
       name: "a screen without its own list: still the head of the left column",
       hidden: false,
       screenHidesTree: true,
       host: "leftHead" as const,
+      toggleHost: "nameRow" as const,
     },
     {
-      name: "the user folded the column: the tab row's lead",
+      name: "the user folded the column: the tab row's lead, and the toggle on the rail",
       hidden: true,
       screenHidesTree: false,
       host: "tabsLead" as const,
+      toggleHost: "rail" as const,
     },
-  ])("$name", ({ hidden, screenHidesTree, host }) => {
+  ])("$name", ({ hidden, screenHidesTree, host, toggleHost }) => {
     const dom = installFakeDom();
     dom.sidebar.visible = !screenHidesTree;
     const sidebar = createSidebarForTest({ sidebarHidden: hidden });
@@ -314,13 +321,13 @@ describe("project name and view entries placement", () => {
     expect([
       dom.viewHead.parentElement === dom[host],
       document.querySelector<HTMLElement>("#sidebar-toggle")?.parentElement ===
-        (dom.nameRow as unknown as HTMLElement),
+        (dom[toggleHost] as unknown as HTMLElement),
     ]).toEqual([true, true]);
   });
 });
 
 describe("sidebar toggle placement", () => {
-  test("keeps the toggle in the name row even when a repo toolbar exists", () => {
+  test("keeps the toggle in the left column even when a repo toolbar exists", () => {
     const dom = installFakeDom();
     const state = { sidebarHidden: false };
     const sidebar = createSidebarForTest(state);
@@ -331,7 +338,7 @@ describe("sidebar toggle placement", () => {
     sidebar.applySidebarHidden(true);
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");
     expect([
-      toggle?.parentElement === (dom.nameRow as unknown as HTMLElement),
+      toggle?.parentElement === (dom.rail as unknown as HTMLElement),
       dom.viewHead.parentElement === dom.tabsLead,
       toggle?.offsetParent === null,
       toggle?.getAttribute("aria-pressed"),
@@ -380,7 +387,7 @@ describe("sidebar toggle placement", () => {
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");
     expect([
       toggle === null,
-      toggle?.parentElement === (dom.nameRow as unknown as HTMLElement),
+      toggle?.parentElement === (dom.rail as unknown as HTMLElement),
       toggle?.offsetParent === null,
       toggle?.innerHTML.includes("<svg"),
     ]).toEqual([false, true, false, true]);
@@ -392,11 +399,11 @@ describe("sidebar toggle placement", () => {
     dom.tabsLead.remove();
     const sidebar = createSidebarForTest({ sidebarHidden: false });
     expect(() => sidebar.placeSidebarToggle()).toThrow(
-      "view head: missing #view-head, #view-head .view-head-row, #left-head, #tabs-lead in index.html",
+      "view head: missing #view-head, #view-head .view-head-row, #left-head, #left-rail, #tabs-lead in index.html",
     );
   });
 
-  test("empty history pane keeps the toggle in the name row after clearing repo DOM", () => {
+  test("empty history pane keeps the toggle on the rail after clearing repo DOM", () => {
     const dom = installFakeDom();
     const state = { sidebarHidden: false };
     const sidebar = createSidebarForTest(state);
@@ -446,7 +453,7 @@ describe("sidebar toggle placement", () => {
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");
     expect([
       toggle === null,
-      toggle?.parentElement === (dom.nameRow as unknown as HTMLElement),
+      toggle?.parentElement === (dom.rail as unknown as HTMLElement),
       toggle?.offsetParent === null,
       toggle?.getAttribute("aria-pressed"),
       toggle?.innerHTML.includes("<svg"),

@@ -85,6 +85,7 @@ import {
 } from "./entry-file";
 import { createEntryProjects, type EntryProjects } from "./projects";
 import { isConnectionFailure, proxyToBackend } from "./proxy";
+import { unknownProjectPage } from "./unknown-project-page";
 
 const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
   .version as string;
@@ -659,6 +660,8 @@ async function handleProjectPath(
   const rest = match[2];
   const found = await ctx.projects.lookup(key);
   if (found.status === "unknown") {
+    // 画面 (HTML) は案内のページ、API は理由つきの JSON。
+    if (!rest || isAppEntryPath(rest)) return unknownProjectPage(key);
     return errorJson(
       404,
       "unknown-project",

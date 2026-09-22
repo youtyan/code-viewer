@@ -21,13 +21,19 @@ import {
   splitRight,
   type TabTarget,
   tabMenu,
+  unsplit,
 } from "../core/main-tabs";
 
-// 配置を短く書くための準備。"a" はファイル a、"~a" は画像 a、"@diff" は page の
-// diff (id も diff)、"*b" は仮のタブ b、"[c]" は選択中。右の面に置けないのは
-// page だけ。検証したい中身はテストの表に見えるまま残す。
+// 配置を短く書くための準備。"a" はファイル a、"~a" は画像 a、"$s" はシェル s
+// (id も s。表示では id だけ)、
+// "@diff" は page の diff (id も diff)、"*b" は仮のタブ b、"[c]" は選択中。右の面に
+// 置けないのは page だけ。検証したい中身はテストの表に見えるまま残す。
 const file = (path: string): TabTarget => ({ kind: "file", path });
 const image = (path: string): TabTarget => ({ kind: "image", path });
+const terminal = (session: string): TabTarget => ({
+  kind: "terminal",
+  session,
+});
 const page = (name: "diff" | "history"): TabTarget => ({
   kind: "page",
   page: name,
@@ -42,12 +48,14 @@ function pane(spec: string) {
       const bare = raw.replace(/[[\]]/g, "");
       const preview = bare.startsWith("*");
       const named = bare.replace("*", "");
-      const name = named.replace(/^[~@]/, "");
+      const name = named.replace(/^[~@$]/, "");
       const target = named.startsWith("~")
         ? image(name)
-        : named.startsWith("@")
-          ? page(name as "diff" | "history")
-          : file(name);
+        : named.startsWith("$")
+          ? terminal(name)
+          : named.startsWith("@")
+            ? page(name as "diff" | "history")
+            : file(name);
       return { id: name, target, preview, active };
     });
   const activeId = tabs.find((tab) => tab.active)?.id ?? null;
@@ -83,6 +91,27 @@ function show(layout: Layout): string {
     ? `${one(layout.panes.left)} | ${one(layout.panes.right)} (${layout.focused})`
     : `${one(layout.panes.left)} (${layout.focused})`;
 }
+
+/**
+ * 右の面のタブの id に -r を付けて、左右の同じファイルの id がぶつからない
+ * ようにする。
+ */
+const withRightIds = (layout: Layout): Layout => {
+  const right = layout.panes.right;
+  if (!right) return layout;
+  const rename = (id: string) => `${id}-r`;
+  return {
+    ...layout,
+    panes: {
+      ...layout.panes,
+      right: {
+        tabs: right.tabs.map((tab) => ({ ...tab, id: rename(tab.id) })),
+        activeId: right.activeId ? rename(right.activeId) : null,
+        recent: right.recent.map(rename),
+      },
+    },
+  };
+};
 
 const ids = () => {
   let n = 0;
@@ -178,24 +207,7 @@ describe("open", () => {
   });
 
   // 左右で同じファイルを開ける。面を指定しないときは、フォーカスのある面 →
-  // 反対の面の順に同じものを探して前面に出す。右の面のタブの id には -r を
-  // 付けて、左右の同じファイルの id がぶつからないようにする。
-  const withRightIds = (layout: Layout): Layout => {
-    const right = layout.panes.right;
-    if (!right) return layout;
-    const rename = (id: string) => `${id}-r`;
-    return {
-      ...layout,
-      panes: {
-        ...layout.panes,
-        right: {
-          tabs: right.tabs.map((tab) => ({ ...tab, id: rename(tab.id) })),
-          activeId: right.activeId ? rename(right.activeId) : null,
-          recent: right.recent.map(rename),
-        },
-      },
-    };
-  };
+  // 反対の面の順に同じものを探して前面に出す。
   test.each([
     {
       name: "面を指定すれば、反対の面にあっても指定した面に開く (左右に同じファイル)",
@@ -673,6 +685,67 @@ describe("分割", () => {
     const after = run(before);
     assertLayout(after);
     expect(show(after)).toBe(expected);
+  });
+});
+
+describe("1 面に戻す (unsplit)", () => {
+  // 右の面のタブを順に左の面の末尾へ移す。左に同じファイルがあるものは右を
+  // 閉じる。フォーカスと前面は左の前面のまま。
+  test.each([
+    {
+      name: "右のタブを順に左の末尾へ移し、左の前面とフォーカスを残す",
+      before: { ...layoutOf("[a] b", "c [d]"), focused: "right" as const },
+      expected: "[a] b c d (left)",
+    },
+    {
+      name: "左に同じファイルがあるものは右を閉じる",
+      before: withRightIds(layoutOf("[a] b", "[a] c")),
+      expected: "[a] b c (left)",
+    },
+    {
+      name: "右がシェル・画像・ファイルの混在でも並びを保つ (同じファイルだけ閉じる)",
+      before: {
+        ...withRightIds(layoutOf("[@diff] a", "$sh ~img [a] b")),
+        focused: "right" as const,
+      },
+      expected: "[diff] a sh-r ~img b (left)",
+    },
+    {
+      name: "左が何も選んでいなければ選ばないまま (本文の既定)",
+      before: { ...layoutOf("", "[~b] $sh"), focused: "right" as const },
+      expected: "~b sh (left)",
+    },
+    {
+      name: "左に仮のタブがあれば、右から来た仮のタブは固定にする",
+      before: layoutOf("*a [b]", "[*c]"),
+      expected: "*a [b] c (left)",
+    },
+    {
+      name: "左に仮のタブが無ければ、右の仮のタブは仮のまま移る",
+      before: layoutOf("[a]", "[*c]"),
+      expected: "[a] *c (left)",
+    },
+    {
+      name: "1 面なら何もしない",
+      before: layoutOf("[a] b"),
+      expected: "[a] b (left)",
+    },
+  ])("$name", ({ before, expected }) => {
+    const after = unsplit(before);
+    assertLayout(after);
+    expect(show(after)).toBe(expected);
+  });
+
+  test("左右の幅の比を持たなくなる", () => {
+    const after = unsplit(setSplit(layoutOf("[a]", "[b]"), 0.3));
+    expect(after.split).toBeUndefined();
+  });
+
+  test("入力の状態を書き換えない", () => {
+    const before = layoutOf("[a]", "[b]");
+    const copy = structuredClone(before);
+    unsplit(before);
+    expect(before).toEqual(copy);
   });
 });
 

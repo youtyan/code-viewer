@@ -294,26 +294,29 @@ export function createSidebar(deps: SidebarDeps) {
    * 木を畳む / 出すボタンと、プロジェクト名・ブランチ・画面の入口 (#view-head)
    * の置き場所。名前と入口は左の列の頭 (#left-head) に固定し、タブや画面を
    * 切り替えても動かさない。利用者が左の列を畳んだときだけ、タブ列の左
-   * (#tabs-lead) へ移す。ボタンはどちらでも名前の行の右端。
+   * (#tabs-lead) へ移す。ボタンは出ているときは名前の行の右端、畳んだときは
+   * 左の列の細い帯 (#left-rail) の頭 (どちらも左の列の頭の右端)。
    */
   function placeSidebarToggle() {
     const head = document.querySelector<HTMLElement>("#view-head");
     const row = head?.querySelector<HTMLElement>(".view-head-row") ?? null;
     const leftHead = document.querySelector<HTMLElement>("#left-head");
+    const rail = document.querySelector<HTMLElement>("#left-rail");
     const lead = document.querySelector<HTMLElement>("#tabs-lead");
-    if (!head || !row || !leftHead || !lead)
+    if (!head || !row || !leftHead || !rail || !lead)
       throw new Error(
         `view head: missing ${[
           ["#view-head", head],
           ["#view-head .view-head-row", row],
           ["#left-head", leftHead],
+          ["#left-rail", rail],
           ["#tabs-lead", lead],
         ]
           .filter(([, el]) => !el)
           .map(([name]) => name)
           .join(", ")} in index.html`,
       );
-    attachSidebarToggle(row);
+    attachSidebarToggle(STATE.sidebarHidden ? rail : row);
     const host = STATE.sidebarHidden ? lead : leftHead;
     if (head.parentElement !== host) host.append(head);
     placeSidebarFilter();

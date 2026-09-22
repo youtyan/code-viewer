@@ -391,10 +391,11 @@ html, body {
   /* 左の列 (タブ列の下・左のサイドバーの右の固定の列)。頭に名前・ブランチ・
      画面の入口 (#left-head)、その下に画面ごとの一覧を出す: History / Worktrees
      (選んでいる間) は一覧パネル、それ以外は #sidebar (その画面の一覧か Files の
-     木)。利用者が畳んだとき (gdp-sidebar-hidden) だけ幅 0。頭の高さは名前の行と
-     絵柄の行の 2 段 (密度に比例)。 */
+     木)。利用者が畳んだとき (gdp-sidebar-hidden) だけ細い帯 (--leftcol-rail-w、
+     開くボタン 1 つ分の実寸) になる。頭の高さは名前の行と絵柄の行の 2 段 (密度に比例)。 */
   --leftcol-w: var(--sidebar-w);
   --leftcol-shown: var(--leftcol-w);
+  --leftcol-rail-w: 28px;
   --left-head-h: calc(var(--space-3) + var(--ui-control-sm) * 2 + var(--space-1) + var(--space-2));
   --left-body-top: calc(var(--global-header-h) + var(--left-head-h));
   /* 本文 (route の中身: ツールバー・#content・面の箱) の左右の端。左の列の右から。
@@ -419,13 +420,13 @@ html, body {
 }
 
 /* 左の列の幅: 一覧パネルを左の列に置く画面 (History・選んでいる Worktrees) は
-   その一覧の幅。利用者が畳んだときだけ 0 (T2 の上書き。body で決める)。 */
+   その一覧の幅。利用者が畳んだときだけ細い帯の幅 (T2 の上書き。body で決める)。 */
 body.gdp-history-page,
 body.gdp-worktree-page:not([data-worktree-overview]) {
   --leftcol-w: var(--history-w);
 }
 body.gdp-sidebar-hidden {
-  --leftcol-shown: 0px;
+  --leftcol-shown: var(--leftcol-rail-w);
 }
 
 /* 左右 2 面: 本文は左の面に収める (route のタブは左にしか置けない。T2 の上書き。body で決める)。 */
@@ -17732,8 +17733,22 @@ button.brand[aria-expanded="true"] {
      削られ、History で列が広がると畳むボタンが 1px 動く)。 */
   box-shadow: inset -1px 0 0 var(--color-line-soft);
 }
+/* 畳んだ左の列は細い帯。名前・入口はタブ列の左へ移り、帯には開くボタン
+   (#left-rail の中) だけを、畳む前と同じ高さ・同じ列の右端に置く。 */
 body.gdp-sidebar-hidden #left-head {
+  width: var(--leftcol-shown);
+  height: auto;
+  bottom: var(--chrome-bottom);
+  padding: var(--space-3) 0 0;
+}
+.left-rail {
   display: none;
+}
+body.gdp-sidebar-hidden .left-rail {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: var(--ui-control-sm);
 }
 #left-head > #view-head {
   flex-direction: column;
@@ -17755,7 +17770,7 @@ body.gdp-sidebar-hidden #left-head {
   min-width: 0;
   max-width: 100%;
 }
-/* 木を畳む / 出すボタンは名前の行の右端 (畳んだときはタブ列の左の同じ行)。 */
+/* 木を畳むボタンは名前の行の右端 (畳んだときの開くボタンは #left-rail)。 */
 .view-head-row > #sidebar-toggle {
   order: 2;
   flex: none;
@@ -17783,9 +17798,6 @@ body.gdp-sidebar-hidden #left-head {
 }
 .tabs-lead .project-branch {
   font-size: var(--ui-font-sm);
-}
-.tabs-lead > #sidebar-toggle {
-  flex: none;
 }
 
 /* ---- 最下段の右の操作 (上の行の右端から移したもの) ---- */
