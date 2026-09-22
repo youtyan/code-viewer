@@ -11,9 +11,9 @@
 //   時刻・どのフック・どのサーバ・理由を残す。設定画面がここを読む
 //
 // 送り先は入口のサーバ (entry.json) と、サーバ登録簿の 1 つで完結するサーバ
-// (`--standalone` と古い版)。入口の裏のプロセス (登録簿の backend) は状態を
-// 持たないので送らない。同じ tmux ペインを複数のサーバが見ているので、
-// 1 つにだけ送ると状態が食い違う。
+// (`--standalone`)。入口の裏のプロセス (登録簿の backend) は状態を持たない
+// ので送らない。入口・単体サーバとも起動ごとの本人確認が一致した相手だけに
+// 送る。古い版のように token / version が無い相手へ prompt を渡さない。
 
 import {
   type AgentHookFailure,
@@ -23,9 +23,16 @@ import {
 import type { AgentEvent } from "../../core/agent-state";
 import { formatErrorDetail } from "../../core/error-detail";
 import { extractErrorDetail } from "../cli-helpers";
-import { liveEntryUrl } from "../entry/entry-file";
+import {
+  type EntryIdentityVerification,
+  type EntryRecord,
+  isEntryToken,
+  liveEntryRecord,
+  verifyServerIdentity,
+} from "../entry/entry-file";
 import {
   listServerRegistry,
+  parseServerRegistryUrl,
   registryDir,
   type ServerRegistryListing,
 } from "../server-registry";
@@ -41,10 +48,19 @@ export type HookReportDeps = {
   now(): number;
   env: Record<string, string | undefined>;
   listServers(): ServerRegistryListing;
-  /** 動いている入口の URL。無ければ null。読めなければ投げる。 */
-  entryUrl(): string | null;
+  /** 動いている入口の記録。無ければ null。読めなければ投げる。 */
+  entryRecord(): EntryRecord | null;
+  verifyIdentity(target: ReportTarget): Promise<EntryIdentityVerification>;
   post(url: string, body: unknown, signal: AbortSignal): Promise<Response>;
   recordFailure(failure: AgentHookFailure): void;
+};
+
+export type ReportTarget = {
+  url: string;
+  pid: number;
+  token?: string;
+  version?: string;
+  role: "entry" | "standalone";
 };
 
 export type HookReportOutcome =
@@ -133,9 +149,9 @@ export async function reportAgentHook(
       detail: formatErrorDetail(broken.error),
     });
   }
-  let entry: string | null = null;
+  let entry: EntryRecord | null = null;
   try {
-    entry = deps.entryUrl();
+    entry = deps.entryRecord();
   } catch (error) {
     fail({
       hookEvent,
@@ -145,8 +161,8 @@ export async function reportAgentHook(
       detail: formatErrorDetail(error),
     });
   }
-  const urls = reportTargets(listing, entry);
-  if (urls.length === 0) {
+  const targets = reportTargets(listing, entry);
+  if (targets.length === 0) {
     fail({
       hookEvent,
       event,
@@ -157,6 +173,46 @@ export async function reportAgentHook(
     return { kind: "failed", failures };
   }
 
+  const verified: ReportTarget[] = [];
+  await Promise.all(
+    targets.map(async (reportTarget) => {
+      let verification: EntryIdentityVerification;
+      try {
+        verification = await deps.verifyIdentity(reportTarget);
+      } catch (error) {
+        fail({
+          hookEvent,
+          event,
+          target,
+          server: reportTarget.url,
+          stage: "identity",
+          detail: formatErrorDetail(error),
+        });
+        return;
+      }
+      if (verification.status === "ok") {
+        verified.push(reportTarget);
+        return;
+      }
+      const detail =
+        verification.status === "dead"
+          ? `registered pid ${reportTarget.pid} is no longer running`
+          : verification.status === "unreachable"
+            ? `identity endpoint did not answer:\n${formatErrorDetail(verification.error)}`
+            : verification.detail;
+      fail({
+        hookEvent,
+        event,
+        target,
+        server: reportTarget.url,
+        stage: "identity",
+        detail,
+      });
+    }),
+  );
+  if (verified.length === 0) return { kind: "failed", failures };
+
+  // 本人確認が終わる前は、送信先ごとの処理にも prompt 本文を作らない。
   const prompt =
     event === "prompt" && typeof input.prompt === "string"
       ? input.prompt.slice(0, MAX_PROMPT_LENGTH)
@@ -171,7 +227,8 @@ export async function reportAgentHook(
   const reached: string[] = [];
   const refused: string[] = [];
   await Promise.all(
-    urls.map(async (url) => {
+    verified.map(async (reportTarget) => {
+      const { url } = reportTarget;
       try {
         const res = await deps.post(
           `${url}/_agent/state`,
@@ -220,20 +277,60 @@ export async function reportAgentHook(
 }
 
 /**
- * 申告と「読んだ」の送り先: 入口と、登録簿のうち裏のプロセスでないもの。
- * 同じ URL は 1 つ (末尾の `/` なし)。
+ * 申告の候補: 入口と、登録簿のうち裏のプロセスでないもの。同じ URL は 1 つ
+ * (末尾の `/` なし)。この後 `verifyReportTargetIdentity` を通った候補だけに送る。
  */
 export function reportTargets(
   listing: ServerRegistryListing,
-  entryUrl: string | null,
-): string[] {
-  const urls = new Set<string>();
-  if (entryUrl) urls.add(entryUrl.replace(/\/+$/, ""));
+  entry: EntryRecord | null,
+): ReportTarget[] {
+  const targets = new Map<string, ReportTarget>();
+  if (entry) {
+    const url = parseServerRegistryUrl(entry.url).href.replace(/\/$/, "");
+    targets.set(url, { ...entry, url, role: "entry" });
+  }
   for (const server of listing.servers) {
     if (server.backend) continue;
-    urls.add(server.url.replace(/\/+$/, ""));
+    const url = parseServerRegistryUrl(server.url).href.replace(/\/$/, "");
+    if (targets.has(url)) continue;
+    targets.set(url, {
+      url,
+      pid: server.pid,
+      token: server.token,
+      version: server.version,
+      role: "standalone",
+    });
   }
-  return [...urls];
+  return [...targets.values()];
+}
+
+export function verifyReportTargetIdentity(
+  target: ReportTarget,
+): Promise<EntryIdentityVerification> {
+  const mismatches: string[] = [];
+  if (!target.version) {
+    mismatches.push("version mismatch: the registry has no version");
+  }
+  if (!isEntryToken(target.token)) {
+    mismatches.push(
+      "token mismatch: the registry has no valid per-start token",
+    );
+  }
+  if (mismatches.length > 0) {
+    return Promise.resolve({
+      status: "invalid",
+      detail: `the server at ${target.url} failed identity verification:\n${mismatches.map((reason) => `- ${reason}`).join("\n")}`,
+    });
+  }
+  return verifyServerIdentity(
+    {
+      url: target.url,
+      pid: target.pid,
+      token: target.token,
+      version: target.version,
+    },
+    target.role,
+  );
 }
 
 /**
@@ -275,7 +372,8 @@ export function defaultHookReportDeps(
     now: () => Date.now(),
     env: process.env,
     listServers: listServerRegistry,
-    entryUrl: () => liveEntryUrl(),
+    entryRecord: () => liveEntryRecord(),
+    verifyIdentity: verifyReportTargetIdentity,
     post: postToServer,
     recordFailure,
   };

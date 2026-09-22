@@ -16,6 +16,7 @@ import {
   liveEntryUrl,
   readEntryRecord,
   removeEntryRecord,
+  verifyServerIdentity,
   writeEntryRecord,
 } from "../server/entry/entry-file";
 import { createEntryProjects } from "../server/entry/projects";
@@ -87,6 +88,34 @@ describe("entry.json", () => {
     expect(acquireEntryStartLock(Date.now(), file)).toBeNull();
     first?.release();
     expect(acquireEntryStartLock(Date.now(), file)).not.toBeNull();
+  });
+
+  test("identity verification reports every mismatch without exposing tokens", async () => {
+    const verification = await verifyServerIdentity(
+      record,
+      "entry",
+      async () =>
+        new Response(
+          JSON.stringify({
+            role: "standalone",
+            pid: process.pid + 1,
+            token: "fedcba9876543210",
+            version: "0.0.0",
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+    );
+
+    expect(verification.status).toBe("invalid");
+    if (verification.status !== "invalid") {
+      throw new Error("expected invalid identity");
+    }
+    expect(verification.detail).toContain("role mismatch");
+    expect(verification.detail).toContain("pid mismatch");
+    expect(verification.detail).toContain("token mismatch");
+    expect(verification.detail).toContain("version mismatch");
+    expect(verification.detail).not.toContain(record.token);
+    expect(verification.detail).not.toContain("fedcba9876543210");
   });
 });
 

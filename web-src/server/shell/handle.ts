@@ -25,7 +25,7 @@ import {
   closeShellSession,
   createShellSession,
   describeShellAvailability,
-  listShellSessions,
+  listShellSessionsForMatching,
   resizeShell,
   subscribeShell,
   writeToShell,
@@ -140,7 +140,10 @@ function createShellStreamResponse(id: ShellSessionId): Response {
 async function handleList(): Promise<Response> {
   const availability = await describeShellAvailability();
   if (availability.available) {
-    return json({ available: true, sessions: listShellSessions() });
+    return json({
+      available: true,
+      sessions: await listShellSessionsForMatching(),
+    });
   }
   return json({
     available: false,

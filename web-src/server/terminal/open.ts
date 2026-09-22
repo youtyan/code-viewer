@@ -19,7 +19,9 @@ import type { TmuxPaneId } from "../../core/tmux";
 import {
   closeShellSession,
   createShellSession,
-  listShellSessions,
+  findShellSessionForTmuxSession,
+  listShellSessionsForMatching,
+  rememberShellTmuxAttachment,
   writeToShellWhenReady,
 } from "../shell/session";
 import { findClientByTty, listTmuxClients } from "../tmux/clients";
@@ -48,15 +50,18 @@ export type OpenTmuxPaneResult =
 /**
  * その tmux セッションを映しているシェルを探す。
  *
+ * code-viewer 自身が接続した宛先は SessionEntry に覚えてあり、呼出側が TTY の
+ * 照合より先に見る。ここは、手動で接続したシェルも見つけるための TTY 経路。
+ *
  * シェルの端末 (tty) が tmux のクライアントとして繋がっていて、そのクライアント
  * が目的のセッションを見ていれば、それがそのセッションのシェル。tty を引けな
  * かったシェルは数えない (空文字どうしが一致して無関係な端末を掴む)。
  */
-function findShellForSession(
+async function findShellForSession(
   session: string,
   clients: Parameters<typeof findClientByTty>[0],
-): ShellSession | null {
-  for (const shell of listShellSessions()) {
+): Promise<ShellSession | null> {
+  for (const shell of await listShellSessionsForMatching()) {
     if (shell.exited || !shell.tty) continue;
     const client = findClientByTty(clients, shell.tty);
     if (client?.session === session) return shell;
@@ -84,11 +89,20 @@ export async function openTmuxPaneInShell(
     return selected;
   }
 
+  const remembered = findShellSessionForTmuxSession(session);
+  if (remembered) {
+    rememberShellTmuxAttachment(remembered.id, session, paneId);
+    return { status: "ok", session: remembered, action: "switched" };
+  }
+
   const listed = await listTmuxClients(cwd);
   if (listed.status === "gone") return { status: "gone" };
   if (listed.status === "error") return listed;
-  const existing = findShellForSession(session, listed.clients);
-  if (existing) return { status: "ok", session: existing, action: "switched" };
+  const existing = await findShellForSession(session, listed.clients);
+  if (existing) {
+    rememberShellTmuxAttachment(existing.id, session, paneId);
+    return { status: "ok", session: existing, action: "switched" };
+  }
 
   const created = await createShellSession(cwd, size);
   if (created.status !== "ok") return created;
@@ -114,5 +128,6 @@ export async function openTmuxPaneInShell(
     }
     return written;
   }
+  rememberShellTmuxAttachment(created.session.id, session, paneId);
   return { status: "ok", session: created.session, action: "attached" };
 }

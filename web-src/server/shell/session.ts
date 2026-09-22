@@ -85,6 +85,10 @@ type SessionEntry = {
     data: string;
     resolve(result: ShellWriteResult): void;
   }>;
+  /** code-viewer がこのシェルから接続した tmux の宛先。TTY がまだ空でも使う。 */
+  tmuxAttachment: { session: string; pane: string } | null;
+  /** 同じ空TTYを同時に問い合わせないための、進行中の再取得。 */
+  ttyRefresh: Promise<void> | null;
 };
 
 const sessions = new Map<ShellSessionId, SessionEntry>();
@@ -128,15 +132,15 @@ function resolveShellCommand(): string {
   return process.env.SHELL || "/bin/sh";
 }
 
-/** ps が応答しないときに待ち続けない。ローカルの ps は数 ms で返る。 */
+/** spawn 直後に TTY が見えるまで待つ上限。ps 自体の上限も残り時間に揃える。 */
 const PS_TIMEOUT_MS = 2000;
 
 /**
  * この PTY の端末デバイス名を引く。
  *
  * node-pty は tty 名を公開していないので、PTY の「中」で動いているプロセス
- * の側から ps で引く。PTY を作った時点で端末は確定しているので、spawn 直後に
- * 1 度だけ引けばよい (以後は変わらない)。
+ * の側から ps で引く。spawn 直後は `?` のことがあるため短く再試行する。
+ * 端末名そのものは一度取れれば変わらない。
  *
  * ps が返すのは `ttys012` や `pts/3` のような /dev を落とした形なので、
  * tmux の `#{client_tty}` と同じ絶対パスに揃える。端末を持たないプロセスは
@@ -145,12 +149,16 @@ const PS_TIMEOUT_MS = 2000;
  * `ps` の実行自体が失敗した場合は、端末を特定できなかった事実を呼出側へ返す。
  * 端末を持たないことを表す正常な `?` / `??` だけは空文字として扱う。
  */
-async function resolvePtyTty(pid: number, cwd: string): Promise<string> {
+async function queryPtyTty(
+  pid: number,
+  cwd: string,
+  timeout: number,
+): Promise<string> {
   try {
     const result = await runAsync(
       ["ps", "-o", "tty=", "-p", String(pid)],
       cwd,
-      { timeout: PS_TIMEOUT_MS },
+      { timeout },
     );
     if (result.code !== 0) {
       const details = [
@@ -168,10 +176,71 @@ async function resolvePtyTty(pid: number, cwd: string): Promise<string> {
   }
 }
 
+async function resolvePtyTty(pid: number, cwd: string): Promise<string> {
+  const deadline = Date.now() + PS_TIMEOUT_MS;
+  while (true) {
+    const tty = await queryPtyTty(pid, cwd, Math.max(1, deadline - Date.now()));
+    if (tty) return tty;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return "";
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, Math.min(50, remaining));
+      timer.unref?.();
+    });
+  }
+}
+
 export function listShellSessions(): ShellSession[] {
   return [...sessions.values()]
     .map((entry) => entry.meta)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+async function refreshSessionTty(entry: SessionEntry): Promise<void> {
+  if (entry.meta.tty || entry.meta.exited) return;
+  if (entry.ttyRefresh) return entry.ttyRefresh;
+  const refresh = queryPtyTty(
+    entry.pty.pid,
+    entry.meta.cwd,
+    PS_TIMEOUT_MS,
+  ).then((tty) => {
+    if (tty) entry.meta.tty = tty;
+  });
+  entry.ttyRefresh = refresh;
+  try {
+    await refresh;
+  } finally {
+    if (entry.ttyRefresh === refresh) entry.ttyRefresh = null;
+  }
+}
+
+/** shownInShell を突き合わせる直前に、まだ空のTTYを毎回取り直す。 */
+export async function listShellSessionsForMatching(): Promise<ShellSession[]> {
+  await Promise.all([...sessions.values()].map(refreshSessionTty));
+  return listShellSessions();
+}
+
+/** 同じ tmux セッションへ code-viewer が既に接続したシェルを先に探す。 */
+export function findShellSessionForTmuxSession(
+  session: string,
+): ShellSession | null {
+  for (const entry of sessions.values()) {
+    if (!entry.meta.exited && entry.tmuxAttachment?.session === session) {
+      return entry.meta;
+    }
+  }
+  return null;
+}
+
+/** attach/select が成功した後だけ、サーバ内の接続先を更新する。 */
+export function rememberShellTmuxAttachment(
+  id: ShellSessionId,
+  session: string,
+  pane: string,
+): void {
+  const entry = sessions.get(id);
+  if (!entry || entry.meta.exited) return;
+  entry.tmuxAttachment = { session, pane };
 }
 
 export function getShellSession(id: ShellSessionId): ShellSession | null {
@@ -261,8 +330,8 @@ export async function createShellSession(
       rows,
       exited: false,
       exitCode: null,
-      // 端末は PTY を作った時点で確定しているので、ここで 1 度引けば足りる。
-      // このシェルの中で tmux を起動したとき、これが宛先になる。
+      // このシェルの中で tmux を起動したとき、これが宛先になる。まだ空なら
+      // shownInShell の照合時に取り直し、値を得た時点で meta に覚える。
       tty,
     },
     pty: child,
@@ -273,6 +342,8 @@ export async function createShellSession(
     exitListeners: new Set(),
     ready: false,
     queued: [],
+    tmuxAttachment: null,
+    ttyRefresh: null,
   };
 
   child.onData((chunk) => {

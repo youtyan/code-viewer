@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   closeShellSession: vi.fn(),
   createShellSession: vi.fn(),
-  listShellSessions: vi.fn(),
+  findShellSessionForTmuxSession: vi.fn(),
+  listShellSessionsForMatching: vi.fn(),
+  rememberShellTmuxAttachment: vi.fn(),
   writeToShellWhenReady: vi.fn(),
   listTmuxClients: vi.fn(),
   resolvePaneSession: vi.fn(),
@@ -13,7 +15,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../server/shell/session", () => ({
   closeShellSession: mocks.closeShellSession,
   createShellSession: mocks.createShellSession,
-  listShellSessions: mocks.listShellSessions,
+  findShellSessionForTmuxSession: mocks.findShellSessionForTmuxSession,
+  listShellSessionsForMatching: mocks.listShellSessionsForMatching,
+  rememberShellTmuxAttachment: mocks.rememberShellTmuxAttachment,
   writeToShellWhenReady: mocks.writeToShellWhenReady,
 }));
 
@@ -52,12 +56,38 @@ describe("openTmuxPaneInShell", () => {
     });
     mocks.selectTmuxPane.mockResolvedValue({ status: "ok" });
     mocks.listTmuxClients.mockResolvedValue({ status: "ok", clients: [] });
-    mocks.listShellSessions.mockReturnValue([]);
+    mocks.listShellSessionsForMatching.mockResolvedValue([]);
+    mocks.findShellSessionForTmuxSession.mockReturnValue(null);
     mocks.createShellSession.mockResolvedValue({
       status: "ok",
       session: SESSION,
     });
     mocks.closeShellSession.mockResolvedValue({ status: "ok" });
+  });
+
+  test("opening two panes in one tmux session keeps one browser shell", async () => {
+    let attached: ShellSession | null = null;
+    mocks.findShellSessionForTmuxSession.mockImplementation(() => attached);
+    mocks.rememberShellTmuxAttachment.mockImplementation(() => {
+      attached = SESSION;
+    });
+    mocks.writeToShellWhenReady.mockResolvedValue({ status: "ok" });
+
+    await expect(openTmuxPaneInShell("%1", "/sample")).resolves.toMatchObject({
+      status: "ok",
+      action: "attached",
+    });
+    await expect(openTmuxPaneInShell("%2", "/sample")).resolves.toMatchObject({
+      status: "ok",
+      action: "switched",
+    });
+
+    expect(mocks.createShellSession).toHaveBeenCalledTimes(1);
+    expect(mocks.rememberShellTmuxAttachment).toHaveBeenCalledWith(
+      SESSION.id,
+      "sample-session",
+      "%1",
+    );
   });
 
   test("returns a delayed shell write failure instead of reporting success", async () => {

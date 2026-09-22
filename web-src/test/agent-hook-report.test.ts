@@ -20,6 +20,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { AGENT_HOOK_MARKER, type AgentHookFailure } from "../core/agent-hooks";
+import type {
+  EntryIdentityVerification,
+  EntryRecord,
+} from "../server/entry/entry-file";
 import type { ServerRegistryEntry } from "../server/server-registry";
 import {
   type HookReportDeps,
@@ -38,9 +42,30 @@ const REPO_ROOT = join(
   "..",
 );
 const CLI_BUNDLE = join(REPO_ROOT, "dist", "code-viewer.js");
+const PACKAGE_VERSION = JSON.parse(
+  readFileSync(join(REPO_ROOT, "package.json"), "utf8"),
+).version as string;
+const SAMPLE_TOKEN = "0123456789abcdef";
+
+function makeEntryRecord(url: string): EntryRecord {
+  return {
+    url: `${url.replace(/\/+$/, "")}/`,
+    pid: process.pid,
+    token: SAMPLE_TOKEN,
+    version: PACKAGE_VERSION,
+    started_at: "2026-01-01T00:00:00.000Z",
+  };
+}
 
 function server(url: string): ServerRegistryEntry {
-  return { url, pid: process.pid, root: "/repo", started_at: "2026-01-01" };
+  return {
+    url,
+    pid: process.pid,
+    root: "/repo",
+    started_at: "2026-01-01",
+    token: SAMPLE_TOKEN,
+    version: PACKAGE_VERSION,
+  };
 }
 
 type Posted = { url: string; body: Record<string, unknown> };
@@ -50,7 +75,8 @@ function fakeDeps(options: {
   registryErrors?: { file: string; error: unknown }[];
   respond?: (url: string) => Promise<Response>;
   env?: Record<string, string>;
-  entryUrl?: () => string | null;
+  entryRecord?: () => EntryRecord | null;
+  verifyIdentity?: () => Promise<EntryIdentityVerification>;
 }): { deps: HookReportDeps; posted: Posted[]; failures: AgentHookFailure[] } {
   const posted: Posted[] = [];
   const failures: AgentHookFailure[] = [];
@@ -64,7 +90,9 @@ function fakeDeps(options: {
         servers: options.servers ?? [],
         errors: options.registryErrors ?? [],
       }),
-      entryUrl: options.entryUrl ?? (() => null),
+      entryRecord: options.entryRecord ?? (() => null),
+      verifyIdentity:
+        options.verifyIdentity ?? (async () => ({ status: "ok" })),
       post: async (url, body) => {
         posted.push({ url, body: body as Record<string, unknown> });
         return options.respond
@@ -103,7 +131,9 @@ describe("reportAgentHook", () => {
   });
 
   test("sends the prompt text with a prompt", async () => {
-    const { deps, posted } = fakeDeps({ servers: [server("http://a")] });
+    const { deps, posted } = fakeDeps({
+      servers: [server("http://127.0.0.1:64001/")],
+    });
     await reportAgentHook(
       "codex",
       JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "fix it" }),
@@ -119,15 +149,17 @@ describe("reportAgentHook", () => {
   test("one failing server does not stop the others", async () => {
     const { deps, posted, failures } = fakeDeps({
       servers: [
-        server("http://ok"),
-        server("http://bad"),
-        server("http://down"),
+        server("http://127.0.0.1:64002/"),
+        server("http://127.0.0.1:64003/"),
+        server("http://127.0.0.1:64004/"),
       ],
       respond: async (url) => {
-        if (url.startsWith("http://bad")) {
+        if (url.startsWith("http://127.0.0.1:64003")) {
           return new Response("invalid target", { status: 400 });
         }
-        if (url.startsWith("http://down")) throw new Error("connect refused");
+        if (url.startsWith("http://127.0.0.1:64004")) {
+          throw new Error("connect refused");
+        }
         return new Response("{}", { status: 200 });
       },
     });
@@ -137,8 +169,8 @@ describe("reportAgentHook", () => {
     expect(
       failures.map((item) => [item.server, item.stage, item.detail]).sort(),
     ).toEqual([
-      ["http://bad", "report", "Error: HTTP 400: invalid target"],
-      ["http://down", "report", "Error: connect refused"],
+      ["http://127.0.0.1:64003", "report", "Error: HTTP 400: invalid target"],
+      ["http://127.0.0.1:64004", "report", "Error: connect refused"],
     ]);
     for (const failure of failures) {
       expect(failure).toMatchObject({
@@ -160,14 +192,14 @@ describe("reportAgentHook", () => {
     },
     {
       name: "broken JSON input",
-      options: { servers: [server("http://a")] },
+      options: { servers: [server("http://127.0.0.1:64001/")] },
       stdin: "{",
       stage: "input",
       detail: "could not read the hook input",
     },
     {
       name: "non-object input",
-      options: { servers: [server("http://a")] },
+      options: { servers: [server("http://127.0.0.1:64001/")] },
       stdin: "[]",
       stage: "input",
       detail: "not a JSON object",
@@ -186,7 +218,7 @@ describe("reportAgentHook", () => {
     const secret = "sample-secret-value";
     const stdin = `{"prompt":"${secret}"`;
     const { deps, failures } = fakeDeps({
-      servers: [server("http://a")],
+      servers: [server("http://127.0.0.1:64001/")],
     });
     await reportAgentHook("claude", stdin, deps);
     expect(failures[0]?.detail).not.toContain(secret);
@@ -200,9 +232,12 @@ describe("reportAgentHook", () => {
       }),
     });
     const { deps, failures } = fakeDeps({
-      servers: [server("http://ok"), server("http://gone")],
+      servers: [
+        server("http://127.0.0.1:64002/"),
+        server("http://127.0.0.1:64005/"),
+      ],
       respond: async (url) => {
-        if (url.startsWith("http://gone")) throw refused;
+        if (url.startsWith("http://127.0.0.1:64005")) throw refused;
         return new Response("{}", { status: 200 });
       },
     });
@@ -210,7 +245,7 @@ describe("reportAgentHook", () => {
     expect(outcome).toEqual({
       kind: "reported",
       event: "stop",
-      servers: ["http://ok"],
+      servers: ["http://127.0.0.1:64002"],
     });
     expect(failures).toEqual([]);
   });
@@ -220,7 +255,10 @@ describe("reportAgentHook", () => {
       cause: { code: "ECONNREFUSED" },
     });
     const { deps, failures } = fakeDeps({
-      servers: [server("http://gone-a"), server("http://gone-b")],
+      servers: [
+        server("http://127.0.0.1:64006/"),
+        server("http://127.0.0.1:64007/"),
+      ],
       respond: async () => {
         throw refused;
       },
@@ -229,12 +267,14 @@ describe("reportAgentHook", () => {
     expect(outcome.kind).toBe("failed");
     expect(failures).toHaveLength(1);
     expect(failures[0]?.stage).toBe("no-server");
-    expect(failures[0]?.detail).toContain("http://gone-a, http://gone-b");
+    expect(failures[0]?.detail).toContain(
+      "http://127.0.0.1:64006, http://127.0.0.1:64007",
+    );
   });
 
   test("an unreadable registry entry is recorded and the rest still get it", async () => {
     const { deps, posted, failures } = fakeDeps({
-      servers: [server("http://a")],
+      servers: [server("http://127.0.0.1:64001/")],
       registryErrors: [{ file: "/reg/x.json", error: new Error("bad json") }],
     });
     await reportAgentHook("claude", STOP, deps);
@@ -261,7 +301,7 @@ describe("reportAgentHook", () => {
     { name: "a malformed pane id", stdin: STOP, env: { TMUX_PANE: "7;x" } },
   ])("skips without contacting servers: $name", async ({ stdin, env }) => {
     const { deps, posted, failures } = fakeDeps({
-      servers: [server("http://a")],
+      servers: [server("http://127.0.0.1:64001/")],
       env,
     });
     const outcome = await reportAgentHook("claude", stdin, deps);
@@ -306,8 +346,32 @@ describe("launcher -> CLI (real processes)", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  async function startServer(name: string): Promise<number> {
+  async function startIdentityServer(
+    name: string,
+    options: {
+      registryIdentity?: boolean;
+      identity?: {
+        role?: string;
+        pid?: number;
+        token?: string;
+        version?: string;
+      };
+    } = {},
+  ): Promise<number> {
     const item = createServer((req, res) => {
+      if (req.method === "GET" && req.url === "/_entry") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            role: "standalone",
+            pid: process.pid,
+            token: SAMPLE_TOKEN,
+            version: PACKAGE_VERSION,
+            ...options.identity,
+          }),
+        );
+        return;
+      }
       let text = "";
       req.on("data", (chunk: Buffer) => {
         text += chunk.toString("utf8");
@@ -329,6 +393,9 @@ describe("launcher -> CLI (real processes)", () => {
         pid: process.pid,
         root: `/sample/${name}`,
         started_at: "2026-01-01T00:00:00Z",
+        ...(options.registryIdentity === false
+          ? {}
+          : { token: SAMPLE_TOKEN, version: PACKAGE_VERSION }),
       }),
       "utf8",
     );
@@ -358,7 +425,10 @@ describe("launcher -> CLI (real processes)", () => {
   }
 
   test("one report reaches both servers", async () => {
-    const ports = [await startServer("one"), await startServer("two")];
+    const ports = [
+      await startIdentityServer("one"),
+      await startIdentityServer("two"),
+    ];
     const result = await runHook("claude", STOP);
     expect(result.code).toBe(0);
     expect(received.map((item) => item.port).sort()).toEqual(ports.sort());
@@ -370,6 +440,45 @@ describe("launcher -> CLI (real processes)", () => {
       });
     }
     expect(readHookFailures(launcher.failureLog).total).toBe(0);
+  });
+
+  test("does not send prompt text when the registered pid and listener identity differ", async () => {
+    const prompt = "sample-sensitive-text";
+    await startIdentityServer("different-process", {
+      identity: { pid: process.pid + 1 },
+    });
+
+    const result = await runHook(
+      "codex",
+      JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt }),
+    );
+
+    expect(result.code).toBe(0);
+    expect(received).toEqual([]);
+    const failures = readHookFailures(launcher.failureLog);
+    expect(failures.recent[0]?.detail).toContain("pid mismatch");
+    expect(readFileSync(launcher.failureLog, "utf8")).not.toContain(prompt);
+  });
+
+  test("sends to a standalone server whose registry and endpoint identity match", async () => {
+    const port = await startIdentityServer("matching-identity");
+
+    const result = await runHook("claude", STOP);
+
+    expect(result.code).toBe(0);
+    expect(received.map((item) => item.port)).toEqual([port]);
+    expect(readHookFailures(launcher.failureLog).total).toBe(0);
+  });
+
+  test("does not send to an old registry without an identity and records the version mismatch", async () => {
+    await startIdentityServer("old-registry", { registryIdentity: false });
+
+    const result = await runHook("claude", STOP);
+
+    expect(result.code).toBe(0);
+    expect(received).toEqual([]);
+    const failures = readHookFailures(launcher.failureLog);
+    expect(failures.recent[0]?.detail).toContain("version mismatch");
   });
 
   test("with no server it exits 0 at once and logs why", async () => {
@@ -439,12 +548,17 @@ describe("where hook reports go", () => {
     ],
   ] as const)("%s", (_label, entryUrl, servers, expected) => {
     expect(
-      reportTargets({ servers: [...servers], errors: [] }, entryUrl),
+      reportTargets(
+        { servers: [...servers], errors: [] },
+        entryUrl ? makeEntryRecord(entryUrl) : null,
+      ).map((target) => target.url),
     ).toEqual(expected);
   });
 
   test("a report reaches the entry server even with no registered server", async () => {
-    const { deps, posted, failures } = fakeDeps({ entryUrl: () => entry });
+    const { deps, posted, failures } = fakeDeps({
+      entryRecord: () => makeEntryRecord(entry),
+    });
     const outcome = await reportAgentHook(
       "claude",
       JSON.stringify({ hook_event_name: "Stop" }),
@@ -462,7 +576,7 @@ describe("where hook reports go", () => {
   test("an unreadable entry record is recorded, and the registered servers still get the report", async () => {
     const { deps, posted, failures } = fakeDeps({
       servers: [standalone],
-      entryUrl: () => {
+      entryRecord: () => {
         throw new Error("entry.json is not valid JSON");
       },
     });

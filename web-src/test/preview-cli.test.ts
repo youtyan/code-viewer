@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   unlinkSync,
   utimesSync,
@@ -18,17 +19,23 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import type { RepoTreeResponse } from "../core/types";
+import {
+  readServerRegistry,
+  serverRegistryFilePath,
+} from "../server/server-registry";
 import { supportsNativeRecursiveWatch } from "../server/worktree-watcher";
 import { runGit as git } from "./_git-fixture";
 
 /** 配布物と同じバンドル。vitest の globalSetup が焼いてある。 */
-const CLI_BUNDLE = join(
+const REPO_ROOT = join(
   fileURLToPath(new URL(".", import.meta.url)),
   "..",
   "..",
-  "dist",
-  "code-viewer.js",
 );
+const CLI_BUNDLE = join(REPO_ROOT, "dist", "code-viewer.js");
+const PACKAGE_VERSION = JSON.parse(
+  readFileSync(join(REPO_ROOT, "package.json"), "utf8"),
+).version as string;
 
 const tmpRoots: string[] = [];
 
@@ -368,6 +375,42 @@ async function refreshPreview(url: string): Promise<Response> {
 }
 
 describe("preview CLI", () => {
+  test("a standalone server publishes the same private identity in its registry and endpoint", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-identity-"));
+    tmpRoots.push(root);
+    const preview = await startTestPreview(root, makeFakeMissingGitCommand());
+
+    try {
+      const response = await fetchWithTimeout(
+        new URL("/_entry", preview.url).href,
+        3000,
+      );
+      expect(response.status).toBe(200);
+      const identity = (await response.json()) as Record<string, unknown>;
+      let registered = readServerRegistry(realpathSync(root));
+      const deadline = Date.now() + 3000;
+      while (!registered && Date.now() < deadline) {
+        await sleep(10);
+        registered = readServerRegistry(realpathSync(root));
+      }
+
+      expect(registered).not.toBeNull();
+      expect(identity).toMatchObject({
+        role: "standalone",
+        pid: registered?.pid,
+        token: registered?.token,
+        version: PACKAGE_VERSION,
+      });
+      expect(registered?.version).toBe(PACKAGE_VERSION);
+      expect(registered?.token).toMatch(/^[0-9a-f]{16}$/);
+      expect(
+        statSync(serverRegistryFilePath(realpathSync(root))).mode & 0o777,
+      ).toBe(0o600);
+    } finally {
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
   test.each([
     {
       ref: "worktree",

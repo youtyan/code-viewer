@@ -12,6 +12,10 @@ export type ServerRegistryEntry = {
   pid: number;
   root: string;
   started_at: string;
+  /** 起動ごとに作る本人確認 token。古い登録には無い。 */
+  token?: string;
+  /** `/_entry` が返す版と突き合わせる。古い登録には無い。 */
+  version?: string;
   /**
    * code-viewer が起こしたサーバ (作業ツリーやプロジェクトを開いたとき)。
    * 利用者が自分で起動したサーバには無い。一覧から止めてよいかの判定に使う。
@@ -77,6 +81,33 @@ export function writeServerRegistry(entry: ServerRegistryEntry): void {
   );
 }
 
+/** 登録簿から外向き通信に使ってよい、ローカル HTTP のルート URL。 */
+export function parseServerRegistryUrl(value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch (error) {
+    throw errorWithCause("server registry contains an invalid URL", error);
+  }
+  if (
+    url.protocol !== "http:" ||
+    url.hostname !== "127.0.0.1" ||
+    !url.port ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error("server registry URL must be an HTTP loopback root URL");
+  }
+  const port = Number(url.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("server registry URL has an invalid port");
+  }
+  return url;
+}
+
 function parseServerRegistryEntry(
   raw: unknown,
   label: string,
@@ -99,10 +130,18 @@ function parseServerRegistryEntry(
       `invalid server registry for ${label}: missing required fields`,
     );
   }
+  parseServerRegistryUrl(entry.url);
   for (const flag of ["launched", "backend"] as const) {
     if (entry[flag] !== undefined && typeof entry[flag] !== "boolean") {
       throw new Error(
         `invalid server registry for ${label}: ${flag} is not a boolean`,
+      );
+    }
+  }
+  for (const field of ["token", "version"] as const) {
+    if (entry[field] !== undefined && typeof entry[field] !== "string") {
+      throw new Error(
+        `invalid server registry for ${label}: ${field} is not a string`,
       );
     }
   }
@@ -111,6 +150,8 @@ function parseServerRegistryEntry(
     pid: entry.pid as number,
     root: entry.root,
     started_at: entry.started_at,
+    ...(typeof entry.token === "string" ? { token: entry.token } : {}),
+    ...(typeof entry.version === "string" ? { version: entry.version } : {}),
     ...(entry.launched === true ? { launched: true } : {}),
     ...(entry.backend === true ? { backend: true } : {}),
   };

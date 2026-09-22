@@ -27,6 +27,7 @@ import { createLinkedAbortController } from "../abort";
 import { isEntryToken } from "../entry/entry-file";
 import {
   acquireServerStartLock,
+  parseServerRegistryUrl,
   readServerRegistry,
   removeServerRegistry,
   type ServerRegistryEntry,
@@ -128,32 +129,6 @@ function registryKey(path: string): string {
     if (errno(error) === "ENOENT") return path;
     throw error;
   }
-}
-
-function registryUrl(entry: ServerRegistryEntry): URL {
-  let url: URL;
-  try {
-    url = new URL(entry.url);
-  } catch (error) {
-    throw errorWithCause("server registry contains an invalid URL", error);
-  }
-  if (
-    url.protocol !== "http:" ||
-    url.hostname !== "127.0.0.1" ||
-    !url.port ||
-    url.username ||
-    url.password ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash
-  ) {
-    throw new Error("server registry URL must be an HTTP loopback root URL");
-  }
-  const port = Number(url.port);
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error("server registry URL has an invalid port");
-  }
-  return url;
 }
 
 function settingsIdentity(value: unknown): SettingsResponse["server"] | null {
@@ -352,7 +327,7 @@ export function createWorktreeServerController(
     }
     let url: URL;
     try {
-      url = registryUrl(entry);
+      url = parseServerRegistryUrl(entry.url);
       if (!processAlive(entry.pid)) return { status: "absent" };
     } catch (error) {
       return { status: "invalid", error };

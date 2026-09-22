@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -3045,6 +3046,11 @@ function closeSseClients() {
 }
 
 parseCli();
+// 単体サーバを登録簿の URL や pid だけで信用しないための、起動ごとの本人確認。
+// 登録簿は 0600 で保存され、HTTP 側は同じ値を `/_entry` から返す。
+const standaloneIdentityToken = backendMode
+  ? null
+  : randomBytes(8).toString("hex");
 // code-viewer が起こしたサーバか (worktree/open.ts)。読んだらすぐ消す。残すと
 // このサーバのブラウザシェルから利用者が起動したサーバにまで引き継がれる。
 const launchedByCodeViewer = process.env[LAUNCHED_BY_ENV] === "code-viewer";
@@ -3069,6 +3075,18 @@ const server = await startServer({
   async fetch(req) {
     if (!requestAllowed(req)) return text("forbidden", 403);
     const url = new URL(req.url);
+    if (url.pathname === "/_entry") {
+      if (backendMode || standaloneIdentityToken === null) {
+        return text("not found", 404);
+      }
+      if (req.method !== "GET") return text("method not allowed", 405);
+      return json({
+        role: "standalone",
+        pid: process.pid,
+        token: standaloneIdentityToken,
+        version: VERSION,
+      });
+    }
     if (url.pathname === "/_entry/adopt") return handleEntryAdopt(req);
     const staticResponse = staticFile(url.pathname);
     if (staticResponse) return staticResponse;
@@ -3254,6 +3272,9 @@ writeServerRegistry({
   pid: process.pid,
   root: cwd,
   started_at: new Date().toISOString(),
+  ...(standaloneIdentityToken === null
+    ? {}
+    : { token: standaloneIdentityToken, version: VERSION }),
   ...(launchedByCodeViewer ? { launched: true } : {}),
   ...(backendMode ? { backend: true } : {}),
 });

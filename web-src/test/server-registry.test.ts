@@ -83,6 +83,41 @@ describe("server registry errors", () => {
     expect(statSync(serverRegistryFilePath(root)).ino).not.toBe(inode);
   });
 
+  test("keeps a standalone identity in a private registry file", () => {
+    const root = "/sample/identity-repository";
+    const entry = {
+      url: "http://127.0.0.1:4321/",
+      pid: process.pid,
+      root,
+      started_at: "2026-08-11T00:00:00.000Z",
+      token: "0123456789abcdef",
+      version: "1.0.0",
+    };
+
+    writeServerRegistry(entry);
+
+    expect(readServerRegistry(root)).toEqual(entry);
+    expect(statSync(serverRegistryFilePath(root)).mode & 0o777).toBe(0o600);
+  });
+
+  test("rejects a registry URL outside the IPv4 loopback root", () => {
+    const root = "/sample/non-loopback-repository";
+    writeFileSync(
+      serverRegistryFilePath(root),
+      JSON.stringify({
+        url: "http://example.invalid/",
+        pid: process.pid,
+        root,
+        started_at: "2026-08-11T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    expect(() => readServerRegistry(root)).toThrow(
+      "server registry URL must be an HTTP loopback root URL",
+    );
+  });
+
   test("allows only one live start lock and releases it by owner token", () => {
     const root = "/sample/repository";
     const first = acquireServerStartLock(root, 1_000);

@@ -43,6 +43,20 @@ export function isEntryToken(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{16}$/.test(value);
 }
 
+export type ServerIdentityRole = "entry" | "standalone";
+
+export type ServerIdentityRecord = {
+  url: string;
+  pid: number;
+  token: string;
+  version: string;
+};
+
+export type ServerIdentityRequest = (
+  url: string,
+  signal: AbortSignal,
+) => Promise<Response>;
+
 /** 起動ロックを古いとみなす時間。入口の起動 (待ち受けまで) より十分長く。 */
 const ENTRY_START_LOCK_STALE_MS = 30_000;
 
@@ -126,21 +140,24 @@ export function entryProcessAlive(entry: EntryRecord): boolean {
   return processAlive(entry.pid);
 }
 
-/** pid・token・version が entry.json と HTTP 本人確認の両方で一致するか。 */
-export async function verifyEntryIdentity(
-  entry: EntryRecord,
+/** pid・token・version が登録と HTTP 本人確認の両方で一致するか。 */
+export async function verifyServerIdentity(
+  expected: ServerIdentityRecord,
+  role: ServerIdentityRole,
+  request: ServerIdentityRequest = (url, signal) =>
+    fetch(url, { redirect: "error", signal }),
 ): Promise<EntryIdentityVerification> {
-  if (!entryProcessAlive(entry)) return { status: "dead" };
+  if (!processAlive(expected.pid)) return { status: "dead" };
   const identityAbort = createLinkedAbortController(
     undefined,
     ENTRY_IDENTITY_TIMEOUT_MS,
   );
   let response: Response;
   try {
-    response = await fetch(new URL("_entry", entry.url), {
-      redirect: "error",
-      signal: identityAbort.signal,
-    });
+    response = await request(
+      new URL("_entry", expected.url).href,
+      identityAbort.signal,
+    );
   } catch (error) {
     return { status: "unreachable", error };
   } finally {
@@ -152,7 +169,13 @@ export async function verifyEntryIdentity(
   } catch (error) {
     return {
       status: "invalid",
-      detail: `the entry server at ${entry.url} returned ${response.status} that is not JSON:\n${formatErrorDetail(error)}`,
+      detail: `the server at ${expected.url} returned HTTP ${response.status} with an identity that is not JSON:\n${formatErrorDetail(error)}`,
+    };
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return {
+      status: "invalid",
+      detail: `the server at ${expected.url} failed identity verification:\n- response mismatch: expected an object (HTTP ${response.status})`,
     };
   }
   const identity = body as {
@@ -161,19 +184,50 @@ export async function verifyEntryIdentity(
     token?: unknown;
     version?: unknown;
   };
-  if (
-    !response.ok ||
-    identity.role !== "entry" ||
-    identity.pid !== entry.pid ||
-    identity.token !== entry.token ||
-    identity.version !== entry.version
-  ) {
+  const mismatches: string[] = [];
+  if (!response.ok) {
+    mismatches.push(`HTTP status mismatch: received ${response.status}`);
+  }
+  if (identity.role !== role) {
+    mismatches.push(`role mismatch: expected ${role}`);
+  }
+  if (identity.pid !== expected.pid) {
+    mismatches.push(
+      `pid mismatch: expected ${expected.pid}, received ${String(identity.pid)}`,
+    );
+  }
+  if (identity.token !== expected.token) {
+    mismatches.push("token mismatch");
+  }
+  if (identity.version !== expected.version) {
+    mismatches.push(
+      `version mismatch: expected ${expected.version}, received ${String(identity.version)}`,
+    );
+  }
+  if (mismatches.length > 0) {
     return {
       status: "invalid",
-      detail: `the server at ${entry.url} is not the entry server recorded for pid ${entry.pid} (HTTP ${response.status}: ${JSON.stringify(body)})`,
+      detail: `the server at ${expected.url} failed identity verification:\n${mismatches.map((reason) => `- ${reason}`).join("\n")}`,
     };
   }
   return { status: "ok" };
+}
+
+/** entry.json 用の後方互換 wrapper。 */
+export function verifyEntryIdentity(
+  entry: EntryRecord,
+): Promise<EntryIdentityVerification> {
+  return verifyServerIdentity(entry, "entry");
+}
+
+/** 動いている入口の記録。読めない記録は理由を投げる。 */
+export function liveEntryRecord(
+  path: string = entryFilePath(),
+): EntryRecord | null {
+  const read = readEntryRecord(path);
+  if (read.ok === false) throw new Error(read.error);
+  const entry = read.registry;
+  return entry && entryProcessAlive(entry) ? entry : null;
 }
 
 /**
@@ -182,10 +236,8 @@ export async function verifyEntryIdentity(
  * 呼び出し側が要求して確かめる。
  */
 export function liveEntryUrl(path: string = entryFilePath()): string | null {
-  const read = readEntryRecord(path);
-  if (read.ok === false) throw new Error(read.error);
-  const entry = read.registry;
-  if (!entry || !entryProcessAlive(entry)) return null;
+  const entry = liveEntryRecord(path);
+  if (!entry) return null;
   return entry.url.replace(/\/+$/, "");
 }
 

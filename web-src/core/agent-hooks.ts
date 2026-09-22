@@ -445,7 +445,7 @@ export type AgentHookFailure = {
   target: string;
   /** 届かなかったサーバ。サーバを探す前の失敗なら空。 */
   server: string;
-  /** どの段階か (input / registry / no-server / report / launch / log)。 */
+  /** どの段階か (input / registry / identity / no-server / report / launch / log)。 */
   stage: string;
   detail: string;
 };

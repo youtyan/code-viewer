@@ -41,7 +41,7 @@ import {
   projectRegistryPath,
   projectRegistrySnapshot,
 } from "../projects/registry";
-import { listShellSessions } from "../shell/session";
+import { listShellSessionsForMatching } from "../shell/session";
 import { listTmuxClients } from "../tmux/clients";
 import { listTmuxPanes } from "../tmux/panes";
 import { runningServerResult } from "../worktree/open";
@@ -65,7 +65,7 @@ export type AgentOverviewDeps = {
   /** terminal/activity.ts が最後に巡回を完了した時刻。 */
   activityObservedAt(): number;
   observationErrors(): AgentStateObservationError[];
-  listShells(): ShellSession[];
+  listShells(): ShellSession[] | Promise<ShellSession[]>;
   listClients(): Promise<
     | { status: "ok"; clients: TmuxClient[] }
     | { status: "error"; error: unknown }
@@ -149,7 +149,7 @@ export async function buildAgentOverview(
   let paneToShell = new Map<string, string>();
   if (clients.status === "ok") {
     paneToShell = linkShellsAndPanes(
-      deps.listShells(),
+      await deps.listShells(),
       clients.clients,
     ).paneToShell;
   } else {
@@ -352,7 +352,7 @@ export function defaultAgentOverviewDeps(cwd: string): AgentOverviewDeps {
     listStates: listAgentStates,
     activityObservedAt: agentActivityObservedAt,
     observationErrors: getAgentActivityErrors,
-    listShells: listShellSessions,
+    listShells: listShellSessionsForMatching,
     listClients: async () => {
       const result = await listTmuxClients(cwd);
       if (result.status === "error") return result;

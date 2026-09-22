@@ -13,7 +13,7 @@
 // 自分の記録は済んでいる。届かなかった理由は全部返し、画面に出す。
 
 import { formatErrorDetail } from "../../core/error-detail";
-import { liveEntryUrl } from "../entry/entry-file";
+import { type EntryRecord, liveEntryRecord } from "../entry/entry-file";
 import {
   listServerRegistry,
   type ServerRegistryListing,
@@ -29,8 +29,8 @@ export type ReadRelayDeps = {
   /** このサーバのプロセス。自分には送らない。 */
   selfPid: number;
   listServers(): ServerRegistryListing;
-  /** 動いている入口の URL。無ければ null。読めなければ投げる。 */
-  entryUrl(): string | null;
+  /** 動いている入口の記録。無ければ null。読めなければ投げる。 */
+  entryRecord(): EntryRecord | null;
   post(url: string, body: unknown, signal: AbortSignal): Promise<Response>;
 };
 
@@ -47,7 +47,7 @@ export async function relayAgentRead(
   deps: ReadRelayDeps = {
     selfPid: process.pid,
     listServers: listServerRegistry,
-    entryUrl: () => liveEntryUrl(),
+    entryRecord: () => liveEntryRecord(),
     post: postToServer,
   },
 ): Promise<ReadRelayResult> {
@@ -64,9 +64,9 @@ export async function relayAgentRead(
   for (const broken of listing.errors) {
     failures.push(`${broken.file}: ${formatErrorDetail(broken.error)}`);
   }
-  let entry: string | null = null;
+  let entry: EntryRecord | null = null;
   try {
-    entry = deps.entryUrl();
+    entry = deps.entryRecord();
   } catch (error) {
     failures.push(`entry server record: ${formatErrorDetail(error)}`);
   }
@@ -78,6 +78,7 @@ export async function relayAgentRead(
   let reached = 0;
   await Promise.all(
     reportTargets(listing, entry)
+      .map((reportTarget) => reportTarget.url)
       .filter((base) => !self.has(base))
       .map(async (base) => {
         const url = `${base}/_agent/state`;

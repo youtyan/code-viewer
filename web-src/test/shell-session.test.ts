@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { formatErrorDetail } from "../core/error-detail";
+import { linkShellsAndPanes } from "../core/terminal-board";
 
 const mocks = vi.hoisted(() => ({
   runAsync: vi.fn(),
@@ -13,6 +14,7 @@ import {
   closeAllShellSessions,
   closeShellSession,
   createShellSession,
+  listShellSessionsForMatching,
   subscribeShell,
   writeToShellWhenReady,
 } from "../server/shell/session";
@@ -73,6 +75,48 @@ afterEach(async () => {
 });
 
 describe("createShellSession PTY terminal resolution", () => {
+  test("retries a temporarily missing tty and links the shell to its tmux pane", async () => {
+    mocks.runAsync
+      .mockResolvedValueOnce({ code: 0, stdout: "?\n", stderr: "" })
+      .mockResolvedValueOnce({ code: 0, stdout: "ttys031\n", stderr: "" });
+
+    const result = await createShellSession(process.cwd());
+
+    if (result.status !== "ok") throw new Error("expected a shell session");
+    expect(result.session.tty).toBe("/dev/ttys031");
+    const linked = linkShellsAndPanes(
+      [result.session],
+      [{ tty: "/dev/ttys031", session: "sample-session", pane: "%31" }],
+    );
+    expect(linked.paneToShell.get("%31")).toBe(result.session.id);
+  });
+
+  test("rechecks an empty tty for matching and remembers the first resolved value", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.runAsync.mockResolvedValue({ code: 0, stdout: "?\n", stderr: "" });
+      const creating = createShellSession(process.cwd());
+      await vi.advanceTimersByTimeAsync(2000);
+      const created = await creating;
+      if (created.status !== "ok") throw new Error("expected a shell session");
+      expect(created.session.tty).toBe("");
+
+      mocks.runAsync.mockResolvedValue({
+        code: 0,
+        stdout: "ttys031\n",
+        stderr: "",
+      });
+      const matched = await listShellSessionsForMatching();
+      const callsAfterResolution = mocks.runAsync.mock.calls.length;
+      expect(matched[0]?.tty).toBe("/dev/ttys031");
+
+      await listShellSessionsForMatching();
+      expect(mocks.runAsync).toHaveBeenCalledTimes(callsAfterResolution);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test.each([
     {
       name: "a non-zero ps result",

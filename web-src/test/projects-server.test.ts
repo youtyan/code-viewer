@@ -587,7 +587,7 @@ describe("relayAgentRead", () => {
           { file: "/state/servers/broken.json", error: new Error("bad JSON") },
         ],
       }),
-      entryUrl: () => null,
+      entryRecord: () => null,
       post: async (url, body) => {
         posted.push({ url, body });
         if (url.includes("64003")) throw refused;
@@ -635,7 +635,13 @@ describe("relayAgentRead with the entry server", () => {
         ],
         errors: [],
       }),
-      entryUrl: () => "http://127.0.0.1:64100",
+      entryRecord: () => ({
+        url: "http://127.0.0.1:64100/",
+        pid: process.pid,
+        token: "0123456789abcdef",
+        version: "1.0.0",
+        started_at: "2026-01-01T00:00:00.000Z",
+      }),
       post: async (url) => {
         posted.push(url);
         return new Response("{}", { status: 200 });

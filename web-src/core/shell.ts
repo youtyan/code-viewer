@@ -31,7 +31,7 @@ export type ShellSession = {
   exited: boolean;
   exitCode: number | null;
   /**
-   * この PTY の端末デバイス (`/dev/ttys012`)。引けなかった環境では空。
+   * この PTY の端末デバイス (`/dev/ttys012`)。まだ引けない間は空。
    *
    * このシェルの中で tmux を起動すると、その tmux クライアントは同じ端末に
    * 載る。つまりこの名前が tmux 側の `#{client_tty}` と一致するので、
