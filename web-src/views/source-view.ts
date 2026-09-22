@@ -8,6 +8,7 @@ import {
   findMainScrollTarget,
   focusMainPanel,
   isEditableKeyTarget,
+  isPageKeymapBlockedTarget,
 } from "../core/focus-scope";
 import { COPY_16_PATHS, iconSvg } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
@@ -2748,6 +2749,7 @@ export function createSourceView(deps: SourceViewDeps) {
     if (
       e.defaultPrevented ||
       isImeComposing(e) ||
+      isPageKeymapBlockedTarget(targetEl) ||
       isPaletteOpen() ||
       document.querySelector(".mkdp-lightbox")
     )

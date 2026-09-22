@@ -362,10 +362,14 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     if (tabs[otherSide(side)]?.screen.getAttached()?.id === id) {
       // もう一方の面で映していたシェル (反対側へ移したタブ)。枠ごと付け替える。
       swapSides();
+      tabs[side]?.screen.focus();
       return;
     }
     const slot = tabSlot(side);
-    if (slot.screen.getAttached()?.id === id) return;
+    if (slot.screen.getAttached()?.id === id) {
+      slot.screen.focus();
+      return;
+    }
     try {
       const session = await resolveShell(id);
       if (myGen !== tabGeneration[side] || disposed) return;

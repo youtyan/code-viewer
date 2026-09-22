@@ -43,9 +43,48 @@ function action(
 }
 
 describe("keymap action resolution", () => {
-  test("moves focus between sidebar and main with Ctrl+H and Ctrl+L", () => {
-    expect(action("h", "main", { ctrl: true })).toBe("focus-sidebar");
-    expect(action("l", "sidebar", { ctrl: true })).toBe("focus-main");
+  test.each([
+    ["Cmd+W", "w", { meta: true }],
+    ["Cmd+T", "t", { meta: true }],
+    ["Cmd+L", "l", { meta: true }],
+    ["Cmd+N", "n", { meta: true }],
+    ["Ctrl+H", "h", { ctrl: true }],
+    ["Ctrl+L", "l", { ctrl: true }],
+    ["Ctrl+W", "w", { ctrl: true }],
+    ["Ctrl+T", "t", { ctrl: true }],
+    ["Ctrl+N", "n", { ctrl: true }],
+    ["Ctrl+Tab", "Tab", { ctrl: true }],
+    ["Ctrl+Shift+Tab", "Tab", { ctrl: true, shift: true }],
+    ["terminal interrupt Ctrl+C", "c", { ctrl: true }],
+  ] as const)("does not claim reserved key %s", (_name, keyValue, options) => {
+    for (const scope of [
+      "global",
+      "sidebar",
+      "main",
+      "panel",
+      "history",
+    ] as const)
+      expect(action(keyValue, scope, options)).toBeNull();
+  });
+
+  test.each([
+    ["plain page key", "j", {}],
+    ["editable-allowed palette key", "k", { ctrl: true }],
+    ["panel menu key", "`", { ctrl: true }],
+    ["terminal interrupt", "c", { ctrl: true }],
+  ] as const)("blocks %s on a protected surface", (_name, keyValue, options) => {
+    expect(
+      resolveKeymapAction(key(keyValue, options), {
+        scope: "panel",
+        editable: true,
+        pageKeymapBlocked: true,
+      }),
+    ).toBeNull();
+  });
+
+  test("moves focus between sidebar and main with Shift+H and Shift+L", () => {
+    expect(action("H", "main", { shift: true })).toBe("focus-sidebar");
+    expect(action("L", "sidebar", { shift: true })).toBe("focus-main");
   });
 
   test("steps annotations with bracket keys in every scope", () => {
@@ -218,7 +257,7 @@ describe("keymap action resolution", () => {
         (binding) =>
           binding.action === "focus-main" &&
           binding.key === "l" &&
-          binding.ctrl,
+          binding.shift,
       ),
     ).toBe(true);
     expect(

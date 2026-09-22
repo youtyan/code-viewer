@@ -4,12 +4,24 @@ export type PanelFocusScope = Extract<KeymapScope, "sidebar" | "main">;
 
 // Panel focus scope mirrors the DOM focus owner used by Vim-style key handling.
 export function isEditableKeyTarget(target: Element | null): boolean {
-  if (!target) return false;
+  if (!target || typeof target.closest !== "function") return false;
   const tag = target.tagName;
   return (
     tag === "INPUT" ||
     tag === "TEXTAREA" ||
     target.closest('[contenteditable="true"]') != null
+  );
+}
+
+// A terminal owns every key while it has focus. Modal dialogs do the same so
+// page-level shortcuts cannot run behind their local Escape / Enter / Tab
+// handling. The search palette is the one exception: Ctrl/Cmd+K and +G are
+// its documented mode-switch keys and are filtered by paletteOpen instead.
+export function isPageKeymapBlockedTarget(target: Element | null): boolean {
+  if (!target || typeof target.closest !== "function") return false;
+  return (
+    target.closest(".xterm") !== null ||
+    target.closest('[role="dialog"]:not(.gdp-palette)') !== null
   );
 }
 

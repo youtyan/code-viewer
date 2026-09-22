@@ -49,6 +49,7 @@ import {
   focusMainPanel,
   focusSidebarPanel,
   isEditableKeyTarget,
+  isPageKeymapBlockedTarget,
   keymapScope,
   prepareKeyboardPanels,
   setPanelFocusScope,
@@ -5345,6 +5346,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     input.select();
   }
 
+  function focusActiveMainTabSurface() {
+    const front = MAIN_TABS.front();
+    if (front && isRouteTab(front)) scheduleMainSurfaceFocus();
+  }
+
   function dispatchKeymapAction(
     action: KeymapAction,
     scope: KeymapScope,
@@ -5619,23 +5625,28 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     if (action === "main-tab-next") {
       MAIN_TABS.next();
+      focusActiveMainTabSurface();
       return true;
     }
     if (action === "main-tab-previous") {
       MAIN_TABS.previous();
+      focusActiveMainTabSurface();
       return true;
     }
     if (action === "main-tab-close") {
       MAIN_TABS.closeActive();
+      focusActiveMainTabSurface();
       return true;
     }
     if (action === "main-pane-other") {
       MAIN_TABS.focusOther();
+      focusActiveMainTabSurface();
       return true;
     }
     const nthTab = /^main-tab-([1-9])$/.exec(action);
     if (nthTab) {
       MAIN_TABS.activateNth(Number(nthTab[1]));
+      focusActiveMainTabSurface();
       return true;
     }
     if (action === "nav-back") {
@@ -5701,7 +5712,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   document.addEventListener("keydown", async (e) => {
-    if (isImeComposing(e)) return;
+    if (isImeComposing(e) || e.defaultPrevented) return;
     if (e.key === "Escape") closeRepoContextMenu();
     if ((e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled)
       return;
@@ -5712,6 +5723,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       {
         scope,
         editable: isEditableKeyTarget(targetEl),
+        pageKeymapBlocked: isPageKeymapBlockedTarget(targetEl),
         composing: isImeComposing(e),
         paletteOpen: isPaletteOpen(),
         pendingG:

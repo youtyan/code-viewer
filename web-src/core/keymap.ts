@@ -102,6 +102,7 @@ export type KeyEventLike = {
 export type KeymapContext = {
   scope: KeymapScope;
   editable: boolean;
+  pageKeymapBlocked?: boolean;
   composing?: boolean;
   paletteOpen?: boolean;
   pendingG?: boolean;
@@ -179,8 +180,8 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "focus-file-filter", key: "/" },
   { action: "annotation-next", key: "]" },
   { action: "annotation-previous", key: "[" },
-  { action: "focus-sidebar", key: "h", ctrl: true },
-  { action: "focus-main", key: "l", ctrl: true },
+  { action: "focus-sidebar", key: "h", shift: true },
+  { action: "focus-main", key: "l", shift: true },
   {
     action: "cancel-source-load",
     key: "escape",
@@ -326,7 +327,7 @@ export function resolveKeymapAction(
   bindings: KeyBinding[] = DEFAULT_KEY_BINDINGS,
 ): KeymapAction | null {
   const key = event.key.toLowerCase();
-  if (context.composing) return null;
+  if (context.composing || context.pageKeymapBlocked) return null;
   for (const binding of bindings) {
     if (binding.key !== key) continue;
     if (binding.requires?.lightboxClosed && context.lightboxOpen) continue;

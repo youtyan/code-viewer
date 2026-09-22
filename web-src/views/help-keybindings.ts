@@ -33,6 +33,7 @@ type HelpKeybindingSelector = {
 
 type HelpKeybindingDisplayRow = {
   selectors: HelpKeybindingSelector[];
+  fixedKeys?: HelpText;
   description: HelpText;
 };
 
@@ -229,6 +230,17 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
           ja: "注釈パネルを開閉",
         },
       },
+      {
+        selectors: [],
+        fixedKeys: {
+          en: "ArrowLeft / ArrowRight / Shift+ArrowLeft / Shift+ArrowRight",
+          ja: "ArrowLeft / ArrowRight / Shift+ArrowLeft / Shift+ArrowRight",
+        },
+        description: {
+          en: "Resize the split while its divider has focus (Shift moves farther)",
+          ja: "分割線にフォーカスがあるとき幅を変更（Shift 併用で大きく移動）",
+        },
+      },
     ],
   },
   {
@@ -355,6 +367,36 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
           ja: "左右に分けたメインの面で、もう一方の面へ",
         },
       },
+      {
+        selectors: [],
+        fixedKeys: {
+          en: "ArrowDown / Ctrl+N / ArrowUp / Ctrl+P",
+          ja: "ArrowDown / Ctrl+N / ArrowUp / Ctrl+P",
+        },
+        description: {
+          en: "Move through search palette results",
+          ja: "検索パレットの候補を移動",
+        },
+      },
+      {
+        selectors: [],
+        fixedKeys: { en: "Enter / Escape", ja: "Enter / Escape" },
+        description: {
+          en: "Open the search palette selection / close the palette",
+          ja: "検索パレットの選択項目を開く / パレットを閉じる",
+        },
+      },
+      {
+        selectors: [],
+        fixedKeys: {
+          en: "Alt+R / Alt+C / Alt+W",
+          ja: "Alt+R / Alt+C / Alt+W",
+        },
+        description: {
+          en: "Toggle grep regular expression / case / whole-word matching",
+          ja: "grep の正規表現 / 大文字小文字 / 単語一致を切り替え",
+        },
+      },
     ],
   },
   {
@@ -394,8 +436,19 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
           { action: "sidebar-expand" },
         ],
         description: {
-          en: "Collapse / expand directory",
-          ja: "ディレクトリを閉じる / 開く",
+          en: "Collapse directory or move to its parent / expand directory",
+          ja: "ディレクトリを閉じる、または親へ移動 / ディレクトリを開く",
+        },
+      },
+      {
+        selectors: [],
+        fixedKeys: {
+          en: "Enter / ArrowDown / ArrowUp / Escape",
+          ja: "Enter / ArrowDown / ArrowUp / Escape",
+        },
+        description: {
+          en: "Open the filtered item / move through matches / clear the file filter",
+          ja: "絞り込み結果を開く / 候補を移動 / ファイルフィルターを消去",
         },
       },
     ],
@@ -488,6 +541,63 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
         description: {
           en: "Switch to Preview / Code tab",
           ja: "Preview / Code タブへ切り替え",
+        },
+      },
+    ],
+  },
+  {
+    title: { en: "Focused Controls", ja: "フォーカス中の操作" },
+    rows: [
+      {
+        selectors: [],
+        fixedKeys: {
+          en: "Escape / Enter / Tab / Shift+Tab",
+          ja: "Escape / Enter / Tab / Shift+Tab",
+        },
+        description: {
+          en: "Cancel or submit a dialog / move within its focus trap",
+          ja: "ダイアログを取り消す・確定する / ダイアログ内でフォーカスを移動",
+        },
+      },
+      {
+        selectors: [],
+        fixedKeys: {
+          en: "ArrowDown / ArrowUp / Home / End / Enter",
+          ja: "ArrowDown / ArrowUp / Home / End / Enter",
+        },
+        description: {
+          en: "Move through agent rows / open the focused row",
+          ja: "エージェント行を移動 / フォーカス中の行を開く",
+        },
+      },
+      {
+        selectors: [],
+        fixedKeys: {
+          en: "ArrowLeft / ArrowRight / ArrowUp / ArrowDown / Enter / Tab / Shift+Tab",
+          ja: "ArrowLeft / ArrowRight / ArrowUp / ArrowDown / Enter / Tab / Shift+Tab",
+        },
+        description: {
+          en: "Move through data cells / open a cell / move between related grids",
+          ja: "データセルを移動 / セルを開く / 関連グリッド間を移動",
+        },
+      },
+      {
+        selectors: [],
+        fixedKeys: {
+          en: "Ctrl+Enter / Meta+Enter",
+          ja: "Ctrl+Enter / Meta+Enter",
+        },
+        description: {
+          en: "Run the data query in the query editor",
+          ja: "クエリエディターのデータクエリを実行",
+        },
+      },
+      {
+        selectors: [],
+        fixedKeys: { en: "Shift+Enter", ja: "Shift+Enter" },
+        description: {
+          en: "Insert a terminal newline without submitting",
+          ja: "ターミナルで送信せずに改行",
         },
       },
     ],
@@ -585,6 +695,7 @@ function buildRow(
   bindings: KeyBinding[],
 ): [string, string] {
   const labels: string[] = [];
+  if (row.fixedKeys) addUnique(labels, row.fixedKeys[language]);
   for (const item of collectRowCoverage(row, bindings))
     addUnique(labels, item.label);
   return [labels.join(" / "), row.description[language]];

@@ -180,6 +180,29 @@ function createSidebarForTest(
 }
 
 describe("diff sidebar repository target", () => {
+  test("collapse moves from a file or closed directory to its visible parent", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+    sidebar.renderSidebar(
+      [
+        { path: "src/sample/first.ts", type: "blob" },
+        { path: "src/second.ts", type: "blob" },
+      ],
+      () => {
+        /* noop: presence forces repository tree mode */
+      },
+    );
+
+    sidebar.markActive("src/sample/first.ts");
+    sidebar.setActiveSidebarDirectoryCollapsed(true);
+    expect(sidebar.getSidebarVirtualActivePath()).toBe("src/sample");
+
+    sidebar.setActiveSidebarDirectoryCollapsed(true);
+    expect(sidebar.getSidebarVirtualActivePath()).toBe("src/sample");
+    sidebar.setActiveSidebarDirectoryCollapsed(true);
+    expect(sidebar.getSidebarVirtualActivePath()).toBe("src");
+  });
+
   test("hides the repository target selector when rendering the diff sidebar", () => {
     installSidebarDom();
     const sidebar = createSidebarForTest();

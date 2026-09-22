@@ -15,20 +15,37 @@ import {
 } from "vitest";
 import type { ShellSession, ShellSessionId } from "../core/shell";
 
+const terminalScreenState = vi.hoisted(() => ({
+  screens: [] as Array<{
+    attached: ShellSession | null;
+    focusCount: number;
+  }>,
+}));
+
 vi.mock("../views/terminal/terminal-screen", () => ({
-  createTerminalScreen: () => ({
-    el: document.createElement("div"),
-    attach: async () => undefined,
-    detach: () => undefined,
-    getAttached: () => null,
-    measure: () => ({ cols: 80, rows: 24 }),
-    focus: () => undefined,
-    refit: () => undefined,
-    applyFontSize: () => undefined,
-    setInputEnabled: () => undefined,
-    localize: () => undefined,
-    dispose: () => undefined,
-  }),
+  createTerminalScreen: () => {
+    const state = { attached: null as ShellSession | null, focusCount: 0 };
+    terminalScreenState.screens.push(state);
+    return {
+      el: document.createElement("div"),
+      attach: async (session: ShellSession) => {
+        state.attached = session;
+      },
+      detach: () => {
+        state.attached = null;
+      },
+      getAttached: () => state.attached,
+      measure: () => ({ cols: 80, rows: 24 }),
+      focus: () => {
+        state.focusCount += 1;
+      },
+      refit: () => undefined,
+      applyFontSize: () => undefined,
+      setInputEnabled: () => undefined,
+      localize: () => undefined,
+      dispose: () => undefined,
+    };
+  },
 }));
 
 const { createTerminalView } = await import("../views/terminal/terminal-view");
@@ -43,6 +60,7 @@ afterAll(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  terminalScreenState.screens = [];
 });
 
 function shell(id: string): ShellSession {
@@ -91,6 +109,23 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status });
 
 describe("terminal view: シェルの作成と停止", () => {
+  test("既に接続済みのターミナルタブへ戻っても入力へフォーカスする", async () => {
+    const session = shell("shell-a1");
+    const { view } = setup([
+      () => json({ available: true, sessions: [session] }),
+    ]);
+    await view.loadShells();
+
+    await view.showInTab(session.id, "left");
+    await view.showInTab(session.id, "left");
+
+    expect(terminalScreenState.screens).toHaveLength(1);
+    expect(terminalScreenState.screens[0]).toMatchObject({
+      attached: session,
+      focusCount: 2,
+    });
+  });
+
   // その面でまだターミナルを映していなければ寸法は測れないので送らない
   // (サーバの既定で開き、タブに映したときに合わせ直す)。
   test("作ったシェルはその面のタブで開いてもらい、一覧にも載せる", async () => {

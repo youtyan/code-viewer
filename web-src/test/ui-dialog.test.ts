@@ -29,6 +29,27 @@ afterAll(() => {
 });
 
 describe("showConfirmDialog", () => {
+  test("traps Tab and restores focus after Escape", async () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    const p = showConfirmDialog({ body: "Continue?" });
+    await tick();
+    const [cancel, confirm] = actionButtons();
+    expect(document.activeElement).toBe(confirm);
+
+    confirm.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+    );
+    expect(document.activeElement).toBe(cancel);
+    cancel.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+
+    expect(await p).toBe(false);
+    expect(document.activeElement).toBe(opener);
+  });
+
   test("clicking confirm resolves true", async () => {
     const p = showConfirmDialog({ body: "Continue?", confirmLabel: "Go" });
     await tick();

@@ -2,7 +2,10 @@
 // line numbers (unified: .line-num2, side-by-side: right pane) highlights the
 // rows and surfaces the line-ref copy pill with "@path#start-end".
 
-import { isEditableKeyTarget } from "../core/focus-scope";
+import {
+  isEditableKeyTarget,
+  isPageKeymapBlockedTarget,
+} from "../core/focus-scope";
 import { isImeComposing } from "../core/keyboard";
 import type { LineRefPill } from "./line-ref-pill";
 
@@ -164,7 +167,8 @@ export function createDiffLineSelect(deps: DiffLineSelectDeps) {
       e.key === "Escape" &&
       selection &&
       !drag &&
-      !isEditableKeyTarget(e.target as Element | null)
+      !isEditableKeyTarget(e.target as Element | null) &&
+      !isPageKeymapBlockedTarget(e.target as Element | null)
     ) {
       clear();
     }

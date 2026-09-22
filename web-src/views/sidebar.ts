@@ -1994,12 +1994,45 @@ export function createSidebar(deps: SidebarDeps) {
     if (target.dataset.path) prefetchByPath(target.dataset.path);
   }
 
+  function moveVirtualSidebarToParent(activeIndex: number) {
+    const active = SIDEBAR_VISIBLE_ROWS[activeIndex];
+    if (!active) return;
+    for (let index = activeIndex - 1; index >= 0; index -= 1) {
+      const candidate = SIDEBAR_VISIBLE_ROWS[index];
+      if (candidate && candidate.depth < active.depth) {
+        selectVirtualSidebarIndex(index);
+        return;
+      }
+    }
+  }
+
+  function moveDomSidebarToParent() {
+    const active = activeSidebarItem();
+    const children = active?.parentElement;
+    if (!children?.classList.contains("tree-children")) return;
+    const parent = children.previousElementSibling;
+    if (!(parent instanceof HTMLElement)) return;
+    if (!parent.matches(".tree-dir[data-dirpath]")) return;
+    const path = parent.dataset.dirpath;
+    if (!path) return;
+    markActive(path);
+    scrollSidebarItemIntoView(parent);
+  }
+
   function setActiveSidebarDirectoryCollapsed(collapsed: boolean) {
     if (isVirtualSidebarActive()) {
-      const row = SIDEBAR_VISIBLE_ROWS[virtualSidebarActiveIndex()];
-      if (row?.kind !== "dir" || !row.dir || row.dir.children_omitted) return;
+      const activeIndex = virtualSidebarActiveIndex();
+      const row = SIDEBAR_VISIBLE_ROWS[activeIndex];
+      if (!row) return;
+      if (row.kind !== "dir" || !row.dir || row.dir.children_omitted) {
+        if (collapsed) moveVirtualSidebarToParent(activeIndex);
+        return;
+      }
       const snap = dirEffectiveCollapsed(row.dir);
-      if (snap.effectiveCollapsed === collapsed) return;
+      if (snap.effectiveCollapsed === collapsed) {
+        if (collapsed) moveVirtualSidebarToParent(activeIndex);
+        return;
+      }
       if (collapsed) {
         // 「閉じる」: collapsedDirs に積む & lazyExpanded は破棄。
         if (!snap.userCollapsed) {
@@ -2035,8 +2068,14 @@ export function createSidebar(deps: SidebarDeps) {
     const active = document.querySelector<HTMLElement>(
       "#filelist .tree-dir.active[data-dirpath]",
     );
-    if (!active) return;
-    if (active.classList.contains("collapsed") === collapsed) return;
+    if (!active) {
+      if (collapsed) moveDomSidebarToParent();
+      return;
+    }
+    if (active.classList.contains("collapsed") === collapsed) {
+      if (collapsed) moveDomSidebarToParent();
+      return;
+    }
     const control = active.querySelector<HTMLElement>(".chev");
     if (control) control.click();
   }

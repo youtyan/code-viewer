@@ -5,6 +5,7 @@ import {
   focusSidebarPanel,
   getPanelFocusScope,
   isEditableKeyTarget,
+  isPageKeymapBlockedTarget,
   keymapScope,
   restorePanelFocusScope,
   setPanelFocusScope,
@@ -60,6 +61,15 @@ describe("focus scope helpers", () => {
       isEditableKeyTarget(target("SPAN", { '[contenteditable="true"]': true })),
     ).toBe(true);
     expect(isEditableKeyTarget(target("BUTTON"))).toBe(false);
+  });
+
+  test.each([
+    ["xterm", { ".xterm": true }, true],
+    ["modal dialog", { '[role="dialog"]:not(.gdp-palette)': true }, true],
+    ["search palette", {}, false],
+    ["ordinary button", {}, false],
+  ])("blocks the page keymap for %s", (_name, closest, expected) => {
+    expect(isPageKeymapBlockedTarget(target("BUTTON", closest))).toBe(expected);
   });
 
   test("stores the active panel focus scope on the document body", () => {
