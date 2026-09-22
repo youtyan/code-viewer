@@ -41,7 +41,7 @@ const fileRoute = (path: string, line?: number): AppRoute => ({
 });
 
 /** 画面の route の移り変わりを、app.ts と同じ順 (移る → syncRoute) でまねる。 */
-function setup(loadSaved: () => Promise<unknown>) {
+function setup(loadSaved: () => Promise<unknown>, leftColumn?: HTMLElement) {
   const mount = document.createElement("nav");
   document.body.append(mount);
   const saves: SerializedLayout[] = [];
@@ -52,6 +52,7 @@ function setup(loadSaved: () => Promise<unknown>) {
   let current: AppRoute = fileRoute("src/app.ts");
   const handle: MainTabsHandle = createMainTabsView({
     mount,
+    ...(leftColumn ? { leftColumn } : {}),
     getLanguage: () => "en",
     pageLabel: (page) => page,
     navigate: (route) => {
@@ -521,6 +522,30 @@ describe("main tabs view: 左右 2 面", () => {
     const button = splitButton(mount);
     button?.click();
     expect([button?.disabled, panes(handle).split]).toEqual([true, false]);
+  });
+
+  // 面の最小幅 360 は本文 (左の列の右) の幅で数える。1 + 360 * 2 = 721px 要る。
+  test.each([
+    { window: 960, column: 240, split: false },
+    { window: 961, column: 240, split: true },
+    { window: 960, column: 0, split: true },
+  ])("窓 $window px・左の列 $column px なら分割できるか: $split", async ({
+    window,
+    column,
+    split,
+  }) => {
+    Object.defineProperty(document.documentElement, "clientWidth", {
+      configurable: true,
+      value: window,
+    });
+    const leftColumn = document.createElement("div");
+    leftColumn.getBoundingClientRect = () => new DOMRect(0, 0, column, 80);
+    const { handle, mount } = setup(async () => null, leftColumn);
+    await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
+    handle.openTerminal("shell-a1");
+    splitButton(mount)?.click();
+    expect(panes(handle).split).toBe(split);
   });
 
   test("右の面にフォーカスがあるとき左のタブを押すと、本文をそのタブの route に合わせる", async () => {

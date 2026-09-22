@@ -245,8 +245,8 @@ describe("diff sidebar repository target", () => {
   });
 
   // The diff file list stays on screen in the source view opened from the
-  // diff ("View File"); only the user's toggle and pages without a file
-  // list hide it.
+  // diff ("View File"). Pages without a list of their own show the Files
+  // tree in the same column, so only the user's toggle hides it.
   test.each([
     ["", "block"],
     ["gdp-diff-page", "block"],
@@ -254,7 +254,8 @@ describe("diff sidebar repository target", () => {
     ["gdp-file-detail-page gdp-repo-blob-page", "block"],
     ["gdp-history-page gdp-file-detail-page", "block"],
     ["gdp-file-detail-page gdp-sidebar-hidden", "none"],
-    ["gdp-help-page", "none"],
+    ["gdp-help-page gdp-files-column-page", "block"],
+    ["gdp-help-page gdp-files-column-page gdp-sidebar-hidden", "none"],
   ])("sidebar display for body class %j", (className, display) => {
     expect(computedDisplayForBodyClass("#sidebar", className)).toBe(display);
     expect(computedDisplayForBodyClass("#sidebar-resizer", className)).toBe(

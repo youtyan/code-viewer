@@ -73,6 +73,12 @@ export type WorktreeViewDeps = {
   getText(): WorktreeText;
   setPageMode(): void;
   syncHeaderMenu(): void;
+  /**
+   * #sidebar (#filelist) の持ち主が変わる。true = この画面が作業ツリーの変更
+   * ファイルを書く (Files の木の使い回しをやめてもらう)。false = 一覧だけの
+   * 表示で、#sidebar は左の列の Files の木に戻してもらう。
+   */
+  onSidebarOwner(owned: boolean): void;
   setStatus(status: "live" | "refreshing" | "error" | null): void;
   /**
    * フォルダを OS のファイルマネージャで開くボタン。Repository / Diff /
@@ -1759,16 +1765,16 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     )) {
       button.disabled = !tree;
     }
-    if (title) title.textContent = t.panes.files;
     const item = selectedWorktree();
-    if (totals) {
-      totals.textContent = item ? t.files.heading(item.fileCount) : "";
-    }
-    list.replaceChildren();
+    // 一覧だけのとき #sidebar は左の列の Files の木 (app が出す)。触らない。
     if (!item) {
-      list.appendChild(note(t.panes.selectWorktree));
+      deps.onSidebarOwner(false);
       return;
     }
+    deps.onSidebarOwner(true);
+    if (title) title.textContent = t.panes.files;
+    if (totals) totals.textContent = t.files.heading(item.fileCount);
+    list.replaceChildren();
     renderCommits(list, item);
     if (!item.fileCount) {
       list.appendChild(note(t.files.none));

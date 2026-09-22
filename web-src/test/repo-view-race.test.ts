@@ -137,6 +137,7 @@ function makeRepoView(
       /* noop */
     },
     renderStandaloneSource: async () => undefined,
+    filesColumnRef: () => null,
     repoFileTargetFromRoute: () =>
       state.route.screen === "file" && state.route.view === "blob"
         ? state.route.ref

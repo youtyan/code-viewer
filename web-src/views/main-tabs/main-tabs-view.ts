@@ -94,6 +94,11 @@ export type MainTabsDeps = {
    * 出ていないときに置く場所)。中身は呼び出し側が入れ替える。
    */
   lead?: HTMLElement;
+  /**
+   * 左の列 (タブ列の下の固定の列) の頭。面の幅はこの右 (本文) で数える。畳んで
+   * いれば幅 0 (display: none)。無ければ左の列は無いものとする。
+   */
+  leftColumn?: HTMLElement;
   getLanguage(): MainTabsLang;
   /** page のタブの名前 (画面の入口と同じ文言)。 */
   pageLabel(page: PageKind): string;
@@ -363,10 +368,22 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
 
   // ---- 幅 ----
 
-  /** 本文の横幅 (左のサイドバーの右から窓の右端まで)。 */
+  /** 左の列の幅 (畳んでいれば 0)。 */
+  function leftColumnWidth(): number {
+    return deps.leftColumn?.getBoundingClientRect().width ?? 0;
+  }
+
+  /** 本文の左端 (左の列の右)。 */
+  function bodyLeft(): number {
+    return deps.mount.getBoundingClientRect().left + leftColumnWidth();
+  }
+
+  /**
+   * 本文の横幅 (左の列の右から窓の右端まで)。面の最小幅はこの幅で数える
+   * (木の列を含めない)。
+   */
   function mainWidth(): number {
-    const left = deps.mount.getBoundingClientRect().left;
-    return document.documentElement.clientWidth - left;
+    return document.documentElement.clientWidth - bodyLeft();
   }
 
   /** 1 面で、左の前面が右に置ける種類 (ターミナルか画像) か。 */
@@ -429,10 +446,13 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     activeClassTarget: document.body,
     activeClassName: "main-split-resizing",
   });
-  new ResizeObserver(() => {
+  const geometryObserver = new ResizeObserver(() => {
     applyGeometry();
     renderActions();
-  }).observe(deps.mount);
+  });
+  geometryObserver.observe(deps.mount);
+  // 左の列の幅が変わる (畳む・幅を変える・History の一覧の幅) と本文の幅も変わる。
+  if (deps.leftColumn) geometryObserver.observe(deps.leftColumn);
 
   // ---- 保存 ----
 
@@ -1080,7 +1100,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     focusSide,
     sideAt(clientX) {
       if (!layout.panes.right) return null;
-      const left = deps.mount.getBoundingClientRect().left;
+      const left = bodyLeft();
       return clientX < left + leftWidthFor(layout.split ?? DEFAULT_SPLIT)
         ? "left"
         : "right";

@@ -270,6 +270,8 @@ function stubFetch(
 
 type Mounted = {
   panel: HTMLElement;
+  /** #sidebar の持ち主の知らせ (true = この画面が変更ファイルを書く)。 */
+  owners: boolean[];
   filelist: HTMLElement;
   diff: HTMLElement;
   routes: AppRoute[];
@@ -318,6 +320,7 @@ async function mountWith(
     ...options.route,
   };
   const routes: AppRoute[] = [];
+  const owners: boolean[] = [];
   let displayOptions: WorktreeViewOptions = {
     layout: "line-by-line",
     ignoreWs: false,
@@ -339,6 +342,7 @@ async function mountWith(
     getText: () => TEXT,
     setPageMode: () => undefined,
     syncHeaderMenu: () => undefined,
+    onSidebarOwner: (owned) => owners.push(owned),
     setStatus: () => undefined,
     // 実物 (app.ts) と同じ形のボタンを返す。中身の挙動はここでは見ない。
     createOpenPathButton: (_path, _kind, title) => {
@@ -373,6 +377,7 @@ async function mountWith(
   if (!panel || !filelist || !diff) throw new Error("boxes were not mounted");
   return {
     panel,
+    owners,
     filelist,
     diff,
     routes,
@@ -1454,10 +1459,16 @@ describe("sidebar file list", () => {
       }),
     ]);
 
-  test("asks for a worktree before showing anything", async () => {
-    const { filelist } = await mountWith(withFiles());
-    expect(filelist.textContent).toContain(TEXT.panes.selectWorktree);
-    expect(filelist.querySelectorAll(".tree-file[data-key]")).toHaveLength(0);
+  // 選ぶ前 (一覧だけの表示) は、#sidebar は左の列の Files の木 (app が出す)。
+  // この画面は書かず、持ち主でないことを知らせる。
+  test("leaves the left column to the Files tree before a worktree is picked", async () => {
+    const { filelist, owners } = await mountWith(withFiles());
+    expect([
+      filelist.querySelectorAll(".tree-file[data-key]").length,
+      filelist.textContent?.includes(TEXT.panes.selectWorktree),
+      owners.includes(true),
+      owners[owners.length - 1],
+    ]).toEqual([0, false, false, false]);
   });
 
   test("lists the files of the picked worktree with their status", async () => {

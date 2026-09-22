@@ -139,6 +139,7 @@ function makeRepoView(
       calls.standaloneSources.push(target.path);
     },
     repoFileTargetFromRoute: () => null,
+    filesColumnRef: () => null,
     trackLoad: (promise) => promise,
     isAbortError: () => false,
     setRepoSidebarRef() {

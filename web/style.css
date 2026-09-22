@@ -122,9 +122,6 @@
   --blob-tab-active:    var(--accent);
 
   /* ---- 寸法 (T1: 固定物の実寸。ui-layout.md の 4 層) ---- */
-  /* 左のサイドバーの頭 (検索の入口) の行の高さ。表示密度で変わる
-     (body[data-sidebar-font-size])。中央には上の行が無い (タブ列が最上段)。 */
-  --header-row-h: 44px;
   /* 上に居座る固定物の合計 = 最上段のタブ列 (#main-tabs) だけ。
      消費側 (ツールバーの top・各ページの --chrome-h・sticky) はこれだけを読む。
      タブ列の高さ (--main-tabs-h) は密度で比例させるので html, body で決める。 */
@@ -372,7 +369,12 @@ html, body {
 
      上書きは全て body に載るので、この 2 つも body で定義する。 */
   --app-panel-max-h: calc(100vh - var(--global-header-h) - var(--chrome-bottom) - var(--app-panel-min-content-h));
-  --content-h: calc(100vh - var(--chrome-h) - var(--app-panel-visible-height) - var(--chrome-bottom));
+  /* 下パネルは閉じていてもタブ列 (--app-panel-tabbar-height) が画面の下端に乗り、
+     重ねる表示でも #content はその分の padding-bottom を持つ。だから本文が使える
+     高さは、パネルが占める高さとタブ列の大きいほうを引いたもの。ここで引かないと、
+     この高さで箱を作る画面 (Data・Work log・全体ボード) がタブ列の分だけ窓から
+     はみ出す (重ねる表示の Data で 36px の縦のスクロールが出ていた)。 */
+  --content-h: calc(100vh - var(--chrome-h) - max(var(--app-panel-visible-height), var(--app-panel-tabbar-height)) - var(--chrome-bottom));
   /* 横と下の固定物が占めている長さ。左端に付く固定物 (上の行・ツールバー・
      ファイルのツリー・下パネル…) は left に、下端に付く固定物は bottom に、
      これだけを読む。左や下に固定物を足す / 消すときはこの 2 行に項を足す
@@ -383,12 +385,21 @@ html, body {
      (docked) はパネルの実高さ、重ねるときもパネルの見出しの行 (畳んでいても
      出ている) の上で止め、端末の最下行 (tmux の状態の行など) を覆わせない。 */
   --main-bottom: calc(var(--chrome-bottom) + max(var(--app-panel-visible-height), var(--app-panel-tabbar-height)));
-  /* 本文 (route の中身: ツールバー・ファイルの木・#content・右の面) の左右の端。
-     1 面ならメインの面いっぱい。左右 2 面のときは本文を出す面の幅に収める
-     (views/main-tabs/main-tabs-view.ts の routeSide。面の幅 --split-*-w は TS が書く)。
-     本文まわりの固定物はこの 2 つだけを読む (上の行・タブ列・下パネル・最下段は
-     面をまたぐので --chrome-left のまま)。 */
-  --page-left: var(--chrome-left);
+  /* 左の列 (タブ列の下・左のサイドバーの右の固定の列)。頭に名前・ブランチ・
+     画面の入口 (#left-head)、その下に画面ごとの一覧を出す: History / Worktrees
+     (選んでいる間) は一覧パネル、それ以外は #sidebar (その画面の一覧か Files の
+     木)。利用者が畳んだとき (gdp-sidebar-hidden) だけ幅 0。頭の高さは名前の行と
+     絵柄の行の 2 段 (密度に比例)。 */
+  --leftcol-w: var(--sidebar-w);
+  --leftcol-shown: var(--leftcol-w);
+  --left-head-h: calc(var(--space-3) + var(--ui-control-sm) * 2 + var(--space-1) + var(--space-2));
+  --left-body-top: calc(var(--global-header-h) + var(--left-head-h));
+  /* 本文 (route の中身: ツールバー・#content・面の箱) の左右の端。左の列の右から。
+     1 面ならメインの面いっぱい。左右 2 面のときは左の面の幅に収める (面の幅
+     --split-*-w は views/main-tabs/main-tabs-view.ts が本文の幅で書く)。
+     本文まわりの固定物はこの 2 つだけを読む (タブ列・下パネル・最下段は面を
+     またぐので --chrome-left のまま)。 */
+  --page-left: calc(var(--chrome-left) + var(--leftcol-shown));
   --page-right: 0px;
 
 
@@ -404,6 +415,16 @@ html, body {
   -moz-osx-font-smoothing: auto;
 }
 
+/* 左の列の幅: 一覧パネルを左の列に置く画面 (History・選んでいる Worktrees) は
+   その一覧の幅。利用者が畳んだときだけ 0 (T2 の上書き。body で決める)。 */
+body.gdp-history-page,
+body.gdp-worktree-page:not([data-worktree-overview]) {
+  --leftcol-w: var(--history-w);
+}
+body.gdp-sidebar-hidden {
+  --leftcol-shown: 0px;
+}
+
 /* 左右 2 面: 本文は左の面に収める (route のタブは左にしか置けない。T2 の上書き。body で決める)。 */
 body.main-split {
   --page-right: calc(var(--split-right-w) + var(--split-divider-w));
@@ -411,7 +432,6 @@ body.main-split {
 
 body[data-sidebar-font-size="compact"] {
   --space-unit: 3.5px;
-  --header-row-h: 40px;
   --statusbar-h: 26px;
   --topbar-h: 52px;
   --ui-font-xs: 9px;
@@ -429,7 +449,6 @@ body[data-sidebar-font-size="compact"] {
 }
 body[data-sidebar-font-size="large"] {
   --space-unit: 4.5px;
-  --header-row-h: 50px;
   --statusbar-h: 32px;
   --topbar-h: 62px;
   --ui-font-xs: 11px;
@@ -447,7 +466,6 @@ body[data-sidebar-font-size="large"] {
 }
 body[data-sidebar-font-size="xlarge"] {
   --space-unit: 5px;
-  --header-row-h: 56px;
   --statusbar-h: 36px;
   --topbar-h: 68px;
   --ui-font-xs: 12px;
@@ -1802,8 +1820,8 @@ body.gdp-diff-page #repo-target-wrap {
 #worktree-panel {
   display: none;
   position: fixed;
-  left: var(--page-left);
-  top: var(--chrome-h);
+  left: var(--chrome-left);
+  top: var(--left-body-top);
   bottom: var(--chrome-bottom);
   width: var(--history-w);
   background: var(--bg-soft);
@@ -1814,15 +1832,19 @@ body.gdp-diff-page #repo-target-wrap {
   font-size: var(--ui-font-base);
 }
 body.gdp-history-page #history-panel { display: flex; }
-body.gdp-history-page #sidebar { left: calc(var(--page-left) + var(--history-w)); }
-body.gdp-history-page main#content {
-  margin-left: calc(var(--history-w) + var(--sidebar-w));
+/* History: 左の列は一覧パネル。変更ファイル (#sidebar) は本文の左の 2 列目
+   (ツールバーの下)。畳むのは左の列 (一覧) だけで、変更ファイルは残す。 */
+body.gdp-history-page #sidebar {
+  left: var(--page-left);
+  top: var(--chrome-h);
 }
+body.gdp-history-page main#content,
 body.gdp-history-page.gdp-sidebar-hidden main#content {
-  margin-left: var(--history-w);
+  margin-left: var(--sidebar-w);
 }
 body.gdp-history-page #sidebar-resizer {
-  left: calc(var(--page-left) + var(--history-w) + var(--sidebar-w) - 4px);
+  left: calc(var(--page-left) + var(--sidebar-w) - 4px);
+  top: var(--chrome-h);
 }
 body.gdp-history-page #repo-target-wrap {
   display: none !important;
@@ -1830,9 +1852,9 @@ body.gdp-history-page #repo-target-wrap {
 #history-resizer {
   display: none;
   position: fixed;
-  top: var(--chrome-h);
+  top: var(--left-body-top);
   bottom: var(--chrome-bottom);
-  left: calc(var(--page-left) + var(--history-w) - 4px);
+  left: calc(var(--chrome-left) + var(--history-w) - 4px);
   width: 8px;
   cursor: col-resize;
   z-index: 32;
@@ -2398,10 +2420,12 @@ body.gdp-history-page #history-commit-info:not([hidden]),
 }
 
 /* ===== Sidebar ===== */
+/* 既定は左の列の本体 (頭 #left-head の下)。一覧パネルを持つ画面では本文の
+   左の 2 列目 (その画面の規則が left / top を上書きする)。 */
 #sidebar {
   position: fixed;
-  left: var(--page-left);
-  top: var(--chrome-h);
+  left: var(--chrome-left);
+  top: var(--left-body-top);
   bottom: var(--chrome-bottom);
   width: var(--sidebar-w);
   background: var(--bg-soft);
@@ -2633,9 +2657,9 @@ body[data-focus-scope="main"] #content {
 /* ===== Sidebar resizer (drag right edge to resize) ===== */
 #sidebar-resizer {
   position: fixed;
-  top: var(--chrome-h);
+  top: var(--left-body-top);
   bottom: var(--chrome-bottom);
-  left: calc(var(--page-left) + var(--sidebar-w) - 4px);
+  left: calc(var(--chrome-left) + var(--sidebar-w) - 4px);
   width: 8px;
   cursor: col-resize;
   z-index: 31;
@@ -3038,9 +3062,7 @@ html[data-theme="dark"] .agent-screen-rules-highlight span[style] {
 body.gdp-help-page {
   --chrome-h: var(--global-header-h);
 }
-body.gdp-help-page #topbar,
-body.gdp-help-page #sidebar,
-body.gdp-help-page #sidebar-resizer {
+body.gdp-help-page #topbar {
   display: none;
 }
 body.gdp-help-page #content {
@@ -3672,7 +3694,8 @@ body.gdp-help-page #content {
   --content-top-gap: 18px;
   /* 本文の左右の余白 (T3)。ソース表示はこの分だけ外へ出て、面を端まで敷く。 */
   --content-pad-x: 24px;
-  margin-left: var(--sidebar-w);
+  /* 左の列 (木) は --page-left に入っている (body の padding-left)。 */
+  margin-left: 0;
   padding: calc(var(--chrome-h) + var(--content-top-gap)) var(--content-pad-x) 80px;
   min-height: var(--content-h);
 }
@@ -5759,7 +5782,8 @@ body.gdp-repo-page #sidebar-resizer {
   display: block;
 }
 body.gdp-repo-page .sb-head,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-head {
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-head,
+body.gdp-files-column-page .sb-head {
   display: grid;
   grid-template:
     "toggle title totals ." auto
@@ -5773,36 +5797,38 @@ body.gdp-file-detail-page.gdp-repo-blob-page .sb-head {
   top: 0;
   z-index: 5;
 }
-body.gdp-repo-page .sb-head > #sidebar-toggle,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-head > #sidebar-toggle {
-  grid-area: toggle;
-}
 body.gdp-repo-page .sb-title,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-title {
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-title,
+body.gdp-files-column-page .sb-title {
   grid-area: title;
 }
 body.gdp-repo-page #totals,
-body.gdp-file-detail-page.gdp-repo-blob-page #totals {
+body.gdp-file-detail-page.gdp-repo-blob-page #totals,
+body.gdp-files-column-page #totals {
   grid-area: totals;
 }
 body.gdp-repo-page #repo-target-wrap,
-body.gdp-file-detail-page.gdp-repo-blob-page #repo-target-wrap {
+body.gdp-file-detail-page.gdp-repo-blob-page #repo-target-wrap,
+body.gdp-files-column-page #repo-target-wrap {
   grid-area: ref;
 }
 .ref-selector.ref-selector-in-grid { width: 100%; }
 body.gdp-repo-page .sb-actions,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-actions {
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-actions,
+body.gdp-files-column-page .sb-actions {
   grid-area: actions;
   margin-left: 0;
   justify-self: start;
 }
 body.gdp-repo-page .sb-view-seg,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-view-seg {
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-view-seg,
+body.gdp-files-column-page .sb-view-seg {
   grid-area: view;
   margin-left: auto;
 }
 body.gdp-repo-page .sb-filter-wrap,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap {
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap,
+body.gdp-files-column-page .sb-filter-wrap {
   grid-area: filter;
   position: relative;
   /* The base rule is sticky with top: var(--sidebar-head-h); keeping that
@@ -5816,17 +5842,20 @@ body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap {
 /* The magnifier glyph offsets assume the default 7px 12px wrap padding;
    the grid layout drops the horizontal padding, so shift it back in. */
 body.gdp-repo-page .sb-filter-wrap::before,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap::before {
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap::before,
+body.gdp-files-column-page .sb-filter-wrap::before {
   left: 11px;
   top: 16px;
 }
 body.gdp-repo-page .sb-filter-wrap::after,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap::after {
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap::after,
+body.gdp-files-column-page .sb-filter-wrap::after {
   left: 22px;
   top: 27px;
 }
 body.gdp-repo-page .sb-filter-clear,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-clear {
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-clear,
+body.gdp-files-column-page .sb-filter-clear {
   right: 7px;
   top: 22px;
 }
@@ -5850,11 +5879,24 @@ body.gdp-repo-page #load-bar {
 }
 body.gdp-repo-page #content {
   --content-top-gap: 24px;
-  margin-left: var(--sidebar-w);
+  margin-left: 0;
   padding: calc(var(--global-header-h) + var(--content-top-gap)) 32px 48px;
 }
 body.gdp-sidebar-hidden #sidebar,
 body.gdp-sidebar-hidden #sidebar-resizer {
+  display: none !important;
+}
+/* 一覧パネルを左の列に置く画面では、畳むのは一覧 (左の列) で、2 列目の
+   変更ファイルは残す。 */
+body.gdp-sidebar-hidden.gdp-history-page #sidebar,
+body.gdp-sidebar-hidden.gdp-worktree-page:not([data-worktree-overview]) #sidebar,
+body.gdp-sidebar-hidden.gdp-history-page #sidebar-resizer,
+body.gdp-sidebar-hidden.gdp-worktree-page:not([data-worktree-overview]) #sidebar-resizer {
+  display: block !important;
+}
+body.gdp-sidebar-hidden #history-panel,
+body.gdp-sidebar-hidden #history-resizer,
+body.gdp-sidebar-hidden.gdp-worktree-page:not([data-worktree-overview]) #worktree-panel {
   display: none !important;
 }
 body.gdp-sidebar-hidden #content,
@@ -8227,9 +8269,6 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
    ============================================================ */
 
 .gdp-database-page #topbar,
-.gdp-database-page #sidebar,
-.gdp-database-page #sidebar-toggle,
-.gdp-database-page #sidebar-resizer,
 .gdp-database-page #query-history-panel {
   display: none !important;
 }
@@ -8271,21 +8310,21 @@ body.gdp-worktree-page #worktree-panel {
   display: flex;
 }
 
-/* 以下 4 つは History 画面と同じ並べ方 (左パネル → サイドバー → 本文)。 */
-body.gdp-worktree-page #sidebar {
-  left: calc(var(--page-left) + var(--history-w));
+/* 以下 3 つは History 画面と同じ並べ方 (左の列 = 一覧パネル → 変更ファイル →
+   本文)。一覧だけを出しているとき (data-worktree-overview) は左の列が Files の木。 */
+body.gdp-worktree-page:not([data-worktree-overview]) #sidebar {
+  left: var(--page-left);
+  top: var(--chrome-h);
 }
 
-body.gdp-worktree-page main#content {
-  margin-left: calc(var(--history-w) + var(--sidebar-w));
+body.gdp-worktree-page:not([data-worktree-overview]) main#content,
+body.gdp-worktree-page.gdp-sidebar-hidden:not([data-worktree-overview]) main#content {
+  margin-left: var(--sidebar-w);
 }
 
-body.gdp-worktree-page.gdp-sidebar-hidden main#content {
-  margin-left: var(--history-w);
-}
-
-body.gdp-worktree-page #sidebar-resizer {
-  left: calc(var(--page-left) + var(--history-w) + var(--sidebar-w) - 4px);
+body.gdp-worktree-page:not([data-worktree-overview]) #sidebar-resizer {
+  left: calc(var(--page-left) + var(--sidebar-w) - 4px);
+  top: var(--chrome-h);
 }
 
 /* サイドバーで意味を持たないのは「対象 ref」だけ。ツリー / 一覧の切替と
@@ -8701,9 +8740,6 @@ body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
    ============================================================ */
 
 .gdp-journal-page #topbar,
-.gdp-journal-page #sidebar,
-.gdp-journal-page #sidebar-toggle,
-.gdp-journal-page #sidebar-resizer,
 .gdp-journal-page #query-history-panel {
   display: none !important;
 }
@@ -16623,9 +16659,6 @@ html[data-theme="dark"] .tools-code span[style] {
    ============================================================ */
 
 .gdp-agents-page #topbar,
-.gdp-agents-page #sidebar,
-.gdp-agents-page #sidebar-toggle,
-.gdp-agents-page #sidebar-resizer,
 .gdp-agents-page #query-history-panel {
   display: none !important;
 }
@@ -16878,12 +16911,14 @@ html[data-nav-collapsed] #app-nav {
 #app-nav[hidden] {
   display: none;
 }
+/* 左のサイドバーの頭 (検索の入口) はタブ列と同じ高さ (--main-tabs-h) で、下端を
+   そろえる。検索欄は --ui-control-sm の枠。 */
 .nav-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  height: var(--header-row-h);
+  height: var(--main-tabs-h);
   padding: 0 var(--pad-face);
 }
 .nav-search {
@@ -17327,8 +17362,9 @@ body.gdp-nav-resizing {
   display: flex;
   align-items: stretch;
 }
+/* 左の面のタブ列は、左の列の上も含む (面の幅 --split-left-w は本文の幅)。 */
 body.main-split .main-tabs-pane[data-side="left"] {
-  flex: 0 0 var(--split-left-w);
+  flex: 0 0 calc(var(--leftcol-shown) + var(--split-left-w));
 }
 .main-tabs-strip {
   flex: 1 1 auto;
@@ -17477,13 +17513,13 @@ body.main-split .main-tabs-pane[data-side="left"] {
 }
 
 /* ---- メインの面の左右の箱 (.main-pane-host。app.ts の PANE_HOSTS) ----
-   前面のタブがターミナルか画像のとき、その面の位置 (タブ列の下・本文の下端の
-   上) に重ねて出す。左の前面が route のタブか何も選んでいないときは出さない
+   前面のタブがターミナルか画像のとき、その面の位置 (タブ列の下・左の列の右・
+   本文の下端の上) に重ねて出す。左の列 (木) は覆わない。左の前面が route のタブか何も選んでいないときは出さない
    (下の本文が見える)。画面ごとのツールバー (50) より上、
    上の行・タブ列・下パネル (60) より下。 */
 .main-pane-host {
   position: fixed;
-  top: var(--global-header-h); left: var(--chrome-left); right: 0;
+  top: var(--global-header-h); left: var(--page-left); right: 0;
   bottom: var(--main-bottom);
   z-index: 55;
   display: none;
@@ -17521,7 +17557,7 @@ body.main-split .main-pane-host[data-side="right"] {
   position: fixed;
   top: 0;
   bottom: var(--main-bottom);
-  left: calc(var(--chrome-left) + var(--split-left-w) - var(--space-unit) * 0.5);
+  left: calc(var(--page-left) + var(--split-left-w) - var(--space-unit) * 0.5);
   width: calc(var(--space-unit) * 1.5);
   z-index: 61;
   display: none;
@@ -17652,46 +17688,67 @@ button.brand[aria-expanded="true"] {
 }
 
 /* ---- プロジェクト名と画面の入口 (#view-head) の置き場所 ----
-   木の列が出ていれば、その見出し (.sb-head) の 1 段目: 名前とブランチの行、
-   その下に絵柄の列。文字は文字の線 (--pad-text)、絵柄の押せる領域の左端は
-   面の線 (--pad-face)。木が出ていなければタブ列の左 (#tabs-lead) に 1 行で。 */
+   左の列の頭 (#left-head) に 2 段で。利用者が左の列を畳んだときだけタブ列の左
+   (#tabs-lead) に 1 行で (views/sidebar.ts の placeSidebarToggle)。 */
 .view-head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
 }
-#sidebar .sb-head > #view-head {
-  grid-area: head;
+/* 左の列の頭 (#left-head)。名前とブランチの行 (右端に木を畳むボタン)、その下に
+   絵柄の列。タブを切り替えても動かない (左の列は利用者が畳まない限りある)。
+   文字は文字の線 (--pad-text)、押せる領域の左端は面の線 (--pad-face)。 */
+#left-head {
+  position: fixed;
+  left: var(--chrome-left);
+  top: var(--global-header-h);
+  width: var(--leftcol-w);
+  height: var(--left-head-h);
+  z-index: 32;
+  box-sizing: border-box;
+  padding: var(--space-3) var(--pad-face) var(--space-2);
+  background: var(--color-tree);
+  /* 右の線は内側の影で引く (border だと幅 --sidebar-w のときだけ中身が 1px
+     削られ、History で列が広がると畳むボタンが 1px 動く)。 */
+  box-shadow: inset -1px 0 0 var(--color-line-soft);
+}
+body.gdp-sidebar-hidden #left-head {
+  display: none;
+}
+#left-head > #view-head {
   flex-direction: column;
   align-items: stretch;
-  gap: var(--space-2);
-  padding-bottom: var(--space-2);
-}
-#sidebar .sb-head > #view-head > .brand {
-  align-self: start;
+  gap: var(--space-1);
+  /* 中身の幅は木の幅で決める。History などで左の列が一覧の幅に広がっても、
+     右端の畳むボタンの位置を変えない。 */
+  width: calc(var(--sidebar-w) - var(--pad-face) * 2);
   max-width: 100%;
-  margin-left: calc(var(--pad-face) - var(--pad-text));
 }
-#sidebar .sb-head > #view-head > .view-strip {
-  margin-left: calc(var(--pad-face) - var(--pad-text));
+.view-head-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: var(--ui-control-sm);
 }
-#sidebar .sb-head:has(> #view-head),
-body.gdp-repo-page #sidebar .sb-head:has(> #view-head),
-body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head:has(> #view-head) {
-  grid-template:
-    "head head head head head head" auto
-    "title ref totals actions view toggle" var(--ui-control-sm)
-    "filter filter filter filter filter filter" auto
-    / auto minmax(0, 1fr) auto auto auto auto;
+.view-head-row > .brand {
+  min-width: 0;
+  max-width: 100%;
 }
+/* 木を畳む / 出すボタンは名前の行の右端 (畳んだときはタブ列の左の同じ行)。 */
+.view-head-row > #sidebar-toggle {
+  order: 2;
+  flex: none;
+  margin-left: auto;
+}
+/* 畳んだときの帯は縮めない (2 面で面が狭くても名前と 6 つの絵柄を出したまま
+   にし、縮むのはタブの列のほう)。名前だけは上限の幅で省略する。 */
 .tabs-lead {
   display: flex;
   align-items: center;
   flex: none;
   gap: var(--space-1);
-  min-width: 0;
-  max-width: 45%;
   padding: 0 var(--space-2) 0 var(--pad-face);
 }
 /* 中身がどれも出ていない (木に名前がある・サイドバーも木も出ている) なら場所を取らない。 */
@@ -17699,7 +17756,11 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head:has(> #view-head)
   display: none;
 }
 .tabs-lead .brand {
+  max-width: calc(var(--space-unit) * 45);
   font-size: var(--ui-font-base);
+}
+.tabs-lead .view-strip {
+  flex: none;
 }
 .tabs-lead .project-branch {
   font-size: var(--ui-font-sm);
@@ -18488,7 +18549,8 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head:has(> #view-head)
    2 段目: 絞り込み。見出しの文字は文字の線、右端の押せる領域は面の線。 */
 #sidebar .sb-head,
 body.gdp-repo-page #sidebar .sb-head,
-body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head {
+body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head,
+body.gdp-files-column-page #sidebar .sb-head {
   display: grid;
   grid-template:
     "title ref totals actions view toggle" var(--ui-control-sm)
@@ -18528,16 +18590,13 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head {
   grid-area: view;
   margin: 0;
 }
-#sidebar .sb-head > #sidebar-toggle {
-  grid-area: toggle;
-}
 #sidebar .sb-head > .sb-filter-wrap {
   grid-area: filter;
   padding: 0;
   margin-left: calc(var(--pad-face) - var(--pad-text));
 }
 #sidebar .sb-head .sb-icon-action,
-#sidebar .sb-head > #sidebar-toggle {
+.view-head-row > #sidebar-toggle {
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
   border: 0;
@@ -18546,7 +18605,7 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head {
   color: var(--color-text-3);
 }
 #sidebar .sb-head .sb-icon-action:hover,
-#sidebar .sb-head > #sidebar-toggle:hover {
+.view-head-row > #sidebar-toggle:hover {
   background: var(--color-raised);
   color: var(--color-text);
 }
@@ -19073,7 +19132,8 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head {
 /* リポジトリの表示ではツリーに固定される (sidebar.ts の treeMode) ので、効かない
    tree / flat の切替は出さず、その幅を対象の ref の値に回す。 */
 body.gdp-repo-page #sidebar .sb-head > .sb-view-seg,
-body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head > .sb-view-seg {
+body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head > .sb-view-seg,
+body.gdp-files-column-page #sidebar .sb-head > .sb-view-seg {
   display: none;
 }
 
@@ -19095,13 +19155,6 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head > .sb-view-seg {
   color: var(--color-text);
   font-size: var(--ui-font-md);
   padding-bottom: var(--space-6);
-}
-/* 重ねる表示では、下パネルのタブ列 (高さ固定、パネルの開閉に依存しない) が
-   常に画面の下端に乗り、#content はその分の padding-bottom を持つ。この画面は
-   自分の箱の中でスクロールするので、箱をその分だけ短くする (2 本目の
-   スクロールバーを出さない)。画面内 (docked) では --content-h が引いてある。 */
-body:not(.app-panel-docked):has(.app-panel) .agents-page {
-  height: calc(var(--content-h) - var(--app-panel-tabbar-height));
 }
 .agents-spacer {
   flex: 1 1 auto;
@@ -20473,7 +20526,7 @@ button.agents-account-name:hover {
 .gdp-repo-blob-layout > .gdp-standalone-file-history,
 .gdp-repo-blob-layout > .gdp-standalone-source:not(:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden]))) {
   margin: calc(var(--content-top-gap) * -1) calc(var(--content-pad-x) * -1) 0;
-  min-height: calc(var(--content-h) - var(--app-panel-tabbar-height));
+  min-height: var(--content-h);
   background: var(--color-code);
 }
 .gdp-repo-blob-layout > .gdp-standalone-blame .gdp-file-detail-sticky,
@@ -21887,13 +21940,14 @@ body[data-worktree-overview] {
     minmax(0, 1.3fr) calc(var(--space-unit) * 30);
 }
 body[data-worktree-overview] #topbar,
-body[data-worktree-overview] #sidebar,
-body[data-worktree-overview] #sidebar-resizer,
 body[data-worktree-overview] #history-resizer,
 body[data-worktree-overview] main#content {
   display: none;
 }
+/* 一覧だけのときは本文の場所いっぱい (左の列は Files の木)。 */
 body[data-worktree-overview] #worktree-panel {
+  left: var(--page-left);
+  top: var(--chrome-h);
   right: 0;
   width: auto;
   padding: 0 var(--space-6) var(--space-6);

@@ -215,10 +215,6 @@ export function createSidebar(deps: SidebarDeps) {
     const observer = new ResizeObserver(syncSidebarHeaderHeight);
     observer.observe(head);
     syncSidebarHeaderHeight();
-    // 木の列は画面ごとの CSS (Worktrees の一覧など) でも出たり消えたりする。
-    // 大きさが変わったら名前と画面の入口を置き直す (消えた列に残さない)。
-    const sidebar = document.querySelector<HTMLElement>("#sidebar");
-    if (sidebar) new ResizeObserver(() => placeViewHead()).observe(sidebar);
   }
 
   let SIDEBAR_FILES: SidebarItem[] = [];
@@ -286,60 +282,33 @@ export function createSidebar(deps: SidebarDeps) {
     host.prepend(button);
   }
 
-  function placeSidebarToggle() {
-    const sidebarHead = document.querySelector<HTMLElement>(".sb-head");
-    const toolbar = document.querySelector<HTMLElement>(
-      ".gdp-repo-toolbar, .gdp-file-detail-header",
-    );
-    const restoreHost =
-      toolbar ||
-      document.querySelector<HTMLElement>("#topbar") ||
-      document.querySelector<HTMLElement>("#tabs-lead");
-    if (STATE.sidebarHidden && restoreHost) attachSidebarToggle(restoreHost);
-    else if (sidebarHead) attachSidebarToggle(sidebarHead);
-    const sidebarToggle =
-      document.querySelector<HTMLButtonElement>("#sidebar-toggle");
-    if (sidebarToggle) syncSidebarToggleIcon(sidebarToggle);
-    placeSidebarFilter();
-    placeViewHead();
-  }
-
   /**
-   * プロジェクト名・ブランチと画面の入口 (#view-head) の置き場所。木の列が
-   * 見えていれば、その見出しの先頭 (1 段目)。畳んでいるか、木の列の無い画面
-   * (Data・全体ボードなど) か、左の面の前面がターミナル・画像で箱が木の列ごと
-   * 覆っているなら、タブ列の左 (#tabs-lead)。
+   * 木を畳む / 出すボタンと、プロジェクト名・ブランチ・画面の入口 (#view-head)
+   * の置き場所。名前と入口は左の列の頭 (#left-head) に固定し、タブや画面を
+   * 切り替えても動かさない。利用者が左の列を畳んだときだけ、タブ列の左
+   * (#tabs-lead) へ移す。ボタンはどちらでも名前の行の右端。
    */
-  function placeViewHead() {
+  function placeSidebarToggle() {
     const head = document.querySelector<HTMLElement>("#view-head");
+    const row = head?.querySelector<HTMLElement>(".view-head-row") ?? null;
+    const leftHead = document.querySelector<HTMLElement>("#left-head");
     const lead = document.querySelector<HTMLElement>("#tabs-lead");
-    const sidebar = document.querySelector<HTMLElement>("#sidebar");
-    const sidebarHead = document.querySelector<HTMLElement>(".sb-head");
-    if (!head || !lead || !sidebar || !sidebarHead)
+    if (!head || !row || !leftHead || !lead)
       throw new Error(
         `view head: missing ${[
           ["#view-head", head],
+          ["#view-head .view-head-row", row],
+          ["#left-head", leftHead],
           ["#tabs-lead", lead],
-          ["#sidebar", sidebar],
-          [".sb-head", sidebarHead],
         ]
           .filter(([, el]) => !el)
           .map(([name]) => name)
           .join(", ")} in index.html`,
       );
-    const coveredByPane =
-      document.querySelector('.main-pane-host[data-side="left"].is-shown') !==
-      null;
-    const inTree =
-      !STATE.sidebarHidden &&
-      !coveredByPane &&
-      !sidebar.hidden &&
-      getComputedStyle(sidebar).display !== "none" &&
-      sidebar.getBoundingClientRect().width > 0;
-    document.body.classList.toggle("view-head-in-tree", inTree);
-    if (inTree) {
-      if (head.parentElement !== sidebarHead) sidebarHead.prepend(head);
-    } else if (head.parentElement !== lead) lead.append(head);
+    attachSidebarToggle(row);
+    const host = STATE.sidebarHidden ? lead : leftHead;
+    if (head.parentElement !== host) host.append(head);
+    placeSidebarFilter();
   }
 
   function placeSidebarFilter() {
@@ -1929,7 +1898,8 @@ export function createSidebar(deps: SidebarDeps) {
   function isRepositorySidebarMode() {
     return (
       document.body.classList.contains("gdp-repo-page") ||
-      document.body.classList.contains("gdp-repo-blob-page")
+      document.body.classList.contains("gdp-repo-blob-page") ||
+      document.body.classList.contains("gdp-files-column-page")
     );
   }
 

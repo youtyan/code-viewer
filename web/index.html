@@ -57,16 +57,21 @@
     <div id="app-nav-resizer" class="app-nav-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="resize sidebar"></div>
   </aside>
   <!-- 上の行は持たない: タブ列が最上段。プロジェクト名・ブランチと画面の入口
-       (#view-head) はファイルの木の列の見出しに置き、木が出ていないときは
-       タブ列の左 (#tabs-lead) へ移す (app.ts の placeViewHead)。 -->
+       (#view-head) は左の列の頭 (#left-head) に固定し、タブを切り替えても動かさない。
+       利用者が左の列を畳んだときだけタブ列の左 (#tabs-lead) へ移す
+       (views/sidebar.ts の placeSidebarToggle)。 -->
   <div id="tabs-lead" class="tabs-lead">
     <button id="nav-expand" class="global-icon-action" type="button" title="show sidebar" aria-label="show sidebar" hidden><span class="goi-icon" aria-hidden="true"></span></button>
+  </div>
+  <div id="left-head" class="left-head">
     <div id="view-head" class="view-head">
-      <!-- リポジトリ名 = プロジェクトの切替 (views/projects/project-switcher.ts)。 -->
-      <button id="project-switcher" class="brand" type="button" aria-label="Switch project">
-        <span class="title" id="project-title">repository</span>
-        <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
-      </button>
+      <div class="view-head-row">
+        <!-- リポジトリ名 = プロジェクトの切替 (views/projects/project-switcher.ts)。 -->
+        <button id="project-switcher" class="brand" type="button" aria-label="Switch project">
+          <span class="title" id="project-title">repository</span>
+          <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
+        </button>
+      </div>
       <!-- 画面の入口。押すとその画面のタブを開くか前面に出す (Files は本文の
            既定 = フォルダ表示)。何を見ているかはタブだけが示すので、選択の印は
            付けない。 -->

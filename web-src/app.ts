@@ -1362,6 +1362,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!lead) throw new Error("#tabs-lead is missing from index.html");
       return lead;
     })(),
+    leftColumn: (() => {
+      const head = document.getElementById("left-head");
+      if (!head) throw new Error("#left-head is missing from index.html");
+      return head;
+    })(),
     getLanguage: () => STATE.language,
     pageLabel: (page) => uiText().nav[page],
     navigate: (route, replace) =>
@@ -1784,6 +1789,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     removeStandaloneSource,
     renderStandaloneSource,
     repoFileTargetFromRoute,
+    filesColumnRef: () =>
+      document.body.classList.contains("gdp-files-column-page")
+        ? STATE.repoRef || "worktree"
+        : null,
     trackLoad,
     isAbortError,
     syncSidebarHeaderHeight,
@@ -4182,6 +4191,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
+  /** 左の列に Files の木を出す (読み込み済みなら使い回す)。失敗は状態と console に出す。 */
+  function showFilesTreeInLeftColumn(): void {
+    const ref = STATE.repoRef || "worktree";
+    REPO_VIEW.renderRepoBlobSidebar("", ref).catch((error: unknown) => {
+      console.error(
+        `[code-viewer] the Files tree (${ref}) for the left column could not be loaded`,
+        error,
+      );
+      setStatus("error");
+    });
+  }
+
   function setPageMode() {
     const historyPanelRoute = STATE.route.screen === "history";
     const fileHistoryRoute = isFileHistoryRoute(STATE.route);
@@ -4236,6 +4257,16 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-agents-page",
       STATE.route.screen === "agents",
     );
+    // 左の列: 自分の一覧を持たない画面は Files の木を出す (History・選んでいる
+    // Worktrees は一覧パネル、repo / file / diff は #sidebar の自分の一覧)。
+    const filesColumnRoute =
+      STATE.route.screen === "journal" ||
+      STATE.route.screen === "agents" ||
+      STATE.route.screen === "help" ||
+      STATE.route.screen === "database" ||
+      (STATE.route.screen === "worktree" && !STATE.route.wt);
+    document.body.classList.toggle("gdp-files-column-page", filesColumnRoute);
+    if (filesColumnRoute) showFilesTreeInLeftColumn();
     // docked の下パネルと場所を分け合うとき、#content がスクロール容器になる
     // ページ。style.css の body.app-panel-docked[data-content-scrolls-when-docked]
     // 規則群がこの属性だけを見る (ページクラスの列挙はしない)。
@@ -6804,8 +6835,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         showImageIn(side, tab.target.path);
       }
     }
-    // 左の箱が木の列を覆ったか外れたか: 名前と画面の入口を置き直す。
-    placeSidebarToggle();
     syncHeaderMenu();
     AGENTS_SIDEBAR?.refresh();
     const front = view.fronts[view.focused];
@@ -7376,6 +7405,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     getText: () => worktreeText(STATE.language),
     setPageMode,
     syncHeaderMenu,
+    onSidebarOwner: (owned) => {
+      // 作業ツリーの変更ファイルを書くなら、Files の木はもう使い回せない。
+      // 一覧だけの表示なら左の列を Files の木に戻す (読み込み済みなら使い回す)。
+      if (owned) invalidateRepoSidebar();
+      else showFilesTreeInLeftColumn();
+    },
     setStatus,
     createOpenPathButton,
     openPathInOs: (path, kind) => openPathInOs(path, kind),

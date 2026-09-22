@@ -80,6 +80,11 @@ export type RepoViewDeps = {
   removeStandaloneSource(): void;
   renderStandaloneSource(target: SourceFileTarget): Promise<unknown>;
   repoFileTargetFromRoute(): string | null;
+  /**
+   * 一覧を持たない画面 (Work log・全体ボード・設定・Data・Worktrees の一覧表示)
+   * で左の列に Files の木を出すときの ref。そうでない画面は null。
+   */
+  filesColumnRef(): string | null;
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;
   isAbortError(err: unknown): boolean;
   setRepoSidebarRef(ref: string | null): void;
@@ -169,6 +174,7 @@ export function createRepoView(deps: RepoViewDeps) {
     removeStandaloneSource,
     renderStandaloneSource,
     repoFileTargetFromRoute,
+    filesColumnRef,
     trackLoad,
     isAbortError,
     syncSidebarHeaderHeight,
@@ -243,7 +249,7 @@ export function createRepoView(deps: RepoViewDeps) {
     const fileRef = repoFileTargetFromRoute();
     if (fileRef != null) return fileRef || "worktree";
     if (STATE.route.screen === "repo") return STATE.route.ref || "worktree";
-    return null;
+    return filesColumnRef();
   }
 
   function isActiveRepoTreeRef(ref: string) {
