@@ -3058,6 +3058,13 @@ window.GdpExpandLogic = GdpExpandLogic;
   function localizeViewerChrome() {
     const text = uiText();
     document.documentElement.lang = STATE.language;
+    // 最下段の接続状態も今の言語で書き直す (状態は #status の class にある)。
+    const status = $("#status").classList;
+    setStatus(
+      (["live", "refreshing", "error"] as const).find((s) =>
+        status.contains(s),
+      ) ?? null,
+    );
     // 画面の入口 (木の見出しの絵柄の列)。絵だけなので、名前とキーは
     // title / aria-label に出す。
     const bindings = activeKeyBindings();
@@ -3462,7 +3469,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         reject(new Error("failed to load highlight.js"));
       };
       document.head.appendChild(script);
-    }).catch(() => {
+    }).catch((error: unknown) => {
+      // 次に使うときに読み直す。ボタンは失敗の見た目、理由はここに残す。
+      console.error("[code-viewer] highlight.js could not be loaded", error);
       highlightLoadPromise = null;
       return null;
     });
@@ -4077,8 +4086,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         dispatchFileRoute(routeNow, { refresh: true });
       });
     // 中断 (cancelInFlightRequests) は再描画しない。次の通知で再検証する。
-    fileRouteSignatureCheck.catch(() => {
+    fileRouteSignatureCheck.catch((error: unknown) => {
       fileRouteSignatureCheck = null;
+      if (!isAbortError(error))
+        console.error(
+          `[code-viewer] could not check whether ${key} changed`,
+          error,
+        );
     });
   }
 
@@ -6078,8 +6092,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         setStatus(data.error ? "error" : "live");
         return result;
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!isCurrentDiffRequest()) return null;
+        if (!isAbortError(error))
+          console.error(
+            `[code-viewer] the diff ${fromAtRequest}..${toAtRequest} could not be loaded or drawn`,
+            error,
+          );
         setStatus("error");
         return null;
       });
@@ -7278,6 +7297,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         session,
         TERMINAL_VIEW.knownShells()?.sessions ?? [],
         terminalText(STATE.language).shellTarget,
+        (id) => !!paneForShell(id)?.kind,
       ),
       state: null,
     };

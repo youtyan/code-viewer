@@ -1772,6 +1772,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     deps.onSidebarOwner(true);
     if (title) title.textContent = t.panes.files;
     if (totals) totals.textContent = t.files.heading(item.fileCount);
+    list.removeAttribute("data-diff-list");
     list.replaceChildren();
     renderCommits(list, item);
     if (!item.fileCount) {

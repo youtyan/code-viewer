@@ -1962,8 +1962,6 @@ export function createHelpPage(deps: HelpPageDeps) {
     const empty = deps.$("#empty");
     empty.classList.add("hidden");
     deps.$("#meta").textContent = "";
-    deps.$("#totals").textContent = "";
-    deps.$("#filelist").textContent = "";
 
     const lang =
       deps.getRoute().screen === "help" &&

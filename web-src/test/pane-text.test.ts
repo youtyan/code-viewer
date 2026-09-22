@@ -104,15 +104,22 @@ describe("shell name: Shell and the order it was opened, never the id", () => {
       expected: "Shell",
     },
   ])("$name → $expected", ({ session, expected }) => {
-    expect(shellName(session, sessions, "Shell")).toBe(expected);
+    expect(shellName(session, sessions, "Shell", () => false)).toBe(expected);
   });
 
   test("closing an earlier shell renumbers the later ones", () => {
     const rest = sessions.filter((item) => item.id !== "shell-aaaa01");
-    expect(shellName("shell-zzzz01", rest, "Shell")).toBe("Shell 2");
+    expect(shellName("shell-zzzz01", rest, "Shell", () => false)).toBe(
+      "Shell 2",
+    );
+  });
+
+  test("shells showing an agent are not counted", () => {
+    const agent = (id: string) => id === "shell-aaaa01";
+    expect(shellName("shell-bbbb01", sessions, "Shell", agent)).toBe("Shell 1");
   });
 
   test("an empty list names every shell by the word alone", () => {
-    expect(shellName("shell-aaaa01", [], "シェル")).toBe("シェル");
+    expect(shellName("shell-aaaa01", [], "シェル", () => false)).toBe("シェル");
   });
 });

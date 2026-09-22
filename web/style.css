@@ -6629,11 +6629,9 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 [data-theme="dark"] ::-webkit-scrollbar-thumb { border-color: var(--bg); }
 
 /* ===== Responsive ===== */
-@media (max-width: 1440px) {
-  #topbar {
-    gap: 8px;
-    padding-inline: 12px;
-  }
+/* 比較対象の帯 (#topbar) の段階は、窓ではなく帯の実幅で決める (下の B-1 の
+   container: topbar)。98em は何も詰めない帯の自然な幅 (どの密度でも約 96em)。 */
+@container topbar (max-width: 98em) {
   #meta {
     flex: 0 1 auto;
     min-width: 0;
@@ -6653,11 +6651,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
     min-width: 0;
     margin-left: 0;
     gap: 6px;
-  }
-  #topbar .ref-selector {
-    flex: 1 1 clamp(140px, 16vw, 220px);
-    width: clamp(140px, 16vw, 220px);
-    min-width: 140px;
   }
   #topbar .spacer {
     display: none;
@@ -18246,10 +18239,15 @@ body.gdp-files-column-page #sidebar .sb-head {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
+/* 見出しの行が狭いとき (日本語・大きい密度) に詰めるのは件数だけ (… で省く)。
+   題と切替の語は折らない。 */
 #sidebar .sb-head > #totals {
   grid-area: totals;
   justify-self: end;
+  max-width: 100%;
+  white-space: nowrap;
 }
 #sidebar .sb-head > #repo-target-wrap {
   grid-area: ref;
@@ -18291,6 +18289,7 @@ body.gdp-files-column-page #sidebar .sb-head {
   height: calc(var(--ui-control-sm) - var(--space-1));
   padding: 0 var(--space-1);
   font-size: var(--ui-font-xs);
+  white-space: nowrap;
 }
 /* 対象の ref: 小さな面。既定のときはアイコンだけの押せる領域 (入力欄は面の
    上に重ねたまま透明にして、押すと今までどおり選ぶ一覧が開く)。 */
@@ -18405,9 +18404,12 @@ body.gdp-files-column-page #sidebar .sb-head {
   min-width: 0;
   min-height: 0;
 }
-/* 端末の画面の内側の余白 (文字が面の端に接しない)。fit は親の余白を引いて
-   桁数を決めるので、ここに付ければ桁数の計算もそろう。 */
+/* 端末の画面の内側の余白 (文字が面の端に接しない)。fit (@xterm/addon-fit) は
+   この親の computed の幅・高さから桁数・行数を決め、親の余白は引かない。
+   border-box のままだと余白の分だけ行と桁が多くなり、最終行と右端が面の外で
+   切れる。content-box にして computed の寸法を余白の内側にする。 */
 .terminal-screen-row > .terminal-screen {
+  box-sizing: content-box;
   padding: var(--space-2) var(--pad-text);
 }
 
@@ -18656,6 +18658,10 @@ body.gdp-files-column-page #sidebar .sb-head {
 .image-tab-actions {
   gap: var(--space-1);
 }
+/* 狭いときに縮むのはパス (省略の …) だけ。操作は縮めない (面の外に押し出さない)。 */
+.image-tab-actions {
+  flex: none;
+}
 .image-tab-meta {
   flex: 1 1 auto;
   gap: var(--space-2);
@@ -18801,6 +18807,9 @@ body.gdp-files-column-page #sidebar .sb-head {
 }
 #sidebar .sb-head .sb-view-seg {
   align-self: center;
+  /* overflow: hidden の枠は grid で 0 まで縮められ、「ツリー」が 1 文字ずつ
+     折り返して潰れた。語の幅は守る。 */
+  min-width: max-content;
 }
 #sidebar .sb-head .sb-view-seg button {
   display: inline-grid;
@@ -20575,6 +20584,11 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 #topbar {
   gap: var(--space-4);
   padding: 0 var(--pad-face) 0 var(--pad-text);
+  /* 詰め方の段階 (@container topbar) は帯の実幅で決める。窓の幅では左の 2 列の
+     幅が入らず、1600px で比較対象が「H.」まで潰れた。閾値の em は密度に比例する
+     この文字の大きさ (帯の中の文字はどれもトークンで大きさを決め、継がない)。 */
+  container: topbar / inline-size;
+  font-size: var(--ui-font-md);
 }
 #topbar > .ref-pickers {
   order: 1;
@@ -20764,17 +20778,16 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
   background: var(--color-accent);
 }
 
-/* 1280px 前後では件数・次の未閲覧・切替のすべてを 1 行に収めるため、間隔と
-   選択欄を 1 段ずつ詰める (省かない)。 */
+/* 件数・次の未閲覧・切替のすべてを 1 行に収めるため、間隔と選択欄を 1 段ずつ
+   詰める (省かない)。帯そのものの間隔だけは帯の中から問えないので窓の幅。 */
 @media (max-width: 1440px) {
   #topbar {
     gap: var(--space-3);
   }
+}
+@container topbar (max-width: 98em) {
   #topbar > #meta {
     gap: var(--space-2);
-  }
-  #topbar .ref-selector {
-    width: calc(var(--space-unit) * 28);
   }
   #topbar .seg button {
     padding: 0 var(--space-3);
@@ -20783,12 +20796,15 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
     padding: 0 var(--space-1);
   }
 }
-/* 左のサイドバーと左の列を出したままの 1280px 前後では、上の詰め方でも
-   比較対象の選択欄の最小が入らない (件数・切替と重なる)。閲覧の数 (0/2 viewed)
-   だけを省き、間隔をもう 1 段詰める。閲覧の数はファイルの見出しの Viewed と
-   サイドバーの印に残る。1359px は、既定の密度・英語で 1 行に収まる幅 (実測)。 */
+/* 帯がさらに狭いと、上の詰め方でも比較対象の選択欄が枝の名前を出せない。
+   閲覧の数 (0/2 viewed) だけを省き、間隔をもう 1 段詰める。閲覧の数はファイルの
+   見出しの Viewed とサイドバーの印に残る。 */
 @media (max-width: 1359px) {
-  #topbar,
+  #topbar {
+    gap: var(--space-1);
+  }
+}
+@container topbar (max-width: 72em) {
   #topbar > #meta {
     gap: var(--space-1);
   }

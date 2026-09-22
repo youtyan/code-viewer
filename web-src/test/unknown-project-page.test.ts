@@ -1,6 +1,6 @@
 // 知らない鍵の案内ページの言語とテーマは、全プロジェクト共通の設定
-// (`<状態>/settings.json` の language / theme) に合わせる。無ければ英語・ライト。
-// 読めなければ英語・ライトで出し、読めない理由をページの末尾と console.error に
+// (`<状態>/settings.json` の language / theme) に合わせる。無ければ英語・ダーク
+// (アプリの既定と同じ)。読めなければ英語・ダークで出し、読めない理由をページの末尾と console.error に
 // 出す (隠さない)。
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -49,10 +49,18 @@ describe("unknown project page: language and theme from the shared settings", ()
       failure: null,
     },
     {
+      name: "a dark palette other than violet",
+      prepare: write('{"version":1,"theme":"graphite"}'),
+      lang: "en",
+      theme: "dark",
+      heading: "This project is not registered",
+      failure: null,
+    },
+    {
       name: "no settings file",
       prepare: () => undefined,
       lang: "en",
-      theme: "light",
+      theme: "dark",
       heading: "This project is not registered",
       failure: null,
     },
@@ -60,7 +68,7 @@ describe("unknown project page: language and theme from the shared settings", ()
       name: "settings without language and theme",
       prepare: write('{"version":1}'),
       lang: "en",
-      theme: "light",
+      theme: "dark",
       heading: "This project is not registered",
       failure: null,
     },
@@ -68,7 +76,7 @@ describe("unknown project page: language and theme from the shared settings", ()
       name: "broken settings (not JSON)",
       prepare: write("{"),
       lang: "en",
-      theme: "light",
+      theme: "dark",
       heading: "This project is not registered",
       failure:
         "settings could not be read: the settings shared by all projects (",
@@ -77,7 +85,7 @@ describe("unknown project page: language and theme from the shared settings", ()
       name: "unreadable settings (a folder in its place)",
       prepare: (path) => mkdirSync(path),
       lang: "en",
-      theme: "light",
+      theme: "dark",
       heading: "This project is not registered",
       failure:
         "settings could not be read: cannot read the settings shared by all projects (",

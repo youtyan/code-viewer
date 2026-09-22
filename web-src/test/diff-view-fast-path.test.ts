@@ -189,6 +189,8 @@ function createDiffViewForShellTest(
     },
     renderSidebar() {
       sidebarRenders++;
+      // 本物 (sidebar.ts) と同じく、差分の一覧を描いた印を付ける。
+      document.querySelector("#filelist")?.setAttribute("data-diff-list", "");
     },
     isRepositorySidebarMode: () => false,
     loadRepo: async () => undefined,
@@ -368,10 +370,16 @@ describe("diff view fast path", () => {
     expect(isDiffShellDomIntact(target([repoShell]), ["src/a.ts"])).toBe(false);
   });
 
-  test("refreshes the sidebar when the file list is unchanged but the diff DOM was replaced", () => {
-    expect(shouldRenderDiffSidebar(true, true)).toBe(false);
-    expect(shouldRenderDiffSidebar(true, false)).toBe(true);
-    expect(shouldRenderDiffSidebar(false, true)).toBe(true);
+  test.each([
+    [true, true, true, false],
+    [true, false, true, true],
+    [false, true, true, true],
+    // 別のタブで左の列が Files の木に書き換わった
+    [true, true, false, true],
+  ])("renders the sidebar (listSame=%s, domIntact=%s, listShown=%s) -> %s", (listSame, domIntact, listShown, expected) => {
+    expect(shouldRenderDiffSidebar(listSame, domIntact, listShown)).toBe(
+      expected,
+    );
   });
 
   test("renders viewed progress from the displayed diff files", () => {
@@ -1685,6 +1693,19 @@ describe("diff view next-unviewed-file navigation", () => {
       document.querySelector<HTMLButtonElement>("#meta .chip-next-unviewed")
         ?.disabled,
     ).toBe(false);
+  });
+
+  test("the fast path renders the sidebar again after another tab replaced #filelist", () => {
+    setupDiffDom();
+    const { view, sidebarRenders } = createDiffViewForShellTest();
+    const meta = makeMeta([makeFile("a.ts", 1, 0, "/a")]);
+    view.renderShell(meta, null);
+    view.renderShell(meta, null);
+    expect(sidebarRenders()).toBe(1);
+    // 別のタブ (Agents など) で左の列が Files の木に書き換わった。
+    document.querySelector("#filelist")?.removeAttribute("data-diff-list");
+    const result = view.renderShell(meta, null);
+    expect([sidebarRenders(), result.structureChanged]).toEqual([2, false]);
   });
 
   test("disables the next-unviewed button after a filter-preserving renderShell refresh hides every row", () => {

@@ -158,8 +158,16 @@ export function isDiffShellDomIntact(
   });
 }
 
-export function shouldRenderDiffSidebar(listSame: boolean, domIntact: boolean) {
-  return !listSame || !domIntact;
+/**
+ * `listShown`: 左の列 (#filelist) が今も差分の一覧か。タブで別の画面へ移ると
+ * Files の木などに書き換わるので、一覧と差分の DOM が同じでも描き直す。
+ */
+export function shouldRenderDiffSidebar(
+  listSame: boolean,
+  domIntact: boolean,
+  listShown: boolean,
+) {
+  return !listSame || !domIntact || !listShown;
 }
 
 function collectDiffCardsByKey(target: Element): Map<string, DiffCardElement> {
@@ -968,7 +976,11 @@ export function createDiffView(deps: DiffViewDeps) {
     const empty = getEmptyPane?.() || $("#empty");
     const expectedKeys = newFiles.map(fileKey);
     const domIntact = isDiffShellDomIntact(target, expectedKeys);
-    const sidebarNeedsRender = shouldRenderDiffSidebar(listSame, domIntact);
+    const sidebarNeedsRender = shouldRenderDiffSidebar(
+      listSame,
+      domIntact,
+      $("#filelist").hasAttribute("data-diff-list"),
+    );
     if (!newFiles.length) {
       prevListSignature = newListSig;
       prevCardSignatures.clear();
@@ -1011,7 +1023,8 @@ export function createDiffView(deps: DiffViewDeps) {
     let invalidatedCards = 0;
 
     if (listSame && domIntact) {
-      // Fast path: file list structure unchanged — skip replaceChildren and renderSidebar.
+      // Fast path: file list structure unchanged — skip replaceChildren (and
+      // renderSidebar, unless another tab replaced #filelist meanwhile).
       // Index the cards once — a per-file linear scan from both loops below
       // is O(n²) on large diffs.
       const cardsByKey = collectDiffCardsByKey(target);
@@ -1097,7 +1110,11 @@ export function createDiffView(deps: DiffViewDeps) {
           }
         }
       }
-      if (sidebarNeedsStatsUpdate && canUpdateSidebar)
+      if (sidebarNeedsRender && canUpdateSidebar) {
+        renderSidebar(newFiles);
+        if (typeof applyHideTests === "function") applyHideTests();
+        applyViewedState();
+      } else if (sidebarNeedsStatsUpdate && canUpdateSidebar)
         updateSidebarStats(newFiles);
       prevCardSignatures = newCardSigs;
       prevListSignature = newListSig;

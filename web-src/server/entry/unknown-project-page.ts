@@ -2,7 +2,8 @@
 // 今までどおり 404 の JSON (server.ts の handleProjectPath)。
 //
 // 言語とテーマは全プロジェクト共通の設定 (`<状態>/settings.json`) に合わせる。
-// 無ければ英語・ライト。読めなければ英語・ライトで出し、読めない理由をページの
+// テーマはアプリと同じく "light" 以外 (未設定・色違いのダーク) をダークにする。
+// 無ければ英語・ダーク。読めなければ英語・ダークで出し、読めない理由をページの
 // 末尾に小さく出す (console.error にも全部出す)。色はアプリの style.css を読まず
 // ここに持つ (style.css はアプリの骨格を前提にする)。
 
@@ -19,23 +20,23 @@ export type PageLook = {
   failure: string | null;
 };
 
-/** 設定から言語とテーマを決める。読めなければ英語・ライトと理由。 */
+/** 設定から言語とテーマを決める。読めなければ英語・ダークと理由。 */
 export function readPageLook(settingsPath: string): PageLook {
   try {
     const settings = readUserSettings(settingsPath);
     return {
       lang: settings?.language === "ja" ? "ja" : "en",
-      theme: settings?.theme === "dark" ? "dark" : "light",
+      theme: settings?.theme === "light" ? "light" : "dark",
       failure: null,
     };
   } catch (error) {
     console.error(
-      "[code-viewer] entry: the page for an unknown project could not read the shared settings; showing it in English and light",
+      "[code-viewer] entry: the page for an unknown project could not read the shared settings; showing it in English and dark",
       error,
     );
     // ページには理由の文だけ (元の原因の文を含む)。スタックは上の console.error。
     const failure = error instanceof Error ? error.message : String(error);
-    return { lang: "en", theme: "light", failure };
+    return { lang: "en", theme: "dark", failure };
   }
 }
 

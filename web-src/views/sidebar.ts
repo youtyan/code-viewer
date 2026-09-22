@@ -1480,6 +1480,8 @@ export function createSidebar(deps: SidebarDeps) {
     }
     const treeMode = STATE.sbView === "tree" || repoSidebar;
     ul.innerHTML = "";
+    // 差分の一覧を描いた印 (diff-view の shouldRenderDiffSidebar が読む)。
+    ul.toggleAttribute("data-diff-list", !repoSidebar);
     ul.classList.toggle("tree", treeMode);
     ul.classList.remove("tree-virtual");
     ul.style.removeProperty("height");
