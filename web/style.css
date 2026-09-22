@@ -16989,7 +16989,7 @@ html[data-nav-collapsed] #app-nav {
   gap: var(--space-2);
   height: var(--ui-control-sm);
   padding: 0 calc(var(--pad-text) - var(--pad-face));
-  border: 0;
+  border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-md);
   background: var(--color-inset);
   color: var(--color-text-3);
@@ -17107,7 +17107,8 @@ html[data-nav-collapsed] #app-nav {
   align-items: center;
   gap: var(--space-2);
   height: 100%;
-  padding: 0 var(--space-1) 0 0;
+  /* hover / focus で出る 2 操作ぶんを常に予約し、名前を動かさない。 */
+  padding: 0 var(--space-7) 0 0;
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
@@ -17200,17 +17201,18 @@ html[data-nav-collapsed] #app-nav {
   color: var(--color-failed);
   font-weight: 700;
 }
-/* 行の操作は hover / キーボードで行に入ったときだけ出す。場所は最初から
-   確保しない (絶対配置で名前の上に重ねる) ので、出ても行は動かない。 */
+/* 行の操作は hover / キーボードで行に入ったときだけ出す。2 個ぶんの場所は
+   .nav-project-toggle が最初から予約するので、出ても名前と行は動かない。 */
 .nav-project-actions {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
+  width: var(--space-7);
   display: flex;
   align-items: center;
-  gap: calc(var(--space-1) / 2);
-  padding: 0 var(--space-1);
+  gap: 0;
+  padding: 0;
   border-radius: var(--radius-md);
   background: var(--color-raised);
   opacity: 0;
@@ -17232,6 +17234,9 @@ html[data-nav-collapsed] #app-nav {
   background: transparent;
   color: var(--color-text-2);
   cursor: pointer;
+}
+.nav-project-actions .nav-row-action {
+  width: var(--space-5);
 }
 .nav-row-action:hover {
   background: var(--color-select);
@@ -17265,7 +17270,7 @@ html[data-nav-collapsed] #app-nav {
   align-items: center;
   column-gap: var(--space-2);
   height: var(--ui-row-h);
-  padding: 0 calc(var(--pad-text) - var(--pad-face)) 0 calc(var(--pad-text) - var(--pad-face) + var(--indent-step));
+  padding: 0 calc(var(--pad-text) - var(--pad-face)) 0 calc(var(--pad-text) - var(--pad-face) + var(--indent-step) + var(--space-1));
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;

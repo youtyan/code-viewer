@@ -131,7 +131,20 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       "nav-agent-kind",
       pane.kind ? current.kind[pane.kind] : current.kindShell,
     );
-    const task = el("span", "nav-agent-task", paneTaskText(pane));
+    const paneTask = paneTaskText(pane);
+    // tmux / shell の既定の題名はホスト名やコマンド名のような 1 語になる。
+    // それを作業内容として見せず、AI CLI が書いた説明的な題名だけを使う。
+    const rawTitle = pane.title.trim();
+    const task = el(
+      "span",
+      "nav-agent-task",
+      paneTask !== pane.command &&
+        (paneTask !== rawTitle ||
+          /\s/.test(rawTitle) ||
+          /[^\p{ASCII}]/u.test(rawTitle))
+        ? paneTask
+        : current.state[pane.state],
+    );
     const age = ageText(pane);
     const time = el("span", "nav-agent-age", age.text);
     if (age.title) time.title = age.title;
@@ -139,7 +152,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     dot.setAttribute("aria-hidden", "true");
     row.append(stateMark(pane.state), kind, task, time, dot);
     row.title = [
-      `${current.state[pane.state]} · ${pane.title || pane.command}`,
+      `${current.state[pane.state]} · ${task.textContent}`,
       `${pane.label} · ${pane.command}`,
       pane.worktree ? current.worktreeTitle(pane.worktree) : "",
       unread
@@ -187,7 +200,6 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
   ): HTMLButtonElement {
     const button = el("button", `nav-row-action ${className}`);
     button.type = "button";
-    button.tabIndex = -1;
     button.innerHTML = svg;
     button.title = title;
     button.setAttribute("aria-label", title);
@@ -247,18 +259,20 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     ].join("\n");
     // 見出しの絵: 起こしている最中は回る点線、人の番のもの (入力待ち・完了)
     // があればその印 (畳んでいても中に何があるか分かる)、無ければフォルダ。
-    const urgent =
+    const projectState =
       group.counts.waiting > 0
         ? "waiting"
         : group.counts.done > 0
           ? "done"
-          : null;
+          : group.counts.working > 0
+            ? "working"
+            : null;
     const icon = el("span", "nav-project-icon");
     icon.setAttribute("aria-hidden", "true");
     if (starting) {
       icon.appendChild(el("i", "terminal-mark nav-mark-starting"));
-    } else if (urgent) {
-      icon.appendChild(stateMark(urgent));
+    } else if (projectState) {
+      icon.appendChild(stateMark(projectState));
     } else {
       icon.innerHTML = iconSvg(
         "octicon-file-directory",

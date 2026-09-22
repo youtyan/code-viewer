@@ -71,12 +71,13 @@ function pane(
   label: string,
   project: string,
   state: AgentState,
+  title = `task ${id}`,
 ): AgentPane {
   return {
     id,
     label,
     session: "work",
-    title: `task ${id}`,
+    title,
     command: "claude",
     path: project,
     kind: "claude",
@@ -356,20 +357,42 @@ describe("agents sidebar actions", () => {
 });
 
 describe("agents sidebar heading marks", () => {
-  test("a folded project shows its most urgent state; a starting one shows Starting", () => {
+  test.each<[string, AgentState[], string]>([
+    [
+      "waiting wins over working",
+      ["working", "waiting"],
+      ".terminal-mark-waiting",
+    ],
+    ["done wins over working", ["working", "done"], ".terminal-mark-done"],
+    [
+      "working is visible on the project",
+      ["working"],
+      ".terminal-mark-working",
+    ],
+    ["idle keeps the folder", ["idle"], "svg"],
+  ])("%s", (_name, states, selector) => {
+    const { root } = mount(
+      overview(
+        states.map((state, index) =>
+          pane(`%${index + 1}`, `work:${index}.0`, "/work/sample-lib", state),
+        ),
+        REGISTERED,
+      ),
+    );
+    const lib = [
+      ...root.querySelectorAll<HTMLElement>(".nav-project-head"),
+    ].find(
+      (el) =>
+        el.querySelector(".nav-project-name")?.textContent === "sample-lib",
+    );
+    expect(lib?.querySelector(`.nav-project-icon ${selector}`)).not.toBeNull();
+  });
+
+  test("a starting project shows its progress mark and label", () => {
     const actions = fakeActions();
     actions.activity = (root) =>
       root === "/work/sample-docs" ? { kind: "starting" } : null;
-    const { root } = mount(
-      overview(
-        [
-          pane("%1", "work:0.0", "/work/sample-lib", "working"),
-          pane("%2", "work:1.0", "/work/sample-lib", "waiting"),
-        ],
-        REGISTERED,
-      ),
-      actions,
-    );
+    const { root } = mount(overview([], REGISTERED), actions);
     const icon = (name: string) =>
       [...root.querySelectorAll<HTMLElement>(".nav-project-head")]
         .find(
@@ -377,14 +400,32 @@ describe("agents sidebar heading marks", () => {
         )
         ?.querySelector(".nav-project-icon");
     expect(
-      icon("sample-lib")?.querySelector(".terminal-mark-waiting"),
-    ).not.toBeNull();
-    expect(icon("sample-app")?.querySelector("svg")).not.toBeNull();
-    expect(
       icon("sample-docs")?.querySelector(".nav-mark-starting"),
     ).not.toBeNull();
     expect(root.querySelector(".nav-project-status")?.textContent).toBe(
       agentsText("en").sidebar.starting,
+    );
+  });
+});
+
+describe("agents sidebar row contents", () => {
+  test.each<[string, AgentState, string, string]>([
+    ["agent title", "working", "✳ Review plan", "Review plan"],
+    ["Japanese agent title", "working", "✳ 調査中", "調査中"],
+    ["command title", "idle", "claude", "Idle"],
+    ["one-word shell title", "waiting", "workstation", "Needs input"],
+    ["empty title", "done", "", "Finished · unread"],
+  ])("%s", (_name, state, title, expected) => {
+    const { root } = mount(
+      overview(
+        [pane("%1", "work:0.0", "/work/sample-app", state, title)],
+        REGISTERED,
+      ),
+    );
+    const row = root.querySelector<HTMLElement>(".nav-agent");
+    expect(row?.querySelector(".nav-agent-task")?.textContent).toBe(expected);
+    expect(row?.title.split("\n")[0]).toBe(
+      `${agentsText("en").state[state]} · ${expected}`,
     );
   });
 });
