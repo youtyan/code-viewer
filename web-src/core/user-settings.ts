@@ -28,6 +28,7 @@ export const USER_SETTING_KEYS = [
   "agentHookHintDismissed",
   "agentAccountsCollapsed",
   "terminalImageShelfCollapsed",
+  "terminalSessionsOpen",
   "navCollapsed",
   "navWidth",
   "navCollapsedProjects",

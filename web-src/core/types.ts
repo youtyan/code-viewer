@@ -216,6 +216,8 @@ export type AppSettingsState = {
   agentAccountsCollapsed?: boolean;
   /** ターミナルの右の画像の棚を畳んだ。 */
   terminalImageShelfCollapsed?: boolean;
+  /** ターミナルのセッションの一覧 (左の列) を開いている。 */
+  terminalSessionsOpen?: boolean;
   /** 左のサイドバー (プロジェクトとエージェント) を畳んだ。 */
   navCollapsed?: boolean;
   /** 左のサイドバーの幅 (px)。範囲は core/panel-sizes.ts の NAV_WIDTH。 */

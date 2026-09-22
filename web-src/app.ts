@@ -6240,6 +6240,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       closeToolsSheet();
     if (
       parseSearchResultsOverlay(window.location.search) !== null ||
+    // セッションの一覧 (左の列) を開いたかも人に付く設定。再読み込みで畳まない。
+    isSessionsOpen: () => APP_SETTINGS.terminalSessionsOpen === true,
+    onSessionsOpenChange: (open) => {
+      mergeLocalSettings({ terminalSessionsOpen: open });
+      patchSettings({ terminalSessionsOpen: open });
+    },
       SEARCH_RESULTS_VIEW.isOpen()
     )
       closeSearchSheet();

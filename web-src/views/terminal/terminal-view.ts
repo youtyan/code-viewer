@@ -72,6 +72,10 @@ export type TerminalViewDeps = {
   isImageShelfCollapsed(): boolean;
   /** 棚を畳んだ・開いた。保存は呼び出し側 (app.ts) が持つ。 */
   onImageShelfCollapsedChange(collapsed: boolean): void;
+  /** セッションの一覧 (左の列) を開いているか (ユーザー単位の設定)。 */
+  isSessionsOpen(): boolean;
+  /** 一覧を開いた・畳んだ。保存は呼び出し側 (app.ts) が持つ。 */
+  onSessionsOpenChange(open: boolean): void;
   onCloseRequest?: () => void;
   /** 映している対象が変わったとき。URL 同期に使う。 */
   onTargetChange?: (id: string | null) => void;
@@ -117,8 +121,10 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   /**
    * セッションの一覧 (左の列) を開いているか。既定は畳む: エージェントは常設の
    * サイドバーから開けるので、一覧は必要なときだけ見出しのボタンで出す。
+   * 開いたかどうかはユーザー単位の設定に残す (再読み込みやプロジェクトの
+   * 移動で畳まれてしまわないように)。
    */
-  let listsOpen = false;
+  let listsOpen = deps.isSessionsOpen();
   let statusEl: HTMLElement | null = null;
   let listEl: HTMLElement | null = null;
   let attached: ShellSession | null = null;
@@ -188,6 +194,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
 
   function setListsOpen(open: boolean): void {
     listsOpen = open;
+    deps.onSessionsOpenChange(open);
     getMount()?.classList.toggle("terminal-lists-open", open);
     syncViewActions();
     // 画面の幅が変わるので桁数を測り直す。

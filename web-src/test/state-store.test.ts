@@ -118,6 +118,30 @@ describe("state store", () => {
 
   test.each([
     {
+      name: "keeps the session list open",
+      input: true,
+      expected: { version: 1, terminalSessionsOpen: true },
+    },
+    {
+      name: "keeps the session list collapsed",
+      input: false,
+      expected: { version: 1, terminalSessionsOpen: false },
+    },
+    {
+      name: "drops a non-boolean session list state",
+      input: "open",
+      expected: { version: 1 },
+    },
+  ])("settings session list sanitizer $name", async ({ input, expected }) => {
+    await withTempProject(async (dir) => {
+      expect(
+        await patchAppSettingsState(dir, { terminalSessionsOpen: input }),
+      ).toEqual(expected);
+    });
+  });
+
+  test.each([
+    {
       name: "keeps a valid override",
       input: { "toggle-theme": [{ key: "x", ctrl: true }] },
       expected: {

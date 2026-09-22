@@ -319,6 +319,9 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   const navWidth = optionalNumber(raw.navWidth, NAV_WIDTH.min, NAV_WIDTH.max);
   if (navWidth !== undefined) out.navWidth = navWidth;
   const navCollapsedProjects = normalizeStringList(raw.navCollapsedProjects, {
+  const terminalSessionsOpen = optionalBoolean(raw.terminalSessionsOpen);
+  if (terminalSessionsOpen !== undefined)
+    out.terminalSessionsOpen = terminalSessionsOpen;
     maxItems: MAX_PROJECTS,
     maxLen: 4096,
   });
