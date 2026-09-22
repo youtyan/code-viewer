@@ -1,10 +1,12 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
-import type { DbValue } from "../core/database/types";
+import type { DbKind, DbValue } from "../core/database/types";
 
 GlobalRegistrator.register();
 
-const { createQueryEditor } = await import("../views/database/query-editor");
+const { createQueryEditor, explainStatement } = await import(
+  "../views/database/query-editor"
+);
 const { dbText } = await import("../views/database/i18n");
 
 describe("query editor value display", () => {
@@ -30,6 +32,7 @@ describe("query editor value display", () => {
     { name: "numbers use decimal text", value: 42, expected: "42" },
   ])("$name", async ({ value, expected }) => {
     const editor = createQueryEditor({
+      getKind: () => "sqlite",
       executeQuery: async () => ({
         dbId: "sample.db",
         columns: ["sample_column"],
@@ -52,6 +55,7 @@ describe("query editor value display", () => {
 
   test("collapses and expands the SQL input", async () => {
     const editor = createQueryEditor({
+      getKind: () => "sqlite",
       executeQuery: async () => ({
         dbId: "sample.db",
         columns: [],
@@ -91,6 +95,7 @@ describe("query editor value display", () => {
 
   test("resizes the SQL input from the keyboard", () => {
     const editor = createQueryEditor({
+      getKind: () => "sqlite",
       executeQuery: async () => ({
         dbId: "sample.db",
         columns: [],
@@ -120,6 +125,7 @@ describe("query editor value display", () => {
   test("returns from query results to the table grid", async () => {
     let resultShown = 0;
     const editor = createQueryEditor({
+      getKind: () => "sqlite",
       executeQuery: async () => ({
         dbId: "sample.db",
         columns: ["sample_column"],
@@ -159,6 +165,7 @@ describe("query editor value display", () => {
   ] as const)("%s + Enter runs the query", async (modifier) => {
     let executions = 0;
     const editor = createQueryEditor({
+      getKind: () => "sqlite",
       executeQuery: async () => {
         executions++;
         return {
@@ -194,6 +201,7 @@ describe("query editor value display", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
     const editor = createQueryEditor({
+      getKind: () => "sqlite",
       executeQuery: async () => ({
         dbId: "sample.db",
         columns: [],
@@ -256,6 +264,7 @@ describe("query editor value display", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
     const editor = createQueryEditor({
+      getKind: () => "sqlite",
       executeQuery: () => Promise.reject(failure),
     });
     document.body.appendChild(editor.el);
@@ -294,6 +303,7 @@ describe("query editor value display", () => {
     status,
   }) => {
     const editor = createQueryEditor({
+      getKind: () => "sqlite",
       getText: () => dbText(language),
       executeQuery: async () => ({
         dbId: "sample.db",
@@ -320,6 +330,7 @@ describe("query editor value display", () => {
   test("relabels Explain when the display language changes", () => {
     let language: "en" | "ja" = "en";
     const editor = createQueryEditor({
+      getKind: () => "sqlite",
       getText: () => dbText(language),
       executeQuery: async () => {
         throw new Error("not called");
@@ -332,6 +343,53 @@ describe("query editor value display", () => {
     editor.localize();
     expect(explain?.textContent).toBe("実行計画");
     expect(explain?.title).toBe("実行計画を表示");
+    editor.dispose();
+  });
+
+  // 直す前は種類を見ずに EXPLAIN QUERY PLAN を送り、PostgreSQL と MySQL では
+  // 構文の誤りになっていた。
+  test.each([
+    { kind: "sqlite", sent: "EXPLAIN QUERY PLAN SELECT * FROM sample_table" },
+    { kind: "d1", sent: "EXPLAIN QUERY PLAN SELECT * FROM sample_table" },
+    { kind: "postgresql", sent: "EXPLAIN SELECT * FROM sample_table" },
+    { kind: "mysql", sent: "EXPLAIN SELECT * FROM sample_table" },
+    { kind: "redis", sent: null },
+    { kind: "elasticsearch", sent: null },
+    { kind: "s3", sent: null },
+    { kind: "dynamodb", sent: null },
+    { kind: undefined, sent: null },
+  ] satisfies {
+    kind: DbKind | undefined;
+    sent: string | null;
+  }[])("Explain on $kind sends $sent", async ({ kind, sent }) => {
+    expect(explainStatement(kind, "SELECT * FROM sample_table")).toBe(sent);
+    const executed: string[] = [];
+    const editor = createQueryEditor({
+      getKind: () => kind,
+      executeQuery: async (sql) => {
+        executed.push(sql);
+        return {
+          dbId: "sample.db",
+          columns: ["detail"],
+          columnTypes: ["TEXT"],
+          rows: [["SCAN sample_table"]],
+          rowCount: 1,
+          truncated: false,
+          elapsedMs: 3,
+        };
+      },
+    });
+    document.body.appendChild(editor.el);
+    editor.setSql("  SELECT * FROM sample_table  ");
+
+    await editor.explain();
+
+    expect(executed).toEqual(sent === null ? [] : [sent]);
+    expect(editor.el.querySelector(".db-query-status")?.textContent).toBe(
+      sent === null
+        ? "Explain works on SQLite, D1, PostgreSQL and MySQL only"
+        : "Explain (3ms)",
+    );
     editor.dispose();
   });
 });

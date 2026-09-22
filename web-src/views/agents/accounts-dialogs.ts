@@ -22,6 +22,8 @@ import {
 } from "../../core/agent-accounts";
 import type { AgentOverviewResponse } from "../../core/agent-overview";
 import { abbreviateHome } from "../../core/agent-overview";
+import { showCopyFailure } from "../../core/copy-failure";
+import { formatErrorDetail } from "../../core/error-detail";
 import { CHEVRON_DOWN_16_PATH, COPY_16_PATHS, iconSvg } from "../../core/icons";
 import { showFormDialog } from "../ui-dialog";
 import type { AccountsClient } from "./accounts-client";
@@ -642,10 +644,16 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
           copyResult.textContent = t.launchCopied;
         },
         (error: unknown) => {
-          console.error("[code-viewer] copy launch command failed", error);
-          copyResult.textContent = `${t.launchCopyFailed}: ${
-            error instanceof Error ? error.message : String(error)
-          }`;
+          // ほかの画面のコピーと同じ形 (ボタンに失敗の見た目と理由、console に
+          // 全体)。状態の行にも、message だけでなく名前と原因の連鎖を出す。
+          showCopyFailure(
+            copy,
+            "copying the launch command failed",
+            error,
+            t.launchCopy,
+            1500,
+          );
+          copyResult.textContent = `${t.launchCopyFailed}: ${formatErrorDetail(error)}`;
         },
       );
     });

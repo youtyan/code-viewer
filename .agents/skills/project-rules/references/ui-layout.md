@@ -103,7 +103,8 @@ grep -n "100vh\|100dvh" web/style.css \
   預ける (理由は分割のボタンの説明)。決まりは `core/panel-column-policy.ts`
 - **面の中で入力と操作を横 1 行に並べる画面は、窓の幅ではなく面の実幅で縦に積む**
   (`@container`。2 面の左の面は窓の半分以下になるので `@media` では決まらない)。
-  実例: Data の `.db-root` の `container: db-pane` と `@container db-pane (max-width: 560px)`
+  実例: Data の `.db-root` の `container: db-pane` と `@container db-pane (max-width: 560px)`、
+  Tools の `.tools-body` の `container: tools-pane` と `@container tools-pane (max-width: 560px)`
 - **上に居座る固定物の高さは `--global-header-h` だけを読む。** 今はタブ列だけなので
   `--global-header-h: var(--main-tabs-h)` (`style.css` の `html, body`)。ツールバーの `top`・各ページの
   `--chrome-h` の上書き・sticky の `top`・面の箱の `top` はこれを読むので、上に固定物を足す / 消す
@@ -137,9 +138,15 @@ grep -n "100vh\|100dvh" web/style.css \
 - 画面座標で線を引く JS (リサイズのプレビュー線) は、固定物の左端を
   `getBoundingClientRect().left` で読む。`0` 起点の座標を書かない
 - 骨格の幅・高さ (`--nav-w` など) の既定・下限・上限は `core/panel-sizes.ts`
-  だけが持つ（画面とサーバの設定の検査が同じ値を使う）。保存先は全プロジェクト共通の設定
-  (`core/user-settings.ts` の `USER_SETTING_KEYS`)。**localStorage に置かない**: プロジェクトを
-  移る = 別のポートのページなので、移るたびに戻ってしまう
+  だけが持つ（画面とサーバの設定の検査が同じ値を使う）。保存先はサーバの設定: 左のサイドバーの
+  幅と畳みは全プロジェクト共通の設定 (`core/user-settings.ts` の `USER_SETTING_KEYS`)、ファイルの木と
+  History の一覧の幅はリポジトリの設定 (`server/state-store.ts` が検査する)。**localStorage に
+  置かない**: localStorage はオリジン (ポート) ごとで、ポートは続かない。入口のサーバは `--port` を
+  付けなければ起動のたびに OS が選ぶポートで待ち受ける (`server/entry/args.ts` の
+  `parseEntryArgs` の既定が 0) ので、code-viewer を起こし直すと空から始まる。`--standalone` の
+  サーバもそれぞれ別のポート。入口の下でプロジェクトを移る (`/p/<鍵>/`) だけならオリジンは同じ。
+  localStorage に置いてよいのは、消えても設定から当て直せる初回描画の控え
+  (`views/shell/early-look.ts`) と、ブラウザの都合の寸法 (`core/stored-size.ts`) だけ
 
 ## 固定物を足す / 消すときの型
 

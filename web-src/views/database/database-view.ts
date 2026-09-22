@@ -803,6 +803,7 @@ function createTabPane(
   let preserveInitialSqlDraft = Boolean(initial.sqlDraft);
   const queryEditor = createQueryEditor({
     executeQuery: (sql) => executeQuery(sql),
+    getKind: () => currentDbInfo?.kind,
     loadHistory: () =>
       outerDeps.loadSqlHistory(currentDbInfo?.id || null, currentSchema),
     onSqlChange: () => cb.onStateChange(),

@@ -3,7 +3,7 @@
 // パス・名前はすべて架空。
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import type { AccountsResponse } from "../core/agent-accounts";
 import type { AccountsClient } from "../views/agents/accounts-client";
 import { createAccountDialogs } from "../views/agents/accounts-dialogs";
@@ -17,6 +17,7 @@ afterAll(async () => {
 });
 afterEach(() => {
   document.body.replaceChildren();
+  vi.restoreAllMocks();
 });
 
 function response(claude: string): AccountsResponse {
@@ -132,4 +133,77 @@ test("開いている間に届いた起動コマンドで、表示するコマ�
     ?.click();
   await closed;
   expect(fake.listeners.size).toBe(0);
+});
+
+// 直す前は失敗を error.message だけで出し、名前と原因が画面から消えていた。
+// ほかの画面のコピーと同じく、ボタンに失敗の印と理由、console に原因つきの全体。
+test.each([
+  {
+    name: "copied",
+    rejection: null,
+    status: "Copied",
+    title: "Copy the command",
+  },
+  {
+    name: "failed with a cause",
+    rejection: Object.assign(new Error("clipboard blocked"), {
+      name: "NotAllowedError",
+      cause: new TypeError("document is not focused"),
+    }),
+    status:
+      "Could not copy the command: NotAllowedError: clipboard blocked\nCaused by: TypeError: document is not focused",
+    title:
+      "Error: copying the launch command failed\nCaused by: NotAllowedError: clipboard blocked\nCaused by: TypeError: document is not focused",
+  },
+])("コマンドのコピー: $name", async ({ rejection, status, title }) => {
+  const written: string[] = [];
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: async (text: string) => {
+        if (rejection) throw rejection;
+        written.push(text);
+      },
+    },
+  });
+  const consoleError = vi
+    .spyOn(console, "error")
+    .mockImplementation(() => undefined);
+  const fake = fakeClient();
+  const dialogs = createAccountDialogs({
+    client: fake.client,
+    getText: () => ACCOUNTS_EN,
+    openPane: unused("openPane"),
+    getOverview: () => null,
+    serverRoot: () => "/home/sample/work/sample-app",
+    refreshOverview: unused("refreshOverview"),
+  });
+  const closed = dialogs.launch();
+  const copy = document.querySelector<HTMLButtonElement>(".agent-launch-copy");
+  const result = document.querySelector(".agent-launch-copy-result");
+  copy?.click();
+  await vi.waitFor(() => expect(result?.textContent).not.toBe(""));
+
+  expect({
+    status: result?.textContent,
+    title: copy?.title,
+    failed: copy?.classList.contains("failed"),
+    written,
+  }).toEqual({
+    status,
+    title,
+    failed: rejection !== null,
+    written: rejection ? [] : ["claude --old"],
+  });
+  if (rejection) {
+    const logged = consoleError.mock.calls[0]?.[0] as Error;
+    expect(logged.message).toBe("copying the launch command failed");
+    expect((logged as Error & { cause?: unknown }).cause).toBe(rejection);
+  } else {
+    expect(consoleError).not.toHaveBeenCalled();
+  }
+  document
+    .querySelector<HTMLButtonElement>(".gdp-dialog .gdp-dialog-cancel")
+    ?.click();
+  await closed;
 });

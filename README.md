@@ -18,14 +18,17 @@ Requires Node.js 20 or newer. Development uses
   History / Worktrees / Data / Work log, with the name and key on hover) sit
   fixed at the head of the right column, next to the Files tree (the left
   sidebar holds the projects and agents), so switching tabs never moves them;
-  they move to the left end of the tab row only when you fold the right column. A single click opens a file in a preview tab (italic) that
+  they move to the left end of the tab row only when you fold the right column. On a narrow head the branch keeps its whole name up to about
+  40% of the width and the project name is shortened into the rest. A single click opens a file in a preview tab (italic) that
   the next file replaces; double-click or **Keep open** keeps it. Diff /
   History / Worktrees / Data / Work log each have one tab that comes back as
   you left it. Files is not a tab: the folder view is what the left side shows
   when no tab is selected (the Files icon, `g r`, or a folder in the tree).
   Right-click a tab to close it, the others or those to its right, or copy its
   path; drag to reorder; `g t` / `g T` / `g x` / `g 1`–`g 9` move and close
-  from the keyboard. The tabs are remembered per project; the agent board,
+  from the keyboard. Tabs that do not fit shrink down to 88px each (the name
+  is shortened), then the row scrolls sideways and keeps the front tab in view.
+  The tabs are remembered per project; the agent board,
   Tools, Settings & Help, terminals and terminal images stay open across projects. Files and screens
   stay on the left side; split the area to put a terminal or an image on the
   right (the split button, **Split right**, or drag one onto the right half),
@@ -209,7 +212,8 @@ Requires Node.js 20 or newer. Development uses
   validator and a JSON⇄YAML converter). Each tool keeps its own draft in
   `.code-viewer/tools.json`, the tab remembers the open tool even while
   another tab is in front, and the split between input and output is
-  draggable.
+  draggable (in a pane under 560px wide the input sits above the output,
+  without the divider).
 - Run a real shell in the browser as a tab of the main area. The ＋ at the
   right of the tab row opens a menu with Open a file, New shell, and the
   existing sessions — the shells of this server and the tmux panes of this
@@ -425,7 +429,10 @@ preview. Media files (images, video, audio, PDF) show a **Preview** tab only
 their own canonical URL (`view=blame`, `view=history`), so deep links and
 the browser back/forward stay in sync. Opening another file from the
 repository tree keeps the active tab (a file that cannot be previewed falls
-back to Code). The Blame tab reuses the source
+back to Code). In a narrow header these tabs move to a row of their own, and
+under about 510px the breadcrumb takes the whole first row with the buttons
+beside it (copy path, open in the OS, info, previous / next, delete) on the
+second. The Blame tab reuses the source
 view's row component, so line numbers, drag-selection of `line=` ranges,
 syntax highlighting and the code font size from Settings & Help all match the
 Code tab.

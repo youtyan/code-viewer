@@ -1,4 +1,4 @@
-import type { DbQueryResponse } from "../../core/database/types";
+import type { DbKind, DbQueryResponse } from "../../core/database/types";
 import { attachDragResizer } from "../../core/drag-resizer";
 import { formatErrorDetail } from "../../core/error-detail";
 import { CHEVRON_DOWN_16_PATH, iconSvg } from "../../core/icons";
@@ -15,8 +15,33 @@ const MAX_HISTORY = 50;
 const MIN_INPUT_HEIGHT = 120;
 const MAX_INPUT_HEIGHT = 480;
 
+// 実行計画を問う文の頭。書き方はデータストアの種類ごとに違う (PostgreSQL と
+// MySQL に EXPLAIN QUERY PLAN を送ると構文の誤りになる)。null はクエリエディタを
+// 持たない種類 (ここでは送らない)。種類を足したら、ここで決めないと型で落ちる。
+const EXPLAIN_PREFIX: Record<DbKind, string | null> = {
+  sqlite: "EXPLAIN QUERY PLAN",
+  d1: "EXPLAIN QUERY PLAN",
+  postgresql: "EXPLAIN",
+  mysql: "EXPLAIN",
+  redis: null,
+  elasticsearch: null,
+  s3: null,
+  dynamodb: null,
+};
+
+/** 実行計画を問う文。種類が分からない・対応しないときは null。 */
+export function explainStatement(
+  kind: DbKind | undefined,
+  sql: string,
+): string | null {
+  const prefix = kind ? EXPLAIN_PREFIX[kind] : null;
+  return prefix === null ? null : `${prefix} ${sql}`;
+}
+
 export type QueryEditorCallbacks = {
   executeQuery: (sql: string) => Promise<DbQueryResponse>;
+  /** いま開いているデータストアの種類 (実行計画の書き方を決める)。 */
+  getKind: () => DbKind | undefined;
   loadHistory?: () => Promise<string[]> | string[];
   // textarea の内容が変わった (input または setSql 経由) ことを外側に
   // 通知する。タブごとに SQL draft を persist するために使う。
@@ -301,12 +326,17 @@ export function createQueryEditor(
   async function runExplain() {
     const sql = textarea.value.trim();
     if (!sql) return;
+    const statement = explainStatement(callbacks.getKind(), sql);
+    if (statement === null) {
+      statusSpan.textContent = text().editor.explainUnsupported;
+      return;
+    }
     explainBtn.disabled = true;
     runBtn.disabled = true;
     statusSpan.textContent = text().editor.explaining;
     showTableResult();
     try {
-      const result = await callbacks.executeQuery(`EXPLAIN QUERY PLAN ${sql}`);
+      const result = await callbacks.executeQuery(statement);
       if (result.error) {
         statusSpan.textContent = text().editor.statusError(result.elapsedMs);
         showQueryResult();

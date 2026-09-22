@@ -172,6 +172,7 @@ export type DbText = {
     runTitle: string;
     explain: string;
     explainTitle: string;
+    explainUnsupported: string;
     localHistory: string;
     localHistoryTitle: string;
     running: string;
@@ -699,6 +700,8 @@ const EN: DbText = {
     runTitle: "Execute query (Ctrl+Enter)",
     explain: "Explain",
     explainTitle: "Show query execution plan",
+    explainUnsupported:
+      "Explain works on SQLite, D1, PostgreSQL and MySQL only",
     localHistory: "Local History",
     localHistoryTitle: "Local editor history",
     running: "Running…",
@@ -1237,6 +1240,8 @@ const JA: DbText = {
     runTitle: "クエリを実行 (Ctrl+Enter)",
     explain: "実行計画",
     explainTitle: "実行計画を表示",
+    explainUnsupported:
+      "実行計画は SQLite・D1・PostgreSQL・MySQL だけで見られます",
     localHistory: "ローカル履歴",
     localHistoryTitle: "エディタのローカル履歴",
     running: "実行中…",
