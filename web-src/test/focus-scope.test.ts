@@ -227,14 +227,17 @@ describe("focus scope helpers", () => {
     expect(getPanelFocusScope(doc)).toBeNull();
   });
 
+  // 「画面に出ているか」は getClientRects で見る (本文の箱は position: fixed
+  // なので offsetParent は常に null。ui-layout.md の「本文の箱」)。
   test("finds a scrollable main-panel target beyond virtual source views", () => {
+    const onScreen = () => [{}] as unknown as DOMRectList;
     const scrollable = {
-      offsetParent: {},
+      getClientRects: onScreen,
       scrollHeight: 500,
       clientHeight: 200,
-    } as HTMLElement;
+    } as unknown as HTMLElement;
     const content = {
-      offsetParent: {},
+      getClientRects: onScreen,
       querySelectorAll: (selector: string) =>
         selector ===
         ".gdp-source-viewer, .gdp-markdown-layout, .gdp-markdown-preview, .d2h-files-diff, .d2h-file-diff"
@@ -244,7 +247,7 @@ describe("focus scope helpers", () => {
     const doc = {
       activeElement: null,
       scrollingElement: {
-        offsetParent: {},
+        getClientRects: onScreen,
         scrollHeight: 1000,
         clientHeight: 400,
       },

@@ -1101,11 +1101,15 @@ describe("main tabs view: 左右 2 面", () => {
     }
   });
 
-  // 面の最小幅 360 は本文 (右の列の右) の幅で数える。1 + 360 * 2 = 721px 要る。
+  // 2 面を置ける下限は、詰めたときの面の幅 (320) 2 つ分 + 仕切り 1 = 641px。
+  // 本文 (右の列の左まで) の幅で数える。ゆとりのある幅 (480 * 2 + 1 = 961) に
+  // 足りないときは、2 面の間だけ右の列を畳む (app.ts。畳めば本文はその分広がる)。
   test.each([
-    { window: 960, column: 240, split: false },
-    { window: 961, column: 240, split: true },
-    { window: 960, column: 0, split: true },
+    { window: 880, column: 240, split: false },
+    { window: 881, column: 240, split: true },
+    { window: 640, column: 0, split: false },
+    { window: 641, column: 0, split: true },
+    { window: 1201, column: 240, split: true },
   ])("窓 $window px・右の列 $column px なら分割できるか: $split", async ({
     window,
     column,
@@ -1123,6 +1127,49 @@ describe("main tabs view: 左右 2 面", () => {
     handle.openTerminal("shell-a1");
     splitButton(mount)?.click();
     expect(panes(handle).split).toBe(split);
+  });
+
+  // ゆとりのある幅で並ぶかは、右の列を畳むかの判断に使う (app.ts が読む)。
+  test.each([
+    { window: 960, column: 240, fits: false },
+    { window: 1200, column: 240, fits: false },
+    { window: 1201, column: 240, fits: true },
+    { window: 961, column: 0, fits: true },
+  ])("窓 $window px・右の列 $column px で 2 面がゆとりを持って並ぶか: $fits", async ({
+    window,
+    column,
+    fits,
+  }) => {
+    Object.defineProperty(document.documentElement, "clientWidth", {
+      configurable: true,
+      value: window,
+    });
+    const panelColumn = document.createElement("div");
+    panelColumn.getBoundingClientRect = () => new DOMRect(0, 0, column, 80);
+    const { handle } = setup(async () => null, panelColumn);
+    await handle.restore();
+    expect(handle.splitFitsWithPanelColumn()).toBe(fits);
+  });
+
+  // 詰めたときは、右の面を先に畳まず両面を同じ比で縮める (下限 320)。
+  test("ゆとりの無い幅では面を同じ比で縮める", async () => {
+    Object.defineProperty(document.documentElement, "clientWidth", {
+      configurable: true,
+      value: 941,
+    });
+    const panelColumn = document.createElement("div");
+    panelColumn.getBoundingClientRect = () => new DOMRect(0, 0, 240, 80);
+    const { handle, mount } = setup(async () => null, panelColumn);
+    await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
+    handle.openTerminal("shell-a1");
+    splitButton(mount)?.click();
+    expect(panes(handle).split).toBe(true);
+    const style = document.documentElement.style;
+    // 本文 701px = 面 351 + 仕切り 1 + 面 349 (比 0.5 を丸めた形。どちらも下限
+    // 320 以上で、右の面を先に畳んでいない)。
+    expect(style.getPropertyValue("--split-left-w")).toBe("351px");
+    expect(style.getPropertyValue("--split-right-w")).toBe("349px");
   });
 
   test("右の面にフォーカスがあるとき左のタブを押すと、本文をそのタブの route に合わせる", async () => {

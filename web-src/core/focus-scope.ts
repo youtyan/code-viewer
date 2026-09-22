@@ -95,6 +95,26 @@ export function focusMainPanel(doc: Document = document) {
   setPanelFocusScope("main", doc);
 }
 
+/**
+ * 本文の箱。**窓ではなくこれがスクロールする** (ui-layout.md の「本文の箱」)。
+ * 画面ごとの中身はこの中に描かれるので、位置を覚える・戻す・先頭へ出すのは
+ * 全部この箱が基準になる。
+ */
+export function mainScrollBox(doc: Document = document): HTMLElement | null {
+  return doc.querySelector<HTMLElement>("#content");
+}
+
+/**
+ * 画面に出ているか。
+ *
+ * `offsetParent` は使えない: 本文の箱 (#content) は position: fixed なので、
+ * 出ていても常に null になる (これで j / k・PageDown が動かなくなった)。
+ * 出ていない要素は箱を 1 つも持たない。
+ */
+function isOnScreen(element: HTMLElement): boolean {
+  return element.getClientRects().length > 0;
+}
+
 export function findMainScrollTarget(
   doc: Document = document,
 ): HTMLElement | null {
@@ -102,17 +122,15 @@ export function findMainScrollTarget(
   const activeScroller = active?.closest<HTMLElement>(
     "#content .gdp-source-virtual-scroller",
   );
-  if (activeScroller && activeScroller.offsetParent !== null)
-    return activeScroller;
+  if (activeScroller && isOnScreen(activeScroller)) return activeScroller;
   const sourceScroller = doc.querySelector<HTMLElement>(
     "#content .gdp-source-virtual-scroller",
   );
-  if (sourceScroller && sourceScroller.offsetParent !== null)
-    return sourceScroller;
+  if (sourceScroller && isOnScreen(sourceScroller)) return sourceScroller;
   const content = doc.querySelector<HTMLElement>("#content");
-  if (!content || content.offsetParent === null) return null;
+  if (!content || !isOnScreen(content)) return null;
   const isScrollable = (item: HTMLElement) => {
-    if (item.offsetParent === null) return false;
+    if (!isOnScreen(item)) return false;
     const style = doc.defaultView?.getComputedStyle(item);
     return (
       !!style &&
@@ -129,5 +147,6 @@ export function findMainScrollTarget(
     preferred.find(isScrollable) ||
     (isScrollable(content) ? content : null) ||
     Array.from(content.querySelectorAll<HTMLElement>("*")).find(isScrollable);
-  return scrollable || (doc.scrollingElement as HTMLElement | null);
+  // 窓は動かないので、最後の行き先も本文の箱 (中身がまだ無いときはここ)。
+  return scrollable || content;
 }

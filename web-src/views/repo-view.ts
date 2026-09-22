@@ -13,6 +13,7 @@ import {
   fileNameClipboardText,
   filePathClipboardText,
 } from "../core/file-path-copy";
+import { mainScrollBox } from "../core/focus-scope";
 import {
   COPY_16_PATHS,
   FILE_16_PATH,
@@ -1036,11 +1037,13 @@ export function createRepoView(deps: RepoViewDeps) {
     REPO_RENDER_SIGNATURE = signature;
     const sameLocation = location === REPO_RENDER_LOCATION;
     REPO_RENDER_LOCATION = location;
-    const savedScroll = window.scrollY;
+    // 位置を持っているのは本文の箱 (窓は動かない)。
+    const box = mainScrollBox();
+    const savedScroll = box?.scrollTop ?? 0;
     target.replaceChildren(shell);
     // 同じディレクトリの再描画 (SSE 更新) なら読んでいた位置を保ち、別の
     // ディレクトリへ移動したときは先頭から表示する。
-    window.scrollTo(0, sameLocation ? savedScroll : 0);
+    if (box) box.scrollTop = sameLocation ? savedScroll : 0;
     placeSidebarToggle();
   }
 

@@ -88,6 +88,18 @@ const SAVE_DELAY_MS = 300;
 const DRAG_TYPE = "application/x-code-viewer-main-tab";
 /** 2 面のときの各面の最小の幅 (px)。これが 2 つ置けない幅では分割しない。 */
 export const MIN_PANE_WIDTH = 360;
+/**
+ * 2 面がゆとりを持って並ぶ幅。これを下回るなら、右の列を畳めば並ぶので、
+ * 2 面の間だけ自動で畳む (app.ts の syncPanelColumnForSplit)。Data の全体検索と
+ * クエリの欄が縦に積まれ始める幅 (560px) の少し下に置いてある: ここを 560 に
+ * すると 1600px の窓でも畳むことになり、畳まないで済む幅まで畳んでしまう。
+ */
+export const COMFORTABLE_PANE_WIDTH = 480;
+/**
+ * 利用者が自分で右の列を開いたときだけ許す、面の幅の下限。ここまでは両面を
+ * 同じ比で縮め、中身は自分の箱の中で横に送ってもらう (右の面を先に畳まない)。
+ */
+export const TIGHT_PANE_WIDTH = 320;
 /** 面の境界の線の幅 (px)。CSS の --split-divider-w へ JS が書く。 */
 const DIVIDER_WIDTH = 1;
 const SIDES: readonly PaneSide[] = ["left", "right"];
@@ -192,6 +204,12 @@ export type MainTabsHandle = {
   front(): Tab | null;
   /** 今の面の様子 (前面・フォーカス・本文を置く面)。 */
   panes(): PanesView;
+  /**
+   * いまの本文の幅 (右の列は今の状態のまま) で、2 面がゆとりを持って
+   * (COMFORTABLE_PANE_WIDTH) 並ぶか。false なら右の列を畳むと並ぶ (app.ts が
+   * 2 面の間だけ自動で畳む)。
+   */
+  splitFitsWithPanelColumn(): boolean;
   /** そのシェルのターミナルのタブがあるか。 */
   hasTerminal(session: string): boolean;
   /** そのファイルのタブを固定にする (木のダブルクリック)。 */
@@ -477,17 +495,28 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     );
   }
 
-  /** 2 面を置ける幅か。 */
+  /**
+   * 2 面を置ける幅か。下限は詰めたときの幅 (TIGHT_PANE_WIDTH)。ゆとりのある
+   * 幅 (MIN_PANE_WIDTH) を下回るときは、右の列を畳めば戻るので、畳む判断は
+   * splitFitsWithPanelColumn() を見る側 (app.ts) が行う。
+   */
   function splitAllowed(): boolean {
-    return mainWidth() >= MIN_PANE_WIDTH * 2 + DIVIDER_WIDTH;
+    return mainWidth() >= TIGHT_PANE_WIDTH * 2 + DIVIDER_WIDTH;
   }
 
-  /** 比から左の面の幅 (px) を決める。最小幅を守れない窓では半分。 */
+  /**
+   * 比から左の面の幅 (px) を決める。ゆとりのある最小幅を守れないときは詰めた
+   * 下限まで、それも守れないときは半分ずつ。
+   */
   function leftWidthFor(ratio: number): number {
     const width = mainWidth();
-    const max = width - MIN_PANE_WIDTH - DIVIDER_WIDTH;
-    if (max < MIN_PANE_WIDTH) return Math.round((width - DIVIDER_WIDTH) / 2);
-    return Math.min(max, Math.max(MIN_PANE_WIDTH, Math.round(width * ratio)));
+    const min =
+      width >= MIN_PANE_WIDTH * 2 + DIVIDER_WIDTH
+        ? MIN_PANE_WIDTH
+        : TIGHT_PANE_WIDTH;
+    const max = width - min - DIVIDER_WIDTH;
+    if (max < min) return Math.round((width - DIVIDER_WIDTH) / 2);
+    return Math.min(max, Math.max(min, Math.round(width * ratio)));
   }
 
   /** 預かっている右の面を戻した配置 (保存とターミナルの数え方に使う)。 */
@@ -539,9 +568,13 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     getSize: () => leftWidthFor(layout.split ?? DEFAULT_SPLIT),
     applySize: (size) => {
       const width = mainWidth();
+      const min =
+        width >= MIN_PANE_WIDTH * 2 + DIVIDER_WIDTH
+          ? MIN_PANE_WIDTH
+          : TIGHT_PANE_WIDTH;
       const clamped = Math.min(
-        width - MIN_PANE_WIDTH - DIVIDER_WIDTH,
-        Math.max(MIN_PANE_WIDTH, size),
+        width - min - DIVIDER_WIDTH,
+        Math.max(min, size),
       );
       // ドラッグ中は描き直さず、比と幅だけ変える。保存は onEnd で。
       layout = setSplit(layout, clamped / width);
@@ -1425,6 +1458,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     },
     front: () => activeTab(layout),
     panes: () => panesView(layout),
+    splitFitsWithPanelColumn: () =>
+      mainWidth() >= COMFORTABLE_PANE_WIDTH * 2 + DIVIDER_WIDTH,
     hasTerminal: (session) => findTerminal(session) !== undefined,
     keepFileOpen(path) {
       const tab = allTabs(layout).find(

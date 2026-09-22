@@ -292,6 +292,11 @@
 *, *::before, *::after { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0;
+  /* 窓はスクロールしない。本文は #content が自分の箱の中で動かす
+     (ui-layout.md の「本文の箱」)。窓が動くと、縦のスクロールバーが右の列の
+     さらに右 (窓の右端) に出て、本文と右の列が左へ寄る。 */
+  height: 100%;
+  overflow: hidden;
   background: var(--color-ground); color: var(--fg);
   --ui-font-xs: 10px;
   --ui-font-sm: 11px;
@@ -3049,7 +3054,7 @@ body.gdp-help-page #topbar {
 body.gdp-help-page #content {
   --content-top-gap: 28px;
   margin-left: 0;
-  padding-top: calc(var(--chrome-h) + var(--content-top-gap));
+  padding-top: var(--content-top-gap);
 }
 .gdp-help-shell {
   width: 100%;
@@ -3074,8 +3079,9 @@ body.gdp-help-page #content {
   align-items: start;
 }
 .gdp-help-nav {
+  /* 本文の箱の中。箱の上端から見出し 1 つ分だけ下げる。 */
   position: sticky;
-  top: calc(var(--global-header-h) + 20px);
+  top: 20px;
   display: grid;
   gap: 4px;
   padding-right: 16px;
@@ -3671,14 +3677,24 @@ body.gdp-help-page #content {
 }
 
 /* ===== Main content area ===== */
+/* 本文の箱。**窓ではなくこれがスクロールする。**
+   上は画面ごとの chrome の下 (--chrome-h)、左右は本文の端、下は最下段の上。
+   縦のスクロールバーはこの箱の右端 = 右の列の左に出る。箱の中の sticky は
+   この箱の上端 (0) が基準になるので、中の見出しは chrome の変数を読まない。 */
 #content {
   --content-top-gap: 18px;
   /* 本文の左右の余白 (T3)。ソース表示はこの分だけ外へ出て、面を端まで敷く。 */
   --content-pad-x: 24px;
-  /* 右の列 (木) は --page-left に入っている (body の padding-left)。 */
+  position: fixed;
+  top: var(--chrome-h);
+  left: var(--page-left);
+  right: var(--page-right);
+  bottom: var(--chrome-bottom);
+  overflow: auto;
+  /* 端まで来たホイールを窓へ渡さない (窓は動かないが、親の箱へ連鎖させない)。 */
+  overscroll-behavior: contain;
   margin-left: 0;
-  padding: calc(var(--chrome-h) + var(--content-top-gap)) var(--content-pad-x) 80px;
-  min-height: var(--content-h);
+  padding: var(--content-top-gap) var(--content-pad-x) 80px;
 }
 
 #diff > *:first-child { margin-top: 0; }
@@ -3882,10 +3898,13 @@ body.gdp-diff-page #diff::after {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* Keep this in sync with --chrome-h. This selector must also cover
-   * .d2h-sticky-header because Diff2Html's vendor CSS sets top: 0 there. */
+  /* 本文の箱 (#content) の中の sticky。箱の中の基準は「箱の内側の余白の内」
+     なので、上の余白 (--content-top-gap) の分だけ上へ出して箱の上端に貼る
+     (出さないと、見出しの上の隙間に次の行がのぞく)。箱の外 (右の面の
+     ソース表示) には余白が無いので 0。このセレクタは .d2h-sticky-header も
+     覆う (Diff2Html の CSS がそこに top: 0 を書くため)。 */
   position: sticky;
-  top: var(--chrome-h);
+  top: calc(0px - var(--content-top-gap, 0px));
   z-index: 20;
   font-size: var(--ui-font-lg);
   line-height: 1.5;
@@ -4920,8 +4939,10 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   margin: 0;
 }
 .gdp-file-detail-sticky {
+  /* 本文の箱 (または右の面の箱) の中。上の余白の分だけ上へ出して箱の上端に
+     貼る (右の面には余白が無いので 0)。 */
   position: sticky;
-  top: var(--global-header-h);
+  top: calc(0px - var(--content-top-gap, 0px));
   z-index: 35;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
@@ -5323,8 +5344,9 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   align-items: start;
 }
 .gdp-markdown-toc {
+  /* 本文の箱の中。箱の上端から少しだけ下げる。 */
   position: sticky;
-  top: calc(var(--global-header-h) + 16px);
+  top: 16px;
   max-height: calc(var(--content-h) - 40px);
   overflow: auto;
   padding: 12px;
@@ -5873,7 +5895,7 @@ body.gdp-repo-page #load-bar {
 body.gdp-repo-page #content {
   --content-top-gap: 24px;
   margin-left: 0;
-  padding: calc(var(--global-header-h) + var(--content-top-gap)) 32px 48px;
+  padding: var(--content-top-gap) 32px 48px;
 }
 body.gdp-sidebar-hidden #sidebar,
 body.gdp-sidebar-hidden #sidebar-resizer {
@@ -6739,7 +6761,7 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
-  #content { margin-left: 0; max-width: none; padding-top: calc(var(--chrome-h) + 240px); }
+  #content { margin-left: 0; max-width: none; padding-top: 240px; }
   .controls input[type="search"] { width: 130px; }
   .app-menu {
     flex-shrink: 1;
@@ -6850,8 +6872,9 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   background: var(--bg-soft);
   border-bottom: 1px solid var(--border);
   border-radius: 6px 6px 0 0;
+  /* 本文の箱の中。上の余白の分だけ上へ出して箱の上端に貼る。 */
   position: sticky;
-  top: var(--chrome-h);
+  top: calc(0px - var(--content-top-gap, 0px));
   z-index: 20;
   font-size: 13px;
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -8689,8 +8712,7 @@ body.gdp-journal-page #load-bar {
 .gdp-journal-page #content {
   --content-top-gap: 0px;
   margin-left: 0;
-  padding: calc(var(--global-header-h) + var(--content-top-gap)) 0 0;
-  min-height: 0;
+  padding: var(--content-top-gap) 0 0;
   max-width: none;
 }
 
@@ -10074,8 +10096,7 @@ body.journal-task-editor-resizing * {
 
 .gdp-database-page #content {
   margin-left: 0;
-  padding: var(--global-header-h) 0 0;
-  min-height: 0;
+  padding: 0;
   max-width: none;
 }
 
@@ -14559,6 +14580,24 @@ body.db-resizing {
   width: 100%;
   overflow: hidden;
   font-size: var(--db-font-base);
+  /* 詰め方は窓ではなく面の実幅で決める (2 面の左の面は窓の半分以下になる)。 */
+  container: db-pane / inline-size;
+}
+/* 面が狭いとき (2 面の左の面): 横 1 行に並べていた入力と操作を縦に積む。
+   並べたままだと、入力欄が押しボタンに押されて数文字分まで潰れる。 */
+@container db-pane (max-width: 560px) {
+  .db-global-search-header,
+  .db-query-toolbar {
+    flex-wrap: wrap;
+  }
+  .db-global-search-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .db-global-search-input,
+  .db-query-editor-wrap {
+    min-width: 0;
+  }
 }
 .db-tabs-bar {
   display: flex;
@@ -16086,8 +16125,7 @@ body.gdp-search-page {
 .gdp-tools-page #content,
 .gdp-search-page #content {
   margin-left: 0;
-  padding: var(--chrome-h) 0 0;
-  min-height: 0;
+  padding: 0;
   max-width: none;
 }
 
@@ -16296,12 +16334,8 @@ body.gdp-search-page {
    --chrome-bottom を読む (html, body ブロック)。
    ====================================================================== */
 
-/* 本文 (窓のスクロール) も左のサイドバーの右、最下段の上から。 */
-body {
-  padding-left: var(--page-left);
-  padding-right: var(--page-right);
-  padding-bottom: var(--chrome-bottom);
-}
+/* 本文の箱 (#content) が自分で --page-left / --page-right / --chrome-bottom を
+   読むので、body は場所を取らない (窓はスクロールしない)。 */
 /* 畳んでいる間。html の属性にしてあるのは、index.html の head のスクリプトが
    body より先に付けるため (移った直後に骨格が一瞬崩れない)。 */
 html[data-nav-collapsed] body {
@@ -17166,6 +17200,21 @@ body.gdp-sidebar-hidden .panel-rail {
   justify-content: center;
   height: var(--global-header-h);
 }
+/* 2 面のために自動で畳んだ帯: 開くボタンの肩に小さな印を出し、手で畳んだ
+   ときと見分けられるようにする (理由はボタンの title に入れる)。 */
+.panel-rail.panel-rail-auto-hidden {
+  position: relative;
+}
+.panel-rail.panel-rail-auto-hidden::after {
+  content: "";
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  width: var(--dot-size);
+  height: var(--dot-size);
+  border-radius: 50%;
+  background: var(--color-accent);
+}
 /* 1 段目 (タブ列の行) に絵柄、2 段目に題名 (名前とブランチ) と畳むボタン。
    列は右端に付くので、History などで列が一覧の幅に広がっても畳むボタンは
    右端のまま。 */
@@ -17970,6 +18019,8 @@ body.gdp-files-column-page #sidebar .sb-head {
   column-gap: var(--space-1);
   row-gap: var(--space-2);
   padding: var(--space-3) var(--pad-face) var(--space-2) var(--pad-text);
+  /* 詰め方は窓ではなくこの見出しの実幅で決める (右の列の幅は利用者が変える)。 */
+  container: sidebar-head / inline-size;
 }
 #sidebar .sb-head > .sb-title {
   grid-area: title;
@@ -17985,8 +18036,19 @@ body.gdp-files-column-page #sidebar .sb-head {
 #sidebar .sb-head > #totals {
   grid-area: totals;
   justify-self: end;
+  /* 自分の列より広がらない (広がると右の操作と重なり、「1…」だけが見えた)。 */
+  min-width: 0;
   max-width: 100%;
+  overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* 見出しが狭いとき (右の列が既定の幅・日本語) は件数を省き、題と切替と操作に
+   幅を回す。件数は Diff の帯と作業ツリーの一覧に出ている。 */
+@container sidebar-head (max-width: 264px) {
+  #sidebar .sb-head > #totals {
+    display: none;
+  }
 }
 #sidebar .sb-head > #repo-target-wrap {
   grid-area: ref;
@@ -20284,20 +20346,21 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 #topbar > .ref-pickers {
   order: 1;
   flex: 0 1 auto;
-  /* 中身の最小 (選択欄 2 つの最小・間の印・戻す / 取り直しのボタン・間隔 4 つ)
+  /* 中身の最小 (選択欄 2 つの最小・間の印・戻す / 取り直しのボタン・間隔)
      より縮めない。0 だと 1280px の窓で 2 つのボタンが件数の上にはみ出して
-     重なった。 */
-  min-width: calc(
-    var(--space-unit) * 16 * 2 + var(--space-4) + var(--ui-control-sm) * 2 +
-      var(--space-2) * 4
-  );
+     重なった。中身の最小は下の選択欄の決まりから出る (ここで足し算しない)。 */
+  min-width: min-content;
   gap: var(--space-2);
   margin-left: 0;
 }
-/* 幅が足りないとき、選択欄は枝の名前を省略して縮む (件数や操作に重ならない)。 */
+/* 幅が足りないとき、選択欄は枝の名前を省略して縮む (件数や操作に重ならない)。
+   幅は width ではなく flex の基準で持つ: width を決めると中身の最小がその幅に
+   なり、上の .ref-pickers が縮めない。縮む下限は中身 (両端の絵と、枝の名前の
+   先頭が読める幅) で決まる。 */
 #topbar .ref-pickers > .ref-selector {
-  flex: 0 1 auto;
-  min-width: calc(var(--space-unit) * 16);
+  flex: 0 1 calc(var(--space-unit) * 40);
+  width: auto;
+  min-width: min-content;
 }
 /* 件数は縮めない (幅が足りないときは比較対象の選択欄が枝の名前を省略して
    縮む)。 */
@@ -20315,7 +20378,6 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 }
 /* 比較対象: 沈んだ面の選択欄。線は付けず、hover で一段明るく。 */
 #topbar .ref-selector {
-  width: calc(var(--space-unit) * 40);
   height: var(--ui-control-md);
   padding: 0 var(--space-3);
   border-color: transparent;
@@ -20332,6 +20394,10 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
   box-shadow: var(--focus-ring);
 }
 #topbar .ref-selector .ref-input {
+  /* 枝の名前の先頭 6〜7 文字 + … が読める幅より縮めない (0 に潰れると
+     「|」だけになった)。余った幅は伸びて埋める。 */
+  width: 7ch;
+  min-width: 7ch;
   font-size: var(--ui-font-md);
 }
 #topbar .ref-dots {
@@ -20409,6 +20475,9 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
   background: var(--color-inset);
 }
 #topbar .seg button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0 var(--space-4);
   border: 0;
   border-radius: var(--radius-sm);
@@ -20418,6 +20487,12 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 }
 #topbar .seg button[data-layout="side-by-side"] {
   order: -1;
+}
+/* 絵は帯が狭いときだけ (下の @container topbar)。広いときは文字だけ。 */
+#topbar .seg .seg-icon {
+  display: none;
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 #topbar .seg button:hover {
   background: transparent;
@@ -20509,6 +20584,20 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 @container topbar (max-width: 56em) {
   #topbar #meta .chip-next-unviewed {
     display: none;
+  }
+  /* 比較対象の選択欄の頭の枝の絵を省き、名前に幅を回す。 */
+  #topbar .ref-selector .ref-selector-icon {
+    display: none;
+  }
+  /* Split / Unified は絵だけにする (名前は title と aria-label に残る)。 */
+  #topbar .seg .seg-icon {
+    display: block;
+  }
+  #topbar .seg .seg-label {
+    display: none;
+  }
+  #topbar .seg button {
+    padding: 0 var(--space-2);
   }
 }
 #topbar {

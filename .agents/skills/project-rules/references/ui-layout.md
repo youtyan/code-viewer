@@ -74,6 +74,31 @@ grep -n "100vh\|100dvh" web/style.css \
 細い帯の幅になり、プロジェクト名と画面の入口 (`#view-head`) はタブ列の左の `#tabs-lead` へ移る
 (`views/sidebar.ts` の `placeSidebarToggle`)。自動では畳まない。
 
+- **本文 (`#content`) は自分の箱の中でスクロールする。窓 (`html` / `body`) は
+  スクロールしない** (`html, body` の `overflow: hidden`)。`#content` は
+  `position: fixed` で `top: --chrome-h` / `left: --page-left` /
+  `right: --page-right` / `bottom: --chrome-bottom`、`overflow: auto`。
+  こうしないと縦のスクロールバーが右の列のさらに右 (窓の右端) に出て、本文と
+  右の列が左へ寄る。付いて回る決まり:
+  - 箱の中の sticky な見出し (`.d2h-file-header`・`.gdp-shell-header`・
+    `.gdp-file-detail-sticky` など) の `top` は**箱の上端が基準**。chrome の変数を
+    読まない。箱の上の余白 (`--content-top-gap`) の分だけ上へ出す
+    (`top: calc(0px - var(--content-top-gap, 0px))`)。出さないと、見出しの上の
+    隙間に次の行がのぞく
+  - スクロール位置を読む / 書く TS は `window.scrollY` / `window.scrollTo` では
+    なく、`core/focus-scope.ts` の `mainScrollBox()` (と、中に自分の scroller が
+    あるときは `findMainScrollTarget()`) を使う
+  - `#content` は `position: fixed` なので **`offsetParent` は常に null**。
+    「画面に出ているか」は `getClientRects().length > 0` で見る (これで j / k と
+    PageDown が動かなくなった)
+  - 戻る / 進むのスクロール位置はブラウザが戻さない (窓が動かないため)。履歴の
+    項ごとの鍵で覚えて戻す (`core/scroll-memory.ts` と `app.ts` の
+    `restoreMainScroll`)
+- **2 面にした本文が、面 2 つ分のゆとり (`COMFORTABLE_PANE_WIDTH` × 2 + 仕切り)
+  に足りないときは、2 面の間だけ右の列を細い帯へ自動で畳む** (`app.ts` の
+  `syncPanelColumnForSplit`)。2 面を解いたら戻す。利用者が 2 面の間に自分で
+  開いたら、そのセッションでは自動で畳まない (保存しない)。面の幅の下限は、
+  自分で開いている間だけ `TIGHT_PANE_WIDTH` まで下げ、両面を同じ比で縮める
 - **上に居座る固定物の高さは `--global-header-h` だけを読む。** 今はタブ列だけなので
   `--global-header-h: var(--main-tabs-h)` (`style.css` の `html, body`)。ツールバーの `top`・各ページの
   `--chrome-h` の上書き・sticky の `top`・面の箱の `top` はこれを読むので、上に固定物を足す / 消す
@@ -97,9 +122,9 @@ grep -n "100vh\|100dvh" web/style.css \
   `bottom: var(--chrome-bottom)` だけを読む。** `--nav-w` や `--statusbar-h` を直接読まない。
   左や下に固定物を足す / 消すときは、`html, body` ブロックの `--chrome-left` /
   `--chrome-bottom` の式に項を足すだけ（下の「型」の横と下の版）
-- 本文 (窓のスクロール) は `body` の `padding-left: var(--chrome-left)` と
-  `padding-bottom: var(--chrome-bottom)` で固定物の内側に入る。`#content` の `margin-left`
-  は今までどおり `--sidebar-w` だけを見る
+- 本文の箱は自分で `--page-left` / `--page-right` / `--chrome-bottom` を読む
+  (`body` の padding では位置を決めない)。`#content` の `margin-left` は今までどおり
+  `--sidebar-w` だけを見る (History・作業ツリーの 2 列目)
 - `--content-h` は `--chrome-bottom` も引く（最下段は本文と場所を分け合う）
 - 左のサイドバーを畳む = `html[data-nav-collapsed]` が `body` で `--nav-w: 0px` にする。
   html の属性なのは、`index.html` の head のスクリプトが body より先に付けて、移った直後に

@@ -92,6 +92,11 @@ export type SidebarDeps = {
   /** 差分の一覧の件数 ("3 files" / "3ファイル")。 */
   fileCountText(count: number): string;
   sidebarToggleTitle(hidden: boolean): string;
+  /**
+   * 利用者が自分で右の列を畳んだ / 開いた (ボタン・キー)。自動で畳んだものと
+   * 区別するために呼ぶ (app.ts の 2 面のときの自動の畳み)。
+   */
+  onUserToggledSidebarHidden?(hidden: boolean): void;
   openDirectoryInOsTitle(): string;
   omittedDirectoryBadge(reason: RepoTreeEntry["children_omitted_reason"]): {
     label: string;
@@ -356,7 +361,9 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function toggleSidebarHidden() {
-    applySidebarHidden(!STATE.sidebarHidden);
+    const hidden = !STATE.sidebarHidden;
+    applySidebarHidden(hidden);
+    deps.onUserToggledSidebarHidden?.(hidden);
   }
 
   // Copies the directory-only facts of a `type: "tree"` entry onto the node

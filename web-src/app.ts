@@ -46,6 +46,7 @@ import {
   isEditableKeyTarget,
   isPageKeymapBlockedKey,
   keymapScope,
+  mainScrollBox,
   prepareKeyboardPanels,
   setPanelFocusScope,
 } from "./core/focus-scope";
@@ -61,6 +62,8 @@ import {
   CHEVRON_DOWN_12_PATH,
   COMMENT_DISCUSSION_16_PATH,
   COPY_16_PATHS,
+  DIFF_SPLIT_16_PATH,
+  DIFF_UNIFIED_16_PATHS,
   FOLDER_ICON_PATHS,
   GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
@@ -121,6 +124,10 @@ import {
   withPaneOverlay,
   withTerminalOverlay,
 } from "./core/routes";
+import {
+  createScrollMemory,
+  scrollKeyOfHistoryState,
+} from "./core/scroll-memory";
 import { rememberPaletteSelection } from "./core/search-palette";
 import type { ShellListResponse, ShellSessionId } from "./core/shell";
 import { sourceInternalPathKind } from "./core/source-meta";
@@ -504,14 +511,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
       return;
     }
-    const top =
-      edge === "top"
-        ? 0
-        : Math.max(
-            document.documentElement.scrollHeight,
-            document.body.scrollHeight,
-          );
-    window.scrollTo({ top, behavior: "auto" });
+    // 動かせる箱が見つからないとき (中身がまだ無い) も、窓ではなく本文の箱。
+    const box = mainScrollBox();
+    box?.scrollTo({
+      top: edge === "top" ? 0 : box.scrollHeight,
+      behavior: "auto",
+    });
   }
 
   function isFocusableClickTarget(target: EventTarget | null): boolean {
@@ -1674,8 +1679,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     filterCountTitle: (visible, total) =>
       uiText().sidebar.filterCountTitle(visible, total),
     fileCountText: (count) => uiText().diff.files(count),
-    sidebarToggleTitle: (hidden) =>
-      hidden ? uiText().sidebar.show : uiText().sidebar.hide,
+    sidebarToggleTitle: panelColumnToggleTitle,
+    onUserToggledSidebarHidden,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
     omittedDirectoryBadge: (reason) => {
       const text = uiText().sidebar;
@@ -2104,6 +2109,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterClearTitle: string;
         hide: string;
         show: string;
+        autoHiddenForSplit: string;
         repoTarget: string;
         openDirectoryInOs: string;
         omittedHeavyLabel: string;
@@ -2273,6 +2279,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterClearTitle: "Clear file filter",
         hide: "hide sidebar",
         show: "show sidebar",
+        autoHiddenForSplit:
+          "collapsed to make room for the two panes - open it to keep it open",
         repoTarget: "repository target",
         openDirectoryInOs: "open this folder in OS",
         omittedHeavyLabel: "skipped",
@@ -2662,6 +2670,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterClearTitle: "ファイル絞り込みを解除",
         hide: "サイドバーを隠す",
         show: "サイドバーを表示",
+        autoHiddenForSplit:
+          "2 面のために畳みました。開くと、そのまま開いたままにします",
         repoTarget: "リポジトリの対象",
         openDirectoryInOs: "このフォルダをOSで開く",
         omittedHeavyLabel: "省略",
@@ -2968,6 +2978,24 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (el) el.textContent = text;
   }
 
+  // Split / Unified は絵と文字を持ち、帯が狭いと CSS が文字を畳んで絵だけに
+  // する (@container topbar)。畳んでも名前が分かるよう title と aria-label にも入れる。
+  function setLayoutButtonLabel(
+    selector: string,
+    paths: string | string[],
+    label: string,
+  ) {
+    const button = document.querySelector<HTMLButtonElement>(selector);
+    if (!button) return;
+    button.innerHTML = iconSvg("seg-icon", paths);
+    const name = document.createElement("span");
+    name.className = "seg-label";
+    name.textContent = label;
+    button.append(name);
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+
   function setButtonLabel(button: HTMLButtonElement | null, text: string) {
     if (button) button.textContent = text;
   }
@@ -3075,12 +3103,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     const layoutGroup = document.querySelector<HTMLElement>("#topbar .seg");
     layoutGroup?.setAttribute("aria-label", text.topbar.layout);
-    setElementText(
+    setLayoutButtonLabel(
       '#topbar .seg button[data-layout="line-by-line"]',
+      DIFF_UNIFIED_16_PATHS,
       text.topbar.unified,
     );
-    setElementText(
+    setLayoutButtonLabel(
       '#topbar .seg button[data-layout="side-by-side"]',
+      DIFF_SPLIT_16_PATH,
       text.topbar.split,
     );
     const ignoreWs = document.querySelector<HTMLButtonElement>("#ignore-ws");
@@ -3143,9 +3173,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const sidebarToggle =
       document.querySelector<HTMLButtonElement>("#sidebar-toggle");
     if (sidebarToggle) {
-      const sidebarToggleTitle = STATE.sidebarHidden
-        ? text.sidebar.show
-        : text.sidebar.hide;
+      const sidebarToggleTitle = panelColumnToggleTitle(STATE.sidebarHidden);
       sidebarToggle.title = sidebarToggleTitle;
       sidebarToggle.setAttribute("aria-label", sidebarToggleTitle);
     }
@@ -3871,15 +3899,99 @@ window.GdpExpandLogic = GdpExpandLogic;
     return withOverlayState(withAnnotationSessionParam(buildRoute(route)));
   }
 
-  function historyStateForRoute(route: AppRoute): unknown {
-    return route.screen === "file"
-      ? {
-          screen: "file",
-          path: route.path,
-          ref: route.ref,
-          view: route.view || "detail",
-        }
-      : { view: route.screen };
+  // ---- 戻る/進むのスクロール位置 ----
+  // 本文は窓ではなく自分の箱 (#content) で動くので、ブラウザは位置を戻さない。
+  // 履歴の項ごとの鍵で覚えて、戻ったときにその位置へ戻す (core/scroll-memory)。
+  const SCROLL_MEMORY = createScrollMemory();
+  let SCROLL_KEY_SEQ = 0;
+
+  function currentScrollKey(): string | null {
+    return scrollKeyOfHistoryState(history.state);
+  }
+
+  /**
+   * いまの履歴の項の鍵。無ければその場で付ける (最初に開いた項・外から来た項は
+   * この仕組みを通っていないので鍵を持たない)。
+   */
+  function ensureScrollKey(): string {
+    const existing = currentScrollKey();
+    if (existing) return existing;
+    const key = `h${++SCROLL_KEY_SEQ}`;
+    const state = history.state;
+    history.replaceState(
+      { ...(typeof state === "object" && state ? state : {}), scrollKey: key },
+      "",
+    );
+    return key;
+  }
+
+  /** いま見ている位置を、いまの履歴の項に覚える。 */
+  function rememberMainScroll(): void {
+    const box = mainScrollBox();
+    if (box) SCROLL_MEMORY.remember(ensureScrollKey(), box.scrollTop);
+  }
+
+  /**
+   * 履歴に積む state。`keep` は同じ項を書き換えるとき (replaceState) で、
+   * 覚えた位置を捨てないように鍵をそのまま使う。
+   */
+  function historyStateForRoute(route: AppRoute, keep = false): unknown {
+    const base =
+      route.screen === "file"
+        ? {
+            screen: "file",
+            path: route.path,
+            ref: route.ref,
+            view: route.view || "detail",
+          }
+        : { view: route.screen };
+    const key = (keep ? currentScrollKey() : null) || `h${++SCROLL_KEY_SEQ}`;
+    // 新しい項へ移る前に、いま見ていた位置を覚えておく。
+    if (!keep) rememberMainScroll();
+    return { ...base, scrollKey: key };
+  }
+
+  /** 本文の箱を先頭へ (新しい画面は先頭から見せる)。 */
+  function scrollMainToTop(): void {
+    const box = mainScrollBox();
+    if (box) box.scrollTop = 0;
+  }
+
+  /**
+   * 戻る/進むで来た項の位置へ戻す。中身は後から描き終わるので、箱がその高さに
+   * なるまで何度か試し、途中で別の画面へ移ったらやめる。
+   */
+  let SCROLL_RESTORE_SEQ = 0;
+  /** 中身が描き終わるまでの間、位置を当て直す時点 (ミリ秒)。 */
+  const SCROLL_RESTORE_DELAYS = [0, 120, 400, 900, 1500];
+  function restoreMainScroll(): void {
+    const key = currentScrollKey();
+    const top = SCROLL_MEMORY.recall(key);
+    const seq = ++SCROLL_RESTORE_SEQ;
+    // 中身は後から届くので (差分のカードは遅れて描かれ、その分だけ上が伸びる)、
+    // 描き終わるまで何度か当て直す。利用者が自分で動かしたらそこでやめる。
+    const stop = new AbortController();
+    for (const event of ["wheel", "pointerdown", "keydown"] as const) {
+      window.addEventListener(event, () => stop.abort(), {
+        once: true,
+        passive: true,
+        signal: stop.signal,
+      });
+    }
+    const apply = () => {
+      if (seq !== SCROLL_RESTORE_SEQ || stop.signal.aborted) return;
+      const box = mainScrollBox();
+      if (box) box.scrollTop = top;
+    };
+    apply();
+    requestAnimationFrame(apply);
+    for (const delay of SCROLL_RESTORE_DELAYS) {
+      setTimeout(() => {
+        apply();
+        if (delay === SCROLL_RESTORE_DELAYS[SCROLL_RESTORE_DELAYS.length - 1])
+          stop.abort();
+      }, delay);
+    }
   }
 
   function replaceUrlWithCurrentRoute(): void {
@@ -3887,7 +3999,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const current = window.location.pathname + window.location.search;
     if (url !== current) {
       history.replaceState(
-        historyStateForRoute(STATE.route),
+        historyStateForRoute(STATE.route, true),
         "",
         url + window.location.hash,
       );
@@ -4119,7 +4231,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.repoRef = nextRoute.ref || "worktree";
     }
     const url = urlForRoute(nextRoute);
-    const state = historyStateForRoute(nextRoute);
+    const state = historyStateForRoute(nextRoute, replace);
     if (replace) history.replaceState(state, "", url);
     else history.pushState(state, "", url);
     MAIN_TABS.syncRoute(nextRoute, !replace);
@@ -5461,14 +5573,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (scope === "main") scrollMainToEdge(edge);
       else if (scope === "sidebar") moveActiveSidebarToEdge(edge);
       else
-        window.scrollTo({
-          top:
-            edge === "top"
-              ? 0
-              : Math.max(
-                  document.documentElement.scrollHeight,
-                  document.body.scrollHeight,
-                ),
+        mainScrollBox()?.scrollTo({
+          top: edge === "top" ? 0 : (mainScrollBox()?.scrollHeight ?? 0),
           behavior: "auto",
         });
       return true;
@@ -5737,7 +5843,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     event.preventDefault();
     const route = emptyDiffHistoryRoute();
     history.pushState(historyStateForRoute(route), "", urlForRoute(route));
-    window.scrollTo(0, 0);
+    scrollMainToTop();
     applyRouteFromLocation();
   }
 
@@ -6556,7 +6662,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (isRepositorySidebarMode()) markActive(route.path);
     const url = withPaneOverlay(urlForRoute(route), "right");
     if (url !== window.location.pathname + window.location.search) {
-      if (replace) history.replaceState(historyStateForRoute(route), "", url);
+      if (replace)
+        history.replaceState(historyStateForRoute(route, true), "", url);
       else history.pushState(historyStateForRoute(route), "", url);
     }
     return true;
@@ -6616,6 +6723,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (next === null || next === current) return;
     const state = historyStateForRoute(
       view.focused === "right" && right ? right : STATE.route,
+      mode === "replace",
     );
     if (mode === "push") history.pushState(state, "", next);
     else history.replaceState(state, "", next);
@@ -6911,7 +7019,70 @@ window.GdpExpandLogic = GdpExpandLogic;
    * ターミナルならそのシェルを積み、そうでないタブへ route を移らずに戻った
    * ときは ?terminal= を外す。
    */
+  // ---- 2 面のときの右の列 (ui-layout.md の「2 面と右の列」) ----
+  // 2 面にした本文が、ゆとりのある面の最小幅 2 つ分に足りないなら、右の列を
+  // 細い帯へ自動で畳む (Data の検索欄などが 0 幅に潰れるため)。2 面を解いたら
+  // 元へ戻す。利用者が 2 面の間に自分で開いたら、その意思を優先して、この
+  // セッションでは二度と自動で畳まない (保存はしない = 読み直しで元に戻る)。
+  let PANEL_COLUMN_AUTO_HIDDEN = false;
+  let PANEL_COLUMN_AUTO_HIDE_OFF = false;
+  let PANEL_COLUMN_SPLIT = false;
+
+  /**
+   * 右の列を畳む / 出すボタンの説明。2 面のために自動で畳んだときは、その理由も
+   * 出す (手で畳んだときと区別が付かないと、なぜ消えたのか分からない)。
+   */
+  function panelColumnToggleTitle(hidden: boolean): string {
+    const text = uiText().sidebar;
+    if (!hidden) return text.hide;
+    return PANEL_COLUMN_AUTO_HIDDEN
+      ? `${text.show} (${text.autoHiddenForSplit})`
+      : text.show;
+  }
+
+  function syncPanelColumnForSplit(split: boolean): void {
+    if (split === PANEL_COLUMN_SPLIT) return;
+    PANEL_COLUMN_SPLIT = split;
+    if (split) {
+      if (PANEL_COLUMN_AUTO_HIDE_OFF) return;
+      if (STATE.sidebarHidden) return;
+      if (MAIN_TABS.splitFitsWithPanelColumn()) return;
+      PANEL_COLUMN_AUTO_HIDDEN = true;
+      SIDEBAR.applySidebarHidden(true, { persist: false });
+      markPanelRailAutoHidden();
+      return;
+    }
+    if (!PANEL_COLUMN_AUTO_HIDDEN) return;
+    PANEL_COLUMN_AUTO_HIDDEN = false;
+    SIDEBAR.applySidebarHidden(false, { persist: false });
+    markPanelRailAutoHidden();
+  }
+
+  /** 帯の頭に「2 面のため畳みました」の印と説明を出す / 外す。 */
+  function markPanelRailAutoHidden(): void {
+    const rail = document.querySelector<HTMLElement>("#panel-rail");
+    rail?.classList.toggle(
+      "panel-rail-auto-hidden",
+      PANEL_COLUMN_AUTO_HIDDEN && STATE.sidebarHidden,
+    );
+    const toggle = document.querySelector<HTMLButtonElement>("#sidebar-toggle");
+    if (!toggle) return;
+    const title = panelColumnToggleTitle(STATE.sidebarHidden);
+    toggle.title = title;
+    toggle.setAttribute("aria-label", title);
+  }
+
+  function onUserToggledSidebarHidden(hidden: boolean): void {
+    if (!hidden && PANEL_COLUMN_SPLIT) {
+      // 2 面の間に自分で開いた = これ以降は自動で畳まない。
+      PANEL_COLUMN_AUTO_HIDE_OFF = true;
+    }
+    PANEL_COLUMN_AUTO_HIDDEN = false;
+    markPanelRailAutoHidden();
+  }
+
   function showPanes(view: PanesView, how: FrontChange): void {
+    syncPanelColumnForSplit(view.split);
     for (const side of ["left", "right"] as const) {
       const host = PANE_HOSTS[side];
       const tab = view.fronts[side];
@@ -7646,13 +7817,17 @@ window.GdpExpandLogic = GdpExpandLogic;
    */
   /** 履歴を積まずにその route へ (本文の面を合わせ直すとき)。 */
   function replaceWithRoute(route: AppRoute): void {
-    history.replaceState(historyStateForRoute(route), "", urlForRoute(route));
+    history.replaceState(
+      historyStateForRoute(route, true),
+      "",
+      urlForRoute(route),
+    );
     applyRouteFromLocation();
   }
 
   function navigateToRoute(route: AppRoute): void {
     history.pushState(historyStateForRoute(route), "", urlForRoute(route));
-    window.scrollTo(0, 0);
+    scrollMainToTop();
     applyRouteFromLocation();
   }
 
@@ -7823,7 +7998,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     load();
   }
-  window.addEventListener("popstate", applyRouteFromLocation);
+  window.addEventListener("popstate", () => {
+    applyRouteFromLocation();
+    restoreMainScroll();
+  });
+  // 本文の箱の位置を、いまの履歴の項に覚え続ける (scroll は上がってこないので
+  // capture で受ける)。
+  document.addEventListener(
+    "scroll",
+    (event) => {
+      if (event.target === mainScrollBox()) rememberMainScroll();
+    },
+    { capture: true, passive: true },
+  );
   window.addEventListener("pagehide", () => {
     flushViewStatePatch(true);
     MAIN_TABS.flush(true);
@@ -7867,7 +8054,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           withOverlayState(target.pathname + target.search),
         );
         // Mimic a fresh page load: menu navigation starts at the top.
-        window.scrollTo(0, 0);
+        scrollMainToTop();
         applyRouteFromLocation();
       });
     });
@@ -8275,7 +8462,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (route.screen !== "diff" && route.screen !== "history") {
       return;
     }
-    const savedScroll = window.scrollY;
+    // 位置を持っているのは本文の箱 (窓は動かない)。
+    const box = mainScrollBox();
+    const savedScroll = box?.scrollTop ?? 0;
     const savedActive = STATE.activeFile;
     load({ changedPaths: paths }).then((result) => {
       if (result?.preservedDom) return;
@@ -8288,7 +8477,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           return;
         }
       }
-      window.scrollTo(0, savedScroll);
+      if (box) box.scrollTop = savedScroll;
     });
   }
 
