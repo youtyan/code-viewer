@@ -3469,7 +3469,11 @@ function startScopedWorktreeWatch(): WatchSupervisor {
 }
 
 function restartWorktreeWatch() {
-  if (shutdown.started() || !worktreeWatch) return;
+  // 起動時の applyPersistedSettings からも呼ばれる。その時点では worktreeWatch が
+  // まだ null で、`shutdown` (下の const) は初期化前なので先に触ると
+  // ReferenceError になる。null の確認を先に置く。
+  if (!worktreeWatch) return;
+  if (shutdown.started()) return;
   worktreeWatch.close();
   worktreeWatch = startScopedWorktreeWatch();
 }
