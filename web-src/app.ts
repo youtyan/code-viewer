@@ -100,7 +100,7 @@ import {
 import { isNativeLinkClick } from "./core/link-click";
 import type { PaneSide, TabTarget } from "./core/main-tabs";
 import { createNetworkActivityTracker } from "./core/network-activity";
-import { listColumnWidth } from "./core/list-column";
+import { listColumnLayout, restoredListWidth } from "./core/list-column";
 import type { TerminalTabProject } from "./core/terminal-tab-name";
 import { panelColumnAction } from "./core/panel-column-policy";
 import {
@@ -1276,11 +1276,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       SIDEBAR_WIDTH.min,
       SIDEBAR_WIDTH.max,
     );
-    STATE.historyWidth = savedNumber(
+    STATE.historyWidth = restoredListWidth(
       APP_SETTINGS.historyWidth,
-      HISTORY_WIDTH.default,
-      HISTORY_WIDTH.min,
-      HISTORY_WIDTH.max,
+      HISTORY_WIDTH,
     );
     STATE.sidebarHidden = APP_SETTINGS.sidebarHidden === true;
     STATE.collapsedDirs = new Set(VIEW_STATE.collapsedDirs || []);
@@ -1360,12 +1358,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         SIDEBAR_WIDTH.min,
         SIDEBAR_WIDTH.max,
       ),
-      historyWidth: savedNumber(
-        APP_SETTINGS.historyWidth,
-        HISTORY_WIDTH.default,
-        HISTORY_WIDTH.min,
-        HISTORY_WIDTH.max,
-      ),
+      historyWidth: restoredListWidth(APP_SETTINGS.historyWidth, HISTORY_WIDTH),
       sidebarHidden: APP_SETTINGS.sidebarHidden === true,
       collapsedDirs: new Set<string>(VIEW_STATE.collapsedDirs),
       lazyExpandedDirs: new Set<string>(VIEW_STATE.lazyExpandedDirs),
@@ -1428,7 +1421,15 @@ window.GdpExpandLogic = GdpExpandLogic;
    * しない。右の列の畳みの設定とは別)。配線は syncListColumn。
    */
   let LIST_COLUMN_HIDDEN = false;
-  /** 一覧の列のいまの幅 (出していなければ 0)。2 面の幅の計算が引く。 */
+  /**
+   * 利用者が畳んだ変更ファイルの木を開いた (このセッションは畳まない)。
+   * 配線は syncListColumn。
+   */
+  let LIST_TREE_KEPT_OPEN = false;
+  /**
+   * 一覧の列のいまの幅 (一覧 + 変更ファイルの木。出していなければ 0)。2 面の
+   * 幅の計算が引く。
+   */
   let LIST_COLUMN_WIDTH = 0;
   /** 一覧の列に出す一覧の要素 (body[data-list-column] の値ごと)。 */
   const LIST_COLUMN_IDS = {
@@ -2140,6 +2141,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         show: string;
         hideList: string;
         showList: string;
+        showTree: string;
         autoHiddenForSplit: string;
         repoTarget: string;
         openDirectoryInOs: string;
@@ -2312,6 +2314,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         show: "Show right column",
         hideList: "hide the list",
         showList: "show the list",
+        showTree:
+          "show the changed files (folded to make room for the main area)",
         autoHiddenForSplit:
           "collapsed to make room for the two panes - open it to keep it open",
         repoTarget: "repository target",
@@ -2705,6 +2709,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         show: "右の列を表示",
         hideList: "一覧を隠す",
         showList: "一覧を表示",
+        showTree: "変更ファイルを表示 (本文の幅のために畳みました)",
         autoHiddenForSplit:
           "2 面のために畳みました。開くと、そのまま開いたままにします",
         repoTarget: "リポジトリの対象",
@@ -3211,6 +3216,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const sidebarToggleTitle = panelColumnToggleTitle(STATE.sidebarHidden);
       sidebarToggle.title = sidebarToggleTitle;
       sidebarToggle.setAttribute("aria-label", sidebarToggleTitle);
+      localizeListTreeOpen();
     }
     setElementText(".sidebar-toggle-label", text.sidebar.files);
 
@@ -7161,29 +7167,48 @@ window.GdpExpandLogic = GdpExpandLogic;
       "data-list-column-hidden",
       !!kind && LIST_COLUMN_HIDDEN,
     );
-    let width = 0;
-    if (kind && !LIST_COLUMN_HIDDEN) {
+    let total = 0;
+    let treeFolded = false;
+    if (kind) {
       // タブ列は左のサイドバーの右から右の列の左まで (= 一覧の列と本文)。
       const room = document
         .getElementById("main-tabs")
         ?.getBoundingClientRect().width;
       if (room === undefined) throw new Error("#main-tabs is missing");
+      // 木を畳んだ帯の幅 = 右の列の帯と同じ (--panelcol-rail-w。密度で変わる)。
+      const railValue =
+        getComputedStyle(body).getPropertyValue("--panelcol-rail-w");
+      const treeRail = Number.parseFloat(railValue);
+      if (!Number.isFinite(treeRail))
+        throw new Error(
+          `--panelcol-rail-w is not a length: ${JSON.stringify(railValue)}`,
+        );
       const split = MAIN_TABS.panes().split;
-      width = listColumnWidth({
+      const layout = listColumnLayout({
         room,
-        preferred: STATE.historyWidth,
+        preferred: LIST_COLUMN_HIDDEN ? 0 : STATE.historyWidth,
         compact: HISTORY_WIDTH.min,
-        // History・作業ツリーの変更ファイルの木は、1 面なら本文の横に居座る
-        // (2 面では左の面の中)。
-        inset: kind === "sidebar" || split ? 0 : STATE.sbWidth,
+        // History・作業ツリーは一覧の右に変更ファイルの木の列が並ぶ。
+        tree: kind === "sidebar" ? 0 : STATE.sbWidth,
+        treeRail,
+        treeKeptOpen: LIST_TREE_KEPT_OPEN,
         need: split
           ? COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH
           : COMFORTABLE_PANE_WIDTH,
-      }).width;
-      document.documentElement.style.setProperty("--list-w", `${width}px`);
+      });
+      if (!LIST_COLUMN_HIDDEN)
+        document.documentElement.style.setProperty(
+          "--list-w",
+          `${layout.width}px`,
+        );
+      treeFolded = layout.treeFolded;
+      total = layout.width + layout.tree;
     }
-    if (width === LIST_COLUMN_WIDTH) return;
-    LIST_COLUMN_WIDTH = width;
+    // 木の幅そのものは CSS が --sidebar-w と帯の幅から作る (木の掴みでの
+    // ドラッグを ResizeObserver で拾えるように)。ここは畳むかどうかだけ。
+    body.toggleAttribute("data-list-tree-folded", treeFolded);
+    if (total === LIST_COLUMN_WIDTH) return;
+    LIST_COLUMN_WIDTH = total;
     MAIN_TABS.refit();
   }
 
@@ -7269,6 +7294,30 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // 窓・左のサイドバー・右の列の幅 (タブ列の幅) と、History の変更ファイルの
   // 木の幅が変わったら、一覧の列の幅を決め直す。
+  // 畳んだ変更ファイルの木の帯。押すと開き、このセッションは畳まない。
+  const listTreeOpen = document.createElement("button");
+  listTreeOpen.type = "button";
+  listTreeOpen.className = "list-tree-open";
+  listTreeOpen.innerHTML = iconSvg(
+    "list-tree-open-icon",
+    SIDEBAR_SHOW_16_PATHS,
+  );
+  listTreeOpen.addEventListener("click", () => {
+    LIST_TREE_KEPT_OPEN = true;
+    syncListColumn();
+  });
+  document.body.append(listTreeOpen);
+  localizeListTreeOpen();
+
+  /** 言語の切替でも呼ばれる (ボタンを作る前にも呼ばれるので DOM から引く)。 */
+  function localizeListTreeOpen(): void {
+    const button = document.querySelector<HTMLButtonElement>(".list-tree-open");
+    if (!button) return;
+    const title = uiText().sidebar.showTree;
+    button.title = title;
+    button.setAttribute("aria-label", title);
+  }
+
   const listColumnObserver = new ResizeObserver(() => syncListColumn());
   for (const id of ["main-tabs", "sidebar"]) {
     const el = document.getElementById(id);

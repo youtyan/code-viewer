@@ -88,17 +88,25 @@ grep -n "100vh\|100dvh" web/style.css \
   無い)。一覧の画面を出たら、一覧のために畳んでいたものは開き、2 面なら開いた幅で 2 面の決まりを
   もう一度当てる。一覧の画面では帯のボタン (`#sidebar-toggle`) は一覧の列を隠す / 出す
   (`toggleListColumn`。このセッションだけ。`body[data-list-column-hidden]`)
-- **一覧の列は 2 段の幅を持つ**: 利用者の幅 (`HISTORY_WIDTH`。既定 320、掴み `#history-resizer`
-  で変え、設定の `historyWidth` に保存) と詰めた幅 (`HISTORY_WIDTH.min` = 240。History は件名と
-  札だけになる)。本文が `COMFORTABLE_PANE_WIDTH` (1 面。History・作業ツリーは隣の変更ファイルの
-  木の幅も引く) / その 2 つ分 + 仕切り (2 面) に足りなければ詰めた幅 (`core/list-column.ts`)。
-  それでも 2 面の下限 (`TIGHT_PANE_WIDTH` × 2 + 仕切り) に足りなければ右の面を預ける
-  (`main-tabs-view.ts` の `fitToWidth`。本文の幅 `mainWidth` は一覧の列を引く)。左のサイドバーは
-  畳まない (プロジェクトとエージェントは常に見える)。既定の密度・左のサイドバー 280 での境目:
-  1 面の History は窓 1348 未満で詰める、2 面は 1589 未満で詰め 1189 未満で預ける
+- **一覧の列 = 一覧 + (History・選んでいる作業ツリーなら) 変更ファイルの木。どちらも面の外**
+  (`--listcol-shown = --list-shown + --list-tree-w`。`--page-left` はその右。2 面でも本文全体の左)。
+  木 (`#sidebar`) の幅は `--sidebar-w` (掴み `#sidebar-resizer` は木の右端)
+- **足りないときの順番** (`core/list-column.ts` の `listColumnLayout`): 本文 (1 面は
+  `COMFORTABLE_PANE_WIDTH`、2 面はその 2 つ分 + 仕切り) に足りなければ、(1) 一覧を詰めた幅
+  (`HISTORY_WIDTH.min` = 240。History は件名と札だけ) にし、(2) 木を帯 (`--panelcol-rail-w`) に
+  畳み (`body[data-list-tree-folded]`。帯は開くボタン `.list-tree-open`。押したらこのセッションは
+  畳まない)、(3) それでも 2 面の下限 (`TIGHT_PANE_WIDTH` × 2 + 仕切り) に足りなければ右の面を
+  預ける (`main-tabs-view.ts` の `fitToWidth`。本文の幅 `mainWidth` は一覧の列を引く)。左の
+  サイドバーは畳まない (プロジェクトとエージェントは常に見える)。一覧の利用者の幅は
+  `HISTORY_WIDTH` (既定 320、掴み `#history-resizer`、設定の `historyWidth`。読み戻しは
+  `restoredListWidth`: 範囲の外は既定に戻す)。既定の密度・左のサイドバー 280・帯 28 での境目:
+  1 面の History は窓 1348 未満で詰め 1268 未満で木を畳む、2 面の History は 1829 未満で詰め
+  1749 未満で木を畳み 1217 未満で預ける。Diff (木なし) は 1 面 1108・2 面 1589 未満で詰め、
+  2 面 1189 未満で預ける
 - 一覧の列の幅が変わる (窓・左のサイドバー・右の列・変更ファイルの木・掴み) と `syncListColumn` が
   幅を決め直し、変われば `MAIN_TABS.refit()` で面の幅を合わせ直す (CSS 変数の変化は
-  ResizeObserver に届かない)
+  ResizeObserver に届かない)。木の幅は TS が書かず CSS が `--sidebar-w` から作る (木の掴みで
+  変えた幅を `#sidebar` の ResizeObserver で拾うため)。TS が付けるのは畳む印だけ
 
 - **本文 (`#content`) は自分の箱の中でスクロールする。窓 (`html` / `body`) は
   スクロールしない** (`html, body` の `overflow: hidden`)。`#content` は

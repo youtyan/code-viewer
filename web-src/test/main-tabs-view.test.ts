@@ -15,7 +15,7 @@ import type {
   SerializedLayout,
   TabTarget,
 } from "../core/main-tabs";
-import { listColumnWidth } from "../core/list-column";
+import { listColumnLayout } from "../core/list-column";
 import { panelColumnAction } from "../core/panel-column-policy";
 import { HISTORY_WIDTH } from "../core/panel-sizes";
 import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
@@ -1316,68 +1316,103 @@ describe("main tabs view: 左右 2 面", () => {
 
   // 2 面のときの一覧の列と右の列 (ui-layout.md の「一覧の列と右の列」)。一覧の
   // 画面 (Diff・History・選んでいる作業ツリー) は一覧を本文の左の列に出し、右の列は
-  // 帯 (28) に畳んだまま。一覧の列は本文が 2 面のゆとり (961) に足りなければ詰めた
-  // 幅 (240) にし (core/list-column.ts。app.ts が決めて listColumnWidth で渡す)、
-  // それでも 2 面の下限 (641) に足りなければ右の面を預ける。一覧の無い画面 (Files。
-  // 右の列 240) は、ゆとりが無ければ右の列を畳む。本文の幅 = 窓 − 左のサイドバー
-  // 280 − 右の列 − 一覧の列。
+  // 帯 (28) に畳んだまま。History は一覧の右に変更ファイルの木 (240) の列も並ぶ
+  // (どちらも面の外)。本文が 2 面のゆとり (961) に足りなければ、一覧を詰めた幅
+  // (240) にし、次に木を帯 (28) に畳み (core/list-column.ts。app.ts が決めて
+  // listColumnWidth で渡す)、それでも 2 面の下限 (641) に足りなければ右の面を
+  // 預ける。一覧の無い画面 (Files。右の列 240) は、ゆとりが無ければ右の列を畳む。
+  // 本文の幅 = 窓 − 左のサイドバー 280 − 右の列 − 一覧の列。
   test.each([
     {
       screen: "History",
-      window: 1188,
-      list: 240,
+      window: 1216,
+      column: 268,
       parked: true,
       action: "keep",
     },
     {
       screen: "History",
-      window: 1189,
-      list: 240,
+      window: 1217,
+      column: 268,
       parked: false,
       action: "keep",
     },
     {
       screen: "History",
       window: 1280,
-      list: 240,
+      column: 268,
       parked: false,
       action: "keep",
     },
     {
       screen: "History",
+      window: 1600,
+      column: 268,
+      parked: false,
+      action: "keep",
+    },
+    {
+      screen: "History",
+      window: 1748,
+      column: 268,
+      parked: false,
+      action: "keep",
+    },
+    {
+      screen: "History",
+      window: 1749,
+      column: 480,
+      parked: false,
+      action: "keep",
+    },
+    {
+      screen: "History",
+      window: 1829,
+      column: 560,
+      parked: false,
+      action: "keep",
+    },
+    { screen: "Diff", window: 1188, column: 240, parked: true, action: "keep" },
+    {
+      screen: "Diff",
+      window: 1189,
+      column: 240,
+      parked: false,
+      action: "keep",
+    },
+    {
+      screen: "Diff",
       window: 1588,
-      list: 240,
+      column: 240,
       parked: false,
       action: "keep",
     },
     {
-      screen: "History",
+      screen: "Diff",
       window: 1589,
-      list: 320,
+      column: 320,
       parked: false,
       action: "keep",
     },
-    { screen: "Diff", window: 1280, list: 240, parked: false, action: "keep" },
-    { screen: "Diff", window: 1600, list: 320, parked: false, action: "keep" },
     {
       screen: "Files",
       window: 1280,
-      list: 0,
+      column: 0,
       parked: false,
       action: "collapse",
     },
     {
       screen: "Files",
       window: 1440,
-      list: 0,
+      column: 0,
       parked: false,
       action: "collapse",
     },
-    { screen: "Files", window: 1600, list: 0, parked: false, action: "keep" },
-  ] as const)("$screen・窓 $window px: 一覧の列 $list px・右の面を預けるか $parked・右の列 $action", async ({
+    { screen: "Files", window: 1600, column: 0, parked: false, action: "keep" },
+  ] as const)("$screen・窓 $window px: 一覧の列 $column px・右の面を預けるか $parked・右の列 $action", async ({
     screen,
     window,
-    list,
+    column,
     parked,
     action,
   }) => {
@@ -1390,15 +1425,16 @@ describe("main tabs view: 左右 2 面", () => {
     const panelColumn = document.createElement("div");
     panelColumn.getBoundingClientRect = () =>
       new DOMRect(0, 0, holdsList ? rail : 240, 80);
-    const listWidth = holdsList
-      ? listColumnWidth({
-          room: window - 280 - rail,
-          preferred: HISTORY_WIDTH.default,
-          compact: HISTORY_WIDTH.min,
-          inset: 0,
-          need: COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH,
-        }).width
-      : 0;
+    const layout = listColumnLayout({
+      room: window - 280 - rail,
+      preferred: HISTORY_WIDTH.default,
+      compact: HISTORY_WIDTH.min,
+      tree: screen === "History" ? 240 : 0,
+      treeRail: rail,
+      treeKeptOpen: false,
+      need: COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH,
+    });
+    const listWidth = holdsList ? layout.width + layout.tree : 0;
     const saved = {
       version: 3,
       focused: "left",
@@ -1442,7 +1478,7 @@ describe("main tabs view: 左右 2 面", () => {
     await handle.restore();
     const split = panes(handle).split;
     expect({
-      list: listWidth,
+      column: listWidth,
       parked: !split,
       action: panelColumnAction({
         split,
@@ -1460,7 +1496,7 @@ describe("main tabs view: 左右 2 面", () => {
             "The right side (1 tab) is set aside to make room for this screen's list",
           )
         : null,
-    }).toEqual({ list, parked, action, reason: parked ? true : null });
+    }).toEqual({ column, parked, action, reason: parked ? true : null });
   });
 
   // 利用者の選んだ状態は上書きしない。一覧の画面 (一覧を本文の左の列に出す) に

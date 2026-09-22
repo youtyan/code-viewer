@@ -24,7 +24,8 @@ Requires Node.js 20 or newer. Development uses
   list) sit in a list column between the left sidebar and the main area; on those
   screens the right column folds to its strip, whose button hides or shows the list
   instead. The list column keeps the width you drag it to (320px at first) and narrows
-  to 240px when the main area would be narrower than 480px. History's branch labels keep
+  to 240px when the main area would be narrower than 480px; History's changed
+  files column next to it folds to a strip after that. History's branch labels keep
   their whole name up to about 40% of the room they share with the subject. A terminal
   tab showing an agent from another project reads `project · title`, and a narrow tab
   shortens the project name first. A single click opens a file in a preview tab (italic)
@@ -52,8 +53,9 @@ Requires Node.js 20 or newer. Development uses
   the two sides would be narrower than 480px each, the right column folds to
   its strip while split (with a mark on its button) and comes back on one
   side; opening it yourself keeps it open until a reload. On Diff, History and
-  a selected worktree the list column narrows first, and the right side is set
-  aside if two sides still do not fit. The main area
+  a selected worktree the list column narrows first, then History's changed
+  files column folds, and the right side is set aside if two sides still do
+  not fit. The main area
   scrolls in its own box (the page never scrolls, and Back / Forward return to
   the scroll position), and a breadcrumb too long for its row folds its middle
   folders into `…` (hover for the full path; click it, or Tab to it and press

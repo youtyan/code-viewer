@@ -14,71 +14,135 @@ import {
 
 const rules = baseRules(loadStyleSheet());
 
-const LIST_PAGE = "body[data-list-column]:not([data-list-column-hidden])";
+/** 一覧の列を出す画面の状態 (body の属性)。 */
+type Page = "none" | "sidebar" | "history" | "history-folded";
 
-/** body に載る変数。listPage なら一覧の列を出している画面の上書きも載せる。 */
-function bodyVariables(listPage: boolean): Map<string, string> {
+/** その状態の body に当たる規則のセレクタ。 */
+function bodySelectors(page: Page): string[] {
+  if (page === "none") return [];
+  const list = page === "sidebar" ? "sidebar" : "history";
+  return [
+    "body[data-list-column]:not([data-list-column-hidden])",
+    `body[data-list-column="${list}"]`,
+    ...(page === "history-folded" ? ["body[data-list-tree-folded]"] : []),
+  ];
+}
+
+/**
+ * body に載る変数。:root (html) の値を継承し、その上に body 自身の宣言
+ * (html, body と、その画面の上書き) を重ねる。1 回のカスケードで比べると、
+ * 別の要素の :root が詳細度で body の属性つきの規則に勝ってしまう。
+ */
+function bodyVariables(page: Page): Map<string, string> {
+  const extra = bodySelectors(page);
+  const inherited = cascadedDeclarations(
+    rules,
+    (selector) => selector === ":root" || selector === "html",
+  );
+  const own = cascadedDeclarations(
+    rules,
+    (selector) => selector === "body" || extra.includes(selector),
+  );
+  return new Map([...inherited, ...own]);
+}
+
+function resolved(name: string, page: Page): string {
+  return resolveVar(`var(${name})`, bodyVariables(page));
+}
+
+/** その画面で element に当たる宣言 (element 単独と、画面の属性つきの規則)。 */
+function declarationsOn(element: string, page: Page): Map<string, string> {
+  const scoped = bodySelectors(page).map((body) => `${body} ${element}`);
   return cascadedDeclarations(
     rules,
-    (selector) =>
-      selector === ":root" ||
-      selector === "html" ||
-      selector === "body" ||
-      (listPage && selector === LIST_PAGE),
-  );
-}
-
-function resolved(name: string, listPage: boolean): string {
-  return resolveVar(`var(${name})`, bodyVariables(listPage));
-}
-
-function declarations(selectors: string[]): Map<string, string> {
-  return cascadedDeclarations(rules, (selector) =>
-    selectors.includes(selector),
+    (selector) => selector === element || scoped.includes(selector),
   );
 }
 
 describe("list column layout", () => {
+  // 本文の左端 = 左のサイドバーの右 + 一覧 + 変更ファイルの木 (木の無い画面は 0、
+  // 畳んだら帯の幅)。
   test.each([
-    { name: "一覧の画面", listPage: true },
-    { name: "一覧の無い画面", listPage: false },
-  ])("$name: 本文の左端は左のサイドバーの右 + 一覧の列の幅", ({ listPage }) => {
-    const chromeLeft = resolved("--chrome-left", listPage);
-    const list = listPage ? resolved("--list-w", true) : "0px";
-    expect(resolved("--page-left", listPage)).toBe(
-      `calc(${chromeLeft} + ${list})`,
+    { page: "none", list: "0px", tree: "0px" },
+    { page: "sidebar", list: "--list-w", tree: "0px" },
+    { page: "history", list: "--list-w", tree: "--sidebar-w" },
+    { page: "history-folded", list: "--list-w", tree: "--panelcol-rail-w" },
+  ] as const)("$page: 本文の左端は一覧と木の右", ({ page, list, tree }) => {
+    const value = (name: string) =>
+      name.startsWith("--") ? resolved(name, page) : name;
+    expect(resolved("--page-left", page)).toBe(
+      `calc(${resolved("--chrome-left", page)} + calc(${value(list)} + ${value(tree)}))`,
     );
   });
 
   test.each([
-    { list: "history", element: "#history-panel" },
-    { list: "worktree", element: "#worktree-panel" },
-    { list: "sidebar", element: "#sidebar" },
-  ])("$list: 一覧は左のサイドバーの右に一覧の列の幅で置く", ({
-    list,
+    { page: "history", element: "#history-panel" },
+    { page: "history", element: "#worktree-panel" },
+    { page: "sidebar", element: "#sidebar" },
+  ] as const)("$page: 一覧 $element は左のサイドバーの右に一覧の幅で置く", ({
+    page,
     element,
   }) => {
-    const box = declarations([
-      element,
-      `body[data-list-column="${list}"] ${element}`,
-    ]);
-    const vars = bodyVariables(true);
+    const box = declarationsOn(element, page);
+    const vars = bodyVariables(page);
     expect({
       left: resolveVar(box.get("left") ?? "", vars),
-      right: box.get("right"),
       width: resolveVar(box.get("width") ?? "", vars),
     }).toEqual({
-      left: resolved("--chrome-left", true),
-      right: list === "sidebar" ? "auto" : undefined,
-      width: resolved("--list-w", true),
+      left: resolved("--chrome-left", page),
+      width: resolved("--list-w", page),
     });
   });
 
-  test("一覧の列の掴みは一覧の列の右端 (本文の左端) に重なる", () => {
-    const resizer = declarations(["#history-resizer"]);
-    expect(resolveVar(resizer.get("left") ?? "", bodyVariables(true))).toBe(
-      `calc(${resolved("--page-left", true)} - ${resolved("--space-1", true)})`,
-    );
+  test("History: 変更ファイルの木は一覧の右、本文の左端の手前に置く", () => {
+    const vars = bodyVariables("history");
+    const tree = declarationsOn("#sidebar", "history");
+    const left = resolveVar(tree.get("left") ?? "", vars);
+    const width = resolveVar(tree.get("width") ?? "", vars);
+    expect({
+      left,
+      width,
+      top: resolveVar(tree.get("top") ?? "", vars),
+    }).toEqual({
+      left: `calc(${resolved("--chrome-left", "history")} + ${resolved("--list-w", "history")})`,
+      width: resolved("--sidebar-w", "history"),
+      top: resolved("--global-header-h", "history"),
+    });
+  });
+
+  test("History: 木を畳んだら木を隠し、開くボタンの帯を木の場所に出す", () => {
+    const vars = bodyVariables("history-folded");
+    const tree = declarationsOn("#sidebar", "history-folded");
+    const rail = declarationsOn(".list-tree-open", "history-folded");
+    expect({
+      tree: tree.get("display"),
+      rail: rail.get("display"),
+      left: resolveVar(rail.get("left") ?? "", vars),
+      width: resolveVar(rail.get("width") ?? "", vars),
+    }).toEqual({
+      tree: "none",
+      rail: "flex",
+      left: `calc(${resolved("--chrome-left", "history-folded")} + ${resolved("--list-w", "history-folded")})`,
+      width: resolved("--panelcol-rail-w", "history-folded"),
+    });
+  });
+
+  test("掴み: 一覧の掴みは一覧の右端、木の掴みは本文の左端", () => {
+    const vars = bodyVariables("history");
+    const space = resolved("--space-1", "history");
+    expect({
+      list: resolveVar(
+        declarationsOn("#history-resizer", "history").get("left") ?? "",
+        vars,
+      ),
+      tree: resolveVar(
+        declarationsOn("#sidebar-resizer", "history").get("left") ?? "",
+        vars,
+      ),
+    }).toEqual({
+      list: `calc(${resolved("--chrome-left", "history")} + ${resolved("--list-w", "history")} - ${space})`,
+      tree: `calc(${resolved("--page-left", "history")} - ${space})`,
+    });
   });
 });
 
@@ -86,6 +150,12 @@ describe("list column layout", () => {
 // 札は先に縮む (縮みやすさが件名より大きい) が、自動の最小幅 (中身と、件名と札の
 // 箱の 40% の小さいほう) で止まる。自動の最小幅が効くには、札の列がスクロール
 // する箱であってはならない (overflow は visible か clip)。
+function declarations(selectors: string[]): Map<string, string> {
+  return cascadedDeclarations(rules, (selector) =>
+    selectors.includes(selector),
+  );
+}
+
 describe("history ref chips", () => {
   const scope = "#history-panel .history-item";
   const refs = declarations([
@@ -125,7 +195,7 @@ describe("history ref chips", () => {
   });
 
   test("札に残す幅は、件名と札の箱から間を除いた幅の 40%", () => {
-    const vars = bodyVariables(false);
+    const vars = bodyVariables("none");
     const gap = resolveVar(title.get("column-gap") ?? "", vars);
     expect(resolveVar(refs.get("width") ?? "", vars)).toBe(
       `calc((100% - ${gap}) * ${BRANCH_SHARE})`,

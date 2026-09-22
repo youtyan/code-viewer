@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { BRANCH_SHARE } from "../core/brand-fit";
 import { terminalTabName } from "../core/terminal-tab-name";
 import {
   baseRules,
@@ -63,7 +64,9 @@ describe("terminalTabName", () => {
 });
 
 // 狭くなったときは題より先にプロジェクト名を省略する: プロジェクト名は題より
-// 縮みやすく、題はプロジェクト名の最小幅まで縮まない。どちらも省略記号で切る。
+// 縮みやすいが、名前と題で分け合う幅の 40% (fitBrandWidths の BRANCH_SHARE) と
+// 自分の幅の小さいほうで止まる (自動の最小幅。flex-basis は中身、width が 40%、
+// overflow はスクロールしない clip)。そこからは題が縮む。どちらも省略記号で切る。
 describe("terminal tab name css", () => {
   const rules = baseRules(loadStyleSheet());
   const of = (selector: string) =>
@@ -71,20 +74,28 @@ describe("terminal tab name css", () => {
   const name = of(".main-tab-name.main-tab-name-project");
   const project = of(".main-tab-project");
   const title = of(".main-tab-title");
-  const shrink = (flex: string | undefined) =>
-    Number((flex ?? "").split(/\s+/)[1]);
+  const flexPart = (flex: string | undefined, index: number) =>
+    (flex ?? "").split(/\s+/)[index];
 
-  test("プロジェクト名が先に縮む", () => {
+  test("プロジェクト名が先に縮み、分け合う幅の 40% で止まる", () => {
     expect({
       display: name.get("display"),
-      projectFirst: shrink(project.get("flex")) > shrink(title.get("flex")),
+      projectFirst:
+        Number(flexPart(project.get("flex"), 1)) >
+        Number(flexPart(title.get("flex"), 1)),
+      projectBasis: flexPart(project.get("flex"), 2),
+      projectFloor: project.get("width"),
+      projectMin: project.get("min-width"),
       projectEllipsis: [project.get("overflow"), project.get("text-overflow")],
       titleEllipsis: [title.get("overflow"), title.get("text-overflow")],
       titleMin: title.get("min-width"),
     }).toEqual({
       display: "flex",
       projectFirst: true,
-      projectEllipsis: ["hidden", "ellipsis"],
+      projectBasis: "content",
+      projectFloor: `calc(100% * ${BRANCH_SHARE})`,
+      projectMin: "auto",
+      projectEllipsis: ["clip", "ellipsis"],
       titleEllipsis: ["hidden", "ellipsis"],
       titleMin: "0",
     });
