@@ -244,6 +244,7 @@ describe("parseJournalArgs", () => {
     const server = await startServer({
       hostname: "127.0.0.1",
       port: 0,
+      onError: (error) => console.error("test server error:", error),
       fetch() {
         return Response.json({
           journal: {
@@ -310,6 +311,7 @@ describe("parseJournalArgs", () => {
     const server = await startServer({
       hostname: "127.0.0.1",
       port: 0,
+      onError: (error) => console.error("test server error:", error),
       async fetch(request) {
         if (request.method === "GET") {
           return Response.json({

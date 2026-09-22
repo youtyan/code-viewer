@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { normalizeNewDirectoryName } from "../core/directory-name";
-import { formatErrorDetail } from "../core/error-detail";
+import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import { parseHistoryLineRange } from "../core/history";
 import {
   collectJournalLabels,
@@ -125,6 +125,7 @@ import {
   readFileTextRange,
   SSE_HEARTBEAT_INTERVAL_MS,
   SSE_RETRY_MS,
+  type SpawnStreamExit,
   startServer,
 } from "./runtime";
 import { DEFAULT_EXCLUDE_NAMES, normalizeGrepMax } from "./search";
@@ -450,14 +451,12 @@ Examples:
 }
 
 function warnIfLegacyConfigPresent() {
-  try {
-    if (existsSync(join(cwd, ".code-viewer.json"))) {
-      console.warn(
-        "[code-viewer] .code-viewer.json is no longer used; configure scope and upload from Viewer Settings instead. The file can be safely removed.",
-      );
-    }
-  } catch {
-    // best effort only
+  // existsSync は投げずに false を返すので、包む必要が無い。包んでいた
+  // 空の catch は、万一の失敗をここで消すだけだった。
+  if (existsSync(join(cwd, ".code-viewer.json"))) {
+    console.warn(
+      "[code-viewer] .code-viewer.json is no longer used; configure scope and upload from Viewer Settings instead. The file can be safely removed.",
+    );
   }
 }
 
@@ -469,13 +468,31 @@ function classifyGitRepository(
   return "unknown";
 }
 
-// stat に失敗したら .git は見えないものとして扱う (ENOENT が本命。権限エラー
-// 等でも状態は変えない)。
+// stat に失敗したら .git は見えないものとして扱う。「無い」(ENOENT) は想定
+// どおりなので黙って null。それ以外 (権限・リンクの輪など) は「無い」と同じ
+// 答えを返しつつ理由を残す。要求のたびに呼ばれるので、同じ理由が続く間は
+// 1 回だけ出す。
+let reportedGitDirStatCode: string | null = null;
+
 function gitDirSignature(): string | null {
+  const gitDir = join(cwd, ".git");
   try {
-    const stats = statSync(join(cwd, ".git"));
+    const stats = statSync(gitDir);
+    reportedGitDirStatCode = null;
     return `${stats.ino}:${stats.mtimeMs}:${stats.size}`;
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? "";
+    if (code === "ENOENT") {
+      reportedGitDirStatCode = null;
+      return null;
+    }
+    if (reportedGitDirStatCode !== code) {
+      reportedGitDirStatCode = code;
+      console.error(
+        `[code-viewer] cannot read ${gitDir}; treating this directory as outside a git repository:`,
+        error,
+      );
+    }
     return null;
   }
 }
@@ -1846,10 +1863,24 @@ async function collectGitBlobLineRangeWithIndex(
     range.start,
     range.endExclusive,
   );
-  await shown.exited;
+  blobStreamExitCode(await shown.exited, oid);
   if (bytes.byteLength !== range.endExclusive - range.start) return null;
   const textValue = new TextDecoder().decode(bytes);
   return collectLineRangeFromIndexedText(textValue, index, start, end);
+}
+
+/**
+ * cat-file の終わり方を終了コードにする。起動できなかった (git が無い・権限が
+ * 無い) 場合は「その ref にその中身が無い」と混ぜず、理由を cause に残して
+ * 投げる。呼び出し側の 404 / null は「動いたが 0 で終わらなかった」だけを指す。
+ */
+function blobStreamExitCode(exit: SpawnStreamExit, oid: string): number {
+  if (exit.kind === "failed")
+    throw errorWithCause(
+      `git cat-file blob ${oid} could not start`,
+      exit.error,
+    );
+  return exit.code;
 }
 
 async function readGitBlobBytesWithIndex(
@@ -1861,7 +1892,7 @@ async function readGitBlobBytesWithIndex(
     shown.stream,
     sizeHint,
   );
-  const code = await shown.exited;
+  const code = blobStreamExitCode(await shown.exited, oid);
   if (code !== 0) return null;
   return result;
 }
@@ -1873,7 +1904,7 @@ async function collectGitBlobLineRangeFromStream(
 ): Promise<LineRangeResult | null> {
   const shown = git.catFileBlobStream(oid, cwd);
   const result = await collectLineRangeFromStream(shown.stream, start, end);
-  const code = await shown.exited;
+  const code = blobStreamExitCode(await shown.exited, oid);
   if (code !== 0 && result.complete) return null;
   return result;
 }
@@ -2036,7 +2067,7 @@ async function handleRawFile(req: Request, url: URL) {
         range.start,
         range.end + 1,
       );
-      const code = await shown.exited;
+      const code = blobStreamExitCode(await shown.exited, oid.oid);
       if (code !== 0) return text("not in ref", 404);
       const body = bytes.buffer.slice(
         bytes.byteOffset,
@@ -3085,6 +3116,10 @@ const ENTRY_ONLY_PATH =
 const server = await startServer({
   hostname: "127.0.0.1",
   port: listenPort,
+  // 待ち受けた後のサーバのエラーは、ログだけ出して壊れたまま動き続けない。
+  // 共通の終了処理へ渡す (shutdown はこの下で組み立てるので、呼ぶときに読む)。
+  onError: (error) =>
+    reportFatalAndShutdown("server error", error, (code) => shutdown.run(code)),
   async fetch(req) {
     if (!requestAllowed(req)) return text("forbidden", 403);
     const url = new URL(req.url);

@@ -8,6 +8,7 @@ import {
   closeToRight,
   isCommonTarget,
   keepOpen,
+  LAYOUT_VERSION,
   type Layout,
   move,
   moveToOtherSide,
@@ -886,6 +887,95 @@ describe("保存と読み戻し", () => {
       JSON.parse(JSON.stringify(serializeLayout(layout))),
     );
     expect([show(parsed.layout), parsed.dropped]).toEqual([show(layout), []]);
+  });
+
+  // page のタブの route は、版を上げずに省略できる欄として足した。
+  describe("page のタブの検索語と道具", () => {
+    test("route を返した page のタブだけに欄が付く", () => {
+      const layout = open(layoutOf("@search"), { kind: "page", page: "tools" });
+      const serialized = serializeLayout(layout, (tab) =>
+        tab.target.kind === "page" && tab.target.page === "search"
+          ? { q: "needle" }
+          : undefined,
+      );
+      expect(serialized.panes[0].tabs.map((tab) => tab.route)).toEqual([
+        { q: "needle" },
+        undefined,
+      ]);
+      expect(serialized.version).toBe(LAYOUT_VERSION);
+    });
+
+    test("読み戻すと id ごとに返る", () => {
+      const layout = layoutOf("@search");
+      const parsed = parseLayout(
+        JSON.parse(
+          JSON.stringify(serializeLayout(layout, () => ({ q: "needle" }))),
+        ),
+      );
+      expect(parsed.pageRoutes).toEqual({ search: { q: "needle" } });
+    });
+
+    test.each([
+      { name: "欄が無い (今までの保存値)", route: undefined, expected: {} },
+      {
+        name: "検索語",
+        route: { q: "needle" },
+        expected: { search: { q: "needle" } },
+      },
+      {
+        name: "知らない欄は捨てる",
+        route: { q: "needle", unknown: 1 },
+        expected: { search: { q: "needle" } },
+      },
+      { name: "空の欄は持たない", route: {}, expected: {} },
+    ])("読める保存値: $name", ({ route, expected }) => {
+      const parsed = parseLayout({
+        version: LAYOUT_VERSION,
+        focused: "left",
+        panes: [
+          {
+            side: "left",
+            activeId: "search",
+            tabs: [
+              {
+                id: "search",
+                preview: false,
+                target: { kind: "page", page: "search" },
+                ...(route === undefined ? {} : { route }),
+              },
+            ],
+          },
+        ],
+      });
+      expect(parsed.pageRoutes).toEqual(expected);
+    });
+
+    test.each([
+      { name: "route が object でない", route: "needle" },
+      { name: "検索語が文字列でない", route: { q: 3 } },
+      { name: "道具が空文字", route: { tool: "" } },
+    ])("壊れた保存値は理由を並べて投げる: $name", ({ route }) => {
+      expect(() =>
+        parseLayout({
+          version: LAYOUT_VERSION,
+          focused: "left",
+          panes: [
+            {
+              side: "left",
+              activeId: "search",
+              tabs: [
+                {
+                  id: "search",
+                  preview: false,
+                  target: { kind: "page", page: "search" },
+                  route,
+                },
+              ],
+            },
+          ],
+        }),
+      ).toThrow(/panes\[0\]\.tabs\[0\]\.route/);
+    });
   });
 
   test("知らない種類のタブは落として、場所と中身を返す", () => {

@@ -675,6 +675,17 @@ export function tabMenu(layout: Layout, id: string): TabMenuState {
 
 // ---- 保存 ----
 
+/**
+ * page のタブが覚えている route のうち、保存して読み戻すもの。Search の検索語と
+ * Tools の道具は URL からも target からも作り直せないので、これだけ載せる
+ * (別のタブを前面にしてリロードすると Search が空で戻っていた)。
+ *
+ * 省略できる欄なので `LAYOUT_VERSION` は上げない。これを持たない古い保存値は
+ * 今までどおり読め、この欄を知らない古いアプリはこの欄を見ないだけで済む
+ * (版を上げると、古いアプリが配置ごと「版が違う」と断ってしまう)。
+ */
+export type SerializedPageRoute = { q?: string; tool?: string };
+
 export type SerializedLayout = {
   version: typeof LAYOUT_VERSION;
   focused: PaneSide;
@@ -683,11 +694,23 @@ export type SerializedLayout = {
   panes: Array<{
     side: PaneSide;
     activeId: string | null;
-    tabs: Array<{ id: string; preview: boolean; target: TabTarget }>;
+    tabs: Array<{
+      id: string;
+      preview: boolean;
+      target: TabTarget;
+      route?: SerializedPageRoute;
+    }>;
   }>;
 };
 
-export function serializeLayout(layout: Layout): SerializedLayout {
+/**
+ * `pageRoute` は page のタブが今見せている route を返す (画面側が持っている)。
+ * 渡さなければ route を書かない。
+ */
+export function serializeLayout(
+  layout: Layout,
+  pageRoute?: (tab: Tab) => SerializedPageRoute | undefined,
+): SerializedLayout {
   return {
     version: LAYOUT_VERSION,
     focused: layout.focused,
@@ -700,11 +723,16 @@ export function serializeLayout(layout: Layout): SerializedLayout {
       return {
         side,
         activeId: pane.activeId,
-        tabs: pane.tabs.map((tab) => ({
-          id: tab.id,
-          preview: tab.preview,
-          target: tab.target,
-        })),
+        tabs: pane.tabs.map((tab) => {
+          const route =
+            tab.target.kind === "page" ? pageRoute?.(tab) : undefined;
+          return {
+            id: tab.id,
+            preview: tab.preview,
+            target: tab.target,
+            ...(route ? { route } : {}),
+          };
+        }),
       };
     }),
   };
@@ -718,6 +746,8 @@ export type ParsedLayout = {
   retired: Array<{ at: string; raw: unknown }>;
   /** 右の面に置けない種類 (page) だったので左の面へ移したタブ。 */
   relocated: Array<{ at: string; id: string }>;
+  /** タブの id ごとの、保存してあった page の route (Search の語・Tools の道具)。 */
+  pageRoutes: Record<string, SerializedPageRoute>;
 };
 
 /** 読める版。1 は repo の page タブと、右の面の page のタブを持ちうる。 */
@@ -760,6 +790,23 @@ function parseLine(raw: unknown): SourceLineTarget | undefined | "bad" {
 
 const KNOWN_KINDS = new Set(["file", "terminal", "image", "page"]);
 
+/** page の route を読む。無ければ undefined、壊れていれば理由の文字列。 */
+function parsePageRoute(
+  raw: unknown,
+): SerializedPageRoute | undefined | string {
+  if (raw === undefined) return undefined;
+  if (!isRecord(raw)) return `route is ${JSON.stringify(raw)}`;
+  const out: SerializedPageRoute = {};
+  for (const key of ["q", "tool"] as const) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    if (typeof value !== "string" || value.length === 0)
+      return `route.${key} is ${JSON.stringify(value)}`;
+    out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** target を読む。不明な種類は null (落とす)、壊れていれば理由の文字列。 */
 function parseTarget(raw: unknown): TabTarget | null | string {
   if (!isRecord(raw)) return "target is not an object";
@@ -799,6 +846,7 @@ export function parseLayout(raw: unknown): ParsedLayout {
   const problems: string[] = [];
   const dropped: ParsedLayout["dropped"] = [];
   const retired: ParsedLayout["retired"] = [];
+  const pageRoutes: ParsedLayout["pageRoutes"] = {};
   if (!isRecord(raw)) throw new Error("main tab layout: not an object");
   if (!READABLE_VERSIONS.includes(raw.version))
     problems.push(
@@ -873,6 +921,9 @@ export function parseLayout(raw: unknown): ParsedLayout {
           `${at}: ${target.kind} ${JSON.stringify(target)} is also open at ${dupTarget.at}`,
         );
       seen.push({ target, at });
+      const pageRoute = parsePageRoute(tabRaw.route);
+      if (typeof pageRoute === "string") problems.push(`${at}.${pageRoute}`);
+      else if (pageRoute) pageRoutes[tabRaw.id] = pageRoute;
       tabs.push({ id: tabRaw.id, target, preview: tabRaw.preview === true });
     });
     const previews = tabs.filter((tab) => tab.preview);
@@ -945,7 +996,7 @@ export function parseLayout(raw: unknown): ParsedLayout {
   };
   layout = collapseEmpty(layout);
   if (!paneOf(layout, layout.focused)) layout = { ...layout, focused: "left" };
-  return { layout, dropped, retired, relocated };
+  return { layout, dropped, retired, relocated, pageRoutes };
 }
 
 // ---- プロジェクトに属さないタブ (共通のタブ) ----

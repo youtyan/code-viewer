@@ -1127,11 +1127,20 @@ export function createRepoView(deps: RepoViewDeps) {
         });
         await activateRepoSidebarPath(currentPath);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!isActiveRepoTreeRef(normalizedRef)) return;
+        console.error(
+          "[code-viewer] repository tree load failed",
+          normalizedRef,
+          error,
+        );
         setRepoSidebarRef(null);
         renderSidebar([], undefined);
-        $("#totals").textContent = repoViewText(STATE.language).cannotLoadTree;
+        // #totals は幅の決まった枠なので、1 行の文言はそのまま出し、理由の
+        // 全文 (cause の連鎖ごと) は title に置く。
+        const totals = $("#totals");
+        totals.textContent = repoViewText(STATE.language).cannotLoadTree;
+        totals.title = formatErrorDetail(error);
       })
       .finally(() => {
         if (REPO_SIDEBAR_LOAD === load) {

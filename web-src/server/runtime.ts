@@ -116,10 +116,15 @@ export function runBytesAsync(
       signal: options.signal,
     });
     if (options.stdin !== undefined) {
-      proc.stdin?.on("error", () => {
+      proc.stdin?.on("error", (error: NodeJS.ErrnoException) => {
         // A child that exits before draining its input (or a kill from the
         // timeout/maxBuffer paths) closes the pipe mid-write - EPIPE here is
-        // expected, and the exit code still decides the result.
+        // expected, and the exit code still decides the result. Anything else
+        // (EACCES, ENOSPC, a broken descriptor) means the input never reached
+        // the child, so it becomes the failure the caller sees.
+        if (error.code === "EPIPE") return;
+        processError ??= error;
+        proc.kill(killSignal);
       });
       proc.stdin?.end(options.stdin);
     }
@@ -193,7 +198,9 @@ export function runBytesAsync(
       processError = err;
     });
     proc.on("close", (code) => {
-      finish(timedOut || bufferExceeded ? 1 : (code ?? (processError ? 1 : 0)));
+      // 子を起こせなかった・入力を渡せなかったときは、子が 0 で終わっていても
+      // 成功として返さない (stderr にだけ理由が残る状態にしない)。
+      finish(timedOut || bufferExceeded || processError ? 1 : (code ?? 0));
     });
   });
 }
@@ -210,21 +217,31 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
   return out;
 }
 
+/**
+ * 子プロセスの終わり方。「動いて終了コードを返した」と「そもそも起動できな
+ * かった」(コマンドが無い・権限が無い) を分ける。両方を終了コード 1 に潰すと、
+ * 呼び出し側は「その ref にその中身が無い」(404) と「git を起こせない」(500)
+ * を見分けられない。
+ */
+export type SpawnStreamExit =
+  | { kind: "exit"; code: number }
+  | { kind: "failed"; error: Error };
+
 export function spawnStream(
   args: string[],
   cwd: string,
 ): {
   stream: ReadableStream<Uint8Array>;
-  exited: Promise<number>;
+  exited: Promise<SpawnStreamExit>;
   kill(signal?: string): void;
 } {
   const proc = spawn(args[0], args.slice(1), {
     cwd,
     stdio: ["ignore", "pipe", "ignore"],
   });
-  let errorCode = 0;
-  proc.on("error", () => {
-    errorCode = 1;
+  let spawnError: Error | null = null;
+  proc.on("error", (error) => {
+    spawnError ??= error;
   });
   return {
     stream: Readable.toWeb(
@@ -232,13 +249,19 @@ export function spawnStream(
     ) as unknown as ReadableStream<Uint8Array>,
     exited: new Promise((resolve) => {
       let settled = false;
-      const done = (code: number) => {
+      const done = (exit: SpawnStreamExit) => {
         if (settled) return;
         settled = true;
-        resolve(code);
+        resolve(exit);
       };
-      proc.on("error", () => done(1));
-      proc.on("close", (code) => done(errorCode || (code ?? 1)));
+      proc.on("error", (error) => done({ kind: "failed", error }));
+      proc.on("close", (code) =>
+        done(
+          spawnError
+            ? { kind: "failed", error: spawnError }
+            : { kind: "exit", code: code ?? 1 },
+        ),
+      );
     }),
     kill: (signal?: string) => proc.kill(signal as NodeJS.Signals | undefined),
   };
@@ -306,6 +329,12 @@ export function startServer(options: {
   hostname: string;
   port: number;
   fetch: (req: Request) => Response | Promise<Response>;
+  /**
+   * listen に成功した後に出たサーバのエラー。聞き続けられる保証は無いので、
+   * 本番の呼び出し側はここから共通の終了処理 (exit 1) へ繋ぐ。省略できない
+   * のは、省略すると「ログだけ出して壊れたまま動き続ける」に戻るため。
+   */
+  onError: (error: Error) => void;
 }): Promise<StartedServer> {
   const server = createServer(async (req, res) => {
     // Handlers read `request.signal` to stop long external processes (rg,
@@ -349,9 +378,7 @@ export function startServer(options: {
     server.once("error", failListen);
     server.listen(options.port, options.hostname, () => {
       server.off("error", failListen);
-      server.on("error", (error) => {
-        console.error("[code-viewer] server error:", error);
-      });
+      server.on("error", options.onError);
       const address = server.address();
       const port =
         typeof address === "object" && address ? address.port : options.port;

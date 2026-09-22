@@ -1,5 +1,6 @@
 import { apiUrl } from "../../core/api-url";
 import { s3ObjectName } from "../../core/database/s3-keys";
+import { formatErrorDetail } from "../../core/error-detail";
 import type {
   S3BucketInfo,
   S3BucketsResponse,
@@ -1161,10 +1162,16 @@ export function createS3Explorer(
           return true;
         } catch (err) {
           if (isAbortError(err) || disposed) return false;
-          more.disabled = false;
-          more.textContent = text().loadMoreFailed(
-            err instanceof Error ? err.message : String(err),
+          // message だけに潰すと、どの要求のどの理由かが消える。console には
+          // error をそのまま、画面には cause の連鎖ごとの全文を出す。
+          console.error(
+            "[code-viewer] S3 load more failed",
+            bucket,
+            prefix,
+            err,
           );
+          more.disabled = false;
+          more.textContent = text().loadMoreFailed(formatErrorDetail(err));
           return false;
         }
       };

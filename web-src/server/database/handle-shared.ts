@@ -1,4 +1,5 @@
 import type { DbKind } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
 import { abortError, isAbortLikeError } from "./adapters/abort";
 import { isD1HttpError } from "./adapters/d1";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
@@ -256,16 +257,35 @@ export async function parseBoundedJsonBody(
   if (!contentType.toLowerCase().startsWith("application/json")) {
     return textError("unsupported media type", 415);
   }
+  return readBoundedJsonBody(req, maxBytes, tooLargeMessage);
+}
+
+/** 上限つきの読み取り本体。失敗は「読めなかった」と「JSON でない」を分ける。 */
+async function readBoundedJsonBody(
+  req: Request,
+  maxBytes: number,
+  tooLargeMessage: string,
+): Promise<unknown | Response> {
   const contentLength = Number(req.headers.get("content-length") || "0");
   if (contentLength > maxBytes) return textError(tooLargeMessage, 413);
+  let raw: string;
   try {
-    const raw = await req.text();
-    if (Buffer.byteLength(raw, "utf8") > maxBytes) {
-      return textError(tooLargeMessage, 413);
-    }
+    raw = await req.text();
+  } catch (error) {
+    return textError(
+      `could not read the request body: ${formatErrorDetail(error)}`,
+      400,
+    );
+  }
+  if (Buffer.byteLength(raw, "utf8") > maxBytes) {
+    return textError(tooLargeMessage, 413);
+  }
+  try {
     return JSON.parse(raw);
-  } catch {
-    return textError("invalid JSON body", 400);
+  } catch (error) {
+    // "invalid JSON body" だけでは、本文のどこが壊れているのか分からな
+    // かった。解析器の理由 (位置を含む) をそのまま返す。
+    return textError(`invalid JSON body: ${formatErrorDetail(error)}`, 400);
   }
 }
 
@@ -444,17 +464,29 @@ export async function dispatchRoutes(
   }
 }
 
+/**
+ * この口を通る本文の上限。いちばん大きいのは端末への貼り付け (`/_shell/keys`)
+ * と SQL の下書きで、どちらも 1 MiB には届かない。上限の無い読み取りを置かない
+ * ための値で、経路ごとの検証はそれぞれのハンドラが続けて行う。
+ */
+const MAX_POST_JSON_BODY_BYTES = 1_048_576;
+
+/**
+ * 汎用の POST 本文。`parseBoundedJsonBody` と同じ上限つきの読み取りを使う
+ * (この口だけ上限が無かった)。content-type は見ない: 既存の呼び出し元には
+ * 付けずに送るものがあり、415 を新しく返すと壊れる。
+ */
 export async function parsePostJsonBody<T>(
   req: Request,
 ): Promise<T | Response> {
   if (req.method !== "POST") {
     return textError("method not allowed", 405);
   }
-  try {
-    return (await req.json()) as T;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  return (await readBoundedJsonBody(
+    req,
+    MAX_POST_JSON_BODY_BYTES,
+    "payload too large",
+  )) as T | Response;
 }
 
 export function handleError(

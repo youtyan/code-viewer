@@ -41,6 +41,7 @@ import {
   runAsync,
   runBytesAsync,
   runSync,
+  type SpawnStreamExit,
   spawnStream,
 } from "./runtime";
 
@@ -875,7 +876,7 @@ export function catFileBlobStream(
   cwd: string,
 ): {
   stream: ReadableStream<Uint8Array>;
-  exited: Promise<number>;
+  exited: Promise<SpawnStreamExit>;
   kill(signal?: string): void;
 } {
   return spawnStream(resolveGitArgs(["git", "cat-file", "blob", oid]), cwd);

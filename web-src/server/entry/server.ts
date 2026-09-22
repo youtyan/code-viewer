@@ -341,6 +341,12 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
       hostname: "127.0.0.1",
       port: args.port,
       fetch: (req) => handleEntryRequest(req, context),
+      // 待ち受けた後のサーバのエラーは、ログだけ出して壊れたまま動き続け
+      // ない。共通の終了処理へ渡す (shutdown はこの下で組み立てる)。
+      onError: (error) =>
+        reportFatalAndShutdown("entry server error", error, (code) =>
+          shutdown.run(code),
+        ),
     });
   } catch (error) {
     lock.release();

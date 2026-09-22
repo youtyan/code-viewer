@@ -341,6 +341,21 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     notifyAnnotationsChanged();
   }
 
+  // URL と設定からの復元中は開閉を保存しない。ページを開いただけで
+  // .code-viewer/settings.json ができてしまうため (Data の tabs.json で
+  // 2dd1eee がやったのと同じ形)。利用者が開閉したときだけ保存する。
+  let restoringDepth = 0;
+
+  function beginRestoring(): () => void {
+    restoringDepth += 1;
+    let finished = false;
+    return () => {
+      if (finished) return;
+      finished = true;
+      restoringDepth = Math.max(0, restoringDepth - 1);
+    };
+  }
+
   function setAnnotationPanelOpen(open: boolean) {
     annotationPanel.hidden = !open;
     document.body.classList.toggle("annotation-panel-open", open);
@@ -356,7 +371,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       updateActiveHighlights();
       syncInlineAnnotationActive();
     }
-    deps.setAnnotationPanelOpenState(open);
+    if (restoringDepth === 0) deps.setAnnotationPanelOpenState(open);
     syncSessionUrl();
     applyInlineAnnotations();
   }
@@ -819,15 +834,20 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   }
 
   function restoreSessionFromUrl() {
-    const params = new URLSearchParams(window.location.search);
-    activeSessionId = params.get(ANNOTATION_SESSION_PARAM);
-    activeAnnotationId = params.get(ANNOTATION_ENTRY_PARAM);
-    setAnnotationPanelOpen(
-      params.get(ANNOTATION_PANEL_PARAM) === "open" || !!activeAnnotationId,
-    );
-    renderAnnotationPanel();
-    restoreAnnotationDetailFromState();
-    applyInlineAnnotations();
+    const finishRestoring = beginRestoring();
+    try {
+      const params = new URLSearchParams(window.location.search);
+      activeSessionId = params.get(ANNOTATION_SESSION_PARAM);
+      activeAnnotationId = params.get(ANNOTATION_ENTRY_PARAM);
+      setAnnotationPanelOpen(
+        params.get(ANNOTATION_PANEL_PARAM) === "open" || !!activeAnnotationId,
+      );
+      renderAnnotationPanel();
+      restoreAnnotationDetailFromState();
+      applyInlineAnnotations();
+    } finally {
+      finishRestoring();
+    }
   }
 
   async function waitForAnnotationDiffTarget(
@@ -1734,8 +1754,14 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     initialUrlParams.get(ANNOTATION_PANEL_PARAM) === "open" ||
     activeAnnotationId ||
     deps.getAnnotationPanelOpen()
-  )
-    setAnnotationPanelOpen(true);
+  ) {
+    const finishRestoring = beginRestoring();
+    try {
+      setAnnotationPanelOpen(true);
+    } finally {
+      finishRestoring();
+    }
+  }
   applyAnnotationPanelWidth(
     deps.getAnnotationPanelWidth() ?? ANNOTATION_PANEL_DEFAULT_WIDTH,
     false,

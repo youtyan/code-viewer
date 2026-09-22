@@ -1,14 +1,17 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { formatErrorDetail } from "../core/error-detail";
 import { collectLineRangeFromStream } from "../server/range";
 import {
   fileByteRangeResponseBody,
   fileReadableStream,
   readFileTextRange,
+  runBytesAsync,
   runBytesSync,
   runSync,
+  type SpawnStreamExit,
   type StartedServer,
   spawnStream,
   startServer,
@@ -92,18 +95,134 @@ describe("server runtime compatibility helpers", () => {
     expect(bytes.stderr).toMatch(/enoent|no such file/i);
   });
 
-  test("spawnStream resolves with a failure code when the command cannot be spawned", async () => {
+  // 直す前は起動の失敗も終了コード 1 になり、「動いて 1 で終わった」と
+  // 区別できなかった。今は kind が分かれ、理由 (ENOENT) が残る。
+  test("spawnStream reports a spawn failure as failed, not as exit code 1", async () => {
     const missing = join(tmpRoot, "missing-command-for-stream-runtime");
     const child = spawnStream([missing], process.cwd());
 
-    const code = await Promise.race([
+    const exit = await Promise.race([
       child.exited,
-      new Promise<number>((resolve) => setTimeout(() => resolve(99), 1000)),
+      new Promise<SpawnStreamExit>((resolve) =>
+        setTimeout(() => resolve({ kind: "exit", code: 99 }), 1000),
+      ),
     ]);
 
-    expect(code).toBe(1);
+    expect(exit.kind).toBe("failed");
+    if (exit.kind !== "failed") throw new Error("expected a spawn failure");
+    expect(formatErrorDetail(exit.error)).toMatch(/enoent|no such file/i);
     await child.stream.cancel().catch(() => undefined);
     child.kill();
+  });
+
+  test("spawnStream reports a non-zero exit as an exit code", async () => {
+    const child = spawnStream(["sh", "-c", "exit 3"], process.cwd());
+
+    const exit = await child.exited;
+
+    expect(exit).toEqual({ kind: "exit", code: 3 });
+    await child.stream.cancel().catch(() => undefined);
+  });
+
+  // 子が先に終わって壊れたパイプ (EPIPE) は想定内。終了コードがそのまま結果を
+  // 決め、失敗としては報告しない。
+  test("runBytesAsync keeps a broken stdin pipe out of the result", async () => {
+    const result = await runBytesAsync(
+      [process.execPath, "-e", "process.exit(4)"],
+      process.cwd(),
+      { stdin: "x".repeat(4 * 1024 * 1024) },
+    );
+
+    expect(result.code).toBe(4);
+    expect(result.stderr).toBe("");
+  });
+
+  // 直す前は stdin の error を全部捨てていたので、入力が子に届かなくても
+  // 「成功」で返っていた。EPIPE 以外は失敗として理由を stderr に残す。
+  test("runBytesAsync reports a stdin write failure that is not EPIPE", async () => {
+    vi.resetModules();
+    const { EventEmitter } = await import("node:events");
+    const { PassThrough, Writable } = await import("node:stream");
+    const child = new EventEmitter() as InstanceType<typeof EventEmitter> & {
+      stdin: InstanceType<typeof Writable>;
+      stdout: InstanceType<typeof PassThrough>;
+      stderr: InstanceType<typeof PassThrough>;
+      kill(signal?: string): void;
+    };
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin = new Writable({
+      write(_chunk, _encoding, callback) {
+        callback(Object.assign(new Error("write EACCES"), { code: "EACCES" }));
+      },
+    });
+    child.kill = () => {
+      // 入力が届かなかった子は止めるが、この偽の子には送る先が無い。
+    };
+    vi.doMock("node:child_process", async () => ({
+      ...(await vi.importActual<typeof import("node:child_process")>(
+        "node:child_process",
+      )),
+      spawn: () => child,
+    }));
+    try {
+      const runtime = await import("../server/runtime");
+      const pending = runtime.runBytesAsync(["anything"], process.cwd(), {
+        stdin: "input the child never reads",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      child.stdout.end();
+      child.stderr.end();
+      child.emit("close", 0);
+
+      const result = await pending;
+
+      expect(result.stderr).toContain("write EACCES");
+      // 子が 0 で終わっても、入力が届かなかったのは失敗として返す。
+      expect(result.code).toBe(1);
+    } finally {
+      vi.doUnmock("node:child_process");
+      vi.resetModules();
+    }
+  });
+
+  // 直す前は listen した後のエラーを console に出すだけで、壊れたサーバのまま
+  // 動き続けていた。今は呼び出し側 (preview / entry) の終了処理へ渡る。
+  test("a server error after listen is handed to onError", async () => {
+    vi.resetModules();
+    const { EventEmitter } = await import("node:events");
+    const fake = new EventEmitter() as InstanceType<typeof EventEmitter> & {
+      listen(port: number, hostname: string, onListening: () => void): void;
+      address(): { port: number };
+      close(done: (error?: Error) => void): void;
+    };
+    fake.listen = (_port, _hostname, onListening) => {
+      setTimeout(onListening, 0);
+    };
+    fake.address = () => ({ port: 65000 });
+    fake.close = (done) => done();
+    vi.doMock("node:http", async () => ({
+      ...(await vi.importActual<typeof import("node:http")>("node:http")),
+      createServer: () => fake,
+    }));
+    try {
+      const runtime = await import("../server/runtime");
+      const seen: string[] = [];
+      const started = await runtime.startServer({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch: () => new Response("ok"),
+        onError: (error) => seen.push(error.message),
+      });
+
+      fake.emit("error", new Error("late listener failure"));
+
+      expect(seen).toEqual(["late listener failure"]);
+      await started.close();
+    } finally {
+      vi.doUnmock("node:http");
+      vi.resetModules();
+    }
   });
 
   test("file stream can be consumed as a web ReadableStream", async () => {
@@ -150,6 +269,7 @@ describe("server runtime compatibility helpers", () => {
       server = await startServer({
         hostname: "127.0.0.1",
         port: 0,
+        onError: (error) => console.error("test server error:", error),
         async fetch() {
           throw new Error("boom from handler");
         },
@@ -176,6 +296,7 @@ describe("server runtime compatibility helpers", () => {
       server = await startServer({
         hostname: "127.0.0.1",
         port: 0,
+        onError: (error) => console.error("test server error:", error),
         fetch(req) {
           observedAbort = new Promise<boolean>((resolve) => {
             const timer = setTimeout(() => resolve(false), 5000);
@@ -213,6 +334,7 @@ describe("server runtime compatibility helpers", () => {
       server = await startServer({
         hostname: "127.0.0.1",
         port: 0,
+        onError: (error) => console.error("test server error:", error),
         fetch(req) {
           signal = req.signal;
           return new Response("done");
@@ -238,6 +360,7 @@ describe("server runtime compatibility helpers", () => {
       server = await startServer({
         hostname: "127.0.0.1",
         port: 0,
+        onError: (error) => console.error("test server error:", error),
         fetch() {
           return new Response(
             new ReadableStream<Uint8Array>({

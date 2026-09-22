@@ -238,6 +238,63 @@ describe("S3 explorer UI", () => {
     expect((active[0] as HTMLElement).dataset.key).toBe("b.png");
   });
 
+  // 直す前は err.message だけをボタンに出し、console にも cause にも何も
+  // 残らなかった。今は cause の連鎖ごとの全文が画面に出て、error そのものが
+  // console.error に渡る。
+  test("続きの読み込みに失敗したら、理由を cause ごと画面と console に出す", async () => {
+    const failure = Object.assign(new Error("failed to fetch s3 folder"), {
+      cause: new Error("network is unreachable"),
+    });
+    let failFolder = false;
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/_db/s3/buckets")
+          return json({ dbId: "mock", buckets: [{ name: "media" }] });
+        if (url.pathname === "/_db/s3/folder") {
+          if (failFolder) throw failure;
+          return json({
+            dbId: "mock",
+            bucket: "media",
+            prefix: "",
+            folders: [],
+            objects: [{ key: "a.png" }],
+            nextToken: "page-2",
+          });
+        }
+        return json({});
+      }) as typeof fetch,
+    });
+    const view = await mountExplorer();
+    click(view.sidebarSlot.querySelectorAll(".s3-view-seg button")[1]);
+    await waitFor(() => !!view.sidebarSlot.querySelector(".s3-tree-more"));
+
+    const logged: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+    try {
+      failFolder = true;
+      const more =
+        view.sidebarSlot.querySelector<HTMLButtonElement>(".s3-tree-more");
+      click(more);
+      await waitFor(() => more?.textContent !== "Load more");
+
+      expect(more?.textContent).toContain("failed to fetch s3 folder");
+      expect(more?.textContent).toContain("Caused by");
+      expect(more?.textContent).toContain("network is unreachable");
+      expect(more?.disabled).toBe(false);
+      expect(logged.length).toBe(1);
+      expect(logged[0]?.[0]).toBe("[code-viewer] S3 load more failed");
+      expect(logged[0]?.[logged[0].length - 1]).toBe(failure);
+    } finally {
+      console.error = originalError;
+    }
+  });
+
   test("未選択プレビューは共通の空状態 (db-pane-empty) で表示する", async () => {
     const view = await mountExplorer();
     const empty = view.el.querySelector(".s3-preview-pane .db-pane-empty");

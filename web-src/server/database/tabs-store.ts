@@ -191,11 +191,23 @@ function sanitizeDynamodb(
 }
 
 // 入力 JSON を厳密に検証して unknown フィールドを捨てる。tabs.json は
-// ユーザーが手で書き換える可能性もあるので、壊れた値は静かに正規化する。
+// ユーザーが手で書き換える可能性もあるので、タブ 1 件ごとの壊れた値は静かに
+// 正規化する。
+//
+// ただし全体の形と版の食い違いは投げる。空で返すと、次の保存が元の値を
+// 上書きして「なぜタブが消えたか」の手がかりごと消していた。投げれば
+// createJsonFileStore が JSON の壊れと同じ経路に乗せ、元のファイルを
+// `.bak-<時刻>` へ退避して理由を console.error に出す。
 function sanitize(input: unknown): TabsState {
-  if (!input || typeof input !== "object") return emptyState();
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new Error(
+      `database tabs state is ${input === null ? "null" : Array.isArray(input) ? "an array" : typeof input}, expected an object`,
+    );
   const obj = input as Record<string, unknown>;
-  if (obj.version !== 1) return emptyState();
+  if (obj.version !== 1)
+    throw new Error(
+      `database tabs state version is ${JSON.stringify(obj.version)}, expected 1`,
+    );
   const rawTabs = Array.isArray(obj.tabs) ? obj.tabs : [];
   const seenIds = new Set<string>();
   const tabs: TabsState["tabs"] = [];

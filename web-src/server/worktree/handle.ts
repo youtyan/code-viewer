@@ -397,9 +397,20 @@ async function blobMediaResponse(
         start,
         end + 1,
       );
-      const code = await shown.exited;
-      if (code !== 0) {
-        return textError(`git cat-file failed with exit code ${code}`, 500);
+      const exit = await shown.exited;
+      // 起動できなかった (git が無い・権限が無い) のと、動いて 0 以外で
+      // 終わったのを混ぜない。前者は終了コードを持たない。
+      if (exit.kind === "failed") {
+        return textError(
+          `git cat-file could not start: ${formatErrorDetail(exit.error)}`,
+          500,
+        );
+      }
+      if (exit.code !== 0) {
+        return textError(
+          `git cat-file failed with exit code ${exit.code}`,
+          500,
+        );
       }
       const expectedLength = end - start + 1;
       if (bytes.byteLength !== expectedLength) {

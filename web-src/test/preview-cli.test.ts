@@ -546,6 +546,51 @@ describe("preview CLI", () => {
 
   const runOrSkip = process.platform === "win32" ? test.skip : test;
 
+  // 直す前は .git を stat できない理由を全部「無い」と同じに潰していたので、
+  // 権限やリンクの輪で読めないときも何も出なかった。ENOENT だけを「無い」と
+  // し、それ以外は理由を残す。
+  runOrSkip(
+    "reports why .git could not be read instead of staying silent",
+    async () => {
+      const root = mkdtempSync(
+        join(tmpdir(), "code-viewer-gitdir-unreadable-"),
+      );
+      tmpRoots.push(root);
+      // 自分を指すシンボリックリンクは stat が ELOOP で失敗する (ENOENT ではない)。
+      symlinkSync(".git", join(root, ".git"));
+      const proc = spawn(
+        process.execPath,
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
+        {
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
+          env: { ...process.env },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stderr = "";
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+      try {
+        await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(15000).then(() => {
+            throw new Error(`preview did not start; stderr=${stderr}`);
+          }),
+        ]);
+        expect(
+          await waitForOutput(() => stderr, /cannot read .*\.git/, 5000),
+        ).toBe(true);
+        expect(stderr).toContain("ELOOP");
+      } finally {
+        await stopTestPreview(proc, exited);
+      }
+    },
+  );
+
   runOrSkip(
     "--open launches the browser after the server port exists",
     async () => {

@@ -77,7 +77,9 @@ function setup(
     defaultRoute: (target: TabTarget): AppRoute =>
       target.kind === "file"
         ? fileRoute(target.path)
-        : { screen: "diff", range },
+        : target.kind === "page"
+          ? ({ screen: target.page, range } as AppRoute)
+          : { screen: "diff", range },
     homeRoute: () => ({ screen: "repo", ref: "worktree", path: "", range }),
     copyPath: () => undefined,
     onNewTab: (side, anchor) =>
@@ -158,6 +160,56 @@ const savedLayout = {
     },
   ],
 };
+
+describe("main tabs view: page のタブの検索語と道具", () => {
+  // 直す前は保存に route が無く、別のタブを前面にしてリロードすると Search の
+  // タブが空で戻っていた。
+  const searchRoute: AppRoute = { screen: "search", q: "needle", range };
+  const toolsRoute: AppRoute = { screen: "tools", tool: "json", range };
+
+  async function savedWithPages(): Promise<SerializedLayout> {
+    const ctx = setup(async () => null, undefined, undefined, searchRoute);
+    await ctx.handle.restore();
+    ctx.handle.syncRoute(searchRoute);
+    ctx.handle.syncRoute(toolsRoute);
+    ctx.handle.syncRoute(fileRoute("src/app.ts"));
+    ctx.handle.flush(false);
+    const saved = ctx.saves[ctx.saves.length - 1];
+    if (!saved) throw new Error("expected a saved layout");
+    return saved;
+  }
+
+  test("背面の Search / Tools のタブの検索語と道具を保存する", async () => {
+    const saved = await savedWithPages();
+    const routes = saved.panes
+      .flatMap((pane) => pane.tabs)
+      .map((tab) => [
+        tab.target.kind === "page" ? tab.target.page : tab.target.kind,
+        tab.route,
+      ]);
+    expect(routes).toEqual([
+      ["search", { q: "needle" }],
+      ["tools", { tool: "json" }],
+      ["file", undefined],
+    ]);
+  });
+
+  test("読み戻すと、前面でないタブに戻っても検索語と道具が残る", async () => {
+    const saved = await savedWithPages();
+    const ctx = setup(
+      async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+    );
+    await ctx.handle.restore();
+
+    ctx.handle.activateNth(1);
+    expect(ctx.current()).toEqual(searchRoute);
+    ctx.handle.activateNth(2);
+    expect(ctx.current()).toEqual(toolsRoute);
+  });
+});
 
 describe("main tabs view: 読み戻し", () => {
   test("保存した配置に戻り、今の画面のタブを前面に出す", async () => {

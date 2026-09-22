@@ -46,6 +46,7 @@ async function registerIdentityServer(
   identityServer = await startServer({
     hostname: "127.0.0.1",
     port: 0,
+    onError: (error) => console.error("test server error:", error),
     fetch: () =>
       new Response(JSON.stringify({ server: { pid, root } }), {
         headers: { "Content-Type": "application/json" },
@@ -193,6 +194,7 @@ describe("openWorktreeServer", () => {
     identityServer = await startServer({
       hostname: "127.0.0.1",
       port: 0,
+      onError: (error) => console.error("test server error:", error),
       async fetch(req) {
         const path = new URL(req.url).pathname;
         if (path === "/_settings") {
@@ -234,6 +236,7 @@ describe("openWorktreeServer", () => {
     identityServer = await startServer({
       hostname: "127.0.0.1",
       port: 0,
+      onError: (error) => console.error("test server error:", error),
       fetch(req) {
         if (new URL(req.url).pathname === "/_settings") {
           return new Response(

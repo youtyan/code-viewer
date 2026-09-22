@@ -56,6 +56,7 @@ import {
   prevTab,
   type SerializedCommonTabs,
   type SerializedLayout,
+  type SerializedPageRoute,
   sameTarget,
   serializeCommonTabs,
   serializeLayout,
@@ -70,6 +71,7 @@ import {
   withCommonTabs,
 } from "../../core/main-tabs";
 import type { AppRoute } from "../../core/routes";
+import { isToolId } from "../../core/tools";
 import { basenameOf } from "../../core/terminal-board";
 import { terminalImageExtension } from "../../core/terminal-images";
 import type { ContextMenuItem } from "../context-menu";
@@ -586,13 +588,51 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const full = fullLayout();
     deps
       .save(
-        serializeLayout(full),
+        serializeLayout(full, savedPageRoute),
         keepalive,
         commonSaveEnabled ? serializeCommonTabs(full) : undefined,
       )
       .catch((error: unknown) => {
         console.error("[code-viewer] main tabs could not be saved", error);
       });
+  }
+
+  /**
+   * 保存する page のタブの route。Search の検索語と Tools の道具だけ (ほかの
+   * 欄は target と今の画面から作り直せる)。前面でないタブの中身が、リロード
+   * のたびに空に戻っていたのを止める。
+   */
+  function savedPageRoute(tab: Tab): SerializedPageRoute | undefined {
+    const route = routes.get(tab.id);
+    if (!route) return undefined;
+    if (route.screen === "search") return route.q ? { q: route.q } : undefined;
+    if (route.screen === "tools")
+      return route.tool ? { tool: route.tool } : undefined;
+    return undefined;
+  }
+
+  /** 読み戻した page のタブに、保存してあった検索語・道具を戻す。 */
+  function seedPageRoutes(
+    target: Layout,
+    saved: Record<string, SerializedPageRoute>,
+  ): void {
+    for (const tab of allTabs(target)) {
+      const route = saved[tab.id];
+      if (!route || tab.target.kind !== "page") continue;
+      const base = deps.defaultRoute(tab.target);
+      if (base.screen === "search" && route.q !== undefined) {
+        routes.set(tab.id, { ...base, q: route.q });
+      } else if (base.screen === "tools" && route.tool !== undefined) {
+        // この版に無い道具は選べない。既定 (道具なし) に落とすが、黙って
+        // 捨てずに理由を残す。
+        if (isToolId(route.tool))
+          routes.set(tab.id, { ...base, tool: route.tool });
+        else
+          console.info(
+            `[code-viewer] main tabs: saved tool ${JSON.stringify(route.tool)} is not known to this version; the Tools tab opens without a tool`,
+          );
+      }
+    }
   }
 
   /** モデルから消えたタブの route を忘れる。 */
@@ -1288,6 +1328,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const restoredLayout = commonTargets
       ? withCommonTabs(parsed.layout, commonTargets)
       : parsed.layout;
+    seedPageRoutes(restoredLayout, parsed.pageRoutes);
     if (options.rightRoute) {
       // URL は右の面のファイル: 左の面 (本文) は保存した前面のまま。
       layout = restoredLayout;

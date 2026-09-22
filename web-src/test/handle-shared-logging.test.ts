@@ -5,6 +5,8 @@ import {
   handleError,
   logResponseWithReason,
   MAX_LOGGED_ERROR_BODY,
+  parseBoundedJsonBody,
+  parsePostJsonBody,
 } from "../server/database/handle-shared";
 
 type ConsoleMethod = "log" | "warn" | "error";
@@ -273,5 +275,52 @@ describe("handleError abort handling", () => {
     const res = handleError("database", "read schema", err, controller.signal);
     expect(res.status).toBe(503);
     expect(captured.filter((c) => c.kind === "error")).toHaveLength(0);
+  });
+});
+
+// 直す前は parsePostJsonBody だけ上限が無く、解析の失敗も "invalid JSON body"
+// の 1 行に潰れていた (どこが壊れているか分からない)。
+describe("POST の JSON 本文の読み取り", () => {
+  function postRequest(body: string, headers: Record<string, string> = {}) {
+    return new Request("http://127.0.0.1/_db/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body,
+    });
+  }
+
+  test.each([
+    { name: "汎用の口", parse: (req: Request) => parsePostJsonBody(req) },
+    {
+      name: "上限つきの口",
+      parse: (req: Request) =>
+        parseBoundedJsonBody(req, 1_048_576, "payload too large"),
+    },
+  ])("解析の失敗は理由を返す: $name", async ({ parse }) => {
+    const result = await parse(postRequest('{"db":'));
+
+    expect(result).toBeInstanceOf(Response);
+    const res = result as Response;
+    expect(res.status).toBe(400);
+    const body = await res.text();
+    expect(body.startsWith("invalid JSON body: ")).toBe(true);
+    // 解析器の理由 (SyntaxError) を落とさない。
+    expect(body).toContain("SyntaxError");
+  });
+
+  test("申告した大きさが上限を超えたら読まずに 413", async () => {
+    const result = await parsePostJsonBody(
+      postRequest("{}", { "Content-Length": "2000000" }),
+    );
+
+    expect((result as Response).status).toBe(413);
+  });
+
+  test("上限までの本文はそのまま読める", async () => {
+    const result = await parsePostJsonBody<{ db: string }>(
+      postRequest('{"db":"sample.db"}'),
+    );
+
+    expect(result).toEqual({ db: "sample.db" });
   });
 });

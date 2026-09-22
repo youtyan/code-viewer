@@ -1136,7 +1136,12 @@ export function createSidebar(deps: SidebarDeps) {
     SIDEBAR_TOTALS_BASE = text;
     const el = $("#totals");
     if (el.textContent === SIDEBAR_TOTALS_FILTER_TEXT) el.textContent = text;
-    if (!SIDEBAR_TOTALS_FILTER_TEXT) el.textContent = text;
+    if (!SIDEBAR_TOTALS_FILTER_TEXT) {
+      el.textContent = text;
+      // 木の読み込みに失敗したとき repo-view が title に入れた理由を、
+      // 次に一覧を描けた時点で外す (絞り込み中の title は別の持ち主)。
+      el.removeAttribute("title");
+    }
   }
   function syncSidebarFilterCount(
     active: boolean,

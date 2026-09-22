@@ -231,6 +231,56 @@ describe("annotation URL state", () => {
   });
 });
 
+describe("annotation panel open state persistence", () => {
+  // 直す前は、起動と URL からの復元が必ず保存を呼んでいたので、ページを
+  // 開くだけでリポジトリに .code-viewer/settings.json ができていた。
+  test.each([
+    {
+      name: "開いただけ (URL に注釈の状態なし)",
+      url: "/file?path=sample.ts",
+      savedOpen: false,
+    },
+    {
+      name: "URL が欄を開く指定を持つ",
+      url: "/file?path=sample.ts&annotations=open",
+      savedOpen: false,
+    },
+    {
+      name: "保存した設定が「開く」",
+      url: "/file?path=sample.ts",
+      savedOpen: true,
+    },
+  ])("復元では開閉を保存しない: $name", async ({ url, savedOpen }) => {
+    setupDom();
+    window.history.replaceState(null, "", url);
+    const saved: boolean[] = [];
+    const ui = createAnnotationsUi(
+      createDeps({
+        getAnnotationPanelOpen: () => savedOpen,
+        setAnnotationPanelOpenState: (open) => saved.push(open),
+      }),
+    );
+
+    ui.restoreSessionFromUrl();
+
+    expect(saved).toEqual([]);
+  });
+
+  test("利用者が開閉したときは保存する", () => {
+    setupDom();
+    window.history.replaceState(null, "", "/file?path=sample.ts");
+    const saved: boolean[] = [];
+    createAnnotationsUi(
+      createDeps({ setAnnotationPanelOpenState: (open) => saved.push(open) }),
+    );
+
+    q<HTMLButtonElement>(document, "#annotations-toggle").click();
+    q<HTMLButtonElement>(document, "#annotation-panel-close").click();
+
+    expect(saved).toEqual([true, false]);
+  });
+});
+
 describe("inline annotation rendering", () => {
   test("dedupes concurrent annotation refresh requests", async () => {
     setupDom();

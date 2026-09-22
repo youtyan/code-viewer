@@ -56,6 +56,8 @@ function makeRepoView(
     repoSidebarDomReady?: boolean;
     polluteSidebarAfterRender?: boolean;
     sidebarRows?: Record<string, { kind: "dir"; dir: { path: string } }>;
+    /** `$` が返す要素 (指定した selector だけ)。ほかは今までどおり投げる。 */
+    elements?: Record<string, HTMLElement>;
     lazyDirPaths?: Set<string>;
     lazyLoadChildren?: Record<string, string[]>;
   } = {},
@@ -211,9 +213,11 @@ function makeRepoView(
     fileBadge: () => {
       throw new Error("stale repository render touched the DOM");
     },
-    $: () => {
+    $: ((selector: string) => {
+      const element = options.elements?.[selector];
+      if (element) return element;
       throw new Error("stale repository render touched the DOM");
-    },
+    }) as RepoViewDeps["$"],
   };
   return {
     view: createRepoView({
@@ -396,6 +400,52 @@ describe("repo view route races", () => {
 });
 
 describe("repo sidebar refresh failures", () => {
+  // 直す前は catch が引数を受け取らず、console にも画面にも理由が残らなかった
+  // (同じファイルのほかの 3 か所は理由を出していた)。
+  test("木の読み込みに失敗したら、理由を console と #totals の title に出す", async () => {
+    installNullDocument();
+    const totals = {
+      textContent: "",
+      title: "",
+      removeAttribute(name: string) {
+        if (name === "title") this.title = "";
+      },
+    };
+    globalThis.fetch = (async () =>
+      new Response("tree read failed: sample cause", {
+        status: 500,
+        statusText: "Internal Server Error",
+      })) as typeof fetch;
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { view } = makeRepoView(
+      {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blob",
+        range,
+      },
+      { elements: { "#totals": totals as unknown as HTMLElement } },
+    );
+
+    await view.renderRepoBlobSidebar("README.md", "worktree");
+
+    expect(totals.textContent).toBe("Cannot load tree");
+    expect(totals.title).toContain(
+      "load repository tree (HTTP 500 Internal Server Error): tree read failed: sample cause",
+    );
+    expect(errors).toHaveBeenCalledTimes(1);
+    const [message, ref, error] = errors.mock.calls[0];
+    expect([message, ref, (error as Error).message]).toEqual([
+      "[code-viewer] repository tree load failed",
+      "worktree",
+      "load repository tree (HTTP 500 Internal Server Error): tree read failed: sample cause",
+    ]);
+    errors.mockRestore();
+  });
+
   test("keeps the tree and logs the HTTP status and body of a failed refresh", async () => {
     installFilelistDocument(() => true);
     globalThis.fetch = (async () =>
