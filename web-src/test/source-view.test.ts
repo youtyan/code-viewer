@@ -1,5 +1,13 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import { findMainScrollTarget } from "../core/focus-scope";
 import type { AppRoute } from "../core/routes";
 import type { ShikiHighlighter } from "../core/shiki-loader";
@@ -777,6 +785,97 @@ describe("renderStandaloneSource loading-state guard and paged retry", () => {
       highlighter.resolve(null);
       await rendering;
     }
+  });
+
+  // 強調の失敗は黙って原文に戻さない: 表に失敗の印と理由 (title) を付け、
+  // console に元の例外ごと出す。コードは原文のまま読める。
+  test("marks the table with the reason when syntax highlighting fails", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async () =>
+        new Response("const sample = 1;", { status: 200 })) as typeof fetch,
+    });
+    const logged: unknown[] = [];
+    vi.spyOn(console, "error").mockImplementation((error) => {
+      logged.push(error);
+    });
+    const state: SourceViewDeps["STATE"] = {
+      route: blobRoute("sample.ts"),
+      from: "HEAD",
+      to: "worktree",
+      files: [],
+      syntaxHighlight: true,
+    };
+    const view = createSourceViewForCursorTest(state.route, {
+      STATE: state,
+      loadSourceHighlighter: async () => ({
+        codeToHtml: () => {
+          throw new Error("grammar is missing");
+        },
+      }),
+    });
+
+    await view.renderStandaloneSource({ path: "sample.ts", ref: "worktree" });
+    const table = document.querySelector<HTMLElement>(".gdp-source-table");
+    await waitFor(
+      () => table?.classList.contains("gdp-highlight-failed") === true,
+    );
+    expect([
+      table?.querySelector(".gdp-source-line-code")?.textContent,
+      table?.title.split("\n"),
+      logged.length,
+    ]).toEqual([
+      "const sample = 1;",
+      [
+        "Error: syntax highlighting failed for sample.ts",
+        "Caused by: Error: shiki could not highlight typescript",
+        "Caused by: Error: grammar is missing",
+      ],
+      1,
+    ]);
+  });
+
+  // タブを切り替えて同じファイルへ戻ると、描き直しても前の位置へ戻る (面ごと・
+  // ファイルごと、セッション中だけ)。行の指定の無い初めてのファイルは先頭。
+  test("restores the scroll position of each file after switching back", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async () =>
+        new Response("line one\nline two", { status: 200 })) as typeof fetch,
+    });
+    const scroller = document.createElement("div");
+    document.body.append(scroller);
+    const state: SourceViewDeps["STATE"] = {
+      route: blobRoute("first.ts"),
+      from: "HEAD",
+      to: "worktree",
+      files: [],
+      syntaxHighlight: false,
+    };
+    const view = createSourceViewForCursorTest(state.route, {
+      STATE: state,
+      mainScrollTarget: () => scroller,
+    });
+    const open = async (path: string) => {
+      state.route = blobRoute(path);
+      await view.renderStandaloneSource({ path, ref: "worktree" });
+    };
+
+    await open("first.ts");
+    scroller.scrollTop = 300;
+    scroller.dispatchEvent(new Event("scroll"));
+    await open("second.ts");
+    const onSecond = scroller.scrollTop;
+    scroller.scrollTop = 40;
+    scroller.dispatchEvent(new Event("scroll"));
+    await open("first.ts");
+    const backOnFirst = scroller.scrollTop;
+    await open("second.ts");
+    expect([onSecond, backOnFirst, scroller.scrollTop]).toEqual([0, 300, 40]);
   });
 
   test("does not apply a late syntax result to the next file", async () => {

@@ -1,4 +1,5 @@
 import { apiUrl } from "../core/api-url";
+import { showHighlightFailure } from "../core/copy-failure";
 import {
   errorWithCause,
   formatErrorDetail,
@@ -210,14 +211,20 @@ export function createBlameView(deps: BlameViewDeps) {
     const sourceShikiLang = normalizeSourceShikiLang(
       deps.inferLang(target.path),
     );
-    const shikiLines =
-      highlighter && sourceShikiLang
-        ? deps.sourceShikiLines(
-            sourceLines.join("\n"),
-            sourceShikiLang,
-            highlighter,
-          )
-        : null;
+    // 強調に失敗したら原文のまま、表に失敗の印と理由を付ける (下)。
+    let shikiLines: string[] | null = null;
+    let highlightError: unknown = null;
+    if (highlighter && sourceShikiLang) {
+      try {
+        shikiLines = deps.sourceShikiLines(
+          sourceLines.join("\n"),
+          sourceShikiLang,
+          highlighter,
+        );
+      } catch (error) {
+        highlightError = error;
+      }
+    }
 
     const lineTarget = deps.currentSourceLineTarget(target);
     const table = document.createElement("table");
@@ -306,6 +313,12 @@ export function createBlameView(deps: BlameViewDeps) {
       }
     }
     table.appendChild(tbody);
+    if (highlightError !== null)
+      showHighlightFailure(
+        table,
+        `syntax highlighting failed for ${target.path}`,
+        highlightError,
+      );
     return table;
   }
 

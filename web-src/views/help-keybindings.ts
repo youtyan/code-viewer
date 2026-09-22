@@ -344,6 +344,13 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
         },
       },
       {
+        selectors: [{ action: "main-tab-menu" }],
+        description: {
+          en: "Open the menu of the front tab (the same as right-clicking it)",
+          ja: "前面のタブのメニューを開く (右クリックと同じ)",
+        },
+      },
+      {
         selectors: [
           { action: "main-tab-1" },
           { action: "main-tab-2" },

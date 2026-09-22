@@ -23,3 +23,19 @@ export function showCopyFailure(
     button.setAttribute("aria-label", idleLabel);
   }, durationMs);
 }
+
+/**
+ * Show that syntax highlighting failed on the element that keeps the plain
+ * text: the failed mark (`.gdp-highlight-failed`), the reason in title, and
+ * the whole error on the console. Same shape as the diff view's marker.
+ */
+export function showHighlightFailure(
+  element: HTMLElement,
+  operation: string,
+  error: unknown,
+): void {
+  const failure = errorWithCause(operation, error);
+  console.error(failure);
+  element.classList.add("gdp-highlight-failed");
+  element.title = formatErrorDetail(failure);
+}

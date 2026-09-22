@@ -5714,6 +5714,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       focusActiveMainTabSurface();
       return true;
     }
+    if (action === "main-tab-menu") return MAIN_TABS.openFrontMenu();
     if (action === "main-pane-other") {
       MAIN_TABS.focusOther();
       focusActiveMainTabSurface();

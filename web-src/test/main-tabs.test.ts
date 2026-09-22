@@ -801,11 +801,11 @@ describe("保存と読み戻し", () => {
     {
       name: "版が違う",
       raw: {
-        version: 3,
+        version: 0,
         focused: "left",
         panes: [{ side: "left", activeId: null, tabs: [] }],
       },
-      messages: ["version is 3, expected one of 1, 2"],
+      messages: ["version is 0, expected one of 1, 2, 3"],
     },
     {
       name: "面が 3 つ",
@@ -861,7 +861,7 @@ describe("保存と読み戻し", () => {
     {
       name: "壊れた箇所が複数あれば全部並べる",
       raw: {
-        version: 3,
+        version: 0,
         focused: "middle",
         panes: [
           {
@@ -876,7 +876,7 @@ describe("保存と読み戻し", () => {
         ],
       },
       messages: [
-        "version is 3, expected one of 1, 2",
+        "version is 0, expected one of 1, 2, 3",
         'focused is "middle"',
         'panes[0].tabs[1]: id "a" is also used at panes[0].tabs[0]',
         "panes[0].tabs[2]: file target has no path",
@@ -919,6 +919,41 @@ describe("本文の既定 (Files のタブの代わり)", () => {
       JSON.parse(JSON.stringify(serializeLayout(layout))),
     );
     expect(show(parsed.layout)).toBe("a b (left)");
+  });
+
+  // 版 2 のまま左右に同じファイルを置いた値 (右の面にファイルを置けるように
+  // した直後の版が書いた) も、そのまま読む。
+  test("版 2 の左右に同じファイルがある値を読む", () => {
+    const parsed = parseLayout({
+      version: 2,
+      focused: "right",
+      split: 0.5,
+      panes: [
+        {
+          side: "left",
+          activeId: "a",
+          tabs: [
+            { id: "a", preview: false, target: { kind: "file", path: "a" } },
+          ],
+        },
+        {
+          side: "right",
+          activeId: "a-right",
+          tabs: [
+            {
+              id: "a-right",
+              preview: false,
+              target: { kind: "file", path: "a" },
+            },
+          ],
+        },
+      ],
+    });
+    assertLayout(parsed.layout);
+    expect([show(parsed.layout), parsed.relocated]).toEqual([
+      "[a] | [a] (right)",
+      [],
+    ]);
   });
 
   test("右の面が何も選んでいない値は壊れている", () => {

@@ -11,6 +11,7 @@ import {
 } from "vitest";
 import type { SerializedLayout, TabTarget } from "../core/main-tabs";
 import type { AppRoute } from "../core/routes";
+import { closeContextMenu } from "../views/context-menu";
 import {
   createMainTabsView,
   type MainTabsHandle,
@@ -168,7 +169,7 @@ describe("main tabs view: 読み戻し", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
     const broken = {
-      version: 7,
+      version: 0,
       focused: "left",
       panes: [
         {
@@ -189,11 +190,37 @@ describe("main tabs view: 読み戻し", () => {
     for (const reason of [
       "the saved layout is broken; starting from an empty layout",
       JSON.stringify(broken),
-      "version is 7, expected one of 1, 2",
+      "version is 0, expected one of 1, 2, 3",
       "panes[0] has 2 preview tabs (a, b); at most 1",
       'panes[0].activeId "zz" is not a tab of the pane',
     ])
       expect(logged[0]).toContain(reason);
+  });
+
+  // 古い版のアプリへ戻したとき: 新しい版で保存した配置は読めないが、上書き
+  // すると新しい版へ戻ったときに消える。使わず、このページでは保存しない。
+  test("新しい版の保存値は使わず、上書きもしない", async () => {
+    vi.useFakeTimers();
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const newer = { version: 4, focused: "left", panes: [] };
+    const { handle, saves, names } = setup(async () => newer);
+    await handle.restore();
+    handle.syncRoute(fileRoute("src/other.ts"));
+    vi.advanceTimersByTime(1000);
+    vi.useRealTimers();
+    expect([
+      saves.length,
+      names(),
+      error.mock.calls.map((call) => call.map(String).join(" ")),
+    ]).toEqual([
+      0,
+      [">other.ts (preview)"],
+      [
+        "[code-viewer] main tabs: the saved layout was written by a newer version (layout version 4, this page reads up to 3); it is kept as it is and tabs are not saved on this page",
+      ],
+    ]);
   });
 
   test("読めなければ、この画面では保存しない (保存した配置を上書きしない)", async () => {
@@ -292,6 +319,26 @@ describe("main tabs view: 操作", () => {
       "Move to other side (disabled)",
       "Copy path",
     ]);
+  });
+
+  // キーの入口 (g m)。前面のタブの右クリックと同じメニューを、そのタブの下に開く。
+  test("openFrontMenu は前面のタブの右クリックと同じメニューを開く", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    mount
+      .querySelector(".main-tab")
+      ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    const byRightClick = menuLabels();
+    closeContextMenu();
+    const opened = handle.openFrontMenu();
+    expect([opened, menuLabels()]).toEqual([true, byRightClick]);
+  });
+
+  test("openFrontMenu は前面のタブが無ければ開かない", async () => {
+    const { handle } = setup(async () => null);
+    await handle.restore();
+    handle.showHome();
+    expect([handle.openFrontMenu(), menuLabels()]).toEqual([false, []]);
   });
 });
 

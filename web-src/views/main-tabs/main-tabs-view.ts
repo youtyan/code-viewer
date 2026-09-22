@@ -34,7 +34,9 @@ import {
   emptyLayout,
   findTab,
   focusPane,
+  isNewerLayoutVersion,
   keepOpen,
+  LAYOUT_VERSION,
   type Layout,
   move,
   moveToOtherSide,
@@ -183,6 +185,11 @@ export type MainTabsHandle = {
   /** 画面の x 座標がどちらの面か (2 面でないか、左の列の上なら null)。 */
   sideAt(clientX: number): PaneSide | null;
   focusOther(): void;
+  /**
+   * フォーカスのある面の前面のタブの右クリックのメニューを、そのタブの下に
+   * 開く (キーで開く入口)。前面のタブが無ければ開かずに false。
+   */
+  openFrontMenu(): boolean;
   next(): void;
   previous(): void;
   closeActive(): void;
@@ -988,11 +995,16 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       const pane = side === "left" ? layout.panes.left : layout.panes.right;
       if (!pane) continue;
       const strip = sections[side].strip;
+      // 描き直しで列が一度空になると横の位置が 0 に戻り、下で前面のタブへ
+      // 送り直すとスクロールが起きる (開いているメニューがそれで閉じる)。
+      // 位置を戻しておけば、前面のタブが見えている限り何も動かない。
+      const scrollLeft = strip.scrollLeft;
       strip.replaceChildren(
         ...pane.tabs.map((tab) =>
           renderTab(tab, tab.id === pane.activeId, side),
         ),
       );
+      strip.scrollLeft = scrollLeft;
       sections[side].el.classList.toggle(
         "main-tabs-pane-focused",
         layout.focused === side,
@@ -1021,6 +1033,15 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       console.error(
         "[code-viewer] main tabs: the saved layout could not be loaded; tabs are not saved on this page",
         error,
+      );
+      openUrlRight();
+      return;
+    }
+    if (isNewerLayoutVersion(saved)) {
+      // 新しい版のアプリが保存した配置: 読めないが、ここで上書きすると新しい
+      // 版へ戻ったときに配置が消える。このページでは保存しない。
+      console.error(
+        `[code-viewer] main tabs: the saved layout was written by a newer version (layout version ${JSON.stringify((saved as { version: unknown }).version)}, this page reads up to ${LAYOUT_VERSION}); it is kept as it is and tabs are not saved on this page`,
       );
       openUrlRight();
       return;
@@ -1193,6 +1214,29 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     },
     focusOther() {
       focusSide(layout.focused === "left" ? "right" : "left");
+    },
+    openFrontMenu() {
+      const tab = activeTab(layout);
+      if (!tab) return false;
+      const el = sections[layout.focused].strip.querySelector<HTMLElement>(
+        `.main-tab[data-tab-id="${CSS.escape(tab.id)}"]`,
+      );
+      if (!el)
+        throw new Error(
+          `main tabs: the front tab ${tab.id} is not rendered in the ${layout.focused} strip`,
+        );
+      const rect = el.getBoundingClientRect();
+      // Escape で戻す先は、キーを押したときにフォーカスのあった場所 (その面の
+      // 本文)。タブの要素は裏の更新で描き直されて差し替わることがある。
+      const back =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      showContextMenu(el, menuFor(tab), {
+        at: { x: rect.left, y: rect.bottom + 4 },
+        focusReturn: back,
+      });
+      return true;
     },
     next: () => changeAndGo(nextTab),
     previous: () => changeAndGo(prevTab),

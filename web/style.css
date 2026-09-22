@@ -20634,6 +20634,27 @@ button.agents-account-name:hover {
   background: var(--color-raised);
   color: var(--color-text);
 }
+/* 2 段目は 1 行に保つ。狭い面 (1280px の左右 2 面など) では補助の文字 (行数と
+   「行へ移動」) を畳み、行へ移る欄と移動のボタンは残す (操作を無くさない)。
+   幅は 2 段目の箱で測る (グリッドの全幅にまたがるので、中身で幅が決まらない)。
+   境目は em (箱の文字の大きさ): 密度で文字が大きくなれば早めに畳む。31em は、
+   標準の密度 (14px) で項目を全部 1 行に並べるのに要る幅 (実測 424px) を少し
+   上回るところ。 */
+.gdp-file-detail-sticky .gdp-file-detail-tabs {
+  container: file-detail-tabs / inline-size;
+  /* 幅を中身から切り離すので、グリッドの幅いっぱいに伸ばす (伸ばさないと 0)。 */
+  justify-self: stretch;
+}
+.gdp-file-detail-sticky .gdp-source-line-count,
+.gdp-file-detail-sticky .gdp-source-line-jump-label {
+  white-space: nowrap;
+}
+@container file-detail-tabs (max-width: 31em) {
+  .gdp-file-detail-sticky .gdp-source-line-count,
+  .gdp-file-detail-sticky .gdp-source-line-jump-label {
+    display: none;
+  }
+}
 
 /* 行番号の列: 幅 12 単位 (48)、右寄せ、補助の色。列の右に細い線。 */
 .gdp-source-line-number,

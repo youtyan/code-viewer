@@ -1,4 +1,5 @@
 import { apiUrl } from "../core/api-url";
+import { showHighlightFailure } from "../core/copy-failure";
 import { errorWithCause, responseErrorMessage } from "../core/error-detail";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 import { normalizeSourceShikiLang } from "../core/source-meta";
@@ -235,11 +236,23 @@ export function createCodePreview(
           !isCurrent(myGeneration, abort.signal)
         )
           return;
-        const highlightedLines = deps.sourceShikiLines(
-          response.lines.join("\n"),
-          lang,
-          highlighter,
-        );
+        // 強調に失敗したら原文のまま、表に失敗の印と理由を付ける (下見の
+        // 読み込みの失敗とは分ける: コードは読めている)。
+        let highlightedLines: string[] | null;
+        try {
+          highlightedLines = deps.sourceShikiLines(
+            response.lines.join("\n"),
+            lang,
+            highlighter,
+          );
+        } catch (error) {
+          showHighlightFailure(
+            table,
+            `syntax highlighting failed for ${target.path}`,
+            error,
+          );
+          return;
+        }
         if (
           !highlightedLines ||
           !table.isConnected ||

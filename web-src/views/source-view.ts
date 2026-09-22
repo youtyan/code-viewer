@@ -1,4 +1,10 @@
 import { apiUrl } from "../core/api-url";
+import { showCopyFailure, showHighlightFailure } from "../core/copy-failure";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 // Standalone source view: text/virtual/paged renderers, shiki highlight,
 // HTML/markdown preview tabs, line selection + keyboard cursor, in-source
 // search, and the source load/cancel machinery. Extracted from app.ts as a
@@ -518,27 +524,33 @@ export function createSourceView(deps: SourceViewDeps) {
     });
   }
 
+  /**
+   * Shiki で行ごとの HTML にする。失敗したら理由 (言語と元の例外) を付けて
+   * 投げる: 呼び出し側が原文のまま失敗の印を付ける (showHighlightFailure)。
+   */
   function sourceShikiLines(
     textValue: string,
     lang: string,
     highlighter: ShikiHighlighter,
-  ): string[] | null {
+  ): string[] {
+    let html: string;
     try {
-      const html = highlighter.codeToHtml(textValue || " ", {
+      html = highlighter.codeToHtml(textValue || " ", {
         lang,
         themes: { light: "github-light", dark: "github-dark" },
         defaultColor: false,
       });
-      const template = document.createElement("template");
-      template.innerHTML = html;
-      const renderedLines = Array.from(
-        template.content.querySelectorAll<HTMLElement>(".line"),
-      );
-      if (!renderedLines.length) return null;
-      return renderedLines.map((line) => line.innerHTML || " ");
-    } catch {
-      return null;
+    } catch (error) {
+      throw errorWithCause(`shiki could not highlight ${lang}`, error);
     }
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const renderedLines = Array.from(
+      template.content.querySelectorAll<HTMLElement>(".line"),
+    );
+    if (!renderedLines.length)
+      throw new Error(`shiki returned no lines for ${lang}`);
+    return renderedLines.map((line) => line.innerHTML || " ");
   }
 
   function scheduleSourceHighlight(
@@ -595,7 +607,11 @@ export function createSourceView(deps: SourceViewDeps) {
           });
         })
         .catch((err: unknown) => {
-          console.error("Failed to apply source syntax highlighting", err);
+          showHighlightFailure(
+            table,
+            `syntax highlighting failed for ${target.path}`,
+            err,
+          );
         });
     }, 0);
   }
@@ -638,7 +654,11 @@ export function createSourceView(deps: SourceViewDeps) {
           onReplace(next);
         })
         .catch((err: unknown) => {
-          console.error("Failed to apply preview syntax highlighting", err);
+          showHighlightFailure(
+            preview,
+            `preview syntax highlighting failed for ${target.path}`,
+            err,
+          );
         });
     }, 0);
   }
@@ -924,11 +944,14 @@ export function createSourceView(deps: SourceViewDeps) {
         setTimeout(() => {
           copy.classList.remove("copied");
         }, 1200);
-      } catch {
-        copy.classList.add("failed");
-        setTimeout(() => {
-          copy.classList.remove("failed");
-        }, 1200);
+      } catch (error) {
+        showCopyFailure(
+          copy,
+          "copy the source to the clipboard",
+          error,
+          "Copy source",
+          1600,
+        );
       }
     });
     return copy;
@@ -939,7 +962,12 @@ export function createSourceView(deps: SourceViewDeps) {
     const form = document.createElement("form");
     form.className = "gdp-source-line-jump";
     const label = document.createElement("label");
-    label.textContent = text.line;
+    // 文字は span に包む: 狭い面では CSS がこれだけを畳む (欄は残す)。
+    // localize は label の最初の子の文字を書き換える。
+    const labelText = document.createElement("span");
+    labelText.className = "gdp-source-line-jump-label";
+    labelText.textContent = text.line;
+    label.appendChild(labelText);
     const input = document.createElement("input");
     input.type = "number";
     input.min = "1";
@@ -1657,6 +1685,7 @@ export function createSourceView(deps: SourceViewDeps) {
           count.textContent = matches.length
             ? `${active + 1} / ${matches.length}`
             : "0 / 0";
+          count.removeAttribute("title");
           if (active >= 0) {
             const rowHeight =
               sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
@@ -1667,11 +1696,17 @@ export function createSourceView(deps: SourceViewDeps) {
           }
           renderFn();
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           if (version !== searchVersion) return;
+          const failure = errorWithCause(
+            `in-file search for ${JSON.stringify(query)} failed`,
+            error,
+          );
+          console.error(failure);
           matches = [];
           active = -1;
           count.textContent = "Search failed";
+          count.title = formatErrorDetail(failure);
           renderFn();
         });
     };
@@ -1774,11 +1809,14 @@ export function createSourceView(deps: SourceViewDeps) {
         setTimeout(() => {
           copy.classList.remove("copied");
         }, 1200);
-      } catch {
-        copy.classList.add("failed");
-        setTimeout(() => {
-          copy.classList.remove("failed");
-        }, 1600);
+      } catch (error) {
+        showCopyFailure(
+          copy,
+          "copy the source to the clipboard",
+          error,
+          "Copy source",
+          1600,
+        );
       }
     });
     const full = document.createElement("a");
@@ -1886,8 +1924,13 @@ export function createSourceView(deps: SourceViewDeps) {
               ignoreIllegals: true,
             }).value;
             code.classList.add("hljs");
-          } catch {
+          } catch (error) {
             code.textContent = line;
+            showHighlightFailure(
+              code,
+              `syntax highlighting failed for line ${index + 1} of ${target.path}`,
+              error,
+            );
           }
         } else {
           code.textContent = line;
@@ -1997,7 +2040,8 @@ export function createSourceView(deps: SourceViewDeps) {
 
     const lines = new Map<number, string>();
     const requestedPages = new Set<number>();
-    const failedPages = new Set<number>();
+    /** 読めなかったページと、その理由 (行に失敗の印と title で出す)。 */
+    const failedPages = new Map<number, string>();
     const targetLine = lineTargetStart(currentSourceLineTarget(target)) || 1;
     let complete = initialComplete;
     let totalRows = initialComplete
@@ -2049,11 +2093,18 @@ export function createSourceView(deps: SourceViewDeps) {
       const end = start + VIRTUAL_SOURCE_PAGE_SIZE - 1;
       trackLoad(
         fetch(buildFileRangeUrl(target, start, end), { signal })
-          .then((res) =>
-            res.ok ? (res.json() as Promise<FileRangeResponse>) : null,
-          )
+          .then(async (res) => {
+            if (!res.ok)
+              throw new Error(
+                await responseErrorMessage(
+                  res,
+                  `load lines ${start}-${end} of ${target.path}`,
+                ),
+              );
+            return res.json() as Promise<FileRangeResponse>;
+          })
           .then((data) => {
-            if (!data || signal?.aborted) return;
+            if (signal?.aborted) return;
             data.lines.forEach((lineValue, index) => {
               lines.set(data.start + index, lineValue);
             });
@@ -2068,7 +2119,12 @@ export function createSourceView(deps: SourceViewDeps) {
           })
           .catch((err) => {
             if (!isAbortError(err)) {
-              failedPages.add(page);
+              const failure = errorWithCause(
+                `lines ${start}-${end} of ${target.path} could not be loaded`,
+                err,
+              );
+              console.error(failure);
+              failedPages.set(page, formatErrorDetail(failure));
               renderedStart = -1;
               renderedEnd = -1;
               schedule();
@@ -2130,8 +2186,16 @@ export function createSourceView(deps: SourceViewDeps) {
         const code = document.createElement("span");
         code.className = "gdp-source-virtual-line-code";
         const line = lines.get(lineNumber);
+        const failedReason = failedPages.get(
+          Math.floor((lineNumber - 1) / VIRTUAL_SOURCE_PAGE_SIZE),
+        );
         if (line == null) {
           code.textContent = "";
+          // 読めなかった範囲の行は空のままにせず、失敗の印と理由を付ける。
+          if (failedReason) {
+            code.classList.add("gdp-highlight-failed");
+            code.title = failedReason;
+          }
         } else if (
           appendVirtualSourceLineCode(
             code,
@@ -2154,8 +2218,13 @@ export function createSourceView(deps: SourceViewDeps) {
               ignoreIllegals: true,
             }).value;
             code.classList.add("hljs");
-          } catch {
+          } catch (error) {
             code.textContent = line;
+            showHighlightFailure(
+              code,
+              `syntax highlighting failed for line ${lineNumber} of ${target.path}`,
+              error,
+            );
           }
         } else {
           code.textContent = line;
@@ -2632,10 +2701,7 @@ export function createSourceView(deps: SourceViewDeps) {
               );
               return;
             }
-            scrollStandaloneSourceLine(
-              card,
-              lineTargetStart(currentFileRoute()?.line),
-            );
+            scrollToLineOrRemembered(card, target);
             setSourceCardState(card, "done");
             finishSourceLoad(req);
             return;
@@ -2675,10 +2741,7 @@ export function createSourceView(deps: SourceViewDeps) {
           )
             return;
           if (!rendered) return;
-          scrollStandaloneSourceLine(
-            card,
-            lineTargetStart(currentFileRoute()?.line),
-          );
+          scrollToLineOrRemembered(card, target);
           setSourceCardState(card, "done");
           finishSourceLoad(req);
         }
@@ -2705,6 +2768,60 @@ export function createSourceView(deps: SourceViewDeps) {
     });
     card._loadPromise = completed;
     return completed;
+  }
+
+  // ---- ファイルごとのスクロール位置 (この実体の面の中。セッション中だけ) ----
+  // タブを切り替えて同じファイルへ戻ったとき、描き直しても前の位置へ戻す。
+  // 行の指定 (line=) がある route はその行が優先。保存はしない。
+  const SOURCE_SCROLL = new Map<string, number>();
+
+  function sourceScrollTop(): number {
+    const scroller = mainScrollTarget();
+    return scroller ? scroller.scrollTop : window.scrollY;
+  }
+
+  // 見えている描き終わったカードが今の route のファイルなら、その位置を覚える。
+  // route が移った後に届くスクロール (前の画面の位置の戻り) は覚えない。
+  document.addEventListener(
+    "scroll",
+    () => {
+      const route = currentFileRoute();
+      if (route?.view !== "blob") return;
+      const card = scope().querySelector<HTMLElement>(
+        '.gdp-standalone-source[data-source-state="done"]',
+      );
+      if (
+        !card ||
+        card.offsetParent === null ||
+        card.dataset.path !== route.path ||
+        card.dataset.sourceRef !== (route.ref || "worktree")
+      )
+        return;
+      SOURCE_SCROLL.set(
+        sourceCursorKey({ path: route.path, ref: route.ref }),
+        sourceScrollTop(),
+      );
+    },
+    { capture: true, passive: true },
+  );
+
+  /** 描き終わったとき: 行の指定があればその行、無ければ覚えた位置 (無ければ先頭)。 */
+  function scrollToLineOrRemembered(
+    card: HTMLElement,
+    target: SourceFileTarget,
+  ): void {
+    const route = currentFileRoute();
+    // ファイルの route でない (History の画面の中のソースなど) は今までどおり動かさない。
+    if (!route) return;
+    const line = lineTargetStart(route.line);
+    if (line) {
+      scrollStandaloneSourceLine(card, line);
+      return;
+    }
+    const top = SOURCE_SCROLL.get(sourceCursorKey(target)) ?? 0;
+    const scroller = mainScrollTarget();
+    if (scroller) scroller.scrollTop = top;
+    else window.scrollTo(0, top);
   }
 
   function scrollStandaloneSourceLine(

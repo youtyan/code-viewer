@@ -109,12 +109,15 @@ export type MoveResult =
     };
 
 /**
+ * 3: 右の面に file を置け、左右で同じファイルを開ける (同じ中身は面ごとに 1 つ)。
+ *    形は 2 と同じ。版を分けたのは、2 までしか読めない古いアプリがこの配置を
+ *    読まずに「版が違う」と報告するため (左右の同じファイルを壊れた配置として
+ *    黙って捨てさせない)。
  * 2: repo の page タブを廃止し、左の面の activeId に null (本文の既定) を
- * 許した。1 の値も読む (repo のタブは落とし、右の面の page のタブは左へ移す)。
- * 右の面に file を置けるようにしたとき (左右で同じファイルも可) は形が同じ
- * なので版を上げていない。
+ *    許した。
+ * 1・2 の値も読む (repo のタブは落とし、右の面の page のタブは左へ移す)。
  */
-export const LAYOUT_VERSION = 2;
+export const LAYOUT_VERSION = 3;
 
 /** その種類のタブをその面に置けるか。page (本文の画面) は左の面だけ。 */
 export function canPlace(target: TabTarget, side: PaneSide): boolean {
@@ -625,7 +628,19 @@ export type ParsedLayout = {
 };
 
 /** 読める版。1 は repo の page タブと、右の面の page のタブを持ちうる。 */
-const READABLE_VERSIONS: readonly unknown[] = [1, LAYOUT_VERSION];
+const READABLE_VERSIONS: readonly unknown[] = [1, 2, LAYOUT_VERSION];
+
+/**
+ * このアプリより新しい版で保存された配置か (古い版のアプリへ戻したとき)。
+ * 読めないので使わず、上書きもしない (新しい版へ戻れば元の配置が残る)。
+ */
+export function isNewerLayoutVersion(raw: unknown): boolean {
+  return (
+    isRecord(raw) &&
+    typeof raw.version === "number" &&
+    raw.version > LAYOUT_VERSION
+  );
+}
 
 function isRetiredTarget(raw: unknown): boolean {
   return isRecord(raw) && raw.kind === "page" && raw.page === "repo";

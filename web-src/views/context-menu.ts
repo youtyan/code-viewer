@@ -113,8 +113,19 @@ export function showContextMenu(
     closeContextMenu();
     focusReturn?.focus();
   };
-  // スクロールで画面が動くと、位置が合わなくなる。追従させずに閉じる。
-  const onScroll = () => closeContextMenu();
+  // スクロールで anchor が動くと、位置が合わなくなる。追従させずに閉じる。
+  // anchor を含まない箱のスクロール (タブの列の描き直しなど) では閉じない:
+  // 裏の更新で開いた直後に閉じ、押した項目が届かなくなる。
+  const onScroll = (event: Event) => {
+    const target = event.target;
+    if (
+      target instanceof Node &&
+      target !== document &&
+      !target.contains(anchor)
+    )
+      return;
+    closeContextMenu();
+  };
 
   // 捕捉フェーズで拾う。行のクリックハンドラより先に閉じないと、メニューを
   // 閉じるつもりのクリックが行の選択として通ってしまう。
