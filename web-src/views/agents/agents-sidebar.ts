@@ -20,6 +20,7 @@ import {
   type AgentPane,
   type AgentProjectGroup,
   groupAgentPanesByPlace,
+  notifyPermissionView,
 } from "../../core/agent-overview";
 import {
   CHEVRON_DOWN_16_PATH,
@@ -408,20 +409,28 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     );
   }
 
-  /** 通知の許可の案内。押しても閉じても、二度と出さない。 */
+  /**
+   * 通知の許可の案内。許可かブロックを選ぶか、閉じたら二度と出さない。
+   * 窓を閉じただけ (default のまま) は答えていないので、「もう一度求める」で残す。
+   */
   function notifyHint(current: AgentsText): HTMLElement[] {
+    const again =
+      notifyPermissionView(
+        deps.monitor.permission(),
+        deps.monitor.snapshot().permissionAsked,
+      ) === "ask-again";
     const box = el("div", "nav-empty");
     box.setAttribute("role", "note");
     const allow = el(
       "button",
       "nav-note-link nav-empty-action",
-      current.notifyEnable,
+      again ? current.notifyAskAgain : current.notifyEnable,
     );
     allow.type = "button";
     allow.addEventListener("click", () => {
-      deps.dismissNotifyHint();
       deps.monitor.requestPermission().then(
-        () => {
+        (result) => {
+          if (result !== "default") deps.dismissNotifyHint();
           notifyRequestError = "";
           render(true);
         },
@@ -439,7 +448,14 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       deps.dismissNotifyHint();
       render(true);
     });
-    box.append(el("span", "nav-empty-body", current.notifyHint), allow);
+    box.append(
+      el(
+        "span",
+        "nav-empty-body",
+        again ? current.notifyNotYet : current.notifyHint,
+      ),
+      allow,
+    );
     return [box, hide];
   }
 

@@ -10,7 +10,7 @@ import {
   vi,
 } from "vitest";
 import type { SerializedLayout, TabTarget } from "../core/main-tabs";
-import type { AppRoute } from "../core/routes";
+import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
 import { closeContextMenu } from "../views/context-menu";
 import {
   createMainTabsView,
@@ -47,6 +47,7 @@ function setup(
   leftColumn?: HTMLElement,
   backupSaved: () => Promise<string> = async () =>
     "/state/main-tabs.json.broken-sample",
+  initial: AppRoute = fileRoute("src/app.ts"),
 ) {
   const mount = document.createElement("nav");
   document.body.append(mount);
@@ -56,7 +57,7 @@ function setup(
   const terminals: Array<{ open: string[]; closed: string[] }> = [];
   /** ＋ と、ターミナルのタブの右クリックから呼ばれたもの。 */
   const calls: string[] = [];
-  let current: AppRoute = fileRoute("src/app.ts");
+  let current: AppRoute = initial;
   const handle: MainTabsHandle = createMainTabsView({
     mount,
     ...(leftColumn ? { leftColumn } : {}),
@@ -552,6 +553,75 @@ describe("main tabs view: ターミナルのタブ", () => {
       ],
       "terminal:stay",
     ]);
+  });
+
+  // 保存した前面がターミナル。URL が画面・ファイルを指すなら URL を優先し、
+  // シェル (?terminal=) かペイン (?open-pane=) を指すときだけ保存した前面を残す。
+  const terminalFront = {
+    version: 1,
+    focused: "left",
+    panes: [
+      {
+        side: "left",
+        activeId: "t3",
+        tabs: [
+          {
+            id: "t1",
+            preview: false,
+            target: { kind: "page", page: "database" },
+          },
+          {
+            id: "t2",
+            preview: false,
+            target: { kind: "file", path: "README.md" },
+          },
+          {
+            id: "t3",
+            preview: false,
+            target: { kind: "terminal", session: "shell-ab12cd" },
+          },
+        ],
+      },
+    ],
+  };
+  test.each([
+    {
+      url: "/database",
+      route: { screen: "database", range } as AppRoute,
+      search: "",
+      front: ">database",
+    },
+    {
+      url: "/file?path=README.md",
+      route: fileRoute("README.md"),
+      search: "?path=README.md",
+      front: ">README.md",
+    },
+    {
+      url: "/database?terminal=shell-ab12cd",
+      route: { screen: "database", range } as AppRoute,
+      search: "?terminal=shell-ab12cd",
+      front: ">Shell shell-ab12cd",
+    },
+    {
+      url: "/database?open-pane=%253",
+      route: { screen: "database", range } as AppRoute,
+      search: "?open-pane=%253",
+      front: ">Shell shell-ab12cd",
+    },
+  ])("保存の前面がターミナルで $url を開く → $front", async ({
+    route,
+    search,
+    front,
+  }) => {
+    const { handle, names } = setup(
+      async () => terminalFront,
+      undefined,
+      undefined,
+      route,
+    );
+    await handle.restore({ keepSavedFront: urlKeepsSavedFront(search) });
+    expect(names().filter((name) => name.startsWith(">"))).toEqual([front]);
   });
 
   test("読み戻したターミナルのタブは残し、開いているシェルを知らせる", async () => {

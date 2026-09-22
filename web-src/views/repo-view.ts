@@ -320,10 +320,11 @@ export function createRepoView(deps: RepoViewDeps) {
     path: string,
     focusReturnTarget?: HTMLElement | null,
   ): Promise<boolean> {
+    const text = repoViewText(STATE.language);
     return showConfirmDialog({
-      title: "Move to Trash?",
-      body: `Move "${path}" to Trash?`,
-      confirmLabel: "Move to Trash",
+      title: text.moveToTrashTitle,
+      body: text.moveToTrashBody(path),
+      confirmLabel: text.moveToTrash,
       danger: true,
       focusReturnTarget,
     });
@@ -333,15 +334,15 @@ export function createRepoView(deps: RepoViewDeps) {
     path: string,
     focusReturnTarget?: HTMLElement | null,
   ): Promise<string | null> {
+    const text = repoViewText(STATE.language);
     return showPromptDialog({
-      title: "New Folder",
-      body: `Create a folder in "${path || getProjectName() || "repository"}".`,
-      placeholder: "Folder name",
-      ariaLabel: "Folder name",
-      confirmLabel: "Create",
+      title: text.newFolder,
+      body: text.newFolderBody(path || getProjectName() || "repository"),
+      placeholder: text.folderName,
+      ariaLabel: text.folderName,
+      confirmLabel: text.create,
       validate: (v) => normalizeNewDirectoryName(v),
-      invalidMessage:
-        "Use a folder name without slashes, control characters, . or ..",
+      invalidMessage: text.invalidFolderName,
       focusReturnTarget,
     });
   }
@@ -366,7 +367,7 @@ export function createRepoView(deps: RepoViewDeps) {
       });
       if (!res.ok) {
         showCreateDirectoryError(
-          `Failed to create "${name}": ${await res.text()}`,
+          repoViewText(STATE.language).createFailed(name, await res.text()),
         );
         return;
       }
@@ -403,8 +404,9 @@ export function createRepoView(deps: RepoViewDeps) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "gdp-file-header-icon gdp-copy-path";
-    button.title = "copy folder path";
-    button.setAttribute("aria-label", "copy folder path");
+    const label = repoViewText(STATE.language).copyFolderPath;
+    button.title = label;
+    button.setAttribute("aria-label", label);
     button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
     button.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -479,23 +481,24 @@ export function createRepoView(deps: RepoViewDeps) {
     menu.style.left = `${anchorX}px`;
     menu.style.top = `${anchorY}px`;
 
+    const text = repoViewText(STATE.language);
     const copyPath = document.createElement("button");
     copyPath.type = "button";
-    copyPath.textContent = "Copy Path";
+    copyPath.textContent = text.copyPath;
     copyPath.addEventListener("click", async () => {
       closeRepoContextMenu();
       await copyRepoContextText(filePathClipboardText(entry.path));
     });
     const copyName = document.createElement("button");
     copyName.type = "button";
-    copyName.textContent = "Copy Name";
+    copyName.textContent = text.copyName;
     copyName.addEventListener("click", async () => {
       closeRepoContextMenu();
       await copyRepoContextText(fileNameClipboardText(entry.path));
     });
     const createDir = document.createElement("button");
     createDir.type = "button";
-    createDir.textContent = "New Folder...";
+    createDir.textContent = text.newFolderMenu;
     createDir.addEventListener("click", async () => {
       closeRepoContextMenu();
       const targetPath =
@@ -507,7 +510,7 @@ export function createRepoView(deps: RepoViewDeps) {
     const trash = document.createElement("button");
     trash.type = "button";
     trash.className = "danger";
-    trash.textContent = "Move to Trash...";
+    trash.textContent = text.moveToTrashMenu;
     trash.addEventListener("click", async () => {
       closeRepoContextMenu();
       await requestMoveToTrash(entry.path, onChanged, { focusReturnTarget });
@@ -1128,7 +1131,7 @@ export function createRepoView(deps: RepoViewDeps) {
         if (!isActiveRepoTreeRef(normalizedRef)) return;
         setRepoSidebarRef(null);
         renderSidebar([], undefined);
-        $("#totals").textContent = "Cannot load tree";
+        $("#totals").textContent = repoViewText(STATE.language).cannotLoadTree;
       })
       .finally(() => {
         if (REPO_SIDEBAR_LOAD === load) {
@@ -1191,9 +1194,10 @@ export function createRepoView(deps: RepoViewDeps) {
       meta.classList.add("symlink-target");
       if (broken) meta.classList.add("broken");
       meta.textContent = `→ ${entry.symlink_target || "?"}`;
+      const text = repoViewText(STATE.language);
       meta.title = broken
-        ? `Broken symlink → ${entry.symlink_target || ""}`
-        : `Symlink → ${entry.symlink_target || ""}`;
+        ? text.brokenSymlink(entry.symlink_target || "")
+        : text.symlink(entry.symlink_target || "");
       return meta;
     }
     const updated = formatFileDate(
@@ -1408,7 +1412,8 @@ export function createRepoView(deps: RepoViewDeps) {
     const wrap = document.createElement("div");
     wrap.className = "gdp-file-detail-meta";
     wrap.tabIndex = 0;
-    wrap.setAttribute("aria-label", "File details");
+    const text = repoViewText(STATE.language);
+    wrap.setAttribute("aria-label", text.fileDetails);
     const icon = document.createElement("span");
     icon.className = "gdp-file-detail-meta-icon";
     icon.textContent = "i";
@@ -1429,16 +1434,16 @@ export function createRepoView(deps: RepoViewDeps) {
       item.append(labelEl, valueEl);
       list.appendChild(item);
     };
-    addItem("Size", meta.size == null ? "" : formatBytes(meta.size));
+    addItem(text.size, meta.size == null ? "" : formatBytes(meta.size));
     addItem(
-      "Updated",
+      text.updated,
       formatFileDate(meta.updated_at || meta.commit_updated_at, STATE.language),
     );
-    addItem("Created", formatFileDate(meta.created_at, STATE.language));
+    addItem(text.created, formatFileDate(meta.created_at, STATE.language));
     // 取れなかったことは「情報が無い」と区別して、ボタンの中に理由つきで出す。
     if (meta.error) {
       wrap.classList.add("failed");
-      addItem("Could not load details", meta.error);
+      addItem(text.detailsFailed, meta.error);
     }
     if (!list.childElementCount) {
       wrap.hidden = true;
@@ -1502,11 +1507,17 @@ export function createRepoView(deps: RepoViewDeps) {
   let creatingDirectory = false;
 
   function showTrashError(message: string) {
-    void showAlertDialog({ title: "Trash failed", body: message });
+    void showAlertDialog({
+      title: repoViewText(STATE.language).trashFailed,
+      body: message,
+    });
   }
 
   function showCreateDirectoryError(message: string) {
-    void showAlertDialog({ title: "New folder failed", body: message });
+    void showAlertDialog({
+      title: repoViewText(STATE.language).newFolderFailed,
+      body: message,
+    });
   }
 
   async function moveRepoPathToTrash(path: string) {

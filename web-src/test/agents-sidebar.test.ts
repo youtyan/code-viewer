@@ -128,6 +128,8 @@ function fakeMonitor(
   notify: {
     sawWaiting?: boolean;
     permission?: ReturnType<AgentMonitor["permission"]>;
+    permissionAsked?: boolean;
+    requested?: ReturnType<AgentMonitor["permission"]>;
   } = {},
 ) {
   let snapshot: AgentMonitorSnapshot = {
@@ -136,6 +138,7 @@ function fakeMonitor(
     notifyError: "",
     unread: new Map(),
     sawWaiting: notify.sawWaiting ?? false,
+    permissionAsked: notify.permissionAsked ?? false,
   };
   const listeners = new Set<() => void>();
   const monitor: AgentMonitor = {
@@ -148,7 +151,11 @@ function fakeMonitor(
     },
     markRead: () => undefined,
     permission: () => notify.permission ?? "default",
-    requestPermission: async () => "default",
+    requestPermission: async () => {
+      snapshot = { ...snapshot, permissionAsked: true };
+      notify.permission = notify.requested ?? "default";
+      return notify.permission;
+    },
   };
   return {
     monitor,
@@ -556,6 +563,43 @@ describe("agents sidebar notification hint", () => {
       notify,
     );
     expect(root.textContent?.includes(hint)).toBe(shown);
+  });
+
+  test.each([
+    { requested: "default" as const, dismissed: false, again: true },
+    { requested: "granted" as const, dismissed: true, again: false },
+    { requested: "denied" as const, dismissed: true, again: false },
+  ])("allowing and answering $requested → dismissed: $dismissed", async ({
+    requested,
+    dismissed: expected,
+    again,
+  }) => {
+    const { root, dismissed } = mount(
+      overview([], REGISTERED),
+      undefined,
+      undefined,
+      { sawWaiting: true, requested },
+    );
+    const en = agentsText("en");
+    [...root.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === en.notifyEnable)
+      ?.click();
+    await vi.waitFor(() => {
+      const buttons = [...root.querySelectorAll("button")].map(
+        (button) => button.textContent,
+      );
+      expect({
+        dismissed: dismissed(),
+        notYet: root.textContent?.includes(en.notifyNotYet),
+        askAgain: buttons.includes(en.notifyAskAgain),
+        enable: buttons.includes(en.notifyEnable),
+      }).toEqual({
+        dismissed: expected,
+        notYet: again,
+        askAgain: again,
+        enable: false,
+      });
+    });
   });
 
   test("Hide this saves the choice and removes the hint", () => {

@@ -617,6 +617,19 @@ export function parseOpenPaneOverlay(search: string): TmuxPaneId | null {
   return isTmuxPaneId(raw) ? raw : null;
 }
 
+/**
+ * 開いたときに、保存したタブの前面 (ターミナル) を URL の route より優先するか。
+ * URL がシェル (?terminal=) か開くペイン (?open-pane=) を指すときだけ。
+ * それ以外は URL の画面・ファイルのタブを前面にする (ブックマークで開いた画面を隠さない)。
+ */
+export function urlKeepsSavedFront(search: string): boolean {
+  const terminal = parseTerminalOverlay(search);
+  return (
+    (terminal !== null && terminal !== "open") ||
+    parseOpenPaneOverlay(search) !== null
+  );
+}
+
 export function withOpenPaneOverlay(
   url: string,
   pane: TmuxPaneId | null,

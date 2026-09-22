@@ -21754,11 +21754,14 @@ body[data-worktree-overview] #history-resizer,
 body[data-worktree-overview] main#content {
   display: none;
 }
-/* 一覧だけのときは本文の場所いっぱい (左の列は Files の木)。 */
+/* 一覧だけのときは本文の場所いっぱい (左の列は Files の木)。2 面なら左の面まで
+   (右の端を 0 にしていたので、右の列が右の面の下に潜っていた)。列の畳み方は
+   この箱の幅で決める (@container worktree-overview)。 */
 body[data-worktree-overview] #worktree-panel {
+  container: worktree-overview / inline-size;
   left: var(--page-left);
   top: var(--chrome-h);
-  right: 0;
+  right: var(--page-right);
   width: auto;
   padding: 0 var(--space-6) var(--space-6);
   border-right: 0;
@@ -22034,6 +22037,31 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   white-space: normal;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+/* 狭い箱 (1280 の窓の 2 面の左など): 列の見出しをやめ、行の中で縦に積む。
+   名前と「開く」を 1 段目、パス・比較・変更・エージェントをその下に 1 段ずつ。 */
+@container worktree-overview (max-width: 640px) {
+  body[data-worktree-overview] .worktree-columns {
+    display: none;
+  }
+  body[data-worktree-overview] #worktree-panel .history-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title actions"
+      "path actions"
+      "compare compare"
+      "changes changes"
+      "agents agents"
+      "error error";
+    grid-template-rows: auto;
+    row-gap: var(--space-2);
+  }
+  body[data-worktree-overview] #worktree-panel .worktree-row-divergence,
+  body[data-worktree-overview] #worktree-panel .worktree-row-meta {
+    flex-direction: row;
+    flex-wrap: wrap;
+    column-gap: var(--space-2);
+  }
 }
 /* 選んだ作業ツリーのコミット (件名と情報の 2 段) は一覧の行の高さに収まらない。
    作業ツリーのファイルの一覧は仮想表示ではないので、高さを中身に任せる。 */

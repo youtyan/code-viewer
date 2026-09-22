@@ -20,6 +20,7 @@ import {
   headerAgentCounts,
   matchesStateFilter,
   nextAgentUnread,
+  notifyPermissionView,
   paneTaskText,
   shouldNotifyAgent,
   titleWithUnread,
@@ -577,6 +578,27 @@ describe("withFinishedAsDone", () => {
     expect(
       withFinishedAsDone([pane({ id: "%1", state })], unread)[0]?.state,
     ).toBe(expected);
+  });
+});
+
+// 許可の窓を閉じただけ (default のまま) は、訊いた後なら「もう一度求める」。
+describe("notifyPermissionView", () => {
+  test.each<{
+    permission: "granted" | "denied" | "default" | "unsupported";
+    asked: boolean;
+    expected: string;
+  }>([
+    { permission: "granted", asked: true, expected: "granted" },
+    { permission: "denied", asked: true, expected: "denied" },
+    { permission: "default", asked: true, expected: "ask-again" },
+    { permission: "default", asked: false, expected: "ask" },
+    { permission: "unsupported", asked: false, expected: "unsupported" },
+  ])("$permission (asked: $asked) → $expected", ({
+    permission,
+    asked,
+    expected,
+  }) => {
+    expect(notifyPermissionView(permission, asked)).toBe(expected);
   });
 });
 

@@ -119,6 +119,7 @@ import {
   type SourceLineTarget,
   screenToLeave,
   type TerminalOverlayState,
+  urlKeepsSavedFront,
   withDoctorOverlay,
   withOpenPaneOverlay,
   withPaneOverlay,
@@ -188,6 +189,7 @@ import { createDatabaseView } from "./views/database/database-view";
 import { createDefinitionJump } from "./views/definition-jump";
 import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
+import { DIFF_SCREEN_TEXT, type DiffScreenText } from "./views/diff-view-i18n";
 import { createDoctorView, doctorText } from "./views/doctor-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
 import {
@@ -596,7 +598,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     el.hidden = !branch;
     const name = el.querySelector<HTMLElement>(".project-branch-name");
     if (name) name.textContent = branch;
-    el.title = branch ? `Current branch: ${branch}` : "";
+    el.title = branch ? uiText().diff.currentBranch(branch) : "";
   }
 
   type SettingsPatch = Partial<Omit<AppSettingsState, "version">> &
@@ -1299,6 +1301,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   const INITIAL_TERMINAL_PARAM = parseTerminalOverlay(window.location.search);
   /** 開いたときの ?open-pane= (別のプロジェクトから移ってきた。同じく先に読む)。 */
   const INITIAL_OPEN_PANE = parseOpenPaneOverlay(window.location.search);
+  /** 保存したタブの前面を URL の route より優先するか (同じく先に読む)。 */
+  const INITIAL_KEEPS_SAVED_FRONT = urlKeepsSavedFront(window.location.search);
   /** 開いたときの pane=right の、右の面のファイルの route (同じく先に読む)。 */
   const INITIAL_RIGHT_ROUTE = ((): Extract<
     AppRoute,
@@ -2067,42 +2071,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         autoUpdateOnTitle: string;
         autoUpdateOffTitle: string;
       };
-      diff: {
-        files: (count: number) => string;
-        updated: (time: string) => string;
-        updatedTitle: string;
-        kindAdded: string;
-        kindDeleted: string;
-        kindRenamed: string;
-        kindHeavy: string;
-        kindBinary: string;
-        kindMedia: string;
-        viewedProgress: (viewed: number, total: number) => string;
-        viewedProgressTitle: string;
-        nextUnviewed: string;
-        nextUnviewedTitle: string;
-        allViewed: string;
-        allViewedTitle: string;
-        viewed: string;
-        preview: string;
-        previewTitle: string;
-        viewFile: string;
-        viewFileTitle: string;
-        viewDiff: string;
-        viewDiffTitle: string;
-        collapseFile: string;
-        copyFilePath: string;
-        noChangesTitle: string;
-        noChangesBody: string;
-        noChangesReload: string;
-        noChangesReloadTitle: string;
-        noChangesHistory: string;
-        noChangesHistoryTitle: string;
-        emptyDiffTitle: string;
-        emptyDiffBody: string;
-        noCommitSelectedTitle: string;
-        noCommitSelectedBody: string;
-      };
+      diff: DiffScreenText;
       changeBanner: {
         text: string;
         reload: string;
@@ -2278,43 +2247,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         autoUpdateOnTitle: "auto update on file change",
         autoUpdateOffTitle: "auto update off — manual reload",
       },
-      diff: {
-        files: (count) => `${count} file${count === 1 ? "" : "s"}`,
-        updated: (time) => `updated ${time}`,
-        updatedTitle: "last updated",
-        kindAdded: "added",
-        kindDeleted: "deleted",
-        kindRenamed: "renamed",
-        kindHeavy: "heavy",
-        kindBinary: "binary",
-        kindMedia: "media",
-        viewedProgress: (viewed, total) => `${viewed}/${total} viewed`,
-        viewedProgressTitle: "review progress",
-        nextUnviewed: "next unviewed",
-        nextUnviewedTitle: "Jump to the next unviewed file (n)",
-        allViewed: "all viewed",
-        allViewedTitle: "All visible files are viewed",
-        viewed: "Viewed",
-        preview: "Preview",
-        previewTitle: "Preview rendered file",
-        viewFile: "View File",
-        viewFileTitle: "View file",
-        viewDiff: "View Diff",
-        viewDiffTitle: "View diff",
-        collapseFile: "Collapse file",
-        copyFilePath: "copy file path",
-        noChangesTitle: "No changes",
-        noChangesBody: "The working tree is clean against this ref.",
-        noChangesReload: "Reload diff",
-        noChangesReloadTitle: "Reload this diff range",
-        noChangesHistory: "Open history",
-        noChangesHistoryTitle: "Open commit history for this range",
-        emptyDiffTitle: "Empty diff",
-        emptyDiffBody: "This commit has no changes against its first parent.",
-        noCommitSelectedTitle: "No commit selected",
-        noCommitSelectedBody:
-          "Select a commit from the list to see its changes.",
-      },
+      diff: DIFF_SCREEN_TEXT.en,
       changeBanner: {
         text: "Files changed",
         reload: "Reload",
@@ -2713,42 +2646,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         autoUpdateOnTitle: "ファイル変更時に自動更新",
         autoUpdateOffTitle: "自動更新オフ — 手動で再読み込み",
       },
-      diff: {
-        files: (count) => `${count}ファイル`,
-        updated: (time) => `更新 ${time}`,
-        updatedTitle: "最終更新",
-        kindAdded: "追加",
-        kindDeleted: "削除",
-        kindRenamed: "名前変更",
-        kindHeavy: "大容量",
-        kindBinary: "バイナリ",
-        kindMedia: "メディア",
-        viewedProgress: (viewed, total) => `${viewed}/${total} 確認済み`,
-        viewedProgressTitle: "確認進捗",
-        nextUnviewed: "次の未確認",
-        nextUnviewedTitle: "次の未確認ファイルへ移動 (n)",
-        allViewed: "すべて確認済み",
-        allViewedTitle: "表示中のファイルはすべて確認済みです",
-        viewed: "確認済み",
-        preview: "プレビュー",
-        previewTitle: "描画したファイルをプレビュー",
-        viewFile: "ファイルを見る",
-        viewFileTitle: "ファイルを見る",
-        viewDiff: "差分を見る",
-        viewDiffTitle: "差分を見る",
-        collapseFile: "ファイルを畳む",
-        copyFilePath: "ファイルのパスをコピー",
-        noChangesTitle: "変更はありません",
-        noChangesBody: "この参照との差分はありません。",
-        noChangesReload: "diff を更新",
-        noChangesReloadTitle: "この差分範囲を再読み込み",
-        noChangesHistory: "履歴を開く",
-        noChangesHistoryTitle: "この範囲のコミット履歴を開く",
-        emptyDiffTitle: "空の差分",
-        emptyDiffBody: "このコミットは最初の親との差分がありません。",
-        noCommitSelectedTitle: "コミット未選択",
-        noCommitSelectedBody: "一覧からコミットを選ぶと変更内容を表示します。",
-      },
+      diff: DIFF_SCREEN_TEXT.ja,
       changeBanner: {
         text: "ファイルに変更がありました",
         reload: "再読み込みする",
@@ -3393,6 +3291,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       document.querySelector<HTMLSelectElement>("#viewer-language");
     if (select) select.value = next;
     localizeViewerChrome();
+    // 開いている Diff の帯とカードは描いたときの言語のまま残るので描き直す。
+    applyHideTestsToMeta();
+    DIFF_VIEW.relocalize();
     if (STATE.route.screen === "help") {
       setRoute(
         {
@@ -4641,10 +4542,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     } catch (error) {
       console.error("[code-viewer] failed to open path in OS", error);
       button.classList.add("failed");
-      button.title = "failed to open in OS";
+      button.title = uiText().diff.openInOsFailed;
       setTimeout(() => {
         button.classList.remove("failed");
-        button.title = oldTitle || "open in OS";
+        button.title = oldTitle || uiText().diff.openInOs;
       }, 1600);
     } finally {
       button.disabled = false;
@@ -4683,7 +4584,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function createOpenPathButton(
     path: string,
     kind: "directory" | "file-parent",
-    title = "open folder in OS",
+    title = uiText().sidebar.openDirectoryInOs,
   ): HTMLButtonElement {
     const button = document.createElement("button");
     button.type = "button";
@@ -6161,9 +6062,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   loadInitialState().finally(() => {
     MAIN_TABS.syncRoute(STATE.route);
     // ?terminal= のタブが前面になるかは、読み戻したタブの並びで決まる。
-    void MAIN_TABS.restore(
-      INITIAL_RIGHT_ROUTE ? { rightRoute: INITIAL_RIGHT_ROUTE } : {},
-    ).then(() => {
+    void MAIN_TABS.restore({
+      ...(INITIAL_RIGHT_ROUTE ? { rightRoute: INITIAL_RIGHT_ROUTE } : {}),
+      // URL がシェルかペインを指すときだけ、保存した前面 (ターミナル) を残す。
+      keepSavedFront: INITIAL_KEEPS_SAVED_FRONT,
+    }).then(() => {
       // 右の面に開けなかった (1 面で狭い) なら、そのファイルは本文で開く。
       const right = MAIN_TABS.paneRoute("right");
       if (

@@ -11,6 +11,8 @@ import type {
   FileMeta,
   FileRangeResponse,
 } from "../core/types";
+import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
+import { pageLanguage } from "./page-language";
 
 type HunkInfo = {
   oldStart: number;
@@ -316,7 +318,9 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         // hunk in the file. Repeated clicks walk further up the file.
         buttons.push({
           direction: "up",
-          title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+          title: DIFF_SCREEN_TEXT[pageLanguage()].showMoreLines(
+            Math.min(STEP, remainingSize),
+          ),
           onClick: () =>
             fetchAndInsert(
               Math.max(remainingStart, remainingEnd - STEP + 1),
@@ -329,7 +333,9 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         //            ↓ pulls high end (toward this hunk, below @@).
         buttons.push({
           direction: "up",
-          title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+          title: DIFF_SCREEN_TEXT[pageLanguage()].showMoreLines(
+            Math.min(STEP, remainingSize),
+          ),
           onClick: () =>
             fetchAndInsert(
               remainingStart,
@@ -339,7 +345,9 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         });
         buttons.push({
           direction: "down",
-          title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+          title: DIFF_SCREEN_TEXT[pageLanguage()].showMoreLines(
+            Math.min(STEP, remainingSize),
+          ),
           onClick: () =>
             fetchAndInsert(
               Math.max(remainingStart, remainingEnd - STEP + 1),
@@ -554,7 +562,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
       const stack = createExpandStack([
         {
           direction: "down",
-          title: "Show more lines",
+          title: DIFF_SCREEN_TEXT[pageLanguage()].showMoreLinesUnknown,
           onClick: () => void fetchAndInsert(),
         },
       ]) as ExpandStackElement;

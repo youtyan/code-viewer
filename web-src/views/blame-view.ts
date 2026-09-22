@@ -6,6 +6,7 @@ import {
   responseErrorMessage,
 } from "../core/error-detail";
 import { pageLanguage } from "./page-language";
+import { SOURCE_READING_TEXT } from "./source-preview-i18n";
 // Standalone file-blame view. Fetches /_file_blame, groups same-sha runs into
 // row-span blocks, paints an Older → Newer time bar legend, and reuses the
 // existing file shell DOM so tabs/sticky header stay consistent across views.
@@ -122,7 +123,8 @@ export function createBlameView(deps: BlameViewDeps) {
     wrap.className = "gdp-blame-legend";
     const older = document.createElement("span");
     older.className = "gdp-blame-legend-label";
-    older.textContent = "Older";
+    const text = SOURCE_READING_TEXT[pageLanguage()];
+    older.textContent = text.blameOlder;
     wrap.appendChild(older);
     const stops = document.createElement("span");
     stops.className = "gdp-blame-legend-stops";
@@ -135,7 +137,7 @@ export function createBlameView(deps: BlameViewDeps) {
     wrap.appendChild(stops);
     const newer = document.createElement("span");
     newer.className = "gdp-blame-legend-label";
-    newer.textContent = "Newer";
+    newer.textContent = text.blameNewer;
     wrap.appendChild(newer);
     return wrap;
   }
@@ -258,7 +260,7 @@ export function createBlameView(deps: BlameViewDeps) {
           const time = document.createElement("span");
           time.className = "gdp-blame-time";
           time.textContent = group.commit.isUncommitted
-            ? "Uncommitted"
+            ? SOURCE_READING_TEXT[pageLanguage()].blameUncommitted
             : relativeTimeText(group.commit.authorTime, pageLanguage());
           meta.appendChild(time);
           const author = document.createElement("span");
@@ -270,7 +272,7 @@ export function createBlameView(deps: BlameViewDeps) {
           sha.textContent = blameShortSha(group.sha);
           if (!group.commit.isUncommitted) {
             sha.dataset.sha = group.sha;
-            sha.title = "open this commit in history";
+            sha.title = SOURCE_READING_TEXT[pageLanguage()].blameOpenCommit;
             sha.style.cursor = "pointer";
             sha.addEventListener("click", () => {
               const ref =
@@ -403,7 +405,7 @@ export function createBlameView(deps: BlameViewDeps) {
   function buildLoading(): HTMLElement {
     const wrap = document.createElement("div");
     wrap.className = "gdp-blame-loading";
-    wrap.textContent = "Loading blame…";
+    wrap.textContent = SOURCE_READING_TEXT[pageLanguage()].blameLoading;
     return wrap;
   }
 

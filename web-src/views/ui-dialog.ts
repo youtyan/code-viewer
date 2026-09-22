@@ -12,6 +12,13 @@
 //   - 多重起動は許容しない (既存ダイアログを閉じてから開く)。
 import { iconSvg, X_16_PATH } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
+import { pageLanguage } from "./page-language";
+
+/** ボタンの既定の文言 (呼び出し側が渡さなかったとき)。 */
+const DIALOG_TEXT = {
+  en: { ok: "OK", cancel: "Cancel", save: "Save" },
+  ja: { ok: "OK", cancel: "キャンセル", save: "保存" },
+};
 
 const BACKDROP_CLASS = "gdp-dialog-backdrop";
 const DIALOG_CLASS = "gdp-dialog";
@@ -112,12 +119,12 @@ export function showConfirmDialog(
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "gdp-dialog-button gdp-dialog-cancel";
-    cancel.textContent = opts.cancelLabel ?? "Cancel";
+    cancel.textContent = opts.cancelLabel ?? DIALOG_TEXT[pageLanguage()].cancel;
     const confirm = document.createElement("button");
     confirm.type = "button";
     confirm.className = "gdp-dialog-button gdp-dialog-confirm";
     if (opts.danger) confirm.classList.add("gdp-dialog-danger");
-    confirm.textContent = opts.confirmLabel ?? "OK";
+    confirm.textContent = opts.confirmLabel ?? DIALOG_TEXT[pageLanguage()].ok;
     const done = (ok: boolean) => {
       document.removeEventListener("keydown", onKeydown);
       closeOpenDialog();
@@ -172,7 +179,7 @@ export function showAlertDialog(opts: AlertDialogOptions): Promise<void> {
     ok.type = "button";
     ok.className = "gdp-dialog-button gdp-dialog-confirm";
     if (opts.danger) ok.classList.add("gdp-dialog-danger");
-    ok.textContent = opts.confirmLabel ?? "OK";
+    ok.textContent = opts.confirmLabel ?? DIALOG_TEXT[pageLanguage()].ok;
     const done = () => {
       document.removeEventListener("keydown", onKeydown);
       closeOpenDialog();
@@ -226,11 +233,11 @@ export function showPromptDialog(
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "gdp-dialog-button gdp-dialog-cancel";
-    cancel.textContent = opts.cancelLabel ?? "Cancel";
+    cancel.textContent = opts.cancelLabel ?? DIALOG_TEXT[pageLanguage()].cancel;
     const submit = document.createElement("button");
     submit.type = "button";
     submit.className = "gdp-dialog-button gdp-dialog-confirm";
-    submit.textContent = opts.confirmLabel ?? "OK";
+    submit.textContent = opts.confirmLabel ?? DIALOG_TEXT[pageLanguage()].ok;
     const input = document.createElement("input");
     input.className = "gdp-dialog-input";
     input.type = "text";
@@ -333,12 +340,12 @@ export function showFormDialog<T>(
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "gdp-dialog-button gdp-dialog-cancel";
-    cancel.textContent = opts.cancelLabel ?? "Cancel";
+    cancel.textContent = opts.cancelLabel ?? DIALOG_TEXT[pageLanguage()].cancel;
     const submit = document.createElement("button");
     submit.type = "button";
     submit.className = "gdp-dialog-button gdp-dialog-confirm";
     if (opts.danger) submit.classList.add("gdp-dialog-danger");
-    submit.textContent = opts.submitLabel ?? "Save";
+    submit.textContent = opts.submitLabel ?? DIALOG_TEXT[pageLanguage()].save;
     const error = document.createElement("div");
     error.className = "gdp-dialog-error";
     error.setAttribute("role", "alert");

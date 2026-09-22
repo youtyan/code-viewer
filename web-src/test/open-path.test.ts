@@ -106,6 +106,7 @@ describe("open path in OS action", () => {
   });
 
   test("UI adds open actions to directory-oriented surfaces", () => {
+    // The parent-folder label comes from the Diff text table (diff-view-i18n.ts).
     // The directory-row button's label is localized via
     // SidebarDeps.openDirectoryInOsTitle() instead of a hardcoded English
     // string; see the DOM-behavior coverage in
@@ -118,12 +119,12 @@ describe("open path in OS action", () => {
     ).toBe(true);
     expect(
       app.includes(
-        "createOpenPathButton(target.path, 'file-parent', 'open parent folder in OS')",
+        "createOpenPathButton(target.path, 'file-parent', DIFF_SCREEN_TEXT[getLanguage()].openParentFolder)",
       ),
     ).toBe(true);
     expect(
       app.includes(
-        "createOpenPathButton(file.path, 'file-parent', 'open parent folder in OS')",
+        "createOpenPathButton(file.path, 'file-parent', text.openParentFolder)",
       ),
     ).toBe(true);
     expect(app.includes("body: JSON.stringify({ path, kind })")).toBe(true);

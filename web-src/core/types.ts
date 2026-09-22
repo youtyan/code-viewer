@@ -460,6 +460,8 @@ export type DiffCardElement = HTMLElement & {
   _diffData?: FileDiffResponse | null;
   _file?: FileMeta | null;
   _loadPromise?: Promise<void>;
+  /** 読み込みの失敗。失敗の表示を今の言語で描き直すために持つ。 */
+  _loadFailure?: Error;
   // 静かな再検証 (silent revalidation) の比較基準。最後に既定 URL から取得した
   // 応答の署名と、その URL (generation クエリ除去済み)。展開読み込みでは更新しない。
   _loadedSig?: string | null;

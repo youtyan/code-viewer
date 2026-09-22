@@ -85,6 +85,8 @@ export type AgentsText = {
   notifyEnableTitle: string;
   notifyOn: string;
   notifyOnTitle: string;
+  notifyNotYet: string;
+  notifyAskAgain: string;
   notifyDenied: string;
   notifyDeniedHelp: string;
   notifyUnsupported: string;
@@ -481,6 +483,8 @@ const EN: AgentsText = {
     "Get a desktop notification when an agent needs input or finishes",
   notifyOn: "Notifications on",
   notifyOnTitle: "Choose which changes notify you in Settings",
+  notifyNotYet: "Notifications are not allowed yet",
+  notifyAskAgain: "Ask again",
   notifyDenied: "Notifications are blocked",
   notifyDeniedHelp:
     "Allow notifications for this site from the icon at the left of the address bar, then reload.",
@@ -610,6 +614,8 @@ const JA: AgentsText = {
     "エージェントが入力待ちになったとき・終わったときにデスクトップへ通知します",
   notifyOn: "通知は有効です",
   notifyOnTitle: "どの変化で通知するかは設定で選べます",
+  notifyNotYet: "まだ許可されていません",
+  notifyAskAgain: "もう一度求める",
   notifyDenied: "通知がブロックされています",
   notifyDeniedHelp:
     "アドレスバー左のアイコンからこのサイトの「通知」を許可し、再読み込みしてください。",

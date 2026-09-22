@@ -26,6 +26,9 @@ import type {
   SidebarItem,
 } from "../core/types";
 import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
+import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
+import { pageLanguage } from "./page-language";
+import { repoViewText } from "./repo-view-i18n";
 import { rowHeightFor } from "./shell/row-height";
 import { treeLevelPad } from "./tree-indent";
 
@@ -901,7 +904,8 @@ export function createSidebar(deps: SidebarDeps) {
     const isBinaryLike = kind.binary || kind.media;
     tag.className = `kind-tag ${isBinaryLike ? "binary" : "heavy"}`;
     tag.textContent = isBinaryLike ? "B" : "!";
-    tag.title = isBinaryLike ? "binary/media file" : "large diff";
+    const text = DIFF_SCREEN_TEXT[pageLanguage()];
+    tag.title = isBinaryLike ? text.kindTagBinary : text.kindTagHeavy;
     return tag;
   }
 
@@ -927,7 +931,8 @@ export function createSidebar(deps: SidebarDeps) {
     label.className = broken ? "symlink-target broken" : "symlink-target";
     const target = filePathDisplayText(f.symlink_target || "?");
     label.textContent = `→ ${target}`;
-    label.title = broken ? `Broken symlink → ${target}` : `Symlink → ${target}`;
+    const text = repoViewText(pageLanguage());
+    label.title = broken ? text.brokenSymlink(target) : text.symlink(target);
     return label;
   }
 
@@ -1055,7 +1060,9 @@ export function createSidebar(deps: SidebarDeps) {
     const filter = compileFileFilter(input.value);
     const invalid = filter.kind === "invalid";
     input.toggleAttribute("aria-invalid", invalid);
-    input.title = invalid ? filter.error || "invalid regular expression" : "";
+    input.title = invalid
+      ? filter.error || DIFF_SCREEN_TEXT[pageLanguage()].invalidRegex
+      : "";
     const filterActive = filter.kind !== "empty" && !invalid;
     const matches = invalid ? () => true : filter.match;
     let totalFiles = 0;
@@ -1647,7 +1654,9 @@ export function createSidebar(deps: SidebarDeps) {
     const filter = compileFileFilter(input.value);
     const invalid = filter.kind === "invalid";
     input.toggleAttribute("aria-invalid", invalid);
-    input.title = invalid ? filter.error || "invalid regular expression" : "";
+    input.title = invalid
+      ? filter.error || DIFF_SCREEN_TEXT[pageLanguage()].invalidRegex
+      : "";
     const matches = invalid ? () => true : filter.match;
     const filterActive = filter.kind !== "empty" && !invalid;
     let totalFiles = 0;

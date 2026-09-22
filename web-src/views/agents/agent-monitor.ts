@@ -60,6 +60,8 @@ export type AgentMonitorSnapshot = {
   unread: ReadonlyMap<TmuxPaneId, AgentTransition>;
   /** この画面を開いてから、入力待ちになったエージェントを 1 度でも見たか。 */
   sawWaiting: boolean;
+  /** この画面を開いてから、通知の許可を 1 度でも求めたか。 */
+  permissionAsked: boolean;
 };
 
 export type AgentMonitorDeps = {
@@ -95,6 +97,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
   let error = "";
   let notifyError = "";
   let sawWaiting = false;
+  let permissionAsked = false;
   let unread = new Map<TmuxPaneId, AgentTransition>();
   /** 前回の状態。最初の取得の前は null (何も起きたことにしない)。 */
   let previous: Map<TmuxPaneId, AgentState> | null = null;
@@ -335,7 +338,14 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       schedule();
     },
     refresh,
-    snapshot: () => ({ overview, error, notifyError, unread, sawWaiting }),
+    snapshot: () => ({
+      overview,
+      error,
+      notifyError,
+      unread,
+      sawWaiting,
+      permissionAsked,
+    }),
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -364,6 +374,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       const api = notificationApi();
       if (!api) return "unsupported";
       const result = await api.requestPermission();
+      permissionAsked = true;
       emit();
       return result;
     },

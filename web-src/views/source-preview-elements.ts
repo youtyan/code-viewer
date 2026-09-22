@@ -2,10 +2,12 @@ import { csvParseRows, tsvParseRows } from "d3-dsv";
 import { iconSvg, SEARCH_16_PATH } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
 import { createMediaPlayer } from "./media-player";
+import { pageLanguage } from "./page-language";
 import {
   type DelimitedPreviewFormat,
   type DelimitedPreviewText,
   delimitedPreviewText,
+  SOURCE_READING_TEXT,
 } from "./source-preview-i18n";
 
 export type DelimitedPreviewElement = HTMLElement & {
@@ -356,7 +358,7 @@ export function renderUnsupportedPreview(opts: {
   content.className = "gdp-source-unsupported-content";
   const title = document.createElement("strong");
   title.className = "gdp-source-unsupported-title";
-  title.textContent = "Preview unavailable";
+  title.textContent = SOURCE_READING_TEXT[pageLanguage()].previewUnavailable;
   const message = document.createElement("div");
   message.className = "gdp-source-unsupported-message";
   message.textContent = opts.message;

@@ -236,8 +236,9 @@ function createFilePathCopyButton(target: SourceFileTarget): HTMLButtonElement {
   const copy = document.createElement("button");
   copy.type = "button";
   copy.className = "gdp-file-header-icon gdp-copy-path";
-  copy.title = "copy file path";
-  copy.setAttribute("aria-label", "copy file path");
+  const label = SOURCE_READING_TEXT[pageLanguage()].copyFilePath;
+  copy.title = label;
+  copy.setAttribute("aria-label", label);
   copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
   copy.addEventListener("click", async (event) => {
     event.stopPropagation();

@@ -546,6 +546,23 @@ export type AgentNotifyContext = {
   viewing: boolean;
 };
 
+/**
+ * 通知の許可の見せ方。default でも、この画面で 1 度訊いて窓を閉じられたら
+ * ask-again (「まだ許可されていません」と「もう一度求める」)。
+ */
+export type NotifyPermissionView =
+  | "ask"
+  | "ask-again"
+  | Exclude<AgentNotifyContext["permission"], "default">;
+
+export function notifyPermissionView(
+  permission: AgentNotifyContext["permission"],
+  asked: boolean,
+): NotifyPermissionView {
+  if (permission !== "default") return permission;
+  return asked ? "ask-again" : "ask";
+}
+
 /** ブラウザの通知を出すか。 */
 export function shouldNotifyAgent(
   transition: AgentTransition,

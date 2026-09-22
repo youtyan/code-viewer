@@ -19,6 +19,17 @@ test.each([
   ["#topbar", "overflow-x", "auto"],
   // ファイルの見出しの 2 段化は窓でなく箱の幅 (@container diff-file) で決める
   [".d2h-file-wrapper", "container", "diff-file / inline-size"],
+  // 作業ツリーの一覧は 2 面なら左の面まで (右の面の下に潜らない)。列は箱の幅で畳む
+  [
+    "body[data-worktree-overview] #worktree-panel",
+    "right",
+    "var(--page-right)",
+  ],
+  [
+    "body[data-worktree-overview] #worktree-panel",
+    "container",
+    "worktree-overview / inline-size",
+  ],
   // 左の列の見出し: 「ツリー / 一覧」と題の語を折らない
   ["#sidebar .sb-head .sb-view-seg", "min-width", "max-content"],
   ["#sidebar .sb-head > .sb-title", "white-space", "nowrap"],

@@ -32,6 +32,7 @@ import {
   filterAgentPanes,
   groupAgentPanes,
   matchesStateFilter,
+  notifyPermissionView,
   paneTaskSummary,
 } from "../../core/agent-overview";
 import {
@@ -574,14 +575,22 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
   function renderNotify(): void {
     const current = text();
     notifyBox.replaceChildren();
-    const permission = deps.monitor.permission();
+    const view = notifyPermissionView(
+      deps.monitor.permission(),
+      deps.monitor.snapshot().permissionAsked,
+    );
     const status = document.createElement("span");
     status.className = "agents-notify-status";
-    if (permission === "default") {
+    if (view === "ask" || view === "ask-again") {
+      if (view === "ask-again") {
+        status.textContent = current.notifyNotYet;
+        notifyBox.appendChild(status);
+      }
       const button = document.createElement("button");
       button.type = "button";
       button.className = "agents-secondary agents-notify-enable";
-      button.textContent = current.notifyEnable;
+      button.textContent =
+        view === "ask" ? current.notifyEnable : current.notifyAskAgain;
       button.title = current.notifyEnableTitle;
       button.addEventListener("click", () => {
         deps.monitor.requestPermission().then(
@@ -602,7 +611,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
         );
       });
       notifyBox.appendChild(button);
-    } else if (permission === "granted") {
+    } else if (view === "granted") {
       const link = document.createElement("button");
       link.type = "button";
       link.className = "agents-text-action agents-notify-on";
@@ -610,7 +619,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       link.title = current.notifyOnTitle;
       link.addEventListener("click", () => deps.openNotificationSettings());
       notifyBox.appendChild(link);
-    } else if (permission === "denied") {
+    } else if (view === "denied") {
       status.classList.add("agents-notify-denied");
       status.textContent = current.notifyDenied;
       status.title = current.notifyDeniedHelp;

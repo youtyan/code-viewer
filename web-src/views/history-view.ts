@@ -39,6 +39,7 @@ import {
   historyGraphSvg,
   passingLanes,
 } from "./history-graph";
+import { pageLanguage } from "./page-language";
 
 export const HISTORY_BODY_COLLAPSE_LINES = 10;
 export const HISTORY_WORKTREE_COMMIT = "worktree";
@@ -68,6 +69,8 @@ export type HistoryText = {
   comparing: (from: string, to: string) => string;
   clearCompare: string;
   refTitle: (kind: HistoryCommitRef["kind"], name: string) => string;
+  panelLabel: string;
+  selectedCommit: string;
 };
 
 type HistoryRefreshStatus = { type: "none" } | { type: "pending" };
@@ -75,6 +78,8 @@ type HistoryRefreshStatus = { type: "none" } | { type: "pending" };
 const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
   en: {
     worktreeLabel: "Uncommitted changes (Working tree)",
+    panelLabel: "Commit history",
+    selectedCommit: "Selected commit",
     bodyExpandClose: "Collapse",
     bodyExpandMore: (n) => `Show more (${n} lines)`,
     refreshLabel: "Refresh",
@@ -108,6 +113,8 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
   },
   ja: {
     worktreeLabel: "未コミット変更 (Working tree)",
+    panelLabel: "コミットの履歴",
+    selectedCommit: "選んだコミット",
     bodyExpandClose: "閉じる",
     bodyExpandMore: (n) => `もっと見る (${n} 行)`,
     refreshLabel: "更新",
@@ -200,7 +207,7 @@ export function buildHistoryPanelDom(
   } else {
     panel.className = "gdp-file-history-panel";
   }
-  panel.setAttribute("aria-label", "Commit history");
+  panel.setAttribute("aria-label", historyText(pageLanguage()).panelLabel);
   // Focusable so j / k land in the "history" keymap scope after a click.
   panel.tabIndex = -1;
 
@@ -208,7 +215,7 @@ export function buildHistoryPanelDom(
   panelHead.className = "history-head";
   const title = document.createElement("span");
   title.className = "history-title";
-  title.textContent = "Commits";
+  title.textContent = historyText(pageLanguage()).commitsTitle;
   panelHead.appendChild(title);
 
   const refreshButton = document.createElement("button");
@@ -315,7 +322,7 @@ export function buildHistoryCommitInfoDom(
     ? "history-commit-info"
     : "history-commit-info gdp-file-history-commit-info";
   info.hidden = true;
-  info.setAttribute("aria-label", "Selected commit");
+  info.setAttribute("aria-label", historyText(pageLanguage()).selectedCommit);
   const head = document.createElement("div");
   head.className = "hci-head";
   const sha = document.createElement("span");

@@ -14,10 +14,11 @@ import type { DiffCardElement, DiffMeta, FileMeta } from "../core/types";
 import {
   createDiffView,
   type DiffViewDeps,
-  type DiffViewText,
   isDiffShellDomIntact,
   shouldRenderDiffSidebar,
 } from "../views/diff-view";
+import { DIFF_SCREEN_TEXT, type DiffViewText } from "../views/diff-view-i18n";
+import type { ExpandStackElement } from "../views/hunk-expand";
 import { deferred, makeDiffMeta, waitFor } from "./_test-helpers";
 
 beforeAll(() => {
@@ -99,32 +100,7 @@ function makeMeta(files: FileMeta[]): DiffMeta {
   return makeDiffMeta(files, { generation: 1 });
 }
 
-const defaultDiffText: DiffViewText = {
-  files: (count) => `${count} file${count === 1 ? "" : "s"}`,
-  updated: (time) => `updated ${time}`,
-  updatedTitle: "last updated",
-  kindAdded: "added",
-  kindDeleted: "deleted",
-  kindRenamed: "renamed",
-  kindHeavy: "heavy",
-  kindBinary: "binary",
-  kindMedia: "media",
-  viewedProgress: (viewed, total) => `${viewed}/${total} viewed`,
-  viewedProgressTitle: "review progress",
-  nextUnviewed: "next unviewed",
-  nextUnviewedTitle: "Jump to the next unviewed file (n)",
-  allViewed: "all viewed",
-  allViewedTitle: "All visible files are viewed",
-  viewed: "Viewed",
-  preview: "Preview",
-  previewTitle: "Preview rendered file",
-  viewFile: "View File",
-  viewFileTitle: "View file",
-  viewDiff: "View Diff",
-  viewDiffTitle: "View diff",
-  collapseFile: "Collapse file",
-  copyFilePath: "copy file path",
-};
+const defaultDiffText: DiffViewText = DIFF_SCREEN_TEXT.en;
 
 function createDiffViewForShellTest(
   text: DiffViewText = defaultDiffText,
@@ -2009,5 +1985,44 @@ describe("diff view silent revalidation", () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+});
+
+// 「すべての行を表示」で隠れた行の取得に失敗したら、理由を捨てずにボタンと console に出す。
+describe("diff view expand all lines", () => {
+  test.each([
+    { name: "a gap fails", gaps: ["ok", "fail"], failed: true },
+    { name: "every gap loads", gaps: ["ok", "ok"], failed: false },
+  ])("$name → failed: $failed", async ({ gaps, failed }) => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* checked below */
+    });
+    document.body.innerHTML =
+      '<div class="gdp-file-shell"><button class="gdp-file-unfold"></button></div>';
+    const card = document.querySelector<DiffCardElement>(".gdp-file-shell");
+    if (!card) throw new Error("missing card");
+    for (const gap of gaps) {
+      const stack = document.createElement("div") as ExpandStackElement;
+      stack.className = "gdp-expand-stack";
+      stack._gdpExpandFully = async () => {
+        if (gap === "fail") throw new Error("HTTP 500 sample-reason");
+        stack.remove();
+      };
+      card.appendChild(stack);
+    }
+    const { view } = createDiffViewForShellTest();
+    await view.expandAllFileContext(
+      card,
+      makeFile("src/sample.ts", 1, 0, "/file_diff?path=src%2Fsample.ts"),
+    );
+    const button = card.querySelector<HTMLButtonElement>(".gdp-file-unfold");
+    expect({
+      failed: button?.classList.contains("failed"),
+      reason: button?.title.includes("HTTP 500 sample-reason"),
+      logged: errorSpy.mock.calls.some((args) =>
+        String(args[0]).includes("src/sample.ts"),
+      ),
+    }).toEqual({ failed, reason: failed, logged: failed });
+    errorSpy.mockRestore();
   });
 });

@@ -3,6 +3,8 @@ import type Renderer from "markdown-it/lib/renderer.mjs";
 import type Token from "markdown-it/lib/token.mjs";
 import markdownItAnchor from "markdown-it-anchor";
 import markdownItFootnote from "markdown-it-footnote";
+import { pageLanguage } from "../views/page-language";
+import { MARKDOWN_PREVIEW_TEXT } from "../views/source-preview-i18n";
 import { showCopyFailure } from "./copy-failure";
 import { errorWithCause, formatErrorDetail } from "./error-detail";
 import { CHECK_16_PATHS, COPY_16_PATHS, iconSvg } from "./icons";
@@ -557,8 +559,9 @@ function enhanceCodeBlocks(root: HTMLElement) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "mkdp-code-copy";
-    button.setAttribute("aria-label", "Copy code");
-    button.title = "Copy code";
+    const label = MARKDOWN_PREVIEW_TEXT[pageLanguage()].copyCode;
+    button.setAttribute("aria-label", label);
+    button.title = label;
     button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
     button.addEventListener("click", async () => {
       try {
@@ -572,7 +575,7 @@ function enhanceCodeBlocks(root: HTMLElement) {
           button,
           "copying the code block failed",
           error,
-          "Copy code",
+          label,
           1500,
         );
       }
@@ -599,7 +602,10 @@ function createMarkdownToc(
 ): HTMLElement {
   const nav = document.createElement("nav");
   nav.className = "gdp-markdown-toc table-of-contents";
-  nav.setAttribute("aria-label", "Markdown contents");
+  nav.setAttribute(
+    "aria-label",
+    MARKDOWN_PREVIEW_TEXT[pageLanguage()].contents,
+  );
   const list = document.createElement("ul");
   entries.forEach((entry) => {
     const item = document.createElement("li");
@@ -875,7 +881,7 @@ async function renderMermaidError(
   if (src && mermaid.parse) {
     try {
       await mermaid.parse(src);
-      detail ||= "Mermaid could not render this diagram.";
+      detail ||= MARKDOWN_PREVIEW_TEXT[pageLanguage()].mermaidRenderFailed;
     } catch (err) {
       detail = [formatErrorDetail(err), detail].filter(Boolean).join("\n\n");
     }
@@ -887,23 +893,24 @@ function renderMermaidErrorDetail(node: HTMLElement, failure: Error | string) {
   const src = node.dataset.gdpMermaidSource || node.textContent || "";
   const detail =
     typeof failure === "string" ? failure : formatErrorDetail(failure);
+  const text = MARKDOWN_PREVIEW_TEXT[pageLanguage()];
   const wrap = document.createElement("div");
   wrap.className = "mkdp-mermaid-error";
   const title = document.createElement("div");
   title.className = "mkdp-mermaid-error-title";
   title.textContent =
     typeof failure === "string"
-      ? "Mermaid syntax error"
-      : "Mermaid could not be loaded";
+      ? text.mermaidSyntaxError
+      : text.mermaidLoadFailed;
   const pre = document.createElement("pre");
   pre.className = "mkdp-mermaid-error-detail";
-  pre.textContent = detail || "No detail available.";
+  pre.textContent = detail || text.noDetail;
   wrap.append(title, pre);
   if (src) {
     const details = document.createElement("details");
     details.className = "mkdp-mermaid-error-srcwrap";
     const summary = document.createElement("summary");
-    summary.textContent = "source";
+    summary.textContent = text.source;
     const source = document.createElement("pre");
     source.className = "mkdp-mermaid-error-source";
     source.textContent = src;
@@ -926,17 +933,17 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
   const toolbar = document.createElement("div");
   toolbar.className = "mkdp-lightbox-toolbar";
   overlay.appendChild(toolbar);
+  const text = MARKDOWN_PREVIEW_TEXT[pageLanguage()];
   const hint = document.createElement("div");
   hint.className = "mkdp-lightbox-hint";
-  hint.textContent =
-    "drag to pan · wheel to zoom · double-click to fit · ESC to close";
+  hint.textContent = text.lightboxHint;
   overlay.appendChild(hint);
   document.body.appendChild(overlay);
 
   const bbox = safeSvgBox(svg);
   if (bbox.error) {
     console.error(bbox.error);
-    hint.textContent += " · size estimated from the layout";
+    hint.textContent += text.sizeEstimated;
     hint.title = formatErrorDetail(bbox.error);
   }
   let scale = 1;
@@ -984,10 +991,10 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
     window.removeEventListener("resize", fitImage);
     overlay.remove();
   };
-  button("+", "zoom in", () => zoomCentered(1.25));
-  button("-", "zoom out", () => zoomCentered(1 / 1.25));
-  button("fit", "fit", fitImage);
-  button("x", "close", close);
+  button("+", text.zoomIn, () => zoomCentered(1.25));
+  button("-", text.zoomOut, () => zoomCentered(1 / 1.25));
+  button("fit", text.fit, fitImage);
+  button("x", text.close, close);
 
   overlay.addEventListener(
     "wheel",

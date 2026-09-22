@@ -214,9 +214,13 @@ export type MainTabsHandle = {
   /**
    * 保存した配置を読み戻す。rightRoute は URL が右の面のファイルを指して
    * いた (pane=right) とき: 左の面は保存した前面のまま、右の面にそのファイルを
-   * 開いて前面に出す。
+   * 開いて前面に出す。keepSavedFront は URL が前面のシェル (?terminal=) か
+   * 開くペイン (?open-pane=) を持っていたとき: 前面がターミナルでも残す。
    */
-  restore(options?: { rightRoute?: FileRoute }): Promise<void>;
+  restore(options?: {
+    rightRoute?: FileRoute;
+    keepSavedFront?: boolean;
+  }): Promise<void>;
   flush(keepalive: boolean): void;
   localize(): void;
   /** テストと確認用。 */
@@ -1109,7 +1113,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   }
 
   async function restore(
-    options: { rightRoute?: FileRoute } = {},
+    options: { rightRoute?: FileRoute; keepSavedFront?: boolean } = {},
   ): Promise<void> {
     if (restored) return;
     restored = true;
@@ -1192,9 +1196,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       );
     // 今の画面 (URL) の route。保存した配置がその route を見せていた (本文の面の
     // 前面か、フォーカスのある面の前面がそのタブ) なら、保存した前面をそのまま
-    // 使う (ターミナルや画像を前面にしたまま再読み込みしても、URL に出ている
-    // 下の route のタブが前へ出てこない)。そうでなければ (別の URL を開いた)
-    // その route のタブを開いて前面に出す。
+    // 使う。そうでなければ (別の URL を開いた) その route のタブを開いて前面に
+    // 出す。前面がターミナルで URL が画面かファイルを指すなら URL を優先する
+    // (ブックマークやリンクで開いた Data がターミナルの裏に隠れていた)。
+    // ターミナルを前面にしたままの再読み込みは URL に ?terminal= が載るので
+    // keepSavedFront で残す。
     const urlRoute = deps.currentRoute();
     const target = routeTarget(urlRoute);
     routes.clear();
@@ -1220,7 +1226,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         routeSideOf(restoredLayout) === null
       : target !== null &&
         (shown.some((tab) => sameTarget(tab.target, target)) ||
-          (routeSideOf(restoredLayout) === null &&
+          (options.keepSavedFront === true &&
+            routeSideOf(restoredLayout) === null &&
             allTabs(restoredLayout).some((tab) =>
               sameTarget(tab.target, target),
             )));

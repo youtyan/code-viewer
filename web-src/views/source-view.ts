@@ -53,6 +53,7 @@ import type {
   HljsApi,
   RawFileInfo,
 } from "../core/types";
+import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
 import {
   appendFileViewTabs,
   createFileShellSticky,
@@ -763,17 +764,18 @@ export function createSourceView(deps: SourceViewDeps) {
     spinner.textContent = "";
     const title = document.createElement("strong");
     title.className = "gdp-source-loading-title";
-    title.textContent = "Loading file";
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    title.textContent = text.loadingFile;
     const message = document.createElement("div");
     message.className = "gdp-source-loading-message";
-    message.textContent = `${target.path} at ${target.ref}`;
+    message.textContent = text.fileAtRef(target.path, target.ref);
     content.append(spinner, title, message);
     if (onCancel) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "gdp-btn gdp-btn-sm gdp-source-cancel";
-      button.textContent = "Cancel";
-      button.title = "Cancel loading (Esc)";
+      button.textContent = text.cancel;
+      button.title = text.cancelTitle;
       button.addEventListener("click", (e) => {
         e.stopPropagation();
         onCancel();
@@ -801,8 +803,9 @@ export function createSourceView(deps: SourceViewDeps) {
           1,
           Math.floor((Date.now() - startedAt) / 1000),
         );
-        title.textContent = `Still loading file (${elapsed}s)`;
-        slowNote.textContent = `Taking longer than usual (${elapsed}s elapsed). You can cancel below.`;
+        const later = SOURCE_READING_TEXT[getLanguage()];
+        title.textContent = later.stillLoading(elapsed);
+        slowNote.textContent = later.slowNote(elapsed);
       };
       updateSlowNote();
       interval = window.setInterval(updateSlowNote, 1000);
@@ -821,7 +824,9 @@ export function createSourceView(deps: SourceViewDeps) {
     );
     const view = document.createElement("div");
     view.className = "gdp-source-viewer error";
-    view.textContent = message || `Cannot load ${target.path} at ${target.ref}`;
+    view.textContent =
+      message ||
+      SOURCE_READING_TEXT[getLanguage()].cannotLoad(target.path, target.ref);
     if (body) body.replaceWith(view);
     else card.appendChild(view);
     setSourceCardState(card, "error");
@@ -840,14 +845,15 @@ export function createSourceView(deps: SourceViewDeps) {
     content.className = "gdp-source-loading-content";
     const title = document.createElement("strong");
     title.className = "gdp-source-loading-title";
-    title.textContent = "Loading cancelled";
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    title.textContent = text.loadingCancelled;
     const message = document.createElement("div");
     message.className = "gdp-source-loading-message";
-    message.textContent = `${target.path} at ${target.ref}`;
+    message.textContent = text.fileAtRef(target.path, target.ref);
     const retry = document.createElement("button");
     retry.type = "button";
     retry.className = "gdp-btn gdp-btn-sm";
-    retry.textContent = "Reopen";
+    retry.textContent = text.reopen;
     retry.addEventListener("click", () =>
       renderStandaloneSource(sourceTargetFromRoute() || target),
     );
@@ -869,11 +875,12 @@ export function createSourceView(deps: SourceViewDeps) {
     const link = document.createElement("a");
     link.className = "gdp-btn gdp-btn-sm gdp-source-download";
     link.href = buildRawFileUrl(target);
-    link.textContent = "Download raw";
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    link.textContent = text.downloadRaw;
     link.target = "_blank";
     link.rel = "noreferrer";
     const view = renderUnsupportedPreview({
-      message: "This file type cannot be previewed safely in the browser.",
+      message: text.unsupported,
       extraChildren: [info, link],
     });
     if (body) body.replaceWith(view);
@@ -892,7 +899,7 @@ export function createSourceView(deps: SourceViewDeps) {
       loadMeta: false,
     });
     const view = renderUnsupportedPreview({
-      message: "Git internal metadata is not previewed from the file viewer.",
+      message: SOURCE_READING_TEXT[getLanguage()].internalMetadata,
       extraChildren: [info],
     });
     if (body) body.replaceWith(view);
@@ -934,8 +941,9 @@ export function createSourceView(deps: SourceViewDeps) {
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className = "gdp-file-header-icon gdp-copy-source";
-    copy.title = "Copy source";
-    copy.setAttribute("aria-label", "Copy source");
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    copy.title = text.copySource;
+    copy.setAttribute("aria-label", text.copySource);
     copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
     copy.addEventListener("click", async () => {
       try {
@@ -949,7 +957,7 @@ export function createSourceView(deps: SourceViewDeps) {
           copy,
           "copy the source to the clipboard",
           error,
-          "Copy source",
+          text.copySource,
           1600,
         );
       }
@@ -1637,20 +1645,21 @@ export function createSourceView(deps: SourceViewDeps) {
     bar.className = "gdp-source-virtual-search";
     const input = document.createElement("input");
     input.type = "search";
-    input.placeholder = "Find in file";
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    input.placeholder = text.findInFile;
     input.autocomplete = "off";
     input.spellcheck = false;
     const count = document.createElement("span");
     count.className = "gdp-source-virtual-search-count";
     const previous = document.createElement("button");
     previous.type = "button";
-    previous.textContent = "Prev";
+    previous.textContent = text.findPrev;
     const next = document.createElement("button");
     next.type = "button";
-    next.textContent = "Next";
+    next.textContent = text.findNext;
     const close = document.createElement("button");
     close.type = "button";
-    close.textContent = "Close";
+    close.textContent = text.findClose;
     bar.append(input, count, previous, next, close);
     wrap.querySelector(".gdp-source-virtual-info")?.appendChild(bar);
     bar.hidden = true;
@@ -1674,7 +1683,7 @@ export function createSourceView(deps: SourceViewDeps) {
         renderFn();
         return;
       }
-      count.textContent = "Searching...";
+      count.textContent = text.searching;
       findMatches(query)
         .then((nextMatches) => {
           if (version !== searchVersion) return;
@@ -1705,7 +1714,7 @@ export function createSourceView(deps: SourceViewDeps) {
           console.error(failure);
           matches = [];
           active = -1;
-          count.textContent = "Search failed";
+          count.textContent = text.searchFailed;
           count.title = formatErrorDetail(failure);
           renderFn();
         });
@@ -1785,22 +1794,22 @@ export function createSourceView(deps: SourceViewDeps) {
     info.className = "gdp-source-virtual-info";
     const badge = document.createElement("span");
     badge.className = "gdp-source-virtual-badge";
-    badge.textContent = "Virtual mode";
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    badge.textContent = text.virtualMode;
     const summary = document.createElement("span");
     summary.className = "gdp-source-virtual-summary";
-    summary.textContent =
-      lines.length.toLocaleString() +
-      " lines, " +
-      formatBytes(textValue.length) +
-      ". Only visible rows are rendered. Highlighting is per-line.";
+    summary.textContent = text.virtualSummary(
+      lines.length.toLocaleString(),
+      formatBytes(textValue.length),
+    );
     const actions = document.createElement("span");
     actions.className = "gdp-source-virtual-actions";
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className =
       "gdp-file-header-icon gdp-copy-source gdp-source-virtual-copy";
-    copy.title = "Copy source";
-    copy.setAttribute("aria-label", "Copy source");
+    copy.title = text.copySource;
+    copy.setAttribute("aria-label", text.copySource);
     copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
     copy.addEventListener("click", async () => {
       try {
@@ -1814,7 +1823,7 @@ export function createSourceView(deps: SourceViewDeps) {
           copy,
           "copy the source to the clipboard",
           error,
-          "Copy source",
+          text.copySource,
           1600,
         );
       }
@@ -1822,9 +1831,8 @@ export function createSourceView(deps: SourceViewDeps) {
     const full = document.createElement("a");
     full.className = "gdp-source-virtual-action";
     full.href = buildCurrentFileRouteWithVirtualMode(target, "off");
-    full.textContent = "Open full view";
-    full.title =
-      "Render every line without virtualization. This can be slow for large files.";
+    full.textContent = text.openFullView;
+    full.title = text.openFullViewTitle;
     full.addEventListener("click", (e) => {
       e.preventDefault();
       const url = new URL(full.href, window.location.origin);
@@ -1837,7 +1845,7 @@ export function createSourceView(deps: SourceViewDeps) {
     scroller.className = "gdp-source-virtual-scroller";
     scroller.tabIndex = 0;
     scroller.setAttribute("role", "region");
-    scroller.setAttribute("aria-label", `${target.path} source code`);
+    scroller.setAttribute("aria-label", text.sourceCode(target.path));
     const spacer = document.createElement("div");
     spacer.className = "gdp-source-virtual-spacer";
     spacer.style.height = `${Math.max(
@@ -1999,7 +2007,8 @@ export function createSourceView(deps: SourceViewDeps) {
     info.className = "gdp-source-virtual-info";
     const badge = document.createElement("span");
     badge.className = "gdp-source-virtual-badge";
-    badge.textContent = "Virtual mode";
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    badge.textContent = text.virtualMode;
     const summary = document.createElement("span");
     summary.className = "gdp-source-virtual-summary";
     const actions = document.createElement("span");
@@ -2009,13 +2018,12 @@ export function createSourceView(deps: SourceViewDeps) {
     raw.href = buildRawFileUrl(target);
     raw.target = "_blank";
     raw.rel = "noreferrer";
-    raw.textContent = "Open raw";
+    raw.textContent = text.openRaw;
     const full = document.createElement("a");
     full.className = "gdp-source-virtual-action";
     full.href = buildCurrentFileRouteWithVirtualMode(target, "off");
-    full.textContent = "Open full view";
-    full.title =
-      "Render every line without paged loading. This can be slow for large files.";
+    full.textContent = text.openFullView;
+    full.title = text.openFullViewPagedTitle;
     full.addEventListener("click", (e) => {
       e.preventDefault();
       const url = new URL(full.href, window.location.origin);
@@ -2029,7 +2037,7 @@ export function createSourceView(deps: SourceViewDeps) {
     scroller.className = "gdp-source-virtual-scroller";
     scroller.tabIndex = 0;
     scroller.setAttribute("role", "region");
-    scroller.setAttribute("aria-label", `${target.path} source code`);
+    scroller.setAttribute("aria-label", text.sourceCode(target.path));
     const spacer = document.createElement("div");
     spacer.className = "gdp-source-virtual-spacer";
     const windowEl = document.createElement("div");
@@ -2069,13 +2077,12 @@ export function createSourceView(deps: SourceViewDeps) {
 
     const updateTotals = () => {
       SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), totalRows);
-      summary.textContent =
-        (complete
+      summary.textContent = text.pagedSummary(
+        complete
           ? totalRows.toLocaleString()
-          : `${lines.size.toLocaleString()}+`) +
-        " lines loaded from " +
-        formatBytes(size) +
-        ". More rows load as you scroll.";
+          : `${lines.size.toLocaleString()}+`,
+        formatBytes(size),
+      );
       const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
       spacer.style.height = `${Math.max(1, totalRows * rowHeight)}px`;
     };
@@ -2447,7 +2454,7 @@ export function createSourceView(deps: SourceViewDeps) {
     view.className = "gdp-source-viewer binary";
     const link = document.createElement("a");
     link.href = buildRawFileUrl(target);
-    link.textContent = "Open raw file";
+    link.textContent = SOURCE_READING_TEXT[getLanguage()].openRawFile;
     link.target = "_blank";
     link.rel = "noreferrer";
     if (!isStandalone) {
@@ -2557,7 +2564,7 @@ export function createSourceView(deps: SourceViewDeps) {
       createOpenPathButton(
         target.path,
         "file-parent",
-        "open parent folder in OS",
+        DIFF_SCREEN_TEXT[getLanguage()].openParentFolder,
       ),
     );
     if (repoTarget && canTrashWorktreeRef(repoTarget)) {
