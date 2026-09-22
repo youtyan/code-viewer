@@ -4,10 +4,10 @@
 // フォーカスのある面が 1 つある。操作はどれも新しい状態を返す純関数で、
 // 渡された状態を書き換えない。
 //
-// 本文 (route で中身が決まる file / page) を描ける場所は 1 つしか無いので、
-// route のタブは左の面にだけ置く。右の面 (2 つ目) に置けるのは terminal と
-// image だけ (canPlace)。左の面はタブを選んでいなくてよい: そのときは本文の
-// 既定 (フォルダ表示) を出す。
+// 本文 (route で中身が決まる page) を描ける場所は 1 つしか無いので、page の
+// タブは左の面にだけ置く。file はソース表示を面ごとに持つので右の面にも置ける
+// (canPlace)。左の面はタブを選んでいなくてよい: そのときは本文の既定 (フォルダ
+// 表示) を出す。
 //
 // 不変条件 (assertLayout が検査する):
 // - タブの id は全体で一意
@@ -15,7 +15,7 @@
 //   右の面は空にならず (空になれば 1 面に戻る)、必ずどれかを選んでいる
 // - 右の面のタブは canPlace(target, "right") を満たす
 // - 仮のタブ (preview) は面ごとに最大 1
-// - 同じ中身 (sameTarget) のタブは全体で最大 1 (page はその特別な場合)
+// - 同じ中身 (sameTarget) のタブは面ごとに最大 1 (左右で同じファイルは開ける)
 //
 // 表示名は画面側 (i18n) が作る。ここは同一判定だけを持つ。
 
@@ -110,15 +110,15 @@ export type MoveResult =
 
 /**
  * 2: repo の page タブを廃止し、左の面の activeId に null (本文の既定) を
- * 許した。1 の値も読む (repo のタブは落とし、右の面の route のタブは左へ移す)。
+ * 許した。1 の値も読む (repo のタブは落とし、右の面の page のタブは左へ移す)。
+ * 右の面に file を置けるようにしたとき (左右で同じファイルも可) は形が同じ
+ * なので版を上げていない。
  */
 export const LAYOUT_VERSION = 2;
 
-/** その種類のタブをその面に置けるか。右の面は terminal と image だけ。 */
+/** その種類のタブをその面に置けるか。page (本文の画面) は左の面だけ。 */
 export function canPlace(target: TabTarget, side: PaneSide): boolean {
-  return (
-    side === "left" || target.kind === "terminal" || target.kind === "image"
-  );
+  return side === "left" || target.kind !== "page";
 }
 
 function emptyPane(): Pane {
@@ -166,11 +166,13 @@ export function findTab(
   return null;
 }
 
+/** 同じ中身のタブを、sides の順に探す。 */
 function findTarget(
   layout: Layout,
   target: TabTarget,
+  order: PaneSide[] = sides(layout),
 ): { side: PaneSide; tab: Tab } | null {
-  for (const side of sides(layout)) {
+  for (const side of order) {
     const tab = paneOf(layout, side)?.tabs.find((item) =>
       sameTarget(item.target, target),
     );
@@ -235,8 +237,10 @@ function resolveSide(
 }
 
 /**
- * 開く。同じ中身のタブがどこかにあれば、それを前面に出してその面へ
- * フォーカスを移す (中身は新しい target に差し替える: 行の指定が変わる)。
+ * 開く。同じ中身のタブがあれば、それを前面に出してその面へフォーカスを移す
+ * (中身は新しい target に差し替える: 行の指定が変わる)。探す面は、面を指定
+ * しないとき (focused) はフォーカスのある面 → 反対の面、指定したとき (Alt+
+ * クリックの反対の面など) はその面だけ (左右で同じファイルを開ける)。
  * 無ければ、仮で開くときに面に仮のタブがあればそれを置き換え、無ければ
  * 選択中のタブの右に足す。
  */
@@ -245,7 +249,7 @@ export function open(
   target: TabTarget,
   opts: OpenOptions = {},
 ): Layout {
-  const existing = findTarget(layout, target);
+  const { side, existing } = openPlan(layout, target, opts);
   if (existing) {
     const pane = paneOf(layout, existing.side) as Pane;
     const tabs = pane.tabs.map((tab) =>
@@ -260,14 +264,9 @@ export function open(
       focused: existing.side,
     };
   }
-  const wanted = resolveSide(layout, opts.pane);
-  const side = canPlace(target, wanted) ? wanted : "left";
   const pane = paneOf(layout, side) as Pane;
-  const preview =
-    target.kind === "page" || target.kind === "terminal"
-      ? false
-      : opts.preview !== false;
-  const tab: Tab = { id: nextId(layout, opts.newId), target, preview };
+  const tab = newTab(layout, target, opts);
+  const preview = tab.preview;
   const previewIndex = preview
     ? pane.tabs.findIndex((item) => item.preview)
     : -1;
@@ -289,6 +288,68 @@ export function open(
   return {
     ...withPane(layout, side, selectIn({ ...pane, tabs, recent }, tab.id)),
     focused: side,
+  };
+}
+
+/** open が同じ中身を探す面と、無ければ入れる面。 */
+function openPlan(
+  layout: Layout,
+  target: TabTarget,
+  opts: OpenOptions,
+): { side: PaneSide; existing: { side: PaneSide; tab: Tab } | null } {
+  const wanted = resolveSide(layout, opts.pane);
+  const side = canPlace(target, wanted) ? wanted : "left";
+  const existing =
+    opts.pane === undefined || opts.pane === "focused"
+      ? findTarget(
+          layout,
+          target,
+          layout.focused === "right" ? ["right", "left"] : sides(layout),
+        )
+      : findTarget(layout, target, [side]);
+  return { side, existing };
+}
+
+/** open が target を前面に出す面 (同じ中身があればその面、無ければ入れる面)。 */
+export function openSide(
+  layout: Layout,
+  target: TabTarget,
+  opts: OpenOptions = {},
+): PaneSide {
+  const plan = openPlan(layout, target, opts);
+  return plan.existing?.side ?? plan.side;
+}
+
+function newTab(layout: Layout, target: TabTarget, opts: OpenOptions): Tab {
+  const preview =
+    target.kind === "page" || target.kind === "terminal"
+      ? false
+      : opts.preview !== false;
+  return { id: nextId(layout, opts.newId), target, preview };
+}
+
+/**
+ * 右の面に開く (Alt+クリックの反対の面)。2 面なら右の面の中で open と同じ。
+ * 1 面なら新しいタブだけの右の面を作る (左に同じ中身があっても動かさない:
+ * 左右に同じファイルを並べられる)。右に置けない種類 (page) は左の面で open。
+ */
+export function openRight(
+  layout: Layout,
+  target: TabTarget,
+  opts: Omit<OpenOptions, "pane"> = {},
+): Layout {
+  if (!canPlace(target, "right"))
+    return open(layout, target, { ...opts, pane: "left" });
+  if (layout.panes.right)
+    return open(layout, target, { ...opts, pane: "right" });
+  const tab = newTab(layout, target, opts);
+  return {
+    panes: {
+      left: layout.panes.left,
+      right: selectIn(emptyPaneWith(tab), tab.id),
+    },
+    focused: "right",
+    split: DEFAULT_SPLIT,
   };
 }
 
@@ -559,11 +620,11 @@ export type ParsedLayout = {
   dropped: Array<{ at: string; raw: unknown }>;
   /** 廃止した種類 (repo の page = Files) なので落としたタブ (場所と元の値)。 */
   retired: Array<{ at: string; raw: unknown }>;
-  /** 右の面に置けない種類 (file / page) だったので左の面へ移したタブ。 */
+  /** 右の面に置けない種類 (page) だったので左の面へ移したタブ。 */
   relocated: Array<{ at: string; id: string }>;
 };
 
-/** 読める版。1 は repo の page タブと、右の面の route のタブを持ちうる。 */
+/** 読める版。1 は repo の page タブと、右の面の page のタブを持ちうる。 */
 const READABLE_VERSIONS: readonly unknown[] = [1, LAYOUT_VERSION];
 
 function isRetiredTarget(raw: unknown): boolean {
@@ -648,8 +709,11 @@ export function parseLayout(raw: unknown): ParsedLayout {
     problems.push(`panes has ${panesRaw.length} entries (1 or 2 allowed)`);
   const panes: Partial<Record<PaneSide, Pane>> = {};
   const seenIds = new Map<string, string>();
-  const seenTargets: Array<{ target: TabTarget; at: string }> = [];
+  // page は左の面にしか置けない (版 1 の右の page は左へ移す) ので、左右を
+  // 通して 1 つ。それ以外の中身は面ごとに 1 つ (左右で同じファイルは開ける)。
+  const seenPages: Array<{ target: TabTarget; at: string }> = [];
   (panesRaw ?? []).slice(0, 2).forEach((paneRaw, paneIndex) => {
+    const seenTargets: Array<{ target: TabTarget; at: string }> = [];
     const where = `panes[${paneIndex}]`;
     if (!isRecord(paneRaw)) {
       problems.push(`${where} is not an object`);
@@ -693,14 +757,13 @@ export function parseLayout(raw: unknown): ParsedLayout {
       if (dupId)
         problems.push(`${at}: id "${tabRaw.id}" is also used at ${dupId}`);
       seenIds.set(tabRaw.id, at);
-      const dupTarget = seenTargets.find((item) =>
-        sameTarget(item.target, target),
-      );
+      const seen = target.kind === "page" ? seenPages : seenTargets;
+      const dupTarget = seen.find((item) => sameTarget(item.target, target));
       if (dupTarget)
         problems.push(
           `${at}: ${target.kind} ${JSON.stringify(target)} is also open at ${dupTarget.at}`,
         );
-      seenTargets.push({ target, at });
+      seen.push({ target, at });
       tabs.push({ id: tabRaw.id, target, preview: tabRaw.preview === true });
     });
     const previews = tabs.filter((tab) => tab.preview);
@@ -740,7 +803,7 @@ export function parseLayout(raw: unknown): ParsedLayout {
     throw new Error(
       `main tab layout is broken (${problems.length} problem${problems.length === 1 ? "" : "s"}):\n- ${problems.join("\n- ")}`,
     );
-  // 右の面の route のタブ (版 1) は、左の面の末尾へ移す。右の面で選んでいて
+  // 右の面の page のタブ (版 1) は、左の面の末尾へ移す。右の面で選んでいて
   // フォーカスも右にあった (見ていた) なら、左の面で選んでフォーカスも左へ。
   const relocated: ParsedLayout["relocated"] = [];
   let left = panes.left as Pane;
@@ -780,18 +843,20 @@ export function parseLayout(raw: unknown): ParsedLayout {
 export function assertLayout(layout: Layout): void {
   const problems: string[] = [];
   const ids = new Set<string>();
-  const targets: TabTarget[] = [];
   if (!paneOf(layout, layout.focused))
     problems.push(`focused pane ${layout.focused} is missing`);
   if (layout.panes.right?.tabs.length === 0)
     problems.push("right pane is empty");
   for (const side of sides(layout)) {
     const pane = paneOf(layout, side) as Pane;
+    const targets: TabTarget[] = [];
     for (const tab of pane.tabs) {
       if (ids.has(tab.id)) problems.push(`duplicate id ${tab.id}`);
       ids.add(tab.id);
       if (targets.some((t) => sameTarget(t, tab.target)))
-        problems.push(`duplicate target ${JSON.stringify(tab.target)}`);
+        problems.push(
+          `duplicate target ${JSON.stringify(tab.target)} in ${side}`,
+        );
       targets.push(tab.target);
     }
     if (pane.tabs.filter((tab) => tab.preview).length > 1)

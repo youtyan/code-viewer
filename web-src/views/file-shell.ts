@@ -11,7 +11,8 @@ export type BlobOrBlameFileRoute = Extract<AppRoute, { screen: "file" }> & {
 };
 
 export type FileShellMountDeps = {
-  $: <T extends Element = HTMLElement>(sel: string) => T;
+  /** カードを差し込む先 (本文なら #diff、右の面ならその面の箱の本体)。 */
+  mountRoot(): HTMLElement;
   repoFileTargetFromRoute(): string | null;
   renderRepoBlobSidebar(path: string, ref: string): Promise<unknown> | unknown;
   placeSidebarToggle(): void;
@@ -285,7 +286,7 @@ export function mountFileShellCard(
   repoTarget = deps.repoFileTargetFromRoute(),
   options: { loadSidebar?: boolean } = {},
 ): void {
-  const root = deps.$<HTMLElement>("#diff");
+  const root = deps.mountRoot();
   if (repoTarget) {
     const layout = document.createElement("div");
     layout.className = "gdp-repo-blob-layout";

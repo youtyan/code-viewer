@@ -470,7 +470,10 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     entry: AnnotationEntry,
     colSpan: number,
     step: { index: number; total: number },
+    /** 同じ注釈の何枚目のカードか (0 = 最初)。2 枚目以降は id に番号を付ける。 */
+    copy = 0,
   ): HTMLTableRowElement {
+    const idSuffix = copy === 0 ? "" : `-${copy + 1}`;
     const tr = document.createElement("tr");
     tr.className = "gdp-annotation-row";
     tr.dataset.annotationId = entry.id;
@@ -500,13 +503,13 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     head.append(createStepChip(entry, step), location, actions);
     const heading = document.createElement("strong");
     heading.className = "gdp-annotation-inline-title";
-    heading.id = `annotation-title-${entry.id}`;
+    heading.id = `annotation-title-${entry.id}${idSuffix}`;
     heading.textContent = entry.title?.trim() || t().body;
     box.setAttribute("aria-labelledby", heading.id);
     const markdown = document.createElement("div");
     markdown.className =
       "gdp-annotation-inline-body gdp-markdown-preview markdown-body gdp-annotation-prose";
-    markdown.id = `annotation-body-${entry.id}`;
+    markdown.id = `annotation-body-${entry.id}${idSuffix}`;
     ensureMarkdownHighlighter();
     markdown.innerHTML = renderMarkdownHtml(
       entry.body,
@@ -596,11 +599,35 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   function inlineAnnotationTargetRow(
     entry: AnnotationEntry,
   ): HTMLTableRowElement | null {
+    return inlineAnnotationTargetRows(entry)[0] ?? null;
+  }
+
+  /**
+   * 注釈を当てる行。本文ではそのファイルの最初のカード (今までどおり)、
+   * 加えて右の面のソース表示 (.main-pane-source) に同じファイルがあれば
+   * その行にも (左右に同じファイルを開いたとき、両方に出す)。
+   */
+  function inlineAnnotationTargetRows(
+    entry: AnnotationEntry,
+  ): HTMLTableRowElement[] {
+    const selector = deps.diffCardSelector(entry.path);
+    const cards = new Set<HTMLElement>();
+    const first = document.querySelector<HTMLElement>(selector);
+    if (first) cards.add(first);
+    for (const card of document.querySelectorAll<HTMLElement>(
+      `.main-pane-source ${selector}`,
+    ))
+      cards.add(card);
+    return [...cards]
+      .map((card) => cardTargetRow(card, entry))
+      .filter((row): row is HTMLTableRowElement => row !== null);
+  }
+
+  function cardTargetRow(
+    card: HTMLElement,
+    entry: AnnotationEntry,
+  ): HTMLTableRowElement | null {
     if (!entry.line) return null;
-    const card = document.querySelector<HTMLElement>(
-      deps.diffCardSelector(entry.path),
-    );
-    if (!card) return null;
     const line = entry.line.end;
     const sourceRow = card.querySelector<HTMLTableRowElement>(
       `.gdp-source-table tr[data-line="${String(line)}"]`,
@@ -693,30 +720,36 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       // The index is over ALL session entries (DB targets included) so the
       // chip numbering matches the panel list and the detail dock counter.
       if (entry.target?.kind === "database") return;
-      const target = inlineAnnotationTargetRow(entry);
-      if (!target) return;
-      // Keep document order when several annotations land on the same line.
-      let anchor: HTMLTableRowElement = target;
-      while (
-        anchor.nextElementSibling?.classList.contains("gdp-annotation-row")
-      )
-        anchor = anchor.nextElementSibling as HTMLTableRowElement;
-      anchor.after(
-        buildInlineAnnotationRow(entry, target.cells.length, {
-          index,
-          total: session.entries.length,
-        }),
-      );
-      const sibling = siblingSideRow(target);
-      if (sibling) {
-        let sibAnchor: HTMLTableRowElement = sibling;
+      for (const [copy, target] of inlineAnnotationTargetRows(
+        entry,
+      ).entries()) {
+        // Keep document order when several annotations land on the same line.
+        let anchor: HTMLTableRowElement = target;
         while (
-          sibAnchor.nextElementSibling?.classList.contains("gdp-annotation-row")
+          anchor.nextElementSibling?.classList.contains("gdp-annotation-row")
         )
-          sibAnchor = sibAnchor.nextElementSibling as HTMLTableRowElement;
-        sibAnchor.after(buildInlineSpacerRow(entry, sibling.cells.length));
+          anchor = anchor.nextElementSibling as HTMLTableRowElement;
+        anchor.after(
+          buildInlineAnnotationRow(
+            entry,
+            target.cells.length,
+            { index, total: session.entries.length },
+            copy,
+          ),
+        );
+        const sibling = siblingSideRow(target);
+        if (sibling) {
+          let sibAnchor: HTMLTableRowElement = sibling;
+          while (
+            sibAnchor.nextElementSibling?.classList.contains(
+              "gdp-annotation-row",
+            )
+          )
+            sibAnchor = sibAnchor.nextElementSibling as HTMLTableRowElement;
+          sibAnchor.after(buildInlineSpacerRow(entry, sibling.cells.length));
+        }
+        mountedInlineRows = true;
       }
-      mountedInlineRows = true;
     });
     inlineAnnotationsMounted = mountedInlineRows;
     syncInlineAnnotationWidths(true);

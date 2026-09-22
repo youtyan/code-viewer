@@ -1,5 +1,6 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { findMainScrollTarget } from "../core/focus-scope";
 import type { AppRoute } from "../core/routes";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 import type { SourceViewDeps } from "../views/source-view";
@@ -81,17 +82,20 @@ function createSourceViewForCursorTest(
     syntaxHighlight: false,
   };
   return createSourceView({
-    $: <T extends Element = HTMLElement>(sel: string): T => {
-      const el = document.querySelector<T>(sel);
-      if (!el) throw new Error(`missing ${sel}`);
-      return el;
-    },
-    $$: <T extends Element = HTMLElement>(sel: string): T[] =>
-      Array.from(document.querySelectorAll<T>(sel)),
     STATE: state,
+    // 本文の実体と同じく、渡された STATE の route を読む (STATE を差し替える
+    // テストがある)。
+    route: () => (overrides.STATE ?? state).route,
     setRoute(nextRoute) {
       state.route = nextRoute;
     },
+    scope: () => document,
+    mountRoot: () => {
+      const el = document.querySelector<HTMLElement>("#diff");
+      if (!el) throw new Error("missing #diff");
+      return el;
+    },
+    mainScrollTarget: () => findMainScrollTarget(),
     setPageMode() {
       /* noop */
     },

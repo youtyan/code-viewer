@@ -152,12 +152,12 @@ function testDeps(
     syncHighlights(card);
   };
   return {
-    $: <T extends Element = HTMLElement>(sel: string) => {
-      const el = document.querySelector<T>(sel);
-      if (!el) throw new Error(`missing ${sel}`);
+    mountRoot: () => {
+      const el = document.querySelector<HTMLElement>("#diff");
+      if (!el) throw new Error("missing #diff");
       return el;
     },
-    STATE: state,
+    scope: () => document,
     setRoute(route: AppRoute, replace?: boolean) {
       state.route = route;
       const url = buildRoute(route);

@@ -32,7 +32,7 @@ const FILE_A: TabTarget = { kind: "file", path: "sample/alpha.ts" };
 const FILE_B: TabTarget = { kind: "file", path: "sample/beta.ts" };
 const FILE_C: TabTarget = { kind: "file", path: "sample/gamma.ts" };
 const IMAGE_A: TabTarget = { kind: "image", path: "sample/alpha.png" };
-// 右の面に置けるのはターミナルと画像だけ (canPlace)。2 面の例の右の面はこれらで組む。
+// 右の面に置けないのは page だけ (canPlace)。2 面の例の右の面は主に画像で組む。
 const IMAGE_B: TabTarget = { kind: "image", path: "sample/beta.png" };
 const IMAGE_C: TabTarget = { kind: "image", path: "sample/gamma.png" };
 const TERMINAL_A: TabTarget = { kind: "terminal", session: "session-a" };
@@ -272,7 +272,9 @@ describe("main tabs contract: open", () => {
     expectValid(result);
   });
 
-  test("activates an existing target across panes without allocating an id", () => {
+  // 面を指定しないとき (フォーカスのある面) は、反対の面の同じものを前面に出す。
+  // 面を指定したときはその面の中だけを探す (左右で同じファイルを開けるため)。
+  test("activates an existing target across panes without allocating an id when no pane is given", () => {
     let calls = 0;
     const start = two(
       pane([tab("a", FILE_A)]),
@@ -286,7 +288,6 @@ describe("main tabs contract: open", () => {
           calls += 1;
           return "unused";
         },
-        pane: "left",
       },
     );
     expect(calls).toBe(0);
@@ -731,12 +732,9 @@ describe("main tabs contract: move", () => {
     expectValid(result.layout);
   });
 
-  test.each([
-    { name: "a file", target: FILE_B },
-    { name: "a page", target: PAGE_DIFF },
-  ])("does not move $name into the right pane", ({ target }) => {
+  test("does not move a page into the right pane", () => {
     const start = two(
-      pane([tab("a", FILE_A), tab("moving", target)]),
+      pane([tab("a", FILE_A), tab("moving", PAGE_DIFF)]),
       pane([tab("c", IMAGE_C)]),
     );
     expect(move(start, "moving", "right", 0)).toEqual({
@@ -744,6 +742,19 @@ describe("main tabs contract: move", () => {
       reason: "not-placeable",
       layout: start,
     });
+  });
+
+  test("moves a file into the right pane", () => {
+    const start = two(
+      pane([tab("a", FILE_A), tab("moving", FILE_B)]),
+      pane([tab("c", IMAGE_C)]),
+    );
+    const result = move(start, "moving", "right", 0);
+    expect([result.moved, paneState(result.layout, "right")?.ids]).toEqual([
+      true,
+      ["moving", "c"],
+    ]);
+    expectValid(result.layout);
   });
 
   test("does not move into a pane containing the same target", () => {
@@ -817,15 +828,20 @@ describe("main tabs contract: split and other side", () => {
     expectValid(result);
   });
 
-  test.each([
-    { name: "a file", target: FILE_B },
-    { name: "a page", target: PAGE_DIFF },
-  ])("splitRight leaves $name in one pane (only terminals and images go right)", ({
-    target,
-  }) => {
-    const start = one([tab("a", FILE_A), tab("b", target)]);
+  test("splitRight leaves a page in one pane (pages stay on the left)", () => {
+    const start = one([tab("a", FILE_A), tab("b", PAGE_DIFF)]);
     const result = splitRight(start, "b");
     expect(result).toBe(start);
+    expectValid(result);
+  });
+
+  test("splitRight moves a file into a new right pane", () => {
+    const result = splitRight(one([tab("a", FILE_A), tab("b", FILE_B)]), "b");
+    expect([
+      paneState(result, "left")?.ids,
+      paneState(result, "right")?.ids,
+      result.focused,
+    ]).toEqual([["a"], ["b"], "right"]);
     expectValid(result);
   });
 
@@ -894,10 +910,22 @@ describe("main tabs contract: split and other side", () => {
     expectValid(result);
   });
 
-  test("moveToOtherSide leaves a file tab on the left", () => {
-    const start = two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)]));
+  test("moveToOtherSide leaves a page tab on the left", () => {
+    const start = two(pane([tab("a", PAGE_DIFF)]), pane([tab("b", IMAGE_B)]));
     const result = moveToOtherSide(start, "a");
     expect(result).toBe(start);
+    expectValid(result);
+  });
+
+  test("moveToOtherSide moves a file tab to the right", () => {
+    const result = moveToOtherSide(
+      two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)])),
+      "a",
+    );
+    expect([
+      paneState(result, "left")?.ids,
+      paneState(result, "right")?.ids,
+    ]).toEqual([[], ["b", "a"]]);
     expectValid(result);
   });
 
@@ -1019,7 +1047,7 @@ describe("main tabs contract: tabMenu", () => {
         closeOthers: true,
         closeToRight: false,
         keepOpen: true,
-        splitRight: false,
+        splitRight: true,
         moveToOtherSide: false,
         copyPath: true,
       },

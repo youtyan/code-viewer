@@ -49,6 +49,11 @@ export type SidebarDeps = {
     lazyExpandedDirs: Set<string>;
   };
   openDiffFile(path: string): void;
+  /**
+   * リポジトリの木のファイルを Alt+クリック: 反対の面で開く (1 面なら右に
+   * 分けて右で)。無ければ Alt+クリックはブラウザに任せる。
+   */
+  openFileInOtherPane?(file: SidebarItem): void;
   /** The URL a row leads to, so the browser can open it in a new tab. */
   sidebarItemHref(item: SidebarItem, mode: "diff" | "repo"): string | null;
   prefetchByPath(path: string): void;
@@ -973,6 +978,13 @@ export function createSidebar(deps: SidebarDeps) {
     const kindTag = fileKindTag(f);
     if (kindTag) li.appendChild(kindTag);
     li.addEventListener("click", (e) => {
+      if (
+        onFileClick &&
+        !brokenSymlink &&
+        !deletedEntry &&
+        openInOtherPaneClick(e, f)
+      )
+        return;
       if (isNativeLinkClick(e)) return;
       e.preventDefault();
       if (brokenSymlink || deletedEntry) return;
@@ -1410,6 +1422,7 @@ export function createSidebar(deps: SidebarDeps) {
       const kindTag = fileKindTag(f);
       if (kindTag) li.appendChild(kindTag);
       li.addEventListener("click", (e) => {
+        if (onFileClick && openInOtherPaneClick(e, f)) return;
         if (isNativeLinkClick(e)) return;
         e.preventDefault();
         if (onFileClick) onFileClick(f);
@@ -1422,6 +1435,22 @@ export function createSidebar(deps: SidebarDeps) {
         });
       ul.appendChild(li);
     });
+  }
+
+  /** Alt だけを押したクリックなら反対の面で開いて true (リポジトリの木だけ)。 */
+  function openInOtherPaneClick(e: MouseEvent, f: SidebarItem): boolean {
+    if (
+      !deps.openFileInOtherPane ||
+      !e.altKey ||
+      e.metaKey ||
+      e.ctrlKey ||
+      e.shiftKey ||
+      e.button !== 0
+    )
+      return false;
+    e.preventDefault();
+    deps.openFileInOtherPane(f);
+    return true;
   }
 
   function renderSidebar(

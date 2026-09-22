@@ -35,6 +35,8 @@ export function keymapScope(target: Element | null): KeymapScope {
   if (target?.closest("#history-panel, .gdp-file-history-panel"))
     return "history";
   if (target?.closest("#content")) return "main";
+  // 右の面のソース表示 (#content の外の 2 つ目の実体) も本文と同じキー。
+  if (target?.closest(".main-pane-source")) return "main";
   if (target?.closest("#sidebar")) return "sidebar";
   return "global";
 }

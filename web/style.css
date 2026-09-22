@@ -385,6 +385,9 @@ html, body {
      (docked) はパネルの実高さ、重ねるときもパネルの見出しの行 (畳んでいても
      出ている) の上で止め、端末の最下行 (tmux の状態の行など) を覆わせない。 */
   --main-bottom: calc(var(--chrome-bottom) + max(var(--app-panel-visible-height), var(--app-panel-tabbar-height)));
+  /* メインの面の箱 (.main-pane-host) の高さ。右の面のソース表示は、本文の
+     --content-h の代わりにこれで箱を作る (.main-pane-source)。 */
+  --main-pane-h: calc(100vh - var(--global-header-h) - var(--main-bottom));
   /* 左の列 (タブ列の下・左のサイドバーの右の固定の列)。頭に名前・ブランチ・
      画面の入口 (#left-head)、その下に画面ごとの一覧を出す: History / Worktrees
      (選んでいる間) は一覧パネル、それ以外は #sidebar (その画面の一覧か Files の
@@ -17513,7 +17516,7 @@ body.main-split .main-tabs-pane[data-side="left"] {
 }
 
 /* ---- メインの面の左右の箱 (.main-pane-host。app.ts の PANE_HOSTS) ----
-   前面のタブがターミナルか画像のとき、その面の位置 (タブ列の下・左の列の右・
+   前面のタブがターミナルか画像 (右の面ならファイルも) のとき、その面の位置 (タブ列の下・左の列の右・
    本文の下端の上) に重ねて出す。左の列 (木) は覆わない。左の前面が route のタブか何も選んでいないときは出さない
    (下の本文が見える)。画面ごとのツールバー (50) より上、
    上の行・タブ列・下パネル (60) より下。 */
@@ -17543,6 +17546,23 @@ body.main-split .main-pane-host[data-side="right"] {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+}
+/* 右の面のソース表示 (app.ts の rightSourcePane)。面の箱いっぱいの枠の中で
+   スクロールし、見出しは枠の上端に留める。本文の余白 (T3) は持たず、
+   本文の高さ (--content-h) の代わりに面の高さで箱を作る。 */
+.main-pane-host[data-kind="file"],
+.main-pane-source {
+  background: var(--color-code);
+}
+.main-pane-source {
+  --content-h: var(--main-pane-h);
+  --content-top-gap: 0px;
+  --content-pad-x: 0px;
+  overflow: auto;
+  outline: none;
+}
+.main-pane-source .gdp-file-detail-sticky {
+  top: 0;
 }
 .main-pane-message {
   margin: 0;

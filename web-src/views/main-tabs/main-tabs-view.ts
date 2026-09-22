@@ -1,10 +1,11 @@
 // メインの面のタブ列 (最上段、`#main-tabs`)。1 面か左右 2 面。
 //
-// ファイルと各画面 (route のタブ) の中身は今までどおり route (URL) 1 つで
-// 決まり、本文は 1 つしか描けない。そこで route のタブは左の面にだけ置き
-// (core/main-tabs.ts の canPlace)、本文も左の面に描く。右の面にはターミナルと
-// 画像だけを置き、面ごとの箱に描く (app.ts)。左の面で何も選んでいないときは
-// 本文の既定 (フォルダ表示 = repo の route) を出す。Files のタブは無い。
+// 本文 (#content) は 1 つで、左の面に描く。本文の route は URL の route。
+// 画面 (page) のタブは左の面にだけ置く (core/main-tabs.ts の canPlace)。
+// ファイルのタブは右の面にも置け、右の面のファイルは app.ts が面の箱に 2 つ目
+// のソース表示で描く (その route はここが覚える: paneRoute / openRouteRight)。
+// ターミナルと画像も面ごとの箱に描く。左の面で何も選んでいないときは本文の
+// 既定 (フォルダ表示 = repo の route) を出す。Files のタブは無い。
 //
 // route が変わるたび (setRoute / applyRouteFromLocation の後) に syncRoute が
 // 呼ばれ、その route のタブを開くか前面に出す (フォルダ表示なら選択を外す)。だから URL・戻る・進む・既存の
@@ -40,6 +41,8 @@ import {
   nextTab,
   type OpenOptions,
   open,
+  openRight,
+  openSide,
   PAGE_KINDS,
   type PageKind,
   type PaneSide,
@@ -160,21 +163,43 @@ export type MainTabsHandle = {
   keepFileOpen(path: string): void;
   /** page のタブがあれば、そのタブが最後に見ていた route。 */
   routeForPage(page: PageKind): AppRoute | null;
+  /**
+   * 右の面の前面がファイルのタブなら、その route (右の面のソース表示が描く)。
+   * 左の面は本文 (URL の route) なので null。
+   */
+  paneRoute(side: PaneSide): AppRoute | null;
+  /**
+   * ファイルの route を右の面に開いて前面に出し、その route を覚える
+   * (Alt+クリック・右にフォーカスがあるときの木・右の面の中の移動・URL の
+   * pane=right)。同じファイルが右の面にあればそのタブの route を差し替える。
+   * 1 面で 2 面を置けない幅なら開かずに false。fromUrl なら URL から来た
+   * (onPanes に sync を渡す: URL を積まない)。
+   */
+  openRouteRight(route: FileRoute, fromUrl?: boolean): boolean;
+  /** そのファイルの route を面を指定せずに開いたら、どちらの面の前面に出るか。 */
+  sideForRoute(route: FileRoute): PaneSide;
   /** 面にフォーカスを移す。2 面でなければ何もしない。 */
   focusSide(side: PaneSide): void;
-  /** 画面の x 座標がどちらの面か (2 面でなければ null)。 */
+  /** 画面の x 座標がどちらの面か (2 面でないか、左の列の上なら null)。 */
   sideAt(clientX: number): PaneSide | null;
   focusOther(): void;
   next(): void;
   previous(): void;
   closeActive(): void;
   activateNth(n: number): void;
-  restore(): Promise<void>;
+  /**
+   * 保存した配置を読み戻す。rightRoute は URL が右の面のファイルを指して
+   * いた (pane=right) とき: 左の面は保存した前面のまま、右の面にそのファイルを
+   * 開いて前面に出す。
+   */
+  restore(options?: { rightRoute?: FileRoute }): Promise<void>;
   flush(keepalive: boolean): void;
   localize(): void;
   /** テストと確認用。 */
   layout(): Layout;
 };
+
+type FileRoute = Extract<AppRoute, { screen: "file" }>;
 
 export function isPageKind(value: string | undefined): value is PageKind {
   return (PAGE_KINDS as readonly (string | undefined)[]).includes(value);
@@ -386,7 +411,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     return document.documentElement.clientWidth - bodyLeft();
   }
 
-  /** 1 面で、左の前面が右に置ける種類 (ターミナルか画像) か。 */
+  /** 1 面で、左の前面が右に置ける種類 (ファイル・ターミナル・画像) か。 */
   function canSplitFront(): boolean {
     const front = frontOf(layout, "left");
     return (
@@ -551,7 +576,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       deps.navigate(homeRoute());
       return;
     }
-    if (!isRouteTab(after)) {
+    // 右の面のファイルは本文ではなく右の面の箱に描く (app の showPanes)。
+    if (!isRouteTab(after) || next.focused === "right") {
       commit(next, "stay");
       return;
     }
@@ -595,13 +621,19 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     if (!target) return;
     if (!activateTab && routeSideOf(layout) === null) {
       // 前面はターミナルか画像のまま。下に残っている画面の route だけ覚え直す。
-      const existing = allTabs(layout).find((tab) =>
+      const existing = layout.panes.left.tabs.find((tab) =>
         sameTarget(tab.target, target),
       );
       if (existing) routes.set(existing.id, route);
       return;
     }
-    let next = open(layout, target);
+    // 本文の route は左の面のタブ (右の面に同じファイルがあっても左で開く)。
+    // 画像は面を選ばない (フォーカスのある面の箱に出す)。
+    let next = open(
+      layout,
+      target,
+      target.kind === "image" ? {} : { pane: "left" },
+    );
     const tab = activeTab(next);
     if (tab && isRouteTab(tab)) routes.set(tab.id, route);
     if (keepFocus) {
@@ -609,6 +641,30 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       keepFocus = null;
     }
     commit(next, "sync");
+  }
+
+  /**
+   * ファイルの route を右の面に開く (1 面で 2 面を置けない幅なら false)。
+   * restoring (読み戻しから) のときは、本文の今の route を左の前面のタブに
+   * 覚えない: 読み戻した直後の本文はまだそのタブを描いていない。
+   */
+  function openRightRoute(
+    route: FileRoute,
+    how: FrontChange,
+    restoring = false,
+  ): boolean {
+    const target = routeTarget(route);
+    if (!target || target.kind === "page")
+      throw new Error(
+        `main tabs: ${JSON.stringify(route)} cannot be opened in the right pane`,
+      );
+    if (!layout.panes.right && !splitAllowed()) return false;
+    if (!restoring) rememberRoute();
+    const next = openRight(layout, target);
+    const tab = frontOf(next, "right");
+    if (tab && target.kind === "file") routes.set(tab.id, route);
+    commit(next, how);
+    return true;
   }
 
   function focusSide(side: PaneSide): void {
@@ -948,9 +1004,15 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     renderActions();
   }
 
-  async function restore(): Promise<void> {
+  async function restore(
+    options: { rightRoute?: FileRoute } = {},
+  ): Promise<void> {
     if (restored) return;
     restored = true;
+    // 保存した配置を使えないときも、URL が指す右の面のファイルは開く。
+    const openUrlRight = () => {
+      if (options.rightRoute) openRightRoute(options.rightRoute, "sync", true);
+    };
     let saved: unknown;
     try {
       saved = await deps.loadSaved();
@@ -960,11 +1022,13 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         "[code-viewer] main tabs: the saved layout could not be loaded; tabs are not saved on this page",
         error,
       );
+      openUrlRight();
       return;
     }
     saveEnabled = true;
     if (saved === null || saved === undefined) {
       scheduleSave();
+      openUrlRight();
       return;
     }
     let parsed: ReturnType<typeof parseLayout>;
@@ -977,6 +1041,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         error,
       );
       scheduleSave();
+      openUrlRight();
       return;
     }
     if (parsed.dropped.length > 0)
@@ -992,7 +1057,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       );
     if (parsed.relocated.length > 0)
       console.info(
-        `[code-viewer] main tabs: moved ${parsed.relocated.length} saved file or page tab(s) from the right side to the left (only terminals and images can be on the right):`,
+        `[code-viewer] main tabs: moved ${parsed.relocated.length} saved page tab(s) from the right side to the left (pages can only be on the left):`,
         JSON.stringify(parsed.relocated),
       );
     // 今の画面 (URL) の route。保存した配置がその route を見せていた (本文の面の
@@ -1004,6 +1069,14 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const target = routeTarget(urlRoute);
     routes.clear();
     const restoredLayout = parsed.layout;
+    if (options.rightRoute) {
+      // URL は右の面のファイル: 左の面 (本文) は保存した前面のまま。
+      layout = restoredLayout;
+      openRightRoute(options.rightRoute, "sync", true);
+      deps.onTerminals(terminalsOf(layout), []);
+      deps.onPanes(panesView(layout), "sync");
+      return;
+    }
     const shown = [routeSideOf(restoredLayout), restoredLayout.focused]
       .map((side) => (side ? frontOf(restoredLayout, side) : null))
       .filter((tab): tab is Tab => tab !== null);
@@ -1097,10 +1170,23 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       );
       return tab ? (routes.get(tab.id) ?? null) : null;
     },
+    paneRoute(side) {
+      if (side === "left") return null;
+      const tab = frontOf(layout, side);
+      return tab?.target.kind === "file" ? routeOf(tab) : null;
+    },
+    openRouteRight: (route, fromUrl = false) =>
+      openRightRoute(route, fromUrl ? "sync" : "stay"),
+    sideForRoute(route) {
+      const target = routeTarget(route);
+      return target ? openSide(layout, target) : "left";
+    },
     focusSide,
     sideAt(clientX) {
       if (!layout.panes.right) return null;
       const left = bodyLeft();
+      // 左の列 (木・一覧) は面の外: 木から開くときフォーカスを動かさない。
+      if (clientX < left) return null;
       return clientX < left + leftWidthFor(layout.split ?? DEFAULT_SPLIT)
         ? "left"
         : "right";

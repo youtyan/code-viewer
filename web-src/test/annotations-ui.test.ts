@@ -1068,6 +1068,33 @@ describe("reading notes beneath code", () => {
     ).toBe(false);
   });
 
+  // 左右の面に同じファイルを開いたとき、右の面のソース表示 (.main-pane-source)
+  // のカードにも同じ注釈を出す。2 枚目の行の id には番号を付けて重ねない。
+  test("shows a note on the right pane copy of the same file with distinct ids", async () => {
+    const { ui } = await inlineHarness();
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<div class="main-pane-source"><div class="gdp-file-shell gdp-standalone-source" data-path="src/example.ts"><table class="gdp-source-table"><tbody><tr data-line="4"><td>example</td></tr></tbody></table></div></div>',
+    );
+    await ui.openAnnotationEntry("note-alpha");
+    ui.applyInlineAnnotations();
+    const rows = [
+      ...document.querySelectorAll<HTMLElement>(
+        '.gdp-annotation-row[data-annotation-id="note-alpha"]',
+      ),
+    ];
+    expect(
+      rows.map((row) => [
+        row.closest(".main-pane-source") !== null,
+        q(row, ".gdp-annotation-inline-title").id,
+        q(row, ".gdp-annotation-inline-body").id,
+      ]),
+    ).toEqual([
+      [false, "annotation-title-note-alpha", "annotation-body-note-alpha"],
+      [true, "annotation-title-note-alpha-2", "annotation-body-note-alpha-2"],
+    ]);
+  });
+
   test("renders paragraphs, code, and tables as prose inside a code table", async () => {
     const { ui, state } = await inlineHarness();
     state.sessions[0].entries[0].body =

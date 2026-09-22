@@ -605,6 +605,19 @@ export function withTerminalOverlay(
   return withQueryParam(url, "terminal", state);
 }
 
+/**
+ * URL の path と route が右の面のファイルを指していること (`?pane=right`)。
+ * 右の面にフォーカスがあり前面がファイルのとき、URL はそのファイルの route に
+ * これを足したもの。無ければ URL の route は本文 (左の面)。値は right だけ。
+ */
+export function parsePaneOverlay(search: string): "right" | null {
+  return new URLSearchParams(search).get("pane") === "right" ? "right" : null;
+}
+
+export function withPaneOverlay(url: string, side: "right" | null): string {
+  return withQueryParam(url, "pane", side);
+}
+
 // Search results sheet (third tab of the bottom panel). The query key holds
 // the grep query so a reload re-runs the same search; an empty value means
 // "open, nothing searched yet". Same AppRoute-independent shape as ?tools=.

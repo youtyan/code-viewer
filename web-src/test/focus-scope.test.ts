@@ -25,6 +25,9 @@ describe("focus scope helpers", () => {
   test("detects sidebar and main keymap scopes from the event target", () => {
     expect(keymapScope(target("BUTTON", { "#sidebar": true }))).toBe("sidebar");
     expect(keymapScope(target("BUTTON", { "#content": true }))).toBe("main");
+    expect(keymapScope(target("BUTTON", { ".main-pane-source": true }))).toBe(
+      "main",
+    );
     expect(keymapScope(target("BODY"))).toBe("global");
   });
 

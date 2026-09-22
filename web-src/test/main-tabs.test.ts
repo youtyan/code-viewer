@@ -11,6 +11,8 @@ import {
   moveToOtherSide,
   nextTab,
   open,
+  openRight,
+  openSide,
   parseLayout,
   prevTab,
   serializeLayout,
@@ -21,11 +23,15 @@ import {
   tabMenu,
 } from "../core/main-tabs";
 
-// 配置を短く書くための準備。"a" はファイル a、"~a" は画像 a、"*b" は仮のタブ b、
-// "[c]" は選択中。右の面に置けるのはターミナルと画像だけなので、2 面の例の
-// 右の面は画像 (~) で書く。検証したい中身はテストの表に見えるまま残す。
+// 配置を短く書くための準備。"a" はファイル a、"~a" は画像 a、"@diff" は page の
+// diff (id も diff)、"*b" は仮のタブ b、"[c]" は選択中。右の面に置けないのは
+// page だけ。検証したい中身はテストの表に見えるまま残す。
 const file = (path: string): TabTarget => ({ kind: "file", path });
 const image = (path: string): TabTarget => ({ kind: "image", path });
+const page = (name: "diff" | "history"): TabTarget => ({
+  kind: "page",
+  page: name,
+});
 
 function pane(spec: string) {
   const tabs = spec
@@ -36,8 +42,12 @@ function pane(spec: string) {
       const bare = raw.replace(/[[\]]/g, "");
       const preview = bare.startsWith("*");
       const named = bare.replace("*", "");
-      const name = named.replace("~", "");
-      const target = named.startsWith("~") ? image(name) : file(name);
+      const name = named.replace(/^[~@]/, "");
+      const target = named.startsWith("~")
+        ? image(name)
+        : named.startsWith("@")
+          ? page(name as "diff" | "history")
+          : file(name);
       return { id: name, target, preview, active };
     });
   const activeId = tabs.find((tab) => tab.active)?.id ?? null;
@@ -146,24 +156,132 @@ describe("open", () => {
 
   test.each([
     {
-      name: "反対の面 (右) を頼んでも、ファイルは左の面に開く",
+      name: "反対の面 (右) を頼むと、ファイルは右の面に開く",
       pane: "other-if-split" as const,
       target: file("x"),
+      expected: "[a] | ~b [x] (right)",
     },
     {
       name: "右の面を頼んでも、page は左の面に開く",
       pane: "right" as const,
-      target: { kind: "page", page: "diff" } as TabTarget,
+      target: page("diff"),
+      expected: "a [n1] | [~b] (left)",
     },
-  ])("$name", ({ pane: where, target }) => {
+  ])("$name", ({ pane: where, target, expected }) => {
     const after = open(layoutOf("[a]", "[~b]"), target, {
       pane: where,
       preview: false,
       newId: ids(),
     });
     assertLayout(after);
-    expect(show(after)).toBe(
-      target.kind === "file" ? "a [x] | [~b] (left)" : "a [n1] | [~b] (left)",
+    expect(show(after)).toBe(expected);
+  });
+
+  // 左右で同じファイルを開ける。面を指定しないときは、フォーカスのある面 →
+  // 反対の面の順に同じものを探して前面に出す。右の面のタブの id には -r を
+  // 付けて、左右の同じファイルの id がぶつからないようにする。
+  const withRightIds = (layout: Layout): Layout => {
+    const right = layout.panes.right;
+    if (!right) return layout;
+    const rename = (id: string) => `${id}-r`;
+    return {
+      ...layout,
+      panes: {
+        ...layout.panes,
+        right: {
+          tabs: right.tabs.map((tab) => ({ ...tab, id: rename(tab.id) })),
+          activeId: right.activeId ? rename(right.activeId) : null,
+          recent: right.recent.map(rename),
+        },
+      },
+    };
+  };
+  test.each([
+    {
+      name: "面を指定すれば、反対の面にあっても指定した面に開く (左右に同じファイル)",
+      before: layoutOf("[a]", "[b]"),
+      pane: "right" as const,
+      expected: "[a] | b [a] (right)",
+    },
+    {
+      name: "指定した面に同じものがあれば、それを前面に出す",
+      before: withRightIds(layoutOf("[a]", "a [b]")),
+      pane: "right" as const,
+      expected: "[a] | [a] b (right)",
+    },
+    {
+      name: "面を指定しなければ、反対の面にあるものを前面に出してフォーカスを移す",
+      before: { ...layoutOf("[a]", "[b]"), focused: "right" as const },
+      pane: undefined,
+      expected: "[a] | [b] (left)",
+    },
+    {
+      name: "面を指定しなければ、フォーカスのある面のものを先に使う",
+      before: {
+        ...withRightIds(layoutOf("[a] b", "[c] a")),
+        focused: "right" as const,
+      },
+      pane: undefined,
+      expected: "[a] b | c [a] (right)",
+    },
+  ])("$name", ({ before, pane: where, expected }) => {
+    const after = open(before, file("a"), {
+      pane: where,
+      preview: false,
+      newId: ids(),
+    });
+    assertLayout(after);
+    expect(show(after)).toBe(expected);
+  });
+
+  test.each([
+    {
+      name: "1 面なら新しい右の面を作る (左の同じファイルは残す)",
+      before: layoutOf("b [a]"),
+      target: file("a"),
+      expected: "b [a] | [a] (right)",
+    },
+    {
+      name: "2 面なら右の面の中で開く",
+      before: layoutOf("[a]", "[~c]"),
+      target: file("a"),
+      expected: "[a] | ~c [a] (right)",
+    },
+    {
+      name: "page は左の面で開く",
+      before: layoutOf("[a]"),
+      target: page("diff"),
+      expected: "a [n1] (left)",
+    },
+  ])("openRight: $name", ({ before, target, expected }) => {
+    const after = openRight(before, target, { preview: false, newId: ids() });
+    assertLayout(after);
+    expect(show(after)).toBe(expected);
+  });
+
+  test.each([
+    {
+      name: "フォーカスの面に無く、反対の面にあれば反対の面",
+      before: { ...layoutOf("[a]", "[b]"), focused: "right" as const },
+      pane: undefined,
+      expected: "left",
+    },
+    {
+      name: "どこにも無ければフォーカスの面",
+      before: { ...layoutOf("[a]", "[b]"), focused: "right" as const },
+      pane: undefined,
+      target: file("x"),
+      expected: "right",
+    },
+    {
+      name: "面を指定すればその面",
+      before: layoutOf("[a]", "[b]"),
+      pane: "right" as const,
+      expected: "right",
+    },
+  ])("openSide: $name", ({ before, pane: where, target, expected }) => {
+    expect(openSide(before, target ?? file("a"), { pane: where })).toBe(
+      expected,
     );
   });
 
@@ -410,9 +528,9 @@ describe("move", () => {
       reason: "no-such-pane",
     },
     {
-      name: "ファイルは右の面に置けない",
-      before: layoutOf("[a] b", "[~c]"),
-      id: "a",
+      name: "page は右の面に置けない",
+      before: layoutOf("[a] @diff", "[~c]"),
+      id: "diff",
       side: "right" as const,
       index: 0,
       reason: "not-placeable",
@@ -420,6 +538,15 @@ describe("move", () => {
   ])("動かさない: $name", ({ before, id, side, index, reason }) => {
     const result = move(before, id, side, index);
     expect(result).toEqual({ layout: before, moved: false, reason });
+  });
+
+  test("ファイルは右の面へ移せる", () => {
+    const result = move(layoutOf("[a] b", "[~c]"), "a", "right", 0);
+    assertLayout(result.layout);
+    expect([result.moved, show(result.layout)]).toEqual([
+      true,
+      "[b] | [a] ~c (right)",
+    ]);
   });
 
   test("移動先に同じ中身があれば動かさない", () => {
@@ -458,10 +585,16 @@ describe("分割", () => {
       expected: " | [~b] (right)",
     },
     {
-      name: "ファイルの splitRight は何もしない",
+      name: "ファイルも splitRight で右の面へ移す",
       run: (l: Layout) => splitRight(l, "b"),
       before: layoutOf("a [b]"),
-      expected: "a [b] (left)",
+      expected: "[a] | [b] (right)",
+    },
+    {
+      name: "page の splitRight は何もしない",
+      run: (l: Layout) => splitRight(l, "diff"),
+      before: layoutOf("a [@diff]"),
+      expected: "a [diff] (left)",
     },
     {
       name: "2 面の splitRight は何もしない",
@@ -476,10 +609,16 @@ describe("分割", () => {
       expected: "a [~c] (left)",
     },
     {
-      name: "ファイルの moveToOtherSide は何もしない",
+      name: "ファイルは moveToOtherSide で右の面へ移る",
       run: (l: Layout) => moveToOtherSide(l, "a"),
       before: layoutOf("[a]", "[~c]"),
-      expected: "[a] | [~c] (left)",
+      expected: " | ~c [a] (right)",
+    },
+    {
+      name: "page の moveToOtherSide は何もしない",
+      run: (l: Layout) => moveToOtherSide(l, "diff"),
+      before: layoutOf("[@diff]", "[~c]"),
+      expected: "[diff] | [~c] (left)",
     },
     {
       name: "1 面の moveToOtherSide は何もしない",
@@ -505,7 +644,7 @@ describe("tabMenu", () => {
         closeOthers: true,
         closeToRight: true,
         keepOpen: true,
-        splitRight: false,
+        splitRight: true,
         moveToOtherSide: false,
         copyPath: true,
       },
@@ -533,7 +672,7 @@ describe("tabMenu", () => {
         closeOthers: false,
         closeToRight: false,
         keepOpen: false,
-        splitRight: false,
+        splitRight: true,
         moveToOtherSide: false,
         copyPath: true,
       },
@@ -553,7 +692,7 @@ describe("tabMenu", () => {
       },
     },
     {
-      name: "2 面の左のファイルのタブは反対側へ移せない",
+      name: "2 面の左のファイルのタブは反対側へ移せる",
       layout: layoutOf("a [b]", "[~c]"),
       id: "b",
       expected: {
@@ -562,8 +701,36 @@ describe("tabMenu", () => {
         closeToRight: false,
         keepOpen: false,
         splitRight: false,
-        moveToOtherSide: false,
+        moveToOtherSide: true,
         copyPath: true,
+      },
+    },
+    {
+      name: "1 面の page のタブは右へ分けられない",
+      layout: layoutOf("a [@diff]"),
+      id: "diff",
+      expected: {
+        close: true,
+        closeOthers: true,
+        closeToRight: false,
+        keepOpen: false,
+        splitRight: false,
+        moveToOtherSide: false,
+        copyPath: false,
+      },
+    },
+    {
+      name: "2 面の左の page のタブは反対側へ移せない",
+      layout: layoutOf("a [@diff]", "[~c]"),
+      id: "diff",
+      expected: {
+        close: true,
+        closeOthers: true,
+        closeToRight: false,
+        keepOpen: false,
+        splitRight: false,
+        moveToOtherSide: false,
+        copyPath: false,
       },
     },
   ])("$name", ({ layout, id, expected }) => {
@@ -804,7 +971,7 @@ describe("本文の既定 (Files のタブの代わり)", () => {
     ]);
   });
 
-  test("版 1 の右の面のファイル・画面のタブは左の面の末尾へ移し、選んでいたなら左で選ぶ", () => {
+  test("版 1 の右の面の画面のタブは左の面の末尾へ移し、選んでいたなら左で選ぶ (ファイル・画像は右に残す)", () => {
     const parsed = parseLayout({
       version: 1,
       focused: "right",
@@ -819,7 +986,7 @@ describe("本文の既定 (Files のタブの代わり)", () => {
         },
         {
           side: "right",
-          activeId: "b",
+          activeId: "d",
           tabs: [
             { id: "b", preview: false, target: { kind: "file", path: "b" } },
             { id: "c", preview: false, target: { kind: "image", path: "c" } },
@@ -832,10 +999,10 @@ describe("本文の既定 (Files のタブの代わり)", () => {
     expect([
       show(parsed.layout),
       parsed.relocated.map((item) => item.id),
-    ]).toEqual(["a [b] d | [~c] (left)", ["b", "d"]]);
+    ]).toEqual(["a [d] | b [~c] (left)", ["d"]]);
   });
 
-  test("版 1 の右の面が全部ファイルなら 1 面に戻す", () => {
+  test("版 1 の右の面が全部画面なら 1 面に戻す", () => {
     const parsed = parseLayout({
       version: 1,
       focused: "left",
@@ -852,7 +1019,7 @@ describe("本文の既定 (Files のタブの代わり)", () => {
           side: "right",
           activeId: "b",
           tabs: [
-            { id: "b", preview: false, target: { kind: "file", path: "b" } },
+            { id: "b", preview: false, target: { kind: "page", page: "diff" } },
           ],
         },
       ],
@@ -864,16 +1031,51 @@ describe("本文の既定 (Files のタブの代わり)", () => {
     ]);
   });
 
-  test("assertLayout は右の面のファイルのタブを見つける", () => {
+  test("assertLayout は右の面の page のタブを見つける", () => {
     const layout: Layout = {
       panes: {
         left: pane("[a]"),
-        right: pane("[b]"),
+        right: pane("[@diff]"),
       },
       focused: "left",
       split: 0.5,
     };
-    expect(() => assertLayout(layout)).toThrow("right holds file tab b");
+    expect(() => assertLayout(layout)).toThrow("right holds page tab diff");
+  });
+
+  test("assertLayout は同じ面の同じ中身を見つけ、左右の同じファイルは通す", () => {
+    const same: Layout = {
+      panes: {
+        left: {
+          tabs: [
+            { id: "a1", target: file("a"), preview: false },
+            { id: "a2", target: file("a"), preview: false },
+          ],
+          activeId: "a1",
+          recent: ["a1"],
+        },
+      },
+      focused: "left",
+    };
+    expect(() => assertLayout(same)).toThrow(
+      'duplicate target {"kind":"file","path":"a"} in left',
+    );
+    expect(() => assertLayout(layoutOf("[a]", "[a]"))).toThrow(
+      "duplicate id a",
+    );
+    const both: Layout = {
+      panes: {
+        left: pane("[a]"),
+        right: {
+          tabs: [{ id: "a-right", target: file("a"), preview: false }],
+          activeId: "a-right",
+          recent: ["a-right"],
+        },
+      },
+      focused: "left",
+      split: 0.5,
+    };
+    expect(() => assertLayout(both)).not.toThrow();
   });
 });
 

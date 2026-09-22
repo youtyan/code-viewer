@@ -38,8 +38,10 @@ type SourceShikiHighlighter = {
 };
 
 export type BlameViewDeps = {
-  $: <T extends Element = HTMLElement>(sel: string) => T;
-  STATE: { route: AppRoute };
+  /** Blame のカードを差し込む先 (本文なら #diff、右の面ならその面の箱の本体)。 */
+  mountRoot(): HTMLElement;
+  /** この実体が描いたものを探す範囲 (本文なら #content、右の面ならその面の箱)。 */
+  scope(): ParentNode;
   setRoute(route: AppRoute, replace?: boolean): void;
   applyRouteFromLocation?(): void;
   setPageMode(): void;
@@ -88,9 +90,12 @@ export function createBlameView(deps: BlameViewDeps) {
   let activeGeneration = 0;
 
   function cleanup() {
-    document.querySelectorAll(".gdp-standalone-blame").forEach((el) => {
-      el.remove();
-    });
+    deps
+      .scope()
+      .querySelectorAll(".gdp-standalone-blame")
+      .forEach((el) => {
+        el.remove();
+      });
   }
 
   function colourBarFor(

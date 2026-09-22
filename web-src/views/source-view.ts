@@ -5,7 +5,6 @@ import { apiUrl } from "../core/api-url";
 // deps-injected factory.
 
 import {
-  findMainScrollTarget,
   focusMainPanel,
   isEditableKeyTarget,
   isPageKeymapBlockedTarget,
@@ -79,8 +78,6 @@ export type VirtualSourcePagingKeyboardEvent = KeyboardEvent & {
 };
 
 export type SourceViewDeps = {
-  $: <T extends Element = HTMLElement>(sel: string) => T;
-  $$: <T extends Element = HTMLElement>(sel: string) => T[];
   STATE: {
     route: AppRoute;
     from: string;
@@ -88,7 +85,19 @@ export type SourceViewDeps = {
     files: FileMeta[];
     syntaxHighlight: boolean;
   };
+  /**
+   * この実体が描く route。左の面 (本文) なら STATE.route、右の面ならその面の
+   * 前面のタブの route。STATE.route を直接読まない (面ごとに違うため)。
+   */
+  route(): AppRoute;
+  /** この実体の route を変える (左は app の setRoute、右はその面の route)。 */
   setRoute(route: AppRoute, replace?: boolean): void;
+  /** この実体が描いたものを探す範囲 (左は #content、右はその面の箱)。 */
+  scope(): ParentNode;
+  /** ソースのカードを差し込む先 (左は #diff、右はその面の箱の本体)。 */
+  mountRoot(): HTMLElement;
+  /** この実体のスクロール先 (左は本文の scroller、右はその面の箱の scroller)。 */
+  mainScrollTarget(): HTMLElement | null;
   setPageMode(): void;
   currentRange(): DiffRange;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
@@ -132,6 +141,11 @@ export type SourceViewDeps = {
     unit?: "line" | "page",
   ): void;
   focusMainSurface(): void;
+  /**
+   * Code / Preview を切り替えた後にキー操作の相手を置く先。無ければ本文
+   * (#content)。右の面の実体はその面の枠。
+   */
+  focusPanel?(): void;
   isPaletteOpen(): boolean;
   getLanguage(): DelimitedPreviewLanguage;
   onSourceRendered?(): void;
@@ -139,10 +153,12 @@ export type SourceViewDeps = {
 
 export function createSourceView(deps: SourceViewDeps) {
   const {
-    $,
-    $$,
     STATE,
+    route: currentRoute,
     setRoute,
+    scope,
+    mountRoot,
+    mainScrollTarget,
     setPageMode,
     currentRange,
     trackLoad,
@@ -167,6 +183,12 @@ export function createSourceView(deps: SourceViewDeps) {
     isPaletteOpen,
     getLanguage,
   } = deps;
+
+  /** この実体の route がファイルなら、その route。 */
+  function currentFileRoute(): Extract<AppRoute, { screen: "file" }> | null {
+    const route = currentRoute();
+    return route.screen === "file" ? route : null;
+  }
 
   function markdownLinkNavigationDeps(): MarkdownLinkNavigationDeps {
     return {
@@ -214,19 +236,19 @@ export function createSourceView(deps: SourceViewDeps) {
   const SOURCE_CURSOR_TOTALS = new Map<string, number>();
 
   function sourceLineScrollAmount(): number | null {
-    const virtualRow = document.querySelector<HTMLElement>(
-      "#content .gdp-source-virtual:not([hidden]) .gdp-source-virtual-row",
+    const virtualRow = scope().querySelector<HTMLElement>(
+      ".gdp-source-virtual:not([hidden]) .gdp-source-virtual-row",
     );
     if (virtualRow)
       return (
         virtualRow.getBoundingClientRect().height || VIRTUAL_SOURCE_ROW_HEIGHT
       );
-    const sourceRow = document.querySelector<HTMLElement>(
-      "#content .gdp-source-table:not([hidden]) tr",
+    const sourceRow = scope().querySelector<HTMLElement>(
+      ".gdp-source-table:not([hidden]) tr",
     );
     if (sourceRow) return sourceRow.getBoundingClientRect().height || 20;
-    const preview = document.querySelector<HTMLElement>(
-      "#content .gdp-markdown-preview:not([hidden])",
+    const preview = scope().querySelector<HTMLElement>(
+      ".gdp-markdown-preview:not([hidden])",
     );
     if (preview) {
       const previewLineHeight = Number.parseFloat(
@@ -245,8 +267,8 @@ export function createSourceView(deps: SourceViewDeps) {
 
   function hasVisibleSourceCodeSurface(): boolean {
     return Array.from(
-      document.querySelectorAll<HTMLElement>(
-        "#content .gdp-source-virtual-scroller, #content .gdp-source-table",
+      scope().querySelectorAll<HTMLElement>(
+        ".gdp-source-virtual-scroller, .gdp-source-table",
       ),
     ).some((item) => item.offsetParent !== null);
   }
@@ -272,8 +294,8 @@ export function createSourceView(deps: SourceViewDeps) {
       SOURCE_CURSOR_ROWS.every((row) => !row.isConnected)
     ) {
       SOURCE_CURSOR_ROWS = Array.from(
-        document.querySelectorAll<HTMLElement>(
-          "#content .gdp-source-table tr.gdp-source-cursor, #content .gdp-source-virtual-row.gdp-source-cursor",
+        scope().querySelectorAll<HTMLElement>(
+          ".gdp-source-table tr.gdp-source-cursor, .gdp-source-virtual-row.gdp-source-cursor",
         ),
       );
     }
@@ -284,16 +306,14 @@ export function createSourceView(deps: SourceViewDeps) {
     if (!SOURCE_CURSOR || !sourceTargetsEqual(SOURCE_CURSOR.target, target))
       return;
     const line = String(SOURCE_CURSOR.line);
-    const table = document.querySelector<HTMLTableElement>(
-      "#content .gdp-source-table",
-    );
+    const table = scope().querySelector<HTMLTableElement>(".gdp-source-table");
     const tableRow = table?.rows[SOURCE_CURSOR.line - 1];
     if (tableRow?.dataset.line === line) {
       tableRow.classList.add("gdp-source-cursor");
       SOURCE_CURSOR_ROWS.push(tableRow);
     }
-    const windowEl = document.querySelector<HTMLElement>(
-      "#content .gdp-source-virtual-window",
+    const windowEl = scope().querySelector<HTMLElement>(
+      ".gdp-source-virtual-window",
     );
     if (windowEl) {
       const firstLine = Number(
@@ -312,16 +332,19 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function visibleSourceLineFallback(): number {
-    const scroller = findMainScrollTarget();
+    const scroller = mainScrollTarget();
     const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
     if (scroller)
       return Math.max(1, Math.floor(scroller.scrollTop / rowHeight) + 1);
-    const rows = $$<HTMLElement>("#content .gdp-source-table tr[data-line]");
-    const contentTop =
-      document.querySelector<HTMLElement>("#content")?.getBoundingClientRect()
-        .top ?? 0;
+    const rows = Array.from(
+      scope().querySelectorAll<HTMLElement>(".gdp-source-table tr[data-line]"),
+    );
+    const scopeTop =
+      scope() instanceof HTMLElement
+        ? (scope() as HTMLElement).getBoundingClientRect().top
+        : 0;
     const row = rows.find(
-      (item) => item.getBoundingClientRect().bottom >= Math.max(0, contentTop),
+      (item) => item.getBoundingClientRect().bottom >= Math.max(0, scopeTop),
     );
     return Math.max(1, Number(row?.dataset.line || "1"));
   }
@@ -353,7 +376,7 @@ export function createSourceView(deps: SourceViewDeps) {
     cursor: { target: SourceFileTarget; line: number },
     edge: "nearest" | "center" | "start" = "nearest",
   ) {
-    const scroller = findMainScrollTarget();
+    const scroller = mainScrollTarget();
     if (scroller) {
       const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
       const top = (cursor.line - 1) * rowHeight;
@@ -376,8 +399,8 @@ export function createSourceView(deps: SourceViewDeps) {
       syncSourceCursorRows(cursor.target);
       return;
     }
-    document
-      .querySelector<HTMLElement>(`#content [data-line="${cursor.line}"]`)
+    scope()
+      .querySelector<HTMLElement>(`[data-line="${cursor.line}"]`)
       ?.scrollIntoView({ block: edge });
   }
 
@@ -401,7 +424,7 @@ export function createSourceView(deps: SourceViewDeps) {
     const pageRows = Math.max(
       1,
       Math.floor(
-        ((findMainScrollTarget()?.clientHeight || window.innerHeight) * 0.55) /
+        ((mainScrollTarget()?.clientHeight || window.innerHeight) * 0.55) /
           (sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT),
       ),
     );
@@ -413,7 +436,7 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function setSourceTabRoute(tab: SourceBlobTab): void {
-    const route = STATE.route;
+    const route = currentRoute();
     if (route.screen !== "file") return;
     setRoute({
       screen: "file",
@@ -449,9 +472,7 @@ export function createSourceView(deps: SourceViewDeps) {
     tab: "preview" | "code",
     options: { updateRoute?: boolean } = {},
   ): boolean {
-    const tabs = document.querySelector<HTMLElement>(
-      "#content .gdp-source-tabs",
-    );
+    const tabs = scope().querySelector<HTMLElement>(".gdp-source-tabs");
     if (!tabs) return false;
     const button = tabs.querySelector<HTMLButtonElement>(
       `button[data-source-tab="${tab}"]`,
@@ -464,11 +485,11 @@ export function createSourceView(deps: SourceViewDeps) {
       const previewButton = tabs.querySelector<HTMLButtonElement>(
         'button[data-source-tab="preview"]',
       );
-      const codePane = document.querySelector<HTMLElement>(
-        '#content [data-source-pane="code"]',
+      const codePane = scope().querySelector<HTMLElement>(
+        '[data-source-pane="code"]',
       );
-      const previewPane = document.querySelector<HTMLElement>(
-        '#content [data-source-pane="preview"]',
+      const previewPane = scope().querySelector<HTMLElement>(
+        '[data-source-pane="preview"]',
       );
       if (!codeButton || !codePane) return false;
       const applied = applyRenderedSourceTab(
@@ -479,11 +500,11 @@ export function createSourceView(deps: SourceViewDeps) {
         previewPane,
         false,
       );
-      if (applied) focusMainPanel();
+      if (applied) (deps.focusPanel ?? focusMainPanel)();
       return applied;
     }
     button.click();
-    focusMainPanel();
+    (deps.focusPanel ?? focusMainPanel)();
     return true;
   }
 
@@ -628,12 +649,9 @@ export function createSourceView(deps: SourceViewDeps) {
 
   function preferredSourceTabFor(previewable: boolean): SourceBlobTab {
     if (!previewable) return "code";
+    const fileRoute = currentFileRoute();
     const routeTab =
-      STATE.route.screen === "file" &&
-      STATE.route.view === "blob" &&
-      STATE.route.preview
-        ? "preview"
-        : "code";
+      fileRoute?.view === "blob" && fileRoute.preview ? "preview" : "code";
     return PREFERRED_SOURCE_TAB || routeTab;
   }
 
@@ -683,7 +701,7 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function sourceTargetFromRoute(): SourceFileTarget | null {
-    const route = STATE.route;
+    const route = currentRoute();
     if (route.screen === "file") return { path: route.path, ref: route.ref };
     if (route.screen === "history" && route.source) {
       // Resolved through the loaded diff so a deleted file reads from the
@@ -695,12 +713,16 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function removeStandaloneSource() {
-    document.querySelectorAll(".gdp-standalone-source").forEach((el) => {
-      el.remove();
-    });
-    document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
-      el.remove();
-    });
+    scope()
+      .querySelectorAll(".gdp-standalone-source")
+      .forEach((el) => {
+        el.remove();
+      });
+    scope()
+      .querySelectorAll(".gdp-repo-blob-layout")
+      .forEach((el) => {
+        el.remove();
+      });
   }
 
   function renderSourceLoading(
@@ -963,7 +985,7 @@ export function createSourceView(deps: SourceViewDeps) {
       active,
       {
         includeFileTabs:
-          STATE.route.screen === "file" &&
+          currentRoute().screen === "file" &&
           sourceInternalPathKind(target.path) !== "code-viewer",
         previewable: !!options.previewable || active === "preview",
         sourceTabClick: "manual",
@@ -1290,9 +1312,7 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function isVirtualSourceDisabled(): boolean {
-    return (
-      deps.STATE.route.screen === "file" && deps.STATE.route.virtual === "off"
-    );
+    return currentFileRoute()?.virtual === "off";
   }
 
   function buildCurrentFileRouteWithVirtualMode(
@@ -1303,7 +1323,7 @@ export function createSourceView(deps: SourceViewDeps) {
       screen: "file",
       path: target.path,
       ref: target.ref,
-      view: STATE.route.screen === "file" ? STATE.route.view : "blob",
+      view: currentFileRoute()?.view ?? "blob",
       range: currentRange(),
       ...(virtualMode === "off" ? { virtual: "off" as const } : {}),
     };
@@ -1332,9 +1352,8 @@ export function createSourceView(deps: SourceViewDeps) {
     target: SourceFileTarget,
   ): SourceLineTarget | undefined {
     const routeTarget = sourceTargetFromRoute();
-    return sourceTargetsEqual(routeTarget, target) &&
-      STATE.route.screen === "file"
-      ? STATE.route.line
+    return sourceTargetsEqual(routeTarget, target)
+      ? currentFileRoute()?.line
       : undefined;
   }
 
@@ -1344,11 +1363,11 @@ export function createSourceView(deps: SourceViewDeps) {
     target: SourceFileTarget,
   ): string | undefined {
     const routeTarget = sourceTargetFromRoute();
+    const fileRoute = currentFileRoute();
     return sourceTargetsEqual(routeTarget, target) &&
-      STATE.route.screen === "file" &&
-      STATE.route.line &&
-      STATE.route.hl
-      ? STATE.route.hl
+      fileRoute?.line &&
+      fileRoute.hl
+      ? fileRoute.hl
       : undefined;
   }
 
@@ -1438,13 +1457,14 @@ export function createSourceView(deps: SourceViewDeps) {
     target: SourceFileTarget,
     line: SourceLineTarget,
   ) {
-    if (STATE.route.screen !== "file") return;
+    const fileRoute = currentFileRoute();
+    if (!fileRoute) return;
     setRoute(
       {
         screen: "file",
         path: target.path,
         ref: target.ref,
-        view: STATE.route.view,
+        view: fileRoute.view,
         range: currentRange(),
         line,
       },
@@ -1703,11 +1723,12 @@ export function createSourceView(deps: SourceViewDeps) {
   function openVirtualSourceSearchFromKeyboard(
     targetEl: Element | null,
   ): boolean {
-    const active = targetEl?.closest<VirtualSourceSearchRoot>(
-      "#content .gdp-source-virtual",
+    const closest = targetEl?.closest<VirtualSourceSearchRoot>(
+      ".gdp-source-virtual",
     );
-    const fallback = document.querySelector<VirtualSourceSearchRoot>(
-      "#content .gdp-source-viewer.virtual .gdp-source-virtual:not([hidden])",
+    const active = closest && scope().contains(closest) ? closest : null;
+    const fallback = scope().querySelector<VirtualSourceSearchRoot>(
+      ".gdp-source-viewer.virtual .gdp-source-virtual:not([hidden])",
     );
     const search =
       active?.__gdpVirtualSourceSearch || fallback?.__gdpVirtualSourceSearch;
@@ -2383,7 +2404,7 @@ export function createSourceView(deps: SourceViewDeps) {
   function mountedStandaloneSourceCard(
     target: SourceFileTarget,
   ): DiffCardElement | null {
-    const card = document.querySelector<DiffCardElement>(
+    const card = scope().querySelector<DiffCardElement>(
       ".gdp-standalone-source",
     );
     if (!card) return null;
@@ -2417,9 +2438,7 @@ export function createSourceView(deps: SourceViewDeps) {
         syncSourceHighlightMarks(mounted, target);
         scrollStandaloneSourceLine(
           mounted,
-          lineTargetStart(
-            STATE.route.screen === "file" ? STATE.route.line : undefined,
-          ),
+          lineTargetStart(currentFileRoute()?.line),
         );
         return;
       }
@@ -2431,9 +2450,11 @@ export function createSourceView(deps: SourceViewDeps) {
     const repoTarget = repoFileTargetFromRoute();
     setPageMode();
     removeStandaloneSource();
-    document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
-      el.remove();
-    });
+    scope()
+      .querySelectorAll(".gdp-repo-blob-layout")
+      .forEach((el) => {
+        el.remove();
+      });
     const card = document.createElement("article") as DiffCardElement;
     card.className =
       "gdp-file-shell loaded gdp-standalone-source gdp-source-mode";
@@ -2445,8 +2466,7 @@ export function createSourceView(deps: SourceViewDeps) {
     wrapper.className = "gdp-file-detail-wrapper";
     const mediaOnly = !internalKind && isMediaPreviewOnlySource(target.path);
     const activeTab: SourceBlobTab =
-      mediaOnly ||
-      (!internalKind && STATE.route.screen === "file" && STATE.route.preview)
+      mediaOnly || (!internalKind && !!currentFileRoute()?.preview)
         ? "preview"
         : "code";
     const { sticky, header } = createFileShellSticky(
@@ -2496,7 +2516,7 @@ export function createSourceView(deps: SourceViewDeps) {
       back.className = "gdp-view-file gdp-btn gdp-btn-sm";
       setViewFileButtonState(back, true);
       back.addEventListener("click", () => {
-        const route = STATE.route;
+        const route = currentRoute();
         setRoute(
           route.screen === "history"
             ? { ...route, source: undefined }
@@ -2516,7 +2536,12 @@ export function createSourceView(deps: SourceViewDeps) {
     // (hidden via body.gdp-repo-blob-page CSS), so leaving the blob view does
     // not force a full diff reload.
     mountFileShellCard(
-      { $, repoFileTargetFromRoute, renderRepoBlobSidebar, placeSidebarToggle },
+      {
+        mountRoot,
+        repoFileTargetFromRoute,
+        renderRepoBlobSidebar,
+        placeSidebarToggle,
+      },
       target,
       card,
       repoTarget,
@@ -2609,9 +2634,7 @@ export function createSourceView(deps: SourceViewDeps) {
             }
             scrollStandaloneSourceLine(
               card,
-              lineTargetStart(
-                STATE.route.screen === "file" ? STATE.route.line : undefined,
-              ),
+              lineTargetStart(currentFileRoute()?.line),
             );
             setSourceCardState(card, "done");
             finishSourceLoad(req);
@@ -2654,9 +2677,7 @@ export function createSourceView(deps: SourceViewDeps) {
           if (!rendered) return;
           scrollStandaloneSourceLine(
             card,
-            lineTargetStart(
-              STATE.route.screen === "file" ? STATE.route.line : undefined,
-            ),
+            lineTargetStart(currentFileRoute()?.line),
           );
           setSourceCardState(card, "done");
           finishSourceLoad(req);
@@ -2764,8 +2785,11 @@ export function createSourceView(deps: SourceViewDeps) {
     const isCtrlArrowKey =
       (key === "arrowdown" || key === "arrowup") && e.ctrlKey && !e.shiftKey;
     if (!isPlainPageKey && !isCtrlArrowKey) return false;
-    const scroller = findMainScrollTarget();
-    if (!scroller?.matches("#content .gdp-source-virtual-scroller"))
+    const scroller = mainScrollTarget();
+    if (
+      !scroller?.matches(".gdp-source-virtual-scroller") ||
+      !scope().contains(scroller)
+    )
       return false;
     const pageDown = key === "pagedown" || key === "arrowdown";
     const pageUp = key === "pageup" || key === "arrowup";
@@ -2841,5 +2865,7 @@ export function createSourceView(deps: SourceViewDeps) {
     shouldVirtualizeSource,
     inferLang,
     localize,
+    /** この実体のスクロール先 (キー操作のスクロールが使う)。 */
+    mainScrollTarget,
   };
 }

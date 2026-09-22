@@ -40,7 +40,7 @@ const EN: MainTabsText = {
   stopSessionTitle:
     "End this shell (Close only hides the tab and keeps the shell running)",
   splitUnavailable:
-    "Split right (a terminal or image tab in front, one side, and a window wide enough for two)",
+    "Split right (a file, terminal or image tab in front, one side, and a window wide enough for two)",
   resizeSplit: "Resize the two sides",
   dropToSplit: "Drop to split right",
   fileHistory: "File history",
@@ -63,7 +63,7 @@ const JA: MainTabsText = {
   stopSessionTitle:
     "このシェルを終了します (閉じるはタブを隠すだけで、シェルは動き続けます)",
   splitUnavailable:
-    "右に分割 (前面がターミナルか画像のタブ・1 面・2 面が置ける窓の幅のときに使えます)",
+    "右に分割 (前面がファイル・ターミナル・画像のタブ・1 面・2 面が置ける窓の幅のときに使えます)",
   resizeSplit: "左右の幅を変える",
   dropToSplit: "ここに落とすと右に分割",
   fileHistory: "ファイルの履歴",

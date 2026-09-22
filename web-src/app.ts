@@ -113,6 +113,7 @@ import {
   buildRoute,
   type DiffRange,
   parseDoctorOverlay,
+  parsePaneOverlay,
   parseRoute,
   parseSearchResultsOverlay,
   parseTerminalOverlay,
@@ -121,6 +122,7 @@ import {
   type SourceLineTarget,
   type TerminalOverlayState,
   withDoctorOverlay,
+  withPaneOverlay,
   withSearchResultsOverlay,
   withTerminalOverlay,
   withToolsOverlay,
@@ -144,6 +146,7 @@ import {
   type FileMeta,
   type HljsApi,
   type SettingsResponse,
+  type SidebarItem,
   THEME_PALETTES,
   type ThemePalette,
   type UndoActionResponse,
@@ -178,7 +181,7 @@ import {
   createAnnotationsUi,
 } from "./views/annotations-ui";
 import { createBackendState } from "./views/backend-state";
-import { createBlameView } from "./views/blame-view";
+import { type BlameViewDeps, createBlameView } from "./views/blame-view";
 import { type ContextMenuItem, showContextMenu } from "./views/context-menu";
 import { createDatabaseView } from "./views/database/database-view";
 import { createDefinitionJump } from "./views/definition-jump";
@@ -249,6 +252,7 @@ import { rememberEarlyLook } from "./views/shell/early-look";
 import { createSidebar, type ViewerFontSize } from "./views/sidebar";
 import {
   createSourceView,
+  type SourceViewDeps,
   type VirtualSourcePagingKeyboardEvent,
 } from "./views/source-view";
 import { terminalText } from "./views/terminal/i18n";
@@ -442,8 +446,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     repeated = false,
     unit: "line" | "page" = "line",
   ) {
-    if (moveSourceCursor(direction, unit)) return;
-    const target = findMainScrollTarget();
+    const source = activeSourceView();
+    if (source.moveSourceCursor(direction, unit)) return;
+    const target = source.mainScrollTarget();
     const viewportHeight =
       target?.clientHeight ||
       document.scrollingElement?.clientHeight ||
@@ -451,7 +456,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const top =
       direction *
       (unit === "line"
-        ? Math.round(sourceLineScrollAmount() || 32)
+        ? Math.round(source.sourceLineScrollAmount() || 32)
         : Math.round(viewportHeight * 0.55));
     const behavior: ScrollBehavior = repeated ? "auto" : "smooth";
     if (target) target.scrollBy({ top, behavior });
@@ -461,7 +466,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   let MAIN_SURFACE_FOCUS_SEQ = 0;
 
   function focusMainSurface() {
-    const target = findMainScrollTarget();
+    const source = activeSourceView();
+    const target = source.mainScrollTarget();
+    // 右の面のソース表示: その面の scroller (無ければ枠) にフォーカスを置く。
+    if (source !== SOURCE_VIEW) {
+      (target ?? RIGHT_SOURCE?.root)?.focus({ preventScroll: true });
+      setPanelFocusScope("main");
+      return;
+    }
     if (target?.matches("#content .gdp-source-virtual-scroller")) {
       target.focus({ preventScroll: true });
       setPanelFocusScope("main");
@@ -485,8 +497,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function scrollMainToEdge(edge: "top" | "bottom") {
-    if (moveSourceCursor(edge === "bottom" ? 1 : -1, "edge", edge)) return;
-    const target = findMainScrollTarget();
+    const source = activeSourceView();
+    if (source.moveSourceCursor(edge === "bottom" ? 1 : -1, "edge", edge))
+      return;
+    const target = source.mainScrollTarget();
     if (target) {
       target.scrollTo({
         top: edge === "top" ? 0 : target.scrollHeight,
@@ -1203,6 +1217,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       window.location.search,
       savedRange(),
     );
+    // URL が右の面のファイル (pane=right) なら、本文はフォルダ表示から起こす
+    // (本文の面の前面はタブの読み戻しが決め、右の面は INITIAL_RIGHT_ROUTE)。
+    if (INITIAL_RIGHT_ROUTE && parsePaneOverlay(window.location.search))
+      return {
+        screen: "repo",
+        ref: INITIAL_RIGHT_ROUTE.ref,
+        path: "",
+        range: parsedRoute.range,
+      };
     const routeBase =
       parsedRoute.screen === "unknown"
         ? { screen: "diff" as const, range: parsedRoute.range }
@@ -1273,6 +1296,19 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** 開いたときの ?terminal= (起動の途中で URL が書き直される前に読む)。 */
   const INITIAL_TERMINAL_PARAM = parseTerminalOverlay(window.location.search);
+  /** 開いたときの pane=right の、右の面のファイルの route (同じく先に読む)。 */
+  const INITIAL_RIGHT_ROUTE = ((): Extract<
+    AppRoute,
+    { screen: "file" }
+  > | null => {
+    if (parsePaneOverlay(window.location.search) !== "right") return null;
+    const route = parseRoute(
+      routePathname(),
+      window.location.search,
+      savedRange(),
+    );
+    return route.screen === "file" && route.view !== "history" ? route : null;
+  })();
 
   const STATE: AppState = (() => {
     const route = routeFromLocation();
@@ -1512,7 +1548,13 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function syncLineRefPill() {
-    const route = STATE.route;
+    // 右の面のファイルにフォーカスがあれば、札はその面の行を指す。
+    const view = MAIN_TABS.panes();
+    const right =
+      view.focused === "right" && view.fronts.right?.target.kind === "file"
+        ? MAIN_TABS.paneRoute("right")
+        : null;
+    const route = right ?? STATE.route;
     if (route.screen === "diff") return;
     DIFF_LINE_SELECT.clear();
     if (route.screen === "file" && route.line) {
@@ -1522,7 +1564,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       LINE_REF_PILL.show(route.path, start, end);
       return;
     }
-    if (route.screen === "file") clearRenderedSourceLineTargets();
+    if (right) LINE_REF_PILL.hide();
+    else if (route.screen === "file") clearRenderedSourceLineTargets();
   }
 
   // ---------- Sidebar: extracted to sidebar.ts ----------
@@ -1531,6 +1574,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     $$,
     STATE,
     openDiffFile: (path) => DIFF_VIEW.openDiffFile(path),
+    openFileInOtherPane: (file) => openFileInOtherPane(file),
     // Where a plain click on the row takes the app; mirrors the diff sidebar
     // (openDiffFile) and the repository sidebar handler in repo-view.ts.
     sidebarItemHref: (item, mode) => {
@@ -1656,11 +1700,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   } = SIDEBAR;
 
   // ---------- Source view: extracted to source-view.ts ----------
-  const SOURCE_VIEW = createSourceView({
-    $$,
-    $,
+  // 本文 (左の面) のソース表示の依存。右の面のソース表示はこれを土台に、
+  // route・探す範囲・差し込み先・本文だけの操作を差し替える (createSidePane)。
+  const SOURCE_VIEW_DEPS: SourceViewDeps = {
     STATE,
+    route: () => STATE.route,
     setRoute,
+    scope: () => $("#content"),
+    mountRoot: () => $("#diff"),
+    mainScrollTarget: () => findMainScrollTarget(),
     setPageMode,
     currentRange,
     trackLoad,
@@ -1690,19 +1738,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     isPaletteOpen: () => SEARCH_PALETTE.isPaletteOpen(),
     getLanguage: () => STATE.language,
     onSourceRendered: applyInlineAnnotations,
-  });
+  };
+  const SOURCE_VIEW = createSourceView(SOURCE_VIEW_DEPS);
   const {
-    renderStandaloneSource,
     applySourceRouteToShell,
     removeStandaloneSource,
     cancelActiveSourceLoad,
     sourceTargetFromRoute,
     fileSourceTarget,
-    switchSourceTab,
-    sourceLineScrollAmount,
-    moveSourceCursor,
-    handleVirtualSourcePagingKeydown,
-    openVirtualSourceSearchFromKeyboard,
   } = SOURCE_VIEW;
 
   const DEFINITION_JUMP = createDefinitionJump({
@@ -1732,9 +1775,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   DEFINITION_JUMP.install($("#content"));
 
-  const BLAME_VIEW = createBlameView({
-    $,
-    STATE,
+  const BLAME_VIEW_DEPS: BlameViewDeps = {
+    mountRoot: () => $("#diff"),
+    scope: () => $("#content"),
     setRoute,
     applyRouteFromLocation,
     setPageMode,
@@ -1763,7 +1806,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     repoFileTargetFromRoute,
     renderRepoBlobSidebar: (path: string, ref: string) =>
       REPO_VIEW.renderRepoBlobSidebar(path, ref),
-  });
+  };
+  const BLAME_VIEW = createBlameView(BLAME_VIEW_DEPS);
 
   // ---------- Repository view: extracted to repo-view.ts ----------
   const REPO_VIEW = createRepoView({
@@ -3845,7 +3889,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const historyRoute = { ...route, view: "history" as const };
     const mount = renderFileHistoryShellView(
       {
-        $,
+        mountRoot: () => $("#diff"),
         repoFileTargetFromRoute,
         renderRepoBlobSidebar: (path, ref) =>
           REPO_VIEW.renderRepoBlobSidebar(path, ref),
@@ -4096,6 +4140,21 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function setRoute(route: AppRoute, replace = false) {
+    // 右の面にフォーカスがあるときの木・パレット・リンクで開くファイルは、
+    // 右の面で開く (本文は描き直さない)。履歴を置き換えるだけの呼び出し
+    // (本文の行の選択など) は本文のもの。
+    if (!replace && route.screen === "file") {
+      const fileRoute = normalizeInternalFileRoute(route);
+      if (
+        fileRoute.screen === "file" &&
+        fileRoute.view !== "history" &&
+        routeTarget(fileRoute)?.kind === "file" &&
+        MAIN_TABS.panes().split &&
+        MAIN_TABS.sideForRoute(fileRoute) === "right" &&
+        openInRightPane(fileRoute)
+      )
+        return;
+    }
     const previousRoute = STATE.route;
     let nextRoute =
       route.screen === "unknown"
@@ -4137,6 +4196,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (replace) history.replaceState(state, "", url);
     else history.pushState(state, "", url);
     MAIN_TABS.syncRoute(nextRoute, !replace);
+    // 右の面にフォーカスが残っている (本文を裏で移した) なら URL は右の面のもの。
+    syncFocusedPaneUrl("replace");
     syncHeaderMenu();
     syncLineRefPill();
     // Picking another commit (or clearing the file) on the history screen
@@ -4153,9 +4214,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       isSameBlobFileRoute(previousRoute, nextRoute) &&
       routeBlobPreview(previousRoute) !== routeBlobPreview(nextRoute)
     ) {
-      switchSourceTab(routeBlobPreview(nextRoute) ? "preview" : "code", {
-        updateRoute: false,
-      });
+      SOURCE_VIEW.switchSourceTab(
+        routeBlobPreview(nextRoute) ? "preview" : "code",
+        { updateRoute: false },
+      );
     }
     if (shouldDispatchFileRouteAfterSetRoute(previousRoute, nextRoute)) {
       dispatchFileRoute(nextRoute);
@@ -5494,7 +5556,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "tab-preview" || action === "tab-code") {
-      return switchSourceTab(action === "tab-preview" ? "preview" : "code");
+      return activeSourceView().switchSourceTab(
+        action === "tab-preview" ? "preview" : "code",
+      );
     }
     if (action === "goto-definition")
       return DEFINITION_JUMP.triggerFromKeyboard();
@@ -5610,7 +5674,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "find-in-source")
-      return openVirtualSourceSearchFromKeyboard(target);
+      return activeSourceView().openVirtualSourceSearchFromKeyboard(target);
     if (action === "goto-journal") {
       navigateToPageTab({ screen: "journal", range: currentRange() });
       return true;
@@ -5698,9 +5762,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     return false;
   }
 
-  document.addEventListener("keydown", handleVirtualSourcePagingKeydown, {
-    capture: true,
-  });
+  document.addEventListener(
+    "keydown",
+    (event) => activeSourceView().handleVirtualSourcePagingKeydown(event),
+    { capture: true },
+  );
   document.addEventListener("click", closeRepoContextMenu);
   $("#filelist").addEventListener("contextmenu", handleSidebarContextMenu);
   // 木の行を 2 回押したら、1 回目で開いた仮のタブを固定にする。
@@ -5973,7 +6039,20 @@ window.GdpExpandLogic = GdpExpandLogic;
   loadInitialState().finally(() => {
     MAIN_TABS.syncRoute(STATE.route);
     // ?terminal= のタブが前面になるかは、読み戻したタブの並びで決まる。
-    void MAIN_TABS.restore().then(() => {
+    void MAIN_TABS.restore(
+      INITIAL_RIGHT_ROUTE ? { rightRoute: INITIAL_RIGHT_ROUTE } : {},
+    ).then(() => {
+      // 右の面に開けなかった (1 面で狭い) なら、そのファイルは本文で開く。
+      const right = MAIN_TABS.paneRoute("right");
+      if (
+        INITIAL_RIGHT_ROUTE &&
+        !(
+          right?.screen === "file" &&
+          right.path === INITIAL_RIGHT_ROUTE.path &&
+          right.ref === INITIAL_RIGHT_ROUTE.ref
+        )
+      )
+        setRoute(INITIAL_RIGHT_ROUTE, true);
       syncTerminalFromUrl(INITIAL_TERMINAL_PARAM);
       // 下パネルの開閉は設定から戻す (URL が Tools も Search も指していないとき)。
       if (
@@ -6549,6 +6628,225 @@ window.GdpExpandLogic = GdpExpandLogic;
     return host;
   }
 
+  // ---- 右の面のソース表示 ----
+  // 右の面の前面がファイルのとき、面の箱に 2 つ目のソース表示 (と Blame) を
+  // 描く。本文 (左の面) の実体と同じ createSourceView を、route・探す範囲・
+  // 差し込み先を右の面のものにして呼ぶ。行の選択・読み込みの取り消し・仮想
+  // スクロールは実体ごと、ファイルの取得・強調器・注釈の保存は共有。
+
+  type FileRoute = Extract<AppRoute, { screen: "file" }>;
+
+  type SidePane = {
+    /** 面の箱に入れる枠。スクロールはこの中。 */
+    root: HTMLElement;
+    /** カードを差し込む先 (本文の #diff にあたる)。 */
+    body: HTMLElement;
+    /** 描いている route (右の前面のタブの route)。 */
+    route: FileRoute;
+    /** 最後に描いた route。同じなら描き直さない (スクロールを失わない)。 */
+    rendered: string | null;
+    source: ReturnType<typeof createSourceView>;
+    blame: ReturnType<typeof createBlameView>;
+  };
+
+  let RIGHT_SOURCE: SidePane | null = null;
+
+  function rightSourcePane(route: FileRoute): SidePane {
+    if (RIGHT_SOURCE) return RIGHT_SOURCE;
+    const root = document.createElement("div");
+    root.className = "main-pane-source";
+    root.tabIndex = -1;
+    const body = document.createElement("div");
+    body.className = "main-pane-source-body";
+    root.append(body);
+    const scrollTarget = (): HTMLElement => {
+      const virtual = root.querySelector<HTMLElement>(
+        ".gdp-source-virtual-scroller",
+      );
+      return virtual && virtual.offsetParent !== null ? virtual : root;
+    };
+    // 本文だけのもの (body のクラス・木・左の列のボタン) は右の面では動かさない。
+    const noop = () => undefined;
+    // 実体の依存は描くときの route を読む (pane は下で組む)。
+    let pane: SidePane;
+    const source = createSourceView({
+      ...SOURCE_VIEW_DEPS,
+      route: () => pane.route,
+      setRoute: (next, replace) => setRightPaneRoute(next, replace),
+      scope: () => root,
+      mountRoot: () => body,
+      mainScrollTarget: scrollTarget,
+      focusPanel: () => root.focus({ preventScroll: true }),
+      setPageMode: noop,
+      repoFileTargetFromRoute: () => pane.route.ref,
+      renderRepoBlobSidebar: noop,
+      placeSidebarToggle: noop,
+    });
+    const blame = createBlameView({
+      ...BLAME_VIEW_DEPS,
+      mountRoot: () => body,
+      scope: () => root,
+      setRoute: (next, replace) => setRightPaneRoute(next, replace),
+      setPageMode: noop,
+      removeStandaloneSource: () => pane.source.removeStandaloneSource(),
+      placeSidebarToggle: noop,
+      repoFileTargetFromRoute: () => pane.route.ref,
+      renderRepoBlobSidebar: noop,
+      currentSourceLineTarget: (target) =>
+        pane.source.currentSourceLineTarget(target),
+      lineInSourceTarget: (lineNumber, target) =>
+        pane.source.lineInSourceTarget(lineNumber, target),
+      bindSourceLineNumber: (num, card, target, line) =>
+        pane.source.bindSourceLineNumber(num, card, target, line),
+      setPreferredSourceTab: (tab) => pane.source.setPreferredSourceTab(tab),
+    });
+    pane = { root, body, route, rendered: null, source, blame };
+    DEFINITION_JUMP.install(root);
+    RIGHT_SOURCE = pane;
+    return pane;
+  }
+
+  /**
+   * 木のファイルを Alt+クリック: 反対の面で開く。1 面か左にフォーカスが
+   * あれば右の面 (1 面なら右に分ける)、右にフォーカスがあれば左 (本文)。
+   * 右の面では History を持たないので、その表示は Code に落とす。フォルダ
+   * は反対の面に開けない (フォルダ表示は本文だけ) ので普通のクリックと同じ。
+   */
+  function openFileInOtherPane(file: SidebarItem): void {
+    const ref = REPO_SIDEBAR_REF || STATE.repoRef || "worktree";
+    if (file.type === "tree") {
+      setRoute(REPO_VIEW.repoRoute(ref, file.resolved_path ?? file.path));
+      void REPO_VIEW.loadRepo();
+      return;
+    }
+    const keep = fileRouteKeepingActiveView(
+      STATE.route,
+      { path: file.path, ref },
+      currentRange(),
+    );
+    const route: FileRoute =
+      keep.view === "history" ? { ...keep, view: "blob" } : keep;
+    const view = MAIN_TABS.panes();
+    if (view.split && view.focused === "right") {
+      MAIN_TABS.focusSide("left");
+      setRoute(route);
+      return;
+    }
+    // 2 面を置けない幅: 反対の面が無いので本文で開く。
+    if (!openInRightPane(route)) setRoute(route);
+  }
+
+  /** キー操作・スクロールの相手: フォーカスのある面のソース表示。 */
+  function activeSourceView(): ReturnType<typeof createSourceView> {
+    const view = MAIN_TABS.panes();
+    return view.focused === "right" &&
+      view.fronts.right?.target.kind === "file" &&
+      RIGHT_SOURCE
+      ? RIGHT_SOURCE.source
+      : SOURCE_VIEW;
+  }
+
+  /** 右の面の箱に、前面のファイルのタブの route を描く (同じ route なら何もしない)。 */
+  function showSourceInRight(): void {
+    const route = MAIN_TABS.paneRoute("right");
+    if (route?.screen !== "file")
+      throw new Error(
+        `right pane: the front tab has no file route (${JSON.stringify(route)})`,
+      );
+    const pane = rightSourcePane(route);
+    const host = PANE_HOSTS.right;
+    if (pane.root.parentElement !== host) host.replaceChildren(pane.root);
+    pane.route = route;
+    const key = JSON.stringify(route);
+    if (pane.rendered === key) return;
+    pane.rendered = key;
+    const target = { path: route.path, ref: route.ref };
+    if (route.view === "blame") {
+      pane.source.cancelActiveSourceLoad("navigation");
+      pane.source.removeStandaloneSource();
+      void pane.blame.renderBlamePage(target);
+      return;
+    }
+    pane.blame.removeBlamePage();
+    pane.source.applySourceRouteToShell();
+  }
+
+  /**
+   * 右の面へファイルの route を開く (右にフォーカスがあるときの木・パレット、
+   * Alt+クリック、右の面の中の移動)。開けなければ (1 面で狭い) false。
+   */
+  function openInRightPane(route: FileRoute, replace = false): boolean {
+    if (!MAIN_TABS.openRouteRight(route)) return false;
+    showSourceInRight();
+    syncLineRefPill();
+    if (isRepositorySidebarMode()) markActive(route.path);
+    const url = withPaneOverlay(urlForRoute(route), "right");
+    if (url !== window.location.pathname + window.location.search) {
+      if (replace) history.replaceState(historyStateForRoute(route), "", url);
+      else history.pushState(historyStateForRoute(route), "", url);
+    }
+    return true;
+  }
+
+  /**
+   * 右の面のソース表示・Blame が route を変える。右で描けないもの (ファイル
+   * の History・フォルダ・Diff・History) は本文 (左の面) で開く。
+   */
+  function setRightPaneRoute(route: AppRoute, replace = false): void {
+    if (
+      route.screen === "file" &&
+      route.view !== "history" &&
+      routeTarget(route)?.kind === "file" &&
+      openInRightPane(route, replace)
+    )
+      return;
+    MAIN_TABS.focusSide("left");
+    setRoute(route, replace);
+  }
+
+  /**
+   * 木・パレット・定義ジャンプなどが route を置いた後に呼ぶソースの描画。
+   * いま右の面に開いたファイルなら右の面の実体、それ以外は本文の実体。
+   */
+  function renderStandaloneSource(
+    target: SourceFileTarget,
+    options?: { refresh?: boolean },
+  ): Promise<unknown> {
+    const view = MAIN_TABS.panes();
+    const route = MAIN_TABS.paneRoute("right");
+    if (
+      view.focused === "right" &&
+      RIGHT_SOURCE &&
+      route?.screen === "file" &&
+      route.path === target.path &&
+      route.ref === target.ref
+    )
+      return RIGHT_SOURCE.source.renderStandaloneSource(target, options);
+    return SOURCE_VIEW.renderStandaloneSource(target, options);
+  }
+
+  /**
+   * URL をフォーカスのある面に合わせる: 右の面のファイルなら その route に
+   * pane=right を足したもの、そうでないのに pane=right が残っていれば本文の
+   * route に戻す。
+   */
+  function syncFocusedPaneUrl(mode: "push" | "replace"): void {
+    const view = MAIN_TABS.panes();
+    const right = MAIN_TABS.paneRoute("right");
+    const current = window.location.pathname + window.location.search;
+    let next: string | null = null;
+    if (view.focused === "right" && right?.screen === "file")
+      next = withPaneOverlay(urlForRoute(right), "right");
+    else if (parsePaneOverlay(window.location.search))
+      next = urlForRoute(STATE.route);
+    if (next === null || next === current) return;
+    const state = historyStateForRoute(
+      view.focused === "right" && right ? right : STATE.route,
+    );
+    if (mode === "push") history.pushState(state, "", next);
+    else history.replaceState(state, "", next);
+  }
+
   /**
    * パスから画像を引く (既存の /_agent/images。URL はサーバが組み立てる)。
    * リポジトリのファイルなら、木の同じフォルダの画像を前後の並びにする。
@@ -6708,7 +7006,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     const overview = AGENT_MONITOR.snapshot().overview;
     const unread = AGENT_MONITOR.snapshot().unread;
     const items: ContextMenuItem[] = [
-      { label: t.newTabOpenFile, onSelect: () => openSearchPalette("file") },
+      {
+        label: t.newTabOpenFile,
+        // その面の＋から開いたファイルは、その面に開く (右の面にも置ける)。
+        onSelect: () => {
+          MAIN_TABS.focusSide(side);
+          openSearchPalette("file");
+        },
+      },
       {
         label: t.newShell,
         title:
@@ -6822,22 +7127,28 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * 面の前面・フォーカス・分割が変わった。面ごとの箱にターミナル・画像を
-   * 出す (本文 = route の中身は左の面にしか出ないので、左の前面が route の
-   * タブか何も選んでいないときは箱を隠して本文を見せる)。フォーカスのある面の
-   * 前面がターミナルなら URL にそのシェルを積み、そうでないタブへ route を
-   * 移らずに戻ったときは ?terminal= を外す。
+   * 面の前面・フォーカス・分割が変わった。面ごとの箱にターミナル・画像・
+   * 右の面のファイルを出す (本文 = route の中身は左の面にしか出ないので、左の
+   * 前面が route のタブか何も選んでいないときは箱を隠して本文を見せる)。
+   * URL はフォーカスのある面に合わせる: 右の面のファイルなら pane=right、
+   * ターミナルならそのシェルを積み、そうでないタブへ route を移らずに戻った
+   * ときは ?terminal= を外す。
    */
   function showPanes(view: PanesView, how: FrontChange): void {
     for (const side of ["left", "right"] as const) {
       const host = PANE_HOSTS[side];
       const tab = view.fronts[side];
       const present = side === "left" || view.split;
-      const shown = present && tab !== null && !isRouteTab(tab);
+      const shown =
+        present &&
+        tab !== null &&
+        (!isRouteTab(tab) || (side === "right" && tab.target.kind === "file"));
       host.classList.toggle("is-shown", shown);
       host.dataset.kind = shown && tab ? tab.target.kind : "";
       if (!shown || !tab) continue;
-      if (tab.target.kind === "terminal") {
+      if (tab.target.kind === "file") {
+        showSourceInRight();
+      } else if (tab.target.kind === "terminal") {
         host.replaceChildren(TERMINAL_VIEW.tabPaneFor(side));
         void TERMINAL_VIEW.showInTab(
           tab.target.session as ShellSessionId,
@@ -6849,6 +7160,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     syncHeaderMenu();
     AGENTS_SIDEBAR?.refresh();
+    syncLineRefPill();
+    // 木の選択の印は、フォーカスのある面のファイル (リポジトリの木のとき)。
+    if (isRepositorySidebarMode()) {
+      const right =
+        view.focused === "right" && view.fronts.right?.target.kind === "file"
+          ? MAIN_TABS.paneRoute("right")
+          : null;
+      const focusedRoute = right ?? STATE.route;
+      if (focusedRoute.screen === "file") markActive(focusedRoute.path);
+    }
+    if (how !== "navigate")
+      syncFocusedPaneUrl(how === "stay" ? "push" : "replace");
     const front = view.fronts[view.focused];
     const session =
       front?.target.kind === "terminal" ? front.target.session : null;
@@ -7508,6 +7831,30 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function applyRouteFromLocation() {
+    // URL が右の面のファイル (pane=right): 右の面で開き、本文は描き直さない。
+    // 右に開けない (1 面で狭い・ファイルでない) なら pane=right を外して本文へ。
+    if (parsePaneOverlay(window.location.search) === "right") {
+      const paneRoute = normalizeInternalFileRoute(
+        parseRoute(routePathname(), window.location.search, currentRange()),
+      );
+      if (
+        paneRoute.screen === "file" &&
+        paneRoute.view !== "history" &&
+        routeTarget(paneRoute)?.kind === "file" &&
+        MAIN_TABS.openRouteRight(paneRoute, true)
+      ) {
+        showSourceInRight();
+        return;
+      }
+      history.replaceState(
+        history.state,
+        "",
+        withPaneOverlay(
+          window.location.pathname + window.location.search,
+          null,
+        ) + window.location.hash,
+      );
+    }
     const previousRoute = STATE.route;
     // replaceUrlWithCurrentRoute が ?terminal= を今の状態で書き直す前に読む。
     const terminalParam = parseTerminalOverlay(window.location.search);
@@ -7577,9 +7924,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (
       isSameBlobFileRoute(previousRoute, STATE.route) &&
       routeBlobPreview(previousRoute) !== routeBlobPreview(STATE.route) &&
-      switchSourceTab(routeBlobPreview(STATE.route) ? "preview" : "code", {
-        updateRoute: false,
-      })
+      SOURCE_VIEW.switchSourceTab(
+        routeBlobPreview(STATE.route) ? "preview" : "code",
+        { updateRoute: false },
+      )
     ) {
       setStatus("live");
       return;

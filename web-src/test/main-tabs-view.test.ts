@@ -579,7 +579,8 @@ describe("main tabs view: 左右 2 面", () => {
   });
 
   test.each([
-    { name: "ファイルのタブ", kind: "file", dropZone: false },
+    { name: "page のタブ", kind: "page", dropZone: false },
+    { name: "ファイルのタブ", kind: "file", dropZone: true },
     { name: "ターミナルのタブ", kind: "terminal", dropZone: true },
   ])("ドラッグ中の右に分割の落とす先は、右に置ける種類だけ ($name)", async ({
     kind,
@@ -587,29 +588,41 @@ describe("main tabs view: 左右 2 面", () => {
   }) => {
     const { handle, mount } = setup(async () => null);
     await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
     handle.openTerminal("shell-a1");
-    mount
-      .querySelector<HTMLElement>(`.main-tab[data-kind="${kind}"]`)
-      ?.dispatchEvent(new Event("dragstart", { bubbles: true }));
+    const dragged = mount.querySelector<HTMLElement>(
+      `.main-tab[data-kind="${kind}"]`,
+    );
+    if (!dragged) throw new Error(`no ${kind} tab to drag`);
+    dragged.dispatchEvent(new Event("dragstart", { bubbles: true }));
     const zone = document.querySelector<HTMLElement>(".main-split-drop");
     expect(zone?.hidden).toBe(!dropZone);
   });
 
-  test("右の面のタブ列には、ファイルのタブを落とせない (dragover を受けない)", async () => {
+  test.each([
+    { kind: "page", accepts: false },
+    { kind: "file", accepts: true },
+  ])("右の面のタブ列が $kind のタブを受けるか (dragover): $accepts", async ({
+    kind,
+    accepts,
+  }) => {
     const { handle, mount } = setup(async () => null);
     await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
     handle.openTerminal("shell-a1");
     splitButton(mount)?.click();
-    mount
-      .querySelector<HTMLElement>('.main-tab[data-kind="file"]')
-      ?.dispatchEvent(new Event("dragstart", { bubbles: true }));
+    const dragged = mount.querySelector<HTMLElement>(
+      `.main-tab[data-kind="${kind}"]`,
+    );
+    if (!dragged) throw new Error(`no ${kind} tab to drag`);
+    dragged.dispatchEvent(new Event("dragstart", { bubbles: true }));
     const over = new Event("dragover", { bubbles: true, cancelable: true });
     mount
       .querySelector<HTMLElement>(
         '.main-tabs-pane[data-side="right"] .main-tabs-strip',
       )
       ?.dispatchEvent(over);
-    expect(over.defaultPrevented).toBe(false);
+    expect(over.defaultPrevented).toBe(accepts);
   });
 
   test("保存した 2 面・比・画像の前面が戻る (URL が下に残った route を指していても)", async () => {

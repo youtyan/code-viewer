@@ -20,9 +20,9 @@ afterAll(() => {
 
 function createDeps() {
   return {
-    $: <T extends Element = HTMLElement>(sel: string): T => {
-      const el = document.querySelector<T>(sel);
-      if (!el) throw new Error(`missing ${sel}`);
+    mountRoot: () => {
+      const el = document.querySelector<HTMLElement>("#diff");
+      if (!el) throw new Error("missing #diff");
       return el;
     },
     repoFileTargetFromRoute: () => null,
