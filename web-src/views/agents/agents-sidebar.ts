@@ -19,7 +19,6 @@ import {
   type AgentPane,
   type AgentProjectGroup,
   groupAgentPanesByPlace,
-  paneTaskText,
 } from "../../core/agent-overview";
 import {
   CHEVRON_DOWN_16_PATH,
@@ -33,6 +32,7 @@ import type { ProjectActions } from "../projects/project-actions";
 import { showProjectMenu } from "../projects/project-menu";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
+import { paneText } from "./pane-text";
 
 export type AgentsSidebarDeps = {
   root: HTMLElement;
@@ -126,25 +126,11 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     row.classList.toggle("unread", unread !== undefined);
     if (active) row.setAttribute("aria-current", "true");
 
-    const kind = el(
-      "span",
-      "nav-agent-kind",
-      pane.kind ? current.kind[pane.kind] : current.kindShell,
-    );
-    const paneTask = paneTaskText(pane);
-    // tmux / shell の既定の題名はホスト名やコマンド名のような 1 語になる。
-    // それを作業内容として見せず、AI CLI が書いた説明的な題名だけを使う。
-    const rawTitle = pane.title.trim();
-    const task = el(
-      "span",
-      "nav-agent-task",
-      paneTask !== pane.command &&
-        (paneTask !== rawTitle ||
-          /\s/.test(rawTitle) ||
-          /[^\p{ASCII}]/u.test(rawTitle))
-        ? paneTask
-        : current.state[pane.state],
-    );
+    // 作業の要約 (無ければ状態の語) は「＋」・パレット・タブと同じ決まり
+    // (pane-text.ts)。tmux の既定の題名 (ホスト名など) は出さない。
+    const shown = paneText(pane, current);
+    const kind = el("span", "nav-agent-kind", shown.kind);
+    const task = el("span", "nav-agent-task", shown.summary);
     const age = ageText(pane);
     const time = el("span", "nav-agent-age", age.text);
     if (age.title) time.title = age.title;
@@ -152,8 +138,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     dot.setAttribute("aria-hidden", "true");
     row.append(stateMark(pane.state), kind, task, time, dot);
     row.title = [
-      `${current.state[pane.state]} · ${task.textContent}`,
-      `${pane.label} · ${pane.command}`,
+      shown.title,
       pane.worktree ? current.worktreeTitle(pane.worktree) : "",
       unread
         ? unread === "waiting"

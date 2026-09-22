@@ -25,7 +25,6 @@ import {
   type AgentPane,
   type AgentTransition,
   nextAgentUnread,
-  paneTaskText,
   shouldNotifyAgent,
 } from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
@@ -36,6 +35,7 @@ import {
 import { BACKGROUND_REQUEST_HEADER } from "../../core/network-activity";
 import type { TmuxPaneId } from "../../core/tmux";
 import type { AgentsText } from "./i18n";
+import { paneText } from "./pane-text";
 
 /**
  * 取り直す間隔。サーバの巡回 (terminal/activity.ts) と合わせて、状態が
@@ -122,7 +122,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     // 同じペインの同じ変化は 1 枚に畳む。同じサーバを複数のタブで開いて
     // いても、OS の通知が重ならない。
     const notification = new api(title, {
-      body: `${paneTaskText(pane)}\n${pane.label}`,
+      body: `${paneText(pane, text).summary}\n${pane.label}`,
       tag: `code-viewer-agent:${pane.id}:${transition}`,
     });
     notification.addEventListener("click", () => {

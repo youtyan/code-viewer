@@ -449,13 +449,31 @@ describe("agents sidebar heading marks", () => {
 });
 
 describe("agents sidebar row contents", () => {
-  test.each<[string, AgentState, string, string]>([
-    ["agent title", "working", "✳ Review plan", "Review plan"],
-    ["Japanese agent title", "working", "✳ 調査中", "調査中"],
-    ["command title", "idle", "claude", "Idle"],
-    ["one-word shell title", "waiting", "workstation", "Needs input"],
-    ["empty title", "done", "", "Finished · unread"],
-  ])("%s", (_name, state, title, expected) => {
+  test.each<[string, AgentState, string, string, string]>([
+    [
+      "agent title",
+      "working",
+      "✳ Review plan",
+      "Review plan",
+      "Working · Review plan",
+    ],
+    [
+      "Japanese agent title",
+      "working",
+      "✳ 調査中",
+      "調査中",
+      "Working · 調査中",
+    ],
+    ["command title", "idle", "claude", "Idle", "Idle"],
+    [
+      "one-word shell title",
+      "waiting",
+      "workstation",
+      "Needs input",
+      "Needs input",
+    ],
+    ["empty title", "done", "", "Finished · unread", "Finished · unread"],
+  ])("%s", (_name, state, title, expected, tooltip) => {
     const { root } = mount(
       overview(
         [pane("%1", "work:0.0", "/work/sample-app", state, title)],
@@ -464,9 +482,7 @@ describe("agents sidebar row contents", () => {
     );
     const row = root.querySelector<HTMLElement>(".nav-agent");
     expect(row?.querySelector(".nav-agent-task")?.textContent).toBe(expected);
-    expect(row?.title.split("\n")[0]).toBe(
-      `${agentsText("en").state[state]} · ${expected}`,
-    );
+    expect(row?.title.split("\n")[0]).toBe(tooltip);
   });
 });
 

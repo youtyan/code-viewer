@@ -234,6 +234,49 @@ describe("open", () => {
     expect(show(after)).toBe(expected);
   });
 
+  // 左右に並べられる同じ中身はファイルだけ。シェル・画像は 1 つの場所にしか
+  // 置かない: 面を指定して開くと、反対の面にあるタブを前面に出す (2 枚目を作らない)。
+  test.each([
+    {
+      name: "シェル",
+      before: {
+        panes: {
+          left: {
+            tabs: [
+              { id: "a", target: file("a"), preview: false },
+              {
+                id: "t",
+                target: { kind: "terminal", session: "shell-a1" },
+                preview: false,
+              },
+            ],
+            activeId: "a",
+            recent: ["a"],
+          },
+          right: pane("[~c]"),
+        },
+        focused: "left",
+        split: 0.5,
+      } as Layout,
+      target: { kind: "terminal", session: "shell-a1" } as TabTarget,
+      expected: "a [t] | [~c] (left)",
+    },
+    {
+      name: "画像",
+      before: layoutOf("[a] ~img", "[~c]"),
+      target: image("img"),
+      expected: "a [~img] | [~c] (left)",
+    },
+  ])("面を指定しても、$name は反対の面の同じタブを前面に出す", ({
+    before,
+    target,
+    expected,
+  }) => {
+    const after = open(before, target, { pane: "right", newId: ids() });
+    assertLayout(after);
+    expect(show(after)).toBe(expected);
+  });
+
   test.each([
     {
       name: "1 面なら新しい右の面を作る (左の同じファイルは残す)",
@@ -1076,6 +1119,29 @@ describe("本文の既定 (Files のタブの代わり)", () => {
       split: 0.5,
     };
     expect(() => assertLayout(layout)).toThrow("right holds page tab diff");
+  });
+
+  test("assertLayout は左右の同じシェルを見つける", () => {
+    const shell = { kind: "terminal", session: "shell-a1" } as TabTarget;
+    const layout: Layout = {
+      panes: {
+        left: {
+          tabs: [{ id: "t1", target: shell, preview: false }],
+          activeId: "t1",
+          recent: ["t1"],
+        },
+        right: {
+          tabs: [{ id: "t2", target: shell, preview: false }],
+          activeId: "t2",
+          recent: ["t2"],
+        },
+      },
+      focused: "left",
+      split: 0.5,
+    };
+    expect(() => assertLayout(layout)).toThrow(
+      'duplicate target {"kind":"terminal","session":"shell-a1"}',
+    );
   });
 
   test("assertLayout は同じ面の同じ中身を見つけ、左右の同じファイルは通す", () => {

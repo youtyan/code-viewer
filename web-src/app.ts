@@ -1,9 +1,5 @@
 import type { AgentHooksResponse } from "./core/agent-hooks";
-import {
-  type AgentPane,
-  paneTaskText,
-  titleWithUnread,
-} from "./core/agent-overview";
+import { type AgentPane, titleWithUnread } from "./core/agent-overview";
 import {
   type AgentScreenRuleIssue,
   type AgentScreenRulesResponse,
@@ -120,6 +116,7 @@ import {
   parseToolsOverlay,
   type SourceFileTarget,
   type SourceLineTarget,
+  screenToLeave,
   type TerminalOverlayState,
   withDoctorOverlay,
   withPaneOverlay,
@@ -171,6 +168,7 @@ import {
 } from "./views/agents/agents-sidebar";
 import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
 import { agentsText } from "./views/agents/i18n";
+import { paneText } from "./views/agents/pane-text";
 import { mountUsageStatus } from "./views/agents/usage-status";
 import { createAnnotationsPlayer } from "./views/annotations-player";
 import {
@@ -4146,6 +4144,29 @@ window.GdpExpandLogic = GdpExpandLogic;
     return route.screen === "file" && route.view === "blob" && !!route.preview;
   }
 
+  /**
+   * 自分の箱を本文の面に置く画面を離れるなら、その画面の後片付け (箱を外し、
+   * 隠した #diff を戻す)。setRoute と URL からの移動の両方がここを通る。
+   */
+  function leaveScreen(previous: AppRoute, next: AppRoute): void {
+    switch (screenToLeave(previous, next)) {
+      case "database":
+        DATABASE_VIEW.suspend();
+        return;
+      case "journal":
+        JOURNAL_VIEW?.suspend();
+        return;
+      case "worktree":
+        WORKTREE_VIEW?.suspend();
+        return;
+      case "agents":
+        AGENTS_VIEW?.suspend();
+        return;
+      case null:
+        return;
+    }
+  }
+
   function setRoute(route: AppRoute, replace = false) {
     // 右の面にフォーカスがあるときの木・パレット・リンクで開くファイルは、
     // 右の面で開く (本文は描き直さない)。履歴を置き換えるだけの呼び出し
@@ -4174,18 +4195,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       preHistoryRange = null;
       removeFileHistoryShell();
     }
-    if (previousRoute.screen === "journal" && nextRoute.screen !== "journal") {
-      JOURNAL_VIEW?.suspend();
-    }
-    if (
-      previousRoute.screen === "worktree" &&
-      nextRoute.screen !== "worktree"
-    ) {
-      WORKTREE_VIEW?.suspend();
-    }
-    if (previousRoute.screen === "agents" && nextRoute.screen !== "agents") {
-      AGENTS_VIEW?.suspend();
-    }
+    leaveScreen(previousRoute, nextRoute);
     STATE.route = nextRoute;
     STATE.from = nextRoute.range.from;
     STATE.to = nextRoute.range.to;
@@ -6120,7 +6130,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   function setRange(from: string, to: string) {
     // An explicit range pick supersedes whatever was parked for history.
     preHistoryRange = null;
-    const wasDatabaseRoute = STATE.route.screen === "database";
     STATE.from = from || "";
     STATE.to = to || "";
     patchSettings({ range: currentRange() });
@@ -6143,8 +6152,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       );
       renderHelpPage();
     } else {
+      // Data を離れる後片付けは setRoute (leaveScreen) がする。
       setRoute({ screen: "diff", range }, true);
-      if (wasDatabaseRoute) DATABASE_VIEW.suspend();
       // Leaving the history screen here: drop its body class and panel layout.
       setPageMode();
       load();
@@ -7074,7 +7083,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         const pane = paneForShell(session.id);
         sessions.push({
           label: `${mark(pane?.id, tabbed)}${terminalTabInfo(session.id).label}${tabbed ? ` · ${t.inTab}` : ""}`,
-          title: [pane ? paneTaskText(pane) : session.command, session.cwd]
+          title: [pane ? paneText(pane, a).title : session.command, session.cwd]
             .filter(Boolean)
             .join("\n"),
           onSelect: () => MAIN_TABS.openTerminal(session.id),
@@ -7091,11 +7100,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     for (const pane of overview?.panes ?? []) {
       if (pane.project !== current?.root) continue;
       if (pane.shownInShell !== "" && shown.has(pane.shownInShell)) continue;
-      const name = pane.kind ? a.kind[pane.kind] : a.kindShell;
+      // 行の形はサイドバー・パレット・タブと同じ決まり (pane-text.ts)。
+      const row = paneText(pane, a);
       sessions.push({
-        // メニューの幅で後ろが切れても見分けが付くよう、場所を作業内容より前に。
-        label: `${mark(pane.id, false)}${name} · ${pane.label} · ${paneTaskText(pane)}`,
-        title: `${a.state[pane.state]} · ${pane.label}\n${paneTaskText(pane)}`,
+        label: `${mark(pane.id, false)}${row.row}`,
+        title: row.title,
         onSelect: () => openAgentPane(pane.id),
       });
     }
@@ -7238,10 +7247,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const pane = paneForShell(session);
     const a = agentsText(STATE.language);
     if (pane?.kind)
-      return {
-        label: `${a.kind[pane.kind]} · ${a.state[pane.state]}`,
-        state: pane.state,
-      };
+      return { label: paneText(pane, a).headline, state: pane.state };
     return {
       label: `${terminalText(STATE.language).shellTarget} ${session.replace(/^shell-/, "")}`,
       state: null,
@@ -7415,8 +7421,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       commands.push({
         group: pane.kind === null ? "sessions" : "agents",
         id: `pane:${pane.id}`,
-        title: pane.kind ? agents.kind[pane.kind] : agents.kindShell,
-        detail: `${paneTaskText(pane)} · ${pane.label}`,
+        title: paneText(pane, agents).kind,
+        detail: paneText(pane, agents).detail,
         status: agents.state[pane.state],
         statusTone: pane.state,
         iconHtml: `<i class="terminal-mark terminal-mark-${pane.state}" aria-hidden="true"></i>`,
@@ -7904,14 +7910,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         ? { screen: "diff", range: parsedRoute.range }
         : parsedRoute;
     nextRoute = normalizeInternalFileRoute(nextRoute);
-    if (previousRoute.screen === "database" && nextRoute.screen !== "database")
-      DATABASE_VIEW.suspend();
-    if (previousRoute.screen === "journal" && nextRoute.screen !== "journal")
-      JOURNAL_VIEW?.suspend();
-    if (previousRoute.screen === "worktree" && nextRoute.screen !== "worktree")
-      WORKTREE_VIEW?.suspend();
-    if (previousRoute.screen === "agents" && nextRoute.screen !== "agents")
-      AGENTS_VIEW?.suspend();
+    leaveScreen(previousRoute, nextRoute);
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
       HISTORY_VIEW.leaveHistory();
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))

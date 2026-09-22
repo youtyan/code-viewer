@@ -614,6 +614,37 @@ export function parsePaneOverlay(search: string): "right" | null {
   return new URLSearchParams(search).get("pane") === "right" ? "right" : null;
 }
 
+/**
+ * 自分の箱を本文の面に置き、#diff を隠す画面。離れるときにその画面の後片付け
+ * (箱を外して #diff を戻す) が要る。設定 (help) は #diff を描き直すだけなので
+ * 入らない。History は範囲の戻しを伴う別の後片付け (app.ts) を持つ。
+ */
+export type LeavableScreen = "database" | "worktree" | "journal" | "agents";
+
+const LEAVABLE_SCREENS: readonly LeavableScreen[] = [
+  "database",
+  "worktree",
+  "journal",
+  "agents",
+];
+
+function isLeavableScreen(screen: string): screen is LeavableScreen {
+  return (LEAVABLE_SCREENS as readonly string[]).includes(screen);
+}
+
+/**
+ * route を移るとき、後片付けの要る画面を離れるならその画面、そうでなければ
+ * null。setRoute (木・パレット・タブ) と URL からの移動 (戻る・進む) の両方が
+ * これを使う (片方にだけ画面を足す取りこぼしを起こさない)。
+ */
+export function screenToLeave(
+  previous: AppRoute,
+  next: AppRoute,
+): LeavableScreen | null {
+  if (previous.screen === next.screen) return null;
+  return isLeavableScreen(previous.screen) ? previous.screen : null;
+}
+
 export function withPaneOverlay(url: string, side: "right" | null): string {
   return withQueryParam(url, "pane", side);
 }

@@ -32,7 +32,7 @@ import {
   filterAgentPanes,
   groupAgentPanes,
   matchesStateFilter,
-  paneTaskText,
+  paneTaskSummary,
 } from "../../core/agent-overview";
 import {
   CHEVRON_DOWN_16_PATH,
@@ -48,6 +48,7 @@ import { showProjectMenu } from "../projects/project-menu";
 import type { AccountsBand } from "./accounts-band";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
+import { paneText } from "./pane-text";
 
 export type AgentsViewDeps = {
   monitor: AgentMonitor;
@@ -268,10 +269,11 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     task.className = "agents-cell agents-task";
     const taskText = document.createElement("span");
     taskText.className = "agents-cell-text";
-    const titled =
-      pane.title.trim() !== "" && paneTaskText(pane) !== pane.command;
-    taskText.textContent = titled ? paneTaskText(pane) : current.board.noTask;
-    task.classList.toggle("agents-task-none", !titled);
+    // 要約はサイドバー・「＋」・パレットと同じ判定 (tmux の既定の題名 =
+    // ホスト名などは作業とみなさない)。状態はこの表では別の列にある。
+    const summary = paneTaskSummary(pane);
+    taskText.textContent = summary ?? current.board.noTask;
+    task.classList.toggle("agents-task-none", summary === null);
     task.appendChild(taskText);
     if (pane.worktree) {
       const worktree = document.createElement("span");
@@ -312,8 +314,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
 
     row.append(state, kind, account, task, place, age, dot);
     row.title = [
-      pane.title || pane.command,
-      `${pane.label} · ${pane.command}`,
+      paneText(pane, current).title,
       pane.path,
       unread ? dot.title : "",
       age.title,

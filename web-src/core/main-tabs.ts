@@ -15,7 +15,8 @@
 //   右の面は空にならず (空になれば 1 面に戻る)、必ずどれかを選んでいる
 // - 右の面のタブは canPlace(target, "right") を満たす
 // - 仮のタブ (preview) は面ごとに最大 1
-// - 同じ中身 (sameTarget) のタブは面ごとに最大 1 (左右で同じファイルは開ける)
+// - 同じ中身 (sameTarget) のタブは、ファイルなら面ごとに最大 1 (左右で同じ
+//   ファイルは開ける)、ほかは全体で最大 1 (perPaneTarget)
 //
 // 表示名は画面側 (i18n) が作る。ここは同一判定だけを持つ。
 
@@ -302,8 +303,10 @@ function openPlan(
 ): { side: PaneSide; existing: { side: PaneSide; tab: Tab } | null } {
   const wanted = resolveSide(layout, opts.pane);
   const side = canPlace(target, wanted) ? wanted : "left";
+  // 面を指定したときにその面の中だけを探すのは、左右に並べられるファイルだけ。
+  // シェル・画像・画面は 1 つの場所にしか置かない (反対の面のタブを前面に出す)。
   const existing =
-    opts.pane === undefined || opts.pane === "focused"
+    opts.pane === undefined || opts.pane === "focused" || !perPaneTarget(target)
       ? findTarget(
           layout,
           target,
@@ -311,6 +314,14 @@ function openPlan(
         )
       : findTarget(layout, target, [side]);
   return { side, existing };
+}
+
+/**
+ * 同じ中身を左右の面に 1 つずつ置けるか。ファイルだけ (面ごとのソース表示)。
+ * シェルは 1 つを 2 か所に映せず、画像・画面も 2 つ並べる意味が無い。
+ */
+function perPaneTarget(target: TabTarget): boolean {
+  return target.kind === "file";
 }
 
 /** open が target を前面に出す面 (同じ中身があればその面、無ければ入れる面)。 */
@@ -724,9 +735,10 @@ export function parseLayout(raw: unknown): ParsedLayout {
     problems.push(`panes has ${panesRaw.length} entries (1 or 2 allowed)`);
   const panes: Partial<Record<PaneSide, Pane>> = {};
   const seenIds = new Map<string, string>();
-  // page は左の面にしか置けない (版 1 の右の page は左へ移す) ので、左右を
-  // 通して 1 つ。それ以外の中身は面ごとに 1 つ (左右で同じファイルは開ける)。
-  const seenPages: Array<{ target: TabTarget; at: string }> = [];
+  // 左右に同じものを置けるのはファイルだけ (perPaneTarget)。シェル・画像・
+  // page は左右を通して 1 つ (版 1 の右の page は左へ移すので、重なると壊れた
+  // 配置として報告する)。
+  const seenEverywhere: Array<{ target: TabTarget; at: string }> = [];
   (panesRaw ?? []).slice(0, 2).forEach((paneRaw, paneIndex) => {
     const seenTargets: Array<{ target: TabTarget; at: string }> = [];
     const where = `panes[${paneIndex}]`;
@@ -772,7 +784,7 @@ export function parseLayout(raw: unknown): ParsedLayout {
       if (dupId)
         problems.push(`${at}: id "${tabRaw.id}" is also used at ${dupId}`);
       seenIds.set(tabRaw.id, at);
-      const seen = target.kind === "page" ? seenPages : seenTargets;
+      const seen = perPaneTarget(target) ? seenTargets : seenEverywhere;
       const dupTarget = seen.find((item) => sameTarget(item.target, target));
       if (dupTarget)
         problems.push(
@@ -858,6 +870,8 @@ export function parseLayout(raw: unknown): ParsedLayout {
 export function assertLayout(layout: Layout): void {
   const problems: string[] = [];
   const ids = new Set<string>();
+  // ファイル以外の同じ中身は左右を通して 1 つ (perPaneTarget)。
+  const everywhere: TabTarget[] = [];
   if (!paneOf(layout, layout.focused))
     problems.push(`focused pane ${layout.focused} is missing`);
   if (layout.panes.right?.tabs.length === 0)
@@ -868,11 +882,12 @@ export function assertLayout(layout: Layout): void {
     for (const tab of pane.tabs) {
       if (ids.has(tab.id)) problems.push(`duplicate id ${tab.id}`);
       ids.add(tab.id);
-      if (targets.some((t) => sameTarget(t, tab.target)))
+      const seen = perPaneTarget(tab.target) ? targets : everywhere;
+      if (seen.some((t) => sameTarget(t, tab.target)))
         problems.push(
           `duplicate target ${JSON.stringify(tab.target)} in ${side}`,
         );
-      targets.push(tab.target);
+      seen.push(tab.target);
     }
     if (pane.tabs.filter((tab) => tab.preview).length > 1)
       problems.push(`${side} has more than one preview tab`);

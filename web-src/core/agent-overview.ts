@@ -115,6 +115,20 @@ export function paneTaskText(pane: AgentPane): string {
 }
 
 /**
+ * 作業の要約。AI CLI が書いた説明的な題名だけを返し、tmux / shell の既定の
+ * 題名は null: 空・コマンド名・状態の記号も無い ASCII の 1 語 (ホスト名など)。
+ * 空白を含むか ASCII 以外を含む題名、状態の記号を取った題名は要約とみなす。
+ */
+export function paneTaskSummary(pane: AgentPane): string | null {
+  const raw = pane.title.trim();
+  const summary = paneTaskText(pane);
+  if (!raw || summary === pane.command) return null;
+  if (summary === raw && !/\s/.test(raw) && !/[^\p{ASCII}]/u.test(raw))
+    return null;
+  return summary;
+}
+
+/**
  * ホーム配下のパスを `~/…` に縮める。見出しの横幅をホームの長いパスに
  * 取られないため。ホームそのものは `~`。`/home/sample-old` のように前方だけ
  * 一致するものは縮めない (区切りまで見る)。
