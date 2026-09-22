@@ -578,6 +578,9 @@ async function flushMicrotasks(count = 8) {
 describe("database view SQL error rendering", () => {
   test("renders schema fetch errors in the table list and grid panes", async () => {
     installDatabaseDom();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     mockFetch((url, init) => {
       if (url === "/_db/tabs" && init?.method === "PUT")
         return jsonResponse({ ok: true });
@@ -600,6 +603,57 @@ describe("database view SQL error rendering", () => {
       "Error: failed to fetch schema (HTTP 500): schema failed",
       "Error: failed to fetch schema (HTTP 500): schema failed",
     ]);
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to fetch schema",
+      expect.objectContaining({
+        message: "failed to fetch schema (HTTP 500): schema failed",
+      }),
+    );
+    await leaveView(view);
+  });
+
+  test("renders schema-list fetch errors in both panes and logs the error", async () => {
+    installDatabaseDom();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") {
+        return jsonResponse({
+          files: [
+            {
+              ...baseFilesResponse().files[0],
+              kind: "postgresql",
+            },
+          ],
+        });
+      }
+      if (url.startsWith("/_db/schemas")) {
+        return new Response("schemas failed", { status: 503 });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+
+    const errors = Array.from(
+      document.querySelectorAll(".db-pane-error"),
+    ) as unknown as FakeElement[];
+    expect(errors).toHaveLength(2);
+    expect(errors.map((error) => error.textContent)).toEqual([
+      "Error: failed to fetch schemas (HTTP 503): schemas failed",
+      "Error: failed to fetch schemas (HTTP 503): schemas failed",
+    ]);
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to fetch schemas",
+      expect.objectContaining({
+        message: "failed to fetch schemas (HTTP 503): schemas failed",
+      }),
+    );
     await leaveView(view);
   });
 
@@ -2133,6 +2187,9 @@ describe("database view SQL error rendering", () => {
 
   test("renders query fetch errors returned as plain text", async () => {
     installDatabaseDom();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     mockFetch((url, init) => {
       if (url === "/_db/tabs" && init?.method === "PUT")
         return jsonResponse({ ok: true });
@@ -2179,6 +2236,12 @@ describe("database view SQL error rendering", () => {
     expect(
       document.querySelector<HTMLElement>(".db-query-result")?.hidden,
     ).toBe(true);
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to execute query",
+      expect.objectContaining({
+        message: "failed to execute query (HTTP 500): query failed",
+      }),
+    );
     await leaveView(view);
   });
 

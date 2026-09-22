@@ -223,4 +223,48 @@ describe("query editor value display", () => {
     );
     editor.dispose();
   });
+
+  test.each([
+    {
+      name: "Run",
+      invoke: (editor: ReturnType<typeof createQueryEditor>) => editor.run(),
+      expectedOperation: "Failed to execute query",
+    },
+    {
+      name: "Explain",
+      invoke: (editor: ReturnType<typeof createQueryEditor>) =>
+        editor.explain(),
+      expectedOperation: "Failed to explain query",
+    },
+  ])("$name keeps the screen message and complete error in the console", async ({
+    invoke,
+    expectedOperation,
+  }) => {
+    const cause = new TypeError("database connection lost");
+    const failure = Object.assign(new Error("query request failed"), {
+      cause,
+    });
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const editor = createQueryEditor({
+      executeQuery: () => Promise.reject(failure),
+    });
+    document.body.appendChild(editor.el);
+    editor.setSql("SELECT sample_column FROM sample_table");
+
+    await invoke(editor);
+
+    expect(editor.el.querySelector(".db-query-error")?.textContent).toBe(
+      "query request failed",
+    );
+    expect(consoleError).toHaveBeenCalledWith(expectedOperation, failure);
+    expect(consoleError.mock.calls[0]?.[1]).toBe(failure);
+    const logged = consoleError.mock.calls[0]?.[1] as Error & {
+      cause?: unknown;
+    };
+    expect(logged.cause).toBe(cause);
+    expect(logged.stack).toBe(failure.stack);
+    editor.dispose();
+  });
 });

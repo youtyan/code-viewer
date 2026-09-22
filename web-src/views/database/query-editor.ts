@@ -221,12 +221,14 @@ export function createQueryEditor(
       );
       renderResultTable(result);
     } catch (err) {
+      console.error("Failed to execute query", err);
       statusSpan.textContent = text().editor.failed;
       showQueryResult();
       resultArea.innerHTML = "";
       const errEl = document.createElement("pre");
       errEl.className = "db-query-error";
-      errEl.textContent = err instanceof Error ? err.message : String(err);
+      errEl.textContent =
+        err instanceof Error ? err.message : formatErrorDetail(err);
       resultArea.appendChild(errEl);
     } finally {
       runBtn.disabled = false;
@@ -319,12 +321,14 @@ export function createQueryEditor(
       statusSpan.textContent = text().editor.statusExplain(result.elapsedMs);
       renderResultTable(result);
     } catch (err) {
+      console.error("Failed to explain query", err);
       statusSpan.textContent = text().editor.failed;
       showQueryResult();
       resultArea.innerHTML = "";
       const errEl = document.createElement("pre");
       errEl.className = "db-query-error";
-      errEl.textContent = err instanceof Error ? err.message : String(err);
+      errEl.textContent =
+        err instanceof Error ? err.message : formatErrorDetail(err);
       resultArea.appendChild(errEl);
     } finally {
       explainBtn.disabled = false;

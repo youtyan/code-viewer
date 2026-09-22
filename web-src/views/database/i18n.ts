@@ -233,6 +233,7 @@ export type DbText = {
     copyMermaid: string;
     copyMermaidTitle: string;
     copied: string;
+    copyFailed: (detail: string) => string;
     noTables: string;
     loadError: string;
     renderError: string;
@@ -666,6 +667,7 @@ const EN: DbText = {
     copyMermaid: "Copy Mermaid",
     copyMermaidTitle: "Copy mermaid source to clipboard",
     copied: "Copied!",
+    copyFailed: (detail) => `Copy Mermaid failed: ${detail}`,
     noTables: "No tables to display.",
     loadError: "Failed to load mermaid.js",
     renderError: "Failed to render ER diagram.",
@@ -1103,6 +1105,7 @@ const JA: DbText = {
     copyMermaid: "Mermaid をコピー",
     copyMermaidTitle: "Mermaid ソースをクリップボードにコピー",
     copied: "コピーしました",
+    copyFailed: (detail) => `Mermaid のコピーに失敗しました: ${detail}`,
     noTables: "表示できるテーブルがありません。",
     loadError: "mermaid.js の読み込みに失敗しました",
     renderError: "ER 図の描画に失敗しました。",

@@ -128,6 +128,7 @@ export type DatabaseView = {
 };
 
 type TabName = "data" | "query" | "schema" | "er" | "search" | "snapshot";
+type LoadRecovery<T> = { ok: true; value: T } | { ok: false; error: unknown };
 type DatabaseAnnotationTarget = Extract<AnnotationTarget, { kind: "database" }>;
 type DatabaseEnterOptions = {
   autoSelectFirst?: boolean;
@@ -1691,9 +1692,16 @@ function createTabPane(
     if (isPostgresKind(currentDbInfo?.kind)) {
       const desiredSchema =
         preferredSchema !== undefined ? preferredSchema : currentSchema;
-      const schemas = await fetchSchemas(dbId, desiredSchema).catch((err) => {
-        if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
-        const message = errorMessage(err);
+      const schemasResult = await fetchSchemas(dbId, desiredSchema).then(
+        (value): LoadRecovery<DbSchemasResponse> => ({ ok: true, value }),
+        (error): LoadRecovery<DbSchemasResponse> => {
+          console.error("Failed to fetch schemas", error);
+          return { ok: false, error };
+        },
+      );
+      if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
+      if (schemasResult.ok === false) {
+        const message = errorMessage(schemasResult.error);
         currentSchema = null;
         renderSchemaOptions([], null);
         schemaCache = null;
@@ -1703,10 +1711,9 @@ function createTabPane(
         schemaView.clear();
         erDiagram.clear();
         cb.onStateChange();
-        return null;
-      });
-      if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
-      if (!schemas) return;
+        return;
+      }
+      const schemas = schemasResult.value;
       const schemaNames = schemas.schemas.map((s) => s.name);
       currentSchema =
         schemas.selectedSchema ||
@@ -1718,9 +1725,16 @@ function createTabPane(
       currentSchema = null;
       renderSchemaOptions([], null);
     }
-    const schema = await fetchSchema(dbId).catch((err) => {
-      if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
-      const message = errorMessage(err);
+    const schemaResult = await fetchSchema(dbId).then(
+      (value): LoadRecovery<DbSchemaResponse> => ({ ok: true, value }),
+      (error): LoadRecovery<DbSchemaResponse> => {
+        console.error("Failed to fetch schema", error);
+        return { ok: false, error };
+      },
+    );
+    if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
+    if (schemaResult.ok === false) {
+      const message = errorMessage(schemaResult.error);
       schemaCache = null;
       tableList.render([]);
       setTableListStatus(message, { error: true });
@@ -1729,10 +1743,9 @@ function createTabPane(
       erDiagram.clear();
       setActiveTab("data", false);
       cb.onStateChange();
-      return null;
-    });
-    if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
-    if (!schema) return;
+      return;
+    }
+    const schema = schemaResult.value;
     currentSchema = schema.schema || currentSchema;
     schemaCache = schema;
     await outerDeps.ensureDbUiState();

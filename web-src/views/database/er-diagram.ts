@@ -1,5 +1,6 @@
 import type { DbColumn, DbSchemaResponse } from "../../core/database/types";
 import { createDiagramViewport } from "../../core/diagram-viewport";
+import { formatErrorDetail } from "../../core/error-detail";
 import { loadMermaid } from "../../core/mermaid-loader";
 import { type DbText, dbText } from "./i18n";
 
@@ -143,7 +144,13 @@ export function createErDiagram(
             copyBtn.textContent = text().er.copyMermaid;
           }, 1500);
         },
-        () => undefined,
+        (error) => {
+          console.error("Failed to copy Mermaid source", error);
+          const message = text().er.copyFailed(formatErrorDetail(error));
+          copyBtn.classList.add("failed");
+          copyBtn.title = message;
+          setTimeout(() => copyBtn.classList.remove("failed"), 1500);
+        },
       );
     }
   });

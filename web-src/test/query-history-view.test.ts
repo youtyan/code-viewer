@@ -190,6 +190,60 @@ describe("query history view", () => {
     expect(meta.textContent || "").toMatch(/34ms/);
   });
 
+  test("keeps an invalid execution time visible and reports the reason", async () => {
+    const invalidTime = "invalid-timestamp";
+    globalThis.fetch = ((_input: RequestInfo | URL) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            entries: [
+              {
+                id: "sample-entry",
+                dbId: "sample.db",
+                schema: "public",
+                sql: "SELECT id FROM sample_table",
+                columns: ["id"],
+                rowsPreview: [[1]],
+                rowCount: 1,
+                savedRows: 1,
+                truncated: false,
+                elapsedMs: 3,
+                executedAt: invalidTime,
+                executedBy: "user",
+                source: "browser",
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )) as typeof fetch;
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const view = createQueryHistoryView({
+      getDbId: () => "sample.db",
+      getSchema: () => "public",
+      copySqlToQuery: () => undefined,
+      getText: () => dbText("en"),
+    });
+    document.body.appendChild(view.el);
+
+    await view.refresh({ force: true });
+
+    const time = q<HTMLElement>(view.el, ".db-query-history-time");
+    expect(time.textContent).toBe(invalidTime);
+    expect(time.title).toBe(invalidTime);
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to format query history timestamp",
+      expect.objectContaining({
+        message: "Invalid query history timestamp: invalid-timestamp",
+      }),
+    );
+  });
+
   test("keeps history and reports refresh, delete, and clear failures", async () => {
     const entry = {
       id: "sample-entry",
