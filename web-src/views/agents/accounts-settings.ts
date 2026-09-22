@@ -2,7 +2,7 @@
 //
 //   アカウント
 //   claude  既定    ● ログイン済み  ~/.claude                       [ログイン]
-//   claude  仕事用  ○ 未ログイン    ~/.local/state/…/claude-work     [ログイン] [外す]
+//   claude  仕事用  ○ 未ログイン    ~/.local/state/…/claude-work     [ログイン] [名前を変更] [外す]
 //   codex   既定    ● ログイン済み  ~/.codex
 //   [アカウントを追加…]
 //   claude の使用量
@@ -196,6 +196,20 @@ export function createAccountsSettings(
       actions.appendChild(login);
     }
     if (!account.builtin) {
+      const rename = el("button", "gdp-btn gdp-btn-sm", t.rename);
+      rename.type = "button";
+      rename.title = t.renameTitle(account.name);
+      rename.disabled = busy;
+      rename.addEventListener(
+        "click",
+        () =>
+          void run(account.id, async () => {
+            const out = await deps.dialogs.rename(account);
+            if (out) sectionMessage = { ok: true, text: out };
+            return null;
+          }),
+      );
+      actions.appendChild(rename);
       const remove = el("button", "gdp-btn gdp-btn-sm", t.remove);
       remove.type = "button";
       remove.title = t.removeTitle(account.name);

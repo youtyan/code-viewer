@@ -41,6 +41,7 @@ import {
   applyCreateAccount,
   applyRegisterAccount,
   applyRemoveAccount,
+  applyRenameAccount,
   planCreateAccount,
   planRegisterAccount,
   updateAccountRegistry,
@@ -153,6 +154,14 @@ export async function handleAccountsPost(req: Request): Promise<Response> {
     if (fields.op === "remove") {
       if (typeof fields.id !== "string") return textError("invalid id", 400);
       return json({ removed: await applyRemoveAccount(paths, fields.id) });
+    }
+    if (fields.op === "rename") {
+      if (typeof fields.id !== "string") return textError("invalid id", 400);
+      const name = text(fields.name, 200);
+      if (name === null) return textError("invalid name", 400);
+      return json({
+        renamed: await applyRenameAccount(paths, fields.id, name),
+      });
     }
     if (fields.op === "preferences") {
       const commands = fields.launchCommands;

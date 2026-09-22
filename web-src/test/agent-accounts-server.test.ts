@@ -44,6 +44,7 @@ import {
   applyCreateAccount,
   applyRegisterAccount,
   applyRemoveAccount,
+  applyRenameAccount,
   planCreateAccount,
   readAccountRegistry,
   updateAccountRegistry,
@@ -438,6 +439,72 @@ describe("registering, removing and a broken registry", () => {
     expect(existsSync(dir)).toBe(true);
     const read = readAccountRegistry(paths.registry);
     expect(read.ok && read.registry.accounts).toEqual([]);
+  });
+
+  test("renaming writes the new name and keeps the directory and id", async () => {
+    const dir = join(root, "existing");
+    mkdirSync(dir);
+    const added = await applyRegisterAccount(paths, "codex", "Personal", dir);
+    const renamed = await applyRenameAccount(paths, added.id, " Side project ");
+    const read = readAccountRegistry(paths.registry);
+    expect([
+      renamed.name,
+      read.ok &&
+        read.registry.accounts.map((account) => [
+          account.id,
+          account.name,
+          account.configDir,
+        ]),
+    ]).toEqual(["Side project", [[added.id, "Side project", dir]]]);
+  });
+
+  test.each([
+    {
+      name: "the name of another account",
+      next: "Other",
+      code: "conflict",
+      message: /"Other" is already the name of another codex account/,
+    },
+    {
+      name: "the name of the default account",
+      next: "Default",
+      code: "invalid",
+      message: /"Default" is the name of the default account/,
+    },
+    {
+      name: "an empty name",
+      next: "  ",
+      code: "invalid",
+      message: /invalid account name \(empty\)/,
+    },
+  ])("renaming to $name is refused with the reason", async ({
+    next,
+    code,
+    message,
+  }) => {
+    const one = join(root, "one");
+    const two = join(root, "two");
+    mkdirSync(one);
+    mkdirSync(two);
+    const added = await applyRegisterAccount(paths, "codex", "Personal", one);
+    await applyRegisterAccount(paths, "codex", "Other", two);
+    const rename = applyRenameAccount(paths, added.id, next);
+    await expect(rename).rejects.toMatchObject({ code });
+    await expect(rename).rejects.toThrow(message);
+    const read = readAccountRegistry(paths.registry);
+    expect(read.ok && read.registry.accounts.map((a) => a.name)).toEqual([
+      "Personal",
+      "Other",
+    ]);
+  });
+
+  test.each([
+    { id: "claude:default", code: "builtin" },
+    { id: "missing", code: "not-found" },
+  ])("renaming $id is refused", async ({ id, code }) => {
+    await expect(applyRenameAccount(paths, id, "Mine")).rejects.toMatchObject({
+      code,
+    });
   });
 
   test.each([

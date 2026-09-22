@@ -54,6 +54,7 @@ export type AccountsClient = {
   create(plan: CreateAccountPlan, share: string[]): Promise<StoredAccount>;
   register(plan: RegisterAccountPlan): Promise<StoredAccount>;
   remove(id: string): Promise<StoredAccount>;
+  rename(id: string, name: string): Promise<StoredAccount>;
   savePreferences(commands: Record<string, string>): Promise<void>;
   login(id: string): Promise<{ paneId: string; session: string }>;
   launch(request: {
@@ -227,6 +228,15 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
       );
       await load();
       return result.removed;
+    },
+    async rename(id, name) {
+      const result = await post<{ renamed: StoredAccount }>(
+        apiUrl("agentAccounts"),
+        { op: "rename", id, name },
+        "rename the account",
+      );
+      await load();
+      return result.renamed;
     },
     async savePreferences(commands) {
       await post(

@@ -24,7 +24,8 @@ import {
   type AgentOverviewResponse,
   abbreviateHome,
 } from "../../core/agent-overview";
-import { CHEVRON_DOWN_16_PATH, iconSvg } from "../../core/icons";
+import { CHEVRON_DOWN_16_PATH, iconSvg, KEBAB_16_PATH } from "../../core/icons";
+import { showContextMenu } from "../context-menu";
 import type { AccountsClient } from "./accounts-client";
 import {
   type AccountDialogs,
@@ -200,6 +201,35 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
     ].join("\n");
     name.addEventListener("click", () => deps.openSettings());
     head.appendChild(name);
+    // 登録したアカウントだけ: 名前の変更・外す (既定のアカウントは変えられない)。
+    if (!account.builtin) {
+      const menu = el("button", "agents-icon-action agents-account-menu");
+      menu.type = "button";
+      menu.innerHTML = iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH);
+      menu.title = t.bandMenu(account.name);
+      menu.setAttribute("aria-label", menu.title);
+      menu.setAttribute("aria-haspopup", "menu");
+      menu.disabled = busy;
+      menu.addEventListener("click", (event) => {
+        // 文書全体の click で閉じる処理に、開いたばかりのメニューを閉じさせない
+        // (全体ボードのプロジェクトの ⋯ と同じ)。
+        event.stopPropagation();
+        showContextMenu(menu, [
+          {
+            label: `${t.rename}…`,
+            title: t.renameTitle(account.name),
+            onSelect: () => void run(() => deps.dialogs.rename(account)),
+          },
+          {
+            label: `${t.remove}…`,
+            title: t.removeTitle(account.name),
+            danger: true,
+            onSelect: () => void run(() => deps.dialogs.remove(account)),
+          },
+        ]);
+      });
+      head.appendChild(menu);
+    }
     box.append(head, usageBlock(account, now));
 
     const foot = el("div", "agents-account-foot");

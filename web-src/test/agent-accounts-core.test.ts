@@ -21,7 +21,9 @@ import {
   normalizeConfigDir,
   parseAccountRegistry,
   pickAccountEnv,
+  RESERVED_ACCOUNT_NAMES,
   removeAccount,
+  renameAccount,
   type ShareEntry,
   showPaneAccounts,
   tmuxLaunchArgs,
@@ -311,6 +313,94 @@ describe("adding and removing", () => {
       expect(result.registry.lastLaunch).toBeNull();
       expect(result.removed.id).toBe("id-1");
     }
+  });
+
+  // 表示名の変更。同じ種類の中で重なる名前・既定のアカウントの表示名と同じ
+  // 名前・空などは、理由の種類を返して断る。自分と同じ名前 (大文字小文字だけ
+  // 違うものを含む) は通す。
+  test.each([
+    {
+      name: "renames a registered account",
+      id: "id-1",
+      next: "  Work laptop ",
+      expected: { ok: true, name: "Work laptop" },
+    },
+    {
+      name: "keeps its own name with a different case",
+      id: "id-1",
+      next: "sample 1",
+      expected: { ok: true, name: "sample 1" },
+    },
+    {
+      name: "the same name as another account of the same agent",
+      id: "id-1",
+      next: "SAMPLE 0",
+      expected: { ok: false, code: "duplicate", existing: "Sample 0" },
+    },
+    {
+      name: "the same name as an account of the other agent is fine",
+      id: "id-1",
+      next: "Sample 2",
+      expected: { ok: true, name: "Sample 2" },
+    },
+    {
+      name: "the English name of the default account",
+      id: "id-1",
+      next: "default",
+      expected: { ok: false, code: "reserved" },
+    },
+    {
+      name: "the Japanese name of the default account",
+      id: "id-1",
+      next: "既定",
+      expected: { ok: false, code: "reserved" },
+    },
+    {
+      name: "an empty name",
+      id: "id-1",
+      next: "   ",
+      expected: { ok: false, code: "name", issue: "empty" },
+    },
+    {
+      name: "the default account",
+      id: "claude:default",
+      next: "Mine",
+      expected: { ok: false, code: "builtin" },
+    },
+    {
+      name: "an unknown account",
+      id: "missing",
+      next: "Mine",
+      expected: { ok: false, code: "not-found" },
+    },
+  ])("rename: $name", ({ id, next, expected }) => {
+    const base = registry([{}, {}, { agent: "codex" }]);
+    const result = renameAccount(base, id, next);
+    if (result.ok) {
+      expect({ ok: true, name: result.renamed.name }).toEqual(expected);
+      expect(
+        result.registry.accounts.map((account) => [account.id, account.name]),
+      ).toEqual([
+        ["id-0", "Sample 0"],
+        ["id-1", result.renamed.name],
+        ["id-2", "Sample 2"],
+      ]);
+    } else {
+      expect(result).toEqual(expected);
+    }
+  });
+
+  // 画面が既定のアカウントに付ける名前 (accounts-i18n の defaultName) は、
+  // 登録するアカウントの名前に使えない一覧と同じでなければならない。
+  test("reserved names cover every display name of the default account", async () => {
+    const { ACCOUNTS_EN, ACCOUNTS_JA } = await import(
+      "../views/agents/accounts-i18n"
+    );
+    expect(
+      [ACCOUNTS_EN.defaultName, ACCOUNTS_JA.defaultName].map((name) =>
+        name.toLocaleLowerCase(),
+      ),
+    ).toEqual([...RESERVED_ACCOUNT_NAMES]);
   });
 
   test("entries put the default first for each agent", () => {

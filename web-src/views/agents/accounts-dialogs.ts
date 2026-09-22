@@ -13,14 +13,16 @@ import {
   type AccountsResponse,
   type CreateAccountPlan,
   defaultLaunchSession,
+  emptyAccountRegistry,
   launchCommandLine,
   type RegisterAccountPlan,
+  renameAccount,
   type ShareEntry,
   tmuxSessionName,
 } from "../../core/agent-accounts";
 import type { AgentOverviewResponse } from "../../core/agent-overview";
 import { abbreviateHome } from "../../core/agent-overview";
-import { COPY_16_PATHS, iconSvg } from "../../core/icons";
+import { CHEVRON_DOWN_16_PATH, COPY_16_PATHS, iconSvg } from "../../core/icons";
 import { showFormDialog } from "../ui-dialog";
 import type { AccountsClient } from "./accounts-client";
 import type { AccountsText } from "./accounts-i18n";
@@ -79,6 +81,32 @@ function launchPreviewBlock(
   const box = el("div", "agent-launch-preview-block");
   box.append(el("span", "agent-launch-label", label), frame, result);
   return box;
+}
+
+/**
+ * 名前と補足 (設定の場所・パス) の 2 段で見せる選択の欄 (絵の Account /
+ * Project)。選ぶのは下に重ねた本物の select (キー操作・読み上げはそのまま)。
+ */
+function twoLineChoice(node: HTMLSelectElement): {
+  element: HTMLElement;
+  show(name: string, detail: string): void;
+} {
+  const box = el("span", "agent-launch-choice");
+  const name = el("span", "agent-launch-choice-name");
+  const detail = el("span", "agent-launch-choice-detail");
+  const chevron = el("span", "agent-launch-choice-chevron");
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
+  node.classList.add("agent-launch-choice-select");
+  box.append(name, detail, chevron, node);
+  return {
+    element: box,
+    show(nameText, detailText) {
+      name.textContent = nameText;
+      detail.textContent = detailText;
+      detail.hidden = detailText === "";
+    },
+  };
 }
 
 function input(value = "", placeholder = ""): HTMLInputElement {
@@ -193,6 +221,7 @@ export function runningCount(
 export type AccountDialogs = {
   add(prefill?: { agent: AccountAgent; path: string }): Promise<string | null>;
   remove(account: AccountStatus): Promise<string | null>;
+  rename(account: AccountStatus): Promise<string | null>;
   login(account: AccountEntry): Promise<string>;
   launch(options?: { project?: string }): Promise<string | null>;
 };
@@ -463,6 +492,60 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     });
   }
 
+  /**
+   * 表示名を変える。押す前の検査はサーバと同じ規則 (renameAccount) を、いま
+   * 見えている一覧に当てる。一覧が古くてもサーバが同じ理由で断り、その理由は
+   * ダイアログに出る。
+   */
+  async function rename(account: AccountStatus): Promise<string | null> {
+    const t = text();
+    const name = input(account.name);
+    name.setAttribute("aria-label", t.renameLabel);
+    const body = el("div", "worktree-form");
+    body.appendChild(field(t.renameLabel, name));
+    const listed = (deps.client.snapshot().data?.accounts ?? []).filter(
+      (entry) => !entry.builtin,
+    );
+    const registry = {
+      ...emptyAccountRegistry(),
+      accounts: listed.map((entry) => ({
+        id: entry.id,
+        agent: entry.agent,
+        name: entry.name,
+        configDir: entry.configDir,
+        managed: entry.managed,
+        createdAt: 0,
+      })),
+    };
+    return showFormDialog({
+      title: t.renameDialogTitle(account.name),
+      description: t.renameDescription,
+      body,
+      focusTarget: name,
+      submitLabel: t.renameConfirm,
+      cancelLabel: t.cancel,
+      validate: () => {
+        const result = renameAccount(registry, account.id, name.value);
+        if (result.ok !== false) return null;
+        switch (result.code) {
+          case "name":
+            return result.issue === "empty" ? t.renameEmpty : null;
+          case "reserved":
+            return t.renameReserved(name.value.trim());
+          case "duplicate":
+            return t.renameDuplicate(result.existing, account.agent);
+          default:
+            // 一覧に無い・既定: サーバに送って、その理由を出す。
+            return null;
+        }
+      },
+      submit: async () => {
+        const renamed = await deps.client.rename(account.id, name.value);
+        return t.renamed(account.name, renamed.name);
+      },
+    });
+  }
+
   async function login(account: AccountEntry): Promise<string> {
     const t = text();
     const pane = await deps.client.login(account.id);
@@ -507,6 +590,22 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
           ? last.project
           : (projects[0]?.value ?? "")),
     );
+    const accountChoice = twoLineChoice(accountSelect);
+    const projectChoice = twoLineChoice(projectSelect);
+    const home = data?.home ?? "";
+    /** 選んでいるアカウントとプロジェクトを、欄の 2 段 (名前・場所) に出す。 */
+    function syncChoices() {
+      const account = accounts.find((item) => item.id === accountSelect.value);
+      accountChoice.show(
+        account ? accountDisplayName(account, t) : "",
+        account ? abbreviateHome(account.configDir, home) : "",
+      );
+      const project = projects.find((p) => p.value === projectSelect.value);
+      projectChoice.show(
+        project?.label ?? "",
+        project ? abbreviateHome(project.value, home) : "",
+      );
+    }
     const session = input();
     const sessionHint = el("span", "worktree-hint");
     const loginHint = el("span", "worktree-hint");
@@ -599,6 +698,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
         data?.home ?? "",
       );
       copyResult.textContent = "";
+      syncChoices();
       loginHint.textContent =
         account?.login.state === "logged-out" ? t.launchNeedsLogin : "";
       loginHint.hidden = loginHint.textContent === "";
@@ -618,8 +718,8 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     });
     body.append(
       launchRow(t.launchKind, kind.element),
-      launchRow(t.launchAccount, accountSelect, loginHint),
-      launchRow(t.launchProject, projectSelect),
+      launchRow(t.launchAccount, accountChoice.element, loginHint),
+      launchRow(t.launchProject, projectChoice.element),
       launchRow(t.launchSession, session, sessionHint),
       launchPreviewBlock(t.launchPreviewLabel, previewFrame, copyResult),
     );
@@ -654,5 +754,5 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
     });
   }
 
-  return { add, remove, login, launch };
+  return { add, remove, rename, login, launch };
 }

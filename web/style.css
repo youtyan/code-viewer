@@ -19490,6 +19490,13 @@ button.agents-section-title:focus-visible {
 button.agents-account-name:hover {
   color: var(--color-text);
 }
+/* 登録したアカウントの ⋯ (名前の変更・外す)。名前の右。カードの見出しの
+   高さを変えないよう、押せる領域は上下へはみ出させる。 */
+.agents-account-menu {
+  flex: none;
+  align-self: center;
+  margin-block: calc((var(--ui-control-sm) - var(--ui-font-section) * 1.2) / -2);
+}
 .agents-account-usage {
   display: flex;
   flex-direction: column;
@@ -20300,12 +20307,78 @@ button.agents-account-name:hover {
   box-shadow: var(--glow-select);
   color: var(--color-text);
 }
+/* 絵のとおり、区切りの線はプレビューの下 (ボタンの上)。プレビューの見出しは
+   上の行と同じ間隔 (4 単位) で続ける。 */
 .agent-launch-preview-block {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding-top: var(--space-4);
-  box-shadow: inset 0 1px 0 var(--color-line);
+}
+.agent-launch-form {
+  padding-bottom: var(--space-5);
+  /* --color-line はダイアログの面とほぼ同じ色で見えないので、欄の枠と同じ線。 */
+  box-shadow: inset 0 -1px 0 var(--color-line-strong);
+}
+/* Account / Project: 名前と補足 (設定の場所・パス) の 2 段の欄 (絵の 14 単位)。
+   選ぶのは上に重ねた透明の select (キー操作・読み上げ・ネイティブの一覧は
+   そのまま)。フォーカスの輪は入力欄と同じ。 */
+.agent-launch-choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: calc(var(--space-unit) * 0.5);
+  min-height: calc(var(--space-unit) * 14);
+  padding: var(--space-2) calc(var(--space-4) + var(--icon-md) + var(--space-3))
+    var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+}
+/* 2 段の欄の行は、見出しを欄の上下の中央にそろえる (絵)。 */
+.agent-launch-row:has(.agent-launch-choice) .agent-launch-label {
+  min-height: calc(var(--space-unit) * 14);
+}
+.agent-launch-choice:focus-within {
+  box-shadow: inset 0 0 0 1px var(--color-accent), var(--focus-ring);
+}
+.agent-launch-choice-name {
+  overflow: hidden;
+  color: var(--color-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-launch-choice-detail {
+  overflow: hidden;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-launch-choice-detail[hidden] {
+  display: none;
+}
+.agent-launch-choice-chevron {
+  position: absolute;
+  top: 50%;
+  right: var(--space-4);
+  display: flex;
+  color: var(--color-text-2);
+  transform: translateY(-50%);
+}
+.agent-launch-choice-chevron svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  fill: currentColor;
+}
+.agent-launch-value .agent-launch-choice-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 .agent-launch-preview-block .agent-launch-label {
   min-height: 0;

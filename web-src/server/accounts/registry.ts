@@ -43,7 +43,9 @@ import {
   normalizeConfigDir,
   parseAccountRegistry,
   type RegisterAccountPlan,
+  type RenameAccountResult,
   removeAccount,
+  renameAccount,
   SHARED_CONFIG_ENTRIES,
   type ShareEntry,
   type ShareSelectionIssue,
@@ -461,4 +463,56 @@ export async function applyRemoveAccount(
     }
     return { registry: result.registry, result: result.removed };
   });
+}
+
+/**
+ * 表示名を変える (ロックの中で読む → 変える → 書く)。id と設定ディレクトリは
+ * 変えないので、使用量・起動の既定 (lastLaunch)・画面の表示はそのまま追従する。
+ */
+export async function applyRenameAccount(
+  paths: AccountPaths,
+  id: string,
+  name: string,
+): Promise<StoredAccount> {
+  return updateAccountRegistry(paths.registry, (registry) => {
+    const result = renameAccount(registry, id, name);
+    if (result.ok === false) throw renameError(registry, id, name, result);
+    return { registry: result.registry, result: result.renamed };
+  });
+}
+
+function renameError(
+  registry: AccountRegistry,
+  id: string,
+  name: string,
+  result: Extract<RenameAccountResult, { ok: false }>,
+): AccountError {
+  switch (result.code) {
+    case "builtin":
+      return new AccountError(
+        "the default account cannot be renamed (its name comes from the screen language)",
+        "builtin",
+      );
+    case "not-found":
+      return new AccountError(`no account ${id}`, "not-found");
+    case "name":
+      return new AccountError(
+        `invalid account name (${result.issue})`,
+        "invalid",
+      );
+    case "reserved":
+      return new AccountError(
+        `"${name.trim()}" is the name of the default account; choose another name`,
+        "invalid",
+      );
+    case "duplicate": {
+      const agent = registry.accounts.find(
+        (account) => account.id === id,
+      )?.agent;
+      return new AccountError(
+        `"${name.trim()}" is already the name of another ${agent} account ("${result.existing}")`,
+        "conflict",
+      );
+    }
+  }
 }

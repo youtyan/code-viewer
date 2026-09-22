@@ -71,6 +71,19 @@ export type AccountsText = {
   pathTitle: (path: string) => string;
   noConfigDir: (path: string) => string;
   add: string;
+  /** 表示名の変更 (設定の行のボタン・帯の ⋯ のメニュー)。 */
+  rename: string;
+  renameTitle: (name: string) => string;
+  renameDialogTitle: (name: string) => string;
+  renameDescription: string;
+  renameLabel: string;
+  renameConfirm: string;
+  renamed: (before: string, after: string) => string;
+  renameEmpty: string;
+  renameReserved: (name: string) => string;
+  renameDuplicate: (name: string, agent: string) => string;
+  /** 帯のカードの ⋯ のボタン。 */
+  bandMenu: (name: string) => string;
   remove: string;
   removeTitle: (name: string) => string;
   removeDialogTitle: (name: string) => string;
@@ -290,6 +303,20 @@ export const ACCOUNTS_EN: AccountsText = {
   pathTitle: (path) => path,
   noConfigDir: (path) => `The settings directory does not exist: ${path}`,
   add: "Add account…",
+  rename: "Rename",
+  renameTitle: (name) => `Change the display name of ${name}`,
+  renameDialogTitle: (name) => `Rename ${name}`,
+  renameDescription:
+    "Only the name shown in code-viewer changes. The settings directory, the sign-in and the usage stay as they are.",
+  renameLabel: "Name",
+  renameConfirm: "Rename",
+  renamed: (before, after) => `Renamed ${before} to ${after}.`,
+  renameEmpty: "Enter a name.",
+  renameReserved: (name) =>
+    `"${name}" is the name of the default account. Choose another name.`,
+  renameDuplicate: (name, agent) =>
+    `Another ${agent} account is already named "${name}".`,
+  bandMenu: (name) => `Actions for ${name}`,
   remove: "Remove",
   removeTitle: (name) => `Remove ${name} from the list`,
   removeDialogTitle: (name) => `Remove ${name}?`,
@@ -427,7 +454,7 @@ export const ACCOUNTS_EN: AccountsText = {
   launchCopy: "Copy the command",
   launchCopied: "Copied",
   launchCopyFailed: "Could not copy the command",
-  launchRun: "Start",
+  launchRun: "Launch",
   launchStarted: (session) => `Started in ${session}.`,
   launchRememberFailed: "Started, but the choice could not be remembered:",
   launchNeedsLogin:
@@ -531,6 +558,20 @@ export const ACCOUNTS_JA: AccountsText = {
   pathTitle: (path) => path,
   noConfigDir: (path) => `設定ディレクトリがありません: ${path}`,
   add: "アカウントを追加…",
+  rename: "名前を変更",
+  renameTitle: (name) => `${name} の表示名を変える`,
+  renameDialogTitle: (name) => `${name} の名前を変更`,
+  renameDescription:
+    "変わるのは code-viewer に表示する名前だけです。設定ディレクトリ・ログイン・使用量はそのままです。",
+  renameLabel: "名前",
+  renameConfirm: "変更",
+  renamed: (before, after) => `${before} を ${after} に変更しました。`,
+  renameEmpty: "名前を入れてください。",
+  renameReserved: (name) =>
+    `「${name}」は既定のアカウントの名前です。別の名前にしてください。`,
+  renameDuplicate: (name, agent) =>
+    `${agent} のほかのアカウントに「${name}」という名前が既にあります。`,
+  bandMenu: (name) => `${name} の操作`,
   remove: "外す",
   removeTitle: (name) => `${name} を一覧から外す`,
   removeDialogTitle: (name) => `${name} を外しますか？`,

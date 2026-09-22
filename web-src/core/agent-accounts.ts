@@ -321,6 +321,58 @@ export function removeAccount(
   };
 }
 
+/**
+ * 登録するアカウントの名前に使えないもの (小文字)。画面が既定のアカウントに
+ * 付ける名前 (views/agents/accounts-i18n.ts の defaultName、英語と日本語)
+ * と同じ名前だと、一覧で既定のものと見分けられない。一致はテストが確かめる。
+ */
+export const RESERVED_ACCOUNT_NAMES = ["default", "既定"] as const;
+
+export type RenameAccountResult =
+  | { ok: true; registry: AccountRegistry; renamed: StoredAccount }
+  | { ok: false; code: "builtin" | "not-found" | "reserved" }
+  | { ok: false; code: "name"; issue: Exclude<AccountNameIssue, null> }
+  | { ok: false; code: "duplicate"; existing: string };
+
+/**
+ * 表示名を変える。id・種類・設定ディレクトリはそのまま。同じ種類の中で
+ * 名前が重なる (大文字小文字を区別しない) もの、既定のアカウントの名前、
+ * 空・長すぎ・制御文字は断る。自分と同じ名前は通す (大文字小文字の直し)。
+ */
+export function renameAccount(
+  registry: AccountRegistry,
+  id: string,
+  name: string,
+): RenameAccountResult {
+  if (id.endsWith(":default")) return { ok: false, code: "builtin" };
+  const target = registry.accounts.find((account) => account.id === id);
+  if (!target) return { ok: false, code: "not-found" };
+  const issue = checkAccountName(name);
+  if (issue) return { ok: false, code: "name", issue };
+  const next = name.trim();
+  const key = next.toLocaleLowerCase();
+  if ((RESERVED_ACCOUNT_NAMES as readonly string[]).includes(key))
+    return { ok: false, code: "reserved" };
+  const clash = registry.accounts.find(
+    (account) =>
+      account.id !== id &&
+      account.agent === target.agent &&
+      account.name.trim().toLocaleLowerCase() === key,
+  );
+  if (clash) return { ok: false, code: "duplicate", existing: clash.name };
+  const renamed = { ...target, name: next };
+  return {
+    ok: true,
+    renamed,
+    registry: {
+      ...registry,
+      accounts: registry.accounts.map((account) =>
+        account.id === id ? renamed : account,
+      ),
+    },
+  };
+}
+
 /** 画面に出すアカウント 1 件 (既定を含む)。 */
 export type AccountEntry = {
   id: string;
