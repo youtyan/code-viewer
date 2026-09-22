@@ -13508,36 +13508,13 @@ body.db-resizing {
   font-size: var(--db-font-sm);
   font-family: var(--mono, monospace);
   text-transform: uppercase;
-  background: var(--bg-soft);
-  color: var(--fg-muted);
-  border: 1px solid var(--border);
+  /* 種類はデータの一部なので無彩色 (種類ごとの色分けはしない)。 */
+  background: var(--color-inset);
+  color: var(--color-text-2);
+  border: 1px solid transparent;
   flex-shrink: 0;
   min-width: 44px;
   text-align: center;
-}
-.redis-type-string {
-  background: #e8f0ff;
-  color: #224a8a;
-}
-.redis-type-hash {
-  background: #fff4e0;
-  color: #8a5a22;
-}
-.redis-type-list {
-  background: #e8f8e8;
-  color: #226a3a;
-}
-.redis-type-set {
-  background: #f0e8f8;
-  color: #5a228a;
-}
-.redis-type-zset {
-  background: #f8e8e8;
-  color: #8a2a3a;
-}
-.redis-type-stream {
-  background: #e8f8f8;
-  color: #226a8a;
 }
 .redis-key-more-btn {
   padding: 6px;
@@ -22540,6 +22517,175 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 }
 .db-root .db-query-highlight {
   background: var(--color-code);
+}
+
+/* ---- B-2: Data の他の面 (Schema・ER 図・各エクスプローラ・問い合わせの結果と
+   履歴・スナップショット・全体検索) ----
+   上の Data の表と同じ決まりに寄せる: 表の面は --color-code、見出しは沈んだ面と
+   1px の線、行は縞にせず薄い線で区切り、hover はわずかに明るく。一覧の行は
+   左の木の行 (.db-table-item) と同じく、選んだものだけ強い選択。入力欄は
+   クエリの入力欄と同じ枠 (コードの面・薄い線・フォーカスでアクセント)。
+   データの文字 (PK・型・状態) は無彩色。DOM と操作は変えない (見た目だけ)。
+   静的な表の行は一覧の行 (--ui-row-h)、見出しは --ui-control-md。 */
+.db-root :is(.db-schema-table, .db-query-table, .db-detail-table, .redis-value-hash-table) {
+  border-collapse: collapse;
+  background: var(--color-code);
+  color: var(--color-text);
+}
+.db-root :is(.db-schema-table, .db-query-table, .db-detail-table, .redis-value-hash-table) :is(th, td) {
+  height: var(--ui-row-h);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-right: 1px solid var(--color-line-soft);
+  border-bottom: 1px solid var(--color-line-soft);
+  background: transparent;
+  color: var(--color-text);
+}
+.db-root :is(.db-schema-table, .db-query-table, .db-detail-table, .redis-value-hash-table) :is(th, td):last-child {
+  border-right: 0;
+}
+.db-root :is(.db-schema-table, .db-query-table, .db-detail-table, .redis-value-hash-table) th {
+  height: var(--ui-control-md);
+  border-bottom-color: var(--color-line);
+  background: var(--color-inset);
+  font-weight: 600;
+}
+.db-root :is(.db-schema-table, .db-query-table, .db-detail-table, .redis-value-hash-table) tr.alt td {
+  background: transparent;
+}
+.db-root :is(.db-schema-table, .db-query-table, .db-detail-table, .redis-value-hash-table) tr:hover td {
+  background: color-mix(in srgb, var(--color-raised) 55%, transparent);
+}
+/* 行番号の列は Data の表と同じ沈んだ面 (上の td の規則より強くする)。 */
+.db-root .db-query-table :is(th, td).db-grid-rownum {
+  background: var(--color-inset);
+  color: var(--color-text-3);
+}
+.db-root :is(.db-schema-table, .db-query-table, .db-detail-table) :is(.db-schema-col-type, .db-schema-default, .db-query-header-type, .db-detail-table-muted, td.null) {
+  color: var(--color-text-3);
+}
+/* 上の html[data-theme="dark"] の PK の行の面より強くする (データは無彩色)。 */
+.db-root .db-schema-view .db-schema-table tr.pk-row {
+  background: transparent;
+}
+.db-root .db-schema-pk {
+  color: var(--color-text-2);
+}
+.db-root .db-schema-view {
+  background: var(--color-doc);
+}
+.db-root .db-schema-header {
+  border-bottom-color: transparent;
+  color: var(--color-text);
+  font-size: var(--ui-font-lg);
+}
+.db-root :is(.db-schema-section-header, .es-mapping-header, .dynamodb-index-heading, .db-snapshot-table-selector-header) {
+  color: var(--color-text-3);
+  letter-spacing: 0.06em;
+}
+.db-root :is(.redis-key-filter, .es-search-input, .s3-search-input, .dynamodb-filter-input, .dynamodb-key-condition-input, .db-global-search-input, .db-snapshot-note-input, .db-snapshot-table-filter-input, .redis-new-key-name, .es-new-doc-id, .redis-value-edit-textarea, .es-doc-edit-textarea, .s3-edit-textarea, .redis-new-key-value) {
+  border-color: var(--color-line-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-code);
+  color: var(--color-text);
+}
+.db-root :is(.redis-key-filter, .es-search-input, .s3-search-input, .dynamodb-filter-input, .dynamodb-key-condition-input, .db-global-search-input, .db-snapshot-note-input, .db-snapshot-table-filter-input, .redis-new-key-name, .es-new-doc-id, .redis-value-edit-textarea, .es-doc-edit-textarea, .s3-edit-textarea, .redis-new-key-value):focus {
+  border-color: var(--color-accent);
+  outline: none;
+  box-shadow: var(--glow-select);
+}
+.db-root :is(.redis-db-item, .redis-key-item, .es-index-item, .es-doc-item, .dynamodb-table-item, .dynamodb-item-row, .s3-object-item, .db-snapshot-table-row, .db-search-hit-row, .db-query-history-entry) {
+  border-left-color: transparent;
+  border-bottom-color: var(--color-line-soft);
+  color: var(--color-text);
+}
+.db-root :is(.redis-db-item, .redis-key-item, .es-index-item, .es-doc-item, .dynamodb-table-item, .dynamodb-item-row, .s3-object-item, .db-snapshot-table-row, .db-search-hit-row, .db-query-history-entry):hover {
+  background: color-mix(in srgb, var(--color-raised) 70%, transparent);
+}
+.db-root :is(.redis-db-item, .redis-key-item, .es-index-item, .es-doc-item, .dynamodb-table-item, .dynamodb-item-row, .s3-object-item).active,
+.db-root .db-query-history-entry.selected {
+  border-left-color: transparent;
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+  color: var(--color-text);
+}
+.db-root :is(.redis-key-list-pane, .es-index-list-pane, .es-doc-list-pane, .dynamodb-item-list-pane, .db-query-history-list-col) {
+  background: var(--color-tree);
+}
+.db-root :is(.db-query-history-detail-col, .db-global-search, .db-snapshot-view, .redis-main-pane, .s3-preview-pane) {
+  background: var(--color-doc);
+}
+/* 全体検索の結果: 表ごとの箱は Data の表と同じ面 (見出しは沈んだ面、行は
+   薄い線、列名はデータの一部なので無彩色の補助色)。 */
+.db-root .db-search-table-section {
+  border-color: transparent;
+  background: var(--color-code);
+}
+.db-root .db-search-table-header {
+  border-bottom-color: var(--color-line);
+  background: var(--color-inset);
+  color: var(--color-text);
+}
+.db-root .db-search-hit-row {
+  min-height: var(--ui-row-h);
+  align-items: center;
+}
+.db-root .db-search-hit-col {
+  color: var(--color-text-3);
+}
+.db-root .db-search-hit-val {
+  color: var(--color-text);
+}
+/* スナップショット: 箱を線で囲まず面の差で分ける (線の幅は残して寸法を変えない)。
+   一覧は木の面、比べる側は文書の面、案内と表の選択は沈んだ面。 */
+.db-root :is(.db-snapshot-guide, .db-snapshot-table-selector, .db-snapshot-table-checkboxes, .db-snapshot-left-pane, .db-snapshot-right-pane) {
+  border-color: transparent;
+}
+.db-root :is(.db-snapshot-guide, .db-snapshot-table-selector, .db-snapshot-table-checkboxes) {
+  background: var(--color-inset);
+}
+.db-root .db-snapshot-left-pane {
+  background: var(--color-tree);
+}
+.db-root .db-snapshot-right-pane {
+  background: var(--color-doc);
+}
+/* ER 図: 図の面はコードの面、実体の箱は沈んだ面と線、文字は本文の色。
+   mermaid が描いた SVG の塗り (path の fill 属性) を名前で上書きする。図の形・
+   配置は変えない。線と辺の札は mermaid が SVG の中に書く「#<id> .x」の規則
+   (id の詳細度) で色を持つので、この図の中に限って !important で上書きする。 */
+.db-root .db-er-diagram {
+  background: var(--color-code);
+}
+.db-root .db-er-diagram svg :is(g.outer-path, g.row-rect-even) > path:first-child {
+  fill: var(--color-inset);
+}
+.db-root .db-er-diagram svg g.row-rect-odd > path:first-child {
+  fill: var(--color-code);
+}
+.db-root .db-er-diagram svg :is(g.outer-path, g.row-rect-odd, g.row-rect-even) > path:not(:first-child),
+.db-root .db-er-diagram svg g.node path[stroke]:not([stroke="none"]) {
+  stroke: var(--color-line) !important;
+}
+.db-root .db-er-diagram svg .nodeLabel {
+  color: var(--color-text);
+}
+.db-root .db-er-diagram svg .label.attribute-type .nodeLabel,
+.db-root .db-er-diagram svg .label.attribute-keys .nodeLabel {
+  color: var(--color-text-3);
+}
+.db-root .db-er-diagram svg path.relationshipLine {
+  stroke: var(--color-text-3) !important;
+}
+.db-root .db-er-diagram svg :is(.labelBkg, span.edgeLabel) {
+  background-color: var(--color-code) !important;
+  color: var(--color-text-2);
+}
+.db-root .db-er-diagram svg :is(marker path, marker circle) {
+  stroke: var(--color-text-3) !important;
+}
+.db-root .db-er-diagram svg marker circle {
+  fill: var(--color-code) !important;
 }
 
 /* ---- B-2: Work log (views/journal-view.ts) ----
