@@ -3,7 +3,11 @@
 // sidebar. Extracted from app.ts as a deps-injected factory.
 
 import { normalizeNewDirectoryName } from "../core/directory-name";
-import { errorWithCause, formatErrorDetail } from "../core/error-detail";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 import {
   fileNameClipboardText,
   filePathClipboardText,
@@ -37,6 +41,7 @@ import {
   type MarkdownLinkNavigationDeps,
   openMarkdownLink,
 } from "./markdown-link-navigation";
+import { type RepoViewLanguage, repoViewText } from "./repo-view-i18n";
 import { createRepositoryWebLink as renderRepositoryWebLink } from "./repository-web-link";
 import { sidebarAncestorDirs } from "./sidebar";
 import {
@@ -134,6 +139,7 @@ export type RepoViewDeps = {
     route: AppRoute;
     files: { path: string }[];
     syntaxHighlight: boolean;
+    language: RepoViewLanguage;
   };
 };
 
@@ -400,10 +406,17 @@ export function createRepoView(deps: RepoViewDeps) {
         setTimeout(() => {
           button.classList.remove("copied");
         }, 1200);
-      } catch {
+      } catch (error) {
+        console.error("[code-viewer] copy folder path failed", path, error);
+        // 理由は押した場所の title に出す (箱の寸法は変えない)。
+        const idleTitle = button.title;
+        button.title = repoViewText(STATE.language).copyPathFailed(
+          formatErrorDetail(error),
+        );
         button.classList.add("failed");
         setTimeout(() => {
           button.classList.remove("failed");
+          button.title = idleTitle;
         }, 1200);
       }
     });
@@ -974,11 +987,24 @@ export function createRepoView(deps: RepoViewDeps) {
             },
           ),
         );
-      } catch {
+      } catch (error) {
+        console.error(
+          "[code-viewer] README markdown render failed",
+          meta.readme.path,
+          error,
+        );
+        // 生の文字に落として読めるようにするが、落ちた理由も並べて残す。
+        const reason = document.createElement("div");
+        reason.className = "gdp-markdown-fallback-reason";
+        const lead = document.createElement("p");
+        lead.textContent = repoViewText(STATE.language).readmeRenderFailed;
+        const detail = document.createElement("pre");
+        detail.textContent = formatErrorDetail(error);
+        reason.append(lead, detail);
         const fallback = document.createElement("pre");
         fallback.className = "gdp-markdown-fallback";
         fallback.textContent = meta.readme.text;
-        wrapper.appendChild(fallback);
+        wrapper.append(reason, fallback);
       }
       readme.appendChild(wrapper);
       shell.appendChild(readme);
@@ -1549,8 +1575,12 @@ export function createRepoView(deps: RepoViewDeps) {
       params.set("ref", ref);
       appendScopeParams(params);
       const meta = await trackLoad<RepoTreeResponse>(
-        fetch(`/_tree?${params.toString()}`).then((r) => {
-          if (!r.ok) throw new Error("failed to load repository tree");
+        fetch(`/_tree?${params.toString()}`).then(async (r) => {
+          if (!r.ok) {
+            throw new Error(
+              await responseErrorMessage(r, "refresh repository tree"),
+            );
+          }
           return r.json();
         }),
       );
@@ -1559,8 +1589,14 @@ export function createRepoView(deps: RepoViewDeps) {
       await refreshRepoSidebarTree(
         repoTreeEntriesToSidebarItems(meta.entries, ref),
       );
-    } catch {
-      /* best-effort: 次の SSE か手動更新で追いつく */
+    } catch (error) {
+      // 取り直しは次の SSE か手動更新で追いつくので、今のツリーはそのまま
+      // 残す。ただし失敗した事実と理由は捨てない。
+      console.error(
+        "[code-viewer] repository sidebar refresh failed",
+        ref,
+        error,
+      );
     } finally {
       REPO_SIDEBAR_REFRESHING = false;
       if (REPO_SIDEBAR_REFRESH_QUEUED) {

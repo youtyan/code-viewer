@@ -24,6 +24,13 @@ import {
 import { isImeComposing } from "../core/keyboard";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute } from "../core/routes";
+import {
+  buildHistoryGraph,
+  type GraphRow,
+  historyGraphPassSvg,
+  historyGraphSvg,
+  passingLanes,
+} from "./history-graph";
 
 export const HISTORY_BODY_COLLAPSE_LINES = 10;
 export const HISTORY_WORKTREE_COMMIT = "worktree";
@@ -644,12 +651,15 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
-  function displayWhen(iso: string): string {
+  /** 「相対 (絶対)」の時刻を、相対と絶対の 2 つの span に分けて返す。一覧が
+   * 狭いときは CSS が絶対の方を隠す (列の幅をそろえるため)。相対が絶対と同じ
+   * (古いコミット) なら絶対だけ。 */
+  function displayWhenHtml(iso: string): string {
     const relative = relativeWhen(iso);
     const absolute = absoluteWhen(iso);
     if (relative === absolute || relative === absolute.slice(0, 10))
-      return absolute;
-    return `${relative} (${absolute})`;
+      return `<span class="when-abs">${deps.escapeHtml(absolute)}</span>`;
+    return `<span class="when-rel">${deps.escapeHtml(relative)}</span> <span class="when-abs">(${deps.escapeHtml(absolute)})</span>`;
   }
 
   function historyItemSelector(sha: string): string {
@@ -716,17 +726,22 @@ export function createHistoryView(deps: HistoryViewDeps) {
       : "";
   }
 
-  function commitRow(commit: HistoryCommit, inRange: boolean): string {
+  function commitRow(
+    commit: HistoryCommit,
+    inRange: boolean,
+    graph: string,
+  ): string {
     const active = commit.sha === selectedSha ? " active" : "";
     const fresh = commit.sha === freshSha ? " history-item-fresh" : "";
     const ranged = inRange ? " history-item-in-range" : "";
     return (
       `<li class="history-item${active}${fresh}${ranged}" data-sha="${deps.escapeHtml(commit.sha)}">` +
+      `<span class="history-graph-cell">${graph}</span>` +
       `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` +
       `<span class="meta2">` +
       `<span class="sha">${deps.escapeHtml(shortSha(commit.sha))}</span>` +
       `<span class="author">${deps.escapeHtml(commit.author)}</span>` +
-      `<span class="when">${deps.escapeHtml(displayWhen(commit.when))}</span>` +
+      `<span class="when" title="${deps.escapeHtml(absoluteWhen(commit.when))}">${displayWhenHtml(commit.when)}</span>` +
       refChipsHtml(commit) +
       `</span>` +
       `</li>`
@@ -753,6 +768,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const active = selectedSha === HISTORY_WORKTREE_COMMIT ? " active" : "";
     return (
       `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}">` +
+      `<span class="history-graph-cell"></span>` +
       `<span class="subject" title="${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}">${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}</span>` +
       `<span class="meta2">` +
       `<span class="sha">HEAD..worktree</span>` +
@@ -768,20 +784,39 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const now = new Date();
     const html: string[] = mode === "history" ? [worktreeRow()] : [];
     const inRange = rangeShas();
+    // 枝の線は全体の履歴のときだけ。絞り込み中・1 ファイルの履歴は並んだ行が
+    // 親子とは限らないので、行を上から順につないだ 1 本の線にする。
+    const graphCommits = commits.filter(
+      (commit) => commit.sha !== HISTORY_WORKTREE_COMMIT,
+    );
+    const graph = buildHistoryGraph(graphCommits, {
+      linear: mode !== "history" || query !== "" || !!pathFilter,
+    });
+    const graphRows = new Map<string, GraphRow>();
+    graphCommits.forEach((commit, i) => {
+      graphRows.set(commit.sha, graph.rows[i]);
+    });
     let lastGroup = "";
     for (const commit of commits) {
       if (commit.sha === HISTORY_WORKTREE_COMMIT) {
         html.push(worktreeRow());
         continue;
       }
+      const row = graphRows.get(commit.sha);
       const group = historyGroupLabel(commit.when, now);
       if (group !== lastGroup) {
         html.push(
-          `<li class="history-group" aria-hidden="true">${deps.escapeHtml(group)}</li>`,
+          `<li class="history-group" aria-hidden="true"><span class="history-graph-cell">${historyGraphPassSvg(passingLanes(row), graph.lanes)}</span>${deps.escapeHtml(group)}</li>`,
         );
         lastGroup = group;
       }
-      html.push(commitRow(commit, inRange.has(commit.sha)));
+      html.push(
+        commitRow(
+          commit,
+          inRange.has(commit.sha),
+          row ? historyGraphSvg(row, graph.lanes) : "",
+        ),
+      );
     }
     list.innerHTML = html.join("");
     activeHistoryRow = list.querySelector<HTMLElement>(".history-item.active");

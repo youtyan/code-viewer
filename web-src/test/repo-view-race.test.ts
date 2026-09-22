@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { RepoTreeResponse, SidebarItem } from "../core/types";
 import { createRepoView, type RepoViewDeps } from "../views/repo-view";
@@ -67,6 +67,7 @@ function makeRepoView(
     route,
     files: [],
     syntaxHighlight: false,
+    language: "en",
   };
   const calls = {
     statuses: [] as Array<"live" | "refreshing" | "error" | null>,
@@ -390,5 +391,35 @@ describe("repo view route races", () => {
       "src/stale.ts",
       "src/fresh.ts",
     ]);
+  });
+});
+
+describe("repo sidebar refresh failures", () => {
+  test("keeps the tree and logs the HTTP status and body of a failed refresh", async () => {
+    installFilelistDocument(() => true);
+    globalThis.fetch = (async () =>
+      new Response("tree read failed: sample cause", {
+        status: 500,
+        statusText: "Internal Server Error",
+      })) as typeof fetch;
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { view, calls } = makeRepoView(
+      { screen: "repo", ref: "worktree", path: "", range },
+      { repoMode: true, repoSidebarRef: "worktree", repoSidebarDomReady: true },
+    );
+
+    await view.refreshRepoSidebar();
+
+    expect(calls.sidebarRenders).toEqual([]);
+    expect(errors).toHaveBeenCalledTimes(1);
+    const [message, ref, error] = errors.mock.calls[0];
+    expect([message, ref, (error as Error).message]).toEqual([
+      "[code-viewer] repository sidebar refresh failed",
+      "worktree",
+      "refresh repository tree (HTTP 500 Internal Server Error): tree read failed: sample cause",
+    ]);
+    errors.mockRestore();
   });
 });

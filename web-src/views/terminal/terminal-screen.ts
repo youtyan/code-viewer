@@ -215,6 +215,14 @@ export function createTerminalScreen(
   // 送る。並走させると届く順が入れ替わる。
   let pendingInput = "";
   let sending = false;
+  // 溜め置きの出力 (購読前に出ていた分) のうち、xterm がまだ解釈し終えて
+  // いない書き込みの数。流し直しの中の問い合わせ (tmux が attach したときの
+  // DA など) に xterm は答え直すが、その答えを待つ者はもういないので、PTY へ
+  // 送ると利用者のペインに `1;2c0;276;0c` のような文字として入る。この間に
+  // xterm が出す文字は送らない。xterm の onData は答えと打鍵を区別しないので、
+  // この数ミリ秒 (attach の直後、流し直しを解釈している間) に打った分も送られ
+  // ない。
+  let replayWrites = 0;
   // 出力から拾った綴りと、最後に問い合わせた時刻。attach ごとに作り直す
   // (clear するのではなく作り直すのは、飛んでいる問い合わせが次の対象の
   // 表を触らないようにするため)。
@@ -868,7 +876,10 @@ export function createTerminalScreen(
     created.loadAddon(fit);
     created.open(screenEl);
     created.registerLinkProvider({ provideLinks: provideImageLinks });
-    created.onData(enqueueInput);
+    created.onData((data) => {
+      if (replayWrites > 0) return;
+      enqueueInput(data);
+    });
     // Shift+Enter は「送信せずに改行」。xterm の既定では Enter と同じ CR に
     // なってしまい、書きかけのまま送信されるので、ここで横取りする。
     created.attachCustomKeyEventHandler((event) => {
@@ -904,8 +915,16 @@ export function createTerminalScreen(
       try {
         const payload = JSON.parse((event as MessageEvent<string>).data) as {
           data: string;
+          replay?: boolean;
         };
-        term.write(payload.data);
+        if (payload.replay === true) {
+          replayWrites += 1;
+          term.write(payload.data, () => {
+            replayWrites -= 1;
+          });
+        } else {
+          term.write(payload.data);
+        }
         scanShellOutput(payload.data);
         deps.onStatus(null);
       } catch (error) {

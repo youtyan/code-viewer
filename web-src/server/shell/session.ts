@@ -66,6 +66,13 @@ type SessionEntry = {
    * 渡すときの位置がこれになる (core/terminal-capture の sliceShellBuffer)。
    */
   totalChars: number;
+  /**
+   * replay の末尾のうち、まだどの購読者にも渡っていない文字数。渡った分の
+   * 中の端末への問い合わせには、そのとき見ていた端末が答えている。渡って
+   * いない分 (シェルを作ってから購読が始まるまでに出た tmux の attach の
+   * 問い合わせなど) は、まだ誰も答えていない。
+   */
+  unseenChars: number;
   listeners: Set<(chunk: string) => void>;
   exitListeners: Set<(exitCode: number) => void>;
   /**
@@ -261,6 +268,7 @@ export async function createShellSession(
     pty: child,
     replay: "",
     totalChars: 0,
+    unseenChars: 0,
     listeners: new Set(),
     exitListeners: new Set(),
     ready: false,
@@ -270,6 +278,10 @@ export async function createShellSession(
   child.onData((chunk) => {
     entry.replay = `${entry.replay}${chunk}`.slice(-REPLAY_BUFFER_LIMIT);
     entry.totalChars += chunk.length;
+    entry.unseenChars =
+      entry.listeners.size > 0
+        ? 0
+        : Math.min(entry.unseenChars + chunk.length, entry.replay.length);
     // 最初の出力が出た = プロンプトが立ち、シェルが入力を読む状態になった。
     // 待たせていた入力があればここで流す。
     markShellReady(entry);
@@ -305,8 +317,13 @@ export async function createShellSession(
 }
 
 export type ShellSubscription = {
-  /** 購読開始時点までに溜まっていた出力。 */
+  /**
+   * 購読開始時点までに溜まっていた出力のうち、前の購読者に渡った分。流し
+   * 直しなので、中の問い合わせに端末が答え直してはいけない。
+   */
   replay: string;
+  /** 溜まっていた出力のうち、まだ誰にも渡っていない分 (replay の続き)。 */
+  unseen: string;
   unsubscribe(): void;
 };
 
@@ -319,8 +336,11 @@ export function subscribeShell(
   if (!entry) return null;
   entry.listeners.add(onData);
   entry.exitListeners.add(onExit);
+  const seenChars = entry.replay.length - entry.unseenChars;
+  entry.unseenChars = 0;
   return {
-    replay: entry.replay,
+    replay: entry.replay.slice(0, seenChars),
+    unseen: entry.replay.slice(seenChars),
     unsubscribe() {
       entry.listeners.delete(onData);
       entry.exitListeners.delete(onExit);

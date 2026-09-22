@@ -1,9 +1,34 @@
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { RepoTreeResponse, SidebarItem } from "../core/types";
 import { createRepoView, type RepoViewDeps } from "../views/repo-view";
+
+const markdownPreview = vi.hoisted(() => ({ failWith: null as Error | null }));
+
+vi.mock("../core/markdown-preview", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../core/markdown-preview")>();
+  return {
+    ...actual,
+    renderMarkdownPreview: (
+      ...args: Parameters<typeof actual.renderMarkdownPreview>
+    ) =>
+      markdownPreview.failWith
+        ? Promise.reject(markdownPreview.failWith)
+        : actual.renderMarkdownPreview(...args),
+  };
+});
+
 import { deferred } from "./_test-helpers";
 
 const range = { from: "HEAD", to: "worktree" };
@@ -57,6 +82,7 @@ function makeRepoView(
     route,
     files: [],
     syntaxHighlight: false,
+    language: "en",
   };
   const calls = {
     renderedFiles: [] as SidebarItem[][],
@@ -1121,5 +1147,95 @@ describe("repo view re-render suppression", () => {
     expect(secondShell).not.toBe(firstShell as Element);
     // 差し替え後も一覧は 1 つだけ (先に消してから作る白抜け方式ではない)。
     expect(document.querySelectorAll("#diff > .gdp-repo-shell").length).toBe(1);
+  });
+});
+
+describe("repo view keeps failure reasons", () => {
+  afterEach(() => {
+    markdownPreview.failWith = null;
+    vi.restoreAllMocks();
+  });
+
+  test("a README that cannot be rendered shows the raw text with the reason", async () => {
+    setupDom();
+    markdownPreview.failWith = Object.assign(
+      new Error("sample render failure"),
+      { cause: new Error("sample cause") },
+    );
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    globalThis.fetch = (async () =>
+      response({
+        ref: "HEAD",
+        path: "",
+        project: "sample-repo",
+        entries: [{ name: "README.md", path: "README.md", type: "blob" }],
+        readme: { path: "README.md", text: "# sample title" },
+      })) as typeof fetch;
+    const { view } = makeRepoView({
+      screen: "repo",
+      ref: "HEAD",
+      path: "",
+      range,
+    });
+
+    await view.loadRepo();
+
+    expect(document.querySelector(".gdp-markdown-fallback")?.textContent).toBe(
+      "# sample title",
+    );
+    expect(
+      document.querySelector(".gdp-markdown-fallback-reason")?.textContent,
+    ).toBe(
+      "Could not render the Markdown, so the raw text is shown.Error: sample render failure\nCaused by: Error: sample cause",
+    );
+    expect(errors).toHaveBeenCalledWith(
+      "[code-viewer] README markdown render failed",
+      "README.md",
+      markdownPreview.failWith,
+    );
+  });
+
+  test("a folder path that cannot be copied keeps the reason on the button and in the console", async () => {
+    setupDom();
+    const failure = new Error("sample clipboard denied");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(failure) },
+    });
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    globalThis.fetch = (async () =>
+      response({
+        ref: "HEAD",
+        path: "src",
+        project: "sample-repo",
+        entries: [{ name: "app.ts", path: "src/app.ts", type: "blob" }],
+      })) as typeof fetch;
+    const { view } = makeRepoView({
+      screen: "repo",
+      ref: "HEAD",
+      path: "src",
+      range,
+    });
+    await view.loadRepo();
+    const button = document.querySelector<HTMLButtonElement>(".gdp-copy-path");
+    if (!button) throw new Error("missing copy folder path button");
+
+    button.click();
+    await vi.waitFor(() =>
+      expect(button.classList.contains("failed")).toBe(true),
+    );
+
+    expect(button.title).toBe(
+      "Could not copy the folder path\nError: sample clipboard denied",
+    );
+    expect(errors).toHaveBeenCalledWith(
+      "[code-viewer] copy folder path failed",
+      "src",
+      failure,
+    );
   });
 });

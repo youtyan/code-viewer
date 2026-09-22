@@ -43,6 +43,20 @@
   --color-idle:         #726b7b;
   --color-backdrop:     rgba(33, 29, 43, 0.18);
   --color-shadow:       rgba(33, 29, 43, 0.16);
+  /* コードの面 (ソース表示・差分)。本文の面より一段沈める。 */
+  --color-code:         #f6f3f9;
+  /* 構文の色。抑えめにし、キーワード・文字列・型・コメントだけを分ける。
+     コメントも本文の地で読める濃さ (4.5:1 以上) にする。 */
+  --syntax-text:        #2c2735;
+  --syntax-keyword:     #6c4ba0;
+  --syntax-string:      #466232;
+  --syntax-type:        #285a78;
+  --syntax-function:    #4d3a78;
+  --syntax-comment:     #69637a;
+  /* 履歴のグラフの線。主線はアクセント、分かれた線は別の落ち着いた色。
+     状態の色 (入力待ち・作業中など) と混ぜない。 */
+  --graph-main:         var(--color-accent);
+  --graph-branch:       #56709a;
 
   /* 余白の段階 (--space-*) は表示密度で比例して変わるので、:root ではなく
      html, body ブロックで --space-unit から作る。 */
@@ -85,21 +99,24 @@
   --danger:         var(--color-failed);
   --danger-emph:    color-mix(in srgb, var(--color-failed) 85%, var(--color-text));
   --attn:           var(--color-waiting);
-  --line-hit-bg:    color-mix(in srgb, var(--color-waiting) 18%, transparent);
+  /* 開いた行・選んだ行 (ソース表示・差分)。入力待ちの琥珀と混ぜず、選択の面。 */
+  --line-hit-bg:    var(--color-select);
   --line-hit-border:var(--accent);
   --done:           var(--color-done);
   /* 差分の色はテーマの色違いに引きずられない (追加・削除の意味を保つ)。
      ライトとダークで 1 組ずつ。 */
-  --diff-add-bg:        #dafbe1;
+  --diff-add-bg:        #e4f3e8;
   --diff-add-num-bg:    #aceebb;
-  --diff-add-num-sticky-bg: #aceebb;
-  --diff-add-word-bg:   #aceebb;
-  --diff-del-bg:        #ffebe9;
+  --diff-add-num-sticky-bg: #d2eadb;
+  --diff-add-word-bg:   #c0e2cb;
+  --diff-del-bg:        #f9e8eb;
   --diff-del-num-bg:    #ffcecb;
-  --diff-del-num-sticky-bg: #ffcecb;
-  --diff-del-word-bg:   #ff818266;
+  --diff-del-num-sticky-bg: #f2d6db;
+  --diff-del-word-bg:   #ecc2ca;
   --diff-hunk-bg:       color-mix(in srgb, var(--color-accent) 9%, transparent);
   --diff-hunk-fg:       var(--color-accent-strong);
+  --diff-add-fg:        #1d4a31;
+  --diff-del-fg:        #7a2436;
   --blob-tab-active:    var(--accent);
 
   /* ---- 寸法 (T1: 固定物の実寸。ui-layout.md の 4 層) ---- */
@@ -172,15 +189,27 @@
   --color-idle:         #aba3b5;
   --color-backdrop:     rgba(4, 3, 8, 0.55);
   --color-shadow:       rgba(0, 0, 0, 0.45);
+  --color-code:         #1b1821;
+  --syntax-text:        #ddd8e6;
+  --syntax-keyword:     #bca4dd;
+  --syntax-string:      #bbc9a8;
+  --syntax-type:        #a7bfd0;
+  --syntax-function:    #e4dcf2;
+  --syntax-comment:     #978fa4;
+  --graph-branch:       #7e91b8;
 
-  --diff-add-bg:        rgba(122,168,142,0.13);
-  --diff-add-num-bg:    rgba(122,168,142,0.26);
+  /* 差分の面は控えめにし、＋／− の印と文字の色でも伝える。色違いの
+     ダーク (graphite / warm) もこの 1 組を使う。 */
+  --diff-add-bg:        #1c3028;
+  --diff-add-num-bg:    #213a2f;
   --diff-add-num-sticky-bg: #1f3027;
-  --diff-add-word-bg:   rgba(122,168,142,0.36);
-  --diff-del-bg:        rgba(210,129,140,0.13);
-  --diff-del-num-bg:    rgba(210,129,140,0.26);
+  --diff-add-word-bg:   #2d493b;
+  --diff-add-fg:        #b5d5c2;
+  --diff-del-bg:        #36232c;
+  --diff-del-num-bg:    #3f2833;
   --diff-del-num-sticky-bg: #3a2229;
-  --diff-del-word-bg:   rgba(210,129,140,0.36);
+  --diff-del-word-bg:   #55323f;
+  --diff-del-fg:        #e1b6be;
 }
 /* ---- ダーク: 無彩色 (線が少なく静か) ---- */
 [data-theme="dark"][data-palette="graphite"] {
@@ -210,6 +239,14 @@
   --color-done:         #98accf;
   --color-failed:       #c77979;
   --color-idle:         #9b9da5;
+  --color-code:         #161719;
+  --syntax-text:        #d9dbe0;
+  --syntax-keyword:     #b3bdd2;
+  --syntax-string:      #b6c4ab;
+  --syntax-type:        #a2b7c8;
+  --syntax-function:    #e2e4e9;
+  --syntax-comment:     #91949d;
+  --graph-branch:       #8f9aab;
 }
 /* ---- ダーク: 暖かい灰色 (読みやすさ) ---- */
 [data-theme="dark"][data-palette="warm"] {
@@ -239,6 +276,14 @@
   --color-done:         #a0b1c8;
   --color-failed:       #ce8d82;
   --color-idle:         #aaa89e;
+  --color-code:         #1f1f1d;
+  --syntax-text:        #e0ddd3;
+  --syntax-keyword:     #cbbb98;
+  --syntax-string:      #b5c5a3;
+  --syntax-type:        #a8bcc0;
+  --syntax-function:    #ebe8df;
+  --syntax-comment:     #9b9886;
+  --graph-branch:       #a89d82;
 }
 
 /* ===== Reset / base ===== */
@@ -262,6 +307,10 @@ html, body {
      一覧で共有する。出所は views/shell/row-height.ts (表示密度ごとの値を
      applySidebarFontSize が body に書く)。ここは JS 実行前の初回描画用の既定。 */
   --ui-row-h: 30px;
+  /* 表の 1 行の高さ (履歴のコミットの一覧・全体ボードの表)。一覧の行
+     (--ui-row-h) より一段ゆったりさせ、列の文字が詰まって見えないようにする。
+     仮想表示に使わないので出所は CSS だけ。密度で --space-unit と一緒に変わる。 */
+  --ui-table-row-h: round(calc(var(--space-unit) * 9), 1px);
   /* 余白の段階。部品はこの名前だけを使う (段階の外の px を書かない)。
      密度で --space-unit だけが変わり、全部の段階が比例して変わる。
      ここ (html, body) に置くのは、body の密度の上書きを反映させるため
@@ -3561,36 +3610,28 @@ body.gdp-help-page #content {
 .bar > span.a { background: var(--success); }
 .bar > span.d { background: var(--danger); }
 
+/* 変更の種類の印: 札ではなく色の付いた 1 文字 (絵の A / M / D)。色は名前の層。
+   U (まだ git に無い) は地の補助の文字、I (無視) は一段薄い文字。 */
 .badge {
   width: 16px; height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
-  font-size: 9px;
-  font-weight: 700;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
   letter-spacing: 0;
-  background: var(--bg-emph);
-  color: var(--fg);
   flex-shrink: 0;
 }
-.badge.M { background: #f9d97a55; color: #7d4e00; }
-.badge.A { background: #ccffd866; color: var(--success); }
-.badge.D { background: #ffd7d566; color: var(--danger); }
-.badge.R { background: #d8b9ff66; color: var(--done); }
-/* Outside version control. U (untracked) takes the accent hue so it reads as
-   "not in git yet" rather than as one more shade of the staged-green A it
-   used to be collapsed into. I (ignored) stays deliberately colorless: an
-   ignored file is present but irrelevant to the repository. */
-.badge.U { background: var(--accent-subtle); color: var(--accent); }
-.badge.I { background: var(--bg-emph); color: var(--fg-muted); }
-
-[data-theme="dark"] .badge.M { background: rgba(210,153,34,0.20); color: var(--attn); }
-[data-theme="dark"] .badge.A { background: rgba(46,160,67,0.20); color: var(--success); }
-[data-theme="dark"] .badge.D { background: rgba(248,81,73,0.20); color: var(--danger); }
-[data-theme="dark"] .badge.R { background: rgba(163,113,247,0.20); color: var(--done); }
-[data-theme="dark"] .badge.U { background: rgba(56,139,253,0.20); color: var(--accent); }
-[data-theme="dark"] .badge.I { background: rgba(145,152,161,0.15); color: var(--fg-muted); }
+.badge.M { color: var(--color-accent); }
+.badge.A { color: var(--color-working); }
+.badge.D { color: var(--color-failed); }
+.badge.R { color: var(--color-done); }
+.badge.U { color: var(--color-text-2); }
+.badge.I { color: var(--color-text-3); }
 
 /* Sidebar row marker for files worth a second look before diving in:
    heavy diffs, binary/media files, or Git commit entries. Same semantics as
@@ -3666,8 +3707,10 @@ body.gdp-help-page #content {
 /* ===== Main content area ===== */
 #content {
   --content-top-gap: 18px;
+  /* 本文の左右の余白 (T3)。ソース表示はこの分だけ外へ出て、面を端まで敷く。 */
+  --content-pad-x: 24px;
   margin-left: var(--sidebar-w);
-  padding: calc(var(--chrome-h) + var(--content-top-gap)) 24px 80px;
+  padding: calc(var(--chrome-h) + var(--content-top-gap)) var(--content-pad-x) 80px;
   min-height: var(--content-h);
 }
 
@@ -4709,11 +4752,14 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-source-line-target .gdp-source-virtual-line-code.hljs {
   background: var(--line-hit-bg);
 }
-.gdp-source-line-code.shiki,
+/* 構文の色は名前の層 (--syntax-*)。shiki の github テーマが付けた色を、
+   下の B-1 の節で名前へ差し替える (テーマごとに書き分けない)。 */
+.gdp-source-line-code.shiki {
+  color: var(--syntax-text) !important;
+}
 .gdp-source-line-code.shiki span {
   color: var(--shiki-light) !important;
 }
-[data-theme="dark"] .gdp-source-line-code.shiki,
 [data-theme="dark"] .gdp-source-line-code.shiki span {
   color: var(--shiki-dark) !important;
 }
@@ -6275,11 +6321,8 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   line-height: var(--code-line-height) !important;
   font-weight: 400 !important;
 }
-/* Force the line wrappers (NOT the inner highlighted spans) to use Primer's
- * full-strength fg color so the text feels as solid as github.com. */
-.d2h-code-line, .d2h-code-side-line { color: #1f2328 !important; }
-[data-theme="dark"] .d2h-code-line,
-[data-theme="dark"] .d2h-code-side-line { color: #e6edf3 !important; }
+/* 行の地の文字は構文の地の色。追加・削除の行は差分の文字の色 (下の B-1 の節)。 */
+.d2h-code-line, .d2h-code-side-line { color: var(--syntax-text) !important; }
 
 /* highlight.js's .hljs class adds a white background — let the parent
  * add/del/cntx/info row color show through instead. */
@@ -6288,112 +6331,143 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   background: transparent !important;
 }
 
-/* Override highlight.js github theme with the actual Primer "prettylights"
- * token colors used on github.com — the vendored `github.min.css` palette is
- * notably more muted/grey, which made our diff feel washed out. */
+/* 構文の色は名前の層 (--syntax-*) だけを読む。
+ * 祖先を :is() でまとめず、面ごとに並べる (先祖のクラスで規則を素早く外せる
+ * 形にしておく。右端に :is() を置いた規則が長いファイルのスクロールを重く
+ * したことは B-1 History の節の注釈)。テーマごとの値は名前の層が持つので、
+ * ここでテーマを書き分けない。抑えめにし、キーワード・文字列・
+ * 型・関数名・コメントだけを分ける (変数や引数は地の文字と同じ)。
+ * highlight.js のクラスを使う面 (差分・Markdown のコード・ソース表示の仮想表示)
+ * はここ、shiki を使う面は B-1 の節で名前へ差し替える。 */
+.d2h-code-line-ctn,
+.gdp-markdown-preview .hljs,
+.gdp-source-virtual-line-code {
+  color: var(--syntax-text);
+}
 .d2h-code-line-ctn .hljs-keyword,
-.d2h-code-line-ctn .hljs-selector-tag,
-.d2h-code-line-ctn .hljs-built_in,
-.d2h-code-line-ctn .hljs-builtin-name,
-.d2h-code-line-ctn .hljs-tag,
-.d2h-code-line-ctn .hljs-meta-keyword,
 .gdp-markdown-preview .hljs-keyword,
+.gdp-source-line-code .hljs-keyword,
+.gdp-source-virtual-line-code .hljs-keyword,
+.d2h-code-line-ctn .hljs-selector-tag,
 .gdp-markdown-preview .hljs-selector-tag,
+.gdp-source-line-code .hljs-selector-tag,
+.gdp-source-virtual-line-code .hljs-selector-tag,
+.d2h-code-line-ctn .hljs-built_in,
 .gdp-markdown-preview .hljs-built_in,
+.gdp-source-line-code .hljs-built_in,
+.gdp-source-virtual-line-code .hljs-built_in,
+.d2h-code-line-ctn .hljs-builtin-name,
 .gdp-markdown-preview .hljs-builtin-name,
+.gdp-source-line-code .hljs-builtin-name,
+.gdp-source-virtual-line-code .hljs-builtin-name,
+.d2h-code-line-ctn .hljs-tag,
 .gdp-markdown-preview .hljs-tag,
-.gdp-markdown-preview .hljs-meta-keyword           { color: #cf222e !important; }
-
+.gdp-source-line-code .hljs-tag,
+.gdp-source-virtual-line-code .hljs-tag,
+.d2h-code-line-ctn .hljs-meta-keyword,
+.gdp-markdown-preview .hljs-meta-keyword,
+.gdp-source-line-code .hljs-meta-keyword,
+.gdp-source-virtual-line-code .hljs-meta-keyword { color: var(--syntax-keyword) !important; }
 .d2h-code-line-ctn .hljs-string,
-.d2h-code-line-ctn .hljs-symbol,
-.d2h-code-line-ctn .hljs-bullet,
-.d2h-code-line-ctn .hljs-attr,
-.d2h-code-line-ctn .hljs-template-tag,
-.d2h-code-line-ctn .hljs-template-variable,
 .gdp-markdown-preview .hljs-string,
+.gdp-source-line-code .hljs-string,
+.gdp-source-virtual-line-code .hljs-string,
+.d2h-code-line-ctn .hljs-symbol,
 .gdp-markdown-preview .hljs-symbol,
+.gdp-source-line-code .hljs-symbol,
+.gdp-source-virtual-line-code .hljs-symbol,
+.d2h-code-line-ctn .hljs-bullet,
 .gdp-markdown-preview .hljs-bullet,
-.gdp-markdown-preview .hljs-attr,
+.gdp-source-line-code .hljs-bullet,
+.gdp-source-virtual-line-code .hljs-bullet,
+.d2h-code-line-ctn .hljs-template-tag,
 .gdp-markdown-preview .hljs-template-tag,
-.gdp-markdown-preview .hljs-template-variable      { color: #0a3069 !important; }
-
+.gdp-source-line-code .hljs-template-tag,
+.gdp-source-virtual-line-code .hljs-template-tag,
+.d2h-code-line-ctn .hljs-regexp,
+.gdp-markdown-preview .hljs-regexp,
+.gdp-source-line-code .hljs-regexp,
+.gdp-source-virtual-line-code .hljs-regexp { color: var(--syntax-string) !important; }
 .d2h-code-line-ctn .hljs-comment,
-.d2h-code-line-ctn .hljs-quote,
-.d2h-code-line-ctn .hljs-deletion,
 .gdp-markdown-preview .hljs-comment,
+.gdp-source-line-code .hljs-comment,
+.gdp-source-virtual-line-code .hljs-comment,
+.d2h-code-line-ctn .hljs-quote,
 .gdp-markdown-preview .hljs-quote,
-.gdp-markdown-preview .hljs-deletion               { color: #6e7781 !important; }
-
+.gdp-source-line-code .hljs-quote,
+.gdp-source-virtual-line-code .hljs-quote { color: var(--syntax-comment) !important; }
 .d2h-code-line-ctn .hljs-number,
-.d2h-code-line-ctn .hljs-literal,
-.d2h-code-line-ctn .hljs-doctag,
-.d2h-code-line-ctn .hljs-meta,
 .gdp-markdown-preview .hljs-number,
+.gdp-source-line-code .hljs-number,
+.gdp-source-virtual-line-code .hljs-number,
+.d2h-code-line-ctn .hljs-literal,
 .gdp-markdown-preview .hljs-literal,
+.gdp-source-line-code .hljs-literal,
+.gdp-source-virtual-line-code .hljs-literal,
+.d2h-code-line-ctn .hljs-doctag,
 .gdp-markdown-preview .hljs-doctag,
-.gdp-markdown-preview .hljs-meta                   { color: #0550ae !important; }
-
-.d2h-code-line-ctn .hljs-title,
-.d2h-code-line-ctn .hljs-section,
-.d2h-code-line-ctn .hljs-function .hljs-title,
-.d2h-code-line-ctn .hljs-name,
-.gdp-markdown-preview .hljs-title,
-.gdp-markdown-preview .hljs-section,
-.gdp-markdown-preview .hljs-function .hljs-title,
-.gdp-markdown-preview .hljs-name                   { color: #8250df !important; }
-
-.d2h-code-line-ctn .hljs-variable,
-.d2h-code-line-ctn .hljs-template-variable,
+.gdp-source-line-code .hljs-doctag,
+.gdp-source-virtual-line-code .hljs-doctag,
+.d2h-code-line-ctn .hljs-meta,
+.gdp-markdown-preview .hljs-meta,
+.gdp-source-line-code .hljs-meta,
+.gdp-source-virtual-line-code .hljs-meta,
 .d2h-code-line-ctn .hljs-type,
-.d2h-code-line-ctn .hljs-class .hljs-title,
-.d2h-code-line-ctn .hljs-attribute,
-.gdp-markdown-preview .hljs-variable,
-.gdp-markdown-preview .hljs-template-variable,
 .gdp-markdown-preview .hljs-type,
+.gdp-source-line-code .hljs-type,
+.gdp-source-virtual-line-code .hljs-type,
+.d2h-code-line-ctn .hljs-title.class_,
+.gdp-markdown-preview .hljs-title.class_,
+.gdp-source-line-code .hljs-title.class_,
+.gdp-source-virtual-line-code .hljs-title.class_,
+.d2h-code-line-ctn .hljs-class .hljs-title,
 .gdp-markdown-preview .hljs-class .hljs-title,
-.gdp-markdown-preview .hljs-attribute              { color: #953800 !important; }
-
+.gdp-source-line-code .hljs-class .hljs-title,
+.gdp-source-virtual-line-code .hljs-class .hljs-title { color: var(--syntax-type) !important; }
+.d2h-code-line-ctn .hljs-title,
+.gdp-markdown-preview .hljs-title,
+.gdp-source-line-code .hljs-title,
+.gdp-source-virtual-line-code .hljs-title,
+.d2h-code-line-ctn .hljs-section,
+.gdp-markdown-preview .hljs-section,
+.gdp-source-line-code .hljs-section,
+.gdp-source-virtual-line-code .hljs-section,
+.d2h-code-line-ctn .hljs-name,
+.gdp-markdown-preview .hljs-name,
+.gdp-source-line-code .hljs-name,
+.gdp-source-virtual-line-code .hljs-name { color: var(--syntax-function) !important; }
+.d2h-code-line-ctn .hljs-attr,
+.gdp-markdown-preview .hljs-attr,
+.gdp-source-line-code .hljs-attr,
+.gdp-source-virtual-line-code .hljs-attr,
+.d2h-code-line-ctn .hljs-attribute,
+.gdp-markdown-preview .hljs-attribute,
+.gdp-source-line-code .hljs-attribute,
+.gdp-source-virtual-line-code .hljs-attribute,
+.d2h-code-line-ctn .hljs-variable,
+.gdp-markdown-preview .hljs-variable,
+.gdp-source-line-code .hljs-variable,
+.gdp-source-virtual-line-code .hljs-variable,
+.d2h-code-line-ctn .hljs-template-variable,
+.gdp-markdown-preview .hljs-template-variable,
+.gdp-source-line-code .hljs-template-variable,
+.gdp-source-virtual-line-code .hljs-template-variable,
+.d2h-code-line-ctn .hljs-params,
+.gdp-markdown-preview .hljs-params,
+.gdp-source-line-code .hljs-params,
+.gdp-source-virtual-line-code .hljs-params,
+.d2h-code-line-ctn .hljs-property,
+.gdp-markdown-preview .hljs-property,
+.gdp-source-line-code .hljs-property,
+.gdp-source-virtual-line-code .hljs-property { color: var(--syntax-text) !important; }
 .d2h-code-line-ctn .hljs-emphasis,
-.gdp-markdown-preview .hljs-emphasis               { font-style: italic; }
+.gdp-markdown-preview .hljs-emphasis,
+.gdp-source-line-code .hljs-emphasis,
+.gdp-source-virtual-line-code .hljs-emphasis { font-style: italic; }
 .d2h-code-line-ctn .hljs-strong,
-.gdp-markdown-preview .hljs-strong                 { font-weight: 600; }
-
-[data-theme="dark"] .d2h-code-line-ctn .hljs-keyword,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-selector-tag,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-built_in,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-tag,
-[data-theme="dark"] .gdp-markdown-preview .hljs-keyword,
-[data-theme="dark"] .gdp-markdown-preview .hljs-selector-tag,
-[data-theme="dark"] .gdp-markdown-preview .hljs-built_in,
-[data-theme="dark"] .gdp-markdown-preview .hljs-tag                { color: #ff7b72 !important; }
-[data-theme="dark"] .d2h-code-line-ctn .hljs-string,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-attr,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-symbol,
-[data-theme="dark"] .gdp-markdown-preview .hljs-string,
-[data-theme="dark"] .gdp-markdown-preview .hljs-attr,
-[data-theme="dark"] .gdp-markdown-preview .hljs-symbol             { color: #a5d6ff !important; }
-[data-theme="dark"] .d2h-code-line-ctn .hljs-comment,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-quote,
-[data-theme="dark"] .gdp-markdown-preview .hljs-comment,
-[data-theme="dark"] .gdp-markdown-preview .hljs-quote              { color: #8b949e !important; }
-[data-theme="dark"] .d2h-code-line-ctn .hljs-number,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-literal,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-meta,
-[data-theme="dark"] .gdp-markdown-preview .hljs-number,
-[data-theme="dark"] .gdp-markdown-preview .hljs-literal,
-[data-theme="dark"] .gdp-markdown-preview .hljs-meta               { color: #79c0ff !important; }
-[data-theme="dark"] .d2h-code-line-ctn .hljs-title,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-name,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-function .hljs-title,
-[data-theme="dark"] .gdp-markdown-preview .hljs-title,
-[data-theme="dark"] .gdp-markdown-preview .hljs-name,
-[data-theme="dark"] .gdp-markdown-preview .hljs-function .hljs-title { color: #d2a8ff !important; }
-[data-theme="dark"] .d2h-code-line-ctn .hljs-variable,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-type,
-[data-theme="dark"] .d2h-code-line-ctn .hljs-attribute,
-[data-theme="dark"] .gdp-markdown-preview .hljs-variable,
-[data-theme="dark"] .gdp-markdown-preview .hljs-type,
-[data-theme="dark"] .gdp-markdown-preview .hljs-attribute          { color: #ffa657 !important; }
+.gdp-markdown-preview .hljs-strong,
+.gdp-source-line-code .hljs-strong,
+.gdp-source-virtual-line-code .hljs-strong { font-weight: 600; }
 
 /* Line number column */
 .d2h-code-linenumber {
@@ -6439,15 +6513,15 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 .d2h-ins .d2h-code-side-line,
 .d2h-ins.d2h-change.d2h-code-line {
   background: var(--diff-add-bg) !important;
-  color: var(--fg) !important;
+  color: var(--diff-add-fg) !important;
 }
 .d2h-ins .d2h-code-linenumber,
 .d2h-ins.d2h-code-linenumber,
 .d2h-ins .d2h-code-side-linenumber,
 .d2h-ins.d2h-code-side-linenumber {
   background: var(--diff-add-num-sticky-bg) !important;
-  color: var(--fg) !important;
-  box-shadow: inset -1px 0 0 rgba(46,160,67,0.30);
+  color: var(--diff-add-fg) !important;
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--diff-add-fg) 25%, transparent);
 }
 
 /* Deletion rows */
@@ -6456,22 +6530,22 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 .d2h-del .d2h-code-side-line,
 .d2h-del.d2h-change.d2h-code-line {
   background: var(--diff-del-bg) !important;
-  color: var(--fg) !important;
+  color: var(--diff-del-fg) !important;
 }
 .d2h-del .d2h-code-linenumber,
 .d2h-del.d2h-code-linenumber,
 .d2h-del .d2h-code-side-linenumber,
 .d2h-del.d2h-code-side-linenumber {
   background: var(--diff-del-num-sticky-bg) !important;
-  color: var(--fg) !important;
-  box-shadow: inset -1px 0 0 rgba(207,34,46,0.30);
+  color: var(--diff-del-fg) !important;
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--diff-del-fg) 25%, transparent);
 }
 
 /* Word-level highlights inside add/del lines */
 .d2h-ins.d2h-change ins,
 .d2h-ins ins {
   background: var(--diff-add-word-bg) !important;
-  color: var(--fg);
+  color: inherit;
   text-decoration: none;
   border-radius: 1px;
   padding: 0 1px;
@@ -6479,7 +6553,7 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 .d2h-del.d2h-change del,
 .d2h-del del {
   background: var(--diff-del-word-bg) !important;
-  color: var(--fg);
+  color: inherit;
   text-decoration: none;
   border-radius: 1px;
   padding: 0 1px;
@@ -6499,8 +6573,8 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 
 /* Prefix coloring (use diff2html's default layout) */
 .d2h-code-line-prefix { color: var(--fg-subtle); user-select: none; }
-.d2h-ins .d2h-code-line-prefix { color: var(--success); }
-.d2h-del .d2h-code-line-prefix { color: var(--danger); }
+.d2h-ins .d2h-code-line-prefix { color: var(--diff-add-fg); }
+.d2h-del .d2h-code-line-prefix { color: var(--diff-del-fg); }
 
 /* ===== Viewed checkbox (top-right of file header) ===== */
 .d2h-file-collapse {
@@ -18500,6 +18574,29 @@ button.brand[aria-expanded="true"] {
   gap: var(--space-6);
   padding: var(--space-4) var(--pad-doc) var(--space-6);
 }
+/* README を Markdown にできなかったとき: 理由の行と生の文字。左端は本文と同じ線。 */
+.gdp-repo-readme .gdp-markdown-fallback-reason {
+  margin: var(--space-4) var(--pad-doc) 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+}
+.gdp-repo-readme .gdp-markdown-fallback-reason p {
+  margin: 0 0 var(--space-1);
+  color: var(--color-failed);
+}
+.gdp-repo-readme .gdp-markdown-fallback-reason pre,
+.gdp-repo-readme .gdp-markdown-fallback {
+  margin: 0;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.gdp-repo-readme .gdp-markdown-fallback {
+  padding: var(--space-4) var(--pad-doc) var(--space-6);
+}
 .gdp-source-viewer .gdp-markdown-layout > .gdp-markdown-preview,
 .gdp-repo-readme .gdp-markdown-layout > .gdp-markdown-preview {
   grid-column: 1;
@@ -19823,7 +19920,7 @@ button.agents-account-name:hover {
 }
 .agents-row {
   width: 100%;
-  height: var(--ui-row-h);
+  height: var(--ui-table-row-h);
   border: 0;
   border-radius: var(--radius-md);
   background: none;
@@ -19892,7 +19989,7 @@ button.agents-account-name:hover {
 .agents-project-none {
   display: flex;
   align-items: center;
-  height: var(--ui-row-h);
+  height: var(--ui-table-row-h);
   padding: 0 var(--pad-text);
   color: var(--color-text-3);
 }
@@ -20618,4 +20715,914 @@ button.agents-account-name:hover {
 /* 表に行が 1 つも無いとき (tmux が無い・エージェントが居ない) は列の名前を出さない。 */
 .agents-board:not(:has(.agents-project)) .agents-columns {
   display: none;
+}
+
+/* ---- B-1: ソース表示 (Code / Blame / History。views/source-view.ts・blame-view.ts・file-history-shell.ts) ----
+   絵 (round3/code.png): コードの面は本文の箱の端まで敷く (浮いた面にしない)。
+   文書 (Markdown の表示) は浮いた面のまま。パンくずの行は同じ面の上に置き、
+   下に細い線を 1 本。行番号の列は右寄せで補助の色、列の右に細い線。
+   今いる行は選択の面を行の端まで薄く敷く。構文の色は名前の層 (--syntax-*)。 */
+.gdp-repo-blob-layout > .gdp-standalone-blame,
+.gdp-repo-blob-layout > .gdp-standalone-file-history,
+.gdp-repo-blob-layout > .gdp-standalone-source:not(:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden]))) {
+  margin: calc(var(--content-top-gap) * -1) calc(var(--content-pad-x) * -1) 0;
+  min-height: calc(var(--content-h) - var(--app-panel-tabbar-height));
+  background: var(--color-code);
+}
+.gdp-repo-blob-layout > .gdp-standalone-blame .gdp-file-detail-sticky,
+  .gdp-repo-blob-layout > .gdp-standalone-file-history .gdp-file-detail-sticky,
+  .gdp-repo-blob-layout > .gdp-standalone-source .gdp-file-detail-sticky {
+  background: var(--color-code);
+}
+.gdp-repo-blob-layout > .gdp-standalone-blame > .gdp-file-detail-wrapper > .gdp-file-detail-sticky,
+  .gdp-repo-blob-layout > .gdp-standalone-file-history > .gdp-file-detail-wrapper > .gdp-file-detail-sticky,
+  .gdp-repo-blob-layout > .gdp-standalone-source > .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
+  /* 下の線は内側の影で描く (線で箱を 1px 伸ばすと、見出しの高さを引いて
+     決めている箱 (--file-detail-head-h の消費側) がずれる)。 */
+  border-bottom: 0;
+  border-radius: 0;
+  box-shadow: inset 0 -1px 0 var(--color-line-soft);
+}
+/* 文書の面 (Markdown) は今までどおり浮いた面。パンくずの下の線は引かない。 */
+.gdp-repo-blob-layout > .gdp-standalone-source:has(> .gdp-file-detail-wrapper > .gdp-source-viewer > .gdp-markdown-layout:not([hidden]))
+  > .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--color-doc);
+}
+.gdp-repo-blob-layout > .gdp-standalone-blame .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))),
+  .gdp-repo-blob-layout > .gdp-standalone-file-history .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))),
+  .gdp-repo-blob-layout > .gdp-standalone-source .gdp-source-viewer:not(:has(> .gdp-markdown-layout:not([hidden]))) {
+  border-radius: 0;
+  background: var(--color-code);
+}
+
+/* 表示の切替 (Code / Blame / History) は文字の項目。今の項目は控えめな面だけ
+   (強い選択は画面の同じ列に 1 つ: ここは「いまここ」の印)。 */
+.gdp-file-detail-sticky .gdp-file-detail-tabs .gdp-source-tabs {
+  /* 余白は今までと同じ (見出しの高さを変えない)。面だけ消す。 */
+  gap: var(--space-1);
+  background: transparent;
+}
+.gdp-file-detail-sticky .gdp-source-tabs button {
+  padding: 0 var(--space-2);
+  color: var(--color-text-2);
+}
+.gdp-file-detail-sticky .gdp-source-tabs button:hover {
+  background: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  color: var(--color-text);
+}
+.gdp-file-detail-sticky .gdp-source-tabs button.active {
+  background: var(--color-raised);
+  box-shadow: none;
+  color: var(--color-text);
+}
+/* 行数・行へ移る欄は補助の情報。枠の付いた部品に見せず、文字の段階で下げる。 */
+.gdp-file-detail-sticky .gdp-source-line-count {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.gdp-file-detail-sticky .gdp-source-line-jump label {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.gdp-file-detail-sticky .gdp-source-line-jump input {
+  border-color: transparent;
+  background: var(--color-inset);
+}
+.gdp-file-detail-sticky .gdp-source-line-jump .gdp-btn {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-2);
+}
+.gdp-file-detail-sticky .gdp-source-line-jump .gdp-btn:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+
+/* 行番号の列: 幅 12 単位 (48)、右寄せ、補助の色。列の右に細い線。 */
+.gdp-source-line-number,
+.gdp-source-virtual-line-number {
+  min-width: calc(var(--space-unit) * 12);
+  padding: 0 var(--space-3) 0 var(--space-2);
+  background: var(--color-code);
+  color: var(--color-text-3);
+  box-shadow: inset -1px 0 0 var(--color-line-soft);
+}
+.gdp-source-line-code {
+  padding: 0 var(--space-4);
+  color: var(--syntax-text);
+}
+.gdp-source-line-code.hljs {
+  background: var(--color-code);
+}
+/* 今いる行: 選択の面を行の端まで薄く敷く。行番号は文字を明るくするだけ。
+   左の縦線 (琥珀) は使わない (状態の色と混ざるため)。 */
+.gdp-source-table tr.gdp-source-cursor .gdp-source-line-number,
+.gdp-source-virtual-row.gdp-source-cursor .gdp-source-virtual-line-number {
+  background: color-mix(in srgb, var(--color-select) 55%, var(--color-code));
+  color: var(--color-text);
+  box-shadow: inset -1px 0 0 var(--color-line-soft);
+}
+.gdp-source-table tr.gdp-source-cursor .gdp-source-line-code,
+.gdp-source-virtual-row.gdp-source-cursor .gdp-source-virtual-line-code {
+  background: color-mix(in srgb, var(--color-select) 55%, var(--color-code)) !important;
+}
+.gdp-source-table tr.gdp-source-cursor .gdp-source-line-code::before,
+.gdp-source-virtual-row.gdp-source-cursor .gdp-source-virtual-line-code::before {
+  content: none;
+}
+
+/* shiki の github テーマの色 → 構文の名前。light と dark の値は同じ span に
+   並んで入っているので、dark の値だけで見分けて両方を差し替える。 */
+.gdp-source-line-code span[style*="--shiki-dark:#f97583" i],
+.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#f97583" i],
+.gdp-source-line-code span[style*="--shiki-dark:#85e89d" i],
+.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#85e89d" i] {
+  --shiki-light: var(--syntax-keyword) !important;
+  --shiki-dark: var(--syntax-keyword) !important;
+}
+.gdp-source-line-code span[style*="--shiki-dark:#9ecbff" i],
+.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#9ecbff" i],
+.gdp-source-line-code span[style*="--shiki-dark:#dbedff" i],
+.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#dbedff" i] {
+  --shiki-light: var(--syntax-string) !important;
+  --shiki-dark: var(--syntax-string) !important;
+}
+.gdp-source-line-code span[style*="--shiki-dark:#79b8ff" i],
+.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#79b8ff" i] {
+  --shiki-light: var(--syntax-type) !important;
+  --shiki-dark: var(--syntax-type) !important;
+}
+.gdp-source-line-code span[style*="--shiki-dark:#b392f0" i],
+.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#b392f0" i] {
+  --shiki-light: var(--syntax-function) !important;
+  --shiki-dark: var(--syntax-function) !important;
+}
+.gdp-source-line-code span[style*="--shiki-dark:#6a737d" i],
+.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#6a737d" i] {
+  --shiki-light: var(--syntax-comment) !important;
+  --shiki-dark: var(--syntax-comment) !important;
+}
+.gdp-source-line-code span[style*="--shiki-dark:#e1e4e8" i],
+.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#e1e4e8" i],
+.gdp-source-line-code span[style*="--shiki-dark:#ffab70" i],
+.gdp-markdown-preview pre.shiki span[style*="--shiki-dark:#ffab70" i] {
+  --shiki-light: var(--syntax-text) !important;
+  --shiki-dark: var(--syntax-text) !important;
+}
+/* パンくず: 上の段の場所は補助の文字、今のファイルだけ地の文字 (絵のとおり)。
+   押せる部分は hover で面と下線。 */
+.gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-file-breadcrumb button.gdp-file-breadcrumb-part {
+  color: var(--color-text-2);
+  font-weight: 400;
+}
+.gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-file-breadcrumb button.gdp-file-breadcrumb-part:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-file-breadcrumb-current {
+  color: var(--color-text);
+  font-weight: 500;
+}
+.gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-file-breadcrumb-sep {
+  color: var(--color-text-3);
+}
+/* 右上のアイコンは補助の色。削除は hover したときだけ失敗の色 (常に赤く置かない)。 */
+.gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-file-header-icon {
+  color: var(--color-text-3);
+}
+.gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-file-header-icon:hover:not(:disabled) {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.gdp-repo-blob-layout .gdp-file-detail-sticky .gdp-trash-path:hover:not(:disabled) {
+  color: var(--color-failed);
+}
+/* 開いた行 (URL の line / 行の選択): 面は --line-hit-bg (名前の層で選択の面)。
+   行番号はアクセントの文字。 */
+.gdp-source-table tr.gdp-source-line-target .gdp-source-line-number,
+.gdp-source-virtual-row.gdp-source-line-target .gdp-source-virtual-line-number {
+  color: var(--color-accent-strong);
+  box-shadow: inset -1px 0 0 var(--color-line-soft);
+}
+/* 注釈の印: 注釈の箱が続く行 (注釈の最後の行) の行番号の列の右端に、16px の
+   吹き出し。列の線の上に重ね、行番号にもコードの文字にもかからない。 */
+.gdp-source-table tr:has(+ tr.gdp-annotation-row) > .gdp-source-line-number::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: calc(var(--space-2) * -1);
+  width: var(--space-4);
+  height: var(--space-3);
+  border: 1.5px solid var(--color-accent);
+  border-radius: var(--radius-sm) var(--radius-sm) var(--radius-sm) 0;
+  background: var(--color-code);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+/* 注釈の箱: 面は浮く面、線は薄いアクセント (強い枠にしない)。 */
+.gdp-source-table .gdp-annotation-inline,
+table.d2h-diff-table .gdp-annotation-inline {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-line));
+  border-radius: var(--radius-md);
+  background: var(--color-overlay);
+}
+
+/* 浮く部品 (行の札・定義の下見): 面はダイアログと同じ浮く面、線は 1 本、影は
+   浮く面の影。 */
+#line-ref-pill {
+  border-color: var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-overlay);
+  color: var(--color-text);
+  box-shadow: var(--shadow-pop);
+}
+#line-ref-pill-copy {
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+#line-ref-pill-copy:hover {
+  background: var(--color-accent-strong);
+}
+#line-ref-pill .lrp-ref,
+#line-ref-pill .lrp-count {
+  background: color-mix(in srgb, var(--color-on-accent) 16%, transparent);
+}
+#line-ref-pill-github-actions {
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+#line-ref-pill-history,
+#line-ref-pill-github-open,
+#line-ref-pill-github-copy {
+  color: var(--color-text-2);
+}
+#line-ref-pill-history:hover,
+#line-ref-pill-github-open:hover,
+#line-ref-pill-github-copy:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+#line-ref-pill-close {
+  border-color: var(--color-line-strong);
+  background: var(--color-overlay);
+  color: var(--color-text-3);
+}
+.gdp-definition-preview-flyout {
+  border-color: var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-code);
+  box-shadow: var(--shadow-pop);
+}
+/* 読んでいる注釈は選択の光 (外側の強い輪にしない)。 */
+.gdp-source-table .gdp-annotation-row.active .gdp-annotation-inline,
+table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
+  box-shadow: var(--glow-select);
+}
+
+/* ---- B-1: Diff (views/diff-view.ts・index.html の #topbar) ----
+   絵 (round2/diff.png): 上の行は「比較対象 … 件数」を左に、Split / Unified を
+   右の主役にする。DOM の順は変えず order で並べる。件数や更新時刻は枠の無い
+   文字、ws / syntax / no test は文字の切替 (印の点で状態を示す)。ファイルごとの
+   見出しは枠の付いた部品を減らし、変更の種類は A / M / D の 1 文字で示す。 */
+#topbar {
+  gap: var(--space-4);
+  padding: 0 var(--pad-face) 0 var(--pad-text);
+}
+#topbar > .ref-pickers {
+  order: 1;
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: var(--space-2);
+  margin-left: 0;
+}
+/* 幅が足りないとき、選択欄は枝の名前を省略して縮む (件数や操作に重ならない)。 */
+#topbar .ref-pickers > .ref-selector {
+  flex: 0 1 auto;
+  min-width: calc(var(--space-unit) * 16);
+}
+/* 件数は縮めない (幅が足りないときは比較対象の選択欄が枝の名前を省略して
+   縮む)。 */
+#topbar > #meta {
+  order: 2;
+  flex: none;
+  gap: var(--space-3);
+}
+#topbar > .spacer {
+  order: 3;
+}
+#topbar > .controls {
+  order: 4;
+  gap: var(--space-1);
+}
+/* 比較対象: 沈んだ面の選択欄。線は付けず、hover で一段明るく。 */
+#topbar .ref-selector {
+  width: calc(var(--space-unit) * 40);
+  height: var(--ui-control-md);
+  padding: 0 var(--space-3);
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+}
+#topbar .ref-selector:hover {
+  border-color: transparent;
+  background: var(--color-raised);
+}
+#topbar .ref-selector:focus-within {
+  border-color: transparent;
+  background: var(--color-raised);
+  box-shadow: var(--focus-ring);
+}
+#topbar .ref-selector .ref-input {
+  font-size: var(--ui-font-md);
+}
+#topbar .ref-dots {
+  color: var(--color-text-3);
+}
+#topbar .ref-pickers > button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-3);
+}
+#topbar .ref-pickers > button:hover,
+#topbar #ref-reset:hover {
+  border-color: transparent;
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+#topbar #reload-prom {
+  margin-left: 0;
+}
+/* 件数: 枠の無い文字。今の件数は地の文字、補助 (追加の数・閲覧・更新時刻) は
+   一段下げる。 */
+#topbar #meta .chip {
+  font-size: var(--ui-font-md);
+}
+#topbar #meta .chip-files {
+  color: var(--color-text);
+  font-weight: 500;
+}
+#topbar #meta .chip-add {
+  color: var(--color-working);
+}
+#topbar #meta .chip-del {
+  color: var(--color-failed);
+}
+#topbar #meta .chip-added,
+#topbar #meta .chip-deleted,
+#topbar #meta .chip-renamed,
+#topbar #meta .chip-viewed-empty,
+#topbar #meta .chip-updated {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+/* 次の未閲覧へ: 文字の操作 (枠の札にしない)。押せる領域は最初から取る。 */
+#topbar #meta .chip-next-unviewed {
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent);
+  font-size: var(--ui-font-sm);
+}
+#topbar #meta .chip-next-unviewed:hover:not(:disabled) {
+  background: var(--color-raised);
+  color: var(--color-accent-strong);
+}
+#topbar #meta .chip-next-unviewed:disabled {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-3);
+}
+/* Split / Unified: 右の主役の切替。Split を先に並べ、今の方は選択の面。 */
+#topbar .seg {
+  order: 2;
+  height: var(--ui-control-md);
+  margin-left: var(--space-2);
+  padding: calc(var(--space-1) / 2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+}
+#topbar .seg button {
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+  text-transform: capitalize;
+}
+#topbar .seg button[data-layout="side-by-side"] {
+  order: -1;
+}
+#topbar .seg button:hover {
+  background: transparent;
+  color: var(--color-text);
+}
+#topbar .seg button.active {
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+  color: var(--color-text);
+  font-weight: 500;
+}
+/* ws / syntax / no test: 控えめな文字の切替。左の点が状態 (点は常に場所を
+   取り、色だけ変える)。 */
+#topbar .controls > button:not(.seg button) {
+  order: 1;
+  gap: var(--space-1);
+  width: auto;
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  font-weight: 500;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+#topbar .controls > button:not(.seg button)::before {
+  content: "";
+  width: var(--dot-size);
+  height: var(--dot-size);
+  border: 1px solid var(--color-line-strong);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+#topbar .controls > button:not(.seg button):hover {
+  border: 0;
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+#topbar .controls > button.active:not(.seg button) {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-2);
+}
+#topbar .controls > button.active:not(.seg button)::before {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+/* 1280px 前後では件数・次の未閲覧・切替のすべてを 1 行に収めるため、間隔と
+   選択欄を 1 段ずつ詰める (省かない)。 */
+@media (max-width: 1440px) {
+  #topbar {
+    gap: var(--space-3);
+  }
+  #topbar > #meta {
+    gap: var(--space-2);
+  }
+  #topbar .ref-selector {
+    width: calc(var(--space-unit) * 28);
+  }
+  #topbar .seg button {
+    padding: 0 var(--space-3);
+  }
+  #topbar .controls > button:not(.seg button) {
+    padding: 0 var(--space-1);
+  }
+}
+/* ファイルの箱: 線と影を消し、コードの面を角丸で置く。箱の間は間隔で分ける。 */
+.d2h-file-wrapper {
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-code);
+  box-shadow: none;
+  margin-bottom: var(--space-4);
+}
+.d2h-file-header,
+.d2h-file-header.d2h-sticky-header {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--color-code);
+  padding: 0 var(--space-2);
+  gap: var(--space-2);
+}
+.d2h-file-header .d2h-file-name {
+  color: var(--color-text);
+  font-weight: 500;
+}
+.d2h-file-header .gdp-file-header-icon {
+  color: var(--color-text-3);
+}
+.d2h-file-header .gdp-file-header-icon:hover:not(:disabled) {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+/* 変更の種類: 札ではなく 1 文字 (A / M / D / R)。文字そのものは読み上げ用に
+   残し、見た目だけ 1 文字にする。 */
+.d2h-file-header .d2h-tag {
+  display: inline-grid;
+  place-items: center;
+  width: var(--space-4);
+  height: var(--space-4);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 0;
+  letter-spacing: 0;
+}
+.d2h-file-header .d2h-tag::before {
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-base);
+  font-weight: 600;
+}
+.d2h-file-header .d2h-changed-tag::before { content: "M"; color: var(--color-accent); }
+.d2h-file-header .d2h-added-tag::before   { content: "A"; color: var(--color-working); }
+.d2h-file-header .d2h-deleted-tag::before { content: "D"; color: var(--color-failed); }
+.d2h-file-header .d2h-moved-tag::before   { content: "R"; color: var(--color-done); }
+/* 増減は数字だけで伝える (色の四角の並びは数字と同じことを言うので出さない)。 */
+.d2h-file-header .gdp-stat-squares {
+  display: none;
+}
+.d2h-file-header .gdp-stat-text .a {
+  color: var(--color-working);
+}
+.d2h-file-header .gdp-stat-text .d {
+  color: var(--color-failed);
+}
+/* Viewed: 枠の無い文字の切替 (チェックの箱は残す)。View File も文字の操作。 */
+.d2h-file-header .d2h-file-collapse {
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-2);
+}
+.d2h-file-header .d2h-file-collapse:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.d2h-file-header .gdp-view-file {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-2);
+}
+.d2h-file-header .gdp-view-file:hover {
+  border-color: transparent;
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+/* 差分の本文: 地はコードの面、変わっていない行の番号は補助の色。区切りの @@ は
+   補助の文字で、面の色を付けない。 */
+.d2h-files-diff > div,
+.d2h-cntx,
+.d2h-cntx.d2h-code-linenumber,
+.d2h-cntx.d2h-code-side-linenumber,
+.d2h-code-linenumber,
+.d2h-code-side-linenumber {
+  background: var(--color-code) !important;
+}
+.d2h-cntx.d2h-code-linenumber,
+.d2h-cntx.d2h-code-side-linenumber,
+.d2h-code-linenumber,
+.d2h-code-side-linenumber {
+  color: var(--color-text-3) !important;
+  box-shadow: inset -1px 0 0 var(--color-line-soft);
+}
+.d2h-info {
+  background: var(--color-code) !important;
+  border-color: var(--color-code) !important;
+}
+.d2h-info .d2h-code-line,
+.d2h-info .d2h-code-side-line {
+  color: var(--color-text-3) !important;
+}
+.d2h-emptyplaceholder,
+.d2h-code-side-emptyplaceholder {
+  background: color-mix(in srgb, var(--color-inset) 60%, var(--color-code)) !important;
+  border-color: var(--color-line-soft) !important;
+}
+.d2h-file-side-diff > div {
+  border-color: var(--color-line-soft) !important;
+}
+
+/* ---- B-1: History (views/history-view.ts・history-graph.ts) ----
+   絵 (round3/history.png): コミットの一覧は 1 行 1 コミットの表。左の列にグラフ
+   (主線はアクセント、分かれた線は別の落ち着いた色。線 2px・節点 6px)、件名は
+   省略、作者・時刻・短いハッシュは列を固定。行の高さは表の行 (--ui-table-row-h)。
+   一覧の幅で列を出し入れする (狭いと作者と絶対時刻を隠す。どちらも詳細にある)。
+   行は隙間なく並べ、グラフの線が行をまたいでつながる。
+   祖先・右端に :is() を使わない (ブラウザが規則を素早く外せず、全要素で照合する。
+   長いファイルのスクロールでスタイル計算が増えたのを実測した)。 */
+#history-panel,
+.gdp-file-history-panel {
+  background: var(--color-nav);
+}
+#history-panel .history-list,
+.gdp-file-history-panel .history-list {
+  container: history-list / inline-size;
+  padding: var(--space-1) 0 var(--space-5);
+}
+#history-panel .history-item,
+.gdp-file-history-panel .history-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto 0 auto auto;
+  grid-template-areas: "graph subject refs author when sha";
+  /* 行の高さを 1 本の行の軌道にする (グラフの SVG の 100% が行の高さになる)。 */
+  grid-template-rows: 100%;
+  align-items: center;
+  column-gap: var(--space-3);
+  height: var(--ui-table-row-h);
+  min-height: 0;
+  margin: 0 var(--pad-face);
+  padding: 0 calc(var(--pad-text) - var(--pad-face));
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+}
+#history-panel .history-item .meta2,
+.gdp-file-history-panel .history-item .meta2 {
+  display: contents;
+}
+#history-panel .history-item .history-graph-cell,
+.gdp-file-history-panel .history-item .history-graph-cell {
+  grid-area: graph;
+  align-self: stretch;
+  display: flex;
+}
+#history-panel .history-item .subject,
+.gdp-file-history-panel .history-item .subject {
+  grid-area: subject;
+  font-size: var(--ui-font-md);
+}
+#history-panel .history-item .history-refs,
+.gdp-file-history-panel .history-item .history-refs {
+  grid-area: refs;
+  flex-basis: auto;
+  flex-wrap: nowrap;
+}
+#history-panel .history-item .author,
+.gdp-file-history-panel .history-item .author {
+  grid-area: author;
+  display: none;
+  overflow: hidden;
+  max-width: calc(var(--space-unit) * 30);
+  color: var(--color-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#history-panel .history-item .when,
+.gdp-file-history-panel .history-item .when {
+  grid-area: when;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  white-space: nowrap;
+}
+#history-panel .history-item .when-abs,
+.gdp-file-history-panel .history-item .when-abs {
+  display: none;
+}
+/* 相対の時刻が無い (古いコミット) ときは絶対の日付だけが入っている。 */
+#history-panel .history-item .when > .when-abs:only-child,
+.gdp-file-history-panel .history-item .when > .when-abs:only-child {
+  display: inline;
+}
+#history-panel .history-item .sha,
+.gdp-file-history-panel .history-item .sha {
+  grid-area: sha;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+@container history-list (min-width: 480px) {
+  #history-panel .history-item,
+  .gdp-file-history-panel .history-item {
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+  }
+  #history-panel .history-item .author,
+  .gdp-file-history-panel .history-item .author {
+    display: block;
+  }
+}
+@container history-list (min-width: 680px) {
+  #history-panel .history-item .when-abs,
+  .gdp-file-history-panel .history-item .when-abs {
+    display: inline;
+  }
+}
+/* 行の状態: 開いているコミットは強い選択 (この列に 1 つ)。範囲に入る行は 控えめな面。新しく来たコミットはアクセントの薄い面。 */
+#history-panel .history-item:hover,
+.gdp-file-history-panel .history-item:hover {
+  background: color-mix(in srgb, var(--color-raised) 70%, transparent);
+}
+#history-panel .history-item.active,
+.gdp-file-history-panel .history-item.active {
+  border-left: 0;
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+}
+#history-panel .history-item-in-range,
+.gdp-file-history-panel .history-item-in-range {
+  background: color-mix(in srgb, var(--color-select) 45%, transparent);
+}
+#history-panel .history-item-fresh,
+.gdp-file-history-panel .history-item-fresh {
+  border-left: 0;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+#history-panel .history-item-worktree,
+.gdp-file-history-panel .history-item-worktree {
+  background: transparent;
+  color: var(--color-text-2);
+}
+/* 枝の名前は小さな面の札 (今の枝はアクセントの面)。件名の場所を残すため短く切る。 */
+#history-panel .history-ref,
+.gdp-file-history-panel .history-ref {
+  max-width: calc(var(--space-unit) * 20);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--color-raised);
+  color: var(--color-text-2);
+  line-height: calc(var(--space-unit) * 5);
+}
+#history-panel .history-ref-head,
+.gdp-file-history-panel .history-ref-head {
+  background: color-mix(in srgb, var(--color-accent) 70%, transparent);
+  color: var(--color-on-accent);
+}
+/* 日付の見出し: 補助の小さな文字。グラフの線はここも素通りする。 */
+#history-panel .history-group,
+.gdp-file-history-panel .history-group {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 100%;
+  align-items: center;
+  column-gap: var(--space-3);
+  height: var(--ui-row-h);
+  margin: 0 var(--pad-face);
+  padding: 0 calc(var(--pad-text) - var(--pad-face));
+  border: 0;
+  background: transparent;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-xs);
+  font-weight: 600;
+}
+#history-panel .history-group::before,
+.gdp-file-history-panel .history-group::before {
+  content: none;
+}
+#history-panel .history-group .history-graph-cell,
+.gdp-file-history-panel .history-group .history-graph-cell {
+  align-self: stretch;
+  display: flex;
+}
+.history-graph-cell {
+  min-height: 0;
+}
+.history-graph {
+  display: block;
+  height: 100%;
+  overflow: visible;
+  flex: none;
+}
+.history-graph line {
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.history-graph .history-graph-main {
+  stroke: var(--graph-main);
+  fill: var(--graph-main);
+}
+.history-graph .history-graph-branch {
+  stroke: var(--graph-branch);
+  fill: var(--graph-branch);
+}
+.history-graph circle.history-graph-node {
+  stroke: none;
+}
+/* 選んでいる行の節点は地の色の輪で浮かせる。 */
+#history-panel .history-item.active circle.history-graph-node,
+.gdp-file-history-panel .history-item.active circle.history-graph-node {
+  stroke: var(--color-select);
+  stroke-width: 2;
+}
+
+/* 一覧の頭と絞り込み: 面は一覧と同じ。絞り込みは沈んだ面の欄。 */
+#history-panel .history-filter-wrap,
+.gdp-file-history-panel .history-filter-wrap {
+  background: transparent;
+  border-bottom: 0;
+}
+#history-panel #history-filter,
+#history-panel .history-filter,
+.gdp-file-history-panel #history-filter,
+.gdp-file-history-panel .history-filter {
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+}
+#history-panel #history-filter:hover,
+#history-panel .history-filter:hover,
+.gdp-file-history-panel #history-filter:hover,
+.gdp-file-history-panel .history-filter:hover {
+  border-color: transparent;
+  background: var(--color-raised);
+}
+#history-panel #history-filter:focus,
+#history-panel .history-filter:focus,
+.gdp-file-history-panel #history-filter:focus,
+.gdp-file-history-panel .history-filter:focus {
+  border-color: transparent;
+  background: var(--color-raised);
+  box-shadow: var(--focus-ring);
+}
+
+/* コミットの詳細: 件名を大きく先頭に、その下にハッシュ・作者・日時と操作。
+   枠で囲まず、本文の面の上に置く。 */
+body.gdp-history-page #history-commit-info:not([hidden]),
+.history-commit-info:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) 0 var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--color-line-soft);
+  border-radius: 0;
+  background: transparent;
+}
+#history-commit-info .hci-subject,
+.history-commit-info .hci-subject {
+  order: -1;
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--ui-font-heading);
+  font-weight: 600;
+  line-height: 1.3;
+}
+#history-commit-info .hci-head,
+.history-commit-info .hci-head {
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+}
+#history-commit-info .hci-sha,
+.history-commit-info .hci-sha {
+  color: var(--color-text-2);
+  font-family: var(--font-mono);
+}
+#history-commit-info .hci-body,
+.history-commit-info .hci-body {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-2);
+}
+
+/* 長いファイル (仮想表示): 情報の行は補助の文字で、札や枠を減らす。面はコードの面。 */
+.gdp-source-virtual,
+.gdp-source-virtual-scroller {
+  background: var(--color-code);
+}
+.gdp-source-virtual-info {
+  gap: var(--space-3);
+  padding: var(--space-2) var(--pad-doc);
+  border-bottom: 1px solid var(--color-line-soft);
+  background: var(--color-code);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.gdp-source-virtual-badge {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+.gdp-source-virtual-action {
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-2);
+}
+.gdp-source-virtual-action:hover {
+  border-color: transparent;
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.gdp-source-virtual-line-code {
+  padding: 0 var(--space-4);
+}
+/* 定義へ移ったときの記号の印: 既定の黄色の mark ではなく、アクセントの薄い面。 */
+.gdp-source-line-code mark.gdp-grep-match,
+.gdp-source-virtual-line-code mark.gdp-grep-match {
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 32%, transparent);
+  color: inherit;
+}
+/* 1 ファイルの履歴: 右の欄は端まで差分を敷くので、詳細だけ文書の線に文字を置く。 */
+.gdp-file-history-diff-pane {
+  background: var(--color-code);
+}
+.gdp-file-history-commit-info:not([hidden]) {
+  padding: var(--space-4) var(--pad-doc);
 }

@@ -36,13 +36,15 @@
 
 | 何 | 名前 |
 |---|---|
-| 面の段階 | `--color-ground` (窓の地・上の行・最下段) / `--color-nav` (サイドバー) / `--color-tree` (ファイルのツリー) / `--color-doc` (本文) / `--color-inset` (本文の中の沈んだ面) / `--color-raised` (hover) / `--color-select` (選んでいる行) / `--color-term` |
+| 面の段階 | `--color-ground` (窓の地・上の行・最下段) / `--color-nav` (サイドバー) / `--color-tree` (ファイルのツリー) / `--color-doc` (本文) / `--color-code` (コードの面: ソース表示・差分) / `--color-inset` (本文の中の沈んだ面) / `--color-raised` (hover) / `--color-select` (選んでいる行) / `--color-term` |
+| 構文の色 | `--syntax-text` / `--syntax-keyword` / `--syntax-string` / `--syntax-type` / `--syntax-function` / `--syntax-comment`。shiki の github テーマの色と highlight.js のクラスは `style.css` の B-1 の節と diff2html の節で名前へ差し替える。コメントもコードの面と差分の面で 4.5:1 以上 |
+| 差分の文字 / 履歴のグラフ | `--diff-add-fg` / `--diff-del-fg` (面は `--diff-*-bg`)。`--graph-main` (主線) / `--graph-branch` (分かれた線)。状態の色と混ぜない |
 | 文字の段階 | `--color-text` / `--color-text-2` / `--color-text-3` / `--color-on-accent` |
 | 線 | `--color-line` / `--color-line-soft` / `--color-line-strong`。**線は最後の手段。** 面の明るさの差で分けられるなら線を引かない |
 | アクセントと状態 | `--color-accent` / `--color-accent-strong`、`--color-waiting` `--color-working` `--color-done` `--color-failed` `--color-idle` |
 | 選んでいる行の光 | `--glow-select` (内側の box-shadow。箱の寸法を変えない) |
 | 余白 / 角丸 | `--space-1`〜`--space-6` (4〜32px) / `--radius-sm` `--radius-md` `--radius-lg` |
-| 文字の大きさ・行の高さ | 密度の段階 (T0): `--ui-font-*`・`--ui-control-*`・`--ui-row-h` (`ui-layout.md`) |
+| 文字の大きさ・行の高さ | 密度の段階 (T0): `--ui-font-*`・`--ui-control-*`・`--ui-row-h`・`--ui-table-row-h` (`ui-layout.md`、下の決まり 7) |
 | 文字の家族 | `--font-ui` / `--font-mono` |
 
 - テーマは同じ名前の値を差し替えるだけ: `html[data-theme="light"|"dark"]` × `html[data-palette]`
@@ -83,9 +85,14 @@
    役割の変わるところ (見出し → 本文) は 1 段広く。**区切りの線を足す前に間隔で区切る**
 6. 補助の情報 (大きさ・日時) は主役の行から外して小さく (`--color-text-3`)。絵に無い行を足して
    絵の密度を壊さない
-7. **一覧の行の高さは `--ui-row-h` の 1 つだけ** (サイドバー・ファイルのツリー・目次・変更ファイル・
-   セッションの一覧)。出所は `views/shell/row-height.ts` (表示密度ごと)。ファイルのツリーの仮想表示も
-   ここを読む。行の高さを別の数値で書かない
+7. **行の高さは 2 種類だけ。どちらも名前で読み、別の数値で書かない。**
+   - **一覧の行は `--ui-row-h`** (サイドバー・ファイルのツリー・目次・変更ファイル・セッションの一覧・
+     全体ボードのプロジェクトの見出し・履歴の日付の見出し)。出所は `views/shell/row-height.ts`
+     (表示密度ごと)。ファイルのツリーの仮想表示もここを読む
+   - **表の行は `--ui-table-row-h`** (列を持つ行: 履歴のコミットの一覧・全体ボードのエージェントの行)。
+     一覧の行より一段ゆったりさせ、列の文字が詰まって見えないようにする。仮想表示に使わないので
+     出所は `style.css` の `html, body` ブロックだけ (`--space-unit` から作るので密度に比例する)。
+     仮想表示で使うことになったら、`--ui-row-h` と同じく TS を出所にする
 8. **選択の強さは 2 段。** 強い選択 (`--color-select` + `--glow-select`) は画面の同じ列に 1 つだけ
    (いまターミナルで開いている行など)。「いまここ」を示すだけのもの (いま見ているプロジェクト) は
    控えめな面だけにする
@@ -127,6 +134,7 @@ disabled / updated のすべてで箱の寸法を保つ。**
 | terminal | `views/terminal/i18n.ts` |
 | tools | `views/tools/i18n.ts` |
 | 検索パレット | `views/search-palette-i18n.ts` |
+| Files のフォルダ表示 | `views/repo-view-i18n.ts` |
 
 - 言語はアプリ全体の設定（`app.ts` の `STATE.language`、`en` / `ja`）
 - 言語切替時のライブ反映は各 view の `localize()` が担当する。**テーブルに足したら

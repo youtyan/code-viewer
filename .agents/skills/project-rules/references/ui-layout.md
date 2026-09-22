@@ -20,7 +20,7 @@
 
 | 層 | 何か | 例 | 生の px |
 |---|---|---|---|
-| **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義。余白・角丸の段階 (`--space-*` `--radius-*`) もここ。一覧の行の高さ `--ui-row-h` だけは出所が TS (`views/shell/row-height.ts`。仮想表示が位置の計算に使うため) で、CSS は初回描画用の既定 | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--ui-row-h` `--code-line-height` | **可**（ここだけ） |
+| **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義。余白・角丸の段階 (`--space-*` `--radius-*`) もここ。一覧の行の高さ `--ui-row-h` だけは出所が TS (`views/shell/row-height.ts`。仮想表示が位置の計算に使うため) で、CSS は初回描画用の既定。表の行の高さ `--ui-table-row-h` は仮想表示に使わないので CSS だけ (`ui-surface.md` の決まり 7) | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--ui-row-h` `--ui-table-row-h` `--code-line-height` | **可**（ここだけ） |
 | **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--global-header-h` (中央上の行) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--app-panel-visible-height` `--sidebar-w` `--history-w` `--annotation-panel-w` | **可**（その固定物の実寸なので） |
 | **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--app-panel-max-h` | **不可。T2 の式に px リテラルを書かない** |
 | **T3** ローカルインセット | 「このエンベロープの内側に居座る家具の高さ」 | `--file-detail-head-h` | **可。ただし必ず命名し、ページスコープに宣言し、何の高さかコメントする** |
