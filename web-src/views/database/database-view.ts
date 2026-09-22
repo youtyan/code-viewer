@@ -289,7 +289,7 @@ export const TABLE_SELECT_FETCH_DELAY_MS = 50;
 
 type DbVisibility = {
   toolsHidden: boolean;
-  // JetBrains 風 bottom dock: タブストリップ自体は SQL モードのとき常時表示
+  // 下端の常駐 dock: タブストリップ自体は SQL モードのとき常時表示
   // (pane open/close と独立)。historyPaneHidden が pane の本体 (展開部) の
   // 表示/非表示で、tabStrip だけ常駐させる。
   historyTabStripHidden: boolean;
@@ -1042,7 +1042,7 @@ function createTabPane(
   logTabContent.appendChild(sessionLogView.el);
   historyPane.append(historyTabContent, logTabContent);
 
-  // JetBrains 風 bottom dock: タブストリップは pane の外 (常駐領域) に
+  // 下端の常駐 dock: タブストリップは pane の外 (常駐領域) に
   // 置く。クリックでアクティブ切替 + pane を開く / アクティブタブ再クリック
   // で pane を閉じる。右端の close ボタンでも閉じられる。
   const historyDock = document.createElement("div");
@@ -1094,7 +1094,7 @@ function createTabPane(
   setActiveHistoryTab(activeHistoryTab);
   // タブクリック: pane が閉じてれば開く + そのタブをアクティブに、
   // 既に開いていて active なタブを再クリックしたら pane を閉じる
-  // (JetBrains の Tool Window タブと同じ挙動)。
+  // (IDE のツール窓のタブと同じ挙動)。
   function handleHistoryTabClick(which: "history" | "log"): void {
     if (userPrefersHistoryOpen && activeHistoryTab === which) {
       userPrefersHistoryOpen = false;

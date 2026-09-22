@@ -7377,7 +7377,7 @@ body.query-history-panel-open #content {
   flex: 1;
   overflow-y: auto;
 }
-/* JetBrains 風 bottom dock。「クエリ履歴 / ログ」のタブストリップは pane の
+/* 下端の常駐 dock。「クエリ履歴 / ログ」のタブストリップは pane の
    開閉に関わらず常時表示し、画面下端に張り付く。タブクリックで pane を開閉
    する (アクティブタブ再クリックで閉じる)。右端の × でも閉じる。 */
 .db-history-dock {

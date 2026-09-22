@@ -75,8 +75,8 @@ export function createSessionLogView(
 
   // 自動追従: 新しいエントリは listEl の先頭 (scrollTop=0) に積まれるので、
   // ON のときは render 後に scrollTop=0 へ戻す。ユーザーが手で下に
-  // スクロール (scrollTop > しきい値) したら自動 OFF にする (JetBrains の
-  // Console / Chrome DevTools と同じ流儀)。
+  // スクロール (scrollTop > しきい値) したら自動 OFF にする (IDE の
+  // コンソールやブラウザの開発者ツールと同じ流儀)。
   let autoFollow = true;
   // 自分で scrollTop=0 をセットしたときに発火する scroll イベントを
   // ユーザー操作と区別するためのフラグ。
