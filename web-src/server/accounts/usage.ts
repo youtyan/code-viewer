@@ -332,13 +332,27 @@ export function parseCodexTokenCountLine(line: string): AccountUsage | null {
 /** 末尾から見て、最後に rate_limits を持つ token_count の行。 */
 export function lastCodexUsage(text: string): AccountUsage | null {
   const lines = text.split("\n");
+  let incomplete: AccountUsage | null = null;
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i];
     if (!line) continue;
     const usage = parseCodexTokenCountLine(line);
+    if (
+      i === lines.length - 1 &&
+      !text.endsWith("\n") &&
+      usage?.status === "unavailable" &&
+      usage.reason === "unreadable"
+    ) {
+      try {
+        JSON.parse(line);
+      } catch {
+        incomplete = usage;
+        continue;
+      }
+    }
     if (usage) return usage;
   }
-  return null;
+  return incomplete;
 }
 
 function listDesc(dir: string): string[] {

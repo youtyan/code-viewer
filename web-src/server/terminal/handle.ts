@@ -63,7 +63,6 @@ import {
   handleError,
   json,
   parseBoundedJsonBody,
-  parsePostJsonBody,
   textError,
 } from "../database/handle-shared";
 import {
@@ -116,6 +115,7 @@ import { clearAgentUnread, noteAgentUnread } from "./unread";
 
 /** 申告 1 件の本文上限。指示文が丸ごと来ても収まる程度。 */
 const MAX_STATE_TEXT = 2000;
+const MAX_AGENT_ACTION_BODY_BYTES = 16 * 1024;
 
 function textField(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -142,7 +142,16 @@ async function handleStatePost(
   req: Request,
   entry: AgentEntryHooks | undefined,
 ): Promise<Response> {
-  const body = await parsePostJsonBody<{
+  const parsed = await parseBoundedJsonBody(
+    req,
+    MAX_AGENT_ACTION_BODY_BYTES,
+    "agent state request too large",
+  );
+  if (parsed instanceof Response) return parsed;
+  if (!parsed || typeof parsed !== "object") {
+    return textError("invalid state request", 400);
+  }
+  const body = parsed as {
     target?: unknown;
     event?: unknown;
     at?: unknown;
@@ -150,8 +159,7 @@ async function handleStatePost(
     note?: unknown;
     agent?: unknown;
     relay?: unknown;
-  }>(req);
-  if (body instanceof Response) return body;
+  };
 
   const target = body.target;
   if (typeof target !== "string" || !terminalKindOf(target)) {
@@ -167,6 +175,16 @@ async function handleStatePost(
 
   if (body.relay !== undefined && body.relay !== true) {
     return textError("invalid relay", 400);
+  }
+  const now = Date.now();
+  if (
+    body.at !== undefined &&
+    (typeof body.at !== "number" ||
+      !Number.isSafeInteger(body.at) ||
+      body.at < 0 ||
+      body.at > now)
+  ) {
+    return textError("invalid event timestamp", 400);
   }
   const record = recordAgentState({
     target,
@@ -415,8 +433,16 @@ async function handlePastePost(req: Request, cwd: string): Promise<Response> {
 }
 
 async function handleUnreadPost(req: Request): Promise<Response> {
-  const body = await parsePostJsonBody<{ target?: unknown }>(req);
-  if (body instanceof Response) return body;
+  const parsed = await parseBoundedJsonBody(
+    req,
+    MAX_AGENT_ACTION_BODY_BYTES,
+    "agent unread request too large",
+  );
+  if (parsed instanceof Response) return parsed;
+  if (!parsed || typeof parsed !== "object") {
+    return textError("invalid unread request", 400);
+  }
+  const body = parsed as { target?: unknown };
   if (typeof body.target !== "string" || !terminalKindOf(body.target)) {
     return textError("invalid target", 400);
   }

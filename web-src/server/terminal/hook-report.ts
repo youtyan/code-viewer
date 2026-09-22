@@ -98,7 +98,7 @@ export async function reportAgentHook(
   } catch (error) {
     fail({
       stage: "input",
-      detail: `could not read the hook input: ${formatErrorDetail(error)}\ninput: ${stdin.slice(0, 500)}`,
+      detail: `could not read the hook input: ${formatErrorDetail(error)}\ninput: ${Buffer.byteLength(stdin, "utf8")} bytes, not shown`,
     });
     return { kind: "failed", failures };
   }

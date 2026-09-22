@@ -838,6 +838,16 @@ describe("usage", () => {
       expected: { status: "unavailable", reason: "unreadable" },
     },
     {
+      name: "an incomplete trailing token_count after a complete value",
+      text: `${tokenLine({ primary: { used_percent: 42, window_minutes: 300 } })}\n{"type":"event_msg","payload":{"type":"token_count"`,
+      expected: { status: "ok", windows: [{ usedPercent: 42 }] },
+    },
+    {
+      name: "a complete invalid trailing token_count after a complete value",
+      text: `${tokenLine({ primary: { used_percent: 42, window_minutes: 300 } })}\n${tokenLine({ primary: { used_percent: "x" } })}`,
+      expected: { status: "unavailable", reason: "unreadable" },
+    },
+    {
       name: "a window without a number",
       text: tokenLine({ primary: { used_percent: "x" } }),
       expected: { status: "unavailable", reason: "unreadable" },

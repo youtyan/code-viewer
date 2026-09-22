@@ -182,6 +182,17 @@ describe("reportAgentHook", () => {
     expect(failures[0]?.detail).toContain(detail);
   });
 
+  test("does not keep malformed hook input contents in a failure", async () => {
+    const secret = "sample-secret-value";
+    const stdin = `{"prompt":"${secret}"`;
+    const { deps, failures } = fakeDeps({
+      servers: [server("http://a")],
+    });
+    await reportAgentHook("claude", stdin, deps);
+    expect(failures[0]?.detail).not.toContain(secret);
+    expect(failures[0]?.detail).toContain("31 bytes, not shown");
+  });
+
   test("a refused connection is a server that is gone, not a failed report", async () => {
     const refused = Object.assign(new TypeError("fetch failed"), {
       cause: Object.assign(new Error("connect ECONNREFUSED"), {

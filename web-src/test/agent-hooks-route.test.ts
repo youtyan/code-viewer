@@ -22,6 +22,7 @@ import {
   describe,
   expect,
   test,
+  vi,
 } from "vitest";
 import type {
   AgentHookApplyResponse,
@@ -140,6 +141,65 @@ describe("state reports carry the agent kind", () => {
     });
     expect(res?.status).toBe(400);
     expect(getAgentState("%3")).toBeNull();
+  });
+
+  test.each([
+    { name: "missing", at: undefined, expected: 200 },
+    { name: "zero", at: 0, expected: 200 },
+    { name: "the current time", at: 1000, expected: 200 },
+    { name: "one millisecond in the future", at: 1001, expected: 400 },
+    { name: "negative", at: -1, expected: 400 },
+    { name: "fractional", at: 999.5, expected: 400 },
+    { name: "a string", at: "1000", expected: 400 },
+    { name: "null", at: null, expected: 400 },
+  ])("accepts only a valid event timestamp ($name)", async ({
+    at,
+    expected,
+  }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    try {
+      const res = await post("/_agent/state", {
+        target: "%3",
+        event: "stop",
+        at,
+      });
+      expect(res?.status).toBe(expected);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("state-changing request bodies", () => {
+  test.each([
+    { name: "state without Content-Type", path: "/_agent/state" },
+    { name: "unread without Content-Type", path: "/_agent/unread" },
+    { name: "state as text/plain", path: "/_agent/state", type: "text/plain" },
+    {
+      name: "unread as text/plain",
+      path: "/_agent/unread",
+      type: "text/plain",
+    },
+  ])("rejects $name", async ({ path, type }) => {
+    const res = await call(path, {
+      method: "POST",
+      headers: type ? { "Content-Type": type } : {},
+      body: JSON.stringify({ target: "%3", event: "stop" }),
+    });
+    expect(res?.status).toBe(415);
+  });
+
+  test.each([
+    { name: "one byte below the limit", bytes: 16_383, expected: 200 },
+    { name: "exactly at the limit", bytes: 16_384, expected: 200 },
+    { name: "one byte above the limit", bytes: 16_385, expected: 413 },
+  ])("limits state JSON bodies ($name)", async ({ bytes, expected }) => {
+    const prefix = '{"target":"%3","event":"stop","padding":"';
+    const suffix = '"}';
+    const body = `${prefix}${"x".repeat(bytes - prefix.length - suffix.length)}${suffix}`;
+    const res = await post("/_agent/state", body);
+    expect(res?.status).toBe(expected);
   });
 });
 
