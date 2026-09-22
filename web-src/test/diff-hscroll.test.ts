@@ -204,4 +204,42 @@ describe("配線", () => {
     attachStickyHScroll(shell);
     expect(shell.querySelector<HTMLElement>(".gdp-hscroll")?.hidden).toBe(true);
   });
+
+  // ブラウザは中に押せる部品 (隠れた行を出すボタン) のある箱には Tab で止まらず、
+  // キーで横に送れなかった。送れる箱だけを止まり場所にする。
+  test.each([
+    { scrollWidth: 1057, clientWidth: 510, tabindex: "0" },
+    { scrollWidth: 510, clientWidth: 510, tabindex: null },
+  ])("中にボタンのある箱 (scrollWidth $scrollWidth / clientWidth $clientWidth) の tabindex は $tabindex", async ({
+    scrollWidth,
+    clientWidth,
+    tabindex,
+  }) => {
+    const { attachStickyHScroll } = await importView();
+    const shell = card(0);
+    const code = document.createElement("div");
+    code.className = "d2h-code-wrapper";
+    const expand = document.createElement("button");
+    expand.className = "gdp-expand-btn";
+    code.append(expand);
+    scrollable(code, scrollWidth, clientWidth);
+    shell.querySelector(".d2h-file-wrapper")?.append(code);
+    attachStickyHScroll(shell);
+    expect(code.getAttribute("tabindex")).toBe(tabindex);
+  });
+
+  test("送れなくなった箱は止まり場所から外す", async () => {
+    const { attachStickyHScroll } = await importView();
+    const shell = card(0);
+    const code = document.createElement("div");
+    code.className = "d2h-code-wrapper";
+    scrollable(code, 1057, 510);
+    shell.querySelector(".d2h-file-wrapper")?.append(code);
+    attachStickyHScroll(shell);
+    expect(code.getAttribute("tabindex")).toBe("0");
+    // 面が広がって収まった (描き直すたびに付け直す)。
+    scrollable(code, 1057, 1057);
+    attachStickyHScroll(shell);
+    expect(code.hasAttribute("tabindex")).toBe(false);
+  });
 });

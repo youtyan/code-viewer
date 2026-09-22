@@ -76,8 +76,16 @@
                  inset 0 0 16px color-mix(in srgb, var(--color-accent) 14%, transparent);
   /* キーで届いた部品の輪。アクセントを薄めずに使う: 7 割に薄めた輪はライトの
      地 (hover・選んでいる行も) で 3:1 に届かず、見えにくかった
-     (web-src/test/focus-ring-contrast.test.ts)。 */
-  --focus-ring: 0 0 0 2px var(--color-accent);
+     (web-src/test/focus-ring-contrast.test.ts)。
+     部品との間に地の色の隙間を挟む: 地がアクセントの塗りのボタン (Register repo・
+     dialog の確定など) では、隙間が無いと輪が塗りに溶けてボタンが少し大きく
+     見えるだけだった。 */
+  --focus-ring-gap: var(--color-ground);
+  --focus-ring: 0 0 0 2px var(--focus-ring-gap), 0 0 0 4px var(--color-accent);
+  /* 外の輪が切れる所 (列の端から端までの行・横に送る箱) は内側に描く。内側は
+     塗りの上に乗らないので隙間を挟まない。inset を --focus-ring に前置きすると
+     1 層目にしか効かず、2 層目が外に出る。 */
+  --focus-ring-inset: inset 0 0 0 2px var(--color-accent);
   --motion-fast: 0.12s;
 
   /* ---- 2. 互換の層 (値は 1 への参照だけ) ---- */
@@ -17407,18 +17415,37 @@ button.brand[aria-expanded="true"] {
   box-shadow: var(--focus-ring);
 }
 /* キーで届くのにブラウザの既定の輪だった部品 (色も太さもほかと違った): タブ列の
-   ＋と分割・右の列を畳むボタン・左のサイドバーの案内のリンク・パンくずの段と「…」。 */
+   ＋と分割・右の列を畳むボタン・左のサイドバーの案内のリンク・パンくずの段と「…」・
+   差分のカードの見出しのボタン (畳む・パスのコピー・全部の行・フォルダを開く・
+   Preview・View file)。 */
 .main-tabs-action:focus-visible,
 #sidebar-toggle:focus-visible,
 .nav-note-link:focus-visible,
 .gdp-file-breadcrumb-part:focus-visible,
-.gdp-file-breadcrumb-ellipsis:focus-visible {
+.gdp-file-breadcrumb-ellipsis:focus-visible,
+.gdp-file-header-icon:focus-visible,
+.gdp-preview-file:focus-visible,
+.gdp-view-file:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
-/* 差分の横に送る箱 (展開のボタンの無い箱は Tab で止まり、←→ で送れる)。箱の外の
-   輪は親の overflow で切れ、箱の中の輪は行番号の列 (sticky・z-index 2) の下に
-   隠れるので、送らない親の面に行番号より上の層で内側の輪を重ねる。 */
+/* 見出しの Viewed はチェックの箱に輪を描くと箱だけが囲まれるので、文字ごと
+   (label) を囲む。 */
+.d2h-file-collapse-input:focus-visible {
+  outline: none;
+}
+.d2h-file-collapse:has(> .d2h-file-collapse-input:focus-visible) {
+  box-shadow: var(--focus-ring);
+}
+/* 隠れた行を出すボタンは行番号の列の幅いっぱいに縦に積まれ、外の輪は隣の
+   ボタンと列の端で切れるので、内側に描く。 */
+.gdp-expand-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
+}
+/* 差分の横に送る箱 (送れる箱は Tab で止まり、←→ で送れる。views/diff-hscroll.ts)。
+   箱の外の輪は親の overflow で切れ、箱の中の輪は行番号の列 (sticky・z-index 2) の
+   下に隠れるので、送らない親の面に行番号より上の層で内側の輪を重ねる。 */
 .d2h-code-wrapper:focus-visible {
   outline: none;
 }
@@ -17432,7 +17459,7 @@ button.brand[aria-expanded="true"] {
   position: absolute;
   inset: 0;
   z-index: 3;
-  box-shadow: inset var(--focus-ring);
+  box-shadow: var(--focus-ring-inset);
   pointer-events: none;
 }
 .view-strip-item .goi-icon {
@@ -17872,11 +17899,11 @@ body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
    切れるので、内側に描く。選んでいる行の光は残す。 */
 #filelist li:focus-visible {
   outline: none;
-  box-shadow: inset var(--focus-ring);
+  box-shadow: var(--focus-ring-inset);
 }
 #filelist li.active:focus-visible,
 #filelist.tree .tree-file.active:focus-visible {
-  box-shadow: inset var(--focus-ring), var(--glow-select);
+  box-shadow: var(--focus-ring-inset), var(--glow-select);
 }
 /* 閲覧済みの印は左の線ではなく、行末のチェック (既存) だけにする。 */
 #filelist li.viewed,

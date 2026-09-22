@@ -183,7 +183,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "The main area scrolls in its own box. The page itself does not scroll, so the scrollbar sits at the right edge of the main area instead of pushing the right column aside, and Back / Forward return to where you had scrolled. On a long diff card the horizontal scrollbar sticks to the bottom of the main area while the card is on screen (Split has one for each side), so you can scroll sideways without going to the end of the card. A breadcrumb too long for its row folds the middle folders into “…”; hover it for the full path, or click it (Tab reaches it, then Enter or Space) to pick one of the folded folders.",
+                text: "The main area scrolls in its own box. The page itself does not scroll, so the scrollbar sits at the right edge of the main area instead of pushing the right column aside, and Back / Forward return to where you had scrolled. On a long diff card the horizontal scrollbar sticks to the bottom of the main area while the card is on screen (Split has one for each side), so you can scroll sideways without going to the end of the card. A diff box that scrolls sideways is a Tab stop: once it has focus, ←/→ scroll it. A breadcrumb too long for its row folds the middle folders into “…”; hover it for the full path, or click it (Tab reaches it, then Enter or Space) to pick one of the folded folders.",
               },
               {
                 kind: "paragraph",
@@ -1084,7 +1084,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "本文は自分の箱の中でスクロールします。ページそのものは動かないので、スクロールバーは本文の右端に出て右の列を押さず、戻る・進むでは前にスクロールしていた位置に戻ります。長い差分のカードでは、カードが見えている間、横のスクロールバーが本文の下端に貼り付きます (Split では左右に 1 本ずつ)。カードの末尾まで行かなくても横に送れます。行に入りきらないパンくずは、真ん中のフォルダを「…」にまとめます。カーソルを置くと全体のパスが出ます。押すと (Tab で届き、Enter か Space でも) まとめたフォルダから選んで移れます。",
+                text: "本文は自分の箱の中でスクロールします。ページそのものは動かないので、スクロールバーは本文の右端に出て右の列を押さず、戻る・進むでは前にスクロールしていた位置に戻ります。長い差分のカードでは、カードが見えている間、横のスクロールバーが本文の下端に貼り付きます (Split では左右に 1 本ずつ)。カードの末尾まで行かなくても横に送れます。横に送れる差分の箱は Tab で止まり、フォーカスがあれば ←/→ で送れます。行に入りきらないパンくずは、真ん中のフォルダを「…」にまとめます。カーソルを置くと全体のパスが出ます。押すと (Tab で届き、Enter か Space でも) まとめたフォルダから選んで移れます。",
               },
               {
                 kind: "paragraph",

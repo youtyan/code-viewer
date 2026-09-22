@@ -3,6 +3,8 @@
 //
 // 輪を 7 割に薄めていた頃は、ライトの地・hover・選んでいる行の上で 2.6〜3.0 しか
 // なく、見えにくかった。値そのものは固定しない (色を変えても 3:1 を保てば通る)。
+// 地がアクセントの塗りのボタンでは、輪と塗りが同じ色で接してボタンが少し大きく
+// 見えるだけだったので、輪と部品の間に地の色の隙間を挟む。
 
 import { describe, expect, test } from "vitest";
 import {
@@ -91,23 +93,109 @@ const SURFACES = [
   "--color-tab-active",
 ];
 
-function ringColor(vars: Map<string, string>): string {
-  const ring = resolveVar("var(--focus-ring)", vars);
-  const color = /^0 0 0 \d+px (.+)$/.exec(ring);
-  if (!color) throw new Error(`focus ring test: unexpected ring ${ring}`);
-  return color[1];
+type Layer = { inset: boolean; spread: number; color: string };
+
+/** `[inset] 0 0 0 <n>px <色>` をカンマで並べた box-shadow を層に分ける。 */
+function layers(shadow: string): Layer[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < shadow.length; i += 1) {
+    if (shadow[i] === "(") depth += 1;
+    else if (shadow[i] === ")") depth -= 1;
+    else if (shadow[i] === "," && depth === 0) {
+      parts.push(shadow.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(shadow.slice(start));
+  return parts.map((part) => {
+    const layer = /^(inset )?0 0 0 (\d+)px (.+)$/.exec(part.trim());
+    if (!layer) throw new Error(`focus ring test: unexpected layer ${part}`);
+    return {
+      inset: Boolean(layer[1]),
+      spread: Number(layer[2]),
+      color: layer[3],
+    };
+  });
 }
+
+/** 外の輪: 部品に接する隙間と、その外の色の輪。 */
+function outerRing(vars: Map<string, string>): { gap: string; ring: string } {
+  const [gap, ring, ...rest] = layers(resolveVar("var(--focus-ring)", vars));
+  if (!ring || rest.length > 0 || gap.inset || ring.inset)
+    throw new Error("focus ring test: --focus-ring is not a gap and a ring");
+  if (gap.spread >= ring.spread)
+    throw new Error("focus ring test: the gap is not inside the ring");
+  return { gap: gap.color, ring: ring.color };
+}
+
+/** 内側の輪 (列の端から端までの行・横に送る箱)。 */
+function insetRing(vars: Map<string, string>): string {
+  const [ring, ...rest] = layers(resolveVar("var(--focus-ring-inset)", vars));
+  if (rest.length > 0 || !ring.inset)
+    throw new Error(
+      "focus ring test: --focus-ring-inset is not one inset ring",
+    );
+  return ring.color;
+}
+
+const RINGS = {
+  outer: (vars: Map<string, string>) => outerRing(vars).ring,
+  inset: insetRing,
+};
 
 describe("the focus ring is visible on every surface", () => {
   test.each(
     Object.entries(themes).flatMap(([theme, vars]) =>
-      SURFACES.map((surface) => ({ theme, surface, vars })),
+      Object.entries(RINGS).flatMap(([kind, color]) =>
+        SURFACES.map((surface) => ({ theme, kind, color, surface, vars })),
+      ),
     ),
-  )("$theme on $surface: 3:1 or more", ({ surface, vars }) => {
+  )("$theme, $kind ring on $surface: 3:1 or more", ({
+    color,
+    surface,
+    vars,
+  }) => {
     const bg = parseColor(resolveVar(`var(${surface})`, vars));
-    const ring = over(parseColor(ringColor(vars)), bg);
+    const ring = over(parseColor(color(vars)), bg);
     expect(contrast(ring, bg)).toBeGreaterThanOrEqual(3);
   });
+});
+
+// 塗りのボタン (地がアクセント。Register repo・New agent・dialog の確定など)。
+// 隙間が塗り (hover の濃い塗りも) から、輪が隙間から、それぞれ 3:1 以上離れる。
+describe("the ring stays apart from a filled button", () => {
+  test.each(
+    Object.entries(themes).flatMap(([theme, vars]) =>
+      ["--color-accent", "--color-accent-strong"].map((fill) => ({
+        theme,
+        fill,
+        vars,
+      })),
+    ),
+  )("$theme on $fill", ({ fill, vars }) => {
+    const { gap, ring } = outerRing(vars);
+    const fillColor = parseColor(resolveVar(`var(${fill})`, vars));
+    const gapColor = over(parseColor(gap), fillColor);
+    expect({
+      gapToFill: contrast(gapColor, fillColor) >= 3,
+      ringToGap: contrast(over(parseColor(ring), gapColor), gapColor) >= 3,
+    }).toEqual({ gapToFill: true, ringToGap: true });
+  });
+});
+
+// `inset var(--focus-ring)` は 1 層目にしか inset が付かず、外の輪が内側の輪の
+// 外にもう 1 本出る。内側に描くときは --focus-ring-inset を使う。
+test("no rule puts inset in front of the two-layer ring", () => {
+  const offenders = rules
+    .filter((rule) =>
+      [...rule.declarations.values()].some((value) =>
+        /inset\s+var\(--focus-ring\)/.test(value),
+      ),
+    )
+    .map((rule) => rule.selector);
+  expect(offenders).toEqual([]);
 });
 
 // キーで届くのにブラウザの既定の輪 (色も太さもほかと違う) だった部品も、同じ輪を描く。
@@ -118,6 +206,10 @@ describe("controls that had the browser's default ring draw the shared ring", ()
     ".nav-note-link",
     ".gdp-file-breadcrumb-part",
     ".gdp-file-breadcrumb-ellipsis",
+    // 差分のカードの見出しのボタン。
+    ".gdp-file-header-icon",
+    ".gdp-preview-file",
+    ".gdp-view-file",
   ])("%s", (control) => {
     const focused = cascadedDeclarations(rules, (s) =>
       s
@@ -159,7 +251,7 @@ describe("a focused diff scroll box draws the shared ring above the line numbers
       host: "relative",
       position: "absolute",
       inset: "0",
-      shadow: `inset ${resolveVar("var(--focus-ring)", light)}`,
+      shadow: resolveVar("var(--focus-ring-inset)", light),
       aboveLineNumbers: true,
     });
   });
@@ -168,14 +260,14 @@ describe("a focused diff scroll box draws the shared ring above the line numbers
 // 木の行は列の端から端までで外の輪は切れるので、内側に描く。選んでいる行は光も残す。
 describe("a focused tree row draws the shared ring inside", () => {
   test.each([
-    ["#filelist li:focus-visible", "inset var(--focus-ring)"],
+    ["#filelist li:focus-visible", "var(--focus-ring-inset)"],
     [
       "#filelist.tree .tree-file.active:focus-visible",
-      "inset var(--focus-ring), var(--glow-select)",
+      "var(--focus-ring-inset), var(--glow-select)",
     ],
     [
       "#filelist li.active:focus-visible",
-      "inset var(--focus-ring), var(--glow-select)",
+      "var(--focus-ring-inset), var(--glow-select)",
     ],
   ])("%s", (selector, expected) => {
     const focused = cascadedDeclarations(rules, (s) => s === selector);
@@ -191,5 +283,37 @@ describe("a focused tree row draws the shared ring inside", () => {
         (s) => s === "#filelist li:focus-visible",
       ).get("outline"),
     ).toBe("none");
+  });
+});
+
+// 差分のカードの見出しの Viewed はチェックの箱ではなく文字ごと (label) を囲む。
+// 隠れた行を出すボタンは行番号の列いっぱいに積まれ、外の輪が切れるので内側に描く。
+describe("the diff card header's Viewed and the hidden-line buttons draw the shared ring", () => {
+  const exactly = (selector: string) =>
+    cascadedDeclarations(rules, (s) => s === selector);
+
+  test("Viewed: the label draws the ring, the checkbox drops the browser's", () => {
+    expect({
+      checkbox: exactly(".d2h-file-collapse-input:focus-visible").get(
+        "outline",
+      ),
+      label: resolveVar(
+        exactly(
+          ".d2h-file-collapse:has(> .d2h-file-collapse-input:focus-visible)",
+        ).get("box-shadow") ?? "",
+        light,
+      ),
+    }).toEqual({
+      checkbox: "none",
+      label: resolveVar("var(--focus-ring)", light),
+    });
+  });
+
+  test("the hidden-line button draws the ring inside", () => {
+    const focused = exactly(".gdp-expand-btn:focus-visible");
+    expect([
+      focused.get("outline"),
+      resolveVar(focused.get("box-shadow") ?? "", light),
+    ]).toEqual(["none", resolveVar("var(--focus-ring-inset)", light)]);
   });
 });

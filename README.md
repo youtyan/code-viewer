@@ -78,7 +78,8 @@ Requires Node.js 20 or newer. Development uses
   a diff card shows the full source in place while the file list stays on
   screen; View Diff returns to the diff. On a long card the horizontal
   scrollbar sticks to the bottom of the main area while the card is on screen
-  (one per side in split layout).
+  (one per side in split layout). A diff box that scrolls sideways is a Tab
+  stop, and ←/→ scroll it once it has focus.
 - Browse commit history per branch and open any commit's changed files and
   diff, with shareable `/history?ref=<branch>&commit=<sha>` links
   (`&source=<path>` while a file is open with View File; the commit list

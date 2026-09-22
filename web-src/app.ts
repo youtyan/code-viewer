@@ -2142,6 +2142,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterCountTitle: (visible: number, total: number) => string;
         filterClear: string;
         filterClearTitle: string;
+        filterLabel: string;
         hide: string;
         show: string;
         hideList: string;
@@ -2315,6 +2316,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           `${visible} of ${total} files match the filter`,
         filterClear: "Clear",
         filterClearTitle: "Clear file filter",
+        filterLabel: "Filter files",
         hide: "Hide right column",
         show: "Show right column",
         hideList: "hide the list",
@@ -2710,6 +2712,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           `${total} ファイル中 ${visible} 件が一致`,
         filterClear: "解除",
         filterClearTitle: "ファイル絞り込みを解除",
+        filterLabel: "ファイル絞り込み",
         hide: "右の列を隠す",
         show: "右の列を表示",
         hideList: "一覧を隠す",
@@ -3202,6 +3205,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (filter) {
       filter.placeholder = text.sidebar.filter;
       filter.title = text.sidebar.filterTitle;
+      filter.setAttribute("aria-label", text.sidebar.filterLabel);
     }
     const filterClear =
       document.querySelector<HTMLButtonElement>("#sb-filter-clear");

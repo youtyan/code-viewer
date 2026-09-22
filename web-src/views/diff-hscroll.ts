@@ -64,7 +64,12 @@ export function attachStickyHScroll(card: HTMLElement): void {
         // 中身と同じだけ送れるよう、内側の幅は中身の scrollWidth。枠の幅は
         // 左右の半分 (flex) で中身の枠とそろう。
         lane.inner.style.width = `${extent.scrollWidth}px`;
-        if (needsProxyScrollbar(extent)) any = true;
+        const scrollable = needsProxyScrollbar(extent);
+        if (scrollable) any = true;
+        // 送れる箱は Tab で止まり、←→ で送れる。ブラウザは中に押せる部品
+        // (隠れた行を出すボタン) のある箱には止まらないので、自分で止める。
+        if (scrollable) lane.source.tabIndex = 0;
+        else lane.source.removeAttribute("tabindex");
         const left = mirroredScrollLeft(lane.source.scrollLeft, lane.proxy);
         if (left !== null) lane.proxy.scrollLeft = left;
       }
