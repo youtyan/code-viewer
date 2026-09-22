@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Search palette (Ctrl+K file / Ctrl+G grep): overlay UI, ranked file
 // matching, repo-wide grep, and result navigation. Extracted from app.ts.
 
@@ -1047,7 +1048,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     params.set("ref", ref);
     appendScopeParams(params);
     const res = await trackLoad<FileSearchListResponse>(
-      fetch(`/_files?${params.toString()}`).then(async (r) => {
+      fetch(`${apiUrl("files")}?${params.toString()}`).then(async (r) => {
         if (!r.ok)
           throw new Error(
             `file search request failed (${r.status}): ${await r.text()}`,
@@ -1385,7 +1386,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       const controller = new AbortController();
       state.controller = controller;
       trackLoad<GrepResponse>(
-        fetch(`/_grep?${params.toString()}`, {
+        fetch(`${apiUrl("grep")}?${params.toString()}`, {
           signal: controller.signal,
         }).then(async (r) => {
           if (!r.ok)

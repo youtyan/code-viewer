@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import type {
   RedisDatabasesResponse,
   RedisExplorerSelection,
@@ -243,7 +244,7 @@ export function createRedisExplorer(
   }
 
   async function postRedisWrite(body: Record<string, unknown>): Promise<void> {
-    const doFetch = fetch("/_db/redis/write", {
+    const doFetch = fetch(apiUrl("dbRedisWrite"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -563,7 +564,7 @@ export function createRedisExplorer(
         dbIndex: String(requestDbIndex),
         key: name,
       });
-      const res = await fetch(`/_db/redis/value?${params}`, {
+      const res = await fetch(`${apiUrl("dbRedisValue")}?${params}`, {
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
@@ -629,7 +630,7 @@ export function createRedisExplorer(
         cursor: currentCursor,
         count: "200",
       });
-      const res = await fetch(`/_db/redis/keys?${params}`, {
+      const res = await fetch(`${apiUrl("dbRedisKeys")}?${params}`, {
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
@@ -731,7 +732,7 @@ export function createRedisExplorer(
     setDbStatus("Loading databases...");
     try {
       const res = await fetch(
-        `/_db/redis/databases?db=${encodeURIComponent(dbId)}`,
+        `${apiUrl("dbRedisDatabases")}?db=${encodeURIComponent(dbId)}`,
         { signal: slot.signal },
       );
       if (disposed || slot.isStale()) return;

@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 // プロジェクトの操作 (登録・外す・名前・並べ替え・開く・止める)。エージェント
 // 一覧の見出しとヘッダの切替が同じものを使う。
 //
@@ -96,7 +97,7 @@ export function createProjectActions(deps: ProjectActionsDeps): ProjectActions {
   /** 登録簿を変える。失敗は root (無ければ "") の失敗として見出しに出す。 */
   async function change(root: string, body: unknown): Promise<boolean> {
     try {
-      await post("/_agent/projects", body);
+      await post(apiUrl("agentProjects"), body);
     } catch (cause) {
       console.error("[code-viewer] project change failed", cause);
       set(root, {
@@ -116,7 +117,7 @@ export function createProjectActions(deps: ProjectActionsDeps): ProjectActions {
     set(info.root, { kind: "starting" });
     let opened: ProjectOpenResponse;
     try {
-      opened = (await post("/_agent/projects/open", {
+      opened = (await post(apiUrl("agentProjectsOpen"), {
         root: info.root,
       })) as ProjectOpenResponse;
     } catch (cause) {
@@ -256,7 +257,7 @@ export function createProjectActions(deps: ProjectActionsDeps): ProjectActions {
       });
       if (!ok) return;
       try {
-        await post("/_agent/projects/stop", { root: info.root });
+        await post(apiUrl("agentProjectsStop"), { root: info.root });
       } catch (cause) {
         console.error("[code-viewer] project server stop failed", cause);
         set(info.root, {

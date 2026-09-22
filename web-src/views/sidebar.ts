@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // File list sidebar: tree/flat rendering, virtual tree for huge repos,
 // filtering, folder icons, keyboard navigation, and sidebar chrome
 // (width / font size / hide toggle). Extracted from app.ts.
@@ -681,7 +682,7 @@ export function createSidebar(deps: SidebarDeps) {
     params.set("path", dir.path);
     appendScopeParams(params);
     return trackLoad<RepoTreeResponse>(
-      fetch(`/_tree?${params.toString()}`).then((response) => {
+      fetch(`${apiUrl("tree")}?${params.toString()}`).then((response) => {
         if (!response.ok) throw new Error("failed to load repository tree");
         return response.json();
       }),

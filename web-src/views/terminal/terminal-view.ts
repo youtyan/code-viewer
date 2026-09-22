@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 // Terminal ドロワー。映すのは PTY のシェル 1 本だけで、tmux はその中で
 // 普通に動く。
 //
@@ -295,10 +296,10 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       myGen !== generation || myList !== listGeneration || disposed;
     try {
       const [paneRes, shellRes, stateRes, clientRes] = await Promise.all([
-        deps.trackLoad(fetch("/_tmux/panes")),
-        deps.trackLoad(fetch("/_shell/list")),
-        deps.trackLoad(fetch("/_agent/states")),
-        deps.trackLoad(fetch("/_tmux/clients")),
+        deps.trackLoad(fetch(apiUrl("tmuxPanes"))),
+        deps.trackLoad(fetch(apiUrl("shellList"))),
+        deps.trackLoad(fetch(apiUrl("agentStates"))),
+        deps.trackLoad(fetch(apiUrl("tmuxClients"))),
       ]);
       if (stale()) return;
       const failed = [
@@ -354,7 +355,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     const myGen = generation;
     try {
       const res = await deps.trackLoad(
-        fetch("/_agent/state", {
+        fetch(apiUrl("agentState"), {
           method: "POST",
           headers: {
             ...deps.actionHeaders(),
@@ -401,7 +402,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     const size = screen?.measure();
     try {
       const res = await deps.trackLoad(
-        fetch("/_tmux/open", {
+        fetch(apiUrl("tmuxOpen"), {
           method: "POST",
           headers: {
             ...deps.actionHeaders(),
@@ -463,7 +464,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     const size = screen?.measure();
     try {
       const res = await deps.trackLoad(
-        fetch("/_shell/create", {
+        fetch(apiUrl("shellCreate"), {
           method: "POST",
           headers: {
             ...deps.actionHeaders(),
@@ -501,7 +502,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     const myGen = generation;
     try {
       const res = await deps.trackLoad(
-        fetch("/_shell/close", {
+        fetch(apiUrl("shellClose"), {
           method: "POST",
           headers: {
             ...deps.actionHeaders(),

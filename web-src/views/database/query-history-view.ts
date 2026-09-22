@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import type {
   QueryHistoryEntry,
   QueryHistoryState,
@@ -198,7 +199,7 @@ export function createQueryHistoryView(
     if (options.announceResult) clearRefreshResult();
     setRefreshBusy(true);
     const promise = (async () => {
-      const res = await fetch(`/_db/history${params}`);
+      const res = await fetch(`${apiUrl("dbHistory")}${params}`);
       if (!res.ok) return;
       const state = (await res.json()) as QueryHistoryState;
       if (currentRefreshParams().key !== refreshKey) return;
@@ -458,7 +459,7 @@ export function createQueryHistoryView(
 
   async function deleteEntry(id: string) {
     try {
-      await fetch("/_db/history/delete", {
+      await fetch(apiUrl("dbHistoryDelete"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -503,7 +504,7 @@ export function createQueryHistoryView(
     }
     try {
       const schema = callbacks.getSchema();
-      await fetch("/_db/history/clear", {
+      await fetch(apiUrl("dbHistoryClear"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

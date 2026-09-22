@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import type {
   ElasticsearchExplorerSelection,
   EsDocHit,
@@ -290,7 +291,7 @@ export function createElasticsearchExplorer(
   }
 
   async function postEsWrite(body: Record<string, unknown>): Promise<void> {
-    const doFetch = fetch("/_db/elasticsearch/write", {
+    const doFetch = fetch(apiUrl("dbElasticsearchWrite"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -498,7 +499,7 @@ export function createElasticsearchExplorer(
     setPaneStatus(mappingBody, "Loading mapping...");
     try {
       const params = new URLSearchParams({ db: requestDbId, index });
-      const res = await fetch(`/_db/elasticsearch/mapping?${params}`, {
+      const res = await fetch(`${apiUrl("dbElasticsearchMapping")}?${params}`, {
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
@@ -556,7 +557,7 @@ export function createElasticsearchExplorer(
       if (requestQuery) params.set("q", requestQuery);
       if (append && lastSort)
         params.set("searchAfter", JSON.stringify(lastSort));
-      const res = await fetch(`/_db/elasticsearch/docs?${params}`, {
+      const res = await fetch(`${apiUrl("dbElasticsearchDocs")}?${params}`, {
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
@@ -631,7 +632,7 @@ export function createElasticsearchExplorer(
         index: requestIndex,
         id,
       });
-      const res = await fetch(`/_db/elasticsearch/doc?${params}`, {
+      const res = await fetch(`${apiUrl("dbElasticsearchDoc")}?${params}`, {
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
@@ -748,7 +749,7 @@ export function createElasticsearchExplorer(
     setIndexStatus(text().es.loadingIndices);
     try {
       const res = await fetch(
-        `/_db/elasticsearch/indices?db=${encodeURIComponent(dbId)}`,
+        `${apiUrl("dbElasticsearchIndices")}?db=${encodeURIComponent(dbId)}`,
         { signal: slot.signal },
       );
       if (disposed || slot.isStale()) return;

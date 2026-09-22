@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Hunk expand subsystem (GitHub-style ↕ controls at hunk separators).
 //
 // Extracted from app.ts: parses @@ headers, attaches per-gap expand stacks
@@ -247,7 +248,8 @@ export function createHunkExpand(deps: HunkExpandDeps) {
       if (end < start) return Promise.resolve();
       setBusy(true);
       const url =
-        "/file_range?path=" +
+        apiUrl("fileRange") +
+        "?path=" +
         refPath +
         "&ref=" +
         encodeURIComponent(ref) +
@@ -482,7 +484,8 @@ export function createHunkExpand(deps: HunkExpandDeps) {
       const myGen = deps.getServerGeneration();
       setBusy(true);
       const url =
-        "/file_range?path=" +
+        apiUrl("fileRange") +
+        "?path=" +
         refPath +
         "&ref=" +
         encodeURIComponent(ref) +
@@ -573,7 +576,8 @@ export function createHunkExpand(deps: HunkExpandDeps) {
     const start = nextNewLine(item.hunk);
     const myGen = deps.getServerGeneration();
     const url =
-      "/file_range?path=" +
+      apiUrl("fileRange") +
+      "?path=" +
       refPath +
       "&ref=" +
       encodeURIComponent(ref) +

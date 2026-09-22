@@ -15,6 +15,7 @@ import {
   aiContextClipboardText,
   resolveSelectionTarget,
 } from "./core/ai-context-copy";
+import { apiUrl } from "./core/api-url";
 import {
   createCatchUpGate,
   shouldAutoLoadForRoute,
@@ -606,7 +607,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     keepalive = false,
   ): Promise<AppSettingsState> {
     const response = await trackLoad(
-      fetch("/_state/settings", {
+      fetch(apiUrl("stateSettings"), {
         method: "PATCH",
         headers: actionHeaders(),
         body: JSON.stringify(patch),
@@ -754,7 +755,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     let saved = false;
     try {
       const response = await trackLoad(
-        fetch("/_state/view", {
+        fetch(apiUrl("stateView"), {
           method: "PATCH",
           headers: actionHeaders(),
           body: JSON.stringify(patch),
@@ -951,7 +952,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   async function loadSettings(): Promise<SettingsResponse> {
-    const res = await trackLoad(fetch("/_settings"));
+    const res = await trackLoad(fetch(apiUrl("settings")));
     if (!res.ok) {
       throw new Error(
         await responseErrorMessage(res, "settings request failed"),
@@ -1057,7 +1058,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   async function loadAgentScreenRules(): Promise<void> {
     const generation = ++AGENT_SCREEN_RULE_REQUEST_GENERATION;
     const response = await agentScreenRuleResponse(
-      await trackLoad(fetch("/_agent/rules")),
+      await trackLoad(fetch(apiUrl("agentRules"))),
     );
     if (generation !== AGENT_SCREEN_RULE_REQUEST_GENERATION) return;
     applyAgentScreenRuleResponse(response);
@@ -1073,7 +1074,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const generation = ++AGENT_SCREEN_RULE_REQUEST_GENERATION;
     const response = await agentScreenRuleResponse(
       await trackLoad(
-        fetch("/_agent/rules", {
+        fetch(apiUrl("agentRules"), {
           method: "PUT",
           headers: actionHeaders(),
           body: JSON.stringify(rules),
@@ -1088,7 +1089,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const generation = ++AGENT_SCREEN_RULE_REQUEST_GENERATION;
     const response = await agentScreenRuleResponse(
       await trackLoad(
-        fetch("/_agent/rules", {
+        fetch(apiUrl("agentRules"), {
           method: "DELETE",
           headers: actionHeaders(),
         }),
@@ -1116,10 +1117,13 @@ window.GdpExpandLogic = GdpExpandLogic;
   async function loadPersistedState(): Promise<void> {
     const [settings, view] = await Promise.all([
       loadStateResponse<AppSettingsState>(
-        "/_state/settings",
+        apiUrl("stateSettings"),
         "settings state request failed",
       ),
-      loadStateResponse<ViewState>("/_state/view", "view state request failed"),
+      loadStateResponse<ViewState>(
+        apiUrl("stateView"),
+        "view state request failed",
+      ),
     ]);
     APP_SETTINGS = settings;
     VIEW_STATE = view;
@@ -4231,7 +4235,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       button.classList.remove("failed");
     }
     try {
-      const res = await fetch("/_open_path", {
+      const res = await fetch(apiUrl("openPath"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -4263,7 +4267,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   async function runUndoAction(action: UndoActionResponse) {
     if (action.type !== "trash") return false;
-    const res = await fetch("/_restore_trash", {
+    const res = await fetch(apiUrl("restoreTrash"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -4350,10 +4354,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       ref: target.ref || "worktree",
     });
     void trackLoad<FileRevisionNeighbors>(
-      fetch(`/_file_revisions?${params.toString()}`).then(async (r) => {
-        if (!r.ok) throw new Error(await r.text());
-        return r.json();
-      }),
+      fetch(`${apiUrl("fileRevisions")}?${params.toString()}`).then(
+        async (r) => {
+          if (!r.ok) throw new Error(await r.text());
+          return r.json();
+        },
+      ),
     )
       .then((neighbors) => {
         if (!nav.isConnected) return;
@@ -5679,7 +5685,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.to) params.set("to", STATE.to);
     if (activeHistoryPathFilter) params.set("path", activeHistoryPathFilter);
     if (options.force) params.set("nocache", "1");
-    const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
+    const url = `${apiUrl("diffJson")}${params.toString() ? `?${params.toString()}` : ""}`;
     return trackLoad<DiffMeta>(fetch(url).then((r) => r.json()))
       .then((data) => {
         if (!isCurrentDiffRequest()) return null;
@@ -7551,7 +7557,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function connectEventSource(): void {
     if (!shouldConnectEventSource()) return;
     if (eventSource) return;
-    const es = new EventSource("/events");
+    const es = new EventSource(apiUrl("events"));
     eventSource = es;
     es.addEventListener("update", (event) => {
       const raw = (event as MessageEvent).data;

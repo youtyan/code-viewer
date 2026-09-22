@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 // 設定画面の「エージェント連携」の節。claude と codex に状態を知らせる
 // フックを、書き込む内容を見せて確認してから入れる・外す。
 //
@@ -154,10 +155,10 @@ export function createAgentHooksSettings(
     const text = deps.getText();
     try {
       const res = background
-        ? await fetch("/_agent/hooks", {
+        ? await fetch(apiUrl("agentHooks"), {
             headers: { [BACKGROUND_REQUEST_HEADER]: "1" },
           })
-        : await deps.trackLoad(fetch("/_agent/hooks"));
+        : await deps.trackLoad(fetch(apiUrl("agentHooks")));
       if (!res.ok) throw new Error(await failureText(res, text.loadFailed));
       const next = (await res.json()) as AgentHooksResponse;
       if (mine !== generation) return;
@@ -295,7 +296,9 @@ export function createAgentHooksSettings(
     action: HookAction,
   ): Promise<AgentHookPlanResponse> {
     const query = new URLSearchParams({ agent, action });
-    const res = await deps.trackLoad(fetch(`/_agent/hooks/plan?${query}`));
+    const res = await deps.trackLoad(
+      fetch(`${apiUrl("agentHooksPlan")}?${query}`),
+    );
     if (!res.ok)
       throw new Error(await failureText(res, deps.getText().planFailed));
     return (await res.json()) as AgentHookPlanResponse;
@@ -414,7 +417,7 @@ export function createAgentHooksSettings(
     const text = deps.getText();
     try {
       const res = await deps.trackLoad(
-        fetch("/_agent/hooks/apply", {
+        fetch(apiUrl("agentHooksApply"), {
           method: "POST",
           headers: deps.actionHeaders(),
           body: JSON.stringify({
@@ -499,7 +502,7 @@ export function createAgentHooksSettings(
     failuresError.hidden = true;
     try {
       const res = await deps.trackLoad(
-        fetch("/_agent/hooks/failures", {
+        fetch(apiUrl("agentHooksFailures"), {
           method: "DELETE",
           headers: deps.actionHeaders(),
         }),

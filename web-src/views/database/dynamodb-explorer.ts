@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import type {
   DynamoDbAttributeValue,
   DynamoDbExplorerSelection,
@@ -614,7 +615,9 @@ export function createDynamoDbExplorer(
         params.set("exclusiveStartKey", JSON.stringify(currentNextToken));
       }
       const res = await trackLoad(
-        fetch(`/_db/dynamodb/items?${params}`, { signal: slot.signal }),
+        fetch(`${apiUrl("dbDynamodbItems")}?${params}`, {
+          signal: slot.signal,
+        }),
       );
       if (disposed || slot.isStale()) return;
       if (!res.ok) {
@@ -676,7 +679,9 @@ export function createDynamoDbExplorer(
     try {
       const params = new URLSearchParams({ db: requestDbId, table });
       const res = await trackLoad(
-        fetch(`/_db/dynamodb/table?${params}`, { signal: slot.signal }),
+        fetch(`${apiUrl("dbDynamodbTable")}?${params}`, {
+          signal: slot.signal,
+        }),
       );
       if (isStaleRequest()) return;
       if (!res.ok) {
@@ -718,7 +723,7 @@ export function createDynamoDbExplorer(
         key: JSON.stringify(key),
       });
       const res = await trackLoad(
-        fetch(`/_db/dynamodb/item?${params}`, { signal: slot.signal }),
+        fetch(`${apiUrl("dbDynamodbItem")}?${params}`, { signal: slot.signal }),
       );
       if (disposed || slot.isStale()) return;
       if (!res.ok) return;
@@ -804,7 +809,9 @@ export function createDynamoDbExplorer(
         exclusiveStartTableName: requestToken,
       });
       const res = await trackLoad(
-        fetch(`/_db/dynamodb/tables?${params}`, { signal: slot.signal }),
+        fetch(`${apiUrl("dbDynamodbTables")}?${params}`, {
+          signal: slot.signal,
+        }),
       );
       if (disposed || slot.isStale() || requestDbId !== currentDbId) return;
       if (!res.ok) {
@@ -885,7 +892,7 @@ export function createDynamoDbExplorer(
     setPaneStatus(tableList, "Loading tables...");
     try {
       const res = await trackLoad(
-        fetch(`/_db/dynamodb/tables?db=${encodeURIComponent(dbId)}`, {
+        fetch(`${apiUrl("dbDynamodbTables")}?db=${encodeURIComponent(dbId)}`, {
           signal: slot.signal,
         }),
       );

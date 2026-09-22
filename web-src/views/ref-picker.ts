@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Ref picker popover (branch / tag / commit selector), extracted from app.ts.
 // createRefPicker() wires the popover, the #ref-from/#ref-to inputs, and the
 // #repo-target input at construction time.
@@ -114,7 +115,7 @@ export function createRefPicker(deps: RefPickerDeps) {
     if (refsInFlight) return refsInFlight;
     refsLoading = true;
     refsError = false;
-    const request = fetch("/_refs")
+    const request = fetch(apiUrl("refs"))
       .then((r) => r.json())
       .then((refs: RefResponse) => {
         Object.assign(REFS, refs);
@@ -171,7 +172,7 @@ export function createRefPicker(deps: RefPickerDeps) {
       commitHasMore = false;
     }
     const url =
-      `/_commits?max=${COMMIT_PAGE_SIZE}&skip=${skip}` +
+      `${apiUrl("commits")}?max=${COMMIT_PAGE_SIZE}&skip=${skip}` +
       `&q=${encodeURIComponent(normalizedQuery)}`;
     return fetch(url, { signal: commitSearchAbort.signal })
       .then((r) => r.json())

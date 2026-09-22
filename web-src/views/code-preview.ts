@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 import { errorWithCause, responseErrorMessage } from "../core/error-detail";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 import { normalizeSourceShikiLang } from "../core/source-meta";
@@ -142,7 +143,7 @@ export function createCodePreview(
 
     void deps
       .trackLoad<FileRangeResponse>(
-        fetch(`/file_range?${params.toString()}`, {
+        fetch(`${apiUrl("fileRange")}?${params.toString()}`, {
           signal: abort.signal,
         }).then(async (response) => {
           if (!response.ok) {

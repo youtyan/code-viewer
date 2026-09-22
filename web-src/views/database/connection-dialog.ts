@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import type { DbKind } from "../../core/database/types";
 import {
   showAlertDialog,
@@ -175,7 +176,7 @@ async function loadConnection(
   deps: ConnectionDialogDeps,
   id: string,
 ): Promise<PublicConnection | null> {
-  const response = await deps.trackLoad(fetch("/_db/connections"));
+  const response = await deps.trackLoad(fetch(apiUrl("dbConnections")));
   if (!response.ok) return null;
   const body = (await response.json()) as { connections?: PublicConnection[] };
   return body.connections?.find((entry) => entry.id === id) ?? null;
@@ -460,7 +461,7 @@ export async function showDatastoreConnectionDialog(
     const generation = ++testGeneration;
     void deps
       .trackLoad(
-        fetch("/_db/connections/test", {
+        fetch(apiUrl("dbConnectionsTest"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -499,7 +500,7 @@ export async function showDatastoreConnectionDialog(
     submit: async () => {
       const payload = buildPayload();
       const response = await deps.trackLoad(
-        fetch("/_db/connections", {
+        fetch(apiUrl("dbConnections"), {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -533,7 +534,7 @@ export async function deleteDatastoreConnectionFromUi(
   });
   if (!confirmed) return false;
   const response = await deps.trackLoad(
-    fetch("/_db/connections", {
+    fetch(apiUrl("dbConnections"), {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",

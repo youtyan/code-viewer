@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Search results sheet: the result list of the Ctrl+G palette, kept open in the
 // bottom panel (third tab next to Terminal / Tools) so it survives opening
 // files. The query travels in the URL (?results=) and is re-run on reload.
@@ -291,15 +292,15 @@ export function createSearchResultsView(
     controller = abort;
     void deps
       .trackLoad<GrepResponse>(
-        fetch(`/_grep?${params.toString()}`, { signal: abort.signal }).then(
-          async (r) => {
-            if (!r.ok)
-              throw new Error(
-                `grep request failed (${r.status}): ${await r.text()}`,
-              );
-            return r.json();
-          },
-        ),
+        fetch(`${apiUrl("grep")}?${params.toString()}`, {
+          signal: abort.signal,
+        }).then(async (r) => {
+          if (!r.ok)
+            throw new Error(
+              `grep request failed (${r.status}): ${await r.text()}`,
+            );
+          return r.json();
+        }),
       )
       .then((response) => {
         if (myGeneration !== generation || abort.signal.aborted) return;

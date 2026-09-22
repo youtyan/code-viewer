@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 // ドロワーが映しているターミナルを xterm.js に描き、打鍵を送り返す部分。
 //
 // 映すのは PTY のシェル 1 本だけ。PTY が吐いた分だけが順に届くので、描き方は
@@ -298,7 +299,7 @@ export function createTerminalScreen(
   ): Promise<void> {
     try {
       const res = await deps.trackLoad(
-        fetch("/_shell/resize", {
+        fetch(apiUrl("shellResize"), {
           method: "POST",
           headers: {
             ...deps.actionHeaders(),
@@ -335,7 +336,7 @@ export function createTerminalScreen(
     pendingInput = "";
     try {
       const res = await deps.trackLoad(
-        fetch("/_shell/keys", {
+        fetch(apiUrl("shellKeys"), {
           method: "POST",
           headers: {
             ...deps.actionHeaders(),
@@ -488,7 +489,7 @@ export function createTerminalScreen(
     for (const path of paths) params.append("path", path);
     try {
       const res = await deps.trackLoad(
-        fetch(`/_agent/images?${params.toString()}`),
+        fetch(`${apiUrl("agentImages")}?${params.toString()}`),
       );
       if (disposed || myGen !== generation) return;
       // 配れない候補は 200 の rejected で返る。ここに来るのはサーバ側の異常
@@ -531,7 +532,9 @@ export function createTerminalScreen(
   ): Promise<void> {
     try {
       const res = await deps.trackLoad(
-        fetch(`/_agent/images/history?shell=${encodeURIComponent(session.id)}`),
+        fetch(
+          `${apiUrl("agentImagesHistory")}?shell=${encodeURIComponent(session.id)}`,
+        ),
       );
       if (disposed || myGen !== generation) return;
       if (!res.ok) {
@@ -774,7 +777,7 @@ export function createTerminalScreen(
     }
     try {
       const res = await deps.trackLoad(
-        fetch("/_agent/paste", {
+        fetch(apiUrl("agentPaste"), {
           method: "POST",
           headers: {
             ...deps.actionHeaders(),
@@ -904,7 +907,7 @@ export function createTerminalScreen(
 
   function openSource(session: ShellSession, myGen: number): void {
     const stream = new EventSource(
-      `/_shell/stream?id=${encodeURIComponent(session.id)}`,
+      `${apiUrl("shellStream")}?id=${encodeURIComponent(session.id)}`,
     );
     source = stream;
 

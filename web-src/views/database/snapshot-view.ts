@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import type {
   DbTableInfo,
   SnapshotDiffRow,
@@ -255,7 +256,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     cancellingJobs.add(id);
     renderProgress();
     try {
-      await postJson("/_db/snapshot/cancel", { id });
+      await postJson(apiUrl("dbSnapshotCancel"), { id });
     } catch {
       // ignore: SSE 側で aborted/error が届くまで row を維持する
     }
@@ -486,7 +487,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     confirmBtn.textContent = text().snapshot.creating;
 
     try {
-      await postJson("/_db/snapshot/create", {
+      await postJson(apiUrl("dbSnapshotCreate"), {
         db: dbId,
         ...(schema ? { schema } : {}),
         tables,
@@ -544,7 +545,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     try {
       const params = new URLSearchParams({ db: dbId });
       if (schema) params.set("schema", schema);
-      const snapRes = await getJson(`/_db/snapshot/list?${params}`);
+      const snapRes = await getJson(`${apiUrl("dbSnapshotList")}?${params}`);
       if (snapRes.ok) {
         const data = (await snapRes.json()) as { snapshots: SnapshotMeta[] };
         if (
@@ -834,7 +835,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
     try {
       const res = await getJson(
-        `/_db/snapshot/diff/tables?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}`,
+        `${apiUrl("dbSnapshotDiffTables")}?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}`,
       );
       if (!res.ok) {
         // 失敗時は currentDiff を巻き戻して restoreDiffFromRoute の重複防止
@@ -1126,7 +1127,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     container.appendChild(loading);
     try {
       const res = await getJson(
-        `/_db/snapshot/diff/rows?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}&table=${encodeURIComponent(table)}&limit=200`,
+        `${apiUrl("dbSnapshotDiffRows")}?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}&table=${encodeURIComponent(table)}&limit=200`,
       );
       if (!res.ok) {
         container.innerHTML = "";
@@ -1333,7 +1334,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     cancelDlgBtn.addEventListener("click", () => dialog.remove());
     saveBtn.addEventListener("click", async () => {
       if (disposed) return;
-      await postJson("/_db/snapshot/update-note", {
+      await postJson(apiUrl("dbSnapshotUpdateNote"), {
         id: snapshotId,
         note: input.value,
       });
@@ -1360,7 +1361,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
   async function deleteSnap(snapshotId: string) {
     if (disposed) return;
-    await postJson("/_db/snapshot/delete", { id: snapshotId });
+    await postJson(apiUrl("dbSnapshotDelete"), { id: snapshotId });
     if (disposed) return;
     refresh();
   }

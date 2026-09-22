@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 // Tools overlay. 画面を離れずに開ける貼り付け専用のスクラッチパッド置き場で、
 // Markdown / Mermaid / JSON・YAML の 3 ツールをタブで切り替える。
 // 開閉の作りは doctor sheet (views/doctor-view.ts) と同じ右ドロワー
@@ -171,7 +172,7 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
     }
     void deps
       .trackLoad(
-        fetch("/_state/tools", {
+        fetch(apiUrl("stateTools"), {
           method: "PATCH",
           headers: deps.actionHeaders(),
           body,
@@ -312,7 +313,7 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
   async function loadState(myGen: number): Promise<void> {
     if (stateLoaded) return;
     try {
-      const res = await deps.trackLoad(fetch("/_state/tools"));
+      const res = await deps.trackLoad(fetch(apiUrl("stateTools")));
       // 世代が変わっていたらこの読み込みは無効。stateLoaded も立てない
       // (立てると開き直したときに二度と読みに行かなくなる)。本文を読み切る
       // までは「読めた」と見なさない。

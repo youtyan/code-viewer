@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import { inferRailsForeignKeys } from "../../core/database/infer-fk";
 import type {
   DbColumn,
@@ -1252,7 +1253,7 @@ function createTabPane(
 
   async function fetchDbFiles(): Promise<DbFilesResponse> {
     if (deps.fetchDbFiles) return deps.fetchDbFiles();
-    const res = await deps.trackLoad(fetch("/_db/files"));
+    const res = await deps.trackLoad(fetch(apiUrl("dbFiles")));
     if (!res.ok) return { files: [] };
     const data = (await res.json()) as DbFilesResponse;
     return data;
@@ -1270,7 +1271,7 @@ function createTabPane(
     const params = new URLSearchParams({ db: dbId });
     if (preferredSchema) params.set("schema", preferredSchema);
     return logSqlFetch<DbSchemasResponse>({
-      url: `/_db/schemas?${params}`,
+      url: `${apiUrl("dbSchemas")}?${params}`,
       kind: "query",
       label: `_db/schemas db=${dbId}`,
       errorPrefix: "failed to fetch schemas",
@@ -1299,7 +1300,7 @@ function createTabPane(
       new URLSearchParams({ db: dbId, includeColumns: "1" }),
     );
     return logSqlFetch<DbSchemaResponse>({
-      url: `/_db/schema?${params}`,
+      url: `${apiUrl("dbSchema")}?${params}`,
       kind: "query",
       label: `_db/schema db=${dbId}`,
       errorPrefix: "failed to fetch schema",
@@ -1330,7 +1331,7 @@ function createTabPane(
     const params = new URLSearchParams({ db: dbId, table });
     if (schema) params.set("schema", schema);
     return logSqlFetch<DbTableCountResponse>({
-      url: `/_db/table-count?${params}`,
+      url: `${apiUrl("dbTableCount")}?${params}`,
       kind: "query",
       label: `_db/table-count ${table}`,
       errorPrefix: "failed to fetch table count",
@@ -1396,7 +1397,7 @@ function createTabPane(
       params.set("eq", JSON.stringify(eq));
     }
     const data = await logSqlFetch<DbTableDataResponse>({
-      url: `/_db/table?${params}`,
+      url: `${apiUrl("dbTable")}?${params}`,
       init: signal ? { signal } : undefined,
       kind: "query",
       label: `SELECT FROM ${table}`,
@@ -1513,7 +1514,7 @@ function createTabPane(
     if (!currentDbInfo) throw new Error("no database selected");
     const label = sql.split("\n")[0]?.trim() || sql;
     return logSqlFetch<DbQueryResponse>({
-      url: "/_db/query",
+      url: apiUrl("dbQuery"),
       init: {
         method: "POST",
         headers: {
@@ -1550,7 +1551,7 @@ function createTabPane(
       2,
     );
     await logSqlFetch<DbMutateResponse>({
-      url: "/_db/mutate",
+      url: apiUrl("dbMutate"),
       init: {
         method: "POST",
         headers: {
@@ -1837,7 +1838,7 @@ function createTabPane(
         columns: DbColumn[];
         executedSql?: string[];
       }>({
-        url: `/_db/columns?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
+        url: `${apiUrl("dbColumns")}?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
         kind: "query",
         label: `_db/columns ${table}`,
         trackLoad: false,
@@ -1926,7 +1927,7 @@ function createTabPane(
         triggers: { name: string; sql: string }[];
         executedSql?: string[];
       }>({
-        url: `/_db/ddl?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
+        url: `${apiUrl("dbDdl")}?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
         kind: "query",
         label: `_db/ddl ${table}`,
         trackLoad: false,
@@ -2582,7 +2583,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   async function ensureDbUiState(): Promise<void> {
     if (dbUiLoadPromise) return dbUiLoadPromise;
     const operation = (async () => {
-      const response = await deps.trackLoad(fetch("/_db/ui"));
+      const response = await deps.trackLoad(fetch(apiUrl("dbUi")));
       if (!response.ok) {
         throw new Error(
           await responseErrorMessage(response, "load database UI settings"),
@@ -2630,7 +2631,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     // PATCH のレスポンスは local state には流し込まない: 連続書込時に古い
     // レスポンスが後勝ちして新しいローカル値を巻き戻す race を避ける。サーバ
     // 側 merge は idempotent なので、各 PATCH が独立に届けば十分。
-    void fetch("/_db/ui", {
+    void fetch(apiUrl("dbUi"), {
       method: "PATCH",
       headers: actionHeaders(),
       body: JSON.stringify({ columnWidths: { [dbId]: { [table]: widths } } }),
@@ -2658,7 +2659,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (nextMap) nextState[stateKey] = nextMap;
     else delete nextState[stateKey];
     applyDbUiState(nextState);
-    void fetch("/_db/ui", {
+    void fetch(apiUrl("dbUi"), {
       method: "PATCH",
       headers: actionHeaders(),
       body: JSON.stringify({
@@ -2718,7 +2719,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }>,
   ): Promise<void> {
     const response = await deps.trackLoad(
-      fetch("/_db/ui", {
+      fetch(apiUrl("dbUi"), {
         method: "PATCH",
         headers: actionHeaders(),
         body: JSON.stringify({ prefs: patch }),
@@ -2754,7 +2755,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (!dbId) return [];
     const params = new URLSearchParams({ db: dbId });
     if (schema) params.set("schema", schema);
-    const res = await fetch(`/_db/history?${params}`);
+    const res = await fetch(`${apiUrl("dbHistory")}?${params}`);
     if (!res.ok) return [];
     const state = (await res.json()) as QueryHistoryState;
     const seen = new Set<string>();
@@ -2786,7 +2787,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }
     if (dbFilesCache?.promise) return dbFilesCache.promise;
     const promise = deps
-      .trackLoad(fetch("/_db/files"))
+      .trackLoad(fetch(apiUrl("dbFiles")))
       .then(async (res) => {
         if (!res.ok) {
           const value: DbFilesResponse = { files: [] };
@@ -2836,7 +2837,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     abortActiveSave();
     if (options.keepalive) {
       try {
-        await fetch("/_db/tabs", {
+        await fetch(apiUrl("dbTabs"), {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -2859,7 +2860,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         const controller = new AbortController();
         saveController = controller;
         try {
-          await fetch("/_db/tabs", {
+          await fetch(apiUrl("dbTabs"), {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
@@ -2895,7 +2896,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   async function fetchTabs(): Promise<TabsResponse | null> {
     try {
-      const res = await fetch("/_db/tabs");
+      const res = await fetch(apiUrl("dbTabs"));
       if (!res.ok) return null;
       return (await res.json()) as TabsResponse;
     } catch {
@@ -3015,7 +3016,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       "Content-Type": "application/json",
       "X-Code-Viewer-Action": "1",
     };
-    void fetch("/_db/close", { method: "POST", headers, body }).catch(
+    void fetch(apiUrl("dbClose"), { method: "POST", headers, body }).catch(
       () => undefined,
     );
   }

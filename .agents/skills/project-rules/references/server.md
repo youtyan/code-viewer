@@ -72,6 +72,7 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
 | `cancelInFlightRequests()` | `app.ts` | 追跡中の fetch を全て abort する。ユーザー操作由来の中断で呼ぶ |
 | `handleFileDiff`（`generation` フィールド） | `preview.ts` | サーバハンドラの手本。モジュールレベルの `generation` カウンタを応答に載せる |
 | `history-view.ts` | — | クライアント側の世代破棄の手本。ローカル `generation` を進め、応答と比較し、古ければ捨てる |
+| `apiUrl(endpoint)` / `pageUrl(path)` | `core/api-url.ts` | フロントの要求 URL の唯一の組み立て口（経路の表もここ）。経路の文字列をほかのファイルに書くと `web-src/test/api-url-guard.test.ts` が落ちる |
 
 ### 規則
 

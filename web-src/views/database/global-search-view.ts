@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import type { GlobalSearchHit } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
 import { type DbText, dbText } from "./i18n";
@@ -95,7 +96,7 @@ export function createGlobalSearchView(
     cancelBtn.hidden = false;
 
     try {
-      const res = await fetch("/_db/search/start", {
+      const res = await fetch(apiUrl("dbSearchStart"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -133,7 +134,7 @@ export function createGlobalSearchView(
     if (!currentJobId) return;
     try {
       const res = await fetch(
-        `/_db/search/status?id=${encodeURIComponent(currentJobId)}`,
+        `${apiUrl("dbSearchStatus")}?id=${encodeURIComponent(currentJobId)}`,
       );
       if (!res.ok) {
         stopPolling();
@@ -192,7 +193,7 @@ export function createGlobalSearchView(
 
   async function cancelJob(jobId: string) {
     try {
-      await fetch("/_db/search/cancel", {
+      await fetch(apiUrl("dbSearchCancel"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

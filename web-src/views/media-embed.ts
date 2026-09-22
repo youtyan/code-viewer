@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Media (image / video / audio) embedding for binary file diffs.
 // Pure helpers extracted from app.ts — no app state involved.
 
@@ -31,7 +32,7 @@ export type MediaCardOptions = {
 
 function fileURL(path: string, side: MediaCardSide): string {
   const ref = side === "before" ? "HEAD" : "worktree";
-  return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
+  return `${apiUrl("file")}?path=${encodeURIComponent(path)}&ref=${ref}`;
 }
 
 function createMediaElement(

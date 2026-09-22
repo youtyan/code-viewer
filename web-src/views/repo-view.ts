@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Repository browsing view: tree listing, breadcrumbs, context menu,
 // new-folder / move-to-trash actions, upload panel, and the repo blob
 // sidebar. Extracted from app.ts as a deps-injected factory.
@@ -348,7 +349,7 @@ export function createRepoView(deps: RepoViewDeps) {
     if (!name) return;
     creatingDirectory = true;
     try {
-      const res = await fetch("/_create_directory", {
+      const res = await fetch(apiUrl("createDirectory"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1077,7 +1078,7 @@ export function createRepoView(deps: RepoViewDeps) {
     appendScopeParams(params);
     REPO_SIDEBAR_LOAD_REF = normalizedRef;
     const load = trackLoad<RepoTreeResponse>(
-      fetch(`/_tree?${params.toString()}`).then((r) => {
+      fetch(`${apiUrl("tree")}?${params.toString()}`).then((r) => {
         if (!r.ok) throw new Error("failed to load repository tree");
         return r.json();
       }),
@@ -1443,7 +1444,7 @@ export function createRepoView(deps: RepoViewDeps) {
     if (routePath) params.set("path", routePath);
     appendScopeParams(params);
     return trackLoad<RepoTreeResponse>(
-      fetch(`/_tree?${params.toString()}`).then(async (r) => {
+      fetch(`${apiUrl("tree")}?${params.toString()}`).then(async (r) => {
         if (!r.ok)
           throw errorWithCause(
             `Repository listing failed (${r.status}): ${routeRef}:${routePath}`,
@@ -1494,7 +1495,7 @@ export function createRepoView(deps: RepoViewDeps) {
   }
 
   async function moveRepoPathToTrash(path: string) {
-    const res = await fetch("/_trash_path", {
+    const res = await fetch(apiUrl("trashPath"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1528,7 +1529,7 @@ export function createRepoView(deps: RepoViewDeps) {
     list.forEach((file) => {
       form.append("files", file, file.name);
     });
-    const res = await fetch("/_upload_files", {
+    const res = await fetch(apiUrl("uploadFiles"), {
       method: "POST",
       headers: { "X-Code-Viewer-Action": "1" },
       body: form,
@@ -1575,7 +1576,7 @@ export function createRepoView(deps: RepoViewDeps) {
       params.set("ref", ref);
       appendScopeParams(params);
       const meta = await trackLoad<RepoTreeResponse>(
-        fetch(`/_tree?${params.toString()}`).then(async (r) => {
+        fetch(`${apiUrl("tree")}?${params.toString()}`).then(async (r) => {
           if (!r.ok) {
             throw new Error(
               await responseErrorMessage(r, "refresh repository tree"),

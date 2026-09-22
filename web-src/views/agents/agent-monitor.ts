@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 // どの画面にいてもエージェントの状態を追いかける役。
 //
 // /_agent/overview を一定間隔で取り直し、前回との差から「作業中 → 入力待ち」
@@ -172,7 +173,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
   async function load(): Promise<void> {
     try {
       // 裏の取り直し。通信中の表示と取消の対象から外す (network-activity)。
-      const res = await fetch("/_agent/overview", {
+      const res = await fetch(apiUrl("agentOverview"), {
         headers: { [BACKGROUND_REQUEST_HEADER]: "1" },
       });
       if (!res.ok) {
@@ -209,7 +210,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     // 申告の done は、読んだと伝えるまでサーバ側で残り続ける (ターミナルの
     // 「読んだ」ボタンと同じ経路)。relay: このサーバからほかの code-viewer
     // サーバにも伝える (別のプロジェクトを開いたとき未読がよみがえらない)。
-    const res = await fetch("/_agent/state", {
+    const res = await fetch(apiUrl("agentState"), {
       method: "POST",
       headers: {
         ...deps.actionHeaders(),

@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Definition lookup is limited to standalone source code and the main diff in
 // v1. Blame, markdown code blocks, worktree diffs, and embedded history diffs
 // deliberately fall through without intercepting the user's input.
@@ -323,24 +324,26 @@ function grepRequest(
   });
   deps.appendScopeParams(params);
   return deps.trackLoad<GrepResponse>(
-    fetch(`/_grep?${params.toString()}`, { signal }).then(async (response) => {
-      if (!response.ok) {
-        throw new Error(
-          await responseErrorMessage(
-            response,
-            "definition grep request failed",
-          ),
-        );
-      }
-      try {
-        return (await response.json()) as GrepResponse;
-      } catch (err) {
-        throw errorWithCause(
-          `definition grep response could not be parsed (HTTP ${response.status})`,
-          err,
-        );
-      }
-    }),
+    fetch(`${apiUrl("grep")}?${params.toString()}`, { signal }).then(
+      async (response) => {
+        if (!response.ok) {
+          throw new Error(
+            await responseErrorMessage(
+              response,
+              "definition grep request failed",
+            ),
+          );
+        }
+        try {
+          return (await response.json()) as GrepResponse;
+        } catch (err) {
+          throw errorWithCause(
+            `definition grep response could not be parsed (HTTP ${response.status})`,
+            err,
+          );
+        }
+      },
+    ),
   );
 }
 

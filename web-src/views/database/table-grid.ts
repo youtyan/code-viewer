@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import type {
   DbCellInput,
   DbColumn,
@@ -2585,7 +2586,7 @@ export function createTableGrid(
       params.set("eq", JSON.stringify(baseEq));
     }
     const a = document.createElement("a");
-    a.href = `/_db/export?${params}`;
+    a.href = `${apiUrl("dbExport")}?${params}`;
     a.download = `${currentTable}.${format}`;
     document.body.appendChild(a);
     a.click();

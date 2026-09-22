@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 import {
   COMMENT_DISCUSSION_16_PATH,
   GRABBER_16_PATH,
@@ -659,7 +660,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
   ): Promise<JournalActionResponse> {
     deps.setStatus("refreshing");
     const res = await deps.trackLoad(
-      fetch("/_journal", {
+      fetch(apiUrl("journal"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -682,7 +683,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     deps.setStatus("refreshing");
     try {
       const next = await deps.trackLoad(
-        fetch("/_journal").then(async (res) => {
+        fetch(apiUrl("journal")).then(async (res) => {
           if (!res.ok) throw new Error(await res.text());
           return (await res.json()) as JournalDataResponse;
         }),
@@ -1526,7 +1527,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     deps.setStatus("refreshing");
     try {
       const res = await deps.trackLoad(
-        fetch("/_journal", {
+        fetch(apiUrl("journal"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

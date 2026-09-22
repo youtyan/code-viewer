@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Standalone source view: text/virtual/paged renderers, shiki highlight,
 // HTML/markdown preview tabs, line selection + keyboard cursor, in-source
 // search, and the source load/cancel machinery. Extracted from app.ts as a
@@ -1314,7 +1315,8 @@ export function createSourceView(deps: SourceViewDeps) {
     end: number,
   ): string {
     return (
-      "/file_range?path=" +
+      apiUrl("fileRange") +
+      "?path=" +
       encodeURIComponent(target.path) +
       "&ref=" +
       encodeURIComponent(target.ref || "worktree") +

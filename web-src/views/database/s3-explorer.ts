@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import { s3ObjectName } from "../../core/database/s3-keys";
 import type {
   S3BucketInfo,
@@ -63,7 +64,7 @@ export type S3ExplorerView = {
 
 function buildS3RawUrl(dbId: string, bucket: string, key: string): string {
   const params = new URLSearchParams({ db: dbId, bucket, key });
-  return `/_db/s3/raw?${params}`;
+  return `${apiUrl("dbS3Raw")}?${params}`;
 }
 
 function s3Uri(bucket: string, key: string): string {
@@ -437,7 +438,7 @@ export function createS3Explorer(
       bucket: currentBucket,
       key,
     });
-    const res = await fetch(`/_db/s3/head?${params}`, { signal });
+    const res = await fetch(`${apiUrl("dbS3Head")}?${params}`, { signal });
     if (!res.ok) return { key, sizeBytes: 0 };
     const data = (await res.json()) as S3ObjectHeadResponse;
     return {
@@ -532,7 +533,7 @@ export function createS3Explorer(
         params.set("q", requestSearch);
       }
       if (append && currentNextToken) params.set("token", currentNextToken);
-      const res = await fetch(`/_db/s3/objects?${params}`, {
+      const res = await fetch(`${apiUrl("dbS3Objects")}?${params}`, {
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
@@ -595,7 +596,7 @@ export function createS3Explorer(
   }
 
   async function postS3Write(body: Record<string, unknown>): Promise<void> {
-    const doFetch = fetch("/_db/s3/write", {
+    const doFetch = fetch(apiUrl("dbS3Write"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -627,7 +628,7 @@ export function createS3Explorer(
         bucket: currentBucket,
         key: object.key,
       });
-      const res = await fetch(`/_db/s3/text?${params}`);
+      const res = await fetch(`${apiUrl("dbS3Text")}?${params}`);
       if (!res.ok) throw new Error((await res.text()) || res.statusText);
       current = ((await res.json()) as S3ObjectTextResponse).text;
     } catch (err) {
@@ -855,7 +856,9 @@ export function createS3Explorer(
       bucket: currentBucket,
       key: object.key,
     });
-    const res = await fetch(`/_db/s3/text?${params}`, { signal: slot.signal });
+    const res = await fetch(`${apiUrl("dbS3Text")}?${params}`, {
+      signal: slot.signal,
+    });
     if (disposed || slot.isStale()) return null;
     if (!res.ok) {
       const text = await res.text();
@@ -1003,7 +1006,7 @@ export function createS3Explorer(
     });
     if (prefix) params.set("prefix", prefix);
     if (token) params.set("token", token);
-    const res = await fetch(`/_db/s3/folder?${params}`, {
+    const res = await fetch(`${apiUrl("dbS3Folder")}?${params}`, {
       signal: explorerAbort?.signal,
     });
     if (!res.ok) throw new Error((await res.text()) || res.statusText);
@@ -1415,7 +1418,7 @@ export function createS3Explorer(
     );
     try {
       const res = await fetch(
-        `/_db/s3/buckets?db=${encodeURIComponent(dbId)}`,
+        `${apiUrl("dbS3Buckets")}?db=${encodeURIComponent(dbId)}`,
         { signal: slot.signal },
       );
       if (disposed || slot.isStale()) return;

@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Standalone file-blame view. Fetches /_file_blame, groups same-sha runs into
 // row-span blocks, paints an Older → Newer time bar legend, and reuses the
 // existing file shell DOM so tabs/sticky header stay consistent across views.
@@ -134,7 +135,7 @@ export function createBlameView(deps: BlameViewDeps) {
     const params = new URLSearchParams();
     params.set("path", target.path);
     params.set("ref", target.ref);
-    const url = `/_file_blame?${params.toString()}`;
+    const url = `${apiUrl("fileBlame")}?${params.toString()}`;
     try {
       return await deps.trackLoad(
         fetch(url).then(async (r) => {
@@ -170,7 +171,7 @@ export function createBlameView(deps: BlameViewDeps) {
     const params = new URLSearchParams();
     params.set("path", target.path);
     params.set("ref", sourceRef);
-    const url = `/_file?${params.toString()}`;
+    const url = `${apiUrl("file")}?${params.toString()}`;
     try {
       const res = await deps.trackLoad(
         fetch(url).then(async (r) => {

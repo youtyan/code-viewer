@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Doctor screen. Fetches /_doctor and renders OK/WARN/ERROR pills with
 // remediation hints. Uses module-level generation counter to drop stale
 // responses (see AGENTS.md Request Lifecycle Discipline).
@@ -181,7 +182,7 @@ export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
     const summary = mount.querySelector<HTMLElement>(".doctor-summary");
     if (summary) summary.textContent = "";
     try {
-      const res = await deps.trackLoad(fetch("/_doctor"));
+      const res = await deps.trackLoad(fetch(apiUrl("doctor")));
       if (myGen !== viewGeneration) return;
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);

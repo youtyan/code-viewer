@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 // アカウントの一覧 (/_agent/accounts) を取り、エージェント一覧の帯と
 // 設定画面の節で同じ結果を見るための入れ物。書き込み系の呼び出しもここに
 // まとめる (X-Code-Viewer-Action を付け忘れないため)。
@@ -107,10 +108,10 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
     const query = options.refreshLogin ? "?login=refresh" : "";
     try {
       const res = options.background
-        ? await fetch(`/_agent/accounts${query}`, {
+        ? await fetch(`${apiUrl("agentAccounts")}${query}`, {
             headers: { [BACKGROUND_REQUEST_HEADER]: "1" },
           })
-        : await deps.trackLoad(fetch(`/_agent/accounts${query}`));
+        : await deps.trackLoad(fetch(`${apiUrl("agentAccounts")}${query}`));
       if (!res.ok) throw await responseFailure(res, "GET /_agent/accounts");
       const next = (await res.json()) as AccountsResponse;
       if (mine !== generation) return;
@@ -181,17 +182,17 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
     },
     planCreate: (agent, name) =>
       get(
-        `/_agent/accounts/plan?${new URLSearchParams({ op: "create", agent, name })}`,
+        `${apiUrl("agentAccountsPlan")}?${new URLSearchParams({ op: "create", agent, name })}`,
         "plan the account",
       ),
     planRegister: (agent, name, path) =>
       get(
-        `/_agent/accounts/plan?${new URLSearchParams({ op: "register", agent, name, path })}`,
+        `${apiUrl("agentAccountsPlan")}?${new URLSearchParams({ op: "register", agent, name, path })}`,
         "check the directory",
       ),
     async create(plan, share) {
       const result = await post<{ added: StoredAccount }>(
-        "/_agent/accounts",
+        apiUrl("agentAccounts"),
         {
           op: "create",
           agent: plan.agent,
@@ -206,7 +207,7 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
     },
     async register(plan) {
       const result = await post<{ added: StoredAccount }>(
-        "/_agent/accounts",
+        apiUrl("agentAccounts"),
         {
           op: "register",
           agent: plan.agent,
@@ -220,7 +221,7 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
     },
     async remove(id) {
       const result = await post<{ removed: StoredAccount }>(
-        "/_agent/accounts",
+        apiUrl("agentAccounts"),
         { op: "remove", id },
         "remove the account",
       );
@@ -229,7 +230,7 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
     },
     async savePreferences(commands) {
       await post(
-        "/_agent/accounts",
+        apiUrl("agentAccounts"),
         { op: "preferences", launchCommands: commands },
         "save the launch commands",
       );
@@ -237,7 +238,7 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
     },
     async login(id) {
       const result = await post<{ paneId: string; session: string }>(
-        "/_agent/accounts/login",
+        apiUrl("agentAccountsLogin"),
         { id },
         "start the login",
       );
@@ -245,15 +246,15 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
       return result;
     },
     launch: (request) =>
-      post<LaunchResponse>("/_agent/launch", request, "start the agent"),
+      post<LaunchResponse>(apiUrl("agentLaunch"), request, "start the agent"),
     planStatusLine: (account, action) =>
       get(
-        `/_agent/statusline/plan?${new URLSearchParams({ account, action })}`,
+        `${apiUrl("agentStatuslinePlan")}?${new URLSearchParams({ account, action })}`,
         "plan the statusLine change",
       ),
     async applyStatusLine(plan, account) {
       const result = await post<StatusLineApplyResponse>(
-        "/_agent/statusline/apply",
+        apiUrl("agentStatuslineApply"),
         { account, action: plan.action, baseHash: plan.baseHash },
         "change the statusLine",
       );
@@ -262,7 +263,7 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
     },
     async clearUsageFailures() {
       const res = await deps.trackLoad(
-        fetch("/_agent/statusline/failures", {
+        fetch(apiUrl("agentStatuslineFailures"), {
           method: "DELETE",
           headers: deps.actionHeaders(),
         }),

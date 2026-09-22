@@ -1,3 +1,4 @@
+import { apiUrl, pageUrl } from "./api-url";
 import {
   formatHistoryLineRange,
   type HistoryLineRange,
@@ -368,6 +369,10 @@ export function parseRoute(
 }
 
 export function buildRoute(route: AppRoute): string {
+  return pageUrl(buildRoutePath(route));
+}
+
+function buildRoutePath(route: AppRoute): string {
   switch (route.screen) {
     case "repo": {
       const params = new URLSearchParams();
@@ -520,7 +525,8 @@ export function buildRoute(route: AppRoute): string {
 
 export function buildRawFileUrl(target: SourceFileTarget): string {
   return (
-    "/_file?path=" +
+    apiUrl("file") +
+    "?path=" +
     encodeURIComponent(target.path) +
     "&ref=" +
     encodeURIComponent(target.ref || "worktree")

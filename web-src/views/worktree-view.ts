@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // 作業ツリーの画面。骨格も行の見た目も History 画面のものをそのまま使う。
 //
 //   #worktree-panel  作業ツリー一覧   (#history-panel と同じ箱・同じ行)
@@ -402,7 +403,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     deps.setStatus("refreshing");
     try {
       const next = await deps.trackLoad(
-        fetch("/_worktree/list").then(async (res) => {
+        fetch(apiUrl("worktreeList")).then(async (res) => {
           if (!res.ok) throw new Error((await res.text()) || `${res.status}`);
           return (await res.json()) as WorktreesResponse;
         }),
@@ -487,7 +488,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     const tab = openBlankTab();
     try {
       const result = await deps.trackLoad(
-        postWorktreeAction("/_worktree/open", { path: item.path }),
+        postWorktreeAction(apiUrl("worktreeOpen"), { path: item.path }),
       );
       const url = result.url || "";
       if (!url) throw new Error(text().openFailed);
@@ -603,7 +604,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     let createdPath = "";
     try {
       const result = await deps.trackLoad(
-        postWorktreeAction("/_worktree/add", submitted),
+        postWorktreeAction(apiUrl("worktreeAdd"), submitted),
       );
       if (isCurrent(seq)) setMessage("");
       createdPath = result.path || "";
@@ -661,7 +662,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       // 読む前に押せてしまう。
       const warn = el("p", "worktree-warn");
       warn.appendChild(
-        el("span", "", `⚠ ${t.removeDialog.dirtyNote(item.changedCount)}`),
+        el("span", "", `! ${t.removeDialog.dirtyNote(item.changedCount)}`),
       );
       warn.appendChild(document.createElement("br"));
       warn.appendChild(el("span", "", t.removeDialog.dirtyLose));
@@ -692,7 +693,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     renderList();
     try {
       await deps.trackLoad(
-        postWorktreeAction("/_worktree/remove", {
+        postWorktreeAction(apiUrl("worktreeRemove"), {
           path: item.path,
           force: submitted.force,
         }),
@@ -942,7 +943,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     renderList();
     try {
       await deps.trackLoad(
-        postWorktreeAction("/_worktree/stop", { path: item.path }),
+        postWorktreeAction(apiUrl("worktreeStop"), { path: item.path }),
       );
       if (isCurrent(seq)) setMessage("");
     } catch (error) {
@@ -959,7 +960,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /**
-   * `/_open_path` に渡す引数。
+   * `apiUrl("openPath")` (OS で開く要求) に渡す引数。
    *
    * **あのエンドポイントが取るのはリポジトリからの相対パスで、絶対パスは
    * 受け付けない** (`isSafePath` が `/` 始まりを弾き、先頭の `/` を削った
@@ -1563,7 +1564,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     try {
       const next = await deps.trackLoad(
         fetch(
-          `/_worktree/commits?${new URLSearchParams({ path: item.path }).toString()}`,
+          `${apiUrl("worktreeCommits")}?${new URLSearchParams({ path: item.path }).toString()}`,
         ).then(async (res) => {
           if (!res.ok) throw new Error((await res.text()) || `${res.status}`);
           return (await res.json()) as WorktreeCommitsResponse;
@@ -1800,12 +1801,14 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     if (deps.getOptions().ignoreWs) params.set("ignore_ws", "1");
     try {
       const res = await deps.trackLoad(
-        fetch(`/_worktree/diff?${params.toString()}`).then(async (response) => {
-          if (!response.ok) {
-            throw new Error((await response.text()) || `${response.status}`);
-          }
-          return (await response.json()) as WorktreeDiffResponse;
-        }),
+        fetch(`${apiUrl("worktreeDiff")}?${params.toString()}`).then(
+          async (response) => {
+            if (!response.ok) {
+              throw new Error((await response.text()) || `${response.status}`);
+            }
+            return (await response.json()) as WorktreeDiffResponse;
+          },
+        ),
       );
       if (
         !isCurrent(seq) ||
@@ -1887,7 +1890,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           shell,
           {
             fileUrl: (side) =>
-              `/_worktree/file?${new URLSearchParams({
+              `${apiUrl("worktreeFile")}?${new URLSearchParams({
                 path: item.path,
                 file: file.path,
                 origin: file.origin,

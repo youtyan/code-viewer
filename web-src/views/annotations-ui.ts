@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Code annotations (AI walkthrough) UI.
 //
 // Agents post explanations for code locations through the CLI
@@ -934,7 +935,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
 
   async function doRefreshAnnotations(): Promise<void> {
     const revision = dataRevision;
-    const res = await fetch("/_annotations");
+    const res = await fetch(apiUrl("annotations"));
     if (!res.ok)
       throw new Error(await responseErrorMessage(res, "Load annotations"));
     const state = (await res.json()) as AnnotationsState;
@@ -964,7 +965,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     session_id?: string;
     session_title?: string;
   }> {
-    const res = await fetch("/_annotations", {
+    const res = await fetch(apiUrl("annotations"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

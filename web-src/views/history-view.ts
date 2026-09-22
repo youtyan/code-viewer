@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Commit history screen (left panel). Renders the commit list, handles
 // infinite scroll / deep links, and delegates diff rendering to the existing
 // diff pipeline via deps.applyCommitRange().
@@ -684,7 +685,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       if (lineRange) params.set("lines", formatHistoryLineRange(lineRange));
       if (routeRef === "worktree") params.set("worktree", "1");
     }
-    const url = `/_log?${params.toString()}`;
+    const url = `${apiUrl("log")}?${params.toString()}`;
     return deps
       .trackLoad(
         fetch(url).then(async (r) => {
@@ -1157,7 +1158,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let lookupFailed = false;
 
   async function fetchSingleCommit(sha: string): Promise<HistoryCommit | null> {
-    const url = `/_log?ref=${encodeURIComponent(sha)}&skip=0&limit=1`;
+    const url = `${apiUrl("log")}?ref=${encodeURIComponent(sha)}&skip=0&limit=1`;
     lookupFailed = false;
     try {
       const res = await deps.trackLoad(
@@ -1560,10 +1561,12 @@ export function createHistoryView(deps: HistoryViewDeps) {
     authorsLoadedFor = key;
     void deps
       .trackLoad(
-        fetch(`/_authors?ref=${encodeURIComponent(ref)}`).then(async (r) => {
-          if (!r.ok) throw new Error(await r.text());
-          return (await r.json()) as HistoryAuthorsResponse;
-        }),
+        fetch(`${apiUrl("authors")}?ref=${encodeURIComponent(ref)}`).then(
+          async (r) => {
+            if (!r.ok) throw new Error(await r.text());
+            return (await r.json()) as HistoryAuthorsResponse;
+          },
+        ),
       )
       .then((res) => {
         if (activeMount.authorList !== list || key !== ref) return;
