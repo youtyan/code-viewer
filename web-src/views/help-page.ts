@@ -167,6 +167,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
+                text: "The row of tabs under the top bar keeps files and screens open. A file opened with one click (tree, palette, a line link, View File) opens in a preview tab with an italic name, and the next file replaces it; double-click the tree row or the tab, or choose Keep open, to keep it. Files, Diff, History, Worktrees, Data and Work log each have one tab: pressing them brings that tab back as you left it. Right-click a tab for Close / Close others / Close to the right / Keep open / Copy path, drag tabs to reorder, and use g t / g T (next / previous), g x (close) and g 1–9. The tabs are remembered per project.",
+              },
+              {
+                kind: "paragraph",
                 text: "Use the sidebar or file palette to open source files, Markdown previews, images, PDFs, and other browser-safe media. Large text files automatically switch to virtual mode. Sidebar rows are links: Cmd/Ctrl+click or middle-click opens a file in a new tab. View File on a diff card shows the full source in place and keeps the file list (and, on the History screen, the commit list) on screen; View Diff returns to the diff.",
               },
               {
@@ -1029,6 +1033,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "フォルダ内のファイル名を絞り込み、表示件数を確認できます。検索欄で下矢印を押すと結果に移り、Enterで先頭の結果を開き、Escapeで解除します。Codeタブの「行へ移動」から指定行を開けます。フォルダ一覧には「最終コミット日時」と「ローカル更新日時」を別々に表示し、それぞれの列で並べ替えできます。コミット日時は、作業ツリーではHEAD、過去の版では選択した版が基準です。フォルダは配下の変更を含み、未コミットの編集では日時が変わりません。履歴がないパスは「コミット履歴なし」と表示します。ローカル更新日時はファイルシステム上の値で、チェックアウト・コピー・展開でも変わります。",
+              },
+              {
+                kind: "paragraph",
+                text: "上の行の直下のタブ列に、開いたファイルと画面が並びます。1 回押して開いたファイル (木・パレット・行リンク・View File) は名前が斜体の仮のタブで、次に開いたファイルに置き換わります。木の行かタブをダブルクリックするか、「開いたままにする」で固定します。Files・Diff・History・Worktrees・Data・Work log はそれぞれタブが 1 つで、押すとそのタブが前に見ていた状態で前面に出ます。タブの右クリックで閉じる・ほかを閉じる・右側を閉じる・開いたままにする・パスをコピー、ドラッグで並べ替え、g t / g T (次 / 前)、g x (閉じる)、g 1〜9 で移れます。タブの並びはプロジェクトごとに覚えます。",
               },
               {
                 kind: "paragraph",

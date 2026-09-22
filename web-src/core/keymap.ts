@@ -73,6 +73,18 @@ export const KEYMAP_ACTIONS = [
   "code-font-size-increase",
   "code-font-size-decrease",
   "code-font-size-reset",
+  "main-tab-next",
+  "main-tab-previous",
+  "main-tab-close",
+  "main-tab-1",
+  "main-tab-2",
+  "main-tab-3",
+  "main-tab-4",
+  "main-tab-5",
+  "main-tab-6",
+  "main-tab-7",
+  "main-tab-8",
+  "main-tab-9",
 ] as const;
 
 export type KeymapAction = (typeof KEYMAP_ACTIONS)[number];
@@ -288,6 +300,20 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "code-font-size-increase", key: "=", ctrl: true },
   { action: "code-font-size-decrease", key: "-", ctrl: true },
   { action: "code-font-size-reset", key: "0", ctrl: true },
+  // メインの面のタブ。ブラウザのタブの操作 (⌘W・Ctrl+Tab・⌘1〜9) は取らず、
+  // 画面の行き先と同じ g から始める。
+  { action: "main-tab-next", key: "t", pendingG: true },
+  { action: "main-tab-previous", key: "t", shift: true, pendingG: true },
+  { action: "main-tab-close", key: "x", pendingG: true },
+  { action: "main-tab-1", key: "1", pendingG: true },
+  { action: "main-tab-2", key: "2", pendingG: true },
+  { action: "main-tab-3", key: "3", pendingG: true },
+  { action: "main-tab-4", key: "4", pendingG: true },
+  { action: "main-tab-5", key: "5", pendingG: true },
+  { action: "main-tab-6", key: "6", pendingG: true },
+  { action: "main-tab-7", key: "7", pendingG: true },
+  { action: "main-tab-8", key: "8", pendingG: true },
+  { action: "main-tab-9", key: "9", pendingG: true },
 ];
 
 export function resolveKeymapAction(

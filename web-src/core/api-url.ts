@@ -125,6 +125,7 @@ const API_ENDPOINTS = {
   shellResize: { path: "/_shell/resize", zone: "entry" },
   shellStream: { path: "/_shell/stream", zone: "entry" },
   stateSettings: { path: "/_state/settings", zone: "project" },
+  stateTabs: { path: "/_state/tabs", zone: "project" },
   stateTools: { path: "/_state/tools", zone: "project" },
   stateView: { path: "/_state/view", zone: "project" },
   tmuxClients: { path: "/_tmux/clients", zone: "entry" },

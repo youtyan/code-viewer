@@ -21,7 +21,7 @@
 | 層 | 何か | 例 | 生の px |
 |---|---|---|---|
 | **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義。余白・角丸の段階 (`--space-*` `--radius-*`) もここ。一覧の行の高さ `--ui-row-h` だけは出所が TS (`views/shell/row-height.ts`。仮想表示が位置の計算に使うため) で、CSS は初回描画用の既定。表の行の高さ `--ui-table-row-h` は仮想表示に使わないので CSS だけ (`ui-surface.md` の決まり 7) | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--ui-row-h` `--ui-table-row-h` `--code-line-height` | **可**（ここだけ） |
-| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--global-header-h` (中央上の行) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--app-panel-visible-height` `--sidebar-w` `--history-w` `--annotation-panel-w` | **可**（その固定物の実寸なので） |
+| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--header-row-h` (中央上の行そのもの) `--main-tabs-h` (その直下のタブ列) `--global-header-h` (上に居座る固定物の合計 = 上の 2 つ。body で決める) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--app-panel-visible-height` `--sidebar-w` `--history-w` `--annotation-panel-w` | **可**（その固定物の実寸なので） |
 | **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--app-panel-max-h` | **不可。T2 の式に px リテラルを書かない** |
 | **T3** ローカルインセット | 「このエンベロープの内側に居座る家具の高さ」 | `--file-detail-head-h` | **可。ただし必ず命名し、ページスコープに宣言し、何の高さかコメントする** |
 
@@ -64,9 +64,17 @@ grep -n "100vh\|100dvh" web/style.css \
 
 ## 骨格 — 左と下の固定物
 
-画面は 4 つの固定物で囲まれている: 左のサイドバー (`#app-nav`、幅 `--nav-w`)、中央の上の
-1 行 (`#global-header`、`--global-header-h`)、画面ごとのツールバー (`#topbar`、`--topbar-h`)、
-最下段のバー (`#statusbar`、`--statusbar-h`)。下パネル (`.app-panel`) は最下段の上に乗る。
+画面は 5 つの固定物で囲まれている: 左のサイドバー (`#app-nav`、幅 `--nav-w`)、中央の上の
+1 行 (`#global-header`、`--header-row-h`)、その直下のタブ列 (`#main-tabs`、`--main-tabs-h`)、
+画面ごとのツールバー (`#topbar`、`--topbar-h`)、最下段のバー (`#statusbar`、`--statusbar-h`)。
+下パネル (`.app-panel`) は最下段の上に乗る。
+
+- **上に居座る固定物の高さは `--global-header-h` (= `--header-row-h` + `--main-tabs-h`) だけを読む。**
+  ツールバーの `top`・各ページの `--chrome-h` の上書き・sticky の `top` はこれを読むので、上に
+  固定物を足す / 消すときはこの式に項を足すだけ。上の行そのものの高さ (`#global-header` と、
+  高さをそろえる `.nav-head`) だけが `--header-row-h` を読む
+- `--main-tabs-h` と `--global-header-h` は `html, body` で決める (密度の `--space-unit` と
+  `--header-row-h` の上書きが body に載るため。下の「T2 を宣言する要素を間違えない」と同じ理由)
 
 - **左端に付く固定物は `left: var(--chrome-left)`、下端に付く固定物は
   `bottom: var(--chrome-bottom)` だけを読む。** `--nav-w` や `--statusbar-h` を直接読まない。

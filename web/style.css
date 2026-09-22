@@ -22,6 +22,8 @@
   --color-inset:        #efebf4;   /* 本文の中の一段沈んだ面 (コード・入力欄) */
   --color-raised:       #e6e1ee;   /* hover */
   --color-select:       #e0d6f2;   /* 選んでいる行 */
+  /* メインの面の選択中のタブ。ライトは本文の面と同じ明るさ、ダークは一段明るい面。 */
+  --color-tab-active:   var(--color-doc);
   --color-overlay:      #fcfbfe;   /* 画面の上に浮く面 (ダイアログ・ポップオーバー) */
   --color-term:         #ede9f2;   /* ターミナル */
   --color-term-text:    #282331;
@@ -120,7 +122,12 @@
   --blob-tab-active:    var(--accent);
 
   /* ---- 寸法 (T1: 固定物の実寸。ui-layout.md の 4 層) ---- */
-  --global-header-h: 44px;
+  /* 上の行そのものの高さ。表示密度で変わる (body[data-sidebar-font-size])。 */
+  --header-row-h: 44px;
+  /* 上に居座る固定物の合計 = 上の行 + その直下のタブ列 (#main-tabs)。
+     消費側 (ツールバーの top・各ページの --chrome-h・sticky) はこれだけを読む。
+     タブ列の高さ (--main-tabs-h) は密度で比例させるので html, body で決める。 */
+  --global-header-h: calc(var(--header-row-h) + var(--main-tabs-h));
   --topbar-h: 56px;
   --chrome-h: calc(var(--global-header-h) + var(--topbar-h));
   /* 左のサイドバー (プロジェクトとエージェント)。幅の出所は TS
@@ -168,6 +175,7 @@
   --color-inset:        #17151e;
   --color-raised:       #29243a;
   --color-select:       #342b48;
+  --color-tab-active:   var(--color-raised);
   --color-overlay:      #28232f;
   --color-term:         #100f15;
   --color-term-text:    #e8e4ef;
@@ -339,6 +347,11 @@ html, body {
      密度で比例させるため --space-unit から作る。 */
   --ui-font-heading: calc(var(--space-unit) * 5.5);  /* 22 */
   --ui-font-section: calc(var(--space-unit) * 4.5);  /* 18 */
+  /* メインの面のタブ列の高さ (34 / 30 / 38 / 43)。密度で --space-unit と一緒に
+     変わるので、:root ではなくここで決め、合計の --global-header-h もここで
+     決め直す (body の --header-row-h の上書きを反映させるため。下のコメント)。 */
+  --main-tabs-h: round(calc(var(--space-unit) * 8.5), 1px);
+  --global-header-h: calc(var(--header-row-h) + var(--main-tabs-h));
   --chrome-h: calc(var(--global-header-h) + var(--topbar-h));
 
   /* ここから下の T2 は :root ではなく body に置く。**置き場所が仕様の一部**。
@@ -378,7 +391,7 @@ html, body {
 
 body[data-sidebar-font-size="compact"] {
   --space-unit: 3.5px;
-  --global-header-h: 40px;
+  --header-row-h: 40px;
   --statusbar-h: 26px;
   --topbar-h: 52px;
   --ui-font-xs: 9px;
@@ -396,7 +409,7 @@ body[data-sidebar-font-size="compact"] {
 }
 body[data-sidebar-font-size="large"] {
   --space-unit: 4.5px;
-  --global-header-h: 50px;
+  --header-row-h: 50px;
   --statusbar-h: 32px;
   --topbar-h: 62px;
   --ui-font-xs: 11px;
@@ -414,7 +427,7 @@ body[data-sidebar-font-size="large"] {
 }
 body[data-sidebar-font-size="xlarge"] {
   --space-unit: 5px;
-  --global-header-h: 56px;
+  --header-row-h: 56px;
   --statusbar-h: 36px;
   --topbar-h: 68px;
   --ui-font-xs: 12px;
@@ -803,7 +816,7 @@ body[data-code-font-size="xlarge"] {
 #global-header {
   position: fixed;
   top: 0; left: var(--chrome-left); right: 0;
-  height: var(--global-header-h);
+  height: var(--header-row-h);
   display: flex;
   align-items: center;
   gap: 16px;
@@ -17379,7 +17392,7 @@ html[data-nav-collapsed] #app-nav {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  height: var(--global-header-h);
+  height: var(--header-row-h);
   padding: 0 var(--pad-face);
 }
 .nav-search {
@@ -17795,6 +17808,158 @@ body.gdp-nav-resizing {
   padding: 0 var(--pad-face);
   background: var(--color-ground);
   border-bottom: 1px solid var(--color-line-soft);
+}
+
+/* ---- メインの面のタブ列 (上の行の直下。views/main-tabs/main-tabs-view.ts) ----
+   高さは --main-tabs-h。タブが収まらなければタブの並びだけが横に送られ、
+   右端の ＋ と分割は隠れない。選択の強さは面の明るさ + 上端の 2px の線 (線は
+   フォーカスのある面の選択中のタブだけ、そのタブの幅だけ)。 */
+#main-tabs {
+  position: fixed;
+  top: var(--header-row-h); left: var(--chrome-left); right: 0;
+  height: var(--main-tabs-h);
+  z-index: 60;
+  display: flex;
+  align-items: stretch;
+  background: var(--color-ground);
+}
+.main-tabs-strip {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: 1px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.main-tabs-strip::-webkit-scrollbar {
+  display: none;
+}
+.main-tab {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  /* 絵と名前の間は 6 (絵の指定)。段階に無いので単位から作る。 */
+  gap: calc(var(--space-unit) * 1.5);
+  min-width: calc(var(--space-unit) * 30);   /* 120 */
+  max-width: calc(var(--space-unit) * 45);   /* 180 */
+  padding: 0 var(--space-3);
+  background: var(--color-nav);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+  cursor: pointer;
+  user-select: none;
+}
+.main-tab:hover {
+  background: color-mix(in srgb, var(--color-nav) 50%, var(--color-tab-active));
+}
+.main-tab.main-tab-active {
+  background: var(--color-tab-active);
+  color: var(--color-text);
+}
+.main-tab.main-tab-active::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 2px;
+  background: var(--color-accent);
+}
+.main-tab:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.main-tab-icon {
+  flex: 0 0 auto;
+  display: flex;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  color: var(--color-text-3);
+}
+.main-tab-active .main-tab-icon {
+  color: var(--color-text-2);
+}
+.main-tab-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.main-tab-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.main-tab-preview .main-tab-name {
+  font-style: italic;
+}
+/* 閉じるは選択中と hover のときだけ見せる。場所は常に取る (名前を動かさない)。 */
+.main-tab-close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: var(--space-4);
+  height: var(--space-4);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-3);
+  cursor: pointer;
+  visibility: hidden;
+}
+.main-tab-active .main-tab-close,
+.main-tab:hover .main-tab-close {
+  visibility: visible;
+}
+.main-tab-close:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.main-tab-close svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.main-tab-dragging {
+  opacity: 0.5;
+}
+.main-tab.main-tab-drop-before {
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+.main-tabs-drop-end .main-tab:last-child {
+  box-shadow: inset -2px 0 0 var(--color-accent);
+}
+.main-tabs-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--pad-face);
+}
+.main-tabs-action {
+  display: grid;
+  place-items: center;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+.main-tabs-action:hover:not(:disabled) {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.main-tabs-action:disabled {
+  color: var(--color-text-3);
+  opacity: 0.5;
+  cursor: default;
+}
+.main-tabs-action svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 .global-header-spacer {
   flex: 1 1 auto;

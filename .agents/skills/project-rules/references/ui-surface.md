@@ -10,6 +10,7 @@
 | 置き場所 | 使うもの |
 |---|---|
 | 中央上の行 (`#global-header`) のアイコンボタン | `global-icon-action` クラス (外部リンクは `global-icon-link`) |
+| メインの面のタブ列 (`#main-tabs`、上の行の直下) | `views/main-tabs/main-tabs-view.ts`。タブは `main-tab` (絵 `main-tab-icon`・名前 `main-tab-name`・閉じる `main-tab-close` は選択中と hover だけ見せ、場所は常に取る)。右端の操作は `main-tabs-action` (＋ と分割)。種類ごとの絵は `views/main-tabs/tab-icons.ts`、page の名前は上の行の入口と同じ文言 (`uiText().nav`)。右クリックの項目の有効・無効は `core/main-tabs.ts` の `tabMenu` だけが決める。選択中の面は `--color-tab-active` |
 | 中央上の行のテキストボタン | 同上 + `width: auto; padding: 0 var(--space-2);` 程度の上書きに留める |
 | 左のサイドバー (`#app-nav`) の下端の項目 | `nav-foot-item` (アイコン + 文字)。見出しの横の小さな操作は `nav-icon-action` |
 | 左のサイドバーの行の操作 (hover で出る) | `nav-row-action`。場所を確保せず行の上に重ねる (`.nav-project-actions`) |

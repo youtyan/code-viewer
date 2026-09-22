@@ -314,6 +314,40 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
           ja: "表示履歴を戻る / 進む",
         },
       },
+      {
+        selectors: [
+          { action: "main-tab-next" },
+          { action: "main-tab-previous" },
+        ],
+        description: {
+          en: "Next / previous tab of the main area",
+          ja: "メインの面の次 / 前のタブ",
+        },
+      },
+      {
+        selectors: [{ action: "main-tab-close" }],
+        description: {
+          en: "Close the tab of the main area",
+          ja: "メインの面のタブを閉じる",
+        },
+      },
+      {
+        selectors: [
+          { action: "main-tab-1" },
+          { action: "main-tab-2" },
+          { action: "main-tab-3" },
+          { action: "main-tab-4" },
+          { action: "main-tab-5" },
+          { action: "main-tab-6" },
+          { action: "main-tab-7" },
+          { action: "main-tab-8" },
+          { action: "main-tab-9" },
+        ],
+        description: {
+          en: "Go to the 1st – 9th tab",
+          ja: "1〜9 番目のタブへ",
+        },
+      },
     ],
   },
   {

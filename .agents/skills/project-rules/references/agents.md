@@ -519,6 +519,7 @@ find web-src -name '*.ts' -not -path 'web-src/server/*' -not -path 'web-src/test
 | `<状態>/agent-usage/` | statusLine を包むスクリプト・claude の使用量・`failures.log` | 同上 |
 | `<状態>/projects.json` | プロジェクトの登録簿 | 同上 |
 | `<状態>/settings.json` | 全プロジェクト共通の設定 | 同上 |
+| `<状態>/main-tabs.json` | メインの面のタブの配置をプロジェクト (根のパス) ごとに。`/_state/tabs`、`server/main-tabs-store.ts`。読み戻しの検査は画面 (`core/main-tabs.ts` の `parseLayout`) | 同上 |
 | `<状態>/server-logs/` | code-viewer が起こしたサーバ・裏の出力（起動に失敗したとき・落ちたとき末尾を理由に添える） | 同上 |
 | `<状態>/entry.json`・`entry.json.start.lock` | 動いている入口の `{url, pid, version, started_at}` と起動の排他 | 同上 |
 | `<状態>/agent-screen-rules.json`・`agent-screen-rules.migrated` | 画面ルールの保存済み上書き（ユーザー単位）と、リポジトリから写した・保存した・戻した印 | 同上 |

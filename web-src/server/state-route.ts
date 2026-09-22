@@ -10,6 +10,11 @@ import {
   textError,
 } from "./database/handle-shared";
 import {
+  loadProjectMainTabs,
+  mainTabsPath,
+  saveProjectMainTabs,
+} from "./main-tabs-store";
+import {
   loadAppSettingsState,
   loadToolsState,
   loadViewState,
@@ -175,6 +180,36 @@ async function handleToolsPatch(cwd: string, req: Request): Promise<Response> {
   );
 }
 
+/** このプロジェクトのメインの面のタブの配置 (無ければ null)。 */
+async function handleTabsGet(cwd: string): Promise<Response> {
+  try {
+    return json({ layout: loadProjectMainTabs(mainTabsPath(), cwd) });
+  } catch (error) {
+    console.error("[code-viewer] main tabs are not loaded:", error);
+    return textError(
+      `failed to load main tabs: ${formatErrorDetail(error)}`,
+      500,
+    );
+  }
+}
+
+async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
+  const body = await parseJsonBody(req, MAX_STATE_PATCH_BODY_BYTES);
+  if (body instanceof Response) return body;
+  if (!body || typeof body !== "object" || !("layout" in body))
+    return textError("main tabs body has no layout", 400);
+  try {
+    await saveProjectMainTabs(mainTabsPath(), cwd, body.layout);
+    return json({ ok: true });
+  } catch (error) {
+    console.error("[code-viewer] main tabs are not saved:", error);
+    return textError(
+      `failed to save main tabs: ${formatErrorDetail(error)}`,
+      500,
+    );
+  }
+}
+
 export async function handleStateRoute(
   req: Request,
   url: URL,
@@ -199,6 +234,12 @@ export async function handleStateRoute(
         sideEffect: (method) => method !== "GET",
         handler: () =>
           req.method === "GET" ? handleViewGet(cwd) : handleViewPatch(cwd, req),
+      },
+      "/_state/tabs": {
+        methods: ["GET", "PUT"],
+        sideEffect: (method) => method !== "GET",
+        handler: () =>
+          req.method === "GET" ? handleTabsGet(cwd) : handleTabsPut(cwd, req),
       },
       "/_state/tools": {
         methods: ["GET", "PATCH"],

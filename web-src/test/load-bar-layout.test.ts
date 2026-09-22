@@ -7,14 +7,22 @@ import {
 
 const rules = loadStyleSheet();
 
-/** #load-bar とその上の body だけを見る。他の要素はこのテストの関心外。 */
+/**
+ * #load-bar とその上の body だけを見る。他の要素はこのテストの関心外。
+ * body には :root の値に加えて `html, body` の規則 (密度で変わる --space-unit・
+ * タブ列の高さ・上に居座る固定物の合計) が載る。
+ */
 function selectorMatches(
   selector: string,
   target: "body" | "load-bar",
   bodyClass?: string,
 ): boolean {
   if (target === "body") {
-    return selector === ":root" || selector === `body.${bodyClass}`;
+    return (
+      selector === ":root" ||
+      selector === "body" ||
+      selector === `body.${bodyClass}`
+    );
   }
   return (
     selector === "#load-bar" ||
@@ -34,9 +42,12 @@ function loadBarTopFor(bodyClass?: string): string {
   return resolveVar(top, bodyDeclarations);
 }
 
-/** :root の固定物の高さ。値そのものは固定しない (密度や骨格で変わる)。 */
+/** 既定の密度の body での固定物の高さ。値そのものは固定しない (密度や骨格で変わる)。 */
 function rootLength(name: string): string {
-  const root = cascadedDeclarations(rules, (selector) => selector === ":root");
+  const root = cascadedDeclarations(
+    rules,
+    (selector) => selector === ":root" || selector === "body",
+  );
   return resolveVar(`var(${name})`, root);
 }
 

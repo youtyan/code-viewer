@@ -97,6 +97,7 @@ import {
   resolveKeymapAction,
 } from "./core/keymap";
 import { isNativeLinkClick } from "./core/link-click";
+import type { TabTarget } from "./core/main-tabs";
 import { createNetworkActivityTracker } from "./core/network-activity";
 import {
   APP_PANEL_HEIGHT,
@@ -206,6 +207,11 @@ import {
   langFromPath,
   readRenderedLines,
 } from "./views/line-ref-pill";
+import {
+  createMainTabsView,
+  isPageKind,
+  routeTarget,
+} from "./views/main-tabs/main-tabs-view";
 import { createProjectActions } from "./views/projects/project-actions";
 import {
   mountProjectSwitcher,
@@ -1278,6 +1284,99 @@ window.GdpExpandLogic = GdpExpandLogic;
       autoUpdate: APP_SETTINGS.autoUpdate !== false,
     };
   })();
+
+  /** 読み戻したタブ (覚えた route が無い) を開くときの route。 */
+  function defaultRouteForTab(target: TabTarget): AppRoute {
+    const range = currentRange();
+    switch (target.kind) {
+      case "file":
+        return {
+          screen: "file",
+          path: target.path,
+          ref: "worktree",
+          range,
+          view: "blob",
+          ...(target.line === undefined ? {} : { line: target.line }),
+        };
+      case "page":
+        switch (target.page) {
+          case "repo":
+            return {
+              screen: "repo",
+              ref: STATE.repoRef || "worktree",
+              path: "",
+              range,
+            };
+          case "history":
+            return { screen: "history", ref: "HEAD", range };
+          case "help":
+            return {
+              screen: "help",
+              range,
+              lang: STATE.language,
+              section: "settings",
+            };
+          default:
+            return { screen: target.page, range };
+        }
+      case "terminal":
+      case "image":
+        // この画面ではまだ開けない種類 (読み戻しで閉じてある)。来たら不具合。
+        throw new Error(
+          `main tabs: ${target.kind} tabs cannot be opened yet: ${JSON.stringify(target)}`,
+        );
+    }
+  }
+
+  const MAIN_TABS = createMainTabsView({
+    mount: (() => {
+      const mount = document.getElementById("main-tabs");
+      if (!mount) throw new Error("#main-tabs is missing from index.html");
+      return mount;
+    })(),
+    getLanguage: () => STATE.language,
+    pageLabel: (page) => uiText().nav[page],
+    navigate: (route) => navigateToRoute(route),
+    currentRoute: () => STATE.route,
+    defaultRoute: defaultRouteForTab,
+    copyPath: (path) => {
+      navigator.clipboard
+        .writeText(filePathClipboardText(path))
+        .catch((error: unknown) => {
+          console.error("[code-viewer] copying the tab path failed", error);
+          setStatus("error");
+        });
+    },
+    onNewTab: () => openSearchPalette("file"),
+    loadSaved: async () =>
+      (
+        await loadStateResponse<{ layout: unknown }>(
+          apiUrl("stateTabs"),
+          "main tabs request failed",
+        )
+      ).layout,
+    save: async (layout, keepalive) => {
+      const response = await fetch(apiUrl("stateTabs"), {
+        method: "PUT",
+        keepalive,
+        headers: { ...actionHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ layout }),
+      });
+      if (!response.ok)
+        throw new Error(await responseErrorMessage(response, "save main tabs"));
+    },
+  });
+
+  /**
+   * 画面へ移る。その画面のタブが開いていれば、そのタブが最後に見ていた
+   * 状態へ (上の行の入口や g d などで、選んでいたコミットや表を失わない)。
+   */
+  function navigateToPageTab(route: AppRoute): void {
+    const target = routeTarget(route);
+    const stored =
+      target?.kind === "page" ? MAIN_TABS.routeForPage(target.page) : null;
+    navigateToRoute(stored ?? route);
+  }
 
   // (declarations recovered during the source-view extraction)
   let highlightConfigured = false;
@@ -2838,6 +2937,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const route = link.dataset.route as keyof typeof text.nav;
       if (route && text.nav[route]) link.textContent = text.nav[route];
     });
+    MAIN_TABS.localize();
     // The repo link is icon-only; the label lives in title/aria-label
     // instead of visible text.
     const repoWebLink =
@@ -3973,6 +4073,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const state = historyStateForRoute(nextRoute);
     if (replace) history.replaceState(state, "", url);
     else history.pushState(state, "", url);
+    MAIN_TABS.syncRoute(nextRoute);
     syncHeaderMenu();
     syncLineRefPill();
     // Picking another commit (or clearing the file) on the history screen
@@ -5361,7 +5462,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (action === "next-hunk" || action === "previous-hunk")
       return DIFF_VIEW.scrollToAdjacentHunk(action === "next-hunk" ? 1 : -1);
     if (action === "goto-diff") {
-      navigateToRoute({ screen: "diff", range: currentRange() });
+      navigateToPageTab({ screen: "diff", range: currentRange() });
       return true;
     }
     if (action === "goto-history") {
@@ -5383,7 +5484,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "goto-repo") {
-      navigateToRoute({
+      navigateToPageTab({
         screen: "repo",
         ref: STATE.repoRef || "worktree",
         path: "",
@@ -5407,15 +5508,32 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (action === "find-in-source")
       return openVirtualSourceSearchFromKeyboard(target);
     if (action === "goto-journal") {
-      navigateToRoute({ screen: "journal", range: currentRange() });
+      navigateToPageTab({ screen: "journal", range: currentRange() });
       return true;
     }
     if (action === "goto-database") {
-      navigateToRoute({ screen: "database", range: currentRange() });
+      navigateToPageTab({ screen: "database", range: currentRange() });
       return true;
     }
     if (action === "goto-agents") {
-      navigateToRoute({ screen: "agents", range: currentRange() });
+      navigateToPageTab({ screen: "agents", range: currentRange() });
+      return true;
+    }
+    if (action === "main-tab-next") {
+      MAIN_TABS.next();
+      return true;
+    }
+    if (action === "main-tab-previous") {
+      MAIN_TABS.previous();
+      return true;
+    }
+    if (action === "main-tab-close") {
+      MAIN_TABS.closeActive();
+      return true;
+    }
+    const nthTab = /^main-tab-([1-9])$/.exec(action);
+    if (nthTab) {
+      MAIN_TABS.activateNth(Number(nthTab[1]));
       return true;
     }
     if (action === "nav-back") {
@@ -5472,6 +5590,13 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   document.addEventListener("click", closeRepoContextMenu);
   $("#filelist").addEventListener("contextmenu", handleSidebarContextMenu);
+  // 木の行を 2 回押したら、1 回目で開いた仮のタブを固定にする。
+  $("#filelist").addEventListener("dblclick", (event) => {
+    const row = (event.target as Element).closest<HTMLElement>(
+      "#filelist li[data-path]",
+    );
+    if (row?.dataset.path) MAIN_TABS.keepFileOpen(row.dataset.path);
+  });
 
   document.addEventListener("keydown", async (e) => {
     if (isImeComposing(e)) return;
@@ -5732,6 +5857,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
   }
   loadInitialState().finally(() => {
+    MAIN_TABS.syncRoute(STATE.route);
+    void MAIN_TABS.restore();
     if (STATE.route.screen === "help") {
       setStatus("live");
       renderHelpPage();
@@ -7002,6 +7129,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.repoRef = STATE.route.ref || "worktree";
     ANNOTATIONS_UI?.restoreSessionFromUrl();
     replaceUrlWithCurrentRoute();
+    MAIN_TABS.syncRoute(STATE.route);
     syncRefInputs();
     syncHeaderMenu();
     syncLineRefPill();
@@ -7092,7 +7220,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     load();
   }
   window.addEventListener("popstate", applyRouteFromLocation);
-  window.addEventListener("pagehide", () => flushViewStatePatch(true));
+  window.addEventListener("pagehide", () => {
+    flushViewStatePatch(true);
+    MAIN_TABS.flush(true);
+  });
 
   // Header logo and menu links navigate within the SPA. A full page load here
   // re-lays-out the whole app from scratch (the layout shift the menu was
@@ -7109,6 +7240,17 @@ window.GdpExpandLogic = GdpExpandLogic;
       link.addEventListener("click", (e) => {
         if (isNativeLinkClick(e)) return;
         e.preventDefault();
+        // 上の行の入口 (Files / Diff / …) と全体ボードは、その画面のタブが
+        // 開いていれば、そのタブが最後に見ていた状態を前面に出す。
+        const page = link.dataset.route;
+        const stored =
+          link.matches("a.app-menu-item, a.nav-board-link") && isPageKind(page)
+            ? MAIN_TABS.routeForPage(page)
+            : null;
+        if (stored) {
+          navigateToRoute(stored);
+          return;
+        }
         const target = new URL(link.href, window.location.origin);
         history.pushState(
           null,

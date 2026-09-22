@@ -13,6 +13,13 @@ Requires Node.js 20 or newer. Development uses
   palette) and globs such as `*.ts` or `src/**`, and shows
   `matching / all` file counts in the header while it is active. Rows are
   real links: Cmd/Ctrl+click or middle-click opens a file in a new tab.
+- Keep files and screens open as tabs under the top bar. A single click opens
+  a file in a preview tab (italic) that the next file replaces; double-click
+  or **Keep open** keeps it. Files / Diff / History / Worktrees / Data /
+  Work log each have one tab that comes back as you left it. Right-click a
+  tab to close it, the others or those to its right, or copy its path; drag
+  to reorder; `g t` / `g T` / `g x` / `g 1`–`g 9` move and close from the
+  keyboard. The tabs are remembered per project.
 - View git diffs with unified or split layout, lazy loading, viewed-file
   state, ignore-whitespace and hide-tests toggles, and dismissible per-line
   "reference pills" that copy `@path#start-end` for AI agents. View File on
