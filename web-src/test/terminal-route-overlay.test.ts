@@ -5,7 +5,11 @@
 // 復元できない。ペイン ID を載せていた古い URL は「開いているだけ」に落ちる。
 
 import { describe, expect, test } from "vitest";
-import { parseTerminalOverlay, withTerminalOverlay } from "../core/routes";
+import {
+  parseTerminalOverlay,
+  projectSwitchPath,
+  withTerminalOverlay,
+} from "../core/routes";
 
 describe("terminal overlay query parsing", () => {
   test.each([
@@ -112,4 +116,29 @@ describe("terminal overlay url building", () => {
       expect(parseTerminalOverlay(url.slice(url.indexOf("?")))).toBe(shell);
     }
   });
+});
+
+// プロジェクトを移るときに持っていく path: 画面のメニューの href に、前面の
+// シェルを足す (前面がシェルのとき、移った先でどのタブも前面でなくなった)。
+test.each([
+  {
+    href: "/",
+    search: "?terminal=shell-ab12cd",
+    expected: "/?terminal=shell-ab12cd",
+  },
+  {
+    href: "/todif?from=HEAD&to=worktree",
+    search: "?from=HEAD&to=worktree&terminal=shell-ab12cd",
+    expected: "/todif?from=HEAD&to=worktree&terminal=shell-ab12cd",
+  },
+  // シェルを映していない・開いているだけ・シェルの形でない: 画面だけ
+  { href: "/todif", search: "?from=HEAD", expected: "/todif" },
+  { href: "/", search: "?terminal=", expected: "/" },
+  { href: "/", search: "?terminal=%12", expected: "/" },
+])("projectSwitchPath($href, $search) = $expected", ({
+  href,
+  search,
+  expected,
+}) => {
+  expect(projectSwitchPath(href, search)).toBe(expected);
 });

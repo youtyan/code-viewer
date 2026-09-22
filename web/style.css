@@ -3937,9 +3937,11 @@ body.gdp-diff-page #diff::after {
   margin: 0 0 16px;
   isolation: isolate;
   box-shadow: var(--shadow-sm);
-  /* When scrolled to (e.g. from sidebar click), leave room for the fixed
-     fixed headers so the file header doesn't get hidden behind them. */
-  scroll-margin-top: calc(var(--chrome-h) + 8px);
+  /* サイドバー・次の未閲覧から送ったときの、箱の上端との間。本文は自分の箱
+     (#content) でスクロールし、固定の帯はその箱の外 (上) にあるので、帯の高さ
+     (--chrome-h) は足さない (足すとカードが箱の上端から 98px 下に止まり、前の
+     カードの尻が見えていた)。 */
+  scroll-margin-top: var(--space-2);
 }
 
 .d2h-file-header,
@@ -6783,7 +6785,17 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 .d2h-file-wrapper {
   container: diff-file / inline-size;
 }
-@container diff-file (max-width: 40em) {
+/* 境目の em は見出しの文字の大きさに合わせる (密度で変わる)。箱の文字が 14px の
+   ままだと、特大では 700px の箱が 50em 相当で 1 段のままになり、操作に幅を
+   取られて名前が 32px (「doc…」) になった。Diff のカードだけ (ファイルの表示と
+   フォルダの一覧も同じ箱を使い、中の段の境目がこの文字の大きさに頼っている)。 */
+.d2h-file-wrapper:has(> .d2h-file-header) {
+  font-size: var(--ui-font-md);
+}
+/* 48em = 名前 12ch と、見出しの操作 (折り畳み・パス・種類・コピー・展開・開く・
+   確認済み・増減・プレビュー・ファイルを見る) と間。これより狭いと 1 段では
+   名前が 12ch を切る。 */
+@container diff-file (max-width: 48em) {
   .d2h-file-header,
   .d2h-file-header.d2h-sticky-header {
     height: auto !important;
@@ -6794,7 +6806,9 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
     row-gap: 6px;
   }
   .d2h-file-header .d2h-file-name-wrapper {
-    flex: 1 1 calc(100% - 44px);
+    /* 1 段目は折り畳みのボタンと名前。ボタンと間の幅は密度で変わる (固定の
+       44px では特大で 36 + 10 に足りず、ボタンだけが 1 段目に残った)。 */
+    flex: 1 1 calc(100% - var(--ui-control-sm) - var(--space-2));
     min-width: 160px;
     order: 1;
   }
@@ -6927,7 +6941,8 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   border: 1px solid var(--border);
   border-radius: 6px;
   margin: 0 0 16px;
-  scroll-margin-top: calc(var(--chrome-h) + 8px);
+  /* 帯の高さは足さない (.d2h-file-wrapper と同じ理由)。 */
+  scroll-margin-top: var(--space-2);
   isolation: isolate;
   box-shadow: 0 1px 0 rgba(31,35,40,0.04);
   content-visibility: auto;
@@ -17786,8 +17801,11 @@ body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
    目次は本文の右の細い列 (--toc-w)。面が狭いときは畳む。 */
 .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
   display: grid;
-  grid-template-columns: auto minmax(0, max-content) auto minmax(0, 1fr) auto auto auto;
-  grid-template-areas: "toggle path info . tabs nav trash";
+  /* back は Diff から開いたときの「差分を見る」。空の間 (1fr) を兼ねるので、
+     ボタンがあるときは下限をその幅にする (0 まで縮むとボタンが情報の丸と
+     表示の切替に重なった)。 */
+  grid-template-columns: auto minmax(0, max-content) auto minmax(auto, 1fr) auto auto auto;
+  grid-template-areas: "toggle path info back tabs nav trash";
   align-items: center;
   column-gap: var(--space-2);
   padding: var(--space-4) var(--pad-doc) var(--space-2);
@@ -17796,8 +17814,8 @@ body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
 /* ツリーを隠していないとき (切替のボタンが無いとき) は、空の列の間隔で
    パンくずが基準線から右へずれないよう、列そのものを持たない。 */
 .gdp-file-detail-wrapper > .gdp-file-detail-sticky:not(:has(#sidebar-toggle)) {
-  grid-template-columns: minmax(0, max-content) auto minmax(0, 1fr) auto auto auto;
-  grid-template-areas: "path info . tabs nav trash";
+  grid-template-columns: minmax(0, max-content) auto minmax(auto, 1fr) auto auto auto;
+  grid-template-areas: "path info back tabs nav trash";
 }
 .gdp-file-detail-wrapper > .gdp-file-detail-sticky > .gdp-file-detail-header {
   display: contents;
@@ -17817,6 +17835,10 @@ body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
 }
 .gdp-file-detail-sticky .gdp-file-detail-header > .gdp-trash-path {
   grid-area: trash;
+}
+.gdp-file-detail-sticky .gdp-file-detail-header > .gdp-view-file {
+  grid-area: back;
+  justify-self: end;
 }
 /* 情報のボタン: パンくずの行の中の小さな丸。hover / フォーカスで大きさと日時の
    小さな面が下に出る (押せる領域の寸法は状態で変えない)。 */
@@ -18027,12 +18049,12 @@ body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
 @container doc-head (max-width: 760px) {
   .gdp-file-detail-wrapper > .gdp-file-detail-sticky {
     grid-template-areas:
-      "toggle path info . nav trash tabs-end"
+      "toggle path info back nav trash tabs-end"
       "tabs tabs tabs tabs tabs tabs tabs";
   }
   .gdp-file-detail-wrapper > .gdp-file-detail-sticky:not(:has(#sidebar-toggle)) {
     grid-template-areas:
-      "path info . nav trash tabs-end"
+      "path info back nav trash tabs-end"
       "tabs tabs tabs tabs tabs tabs";
     row-gap: var(--space-2);
   }
@@ -18046,17 +18068,17 @@ body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
    510px = 左右の余白 48 + 操作 6 つと間 222 + パンくずの 240。 */
 @container doc-head (max-width: 509px) {
   .gdp-file-detail-wrapper > .gdp-file-detail-sticky:not(:has(#sidebar-toggle)) {
-    grid-template-columns: auto auto auto minmax(0, 1fr) auto auto;
+    grid-template-columns: auto auto auto minmax(auto, 1fr) auto auto;
     grid-template-areas:
       "crumb crumb crumb crumb crumb crumb"
-      "copy open info . nav trash"
+      "copy open info back nav trash"
       "tabs tabs tabs tabs tabs tabs";
   }
   .gdp-file-detail-wrapper > .gdp-file-detail-sticky:has(#sidebar-toggle) {
     grid-template-columns: auto auto auto auto minmax(0, 1fr) auto auto;
     grid-template-areas:
       "toggle crumb crumb crumb crumb crumb crumb"
-      "copy open info . . nav trash"
+      "copy open info back . nav trash"
       "tabs tabs tabs tabs tabs tabs tabs";
     row-gap: var(--space-2);
   }
@@ -20077,14 +20099,58 @@ button.agents-account-name:hover {
   min-width: 0;
   color: var(--color-text-3);
   font-size: var(--ui-font-sm);
+  white-space: nowrap;
 }
+/* 面が狭いとき (2 面の面など) は、件数と操作を次の行へ折る (件数が 1 文字ずつ
+   縦に折れた)。 */
+.gdp-repo-shell .gdp-repo-search-bar {
+  flex-wrap: wrap;
+}
+/* 名前の欄は日付の欄より先に縮めない (12ch は残す)。0 まで縮められると、日付の
+   欄が上限の 23ch まで広がった残りしか名前に回らず、1280px・日本語・特大で
+   「as…」「R…」、2 面では名前が消えた。 */
 .gdp-repo-shell .gdp-repo-sort-header,
 .gdp-repo-shell .gdp-repo-row {
   grid-template-columns:
-    var(--icon-md) minmax(0, 1fr) minmax(18ch, 23ch) minmax(18ch, 23ch)
+    var(--icon-md) minmax(12ch, 1fr) minmax(18ch, 23ch) minmax(18ch, 23ch)
     8ch;
   column-gap: var(--space-3);
   padding: 0 var(--pad-face);
+}
+/* 欄の詰め方は一覧の実幅で決める。境目の em は行の文字の大きさ (密度で変わる)
+   に合わせるため、入れ物の文字の大きさを行と同じにする。 */
+.gdp-repo-shell .gdp-repo-sort-host,
+.gdp-repo-shell .gdp-repo-file-list {
+  container: repo-list / inline-size;
+  font-size: var(--ui-font-md);
+}
+.gdp-repo-shell .gdp-repo-sort-header button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 名前 12ch と日付 2 つ (各 18ch)・大きさ・間が入らない幅 (約 41em): ローカルの
+   更新日時の欄を省く。さらに狭い (約 29em): 最終コミットの日時も省く。名前と
+   大きさは残す (日時は行を開けばファイルの情報に出る)。 */
+@container repo-list (max-width: 41em) {
+  .gdp-repo-shell .gdp-repo-sort-header,
+  .gdp-repo-shell .gdp-repo-row {
+    grid-template-columns: var(--icon-md) minmax(12ch, 1fr) minmax(18ch, 23ch) 8ch;
+  }
+  .gdp-repo-shell .gdp-repo-sort-header [data-repo-sort="updated"],
+  .gdp-repo-shell .gdp-repo-row > .meta {
+    display: none;
+  }
+}
+@container repo-list (max-width: 29em) {
+  .gdp-repo-shell .gdp-repo-sort-header,
+  .gdp-repo-shell .gdp-repo-row {
+    grid-template-columns: var(--icon-md) minmax(12ch, 1fr) 8ch;
+  }
+  .gdp-repo-shell .gdp-repo-sort-header [data-repo-sort="committed"],
+  .gdp-repo-shell .gdp-repo-row > .commit-date {
+    display: none;
+  }
 }
 /* 行の面は文字の線から --pad-face だけ外。箱のほうをその線から始める。 */
 .gdp-repo-shell .gdp-repo-sort-host,
@@ -20318,6 +20384,15 @@ button.agents-account-name:hover {
 .gdp-file-detail-sticky .gdp-source-line-count,
 .gdp-file-detail-sticky .gdp-source-line-jump-label {
   white-space: nowrap;
+}
+/* 31em は行数が 1 桁 (「7 lines」) のときの幅。4 桁以上 (「1,601 lines」) だと
+   31em〜約 33em で入りきらず、コピーのボタンだけが 2 行目に落ちた (1280px の
+   2 面の右の面、箱 437px)。その幅ではまず「行へ移動」の文字だけを畳む
+   (行数は残す)。34em は 6 桁の行数でも全部を 1 行に並べられる幅。 */
+@container file-detail-tabs (max-width: 34em) {
+  .gdp-file-detail-sticky .gdp-source-line-jump-label {
+    display: none;
+  }
 }
 @container file-detail-tabs (max-width: 31em) {
   .gdp-file-detail-sticky .gdp-source-line-count,
@@ -20758,15 +20833,12 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
     display: none;
   }
 }
-/* 2 面の左の面など、帯がさらに狭いとき: 次の未閲覧 (キーの n とファイルの見出し
-   の確認済みで代わりが利く) も省く。それでも入らない分は帯の中を横に送って
-   見る (面の外へ押し出して届かなくしない)。 */
-@container topbar (max-width: 56em) {
+/* 帯がさらに狭いとき: 次の未閲覧 (キーの n とファイルの見出しの確認済みで
+   代わりが利く) を省き、Split / Unified を絵だけにする。上の段の中身は約 67em
+   (1280px の窓で右の列を開いた 1 面の帯 58.5em に入らず、Split / Unified が
+   帯の外へ押し出されていた) なので、この段は 68em から。 */
+@container topbar (max-width: 68em) {
   #topbar #meta .chip-next-unviewed {
-    display: none;
-  }
-  /* 比較対象の選択欄の頭の枝の絵を省き、名前に幅を回す。 */
-  #topbar .ref-selector .ref-selector-icon {
     display: none;
   }
   /* Split / Unified は絵だけにする (名前は title と aria-label に残る)。 */
@@ -20778,6 +20850,14 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
   }
   #topbar .seg button {
     padding: 0 var(--space-2);
+  }
+}
+/* 2 面の左の面など、帯がさらに狭いとき: 比較対象の選択欄の頭の枝の絵を省き、
+   名前に幅を回す。それでも入らない分は帯の中を横に送って見る (面の外へ押し出して
+   届かなくしない)。 */
+@container topbar (max-width: 56em) {
+  #topbar .ref-selector .ref-selector-icon {
+    display: none;
   }
 }
 #topbar {

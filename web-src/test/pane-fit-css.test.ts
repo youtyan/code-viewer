@@ -68,6 +68,18 @@ test.each([
   [".brand .title", "max-width", "var(--brand-name-max, 60%)"],
   [".project-branch", "flex", "0 0 auto"],
   [".project-branch", "max-width", "var(--brand-branch-max, min(20vw, 260px))"],
+  // Diff から開いたファイルの「差分を見る」は自分の欄に置く (欄が無いと空の
+  // 間 (0 まで縮む) に自動で置かれ、情報の丸と表示の切替に重なった)
+  [
+    ".gdp-file-detail-sticky .gdp-file-detail-header > .gdp-view-file",
+    "grid-area",
+    "back",
+  ],
+  [
+    ".gdp-file-detail-wrapper > .gdp-file-detail-sticky:not(:has(#sidebar-toggle))",
+    "grid-template-areas",
+    '"path info back tabs nav trash"',
+  ],
   // Tools の入力・出力の並べ方は面の実幅で決める。見出しの語は折らない
   [".tools-body", "container", "tools-pane / inline-size"],
   [".tools-pane-title", "white-space", "nowrap"],
@@ -100,21 +112,43 @@ test.each([
   ).toBe(expected);
 });
 
-// 2 面の左の面ほど帯が狭いとき (56em 以下): Split / Unified は絵だけにし、選択欄の
-// 頭の絵を省いて枝の名前に幅を回す。
-const narrowTopbar = allRules.filter(
-  (rule) => rule.atRule === "@container topbar (max-width: 56em)",
-);
+// 帯が狭いときの段。68em 以下 (1280px の窓で右の列を開いた 1 面の帯 58.5em を
+// 含む): Split / Unified は絵だけにし、次の未閲覧を省く (上の段の中身は約 67em で、
+// 入らない分の Split / Unified が帯の外へ押し出されていた)。56em 以下 (2 面の
+// 左の面など): 選択欄の頭の絵も省いて枝の名前に幅を回す。
 test.each([
-  ["#topbar .seg .seg-icon", "display", "block"],
-  ["#topbar .seg .seg-label", "display", "none"],
-  ["#topbar .ref-selector .ref-selector-icon", "display", "none"],
-])("narrow topbar: %s has %s: %s", (selector, property, expected) => {
+  ["68em", "#topbar .seg .seg-icon", "display", "block"],
+  ["68em", "#topbar .seg .seg-label", "display", "none"],
+  ["68em", "#topbar #meta .chip-next-unviewed", "display", "none"],
+  ["56em", "#topbar .ref-selector .ref-selector-icon", "display", "none"],
+])("narrow topbar (%s): %s has %s: %s", (width, selector, property, expected) => {
   expect(
     cascadedDeclarations(
-      narrowTopbar,
+      allRules.filter(
+        (rule) => rule.atRule === `@container topbar (max-width: ${width})`,
+      ),
       (candidate) => candidate === selector,
     ).get(property),
+  ).toBe(expected);
+});
+
+// ファイルの見出しの 2 段目 (Code / Blame / History・行数・行へ移動・コピー): 行数が
+// 4 桁以上だと 31em〜約 33em で入らず、コピーだけが 2 行目に落ちた。34em 以下では
+// 「行へ移動」の文字だけを先に畳み、31em 以下で行数も畳む。
+test.each([
+  ["34em", ".gdp-file-detail-sticky .gdp-source-line-jump-label", "none"],
+  ["34em", ".gdp-file-detail-sticky .gdp-source-line-count", undefined],
+  ["31em", ".gdp-file-detail-sticky .gdp-source-line-jump-label", "none"],
+  ["31em", ".gdp-file-detail-sticky .gdp-source-line-count", "none"],
+])("narrow file tabs (%s): %s display is %s", (width, selector, expected) => {
+  expect(
+    cascadedDeclarations(
+      allRules.filter(
+        (rule) =>
+          rule.atRule === `@container file-detail-tabs (max-width: ${width})`,
+      ),
+      (candidate) => candidate === selector,
+    ).get("display"),
   ).toBe(expected);
 });
 
@@ -173,12 +207,12 @@ test.each([
   [
     ".gdp-file-detail-wrapper > .gdp-file-detail-sticky:not(:has(#sidebar-toggle))",
     "grid-template-areas",
-    '"crumb crumb crumb crumb crumb crumb" "copy open info . nav trash" "tabs tabs tabs tabs tabs tabs"',
+    '"crumb crumb crumb crumb crumb crumb" "copy open info back nav trash" "tabs tabs tabs tabs tabs tabs"',
   ],
   [
     ".gdp-file-detail-wrapper > .gdp-file-detail-sticky:has(#sidebar-toggle)",
     "grid-template-areas",
-    '"toggle crumb crumb crumb crumb crumb crumb" "copy open info . . nav trash" "tabs tabs tabs tabs tabs tabs tabs"',
+    '"toggle crumb crumb crumb crumb crumb crumb" "copy open info back . nav trash" "tabs tabs tabs tabs tabs tabs tabs"',
   ],
   [".gdp-file-detail-sticky .gdp-file-detail-path", "display", "contents"],
   [
@@ -199,5 +233,91 @@ test.each([
         (candidate) => candidate === selector,
       ).get(property) ?? ""
     ).replace(/\s+/g, " "),
+  ).toBe(expected);
+});
+
+// フォルダの一覧: 名前の欄は 12ch を残し、狭い一覧では日時の欄から省く (名前が
+// 0 まで縮み、2 面・特大で名前が消えた)。境目は一覧の実幅と行の文字の大きさ。
+test.each([
+  [
+    null,
+    ".gdp-repo-shell .gdp-repo-file-list",
+    "container",
+    "repo-list / inline-size",
+  ],
+  [
+    null,
+    ".gdp-repo-shell .gdp-repo-file-list",
+    "font-size",
+    "var(--ui-font-md)",
+  ],
+  [null, ".gdp-repo-shell .gdp-repo-search-bar", "flex-wrap", "wrap"],
+  [
+    null,
+    ".gdp-repo-shell .gdp-repo-row",
+    "grid-template-columns",
+    "var(--icon-md) minmax(12ch, 1fr) minmax(18ch, 23ch) minmax(18ch, 23ch) 8ch",
+  ],
+  ["41em", ".gdp-repo-shell .gdp-repo-row > .meta", "display", "none"],
+  [
+    "41em",
+    ".gdp-repo-shell .gdp-repo-row",
+    "grid-template-columns",
+    "var(--icon-md) minmax(12ch, 1fr) minmax(18ch, 23ch) 8ch",
+  ],
+  ["29em", ".gdp-repo-shell .gdp-repo-row > .commit-date", "display", "none"],
+  [
+    "29em",
+    ".gdp-repo-shell .gdp-repo-row",
+    "grid-template-columns",
+    "var(--icon-md) minmax(12ch, 1fr) 8ch",
+  ],
+])("repo list (%s): %s has %s: %s", (width, selector, property, expected) => {
+  const scope =
+    width === null
+      ? rules
+      : allRules.filter(
+          (rule) =>
+            rule.atRule === `@container repo-list (max-width: ${width})`,
+        );
+  expect(
+    (
+      cascadedDeclarations(scope, (candidate) => candidate === selector).get(
+        property,
+      ) ?? ""
+    ).replace(/\s+/g, " "),
+  ).toBe(expected);
+});
+
+// Diff のカードの見出しの 2 段化: 境目の em は見出しの文字の大きさ (密度で変わる)
+// で数え、名前 12ch と操作が 1 段に入らない幅 (48em) から 2 段にする。特大では
+// 1 段のまま名前が 32px (「doc…」) になり、2 段にすると折り畳みのボタンだけが
+// 1 段目に残った。
+test.each([
+  [
+    null,
+    ".d2h-file-wrapper:has(> .d2h-file-header)",
+    "font-size",
+    "var(--ui-font-md)",
+  ],
+  ["48em", ".d2h-file-header", "flex-wrap", "wrap"],
+  [
+    "48em",
+    ".d2h-file-header .d2h-file-name-wrapper",
+    "flex",
+    "1 1 calc(100% - var(--ui-control-sm) - var(--space-2))",
+  ],
+])("diff card head (%s): %s has %s: %s", (width, selector, property, expected) => {
+  const scope =
+    width === null
+      ? rules
+      : allRules.filter(
+          (rule) =>
+            rule.atRule === `@container diff-file (max-width: ${width})`,
+        );
+  expect(
+    cascadedDeclarations(scope, (candidate) => candidate === selector).get(
+      property,
+    ),
   ).toBe(expected);
 });

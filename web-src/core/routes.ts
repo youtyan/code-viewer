@@ -641,6 +641,19 @@ export function withTerminalOverlay(
 }
 
 /**
+ * プロジェクトを移るときに持っていく画面の path。画面のメニューの項目の href
+ * (ファイルやコミットのような、そのプロジェクトにしか無いものは持っていかない)
+ * に、前面のシェル (`?terminal=`) を足す。シェルのタブはどのプロジェクトにも
+ * ある共通のタブで、前面がシェルのときはメニューに選ばれた項目が無いので、
+ * 足さないと移った先がフォルダの表示になり、どのタブも前面でなくなった。
+ */
+export function projectSwitchPath(screenHref: string, search: string): string {
+  const terminal = parseTerminalOverlay(search);
+  if (terminal === null || terminal === "open") return screenHref;
+  return withTerminalOverlay(screenHref, terminal);
+}
+
+/**
  * 読み込んだらタブで開くエージェントのペイン (`?open-pane=%12`)。別の
  * プロジェクトのエージェントを開くとき、そのプロジェクトへ移ってから開くための
  * 一度きりの行き先で、開いたら URL から外す。`?pane=right` (右の面) とは別の

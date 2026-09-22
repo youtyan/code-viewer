@@ -117,6 +117,7 @@ import {
   parsePaneOverlay,
   parseRoute,
   parseTerminalOverlay,
+  projectSwitchPath,
   type SourceFileTarget,
   type SourceLineTarget,
   screenToLeave,
@@ -6023,7 +6024,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (activeHistoryPathFilter) params.set("path", activeHistoryPathFilter);
     if (options.force) params.set("nocache", "1");
     const url = `${apiUrl("diffJson")}${params.toString() ? `?${params.toString()}` : ""}`;
-    return trackLoad<DiffMeta>(fetch(url).then((r) => r.json()))
+    // HTTP の失敗を差分として描かない。裏のプロセスが止まると入口は 502 と
+    // `{error, code, project: {key, root}, …}` を返し、それを DiffMeta として
+    // 読むと見出しのプロジェクト名が "[object Object]" になり、差分が空になった。
+    const request = fetch(url).then(async (response) => {
+      if (!response.ok)
+        throw new Error(
+          await responseErrorMessage(
+            response,
+            `diff ${fromAtRequest}..${toAtRequest} request failed`,
+          ),
+        );
+      return (await response.json()) as DiffMeta;
+    });
+    return trackLoad<DiffMeta>(request)
       .then((data) => {
         if (!isCurrentDiffRequest()) return null;
         const result = renderShell(data, options.changedPaths);
@@ -7469,12 +7483,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   /** 移った先でも同じ画面を開く (ナビで選ばれている画面の入口)。 */
   /** いまの画面のパス (前置きを外したもの)。プロジェクトを移るときの移り先。 */
   function currentScreenPath(): string {
-    return withoutProjectPrefix(
-      document
-        .querySelector<HTMLAnchorElement>(
-          "a.app-menu-item.active, a.nav-board-link.active",
-        )
-        ?.getAttribute("href") ?? "/",
+    return projectSwitchPath(
+      withoutProjectPrefix(
+        document
+          .querySelector<HTMLAnchorElement>(
+            "a.app-menu-item.active, a.nav-board-link.active",
+          )
+          ?.getAttribute("href") ?? "/",
+      ),
+      window.location.search,
     );
   }
 

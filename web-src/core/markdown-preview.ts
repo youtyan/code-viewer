@@ -775,6 +775,32 @@ function scrollableAncestor(element: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/**
+ * 箱の中で上に貼り付くファイルの見出しが、貼り付いたときに箱の上端から覆う高さ
+ * (箱の上の余白 + 貼り付く位置 `top` + 見出しの高さ。貼り付く位置は箱の余白の
+ * 内側から数える)。本文が自分の箱 (#content) でスクロールするようになってから、
+ * 目次で送った見出しが箱の上端から 12px の所、つまり貼り付いたファイルの見出しの
+ * 下に隠れていた。
+ */
+function stickyCoverInside(container: HTMLElement): number {
+  const padding = Number.parseFloat(getComputedStyle(container).paddingTop);
+  let cover = 0;
+  for (const header of container.querySelectorAll<HTMLElement>(
+    ".gdp-file-detail-sticky",
+  )) {
+    const style = getComputedStyle(header);
+    if (style.position !== "sticky" || style.display === "none") continue;
+    const top = Number.parseFloat(style.top);
+    cover = Math.max(
+      cover,
+      (Number.isFinite(padding) ? padding : 0) +
+        (Number.isFinite(top) ? top : 0) +
+        header.getBoundingClientRect().height,
+    );
+  }
+  return cover;
+}
+
 function scrollMarkdownSectionIntoView(
   section: HTMLElement,
   behavior: ScrollBehavior,
@@ -785,6 +811,7 @@ function scrollMarkdownSectionIntoView(
       section.getBoundingClientRect().top -
       container.getBoundingClientRect().top +
       container.scrollTop -
+      stickyCoverInside(container) -
       12;
     container.scrollTo({ top: Math.max(0, top), behavior });
     return;

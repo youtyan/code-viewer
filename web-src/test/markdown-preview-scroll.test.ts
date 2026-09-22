@@ -91,4 +91,38 @@ describe("markdown table of contents navigation", () => {
 
     expect(windowScrolls).toBe(1);
   });
+
+  // 本文の箱 (#content) の中で上に貼り付くファイルの見出しの下に、送った見出しを
+  // 隠さない。箱の余白 18px + 貼り付く位置 -18px + 高さ 56px = 箱の上端から 56px。
+  test("leaves room for the file header that sticks inside the pane", async () => {
+    const pane = createScrollablePane();
+    Object.defineProperty(pane, "scrollTop", {
+      value: 1000,
+      configurable: true,
+    });
+    pane.style.paddingTop = "18px";
+    const header = document.createElement("div");
+    header.className = "gdp-file-detail-sticky";
+    header.style.position = "sticky";
+    header.style.top = "-18px";
+    header.getBoundingClientRect = () => new DOMRect(0, 0, 400, 56);
+    pane.appendChild(header);
+    document.body.appendChild(pane);
+    pane.appendChild(
+      await renderMarkdownPreview(
+        DOC,
+        { path: "scratchpad.md", ref: "worktree" },
+        { syntaxHighlight: false },
+      ),
+    );
+
+    const link = pane.querySelector<HTMLAnchorElement>(
+      ".gdp-markdown-toc a[data-target]",
+    );
+    if (!link) throw new Error("expected a table of contents entry");
+    link.click();
+
+    // 見出しと箱の上端はどちらも 0 (happy-dom は配置しない): 1000 - 56 - 12。
+    expect(pane.scrolls).toEqual([932]);
+  });
 });

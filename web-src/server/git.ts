@@ -2574,7 +2574,28 @@ export async function untrackedFileDiffAsync(
   if (isCommandNotFoundResult("git", res)) {
     return { ...res, stderr: commandNotFoundDetail("git"), status: 503 };
   }
-  return res;
+  if (path.startsWith("./")) return res;
+  return { ...res, stdout: withoutDotSlashInHeader(res.stdout, path) };
+}
+
+/**
+ * 上で前置した `./` を、差分の見出し (`diff --git a/./x b/./x` と `+++ b/./x`)
+ * から外す。git は受け取ったパスをそのまま見出しに書くので、Diff のカードの題が
+ * `./docs/x.md` になり、追跡中のファイルの題 (`docs/x.md`) と揃わなかった。
+ * 本文 (@@ から後) には触らない。
+ */
+export function withoutDotSlashInHeader(
+  diffText: string,
+  path: string,
+): string {
+  const bodyStart = diffText.indexOf("\n@@");
+  const header = bodyStart < 0 ? diffText : diffText.slice(0, bodyStart);
+  const fixed = header
+    .split(`a/./${path}`)
+    .join(`a/${path}`)
+    .split(`b/./${path}`)
+    .join(`b/${path}`);
+  return bodyStart < 0 ? fixed : fixed + diffText.slice(bodyStart);
 }
 
 export function splitHunks(diffText: string): {
