@@ -161,10 +161,10 @@ Requires Node.js 20 or newer. Development uses
   engine unless you turn match-case on. Opening a hit marks the matched
   text on the target line (`?hl=`), and in large virtualized files it
   pre-fills the in-file find bar with it. **Pin** (or `Ctrl+Enter`) moves
-  the query into the bottom panel's **Search** tab, where the grouped
-  result list stays open while you browse files; the query rides in the
-  URL (`?results=<query>`) so a reload re-runs it, and the Search tab can
-  also be opened directly from the panel's tab row.
+  the query into a **Search** tab, where the grouped result list stays
+  open while you browse files; the query rides in the URL
+  (`/search?q=<query>`) so a reload re-runs it, and the Search tab can
+  also be opened from the tab row's `+` menu or the palette.
 - Jump from a function, class, or variable in source and diff code to its
   definition with `Cmd/Ctrl+click` or `g .`; choose from ranked candidates when
   several definitions match — a code preview of the highlighted candidate
@@ -182,9 +182,8 @@ Requires Node.js 20 or newer. Development uses
 - Read the built-in Settings & Help page (Settings and Help at the bottom of the left sidebar) for getting
   started, the `.code-viewer/` project files, AI annotations, datastores,
   the agent skill, and keybindings.
-- Scratch on pasted text without leaving the current screen with the Tools
-  drawer (the `Tools` tab of the bottom panel, or `?tools=<tool>` on any
-  URL): Markdown
+- Scratch on pasted text in a Tools tab (the tab row's `+` menu, the
+  palette, or `/tools?tool=<tool>`): Markdown
   preview (same renderer as file preview, so table of contents, task lists,
   frontmatter, code highlighting and ` ```mermaid ` fences all work),
   Mermaid preview with zoom and drag-pan, and a JSON / YAML tool that

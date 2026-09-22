@@ -48,10 +48,10 @@ describe("focus scope helpers", () => {
       expected: "history",
     },
     {
-      name: "app panel still wins over everything",
+      name: "the Tools / Search tab content wins over #content",
       closest: {
-        "#app-panel": true,
-        "#history-panel, .gdp-file-history-panel": true,
+        "#tools-sheet, #search-sheet": true,
+        "#content": true,
       },
       expected: "panel",
     },

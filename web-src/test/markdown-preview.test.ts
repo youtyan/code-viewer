@@ -464,7 +464,7 @@ describe("markdown preview", () => {
   });
 
   // TOC の高さは「本文が使える高さ」(--content-h) から導く。100vh から直接引くと
-  // 下パネルが開いたときに画面外へはみ出す。
+  // 固定物 (最下段など) の高さが変わったときに画面外へはみ出す。
   //
   // 生文字列ではなくカスケードを解決して見るのは、同じ文字列が別の規則にも現れると
   // 黙って無関係な規則を守り始めるため。実際この検査は以前 .app-panel の max-height を
@@ -473,15 +473,15 @@ describe("markdown preview", () => {
     // デスクトップ既定の見た目を見る。@media の上書きは対象外。
     const rules = baseRules(loadStyleSheet());
     // body から見た値を使う。カスタムプロパティの var() は宣言した要素で確定するので、
-    // ページごとの --chrome-h も docked の --app-panel-visible-height も body に載る。
+    // ページごとの --chrome-h も表示密度の上書きも body に載る。
     const bodyVariables = cascadedDeclarations(
       rules,
       (selector) =>
         selector === ":root" || selector === "html" || selector === "body",
     );
 
-    // --content-h を :root だけで宣言すると、body 側の上書きが一切届かず、
-    // docked にしても本文の下端がパネルの裏に入る。実際にその事故を起こした。
+    // --content-h を :root だけで宣言すると、body 側の上書きが一切届かない
+    // (下パネルがあった頃、本文の下端がパネルの裏に入る事故を実際に起こした)。
     const rootOnly = cascadedDeclarations(
       rules,
       (selector) => selector === ":root",
@@ -500,17 +500,17 @@ describe("markdown preview", () => {
     const maxHeight = toc.get("max-height");
     if (!maxHeight) throw new Error("Missing .gdp-markdown-toc max-height");
 
-    // 下パネルが占有する高さを変えると TOC の上限も変わること。
+    // 最下段 (--statusbar-h) の高さを変えると TOC の上限も変わること。
     // 100vh からの直接引き算に戻すと、この 2 つが同じ値になって落ちる。
-    const panelClosed = resolveVar(
+    const shortFooter = resolveVar(
       maxHeight,
-      new Map(bodyVariables).set("--app-panel-visible-height", "0px"),
+      new Map(bodyVariables).set("--statusbar-h", "0px"),
     );
-    const panelOpen = resolveVar(
+    const tallFooter = resolveVar(
       maxHeight,
-      new Map(bodyVariables).set("--app-panel-visible-height", "320px"),
+      new Map(bodyVariables).set("--statusbar-h", "320px"),
     );
-    expect(panelClosed).not.toBe(panelOpen);
+    expect(shortFooter).not.toBe(tallFooter);
   });
 
   test("preview/code tabs can hide either rendered surface despite display-specific CSS", () => {

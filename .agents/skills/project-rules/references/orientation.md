@@ -89,33 +89,14 @@
 再起動したときはコンソールに `server source changed; restarting preview server` が出る。
 **出ていないなら再起動していない。**
 
-## 下パネル（Tools / Search）の 2 モード
+## Tools と Search はタブ
 
-画面下のパネルの中身は **Tools と Search だけ**。ターミナルはメインの面のタブにあり、
-下パネルには置かない。開閉の保存キー `APP_SETTINGS.terminalPanelOpen` は、以前ターミナルを
-置いていた頃の名前を互換のために残したもので、いまは下パネル全体の開閉を表す。
-
-下パネルには**仕組みが根本的に違う 2 モード**がある。どちらの話をしているかを
-決めずにレイアウトを触ると必ず壊れる。切り替えは `[data-panel-layout]` のボタン、
-保存先は `APP_SETTINGS.appPanelDocked`、body の `app-panel-docked` クラスで表現される。
-
-| | **docked（画面内）** | **overlay（重ねる）** |
-|---|---|---|
-| body クラス | `app-panel-docked` あり | なし |
-| 考え方 | 本文とパネルで**画面を分け合う** | パネルが本文の**上に浮く** |
-| `--app-panel-visible-height` | パネルの実高さ（タブ列のみなら `--app-panel-tabbar-height`） | **`0px`（固定）** |
-| `--content-h` | パネル分が引かれる | **引かれない**（画面いっぱい） |
-| `#content` | `height: var(--content-h)` + `overflow: auto` の**スクロール容器** | 通常フロー。ページ側がスクロールする |
-| `#content` の `padding-bottom` | 使わない | **タブ列ぶん（36px）固定。パネル高さに追従させない** |
-| 本文の扱い | パネルと**場所を分け合う**ので短くなる | **パネルを閉じているときと完全に同じ。パネルが上に乗るだけ** |
-
-### 判定基準
-
-> **重ねる: パネルを開いても・引き伸ばしても・閉じても、本文の表示が 1px も変わらない。**
-> 高さだけでなく余白・位置・スクロール量も含む。
-
-パネルが本文の一部を覆うのは仕様。覆われた部分は、パネルを縮める／閉じるか、その箱の中を
-スクロールして見る。覆われていることを理由に本文側を動かさない。
+画面下のパネルは無い。Tools と Search はメインの面の page のタブ（`PAGE_KINDS`、左の面だけ）で、
+route は `/tools?tool=<道具>` と `/search?q=<検索語>`。中身の箱（`#tools-sheet` /
+`#search-sheet`）は agents と同じ「離れられる画面」の形で `#content` の代わりに出る。
+下パネルだった頃の URL（`?tools=` / `?results=`）は `legacyPanelRoute`（`core/routes.ts`）が
+このタブの route に読み替える。`APP_SETTINGS.terminalPanelOpen` は保存値の形を変えないために
+残した値で、誰も読まない。
 
 ## 既にあるもの（再利用の地図）
 

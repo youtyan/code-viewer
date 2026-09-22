@@ -276,8 +276,8 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "toggle-sidebar", key: "b" },
   { action: "toggle-terminal-panel", key: "`", ctrl: true },
   // 名前は下パネルにターミナルがあった頃のまま (保存した割り当てを壊さない)。
-  // いまは「＋」のメニュー (新しいシェル・セッション) を開く。下パネル
-  // (Tools / Search) の入力欄からも開けるよう、ここだけ入力欄でも通す。
+  // いまは「＋」のメニュー (新しいシェル・セッション) を開く。Tools / Search の
+  // タブの入力欄からも開けるよう、ここだけ入力欄でも通す。
   {
     action: "toggle-terminal-panel",
     key: "`",

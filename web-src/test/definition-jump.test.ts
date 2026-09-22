@@ -512,7 +512,7 @@ function setupDefinitionFlow(
     loadSourceShikiHighlighter: async () => null,
     sourceShikiLines: () => null,
     openMatch: (match) => opened.push(match),
-    openSearchSheet: (query) => searchSheets.push(query),
+    openSearch: (query) => searchSheets.push(query),
     caretFromPoint: () => ({ node: textNode, offset: 3 }),
   });
   jump.install(content);

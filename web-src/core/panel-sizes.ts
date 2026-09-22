@@ -19,13 +19,6 @@ export const SIDEBAR_WIDTH: PanelSize = { default: 240, min: 180, max: 900 };
  */
 export const HISTORY_WIDTH: PanelSize = { default: 560, min: 220, max: 800 };
 
-/** 画面下のパネル (Terminal / Tools / Search) の高さ。 */
-export const APP_PANEL_HEIGHT: PanelSize = {
-  default: 210,
-  min: 160,
-  max: 1400,
-};
-
 export function clampPanelSize(size: PanelSize, value: number): number {
   return Math.max(size.min, Math.min(size.max, value));
 }

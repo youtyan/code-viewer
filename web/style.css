@@ -141,16 +141,8 @@
   --sidebar-restore-rail-w: 44px;
   --annotation-panel-w: 380px;
   --journal-task-editor-w: 380px;
-  --app-panel-tabbar-height: 36px;
-  /* 下パネルが本文から奪っている高さ。既定は 0 で、docked のときだけ
-     body 側で実際の値に上書きされる (§ body.app-panel-docked)。 */
-  --app-panel-visible-height: 0px;
-  /* 下パネルをどれだけ引き伸ばしても、その上に必ず残す本文の高さ。 */
-  --app-panel-min-content-h: 40px;
-
-  /* --app-panel-max-h と --content-h、--chrome-left と --chrome-bottom は、
-     ここ (:root) ではなく body 側で定義する。理由は html, body ブロックの
-     コメントを見ること。 */
+  /* --content-h と --chrome-left と --chrome-bottom は、ここ (:root) ではなく
+     body 側で定義する。理由は html, body ブロックのコメントを見ること。 */
 
   /* ファイル詳細ページで、本文の中に居座るものの高さ。パンくず・
      Code/Blame/History のタブ・その下の情報バー・余白の合計。
@@ -361,30 +353,18 @@ html, body {
      値として継承される。使う場所で解決し直されはしない。
      つまり :root に置くと、body 側の上書き
        - ページごとの --chrome-h (body.gdp-*-page)
-       - docked のときの --app-panel-visible-height (body.app-panel-docked)
        - 表示密度ごとの --global-header-h (body[data-sidebar-font-size])
-     がどれも反映されない。実際 :root に置いていたときは、docked にしても
-     --content-h がパネル 0px・ツールバー込みのままで、本文の下端がパネルの裏に
-     入っていた。
-
-     上書きは全て body に載るので、この 2 つも body で定義する。 */
-  --app-panel-max-h: calc(100vh - var(--global-header-h) - var(--chrome-bottom) - var(--app-panel-min-content-h));
-  /* 下パネルは閉じていてもタブ列 (--app-panel-tabbar-height) が画面の下端に乗り、
-     重ねる表示でも #content はその分の padding-bottom を持つ。だから本文が使える
-     高さは、パネルが占める高さとタブ列の大きいほうを引いたもの。ここで引かないと、
-     この高さで箱を作る画面 (Data・Work log・全体ボード) がタブ列の分だけ窓から
-     はみ出す (重ねる表示の Data で 36px の縦のスクロールが出ていた)。 */
-  --content-h: calc(100vh - var(--chrome-h) - max(var(--app-panel-visible-height), var(--app-panel-tabbar-height)) - var(--chrome-bottom));
+     がどれも反映されない。上書きは全て body に載るので、T2 も body で定義する。 */
+  --content-h: calc(100vh - var(--chrome-h) - var(--chrome-bottom));
   /* 横と下の固定物が占めている長さ。左端に付く固定物 (上の行・ツールバー・
-     ファイルのツリー・下パネル…) は left に、下端に付く固定物は bottom に、
+     ファイルのツリー…) は left に、下端に付く固定物は bottom に、
      これだけを読む。左や下に固定物を足す / 消すときはこの 2 行に項を足す
      だけで、消費側は触らない (ui-layout.md の「固定物を足す / 消すときの型」)。 */
   --chrome-left: var(--nav-w);
   --chrome-bottom: var(--statusbar-h);
-  /* メインの面のターミナルのタブの箱の下端。最下段と下パネルの上。画面内
-     (docked) はパネルの実高さ、重ねるときもパネルの見出しの行 (畳んでいても
-     出ている) の上で止め、端末の最下行 (tmux の状態の行など) を覆わせない。 */
-  --main-bottom: calc(var(--chrome-bottom) + max(var(--app-panel-visible-height), var(--app-panel-tabbar-height)));
+  /* メインの面の箱の下端。最下段の上 (下パネルは無くなり、Tools と Search は
+     タブ)。消費側 (面の箱) はこの名前だけを読む。 */
+  --main-bottom: var(--chrome-bottom);
   /* メインの面の箱 (.main-pane-host) の高さ。右の面のソース表示は、本文の
      --content-h の代わりにこれで箱を作る (.main-pane-source)。 */
   --main-pane-h: calc(100vh - var(--global-header-h) - var(--main-bottom));
@@ -3790,15 +3770,15 @@ body.gdp-diff-page #diff::after {
 .empty.hidden { display: none; }
 /* 入口の下で、このプロジェクトの裏のプロセスが止まった・起動中のとき
    (views/backend-state.ts)。中央の面 (タブ列の下・左のサイドバーの右・
-   下のパネルの上) を空表示で覆い、各画面の取得の失敗を見せない。タブ列
-   (#main-tabs) と下のパネル (#app-panel) は覆わないので、z-index はその
-   2 つ (60) より下、画面の上の行 (#topbar 50) より上。 */
+   最下段の上) を空表示で覆い、各画面の取得の失敗を見せない。タブ列
+   (#main-tabs) は覆わないので、z-index はそれ (60) より下、画面の上の行
+   (#topbar 50) より上。 */
 .empty.backend-state {
   position: fixed;
   top: var(--global-header-h);
   left: var(--page-left);
   right: var(--page-right);
-  bottom: calc(var(--chrome-bottom) + var(--app-panel-visible-height));
+  bottom: var(--chrome-bottom);
   z-index: 55;
   margin: 0;
   background: var(--bg);
@@ -4762,9 +4742,8 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-source-virtual {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  /* 下パネルを docked で開いている間は、その高さぶん本文が縮んでいる。
-     引かないと、この箱だけが画面の高さのまま残って下端がパネルの裏に
-     入り、最後の数十行が読めなくなる。
+  /* 本文の高さ (--content-h) から、この箱より上にあるものを引く。引かないと
+     下端が最下段の裏に入り、最後の数十行が読めなくなる。
 
      136px は、この箱より上にあるもの (パンくず・タブ・Virtual mode の情報
      バー) と下の余白ぶん。実測で 96px では最終行が数 px 欠けたので広げた。 */
@@ -15025,218 +15004,12 @@ body.db-resizing {
   background: var(--attn, #9a6700);
 }
 
-/* ===== 画面下のパネル (Tools / Search) =====
-   画面下に固定し、Overlay / Docked を切り替えられる。中身はタブで 1 つだけ
-   出す。
-   ここに入る #tools-sheet は、右ドロワーだった頃の id を
-   そのまま使っている (各ビューの実装を変えないため)。位置と大きさだけを
-   パネル側で決め直す。 */
-.app-panel {
-  position: fixed;
-  left: var(--chrome-left);
-  right: 0;
-  bottom: var(--chrome-bottom);
-  height: var(--app-panel-tabbar-height);
-  /* パネル自身の上限。式の中身と、自分を自分から引いてはいけない理由は
-     :root の --app-panel-max-h に書いてある。 */
-  max-height: var(--app-panel-max-h);
-  background: var(--bg, #fff);
-  border-top: 1px solid var(--border, #d0d7de);
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  box-sizing: border-box;
-}
-.app-panel.app-panel-open {
-  height: var(--app-panel-height, 210px);
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.12);
-}
-.app-panel[hidden] {
-  display: none;
-}
-/* 閉じていてもタブ列はフッターとして残るので、その高さぶんは常に空ける。
-
-   「重ねる」はパネルを閉じているときと同じ本文表示のまま、パネルが上に乗るだけ。
-   だからパネルを開いても・引き伸ばしても、本文側の余白は変えない。
-   ここでパネルの高さぶん余白を広げると、フッターを動かすたびに本文の位置と
-   スクロール量が動いてしまい、「重ねる」ではなくなる。
-   覆われた部分は、パネルを縮めるか閉じるか、その箱の中をスクロールして見る。 */
-body:not(.app-panel-docked):has(.app-panel) #content {
-  padding-bottom: 36px;
-}
-/* 閉じたときに消すのは中身と、その中身のための操作だけ。タブ列は残す。 */
-.app-panel:not(.app-panel-open) .app-panel-resizer,
-.app-panel:not(.app-panel-open) .app-panel-bodies,
-.app-panel:not(.app-panel-open) .app-panel-close {
-  display: none;
-}
-/* 上端の掴みしろ。ドロワーのハンドルと同じ作り。 */
-.app-panel-resizer {
-  position: absolute;
-  top: -4px;
-  left: 0;
-  right: 0;
-  height: 8px;
-  cursor: row-resize;
-  touch-action: none;
-  z-index: 1;
-}
-.app-panel-resizer::before {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 50%;
-  width: 48px;
-  height: 4px;
-  transform: translateX(-50%);
-  border-radius: 2px;
-  background: var(--fg-muted, #57606a);
-  opacity: 0.45;
-}
-.app-panel-resizer:hover,
-.app-panel-resizing .app-panel-resizer {
-  background: var(--accent-muted, rgba(9, 105, 218, 0.2));
-}
-.app-panel-resizer:hover::before,
-.app-panel-resizing .app-panel-resizer::before {
-  background: var(--accent, #0969da);
-  opacity: 1;
-}
-.app-panel-resizer:focus-visible {
-  outline: 2px solid var(--accent, #0969da);
-  outline-offset: -2px;
-}
-/* タブ列。ここが Terminal / Tools のメニューを兼ねる。 */
-.app-panel-tabs {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-  height: var(--app-panel-tabbar-height);
-  box-sizing: border-box;
-  padding: 0 8px;
-  border-bottom: 1px solid var(--border, #d0d7de);
-  background: var(--bg-soft, #f6f8fa);
-}
-.app-panel-tab {
-  appearance: none;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--fg-muted, #57606a);
-  font: inherit;
-  font-size: 12px;
-  padding: 0 12px;
-  cursor: pointer;
-}
-.app-panel-tab:hover {
-  color: var(--fg, #1f2328);
-}
-.app-panel-tab[aria-selected="true"] {
-  color: var(--fg, #1f2328);
-  font-weight: 600;
-  border-bottom-color: var(--accent, #0969da);
-}
-.app-panel-spacer {
-  flex: 1 1 auto;
-}
-.app-panel-layout-switch {
-  align-self: center;
-  height: 24px;
-  margin-right: 4px;
-}
-.app-panel-layout-switch button {
-  min-width: 60px;
-  padding-inline: 8px;
-  font-size: 11px;
-}
-.app-panel-close {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--fg-muted, #57606a);
-  font: inherit;
-  font-size: 15px;
-  line-height: 1;
-  padding: 0 10px;
-  cursor: pointer;
-}
-.app-panel-close:hover {
-  color: var(--fg, #1f2328);
-}
-.app-panel-bodies {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-}
-
-/* Docked は本文とパネルで表示領域を分ける。パネル自体は画面下に固定したまま、
-   本文と左右の固定パネルの下端を同じ位置まで縮める。 */
-body.app-panel-docked {
-  --app-panel-visible-height: var(--app-panel-tabbar-height);
-  overflow: hidden;
-}
-body.app-panel-docked:has(.app-panel.app-panel-open) {
-  --app-panel-visible-height: min(
-    var(--app-panel-height, 210px),
-    var(--app-panel-max-h)
-  );
-}
-/* #content がスクロール容器になるかはページの属性で決まる。属性は app.ts の
-   setPageMode がページクラスと同じ場所で立てる。ページクラスの列挙はしない
-   (ui-layout.md「ページクラスの列挙をレイアウト規則に書かない」)。 */
-body.app-panel-docked[data-content-scrolls-when-docked] #content {
-  position: relative;
-  top: var(--chrome-h);
-  height: var(--content-h);
-  min-height: 0;
-  padding-top: 0;
-  overflow: auto;
-}
-
-/* Keep the normal page-specific top gap without putting padding on the
-   scroll container. A sticky child otherwise adds that padding to its top
-   offset and leaves scrolled content visible above the file header. */
-body.app-panel-docked[data-content-scrolls-when-docked] #diff {
-  padding-top: var(--content-top-gap);
-}
-body.app-panel-docked[data-content-scrolls-when-docked] .d2h-file-header,
-body.app-panel-docked[data-content-scrolls-when-docked] .gdp-shell-header,
-body.app-panel-docked[data-content-scrolls-when-docked] .gdp-file-detail-sticky {
-  top: 0;
-}
-body.app-panel-docked[data-content-scrolls-when-docked] .gdp-markdown-toc {
-  top: 16px;
-}
-body.app-panel-docked[data-content-scrolls-when-docked] .gdp-help-nav {
-  top: 20px;
-}
-body.app-panel-docked[data-content-scrolls-when-docked] .d2h-file-wrapper,
-body.app-panel-docked[data-content-scrolls-when-docked] .gdp-file-shell {
-  scroll-margin-top: 8px;
-}
-body.app-panel-docked #sidebar,
-body.app-panel-docked #sidebar-resizer,
-body.app-panel-docked #history-panel,
-body.app-panel-docked #history-resizer,
-body.app-panel-docked #annotation-panel {
-  bottom: calc(var(--chrome-bottom) + var(--app-panel-visible-height));
-}
-body.app-panel-docked .app-panel.app-panel-open {
-  box-shadow: none;
-}
-/* docked のときに `.journal-page` / `.db-root` を `height: 100%` で上書きしない。
-   この 2 ページは data-content-scrolls-when-docked を持たず、
-   親の `#content` が高さを持たないので、100% は解決先を失って auto に落ち、ページ
-   全体が中身の高さまで縮む (中身が空のとき画面途中で切れる形で表面化した)。両者は
-   既に `height: var(--content-h)` を持ち、--content-h は docked ではパネル占有分が
-   引かれた値になるので、そもそも上書きが要らない。検査は
-   `web-src/test/docked-page-height.test.ts`。 */
-
+/* Tools と Search のタブの中身 (/tools・/search)。本文 (#content) の中に置き、
+   本文が使える高さ (--content-h) の箱にする。画面の余白・ツールバーを隠すのは
+   agents と同じ規則 (§ Agents)。 */
 .tools-sheet,
 .search-sheet {
-  flex: 1 1 auto;
+  height: var(--content-h);
   min-width: 0;
   min-height: 0;
   background: var(--bg, #fff);
@@ -15244,8 +15017,8 @@ body.app-panel-docked .app-panel.app-panel-open {
   flex-direction: column;
   box-sizing: border-box;
 }
-/* パネルの中ではタブで 1 つだけ出す。閉じている側は本当に消す
-   (右ドロワーの頃はスライドのために display を残していた)。 */
+/* 画面にいないときは本当に消す (右ドロワーの頃はスライドのために display を
+   残していた)。 */
 .tools-sheet[hidden],
 .search-sheet[hidden] {
   display: none;
@@ -16279,15 +16052,25 @@ html[data-theme="dark"] .tools-code span[style] {
    ============================================================ */
 
 .gdp-agents-page #topbar,
-.gdp-agents-page #query-history-panel {
+.gdp-agents-page #query-history-panel,
+.gdp-tools-page #topbar,
+.gdp-tools-page #query-history-panel,
+.gdp-search-page #topbar,
+.gdp-search-page #query-history-panel {
   display: none !important;
 }
 
-body.gdp-agents-page {
+/* Tools と Search のタブ (/tools・/search) も、全体ボードと同じく自分の箱を
+   本文に置き、ツールバーを持たない。 */
+body.gdp-agents-page,
+body.gdp-tools-page,
+body.gdp-search-page {
   --chrome-h: var(--global-header-h);
 }
 
-.gdp-agents-page #content {
+.gdp-agents-page #content,
+.gdp-tools-page #content,
+.gdp-search-page #content {
   margin-left: 0;
   padding: var(--chrome-h) 0 0;
   min-height: 0;
@@ -17137,7 +16920,7 @@ body.main-split .main-tabs-pane[data-side="left"] {
    前面のタブがターミナルか画像 (右の面ならファイルも) のとき、その面の位置 (タブ列の下・左の列の右・
    本文の下端の上) に重ねて出す。左の列 (木) は覆わない。左の前面が route のタブか何も選んでいないときは出さない
    (下の本文が見える)。画面ごとのツールバー (50) より上、
-   上の行・タブ列・下パネル (60) より下。 */
+   上の行・タブ列 (60) より下。 */
 .main-pane-host {
   position: fixed;
   top: var(--global-header-h); left: var(--page-left); right: 0;
@@ -17791,43 +17574,6 @@ body.gdp-sidebar-hidden .left-rail {
   border-right-color: var(--color-working);
 }
 
-/* ---- 下パネル (Terminal / Tools / Search) ----
-   地はターミナルの色。タブ列は上の行と同じ作り (文字の明るさと下の線)。 */
-.app-panel {
-  background: var(--color-term);
-  border-top: 1px solid var(--color-line-soft);
-}
-.app-panel.app-panel-open {
-  box-shadow: 0 -12px 32px var(--color-shadow);
-}
-.app-panel-tabs {
-  gap: 0;
-  padding: 0 var(--pad-face) 0 calc(var(--pad-text) - var(--space-3));
-  border-bottom: 1px solid var(--color-line-soft);
-  background: var(--color-ground);
-}
-.app-panel-tab {
-  padding: 0 var(--space-3);
-  border-bottom-width: 2px;
-  color: var(--color-text-2);
-  font-size: var(--ui-font-base);
-}
-.app-panel-tab:hover {
-  color: var(--color-text);
-}
-.app-panel-tab[aria-selected="true"] {
-  color: var(--color-text);
-  border-bottom-color: var(--color-accent);
-}
-.app-panel-close {
-  color: var(--color-text-3);
-}
-.app-panel-close:hover {
-  color: var(--color-text);
-}
-.app-panel-resizer::before {
-  background: var(--color-text-3);
-}
 .terminal-screen {
   background: var(--color-term);
 }
@@ -18299,54 +18045,6 @@ body.gdp-files-column-page #sidebar .sb-head {
 }
 #sidebar .sb-head .ref-selector.ref-selector-in-grid[data-default-ref="true"] .ref-selector-caret {
   display: none;
-}
-
-/* ---- 下パネルの見出しの細い 1 行 ----
-   左: Tools / Search のタブ。右: 「⋯」と、開く / 畳むの山形。 */
-.app-panel-tabs {
-  align-items: center;
-  gap: var(--space-1);
-}
-.app-panel-tab {
-  height: 100%;
-}
-.app-panel-layout-switch[hidden] {
-  display: none;
-}
-.app-panel-icon {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: var(--ui-control-sm);
-  height: var(--ui-control-sm);
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-3);
-  cursor: pointer;
-}
-.app-panel-icon:hover,
-.app-panel-icon.active {
-  background: var(--color-raised);
-  color: var(--color-text);
-}
-.app-panel-icon:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-.app-panel-icon svg {
-  width: var(--icon-md);
-  height: var(--icon-md);
-  display: block;
-  transition: transform var(--motion-fast);
-}
-/* 畳んでいる間も山形は出す (上向き。押すとターミナルが開く)。 */
-.app-panel:not(.app-panel-open) .app-panel-close {
-  display: inline-grid;
-}
-.app-panel:not(.app-panel-open) .app-panel-close svg {
-  transform: rotate(180deg);
 }
 
 /* ---- ターミナル: 画面の枠 ---- */
@@ -19520,7 +19218,7 @@ button.agents-account-name:hover {
    アカウントの間だけ薄い線で区切る。位置 (left / bottom) は JS が決める。 */
 .usage-popover {
   position: fixed;
-  /* ヘッダのプロジェクトの切替と同じ層 (サイドバー・下パネルより上)。 */
+  /* ヘッダのプロジェクトの切替と同じ層 (サイドバーより上)。 */
   z-index: 1000;
   display: flex;
   flex-direction: column;

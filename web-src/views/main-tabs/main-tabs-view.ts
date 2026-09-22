@@ -261,6 +261,8 @@ export function routeTarget(route: AppRoute): TabTarget | null {
     case "database":
     case "journal":
     case "agents":
+    case "tools":
+    case "search":
     case "help":
       return { kind: "page", page: route.screen };
     case "repo":

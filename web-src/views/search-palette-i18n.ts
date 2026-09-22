@@ -68,11 +68,10 @@ export type SearchPaletteText = CodePreviewText & {
   searchFailed: (error: string) => string;
   savingSelection: string;
   selectionSaveFailed: (error: string) => string;
-  // Results sheet (bottom panel tab that keeps a grep result list open).
+  // Results sheet (the Search tab that keeps a grep result list open).
   pinResults: string;
   pinResultsTitle: string;
   resultsTitle: string;
-  resultsOpen: string;
   resultsRun: string;
   resultsPlaceholder: string;
   resultsIdle: string;
@@ -103,6 +102,8 @@ export type PaletteActionId =
   | "goto-database"
   | "goto-journal"
   | "goto-agents"
+  | "goto-tools"
+  | "goto-search"
   | "toggle-terminal-panel"
   | "toggle-sidebar"
   | "switch-project"
@@ -181,9 +182,8 @@ const EN: SearchPaletteText = {
   selectionSaveFailed: (error) => `Failed to save selection: ${error}`,
   pinResults: "Pin",
   pinResultsTitle:
-    "Keep these results open in the bottom panel while you browse (Ctrl+Enter)",
+    "Keep these results open in the Search tab while you browse (Ctrl+Enter)",
   resultsTitle: "Search",
-  resultsOpen: "Open the search results panel",
   resultsRun: "Search",
   resultsPlaceholder: "Search text (path:<dir or glob> narrows)",
   resultsIdle: "Type a search and press Enter",
@@ -212,6 +212,8 @@ const EN: SearchPaletteText = {
     "goto-database": "Go to Data",
     "goto-journal": "Go to Work log",
     "goto-agents": "Go to Agents",
+    "goto-tools": "Go to Tools",
+    "goto-search": "Go to Search",
     "toggle-terminal-panel": "Open a terminal (new shell or session)",
     "toggle-sidebar": "Toggle file sidebar",
     "switch-project": "Switch project",
@@ -289,9 +291,9 @@ const JA: SearchPaletteText = {
   savingSelection: "選択履歴を保存中...",
   selectionSaveFailed: (error) => `選択履歴を保存できませんでした: ${error}`,
   pinResults: "固定",
-  pinResultsTitle: "この結果を下パネルに出したまま閲覧を続ける (Ctrl+Enter)",
+  pinResultsTitle:
+    "この結果を「検索」タブに出したまま閲覧を続ける (Ctrl+Enter)",
   resultsTitle: "検索",
-  resultsOpen: "検索結果パネルを開く",
   resultsRun: "検索",
   resultsPlaceholder:
     "検索するコード（path:<ディレクトリ or glob> で絞り込み）",
@@ -322,6 +324,8 @@ const JA: SearchPaletteText = {
     "goto-database": "データストアへ移る",
     "goto-journal": "ワークログへ移る",
     "goto-agents": "エージェントへ移る",
+    "goto-tools": "ツールへ移る",
+    "goto-search": "検索へ移る",
     "toggle-terminal-panel": "ターミナルを開く (新しいシェル・セッション)",
     "toggle-sidebar": "ファイルの列を出す・隠す",
     "switch-project": "プロジェクトを切り替える",

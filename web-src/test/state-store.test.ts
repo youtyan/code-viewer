@@ -92,27 +92,15 @@ describe("state store", () => {
     });
   });
 
-  test.each([
-    {
-      name: "keeps docked panel mode",
-      input: true,
-      expected: { version: 1, appPanelDocked: true },
-    },
-    {
-      name: "keeps overlay panel mode",
-      input: false,
-      expected: { version: 1, appPanelDocked: false },
-    },
-    {
-      name: "drops a non-boolean panel mode",
-      input: "docked",
-      expected: { version: 1 },
-    },
-  ])("settings panel mode sanitizer $name", async ({ input, expected }) => {
+  // 下パネルは無くなった (Tools と Search はタブ)。その表示の仕方と高さは読まない。
+  test("drops the retired bottom panel mode and height", async () => {
     await withTempProject(async (dir) => {
       expect(
-        await patchAppSettingsState(dir, { appPanelDocked: input }),
-      ).toEqual(expected);
+        await patchAppSettingsState(dir, {
+          appPanelDocked: true,
+          appPanelHeight: 320,
+        }),
+      ).toEqual({ version: 1 });
     });
   });
 

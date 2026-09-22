@@ -157,7 +157,7 @@ export type DefinitionJumpDeps = {
     line: number;
     hl?: string;
   }): void;
-  openSearchSheet(query: string): void;
+  openSearch(query: string): void;
   caretFromPoint?(x: number, y: number): { node: Node; offset: number } | null;
 };
 
@@ -606,7 +606,7 @@ function createDefinitionSearchRunner(
           { kind: "separator" },
           {
             label: text.openSearchPanel,
-            onSelect: () => deps.openSearchSheet(trigger.symbol),
+            onSelect: () => deps.openSearch(trigger.symbol),
           },
         ];
         ownMenu = openSearchMenu(trigger, items, {

@@ -1,6 +1,7 @@
 // タブ列の絵。種類ごとに core/icons.ts の既存の絵を当てるだけ。
 import {
   APPS_16_PATH,
+  BOOK_16_PATH,
   FILE_16_PATH,
   FOLDER_ICON_PATHS,
   GEAR_16_PATH,
@@ -9,6 +10,7 @@ import {
   PENCIL_16_PATH,
   PLUS_16_PATH,
   PULSE_16_PATH,
+  SEARCH_16_PATH,
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
   TERMINAL_16_PATHS,
@@ -37,6 +39,9 @@ const ICONS: Record<
   database: APPS_16_PATH,
   journal: PENCIL_16_PATH,
   agents: TERMINAL_16_PATHS,
+  // Markdown / Mermaid / JSON の変換 (道具の絵は無いので、文書の絵)。
+  tools: BOOK_16_PATH,
+  search: SEARCH_16_PATH,
   help: GEAR_16_PATH,
   file: FILE_16_PATH,
   image: IMAGE_16_PATH,

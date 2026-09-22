@@ -33,6 +33,8 @@ export const PAGE_KINDS = [
   "database",
   "journal",
   "agents",
+  "tools",
+  "search",
   "help",
 ] as const;
 

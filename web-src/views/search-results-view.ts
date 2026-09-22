@@ -1,7 +1,7 @@
 import { apiUrl } from "../core/api-url";
 // Search results sheet: the result list of the Ctrl+G palette, kept open in the
-// bottom panel (the tab next to Tools) so it survives opening
-// files. The query travels in the URL (?results=) and is re-run on reload.
+// Search tab of the main area so it survives opening files. The query travels
+// in the URL (/search?q=) and is re-run on reload.
 // Toggles (regex / match case / whole word / no test) are the same persisted
 // settings the palette uses, so both always search the same way.
 

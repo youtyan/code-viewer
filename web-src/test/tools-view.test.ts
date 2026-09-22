@@ -219,8 +219,8 @@ describe("tools overlay shell", () => {
     expect(tabLabels()).toEqual(["Markdown", "Mermaid", "JSON / YAML"]);
   });
 
-  // 閉じるボタンと見出しは下パネルのタブ列が持つようになったので、この
-  // ビュー自身は持たない。パネル側の開閉は app.ts の配線が担う。
+  // 閉じるボタンと見出しはメインの面のタブが持つので、このビュー自身は
+  // 持たない。タブの開閉は app.ts の配線が担う。
   test("does not render its own title or close button", async () => {
     await createView().open();
     expect(document.querySelector(".tools-close")).toBeNull();
@@ -288,7 +288,7 @@ describe("tools overlay drafts", () => {
     expect(textareaFor("mermaid").value).toBe("");
   });
 
-  // 幅は右ドロワーだった頃の設定。下パネルは高さだけを持つので、古い保存値が
+  // 幅は右ドロワーだった頃の設定。いまは幅を持たないので、古い保存値が
   // 残っていても読み飛ばす (型には残してあるが誰も使わない)。
   test("ignores a stored drawer width", async () => {
     storedState = { version: 1, width: 900 };

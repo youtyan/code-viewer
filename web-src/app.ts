@@ -26,7 +26,6 @@ import {
   shouldAutoLoadForRoute,
 } from "./core/catch-up";
 import { changedPathsCoverPath } from "./core/changed-paths";
-import { attachDragResizer } from "./core/drag-resizer";
 import {
   errorWithCause,
   errorWithCauses,
@@ -58,15 +57,14 @@ import type { FileRevisionNeighbors } from "./core/history";
 import {
   APPS_16_PATH,
   ARROW_RIGHT_16_PATH,
+  BOOK_16_PATH,
   CHEVRON_DOWN_12_PATH,
-  CHEVRON_DOWN_16_PATH,
   COMMENT_DISCUSSION_16_PATH,
   COPY_16_PATHS,
   FOLDER_ICON_PATHS,
   GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
   iconSvg,
-  KEBAB_16_PATH,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
   NEXT_16_PATHS,
@@ -98,7 +96,6 @@ import { isNativeLinkClick } from "./core/link-click";
 import type { PaneSide, TabTarget } from "./core/main-tabs";
 import { createNetworkActivityTracker } from "./core/network-activity";
 import {
-  APP_PANEL_HEIGHT,
   clampPanelSize,
   HISTORY_WIDTH,
   SIDEBAR_WIDTH,
@@ -108,13 +105,12 @@ import {
   type AppRoute,
   buildRoute,
   type DiffRange,
+  legacyPanelRoute,
   parseDoctorOverlay,
   parseOpenPaneOverlay,
   parsePaneOverlay,
   parseRoute,
-  parseSearchResultsOverlay,
   parseTerminalOverlay,
-  parseToolsOverlay,
   type SourceFileTarget,
   type SourceLineTarget,
   screenToLeave,
@@ -123,14 +119,11 @@ import {
   withDoctorOverlay,
   withOpenPaneOverlay,
   withPaneOverlay,
-  withSearchResultsOverlay,
   withTerminalOverlay,
-  withToolsOverlay,
 } from "./core/routes";
 import { rememberPaletteSelection } from "./core/search-palette";
 import type { ShellListResponse, ShellSessionId } from "./core/shell";
 import { sourceInternalPathKind } from "./core/source-meta";
-import { readStoredSize, reportStoredSizeFailure } from "./core/stored-size";
 import {
   type TerminalImageRef,
   type TerminalImagesResponse,
@@ -138,7 +131,7 @@ import {
   validateTerminalImageResponseUrls,
 } from "./core/terminal-images";
 import { clampTerminalFontSize } from "./core/tmux";
-import type { ToolId } from "./core/tools";
+import { isToolId, type ToolId } from "./core/tools";
 import {
   type AppSettingsState,
   type DiffCardElement,
@@ -1212,7 +1205,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     VIEW_STATE = view;
   }
 
+  /**
+   * 下パネルがあった頃の URL (?tools= / ?results=) を、そのタブの URL
+   * (/tools?tool= / /search?q=) に書き換える。URL から route を読む入口
+   * (読み込み・戻る進む) の最初に呼ぶ。
+   */
+  function upgradeLegacyPanelUrl(): void {
+    const legacy = legacyPanelRoute(window.location.search, savedRange());
+    if (!legacy) return;
+    history.replaceState(
+      history.state,
+      "",
+      buildRoute(legacy) + window.location.hash,
+    );
+  }
+
   function routeFromLocation(): AppRoute {
+    upgradeLegacyPanelUrl();
     const savedLanguage =
       viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
     const parsedRoute = parseRoute(
@@ -1284,7 +1293,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     applySidebarHidden(STATE.sidebarHidden, { persist: false });
     applyHistoryWidth(STATE.historyWidth, false);
     applySidebarWidth(STATE.sbWidth, { persist: false });
-    syncAppPanelLayout();
     ANNOTATIONS_UI?.applyAnnotationPanelWidth(
       APP_SETTINGS.annotationPanelWidth ?? 380,
       false,
@@ -1292,7 +1300,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     setLayout(STATE.layout, false);
     applyTheme();
     APP_NAV?.sync();
-    applyAppPanelHeight(savedAppPanelHeight());
     AGENTS_SIDEBAR?.syncCollapsed();
     localizeViewerChrome();
   }
@@ -1799,7 +1806,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
       void renderStandaloneSource({ path, ref });
     },
-    openSearchSheet,
+    openSearch: (query) => openSearchPage(query),
   });
   DEFINITION_JUMP.install($("#content"));
 
@@ -1990,7 +1997,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.hideTests = hidden;
       applyHideTests();
     },
-    openSearchResults: (query) => openSearchSheet(query),
+    openSearchResults: (query) => openSearchPage(query),
     getPaletteCommands: () => paletteCommands(),
   });
   const { openSearchPalette, isPaletteOpen, paletteMode, clearRepoFileCache } =
@@ -2008,21 +2015,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         | "worktree"
         | "agents"
         | "tools"
+        | "search"
         | "help",
         string
       >;
-      appPanel: {
-        tabs: string;
-        layout: string;
-        overlay: string;
-        overlayTitle: string;
-        docked: string;
-        dockedTitle: string;
-        close: string;
-        /** 畳んでいるときの山形: 開く (Tools を出す)。 */
-        open: string;
-        resize: string;
-      };
       global: {
         annotations: string;
         queryHistory: string;
@@ -2180,18 +2176,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         worktree: "Worktrees",
         agents: "Agents",
         tools: "Tools",
+        search: "Search",
         help: "Settings & Help",
-      },
-      appPanel: {
-        tabs: "Panel",
-        layout: "Panel layout",
-        overlay: "Overlay",
-        overlayTitle: "Show the panel over the page",
-        docked: "Docked",
-        dockedTitle: "Keep the panel inside the window",
-        close: "Close panel",
-        open: "Open panel (Tools / Search)",
-        resize: "Resize panel height",
       },
       global: {
         annotations: "code annotations",
@@ -2580,18 +2566,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         worktree: "作業ツリー",
         agents: "エージェント",
         tools: "ツール",
+        search: "検索",
         help: "設定・ヘルプ",
-      },
-      appPanel: {
-        tabs: "パネル",
-        layout: "パネルの表示方法",
-        overlay: "重ねる",
-        overlayTitle: "本文に重ねて表示",
-        docked: "画面内",
-        dockedTitle: "本文と分けて画面内に表示",
-        close: "パネルを閉じる",
-        open: "パネルを開く (Tools / Search)",
-        resize: "パネルの高さを変更",
       },
       global: {
         annotations: "コード注釈",
@@ -3066,56 +3042,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     document
       .querySelector<HTMLElement>("#doctor-sheet")
       ?.setAttribute("aria-label", doctorTitle);
-    const toolsChrome = toolsText(STATE.language);
-    const toolsBtn =
-      document.querySelector<HTMLButtonElement>("#panel-tab-tools");
-    if (toolsBtn) {
-      toolsBtn.textContent = toolsChrome.title;
-      toolsBtn.title = toolsChrome.open;
-    }
     document
       .querySelector<HTMLElement>("#tools-sheet")
-      ?.setAttribute("aria-label", toolsChrome.title);
+      ?.setAttribute("aria-label", toolsText(STATE.language).title);
     relocalizeTools?.();
     relocalizeTerminal?.();
-    const searchChrome = searchPaletteText(STATE.language);
-    const searchTabBtn =
-      document.querySelector<HTMLButtonElement>("#panel-tab-search");
-    if (searchTabBtn) {
-      searchTabBtn.textContent = searchChrome.resultsTitle;
-      searchTabBtn.title = searchChrome.resultsOpen;
-    }
     relocalizeSearchResults?.();
-    document
-      .querySelector<HTMLElement>(".app-panel-tabs")
-      ?.setAttribute("aria-label", text.appPanel.tabs);
-    const panelLayout = document.querySelector<HTMLElement>(
-      ".app-panel-layout-switch",
-    );
-    panelLayout?.setAttribute("aria-label", text.appPanel.layout);
-    const overlayLayout = document.querySelector<HTMLButtonElement>(
-      '[data-panel-layout="overlay"]',
-    );
-    if (overlayLayout) {
-      overlayLayout.textContent = text.appPanel.overlay;
-      overlayLayout.title = text.appPanel.overlayTitle;
-    }
-    const dockedLayout = document.querySelector<HTMLButtonElement>(
-      '[data-panel-layout="docked"]',
-    );
-    if (dockedLayout) {
-      dockedLayout.textContent = text.appPanel.docked;
-      dockedLayout.title = text.appPanel.dockedTitle;
-    }
-    const panelMenu =
-      document.querySelector<HTMLButtonElement>("#app-panel-menu");
-    if (panelMenu) {
-      panelMenu.title = text.appPanel.layout;
-      panelMenu.setAttribute("aria-label", text.appPanel.layout);
-    }
-    document
-      .querySelector<HTMLElement>("#app-panel-resizer")
-      ?.setAttribute("aria-label", text.appPanel.resize);
     const copyAiContext =
       document.querySelector<HTMLButtonElement>("#copy-ai-context");
     if (copyAiContext) {
@@ -3914,21 +3846,16 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   // buildRoute は AppRoute しか知らないので、そこに乗らないオーバーレイの状態
-  // (doctor / tools / search) は現在の URL から明示的に引き継ぐ。落とすと画面を
-  // 移動した瞬間にシートの状態が URL から消える。history に積む URL とヘッダ
-  // メニューの href の両方がこれを通る必要がある。?terminal= は引き継がない:
-  // 前面のタブがターミナルでない画面へ移るので、映しているシェルは無い
-  // (ターミナルのタブが前面になるときは showPanes がそのシェルを積む)。
+  // (doctor) は現在の URL から明示的に引き継ぐ。落とすと画面を移動した瞬間に
+  // シートの状態が URL から消える。history に積む URL とヘッダメニューの href の
+  // 両方がこれを通る必要がある。?terminal= は引き継がない: 前面のタブが
+  // ターミナルでない画面へ移るので、映しているシェルは無い (ターミナルのタブが
+  // 前面になるときは showPanes がそのシェルを積む)。Tools と Search はタブ
+  // (route の画面) なので、ここでは運ばない。
   function withOverlayState(url: string): string {
-    return withSearchResultsOverlay(
-      withToolsOverlay(
-        withDoctorOverlay(
-          url,
-          parseDoctorOverlay(routePathname(), window.location.search),
-        ),
-        parseToolsOverlay(window.location.search),
-      ),
-      parseSearchResultsOverlay(window.location.search),
+    return withDoctorOverlay(
+      url,
+      parseDoctorOverlay(routePathname(), window.location.search),
     );
   }
 
@@ -4119,7 +4046,8 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 隠した #diff を戻す)。setRoute と URL からの移動の両方がここを通る。
    */
   function leaveScreen(previous: AppRoute, next: AppRoute): void {
-    switch (screenToLeave(previous, next)) {
+    const leaving = screenToLeave(previous, next);
+    switch (leaving) {
       case "database":
         DATABASE_VIEW.suspend();
         return;
@@ -4131,6 +4059,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         return;
       case "agents":
         AGENTS_VIEW?.suspend();
+        return;
+      case "tools":
+      case "search":
+        leaveToolOrSearchPage(leaving);
         return;
       case null:
         return;
@@ -4227,6 +4159,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       removeStandaloneSource();
       void AGENTS_VIEW?.enter();
     }
+    enterToolOrSearchPage();
   }
 
   // ---- Query History right-panel open/close ----
@@ -4307,29 +4240,26 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-agents-page",
       STATE.route.screen === "agents",
     );
+    document.body.classList.toggle(
+      "gdp-tools-page",
+      STATE.route.screen === "tools",
+    );
+    document.body.classList.toggle(
+      "gdp-search-page",
+      STATE.route.screen === "search",
+    );
     // 左の列: 自分の一覧を持たない画面は Files の木を出す (History・選んでいる
     // Worktrees は一覧パネル、repo / file / diff は #sidebar の自分の一覧)。
     const filesColumnRoute =
       STATE.route.screen === "journal" ||
       STATE.route.screen === "agents" ||
+      STATE.route.screen === "tools" ||
+      STATE.route.screen === "search" ||
       STATE.route.screen === "help" ||
       STATE.route.screen === "database" ||
       (STATE.route.screen === "worktree" && !STATE.route.wt);
     document.body.classList.toggle("gdp-files-column-page", filesColumnRoute);
     if (filesColumnRoute) showFilesTreeInLeftColumn();
-    // docked の下パネルと場所を分け合うとき、#content がスクロール容器になる
-    // ページ。style.css の body.app-panel-docked[data-content-scrolls-when-docked]
-    // 規則群がこの属性だけを見る (ページクラスの列挙はしない)。
-    // journal / database は自分の箱が --content-h から高さを取るので立てない。
-    document.body.toggleAttribute(
-      "data-content-scrolls-when-docked",
-      STATE.route.screen === "diff" ||
-        STATE.route.screen === "history" ||
-        STATE.route.screen === "repo" ||
-        STATE.route.screen === "file" ||
-        STATE.route.screen === "help" ||
-        STATE.route.screen === "worktree",
-    );
     // 左に --history-w の一覧パネル (#history-panel / #worktree-panel) を持つ
     // ページ。#history-resizer の表示がこの属性を見る。
     document.body.toggleAttribute(
@@ -4401,9 +4331,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function syncHeaderMenu() {
-    // Tools / Search はページ遷移ではなく下パネルの中身なので、ヘッダーの
-    // 並びには居ない。選択状態は URL (?tools= / ?results=) から決める。
-    syncAppPanel();
     document
       .querySelectorAll<HTMLAnchorElement>(ROUTE_LINK_SELECTOR)
       .forEach((link) => {
@@ -4980,8 +4907,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       quickHelpIcon.innerHTML = iconSvg("octicon-question", QUESTION_16_PATH);
     }
     const navIcons: [string, string, string | string[]][] = [
-      ["#app-panel-menu", "octicon-kebab-horizontal", KEBAB_16_PATH],
-      ["#app-panel-close", "octicon-chevron-down", CHEVRON_DOWN_16_PATH],
       ["#nav-collapse", "octicon-sidebar-collapse", SIDEBAR_HIDE_16_PATHS],
       ["#nav-expand", "octicon-sidebar-expand", SIDEBAR_SHOW_16_PATHS],
       ["#nav-board-link", "octicon-apps", APPS_16_PATH],
@@ -5049,50 +4974,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     event.preventDefault();
     toggleDoctorSheet();
   });
-  $("#panel-tab-tools")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    openToolsSheet();
-  });
-  $("#panel-tab-search")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    openSearchSheet();
-  });
-  // 見出しの行の山形: 開いていれば畳み、畳んでいれば Tools を開く。
-  $("#app-panel-close")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    if (
-      document.getElementById("app-panel")?.classList.contains("app-panel-open")
-    )
-      closeAppPanel();
-    else openToolsSheet();
-  });
-  // 見出しの行の「⋯」: 表示の仕方 (重ねる / 画面内)。
-  $("#app-panel-menu")?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    const button = event.currentTarget as HTMLElement;
-    const text = uiText().appPanel;
-    const docked = APP_SETTINGS.appPanelDocked === true;
-    const items: ContextMenuItem[] = [
-      {
-        label: `${docked ? "" : "✓ "}${text.overlay}`,
-        title: text.overlayTitle,
-        onSelect: () => setAppPanelDocked(false),
-      },
-      {
-        label: `${docked ? "✓ " : ""}${text.docked}`,
-        title: text.dockedTitle,
-        onSelect: () => setAppPanelDocked(true),
-      },
-    ];
-    showContextMenu(button, items);
-  });
-  document
-    .querySelectorAll<HTMLButtonElement>("[data-panel-layout]")
-    .forEach((button) => {
-      button.addEventListener("click", () => {
-        setAppPanelDocked(button.dataset.panelLayout === "docked");
-      });
-    });
   let copyAiContextFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   $("#copy-ai-context")?.addEventListener("click", async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
@@ -5442,10 +5323,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "cancel-source-load") {
-      // Escape は手前にあるものから畳む。下パネルの中にいればパネルを閉じ、
-      // 行を選んでいればその解除、どちらでもなければ読み込みを止める。
+      // Escape は手前にあるものから畳む。Tools / Search の中にいればそのタブを
+      // 閉じ (下パネルだった頃の「パネルを閉じる」)、行を選んでいればその解除、
+      // どちらでもなければ読み込みを止める。
       if (scope === "panel") {
-        closeAppPanel();
+        if (STATE.route.screen === "tools" || STATE.route.screen === "search")
+          MAIN_TABS.closeActive();
         return true;
       }
       if (clearLineSelection()) return true;
@@ -5977,6 +5860,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       return Promise.resolve(null);
     }
+    if (enterToolOrSearchPage()) return Promise.resolve(null);
     if (
       STATE.route.screen === "file" &&
       !(isFileHistoryRoute(STATE.route) && activeHistoryPathFilter) &&
@@ -6094,13 +5978,6 @@ window.GdpExpandLogic = GdpExpandLogic;
           ) + window.location.hash,
         );
       }
-      // 下パネルの開閉は設定から戻す (URL が Tools も Search も指していないとき)。
-      if (
-        APP_SETTINGS.terminalPanelOpen &&
-        parseToolsOverlay(window.location.search) === null &&
-        parseSearchResultsOverlay(window.location.search) === null
-      )
-        openToolsSheet();
     });
     if (STATE.route.screen === "help") {
       setStatus("live");
@@ -6128,13 +6005,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     } else if (STATE.route.screen === "agents") {
       setStatus("live");
       void AGENTS_VIEW?.enter();
-    } else load();
+    } else if (!enterToolOrSearchPage()) load();
     // Deep links land here without going through setRoute; reflect a line=
     // selection in the copy pill on first paint too.
     syncLineRefPill();
     syncDoctorSheetFromUrl();
-    syncToolsSheetFromUrl();
-    syncSearchSheetFromUrl();
   });
 
   // Ref picker (from / to)
@@ -6345,202 +6220,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     trackLoad,
     getLanguage: () => STATE.language,
     actionHeaders,
-    onCloseRequest: () => closeToolsSheet(),
-    onToolChange: (tool) => updateUrlForToolsOverlay(tool),
+    // 道具の面の閉じる = Tools のタブを閉じる (前面のときだけ押せる)。
+    onCloseRequest: () => {
+      if (STATE.route.screen === "tools") MAIN_TABS.closeActive();
+    },
+    onToolChange: (tool) => rememberPageRoute("tools", tool),
   });
   relocalizeTools = () => TOOLS_VIEW.localize();
 
-  function openToolsOverlay(): ToolId | null {
-    return parseToolsOverlay(window.location.search);
-  }
-
-  function updateUrlForToolsOverlay(tool: ToolId | null): void {
-    const current = window.location.pathname + window.location.search;
-    const next = withToolsOverlay(current, tool);
-    if (next !== current) {
-      history.replaceState(history.state, "", next + window.location.hash);
-    }
-    // メニューの Tools は URL の ?tools= を見て押下状態を出すので、URL を
-    // 書き換えたらその場で貼り直す。
-    syncHeaderMenu();
-  }
-
-  /**
-   * 画面下のパネル。中身は Tools と Search で、出せるのは一度に 1 つ。
-   * ターミナルはメインの面のタブだけに出す (下パネルには置かない)。
-   *
-   * 開いているかどうかは URL (?tools= / ?results=) が持っている。パネル自身は
-   * 器なので、状態を二重に持たずに URL から引き直す。ここを別々に持つと、
-   * URL から復元したときにタブと中身がずれる。
-   */
-  function syncAppPanel(): void {
-    // 中身の open() は非同期なので、直後に isOpen() を見ると閉じたままに
-    // 見える。URL は開いた時点で同期的に入るので、そちらを正とする。
-    const tools = parseToolsOverlay(window.location.search) !== null;
-    const search = parseSearchResultsOverlay(window.location.search) !== null;
-    const open = tools || search;
-    const panel = document.getElementById("app-panel");
-    if (panel) {
-      panel.classList.toggle("app-panel-open", open);
-    }
-    for (const [id, selected] of [
-      ["#panel-tab-tools", tools],
-      ["#panel-tab-search", search],
-    ] as const) {
-      const tab = document.querySelector<HTMLButtonElement>(id);
-      if (!tab) continue;
-      tab.setAttribute("aria-selected", String(selected));
-    }
-    const toggle =
-      document.querySelector<HTMLButtonElement>("#app-panel-close");
-    if (toggle) {
-      const label = open ? uiText().appPanel.close : uiText().appPanel.open;
-      toggle.title = label;
-      toggle.setAttribute("aria-label", label);
-      toggle.setAttribute("aria-expanded", String(open));
-    }
-    syncAppPanelLayout();
-  }
-
-  function syncAppPanelLayout(): void {
-    const docked = APP_SETTINGS.appPanelDocked === true;
-    document.body.classList.toggle("app-panel-docked", docked);
-    for (const button of document.querySelectorAll<HTMLButtonElement>(
-      "[data-panel-layout]",
-    )) {
-      const active =
-        button.dataset.panelLayout === (docked ? "docked" : "overlay");
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-pressed", String(active));
-    }
-  }
-
-  function setAppPanelDocked(docked: boolean): void {
-    if ((APP_SETTINGS.appPanelDocked === true) === docked) return;
-    patchSettings({ appPanelDocked: docked });
-    syncAppPanelLayout();
-  }
-
-  function closeAppPanel(): void {
-    hideSearchSheet();
-    hideToolsSheet();
-    setAppPanelOpen(false);
-    syncAppPanel();
-  }
-
-  /**
-   * 下パネルを開いているか (再読み込みで戻す)。保存のキーは下パネルに
-   * ターミナルがあった頃の名前 (terminalPanelOpen) のまま: 保存してある値を
-   * そのまま読めるように。
-   */
-  function setAppPanelOpen(open: boolean): void {
-    if ((APP_SETTINGS.terminalPanelOpen === true) === open) return;
-    mergeLocalSettings({ terminalPanelOpen: open });
-    patchSettings({ terminalPanelOpen: open });
-  }
-
-  /**
-   * 以前の版が高さを覚えていた場所 (オリジンごとの localStorage)。いまは
-   * 全プロジェクト共通の設定 (appPanelHeight) に置く。設定がまだ無い人だけ、
-   * ここの値を引き継ぐ。範囲は core/panel-sizes.ts の APP_PANEL_HEIGHT
-   * (上限は CSS の max-height も持つ)。
-   */
-  const APP_PANEL_HEIGHT_STORAGE_KEY = "code-viewer:app-panel-height";
-
-  /** 最後に適用した高さ。ドラッグが終わった時点でこれを保存する。 */
-  let appPanelHeight = APP_PANEL_HEIGHT.default;
-
-  function savedAppPanelHeight(): number {
-    if (APP_SETTINGS.appPanelHeight != null) {
-      return APP_SETTINGS.appPanelHeight;
-    }
-    const result = readStoredSize(
-      APP_PANEL_HEIGHT_STORAGE_KEY,
-      APP_PANEL_HEIGHT.default,
-    );
-    reportStoredSizeFailure(
-      result,
-      "reading the saved app panel height failed",
-    );
-    return result.value;
-  }
-
-  function applyAppPanelHeight(height: number): void {
-    appPanelHeight = clampPanelSize(APP_PANEL_HEIGHT, Math.round(height));
-    // 高さはパネル自身だけでなく #content の下余白も決める。パネル要素に
-    // 置くと兄弟の #content から見えないので、:root に置く。
-    document.documentElement.style.setProperty(
-      "--app-panel-height",
-      `${appPanelHeight}px`,
-    );
-  }
-
-  {
-    const panel = document.getElementById("app-panel");
-    const handle = document.getElementById("app-panel-resizer");
-    // 前回引き伸ばした高さで開く。パネルを出す前に当てておけば、開いた瞬間に
-    // 既定値からの跳ねが出ない。
-    applyAppPanelHeight(savedAppPanelHeight());
-    if (panel && handle) {
-      attachDragResizer({
-        handle,
-        getSize: () => panel.getBoundingClientRect().height,
-        // 上へ引くほど高くなる。ハンドルはパネルの上端にある。
-        direction: -1,
-        axis: "y",
-        applySize: (height) => {
-          applyAppPanelHeight(height);
-          // 高さが変わると端末の桁数・行数も変わる。追従させる。
-          TERMINAL_VIEW.refit();
-        },
-        // 保存はドラッグ / キー操作が終わった時だけ。動かしている間ずっと
-        // 書くと、1 回のドラッグで数十回設定を書き換えることになる。
-        onEnd: () => patchSettings({ appPanelHeight }),
-        activeClassTarget: panel,
-        activeClassName: "app-panel-resizing",
-      });
-    }
-  }
-
-  function openToolsSheet(tool?: ToolId): void {
-    // タブなので、他は畳む。2 つ並べると 1 つあたりが狭くなりすぎる。
-    hideSearchSheet();
-    setAppPanelOpen(true);
-    // 実際に出すツールが決まるのは保存状態を読んだ後だが、「開いた」ことは
-    // その場で URL に出す。読み込みが止まっても URL と画面が食い違わない。
-    updateUrlForToolsOverlay(tool ?? TOOLS_VIEW.getActiveTool());
-    void TOOLS_VIEW.open(tool);
-    syncAppPanel();
-  }
-
-  /** Tools を畳む (パネルの開閉の設定は呼び出し側が決める)。 */
-  function hideToolsSheet(): void {
-    if (
-      parseToolsOverlay(window.location.search) === null &&
-      !TOOLS_VIEW.isOpen()
-    )
-      return;
-    TOOLS_VIEW.close();
-    updateUrlForToolsOverlay(null);
-  }
-
-  function closeToolsSheet(): void {
-    hideToolsSheet();
-    setAppPanelOpen(false);
-    syncAppPanel();
-  }
-
-  function syncToolsSheetFromUrl(): void {
-    const tool = openToolsOverlay();
-    const open = TOOLS_VIEW.isOpen();
-    if (tool && (!open || TOOLS_VIEW.getActiveTool() !== tool))
-      void TOOLS_VIEW.open(tool);
-    else if (!tool && open) TOOLS_VIEW.close();
-    syncAppPanel();
-  }
-
-  // Search results sheet — same independent overlay as tools; the URL holds
-  // the grep query (?results=<query>) so a reload re-runs it.
+  // grep の結果の一覧 (Search のタブ)。URL の /search?q= が検索語を持つので、
+  // 読み直すと同じ検索をやり直す。
   const SEARCH_RESULTS_VIEW = createSearchResultsView({
     $: <T extends Element = HTMLElement>(sel: string) =>
       document.querySelector<T>(sel),
@@ -6583,45 +6272,81 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
       void renderStandaloneSource({ path, ref });
     },
-    onQueryChange: (query) => updateUrlForSearchResultsOverlay(query),
+    onQueryChange: (query) => rememberPageRoute("search", query),
   });
   relocalizeSearchResults = () => SEARCH_RESULTS_VIEW.localize();
 
-  function updateUrlForSearchResultsOverlay(query: string | null): void {
-    const current = window.location.pathname + window.location.search;
-    const next = withSearchResultsOverlay(current, query);
-    if (next !== current) {
-      history.replaceState(history.state, "", next + window.location.hash);
+  /**
+   * Tools と Search はメインの面のタブ (page の画面)。中身の箱 (#tools-sheet /
+   * #search-sheet) は index.html で本文 (#content) の中にあり、画面に入ると
+   * #diff を隠して中身を開き、離れると閉じて #diff を戻す (agents と同じ形)。
+   */
+  // 道具・検索語を渡されたらそれを開く (タブが覚えている前の検索語に負けない)。
+  // 渡されなければタブが最後に見ていた route へ戻る。
+  function openToolsPage(tool?: ToolId): void {
+    if (tool) navigateToRoute({ screen: "tools", tool, range: currentRange() });
+    else navigateToPageTab({ screen: "tools", range: currentRange() });
+  }
+
+  function openSearchPage(query?: string): void {
+    if (query)
+      navigateToRoute({ screen: "search", q: query, range: currentRange() });
+    else navigateToPageTab({ screen: "search", range: currentRange() });
+  }
+
+  /** Tools / Search の画面に入る (setRoute・戻る進む・読み込みの全部がここ)。 */
+  function enterToolOrSearchPage(): boolean {
+    const route = STATE.route;
+    if (route.screen !== "tools" && route.screen !== "search") return false;
+    cancelActiveSourceLoad("navigation");
+    setPageMode();
+    removeStandaloneSource();
+    document.getElementById("diff")?.setAttribute("hidden", "true");
+    document.getElementById("empty")?.classList.add("hidden");
+    document
+      .getElementById("history-commit-info")
+      ?.setAttribute("hidden", "true");
+    if (route.screen === "tools") {
+      if (!TOOLS_VIEW.isOpen() || TOOLS_VIEW.getActiveTool() !== route.tool)
+        void TOOLS_VIEW.open(route.tool);
+    } else if (
+      !SEARCH_RESULTS_VIEW.isOpen() ||
+      SEARCH_RESULTS_VIEW.getQuery() !== (route.q ?? "")
+    ) {
+      SEARCH_RESULTS_VIEW.open(route.q);
     }
-    syncHeaderMenu();
+    setStatus("live");
+    return true;
   }
 
-  function openSearchSheet(query?: string): void {
-    hideToolsSheet();
-    setAppPanelOpen(true);
-    updateUrlForSearchResultsOverlay(query ?? SEARCH_RESULTS_VIEW.getQuery());
-    SEARCH_RESULTS_VIEW.open(query);
-    syncAppPanel();
+  /** Tools / Search の画面を離れる (leaveScreen)。 */
+  function leaveToolOrSearchPage(screen: "tools" | "search"): void {
+    if (screen === "tools") TOOLS_VIEW.close();
+    else SEARCH_RESULTS_VIEW.close();
+    document.getElementById("diff")?.removeAttribute("hidden");
   }
 
-  /** Search を畳む (パネルの開閉の設定は呼び出し側が決める)。 */
-  function hideSearchSheet(): void {
-    if (
-      parseSearchResultsOverlay(window.location.search) === null &&
-      !SEARCH_RESULTS_VIEW.isOpen()
-    )
-      return;
-    SEARCH_RESULTS_VIEW.close();
-    updateUrlForSearchResultsOverlay(null);
-  }
-
-  function syncSearchSheetFromUrl(): void {
-    const query = parseSearchResultsOverlay(window.location.search);
-    const open = SEARCH_RESULTS_VIEW.isOpen();
-    if (query !== null && (!open || SEARCH_RESULTS_VIEW.getQuery() !== query))
-      SEARCH_RESULTS_VIEW.open(query);
-    else if (query === null && open) SEARCH_RESULTS_VIEW.close();
-    syncAppPanel();
+  /**
+   * 画面の中で道具・検索語が変わった: route と URL とタブの記憶だけを
+   * 書き換える (画面に入り直さない)。
+   */
+  function rememberPageRoute(
+    screen: "tools" | "search",
+    value: string | null,
+  ): void {
+    const route = STATE.route;
+    if (route.screen !== screen) return;
+    if (route.screen === "tools") {
+      STATE.route = isToolId(value)
+        ? { ...route, tool: value }
+        : { screen: "tools", range: route.range };
+    } else {
+      STATE.route = value
+        ? { ...route, q: value }
+        : { screen: "search", range: route.range };
+    }
+    replaceUrlWithCurrentRoute();
+    MAIN_TABS.syncRoute(STATE.route, false);
   }
 
   // メインの面のターミナルのタブ。URL の ?terminal= は、フォーカスのある面の
@@ -6982,7 +6707,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   // 2 面のとき、面の中 (本文・箱) を押したらその面へフォーカスを移す。
-  // タブ列 (タブを押せばその面へ移る)・サイドバー・下パネル・最下段・
+  // タブ列 (タブを押せばその面へ移る)・サイドバー・最下段・
   // メニューやダイアログは面の外なので見ない。
   document.addEventListener(
     "pointerdown",
@@ -6992,7 +6717,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const target = event.target as Element | null;
       if (
         target?.closest(
-          "#app-nav, #main-tabs, #app-panel, #statusbar, .main-split-divider, .gdp-context-menu, [role=dialog]",
+          "#app-nav, #main-tabs, #statusbar, .main-split-divider, .gdp-context-menu, [role=dialog]",
         )
       )
         return;
@@ -7078,6 +6803,9 @@ window.GdpExpandLogic = GdpExpandLogic;
           });
         },
       },
+      // Tools と Search は page のタブ (左の面にだけ開く)。
+      { label: uiText().nav.tools, onSelect: () => openToolsPage() },
+      { label: uiText().nav.search, onSelect: () => openSearchPage() },
     ];
     const sessions: ContextMenuItem[] = [];
     /** タブで開いていない未読のペイン (印を付け、まとめて読んだことにできる)。 */
@@ -7373,6 +7101,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       keymap: "goto-agents",
       icon: ARROW_RIGHT_16_PATH,
       suggested: false,
+    },
+    {
+      id: "goto-tools",
+      icon: BOOK_16_PATH,
+      suggested: false,
+      run: () => openToolsPage(),
+    },
+    {
+      id: "goto-search",
+      icon: SEARCH_16_PATH,
+      suggested: false,
+      run: () => openSearchPage(),
     },
     {
       id: "toggle-terminal-panel",
@@ -7915,6 +7655,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function applyRouteFromLocation() {
+    upgradeLegacyPanelUrl();
     // URL が右の面のファイル (pane=right): 右の面で開き、本文は描き直さない。
     // 右に開けない (1 面で狭い・ファイルでない) なら pane=right を外して本文へ。
     if (parsePaneOverlay(window.location.search) === "right") {
@@ -7995,9 +7736,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncHeaderMenu();
     syncLineRefPill();
     syncDoctorSheetFromUrl();
-    syncToolsSheetFromUrl();
     syncTerminalFromUrl(terminalParam);
-    syncSearchSheetFromUrl();
     if (
       isSameBlobFileRoute(previousRoute, STATE.route) &&
       routeBlobPreview(previousRoute) !== routeBlobPreview(STATE.route) &&
@@ -8069,6 +7808,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       return;
     }
+    if (enterToolOrSearchPage()) return;
     if (STATE.route.screen !== "file") {
       cancelActiveSourceLoad("navigation");
       setPageMode();

@@ -6,7 +6,7 @@
 
 ## 何を防ぐか
 
-下パネル（フッター）を 1 つ足したら、画面いっぱいに広がる要素が軒並み見切れた。
+画面の下に固定のパネルを 1 つ足したら、画面いっぱいに広がる要素が軒並み見切れた。
 原因は各所が個別に `calc(100vh - var(--global-header-h) - 96px)` のように引き算していたこと。
 **固定物が増えるたびに全箇所を直す必要があり、直し漏れたところだけが画面外へはみ出す。**
 
@@ -21,8 +21,8 @@
 | 層 | 何か | 例 | 生の px |
 |---|---|---|---|
 | **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義。余白・角丸の段階 (`--space-*` `--radius-*`) もここ。一覧の行の高さ `--ui-row-h` だけは出所が TS (`views/shell/row-height.ts`。仮想表示が位置の計算に使うため) で、CSS は初回描画用の既定。表の行の高さ `--ui-table-row-h` は仮想表示に使わないので CSS だけ (`ui-surface.md` の決まり 7) | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--ui-row-h` `--ui-table-row-h` `--code-line-height` | **可**（ここだけ） |
-| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--left-head-h` (左の列の頭 `#left-head`) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--app-panel-visible-height` `--sidebar-w` `--history-w` `--annotation-panel-w` | **可**（その固定物の実寸なので） |
-| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--app-panel-max-h` `--main-bottom` (メインの面の箱の下端。重ねるときも下パネルの見出しの行の上で止める) `--main-pane-h` (面の箱の高さ) `--left-body-top` (左の列の本体の上端) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) | **不可。T2 の式に px リテラルを書かない** |
+| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--left-head-h` (左の列の頭 `#left-head`) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--sidebar-w` `--history-w` `--annotation-panel-w` | **可**（その固定物の実寸なので） |
+| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--main-bottom` (メインの面の箱の下端。最下段の上) `--main-pane-h` (面の箱の高さ) `--left-body-top` (左の列の本体の上端) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) | **不可。T2 の式に px リテラルを書かない** |
 | **T3** ローカルインセット | 「このエンベロープの内側に居座る家具の高さ」 | `--file-detail-head-h` | **可。ただし必ず命名し、ページスコープに宣言し、何の高さかコメントする** |
 
 ### 消費側の規則
@@ -35,7 +35,7 @@
   この 2 つが並んでいたら、それは T2 を経由していない引き算
 - **T2 は `--content-h` だけではない。** 本文と場所を分け合わないもの（画面下に固定した
   パネルなど）は `--content-h` を使うと自分を自分から引く循環になるので、**別の T2 を
-  定義する**（例: `--app-panel-max-h`）。T2 を増やすこと自体は違反ではない。
+  定義する**（例: そのパネルの最大の高さ `--<surface>-max-h`）。T2 を増やすこと自体は違反ではない。
   違反は「消費側が直接引き算すること」
 - **T2 の定義は 1 行に書く。** 下の検出コマンドが行単位なので、`calc(` の後で改行すると
   式の行が定義行に見えず、正しいコードが違反として並ぶ
@@ -46,7 +46,7 @@
 
 **例外: chrome の上に浮く overlay。** `position: fixed` で画面中央に置くダイアログ・
 ライトボックス・ポップオーバーは、chrome と場所を分け合わないので `calc(100vw - 32px)` の
-ような viewport 基準でよい。これらを T2 に置き換えないこと（下パネルが開いた分だけ
+ような viewport 基準でよい。これらを T2 に置き換えないこと（固定物が増えた分だけ
 モーダルが縮む、という誤った挙動になる）。
 
 現状の違反は次で列挙できる。**数を覚えず、その都度数える。**
@@ -68,7 +68,7 @@ grep -n "100vh\|100dvh" web/style.css \
 (`#main-tabs`、`--main-tabs-h`。**上の行は無い**: `web/index.html` のコメントと da82d59)、その下で
 サイドバーの右の左の列 (頭が `#left-head`、高さ `--left-head-h`、幅 `--leftcol-shown`。本体は
 `--left-body-top` から)、画面ごとのツールバー (`#topbar`、`--topbar-h`)、最下段のバー
-(`#statusbar`、`--statusbar-h`)。下パネル (`.app-panel`) は最下段の上に乗る。左の列を畳むと
+(`#statusbar`、`--statusbar-h`)。画面下のパネルは無い (Tools と Search はタブ。`orientation.md`)。左の列を畳むと
 (`body.gdp-sidebar-hidden`) `--leftcol-shown` が 0 になり、プロジェクト名と画面の入口
 (`#view-head`) はタブ列の左の `#tabs-lead` へ移る (`views/sidebar.ts` の `placeSidebarToggle`)。
 
@@ -86,7 +86,7 @@ grep -n "100vh\|100dvh" web/style.css \
 - **メインの面の箱 (`.main-pane-host`。`app.ts` の `PANE_HOSTS`) は `top: --global-header-h`・
   `left: --page-left`・`bottom: --main-bottom`。** 左の列 (木) を覆わない。2 面では左の箱は
   `--split-left-w` の幅、右の箱は残り。右の面のソース表示 (`.main-pane-source`) は本文の
-  `--content-h` ではなく `--main-pane-h` で箱を作る。タブ列・下パネル・最下段は面をまたぐので
+  `--content-h` ではなく `--main-pane-h` で箱を作る。タブ列・最下段は面をまたぐので
   `--chrome-left` のまま
 - `--main-tabs-h` と `--global-header-h` は `html, body` で決める (密度の `--space-unit` の上書きが
   body に載るため。下の「T2 を宣言する要素を間違えない」と同じ理由)
@@ -104,22 +104,20 @@ grep -n "100vh\|100dvh" web/style.css \
   骨格が一瞬崩れないようにするため（控えは `views/shell/early-look.ts`）
 - 画面座標で線を引く JS (リサイズのプレビュー線) は、固定物の左端を
   `getBoundingClientRect().left` で読む。`0` 起点の座標を書かない
-- 骨格の幅・高さ (`--nav-w`・下パネルの高さ) の既定・下限・上限は `core/panel-sizes.ts`
+- 骨格の幅・高さ (`--nav-w` など) の既定・下限・上限は `core/panel-sizes.ts`
   だけが持つ（画面とサーバの設定の検査が同じ値を使う）。保存先は全プロジェクト共通の設定
   (`core/user-settings.ts` の `USER_SETTING_KEYS`)。**localStorage に置かない**: プロジェクトを
   移る = 別のポートのページなので、移るたびに戻ってしまう
 
 ## 固定物を足す / 消すときの型
 
-**T1 は「既定 0 + 占有時に上書き」の形にする。** これは `--app-panel-visible-height` が
-既にやっている形で、一般化するとこうなる。
+**T1 は「既定 0 + 占有時に上書き」の形にする。** 一般化するとこうなる。
 
 ```css
 :root { --<surface>-visible-h: 0px; }               /* 何も占有していない状態が既定 */
 body.<その固定物が出ている状態> { --<surface>-visible-h: <実際の値>; }
 
---content-h: calc(100vh - var(--chrome-h)
-             - var(--app-panel-visible-height)
+--content-h: calc(100vh - var(--chrome-h) - var(--chrome-bottom)
              - var(--<surface>-visible-h));          /* T2 に 1 項足すだけ */
 ```
 
@@ -136,11 +134,10 @@ body.<その固定物が出ている状態> { --<surface>-visible-h: <実際の�
 **カスタムプロパティの `var()` は「宣言した要素」で確定し、その後は確定済みの値として
 継承される。使う場所で解決し直されはしない。**
 
-したがって T2（`--content-h` `--app-panel-max-h`）を `:root` に置くと、`body` に載る
+したがって T2（`--content-h` `--main-bottom`）を `:root` に置くと、`body` に載る
 上書きが**どれも反映されない**:
 
 - ページごとの `--chrome-h`（`body.gdp-*-page`）
-- docked のときの `--app-panel-visible-height`（`body.app-panel-docked`）
 - 表示密度ごとの `--space-unit` と、それから作る `--main-tabs-h`・`--global-header-h`（`body[data-sidebar-font-size]`）
 
 **規則: T1 の上書きが `body` に載るなら、その T1 を読む T2 も `body` で宣言する。**
@@ -151,32 +148,6 @@ body.<その固定物が出ている状態> { --<surface>-visible-h: <実際の�
 ```js
 getComputedStyle(document.documentElement).getPropertyValue('--content-h')
 getComputedStyle(document.body).getPropertyValue('--content-h')
-```
-
-### 「重ねる」では本文を 1px も動かさない
-
-下パネルには「画面内」と「重ねる」の 2 モードがあり、**仕組みが違う**。仕様は
-`orientation.md` の「下パネルの 2 モード」を読むこと。
-
-- **画面内** — 本文とパネルが場所を分け合う。`--app-panel-visible-height` が実高さになり、
-  `--content-h` がその分短くなる。消費側は `--content-h` を見るだけでよい
-- **重ねる** — パネルが本文の**上に乗る**。`--app-panel-visible-height` は `0px` のまま。
-  **本文はパネルを閉じているときと完全に同じに表示される**
-
-> **判定基準: パネルを開いても・引き伸ばしても・閉じても、本文の表示が 1px も変わらないこと。**
->
-> 高さだけでなく**余白・位置・スクロール量**も含む。
-
-**覆われている ≠ 見切れている。** パネルが本文の一部を覆うのは仕様。
-
-重ねる側に書いてよいのは、**パネルの状態に依存しない固定値**だけ（タブ列ぶんの 36px など）。
-`--app-panel-height` や `--app-panel-visible-height` を重ねる側の本文に効かせない。
-
-確認方法（3 つの値が全状態で一致すること）:
-
-```js
-const c = document.getElementById('content'), s = getComputedStyle(c);
-[s.paddingBottom, s.minHeight, c.scrollHeight]   // パネル開 / 引き伸ばし / 閉 で比較
 ```
 
 ## ページごとの chrome は、変数を直す。消費側を直さない
@@ -239,8 +210,8 @@ grep -n -A6 "gdp-[a-z-]*-page" web/style.css \
 max-height: calc(100vh - var(--global-header-h) - 40px);
 
 /* よい: T3 に名前を与え、T2 を 1 つ作って 3 箇所がそれを参照する */
---app-panel-min-content-h: 40px;    /* パネルの上に必ず残す本文の高さ */
---app-panel-max-h: calc(100vh - var(--global-header-h) - var(--app-panel-min-content-h));
+--<surface>-min-content-h: 40px;    /* その固定物の上に必ず残す本文の高さ */
+--<surface>-max-h: calc(100vh - var(--global-header-h) - var(--<surface>-min-content-h));
 ```
 
 ## ページクラスの列挙をレイアウト規則に書かない
@@ -248,9 +219,9 @@ max-height: calc(100vh - var(--global-header-h) - 40px);
 ```css
 /* 禁止。ページを 1 枚足すたびに、この種の列挙を複数箇所へ追記することになる。
    追記漏れ = そのページだけ画面外へはみ出す = 冒頭の事故そのもの */
-body.app-panel-docked.gdp-diff-page #content,
-body.app-panel-docked.gdp-history-page #content,
-body.app-panel-docked.gdp-repo-page #content,
+body.<状態>.gdp-diff-page #content,
+body.<状態>.gdp-history-page #content,
+body.<状態>.gdp-repo-page #content,
 ... { height: var(--content-h); }
 ```
 
@@ -303,7 +274,7 @@ grep -rh -A2 "setProperty(" web-src --include=*.ts | grep -oE '"--[a-z-]+"' | so
 - 永続化は `core/stored-size.ts`。**保存は `onEnd` のみ。** ドラッグ中に書くと 1 回の
   ドラッグで数十回 localStorage を叩く
 - 寸法が変わったとき追従が必要なものを忘れない。既知のもの:
-  - ターミナル（下パネルの高さが変わると桁数・行数が変わる → `TERMINAL_VIEW.refit()`）
+  - ターミナル（面の箱の大きさが変わると桁数・行数が変わる → `TERMINAL_VIEW.refit()`）
   - 他に追従が要るものを見つけたら、この行に足す
 
 ## 密度モードを壊さない

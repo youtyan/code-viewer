@@ -1,12 +1,7 @@
 import { join } from "node:path";
 import { hasControlCharacter } from "../core/control-chars";
 import { sanitizeKeymapOverrides } from "../core/keymap";
-import {
-  APP_PANEL_HEIGHT,
-  HISTORY_WIDTH,
-  NAV_WIDTH,
-  SIDEBAR_WIDTH,
-} from "../core/panel-sizes";
+import { HISTORY_WIDTH, NAV_WIDTH, SIDEBAR_WIDTH } from "../core/panel-sizes";
 import { MAX_PROJECTS } from "../core/projects";
 import {
   MAX_GREP_PALETTE_HEIGHT,
@@ -208,8 +203,6 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     MAX_TERMINAL_FONT_SIZE,
   );
   if (terminalFontSize !== undefined) out.terminalFontSize = terminalFontSize;
-  const appPanelDocked = optionalBoolean(raw.appPanelDocked);
-  if (appPanelDocked !== undefined) out.appPanelDocked = appPanelDocked;
   const syntaxHighlight = optionalBoolean(raw.syntaxHighlight);
   if (syntaxHighlight !== undefined) out.syntaxHighlight = syntaxHighlight;
   const autoUpdate = optionalBoolean(raw.autoUpdate);
@@ -337,12 +330,6 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     maxLen: 4096,
   });
   if (navCollapsedProjects) out.navCollapsedProjects = navCollapsedProjects;
-  const appPanelHeight = optionalNumber(
-    raw.appPanelHeight,
-    APP_PANEL_HEIGHT.min,
-    APP_PANEL_HEIGHT.max,
-  );
-  if (appPanelHeight !== undefined) out.appPanelHeight = appPanelHeight;
   const lastProjectRoot = optionalString(raw.lastProjectRoot, 4096);
   if (
     lastProjectRoot?.startsWith("/") &&

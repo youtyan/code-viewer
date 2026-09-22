@@ -83,6 +83,18 @@ export type AppRoute =
       range: DiffRange;
     }
   | {
+      /** 変換の道具 (Markdown / Mermaid / JSON)。tool は出している道具。 */
+      screen: "tools";
+      tool?: ToolId;
+      range: DiffRange;
+    }
+  | {
+      /** grep の結果の一覧。q は検索語 (無ければ、まだ何も検索していない)。 */
+      screen: "search";
+      q?: string;
+      range: DiffRange;
+    }
+  | {
       screen: "journal";
       tab?: "journal" | "tasks";
       date?: string;
@@ -120,6 +132,8 @@ export const SPA_PATHS = [
   "/database",
   "/worktree",
   "/agents",
+  "/tools",
+  "/search",
   "/doctor",
 ] as const;
 export const APP_ENTRY_PATHS = ["/", "/index.html"] as const;
@@ -315,6 +329,14 @@ export function parseRoute(
     }
     case "/agents":
       return { screen: "agents", range };
+    case "/tools": {
+      const tool = params.get("tool");
+      return { screen: "tools", ...(isToolId(tool) ? { tool } : {}), range };
+    }
+    case "/search": {
+      const q = params.get("q") || "";
+      return { screen: "search", ...(q ? { q } : {}), range };
+    }
     case "/journal": {
       const tabRaw = params.get("tab");
       const tab =
@@ -490,6 +512,12 @@ function buildRoutePath(route: AppRoute): string {
     }
     case "agents":
       return "/agents";
+    case "tools":
+      return route.tool ? `/tools?tool=${route.tool}` : "/tools";
+    case "search":
+      return route.q
+        ? `/search?${new URLSearchParams({ q: route.q })}`
+        : "/search";
     case "journal": {
       const params = new URLSearchParams();
       // "tasks" is the default tab, so only "journal" needs the explicit
@@ -565,16 +593,22 @@ export function withDoctorOverlay(url: string, open: boolean): string {
   return withQueryParam(url, "doctor", open ? "open" : null);
 }
 
-// Tools overlay is the same kind of AppRoute-independent state as the doctor
-// sheet, except the query value also carries which tool is on screen
-// (`?tools=markdown`). An unknown value counts as closed.
-export function parseToolsOverlay(search: string): ToolId | null {
-  const raw = new URLSearchParams(search).get("tools");
-  return isToolId(raw) ? raw : null;
-}
-
-export function withToolsOverlay(url: string, tool: ToolId | null): string {
-  return withQueryParam(url, "tools", tool);
+/**
+ * 下パネルがあった頃の URL (`?tools=markdown` / `?results=<検索語>`) を、その
+ * タブの route に読み替える。Tools と Search はいまメインの面のタブ (page) で、
+ * route は `/tools?tool=` と `/search?q=`。知らない道具・キーが無いなら null
+ * (`?results=` は空でも「Search を開く」)。
+ */
+export function legacyPanelRoute(
+  search: string,
+  range: DiffRange,
+): Extract<AppRoute, { screen: "tools" | "search" }> | null {
+  const params = new URLSearchParams(search);
+  const tool = params.get("tools");
+  if (isToolId(tool)) return { screen: "tools", tool, range };
+  const results = params.get("results");
+  if (results === null) return null;
+  return { screen: "search", ...(results ? { q: results } : {}), range };
 }
 
 /**
@@ -651,13 +685,21 @@ export function parsePaneOverlay(search: string): "right" | null {
  * (箱を外して #diff を戻す) が要る。設定 (help) は #diff を描き直すだけなので
  * 入らない。History は範囲の戻しを伴う別の後片付け (app.ts) を持つ。
  */
-export type LeavableScreen = "database" | "worktree" | "journal" | "agents";
+export type LeavableScreen =
+  | "database"
+  | "worktree"
+  | "journal"
+  | "agents"
+  | "tools"
+  | "search";
 
 const LEAVABLE_SCREENS: readonly LeavableScreen[] = [
   "database",
   "worktree",
   "journal",
   "agents",
+  "tools",
+  "search",
 ];
 
 function isLeavableScreen(screen: string): screen is LeavableScreen {
@@ -679,18 +721,4 @@ export function screenToLeave(
 
 export function withPaneOverlay(url: string, side: "right" | null): string {
   return withQueryParam(url, "pane", side);
-}
-
-// Search results sheet (third tab of the bottom panel). The query key holds
-// the grep query so a reload re-runs the same search; an empty value means
-// "open, nothing searched yet". Same AppRoute-independent shape as ?tools=.
-export function parseSearchResultsOverlay(search: string): string | null {
-  return new URLSearchParams(search).get("results");
-}
-
-export function withSearchResultsOverlay(
-  url: string,
-  query: string | null,
-): string {
-  return withQueryParam(url, "results", query);
 }

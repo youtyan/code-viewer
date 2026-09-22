@@ -34,10 +34,10 @@ export function isPageKeymapBlockedTarget(target: Element | null): boolean {
 }
 
 export function keymapScope(target: Element | null): KeymapScope {
-  // 下パネル (Tools / Search) は #content の外にあるので、先に見る。
-  // ここを分けておかないと、パネルのタブにフォーカスがあるときに j や k が
-  // サイドバーの移動として発火してしまう。
-  if (target?.closest("#app-panel")) return "panel";
+  // Tools / Search のタブの中身 (本文 #content の中) は、下パネルだった頃と
+  // 同じ "panel" の範囲 (Escape で閉じる・入力欄でも Ctrl+` を通す)。#content より
+  // 先に見る。
+  if (target?.closest("#tools-sheet, #search-sheet")) return "panel";
   // The commit list of the history screen, or the one embedded in a file
   // History tab (inside #content), so it must be checked before "main".
   if (target?.closest("#history-panel, .gdp-file-history-panel"))

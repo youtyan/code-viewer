@@ -125,7 +125,7 @@ export type SearchPaletteDeps = {
     grepPaletteHeight?: number;
   }): Promise<void>;
   applyGrepHideTests(hidden: boolean): void;
-  /** "Pin": hand the current query to the results sheet in the bottom panel. */
+  /** "Pin": hand the current query to the Search tab. */
   openSearchResults?(query: string): void;
   /** ファイルの検索に混ぜるプロジェクト・エージェント・セッション・操作。 */
   getPaletteCommands?(): PaletteCommand[];

@@ -184,8 +184,6 @@ export type AppSettingsState = {
    * 桁数・行数も変わるので、PTY のリサイズもここから連動する。
    */
   terminalFontSize?: number;
-  /** 下パネルを本文と高さを分けて表示する。false / 未設定なら重ねて表示。 */
-  appPanelDocked?: boolean;
   syntaxHighlight?: boolean;
   autoUpdate?: boolean;
   queryHistoryPanelWidth?: number;
@@ -226,8 +224,8 @@ export type AppSettingsState = {
   /** ターミナルの右の画像の棚を畳んだ。 */
   terminalImageShelfCollapsed?: boolean;
   /**
-   * 下パネル (Tools / Search) を開いているか。再読み込みで開いたまま戻す。
-   * 名前は下パネルにターミナルがあった頃のまま (保存してある値を読むため)。
+   * 下パネル (Tools / Search) を開いていたか。下パネルは無くなり (Tools と
+   * Search はタブ)、いまは読まない。保存してある値の形を変えないために残す。
    */
   terminalPanelOpen?: boolean;
   /** 左のサイドバー (プロジェクトとエージェント) を畳んだ。 */
@@ -236,8 +234,6 @@ export type AppSettingsState = {
   navWidth?: number;
   /** 左のサイドバーで畳んだプロジェクト (プロジェクトの root)。 */
   navCollapsedProjects?: string[];
-  /** 画面下のパネルの高さ (px)。範囲は core/panel-sizes.ts の APP_PANEL_HEIGHT。 */
-  appPanelHeight?: number;
   /**
    * 入口のサーバで最後に開いたプロジェクトの根 (実パス)。前置きの無い URL
    * (`/`・古いブックマーク) をどのプロジェクトへ送るかに使う。画面は書かない。
