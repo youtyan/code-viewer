@@ -59,6 +59,14 @@ export type SpawnOptions = {
    * 理由として返す。無ければ捨てる。
    */
   logFile?: string;
+  /**
+   * 入口のサーバの pid。渡すと、子は入口の裏のプロセス (`--backend`) として
+   * 起き、入口が居なくなったら自分で終わる。無ければ今までどおりの 1 つで
+   * 完結したサーバ (`--standalone`)。
+   */
+  backendOf?: number;
+  /** 子に足す引数 (`--bin`・git の差分の引数など)。 */
+  serverArgs?: readonly string[];
 };
 
 type SpawnedServer = {
@@ -198,6 +206,10 @@ function spawnServer(path: string, options: SpawnOptions): SpawnedServer {
         path,
         "--port",
         String(options.port ?? 0),
+        ...(options.backendOf === undefined
+          ? ["--standalone"]
+          : ["--backend", "--entry-pid", String(options.backendOf)]),
+        ...(options.serverArgs ?? []),
       ],
       {
         cwd: path,
@@ -230,7 +242,7 @@ function openLogFile(file: string): number {
 /** 起動に失敗したときの理由に添える、子の出力の末尾。 */
 const LOG_TAIL_BYTES = 8_000;
 
-function logTail(file: string | undefined): string {
+export function logTail(file: string | undefined): string {
   if (!file) return "";
   let text: string;
   try {

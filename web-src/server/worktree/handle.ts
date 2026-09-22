@@ -20,8 +20,8 @@ import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
-import { sourceDisplayKind } from "../../core/source-meta";
 import { HISTORY_PAGE_SIZE } from "../../core/history";
+import { sourceDisplayKind } from "../../core/source-meta";
 import type {
   WorktreeActionResponse,
   WorktreeCommitsResponse,
@@ -69,7 +69,11 @@ import {
   serverWorktreeRoot,
   worktreeAddParent,
 } from "./list";
-import { openWorktreeServer, stopWorktreeServer } from "./open";
+import {
+  openWorktreeServer,
+  stopWorktreeServer,
+  type WorktreeOpenResult,
+} from "./open";
 
 /** 名前・ブランチ名しか載らないので、本文はごく小さい。 */
 const BODY_MAX_BYTES = 8 * 1024;
@@ -90,12 +94,39 @@ function bodyString(body: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * 入口のサーバの下で動くとき (裏のプロセス・入口そのもの) だけ渡す差し替え。
+ * 1 つで完結するサーバは渡さない。
+ */
+export type WorktreeRouteOptions = {
+  /**
+   * 動いているサーバの見せ方。裏のプロセスは、作業ツリーのサーバを入口の
+   * URL (`/p/<鍵>/`) で見せる (別のポートへのリンクにしない)。
+   */
+  serverUrlFor?: (path: string) => string;
+  /** 「開く」「止める」。入口は別のサーバを起こさず、入口の裏を起こす。 */
+  open?: (path: string) => Promise<WorktreeOpenResult>;
+  stop?: (path: string) => Promise<void>;
+};
+
 async function handleListGet(
   cwd: string,
   generation: number,
+  options: WorktreeRouteOptions,
 ): Promise<Response> {
   const list = await buildWorktreeList(serverWorktreeRoot(cwd));
-  const response: WorktreesResponse = { ...list, generation };
+  const { serverUrlFor } = options;
+  const response: WorktreesResponse = {
+    ...list,
+    worktrees: serverUrlFor
+      ? list.worktrees.map((item) =>
+          item.serverUrl
+            ? { ...item, serverUrl: serverUrlFor(item.path) }
+            : item,
+        )
+      : list.worktrees,
+    generation,
+  };
   return json(response);
 }
 
@@ -564,7 +595,11 @@ async function handleRemovePost(req: Request, cwd: string): Promise<Response> {
  * 「開く」で起こしたサーバを止める。起こす口だけあって止める口が無いと、
  * 開いた本人にも止め方が分からないまま増え続ける。
  */
-async function handleStopPost(req: Request, cwd: string): Promise<Response> {
+async function handleStopPost(
+  req: Request,
+  cwd: string,
+  stop: (path: string) => Promise<void>,
+): Promise<Response> {
   const parsed = await parseBoundedJsonBody(
     req,
     BODY_MAX_BYTES,
@@ -582,11 +617,15 @@ async function handleStopPost(req: Request, cwd: string): Promise<Response> {
 
   // 止められなかった理由はそのまま上へ返す (dispatchRoutes が 500 にする)。
   // 黙って成功扱いにすると、一覧に「起動中」が残ったままになる。
-  await stopWorktreeServer(resolved.path);
+  await stop(resolved.path);
   return actionJson({});
 }
 
-async function handleOpenPost(req: Request, cwd: string): Promise<Response> {
+async function handleOpenPost(
+  req: Request,
+  cwd: string,
+  open: (path: string) => Promise<WorktreeOpenResult>,
+): Promise<Response> {
   const parsed = await parseBoundedJsonBody(
     req,
     BODY_MAX_BYTES,
@@ -598,7 +637,7 @@ async function handleOpenPost(req: Request, cwd: string): Promise<Response> {
   const resolved = await resolveListedPath(cwd, bodyString(body, "path"));
   if (resolved instanceof Response) return resolved;
 
-  const result = await openWorktreeServer(resolved.path);
+  const result = await open(resolved.path);
   if (result.status === "missing") return textError("worktree is gone", 410);
   if (result.status === "timeout") {
     return textError("code-viewer did not come up in time", 504);
@@ -616,7 +655,10 @@ export function handleWorktreeRoute(
   cwd: string,
   generation: number,
   sideEffectAllowed: (req: Request) => boolean,
+  options: WorktreeRouteOptions = {},
 ): Promise<Response | null> {
+  const open = options.open ?? ((path: string) => openWorktreeServer(path));
+  const stop = options.stop ?? stopWorktreeServer;
   return dispatchRoutes(
     req,
     url,
@@ -624,7 +666,7 @@ export function handleWorktreeRoute(
       "/_worktree/list": {
         methods: ["GET"],
         sideEffect: false,
-        handler: () => handleListGet(cwd, generation),
+        handler: () => handleListGet(cwd, generation, options),
       },
       "/_worktree/commits": {
         methods: ["GET"],
@@ -654,12 +696,12 @@ export function handleWorktreeRoute(
       "/_worktree/open": {
         methods: ["POST"],
         sideEffect: true,
-        handler: () => handleOpenPost(req, cwd),
+        handler: () => handleOpenPost(req, cwd, open),
       },
       "/_worktree/stop": {
         methods: ["POST"],
         sideEffect: true,
-        handler: () => handleStopPost(req, cwd),
+        handler: () => handleStopPost(req, cwd, stop),
       },
     },
     sideEffectAllowed,

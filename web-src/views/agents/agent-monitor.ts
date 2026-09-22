@@ -12,6 +12,12 @@ import { apiUrl } from "../../core/api-url";
 //
 // 変化の判定・未読・通知の条件は core/agent-overview の純関数に置き、ここは
 // 取得とブラウザ API の出し入れだけを持つ。
+//
+// 未読の元はサーバの記録 (応答の unread。server/terminal/unread.ts)。画面を
+// 読み直しても・プロジェクトを移っても (入口の下では同じオリジンのページの
+// 読み直し) 残る。見ているペインの未読は、ここがサーバに解かせる
+// (/_agent/unread)。unread を持たない古い版のサーバでは、今までどおり
+// タブのメモリで数える。
 
 import {
   type AgentNotifySettings,
@@ -88,6 +94,8 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
   let previous: Map<TmuxPaneId, AgentState> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let inFlight: Promise<void> | null = null;
+  /** サーバに「解いて」を送っている最中のペイン (同じ送信を重ねない)。 */
+  const clearing = new Set<TmuxPaneId>();
   const listeners = new Set<() => void>();
 
   function emit(): void {
@@ -154,9 +162,53 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       }
     }
     notifyError = failures.join("\n");
-    unread = update.unread;
+    unread = next.unread ? serverUnread(next) : update.unread;
     previous = new Map(next.panes.map((pane) => [pane.id, pane.state]));
     overview = next;
+  }
+
+  /**
+   * サーバの未読から、いま見ているペインを除いたもの。見ているペインの未読は
+   * サーバにも解かせる (次の取得でまた未読として返ってこないように)。
+   */
+  function serverUnread(
+    next: AgentOverviewResponse,
+  ): Map<TmuxPaneId, AgentTransition> {
+    const panes = new Map(next.panes.map((pane) => [pane.id, pane]));
+    const kept = new Map<TmuxPaneId, AgentTransition>();
+    for (const entry of next.unread ?? []) {
+      // 解いている最中のものは、送る前の応答でよみがえらせない。
+      if (clearing.has(entry.pane)) continue;
+      const pane = panes.get(entry.pane);
+      if (pane && deps.isViewing(pane)) {
+        clearOnServer(entry.pane);
+        continue;
+      }
+      kept.set(entry.pane, entry.transition);
+    }
+    return kept;
+  }
+
+  function clearOnServer(pane: TmuxPaneId): void {
+    if (clearing.has(pane)) return;
+    clearing.add(pane);
+    fetch(apiUrl("agentUnread"), {
+      method: "POST",
+      headers: {
+        ...deps.actionHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ target: pane }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(await responseErrorMessage(res, "unread"));
+      })
+      .catch((cause: unknown) => {
+        console.error("[code-viewer] agent unread clear failed", cause);
+        error = formatErrorDetail(cause);
+        emit();
+      })
+      .finally(() => clearing.delete(pane));
   }
 
   /**
@@ -250,6 +302,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     markRead(pane) {
       const current = overview?.panes.find((item) => item.id === pane);
       const hadUnread = unread.delete(pane);
+      if (hadUnread && overview?.unread) clearOnServer(pane);
       if (current?.state === "done") {
         markReadOnServer(pane).then(
           () => refresh(),

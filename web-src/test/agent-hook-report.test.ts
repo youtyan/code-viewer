@@ -24,6 +24,7 @@ import type { ServerRegistryEntry } from "../server/server-registry";
 import {
   type HookReportDeps,
   reportAgentHook,
+  reportTargets,
 } from "../server/terminal/hook-report";
 import {
   type HookLauncher,
@@ -49,6 +50,7 @@ function fakeDeps(options: {
   registryErrors?: { file: string; error: unknown }[];
   respond?: (url: string) => Promise<Response>;
   env?: Record<string, string>;
+  entryUrl?: () => string | null;
 }): { deps: HookReportDeps; posted: Posted[]; failures: AgentHookFailure[] } {
   const posted: Posted[] = [];
   const failures: AgentHookFailure[] = [];
@@ -62,6 +64,7 @@ function fakeDeps(options: {
         servers: options.servers ?? [],
         errors: options.registryErrors ?? [],
       }),
+      entryUrl: options.entryUrl ?? (() => null),
       post: async (url, body) => {
         posted.push({ url, body: body as Record<string, unknown> });
         return options.respond
@@ -387,5 +390,81 @@ describe("launcher -> CLI (real processes)", () => {
     expect(
       readFileSync(launcher.failureLog, "utf8").trim().split("\n"),
     ).toHaveLength(1);
+  });
+});
+
+describe("where hook reports go", () => {
+  const entry = "http://127.0.0.1:64100";
+  const standalone: ServerRegistryEntry = {
+    url: "http://127.0.0.1:64200/",
+    pid: 1,
+    root: "/work/a",
+    started_at: "x",
+  };
+  const backend: ServerRegistryEntry = {
+    url: "http://127.0.0.1:64300/",
+    pid: 2,
+    root: "/work/b",
+    started_at: "x",
+    launched: true,
+    backend: true,
+  };
+  test.each([
+    ["no entry, no servers", null, [], []],
+    ["the entry alone", entry, [], [entry]],
+    [
+      "the entry and a standalone server",
+      entry,
+      [standalone],
+      [entry, "http://127.0.0.1:64200"],
+    ],
+    ["a project process of the entry is skipped", entry, [backend], [entry]],
+    ["only project processes", null, [backend], []],
+    [
+      "the entry registered twice is sent once",
+      `${entry}/`,
+      [{ ...standalone, url: `${entry}/` }],
+      [entry],
+    ],
+  ] as const)("%s", (_label, entryUrl, servers, expected) => {
+    expect(
+      reportTargets({ servers: [...servers], errors: [] }, entryUrl),
+    ).toEqual(expected);
+  });
+
+  test("a report reaches the entry server even with no registered server", async () => {
+    const { deps, posted, failures } = fakeDeps({ entryUrl: () => entry });
+    const outcome = await reportAgentHook(
+      "claude",
+      JSON.stringify({ hook_event_name: "Stop" }),
+      deps,
+    );
+    expect(posted.map((item) => item.url)).toEqual([`${entry}/_agent/state`]);
+    expect(failures).toEqual([]);
+    expect(outcome).toEqual({
+      kind: "reported",
+      event: "stop",
+      servers: [entry],
+    });
+  });
+
+  test("an unreadable entry record is recorded, and the registered servers still get the report", async () => {
+    const { deps, posted, failures } = fakeDeps({
+      servers: [standalone],
+      entryUrl: () => {
+        throw new Error("entry.json is not valid JSON");
+      },
+    });
+    await reportAgentHook(
+      "claude",
+      JSON.stringify({ hook_event_name: "Stop" }),
+      deps,
+    );
+    expect(posted.map((item) => item.url)).toEqual([
+      "http://127.0.0.1:64200/_agent/state",
+    ]);
+    expect(failures.map((failure) => [failure.stage, failure.detail])).toEqual([
+      ["registry", "Error: entry.json is not valid JSON"],
+    ]);
   });
 });

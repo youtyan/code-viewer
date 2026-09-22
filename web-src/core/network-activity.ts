@@ -9,6 +9,17 @@ type FetchTarget = {
 
 type NetworkActivityOptions = {
   onChange?: (state: NetworkActivityState) => void;
+  /**
+   * すべての fetch (裏の取り直しも) の前に URL と見出しを整える。入口の
+   * サーバの下で、前置きとプロジェクトの鍵を足す (core/api-url.ts の
+   * projectRequest)。
+   */
+  prepareRequest?: (
+    input: RequestInfo | URL,
+    init: RequestInit | undefined,
+  ) => { input: RequestInfo | URL; init?: RequestInit };
+  /** すべての fetch の応答を見る (本文は読まない。読むなら clone する)。 */
+  onResponse?: (response: Response) => void;
 };
 
 /**
@@ -21,16 +32,30 @@ type NetworkActivityOptions = {
  */
 export const BACKGROUND_REQUEST_HEADER = "X-Code-Viewer-Background";
 
+/**
+ * 途中で止めてはいけない書き込みに付ける印 (値は "1")。ターミナルの打鍵と
+ * 寸法の送信のように、利用者の操作そのものを運ぶ要求。
+ *
+ * 画面を切り替えたときの取消 (cancelAll) で打鍵が捨てられると、打った文字が
+ * 黙って消える。これが付いた fetch は取消の対象にも通信中の表示にも数えない
+ * (打鍵のたびに表示が点滅しないように)。BACKGROUND_REQUEST_HEADER と違って
+ * 書き込みに付けてよいが、利用者の操作で始まる読み取りには付けない。
+ */
+export const UNINTERRUPTIBLE_REQUEST_HEADER = "X-Code-Viewer-Uninterruptible";
+
 function isBackgroundRequest(
   input: RequestInfo | URL,
   init: RequestInit | undefined,
 ): boolean {
-  const fromInit = new Headers(init?.headers).get(BACKGROUND_REQUEST_HEADER);
-  if (fromInit === "1") return true;
+  const fromInit = new Headers(init?.headers);
+  const marked = (headers: Headers) =>
+    headers.get(BACKGROUND_REQUEST_HEADER) === "1" ||
+    headers.get(UNINTERRUPTIBLE_REQUEST_HEADER) === "1";
+  if (marked(fromInit)) return true;
   return (
     typeof Request !== "undefined" &&
     input instanceof Request &&
-    input.headers.get(BACKGROUND_REQUEST_HEADER) === "1"
+    marked(input.headers)
   );
 }
 
@@ -98,7 +123,19 @@ export function createNetworkActivityTracker(
       : null;
   }
 
-  function makeTrackedFetch(originalFetch: typeof fetch): typeof fetch {
+  function makeTrackedFetch(baseFetch: typeof fetch): typeof fetch {
+    const originalFetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const prepared = options.prepareRequest
+        ? options.prepareRequest(input, init)
+        : { input, init };
+      const pending = baseFetch(prepared.input, prepared.init);
+      const inspect = options.onResponse;
+      if (!inspect) return pending;
+      return Promise.resolve(pending).then((response) => {
+        inspect(response);
+        return response;
+      });
+    }) as typeof fetch;
     return ((input: RequestInfo | URL, init?: RequestInit) => {
       if (isBackgroundRequest(input, init)) return originalFetch(input, init);
       const end = begin();

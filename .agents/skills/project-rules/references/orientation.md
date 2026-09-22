@@ -80,7 +80,7 @@
 
 | 編集したもの | 実際に起きること |
 |---|---|
-| `web-src/server/**` | **サーバ再起動**（500ms 間隔の mtime ポーリング） |
+| `web-src/server/**` | **サーバ再起動**（500ms 間隔の mtime ポーリング）。`pnpm dev` は `cli.ts` を起こすので入口のサーバになり、再起動のたびに裏（開いているプロジェクトのプロセス）も起き直す |
 | `web-src/core/**` | **サーバ再起動**（core も watch 対象に含まれる） |
 | `web-src/views/**`, `web-src/app.ts` | `web/app.js` を esbuild watch が焼き直すだけ。**サーバは再起動しない** |
 | `web-src/*-entry.ts`（遅延バンドル入口） | **dev では何も起きない。** `pnpm run build:web` が要る |
@@ -139,7 +139,10 @@ global の `my-reuse-first` に従う。ここに置くのは**このリポジ�
 | ユーザー単位の登録簿（JSON 1 ファイル）の読み方 | `server/registry-file.ts` `readRegistryFile` / `cachedRegistryReader` |
 | 利用者の設定ファイル（エージェントの settings.json など）を安全に書き換える | `server/terminal/settings-file.ts`（約束は `agents.md` の 4） |
 | 動いている全部の code-viewer サーバへ送る | `server/server-registry.ts` `listServerRegistry` + `server/terminal/hook-report.ts` `postToServer` |
-| 別のリポジトリのサーバを起こす・見つける・止める | `server/worktree/open.ts` `openWorktreeServer` / `runningServerResult` / `stopWorktreeServer` |
+| 別のリポジトリのサーバを起こす・見つける・止める | `server/worktree/open.ts` `openWorktreeServer` / `runningServerResult` / `stopWorktreeServer`（`backendOf` で入口の裏として起こす） |
+| 入口のサーバの取り次ぎ・裏の管理・鍵の解決・`entry.json` | `server/entry/proxy.ts` / `backends.ts` / `projects.ts` / `entry-file.ts` |
+| 画面の URL の前置き (`/p/<鍵>`) を付ける・外す | `core/api-url.ts` の `apiUrl` / `pageUrl` / `routePathname` / `withoutProjectPrefix`。`location.pathname` を経路として読むなら `routePathname()` |
+| 画面のファイルを配る | `server/static-files.ts` `staticFile` |
 | テストの共有ヘルパ | `web-src/test/_test-helpers.ts` / `_fake-dom.ts` / `_git-fixture.ts` / `_io-fixture.ts` / `_dialog-helpers.ts` |
 
 `alert` / `confirm` / `prompt` は `biome.jsonc` が error で落とすので書けない。

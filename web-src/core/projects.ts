@@ -18,11 +18,6 @@ export type StoredProject = {
   root: string;
   /** 表示名。既定はフォルダ名。 */
   name: string;
-  /**
-   * code-viewer がこのプロジェクトのサーバを起こしたときのポート。次も同じ
-   * ポートで起こす (通知の許可などがオリジンごとのため)。未定なら無い。
-   */
-  port?: number;
   /** 登録した時刻 (ISO 8601)。 */
   addedAt: string;
 };
@@ -43,15 +38,6 @@ export function emptyProjectRegistry(): ProjectRegistry {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-export function isValidPort(value: unknown): value is number {
-  return (
-    typeof value === "number" &&
-    Number.isInteger(value) &&
-    value >= 1 &&
-    value <= 65_535
-  );
 }
 
 /** 表示名の問題。無ければ null。 */
@@ -96,7 +82,9 @@ export function parseProjectRegistry(
       issues.push(`${at}: not an object`);
       return;
     }
-    const { root, name, port, addedAt } = entry;
+    // 以前の版はプロジェクトごとのポート (port) を書いていた。入口のサーバで
+    // オリジンが 1 つになったので使わない。読み飛ばし、次に書くときに落ちる。
+    const { root, name, addedAt } = entry;
     if (typeof root !== "string") {
       issues.push(`${at}.root: not a string`);
       return;
@@ -110,16 +98,12 @@ export function parseProjectRegistry(
       const nameIssue = projectNameIssue(name);
       if (nameIssue) issues.push(`${at}.name: ${nameIssue}`);
     }
-    if (port !== undefined && !isValidPort(port)) {
-      issues.push(`${at}.port: not a TCP port (${String(port)})`);
-    }
     if (typeof addedAt !== "string" || !addedAt) {
       issues.push(`${at}.addedAt: not a string`);
     }
     projects.push({
       root,
       name: typeof name === "string" ? name.trim() : "",
-      ...(isValidPort(port) ? { port } : {}),
       addedAt: typeof addedAt === "string" ? addedAt : "",
     });
   });
@@ -247,26 +231,12 @@ export function moveProject(
   return { ok: true, registry: { version: 1, projects }, project };
 }
 
-/** 起こしたポートを覚える。 */
-export function setProjectPort(
-  registry: ProjectRegistry,
-  root: string,
-  port: number,
-): ProjectRegistryChange {
-  const index = findIndex(registry, root);
-  if (typeof index !== "number") return index;
-  const current = registry.projects[index] as StoredProject;
-  if (current.port === port) return { ok: true, registry, project: current };
-  return replaceAt(registry, index, { ...current, port });
-}
-
 /** 一覧・切替に載せる登録の情報 (ワイヤ形式)。 */
 export type RegisteredProjectInfo = {
   root: string;
   name: string;
   /** 登録簿の中の位置 (0 始まり)。利用者が決めた順。 */
   order: number;
-  port: number | null;
 };
 
 export type ProjectRegistrySnapshot = {
@@ -284,7 +254,6 @@ export function registeredProjectInfos(
     root: project.root,
     name: project.name,
     order,
-    port: project.port ?? null,
   }));
 }
 
@@ -330,8 +299,9 @@ export function canStopProjectServer(server: AgentProjectServer): boolean {
 }
 
 /**
- * 移り先の URL。サーバの根 (`http://127.0.0.1:<port>/`) に、移る前と同じ
- * 画面のパスを付ける。パスは `/` 始まりのアプリ内のものだけ受け、それ以外は
+ * 移り先の URL。プロジェクトの根 (`http://127.0.0.1:<port>/`、入口の下なら
+ * `http://127.0.0.1:<port>/p/<鍵>/`) に、移る前と同じ画面のパスを付ける。
+ * パスは `/` 始まりのアプリ内のもの (前置きを外したもの) だけ受け、それ以外は
  * 根にする (別のオリジンへ飛ばさない)。
  */
 export function projectDestination(serverUrl: string, path: string): string {
@@ -340,7 +310,8 @@ export function projectDestination(serverUrl: string, path: string): string {
     path.startsWith("/") && !path.startsWith("//") && !hasControlCharacter(path)
       ? path
       : "/";
-  const target = new URL(safe, base);
+  const prefix = base.pathname.replace(/\/+$/, "");
+  const target = new URL(prefix + safe, base);
   if (target.origin !== base.origin) return base.href;
   return target.href;
 }
@@ -350,11 +321,6 @@ export type ProjectOpenResponse = {
   url: string;
   /** 今回起こしたか (既に動いていたら false)。 */
   started: boolean;
-  /**
-   * 覚えていたポートが使えず、別のポートで起こした。オリジンが変わるので、
-   * 通知の許可を取り直す必要がある。
-   */
-  portChanged: { from: number; to: number } | null;
 };
 
 /** 絞り込みの文字でプロジェクトを選ぶ (名前とパスの部分一致、大小無視)。 */

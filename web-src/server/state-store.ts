@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { hasControlCharacter } from "../core/control-chars";
 import { sanitizeKeymapOverrides } from "../core/keymap";
 import {
   APP_PANEL_HEIGHT,
@@ -337,6 +338,13 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     APP_PANEL_HEIGHT.max,
   );
   if (appPanelHeight !== undefined) out.appPanelHeight = appPanelHeight;
+  const lastProjectRoot = optionalString(raw.lastProjectRoot, 4096);
+  if (
+    lastProjectRoot?.startsWith("/") &&
+    !hasControlCharacter(lastProjectRoot)
+  ) {
+    out.lastProjectRoot = lastProjectRoot;
+  }
   // 差分が空なら書かない。全部デフォルトに戻したときにファイルへ {} が
   // 残らないので、次に読んだときは素直に「未設定」として扱える。
   const keybindings = sanitizeKeymapOverrides(raw.keybindings);

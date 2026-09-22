@@ -13,7 +13,8 @@
 import type { AppSettingsState } from "./types";
 
 // 骨格の見た目 (左のサイドバーの幅・畳み・畳んだプロジェクト、下のパネルの
-// 高さ) もここに入れる。プロジェクトを移る = 別のポートのページへ移るので、
+// 高さ) もここに入れる。1 つで完結するサーバ (`--standalone`) の間を移る =
+// 別のポートのページへ移るので、
 // localStorage に置くと移るたびに見た目が戻ってしまう。
 export const USER_SETTING_KEYS = [
   "theme",
@@ -33,6 +34,7 @@ export const USER_SETTING_KEYS = [
   "navWidth",
   "navCollapsedProjects",
   "appPanelHeight",
+  "lastProjectRoot",
 ] as const satisfies readonly (keyof AppSettingsState)[];
 
 export type UserSettingKey = (typeof USER_SETTING_KEYS)[number];

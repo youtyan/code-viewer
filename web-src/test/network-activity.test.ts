@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   BACKGROUND_REQUEST_HEADER,
   createNetworkActivityTracker,
+  UNINTERRUPTIBLE_REQUEST_HEADER,
 } from "../core/network-activity";
 import { deferred } from "./_test-helpers";
 
@@ -103,5 +104,60 @@ describe("network activity tracker", () => {
     pending.resolve("done");
     expect(await tracked).toBe("done");
     expect(tracker.getState()).toEqual({ inFlight: 0, cancellable: 0 });
+  });
+
+  // ターミナルの打鍵と寸法の送信。画面の切替の取消で捨てると、打った文字が
+  // 黙って消える。
+  test.each([
+    [
+      "keys marked uninterruptible",
+      { [UNINTERRUPTIBLE_REQUEST_HEADER]: "1" },
+      0,
+    ],
+    ["a background poll", { [BACKGROUND_REQUEST_HEADER]: "1" }, 0],
+    ["an ordinary request", {}, 1],
+  ])("cancelAll and %s: cancels %i", async (_label, headers, cancelled) => {
+    const signals: (AbortSignal | undefined | null)[] = [];
+    const target = {
+      fetch: ((_input, init) => {
+        signals.push(init?.signal);
+        return new Promise<Response>(() => undefined);
+      }) as unknown as typeof fetch,
+    };
+    const tracker = createNetworkActivityTracker();
+    tracker.installFetch(target);
+    void target.fetch("/_shell/keys", { method: "POST", headers });
+    expect(tracker.cancelAll()).toBe(cancelled);
+    expect(signals[0]?.aborted ?? false).toBe(cancelled === 1);
+  });
+
+  test("prepareRequest rewrites every request and onResponse sees every response", async () => {
+    const seen: string[] = [];
+    const statuses: number[] = [];
+    const target = {
+      fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push(
+          `${String(input)} ${new Headers(init?.headers).get("x-sample") ?? ""}`,
+        );
+        return Promise.resolve(new Response("", { status: 502 }));
+      }) as unknown as typeof fetch,
+    };
+    const tracker = createNetworkActivityTracker({
+      prepareRequest: (input, init) => ({
+        input: `/p/0123456789abcdef${String(input)}`,
+        init: { ...init, headers: { "x-sample": "1" } },
+      }),
+      onResponse: (response) => statuses.push(response.status),
+    });
+    tracker.installFetch(target);
+    await target.fetch("/_tree");
+    await target.fetch("/_agent/overview", {
+      headers: { [BACKGROUND_REQUEST_HEADER]: "1" },
+    });
+    expect(seen).toEqual([
+      "/p/0123456789abcdef/_tree 1",
+      "/p/0123456789abcdef/_agent/overview 1",
+    ]);
+    expect(statuses).toEqual([502, 502]);
   });
 });

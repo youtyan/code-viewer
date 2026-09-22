@@ -6,13 +6,21 @@
  * `web-src/test/api-url-guard.test.ts` が見ている。経路を足すときは下の表に
  * 1 行足し、呼び出し側は `apiUrl("名前")` にクエリを繋げる。
  *
- * zone は、入口のサーバを 1 つにしたときにどこが受けるか:
- * - `project`: リポジトリ決め打ちの処理 (プロジェクトごとの裏のプロセスが受ける)
- * - `entry`: プロジェクトに依らない処理 (入口が受ける)
- * いまはどちらも前置きが空で、URL はこれまでと同じ。
+ * zone は、入口のサーバ (server/entry/) の下でどこが受けるか:
+ * - `project`: リポジトリ決め打ちの処理。入口の下の画面では `/p/<鍵>` を前置きし、
+ *   入口がそのプロジェクトの裏のプロセスへ取り次ぐ
+ * - `entry`: プロジェクトに依らない処理 (入口が受ける)。前置きしない
+ * 1 つで完結するサーバ (`--standalone`) の画面は前置きが無く、URL は今までと同じ。
  */
 
 export type ApiZone = "project" | "entry";
+
+/**
+ * 入口のサーバへの要求に付ける、画面が選んでいるプロジェクトの鍵。入口は
+ * これでシェルの作業場所や「このリポジトリのペインか」を決める
+ * (server/entry/server.ts)。
+ */
+export const PROJECT_HEADER = "X-Code-Viewer-Project";
 
 const API_ENDPOINTS = {
   agentAccounts: { path: "/_agent/accounts", zone: "entry" },
@@ -39,6 +47,7 @@ const API_ENDPOINTS = {
     zone: "entry",
   },
   agentStatuslinePlan: { path: "/_agent/statusline/plan", zone: "entry" },
+  agentUnread: { path: "/_agent/unread", zone: "entry" },
   annotations: { path: "/_annotations", zone: "project" },
   authors: { path: "/_authors", zone: "project" },
   commits: { path: "/_commits", zone: "project" },
@@ -133,21 +142,102 @@ const API_ENDPOINTS = {
   worktreeRemove: { path: "/_worktree/remove", zone: "project" },
   worktreeStop: { path: "/_worktree/stop", zone: "entry" },
   diffJson: { path: "/diff.json", zone: "project" },
+  entryRestart: { path: "/_entry/restart", zone: "entry" },
   events: { path: "/events", zone: "project" },
   fileRange: { path: "/file_range", zone: "project" },
+  // サーバが一覧の応答で返す load_url・preview_url の経路。呼び出し側は
+  // apiUrl で組み立てず、projectRequest が前置きを付ける先として載せる。
+  fileDiff: { path: "/file_diff", zone: "project" },
 } as const satisfies Record<string, { path: string; zone: ApiZone }>;
 
 export type ApiEndpoint = keyof typeof API_ENDPOINTS;
 
-const ZONE_PREFIX: Record<ApiZone, string> = { project: "", entry: "" };
+/**
+ * 入口のサーバの下で開いた画面の URL の前置き (`/p/<鍵>`)。鍵は根の実パスの
+ * rootFileKey (server/server-registry.ts) で、16 進 16 文字。1 つで完結する
+ * サーバ (`--standalone`) の画面には付かない。
+ */
+const PROJECT_PREFIX_PATTERN = /^\/p\/([0-9a-f]{16})(?=[/?#]|$)/;
+
+function currentPathname(): string {
+  // サーバ (entry/server.ts) もこのファイルを読むので、location が無い所では空。
+  return typeof location === "undefined" ? "" : location.pathname;
+}
+
+/** 画面が選んでいるプロジェクトの鍵。前置きの無い画面では null。 */
+export function projectKey(
+  pathname: string = currentPathname(),
+): string | null {
+  return PROJECT_PREFIX_PATTERN.exec(pathname)?.[1] ?? null;
+}
+
+function projectPrefix(): string {
+  const key = projectKey();
+  return key ? `/p/${key}` : "";
+}
+
+/**
+ * 前置きを外した画面の URL (`/p/<鍵>/file?…` → `/file?…`)。parseRoute など
+ * 経路を読む側はこれを通す。前置きが無ければそのまま。
+ */
+export function withoutProjectPrefix(url: string): string {
+  const rest = url.replace(PROJECT_PREFIX_PATTERN, "");
+  if (rest === url) return url;
+  return rest.startsWith("/") ? rest : `/${rest}`;
+}
+
+/** いまの画面の経路 (前置きを外した location.pathname)。 */
+export function routePathname(): string {
+  return withoutProjectPrefix(currentPathname());
+}
 
 /** サーバの経路の URL (クエリは呼び出し側が繋げる)。 */
 export function apiUrl(endpoint: ApiEndpoint): string {
   const { path, zone } = API_ENDPOINTS[endpoint];
-  return ZONE_PREFIX[zone] + path;
+  return zone === "project" ? projectPrefix() + path : path;
 }
 
 /** 画面の URL (`/file?…`・`/todif?…` など)。`buildRoute` が通す。 */
 export function pageUrl(path: string): string {
-  return ZONE_PREFIX.project + path;
+  return projectPrefix() + path;
+}
+
+const PATHS_BY_ZONE: Record<ApiZone, ReadonlySet<string>> = {
+  project: new Set(
+    Object.values(API_ENDPOINTS)
+      .filter((spec) => spec.zone === "project")
+      .map((spec) => spec.path),
+  ),
+  entry: new Set(
+    Object.values(API_ENDPOINTS)
+      .filter((spec) => spec.zone === "entry")
+      .map((spec) => spec.path),
+  ),
+};
+
+/**
+ * すべての fetch が通る包み (network-activity の prepareRequest) で、入口の
+ * サーバの下の画面の要求を整える。
+ * - プロジェクトの経路で前置きの無いもの (サーバが返した `load_url` の
+ *   `/file_diff?…` など) に前置きを付ける
+ * - 入口が受ける経路には、選んでいるプロジェクトの鍵を PROJECT_HEADER で渡す
+ * 前置きの無い画面 (1 つで完結するサーバ) では何もしない。
+ */
+export function projectRequest(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): { input: RequestInfo | URL; init?: RequestInit } {
+  const key = projectKey();
+  if (!key || typeof input !== "string") return { input, init };
+  if (!input.startsWith("/") || input.startsWith("//")) return { input, init };
+  const path = input.split(/[?#]/, 1)[0] ?? input;
+  if (PATHS_BY_ZONE.project.has(path)) {
+    return { input: `/p/${key}${input}`, init };
+  }
+  if (PATHS_BY_ZONE.entry.has(path)) {
+    const headers = new Headers(init?.headers);
+    headers.set(PROJECT_HEADER, key);
+    return { input, init: { ...init, headers } };
+  }
+  return { input, init };
 }

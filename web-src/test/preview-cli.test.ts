@@ -317,7 +317,7 @@ async function startTestPreview(
 ) {
   const proc = spawn(
     process.execPath,
-    [CLI_BUNDLE, "--port", "0", "--cwd", root],
+    [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
     {
       cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
       env: {
@@ -471,7 +471,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--open"],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--open"],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           env: {
@@ -585,7 +585,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           env: {
@@ -666,7 +666,7 @@ describe("preview CLI", () => {
 
     const proc = spawn(
       process.execPath,
-      [CLI_BUNDLE, "--port", "0", "--cwd", explicitCwd],
+      [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", explicitCwd],
       {
         cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
         stdio: ["ignore", "pipe", "pipe"],
@@ -709,7 +709,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -798,7 +798,7 @@ describe("preview CLI", () => {
 
     const proc = spawn(
       process.execPath,
-      [CLI_BUNDLE, "--port", "0", "--cwd", root],
+      [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
       {
         cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
         stdio: ["ignore", "pipe", "pipe"],
@@ -849,7 +849,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -903,7 +903,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", explicitCwd],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", explicitCwd],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           env: { ...process.env, CODE_VIEWER_BIN_GIT: fakeGit },
@@ -971,7 +971,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -1042,7 +1042,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -1111,7 +1111,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -1187,7 +1187,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -1281,7 +1281,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -1831,7 +1831,7 @@ describe("preview CLI", () => {
 
     const proc = spawn(
       process.execPath,
-      [CLI_BUNDLE, "--port", "0", "--cwd", root],
+      [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
       {
         cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
         stdio: ["ignore", "pipe", "pipe"],

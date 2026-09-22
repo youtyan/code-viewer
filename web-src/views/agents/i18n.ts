@@ -445,8 +445,8 @@ const EN: AgentsText = {
   openServer: "Open",
   openServerTitle: (url) =>
     `Open the code-viewer running for this project (${url})`,
-  currentServer: "this viewer",
-  currentServerTitle: "This code-viewer is showing this project",
+  currentServer: "selected",
+  currentServerTitle: "This project is the one shown on this screen",
   serverProblem: (detail) =>
     `A code-viewer is registered for this project but could not be reached: ${detail}`,
   outsideGit: "not a git repository",
@@ -568,8 +568,8 @@ const JA: AgentsText = {
   openServer: "開く",
   openServerTitle: (url) =>
     `このプロジェクトを開いている code-viewer へ移動 (${url})`,
-  currentServer: "この画面",
-  currentServerTitle: "いま見ている code-viewer がこのプロジェクトです",
+  currentServer: "選択中",
+  currentServerTitle: "いまこの画面で選んでいるプロジェクトです",
   serverProblem: (detail) =>
     `このプロジェクトの code-viewer が登録されていますが、応答がありません: ${detail}`,
   outsideGit: "git 管理外",

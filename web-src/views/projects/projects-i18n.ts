@@ -45,10 +45,13 @@ export type ProjectsText = {
   addPathLabel: string;
   addPathHint: string;
   addPathSubmit: string;
-  portChangedTitle: string;
-  portChangedBody: (from: number, to: number) => string;
-  portChangedContinue: string;
   registryProblem: (detail: string) => string;
+  /** 入口のサーバの下で、このプロジェクトの裏のプロセスが止まった・起きなかった。 */
+  backendStoppedTitle: (name: string) => string;
+  backendFailedTitle: (name: string) => string;
+  backendRestart: string;
+  backendRestartFailed: string;
+  close: string;
   /** ヘッダの切替。 */
   switcherTitle: string;
   switcherHint: string;
@@ -89,7 +92,7 @@ export const PROJECTS_EN: ProjectsText = {
   dismiss: "Dismiss",
   openTitle: (name) => `Open ${name} in this tab`,
   openStoppedTitle: (name) =>
-    `Start the code-viewer server for ${name} and open it in this tab`,
+    `Start the process for ${name} and open it in this tab`,
   openUnregisteredTitle: (name) =>
     `No code-viewer is running for ${name}. Register it to start one from here.`,
   registerFirstTitle: "Register this project?",
@@ -114,12 +117,13 @@ export const PROJECTS_EN: ProjectsText = {
   addPathHint:
     "An absolute path. A folder inside a repository or a worktree registers the repository.",
   addPathSubmit: "Register",
-  portChangedTitle: "The address of this project changed",
-  portChangedBody: (from, to) =>
-    `Port ${from} was in use, so its code-viewer started on port ${to}. The browser treats it as a different site: allow notifications there again if you use them. Next time code-viewer tries port ${to} first.`,
-  portChangedContinue: "Open",
   registryProblem: (detail) =>
     `The registered projects cannot be read, so they are not shown and cannot be changed:\n${detail}`,
+  backendStoppedTitle: (name) => `The process for ${name} stopped`,
+  backendFailedTitle: (name) => `The process for ${name} did not start`,
+  backendRestart: "Restart",
+  backendRestartFailed: "The process for this project could not be restarted",
+  close: "Close",
   switcherTitle: "Projects",
   switcherHint: "↑↓ move · Enter open · Esc close",
   switcherPlaceholder: "Filter projects",
@@ -159,8 +163,7 @@ export const PROJECTS_JA: ProjectsText = {
   changeFailed: "登録したプロジェクトを変更できませんでした",
   dismiss: "閉じる",
   openTitle: (name) => `${name} をこのタブで開く`,
-  openStoppedTitle: (name) =>
-    `${name} の code-viewer を起動して、このタブで開く`,
+  openStoppedTitle: (name) => `${name} のプロセスを起動して、このタブで開く`,
   openUnregisteredTitle: (name) =>
     `${name} の code-viewer は動いていません。登録するとここから起動できます`,
   registerFirstTitle: "このプロジェクトを登録しますか？",
@@ -185,12 +188,13 @@ export const PROJECTS_JA: ProjectsText = {
   addPathHint:
     "絶対パスで入力します。リポジトリの中のフォルダや作業ツリーを指定すると、そのリポジトリを登録します。",
   addPathSubmit: "登録",
-  portChangedTitle: "このプロジェクトのアドレスが変わりました",
-  portChangedBody: (from, to) =>
-    `ポート ${from} が使われていたため、ポート ${to} で起動しました。ブラウザからは別のサイトに見えるので、通知を使うならそこで許可し直してください。次からはポート ${to} を先に使います。`,
-  portChangedContinue: "開く",
   registryProblem: (detail) =>
     `登録したプロジェクトを読めないため、表示も変更もできません:\n${detail}`,
+  backendStoppedTitle: (name) => `${name} のプロセスが止まりました`,
+  backendFailedTitle: (name) => `${name} のプロセスを起動できませんでした`,
+  backendRestart: "再起動",
+  backendRestartFailed: "このプロジェクトのプロセスを再起動できませんでした",
+  close: "閉じる",
   switcherTitle: "プロジェクト",
   switcherHint: "↑↓ 移動 · Enter 開く · Esc 閉じる",
   switcherPlaceholder: "プロジェクトを絞り込む",

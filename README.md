@@ -106,11 +106,15 @@ Requires Node.js 20 or newer. Development uses
   tmux window.
 - Register your projects so they stay in the Agents list (in your order) even
   with no agent running, and switch between them from the project name at
-  the left of the top bar (`p`) or from the left sidebar on any screen. Open goes to that project's
-  code-viewer in the same tab, starting one first for a registered project and
-  reusing its port next time; servers that code-viewer started can be stopped
-  from the list. Theme, language, font sizes, key bindings and notifications
-  are shared by all projects, so switching does not change how it looks.
+  the left of the top bar (`p`) or from the left sidebar on any screen. One
+  code-viewer serves every project on one port: switching reloads the page at
+  `/p/<key>/…` on the same address, so notification permission, the terminal
+  shells and unread marks carry over, and reload, back/forward and bookmarks
+  return to the same project and screen. Each project is shown by its own
+  process that code-viewer starts the first time you open it (and stops when
+  code-viewer exits); processes it started can be stopped from the list. Theme,
+  language, font sizes, key bindings and notifications are shared by all
+  projects, so switching does not change how it looks.
 - Open files directly from the repository or diff view, including text-like
   config/prompt files and large generated files (virtualized source viewer
   with copy/open-full-view).
@@ -243,8 +247,11 @@ From inside a git repository, run it without installing:
 npx @youtyan/code-viewer
 ```
 
-The server prints a local URL. Add `--open` if you want the browser opened
-automatically:
+The server prints a local URL. Running `code-viewer` again in another
+repository adds that repository to the running code-viewer and prints its URL
+instead of starting a second server (if a code-viewer of another version is
+running, it tells you where and does not start). Add `--open` if you want the
+browser opened automatically:
 
 ```sh
 npx @youtyan/code-viewer --open
@@ -276,6 +283,9 @@ Common options:
 - `--cwd <dir>` — repository to view (default: current working directory).
 - `--open` — open the printed URL in the default browser.
 - `--port <port>` — bind to a specific port (default: pick a free port).
+- `--standalone` — run one self-contained server for this repository only, the
+  way code-viewer worked before it served every project from one address
+  (scripts and tests use this).
 - `--bin <name>=<absolute-path>` — override an external command path
   (`git`, `rg`, `docker`, `gh`, or `tmux`). The same values can be supplied through
   `CODE_VIEWER_BIN_GIT`, `CODE_VIEWER_BIN_RG`, `CODE_VIEWER_BIN_DOCKER`, and

@@ -5,10 +5,15 @@
 // 完了・未読が残り、プロジェクトを移ると未読がよみがえって見える。フックの
 // 申告 (hook-report.ts) と同じく、登録簿の全部のサーバへ送る。
 //
+// 入口のサーバ自身は中継しない (状態を持つのが入口だけなので)。ここを使うのは
+// 1 つで完結するサーバで、送り先は入口と、登録簿のうち入口の裏のプロセスで
+// ないもの (hook-report.ts の reportTargets)。
+//
 // 送り先では送り直さない (relay の印を付けない)。ほかのサーバに届かなくても
 // 自分の記録は済んでいる。届かなかった理由は全部返し、画面に出す。
 
 import { formatErrorDetail } from "../../core/error-detail";
+import { liveEntryUrl } from "../entry/entry-file";
 import {
   listServerRegistry,
   type ServerRegistryListing,
@@ -17,12 +22,15 @@ import {
   connectionRefused,
   postToServer,
   REPORT_TIMEOUT_MS,
+  reportTargets,
 } from "./hook-report";
 
 export type ReadRelayDeps = {
   /** このサーバのプロセス。自分には送らない。 */
   selfPid: number;
   listServers(): ServerRegistryListing;
+  /** 動いている入口の URL。無ければ null。読めなければ投げる。 */
+  entryUrl(): string | null;
   post(url: string, body: unknown, signal: AbortSignal): Promise<Response>;
 };
 
@@ -39,6 +47,7 @@ export async function relayAgentRead(
   deps: ReadRelayDeps = {
     selfPid: process.pid,
     listServers: listServerRegistry,
+    entryUrl: () => liveEntryUrl(),
     post: postToServer,
   },
 ): Promise<ReadRelayResult> {
@@ -55,12 +64,23 @@ export async function relayAgentRead(
   for (const broken of listing.errors) {
     failures.push(`${broken.file}: ${formatErrorDetail(broken.error)}`);
   }
+  let entry: string | null = null;
+  try {
+    entry = deps.entryUrl();
+  } catch (error) {
+    failures.push(`entry server record: ${formatErrorDetail(error)}`);
+  }
+  const self = new Set(
+    listing.servers
+      .filter((server) => server.pid === deps.selfPid)
+      .map((server) => server.url.replace(/\/+$/, "")),
+  );
   let reached = 0;
   await Promise.all(
-    listing.servers
-      .filter((server) => server.pid !== deps.selfPid)
-      .map(async (server) => {
-        const url = `${server.url.replace(/\/+$/, "")}/_agent/state`;
+    reportTargets(listing, entry)
+      .filter((base) => !self.has(base))
+      .map(async (base) => {
+        const url = `${base}/_agent/state`;
         try {
           const res = await deps.post(
             url,

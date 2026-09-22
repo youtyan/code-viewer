@@ -249,7 +249,6 @@ describe("opening a registered project", () => {
         };
       },
       stop: async () => undefined,
-      portAvailable: async () => true,
       ...over,
     };
   }
@@ -273,11 +272,6 @@ describe("opening a registered project", () => {
     }));
   }
 
-  function rememberedPort(): number | undefined {
-    const read = readProjectRegistry(registryPath);
-    return read.ok ? read.registry.projects[0]?.port : undefined;
-  }
-
   test("running: goes there without starting anything", async () => {
     await register();
     const opens: SpawnOptions[] = [];
@@ -293,74 +287,19 @@ describe("opening a registered project", () => {
         }),
       }),
     );
-    expect(result).toEqual({
-      url: "http://127.0.0.1:64150/",
-      started: false,
-      portChanged: null,
-    });
+    expect(result).toEqual({ url: "http://127.0.0.1:64150/", started: false });
     expect(opens).toEqual([]);
   });
 
-  test("stopped: starts it, then remembers the port for next time", async () => {
-    await register();
+  test.each([
+    ["nothing remembered", undefined],
+    ["a port remembered by an older version", 64200],
+  ])("stopped (%s): starts it on an automatic port", async (_label, port) => {
+    await register(port);
     const opens: SpawnOptions[] = [];
-    const first = await openRegisteredProject(ROOT, deps({ opens }));
-    expect(first).toEqual({
-      url: "http://127.0.0.1:64200/",
-      started: true,
-      portChanged: null,
-    });
-    expect(opens[0]?.port).toBe(0);
-    expect(rememberedPort()).toBe(64200);
-    await openRegisteredProject(ROOT, deps({ opens }));
-    expect(opens[1]?.port).toBe(64200);
-  });
-
-  test("the remembered port is in use: another port, and it says so", async () => {
-    await register(64200);
-    const opens: SpawnOptions[] = [];
-    const result = await openRegisteredProject(
-      ROOT,
-      deps({
-        opens,
-        portAvailable: async () => false,
-        open: async (_root, options) => {
-          opens.push(options);
-          return {
-            status: "ok",
-            url: "http://127.0.0.1:64333/",
-            started: true,
-          };
-        },
-      }),
-    );
+    const result = await openRegisteredProject(ROOT, deps({ opens }));
+    expect(result).toEqual({ url: "http://127.0.0.1:64200/", started: true });
     expect(opens.map((item) => item.port)).toEqual([0]);
-    expect(result.portChanged).toEqual({ from: 64200, to: 64333 });
-    expect(rememberedPort()).toBe(64333);
-  });
-
-  test("the port is taken between the check and the start: retried once on another port", async () => {
-    await register(64200);
-    const opens: SpawnOptions[] = [];
-    const result = await openRegisteredProject(
-      ROOT,
-      deps({
-        opens,
-        open: async (_root, options) => {
-          opens.push(options);
-          if (options.port === 64200) {
-            return { status: "error", error: new Error("EADDRINUSE 64200") };
-          }
-          return {
-            status: "ok",
-            url: "http://127.0.0.1:64444/",
-            started: true,
-          };
-        },
-      }),
-    );
-    expect(opens.map((item) => item.port)).toEqual([64200, 0]);
-    expect(result.portChanged).toEqual({ from: 64200, to: 64444 });
   });
 
   test.each<[string, WorktreeOpenResult, string]>([
@@ -382,7 +321,6 @@ describe("opening a registered project", () => {
       deps({ open: async () => outcome }),
     ).catch((caught: unknown) => caught);
     expect((error as Error).message).toContain(reason);
-    expect(rememberedPort()).toBeUndefined();
   });
 
   test("an unregistered project is never started", async () => {
@@ -649,6 +587,7 @@ describe("relayAgentRead", () => {
           { file: "/state/servers/broken.json", error: new Error("bad JSON") },
         ],
       }),
+      entryUrl: () => null,
       post: async (url, body) => {
         posted.push({ url, body });
         if (url.includes("64003")) throw refused;
@@ -669,6 +608,41 @@ describe("relayAgentRead", () => {
       "/state/servers/broken.json: Error: bad JSON",
       "http://127.0.0.1:64004/_agent/state: Error: HTTP 403: forbidden",
     ]);
+  });
+});
+
+describe("relayAgentRead with the entry server", () => {
+  test("a standalone server tells the entry server and skips the entry's project processes", async () => {
+    const posted: string[] = [];
+    const result = await relayAgentRead("%3", 1234, {
+      selfPid: 10,
+      listServers: () => ({
+        servers: [
+          {
+            url: "http://127.0.0.1:64001/",
+            pid: 10,
+            root: "/work/self",
+            started_at: "x",
+          },
+          {
+            url: "http://127.0.0.1:64002/",
+            pid: 11,
+            root: "/work/backend",
+            started_at: "x",
+            launched: true,
+            backend: true,
+          },
+        ],
+        errors: [],
+      }),
+      entryUrl: () => "http://127.0.0.1:64100",
+      post: async (url) => {
+        posted.push(url);
+        return new Response("{}", { status: 200 });
+      },
+    });
+    expect(posted).toEqual(["http://127.0.0.1:64100/_agent/state"]);
+    expect(result).toEqual({ reached: 1, failures: [] });
   });
 });
 

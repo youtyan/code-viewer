@@ -123,6 +123,7 @@ TOC の検査は、`.gdp-markdown-toc` のブロックを改行込みで丸ご�
 | `fileParallelism: false` | 実プロセス（preview サーバ / git / docker CLI）を起動するテストが多く、並列だと互いに遅れてランダムに落ちるため。**タイミング依存の失敗を「並列だから」と説明しない** |
 | `environment: "node"` | DOM が要るファイルは**各自** `@happy-dom/global-registrator` を登録する。全体に被せると node 側のテストが本来無いグローバルを掴む |
 | `globalSetup` が `dist/code-viewer.js` を焼く | CLI を起動するテストが依存している |
+| サーバを起こすテストは `--standalone` を付ける | 既定の `code-viewer` は入口のサーバ（`entry.json` を見て、動いている入口があれば委ねて終わる）。入口そのものを確かめるテスト（`entry-server.test.ts`）は、状態ディレクトリ・登録簿・`TMUX_TMPDIR` をテストごとの一時ディレクトリにし、`TMUX`・`TMUX_PANE` を外す（入口は tmux を巡回する） |
 | `globalSetup`（と `scripts/node-smoke.mjs`）がサーバ登録簿と状態ディレクトリを一時ディレクトリへ向ける | 向けないとテストが開発者の実データを書き換える（実際に消した・溜めた）。新しい置き場所を足すときの決まりは `agents.md` の 8 と 9 |
 | `testTimeout` / `hookTimeout` = 30s | 既定の 5s では足りないテストがあるため |
 | `web-src/test/_*.ts` はグロブに入らない | 共有ヘルパの置き場。`_test-helpers.ts` / `_fake-dom.ts` / `_git-fixture.ts` / `_io-fixture.ts` / `_dialog-helpers.ts` / `_documented-cli-fixture.ts` |

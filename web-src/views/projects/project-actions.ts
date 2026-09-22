@@ -20,11 +20,7 @@ import {
   projectDestination,
 } from "../../core/projects";
 import { responseFailure } from "../agents/accounts-client";
-import {
-  showAlertDialog,
-  showConfirmDialog,
-  showPromptDialog,
-} from "../ui-dialog";
+import { showConfirmDialog, showPromptDialog } from "../ui-dialog";
 import type { ProjectsText } from "./projects-i18n";
 
 export type ProjectActionsDeps = {
@@ -128,16 +124,6 @@ export function createProjectActions(deps: ProjectActionsDeps): ProjectActions {
         detail: formatErrorDetail(cause),
       });
       return;
-    }
-    if (opened.portChanged) {
-      await showAlertDialog({
-        title: text.portChangedTitle,
-        body: text.portChangedBody(
-          opened.portChanged.from,
-          opened.portChanged.to,
-        ),
-        confirmLabel: text.portChangedContinue,
-      });
     }
     // 移るまで「起動中」を出したままにする (押し直しで 2 本目を起こさない)。
     deps.navigate(projectDestination(opened.url, path));

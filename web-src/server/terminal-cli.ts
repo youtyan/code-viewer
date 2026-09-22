@@ -28,9 +28,11 @@ import {
   readStdin,
   requestJson,
   resolveRepoRoot,
+  serverReachable,
   takeGlobalCliOption,
   takeValue,
 } from "./cli-helpers";
+import { liveEntryUrl } from "./entry/entry-file";
 import { defaultHookReportDeps, reportAgentHook } from "./terminal/hook-report";
 import { appendHookFailure, currentHookLauncher } from "./terminal/hooks";
 
@@ -381,7 +383,13 @@ export async function runTerminalCli(argv: string[]): Promise<void> {
   }
 
   const root = resolveRepoRoot(cwd);
-  const serverUrl = await ensureServerUrl(root, server, HEALTH_PATH);
+  // 状態とターミナルを持つのは入口のサーバ。入口が居なければ、このリポジトリの
+  // 1 つで完結するサーバ (`--standalone`・古い版) を探す。
+  const entry = server ? null : liveEntryUrl();
+  const serverUrl =
+    entry && (await serverReachable(entry, HEALTH_PATH))
+      ? entry
+      : await ensureServerUrl(root, server, HEALTH_PATH);
 
   if (command.mode === "state") {
     // フックは別プロセスなので、送った順に着くとは限らない。呼ばれた時刻を

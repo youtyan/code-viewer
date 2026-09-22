@@ -1,4 +1,4 @@
-import { apiUrl } from "../../core/api-url";
+import { apiUrl, routePathname } from "../../core/api-url";
 import { inferRailsForeignKeys } from "../../core/database/infer-fk";
 import type {
   DbColumn,
@@ -797,7 +797,7 @@ function createTabPane(
       // window.location を直読みすると URL クエリ名の規約が将来変わったとき
       // routes.ts と此処の 2 箇所を直さないと壊れる。
       const parsed = parseRoute(
-        window.location.pathname,
+        routePathname(),
         window.location.search,
         deps.currentRange(),
       );

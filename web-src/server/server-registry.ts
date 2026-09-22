@@ -22,6 +22,12 @@ export type ServerRegistryEntry = {
    * 利用者が自分で起動したサーバには無い。一覧から止めてよいかの判定に使う。
    */
   launched?: boolean;
+  /**
+   * 入口のサーバが起こしたプロジェクトの裏のプロセス (`--backend`)。巡回も
+   * フックの受け口も持たないので、フックの申告と「読んだ」の中継の送り先から
+   * 外す。入口はこれを見て、生きている裏を拾い直す。
+   */
+  backend?: boolean;
 };
 
 export type ServerStartLock = FileLock;
@@ -98,10 +104,12 @@ function parseServerRegistryEntry(
       `invalid server registry for ${label}: missing required fields`,
     );
   }
-  if (entry.launched !== undefined && typeof entry.launched !== "boolean") {
-    throw new Error(
-      `invalid server registry for ${label}: launched is not a boolean`,
-    );
+  for (const flag of ["launched", "backend"] as const) {
+    if (entry[flag] !== undefined && typeof entry[flag] !== "boolean") {
+      throw new Error(
+        `invalid server registry for ${label}: ${flag} is not a boolean`,
+      );
+    }
   }
   return {
     url: entry.url,
@@ -109,6 +117,7 @@ function parseServerRegistryEntry(
     root: entry.root,
     started_at: entry.started_at,
     ...(entry.launched === true ? { launched: true } : {}),
+    ...(entry.backend === true ? { backend: true } : {}),
   };
 }
 

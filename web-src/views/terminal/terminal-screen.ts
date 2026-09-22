@@ -1,4 +1,5 @@
 import { apiUrl } from "../../core/api-url";
+import { UNINTERRUPTIBLE_REQUEST_HEADER } from "../../core/network-activity";
 // ドロワーが映しているターミナルを xterm.js に描き、打鍵を送り返す部分。
 //
 // 映すのは PTY のシェル 1 本だけ。PTY が吐いた分だけが順に届くので、描き方は
@@ -304,6 +305,8 @@ export function createTerminalScreen(
           headers: {
             ...deps.actionHeaders(),
             "Content-Type": "application/json",
+            // 画面の切替の取消で寸法の送信を捨てない (network-activity)。
+            [UNINTERRUPTIBLE_REQUEST_HEADER]: "1",
           },
           body: JSON.stringify({ id, cols, rows }),
         }),
@@ -341,6 +344,8 @@ export function createTerminalScreen(
           headers: {
             ...deps.actionHeaders(),
             "Content-Type": "application/json",
+            // 画面の切替の取消で打鍵を捨てない (打った文字が黙って消える)。
+            [UNINTERRUPTIBLE_REQUEST_HEADER]: "1",
           },
           body: JSON.stringify({ id: target.id, data }),
         }),

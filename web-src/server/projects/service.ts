@@ -5,12 +5,11 @@
 // あるプロジェクトだけ (登録簿はこのユーザーの状態ディレクトリにあり、
 // 登録の入口は同一オリジンからの要求だけが通る)。
 //
-// ポートはプロジェクトごとに覚えて、次も同じポートで起こす (通知の許可と
-// 画面の寸法がオリジンごとに残るため)。覚えたポートが使えなければ別の
-// ポートで起こし、変わったことを返す。
+// ポートは毎回自動 (0)。入口のサーバの下ではオリジンが入口の 1 つなので、
+// プロジェクトごとのポートを覚える理由が無い (以前は通知の許可と画面の寸法を
+// 保つために覚えていた)。
 
 import { realpathSync } from "node:fs";
-import { createServer } from "node:net";
 import { join } from "node:path";
 import { formatErrorDetail } from "../../core/error-detail";
 import {
@@ -20,7 +19,6 @@ import {
   removeProject,
   renameProject,
   type StoredProject,
-  setProjectPort,
 } from "../../core/projects";
 import { projectRootResultAsync } from "../git";
 import { rootFileKey } from "../server-registry";
@@ -97,21 +95,6 @@ export async function changeProjects(
   });
 }
 
-/** そのポートで今すぐ待ち受けられるか。 */
-export function portAvailable(port: number): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.once("error", (error) => {
-      const code = errno(error);
-      if (code === "EADDRINUSE" || code === "EACCES") resolve(false);
-      else reject(error);
-    });
-    probe.listen({ host: "127.0.0.1", port, exclusive: true }, () => {
-      probe.close((error) => (error ? reject(error) : resolve(true)));
-    });
-  });
-}
-
 /** 起こしたサーバの出力の置き場所。起動に失敗したとき末尾を理由に出す。 */
 export function serverLogFile(root: string): string {
   return join(codeViewerStateDir(), "server-logs", `${rootFileKey(root)}.log`);
@@ -123,7 +106,6 @@ export type ProjectServerDeps = {
   running(root: string): Promise<RunningWorktreeServerResult>;
   open(root: string, options: SpawnOptions): Promise<WorktreeOpenResult>;
   stop(root: string): Promise<void>;
-  portAvailable(port: number): Promise<boolean>;
 };
 
 export function defaultProjectServerDeps(): ProjectServerDeps {
@@ -132,7 +114,6 @@ export function defaultProjectServerDeps(): ProjectServerDeps {
     running: (root) => runningServerResult(root),
     open: openWorktreeServer,
     stop: stopWorktreeServer,
-    portAvailable,
   };
 }
 
@@ -154,16 +135,29 @@ function registeredProject(registryPath: string, root: string): StoredProject {
   return project;
 }
 
-async function startAt(
-  deps: ProjectServerDeps,
+/**
+ * 登録したプロジェクトのサーバの URL。動いていなければ起こす (ポートは自動)。
+ * 登録していないプロジェクトは起こさない (not-found)。
+ */
+export async function openRegisteredProject(
   root: string,
-  port: number,
-): Promise<string> {
+  deps: ProjectServerDeps = defaultProjectServerDeps(),
+): Promise<ProjectOpenResponse> {
+  registeredProject(deps.registryPath, root);
+  const running = await deps.running(root);
+  if (running.status === "running") return { url: running.url, started: false };
+  if (running.status !== "absent") {
+    throw new ProjectRegistryError(
+      `the running code-viewer server for ${root} could not be checked:\n${formatErrorDetail(running.error)}`,
+      "failed",
+      { cause: running.error },
+    );
+  }
   const result = await deps.open(root, {
-    port,
+    port: 0,
     logFile: serverLogFile(root),
   });
-  if (result.status === "ok") return result.url;
+  if (result.status === "ok") return { url: result.url, started: true };
   if (result.status === "missing") {
     throw new ProjectRegistryError(
       `the repository folder ${root} does not exist`,
@@ -181,66 +175,6 @@ async function startAt(
     "failed",
     { cause: result.error },
   );
-}
-
-/**
- * 登録したプロジェクトのサーバの URL。動いていなければ起こす。
- * 登録していないプロジェクトは起こさない (not-found)。
- */
-export async function openRegisteredProject(
-  root: string,
-  deps: ProjectServerDeps = defaultProjectServerDeps(),
-): Promise<ProjectOpenResponse> {
-  const project = registeredProject(deps.registryPath, root);
-  const running = await deps.running(root);
-  if (running.status === "running") {
-    return { url: running.url, started: false, portChanged: null };
-  }
-  if (running.status !== "absent") {
-    throw new ProjectRegistryError(
-      `the running code-viewer server for ${root} could not be checked:\n${formatErrorDetail(running.error)}`,
-      "failed",
-      { cause: running.error },
-    );
-  }
-  const remembered = project.port;
-  let url: string;
-  if (remembered !== undefined && (await deps.portAvailable(remembered))) {
-    try {
-      url = await startAt(deps, root, remembered);
-    } catch (error) {
-      // 確かめた直後に別のプロセスがポートを取ることがある。その 1 回だけ
-      // 別のポートで起こし直す。消えたリポジトリは起こし直さない。
-      if (error instanceof ProjectRegistryError && error.code === "not-found") {
-        throw error;
-      }
-      try {
-        url = await startAt(deps, root, 0);
-      } catch (retryError) {
-        throw new ProjectRegistryError(
-          `could not start the code-viewer server for ${root} on port ${remembered} nor on another port:\n${formatErrorDetail(error)}\n\n${formatErrorDetail(retryError)}`,
-          "failed",
-          { cause: retryError },
-        );
-      }
-    }
-  } else {
-    url = await startAt(deps, root, 0);
-  }
-  const port = Number(new URL(url).port);
-  if (port !== remembered) {
-    await updateProjectRegistry(deps.registryPath, (registry) =>
-      setProjectPort(registry, root, port),
-    );
-  }
-  return {
-    url,
-    started: true,
-    portChanged:
-      remembered !== undefined && remembered !== port
-        ? { from: remembered, to: port }
-        : null,
-  };
 }
 
 /**

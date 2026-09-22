@@ -17,7 +17,6 @@ import {
   type JournalTaskPriority,
   type JournalTaskStatus,
 } from "../core/journal";
-import { APP_ENTRY_PATHS, SPA_PATHS } from "../core/routes";
 import type {
   AnnotationTarget,
   AppSettingsState,
@@ -59,6 +58,7 @@ import {
 import { isAbortLikeError } from "./database/adapters/abort";
 import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
+import { readEntryRecord } from "./entry/entry-file";
 import { writeUploadedFiles } from "./file-upload";
 import * as git from "./git";
 import {
@@ -129,9 +129,11 @@ import {
 import {
   pruneDeadServerRegistry,
   removeServerRegistry,
+  rootFileKey,
   writeServerRegistry,
 } from "./server-registry";
 import { loadAppSettingsState } from "./state-store";
+import { staticFile, WEB_ROOT } from "./static-files";
 import type { ListTmuxPanesOptions } from "./tmux/panes";
 import { startWatchSupervisor, type WatchSupervisor } from "./watch-supervisor";
 import { LAUNCHED_BY_ENV } from "./worktree/open";
@@ -142,13 +144,19 @@ import {
   supportsNativeRecursiveWatch,
 } from "./worktree-watcher";
 
-const WEB_ROOT = join(ROOT, "web");
 const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
   .version as string;
 const DEFAULT_ARGS = ["HEAD"];
 const PREVIEW_HUNKS_DEFAULT = 3;
 const PREVIEW_LINES_DEFAULT = 1200;
 const WATCHED_ASSET_FILES = ["index.html", "style.css", "app.js"];
+/** 裏のプロセスが入口の生存を確かめる間隔。 */
+const ENTRY_WATCH_INTERVAL_MS = 2000;
+/**
+ * 入口が居なくなってから、起動し直した入口を待つ時間。これを過ぎたら裏は
+ * 自分で終わる (入口を kill したら裏も片付く)。
+ */
+const ENTRY_ADOPT_GRACE_MS = 10_000;
 const SIZE_SMALL = 2000;
 const SIZE_MEDIUM = 8000;
 const SIZE_LARGE = 20000;
@@ -203,6 +211,11 @@ let listenPort = 0;
 let openAfterStart = false;
 const commandOverrides: ExternalCommandOverride[] = [];
 let cwdWasExplicit = false;
+// 入口のサーバが起こしたプロジェクトの裏のプロセスか (`--backend`)。裏は
+// 閲覧の処理だけを持ち、tmux の巡回・フックの受け口・シェルは入口が持つ。
+let backendMode = false;
+// 裏を起こした入口の pid。居なくなったら裏は自分で終わる。
+let entryPid: number | null = null;
 // cwd が git 管理下か。"unknown" は git が無い・所有権エラー等で判定できなかった
 // 状態で、従来どおり git を叩いてその失敗を表に出す (握り潰さない)。
 // "outside" だけが「git を呼んでも失敗すると分かっている」状態で、diff と
@@ -253,7 +266,7 @@ function parseCli() {
       console.log(`code-viewer ${VERSION}
 
 Usage:
-  code-viewer [--cwd <repo>] [--port <port>] [--open] [--bin <name>=<path>] [git-diff-args...]
+  code-viewer [--cwd <repo>] [--port <port>] [--open] [--standalone] [--bin <name>=<path>] [git-diff-args...]
   code-viewer status [--cwd <repo>] [--bin git=<path>] [--ref <ref>] [--limit <N>] [--json]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
   code-viewer journal <list|add|edit|tasks|task-add|task-update|task-next|github-issues|task-link-issue|task-claim|task-done|task-delete> [options]
@@ -268,6 +281,10 @@ Usage:
 
 AI-agent index (start here):  code-viewer agent-help
 Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search|file|skill|doctor> agent-help
+
+One code-viewer serves every project on one port. Running it again in another
+repository adds that repository to the running one and prints its URL.
+--standalone runs a separate server for this repository only.
 
 Examples:
   code-viewer --open
@@ -315,6 +332,17 @@ Examples:
       listenPort = parsed;
     } else if (arg === "--open") {
       openAfterStart = true;
+    } else if (arg === "--standalone") {
+      // 1 つで完結するサーバ (今までの動き)。cli.ts がこの印でここへ来る。
+    } else if (arg === "--backend") {
+      backendMode = true;
+    } else if (arg === "--entry-pid") {
+      const parsed = Number(process.argv[++i]);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        console.error("--entry-pid requires a process id");
+        process.exit(1);
+      }
+      entryPid = parsed;
     } else if (arg === "--bin") {
       const next = process.argv[++i];
       if (!next) {
@@ -344,6 +372,10 @@ Examples:
     }
   }
   if (rest.length) cliArgs = rest;
+  if (backendMode && entryPid === null) {
+    console.error("--backend requires --entry-pid");
+    process.exit(1);
+  }
   const commandConfig = configureExternalCommands({
     cwd,
     cliOverrides: commandOverrides,
@@ -509,52 +541,6 @@ function requestAllowed(req: Request): boolean {
 
 function sideEffectRequestAllowed(req: Request): boolean {
   return sideEffectRequestAllowedForOrigin(req);
-}
-
-function staticFile(pathname: string): Response | null {
-  const map: Record<string, [string, string]> = {
-    "/favicon.png": ["favicon.png", "image/png"],
-    "/style.css": ["style.css", "text/css; charset=utf-8"],
-    "/app.js": ["app.js", "application/javascript; charset=utf-8"],
-    "/mermaid.js": ["mermaid.js", "application/javascript; charset=utf-8"],
-    "/shiki.js": ["shiki.js", "application/javascript; charset=utf-8"],
-    "/yaml.js": ["yaml.js", "application/javascript; charset=utf-8"],
-    "/xterm.js": ["xterm.js", "application/javascript; charset=utf-8"],
-    "/vendor/xterm/xterm.css": [
-      "vendor/xterm/xterm.css",
-      "text/css; charset=utf-8",
-    ],
-    "/vendor/diff2html/diff2html.min.css": [
-      "vendor/diff2html/diff2html.min.css",
-      "text/css; charset=utf-8",
-    ],
-    "/vendor/diff2html/diff2html-ui.min.js": [
-      "vendor/diff2html/diff2html-ui.min.js",
-      "application/javascript; charset=utf-8",
-    ],
-    "/vendor/highlight.js/highlight.min.js": [
-      "vendor/highlight.js/highlight.min.js",
-      "application/javascript; charset=utf-8",
-    ],
-    "/vendor/highlight.js/styles/github.min.css": [
-      "vendor/highlight.js/styles/github.min.css",
-      "text/css; charset=utf-8",
-    ],
-    "/vendor/highlight.js/styles/github-dark.min.css": [
-      "vendor/highlight.js/styles/github-dark.min.css",
-      "text/css; charset=utf-8",
-    ],
-  };
-  for (const spaPath of [...APP_ENTRY_PATHS, ...SPA_PATHS]) {
-    map[spaPath] = ["index.html", "text/html; charset=utf-8"];
-  }
-  const spec = map[pathname];
-  if (!spec) return null;
-  const full = join(WEB_ROOT, spec[0]);
-  if (!existsSync(full)) return text("not found", 404);
-  return new Response(readFileSync(full), {
-    headers: { "Content-Type": spec[1], "Cache-Control": "no-store" },
-  });
 }
 
 function buildRangeArgs(range: { from?: string; to?: string }) {
@@ -2963,6 +2949,8 @@ const shellHandleModule = import("./shell/handle");
 const agentHandleModule = import("./terminal/handle");
 const worktreeHandleModule = import("./worktree/handle");
 
+const ENTRY_ONLY_PREFIXES = ["/_tmux/", "/_shell/", "/_agent/"];
+
 const server = await startServer({
   hostname: "127.0.0.1",
   port: listenPort,
@@ -3017,6 +3005,18 @@ const server = await startServer({
       );
       if (dbResponse) return dbResponse;
     }
+    // 裏のプロセスは tmux・シェル・エージェントを受けない (入口が受ける)。
+    // 入口の取り次ぎはこれらを裏へ送らないので、ここへ来るのは古い版の
+    // フックや直接叩いた要求だけ。黙って受けて状態を分けない。
+    if (
+      backendMode &&
+      ENTRY_ONLY_PREFIXES.some((p) => url.pathname.startsWith(p))
+    ) {
+      return text(
+        `${url.pathname} is served by the code-viewer entry server, not by this project process`,
+        404,
+      );
+    }
     if (url.pathname.startsWith("/_tmux/")) {
       const { handleTmuxRoute } = await tmuxHandleModule;
       const tmuxResponse = await handleTmuxRoute(
@@ -3036,6 +3036,9 @@ const server = await startServer({
         cwd,
         generation,
         sideEffectRequestAllowed,
+        backendMode
+          ? { serverUrlFor: (path) => `/p/${rootFileKey(path)}/` }
+          : {},
       );
       if (worktreeResponse) return worktreeResponse;
     }
@@ -3142,6 +3145,7 @@ writeServerRegistry({
   root: cwd,
   started_at: new Date().toISOString(),
   ...(launchedByCodeViewer ? { launched: true } : {}),
+  ...(backendMode ? { backend: true } : {}),
 });
 // 落ちたサーバの登録を片付ける。起動を待たせず、失敗しても起動は止めない
 // (どの登録がなぜ残ったかは全部ログに出す)。
@@ -3275,6 +3279,59 @@ if (process.env.CODE_VIEWER_DEV === "1") {
   }, 1000).unref();
 }
 
+// 入口の裏のプロセスは、入口が居なくなったら自分で終わる (起こされるときに
+// detached で切り離されているので、入口と一緒には終わらない)。ただし入口が
+// 起動し直した (同じ版の入口が entry.json に居る) なら、その入口を新しい
+// 持ち主にして動き続ける。入口は登録簿からこの裏を拾い直す。
+if (backendMode && entryPid !== null) {
+  let owner = entryPid;
+  let ownerGoneAt: number | null = null;
+  setInterval(() => {
+    if (processAliveOrEperm(owner)) {
+      ownerGoneAt = null;
+      return;
+    }
+    const next = liveEntryOfThisVersion();
+    if (next !== null) {
+      console.log(
+        `the code-viewer entry server restarted (pid ${owner} -> ${next}); this project process now follows it`,
+      );
+      owner = next;
+      ownerGoneAt = null;
+      return;
+    }
+    ownerGoneAt ??= Date.now();
+    if (Date.now() - ownerGoneAt < ENTRY_ADOPT_GRACE_MS) return;
+    console.log(
+      `the code-viewer entry server (pid ${owner}) is gone; shutting down this project process`,
+    );
+    void shutdown(0);
+  }, ENTRY_WATCH_INTERVAL_MS).unref();
+}
+
+function processAliveOrEperm(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** entry.json に居る、生きている同じ版の入口の pid。読めなければ理由を出して null。 */
+function liveEntryOfThisVersion(): number | null {
+  const read = readEntryRecord();
+  if (read.ok === false) {
+    console.error(
+      `code-viewer could not read the entry record:\n${read.error}`,
+    );
+    return null;
+  }
+  const entry = read.registry;
+  if (!entry || entry.version !== VERSION) return null;
+  return processAliveOrEperm(entry.pid) ? entry.pid : null;
+}
+
 startDevAssetReload({
   enabled: process.env.CODE_VIEWER_DEV === "1",
   webRoot: WEB_ROOT,
@@ -3331,9 +3388,12 @@ worktreeWatch = startScopedWorktreeWatch();
 
 // フックを入れていないセッションを、画面の動きだけで「稼働 / 停止」に
 // 振り分ける観測。申告のある対象には触らない (terminal/activity.ts 参照)。
-void import("./terminal/activity").then(({ startAgentActivityWatch }) =>
-  startAgentActivityWatch(cwd, tmuxPaneListOptions),
-);
+// 裏のプロセスは巡回しない (入口が 1 本だけ巡回する)。
+if (!backendMode) {
+  void import("./terminal/activity").then(({ startAgentActivityWatch }) =>
+    startAgentActivityWatch(cwd, tmuxPaneListOptions),
+  );
+}
 
 console.log(`GDP_LISTEN_URL=http://127.0.0.1:${server.port}/`);
 console.log(`git-diff-preview serving ${cwd}`);

@@ -19,7 +19,7 @@ process.on("exit", () => {
 
 const child = spawn(
   process.execPath,
-  ["dist/code-viewer.js", "--cwd", ".", "--port", "0"],
+  ["dist/code-viewer.js", "--standalone", "--cwd", ".", "--port", "0"],
   {
     cwd: process.cwd(),
     env: {

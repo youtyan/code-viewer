@@ -109,13 +109,15 @@ async function startBuild() {
   await buildCtx.watch();
 }
 
+// CLI の入口 (cli.ts) を起こすので、引数が無ければ入口のサーバになる
+// (`pnpm dev -- --standalone` で今までの 1 つで完結するサーバ)。入口が起こす
+// プロジェクトの裏のプロセスは CODE_VIEWER_DEV を受け継ぎ、親 (入口) が
+// 居なくなると 1 秒で終わる。ソースを直すと入口が起き直すので、裏も
+// 起き直す (次の要求で入口が起こす)。
 function startServer() {
   const args = serverArgs();
   firstStart = false;
-  server = spawnDevChild(TSX, [
-    join("web-src", "server", "preview.ts"),
-    ...args,
-  ]);
+  server = spawnDevChild(TSX, [join("web-src", "server", "cli.ts"), ...args]);
 }
 
 async function restartServer() {

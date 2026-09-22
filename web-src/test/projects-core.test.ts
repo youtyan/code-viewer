@@ -22,7 +22,6 @@ import {
   projectDestination,
   removeProject,
   renameProject,
-  setProjectPort,
 } from "../core/projects";
 import type { AppSettingsState } from "../core/types";
 import {
@@ -54,12 +53,7 @@ describe("parseProjectRegistry", () => {
     const raw = {
       version: 1,
       projects: [
-        {
-          root: "/work/b",
-          name: "b",
-          port: 64100,
-          addedAt: "2026-09-20T00:00:00.000Z",
-        },
+        { root: "/work/b", name: "b", addedAt: "2026-09-20T00:00:00.000Z" },
         { root: "/work/a", name: "a", addedAt: "2026-09-20T00:00:00.000Z" },
       ],
     };
@@ -94,16 +88,12 @@ describe("parseProjectRegistry", () => {
       ["projects[1].root: listed twice (/work/a)"],
     ],
     [
-      "empty name, bad port, missing addedAt (all reported)",
+      "empty name, missing addedAt (all reported; a port of an older version is not checked)",
       {
         version: 1,
         projects: [{ root: "/work/a", name: " ", port: 70000 }],
       },
-      [
-        "projects[0].name: empty",
-        "projects[0].port: not a TCP port (70000)",
-        "projects[0].addedAt: not a string",
-      ],
+      ["projects[0].name: empty", "projects[0].addedAt: not a string"],
     ],
     [
       "entry is not an object",
@@ -214,7 +204,6 @@ describe("changing the registry", () => {
       (value: ProjectRegistry) => renameProject(value, "/work/x", "x"),
     ],
     ["move", (value: ProjectRegistry) => moveProject(value, "/work/x", 1)],
-    ["port", (value: ProjectRegistry) => setProjectPort(value, "/work/x", 1)],
   ])("%s of an unknown project is not-found", (_label, change) => {
     expect(change(registry("/work/a"))).toEqual({
       ok: false,
@@ -222,9 +211,19 @@ describe("changing the registry", () => {
     });
   });
 
-  test("remembers the port", () => {
-    const result = setProjectPort(registry("/work/a"), "/work/a", 64123);
-    expect(result.ok && result.project.port).toBe(64123);
+  test("a port remembered by an older version is read and dropped", () => {
+    expect(
+      parseProjectRegistry({
+        version: 1,
+        projects: [{ root: "/work/a", name: "a", port: 64123, addedAt: "x" }],
+      }),
+    ).toEqual({
+      ok: true,
+      registry: {
+        version: 1,
+        projects: [{ root: "/work/a", name: "a", addedAt: "x" }],
+      },
+    });
   });
 
   test("an empty registry has version 1", () => {
@@ -311,6 +310,30 @@ describe("projectDestination", () => {
   ])("%s", (_label, path, expected) => {
     expect(projectDestination("http://127.0.0.1:64101/", path)).toBe(expected);
   });
+
+  // 入口のサーバの下では、プロジェクトの根は `/p/<鍵>/`。パスはその下に付く。
+  test.each([
+    [
+      "the same screen",
+      "/history",
+      "http://127.0.0.1:64101/p/0123456789abcdef/history",
+    ],
+    ["the top", "/", "http://127.0.0.1:64101/p/0123456789abcdef/"],
+    [
+      "with a query",
+      "/file?path=README.md",
+      "http://127.0.0.1:64101/p/0123456789abcdef/file?path=README.md",
+    ],
+    [
+      "another origin is refused",
+      "//example.invalid/x",
+      "http://127.0.0.1:64101/p/0123456789abcdef/",
+    ],
+  ])("under the entry server: %s", (_label, path, expected) => {
+    expect(
+      projectDestination("http://127.0.0.1:64101/p/0123456789abcdef/", path),
+    ).toBe(expected);
+  });
 });
 
 describe("matchesProjectQuery", () => {
@@ -340,7 +363,7 @@ describe("groupAgentPanes with registered projects", () => {
       git: true,
       error: "",
       server: { status: "absent" },
-      registered: order === null ? null : { root, name, order, port: null },
+      registered: order === null ? null : { root, name, order },
     };
   }
   function pane(id: string, project: string, state: AgentState): AgentPane {
@@ -407,7 +430,7 @@ describe("groupAgentPanesByPlace (the sidebar order)", () => {
       git: true,
       error: "",
       server: { status: "absent" },
-      registered: order === null ? null : { root, name, order, port: null },
+      registered: order === null ? null : { root, name, order },
     };
   }
   function pane(

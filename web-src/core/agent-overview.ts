@@ -186,6 +186,17 @@ export type AgentOverviewResponse = {
   errors: AgentStateObservationError[];
   /** 登録簿そのもの (読めなかった理由を含む)。 */
   registry: ProjectRegistrySnapshot;
+  /**
+   * サーバが覚えている未読 (作業中 → 入力待ち・止まった、をまだ見ていない
+   * もの)。サーバのメモリにあるので、画面を読み直しても・プロジェクトを
+   * 移っても消えない。この欄を持たない古い版のサーバでは無い。
+   */
+  unread?: AgentUnreadEntry[];
+};
+
+export type AgentUnreadEntry = {
+  pane: TmuxPaneId;
+  transition: AgentTransition;
 };
 
 /**

@@ -1,3 +1,4 @@
+import { withoutProjectPrefix } from "../../core/api-url";
 // 左のサイドバーの「プロジェクト → エージェント」の一覧。どの画面にいても出る。
 //
 //   PROJECTS                              [全体ボード]
@@ -341,11 +342,12 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     render(true);
   }
 
+  /** いまの画面のパス (前置きを外したもの)。プロジェクトを移るときの移り先。 */
   function currentPath(): string {
-    return (
+    return withoutProjectPrefix(
       document
         .querySelector<HTMLAnchorElement>("a.app-menu-item.active")
-        ?.getAttribute("href") ?? "/"
+        ?.getAttribute("href") ?? "/",
     );
   }
 

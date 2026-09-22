@@ -15,7 +15,14 @@ import {
   aiContextClipboardText,
   resolveSelectionTarget,
 } from "./core/ai-context-copy";
-import { apiUrl } from "./core/api-url";
+import {
+  apiUrl,
+  pageUrl,
+  projectKey,
+  projectRequest,
+  routePathname,
+  withoutProjectPrefix,
+} from "./core/api-url";
 import {
   createCatchUpGate,
   shouldAutoLoadForRoute,
@@ -124,8 +131,10 @@ import {
   type AppSettingsState,
   type DiffCardElement,
   type DiffMeta,
+  type EntryBackendFailure,
   type FileMeta,
   type HljsApi,
+  isEntryBackendFailure,
   type SettingsResponse,
   THEME_PALETTES,
   type ThemePalette,
@@ -227,6 +236,7 @@ import { terminalText } from "./views/terminal/i18n";
 import { createTerminalView } from "./views/terminal/terminal-view";
 import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
+import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
   SETTINGS_CATEGORIES,
@@ -307,8 +317,24 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const NETWORK_ACTIVITY = createNetworkActivityTracker({
     onChange: updateNetworkActivity,
+    // 入口のサーバの下の画面では、前置きとプロジェクトの鍵を足す。
+    prepareRequest: projectRequest,
+    onResponse: (response) => inspectBackendResponse(response),
   });
   NETWORK_ACTIVITY.installFetch(window);
+  // 入口のサーバの下の画面では、index.html に書いた画面のリンクにも前置きを
+  // 付ける。クリックは横取りして pushState するが、中クリック・新しいタブでは
+  // 素の href が開くため。
+  if (projectKey()) {
+    for (const link of document.querySelectorAll<HTMLAnchorElement>(
+      'a[href^="/"]',
+    )) {
+      const href = link.getAttribute("href") ?? "";
+      if (!href.startsWith("//") && !href.startsWith("/p/")) {
+        link.setAttribute("href", pageUrl(href));
+      }
+    }
+  }
 
   function updateNetworkActivity(state = NETWORK_ACTIVITY.getState()): void {
     const loadBar = document.querySelector<HTMLElement>("#load-bar");
@@ -545,6 +571,72 @@ window.GdpExpandLogic = GdpExpandLogic;
       "Content-Type": "application/json",
       "X-Code-Viewer-Action": "1",
     };
+  }
+
+  // 入口のサーバの下で、このプロジェクトの裏のプロセスが止まった (502)・
+  // 起きなかった (503)。どの画面の取得でも同じ応答が来るので、fetch の包みで
+  // 拾って中央に理由と「再起動」を 1 つだけ出す。
+  let backendFailureShown = false;
+
+  function inspectBackendResponse(response: Response): void {
+    if (response.status !== 502 && response.status !== 503) return;
+    if (!(response.headers.get("content-type") ?? "").includes("json")) return;
+    response
+      .clone()
+      .json()
+      .then(
+        (body: unknown) => {
+          if (isEntryBackendFailure(body)) void showBackendFailure(body);
+        },
+        (error: unknown) => {
+          console.error(
+            "[code-viewer] the entry server's error response could not be read",
+            error,
+          );
+        },
+      );
+  }
+
+  async function showBackendFailure(body: EntryBackendFailure): Promise<void> {
+    if (backendFailureShown) return;
+    backendFailureShown = true;
+    const text = agentsText(STATE.language).projects;
+    const name = body.project.root.split("/").pop() || body.project.root;
+    const restart = await showConfirmDialog({
+      title:
+        body.code === "backend-stopped"
+          ? text.backendStoppedTitle(name)
+          : text.backendFailedTitle(name),
+      body: [body.detail, body.log].filter(Boolean).join("\n\n"),
+      confirmLabel: text.backendRestart,
+      cancelLabel: text.close,
+    });
+    if (!restart) {
+      backendFailureShown = false;
+      return;
+    }
+    try {
+      const res = await fetch(apiUrl("entryRestart"), {
+        method: "POST",
+        headers: actionHeaders(),
+        body: JSON.stringify({ key: body.project.key }),
+      });
+      if (!res.ok) {
+        throw new Error(
+          await responseErrorMessage(res, text.backendRestartFailed),
+        );
+      }
+    } catch (error) {
+      console.error("[code-viewer] project process restart failed", error);
+      await showAlertDialog({
+        title: text.backendRestartFailed,
+        body: formatErrorDetail(error),
+        confirmLabel: text.close,
+      });
+      backendFailureShown = false;
+      return;
+    }
+    window.location.reload();
   }
 
   function reportPersistenceError(operation: string, error: unknown): void {
@@ -1133,7 +1225,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const savedLanguage =
       viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
     const parsedRoute = parseRoute(
-      window.location.pathname,
+      routePathname(),
       window.location.search,
       savedRange(),
     );
@@ -3713,10 +3805,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         withToolsOverlay(
           withDoctorOverlay(
             url,
-            parseDoctorOverlay(
-              window.location.pathname,
-              window.location.search,
-            ),
+            parseDoctorOverlay(routePathname(), window.location.search),
           ),
           parseToolsOverlay(window.location.search),
         ),
@@ -5473,7 +5562,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   applyTheme();
   setLayout(STATE.layout);
   setPageMode();
-  if (window.location.pathname === "/") {
+  if (routePathname() === "/") {
     setRoute(STATE.route, true);
   }
 
@@ -5895,7 +5984,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   function isDoctorOverlayOpen(): boolean {
-    return parseDoctorOverlay(window.location.pathname, window.location.search);
+    return parseDoctorOverlay(routePathname(), window.location.search);
   }
 
   function updateUrlForDoctorOverlay(open: boolean): void {
@@ -6497,13 +6586,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /** 移った先でも同じ画面を開く (ナビで選ばれている画面の入口)。 */
+  /** いまの画面のパス (前置きを外したもの)。プロジェクトを移るときの移り先。 */
   function currentScreenPath(): string {
-    return (
+    return withoutProjectPrefix(
       document
         .querySelector<HTMLAnchorElement>(
           "a.app-menu-item.active, a.nav-board-link.active",
         )
-        ?.getAttribute("href") ?? "/"
+        ?.getAttribute("href") ?? "/",
     );
   }
 
@@ -6919,16 +7009,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     // for the other screens before the URL fallback below reads it.
     if (
       isHistoryPanelRoute(previousRoute) &&
-      window.location.pathname !== "/history" &&
+      routePathname() !== "/history" &&
       !(
-        window.location.pathname === "/file" &&
+        routePathname() === "/file" &&
         new URLSearchParams(window.location.search).get("view") === "history"
       )
     ) {
       restoreRangeAfterHistory();
     }
     const parsedRoute = parseRoute(
-      window.location.pathname,
+      routePathname(),
       window.location.search,
       currentRange(),
     );
@@ -7594,7 +7684,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     es.addEventListener("db-snapshot", (event) => {
       DATABASE_VIEW.handleSse("db-snapshot", (event as MessageEvent).data);
     });
-    es.addEventListener("error", () => setStatus("error"));
+    es.addEventListener("error", () => {
+      setStatus("error");
+      // 入口のサーバの下で、裏のプロセスが止まっていると入口は 502 を返し、
+      // EventSource は繋ぎ直しをやめる。理由と再起動を出すため、同じ入口に
+      // 1 回だけ問い合わせる (応答は inspectBackendResponse が見る)。
+      if (projectKey() && es.readyState === EventSource.CLOSED) {
+        void fetch(apiUrl("settings")).catch((error: unknown) => {
+          console.error("[code-viewer] project process check failed", error);
+        });
+      }
+    });
     es.addEventListener("open", () => {
       setStatus("live");
       if (!openedOnce) {

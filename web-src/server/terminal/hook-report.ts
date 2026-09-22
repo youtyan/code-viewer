@@ -10,8 +10,10 @@
 // - 失敗は捨てない。フックの失敗の記録 (起動スクリプトが --log で渡す) に、
 //   時刻・どのフック・どのサーバ・理由を残す。設定画面がここを読む
 //
-// どのサーバに送るかは決めない。同じ tmux ペインを複数のサーバ (リポジトリ
-// ごとに起こしたもの) が見ているので、1 つにだけ送ると状態が食い違う。
+// 送り先は入口のサーバ (entry.json) と、サーバ登録簿の 1 つで完結するサーバ
+// (`--standalone` と古い版)。入口の裏のプロセス (登録簿の backend) は状態を
+// 持たないので送らない。同じ tmux ペインを複数のサーバが見ているので、
+// 1 つにだけ送ると状態が食い違う。
 
 import {
   type AgentHookFailure,
@@ -21,6 +23,7 @@ import {
 import type { AgentEvent } from "../../core/agent-state";
 import { formatErrorDetail } from "../../core/error-detail";
 import { extractErrorDetail } from "../cli-helpers";
+import { liveEntryUrl } from "../entry/entry-file";
 import {
   listServerRegistry,
   registryDir,
@@ -38,6 +41,8 @@ export type HookReportDeps = {
   now(): number;
   env: Record<string, string | undefined>;
   listServers(): ServerRegistryListing;
+  /** 動いている入口の URL。無ければ null。読めなければ投げる。 */
+  entryUrl(): string | null;
   post(url: string, body: unknown, signal: AbortSignal): Promise<Response>;
   recordFailure(failure: AgentHookFailure): void;
 };
@@ -128,7 +133,20 @@ export async function reportAgentHook(
       detail: formatErrorDetail(broken.error),
     });
   }
-  if (listing.servers.length === 0) {
+  let entry: string | null = null;
+  try {
+    entry = deps.entryUrl();
+  } catch (error) {
+    fail({
+      hookEvent,
+      event,
+      target,
+      stage: "registry",
+      detail: formatErrorDetail(error),
+    });
+  }
+  const urls = reportTargets(listing, entry);
+  if (urls.length === 0) {
     fail({
       hookEvent,
       event,
@@ -153,8 +171,7 @@ export async function reportAgentHook(
   const reached: string[] = [];
   const refused: string[] = [];
   await Promise.all(
-    listing.servers.map(async (server) => {
-      const url = server.url.replace(/\/+$/, "");
+    urls.map(async (url) => {
       try {
         const res = await deps.post(
           `${url}/_agent/state`,
@@ -203,6 +220,23 @@ export async function reportAgentHook(
 }
 
 /**
+ * 申告と「読んだ」の送り先: 入口と、登録簿のうち裏のプロセスでないもの。
+ * 同じ URL は 1 つ (末尾の `/` なし)。
+ */
+export function reportTargets(
+  listing: ServerRegistryListing,
+  entryUrl: string | null,
+): string[] {
+  const urls = new Set<string>();
+  if (entryUrl) urls.add(entryUrl.replace(/\/+$/, ""));
+  for (const server of listing.servers) {
+    if (server.backend) continue;
+    urls.add(server.url.replace(/\/+$/, ""));
+  }
+  return [...urls];
+}
+
+/**
  * ほかの code-viewer サーバへ状態を知らせる POST。サーバは同一オリジンの
  * 副作用要求しか通さないので、相手のオリジンと X-Code-Viewer-Action を付ける。
  */
@@ -241,6 +275,7 @@ export function defaultHookReportDeps(
     now: () => Date.now(),
     env: process.env,
     listServers: listServerRegistry,
+    entryUrl: () => liveEntryUrl(),
     post: postToServer,
     recordFailure,
   };

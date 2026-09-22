@@ -6,6 +6,7 @@ import {
   resolveMarkdownAssetPath,
   resolveMarkdownLinkTarget,
 } from "../core/markdown-preview";
+import { staticFileSpec } from "../server/static-files";
 import {
   baseRules,
   cascadedDeclarations,
@@ -28,9 +29,6 @@ const shikiLoader = sourceFixture(
 );
 const lazyBundle = sourceFixture(
   readFileSync(new URL("../core/lazy-bundle.ts", import.meta.url), "utf8"),
-);
-const server = sourceFixture(
-  readFileSync(new URL("../server/preview.ts", import.meta.url), "utf8"),
 );
 const style = sourceFixture(
   readFileSync(new URL("../../web/style.css", import.meta.url), "utf8"),
@@ -404,11 +402,10 @@ describe("markdown preview", () => {
   test("mermaid is built as a lazy standalone asset and served by the preview server", () => {
     expect(bundles.includes("web/mermaid.js")).toBe(true);
     expect(bundles.includes("web-src/mermaid-entry.ts")).toBe(true);
-    expect(
-      server.includes(
-        "'/mermaid.js': ['mermaid.js', 'application/javascript; charset=utf-8']",
-      ),
-    ).toBe(true);
+    expect(staticFileSpec("/mermaid.js")).toEqual([
+      "mermaid.js",
+      "application/javascript; charset=utf-8",
+    ]);
     // lazy import 本体は mermaid-loader.ts に切り出し済み。markdown-preview
     // 側は loader を呼ぶだけで、bundle 抑止のための非リテラル import 文字列は
     // loader にある。
@@ -425,11 +422,10 @@ describe("markdown preview", () => {
     expect(bundles.includes("web/shiki.js")).toBe(true);
     expect(bundles.includes("web-src/shiki-entry.ts")).toBe(true);
     expect(pkg.includes('"shiki"')).toBe(true);
-    expect(
-      server.includes(
-        "'/shiki.js': ['shiki.js', 'application/javascript; charset=utf-8']",
-      ),
-    ).toBe(true);
+    expect(staticFileSpec("/shiki.js")).toEqual([
+      "shiki.js",
+      "application/javascript; charset=utf-8",
+    ]);
     // lazy import 本体は shiki-loader.ts に切り出し済み。
     expect(shikiLoader.includes('"shiki.js"')).toBe(true);
     expect(shikiLoader.includes("createBundleLoader")).toBe(true);

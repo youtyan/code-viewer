@@ -1,4 +1,4 @@
-import { apiUrl } from "../core/api-url";
+import { apiUrl, projectKey } from "../core/api-url";
 // 作業ツリーの画面。骨格も行の見た目も History 画面のものをそのまま使う。
 //
 //   #worktree-panel  作業ツリー一覧   (#history-panel と同じ箱・同じ行)
@@ -462,6 +462,31 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
 
   // ---- 操作 ----
 
+  async function switchToWorktree(item: WorktreeItem): Promise<void> {
+    const seq = lifecycle;
+    busyPath = item.path;
+    setMessage(text().opening);
+    renderList();
+    try {
+      const result = await deps.trackLoad(
+        postWorktreeAction(apiUrl("worktreeOpen"), { path: item.path }),
+      );
+      const url = result.url || "";
+      if (!url) throw new Error(text().openFailed);
+      // 移るまで「開いています」を出したままにする (押し直しで 2 度起こさない)。
+      window.location.assign(url);
+    } catch (error) {
+      busyPath = "";
+      if (isCurrent(seq)) {
+        setMessage(
+          error instanceof Error ? error.message : text().openFailed,
+          true,
+        );
+        await refresh();
+      }
+    }
+  }
+
   /**
    * 別タブは先に開いておく。URL が返ってくるまで待ってから window.open すると、
    * ユーザー操作から離れた呼び出しとしてポップアップブロックに掛かる。
@@ -481,6 +506,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
 
   async function openWorktree(item: WorktreeItem): Promise<void> {
     if (busyPath) return;
+    // 入口のサーバの下では、作業ツリーも 1 つのプロジェクトとして同じタブで
+    // 移る (同じオリジンのまま。別のポートのタブを増やさない)。
+    if (projectKey()) {
+      await switchToWorktree(item);
+      return;
+    }
     const seq = lifecycle;
     busyPath = item.path;
     setMessage(text().opening);
@@ -1031,7 +1062,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         label: t.actions.copyServerUrl,
         title: t.actions.copyServerUrlTitle(item.serverUrl),
         onSelect: () => {
-          void runAction(() => copyText(item.serverUrl), t.actions.copyFailed);
+          // 入口の下では `/p/<鍵>/` の形で返るので、開ける URL にして写す。
+          const address = new URL(item.serverUrl, window.location.href).href;
+          void runAction(() => copyText(address), t.actions.copyFailed);
         },
       });
     }

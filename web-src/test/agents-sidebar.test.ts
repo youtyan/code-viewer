@@ -62,7 +62,7 @@ function info(
     git: true,
     error: "",
     server,
-    registered: order === null ? null : { root, name, order, port: null },
+    registered: order === null ? null : { root, name, order },
   };
 }
 
@@ -415,7 +415,7 @@ describe("project actions open", () => {
         calls.push({ url, body: JSON.parse(String(init.body)) });
         const payload =
           url === "/_agent/projects/open"
-            ? { url: "http://127.0.0.1:65001", portChanged: null }
+            ? { url: "http://127.0.0.1:65001" }
             : { ok: true };
         return new Response(JSON.stringify(payload), {
           status: 200,

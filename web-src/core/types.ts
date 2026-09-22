@@ -227,6 +227,11 @@ export type AppSettingsState = {
   /** 画面下のパネルの高さ (px)。範囲は core/panel-sizes.ts の APP_PANEL_HEIGHT。 */
   appPanelHeight?: number;
   /**
+   * 入口のサーバで最後に開いたプロジェクトの根 (実パス)。前置きの無い URL
+   * (`/`・古いブックマーク) をどのプロジェクトへ送るかに使う。画面は書かない。
+   */
+  lastProjectRoot?: string;
+  /**
    * ユーザーが変更したキー割り当てだけを持つ差分。ここに無いアクションは
    * デフォルトのまま動くので、後からデフォルトを変えても、触っていない
    * ものは新しい割り当てに追従する。
@@ -565,3 +570,33 @@ export type RawFileInfo = {
   // 欄が空) とは違い、失敗は情報のボタンの中に理由つきで出す。
   error?: string;
 };
+
+/**
+ * 入口のサーバが、プロジェクトの裏のプロセスに取り次げなかったときの応答
+ * (502: 止まった・503: 起きなかった)。画面は理由と「再起動」を出す。
+ */
+export type EntryBackendFailure = {
+  error: string;
+  code: "backend-stopped" | "backend-start-failed";
+  project: { key: string; root: string };
+  /** 理由の全文。 */
+  detail: string;
+  /** 裏のプロセスの出力の末尾 (`<状態>/server-logs/`)。 */
+  log: string;
+};
+
+export function isEntryBackendFailure(
+  value: unknown,
+): value is EntryBackendFailure {
+  if (!value || typeof value !== "object") return false;
+  const body = value as Record<string, unknown>;
+  const project = body.project as Record<string, unknown> | undefined;
+  return (
+    (body.code === "backend-stopped" || body.code === "backend-start-failed") &&
+    typeof body.detail === "string" &&
+    typeof body.log === "string" &&
+    !!project &&
+    typeof project.key === "string" &&
+    typeof project.root === "string"
+  );
+}

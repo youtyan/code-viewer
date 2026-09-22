@@ -68,6 +68,8 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
 | `SERVER_GENERATION` | `app.ts` | サーバ世代カウンタの唯一の権威。`app.ts` の 1 箇所からのみ更新 |
 | `NETWORK_ACTIVITY.installFetch(window)` | `app.ts` | 全 `fetch` を `AbortController` で包む。既にグローバル。迂回しない |
 | `BACKGROUND_REQUEST_HEADER` | `core/network-activity.ts` | 数秒おきの取り直し (読み取りのみ・失敗しても次の周期で取り直せるもの) に付ける印。`installFetch` の中で、通信中の表示と `cancelAll` の対象から外す。**迂回の口ではない。** 利用者の操作で始まる fetch に付けない |
+| `UNINTERRUPTIBLE_REQUEST_HEADER` | `core/network-activity.ts` | 途中で止めてはいけない書き込み (ターミナルの打鍵 `/_shell/keys`・寸法 `/_shell/resize`) に付ける印。`cancelAll` の対象と通信中の表示から外す。画面の切替の取消で打鍵を捨てないため。読み取りや、取り消してよい書き込みには付けない |
+| `projectRequest` (`prepareRequest`) | `core/api-url.ts` → `installFetch` | 入口のサーバの下の画面で、全 fetch にプロジェクトの前置き・鍵の見出し (`PROJECT_HEADER`) を足す。**経路の組み立ては `apiUrl` のまま。** これを当てにして経路の文字列をじかに書かない |
 | `trackLoad<T>(promise): Promise<T>` | `app.ts` | promise を登録して `cancelInFlightRequests` の対象にする。view には `deps.trackLoad` で渡る。**この名前を使う** |
 | `cancelInFlightRequests()` | `app.ts` | 追跡中の fetch を全て abort する。ユーザー操作由来の中断で呼ぶ |
 | `handleFileDiff`（`generation` フィールド） | `preview.ts` | サーバハンドラの手本。モジュールレベルの `generation` カウンタを応答に載せる |
@@ -97,6 +99,34 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
 
 これらを飛ばした実装、または並行プリミティブを発明した実装は禁止。レビューでは
 新規の fetch / ハンドラ / ビュー切替を全てこの節に照らす。
+
+## 入口のサーバと取り次ぎ
+
+既定の `code-viewer` は入口のサーバ (`server/entry/`)。1 つのポートで全プロジェクトを扱い、
+リポジトリ決め打ちの処理は `/p/<鍵>/…` として、そのプロジェクトの裏のプロセス
+(今のサーバそのもの = `preview.ts --backend`) へ取り次ぐ。`--standalone` は今までの
+1 つで完結するサーバ (テスト・スクリプトはこちら)。
+
+| どこが受けるか | 経路 | 決めるもの |
+|---|---|---|
+| 入口 | 画面のファイル・`/_agent/*`・`/_tmux/*`・`/_shell/*`・`/_worktree/open|stop`・`/_entry*` | `core/api-url.ts` の zone `entry` |
+| 裏 (入口が取り次ぐ) | それ以外の経路全部 (`/_settings`・`/_doctor`・`/_state/*` を含む) | zone `project` |
+
+- **新しい経路は `api-url.ts` の表に zone 付きで足す。** zone を間違えると、入口の下では
+  別のプロセスに届く (または 404)。裏は `/_agent/` `/_tmux/` `/_shell/` を 404 で断る
+- 選んでいるプロジェクトで結果が変わる入口の処理 (シェルの作業場所・「このリポジトリの
+  ペインか」・アカウントのログインの作業場所・貼った画像の置き場所) は、要求の
+  `PROJECT_HEADER` から入口が根を決めて、既存のハンドラに `cwd` として渡す。新しく
+  足すときも同じ形にし、ハンドラの中で入口かどうかを見分けない
+- 取り次ぎ (`entry/proxy.ts`) は本文も応答も溜めずに流す (SSE・ダウンロード・ファイルの
+  送信)。書き込みは入口で `sideEffectRequestAllowed` を通ったものだけ `Origin` を裏の
+  オリジンに付け替える。**裏に「入口からは信用する」口を作らない** (単体の裏と挙動が分かれる)
+- 裏に繋がらない = 502 (`backend-stopped`)、起きない = 503 (`backend-start-failed`)。
+  形は `core/types.ts` の `EntryBackendFailure`。画面は fetch の包み (`onResponse`) で
+  拾って理由と再起動を出す。**502/503 を各画面で個別に扱わない**
+- 裏の起動・本人確認・停止は `worktree/open.ts` の仕組みをそのまま使う
+  (`backendOf` を渡すと `--backend --entry-pid`)。裏は入口が居なくなると 10 秒待って
+  終わる (その間に同じ版の入口が `entry.json` に現れれば、そちらに付き直す)
 
 ## クライアントとサーバで共有する型
 

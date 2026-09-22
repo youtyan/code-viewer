@@ -30,6 +30,7 @@ import {
   type HookAction,
   isHookAgent,
 } from "../../core/agent-hooks";
+import type { AgentOverviewResponse } from "../../core/agent-overview";
 import type { AgentScreenRuleIssue } from "../../core/agent-screen";
 import {
   type AgentStatesResponse,
@@ -37,6 +38,7 @@ import {
   isReportedAgent,
 } from "../../core/agent-state";
 import { formatErrorDetail } from "../../core/error-detail";
+import type { ProjectOpenResponse } from "../../core/projects";
 import { isShellSessionId } from "../../core/shell";
 import {
   findImagePathsNewestFirst,
@@ -110,6 +112,7 @@ import {
   resetAgentScreenRules,
   saveAgentScreenRules,
 } from "./rules";
+import { clearAgentUnread, noteAgentUnread } from "./unread";
 
 /** 申告 1 件の本文上限。指示文が丸ごと来ても収まる程度。 */
 const MAX_STATE_TEXT = 2000;
@@ -119,7 +122,26 @@ function textField(value: unknown): string | undefined {
   return value.slice(0, MAX_STATE_TEXT);
 }
 
-async function handleStatePost(req: Request): Promise<Response> {
+/**
+ * 入口のサーバ (entry/server.ts) が受けるときだけ渡す差し替え。1 つで完結する
+ * サーバ (preview.ts) は渡さない。要求ごとに作る (選んでいるプロジェクトは
+ * 画面が要求の見出しで伝える)。
+ */
+export type AgentEntryHooks = {
+  /** 画面が選んでいるプロジェクトの根。一覧ではこれが current になる。 */
+  selectedRoot: string;
+  /** 動いているプロジェクトのサーバを、入口の URL (`/p/<鍵>/`) で見せる。 */
+  serverUrl(root: string): string;
+  /** 登録したプロジェクトの裏を (無ければ起こして) 入口の URL で返す。 */
+  openProject(root: string): Promise<ProjectOpenResponse>;
+  /** 入口が起こした裏を止める。 */
+  stopProject(root: string): Promise<{ stopped: boolean }>;
+};
+
+async function handleStatePost(
+  req: Request,
+  entry: AgentEntryHooks | undefined,
+): Promise<Response> {
   const body = await parsePostJsonBody<{
     target?: unknown;
     event?: unknown;
@@ -158,7 +180,9 @@ async function handleStatePost(req: Request): Promise<Response> {
   if (!record) return textError("invalid event", 400);
   // 画面で「読んだ」ときは、ほかのサーバにも伝える (read-relay.ts)。送り先
   // からは relay を付けずに送るので、送り返されない。
-  if (body.event === "read" && body.relay === true) {
+  // 入口では状態を持つのが入口だけなので中継しない (read-relay.ts は
+  // 1 つで完結するサーバが並ぶ間のもの)。
+  if (body.event === "read" && body.relay === true && !entry) {
     const relay = await relayAgentRead(target, record.updatedAt);
     return json({ ok: true, state: record, relay });
   }
@@ -197,7 +221,7 @@ async function handleRulesGet(cwd: string): Promise<Response> {
   return json(await reloadAgentScreenRules(cwd));
 }
 
-async function handleRulesPut(req: Request, cwd: string): Promise<Response> {
+async function handleRulesPut(req: Request): Promise<Response> {
   const body = await parseBoundedJsonBody(
     req,
     MAX_AGENT_SCREEN_RULES_BYTES,
@@ -205,16 +229,16 @@ async function handleRulesPut(req: Request, cwd: string): Promise<Response> {
   );
   if (body instanceof Response) return body;
   try {
-    const result = await saveAgentScreenRules(cwd, body);
+    const result = await saveAgentScreenRules(body);
     return json(result, "source" in result ? 200 : 400);
   } catch (error) {
     return ruleOperationError("save_failed", error);
   }
 }
 
-async function handleRulesDelete(cwd: string): Promise<Response> {
+async function handleRulesDelete(): Promise<Response> {
   try {
-    return json(await resetAgentScreenRules(cwd));
+    return json(await resetAgentScreenRules());
   } catch (error) {
     return ruleOperationError("reset_failed", error);
   }
@@ -390,6 +414,15 @@ async function handlePastePost(req: Request, cwd: string): Promise<Response> {
   });
 }
 
+async function handleUnreadPost(req: Request): Promise<Response> {
+  const body = await parsePostJsonBody<{ target?: unknown }>(req);
+  if (body instanceof Response) return body;
+  if (typeof body.target !== "string" || !terminalKindOf(body.target)) {
+    return textError("invalid target", 400);
+  }
+  return json({ ok: true, removed: clearAgentUnread(body.target) });
+}
+
 /** フックの入れ外しの本文上限。種類・動作・ハッシュだけが来る。 */
 const MAX_HOOK_APPLY_BYTES = 4096;
 
@@ -513,10 +546,30 @@ function handleHookFailuresDelete(): Response {
  */
 let overviewDeps: AgentOverviewDeps | null = null;
 
-async function handleOverviewGet(cwd: string): Promise<Response> {
+async function handleOverviewGet(
+  cwd: string,
+  entry: AgentEntryHooks | undefined,
+): Promise<Response> {
   await noteAgentListWatched();
   overviewDeps ??= defaultAgentOverviewDeps(cwd);
-  return json(await buildAgentOverview(overviewDeps));
+  const base = overviewDeps;
+  const deps: AgentOverviewDeps = entry
+    ? {
+        ...base,
+        serverRoot: entry.selectedRoot,
+        findServer: async (root) => {
+          const found = await base.findServer(root);
+          return found.status === "running"
+            ? { ...found, url: entry.serverUrl(root) }
+            : found;
+        },
+      }
+    : base;
+  const overview = await buildAgentOverview(deps);
+  return json({
+    ...overview,
+    unread: noteAgentUnread(overview.panes),
+  } satisfies AgentOverviewResponse);
 }
 
 /**
@@ -532,6 +585,7 @@ export function handleAgentRoute(
   url: URL,
   cwd: string,
   sideEffectAllowed: (req: Request) => boolean,
+  entry?: AgentEntryHooks,
 ): Promise<Response | null> {
   return dispatchRoutes(
     req,
@@ -540,7 +594,7 @@ export function handleAgentRoute(
       "/_agent/state": {
         methods: ["POST"],
         sideEffect: true,
-        handler: () => handleStatePost(req),
+        handler: () => handleStatePost(req, entry),
       },
       "/_agent/states": {
         methods: ["GET"],
@@ -550,15 +604,15 @@ export function handleAgentRoute(
       "/_agent/overview": {
         methods: ["GET"],
         sideEffect: false,
-        handler: () => handleOverviewGet(cwd),
+        handler: () => handleOverviewGet(cwd, entry),
       },
       "/_agent/rules": {
         methods: ["GET", "PUT", "DELETE"],
         sideEffect: (method) => method !== "GET",
         handler: () => {
           if (req.method === "GET") return handleRulesGet(cwd);
-          if (req.method === "DELETE") return handleRulesDelete(cwd);
-          return handleRulesPut(req, cwd);
+          if (req.method === "DELETE") return handleRulesDelete();
+          return handleRulesPut(req);
         },
       },
       "/_agent/capture": {
@@ -651,12 +705,20 @@ export function handleAgentRoute(
       "/_agent/projects/open": {
         methods: ["POST"],
         sideEffect: true,
-        handler: () => handleProjectOpenPost(req, forgetServer),
+        handler: () =>
+          handleProjectOpenPost(req, forgetServer, entry?.openProject),
       },
       "/_agent/projects/stop": {
         methods: ["POST"],
         sideEffect: true,
-        handler: () => handleProjectStopPost(req, cwd, forgetServer),
+        handler: () =>
+          handleProjectStopPost(req, cwd, forgetServer, entry?.stopProject),
+      },
+      // 未読を解く (見ている・開いた)。未読はサーバのメモリにある (unread.ts)。
+      "/_agent/unread": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleUnreadPost(req),
       },
       // ファイルを作るので副作用。同一オリジンからしか通らない。
       "/_agent/paste": {

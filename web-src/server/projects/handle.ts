@@ -11,7 +11,11 @@
 import { realpathSync } from "node:fs";
 import { hasControlCharacter } from "../../core/control-chars";
 import { formatErrorDetail } from "../../core/error-detail";
-import { MAX_PROJECT_NAME_LENGTH, projectRootIssue } from "../../core/projects";
+import {
+  MAX_PROJECT_NAME_LENGTH,
+  type ProjectOpenResponse,
+  projectRootIssue,
+} from "../../core/projects";
 import { json, parseBoundedJsonBody } from "../database/handle-shared";
 import { ProjectRegistryError } from "./registry";
 import {
@@ -131,13 +135,15 @@ export async function handleProjectsPost(
 export async function handleProjectOpenPost(
   req: Request,
   forgetServer: (root: string) => void,
+  open: (root: string) => Promise<ProjectOpenResponse> = (root) =>
+    openRegisteredProject(root),
 ): Promise<Response> {
   const body = await readBody(req);
   if (body instanceof Response) return body;
   const root = pathField(body.root);
   if (!root) return invalid("root must be an absolute path");
   try {
-    return json(await openRegisteredProject(root));
+    return json(await open(root));
   } catch (error) {
     return errorResponse(error);
   } finally {
@@ -149,13 +155,15 @@ export async function handleProjectStopPost(
   req: Request,
   cwd: string,
   forgetServer: (root: string) => void,
+  stop: (root: string) => Promise<{ stopped: boolean }> = (root) =>
+    stopLaunchedServer(root, realpathSync(cwd)),
 ): Promise<Response> {
   const body = await readBody(req);
   if (body instanceof Response) return body;
   const root = pathField(body.root);
   if (!root) return invalid("root must be an absolute path");
   try {
-    return json(await stopLaunchedServer(root, realpathSync(cwd)));
+    return json(await stop(root));
   } catch (error) {
     return errorResponse(error);
   } finally {
