@@ -50,7 +50,11 @@ export type TerminalViewDeps = {
    * 開いたとき、そのペイン (シェルとペインの対応をサーバがまだ知らないときの
    * 名前付けに使う)。
    */
-  onOpenInTab(session: ShellSession, pane?: string): void;
+  onOpenInTab(
+    session: ShellSession,
+    pane: string | undefined,
+    side: TabSide,
+  ): void;
   /** 棚の画像を画像のタブで開く (既定の押し方)。 */
   onOpenImage?: (image: TerminalImageRef, gallery: TerminalImageRef[]) => void;
 };
@@ -300,7 +304,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       };
       if (disposed) return;
       if (body.action === "attached") addShell(body.session);
-      deps.onOpenInTab(body.session, pane);
+      deps.onOpenInTab(body.session, pane, side);
     } catch (error) {
       if (disposed) return;
       console.error("[code-viewer] tmux pane open in tab failed", error);
@@ -331,7 +335,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     const created = (await res.json()) as { session: ShellSession };
     if (disposed) return;
     addShell(created.session);
-    deps.onOpenInTab(created.session);
+    deps.onOpenInTab(created.session, undefined, side);
   }
 
   async function closeShell(id: ShellSessionId): Promise<void> {

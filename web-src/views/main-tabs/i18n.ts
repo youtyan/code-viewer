@@ -1,4 +1,4 @@
-// メインの面のタブ列の文言。page のタブの名前は上の行の入口と同じ文言を
+// メインの面のタブ列の文言。page のタブの名前は画面の入口と同じ文言を
 // 使うので、ここには持たない (app.ts の uiText().nav から渡す)。
 
 export type MainTabsLang = "en" | "ja";
@@ -20,9 +20,6 @@ export type MainTabsText = {
   splitUnavailable: string;
   resizeSplit: string;
   dropToSplit: string;
-  /** 本文を出していない面の、route のタブの置き札。 */
-  shownElsewhere: (name: string) => string;
-  showHere: string;
   /** 画像のタブのメニュー: そのファイルの履歴。 */
   fileHistory: string;
   previewHint: string;
@@ -43,11 +40,9 @@ const EN: MainTabsText = {
   stopSessionTitle:
     "End this shell (Close only hides the tab and keeps the shell running)",
   splitUnavailable:
-    "Split right (needs two tabs, one side, and a window wide enough for two)",
+    "Split right (a terminal or image tab in front, one side, and a window wide enough for two)",
   resizeSplit: "Resize the two sides",
   dropToSplit: "Drop to split right",
-  shownElsewhere: (name) => `${name} is shown on the other side`,
-  showHere: "Click to show it here",
   fileHistory: "File history",
   previewHint:
     "Preview tab: the next file you open replaces it. Double-click to keep it open.",
@@ -68,11 +63,9 @@ const JA: MainTabsText = {
   stopSessionTitle:
     "このシェルを終了します (閉じるはタブを隠すだけで、シェルは動き続けます)",
   splitUnavailable:
-    "右に分割 (タブが 2 つ以上・1 面・2 面が置ける窓の幅のときに使えます)",
+    "右に分割 (前面がターミナルか画像のタブ・1 面・2 面が置ける窓の幅のときに使えます)",
   resizeSplit: "左右の幅を変える",
   dropToSplit: "ここに落とすと右に分割",
-  shownElsewhere: (name) => `${name} は反対側の面に出ています`,
-  showHere: "押すとここに出します",
   fileHistory: "ファイルの履歴",
   previewHint:
     "仮のタブ: 次に開いたファイルで置き換わります。ダブルクリックで開いたままにします。",

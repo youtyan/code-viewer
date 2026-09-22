@@ -13,17 +13,24 @@ Requires Node.js 20 or newer. Development uses
   palette) and globs such as `*.ts` or `src/**`, and shows
   `matching / all` file counts in the header while it is active. Rows are
   real links: Cmd/Ctrl+click or middle-click opens a file in a new tab.
-- Keep files and screens open as tabs under the top bar. A single click opens
-  a file in a preview tab (italic) that the next file replaces; double-click
-  or **Keep open** keeps it. Files / Diff / History / Worktrees / Data /
-  Work log each have one tab that comes back as you left it. Right-click a
-  tab to close it, the others or those to its right, or copy its path; drag
-  to reorder; `g t` / `g T` / `g x` / `g 1`–`g 9` move and close from the
-  keyboard. The tabs are remembered per project. Split the area into two
-  sides (the split button, **Split right**, or drag a tab onto the right
-  half), resize them by dragging the line between, and move tabs across or
-  press `g o` to switch sides. Image files open in an image tab (zoom,
-  previous / next, copy path, open folder).
+- Keep files and screens open as tabs in the top row (there is no header row
+  above it). The project name, its branch and six view icons (Files / Diff /
+  History / Worktrees / Data / Work log, with the name and key on hover) sit
+  at the head of the file tree, or at the left end of the tab row when the
+  tree is hidden. A single click opens a file in a preview tab (italic) that
+  the next file replaces; double-click or **Keep open** keeps it. Diff /
+  History / Worktrees / Data / Work log each have one tab that comes back as
+  you left it. Files is not a tab: the folder view is what the left side shows
+  when no tab is selected (the Files icon, `g r`, or a folder in the tree).
+  Right-click a tab to close it, the others or those to its right, or copy its
+  path; drag to reorder; `g t` / `g T` / `g x` / `g 1`–`g 9` move and close
+  from the keyboard. The tabs are remembered per project. Files and screens
+  stay on the left side; split the area to put a terminal or an image on the
+  right (the split button, **Split right**, or drag one onto the right half),
+  resize by dragging the line between, and press `g o` to switch sides. Image
+  files open in an image tab (zoom, previous / next, copy path, open folder).
+  The annotations, Copy AI context, auto-update, cancel-requests, theme and
+  repository-page buttons are at the right of the bottom bar.
 - View git diffs with unified or split layout, lazy loading, viewed-file
   state, ignore-whitespace and hide-tests toggles, and dismissible per-line
   "reference pills" that copy `@path#start-end` for AI agents. View File on
@@ -57,8 +64,8 @@ Requires Node.js 20 or newer. Development uses
   same commit list and diff renderer used by `/history` inside the file's
   tab shell, filtered to that path. Both tabs keep the Repository sidebar
   visible.
-- Browse every worktree of the repository from the `Worktrees` tab in the
-  top bar, in the same three-pane shape as History: worktrees on the left,
+- Browse every worktree of the repository from the `Worktrees` icon at the
+  head of the file tree, in the same three-pane shape as History: worktrees on the left,
   the picked one's changed files in the middle, the diff on the right. Changed
   images, video, and audio show a before / after preview there too, with the
   same media card as the Diff Viewer, read from that worktree. Each row
@@ -118,7 +125,7 @@ Requires Node.js 20 or newer. Development uses
   tmux window.
 - Register your projects so they stay in the Agents list (in your order) even
   with no agent running, and switch between them from the project name at
-  the left of the top bar (`p`) or from the left sidebar on any screen. One
+  the head of the file tree (`p`) or from the left sidebar on any screen. One
   code-viewer serves every project on one port: switching reloads the page at
   `/p/<key>/…` on the same address, so notification permission, the terminal
   shells and unread marks carry over, and reload, back/forward and bookmarks
@@ -1086,7 +1093,7 @@ survives reloads and server restarts. See **Uploads and Scope Settings**
 above for how `.code-viewer/` is treated by the viewer and how to opt out of
 sharing it through git.
 
-In the browser, the annotation icon in the top bar opens a searchable library.
+In the browser, the annotation icon in the bottom bar opens a searchable library.
 Search titles, full Markdown bodies, file paths, and session names, or show only
 notes for the current file or datastore location. Sessions can be collapsed,
 renamed, or deleted; original step numbers remain stable when filtering.

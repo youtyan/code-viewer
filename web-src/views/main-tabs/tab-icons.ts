@@ -17,8 +17,9 @@ import type { PageKind } from "../../core/main-tabs";
 
 export type PageIconPaths = string | string[];
 
+// repo はタブにしないが、Files の入口 (木の見出しの絵柄の列) が使う。
 const ICONS: Record<
-  PageKind | "file" | "image" | "terminal" | "new" | "split",
+  PageKind | "repo" | "file" | "image" | "terminal" | "new" | "split",
   PageIconPaths
 > = {
   repo: FOLDER_ICON_PATHS.closed,

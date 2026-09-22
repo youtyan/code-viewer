@@ -754,7 +754,7 @@ function scrollMarkdownSectionIntoView(
 function markdownAnchorOffset(): number {
   const bottoms = Array.from(
     document.querySelectorAll<HTMLElement>(
-      "#global-header, .gdp-file-detail-sticky",
+      "#main-tabs, .gdp-file-detail-sticky",
     ),
   )
     .map((element) => {

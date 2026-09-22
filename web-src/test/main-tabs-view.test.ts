@@ -62,9 +62,8 @@ function setup(loadSaved: () => Promise<unknown>) {
     defaultRoute: (target: TabTarget): AppRoute =>
       target.kind === "file"
         ? fileRoute(target.path)
-        : target.kind === "page" && target.page === "repo"
-          ? { screen: "repo", ref: "worktree", path: "", range }
-          : { screen: "diff", range },
+        : { screen: "diff", range },
+    homeRoute: () => ({ screen: "repo", ref: "worktree", path: "", range }),
     copyPath: () => undefined,
     onNewTab: (side, anchor) =>
       calls.push(`new:${side}:${anchor.getAttribute("aria-label")}`),
@@ -189,7 +188,7 @@ describe("main tabs view: 読み戻し", () => {
     for (const reason of [
       "the saved layout is broken; starting from an empty layout",
       JSON.stringify(broken),
-      "version is 7, expected 1",
+      "version is 7, expected one of 1, 2",
       "panes[0] has 2 preview tabs (a, b); at most 1",
       'panes[0].activeId "zz" is not a tab of the pane',
     ])
@@ -230,14 +229,46 @@ describe("main tabs view: 操作", () => {
     ]);
   });
 
-  test("選択中のタブを閉じたら直前のタブへ、最後の 1 つなら Files へ", async () => {
-    const { handle, names } = setup(async () => null);
+  test("選択中のタブを閉じたら直前のタブへ、最後の 1 つなら本文の既定 (フォルダ表示) へ", async () => {
+    const { handle, names, current } = setup(async () => null);
     await handle.restore();
     handle.syncRoute({ screen: "diff", range });
     handle.closeActive();
     const afterFirst = names();
     handle.closeActive();
-    expect([afterFirst, names()]).toEqual([[">app.ts (preview)"], [">repo"]]);
+    expect([afterFirst, names(), current().screen]).toEqual([
+      [">app.ts (preview)"],
+      [],
+      "repo",
+    ]);
+  });
+
+  test("フォルダ表示の route はタブにせず、左の面の選択を外す (タブは残す)", async () => {
+    const { handle, names, fronts } = setup(async () => null);
+    await handle.restore();
+    handle.syncRoute({ screen: "repo", ref: "worktree", path: "src", range });
+    expect([names(), handle.front(), fronts[fronts.length - 1]]).toEqual([
+      ["app.ts (preview)"],
+      null,
+      "none:sync",
+    ]);
+  });
+
+  test("Files の入口 (showHome) は最後に見ていたフォルダへ戻り、タブを選べば戻る", async () => {
+    const { handle, mount, current } = setup(async () => null);
+    await handle.restore();
+    const folder: AppRoute = {
+      screen: "repo",
+      ref: "worktree",
+      path: "src/lib",
+      range,
+    };
+    handle.syncRoute(folder);
+    handle.syncRoute({ screen: "diff", range });
+    handle.showHome();
+    const home = current();
+    mount.querySelector<HTMLElement>(".main-tab")?.click();
+    expect([home, current()]).toEqual([folder, fileRoute("src/app.ts")]);
   });
 
   test("右クリックのメニューは分割の 2 項目を無効にする", async () => {
@@ -433,34 +464,74 @@ describe("main tabs view: 左右 2 面", () => {
     };
   };
 
-  test("分割ボタンで左の前面のタブが右の面へ移り、本文は右の面に出る", async () => {
-    const { handle, mount } = setup(async () => null);
+  test("ターミナルを指定した面で開き、既存タブもその面へ移す", async () => {
+    const { handle } = setup(async () => null);
     await handle.restore();
-    handle.syncRoute({ screen: "diff", range });
-    mount
-      .querySelector<HTMLButtonElement>(
-        '.main-tabs-pane[data-side="left"] .main-tabs-action:nth-child(2)',
-      )
-      ?.click();
+    handle.openTerminal("shell-a1", "right");
     expect(panes(handle)).toEqual({
       split: true,
       focused: "right",
-      routeSide: "right",
+      routeSide: "left",
       left: { kind: "file", path: "src/app.ts" },
-      right: { kind: "page", page: "diff" },
+      right: { kind: "terminal", session: "shell-a1" },
+    });
+    handle.openTerminal("shell-b2", "left");
+    expect(panes(handle)).toEqual({
+      split: true,
+      focused: "left",
+      routeSide: null,
+      left: { kind: "terminal", session: "shell-b2" },
+      right: { kind: "terminal", session: "shell-a1" },
+    });
+    handle.openImage("/work/images/landscape.png", "right");
+    handle.openTerminal("shell-a1", "left");
+    expect(panes(handle)).toEqual({
+      split: true,
+      focused: "left",
+      routeSide: null,
+      left: { kind: "terminal", session: "shell-a1" },
+      right: { kind: "image", path: "/work/images/landscape.png" },
     });
   });
 
-  test("左の面へフォーカスを移すと、本文をその面のタブの route に合わせる", async () => {
+  const splitButton = (mount: HTMLElement) =>
+    mount.querySelector<HTMLButtonElement>(
+      '.main-tabs-pane[data-side="left"] .main-tabs-action:nth-child(2)',
+    );
+
+  test("分割ボタンは前面のターミナルを右の面へ出し、本文は左の面に残る", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
+    handle.openTerminal("shell-a1");
+    splitButton(mount)?.click();
+    expect(panes(handle)).toEqual({
+      split: true,
+      focused: "right",
+      routeSide: "left",
+      left: { kind: "page", page: "diff" },
+      right: { kind: "terminal", session: "shell-a1" },
+    });
+  });
+
+  test("前面がファイルや画面のタブなら分割ボタンは押せない", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
+    const button = splitButton(mount);
+    button?.click();
+    expect([button?.disabled, panes(handle).split]).toEqual([true, false]);
+  });
+
+  test("右の面にフォーカスがあるとき左のタブを押すと、本文をそのタブの route に合わせる", async () => {
     const { handle, mount, current } = setup(async () => null);
     await handle.restore();
     handle.syncRoute({ screen: "diff", range });
+    handle.openTerminal("shell-a1");
+    splitButton(mount)?.click();
     mount
-      .querySelector<HTMLButtonElement>(
-        '.main-tabs-pane[data-side="left"] .main-tabs-action:nth-child(2)',
-      )
+      .querySelector<HTMLElement>('.main-tabs-pane[data-side="left"] .main-tab')
       ?.click();
-    handle.focusSide("left");
     expect([panes(handle).routeSide, panes(handle).focused, current()]).toEqual(
       ["left", "left", fileRoute("src/app.ts")],
     );
@@ -470,19 +541,50 @@ describe("main tabs view: 左右 2 面", () => {
     const { handle, mount } = setup(async () => null);
     await handle.restore();
     handle.syncRoute({ screen: "diff", range });
-    mount
-      .querySelector<HTMLButtonElement>(
-        '.main-tabs-pane[data-side="left"] .main-tabs-action:nth-child(2)',
-      )
-      ?.click();
+    handle.openTerminal("shell-a1");
+    splitButton(mount)?.click();
     handle.openImage("/work/images/landscape.png", "other-if-split");
     expect(panes(handle)).toEqual({
       split: true,
       focused: "left",
-      routeSide: "right",
+      routeSide: null,
       left: { kind: "image", path: "/work/images/landscape.png" },
-      right: { kind: "page", page: "diff" },
+      right: { kind: "terminal", session: "shell-a1" },
     });
+  });
+
+  test.each([
+    { name: "ファイルのタブ", kind: "file", dropZone: false },
+    { name: "ターミナルのタブ", kind: "terminal", dropZone: true },
+  ])("ドラッグ中の右に分割の落とす先は、右に置ける種類だけ ($name)", async ({
+    kind,
+    dropZone,
+  }) => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.openTerminal("shell-a1");
+    mount
+      .querySelector<HTMLElement>(`.main-tab[data-kind="${kind}"]`)
+      ?.dispatchEvent(new Event("dragstart", { bubbles: true }));
+    const zone = document.querySelector<HTMLElement>(".main-split-drop");
+    expect(zone?.hidden).toBe(!dropZone);
+  });
+
+  test("右の面のタブ列には、ファイルのタブを落とせない (dragover を受けない)", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.openTerminal("shell-a1");
+    splitButton(mount)?.click();
+    mount
+      .querySelector<HTMLElement>('.main-tab[data-kind="file"]')
+      ?.dispatchEvent(new Event("dragstart", { bubbles: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    mount
+      .querySelector<HTMLElement>(
+        '.main-tabs-pane[data-side="right"] .main-tabs-strip',
+      )
+      ?.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(false);
   });
 
   test("保存した 2 面・比・画像の前面が戻る (URL が下に残った route を指していても)", async () => {

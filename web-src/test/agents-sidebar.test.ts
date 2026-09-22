@@ -28,8 +28,12 @@ import type {
   AgentMonitor,
   AgentMonitorSnapshot,
 } from "../views/agents/agent-monitor";
-import { mountAgentsSidebar } from "../views/agents/agents-sidebar";
+import {
+  type AgentsSidebarDeps,
+  mountAgentsSidebar,
+} from "../views/agents/agents-sidebar";
 import { agentsText } from "../views/agents/i18n";
+import { closeContextMenu } from "../views/context-menu";
 import {
   createProjectActions,
   type ProjectActions,
@@ -45,6 +49,7 @@ afterAll(() => {
 });
 
 afterEach(() => {
+  closeContextMenu();
   closeOpenDialog();
   vi.unstubAllGlobals();
 });
@@ -175,7 +180,11 @@ function fakeActions(): ProjectActions & {
   };
 }
 
-function mount(data: AgentOverviewResponse, actions = fakeActions()) {
+function mount(
+  data: AgentOverviewResponse,
+  actions = fakeActions(),
+  openPane: AgentsSidebarDeps["openPane"] = () => undefined,
+) {
   document.body.innerHTML =
     '<nav><a class="app-menu-item active" href="/history">History</a></nav><div id="nav-projects"></div>';
   const root = document.querySelector<HTMLElement>("#nav-projects");
@@ -187,7 +196,7 @@ function mount(data: AgentOverviewResponse, actions = fakeActions()) {
     monitor,
     projects: actions,
     getText: () => agentsText("en"),
-    openPane: () => undefined,
+    openPane,
     viewingPane: () => null,
     launch: () => undefined,
     openBoard: () => undefined,
@@ -354,6 +363,36 @@ describe("agents sidebar actions", () => {
       "sample-lib",
     ).parentElement?.querySelector<HTMLElement>(".nav-agents");
     expect(rows?.hidden).toBe(true);
+  });
+
+  test("click, Alt+click, and the context menu use their respective targets", () => {
+    const opened: Array<[string, "opposite" | undefined]> = [];
+    const { root } = mount(withAgents, fakeActions(), (id, target) =>
+      opened.push([id, target]),
+    );
+    const row = root.querySelector<HTMLElement>('[data-nav-item="pane:%1"]');
+    row?.click();
+    row?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, altKey: true }),
+    );
+    row?.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    );
+    const items = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        ".gdp-context-menu button",
+      ),
+    ];
+    expect(items.map((item) => item.textContent)).toEqual([
+      "Open in a tab",
+      "Open in the opposite pane",
+    ]);
+    items[1]?.click();
+    expect(opened).toEqual([
+      ["%1", undefined],
+      ["%1", "opposite"],
+      ["%1", "opposite"],
+    ]);
   });
 });
 

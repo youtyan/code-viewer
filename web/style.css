@@ -122,12 +122,13 @@
   --blob-tab-active:    var(--accent);
 
   /* ---- 寸法 (T1: 固定物の実寸。ui-layout.md の 4 層) ---- */
-  /* 上の行そのものの高さ。表示密度で変わる (body[data-sidebar-font-size])。 */
+  /* 左のサイドバーの頭 (検索の入口) の行の高さ。表示密度で変わる
+     (body[data-sidebar-font-size])。中央には上の行が無い (タブ列が最上段)。 */
   --header-row-h: 44px;
-  /* 上に居座る固定物の合計 = 上の行 + その直下のタブ列 (#main-tabs)。
+  /* 上に居座る固定物の合計 = 最上段のタブ列 (#main-tabs) だけ。
      消費側 (ツールバーの top・各ページの --chrome-h・sticky) はこれだけを読む。
      タブ列の高さ (--main-tabs-h) は密度で比例させるので html, body で決める。 */
-  --global-header-h: calc(var(--header-row-h) + var(--main-tabs-h));
+  --global-header-h: var(--main-tabs-h);
   --topbar-h: 56px;
   --chrome-h: calc(var(--global-header-h) + var(--topbar-h));
   /* 左のサイドバー (プロジェクトとエージェント)。幅の出所は TS
@@ -352,9 +353,9 @@ html, body {
   --ui-font-section: calc(var(--space-unit) * 4.5);  /* 18 */
   /* メインの面のタブ列の高さ (34 / 30 / 38 / 43)。密度で --space-unit と一緒に
      変わるので、:root ではなくここで決め、合計の --global-header-h もここで
-     決め直す (body の --header-row-h の上書きを反映させるため。下のコメント)。 */
+     決め直す (body で変わった --main-tabs-h を反映させるため。下のコメント)。 */
   --main-tabs-h: round(calc(var(--space-unit) * 8.5), 1px);
-  --global-header-h: calc(var(--header-row-h) + var(--main-tabs-h));
+  --global-header-h: var(--main-tabs-h);
   --chrome-h: calc(var(--global-header-h) + var(--topbar-h));
 
   /* ここから下の T2 は :root ではなく body に置く。**置き場所が仕様の一部**。
@@ -403,13 +404,9 @@ html, body {
   -moz-osx-font-smoothing: auto;
 }
 
-/* 左右 2 面: 本文を出す面に本文を収める (T2 の上書き。body で決める)。 */
+/* 左右 2 面: 本文は左の面に収める (route のタブは左にしか置けない。T2 の上書き。body で決める)。 */
 body.main-split {
   --page-right: calc(var(--split-right-w) + var(--split-divider-w));
-}
-body.main-split.route-in-right {
-  --page-left: calc(var(--chrome-left) + var(--split-left-w) + var(--split-divider-w));
-  --page-right: 0px;
 }
 
 body[data-sidebar-font-size="compact"] {
@@ -835,20 +832,6 @@ body[data-code-font-size="xlarge"] {
   padding: 0 1px;
 }
 
-/* ===== Global header ===== */
-#global-header {
-  position: fixed;
-  top: 0; left: var(--chrome-left); right: 0;
-  height: var(--header-row-h);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 18px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  z-index: 60;
-}
-
 /* ===== Topbar ===== */
 #topbar {
   position: fixed;
@@ -973,16 +956,6 @@ button.brand:focus-visible {
   font-weight: 500;
 }
 
-.app-menu {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  height: 100%;
-  min-width: 0;
-  flex: 0 1 auto;
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
 .global-icon-link {
   /* Icon-only header links (help page, repository web page): same 28x28
      shell as .global-icon-action so the action cluster reads as one
@@ -1015,53 +988,6 @@ button.brand:focus-visible {
 .global-icon-link svg {
   display: block;
 }
-.app-menu-item {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  height: var(--ui-control-md);
-  flex-shrink: 0;
-  padding: 0 10px;
-  border-radius: 7px;
-  color: var(--fg-muted);
-  font-size: var(--ui-font-md);
-  font-weight: 600;
-  line-height: 1;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.app-menu-item:hover {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
-  text-decoration: none;
-}
-.app-menu-item.active {
-  background: var(--accent-subtle);
-  color: var(--accent);
-  font-weight: 600;
-}
-.app-menu-item.active::after {
-  content: "";
-  position: absolute;
-  right: 10px;
-  bottom: 1px;
-  left: 10px;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--accent);
-}
-.global-actions-sep.app-menu-sep {
-  margin: 0 6px;
-}
-/* メニューの中で唯一「画面遷移ではなく開閉」をする項目 (Tools)。見た目は
-   リンクの項目と揃えたいので、button 由来の既定値だけ打ち消す。 */
-.app-menu-action {
-  font-family: inherit;
-  border: 0;
-  cursor: pointer;
-  background: transparent;
-}
-
 .global-actions {
   position: relative;
   margin-left: auto;
@@ -3849,11 +3775,10 @@ body.gdp-diff-page #diff::after {
 }
 .empty.hidden { display: none; }
 /* 入口の下で、このプロジェクトの裏のプロセスが止まった・起動中のとき
-   (views/backend-state.ts)。中央の面 (上の行の下・左のサイドバーの右・
-   下のパネルの上) を空表示で覆い、各画面の取得の失敗を見せない。上の行
-   (#global-header) と下のパネル (#app-panel。ターミナルは入口が受ける) は
-   覆わないので、z-index はその 2 つ (60) より下、画面の上の行 (#topbar 50)
-   より上。 */
+   (views/backend-state.ts)。中央の面 (タブ列の下・左のサイドバーの右・
+   下のパネルの上) を空表示で覆い、各画面の取得の失敗を見せない。タブ列
+   (#main-tabs) と下のパネル (#app-panel) は覆わないので、z-index はその
+   2 つ (60) より下、画面の上の行 (#topbar 50) より上。 */
 .empty.backend-state {
   position: fixed;
   top: var(--global-header-h);
@@ -6707,16 +6632,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   #agent-status + .global-actions-sep {
     display: none;
   }
-  #global-header {
-    gap: 10px;
-    padding-inline: 12px;
-  }
-  .app-menu {
-    gap: 1px;
-  }
-  .app-menu-item {
-    padding-inline: 7px;
-  }
   .global-actions-sep.app-menu-sep {
     margin-inline: 2px;
   }
@@ -6739,19 +6654,9 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   #status::before {
     margin-right: 0;
   }
-  .app-menu-item {
-    padding-inline: 6px;
-  }
 }
 
 @media (max-width: 1100px) {
-  #global-header {
-    gap: 10px;
-    padding-inline: 12px;
-  }
-  .app-menu-item {
-    padding-inline: 7px;
-  }
   .global-actions {
     gap: 4px;
   }
@@ -17401,13 +17306,13 @@ body.gdp-nav-resizing {
   border-bottom: 1px solid var(--color-line-soft);
 }
 
-/* ---- メインの面のタブ列 (上の行の直下。views/main-tabs/main-tabs-view.ts) ----
+/* ---- メインの面のタブ列 (最上段。views/main-tabs/main-tabs-view.ts) ----
    高さは --main-tabs-h。タブが収まらなければタブの並びだけが横に送られ、
    右端の ＋ と分割は隠れない。選択の強さは面の明るさ + 上端の 2px の線 (線は
    フォーカスのある面の選択中のタブだけ、そのタブの幅だけ)。 */
 #main-tabs {
   position: fixed;
-  top: var(--header-row-h); left: var(--chrome-left); right: 0;
+  top: 0; left: var(--chrome-left); right: 0;
   height: var(--main-tabs-h);
   z-index: 60;
   display: flex;
@@ -17572,9 +17477,9 @@ body.main-split .main-tabs-pane[data-side="left"] {
 }
 
 /* ---- メインの面の左右の箱 (.main-pane-host。app.ts の PANE_HOSTS) ----
-   前面のタブがターミナル・画像・本文を出していない route のタブ (置き札) の
-   とき、その面の位置 (タブ列の下・本文の下端の上) に重ねて出す。本文を出して
-   いる面の箱は出さない (下の本文が見える)。画面ごとのツールバー (50) より上、
+   前面のタブがターミナルか画像のとき、その面の位置 (タブ列の下・本文の下端の
+   上) に重ねて出す。左の前面が route のタブか何も選んでいないときは出さない
+   (下の本文が見える)。画面ごとのツールバー (50) より上、
    上の行・タブ列・下パネル (60) より下。 */
 .main-pane-host {
   position: fixed;
@@ -17603,27 +17508,6 @@ body.main-split .main-pane-host[data-side="right"] {
   min-width: 0;
   min-height: 0;
 }
-/* 本文を出していない面の route のタブ: 名前と「押すとここに出す」。 */
-.main-pane-placeholder {
-  display: grid;
-  place-content: center;
-  gap: var(--space-2);
-  padding: var(--space-5);
-  border: 0;
-  background: var(--color-doc);
-  color: var(--color-text-2);
-  font: inherit;
-  font-size: var(--ui-font-md);
-  text-align: center;
-  cursor: pointer;
-}
-.main-pane-placeholder:hover {
-  background: color-mix(in srgb, var(--color-doc) 70%, var(--color-raised));
-}
-.main-pane-placeholder-hint {
-  color: var(--color-text-3);
-  font-size: var(--ui-font-sm);
-}
 .main-pane-message {
   margin: 0;
   padding: var(--space-5);
@@ -17635,7 +17519,7 @@ body.main-split .main-pane-host[data-side="right"] {
    2px の強調と左右のリサイズカーソル。面を太い枠では囲まない。 */
 .main-split-divider {
   position: fixed;
-  top: var(--header-row-h);
+  top: 0;
   bottom: var(--main-bottom);
   left: calc(var(--chrome-left) + var(--split-left-w) - var(--space-unit) * 0.5);
   width: calc(var(--space-unit) * 1.5);
@@ -17696,10 +17580,6 @@ body.main-split-resizing {
   width: var(--space-6);
   height: var(--space-6);
 }
-.global-header-spacer {
-  flex: 1 1 auto;
-  min-width: var(--space-2);
-}
 #nav-expand[hidden] {
   display: none;
 }
@@ -17732,41 +17612,127 @@ button.brand[aria-expanded="true"] {
   font-family: var(--font-ui);
   font-weight: 400;
 }
-/* 画面のタブ。選んでいるタブは下の線と文字の明るさ。 */
-.app-menu {
-  flex: 0 1 auto;
+/* ---- 画面の入口 (#view-head の .view-strip) ----
+   6 つの絵柄 (Files / Diff / History / Worktrees / Data / Work log)。押せる
+   領域は --ui-control-sm (28) 角。何を見ているかはタブだけが示すので、選んで
+   いる印 (.active) は付けない (active は JS が今の画面を知るためだけに持つ)。 */
+.view-strip {
+  display: flex;
+  align-items: center;
   gap: 0;
-  align-self: stretch;
-  scrollbar-width: none;
+  min-width: 0;
 }
-.app-menu-item {
-  height: 100%;
-  padding: 0 var(--space-3);
-  border-radius: 0;
-  color: var(--color-text-2);
-  font-weight: 500;
+.view-strip-item {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-3);
+  text-decoration: none;
 }
-.app-menu-item:hover {
-  background: transparent;
+.view-strip-item:hover {
+  background: var(--color-raised);
   color: var(--color-text);
+  text-decoration: none;
 }
-.app-menu-item.active {
-  background: transparent;
-  color: var(--color-text);
-  font-weight: 600;
-}
-.app-menu-item.active::after {
-  right: var(--space-3);
-  left: var(--space-3);
-  bottom: 0;
-  height: calc(var(--space-1) / 2);
-  border-radius: 2px 2px 0 0;
-  background: var(--color-accent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent) 55%, transparent);
-}
-.app-menu-item:focus-visible {
+.view-strip-item:focus-visible {
   outline: none;
-  box-shadow: inset var(--focus-ring);
+  box-shadow: var(--focus-ring);
+}
+.view-strip-item .goi-icon {
+  display: inline-flex;
+}
+.view-strip-icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  display: block;
+  fill: currentColor;
+}
+
+/* ---- プロジェクト名と画面の入口 (#view-head) の置き場所 ----
+   木の列が出ていれば、その見出し (.sb-head) の 1 段目: 名前とブランチの行、
+   その下に絵柄の列。文字は文字の線 (--pad-text)、絵柄の押せる領域の左端は
+   面の線 (--pad-face)。木が出ていなければタブ列の左 (#tabs-lead) に 1 行で。 */
+.view-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+#sidebar .sb-head > #view-head {
+  grid-area: head;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+#sidebar .sb-head > #view-head > .brand {
+  align-self: start;
+  max-width: 100%;
+  margin-left: calc(var(--pad-face) - var(--pad-text));
+}
+#sidebar .sb-head > #view-head > .view-strip {
+  margin-left: calc(var(--pad-face) - var(--pad-text));
+}
+#sidebar .sb-head:has(> #view-head),
+body.gdp-repo-page #sidebar .sb-head:has(> #view-head),
+body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head:has(> #view-head) {
+  grid-template:
+    "head head head head head head" auto
+    "title ref totals actions view toggle" var(--ui-control-sm)
+    "filter filter filter filter filter filter" auto
+    / auto minmax(0, 1fr) auto auto auto auto;
+}
+.tabs-lead {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 45%;
+  padding: 0 var(--space-2) 0 var(--pad-face);
+}
+/* 中身がどれも出ていない (木に名前がある・サイドバーも木も出ている) なら場所を取らない。 */
+.tabs-lead:not(:has(> :not([hidden]))) {
+  display: none;
+}
+.tabs-lead .brand {
+  font-size: var(--ui-font-base);
+}
+.tabs-lead .project-branch {
+  font-size: var(--ui-font-sm);
+}
+.tabs-lead > #sidebar-toggle {
+  flex: none;
+}
+
+/* ---- 最下段の右の操作 (上の行の右端から移したもの) ---- */
+#statusbar .statusbar-actions {
+  gap: 0;
+  padding-left: var(--space-1);
+}
+#statusbar .statusbar-actions #theme,
+#statusbar .statusbar-actions .global-icon-action,
+#statusbar .statusbar-actions .global-icon-link {
+  width: calc(var(--statusbar-h) - var(--space-1));
+  height: calc(var(--statusbar-h) - var(--space-1));
+  border-radius: var(--radius-sm);
+}
+#statusbar .statusbar-actions svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+/* コピーの結果の札はボタンの上に出す (下は画面の外)。 */
+#statusbar .goi-feedback {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 var(--space-2);
+}
+#statusbar #annotations-count {
+  top: calc(var(--space-1) * -1);
+  right: calc(var(--space-1) * -1);
 }
 .global-actions {
   margin-left: 0;

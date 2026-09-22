@@ -215,7 +215,6 @@ import {
   langFromPath,
   readRenderedLines,
 } from "./views/line-ref-pill";
-import { mainTabsText } from "./views/main-tabs/i18n";
 import {
   createMainTabsView,
   type FrontChange,
@@ -224,6 +223,7 @@ import {
   type PanesView,
   routeTarget,
 } from "./views/main-tabs/main-tabs-view";
+import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { createProjectActions } from "./views/projects/project-actions";
 import {
   mountProjectSwitcher,
@@ -262,6 +262,19 @@ import {
 } from "./views/viewer-settings";
 import { worktreeText } from "./views/worktree-i18n";
 import { createWorktreeView, type WorktreeView } from "./views/worktree-view";
+
+/** 画面の入口の絵柄と、その画面へ移るキー (Worktrees にはキーが無い)。 */
+const VIEW_STRIP_KEYS: Record<
+  "repo" | "diff" | "history" | "worktree" | "database" | "journal",
+  KeymapAction | null
+> = {
+  repo: "goto-repo",
+  diff: "goto-diff",
+  history: "goto-history",
+  worktree: null,
+  database: "goto-database",
+  journal: "goto-journal",
+};
 
 window.GdpExpandLogic = GdpExpandLogic;
 
@@ -1316,13 +1329,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         };
       case "page":
         switch (target.page) {
-          case "repo":
-            return {
-              screen: "repo",
-              ref: STATE.repoRef || "worktree",
-              path: "",
-              range,
-            };
           case "history":
             return { screen: "history", ref: "HEAD", range };
           case "help":
@@ -1350,12 +1356,23 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!mount) throw new Error("#main-tabs is missing from index.html");
       return mount;
     })(),
+    lead: (() => {
+      const lead = document.getElementById("tabs-lead");
+      if (!lead) throw new Error("#tabs-lead is missing from index.html");
+      return lead;
+    })(),
     getLanguage: () => STATE.language,
     pageLabel: (page) => uiText().nav[page],
     navigate: (route, replace) =>
       replace ? replaceWithRoute(route) : navigateToRoute(route),
     currentRoute: () => STATE.route,
     defaultRoute: defaultRouteForTab,
+    homeRoute: () => ({
+      screen: "repo",
+      ref: STATE.repoRef || "worktree",
+      path: "",
+      range: currentRange(),
+    }),
     copyPath: (path) => {
       navigator.clipboard
         .writeText(filePathClipboardText(path))
@@ -1402,7 +1419,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /**
    * 画面へ移る。その画面のタブが開いていれば、そのタブが最後に見ていた
-   * 状態へ (上の行の入口や g d などで、選んでいたコミットや表を失わない)。
+   * 状態へ (画面の入口の絵柄や g d などで、選んでいたコミットや表を失わない)。
    */
   function navigateToPageTab(route: AppRoute): void {
     const target = routeTarget(route);
@@ -2968,12 +2985,26 @@ window.GdpExpandLogic = GdpExpandLogic;
   function localizeViewerChrome() {
     const text = uiText();
     document.documentElement.lang = STATE.language;
-    // Tools はリンクではなくボタンなので HTMLElement で拾う (ラベルの当て方は
-    // 他のメニュー項目と同じ data-route 経由)。
-    document.querySelectorAll<HTMLElement>(".app-menu-item").forEach((link) => {
-      const route = link.dataset.route as keyof typeof text.nav;
-      if (route && text.nav[route]) link.textContent = text.nav[route];
-    });
+    // 画面の入口 (木の見出しの絵柄の列)。絵だけなので、名前とキーは
+    // title / aria-label に出す。
+    const bindings = activeKeyBindings();
+    document
+      .querySelectorAll<HTMLElement>(".view-strip-item")
+      .forEach((link) => {
+        const route = link.dataset.route as keyof typeof VIEW_STRIP_KEYS;
+        const name = text.nav[route];
+        if (!name) throw new Error(`view strip: no label for route ${route}`);
+        const action = VIEW_STRIP_KEYS[route];
+        const binding = action
+          ? bindings.find((item) => item.action === action)
+          : undefined;
+        const label = binding ? `${name} (${formatKeyBinding(binding)})` : name;
+        link.title = label;
+        link.setAttribute("aria-label", label);
+        const icon = link.querySelector<HTMLElement>(".goi-icon");
+        if (icon && !icon.firstElementChild)
+          icon.innerHTML = iconSvg("view-strip-icon", pageIconPaths(route));
+      });
     MAIN_TABS.localize();
     for (const view of Object.values(IMAGE_VIEWS))
       view?.setLanguage(STATE.language);
@@ -4269,9 +4300,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     "a.app-menu-item, a.global-icon-link, a.nav-board-link, a.nav-foot-item";
 
   /**
-   * 上の行で強調する入口。フォーカスのある面の選択タブで決める: page は
-   * その入口、file は Files、ターミナルは無し。タブがまだ無い起動の途中は
-   * route から決める (以前と同じ)。
+   * いまの画面の入口 (.active を付ける。見た目の印は付けず、プロジェクトを
+   * 移るときの移り先 currentScreenPath などが読む)。フォーカスのある面の選択
+   * タブで決める: page はその入口、file は Files、ターミナルは無し。タブが
+   * まだ無い (本文の既定を出している) ときは route から決める。
    */
   function headerRouteForFront(): string | null {
     const front = MAIN_TABS.front();
@@ -5520,13 +5552,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       );
       return true;
     }
+    // Files はタブではなく左の面の本文の既定 (フォルダ表示)。選択を外して出す。
     if (action === "goto-repo") {
-      navigateToPageTab({
-        screen: "repo",
-        ref: STATE.repoRef || "worktree",
-        path: "",
-        range: currentRange(),
-      });
+      MAIN_TABS.showHome();
       return true;
     }
     if (action === "toggle-sidebar") {
@@ -6447,9 +6475,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       mergeLocalSettings({ terminalImageShelfCollapsed: collapsed });
       patchSettings({ terminalImageShelfCollapsed: collapsed });
     },
-    onOpenInTab: (session, pane) => {
+    onOpenInTab: (session, pane, side) => {
       if (pane) TAB_SHELL_PANES.set(session.id, pane);
-      MAIN_TABS.openTerminal(session.id);
+      MAIN_TABS.openTerminal(session.id, side);
     },
     onOpenImage: (image, gallery) => {
       IMAGE_REFS.set(image.path, { image, images: gallery });
@@ -6562,7 +6590,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   // 2 面のとき、面の中 (本文・箱) を押したらその面へフォーカスを移す。
-  // 上の行・タブ列 (タブを押せばその面へ移る)・サイドバー・下パネル・最下段・
+  // タブ列 (タブを押せばその面へ移る)・サイドバー・下パネル・最下段・
   // メニューやダイアログは面の外なので見ない。
   document.addEventListener(
     "pointerdown",
@@ -6572,7 +6600,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const target = event.target as Element | null;
       if (
         target?.closest(
-          "#app-nav, #global-header, #main-tabs, #app-panel, #statusbar, .main-split-divider, .gdp-context-menu, [role=dialog]",
+          "#app-nav, #main-tabs, #app-panel, #statusbar, .main-split-divider, .gdp-context-menu, [role=dialog]",
         )
       )
         return;
@@ -6581,22 +6609,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     true,
   );
 
-  /** 本文を出していない面の route のタブの置き札。押すとその面へフォーカス。 */
-  function placeholderFor(side: PaneSide, label: string): HTMLElement {
-    const text = mainTabsText(STATE.language);
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "main-pane-placeholder";
-    const name = document.createElement("span");
-    name.className = "main-pane-placeholder-name";
-    name.textContent = text.shownElsewhere(label);
-    const hint = document.createElement("span");
-    hint.className = "main-pane-placeholder-hint";
-    hint.textContent = text.showHere;
-    card.append(name, hint);
-    card.addEventListener("click", () => MAIN_TABS.focusSide(side));
-    return card;
-  }
   relocalizeTerminal = () => TERMINAL_VIEW.localize();
 
   /**
@@ -6763,24 +6775,18 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * 面の前面・フォーカス・分割が変わった。面ごとの箱にターミナル・画像・
-   * 置き札を出し、本文を出す面を体のクラスで決める。フォーカスのある面の
+   * 面の前面・フォーカス・分割が変わった。面ごとの箱にターミナル・画像を
+   * 出す (本文 = route の中身は左の面にしか出ないので、左の前面が route の
+   * タブか何も選んでいないときは箱を隠して本文を見せる)。フォーカスのある面の
    * 前面がターミナルなら URL にそのシェルを積み、そうでないタブへ route を
    * 移らずに戻ったときは ?terminal= を外す。
    */
   function showPanes(view: PanesView, how: FrontChange): void {
-    document.body.classList.toggle(
-      "route-in-right",
-      view.split && view.routeSide === "right",
-    );
     for (const side of ["left", "right"] as const) {
       const host = PANE_HOSTS[side];
       const tab = view.fronts[side];
       const present = side === "left" || view.split;
-      const shown =
-        present &&
-        tab !== null &&
-        !(isRouteTab(tab) && view.routeSide === side);
+      const shown = present && tab !== null && !isRouteTab(tab);
       host.classList.toggle("is-shown", shown);
       host.dataset.kind = shown && tab ? tab.target.kind : "";
       if (!shown || !tab) continue;
@@ -6792,14 +6798,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         );
       } else if (tab.target.kind === "image") {
         showImageIn(side, tab.target.path);
-      } else {
-        const label =
-          tab.target.kind === "file"
-            ? tab.target.path
-            : uiText().nav[tab.target.page];
-        host.replaceChildren(placeholderFor(side, label));
       }
     }
+    // 左の箱が木の列を覆ったか外れたか: 名前と画面の入口を置き直す。
+    placeSidebarToggle();
     syncHeaderMenu();
     AGENTS_SIDEBAR?.refresh();
     const front = view.fronts[view.focused];
@@ -7084,13 +7086,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   }
 
-  /**
-   * そのペインをメインの面のタブで開く (サイドバー・パレット・全体ボード・
-   * 通知・最下段・「＋」のメニュー)。下パネルにターミナルは無いので、
-   * 呼び出し側が「下パネルで」を渡してきてもタブで開く。
-   */
-  function openAgentPane(pane: string): void {
+  /** そのペインをメインの面のタブで開く。サイドバーの修飾操作だけ反対面。 */
+  function openAgentPane(pane: string, destination?: "opposite"): void {
     AGENT_MONITOR.markRead(pane);
+    const panes = MAIN_TABS.panes();
+    const side: PaneSide =
+      destination === "opposite"
+        ? panes.split
+          ? panes.focused === "left"
+            ? "right"
+            : "left"
+          : "right"
+        : panes.focused;
     // もうタブで開いていれば、そのタブを前面に出すだけ (シェルを増やさない)。
     const tabbed = [...TAB_SHELL_PANES].find(
       ([shell, opened]) =>
@@ -7098,10 +7105,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         MAIN_TABS.hasTerminal(shell),
     );
     if (tabbed) {
-      MAIN_TABS.openTerminal(tabbed[0]);
+      MAIN_TABS.openTerminal(
+        tabbed[0],
+        destination === "opposite" ? side : undefined,
+      );
       return;
     }
-    void TERMINAL_VIEW.openPaneInTab(pane, MAIN_TABS.panes().focused);
+    void TERMINAL_VIEW.openPaneInTab(pane, side);
   }
 
   const AGENT_MONITOR = createAgentMonitor({
@@ -7616,9 +7626,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       link.addEventListener("click", (e) => {
         if (isNativeLinkClick(e)) return;
         e.preventDefault();
-        // 上の行の入口 (Files / Diff / …) と全体ボードは、その画面のタブが
-        // 開いていれば、そのタブが最後に見ていた状態を前面に出す。
+        // 画面の入口 (木の見出しの絵柄の列) と全体ボードは、その画面のタブが
+        // 開いていれば、そのタブが最後に見ていた状態を前面に出す。Files は
+        // タブではなく本文の既定なので、左の面の選択を外して出す。
         const page = link.dataset.route;
+        if (link.matches("a.app-menu-item") && page === "repo") {
+          MAIN_TABS.showHome();
+          return;
+        }
         const stored =
           link.matches("a.app-menu-item, a.nav-board-link") && isPageKind(page)
             ? MAIN_TABS.routeForPage(page)

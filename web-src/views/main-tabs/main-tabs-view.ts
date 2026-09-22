@@ -1,12 +1,13 @@
-// メインの面のタブ列 (上の行の直下、`#main-tabs`)。1 面か左右 2 面。
+// メインの面のタブ列 (最上段、`#main-tabs`)。1 面か左右 2 面。
 //
 // ファイルと各画面 (route のタブ) の中身は今までどおり route (URL) 1 つで
-// 決まり、本文は 1 つしか描けない。そこで本文は「route のタブを選んでいる面」
-// (両方ならフォーカスのある面) に置き (routeSide)、もう一方の面の route の
-// タブは置き札になる。ターミナルと画像のタブは面ごとの箱に描く (app.ts)。
+// 決まり、本文は 1 つしか描けない。そこで route のタブは左の面にだけ置き
+// (core/main-tabs.ts の canPlace)、本文も左の面に描く。右の面にはターミナルと
+// 画像だけを置き、面ごとの箱に描く (app.ts)。左の面で何も選んでいないときは
+// 本文の既定 (フォルダ表示 = repo の route) を出す。Files のタブは無い。
 //
 // route が変わるたび (setRoute / applyRouteFromLocation の後) に syncRoute が
-// 呼ばれ、その route のタブを開くか前面に出す。だから URL・戻る・進む・既存の
+// 呼ばれ、その route のタブを開くか前面に出す (フォルダ表示なら選択を外す)。だから URL・戻る・進む・既存の
 // 全部の入口 (木・パレット・行リンク・Diff や History から開く) がそのまま
 // タブになる。
 //
@@ -23,6 +24,7 @@ import {
   activate,
   activateIndex,
   activeTab,
+  canPlace,
   canSplit,
   close,
   closeOthers,
@@ -47,6 +49,7 @@ import {
   sameTarget,
   serializeLayout,
   setSplit,
+  showHome,
   splitRight,
   type Tab,
   type TabTarget,
@@ -86,8 +89,13 @@ export type PanesView = {
 
 export type MainTabsDeps = {
   mount: HTMLElement;
+  /**
+   * 左の面のタブ列の先頭に置く箱 (プロジェクト名と画面の入口を、木の列が
+   * 出ていないときに置く場所)。中身は呼び出し側が入れ替える。
+   */
+  lead?: HTMLElement;
   getLanguage(): MainTabsLang;
-  /** page のタブの名前 (上の行の入口と同じ文言)。 */
+  /** page のタブの名前 (画面の入口と同じ文言)。 */
   pageLabel(page: PageKind): string;
   /** その route を開く (replace なら履歴を積まない)。 */
   navigate(route: AppRoute, replace?: boolean): void;
@@ -95,6 +103,8 @@ export type MainTabsDeps = {
   currentRoute(): AppRoute;
   /** 覚えた route が無いタブ (読み戻したタブ) を開くときの route。 */
   defaultRoute(target: TabTarget): AppRoute;
+  /** 本文の既定 (フォルダ表示) の route。まだ一度も出していないときに使う。 */
+  homeRoute(): AppRoute;
   copyPath(path: string): void;
   /**
    * ＋ボタン。その面の新しいタブのメニュー (ファイル・新しいシェル・既存の
@@ -133,6 +143,8 @@ export type MainTabsHandle = {
   openImage(path: string, pane?: OpenOptions["pane"]): void;
   /** フォーカスのある面の＋のメニューを開く (キー操作・パレットから)。 */
   openNewTabMenu(): void;
+  /** 左の面の選択を外して本文の既定 (フォルダ表示) を出す (Files の入口)。 */
+  showHome(): void;
   /** フォーカスのある面の前面のタブ。 */
   front(): Tab | null;
   /** 今の面の様子 (前面・フォーカス・本文を置く面)。 */
@@ -171,7 +183,8 @@ export function isRouteTab(tab: Tab | null): boolean {
 /**
  * route をタブの中身に。画像のファイルを開く route (view が無いか blob) は
  * 画像のタブ。画像でも履歴・blame の route はファイルのタブ (ファイルの画面の
- * History / Blame を無くさない)。タブにならない route は null。
+ * History / Blame を無くさない)。タブにならない route は null: フォルダ表示
+ * (repo) は左の面の本文の既定で、タブにしない。
  */
 export function routeTarget(route: AppRoute): TabTarget | null {
   switch (route.screen) {
@@ -184,7 +197,6 @@ export function routeTarget(route: AppRoute): TabTarget | null {
       return route.line === undefined
         ? { kind: "file", path: route.path }
         : { kind: "file", path: route.path, line: route.line };
-    case "repo":
     case "diff":
     case "history":
     case "worktree":
@@ -193,6 +205,7 @@ export function routeTarget(route: AppRoute): TabTarget | null {
     case "agents":
     case "help":
       return { kind: "page", page: route.screen };
+    case "repo":
     case "unknown":
       return null;
   }
@@ -208,12 +221,14 @@ function frontOf(layout: Layout, side: PaneSide): Tab | null {
   return pane.tabs.find((tab) => tab.id === pane.activeId) ?? null;
 }
 
-/** 本文を置く面: フォーカスのある面の前面が route のタブならそこ、無ければもう一方。 */
+/**
+ * 本文を出す面。route のタブは左の面にしか置けないので、左の前面が route の
+ * タブか、何も選んでいない (本文の既定) なら左。左の前面がターミナルか画像
+ * なら本文は隠れる (null)。
+ */
 export function routeSideOf(layout: Layout): PaneSide | null {
-  const other: PaneSide = layout.focused === "left" ? "right" : "left";
-  if (isRouteTab(frontOf(layout, layout.focused))) return layout.focused;
-  if (layout.panes.right && isRouteTab(frontOf(layout, other))) return other;
-  return null;
+  const front = frontOf(layout, "left");
+  return front === null || isRouteTab(front) ? "left" : null;
 }
 
 function panesView(layout: Layout): PanesView {
@@ -247,6 +262,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
    * syncRoute がその route のタブの面へフォーカスを持って行かないようにする。
    */
   let keepFocus: PaneSide | null = null;
+  /** 最後に出したフォルダ表示の route (Files に戻ったとき同じフォルダを出す)。 */
+  let lastHome: AppRoute | null = null;
 
   // 面ごとのタブ列 (タブの並び + 右端の ＋ と分割)。
   type Section = {
@@ -309,9 +326,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     );
     splitButton.addEventListener("click", () => {
       const front = frontOf(layout, "left");
-      if (front && splitAllowed()) changeAndGo((l) => splitRight(l, front.id));
+      if (front && canSplitFront() && splitAllowed())
+        changeAndGo((l) => splitRight(l, front.id));
     });
     actions.append(newButton, splitButton);
+    if (side === "left" && deps.lead) el.append(deps.lead);
     el.append(strip, actions);
     wireStrip(strip, side);
     return { el, strip, newButton, splitButton };
@@ -348,6 +367,14 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   function mainWidth(): number {
     const left = deps.mount.getBoundingClientRect().left;
     return document.documentElement.clientWidth - left;
+  }
+
+  /** 1 面で、左の前面が右に置ける種類 (ターミナルか画像) か。 */
+  function canSplitFront(): boolean {
+    const front = frontOf(layout, "left");
+    return (
+      !layout.panes.right && front !== null && canPlace(front.target, "right")
+    );
   }
 
   /** 2 面を置ける幅か。 */
@@ -469,8 +496,16 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   function followRouteSide(how: FrontChange): void {
     if (how === "navigate") return;
     const side = routeSideOf(layout);
-    const tab = side ? frontOf(layout, side) : null;
-    if (!tab) return;
+    if (!side) return;
+    const tab = frontOf(layout, side);
+    if (!tab) {
+      // 本文の既定 (フォルダ表示)。どのフォルダかは URL が持つので、フォルダ
+      // 表示ならそのまま。
+      if (deps.currentRoute().screen === "repo") return;
+      keepFocus = layout.focused;
+      deps.navigate(homeRoute(), how === "sync");
+      return;
+    }
     const route = routeOf(tab);
     if (JSON.stringify(route) === JSON.stringify(deps.currentRoute())) return;
     keepFocus = layout.focused;
@@ -487,9 +522,13 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const next = change(layout);
     const after = activeTab(next);
     if (!after) {
+      // 左の面で何も選んでいない: 本文の既定 (フォルダ表示) を出す。
+      if (deps.currentRoute().screen === "repo") {
+        commit(next, "stay");
+        return;
+      }
       commit(next, "navigate");
-      // 面が空になった。空の面は URL で表せないので Files を開く。
-      deps.navigate(deps.defaultRoute({ kind: "page", page: "repo" }));
+      deps.navigate(homeRoute());
       return;
     }
     if (!isRouteTab(after)) {
@@ -505,14 +544,33 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     deps.navigate(route);
   }
 
-  /** 本文に出ている route のタブの、今の route を覚える。 */
+  /** 本文に出ている route のタブ (か本文の既定) の、今の route を覚える。 */
   function rememberRoute(): void {
     const side = routeSideOf(layout);
-    const tab = side ? frontOf(layout, side) : null;
-    if (tab) routes.set(tab.id, deps.currentRoute());
+    if (!side) return;
+    const tab = frontOf(layout, side);
+    const current = deps.currentRoute();
+    if (tab) routes.set(tab.id, current);
+    else if (current.screen === "repo") lastHome = current;
+  }
+
+  function homeRoute(): AppRoute {
+    return lastHome ?? deps.homeRoute();
   }
 
   function syncRoute(route: AppRoute, activateTab = true): void {
+    if (route.screen === "repo") {
+      // フォルダ表示はタブにしない: 左の面の選択を外して本文の既定にする。
+      lastHome = route;
+      if (!activateTab && routeSideOf(layout) === null) return;
+      let next = showHome(layout);
+      if (keepFocus) {
+        next = focusPane(next, keepFocus);
+        keepFocus = null;
+      }
+      commit(next, "sync");
+      return;
+    }
     const target = routeTarget(route);
     if (!target) return;
     if (!activateTab && routeSideOf(layout) === null) {
@@ -658,6 +716,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   function wireStrip(strip: HTMLElement, side: PaneSide): void {
     strip.addEventListener("dragover", (event) => {
       if (!dragId) return;
+      // 右の面に置けない種類 (ファイル・画面) は落とす先にしない。
+      const dragged = findTab(layout, dragId);
+      if (dragged && !canPlace(dragged.tab.target, side)) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
       clearDropMarks();
@@ -808,10 +869,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       el.classList.add("main-tab-dragging");
       document.body.classList.add("main-tab-dragging");
       // 1 面で分割できるときだけ、右に分割のドロップ先を出す。
+      // 1 面で、右に置ける種類 (ターミナル・画像) のときだけ右に分割の落とす先を出す。
       dropZone.hidden = !(
         !layout.panes.right &&
         canSplit(layout) &&
-        layout.panes.left.tabs.length > 1 &&
+        canPlace(tab.target, "right") &&
         splitAllowed()
       );
     });
@@ -825,8 +887,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   function renderActions(): void {
     const current = text();
     const split = !!layout.panes.right;
-    const allowed =
-      !split && layout.panes.left.tabs.length > 1 && splitAllowed();
+    const allowed = !split && canSplitFront() && splitAllowed();
     for (const side of SIDES) {
       const { newButton, splitButton, strip } = sections[side];
       strip.setAttribute("aria-label", current.tabList);
@@ -903,6 +964,17 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         `[code-viewer] main tabs: dropped ${parsed.dropped.length} saved tab(s) of an unknown kind:`,
         JSON.stringify(parsed.dropped),
       );
+    // 廃止・移動は古い版の値を読んだ結果で、不具合ではない。件数と中身は残す。
+    if (parsed.retired.length > 0)
+      console.info(
+        `[code-viewer] main tabs: dropped ${parsed.retired.length} saved Files tab(s); the folder view is now the default of the left side:`,
+        JSON.stringify(parsed.retired),
+      );
+    if (parsed.relocated.length > 0)
+      console.info(
+        `[code-viewer] main tabs: moved ${parsed.relocated.length} saved file or page tab(s) from the right side to the left (only terminals and images can be on the right):`,
+        JSON.stringify(parsed.relocated),
+      );
     // 今の画面 (URL) の route。保存した配置がその route を見せていた (本文の面の
     // 前面か、フォーカスのある面の前面がそのタブ) なら、保存した前面をそのまま
     // 使う (ターミナルや画像を前面にしたまま再読み込みしても、URL に出ている
@@ -917,15 +989,22 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       .filter((tab): tab is Tab => tab !== null);
     // 本文を出す面が無い (前面がどちらもターミナルか画像) なら、URL は下に
     // 残った route を指している。そのタブが配置にあれば一致とみなす。
-    const agrees =
-      target !== null &&
-      (shown.some((tab) => sameTarget(tab.target, target)) ||
-        (routeSideOf(restoredLayout) === null &&
-          allTabs(restoredLayout).some((tab) =>
-            sameTarget(tab.target, target),
-          )));
+    const home = urlRoute.screen === "repo";
+    const agrees = home
+      ? // フォルダ表示: 保存した左の面が何も選んでいないか、前面がターミナル・画像
+        frontOf(restoredLayout, "left") === null ||
+        routeSideOf(restoredLayout) === null
+      : target !== null &&
+        (shown.some((tab) => sameTarget(tab.target, target)) ||
+          (routeSideOf(restoredLayout) === null &&
+            allTabs(restoredLayout).some((tab) =>
+              sameTarget(tab.target, target),
+            )));
     layout = restoredLayout;
-    if (agrees && target) {
+    if (home && agrees) {
+      lastHome = urlRoute;
+      commit(layout, "sync");
+    } else if (agrees && target) {
       const tab = allTabs(restoredLayout).find((item) =>
         sameTarget(item.target, target),
       );
@@ -951,7 +1030,20 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     syncRoute,
     openTerminal(session, pane = "focused") {
       rememberRoute();
-      commit(open(layout, { kind: "terminal", session }, { pane }));
+      let next = open(layout, { kind: "terminal", session }, { pane });
+      const terminal = allTabs(next).find(
+        (tab) =>
+          tab.target.kind === "terminal" && tab.target.session === session,
+      );
+      if (terminal && (pane === "left" || pane === "right")) {
+        const found = findTab(next, terminal.id);
+        if (pane === "right" && !next.panes.right && splitAllowed()) {
+          next = splitRight(next, terminal.id);
+        } else if (next.panes.right && found?.side !== pane) {
+          next = moveToOtherSide(next, terminal.id);
+        }
+      }
+      commit(next);
     },
     closeTerminal(session) {
       const tab = findTerminal(session);
@@ -960,6 +1052,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     openImage(path, pane = "focused") {
       rememberRoute();
       commit(open(layout, { kind: "image", path }, { pane }));
+    },
+    showHome() {
+      changeAndGo(showHome);
     },
     openNewTabMenu() {
       const side = layout.panes.right ? layout.focused : "left";

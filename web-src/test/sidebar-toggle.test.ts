@@ -4,10 +4,12 @@ import { createSidebar } from "../views/sidebar";
 
 const originalDocument = globalThis.document;
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+const originalGetComputedStyle = globalThis.getComputedStyle;
 
 afterEach(() => {
   globalThis.document = originalDocument;
   globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+  globalThis.getComputedStyle = originalGetComputedStyle;
 });
 
 class FakeClassList {
@@ -48,6 +50,7 @@ class FakeElement {
   title = "";
   type = "";
   innerHTML = "";
+  hidden = false;
   visible = true;
   private listeners: Record<string, Array<() => void>> = {};
   private classValue = "";
@@ -72,6 +75,10 @@ class FakeElement {
       if (!node.visible) return null;
     }
     return this.parentElement;
+  }
+
+  getBoundingClientRect() {
+    return { width: this.visible ? 280 : 0 };
   }
 
   appendChild(child: FakeElement) {
@@ -151,7 +158,10 @@ class FakeElement {
 
 function installFakeDom() {
   const body = new FakeElement("body");
-  const globalHeader = new FakeElement("header", "global-header");
+  // タブ列の左の箱と、その中のプロジェクト名・画面の入口 (木が出ていれば木の見出しへ移る)。
+  const tabsLead = new FakeElement("div", "tabs-lead");
+  const viewHead = new FakeElement("div", "view-head");
+  tabsLead.appendChild(viewHead);
   const topbar = new FakeElement("div", "topbar");
   const sidebar = new FakeElement("aside", "sidebar");
   const sidebarHead = new FakeElement("div");
@@ -164,7 +174,7 @@ function installFakeDom() {
   label.className = "sidebar-toggle-label";
   toggle.appendChild(label);
   sidebar.append(sidebarHead, filter, filelist);
-  body.append(globalHeader, topbar, sidebar, toggle);
+  body.append(tabsLead, topbar, sidebar, toggle);
   globalThis.document = {
     body,
     createElement: (tagName: string) => new FakeElement(tagName),
@@ -172,7 +182,10 @@ function installFakeDom() {
     querySelectorAll: (selector: string) => body.querySelectorAll(selector),
   } as unknown as Document;
   globalThis.requestAnimationFrame = (() => 1) as typeof requestAnimationFrame;
-  return { body, globalHeader, sidebarHead, topbar };
+  globalThis.getComputedStyle = ((el: FakeElement) => ({
+    display: el.visible ? "block" : "none",
+  })) as unknown as typeof getComputedStyle;
+  return { body, tabsLead, viewHead, sidebar, sidebarHead, topbar };
 }
 
 function createSidebarForTest(state: { sidebarHidden: boolean }) {
@@ -256,6 +269,38 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
   });
 }
 
+describe("project name and view entries placement", () => {
+  test.each([
+    {
+      name: "the tree is shown: its header",
+      hidden: false,
+      screenHidesTree: false,
+      host: "sidebarHead" as const,
+    },
+    {
+      name: "the tree is folded: the tab row's lead",
+      hidden: true,
+      screenHidesTree: false,
+      host: "tabsLead" as const,
+    },
+    {
+      name: "the screen has no tree: the tab row's lead",
+      hidden: false,
+      screenHidesTree: true,
+      host: "tabsLead" as const,
+    },
+  ])("$name", ({ hidden, screenHidesTree, host }) => {
+    const dom = installFakeDom();
+    dom.sidebar.visible = !screenHidesTree;
+    const sidebar = createSidebarForTest({ sidebarHidden: hidden });
+    sidebar.placeSidebarToggle();
+    expect([
+      dom.viewHead.parentElement === dom[host],
+      dom.body.classList.contains("view-head-in-tree"),
+    ]).toEqual([true, host === "sidebarHead"]);
+  });
+});
+
 describe("sidebar toggle placement", () => {
   test("recreates a visible toggle after a hidden repo toolbar is removed", () => {
     const dom = installFakeDom();
@@ -327,7 +372,7 @@ describe("sidebar toggle placement", () => {
     expect(toggle?.innerHTML.includes("<svg")).toBe(true);
   });
 
-  test("uses the global header only when no toolbar or topbar host exists", () => {
+  test("uses the tab row's lead only when no toolbar or topbar host exists", () => {
     const dom = installFakeDom();
     const state = { sidebarHidden: true };
     const sidebar = createSidebarForTest(state);
@@ -338,7 +383,7 @@ describe("sidebar toggle placement", () => {
 
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");
     expect(toggle === null).toBe(false);
-    expect(toggle?.parentElement).toBe(dom.globalHeader);
+    expect(toggle?.parentElement).toBe(dom.tabsLead);
     expect(toggle?.offsetParent === null).toBe(false);
     expect(toggle?.innerHTML.includes("<svg")).toBe(true);
   });

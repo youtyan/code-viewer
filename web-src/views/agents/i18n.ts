@@ -56,10 +56,10 @@ export type AgentsText = {
   /** 見始めて 1 分未満。下限と言えるほどの長さが無い。 */
   elapsedJustWatched: string;
   openPane: string;
-  /** 行の右クリックのメニュー: 下のターミナルパネルで開く。 */
-  openPaneInPanel: string;
+  /** 行の右クリックのメニュー: 反対の面で開く。 */
+  openPaneOpposite: string;
   /** サイドバーの行の説明に添える、修飾キーの案内。 */
-  openPaneInPanelHint: string;
+  openPaneOppositeHint: string;
   openServer: string;
   openServerTitle: (url: string) => string;
   currentServer: string;
@@ -446,8 +446,8 @@ const EN: AgentsText = {
   elapsedJustWatched:
     "Just started watching: when it entered this state is not known",
   openPane: "Open in a tab",
-  openPaneInPanel: "Open in the bottom panel",
-  openPaneInPanelHint: "Alt+click: open in the bottom panel",
+  openPaneOpposite: "Open in the opposite pane",
+  openPaneOppositeHint: "Alt+click: open in the opposite pane",
   openServer: "Open",
   openServerTitle: (url) =>
     `Open the code-viewer running for this project (${url})`,
@@ -571,8 +571,8 @@ const JA: AgentsText = {
     `見始めてから変化なし。少なくとも ${lowerBound} 前からこの状態です`,
   elapsedJustWatched: "見始めたばかりで、この状態になった時刻は分かりません",
   openPane: "タブで開く",
-  openPaneInPanel: "下のパネルで開く",
-  openPaneInPanelHint: "Alt+クリック: 下のパネルで開く",
+  openPaneOpposite: "反対の面で開く",
+  openPaneOppositeHint: "Alt+クリック: 反対の面で開く",
   openServer: "開く",
   openServerTitle: (url) =>
     `このプロジェクトを開いている code-viewer へ移動 (${url})`,

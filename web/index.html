@@ -56,35 +56,31 @@
     </div>
     <div id="app-nav-resizer" class="app-nav-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="resize sidebar"></div>
   </aside>
-  <!-- 中央の上の 1 行: プロジェクト名とブランチ (= プロジェクトの切替、p)、
-       画面のタブ、見ている画面への操作。 -->
-  <header id="global-header">
+  <!-- 上の行は持たない: タブ列が最上段。プロジェクト名・ブランチと画面の入口
+       (#view-head) はファイルの木の列の見出しに置き、木が出ていないときは
+       タブ列の左 (#tabs-lead) へ移す (app.ts の placeViewHead)。 -->
+  <div id="tabs-lead" class="tabs-lead">
     <button id="nav-expand" class="global-icon-action" type="button" title="show sidebar" aria-label="show sidebar" hidden><span class="goi-icon" aria-hidden="true"></span></button>
-    <!-- リポジトリ名 = プロジェクトの切替 (views/projects/project-switcher.ts)。 -->
-    <button id="project-switcher" class="brand" type="button" aria-label="Switch project">
-      <span class="title" id="project-title">repository</span>
-      <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
-    </button>
-    <span class="global-header-spacer"></span>
-    <nav class="app-menu" aria-label="Views">
-      <a class="app-menu-item active" data-route="repo" href="/">Files</a>
-      <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff</a>
-      <a class="app-menu-item" data-route="history" href="/history">History</a>
-      <a class="app-menu-item" data-route="worktree" href="/worktree">Worktrees</a>
-      <a class="app-menu-item" data-route="database" href="/database">Data</a>
-      <a class="app-menu-item" data-route="journal" href="/journal">Work log</a>
-    </nav>
-    <div class="global-actions">
-      <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations"><span class="goi-icon" aria-hidden="true"></span><span id="annotations-count" hidden></span></button>
-      <button id="copy-ai-context" class="global-icon-action" title="Copy AI context" aria-label="Copy AI context"><span class="goi-icon" aria-hidden="true"></span></button>
-      <span id="copy-ai-context-feedback" class="goi-feedback" role="status" hidden></span>
-      <button id="auto-update" class="global-icon-action active" title="auto update on file change" aria-label="auto update on file change"><span class="goi-icon" aria-hidden="true"></span></button>
-      <button id="cancel-requests" class="global-icon-action" title="no in-flight requests" aria-label="no in-flight requests" disabled><span class="goi-icon" aria-hidden="true"></span></button>
-      <button id="theme" class="global-icon-action" title="toggle theme" aria-label="toggle theme"></button>
-      <a id="repo-web-link" class="global-icon-link" href="#" target="_blank" rel="noopener" hidden><span class="goi-icon" aria-hidden="true"></span></a>
+    <div id="view-head" class="view-head">
+      <!-- リポジトリ名 = プロジェクトの切替 (views/projects/project-switcher.ts)。 -->
+      <button id="project-switcher" class="brand" type="button" aria-label="Switch project">
+        <span class="title" id="project-title">repository</span>
+        <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
+      </button>
+      <!-- 画面の入口。押すとその画面のタブを開くか前面に出す (Files は本文の
+           既定 = フォルダ表示)。何を見ているかはタブだけが示すので、選択の印は
+           付けない。 -->
+      <nav class="app-menu view-strip" aria-label="Views">
+        <a class="app-menu-item view-strip-item" data-route="repo" href="/"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="diff" href="/todif?from=HEAD&to=worktree"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="history" href="/history"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="worktree" href="/worktree"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="database" href="/database"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="journal" href="/journal"><span class="goi-icon" aria-hidden="true"></span></a>
+      </nav>
     </div>
-  </header>
-  <!-- メインの面のタブ列 (上の行の直下)。中身は views/main-tabs/main-tabs-view.ts。
+  </div>
+  <!-- メインの面のタブ列 (最上段)。中身は views/main-tabs/main-tabs-view.ts。
        ファイル・各画面を開いたまま切り替える。高さは --main-tabs-h。 -->
   <nav id="main-tabs" aria-label="Tabs"></nav>
   <header id="topbar">
@@ -301,6 +297,17 @@
     <button id="agent-status" class="agent-status" type="button" hidden></button>
     <span class="statusbar-sep" aria-hidden="true"></span>
     <span id="status" class="status" role="status" aria-live="polite"><span class="status-label"></span></span>
+    <!-- 上の行の右端にあった操作 (注釈・AI 向けのコピー・自動更新・通信の中止・
+         テーマ・リポジトリの Web ページ)。id はそのまま (app.ts が絵と状態を貼る)。 -->
+    <div class="global-actions statusbar-actions" role="group" aria-label="Actions">
+      <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations"><span class="goi-icon" aria-hidden="true"></span><span id="annotations-count" hidden></span></button>
+      <button id="copy-ai-context" class="global-icon-action" title="Copy AI context" aria-label="Copy AI context"><span class="goi-icon" aria-hidden="true"></span></button>
+      <span id="copy-ai-context-feedback" class="goi-feedback" role="status" hidden></span>
+      <button id="auto-update" class="global-icon-action active" title="auto update on file change" aria-label="auto update on file change"><span class="goi-icon" aria-hidden="true"></span></button>
+      <button id="cancel-requests" class="global-icon-action" title="no in-flight requests" aria-label="no in-flight requests" disabled><span class="goi-icon" aria-hidden="true"></span></button>
+      <button id="theme" class="global-icon-action" title="toggle theme" aria-label="toggle theme"></button>
+      <a id="repo-web-link" class="global-icon-link" href="#" target="_blank" rel="noopener" hidden><span class="goi-icon" aria-hidden="true"></span></a>
+    </div>
     <button id="doctor-btn" class="statusbar-icon-action" type="button" title="environment doctor" aria-label="environment doctor"><span class="goi-icon" aria-hidden="true"></span><span id="doctor-badge" class="doctor-badge" hidden></span></button>
   </footer>
 </div>

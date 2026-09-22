@@ -21,6 +21,7 @@ import {
   prevTab,
   sameTarget,
   serializeLayout,
+  showHome,
   splitRight,
   type Tab,
   type TabTarget,
@@ -31,6 +32,9 @@ const FILE_A: TabTarget = { kind: "file", path: "sample/alpha.ts" };
 const FILE_B: TabTarget = { kind: "file", path: "sample/beta.ts" };
 const FILE_C: TabTarget = { kind: "file", path: "sample/gamma.ts" };
 const IMAGE_A: TabTarget = { kind: "image", path: "sample/alpha.png" };
+// 右の面に置けるのはターミナルと画像だけ (canPlace)。2 面の例の右の面はこれらで組む。
+const IMAGE_B: TabTarget = { kind: "image", path: "sample/beta.png" };
+const IMAGE_C: TabTarget = { kind: "image", path: "sample/gamma.png" };
 const TERMINAL_A: TabTarget = { kind: "terminal", session: "session-a" };
 const PAGE_DIFF: TabTarget = { kind: "page", page: "diff" };
 const PAGE_HISTORY: TabTarget = { kind: "page", page: "history" };
@@ -242,7 +246,7 @@ describe("main tabs contract: open", () => {
   ])("opens in $name", ({ destination, expectedSide }) => {
     const start = two(
       pane([tab("a", FILE_A)]),
-      pane([tab("b", FILE_B)]),
+      pane([tab("b", IMAGE_B)]),
       "right",
     );
     const result = open(start, IMAGE_A, {
@@ -272,7 +276,7 @@ describe("main tabs contract: open", () => {
     let calls = 0;
     const start = two(
       pane([tab("a", FILE_A)]),
-      pane([tab("b", FILE_B), tab("image", IMAGE_A)], "b"),
+      pane([tab("b", IMAGE_B), tab("image", IMAGE_A)], "b"),
     );
     const result = open(
       start,
@@ -400,7 +404,7 @@ describe("main tabs contract: selection, focus, and previews", () => {
   ])("focusPane $name", ({ onePane, expected, same }) => {
     const start = onePane
       ? one([tab("a", FILE_A)])
-      : two(pane([tab("a", FILE_A)]), pane([tab("b", FILE_B)]));
+      : two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)]));
     const result = focusPane(start, "right");
     expect(result.focused).toBe(expected);
     expect(result === start).toBe(same);
@@ -496,25 +500,33 @@ describe("main tabs contract: close", () => {
   test.each([
     {
       name: "removes an empty right pane",
-      start: two(pane([tab("a", FILE_A)]), pane([tab("b", FILE_B)]), "right"),
+      start: two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)]), "right"),
       id: "b",
       expectedId: "a",
-    },
-    {
-      name: "promotes a non-empty right pane when left becomes empty",
-      start: two(pane([tab("a", FILE_A)]), pane([tab("b", FILE_B)])),
-      id: "a",
-      expectedId: "b",
     },
   ])("$name", ({ start, id, expectedId }) => {
     const result = close(start, id);
     expect(result).toEqual({
       panes: {
         left: {
-          tabs: [tab(expectedId, expectedId === "a" ? FILE_A : FILE_B)],
+          tabs: [tab(expectedId, FILE_A)],
           activeId: expectedId,
           recent: [expectedId],
         },
+      },
+      focused: "left",
+    });
+    expectValid(result);
+  });
+
+  // 左の面は空でもよい (本文の既定を出す) ので、右の面を左へ寄せない。
+  test("keeps the right pane when the left pane becomes empty", () => {
+    const start = two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)]));
+    const result = close(start, "a");
+    expect(result).toEqual({
+      panes: {
+        left: { tabs: [], activeId: null, recent: [] },
+        right: { tabs: [tab("b", IMAGE_B)], activeId: "b", recent: ["b"] },
       },
       focused: "left",
     });
@@ -643,8 +655,8 @@ describe("main tabs contract: move", () => {
 
   test("moves a tab across panes and activates the destination", () => {
     const start = two(
-      pane([tab("a", FILE_A), tab("b", FILE_B)]),
-      pane([tab("c", FILE_C)]),
+      pane([tab("a", FILE_A), tab("b", IMAGE_B)]),
+      pane([tab("c", IMAGE_C)]),
     );
     const result = move(start, "b", "right", 0);
     expect(result.moved).toBe(true);
@@ -666,9 +678,9 @@ describe("main tabs contract: move", () => {
 
   test("keeps the destination preview fixed when moving another preview", () => {
     const start = two(
-      pane([tab("a", FILE_A), tab("moving", FILE_B, true)]),
+      pane([tab("a", FILE_A), tab("moving", IMAGE_B, true)]),
       pane(
-        [tab("c", FILE_C), tab("old-preview", IMAGE_A, true)],
+        [tab("c", IMAGE_C), tab("old-preview", IMAGE_A, true)],
         "old-preview",
         ["c", "old-preview"],
       ),
@@ -684,24 +696,60 @@ describe("main tabs contract: move", () => {
     expectValid(result.layout);
   });
 
-  test("collapses an emptied source pane", () => {
-    const start = two(pane([tab("a", FILE_A)]), pane([tab("b", FILE_B)]));
-    const result = move(start, "a", "right", 1);
+  test("collapses an emptied right pane", () => {
+    const start = two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)]));
+    const result = move(start, "b", "left", 1);
     expect(result.moved).toBe(true);
     expect(result.layout.panes.right).toBeUndefined();
     expect(paneState(result.layout, "left")).toEqual({
-      ids: ["b", "a"],
-      activeId: "a",
-      recent: ["b", "a"],
+      ids: ["a", "b"],
+      activeId: "b",
+      recent: ["a", "b"],
       previews: [false, false],
     });
     expectValid(result.layout);
   });
 
+  test("keeps two panes when the left pane is emptied (the left shows its default body)", () => {
+    const start = two(pane([tab("a", IMAGE_A)]), pane([tab("b", IMAGE_B)]));
+    const result = move(start, "a", "right", 1);
+    expect(result.moved).toBe(true);
+    expect([
+      paneState(result.layout, "left"),
+      paneState(result.layout, "right"),
+      result.layout.focused,
+    ]).toEqual([
+      { ids: [], activeId: null, recent: [], previews: [] },
+      {
+        ids: ["b", "a"],
+        activeId: "a",
+        recent: ["b", "a"],
+        previews: [false, false],
+      },
+      "right",
+    ]);
+    expectValid(result.layout);
+  });
+
+  test.each([
+    { name: "a file", target: FILE_B },
+    { name: "a page", target: PAGE_DIFF },
+  ])("does not move $name into the right pane", ({ target }) => {
+    const start = two(
+      pane([tab("a", FILE_A), tab("moving", target)]),
+      pane([tab("c", IMAGE_C)]),
+    );
+    expect(move(start, "moving", "right", 0)).toEqual({
+      moved: false,
+      reason: "not-placeable",
+      layout: start,
+    });
+  });
+
   test("does not move into a pane containing the same target", () => {
     const start = two(
-      pane([tab("a", FILE_A)]),
-      pane([tab("duplicate", { ...FILE_A })]),
+      pane([tab("a", IMAGE_A)]),
+      pane([tab("duplicate", { ...IMAGE_A })]),
     );
     expect(move(start, "a", "right", 0)).toEqual({
       moved: false,
@@ -752,7 +800,7 @@ describe("main tabs contract: move", () => {
 
 describe("main tabs contract: split and other side", () => {
   test("splitRight moves a tab into a new right pane", () => {
-    const result = splitRight(one([tab("a", FILE_A), tab("b", FILE_B)]), "b");
+    const result = splitRight(one([tab("a", FILE_A), tab("b", IMAGE_B)]), "b");
     expect(paneState(result, "left")).toEqual({
       ids: ["a"],
       activeId: "a",
@@ -769,17 +817,36 @@ describe("main tabs contract: split and other side", () => {
     expectValid(result);
   });
 
-  test("splitRight leaves a sole tab in one pane", () => {
-    const start = one([tab("a", FILE_A)]);
-    const result = splitRight(start, "a");
+  test.each([
+    { name: "a file", target: FILE_B },
+    { name: "a page", target: PAGE_DIFF },
+  ])("splitRight leaves $name in one pane (only terminals and images go right)", ({
+    target,
+  }) => {
+    const start = one([tab("a", FILE_A), tab("b", target)]);
+    const result = splitRight(start, "b");
     expect(result).toBe(start);
+    expectValid(result);
+  });
+
+  test("splitRight of a sole terminal leaves the left pane empty (its default body)", () => {
+    const result = splitRight(one([tab("t", TERMINAL_A)]), "t");
+    expect([
+      paneState(result, "left"),
+      paneState(result, "right")?.ids,
+      result.focused,
+    ]).toEqual([
+      { ids: [], activeId: null, recent: [], previews: [] },
+      ["t"],
+      "right",
+    ]);
     expectValid(result);
   });
 
   test.each([
     {
       name: "an already split layout",
-      start: two(pane([tab("a", FILE_A)]), pane([tab("b", FILE_B)])),
+      start: two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)])),
       id: "a",
     },
     {
@@ -795,7 +862,10 @@ describe("main tabs contract: split and other side", () => {
 
   test("moveToOtherSide moves and activates the tab", () => {
     const result = moveToOtherSide(
-      two(pane([tab("a", FILE_A), tab("b", FILE_B)]), pane([tab("c", FILE_C)])),
+      two(
+        pane([tab("a", FILE_A), tab("b", IMAGE_B)]),
+        pane([tab("c", IMAGE_C)]),
+      ),
       "b",
     );
     expect(paneState(result, "left")?.ids).toEqual(["a"]);
@@ -809,18 +879,25 @@ describe("main tabs contract: split and other side", () => {
     expectValid(result);
   });
 
-  test("moveToOtherSide collapses an emptied source pane", () => {
+  test("moveToOtherSide collapses an emptied right pane", () => {
     const result = moveToOtherSide(
-      two(pane([tab("a", FILE_A)]), pane([tab("b", FILE_B)])),
-      "a",
+      two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)])),
+      "b",
     );
     expect(result.panes.right).toBeUndefined();
     expect(paneState(result, "left")).toEqual({
-      ids: ["b", "a"],
-      activeId: "a",
-      recent: ["b", "a"],
+      ids: ["a", "b"],
+      activeId: "b",
+      recent: ["a", "b"],
       previews: [false, false],
     });
+    expectValid(result);
+  });
+
+  test("moveToOtherSide leaves a file tab on the left", () => {
+    const start = two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)]));
+    const result = moveToOtherSide(start, "a");
+    expect(result).toBe(start);
     expectValid(result);
   });
 
@@ -832,7 +909,7 @@ describe("main tabs contract: split and other side", () => {
     },
     {
       name: "a missing tab",
-      start: two(pane([tab("a", FILE_A)]), pane([tab("b", FILE_B)])),
+      start: two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)])),
       id: "missing",
     },
   ])("moveToOtherSide ignores $name", ({ start, id }) => {
@@ -916,7 +993,7 @@ describe("main tabs contract: keyboard selection", () => {
     const result = nextTab(
       two(
         pane([tab("a", FILE_A), tab("b", FILE_B)]),
-        pane([tab("c", FILE_C), tab("image", IMAGE_A)]),
+        pane([tab("c", IMAGE_C), tab("image", IMAGE_A)]),
         "right",
       ),
     );
@@ -942,6 +1019,20 @@ describe("main tabs contract: tabMenu", () => {
         closeOthers: true,
         closeToRight: false,
         keepOpen: true,
+        splitRight: false,
+        moveToOtherSide: false,
+        copyPath: true,
+      },
+    },
+    {
+      name: "a preview image in one pane",
+      state: one([tab("a", FILE_A), tab("b", IMAGE_B, true)]),
+      id: "b",
+      expected: {
+        close: true,
+        closeOthers: true,
+        closeToRight: false,
+        keepOpen: true,
         splitRight: true,
         moveToOtherSide: false,
         copyPath: true,
@@ -951,13 +1042,30 @@ describe("main tabs contract: tabMenu", () => {
       name: "a fixed page in two panes",
       state: two(
         pane([tab("a", PAGE_DIFF), tab("b", FILE_B)]),
-        pane([tab("c", FILE_C)]),
+        pane([tab("c", IMAGE_C)]),
       ),
       id: "a",
       expected: {
         close: true,
         closeOthers: true,
         closeToRight: true,
+        keepOpen: false,
+        splitRight: false,
+        moveToOtherSide: false,
+        copyPath: false,
+      },
+    },
+    {
+      name: "a terminal in two panes",
+      state: two(
+        pane([tab("a", PAGE_DIFF), tab("t", TERMINAL_A)]),
+        pane([tab("c", IMAGE_C)]),
+      ),
+      id: "t",
+      expected: {
+        close: true,
+        closeOthers: true,
+        closeToRight: false,
         keepOpen: false,
         splitRight: false,
         moveToOtherSide: true,
@@ -973,7 +1081,7 @@ describe("main tabs contract: tabMenu", () => {
         closeOthers: false,
         closeToRight: false,
         keepOpen: false,
-        splitRight: false,
+        splitRight: true,
         moveToOtherSide: false,
         copyPath: true,
       },
@@ -1016,7 +1124,7 @@ describe("main tabs contract: operation purity and invariants", () => {
     },
     {
       name: "focusPane",
-      start: two(pane([tab("a", FILE_A)]), pane([tab("b", FILE_B)])),
+      start: two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)])),
       run: (state: Layout) => focusPane(state, "right"),
     },
     {
@@ -1041,16 +1149,21 @@ describe("main tabs contract: operation purity and invariants", () => {
     },
     {
       name: "splitRight",
-      start: one([tab("a", FILE_A), tab("b", FILE_B)]),
+      start: one([tab("a", FILE_A), tab("b", IMAGE_B)]),
       run: (state: Layout) => splitRight(state, "b"),
     },
     {
       name: "moveToOtherSide",
       start: two(
-        pane([tab("a", FILE_A), tab("b", FILE_B)]),
-        pane([tab("c", FILE_C)]),
+        pane([tab("a", FILE_A), tab("b", IMAGE_B)]),
+        pane([tab("c", IMAGE_C)]),
       ),
       run: (state: Layout) => moveToOtherSide(state, "b"),
+    },
+    {
+      name: "showHome",
+      start: two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)]), "right"),
+      run: showHome,
     },
     {
       name: "nextTab",
@@ -1103,7 +1216,7 @@ describe("main tabs contract: persistence", () => {
     const serialized = serializeLayout(state);
     const parsed = parseLayout(JSON.parse(JSON.stringify(serialized)));
     expect(serialized).toEqual({
-      version: 1,
+      version: 2,
       focused: "right",
       panes: [
         {
@@ -1171,12 +1284,12 @@ describe("main tabs contract: persistence", () => {
     {
       name: "a different version",
       raw: {
-        version: 2,
+        version: 3,
         focused: "left",
         panes: [{ side: "left", activeId: null, tabs: [] }],
       },
       message:
-        "main tab layout is broken (1 problem):\n- version is 2, expected 1",
+        "main tab layout is broken (1 problem):\n- version is 3, expected one of 1, 2",
     },
     {
       name: "three panes",
@@ -1314,7 +1427,7 @@ describe("main tabs contract: persistence", () => {
       ],
     };
     expect(thrownMessage(() => parseLayout(raw))).toBe(
-      'main tab layout is broken (7 problems):\n- version is 7, expected 1\n- focused is "middle"\n- panes[0].tabs[1]: id "same" is also used at panes[0].tabs[0]\n- panes[0].tabs[3]: page {"kind":"page","page":"diff"} is also open at panes[0].tabs[2]\n- panes[0].tabs[4]: file target has no path\n- panes[0] has 2 preview tabs (same, same); at most 1\n- panes[0].activeId "missing" is not a tab of the pane',
+      'main tab layout is broken (7 problems):\n- version is 7, expected one of 1, 2\n- focused is "middle"\n- panes[0].tabs[1]: id "same" is also used at panes[0].tabs[0]\n- panes[0].tabs[3]: page {"kind":"page","page":"diff"} is also open at panes[0].tabs[2]\n- panes[0].tabs[4]: file target has no path\n- panes[0] has 2 preview tabs (same, same); at most 1\n- panes[0].activeId "missing" is not a tab of the pane',
     );
   });
 });

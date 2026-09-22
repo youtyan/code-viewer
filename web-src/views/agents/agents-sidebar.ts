@@ -39,8 +39,8 @@ export type AgentsSidebarDeps = {
   monitor: AgentMonitor;
   projects: ProjectActions;
   getText(): AgentsText;
-  /** そのペインをターミナルで開く (既定はメインの面のタブ)。 */
-  openPane(pane: string, where?: "tab" | "panel"): void;
+  /** そのペインをターミナルで開く。opposite は反対の面 (1 面なら右へ分割)。 */
+  openPane(pane: string, destination?: "opposite"): void;
   /** いまターミナルで見ているペイン (行の選択の印)。 */
   viewingPane(): string | null;
   /** 「新しいエージェント」の画面。project は選んでおくプロジェクト。 */
@@ -162,7 +162,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         : "",
       age.title,
       current.openPane,
-      current.openPaneInPanelHint,
+      current.openPaneOppositeHint,
     ]
       .filter(Boolean)
       .join("\n");
@@ -170,21 +170,24 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       "aria-label",
       `${current.state[pane.state]} · ${kind.textContent} · ${task.textContent}`,
     );
-    const openHere = (where: "tab" | "panel") => {
+    const openHere = (destination?: "opposite") => {
       deps.monitor.markRead(pane.id);
-      deps.openPane(pane.id, where);
+      deps.openPane(pane.id, destination);
       render(true);
     };
     row.addEventListener("click", (event) =>
-      openHere(event.altKey ? "panel" : "tab"),
+      openHere(event.altKey ? "opposite" : undefined),
     );
     row.addEventListener("contextmenu", (event) => {
       event.preventDefault();
       showContextMenu(
         row,
         [
-          { label: current.openPane, onSelect: () => openHere("tab") },
-          { label: current.openPaneInPanel, onSelect: () => openHere("panel") },
+          { label: current.openPane, onSelect: () => openHere() },
+          {
+            label: current.openPaneOpposite,
+            onSelect: () => openHere("opposite"),
+          },
         ],
         { at: { x: event.clientX, y: event.clientY } },
       );

@@ -79,8 +79,10 @@ function setup(responses: Array<() => Response | Promise<Response>>) {
     onFontSizeChange: () => undefined,
     isImageShelfCollapsed: () => false,
     onImageShelfCollapsedChange: () => undefined,
-    onOpenInTab: (session, pane) =>
-      opened.push(pane ? `${session.id}:${pane}` : session.id),
+    onOpenInTab: (session, pane, side) =>
+      opened.push(
+        pane ? `${session.id}:${pane}:${side}` : `${session.id}:${side}`,
+      ),
   });
   return { view, requests, opened };
 }
@@ -91,7 +93,7 @@ const json = (body: unknown, status = 200) =>
 describe("terminal view: シェルの作成と停止", () => {
   // その面でまだターミナルを映していなければ寸法は測れないので送らない
   // (サーバの既定で開き、タブに映したときに合わせ直す)。
-  test("作ったシェルはタブで開いてもらい、一覧にも載せる", async () => {
+  test("作ったシェルはその面のタブで開いてもらい、一覧にも載せる", async () => {
     const { view, requests, opened } = setup([
       () => json({ session: shell("shell-a1") }),
     ]);
@@ -100,7 +102,18 @@ describe("terminal view: シェルの作成と停止", () => {
       requests,
       opened,
       view.knownShells()?.sessions.map((item) => item.id),
-    ]).toEqual([["POST /_shell/create {}"], ["shell-a1"], ["shell-a1"]]);
+    ]).toEqual([["POST /_shell/create {}"], ["shell-a1:left"], ["shell-a1"]]);
+  });
+
+  test("tmux ペインを開くとき、指定した面をタブへ引き継ぐ", async () => {
+    const { view, requests, opened } = setup([
+      () => json({ session: shell("shell-a1"), action: "attached" }),
+    ]);
+    await view.openPaneInTab("%1", "right");
+    expect(requests).toEqual([
+      'POST /_tmux/open {"pane":"%1","shell":null,"cols":80,"rows":24}',
+    ]);
+    expect(opened).toEqual(["shell-a1:%1:right"]);
   });
 
   test.each([
