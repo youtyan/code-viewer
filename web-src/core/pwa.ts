@@ -69,6 +69,8 @@ type PwaChord = {
 };
 
 // Cmd+N は窓を増やさない (握るだけ)。
+// ⌘⇧W / Ctrl+Shift+W (窓を閉じる) は表に入れない: 窓を閉じる手段を 1 つは残す
+// (⌘W はタブを閉じるので、全部閉じても窓は残る)。
 export const PWA_TAB_KEYS: readonly PwaChord[] = [
   { keys: ["w"], modifier: "primary", action: "main-tab-close" },
   { keys: ["t"], modifier: "primary", shift: true, action: "main-tab-reopen" },
@@ -145,4 +147,102 @@ export function lastTabNumber(layout: Layout): number {
       `pwa: the focused pane ${layout.focused} is missing from the layout`,
     );
   return pane.tabs.length;
+}
+
+/**
+ * 窓の枠の色 (インストールした窓のタイトルバー) を、いまのテーマの窓の地
+ * (--color-ground) に合わせる。head の theme-color は OS の明暗で選ぶ 2 本だが、
+ * アプリのテーマは OS と別に選べるので、どちらも今の地にする。
+ */
+export function syncThemeColor(doc: Document): void {
+  const ground = getComputedStyle(doc.documentElement)
+    .getPropertyValue("--color-ground")
+    .trim();
+  if (!ground)
+    throw new Error(
+      `pwa: --color-ground is empty on <html data-theme="${doc.documentElement.dataset.theme}" data-palette="${doc.documentElement.dataset.palette ?? ""}">`,
+    );
+  for (const meta of doc.querySelectorAll<HTMLMetaElement>(
+    'meta[name="theme-color"]',
+  ))
+    meta.content = ground;
+}
+
+/** navigator.userAgentData の brands (Chromium だけが持つ。標準の型に無い)。 */
+export type UserAgentBrand = { brand: string; version: string };
+
+/**
+ * インストールの案内を出すブラウザか。案内の手順は Chrome の画面のものなので、
+ * 同じ Chromium でも Edge などには出さない。
+ */
+export function isChromeBrowser(
+  brands: readonly UserAgentBrand[] | undefined,
+): boolean {
+  return !!brands?.some((item) => item.brand === "Google Chrome");
+}
+
+/** beforeinstallprompt の event (標準の型に無いので使う分だけ)。 */
+type InstallPromptEvent = Event & {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+
+/**
+ * hidden: 案内を出さない (Chrome 以外・インストールした窓の中)。
+ * prompt: ブラウザがインストールの画面を出せる (ボタンを出す)。
+ * manual: 出せない (インストール済み・条件を満たさない)。手順の文だけ。
+ */
+export type InstallOfferState = "hidden" | "prompt" | "manual";
+
+export type InstallOffer = {
+  state(): InstallOfferState;
+  /** ブラウザのインストールの画面を出し、利用者の選んだ結果を返す。 */
+  install(): Promise<"accepted" | "dismissed">;
+  /** state() が変わったら呼ぶ。1 つだけ持つ (描き直すたびに置き換える)。 */
+  onChange(listener: (() => void) | null): void;
+};
+
+type InstallOfferWindow = Pick<
+  Window,
+  "addEventListener" | "matchMedia" | "navigator"
+>;
+
+/**
+ * beforeinstallprompt は読み込みの直後に 1 度だけ来るので、ヘルプを開く前から
+ * 受けておく。event の prompt() は 1 回しか使えない。
+ */
+export function createInstallOffer(win: InstallOfferWindow): InstallOffer {
+  const chrome = isChromeBrowser(
+    (win.navigator as { userAgentData?: { brands?: UserAgentBrand[] } })
+      .userAgentData?.brands,
+  );
+  let pending: InstallPromptEvent | null = null;
+  let listener: (() => void) | null = null;
+  win.addEventListener("beforeinstallprompt", (event) => {
+    pending = event as InstallPromptEvent;
+    listener?.();
+  });
+  win.addEventListener("appinstalled", () => {
+    pending = null;
+    listener?.();
+  });
+  return {
+    state() {
+      if (!chrome || win.matchMedia(STANDALONE_MEDIA_QUERY).matches)
+        return "hidden";
+      return pending ? "prompt" : "manual";
+    },
+    async install() {
+      const event = pending;
+      if (!event)
+        throw new Error("pwa: the browser has not offered an install prompt");
+      pending = null;
+      listener?.();
+      await event.prompt();
+      return (await event.userChoice).outcome;
+    },
+    onChange(next) {
+      listener = next;
+    },
+  };
 }

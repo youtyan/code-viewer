@@ -6,6 +6,7 @@ import {
   type KeyBinding,
   resolveKeymapAction,
 } from "../core/keymap";
+import type { InstallOffer, InstallOfferState } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
 import { parseQueryArgs } from "../server/query-cli";
 import {
@@ -19,6 +20,13 @@ import {
   type HelpSection,
   openHelpKeybindings,
 } from "../views/help-page";
+
+/** インストールの案内を出さないブラウザ (案内の中身は pwa.test.ts)。 */
+const HIDDEN_INSTALL_OFFER: InstallOffer = {
+  state: () => "hidden",
+  install: () => Promise.reject(new Error("no install prompt in this test")),
+  onChange: () => undefined,
+};
 
 const EXPECTED_QUERY_DIFF_COMMANDS = [
   "code-viewer query diff tables --before snap-abc123 --after snap-def456 --json",
@@ -169,6 +177,7 @@ describe("help page settings categories", () => {
       },
       getKeyBindings: () => DEFAULT_KEY_BINDINGS,
       decorateKeybindings: () => undefined,
+      installOffer: HIDDEN_INSTALL_OFFER,
     });
     page.renderHelpPage();
     const nav = () =>
@@ -250,6 +259,7 @@ describe("help page CLI reference", () => {
   function renderHelp(
     lang: "en" | "ja",
     section: HelpSection = "database",
+    installOffer: InstallOffer = HIDDEN_INSTALL_OFFER,
   ): {
     text: string;
     commands: string[];
@@ -291,6 +301,7 @@ describe("help page CLI reference", () => {
       setSettingsCategory: () => undefined,
       getKeyBindings: () => DEFAULT_KEY_BINDINGS,
       decorateKeybindings: () => undefined,
+      installOffer,
     });
     page.renderHelpPage();
     const root = document.querySelector("#diff");
@@ -302,6 +313,76 @@ describe("help page CLI reference", () => {
       ),
     };
   }
+
+  /** 状態を外から切り替えられる案内。install() の呼び出しを数える。 */
+  function switchableOffer(initial: InstallOfferState) {
+    let state = initial;
+    let listener: (() => void) | null = null;
+    const offer = {
+      installs: 0,
+      state: () => state,
+      install: () => {
+        offer.installs += 1;
+        return Promise.resolve("accepted" as const);
+      },
+      onChange: (next: (() => void) | null) => {
+        listener = next;
+      },
+      set(next: InstallOfferState) {
+        state = next;
+        listener?.();
+      },
+      listening: () => listener !== null,
+    };
+    return offer;
+  }
+
+  /** 「アプリとしてインストール」の節: [ボタンの文字, 手順の数] (節が無ければ null)。 */
+  function installGuide(): [string[], number] | null {
+    const host = document.querySelector(".gdp-help-install");
+    if (!host) return null;
+    return [
+      Array.from(host.querySelectorAll("button"), (b) => b.textContent ?? ""),
+      host.querySelectorAll(".gdp-help-steps li").length,
+    ];
+  }
+
+  test.each<["en" | "ja", InstallOfferState, [string[], number] | null]>([
+    ["en", "prompt", [["Install code-viewer"], 2]],
+    ["ja", "prompt", [["code-viewer をインストール"], 2]],
+    ["en", "manual", [[], 2]],
+    ["ja", "manual", [[], 2]],
+    ["en", "hidden", null],
+  ])("Getting Started in %s with the offer %s shows the install guide %j", (lang, state, expected) => {
+    const { text } = renderHelp(lang, "overview", switchableOffer(state));
+    expect(installGuide()).toEqual(expected);
+    // キーの説明は案内を出さないブラウザでも残る。
+    expect(text).toContain(
+      lang === "en" ? "Installed as an app" : "アプリとしてインストールすると",
+    );
+  });
+
+  test("the install button appears when the browser starts offering, and asks the browser once", () => {
+    const offer = switchableOffer("manual");
+    renderHelp("en", "overview", offer);
+    expect(installGuide()).toEqual([[], 2]);
+    offer.set("prompt");
+    expect(installGuide()).toEqual([["Install code-viewer"], 2]);
+    document
+      .querySelector<HTMLButtonElement>(".gdp-help-install button")
+      ?.click();
+    expect(offer.installs).toBe(1);
+    offer.set("manual");
+    expect(installGuide()).toEqual([[], 2]);
+  });
+
+  test("a help section without the guide stops listening for the offer", () => {
+    const offer = switchableOffer("manual");
+    renderHelp("en", "overview", offer);
+    expect(offer.listening()).toBe(true);
+    renderHelp("en", "database", offer);
+    expect(offer.listening()).toBe(false);
+  });
 
   function parseRenderedQueryCommand(command: string) {
     const parts = command.trim().split(/\s+/);

@@ -108,9 +108,11 @@ import {
   SIDEBAR_WIDTH,
 } from "./core/panel-sizes";
 import {
+  createInstallOffer,
   lastTabNumber,
   resolvePwaKey,
   STANDALONE_MEDIA_QUERY,
+  syncThemeColor,
 } from "./core/pwa";
 import { buildRepositoryWebTarget } from "./core/repository-web-url";
 import {
@@ -3365,6 +3367,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
     $<HTMLLinkElement>("#hljs-light").disabled = STATE.theme === "dark";
     $<HTMLLinkElement>("#hljs-dark").disabled = STATE.theme !== "dark";
+    // インストールした窓の枠の色も今の地に (core/pwa.ts)。
+    syncThemeColor(document);
   }
 
   function getHljs(): HljsApi | null {
@@ -4932,6 +4936,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     getKeyBindings: activeKeyBindings,
     decorateKeybindings: (article, groups) =>
       KEYBINDING_EDITOR.decorate(article, groups),
+    // インストールの案内 (PWA)。ブラウザが出す 1 度きりの event を今から受けておく。
+    installOffer: createInstallOffer(window),
   });
 
   // ---------- Hunk expand: extracted to hunk-expand.ts ----------

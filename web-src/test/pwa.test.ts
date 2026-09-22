@@ -6,10 +6,15 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { KeyEventLike } from "../core/keymap";
 import type { Layout } from "../core/main-tabs";
 import {
+  createInstallOffer,
+  type InstallOfferState,
+  isChromeBrowser,
   lastTabNumber,
   type PwaKeyOutcome,
   type PwaKeyTarget,
   resolvePwaKey,
+  syncThemeColor,
+  type UserAgentBrand,
 } from "../core/pwa";
 import { staticFileSpec } from "../server/static-files";
 import {
@@ -387,6 +392,24 @@ describe("the tab keys of an installed window", () => {
       run("main-tab-next") as PwaKeyOutcome,
     ],
     [
+      "Cmd+Shift+W still closes the window (never taken)",
+      "W",
+      "cmd+shift",
+      true,
+      true,
+      "page",
+      null,
+    ],
+    [
+      "Ctrl+Shift+W off a Mac still closes the window (never taken)",
+      "W",
+      "ctrl+shift",
+      true,
+      false,
+      "page",
+      null,
+    ],
+    [
       "Ctrl+Shift+] off a Mac is not a tab key",
       "}",
       "ctrl+shift",
@@ -452,5 +475,173 @@ describe("the tab keys of an installed window", () => {
     expect(() =>
       lastTabNumber({ panes: { left: pane(["a"]) }, focused: "right" }),
     ).toThrow("pwa: the focused pane right is missing from the layout");
+  });
+});
+
+describe("the window frame color follows the app theme", () => {
+  const THEME_RULES: [string, string, string][] = [
+    // [data-theme, data-palette, その地を決める規則]
+    ["light", "", ":root"],
+    ["dark", "", '[data-theme="dark"]'],
+    ["dark", "graphite", '[data-theme="dark"][data-palette="graphite"]'],
+    ["dark", "warm", '[data-theme="dark"][data-palette="warm"]'],
+    // 色違いはダークだけに効く
+    ["light", "warm", ":root"],
+  ];
+  const root = () => document.documentElement;
+  const setLook = (theme: string, palette: string) => {
+    root().dataset.theme = theme;
+    if (palette) root().dataset.palette = palette;
+    else delete root().dataset.palette;
+  };
+  const themeColors = () =>
+    Array.from(document.querySelectorAll('meta[name="theme-color"]'), (meta) =>
+      meta.getAttribute("content"),
+    );
+  let style: HTMLStyleElement;
+  beforeAll(() => {
+    GlobalRegistrator.register();
+    // index.html の head にある theme-color をそのまま使う。
+    const page = new DOMParser().parseFromString(
+      readFileSync("web/index.html", "utf8"),
+      "text/html",
+    );
+    for (const meta of page.querySelectorAll('meta[name="theme-color"]'))
+      document.head.append(document.importNode(meta, true));
+    style = document.createElement("style");
+    style.textContent = readFileSync("web/style.css", "utf8");
+    document.head.append(style);
+  });
+  afterAll(() => GlobalRegistrator.unregister());
+
+  test.each(
+    THEME_RULES,
+  )("theme %s palette '%s' paints both theme colors with the ground of %s", (theme, palette, selector) => {
+    const ground = cascadedDeclarations(
+      baseRules(loadStyleSheet()),
+      (s) => s === selector,
+    ).get("--color-ground");
+    if (!ground) throw new Error(`${selector} does not set --color-ground`);
+    setLook(theme, palette);
+    syncThemeColor(document);
+    expect(themeColors()).toEqual([ground, ground]);
+  });
+
+  test("switching back and forth repaints every time", () => {
+    const seen: (string | null)[] = [];
+    for (const [theme, palette] of THEME_RULES) {
+      setLook(theme, palette);
+      syncThemeColor(document);
+      seen.push(themeColors()[0] ?? null);
+    }
+    // 4 つのテーマの地はどれも違う (同じなら上の表の検査が何も見分けていない)。
+    expect(new Set(seen.slice(0, 4)).size).toBe(4);
+    expect(seen[4]).toBe(seen[0]);
+  });
+
+  test("a page without the stylesheet is reported instead of painting an empty color", () => {
+    style.remove();
+    setLook("dark", "");
+    try {
+      expect(() => syncThemeColor(document)).toThrow(
+        'pwa: --color-ground is empty on <html data-theme="dark" data-palette="">',
+      );
+    } finally {
+      document.head.append(style);
+    }
+  });
+});
+
+const CHROME: UserAgentBrand[] = [
+  { brand: "Not)A;Brand", version: "8" },
+  { brand: "Chromium", version: "140" },
+  { brand: "Google Chrome", version: "140" },
+];
+const EDGE: UserAgentBrand[] = [
+  { brand: "Not)A;Brand", version: "8" },
+  { brand: "Chromium", version: "140" },
+  { brand: "Microsoft Edge", version: "140" },
+];
+
+/** beforeinstallprompt の代わり。prompt() が呼ばれた回数を数える。 */
+class FakeInstallPrompt extends Event {
+  prompted = 0;
+  constructor(private readonly outcome: "accepted" | "dismissed") {
+    super("beforeinstallprompt");
+  }
+  prompt(): Promise<void> {
+    this.prompted += 1;
+    return Promise.resolve();
+  }
+  get userChoice() {
+    return Promise.resolve({ outcome: this.outcome });
+  }
+}
+
+function fakeWindow(brands: UserAgentBrand[] | undefined, standalone = false) {
+  const target = new EventTarget();
+  return Object.assign(target, {
+    navigator: (brands ? { userAgentData: { brands } } : {}) as Navigator,
+    matchMedia: (query: string) =>
+      ({
+        matches: standalone && query === "(display-mode: standalone)",
+      }) as MediaQueryList,
+  });
+}
+
+describe("the install offer", () => {
+  test.each<
+    [string, UserAgentBrand[] | undefined, boolean, boolean, InstallOfferState]
+  >([
+    ["Chrome before the browser offers", CHROME, false, false, "manual"],
+    ["Chrome after the browser offers", CHROME, false, true, "prompt"],
+    ["Chrome in the installed window", CHROME, true, true, "hidden"],
+    ["Edge, even when it offers", EDGE, false, true, "hidden"],
+    ["a browser without userAgentData", undefined, false, false, "hidden"],
+  ])("%s", (_label, brands, standalone, offered, expected) => {
+    const win = fakeWindow(brands, standalone);
+    const offer = createInstallOffer(win);
+    if (offered) win.dispatchEvent(new FakeInstallPrompt("accepted"));
+    expect(offer.state()).toBe(expected);
+  });
+
+  test.each<[UserAgentBrand[] | undefined, boolean]>([
+    [CHROME, true],
+    [EDGE, false],
+    [[{ brand: "Chromium", version: "140" }], false],
+    [[], false],
+    [undefined, false],
+  ])("isChromeBrowser(%j) is %s", (brands, expected) => {
+    expect(isChromeBrowser(brands)).toBe(expected);
+  });
+
+  test.each([
+    "accepted",
+    "dismissed",
+  ] as const)("installing shows the browser's prompt once, returns %s and drops the button", async (outcome) => {
+    const win = fakeWindow(CHROME);
+    const offer = createInstallOffer(win);
+    const states: InstallOfferState[] = [];
+    offer.onChange(() => states.push(offer.state()));
+    const event = new FakeInstallPrompt(outcome);
+    win.dispatchEvent(event);
+    await expect(offer.install()).resolves.toBe(outcome);
+    expect(event.prompted).toBe(1);
+    expect(states).toEqual(["prompt", "manual"]);
+    await expect(offer.install()).rejects.toThrow(
+      "pwa: the browser has not offered an install prompt",
+    );
+  });
+
+  test("once installed, only the steps are left", () => {
+    const win = fakeWindow(CHROME);
+    const offer = createInstallOffer(win);
+    let changes = 0;
+    offer.onChange(() => {
+      changes += 1;
+    });
+    win.dispatchEvent(new FakeInstallPrompt("accepted"));
+    win.dispatchEvent(new Event("appinstalled"));
+    expect([offer.state(), changes]).toEqual(["manual", 2]);
   });
 });

@@ -1,6 +1,7 @@
 // Help page (keybindings reference), extracted from app.ts.
 
 import type { KeyBinding } from "../core/keymap";
+import type { InstallOffer } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
 import {
   buildHelpKeybindingGroups,
@@ -41,6 +42,8 @@ export type HelpPageDeps = {
     article: HTMLElement,
     groups: HelpKeybindingTableGroup[],
   ): void;
+  /** インストールの案内 (PWA) を出すか・ボタンを出せるか。実体は core/pwa.ts */
+  installOffer: InstallOffer;
 };
 
 export type HelpLanguage = "en" | "ja";
@@ -58,6 +61,8 @@ export type HelpSection =
 type HelpBlock =
   | { kind: "paragraph"; text: string }
   | { kind: "steps"; items: string[] }
+  /** インストールの案内 (PWA)。ボタンはブラウザが出せるときだけ。Chrome 以外では出さない */
+  | { kind: "install"; button: string; steps: string[] }
   | { kind: "command"; title: string; command: string }
   | { kind: "table"; rows: Array<[string, string]> };
 
@@ -175,10 +180,6 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Installed as an app (the install button in the address bar or the browser menu), code-viewer opens in its own window, and there the browser's tab keys work on these tabs: ⌘W / Ctrl+W closes the front tab (never the window), ⌘T / Ctrl+T opens the ＋ menu, ⌘⇧T / Ctrl+Shift+T reopens the last tab you closed, ⌘1–8 / Ctrl+1–8 pick a tab and ⌘9 / Ctrl+9 the last one, and Ctrl+Tab / Ctrl+Shift+Tab (or ⌘⇧] / ⌘⇧[ on a Mac) move to the next / previous tab. ⌘N / Ctrl+N does nothing, so the window is not doubled. In a terminal tab, Ctrl keys still go to the terminal. In an ordinary browser tab nothing changes: the browser keeps these keys, and g t / g T / g x / g 1–9 work everywhere.",
-              },
-              {
-                kind: "paragraph",
                 text: "When the two sides would be narrower than 480px each with the right column open, the right column folds to its thin strip while the area is split (its button carries a mark and says why) and comes back when you return to one side; if you open it yourself while split, it stays open until you reload. On Diff, History and a selected worktree the right column is already a strip: when the two sides would be narrower than 480px each, the list column narrows to 240px first, then the changed files column folds to its strip, and when two sides still do not fit, the right side is set aside until you move to another screen or widen the window (the split button says so).",
               },
               {
@@ -220,6 +221,23 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               {
                 kind: "paragraph",
                 text: "Files with pending git changes show a status badge in the tree instead of the regular type icon: M (modified), A (added — staged for commit), D (deleted), R (renamed), U (untracked — in the worktree but not under version control yet), and I (ignored by a .gitignore rule). U and A stay separate so a file you have never run git add on does not look like one that is already staged. A wholly untracked or ignored directory is badged as a whole and keeps its folder icon, so it stays recognizable while collapsed; its contents inherit the badge unless an ignore rule names a file specifically.",
+              },
+            ],
+          },
+          {
+            title: "Install as an app",
+            blocks: [
+              {
+                kind: "install",
+                button: "Install code-viewer",
+                steps: [
+                  "In Chrome, click the install icon at the right end of the address bar, or open ⋮ → Cast, save, and share → Install page as app.",
+                  "code-viewer opens in its own window. Next time, open it from the Dock, the Start menu or chrome://apps once code-viewer is running.",
+                ],
+              },
+              {
+                kind: "paragraph",
+                text: "Installed as an app (the install button in the address bar or the browser menu), code-viewer opens in its own window, and there the browser's tab keys work on these tabs: ⌘W / Ctrl+W closes the front tab (never the window), ⌘T / Ctrl+T opens the ＋ menu, ⌘⇧T / Ctrl+Shift+T reopens the last tab you closed, ⌘1–8 / Ctrl+1–8 pick a tab and ⌘9 / Ctrl+9 the last one, and Ctrl+Tab / Ctrl+Shift+Tab (or ⌘⇧] / ⌘⇧[ on a Mac) move to the next / previous tab. ⌘N / Ctrl+N does nothing, so the window is not doubled. ⌘⇧W / Ctrl+Shift+W is left to the browser and closes the window. In a terminal tab, Ctrl keys still go to the terminal. In an ordinary browser tab nothing changes: the browser keeps these keys, and g t / g T / g x / g 1–9 work everywhere.",
               },
             ],
           },
@@ -1080,10 +1098,6 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "アプリとしてインストールすると (アドレスバーかブラウザのメニューのインストール)、専用の窓で開き、その窓ではブラウザのタブ操作のキーがこのタブ列に効きます。⌘W / Ctrl+W で前面のタブを閉じ (窓は閉じません)、⌘T / Ctrl+T で「＋」のメニュー、⌘⇧T / Ctrl+Shift+T で最後に閉じたタブを開き直し、⌘1〜8 / Ctrl+1〜8 で N 番目、⌘9 / Ctrl+9 で最後のタブ、Ctrl+Tab / Ctrl+Shift+Tab (Mac では ⌘⇧] / ⌘⇧[ も) で次 / 前のタブへ移ります。⌘N / Ctrl+N は何もしません (窓を増やさないため)。ターミナルのタブでは、Ctrl のキーは今までどおりターミナルに届きます。通常のブラウザのタブでは何も変わらず、これらのキーはブラウザのもので、g t / g T / g x / g 1〜9 はどちらでも使えます。",
-              },
-              {
-                kind: "paragraph",
                 text: "右の列を開いたままだと左右の面がそれぞれ 480px に足りないときは、2 面の間だけ右の列を細い帯に畳みます (帯のボタンに印と理由が出ます)。1 面に戻すと開き直します。2 面の間に自分で開いたときは、再読み込みまで開いたままにします。Diff・History・選んでいる作業ツリーでは右の列はもう帯です。左右の面がそれぞれ 480px に足りないときは、まず一覧の列を 240px に詰め、次に変更ファイルの列を帯に畳み、それでも 2 面が入らなければ、別の画面へ移るか窓を広げるまで右の面を預けます (分割のボタンにそう出ます)。",
               },
               {
@@ -1125,6 +1139,23 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "git の状態があるファイルは、通常の種類アイコンの代わりにステータスバッジがツリーに表示されます。M(変更)、A(追加 — コミット予定としてステージ済み)、D(削除)、R(リネーム)、U(未追跡 — ワークツリーにあるがまだバージョン管理下にない)、I(.gitignore の対象) の 6 種類です。U と A を分けているのは、git add をまだ一度もしていないファイルが、既にステージ済みのファイルと同じ見た目にならないようにするためです。丸ごと未追跡・無視のディレクトリにはディレクトリ単位でバッジが付き、フォルダアイコンは残るので折りたたんだままでも判別できます。配下のファイルはそのバッジを引き継ぎますが、無視ルールが個別に名指ししているファイルはそちらが優先されます。",
+              },
+            ],
+          },
+          {
+            title: "アプリとしてインストール",
+            blocks: [
+              {
+                kind: "install",
+                button: "code-viewer をインストール",
+                steps: [
+                  "Chrome のアドレスバーの右端にあるインストールのアイコンを押すか、⋮ → キャスト、保存、共有 → ページをアプリとしてインストール を選びます。",
+                  "専用の窓で開きます。次からは code-viewer を起こしてから、Dock・スタートメニュー・chrome://apps で開きます。",
+                ],
+              },
+              {
+                kind: "paragraph",
+                text: "アプリとしてインストールすると (アドレスバーかブラウザのメニューのインストール)、専用の窓で開き、その窓ではブラウザのタブ操作のキーがこのタブ列に効きます。⌘W / Ctrl+W で前面のタブを閉じ (窓は閉じません)、⌘T / Ctrl+T で「＋」のメニュー、⌘⇧T / Ctrl+Shift+T で最後に閉じたタブを開き直し、⌘1〜8 / Ctrl+1〜8 で N 番目、⌘9 / Ctrl+9 で最後のタブ、Ctrl+Tab / Ctrl+Shift+Tab (Mac では ⌘⇧] / ⌘⇧[ も) で次 / 前のタブへ移ります。⌘N / Ctrl+N は何もしません (窓を増やさないため)。⌘⇧W / Ctrl+Shift+W はブラウザのままで、窓を閉じます。ターミナルのタブでは、Ctrl のキーは今までどおりターミナルに届きます。通常のブラウザのタブでは何も変わらず、これらのキーはブラウザのもので、g t / g T / g x / g 1〜9 はどちらでも使えます。",
               },
             ],
           },
@@ -1989,24 +2020,54 @@ export function renderHelpTable(rows: Array<[string, string]>) {
   return table;
 }
 
-function renderHelpBlock(block: HelpBlock): HTMLElement {
+function renderHelpBlock(
+  block: Exclude<HelpBlock, { kind: "install" }>,
+): HTMLElement {
   if (block.kind === "paragraph") {
     const p = document.createElement("p");
     p.textContent = block.text;
     return p;
   }
-  if (block.kind === "steps") {
-    const ol = document.createElement("ol");
-    ol.className = "gdp-help-steps";
-    block.items.forEach((item) => {
-      const li = document.createElement("li");
-      li.textContent = item;
-      ol.appendChild(li);
-    });
-    return ol;
-  }
+  if (block.kind === "steps") return renderHelpSteps(block.items);
   if (block.kind === "command") return renderHelpCommand(block);
   return renderHelpTable(block.rows);
+}
+
+function renderHelpSteps(items: string[]): HTMLOListElement {
+  const ol = document.createElement("ol");
+  ol.className = "gdp-help-steps";
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = item;
+    ol.appendChild(li);
+  });
+  return ol;
+}
+
+/**
+ * インストールの案内の中身。ボタンはブラウザがインストールの画面を出せるときだけ
+ * (押すと 1 度きりなので、押した後は手順の文だけになる)。
+ */
+function fillInstallBlock(
+  host: HTMLElement,
+  block: Extract<HelpBlock, { kind: "install" }>,
+  offer: InstallOffer,
+): void {
+  const children: HTMLElement[] = [];
+  if (offer.state() === "prompt") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "gdp-btn";
+    button.textContent = block.button;
+    button.addEventListener("click", () => {
+      void offer.install();
+    });
+    const row = document.createElement("p");
+    row.append(button);
+    children.push(row);
+  }
+  children.push(renderHelpSteps(block.steps));
+  host.replaceChildren(...children);
 }
 
 /** 狭い面で目次を畳んだときの 1 行の見出し (「目次: 今の節」)。 */
@@ -2125,6 +2186,9 @@ export function createHelpPage(deps: HelpPageDeps) {
 
     const article = document.createElement("article");
     article.className = "gdp-help-content";
+    // ブラウザがインストールの画面を出せるようになった・出せなくなったら、
+    // 案内だけ描き直す (この画面に案内が無ければ何もしない)。
+    let installBlock: (() => void) | null = null;
     const h2 = document.createElement("h2");
     const intro = document.createElement("p");
     const settingsCategory =
@@ -2145,7 +2209,16 @@ export function createHelpPage(deps: HelpPageDeps) {
       groupTitle.textContent = group.title;
       groupSection.append(groupTitle);
       group.blocks.forEach((block) => {
-        groupSection.appendChild(renderHelpBlock(block));
+        if (block.kind !== "install") {
+          groupSection.appendChild(renderHelpBlock(block));
+          return;
+        }
+        if (deps.installOffer.state() === "hidden") return;
+        const host = document.createElement("div");
+        host.className = "gdp-help-install";
+        fillInstallBlock(host, block, deps.installOffer);
+        installBlock = () => fillInstallBlock(host, block, deps.installOffer);
+        groupSection.appendChild(host);
       });
       article.appendChild(groupSection);
     });
@@ -2154,6 +2227,7 @@ export function createHelpPage(deps: HelpPageDeps) {
     if (section === "settings") deps.mountViewerSettings(article);
     if (section === "keybindings")
       deps.decorateKeybindings(article, keybindingGroups);
+    deps.installOffer.onChange(installBlock);
 
     // 狭い面だけで見える、目次を開閉する 1 行 (広い面では CSS が隠す)。
     helpNav.id = "gdp-help-nav";

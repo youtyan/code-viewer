@@ -64,15 +64,23 @@ Requires Node.js 20 or newer. Development uses
   folders into `…` (hover for the full path; click it, or Tab to it and press
   Enter, to pick a folded folder). Image
   files open in an image tab (zoom, previous / next, copy path, open folder).
-- Install it as an app (the install button in the address bar or the browser
-  menu) to get its own window, where the browser's tab keys work on
-  these tabs: ⌘W / Ctrl+W closes the front tab (never the window), ⌘T /
-  Ctrl+T opens the `+` menu, ⌘⇧T / Ctrl+Shift+T reopens the last closed tab,
-  ⌘1–8 / Ctrl+1–8 pick a tab and ⌘9 / Ctrl+9 the last, Ctrl+Tab /
-  Ctrl+Shift+Tab (⌘⇧] / ⌘⇧[ on a Mac) move between tabs, and ⌘N does nothing. Ctrl keys in a terminal tab still go to the
-  terminal. In an ordinary browser tab nothing changes.
   The annotations, Copy AI context, auto-update, cancel-requests, theme and
   repository-page buttons are at the right of the bottom bar.
+- Install it as an app from Chrome: the install icon at the right of the
+  address bar, ⋮ → Cast, save, and share → Install page as app, or the
+  Install code-viewer button in Settings & Help → Getting Started → Install
+  as an app. It opens in its own window, whose title bar follows the app
+  theme, and there the browser's tab keys work on these tabs: ⌘W / Ctrl+W
+  closes the front tab (never the window; ⌘⇧W / Ctrl+Shift+W still closes
+  the window), ⌘T / Ctrl+T opens the `+` menu, ⌘⇧T / Ctrl+Shift+T reopens
+  the last closed tab, ⌘1–8 / Ctrl+1–8 pick a tab and ⌘9 / Ctrl+9 the last,
+  Ctrl+Tab / Ctrl+Shift+Tab (⌘⇧] / ⌘⇧[ on a Mac) move between tabs, and
+  ⌘N / Ctrl+N does nothing. Ctrl keys in a terminal tab still go to the
+  terminal. In an ordinary browser tab nothing changes. To try it, start
+  `code-viewer`, open its address in Chrome and install it; in the new
+  window open a few files, then press ⌘T (the `+` menu opens), ⌘1, ⌘9 and
+  Ctrl+Tab (the front tab changes) and ⌘W (the front tab closes, the window
+  stays).
 - View git diffs with unified or split layout, lazy loading, viewed-file
   state, ignore-whitespace and hide-tests toggles, and dismissible per-line
   "reference pills" that copy `@path#start-end` for AI agents. View File on
