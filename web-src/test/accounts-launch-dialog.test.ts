@@ -2,6 +2,7 @@
 // 起動コマンドを出す (設定の保存が別の画面で起きても、開き直さずに合う)。
 // パス・名前はすべて架空。
 
+import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import type { AccountsResponse } from "../core/agent-accounts";
@@ -11,6 +12,9 @@ import { ACCOUNTS_EN } from "../views/agents/accounts-i18n";
 
 beforeAll(() => {
   GlobalRegistrator.register();
+  const style = document.createElement("style");
+  style.textContent = readFileSync("web/style.css", "utf8");
+  document.head.appendChild(style);
 });
 afterAll(async () => {
   await GlobalRegistrator.unregister();
@@ -135,8 +139,18 @@ test("開いている間に届いた起動コマンドで、表示するコマ�
   expect(fake.listeners.size).toBe(0);
 });
 
+function colorOf(className: string): string {
+  const probe = document.createElement("button");
+  probe.className = className;
+  document.body.append(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color;
+}
+
 // 直す前は失敗を error.message だけで出し、名前と原因が画面から消えていた。
 // ほかの画面のコピーと同じく、ボタンに失敗の印と理由、console に原因つきの全体。
+// 失敗の色も、ほかの画面のコピーのボタン (`.global-icon-action`) と同じ。
 test.each([
   {
     name: "copied",
@@ -184,15 +198,19 @@ test.each([
   copy?.click();
   await vi.waitFor(() => expect(result?.textContent).not.toBe(""));
 
+  const failedColor = colorOf("global-icon-action failed");
+  expect(failedColor).not.toBe(colorOf("agents-icon-action"));
   expect({
     status: result?.textContent,
     title: copy?.title,
     failed: copy?.classList.contains("failed"),
+    color: copy && getComputedStyle(copy).color,
     written,
   }).toEqual({
     status,
     title,
     failed: rejection !== null,
+    color: rejection ? failedColor : colorOf("agents-icon-action"),
     written: rejection ? [] : ["claude --old"],
   });
   if (rejection) {

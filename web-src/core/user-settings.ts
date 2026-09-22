@@ -13,9 +13,11 @@
 import type { AppSettingsState } from "./types";
 
 // 骨格の見た目 (左のサイドバーの幅・畳み・畳んだプロジェクト、下のパネルの
-// 高さ) もここに入れる。1 つで完結するサーバ (`--standalone`) の間を移る =
-// 別のポートのページへ移るので、
-// localStorage に置くと移るたびに見た目が戻ってしまう。
+// 高さ) もここに入れる。localStorage はオリジン (ポート) ごとで、ポートは
+// 続かない: 入口のサーバは `--port` を付けなければ起動のたびに OS が選ぶ
+// ポートで待ち受ける (`server/entry/args.ts` の既定が 0) ので、code-viewer を
+// 起こし直すとオリジンが変わり、localStorage は空から始まる (`--standalone`
+// のサーバもそれぞれ別のポート)。決まりの本体は project-rules の ui-layout.md。
 export const USER_SETTING_KEYS = [
   "theme",
   "palette",

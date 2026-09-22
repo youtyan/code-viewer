@@ -30,6 +30,7 @@ import {
   splitSettingsPatch,
   withUserSettings,
 } from "../core/user-settings";
+import { agentPane } from "./_test-helpers";
 
 const NOW = Date.parse("2026-09-21T00:00:00.000Z");
 
@@ -387,23 +388,16 @@ describe("groupAgentPanes with registered projects", () => {
     };
   }
   function pane(id: string, project: string, state: AgentState): AgentPane {
-    return {
+    return agentPane({
       id,
       label: `s:${id}`,
       session: "s",
-      title: "",
-      command: "claude",
       path: project,
-      kind: "claude",
       state,
       source: "screen",
       updatedAt: 100,
-      watchedSince: 0,
       project,
-      worktree: "",
-      shownInShell: "",
-      account: null,
-    };
+    });
   }
   const projects = [
     info("/work/reg-first", 0),
@@ -459,23 +453,16 @@ describe("groupAgentPanesByPlace (the sidebar order)", () => {
     project: string,
     state: AgentState,
   ): AgentPane {
-    return {
+    return agentPane({
       id,
       label,
       session: label.slice(0, label.indexOf(":")),
-      title: "",
-      command: "claude",
       path: project,
-      kind: "claude",
       state,
       source: "screen",
       updatedAt: 100,
-      watchedSince: 0,
       project,
-      worktree: "",
-      shownInShell: "",
-      account: null,
-    };
+    });
   }
   const registered = [
     info("/work/reg-first", 0),

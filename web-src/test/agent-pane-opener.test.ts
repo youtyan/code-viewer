@@ -11,6 +11,7 @@ import type {
 import { agentPaneTarget } from "../core/projects";
 import { parseOpenPaneOverlay, withOpenPaneOverlay } from "../core/routes";
 import { createAgentPaneOpener } from "../views/agents/agent-pane-opener";
+import { agentPane } from "./_test-helpers";
 
 function project(
   root: string,
@@ -30,23 +31,7 @@ function project(
 }
 
 function pane(id: string, root: string): AgentPane {
-  return {
-    id,
-    label: `sample:0.${id.slice(1)}`,
-    session: "sample",
-    title: "",
-    command: "claude",
-    path: root,
-    kind: "claude",
-    state: "waiting",
-    source: null,
-    updatedAt: 0,
-    watchedSince: 0,
-    project: root,
-    worktree: "",
-    shownInShell: "",
-    account: null,
-  };
+  return agentPane({ id, state: "waiting", path: root, project: root });
 }
 
 const OTHER_URL = "http://127.0.0.1:64101/p/0123456789abcdef/";

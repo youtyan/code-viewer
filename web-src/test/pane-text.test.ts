@@ -9,25 +9,18 @@ import type { AgentPane } from "../core/agent-overview";
 import { paneTaskSummary } from "../core/agent-overview";
 import { agentsText } from "../views/agents/i18n";
 import { paneText, shellName } from "../views/agents/pane-text";
+import { agentPane } from "./_test-helpers";
 
 function pane(title: string): AgentPane {
-  return {
+  return agentPane({
     id: "%1",
     label: "sample:0.0",
-    session: "sample",
     title,
-    command: "claude",
     path: "/work/sample-repo",
-    kind: "claude",
     state: "waiting",
     source: "screen",
-    updatedAt: 0,
-    watchedSince: 0,
     project: "/work/sample-repo",
-    worktree: "",
-    shownInShell: "",
-    account: null,
-  };
+  });
 }
 
 const EN = agentsText("en");

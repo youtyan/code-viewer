@@ -18869,6 +18869,9 @@ button.agents-section-title:focus-visible {
   background: var(--color-raised);
   color: var(--color-text);
 }
+/* コピーの失敗 (`showCopyFailure`)。押した直後はポインタが乗ったままなので、
+   :hover より後ろに置いて失敗の色を勝たせる。 */
+.agents-icon-action.failed { color: var(--color-failed); }
 .agents-icon-action svg {
   display: block;
   width: var(--icon-md);

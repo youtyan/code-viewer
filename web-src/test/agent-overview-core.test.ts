@@ -27,25 +27,17 @@ import {
   withFinishedAsDone,
 } from "../core/agent-overview";
 import type { AgentState, AgentStateSource } from "../core/agent-state";
+import { agentPane } from "./_test-helpers";
 
 function pane(over: Partial<AgentPane> & { id: string }): AgentPane {
-  return {
+  return agentPane({
     label: `sample-session:0.${over.id.slice(1)}`,
     session: "sample-session",
-    title: "",
-    command: "claude",
     path: "/work/sample-repo",
-    kind: "claude",
-    state: "idle",
     source: "screen",
-    updatedAt: 0,
-    watchedSince: 0,
     project: "/work/sample-repo",
-    worktree: "",
-    shownInShell: "",
-    account: null,
     ...over,
-  };
+  });
 }
 
 function project(root: string, name: string): AgentProjectInfo {

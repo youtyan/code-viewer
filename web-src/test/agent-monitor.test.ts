@@ -6,25 +6,15 @@ import type {
 } from "../core/agent-overview";
 import { createAgentMonitor } from "../views/agents/agent-monitor";
 import { agentsText } from "../views/agents/i18n";
+import { agentPane } from "./_test-helpers";
 
 function pane(id: string, state: AgentPane["state"]): AgentPane {
-  return {
+  return agentPane({
     id,
-    label: `sample:0.${id.slice(1)}`,
-    session: "sample",
-    title: "",
-    command: "claude",
-    path: "/work/sample-app",
-    kind: "claude",
     state,
-    source: null,
-    updatedAt: 0,
-    watchedSince: 0,
+    path: "/work/sample-app",
     project: "/work/sample-app",
-    worktree: "",
-    shownInShell: "",
-    account: null,
-  };
+  });
 }
 
 function overview(

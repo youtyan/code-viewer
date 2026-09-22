@@ -39,6 +39,7 @@ import {
   type ProjectActions,
 } from "../views/projects/project-actions";
 import { closeOpenDialog } from "./_dialog-helpers";
+import { agentPane } from "./_test-helpers";
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -78,23 +79,16 @@ function pane(
   state: AgentState,
   title = `task ${id}`,
 ): AgentPane {
-  return {
+  return agentPane({
     id,
     label,
     session: "work",
     title,
-    command: "claude",
     path: project,
-    kind: "claude",
     state,
     source: "screen",
-    updatedAt: 0,
-    watchedSince: 0,
     project,
-    worktree: "",
-    shownInShell: "",
-    account: null,
-  };
+  });
 }
 
 function overview(

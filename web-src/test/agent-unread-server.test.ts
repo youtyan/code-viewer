@@ -13,6 +13,7 @@ import {
   noteAgentUnread,
   resetAgentUnread,
 } from "../server/terminal/unread";
+import { agentPane } from "./_test-helpers";
 
 afterEach(() => {
   resetAgentUnread();
@@ -25,23 +26,7 @@ function observe(id: string, state: AgentState): void {
 }
 
 function pane(id: string, state: AgentState): AgentPane {
-  return {
-    id,
-    label: id,
-    session: "sample",
-    title: "",
-    command: "claude",
-    path: "/work/sample",
-    kind: "claude",
-    state,
-    source: "hook",
-    updatedAt: 0,
-    watchedSince: 0,
-    project: "/work/sample",
-    worktree: "",
-    shownInShell: "",
-    account: null,
-  } as AgentPane;
+  return agentPane({ id, label: id, state, source: "hook" });
 }
 
 describe("unread kept by the server", () => {

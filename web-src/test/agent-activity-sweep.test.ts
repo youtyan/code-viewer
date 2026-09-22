@@ -36,6 +36,7 @@ import {
   recordAgentState,
 } from "../server/terminal/agent-state";
 import { noteAgentUnread, resetAgentUnread } from "../server/terminal/unread";
+import { agentPane } from "./_test-helpers";
 
 const paneIds = Array.from({ length: 16 }, (_, index) => `%${index + 1}`);
 
@@ -87,22 +88,16 @@ function capture(id: string): TmuxCaptureResult {
   };
 }
 
-function agentPane(state: AgentState): AgentPane {
+function sweptPane(state: AgentState): AgentPane {
   const samplePane = tmuxPanesFixture().sessions[0]?.windows[0]?.panes[0];
   if (!samplePane) throw new Error("sample pane fixture is empty");
-  return {
+  return agentPane({
     ...samplePane,
     session: "sample-session",
     kind: "codex",
     state,
     source: "hook",
-    updatedAt: 0,
-    watchedSince: 0,
-    project: "/work/sample",
-    worktree: "",
-    shownInShell: "",
-    account: null,
-  };
+  });
 }
 
 beforeEach(() => {
@@ -202,9 +197,9 @@ describe("tmux generation changes", () => {
     await vi.advanceTimersByTimeAsync(ACTIVITY_POLL_INTERVAL_MS);
     for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
 
-    noteAgentUnread([agentPane("working")]);
+    noteAgentUnread([sweptPane("working")]);
     recordAgentState({ target: "%1", event: "stop", source: "hook" });
-    expect(noteAgentUnread([agentPane("done")])).toEqual([
+    expect(noteAgentUnread([sweptPane("done")])).toEqual([
       { pane: "%1", transition: "finished" },
     ]);
 
@@ -215,7 +210,7 @@ describe("tmux generation changes", () => {
 
     expect(mocks.generation).toHaveBeenCalledTimes(2);
     expect(getAgentState("%1")).toBeNull();
-    expect(noteAgentUnread([agentPane("done")])).toEqual([]);
+    expect(noteAgentUnread([sweptPane("done")])).toEqual([]);
     expect(logged).toHaveBeenCalledTimes(1);
   });
 });
