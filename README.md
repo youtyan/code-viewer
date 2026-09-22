@@ -185,7 +185,10 @@ Requires Node.js 20 or newer. Development uses
   is shown by its own
   process that code-viewer starts the first time you open it (and stops when
   code-viewer exits or after the configured idle period); processes it started
-  can be stopped from the list. Theme,
+  can be stopped from the list. If you update or reinstall code-viewer while
+  it keeps running, it can no longer start project processes and says so on
+  the screen and in its terminal: stop it (Ctrl+C) and run `code-viewer`
+  again. Theme,
   language, font sizes, key bindings and notifications are shared by all
   projects, so switching does not change how it looks.
 - Open files directly from the repository or diff view, including text-like
@@ -268,7 +271,9 @@ Requires Node.js 20 or newer. Development uses
   bounded safe subset; combine conditions with `all` / `any`. Invalid changes
   list every validation error and do not replace the active rules; restoring
   the built-in set removes the saved override so later releases can supply
-  updated defaults. The editor includes an expandable field guide, a valid
+  updated defaults. If the saved rules cannot be read again (for example,
+  another code-viewer holds their lock), the rules in use stay and Settings
+  shows why, instead of falling back to the built-in set. The editor includes an expandable field guide, a valid
   example, and live JSON syntax highlighting.
 - Choosing a tmux pane takes you to it in a tab. If a shell already has that
   session open, that shell's tab comes forward and the pane becomes current;
@@ -553,6 +558,12 @@ tree, and its text files can be inspected in the Code view, but it remains
 excluded from repository searches and diffs. Treat the files as diagnostic
 state rather than hand-edited configuration. Add `.code-viewer/` to
 `.gitignore` if you do not want to share its contents through git.
+
+What is shared by all projects (settings such as theme and language, the
+project list, accounts, the tab layout and the running code-viewer's record)
+lives in `$XDG_STATE_HOME/code-viewer`, or `~/.local/state/code-viewer` when
+`XDG_STATE_HOME` is not set. A relative `XDG_STATE_HOME` is ignored, as the
+XDG specification says, and code-viewer prints why once.
 
 ## Datastore Viewer
 

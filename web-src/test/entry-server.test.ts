@@ -8,6 +8,7 @@
 // (実データと利用者の tmux に触らない。agents.md 9・10)。
 import { type ChildProcess, spawn } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -15,6 +16,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -24,6 +26,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { PROJECT_HEADER } from "../core/api-url";
+import type { EntryBackendFailure } from "../core/types";
 import { SSE_RETRY_MS } from "../server/runtime";
 import { rootFileKey } from "../server/server-registry";
 import { runGit } from "./_git-fixture";
@@ -35,6 +38,10 @@ const REPO_ROOT = join(
   "..",
 );
 const CLI_BUNDLE = join(REPO_ROOT, "dist", "code-viewer.js");
+const PACKAGE_VERSION = JSON.parse(
+  readFileSync(join(REPO_ROOT, "package.json"), "utf8"),
+).version as string;
+const SAMPLE_TOKEN = "0123456789abcdef";
 
 type Sandbox = {
   dir: string;
@@ -45,8 +52,13 @@ type Sandbox = {
 
 const children: ChildProcess[] = [];
 const sandboxes: string[] = [];
+const identityServers: Server[] = [];
 
 afterEach(async () => {
+  for (const server of identityServers.splice(0)) {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
   for (const child of children.splice(0)) {
     if (child.exitCode === null && child.signalCode === null)
       child.kill("SIGKILL");
@@ -120,6 +132,7 @@ function startEntry(
   box: Sandbox,
   cwd: string,
   extraArgs: string[] = [],
+  bundle = CLI_BUNDLE,
 ): Promise<{
   proc: ChildProcess;
   url: string;
@@ -128,7 +141,7 @@ function startEntry(
 }> {
   const proc = spawn(
     process.execPath,
-    [CLI_BUNDLE, "--cwd", cwd, "--port", "0", ...extraArgs],
+    [bundle, "--cwd", cwd, "--port", "0", ...extraArgs],
     {
       env: box.env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -189,6 +202,73 @@ function backendPid(box: Sandbox, root: string): number {
   return JSON.parse(
     readFileSync(join(box.registryDir, `${rootFileKey(root)}.json`), "utf8"),
   ).pid;
+}
+
+/** 入口を通さずに裏だけを起こす (持ち主の入口は entry.json と偽の本人確認で作る)。 */
+function startBackend(
+  box: Sandbox,
+  root: string,
+  entryPid: number,
+  entryToken: string,
+): { proc: ChildProcess; output: () => string } {
+  const proc = spawn(
+    process.execPath,
+    [
+      CLI_BUNDLE,
+      "--cwd",
+      root,
+      "--port",
+      "0",
+      "--backend",
+      "--entry-pid",
+      String(entryPid),
+      "--entry-token",
+      entryToken,
+    ],
+    { env: box.env, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  children.push(proc);
+  let output = "";
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    output += chunk.toString("utf8");
+  });
+  proc.stderr?.on("data", (chunk: Buffer) => {
+    output += chunk.toString("utf8");
+  });
+  return { proc, output: () => output };
+}
+
+/** `/_entry` に決まった本人確認を返す偽の入口。 */
+async function identityServer(identity: {
+  pid: number;
+  token: string;
+  version: string;
+}): Promise<{ url: string; close: () => Promise<void> }> {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ role: "entry", ...identity }));
+  });
+  identityServers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`,
+    // 使い回しの接続で答え続けないよう、繋がっているものも切る。
+    close: async () => {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    },
+  };
+}
+
+function writeEntryJson(
+  box: Sandbox,
+  entry: { url: string; pid: number; token: string; version: string },
+): void {
+  mkdirSync(box.stateDir, { recursive: true });
+  writeFileSync(
+    join(box.stateDir, "entry.json"),
+    JSON.stringify({ ...entry, started_at: "2026-09-23T00:00:00.000Z" }),
+  );
 }
 
 function alive(pid: number): boolean {
@@ -505,30 +585,7 @@ describe("the entry server", () => {
   test("a project process exits when the owner pid is alive but its entry token cannot be verified", async () => {
     const box = sandbox();
     const root = repo(box, "sample-app");
-    const proc = spawn(
-      process.execPath,
-      [
-        CLI_BUNDLE,
-        "--cwd",
-        root,
-        "--port",
-        "0",
-        "--backend",
-        "--entry-pid",
-        String(process.pid),
-        "--entry-token",
-        "0123456789abcdef",
-      ],
-      { env: box.env, stdio: ["ignore", "pipe", "pipe"] },
-    );
-    children.push(proc);
-    let output = "";
-    proc.stdout?.on("data", (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-    });
-    proc.stderr?.on("data", (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-    });
+    const { proc, output } = startBackend(box, root, process.pid, SAMPLE_TOKEN);
 
     expect(
       await waitUntil(
@@ -547,7 +604,189 @@ describe("the entry server", () => {
         16_000,
       ),
     ).toBe(true);
-    expect(output).toContain("entry owner verification failed");
+    expect(output()).toContain("entry owner verification failed");
+  }, 25_000);
+
+  test("a project process started by an entry of another version stops at once with its own exit code and says how to restart the entry", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    writeEntryJson(box, {
+      url: "http://127.0.0.1:9/",
+      pid: process.pid,
+      token: SAMPLE_TOKEN,
+      version: "0.0.1-sample",
+    });
+    const { proc, output } = startBackend(box, root, process.pid, SAMPLE_TOKEN);
+
+    expect(
+      await waitUntil(
+        () => proc.exitCode !== null || proc.signalCode !== null,
+        5000,
+      ),
+    ).toBe(true);
+    expect([proc.exitCode, proc.signalCode]).toEqual([3, null]);
+    expect(registeredPids(box.registryDir)).not.toContain(proc.pid);
+    expect(output()).toContain(
+      `this project process is version ${PACKAGE_VERSION}, but the entry server that started it (pid ${process.pid}) is version 0.0.1-sample.`,
+    );
+    expect(output()).toContain(`kill ${process.pid}`);
+  }, 15_000);
+
+  test("an entry server left running across an update of code-viewer says it is out of date, stops starting project processes, and a restart tries again", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    // 入れ直しを写しで作る: 配布物と package.json を写した置き場から入口を
+    // 起こし、動いている間に package.json の版だけを書き換える (裏は入口と
+    // 同じ置き場から起きるので、書き換えた版で動く)。
+    const pkg = join(box.dir, "package");
+    const bundle = join(pkg, "dist", "code-viewer.js");
+    mkdirSync(join(pkg, "dist"), { recursive: true });
+    copyFileSync(CLI_BUNDLE, bundle);
+    symlinkSync(join(REPO_ROOT, "web"), join(pkg, "web"));
+    symlinkSync(join(REPO_ROOT, "node_modules"), join(pkg, "node_modules"));
+    const manifest = JSON.parse(
+      readFileSync(join(REPO_ROOT, "package.json"), "utf8"),
+    );
+    const install = (version: string) =>
+      writeFileSync(
+        join(pkg, "package.json"),
+        JSON.stringify({ ...manifest, version }),
+      );
+    install("0.0.1-sample");
+    const entry = await startEntry(box, root, [], bundle);
+    install("0.0.2-sample");
+    const key = rootFileKey(root);
+    const entryPid = entry.proc.pid as number;
+    const failure = async () => {
+      const res = await fetch(`${entry.url}p/${key}/_settings`);
+      return {
+        status: res.status,
+        body: (await res.json()) as EntryBackendFailure,
+      };
+    };
+    const started = () =>
+      readdirSync(join(box.stateDir, "server-logs"))
+        .map((name) =>
+          readFileSync(join(box.stateDir, "server-logs", name), "utf8"),
+        )
+        .join("")
+        .split("this project process is version 0.0.2-sample").length - 1;
+
+    const first = await failure();
+    expect(first.status).toBe(503);
+    expect(first.body).toMatchObject({
+      code: "backend-start-failed",
+      error: `code-viewer was updated or reinstalled while this entry server (version 0.0.1-sample, pid ${entryPid}) was running, so the entry server is out of date. Stop the entry server (Ctrl+C where code-viewer was started, or kill ${entryPid}) and run code-viewer again.`,
+      project: { key, root },
+    });
+    expect(first.body.detail.startsWith(first.body.error)).toBe(true);
+    expect(first.body.log).toContain(
+      `this project process is version 0.0.2-sample, but the entry server that started it (pid ${entryPid}) is version 0.0.1-sample.`,
+    );
+    // 2 回目からは起こさずに同じ案内を返す (起こしても同じ理由で終わる)。
+    const again = await failure();
+    expect([again.status, again.body.error]).toEqual([503, first.body.error]);
+    expect(started()).toBe(1);
+    expect(
+      entry.output().split("the entry server is out of date").length - 1,
+    ).toBe(1);
+    // 案内は全プロジェクト共通の設定の言語で出す。
+    writeFileSync(
+      join(box.stateDir, "settings.json"),
+      JSON.stringify({ version: 1, language: "ja" }),
+    );
+    expect((await failure()).body.error).toBe(
+      `入口のサーバ（版 0.0.1-sample、pid ${entryPid}）が動いている間に code-viewer が入れ直されたので、入口の版が古いままです。入口のプロセスを止めて（code-viewer を起動した端末で Ctrl+C、または kill ${entryPid}）、code-viewer を打ち直してください。`,
+    );
+
+    // 画面の「再起動」は起こし直す (版が戻っていれば動く)。
+    install("0.0.1-sample");
+    const origin = new URL(entry.url).origin;
+    const restart = await fetch(`${entry.url}_entry/restart`, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        "X-Code-Viewer-Action": "1",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ key }),
+    });
+    expect(restart.status).toBe(200);
+    expect((await fetch(`${entry.url}p/${key}/_settings`)).status).toBe(200);
+  }, 45_000);
+
+  test("a restarted entry adopts a project process even when the old entry's pid now belongs to another program", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    // 古い入口の pid を別のプログラムが使っている: pid は生きているが、古い
+    // 入口の URL はもう答えない。
+    const reused = spawn(
+      process.execPath,
+      ["-e", "setInterval(() => {}, 1 << 30)"],
+      { stdio: "ignore" },
+    );
+    children.push(reused);
+    const reusedPid = reused.pid as number;
+    const newToken = "fedcba9876543210";
+    const oldEntry = await identityServer({
+      pid: reusedPid,
+      token: SAMPLE_TOKEN,
+      version: PACKAGE_VERSION,
+    });
+    writeEntryJson(box, {
+      url: oldEntry.url,
+      pid: reusedPid,
+      token: SAMPLE_TOKEN,
+      version: PACKAGE_VERSION,
+    });
+    const { proc, output } = startBackend(box, root, reusedPid, SAMPLE_TOKEN);
+    expect(
+      await waitUntil(
+        () => registeredPids(box.registryDir).includes(proc.pid ?? -1),
+        5000,
+      ),
+    ).toBe(true);
+    const backendUrl = JSON.parse(
+      readFileSync(join(box.registryDir, `${rootFileKey(root)}.json`), "utf8"),
+    ).url as string;
+    const newEntry = await identityServer({
+      pid: process.pid,
+      token: newToken,
+      version: PACKAGE_VERSION,
+    });
+    writeEntryJson(box, {
+      url: newEntry.url,
+      pid: process.pid,
+      token: newToken,
+      version: PACKAGE_VERSION,
+    });
+    const adopt = () =>
+      fetch(`${backendUrl}_entry/adopt`, {
+        method: "POST",
+        headers: {
+          Origin: new URL(backendUrl).origin,
+          "X-Code-Viewer-Action": "1",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ pid: process.pid, token: newToken }),
+      });
+
+    // 古い入口が token で答える間は、持ち主を渡さない。
+    const refused = await adopt();
+    expect([refused.status, await refused.text()]).toEqual([
+      409,
+      `entry owner pid ${reusedPid} is still alive`,
+    ]);
+    // 古い入口が答えなくなれば、pid が生きていても新しい入口を採用する。
+    await oldEntry.close();
+    const adopted = await adopt();
+    expect([adopted.status, await adopted.text()]).toEqual([
+      200,
+      JSON.stringify({ ok: true, adopted: true }),
+    ]);
+    expect(output()).toContain(
+      `the code-viewer entry server restarted (pid ${reusedPid} -> ${process.pid})`,
+    );
   }, 25_000);
 });
 

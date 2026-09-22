@@ -278,7 +278,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Status first uses lifecycle reports when they are available. Otherwise it evaluates every enabled screen rule against the live terminal title and recent visible lines, then uses the highest-priority match. A terminal is tracked only after a report or a visible rule identifies it; screen motion then provides the working/idle fallback. Working matches expire when the title and screen stop changing, so stale status text does not stay active. Settings & Help → Settings contains the full JSON rule set, including regions, priorities, contains checks, regular expressions, and nested all/any/not conditions. Regular expressions use a bounded safe subset: groups, alternation, and backreferences are rejected, and AND/OR belongs in all/any. Saving validates the whole set and shows every error without replacing the active rules. Restoring the built-in rules removes the saved override so updated defaults can arrive with later releases.",
+                text: "Status first uses lifecycle reports when they are available. Otherwise it evaluates every enabled screen rule against the live terminal title and recent visible lines, then uses the highest-priority match. A terminal is tracked only after a report or a visible rule identifies it; screen motion then provides the working/idle fallback. Working matches expire when the title and screen stop changing, so stale status text does not stay active. Settings & Help → Settings contains the full JSON rule set, including regions, priorities, contains checks, regular expressions, and nested all/any/not conditions. Regular expressions use a bounded safe subset: groups, alternation, and backreferences are rejected, and AND/OR belongs in all/any. Saving validates the whole set and shows every error without replacing the active rules. If the saved rules cannot be read again (for example, another code-viewer holds their lock), the rules in use stay and Settings shows why, instead of switching to the built-in rules. Restoring the built-in rules removes the saved override so updated defaults can arrive with later releases.",
               },
               {
                 kind: "paragraph",
@@ -315,7 +315,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Register your projects to keep them in the Agents list even when no agent runs in them, in the order you choose (⋯ on a project heading: register, rename, move up / down, remove from projects — the repository itself is never touched). Open (on a heading) switches to that project in the same tab and on the same address (`/p/<key>/…`), so the browser's notification permission, the terminal shells and the unread marks stay; code-viewer starts the project's process first if it is not running. Processes that code-viewer started can be stopped from the ⋯ menu; the project shown on this screen cannot. Running `code-viewer` in another repository adds it to the code-viewer that is already running and prints its URL (`code-viewer --standalone` runs a separate server for one repository, as before). CLI commands that print a screen URL (annotate, query diff tables) print the same `/p/<key>/…` address (a `--standalone` server has none). A project's process that nobody has used for 10 minutes is stopped and started again when you open the project (`--idle-stop <seconds>` changes the time; the terminals, the agents and the unread marks stay); if it stops by itself, the screen says so and offers Restart, with the reason under Details. The project name at the head of the file tree (or the left end of the tab row; p) switches between registered projects from any screen and keeps the screen you are on; type to filter, ↑↓ and Enter to go. Theme, language, font sizes, key bindings, notifications, dismissed hints and the layout (sidebar width and folding) are shared by all projects (Settings shows which sections), so switching does not change how code-viewer looks.",
+                text: "Register your projects to keep them in the Agents list even when no agent runs in them, in the order you choose (⋯ on a project heading: register, rename, move up / down, remove from projects — the repository itself is never touched). Open (on a heading) switches to that project in the same tab and on the same address (`/p/<key>/…`), so the browser's notification permission, the terminal shells and the unread marks stay; code-viewer starts the project's process first if it is not running. Processes that code-viewer started can be stopped from the ⋯ menu; the project shown on this screen cannot. Running `code-viewer` in another repository adds it to the code-viewer that is already running and prints its URL (`code-viewer --standalone` runs a separate server for one repository, as before). CLI commands that print a screen URL (annotate, query diff tables) print the same `/p/<key>/…` address (a `--standalone` server has none). A project's process that nobody has used for 10 minutes is stopped and started again when you open the project (`--idle-stop <seconds>` changes the time; the terminals, the agents and the unread marks stay); if it stops by itself, the screen says so and offers Restart, with the reason under Details. If code-viewer was updated or reinstalled while it kept running, it can no longer start project processes; the screen (after Restart) and the terminal where you started it say the entry server is out of date. Stop that code-viewer (Ctrl+C there) and run code-viewer again. The project name at the head of the file tree (or the left end of the tab row; p) switches between registered projects from any screen and keeps the screen you are on; type to filter, ↑↓ and Enter to go. Theme, language, font sizes, key bindings, notifications, dismissed hints and the layout (sidebar width and folding) are shared by all projects (Settings shows which sections), so switching does not change how code-viewer looks.",
               },
             ],
           },
@@ -440,6 +440,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               {
                 kind: "paragraph",
                 text: "Deleting the whole directory is the supported way to reset all per-repository state. Removing a single file resets only that subsystem (for example, deleting tabs.json closes all DB tabs on the next load).",
+              },
+              {
+                kind: "paragraph",
+                text: "What is shared by all projects (settings such as theme and language, the project list, accounts, the tab layout and the running code-viewer's record) lives in $XDG_STATE_HOME/code-viewer, or ~/.local/state/code-viewer when it is not set. A relative XDG_STATE_HOME is ignored, as the XDG specification says, and code-viewer prints why once.",
               },
             ],
           },
@@ -1179,7 +1183,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "状態変更の申告がある場合はそれを先に使います。申告が無い場合は、現在のターミナルタイトルと画面下端の表示に対して全ルールを評価し、優先度が最大の一致から「作業中」「入力待ち」「待機中」「直前の状態を維持」を決めます。申告か見えているルールで対象を識別した後だけ、画面の変化量を作業中・待機中の補助判定に使います。作業中ルールの文字が残っていても、タイトルと画面が変化しなくなれば待機中へ移ります。設定・ヘルプ → 設定では、見る範囲、優先度、contains、正規表現、入れ子の all/any/not を含むJSONルール集を編集できます。正規表現は処理時間を抑えた範囲だけを許可し、グループ・選択・後方参照は使えません。AND/OR は all/any で表します。保存時は全ルールを検証し、エラーはすべて表示して適用中のルールを置き換えません。組み込みルールへ戻すと保存済みの上書きを削除するため、以後の更新で新しい既定ルールを受け取れます。",
+                text: "状態変更の申告がある場合はそれを先に使います。申告が無い場合は、現在のターミナルタイトルと画面下端の表示に対して全ルールを評価し、優先度が最大の一致から「作業中」「入力待ち」「待機中」「直前の状態を維持」を決めます。申告か見えているルールで対象を識別した後だけ、画面の変化量を作業中・待機中の補助判定に使います。作業中ルールの文字が残っていても、タイトルと画面が変化しなくなれば待機中へ移ります。設定・ヘルプ → 設定では、見る範囲、優先度、contains、正規表現、入れ子の all/any/not を含むJSONルール集を編集できます。正規表現は処理時間を抑えた範囲だけを許可し、グループ・選択・後方参照は使えません。AND/OR は all/any で表します。保存時は全ルールを検証し、エラーはすべて表示して適用中のルールを置き換えません。保存したルールを読み直せないとき (別の code-viewer がロックを持ったままなど) は、組み込みのルールに戻さず、使っているルールのまま設定画面に理由を出します。組み込みルールへ戻すと保存済みの上書きを削除するため、以後の更新で新しい既定ルールを受け取れます。",
               },
               {
                 kind: "paragraph",
@@ -1216,7 +1220,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "プロジェクトを登録すると、エージェントが居なくてもエージェント一覧に、好きな順で常に並びます (見出しの ⋯ から登録・名前を変える・上へ / 下へ・登録を外す。リポジトリには触りません)。見出しの「開く」は、同じタブ・同じアドレスのまま (`/p/<鍵>/…`) そのプロジェクトへ切り替えます。ブラウザの通知の許可・ターミナルのシェル・未読の印はそのまま残ります。そのプロジェクトのプロセスが動いていなければ、先に起動してから移ります。code-viewer が起動したプロセスは ⋯ から止められます。この画面で選んでいるプロジェクトは止められません。別のリポジトリで `code-viewer` を実行すると、動いている code-viewer にそのリポジトリを加えて URL を表示します (`code-viewer --standalone` は、これまでどおり 1 つのリポジトリだけの別のサーバを起動します)。画面の URL を表示する CLI (annotate・query diff tables) も、同じ `/p/<鍵>/…` のアドレスを表示します (`--standalone` のサーバには付きません)。10 分使われていないプロジェクトのプロセスは止め、そのプロジェクトを開くと起動し直します (時間は `--idle-stop <秒>` で変えられます。ターミナル・エージェント・未読の印はそのまま残ります)。プロセスが自分で止まったときは、画面にそう出して「再起動」を出します。理由は「詳細」にあります。ファイルの木の見出し (木が無ければタブ列の左端) のプロジェクト名 (p) から、どの画面でも登録したプロジェクトへ切り替えられます。いまの画面のまま移ります。文字を打つと絞り込み、↑↓ と Enter で移ります。テーマ・言語・文字サイズ・キー割り当て・通知・閉じた案内・画面の配置 (サイドバーの幅と畳み) は全プロジェクト共通なので (設定画面にどの節かを表示します)、移っても見た目は変わりません。",
+                text: "プロジェクトを登録すると、エージェントが居なくてもエージェント一覧に、好きな順で常に並びます (見出しの ⋯ から登録・名前を変える・上へ / 下へ・登録を外す。リポジトリには触りません)。見出しの「開く」は、同じタブ・同じアドレスのまま (`/p/<鍵>/…`) そのプロジェクトへ切り替えます。ブラウザの通知の許可・ターミナルのシェル・未読の印はそのまま残ります。そのプロジェクトのプロセスが動いていなければ、先に起動してから移ります。code-viewer が起動したプロセスは ⋯ から止められます。この画面で選んでいるプロジェクトは止められません。別のリポジトリで `code-viewer` を実行すると、動いている code-viewer にそのリポジトリを加えて URL を表示します (`code-viewer --standalone` は、これまでどおり 1 つのリポジトリだけの別のサーバを起動します)。画面の URL を表示する CLI (annotate・query diff tables) も、同じ `/p/<鍵>/…` のアドレスを表示します (`--standalone` のサーバには付きません)。10 分使われていないプロジェクトのプロセスは止め、そのプロジェクトを開くと起動し直します (時間は `--idle-stop <秒>` で変えられます。ターミナル・エージェント・未読の印はそのまま残ります)。プロセスが自分で止まったときは、画面にそう出して「再起動」を出します。理由は「詳細」にあります。動かしたまま code-viewer を入れ直すと、プロジェクトのプロセスを起動できなくなります。そのときは画面 (「再起動」を押した後) と、code-viewer を起動した端末に「入口の版が古い」と出ます。その code-viewer を止めて (その端末で Ctrl+C)、code-viewer を打ち直してください。ファイルの木の見出し (木が無ければタブ列の左端) のプロジェクト名 (p) から、どの画面でも登録したプロジェクトへ切り替えられます。いまの画面のまま移ります。文字を打つと絞り込み、↑↓ と Enter で移ります。テーマ・言語・文字サイズ・キー割り当て・通知・閉じた案内・画面の配置 (サイドバーの幅と畳み) は全プロジェクト共通なので (設定画面にどの節かを表示します)、移っても見た目は変わりません。",
               },
             ],
           },
@@ -1341,6 +1345,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "ディレクトリごと削除するのが、このリポジトリの全状態をリセットする推奨手順です。個別ファイルだけを消した場合はその系統だけがリセットされます（例: tabs.json を消すと次回起動時に DB タブがすべて閉じた状態になります）。",
+              },
+              {
+                kind: "paragraph",
+                text: "全プロジェクト共通のもの (テーマや言語などの設定・プロジェクトの一覧・アカウント・タブの配置・動いている code-viewer の記録) は $XDG_STATE_HOME/code-viewer に、未設定なら ~/.local/state/code-viewer に置きます。相対パスの XDG_STATE_HOME は XDG の決まりどおり無視し、その理由を 1 回表示します。",
               },
             ],
           },

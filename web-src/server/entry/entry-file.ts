@@ -37,6 +37,15 @@ export type EntryRecordRemovalResult =
 
 export const ENTRY_IDENTITY_TIMEOUT_MS = 1500;
 
+/**
+ * 裏が「自分を起こした入口の版が違う」(入口を動かしたまま入れ直した) で起動を
+ * やめるときの終了コード。入口はこれで「入口の版が古い」を見分ける。
+ */
+export const ENTRY_OUTDATED_EXIT_CODE = 3;
+
+/** 裏が ENTRY_OUTDATED_EXIT_CODE で終わった (worktree/open.ts が作る)。 */
+export class EntryOutdatedError extends Error {}
+
 export type EntryIdentityVerification =
   | { status: "ok" }
   | { status: "dead" }

@@ -13,6 +13,7 @@ import {
 } from "../server/entry/backends";
 import {
   acquireEntryStartLock,
+  EntryOutdatedError,
   liveEntryUrl,
   readEntryRecord,
   removeEntryRecord,
@@ -334,6 +335,36 @@ describe("the project processes the entry starts", () => {
     expect(target.detail).toContain(reason);
     expect(target.log).toBe("server output: sample tail");
     expect(b.state(ROOT)).toBe("absent");
+  });
+
+  test("notes once that the entry is older than the installed code-viewer, stops starting processes for it, and tries again on restart", async () => {
+    const { b, opens, lines } = backends([
+      {
+        status: "error",
+        error: new EntryOutdatedError("exited with the version exit code"),
+      },
+      ok(65001),
+    ]);
+    const first = await b.target(ROOT);
+    expect(first).toEqual({
+      status: "failed",
+      entryOutdated: true,
+      detail: expect.stringContaining("exited with the version exit code"),
+      log: "server output: sample tail",
+    });
+    expect(await b.target("/work/sample-lib")).toEqual(first);
+    expect(await b.target(ROOT, { events: true })).toEqual(first);
+    expect(opens).toHaveLength(1);
+    expect(lines).toEqual([
+      "code-viewer was updated or reinstalled while this entry server (pid 4242) was running, so the entry server is out of date and cannot start project processes. Stop it (Ctrl+C here, or kill 4242) and run code-viewer again.",
+    ]);
+
+    expect(await b.restart(ROOT)).toMatchObject({ status: "ok" });
+    expect(await b.target("/work/sample-lib")).toMatchObject({
+      status: "failed",
+      detail: "the project process for /work/sample-lib did not start in time",
+    });
+    expect(opens).toHaveLength(3);
   });
 
   test.each([

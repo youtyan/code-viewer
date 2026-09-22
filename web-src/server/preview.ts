@@ -62,9 +62,11 @@ import { parseBoundedJsonBody } from "./database/handle-shared";
 import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
 import {
+  ENTRY_OUTDATED_EXIT_CODE,
   isEntryToken,
   readEntryRecord,
   verifyEntryIdentity,
+  verifyServerIdentity,
 } from "./entry/entry-file";
 import { processAlive } from "./file-lock";
 import { writeUploadedFiles } from "./file-upload";
@@ -232,6 +234,9 @@ let backendMode = false;
 let entryPid: number | null = null;
 // pid が使い回されても別の入口を持ち主にしない、起動ごとの本人確認 token。
 let entryToken: string | null = null;
+// 持ち主の入口の URL (entry.json で pid と token が合ったもの)。入口を起こし
+// 直したとき、古い pid が生きていても本当に古い入口かをここで確かめる。
+let entryUrl: string | null = null;
 let entryOwnerGoneAt: number | null = null;
 let lastEntryOwnerFailure = "";
 // cwd が git 管理下か。"unknown" は git が無い・所有権エラー等で判定できなかった
@@ -420,6 +425,25 @@ Examples:
     console.error("--backend requires --entry-pid and --entry-token");
     process.exit(1);
   }
+  // 起こした入口の版が違う (入口を動かしたまま入れ直した) なら、待ち受ける前に
+  // 終わる。入口は終了コードで見分けて「入口が古い」と案内する。読めない
+  // entry.json はここでは判断せず、持ち主の確認の周期が理由を出す。
+  if (backendMode) {
+    const read = readEntryRecord();
+    const owner =
+      read.ok &&
+      read.registry?.pid === entryPid &&
+      read.registry.token === entryToken
+        ? read.registry
+        : null;
+    if (owner && owner.version !== VERSION) {
+      console.error(
+        `[code-viewer] this project process is version ${VERSION}, but the entry server that started it (pid ${entryPid}) is version ${owner.version}. code-viewer was updated or reinstalled while the entry server was running: stop the entry server (Ctrl+C where code-viewer was started, or kill ${entryPid}) and run code-viewer again.`,
+      );
+      process.exit(ENTRY_OUTDATED_EXIT_CODE);
+    }
+    entryUrl = owner?.url ?? null;
+  }
   const commandConfig = configureExternalCommands({
     cwd,
     cliOverrides: commandOverrides,
@@ -603,7 +627,9 @@ function sideEffectRequestAllowed(req: Request): boolean {
   return sideEffectRequestAllowedForOrigin(req);
 }
 
-type EntryOwnerVerification = { ok: true } | { ok: false; detail: string };
+type EntryOwnerVerification =
+  | { ok: true; url: string }
+  | { ok: false; detail: string };
 
 async function verifyEntryOwner(
   pid: number,
@@ -620,7 +646,7 @@ async function verifyEntryOwner(
     };
   }
   const verified = await verifyEntryIdentity(entry);
-  if (verified.status === "ok") return { ok: true };
+  if (verified.status === "ok") return { ok: true, url: entry.url };
   if (verified.status === "dead") {
     return { ok: false, detail: `entry owner pid ${pid} is not alive` };
   }
@@ -659,8 +685,26 @@ async function handleEntryAdopt(req: Request): Promise<Response> {
   if (entryPid === null || entryToken === null) {
     return text("project process has no entry owner", 500);
   }
+  // pid は使い回される。生きていても、覚えている古い入口の URL が古い token で
+  // 答えなければもう古い入口ではない。URL を知らなければ確かめられないので断る。
+  let previousOwnerGone = "";
   if (processAlive(entryPid)) {
-    return text(`entry owner pid ${entryPid} is still alive`, 409);
+    if (entryUrl === null) {
+      return text(`entry owner pid ${entryPid} is still alive`, 409);
+    }
+    const previous = await verifyServerIdentity(
+      { url: entryUrl, pid: entryPid, token: entryToken, version: VERSION },
+      "entry",
+    );
+    if (previous.status === "ok") {
+      return text(`entry owner pid ${entryPid} is still alive`, 409);
+    }
+    previousOwnerGone =
+      previous.status === "unreachable"
+        ? `the old entry server at ${entryUrl} did not answer:\n${formatErrorDetail(previous.error)}`
+        : previous.status === "invalid"
+          ? previous.detail
+          : `pid ${entryPid} exited while it was being checked`;
   }
   const verified = await verifyEntryOwner(pid, token);
   if (verified.ok === false) {
@@ -675,10 +719,11 @@ async function handleEntryAdopt(req: Request): Promise<Response> {
   const previousPid = entryPid;
   entryPid = pid;
   entryToken = token;
+  entryUrl = verified.url;
   entryOwnerGoneAt = null;
   lastEntryOwnerFailure = "";
   console.log(
-    `the code-viewer entry server restarted (pid ${previousPid} -> ${pid}); this project process now follows it`,
+    `the code-viewer entry server restarted (pid ${previousPid} -> ${pid}); this project process now follows it${previousOwnerGone ? `\npid ${previousPid} is alive but is no longer that entry server:\n${previousOwnerGone}` : ""}`,
   );
   return json({ ok: true, adopted: true });
 }
@@ -3469,6 +3514,7 @@ if (backendMode && entryPid !== null && entryToken !== null) {
       // adoption が確認中に持ち主を変えたなら、古い結果は現在の状態に使わない。
       if (entryPid !== checkedPid || entryToken !== checkedToken) return;
       if (verified.ok === true) {
+        entryUrl = verified.url;
         entryOwnerGoneAt = null;
         lastEntryOwnerFailure = "";
         return;

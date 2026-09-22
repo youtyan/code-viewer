@@ -22,6 +22,11 @@
 // 入口の裏 (登録簿の `backend`) だけで、利用者が起こした `--standalone` の
 // サーバは止めない。ターミナル・未読・フックは入口に居るので、裏を止めても
 // 消えない。
+//
+// 入口が古い: 入口を動かしたまま code-viewer を入れ直すと、起こした裏は新しい版で
+// 動き、版の違う入口を持ち主にできずに終わる (preview.ts・ENTRY_OUTDATED_EXIT_CODE)。
+// それを 1 回覚えてログに出し、以後は起こさずに同じ失敗を返す (起こしても同じ理由で
+// 終わる)。画面の再起動 (restart) だけは起こし直しを試す。
 
 import {
   errorWithCause,
@@ -37,13 +42,17 @@ import {
   type RunningWorktreeServerResult,
   registryKey,
 } from "../worktree/open";
+import { EntryOutdatedError } from "./entry-file";
 
 export type BackendTarget =
   | { status: "ok"; url: string; pid: number; started: boolean }
   /** 取り次いでいた裏が落ちた。画面の再起動のボタンか、SSE の 1 回で起こす。 */
   | { status: "unreachable"; detail: string; log: string }
-  /** 起こせなかった (時間切れ・起動直後に終わった・確かめられない)。 */
-  | { status: "failed"; detail: string; log: string };
+  /**
+   * 起こせなかった (時間切れ・起動直後に終わった・確かめられない)。
+   * `entryOutdated` は、入口の版が入れ直した code-viewer と違うため。
+   */
+  | { status: "failed"; detail: string; log: string; entryOutdated?: true };
 
 type BackendRecord =
   | { state: "starting"; done: Promise<BackendTarget> }
@@ -140,6 +149,8 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
   /** 落ちた後に SSE の繋ぎ直しで起こし直した根。2 回目は起こさない。 */
   const autoRestarted = new Set<string>();
   const activity = new Map<string, Activity>();
+  /** 入口が古いと分かった失敗。起こせたら消す。 */
+  let entryOutdated: Extract<BackendTarget, { status: "failed" }> | null = null;
 
   function activityOf(root: string): Activity {
     let found = activity.get(root);
@@ -180,6 +191,7 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
           log: deps.logTail(deps.logFile(root)),
         };
       }
+      entryOutdated = null;
       records.set(root, {
         state: "running",
         url: result.url,
@@ -199,6 +211,23 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
     if (previous?.state === "unreachable") records.set(root, previous);
     else records.delete(root);
     const log = deps.logTail(deps.logFile(root));
+    if (
+      result.status === "error" &&
+      result.error instanceof EntryOutdatedError
+    ) {
+      if (!entryOutdated) {
+        deps.log(
+          `code-viewer was updated or reinstalled while this entry server (pid ${deps.entryPid}) was running, so the entry server is out of date and cannot start project processes. Stop it (Ctrl+C here, or kill ${deps.entryPid}) and run code-viewer again.`,
+        );
+      }
+      entryOutdated = {
+        status: "failed",
+        entryOutdated: true,
+        detail: `the project process for ${root} stopped at start because this entry server is out of date:\n${formatErrorDetail(result.error)}`,
+        log,
+      };
+      return entryOutdated;
+    }
     if (result.status === "missing") {
       return {
         status: "failed",
@@ -244,6 +273,7 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
       await known.done;
       return target(root, options);
     }
+    if (entryOutdated) return entryOutdated;
     if (known?.state === "unreachable") {
       if (!options.events || autoRestarted.has(root)) {
         return { status: "unreachable", detail: known.detail, log: known.log };

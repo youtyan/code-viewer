@@ -639,20 +639,37 @@ async function handleEntryOpen(
   return json({ url: projectUrl(ctx, root, url), key, root });
 }
 
+/**
+ * 入口が古い (動かしたまま入れ直した) ときの案内。画面は再起動の失敗の文と
+ * 「詳細」にこれを出すので、言語は全プロジェクト共通の設定に合わせる。
+ */
+const ENTRY_OUTDATED_GUIDANCE = {
+  en: (pid: number) =>
+    `code-viewer was updated or reinstalled while this entry server (version ${VERSION}, pid ${pid}) was running, so the entry server is out of date. Stop the entry server (Ctrl+C where code-viewer was started, or kill ${pid}) and run code-viewer again.`,
+  ja: (pid: number) =>
+    `入口のサーバ（版 ${VERSION}、pid ${pid}）が動いている間に code-viewer が入れ直されたので、入口の版が古いままです。入口のプロセスを止めて（code-viewer を起動した端末で Ctrl+C、または kill ${pid}）、code-viewer を打ち直してください。`,
+};
+
 function backendFailure(
   status: 502 | 503,
   key: string,
   root: string,
-  target: { detail: string; log: string },
+  target: { detail: string; log: string; entryOutdated?: true },
 ): Response {
+  const outdated = target.entryOutdated
+    ? ENTRY_OUTDATED_GUIDANCE[readPageLook(userSettingsPath()).lang](
+        process.pid,
+      )
+    : null;
   const body: EntryBackendFailure = {
     error:
-      status === 502
+      outdated ??
+      (status === 502
         ? "the process for this project stopped"
-        : "the process for this project did not start",
+        : "the process for this project did not start"),
     code: status === 502 ? "backend-stopped" : "backend-start-failed",
     project: { key, root },
-    detail: target.detail,
+    detail: outdated ? `${outdated}\n\n${target.detail}` : target.detail,
     log: target.log,
   };
   return json(body, status);

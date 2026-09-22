@@ -24,7 +24,11 @@ import {
 } from "../../core/error-detail";
 import type { SettingsResponse } from "../../core/types";
 import { createLinkedAbortController } from "../abort";
-import { isEntryToken } from "../entry/entry-file";
+import {
+  ENTRY_OUTDATED_EXIT_CODE,
+  EntryOutdatedError,
+  isEntryToken,
+} from "../entry/entry-file";
 import {
   acquireServerStartLock,
   parseServerRegistryUrl,
@@ -474,16 +478,19 @@ export function createWorktreeServerController(
     // 時間切れまで待たず、子の出力の末尾を理由にしてすぐ返す。
     let exited: Error | null = null;
     child.onExit((code, signal) => {
-      exited = new Error(
-        [
-          `the code-viewer server for ${key} exited before it was ready (${
-            signal ? `signal ${signal}` : `exit code ${code}`
-          })`,
-          logTail(options.logFile),
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      );
+      const message = [
+        `the code-viewer server for ${key} exited before it was ready (${
+          signal ? `signal ${signal}` : `exit code ${code}`
+        })`,
+        logTail(options.logFile),
+      ]
+        .filter(Boolean)
+        .join("\n");
+      // 入口の版が違うので裏が起動をやめた (preview.ts)。入口が「入口が古い」と案内する。
+      exited =
+        options.backendOf !== undefined && code === ENTRY_OUTDATED_EXIT_CODE
+          ? new EntryOutdatedError(message)
+          : new Error(message);
     });
     child.unref();
 
