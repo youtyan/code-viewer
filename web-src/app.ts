@@ -132,6 +132,7 @@ import {
   type TerminalImageRef,
   type TerminalImagesResponse,
   terminalImageExtension,
+  validateTerminalImageResponseUrls,
 } from "./core/terminal-images";
 import { clampTerminalFontSize } from "./core/tmux";
 import type { ToolId } from "./core/tools";
@@ -6536,7 +6537,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     if (!res.ok)
       throw new Error(await responseErrorMessage(res, `load image ${path}`));
-    const body = (await res.json()) as TerminalImagesResponse;
+    const body = validateTerminalImageResponseUrls(
+      (await res.json()) as TerminalImagesResponse,
+      window.location.href,
+    );
     const image = body.images.find(
       (item) => item.candidate === path || item.path === path,
     );

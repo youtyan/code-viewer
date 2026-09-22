@@ -2140,6 +2140,39 @@ describe("event wiring", () => {
     expect(routes.length - before).toBe(1);
   });
 
+  test("does not navigate a new tab to an untrusted server URL", async () => {
+    const mounted = await mountWith(response([item({ name: "other" })]), {
+      postResponse: { url: "https://example.invalid/" },
+    });
+    const close = vi.fn();
+    const tab = { opener: null, location: { href: "" }, close };
+    const originalOpen = window.open;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      value: () => tab,
+    });
+    try {
+      openRowMenu(mounted.panel, 0);
+      menuItem(TEXT.open).click();
+      for (let i = 0; i < 8; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      expect(tab.location.href).toBe("");
+      expect(close).toHaveBeenCalledOnce();
+      expect(
+        texts(mounted.panel, ".history-status").some((message) =>
+          message.includes("project server URL must be an HTTP loopback URL"),
+        ),
+      ).toBe(true);
+    } finally {
+      Object.defineProperty(window, "open", {
+        configurable: true,
+        value: originalOpen,
+      });
+    }
+  });
+
   test("does not refresh or rewrite the page after a suspended action finishes", async () => {
     const mounted = await mountWith(response([item({ name: "repo" })]), {
       route: { wt: "/repo" },

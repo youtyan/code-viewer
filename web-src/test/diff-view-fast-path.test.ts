@@ -303,6 +303,41 @@ describe("diff view fast path", () => {
     expect(await result).toBe(true);
   });
 
+  test("does not fetch an external diff URL returned by the server", async () => {
+    setupDiffDom();
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ diff: "", generation: 1 }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      const { view, state } = createDiffViewForShellTest();
+      const file = makeFile(
+        "src/sample.ts",
+        1,
+        0,
+        "https://example.invalid/file_diff",
+      );
+      state.files = [file];
+      const card = document.createElement("article") as DiffCardElement;
+      card.className = "gdp-file-shell pending";
+      card.dataset.path = file.path;
+      card._file = file;
+      card.innerHTML =
+        '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+      document.querySelector("#diff")?.appendChild(card);
+
+      expect(await view.loadDiffFile(file.path)).toBe(false);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(card.classList.contains("error")).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("accepts the fast path only when direct diff cards match the file list", () => {
     expect(
       isDiffShellDomIntact(

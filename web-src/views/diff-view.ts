@@ -3,8 +3,11 @@
 // re-anchoring, idle syntax highlight, and the diff meta header.
 // Extracted from app.ts.
 
+import { apiUrl, withoutProjectPrefix } from "../core/api-url";
 import { changedPathsCoverPath } from "../core/changed-paths";
+import { hasControlCharacter } from "../core/control-chars";
 import { summarizeDiffFileKinds } from "../core/diff-file-kinds";
+import { errorWithCause } from "../core/error-detail";
 import { filePathClipboardText } from "../core/file-path-copy";
 import {
   CHEVRON_DOWN_16_PATH,
@@ -93,6 +96,31 @@ export type DiffViewText = {
   allViewed: string;
   allViewedTitle: string;
 };
+
+function validatedFileDiffUrl(value: string): string {
+  const expected = apiUrl("fileDiff");
+  const validationBase = new URL("http://localhost");
+  let target: URL;
+  try {
+    target = new URL(value, validationBase);
+  } catch (cause) {
+    throw errorWithCause("diff response URL is invalid", cause);
+  }
+  if (
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    hasControlCharacter(value) ||
+    target.origin !== validationBase.origin ||
+    (target.pathname !== expected &&
+      target.pathname !== withoutProjectPrefix(expected)) ||
+    target.username ||
+    target.password ||
+    target.hash
+  ) {
+    throw new Error("diff response URL must use the internal diff endpoint");
+  }
+  return value;
+}
 
 type LoadQueueItem = {
   file: FileMeta;
@@ -1398,10 +1426,12 @@ export function createDiffView(deps: DiffViewDeps) {
     };
 
     const request = trackLoad<FileDiffResponse>(
-      fetch(url).then(async (r) => {
-        if (!r.ok) throw new Error(await r.text());
-        return r.json();
-      }),
+      Promise.resolve()
+        .then(() => fetch(validatedFileDiffUrl(url)))
+        .then(async (r) => {
+          if (!r.ok) throw new Error(await r.text());
+          return r.json();
+        }),
     )
       .then(async (data) => {
         if (String(myReq) !== card.dataset.reqId) return; // superseded by newer request
@@ -1922,8 +1952,12 @@ export function createDiffView(deps: DiffViewDeps) {
       moreBtn.disabled = allBtn.disabled = true;
       moreBtn.textContent = "Loading…";
       const myGen = getServerGeneration();
-      const url = full ? file.load_url : buildPreviewUrl(file, count);
-      trackLoad<FileDiffResponse>(fetch(url).then((r) => r.json()))
+      trackLoad<FileDiffResponse>(
+        Promise.resolve()
+          .then(() => (full ? file.load_url : buildPreviewUrl(file, count)))
+          .then((url) => fetch(validatedFileDiffUrl(url)))
+          .then((response) => response.json()),
+      )
         .then((next) => {
           if (myGen !== getServerGeneration()) {
             moreBtn.textContent = "Data changed — reload";

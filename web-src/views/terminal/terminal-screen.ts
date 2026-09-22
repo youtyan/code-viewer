@@ -28,6 +28,7 @@ import {
   type TerminalImageHistoryResponse,
   type TerminalImageRef,
   type TerminalImagesResponse,
+  validateTerminalImageResponseUrls,
 } from "../../core/terminal-images";
 import {
   isShiftEnter,
@@ -509,7 +510,10 @@ export function createTerminalScreen(
         );
         return;
       }
-      const body = (await res.json()) as TerminalImagesResponse;
+      const body = validateTerminalImageResponseUrls(
+        (await res.json()) as TerminalImagesResponse,
+        window.location.href,
+      );
       // 応答を待つ間に別の対象へ切り替わっていたら、その棚には入れない。
       if (disposed || myGen !== generation) return;
       reportBase(body);
@@ -551,7 +555,10 @@ export function createTerminalScreen(
         );
         return;
       }
-      const body = (await res.json()) as TerminalImageHistoryResponse;
+      const body = validateTerminalImageResponseUrls(
+        (await res.json()) as TerminalImageHistoryResponse,
+        window.location.href,
+      );
       if (disposed || myGen !== generation) return;
       reportBase(body);
       setShelf(

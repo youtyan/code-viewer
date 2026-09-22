@@ -7,6 +7,8 @@
 // 拾う側 (ブラウザ) と配る側 (サーバ) が同じ判定を見るように core に置く。
 // terminal-paste.ts と同じ理由で、許可する画像の種類を片方だけずらさない。
 
+import { hasControlCharacter } from "./control-chars";
+import { errorWithCause } from "./error-detail";
 import { PASTE_IMAGE_TYPES } from "./terminal-paste";
 
 /**
@@ -128,6 +130,46 @@ export type TerminalImagesResponse = {
   rejected: TerminalImageRejection[];
   base: TerminalImageBase;
 };
+
+/** サーバ応答の画像 URL が、この画面と同じオリジンの HTTP URL か確かめる。 */
+export function validateTerminalImageResponseUrls<
+  T extends TerminalImagesResponse,
+>(response: T, browserUrl: string): T {
+  let base: URL;
+  try {
+    base = new URL(browserUrl);
+  } catch (cause) {
+    throw errorWithCause("browser URL is invalid", cause);
+  }
+  if (!Array.isArray(response.images)) {
+    throw new Error("terminal image response images must be an array");
+  }
+  response.images.forEach((image, index) => {
+    const at = `terminal image response images[${index}].url`;
+    if (
+      typeof image?.url !== "string" ||
+      !image.url ||
+      hasControlCharacter(image.url)
+    ) {
+      throw new Error(`${at} must be a same-origin URL`);
+    }
+    let target: URL;
+    try {
+      target = new URL(image.url, base);
+    } catch (cause) {
+      throw errorWithCause(`${at} must be a same-origin URL`, cause);
+    }
+    if (
+      (target.protocol !== "http:" && target.protocol !== "https:") ||
+      target.origin !== base.origin ||
+      target.username ||
+      target.password
+    ) {
+      throw new Error(`${at} must be a same-origin URL`);
+    }
+  });
+  return response;
+}
 
 /**
  * 繋いだときに 1 回だけ、そのペインの tmux の履歴をさかのぼって拾った結果。

@@ -11,6 +11,7 @@
 
 import type { AgentProjectServer } from "./agent-overview";
 import { hasControlCharacter } from "./control-chars";
+import { errorWithCause } from "./error-detail";
 
 /** 登録簿の 1 件。 */
 export type StoredProject = {
@@ -305,14 +306,45 @@ export function canStopProjectServer(server: AgentProjectServer): boolean {
  * 根にする (別のオリジンへ飛ばさない)。
  */
 export function projectDestination(serverUrl: string, path: string): string {
-  const base = new URL(serverUrl);
+  let base: URL;
+  try {
+    base = new URL(serverUrl);
+  } catch (cause) {
+    throw errorWithCause(
+      "project server URL must be an HTTP loopback URL",
+      cause,
+    );
+  }
+  const loopbackHost =
+    base.hostname === "127.0.0.1" ||
+    base.hostname === "localhost" ||
+    base.hostname === "[::1]";
+  const projectRoot = /^\/p\/[0-9a-f]{16}\/$/.test(base.pathname);
+  if (
+    hasControlCharacter(serverUrl) ||
+    base.protocol !== "http:" ||
+    !loopbackHost ||
+    !base.port ||
+    base.username ||
+    base.password ||
+    (base.pathname !== "/" && !projectRoot) ||
+    base.search ||
+    base.hash
+  ) {
+    throw new Error("project server URL must be an HTTP loopback URL");
+  }
   const safe =
     path.startsWith("/") && !path.startsWith("//") && !hasControlCharacter(path)
       ? path
       : "/";
   const prefix = base.pathname.replace(/\/+$/, "");
   const target = new URL(prefix + safe, base);
-  if (target.origin !== base.origin) return base.href;
+  if (
+    target.origin !== base.origin ||
+    (prefix && !target.pathname.startsWith(`${prefix}/`))
+  ) {
+    return base.href;
+  }
   return target.href;
 }
 

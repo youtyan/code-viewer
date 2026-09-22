@@ -334,6 +334,26 @@ describe("projectDestination", () => {
       projectDestination("http://127.0.0.1:64101/p/0123456789abcdef/", path),
     ).toBe(expected);
   });
+
+  test.each([
+    ["an external host", "https://example.invalid/"],
+    ["a lookalike loopback host", "http://127.0.0.1.example.invalid:64101/"],
+    ["an executable scheme", "javascript:alert(1)"],
+  ])("rejects %s as a project server URL", (_label, serverUrl) => {
+    expect(() => projectDestination(serverUrl, "/history")).toThrow(
+      "project server URL must be an HTTP loopback URL",
+    );
+  });
+
+  test.each([
+    "/../admin",
+    "/%2e%2e/admin",
+    "/a/../../admin",
+  ])("keeps an escaping path inside the project prefix: %s", (path) => {
+    expect(
+      projectDestination("http://127.0.0.1:64101/p/0123456789abcdef/", path),
+    ).toBe("http://127.0.0.1:64101/p/0123456789abcdef/");
+  });
 });
 
 describe("matchesProjectQuery", () => {

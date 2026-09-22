@@ -22,6 +22,7 @@ import {
   iconSvg,
   KEBAB_16_PATH,
 } from "../core/icons";
+import { projectDestination } from "../core/projects";
 import type { AppRoute } from "../core/routes";
 import type {
   CommitMeta,
@@ -178,6 +179,7 @@ function matches(haystack: string, needle: string): boolean {
 
 export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   let mounted = false;
+  let viewGeneration = 0;
   let lifecycle = 0;
   let acceptedServerGeneration = 0;
   let data: WorktreesResponse | null = null;
@@ -287,6 +289,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       ?.setAttribute("hidden", "true");
     listPanel.hidden = false;
     mounted = true;
+    viewGeneration++;
     document.body.classList.add("gdp-worktree-page");
     // サイドバーの絞り込みはこの画面でも使う。既定のハンドラは STATE.files を
     // 見ていて作業ツリーの一覧には効かないので、こちらでも拾う。
@@ -314,6 +317,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   function suspend(): void {
     // 進行中の読み込みの結果を捨てる。画面を離れた後に書き換えない。
     lifecycle++;
+    viewGeneration++;
     // 開いたままのメニューは body 直下に居るので、この画面を畳んでも残る。
     closeContextMenu();
     observer?.disconnect();
@@ -462,6 +466,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
 
   async function switchToWorktree(item: WorktreeItem): Promise<void> {
     const seq = lifecycle;
+    const viewGen = viewGeneration;
     busyPath = item.path;
     setMessage(text().opening);
     renderList();
@@ -469,18 +474,26 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       const result = await deps.trackLoad(
         postWorktreeAction(apiUrl("worktreeOpen"), { path: item.path }),
       );
-      const url = result.url || "";
-      if (!url) throw new Error(text().openFailed);
+      if (!result.url) throw new Error(text().openFailed);
+      const url = projectDestination(result.url, "/");
       // 移るまで「開いています」を出したままにする (押し直しで 2 度起こさない)。
       window.location.assign(url);
     } catch (error) {
       busyPath = "";
       if (isCurrent(seq)) {
-        setMessage(
-          error instanceof Error ? error.message : text().openFailed,
-          true,
-        );
+        const detail =
+          error instanceof Error ? error.message : text().openFailed;
         await refresh();
+        if (mounted && viewGeneration === viewGen && route()) {
+          const refreshDetail = message;
+          setMessage(
+            refreshDetail && refreshDetail !== detail
+              ? `${detail}\n${refreshDetail}`
+              : detail,
+            true,
+          );
+          renderList();
+        }
       }
     }
   }
@@ -511,31 +524,43 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       return;
     }
     const seq = lifecycle;
+    const viewGen = viewGeneration;
     busyPath = item.path;
     setMessage(text().opening);
     renderList();
     const tab = openBlankTab();
+    let completion: { detail: string; error: boolean } | null = null;
     try {
       const result = await deps.trackLoad(
         postWorktreeAction(apiUrl("worktreeOpen"), { path: item.path }),
       );
-      const url = result.url || "";
-      if (!url) throw new Error(text().openFailed);
+      if (!result.url) throw new Error(text().openFailed);
+      const url = projectDestination(result.url, "/");
       if (tab) tab.location.href = url;
       // ブロックされてタブを開けなかったときは、URL を残して自分で開けるように
       // する (黙って何も起きないのが一番困る)。
-      if (isCurrent(seq)) setMessage(tab ? "" : url, !tab);
+      if (!tab) completion = { detail: url, error: true };
     } catch (error) {
       tab?.close();
-      if (isCurrent(seq)) {
-        setMessage(
-          error instanceof Error ? error.message : text().openFailed,
-          true,
-        );
-      }
+      completion = {
+        detail: error instanceof Error ? error.message : text().openFailed,
+        error: true,
+      };
     } finally {
       busyPath = "";
-      if (isCurrent(seq)) await refresh();
+      if (isCurrent(seq)) {
+        await refresh();
+        if (completion && mounted && viewGeneration === viewGen && route()) {
+          const refreshDetail = message;
+          setMessage(
+            refreshDetail && refreshDetail !== completion.detail
+              ? `${completion.detail}\n${refreshDetail}`
+              : completion.detail,
+            completion.error || messageIsError,
+          );
+          renderList();
+        }
+      }
     }
   }
 
@@ -1077,7 +1102,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         title: t.actions.copyServerUrlTitle(item.serverUrl),
         onSelect: () => {
           // 入口の下では `/p/<鍵>/` の形で返るので、開ける URL にして写す。
-          const address = new URL(item.serverUrl, window.location.href).href;
+          const address = projectDestination(item.serverUrl, "/");
           void runAction(() => copyText(address), t.actions.copyFailed);
         },
       });

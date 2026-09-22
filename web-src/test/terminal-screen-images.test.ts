@@ -426,6 +426,22 @@ describe("画面に出た画像パスと棚", () => {
     ]);
   });
 
+  test.each([
+    "https://example.invalid/image.png",
+    "//example.invalid/image.png",
+    "data:image/png;base64,AA==",
+  ])("サーバ応答の外部画像 URL を読み込まない: %s", async (url) => {
+    respond = () => ({ images: [{ ...IMAGE, url }], rejected: [] });
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
+    await flush();
+
+    expect(shelfEl(handle).querySelector("img")).toBeNull();
+    expect(
+      statusMessages.some((message) => message?.includes("same-origin URL")),
+    ).toBe(true);
+  });
+
   test("同じ画面が何度届いても問い合わせを作り直さない", async () => {
     // 全画面アプリの下では同じ画面が続けて届く。
     const source = await attachShell(SHELL);
