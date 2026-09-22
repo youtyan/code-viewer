@@ -9,9 +9,14 @@
 // DOM にもファイルにも触らない。並び・開くときの判断・止めてよいかの判定は
 // ここだけで確かめられる。
 
-import type { AgentProjectServer } from "./agent-overview";
+import type {
+  AgentOverviewResponse,
+  AgentProjectInfo,
+  AgentProjectServer,
+} from "./agent-overview";
 import { hasControlCharacter } from "./control-chars";
 import { errorWithCause } from "./error-detail";
+import { withOpenPaneOverlay } from "./routes";
 
 /** 登録簿の 1 件。 */
 export type StoredProject = {
@@ -289,6 +294,38 @@ export function decideProjectOpen(input: {
     return { kind: "unavailable", reason: server.detail };
   }
   return input.registered ? { kind: "start" } : { kind: "register-first" };
+}
+
+/**
+ * エージェントのペインを開く行き先。通知・サイドバー・全体ボード・パレットが
+ * これ 1 つを使う。ペインのプロジェクトがこの画面のもの・一覧に無い・移れない
+ * (git の外・サーバに繋がらない) なら、この画面のタブで開く。移れる別の
+ * プロジェクトなら、そこへ移り、移った先で `?open-pane=` のペインを開く
+ * (path は移り先のアプリ内パス。今の画面のパスに付ける)。
+ */
+export function agentPaneTarget(
+  pane: string,
+  overview: Pick<AgentOverviewResponse, "panes" | "projects"> | null,
+  currentPath: string,
+):
+  | { kind: "here" }
+  | { kind: "project"; info: AgentProjectInfo; path: string } {
+  const root = overview?.panes.find((item) => item.id === pane)?.project;
+  const info = overview?.projects.find((item) => item.root === root);
+  if (!info) return { kind: "here" };
+  const decision = decideProjectOpen({
+    server: info.server,
+    registered: info.registered !== null,
+    git: info.git,
+  });
+  if (decision.kind === "current" || decision.kind === "unavailable") {
+    return { kind: "here" };
+  }
+  return {
+    kind: "project",
+    info,
+    path: withOpenPaneOverlay(currentPath, pane),
+  };
 }
 
 /**

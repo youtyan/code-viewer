@@ -109,6 +109,7 @@ import {
   buildRoute,
   type DiffRange,
   parseDoctorOverlay,
+  parseOpenPaneOverlay,
   parsePaneOverlay,
   parseRoute,
   parseSearchResultsOverlay,
@@ -119,6 +120,7 @@ import {
   screenToLeave,
   type TerminalOverlayState,
   withDoctorOverlay,
+  withOpenPaneOverlay,
   withPaneOverlay,
   withSearchResultsOverlay,
   withTerminalOverlay,
@@ -161,6 +163,7 @@ import {
   createAgentHooksSettings,
 } from "./views/agents/agent-hooks-settings";
 import { createAgentMonitor } from "./views/agents/agent-monitor";
+import { createAgentPaneOpener } from "./views/agents/agent-pane-opener";
 import { mountAgentStatus } from "./views/agents/agent-status";
 import {
   type AgentsSidebar,
@@ -1294,6 +1297,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** 開いたときの ?terminal= (起動の途中で URL が書き直される前に読む)。 */
   const INITIAL_TERMINAL_PARAM = parseTerminalOverlay(window.location.search);
+  /** 開いたときの ?open-pane= (別のプロジェクトから移ってきた。同じく先に読む)。 */
+  const INITIAL_OPEN_PANE = parseOpenPaneOverlay(window.location.search);
   /** 開いたときの pane=right の、右の面のファイルの route (同じく先に読む)。 */
   const INITIAL_RIGHT_ROUTE = ((): Extract<
     AppRoute,
@@ -6121,6 +6126,20 @@ window.GdpExpandLogic = GdpExpandLogic;
       )
         setRoute(INITIAL_RIGHT_ROUTE, true);
       syncTerminalFromUrl(INITIAL_TERMINAL_PARAM);
+      // 移ってきた先で開くペイン。一度きりなので、開いたら URL から外す
+      // (読み直しで開き直さない)。行き先の判定は通さない (食い違ったときに
+      // 移り直しを繰り返さない)。
+      if (INITIAL_OPEN_PANE) {
+        openAgentPaneHere(INITIAL_OPEN_PANE);
+        history.replaceState(
+          history.state,
+          "",
+          withOpenPaneOverlay(
+            window.location.pathname + window.location.search,
+            null,
+          ) + window.location.hash,
+        );
+      }
       // 下パネルの開閉は設定から戻す (URL が Tools も Search も指していないとき)。
       if (
         APP_SETTINGS.terminalPanelOpen &&
@@ -7534,8 +7553,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   }
 
-  /** そのペインをメインの面のタブで開く。サイドバーの修飾操作だけ反対面。 */
+  /**
+   * エージェントのペインを開く (通知・サイドバー・全体ボード・パレット)。
+   * 別のプロジェクトのペインならそのプロジェクトへ移る (agent-pane-opener.ts)。
+   */
   function openAgentPane(pane: string, destination?: "opposite"): void {
+    AGENT_PANE_OPENER(pane, destination);
+  }
+
+  /** この画面のメインの面のタブで開く。サイドバーの修飾操作だけ反対面。 */
+  function openAgentPaneHere(pane: string, destination?: "opposite"): void {
     AGENT_MONITOR.markRead(pane);
     const panes = MAIN_TABS.panes();
     const side: PaneSide =
@@ -7622,6 +7649,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     actionHeaders,
     refresh: () => AGENT_MONITOR.refresh(),
     navigate: (url) => window.location.assign(url),
+  });
+
+  const AGENT_PANE_OPENER = createAgentPaneOpener({
+    overview: () => AGENT_MONITOR.snapshot().overview,
+    currentPath: currentScreenPath,
+    openProject: (info, path) =>
+      PROJECT_ACTIONS.open(info, path, { confirmRegister: false }),
+    openHere: openAgentPaneHere,
   });
 
   const projectSwitcherButton =

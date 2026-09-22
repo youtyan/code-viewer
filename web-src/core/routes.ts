@@ -5,6 +5,7 @@ import {
   parseHistoryLineRange,
 } from "./history";
 import { isShellSessionId, type ShellSessionId } from "./shell";
+import { isTmuxPaneId, type TmuxPaneId } from "./tmux";
 import { isToolId, type ToolId } from "./tools";
 
 export type DiffRange = {
@@ -603,6 +604,24 @@ export function withTerminalOverlay(
   state: TerminalOverlayState,
 ): string {
   return withQueryParam(url, "terminal", state);
+}
+
+/**
+ * 読み込んだらタブで開くエージェントのペイン (`?open-pane=%12`)。別の
+ * プロジェクトのエージェントを開くとき、そのプロジェクトへ移ってから開くための
+ * 一度きりの行き先で、開いたら URL から外す。`?pane=right` (右の面) とは別の
+ * キー。tmux のペイン ID の形でなければ無い扱い。
+ */
+export function parseOpenPaneOverlay(search: string): TmuxPaneId | null {
+  const raw = new URLSearchParams(search).get("open-pane");
+  return isTmuxPaneId(raw) ? raw : null;
+}
+
+export function withOpenPaneOverlay(
+  url: string,
+  pane: TmuxPaneId | null,
+): string {
+  return withQueryParam(url, "open-pane", pane);
 }
 
 /**

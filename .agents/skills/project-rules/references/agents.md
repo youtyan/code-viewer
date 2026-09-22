@@ -107,6 +107,12 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
   全体ボード・通知・最下段）。サイドバーの Alt+クリックと、行の右クリックのメニューの項目は
   反対のメインの面に開き、1 面なら右の面を作る（`agents-sidebar.ts` の `openPane(pane, "opposite")`）。経路はどちらも `/_tmux/open`（ペイン → そのセッションのシェル）で、
   タブの中身はシェル（`shell-…`）
+- ペインが別のプロジェクト（移れるもの）のものなら、開く前にそのプロジェクトへ移る。判定は
+  `core/projects.ts` の `agentPaneTarget` 1 か所（入口は `views/agents/agent-pane-opener.ts`）で、
+  移り先の URL に `?open-pane=%N` を付け、移った先が読み込み後にそのペインをタブで開いて
+  URL から外す（`core/routes.ts` の `parseOpenPaneOverlay`。`?terminal=` は映しているシェル、
+  `?pane=right` は右の面で、どちらとも別のキー）。移った先では判定を通さない（食い違いで移り直しを
+  繰り返さない）。git の外・サーバに繋がらないプロジェクトのペインは、今の画面で開く
 - xterm は `views/terminal/terminal-view.ts` の枠（`ScreenSlot`）ごとに 1 つで、枠はメインの面の
   左右それぞれの 2 つ。**同じシェルを 2 か所に描かない**。左の面 ⇄ 右の面の移動は枠を
   入れ替えて DOM の親を変えるだけ（attach し直さない）。画像の棚は枠の一部なので一緒に移る
