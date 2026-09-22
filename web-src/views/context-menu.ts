@@ -107,11 +107,48 @@ export function showContextMenu(
     if (menu.contains(event.target as Node)) return;
     closeContextMenu();
   };
+  // キーだけで選べるようにする: 上下の矢印・Home・End で押せる項目だけを巡り
+  // (端では反対の端へ)、Enter で選ぶ。Enter はボタンの既定の動作に任せず
+  // ここで押す (既定の動作を止めるので 2 回は押されない)。使ったキーはページの
+  // キー操作へ渡さない。
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== "Escape") return;
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      closeContextMenu();
+      focusReturn?.focus();
+      return;
+    }
+    const buttons = [
+      ...menu.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+    ];
+    const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const last = buttons.length - 1;
+    let next: number;
+    switch (event.key) {
+      case "ArrowDown":
+        next = at < 0 || at === last ? 0 : at + 1;
+        break;
+      case "ArrowUp":
+        next = at <= 0 ? last : at - 1;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = last;
+        break;
+      case "Enter":
+        if (at < 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        buttons[at].click();
+        return;
+      default:
+        return;
+    }
+    event.preventDefault();
     event.stopPropagation();
-    closeContextMenu();
-    focusReturn?.focus();
+    buttons[next]?.focus();
   };
   // スクロールで anchor が動くと、位置が合わなくなる。追従させずに閉じる。
   // anchor を含まない箱のスクロール (タブの列の描き直しなど) では閉じない:

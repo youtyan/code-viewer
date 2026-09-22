@@ -44,3 +44,65 @@ describe("context menu and scrolling", () => {
     expect(isContextMenuOpen()).toBe(open);
   });
 });
+
+// メニューはキーだけで選べる。開くと最初の項目にフォーカスがあり、上下の矢印・
+// Home・End で押せる項目だけを巡り (区切りと押せない項目は飛ばす、端では反対の
+// 端へ)、Enter で選ぶ。メニューが使ったキーはページのキー操作へ渡さない。
+describe("context menu and the keyboard", () => {
+  test.each([
+    { name: "Enter on the first item", keys: ["Enter"], chosen: "Open a file" },
+    {
+      name: "ArrowDown then Enter",
+      keys: ["ArrowDown", "Enter"],
+      chosen: "New shell",
+    },
+    {
+      name: "ArrowDown skips the separator and the disabled item",
+      keys: ["ArrowDown", "ArrowDown", "Enter"],
+      chosen: "All sessions",
+    },
+    {
+      name: "ArrowDown past the last item wraps to the first",
+      keys: ["ArrowDown", "ArrowDown", "ArrowDown", "Enter"],
+      chosen: "Open a file",
+    },
+    {
+      name: "ArrowUp from the first item wraps to the last",
+      keys: ["ArrowUp", "Enter"],
+      chosen: "All sessions",
+    },
+    {
+      name: "End then Home",
+      keys: ["End", "Home", "Enter"],
+      chosen: "Open a file",
+    },
+  ])("$name chooses $chosen", ({ keys, chosen }) => {
+    document.body.innerHTML = '<button id="anchor">+</button>';
+    const anchor = document.getElementById("anchor") as HTMLElement;
+    const selected: string[] = [];
+    const reachedPage: string[] = [];
+    const page = (event: KeyboardEvent) => reachedPage.push(event.key);
+    document.addEventListener("keydown", page);
+    const pick = (label: string) => ({
+      label,
+      onSelect: () => selected.push(label),
+    });
+    showContextMenu(anchor, [
+      pick("Open a file"),
+      pick("New shell"),
+      { kind: "separator" },
+      { ...pick("No shell is open yet"), disabled: true },
+      pick("All sessions"),
+    ]);
+    for (const key of keys)
+      (document.activeElement ?? document.body).dispatchEvent(
+        new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+      );
+    document.removeEventListener("keydown", page);
+    expect([selected, reachedPage, isContextMenuOpen()]).toEqual([
+      [chosen],
+      [],
+      false,
+    ]);
+  });
+});

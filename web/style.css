@@ -20714,11 +20714,21 @@ button.agents-account-name:hover {
    幅は 2 段目の箱で測る (グリッドの全幅にまたがるので、中身で幅が決まらない)。
    境目は em (箱の文字の大きさ): 密度で文字が大きくなれば早めに畳む。31em は、
    標準の密度 (14px) で項目を全部 1 行に並べるのに要る幅 (実測 424px) を少し
-   上回るところ。 */
-.gdp-file-detail-sticky .gdp-file-detail-tabs {
-  container: file-detail-tabs / inline-size;
-  /* 幅を中身から切り離すので、グリッドの幅いっぱいに伸ばす (伸ばさないと 0)。 */
-  justify-self: stretch;
+   上回るところ。
+   箱を container にするのは、切替が 2 段目にある狭い見出しのときだけ。広い
+   見出しでは切替は中身の幅で決まる列 (auto) にあり、container にすると中身の
+   幅が 0 とみなされて列が 0 になる (ボタンが削除の絵柄に重なっていた)。 */
+@container doc-head (max-width: 760px) {
+  .gdp-file-detail-sticky .gdp-file-detail-tabs {
+    container: file-detail-tabs / inline-size;
+    /* 幅を中身から切り離すので、2 段目の幅いっぱいに伸ばす (伸ばさないと 0)。 */
+    justify-self: stretch;
+  }
+  /* 補助の文字を畳んでも入りきらないとき (1280px の 2 面の Markdown: 切替が
+     1 つ多い) は、窓の外へはみ出させずに折り返す。項目は消さない。 */
+  .gdp-file-detail-sticky .gdp-file-detail-tabs .gdp-source-tabs {
+    flex-wrap: wrap;
+  }
 }
 .gdp-file-detail-sticky .gdp-source-line-count,
 .gdp-file-detail-sticky .gdp-source-line-jump-label {

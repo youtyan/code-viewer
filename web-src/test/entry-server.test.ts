@@ -254,6 +254,7 @@ describe("the entry server", () => {
       "unknown-project",
     );
     // 知らない鍵の画面は、ただの 404 ではなく登録されていないことの案内。
+    // 言語は全プロジェクト共通の設定に合わせる (この一時の状態では英語)。
     const stranger = rootFileKey("/work/not-registered");
     const pages = await Promise.all(
       [`p/${stranger}`, `p/${stranger}/`, `p/${stranger}/history`].map(
@@ -278,7 +279,7 @@ describe("the entry server", () => {
         404,
         "text/html; charset=utf-8",
         true,
-        true,
+        false,
         true,
         true,
       ],
@@ -287,7 +288,7 @@ describe("the entry server", () => {
         404,
         "text/html; charset=utf-8",
         true,
-        true,
+        false,
         true,
         true,
       ],
@@ -296,7 +297,7 @@ describe("the entry server", () => {
         404,
         "text/html; charset=utf-8",
         true,
-        true,
+        false,
         true,
         true,
       ],
