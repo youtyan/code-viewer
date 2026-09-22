@@ -1330,7 +1330,7 @@ function createTabPane(
       url: `${apiUrl("dbSchemas")}?${params}`,
       kind: "query",
       label: `_db/schemas db=${dbId}`,
-      errorPrefix: "failed to fetch schemas",
+      errorPrefix: paneText().failure.fetchSchemas,
     });
   }
 
@@ -1359,7 +1359,7 @@ function createTabPane(
       url: `${apiUrl("dbSchema")}?${params}`,
       kind: "query",
       label: `_db/schema db=${dbId}`,
-      errorPrefix: "failed to fetch schema",
+      errorPrefix: paneText().failure.fetchSchema,
     });
   }
 
@@ -1390,7 +1390,7 @@ function createTabPane(
       url: `${apiUrl("dbTableCount")}?${params}`,
       kind: "query",
       label: `_db/table-count ${table}`,
-      errorPrefix: "failed to fetch table count",
+      errorPrefix: paneText().failure.fetchTableCount,
       rowCountOf: (r) => r.rowCount ?? undefined,
     });
   }
@@ -1459,7 +1459,7 @@ function createTabPane(
       kind: "query",
       label: `SELECT FROM ${table}`,
       trackLoad: false,
-      errorPrefix: "failed to fetch table",
+      errorPrefix: paneText().failure.fetchTable,
       rowCountOf: (r) => r.rows.length,
     });
     if (
@@ -1591,7 +1591,7 @@ function createTabPane(
       label,
       fallbackDetail: sql,
       trackLoad: false,
-      errorPrefix: "failed to execute query",
+      errorPrefix: paneText().failure.executeQuery,
       rowCountOf: (r) => r.rowCount ?? r.rows.length,
     });
   }
@@ -1625,7 +1625,7 @@ function createTabPane(
       kind: "mutate",
       label,
       fallbackDetail: fallback,
-      errorPrefix: "failed to save changes",
+      errorPrefix: paneText().failure.saveChanges,
       rowCountOf: () => mutations.length,
     });
   }
@@ -1930,7 +1930,7 @@ function createTabPane(
       kind: "query",
       label: `_db/columns ${table}`,
       trackLoad: false,
-      errorPrefix: "failed to fetch columns",
+      errorPrefix: paneText().failure.fetchColumns,
     });
     return data.columns;
   }
@@ -2023,7 +2023,7 @@ function createTabPane(
         kind: "query",
         label: `_db/ddl ${table}`,
         trackLoad: false,
-        errorPrefix: "failed to fetch DDL",
+        errorPrefix: paneText().failure.fetchDdl,
       });
       const columns = await fetchColumns(table);
       schemaView.render(table, columns, schemaCache?.indexes || [], {

@@ -1,9 +1,15 @@
-import { describe, expect, test } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  screenBaseUrl,
   takeGlobalCliOption,
   validateRefValue,
   validateRepoRelativePathValue,
 } from "../server/cli-helpers";
+import { rootFileKey, writeServerRegistry } from "../server/server-registry";
 
 describe("takeGlobalCliOption", () => {
   test.each([
@@ -104,5 +110,142 @@ describe("takeGlobalCliOption", () => {
   ])("keeps shared validation behavior: $name", ({ value, expected }) => {
     expect(validateRefValue(value, "--value")).toBe(expected);
     expect(validateRepoRelativePathValue(value, "--value")).toBe(expected);
+  });
+});
+
+// 入口の下では、CLI が繋ぐのは登録簿にある裏のプロセスで、その URL を開いても
+// 入口の画面にならない (直す前は `query diff tables` の diffUrl に `/p/<鍵>` が
+// 付かなかった)。
+describe("screenBaseUrl", () => {
+  const ROOT = "/example/repository";
+  const BACKEND = "http://127.0.0.1:64161";
+  const ENTRY = "http://127.0.0.1:64160/";
+  const saved: Record<string, string | undefined> = {};
+  let stateDir = "";
+
+  beforeEach(() => {
+    for (const name of [
+      "CODE_VIEWER_TEST_SERVER_REGISTRY_DIR",
+      "CODE_VIEWER_TEST_STATE_DIR",
+    ])
+      saved[name] = process.env[name];
+    const dir = mkdtempSync(join(tmpdir(), "cv-screen-base-"));
+    stateDir = join(dir, "state");
+    process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR = join(dir, "servers");
+    process.env.CODE_VIEWER_TEST_STATE_DIR = stateDir;
+  });
+
+  afterEach(() => {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    vi.restoreAllMocks();
+  });
+
+  function register(backend: boolean) {
+    writeServerRegistry({
+      url: `${BACKEND}/`,
+      pid: process.pid,
+      root: ROOT,
+      started_at: "2026-01-01T00:00:00.000Z",
+      ...(backend ? { backend: true } : {}),
+    });
+  }
+
+  function writeEntry(content: string) {
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, "entry.json"), content);
+  }
+
+  function entryRecord(pid: number) {
+    return JSON.stringify({
+      url: ENTRY,
+      pid,
+      token: "0123456789abcdef",
+      version: "0.0.0-test",
+      started_at: "2026-01-01T00:00:00.000Z",
+    });
+  }
+
+  const deadPid = () =>
+    spawnSync(process.execPath, ["-e", ""]).pid ?? Number.MAX_SAFE_INTEGER;
+
+  test.each([
+    {
+      name: "no registry (for example a --server to another machine) stays as given",
+      setup: () => {
+        // 登録簿も入口の記録も書かない。
+      },
+      serverUrl: `${BACKEND}/`,
+      expected: BACKEND,
+      stderr: null,
+    },
+    {
+      name: "a --standalone server stays as given",
+      setup: () => register(false),
+      serverUrl: BACKEND,
+      expected: BACKEND,
+      stderr: null,
+    },
+    {
+      name: "a project process behind a live entry gets the entry URL and key",
+      setup: () => {
+        register(true);
+        writeEntry(entryRecord(process.pid));
+      },
+      serverUrl: BACKEND,
+      expected: `http://127.0.0.1:64160/p/${rootFileKey(ROOT)}`,
+      stderr: null,
+    },
+    {
+      name: "a --server that is not the registered project process stays as given",
+      setup: () => {
+        register(true);
+        writeEntry(entryRecord(process.pid));
+      },
+      serverUrl: "http://127.0.0.1:64999",
+      expected: "http://127.0.0.1:64999",
+      stderr: null,
+    },
+    {
+      name: "a project process without an entry record is reported",
+      setup: () => register(true),
+      serverUrl: BACKEND,
+      expected: BACKEND,
+      stderr: "no entry server is running",
+    },
+    {
+      name: "a project process whose entry is gone is reported",
+      setup: () => {
+        register(true);
+        writeEntry(entryRecord(deadPid()));
+      },
+      serverUrl: BACKEND,
+      expected: BACKEND,
+      stderr: "no entry server is running",
+    },
+    {
+      name: "an unreadable entry record is reported with its reason",
+      setup: () => {
+        register(true);
+        writeEntry("{not json");
+      },
+      serverUrl: BACKEND,
+      expected: BACKEND,
+      stderr: "could not tell whether",
+    },
+  ])("$name", ({ setup, serverUrl, expected, stderr }) => {
+    setup();
+    const logged: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(args.join(" "));
+    });
+    expect(screenBaseUrl(ROOT, serverUrl)).toBe(expected);
+    if (stderr === null) expect(logged).toEqual([]);
+    else {
+      expect(logged).toHaveLength(1);
+      expect(logged[0]).toContain(stderr);
+    }
   });
 });

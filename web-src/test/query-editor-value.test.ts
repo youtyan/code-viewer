@@ -5,6 +5,7 @@ import type { DbValue } from "../core/database/types";
 GlobalRegistrator.register();
 
 const { createQueryEditor } = await import("../views/database/query-editor");
+const { dbText } = await import("../views/database/i18n");
 
 describe("query editor value display", () => {
   afterEach(() => {
@@ -265,6 +266,65 @@ describe("query editor value display", () => {
     };
     expect(logged.cause).toBe(cause);
     expect(logged.stack).toBe(failure.stack);
+    editor.dispose();
+  });
+
+  // 直す前は日本語の設定でも「Explain」とその結果の状態が英語のままだった。
+  test.each([
+    {
+      language: "en" as const,
+      button: "Explain",
+      status: "Explain (3ms)",
+    },
+    {
+      language: "ja" as const,
+      button: "実行計画",
+      status: "実行計画 (3ms)",
+    },
+  ])("labels Explain and its status in the display language: $language", async ({
+    language,
+    button,
+    status,
+  }) => {
+    const editor = createQueryEditor({
+      getText: () => dbText(language),
+      executeQuery: async () => ({
+        dbId: "sample.db",
+        columns: ["detail"],
+        columnTypes: ["TEXT"],
+        rows: [["SCAN sample_table"]],
+        rowCount: 1,
+        truncated: false,
+        elapsedMs: 3,
+      }),
+    });
+    document.body.appendChild(editor.el);
+    const explain =
+      editor.el.querySelector<HTMLButtonElement>(".db-query-explain");
+    expect(explain?.textContent).toBe(button);
+
+    editor.setSql("SELECT * FROM sample_table");
+    await editor.explain();
+
+    expect(editor.el.textContent).toContain(status);
+    editor.dispose();
+  });
+
+  test("relabels Explain when the display language changes", () => {
+    let language: "en" | "ja" = "en";
+    const editor = createQueryEditor({
+      getText: () => dbText(language),
+      executeQuery: async () => {
+        throw new Error("not called");
+      },
+    });
+    const explain =
+      editor.el.querySelector<HTMLButtonElement>(".db-query-explain");
+    expect(explain?.textContent).toBe("Explain");
+    language = "ja";
+    editor.localize();
+    expect(explain?.textContent).toBe("実行計画");
+    expect(explain?.title).toBe("実行計画を表示");
     editor.dispose();
   });
 });

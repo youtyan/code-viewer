@@ -12,6 +12,7 @@ import {
   readStdin,
   requestJson,
   resolveRepoRoot,
+  screenBaseUrl,
   takeGlobalCliOption,
   takeValue,
 } from "./cli-helpers";
@@ -642,7 +643,7 @@ function printList(state: AnnotationsState): void {
 function printAddedAnnotation(
   result: AnnotateAddResponse,
   location: string,
-  serverUrl: string,
+  screenBase: string,
 ): void {
   const sessionTitle = result.session_title || "Untitled session";
   if (result.created_session) {
@@ -655,7 +656,7 @@ function printAddedAnnotation(
       `[${result.entry.id}] in session ${result.session_id} (${sessionTitle})`,
   );
   console.error(
-    `view annotations at ${serverUrl}/ with the code annotations panel`,
+    `view annotations at ${screenBase}/ with the code annotations panel`,
   );
 }
 
@@ -708,7 +709,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     })) as { session: AnnotationSession };
     console.log(`session ${result.session.id}  ${result.session.title}`);
     console.error(
-      `view annotations at ${serverUrl}/ with the code annotations panel`,
+      `view annotations at ${screenBaseUrl(root, serverUrl)}/ with the code annotations panel`,
     );
     return;
   }
@@ -730,7 +731,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     printAddedAnnotation(
       result,
       `${result.entry.path}${formatLine(result.entry.line)}`,
-      serverUrl,
+      screenBaseUrl(root, serverUrl),
     );
     return;
   }
@@ -806,7 +807,11 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
         position: command.position,
       },
     )) as AnnotateAddResponse;
-    printAddedAnnotation(result, result.entry.path, serverUrl);
+    printAddedAnnotation(
+      result,
+      result.entry.path,
+      screenBaseUrl(root, serverUrl),
+    );
     return;
   }
   if (command.kind === "list") {

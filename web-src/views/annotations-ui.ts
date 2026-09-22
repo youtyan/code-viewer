@@ -387,7 +387,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
 
   function annotationLocationLabel(entry: AnnotationEntry): string {
     if (entry.target?.kind === "database") {
-      const parts = ["Datastores"];
+      const parts = [t().datastoreLocation];
       if (entry.target.db) parts.push(entry.target.db);
       if (entry.target.schema) parts.push(entry.target.schema);
       if (entry.target.table) parts.push(entry.target.table);

@@ -23,6 +23,7 @@ import {
   ensureServerUrl,
   requestJson,
   resolveRepoRoot,
+  screenBaseUrl,
   shellSingleQuote,
   takeGlobalCliOption,
   takeValue,
@@ -1935,7 +1936,8 @@ export async function runQueryCli(argv: string[]): Promise<void> {
     return runSnapshotDelete(serverUrl, command);
   if (command.kind === "snapshot-note")
     return runSnapshotNote(serverUrl, command);
-  if (command.kind === "diff-tables") return runDiffTables(serverUrl, command);
+  if (command.kind === "diff-tables")
+    return runDiffTables(serverUrl, screenBaseUrl(root, serverUrl), command);
   if (command.kind === "diff-rows") return runDiffRows(serverUrl, command);
   if (command.kind === "search") return runSearch(serverUrl, command);
   if (command.kind === "redis-databases")
@@ -2791,8 +2793,10 @@ function buildSnapshotPollCommand(
 // (web-src/core/routes.ts buildRoute) をそのまま再利用するので、URL の形が
 // ブラウザの実際のルーティングと常に一致する (二重エンコード等のズレが出ない)。
 // range はデータベース画面では未使用だが AppRoute の型上必須なので空文字で埋める。
+// screenBase は screenBaseUrl の値。入口の下では `/p/<鍵>` を含むので、
+// `new URL(path, base)` で経路ごと置き換えず、後ろに繋ぐ。
 function buildSnapshotDiffUrl(
-  serverUrl: string,
+  screenBase: string,
   dbId: string,
   schema: string,
   beforeId: string,
@@ -2807,7 +2811,7 @@ function buildSnapshotDiffUrl(
     diffAfter: afterId,
     range: { from: "", to: "" },
   });
-  return new URL(path, serverUrl).toString();
+  return new URL(`${screenBase}${path}`).toString();
 }
 
 // diff tables の各行から row 詳細を見るための paste-safe な diff rows コマンド。
@@ -3122,6 +3126,7 @@ async function runSnapshotNote(
 
 async function runDiffTables(
   serverUrl: string,
+  screenBase: string,
   command: Extract<QueryCommand, { kind: "diff-tables" }>,
 ): Promise<void> {
   const qs = `?before=${encodeURIComponent(command.before)}&after=${encodeURIComponent(command.after)}`;
@@ -3153,7 +3158,7 @@ async function runDiffTables(
   const enriched = {
     ...body,
     diffUrl: buildSnapshotDiffUrl(
-      serverUrl,
+      screenBase,
       body.dbId,
       body.schema,
       body.beforeId,

@@ -10,7 +10,7 @@ import {
 } from "../server/database/handle-shared";
 
 type ConsoleMethod = "log" | "warn" | "error";
-type CapturedLine = { kind: ConsoleMethod; line: string };
+type CapturedLine = { kind: ConsoleMethod; line: string; args: unknown[] };
 
 let captured: CapturedLine[] = [];
 let originalLog: typeof console.log;
@@ -22,13 +22,13 @@ beforeAll(() => {
   originalWarn = console.warn;
   originalError = console.error;
   console.log = (...args: unknown[]) => {
-    captured.push({ kind: "log", line: args.join(" ") });
+    captured.push({ kind: "log", line: args.join(" "), args });
   };
   console.warn = (...args: unknown[]) => {
-    captured.push({ kind: "warn", line: args.join(" ") });
+    captured.push({ kind: "warn", line: args.join(" "), args });
   };
   console.error = (...args: unknown[]) => {
-    captured.push({ kind: "error", line: args.join(" ") });
+    captured.push({ kind: "error", line: args.join(" "), args });
   };
 });
 
@@ -204,6 +204,72 @@ describe("logResponseWithReason", () => {
     expect(
       (captured[0]?.line ?? "").includes(":: invalid schema parameter"),
     ).toBe(true);
+  });
+});
+
+// ログのための読み取りが失敗しても応答は壊さないが、失敗の理由は元の error ごと
+// console.error に残す (直す前は空の catch で黙って捨てていた)。
+describe("ログのための読み取りに失敗したとき", () => {
+  function consumedResponse(): Promise<Response> {
+    const res = new Response("already read", {
+      status: 400,
+      headers: { "Content-Type": "text/plain" },
+    });
+    return res.text().then(() => res);
+  }
+
+  function brokenBodyResponse(failure: Error): Response {
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.error(failure);
+        },
+      }),
+      { status: 500, headers: { "Content-Type": "text/plain" } },
+    );
+  }
+
+  test.each([
+    {
+      name: "extractErrorReason: 読み終えた応答は clone できない",
+      run: async () => extractErrorReason(await consumedResponse()),
+      message: "could not clone a 400 response to read its failure reason",
+      cause: (error: unknown) => expect(error).toBeInstanceOf(TypeError),
+    },
+    {
+      name: "extractErrorReason: 本文の読み取りが失敗する",
+      run: async () =>
+        extractErrorReason(brokenBodyResponse(new Error("stream broke"))),
+      message: "could not read the body of a 500 response for the log",
+      cause: (error: unknown) =>
+        expect((error as Error).message).toBe("stream broke"),
+    },
+  ])("$name", async ({ run, message, cause }) => {
+    reset();
+    expect(await run()).toBe("");
+    const errors = captured.filter((entry) => entry.kind === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.line).toContain(message);
+    const args = errors[0]?.args ?? [];
+    cause(args[args.length - 1]);
+  });
+
+  test("logResponseWithReason: clone できなくても head の行は出し、理由も残す", async () => {
+    reset();
+    const res = await consumedResponse();
+    logResponseWithReason("[code-viewer]", makeReq(), makeUrl(), res, 0);
+    await drainLogs();
+    const errors = captured.filter((entry) => entry.kind === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.line).toContain(
+      "could not clone the response for the log line: [code-viewer] GET /_db/foo 400",
+    );
+    const args = errors[0]?.args ?? [];
+    expect(args[args.length - 1]).toBeInstanceOf(TypeError);
+    const warns = captured.filter((entry) => entry.kind === "warn");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]?.line).toMatch(" 400 ");
+    expect(warns[0]?.line.includes("::")).toBe(false);
   });
 });
 

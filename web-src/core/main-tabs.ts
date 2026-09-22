@@ -108,7 +108,8 @@ export type MoveResult =
         | "unknown-tab"
         | "no-such-pane"
         | "duplicate-target"
-        | "not-placeable";
+        | "not-placeable"
+        | "invalid-index";
     };
 
 /**
@@ -527,6 +528,10 @@ export function closeToRight(layout: Layout, id: string): Layout {
 /**
  * 並べ替え (同じ面) と、反対の面への移動。移動先に同じ中身のタブがあれば
  * 動かさず、理由を返す。
+ *
+ * `index` は整数だけを受ける。NaN や undefined を通すと Math.min / slice が
+ * 黙って先頭へ入れてしまい、呼び出し側は「意図した場所へ動いた」と区別
+ * できない。端の外は今までどおり端へ寄せる。
  */
 export function move(
   layout: Layout,
@@ -534,6 +539,8 @@ export function move(
   side: PaneSide,
   index: number,
 ): MoveResult {
+  if (!Number.isInteger(index))
+    return { layout, moved: false, reason: "invalid-index" };
   const found = findTab(layout, id);
   if (!found) return { layout, moved: false, reason: "unknown-tab" };
   const dest = paneOf(layout, side);

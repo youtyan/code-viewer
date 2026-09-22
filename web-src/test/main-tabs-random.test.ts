@@ -182,4 +182,34 @@ describe("main tab layout under random operation sequences", () => {
     }
     expect(history).toHaveLength(60);
   });
+
+  // どの配置の途中でも、数値でない位置の move は配置に触らず理由を返す
+  // (黙って先頭へ入れない)。
+  test.each(
+    Array.from({ length: 20 }, (_, seed) => seed + 1),
+  )("seed %i: a move with a non-numeric index never changes the layout", (seed) => {
+    const pick = rng(seed);
+    const badIndexes = [
+      Number.NaN,
+      undefined as unknown as number,
+      1.5,
+      Number.POSITIVE_INFINITY,
+    ];
+    let layout = emptyLayout();
+    for (let step = 0; step < 60; step++) {
+      layout = randomStep(pick, layout).apply(layout);
+      const ids = allIds(layout);
+      if (ids.length === 0) continue;
+      const id = ids[pick(ids.length)];
+      const side: PaneSide = pick(2) === 0 ? "left" : "right";
+      const index = badIndexes[pick(badIndexes.length)];
+      const result = move(layout, id, side, index);
+      expect(result, `seed ${seed}, step ${step + 1}, index ${index}`).toEqual({
+        moved: false,
+        reason: "invalid-index",
+        layout,
+      });
+      expect(result.layout).toBe(layout);
+    }
+  });
 });

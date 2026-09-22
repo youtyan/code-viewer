@@ -313,6 +313,18 @@ export type DbText = {
     coverageNoteBeforeOnly: (rows: number) => string;
     coverageNoteAfterOnly: (rows: number) => string;
   };
+  // 取得・実行の失敗の詳細の頭に付ける操作名。responseErrorMessage が
+  // 「<操作名> (HTTP 500): <本文>」の形にして、画面とセッションログに出す。
+  failure: {
+    fetchSchemas: string;
+    fetchSchema: string;
+    fetchTableCount: string;
+    fetchTable: string;
+    fetchColumns: string;
+    fetchDdl: string;
+    executeQuery: string;
+    saveChanges: string;
+  };
   // データストアエクスプローラ (redis / elasticsearch / s3)。共通文言は
   // common に集約し、各データストア固有の文言を redis/es/s3 に分ける。
   explorer: {
@@ -760,6 +772,16 @@ const EN: DbText = {
     coverageNoteAfterOnly: (rows) =>
       `Only in the after snapshot (${rows} rows). Not selected for the before snapshot, so no comparison.`,
   },
+  failure: {
+    fetchSchemas: "failed to fetch schemas",
+    fetchSchema: "failed to fetch schema",
+    fetchTableCount: "failed to fetch table count",
+    fetchTable: "failed to fetch table",
+    fetchColumns: "failed to fetch columns",
+    fetchDdl: "failed to fetch DDL",
+    executeQuery: "failed to execute query",
+    saveChanges: "failed to save changes",
+  },
   explorer: {
     common: {
       loadMore: "Load more",
@@ -1068,7 +1090,7 @@ const JA: DbText = {
     resizeInput: "クエリ入力欄の高さを変更",
     run: "実行",
     runTitle: "クエリを実行 (Ctrl+Enter)",
-    explain: "Explain",
+    explain: "実行計画",
     explainTitle: "実行計画を表示",
     localHistory: "ローカル履歴",
     localHistoryTitle: "エディタのローカル履歴",
@@ -1082,7 +1104,7 @@ const JA: DbText = {
     historyError: (detail) => `履歴の読み込みに失敗しました: ${detail}`,
     statusError: (ms) => `エラー (${ms}ms)`,
     statusSuccess: (rows, suffix, ms) => `${rows}${suffix} 行 (${ms}ms)`,
-    statusExplain: (ms) => `Explain (${ms}ms)`,
+    statusExplain: (ms) => `実行計画 (${ms}ms)`,
   },
   history: {
     refresh: "クエリ履歴を更新",
@@ -1214,6 +1236,16 @@ const JA: DbText = {
       `比較元のみに存在 (${rows}行)。比較先では対象テーブルに選ばれていないため比較できません。`,
     coverageNoteAfterOnly: (rows) =>
       `比較先のみに存在 (${rows}行)。比較元では対象テーブルに選ばれていないため比較できません。`,
+  },
+  failure: {
+    fetchSchemas: "スキーマの一覧を取得できませんでした",
+    fetchSchema: "スキーマを取得できませんでした",
+    fetchTableCount: "テーブルの行数を取得できませんでした",
+    fetchTable: "テーブルを取得できませんでした",
+    fetchColumns: "列を取得できませんでした",
+    fetchDdl: "DDL を取得できませんでした",
+    executeQuery: "クエリを実行できませんでした",
+    saveChanges: "変更を保存できませんでした",
   },
   explorer: {
     common: {

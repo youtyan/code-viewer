@@ -131,10 +131,44 @@ describe("diff catch-up policy", () => {
     let now = 1000;
     const shouldRun = createCatchUpGate(() => now, 1000);
 
-    expect(shouldRun()).toBe(true);
+    expect(shouldRun("visible")).toBe(true);
     now = 1500;
-    expect(shouldRun()).toBe(false);
+    expect(shouldRun("visible")).toBe(false);
     now = 2000;
-    expect(shouldRun()).toBe(true);
+    expect(shouldRun("visible")).toBe(true);
+  });
+
+  // 繋ぎ直しは「切れていた間の変更」を取り直す唯一の機会なので、間引きに
+  // 落とすと古い表示が次の変更まで残る。
+  test.each([
+    {
+      name: "a reconnect within the interval still runs",
+      steps: [
+        { at: 1000, reason: "visible" as const, expected: true },
+        { at: 1500, reason: "reconnect" as const, expected: true },
+      ],
+    },
+    {
+      name: "two reconnects in a row both run",
+      steps: [
+        { at: 1000, reason: "reconnect" as const, expected: true },
+        { at: 1001, reason: "reconnect" as const, expected: true },
+      ],
+    },
+    {
+      name: "a reconnect still holds back the next visibility catch-up",
+      steps: [
+        { at: 1000, reason: "reconnect" as const, expected: true },
+        { at: 1500, reason: "visible" as const, expected: false },
+        { at: 2000, reason: "visible" as const, expected: true },
+      ],
+    },
+  ])("$name", ({ steps }) => {
+    let now = 0;
+    const shouldRun = createCatchUpGate(() => now, 1000);
+    for (const step of steps) {
+      now = step.at;
+      expect(shouldRun(step.reason)).toBe(step.expected);
+    }
   });
 });

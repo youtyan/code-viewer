@@ -671,6 +671,77 @@ describe("database view SQL error rendering", () => {
     await leaveView(view);
   });
 
+  // 直す前は操作名 ("failed to fetch …") が日本語の設定でも英語のままだった。
+  test.each([
+    {
+      language: "en" as const,
+      kind: "sqlite",
+      failing: "/_db/schema?",
+      operation: "failed to fetch schema",
+    },
+    {
+      language: "ja" as const,
+      kind: "sqlite",
+      failing: "/_db/schema?",
+      operation: "スキーマを取得できませんでした",
+    },
+    {
+      language: "en" as const,
+      kind: "postgresql",
+      failing: "/_db/schemas",
+      operation: "failed to fetch schemas",
+    },
+    {
+      language: "ja" as const,
+      kind: "postgresql",
+      failing: "/_db/schemas",
+      operation: "スキーマの一覧を取得できませんでした",
+    },
+  ])("names the failed operation in the display language: $language $failing", async ({
+    language,
+    kind,
+    failing,
+    operation,
+  }) => {
+    installDatabaseDom();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files")
+        return jsonResponse({
+          files: [{ ...baseFilesResponse().files[0], kind }],
+        });
+      if (url.startsWith(failing))
+        return new Response("sample failure", { status: 500 });
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest({ getLanguage: () => language });
+    await view.enter("docker:db");
+
+    const shown = (
+      Array.from(
+        document.querySelectorAll(".db-pane-error"),
+      ) as unknown as FakeElement[]
+    ).map((error) => String(error.textContent));
+    // 頭の "Error:" は文言ではなく、formatErrorDetail が出す error の型名。
+    expect(shown).toEqual([
+      `Error: ${operation} (HTTP 500): sample failure`,
+      `Error: ${operation} (HTTP 500): sample failure`,
+    ]);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        message: `${operation} (HTTP 500): sample failure`,
+      }),
+    );
+    await leaveView(view);
+  });
+
   test("keeps the normal schema and first table path rendering", async () => {
     installDatabaseDom();
     mockFetch((url, init) => {

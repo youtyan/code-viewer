@@ -22,6 +22,7 @@ import {
 } from "./core/api-url";
 import {
   catchUpKind,
+  type CatchUpReason,
   createCatchUpGate,
   shouldAutoLoadForRoute,
 } from "./core/catch-up";
@@ -8589,7 +8590,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         openedOnce = true;
         return;
       }
-      catchUpMissedChanges();
+      catchUpMissedChanges("reconnect");
     });
   }
 
@@ -8622,11 +8623,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   }
 
-  function catchUpMissedChanges() {
+  function catchUpMissedChanges(reason: CatchUpReason) {
     const historyWorktreeSelected = HISTORY_VIEW.isWorktreeSelected();
     const kind = catchUpKind(STATE.route, { historyWorktreeSelected });
     if (!kind) return;
-    if (!catchUpGate()) return;
+    if (!catchUpGate(reason)) return;
     if (kind === "files") {
       scheduleSseLoad(null);
       return;
@@ -8644,12 +8645,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     scheduleEventSourceConnect();
-    catchUpMissedChanges();
+    catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
   });
   window.addEventListener("focus", () => {
     scheduleEventSourceConnect();
-    catchUpMissedChanges();
+    catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
   });
 })();

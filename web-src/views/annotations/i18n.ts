@@ -87,6 +87,8 @@ const EN = {
   unmute: "Unmute annotation playback",
   speed: "Playback speed",
   datastoreNotes: "Datastore annotations",
+  /** 注釈の場所の表記の頭 (「<これ> / <接続> / <スキーマ> / <テーブル>」)。 */
+  datastoreLocation: "Datastores",
 };
 
 type AnnotationText = typeof EN;
@@ -177,6 +179,7 @@ const JA: AnnotationText = {
   unmute: "読み上げのミュートを解除",
   speed: "読み上げ速度",
   datastoreNotes: "データストアの注釈",
+  datastoreLocation: "データストア",
 };
 
 export function annotationText(language: "en" | "ja"): AnnotationText {

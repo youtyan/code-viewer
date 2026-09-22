@@ -1,6 +1,6 @@
 import { apiUrl } from "../../core/api-url";
+import { showCopyFailure } from "../../core/copy-failure";
 import { s3ObjectName } from "../../core/database/s3-keys";
-import { formatErrorDetail } from "../../core/error-detail";
 import type {
   S3BucketInfo,
   S3BucketsResponse,
@@ -14,6 +14,7 @@ import type {
   S3SortMode,
   S3ViewMode,
 } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
 import {
   CHEVRON_DOWN_12_PATH,
   FOLDER_ICON_PATHS,
@@ -71,6 +72,18 @@ function buildS3RawUrl(dbId: string, bucket: string, key: string): string {
 
 function s3Uri(bucket: string, key: string): string {
   return `s3://${bucket}/${key}`;
+}
+
+// 失敗の理由を err.message だけに潰すと、どの操作のどの対象で何が起きたかが
+// 消える。console には error そのものと操作・対象を渡し、画面に出す文字列
+// として cause の連鎖ごとの全文を返す。
+function reportS3Failure(
+  operation: string,
+  error: unknown,
+  ...context: unknown[]
+): string {
+  console.error(`[code-viewer] S3 ${operation} failed`, ...context, error);
+  return formatErrorDetail(error);
 }
 
 function objectTypeLabel(key: string, contentType?: string): string {
@@ -584,7 +597,7 @@ export function createS3Explorer(
       if (slot.isStale()) return;
       setPaneStatus(
         objectList,
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${reportS3Failure("object list", err, requestBucket, requestSearch)}`,
         { error: true },
       );
       objectStatus.textContent = "";
@@ -641,7 +654,9 @@ export function createS3Explorer(
     } catch (err) {
       setPaneStatus(
         bodyEl,
-        tCommon().saveError(err instanceof Error ? err.message : String(err)),
+        tCommon().saveError(
+          reportS3Failure("object text", err, currentBucket, object.key),
+        ),
         { error: true },
       );
       return;
@@ -677,7 +692,7 @@ export function createS3Explorer(
         save.disabled = false;
         cancel.disabled = false;
         status.textContent = tCommon().saveError(
-          err instanceof Error ? err.message : String(err),
+          reportS3Failure("object write", err, currentBucket, object.key),
         );
       }
     });
@@ -705,7 +720,9 @@ export function createS3Explorer(
     } catch (err) {
       setPaneStatus(
         previewPane,
-        tCommon().saveError(err instanceof Error ? err.message : String(err)),
+        tCommon().saveError(
+          reportS3Failure("object delete", err, currentBucket, object.key),
+        ),
         { error: true },
       );
     }
@@ -766,7 +783,7 @@ export function createS3Explorer(
       } catch (err) {
         create.disabled = false;
         status.textContent = tCommon().saveError(
-          err instanceof Error ? err.message : String(err),
+          reportS3Failure("object create", err, currentBucket, key),
         );
       }
     });
@@ -818,8 +835,20 @@ export function createS3Explorer(
           window.setTimeout(() => {
             copy.textContent = text().copyUri;
           }, 1200);
-        } catch {
+        } catch (err) {
+          // ラベルは成功のときと同じく一時的に変えて戻す。理由の全文は
+          // console と title/aria-label に残す (直す前は理由を捨てていた)。
+          showCopyFailure(
+            copy,
+            `copy s3 uri ${s3Uri(currentBucket || "", object.key)}`,
+            err,
+            text().copyUri,
+            1200,
+          );
           copy.textContent = text().copyFailed;
+          window.setTimeout(() => {
+            copy.textContent = text().copyUri;
+          }, 1200);
         }
       });
       actions.append(open, download, copy);
@@ -963,7 +992,7 @@ export function createS3Explorer(
       if (slot.isStale()) return;
       setPaneStatus(
         body,
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${reportS3Failure("object preview", err, requestBucket, object.key)}`,
         { error: true },
       );
     } finally {
@@ -1142,11 +1171,16 @@ export function createS3Explorer(
       more.className = "s3-tree-more";
       more.style.setProperty("--lvl-pad", indentPad(depth));
       more.textContent = tCommon().loadMore;
+      // 失敗の文言はボタンのラベルに入れない (ラベルが伸びると押せる領域が
+      // 動く)。ボタンの外の状態の行に出し、次の試行で消す。
+      let failureRow: HTMLElement | null = null;
       // ボタン押下と、復元時のプログラム的なページ送り (expandExplorerToKey) を
       // 同じ関数で扱う。1 ページ追加できれば true を返す。
       const loadMore = async (): Promise<boolean> => {
         if (more.disabled) return false;
         more.disabled = true;
+        failureRow?.remove();
+        failureRow = null;
         try {
           const next = await fetchFolder(prefix, data.nextToken);
           if (
@@ -1162,16 +1196,15 @@ export function createS3Explorer(
           return true;
         } catch (err) {
           if (isAbortError(err) || disposed) return false;
-          // message だけに潰すと、どの要求のどの理由かが消える。console には
-          // error をそのまま、画面には cause の連鎖ごとの全文を出す。
-          console.error(
-            "[code-viewer] S3 load more failed",
-            bucket,
-            prefix,
-            err,
-          );
           more.disabled = false;
-          more.textContent = text().loadMoreFailed(formatErrorDetail(err));
+          failureRow = makeTreeMessageRow(
+            "s3-tree-error",
+            depth,
+            text().loadMoreFailed(
+              reportS3Failure("load more", err, bucket, prefix),
+            ),
+          );
+          more.after(failureRow);
           return false;
         }
       };
@@ -1219,7 +1252,7 @@ export function createS3Explorer(
           makeTreeMessageRow(
             "s3-tree-error",
             depth,
-            `Error: ${err instanceof Error ? err.message : String(err)}`,
+            `Error: ${reportS3Failure("folder", err, bucket, prefix)}`,
           ),
         );
       } finally {
@@ -1257,7 +1290,7 @@ export function createS3Explorer(
       if (slot.isStale() || isAbortError(err)) return;
       setPaneStatus(
         explorerTree,
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${reportS3Failure("folder tree", err, bucket)}`,
         { error: true },
       );
     } finally {
@@ -1478,9 +1511,16 @@ export function createS3Explorer(
         currentNextToken = undefined;
         notifySelectionChange();
         highlightActiveObject(null);
+        // head が取れなくても復元は続ける (行の大きさが出ないだけ)。
+        // ただし理由は console に残す。
         const headPromise = initial?.key
           ? fetchObjectHeadForSelection(initial.key, slot.signal).catch(
-              () => null,
+              (err: unknown) => {
+                if (!isAbortError(err)) {
+                  reportS3Failure("object head", err, selected, initial.key);
+                }
+                return null;
+              },
             )
           : null;
         if (initialView === "explorer") {
@@ -1509,7 +1549,7 @@ export function createS3Explorer(
       if (slot.isStale()) return;
       setPaneStatus(
         objectList,
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        `Error: ${reportS3Failure("bucket list", err, dbId)}`,
         { error: true },
       );
     } finally {

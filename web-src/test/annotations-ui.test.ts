@@ -10,6 +10,7 @@ import {
   test,
   vi,
 } from "vitest";
+import type { AnnotationEntry } from "../core/types";
 import type { AnnotationsUiDeps } from "../views/annotations-ui";
 import { createAnnotationsUi } from "../views/annotations-ui";
 import { clickDialogCancel, clickDialogConfirm } from "./_dialog-helpers";
@@ -1180,6 +1181,44 @@ describe("reading notes beneath code", () => {
     expect(q(document, "#annotation-detail-body").textContent).toContain(
       "Detailed finding",
     );
+  });
+
+  // 直す前はデータの注釈の場所の頭が、日本語でも "Datastores" のままだった。
+  test.each([
+    {
+      language: "en" as const,
+      expected: "Datastores / sample.db / sample_table / data",
+    },
+    {
+      language: "ja" as const,
+      expected: "データストア / sample.db / sample_table / data",
+    },
+  ])("labels a data note's location in the list: $language", async ({
+    language,
+    expected,
+  }) => {
+    const { ui, state } = await inlineHarness({ getLanguage: () => language });
+    const entries: AnnotationEntry[] = state.sessions[0].entries;
+    entries.push({
+      id: "note-data",
+      created_at: "2026-01-01T00:00:00.000Z",
+      path: "",
+      range: { from: "HEAD", to: "worktree" },
+      target: {
+        kind: "database",
+        db: "sample.db",
+        table: "sample_table",
+        tab: "data",
+      },
+      title: "Data finding",
+      body: "A note about a table",
+    });
+    await ui.refreshAnnotations();
+    const location = q(
+      document,
+      '[data-entry-id="note-data"] .annotation-entry-location',
+    );
+    expect(location.textContent).toBe(expected);
   });
 
   test("updates inline controls when the language changes", async () => {

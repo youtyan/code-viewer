@@ -792,9 +792,37 @@ describe("main tabs contract: move", () => {
     expectValid(start);
   });
 
+  // 数値でない位置を通すと Math.min / slice が黙って先頭へ入れ、呼び出し側は
+  // 「意図した場所へ動いた」と区別できなかった。理由つきで断る。
   test.each([
-    { name: "a non-finite index", index: Number.NaN },
+    { name: "NaN", index: Number.NaN },
+    { name: "undefined", index: undefined as unknown as number },
+    { name: "a fraction", index: 0.5 },
+    { name: "Infinity", index: Number.POSITIVE_INFINITY },
+    { name: "-Infinity", index: Number.NEGATIVE_INFINITY },
+    { name: "a numeric string", index: "1" as unknown as number },
+  ])("rejects $name as the index without moving", ({ index }) => {
+    const start = two(
+      pane([tab("a", FILE_A), tab("b", FILE_B)]),
+      pane([tab("c", TERMINAL_A)]),
+    );
+    for (const [id, side] of [
+      ["a", "left"],
+      ["c", "left"],
+    ] as const) {
+      const result = move(start, id, side, index);
+      expect(result).toEqual({
+        moved: false,
+        reason: "invalid-index",
+        layout: start,
+      });
+      expect(result.layout).toBe(start);
+    }
+  });
+
+  test.each([
     { name: "the same position", index: 0 },
+    { name: "a negative index", index: -3 },
   ])("accepts $name as a clamped reorder", ({ index }) => {
     const start = one([tab("a", FILE_A), tab("b", FILE_B)]);
     const result = move(start, "a", "left", index);

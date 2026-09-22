@@ -11,8 +11,9 @@ import {
   type ExternalCommandOverride,
   parseExternalCommandOverride,
 } from "./command-resolver";
+import { liveEntryUrl } from "./entry/entry-file";
 import * as git from "./git";
-import { readServerRegistry } from "./server-registry";
+import { readServerRegistry, rootFileKey } from "./server-registry";
 
 // `--flag <value>` を 1 つ消費する。値が無ければ {error}。
 export function takeValue(
@@ -251,6 +252,42 @@ export async function ensureServerUrl(
       registeredFailure,
   );
   process.exit(1);
+}
+
+/**
+ * CLI が出す画面の URL の根 (末尾の `/` なし)。
+ *
+ * 入口のサーバの下では、登録簿にあるのはプロジェクトの裏のプロセス
+ * (`--backend`) で、CLI はそこへじかに要求する。その URL をブラウザで開いても
+ * 入口の画面にならないので、繋いだ先が登録簿の裏なら入口の URL に
+ * `/p/<鍵>` を付けて返す。`--standalone` のサーバと、登録簿と違う `--server`
+ * はそのまま返す。
+ * 入口の記録が読めない・入口が居ないときは、理由を stderr に出して繋いだ先を
+ * 返す (画面の URL は案内で、要求そのものは済んでいるため)。
+ */
+export function screenBaseUrl(root: string, serverUrl: string): string {
+  const base = serverUrl.replace(/\/+$/, "");
+  let entryUrl: string | null;
+  let key: string;
+  try {
+    const registered = readServerRegistry(root);
+    if (!registered?.backend || registered.url.replace(/\/+$/, "") !== base)
+      return base;
+    key = rootFileKey(registered.root);
+    entryUrl = liveEntryUrl();
+  } catch (error) {
+    console.error(
+      `could not tell whether ${base} is behind the code-viewer entry server, so screen URLs point at it directly:\n${formatErrorDetail(error)}`,
+    );
+    return base;
+  }
+  if (!entryUrl) {
+    console.error(
+      `${base} is a project process of the code-viewer entry server, but no entry server is running, so screen URLs point at the project process directly`,
+    );
+    return base;
+  }
+  return `${entryUrl}/p/${key}`;
 }
 
 // サーバが 4xx / 5xx を返したときは text/plain で body を返す経路 (handle.ts

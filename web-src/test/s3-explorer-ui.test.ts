@@ -37,12 +37,14 @@ function json(body: unknown): Response {
   });
 }
 
-function installFetchMock(): void {
+function installFetchMock(fail?: (url: URL) => Error | null): void {
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
     writable: true,
     value: (async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://localhost");
+      const failure = fail?.(url);
+      if (failure) throw failure;
       const p = url.pathname;
       if (p === "/_db/s3/buckets")
         return json({ dbId: "mock", buckets: [{ name: "media" }] });
@@ -281,17 +283,169 @@ describe("S3 explorer UI", () => {
       const more =
         view.sidebarSlot.querySelector<HTMLButtonElement>(".s3-tree-more");
       click(more);
-      await waitFor(() => more?.textContent !== "Load more");
+      await waitFor(() => !!view.sidebarSlot.querySelector(".s3-tree-error"));
 
-      expect(more?.textContent).toContain("failed to fetch s3 folder");
-      expect(more?.textContent).toContain("Caused by");
-      expect(more?.textContent).toContain("network is unreachable");
+      // 失敗の文言はボタンのラベルに入れず、ボタンの直後の状態の行に出す
+      // (ラベルが伸びると押せる領域が動くため)。
+      const row = more?.nextElementSibling;
+      expect(row?.classList.contains("s3-tree-error")).toBe(true);
+      expect(row?.tagName).not.toBe("BUTTON");
+      expect(row?.textContent).toContain("failed to fetch s3 folder");
+      expect(row?.textContent).toContain("Caused by");
+      expect(row?.textContent).toContain("network is unreachable");
+      expect(more?.textContent).toBe("Load more");
       expect(more?.disabled).toBe(false);
       expect(logged.length).toBe(1);
       expect(logged[0]?.[0]).toBe("[code-viewer] S3 load more failed");
       expect(logged[0]?.[logged[0].length - 1]).toBe(failure);
+
+      // もう一度押して成功すれば、前の失敗の行は残らない。
+      failFolder = false;
+      click(more);
+      await waitFor(() => !more?.isConnected);
+      expect(view.sidebarSlot.querySelector(".s3-tree-error")).toBeNull();
     } finally {
       console.error = originalError;
+    }
+  });
+
+  // 直す前は err.message だけを出し、console にも cause にも何も残らなかった。
+  test.each([
+    {
+      operation: "bucket list",
+      fails: (url: URL) => url.pathname === "/_db/s3/buckets",
+      open: async () => {
+        // 開くだけ (load の中で失敗する)。
+      },
+      where: ".s3-object-list .db-pane-error",
+    },
+    {
+      operation: "object list",
+      fails: (url: URL) => url.pathname === "/_db/s3/objects",
+      open: async () => {
+        // 開くだけ (load の中で失敗する)。
+      },
+      where: ".s3-object-list .db-pane-error",
+    },
+    {
+      operation: "folder tree",
+      fails: (url: URL) =>
+        url.pathname === "/_db/s3/folder" && !url.searchParams.get("prefix"),
+      open: async (view: ReturnType<typeof createS3Explorer>) => {
+        click(view.sidebarSlot.querySelectorAll(".s3-view-seg button")[1]);
+      },
+      where: ".s3-tree .db-pane-error",
+    },
+    {
+      operation: "folder",
+      fails: (url: URL) =>
+        url.pathname === "/_db/s3/folder" &&
+        url.searchParams.get("prefix") === "images/",
+      open: async (view: ReturnType<typeof createS3Explorer>) => {
+        await switchToExplorer(view);
+        click(
+          [...view.sidebarSlot.querySelectorAll(".s3-tree .tree-dir")].find(
+            (dir) => dir.querySelector(".dir-name")?.textContent === "images",
+          ),
+        );
+      },
+      where: ".s3-tree-error",
+    },
+    {
+      operation: "object preview",
+      fails: (url: URL) => url.pathname === "/_db/s3/text",
+      open: async (view: ReturnType<typeof createS3Explorer>) => {
+        await waitFor(
+          () =>
+            !!view.sidebarSlot.querySelector(
+              '.s3-object-item[data-key="sample.csv"]',
+            ),
+        );
+        click(
+          view.sidebarSlot.querySelector(
+            '.s3-object-item[data-key="sample.csv"]',
+          ),
+        );
+      },
+      where: ".s3-preview-pane .db-pane-error",
+    },
+  ])("$operation の失敗は理由を cause ごと画面と console に出す", async ({
+    operation,
+    fails,
+    open,
+    where,
+  }) => {
+    const failure = Object.assign(new Error(`${operation} request failed`), {
+      cause: new Error("network is unreachable"),
+    });
+    installFetchMock((url) => (fails(url) ? failure : null));
+    const logged: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+    try {
+      const view = await mountExplorer();
+      await open(view);
+      const root = document.body;
+      await waitFor(() => !!root.querySelector(where));
+
+      const shown = root.querySelector(where)?.textContent ?? "";
+      expect(shown).toContain(`${operation} request failed`);
+      expect(shown).toContain("Caused by");
+      expect(shown).toContain("network is unreachable");
+      const s3Logs = logged.filter(
+        (args) => args[0] === `[code-viewer] S3 ${operation} failed`,
+      );
+      expect(s3Logs.length).toBe(1);
+      expect(s3Logs[0]?.[s3Logs[0].length - 1]).toBe(failure);
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  test("S3 URI のコピーに失敗したら、ラベルは動かさず理由を title と console に出す", async () => {
+    const failure = new Error("clipboard is not allowed");
+    const clipboard = navigator.clipboard;
+    const originalWrite = clipboard.writeText;
+    clipboard.writeText = async () => {
+      throw failure;
+    };
+    const logged: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+    try {
+      const view = await mountExplorer();
+      await waitFor(
+        () =>
+          !!view.sidebarSlot.querySelector('.s3-object-item[data-key="a.png"]'),
+      );
+      click(
+        view.sidebarSlot.querySelector('.s3-object-item[data-key="a.png"]'),
+      );
+      await waitFor(
+        () =>
+          !![...view.el.querySelectorAll("button")].find(
+            (button) => button.textContent === "Copy S3 URI",
+          ),
+      );
+      const copy = [...view.el.querySelectorAll("button")].find(
+        (button) => button.textContent === "Copy S3 URI",
+      );
+      click(copy);
+      await waitFor(() => copy?.classList.contains("failed") === true);
+
+      expect(copy?.textContent).toBe("Copy failed");
+      expect(copy?.title).toContain("copy s3 uri s3://media/a.png");
+      expect(copy?.title).toContain("clipboard is not allowed");
+      expect(logged.length).toBe(1);
+      const logged0 = logged[0]?.[0] as Error & { cause?: unknown };
+      expect(logged0.cause).toBe(failure);
+    } finally {
+      console.error = originalError;
+      clipboard.writeText = originalWrite;
     }
   });
 

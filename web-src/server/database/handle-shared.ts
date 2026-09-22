@@ -140,8 +140,12 @@ export async function extractErrorReason(res: Response): Promise<string> {
   let cloned: Response;
   try {
     cloned = res.clone();
-  } catch {
-    // Intentional: 既に消費された Response は理由抽出を諦める
+  } catch (error) {
+    // 理由抽出は諦めるが、諦めた理由は残す (応答そのものは壊さない)。
+    console.error(
+      `[code-viewer] could not clone a ${res.status} response to read its failure reason`,
+      error,
+    );
     return "";
   }
   try {
@@ -152,8 +156,12 @@ export async function extractErrorReason(res: Response): Promise<string> {
     return trimmed.length > MAX_LOGGED_ERROR_BODY
       ? `${trimmed.slice(0, MAX_LOGGED_ERROR_BODY)}...`
       : trimmed;
-  } catch {
-    // Intentional: body 読取失敗時はログだけ簡略化する
+  } catch (error) {
+    // ログを簡略化するだけだが、読めなかった理由は残す。
+    console.error(
+      `[code-viewer] could not read the body of a ${res.status} response for the log`,
+      error,
+    );
     return "";
   }
 }
@@ -193,8 +201,12 @@ export function logResponseWithReason(
   let cloned: Response | null = null;
   try {
     cloned = res.clone();
-  } catch {
-    // Intentional: clone 失敗時は理由なしでログだけ出す
+  } catch (error) {
+    // 理由なしでログ行は出すが、理由を読めなかったこと自体は残す。
+    console.error(
+      `[code-viewer] could not clone the response for the log line: ${head}`,
+      error,
+    );
   }
   enqueueLogLine(async () => {
     const reason = cloned ? await extractErrorReason(cloned) : "";

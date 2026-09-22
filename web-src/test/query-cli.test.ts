@@ -3785,6 +3785,52 @@ describe("runQueryCli integration", () => {
     });
   });
 
+  // --server に入口の前置き (`/p/<鍵>`) ごと渡したとき、直す前は
+  // new URL(path, server) が経路を置き換えて鍵が落ちていた。
+  test("diff tables keeps the /p/<key> prefix of --server in diffUrl", async () => {
+    const projectServer = `${SERVER}/p/0123456789abcdef`;
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          beforeId: "snap-a",
+          afterId: "snap-b",
+          dbId: "app.db",
+          schema: "public",
+          tables: [],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      projectServer,
+      "diff",
+      "tables",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+      "--json",
+    ]);
+
+    expect(harness.requests[1].url).toBe(
+      `${projectServer}/_db/snapshot/diff/tables?before=snap-a&after=snap-b`,
+    );
+    const route = buildRoute({
+      screen: "database",
+      db: "app.db",
+      schema: "public",
+      tab: "snapshot",
+      diffBefore: "snap-a",
+      diffAfter: "snap-b",
+      range: { from: "", to: "" },
+    });
+    expect(JSON.parse(harness.logs[0]).diffUrl).toBe(
+      `${projectServer}${route}`,
+    );
+  });
+
   test("diff tables (default) prints the summary line and a paste-safe diff rows hint per table", async () => {
     const payload = {
       beforeId: "snap-a",
