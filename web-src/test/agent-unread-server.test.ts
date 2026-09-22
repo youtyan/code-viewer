@@ -6,10 +6,10 @@ import type { AgentState } from "../core/agent-state";
 import {
   clearAgentUnread,
   noteAgentUnread,
-  resetAgentUnreadForTest,
+  resetAgentUnread,
 } from "../server/terminal/unread";
 
-afterEach(() => resetAgentUnreadForTest());
+afterEach(() => resetAgentUnread());
 
 function pane(id: string, state: AgentState): AgentPane {
   return {

@@ -45,7 +45,7 @@ import { listShellSessions } from "../shell/session";
 import { listTmuxClients } from "../tmux/clients";
 import { listTmuxPanes } from "../tmux/panes";
 import { runningServerResult } from "../worktree/open";
-import { getAgentActivityErrors } from "./activity";
+import { agentActivityObservedAt, getAgentActivityErrors } from "./activity";
 import { listAgentStates } from "./agent-state";
 
 export type ProjectResolution =
@@ -62,6 +62,8 @@ export type AgentOverviewDeps = {
   serverRoot: string;
   listPanes(): Promise<TmuxPanesResponse>;
   listStates(): AgentStateRecord[];
+  /** terminal/activity.ts が最後に巡回を完了した時刻。 */
+  activityObservedAt(): number;
   observationErrors(): AgentStateObservationError[];
   listShells(): ShellSession[];
   listClients(): Promise<
@@ -111,6 +113,7 @@ export async function buildAgentOverview(
   deps: AgentOverviewDeps,
 ): Promise<AgentOverviewResponse> {
   const now = deps.now();
+  const observedAt = deps.activityObservedAt();
   const errors = deps.observationErrors();
   let panes: TmuxPanesResponse;
   try {
@@ -119,6 +122,7 @@ export async function buildAgentOverview(
     console.error("[code-viewer] agent overview: tmux listing failed", cause);
     return {
       serverInstance: deps.serverInstance,
+      observedAt,
       tmux: {
         available: true,
         running: false,
@@ -285,6 +289,7 @@ export async function buildAgentOverview(
 
   return {
     serverInstance: deps.serverInstance,
+    observedAt,
     tmux: {
       available: panes.available,
       running: panes.running,
@@ -345,6 +350,7 @@ export function defaultAgentOverviewDeps(cwd: string): AgentOverviewDeps {
     // 「このリポジトリか」の判定は使わないので、作業ツリーの一覧を引かない。
     listPanes: () => listTmuxPanes(cwd, { worktreePaths: async () => [] }),
     listStates: listAgentStates,
+    activityObservedAt: agentActivityObservedAt,
     observationErrors: getAgentActivityErrors,
     listShells: listShellSessions,
     listClients: async () => {

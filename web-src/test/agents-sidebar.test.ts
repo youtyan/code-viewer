@@ -98,6 +98,7 @@ function overview(
 ): AgentOverviewResponse {
   return {
     serverInstance: "sample",
+    observedAt: 0,
     tmux: { available: true, running: true, error: "" },
     panes,
     projects,

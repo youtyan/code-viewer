@@ -27,6 +27,31 @@ const MAX_TRACKED_TARGETS = 200;
 const MAX_TEXT_LENGTH = 2000;
 
 const states = new Map<string, AgentStateRecord>();
+let tmuxGeneration: string | null = null;
+
+/** pane id を現在の tmux サーバ世代に結び付ける、メモリ内ストアの鍵。 */
+export function agentTargetKey(target: string): string {
+  return `${tmuxGeneration ?? "pending"}\0${target}`;
+}
+
+/**
+ * 現在の tmux サーバ世代を置く。初回は先に届いたフックを現世代へ移し、
+ * 変更時は再利用されうる pane id の記録をすべて捨てる。
+ */
+export function setAgentTmuxGeneration(generation: string): {
+  changed: boolean;
+  previous: string | null;
+} {
+  if (!generation) throw new RangeError("tmux generation must not be empty");
+  const previous = tmuxGeneration;
+  if (previous === generation) return { changed: false, previous };
+  const records = previous === null ? [...states.values()] : [];
+  states.clear();
+  tmuxGeneration = generation;
+  for (const record of records)
+    states.set(agentTargetKey(record.target), record);
+  return { changed: previous !== null, previous };
+}
 
 function clip(value: string): string {
   return value.length > MAX_TEXT_LENGTH
@@ -88,7 +113,8 @@ export type RecordAgentStateInput = {
 export function recordAgentState(
   input: RecordAgentStateInput,
 ): AgentStateRecord | null {
-  const previous = states.get(input.target);
+  const key = agentTargetKey(input.target);
+  const previous = states.get(key);
   const next =
     input.state ??
     (input.event
@@ -150,13 +176,13 @@ export function recordAgentState(
   const ended =
     input.source === "hook" ? input.event === "exit" : previous?.ended;
   if (ended) record.ended = true;
-  states.set(input.target, record);
+  states.set(key, record);
   evictOldest();
   return record;
 }
 
 export function getAgentState(target: string): AgentStateRecord | null {
-  return states.get(target) ?? null;
+  return states.get(agentTargetKey(target)) ?? null;
 }
 
 /** 一覧。人間の番のものが先、その中では待たせている順に並べる。 */
@@ -169,7 +195,7 @@ export function listAgentStates(): AgentStateRecord[] {
 }
 
 export function forgetAgentState(target: string): boolean {
-  return states.delete(target);
+  return states.delete(agentTargetKey(target));
 }
 
 /**
@@ -179,9 +205,9 @@ export function forgetAgentState(target: string): boolean {
  */
 export function retainAgentStates(known: Set<string>): number {
   let removed = 0;
-  for (const target of [...states.keys()]) {
-    if (!known.has(target)) {
-      states.delete(target);
+  for (const [key, record] of [...states]) {
+    if (!known.has(record.target)) {
+      states.delete(key);
       removed += 1;
     }
   }
@@ -191,4 +217,5 @@ export function retainAgentStates(known: Set<string>): number {
 /** テストとサーバ終了用。持ち越すと次のテストに漏れる。 */
 export function clearAgentStates(): void {
   states.clear();
+  tmuxGeneration = null;
 }

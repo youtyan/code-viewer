@@ -31,13 +31,18 @@ import { hashLine } from "../../core/terminal-capture";
 import { flattenTmuxPanes } from "../../core/tmux";
 import { listShellSessions, readShellBuffer } from "../shell/session";
 import { captureTmuxPane } from "../tmux/capture";
+import { readTmuxServerGeneration } from "../tmux/command";
 import { type ListTmuxPanesOptions, listTmuxPanes } from "../tmux/panes";
+import { mapWithConcurrency } from "../worktree/list";
 import {
+  agentTargetKey,
   getAgentState,
   recordAgentState,
   retainAgentStates,
+  setAgentTmuxGeneration,
 } from "./agent-state";
 import { getActiveAgentScreenRules, reloadAgentScreenRules } from "./rules";
+import { resetAgentUnread } from "./unread";
 
 /**
  * 見に行く間隔。エージェント一覧とヘッダの件数表示は、状態が変わってから
@@ -100,14 +105,17 @@ export const OVERRIDE_CHANGE_STREAK = Math.ceil(
   OVERRIDE_MOTION_MS / ACTIVITY_POLL_INTERVAL_MS,
 );
 
+/** capture-pane の同時実行数。子プロセス数をこの値より増やさない。 */
+export const ACTIVITY_CAPTURE_CONCURRENCY = 8;
 /**
  * 1 周で capture-pane を掛けるペインの上限。続きは次の周で見る。
  *
- * 1 本あたり 10ms 前後 (30 ペインで 1 周 0.3 秒弱、実測) なので、ふだんの
- * 本数なら 1 周で全部を見る。上限はペインが極端に多いときに 1 周が間隔を
- * 超えないための歯止め。
+ * 並列化で 1 周が短くなっても単位時間あたりの子プロセス数を増やさないよう、
+ * 3 組までに抑える。ペインが多い場合も巡回位置を持ち回って全件を見る。
  */
-export const MAX_PANES_PER_SWEEP = 40;
+export const MAX_PANES_PER_SWEEP = ACTIVITY_CAPTURE_CONCURRENCY * 3;
+/** 一覧・世代確認・capture を含む巡回 1 回の上限。 */
+export const ACTIVITY_SWEEP_TIMEOUT_MS = 6000;
 
 export type ActivitySeen = {
   hash: string;
@@ -120,7 +128,7 @@ export type ActivitySeen = {
 
 const seen = new Map<string, ActivitySeen>();
 let timer: ReturnType<typeof setTimeout> | null = null;
-/** 走っている巡回。重ねて走らせず、取得はこれを待つ。 */
+/** 走っている巡回。重ねて走らせない。一覧要求は完了を待たない。 */
 let inFlight: Promise<void> | null = null;
 let watching: { cwd: string; options: ListTmuxPanesOptions } | null = null;
 /** 最後に一覧を取りに来た時刻。 */
@@ -239,15 +247,16 @@ function observe(
   note: string,
   title?: string,
 ): void {
+  const key = agentTargetKey(target);
   const next = nextObservedState(
-    seen.get(target),
+    seen.get(key),
     content,
     title,
     Date.now(),
     getActiveAgentScreenRules(),
     getAgentState(target)?.state ?? null,
   );
-  seen.set(target, next.seen);
+  seen.set(key, next.seen);
   if (
     next.kind === "skip" ||
     next.kind === "hold" ||
@@ -325,22 +334,61 @@ async function sweepOnce(
   cwd: string,
   paneListOptions: ListTmuxPanesOptions,
 ): Promise<void> {
+  const deadline = Date.now() + ACTIVITY_SWEEP_TIMEOUT_MS;
   try {
-    const panes = await listTmuxPanes(cwd, paneListOptions);
+    const [panes, generation] = await Promise.all([
+      listTmuxPanes(cwd, paneListOptions),
+      readTmuxServerGeneration(cwd),
+    ]);
     activityErrors.delete(activityErrorKey("list_terminals", ""));
     const shells = listShellSessions();
     const allPanes = panes.running ? flattenTmuxPanes(panes.sessions) : [];
 
+    if (
+      generation.status === "error" ||
+      (panes.running && generation.status !== "ok")
+    ) {
+      const cause =
+        generation.status === "error"
+          ? generation.error
+          : new Error(
+              `tmux panes were listed but server generation was ${generation.status}`,
+            );
+      console.error(
+        "[code-viewer] tmux server generation lookup failed",
+        cause,
+      );
+      activityErrors.set(
+        activityErrorKey("list_terminals", "tmux-generation"),
+        observationError("list_terminals", "tmux-generation", cause),
+      );
+    } else if (generation.status === "ok" || !panes.running) {
+      activityErrors.delete(
+        activityErrorKey("list_terminals", "tmux-generation"),
+      );
+    }
+    if (generation.status === "ok") {
+      const changed = setAgentTmuxGeneration(generation.generation);
+      if (changed.changed) {
+        seen.clear();
+        resetAgentUnread();
+        console.info(
+          `[code-viewer] tmux server generation changed (${changed.previous} -> ${generation.generation}); cleared agent state`,
+        );
+      }
+    }
+
     // 棚卸しできたものだけを残す。tmux が落ちているときにペインの状態を
     // 消してしまうと、復帰した瞬間に全部が「初めて見た」に戻る。
-    if (panes.running) {
+    if (panes.running && generation.status === "ok") {
       const known = new Set<string>([
         ...allPanes.map((pane) => pane.id),
         ...shells.map((session) => session.id),
       ]);
       retainAgentStates(known);
+      const knownKeys = new Set([...known].map(agentTargetKey));
       for (const target of [...seen.keys()]) {
-        if (!known.has(target)) seen.delete(target);
+        if (!knownKeys.has(target)) seen.delete(target);
       }
     }
 
@@ -350,6 +398,8 @@ async function sweepOnce(
       if (!buffer) continue;
       observe(session.id, buffer.replay, session.command);
     }
+    // pane id の世代を特定できなければ旧状態へ結び付けず、次の巡回へ回す。
+    if (panes.running && generation.status !== "ok") return;
 
     const targets = allPanes;
     const { batch, nextOffset } = rotateForSweep(
@@ -358,11 +408,36 @@ async function sweepOnce(
       MAX_PANES_PER_SWEEP,
     );
     sweepOffset = nextOffset;
-    for (const pane of batch) {
-      const result = await captureTmuxPane(pane.id, cwd);
+    const captures = await mapWithConcurrency(
+      batch,
+      ACTIVITY_CAPTURE_CONCURRENCY,
+      async (pane) => {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return { pane, result: null };
+        return {
+          pane,
+          result: await captureTmuxPane(pane.id, cwd, 0, remaining),
+        };
+      },
+    );
+    for (const { pane, result } of captures) {
+      if (result === null) {
+        const error = new Error(
+          "activity sweep deadline exceeded before this pane could be captured",
+        );
+        console.error(
+          `[code-viewer] terminal screen capture failed for ${pane.id}`,
+          error,
+        );
+        activityErrors.set(
+          activityErrorKey("capture_screen", pane.id),
+          observationError("capture_screen", pane.id, error),
+        );
+        continue;
+      }
       if (result.status === "gone") {
         activityErrors.delete(activityErrorKey("capture_screen", pane.id));
-        seen.delete(pane.id);
+        seen.delete(agentTargetKey(pane.id));
         continue;
       }
       if (result.status === "error") {
@@ -416,21 +491,25 @@ export function startAgentActivityWatch(
 }
 
 /**
- * 一覧を取りに来た。速い巡回に戻し、覚えている状態が遅い巡回の古いもの
- * なら、答える前に巡回し直す (古い状態を今の状態のように見せない)。
+ * 一覧を取りに来た。速い巡回に戻し、古ければ巡回を起動する。一覧要求は
+ * 巡回を待たず、呼び出し側が lastSweepAt を応答に載せて古さを示す。
  */
-export async function noteAgentListWatched(): Promise<void> {
+export function noteAgentListWatched(): number {
   const now = Date.now();
   const wasUnwatched = now - lastWatchedAt > ACTIVITY_UNWATCHED_AFTER_MS;
   lastWatchedAt = now;
-  if (!watching) return;
-  if (activityIsStale(now, lastSweepAt) || inFlight) {
-    await sweep(watching.cwd, watching.options);
-    schedule();
-    return;
+  if (!watching) return lastSweepAt;
+  if (activityIsStale(now, lastSweepAt)) {
+    if (!inFlight) void sweep(watching.cwd, watching.options).finally(schedule);
+    return lastSweepAt;
   }
   // 遅い巡回の待ちに入っていたら、速い間隔で組み直す。
   if (wasUnwatched) schedule();
+  return lastSweepAt;
+}
+
+export function agentActivityObservedAt(): number {
+  return lastSweepAt;
 }
 
 export function stopAgentActivityWatch(): void {

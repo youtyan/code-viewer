@@ -64,6 +64,8 @@ export async function captureTmuxPane(
    * 購読はスクロールバックを持たないので既定のまま使う。
    */
   historyLines = 0,
+  /** 呼び出し側に全体期限がある場合は、残り時間を tmux 子プロセスへ渡す。 */
+  timeoutMs?: number,
 ): Promise<TmuxCaptureResult> {
   const history = Math.min(
     Math.max(Math.trunc(historyLines) || 0, 0),
@@ -88,6 +90,7 @@ export async function captureTmuxPane(
       ...(history > 0 ? ["-S", `-${history}`] : []),
     ],
     cwd,
+    timeoutMs,
   );
 
   if (result.status === "missing" || result.status === "no-server") {

@@ -35,6 +35,7 @@ import {
   listAgentStates,
   recordAgentState,
   retainAgentStates,
+  setAgentTmuxGeneration,
 } from "../server/terminal/agent-state";
 import { handleAgentRoute } from "../server/terminal/handle";
 import {
@@ -178,6 +179,25 @@ describe("state report and readback", () => {
   test("reports an unknown target as missing", async () => {
     const res = await call("/_agent/states?target=%25999");
     expect(res?.status).toBe(404);
+  });
+});
+
+describe("tmux generation state keys", () => {
+  test("a hook report attaches to the current generation after reused ids are cleared", () => {
+    expect(setAgentTmuxGeneration("4242:1")).toEqual({
+      changed: false,
+      previous: null,
+    });
+    recordAgentState({ target: PANE, event: "ask", source: "hook" });
+    expect(getAgentState(PANE)?.state).toBe("waiting");
+
+    expect(setAgentTmuxGeneration("5252:2")).toEqual({
+      changed: true,
+      previous: "4242:1",
+    });
+    expect(getAgentState(PANE)).toBeNull();
+    recordAgentState({ target: PANE, event: "prompt", source: "hook" });
+    expect(getAgentState(PANE)?.state).toBe("working");
   });
 });
 

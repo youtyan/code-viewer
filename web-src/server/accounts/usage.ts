@@ -427,7 +427,9 @@ export function readCodexUsage(configDir: string): AccountUsage {
       observedAt: 0,
     };
   }
-  let first: Extract<AccountUsage, { status: "ok" }> | null = null;
+  const normal: Extract<AccountUsage, { status: "ok" }>[] = [];
+  let unavailable: Extract<AccountUsage, { status: "unavailable" }> | null =
+    null;
   for (const file of files) {
     const key = `${file.size}:${file.mtime}`;
     let usage: AccountUsage | null;
@@ -455,29 +457,32 @@ export function readCodexUsage(configDir: string): AccountUsage {
     }
     if (!usage) continue;
     if (usage.status === "unavailable") {
-      if (first) continue;
-      if (usage.detail) {
-        return { ...usage, detail: `${file.path}: ${usage.detail}` };
-      }
-      return usage;
-    }
-    if (!first) {
-      first = usage;
+      unavailable ??= usage.detail
+        ? { ...usage, detail: `${file.path}: ${usage.detail}` }
+        : usage;
       continue;
     }
+    normal.push(usage);
+  }
+  normal.sort((a, b) => b.observedAt - a.observedAt);
+  const [first, ...older] = normal;
+  if (first) {
     // 新しいほうの記録と同じ枠なのにリセットの時刻が違う = 同じ設定ディレクトリで
     // 別のアカウントとしてログインした記録。0% を今の値のように見せない。
-    if (
-      Math.abs(first.observedAt - usage.observedAt) <= CODEX_MIXED_WINDOW_MS &&
-      usageWindowsConflict(first.windows, usage.windows)
-    ) {
-      return {
-        ...first,
-        mixed: { windows: usage.windows, observedAt: usage.observedAt },
-      };
+    for (const usage of older) {
+      if (
+        first.observedAt - usage.observedAt <= CODEX_MIXED_WINDOW_MS &&
+        usageWindowsConflict(first, usage)
+      ) {
+        return {
+          ...first,
+          mixed: { windows: usage.windows, observedAt: usage.observedAt },
+        };
+      }
     }
+    return first;
   }
-  if (first) return first;
+  if (unavailable) return unavailable;
   return {
     status: "unavailable",
     reason: "no-token-count",

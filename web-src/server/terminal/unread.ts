@@ -17,6 +17,7 @@ import {
   nextAgentUnread,
 } from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
+import { agentTargetKey } from "./agent-state";
 
 let unread = new Map<string, AgentTransition>();
 /** 前回の一覧の状態。最初の一覧の前は null (何も起きたことにしない)。 */
@@ -24,17 +25,28 @@ let previous: Map<string, AgentState> | null = null;
 
 /** 今回の一覧を前回と比べて未読を進め、今の未読を返す。 */
 export function noteAgentUnread(panes: AgentPane[]): AgentUnreadEntry[] {
-  unread = nextAgentUnread(unread, previous, panes, () => false).unread;
-  previous = new Map(panes.map((pane) => [pane.id, pane.state]));
-  return [...unread].map(([pane, transition]) => ({ pane, transition }));
+  unread = nextAgentUnread(
+    unread,
+    previous,
+    panes,
+    () => false,
+    (pane) => agentTargetKey(pane.id),
+  ).unread;
+  previous = new Map(
+    panes.map((pane) => [agentTargetKey(pane.id), pane.state]),
+  );
+  return panes.flatMap((pane) => {
+    const transition = unread.get(agentTargetKey(pane.id));
+    return transition ? [{ pane: pane.id, transition }] : [];
+  });
 }
 
 /** 見た・開いた。解いたら true。 */
 export function clearAgentUnread(target: string): boolean {
-  return unread.delete(target);
+  return unread.delete(agentTargetKey(target));
 }
 
-export function resetAgentUnreadForTest(): void {
+export function resetAgentUnread(): void {
   unread = new Map();
   previous = null;
 }

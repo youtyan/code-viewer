@@ -168,6 +168,8 @@ export type AgentOverviewResponse = {
    * 覚え直す前の「待機」を「作業中から止まった」と取り違えて通知してしまう。
    */
   serverInstance: string;
+  /** 画面状態の巡回を最後に完了した時刻。0 はまだ一度も完了していない。 */
+  observedAt: number;
   tmux: {
     /** tmux の実行ファイルが在るか。 */
     available: boolean;
@@ -481,19 +483,21 @@ export function nextAgentUnread(
   previous: ReadonlyMap<TmuxPaneId, AgentState> | null,
   panes: AgentPane[],
   viewing: (pane: AgentPane) => boolean,
+  identity: (pane: AgentPane) => TmuxPaneId = (pane) => pane.id,
 ): AgentUnreadUpdate {
   const next = new Map<TmuxPaneId, AgentTransition>();
   const transitions: AgentUnreadUpdate["transitions"] = [];
   for (const pane of panes) {
     if (pane.kind === null) continue;
-    const kept = unread.get(pane.id);
+    const key = identity(pane);
+    const kept = unread.get(key);
     const seen = viewing(pane);
-    if (kept && pane.state !== "working" && !seen) next.set(pane.id, kept);
+    if (kept && pane.state !== "working" && !seen) next.set(key, kept);
     if (!previous) continue;
-    const transition = agentTransition(previous.get(pane.id), pane.state);
+    const transition = agentTransition(previous.get(key), pane.state);
     if (!transition) continue;
     transitions.push({ pane, transition });
-    if (!seen) next.set(pane.id, transition);
+    if (!seen) next.set(key, transition);
   }
   return { unread: next, transitions };
 }

@@ -465,6 +465,12 @@ describe("showPaneAccounts", () => {
 });
 
 describe("usage windows from two accounts in one config directory", () => {
+  const fiveHours = (usedPercent: number, resetsAt: number) => ({
+    kind: "five_hour" as const,
+    minutes: 300,
+    usedPercent,
+    resetsAt,
+  });
   const week = (usedPercent: number, resetsAt: number) => ({
     kind: "seven_day" as const,
     minutes: 10080,
@@ -474,44 +480,58 @@ describe("usage windows from two accounts in one config directory", () => {
   const HOUR = 60 * 60_000;
   test.each([
     {
-      name: "same window, reset times a week apart (another account)",
-      a: [week(97, 1_000 * HOUR)],
-      b: [week(0, 1_150 * HOUR)],
+      name: "a normal five-hour reset advances after the old window ended",
+      newer: { windows: [fiveHours(4, 910 * HOUR)], observedAt: 906 * HOUR },
+      older: { windows: [fiveHours(97, 905 * HOUR)], observedAt: 900 * HOUR },
+      expected: false,
+    },
+    {
+      name: "a normal weekly reset advances after the old window ended",
+      newer: { windows: [week(4, 1_068 * HOUR)], observedAt: 901 * HOUR },
+      older: { windows: [week(97, 900 * HOUR)], observedAt: 800 * HOUR },
+      expected: false,
+    },
+    {
+      name: "the newer observation moving reset backward is another account",
+      newer: { windows: [week(0, 850 * HOUR)], observedAt: 910 * HOUR },
+      older: { windows: [week(97, 1_000 * HOUR)], observedAt: 900 * HOUR },
       expected: true,
     },
     {
-      name: "same window, same reset time (same account, later reading)",
-      a: [week(97, 1_000 * HOUR)],
-      b: [week(98, 1_000 * HOUR)],
+      name: "two reset times observed together while the old window is active conflict",
+      newer: { windows: [week(0, 1_150 * HOUR)], observedAt: 900 * HOUR },
+      older: { windows: [week(97, 1_000 * HOUR)], observedAt: 900 * HOUR },
+      expected: true,
+    },
+    {
+      name: "the same reset time is the same account",
+      newer: { windows: [week(98, 1_000 * HOUR)], observedAt: 910 * HOUR },
+      older: { windows: [week(97, 1_000 * HOUR)], observedAt: 900 * HOUR },
       expected: false,
     },
     {
       name: "reset times within the tolerance (clock drift)",
-      a: [week(97, 1_000 * HOUR)],
-      b: [week(97, 1_000 * HOUR + 30 * 60_000)],
+      newer: {
+        windows: [week(97, 1_000 * HOUR + 30 * 60_000)],
+        observedAt: 900 * HOUR,
+      },
+      older: { windows: [week(97, 1_000 * HOUR)], observedAt: 900 * HOUR },
       expected: false,
     },
     {
       name: "different windows are not compared",
-      a: [week(97, 1_000 * HOUR)],
-      b: [
-        {
-          kind: "five_hour" as const,
-          minutes: 300,
-          usedPercent: 0,
-          resetsAt: 5 * HOUR,
-        },
-      ],
+      newer: { windows: [fiveHours(0, 5 * HOUR)], observedAt: HOUR },
+      older: { windows: [week(97, 1_000 * HOUR)], observedAt: HOUR },
       expected: false,
     },
     {
       name: "a window without a reset time cannot conflict",
-      a: [week(97, 0)],
-      b: [week(0, 1_150 * HOUR)],
+      newer: { windows: [week(0, 1_150 * HOUR)], observedAt: 900 * HOUR },
+      older: { windows: [week(97, 0)], observedAt: 800 * HOUR },
       expected: false,
     },
-  ])("usageWindowsConflict: $name", ({ a, b, expected }) => {
-    expect(usageWindowsConflict(a, b)).toBe(expected);
+  ])("usageWindowsConflict: $name", ({ newer, older, expected }) => {
+    expect(usageWindowsConflict(newer, older)).toBe(expected);
   });
 });
 

@@ -176,6 +176,7 @@ function deps(over: Partial<AgentOverviewDeps> = {}): AgentOverviewDeps {
         { id: "%4", path: "/work/notes", command: "zsh" },
       ]),
     listStates: () => states,
+    activityObservedAt: () => 4321,
     observationErrors: () => [],
     listShells: () => [],
     listClients: async () => ({ status: "ok", clients: [] }),
@@ -231,6 +232,7 @@ describe("buildAgentOverview", () => {
 
   test("ペインを本体のルートでまとめ、worktree 名・種類・状態を付ける", async () => {
     const overview = await buildAgentOverview(deps());
+    expect(overview.observedAt).toBe(4321);
     expect(
       overview.panes.map((item) => [
         item.id,

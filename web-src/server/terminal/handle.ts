@@ -208,7 +208,7 @@ async function handleStatePost(
 }
 
 async function handleStatesGet(url: URL): Promise<Response> {
-  await noteAgentListWatched();
+  noteAgentListWatched();
   const errors = getAgentActivityErrors();
   const target = url.searchParams.get("target");
   if (target) {
@@ -579,7 +579,7 @@ async function handleOverviewGet(
   cwd: string,
   entry: AgentEntryHooks | undefined,
 ): Promise<Response> {
-  await noteAgentListWatched();
+  noteAgentListWatched();
   overviewDeps ??= defaultAgentOverviewDeps(cwd);
   const base = overviewDeps;
   const deps: AgentOverviewDeps = entry

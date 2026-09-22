@@ -553,22 +553,29 @@ export function usageIsStale(observedAt: number, now: number): boolean {
 export const USAGE_MIXED_RESET_TOLERANCE_MS = 60 * 60_000;
 
 /**
- * 2 つの記録が別のアカウントの上限を指しているか。同じ枠 (kind と長さ) で、
- * どちらもリセットの時刻を持ち、その時刻が USAGE_MIXED_RESET_TOLERANCE_MS より
- * 離れていれば別のアカウント (同じアカウントなら窓のリセットは 1 つ)。
+ * 新旧 2 つの記録が別のアカウントの上限を指しているか。同じ枠で reset が
+ * 許容差より戻るか、古い窓がまだ終わっていない観測時刻に別の reset があれば
+ * 混在。同じアカウントの窓が終わった後、次の reset へ進むのは正常な更新。
  */
 export function usageWindowsConflict(
-  a: readonly UsageWindow[],
-  b: readonly UsageWindow[],
+  newer: Pick<
+    Extract<AccountUsage, { status: "ok" }>,
+    "windows" | "observedAt"
+  >,
+  older: Pick<
+    Extract<AccountUsage, { status: "ok" }>,
+    "windows" | "observedAt"
+  >,
 ): boolean {
-  return a.some((x) =>
-    b.some(
+  return newer.windows.some((x) =>
+    older.windows.some(
       (y) =>
         x.kind === y.kind &&
         x.minutes === y.minutes &&
         x.resetsAt > 0 &&
         y.resetsAt > 0 &&
-        Math.abs(x.resetsAt - y.resetsAt) > USAGE_MIXED_RESET_TOLERANCE_MS,
+        Math.abs(x.resetsAt - y.resetsAt) > USAGE_MIXED_RESET_TOLERANCE_MS &&
+        (x.resetsAt < y.resetsAt || y.resetsAt > newer.observedAt),
     ),
   );
 }

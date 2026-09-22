@@ -828,6 +828,23 @@ describe("usage", () => {
       type: "event_msg",
       payload: { type: "token_count", info: null, rate_limits: rateLimits },
     });
+  const usageBaseMs = Date.parse("2026-01-01T00:00:00.000Z");
+  const hourMs = 60 * 60_000;
+  const rateLimitsAt = (
+    usedPercent: number,
+    [primaryResetHour, secondaryResetHour]: readonly [number, number],
+  ) => ({
+    primary: {
+      used_percent: usedPercent,
+      window_minutes: 300,
+      resets_at: (usageBaseMs + primaryResetHour * hourMs) / 1000,
+    },
+    secondary: {
+      used_percent: usedPercent,
+      window_minutes: 10080,
+      resets_at: (usageBaseMs + secondaryResetHour * hourMs) / 1000,
+    },
+  });
 
   test.each([
     {
@@ -916,6 +933,96 @@ describe("usage", () => {
     utimesSync(recent, 200, 200);
     const usage = readCodexUsage(codexHome);
     expect(usage.status === "ok" && usage.windows[0]?.usedPercent).toBe(20);
+  });
+
+  test("codex: a newer weekly-only event cannot gain a five-hour window from mtime order", () => {
+    const codexHome = join(root, "codex-event-order");
+    const day = join(codexHome, "sessions", "2026", "01", "02");
+    mkdirSync(day, { recursive: true });
+    const olderEvent = join(day, "rollout-newer-mtime.jsonl");
+    const newerEvent = join(day, "rollout-older-mtime.jsonl");
+    writeFileSync(
+      olderEvent,
+      `${tokenLine({ primary: { used_percent: 88, window_minutes: 10080 }, secondary: null }, "2026-01-02T03:00:00.000Z")}\n`,
+    );
+    writeFileSync(
+      newerEvent,
+      `${tokenLine({ primary: { used_percent: 34, window_minutes: 10080 }, secondary: null }, "2026-01-02T04:00:00.000Z")}\n`,
+    );
+    utimesSync(olderEvent, 200, 200);
+    utimesSync(newerEvent, 100, 100);
+
+    const usage = readCodexUsage(codexHome);
+    expect(usage).toEqual({
+      status: "ok",
+      observedAt: Date.parse("2026-01-02T04:00:00.000Z"),
+      windows: [
+        {
+          kind: "seven_day",
+          minutes: 10080,
+          usedPercent: 34,
+          resetsAt: 0,
+        },
+      ],
+    });
+  });
+
+  test.each([
+    {
+      name: "normal five-hour reset",
+      newer: [6, [11, 168]],
+      older: [0, [5, 168]],
+      mixed: false,
+    },
+    {
+      name: "normal weekly reset",
+      newer: [2, [5, 169]],
+      older: [0, [5, 1]],
+      mixed: false,
+    },
+    {
+      name: "reset moves backward",
+      newer: [3, [12, 120]],
+      older: [0, [24, 168]],
+      mixed: true,
+    },
+    {
+      name: "two resets at the same observation time",
+      newer: [0, [24, 336]],
+      older: [0, [5, 168]],
+      mixed: true,
+    },
+    {
+      name: "clock skew inside tolerance",
+      newer: [0, [5.5, 168.5]],
+      older: [0, [5, 168]],
+      mixed: false,
+    },
+  ] as const)("codex mixed detection: $name", ({
+    name,
+    newer,
+    older,
+    mixed,
+  }) => {
+    const codexHome = join(root, `codex-window-${name.replace(/ /g, "-")}`);
+    const day = join(codexHome, "sessions", "2026", "01", "02");
+    mkdirSync(day, { recursive: true });
+    const newerFile = join(day, "rollout-newer.jsonl");
+    const olderFile = join(day, "rollout-older.jsonl");
+    writeFileSync(
+      newerFile,
+      `${tokenLine(rateLimitsAt(4, newer[1]), new Date(usageBaseMs + newer[0] * hourMs).toISOString())}\n`,
+    );
+    writeFileSync(
+      olderFile,
+      `${tokenLine(rateLimitsAt(97, older[1]), new Date(usageBaseMs + older[0] * hourMs).toISOString())}\n`,
+    );
+    utimesSync(newerFile, 200, 200);
+    utimesSync(olderFile, 100, 100);
+
+    const usage = readCodexUsage(codexHome);
+    expect(usage.status).toBe("ok");
+    expect(usage.status === "ok" && Boolean(usage.mixed)).toBe(mixed);
   });
 
   test("codex: logs from two accounts in one home are flagged as mixed, same account is not", () => {
