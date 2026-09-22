@@ -1,4 +1,5 @@
-// プロセスをまたいだ排他。`wx` で作れた者だけが持ち主になる小さなファイル。
+// プロセスをまたいだ排他。中身を書いた一時ファイルを link で置けた者だけが
+// 持ち主になる小さなファイル (placeLockEntry)。
 //
 // 同じユーザー単位のファイル (サーバの起動、プロジェクトの登録簿、ユーザー
 // 単位の設定) を、別々のリポジトリで動く複数のサーバが同時に読み書きする。
@@ -14,6 +15,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -102,6 +104,36 @@ function readFileLock(file: string): FileLockEntry | null {
 }
 
 /**
+ * 読めないロックが staleMs より古ければ、理由を出して消す (奪う)。消したら
+ * true。新しい (書きかけかもしれない) か、もう無いなら false。
+ */
+function takeOverUnreadableLock(
+  file: string,
+  cause: unknown,
+  now: number,
+  staleMs: number,
+): boolean {
+  let mtimeMs: number;
+  try {
+    mtimeMs = statSync(file).mtimeMs;
+  } catch (error) {
+    if (errno(error) === "ENOENT") return true;
+    throw errorWithCause(`failed to stat unreadable lock ${file}`, error);
+  }
+  if (now - mtimeMs <= staleMs) return false;
+  console.error(
+    `[code-viewer] removing unreadable lock ${file} (last written ${new Date(mtimeMs).toISOString()}):`,
+    cause,
+  );
+  try {
+    unlinkSync(file);
+  } catch (error) {
+    if (errno(error) !== "ENOENT") throw error;
+  }
+  return true;
+}
+
+/**
  * ロックの中身を書き終えてから、その場所に置く。置けたら true、既に誰かの
  * ロックがあれば false。
  *
@@ -159,7 +191,19 @@ export function tryAcquireFileLock(
         },
       };
     }
-    const current = readFileLock(file);
+    let current: FileLockEntry | null;
+    try {
+      current = readFileLock(file);
+    } catch (error) {
+      // 読めないロック (空・壊れた JSON・欄が無い)。link で置く前の版が
+      // 書きかけのまま落ちると残る。放っておくと、このロックを使う経路が
+      // ずっと失敗し続けるので、staleMs より古ければ理由を出して奪う。
+      // 新しいものは、書きかけかもしれないので今までどおり投げる。
+      if (!takeOverUnreadableLock(file, error, now, options.staleMs)) {
+        throw error;
+      }
+      continue;
+    }
     if (!current) continue;
     const stale =
       now - current.createdAt > options.staleMs || !processAlive(current.pid);

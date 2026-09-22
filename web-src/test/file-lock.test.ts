@@ -54,6 +54,42 @@ describe("file lock", () => {
     taken?.release();
   });
 
+  // link で置く前の版が書きかけのまま落ちると、空のロックが残る。放っておくと
+  // そのロックを使う経路がずっと失敗し続ける (実際に起きた)。
+  test.each([
+    ["empty", ""],
+    ["broken JSON", "{"],
+    ["missing fields", '{"token":"x"}'],
+  ])("an unreadable lock (%s) older than staleMs is taken over with the reason logged, a fresh one still fails", (_label, body) => {
+    const file = join(dir, "sample.json.lock");
+    writeFileSync(file, body);
+    const now = Date.now();
+    // 新しい (staleMs 以内) うちは書きかけかもしれないので投げる。
+    expect(() => tryAcquireFileLock(file, { staleMs: 60_000, now })).toThrow(
+      /lock/,
+    );
+    // 古くなったら奪う。理由は console.error に出す。
+    const errors: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+    };
+    try {
+      const lock = tryAcquireFileLock(file, {
+        staleMs: 60_000,
+        now: now + 61_000,
+      });
+      expect(lock).not.toBeNull();
+      lock?.release();
+    } finally {
+      console.error = original;
+    }
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0][0])).toContain("removing unreadable lock");
+    expect(errors[0][1]).toBeInstanceOf(Error);
+    expect(existsSync(file)).toBe(false);
+  });
+
   // ロックを「作ってから書く」と、その間に読んだ別のプロセスが空のファイルを
   // JSON として解析して失敗する (agent-screen-rules-route のテストで実際に
   // 起きた)。別プロセスで同じロックを取り合っても、誰も読み損ねないこと。
