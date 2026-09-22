@@ -34,7 +34,11 @@ import {
   runningCount,
 } from "./accounts-dialogs";
 import type { AccountsText } from "./accounts-i18n";
-import { usageMeterRow, usageObservedText } from "./usage-meter";
+import {
+  usageMeterRow,
+  usageMixedText,
+  usageObservedText,
+} from "./usage-meter";
 
 export type AccountsBandDeps = {
   client: AccountsClient;
@@ -157,6 +161,16 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
     }
     for (const view of usageWindowViews(usage, now)) {
       box.appendChild(usageMeterRow(view, now, t, { showReset: false }));
+    }
+    const mixed = usageMixedText(usage, now, t);
+    if (mixed) {
+      const note = el(
+        "span",
+        "agents-account-status agents-account-mixed",
+        t.usageMixed,
+      );
+      note.title = mixed;
+      box.appendChild(note);
     }
     return box;
   }

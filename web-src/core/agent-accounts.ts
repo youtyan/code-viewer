@@ -477,6 +477,13 @@ export type AccountUsage =
       windows: UsageWindow[];
       /** この値を得た時刻 (epoch ms)。 */
       observedAt: number;
+      /**
+       * 同じ設定ディレクトリの記録に、別のアカウントの上限が混ざっている
+       * (同じ枠なのにリセットの時刻が違う値が、近い時刻に出ている)。
+       * `windows` は最新の記録の値で、こちらは別の記録の値。同じディレクトリで
+       * ログインを切り替えて使うと起きる。どちらが今のアカウントかは決められない。
+       */
+      mixed?: { windows: UsageWindow[]; observedAt: number };
     }
   /** 取得できない。0% や空欄にせず、理由を出す。 */
   | {
@@ -540,6 +547,30 @@ export const USAGE_STALE_MS = 30 * 60_000;
 
 export function usageIsStale(observedAt: number, now: number): boolean {
   return observedAt > 0 && now - observedAt > USAGE_STALE_MS;
+}
+
+/** 同じ枠でリセットの時刻がこれより違えば、別のアカウントの値とみなす。 */
+export const USAGE_MIXED_RESET_TOLERANCE_MS = 60 * 60_000;
+
+/**
+ * 2 つの記録が別のアカウントの上限を指しているか。同じ枠 (kind と長さ) で、
+ * どちらもリセットの時刻を持ち、その時刻が USAGE_MIXED_RESET_TOLERANCE_MS より
+ * 離れていれば別のアカウント (同じアカウントなら窓のリセットは 1 つ)。
+ */
+export function usageWindowsConflict(
+  a: readonly UsageWindow[],
+  b: readonly UsageWindow[],
+): boolean {
+  return a.some((x) =>
+    b.some(
+      (y) =>
+        x.kind === y.kind &&
+        x.minutes === y.minutes &&
+        x.resetsAt > 0 &&
+        y.resetsAt > 0 &&
+        Math.abs(x.resetsAt - y.resetsAt) > USAGE_MIXED_RESET_TOLERANCE_MS,
+    ),
+  );
 }
 
 /** claude の statusLine を包んでいるか。 */

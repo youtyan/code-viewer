@@ -22,6 +22,7 @@ import type {
   AccountUsage,
   UsageWindow,
 } from "../../core/agent-accounts";
+import { usageWindowsConflict } from "../../core/agent-accounts";
 import { formatErrorDetail } from "../../core/error-detail";
 import { errno } from "../terminal/settings-file";
 
@@ -252,6 +253,8 @@ const MAX_TOKEN_COUNT_LINE = 64 * 1024;
 const CODEX_FILES_TO_SCAN = 5;
 /** 見る日付のディレクトリの数。 */
 const CODEX_DAYS_TO_SCAN = 3;
+/** 混在を疑うのは、最新の記録とこの時間の中で観測された記録だけ。 */
+const CODEX_MIXED_WINDOW_MS = 6 * 60 * 60_000;
 
 function codexWindow(value: unknown): UsageWindow | null | "bad" {
   if (value === undefined || value === null) return null;
@@ -410,6 +413,7 @@ export function readCodexUsage(configDir: string): AccountUsage {
       observedAt: 0,
     };
   }
+  let first: Extract<AccountUsage, { status: "ok" }> | null = null;
   for (const file of files) {
     const key = `${file.size}:${file.mtime}`;
     let usage: AccountUsage | null;
@@ -435,11 +439,31 @@ export function readCodexUsage(configDir: string): AccountUsage {
         if (oldest !== undefined) codexCache.delete(oldest);
       }
     }
-    if (usage?.status === "unavailable" && usage.detail) {
-      return { ...usage, detail: `${file.path}: ${usage.detail}` };
+    if (!usage) continue;
+    if (usage.status === "unavailable") {
+      if (first) continue;
+      if (usage.detail) {
+        return { ...usage, detail: `${file.path}: ${usage.detail}` };
+      }
+      return usage;
     }
-    if (usage) return usage;
+    if (!first) {
+      first = usage;
+      continue;
+    }
+    // 新しいほうの記録と同じ枠なのにリセットの時刻が違う = 同じ設定ディレクトリで
+    // 別のアカウントとしてログインした記録。0% を今の値のように見せない。
+    if (
+      Math.abs(first.observedAt - usage.observedAt) <= CODEX_MIXED_WINDOW_MS &&
+      usageWindowsConflict(first.windows, usage.windows)
+    ) {
+      return {
+        ...first,
+        mixed: { windows: usage.windows, observedAt: usage.observedAt },
+      };
+    }
   }
+  if (first) return first;
   return {
     status: "unavailable",
     reason: "no-token-count",

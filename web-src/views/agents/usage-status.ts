@@ -29,7 +29,11 @@ import { iconSvg, SYNC_16_PATH } from "../../core/icons";
 import type { AccountsClient } from "./accounts-client";
 import { accountDisplayName, el } from "./accounts-dialogs";
 import type { AgentsText } from "./i18n";
-import { usageMeterRow, usageObservedText } from "./usage-meter";
+import {
+  usageMeterRow,
+  usageMixedText,
+  usageObservedText,
+} from "./usage-meter";
 
 export type UsageStatusDeps = {
   root: HTMLElement;
@@ -61,12 +65,14 @@ export function mountUsageStatus(deps: UsageStatusDeps): UsageStatus {
     if (account.usage.status !== "ok") return null;
     const text = deps.getText();
     const t = text.accounts;
-    const [first] = usageWindowViews(account.usage, now);
+    const views = usageWindowViews(account.usage, now);
+    const [first] = views;
     if (!first) return null;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "usage-status-item";
-    button.classList.toggle("warn", first.warn);
+    const warnView = views.find((view) => view.warn);
+    button.classList.toggle("warn", warnView !== undefined);
     button.setAttribute("aria-haspopup", "dialog");
     button.setAttribute("aria-expanded", String(panel !== null));
     const kind = document.createElement("span");
@@ -74,11 +80,29 @@ export function mountUsageStatus(deps: UsageStatusDeps): UsageStatus {
     kind.textContent = account.builtin
       ? account.agent
       : `${account.agent} · ${accountDisplayName(account, t)}`;
-    const value = document.createElement("span");
-    value.className = "usage-status-value";
-    value.textContent = `${Math.round(first.window.usedPercent)}%`;
-    button.append(kind, value);
-    if (first.warn) {
+    button.appendChild(kind);
+    // 枠は全部出す (claude は 5h と週の 2 つ。片方だけだと週の上限に気付けない)。
+    for (const view of views) {
+      const windowEl = document.createElement("span");
+      windowEl.className = "usage-status-window";
+      windowEl.classList.toggle("warn", view.warn);
+      const name = document.createElement("span");
+      name.className = "usage-status-window-name";
+      name.textContent = t.windowName(view.window);
+      const value = document.createElement("span");
+      value.className = "usage-status-value";
+      value.textContent = `${Math.round(view.window.usedPercent)}%`;
+      windowEl.append(name, value);
+      button.appendChild(windowEl);
+    }
+    const mixed = usageMixedText(account.usage, now, t);
+    if (mixed) {
+      const mark = document.createElement("span");
+      mark.className = "usage-status-mixed";
+      mark.textContent = t.usageMixed;
+      button.appendChild(mark);
+    }
+    if (warnView) {
       const warn = document.createElement("span");
       warn.className = "usage-status-warn";
       warn.textContent = t.warn;
@@ -110,6 +134,7 @@ export function mountUsageStatus(deps: UsageStatusDeps): UsageStatus {
           .join(" · "),
       ),
       [observed.text, observed.title].filter(Boolean).join(" · "),
+      mixed,
       t.usagePopoverOpen,
     ].filter(Boolean);
     button.title = text.sidebar.usageTitle(lines);
@@ -208,6 +233,12 @@ export function mountUsageStatus(deps: UsageStatusDeps): UsageStatus {
     }
     for (const view of usageWindowViews(usage, now)) {
       block.appendChild(usageMeterRow(view, now, t, { showReset: true }));
+    }
+    const mixed = usageMixedText(usage, now, t);
+    if (mixed) {
+      block.appendChild(
+        el("div", "usage-popover-hint usage-popover-mixed", mixed),
+      );
     }
     return block;
   }

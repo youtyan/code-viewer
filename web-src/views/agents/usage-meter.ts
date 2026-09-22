@@ -78,6 +78,31 @@ export function usageMeterRow(
 }
 
 /**
+ * 同じ設定ディレクトリに別のアカウントの上限が混ざっているときの説明。
+ * 混ざっていなければ空。
+ */
+export function usageMixedText(
+  usage: AccountUsage,
+  now: number,
+  t: AccountsText,
+): string {
+  if (usage.status !== "ok" || !usage.mixed) return "";
+  const others = usage.mixed.windows
+    .map((window) =>
+      [
+        t.window(window),
+        window.resetsAt > 0
+          ? t.resetsIn(t.duration(window.resetsAt - now))
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    )
+    .join(", ");
+  return t.usageMixedHint(others);
+}
+
+/**
  * 「いつの値か」。使用量の値があればその時刻、無ければログインを確かめた時刻。
  * どちらも無いときは空 (時刻を作らない)。
  */

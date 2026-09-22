@@ -17960,11 +17960,26 @@ button.brand[aria-expanded="true"] {
 .usage-status-reset {
   color: var(--color-text-3);
 }
-/* 80% 以上: 文字 (「注意」) と琥珀色。 */
-.usage-status-item.warn .usage-status-value,
+/* 枠ごとの「名前 割合」。名前は補助の色、割合は等幅。 */
+.usage-status-window {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+}
+.usage-status-window-name {
+  color: var(--color-text-3);
+}
+/* 80% 以上: その枠の割合と「注意」の文字を琥珀色に (色だけに頼らない)。 */
+.usage-status-window.warn .usage-status-value,
 .usage-status-warn {
   color: var(--color-waiting);
   font-weight: 600;
+}
+/* 別のアカウントの記録が混ざっている: 値を信じてよいか分からないことを示す。 */
+.usage-status-mixed,
+.agents-account-mixed,
+.usage-popover-mixed {
+  color: var(--color-waiting);
 }
 .usage-status-item.stale .usage-status-value {
   color: var(--color-text-3);

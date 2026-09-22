@@ -54,6 +54,10 @@ export type AccountsText = {
   observedStale: (ago: string) => string;
   observedTitle: (time: string) => string;
   usageUnavailable: string;
+  /** 同じ設定ディレクトリに別のアカウントの上限が混ざっている (短い札)。 */
+  usageMixed: string;
+  /** その説明。others = 別の記録の値 (枠と割合とリセット)。 */
+  usageMixedHint: (others: string) => string;
   usageReason: Record<UsageUnavailableReason, string>;
   agentsCount: (count: number) => string;
   hooksShort: (state: string) => string;
@@ -256,6 +260,9 @@ export const ACCOUNTS_EN: AccountsText = {
   observedStale: (ago) => `old value · ${ago} ago`,
   observedTitle: (time) => `Last value received at ${time}`,
   usageUnavailable: "Usage unavailable",
+  usageMixed: "Mixed",
+  usageMixedHint: (others) =>
+    `Session logs in this config directory report limits of more than one account (also seen: ${others}). Sign in to each account in its own config directory so the numbers do not mix.`,
   usageReason: {
     "not-wrapped":
       "claude reports usage only to the status line. Turn on usage collection in Settings > Accounts.",
@@ -494,6 +501,9 @@ export const ACCOUNTS_JA: AccountsText = {
   observedStale: (ago) => `古い値・${ago}前`,
   observedTitle: (time) => `${time} に受け取った値`,
   usageUnavailable: "使用量を取得できません",
+  usageMixed: "混在",
+  usageMixedHint: (others) =>
+    `同じ設定ディレクトリの記録に、別のアカウントの上限が混ざっています (ほかに ${others})。アカウントごとに設定ディレクトリを分けてログインすると混ざりません。`,
   usageReason: {
     "not-wrapped":
       "claude は使用量をステータスラインにだけ渡します。設定 > アカウント で使用量の取得を有効にしてください。",

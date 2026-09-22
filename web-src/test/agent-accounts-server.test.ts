@@ -872,6 +872,36 @@ describe("usage", () => {
     expect(usage.status === "ok" && usage.windows[0]?.usedPercent).toBe(20);
   });
 
+  test("codex: logs from two accounts in one home are flagged as mixed, same account is not", () => {
+    const codexHome = join(root, "codex-mixed");
+    const day = join(codexHome, "sessions", "2026", "01", "02");
+    mkdirSync(day, { recursive: true });
+    const current = join(day, "rollout-current.jsonl");
+    const other = join(day, "rollout-other.jsonl");
+    const week = (used_percent: number, resets_at: number) => ({
+      primary: { used_percent, window_minutes: 10080, resets_at },
+    });
+    writeFileSync(current, `${tokenLine(week(97, 1_790_438_922))}\n`);
+    writeFileSync(other, `${tokenLine(week(0, 1_790_655_110))}\n`);
+    utimesSync(other, 100, 100);
+    utimesSync(current, 200, 200);
+    const mixed = readCodexUsage(codexHome);
+    expect(mixed).toMatchObject({
+      status: "ok",
+      windows: [{ usedPercent: 97 }],
+      mixed: { windows: [{ usedPercent: 0, resetsAt: 1_790_655_110_000 }] },
+    });
+    // 同じアカウントの古い記録 (リセットの時刻が同じ) は混在ではない。
+    writeFileSync(other, `${tokenLine(week(80, 1_790_438_922))}\n`);
+    utimesSync(other, 100, 100);
+    const same = readCodexUsage(codexHome);
+    expect(same).toMatchObject({
+      status: "ok",
+      windows: [{ usedPercent: 97 }],
+    });
+    expect(same.status === "ok" && same.mixed).toBeUndefined();
+  });
+
   test("codex: only the tail of a large log is read", () => {
     const day = join(root, "big", "sessions", "2026", "01", "02");
     mkdirSync(day, { recursive: true });

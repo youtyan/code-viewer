@@ -27,6 +27,7 @@ import {
   tmuxLaunchArgs,
   tmuxSessionName,
   usageIsStale,
+  usageWindowsConflict,
   usageWindowViews,
 } from "../core/agent-accounts";
 
@@ -460,6 +461,57 @@ describe("showPaneAccounts", () => {
     },
   ])("$name → $expected", ({ registered, panes, expected }) => {
     expect(showPaneAccounts(registered, panes)).toBe(expected);
+  });
+});
+
+describe("usage windows from two accounts in one config directory", () => {
+  const week = (usedPercent: number, resetsAt: number) => ({
+    kind: "seven_day" as const,
+    minutes: 10080,
+    usedPercent,
+    resetsAt,
+  });
+  const HOUR = 60 * 60_000;
+  test.each([
+    {
+      name: "same window, reset times a week apart (another account)",
+      a: [week(97, 1_000 * HOUR)],
+      b: [week(0, 1_150 * HOUR)],
+      expected: true,
+    },
+    {
+      name: "same window, same reset time (same account, later reading)",
+      a: [week(97, 1_000 * HOUR)],
+      b: [week(98, 1_000 * HOUR)],
+      expected: false,
+    },
+    {
+      name: "reset times within the tolerance (clock drift)",
+      a: [week(97, 1_000 * HOUR)],
+      b: [week(97, 1_000 * HOUR + 30 * 60_000)],
+      expected: false,
+    },
+    {
+      name: "different windows are not compared",
+      a: [week(97, 1_000 * HOUR)],
+      b: [
+        {
+          kind: "five_hour" as const,
+          minutes: 300,
+          usedPercent: 0,
+          resetsAt: 5 * HOUR,
+        },
+      ],
+      expected: false,
+    },
+    {
+      name: "a window without a reset time cannot conflict",
+      a: [week(97, 0)],
+      b: [week(0, 1_150 * HOUR)],
+      expected: false,
+    },
+  ])("usageWindowsConflict: $name", ({ a, b, expected }) => {
+    expect(usageWindowsConflict(a, b)).toBe(expected);
   });
 });
 

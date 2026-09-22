@@ -195,6 +195,49 @@ describe("the usage popover", () => {
     ]);
   });
 
+  test("the status bar shows every window, and marks values mixed with another account", () => {
+    mount([
+      account({ id: "claude:default" }),
+      account({
+        id: "codex:default",
+        agent: "codex",
+        usage: {
+          status: "ok",
+          observedAt: NOW - MINUTE,
+          windows: [
+            {
+              kind: "seven_day",
+              minutes: 10080,
+              usedPercent: 97,
+              resetsAt: NOW + 2 * 24 * 60 * MINUTE,
+            },
+          ],
+          mixed: {
+            observedAt: NOW - MINUTE,
+            windows: [
+              {
+                kind: "seven_day",
+                minutes: 10080,
+                usedPercent: 0,
+                resetsAt: NOW + 7 * 24 * 60 * MINUTE,
+              },
+            ],
+          },
+        },
+      }),
+    ]);
+    const items = [...harness.root.querySelectorAll(".usage-status-item")];
+    expect(items).toHaveLength(2);
+    const claudeWindows = [
+      ...(items[0]?.querySelectorAll(".usage-status-window") ?? []),
+    ].map((el) => el.textContent);
+    expect(claudeWindows).toEqual(["5h42%", "week81%"]);
+    expect(items[0]?.querySelector(".usage-status-mixed")).toBeNull();
+    const codexMixed = items[1]?.querySelector(".usage-status-mixed");
+    expect(codexMixed?.textContent).toBe("Mixed");
+    expect(items[1]?.getAttribute("title")).toContain("Week 0%");
+  });
+
   test("a signed-out account gets no bars and no percentage, only the sign-in", () => {
     mount([
       account({
