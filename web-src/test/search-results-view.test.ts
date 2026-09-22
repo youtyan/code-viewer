@@ -23,6 +23,7 @@ function setup(
     '<aside id="search-sheet" hidden aria-hidden="true" inert></aside>';
   const urls: string[] = [];
   const opened: Array<{ path: string; line: number; hl?: string }> = [];
+  const intents: string[] = [];
   const patches: unknown[] = [];
   const queries: string[] = [];
   let regex = options.regex === true;
@@ -72,14 +73,15 @@ function setup(
       patches.push(patch);
       if (patch.grepRegex !== undefined) regex = patch.grepRegex;
     },
-    openMatch: (match) => {
+    openMatch: (match, intent) => {
       opened.push(match);
+      intents.push(intent);
     },
     onQueryChange: (query) => {
       queries.push(query);
     },
   });
-  return { view, urls, opened, patches, queries };
+  return { view, urls, opened, intents, patches, queries };
 }
 
 describe("search results sheet", () => {
@@ -123,6 +125,28 @@ describe("search results sheet", () => {
       { path: "src/a.ts", line: 3, hl: "needle" },
       { path: "src/a.ts", line: 9, hl: "needle" },
     ]);
+  });
+
+  // ui-surface.md の「タブの決まり」: 押し方で開き方が決まる (Shift・右ボタンはブラウザ)。
+  test.each([
+    ["click", "click", {}, ["preview"]],
+    ["Cmd+click", "click", { metaKey: true }, ["new-tab"]],
+    ["Ctrl+click", "click", { ctrlKey: true }, ["new-tab"]],
+    ["middle click", "auxclick", { button: 1 }, ["new-tab"]],
+    ["double click", "dblclick", {}, ["new-tab"]],
+    ["Alt+click", "click", { altKey: true }, ["other-pane"]],
+    ["Shift+click", "click", { shiftKey: true }, []],
+    ["right button", "auxclick", { button: 2 }, []],
+  ])("%s on a hit opens it as %j", async (_label, type, init, expected) => {
+    const { view, intents } = setup();
+    view.open("needle");
+    await waitFor(
+      () => document.querySelectorAll(".gdp-palette-row").length === 3,
+    );
+    q<HTMLElement>(document, ".gdp-palette-row").dispatchEvent(
+      new MouseEvent(type, { bubbles: true, cancelable: true, ...init }),
+    );
+    expect(intents).toEqual(expected);
   });
 
   test("the opened hit stays marked as the current row, also after the same search is re-run", async () => {

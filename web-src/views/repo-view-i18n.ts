@@ -9,6 +9,9 @@ export type RepoViewText = {
   copyFolderPath: string;
   copyPath: string;
   copyName: string;
+  /** 木のファイルの行: 固定のタブで開く・反対の面で開く (ui-surface.md のタブの決まり)。 */
+  openInNewTab: string;
+  openToTheRight: string;
   newFolderMenu: string;
   moveToTrashMenu: string;
   moveToTrashTitle: string;
@@ -37,9 +40,11 @@ const EN: RepoViewText = {
   readmeRenderFailed:
     "Could not render the Markdown, so the raw text is shown.",
   copyFolderPath: "copy folder path",
-  copyPath: "Copy Path",
-  copyName: "Copy Name",
-  newFolderMenu: "New Folder...",
+  copyPath: "Copy path",
+  copyName: "Copy name",
+  openInNewTab: "Open in new tab",
+  openToTheRight: "Open to the right",
+  newFolderMenu: "New folder...",
   moveToTrashMenu: "Move to Trash...",
   moveToTrashTitle: "Move to Trash?",
   moveToTrashBody: (path) => `Move "${path}" to Trash?`,
@@ -71,6 +76,8 @@ const JA: RepoViewText = {
   copyFolderPath: "フォルダのパスをコピー",
   copyPath: "パスをコピー",
   copyName: "名前をコピー",
+  openInNewTab: "新しいタブで開く",
+  openToTheRight: "右に分割して開く",
   newFolderMenu: "新しいフォルダ...",
   moveToTrashMenu: "ゴミ箱に入れる...",
   moveToTrashTitle: "ゴミ箱に入れますか？",

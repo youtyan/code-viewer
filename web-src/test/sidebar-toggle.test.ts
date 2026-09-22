@@ -227,6 +227,9 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
       hideTests: false,
       viewedFiles: new Set(),
     },
+    openFileAs() {
+      /* noop */
+    },
     openDiffFile() {
       /* noop */
     },

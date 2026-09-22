@@ -87,9 +87,13 @@ function makeRepoView(
   const calls = {
     renderedFiles: [] as SidebarItem[][],
     standaloneSources: [] as string[],
+    openedAs: [] as string[][],
   };
   const view = createRepoView({
     STATE: state,
+    openTreeFileAs(path, intent) {
+      calls.openedAs.push([path, intent]);
+    },
     setRoute(nextRoute) {
       state.route = nextRoute;
     },
@@ -273,6 +277,44 @@ describe("repo view commit entries", () => {
     );
     expect(input.value).toBe("");
     expect(document.querySelectorAll(".gdp-repo-row")).toHaveLength(3);
+  });
+
+  // ui-surface.md の「タブの決まり」: ファイルの右クリックで固定のタブ・反対の面に開ける。
+  test.each([
+    ["Open in new tab", "new-tab"],
+    ["Open to the right", "other-pane"],
+  ])("the file menu item %s opens the file as %s", async (label, intent) => {
+    setupDom();
+    globalThis.fetch = (async () =>
+      response({
+        ref: "worktree",
+        path: "",
+        project: "sample-repo",
+        entries: [{ name: "alpha.ts", path: "alpha.ts", type: "blob" }],
+      })) as typeof fetch;
+    const { view, calls } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+    await view.loadRepo();
+    document
+      .querySelector(".gdp-repo-row")
+      ?.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    const items = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(".gdp-context-menu button"),
+    );
+    items.find((item) => item.textContent === label)?.click();
+    expect([
+      items.map((item) => item.textContent).slice(0, 2),
+      calls.openedAs,
+    ]).toEqual([
+      ["Open in new tab", "Open to the right"],
+      [["alpha.ts", intent]],
+    ]);
   });
 
   test.each([

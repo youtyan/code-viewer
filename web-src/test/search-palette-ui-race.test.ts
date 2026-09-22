@@ -80,6 +80,7 @@ async function setup() {
       to: "worktree",
     },
     setRoute: () => undefined,
+    openingNewTab: (run) => run(),
     currentRange: () => ({ from: "HEAD", to: "worktree" }),
     appendScopeParams: () => undefined,
     isAbortError: () => false,
@@ -257,6 +258,7 @@ async function setupFilePalette(
       to: "worktree",
     },
     setRoute: (route) => routes.push(route),
+    openingNewTab: (run) => run(),
     currentRange: () => ({ from: "HEAD", to: "worktree" }),
     appendScopeParams: () => undefined,
     isAbortError: (err) =>
@@ -416,6 +418,9 @@ async function setupGrep(
     grepPaletteHeight?: number;
   }> = [];
   const routes: unknown[] = [];
+  /** 置いた route ごとに、固定のタブで開く印の中だったか。 */
+  const kept: boolean[] = [];
+  let keeping = false;
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
     writable: true,
@@ -489,7 +494,18 @@ async function setupGrep(
       repoRef: "worktree",
       to: "worktree",
     },
-    setRoute: (route) => routes.push(route),
+    setRoute: (route) => {
+      routes.push(route);
+      kept.push(keeping);
+    },
+    openingNewTab: (run) => {
+      keeping = true;
+      try {
+        run();
+      } finally {
+        keeping = false;
+      }
+    },
     currentRange: () => ({ from: "HEAD", to: "worktree" }),
     appendScopeParams: () => undefined,
     isAbortError: (err) =>
@@ -551,7 +567,7 @@ async function setupGrep(
       () => !!document.querySelector(".gdp-source-line-code.shiki"),
     );
   }
-  return { input, palette, patches, routes, urls };
+  return { input, palette, patches, routes, urls, kept };
 }
 
 describe("grep search palette master/detail behavior", () => {
@@ -642,6 +658,65 @@ describe("grep search palette master/detail behavior", () => {
       line: 2,
     });
     palette.closeSearchPalette();
+  });
+
+  // ui-surface.md の「タブの決まり」: Enter と 1 回押すは仮のタブ、Shift+Enter・
+  // ⌘/Ctrl＋クリック・中ボタンは固定のタブ (openingNewTab の中で route を置く)。
+  test.each([
+    [
+      "Enter",
+      () => new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      false,
+    ],
+    [
+      "Shift+Enter",
+      () =>
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          shiftKey: true,
+          bubbles: true,
+        }),
+      true,
+    ],
+    [
+      "click",
+      () => new MouseEvent("click", { bubbles: true, cancelable: true }),
+      false,
+    ],
+    [
+      "Cmd+click",
+      () =>
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          metaKey: true,
+        }),
+      true,
+    ],
+    [
+      "middle click",
+      () =>
+        new MouseEvent("auxclick", {
+          bubbles: true,
+          cancelable: true,
+          button: 1,
+        }),
+      true,
+    ],
+  ])("%s opens the grep result in a kept tab: %s", async (_label, event, expected) => {
+    const { input, palette, routes, kept } = await setupGrep();
+    try {
+      const made = event();
+      if (made instanceof KeyboardEvent) input.dispatchEvent(made);
+      else q<HTMLElement>(document, ".gdp-palette-row").dispatchEvent(made);
+      await waitFor(() => routes.length === 1);
+      expect({ routes, kept }).toMatchObject({
+        routes: [{ screen: "file" }],
+        kept: [expected],
+      });
+    } finally {
+      palette.closeSearchPalette();
+    }
   });
 
   test("opens a grep result with one click", async () => {

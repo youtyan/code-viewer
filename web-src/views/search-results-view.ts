@@ -5,6 +5,7 @@ import { apiUrl } from "../core/api-url";
 // Toggles (regex / match case / whole word / no test) are the same persisted
 // settings the palette uses, so both always search the same way.
 
+import { linkOpenIntent, type OpenIntent } from "../core/link-click";
 import { buildGrepRequestParams, parseGrepQuery } from "../core/search-palette";
 import type { GrepResponse } from "../core/types";
 import {
@@ -31,8 +32,14 @@ export type SearchResultsViewDeps = {
     grepWholeWord?: boolean;
     hideTests?: boolean;
   }): Promise<void>;
-  /** Opens one hit (file at line, with the hit text to mark). */
-  openMatch(match: { path: string; line: number; hl?: string }): void;
+  /**
+   * Opens one hit (file at line, with the hit text to mark). intent is how it
+   * was pressed (the tab rules in ui-surface.md: preview / kept tab / other side).
+   */
+  openMatch(
+    match: { path: string; line: number; hl?: string },
+    intent: OpenIntent,
+  ): void;
   /** Fired when a search runs; the app mirrors the query into the URL. */
   onQueryChange?(query: string): void;
 };
@@ -233,15 +240,20 @@ export function createSearchResultsView(
         detail.className = "gdp-palette-row-detail";
         detail.textContent = match.preview;
         row.append(title, detail);
-        row.addEventListener("click", () => {
+        const openRow = (event: MouseEvent) => {
+          const intent = linkOpenIntent(event);
+          if (intent === null) return;
+          event.preventDefault();
           setActiveRow(key);
           const hl = match.matchText || (deps.getGrepRegex() ? "" : term);
-          deps.openMatch({
-            path: match.path,
-            line: match.line,
-            ...(hl ? { hl } : {}),
-          });
-        });
+          deps.openMatch(
+            { path: match.path, line: match.line, ...(hl ? { hl } : {}) },
+            intent,
+          );
+        };
+        row.addEventListener("click", openRow);
+        row.addEventListener("auxclick", openRow);
+        row.addEventListener("dblclick", openRow);
         rows.appendChild(row);
       }
       group.append(heading, rows);

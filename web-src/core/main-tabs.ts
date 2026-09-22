@@ -245,7 +245,8 @@ function resolveSide(
 
 /**
  * 開く。同じ中身のタブがあれば、それを前面に出してその面へフォーカスを移す
- * (中身は新しい target に差し替える: 行の指定が変わる)。探す面は、面を指定
+ * (中身は新しい target に差し替える: 行の指定が変わる。固定で開いたなら
+ * 仮のタブも固定にする: 「新しいタブで開く」が仮のまま残らない)。探す面は、面を指定
  * しないとき (focused) はフォーカスのある面 → 反対の面、指定したとき (Alt+
  * クリックの反対の面など) はその面だけ (左右で同じファイルを開ける)。
  * 無ければ、仮で開くときに面に仮のタブがあればそれを置き換え、無ければ
@@ -260,7 +261,9 @@ export function open(
   if (existing) {
     const pane = paneOf(layout, existing.side) as Pane;
     const tabs = pane.tabs.map((tab) =>
-      tab.id === existing.tab.id ? { ...tab, target } : tab,
+      tab.id === existing.tab.id
+        ? { ...tab, target, preview: tab.preview && opts.preview !== false }
+        : tab,
     );
     return {
       ...withPane(
@@ -571,8 +574,91 @@ export function move(
   return { layout: collapseEmpty({ ...moved, focused: side }), moved: true };
 }
 
+// ---- 閉じたタブの履歴 (最後に閉じたタブを開き直す) ----
+//
+// 面ごとでなく全体で 1 本、新しい順に CLOSED_HISTORY_LIMIT 件まで。保存しない
+// (ページを開いている間だけ)。どの閉じ方を積むかは画面側が決める (利用者が
+// 閉じたときだけ。シェルが消えて閉じたタブなどは積まない)。
+
+export const CLOSED_HISTORY_LIMIT = 10;
+
+export type ClosedTab = { target: TabTarget; side: PaneSide };
+
+/** before にあって after に無いタブ (閉じたタブ)。面ごとに並びの順。 */
+export function closedTabs(before: Layout, after: Layout): ClosedTab[] {
+  const out: ClosedTab[] = [];
+  for (const side of sides(before))
+    for (const tab of (paneOf(before, side) as Pane).tabs)
+      if (!findTab(after, tab.id)) out.push({ target: tab.target, side });
+  return out;
+}
+
+/**
+ * 閉じたタブを履歴の先頭に積む (closed の後ろほど新しい扱い)。同じ中身の
+ * 古い項は落とし、CLOSED_HISTORY_LIMIT 件で切る。
+ */
+export function pushClosed(
+  history: readonly ClosedTab[],
+  closed: readonly ClosedTab[],
+): ClosedTab[] {
+  let next = [...history];
+  for (const item of closed)
+    next = [
+      item,
+      ...next.filter((old) => !sameTarget(old.target, item.target)),
+    ];
+  return next.slice(0, CLOSED_HISTORY_LIMIT);
+}
+
+/**
+ * いちばん新しく閉じたタブを固定のタブで開き直し、前面に出す。閉じた面が
+ * もう無ければ (1 面に戻った) 左の面に開く。今開いているものは飛ばして
+ * 履歴から落とす。開き直せるものが無ければ layout はそのまま、reopened は null。
+ */
+export function reopenClosed(
+  layout: Layout,
+  history: readonly ClosedTab[],
+  opts: Pick<OpenOptions, "newId"> = {},
+): { layout: Layout; history: ClosedTab[]; reopened: ClosedTab | null } {
+  const rest = [...history];
+  while (rest.length > 0) {
+    const item = rest.shift() as ClosedTab;
+    const isOpen = perPaneTarget(item.target)
+      ? paneOf(layout, item.side)?.tabs.some((tab) =>
+          sameTarget(tab.target, item.target),
+        )
+      : findTarget(layout, item.target) !== null;
+    if (isOpen) continue;
+    const side = paneOf(layout, item.side) ? item.side : "left";
+    return {
+      layout: open(layout, item.target, {
+        ...opts,
+        pane: side,
+        preview: false,
+      }),
+      history: rest,
+      reopened: item,
+    };
+  }
+  return { layout, history: rest, reopened: null };
+}
+
 export function canSplit(layout: Layout): boolean {
   return !layout.panes.right;
+}
+
+/**
+ * タブ列の分割のボタンで左の前面を右へ出せない理由 (出せるなら null)。
+ * 窓の幅はここでは見ない (描画側が足す)。
+ */
+export type SplitBlocker = "split" | "no-front" | "page";
+
+export function splitBlocker(layout: Layout): SplitBlocker | null {
+  if (!canSplit(layout)) return "split";
+  const pane = layout.panes.left;
+  const front = pane.tabs.find((tab) => tab.id === pane.activeId);
+  if (!front) return "no-front";
+  return canPlace(front.target, "right") ? null : "page";
 }
 
 export function canMoveToOtherSide(layout: Layout): boolean {

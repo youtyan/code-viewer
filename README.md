@@ -20,18 +20,26 @@ Requires Node.js 20 or newer. Development uses
   sidebar holds the projects and agents), so switching tabs never moves them;
   they move to the left end of the tab row only when you fold the right column. On a narrow head the branch keeps its whole name up to about
   40% of the width and the project name is shortened into the rest. A single click opens a file in a preview tab (italic) that
-  the next file replaces; double-click or **Keep open** keeps it. Diff /
+  the next file replaces; double-click or **Keep open** keeps it. Middle-click,
+  ⌘/Ctrl+click (tree, Diff / History file lists, Search results, palette rows),
+  Shift+Enter in the palette, or **Open in new tab** on a tree file opens it in a
+  kept tab of its own (an open one comes to the front and is kept); Shift+click
+  still opens a new browser window. Diff /
   History / Worktrees / Data / Work log each have one tab that comes back as
   you left it. Files is not a tab: the folder view is what the left side shows
   when no tab is selected (the Files icon, `g r`, or a folder in the tree).
   Right-click a tab to close it, the others or those to its right, or copy its
-  path; drag to reorder; `g t` / `g T` / `g x` / `g 1`–`g 9` move and close
-  from the keyboard. Tabs that do not fit shrink down to 88px each (the name
+  path (Shift+F10 on a tab opens the same menu); drag to reorder; `g t` / `g T` /
+  `g x` / `g 1`–`g 9` move and close from the keyboard. On the tab row, ←/→,
+  Home and End move, Enter brings a tab to the front, Delete closes it and
+  Ctrl+Shift+PageUp / PageDown reorders it. Tabs that do not fit shrink down to 88px each (the name
   is shortened), then the row scrolls sideways and keeps the front tab in view.
   The tabs are remembered per project; the agent board,
   Tools, Settings & Help, terminals and terminal images stay open across projects. Files and screens
   stay on the left side; split the area to put a terminal or an image on the
-  right (the split button, **Split right**, or drag one onto the right half),
+  right (the split button — its tooltip says why when it cannot split —,
+  **Split right**, Alt+click, **Open to the right**, or drag one onto the
+  dashed area on the right half),
   resize by dragging the line between, and press `g o` to switch sides. When
   the two sides would be narrower than 480px each, the right column folds to
   its strip while split (with a mark on its button) and comes back on one

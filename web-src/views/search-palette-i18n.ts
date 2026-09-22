@@ -84,6 +84,8 @@ export type SearchPaletteText = CodePreviewText & {
   >;
   footerMove: string;
   footerOpen: string;
+  /** Shift+Enter: 固定のタブで開く (ui-surface.md の「タブの決まり」)。 */
+  footerOpenNewTab: string;
   footerClose: string;
   footerSwitch: (mode: "file" | "grep") => string;
   currentProject: string;
@@ -198,6 +200,7 @@ const EN: SearchPaletteText = {
   },
   footerMove: "move",
   footerOpen: "open",
+  footerOpenNewTab: "new tab",
   footerClose: "close",
   footerSwitch: (mode) => (mode === "file" ? "text search" : "file search"),
   currentProject: "This screen",
@@ -310,6 +313,7 @@ const JA: SearchPaletteText = {
   },
   footerMove: "移動",
   footerOpen: "開く",
+  footerOpenNewTab: "新しいタブ",
   footerClose: "閉じる",
   footerSwitch: (mode) => (mode === "file" ? "コード検索" : "ファイル検索"),
   currentProject: "この画面",

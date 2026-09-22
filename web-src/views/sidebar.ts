@@ -18,7 +18,7 @@ import {
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
 } from "../core/icons";
-import { isNativeLinkClick } from "../core/link-click";
+import { isNativeLinkClick, linkOpenIntent } from "../core/link-click";
 import type {
   FileMeta,
   RepoTreeEntry,
@@ -56,11 +56,16 @@ export type SidebarDeps = {
   };
   openDiffFile(path: string): void;
   /**
-   * リポジトリの木のファイルを Alt+クリック: 反対の面で開く (1 面なら右に
-   * 分けて右で)。無ければ Alt+クリックはブラウザに任せる。
+   * ファイルの行を固定のタブで開く (中ボタン・⌘/Ctrl＋クリック・ダブル
+   * クリック) か、反対の面で開く (Alt＋クリック。1 面なら右に分けて右で)。
+   * list は行のある一覧 (repo = 木、diff = 差分の一覧: 差分の版のファイル)。
    */
-  openFileInOtherPane?(file: SidebarItem): void;
-  /** The URL a row leads to, so the browser can open it in a new tab. */
+  openFileAs(
+    file: SidebarItem,
+    intent: "new-tab" | "other-pane",
+    list: "diff" | "repo",
+  ): void;
+  /** The URL a row leads to, so the browser can open it (Shift+click: a new window). */
   sidebarItemHref(item: SidebarItem, mode: "diff" | "repo"): string | null;
   prefetchByPath(path: string): void;
   fileBadge(status?: string): HTMLElement;
@@ -412,9 +417,10 @@ export function createSidebar(deps: SidebarDeps) {
   // identical. The status badge sits after the name rather than replacing
   // the leading icon (as a file row does), because that icon is the
   // expand/collapse target.
-  // Rows are real links so the browser keeps its own handling of modified
-  // and non-primary clicks (new tab / window, middle click, context menu);
-  // only a plain primary click stays in the app. The target is resolved
+  // Rows are real links so the browser keeps Shift+click (a new window).
+  // File rows take the other presses themselves (middle / ⌘ / Ctrl / Alt /
+  // double click open app tabs: wireFileRowOpen); folder rows leave every
+  // modified press to the browser. The target is resolved
   // again when the pointer goes down so it follows the current range / ref
   // even when the row itself was not re-rendered.
   function createRowLink(
@@ -1025,21 +1031,7 @@ export function createSidebar(deps: SidebarDeps) {
     if (symlinkLabel) li.appendChild(symlinkLabel);
     const kindTag = fileKindTag(f);
     if (kindTag) li.appendChild(kindTag);
-    li.addEventListener("click", (e) => {
-      if (
-        onFileClick &&
-        !brokenSymlink &&
-        !deletedEntry &&
-        openInOtherPaneClick(e, f)
-      )
-        return;
-      if (isNativeLinkClick(e)) return;
-      e.preventDefault();
-      if (brokenSymlink || deletedEntry) return;
-      if (onFileClick) onFileClick(f);
-      else openDiffFile(f.path);
-      scheduleMainSurfaceFocus();
-    });
+    wireFileRowOpen(li, f, onFileClick, brokenSymlink || deletedEntry);
     if (!onFileClick && !brokenSymlink)
       li.addEventListener("mouseenter", () => prefetchByPath(f.path), {
         passive: true,
@@ -1476,14 +1468,7 @@ export function createSidebar(deps: SidebarDeps) {
       li.appendChild(name);
       const kindTag = fileKindTag(f);
       if (kindTag) li.appendChild(kindTag);
-      li.addEventListener("click", (e) => {
-        if (onFileClick && openInOtherPaneClick(e, f)) return;
-        if (isNativeLinkClick(e)) return;
-        e.preventDefault();
-        if (onFileClick) onFileClick(f);
-        else openDiffFile(f.path);
-        scheduleMainSurfaceFocus();
-      });
+      wireFileRowOpen(li, f, onFileClick, false);
       if (!onFileClick)
         li.addEventListener("mouseenter", () => prefetchByPath(f.path), {
           passive: true,
@@ -1492,20 +1477,35 @@ export function createSidebar(deps: SidebarDeps) {
     });
   }
 
-  /** Alt だけを押したクリックなら反対の面で開いて true (リポジトリの木だけ)。 */
-  function openInOtherPaneClick(e: MouseEvent, f: SidebarItem): boolean {
-    if (
-      !deps.openFileInOtherPane ||
-      !e.altKey ||
-      e.metaKey ||
-      e.ctrlKey ||
-      e.shiftKey ||
-      e.button !== 0
-    )
-      return false;
-    e.preventDefault();
-    deps.openFileInOtherPane(f);
-    return true;
+  /**
+   * ファイルの行の押し方 (ui-surface.md の「タブの決まり」)。1 回押すは今までの
+   * 開き方 (木は仮のタブ、差分の一覧はその差分へ送る)、固定の押し方と Alt は
+   * deps.openFileAs。Shift と右ボタンはブラウザに任せる (行はリンク)。
+   * inert (壊れたリンク・消したファイル) は何も開かない。
+   */
+  function wireFileRowOpen(
+    li: HTMLElement,
+    f: SidebarItem,
+    onFileClick: ((file: SidebarItem) => void) | undefined,
+    inert: boolean,
+  ): void {
+    const handle = (e: MouseEvent) => {
+      const intent = linkOpenIntent(e);
+      if (intent === null) return;
+      e.preventDefault();
+      if (inert) return;
+      if (intent !== "preview") {
+        deps.openFileAs(f, intent, onFileClick ? "repo" : "diff");
+      } else if (onFileClick) {
+        onFileClick(f);
+      } else {
+        openDiffFile(f.path);
+      }
+      scheduleMainSurfaceFocus();
+    };
+    li.addEventListener("click", handle);
+    li.addEventListener("auxclick", handle);
+    li.addEventListener("dblclick", handle);
   }
 
   function renderSidebar(

@@ -77,6 +77,7 @@ function createSidebarForTest(
       | "openDirectoryInOsTitle"
       | "commitEntryBadge"
       | "openDiffFile"
+      | "openFileAs"
     >
   > = {},
 ) {
@@ -94,6 +95,7 @@ function createSidebarForTest(
   return createSidebar({
     STATE: state,
     openDiffFile: overrides.openDiffFile ?? (() => undefined),
+    openFileAs: overrides.openFileAs ?? (() => undefined),
     sidebarItemHref: (item, mode) => `/link/${mode}/${item.path}`,
     prefetchByPath() {
       /* noop */
@@ -342,18 +344,27 @@ describe("diff sidebar repository target", () => {
     expect(label?.tagName).toBe("SPAN");
   });
 
+  // ui-surface.md の「タブの決まり」: 1 回押すは画面の中 (差分へ送る)、中ボタン・
+  // ⌘/Ctrl・ダブルクリックは固定のタブ、Alt は反対の面、Shift と右ボタンはブラウザ。
   test.each([
-    ["plain click", {}, 1, true],
-    ["Cmd+click", { metaKey: true }, 0, false],
-    ["Ctrl+click", { ctrlKey: true }, 0, false],
-    ["Shift+click", { shiftKey: true }, 0, false],
-    ["middle click", { button: 1 }, 0, false],
-  ])("%s on a row: opened %i time(s), default prevented %s", (_label, init, opens, prevented) => {
+    ["plain click", "click", {}, [["diff", "src/alpha.ts"]], true],
+    ["Cmd+click", "click", { metaKey: true }, [["new-tab", "diff"]], true],
+    ["Ctrl+click", "click", { ctrlKey: true }, [["new-tab", "diff"]], true],
+    ["middle click", "auxclick", { button: 1 }, [["new-tab", "diff"]], true],
+    ["double click", "dblclick", {}, [["new-tab", "diff"]], true],
+    ["Alt+click", "click", { altKey: true }, [["other-pane", "diff"]], true],
+    ["Shift+click", "click", { shiftKey: true }, [], false],
+    ["right button", "auxclick", { button: 2 }, [], false],
+    ["Cmd+Alt+click", "click", { metaKey: true, altKey: true }, [], false],
+  ])("%s on a diff row: opens %j, default prevented %s", (_label, type, init, opens, prevented) => {
     installSidebarDom();
-    const opened: string[] = [];
+    const opened: string[][] = [];
     const sidebar = createSidebarForTest({
       openDiffFile: (path) => {
-        opened.push(path);
+        opened.push(["diff", path]);
+      },
+      openFileAs: (_file, intent, list) => {
+        opened.push([intent, list]);
       },
     });
     sidebar.renderSidebar([{ path: "src/alpha.ts", status: "M" }]);
@@ -361,14 +372,13 @@ describe("diff sidebar repository target", () => {
       '#filelist li[data-path="src/alpha.ts"] a.name',
     );
     if (!link) throw new Error("missing row link");
-    const event = new MouseEvent("click", {
+    const event = new MouseEvent(type, {
       bubbles: true,
       cancelable: true,
       ...init,
     });
     link.dispatchEvent(event);
-    expect(opened).toHaveLength(opens);
-    expect(event.defaultPrevented).toBe(prevented);
+    expect([opened, event.defaultPrevented]).toEqual([opens, prevented]);
   });
 
   // The commit list stays while the history screen shows a source view.

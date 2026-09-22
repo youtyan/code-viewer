@@ -17035,7 +17035,9 @@ body.main-split .main-tabs-pane[data-side="left"] {
   width: var(--icon-sm);
   height: var(--icon-sm);
 }
-.main-tab-dragging {
+/* 掴んでいるタブだけを薄くする。body には別の印 (main-tab-drag-active) が付く
+   (同じ名前だった間は、画面全体が薄くなっていた)。 */
+.main-tab.main-tab-dragging {
   opacity: 0.5;
 }
 .main-tab.main-tab-drop-before {
@@ -17063,18 +17065,20 @@ body.main-split .main-tabs-pane[data-side="left"] {
   color: var(--color-text-2);
   cursor: pointer;
 }
-.main-tabs-action:hover:not(:disabled) {
+.main-tabs-action:hover:not([aria-disabled="true"]) {
   background: var(--color-raised);
   color: var(--color-text);
 }
-.main-tabs-action:disabled {
+/* 押せない分割のボタンは disabled にせず aria-disabled (Tab で届き、押せない
+   理由の title を読める)。 */
+.main-tabs-action[aria-disabled="true"] {
   color: var(--color-text-3);
   opacity: 0.5;
   cursor: default;
 }
 /* 窓が狭くて右の面を隠している間の印 (分割のボタン。説明は title)。押せないが
    薄くせず、アクセントの色で「隠しているものがある」と分かるようにする。 */
-.main-tabs-action.main-tabs-action-parked:disabled {
+.main-tabs-action.main-tabs-action-parked[aria-disabled="true"] {
   color: var(--color-accent);
   opacity: 1;
 }
@@ -17182,12 +17186,12 @@ body.main-split-resizing {
   user-select: none;
 }
 /* タブを右端へドラッグしたときの「右に分割」のドロップ先。ドラッグ中だけ、
-   本文の右半分に出す (タブ列・サイドバーは覆わない)。 */
+   本文の右半分に出す (タブ列・左のサイドバー・右の列は覆わない)。 */
 .main-split-drop {
   position: fixed;
   top: var(--global-header-h);
   bottom: var(--main-bottom);
-  right: 0;
+  right: var(--panelcol-shown);
   /* 本文の横幅の半分。幅 --main-w は TS (main-tabs-view.ts の applyGeometry) が書く。 */
   width: calc(var(--main-w, 50vw) / 2);
   z-index: 58;

@@ -82,6 +82,9 @@ function makeRepoView(
   };
   const deps: RepoViewDeps = {
     STATE: state,
+    openTreeFileAs() {
+      /* noop */
+    },
     setRoute(nextRoute) {
       state.route = nextRoute;
     },

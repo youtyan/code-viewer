@@ -20,6 +20,11 @@ import {
 } from "../core/fuzzy-search";
 import { FILE_16_PATH, iconSvg, SEARCH_16_PATH } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
+import {
+  keyOpenIntent,
+  linkOpenIntent,
+  type OpenIntent,
+} from "../core/link-click";
 import type { AppRoute } from "../core/routes";
 import {
   buildGrepRequestParams,
@@ -82,6 +87,8 @@ const PALETTE_COMMAND_GROUP_LIMIT = 5;
 
 export type SearchPaletteDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;
+  /** run の中で置いた route を固定のタブで開く (main-tabs-view の openingNewTab)。 */
+  openingNewTab(run: () => void): void;
   currentRange(): { from: string; to: string };
   appendScopeParams(params: URLSearchParams): void;
   isAbortError(err: unknown): boolean;
@@ -370,6 +377,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     for (const [keys, label] of [
       ["↑↓", text().footerMove],
       ["Enter", text().footerOpen],
+      ["Shift+Enter", text().footerOpenNewTab],
       ["Esc", text().footerClose],
       [mode === "file" ? "Ctrl+G" : "Ctrl+K", text().footerSwitch(mode)],
     ] as const) {
@@ -947,12 +955,20 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       state.selected = index;
       syncPaletteSelection(state);
     });
-    row.addEventListener("click", (e) => {
+    // 中ボタン・⌘/Ctrl＋クリックは固定のタブで (ui-surface.md の「タブの決まり」)。
+    const openRow = (e: MouseEvent) => {
+      const intent = linkOpenIntent(e);
+      if (intent === null) return;
       e.preventDefault();
       state.selected = index;
       syncPaletteSelection(state);
-      void selectPaletteItem(state);
-    });
+      void selectPaletteItem(
+        state,
+        intent === "new-tab" ? "new-tab" : "preview",
+      );
+    };
+    row.addEventListener("click", openRow);
+    row.addEventListener("auxclick", openRow);
     return row;
   }
 
@@ -1481,7 +1497,10 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     }
   }
 
-  async function selectPaletteItem(state: PaletteState): Promise<void> {
+  async function selectPaletteItem(
+    state: PaletteState,
+    intent: OpenIntent = "preview",
+  ): Promise<void> {
     const item = state.items[state.selected];
     if (!item || state.opening) return;
     if (item.kind === "command") {
@@ -1516,22 +1535,31 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     }
     if (PALETTE !== state) return;
     closeSearchPalette();
+    // 固定のタブで開くときは、route を置くところだけを印の中で行う
+    // (上の保存を待った後なので、ここは同期)。差分の中の行は差分の画面の中の
+    // 移動なので、固定で開くときはその版のファイルを開く。
+    const place = (run: () => void) =>
+      intent === "new-tab" ? deps.openingNewTab(run) : run();
+    const diffAsFile = intent === "new-tab" && item.source === "diff";
+    const ref = diffAsFile ? currentRange().to : item.ref;
     if (item.kind === "file") {
-      if (item.source === "diff") {
+      if (item.source === "diff" && !diffAsFile) {
         openDiffFile(item.path);
       } else {
-        setRoute({
-          screen: "file",
-          path: item.path,
-          ref: item.ref,
-          view: "blob",
-          range: currentRange(),
-        });
-        void renderStandaloneSource({ path: item.path, ref: item.ref });
+        place(() =>
+          setRoute({
+            screen: "file",
+            path: item.path,
+            ref,
+            view: "blob",
+            range: currentRange(),
+          }),
+        );
+        void renderStandaloneSource({ path: item.path, ref });
       }
       return;
     }
-    if (item.source === "diff") {
+    if (item.source === "diff" && !diffAsFile) {
       setRoute({
         screen: "diff",
         range: currentRange(),
@@ -1543,16 +1571,18 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       // hl= lets the source view mark the hit text on the target line, so
       // the eye lands on the column, not just the line.
       const hl = grepHighlightText(item);
-      setRoute({
-        screen: "file",
-        path: item.path,
-        ref: item.ref,
-        view: "blob",
-        line: item.line,
-        ...(hl ? { hl } : {}),
-        range: currentRange(),
-      });
-      void renderStandaloneSource({ path: item.path, ref: item.ref });
+      place(() =>
+        setRoute({
+          screen: "file",
+          path: item.path,
+          ref,
+          view: "blob",
+          line: item.line,
+          ...(hl ? { hl } : {}),
+          range: currentRange(),
+        }),
+      );
+      void renderStandaloneSource({ path: item.path, ref });
     }
   }
 
@@ -1574,7 +1604,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
         pinResults(state);
         return;
       }
-      void selectPaletteItem(state);
+      void selectPaletteItem(state, keyOpenIntent(e));
       return;
     }
     if (state.mode === "grep" && e.altKey && e.key.toLowerCase() === "r") {

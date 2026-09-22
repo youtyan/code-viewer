@@ -1627,7 +1627,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     $$,
     STATE,
     openDiffFile: (path) => DIFF_VIEW.openDiffFile(path),
-    openFileInOtherPane: (file) => openFileInOtherPane(file),
+    openFileAs: (file, intent, list) => openFileAs(file, intent, list),
     // Where a plain click on the row takes the app; mirrors the diff sidebar
     // (openDiffFile) and the repository sidebar handler in repo-view.ts.
     sidebarItemHref: (item, mode) => {
@@ -1865,6 +1865,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // ---------- Repository view: extracted to repo-view.ts ----------
   const REPO_VIEW = createRepoView({
+    openTreeFileAs: (path, intent) =>
+      openFileAs({ path, type: "blob" }, intent, "repo"),
     $,
     STATE,
     setRoute,
@@ -1984,6 +1986,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   const SEARCH_PALETTE = createSearchPalette({
     STATE,
     setRoute,
+    openingNewTab: (run) => MAIN_TABS.openingNewTab(run),
     currentRange,
     appendScopeParams,
     isAbortError,
@@ -5768,13 +5771,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   );
   document.addEventListener("click", closeRepoContextMenu);
   $("#filelist").addEventListener("contextmenu", handleSidebarContextMenu);
-  // 木の行を 2 回押したら、1 回目で開いた仮のタブを固定にする。
-  $("#filelist").addEventListener("dblclick", (event) => {
-    const row = (event.target as Element).closest<HTMLElement>(
-      "#filelist li[data-path]",
-    );
-    if (row?.dataset.path) MAIN_TABS.keepFileOpen(row.dataset.path);
-  });
 
   document.addEventListener("keydown", async (e) => {
     if (isImeComposing(e) || e.defaultPrevented) return;
@@ -6388,13 +6384,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         applyHideTests();
       }
     },
-    openMatch: ({ path, line, hl }) => {
+    openMatch: ({ path, line, hl }, intent) => {
       const route = STATE.route;
       const ref =
         route.screen === "repo" || route.screen === "file"
           ? route.ref || "worktree"
           : STATE.repoRef || "worktree";
-      setRoute({
+      const fileRoute: FileRoute = {
         screen: "file",
         path,
         ref,
@@ -6402,7 +6398,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         line,
         ...(hl ? { hl } : {}),
         range: currentRange(),
-      });
+      };
+      if (intent === "other-pane") {
+        openFileInOtherPane(fileRoute);
+        return;
+      }
+      if (intent === "new-tab")
+        MAIN_TABS.openingNewTab(() => setRoute(fileRoute));
+      else setRoute(fileRoute);
       void renderStandaloneSource({ path, ref });
     },
     onQueryChange: (query) => rememberPageRoute("search", query),
@@ -6612,23 +6615,53 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * 木のファイルを Alt+クリック: 反対の面で開く。1 面か左にフォーカスが
-   * あれば右の面 (1 面なら右に分ける)、右にフォーカスがあれば左 (本文)。
-   * 右の面では History を持たないので、その表示は Code に落とす。フォルダ
-   * は反対の面に開けない (フォルダ表示は本文だけ) ので普通のクリックと同じ。
+   * 木・差分の一覧のファイルの行を、固定のタブ (new-tab) か反対の面
+   * (other-pane) で開く (ui-surface.md の「タブの決まり」)。木は今見ている
+   * 表示 (Code / Blame) を保ち、差分の一覧はその差分の新しい側の版 (消した
+   * ファイルは古い側) を Code で開く。フォルダはタブにならないので普通の
+   * クリックと同じ。
    */
-  function openFileInOtherPane(file: SidebarItem): void {
+  function openFileAs(
+    file: SidebarItem,
+    intent: "new-tab" | "other-pane",
+    list: "diff" | "repo",
+  ): void {
     const ref = REPO_SIDEBAR_REF || STATE.repoRef || "worktree";
     if (file.type === "tree") {
       setRoute(REPO_VIEW.repoRoute(ref, file.resolved_path ?? file.path));
       void REPO_VIEW.loadRepo();
       return;
     }
-    const keep = fileRouteKeepingActiveView(
-      STATE.route,
-      { path: file.path, ref },
-      currentRange(),
-    );
+    const range = currentRange();
+    const route: FileRoute =
+      list === "diff"
+        ? {
+            screen: "file",
+            path: file.path,
+            ref: file.status === "D" ? range.from : range.to,
+            view: "blob",
+            range,
+          }
+        : fileRouteKeepingActiveView(
+            STATE.route,
+            { path: file.path, ref },
+            range,
+          );
+    if (intent === "new-tab") {
+      MAIN_TABS.openingNewTab(() => setRoute(route));
+      if (route.view === "blob")
+        void renderStandaloneSource({ path: route.path, ref: route.ref });
+      return;
+    }
+    openFileInOtherPane(route);
+  }
+
+  /**
+   * 反対の面で開く。1 面か左にフォーカスがあれば右の面 (1 面なら右に分ける)、
+   * 右にフォーカスがあれば左 (本文)。右の面では History を持たないので、その
+   * 表示は Code に落とす。
+   */
+  function openFileInOtherPane(keep: FileRoute): void {
     const route: FileRoute =
       keep.view === "history" ? { ...keep, view: "blob" } : keep;
     const view = MAIN_TABS.panes();

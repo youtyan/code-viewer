@@ -56,6 +56,11 @@ import {
 
 export type RepoViewDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;
+  /**
+   * 木のファイルの右クリックの「新しいタブで開く」「右に分割して開く」
+   * (木の行の中ボタン・Alt＋クリックと同じ開き方。ui-surface.md のタブの決まり)。
+   */
+  openTreeFileAs(path: string, intent: "new-tab" | "other-pane"): void;
   setPageMode(): void;
   setStatus(s: "live" | "refreshing" | "error" | null): void;
   setProjectName(project: string): void;
@@ -484,6 +489,24 @@ export function createRepoView(deps: RepoViewDeps) {
     menu.style.top = `${anchorY}px`;
 
     const text = repoViewText(STATE.language);
+    const openItems =
+      entry.type === "blob"
+        ? (
+            [
+              [text.openInNewTab, "new-tab"],
+              [text.openToTheRight, "other-pane"],
+            ] as const
+          ).map(([label, intent]) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = label;
+            button.addEventListener("click", () => {
+              closeRepoContextMenu();
+              deps.openTreeFileAs(entry.path, intent);
+            });
+            return button;
+          })
+        : [];
     const copyPath = document.createElement("button");
     copyPath.type = "button";
     copyPath.textContent = text.copyPath;
@@ -517,7 +540,7 @@ export function createRepoView(deps: RepoViewDeps) {
       closeRepoContextMenu();
       await requestMoveToTrash(entry.path, onChanged, { focusReturnTarget });
     });
-    menu.append(copyPath, copyName, createDir, trash);
+    menu.append(...openItems, copyPath, copyName, createDir, trash);
     document.body.appendChild(menu);
     const rect = menu.getBoundingClientRect();
     const left = Math.min(anchorX, window.innerWidth - rect.width - 8);

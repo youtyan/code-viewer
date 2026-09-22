@@ -55,6 +55,9 @@ function createSidebarForTest() {
   };
   return createSidebar({
     STATE: state,
+    openFileAs() {
+      /* noop */
+    },
     openDiffFile() {
       /* noop */
     },

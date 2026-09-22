@@ -4,7 +4,8 @@
 export type MainTabsLang = "en" | "ja";
 
 export type MainTabsText = {
-  tabList: string;
+  /** タブ列の名前。2 面なら左右が分かるように (side が null なら 1 面)。 */
+  tabList: (side: "left" | "right" | null) => string;
   close: string;
   closeTab: (name: string) => string;
   closeOthers: string;
@@ -17,7 +18,8 @@ export type MainTabsText = {
   /** ターミナルのタブの右クリック: シェルを止める (タブを閉じるのとは別)。 */
   stopSession: string;
   stopSessionTitle: string;
-  splitUnavailable: string;
+  /** 分割のボタンを押せない理由 (core/main-tabs.ts の splitBlocker と窓の幅)。 */
+  splitBlocked: Record<"split" | "no-front" | "page" | "narrow", string>;
   /** 2 面のときの右の面のボタン: 右のタブを左へ移して 1 面に戻す。 */
   unsplit: string;
   /** 窓が狭くて右の面を隠している間の、分割のボタンの説明。 */
@@ -35,7 +37,7 @@ export type MainTabsText = {
 };
 
 const EN: MainTabsText = {
-  tabList: "Open tabs",
+  tabList: (side) => (side === null ? "Open tabs" : `Open tabs, ${side} side`),
   close: "Close",
   closeTab: (name) => `Close ${name}`,
   closeOthers: "Close others",
@@ -48,8 +50,12 @@ const EN: MainTabsText = {
   stopSession: "Stop session",
   stopSessionTitle:
     "End this shell (Close only hides the tab and keeps the shell running)",
-  splitUnavailable:
-    "Split right (a file, terminal or image tab in front, one side, and a window wide enough for two)",
+  splitBlocked: {
+    split: "Split right: already two sides",
+    "no-front": "Split right: open a file, terminal or image tab first",
+    page: "Split right: this screen stays on the left. Bring a file, terminal or image tab to the front",
+    narrow: "Split right: the window is too narrow for two sides",
+  },
   unsplit:
     "Back to one side (moves the right tabs to the left; a file already open on the left closes on the right)",
   rightParked: (count) =>
@@ -64,7 +70,10 @@ const EN: MainTabsText = {
 };
 
 const JA: MainTabsText = {
-  tabList: "開いているタブ",
+  tabList: (side) =>
+    side === null
+      ? "開いているタブ"
+      : `開いているタブ (${side === "left" ? "左" : "右"}の面)`,
   close: "閉じる",
   closeTab: (name) => `${name} を閉じる`,
   closeOthers: "ほかを閉じる",
@@ -77,8 +86,13 @@ const JA: MainTabsText = {
   stopSession: "セッションを止める",
   stopSessionTitle:
     "このシェルを終了します (閉じるはタブを隠すだけで、シェルは動き続けます)",
-  splitUnavailable:
-    "右に分割 (前面がファイル・ターミナル・画像のタブ・1 面・2 面が置ける窓の幅のときに使えます)",
+  splitBlocked: {
+    split: "右に分割: もう 2 面です",
+    "no-front":
+      "右に分割: 先にファイル・ターミナル・画像のタブを開いてください",
+    page: "右に分割: この画面は左の面だけに置きます。ファイル・ターミナル・画像のタブを前面にしてください",
+    narrow: "右に分割: 窓が 2 面を置ける幅より狭いです",
+  },
   unsplit:
     "1 面に戻す (右のタブを左へ移します。左で開いているファイルは右を閉じます)",
   rightParked: (count) =>

@@ -3,9 +3,12 @@ import {
   activate,
   activateIndex,
   assertLayout,
+  CLOSED_HISTORY_LIMIT,
+  type ClosedTab,
   canMoveToOtherSide,
   canSplit,
   close,
+  closedTabs,
   closeOthers,
   closeToRight,
   focusPane,
@@ -19,9 +22,12 @@ import {
   type PaneSide,
   parseLayout,
   prevTab,
+  pushClosed,
+  reopenClosed,
   sameTarget,
   serializeLayout,
   showHome,
+  splitBlocker,
   splitRight,
   type Tab,
   type TabTarget,
@@ -334,6 +340,156 @@ describe("main tabs contract: open", () => {
       previews: [false, true],
     });
     expectValid(result);
+  });
+});
+
+// ui-surface.md の「タブの決まり」: 固定で開く (preview: false) は、同じ中身の
+// 仮のタブを前面に出して固定にする。仮で開き直しても固定のタブは仮に戻らない。
+describe("main tabs contract: opening an existing target kept or preview", () => {
+  test.each([
+    {
+      name: "kept open pins a preview",
+      start: true,
+      preview: false,
+      expected: false,
+    },
+    {
+      name: "preview open keeps a preview",
+      start: true,
+      preview: undefined,
+      expected: true,
+    },
+    {
+      name: "preview open never unpins a kept tab",
+      start: false,
+      preview: true,
+      expected: false,
+    },
+    {
+      name: "kept open leaves a kept tab kept",
+      start: false,
+      preview: false,
+      expected: false,
+    },
+  ])("$name", ({ start, preview, expected }) => {
+    const state = one([tab("a", FILE_A), tab("b", FILE_B, start)], "a");
+    const result = open(state, FILE_B, {
+      newId: () => "unused",
+      ...(preview === undefined ? {} : { preview }),
+    });
+    expect(paneState(result, "left")).toEqual({
+      ids: ["a", "b"],
+      activeId: "b",
+      recent: ["a", "b"],
+      previews: [false, expected],
+    });
+    expectValid(result);
+  });
+});
+
+// 最後に閉じたタブを開き直す (PWA の窓の ⌘/Ctrl+Shift+T)。全体で 1 本、新しい順、上限あり。
+describe("main tabs contract: closed tab history", () => {
+  test("closedTabs lists the tabs that are gone, with their side", () => {
+    const before = two(
+      pane([tab("a", FILE_A), tab("b", FILE_B)]),
+      pane([tab("c", IMAGE_C)]),
+    );
+    expect(closedTabs(before, closeOthers(before, "a"))).toEqual([
+      { target: FILE_B, side: "left" },
+    ]);
+    expect(closedTabs(before, close(before, "c"))).toEqual([
+      { target: IMAGE_C, side: "right" },
+    ]);
+  });
+
+  test("pushClosed keeps the newest first, drops an older same target and caps the length", () => {
+    const item = (n: number): ClosedTab => ({
+      target: { kind: "file", path: `sample/${n}.ts` },
+      side: "left",
+    });
+    let history: ClosedTab[] = [];
+    for (let n = 0; n < CLOSED_HISTORY_LIMIT + 2; n += 1)
+      history = pushClosed(history, [item(n)]);
+    history = pushClosed(history, [item(5)]);
+    expect(history.map((entry) => entry.target)).toEqual(
+      [5, 11, 10, 9, 8, 7, 6, 4, 3, 2].map((n) => item(n).target),
+    );
+  });
+
+  test.each([
+    {
+      name: "reopens the newest as a kept tab on its side",
+      start: two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)])),
+      history: [
+        { target: IMAGE_C, side: "right" as const },
+        { target: FILE_B, side: "left" as const },
+      ],
+      side: "right" as const,
+      previews: [false, false],
+      rest: 1,
+    },
+    {
+      name: "falls back to the left side when the right one is gone",
+      start: one([tab("a", FILE_A)]),
+      history: [{ target: IMAGE_C, side: "right" as const }],
+      side: "left" as const,
+      previews: [false, false],
+      rest: 0,
+    },
+    {
+      name: "skips and drops a target that is open again",
+      start: one([tab("a", FILE_A)]),
+      history: [
+        { target: FILE_A, side: "left" as const },
+        { target: FILE_B, side: "left" as const },
+      ],
+      side: "left" as const,
+      previews: [false, false],
+      rest: 0,
+    },
+  ])("$name", ({ start, history, side, previews, rest }) => {
+    const result = reopenClosed(start, history, { newId: () => "new" });
+    expect([
+      result.layout.focused,
+      paneAt(result.layout, side)?.activeId,
+      paneAt(result.layout, side)?.tabs.map((item) => item.preview),
+      result.history.length,
+    ]).toEqual([side, "new", previews, rest]);
+    expectValid(result.layout);
+  });
+
+  test("nothing to reopen leaves the layout as it is", () => {
+    const start = one([tab("a", FILE_A)]);
+    const result = reopenClosed(start, [{ target: FILE_A, side: "left" }]);
+    expect(result).toEqual({ layout: start, history: [], reopened: null });
+  });
+});
+
+describe("main tabs contract: splitBlocker", () => {
+  test.each([
+    { name: "a file in front", state: one([tab("a", FILE_A)]), expected: null },
+    {
+      name: "a terminal in front",
+      state: one([tab("t", TERMINAL_A)]),
+      expected: null,
+    },
+    {
+      name: "a page in front",
+      state: one([tab("d", PAGE_DIFF)]),
+      expected: "page",
+    },
+    {
+      name: "nothing in front",
+      state: one([tab("a", FILE_A)], null),
+      expected: "no-front",
+    },
+    {
+      name: "already two sides",
+      state: two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)])),
+      expected: "split",
+    },
+  ])("$name → $expected", ({ state, expected }) => {
+    expect(splitBlocker(state)).toBe(expected);
   });
 });
 

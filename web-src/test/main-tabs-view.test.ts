@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   afterAll,
@@ -483,14 +484,147 @@ describe("main tabs view: 操作", () => {
   test("タブを押すとそのタブが最後に見ていた route へ移る", async () => {
     const { handle, mount, names } = setup(async () => null);
     await handle.restore();
-    handle.keepFileOpen("src/app.ts");
     const lined = fileRoute("src/app.ts", 12);
-    handle.syncRoute(lined);
+    handle.openingNewTab(() => handle.syncRoute(lined));
     handle.syncRoute({ screen: "diff", range });
     mount.querySelector<HTMLElement>(".main-tab")?.click();
     expect([names(), handle.layout().panes.left.tabs[0].target]).toEqual([
       [">app.ts", "diff"],
       { kind: "file", path: "src/app.ts", line: 12 },
+    ]);
+  });
+
+  // ui-surface.md の「タブの決まり」: 固定の押し方は、仮のタブを置き換えず固定で
+  // 足し、同じ中身の仮のタブがあれば前面に出して固定にする。
+  test.each([
+    {
+      name: "別のファイルは固定で足す (仮のタブは残る)",
+      path: "src/other.ts",
+      opened: ["app.ts (preview)", ">other.ts"],
+      // 印は run の間だけ: 次の 1 回押すは仮のタブ (残っていた仮を置き換える)。
+      next: [">third.ts (preview)", "other.ts"],
+    },
+    {
+      name: "同じファイルの仮のタブは固定にする",
+      path: "src/app.ts",
+      opened: [">app.ts"],
+      next: ["app.ts", ">third.ts (preview)"],
+    },
+  ])("openingNewTab: $name", async ({ path, opened, next }) => {
+    const { handle, names } = setup(async () => null);
+    await handle.restore();
+    handle.openingNewTab(() => handle.syncRoute(fileRoute(path)));
+    const afterOpen = names();
+    handle.syncRoute(fileRoute("src/third.ts"));
+    expect([afterOpen, names()]).toEqual([opened, next]);
+  });
+
+  // 数秒おきの描き直し (エージェントの状態で名前を当て直す) で、面の箱ごと外して
+  // 付け直していたので ＋・分割のボタンのフォーカスが毎回消えていた。
+  test("描き直しても ＋ のフォーカスと面の箱は残る", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    const pane = mount.querySelector(".main-tabs-pane");
+    const plus = mount.querySelector<HTMLButtonElement>(".main-tabs-action");
+    plus?.focus();
+    handle.localize();
+    expect([
+      mount.querySelector(".main-tabs-pane") === pane,
+      document.activeElement === plus,
+      plus?.getAttribute("aria-haspopup"),
+    ]).toEqual([true, true, "menu"]);
+  });
+
+  test("タブの名前に閉じるボタンの名前が混ざらず、ContextMenu キーで右クリックのメニューが開く", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    const tab = mount.querySelector<HTMLElement>(".main-tab-active");
+    tab?.focus();
+    tab?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "F10",
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect([
+      tab?.querySelector(".main-tab-close")?.getAttribute("aria-hidden"),
+      document.querySelectorAll(".gdp-context-menu [role=menuitem]").length > 0,
+    ]).toEqual(["true", true]);
+    // 開いたメニューは文書のキーを受け続けるので、次の検査の前に閉じる。
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect(document.querySelector(".gdp-context-menu")).toBeNull();
+  });
+
+  // 利用者が閉じたタブだけを開き直す (シェルが消えて閉じたタブは積まない)。
+  test("reopenClosed: × で閉じたタブを固定で開き直し、closeTerminal で閉じたものは積まない", async () => {
+    const { handle, mount, names } = setup(async () => null);
+    await handle.restore();
+    handle.openingNewTab(() => handle.syncRoute(fileRoute("src/b.ts")));
+    mount
+      .querySelector<HTMLElement>(".main-tab-active .main-tab-close")
+      ?.click();
+    handle.openTerminal("shell-a1");
+    handle.closeTerminal("shell-a1");
+    const afterClose = names();
+    const first = handle.reopenClosed();
+    const afterReopen = names();
+    const second = handle.reopenClosed();
+    expect([afterClose, first, afterReopen, second]).toEqual([
+      [">app.ts (preview)"],
+      true,
+      ["app.ts (preview)", ">b.ts"],
+      false,
+    ]);
+  });
+
+  // タブ列のキー (roving tabindex)。←→ Home End は移るだけで前面は変えない。
+  test("タブ列のキー: ←→ Home End で移り、Enter で前面、Ctrl+Shift+PageDown で並べ替え、Delete で閉じる", async () => {
+    const { handle, mount, names } = setup(async () => null);
+    await handle.restore();
+    handle.openingNewTab(() => handle.syncRoute(fileRoute("src/app.ts")));
+    handle.openingNewTab(() => handle.syncRoute(fileRoute("src/b.ts")));
+    handle.openingNewTab(() => handle.syncRoute(fileRoute("src/c.ts")));
+    const press = (key: string, init: KeyboardEventInit = {}) =>
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key,
+          bubbles: true,
+          cancelable: true,
+          ...init,
+        }),
+      );
+    const focused = () =>
+      (document.activeElement as HTMLElement).querySelector(".main-tab-name")
+        ?.textContent;
+    mount.querySelector<HTMLElement>(".main-tab-active")?.focus();
+    const seen: unknown[] = [focused()];
+    press("Home");
+    seen.push(focused());
+    press("ArrowLeft");
+    seen.push(focused());
+    press("ArrowRight");
+    seen.push(focused(), names());
+    press("Enter");
+    seen.push(names());
+    press("PageDown", { ctrlKey: true, shiftKey: true });
+    seen.push(names(), focused());
+    press("Delete");
+    seen.push(names(), focused());
+    expect(seen).toEqual([
+      "c.ts",
+      "app.ts",
+      "c.ts", // 端で折り返す
+      "app.ts",
+      ["app.ts", "b.ts", ">c.ts"], // 移るだけでは前面を変えない
+      [">app.ts", "b.ts", "c.ts"],
+      ["b.ts", ">app.ts", "c.ts"],
+      "app.ts",
+      ["b.ts", ">c.ts"], // 最近使った順で次を前面に
+      "c.ts",
     ]);
   });
 
@@ -959,7 +1093,10 @@ describe("main tabs view: 左右 2 面", () => {
     const button = mount.querySelector<HTMLButtonElement>(
       '.main-tabs-pane[data-side="right"] .main-tabs-action:nth-child(2)',
     );
-    expect([button?.disabled, button?.getAttribute("aria-label")]).toEqual([
+    expect([
+      button?.getAttribute("aria-disabled") === "true",
+      button?.getAttribute("aria-label"),
+    ]).toEqual([
       false,
       "Back to one side (moves the right tabs to the left; a file already open on the left closes on the right)",
     ]);
@@ -982,13 +1119,81 @@ describe("main tabs view: 左右 2 面", () => {
     ]);
   });
 
-  test("前面がファイルや画面のタブなら分割ボタンは押せない", async () => {
+  test("openingNewTab: 右の面に開くときも固定", async () => {
+    const { handle } = setup(async () => null);
+    await handle.restore();
+    let opened = false;
+    handle.openingNewTab(() => {
+      opened = handle.openRouteRight({
+        screen: "file",
+        path: "src/b.ts",
+        ref: "worktree",
+        range,
+        view: "blob",
+      });
+    });
+    expect([
+      opened,
+      handle.layout().panes.right?.tabs.map((tab) => tab.preview),
+    ]).toEqual([true, [false]]);
+  });
+
+  test("2 面のとき、タブ列の名前で左右が分かり、境界は左の面の幅を % で持つ", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.openTerminal("shell-a1");
+    splitButton(mount)?.click();
+    const divider = document.querySelector(".main-split-divider");
+    expect([
+      [...mount.querySelectorAll(".main-tabs-strip")].map((strip) =>
+        strip.getAttribute("aria-label"),
+      ),
+      divider?.getAttribute("aria-valuenow"),
+      Number(divider?.getAttribute("aria-valuemin")) <
+        Number(divider?.getAttribute("aria-valuemax")),
+    ]).toEqual([["Open tabs, left side", "Open tabs, right side"], "50", true]);
+  });
+
+  test("前面が画面のタブなら分割ボタンは押せない", async () => {
     const { handle, mount } = setup(async () => null);
     await handle.restore();
     handle.syncRoute({ screen: "diff", range });
     const button = splitButton(mount);
     button?.click();
-    expect([button?.disabled, panes(handle).split]).toEqual([true, false]);
+    expect([
+      button?.getAttribute("aria-disabled") === "true",
+      panes(handle).split,
+    ]).toEqual([true, false]);
+  });
+
+  // 押せない理由は 1 つだけ出す (条件を全部並べると、どれに当たったか読めない)。
+  test.each([
+    {
+      name: "前面が画面",
+      arrange: (handle: MainTabsHandle) =>
+        handle.syncRoute({ screen: "diff", range }),
+      title:
+        "Split right: this screen stays on the left. Bring a file, terminal or image tab to the front",
+    },
+    {
+      name: "左の面で何も選んでいない",
+      arrange: (handle: MainTabsHandle) => handle.showHome(),
+      title: "Split right: open a file, terminal or image tab first",
+    },
+    {
+      name: "前面がファイル",
+      arrange: () => undefined,
+      title: "Split right",
+    },
+  ])("分割ボタンの説明: $name", async ({ arrange, title }) => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    arrange(handle);
+    const button = splitButton(mount);
+    expect([
+      button?.getAttribute("aria-disabled") === "true",
+      button?.title,
+    ]).toEqual([title !== "Split right", title]);
   });
 
   test("狭い窓では右の面を隠して左だけにし、印を出し、広がれば戻す (保存は右の面ごと)", async () => {
@@ -1470,7 +1675,17 @@ describe("main tabs view: 左右 2 面", () => {
     );
     if (!dragged) throw new Error("no terminal tab to drag");
     const id = dragged.dataset.tabId;
+    // 掴んだタブだけを薄くする (body とタブが同じ印だった間は、タブを薄くする
+    // 規則が body に当たって画面全体が半透明になっていた)。空は規則が当たっていない。
+    const style = document.createElement("style");
+    style.textContent = readFileSync("web/style.css", "utf8");
+    document.head.appendChild(style);
     dragged.dispatchEvent(new Event("dragstart", { bubbles: true }));
+    expect([
+      getComputedStyle(document.body).opacity,
+      getComputedStyle(dragged).opacity,
+    ]).toEqual(["", "0.5"]);
+    style.remove();
     // 描き直し (別のシェルのタブが増える)
     handle.openTerminal("shell-b2");
     const redrawn = mount.querySelector<HTMLElement>(
@@ -1479,14 +1694,14 @@ describe("main tabs view: 左右 2 面", () => {
     expect([
       redrawn === dragged,
       redrawn?.classList.contains("main-tab-dragging"),
-      document.body.classList.contains("main-tab-dragging"),
+      document.body.classList.contains("main-tab-drag-active"),
     ]).toEqual([false, true, true]);
     // 外れた要素には dragend が来ない。ボタンを離した移動で終わりと分かる
     const moved = new Event("pointermove", { bubbles: true });
     Object.defineProperty(moved, "buttons", { value: 0 });
     document.dispatchEvent(moved);
     expect([
-      document.body.classList.contains("main-tab-dragging"),
+      document.body.classList.contains("main-tab-drag-active"),
       document.querySelector<HTMLElement>(".main-split-drop")?.hidden,
     ]).toEqual([false, true]);
   });

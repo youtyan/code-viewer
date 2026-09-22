@@ -85,6 +85,7 @@ async function setup(options: {
       to: "worktree",
     },
     setRoute: () => undefined,
+    openingNewTab: (run) => run(),
     currentRange: () => ({ from: "HEAD", to: "worktree" }),
     appendScopeParams: () => undefined,
     isAbortError: () => false,
