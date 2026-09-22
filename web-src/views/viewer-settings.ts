@@ -443,7 +443,6 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     watchLimitRange.id = "scope-watch-limit-range";
     watchLimitRange.type = "range";
     watchLimitRange.step = "16";
-    watchLimitRange.setAttribute("aria-label", "watch limit slider");
     watchLimitNumber.id = "scope-watch-limit";
     watchLimitNumber.type = "number";
     watchLimitNumber.step = "1";
@@ -848,6 +847,8 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     omitDirsLabel.textContent = text.omitDirs;
     excludeNamesLabel.textContent = text.excludeNames;
     watchLimitLabel.textContent = text.watchLimit;
+    // スライダーと数の欄は同じ値を持つので、同じ名前で読み上げる。
+    watchLimitRange.setAttribute("aria-label", text.watchLimit);
     agentRulesLabel.textContent = text.agentRulesLabel;
     uiFontSizeHelp.textContent = text.fileListFontSizeHelp;
     displaySource.textContent = text.displaySource;

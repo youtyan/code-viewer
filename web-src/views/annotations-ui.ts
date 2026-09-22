@@ -192,14 +192,14 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     "octicon-skip-back",
     PREVIOUS_16_PATHS,
   );
-  annotationDetailPrev.title = "previous annotation";
-  annotationDetailPrev.setAttribute("aria-label", "previous annotation");
+  annotationDetailPrev.title = t().previous;
+  annotationDetailPrev.setAttribute("aria-label", t().previous);
   annotationDetailNext.innerHTML = iconSvg(
     "octicon-skip-forward",
     NEXT_16_PATHS,
   );
-  annotationDetailNext.title = "next annotation";
-  annotationDetailNext.setAttribute("aria-label", "next annotation");
+  annotationDetailNext.title = t().next;
+  annotationDetailNext.setAttribute("aria-label", t().next);
 
   const detailHead = annotationDetail.querySelector(".annotation-detail-head");
   const detailMeta = document.createElement("div");
@@ -583,7 +583,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     if (!root) return;
     const strip = document.createElement("section");
     strip.className = "gdp-db-annotation-strip";
-    strip.setAttribute("aria-label", "Datastore annotations");
+    strip.setAttribute("aria-label", t().datastoreNotes);
     for (const entry of matches) {
       strip.appendChild(
         buildDatabaseAnnotationBlock(entry, {

@@ -212,8 +212,8 @@ function taskField(
 function createLabelEditor(
   initialLabels: string[],
   placeholder: string,
-  suggestionLabels: string[] = [],
-  removeLabelText: (label: string) => string = (label) => `Remove ${label}`,
+  suggestionLabels: string[],
+  removeLabelText: (label: string) => string,
 ): { element: HTMLElement; getLabels(): string[] } {
   const root = document.createElement("div");
   root.className = "journal-label-editor";

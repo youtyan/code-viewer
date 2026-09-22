@@ -94,9 +94,7 @@ export function createSchemaView(
     const headerTitle = document.createElement("span");
     headerTitle.className = "db-schema-header-title";
     const tableComment = extra?.tableComment?.trim();
-    headerTitle.textContent = tableComment
-      ? `Schema: ${table} — ${tableComment}`
-      : `Schema: ${table}`;
+    headerTitle.textContent = t.header(table, tableComment);
     header.appendChild(headerTitle);
     if (deps.onRefresh) {
       refreshBtn = document.createElement("button");

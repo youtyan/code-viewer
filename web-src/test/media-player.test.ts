@@ -51,6 +51,32 @@ describe("media player", () => {
     ).not.toBeNull();
   });
 
+  test("labels the controls in the page language", () => {
+    document.documentElement.lang = "ja";
+    try {
+      const player = createMediaPlayer(
+        "/_file?path=clip.mp4",
+        "video",
+        "clip.mp4",
+      );
+      const labels = [...player.querySelectorAll("[aria-label]")].map((el) =>
+        el.getAttribute("aria-label"),
+      );
+      expect(player.getAttribute("aria-label")).toBe("動画の再生: clip.mp4");
+      expect(labels).toEqual([
+        "clip.mp4",
+        "再生",
+        "再生位置",
+        "消音",
+        "音量",
+        "再生速度",
+        "全画面表示",
+      ]);
+    } finally {
+      document.documentElement.lang = "";
+    }
+  });
+
   test("renders an audio player without a fullscreen button", () => {
     const player = createMediaPlayer(
       "/_file?path=song.mp3",

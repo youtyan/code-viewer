@@ -923,11 +923,21 @@ export function createSourceView(deps: SourceViewDeps) {
     info.className = "gdp-source-file-info";
     const type = document.createElement("span");
     type.className = "kind";
-    type.textContent = humanFileKind(target.path, undefined, kind);
+    type.textContent = humanFileKind(
+      target.path,
+      undefined,
+      kind,
+      getLanguage(),
+    );
     info.appendChild(type);
     if (options.loadMeta === false) return info;
     loadRawFileInfo(target).then((meta) => {
-      type.textContent = humanFileKind(target.path, meta.type, kind);
+      type.textContent = humanFileKind(
+        target.path,
+        meta.type,
+        kind,
+        getLanguage(),
+      );
       if (meta.size != null) {
         const size = document.createElement("span");
         size.textContent = formatBytes(meta.size);

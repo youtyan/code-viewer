@@ -78,28 +78,30 @@ function objectTypeLabel(key: string, contentType?: string): string {
     key,
     contentType,
     kind === "unsupported" ? "unsupported file" : kind,
+    pageLanguage(),
   );
 }
 
-// ファイル種別をひと目で判別できる短いラベル。詳細 (例: "PNG image") は
-// title 属性に出す。
-const KIND_LABELS: Record<
-  ReturnType<typeof sourceDisplayKind>,
-  { text: string; cls: string }
-> = {
-  image: { text: "Image", cls: "kind-image" },
-  video: { text: "Video", cls: "kind-video" },
-  audio: { text: "Audio", cls: "kind-audio" },
-  pdf: { text: "PDF", cls: "kind-pdf" },
-  text: { text: "Text", cls: "kind-text" },
-  unsupported: { text: "Binary", cls: "kind-binary" },
+// ファイル種別をひと目で判別できる短いラベル (文言は i18n の explorer.s3.kind)。
+// 詳細 (例: "PNG image") は title 属性に出す。
+const KIND_CLASSES: Record<ReturnType<typeof sourceDisplayKind>, string> = {
+  image: "kind-image",
+  video: "kind-video",
+  audio: "kind-audio",
+  pdf: "kind-pdf",
+  text: "kind-text",
+  unsupported: "kind-binary",
 };
 
-function createKindBadge(key: string, contentType?: string): HTMLElement {
-  const { text, cls } = KIND_LABELS[sourceDisplayKind(key)];
+function createKindBadge(
+  key: string,
+  contentType: string | undefined,
+  labels: DbText["explorer"]["s3"]["kind"],
+): HTMLElement {
+  const kind = sourceDisplayKind(key);
   const badge = document.createElement("span");
-  badge.className = `s3-kind-badge ${cls}`;
-  badge.textContent = text;
+  badge.className = `s3-kind-badge ${KIND_CLASSES[kind]}`;
+  badge.textContent = labels[kind];
   badge.title = objectTypeLabel(key, contentType);
   return badge;
 }
@@ -155,10 +157,10 @@ export function createS3Explorer(
   viewSeg.className = "seg s3-view-seg";
   const listViewBtn = document.createElement("button");
   listViewBtn.type = "button";
-  listViewBtn.textContent = "List";
+  listViewBtn.textContent = text().listView;
   const explorerViewBtn = document.createElement("button");
   explorerViewBtn.type = "button";
-  explorerViewBtn.textContent = "Explorer";
+  explorerViewBtn.textContent = text().explorerView;
   viewSeg.append(listViewBtn, explorerViewBtn);
   bucketRow.appendChild(viewSeg);
 
@@ -482,7 +484,10 @@ export function createS3Explorer(
       const name = document.createElement("span");
       name.className = "s3-object-name";
       name.textContent = fileName;
-      head.append(createKindBadge(object.key, object.contentType), name);
+      head.append(
+        createKindBadge(object.key, object.contentType, text().kind),
+        name,
+      );
       row.appendChild(head);
       // 3 行目: メタ。
       const meta = document.createElement("span");
@@ -1041,7 +1046,11 @@ export function createS3Explorer(
     name.className = "name";
     name.textContent = s3ObjectName(object.key) || object.key;
     name.title = object.key;
-    row.append(spacer, createKindBadge(object.key, object.contentType), name);
+    row.append(
+      spacer,
+      createKindBadge(object.key, object.contentType, text().kind),
+      name,
+    );
     explorerRowsByKey.set(object.key, row);
     // active の付与は highlightActiveObject に一元化する (renderFolderLevel 末尾で
     // 同期)。ここで直付けすると activeObjectRow と二重管理になりずれる。
@@ -1131,7 +1140,7 @@ export function createS3Explorer(
       more.type = "button";
       more.className = "s3-tree-more";
       more.style.setProperty("--lvl-pad", indentPad(depth));
-      more.textContent = "Load more";
+      more.textContent = tCommon().loadMore;
       // ボタン押下と、復元時のプログラム的なページ送り (expandExplorerToKey) を
       // 同じ関数で扱う。1 ページ追加できれば true を返す。
       const loadMore = async (): Promise<boolean> => {
@@ -1153,7 +1162,9 @@ export function createS3Explorer(
         } catch (err) {
           if (isAbortError(err) || disposed) return false;
           more.disabled = false;
-          more.textContent = `Load more failed: ${err instanceof Error ? err.message : String(err)}`;
+          more.textContent = text().loadMoreFailed(
+            err instanceof Error ? err.message : String(err),
+          );
           return false;
         }
       };
@@ -1567,6 +1578,8 @@ export function createS3Explorer(
     sortKey.textContent = t.sortKey;
     newObjectBtn.textContent = `＋ ${t.newObject}`;
     newObjectBtn.title = t.newObject;
+    listViewBtn.textContent = t.listView;
+    explorerViewBtn.textContent = t.explorerView;
     moreBtn.textContent = tCommon().loadMore;
     searchInput.placeholder =
       currentMode === "prefix" ? t.prefixPlaceholder : t.containsPlaceholder;

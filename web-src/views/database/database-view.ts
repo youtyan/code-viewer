@@ -638,8 +638,8 @@ function createTabPane(
   });
 
   const erBtn = makeIconButton({
-    label: "ER Diagram",
-    title: "Entity Relationship Diagram",
+    label: paneText().nav.er,
+    title: paneText().nav.erTitle,
     pathD: ICON_PATH_ER,
     onClick: () => {
       setActiveTab("er");
@@ -648,15 +648,15 @@ function createTabPane(
   });
 
   const searchBtn = makeIconButton({
-    label: "Search",
-    title: "Search across tables",
+    label: paneText().nav.search,
+    title: paneText().nav.searchTitle,
     pathD: SEARCH_16_PATH,
     onClick: () => setActiveTab("search"),
   });
 
   const snapshotBtn = makeIconButton({
-    label: "Snapshot",
-    title: "Snapshot & Diff",
+    label: paneText().nav.snapshot,
+    title: paneText().nav.snapshotTitle,
     pathD: ICON_PATH_SNAPSHOT,
     onClick: () => {
       setActiveTab("snapshot");

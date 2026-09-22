@@ -212,7 +212,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "Ctrl+K opens the file palette and Ctrl+G the text palette; the Search box at the top of the left sidebar does the same (Shift+click for text). The two share one window: switching keeps what you typed, and reopening restores the last query, selected so typing replaces it. With an empty query the file palette lists the files you opened most recently, and the result line says when the ranking was cut at 50. The text palette has regex (Alt+R), match-case (Alt+C) and whole-word (Alt+W) toggles, and path:<dir or glob> tokens in the query narrow the search; matching is case-insensitive on every engine unless match-case is on. Opening a hit marks the matched text on the target line, and in a large virtualized file it pre-fills the in-file find bar. Pin (or Ctrl+Enter) moves the query into the bottom panel's Search tab, where the grouped result list stays open while you browse files; the query is part of the URL (?results=) so a reload re-runs it.",
+                text: "Ctrl+K opens the file palette and Ctrl+G the text palette; the Search box at the top of the left sidebar does the same (Shift+click for text). The two share one window: switching keeps what you typed, and reopening restores the last query, selected so typing replaces it. With an empty query the file palette lists the files you opened most recently, and the result line says when the ranking was cut at 50. The text palette has regex (Alt+R), match-case (Alt+C) and whole-word (Alt+W) toggles, and path:<dir or glob> tokens in the query narrow the search; matching is case-insensitive on every engine unless match-case is on. Opening a hit marks the matched text on the target line, and in a large virtualized file it pre-fills the in-file find bar. Pin (or Ctrl+Enter) moves the query into the Search tab, where the grouped result list stays open while you browse files; the Search tab also opens from the + menu of the tab row or the palette. The query is part of the URL (/search?q=) so a reload re-runs it.",
               },
               {
                 kind: "paragraph",
@@ -233,11 +233,11 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "The Tools tab of the bottom panel opens a drawer for text you paste, without leaving the screen you are on. It holds a Markdown preview (the same renderer as the file preview, so the table of contents, task lists, frontmatter, code highlighting and ```mermaid fences all work), a Mermaid preview with zoom and drag-pan, and a JSON / YAML tool that reads either format and re-emits it as formatted JSON or YAML — a validator and a converter in one.",
+                text: "The Tools tab (the + menu of the tab row, or Go to Tools in the palette) is a scratch pad for text you paste. It holds a Markdown preview (the same renderer as the file preview, so the table of contents, task lists, frontmatter, code highlighting and ```mermaid fences all work), a Mermaid preview with zoom and drag-pan, and a JSON / YAML tool that reads either format and re-emits it as formatted JSON or YAML — a validator and a converter in one.",
               },
               {
                 kind: "paragraph",
-                text: "Each tool keeps its own draft in .code-viewer/tools.json, so the drawer reopens where you left it. The open tool is part of the URL (?tools=markdown), which makes it shareable and survives a reload, and the drawer width is draggable from the grip on its left edge.",
+                text: "Each tool keeps its own draft in .code-viewer/tools.json, so the tab reopens where you left it. The open tool is part of the URL (/tools?tool=markdown), which makes it shareable and survives a reload, and the split between input and output is draggable.",
               },
             ],
           },
@@ -392,7 +392,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                   ],
                   [
                     "tools.json",
-                    "Tools drawer state — the pasted draft for each tool (Markdown, Mermaid, JSON / YAML), the tool you used last, and the drawer width.",
+                    "Tools tab state — the pasted draft for each tool (Markdown, Mermaid, JSON / YAML) and the tool you used last.",
                   ],
                   [
                     "annotations.json",
@@ -1089,7 +1089,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "Ctrl+K でファイルパレット、Ctrl+G でコード検索パレットが開きます。左のサイドバーの上の「検索」でも同じです（Shift+クリックでコード検索）。2 つは 1 つのウィンドウを共有し、切り替えても入力中の検索語は残り、閉じて開き直すと前回の検索語が選択状態で戻ります。ファイルパレットは空のとき最近開いたファイルを並べ、結果が 50 件で切られたときはその旨を表示します。コード検索には正規表現（Alt+R）・大文字小文字の区別（Alt+C）・単語単位（Alt+W）の切り替えがあり、検索語の中の path:<ディレクトリ or glob> で対象を絞れます。大文字小文字は「区別する」を押さない限りどのエンジンでも区別しません。ヒットを開くと該当行の一致箇所が強調され、大きな仮想表示のファイルではファイル内検索バーに検索語が入ります。「固定」（または Ctrl+Enter）を押すと検索語が下パネルの「検索」タブに移り、ファイルを開いて回る間も結果一覧が残ります。検索語は URL（?results=）に載るのでリロードしても同じ検索が走ります。",
+                text: "Ctrl+K でファイルパレット、Ctrl+G でコード検索パレットが開きます。左のサイドバーの上の「検索」でも同じです（Shift+クリックでコード検索）。2 つは 1 つのウィンドウを共有し、切り替えても入力中の検索語は残り、閉じて開き直すと前回の検索語が選択状態で戻ります。ファイルパレットは空のとき最近開いたファイルを並べ、結果が 50 件で切られたときはその旨を表示します。コード検索には正規表現（Alt+R）・大文字小文字の区別（Alt+C）・単語単位（Alt+W）の切り替えがあり、検索語の中の path:<ディレクトリ or glob> で対象を絞れます。大文字小文字は「区別する」を押さない限りどのエンジンでも区別しません。ヒットを開くと該当行の一致箇所が強調され、大きな仮想表示のファイルではファイル内検索バーに検索語が入ります。「固定」（または Ctrl+Enter）を押すと検索語が「検索」タブに移り、ファイルを開いて回る間も結果一覧が残ります。「検索」タブはタブ列の ＋ のメニューやパレットからも開けます。検索語は URL（/search?q=）に載るのでリロードしても同じ検索が走ります。",
               },
               {
                 kind: "paragraph",
@@ -1110,11 +1110,11 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "下パネルの Tools タブは、いま見ている画面を離れずに使える貼り付け用のドロワーを開きます。Markdown プレビュー（ファイルプレビューと同じ描画なので、目次・タスクリスト・frontmatter・コードハイライト・```mermaid フェンスがそのまま効きます）、ズームとドラッグ移動ができる Mermaid プレビュー、JSON と YAML のどちらでも読み取って整形し直す JSON / YAML ツール（検証と相互変換を兼ねます）が入っています。",
+                text: "「ツール」タブ（タブ列の ＋ のメニュー、またはパレットの「ツールへ移る」）は、貼り付けたテキストを試す作業台です。Markdown プレビュー（ファイルプレビューと同じ描画なので、目次・タスクリスト・frontmatter・コードハイライト・```mermaid フェンスがそのまま効きます）、ズームとドラッグ移動ができる Mermaid プレビュー、JSON と YAML のどちらでも読み取って整形し直す JSON / YAML ツール（検証と相互変換を兼ねます）が入っています。",
               },
               {
                 kind: "paragraph",
-                text: "各ツールの入力は .code-viewer/tools.json に保存されるので、開き直すと続きから使えます。開いているツールは URL（?tools=markdown）に載るので共有もリロードもでき、ドロワーの幅は左端のグリップをドラッグして変えられます。",
+                text: "各ツールの入力は .code-viewer/tools.json に保存されるので、開き直すと続きから使えます。開いているツールは URL（/tools?tool=markdown）に載るので共有もリロードもでき、入力と出力の境目はドラッグで動かせます。",
               },
             ],
           },
@@ -1269,7 +1269,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "tools.json",
-                    "ツールドロワーの状態 — 各ツール（Markdown / Mermaid / JSON・YAML）に貼り付けた下書き、最後に使ったツール、ドロワーの幅。",
+                    "「ツール」タブの状態 — 各ツール（Markdown / Mermaid / JSON・YAML）に貼り付けた下書きと、最後に使ったツール。",
                   ],
                   [
                     "annotations.json",

@@ -850,6 +850,7 @@ export function createTableGrid(
   };
   let relatedPanel: HTMLElement | null = null;
   let relatedListEl: HTMLElement | null = null;
+  let relatedCopyBtn: HTMLButtonElement | null = null;
   let relatedListResizeEl: HTMLElement | null = null;
   let relatedGridHost: HTMLElement | null = null;
   // 参照先が 0 件のときに出す空表示。
@@ -1361,19 +1362,22 @@ export function createTableGrid(
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
     copyBtn.className = "db-btn db-grid-detail-copy db-related-copy";
-    copyBtn.textContent = "Copy";
+    copyBtn.textContent = text().detail.copy;
+    relatedCopyBtn = copyBtn;
     copyBtn.addEventListener("click", () => {
       const target = currentRelatedTarget();
       if (!target) return;
       navigator.clipboard.writeText(target.value).then(
         () => {
-          copyBtn.textContent = "Copied";
+          copyBtn.textContent = text().detail.copied;
           setTimeout(() => {
-            copyBtn.textContent = "Copy";
+            copyBtn.textContent = text().detail.copy;
           }, 800);
         },
-        () => {
-          copyBtn.textContent = "Copy failed";
+        // 詳細の欄のコピーと同じく、失敗の理由を出す。
+        (error: unknown) => {
+          console.error(error);
+          copyBtn.textContent = `${text().detail.copyFailed}: ${formatErrorDetail(error)}`;
         },
       );
     });
@@ -2884,6 +2888,7 @@ export function createTableGrid(
     discardBtn.textContent = t.edit.discard;
     showPendingStatus();
     if (relatedEmptyEl) relatedEmptyEl.textContent = t.grid.relatedEmpty;
+    if (relatedCopyBtn) relatedCopyBtn.textContent = t.detail.copy;
     if (currentTable) {
       renderHeader(); // FK アイコンの title や列フィルタを再構築
       updateStatus();

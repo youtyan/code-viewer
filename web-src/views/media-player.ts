@@ -1,12 +1,14 @@
 import {
   FULLSCREEN_ENTER_16_PATHS,
   FULLSCREEN_EXIT_16_PATHS,
+  iconSvg,
   PAUSE_16_PATHS,
   PLAY_16_PATH,
   VOLUME_MUTED_16_PATHS,
   VOLUME_UNMUTED_16_PATHS,
-  iconSvg,
 } from "../core/icons";
+import { pageLanguage } from "./page-language";
+import { MEDIA_PLAYER_TEXT } from "./source-preview-i18n";
 
 type MediaKind = "video" | "audio";
 
@@ -27,14 +29,12 @@ export function createMediaPlayer(
   kind: MediaKind,
   title: string,
 ): HTMLElement {
+  const text = MEDIA_PLAYER_TEXT[pageLanguage()];
   const container = document.createElement("div");
   container.className = `gdp-media-player kind-${kind}`;
   container.tabIndex = 0;
   container.setAttribute("role", "region");
-  container.setAttribute(
-    "aria-label",
-    `${kind === "video" ? "Video" : "Audio"} player: ${title}`,
-  );
+  container.setAttribute("aria-label", text.player(kind, title));
 
   const media: HTMLVideoElement | HTMLAudioElement =
     kind === "video"
@@ -48,7 +48,7 @@ export function createMediaPlayer(
   const controls = document.createElement("div");
   controls.className = "gdp-media-controls";
 
-  const playButton = createIconButton("Play", PLAY_16_PATH);
+  const playButton = createIconButton(text.play, PLAY_16_PATH);
   const currentTimeEl = document.createElement("span");
   currentTimeEl.className = "gdp-media-time";
   currentTimeEl.textContent = "0:00";
@@ -62,9 +62,9 @@ export function createMediaPlayer(
   seek.min = "0";
   seek.max = "100";
   seek.value = "0";
-  seek.setAttribute("aria-label", "Seek");
+  seek.setAttribute("aria-label", text.seek);
 
-  const volumeButton = createIconButton("Mute", VOLUME_UNMUTED_16_PATHS);
+  const volumeButton = createIconButton(text.mute, VOLUME_UNMUTED_16_PATHS);
   const volume = document.createElement("input");
   volume.type = "range";
   volume.className = "gdp-media-volume";
@@ -72,14 +72,14 @@ export function createMediaPlayer(
   volume.max = "1";
   volume.step = "0.05";
   volume.value = "1";
-  volume.setAttribute("aria-label", "Volume");
+  volume.setAttribute("aria-label", text.volume);
 
   const speedButton = document.createElement("button");
   speedButton.type = "button";
   speedButton.className = "gdp-media-speed";
   speedButton.textContent = "1x";
-  speedButton.title = "Playback speed";
-  speedButton.setAttribute("aria-label", "Playback speed");
+  speedButton.title = text.playbackSpeed;
+  speedButton.setAttribute("aria-label", text.playbackSpeed);
 
   controls.append(
     playButton,
@@ -94,7 +94,7 @@ export function createMediaPlayer(
   let fullscreenButton: HTMLButtonElement | null = null;
   if (kind === "video") {
     fullscreenButton = createIconButton(
-      "Enter fullscreen",
+      text.enterFullscreen,
       FULLSCREEN_ENTER_16_PATHS,
     );
     controls.appendChild(fullscreenButton);
@@ -111,8 +111,9 @@ export function createMediaPlayer(
       media.paused ? "octicon-play" : "octicon-pause",
       media.paused ? PLAY_16_PATH : PAUSE_16_PATHS,
     );
-    playButton.title = media.paused ? "Play" : "Pause";
-    playButton.setAttribute("aria-label", media.paused ? "Play" : "Pause");
+    const label = media.paused ? text.play : text.pause;
+    playButton.title = label;
+    playButton.setAttribute("aria-label", label);
   }
 
   function updateVolumeButton() {
@@ -121,8 +122,9 @@ export function createMediaPlayer(
       muted ? "octicon-volume-mute" : "octicon-volume",
       muted ? VOLUME_MUTED_16_PATHS : VOLUME_UNMUTED_16_PATHS,
     );
-    volumeButton.title = muted ? "Unmute" : "Mute";
-    volumeButton.setAttribute("aria-label", muted ? "Unmute" : "Mute");
+    const label = muted ? text.unmute : text.mute;
+    volumeButton.title = label;
+    volumeButton.setAttribute("aria-label", label);
   }
 
   function updateFullscreenButton() {
@@ -132,13 +134,9 @@ export function createMediaPlayer(
       isFullscreen ? "octicon-screen-normal" : "octicon-screen-full",
       isFullscreen ? FULLSCREEN_EXIT_16_PATHS : FULLSCREEN_ENTER_16_PATHS,
     );
-    fullscreenButton.title = isFullscreen
-      ? "Exit fullscreen"
-      : "Enter fullscreen";
-    fullscreenButton.setAttribute(
-      "aria-label",
-      isFullscreen ? "Exit fullscreen" : "Enter fullscreen",
-    );
+    const label = isFullscreen ? text.exitFullscreen : text.enterFullscreen;
+    fullscreenButton.title = label;
+    fullscreenButton.setAttribute("aria-label", label);
   }
 
   function syncSeek() {

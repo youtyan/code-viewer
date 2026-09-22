@@ -92,8 +92,8 @@ Requires Node.js 20 or newer. Development uses
   to it in the same tab (an unregistered one is registered first), or click an
   agent to open its pane in a terminal tab of the main area. Alt+click or the
   row menu opens it in the opposite pane, splitting a single pane to the right.
-  The sidebar folds away and its width, folding and the panel height follow you
-  across projects.
+  The sidebar folds away and its width and folding follow you across
+  projects.
 - See every coding agent running in tmux on this machine on the All agents
   board (the button next to Projects in the sidebar, or `g a`), grouped by
   project (the git repository of each pane's folder; worktrees fold into their
@@ -191,8 +191,8 @@ Requires Node.js 20 or newer. Development uses
   Mermaid preview with zoom and drag-pan, and a JSON / YAML tool that
   auto-detects the input and re-emits it as formatted JSON or YAML (also a
   validator and a JSON⇄YAML converter). Each tool keeps its own draft in
-  `.code-viewer/tools.json`, and the drawer width is draggable from its left
-  edge.
+  `.code-viewer/tools.json`, and the split between input and output is
+  draggable.
 - Run a real shell in the browser as a tab of the main area. The ＋ at the
   right of the tab row opens a menu with Open a file, New shell, and the
   existing sessions — the shells of this server and the tmux panes of this

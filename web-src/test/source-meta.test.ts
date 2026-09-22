@@ -3,6 +3,7 @@ import {
   EXT_TO_LANG,
   FILENAME_TO_LANG,
   formatFileDate,
+  humanFileKind,
   isDotenvName,
   isLikelyTextBytes,
   isPreviewableSource,
@@ -53,6 +54,60 @@ describe("source metadata", () => {
     ["ja", /^2026年9月\d+日/],
   ])("formats file dates in the setting language (%s), not the browser's", (language, expected) => {
     expect(formatFileDate("2026-09-22T12:00:00Z", language)).toMatch(expected);
+  });
+
+  test.each([
+    {
+      path: "a.png",
+      mime: undefined,
+      fallback: "image",
+      en: "PNG image",
+      ja: "PNG 画像",
+    },
+    {
+      path: "a.zip",
+      mime: undefined,
+      fallback: "unsupported file",
+      en: "ZIP archive",
+      ja: "ZIP 圧縮ファイル",
+    },
+    {
+      path: "a.bin",
+      mime: "video/x-sample",
+      fallback: "video",
+      en: "Video",
+      ja: "動画",
+    },
+    {
+      path: "a.bin",
+      mime: "application/pdf",
+      fallback: "pdf",
+      en: "PDF document",
+      ja: "PDF 文書",
+    },
+    {
+      path: "a.bin",
+      mime: undefined,
+      fallback: "unsupported file",
+      en: "Binary file",
+      ja: "バイナリファイル",
+    },
+    {
+      path: "a.bin",
+      mime: undefined,
+      fallback: "internal metadata",
+      en: "Internal metadata",
+      ja: "内部のファイル",
+    },
+  ])("names the file kind of $path ($fallback) in the setting language", ({
+    path,
+    mime,
+    fallback,
+    en,
+    ja,
+  }) => {
+    expect(humanFileKind(path, mime, fallback, "en")).toBe(en);
+    expect(humanFileKind(path, mime, fallback, "ja")).toBe(ja);
   });
 
   test("treats dotenv examples and variants as text sources", () => {

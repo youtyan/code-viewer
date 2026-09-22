@@ -131,6 +131,8 @@ export type DbText = {
   };
   // スキーマビュー。
   schema: {
+    /** 構造の欄の見出し。テーブルの説明があれば後ろに添える。 */
+    header: (table: string, comment?: string) => string;
     columns: string;
     foreignKeys: string;
     indexes: string;
@@ -389,6 +391,14 @@ export type DbText = {
       confirmDeleteObject: (key: string) => string;
       editTextHint: string;
       create: string;
+      listView: string;
+      explorerView: string;
+      /** オブジェクトの種類の短い札 (詳しい種類は title に出す)。 */
+      kind: Record<
+        "image" | "video" | "audio" | "pdf" | "text" | "unsupported",
+        string
+      >;
+      loadMoreFailed: (detail: string) => string;
     };
     dynamodb: {
       table: string;
@@ -402,6 +412,8 @@ export type DbText = {
       selectItem: string;
       noItems: string;
       noTables: string;
+      loadingTable: string;
+      loadingTables: string;
       copyKey: string;
       copied: string;
       copyFailed: string;
@@ -567,6 +579,8 @@ const EN: DbText = {
       "This table has no primary key. Existing rows cannot be edited or deleted (you can still add new rows).",
   },
   schema: {
+    header: (table, comment) =>
+      comment ? `Schema: ${table} — ${comment}` : `Schema: ${table}`,
     columns: "Columns",
     foreignKeys: "Foreign Keys",
     indexes: "Indexes",
@@ -823,6 +837,17 @@ const EN: DbText = {
       confirmDeleteObject: (key) => `Delete object "${key}"?`,
       editTextHint: "Only text objects can be edited in the browser.",
       create: "Create",
+      listView: "List",
+      explorerView: "Explorer",
+      kind: {
+        image: "Image",
+        video: "Video",
+        audio: "Audio",
+        pdf: "PDF",
+        text: "Text",
+        unsupported: "Binary",
+      },
+      loadMoreFailed: (detail) => `Load more failed: ${detail}`,
     },
     dynamodb: {
       table: "Table",
@@ -836,6 +861,8 @@ const EN: DbText = {
       selectItem: "Select an item to preview.",
       noItems: "(no items)",
       noTables: "(no tables)",
+      loadingTable: "Loading table...",
+      loadingTables: "Loading tables...",
       copyKey: "Copy key",
       copied: "Copied",
       copyFailed: "Copy failed",
@@ -1006,6 +1033,8 @@ const JA: DbText = {
       "このテーブルには主キーがありません。既存行の編集・削除はできません(新規行の追加は可能です)。",
   },
   schema: {
+    header: (table, comment) =>
+      comment ? `スキーマ: ${table} — ${comment}` : `スキーマ: ${table}`,
     columns: "カラム",
     foreignKeys: "外部キー",
     indexes: "インデックス",
@@ -1263,6 +1292,17 @@ const JA: DbText = {
       confirmDeleteObject: (key) => `オブジェクト "${key}" を削除しますか?`,
       editTextHint: "ブラウザで編集できるのはテキストオブジェクトのみです。",
       create: "作成",
+      listView: "一覧",
+      explorerView: "フォルダ",
+      kind: {
+        image: "画像",
+        video: "動画",
+        audio: "音声",
+        pdf: "PDF",
+        text: "テキスト",
+        unsupported: "バイナリ",
+      },
+      loadMoreFailed: (detail) => `続きを読み込めませんでした: ${detail}`,
     },
     dynamodb: {
       table: "テーブル",
@@ -1276,6 +1316,8 @@ const JA: DbText = {
       selectItem: "アイテムを選択するとプレビューが表示されます。",
       noItems: "(アイテムがありません)",
       noTables: "(テーブルがありません)",
+      loadingTable: "テーブルを読み込み中...",
+      loadingTables: "テーブルの一覧を読み込み中...",
       copyKey: "キーをコピー",
       copied: "コピーしました",
       copyFailed: "コピーに失敗しました",

@@ -86,6 +86,7 @@ const EN = {
   mute: "Mute annotation playback",
   unmute: "Unmute annotation playback",
   speed: "Playback speed",
+  datastoreNotes: "Datastore annotations",
 };
 
 type AnnotationText = typeof EN;
@@ -175,6 +176,7 @@ const JA: AnnotationText = {
   mute: "読み上げをミュート",
   unmute: "読み上げのミュートを解除",
   speed: "読み上げ速度",
+  datastoreNotes: "データストアの注釈",
 };
 
 export function annotationText(language: "en" | "ja"): AnnotationText {

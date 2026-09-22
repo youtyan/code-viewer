@@ -762,7 +762,7 @@ export function createDynamoDbExplorer(
     itemsByKeyToken.clear();
     itemRowsByKeyToken.clear();
     structureBody.innerHTML = "";
-    setPaneStatus(structureBody, "Loading table...");
+    setPaneStatus(structureBody, text().dynamodb.loadingTable);
     itemBody.innerHTML = "";
     setPaneEmpty(itemBody, text().dynamodb.selectItem);
     setDetailTab("structure");
@@ -889,7 +889,7 @@ export function createDynamoDbExplorer(
     itemBody.innerHTML = "";
     setPaneEmpty(itemBody, text().dynamodb.selectItem);
     setDetailTab("structure");
-    setPaneStatus(tableList, "Loading tables...");
+    setPaneStatus(tableList, text().dynamodb.loadingTables);
     try {
       const res = await trackLoad(
         fetch(`${apiUrl("dbDynamodbTables")}?db=${encodeURIComponent(dbId)}`, {

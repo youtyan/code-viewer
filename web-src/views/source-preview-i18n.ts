@@ -198,3 +198,33 @@ export const MARKDOWN_PREVIEW_TEXT = {
     close: "閉じる",
   },
 };
+
+/** 動画・音声の再生の操作。プレーヤーを作るときの言語で入れる。 */
+export const MEDIA_PLAYER_TEXT = {
+  en: {
+    player: (kind: "video" | "audio", title: string) =>
+      `${kind === "video" ? "Video" : "Audio"} player: ${title}`,
+    play: "Play",
+    pause: "Pause",
+    seek: "Seek",
+    mute: "Mute",
+    unmute: "Unmute",
+    volume: "Volume",
+    playbackSpeed: "Playback speed",
+    enterFullscreen: "Enter fullscreen",
+    exitFullscreen: "Exit fullscreen",
+  },
+  ja: {
+    player: (kind: "video" | "audio", title: string) =>
+      `${kind === "video" ? "動画" : "音声"}の再生: ${title}`,
+    play: "再生",
+    pause: "一時停止",
+    seek: "再生位置",
+    mute: "消音",
+    unmute: "消音を解除",
+    volume: "音量",
+    playbackSpeed: "再生速度",
+    enterFullscreen: "全画面表示",
+    exitFullscreen: "全画面表示を終了",
+  },
+};

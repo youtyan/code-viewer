@@ -8,6 +8,7 @@ import { waitFor } from "./_test-helpers";
 GlobalRegistrator.register();
 
 const { createS3Explorer } = await import("../views/database/s3-explorer");
+const { dbText } = await import("../views/database/i18n");
 
 type FolderLevel = { folders: string[]; objects: Array<{ key: string }> };
 
@@ -101,8 +102,10 @@ afterAll(() => {
   GlobalRegistrator.unregister();
 });
 
-async function mountExplorer(): Promise<ReturnType<typeof createS3Explorer>> {
-  const view = createS3Explorer();
+async function mountExplorer(
+  callbacks: Parameters<typeof createS3Explorer>[0] = {},
+): Promise<ReturnType<typeof createS3Explorer>> {
+  const view = createS3Explorer(callbacks);
   explorer = view;
   // sidebarSlot は本番では db-sidebar の dbToolbar 直下に mount される。
   // テストでは同じ document.body に並べて、querySelector で両方を辿れるようにする。
@@ -139,6 +142,25 @@ describe("S3 explorer UI", () => {
       '.s3-object-item[data-key="notes.txt"]',
     );
     expect(txtRow?.querySelector(".s3-kind-badge.kind-text")).toBeTruthy();
+  });
+
+  test("日本語では表示の切替と種別バッジも日本語になる", async () => {
+    document.documentElement.lang = "ja";
+    try {
+      const view = await mountExplorer({ getText: () => dbText("ja") });
+      await waitFor(() => !!view.sidebarSlot.querySelector(".s3-object-item"));
+      const seg = [
+        ...view.sidebarSlot.querySelectorAll(".s3-view-seg button"),
+      ].map((button) => button.textContent);
+      expect(seg).toEqual(["一覧", "フォルダ"]);
+      const badge = view.sidebarSlot.querySelector(
+        '.s3-object-item[data-key="a.png"] .s3-kind-badge',
+      );
+      expect(badge?.textContent).toBe("画像");
+      expect(badge?.getAttribute("title")).toBe("PNG 画像");
+    } finally {
+      document.documentElement.lang = "";
+    }
   });
 
   test("Explorer に切り替えると List 専用の検索/ソート行が hidden になる", async () => {
