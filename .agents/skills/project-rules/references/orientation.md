@@ -89,9 +89,13 @@
 再起動したときはコンソールに `server source changed; restarting preview server` が出る。
 **出ていないなら再起動していない。**
 
-## 下パネル（Terminal / Tools）の 2 モード
+## 下パネル（Tools / Search）の 2 モード
 
-画面下のパネルには**仕組みが根本的に違う 2 モード**がある。どちらの話をしているかを
+画面下のパネルの中身は **Tools と Search だけ**。ターミナルはメインの面のタブにあり、
+下パネルには置かない。開閉の保存キー `APP_SETTINGS.terminalPanelOpen` は、以前ターミナルを
+置いていた頃の名前を互換のために残したもので、いまは下パネル全体の開閉を表す。
+
+下パネルには**仕組みが根本的に違う 2 モード**がある。どちらの話をしているかを
 決めずにレイアウトを触ると必ず壊れる。切り替えは `[data-panel-layout]` のボタン、
 保存先は `APP_SETTINGS.appPanelDocked`、body の `app-panel-docked` クラスで表現される。
 
@@ -121,15 +125,18 @@ global の `my-reuse-first` に従う。ここに置くのは**このリポジ�
 | やりたいこと | 既にあるもの |
 |---|---|
 | ドラッグでサイズを変えるハンドル | `core/drag-resizer.ts` `attachDragResizer`（5 箇所が共有） |
-| 変えたサイズを覚える | `core/stored-size.ts` `readStoredSize` / `writeStoredSize` |
+| 変えたサイズを覚える | `core/stored-size.ts` `readStoredSize` / `writeStoredSize`（保存領域の失敗は結果の型で返る。既定値を使うときは `reportStoredSizeFailure` で操作ごとに 1 回 console.error） |
 | アイコン SVG | `core/icons.ts` の path 定数 + `iconSvg()` |
 | 確認・入力ダイアログ | `views/ui-dialog.ts` `showConfirmDialog` / `showAlertDialog` / `showPromptDialog` / `showFormDialog` |
 | 遅延バンドルの読み込み | `core/lazy-bundle.ts` `createBundleLoader` + `core/*-loader.ts` |
 | クライアント / サーバ共通の型 | `core/types.ts` |
-| キーボード操作・フォーカス制御 | `core/keymap.ts` / `core/focus-scope.ts` / `core/keyboard.ts` |
+| キーボード操作・フォーカス制御 | `core/keymap.ts` / `core/focus-scope.ts` / `core/keyboard.ts`（xterm とダイアログの中では画面のキーを実行しない判定は `isPageKeymapBlockedTarget`） |
 | スクロール連鎖の抑止 | `core/scroll-chaining.ts` `blockScrollChaining` |
 | あいまい検索 | `core/fuzzy-search.ts` |
 | 制御文字の検出 | `core/control-chars.ts` `hasControlCharacter` |
+| ファイルのパスを画面に出す・コピーする | `core/file-path-copy.ts` の `filePathDisplayText`（制御文字・書式文字を含むパスだけ可視化した表記。表示とコピーは同じものを使う）と `filePathClipboardText` / `fileReferenceClipboardText` |
+| コピーの失敗をボタンに出す | `core/copy-failure.ts` `showCopyFailure`（failed の見た目・title に理由・console.error） |
+| エラーを画面の文字にする | `core/error-detail.ts` の `formatErrorDetail`（cause の連鎖ごと）・`errorWithCause`・`responseErrorMessage`（操作・HTTP status・本文） |
 | tmux コマンド実行 | `server/tmux/command.ts` `runTmux` / `tmuxArgs` / `TMUX_FIELD_SEP` |
 | JSON をファイルに永続化 | `server/json-store.ts` `createJsonFileStore` |
 | CLI からサーバを叩く | `server/cli-helpers.ts` `requestJson` |

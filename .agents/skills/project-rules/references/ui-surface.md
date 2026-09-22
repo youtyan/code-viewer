@@ -26,7 +26,7 @@
 | 使用量 (5h / week の割合・バー・リセットまで・いつの値か) | `views/agents/usage-meter.ts` の `usageMeterRow` / `usageObservedText`。全体ボードのカードと最下段のポップオーバーが同じものを使う (場所で見え方を変えない) |
 | 全体ボードの操作 | 主の操作は `agents-primary`、枠つきの小さな操作は `agents-secondary`、文字だけは `agents-text-action`、アイコンは `agents-icon-action` (28px 角)。プロジェクトの見出しの開く・起動・⋯ は hover / フォーカスで出し、場所は最初から取る |
 | 設定の節 (Help ページの設定) | `views/viewer-settings.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: general / appearance / agents / accounts / advanced) を 1 つ付ける (付けないと全部の分類に出る)。左の列・検索欄・見出しは `help-page.ts` が描く。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (分類も切り替わる) |
-| ⌘K のパレットの行き先 (ファイル以外) | `views/search-palette-ui.ts` の `PaletteCommand` (種類 = projects / agents / actions)。中身は `app.ts` の `paletteCommands()`、操作は `PALETTE_ACTIONS` (キー割り当てのある操作は `keymap` を書けばキーが右に出て、実行も同じ `dispatchKeymapAction`)。ファイルの絞り込み・grep の側には足さない |
+| ⌘K のパレットの行き先 (ファイル以外) | `views/search-palette-ui.ts` の `PaletteCommand` (群 = projects / agents / sessions / actions。エージェントでないペインとシェルは sessions)。中身は `app.ts` の `paletteCommands()`、操作は `PALETTE_ACTIONS` (キー割り当てのある操作は `keymap` を書けばキーが右に出て、実行も同じ `dispatchKeymapAction`)。ファイルの絞り込み・grep の側には足さない |
 | 作業ツリーの一覧の行 | `views/worktree-view.ts`。何も選んでいないときは一覧だけの画面 (`body[data-worktree-overview]`、列は `--worktree-columns`)。行の「開く」はこのときだけ置き、選んだ後の狭い一覧は「…」だけ (選んだ瞬間にボタンを増やさない) |
 | Data の表の足元 | `views/database/table-grid.ts` の `db-grid-status` (件数) と `db-grid-pager` (見えている行の範囲と 1 画面ずつのページ送り)。表の行の高さ・列幅は TS (`ROW_HEIGHT`) が持つので、CSS は色と線だけ |
 | アイコン SVG | `core/icons.ts` の path 定数 + `iconSvg(className, paths)` |

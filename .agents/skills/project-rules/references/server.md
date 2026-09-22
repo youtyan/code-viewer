@@ -157,11 +157,47 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
   返すことを確かめる。入口を起動し直したときは、古い pid が居なくなった後に新しい入口が
   `/_entry/adopt` で新しい token を渡す。採用されなければ 10 秒後に裏は終わる。採用口が無い
   古い版の裏は再利用しない
+- `entry.json` は `entry/entry-file.ts` の `readEntryRecord` で読む。**ファイルが無い**は
+  `{ ok: true, registry: null }`、読めない・JSON が壊れている・必須欄が欠けるは
+  `{ ok: false, error }` であり、同じ扱いにしない。読めない記録は上書きも削除もせず理由を
+  表に出す。終了時の `removeEntryRecord` も `absent` / `other-owner` / `unreadable` を分け、
+  別の入口が書いた記録を消さない
+- 入口と裏の終了処理は `server/shutdown.ts` の `createProcessShutdown` に集約する。登録簿・
+  `entry.json`、SSE、シェル、巡回、watch、HTTP サーバの片付けは、途中の 1 件が失敗しても
+  残りを続け、失敗をスタックごと出して exit 1 にする。`uncaughtException` と
+  `unhandledRejection` も同じ終了処理を exit 1 で通す。片付けの失敗を log だけ出して
+  正常終了にしない
 
 ## クライアントとサーバで共有する型
 
 ワイヤ形式の型は `web-src/core/types.ts` に 1 つ置く。**view 側でレスポンス形状を
 再宣言しない**（片方だけ直って気付かない状態になる）。
+
+## サーバが返した URL をブラウザで使う前に検査する
+
+レスポンスの URL は、同じサーバが返したものでも移動・`fetch`・`img.src` へ直接渡さない。
+用途ごとの既存の検査を通し、違反は例外として表に出す。
+
+| 用途 | 検査 | 許すもの |
+|---|---|---|
+| プロジェクト・作業ツリーへ移る | `core/projects.ts` の `projectDestination` | 認証情報の無い loopback HTTP の根、または `/p/<16 桁の鍵>/`。移る前のアプリ内パスだけを足す |
+| ターミナル画像を fetch / 表示する | `core/terminal-images.ts` の `validateTerminalImageResponseUrls` | 現在の画面と同一オリジンの HTTP(S) URL。`images` の全件を検査する |
+| 差分の遅延読み込み・hunk 展開 | `views/diff-view.ts` の `validatedFileDiffUrl` | `apiUrl("fileDiff")` が示す内部の差分経路だけ。プロジェクト前置きの有無は両方扱う |
+| リポジトリの Web ページへのリンク | `core/repository-web-url.ts` の `buildRepositoryWebTarget` | `http:` / `https:` だけ（それ以外は null）。parse できない値は cause 付きで投げる（サーバは https か null しか返さないので、来たら契約違反） |
+
+`new URL()` が成功しただけでは安全の根拠にならない。プロトコル・オリジン・認証情報・
+許可した pathname を検査し、URL の配列は先頭だけでなく全要素を見る。
+
+## ブラウザ側で失敗から回復するとき
+
+原文の表示・layout 値・既定値に戻して続けてよい場面でも、黙って戻さない。元の例外を
+error オブジェクトごと `console.error` に出し、画面に「失敗して代わりを出している」印と理由を
+残す（既存の状態表示・`title`・failed の見た目）。読み込みの失敗は空や null に置き換えず、
+画面の既存のエラー表示に全文（`responseErrorMessage` の操作・HTTP status・本文と、
+`formatErrorDetail` の cause の連鎖）を出す。道具は `orientation.md` の「既にあるもの」
+（`core/error-detail.ts`・`core/copy-failure.ts`・`core/stored-size.ts` の `reportStoredSizeFailure`）。
+実例: `views/blame-view.ts` のエラー表示、`views/history-view.ts` の `fetchSingleCommit`、
+`core/markdown-preview.ts` の強調・Mermaid・リンクの decode、強調失敗の印 `gdp-highlight-failed`。
 
 ## 制御文字をソースに直書きしない
 

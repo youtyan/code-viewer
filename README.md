@@ -16,8 +16,8 @@ Requires Node.js 20 or newer. Development uses
 - Keep files and screens open as tabs in the top row (there is no header row
   above it). The project name, its branch and six view icons (Files / Diff /
   History / Worktrees / Data / Work log, with the name and key on hover) sit
-  at the head of the file tree, or at the left end of the tab row when the
-  tree is hidden. A single click opens a file in a preview tab (italic) that
+  fixed at the head of the left column, so switching tabs never moves them;
+  they move to the left end of the tab row only when you fold the left column. A single click opens a file in a preview tab (italic) that
   the next file replaces; double-click or **Keep open** keeps it. Diff /
   History / Worktrees / Data / Work log each have one tab that comes back as
   you left it. Files is not a tab: the folder view is what the left side shows
@@ -84,12 +84,14 @@ Requires Node.js 20 or newer. Development uses
   deleting one removes its folder from disk and keeps the branch.
 - Keep your projects and their agents in the left sidebar on every screen:
   registered projects first, in your order, then projects found in tmux that
-  are not registered. Rows never reorder when states change; click a project
-  name to switch to it in the same tab (an unregistered one is registered
-  first), click an agent to open its pane in a terminal tab of the main area.
-  The sidebar
-  folds away and its width, folding and the panel height follow you across
-  projects.
+  are not registered. Rows never reorder when states change. Each project
+  heading keeps its state mark, ＋ and … controls visible; each agent row shows
+  its state, kind, task title and elapsed time. Click a project name to switch
+  to it in the same tab (an unregistered one is registered first), or click an
+  agent to open its pane in a terminal tab of the main area. Alt+click or the
+  row menu opens it in the opposite pane, splitting a single pane to the right.
+  The sidebar folds away and its width, folding and the panel height follow you
+  across projects.
 - See every coding agent running in tmux on this machine on the All agents
   board (the button next to Projects in the sidebar, or `g a`), grouped by
   project (the git repository of each pane's folder; worktrees fold into their
@@ -118,11 +120,13 @@ Requires Node.js 20 or newer. Development uses
   shared) or register one you already
   have, showing what will be created and linked first. Sign in once per account
   with the official command, opened in a new tmux window. The Agents list then
-  shows which account each agent runs with, a band of account cards with the
-  5-hour and weekly usage (codex from its session logs; claude through an
-  optional status line wrapper that returns your status line unchanged), and
-  New agent starts claude or codex with a chosen account and project in a new
-  tmux window.
+  shows which account each agent runs with, a band of account cards with every
+  quota window present in the latest record and its reset time (codex from its
+  session logs; claude through an optional status line wrapper that returns
+  your status line unchanged), and New agent starts claude or codex with a
+  chosen account and project in a new tmux window. Missing windows are not
+  invented; when one config directory holds records from two accounts, the card
+  keeps the newest values and adds a Mixed note that says how to separate them.
 - Register your projects so they stay in the Agents list (in your order) even
   with no agent running, and switch between them from the project name at
   the head of the file tree (`p`) or from the left sidebar on any screen. One
@@ -131,7 +135,8 @@ Requires Node.js 20 or newer. Development uses
   shells and unread marks carry over, and reload, back/forward and bookmarks
   return to the same project and screen. Each project is shown by its own
   process that code-viewer starts the first time you open it (and stops when
-  code-viewer exits); processes it started can be stopped from the list. Theme,
+  code-viewer exits or after the configured idle period); processes it started
+  can be stopped from the list. Theme,
   language, font sizes, key bindings and notifications are shared by all
   projects, so switching does not change how it looks.
 - Open files directly from the repository or diff view, including text-like
@@ -200,8 +205,8 @@ Requires Node.js 20 or newer. Development uses
   the agent. The same terminal moves to the other side with its screen and
   half-typed input. Images the agent writes are listed on a shelf beside the
   terminal; a click opens them in an image tab (on the other side when split),
-  Alt+click in the full-screen viewer. The palette (`Ctrl+K`) lists agents,
-  shells and plain tmux panes under Agents & sessions.
+  Alt+click in the full-screen viewer. The palette (`Ctrl+K`) lists agents
+  under Agents, and shells and plain tmux panes under Sessions.
 - Terminal status combines lifecycle reports with priority-based matching of
   the live terminal title and recent visible lines. Matching rules can report
   working, waiting, idle, or keep the previous state. A target is tracked only

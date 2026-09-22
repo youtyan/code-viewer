@@ -43,7 +43,7 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 | 全画面共通の取り直し・未読・通知・タブのタイトル | `views/agents/agent-monitor.ts` |
 | アカウントの帯（一覧の上）と、作る・ログイン・起動の画面 | `views/agents/accounts-band.ts`・`accounts-dialogs.ts` |
 | 設定の「エージェントの通知」「エージェント連携」「アカウント」の節 | `views/viewer-settings.ts`・`views/agents/agent-hooks-settings.ts`・`accounts-settings.ts` |
-| 中央上の行の左端のプロジェクト名 = プロジェクトの切替（`p`） | `views/projects/project-switcher.ts`（サイドバー・全体ボードと共有する操作は `project-actions.ts`、⋯ のメニューは `project-menu.ts`） |
+| 左の列の頭（`#left-head`。左の列を畳んだときだけタブ列の左の `#tabs-lead`）のプロジェクト名 = プロジェクトの切替（`p`） | `views/projects/project-switcher.ts`（置き場所は `views/sidebar.ts` の `placeSidebarToggle`、サイドバー・全体ボードと共有する操作は `project-actions.ts`、⋯ のメニューは `project-menu.ts`） |
 
 | サーバ側 | 役割 |
 |---|---|
@@ -85,29 +85,34 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 サイドバーは 2 つの区画に分ける。上 (「PROJECTS」) は登録したプロジェクトで、エージェントが
 居なくても常に 1 行。下 (「tmux で検出」) は未登録でエージェントが居るもの。起動・終了で
 出入りするのは下の区画だけで、上の行の位置は動かない。0 件なら下の区画ごと出さない。
-見出しの絵は、人の番のもの (入力待ち > 完了・未読) があればその印、無ければフォルダ、サーバを
-起こしている最中は回る点線と「起動中…」。畳んでいても中に何があるか分かるのはこの印で、
-件数の札は出さない (件数は最下段)。
-選択の見た目は 2 段: いま見ているプロジェクトの見出しは控えめな面だけ、ターミナルで開いている
-エージェントの行が強い選択 (面 + 細い枠 + 内側の光)。下パネルの見出しの行には、映しているペインの
-種類・作業内容・状態と、そのプロジェクト (この画面のプロジェクトならブランチ、作業ツリーなら
-その名前) を出す (`app.ts` の `renderPanelContext`)。ターミナルのセッションの一覧は既定で畳む
-(エージェントはサイドバーから開けるので、役目が重なる一覧を常に出さない)。
+プロジェクト見出しの印は、人の番のもの（入力待ち > 完了・未読 > 作業中）があればその印、
+無ければフォルダで、サーバを起こしている最中だけ回る点線と「起動中…」を優先する。
+見出しは `+` と `⋯` の幅を常に確保し、畳んでいてもこの印で中の状態を伝える（件数は最下段）。
+エージェントの行は状態の印・種類・作業内容・経過時間・未読を出す。経過時間は
+変わった瞬間を見たもの（`updatedAt` が 0 でない）だけに出し、見始めてからの下限しか
+分からないものは「—」にしてツールチップに下限を出す（`views/agents/agents-sidebar.ts` の `ageText`）。
+選択の見た目は 2 段で、いま見ているプロジェクトの見出しは控えめな面だけ、メインの面で
+開いているエージェントの行が強い選択（面 + 細い枠 + 内側の光）。
 
 **ターミナルはメインの面のタブでも映す。** 決まりは次のとおり。
 
-- エージェントを開く既定はタブ (`app.ts` の `openAgentPane`。サイドバー・パレット・全体ボード・
-  通知・最下段)。サイドバーの Alt+クリックと行の右クリックが下パネル。経路はどちらも
-  `/_tmux/open` (ペイン → そのセッションのシェル) で、タブの中身はシェル (`shell-…`)
-- xterm は `views/terminal/terminal-view.ts` の枠 (`ScreenSlot`) ごとに 1 つで、枠はパネル用と、メインの面の左右それぞれの 3 つ。
-  **同じシェルを 2 か所に描かない**: タブのあるシェルはパネルでは映さず、一覧に印を付ける。
-  タブ ⇄ パネル、左の面 ⇄ 右の面の移動は枠を入れ替えて DOM の親を変えるだけ (attach し直さない)。
-  画像の棚は枠の一部なので一緒に移る
+- メインの面は 1 面か左右 2 面。左はファイルと画面を含む全種類、右は terminal と image だけを
+  置ける（`core/main-tabs.ts` の `canPlace`）。Files はタブではなく、左で何も選んでいないときの本文
+- タブ列の `+` は `app.ts` の `openNewTabMenu` / `newTabMenuItems` が作る。ファイル、新しいシェル、
+  既存のシェルと tmux ペインを開き、全プロジェクトの一覧へも移れる
+- エージェントを開く既定は現在の面のタブ（`app.ts` の `openAgentPane`。サイドバー・パレット・
+  全体ボード・通知・最下段）。サイドバーの Alt+クリックと、行の右クリックのメニューの項目は
+  反対のメインの面に開き、1 面なら右の面を作る（`agents-sidebar.ts` の `openPane(pane, "opposite")`）。経路はどちらも `/_tmux/open`（ペイン → そのセッションのシェル）で、
+  タブの中身はシェル（`shell-…`）
+- xterm は `views/terminal/terminal-view.ts` の枠（`ScreenSlot`）ごとに 1 つで、枠はメインの面の
+  左右それぞれの 2 つ。**同じシェルを 2 か所に描かない**。左の面 ⇄ 右の面の移動は枠を
+  入れ替えて DOM の親を変えるだけ（attach し直さない）。画像の棚は枠の一部なので一緒に移る
 - 棚の項目とターミナルの画像パスを押すと画像のタブで開く (2 面なら反対の面、`other-if-split`)。
   覆い (拡大表示) は Alt / Shift + クリックか、棚の項目の右クリックのメニュー
-- URL の `?terminal=<shell>` は「映しているシェル」。そのシェルのタブがあればタブを前面に、
-  無ければパネルで映す。パネルの開閉は URL に載せずユーザー単位の設定 `terminalPanelOpen`
-- ターミナルのタブを閉じても、シェルもエージェントも止めない (止めるのは今までの場所だけ)
+- URL の `?terminal=<shell>` は、そのシェルのタブを前面にする。下パネルは Tools / Search 専用で、
+  開閉は URL に載せない。互換性のため名前を保つ設定 `terminalPanelOpen` は下パネル全体の開閉を表す
+- ターミナルのタブを閉じても、シェルもエージェントも止めない。止める操作はタブの右クリック
+  メニューの「セッションを停止」で、確認してから行う
 - シェルの端末名 (`tty`) はシェルを作った直後から 2 秒まで `ps` で取り直す。まだ空なら、
   シェルとペインの対応 (`shownInShell`) を調べるたびに再取得し、取れた値を覚える。
   同じ tmux セッションをもう一度開く判定は、TTY より先にサーバが覚えた接続先を使う。
@@ -130,8 +135,9 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
   届くので、`progress` が `stop` より遅れて着くことがある
 - 状態はサーバのメモリにだけ持つ。サーバを再起動すると消え、次の申告と巡回で入り直る
   （古い状態をディスクから戻すと、終わったものを「待ち」と出す害のほうが大きい）
-- tmux の pane id はサーバを起動し直すと再利用される。巡回ごとに tmux の pid と開始時刻
-  （得られなければ socket の inode と ctime）を世代として読み、状態・画面観測・未読の鍵は
+- tmux の pane id はサーバを起動し直すと再利用される。巡回ごとに `tmux/command.ts` の
+  `readTmuxServerGeneration` で pid と開始時刻（得られなければ socket の inode と ctime）を
+  世代として読み、状態・画面観測・未読の鍵は
   **世代 + pane id** にする。世代が変わったら state・seen・unread・前回一覧を一緒に捨てる。
   フックの pane id は、その時点の世代へ付く
 
@@ -151,7 +157,7 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 |---|---|
 | `ACTIVITY_POLL_INTERVAL_MS`（1.5 秒） | 状態が変わってから一覧に出るまでを 5 秒以内にするため。作業中 → 待機は「待機の表示を 2 回続けて見て」決まるので、2 周 + 画面側の取り直し（`AGENT_MONITOR_INTERVAL_MS`）がそこに収まる値 |
 | `ACTIVITY_IDLE_POLL_INTERVAL_MS`・`ACTIVITY_UNWATCHED_AFTER_MS` | プロジェクトごとにサーバが立つので、誰も見ていないサーバまで速く回すと tmux の呼び出しがサーバの数だけ増える（1 本で毎秒約 45 回を実測）。一覧の取得が来ない間は遅く回す。フックの申告は遅くしない |
-| `ACTIVITY_CAPTURE_CONCURRENCY`（8）・`ACTIVITY_SWEEP_TIMEOUT_MS`（6 秒） | capture は固定数の worker で並べ、1 回の巡回を期限内で終える。期限を越えたペインは前回の状態を保ち、`errors` に理由を残す。停止へ丸めない |
+| `ACTIVITY_CAPTURE_CONCURRENCY`（8）・`MAX_PANES_PER_SWEEP`（24）・`ACTIVITY_SWEEP_TIMEOUT_MS`（6 秒） | capture は固定数の worker で並べ、1 周で扱う数も制限し、巡回を期限内で終える。期限を越えたペインは前回の状態を保ち、`errors` に理由を残す。停止へ丸めない |
 | `activityIsStale`（`noteAgentListWatched`） | 古ければ巡回を起動するが、一覧の要求は待たせない。`/_agent/overview` の `observedAt` に最後の巡回完了時刻を返し、0 または古い値なら利用側が古さを判断できるようにする |
 | `OVERRIDE_CHANGE_STREAK` を `OVERRIDE_MOTION_MS` から導く | 守りたいのは「12 秒動き続けた」という**時間**。回数の定数のままだと、巡回を 3 秒から 1.5 秒にした時点で 6 秒に縮んでいた。**巡回の間隔を変えるなら、回数で決めている値が無いか探す** |
 
@@ -277,6 +283,10 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
   token や version が無い相手、pid・ポートを使い回した別プロセスには送らない
 - 本人確認の失敗は不一致の項目を全部記録する。ただし token とフックの prompt 本文は
   失敗記録へ書かない。prompt を含む POST 本文も本人確認が終わるまで作らない
+- `/_agent/action` は本文を 16 KiB までに制限し（超えたら 413）、`lastPrompt` と `note` は
+  それぞれ先頭 2,000 文字に切り詰める（`server/terminal/handle.ts` の `MAX_AGENT_ACTION_BODY_BYTES`・
+  `textField`）。`at` は 0 以上で現在時刻以下の安全な整数だけを受け入れ、違反は状態を変える前に
+  400 で返す
 - 1 つあたり `REPORT_TIMEOUT_MS` で打ち切る。1 つが応答しなくてもほかを止めない
 - **どう失敗しても終了コードは 0。** エージェントをブロックする終了コードを返さない
 - 失敗は捨てず、`<状態ディレクトリ>/agent-hooks/failures.jsonl` に時刻・フック・サーバ・
@@ -380,8 +390,9 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 - 登録したアカウントの削除は確認画面を出し、登録簿からだけ外す。管理下の設定ディレクトリにも
   認証・履歴があるため、code-viewer は消さない。動いているエージェントも止めず、一覧では
   未登録の設定ディレクトリとして扱う
-- 表示名の変更と、別の登録アカウントを「既定」にする操作は無い。表示名を変えるときは外して
-  同じディレクトリを登録し直す。「既定」は選べる属性ではなく、環境変数を渡さない固定の経路
+- 表示名の変更はまだ無い（11 の後回し）。変えるときは外して同じディレクトリを登録し直す
+- 別の登録アカウントを「既定」にする操作は**作らない**（決定）。「既定」は選べる属性ではなく、
+  環境変数を渡さない `~/.claude` / `~/.codex` という固定の経路
 
 ### プロセスの環境変数（`server/accounts/process-env.ts`）
 
@@ -409,7 +420,10 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 reset が古い reset より許容差を超えて前へ戻るか、古い窓が新しい観測時刻にも終わっていない
 のに別の reset が同時に見えている場合だけ。古い窓が終わった後、5 時間・週の次の reset へ
 進むのは正常な更新であり、混在にしない。`primary` / `secondary` という位置から窓の種類を
-推測せず、各要素の `window_minutes` で種類を決める。記録に無い窓は補わず、表示もしない。
+推測せず、各要素の `window_minutes` で種類を決める。画面は応答の `windows` にある窓だけを
+表示し、記録に無い 5 時間・週の窓を補わない。混在と判定したときは、観測時刻の新しい記録の
+値を出し、応答の `mixed` に古い側の窓を載せ、カードに「混在」の札（ツールチップに古い側の窓と、
+アカウントごとに設定ディレクトリを分ける案内）を付ける。
 
 ---
 
@@ -549,7 +563,16 @@ find web-src -name '*.ts' -not -path 'web-src/server/*' -not -path 'web-src/test
 読み書きする。読んで・変えて・書く間は `server/file-lock.ts` のロックで囲む
 （`createJsonFileStore` の直列化はプロセスの中だけ）。持ち主のプロセスが居ない・古すぎる
 ロックは奪う。**ユーザー単位のファイルを足すときは、このロックと `registry-file.ts` の
-読み方を使う。**
+読み方を使う。** 既存の書き方は次のとおり。
+
+- フックと statusLine の設定変更は `commitJsonSettingsChange` がリンク先の実パスの
+  `<realPath>.lock` を取り、ロック内で読み直して、確認時の hash・実パス・ファイル identity を
+  全て照合してからバックアップと置換を行う
+- アカウント登録簿は `updateAccountRegistry` が実パスの `<realPath>.lock` を取り、ロック内で
+  読み直してから変更・保存する
+- 画面ルールの移行・再読込・保存・初期化は `withAgentScreenRulesLock` という同じ実パスの
+  ロックを共有する。保存と初期化は、本体の変更より先に移行済みの印を書き、途中で止まっても
+  古いリポジトリのルールが復活しないようにする
 
 ### 古い版と混ざったとき
 
@@ -575,7 +598,7 @@ find web-src -name '*.ts' -not -path 'web-src/server/*' -not -path 'web-src/test
 | `<状態>/agent-usage/` | statusLine を包むスクリプト・claude の使用量・`failures.log` | 同上 |
 | `<状態>/projects.json` | プロジェクトの登録簿 | 同上 |
 | `<状態>/settings.json` | 全プロジェクト共通の設定 | 同上 |
-| `<状態>/main-tabs.json` | メインの面のタブの配置をプロジェクト (根のパス) ごとに。`/_state/tabs`、`server/main-tabs-store.ts`。読み戻しの検査は画面 (`core/main-tabs.ts` の `parseLayout`) | 同上 |
+| `<状態>/main-tabs.json` | メインの面のタブの配置をプロジェクト（根のパス）ごとに。ファイルの包みは version 1、各配置は version 2。配置 version 1 も読み、Files のタブを除き、右の route タブを左へ移して version 2 にする。`/_state/tabs`、`server/main-tabs-store.ts`、`core/main-tabs.ts` の `parseLayout` | 同上 |
 | `<状態>/server-logs/` | code-viewer が起こしたサーバ・裏の出力（起動に失敗したとき・落ちたとき末尾を理由に添える） | 同上 |
 | `<状態>/entry.json`・`entry.json.start.lock` | 動いている入口の `{url, pid, token, version, started_at}` と起動の排他 | 同上 |
 | `<状態>/agent-screen-rules.json`・`agent-screen-rules.migrated` | 画面ルールの保存済み上書き（ユーザー単位）と、リポジトリから写した・保存した・戻した印 | 同上 |
@@ -617,7 +640,9 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 | 設定ファイルのリンクを 1 段目だけ見て「書けない」と誤って報告した | 4 の「最後までたどった先で判断する」 |
 | 作業中に `web-src/core`・`web-src/server` を編集するたび、開発者が `pnpm dev` で使っているサーバが再起動した（状態の記録・見始めた時刻が消え、`serverInstance` が変わる）。`pnpm dev` が入口になってからは、入口の再起動のたびに裏（開いているプロジェクト全部）も起き直し、シェルと未読も消える | 何を編集すると再起動するかは `orientation.md` の dev サーバの表。検証は別ポート・一時ディレクトリで起こした自分のサーバで行う（10）。使われているサーバの横で core / server を編集するなら、回数を減らし、編集したことを伝える |
 | `biome check --write` を広い範囲に掛け、無関係なファイルの import の並びまで書き換えた（2 回） | `orientation.md` のコマンドの表。対象のファイルだけに掛ける |
-| `TMUX` 変数が残ったシェルから `tmux` を実行し、開発者の tmux を読んだ | 検証は専用のソケット（`TMUX_TMPDIR` か `-L`）で、`TMUX`・`TMUX_PANE` を外して行う（10） |
+| `TMUX` 変数が残ったシェルで広いパターンのプロセス終了と tmux のサーバ終了を行い、利用者の tmux まで止めた | `pkill -f`・`killall` と tmux の `kill-server` / `kill-session` / `kill-window` / `kill-pane` は使わない。専用ソケットを明示した読み取りだけを行い、止めるのは自分が起動時に控えた pid への `kill <pid>` だけ（10） |
+| 分離した tmux の検証で AI CLI の裸のコマンド名を起動し、PATH 上の本物を実行した | PATH に同名ファイルを置くだけにせず、起動コマンドには自分で作った偽実行ファイルの絶対パスを設定する（10） |
+| 2 つのアカウントに同じ設定ディレクトリを使い、使用量の記録が混ざった | 登録時の実パス重複検査を通し、検証ではアカウントごとに別の設定ディレクトリを作る。使用量は `observedAt` と窓ごとの reset で混在を判定し、最新の記録の値に「混在」の札と、混ざった側の窓・専用ディレクトリへ分ける案内を付ける（5。`server/accounts/usage.ts` の `mixed`、`views/agents/usage-meter.ts` の `usageMixedText`） |
 
 ---
 
@@ -626,41 +651,45 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 実データ（利用者の tmux・エージェントの設定・状態ディレクトリ・登録簿）に触らずに、
 この領域を動かして確かめる手順。パスは例。自分の一時ディレクトリに読み替える。
 
-1. **一時ディレクトリを 1 つ作り、HOME ごと差し替える。** HOME を差し替えると
-   `~/.cache/code-viewer` と `~/.local/state/code-viewer` もその中になる
+1. **一時ディレクトリを 1 つ作り、`HOME`・code-viewer の状態・登録簿・tmux を逃がす。**
+   `HOME` を差し替えるのは、既定のアカウント（`~/.claude`・`~/.codex`）とその使用量・フックの
+   設定を読み書きさせないため。`PATH` は差し替えない（限った `PATH` では git や tmux が
+   見つからない・別の git を拾うことが実際にあった）
 
    ```sh
-   SB=$(mktemp -d)
-   mkdir -p "$SB/home" "$SB/bin" "$SB/libexec" "$SB/tmux"
-   export HOME="$SB/home" TMUX_TMPDIR="$SB/tmux" SHELL=/bin/sh PATH="$SB/bin:$PATH"
-   unset TMUX TMUX_PANE XDG_STATE_HOME CLAUDE_CONFIG_DIR CODEX_HOME \
-     CODE_VIEWER_TEST_STATE_DIR CODE_VIEWER_TEST_SERVER_REGISTRY_DIR
+   CV_SANDBOX_DIR=$(mktemp -d)
+   mkdir -p "$CV_SANDBOX_DIR/home" "$CV_SANDBOX_DIR/state" "$CV_SANDBOX_DIR/registry" \
+     "$CV_SANDBOX_DIR/tmux" "$CV_SANDBOX_DIR/libexec" "$CV_SANDBOX_DIR/work/sample-app"
+   export HOME="$CV_SANDBOX_DIR/home"
+   export CODE_VIEWER_TEST_STATE_DIR="$CV_SANDBOX_DIR/state"
+   export CODE_VIEWER_TEST_SERVER_REGISTRY_DIR="$CV_SANDBOX_DIR/registry"
+   export TMUX_TMPDIR="$CV_SANDBOX_DIR/tmux"
+   unset TMUX TMUX_PANE XDG_STATE_HOME CLAUDE_CONFIG_DIR CODEX_HOME
    ```
 
-   `TMUX_TMPDIR` を変えると tmux のソケットが別になり、利用者の tmux が見えなくなる。
-   `TMUX` を外さないと、tmux は環境変数のソケットを優先して利用者の tmux に繋ぐ
-2. **偽の `claude` / `codex` を作る。** 種類はペインの前面のコマンド名で決まる
-   （`agentKindOf`）ので、「`claude` という名前で動き続ける実行ファイル」が要る
+   `TMUX_TMPDIR` はアプリが起動する tmux を分離し、`TMUX` を外すのは親のソケットへの接続を
+   防ぐ。tmux を直接調べる必要があるときも、`env -u TMUX -u TMUX_PANE tmux -S <この検証で
+   作ったソケットの絶対パス> …` という読み取り専用の形だけを使う
+2. **偽のエージェント実行ファイルを作り、起動コマンドにその絶対パスを設定する。** 種類は
+   ペインの前面のコマンド名で決まる（`agentKindOf`）ので、調べる種類と同じ basename の
+   実行ファイルが要る
 
    ```sh
-   cp "$(node -p process.execPath)" "$SB/libexec/claude"
-   cat > "$SB/bin/claude" <<'EOF'
-   #!/bin/sh
-   # 必要なら auth status / auth login の偽の応答をここで返す
-   exec "$(dirname "$0")/../libexec/claude" -e 'setInterval(() => {}, 1 << 30)'
-   EOF
-   chmod +x "$SB/bin/claude"
+   cp "$(node -p process.execPath)" "$CV_SANDBOX_DIR/libexec/claude"
    ```
 
-   node の写しにしているのは経緯がある。`/bin/sleep` の写しは macOS に殺され
-   （SIGKILL）、実行ファイルを作るコンパイラも使えなかった。node の写しは動いた。
-   画面の状態を変えるには、そのペインの tty に文字を書くか、画面を描くスクリプトを
-   偽のエージェントとして動かす
+   Settings → Accounts → Launch commands には
+   `$CV_SANDBOX_DIR/libexec/claude -e 'setInterval(() => {}, 1 << 30)'` のように絶対パスを入れる。
+   `claude` のような裸の名前は、PATH 上の本物を起動するので使わない。node の写しにしているのは、
+   basename を保ったまま動かせるため。画面の状態を変えるには、画面を描く自作スクリプトを
+   同じ絶対パスから動かす
 3. **フィクスチャの repo を作り、別ポートでサーバを起こす**（`sample-app` のような中立な
    名前。利用者のサーバのポートを使わない）
 
    ```sh
-   node dist/code-viewer.js --cwd "$HOME/work/sample-app" --port <空いているポート>
+   node dist/code-viewer.js --cwd "$CV_SANDBOX_DIR/work/sample-app" \
+     --port <空いているポート> &
+   CV_SERVER_PID=$!
    ```
 
    アイドル停止を確かめるなら `--idle-stop 20` のように短くする（止めた・起こし直したは
@@ -669,10 +698,10 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
    複数のサーバ・プロジェクトの切替を見るなら、repo を 2〜3 個作って同じように起こす。
    フックの申告は、設定ファイルに書かれたコマンドを公式どおりの入力（フックに渡される
    JSON）で `sh -c` に渡して手で実行する
-4. 終わったら、起こしたサーバ・専用の tmux サーバ・一時ディレクトリを全部片付ける
-5. `pnpm run verify` と `npm pack --dry-run` は、登録簿と状態ディレクトリを一時ディレクトリに
-   向けて実行し（`CODE_VIEWER_TEST_SERVER_REGISTRY_DIR`・`CODE_VIEWER_TEST_STATE_DIR`）、
-   前後で実データの更新時刻が変わっていないことを記録する
+4. 終わったら、自分が起動時に控えた `CV_SERVER_PID` だけを `kill "$CV_SERVER_PID"` で止める。
+   分離した tmux は終了操作をせず残す。一時ディレクトリも、その tmux が残っている間は消さない
+5. `pnpm run verify` と `npm pack --dry-run` の逃がし方は `testing.md` の vitest 事情の表の
+   後ろ。前後で実データの更新時刻が変わっていないことを記録する
 
 画面の確認そのもの（DOM と `getComputedStyle` を読む・ライトとダーク・密度）は
 `diagnose.md` の「UI を実画面で確認する」。
@@ -685,7 +714,7 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 |---|---|
 | 使っていない裏の自動停止 | 入った（7）。止めるまでの時間は CLI の `--idle-stop` だけで、設定画面には出していない。入口を起動し直すと数え直す（前の入口が数えていた時間は引き継がない）ので、拾い直した裏はそこから `--idle-stop` 秒後に止まる |
 | 未読 | サーバのメモリ（3）。サーバの再起動では消える |
-| アカウントの表示名の変更・既定の変更 | 無い。表示名は外して同じディレクトリを登録し直す。既定は環境変数を渡さない固定のアカウントで、別の登録アカウントへ付け替えない |
+| アカウントの表示名の変更 | 足す価値あり（後回し）。いまは外して同じディレクトリを登録し直す。既定の付け替えは作らないと決めた（5 の登録・削除・表示名） |
 | 起動時に `--settings` でフックを渡す | 作っていない。設定ファイルが書けない人向けの別の入れ方になりうる |
 | tmux の巡回を 1 本にまとめる | 入口の下では入口の 1 本だけ。`--standalone` と古い版が並ぶ間はそれぞれが巡回する（見られていないサーバを遅くする仕組みで抑える） |
 | 前置きの無い古いブックマーク | 最後に開いたプロジェクトへ転送するので、別のプロジェクトを最後に開いていればそちらで開く |
@@ -783,6 +812,8 @@ code-viewer 自身のファイルの置き場所を作っている箇所が無�
 | フックの設定ファイルに code-viewer の場所を直接書く | 版が上がるたびに設定ファイルが変わり、codex が信頼し直しを求める |
 | 新しい置き場所を `codeViewerStateDir()` の外に、逃がす変数なしで作る | テストとスモークが実データを書き換える（実際に 160 件消えた） |
 | `send-keys` でエージェントを起動する | 利用者のシェルの履歴と入力に混ざる |
+| 広いパターンでプロセスを止める / tmux のサーバ・セッション・ウィンドウ・ペインを終了する | 利用者の作業まで止める。止めてよいのは、自分が起動時に pid を控えたプロセスだけ |
+| 検証用 tmux で AI CLI の裸のコマンド名を起動する | PATH 上の本物を実行する。自作した偽実行ファイルの絶対パスだけを使う |
 | ターミナルの文字の上に画像やツールチップを重ねる | パスの下の行・入力欄・statusline が隠れる（実際に「見づらい」と言われて棚に移した） |
 | 端末に出たパスを `resolveTerminalImage` を通さずに読む・配る | 許可していない種類・大きさ・ファイルでないものを配る |
 | 使用量を「いつの値か」なしで出す / 読めないときに 0% と出す | 古い値や失敗を今の値として信じさせる |
