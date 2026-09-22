@@ -16976,10 +16976,23 @@ body.gdp-nav-resizing {
 }
 /* 面ごとのタブ列 (タブの並び + 右端の ＋ と分割)。2 面なら左は左の面の幅。 */
 .main-tabs-pane {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: stretch;
+}
+/* 2 面のとき、フォーカスのある面 (次に開くものが入る面) のタブ列の下端に、面の
+   幅いっぱいの線。前面のタブの上端の線 (.main-tab-focused) はタブの幅だけで
+   弱いので足す。タブの面の上に描く。1 面では出さない。 */
+body.main-split .main-tabs-pane.main-tabs-pane-focused::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2px;
+  z-index: 1;
+  background: var(--color-accent);
+  pointer-events: none;
 }
 /* 2 面の左の面のタブ列は左の面の幅 (右の列の上には伸ばさない)。タブ列は一覧の
    列の上もまたぐので、一覧の列の幅を足して面の境界にそろえる。 */

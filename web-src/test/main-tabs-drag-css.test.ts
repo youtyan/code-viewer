@@ -20,3 +20,33 @@ describe("main tabs while a tab is dragged", () => {
     expect(right(".main-split-drop")).toBe(right("#main-tabs"));
   });
 });
+
+// 2 面のとき、フォーカスのある面のタブ列の下端の線 (ui-surface.md の「タブの決まり」)。
+// happy-dom は ::after の計算値を返さない (要素の値が返る) ので、解決した宣言で見る。
+// 前面のタブの上端の線と同じ色・太さにする (値そのものは固定しない)。
+describe("the focused side mark while split", () => {
+  test("draws a line as wide as the pane, in the same colour and weight as the focused tab line", () => {
+    const rules = baseRules(loadStyleSheet());
+    const declarations = (selector: string) =>
+      cascadedDeclarations(rules, (candidate) => candidate === selector);
+    const line = declarations(
+      "body.main-split .main-tabs-pane.main-tabs-pane-focused::after",
+    );
+    const tabLine = declarations(".main-tab.main-tab-focused::before");
+    expect([
+      declarations(".main-tabs-pane").get("position"),
+      line.get("position"),
+      line.get("left"),
+      line.get("right"),
+      line.get("background"),
+      line.get("height"),
+    ]).toEqual([
+      "relative",
+      "absolute",
+      "0",
+      "0",
+      tabLine.get("background"),
+      tabLine.get("height"),
+    ]);
+  });
+});

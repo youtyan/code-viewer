@@ -56,7 +56,11 @@ export type TerminalViewDeps = {
     side: TabSide,
   ): void;
   /** 棚の画像を画像のタブで開く (既定の押し方)。 */
-  onOpenImage?: (image: TerminalImageRef, gallery: TerminalImageRef[]) => void;
+  onOpenImage?: (
+    image: TerminalImageRef,
+    gallery: TerminalImageRef[],
+    kept: boolean,
+  ) => void;
 };
 
 export type TerminalViewHandle = {

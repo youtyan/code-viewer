@@ -171,9 +171,16 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       deps.openPane(pane.id, destination);
       render(true);
     };
-    row.addEventListener("click", (event) =>
-      openHere(event.altKey ? "opposite" : undefined),
-    );
+    // ターミナルは 1 か所にしか置けず、仮にもならないので、中ボタン・⌘/Ctrl
+    // も 1 回押すと同じ (開くか前面に出す)。Alt は反対の面 (ui-surface.md の
+    // 「タブの決まり」の例外の表)。
+    const openBy = (event: MouseEvent) => {
+      if (event.button > 1) return;
+      event.preventDefault();
+      openHere(event.altKey ? "opposite" : undefined);
+    };
+    row.addEventListener("click", openBy);
+    row.addEventListener("auxclick", openBy);
     row.addEventListener("contextmenu", (event) => {
       event.preventDefault();
       showContextMenu(

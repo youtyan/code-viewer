@@ -123,7 +123,12 @@ export type TerminalScreenDeps = {
   /** 棚を畳んだ・開いた。保存は呼び出し側。 */
   setImageShelfCollapsed(collapsed: boolean): void;
   /** 棚の画像を画像のタブで開く。無ければ覆いで開く。 */
-  onOpenImage?: (image: TerminalImageRef, gallery: TerminalImageRef[]) => void;
+  /** kept なら固定のタブで (中ボタン・⌘/Ctrl・右クリックの「タブで開く」)。 */
+  onOpenImage?: (
+    image: TerminalImageRef,
+    gallery: TerminalImageRef[],
+    kept: boolean,
+  ) => void;
 };
 
 export type TerminalScreenHandle = {
@@ -596,9 +601,9 @@ export function createTerminalScreen(
     }
     const gallery = shelfGallery(shelfEntries);
     // 既定は画像のタブ (分割していれば隣の面)。覆いは Alt / Shift か右クリック。
-    if (mode === "tab" && deps.onOpenImage) {
+    if (mode !== "overlay" && deps.onOpenImage) {
       shelf.setOpened(entry.key);
-      deps.onOpenImage(entry.image, gallery);
+      deps.onOpenImage(entry.image, gallery, mode === "kept-tab");
       return;
     }
     const index = gallery.findIndex((image) => image.path === entry.key);
@@ -741,11 +746,19 @@ export function createTerminalScreen(
         text: link.candidate,
         decorations: { pointerCursor: true, underline: true },
         activate: (event) => {
-          // 修飾キー付きの押し方は xterm の選択などに任せる。Alt は覆いで開く。
-          if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+          // Shift は xterm の選択に任せる。Alt は覆い、⌘/Ctrl は固定のタブ
+          // (棚と同じ押し分け。ui-surface.md の「タブの決まり」)。
+          if (event.shiftKey) return;
           const current = shelfEntryByCandidate(shelfEntries, link.candidate);
           if (current)
-            openShelfEntry(current, event.altKey ? "overlay" : "tab");
+            openShelfEntry(
+              current,
+              event.altKey
+                ? "overlay"
+                : event.metaKey || event.ctrlKey
+                  ? "kept-tab"
+                  : "tab",
+            );
         },
         hover: () => {
           const current = shelfEntryByCandidate(shelfEntries, link.candidate);

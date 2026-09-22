@@ -98,10 +98,9 @@ import {
   resolveKeymapAction,
 } from "./core/keymap";
 import { isNativeLinkClick } from "./core/link-click";
+import { listColumnLayout, restoredListWidth } from "./core/list-column";
 import type { PaneSide, TabTarget } from "./core/main-tabs";
 import { createNetworkActivityTracker } from "./core/network-activity";
-import { listColumnLayout, restoredListWidth } from "./core/list-column";
-import type { TerminalTabProject } from "./core/terminal-tab-name";
 import { panelColumnAction } from "./core/panel-column-policy";
 import {
   clampPanelSize,
@@ -143,6 +142,7 @@ import {
   terminalImageExtension,
   validateTerminalImageResponseUrls,
 } from "./core/terminal-images";
+import type { TerminalTabProject } from "./core/terminal-tab-name";
 import { clampTerminalFontSize } from "./core/tmux";
 import { isToolId, type ToolId } from "./core/tools";
 import {
@@ -6536,9 +6536,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (pane) TAB_SHELL_PANES.set(session.id, pane);
       MAIN_TABS.openTerminal(session.id, side);
     },
-    onOpenImage: (image, gallery) => {
+    onOpenImage: (image, gallery, kept) => {
       IMAGE_REFS.set(image.path, { image, images: gallery });
-      MAIN_TABS.openImage(image.path, "other-if-split");
+      const open = () => MAIN_TABS.openImage(image.path, "other-if-split");
+      if (kept) MAIN_TABS.openingNewTab(open);
+      else open();
     },
   });
 

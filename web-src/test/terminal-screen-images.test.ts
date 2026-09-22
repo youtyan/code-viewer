@@ -370,7 +370,14 @@ beforeEach(() => {
   state.linkProvider = null;
   state.proposed = { cols: 80, rows: 24 };
   installFakes();
-  handle = createTerminalScreen({
+  handle = makeScreen();
+});
+
+/** 画面を作って文書に置く。extra で依存を足す (画像のタブを開く先など)。 */
+function makeScreen(
+  extra: Partial<Parameters<typeof createTerminalScreen>[0]> = {},
+): ReturnType<typeof createTerminalScreen> {
+  const screen = createTerminalScreen({
     trackLoad: (promise) => promise,
     actionHeaders: () => ({}),
     getText: () => terminalText("en"),
@@ -382,9 +389,11 @@ beforeEach(() => {
       shelfCollapsed = collapsed;
       collapsedChanges.push(collapsed);
     },
+    ...extra,
   });
-  document.body.append(handle.el);
-});
+  document.body.append(screen.el);
+  return screen;
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -668,6 +677,99 @@ describe("画面に出た画像パスと棚", () => {
     await flush();
 
     expect(shelfNames(handle)).toEqual([]);
+  });
+});
+
+// ui-surface.md の「タブの決まり」: 画像は 1 回押すと画像のタブ (仮)、中ボタン・
+// ⌘/Ctrl は固定のタブ、Alt / Shift は覆い。端末の中のリンクは Shift を選択に任せる。
+describe("画像の開き方 (棚と端末のリンク)", () => {
+  test.each([
+    {
+      name: "棚を押す",
+      where: "shelf",
+      type: "click",
+      init: {},
+      expected: "tab",
+    },
+    {
+      name: "棚を ⌘＋クリック",
+      where: "shelf",
+      type: "click",
+      init: { metaKey: true },
+      expected: "kept",
+    },
+    {
+      name: "棚を中ボタン",
+      where: "shelf",
+      type: "auxclick",
+      init: { button: 1 },
+      expected: "kept",
+    },
+    {
+      name: "棚を Alt＋クリック",
+      where: "shelf",
+      type: "click",
+      init: { altKey: true },
+      expected: "overlay",
+    },
+    {
+      name: "棚を Shift＋クリック",
+      where: "shelf",
+      type: "click",
+      init: { shiftKey: true },
+      expected: "overlay",
+    },
+    {
+      name: "リンクを押す",
+      where: "link",
+      type: "click",
+      init: {},
+      expected: "tab",
+    },
+    {
+      name: "リンクを Ctrl＋クリック",
+      where: "link",
+      type: "click",
+      init: { ctrlKey: true },
+      expected: "kept",
+    },
+    {
+      name: "リンクを Alt＋クリック",
+      where: "link",
+      type: "click",
+      init: { altKey: true },
+      expected: "overlay",
+    },
+    {
+      name: "リンクを Shift＋クリック",
+      where: "link",
+      type: "click",
+      init: { shiftKey: true },
+      expected: "none",
+    },
+  ])("$name → $expected", async ({ where, type, init, expected }) => {
+    handle.dispose();
+    const opened: string[] = [];
+    handle = makeScreen({
+      onOpenImage: (_image, _gallery, kept) =>
+        opened.push(kept ? "kept" : "tab"),
+    });
+    const source = await attachShell(SHELL);
+    source.emitOutput("wrote docs/out.png\n");
+    await flush();
+    const event = new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    if (where === "shelf")
+      shelfEl(handle)
+        .querySelector<HTMLButtonElement>(".terminal-image-shelf-open")
+        ?.dispatchEvent(event);
+    else linksAt(2)[0]?.activate(event, "docs/out.png");
+    const overlay = document.querySelector(".terminal-lightbox") !== null;
+    expect(overlay ? "overlay" : (opened[0] ?? "none")).toBe(expected);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
   });
 });
 

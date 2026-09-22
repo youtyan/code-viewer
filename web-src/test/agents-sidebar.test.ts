@@ -379,6 +379,27 @@ describe("agents sidebar actions", () => {
     expect(rows?.hidden).toBe(true);
   });
 
+  // ui-surface.md の「タブの決まり」の例外: ターミナルは 1 か所にしか置けず仮にも
+  // ならないので、中ボタン・⌘/Ctrl も 1 回押すと同じ。Alt は反対の面。右ボタンは開かない。
+  test.each([
+    ["click", "click", {}, [["%1", undefined]]],
+    ["Cmd+click", "click", { metaKey: true }, [["%1", undefined]]],
+    ["middle click", "auxclick", { button: 1 }, [["%1", undefined]]],
+    ["Alt+click", "click", { altKey: true }, [["%1", "opposite"]]],
+    ["right button", "auxclick", { button: 2 }, []],
+  ])("%s on an agent row opens %j", (_label, type, init, expected) => {
+    const opened: Array<[string, "opposite" | undefined]> = [];
+    const { root } = mount(withAgents, fakeActions(), (id, target) =>
+      opened.push([id, target]),
+    );
+    root
+      .querySelector<HTMLElement>('[data-nav-item="pane:%1"]')
+      ?.dispatchEvent(
+        new MouseEvent(type, { bubbles: true, cancelable: true, ...init }),
+      );
+    expect(opened).toEqual(expected);
+  });
+
   test("click, Alt+click, and the context menu use their respective targets", () => {
     const opened: Array<[string, "opposite" | undefined]> = [];
     const { root } = mount(withAgents, fakeActions(), (id, target) =>

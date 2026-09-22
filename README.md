@@ -41,7 +41,9 @@ Requires Node.js 20 or newer. Development uses
   path (Shift+F10 on a tab opens the same menu); drag to reorder; `g t` / `g T` /
   `g x` / `g 1`–`g 9` move and close from the keyboard. On the tab row, ←/→,
   Home and End move, Enter brings a tab to the front, Delete closes it and
-  Ctrl+Shift+PageUp / PageDown reorders it. Tabs that do not fit shrink down to 88px each (the name
+  Ctrl+Shift+PageUp / PageDown (or Ctrl+Shift+←/→, ⌘+Shift+←/→, **Move left** /
+  **Move right**) reorders it. With two sides, the focused side's tab row is
+  underlined across its width. Tabs that do not fit shrink down to 88px each (the name
   is shortened), then the row scrolls sideways and keeps the front tab in view.
   The tabs are remembered per project; the agent board,
   Tools, Settings & Help, terminals and terminal images stay open across projects. Files and screens
@@ -246,7 +248,7 @@ Requires Node.js 20 or newer. Development uses
   the agent. The same terminal moves to the other side with its screen and
   half-typed input. Images the agent writes are listed on a shelf beside the
   terminal; a click opens them in an image tab (on the other side when split),
-  Alt+click in the full-screen viewer. The palette (`Ctrl+K`) lists agents
+  a middle-click or ⌘/Ctrl+click in a kept one, Alt+click in the full-screen viewer. The palette (`Ctrl+K`) lists agents
   under Agents, and shells and plain tmux panes under Sessions.
 - Terminal status combines lifecycle reports with priority-based matching of
   the live terminal title and recent visible lines. Matching rules can report

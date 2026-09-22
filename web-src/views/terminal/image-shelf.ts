@@ -40,7 +40,8 @@ export type ImageShelfDeps = {
 };
 
 /** 棚の項目の開き方。既定はタブ。Alt / Shift を押しながらか、右クリックで覆い。 */
-export type ShelfOpenMode = "tab" | "overlay";
+/** tab は画像のタブ (仮)、kept-tab は固定のタブ、overlay は大きく開く覆い。 */
+export type ShelfOpenMode = "tab" | "kept-tab" | "overlay";
 
 export type ImageShelfHandle = {
   el: HTMLElement;
@@ -191,14 +192,24 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
       meta,
       url: undefined,
     };
-    open.addEventListener("click", (event) => {
+    // 1 回押すは画像のタブ (仮)、中ボタン・⌘/Ctrl は固定のタブ、Alt / Shift は
+    // 覆い (ui-surface.md の「タブの決まり」)。
+    const openBy = (event: MouseEvent) => {
+      if (event.button > 1) return;
       const current = entries.find((item) => item.key === li.dataset.key);
-      if (current)
-        deps.onOpen(
-          current,
-          event.altKey || event.shiftKey ? "overlay" : "tab",
-        );
-    });
+      if (!current) return;
+      event.preventDefault();
+      deps.onOpen(
+        current,
+        event.altKey || event.shiftKey
+          ? "overlay"
+          : event.button === 1 || event.metaKey || event.ctrlKey
+            ? "kept-tab"
+            : "tab",
+      );
+    };
+    open.addEventListener("click", openBy);
+    open.addEventListener("auxclick", openBy);
     open.addEventListener("contextmenu", (event) => {
       const current = entries.find((item) => item.key === li.dataset.key);
       if (!current?.image) return;
@@ -209,7 +220,8 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
         [
           {
             label: text.imageOpenInTab,
-            onSelect: () => deps.onOpen(current, "tab"),
+            // 右クリックで選んだ「タブで開く」は、あえて開くので固定。
+            onSelect: () => deps.onOpen(current, "kept-tab"),
           },
           {
             label: text.imageOpenInViewer,

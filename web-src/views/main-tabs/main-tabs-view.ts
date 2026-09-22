@@ -987,6 +987,16 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         disabled: !state.moveToOtherSide,
         onSelect: () => changeAndGo((l) => moveToOtherSide(l, tab.id)),
       },
+      {
+        label: current.moveLeft,
+        disabled: !state.moveLeft,
+        onSelect: () => moveWithin(tab.id, -1),
+      },
+      {
+        label: current.moveRight,
+        disabled: !state.moveRight,
+        onSelect: () => moveWithin(tab.id, 1),
+      },
       { kind: "separator" },
       // ターミナルのタブ: 端末の操作と、シェルそのものを止める (閉じるはタブだけ)。
       ...(tab.target.kind === "terminal"
@@ -1070,6 +1080,16 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     { passive: true },
   );
 
+  /** そのタブを同じ面の中で delta だけ動かす (端では止まる)。 */
+  function moveWithin(id: string, delta: number): void {
+    const found = findTab(layout, id);
+    if (!found) return;
+    const result = move(layout, id, found.side, found.index + delta);
+    if (result.moved === false)
+      throw new Error(`main tabs: tab ${id} was not moved: ${result.reason}`);
+    commit(result.layout);
+  }
+
   /** その面の列の、そのタブの要素 (無ければ前面のタブ) にフォーカスを置く。 */
   function focusTabIn(side: PaneSide, id: string | null): void {
     const strip = sections[side].strip;
@@ -1103,24 +1123,35 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       if (!tab) return;
       event.preventDefault();
       const rect = el.getBoundingClientRect();
+      // 戻り先はタブの id で探す。メニューを開いている間もタブ列は数秒おきに
+      // 描き直され、開いたときのタブの要素は外れている (Escape でフォーカスが
+      // body に落ちていた)。項目がダイアログなどへフォーカスを移したときは
+      // 奪わない。
       showContextMenu(el, menuFor(tab), {
         at: { x: rect.left, y: rect.bottom + 4 },
-        focusReturn: el,
+        focusReturn: null,
+        onClose: () =>
+          queueMicrotask(() => {
+            const lost =
+              document.activeElement === null ||
+              document.activeElement === document.body;
+            if (lost) focusTabIn(layout.panes.right ? side : "left", id);
+          }),
       });
       return;
     }
-    if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey) {
-      if (key !== "PageUp" && key !== "PageDown") return;
+    // 並べ替え: Ctrl+Shift+PageUp / PageDown。OS やブラウザが先に取る環境の
+    // ために Ctrl+Shift+← → (mac は ⌘+Shift+← → も) でも同じ。
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey) {
+      const delta =
+        key === "PageUp" || key === "ArrowLeft"
+          ? -1
+          : key === "PageDown" || key === "ArrowRight"
+            ? 1
+            : 0;
+      if (delta === 0) return;
       event.preventDefault();
-      const result = move(
-        layout,
-        id,
-        side,
-        index + (key === "PageUp" ? -1 : 1),
-      );
-      if (result.moved === false)
-        throw new Error(`main tabs: tab ${id} was not moved: ${result.reason}`);
-      commit(result.layout);
+      moveWithin(id, delta);
       focusTabIn(side, id);
       return;
     }

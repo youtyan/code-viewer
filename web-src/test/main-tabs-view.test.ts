@@ -10,12 +10,12 @@ import {
   test,
   vi,
 } from "vitest";
+import { listColumnLayout } from "../core/list-column";
 import type {
   SerializedCommonTabs,
   SerializedLayout,
   TabTarget,
 } from "../core/main-tabs";
-import { listColumnLayout } from "../core/list-column";
 import { panelColumnAction } from "../core/panel-column-policy";
 import { HISTORY_WIDTH } from "../core/panel-sizes";
 import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
@@ -585,6 +585,87 @@ describe("main tabs view: 操作", () => {
     ]);
   });
 
+  // Ctrl+Shift+PageUp / PageDown を OS やブラウザが先に取る環境の代わり。
+  test.each([
+    { name: "Ctrl+Shift+←", init: { key: "ArrowLeft", ctrlKey: true } },
+    { name: "⌘+Shift+←", init: { key: "ArrowLeft", metaKey: true } },
+    { name: "Ctrl+Shift+PageUp", init: { key: "PageUp", ctrlKey: true } },
+  ])("タブ列の $name で前面のタブを 1 つ左へ", async ({ init }) => {
+    const { handle, mount, names } = setup(async () => null);
+    await handle.restore();
+    handle.openingNewTab(() => handle.syncRoute(fileRoute("src/b.ts")));
+    const front = mount.querySelector<HTMLElement>(".main-tab-active");
+    front?.focus();
+    front?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      }),
+    );
+    expect([
+      names(),
+      (document.activeElement as HTMLElement).dataset.tabId ===
+        front?.dataset.tabId,
+    ]).toEqual([[">b.ts", "app.ts (preview)"], true]);
+  });
+
+  test("右クリックの「左へ移す」「右へ移す」で同じ面の中を動かす", async () => {
+    const { handle, mount, names } = setup(async () => null);
+    await handle.restore();
+    handle.openingNewTab(() => handle.syncRoute(fileRoute("src/b.ts")));
+    const pick = (label: string) => {
+      mount
+        .querySelector(".main-tab-active")
+        ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          ".gdp-context-menu [role=menuitem]",
+        ),
+      ]
+        .find((item) => item.textContent === label)
+        ?.click();
+      return names();
+    };
+    expect([pick("Move left"), pick("Move right")]).toEqual([
+      [">b.ts", "app.ts (preview)"],
+      ["app.ts (preview)", ">b.ts"],
+    ]);
+  });
+
+  // メニューを開いている間もタブ列は描き直され、開いたときのタブの要素は外れる。
+  test("Shift+F10 のメニューを Escape で閉じると、描き直しの後でも同じタブへ戻る", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    const tab = mount.querySelector<HTMLElement>(".main-tab-active");
+    const id = tab?.dataset.tabId;
+    tab?.focus();
+    tab?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "F10",
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    handle.localize();
+    (document.activeElement as HTMLElement).dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await Promise.resolve();
+    const active = document.activeElement as HTMLElement;
+    expect([
+      active === tab,
+      active.classList.contains("main-tab"),
+      active.dataset.tabId === id,
+    ]).toEqual([false, true, true]);
+  });
+
   // タブ列のキー (roving tabindex)。←→ Home End は移るだけで前面は変えない。
   test("タブ列のキー: ←→ Home End で移り、Enter で前面、Ctrl+Shift+PageDown で並べ替え、Delete で閉じる", async () => {
     const { handle, mount, names } = setup(async () => null);
@@ -717,6 +798,8 @@ describe("main tabs view: 操作", () => {
       "Keep open",
       "Split right (disabled)",
       "Move to other side (disabled)",
+      "Move left (disabled)",
+      "Move right (disabled)",
       "Copy path",
     ]);
   });
@@ -774,6 +857,8 @@ describe("main tabs view: ターミナルのタブ", () => {
         "Keep open (disabled)",
         "Split right (disabled)",
         "Move to other side (disabled)",
+        "Move left",
+        "Move right (disabled)",
         "Larger text (13)",
         "Stop session",
         "Copy path (disabled)",

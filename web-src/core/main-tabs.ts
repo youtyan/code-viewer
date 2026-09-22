@@ -96,6 +96,9 @@ export type TabMenuState = {
   keepOpen: boolean;
   splitRight: boolean;
   moveToOtherSide: boolean;
+  /** 同じ面の中で 1 つ左 / 右へ (ドラッグと Ctrl+Shift+PageUp / PageDown の代わり)。 */
+  moveLeft: boolean;
+  moveRight: boolean;
   copyPath: boolean;
 };
 
@@ -749,6 +752,8 @@ export function tabMenu(layout: Layout, id: string): TabMenuState {
       keepOpen: false,
       splitRight: false,
       moveToOtherSide: false,
+      moveLeft: false,
+      moveRight: false,
       copyPath: false,
     };
   const pane = paneOf(layout, found.side) as Pane;
@@ -761,6 +766,8 @@ export function tabMenu(layout: Layout, id: string): TabMenuState {
     splitRight: canSplit(layout) && canPlace(found.tab.target, "right"),
     moveToOtherSide:
       canMoveToOtherSide(layout) && canPlace(found.tab.target, other),
+    moveLeft: found.index > 0,
+    moveRight: found.index < pane.tabs.length - 1,
     copyPath:
       found.tab.target.kind === "file" || found.tab.target.kind === "image",
   };

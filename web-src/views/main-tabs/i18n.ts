@@ -13,6 +13,8 @@ export type MainTabsText = {
   keepOpen: string;
   splitRight: string;
   moveToOtherSide: string;
+  moveLeft: string;
+  moveRight: string;
   copyPath: string;
   newTab: string;
   /** ターミナルのタブの右クリック: シェルを止める (タブを閉じるのとは別)。 */
@@ -45,6 +47,8 @@ const EN: MainTabsText = {
   keepOpen: "Keep open",
   splitRight: "Split right",
   moveToOtherSide: "Move to other side",
+  moveLeft: "Move left",
+  moveRight: "Move right",
   copyPath: "Copy path",
   newTab: "New tab: a file, a new shell, or a session",
   stopSession: "Stop session",
@@ -81,6 +85,8 @@ const JA: MainTabsText = {
   keepOpen: "開いたままにする",
   splitRight: "右に分割",
   moveToOtherSide: "反対側へ移す",
+  moveLeft: "左へ移す",
+  moveRight: "右へ移す",
   copyPath: "パスをコピー",
   newTab: "新しいタブ: ファイル・新しいシェル・セッション",
   stopSession: "セッションを止める",

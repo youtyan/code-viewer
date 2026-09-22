@@ -57,7 +57,8 @@ export type AgentsViewDeps = {
   setPageMode(): void;
   syncHeaderMenu(): void;
   /** そのペインを下のターミナルパネルで開く。 */
-  openPane(pane: string): void;
+  /** opposite は反対の面 (Alt＋クリック)。 */
+  openPane(pane: string, destination?: "opposite"): void;
   /** 設定画面の通知の項目へ。 */
   openNotificationSettings(): void;
   /** フックの状態。まだ取っていなければ null。 */
@@ -231,10 +232,10 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     return mark;
   }
 
-  function select(pane: AgentPane): void {
+  function select(pane: AgentPane, destination?: "opposite"): void {
     selected = pane.id;
     deps.monitor.markRead(pane.id);
-    deps.openPane(pane.id);
+    deps.openPane(pane.id, destination);
     render(true);
   }
 
@@ -323,7 +324,15 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     ]
       .filter(Boolean)
       .join("\n");
-    row.addEventListener("click", () => select(pane));
+    // 左のサイドバーの行と同じ押し分け (中ボタン・⌘/Ctrl は 1 回押すと同じ、
+    // Alt は反対の面)。
+    const openBy = (event: MouseEvent) => {
+      if (event.button > 1) return;
+      event.preventDefault();
+      select(pane, event.altKey ? "opposite" : undefined);
+    };
+    row.addEventListener("click", openBy);
+    row.addEventListener("auxclick", openBy);
     return row;
   }
 
