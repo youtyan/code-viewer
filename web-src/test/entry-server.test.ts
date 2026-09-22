@@ -261,6 +261,18 @@ describe("the entry server", () => {
     expect(direct.status).toBe(404);
     const viaEntry = await fetch(`${url}_agent/states`);
     expect(viaEntry.status).toBe(200);
+
+    const backendWorktreeOpen = await fetch(`${url}p/${key}/_worktree/open`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: origin,
+        "X-Code-Viewer-Action": "1",
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: JSON.stringify({ path: root }),
+    });
+    expect(backendWorktreeOpen.status).toBe(404);
   });
 
   test("a stopped project process is 502 until restarted; a project that cannot start is 503", async () => {

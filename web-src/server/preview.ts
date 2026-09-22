@@ -2959,7 +2959,8 @@ const shellHandleModule = import("./shell/handle");
 const agentHandleModule = import("./terminal/handle");
 const worktreeHandleModule = import("./worktree/handle");
 
-const ENTRY_ONLY_PREFIXES = ["/_tmux/", "/_shell/", "/_agent/"];
+const ENTRY_ONLY_PATH =
+  /^\/(?:_tmux|_shell|_agent)\/|^\/_worktree\/(?:open|stop)$/;
 
 const server = await startServer({
   hostname: "127.0.0.1",
@@ -3015,13 +3016,10 @@ const server = await startServer({
       );
       if (dbResponse) return dbResponse;
     }
-    // 裏のプロセスは tmux・シェル・エージェントを受けない (入口が受ける)。
+    // 裏のプロセスは tmux・シェル・エージェント・作業ツリー操作を受けない。
     // 入口の取り次ぎはこれらを裏へ送らないので、ここへ来るのは古い版の
     // フックや直接叩いた要求だけ。黙って受けて状態を分けない。
-    if (
-      backendMode &&
-      ENTRY_ONLY_PREFIXES.some((p) => url.pathname.startsWith(p))
-    ) {
+    if (backendMode && ENTRY_ONLY_PATH.test(url.pathname)) {
       return text(
         `${url.pathname} is served by the code-viewer entry server, not by this project process`,
         404,

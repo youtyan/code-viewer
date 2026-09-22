@@ -1,16 +1,11 @@
 import { createHash } from "node:crypto";
-import {
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { readdir, readFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { errorWithCause } from "../core/error-detail";
 import { type FileLock, processAlive, tryAcquireFileLock } from "./file-lock";
+import { writeFileAtomic } from "./terminal/settings-file";
 
 export type ServerRegistryEntry = {
   url: string;
@@ -75,10 +70,10 @@ export function acquireServerStartLock(
 
 export function writeServerRegistry(entry: ServerRegistryEntry): void {
   mkdirSync(registryDir(), { recursive: true });
-  writeFileSync(
+  writeFileAtomic(
     serverRegistryFilePath(entry.root),
     `${JSON.stringify(entry, null, 2)}\n`,
-    "utf8",
+    0o600,
   );
 }
 

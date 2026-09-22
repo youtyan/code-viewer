@@ -1,13 +1,11 @@
 // 入口が取り次ぐ先 (プロジェクトごとの裏のプロセス) を起こす・覚える・止める。
 //
 // 裏は今のサーバそのもの (`--backend`。巡回しない・フックを受けない印付き)。
-// 起こし方は作業ツリーを開く仕組み (worktree/open.ts) をそのまま使う:
-// 起動ロック・登録簿に出るまで待つ・/_settings で本人確認・同じ根の要求は
-// 1 本にまとめる。起こしている間の要求は同じ Promise を待つ。
+// 起こし方は作業ツリーを開く仕組み (worktree/open.ts) をそのまま使い、
+// 同じ根の要求は 1 本の Promise にまとめる。
 //
 // 覚えているのは「このプロセスの間に取り次いだ裏の URL と pid」だけ。入口を
-// 起動し直すと空から始まり、最初の要求で登録簿から生きた裏を拾い直す
-// (openWorktreeServer は動いているものがあれば起こさずにそれを返す)。
+// 起動し直すと空から始まり、最初の要求で登録簿から生きた裏を拾い直す。
 //
 // 裏の状態 (BackendState) は 4 つ:
 // - starting: 起こしている最中。要求は起き終わるのを待つ
@@ -43,7 +41,7 @@ export type BackendTarget =
   | { status: "failed"; detail: string; log: string };
 
 type BackendRecord =
-  | { state: "starting"; since: number }
+  | { state: "starting"; done: Promise<BackendTarget> }
   | {
       state: "running";
       url: string;
@@ -131,9 +129,10 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
     activityOf(root).lastAt = deps.now();
   }
 
-  async function start(root: string): Promise<BackendTarget> {
-    const previous = records.get(root);
-    records.set(root, { state: "starting", since: deps.now() });
+  async function finishStart(
+    root: string,
+    previous: BackendRecord | undefined,
+  ): Promise<BackendTarget> {
     const result = await deps.controller.openWorktreeServer(root, {
       port: 0,
       logFile: deps.logFile(root),
@@ -190,6 +189,12 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
     };
   }
 
+  function start(root: string): Promise<BackendTarget> {
+    const done = finishStart(root, records.get(root));
+    records.set(root, { state: "starting", done });
+    return done;
+  }
+
   /**
    * 取り次ぐ先。動いていなければ起こす (アイドル停止したものは黙って起こす。
    * 落ちた後は起こさない。restart か、SSE の繋ぎ直しの 1 回だけ)。
@@ -203,6 +208,7 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
     if (known?.state === "running") {
       return { status: "ok", url: known.url, pid: known.pid, started: false };
     }
+    if (known?.state === "starting") return known.done;
     if (known?.state === "stopping") {
       await known.done;
       return target(root, options);

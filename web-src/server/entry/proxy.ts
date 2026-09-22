@@ -52,7 +52,7 @@ export async function proxyToBackend(
     onBodyEnd?: () => void;
   } = {},
 ): Promise<ProxyResult> {
-  const target = new URL(path + search, backendUrl);
+  const target = new URL(`.${path}${search}`, backendUrl);
   const headers = new Headers();
   req.headers.forEach((value, key) => {
     if (!HOP_BY_HOP_REQUEST.has(key.toLowerCase())) headers.set(key, value);

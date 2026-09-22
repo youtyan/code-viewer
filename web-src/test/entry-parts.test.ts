@@ -304,11 +304,18 @@ describe("the project processes the entry starts", () => {
     expect(opens).toHaveLength(3);
   });
 
-  test("a failed SSE restart after it became unreachable keeps it unreachable", async () => {
+  test("concurrent failed SSE restarts share one start and keep it unreachable", async () => {
     const { b, opens } = backends([ok(65001), { status: "timeout" }]);
     await b.target(ROOT);
     b.noteUnreachable(ROOT, refused);
-    expect((await b.target(ROOT, { events: true })).status).toBe("failed");
+    const restarted = await Promise.all([
+      b.target(ROOT, { events: true }),
+      b.target(ROOT, { events: true }),
+    ]);
+    expect(restarted.map((target) => target.status)).toEqual([
+      "failed",
+      "failed",
+    ]);
     expect(b.state(ROOT)).toBe("unreachable");
     expect((await b.target(ROOT)).status).toBe("unreachable");
     expect(opens).toHaveLength(2);
@@ -602,6 +609,11 @@ describe("forwarding to a project process", () => {
         origin: "http://127.0.0.1:1",
         body: "x",
       },
+    ],
+    [
+      "a double slash stays a path on the project process origin",
+      new Request(`${ENTRY}/p/0123456789abcdef//127.0.0.1:9/x`),
+      { url: "//127.0.0.1:9/x", origin: null },
     ],
   ])("%s", async (_label, req, expected) => {
     const base = await startUpstream();

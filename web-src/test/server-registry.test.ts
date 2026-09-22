@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -66,6 +67,20 @@ describe("server registry errors", () => {
         started_at: "2026-08-11T00:00:00.000Z",
       }),
     ).toThrow();
+  });
+
+  test("publishes a replacement file instead of truncating the visible registry", () => {
+    const root = "/sample/repository";
+    const entry = {
+      url: "http://127.0.0.1:4321/",
+      pid: process.pid,
+      root,
+      started_at: "2026-08-11T00:00:00.000Z",
+    };
+    writeServerRegistry(entry);
+    const inode = statSync(serverRegistryFilePath(root)).ino;
+    writeServerRegistry({ ...entry, started_at: "2026-08-11T00:00:01.000Z" });
+    expect(statSync(serverRegistryFilePath(root)).ino).not.toBe(inode);
   });
 
   test("allows only one live start lock and releases it by owner token", () => {
