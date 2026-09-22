@@ -30,7 +30,6 @@ import type { PageView } from "./page-view";
 import { showConfirmDialog } from "./ui-dialog";
 
 export type JournalViewText = {
-  locale: string;
   ariaLabel: string;
   title: string;
   tabs: Record<ActiveTab, string>;
@@ -41,9 +40,6 @@ export type JournalViewText = {
   priorityLabels: Record<JournalTaskPriority, string>;
   statusField: string;
   priorityField: string;
-  previousMonth: string;
-  nextMonth: string;
-  weekDays: string[];
   noEntries: string;
   noRelatedTasks: string;
   noBody: string;
@@ -186,21 +182,6 @@ function taskDateRange(task: JournalTask): JournalTaskDateRange | null {
 function taskCoversDate(task: JournalTask, date: string): boolean {
   const range = taskDateRange(task);
   return !!range && range.start <= date && date <= range.end;
-}
-
-function monthKey(date: string): string {
-  return date.slice(0, 7);
-}
-
-function monthTitle(date: string, locale: string): string {
-  const parsed = new Date(`${monthKey(date)}-01T00:00:00`);
-  return parsed.toLocaleString(locale, { month: "long", year: "numeric" });
-}
-
-function offsetMonth(date: string, delta: number): string {
-  const parsed = new Date(`${monthKey(date)}-01T00:00:00`);
-  parsed.setMonth(parsed.getMonth() + delta);
-  return `${todayIsoDate(parsed).slice(0, 7)}-01`;
 }
 
 function labelChip(label: string): HTMLElement {
@@ -784,123 +765,6 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     return header;
   }
 
-  function renderCalendar(): HTMLElement {
-    const panel = document.createElement("aside");
-    panel.className = "journal-calendar";
-    const head = document.createElement("div");
-    head.className = "journal-calendar-head";
-    const prev = document.createElement("button");
-    prev.type = "button";
-    prev.textContent = "<";
-    prev.setAttribute("aria-label", text().previousMonth);
-    const next = document.createElement("button");
-    next.type = "button";
-    next.textContent = ">";
-    next.setAttribute("aria-label", text().nextMonth);
-    const title = document.createElement("strong");
-    title.textContent = monthTitle(selectedDate, text().locale);
-    prev.addEventListener("click", () => {
-      selectedDate = offsetMonth(selectedDate, -1);
-      selectedEntryId = "";
-      creatingEntry = false;
-      setRoute({ date: selectedDate });
-    });
-    next.addEventListener("click", () => {
-      selectedDate = offsetMonth(selectedDate, 1);
-      selectedEntryId = "";
-      creatingEntry = false;
-      setRoute({ date: selectedDate });
-    });
-    head.append(prev, title, next);
-
-    const days = document.createElement("div");
-    days.className = "journal-calendar-grid";
-    for (const label of text().weekDays) {
-      const day = document.createElement("span");
-      day.className = "journal-weekday";
-      day.textContent = label;
-      days.appendChild(day);
-    }
-
-    const monthStart = new Date(`${monthKey(selectedDate)}-01T00:00:00`);
-    const first = new Date(monthStart);
-    first.setDate(first.getDate() - first.getDay());
-    const entryDates = new Set(
-      (data?.journal.entries || []).map((entry) => entry.date),
-    );
-    const monthTasks = (data?.tasks.tasks || [])
-      .filter((task) => {
-        const range = taskDateRange(task);
-        return (
-          !!range &&
-          range.end >= todayIsoDate(first) &&
-          range.start <=
-            todayIsoDate(new Date(first.getTime() + 41 * 24 * 60 * 60 * 1000))
-        );
-      })
-      .slice(0, 60);
-    const today = todayIsoDate();
-    for (let i = 0; i < 42; i++) {
-      const current = new Date(first);
-      current.setDate(first.getDate() + i);
-      const value = todayIsoDate(current);
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "journal-day-button";
-      button.classList.toggle(
-        "muted",
-        monthKey(value) !== monthKey(selectedDate),
-      );
-      button.classList.toggle("active", value === selectedDate);
-      button.classList.toggle("today", value === today);
-      button.classList.toggle("has-entry", entryDates.has(value));
-      const number = document.createElement("span");
-      number.className = "journal-day-number";
-      number.textContent = String(current.getDate());
-      const bars = document.createElement("span");
-      bars.className = "journal-day-ranges";
-      const tasksForDay = monthTasks.filter((item) =>
-        taskCoversDate(item, value),
-      );
-      for (const task of tasksForDay.slice(0, 3)) {
-        const range = taskDateRange(task);
-        if (!range) continue;
-        const bar = document.createElement("span");
-        bar.className = `journal-day-range journal-range-${task.priority}`;
-        bar.classList.toggle("start", value === range.start);
-        bar.classList.toggle("end", value === range.end);
-        bar.classList.toggle(
-          "single",
-          value === range.start && value === range.end,
-        );
-        if (value === range.start) bar.textContent = task.title;
-        bar.title = `${task.title} (${range.start} - ${range.end})`;
-        bars.appendChild(bar);
-      }
-      if (tasksForDay.length > 3) {
-        const more = document.createElement("span");
-        more.className = "journal-day-range-more";
-        more.textContent = text().moreTasks(tasksForDay.length - 3);
-        more.title = tasksForDay
-          .slice(3)
-          .map((task) => task.title)
-          .join("\n");
-        bars.appendChild(more);
-      }
-      button.append(number, bars);
-      button.addEventListener("click", () => {
-        selectedDate = value;
-        creatingEntry = false;
-        selectedEntryId =
-          data?.journal.entries.find((entry) => entry.date === value)?.id || "";
-        setRoute({ date: value, tab: "journal" });
-      });
-      days.appendChild(button);
-    }
-    panel.append(head, days);
-    return panel;
-  }
-
   function renderJournalEntryList(entries: DailyJournalEntry[]): HTMLElement {
     const list = document.createElement("div");
     list.className = "journal-entry-list";
@@ -1071,7 +935,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
   function renderJournalTab(): HTMLElement {
     const body = document.createElement("div");
     body.className = "journal-daily-layout";
-    body.append(renderCalendar(), renderJournalEditor(), renderRelatedTasks());
+    body.append(renderJournalEditor(), renderRelatedTasks());
     return body;
   }
 

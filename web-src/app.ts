@@ -2094,7 +2094,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         refreshTitle: "Refresh commit history",
       },
       journal: {
-        locale: "en",
         ariaLabel: "Work log and tasks",
         title: "Work Log",
         tabs: {
@@ -2119,9 +2118,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         },
         statusField: "Status",
         priorityField: "Priority",
-        previousMonth: "Previous month",
-        nextMonth: "Next month",
-        weekDays: ["S", "M", "T", "W", "T", "F", "S"],
         noEntries: "No logs",
         noRelatedTasks: "No related tasks",
         noBody: "No body",
@@ -2498,7 +2494,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         refreshTitle: "コミット履歴を更新",
       },
       journal: {
-        locale: "ja",
         ariaLabel: "ワークログとタスク",
         title: "ワークログ",
         tabs: {
@@ -2523,9 +2518,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         },
         statusField: "ステータス",
         priorityField: "優先度",
-        previousMonth: "前の月",
-        nextMonth: "次の月",
-        weekDays: ["日", "月", "火", "水", "木", "金", "土"],
         noEntries: "ログはありません",
         noRelatedTasks: "関連タスクはありません",
         noBody: "本文はありません",

@@ -8814,11 +8814,10 @@ body.gdp-journal-page #load-bar {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: 520px minmax(360px, 1fr) 320px;
+  grid-template-columns: minmax(360px, 1fr) 320px;
   gap: 0;
 }
 
-.journal-calendar,
 .journal-related,
 .journal-task-editor {
   min-width: 0;
@@ -8834,7 +8833,6 @@ body.gdp-journal-page #load-bar {
   background: var(--bg);
 }
 
-.journal-calendar-head,
 .journal-section-head,
 .journal-task-column-head {
   display: flex;
@@ -8843,12 +8841,6 @@ body.gdp-journal-page #load-bar {
   gap: 8px;
 }
 
-.journal-calendar-head {
-  padding: 12px;
-  border-bottom: 1px solid var(--border-muted);
-}
-
-.journal-calendar-head button,
 .journal-section-head button,
 .journal-editor-actions button,
 .journal-markdown-toolbar button {
@@ -8882,175 +8874,11 @@ body.gdp-journal-page #load-bar {
   height: 16px;
 }
 
-.journal-calendar-head button:hover,
 .journal-section-head button:hover,
 .journal-editor-actions button:hover,
 .journal-markdown-toolbar button:hover {
   background: var(--bg-mute);
   border-color: var(--border-strong);
-}
-
-.journal-calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 4px;
-  padding: 12px;
-}
-
-.journal-weekday {
-  height: 24px;
-  display: grid;
-  place-items: center;
-  color: var(--fg-subtle);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.journal-day-button {
-  position: relative;
-  height: 70px;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  padding: 4px 2px;
-}
-
-.journal-day-button:hover {
-  background: var(--bg);
-  border-color: var(--border);
-}
-
-.journal-day-button.muted {
-  color: var(--fg-subtle);
-}
-
-.journal-day-button.today {
-  border-color: var(--accent);
-}
-
-.journal-day-button.active {
-  background: var(--accent-subtle);
-  border-color: var(--accent);
-  color: var(--fg);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-.journal-day-button.has-entry::after {
-  content: "";
-  position: absolute;
-  left: calc(50% - 2px);
-  top: 22px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--success);
-}
-
-.journal-day-number {
-  flex: 0 0 auto;
-  align-self: center;
-  line-height: 18px;
-  min-width: 20px;
-  border-radius: 999px;
-  padding: 0 4px;
-}
-
-.journal-day-button.active .journal-day-number {
-  background: var(--accent);
-  color: var(--fg-onemphasis);
-}
-
-.journal-day-ranges {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: auto;
-  pointer-events: none;
-}
-
-.journal-day-range {
-  min-width: 0;
-  height: 12px;
-  border-radius: 0;
-  margin-inline: -3px;
-  background: var(--accent);
-  color: var(--fg-onemphasis);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 12px;
-  overflow: hidden;
-  padding: 0 3px;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0.88;
-}
-
-.journal-day-range.start {
-  margin-left: 0;
-  border-top-left-radius: 999px;
-  border-bottom-left-radius: 999px;
-}
-
-.journal-day-range.end {
-  margin-right: 0;
-  border-top-right-radius: 999px;
-  border-bottom-right-radius: 999px;
-}
-
-.journal-day-range.single {
-  margin-inline: 2px;
-  border-radius: 999px;
-}
-
-.journal-day-range-more {
-  align-self: stretch;
-  min-width: 0;
-  height: 13px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--fg-muted);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
-  margin-inline: -1px;
-  overflow: hidden;
-  padding: 0 3px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.journal-day-button.active .journal-day-range-more {
-  background: color-mix(in srgb, var(--bg) 72%, var(--accent-subtle));
-  color: var(--fg-muted);
-}
-
-.journal-range-p0 {
-  background: var(--danger);
-}
-
-.journal-range-p1 {
-  background: var(--attn);
-}
-
-.journal-range-p2 {
-  background: var(--accent);
-}
-
-.journal-range-p3 {
-  background: var(--fg-subtle);
 }
 
 .journal-editor {
@@ -9310,12 +9138,10 @@ body.gdp-journal-page #load-bar {
 .journal-task-fields select:focus,
 .journal-task-fields input:focus,
 .journal-task-toolbar input:focus,
-.journal-day-button:focus-visible,
 .journal-label-filter:focus-visible,
 .journal-task-card:focus-visible,
 .journal-icon-action:focus-visible,
 .journal-entry-row:focus-visible,
-.journal-calendar-head button:focus-visible,
 .journal-section-head button:focus-visible,
 .journal-editor-actions button:focus-visible,
 .journal-markdown-toolbar button:focus-visible {
@@ -10221,7 +10047,6 @@ body.journal-task-editor-resizing * {
     overflow: auto;
   }
 
-  .journal-calendar,
   .journal-related,
   .journal-task-editor {
     border: 0;
