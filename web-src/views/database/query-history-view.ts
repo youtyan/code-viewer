@@ -360,6 +360,13 @@ export function createQueryHistoryView(
 
     detailCol.append(meta, actions, sqlBlock);
 
+    if (entry.error !== undefined) {
+      const errorBlock = document.createElement("pre");
+      errorBlock.className = "db-query-error";
+      errorBlock.textContent = entry.error;
+      detailCol.appendChild(errorBlock);
+    }
+
     if (entry.body) {
       const bodyBlock = document.createElement("div");
       bodyBlock.className = "db-query-history-body";
@@ -435,6 +442,12 @@ export function createQueryHistoryView(
       entry.rowCount,
       entry.truncated,
     )}, ${text().history.elapsedLabel(entry.elapsedMs)}`;
+    if (entry.error !== undefined) {
+      // 失敗した問い合わせ: 行数の代わりに「失敗」の印 (理由は詳細に出す)。
+      stats.classList.add("db-query-history-failed");
+      stats.textContent = `${text().history.failedMark}, ${text().history.elapsedLabel(entry.elapsedMs)}`;
+      stats.title = entry.error;
+    }
 
     meta.append(byIcon, time, stats);
     return meta;

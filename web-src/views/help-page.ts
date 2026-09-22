@@ -1993,7 +1993,17 @@ function renderHelpBlock(block: HelpBlock): HTMLElement {
   return renderHelpTable(block.rows);
 }
 
+/** 狭い面で目次を畳んだときの 1 行の見出し (「目次: 今の節」)。 */
+const HELP_NAV_TOGGLE_TEXT: Record<HelpLanguage, string> = {
+  en: "Contents",
+  ja: "目次",
+};
+
 export function createHelpPage(deps: HelpPageDeps) {
+  // 狭い面 (style.css の @container help-shell) では目次を本文の上に畳む。既定は
+  // 畳み、節を選んだらまた畳む (描き直しても開いたままにはしない)。
+  let helpNavOpen = false;
+
   function renderHelpPage() {
     deps.cancelActiveSourceLoad("navigation");
     deps.removeStandaloneSource();
@@ -2042,6 +2052,7 @@ export function createHelpPage(deps: HelpPageDeps) {
     const helpNav = document.createElement("nav");
     helpNav.className = "gdp-help-nav";
     const goToSection = (helpSection: HelpSection) => {
+      helpNavOpen = false;
       deps.setRoute({
         screen: "help",
         lang,
@@ -2128,7 +2139,33 @@ export function createHelpPage(deps: HelpPageDeps) {
     if (section === "keybindings")
       deps.decorateKeybindings(article, keybindingGroups);
 
-    layout.append(helpNav, article);
+    // 狭い面だけで見える、目次を開閉する 1 行 (広い面では CSS が隠す)。
+    helpNav.id = "gdp-help-nav";
+    const activeLabel =
+      helpNav.querySelector<HTMLButtonElement>("button.active")?.textContent ??
+      "";
+    const navToggle = document.createElement("button");
+    navToggle.type = "button";
+    navToggle.className = "gdp-help-nav-toggle";
+    navToggle.setAttribute("aria-controls", helpNav.id);
+    const syncNavOpen = () => {
+      layout.classList.toggle("gdp-help-nav-open", helpNavOpen);
+      navToggle.setAttribute("aria-expanded", String(helpNavOpen));
+    };
+    const toggleLabel = document.createElement("span");
+    toggleLabel.className = "gdp-help-nav-toggle-label";
+    toggleLabel.textContent = HELP_NAV_TOGGLE_TEXT[lang];
+    const toggleCurrent = document.createElement("span");
+    toggleCurrent.className = "gdp-help-nav-toggle-current";
+    toggleCurrent.textContent = activeLabel;
+    navToggle.append(toggleLabel, toggleCurrent);
+    navToggle.addEventListener("click", () => {
+      helpNavOpen = !helpNavOpen;
+      syncNavOpen();
+    });
+    syncNavOpen();
+
+    layout.append(navToggle, helpNav, article);
     // 設定の検索はどの節でも同じ場所に置く (節を移っても左の列が動かない)。
     // ヘルプの節で打ち始めたら、結果を出す設定の節へ移る。
     const searchRow = document.createElement("div");

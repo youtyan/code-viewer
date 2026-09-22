@@ -321,3 +321,85 @@ test.each([
     ),
   ).toBe(expected);
 });
+
+// 見出しの件数を省く境目は見出しの文字の大きさに比例 (px だと特大で件数が残り、
+// 左の列 319px の題が切れた)。
+test("the sidebar head drops the totals below 22em", () => {
+  expect(
+    cascadedDeclarations(
+      allRules.filter(
+        (rule) => rule.atRule === "@container sidebar-head (max-width: 22em)",
+      ),
+      (candidate) => candidate === "#sidebar .sb-head > #totals",
+    ).get("display"),
+  ).toBe("none");
+});
+
+// 右の列の見出し: 題は省略しない。大・特大の既定の幅 (17.5em 以下) では、全部
+// 開く / 畳むを 2 段目へ下ろす (日本語・特大で題が「フ…」になった)。素の規則と
+// 合わせて重ねて、段の規則が勝つこと (前に書くと詳細度が同じ素の grid-area が
+// 勝ち、段が効かなかった)。
+test.each([
+  ["#sidebar .sb-head > .sb-actions", "2 / 5 / auto / 7"],
+  ["#sidebar .sb-head > .sb-filter-wrap", "2 / 1 / auto / 5"],
+])("narrow sidebar head: %s is placed at %s", (selector, expected) => {
+  expect(
+    cascadedDeclarations(
+      allRules.filter(
+        (rule) =>
+          rule.atRule === null ||
+          rule.atRule === "@container sidebar-head (max-width: 17.5em)",
+      ),
+      (candidate) => candidate === selector,
+    ).get("grid-area"),
+  ).toBe(expected);
+});
+
+// 設定・ヘルプ: 面が 640px 未満 (箱 580px 未満) なら目次を本文の上に畳む (2 面の
+// 面で目次 208px の横の本文が 186px になった)。広い面では開閉の 1 行を出さない。
+test.each([
+  [null, ".gdp-help-shell", "container", "help-shell / inline-size"],
+  [null, ".gdp-help-nav-toggle", "display", "none"],
+  ["579px", ".gdp-help-layout", "grid-template-columns", "minmax(0, 1fr)"],
+  ["579px", ".gdp-help-nav-toggle", "display", "flex"],
+  [
+    "579px",
+    ".gdp-help-layout:not(.gdp-help-nav-open) > .gdp-help-nav",
+    "display",
+    "none",
+  ],
+  ["579px", ".gdp-help-nav", "position", "static"],
+])("help layout (%s): %s has %s: %s", (width, selector, property, expected) => {
+  const scope =
+    width === null
+      ? rules
+      : allRules.filter(
+          (rule) =>
+            rule.atRule === `@container help-shell (max-width: ${width})`,
+        );
+  expect(
+    cascadedDeclarations(scope, (candidate) => candidate === selector).get(
+      property,
+    ),
+  ).toBe(expected);
+});
+
+// Data の表の検索欄は横の操作に押されて潰れない (2 面の左で 18px になった)。
+// 面が狭いときは操作を次の行へ折る。
+test.each([
+  [null, ".db-grid-filter-input", "min-width", "min(100%, 12em)"],
+  ["560px", ".db-grid-filter-bar", "flex-wrap", "wrap"],
+  ["560px", ".db-grid-edit-controls", "flex-wrap", "wrap"],
+])("data grid filter (%s): %s has %s: %s", (width, selector, property, expected) => {
+  const scope =
+    width === null
+      ? rules
+      : allRules.filter(
+          (rule) => rule.atRule === `@container db-pane (max-width: ${width})`,
+        );
+  expect(
+    cascadedDeclarations(scope, (candidate) => candidate === selector).get(
+      property,
+    ),
+  ).toBe(expected);
+});

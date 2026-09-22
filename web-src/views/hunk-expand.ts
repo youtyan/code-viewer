@@ -5,6 +5,7 @@ import { apiUrl } from "../core/api-url";
 // (20-line steps via /file_range) plus one-shot full-gap expansion used by
 // "expand all context", and trailing expansion below the last hunk.
 
+import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import { GdpExpandLogic } from "../core/expand-logic";
 import type {
   DiffCardElement,
@@ -47,6 +48,69 @@ export type HunkExpandDeps = {
   getToRef(): string;
   highlightInsertedSpans(card: Element, file: FileMeta): void;
 };
+
+/** 行を読めなかったときの帯の見出し (理由はその後ろに全文で続ける)。 */
+const EXPAND_FAILURE_TEXT = {
+  en: "Could not load more lines",
+  ja: "行を読み込めませんでした",
+} as const;
+
+/**
+ * /file_range を読む。HTTP の失敗も、行 (lines) の無い応答も投げる。以前は
+ * `r.json()` だけで読み、失敗の本文や行の無い応答で展開のボタンが黙って戻り、
+ * 何が起きたかがどこにも残らなかった。
+ */
+async function readFileRange(
+  url: string,
+  operation: string,
+): Promise<FileRangeResponse & { lines: string[] }> {
+  const response = await fetch(url);
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, operation));
+  const data = (await response.json()) as FileRangeResponse;
+  if (!Array.isArray(data?.lines))
+    throw new Error(
+      `${operation}: the response has no lines (${JSON.stringify(data)})`,
+    );
+  return data as FileRangeResponse & { lines: string[] };
+}
+
+/**
+ * 展開の失敗を console と、失敗した行のすぐ下の帯に出す (2 面の差分は両側の
+ * 表に同じ帯を入れて行の高さをそろえる)。もう一度押せば読み直す。
+ */
+function showExpandFailure(
+  anchors: HTMLTableRowElement[],
+  operation: string,
+  error: unknown,
+): void {
+  console.error(`[code-viewer] ${operation} failed`, error);
+  const text = `${EXPAND_FAILURE_TEXT[pageLanguage()]}: ${formatErrorDetail(error)}`;
+  anchors.forEach((anchor, index) => {
+    clearExpandFailure([anchor]);
+    const row = document.createElement("tr");
+    row.className = "gdp-expand-error-row";
+    const cell = document.createElement("td");
+    cell.colSpan = Math.max(
+      1,
+      [...anchor.cells].reduce((sum, td) => sum + td.colSpan, 0),
+    );
+    const message = document.createElement("div");
+    message.className = "gdp-error";
+    if (index === 0) message.setAttribute("role", "alert");
+    message.textContent = text;
+    cell.appendChild(message);
+    row.appendChild(cell);
+    anchor.after(row);
+  });
+}
+
+function clearExpandFailure(anchors: HTMLTableRowElement[]): void {
+  for (const anchor of anchors) {
+    const next = anchor.nextElementSibling;
+    if (next?.classList.contains("gdp-expand-error-row")) next.remove();
+  }
+}
 
 export function createHunkExpand(deps: HunkExpandDeps) {
   // ---------- Hunk expand (mimics GitHub's ↕ at hunk separators) ----------
@@ -259,13 +323,12 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         start +
         "&end=" +
         end;
+      const operation = `expanding ${file.path} lines ${start}-${end} at ${ref}`;
+      const anchors = (item.siblings || [{ tr: item.tr }]).map((sib) => sib.tr);
       return deps
-        .trackLoad<{ lines?: string[] }>(fetch(url).then((r) => r.json()))
+        .trackLoad(readFileRange(url, operation))
         .then((data) => {
-          if (!data?.lines) {
-            setBusy(false);
-            return;
-          }
+          clearExpandFailure(anchors);
           const oldStartForGap = prevHunkEndOld + (start - prevHunkEndNew);
           const card = item.tr.closest(".d2h-file-wrapper");
           const sibs = item.siblings || [{ tr: item.tr, sideIndex: 0 }];
@@ -294,8 +357,9 @@ export function createHunkExpand(deps: HunkExpandDeps) {
           }
           attachExpandControls(item, file, ref, refPath);
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           setBusy(false);
+          showExpandFailure(anchors, operation, error);
         });
     };
 
@@ -501,9 +565,12 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         range.start +
         "&end=" +
         range.end;
+      const operation = `expanding ${file.path} lines ${range.start}-${range.end} at ${ref}`;
+      const anchors = rows.map((row) => row.tr);
       return deps
-        .trackLoad<FileRangeResponse>(fetch(url).then((r) => r.json()))
+        .trackLoad(readFileRange(url, operation))
         .then((data) => {
+          clearExpandFailure(anchors);
           if (
             myGen !== deps.getServerGeneration() ||
             (data.generation && data.generation !== deps.getServerGeneration())
@@ -512,7 +579,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
             return;
           }
           if (!item.tr.isConnected) return;
-          const lines = data?.lines || [];
+          const lines = data.lines;
           if (!lines.length) {
             rows.forEach((row) => {
               row.tr.remove();
@@ -546,8 +613,9 @@ export function createHunkExpand(deps: HunkExpandDeps) {
           }
           setBusy(false);
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           setBusy(false);
+          showExpandFailure(anchors, operation, error);
         });
     };
     // One-shot expansion to EOF for "expand all context": a single large
@@ -593,8 +661,10 @@ export function createHunkExpand(deps: HunkExpandDeps) {
       start +
       "&end=" +
       start;
+    const operation = `checking for lines after the last hunk of ${file.path} (line ${start}) at ${ref}`;
+    const anchors = (item.siblings || [{ tr: item.tr }]).map((sib) => sib.tr);
     deps
-      .trackLoad<FileRangeResponse>(fetch(url).then((r) => r.json()))
+      .trackLoad(readFileRange(url, operation))
       .then((data) => {
         if (myGen !== deps.getServerGeneration()) return;
         if (data.generation && data.generation !== deps.getServerGeneration())
@@ -605,13 +675,22 @@ export function createHunkExpand(deps: HunkExpandDeps) {
             !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"),
         );
         if (hasTrailingRow) return;
-        if (
-          !GdpExpandLogic.shouldAttachTrailingExpand(data?.lines?.length || 0)
-        )
+        if (!GdpExpandLogic.shouldAttachTrailingExpand(data.lines.length))
           return;
         attachTrailingExpandControls(item, file, ref, refPath);
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        // 差分を描き直した後の古い問い合わせの失敗は、行が無いので console
+        // にだけ出す。
+        if (myGen !== deps.getServerGeneration() || !item.tr.isConnected) {
+          console.error(
+            `[code-viewer] ${operation} failed (the diff was redrawn since)`,
+            error,
+          );
+          return;
+        }
+        showExpandFailure(anchors, operation, error);
+      });
   }
 
   // Insert context rows around the `@@` info row.

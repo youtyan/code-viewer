@@ -53,6 +53,46 @@ describe("query editor value display", () => {
     editor.dispose();
   });
 
+  // 失敗の本文がサーバの JSON なら、その error を先頭に出し、全文は「詳細」に
+  // 畳む (以前は JSON をそのまま並べ、理由が末尾に埋もれた)。
+  test("shows the server's reason first and folds the full detail", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const body = JSON.stringify({
+      dbId: "sample.db",
+      columns: [],
+      rows: [],
+      elapsedMs: 1,
+      error: "no such table: absent",
+    });
+    const editor = createQueryEditor({
+      getKind: () => "sqlite",
+      getText: () => dbText("ja"),
+      executeQuery: async () => {
+        throw new Error(
+          `クエリを実行できませんでした (HTTP 400 Bad Request): ${body}`,
+        );
+      },
+    });
+    document.body.appendChild(editor.el);
+    editor.setSql("SELECT * FROM absent");
+
+    await editor.run();
+
+    const box = editor.el.querySelector<HTMLElement>(".db-query-error");
+    expect([
+      box?.querySelector(".db-query-error-summary")?.textContent,
+      box?.querySelector("details > summary")?.textContent,
+      box?.querySelector("details")?.open,
+      box?.querySelector("details > pre")?.textContent,
+    ]).toEqual([
+      "no such table: absent",
+      "詳細",
+      false,
+      `Error: クエリを実行できませんでした (HTTP 400 Bad Request): ${body}`,
+    ]);
+    editor.dispose();
+  });
+
   test("collapses and expands the SQL input", async () => {
     const editor = createQueryEditor({
       getKind: () => "sqlite",

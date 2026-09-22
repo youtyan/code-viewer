@@ -190,6 +190,66 @@ describe("query history view", () => {
     expect(meta.textContent || "").toMatch(/34ms/);
   });
 
+  // 失敗した問い合わせは「失敗」の印を付け、詳細に理由を出す。
+  test("a failed query is marked failed and shows its reason", async () => {
+    globalThis.fetch = ((_input: RequestInfo | URL) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            entries: [
+              {
+                id: "sample-failed",
+                dbId: "sample.db",
+                sql: "SELECT * FROM absent",
+                columns: [],
+                rowsPreview: [],
+                rowCount: 0,
+                savedRows: 0,
+                truncated: false,
+                elapsedMs: 3,
+                executedAt: "2026-01-02T03:04:05",
+                executedBy: "user",
+                source: "browser",
+                error: "no such table: absent",
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )) as typeof fetch;
+
+    const view = createQueryHistoryView({
+      getDbId: () => "sample.db",
+      getSchema: () => null,
+      copySqlToQuery: () => undefined,
+      getText: () => dbText("ja"),
+    });
+    document.body.appendChild(view.el);
+
+    await view.refresh({ force: true });
+    const row = q<HTMLElement>(view.el, ".db-query-history-entry");
+    const rowMark = q<HTMLElement>(row, ".db-query-history-failed");
+    row.click();
+    expect([
+      rowMark.textContent,
+      rowMark.title,
+      q<HTMLElement>(
+        view.el,
+        ".db-query-history-detail-meta .db-query-history-failed",
+      ).textContent,
+      q<HTMLElement>(view.el, ".db-query-history-detail-col .db-query-error")
+        .textContent,
+    ]).toEqual([
+      "失敗, 3ms",
+      "no such table: absent",
+      "失敗, 3ms",
+      "no such table: absent",
+    ]);
+  });
+
   test("keeps an invalid execution time visible and reports the reason", async () => {
     const invalidTime = "invalid-timestamp";
     globalThis.fetch = ((_input: RequestInfo | URL) =>

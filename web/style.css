@@ -2772,8 +2772,11 @@ body.gdp-history-resizing * {
 }
 .scope-settings-section-title {
   display: block;
-  /* 一覧の案内などから見出しへ送ったとき、固定ヘッダの下に隠れない。 */
-  scroll-margin-top: calc(var(--chrome-h) + 12px);
+  /* 一覧の案内などから見出しへ送ったとき (app.ts の openSettingsAt)、本文の箱の
+     上の余白と同じ所に止める。本文は自分の箱 (#content) でスクロールし、固定の
+     帯は箱の外なので、帯の高さ (--chrome-h) は足さない (足すと 1280px で箱の上端
+     から 46px、余白より 22px 下に止まった)。 */
+  scroll-margin-top: var(--content-top-gap);
   margin-bottom: 6px;
   color: var(--fg);
   font-size: 12px;
@@ -11372,6 +11375,28 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* サーバの理由 (JSON の error) を先頭に、全文は「詳細」に畳む (query-editor.ts)。 */
+.db-query-error-summary {
+  margin: 0;
+  font-weight: 600;
+}
+.db-query-error-details {
+  margin-top: 8px;
+}
+.db-query-error-details > summary {
+  cursor: pointer;
+  opacity: 0.85;
+}
+.db-query-error-details > pre {
+  margin: 6px 0 0;
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 失敗した問い合わせの印 (履歴の一覧と詳細の頭)。 */
+.db-query-history-failed {
+  color: var(--danger);
+}
 
 .db-query-table-wrap {
   overflow: auto;
@@ -11555,7 +11580,10 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   color: var(--fg);
   font-size: var(--db-font-base);
   font-family: inherit;
-  min-width: 0;
+  /* 横の操作 (新しい行・保存・更新・書き出し) に押されて潰れない (2 面の左の面で
+     18px になり、「Search all columns…」が読めなかった)。入らない分は下の
+     @container db-pane で操作を次の行へ折る。 */
+  min-width: min(100%, 12em);
 }
 .db-grid-filter-input:focus {
   outline: 2px solid var(--accent);
@@ -14734,8 +14762,16 @@ body.db-resizing {
    並べたままだと、入力欄が押しボタンに押されて数文字分まで潰れる。 */
 @container db-pane (max-width: 560px) {
   .db-global-search-header,
-  .db-query-toolbar {
+  .db-query-toolbar,
+  .db-grid-filter-bar,
+  .db-grid-edit-controls {
     flex-wrap: wrap;
+  }
+  /* 編集の操作 (新しい行・保存・取り消し) は塊ごと縮めずに折る (特大で塊が
+     一覧の幅を超えてはみ出した)。 */
+  .db-grid-edit-controls {
+    flex-shrink: 1;
+    min-width: 0;
   }
   .db-global-search-header {
     flex-direction: column;
@@ -18358,7 +18394,10 @@ body.gdp-files-column-page #sidebar .sb-head {
 }
 /* 見出しが狭いとき (右の列が既定の幅・日本語) は件数を省き、題と切替と操作に
    幅を回す。件数は Diff の帯と作業ツリーの一覧に出ている。 */
-@container sidebar-head (max-width: 264px) {
+/* 境目は見出しの文字の大きさに比例させる (22em = 標準の密度で 264px)。px の
+   ままだと特大で件数が残り、左の列 (319px) の題が「ファイル」の 2px 手前で
+   切れた。 */
+@container sidebar-head (max-width: 22em) {
   #sidebar .sb-head > #totals {
     display: none;
   }
@@ -18384,6 +18423,21 @@ body.gdp-files-column-page #sidebar .sb-head {
   grid-area: filter;
   padding: 0;
   margin-left: calc(var(--pad-face) - var(--pad-text));
+}
+/* 題は省略しない。大・特大の密度の既定の幅 (約 17em) では、題・全部開く / 畳む
+   (36px × 2)・切替が 1 段に入らず、題が「フ…」(日本語・特大) になった。全部
+   開く / 畳むを 2 段目へ下ろす (絞り込みが見出しの中にある画面ではその右、無い
+   画面では 2 段目が増える。見出しの高さは sidebar.ts が測って
+   --sidebar-head-h に書くので、下に貼り付く絞り込みはずれない)。自分の grid の
+   区画は container の中から変えられないので、線で置き直す。 */
+@container sidebar-head (max-width: 17.5em) {
+  #sidebar .sb-head > .sb-actions {
+    grid-area: 2 / 5 / auto / 7;
+    justify-self: end;
+  }
+  #sidebar .sb-head > .sb-filter-wrap {
+    grid-area: 2 / 1 / auto / 5;
+  }
 }
 #sidebar .sb-head .sb-icon-action,
 .view-head-row > #sidebar-toggle {
@@ -21610,6 +21664,75 @@ body.gdp-help-page #content {
   box-shadow: var(--glow-select);
   color: var(--color-text);
   font-weight: 600;
+}
+/* 目次を開閉する 1 行は狭い面だけで出す (help-page.ts)。 */
+.gdp-help-nav-toggle {
+  display: none;
+}
+/* 面が狭いとき (640px 未満 = この箱 580px 未満。2 面の面 486px など): 目次を
+   本文の上に畳む (目次 208px の横で本文が 186px になり、1 行 3〜4 語で長い語が
+   はみ出した)。既定は畳み、1 行の見出し (「目次: 今の節」) で開く。 */
+.gdp-help-shell {
+  container: help-shell / inline-size;
+}
+@container help-shell (max-width: 579px) {
+  .gdp-help-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+  .gdp-help-nav-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    height: var(--ui-control-md);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-line-soft);
+    border-radius: var(--radius-md);
+    background: var(--color-inset);
+    color: var(--color-text);
+    font: inherit;
+    font-size: var(--ui-font-md);
+    text-align: left;
+    cursor: pointer;
+  }
+  .gdp-help-nav-toggle:hover {
+    background: var(--color-raised);
+  }
+  .gdp-help-nav-toggle-label {
+    flex: none;
+    color: var(--color-text-3);
+  }
+  .gdp-help-nav-toggle-current {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .gdp-help-nav-toggle::after {
+    content: "";
+    flex: none;
+    width: 0.45em;
+    height: 0.45em;
+    margin: 0 var(--space-1) 0.2em;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(45deg);
+  }
+  .gdp-help-nav-open > .gdp-help-nav-toggle::after {
+    margin-bottom: -0.2em;
+    transform: rotate(-135deg);
+  }
+  .gdp-help-layout:not(.gdp-help-nav-open) > .gdp-help-nav {
+    display: none;
+  }
+  .gdp-help-nav {
+    position: static;
+    padding: 0 0 var(--space-3);
+    border-right: 0;
+    border-bottom: 1px solid var(--color-line-soft);
+  }
 }
 .gdp-help-content h2 {
   margin: 0 0 var(--space-1);

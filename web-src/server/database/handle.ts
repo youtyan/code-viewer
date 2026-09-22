@@ -1061,7 +1061,18 @@ async function handleQuery(
     omitDirNames,
     req.signal,
   );
-  if (result.ok !== true) return result.response;
+  if (result.ok !== true) {
+    // 失敗した問い合わせも履歴に残す (「失敗」の印と理由つき)。以前は成功した
+    // ものだけを残し、何を打って失敗したかが履歴から消えていた。
+    if (body.saveHistory && body.db && body.sql)
+      await saveFailedQueryHistory(
+        cwd,
+        { ...body, db: body.db, sql: body.sql },
+        result.response,
+        sendSse,
+      );
+    return result.response;
+  }
   const response = result.value;
   if (body.saveHistory && body.db && body.sql) {
     const entry: QueryHistoryEntry = {
@@ -1096,6 +1107,74 @@ async function handleQuery(
     );
   }
   return json(response);
+}
+
+/** 失敗の応答の理由: JSON の error、無ければ本文、それも無ければ HTTP の状態。 */
+async function failureReason(
+  response: Response,
+): Promise<{ error: string; elapsedMs: number }> {
+  const text = await response.clone().text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // JSON でない本文は、そのまま理由にする (下で text を使う)。
+    parsed = null;
+  }
+  const record =
+    parsed && typeof parsed === "object"
+      ? (parsed as { error?: unknown; elapsedMs?: unknown })
+      : {};
+  const error =
+    typeof record.error === "string" && record.error
+      ? record.error
+      : text.trim() || `HTTP ${response.status} ${response.statusText}`.trim();
+  const elapsedMs =
+    typeof record.elapsedMs === "number" && Number.isFinite(record.elapsedMs)
+      ? record.elapsedMs
+      : 0;
+  return { error, elapsedMs };
+}
+
+async function saveFailedQueryHistory(
+  cwd: string,
+  body: {
+    db: string;
+    sql: string;
+    title?: string;
+    body?: string;
+    executedBy?: "user" | "ai";
+    source?: "cli" | "browser";
+  },
+  response: Response,
+  sendSse?: (event: string, data?: string) => void,
+): Promise<void> {
+  const { error, elapsedMs } = await failureReason(response);
+  const entry: QueryHistoryEntry = {
+    id: makeHistoryId(),
+    dbId: body.db,
+    sql: body.sql,
+    title: body.title,
+    body: body.body,
+    columns: [],
+    rowsPreview: [],
+    rowCount: 0,
+    savedRows: 0,
+    truncated: false,
+    elapsedMs,
+    executedAt: new Date().toISOString(),
+    executedBy: body.executedBy || "user",
+    source: body.source || "browser",
+    error,
+  };
+  await updateQueryHistoryAsync(cwd, (state) => ({
+    state: addQueryHistoryEntry(state, entry),
+    result: undefined,
+  }));
+  sendSse?.(
+    "db-query",
+    JSON.stringify({ action: "add", dbId: body.db, id: entry.id }),
+  );
 }
 
 async function handleHistory(cwd: string, url: URL): Promise<Response> {

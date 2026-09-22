@@ -9,6 +9,7 @@ import {
 } from "../../core/shiki-loader";
 import { type DbText, dbText } from "./i18n";
 import { formatQueryValue } from "./query-value";
+import { serverErrorSummary } from "./report-failure";
 import { highlightSqlToInnerHtml } from "./shiki-sql";
 
 const MAX_HISTORY = 50;
@@ -220,6 +221,35 @@ export function createQueryEditor(
     el.classList.remove("has-result");
   }
 
+  /**
+   * 失敗の表示。サーバの JSON の error があれば先頭に出し、全文 (操作・HTTP の
+   * 状態・本文・cause の連鎖) は「詳細」に畳む。無ければ全文をそのまま出す。
+   */
+  function renderQueryFailure(err: unknown): HTMLElement {
+    const detail = formatErrorDetail(err);
+    const summary = serverErrorSummary(err);
+    if (summary === null) {
+      const errEl = document.createElement("pre");
+      errEl.className = "db-query-error";
+      errEl.textContent = detail;
+      return errEl;
+    }
+    const box = document.createElement("div");
+    box.className = "db-query-error";
+    const lead = document.createElement("p");
+    lead.className = "db-query-error-summary";
+    lead.textContent = summary;
+    const more = document.createElement("details");
+    more.className = "db-query-error-details";
+    const label = document.createElement("summary");
+    label.textContent = text().editor.errorDetails;
+    const full = document.createElement("pre");
+    full.textContent = detail;
+    more.append(label, full);
+    box.append(lead, more);
+    return box;
+  }
+
   async function run() {
     const sql = textarea.value.trim();
     if (!sql) return;
@@ -250,10 +280,7 @@ export function createQueryEditor(
       statusSpan.textContent = text().editor.failed;
       showQueryResult();
       resultArea.innerHTML = "";
-      const errEl = document.createElement("pre");
-      errEl.className = "db-query-error";
-      errEl.textContent = formatErrorDetail(err);
-      resultArea.appendChild(errEl);
+      resultArea.appendChild(renderQueryFailure(err));
     } finally {
       runBtn.disabled = false;
     }
@@ -354,10 +381,7 @@ export function createQueryEditor(
       statusSpan.textContent = text().editor.failed;
       showQueryResult();
       resultArea.innerHTML = "";
-      const errEl = document.createElement("pre");
-      errEl.className = "db-query-error";
-      errEl.textContent = formatErrorDetail(err);
-      resultArea.appendChild(errEl);
+      resultArea.appendChild(renderQueryFailure(err));
     } finally {
       explainBtn.disabled = false;
       runBtn.disabled = false;

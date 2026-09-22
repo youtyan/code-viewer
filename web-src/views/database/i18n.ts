@@ -186,6 +186,8 @@ export type DbText = {
     statusError: (ms: number) => string;
     statusSuccess: (rows: number, suffix: string, ms: number) => string;
     statusExplain: (ms: number) => string;
+    /** 失敗の全文 (操作・HTTP の状態・本文・cause の連鎖) を畳んだ欄の見出し。 */
+    errorDetails: string;
   };
   // クエリ履歴ペイン。
   history: {
@@ -210,6 +212,8 @@ export type DbText = {
     executorUser: string;
     rowsLabel: (rows: number, truncated: boolean) => string;
     elapsedLabel: (ms: number) => string;
+    /** 失敗した問い合わせの印。 */
+    failedMark: string;
     truncatedRows: (saved: number, total: number) => string;
   };
   // セッションログペイン (session 限定。SQL 実行 / 編集コミットの成否を記録)。
@@ -715,6 +719,7 @@ const EN: DbText = {
     statusError: (ms) => `Error (${ms}ms)`,
     statusSuccess: (rows, suffix, ms) => `${rows}${suffix} rows (${ms}ms)`,
     statusExplain: (ms) => `Explain (${ms}ms)`,
+    errorDetails: "Details",
   },
   history: {
     refresh: "Refresh history",
@@ -738,6 +743,7 @@ const EN: DbText = {
     executorUser: "User",
     rowsLabel: (rows, truncated) => `${rows}${truncated ? "+" : ""} rows`,
     elapsedLabel: (ms) => `${ms}ms`,
+    failedMark: "Failed",
     truncatedRows: (saved, total) => `Showing ${saved} of ${total} rows`,
   },
   sessionLog: {
@@ -1255,6 +1261,7 @@ const JA: DbText = {
     statusError: (ms) => `エラー (${ms}ms)`,
     statusSuccess: (rows, suffix, ms) => `${rows}${suffix} 行 (${ms}ms)`,
     statusExplain: (ms) => `実行計画 (${ms}ms)`,
+    errorDetails: "詳細",
   },
   history: {
     refresh: "クエリ履歴を更新",
@@ -1278,6 +1285,7 @@ const JA: DbText = {
     executorUser: "ユーザー",
     rowsLabel: (rows, truncated) => `${rows}${truncated ? "+" : ""} 行`,
     elapsedLabel: (ms) => `${ms}ms`,
+    failedMark: "失敗",
     truncatedRows: (saved, total) => `全 ${total} 行中 ${saved} 行を表示`,
   },
   sessionLog: {
