@@ -182,6 +182,27 @@ function isAbortError(err: unknown): boolean {
   );
 }
 
+async function requireOkResponse(
+  response: Response,
+  operation: string,
+): Promise<void> {
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, operation));
+  }
+}
+
+async function readJsonResponse<T>(
+  response: Response,
+  operation: string,
+): Promise<T> {
+  await requireOkResponse(response, operation);
+  try {
+    return (await response.json()) as T;
+  } catch (error) {
+    throw errorWithCause(`${operation}: response is not valid JSON`, error);
+  }
+}
+
 // ----- 内部: 1 タブ分の view (元 createDatabaseView の中身) -----
 
 type TabPaneCallbacks = {
@@ -208,6 +229,7 @@ type TabPaneInternal = {
   getLabel: () => string;
   dispose: () => void;
   localize: () => void;
+  showError: (message: string) => void;
 };
 
 // TabPane のすべての永続化対象 state を 1 箇所で受け取る。pane の構築時に
@@ -394,6 +416,7 @@ function createTabPane(
   }
   let lastFiles: DbFileInfo[] = [];
   let noDatastoresAvailable = false;
+  let datastoreListError: unknown | null = null;
   let currentSchema: string | null = initial.schema ?? null;
   let currentTable: string | null = initial.table ?? null;
   let loadGeneration = 0;
@@ -911,6 +934,14 @@ function createTabPane(
 
   function renderNoDatastoresEmpty(): void {
     const t = paneText().nav;
+    if (datastoreListError) {
+      setPaneStatus(
+        noDatastoresPane,
+        t.datastoresError(errorMessage(datastoreListError)),
+        { error: true },
+      );
+      return;
+    }
     setPaneEmpty(noDatastoresPane, t.noDatastores, {
       hint: t.noDatastoresHint,
       iconPath: ICON_PATH_SNAPSHOT,
@@ -1268,9 +1299,7 @@ function createTabPane(
   async function fetchDbFiles(): Promise<DbFilesResponse> {
     if (deps.fetchDbFiles) return deps.fetchDbFiles();
     const res = await deps.trackLoad(fetch(apiUrl("dbFiles")));
-    if (!res.ok) return { files: [] };
-    const data = (await res.json()) as DbFilesResponse;
-    return data;
+    return readJsonResponse<DbFilesResponse>(res, "load datastores");
   }
 
   function withCurrentSchema(params: URLSearchParams): URLSearchParams {
@@ -1371,7 +1400,8 @@ function createTabPane(
       syncCachedTableRowCount(table, data.rowCount);
     } catch (err) {
       if (!isAbortError(err)) {
-        console.warn(`failed to refresh table count: ${errorMessage(err)}`);
+        console.error("Failed to refresh table count", err);
+        showPaneError(paneText().nav.rowCountError(errorMessage(err)));
       }
     }
   }
@@ -1810,18 +1840,25 @@ function createTabPane(
       slot.finish();
     }
     if (currentTab === "schema") {
-      const columns = await fetchColumns(table);
-      if (
-        generation !== loadGeneration ||
-        currentDbInfo?.id !== requestDbId ||
-        currentTable !== table
-      ) {
-        return;
+      try {
+        const columns = await fetchColumns(table);
+        if (
+          generation !== loadGeneration ||
+          currentDbInfo?.id !== requestDbId ||
+          currentTable !== table
+        ) {
+          return;
+        }
+        schemaView.render(table, columns, schemaCache?.indexes || [], {
+          tableComment: schemaCache?.tables.find(
+            (entry) => entry.name === table,
+          )?.comment,
+        });
+      } catch (error) {
+        if (generation !== loadGeneration || isAbortError(error)) return;
+        console.error(`Failed to load schema for ${table}`, error);
+        schemaView.showError(paneText().schema.loadError(errorMessage(error)));
       }
-      schemaView.render(table, columns, schemaCache?.indexes || [], {
-        tableComment: schemaCache?.tables.find((entry) => entry.name === table)
-          ?.comment,
-      });
     }
   }
 
@@ -1835,50 +1872,57 @@ function createTabPane(
     if (!currentDbInfo) return;
     const requestDbId = currentDbInfo.id;
     setActiveTab("schema", false);
-    const columns = await fetchColumns(table);
-    if (
-      generation !== loadGeneration ||
-      currentDbInfo?.id !== requestDbId ||
-      currentTable !== table
-    ) {
-      return;
+    try {
+      const columns = await fetchColumns(table);
+      if (
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== requestDbId ||
+        currentTable !== table
+      ) {
+        return;
+      }
+      schemaView.render(table, columns, schemaCache?.indexes || [], {
+        tableComment: schemaCache?.tables.find((entry) => entry.name === table)
+          ?.comment,
+      });
+    } catch (error) {
+      if (generation !== loadGeneration || isAbortError(error)) return;
+      console.error(`Failed to load schema for ${table}`, error);
+      schemaView.showError(paneText().schema.loadError(errorMessage(error)));
     }
-    schemaView.render(table, columns, schemaCache?.indexes || [], {
-      tableComment: schemaCache?.tables.find((entry) => entry.name === table)
-        ?.comment,
-    });
   }
 
   async function fetchColumns(table: string): Promise<DbColumn[]> {
     if (schemaCache?.columnsMap?.[table]) {
       return schemaCache.columnsMap[table];
     }
-    if (!currentDbInfo) return [];
-    try {
-      const data = await logSqlFetch<{
-        columns: DbColumn[];
-        executedSql?: string[];
-      }>({
-        url: `${apiUrl("dbColumns")}?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
-        kind: "query",
-        label: `_db/columns ${table}`,
-        trackLoad: false,
-        errorPrefix: "failed to fetch columns",
-      });
-      return data.columns;
-    } catch {
-      return [];
-    }
+    if (!currentDbInfo) throw new Error("no database selected");
+    const data = await logSqlFetch<{
+      columns: DbColumn[];
+      executedSql?: string[];
+    }>({
+      url: `${apiUrl("dbColumns")}?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
+      kind: "query",
+      label: `_db/columns ${table}`,
+      trackLoad: false,
+      errorPrefix: "failed to fetch columns",
+    });
+    return data.columns;
   }
 
   async function showSchema(table: string) {
     setActiveTab("schema");
     if (!currentDbInfo) return;
-    const columns = await fetchColumns(table);
-    schemaView.render(table, columns, schemaCache?.indexes || [], {
-      tableComment: schemaCache?.tables.find((entry) => entry.name === table)
-        ?.comment,
-    });
+    try {
+      const columns = await fetchColumns(table);
+      schemaView.render(table, columns, schemaCache?.indexes || [], {
+        tableComment: schemaCache?.tables.find((entry) => entry.name === table)
+          ?.comment,
+      });
+    } catch (error) {
+      console.error(`Failed to load schema for ${table}`, error);
+      schemaView.showError(paneText().schema.loadError(errorMessage(error)));
+    }
   }
 
   async function refreshCurrentSchemaView(): Promise<void> {
@@ -1933,7 +1977,9 @@ function createTabPane(
       ) {
         return;
       }
+      console.error(`Failed to refresh schema for ${table}`, err);
       setTableListStatus(errorMessage(err), { error: true });
+      schemaView.showError(paneText().schema.loadError(errorMessage(err)));
     } finally {
       schemaView.setRefreshBusy(false);
     }
@@ -1962,8 +2008,9 @@ function createTabPane(
         tableComment: schemaCache?.tables.find((entry) => entry.name === table)
           ?.comment,
       });
-    } catch {
-      /* ignore */
+    } catch (error) {
+      console.error(`Failed to load DDL for ${table}`, error);
+      schemaView.showError(paneText().schema.loadError(errorMessage(error)));
     }
   }
 
@@ -1976,11 +2023,26 @@ function createTabPane(
       }
     } else {
       const tables = schemaCache.tables.filter((t) => t.type !== "view");
-      const results = await Promise.all(
-        tables.map((t) =>
-          fetchColumns(t.name).then((cols) => ({ name: t.name, cols })),
-        ),
-      );
+      let results: Array<{ name: string; cols: DbColumn[] }>;
+      try {
+        results = await Promise.all(
+          tables.map((t) =>
+            fetchColumns(t.name).then((cols) => ({ name: t.name, cols })),
+          ),
+        );
+      } catch (error) {
+        console.error("Failed to load columns for ER diagram", error);
+        const statusHost =
+          erDiagram.el.querySelector<HTMLElement>(".db-er-svg-wrap");
+        if (statusHost) {
+          setPaneStatus(
+            statusHost,
+            paneText().schema.loadError(errorMessage(error)),
+            { error: true },
+          );
+        }
+        return;
+      }
       for (const { name, cols } of results) {
         if (cols.length > 0) columnsMap.set(name, cols);
       }
@@ -2002,18 +2064,28 @@ function createTabPane(
       "aria-busy",
       isRefreshingDatastores ? "true" : "false",
     );
-    syncDatastoreRefreshResult();
   }
 
-  function syncDatastoreRefreshResult(): void {
+  function clearDatastoreRefreshResult(): void {
     dbRefreshResult.hidden = true;
     dbRefreshResult.textContent = "";
     dbRefreshResult.classList.toggle("changed", false);
+    dbRefreshResult.classList.remove("db-pane-error");
+    dbRefreshResult.title = "";
+  }
+
+  function showPaneError(message: string): void {
+    dbRefreshResult.hidden = false;
+    dbRefreshResult.textContent = message;
+    dbRefreshResult.classList.toggle("changed", false);
+    dbRefreshResult.classList.add("db-pane-error");
+    dbRefreshResult.title = message;
   }
 
   async function refreshDatastoreList(): Promise<void> {
     if (dbRefreshBtn.disabled) return;
     isRefreshingDatastores = true;
+    clearDatastoreRefreshResult();
     dbRefreshBtn.disabled = true;
     dbRefreshBtn.classList.add("spinning");
     syncDbRefreshButton();
@@ -2060,7 +2132,7 @@ function createTabPane(
   async function handleDbSelectChange(): Promise<void> {
     const dbId = dbSelect.value;
     if (!dbId) return;
-    syncDatastoreRefreshResult();
+    clearDatastoreRefreshResult();
     const generation = ++loadGeneration;
     const file = lastFiles.find((f) => f.id === dbId);
     const option = dbSelect.selectedOptions[0];
@@ -2107,7 +2179,25 @@ function createTabPane(
     options: DatabaseEnterOptions = {},
   ) {
     const generation = ++loadGeneration;
-    const filesResponse = await fetchDbFiles();
+    let filesResponse: DbFilesResponse;
+    try {
+      filesResponse = await fetchDbFiles();
+      datastoreListError = null;
+      clearDatastoreRefreshResult();
+    } catch (error) {
+      if (generation !== loadGeneration || isAbortError(error)) return;
+      datastoreListError = error;
+      console.error("Failed to load datastores", error);
+      if (lastFiles.length === 0) {
+        noDatastoresAvailable = true;
+        renderNoDatastoresEmpty();
+      } else {
+        showPaneError(paneText().nav.datastoresError(errorMessage(error)));
+      }
+      applyVisibility();
+      cb.onStateChange();
+      return;
+    }
     if (generation !== loadGeneration) return;
     const files = filesResponse.files;
     lastFiles = files;
@@ -2498,6 +2588,7 @@ function createTabPane(
     getLabel,
     dispose,
     localize: localizePane,
+    showError: showPaneError,
   };
 }
 
@@ -2589,6 +2680,15 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   // 履歴 pane 内「ログ」タブで時系列表示する (view は tabPane 側で生成)。
   const sessionLog = createSessionLog();
 
+  function reportActivePaneError(
+    operation: string,
+    error: unknown,
+    message = outerText().nav.viewLoadError(errorMessage(error)),
+  ): void {
+    console.error(operation, error);
+    if (activeTabId) tabsById.get(activeTabId)?.pane.showError(message);
+  }
+
   function isRestoring(): boolean {
     return restoringDepth > 0;
   }
@@ -2598,6 +2698,26 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       "Content-Type": "application/json",
       "X-Code-Viewer-Action": "1",
     };
+  }
+
+  async function persistDbUiPatch(
+    patch: Record<string, unknown>,
+    operation: string,
+  ): Promise<void> {
+    try {
+      const response = await fetch(apiUrl("dbUi"), {
+        method: "PATCH",
+        headers: actionHeaders(),
+        body: JSON.stringify(patch),
+      });
+      await requireOkResponse(response, operation);
+    } catch (error) {
+      reportActivePaneError(
+        operation,
+        error,
+        outerText().nav.stateSaveError(errorMessage(error)),
+      );
+    }
   }
 
   async function ensureDbUiState(): Promise<void> {
@@ -2651,11 +2771,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     // PATCH のレスポンスは local state には流し込まない: 連続書込時に古い
     // レスポンスが後勝ちして新しいローカル値を巻き戻す race を避ける。サーバ
     // 側 merge は idempotent なので、各 PATCH が独立に届けば十分。
-    void fetch(apiUrl("dbUi"), {
-      method: "PATCH",
-      headers: actionHeaders(),
-      body: JSON.stringify({ columnWidths: { [dbId]: { [table]: widths } } }),
-    }).catch(() => undefined);
+    void persistDbUiPatch(
+      { columnWidths: { [dbId]: { [table]: widths } } },
+      "save database column widths",
+    );
   }
 
   // dbUiState 内の `Record<scope, string[]>` 形フィールドを 1 か所で更新する
@@ -2679,15 +2798,14 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (nextMap) nextState[stateKey] = nextMap;
     else delete nextState[stateKey];
     applyDbUiState(nextState);
-    void fetch(apiUrl("dbUi"), {
-      method: "PATCH",
-      headers: actionHeaders(),
-      body: JSON.stringify({
+    void persistDbUiPatch(
+      {
         [stateKey]: {
           [scopeKey]: nextTables.length > 0 ? nextTables : null,
         },
-      }),
-    }).catch(() => undefined);
+      },
+      `save database ${stateKey}`,
+    );
   }
 
   function getExpandedTables(scopeKey: string): string[] {
@@ -2776,8 +2894,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const params = new URLSearchParams({ db: dbId });
     if (schema) params.set("schema", schema);
     const res = await fetch(`${apiUrl("dbHistory")}?${params}`);
-    if (!res.ok) return [];
-    const state = (await res.json()) as QueryHistoryState;
+    const state = await readJsonResponse<QueryHistoryState>(
+      res,
+      "load query Local History",
+    );
     const seen = new Set<string>();
     const history: string[] = [];
     for (const entry of state.entries) {
@@ -2809,19 +2929,16 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const promise = deps
       .trackLoad(fetch(apiUrl("dbFiles")))
       .then(async (res) => {
-        if (!res.ok) {
-          const value: DbFilesResponse = { files: [] };
-          dbFilesCache = { value, expiresAt: Date.now() + 10_000 };
-          return value;
-        }
-        const value = (await res.json()) as DbFilesResponse;
+        const value = await readJsonResponse<DbFilesResponse>(
+          res,
+          "load datastores",
+        );
         dbFilesCache = { value, expiresAt: Date.now() + 10_000 };
         return value;
       })
-      .catch(() => {
-        const value: DbFilesResponse = { files: [] };
-        dbFilesCache = { value, expiresAt: Date.now() + 10_000 };
-        return value;
+      .catch((error) => {
+        dbFilesCache = null;
+        throw error;
       })
       .finally(() => {
         if (dbFilesCache?.promise === promise) dbFilesCache = null;
@@ -2857,7 +2974,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     abortActiveSave();
     if (options.keepalive) {
       try {
-        await fetch(apiUrl("dbTabs"), {
+        const response = await fetch(apiUrl("dbTabs"), {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -2866,21 +2983,32 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           body: raw,
           keepalive: true,
         });
+        await requireOkResponse(response, "save database tabs on unload");
         lastSavedTabsRaw = raw;
-      } catch {
-        // ベストエフォート。失敗してもユーザー操作は妨げない。
+      } catch (error) {
+        reportActivePaneError(
+          "Failed to save database tabs on unload",
+          error,
+          outerText().nav.stateSaveError(errorMessage(error)),
+        );
       } finally {
         if (pendingSavedTabsRaw === raw) pendingSavedTabsRaw = null;
       }
       return;
     }
     saveChain = saveChain
-      .catch(() => undefined)
+      .catch((error) => {
+        reportActivePaneError(
+          "Previous database tab save failed",
+          error,
+          outerText().nav.stateSaveError(errorMessage(error)),
+        );
+      })
       .then(async () => {
         const controller = new AbortController();
         saveController = controller;
         try {
-          await fetch(apiUrl("dbTabs"), {
+          const response = await fetch(apiUrl("dbTabs"), {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
@@ -2889,10 +3017,15 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
             body: raw,
             signal: controller.signal,
           });
+          await requireOkResponse(response, "save database tabs");
           lastSavedTabsRaw = raw;
-        } catch (err) {
-          if (!isAbortError(err)) {
-            // ベストエフォート。失敗してもユーザー操作は妨げない。
+        } catch (error) {
+          if (!isAbortError(error)) {
+            reportActivePaneError(
+              "Failed to save database tabs",
+              error,
+              outerText().nav.stateSaveError(errorMessage(error)),
+            );
           }
         } finally {
           if (saveController === controller) saveController = null;
@@ -2914,14 +3047,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     flushPendingSave({ keepalive: true });
   }
 
-  async function fetchTabs(): Promise<TabsResponse | null> {
-    try {
-      const res = await fetch(apiUrl("dbTabs"));
-      if (!res.ok) return null;
-      return (await res.json()) as TabsResponse;
-    } catch {
-      return null;
-    }
+  async function fetchTabs(): Promise<TabsResponse> {
+    const res = await fetch(apiUrl("dbTabs"));
+    return readJsonResponse<TabsResponse>(res, "load database tabs");
   }
 
   const tabsBar = document.createElement("div");
@@ -2956,7 +3084,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (!isRestoring()) syncActiveRoute();
     scheduleSave();
     if (mounted && !isRestoring()) {
-      void ensureInitialEnter(id)?.catch(() => undefined);
+      void ensureInitialEnter(id)?.catch((error) => {
+        reportActivePaneError(
+          "Failed to initialize database tab",
+          error,
+          outerText().nav.viewLoadError(errorMessage(error)),
+        );
+      });
     }
   }
 
@@ -3036,9 +3170,22 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       "Content-Type": "application/json",
       "X-Code-Viewer-Action": "1",
     };
-    void fetch(apiUrl("dbClose"), { method: "POST", headers, body }).catch(
-      () => undefined,
-    );
+    void (async () => {
+      try {
+        const response = await fetch(apiUrl("dbClose"), {
+          method: "POST",
+          headers,
+          body,
+        });
+        await requireOkResponse(response, `close datastore ${dbId}`);
+      } catch (error) {
+        reportActivePaneError(
+          `Failed to close datastore ${dbId}`,
+          error,
+          outerText().nav.closeDatastoreError(errorMessage(error)),
+        );
+      }
+    })();
   }
 
   function clearDropTarget(): void {
@@ -3327,6 +3474,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           options,
         );
         refreshChipLabel(id);
+      } catch (error) {
+        console.error(`Failed to initialize database tab ${id}`, error);
+        pane.showError(outerText().nav.viewLoadError(errorMessage(error)));
       } finally {
         finishRestoring?.();
         paneReadyById.delete(id);
@@ -3493,8 +3643,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     try {
       const parsed = JSON.parse(data) as { dbId?: unknown };
       return typeof parsed.dbId === "string" ? parsed.dbId : null;
-    } catch {
-      return null;
+    } catch (error) {
+      throw errorWithCause(
+        `parse database event dbId; response body: ${data}`,
+        error,
+      );
     }
   }
 
@@ -3503,8 +3656,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     try {
       const parsed = JSON.parse(data) as { schema?: unknown };
       return typeof parsed.schema === "string" ? parsed.schema : null;
-    } catch {
-      return null;
+    } catch (error) {
+      throw errorWithCause(
+        `parse database event schema; response body: ${data}`,
+        error,
+      );
     }
   }
 
@@ -3517,6 +3673,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     options: DatabaseEnterOptions = {},
   ): Promise<void> {
     if (seq !== lifecycleSeq) return;
+    let tabsLoadError: unknown | null = null;
     const firstMount = !mounted;
     if (firstMount) {
       const content = document.getElementById("content");
@@ -3537,7 +3694,15 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       deps.syncHeaderMenu();
 
       // suspend 復帰時はメモリ上のタブをそのまま使い、永続化タブを重ねない。
-      const restored = tabsById.size === 0 ? await fetchTabs() : null;
+      let restored: TabsResponse | null = null;
+      if (tabsById.size === 0) {
+        try {
+          restored = await fetchTabs();
+        } catch (error) {
+          tabsLoadError = error;
+          console.error("Failed to restore database tabs", error);
+        }
+      }
       if (!mounted || seq !== lifecycleSeq) return;
       if (restored && restored.tabs.length > 0) {
         const hasRouteTarget = Boolean(db || schema || table || view);
@@ -3608,6 +3773,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       const ready = paneReadyById.get(id);
       if (ready) await ready;
       if (!mounted || seq !== lifecycleSeq) return;
+      if (tabsLoadError) {
+        tabsById
+          .get(id)
+          ?.pane.showError(
+            outerText().nav.tabsLoadError(errorMessage(tabsLoadError)),
+          );
+      }
       return;
     }
     if (!activeTabId) return;
@@ -3632,16 +3804,26 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   ): Promise<void> {
     const seq = lifecycleSeq;
     enterQueue = enterQueue
-      .catch(() => undefined)
-      .then(() => doEnter(seq, db, schema, table, view, options));
+      .catch((error) => {
+        reportActivePaneError("Previous database view load failed", error);
+      })
+      .then(() => doEnter(seq, db, schema, table, view, options))
+      .catch((error) => {
+        reportActivePaneError("Failed to load database view", error);
+      });
     await enterQueue;
   }
 
   async function refreshDatastores(): Promise<void> {
     const seq = lifecycleSeq;
     enterQueue = enterQueue
-      .catch(() => undefined)
-      .then(() => doRefreshDatastores(seq));
+      .catch((error) => {
+        reportActivePaneError("Previous datastore refresh failed", error);
+      })
+      .then(() => doRefreshDatastores(seq))
+      .catch((error) => {
+        reportActivePaneError("Failed to refresh datastores", error);
+      });
     await enterQueue;
   }
 
@@ -3713,8 +3895,20 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   function handleSse(event?: string, data?: string): void {
     if (!mounted) return;
-    const dbId = parseSseDbId(data);
-    const schema = parseSseSchema(data);
+    let dbId: string | null;
+    let schema: string | null;
+    try {
+      dbId = parseSseDbId(data);
+      schema = parseSseSchema(data);
+    } catch (error) {
+      reportActivePaneError(
+        "Failed to parse database event",
+        error,
+        outerText().nav.eventError(errorMessage(error)),
+      );
+      void refreshDatastores();
+      return;
+    }
     for (const [, entry] of tabsById) {
       const state = entry.pane.getState();
       if (dbId && state.dbId !== dbId) continue;

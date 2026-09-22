@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   createDatabaseView,
   TABLE_SELECT_FETCH_DELAY_MS,
@@ -50,6 +50,7 @@ afterEach(() => {
     writable: true,
     value: originalNode,
   });
+  vi.restoreAllMocks();
 });
 
 class FakeClassList {
@@ -289,6 +290,38 @@ class FakeElement {
     }
   }
 
+  async contextmenu() {
+    const event = {
+      target: this,
+      pageX: 10,
+      pageY: 10,
+      preventDefault() {
+        /* noop */
+      },
+      stopPropagation() {
+        /* noop */
+      },
+    };
+    for (const listener of this.listeners.contextmenu || []) {
+      await listener(event);
+    }
+  }
+
+  async dblclick(target: FakeElement = this) {
+    const event = {
+      target,
+      preventDefault() {
+        /* noop */
+      },
+      stopPropagation() {
+        /* noop */
+      },
+    };
+    for (const listener of this.listeners.dblclick || []) {
+      await listener(event);
+    }
+  }
+
   focus() {
     /* noop */
   }
@@ -437,7 +470,7 @@ function jsonResponse(body: unknown): Response {
 
 function mockFetch(
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
-  options: { handleDbUi?: boolean } = {},
+  options: { handleDbUi?: boolean; handleDbHistory?: boolean } = {},
 ) {
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
@@ -453,6 +486,13 @@ function mockFetch(
         return Promise.resolve(
           jsonResponse({ version: 1, columnWidths: {}, prefs: {} }),
         );
+      }
+      if (
+        url.startsWith("/_db/history") &&
+        !init?.method &&
+        options.handleDbHistory !== true
+      ) {
+        return Promise.resolve(jsonResponse({ entries: [] }));
       }
       return Promise.resolve(handler(url, init));
     }) as typeof fetch,
@@ -2252,6 +2292,389 @@ describe("database view SQL error rendering", () => {
 
     expect(requestCount).toBe(2);
     expect(view.getDbUiPref("inferFkRails", false)).toBe(true);
+    await leaveView(view);
+  });
+
+  test("shows datastore list failures and retries instead of caching an empty list", async () => {
+    installDatabaseDom();
+    let filesFetches = 0;
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") {
+        filesFetches++;
+        if (filesFetches === 1) {
+          return new Response("list reason\nlist detail", { status: 503 });
+        }
+        return jsonResponse(baseFilesResponse());
+      }
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter();
+
+    const unavailable = document.querySelector(
+      ".db-no-datastores",
+    ) as unknown as FakeElement;
+    expect(unavailable.hidden).toBe(false);
+    expect(
+      (unavailable.querySelector(".db-pane-error")?.textContent || "").includes(
+        "list reason\nlist detail",
+      ),
+    ).toBe(true);
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to load datastores",
+      expect.any(Error),
+    );
+
+    await view.refresh();
+    expect(filesFetches).toBe(2);
+    expect(unavailable.hidden).toBe(true);
+    expect(
+      (document.querySelector(".db-file-select") as unknown as FakeElement)
+        .disabled,
+    ).toBe(false);
+    await leaveView(view);
+  });
+
+  test("shows column and DDL fetch failures in the schema pane", async () => {
+    installDatabaseDom();
+    let ddlFails = false;
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema")) {
+        return jsonResponse({ ...baseSchemaResponse(), columnsMap: undefined });
+      }
+      if (url.startsWith("/_db/columns")) {
+        return ddlFails
+          ? jsonResponse({ columns: baseTableResponse().columns })
+          : new Response("column reason\ncolumn detail", { status: 502 });
+      }
+      if (url.startsWith("/_db/ddl")) {
+        return new Response("DDL reason\nDDL detail", { status: 500 });
+      }
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db", undefined, "users", "schema");
+    expect(document.querySelector(".db-schema-view .db-pane-error")).toBeNull();
+    const schema = document.querySelector(
+      ".db-schema-view",
+    ) as unknown as FakeElement;
+    expect(
+      (schema.querySelector(".db-pane-error")?.textContent || "").includes(
+        "column reason\ncolumn detail",
+      ),
+    ).toBe(true);
+
+    ddlFails = true;
+    await view.enter("docker:db", undefined, "users", "data");
+    const table = document.querySelector(
+      ".db-table-item",
+    ) as unknown as FakeElement;
+    await table.contextmenu();
+    const createItem = Array.from(
+      document.querySelectorAll(".db-context-menu-item"),
+    ).find((item) => item.textContent === "View CREATE TABLE") as unknown as
+      | FakeElement
+      | undefined;
+    await createItem?.click();
+    await waitFor(() =>
+      Boolean(
+        schema
+          .querySelector(".db-pane-error")
+          ?.textContent.includes("DDL detail"),
+      ),
+    );
+    expect(
+      consoleError.mock.calls.some((call) => call[1] instanceof Error),
+    ).toBe(true);
+    await leaveView(view);
+  });
+
+  test("shows row count refresh failures without replacing the known count", async () => {
+    installDatabaseDom();
+    let tableFetches = 0;
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table-count"))
+        return new Response("count reason\ncount detail", { status: 503 });
+      if (url.startsWith("/_db/table")) {
+        tableFetches++;
+        return jsonResponse(baseTableResponse());
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+    const filter = document.querySelector(
+      ".db-grid-filter-input",
+    ) as unknown as FakeElement;
+    filter.value = "sample";
+    await filter.input();
+    await waitFor(() => tableFetches === 2);
+    await (
+      document.querySelector(".db-grid-refresh") as unknown as FakeElement
+    ).click();
+    await waitFor(() =>
+      Boolean(
+        document
+          .querySelector(".db-refresh-result.db-pane-error")
+          ?.textContent.includes("count detail"),
+      ),
+    );
+    expect(document.querySelector(".db-table-count")?.textContent).toBe("1");
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to refresh table count",
+      expect.any(Error),
+    );
+    await leaveView(view);
+  });
+
+  test("shows tab save failures while leaving the current screen usable", async () => {
+    installDatabaseDom();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT") {
+        return new Response("save reason\nsave detail", { status: 507 });
+      }
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+    await waitFor(() =>
+      Boolean(
+        document
+          .querySelector(".db-refresh-result.db-pane-error")
+          ?.textContent.includes("save detail"),
+      ),
+    );
+    expect(document.querySelector(".db-table-name")?.textContent).toBe("users");
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to save database tabs",
+      expect.any(Error),
+    );
+    await leaveView(view);
+  });
+
+  test("reports failed expanded-state and column-width persistence", async () => {
+    installDatabaseDom();
+    let patchAttempts = 0;
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockFetch(
+      (url, init) => {
+        if (url === "/_db/ui" && init?.method === "PATCH") {
+          patchAttempts++;
+          return new Response("settings reason\nsettings detail", {
+            status: 507,
+          });
+        }
+        if (url === "/_db/ui") {
+          return jsonResponse({ version: 1, columnWidths: {}, prefs: {} });
+        }
+        if (url === "/_db/tabs" && init?.method === "PUT")
+          return jsonResponse({ ok: true });
+        if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+        if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+        if (url.startsWith("/_db/schema"))
+          return jsonResponse(baseSchemaResponse());
+        if (url.startsWith("/_db/table"))
+          return jsonResponse(baseTableResponse());
+        return new Response("unexpected request", { status: 500 });
+      },
+      { handleDbUi: true },
+    );
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+    await (
+      document.querySelector(".db-table-arrow") as unknown as FakeElement
+    ).click();
+    await waitFor(() => patchAttempts === 1);
+
+    const header = document.querySelector(
+      ".db-grid-header-cell",
+    ) as unknown as FakeElement;
+    const resize = header.querySelector(
+      ".db-grid-resize-handle",
+    ) as unknown as FakeElement;
+    await header.dblclick(resize);
+    await waitFor(() => patchAttempts === 2);
+    await waitFor(() => consoleError.mock.calls.length === 2);
+
+    const status = document.querySelector(".db-refresh-result.db-pane-error");
+    expect(
+      (status?.textContent || "").includes("settings reason\nsettings detail"),
+    ).toBe(true);
+    expect(consoleError).toHaveBeenCalledTimes(2);
+    await leaveView(view);
+  });
+
+  test("reports tab restore and datastore close failures", async () => {
+    installDatabaseDom();
+    let closeAttempts = 0;
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && !init?.method)
+        return new Response("restore reason\nrestore detail", { status: 500 });
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      if (url === "/_db/close") {
+        closeAttempts++;
+        return new Response("close reason\nclose detail", { status: 503 });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+    expect(
+      (
+        document.querySelector(".db-refresh-result.db-pane-error")
+          ?.textContent || ""
+      ).includes("restore reason\nrestore detail"),
+    ).toBe(true);
+
+    await (
+      document.querySelector(".db-tabs-chip-close") as unknown as FakeElement
+    ).click();
+    await waitFor(() => closeAttempts === 1);
+    await waitFor(() =>
+      consoleError.mock.calls.some((call) =>
+        String(call[0]).includes("Failed to close datastore"),
+      ),
+    );
+    expect(
+      (
+        document.querySelector(".db-refresh-result.db-pane-error")
+          ?.textContent || ""
+      ).includes("close reason\nclose detail"),
+    ).toBe(true);
+    await leaveView(view);
+  });
+
+  test("logs malformed database events with the body and triggers a full refresh", async () => {
+    installDatabaseDom();
+    let filesFetches = 0;
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") {
+        filesFetches++;
+        return jsonResponse(baseFilesResponse());
+      }
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+    view.handleSse("db-change", "{malformed event body");
+    await waitFor(() => filesFetches === 2);
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to parse database event",
+      expect.objectContaining({
+        message: expect.stringContaining("{malformed event body"),
+      }),
+    );
+    await leaveView(view);
+  });
+
+  test("preserves the Local History HTTP failure body in the editor", async () => {
+    installDatabaseDom();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockFetch(
+      (url, init) => {
+        if (url === "/_db/tabs" && init?.method === "PUT")
+          return jsonResponse({ ok: true });
+        if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+        if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+        if (url.startsWith("/_db/schema"))
+          return jsonResponse(baseSchemaResponse());
+        if (url.startsWith("/_db/table"))
+          return jsonResponse(baseTableResponse());
+        if (url.startsWith("/_db/history")) {
+          return new Response("history reason\nhistory detail", {
+            status: 502,
+          });
+        }
+        return new Response("unexpected request", { status: 500 });
+      },
+      { handleDbHistory: true },
+    );
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+    await (
+      document.querySelector(".db-query-history-btn") as unknown as FakeElement
+    ).click();
+    await waitFor(() =>
+      Boolean(
+        document
+          .querySelector(".db-query-history-dropdown")
+          ?.textContent.includes("history detail"),
+      ),
+    );
+    expect(
+      consoleError.mock.calls.some((call) =>
+        String(call[0]).includes("Local History"),
+      ),
+    ).toBe(true);
     await leaveView(view);
   });
 });

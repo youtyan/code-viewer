@@ -1,5 +1,6 @@
 import type { DbQueryResponse } from "../../core/database/types";
 import { attachDragResizer } from "../../core/drag-resizer";
+import { formatErrorDetail } from "../../core/error-detail";
 import { CHEVRON_DOWN_16_PATH, iconSvg } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 import {
@@ -368,11 +369,14 @@ export function createQueryEditor(
           historyDropdown.appendChild(item);
         }
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error("Failed to load query Local History", error);
         historyDropdown.innerHTML = "";
         const empty = document.createElement("div");
-        empty.className = "db-query-history-empty";
-        empty.textContent = text().editor.historyError;
+        empty.className = "db-query-history-empty db-pane-error";
+        empty.textContent = text().editor.historyError(
+          formatErrorDetail(error),
+        );
         historyDropdown.appendChild(empty);
       });
   });

@@ -1,5 +1,5 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 import type { DbColumn } from "../core/database/types";
 
 GlobalRegistrator.register();
@@ -12,6 +12,7 @@ afterAll(() => {
 
 afterEach(() => {
   document.body.innerHTML = "";
+  vi.restoreAllMocks();
 });
 
 function column(name: string, type: string, comment?: string): DbColumn {
@@ -140,6 +141,97 @@ describe("database table list", () => {
     expect(copied).toEqual(["external_status"]);
     expect(selected).toEqual([]);
     expect(copy?.classList.contains("copied")).toBe(true);
+  });
+
+  test("reports column loading failures without caching an empty result", async () => {
+    let attempts = 0;
+    const failure = new Error("column endpoint unavailable");
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const view = createTableList({
+      onSelectTable: () => undefined,
+      getColumns: async () => {
+        attempts++;
+        if (attempts === 1) throw failure;
+        return [column("sample_column", "text")];
+      },
+    });
+    document.body.appendChild(view.el);
+    view.render([{ name: "sample_table", type: "table", rowCount: 1 }]);
+
+    const arrow = view.el.querySelector<HTMLElement>(".db-table-arrow");
+    arrow?.click();
+    await waitFor(() => !!view.el.querySelector(".db-pane-error"));
+    expect(view.el.querySelector(".db-pane-error")?.textContent).toContain(
+      "Error: column endpoint unavailable",
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("columns"),
+      failure,
+    );
+
+    arrow?.click();
+    arrow?.click();
+    await waitFor(() => !!view.el.querySelector(".db-table-col-name"));
+    expect(attempts).toBe(2);
+    expect(view.el.querySelector(".db-table-col-name")?.textContent).toBe(
+      "sample_column",
+    );
+  });
+
+  test("shows clipboard error reasons for column and context-menu copies", async () => {
+    const failure = new DOMException(
+      "clipboard permission denied",
+      "NotAllowedError",
+    );
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(failure) },
+    });
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const view = createTableList({
+      onSelectTable: () => undefined,
+      getExpandedTables: () => ["sample_table"],
+      getColumns: async () => [column("sample_column", "text")],
+    });
+    document.body.appendChild(view.el);
+    view.render([{ name: "sample_table", type: "table", rowCount: 1 }]);
+    await waitFor(() => !!view.el.querySelector(".db-table-col-copy"));
+
+    const columnCopy =
+      view.el.querySelector<HTMLButtonElement>(".db-table-col-copy");
+    columnCopy?.click();
+    await waitFor(() => columnCopy?.classList.contains("failed") === true);
+    expect(columnCopy?.title).toContain(
+      "NotAllowedError: clipboard permission denied",
+    );
+
+    view.el.querySelector<HTMLElement>(".db-table-item")?.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 10,
+        clientY: 10,
+      }),
+    );
+    const menuItem = document.querySelector<HTMLElement>(
+      ".db-context-menu-item",
+    );
+    menuItem?.click();
+    await waitFor(() =>
+      Boolean(
+        view.el
+          .querySelector(".db-table-list-summary")
+          ?.textContent?.includes("NotAllowedError"),
+      ),
+    );
+    expect(consoleError).toHaveBeenCalledTimes(2);
+    for (const call of consoleError.mock.calls) {
+      expect(call.some((value) => value === failure)).toBe(true);
+    }
   });
 
   test("clears the table filter from the input button and empty state", () => {

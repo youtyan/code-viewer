@@ -1,7 +1,9 @@
 import type { DbColumn, DbTableInfo } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
 import { COPY_16_PATHS, iconSvg, X_16_PATH } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 import { type DbLang, dbText } from "./i18n";
+import { setPaneStatus } from "./pane-status";
 
 export type TableListCallbacks = {
   getLanguage?: () => DbLang;
@@ -62,6 +64,15 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
   const expandedTables = new Set<string>();
   const columnCache = new Map<string, DbColumn[]>();
 
+  function reportCopyFailure(error: unknown, operation: string): string {
+    console.error(operation, error);
+    const message = text().copyFailed(formatErrorDetail(error));
+    summary.textContent = message;
+    summary.title = message;
+    summary.classList.add("db-pane-error");
+    return message;
+  }
+
   /* ---- Context menu ---- */
   let contextMenu: HTMLDivElement | null = null;
   let contextMenuClick: ((ev: MouseEvent) => void) | null = null;
@@ -99,30 +110,30 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
 
     const items: { label: string; action: () => void }[] = [
       {
-        label: "Copy Table Name",
+        label: text().copyTableName,
         action: () => {
-          navigator.clipboard.writeText(tableName).catch(() => {
-            /* ignore */
+          navigator.clipboard.writeText(tableName).catch((error) => {
+            reportCopyFailure(error, "Failed to copy table name");
           });
         },
       },
       {
-        label: "Copy SELECT Statement",
+        label: text().copySelect,
         action: () => {
           const sql = `SELECT * FROM "${tableName}" LIMIT 100`;
-          navigator.clipboard.writeText(sql).catch(() => {
-            /* ignore */
+          navigator.clipboard.writeText(sql).catch((error) => {
+            reportCopyFailure(error, "Failed to copy SELECT statement");
           });
         },
       },
       {
-        label: "View CREATE TABLE",
+        label: text().viewCreate,
         action: () => {
           callbacks.onViewCreateTable?.(tableName);
         },
       },
       {
-        label: "View Table Definition",
+        label: text().viewDefinition,
         action: () => {
           callbacks.onViewDefinition?.(tableName);
         },
@@ -168,8 +179,19 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
   async function renderColumns(container: HTMLElement, tableName: string) {
     let cols = columnCache.get(tableName);
     if (!cols && callbacks.getColumns) {
-      cols = await callbacks.getColumns(tableName);
-      columnCache.set(tableName, cols);
+      container.innerHTML = "";
+      try {
+        cols = await callbacks.getColumns(tableName);
+        columnCache.set(tableName, cols);
+      } catch (error) {
+        console.error(`Failed to load columns for ${tableName}`, error);
+        setPaneStatus(
+          container,
+          text().columnsError(formatErrorDetail(error)),
+          { error: true },
+        );
+        return;
+      }
     }
     if (!cols || cols.length === 0) return;
     container.innerHTML = "";
@@ -192,7 +214,14 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
       const colName = document.createElement("span");
       colName.className = "db-table-col-name";
       colName.textContent = col.name;
-      colNameWrap.append(colName, createColumnCopyButton(col.name));
+      colNameWrap.append(
+        colName,
+        createColumnCopyButton(col.name, {
+          label: () => text().copyColumnName(col.name),
+          onError: (error) =>
+            reportCopyFailure(error, `Failed to copy column ${col.name}`),
+        }),
+      );
 
       const colType = document.createElement("span");
       colType.className = "db-table-col-type";
@@ -233,7 +262,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
       children.hidden = false;
       arrow.classList.add("expanded");
       callbacks.onExpandedTableChange?.(tableName, true);
-      if (columnsHost.children.length === 0) {
+      if (!columnCache.has(tableName)) {
         renderColumns(columnsHost, tableName);
       }
     }
@@ -259,6 +288,8 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
         )
       : tables;
     summary.textContent = text().result(filtered.length, tables.length);
+    summary.title = text().keyboardHint;
+    summary.classList.remove("db-pane-error");
     if (filtered.length === 0) {
       const empty = document.createElement("div");
       empty.className = "db-table-list-empty";
@@ -481,12 +512,15 @@ function columnCommentText(comment: string | null | undefined): string {
   return (comment || "").trim();
 }
 
-function createColumnCopyButton(columnName: string): HTMLButtonElement {
+function createColumnCopyButton(
+  columnName: string,
+  deps: { label: () => string; onError: (error: unknown) => string },
+): HTMLButtonElement {
   const copy = document.createElement("button");
   copy.type = "button";
   copy.className = "db-icon-btn db-table-col-copy";
-  copy.title = "Copy column name";
-  copy.setAttribute("aria-label", `Copy column name: ${columnName}`);
+  copy.title = deps.label();
+  copy.setAttribute("aria-label", deps.label());
   copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
   copy.addEventListener("click", async (event) => {
     event.stopPropagation();
@@ -495,8 +529,10 @@ function createColumnCopyButton(columnName: string): HTMLButtonElement {
       await navigator.clipboard.writeText(columnName);
       copy.classList.add("copied");
       setTimeout(() => copy.classList.remove("copied"), 1000);
-    } catch {
+    } catch (error) {
       copy.classList.add("failed");
+      const message = deps.onError(error);
+      copy.title = message;
       setTimeout(() => copy.classList.remove("failed"), 1000);
     }
   });

@@ -46,6 +46,13 @@ export type DbText = {
     // 推測 FK の右ペインリストに付ける小バッジ。
     inferredBadge: string;
     inferredBadgeTitle: string;
+    datastoresError: (detail: string) => string;
+    rowCountError: (detail: string) => string;
+    tabsLoadError: (detail: string) => string;
+    stateSaveError: (detail: string) => string;
+    closeDatastoreError: (detail: string) => string;
+    viewLoadError: (detail: string) => string;
+    eventError: (detail: string) => string;
   };
   tableList: {
     filter: string;
@@ -56,6 +63,13 @@ export type DbText = {
     views: string;
     keyboardHint: string;
     result: (visible: number, total: number) => string;
+    copyTableName: string;
+    copySelect: string;
+    viewCreate: string;
+    viewDefinition: string;
+    copyColumnName: (column: string) => string;
+    copyFailed: (detail: string) => string;
+    columnsError: (detail: string) => string;
   };
   detail: {
     cell: string;
@@ -127,6 +141,8 @@ export type DbText = {
     refreshingLabel: string;
     copyDdl: string;
     copied: string;
+    copyFailed: (detail: string) => string;
+    loadError: (detail: string) => string;
     colName: string;
     colType: string;
     colNullable: string;
@@ -160,7 +176,7 @@ export type DbText = {
     noRows: string;
     historyLoading: string;
     historyEmpty: string;
-    historyError: string;
+    historyError: (detail: string) => string;
     statusError: (ms: number) => string;
     statusSuccess: (rows: number, suffix: string, ms: number) => string;
     statusExplain: (ms: number) => string;
@@ -171,6 +187,9 @@ export type DbText = {
     refreshTitle: string;
     refreshResultAdded: (count: number) => string;
     refreshResultUnchanged: string;
+    refreshError: (detail: string) => string;
+    deleteError: (detail: string) => string;
+    clearError: (detail: string) => string;
     clearAll: string;
     clearTitle: string;
     selectPlaceholder: string;
@@ -449,6 +468,16 @@ const EN: DbText = {
     inferFkTitle: "Infer FK from Rails-style <name>_id → <names>.id",
     inferredBadge: "inferred",
     inferredBadgeTitle: "Inferred from Rails-style naming, not declared in DB",
+    datastoresError: (detail) => `Failed to load datastores: ${detail}`,
+    rowCountError: (detail) => `Failed to refresh row count: ${detail}`,
+    tabsLoadError: (detail) => `Failed to restore tabs: ${detail}`,
+    stateSaveError: (detail) =>
+      `Your changes are active, but were not saved: ${detail}`,
+    closeDatastoreError: (detail) =>
+      `Failed to close the datastore connection: ${detail}`,
+    viewLoadError: (detail) => `Failed to load the database view: ${detail}`,
+    eventError: (detail) =>
+      `A database update could not be read; refreshing all data: ${detail}`,
   },
   tableList: {
     filter: "Filter tables…",
@@ -459,6 +488,13 @@ const EN: DbText = {
     views: "Views",
     keyboardHint: "↑ ↓ Select · Enter Open · → Expand · Esc Clear",
     result: (visible, total) => `${visible} / ${total} tables`,
+    copyTableName: "Copy table name",
+    copySelect: "Copy SELECT statement",
+    viewCreate: "View CREATE TABLE",
+    viewDefinition: "View table definition",
+    copyColumnName: (column) => `Copy column name: ${column}`,
+    copyFailed: (detail) => `Copy failed: ${detail}`,
+    columnsError: (detail) => `Failed to load columns: ${detail}`,
   },
   detail: {
     cell: "Cell",
@@ -540,6 +576,8 @@ const EN: DbText = {
     refreshingLabel: "Refreshing...",
     copyDdl: "Copy DDL",
     copied: "Copied!",
+    copyFailed: (detail) => `Copy DDL failed: ${detail}`,
+    loadError: (detail) => `Failed to load table definition: ${detail}`,
     colName: "Column",
     colType: "Type",
     colNullable: "Nullable",
@@ -572,7 +610,7 @@ const EN: DbText = {
     noRows: "No rows",
     historyLoading: "Loading…",
     historyEmpty: "No history",
-    historyError: "Failed to load history",
+    historyError: (detail) => `Failed to load history: ${detail}`,
     statusError: (ms) => `Error (${ms}ms)`,
     statusSuccess: (rows, suffix, ms) => `${rows}${suffix} rows (${ms}ms)`,
     statusExplain: (ms) => `Explain (${ms}ms)`,
@@ -582,6 +620,9 @@ const EN: DbText = {
     refreshTitle: "Refresh query history",
     refreshResultAdded: (count) => `+${count} queries`,
     refreshResultUnchanged: "No new queries",
+    refreshError: (detail) => `Failed to refresh query history: ${detail}`,
+    deleteError: (detail) => `Failed to delete query history: ${detail}`,
+    clearError: (detail) => `Failed to clear query history: ${detail}`,
     clearAll: "Clear All",
     clearTitle: "Delete all query history",
     selectPlaceholder: "Select a query to view details",
@@ -865,6 +906,18 @@ const JA: DbText = {
     inferredBadge: "推測",
     inferredBadgeTitle:
       "Rails 命名規約から推測した FK (DB の宣言ではありません)",
+    datastoresError: (detail) =>
+      `データストアの読み込みに失敗しました: ${detail}`,
+    rowCountError: (detail) => `行数の更新に失敗しました: ${detail}`,
+    tabsLoadError: (detail) => `タブの復元に失敗しました: ${detail}`,
+    stateSaveError: (detail) =>
+      `変更は反映されていますが保存できませんでした: ${detail}`,
+    closeDatastoreError: (detail) =>
+      `データストア接続を閉じられませんでした: ${detail}`,
+    viewLoadError: (detail) =>
+      `データベース画面の読み込みに失敗しました: ${detail}`,
+    eventError: (detail) =>
+      `データベース更新を読み取れなかったため全体を再読み込みします: ${detail}`,
   },
   tableList: {
     filter: "テーブルを絞り込み…",
@@ -875,6 +928,13 @@ const JA: DbText = {
     views: "ビュー",
     keyboardHint: "↑ ↓ 選択 · Enter 開く · → 列を展開 · Esc 解除",
     result: (visible, total) => `${visible} / ${total} テーブル`,
+    copyTableName: "テーブル名をコピー",
+    copySelect: "SELECT 文をコピー",
+    viewCreate: "CREATE TABLE を表示",
+    viewDefinition: "テーブル定義を表示",
+    copyColumnName: (column) => `カラム名をコピー: ${column}`,
+    copyFailed: (detail) => `コピーに失敗しました: ${detail}`,
+    columnsError: (detail) => `カラムの読み込みに失敗しました: ${detail}`,
   },
   detail: {
     cell: "セル",
@@ -954,6 +1014,8 @@ const JA: DbText = {
     refreshingLabel: "更新中...",
     copyDdl: "DDL をコピー",
     copied: "コピーしました",
+    copyFailed: (detail) => `DDL のコピーに失敗しました: ${detail}`,
+    loadError: (detail) => `テーブル定義の読み込みに失敗しました: ${detail}`,
     colName: "カラム",
     colType: "型",
     colNullable: "NULL 許可",
@@ -986,7 +1048,7 @@ const JA: DbText = {
     noRows: "行がありません",
     historyLoading: "読み込み中…",
     historyEmpty: "履歴がありません",
-    historyError: "履歴の読み込みに失敗しました",
+    historyError: (detail) => `履歴の読み込みに失敗しました: ${detail}`,
     statusError: (ms) => `エラー (${ms}ms)`,
     statusSuccess: (rows, suffix, ms) => `${rows}${suffix} 行 (${ms}ms)`,
     statusExplain: (ms) => `Explain (${ms}ms)`,
@@ -996,6 +1058,9 @@ const JA: DbText = {
     refreshTitle: "クエリ履歴を再読み込み",
     refreshResultAdded: (count) => `+${count} 件`,
     refreshResultUnchanged: "新しいクエリはありません",
+    refreshError: (detail) => `クエリ履歴の更新に失敗しました: ${detail}`,
+    deleteError: (detail) => `クエリ履歴の削除に失敗しました: ${detail}`,
+    clearError: (detail) => `クエリ履歴の全削除に失敗しました: ${detail}`,
     clearAll: "すべて削除",
     clearTitle: "クエリ履歴をすべて削除",
     selectPlaceholder: "クエリを選択すると詳細が表示されます",

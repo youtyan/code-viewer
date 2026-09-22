@@ -1,5 +1,5 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 import type { DbValue } from "../core/database/types";
 
 GlobalRegistrator.register();
@@ -9,6 +9,7 @@ const { createQueryEditor } = await import("../views/database/query-editor");
 describe("query editor value display", () => {
   afterEach(() => {
     document.body.innerHTML = "";
+    vi.restoreAllMocks();
   });
 
   afterAll(() => {
@@ -183,6 +184,43 @@ describe("query editor value display", () => {
     await Promise.resolve();
 
     expect(executions).toBe(1);
+    editor.dispose();
+  });
+
+  test("shows the complete Local History load failure", async () => {
+    const failure = new TypeError("history connection lost");
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const editor = createQueryEditor({
+      executeQuery: async () => ({
+        dbId: "sample.db",
+        columns: [],
+        columnTypes: [],
+        rows: [],
+        rowCount: 0,
+        truncated: false,
+        elapsedMs: 1,
+      }),
+      loadHistory: () => Promise.reject(failure),
+    });
+    document.body.appendChild(editor.el);
+
+    editor.el
+      .querySelector<HTMLButtonElement>(".db-query-history-btn")
+      ?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const message = editor.el.querySelector(".db-query-history-empty");
+    expect(message?.textContent).toContain(
+      "TypeError: history connection lost",
+    );
+    expect(message?.classList.contains("db-pane-error")).toBe(true);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("Local History"),
+      failure,
+    );
     editor.dispose();
   });
 });

@@ -3,8 +3,10 @@ import type {
   DbForeignKey,
   DbIndexInfo,
 } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
 import { iconSvg, SYNC_16_PATH } from "../../core/icons";
 import { type DbText, dbText } from "./i18n";
+import { setPaneStatus } from "./pane-status";
 
 export type TriggerDisplayInfo = {
   name: string;
@@ -36,6 +38,7 @@ export type SchemaView = {
     extra?: SchemaViewExtra,
   ) => void;
   clear: () => void;
+  showError: (message: string) => void;
   localize: () => void;
   setRefreshBusy: (busy: boolean) => void;
 };
@@ -292,8 +295,12 @@ export function createSchemaView(
               copyBtn.textContent = t.copyDdl;
             }, 1500);
           },
-          () => {
-            /* clipboard write failed — ignore */
+          (error) => {
+            console.error("Failed to copy schema DDL", error);
+            const message = t.copyFailed(formatErrorDetail(error));
+            copyBtn.classList.add("failed");
+            copyBtn.title = message;
+            setTimeout(() => copyBtn.classList.remove("failed"), 1500);
           },
         );
       });
@@ -316,10 +323,19 @@ export function createSchemaView(
     refreshBusy = false;
   }
 
+  function showError(message: string): void {
+    el.hidden = false;
+    lastArgs = null;
+    refreshBtn = null;
+    refreshLabel = null;
+    refreshBusy = false;
+    setPaneStatus(el, message, { error: true });
+  }
+
   function localize(): void {
     if (!lastArgs || el.hidden) return;
     render(lastArgs.table, lastArgs.columns, lastArgs.indexes, lastArgs.extra);
   }
 
-  return { el, render, clear, localize, setRefreshBusy };
+  return { el, render, clear, showError, localize, setRefreshBusy };
 }

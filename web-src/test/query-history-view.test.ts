@@ -2,7 +2,7 @@
 // 更新ボタンはサーバの履歴再取得を使い、更新中フィードバックを出す。
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 import { q } from "./_test-helpers";
 
 GlobalRegistrator.register();
@@ -32,6 +32,7 @@ describe("query history view", () => {
   afterEach(() => {
     document.body.innerHTML = "";
     globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
   afterAll(() => {
@@ -187,5 +188,91 @@ describe("query history view", () => {
     expect(meta.textContent || "").toMatch(/2026-01-02 03:04:05/);
     expect(meta.textContent || "").toMatch(/12\+ rows/);
     expect(meta.textContent || "").toMatch(/34ms/);
+  });
+
+  test("keeps history and reports refresh, delete, and clear failures", async () => {
+    const entry = {
+      id: "sample-entry",
+      dbId: "sample.db",
+      schema: "public",
+      sql: "SELECT id FROM sample_table",
+      columns: ["id"],
+      rowsPreview: [[1]],
+      rowCount: 1,
+      savedRows: 1,
+      truncated: false,
+      elapsedMs: 3,
+      executedAt: "2026-01-02T03:04:05",
+      executedBy: "user",
+      source: "browser",
+    };
+    let initialLoad = true;
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/_db/history?") && initialLoad) {
+        initialLoad = false;
+        return Promise.resolve(
+          new Response(JSON.stringify({ entries: [entry] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.startsWith("/_db/history?")) {
+        return Promise.resolve(
+          new Response("refresh reason\nrefresh detail", { status: 503 }),
+        );
+      }
+      if (url === "/_db/history/delete") {
+        return Promise.resolve(
+          new Response("delete reason\ndelete detail", { status: 409 }),
+        );
+      }
+      return Promise.reject(new TypeError("clear connection lost"));
+    }) as typeof fetch;
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    const view = createQueryHistoryView({
+      getDbId: () => "sample.db",
+      getSchema: () => "public",
+      copySqlToQuery: () => undefined,
+      getText: () => dbText("en"),
+    });
+    document.body.appendChild(view.el);
+    await view.refresh({ force: true });
+
+    q<HTMLButtonElement>(view.el, ".db-query-history-refresh").click();
+    await flush();
+    const result = q<HTMLElement>(view.el, ".db-query-history-refresh-result");
+    expect(result.textContent).toContain("refresh reason\nrefresh detail");
+    expect(result.classList.contains("db-pane-error")).toBe(true);
+    expect(view.el.querySelectorAll(".db-query-history-entry")).toHaveLength(1);
+
+    q<HTMLElement>(view.el, ".db-query-history-entry").click();
+    const deleteButton = q<HTMLButtonElement>(
+      view.el,
+      ".db-query-history-detail-actions .db-query-history-danger",
+    );
+    deleteButton.click();
+    deleteButton.click();
+    await flush();
+    expect(result.textContent).toContain("delete reason\ndelete detail");
+    expect(view.el.querySelectorAll(".db-query-history-entry")).toHaveLength(1);
+
+    const clearButton = q<HTMLButtonElement>(
+      view.el,
+      ".db-query-history-toolbar .db-query-history-danger",
+    );
+    clearButton.click();
+    clearButton.click();
+    await flush();
+    expect(result.textContent).toContain("TypeError: clear connection lost");
+    expect(view.el.querySelectorAll(".db-query-history-entry")).toHaveLength(1);
+    expect(consoleError).toHaveBeenCalledTimes(3);
+    for (const call of consoleError.mock.calls) {
+      expect(call.some((value) => value instanceof Error)).toBe(true);
+    }
   });
 });
