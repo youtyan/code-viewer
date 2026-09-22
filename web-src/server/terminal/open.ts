@@ -13,8 +13,9 @@
 // セッションに何台も attach することになり、tmux のウィンドウ寸法を取り合う
 // (tmux のウィンドウは 1 つの寸法しか持てない)。
 
+import { LOGIN_SESSION } from "../../core/agent-accounts";
 import { errorWithCauses } from "../../core/error-detail";
-import type { ShellSession } from "../../core/shell";
+import type { ShellPurpose, ShellSession } from "../../core/shell";
 import type { TmuxPaneId } from "../../core/tmux";
 import {
   closeShellSession,
@@ -69,6 +70,16 @@ async function findShellForSession(
   return null;
 }
 
+/** ログインのウィンドウのペインと、そのアカウント (accounts/handle.ts が覚える)。 */
+const signInPanes = new Map<TmuxPaneId, ShellPurpose>();
+
+export function rememberSignInPane(
+  paneId: TmuxPaneId,
+  purpose: ShellPurpose,
+): void {
+  signInPanes.set(paneId, purpose);
+}
+
 export async function openTmuxPaneInShell(
   paneId: TmuxPaneId,
   cwd: string,
@@ -79,6 +90,10 @@ export async function openTmuxPaneInShell(
   if (resolved.status === "gone") return { status: "gone" };
   if (resolved.status === "error") return resolved;
   const session = resolved.session;
+  // ペイン ID は tmux が起き直すと振り直されるので、ログインのセッションの
+  // ペインのときだけ覚えた用途を使う。
+  const purpose =
+    session === LOGIN_SESSION ? (signInPanes.get(paneId) ?? null) : null;
 
   // ペインをそのセッションのカレントにする。既に繋がっているシェルがあれば
   // その場で表示が変わり、これから開く場合は繋いだ瞬間にそのペインが出る。
@@ -91,7 +106,7 @@ export async function openTmuxPaneInShell(
 
   const remembered = findShellSessionForTmuxSession(session);
   if (remembered) {
-    rememberShellTmuxAttachment(remembered.id, session, paneId);
+    rememberShellTmuxAttachment(remembered.id, session, paneId, purpose);
     return { status: "ok", session: remembered, action: "switched" };
   }
 
@@ -100,7 +115,7 @@ export async function openTmuxPaneInShell(
   if (listed.status === "error") return listed;
   const existing = await findShellForSession(session, listed.clients);
   if (existing) {
-    rememberShellTmuxAttachment(existing.id, session, paneId);
+    rememberShellTmuxAttachment(existing.id, session, paneId, purpose);
     return { status: "ok", session: existing, action: "switched" };
   }
 
@@ -128,6 +143,6 @@ export async function openTmuxPaneInShell(
     }
     return written;
   }
-  rememberShellTmuxAttachment(created.session.id, session, paneId);
+  rememberShellTmuxAttachment(created.session.id, session, paneId, purpose);
   return { status: "ok", session: created.session, action: "attached" };
 }

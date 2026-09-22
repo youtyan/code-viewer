@@ -103,6 +103,7 @@ export function createAccountService(
 
   async function status(
     entry: AccountEntry,
+    command: string,
     forceLogin: boolean,
     launcher: { launcher: HookLauncher; health: LauncherHealth },
   ): Promise<AccountStatus> {
@@ -129,7 +130,7 @@ export function createAccountService(
       wrapped,
     });
     const loginState = exists
-      ? await login.status(entry, forceLogin)
+      ? await login.status(entry, command, forceLogin)
       : {
           state: dir.error ? ("unknown" as const) : ("no-config-dir" as const),
           who: "",
@@ -160,7 +161,12 @@ export function createAccountService(
       };
       const accounts = await Promise.all(
         list.map((entry) =>
-          status(entry, options.forceLogin === true, launcher),
+          status(
+            entry,
+            launchCommandsOf(registry)[entry.agent],
+            options.forceLogin === true,
+            launcher,
+          ),
         ),
       );
       let usageFailures: AccountsResponse["usageFailures"];

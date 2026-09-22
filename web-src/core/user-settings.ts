@@ -27,6 +27,7 @@ export const USER_SETTING_KEYS = [
   "agentNotifyWaiting",
   "agentNotifyDone",
   "agentHookHintDismissed",
+  "agentNotifyHintDismissed",
   "agentAccountsCollapsed",
   "terminalImageShelfCollapsed",
   "terminalPanelOpen",

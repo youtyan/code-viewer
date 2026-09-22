@@ -122,20 +122,59 @@ export async function openAccountWindow(options: {
   return { paneId, session, created: !exists };
 }
 
-/** 種類ごとの公式のログインコマンド (引数の配列)。 */
-export function loginArgv(agent: AccountAgent): string[] {
-  return agent === "claude" ? ["claude", "auth", "login"] : ["codex", "login"];
+/** 種類ごとの公式のサブコマンド (ログインと、ログインの状態)。 */
+const AGENT_SUBCOMMANDS = {
+  login: { claude: ["auth", "login"], codex: ["login"] },
+  status: { claude: ["auth", "status", "--json"], codex: ["login", "status"] },
+} as const;
+
+/**
+ * 設定した起動コマンド (登録簿の launch command) に引数を足して動かす argv。
+ * 起動・ログイン・ログインの状態の確認がこれ 1 つを使うので、ラッパーや
+ * シェルの関数で動かしている人でも 3 つが同じ claude / codex を呼ぶ。対話
+ * シェル (-i) を通すのは、シェルの関数を使えるようにするため。足す引数は
+ * "$@" で渡し、コマンドの文字列に埋め込まない。then はコマンドの後に同じ
+ * シェルで続けるもの (ログインのウィンドウの「Enter を待つ」)。
+ */
+export function agentCommandArgv(
+  command: string,
+  args: readonly string[] = [],
+  env: NodeJS.ProcessEnv = process.env,
+  then = "",
+): string[] {
+  const shell = interactiveShell(env);
+  if (args.length === 0 && !then) return [shell, "-i", "-c", command];
+  const script = `${command} "$@"${then ? `; ${then}` : ""}`;
+  return [shell, "-i", "-c", script, shell, ...args];
+}
+
+/** ログインの状態を訊く argv (server/accounts/login.ts)。 */
+export function loginStatusArgv(
+  agent: AccountAgent,
+  command: string,
+): string[] {
+  return agentCommandArgv(command, AGENT_SUBCOMMANDS.status[agent]);
 }
 
 /**
  * ログインのウィンドウで動かすもの。公式のコマンドを動かした後、結果を
  * 読めるように Enter を待ってから閉じる (成功するとすぐ閉じてしまい、
- * 何が起きたか見えないため)。コマンドは "$@" で渡し、文字列に埋め込まない。
+ * 何が起きたか見えないため)。待つのは起動コマンドと同じ対話シェルの中で
+ * する。外側の別のシェルで待つと、対話シェルが端末の前面を持ったまま
+ * 終わるので read が端末から読めず、すぐ閉じる (zsh で実際に起きた)。
+ * zsh では status が読み取り専用なので rc に置く。
  */
-export function loginWindowArgv(agent: AccountAgent): string[] {
-  const script =
-    '"$@"; status=$?; printf "\\n[code-viewer] sign-in command exited with %s. Press Enter to close this window.\\n" "$status"; read -r _; exit "$status"';
-  return ["/bin/sh", "-c", script, "sh", ...loginArgv(agent)];
+export function loginWindowArgv(
+  agent: AccountAgent,
+  command: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  return agentCommandArgv(
+    command,
+    AGENT_SUBCOMMANDS.login[agent],
+    env,
+    'rc=$?; printf "\\n[code-viewer] sign-in command exited with %s. Press Enter to close this window.\\n" "$rc"; read -r _; exit "$rc"',
+  );
 }
 
 export function accountWindowName(agent: AccountAgent, account: AccountEntry) {

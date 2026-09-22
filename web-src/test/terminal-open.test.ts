@@ -32,8 +32,18 @@ vi.mock("../server/tmux/focus", () => ({
   tmuxAttachCommandLine: () => "attach sample pane\r",
 }));
 
-import type { ShellSession } from "../core/shell";
-import { openTmuxPaneInShell } from "../server/terminal/open";
+import { LOGIN_SESSION } from "../core/agent-accounts";
+import type { ShellPurpose, ShellSession } from "../core/shell";
+import {
+  openTmuxPaneInShell,
+  rememberSignInPane,
+} from "../server/terminal/open";
+
+const SIGN_IN: ShellPurpose = {
+  kind: "sign-in",
+  agent: "claude",
+  account: "Work",
+};
 
 const SESSION: ShellSession = {
   id: "shell-sample1",
@@ -87,6 +97,28 @@ describe("openTmuxPaneInShell", () => {
       SESSION.id,
       "sample-session",
       "%1",
+      null,
+    );
+  });
+
+  // ログインのウィンドウのペインだけに用途が付く。tmux が起き直して同じ ID が
+  // 別のセッションのペインに付いても、そちらには付けない。
+  test.each([
+    { session: LOGIN_SESSION, expected: SIGN_IN },
+    { session: "sample-session", expected: null },
+  ])("a pane in $session gets the purpose $expected", async ({
+    session,
+    expected,
+  }) => {
+    rememberSignInPane("%7", SIGN_IN);
+    mocks.resolvePaneSession.mockResolvedValue({ status: "ok", session });
+    mocks.writeToShellWhenReady.mockResolvedValue({ status: "ok" });
+    await openTmuxPaneInShell("%7", "/sample");
+    expect(mocks.rememberShellTmuxAttachment).toHaveBeenCalledWith(
+      SESSION.id,
+      session,
+      "%7",
+      expected,
     );
   });
 

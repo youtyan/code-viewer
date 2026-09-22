@@ -7296,7 +7296,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       label: shellName(
         session,
         TERMINAL_VIEW.knownShells()?.sessions ?? [],
-        terminalText(STATE.language).shellTarget,
+        {
+          shell: terminalText(STATE.language).shellTarget,
+          signIn: a.accounts.loginButton,
+          defaultAccount: a.accounts.defaultName,
+        },
         (id) => !!paneForShell(id)?.kind,
       ),
       state: null,
@@ -7691,6 +7695,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         currentName: () => PROJECT_NAME,
         saveCollapsed: (roots) =>
           patchSettings({ navCollapsedProjects: roots }),
+        notifyHintDismissed: () =>
+          APP_SETTINGS.agentNotifyHintDismissed === true,
+        dismissNotifyHint: () =>
+          patchSettings({ agentNotifyHintDismissed: true }),
       })
     : null;
   document

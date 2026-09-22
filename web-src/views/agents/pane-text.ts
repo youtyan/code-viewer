@@ -6,6 +6,7 @@
 // と場所。
 
 import { type AgentPane, paneTaskSummary } from "../../core/agent-overview";
+import type { ShellPurpose } from "../../core/shell";
 import type { AgentsText } from "./i18n";
 
 export type PaneText = {
@@ -43,6 +44,13 @@ export function paneText(pane: AgentPane, text: AgentsText): PaneText {
   };
 }
 
+/** シェルの名前に使う語。signIn・defaultAccount はアカウントの文言と同じもの。 */
+export type ShellWords = {
+  shell: string;
+  signIn: string;
+  defaultAccount: string;
+};
+
 /**
  * エージェントを映していないシェルの名前 (タブ・「＋」の行・パレット)。
  * 「Shell」＋このプロジェクトのサーバで開いた順の番号。id (`shell-…`) は
@@ -50,13 +58,23 @@ export function paneText(pane: AgentPane, text: AgentsText): PaneText {
  * 詰まる。一覧にまだ載っていない (取り直し前の) シェルは番号を付けない。
  * エージェントを映しているシェル (`showsAgent`) はエージェントの名前で出るので
  * 数えない (素のシェルの 1 本目は「Shell 1」)。
+ * ログインのウィンドウを映すシェル (purpose が sign-in) は
+ * 「Sign in · 種類 · アカウント」。
  */
 export function shellName(
   session: string,
-  sessions: readonly { id: string; createdAt: string }[],
-  word: string,
+  sessions: readonly {
+    id: string;
+    createdAt: string;
+    purpose?: ShellPurpose | null;
+  }[],
+  words: ShellWords,
   showsAgent: (id: string) => boolean,
 ): string {
+  const purpose = sessions.find((item) => item.id === session)?.purpose;
+  if (purpose?.kind === "sign-in") {
+    return `${words.signIn} · ${purpose.agent} · ${purpose.account || words.defaultAccount}`;
+  }
   const order = sessions
     .filter((item) => item.id === session || !showsAgent(item.id))
     .sort(
@@ -64,5 +82,5 @@ export function shellName(
         a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
     );
   const index = order.findIndex((item) => item.id === session);
-  return index < 0 ? word : `${word} ${index + 1}`;
+  return index < 0 ? words.shell : `${words.shell} ${index + 1}`;
 }

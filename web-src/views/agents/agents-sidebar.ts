@@ -1,4 +1,5 @@
 import { withoutProjectPrefix } from "../../core/api-url";
+import { formatErrorDetail } from "../../core/error-detail";
 // 左のサイドバーの「プロジェクト → エージェント」の一覧。どの画面にいても出る。
 //
 //   PROJECTS                              [全体ボード]
@@ -55,6 +56,9 @@ export type AgentsSidebarDeps = {
   /** いま見ているリポジトリの名前 (登録が 1 つも無いときの案内に出す)。 */
   currentName(): string;
   saveCollapsed(roots: string[]): void;
+  /** 最初の入力待ちの「通知を許可すると…」を閉じたか・閉じる。 */
+  notifyHintDismissed(): boolean;
+  dismissNotifyHint(): void;
 };
 
 export type AgentsSidebar = {
@@ -385,9 +389,58 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       deps.viewingPane(),
       deps.projects.signature(),
       snapshot.overview,
+      showsNotifyHint(),
+      notifyRequestError,
       // 経過時間は分単位でしか変わらない。
       Math.floor(Date.now() / 60_000),
     ]);
+  }
+
+  /** 案内から許可を求めて失敗した理由。空なら無し。 */
+  let notifyRequestError = "";
+
+  /** 入力待ちを見た・許可をまだ訊いていない・閉じていない。 */
+  function showsNotifyHint(): boolean {
+    return (
+      deps.monitor.snapshot().sawWaiting &&
+      deps.monitor.permission() === "default" &&
+      !deps.notifyHintDismissed()
+    );
+  }
+
+  /** 通知の許可の案内。押しても閉じても、二度と出さない。 */
+  function notifyHint(current: AgentsText): HTMLElement[] {
+    const box = el("div", "nav-empty");
+    box.setAttribute("role", "note");
+    const allow = el(
+      "button",
+      "nav-note-link nav-empty-action",
+      current.notifyEnable,
+    );
+    allow.type = "button";
+    allow.addEventListener("click", () => {
+      deps.dismissNotifyHint();
+      deps.monitor.requestPermission().then(
+        () => {
+          notifyRequestError = "";
+          render(true);
+        },
+        (cause: unknown) => {
+          // 全体ボードの「通知を有効にする」と同じ扱い: 理由を出す。
+          console.error("[code-viewer] notification permission failed", cause);
+          notifyRequestError = `${current.notifyRequestFailed}: ${formatErrorDetail(cause)}`;
+          render(true);
+        },
+      );
+    });
+    const hide = el("button", "nav-note nav-note-link", current.hookHintClose);
+    hide.type = "button";
+    hide.addEventListener("click", () => {
+      deps.dismissNotifyHint();
+      render(true);
+    });
+    box.append(el("span", "nav-empty-body", current.notifyHint), allow);
+    return [box, hide];
   }
 
   function render(force = false): void {
@@ -509,6 +562,10 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
           current.emptyNoAgentsBody,
         ),
       );
+    }
+    if (showsNotifyHint()) root.append(...notifyHint(current));
+    if (notifyRequestError) {
+      root.appendChild(note("nav-note-error", notifyRequestError));
     }
     if (problems > 0) {
       // 中身の全文は全体ボードの「問題」の欄にある。ここは入口だけ。

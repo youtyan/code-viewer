@@ -24,6 +24,7 @@ import {
   parseBoundedJsonBody,
   textError,
 } from "../database/handle-shared";
+import { rememberSignInPane } from "../terminal/open";
 import {
   applyStatusLine,
   planStatusLine,
@@ -32,7 +33,7 @@ import {
 } from "../terminal/statusline";
 import {
   accountWindowName,
-  interactiveShell,
+  agentCommandArgv,
   loginWindowArgv,
   openAccountWindow,
 } from "./launch";
@@ -238,7 +239,15 @@ export async function handleLoginPost(
       cwd,
       session: LOGIN_SESSION,
       windowName: `login-${accountWindowName(account.agent, account)}`,
-      argv: loginWindowArgv(account.agent),
+      argv: loginWindowArgv(
+        account.agent,
+        sharedAccountService().launchCommands()[account.agent],
+      ),
+    });
+    rememberSignInPane(pane.paneId, {
+      kind: "sign-in",
+      agent: account.agent,
+      account: account.builtin ? "" : account.name,
     });
     return json(pane);
   } catch (error) {
@@ -278,7 +287,7 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
       cwd,
       session: sessionName,
       windowName: accountWindowName(account.agent, account),
-      argv: [interactiveShell(), "-i", "-c", command],
+      argv: agentCommandArgv(command),
     });
     // 次に開いたときの既定。覚えられなくても起動は済んでいるので、理由を
     // 添えて返す (画面に出す)。

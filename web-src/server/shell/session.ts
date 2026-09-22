@@ -22,6 +22,7 @@ import {
   DEFAULT_SHELL_COLS,
   DEFAULT_SHELL_ROWS,
   SHELL_ID_PREFIX,
+  type ShellPurpose,
   type ShellSession,
   type ShellSessionId,
 } from "../../core/shell";
@@ -232,15 +233,21 @@ export function findShellSessionForTmuxSession(
   return null;
 }
 
-/** attach/select が成功した後だけ、サーバ内の接続先を更新する。 */
+/**
+ * attach/select が成功した後だけ、サーバ内の接続先を更新する。用途も
+ * 映したペインのものに付け直す (ログインのウィンドウから別のペインへ移れば
+ * 普通のシェルに戻る)。
+ */
 export function rememberShellTmuxAttachment(
   id: ShellSessionId,
   session: string,
   pane: string,
+  purpose: ShellPurpose | null = null,
 ): void {
   const entry = sessions.get(id);
   if (!entry || entry.meta.exited) return;
   entry.tmuxAttachment = { session, pane };
+  entry.meta.purpose = purpose;
 }
 
 export function getShellSession(id: ShellSessionId): ShellSession | null {

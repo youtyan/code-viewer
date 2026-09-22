@@ -16,6 +16,7 @@ import type {
   ReportedAgent,
 } from "../../core/agent-state";
 import { agentStateForEvent, needsAttention } from "../../core/agent-state";
+import { noteAgentStateChange } from "./unread";
 
 /**
  * 覚えておく対象の数。閉じたペインの分が積み上がらないように上限を掛ける。
@@ -176,6 +177,9 @@ export function recordAgentState(
   const ended =
     input.source === "hook" ? input.event === "exit" : previous?.ended;
   if (ended) record.ended = true;
+  if (previous?.state !== next) {
+    noteAgentStateChange(key, previous?.state, next);
+  }
   states.set(key, record);
   evictOldest();
   return record;

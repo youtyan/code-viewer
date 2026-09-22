@@ -80,6 +80,8 @@ export type AgentsText = {
   emptyNoMatchBody: string;
   emptyNoMatchAction: string;
   notifyEnable: string;
+  /** 最初の入力待ちで、サイドバーに 1 度だけ出す案内。 */
+  notifyHint: string;
   notifyEnableTitle: string;
   notifyOn: string;
   notifyOnTitle: string;
@@ -473,6 +475,8 @@ const EN: AgentsText = {
   emptyNoMatchBody: "Agents in other states are hidden by the filter.",
   emptyNoMatchAction: "Clear filter",
   notifyEnable: "Enable notifications",
+  notifyHint:
+    "An agent needs input. Allow notifications to hear about it while you are in another tab or window.",
   notifyEnableTitle:
     "Get a desktop notification when an agent needs input or finishes",
   notifyOn: "Notifications on",
@@ -598,6 +602,8 @@ const JA: AgentsText = {
   emptyNoMatchBody: "ほかの状態のエージェントは絞り込みで隠れています。",
   emptyNoMatchAction: "絞り込みを解除",
   notifyEnable: "通知を有効にする",
+  notifyHint:
+    "エージェントが入力を待っています。通知を許可すると、別のタブや窓にいても知らせます。",
   notifyEnableTitle:
     "エージェントが入力待ちになったとき・終わったときにデスクトップへ通知します",
   notifyOn: "通知は有効です",

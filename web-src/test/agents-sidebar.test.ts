@@ -123,12 +123,19 @@ function overview(
   };
 }
 
-function fakeMonitor(initial: AgentOverviewResponse) {
+function fakeMonitor(
+  initial: AgentOverviewResponse,
+  notify: {
+    sawWaiting?: boolean;
+    permission?: ReturnType<AgentMonitor["permission"]>;
+  } = {},
+) {
   let snapshot: AgentMonitorSnapshot = {
     overview: initial,
     error: "",
     notifyError: "",
     unread: new Map(),
+    sawWaiting: notify.sawWaiting ?? false,
   };
   const listeners = new Set<() => void>();
   const monitor: AgentMonitor = {
@@ -140,7 +147,7 @@ function fakeMonitor(initial: AgentOverviewResponse) {
       return () => listeners.delete(listener);
     },
     markRead: () => undefined,
-    permission: () => "default",
+    permission: () => notify.permission ?? "default",
     requestPermission: async () => "default",
   };
   return {
@@ -184,13 +191,15 @@ function mount(
   data: AgentOverviewResponse,
   actions = fakeActions(),
   openPane: AgentsSidebarDeps["openPane"] = () => undefined,
+  notify: Parameters<typeof fakeMonitor>[1] & { dismissed?: boolean } = {},
 ) {
   document.body.innerHTML =
     '<nav><a class="app-menu-item active" href="/history">History</a></nav><div id="nav-projects"></div>';
   const root = document.querySelector<HTMLElement>("#nav-projects");
   if (!root) throw new Error("missing sidebar root");
-  const { monitor, publish } = fakeMonitor(data);
+  const { monitor, publish } = fakeMonitor(data, notify);
   const saved: string[][] = [];
+  let dismissed = notify.dismissed ?? false;
   mountAgentsSidebar({
     root,
     monitor,
@@ -203,8 +212,12 @@ function mount(
     getCollapsed: () => [],
     currentName: () => "sample-app",
     saveCollapsed: (roots) => saved.push(roots),
+    notifyHintDismissed: () => dismissed,
+    dismissNotifyHint: () => {
+      dismissed = true;
+    },
   });
-  return { root, publish, actions, saved };
+  return { root, publish, actions, saved, dismissed: () => dismissed };
 }
 
 /** 区画ごとの見出しの並び (登録 / tmux で検出)。 */
@@ -500,6 +513,66 @@ describe("agents sidebar without registered projects", () => {
     );
     link?.click();
     expect(registered).toBe(1);
+  });
+});
+
+// 最初の入力待ちで 1 度だけ「通知を許可すると…」を出す。
+describe("agents sidebar notification hint", () => {
+  const hint = agentsText("en").notifyHint;
+  test.each([
+    {
+      name: "after the first waiting",
+      sawWaiting: true,
+      permission: "default" as const,
+      dismissed: false,
+      shown: true,
+    },
+    {
+      name: "before any waiting",
+      sawWaiting: false,
+      permission: "default" as const,
+      dismissed: false,
+      shown: false,
+    },
+    {
+      name: "once allowed",
+      sawWaiting: true,
+      permission: "granted" as const,
+      dismissed: false,
+      shown: false,
+    },
+    {
+      name: "once dismissed",
+      sawWaiting: true,
+      permission: "default" as const,
+      dismissed: true,
+      shown: false,
+    },
+  ])("$name → shown: $shown", ({ shown, ...notify }) => {
+    const { root } = mount(
+      overview([], REGISTERED),
+      undefined,
+      undefined,
+      notify,
+    );
+    expect(root.textContent?.includes(hint)).toBe(shown);
+  });
+
+  test("Hide this saves the choice and removes the hint", () => {
+    const { root, dismissed } = mount(
+      overview([], REGISTERED),
+      undefined,
+      undefined,
+      {
+        sawWaiting: true,
+      },
+    );
+    const hide = [...root.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === agentsText("en").hookHintClose,
+    );
+    hide?.click();
+    expect(dismissed()).toBe(true);
+    expect(root.textContent?.includes(hint)).toBe(false);
   });
 });
 

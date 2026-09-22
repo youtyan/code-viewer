@@ -3081,6 +3081,7 @@ const worktreeHandleModule = import("./worktree/handle");
 const ENTRY_ONLY_PATH =
   /^\/(?:_tmux|_shell|_agent)\/|^\/_worktree\/(?:open|stop)$/;
 
+// 待ち受けに失敗したら理由 (ポートが塞がっていれば次の一手) を 1 回出して終える。
 const server = await startServer({
   hostname: "127.0.0.1",
   port: listenPort,
@@ -3269,6 +3270,11 @@ const server = await startServer({
     }
     return text("not found", 404);
   },
+}).catch((error: unknown) => {
+  console.error(
+    `code-viewer could not start the server on port ${listenPort}:\n${formatErrorDetail(error)}`,
+  );
+  process.exit(1);
 });
 
 // startServer 後に実際にバインドされたポートを listenPort に反映する。

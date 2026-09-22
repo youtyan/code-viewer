@@ -312,6 +312,11 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   const agentHookHintDismissed = optionalBoolean(raw.agentHookHintDismissed);
   if (agentHookHintDismissed !== undefined)
     out.agentHookHintDismissed = agentHookHintDismissed;
+  const agentNotifyHintDismissed = optionalBoolean(
+    raw.agentNotifyHintDismissed,
+  );
+  if (agentNotifyHintDismissed !== undefined)
+    out.agentNotifyHintDismissed = agentNotifyHintDismissed;
   const agentAccountsCollapsed = optionalBoolean(raw.agentAccountsCollapsed);
   if (agentAccountsCollapsed !== undefined)
     out.agentAccountsCollapsed = agentAccountsCollapsed;

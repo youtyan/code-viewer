@@ -85,6 +85,11 @@ describe("pane text: one rule for every place", () => {
 });
 
 describe("shell name: Shell and the order it was opened, never the id", () => {
+  const words = {
+    shell: "Shell",
+    signIn: "Sign in",
+    defaultAccount: "Default",
+  };
   const sessions = [
     { id: "shell-zzzz01", createdAt: "2026-01-01T00:00:02.000Z" },
     { id: "shell-aaaa01", createdAt: "2026-01-01T00:00:01.000Z" },
@@ -104,22 +109,49 @@ describe("shell name: Shell and the order it was opened, never the id", () => {
       expected: "Shell",
     },
   ])("$name → $expected", ({ session, expected }) => {
-    expect(shellName(session, sessions, "Shell", () => false)).toBe(expected);
+    expect(shellName(session, sessions, words, () => false)).toBe(expected);
+  });
+
+  // ログインのウィンドウを映すシェルは、番号でなく用途とアカウントで呼ぶ。
+  test.each([
+    {
+      account: "Work",
+      agent: "claude" as const,
+      expected: "Sign in · claude · Work",
+    },
+    {
+      account: "",
+      agent: "codex" as const,
+      expected: "Sign in · codex · Default",
+    },
+  ])("sign-in $agent '$account' → $expected", ({
+    account,
+    agent,
+    expected,
+  }) => {
+    const signIn = {
+      id: "shell-dddd01",
+      createdAt: "2026-01-01T00:00:03.000Z",
+      purpose: { kind: "sign-in" as const, agent, account },
+    };
+    expect(
+      shellName(signIn.id, [...sessions, signIn], words, () => false),
+    ).toBe(expected);
   });
 
   test("closing an earlier shell renumbers the later ones", () => {
     const rest = sessions.filter((item) => item.id !== "shell-aaaa01");
-    expect(shellName("shell-zzzz01", rest, "Shell", () => false)).toBe(
-      "Shell 2",
-    );
+    expect(shellName("shell-zzzz01", rest, words, () => false)).toBe("Shell 2");
   });
 
   test("shells showing an agent are not counted", () => {
     const agent = (id: string) => id === "shell-aaaa01";
-    expect(shellName("shell-bbbb01", sessions, "Shell", agent)).toBe("Shell 1");
+    expect(shellName("shell-bbbb01", sessions, words, agent)).toBe("Shell 1");
   });
 
   test("an empty list names every shell by the word alone", () => {
-    expect(shellName("shell-aaaa01", [], "シェル", () => false)).toBe("シェル");
+    expect(
+      shellName("shell-aaaa01", [], { ...words, shell: "シェル" }, () => false),
+    ).toBe("シェル");
   });
 });

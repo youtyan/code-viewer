@@ -344,15 +344,8 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     });
   } catch (error) {
     lock.release();
-    const inUse =
-      error instanceof Error &&
-      (error as NodeJS.ErrnoException).code === "EADDRINUSE";
     fail(
-      `code-viewer could not start the entry server on port ${args.port}:\n${formatErrorDetail(error)}${
-        inUse
-          ? `\nPort ${args.port} is used by another program. Pass another --port, or leave --port out to use a free port.`
-          : ""
-      }`,
+      `code-viewer could not start the entry server on port ${args.port}:\n${formatErrorDetail(error)}`,
     );
   }
   const url = `http://127.0.0.1:${server.port}/`;

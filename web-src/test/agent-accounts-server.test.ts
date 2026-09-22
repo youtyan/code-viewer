@@ -23,7 +23,12 @@ import {
   defaultShareSelection,
   SHARED_CONFIG_ENTRIES,
 } from "../core/agent-accounts";
-import { loginWindowArgv } from "../server/accounts/launch";
+import {
+  agentCommandArgv,
+  interactiveShell,
+  loginStatusArgv,
+  loginWindowArgv,
+} from "../server/accounts/launch";
 import {
   accountEnv,
   createLoginChecker,
@@ -799,10 +804,13 @@ describe("login status (official commands only)", () => {
       builtin: true,
       managed: false,
     };
-    await checker.status(account);
-    await checker.status(account);
-    await checker.status(account, true);
+    await checker.status(account, "claude");
+    await checker.status(account, "claude");
+    await checker.status(account, "claude", true);
     expect(runs).toBe(2);
+    // 起動コマンドを変えたら、覚えた答えを使わずに訊き直す。
+    await checker.status(account, "/opt/sample/claude");
+    expect(runs).toBe(3);
   });
 });
 
@@ -1142,21 +1150,57 @@ describe("the login window", () => {
   test.each([
     "claude",
     "codex",
-  ] as const)("%s: runs the command as separate arguments, then waits for Enter", (agent) => {
-    const argv = loginWindowArgv(agent);
-    expect(argv.slice(0, 2)).toEqual(["/bin/sh", "-c"]);
-    // コマンドの代わりに、引用符と空白を含む引数を渡しても崩れない。
-    const out = spawnSync(
-      argv[0] ?? "",
-      [...argv.slice(1, 4), "printf", "[%s]", "it's a 'sample' $HOME"],
-      { input: "\n", encoding: "utf8" },
-    );
+  ] as const)("%s: runs the command with separate arguments, then waits for Enter in the same shell", (agent) => {
+    // 起動コマンドの代わりに printf。足す引数 (auth login / login) がそのまま届き、
+    // 同じシェルの中で Enter を待ってから閉じる。
+    const argv = loginWindowArgv(agent, "printf '[%s]'", { SHELL: "/bin/sh" });
+    const out = spawnSync(argv[0] ?? "", argv.slice(1), {
+      input: "\n",
+      encoding: "utf8",
+    });
     expect(out.stdout).toBe(
-      "[it's a 'sample' $HOME]\n[code-viewer] sign-in command exited with 0. Press Enter to close this window.\n",
+      `${agent === "claude" ? "[auth][login]" : "[login]"}\n[code-viewer] sign-in command exited with 0. Press Enter to close this window.\n`,
     );
     expect(out.status).toBe(0);
-    expect(argv.slice(4)).toEqual(
-      agent === "claude" ? ["claude", "auth", "login"] : ["codex", "login"],
-    );
+  });
+});
+
+describe("the launch command is the one login and status use", () => {
+  const command = "/opt/sample/bin/wrapper --profile 'a b'";
+  const shell = interactiveShell();
+  test.each([
+    {
+      name: "claude login",
+      argv: loginWindowArgv("claude", command),
+      args: ["auth", "login"],
+    },
+    {
+      name: "claude status",
+      argv: loginStatusArgv("claude", command),
+      args: ["auth", "status", "--json"],
+    },
+    {
+      name: "codex login",
+      argv: loginWindowArgv("codex", command),
+      args: ["login"],
+    },
+    {
+      name: "codex status",
+      argv: loginStatusArgv("codex", command),
+      args: ["login", "status"],
+    },
+  ])("$name runs the configured command", ({ argv, args }) => {
+    // ログインは同じシェルで Enter を待つ文が続くので、先頭だけ見る。
+    expect(argv.slice(0, 3)).toEqual([shell, "-i", "-c"]);
+    expect(argv[3]?.startsWith(`${command} "$@"`)).toBe(true);
+    expect(argv.slice(4)).toEqual([shell, ...args]);
+  });
+
+  test("the added arguments reach the command unchanged", () => {
+    const argv = agentCommandArgv("printf '[%s]'", ["it's", "$HOME"], {
+      SHELL: "/bin/sh",
+    });
+    const out = spawnSync(argv[0] ?? "", argv.slice(1), { encoding: "utf8" });
+    expect(out.stdout).toBe("[it's][$HOME]");
   });
 });

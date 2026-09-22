@@ -219,6 +219,8 @@ export type AppSettingsState = {
   agentNotifyDone?: boolean;
   /** エージェント一覧の「フックを入れられます」の案内を閉じた。 */
   agentHookHintDismissed?: boolean;
+  /** 最初の入力待ちで出す「通知を許可すると…」の案内を閉じた (許可を訊いた後も)。 */
+  agentNotifyHintDismissed?: boolean;
   /** エージェント一覧のアカウントの帯を畳んだ。 */
   agentAccountsCollapsed?: boolean;
   /** ターミナルの右の画像の棚を畳んだ。 */

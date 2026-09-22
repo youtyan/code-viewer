@@ -6,6 +6,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { Readable } from "node:stream";
+import { errorWithCause } from "../core/error-detail";
 
 /** `/events` sends this often; the entry proxy allows three missed beats. */
 export const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
@@ -335,9 +336,19 @@ export function startServer(options: {
     }
   });
   return new Promise((resolve, reject) => {
-    server.once("error", reject);
+    // ポートが塞がっているときは次の一手を添える (入口も --standalone もここ)。
+    const failListen = (error: NodeJS.ErrnoException) =>
+      reject(
+        error.code === "EADDRINUSE"
+          ? errorWithCause(
+              `port ${options.port} is used by another program. Pass another --port, or leave --port out to use a free port.`,
+              error,
+            )
+          : error,
+      );
+    server.once("error", failListen);
     server.listen(options.port, options.hostname, () => {
-      server.off("error", reject);
+      server.off("error", failListen);
       server.on("error", (error) => {
         console.error("[code-viewer] server error:", error);
       });

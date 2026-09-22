@@ -57,6 +57,8 @@ export type AgentMonitorSnapshot = {
   /** 通知を出せなかった理由。空なら問題なし。 */
   notifyError: string;
   unread: ReadonlyMap<TmuxPaneId, AgentTransition>;
+  /** この画面を開いてから、入力待ちになったエージェントを 1 度でも見たか。 */
+  sawWaiting: boolean;
 };
 
 export type AgentMonitorDeps = {
@@ -89,6 +91,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
   let overview: AgentOverviewResponse | null = null;
   let error = "";
   let notifyError = "";
+  let sawWaiting = false;
   let unread = new Map<TmuxPaneId, AgentTransition>();
   /** 前回の状態。最初の取得の前は null (何も起きたことにしない)。 */
   let previous: Map<TmuxPaneId, AgentState> | null = null;
@@ -145,7 +148,11 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       settings: deps.getNotifySettings(),
       permission: permission(),
     };
-    for (const { pane, transition } of update.transitions) {
+    for (const { pane, transition } of [
+      ...update.transitions,
+      ...serverOnlyTransitions(next, update.transitions),
+    ]) {
+      if (transition === "waiting") sawWaiting = true;
       if (
         !shouldNotifyAgent(transition, {
           ...context,
@@ -165,6 +172,28 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     unread = next.unread ? serverUnread(next) : update.unread;
     previous = new Map(next.panes.map((pane) => [pane.id, pane.state]));
     overview = next;
+  }
+
+  /**
+   * サーバの未読に新しく載った変化のうち、この画面が自分では見ていないもの。
+   * 背面のタブではブラウザが取り直しを十数秒まで間引くので、短い作業中を
+   * まるごと見逃し、画面の側では「作業中 → 入力待ち」が起きない。サーバは
+   * 巡回し続けて未読に記録しているので、それで通知の取りこぼしを埋める。
+   * 最初の取得 (previous が null) の未読は開く前の出来事なので通知しない。
+   */
+  function serverOnlyTransitions(
+    next: AgentOverviewResponse,
+    seen: readonly { pane: AgentPane; transition: AgentTransition }[],
+  ): { pane: AgentPane; transition: AgentTransition }[] {
+    if (!previous || !next.unread) return [];
+    const panes = new Map(next.panes.map((pane) => [pane.id, pane]));
+    return next.unread.flatMap((entry) => {
+      const pane = panes.get(entry.pane);
+      if (!pane || pane.kind === null) return [];
+      if (unread.get(entry.pane) === entry.transition) return [];
+      if (seen.some((item) => item.pane.id === entry.pane)) return [];
+      return [{ pane, transition: entry.transition }];
+    });
   }
 
   /**
@@ -294,7 +323,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       schedule();
     },
     refresh,
-    snapshot: () => ({ overview, error, notifyError, unread }),
+    snapshot: () => ({ overview, error, notifyError, unread, sawWaiting }),
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

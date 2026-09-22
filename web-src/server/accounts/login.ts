@@ -17,6 +17,7 @@ import type { AccountEntry, AccountLogin } from "../../core/agent-accounts";
 import { ACCOUNT_ENV } from "../../core/agent-accounts";
 import { formatErrorDetail } from "../../core/error-detail";
 import { type RunResult, runAsync } from "../runtime";
+import { loginStatusArgv } from "./launch";
 
 export const LOGIN_CACHE_MS = 60_000;
 const LOGIN_TIMEOUT_MS = 8000;
@@ -141,7 +142,12 @@ export function parseCodexLoginStatus(
 }
 
 export type LoginChecker = {
-  status(account: AccountEntry, force?: boolean): Promise<AccountLogin>;
+  /** command: その種類の起動コマンド (起動と同じものに訊く)。 */
+  status(
+    account: AccountEntry,
+    command: string,
+    force?: boolean,
+  ): Promise<AccountLogin>;
 };
 
 export function createLoginChecker(
@@ -149,12 +155,12 @@ export function createLoginChecker(
 ): LoginChecker {
   const cache = new Map<string, { at: number; value: Promise<AccountLogin> }>();
 
-  async function check(account: AccountEntry): Promise<AccountLogin> {
+  async function check(
+    account: AccountEntry,
+    command: string,
+  ): Promise<AccountLogin> {
     const env = accountEnv(account);
-    const args =
-      account.agent === "claude"
-        ? ["claude", "auth", "status", "--json"]
-        : ["codex", "login", "status"];
+    const args = loginStatusArgv(account.agent, command);
     let result: RunResult;
     try {
       result = await deps.run(args, env);
@@ -173,12 +179,12 @@ export function createLoginChecker(
   }
 
   return {
-    status(account, force = false) {
-      const key = `${account.agent}\n${account.builtin ? "" : account.configDir}`;
+    status(account, command, force = false) {
+      const key = `${account.agent}\n${account.builtin ? "" : account.configDir}\n${command}`;
       const hit = cache.get(key);
       if (!force && hit && deps.now() - hit.at < LOGIN_CACHE_MS)
         return hit.value;
-      const value = check(account);
+      const value = check(account, command);
       cache.set(key, { at: deps.now(), value });
       return value;
     },
