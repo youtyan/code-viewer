@@ -3510,4 +3510,7 @@ if (!backendMode) {
 }
 
 console.log(`GDP_LISTEN_URL=http://127.0.0.1:${server.port}/`);
-console.log(`git-diff-preview serving ${cwd}`);
+// 人が読む行 (機械が読むのは上の行)。入口の「code-viewer entry server: <URL>」にそろえる。
+console.log(
+  `code-viewer ${backendMode ? "project process" : "standalone server"}: http://127.0.0.1:${server.port}/ (${cwd})`,
+);

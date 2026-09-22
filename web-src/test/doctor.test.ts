@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
+  _classifySqliteLoadError,
   _parseSqliteAbiMismatchMessage,
   describeSqliteDriver,
 } from "../server/database/sqlite-driver";
@@ -45,6 +46,30 @@ describe("sqlite driver diagnostics", () => {
   test("returns null for unrelated error messages", () => {
     expect(_parseSqliteAbiMismatchMessage("ENOENT: no such file")).toBeNull();
     expect(_parseSqliteAbiMismatchMessage("")).toBeNull();
+  });
+
+  // DB を開けなかった理由ごとの状態と直し方。部品が無い (install スクリプトが
+  // 走っていない) のは「入れ直す」でなく rebuild を案内する。
+  test.each([
+    [
+      "NODE_MODULE_VERSION 127. This version of Node.js requires NODE_MODULE_VERSION 137.",
+      "abi-mismatch",
+      "rm -rf ~/.npm/_npx",
+    ],
+    [
+      "Could not locate the bindings file. Tried:\n → /x/build/better_sqlite3.node",
+      "unavailable",
+      "npm rebuild better-sqlite3",
+    ],
+    [
+      "Cannot find package 'better-sqlite3' imported from /x/dist/code-viewer.js",
+      "unavailable",
+      "npm i better-sqlite3",
+    ],
+  ])("a load failure %j is %s with the hint %j", (message, kind, hint) => {
+    const status = _classifySqliteLoadError(message);
+    expect(status.kind).toBe(kind);
+    expect(status.hint).toContain(hint);
   });
 
   test("describeSqliteDriver returns a status with a known kind", async () => {

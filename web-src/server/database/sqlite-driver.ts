@@ -65,6 +65,42 @@ const INSTALL_GUIDE =
   "better-sqlite3 is an optional dependency required for SQLite features (data viewer / snapshot). " +
   "Install it with `npm i better-sqlite3`.";
 
+const MISSING_BUILD_GUIDE =
+  "better-sqlite3 is installed, but its native build is missing: its install script did not run " +
+  "(npm --ignore-scripts, or npm's allow-scripts left it unapproved). " +
+  "Run `npm rebuild better-sqlite3` where code-viewer is installed " +
+  "(or `npm approve-scripts better-sqlite3` and install again).";
+
+/**
+ * better-sqlite3 を読めなかった・開けなかった理由から、状態と直し方を決める。
+ * ネイティブの部品が無いのは import では分からず、DB を開いたときに
+ * 「Could not locate the bindings file」で分かる。
+ */
+export function _classifySqliteLoadError(
+  message: string,
+): Exclude<SqliteDriverStatus, { kind: "ok" }> {
+  const abi = parseAbiMismatch(message);
+  if (abi) {
+    return {
+      kind: "abi-mismatch",
+      driver: "better-sqlite3",
+      compiledAbi: abi.compiledAbi,
+      runtimeAbi: abi.runtimeAbi,
+      ...(abi.modulePath ? { modulePath: abi.modulePath } : {}),
+      message,
+      hint: NPX_CACHE_GUIDE,
+    };
+  }
+  return {
+    kind: "unavailable",
+    driver: "better-sqlite3",
+    message,
+    hint: /Could not locate the bindings file/.test(message)
+      ? MISSING_BUILD_GUIDE
+      : INSTALL_GUIDE,
+  };
+}
+
 export function _parseSqliteAbiMismatchMessage(message: string): {
   compiledAbi: number;
   runtimeAbi: number;
@@ -94,27 +130,17 @@ function parseAbiMismatch(message: string): {
 
 export async function describeSqliteDriver(): Promise<SqliteDriverStatus> {
   try {
-    await import("better-sqlite3");
+    const mod = (await import("better-sqlite3")) as { default?: unknown };
+    const Database = (mod.default || mod) as SqliteClassCtor<{
+      close(): void;
+    }>;
+    // ネイティブの部品は DB を開くときに初めて読むので、import だけでは
+    // 部品が無い・Node.js と合わないのを見逃す。実際に 1 度開いて閉じる。
+    new Database(":memory:").close();
     return { kind: "ok", driver: "better-sqlite3" };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const abi = parseAbiMismatch(message);
-    if (abi) {
-      return {
-        kind: "abi-mismatch",
-        driver: "better-sqlite3",
-        compiledAbi: abi.compiledAbi,
-        runtimeAbi: abi.runtimeAbi,
-        ...(abi.modulePath ? { modulePath: abi.modulePath } : {}),
-        message,
-        hint: NPX_CACHE_GUIDE,
-      };
-    }
-    return {
-      kind: "unavailable",
-      driver: "better-sqlite3",
-      message,
-      hint: INSTALL_GUIDE,
-    };
+    return _classifySqliteLoadError(
+      err instanceof Error ? err.message : String(err),
+    );
   }
 }
