@@ -106,6 +106,7 @@ export function createScratchpadPane(
   input.className = "tools-textarea";
   input.spellcheck = false;
   input.placeholder = placeholder;
+  input.setAttribute("aria-label", placeholder);
   input.value = options.initialText;
   inputSide.append(inputHead, input);
 
@@ -271,6 +272,7 @@ export function createScratchpadPane(
       resizer.setAttribute("aria-label", nextText.pane.resize);
       outputTitleEl.textContent = nextOutputTitle;
       input.placeholder = nextPlaceholder;
+      input.setAttribute("aria-label", nextPlaceholder);
     },
     focus: () => input.focus(),
     dispose() {

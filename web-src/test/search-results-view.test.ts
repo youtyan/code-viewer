@@ -1,6 +1,7 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { GrepResponse } from "../core/types";
+import { searchPaletteText } from "../views/search-palette-i18n";
 import { createSearchResultsView } from "../views/search-results-view";
 import { q, waitFor } from "./_test-helpers";
 
@@ -17,7 +18,11 @@ afterEach(() => {
 });
 
 function setup(
-  options: { regex?: boolean; matches?: GrepResponse["matches"] } = {},
+  options: {
+    regex?: boolean;
+    matches?: GrepResponse["matches"];
+    language?: () => "en" | "ja";
+  } = {},
 ) {
   document.body.innerHTML =
     '<aside id="search-sheet" hidden aria-hidden="true" inert></aside>';
@@ -60,7 +65,7 @@ function setup(
   const view = createSearchResultsView({
     $: (sel) => document.querySelector(sel),
     trackLoad: (promise) => promise,
-    getLanguage: () => "en",
+    getLanguage: options.language ?? (() => "en"),
     appendScopeParams: () => undefined,
     getRef: () => "worktree",
     getServerGeneration: () => 1,
@@ -85,6 +90,18 @@ function setup(
 }
 
 describe("search results sheet", () => {
+  test("the query box is named in the current language", () => {
+    let language: "en" | "ja" = "en";
+    const { view } = setup({ language: () => language });
+    view.open();
+    const box = q<HTMLInputElement>(document, ".search-results-input");
+    const named = () => box.getAttribute("aria-label");
+    expect(named()).toBe(searchPaletteText("en").resultsPlaceholder);
+    language = "ja";
+    view.localize();
+    expect(named()).toBe(searchPaletteText("ja").resultsPlaceholder);
+  });
+
   test("opening with a query runs it, groups hits by file and reports the count", async () => {
     const { view, urls, queries } = setup();
     view.open("needle path:src/");

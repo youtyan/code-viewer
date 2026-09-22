@@ -614,6 +614,84 @@ describe("agents sidebar notification hint", () => {
   });
 });
 
+// 取り直しのたびに描き直すので、押した・Tab で止まった部品からフォーカスが
+// 落ちない (落ちると次の Tab が差し替わった同じボタンにもう一度止まる)。
+describe("agents sidebar focus across redraws", () => {
+  const WITH_AGENT = () =>
+    overview([pane("%1", "claude", "/work/sample-lib", "waiting")], REGISTERED);
+  const NO_PROJECTS = () => overview([], []);
+  const WITH_PROBLEM = () => ({
+    ...overview([], REGISTERED),
+    registry: { ...overview([], REGISTERED).registry, error: "sample" },
+  });
+
+  test.each<[string, () => AgentOverviewResponse, string]>([
+    ["new agent (+)", WITH_AGENT, "launch:/work/sample-lib"],
+    ["project menu (⋯)", WITH_AGENT, "menu:/work/sample-lib"],
+    ["chevron", WITH_AGENT, "twisty:/work/sample-lib"],
+    ["register the current repository", NO_PROJECTS, "register-current"],
+    ["register by path", NO_PROJECTS, "register-path"],
+    ["problems link", WITH_PROBLEM, "problems"],
+  ])("%s keeps focus on the redrawn button", (_name, data, key) => {
+    const { root, publish } = mount(data());
+    const selector = `[data-nav-focus="${key}"]`;
+    const before = root.querySelector<HTMLElement>(selector);
+    before?.focus();
+    expect(document.activeElement).toBe(before);
+    publish({ ...data(), serverInstance: "restarted" });
+    const after = root.querySelector<HTMLElement>(selector);
+    expect({
+      replaced: after !== before,
+      focused: document.activeElement,
+    }).toEqual({
+      replaced: true,
+      focused: after,
+    });
+  });
+
+  test("a new observation time alone does not redraw", () => {
+    const { root, publish } = mount(NO_PROJECTS());
+    const before = root.querySelector(".nav-empty-action");
+    expect(before).not.toBeNull();
+    publish({ ...NO_PROJECTS(), observedAt: 1_000 });
+    expect(root.querySelector(".nav-empty-action")).toBe(before);
+  });
+
+  test("a vanished agent row hands focus to its project", () => {
+    const { root, publish } = mount(WITH_AGENT());
+    root.querySelector<HTMLElement>('[data-nav-item="pane:%1"]')?.focus();
+    publish(overview([], REGISTERED));
+    expect({
+      focused: document.activeElement?.getAttribute("data-nav-item"),
+      tabIndex: (document.activeElement as HTMLElement | null)?.tabIndex,
+    }).toEqual({ focused: "project:/work/sample-lib", tabIndex: 0 });
+  });
+
+  test("hiding the notification hint leaves focus in the tree", () => {
+    const { root } = mount(overview([], REGISTERED), undefined, undefined, {
+      sawWaiting: true,
+    });
+    const hide = root.querySelector<HTMLButtonElement>(
+      '[data-nav-focus="notify-hide"]',
+    );
+    hide?.focus();
+    hide?.click();
+    expect({
+      hint: root.querySelector('[data-nav-focus="notify-hide"]'),
+      focused: document.activeElement?.getAttribute("data-nav-item"),
+    }).toEqual({ hint: null, focused: "project:/work/sample-app" });
+  });
+
+  test("focus outside the sidebar is left alone", () => {
+    const { root, publish } = mount(WITH_AGENT());
+    const outside = document.querySelector<HTMLElement>("a.app-menu-item");
+    outside?.focus();
+    publish({ ...WITH_AGENT(), serverInstance: "restarted" });
+    expect(document.activeElement).toBe(outside);
+    expect(root.contains(document.activeElement)).toBe(false);
+  });
+});
+
 describe("project actions open", () => {
   test("an unregistered project is registered and opened without a dialog when asked not to confirm", async () => {
     const calls: { url: string; body: unknown }[] = [];

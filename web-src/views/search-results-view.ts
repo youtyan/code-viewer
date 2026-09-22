@@ -359,7 +359,10 @@ export function createSearchResultsView(
   function localize(): void {
     if (!mounted) return;
     const current = text();
-    if (input) input.placeholder = current.resultsPlaceholder;
+    if (input) {
+      input.placeholder = current.resultsPlaceholder;
+      input.setAttribute("aria-label", current.resultsPlaceholder);
+    }
     if (runButton) {
       runButton.textContent = current.resultsRun;
       runButton.title = current.resultsRun;

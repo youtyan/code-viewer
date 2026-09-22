@@ -70,8 +70,14 @@ export type AgentsSidebar = {
   syncCollapsed(): void;
 };
 
-/** 描き直しの前後で同じ要素を指すための鍵。 */
+/** 描き直しの前後で同じ要素を指すための鍵。木の行 (矢印で動く) の分。 */
 const NAV_ATTR = "data-nav-item";
+/**
+ * 木の行でない操作 (＋・⋯・案内や登録のボタン) の鍵。取り直しのたびに
+ * 描き直すので、鍵が無いとフォーカスが body に落ち、次の Tab が差し替わった
+ * 同じボタンにもう一度止まる。
+ */
+const FOCUS_ATTR = "data-nav-focus";
 
 export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
   const { root } = deps;
@@ -187,12 +193,14 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
 
   function iconButton(
     className: string,
+    focusKey: string,
     svg: string,
     title: string,
     onClick: (event: MouseEvent, button: HTMLButtonElement) => void,
   ): HTMLButtonElement {
     const button = el("button", `nav-row-action ${className}`);
     button.type = "button";
+    button.setAttribute(FOCUS_ATTR, focusKey);
     button.innerHTML = svg;
     button.title = title;
     button.setAttribute("aria-label", title);
@@ -222,6 +230,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     const twisty = el("button", "nav-twisty");
     twisty.type = "button";
     twisty.tabIndex = -1;
+    twisty.setAttribute(FOCUS_ATTR, `twisty:${info.root}`);
     twisty.classList.toggle("collapsed", isCollapsed || !hasAgents);
     twisty.classList.toggle("empty", !hasAgents);
     twisty.disabled = !hasAgents;
@@ -304,6 +313,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       actions.appendChild(
         iconButton(
           "nav-project-launch",
+          `launch:${info.root}`,
           iconSvg("octicon-plus", PLUS_16_PATH),
           current.accounts.launchProjectTitle(info.name),
           () => deps.launch(info.root),
@@ -313,6 +323,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     actions.appendChild(
       iconButton(
         "nav-project-menu",
+        `menu:${info.root}`,
         iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH),
         current.projects.menuTitle(info.name),
         (_event, button) =>
@@ -337,6 +348,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       const title = el("strong", "", activity.title);
       const close = el("button", "nav-row-action", "×");
       close.type = "button";
+      close.setAttribute(FOCUS_ATTR, `dismiss:${info.root}`);
       close.title = current.projects.dismiss;
       close.setAttribute("aria-label", current.projects.dismiss);
       close.addEventListener("click", () => deps.projects.dismiss(info.root));
@@ -389,7 +401,8 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       snapshot.error,
       deps.viewingPane(),
       deps.projects.signature(),
-      snapshot.overview,
+      // 巡回を終えた時刻は描かない。含めると取り直しのたびに描き直す。
+      snapshot.overview && { ...snapshot.overview, observedAt: 0 },
       showsNotifyHint(),
       notifyRequestError,
       // 経過時間は分単位でしか変わらない。
@@ -427,6 +440,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       again ? current.notifyAskAgain : current.notifyEnable,
     );
     allow.type = "button";
+    allow.setAttribute(FOCUS_ATTR, "notify-allow");
     allow.addEventListener("click", () => {
       deps.monitor.requestPermission().then(
         (result) => {
@@ -444,6 +458,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     });
     const hide = el("button", "nav-note nav-note-link", current.hookHintClose);
     hide.type = "button";
+    hide.setAttribute(FOCUS_ATTR, "notify-hide");
     hide.addEventListener("click", () => {
       deps.dismissNotifyHint();
       render(true);
@@ -465,11 +480,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     lastSignature = next;
     const current = text();
     const { overview, error } = deps.monitor.snapshot();
-    const focusedKey =
-      document.activeElement instanceof HTMLElement &&
-      root.contains(document.activeElement)
-        ? document.activeElement.getAttribute(NAV_ATTR)
-        : null;
+    const focused = focusedKeys();
     root.setAttribute("aria-label", current.sidebar.ariaLabel);
     root.replaceChildren();
 
@@ -511,6 +522,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         current.projects.switcherRegisterCurrent(deps.currentName()),
       );
       register.type = "button";
+      register.setAttribute(FOCUS_ATTR, "register-current");
       register.title = current.projects.switcherRegisterCurrentHint;
       register.addEventListener(
         "click",
@@ -524,6 +536,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         current.projects.switcherAddPath,
       );
       byPath.type = "button";
+      byPath.setAttribute(FOCUS_ATTR, "register-path");
       byPath.addEventListener(
         "click",
         () => void deps.projects.registerByPath(),
@@ -591,22 +604,52 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         current.sidebar.problems(problems),
       );
       link.type = "button";
+      link.setAttribute(FOCUS_ATTR, "problems");
       link.addEventListener("click", () => deps.openBoard());
       root.appendChild(link);
     }
 
     const items = navItems();
-    const restore =
-      (focusedKey &&
-        items.find((item) => item.getAttribute(NAV_ATTR) === focusedKey)) ||
-      null;
+    const find = (attr: string, key: string | null) =>
+      key === null
+        ? undefined
+        : [...root.querySelectorAll<HTMLElement>(`[${attr}]`)].find(
+            (node) =>
+              node.getAttribute(attr) === key && !node.closest("[hidden]"),
+          );
+    // フォーカスは同じ役目の部品へ戻す。それが無くなったら (案内を閉じた・
+    // エージェントが終わった) 同じプロジェクトの見出し、それも無ければ木の入口。
+    const action = find(FOCUS_ATTR, focused?.action ?? null);
+    const restore = action
+      ? undefined
+      : (find(NAV_ATTR, focused?.item ?? null) ??
+        find(NAV_ATTR, focused?.project ?? null));
     // Tab で入れるのは 1 つだけ (矢印で動く)。選んでいる行、無ければ先頭。
     const tabStop =
       restore ??
       items.find((item) => item.classList.contains("active")) ??
       items[0];
     if (tabStop) tabStop.tabIndex = 0;
-    restore?.focus({ preventScroll: true });
+    if (focused) (action ?? tabStop)?.focus({ preventScroll: true });
+  }
+
+  /** 描き直す前にフォーカスが root の中にあれば、その鍵と属するプロジェクト。 */
+  function focusedKeys(): {
+    item: string | null;
+    action: string | null;
+    project: string | null;
+  } | null {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || !root.contains(active)) return null;
+    return {
+      item: active.getAttribute(NAV_ATTR),
+      action: active.getAttribute(FOCUS_ATTR),
+      project:
+        active
+          .closest(".nav-project")
+          ?.querySelector(`[${NAV_ATTR}^="project:"]`)
+          ?.getAttribute(NAV_ATTR) ?? null,
+    };
   }
 
   function navItems(): HTMLElement[] {

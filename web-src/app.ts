@@ -2308,8 +2308,8 @@ window.GdpExpandLogic = GdpExpandLogic;
           `${visible} of ${total} files match the filter`,
         filterClear: "Clear",
         filterClearTitle: "Clear file filter",
-        hide: "hide sidebar",
-        show: "show sidebar",
+        hide: "Hide right column",
+        show: "Show right column",
         hideList: "hide the list",
         showList: "show the list",
         autoHiddenForSplit:
@@ -2701,8 +2701,8 @@ window.GdpExpandLogic = GdpExpandLogic;
           `${total} ファイル中 ${visible} 件が一致`,
         filterClear: "解除",
         filterClearTitle: "ファイル絞り込みを解除",
-        hide: "サイドバーを隠す",
-        show: "サイドバーを表示",
+        hide: "右の列を隠す",
+        show: "右の列を表示",
         hideList: "一覧を隠す",
         showList: "一覧を表示",
         autoHiddenForSplit:

@@ -354,7 +354,7 @@ export function showFormDialog<T>(
     const focusables = (): HTMLElement[] => [
       ...Array.from(
         opts.body.querySelectorAll<HTMLElement>(
-          "input:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), textarea:not([disabled]):not([hidden]), button:not([disabled]):not([hidden])",
+          'input:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), textarea:not([disabled]):not([hidden]), button:not([disabled]):not([hidden]), a[href]:not([hidden]), [tabindex]:not([tabindex="-1"]):not([disabled]):not([hidden])',
         ),
       ).filter((element) => element.offsetParent !== null),
       cancel,
@@ -399,8 +399,10 @@ export function showFormDialog<T>(
         !(document.activeElement instanceof HTMLTextAreaElement)
       ) {
         event.preventDefault();
+        // 本文のボタンとリンクは押す (リンクの上の Enter で保存しない)。
         if (
-          document.activeElement instanceof HTMLButtonElement &&
+          (document.activeElement instanceof HTMLButtonElement ||
+            document.activeElement instanceof HTMLAnchorElement) &&
           opts.body.contains(document.activeElement)
         ) {
           document.activeElement.click();

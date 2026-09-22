@@ -473,6 +473,9 @@ shows a banner so reloads are not silently missed.
 Large repositories load folder children on demand. The sidebar remembers which
 lazy-loaded folders you opened and re-expands them on the next reload, so the
 tree state survives navigation and refresh.
+Tab reaches the tree once, on the selected row; ↑ / ↓, Home / End, → (open a
+folder), ← (fold it or go to its parent) and Enter work there, next to the
+existing j / k / l / h keys.
 
 Symlinks get a distinct icon and a "→ target" label instead of looking like a
 regular file, and clicking one navigates straight to its resolved target.

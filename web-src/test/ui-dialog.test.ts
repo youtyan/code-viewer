@@ -4,7 +4,11 @@
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, describe, expect, test } from "vitest";
-import { closeOpenDialog, getOpenDialog } from "./_dialog-helpers";
+import {
+  clickDialogCancel,
+  closeOpenDialog,
+  getOpenDialog,
+} from "./_dialog-helpers";
 
 GlobalRegistrator.register();
 
@@ -158,6 +162,98 @@ describe("showAlertDialog", () => {
 
 // 右上の閉じるボタンは取り消しと同じ (確定の値を返さない)。4 つの型のどれでも
 // 同じ場所・同じ意味で、説明は取り消しのラベルを使う。
+// 本文に置いたリンクや tabindex の部品も閉じ込めの輪に入る (入らないと、
+// そこから Shift+Tab すると先頭へ飛ばされ、最初のフォーカスも取り消しに行く)。
+describe("showFormDialog focus trap", () => {
+  function part(html: string): HTMLElement {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    return template.content.firstElementChild as HTMLElement;
+  }
+  const key = (target: HTMLElement, name: string, shiftKey = false) => {
+    const event = new KeyboardEvent("keydown", {
+      key: name,
+      shiftKey,
+      bubbles: true,
+      cancelable: true,
+    });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  test.each([
+    ["a link", ['<a href="#sample">sample</a>', "<button>b</button>"], "a"],
+    [
+      "a tabindex=0 part",
+      ['<div tabindex="0">p</div>', "<button>b</button>"],
+      "div",
+    ],
+    [
+      "a link after a tabindex=-1 part",
+      ['<div tabindex="-1">p</div>', '<a href="#sample">sample</a>'],
+      "a",
+    ],
+  ])("%s is first in the loop", async (_name, parts, first) => {
+    const body = document.createElement("div");
+    body.append(...parts.map(part));
+    const result = showFormDialog({ body, submit: () => "saved" });
+    await tick();
+    const [, submit] = actionButtons();
+    const head = body.querySelector<HTMLElement>(first);
+    expect(document.activeElement).toBe(head);
+    key(submit, "Tab");
+    expect(document.activeElement).toBe(head);
+    if (head) key(head, "Tab", true);
+    expect(document.activeElement).toBe(submit);
+    clickDialogCancel();
+    expect(await result).toBeNull();
+  });
+
+  test("Shift+Tab from a link in the middle is left to the browser", async () => {
+    const body = document.createElement("div");
+    body.append(
+      part("<button>b</button>"),
+      part('<a href="#sample">sample</a>'),
+    );
+    const result = showFormDialog({ body, submit: () => "saved" });
+    await tick();
+    const link = body.querySelector<HTMLAnchorElement>("a");
+    link?.focus();
+    expect(link && key(link, "Tab", true)).toBe(false);
+    expect(document.activeElement).toBe(link);
+    clickDialogCancel();
+    expect(await result).toBeNull();
+  });
+
+  test("Enter on a link follows it instead of submitting", async () => {
+    const body = document.createElement("div");
+    body.append(part('<a href="#sample">sample</a>'));
+    let submitted = 0;
+    const followed: string[] = [];
+    const result = showFormDialog({
+      body,
+      submit: () => {
+        submitted += 1;
+        return "saved";
+      },
+    });
+    await tick();
+    const link = body.querySelector<HTMLAnchorElement>("a");
+    link?.addEventListener("click", (event) => {
+      event.preventDefault();
+      followed.push(link.getAttribute("href") ?? "");
+    });
+    if (link) key(link, "Enter");
+    await tick();
+    expect({ submitted, followed }).toEqual({
+      submitted: 0,
+      followed: ["#sample"],
+    });
+    clickDialogCancel();
+    expect(await result).toBeNull();
+  });
+});
+
 describe("the close button in the corner cancels", () => {
   function closeButton(): HTMLButtonElement {
     const button =

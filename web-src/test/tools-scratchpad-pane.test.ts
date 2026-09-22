@@ -55,6 +55,17 @@ beforeEach(() => {
   document.body.replaceChildren();
 });
 
+describe("scratchpad pane input name", () => {
+  test("the input is named by its placeholder, also after switching language", () => {
+    const pane = createPendingPane("");
+    const input = pane.el.querySelector<HTMLTextAreaElement>(".tools-textarea");
+    expect(input?.getAttribute("aria-label")).toBe("Input");
+    const ja = toolsText("ja");
+    pane.localize(ja, ja.markdown.output, ja.markdown.placeholder);
+    expect(input?.getAttribute("aria-label")).toBe(ja.markdown.placeholder);
+  });
+});
+
 describe("scratchpad pane render lifecycle", () => {
   test("typing aborts the render that is still running", () => {
     const pane = createPendingPane("first");

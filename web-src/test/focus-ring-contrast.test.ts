@@ -131,3 +131,65 @@ describe("controls that had the browser's default ring draw the shared ring", ()
     ]).toEqual(["none", resolveVar("var(--focus-ring)", light)]);
   });
 });
+
+// 差分の横に送る箱は、箱の外に描くと親の overflow で切れ、箱の中に描くと行番号の
+// 列 (sticky) の下に隠れる。送らない親の面に、行番号より上の層で内側の輪を重ねる。
+describe("a focused diff scroll box draws the shared ring above the line numbers", () => {
+  const exactly = (selector: string) =>
+    cascadedDeclarations(rules, (s) => s === selector);
+  const lineNumbers = exactly("table.d2h-diff-table td.d2h-code-linenumber");
+
+  test("the box drops the browser's ring", () => {
+    expect(exactly(".d2h-code-wrapper:focus-visible").get("outline")).toBe(
+      "none",
+    );
+  });
+
+  test.each([".d2h-file-diff", ".d2h-file-side-diff"])("%s", (parent) => {
+    const focused = `${parent}:has(> .d2h-code-wrapper:focus-visible)`;
+    const ring = exactly(`${focused}::after`);
+    expect({
+      host: exactly(focused).get("position"),
+      position: ring.get("position"),
+      inset: ring.get("inset"),
+      shadow: resolveVar(ring.get("box-shadow") ?? "", light),
+      aboveLineNumbers:
+        Number(ring.get("z-index")) > Number(lineNumbers.get("z-index")),
+    }).toEqual({
+      host: "relative",
+      position: "absolute",
+      inset: "0",
+      shadow: `inset ${resolveVar("var(--focus-ring)", light)}`,
+      aboveLineNumbers: true,
+    });
+  });
+});
+
+// 木の行は列の端から端までで外の輪は切れるので、内側に描く。選んでいる行は光も残す。
+describe("a focused tree row draws the shared ring inside", () => {
+  test.each([
+    ["#filelist li:focus-visible", "inset var(--focus-ring)"],
+    [
+      "#filelist.tree .tree-file.active:focus-visible",
+      "inset var(--focus-ring), var(--glow-select)",
+    ],
+    [
+      "#filelist li.active:focus-visible",
+      "inset var(--focus-ring), var(--glow-select)",
+    ],
+  ])("%s", (selector, expected) => {
+    const focused = cascadedDeclarations(rules, (s) => s === selector);
+    expect(resolveVar(focused.get("box-shadow") ?? "", light)).toBe(
+      resolveVar(expected, light),
+    );
+  });
+
+  test("the browser's ring is off", () => {
+    expect(
+      cascadedDeclarations(
+        rules,
+        (s) => s === "#filelist li:focus-visible",
+      ).get("outline"),
+    ).toBe("none");
+  });
+});

@@ -349,6 +349,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     if (mode === "file" && getPaletteCommands) {
       input.placeholder = text().searchEverything;
     }
+    input.setAttribute("aria-label", input.placeholder);
     const inputRow = document.createElement("div");
     inputRow.className = "gdp-palette-input-row";
     inputRow.innerHTML = iconSvg("gdp-palette-input-icon", SEARCH_16_PATH);

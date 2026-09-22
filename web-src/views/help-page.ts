@@ -211,6 +211,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
+                text: "Tab reaches the tree once, on the selected row (or the first row). There, ↑ / ↓ move, Home / End jump to the first / last row, → opens a folder, ← folds it or goes to its parent folder, and Enter opens the row; j / k / l / h and Shift+H keep working as before.",
+              },
+              {
+                kind: "paragraph",
                 text: "Files with pending git changes show a status badge in the tree instead of the regular type icon: M (modified), A (added — staged for commit), D (deleted), R (renamed), U (untracked — in the worktree but not under version control yet), and I (ignored by a .gitignore rule). U and A stay separate so a file you have never run git add on does not look like one that is already staged. A wholly untracked or ignored directory is badged as a whole and keeps its folder icon, so it stays recognizable while collapsed; its contents inherit the badge unless an ignore rule names a file specifically.",
               },
             ],
@@ -1101,6 +1105,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "シンボリックリンクは専用アイコンと「→ リンク先」ラベルで表示されるため通常のファイル/フォルダと区別でき、クリックするとリンク先に遷移します。リンク切れのシンボリックリンクは無効化されたことが分かる表示になります。",
+              },
+              {
+                kind: "paragraph",
+                text: "木には Tab で 1 回だけ止まります (選んでいる行、無ければ先頭の行)。そこで ↑ / ↓ で移り、Home / End で先頭 / 末尾へ、→ でフォルダを開き、← で畳むか親のフォルダへ移り、Enter で開きます。j / k / l / h と Shift+H はこれまでどおり使えます。",
               },
               {
                 kind: "paragraph",

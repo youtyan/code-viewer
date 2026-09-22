@@ -79,6 +79,11 @@ test.each([
     action: "open-sidebar-item",
   },
   {
+    name: "the tree's tab stop row (tabindex 0): the page opens it",
+    html: '<aside id="sidebar"><ul id="filelist"><li id="target" tabindex="0" data-path="a.ts">a.ts</li></ul></aside>',
+    action: "open-sidebar-item",
+  },
+  {
     name: "nothing focused: the page opens the tree item",
     html: '<div id="target"></div>',
     action: "open-sidebar-item",
@@ -91,4 +96,49 @@ test("other keys on a focused button still reach the page keymap", () => {
   expect(
     enterOn('<aside><button id="target">New agent</button></aside>', "j"),
   ).toBe("sidebar-next");
+});
+
+// 実ブラウザの Enter は keydown の既定の動作としてボタンを押す (click)。道具の
+// Enter は文字を持たず、素のボタンでも押す動作にならないので、ここでは順に
+// keydown → keyup を送り、ページが止めていなければブラウザの代わりに click を
+// 起こす。押されるのは 1 回だけで、木の行ではページの割り当てが取る (対照)。
+test.each([
+  {
+    name: "New agent is pressed once",
+    html: '<nav id="app-nav"><button id="target">New agent</button></nav>',
+    expected: { prevented: false, pressed: 1, action: null },
+  },
+  {
+    name: "a tree row is opened by the page instead",
+    html: '<aside id="sidebar"><ul id="filelist"><li id="target" tabindex="0" data-path="a.ts">a.ts</li></ul></aside>',
+    expected: { prevented: true, pressed: 0, action: "open-sidebar-item" },
+  },
+])("keydown → keyup → click: $name", ({ html, expected }) => {
+  const action = enterOn(html);
+  const target = document.querySelector<HTMLElement>("#target");
+  if (!target) throw new Error("no #target");
+  let pressed = 0;
+  target.addEventListener("click", () => {
+    pressed += 1;
+  });
+  // app.ts の keydown と同じく、割り当てがあれば既定の動作を止める。
+  const page = (event: KeyboardEvent) => {
+    if (action) event.preventDefault();
+  };
+  document.addEventListener("keydown", page);
+  target.focus();
+  const down = new KeyboardEvent("keydown", {
+    key: "Enter",
+    bubbles: true,
+    cancelable: true,
+  });
+  target.dispatchEvent(down);
+  target.dispatchEvent(
+    new KeyboardEvent("keyup", { key: "Enter", bubbles: true }),
+  );
+  if (!down.defaultPrevented) target.click();
+  document.removeEventListener("keydown", page);
+  expect({ prevented: down.defaultPrevented, pressed, action }).toEqual(
+    expected,
+  );
 });

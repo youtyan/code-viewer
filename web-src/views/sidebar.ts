@@ -848,9 +848,17 @@ export function createSidebar(deps: SidebarDeps) {
     dirIcon.className = "dir-icon";
     li.appendChild(dirIcon);
     li.appendChild(createTreeDirLabel(dir, onFileClick));
-    li.appendChild(
-      createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
+    const openPath = createOpenPathButton(
+      dir.path,
+      "directory",
+      openDirectoryInOsTitle(),
     );
+    // Files の木では止まり場所の行のボタンだけ Tab に入れる (syncTreeTabStop)。
+    if (onFileClick) {
+      openPath.tabIndex = -1;
+      openPath.dataset.rowAction = "";
+    }
+    li.appendChild(openPath);
     const updateIcon = () => {
       setFolderIcon(dirIcon, li.classList.contains("collapsed"));
     };
@@ -1230,8 +1238,85 @@ export function createSidebar(deps: SidebarDeps) {
       li.style.right = "0";
       fragment.appendChild(li);
     }
+    const focused = focusedTreeRow(ul);
     ul.replaceChildren(fragment);
     ul.style.height = `${SIDEBAR_VISIBLE_ROWS.length * rowHeight}px`;
+    syncTreeTabStop(ul, focused);
+  }
+
+  // Files の木は Tab の止まり場所を 1 つだけ持つ (roving tabindex): 選んでいる
+  // 行、描いていなければ描いている先頭の行が tabIndex 0。行は選び直し・スクロール
+  // のたびに作り直すので、木の行 (か、その中のボタン) にフォーカスがあったら戻す:
+  // 選び直した (j k でも ↑↓ でも) なら選んだ行へ、そうでなければ同じ行の同じ
+  // 部品へ。どちらも描いていなければ #sidebar (キーの範囲はそのまま)。差分の
+  // 一覧は対象にしない。
+  const TREE_ROW_SELECTOR = ":scope > li[data-path], :scope > li[data-dirpath]";
+
+  type FocusedTreeRow = { path: string; onAction: boolean };
+
+  function treeRowPath(row: HTMLElement): string {
+    return row.dataset.path ?? row.dataset.dirpath ?? "";
+  }
+
+  function focusedTreeRow(ul: HTMLElement): FocusedTreeRow | null {
+    const focused = document.activeElement;
+    const row = focused?.closest<HTMLElement>("li");
+    if (
+      row?.parentElement !== ul ||
+      !row.matches("li[data-path], li[data-dirpath]")
+    )
+      return null;
+    return { path: treeRowPath(row), onAction: focused !== row };
+  }
+
+  function syncTreeTabStop(ul: HTMLElement, focused: FocusedTreeRow | null) {
+    if (!SIDEBAR_ON_FILE_CLICK) return;
+    const rows = [...ul.querySelectorAll<HTMLElement>(TREE_ROW_SELECTOR)];
+    const active = rows.find((row) => row.classList.contains("active"));
+    const stop = active ?? rows[0];
+    // 行の中のボタン (フォルダを OS で開く) は止まり場所の行の分だけ Tab に入れる。
+    const actionOf = (row: HTMLElement | undefined) =>
+      row?.querySelector<HTMLElement>("[data-row-action]") ?? null;
+    if (stop) stop.tabIndex = 0;
+    const stopAction = actionOf(stop);
+    if (stopAction) stopAction.tabIndex = 0;
+    if (!focused) return;
+    const same = rows.find((row) => treeRowPath(row) === focused.path);
+    const moved = active && treeRowPath(active) !== focused.path;
+    const target = moved ? active : (same ?? active);
+    const restored =
+      !moved && focused.onAction && target === stop ? actionOf(target) : null;
+    (
+      restored ??
+      target ??
+      document.querySelector<HTMLElement>("#sidebar")
+    )?.focus({ preventScroll: true });
+  }
+
+  // 木の行の上の矢印キー。↑↓ と Home / End は j k と gg / G と同じ動き、→ は
+  // 開くだけ (l は開閉の切り替え)、← は畳むか親へ (h と同じ)。Enter はページの
+  // キー割り当て (open-sidebar-item) が開く。
+  const TREE_ROW_KEYS: Record<string, () => void> = {
+    ArrowDown: () => moveActiveSidebarItem(1),
+    ArrowUp: () => moveActiveSidebarItem(-1),
+    ArrowRight: () => setActiveSidebarDirectoryCollapsed(false),
+    ArrowLeft: () => setActiveSidebarDirectoryCollapsed(true),
+    Home: () => moveActiveSidebarToEdge("top"),
+    End: () => moveActiveSidebarToEdge("bottom"),
+  };
+
+  function onTreeRowKeydown(event: KeyboardEvent) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+      return;
+    const row = event.target;
+    const move = TREE_ROW_KEYS[event.key];
+    if (!move || !SIDEBAR_ON_FILE_CLICK || !(row instanceof HTMLElement))
+      return;
+    if (!row.matches("li[data-path], li[data-dirpath]")) return;
+    event.preventDefault();
+    // Tab で入った先頭の行 (選んでいる行を描いていなかった) から動かす。
+    if (!row.classList.contains("active")) markActive(treeRowPath(row));
+    move();
   }
 
   function scrollVirtualSidebarPathIntoView(path: string) {
@@ -1283,6 +1368,7 @@ export function createSidebar(deps: SidebarDeps) {
     buildSidebarTreeRows(root);
     ul.classList.add("tree-virtual");
     ul.style.position = "relative";
+    ul.addEventListener("keydown", onTreeRowKeydown);
     computeVirtualSidebarVisibleRows();
     renderVirtualSidebarWindow();
     document

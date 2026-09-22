@@ -17335,6 +17335,25 @@ button.brand[aria-expanded="true"] {
   outline: none;
   box-shadow: var(--focus-ring);
 }
+/* 差分の横に送る箱 (展開のボタンの無い箱は Tab で止まり、←→ で送れる)。箱の外の
+   輪は親の overflow で切れ、箱の中の輪は行番号の列 (sticky・z-index 2) の下に
+   隠れるので、送らない親の面に行番号より上の層で内側の輪を重ねる。 */
+.d2h-code-wrapper:focus-visible {
+  outline: none;
+}
+.d2h-file-diff:has(> .d2h-code-wrapper:focus-visible),
+.d2h-file-side-diff:has(> .d2h-code-wrapper:focus-visible) {
+  position: relative;
+}
+.d2h-file-diff:has(> .d2h-code-wrapper:focus-visible)::after,
+.d2h-file-side-diff:has(> .d2h-code-wrapper:focus-visible)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  box-shadow: inset var(--focus-ring);
+  pointer-events: none;
+}
 .view-strip-item .goi-icon {
   display: inline-flex;
 }
@@ -17767,6 +17786,16 @@ body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
   background: var(--color-select);
   box-shadow: var(--glow-select);
   color: var(--color-text);
+}
+/* キーで届いた木の行 (Tab の止まり場所は 1 行)。行は列の端から端までで外の輪は
+   切れるので、内側に描く。選んでいる行の光は残す。 */
+#filelist li:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
+}
+#filelist li.active:focus-visible,
+#filelist.tree .tree-file.active:focus-visible {
+  box-shadow: inset var(--focus-ring), var(--glow-select);
 }
 /* 閲覧済みの印は左の線ではなく、行末のチェック (既存) だけにする。 */
 #filelist li.viewed,

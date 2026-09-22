@@ -233,6 +233,29 @@ describe("search palette query memory", () => {
   });
 });
 
+// 入力欄は placeholder だけでは名前にならない (入力すると消える)。
+describe("search palette input name", () => {
+  test.each<["file" | "grep", boolean, string]>([
+    ["file", false, "Search files"],
+    ["grep", false, "Search text"],
+    ["file", true, "Search projects, agents, sessions, files, actions…"],
+  ])("%s mode (commands: %s) is named %s", async (mode, commands, name) => {
+    const { palette } = await setup({
+      files: ["src/sample.ts"],
+      ...(commands ? { commands: [] } : {}),
+    });
+    try {
+      palette.openSearchPalette(mode);
+      expect({
+        label: input().getAttribute("aria-label"),
+        placeholder: input().placeholder,
+      }).toEqual({ label: name, placeholder: name });
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+});
+
 describe("repository palette recent files", () => {
   test("an empty query lists recently opened files, newest first, skipping files that no longer exist", async () => {
     const { palette } = await setup({
