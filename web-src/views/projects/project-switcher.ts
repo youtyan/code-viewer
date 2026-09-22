@@ -229,7 +229,7 @@ export function mountProjectSwitcher(
         ),
       );
     }
-    if (overview && !noneRegistered) {
+    if (overview) {
       actions.appendChild(
         action(t.switcherAddPath, () => {
           close();

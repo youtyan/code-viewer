@@ -274,7 +274,7 @@ export function gitFailureMessage(
   fallback: string,
 ): string {
   const message = isCommandNotFoundResult("git", res)
-    ? commandNotFoundDetail("git")
+    ? `${commandNotFoundDetail("git")}. Install git, add its directory to PATH, or pass --bin git=/absolute/path.`
     : res.stderr?.trim() || fallback;
   console.error(`[code-viewer] ${fallback} (git exit ${res.code}): ${message}`);
   return message;
@@ -943,7 +943,10 @@ export async function worktreeCommitDatesAsync(
   // An unborn HEAD has no history; other failures must not look like that state.
   if (head.code === 1 && !head.stderr.trim()) return dates;
   if (head.code !== 0)
-    throw errorWithCause("Cannot resolve HEAD for file commit dates", head);
+    throw errorWithCause(
+      `Cannot resolve HEAD for file commit dates: ${gitFailureMessage(head, "git rev-parse failed")}`,
+      head,
+    );
   const sha = head.stdout.trim();
   const pending = paths.values();
   // Pin every lookup to one commit and bound the process count for wide directories.

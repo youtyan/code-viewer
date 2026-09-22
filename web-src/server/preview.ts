@@ -298,7 +298,7 @@ Usage:
   code-viewer help
 
 AI-agent index (start here):  code-viewer agent-help
-Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search|file|skill|doctor> agent-help
+Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search|file|terminal|skill|doctor> agent-help
 
 One code-viewer serves every project on one port. Running it again in another
 repository adds that repository to the running one and prints its URL.
@@ -306,6 +306,12 @@ Each project runs in its own process behind that port; a process nobody has
 used for --idle-stop seconds (default 600, 0 = never) is stopped and started
 again on the next request. --standalone runs a separate server for this
 repository only.
+
+Getting started: run code-viewer inside a git repository and open the printed
+URL; the repository is listed under Projects in the left sidebar. New agent
+there starts claude or codex in tmux (tmux must be installed). When something
+is missing (git, tmux, an older code-viewer still running), run
+code-viewer doctor.
 
 Examples:
   code-viewer --open

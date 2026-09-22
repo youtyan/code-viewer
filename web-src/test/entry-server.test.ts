@@ -8,6 +8,7 @@
 // (実データと利用者の tmux に触らない。agents.md 9・10)。
 import { type ChildProcess, spawn } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -160,10 +161,11 @@ function startEntry(
 function runCli(
   box: Sandbox,
   cwd: string,
+  args: string[] = [],
 ): Promise<{ status: number | null; stdout: string; stderr: string }> {
   // spawnSync だとこのプロセスのイベントループが止まり、テストの中の偽の
   // サーバが応答できない。
-  const proc = spawn(process.execPath, [CLI_BUNDLE], {
+  const proc = spawn(process.execPath, [CLI_BUNDLE, ...args], {
     cwd,
     env: box.env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -591,5 +593,24 @@ describe("`code-viewer` in another folder", () => {
     expect(result.stderr).toContain(
       `another version (0.0.1-sample) is running at http://127.0.0.1:${port}/ (pid ${process.pid})`,
     );
+    expect(result.stderr).toContain(`kill ${process.pid}`);
+    // doctor も同じ入口を見つけ、止め方を hint に出す。
+    const doctor = await runCli(box, root, ["doctor", "--json"]);
+    const entry = JSON.parse(doctor.stdout)
+      .groups.flatMap((group: { rows: unknown[] }) => group.rows)
+      .find((row: { id: string }) => row.id === "server.entry");
+    expect(entry).toMatchObject({ status: "warn" });
+    expect(entry.hint).toContain(`kill ${process.pid}`);
+  });
+
+  test("starts outside git, says why the folder is not registered and does not register it", async () => {
+    const box = sandbox();
+    const folder = join(box.dir, "plain-folder");
+    mkdirSync(folder);
+    const entry = await startEntry(box, folder);
+    expect(entry.output()).toContain(
+      `${realpathSync(folder)} is not a git repository, so it is not added to the projects`,
+    );
+    expect(existsSync(join(box.stateDir, "projects.json"))).toBe(false);
   });
 });

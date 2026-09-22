@@ -1756,6 +1756,7 @@ export async function checkServer(
           ? `http://localhost:${listenPort}/`
           : "port not yet bound",
     },
+    await entryServerRow(),
   ];
   const root = serverWorktreeRoot(cwd);
   const listed = await worktreeListResultAsync(root, {
@@ -1809,6 +1810,43 @@ export async function checkServer(
       : {}),
   });
   return { id: "server", title: "Server", rows };
+}
+
+/**
+ * 動いている入口のサーバ (`code-viewer` が 1 つだけ起こす、全プロジェクトの
+ * 窓口)。版の違う入口が居ると新しい `code-viewer` は起動しないので、その
+ * 原因と止め方をここにも出す。判定は起動と同じ findRunningEntry を使う。
+ */
+async function entryServerRow(): Promise<DoctorRow> {
+  const { findRunningEntry } = await import("./entry/server");
+  const running = await findRunningEntry();
+  const base = { id: "server.entry", title: "Entry server" } as const;
+  if (running.status === "none") {
+    return {
+      ...base,
+      status: "ok",
+      detail: "not running (`code-viewer` starts it)",
+    };
+  }
+  if (running.status === "broken") {
+    return {
+      ...base,
+      status: "error",
+      detail: running.detail,
+      hint: "`code-viewer` does not start until this is resolved. The record is entry.json in code-viewer's state directory.",
+    };
+  }
+  const version = findCodeViewerPackageJson().version;
+  const detail = `${running.url} (pid ${running.pid}, v${running.version})`;
+  if (version && running.version !== version) {
+    return {
+      ...base,
+      status: "warn",
+      detail,
+      hint: `This is v${version}; \`code-viewer\` does not start while an entry server of another version runs. Stop it (Ctrl+C where it was started, or kill ${running.pid}), then run code-viewer again.`,
+    };
+  }
+  return { ...base, status: "ok", detail };
 }
 
 export async function buildDoctorReport(

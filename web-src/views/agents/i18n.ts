@@ -461,13 +461,13 @@ const EN: AgentsText = {
   toggleProject: "Collapse or expand this project",
   emptyNoTmuxTitle: "tmux is not running",
   emptyNoTmuxBody:
-    "Agents are listed here when they run inside tmux. Start one with “tmux new -s work”, then launch claude or codex in it.",
+    "Agents are listed here when they run inside tmux. New agent starts claude or codex in a new tmux session for you, or run them in tmux yourself (“tmux new -s work”).",
   emptyNotInstalledTitle: "tmux was not found",
   emptyNotInstalledBody:
     "This list reads agents from tmux. Install tmux (or pass --bin tmux=<path>) and run your agents inside it.",
   emptyNoAgentsTitle: "No agents are running",
   emptyNoAgentsBody:
-    "Launch claude or codex in a tmux pane and it appears here, grouped by project.",
+    "Start one with New agent, or launch claude or codex in a tmux pane; it appears here, grouped by project.",
   emptyNoAgentsAction: "Show all panes",
   emptyNoMatchTitle: (filter) => `No agents are “${filter}”`,
   emptyNoMatchBody: "Agents in other states are hidden by the filter.",
@@ -586,13 +586,13 @@ const JA: AgentsText = {
   toggleProject: "このプロジェクトを畳む / 開く",
   emptyNoTmuxTitle: "tmux が動いていません",
   emptyNoTmuxBody:
-    "エージェントは tmux の中で動いているとここに並びます。「tmux new -s work」で tmux を起動し、その中で claude や codex を起動してください。",
+    "エージェントは tmux の中で動いているとここに並びます。「新しいエージェント」で claude や codex を新しい tmux のセッションに起動できます (自分で「tmux new -s work」から起動してもかまいません)。",
   emptyNotInstalledTitle: "tmux が見つかりません",
   emptyNotInstalledBody:
     "この一覧は tmux からエージェントを読み取ります。tmux をインストールし (場所が違うなら --bin tmux=<パス>)、その中でエージェントを動かしてください。",
   emptyNoAgentsTitle: "エージェントが動いていません",
   emptyNoAgentsBody:
-    "tmux のペインで claude や codex を起動すると、プロジェクトごとにここへ並びます。",
+    "「新しいエージェント」で起動するか、tmux のペインで claude や codex を起動すると、プロジェクトごとにここへ並びます。",
   emptyNoAgentsAction: "すべてのペインを表示",
   emptyNoMatchTitle: (filter) => `「${filter}」のエージェントはありません`,
   emptyNoMatchBody: "ほかの状態のエージェントは絞り込みで隠れています。",

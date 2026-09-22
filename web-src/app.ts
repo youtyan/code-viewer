@@ -7629,6 +7629,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   AGENT_MONITOR.subscribe(() => {
+    // 開いたときのペインが一覧から消えたら、その対応を捨てる。ペイン ID は
+    // tmux サーバの中でしか一意でなく、tmux が起き直すと同じ `%0` が別の
+    // ペインに付く (ログインのウィンドウを閉じた後の最初の起動がそう)。
+    // 残すと、新しいエージェントを閉じ終わった古いシェルのタブで開いてしまう。
+    const overview = AGENT_MONITOR.snapshot().overview;
+    if (overview && !overview.tmux.error) {
+      const live = new Set(overview.panes.map((pane) => pane.id));
+      for (const [shell, pane] of TAB_SHELL_PANES) {
+        if (!live.has(pane)) TAB_SHELL_PANES.delete(shell);
+      }
+    }
     // ターミナルのタブの名前 (エージェントの状態) を当て直す。
     MAIN_TABS.localize();
   });

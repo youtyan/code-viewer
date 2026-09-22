@@ -404,9 +404,11 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     root.setAttribute("aria-label", current.sidebar.ariaLabel);
     root.replaceChildren();
 
+    // 登録の失敗は理由を読めるように全文を出す (title だけだと気付けない)。
     const general = deps.projects.activity("");
     if (general?.kind === "failed") {
-      root.appendChild(note("nav-note-error", general.title, general.detail));
+      root.appendChild(note("nav-note-error", general.title));
+      root.appendChild(note("nav-note-error", general.detail));
     }
     if (!overview) {
       root.appendChild(
@@ -445,12 +447,24 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         "click",
         () => void deps.projects.registerCurrent(),
       );
+      // いま見ている場所がリポジトリでなければ上の登録は断られるので、
+      // パスを入れて登録する道も最初から出す。
+      const byPath = el(
+        "button",
+        "nav-note nav-note-link",
+        current.projects.switcherAddPath,
+      );
+      byPath.type = "button";
+      byPath.addEventListener(
+        "click",
+        () => void deps.projects.registerByPath(),
+      );
       empty.append(
         el("strong", "nav-empty-title", current.sidebar.noProjectsTitle),
         el("span", "nav-empty-body", current.sidebar.noProjectsBody),
         register,
       );
-      root.appendChild(empty);
+      root.append(empty, byPath);
     }
     if (detected.length > 0) {
       const section = el("div", "nav-detected");
@@ -474,12 +488,27 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       (overview.registry.error ? 1 : 0) +
       (overview.tmux.error ? 1 : 0) +
       overview.errors.length;
+    // 狭い列なので 1 行だけ。次に何をするかは全体ボードと同じ文を title に。
     if (!overview.tmux.available) {
-      root.appendChild(note("nav-note-muted", current.sidebar.notInstalled));
+      root.appendChild(
+        note(
+          "nav-note-muted",
+          current.sidebar.notInstalled,
+          current.emptyNotInstalledBody,
+        ),
+      );
     } else if (!overview.tmux.running) {
-      root.appendChild(note("nav-note-muted", current.sidebar.noTmux));
+      root.appendChild(
+        note("nav-note-muted", current.sidebar.noTmux, current.emptyNoTmuxBody),
+      );
     } else if (panes.length === 0) {
-      root.appendChild(note("nav-note-muted", current.sidebar.noAgents));
+      root.appendChild(
+        note(
+          "nav-note-muted",
+          current.sidebar.noAgents,
+          current.emptyNoAgentsBody,
+        ),
+      );
     }
     if (problems > 0) {
       // 中身の全文は全体ボードの「問題」の欄にある。ここは入口だけ。

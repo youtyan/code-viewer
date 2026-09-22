@@ -117,7 +117,10 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
     const t = text();
     const box = el("div", "agents-account-usage");
     const state = account.login.state;
-    if (state === "logged-out") {
+    if (
+      state === "logged-out" ||
+      (state === "no-config-dir" && account.builtin)
+    ) {
       // 未ログインには値を作らない (0% や空のバーで代用しない)。
       box.appendChild(el("span", "agents-account-status", t.login[state]));
       const login = el(

@@ -70,6 +70,8 @@ export type AccountsText = {
   registryError: (path: string) => string;
   pathTitle: (path: string) => string;
   noConfigDir: (path: string) => string;
+  /** 既定のアカウントの設定ディレクトリがまだ無い (初めて使う人。問題ではない)。 */
+  defaultNotSetUp: (path: string) => string;
   add: string;
   /** 表示名の変更 (設定の行のボタン・帯の ⋯ のメニュー)。 */
   rename: string;
@@ -187,6 +189,8 @@ export type AccountsText = {
   launchStarted: (session: string) => string;
   launchRememberFailed: string;
   launchNeedsLogin: string;
+  launchNotSetUp: string;
+  launchLoginUnknown: (detail: string) => string;
   launchNoProjects: string;
   currentServerProject: (name: string) => string;
 };
@@ -302,6 +306,8 @@ export const ACCOUNTS_EN: AccountsText = {
     `The account registry ${path} cannot be read, so it is not changed. Only the default accounts are listed until it is fixed:`,
   pathTitle: (path) => path,
   noConfigDir: (path) => `The settings directory does not exist: ${path}`,
+  defaultNotSetUp: (path) =>
+    `Not used yet: ${path} is created when you sign in here or start the agent for the first time.`,
   add: "Add account…",
   rename: "Rename",
   renameTitle: (name) => `Change the display name of ${name}`,
@@ -459,6 +465,9 @@ export const ACCOUNTS_EN: AccountsText = {
   launchRememberFailed: "Started, but the choice could not be remembered:",
   launchNeedsLogin:
     "This account is not signed in. The agent will ask you to sign in.",
+  launchNotSetUp:
+    "This account has not been used yet (no settings directory). The agent sets it up and asks you to sign in.",
+  launchLoginUnknown: (detail) => `Sign-in could not be checked: ${detail}`,
   launchNoProjects: "No project to choose.",
   currentServerProject: (name) => `${name} (this server)`,
 };
@@ -557,6 +566,8 @@ export const ACCOUNTS_JA: AccountsText = {
     `アカウントの登録簿 ${path} を読めないため、書き換えません。直すまでは既定のアカウントだけを表示します:`,
   pathTitle: (path) => path,
   noConfigDir: (path) => `設定ディレクトリがありません: ${path}`,
+  defaultNotSetUp: (path) =>
+    `まだ使われていません: ${path} は、ここでログインするか、エージェントを初めて起動したときに作られます。`,
   add: "アカウントを追加…",
   rename: "名前を変更",
   renameTitle: (name) => `${name} の表示名を変える`,
@@ -715,6 +726,10 @@ export const ACCOUNTS_JA: AccountsText = {
   launchRememberFailed: "起動しましたが、選んだものを覚えられませんでした:",
   launchNeedsLogin:
     "このアカウントは未ログインです。起動したエージェントがログインを求めます。",
+  launchNotSetUp:
+    "このアカウントはまだ使われていません (設定ディレクトリがありません)。起動したエージェントが用意し、ログインを求めます。",
+  launchLoginUnknown: (detail) =>
+    `ログイン状態を確かめられませんでした: ${detail}`,
   launchNoProjects: "選べるプロジェクトがありません。",
   currentServerProject: (name) => `${name}（このサーバ）`,
 };

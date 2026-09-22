@@ -117,6 +117,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 text: "Run the command from inside a Git repository. The server prints a localhost URL; open it in your browser.",
               },
               {
+                kind: "paragraph",
+                text: "First run, in order: the repository you started in is registered and listed under Projects at the top of the left sidebar (a folder outside git is shown but not registered; Register by path… there adds a repository). Running code-viewer in another repository adds it to the same page. To run agents you need tmux: New agent at the bottom of the sidebar starts claude or codex in a new tmux session, and its state (Needs input, Working) shows in the sidebar, the bottom bar and the tab title; Enable notifications on the Agents screen turns on desktop notifications. Settings → Accounts signs in (the default ~/.claude and ~/.codex are created on first sign-in or start) and adds more accounts. When something does not work, code-viewer doctor lists what is missing and how to fix it.",
+              },
+              {
                 kind: "command",
                 title: "Run without installing",
                 command: "npx @youtyan/code-viewer",
@@ -988,6 +992,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "Git リポジトリの中でコマンドを実行します。サーバが localhost の URL を表示するので、それをブラウザで開きます。",
+              },
+              {
+                kind: "paragraph",
+                text: "初めて使うときの順番: 起動したリポジトリは登録され、左のサイドバーの上の「プロジェクト」に並びます (git の外のフォルダは表示だけで登録されません。そこの「パスを入力して登録…」でリポジトリを足せます)。別のリポジトリで code-viewer を実行すると、同じページに加わります。エージェントを動かすには tmux が要ります。サイドバーの下の「新しいエージェント」が claude や codex を新しい tmux のセッションに起動し、その状態 (入力待ち・作業中) がサイドバー・最下段・タブのタイトルに出ます。デスクトップ通知はエージェントの画面の「通知を有効にする」で入れます。設定 → アカウントでログインし (既定の ~/.claude・~/.codex は初めてのログインか起動で作られます)、アカウントを足せます。うまく動かないときは code-viewer doctor が、足りないものと直し方を出します。",
               },
               {
                 kind: "command",

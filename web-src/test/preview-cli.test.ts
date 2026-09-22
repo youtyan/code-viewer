@@ -1459,7 +1459,7 @@ describe("preview CLI", () => {
       /code-viewer query <sources\|schemas\|schema\|columns\|ddl\|exec\|list\|clear\|snapshot\|diff\|search\|redis\|elasticsearch\|s3>/,
     );
     expect(stdout).toMatch(
-      /code-viewer <status\|annotate\|journal\|query\|search\|file\|skill\|doctor> agent-help/,
+      /code-viewer <status\|annotate\|journal\|query\|search\|file\|terminal\|skill\|doctor> agent-help/,
     );
     expect(stdout).toMatch(/code-viewer search code --term <text>/);
     expect(stdout).toMatch(/code-viewer search files --term <pattern>/);

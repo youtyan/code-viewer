@@ -47,7 +47,7 @@ export async function resolveProjectRoot(
   const resolved = await projectRootResultAsync(path, cwd);
   if (resolved.kind === "outside") {
     throw new ProjectRegistryError(
-      `${path} is not inside a git repository`,
+      `${path} is not inside a git repository. Register a repository (or a folder inside one), or run code-viewer inside a repository.`,
       "invalid",
     );
   }

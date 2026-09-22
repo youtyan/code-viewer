@@ -18,6 +18,7 @@ import {
   tmuxSessionName,
 } from "../../core/agent-accounts";
 import { hasControlCharacter } from "../../core/control-chars";
+import { commandNotFoundDetail } from "../command-resolver";
 import { runTmux } from "../tmux/command";
 import { AccountError } from "./registry";
 
@@ -38,7 +39,10 @@ async function sessionExists(session: string, cwd: string): Promise<boolean> {
   if (result.status === "no-server" || result.status === "no-target")
     return false;
   if (result.status === "missing") {
-    throw new AccountError("tmux is not installed", "failed");
+    throw new AccountError(
+      `${commandNotFoundDetail("tmux")}. Agents run in tmux: install tmux, or start code-viewer with --bin tmux=/absolute/path.`,
+      "failed",
+    );
   }
   // has-session はセッションが無いとき exit 1 を返し、stderr の文言は版で
   // 違う (can't find session / session not found)。

@@ -16927,6 +16927,9 @@ html[data-nav-collapsed] #app-nav {
   font: inherit;
   font-size: var(--ui-font-sm);
   text-align: left;
+  /* 失敗の理由の全文 (改行・長いパス) を折り返して出す。 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .nav-note-error {
   color: var(--color-failed);

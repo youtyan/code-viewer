@@ -184,7 +184,11 @@ export function createAccountsSettings(
     );
     path.title = account.configDir;
     const actions = el("span", "agent-accounts-actions");
-    if (account.login.state !== "logged-in" && account.exists) {
+    // 既定のアカウントは設定ディレクトリが無くてもログインで作られる。
+    if (
+      account.login.state !== "logged-in" &&
+      (account.exists || account.builtin)
+    ) {
       const login = el("button", "gdp-btn gdp-btn-sm", t.loginButton);
       login.type = "button";
       login.title = t.loginTitle(accountDisplayName(account, t));
@@ -234,11 +238,17 @@ export function createAccountsSettings(
     );
     if (!account.exists && account.login.state === "no-config-dir") {
       box.appendChild(
-        el(
-          "p",
-          "agent-hooks-detail agent-hooks-detail-problem",
-          t.noConfigDir(account.configDir),
-        ),
+        account.builtin
+          ? el(
+              "p",
+              "agent-hooks-detail",
+              t.defaultNotSetUp(abbreviateHome(account.configDir, home)),
+            )
+          : el(
+              "p",
+              "agent-hooks-detail agent-hooks-detail-problem",
+              t.noConfigDir(account.configDir),
+            ),
       );
     }
     const result = results.get(account.id);

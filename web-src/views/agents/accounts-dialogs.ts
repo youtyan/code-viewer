@@ -198,6 +198,23 @@ export function resultLine(result: { ok: boolean; text: string }): HTMLElement {
   return out;
 }
 
+/** 起動の画面で、選んだアカウントのログインについて先に言っておくこと。 */
+function launchLoginHint(
+  account: AccountStatus | undefined,
+  t: AccountsText,
+): string {
+  switch (account?.login.state) {
+    case "logged-out":
+      return t.launchNeedsLogin;
+    case "no-config-dir":
+      return t.launchNotSetUp;
+    case "unknown":
+      return t.launchLoginUnknown(account.login.detail);
+    default:
+      return "";
+  }
+}
+
 export function accountDisplayName(
   account: Pick<AccountEntry, "builtin" | "name">,
   text: AccountsText,
@@ -699,8 +716,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       );
       copyResult.textContent = "";
       syncChoices();
-      loginHint.textContent =
-        account?.login.state === "logged-out" ? t.launchNeedsLogin : "";
+      loginHint.textContent = launchLoginHint(account, t);
       loginHint.hidden = loginHint.textContent === "";
     }
 

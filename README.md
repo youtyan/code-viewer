@@ -257,6 +257,25 @@ Requires Node.js 20 or newer. Development uses
   AI agents can call status, file, search, and datastore tools directly
   over JSON-RPC instead of spawning CLI subprocesses.
 
+## Getting started
+
+1. From inside a git repository, run `npx @youtyan/code-viewer --open`. It
+   prints a local URL (`http://127.0.0.1:<port>/p/<key>/`) and opens it. The
+   repository is registered and listed under **Projects** at the top of the
+   left sidebar. A folder outside git is shown but not registered; use
+   **Register by path…** in the sidebar to add a repository.
+2. To add another repository, run `code-viewer` inside it: the running
+   code-viewer adds it and prints its URL instead of starting a second server.
+3. Agents need [tmux](https://github.com/tmux/tmux). **New agent** at the
+   bottom of the sidebar starts claude or codex in a new tmux session (tmux is
+   started for you). Its state (Needs input, Working) shows in the sidebar, the
+   bottom bar and the tab title; **Enable notifications** on the Agents screen
+   turns on desktop notifications.
+4. **Settings → Accounts** signs in (the default `~/.claude` and `~/.codex`
+   are created on the first sign-in or start) and adds more accounts.
+5. When something does not work, `code-viewer doctor` lists what is missing
+   (git, tmux, an old code-viewer still running, …) and how to fix it.
+
 ## Usage
 
 From inside a git repository, run it without installing:

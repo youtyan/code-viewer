@@ -105,7 +105,11 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-/** 起動したディレクトリ。git の中なら作業ツリーの根 (preview.ts と同じ決め方)。 */
+/**
+ * 起動したディレクトリ。git の中なら作業ツリーの根 (preview.ts と同じ決め方)。
+ * git の外・git を呼べないときは、そのまま開くが登録はしないので、原因と
+ * 次の一手を 1 行で出す (画面の「登録」が断られる理由をここで先に言う)。
+ */
 function resolveLaunchRoot(cwd: string | null): string {
   let dir: string;
   try {
@@ -118,6 +122,16 @@ function resolveLaunchRoot(cwd: string | null): string {
     );
   }
   const result = git.repoRootResult(dir);
+  if (result.kind === "outside") {
+    console.warn(
+      `code-viewer: ${dir} is not a git repository, so it is not added to the projects (its files are still shown). Run code-viewer inside a repository, or use "Register by path…" in the left sidebar.`,
+    );
+  }
+  if (result.kind === "error") {
+    console.warn(
+      `code-viewer: git could not be run in ${dir}: ${result.error}\nDiffs, history and projects need git. Install git (or fix the error above), or pass --bin git=/absolute/path. "code-viewer doctor" shows what is missing.`,
+    );
+  }
   if (result.kind !== "root") return dir;
   let root: string;
   try {
@@ -241,7 +255,7 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     }
     if (decision.kind === "other-version") {
       fail(
-        `a code-viewer entry server of another version (${decision.version || "unknown"}) is running at ${decision.url} (pid ${decision.pid}).\nStop it, then start code-viewer again. This one (${VERSION}) was not started.`,
+        `a code-viewer entry server of another version (${decision.version || "unknown"}) is running at ${decision.url} (pid ${decision.pid}).\nStop it (Ctrl+C where it was started, or kill ${decision.pid}), then start code-viewer again. This one (${VERSION}) was not started.`,
       );
     }
     if (decision.kind === "delegate") {
@@ -306,9 +320,7 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     projects,
     backends,
     lastProject: createLastProject(launchRoot),
-    paneListOptions: {
-      worktreePaths: (root) => git.worktreePathsAsync(root),
-    },
+    paneListOptions: { worktreePaths: worktreePathsInsideGit() },
   };
   try {
     await registerLaunchRoot(launchRoot);
@@ -332,8 +344,15 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     });
   } catch (error) {
     lock.release();
+    const inUse =
+      error instanceof Error &&
+      (error as NodeJS.ErrnoException).code === "EADDRINUSE";
     fail(
-      `code-viewer could not start the entry server on port ${args.port}:\n${formatErrorDetail(error)}`,
+      `code-viewer could not start the entry server on port ${args.port}:\n${formatErrorDetail(error)}${
+        inUse
+          ? `\nPort ${args.port} is used by another program. Pass another --port, or leave --port out to use a free port.`
+          : ""
+      }`,
     );
   }
   const url = `http://127.0.0.1:${server.port}/`;
@@ -431,6 +450,31 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
   console.log(`GDP_LISTEN_URL=${url}`);
   console.log(`code-viewer entry server: ${openUrl}`);
   if (args.open) await openUrlInOs(openUrl, launchRoot);
+}
+
+/**
+ * ペインを「このリポジトリのもの」に絞る作業ツリーの一覧。git の外・git を
+ * 呼べない根では空 (絞り込み無し) にし、それを根ごとに最初の 1 回で覚える。
+ * 覚えないと巡回のたびに失敗する git を呼び、同じ失敗を端末へ出し続ける
+ * (preview.ts の tmuxPaneListOptions と同じ扱い)。git を呼べない理由は
+ * 根ごとに 1 度だけ出す。
+ */
+function worktreePathsInsideGit(): (root: string) => Promise<string[]> {
+  const insideGit = new Map<string, boolean>();
+  return (root) => {
+    let inside = insideGit.get(root);
+    if (inside === undefined) {
+      const result = git.repoRootResult(root);
+      inside = result.kind === "root";
+      insideGit.set(root, inside);
+      if (result.kind === "error") {
+        console.error(
+          `[code-viewer] entry: not filtering tmux panes by the worktrees of ${root}: ${result.error}`,
+        );
+      }
+    }
+    return inside ? git.worktreePathsAsync(root) : Promise.resolve([]);
+  };
 }
 
 /** 起動したディレクトリを登録簿に載せる (git の中なら。載っていればそのまま)。 */
