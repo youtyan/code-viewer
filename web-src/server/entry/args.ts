@@ -17,8 +17,16 @@ export function runsStandaloneServer(argv: readonly string[]): boolean {
   );
 }
 
+/**
+ * 使われていない裏のプロセスを止めるまでの既定 (秒)。`--idle-stop <秒>` で
+ * 変える (0 は止めない)。
+ */
+export const DEFAULT_IDLE_STOP_SECONDS = 600;
+
 export type EntryArgs = {
   port: number;
+  /** 使われていない裏を止めるまでの秒数。0 は止めない。 */
+  idleStopSeconds: number;
   cwd: string | null;
   open: boolean;
   /** `--bin <name>=<path>` の値 (入口の tmux・git と、起動したディレクトリの裏に効く)。 */
@@ -34,6 +42,7 @@ export type EntryArgsResult =
 export function parseEntryArgs(argv: readonly string[]): EntryArgsResult {
   const args: EntryArgs = {
     port: 0,
+    idleStopSeconds: DEFAULT_IDLE_STOP_SECONDS,
     cwd: null,
     open: false,
     bins: [],
@@ -47,6 +56,16 @@ export function parseEntryArgs(argv: readonly string[]): EntryArgsResult {
         return { ok: false, error: "--port requires a TCP port number" };
       }
       args.port = parsed;
+    } else if (arg === "--idle-stop") {
+      const raw = argv[++i];
+      const parsed = Number(raw);
+      if (!raw || !Number.isFinite(parsed) || parsed < 0) {
+        return {
+          ok: false,
+          error: "--idle-stop requires a number of seconds (0 = never stop)",
+        };
+      }
+      args.idleStopSeconds = parsed;
     } else if (arg === "--cwd") {
       const next = argv[++i];
       if (!next) return { ok: false, error: "--cwd requires a value" };

@@ -600,3 +600,23 @@ export function isEntryBackendFailure(
     typeof project.root === "string"
   );
 }
+
+/**
+ * 入口のサーバから見た、プロジェクトの裏のプロセスの状態 (apiUrl の entryBackend)。
+ * - absent: 入口がまだ扱っていない (次の要求で起こす)
+ * - starting: 起こしている最中 (要求は起き終わるのを待つ)
+ * - running: 取り次げる
+ * - idle-stopped: 使われていないので入口が止めた (次の要求で黙って起こす)
+ * - unreachable: 落ちた (要求は 502。画面の「再起動」で戻す)
+ */
+export type EntryBackendState =
+  | "absent"
+  | "starting"
+  | "running"
+  | "idle-stopped"
+  | "unreachable";
+
+export type EntryBackendStateResponse = {
+  state: EntryBackendState;
+  project: { key: string; root: string };
+};

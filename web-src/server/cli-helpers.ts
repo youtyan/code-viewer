@@ -5,6 +5,7 @@
 // していたため集約。
 
 import { realpathSync } from "node:fs";
+import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import {
   type ExternalCommandName,
   type ExternalCommandOverride,
@@ -171,22 +172,51 @@ export function resolveRepoRoot(cwdOption: string | undefined): string {
   process.exit(1);
 }
 
-// 指定 URL に対して `<healthPath>` を 1.5s タイムアウトで HEAD-like fetch し、
-// 2xx を返すかどうかで生存判定する。
-// caller ごとに `healthPath` が違うので (例: /_annotations vs /_db/files)、
-// 引数で受ける。
-export async function serverReachable(
+export type ServerProbe =
+  | { status: "ok" }
+  /** 繋がらなかった (接続拒否・時間切れ)。理由は error.cause。 */
+  | { status: "unreachable"; error: Error }
+  /** 繋がったが 2xx でなかった。状態と本文は error.message。 */
+  | { status: "failed"; error: Error };
+
+// 指定 URL に対して `<healthPath>` を 1.5s タイムアウトで GET し、2xx を
+// 返すかどうかで生存判定する。「繋がらない」と「繋がったが失敗」を分け、
+// どちらも理由を残す。caller ごとに `healthPath` が違うので
+// (例: /_annotations vs /_db/files)、引数で受ける。
+export async function probeServer(
   serverUrl: string,
   healthPath: string,
-): Promise<boolean> {
+): Promise<ServerProbe> {
+  const url = `${serverUrl}${healthPath}`;
+  let res: Response;
   try {
-    const res = await fetch(`${serverUrl}${healthPath}`, {
-      signal: AbortSignal.timeout(1500),
-    });
-    return res.ok;
-  } catch {
-    return false;
+    res = await fetch(url, { signal: AbortSignal.timeout(1500) });
+  } catch (error) {
+    return {
+      status: "unreachable",
+      error: errorWithCause(`GET ${url} failed`, error),
+    };
   }
+  if (res.ok) {
+    await res.body?.cancel();
+    return { status: "ok" };
+  }
+  let body: string;
+  try {
+    body = await res.text();
+  } catch (error) {
+    return {
+      status: "failed",
+      error: errorWithCause(
+        `GET ${url} returned ${res.status} and its body could not be read`,
+        error,
+      ),
+    };
+  }
+  return {
+    status: "failed",
+    error: new Error(`GET ${url} returned ${res.status}: ${body}`),
+  };
 }
 
 // `--server` override があればそれを使う。無ければ server-registry から
@@ -199,19 +229,26 @@ export async function ensureServerUrl(
 ): Promise<string> {
   if (override) {
     const url = override.replace(/\/+$/, "");
-    if (await serverReachable(url, healthPath)) return url;
-    console.error(`could not reach the code-viewer server at ${url}.`);
+    const probe = await probeServer(url, healthPath);
+    if (probe.status === "ok") return url;
+    console.error(
+      `could not reach the code-viewer server at ${url}.\n${formatErrorDetail(probe.error)}`,
+    );
     process.exit(1);
   }
   const registered = readServerRegistry(root);
+  let registeredFailure = "";
   if (registered) {
     const url = registered.url.replace(/\/+$/, "");
-    if (await serverReachable(url, healthPath)) return url;
+    const probe = await probeServer(url, healthPath);
+    if (probe.status === "ok") return url;
+    registeredFailure = `\nThe registered server at ${url} (pid ${registered.pid}) ${probe.status === "unreachable" ? "could not be reached" : "answered with an error"}:\n${formatErrorDetail(probe.error)}`;
   }
   console.error(
     "no running code-viewer server for this repository.\n" +
       `Start one manually (from ${root}):\n` +
-      "  code-viewer",
+      "  code-viewer" +
+      registeredFailure,
   );
   process.exit(1);
 }
@@ -246,8 +283,10 @@ export async function requestJson(
           : {},
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-  } catch {
-    console.error(`could not reach the code-viewer server at ${serverUrl}.`);
+  } catch (error) {
+    console.error(
+      `could not reach the code-viewer server at ${serverUrl}.\n${formatErrorDetail(errorWithCause(`${action}: ${method} ${url} failed`, error))}`,
+    );
     process.exit(1);
   }
   const ctype = (res.headers.get("content-type") || "").toLowerCase();

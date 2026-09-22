@@ -3812,6 +3812,26 @@ body.gdp-diff-page #diff::after {
   animation: gdp-spin 0.7s linear infinite;
 }
 .empty.hidden { display: none; }
+/* 入口の下で、このプロジェクトの裏のプロセスが止まった・起動中のとき
+   (views/backend-state.ts)。中央の面 (上の行の下・左のサイドバーの右・
+   下のパネルの上) を空表示で覆い、各画面の取得の失敗を見せない。上の行
+   (#global-header) と下のパネル (#app-panel。ターミナルは入口が受ける) は
+   覆わないので、z-index はその 2 つ (60) より下、画面の上の行 (#topbar 50)
+   より上。 */
+.empty.backend-state {
+  position: fixed;
+  top: var(--global-header-h);
+  left: var(--chrome-left);
+  right: 0;
+  bottom: calc(var(--chrome-bottom) + var(--app-panel-visible-height));
+  z-index: 55;
+  margin: 0;
+  background: var(--bg);
+}
+.empty.backend-state[hidden] { display: none; }
+.backend-state .empty-icon.backend-state-spinning .octicon {
+  animation: gdp-spin 0.7s linear infinite;
+}
 
 /* ===== diff2html overrides ===== */
 

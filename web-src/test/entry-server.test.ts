@@ -2,7 +2,7 @@
 // `/p/<鍵>/` をプロジェクトの裏のプロセスへ取り次ぐ・落ちた裏は 502・起きない
 // 裏は 503・入口が居なくなったら裏も終わる・起動し直した入口は生きた裏を拾う・
 // 別のディレクトリの `code-viewer` は動いている入口に委ねる・版の違う入口は
-// 止めずに知らせる。
+// 止めずに知らせる・使われていない裏は止め、次の要求で黙って起こす。
 //
 // 状態ディレクトリ・サーバ登録簿・tmux のソケットはテストごとの一時ディレクトリ
 // (実データと利用者の tmux に触らない。agents.md 9・10)。
@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
+import { PROJECT_HEADER } from "../core/api-url";
 import { rootFileKey } from "../server/server-registry";
 import { runGit } from "./_git-fixture";
 
@@ -115,10 +116,16 @@ function repo(box: Sandbox, name: string): string {
 function startEntry(
   box: Sandbox,
   cwd: string,
-): Promise<{ proc: ChildProcess; url: string; openUrl: string }> {
+  extraArgs: string[] = [],
+): Promise<{
+  proc: ChildProcess;
+  url: string;
+  openUrl: string;
+  output: () => string;
+}> {
   const proc = spawn(
     process.execPath,
-    [CLI_BUNDLE, "--cwd", cwd, "--port", "0"],
+    [CLI_BUNDLE, "--cwd", cwd, "--port", "0", ...extraArgs],
     {
       env: box.env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -134,7 +141,12 @@ function startEntry(
       );
       const open = /code-viewer entry server: (\S+)/.exec(output);
       if (listen?.[1] && open?.[1])
-        resolve({ proc, url: listen[1], openUrl: open[1] });
+        resolve({
+          proc,
+          url: listen[1],
+          openUrl: open[1],
+          output: () => output,
+        });
     };
     proc.stdout?.on("data", onData);
     proc.stderr?.on("data", onData);
@@ -296,6 +308,62 @@ describe("the entry server", () => {
     expect(failed.status).toBe(503);
     expect(((await failed.json()) as { code: string }).code).toBe(
       "backend-start-failed",
+    );
+  });
+
+  test("a project process nobody uses is stopped after --idle-stop, not treated as stopped, and started again by the next request", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    const { url, output } = await startEntry(box, root, ["--idle-stop", "1"]);
+    const key = rootFileKey(root);
+    const backendState = async () =>
+      (
+        (await (
+          await fetch(`${url}_entry/backend`, {
+            headers: { [PROJECT_HEADER]: key },
+          })
+        ).json()) as { state: string }
+      ).state;
+
+    // SSE を購読している間は止めない。
+    const leave = new AbortController();
+    const events = await fetch(`${url}p/${key}/events`, {
+      signal: leave.signal,
+    });
+    await events.body?.getReader().read();
+    const first = backendPid(box, root);
+    expect(await backendState()).toBe("running");
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    expect(alive(first)).toBe(true);
+
+    leave.abort();
+    expect(await waitUntil(() => !alive(first), 10_000)).toBe(true);
+    expect(await backendState()).toBe("idle-stopped");
+    // 入口の出力はパイプ越しなので、状態が変わった後に届く。
+    const stoppedLine = `[code-viewer] entry: stopped the project process for ${root} (idle: no subscribers or streams for`;
+    await waitUntil(() => output().includes(stoppedLine), 5000);
+    expect(output()).toContain(stoppedLine);
+
+    const settings = await fetch(`${url}p/${key}/_settings`);
+    expect(settings.status).toBe(200);
+    expect(backendPid(box, root)).not.toBe(first);
+    expect(await backendState()).toBe("running");
+    const startedLine = `[code-viewer] entry: started the project process for ${root} again on request (stopped as idle`;
+    await waitUntil(() => output().includes(startedLine), 5000);
+    expect(output()).toContain(startedLine);
+  }, 30_000);
+
+  test("the state of the selected project's process needs a known project", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    const { url } = await startEntry(box, root);
+    const missing = await fetch(`${url}_entry/backend`);
+    expect(missing.status).toBe(400);
+    const known = await fetch(`${url}_entry/backend`, {
+      headers: { [PROJECT_HEADER]: rootFileKey(root) },
+    });
+    expect(["absent", "starting", "running"]).toContain(
+      ((await known.json()) as { state: string }).state,
     );
   });
 

@@ -6,7 +6,8 @@
 //   (`/_shell/*`)・作業ツリーの開く/止める (`/_worktree/open|stop`)。tmux の巡回と
 //   フックの受け口はここにしか無い
 // - 入口そのもの (`/_entry`: 本人確認・`/_entry/open`: このディレクトリを開く・
-//   `/_entry/restart`: 落ちた裏を起こし直す)
+//   `/_entry/restart`: 落ちた裏を起こし直す・`/_entry/backend`: 選んでいる
+//   プロジェクトの裏の状態)
 // 裏へ取り次ぐもの: `/p/<鍵>/…` の残り全部 (リポジトリ決め打ちの処理)。裏は
 // プロジェクトごとに起こす今のサーバ (`--backend`)。
 //
@@ -24,7 +25,10 @@ import { PROJECT_HEADER } from "../../core/api-url";
 import { hasControlCharacter } from "../../core/control-chars";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import type { ProjectOpenResponse } from "../../core/projects";
-import type { EntryBackendFailure } from "../../core/types";
+import type {
+  EntryBackendFailure,
+  EntryBackendStateResponse,
+} from "../../core/types";
 import {
   configureExternalCommands,
   parseExternalCommandOverride,
@@ -55,6 +59,7 @@ import {
 } from "../user-settings";
 import type { WorktreeOpenResult } from "../worktree/open";
 import {
+  DEFAULT_IDLE_STOP_SECONDS,
   decideEntryLaunch,
   type EntryArgs,
   parseEntryArgs,
@@ -259,6 +264,11 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
           `code-viewer is already running at ${decision.url}; --port ${args.port} was not used.`,
         );
       }
+      if (args.idleStopSeconds !== DEFAULT_IDLE_STOP_SECONDS) {
+        console.warn(
+          `code-viewer is already running at ${decision.url}; --idle-stop ${args.idleStopSeconds} was not used.`,
+        );
+      }
       if (args.backendArgs.length > 0 || args.bins.length > 0) {
         console.warn(
           `code-viewer is already running; the server options (${[...args.bins.map((b) => `--bin ${b}`), ...args.backendArgs].join(" ")}) apply only when that project's process starts.`,
@@ -291,9 +301,12 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     ...args.bins.flatMap((bin) => ["--bin", bin]),
     ...args.backendArgs,
   ];
+  const idleStopMs = args.idleStopSeconds * 1000;
   const backends = createEntryBackends(
-    defaultEntryBackendsDeps(process.pid, (root) =>
-      root === launchRoot ? launchArgs : [],
+    defaultEntryBackendsDeps(
+      process.pid,
+      (root) => (root === launchRoot ? launchArgs : []),
+      idleStopMs,
     ),
   );
   const context: EntryContext = {
@@ -418,6 +431,19 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
 
   const { startAgentActivityWatch } = await import("../terminal/activity");
   startAgentActivityWatch(launchRoot, context.paneListOptions);
+
+  // 使われていない裏を止める。見る間隔は止めるまでの時間の 1/10
+  // (1 秒〜1 分)。止めた・起こし直したことは backends がログに 1 行ずつ出す。
+  if (idleStopMs > 0) {
+    const everyMs = Math.min(60_000, Math.max(1000, idleStopMs / 10));
+    setInterval(() => {
+      backends.stopIdleBackends().catch((error: unknown) => {
+        console.error(
+          `[code-viewer] entry: stopping idle project processes failed:\n${formatErrorDetail(error)}`,
+        );
+      });
+    }, everyMs).unref();
+  }
 
   const openUrl = `${url}p/${launchKey}/`;
   console.log(`GDP_LISTEN_URL=${url}`);
@@ -611,6 +637,26 @@ async function handleEntryRestart(
   return backendFailure(503, key, found.root, result);
 }
 
+/** 選んでいるプロジェクト (PROJECT_HEADER) の裏の状態。画面の「起動中」に使う。 */
+async function handleEntryBackend(
+  ctx: EntryContext,
+  req: Request,
+): Promise<Response> {
+  const root = await selectedRoot(ctx, req);
+  if (!root) {
+    return errorJson(
+      400,
+      "invalid",
+      `${PROJECT_HEADER} must name a known project`,
+    );
+  }
+  const body: EntryBackendStateResponse = {
+    state: ctx.backends.state(root),
+    project: { key: ctx.projects.keyOf(root), root },
+  };
+  return json(body);
+}
+
 async function handleProjectPath(
   ctx: EntryContext,
   req: Request,
@@ -648,18 +694,21 @@ async function handleProjectPath(
     return staticFile(rest) ?? textError("not found", 404);
   }
   const events = rest === "/events";
-  const target = await ctx.backends.target(root, { events });
+  // 取り次ぐ間 (SSE なら購読の間、ダウンロードなら流し終わるまで) は数に
+  // 入れ、アイドル停止の対象にしない。
+  const { target, release } = await ctx.backends.acquire(root, { events });
   if (target.status === "failed") return backendFailure(503, key, root, target);
-  if (target.status === "stopped")
+  if (target.status === "unreachable")
     return backendFailure(502, key, root, target);
   const result = await proxyToBackend(req, target.url, rest, url.search, {
-    onBodyEnd: events ? ctx.backends.subscribe(root) : undefined,
+    onBodyEnd: release ?? undefined,
   });
   if (result.status === "ok") return result.response;
   if (req.signal.aborted) return textError("the request was cancelled", 499);
   if (isConnectionFailure(result.error)) {
     const down = ctx.backends.noteUnreachable(root, result.error);
-    if (down.status === "stopped") return backendFailure(502, key, root, down);
+    if (down.status === "unreachable")
+      return backendFailure(502, key, root, down);
   }
   console.error(
     `[code-viewer] entry: forwarding ${req.method} ${url.pathname} failed`,
@@ -694,6 +743,9 @@ async function handleEntryRequest(
       launchRoot: ctx.launchRoot,
       lastProjectError: ctx.lastProject.error(),
     });
+  }
+  if (path === "/_entry/backend" && req.method === "GET") {
+    return handleEntryBackend(ctx, req);
   }
   if (path === "/_entry/open" || path === "/_entry/restart") {
     if (req.method !== "POST") return textError("method not allowed", 405);
@@ -779,7 +831,8 @@ async function openProjectInEntry(
     );
   }
   let target = await ctx.backends.target(root);
-  if (target.status === "stopped") target = await ctx.backends.restart(root);
+  if (target.status === "unreachable")
+    target = await ctx.backends.restart(root);
   if (target.status !== "ok") {
     throw new ProjectRegistryError(
       [target.detail, target.log].filter(Boolean).join("\n"),
@@ -799,7 +852,8 @@ async function openWorktreeInEntry(
 ): Promise<WorktreeOpenResult> {
   ctx.projects.allow(path);
   let target = await ctx.backends.target(path);
-  if (target.status === "stopped") target = await ctx.backends.restart(path);
+  if (target.status === "unreachable")
+    target = await ctx.backends.restart(path);
   if (target.status === "ok") {
     return {
       status: "ok",

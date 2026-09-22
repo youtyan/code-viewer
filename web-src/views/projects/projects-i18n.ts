@@ -51,6 +51,13 @@ export type ProjectsText = {
   backendFailedTitle: (name: string) => string;
   backendRestart: string;
   backendRestartFailed: string;
+  /** 中央の面の空表示 (views/backend-state.ts)。 */
+  backendStoppedHeading: string;
+  backendSurfaceText: (name: string) => string;
+  backendDialogText: string;
+  backendDetails: string;
+  backendStartingTitle: (name: string) => string;
+  backendStartingText: string;
   close: string;
   /** ヘッダの切替。 */
   switcherTitle: string;
@@ -123,6 +130,14 @@ export const PROJECTS_EN: ProjectsText = {
   backendFailedTitle: (name) => `The process for ${name} did not start`,
   backendRestart: "Restart",
   backendRestartFailed: "The process for this project could not be restarted",
+  backendStoppedHeading: "The process for this project is not running",
+  backendSurfaceText: (name) =>
+    `Restart it to show ${name} here. The terminal and the agents keep working.`,
+  backendDialogText:
+    "Restart it to show this project again. Details has the reason and the end of its output.",
+  backendDetails: "Details",
+  backendStartingTitle: (name) => `Starting the process for ${name}…`,
+  backendStartingText: "The screen appears when it is ready.",
   close: "Close",
   switcherTitle: "Projects",
   switcherHint: "↑↓ move · Enter open · Esc close",
@@ -194,6 +209,14 @@ export const PROJECTS_JA: ProjectsText = {
   backendFailedTitle: (name) => `${name} のプロセスを起動できませんでした`,
   backendRestart: "再起動",
   backendRestartFailed: "このプロジェクトのプロセスを再起動できませんでした",
+  backendStoppedHeading: "このプロジェクトのプロセスが止まっています",
+  backendSurfaceText: (name) =>
+    `再起動すると、ここに ${name} を表示します。ターミナルとエージェントはそのまま使えます。`,
+  backendDialogText:
+    "再起動すると、このプロジェクトをもう一度表示します。止まった理由と出力の末尾は「詳細」にあります。",
+  backendDetails: "詳細",
+  backendStartingTitle: (name) => `${name} のプロセスを起動しています…`,
+  backendStartingText: "起動し終わると画面を表示します。",
   close: "閉じる",
   switcherTitle: "プロジェクト",
   switcherHint: "↑↓ 移動 · Enter 開く · Esc 閉じる",

@@ -283,6 +283,9 @@ Common options:
 - `--cwd <dir>` — repository to view (default: current working directory).
 - `--open` — open the printed URL in the default browser.
 - `--port <port>` — bind to a specific port (default: pick a free port).
+- `--idle-stop <seconds>` — stop a project's process after nobody has used it
+  for this long (default `600`; `0` never stops). It is started again on the
+  next request; terminals, agents and unread marks are not affected.
 - `--standalone` — run one self-contained server for this repository only, the
   way code-viewer worked before it served every project from one address
   (scripts and tests use this).

@@ -25,10 +25,10 @@ import {
 import { formatErrorDetail } from "../core/error-detail";
 import {
   ensureServerUrl,
+  probeServer,
   readStdin,
   requestJson,
   resolveRepoRoot,
-  serverReachable,
   takeGlobalCliOption,
   takeValue,
 } from "./cli-helpers";
@@ -386,8 +386,16 @@ export async function runTerminalCli(argv: string[]): Promise<void> {
   // 状態とターミナルを持つのは入口のサーバ。入口が居なければ、このリポジトリの
   // 1 つで完結するサーバ (`--standalone`・古い版) を探す。
   const entry = server ? null : liveEntryUrl();
+  const entryProbe = entry ? await probeServer(entry, HEALTH_PATH) : null;
+  if (entry && entryProbe && entryProbe.status !== "ok") {
+    // 入口の記録 (entry.json) の pid は生きているのに答えない。1 つで完結する
+    // サーバを探しに行く前に、入口がなぜ使えなかったかを出す。
+    console.error(
+      `the code-viewer entry server at ${entry} ${entryProbe.status === "unreachable" ? "could not be reached" : "answered with an error"}; looking for this repository's server instead:\n${formatErrorDetail(entryProbe.error)}`,
+    );
+  }
   const serverUrl =
-    entry && (await serverReachable(entry, HEALTH_PATH))
+    entry && entryProbe?.status === "ok"
       ? entry
       : await ensureServerUrl(root, server, HEALTH_PATH);
 

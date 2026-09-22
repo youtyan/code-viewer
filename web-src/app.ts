@@ -131,10 +131,8 @@ import {
   type AppSettingsState,
   type DiffCardElement,
   type DiffMeta,
-  type EntryBackendFailure,
   type FileMeta,
   type HljsApi,
-  isEntryBackendFailure,
   type SettingsResponse,
   THEME_PALETTES,
   type ThemePalette,
@@ -169,6 +167,7 @@ import {
   type AnnotationsUi,
   createAnnotationsUi,
 } from "./views/annotations-ui";
+import { createBackendState } from "./views/backend-state";
 import { createBlameView } from "./views/blame-view";
 import { type ContextMenuItem, showContextMenu } from "./views/context-menu";
 import { createDatabaseView } from "./views/database/database-view";
@@ -236,7 +235,6 @@ import { terminalText } from "./views/terminal/i18n";
 import { createTerminalView } from "./views/terminal/terminal-view";
 import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
-import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
   SETTINGS_CATEGORIES,
@@ -315,11 +313,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     viewedFiles: [],
   };
 
+  // 入口のサーバの下で、このプロジェクトの裏のプロセスが止まった (502)・
+  // 起きなかった (503)・起動中。どの画面の取得でも同じ応答が来るので、fetch の
+  // 包みで拾って中央に 1 つだけ出す。
+  const BACKEND_STATE = createBackendState({
+    text: () => agentsText(STATE.language).projects,
+    reload: () => window.location.reload(),
+    reportError: reportPersistenceError,
+  });
   const NETWORK_ACTIVITY = createNetworkActivityTracker({
     onChange: updateNetworkActivity,
     // 入口のサーバの下の画面では、前置きとプロジェクトの鍵を足す。
     prepareRequest: projectRequest,
-    onResponse: (response) => inspectBackendResponse(response),
+    onResponse: (response) => BACKEND_STATE.inspect(response),
   });
   NETWORK_ACTIVITY.installFetch(window);
   // 入口のサーバの下の画面では、index.html に書いた画面のリンクにも前置きを
@@ -571,72 +577,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       "Content-Type": "application/json",
       "X-Code-Viewer-Action": "1",
     };
-  }
-
-  // 入口のサーバの下で、このプロジェクトの裏のプロセスが止まった (502)・
-  // 起きなかった (503)。どの画面の取得でも同じ応答が来るので、fetch の包みで
-  // 拾って中央に理由と「再起動」を 1 つだけ出す。
-  let backendFailureShown = false;
-
-  function inspectBackendResponse(response: Response): void {
-    if (response.status !== 502 && response.status !== 503) return;
-    if (!(response.headers.get("content-type") ?? "").includes("json")) return;
-    response
-      .clone()
-      .json()
-      .then(
-        (body: unknown) => {
-          if (isEntryBackendFailure(body)) void showBackendFailure(body);
-        },
-        (error: unknown) => {
-          console.error(
-            "[code-viewer] the entry server's error response could not be read",
-            error,
-          );
-        },
-      );
-  }
-
-  async function showBackendFailure(body: EntryBackendFailure): Promise<void> {
-    if (backendFailureShown) return;
-    backendFailureShown = true;
-    const text = agentsText(STATE.language).projects;
-    const name = body.project.root.split("/").pop() || body.project.root;
-    const restart = await showConfirmDialog({
-      title:
-        body.code === "backend-stopped"
-          ? text.backendStoppedTitle(name)
-          : text.backendFailedTitle(name),
-      body: [body.detail, body.log].filter(Boolean).join("\n\n"),
-      confirmLabel: text.backendRestart,
-      cancelLabel: text.close,
-    });
-    if (!restart) {
-      backendFailureShown = false;
-      return;
-    }
-    try {
-      const res = await fetch(apiUrl("entryRestart"), {
-        method: "POST",
-        headers: actionHeaders(),
-        body: JSON.stringify({ key: body.project.key }),
-      });
-      if (!res.ok) {
-        throw new Error(
-          await responseErrorMessage(res, text.backendRestartFailed),
-        );
-      }
-    } catch (error) {
-      console.error("[code-viewer] project process restart failed", error);
-      await showAlertDialog({
-        title: text.backendRestartFailed,
-        body: formatErrorDetail(error),
-        confirmLabel: text.close,
-      });
-      backendFailureShown = false;
-      return;
-    }
-    window.location.reload();
   }
 
   function reportPersistenceError(operation: string, error: unknown): void {
@@ -5560,7 +5500,9 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // ----- initial state + live updates -----
   applyTheme();
-  setLayout(STATE.layout);
+  // 読んだ設定を当てるだけ。書き戻すと、開くたびにリポジトリへ
+  // .code-viewer/settings.json を作ってしまう (利用者は何も変えていない)。
+  setLayout(STATE.layout, false);
   setPageMode();
   if (routePathname() === "/") {
     setRoute(STATE.route, true);
@@ -7656,8 +7598,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         try {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed.paths)) paths = parsed.paths;
-        } catch {
-          /* ignore parse errors */
+        } catch (error) {
+          // 壊れた本文でも、変わったことは確か。どのファイルかが分からない
+          // だけなので、全体を読み直す (paths = null) 形で続ける。本文は残す。
+          console.error(
+            "[code-viewer] the SSE update event has a body that is not JSON; reloading everything",
+            raw,
+            error,
+          );
         }
       }
       if (isHistoryPanelRoute(STATE.route)) HISTORY_VIEW.notePossibleUpdate();
@@ -7723,6 +7671,16 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   scheduleEventSourceConnect();
   window.addEventListener("pagehide", disconnectEventSource);
+  // 入口の下で、このプロジェクトの裏を起こしている最中なら「起動中」を出す。
+  // 画面の組み立てが終わってから聞く (fetch の包みと状態表示を使うため)。
+  if (projectKey()) {
+    BACKEND_STATE.checkStarting().catch((error: unknown) =>
+      reportPersistenceError(
+        "check the state of this project's process",
+        error,
+      ),
+    );
+  }
 
   function catchUpDiff() {
     const historyWorktreeSelected = HISTORY_VIEW.isWorktreeSelected();

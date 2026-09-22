@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   type BackendTarget,
   createEntryBackends,
@@ -172,27 +172,49 @@ describe("resolving the key in /p/<key>/", () => {
 
 describe("the project processes the entry starts", () => {
   const ROOT = "/work/sample-app";
-  function backends(outcomes: WorktreeOpenResult[]) {
+  const IDLE_MS = 600_000;
+  /**
+   * 起こす・止めるを記録する偽の仕組み。open と stop は差し替えられる
+   * (既定: outcomes を順に返す・止めるのは成功)。
+   */
+  function backends(
+    outcomes: WorktreeOpenResult[],
+    options: {
+      backend?: boolean;
+      idleStopMs?: number;
+      open?: () => Promise<WorktreeOpenResult>;
+      stop?: () => Promise<void>;
+    } = {},
+  ) {
     const opens: unknown[] = [];
     const stops: string[] = [];
+    const lines: string[] = [];
+    const clock = { now: 1_000_000 };
     const deps: EntryBackendsDeps = {
       entryPid: 4242,
       controller: {
-        openWorktreeServer: async (_root, options) => {
-          opens.push(options);
+        openWorktreeServer: async (_root, open) => {
+          opens.push(open);
+          if (options.open) return options.open();
           return outcomes.shift() ?? { status: "timeout" };
         },
         runningServerResult: async () => ({ status: "absent" }),
         stopWorktreeServer: async (root) => {
           stops.push(root);
+          if (options.stop) await options.stop();
         },
       },
       logFile: () => "/state/server-logs/sample.log",
       logTail: () => "server output: sample tail",
-      registryPid: () => 777,
+      registryEntry: () => ({ pid: 777, backend: options.backend ?? true }),
       serverArgs: () => ["--staged"],
+      idleStopMs: options.idleStopMs ?? IDLE_MS,
+      now: () => clock.now,
+      log: (line) => {
+        lines.push(line);
+      },
     };
-    return { b: createEntryBackends(deps), opens, stops };
+    return { b: createEntryBackends(deps), opens, stops, lines, clock };
   }
   const ok = (port: number): WorktreeOpenResult => ({
     status: "ok",
@@ -205,12 +227,14 @@ describe("the project processes the entry starts", () => {
 
   test("starts it as a project process of this entry, once", async () => {
     const { b, opens } = backends([ok(65001)]);
+    expect(b.state(ROOT)).toBe("absent");
     expect(await b.target(ROOT)).toEqual({
       status: "ok",
       url: "http://127.0.0.1:65001/",
       pid: 777,
       started: true,
     });
+    expect(b.state(ROOT)).toBe("running");
     await b.target(ROOT);
     expect(opens).toEqual([
       {
@@ -220,6 +244,21 @@ describe("the project processes the entry starts", () => {
         serverArgs: ["--staged"],
       },
     ]);
+  });
+
+  test("reads as starting while it is being started", async () => {
+    const opening: { finish?: (result: WorktreeOpenResult) => void } = {};
+    const { b } = backends([], {
+      open: () =>
+        new Promise<WorktreeOpenResult>((resolve) => {
+          opening.finish = resolve;
+        }),
+    });
+    const started = b.target(ROOT);
+    expect(b.state(ROOT)).toBe("starting");
+    opening.finish?.(ok(65001));
+    await started;
+    expect(b.state(ROOT)).toBe("running");
   });
 
   test.each<[string, WorktreeOpenResult, string]>([
@@ -239,21 +278,25 @@ describe("the project processes the entry starts", () => {
     expect(target.status).toBe("failed");
     expect(target.detail).toContain(reason);
     expect(target.log).toBe("server output: sample tail");
+    expect(b.state(ROOT)).toBe("absent");
   });
 
-  test("after it stopped: not started by ordinary requests, once by the SSE reconnect, again by restart", async () => {
+  test("after it became unreachable: not started by ordinary requests, once by the SSE reconnect, again by restart", async () => {
     const { b, opens } = backends([ok(65001), ok(65002), ok(65003)]);
     await b.target(ROOT);
     const down = b.noteUnreachable(ROOT, refused);
-    expect(down.status).toBe("stopped");
-    expect(down.status === "stopped" && down.detail).toContain("ECONNREFUSED");
-    expect((await b.target(ROOT)).status).toBe("stopped");
+    expect(down.status).toBe("unreachable");
+    expect(down.status === "unreachable" && down.detail).toContain(
+      "ECONNREFUSED",
+    );
+    expect(b.state(ROOT)).toBe("unreachable");
+    expect((await b.target(ROOT)).status).toBe("unreachable");
     expect(await b.target(ROOT, { events: true })).toMatchObject({
       status: "ok",
       url: "http://127.0.0.1:65002/",
     });
     b.noteUnreachable(ROOT, refused);
-    expect((await b.target(ROOT, { events: true })).status).toBe("stopped");
+    expect((await b.target(ROOT, { events: true })).status).toBe("unreachable");
     expect(await b.restart(ROOT)).toMatchObject({
       status: "ok",
       url: "http://127.0.0.1:65003/",
@@ -261,27 +304,202 @@ describe("the project processes the entry starts", () => {
     expect(opens).toHaveLength(3);
   });
 
+  test("a failed SSE restart after it became unreachable keeps it unreachable", async () => {
+    const { b, opens } = backends([ok(65001), { status: "timeout" }]);
+    await b.target(ROOT);
+    b.noteUnreachable(ROOT, refused);
+    expect((await b.target(ROOT, { events: true })).status).toBe("failed");
+    expect(b.state(ROOT)).toBe("unreachable");
+    expect((await b.target(ROOT)).status).toBe("unreachable");
+    expect(opens).toHaveLength(2);
+  });
+
   test("stopping from the menu forgets it, and the next request starts it again", async () => {
     const { b, stops } = backends([ok(65001), ok(65002)]);
     await b.target(ROOT);
     await b.stop(ROOT);
     expect(stops).toEqual([ROOT]);
+    expect(b.state(ROOT)).toBe("absent");
     expect(await b.target(ROOT)).toMatchObject({
       status: "ok",
       url: "http://127.0.0.1:65002/",
     });
   });
 
-  test("counts SSE subscribers; releasing twice counts once", () => {
-    const { b } = backends([]);
-    const first = b.subscribe(ROOT);
-    const second = b.subscribe(ROOT);
-    expect(b.subscriberCount(ROOT)).toBe(2);
-    first();
-    first();
-    expect(b.subscriberCount(ROOT)).toBe(1);
-    second();
+  test("counts SSE subscribers and other streams; releasing twice counts once", async () => {
+    const { b } = backends([ok(65001)]);
+    const first = await b.acquire(ROOT, { events: true });
+    const second = await b.acquire(ROOT, { events: true });
+    const download = await b.acquire(ROOT);
+    expect([b.subscriberCount(ROOT), b.streamCount(ROOT)]).toEqual([2, 1]);
+    first.release();
+    first.release();
+    download.release();
+    expect([b.subscriberCount(ROOT), b.streamCount(ROOT)]).toEqual([1, 0]);
+    second.release();
+    expect([b.subscriberCount(ROOT), b.streamCount(ROOT)]).toEqual([0, 0]);
+  });
+
+  test("a request that cannot be forwarded is not counted", async () => {
+    const { b } = backends([{ status: "timeout" }]);
+    const { target } = await b.acquire(ROOT, { events: true });
+    expect(target.status).toBe("failed");
     expect(b.subscriberCount(ROOT)).toBe(0);
+  });
+
+  // アイドル停止: 購読・流れ・最後の要求からの時間・入口の裏か、の組合せ。
+  test.each<{
+    name: string;
+    subscribers: number;
+    streams: number;
+    elapsedMs: number;
+    backend: boolean;
+    stopped: boolean;
+  }>([
+    {
+      name: "nothing open for exactly the idle time: stopped",
+      subscribers: 0,
+      streams: 0,
+      elapsedMs: 600_000,
+      backend: true,
+      stopped: true,
+    },
+    {
+      name: "nothing open, 1 ms short of the idle time: kept",
+      subscribers: 0,
+      streams: 0,
+      elapsedMs: 599_999,
+      backend: true,
+      stopped: false,
+    },
+    {
+      name: "nothing open for longer than the idle time: stopped",
+      subscribers: 0,
+      streams: 0,
+      elapsedMs: 600_001,
+      backend: true,
+      stopped: true,
+    },
+    {
+      name: "an SSE subscriber is open: kept",
+      subscribers: 1,
+      streams: 0,
+      elapsedMs: 3_600_000,
+      backend: true,
+      stopped: false,
+    },
+    {
+      name: "a download is still streaming: kept",
+      subscribers: 0,
+      streams: 1,
+      elapsedMs: 3_600_000,
+      backend: true,
+      stopped: false,
+    },
+    {
+      name: "a server the user started (--standalone): kept",
+      subscribers: 0,
+      streams: 0,
+      elapsedMs: 3_600_000,
+      backend: false,
+      stopped: false,
+    },
+  ])("$name", async ({ subscribers, streams, elapsedMs, backend, stopped }) => {
+    const { b, stops, clock } = backends([ok(65001)], { backend });
+    await b.target(ROOT);
+    for (let i = 0; i < subscribers; i += 1) {
+      await b.acquire(ROOT, { events: true });
+    }
+    for (let i = 0; i < streams; i += 1) await b.acquire(ROOT);
+    clock.now += elapsedMs;
+    await b.stopIdleBackends();
+    expect({ stops, state: b.state(ROOT) }).toEqual(
+      stopped
+        ? { stops: [ROOT], state: "idle-stopped" }
+        : { stops: [], state: "running" },
+    );
+  });
+
+  test("the idle time counts from when the last stream ended, not from the start", async () => {
+    const { b, stops, clock } = backends([ok(65001)]);
+    await b.target(ROOT);
+    const sse = await b.acquire(ROOT, { events: true });
+    clock.now += 3_600_000;
+    sse.release();
+    clock.now += 599_999;
+    await b.stopIdleBackends();
+    expect(stops).toEqual([]);
+    clock.now += 1;
+    await b.stopIdleBackends();
+    expect(stops).toEqual([ROOT]);
+  });
+
+  test("a process stopped as idle is not unreachable: the next request starts it again quietly, and both are logged", async () => {
+    const { b, opens, lines, clock } = backends([ok(65001), ok(65002)]);
+    await b.target(ROOT);
+    clock.now += 600_000;
+    await b.stopIdleBackends();
+    clock.now += 120_000;
+    expect(await b.target(ROOT)).toEqual({
+      status: "ok",
+      url: "http://127.0.0.1:65002/",
+      pid: 777,
+      started: true,
+    });
+    expect(opens).toHaveLength(2);
+    expect(lines).toEqual([
+      "stopped the project process for /work/sample-app (idle: no subscribers or streams for 10m 0s; it ran 10m 0s)",
+      "started the project process for /work/sample-app again on request (stopped as idle 2m 0s ago)",
+    ]);
+  });
+
+  test("a request that arrives while it is being stopped waits and then starts it again", async () => {
+    const stopping: { finish?: () => void } = {};
+    const { b, opens, clock } = backends([ok(65001), ok(65002)], {
+      stop: () =>
+        new Promise<void>((resolve) => {
+          stopping.finish = resolve;
+        }),
+    });
+    await b.target(ROOT);
+    clock.now += IDLE_MS;
+    const sweep = b.stopIdleBackends();
+    expect(b.state(ROOT)).toBe("idle-stopped");
+    const next = b.target(ROOT);
+    stopping.finish?.();
+    await sweep;
+    expect(await next).toMatchObject({ url: "http://127.0.0.1:65002/" });
+    expect(opens).toHaveLength(2);
+  });
+
+  test("when stopping fails, it stays running and the reason is not lost", async () => {
+    const { b, clock } = backends([ok(65001)], {
+      stop: async () => {
+        throw new Error("sample: kill failed");
+      },
+    });
+    await b.target(ROOT);
+    clock.now += IDLE_MS;
+    const logged = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      await b.stopIdleBackends();
+      expect(b.state(ROOT)).toBe("running");
+      expect(String(logged.mock.calls[0]?.[0])).toContain(
+        "sample: kill failed",
+      );
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  test("an idle time of 0 never stops anything", async () => {
+    const { b, stops, clock } = backends([ok(65001)], { idleStopMs: 0 });
+    await b.target(ROOT);
+    clock.now += 10 ** 12;
+    await b.stopIdleBackends();
+    expect(stops).toEqual([]);
   });
 });
 

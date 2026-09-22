@@ -266,7 +266,7 @@ function parseCli() {
       console.log(`code-viewer ${VERSION}
 
 Usage:
-  code-viewer [--cwd <repo>] [--port <port>] [--open] [--standalone] [--bin <name>=<path>] [git-diff-args...]
+  code-viewer [--cwd <repo>] [--port <port>] [--open] [--idle-stop <seconds>] [--standalone] [--bin <name>=<path>] [git-diff-args...]
   code-viewer status [--cwd <repo>] [--bin git=<path>] [--ref <ref>] [--limit <N>] [--json]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
   code-viewer journal <list|add|edit|tasks|task-add|task-update|task-next|github-issues|task-link-issue|task-claim|task-done|task-delete> [options]
@@ -284,7 +284,10 @@ Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search
 
 One code-viewer serves every project on one port. Running it again in another
 repository adds that repository to the running one and prints its URL.
---standalone runs a separate server for this repository only.
+Each project runs in its own process behind that port; a process nobody has
+used for --idle-stop seconds (default 600, 0 = never) is stopped and started
+again on the next request. --standalone runs a separate server for this
+repository only.
 
 Examples:
   code-viewer --open
@@ -334,6 +337,13 @@ Examples:
       openAfterStart = true;
     } else if (arg === "--standalone") {
       // 1 つで完結するサーバ (今までの動き)。cli.ts がこの印でここへ来る。
+    } else if (arg === "--idle-stop") {
+      // 入口だけの引数。git の差分の引数として渡ると、分かりにくい git の
+      // 失敗になるので、ここで断る。
+      console.error(
+        "--idle-stop applies to the entry server only; it cannot be used with --standalone",
+      );
+      process.exit(1);
     } else if (arg === "--backend") {
       backendMode = true;
     } else if (arg === "--entry-pid") {

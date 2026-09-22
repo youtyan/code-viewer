@@ -23,13 +23,27 @@ describe("which server `code-viewer` starts", () => {
   });
 });
 
+const IDLE_STOP_ERROR =
+  "--idle-stop requires a number of seconds (0 = never stop)";
+
 describe("parseEntryArgs", () => {
   test.each([
-    [[], { port: 0, cwd: null, open: false, bins: [], backendArgs: [] }],
+    [
+      [],
+      {
+        port: 0,
+        idleStopSeconds: 600,
+        cwd: null,
+        open: false,
+        bins: [],
+        backendArgs: [],
+      },
+    ],
     [
       ["--port", "64620", "--cwd", "/work/sample", "--open"],
       {
         port: 64620,
+        idleStopSeconds: 600,
         cwd: "/work/sample",
         open: true,
         bins: [],
@@ -40,6 +54,7 @@ describe("parseEntryArgs", () => {
       ["--bin", "git=/usr/bin/git", "--staged", "--scope-omit-dir", "vendor"],
       {
         port: 0,
+        idleStopSeconds: 600,
         cwd: null,
         open: false,
         bins: ["git=/usr/bin/git"],
@@ -48,7 +63,47 @@ describe("parseEntryArgs", () => {
     ],
     [
       ["--allow-upload"],
-      { port: 0, cwd: null, open: false, bins: [], backendArgs: [] },
+      {
+        port: 0,
+        idleStopSeconds: 600,
+        cwd: null,
+        open: false,
+        bins: [],
+        backendArgs: [],
+      },
+    ],
+    [
+      ["--idle-stop", "0"],
+      {
+        port: 0,
+        idleStopSeconds: 0,
+        cwd: null,
+        open: false,
+        bins: [],
+        backendArgs: [],
+      },
+    ],
+    [
+      ["--idle-stop", "5"],
+      {
+        port: 0,
+        idleStopSeconds: 5,
+        cwd: null,
+        open: false,
+        bins: [],
+        backendArgs: [],
+      },
+    ],
+    [
+      ["--idle-stop", "0.5"],
+      {
+        port: 0,
+        idleStopSeconds: 0.5,
+        cwd: null,
+        open: false,
+        bins: [],
+        backendArgs: [],
+      },
     ],
   ])("%j", (argv, expected) => {
     expect(parseEntryArgs(argv)).toEqual({ ok: true, args: expected });
@@ -60,6 +115,10 @@ describe("parseEntryArgs", () => {
     [["--cwd"], "--cwd requires a value"],
     [["--bin"], "--bin requires <name>=<absolute-path>"],
     [["--scope-omit-dir"], "--scope-omit-dir requires a directory name"],
+    [["--idle-stop"], IDLE_STOP_ERROR],
+    [["--idle-stop", "-1"], IDLE_STOP_ERROR],
+    [["--idle-stop", "ten"], IDLE_STOP_ERROR],
+    [["--idle-stop", "Infinity"], IDLE_STOP_ERROR],
   ])("%j is refused", (argv, error) => {
     expect(parseEntryArgs(argv)).toEqual({ ok: false, error });
   });

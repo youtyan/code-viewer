@@ -109,7 +109,7 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
 
 | どこが受けるか | 経路 | 決めるもの |
 |---|---|---|
-| 入口 | 画面のファイル・`/_agent/*`・`/_tmux/*`・`/_shell/*`・`/_worktree/open|stop`・`/_entry*` | `core/api-url.ts` の zone `entry` |
+| 入口 | 画面のファイル・`/_agent/*`・`/_tmux/*`・`/_shell/*`・`/_worktree/open|stop`・`/_entry*` (`/_entry/backend` = 選んでいるプロジェクトの裏の状態) | `core/api-url.ts` の zone `entry` |
 | 裏 (入口が取り次ぐ) | それ以外の経路全部 (`/_settings`・`/_doctor`・`/_state/*` を含む) | zone `project` |
 
 - **新しい経路は `api-url.ts` の表に zone 付きで足す。** zone を間違えると、入口の下では
@@ -123,7 +123,29 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
   オリジンに付け替える。**裏に「入口からは信用する」口を作らない** (単体の裏と挙動が分かれる)
 - 裏に繋がらない = 502 (`backend-stopped`)、起きない = 503 (`backend-start-failed`)。
   形は `core/types.ts` の `EntryBackendFailure`。画面は fetch の包み (`onResponse`) で
-  拾って理由と再起動を出す。**502/503 を各画面で個別に扱わない**
+  拾い、`views/backend-state.ts` が中央の面を空表示で覆って、理由の全文をダイアログの
+  「詳細」に畳んで出す (再起動が失敗したときも同じ所に全文)。**502/503 を各画面で個別に
+  扱わない** (各画面は受け取った本文をそのまま出すことがあるが、覆われて見えない)
+- 裏の状態は `entry/backends.ts` の型で 4 つに分ける。**「止めた」と「落ちた」を混ぜない**
+
+  | 状態 (`EntryBackendState`) | 何か | 次の要求 |
+  |---|---|---|
+  | `starting` | 起こしている最中 | 起き終わるのを待つ (画面は `/_entry/backend` を 1 度聞いて「起動中」を出す) |
+  | `running` | 取り次げる | そのまま取り次ぐ |
+  | `idle-stopped` | 使われていないので入口が止めた | 黙って起こす (502 にしない) |
+  | `unreachable` | 取り次ぎが接続を断られた (落ちた) | 502。画面の「再起動」か SSE の繋ぎ直しの 1 回だけ起こす |
+
+  このほか入口がまだ扱っていない根は `absent` (次の要求で起こす)
+- **アイドル停止**: SSE の購読が 0 本・取り次ぎ中の要求 (ダウンロード・ファイルの送信
+  などの流れ) が 0 本・最後の要求から `--idle-stop` 秒 (既定 600。0 は止めない。
+  `entry/args.ts` の `DEFAULT_IDLE_STOP_SECONDS` の 1 か所) 経った裏を止める。止めて
+  よいのは入口の裏 (登録簿の `backend`) だけで、利用者が起こした `--standalone` は
+  止めない。取り次ぐ要求は `backends.acquire` で数え、流し終わりで `release` する
+  (**新しい取り次ぎの経路を足すときも `acquire` を通す**。通さないと、流している最中の
+  裏を止める)。止めた・起こし直したは入口のログに 1 行ずつ (`[code-viewer] entry: …`)
+- ターミナル (tmux・シェル)・未読・通知・フックの申告は入口に居るので、裏を止めても
+  消えない。**裏に「止めると消える」ものを持たせない** (持たせるなら、アイドル停止の
+  条件に加える)
 - 裏の起動・本人確認・停止は `worktree/open.ts` の仕組みをそのまま使う
   (`backendOf` を渡すと `--backend --entry-pid`)。裏は入口が居なくなると 10 秒待って
   終わる (その間に同じ版の入口が `entry.json` に現れれば、そちらに付き直す)
@@ -191,6 +213,9 @@ docker コンテナ、OS の設定）を変える機能は、次の 3 つが揃�
   README / Help に書いた呼び出し方と実装がずれると落ちる
 - CLI からサーバを叩くときは `server/cli-helpers.ts` の `requestJson`
   （Origin と `X-Code-Viewer-Action` を付ける）
+- サーバが居るかの確認は `probeServer`。「繋がらない」(`unreachable`) と「繋がったが
+  失敗」(`failed`) を分けて返し、どちらも理由を `error` (と `cause`) に持つ。真偽値に
+  潰さない。呼び出し側は既存の 1 行目の文言と exit code を保ったまま、次の行に理由を出す
 
 ## 既存の違反をどう扱うか
 
