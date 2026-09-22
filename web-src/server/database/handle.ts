@@ -1020,10 +1020,7 @@ export async function createDbQueryResponse(
         response: handleError("database", "execute query", err),
       };
     }
-    console.error(
-      "[code-viewer] database error:",
-      err instanceof Error ? err.message : String(err),
-    );
+    console.error("[code-viewer] database error:", err);
     const elapsed = Date.now() - start;
     const errorResponse: DbQueryResponse = {
       dbId: opts.db,

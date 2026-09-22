@@ -33,11 +33,12 @@ import {
   sqliteForeignKeyListSql,
   sqliteIndexInfoSql,
   sqliteIndexListSql,
+  sqliteReadonlyAttempts,
+  sqliteReadonlyAttemptsFailed,
   sqliteRowCountSql,
   sqliteRowCountUnionSql,
   sqliteTableInfoFromRow,
   sqliteTableInfoSql,
-  stripTrailingSemicolon,
 } from "./sqlite-introspection";
 import type {
   DatabaseAdapter,
@@ -412,25 +413,21 @@ function createSqliteAdapter(
       maxRows = 1000,
     ): QueryResult {
       assertReadonlySqliteStatement(sql);
-      const limited = stripTrailingSemicolon(sql);
-      const wrappedSql = `SELECT * FROM (${limited}) LIMIT ${maxRows + 1}`;
-      let rows: Record<string, DbValue>[];
-      try {
-        rows = safePrepare(db, wrappedSql).all(...(params || [])) as Record<
-          string,
-          DbValue
-        >[];
-      } catch (wrapErr) {
-        const fallbackSql = `${limited} LIMIT ${maxRows + 1}`;
+      const attempts = sqliteReadonlyAttempts(sql, maxRows);
+      const errors: unknown[] = [];
+      let rows: Record<string, DbValue>[] | undefined;
+      for (const attempt of attempts) {
         try {
-          rows = safePrepare(db, fallbackSql).all(...(params || [])) as Record<
+          rows = safePrepare(db, attempt.sql).all(...(params || [])) as Record<
             string,
             DbValue
           >[];
-        } catch {
-          throw wrapErr;
+          break;
+        } catch (err) {
+          errors.push(err);
         }
       }
+      if (!rows) throw sqliteReadonlyAttemptsFailed(attempts, errors);
       const truncated = rows.length > maxRows;
       if (truncated) rows = rows.slice(0, maxRows);
       if (rows.length === 0) {

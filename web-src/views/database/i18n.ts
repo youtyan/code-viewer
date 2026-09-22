@@ -39,6 +39,9 @@ export type DbText = {
     noDatastores: string;
     noDatastoresHint: string;
     noDatastoreTab: string;
+    // 新しいタブ (データストアを選んでいない) の本文の案内。
+    chooseDatastore: string;
+    chooseDatastoreHint: string;
     dockerLimitReached: string;
     // Rails 命名規約 (<name>_id → <names>.id) からの仮想 FK 推測トグル。
     inferFkLabel: string;
@@ -338,6 +341,28 @@ export type DbText = {
     refreshHistory: string;
     deleteHistoryEntry: string;
     clearHistory: string;
+    s3Buckets: string;
+    s3Objects: string;
+    s3ObjectHead: string;
+    s3ObjectText: string;
+    s3Folder: string;
+    s3Write: string;
+    dynamodbTables: string;
+    dynamodbTable: string;
+    dynamodbItems: string;
+    dynamodbItem: string;
+    esIndices: string;
+    esMapping: string;
+    esDocs: string;
+    esDoc: string;
+    esWrite: string;
+    redisDatabases: string;
+    redisKeys: string;
+    redisValue: string;
+    redisWrite: string;
+    searchStart: string;
+    searchStatus: string;
+    searchCancel: string;
   };
   // データストアエクスプローラ (redis / elasticsearch / s3)。共通文言は
   // common に集約し、各データストア固有の文言を redis/es/s3 に分ける。
@@ -471,6 +496,7 @@ export type DbText = {
       copied: string;
       copyFailed: string;
       invalidAttributeValues: string;
+      attributeValuesNotObject: string;
       runQuery: string;
       structureTab: string;
       itemTab: string;
@@ -529,6 +555,9 @@ const EN: DbText = {
     noDatastoresHint:
       "Start a database service or add a SQLite file, then refresh this list.",
     noDatastoreTab: "No datastore",
+    chooseDatastore: "Choose a datastore",
+    chooseDatastoreHint:
+      "Pick one in the box at the top left, or add a connection with +.",
     dockerLimitReached:
       "Docker discovery reached the service limit; some compose services may be hidden.",
     inferFkLabel: "Rails FK inference",
@@ -837,6 +866,28 @@ const EN: DbText = {
     refreshHistory: "refresh query history",
     deleteHistoryEntry: "delete query history entry",
     clearHistory: "clear query history",
+    s3Buckets: "load S3 buckets",
+    s3Objects: "load S3 objects",
+    s3ObjectHead: "load S3 object metadata",
+    s3ObjectText: "load S3 object text",
+    s3Folder: "load S3 folder",
+    s3Write: "write S3 object",
+    dynamodbTables: "load DynamoDB tables",
+    dynamodbTable: "describe DynamoDB table",
+    dynamodbItems: "load DynamoDB items",
+    dynamodbItem: "get DynamoDB item",
+    esIndices: "load Elasticsearch indices",
+    esMapping: "load Elasticsearch mapping",
+    esDocs: "load Elasticsearch documents",
+    esDoc: "load Elasticsearch document",
+    esWrite: "write Elasticsearch document",
+    redisDatabases: "load Redis databases",
+    redisKeys: "load Redis keys",
+    redisValue: "load Redis value",
+    redisWrite: "write Redis key",
+    searchStart: "start search",
+    searchStatus: "read search progress",
+    searchCancel: "cancel search",
   },
   explorer: {
     common: {
@@ -979,6 +1030,7 @@ const EN: DbText = {
       copied: "Copied",
       copyFailed: "Copy failed",
       invalidAttributeValues: "Invalid attribute values JSON",
+      attributeValuesNotObject: "write the attribute values as a JSON object",
       runQuery: "Run",
       structureTab: "Structure",
       itemTab: "Item",
@@ -1041,6 +1093,8 @@ const JA: DbText = {
     noDatastoresHint:
       "DB サービスを起動するか SQLite ファイルを追加してから、一覧を更新してください。",
     noDatastoreTab: "未検出",
+    chooseDatastore: "データストアを選んでください",
+    chooseDatastoreHint: "左上の欄から選ぶか、＋ から接続を追加してください。",
     dockerLimitReached:
       "Docker のサービス数が上限に達しました。一部の compose サービスは表示されていない可能性があります。",
     inferFkLabel: "Rails FK 推測",
@@ -1352,6 +1406,28 @@ const JA: DbText = {
     refreshHistory: "クエリ履歴を更新できませんでした",
     deleteHistoryEntry: "クエリ履歴の項目を削除できませんでした",
     clearHistory: "クエリ履歴を消去できませんでした",
+    s3Buckets: "S3 のバケットの一覧を読み込めませんでした",
+    s3Objects: "S3 のオブジェクトの一覧を読み込めませんでした",
+    s3ObjectHead: "S3 のオブジェクトの情報を読み込めませんでした",
+    s3ObjectText: "S3 のオブジェクトの内容を読み込めませんでした",
+    s3Folder: "S3 のフォルダを読み込めませんでした",
+    s3Write: "S3 のオブジェクトに書き込めませんでした",
+    dynamodbTables: "DynamoDB のテーブルの一覧を読み込めませんでした",
+    dynamodbTable: "DynamoDB のテーブルの情報を読み込めませんでした",
+    dynamodbItems: "DynamoDB のアイテムを読み込めませんでした",
+    dynamodbItem: "DynamoDB のアイテムを取得できませんでした",
+    esIndices: "Elasticsearch のインデックスの一覧を読み込めませんでした",
+    esMapping: "Elasticsearch のマッピングを読み込めませんでした",
+    esDocs: "Elasticsearch のドキュメントの一覧を読み込めませんでした",
+    esDoc: "Elasticsearch のドキュメントを読み込めませんでした",
+    esWrite: "Elasticsearch のドキュメントに書き込めませんでした",
+    redisDatabases: "Redis のデータベースの一覧を読み込めませんでした",
+    redisKeys: "Redis のキーの一覧を読み込めませんでした",
+    redisValue: "Redis の値を読み込めませんでした",
+    redisWrite: "Redis のキーに書き込めませんでした",
+    searchStart: "検索を始められませんでした",
+    searchStatus: "検索の進み具合を読み込めませんでした",
+    searchCancel: "検索を止められませんでした",
   },
   explorer: {
     common: {
@@ -1494,6 +1570,7 @@ const JA: DbText = {
       copied: "コピーしました",
       copyFailed: "コピーに失敗しました",
       invalidAttributeValues: "属性値の JSON が不正です",
+      attributeValuesNotObject: "属性値は JSON のオブジェクトで書いてください",
       runQuery: "実行",
       structureTab: "構造",
       itemTab: "アイテム",

@@ -50,6 +50,7 @@ import { localizePrefToggle, makePrefToggle } from "./pref-toggle";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
 import { createRedisExplorer } from "./redis-explorer";
+import { requireOkResponse } from "./report-failure";
 import { createS3Explorer } from "./s3-explorer";
 import { createSchemaView } from "./schema-view";
 import { createSessionLog, type SessionLogStore } from "./session-log";
@@ -181,15 +182,6 @@ function isAbortError(err: unknown): boolean {
     (err instanceof DOMException && err.name === "AbortError") ||
     (err instanceof Error && err.name === "AbortError")
   );
-}
-
-async function requireOkResponse(
-  response: Response,
-  operation: string,
-): Promise<void> {
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, operation));
-  }
 }
 
 async function readJsonResponse<T>(
@@ -353,8 +345,11 @@ function normalizeViewForDb(
   return view && isSqlView(view) ? view : "data";
 }
 
-function labelFromDbId(dbId: string | null | undefined): string {
-  if (!dbId) return "(empty)";
+function labelFromDbId(
+  dbId: string | null | undefined,
+  emptyLabel: string,
+): string {
+  if (!dbId) return emptyLabel;
   if (dbId.startsWith("docker:")) {
     const rest = dbId.slice("docker:".length);
     const service = rest.split(/[@:]/, 1)[0];
@@ -426,6 +421,10 @@ function createTabPane(
   }
   let lastFiles: DbFileInfo[] = [];
   let noDatastoresAvailable = false;
+  // データストアはあるが、このタブではまだ選んでいない (新しいタブ)。
+  let awaitingDatastoreChoice = false;
+  // そのとき select の先頭に置く「データストアを選択」の行。
+  let datastorePlaceholder: HTMLOptionElement | null = null;
   let datastoreListError: unknown | null = null;
   let currentSchema: string | null = initial.schema ?? null;
   let currentTable: string | null = initial.table ?? null;
@@ -968,15 +967,37 @@ function createTabPane(
     refresh.addEventListener("click", () => {
       void refreshDatastoreList();
     });
-    const addConnection = document.createElement("button");
-    addConnection.type = "button";
-    addConnection.className = "db-btn db-no-datastores-action";
-    addConnection.textContent = t.addConnection;
-    addConnection.addEventListener("click", () => addConnectionBtn.click());
-    actionRow.append(refresh, addConnection);
+    actionRow.append(refresh, addConnectionAction());
     noDatastoresPane
       .querySelector<HTMLElement>(".db-pane-empty")
       ?.appendChild(actionRow);
+  }
+
+  function addConnectionAction(): HTMLButtonElement {
+    const addConnection = document.createElement("button");
+    addConnection.type = "button";
+    addConnection.className = "db-btn db-no-datastores-action";
+    addConnection.textContent = paneText().nav.addConnection;
+    addConnection.addEventListener("click", () => addConnectionBtn.click());
+    return addConnection;
+  }
+
+  // 新しいタブの本文。データストアの無いときと同じ面・同じ見せ方で、
+  // 選ぶ場所と接続の足し方を案内する。
+  function renderDatastoreChoice(): void {
+    const t = paneText().nav;
+    setPaneEmpty(noDatastoresPane, t.chooseDatastore, {
+      hint: t.chooseDatastoreHint,
+      iconPath: ICON_PATH_SNAPSHOT,
+    });
+    const actionRow = document.createElement("div");
+    actionRow.className = "db-no-datastores-actions";
+    actionRow.append(addConnectionAction());
+    noDatastoresPane
+      .querySelector<HTMLElement>(".db-pane-empty")
+      ?.appendChild(actionRow);
+    if (datastorePlaceholder)
+      datastorePlaceholder.textContent = t.selectDatastore;
   }
 
   const mainContent = document.createElement("div");
@@ -1137,7 +1158,8 @@ function createTabPane(
       currentTab,
       userPrefersHistoryOpen,
     );
-    noDatastoresPane.hidden = !noDatastoresAvailable;
+    noDatastoresPane.hidden =
+      !noDatastoresAvailable && !awaitingDatastoreChoice;
     toolsSection.hidden = visibility.toolsHidden;
     // prefs バー (Rails FK 推測トグル) は toolsSection と同じ SQL kind 限定。
     prefsBar.hidden = visibility.toolsHidden;
@@ -1563,7 +1585,7 @@ function createTabPane(
         status: "error",
         label: opts.label,
         detail: opts.fallbackDetail,
-        message: err.message,
+        message: errorMessage(err),
         elapsedMs: Date.now() - startedAt,
       });
       throw err;
@@ -2230,6 +2252,7 @@ function createTabPane(
     const files = filesResponse.files;
     lastFiles = files;
     noDatastoresAvailable = files.length === 0;
+    awaitingDatastoreChoice = false;
     if (filesResponse.truncated) {
       showDockerNotice(paneText().nav.dockerLimitReached);
     } else {
@@ -2285,7 +2308,14 @@ function createTabPane(
       db = autoSelectFirst ? files[0].id : null;
     }
     if (!db && !autoSelectFirst) {
+      // 選んでいないことを select にも出す (value だけ空にすると空の箱になる)。
+      datastorePlaceholder = document.createElement("option");
+      datastorePlaceholder.value = "";
+      datastorePlaceholder.disabled = true;
+      dbSelect.prepend(datastorePlaceholder);
       dbSelect.value = "";
+      awaitingDatastoreChoice = true;
+      renderDatastoreChoice();
       currentDbInfo = null;
       syncConnectionActions();
       currentSchema = null;
@@ -2301,6 +2331,7 @@ function createTabPane(
       s3Explorer.clear();
       dynamodbExplorer.clear();
       setActiveTab("data", false);
+      applyVisibility();
       cb.onStateChange();
       return;
     }
@@ -2534,7 +2565,8 @@ function createTabPane(
 
   function getLabel(): string {
     if (noDatastoresAvailable) return paneText().nav.noDatastoreTab;
-    if (!currentDbInfo) return labelFromDbId(initial.dbId);
+    if (!currentDbInfo)
+      return labelFromDbId(initial.dbId, paneText().nav.newTab);
     const suffix = currentSchema ? ` / ${currentSchema}` : "";
     if (currentDbInfo.savedConnection) {
       return `${currentDbInfo.name}${suffix}`;
@@ -2593,6 +2625,7 @@ function createTabPane(
   function localizePane() {
     for (const fn of paneLocalizers) fn();
     if (noDatastoresAvailable) renderNoDatastoresEmpty();
+    else if (awaitingDatastoreChoice) renderDatastoreChoice();
     grid.localize();
     tableList.localize();
     schemaView.localize();
@@ -3405,7 +3438,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
     const labelEl = document.createElement("span");
     labelEl.className = "db-tabs-chip-label";
-    const initialLabel = labelFromDbId(initial?.dbId);
+    const initialLabel = labelFromDbId(initial?.dbId, outerText().nav.newTab);
     labelEl.textContent = initialLabel;
     labelEl.title = initialLabel;
 

@@ -10371,15 +10371,21 @@ body.journal-task-editor-resizing * {
   padding: 8px;
   border-bottom: 1px solid var(--border);
 }
+/* 失敗の文 (.db-refresh-result.db-pane-error) は次の行へ送る。同じ行に
+   置くと、狭い列では文が select を押し潰して途中で切れた。 */
 .db-select-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
+/* 選んでいるデータストアの名前が読める幅を残す (潰れて空の箱にしない)。
+   基準の幅は 0 にする。auto だと一番長い選択肢の幅を取ろうとして、折り返しで
+   右のボタンを次の行へ落とす。 */
 .db-select-row .db-file-select {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 1 1 0;
+  min-width: min(100%, 8em);
 }
 .db-refresh-btn {
   flex: 0 0 auto;
@@ -10421,6 +10427,12 @@ body.journal-task-editor-resizing * {
 .db-refresh-result.changed {
   color: var(--accent);
   font-weight: 600;
+}
+.db-refresh-result.db-pane-error {
+  flex: 1 1 100%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .db-grid-refresh-result {
   align-self: center;
@@ -13968,6 +13980,11 @@ body.db-resizing {
 .s3-sort-select {
   flex: 1;
   padding: 4px 8px;
+}
+/* 並び順の名前 (「更新が新しい順」など) を削らない。収まらなければ
+   .s3-options-row の折り返しで次の行へ送る。 */
+.db-root .s3-sort-select {
+  flex: 1 0 auto;
 }
 .s3-object-status {
   min-height: 22px;

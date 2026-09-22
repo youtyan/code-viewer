@@ -28,11 +28,12 @@ function jsonResponse(body: unknown): Response {
 
 const origFetch = globalThis.fetch;
 
-function installFetch(fail?: (url: string) => Error | null) {
+function installFetch(fail?: (url: string) => Error | Response | null) {
   writeCalls = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const failure = fail?.(url);
+    if (failure instanceof Response) return failure;
     if (failure) throw failure;
     if (url.includes("/_db/elasticsearch/indices")) {
       return jsonResponse({
@@ -81,7 +82,7 @@ afterAll(() => {
   GlobalRegistrator.unregister();
 });
 
-async function setupWithDoc(fail?: (url: string) => Error | null) {
+async function setupWithDoc(fail?: (url: string) => Error | Response | null) {
   installFetch(fail);
   const view = createElasticsearchExplorer();
   document.body.appendChild(view.sidebarSlot);
@@ -101,68 +102,100 @@ function failureWithCause(message: string): Error {
   });
 }
 
+// 各失敗を「通信の失敗」と「HTTP の失敗」の 2 通りで起こす。
+function withFailureKinds<T>(cases: T[]) {
+  return cases.flatMap((failureCase) => [
+    { ...failureCase, via: "network" as const },
+    { ...failureCase, via: "http" as const },
+  ]);
+}
+
+function failureFor(via: "network" | "http", failure: Error): Error | Response {
+  return via === "network"
+    ? failure
+    : new Response("sample failure", { status: 500 });
+}
+
+// httpDetail があれば HTTP の失敗として、操作と状態と本文が出ることを見る。
 async function expectReportedFailure(
   operation: string,
   failure: Error,
   shown: () => string | null | undefined,
   consoleError: { mock: { calls: unknown[][] } },
+  httpDetail?: string,
 ): Promise<void> {
-  await waitFor(() => !!shown());
+  // 書き込みの行は先に「保存中」を出すので、理由が出るまで待つ。
+  await waitFor(() => (shown() ?? "").includes(httpDetail ?? failure.message));
   const text = shown() ?? "";
-  expect(text).toContain(failure.message);
-  expect(text).toContain("Caused by");
-  expect(text).toContain("network is unreachable");
+  expect(text).not.toContain("Error: Error:");
   const logs = consoleError.mock.calls.filter(
     (args) => args[0] === `[code-viewer] Elasticsearch ${operation} failed`,
   );
   expect(logs.length).toBe(1);
-  expect(logs[0]?.[logs[0].length - 1]).toBe(failure);
+  const logged = logs[0]?.[logs[0].length - 1];
+  if (httpDetail) {
+    expect(text).toContain(`Error: ${httpDetail}`);
+    expect((logged as Error).message).toBe(httpDetail);
+    return;
+  }
+  expect(text).toContain(failure.message);
+  expect(text).toContain("Caused by");
+  expect(text).toContain("network is unreachable");
+  expect(logged).toBe(failure);
 }
 
 // 直す前は err.message だけを出し、console にも cause にも何も残らなかった。
 describe("elasticsearch explorer failures", () => {
-  test.each([
-    {
-      operation: "index list",
-      fails: (url: string) => url.includes("/_db/elasticsearch/indices"),
-      open: async (_view: EsView) => {
-        // 開くだけ (load の中で失敗する)。
+  test.each(
+    withFailureKinds([
+      {
+        operation: "index list",
+        httpOperation: "load Elasticsearch indices",
+        fails: (url: string) => url.includes("/_db/elasticsearch/indices"),
+        open: async (_view: EsView) => {
+          // 開くだけ (load の中で失敗する)。
+        },
+        where: ".es-index-list .db-pane-error",
       },
-      where: ".es-index-list .db-pane-error",
-    },
-    {
-      operation: "mapping",
-      fails: (url: string) => url.includes("/_db/elasticsearch/mapping"),
-      open: async (_view: EsView) => {
-        // 開くだけ (index を選んだところで失敗する)。
+      {
+        operation: "mapping",
+        httpOperation: "load Elasticsearch mapping",
+        fails: (url: string) => url.includes("/_db/elasticsearch/mapping"),
+        open: async (_view: EsView) => {
+          // 開くだけ (index を選んだところで失敗する)。
+        },
+        where: ".db-detail-pane .db-pane-error",
       },
-      where: ".db-detail-pane .db-pane-error",
-    },
-    {
-      operation: "doc list",
-      fails: (url: string) => url.includes("/_db/elasticsearch/docs"),
-      open: async (_view: EsView) => {
-        // 開くだけ (index を選んだところで失敗する)。
+      {
+        operation: "doc list",
+        httpOperation: "load Elasticsearch documents",
+        fails: (url: string) => url.includes("/_db/elasticsearch/docs"),
+        open: async (_view: EsView) => {
+          // 開くだけ (index を選んだところで失敗する)。
+        },
+        where: ".es-doc-list .db-pane-error",
       },
-      where: ".es-doc-list .db-pane-error",
-    },
-    {
-      operation: "doc",
-      fails: (url: string) => url.includes("/_db/elasticsearch/doc?"),
-      open: async (view: EsView) => {
-        await waitFor(() => !!view.el.querySelector(".es-doc-item"));
-        q<HTMLElement>(view.el, ".es-doc-item").click();
+      {
+        operation: "doc",
+        httpOperation: "load Elasticsearch document",
+        fails: (url: string) => url.includes("/_db/elasticsearch/doc?"),
+        open: async (view: EsView) => {
+          await waitFor(() => !!view.el.querySelector(".es-doc-item"));
+          q<HTMLElement>(view.el, ".es-doc-item").click();
+        },
+        where: ".db-detail-pane .db-pane-error",
       },
-      where: ".db-detail-pane .db-pane-error",
-    },
-  ])("$operation の失敗は理由を cause ごと画面と console に出す", async ({
+    ]),
+  )("$operation の $via の失敗は理由を画面と console に出す", async ({
     operation,
+    httpOperation,
+    via,
     fails,
     open,
     where,
   }) => {
     const failure = failureWithCause(`${operation} request failed`);
-    installFetch((url) => (fails(url) ? failure : null));
+    installFetch((url) => (fails(url) ? failureFor(via, failure) : null));
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
@@ -176,6 +209,9 @@ describe("elasticsearch explorer failures", () => {
         failure,
         () => document.body.querySelector(where)?.textContent,
         consoleError,
+        via === "http"
+          ? `${httpOperation} (HTTP 500): sample failure`
+          : undefined,
       );
     } finally {
       view.dispose();
@@ -184,48 +220,55 @@ describe("elasticsearch explorer failures", () => {
     }
   });
 
-  test.each([
-    {
-      operation: "doc write",
-      act: async (view: EsView) => {
-        q<HTMLButtonElement>(view.el, ".es-doc-actions .db-btn").click();
-        await tick();
-        q<HTMLButtonElement>(
-          view.el,
-          ".es-doc-edit-bar .db-btn-primary",
-        ).click();
+  test.each(
+    withFailureKinds([
+      {
+        operation: "doc write",
+        httpOperation: "write Elasticsearch document",
+        act: async (view: EsView) => {
+          q<HTMLButtonElement>(view.el, ".es-doc-actions .db-btn").click();
+          await tick();
+          q<HTMLButtonElement>(
+            view.el,
+            ".es-doc-edit-bar .db-btn-primary",
+          ).click();
+        },
+        where: ".es-doc-edit-status",
       },
-      where: ".es-doc-edit-status",
-    },
-    {
-      operation: "doc delete",
-      act: async (view: EsView) => {
-        const buttons = view.el.querySelectorAll<HTMLButtonElement>(
-          ".es-doc-actions .db-btn",
-        );
-        buttons[buttons.length - 1].click();
-        await tick();
-        clickDialogConfirm();
+      {
+        operation: "doc delete",
+        httpOperation: "write Elasticsearch document",
+        act: async (view: EsView) => {
+          const buttons = view.el.querySelectorAll<HTMLButtonElement>(
+            ".es-doc-actions .db-btn",
+          );
+          buttons[buttons.length - 1].click();
+          await tick();
+          clickDialogConfirm();
+        },
+        where: ".db-detail-pane .db-pane-error",
       },
-      where: ".db-detail-pane .db-pane-error",
-    },
-    {
-      operation: "doc create",
-      act: async (view: EsView) => {
-        q<HTMLButtonElement>(view.el, ".es-new-doc-btn").click();
-        await tick();
-        q<HTMLInputElement>(view.el, ".es-new-doc-id").value = "d2";
-        q<HTMLTextAreaElement>(view.el, ".es-doc-edit-textarea").value =
-          '{ "b": 9 }';
-        q<HTMLButtonElement>(
-          view.el,
-          ".es-new-doc-form .db-btn-primary",
-        ).click();
+      {
+        operation: "doc create",
+        httpOperation: "write Elasticsearch document",
+        act: async (view: EsView) => {
+          q<HTMLButtonElement>(view.el, ".es-new-doc-btn").click();
+          await tick();
+          q<HTMLInputElement>(view.el, ".es-new-doc-id").value = "d2";
+          q<HTMLTextAreaElement>(view.el, ".es-doc-edit-textarea").value =
+            '{ "b": 9 }';
+          q<HTMLButtonElement>(
+            view.el,
+            ".es-new-doc-form .db-btn-primary",
+          ).click();
+        },
+        where: ".es-new-doc-form .es-doc-edit-status",
       },
-      where: ".es-new-doc-form .es-doc-edit-status",
-    },
-  ])("$operation の失敗は理由を cause ごと画面と console に出す", async ({
+    ]),
+  )("$operation の $via の失敗は理由を画面と console に出す", async ({
     operation,
+    httpOperation,
+    via,
     act,
     where,
   }) => {
@@ -234,7 +277,9 @@ describe("elasticsearch explorer failures", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
     const view = await setupWithDoc((url) =>
-      url.includes("/_db/elasticsearch/write") ? failure : null,
+      url.includes("/_db/elasticsearch/write")
+        ? failureFor(via, failure)
+        : null,
     );
     try {
       await act(view);
@@ -243,6 +288,9 @@ describe("elasticsearch explorer failures", () => {
         failure,
         () => view.el.querySelector(where)?.textContent,
         consoleError,
+        via === "http"
+          ? `${httpOperation} (HTTP 500): sample failure`
+          : undefined,
       );
     } finally {
       view.dispose();
@@ -338,15 +386,38 @@ describe("elasticsearch explorer edit UI", () => {
     view.dispose();
   });
 
-  test("invalid JSON blocks the save (no request sent)", async () => {
+  // 直す前は「Invalid JSON」だけで、どこが読めないかが出なかった。
+  test.each([
+    {
+      form: "edit",
+      open: async (view: EsView) => {
+        q<HTMLButtonElement>(view.el, ".es-doc-actions .db-btn").click();
+        await tick();
+      },
+      submit: ".es-doc-edit-bar .db-btn-primary",
+    },
+    {
+      form: "new doc",
+      open: async (view: EsView) => {
+        q<HTMLButtonElement>(view.el, ".es-new-doc-btn").click();
+        await tick();
+      },
+      submit: ".es-new-doc-form .db-btn-primary",
+    },
+  ])("invalid JSON in the $form form blocks the save and shows why", async ({
+    open,
+    submit,
+  }) => {
     const view = await setupWithDoc();
-    q<HTMLButtonElement>(view.el, ".es-doc-actions .db-btn").click();
-    await tick();
+    await open(view);
     const ta = q<HTMLTextAreaElement>(view.el, ".es-doc-edit-textarea");
     ta.value = "{ not json";
-    q<HTMLButtonElement>(view.el, ".es-doc-edit-bar .db-btn-primary").click();
+    q<HTMLButtonElement>(view.el, submit).click();
     await tick();
     expect(writeCalls.length).toBe(0);
+    expect(q(view.el, ".es-doc-edit-status").textContent).toMatch(
+      /^Invalid JSON: SyntaxError: .+/,
+    );
     view.dispose();
   });
 

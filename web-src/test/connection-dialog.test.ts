@@ -1,5 +1,5 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 import { closeOpenDialog, getOpenDialog } from "./_dialog-helpers";
 
 GlobalRegistrator.register();
@@ -220,12 +220,19 @@ describe("datastore connection test action", () => {
       state: "success",
     },
     {
+      // 直す前は本文を読まずに「Connection failed」だけを出していた。
       name: "failure",
-      response: new Response("Connection failed", { status: 400 }),
-      status: "Connection failed",
+      response: new Response("authentication failed for sample_user", {
+        status: 400,
+      }),
+      status:
+        "Error: Connection failed (HTTP 400): authentication failed for sample_user",
       state: "error",
     },
   ])("shows stable in-dialog feedback for $name", async (scenario) => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     let resolveFetch: ((response: Response) => void) | null = null;
     let request: { url: string; method: string; headers: Headers } | null =
       null;
@@ -271,6 +278,17 @@ describe("datastore connection test action", () => {
     expect(button.textContent).toBe(label);
     expect(status.textContent).toBe(scenario.status);
     expect(status.dataset.state).toBe(scenario.state);
+    const logged = consoleError.mock.calls.filter(
+      (args) => args[0] === "[code-viewer] datastore connection test failed",
+    );
+    expect(logged.length).toBe(scenario.state === "error" ? 1 : 0);
+    if (scenario.state === "error") {
+      // 入力 (資格情報を含む) は console に出さない。
+      expect(JSON.stringify(logged[0]?.slice(0, -1))).not.toContain(
+        "sample_user",
+      );
+    }
+    consoleError.mockRestore();
     dialogButtons()[0].click();
     expect(await promise).toBeNull();
   });

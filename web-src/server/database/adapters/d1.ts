@@ -47,11 +47,12 @@ import {
   sqliteForeignKeyListSql,
   sqliteIndexInfoSql,
   sqliteIndexListSql,
+  sqliteReadonlyAttempts,
+  sqliteReadonlyAttemptsFailed,
   sqliteRowCountSql,
   sqliteRowCountUnionSql,
   sqliteTableInfoFromRow,
   sqliteTableInfoSql,
-  stripTrailingSemicolon,
 } from "./sqlite-introspection";
 import { createTableMetaCache } from "./table-meta-cache";
 import type {
@@ -556,26 +557,20 @@ export function createD1Adapter(config: D1Config): D1Source {
       signal?: AbortSignal,
     ): Promise<QueryResult> {
       assertReadonlySqliteStatement(sql);
-      const limited = stripTrailingSemicolon(sql);
-      let result: QueryResult;
-      try {
-        result = await runSql(
-          `SELECT * FROM (${limited}) LIMIT ${maxRows + 1}`,
-          params,
-          signal,
-        );
-      } catch (wrapErr) {
-        // PRAGMA / EXPLAIN はサブクエリに包めないので素の文へ落とす。
+      const attempts = sqliteReadonlyAttempts(sql, maxRows);
+      const errors: unknown[] = [];
+      let result: QueryResult | undefined;
+      for (const attempt of attempts) {
         try {
-          result = await runSql(
-            `${limited} LIMIT ${maxRows + 1}`,
-            params,
-            signal,
-          );
-        } catch {
-          throw wrapErr;
+          result = await runSql(attempt.sql, params, signal);
+          break;
+        } catch (err) {
+          // 中止は形を変えても同じなので、次の形を試さずにそのまま返す。
+          if (signal?.aborted) throw err;
+          errors.push(err);
         }
       }
+      if (!result) throw sqliteReadonlyAttemptsFailed(attempts, errors);
       return result.rows.length > maxRows
         ? { ...result, rows: result.rows.slice(0, maxRows), rowCount: maxRows }
         : result;

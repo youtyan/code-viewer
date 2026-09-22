@@ -11,7 +11,7 @@ import type {
   DynamoDbTableResponse,
   DynamoDbTablesResponse,
 } from "../../core/database/types";
-import { responseErrorMessage } from "../../core/error-detail";
+import { formatErrorDetail } from "../../core/error-detail";
 import { isImeComposing } from "../../core/keyboard";
 import { formatBytes } from "../../core/source-meta";
 import { createAbortGuard } from "./abort-guard";
@@ -19,7 +19,7 @@ import { createDetailTable } from "./detail-table";
 import { createDetailTabs } from "./detail-tabs";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
-import { reportDatastoreFailure } from "./report-failure";
+import { reportDatastoreFailure, requireOkResponse } from "./report-failure";
 
 export type DynamoDbExplorerCallbacks = {
   onSelectionChange?: (selection: DynamoDbExplorerSelection) => void;
@@ -129,19 +129,23 @@ function itemKeyToken(key: DynamoDbKey): string {
   return JSON.stringify(sorted);
 }
 
+// 読めなかったときは理由 (JSON.parse の位置つきの文、またはオブジェクトで
+// ないこと) を返し、画面に出す。
 function parseAttributeValuesJson(
   raw: string,
-): Record<string, DynamoDbAttributeValue> | null {
-  if (!raw.trim()) return {};
+  notObject: string,
+): { values: Record<string, DynamoDbAttributeValue> } | { reason: string } {
+  if (!raw.trim()) return { values: {} };
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, DynamoDbAttributeValue>;
-  } catch {
-    return null;
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { reason: formatErrorDetail(err) };
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { reason: notObject };
+  }
+  return { values: parsed as Record<string, DynamoDbAttributeValue> };
 }
 
 export function createDynamoDbExplorer(
@@ -149,6 +153,8 @@ export function createDynamoDbExplorer(
 ): DynamoDbExplorerView {
   const text = (): DbText["explorer"] =>
     (callbacks.getText?.() ?? dbText("en")).explorer;
+  const tFailure = (): DbText["failure"] =>
+    (callbacks.getText?.() ?? dbText("en")).failure;
   const trackLoad = <T>(promise: Promise<T>): Promise<T> =>
     callbacks.trackLoad ? callbacks.trackLoad(promise) : promise;
 
@@ -546,7 +552,9 @@ export function createDynamoDbExplorer(
     pre.className = "dynamodb-item-source";
     try {
       pre.textContent = JSON.stringify(unwrapItem(item), null, 2);
-    } catch {
+    } catch (err) {
+      // 描けない値でもアイテムは出す。描けなかった理由は console に残す。
+      reportDatastoreFailure("DynamoDB", "item render", err, currentTable);
       pre.textContent = String(item);
     }
     itemBody.appendChild(pre);
@@ -574,8 +582,9 @@ export function createDynamoDbExplorer(
     if (!currentDbId || !currentTable || disposed) return;
     const keyConditionExpression = keyConditionInput.value.trim();
     const filterExpression = filterInput.value.trim();
-    const attributeValues = parseAttributeValuesJson(
+    const parsedValues = parseAttributeValuesJson(
       attributeValuesInput.value,
+      text().dynamodb.attributeValuesNotObject,
     );
     queryError.hidden = true;
     // itemsGuard.start() より前に検証する。start() 後に return すると
@@ -585,11 +594,12 @@ export function createDynamoDbExplorer(
       queryError.textContent = text().dynamodb.keyConditionPlaceholder;
       return;
     }
-    if (attributeValues === null) {
+    if ("reason" in parsedValues) {
       queryError.hidden = false;
-      queryError.textContent = text().dynamodb.invalidAttributeValues;
+      queryError.textContent = `${text().dynamodb.invalidAttributeValues}: ${parsedValues.reason}`;
       return;
     }
+    const attributeValues = parsedValues.values;
     const slot = itemsGuard.start();
     const requestRunId = loadRunId;
     const requestDbId = currentDbId;
@@ -634,13 +644,7 @@ export function createDynamoDbExplorer(
         }),
       );
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const errText = await res.text();
-        setPaneStatus(itemList, `Error: ${errText || res.statusText}`, {
-          error: true,
-        });
-        return;
-      }
+      await requireOkResponse(res, tFailure().dynamodbItems);
       const data = (await res.json()) as DynamoDbItemsResponse;
       if (
         disposed ||
@@ -672,7 +676,13 @@ export function createDynamoDbExplorer(
       if (slot.isStale()) return;
       setPaneStatus(
         itemList,
-        `Error: ${reportDatastoreFailure("DynamoDB", "item list", err, requestTable, requestMode)}`,
+        reportDatastoreFailure(
+          "DynamoDB",
+          "item list",
+          err,
+          requestTable,
+          requestMode,
+        ),
         { error: true },
       );
     } finally {
@@ -698,13 +708,7 @@ export function createDynamoDbExplorer(
         }),
       );
       if (isStaleRequest()) return;
-      if (!res.ok) {
-        const errText = await res.text();
-        setPaneStatus(structureBody, `Error: ${errText || res.statusText}`, {
-          error: true,
-        });
-        return;
-      }
+      await requireOkResponse(res, tFailure().dynamodbTable);
       const data = (await res.json()) as DynamoDbTableResponse;
       if (isStaleRequest()) return;
       currentTableInfo = data.table;
@@ -716,7 +720,7 @@ export function createDynamoDbExplorer(
       if (isStaleRequest()) return;
       setPaneStatus(
         structureBody,
-        `Error: ${reportDatastoreFailure("DynamoDB", "table describe", err, table)}`,
+        reportDatastoreFailure("DynamoDB", "table describe", err, table),
         { error: true },
       );
     } finally {
@@ -740,9 +744,7 @@ export function createDynamoDbExplorer(
         fetch(`${apiUrl("dbDynamodbItem")}?${params}`, { signal: slot.signal }),
       );
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        throw new Error(await responseErrorMessage(res, "get item"));
-      }
+      await requireOkResponse(res, tFailure().dynamodbItem);
       const data = (await res.json()) as DynamoDbItemResponse;
       if (
         disposed ||
@@ -839,10 +841,7 @@ export function createDynamoDbExplorer(
         }),
       );
       if (disposed || slot.isStale() || requestDbId !== currentDbId) return;
-      if (!res.ok) {
-        tableMoreBtn.title = (await res.text()) || res.statusText;
-        return;
-      }
+      await requireOkResponse(res, tFailure().dynamodbTables);
       const data = (await res.json()) as DynamoDbTablesResponse;
       if (disposed || slot.isStale() || requestDbId !== currentDbId) return;
       renderTables(data.tableNames, true);
@@ -928,13 +927,7 @@ export function createDynamoDbExplorer(
         }),
       );
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const errText = await res.text();
-        setPaneStatus(tableList, `Error: ${errText || res.statusText}`, {
-          error: true,
-        });
-        return;
-      }
+      await requireOkResponse(res, tFailure().dynamodbTables);
       const data = (await res.json()) as DynamoDbTablesResponse;
       if (
         disposed ||
@@ -984,7 +977,7 @@ export function createDynamoDbExplorer(
       if (slot.isStale()) return;
       setPaneStatus(
         tableList,
-        `Error: ${reportDatastoreFailure("DynamoDB", "table list", err, dbId)}`,
+        reportDatastoreFailure("DynamoDB", "table list", err, dbId),
         { error: true },
       );
     } finally {

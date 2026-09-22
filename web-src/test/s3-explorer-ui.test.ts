@@ -37,13 +37,15 @@ function json(body: unknown): Response {
   });
 }
 
-function installFetchMock(fail?: (url: URL) => Error | null): void {
+// fail が Error を返せば通信の失敗として投げ、Response を返せばそれを応答する。
+function installFetchMock(fail?: (url: URL) => Error | Response | null): void {
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
     writable: true,
     value: (async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://localhost");
       const failure = fail?.(url);
+      if (failure instanceof Response) return failure;
       if (failure) throw failure;
       const p = url.pathname;
       if (p === "/_db/s3/buckets")
@@ -442,9 +444,11 @@ describe("S3 explorer UI", () => {
   });
 
   // 直す前は err.message だけを出し、console にも cause にも何も残らなかった。
-  test.each([
+  // HTTP の失敗は画面に本文を出すだけで、操作も状態も console も無かった。
+  const FAILURE_CASES = [
     {
       operation: "bucket list",
+      httpOperation: "load S3 buckets",
       fails: (url: URL) => url.pathname === "/_db/s3/buckets",
       open: async () => {
         // 開くだけ (load の中で失敗する)。
@@ -453,6 +457,7 @@ describe("S3 explorer UI", () => {
     },
     {
       operation: "object list",
+      httpOperation: "load S3 objects",
       fails: (url: URL) => url.pathname === "/_db/s3/objects",
       open: async () => {
         // 開くだけ (load の中で失敗する)。
@@ -461,6 +466,7 @@ describe("S3 explorer UI", () => {
     },
     {
       operation: "folder tree",
+      httpOperation: "load S3 folder",
       fails: (url: URL) =>
         url.pathname === "/_db/s3/folder" && !url.searchParams.get("prefix"),
       open: async (view: ReturnType<typeof createS3Explorer>) => {
@@ -470,6 +476,7 @@ describe("S3 explorer UI", () => {
     },
     {
       operation: "folder",
+      httpOperation: "load S3 folder",
       fails: (url: URL) =>
         url.pathname === "/_db/s3/folder" &&
         url.searchParams.get("prefix") === "images/",
@@ -485,6 +492,7 @@ describe("S3 explorer UI", () => {
     },
     {
       operation: "object preview",
+      httpOperation: "load S3 object text",
       fails: (url: URL) => url.pathname === "/_db/s3/text",
       open: async (view: ReturnType<typeof createS3Explorer>) => {
         await waitFor(
@@ -501,8 +509,16 @@ describe("S3 explorer UI", () => {
       },
       where: ".s3-preview-pane .db-pane-error",
     },
-  ])("$operation の失敗は理由を cause ごと画面と console に出す", async ({
+  ];
+  test.each(
+    FAILURE_CASES.flatMap((failureCase) => [
+      { ...failureCase, via: "network" as const },
+      { ...failureCase, via: "http" as const },
+    ]),
+  )("$operation の $via の失敗は理由を画面と console に出す", async ({
     operation,
+    httpOperation,
+    via,
     fails,
     open,
     where,
@@ -510,7 +526,13 @@ describe("S3 explorer UI", () => {
     const failure = Object.assign(new Error(`${operation} request failed`), {
       cause: new Error("network is unreachable"),
     });
-    installFetchMock((url) => (fails(url) ? failure : null));
+    installFetchMock((url) =>
+      fails(url)
+        ? via === "network"
+          ? failure
+          : new Response("sample failure", { status: 500 })
+        : null,
+    );
     const logged: unknown[][] = [];
     const originalError = console.error;
     console.error = (...args: unknown[]) => {
@@ -523,14 +545,43 @@ describe("S3 explorer UI", () => {
       await waitFor(() => !!root.querySelector(where));
 
       const shown = root.querySelector(where)?.textContent ?? "";
-      expect(shown).toContain(`${operation} request failed`);
-      expect(shown).toContain("Caused by");
-      expect(shown).toContain("network is unreachable");
+      expect(shown).not.toContain("Error: Error:");
       const s3Logs = logged.filter(
         (args) => args[0] === `[code-viewer] S3 ${operation} failed`,
       );
       expect(s3Logs.length).toBe(1);
-      expect(s3Logs[0]?.[s3Logs[0].length - 1]).toBe(failure);
+      const logged0 = s3Logs[0]?.[s3Logs[0].length - 1];
+      if (via === "network") {
+        expect(shown).toContain(`${operation} request failed`);
+        expect(shown).toContain("Caused by");
+        expect(shown).toContain("network is unreachable");
+        expect(logged0).toBe(failure);
+      } else {
+        const detail = `${httpOperation} (HTTP 500): sample failure`;
+        expect(shown).toContain(`Error: ${detail}`);
+        expect((logged0 as Error).message).toBe(detail);
+      }
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  test("HTTP の失敗の操作名を表示の言語で出す", async () => {
+    installFetchMock((url) =>
+      url.pathname === "/_db/s3/buckets"
+        ? new Response("sample failure", { status: 500 })
+        : null,
+    );
+    const originalError = console.error;
+    console.error = () => undefined;
+    try {
+      await mountExplorer({ getText: () => dbText("ja") });
+      expect(
+        document.body.querySelector(".s3-object-list .db-pane-error")
+          ?.textContent,
+      ).toBe(
+        "Error: S3 のバケットの一覧を読み込めませんでした (HTTP 500): sample failure",
+      );
     } finally {
       console.error = originalError;
     }

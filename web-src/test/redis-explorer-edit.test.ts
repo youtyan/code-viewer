@@ -33,7 +33,7 @@ const origFetch = globalThis.fetch;
 
 function installFetch(
   options: {
-    fail?: (url: string) => Error | null;
+    fail?: (url: string) => Error | Response | null;
     value?: Record<string, unknown>;
   } = {},
 ) {
@@ -41,6 +41,7 @@ function installFetch(
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const failure = options.fail?.(url);
+    if (failure instanceof Response) return failure;
     if (failure) throw failure;
     if (url.includes("/_db/redis/databases")) {
       return jsonResponse({
@@ -110,53 +111,86 @@ function failureWithCause(message: string): Error {
   });
 }
 
+// 各失敗を「通信の失敗」と「HTTP の失敗」の 2 通りで起こす。
+function withFailureKinds<T>(cases: T[]) {
+  return cases.flatMap((failureCase) => [
+    { ...failureCase, via: "network" as const },
+    { ...failureCase, via: "http" as const },
+  ]);
+}
+
+function failureFor(via: "network" | "http", failure: Error): Error | Response {
+  return via === "network"
+    ? failure
+    : new Response("sample failure", { status: 500 });
+}
+
+// httpDetail があれば HTTP の失敗として、操作と状態と本文が出ることを見る。
 async function expectReportedFailure(
   operation: string,
   failure: Error,
   shown: () => string | null | undefined,
   consoleError: { mock: { calls: unknown[][] } },
+  httpDetail?: string,
 ): Promise<void> {
-  await waitFor(() => !!shown());
+  // 書き込みの行は先に「保存中」を出すので、理由が出るまで待つ。
+  await waitFor(() => (shown() ?? "").includes(httpDetail ?? failure.message));
   const text = shown() ?? "";
-  expect(text).toContain(failure.message);
-  expect(text).toContain("Caused by");
-  expect(text).toContain("network is unreachable");
+  expect(text).not.toContain("Error: Error:");
   const logs = consoleError.mock.calls.filter(
     (args) => args[0] === `[code-viewer] Redis ${operation} failed`,
   );
   expect(logs.length).toBe(1);
-  expect(logs[0]?.[logs[0].length - 1]).toBe(failure);
+  const logged = logs[0]?.[logs[0].length - 1];
+  if (httpDetail) {
+    expect(text).toContain(`Error: ${httpDetail}`);
+    expect((logged as Error).message).toBe(httpDetail);
+    return;
+  }
+  expect(text).toContain(failure.message);
+  expect(text).toContain("Caused by");
+  expect(text).toContain("network is unreachable");
+  expect(logged).toBe(failure);
 }
 
 // 直す前は err.message だけを出し、console にも cause にも何も残らなかった。
 describe("redis explorer failures", () => {
-  test.each([
-    {
-      operation: "database list",
-      fails: (url: string) => url.includes("/_db/redis/databases"),
-      where: ".redis-db-list .db-pane-error",
-      clickKey: false,
-    },
-    {
-      operation: "key list",
-      fails: (url: string) => url.includes("/_db/redis/keys"),
-      where: ".redis-key-list .db-pane-error",
-      clickKey: false,
-    },
-    {
-      operation: "value",
-      fails: (url: string) => url.includes("/_db/redis/value"),
-      where: ".redis-main-pane .db-pane-error",
-      clickKey: true,
-    },
-  ])("$operation の失敗は理由を cause ごと画面と console に出す", async ({
+  test.each(
+    withFailureKinds([
+      {
+        operation: "database list",
+        httpOperation: "load Redis databases",
+        fails: (url: string) => url.includes("/_db/redis/databases"),
+        where: ".redis-db-list .db-pane-error",
+        clickKey: false,
+      },
+      {
+        operation: "key list",
+        httpOperation: "load Redis keys",
+        fails: (url: string) => url.includes("/_db/redis/keys"),
+        where: ".redis-key-list .db-pane-error",
+        clickKey: false,
+      },
+      {
+        operation: "value",
+        httpOperation: "load Redis value",
+        fails: (url: string) => url.includes("/_db/redis/value"),
+        where: ".redis-main-pane .db-pane-error",
+        clickKey: true,
+      },
+    ]),
+  )("$operation の $via の失敗は理由を画面と console に出す", async ({
     operation,
+    httpOperation,
+    via,
     fails,
     where,
     clickKey,
   }) => {
     const failure = failureWithCause(`${operation} request failed`);
-    installFetch({ fail: (url) => (fails(url) ? failure : null) });
+    installFetch({
+      fail: (url) => (fails(url) ? failureFor(via, failure) : null),
+    });
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
@@ -173,6 +207,9 @@ describe("redis explorer failures", () => {
         failure,
         () => document.body.querySelector(where)?.textContent,
         consoleError,
+        via === "http"
+          ? `${httpOperation} (HTTP 500): sample failure`
+          : undefined,
       );
     } finally {
       view.dispose();
@@ -181,46 +218,53 @@ describe("redis explorer failures", () => {
     }
   });
 
-  test.each([
-    {
-      operation: "key write",
-      act: async (view: RedisView) => {
-        q<HTMLButtonElement>(view.el, ".redis-value-actions .db-btn").click();
-        await tick();
-        q<HTMLButtonElement>(
-          view.el,
-          ".redis-value-edit-bar .db-btn-primary",
-        ).click();
+  test.each(
+    withFailureKinds([
+      {
+        operation: "key write",
+        httpOperation: "write Redis key",
+        act: async (view: RedisView) => {
+          q<HTMLButtonElement>(view.el, ".redis-value-actions .db-btn").click();
+          await tick();
+          q<HTMLButtonElement>(
+            view.el,
+            ".redis-value-edit-bar .db-btn-primary",
+          ).click();
+        },
+        where: ".redis-value-edit-status",
       },
-      where: ".redis-value-edit-status",
-    },
-    {
-      operation: "key delete",
-      act: async (view: RedisView) => {
-        const buttons = view.el.querySelectorAll<HTMLButtonElement>(
-          ".redis-value-actions .db-btn",
-        );
-        buttons[buttons.length - 1].click();
-        await tick();
-        clickDialogConfirm();
+      {
+        operation: "key delete",
+        httpOperation: "write Redis key",
+        act: async (view: RedisView) => {
+          const buttons = view.el.querySelectorAll<HTMLButtonElement>(
+            ".redis-value-actions .db-btn",
+          );
+          buttons[buttons.length - 1].click();
+          await tick();
+          clickDialogConfirm();
+        },
+        where: ".redis-main-pane .db-pane-error",
       },
-      where: ".redis-main-pane .db-pane-error",
-    },
-    {
-      operation: "key create",
-      act: async (view: RedisView) => {
-        q<HTMLButtonElement>(view.el, ".redis-new-key-btn").click();
-        await tick();
-        q<HTMLInputElement>(view.el, ".redis-new-key-name").value = "newkey";
-        q<HTMLButtonElement>(
-          view.el,
-          ".redis-new-key-form .db-btn-primary",
-        ).click();
+      {
+        operation: "key create",
+        httpOperation: "write Redis key",
+        act: async (view: RedisView) => {
+          q<HTMLButtonElement>(view.el, ".redis-new-key-btn").click();
+          await tick();
+          q<HTMLInputElement>(view.el, ".redis-new-key-name").value = "newkey";
+          q<HTMLButtonElement>(
+            view.el,
+            ".redis-new-key-form .db-btn-primary",
+          ).click();
+        },
+        where: ".redis-new-key-form .redis-value-edit-status",
       },
-      where: ".redis-new-key-form .redis-value-edit-status",
-    },
-  ])("$operation の失敗は理由を cause ごと画面と console に出す", async ({
+    ]),
+  )("$operation の $via の失敗は理由を画面と console に出す", async ({
     operation,
+    httpOperation,
+    via,
     act,
     where,
   }) => {
@@ -229,7 +273,8 @@ describe("redis explorer failures", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
     const view = await setupSelectedKey({
-      fail: (url) => (url.includes("/_db/redis/write") ? failure : null),
+      fail: (url) =>
+        url.includes("/_db/redis/write") ? failureFor(via, failure) : null,
     });
     try {
       await act(view);
@@ -238,6 +283,9 @@ describe("redis explorer failures", () => {
         failure,
         () => view.el.querySelector(where)?.textContent,
         consoleError,
+        via === "http"
+          ? `${httpOperation} (HTTP 500): sample failure`
+          : undefined,
       );
     } finally {
       view.dispose();

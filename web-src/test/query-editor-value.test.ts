@@ -230,7 +230,9 @@ describe("query editor value display", () => {
       name: "Run",
       invoke: (editor: ReturnType<typeof createQueryEditor>) => editor.run(),
       expectedOperation: "Failed to execute query",
-      expectedScreen: "query request failed",
+      // 直す前は err.message だけを出し、cause が画面から消えていた。
+      expectedScreen:
+        "Error: query request failed\nCaused by: TypeError: database connection lost",
     },
     {
       name: "Explain",

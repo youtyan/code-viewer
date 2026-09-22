@@ -39,7 +39,7 @@ import { showConfirmDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
-import { reportDatastoreFailure } from "./report-failure";
+import { reportDatastoreFailure, requireOkResponse } from "./report-failure";
 
 export type S3ExplorerCallbacks = {
   onSelectionChange?: (selection: S3ExplorerSelection) => void;
@@ -135,6 +135,8 @@ export function createS3Explorer(
     (callbacks.getText?.() ?? dbText("en")).explorer.s3;
   const tCommon = (): DbText["explorer"]["common"] =>
     (callbacks.getText?.() ?? dbText("en")).explorer.common;
+  const tFailure = (): DbText["failure"] =>
+    (callbacks.getText?.() ?? dbText("en")).failure;
   const container = document.createElement("div");
   container.className = "s3-explorer";
 
@@ -442,7 +444,7 @@ export function createS3Explorer(
       key,
     });
     const res = await fetch(`${apiUrl("dbS3Head")}?${params}`, { signal });
-    if (!res.ok) return { key, sizeBytes: 0 };
+    await requireOkResponse(res, tFailure().s3ObjectHead);
     const data = (await res.json()) as S3ObjectHeadResponse;
     return {
       key,
@@ -543,14 +545,7 @@ export function createS3Explorer(
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const text = await res.text();
-        setPaneStatus(objectList, `Error: ${text || res.statusText}`, {
-          error: true,
-        });
-        objectStatus.textContent = "";
-        return;
-      }
+      await requireOkResponse(res, tFailure().s3Objects);
       const data = (await res.json()) as S3ObjectsResponse;
       if (
         disposed ||
@@ -583,7 +578,13 @@ export function createS3Explorer(
       if (slot.isStale()) return;
       setPaneStatus(
         objectList,
-        `Error: ${reportDatastoreFailure("S3", "object list", err, requestBucket, requestSearch)}`,
+        reportDatastoreFailure(
+          "S3",
+          "object list",
+          err,
+          requestBucket,
+          requestSearch,
+        ),
         { error: true },
       );
       objectStatus.textContent = "";
@@ -613,7 +614,7 @@ export function createS3Explorer(
     const res = await (callbacks.trackLoad
       ? callbacks.trackLoad(doFetch)
       : doFetch);
-    if (!res.ok) throw new Error((await res.text()) || res.statusText);
+    await requireOkResponse(res, tFailure().s3Write);
   }
 
   function refreshObjectList(): void {
@@ -635,7 +636,7 @@ export function createS3Explorer(
         key: object.key,
       });
       const res = await fetch(`${apiUrl("dbS3Text")}?${params}`);
-      if (!res.ok) throw new Error((await res.text()) || res.statusText);
+      await requireOkResponse(res, tFailure().s3ObjectText);
       current = ((await res.json()) as S3ObjectTextResponse).text;
     } catch (err) {
       setPaneStatus(
@@ -906,13 +907,7 @@ export function createS3Explorer(
       signal: slot.signal,
     });
     if (disposed || slot.isStale()) return null;
-    if (!res.ok) {
-      const text = await res.text();
-      const error = document.createElement("div");
-      error.className = "db-pane-error";
-      error.textContent = text || res.statusText;
-      return error;
-    }
+    await requireOkResponse(res, tFailure().s3ObjectText);
     const data = (await res.json()) as S3ObjectTextResponse;
     if (disposed || slot.isStale()) return null;
     const previewKind = sourcePreviewKind(object.key);
@@ -1002,7 +997,13 @@ export function createS3Explorer(
       if (slot.isStale()) return;
       setPaneStatus(
         body,
-        `Error: ${reportDatastoreFailure("S3", "object preview", err, requestBucket, object.key)}`,
+        reportDatastoreFailure(
+          "S3",
+          "object preview",
+          err,
+          requestBucket,
+          object.key,
+        ),
         { error: true },
       );
     } finally {
@@ -1055,7 +1056,7 @@ export function createS3Explorer(
     const res = await fetch(`${apiUrl("dbS3Folder")}?${params}`, {
       signal: explorerAbort?.signal,
     });
-    if (!res.ok) throw new Error((await res.text()) || res.statusText);
+    await requireOkResponse(res, tFailure().s3Folder);
     return (await res.json()) as S3FolderResponse;
   }
 
@@ -1264,7 +1265,7 @@ export function createS3Explorer(
           makeTreeMessageRow(
             "s3-tree-error",
             depth,
-            `Error: ${reportDatastoreFailure("S3", "folder", err, bucket, prefix)}`,
+            reportDatastoreFailure("S3", "folder", err, bucket, prefix),
           ),
         );
       } finally {
@@ -1302,7 +1303,7 @@ export function createS3Explorer(
       if (slot.isStale() || isAbortError(err)) return;
       setPaneStatus(
         explorerTree,
-        `Error: ${reportDatastoreFailure("S3", "folder tree", err, bucket)}`,
+        reportDatastoreFailure("S3", "folder tree", err, bucket),
         { error: true },
       );
     } finally {
@@ -1486,13 +1487,7 @@ export function createS3Explorer(
         { signal: slot.signal },
       );
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const text = await res.text();
-        setPaneStatus(objectList, `Error: ${text || res.statusText}`, {
-          error: true,
-        });
-        return;
-      }
+      await requireOkResponse(res, tFailure().s3Buckets);
       const data = (await res.json()) as S3BucketsResponse;
       if (
         disposed ||
@@ -1567,7 +1562,7 @@ export function createS3Explorer(
       if (slot.isStale()) return;
       setPaneStatus(
         objectList,
-        `Error: ${reportDatastoreFailure("S3", "bucket list", err, dbId)}`,
+        reportDatastoreFailure("S3", "bucket list", err, dbId),
         { error: true },
       );
     } finally {

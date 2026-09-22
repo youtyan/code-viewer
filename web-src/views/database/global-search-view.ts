@@ -2,7 +2,7 @@ import { apiUrl } from "../../core/api-url";
 import type { GlobalSearchHit } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
 import { type DbText, dbText } from "./i18n";
-import { reportDatastoreFailure } from "./report-failure";
+import { reportDatastoreFailure, requireOkResponse } from "./report-failure";
 
 export type GlobalSearchViewDeps = {
   getDbId: () => string | null;
@@ -110,21 +110,21 @@ export function createGlobalSearchView(
           includeNonText: nonTextCheck.checked,
         }),
       });
-      if (!res.ok) {
-        progress.textContent = text().search.error(await res.text());
-        stopPolling();
-        return;
-      }
+      await requireOkResponse(res, text().failure.searchStart);
       const data = (await res.json()) as { jobId: string };
       if (disposed) {
-        void cancelJob(data.jobId);
+        cancelJobQuietly(data.jobId);
         return;
       }
       currentJobId = data.jobId;
       pollTimer = setInterval(() => pollStatus(), 500);
     } catch (err) {
-      progress.textContent = text().search.error(
-        reportDatastoreFailure("SQL", "search start", err, dbId, term),
+      progress.textContent = reportDatastoreFailure(
+        "SQL",
+        "search start",
+        err,
+        dbId,
+        term,
       );
       stopPolling();
     }
@@ -133,14 +133,32 @@ export function createGlobalSearchView(
   async function pollStatus() {
     if (disposed) return;
     if (!currentJobId) return;
+    const jobId = currentJobId;
+    let res: Response;
     try {
-      const res = await fetch(
-        `${apiUrl("dbSearchStatus")}?id=${encodeURIComponent(currentJobId)}`,
+      res = await fetch(
+        `${apiUrl("dbSearchStatus")}?id=${encodeURIComponent(jobId)}`,
       );
-      if (!res.ok) {
-        stopPolling();
-        return;
-      }
+    } catch (err) {
+      // 届かなかった失敗は次の周期で取り直す。理由は毎回 console に残す。
+      reportDatastoreFailure("SQL", "search status", err, jobId);
+      return;
+    }
+    try {
+      // サーバが断った失敗は取り直さない。諦めたことを画面に出す。
+      await requireOkResponse(res, text().failure.searchStatus);
+    } catch (err) {
+      stopPolling();
+      if (disposed) return;
+      progress.textContent = reportDatastoreFailure(
+        "SQL",
+        "search status",
+        err,
+        jobId,
+      );
+      return;
+    }
+    try {
       const data = (await res.json()) as {
         scannedTables: number;
         totalTables: number;
@@ -177,8 +195,9 @@ export function createGlobalSearchView(
         stopPolling();
         progress.hidden = false;
       }
-    } catch {
-      // retry on next poll
+    } catch (err) {
+      // 読めなかった応答も次の周期で取り直す。理由は毎回 console に残す。
+      reportDatastoreFailure("SQL", "search status", err, jobId);
     }
   }
 
@@ -186,25 +205,41 @@ export function createGlobalSearchView(
     if (!currentJobId) return;
     const jobId = currentJobId;
     currentJobId = null;
-    await cancelJob(jobId);
+    try {
+      await cancelJob(jobId);
+    } catch (err) {
+      stopPolling();
+      if (disposed) return;
+      progress.textContent = reportDatastoreFailure(
+        "SQL",
+        "search cancel",
+        err,
+        jobId,
+      );
+      return;
+    }
     stopPolling();
     if (disposed) return;
     progress.textContent = text().search.cancelled;
   }
 
-  async function cancelJob(jobId: string) {
-    try {
-      await fetch(apiUrl("dbSearchCancel"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Code-Viewer-Action": "1",
-        },
-        body: JSON.stringify({ id: jobId }),
-      });
-    } catch {
-      // ignore
-    }
+  async function cancelJob(jobId: string): Promise<void> {
+    const res = await fetch(apiUrl("dbSearchCancel"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Code-Viewer-Action": "1",
+      },
+      body: JSON.stringify({ id: jobId }),
+    });
+    await requireOkResponse(res, text().failure.searchCancel);
+  }
+
+  // 画面を閉じたあとの中止。見せる場所が無いので、失敗は console にだけ残す。
+  function cancelJobQuietly(jobId: string): void {
+    cancelJob(jobId).catch((err: unknown) => {
+      reportDatastoreFailure("SQL", "search cancel", err, jobId);
+    });
   }
 
   function renderHits(hits: GlobalSearchHit[]) {
@@ -295,7 +330,7 @@ export function createGlobalSearchView(
     if (currentJobId) {
       const jobId = currentJobId;
       currentJobId = null;
-      void cancelJob(jobId);
+      cancelJobQuietly(jobId);
     }
   }
 

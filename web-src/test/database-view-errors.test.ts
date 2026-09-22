@@ -826,6 +826,116 @@ describe("database view SQL error rendering", () => {
     await leaveView(view);
   });
 
+  // 直す前は通信の失敗を err.message だけでセッションログに載せ、cause が消えていた。
+  test("keeps the whole failure with its cause in the session log", async () => {
+    installDatabaseDom();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failure = Object.assign(new TypeError("table request failed"), {
+      cause: new Error("network is unreachable"),
+    });
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table")) return Promise.reject(failure);
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+    await flushMicrotasks();
+
+    const entry = document.querySelector(
+      ".db-session-log-entry",
+    ) as unknown as FakeElement | null;
+    if (!entry) throw new Error("session log entry is missing");
+    await entry.click();
+    const message = document.querySelector(".db-session-log-message");
+    expect(message?.textContent).toBe(
+      "TypeError: table request failed\nCaused by: Error: network is unreachable",
+    );
+    await leaveView(view);
+  });
+
+  // 直す前は新しいタブの本文が空で、select も空の箱、タブの札は日本語でも
+  // "(empty)" だった。
+  test.each([
+    {
+      language: "en" as const,
+      title: "Choose a datastore",
+      hint: "Pick one in the box at the top left, or add a connection with +.",
+      select: "Select datastore",
+      chip: "New tab",
+    },
+    {
+      language: "ja" as const,
+      title: "データストアを選んでください",
+      hint: "左上の欄から選ぶか、＋ から接続を追加してください。",
+      select: "データストアを選択",
+      chip: "新しいタブ",
+    },
+  ])("guides a new tab to choose a datastore: $language", async ({
+    language,
+    title,
+    hint,
+    select,
+    chip,
+  }) => {
+    installDatabaseDom();
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest({ getLanguage: () => language });
+    await view.enter("docker:db");
+    const newTab = document.querySelector(
+      ".db-tabs-new-btn",
+    ) as unknown as FakeElement | null;
+    if (!newTab) throw new Error("new tab button is missing");
+    await newTab.click();
+    await flushMicrotasks();
+
+    const guides = (
+      Array.from(
+        document.querySelectorAll(".db-no-datastores"),
+      ) as unknown as FakeElement[]
+    ).filter((pane) => !pane.hidden);
+    expect(guides).toHaveLength(1);
+    const guide = guides[0] as unknown as HTMLElement;
+    expect(guide.querySelector(".db-pane-empty-title")?.textContent).toBe(
+      title,
+    );
+    expect(guide.querySelector(".db-pane-empty-hint")?.textContent).toBe(hint);
+    const placeholders = (
+      Array.from(
+        document.querySelectorAll(".db-file-select"),
+      ) as unknown as FakeElement[]
+    )
+      .flatMap((selectEl) => selectEl.children)
+      .filter(
+        (option): option is FakeElement =>
+          option instanceof FakeElement &&
+          (option as unknown as { disabled?: boolean }).disabled === true,
+      );
+    expect(placeholders.map((option) => option.textContent)).toEqual([select]);
+    const chips = Array.from(
+      document.querySelectorAll(".db-tabs-chip-label"),
+    ).map((label) => label.textContent);
+    expect(chips[chips.length - 1]).toBe(chip);
+    await leaveView(view);
+  });
+
   test("keeps the normal schema and first table path rendering", async () => {
     installDatabaseDom();
     mockFetch((url, init) => {
@@ -1278,12 +1388,12 @@ describe("database view SQL error rendering", () => {
     const view = createViewForTest();
     await view.enter();
 
-    expect(restoredTabLabels()).toEqual(["db", "(empty)"]);
+    expect(restoredTabLabels()).toEqual(["db", "New tab"]);
 
     view.suspend();
     await view.enter();
 
-    expect(restoredTabLabels()).toEqual(["db", "(empty)"]);
+    expect(restoredTabLabels()).toEqual(["db", "New tab"]);
     expect(tabFetches).toBe(1);
     await leaveView(view);
   });
@@ -2389,8 +2499,9 @@ describe("database view SQL error rendering", () => {
     ) as unknown as FakeElement | null;
     await runButton?.click();
 
+    // 画面には error の型名から始まる全文を出す (cause があれば続く)。
     expect(document.querySelector(".db-query-error")?.textContent).toBe(
-      "failed to execute query (HTTP 500): query failed",
+      "Error: failed to execute query (HTTP 500): query failed",
     );
     expect(document.querySelector<HTMLElement>(".db-grid")?.hidden).toBe(true);
     expect(
@@ -2574,7 +2685,11 @@ describe("database view SQL error rendering", () => {
 
     await view.refresh();
     expect(filesFetches).toBe(2);
-    expect(unavailable.hidden).toBe(true);
+    // 失敗の文は消え、データストアを選んでいないタブとして案内を出す。
+    expect(unavailable.querySelector(".db-pane-error")).toBeNull();
+    expect(unavailable.querySelector(".db-pane-empty-title")?.textContent).toBe(
+      "Choose a datastore",
+    );
     expect(
       (document.querySelector(".db-file-select") as unknown as FakeElement)
         .disabled,

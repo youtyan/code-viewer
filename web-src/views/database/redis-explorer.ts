@@ -12,7 +12,7 @@ import { showConfirmDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
-import { reportDatastoreFailure } from "./report-failure";
+import { reportDatastoreFailure, requireOkResponse } from "./report-failure";
 
 function isBinaryItem(item: RedisItem): item is { binaryBase64: string } {
   return typeof item === "object" && item !== null && "binaryBase64" in item;
@@ -64,6 +64,8 @@ export function createRedisExplorer(
 ): RedisExplorerView {
   const text = (): DbText["explorer"] =>
     (callbacks.getText?.() ?? dbText("en")).explorer;
+  const tFailure = (): DbText["failure"] =>
+    (callbacks.getText?.() ?? dbText("en")).failure;
   const container = document.createElement("div");
   container.className = "redis-explorer";
 
@@ -256,7 +258,7 @@ export function createRedisExplorer(
     const res = await (callbacks.trackLoad
       ? callbacks.trackLoad(doFetch)
       : doFetch);
-    if (!res.ok) throw new Error((await res.text()) || res.statusText);
+    await requireOkResponse(res, tFailure().redisWrite);
   }
 
   async function deleteCurrentKey(key: string): Promise<void> {
@@ -598,13 +600,7 @@ export function createRedisExplorer(
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const text = await res.text();
-        setPaneStatus(mainPane, `Error: ${text || res.statusText}`, {
-          error: true,
-        });
-        return;
-      }
+      await requireOkResponse(res, tFailure().redisValue);
       const data = (await res.json()) as RedisValueResponse;
       if (
         disposed ||
@@ -622,7 +618,7 @@ export function createRedisExplorer(
       if (requestRunId !== keyRunId || requestDbId !== currentDbId) return;
       setPaneStatus(
         mainPane,
-        `Error: ${reportDatastoreFailure("Redis", "value", err, requestDbIndex, name)}`,
+        reportDatastoreFailure("Redis", "value", err, requestDbIndex, name),
         { error: true },
       );
     } finally {
@@ -664,11 +660,7 @@ export function createRedisExplorer(
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const text = await res.text();
-        setKeyStatus(`Error: ${text || res.statusText}`, true);
-        return;
-      }
+      await requireOkResponse(res, tFailure().redisKeys);
       const data = (await res.json()) as RedisKeysResponse;
       if (
         disposed ||
@@ -696,7 +688,13 @@ export function createRedisExplorer(
       if (slot.isStale()) return;
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setKeyStatus(
-        `Error: ${reportDatastoreFailure("Redis", "key list", err, requestDbIndex, currentKeyFilter)}`,
+        reportDatastoreFailure(
+          "Redis",
+          "key list",
+          err,
+          requestDbIndex,
+          currentKeyFilter,
+        ),
         true,
       );
     } finally {
@@ -766,11 +764,7 @@ export function createRedisExplorer(
         { signal: slot.signal },
       );
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const text = await res.text();
-        setDbStatus(`Error: ${text || res.statusText}`, true);
-        return;
-      }
+      await requireOkResponse(res, tFailure().redisDatabases);
       const data = (await res.json()) as RedisDatabasesResponse;
       if (
         disposed ||
@@ -822,7 +816,7 @@ export function createRedisExplorer(
     } catch (err) {
       if (slot.isStale()) return;
       setDbStatus(
-        `Error: ${reportDatastoreFailure("Redis", "database list", err, dbId)}`,
+        reportDatastoreFailure("Redis", "database list", err, dbId),
         true,
       );
     } finally {

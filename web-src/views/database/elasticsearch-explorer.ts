@@ -7,6 +7,7 @@ import type {
   EsIndicesResponse,
   EsMappingResponse,
 } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
 import { isImeComposing } from "../../core/keyboard";
 import { formatBytes } from "../../core/source-meta";
 import { showConfirmDialog } from "../ui-dialog";
@@ -15,7 +16,7 @@ import { createDetailTable } from "./detail-table";
 import { createDetailTabs } from "./detail-tabs";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
-import { reportDatastoreFailure } from "./report-failure";
+import { reportDatastoreFailure, requireOkResponse } from "./report-failure";
 
 export type ElasticsearchExplorerCallbacks = {
   // 選択中の index / query 文字列が変わったことを外側に通知する。タブ
@@ -46,6 +47,8 @@ export function createElasticsearchExplorer(
 ): ElasticsearchExplorerView {
   const text = (): DbText["explorer"] =>
     (callbacks.getText?.() ?? dbText("en")).explorer;
+  const tFailure = (): DbText["failure"] =>
+    (callbacks.getText?.() ?? dbText("en")).failure;
   const container = document.createElement("div");
   container.className = "es-explorer";
 
@@ -313,7 +316,7 @@ export function createElasticsearchExplorer(
     const res = await (callbacks.trackLoad
       ? callbacks.trackLoad(doFetch)
       : doFetch);
-    if (!res.ok) throw new Error((await res.text()) || res.statusText);
+    await requireOkResponse(res, tFailure().esWrite);
   }
 
   // 既存ドキュメントの _source を JSON 編集する。楽観ロック用に seqNo/
@@ -336,8 +339,8 @@ export function createElasticsearchExplorer(
       let parsed: unknown;
       try {
         parsed = JSON.parse(ta.value);
-      } catch {
-        status.textContent = text().es.invalidJson;
+      } catch (err) {
+        status.textContent = `${text().es.invalidJson}: ${formatErrorDetail(err)}`;
         return;
       }
       if (!currentDbId || !currentIndex) return;
@@ -444,8 +447,8 @@ export function createElasticsearchExplorer(
       let parsed: unknown;
       try {
         parsed = JSON.parse(ta.value);
-      } catch {
-        status.textContent = text().es.invalidJson;
+      } catch (err) {
+        status.textContent = `${text().es.invalidJson}: ${formatErrorDetail(err)}`;
         return;
       }
       const id = idInput.value.trim();
@@ -514,7 +517,15 @@ export function createElasticsearchExplorer(
     pre.className = "es-doc-source";
     try {
       pre.textContent = JSON.stringify(resp.source, null, 2);
-    } catch {
+    } catch (err) {
+      // 描けない値でもドキュメントは出す。描けなかった理由は console に残す。
+      reportDatastoreFailure(
+        "Elasticsearch",
+        "doc render",
+        err,
+        resp.index,
+        resp.id,
+      );
       pre.textContent = String(resp.source);
     }
     docBody.appendChild(pre);
@@ -532,13 +543,7 @@ export function createElasticsearchExplorer(
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const text = await res.text();
-        setPaneStatus(mappingBody, `Error: ${text || res.statusText}`, {
-          error: true,
-        });
-        return;
-      }
+      await requireOkResponse(res, tFailure().esMapping);
       const data = (await res.json()) as EsMappingResponse;
       if (
         disposed ||
@@ -555,7 +560,7 @@ export function createElasticsearchExplorer(
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setPaneStatus(
         mappingBody,
-        `Error: ${reportDatastoreFailure("Elasticsearch", "mapping", err, index)}`,
+        reportDatastoreFailure("Elasticsearch", "mapping", err, index),
         { error: true },
       );
     } finally {
@@ -590,11 +595,7 @@ export function createElasticsearchExplorer(
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const text = await res.text();
-        setDocStatus(`Error: ${text || res.statusText}`, true);
-        return;
-      }
+      await requireOkResponse(res, tFailure().esDocs);
       const data = (await res.json()) as EsDocsResponse;
       if (
         disposed ||
@@ -623,7 +624,13 @@ export function createElasticsearchExplorer(
       if (slot.isStale()) return;
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setDocStatus(
-        `Error: ${reportDatastoreFailure("Elasticsearch", "doc list", err, requestIndex, requestQuery)}`,
+        reportDatastoreFailure(
+          "Elasticsearch",
+          "doc list",
+          err,
+          requestIndex,
+          requestQuery,
+        ),
         true,
       );
     } finally {
@@ -665,13 +672,7 @@ export function createElasticsearchExplorer(
         signal: slot.signal,
       });
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const text = await res.text();
-        setPaneStatus(docBody, `Error: ${text || res.statusText}`, {
-          error: true,
-        });
-        return;
-      }
+      await requireOkResponse(res, tFailure().esDoc);
       const data = (await res.json()) as EsDocResponse;
       if (
         disposed ||
@@ -689,7 +690,7 @@ export function createElasticsearchExplorer(
       if (requestRunId !== docRunId || requestDbId !== currentDbId) return;
       setPaneStatus(
         docBody,
-        `Error: ${reportDatastoreFailure("Elasticsearch", "doc", err, requestIndex, id)}`,
+        reportDatastoreFailure("Elasticsearch", "doc", err, requestIndex, id),
         { error: true },
       );
     } finally {
@@ -782,11 +783,7 @@ export function createElasticsearchExplorer(
         { signal: slot.signal },
       );
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const text = await res.text();
-        setIndexStatus(`Error: ${text || res.statusText}`, true);
-        return;
-      }
+      await requireOkResponse(res, tFailure().esIndices);
       const data = (await res.json()) as EsIndicesResponse;
       if (
         disposed ||
@@ -814,7 +811,7 @@ export function createElasticsearchExplorer(
     } catch (err) {
       if (slot.isStale()) return;
       setIndexStatus(
-        `Error: ${reportDatastoreFailure("Elasticsearch", "index list", err, dbId)}`,
+        reportDatastoreFailure("Elasticsearch", "index list", err, dbId),
         true,
       );
     } finally {

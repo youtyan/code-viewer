@@ -1,4 +1,7 @@
-import { formatErrorDetail } from "../../core/error-detail";
+import {
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../../core/error-detail";
 
 /** Which part of the Data page failed; the console line starts with it. */
 export type DatastoreFailureKind =
@@ -19,4 +22,17 @@ export function reportDatastoreFailure(
 ): string {
   console.error(`[code-viewer] ${kind} ${operation} failed`, ...context, error);
   return formatErrorDetail(error);
+}
+
+/**
+ * Throw a failed response as an error that names the operation, the HTTP
+ * status and the body, so the caller's catch reports it like any other failure.
+ */
+export async function requireOkResponse(
+  response: Response,
+  operation: string,
+): Promise<void> {
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, operation));
+  }
 }
