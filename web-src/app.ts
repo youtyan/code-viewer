@@ -6887,8 +6887,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   /**
    * Ctrl+K のパレットに混ぜる行き先。プロジェクト = 登録したものと tmux から
    * 見つけたもの (選ぶとヘッダの切替と同じ関数で移る)、エージェント = 一覧の
-   * エージェント (選ぶとターミナルに開く)、操作 = キー割り当てのある操作と
-   * 新しいエージェント。キーは今の割り当てから出す。
+   * エージェント (選ぶとターミナルに開く)、セッション = 通常のシェル、
+   * 操作 = キー割り当てのある操作と新しいエージェント。キーは今の割り当てから出す。
    */
   const PALETTE_ACTIONS: ReadonlyArray<{
     id: PaletteActionId;
@@ -7028,7 +7028,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     panes.forEach((pane, index) => {
       commands.push({
-        group: "agents",
+        group: pane.kind === null ? "sessions" : "agents",
         id: `pane:${pane.id}`,
         title: pane.kind ? agents.kind[pane.kind] : agents.kindShell,
         detail: `${paneTaskText(pane)} · ${pane.label}`,
@@ -7046,7 +7046,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     for (const session of TERMINAL_VIEW.knownShells()?.sessions ?? []) {
       if (paneForShell(session.id)) continue;
       commands.push({
-        group: "agents",
+        group: "sessions",
         id: `shell:${session.id}`,
         title: terminalTabInfo(session.id).label,
         detail: session.cwd,

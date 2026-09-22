@@ -327,7 +327,8 @@ describe("palette projects, agents and actions", () => {
     return [
       command("projects", "sample-app", "~/work/sample-app", true, ran),
       command("projects", "sample-lib", "~/work/sample-lib", false, ran),
-      command("agents", "claude", "Review plan", true, ran),
+      command("agents", "sample-agent", "Review plan", true, ran),
+      command("sessions", "sample-shell", "~/work/sample-app", true, ran),
       command("actions", "New agent", "", true, ran),
       command("actions", "Toggle theme", "", false, ran),
     ];
@@ -365,15 +366,17 @@ describe("palette projects, agents and actions", () => {
       expect(listing()).toEqual([
         "# Projects",
         "sample-app|~/work/sample-app",
-        "# Agents & sessions",
-        "claude|Review plan",
+        "# Agents",
+        "sample-agent|Review plan",
+        "# Sessions",
+        "sample-shell|~/work/sample-app",
         "# Files",
         "a.ts|src/a.ts *",
         "# Actions",
         "New agent|",
       ]);
       expect(input().placeholder).toBe(
-        "Search projects, agents, files, actions…",
+        "Search projects, agents, sessions, files, actions…",
       );
     } finally {
       palette.closeSearchPalette();
@@ -394,7 +397,12 @@ describe("palette projects, agents and actions", () => {
     {
       name: "the detail matches only as a substring",
       query: "plan",
-      expected: ["# Agents & sessions", "claude|Review plan *"],
+      expected: ["# Agents", "sample-agent|Review plan *"],
+    },
+    {
+      name: "a shell name has its own session group",
+      query: "shell",
+      expected: ["# Sessions", "sample-shell|~/work/sample-app *"],
     },
     {
       name: "a long detail does not match a scattered query",
@@ -428,10 +436,10 @@ describe("palette projects, agents and actions", () => {
       palette.openSearchPalette("file");
       await waitFor(() => status() === "Recent files - 1");
       key("ArrowUp");
-      expect(listing()).toContain("claude|Review plan *");
+      expect(listing()).toContain("sample-shell|~/work/sample-app *");
       key("Enter");
       await waitFor(() => ran.length === 1);
-      expect(ran).toEqual(["claude"]);
+      expect(ran).toEqual(["sample-shell"]);
       expect(palette.isPaletteOpen()).toBe(false);
       expect(persisted).toEqual([]);
     } finally {

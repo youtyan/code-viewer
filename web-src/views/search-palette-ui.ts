@@ -48,11 +48,15 @@ import {
 
 /**
  * ファイルの検索 (Ctrl+K) に混ぜて出す、ファイル以外の行き先。持ち主は app.ts
- * (プロジェクト・エージェントの一覧と、キー割り当てのある操作)。検索の
+ * (プロジェクト・エージェント・セッションの一覧と、キー割り当てのある操作)。検索の
  * ロジック (ファイルの絞り込み・grep) には関わらず、名前をあいまい一致で
  * 絞るだけ。
  */
-export type PaletteCommandGroup = "projects" | "agents" | "actions";
+export type PaletteCommandGroup =
+  | "projects"
+  | "agents"
+  | "sessions"
+  | "actions";
 export type PaletteCommand = {
   group: PaletteCommandGroup;
   /** 並べ替えても同じ行を指す値。 */
@@ -68,7 +72,7 @@ export type PaletteCommand = {
   iconHtml: string;
   /** 右端に出すキー。 */
   shortcut?: string;
-  /** 検索欄が空のときにも出す (最近のプロジェクト・エージェント、よく使う操作)。 */
+  /** 検索欄が空のときにも出す (最近のプロジェクト・エージェント・セッション、よく使う操作)。 */
   suggested: boolean;
   run(): void;
 };
@@ -123,7 +127,7 @@ export type SearchPaletteDeps = {
   applyGrepHideTests(hidden: boolean): void;
   /** "Pin": hand the current query to the results sheet in the bottom panel. */
   openSearchResults?(query: string): void;
-  /** ファイルの検索に混ぜるプロジェクト・エージェント・操作。 */
+  /** ファイルの検索に混ぜるプロジェクト・エージェント・セッション・操作。 */
   getPaletteCommands?(): PaletteCommand[];
   STATE: {
     route: AppRoute;
@@ -992,7 +996,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       }
     } else {
       // ファイルの検索では種類ごとに見出しを置く (Projects / Agents /
-      // Files / Actions)。見出しは行ではない (↑↓ は行だけを移る)。
+      // Sessions / Files / Actions)。見出しは行ではない (↑↓ は行だけを移る)。
       let group = "";
       state.items.forEach((item, index) => {
         if (state.mode === "file") {
@@ -1113,7 +1117,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
   }
 
   /**
-   * ファイルの行の前に名前が一致したプロジェクト・エージェント、後ろに操作を
+   * ファイルの行の前に名前が一致したプロジェクト・エージェント・セッション、後ろに操作を
    * 足す (空欄のときは suggested のものだけ)。選ぶ行は今までどおり最初の
    * ファイル (打って Enter でファイルが開く動きを変えない)。ファイルが無ければ先頭。
    */
@@ -1125,6 +1129,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     const groups: Record<PaletteCommandGroup, PaletteCommandItem[]> = {
       projects: [],
       agents: [],
+      sessions: [],
       actions: [],
     };
     const trimmed = query.trim();
@@ -1154,6 +1159,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     state.items = [
       ...cap(groups.projects),
       ...cap(groups.agents),
+      ...cap(groups.sessions),
       ...files,
       ...cap(groups.actions),
     ];

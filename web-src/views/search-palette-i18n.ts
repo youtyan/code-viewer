@@ -77,9 +77,12 @@ export type SearchPaletteText = CodePreviewText & {
   resultsPlaceholder: string;
   resultsIdle: string;
   resultsScope: (ref: string) => string;
-  // Ctrl+K に混ぜるプロジェクト・エージェント・操作 (search-palette-ui.ts の PaletteCommand)。
+  // Ctrl+K に混ぜるプロジェクト・エージェント・セッション・操作 (search-palette-ui.ts の PaletteCommand)。
   searchEverything: string;
-  groups: Record<"projects" | "agents" | "files" | "actions", string>;
+  groups: Record<
+    "projects" | "agents" | "sessions" | "files" | "actions",
+    string
+  >;
   footerMove: string;
   footerOpen: string;
   footerClose: string;
@@ -185,10 +188,11 @@ const EN: SearchPaletteText = {
   resultsPlaceholder: "Search text (path:<dir or glob> narrows)",
   resultsIdle: "Type a search and press Enter",
   resultsScope: (ref) => `in ${ref}`,
-  searchEverything: "Search projects, agents, files, actions…",
+  searchEverything: "Search projects, agents, sessions, files, actions…",
   groups: {
     projects: "Projects",
-    agents: "Agents & sessions",
+    agents: "Agents",
+    sessions: "Sessions",
     files: "Files",
     actions: "Actions",
   },
@@ -293,10 +297,12 @@ const JA: SearchPaletteText = {
     "検索するコード（path:<ディレクトリ or glob> で絞り込み）",
   resultsIdle: "検索語を入力して Enter",
   resultsScope: (ref) => `${ref} 内`,
-  searchEverything: "プロジェクト・エージェント・ファイル・操作を検索…",
+  searchEverything:
+    "プロジェクト・エージェント・セッション・ファイル・操作を検索…",
   groups: {
     projects: "プロジェクト",
-    agents: "エージェント・セッション",
+    agents: "エージェント",
+    sessions: "セッション",
     files: "ファイル",
     actions: "操作",
   },
