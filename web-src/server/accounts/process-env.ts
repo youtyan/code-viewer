@@ -269,7 +269,8 @@ export function createProcessEnvProber(
     }
     if (unknown.length === 0) {
       // 一覧の応答を ps (数百 ms かかることがある) で待たせない。
-      background ??= refresh(old, now)
+      if (background !== null) return out;
+      background = refresh(old, now)
         .catch((error: unknown) => {
           // refresh は失敗を結果として覚えるので、ここに来るのは想定外の
           // 例外だけ。黙って捨てず、行に理由として出す。

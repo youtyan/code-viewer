@@ -561,7 +561,7 @@ describe("process environment", () => {
   const targets = [
     { id: "%1", pid: 5, command: "claude" },
     { id: "%2", pid: 9, command: "codex" },
-  ];
+  ] as const;
 
   test("probes once, then answers from memory until the pane changes", async () => {
     const { value, calls } = deps();
@@ -576,7 +576,7 @@ describe("process environment", () => {
     await prober.probe(targets);
     expect(calls).toEqual({ list: 1, env: 1 });
     // コマンドが変わったペインは、待って調べ直す。
-    await prober.probe([{ id: "%1", pid: 5, command: "zsh" }, targets[1]!]);
+    await prober.probe([{ id: "%1", pid: 5, command: "zsh" }, targets[1]]);
     expect(calls.list).toBe(2);
   });
 
