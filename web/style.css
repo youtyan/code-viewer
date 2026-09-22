@@ -11165,19 +11165,27 @@ body.journal-task-editor-resizing * {
 
 /* ---------- Query Editor ---------- */
 .db-query-editor {
-  flex: 1;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
+.db-query-editor.has-result {
+  flex: 1;
+  min-height: 0;
+}
 
 .db-query-input {
+  display: flex;
+  flex-direction: column;
   padding: 8px;
   border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
   flex-shrink: 0;
 }
 
 .db-query-editor-wrap {
+  flex: 1;
   position: relative;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -11222,6 +11230,8 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 .db-query-textarea {
   position: relative;
   width: 100%;
+  height: 100%;
+  box-sizing: border-box;
   padding: 8px;
   border: none;
   border-radius: 0;
@@ -11231,7 +11241,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: var(--db-font-md);
   line-height: 1.5;
-  resize: vertical;
+  resize: none;
   min-height: 60px;
   z-index: 1;
 }
@@ -11250,6 +11260,58 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   margin-top: 6px;
 }
 
+.db-query-collapse {
+  display: inline-grid;
+  place-items: center;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.db-query-collapse:hover {
+  background: var(--bg-mute);
+  color: var(--fg);
+}
+.db-query-collapse:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.db-query-collapse .octicon {
+  transition: transform 0.15s ease;
+}
+.db-query-editor.is-collapsed .db-query-collapse .octicon {
+  transform: rotate(-90deg);
+}
+
+.db-query-resize {
+  position: relative;
+  height: var(--space-2);
+  flex: 0 0 var(--space-2);
+  cursor: row-resize;
+}
+.db-query-resize::before {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--border);
+  content: "";
+}
+.db-query-resize:hover::before,
+.db-query-editor.is-resizing .db-query-resize::before,
+.db-query-resize:focus-visible::before {
+  background: var(--accent);
+}
+.db-query-resize:focus-visible {
+  outline: none;
+}
+
 .db-query-run {
   padding: 4px 16px;
   border-radius: 6px;
@@ -11262,6 +11324,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 
 .db-query-result {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 8px;
 }

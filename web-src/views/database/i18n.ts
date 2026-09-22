@@ -25,8 +25,6 @@ export type DbText = {
     refreshDatastoresUnchanged: string;
     refreshDatastoresChanged: (added: number, removed: number) => string;
     toolbar: string;
-    query: string;
-    queryTitle: string;
     er: string;
     erTitle: string;
     search: string;
@@ -146,6 +144,9 @@ export type DbText = {
   // クエリエディタ。
   editor: {
     sqlPlaceholder: string;
+    collapseInput: string;
+    expandInput: string;
+    resizeInput: string;
     run: string;
     runTitle: string;
     explain: string;
@@ -426,8 +427,6 @@ const EN: DbText = {
         .filter(Boolean)
         .join(" / "),
     toolbar: "Datastore tools",
-    query: "Query",
-    queryTitle: "Query Editor",
     er: "ER",
     erTitle: "Entity Relationship Diagram",
     search: "Search",
@@ -557,6 +556,9 @@ const EN: DbText = {
   },
   editor: {
     sqlPlaceholder: "SELECT * FROM ...",
+    collapseInput: "Collapse query input",
+    expandInput: "Expand query input",
+    resizeInput: "Resize query input",
     run: "Run",
     runTitle: "Execute query (Ctrl+Enter)",
     explain: "Explain",
@@ -840,8 +842,6 @@ const JA: DbText = {
         .filter(Boolean)
         .join(" / "),
     toolbar: "データストアツール",
-    query: "クエリ",
-    queryTitle: "クエリエディタ",
     er: "ER",
     erTitle: "ER 図 (リレーション図)",
     search: "検索",
@@ -970,6 +970,9 @@ const JA: DbText = {
   },
   editor: {
     sqlPlaceholder: "SELECT * FROM ...",
+    collapseInput: "クエリ入力欄を畳む",
+    expandInput: "クエリ入力欄を開く",
+    resizeInput: "クエリ入力欄の高さを変更",
     run: "実行",
     runTitle: "クエリを実行 (Ctrl+Enter)",
     explain: "Explain",

@@ -156,6 +156,25 @@ function looksReadOnlySql(sql: string): boolean {
   return /^(select|with|pragma|explain)\b/i.test(normalized);
 }
 
+function queryForTableResult(data: DbTableDataResponse): string | null {
+  if (!data.executedSql) return null;
+  for (let i = data.executedSql.length - 1; i >= 0; i--) {
+    const sql = data.executedSql[i]?.trim();
+    if (
+      sql &&
+      /^select\b/i.test(sql) &&
+      /\blimit\b/i.test(sql) &&
+      !/\bcount\s*\(/i.test(sql)
+    ) {
+      return sql.replace(
+        /\blimit\s+\?\s+offset\s+\?\s*;?$/i,
+        `LIMIT ${data.limit} OFFSET ${data.offset}`,
+      );
+    }
+  }
+  return null;
+}
+
 function isAbortError(err: unknown): boolean {
   return (
     (err instanceof DOMException && err.name === "AbortError") ||
@@ -272,7 +291,7 @@ function computeVisibility(
   userPrefersHistoryOpen: boolean,
 ): DbVisibility {
   const sqlMode = isSqlKind(kind);
-  const tableScopedTab = tab === "data" || tab === "schema";
+  const tableScopedTab = tab === "data" || tab === "query" || tab === "schema";
   const historyVisible = sqlMode && userPrefersHistoryOpen;
   return {
     toolsHidden: !sqlMode,
@@ -282,7 +301,7 @@ function computeVisibility(
     tableListHidden: !sqlMode,
     tabBarHidden: !sqlMode || !tableScopedTab,
     gridHidden: !sqlMode || tab !== "data",
-    queryHidden: !sqlMode || tab !== "query",
+    queryHidden: !sqlMode || (tab !== "data" && tab !== "query"),
     schemaHidden: !sqlMode || tab !== "schema",
     erHidden: !sqlMode || tab !== "er",
     searchHidden: !sqlMode || tab !== "search",
@@ -585,13 +604,6 @@ function createTabPane(
     toolsSection.setAttribute("aria-label", paneText().nav.toolbar);
   });
 
-  const queryBtn = makeIconButton({
-    label: "Query",
-    title: "Query Editor",
-    pathD: ICON_PATH_QUERY,
-    onClick: () => setActiveTab("query"),
-  });
-
   const erBtn = makeIconButton({
     label: "ER Diagram",
     title: "Entity Relationship Diagram",
@@ -635,13 +647,12 @@ function createTabPane(
       t.refreshDatastoresTitle,
     );
     syncDbRefreshButton();
-    localizeIconButton(queryBtn, t.query, t.queryTitle);
     localizeIconButton(erBtn, t.er, t.erTitle);
     localizeIconButton(searchBtn, t.search, t.searchTitle);
     localizeIconButton(snapshotBtn, t.snapshot, t.snapshotTitle);
   });
 
-  toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
+  toolsSection.append(erBtn, searchBtn, snapshotBtn);
 
   // 設定トグル (Rails FK 推測など) はビューア設定パネルへ移したので、
   // ここの prefs バーは現状空。#16 (Edit モードトグル集約) で再利用予定。
@@ -754,11 +765,13 @@ function createTabPane(
     localizePrefToggle(editModeToggle, e.editMode, e.editModeTitle);
   });
 
+  let preserveInitialSqlDraft = Boolean(initial.sqlDraft);
   const queryEditor = createQueryEditor({
     executeQuery: (sql) => executeQuery(sql),
     loadHistory: () =>
       outerDeps.loadSqlHistory(currentDbInfo?.id || null, currentSchema),
     onSqlChange: () => cb.onStateChange(),
+    onResultShown: () => setActiveTab("query"),
     getText: () => paneText(),
   });
   // 復元すべき SQL draft があれば初期化時に流し込む (これも onSqlChange を
@@ -832,7 +845,8 @@ function createTabPane(
     getText: () => paneText(),
     copySqlToQuery: (sql) => {
       queryEditor.setSql(sql);
-      setActiveTab("query");
+      setActiveTab("data");
+      queryEditor.focus();
     },
   });
   // ログタブ用 view。store は database-view で 1 つ。各 tab pane が view を
@@ -843,7 +857,8 @@ function createTabPane(
     getText: () => paneText(),
     copySqlToQuery: (sql) => {
       queryEditor.setSql(sql);
-      setActiveTab("query");
+      setActiveTab("data");
+      queryEditor.focus();
     },
   });
 
@@ -924,8 +939,8 @@ function createTabPane(
   mainContent.className = "db-main-content";
   mainContent.append(
     tabBar,
-    grid.el,
     queryEditor.el,
+    grid.el,
     schemaView.el,
     erDiagram.el,
     globalSearchView.el,
@@ -1135,7 +1150,6 @@ function createTabPane(
       explorerSidebarHost.hidden = true;
     }
     if (!sqlMode) {
-      queryBtn.classList.remove("active");
       erBtn.classList.remove("active");
       searchBtn.classList.remove("active");
       snapshotBtn.classList.remove("active");
@@ -1207,26 +1221,26 @@ function createTabPane(
 
   function setActiveTab(tab: TabName, updateUrl = true) {
     currentTab = normalizeViewForDb(tab, currentDbInfo);
-    // アイコン (Query / ER / Search / Snapshot) は「テーブルに紐づかない」
-    // 操作なので、これらを active にしたときは table list の active 表示を
-    // 外す (= アイコン中はテーブル選択を持たない)。
-    // 逆にテーブルクリックで Data / Schema に戻したときは tableList.setActive
-    // が selectTable / showSchema から呼ばれるのでそちらで反映される。
-    const tableScopedTab = currentTab === "data" || currentTab === "schema";
+    // Data と query result は同じテーブル作業面を共有する。ER / Search /
+    // Snapshot のようなテーブルに紐づかない面だけ選択表示を外す。
+    const tableScopedTab =
+      currentTab === "data" ||
+      currentTab === "query" ||
+      currentTab === "schema";
     if (!tableScopedTab) {
       currentTable = null;
       tableList.setActive(null);
     }
-    tabData.classList.toggle("active", currentTab === "data");
+    tabData.classList.toggle(
+      "active",
+      currentTab === "data" || currentTab === "query",
+    );
     tabSchema.classList.toggle("active", currentTab === "schema");
-    queryBtn.classList.toggle("active", currentTab === "query");
     erBtn.classList.toggle("active", currentTab === "er");
     searchBtn.classList.toggle("active", currentTab === "search");
     snapshotBtn.classList.toggle("active", currentTab === "snapshot");
-    // Data / Schema の inner tabBar は「テーブルの中身を表示してるとき」
-    // だけ表示する。Query / ER / Search / Snapshot 中は無関係なので隠す。
+    if (currentTab === "data") queryEditor.showTableResult();
     applyVisibility();
-    if (currentTab === "query") queryEditor.focus();
     if (updateUrl && currentDbInfo) {
       deps.setRoute(
         {
@@ -1700,7 +1714,10 @@ function createTabPane(
     const normalizedTargetView = normalizeViewForDb(targetView, currentDbInfo);
     setActiveTab(normalizedTargetView === "schema" ? "schema" : "data", false);
     const initialTable = preferredTable || schema.tables[0]?.name;
-    if (initialTable && normalizedTargetView === "data") {
+    if (
+      initialTable &&
+      (normalizedTargetView === "data" || normalizedTargetView === "query")
+    ) {
       await selectTable(initialTable, generation);
     } else if (initialTable && normalizedTargetView === "schema") {
       await selectTableSchemaOnly(initialTable, generation);
@@ -1720,10 +1737,7 @@ function createTabPane(
     tableList.setActive(table);
     if (!currentDbInfo) return;
     const requestDbId = currentDbInfo.id;
-    // テーブル選択は「テーブル中身の表示」なので、Query / ER / Search /
-    // Snapshot のような「テーブルに紐づかない」ビュー中だった場合は
-    // Data に戻す。これによりアイコンの active も自動で外れる
-    // (setActiveTab 内のクラス操作)。
+    // テーブル選択は「テーブル中身の表示」なので、別の面から Data に戻す。
     if (
       currentTab === "query" ||
       currentTab === "er" ||
@@ -1774,6 +1788,13 @@ function createTabPane(
         return;
       }
       grid.load(table, data);
+      queryEditor.showTableResult();
+      if (preserveInitialSqlDraft) {
+        preserveInitialSqlDraft = false;
+      } else {
+        const tableQuery = queryForTableResult(data);
+        if (tableQuery) queryEditor.setSql(tableQuery);
+      }
     } catch (err) {
       if (
         slot.isStale() ||
@@ -2227,7 +2248,7 @@ function createTabPane(
     }
     if (generation !== loadGeneration) return;
     const normalizedView = normalizeViewForDb(view, currentDbInfo);
-    if (normalizedView !== "data") {
+    if (normalizedView !== "data" && normalizedView !== "query") {
       setActiveTab(normalizedView);
       if (normalizedView === "schema") {
         const activeTable = tableList.el.querySelector<HTMLElement>(
@@ -2257,7 +2278,7 @@ function createTabPane(
       grid.applyState(target.data);
     }
     if (target.query) {
-      setActiveTab("query");
+      setActiveTab("data");
       if (target.query.sql)
         queryEditor.setSql(target.query.sql, { silent: true });
       if (target.query.autoRun && target.query.sql) {
@@ -2267,6 +2288,8 @@ function createTabPane(
         void (target.query.mode === "explain"
           ? queryEditor.explain()
           : queryEditor.run());
+      } else {
+        queryEditor.focus();
       }
     }
     if (target.search) {
@@ -2481,9 +2504,6 @@ function createTabPane(
 // ----- アイコンツールバー (案 B 改: TablePlus / Beekeeper 風) -----
 // octicon / bootstrap-icons ベースの 16x16 path。currentColor で描画して
 // hover / active 時の色変更を CSS から制御できるようにする。
-
-const ICON_PATH_QUERY =
-  "M5.72 4.22a.75.75 0 0 1 0 1.06L2.81 8l2.91 2.72a.75.75 0 1 1-1.06 1.06L1.22 8.53a.75.75 0 0 1 0-1.06l3.44-3.25a.75.75 0 0 1 1.06 0Zm4.56 0a.75.75 0 0 1 1.06 0l3.44 3.25a.75.75 0 0 1 0 1.06l-3.44 3.25a.75.75 0 1 1-1.06-1.06L13.19 8l-2.91-2.72a.75.75 0 0 1 0-1.06Z";
 
 const ICON_PATH_ER =
   "M1.5 1.75A.75.75 0 0 1 2.25 1h4.5a.75.75 0 0 1 .75.75v3.5h2v-1.5A.75.75 0 0 1 10.25 3h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75V6.5h-2v3h2v-.75A.75.75 0 0 1 10.25 8h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75v-1.5h-2v3.5a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1-.75-.75v-3.5A.75.75 0 0 1 2.25 9h4.5a.75.75 0 0 1 .75.75v.75h-.5v-1H3v3h3V11h.5v-.75a.75.75 0 0 0-.75-.75H3V6.5h2.5V2.5H3Z";

@@ -511,10 +511,18 @@ function baseSchemaResponse() {
 
 function baseTableResponse() {
   return {
+    dbId: "docker:db",
     table: "users",
     columns: [{ name: "id", type: "integer", primaryKey: true }],
     rows: [[1]],
     totalRows: 1,
+    offset: 0,
+    limit: 200,
+    hasMore: false,
+    executedSql: [
+      "SELECT * FROM users LIMIT ? OFFSET ?",
+      "SELECT COUNT(*) FROM users",
+    ],
   };
 }
 
@@ -574,6 +582,18 @@ describe("database view SQL error rendering", () => {
 
     expect(document.querySelector(".db-pane-error")).toBeNull();
     expect(document.querySelector(".db-table-name")?.textContent).toBe("users");
+    expect(
+      document.querySelector<HTMLElement>(".db-query-editor")?.hidden,
+    ).toBe(false);
+    expect(document.querySelector<HTMLElement>(".db-grid")?.hidden).toBe(false);
+    expect(document.querySelector("textarea")?.value).toBe(
+      "SELECT * FROM users LIMIT 200 OFFSET 0",
+    );
+    expect(
+      document
+        .querySelector(".db-icon-toolbar")
+        ?.querySelectorAll(".db-icon-btn"),
+    ).toHaveLength(3);
     await leaveView(view);
   });
 
@@ -1781,7 +1801,7 @@ describe("database view SQL error rendering", () => {
     await leaveView(view);
   });
 
-  test("opens a query view without fetching the first table", async () => {
+  test("restores an old query route into the combined data screen", async () => {
     installDatabaseDom();
     const fetchedTables: string[] = [];
     mockFetch((url, init) => {
@@ -1810,7 +1830,47 @@ describe("database view SQL error rendering", () => {
     const view = createViewForTest();
     await view.enter("docker:db", undefined, undefined, "query");
 
-    expect(fetchedTables).toEqual([]);
+    expect(fetchedTables).toEqual(["users"]);
+    expect(
+      document.querySelector<HTMLElement>(".db-query-editor")?.hidden,
+    ).toBe(false);
+    expect(document.querySelector<HTMLElement>(".db-grid")?.hidden).toBe(false);
+    await leaveView(view);
+  });
+
+  test("keeps a restored SQL draft when loading its table", async () => {
+    installDatabaseDom();
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs")
+        return jsonResponse({
+          version: 1,
+          activeTabId: "sample-tab",
+          tabs: [
+            {
+              id: "sample-tab",
+              dbId: "docker:db",
+              table: "users",
+              view: "data",
+              sqlDraft: "SELECT id FROM sample_table",
+            },
+          ],
+        });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter();
+
+    expect(document.querySelector("textarea")?.value).toBe(
+      "SELECT id FROM sample_table",
+    );
     await leaveView(view);
   });
 
@@ -2050,10 +2110,6 @@ describe("database view SQL error rendering", () => {
     const view = createViewForTest();
     await view.enter("docker:db");
 
-    const queryButton = document.querySelectorAll(
-      ".db-icon-btn",
-    )[0] as unknown as FakeElement | undefined;
-    await queryButton?.click();
     const textarea = document.querySelector(
       "textarea",
     ) as unknown as FakeElement | null;
@@ -2066,6 +2122,23 @@ describe("database view SQL error rendering", () => {
     expect(document.querySelector(".db-query-error")?.textContent).toBe(
       "failed to execute query (HTTP 500): query failed",
     );
+    expect(document.querySelector<HTMLElement>(".db-grid")?.hidden).toBe(true);
+    expect(
+      document.querySelector<HTMLElement>(".db-query-editor")?.hidden,
+    ).toBe(false);
+
+    const dataTab = document.querySelector(
+      ".db-tab",
+    ) as unknown as FakeElement | null;
+    await dataTab?.click();
+
+    expect(document.querySelector<HTMLElement>(".db-grid")?.hidden).toBe(false);
+    expect(
+      document.querySelector<HTMLElement>(".db-query-editor")?.hidden,
+    ).toBe(false);
+    expect(
+      document.querySelector<HTMLElement>(".db-query-result")?.hidden,
+    ).toBe(true);
     await leaveView(view);
   });
 

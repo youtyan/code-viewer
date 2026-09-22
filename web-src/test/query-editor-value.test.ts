@@ -47,4 +47,142 @@ describe("query editor value display", () => {
     expect(cells[1]?.textContent).toBe(expected);
     editor.dispose();
   });
+
+  test("collapses and expands the SQL input", async () => {
+    const editor = createQueryEditor({
+      executeQuery: async () => ({
+        dbId: "sample.db",
+        columns: [],
+        columnTypes: [],
+        rows: [],
+        rowCount: 0,
+        truncated: false,
+        elapsedMs: 1,
+      }),
+    });
+    document.body.appendChild(editor.el);
+
+    const toggle =
+      editor.el.querySelector<HTMLButtonElement>(".db-query-collapse");
+    const editorWrap = editor.el.querySelector<HTMLElement>(
+      ".db-query-editor-wrap",
+    );
+    const resizer = editor.el.querySelector<HTMLElement>(".db-query-resize");
+
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(editorWrap?.hidden).toBe(false);
+    expect(resizer?.hidden).toBe(false);
+
+    toggle?.click();
+
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(editorWrap?.hidden).toBe(true);
+    expect(resizer?.hidden).toBe(true);
+
+    toggle?.click();
+
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(editorWrap?.hidden).toBe(false);
+    expect(resizer?.hidden).toBe(false);
+    editor.dispose();
+  });
+
+  test("resizes the SQL input from the keyboard", () => {
+    const editor = createQueryEditor({
+      executeQuery: async () => ({
+        dbId: "sample.db",
+        columns: [],
+        columnTypes: [],
+        rows: [],
+        rowCount: 0,
+        truncated: false,
+        elapsedMs: 1,
+      }),
+    });
+    document.body.appendChild(editor.el);
+    const input = editor.el.querySelector<HTMLElement>(".db-query-input");
+    const resizer = editor.el.querySelector<HTMLElement>(".db-query-resize");
+    const event = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
+
+    resizer?.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(input?.style.height).toBe("120px");
+    editor.dispose();
+  });
+
+  test("returns from query results to the table grid", async () => {
+    let resultShown = 0;
+    const editor = createQueryEditor({
+      executeQuery: async () => ({
+        dbId: "sample.db",
+        columns: ["sample_column"],
+        columnTypes: ["TEXT"],
+        rows: [["sample"]],
+        rowCount: 1,
+        truncated: false,
+        elapsedMs: 1,
+      }),
+      onResultShown: () => {
+        resultShown++;
+      },
+    });
+    document.body.appendChild(editor.el);
+    editor.setSql("SELECT sample_column FROM sample_table");
+
+    await editor.run();
+
+    expect(resultShown).toBe(1);
+    expect(editor.el.classList.contains("has-result")).toBe(true);
+    expect(
+      editor.el.querySelector<HTMLElement>(".db-query-result")?.hidden,
+    ).toBe(false);
+
+    editor.showTableResult();
+
+    expect(editor.el.classList.contains("has-result")).toBe(false);
+    expect(
+      editor.el.querySelector<HTMLElement>(".db-query-result")?.hidden,
+    ).toBe(true);
+    editor.dispose();
+  });
+
+  test.each([
+    "ctrlKey",
+    "metaKey",
+  ] as const)("%s + Enter runs the query", async (modifier) => {
+    let executions = 0;
+    const editor = createQueryEditor({
+      executeQuery: async () => {
+        executions++;
+        return {
+          dbId: "sample.db",
+          columns: [],
+          columnTypes: [],
+          rows: [],
+          rowCount: 0,
+          truncated: false,
+          elapsedMs: 1,
+        };
+      },
+    });
+    document.body.appendChild(editor.el);
+    editor.setSql("SELECT sample_column FROM sample_table");
+
+    editor.el.querySelector("textarea")?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        [modifier]: true,
+        bubbles: true,
+      }),
+    );
+    await Promise.resolve();
+
+    expect(executions).toBe(1);
+    editor.dispose();
+  });
 });
