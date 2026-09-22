@@ -2279,3 +2279,239 @@ describe("event wiring", () => {
     }
   });
 });
+
+// 一覧と変更ファイルの Tab の止まり場所と行の上のキー (views/list-tab-stop.ts)。
+// 止まり場所は選んでいる行 (無ければ先頭の行) 1 つ。行の中のボタンは止まり場所の
+// 行の分だけ Tab に入る。↑↓・Home / End はフォーカスを移すだけ (選ぶと画面が
+// 切り替わる)。Enter は 1 回押したのと同じ。
+describe("worktree rows by keyboard", () => {
+  // 前のテストで開いたまま残ったダイアログは document の keydown を受け続け、
+  // ここで押す Enter で送信してフォーカスを開く前の場所 (body) へ戻す
+  // (ui-dialog.ts)。始める前に Escape で閉じ、その後始末を流し切る。
+  beforeEach(async () => {
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    for (let i = 0; i < 5; i++)
+      await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  function press(target: HTMLElement, key: string): boolean {
+    const event = new KeyboardEvent("keydown", {
+      key,
+      bubbles: true,
+      cancelable: true,
+    });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+
+  const three = () =>
+    response([
+      item({ name: "repo" }),
+      item({ name: "one" }),
+      item({ name: "two" }),
+    ]);
+
+  function rowsOf(panel: HTMLElement): HTMLElement[] {
+    return [...panel.querySelectorAll<HTMLElement>(".history-list > li")];
+  }
+
+  function nameOf(row: Element | null | undefined): string {
+    return row?.querySelector(".subject")?.textContent ?? "";
+  }
+
+  test.each([
+    { name: "nothing picked: the first row", route: {}, stop: "repo" },
+    {
+      name: "a picked worktree: its row",
+      route: { wt: "/repo/.worktrees/two" },
+      stop: "two",
+    },
+  ])("the list is one tab stop — $name", async ({ route, stop }) => {
+    const { panel } = await mountWith(three(), { route });
+    const rows = rowsOf(panel);
+    const list = panel.querySelector(".history-list");
+    expect({
+      stops: rows.filter((row) => row.tabIndex === 0).map(nameOf),
+      buttonsInTab: [
+        ...panel.querySelectorAll<HTMLElement>(".history-list button"),
+      ]
+        .filter((button) => button.tabIndex >= 0)
+        .map((button) => nameOf(button.closest("li")))
+        .filter((name, index, all) => all.indexOf(name) === index),
+      label: list?.getAttribute("aria-label"),
+      current: rows
+        .filter((row) => row.getAttribute("aria-current") === "true")
+        .map(nameOf),
+    }).toEqual({
+      stops: [stop],
+      buttonsInTab: [stop],
+      label: "Worktrees",
+      current: "wt" in route ? [stop] : [],
+    });
+  });
+
+  test.each([
+    { key: "ArrowDown", from: 0, focused: "one" },
+    { key: "ArrowUp", from: 2, focused: "one" },
+    { key: "End", from: 0, focused: "two" },
+    { key: "Home", from: 2, focused: "repo" },
+    { key: "ArrowUp", from: 0, focused: "repo" },
+  ])("$key moves the focus without picking", async ({ key, from, focused }) => {
+    const { panel, routes } = await mountWith(three(), {
+      route: { wt: "/repo" },
+    });
+    const row = rowsOf(panel)[from];
+    row.focus();
+    const prevented = press(row, key);
+    expect({
+      prevented,
+      focused: nameOf(document.activeElement),
+      navigated: routes.length,
+    }).toEqual({ prevented: true, focused, navigated: 0 });
+  });
+
+  test("Enter picks the row and keeps the focus on it after the redraw", async () => {
+    const mounted = await mountWith(three(), { route: { wt: "/repo" } });
+    const row = rowsOf(mounted.panel)[1];
+    row.focus();
+    press(row, "Enter");
+    const route = lastRoute(mounted.routes);
+    expect(route?.screen === "worktree" ? route.wt : null).toBe(
+      "/repo/.worktrees/one",
+    );
+    // 画面が URL を読み直して一覧を描き直す (選んだ行が active)。
+    if (route) mounted.setCurrentRoute(route);
+    await mounted.view.enter();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const focused = document.activeElement;
+    expect({
+      name: nameOf(focused),
+      connected: focused?.isConnected,
+      stop: rowsOf(mounted.panel)
+        .filter((item) => item.tabIndex === 0)
+        .map(nameOf),
+    }).toEqual({ name: "one", connected: true, stop: ["one"] });
+  });
+
+  // 一覧はエージェントの状態が変わるたびに頭ごと作り直すので、頭の部品に
+  // あったフォーカスも戻す (戻さないと body に落ち、Tab が一覧の先へ進めない)。
+  test.each([
+    {
+      name: "the filter field",
+      pick: (panel: HTMLElement) =>
+        panel.querySelector<HTMLElement>(".history-filter-wrap input"),
+    },
+    {
+      name: "the Reload button",
+      pick: (panel: HTMLElement) =>
+        panel.querySelector<HTMLElement>(".history-head button"),
+    },
+  ])("a redraw keeps the focus on $name", async ({ pick }) => {
+    const mounted = await mountWith(three(), { route: { wt: "/repo" } });
+    const before = pick(mounted.panel);
+    if (!before) throw new Error("missing control");
+    before.focus();
+    await mounted.view.enter();
+    const after = pick(mounted.panel);
+    expect({
+      same: document.activeElement === after,
+      connected: document.activeElement?.isConnected,
+    }).toEqual({ same: true, connected: true });
+  });
+
+  const withFiles = () =>
+    response([
+      item({
+        name: "repo",
+        files: [
+          file({ path: "src/a/one.ts" }),
+          file({ path: "src/b/two.ts" }),
+          file({ path: "top.ts" }),
+        ],
+      }),
+    ]);
+
+  function fileRows(filelist: HTMLElement): HTMLElement[] {
+    return [
+      ...filelist.querySelectorAll<HTMLElement>(
+        "li.tree-file[data-key], li.tree-dir[data-worktree-dir]",
+      ),
+    ];
+  }
+
+  function fileName(row: Element | null | undefined): string {
+    return row?.querySelector(".name")?.textContent ?? "";
+  }
+
+  test("the changed files are one tab stop in a named tree", async () => {
+    const { filelist } = await mountWith(withFiles(), {
+      route: { wt: "/repo" },
+      sidebarView: "tree",
+      diff: { diff: "@@ -1 +1 @@\n-a\n+b\n" },
+    });
+    const rows = fileRows(filelist);
+    expect({
+      role: filelist.getAttribute("role"),
+      label: filelist.getAttribute("aria-label"),
+      rowRoles: [...new Set(rows.map((row) => row.getAttribute("role")))],
+      stops: rows.filter((row) => row.tabIndex === 0).map(fileName),
+      expanded: rows
+        .filter((row) => row.dataset.worktreeDir !== undefined)
+        .map((row) => row.getAttribute("aria-expanded")),
+    }).toEqual({
+      role: "tree",
+      label: "Changed files",
+      rowRoles: ["treeitem"],
+      stops: ["src"],
+      expanded: ["true", "true", "true"],
+    });
+  });
+
+  test("↓ moves between shown rows; Enter on a folder folds it", async () => {
+    const { filelist, routes } = await mountWith(withFiles(), {
+      route: { wt: "/repo" },
+      sidebarView: "tree",
+      diff: { diff: "@@ -1 +1 @@\n-a\n+b\n" },
+    });
+    const [src, a] = fileRows(filelist);
+    src.focus();
+    press(src, "ArrowDown");
+    const afterDown = fileName(document.activeElement);
+    press(a, "Enter");
+    const folded = a.classList.contains("collapsed");
+    press(a, "ArrowDown");
+    const afterFold = fileName(document.activeElement);
+    expect({
+      afterDown,
+      folded,
+      expanded: a.getAttribute("aria-expanded"),
+      afterFold,
+      navigated: routes.length,
+    }).toEqual({
+      afterDown: "a",
+      folded: true,
+      expanded: "false",
+      afterFold: "b",
+      navigated: 0,
+    });
+  });
+
+  test("Enter on a file row opens it (same as one click)", async () => {
+    const { filelist, routes } = await mountWith(withFiles(), {
+      route: { wt: "/repo" },
+      sidebarView: "flat",
+      diff: { diff: "@@ -1 +1 @@\n-a\n+b\n" },
+    });
+    const row = fileRows(filelist).find((item) => fileName(item) === "top.ts");
+    if (!row) throw new Error("missing top.ts");
+    row.focus();
+    press(row, "Enter");
+    const route = lastRoute(routes);
+    expect({
+      role: filelist.getAttribute("role"),
+      file: route?.screen === "worktree" ? route.file : null,
+    }).toEqual({ role: "listbox", file: "top.ts" });
+  });
+});

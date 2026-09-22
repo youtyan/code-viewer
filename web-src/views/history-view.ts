@@ -39,6 +39,13 @@ import {
   historyGraphSvg,
   passingLanes,
 } from "./history-graph";
+import {
+  type FocusedListRow,
+  focusedListRow,
+  type ListRowKeys,
+  onListRowKeys,
+  syncListTabStop,
+} from "./list-tab-stop";
 import { pageLanguage } from "./page-language";
 
 export const HISTORY_BODY_COLLAPSE_LINES = 10;
@@ -437,6 +444,8 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let statusEl = defaultMount.status;
   let sentinel = defaultMount.sentinel;
   let attachedList: HTMLOListElement | null = null;
+  /** 一覧の行の上のキーを受けるのをやめる (一覧の箱を付け替えるとき)。 */
+  let detachListKeys: (() => void) | null = null;
   let attachedFilterInput: HTMLInputElement | null = null;
   let attachedFilterClearButton: HTMLButtonElement | null = null;
   let attachedRefreshButton: HTMLButtonElement | null = null;
@@ -730,8 +739,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
         `<span class="history-ref history-ref-merge" title="${deps.escapeHtml(text.mergeBadge)}">${deps.escapeHtml(text.mergeBadge)}</span>`,
       );
     }
+    // 入りきらない札は隠れる (style.css の B-1) ので、全部の名前は title に。
+    const names = (commit.refs ?? []).map((ref) => ref.name).join(", ");
     return chips.length
-      ? `<span class="history-refs">${chips.join("")}</span>`
+      ? `<span class="history-refs"${names ? ` title="${deps.escapeHtml(names)}"` : ""}>${chips.join("")}</span>`
       : "";
   }
 
@@ -744,7 +755,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const fresh = commit.sha === freshSha ? " history-item-fresh" : "";
     const ranged = inRange ? " history-item-in-range" : "";
     return (
-      `<li class="history-item${active}${fresh}${ranged}" data-sha="${deps.escapeHtml(commit.sha)}">` +
+      `<li class="history-item${active}${fresh}${ranged}" data-sha="${deps.escapeHtml(commit.sha)}" role="option" tabindex="-1">` +
       `<span class="history-graph-cell">${graph}</span>` +
       // 件名と枝の札は 1 つの箱で幅を分け合う (style.css の B-1)。
       `<span class="history-title">` +
@@ -779,7 +790,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function worktreeRow(): string {
     const active = selectedSha === HISTORY_WORKTREE_COMMIT ? " active" : "";
     return (
-      `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}">` +
+      `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}" role="option" tabindex="-1">` +
       `<span class="history-graph-cell"></span>` +
       `<span class="history-title">` +
       `<span class="subject" title="${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}">${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}</span>` +
@@ -832,9 +843,56 @@ export function createHistoryView(deps: HistoryViewDeps) {
         ),
       );
     }
+    // 作り直す前に、行にあったフォーカスを控える (作り直すと body へ落ちる)。
+    const focused = focusedListRow(list, HISTORY_ROW_SELECTOR, rowSha);
     list.innerHTML = html.join("");
     activeHistoryRow = list.querySelector<HTMLElement>(".history-item.active");
+    syncListTabStopHere(focused);
     syncRefreshStatusText();
+  }
+
+  // コミットの一覧は Tab の止まり場所を 1 つにする (views/list-tab-stop.ts):
+  // 選んでいる行 (無ければ先頭の行) だけが tabIndex 0。選び直したら選んだ行へ
+  // フォーカスを移す。行の上の ↑↓ は j k と同じ moveSelection、Home / End は
+  // 先頭 / 末尾のコミット、Enter は 1 回押したのと同じ (行の click)。
+  const HISTORY_ROW_SELECTOR = ".history-item";
+
+  function rowSha(row: HTMLElement): string {
+    return row.dataset.sha ?? "";
+  }
+
+  function syncListTabStopHere(focused?: FocusedListRow | null) {
+    syncListTabStop(list, {
+      rows: [...list.querySelectorAll<HTMLElement>(HISTORY_ROW_SELECTOR)],
+      keyOf: rowSha,
+      isActive: (row) => row.classList.contains("active"),
+      ariaSelected: true,
+      ...(focused === undefined ? {} : { focused }),
+      fallback: panel,
+    });
+  }
+
+  function historyRowKeys(): ListRowKeys {
+    return {
+      ArrowDown: (row) => void moveSelection(1, rowSha(row)),
+      ArrowUp: (row) => void moveSelection(-1, rowSha(row)),
+      Home: () => void selectEdge("first"),
+      End: () => void selectEdge("last"),
+      Enter: (row) => {
+        row.click();
+        // click は j k のために一覧の箱へフォーカスを移すので、行へ戻す。
+        row.focus({ preventScroll: true });
+      },
+    };
+  }
+
+  async function selectEdge(edge: "first" | "last") {
+    if (!historyScopeFromRoute()) return;
+    const shas = selectableShas();
+    const sha = edge === "first" ? shas[0] : shas[shas.length - 1];
+    if (!sha) return;
+    await selectSha(sha);
+    scrollToSelected();
   }
 
   function syncRefreshButton(button?: HTMLButtonElement | null) {
@@ -1028,6 +1086,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       : null;
     activeHistoryRow?.classList.add("active");
     updateRangeRows();
+    syncListTabStopHere();
   }
 
   // Toggle the Shift+click range tint in place (no list rebuild, so row
@@ -1059,11 +1118,16 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (commit) await selectCommit(commit);
   }
 
-  async function moveSelection(delta: 1 | -1) {
+  /**
+   * 選んでいるコミットの隣を選ぶ (j k・↑↓)。from は行の上の ↑↓ のときの起点
+   * (Tab で入った、まだ選んでいない行からも、その行の隣へ動かす)。
+   */
+  async function moveSelection(delta: 1 | -1, from?: string) {
     if (!historyScopeFromRoute()) return;
     let shas = selectableShas();
     if (shas.length === 0) return;
-    let index = selectedSha ? shas.indexOf(selectedSha) : -1;
+    const origin = from ?? selectedSha;
+    let index = origin ? shas.indexOf(origin) : -1;
     if (index < 0) index = delta > 0 ? -1 : shas.length;
     let nextIndex = index + delta;
     if (nextIndex >= shas.length && hasMore && !loading) {
@@ -1489,6 +1553,8 @@ export function createHistoryView(deps: HistoryViewDeps) {
     }
     if (attachedList) {
       attachedList.removeEventListener("click", handleListClick);
+      detachListKeys?.();
+      detachListKeys = null;
       attachedList = null;
     }
     if (attachedFilterInput) {
@@ -1523,6 +1589,11 @@ export function createHistoryView(deps: HistoryViewDeps) {
     sentinel = mount.sentinel;
 
     list.addEventListener("click", handleListClick);
+    detachListKeys = onListRowKeys(
+      list,
+      HISTORY_ROW_SELECTOR,
+      historyRowKeys(),
+    );
     attachedList = list;
     const input = mount.filterInput ?? null;
     if (input) {
@@ -1574,14 +1645,18 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   function syncPanelTitle() {
-    const title = panel.querySelector?.<HTMLElement>(".history-title");
-    if (!title) return;
     const text = historyText(deps.getLanguage());
-    title.textContent = lineRange
+    const label = lineRange
       ? text.commitsForLines(lineRange.start, lineRange.end)
       : mode === "history" && pathFilter
         ? text.commitsIn(pathFilter)
         : text.commitsTitle;
+    // 行は選べる項目 (中にボタンが無い) なので listbox。名前は見出しと同じ。
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", label);
+    const title = panel.querySelector?.<HTMLElement>(".history-title");
+    if (!title) return;
+    title.textContent = label;
   }
 
   // "author:<name>" suggestions for the filter, loaded once per ref the

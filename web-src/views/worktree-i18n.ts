@@ -83,6 +83,8 @@ export type WorktreeText = {
     /** 一覧だけのときの見出しの下の件数。 */
     count: (n: number) => string;
     files: string;
+    /** 変更ファイルの木の名前 (支援技術向け)。 */
+    fileListLabel: string;
     diff: string;
     filterWorktrees: string;
     filterFiles: string;
@@ -311,6 +313,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       worktrees: "Worktrees",
       count: (n) => (n === 1 ? "1 worktree" : `${n} worktrees`),
       files: "Files",
+      fileListLabel: "Changed files",
       diff: "Diff",
       filterWorktrees: "Filter worktrees…",
       filterFiles: "Filter files…",
@@ -495,6 +498,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       worktrees: "作業ツリー",
       count: (n) => `${n} 本`,
       files: "ファイル",
+      fileListLabel: "変更ファイル",
       diff: "差分",
       filterWorktrees: "作業ツリーを絞り込み…",
       filterFiles: "ファイルを絞り込み…",

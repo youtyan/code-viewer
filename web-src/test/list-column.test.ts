@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { listColumnLayout, restoredListWidth } from "../core/list-column";
+import {
+  listColumnDrag,
+  listColumnLayout,
+  restoredListWidth,
+} from "../core/list-column";
 import { HISTORY_WIDTH } from "../core/panel-sizes";
 
 // 一覧の列の決まり (core/list-column.ts)。本文 = room − 一覧 − 変更ファイルの木。
@@ -149,5 +153,71 @@ describe("restoredListWidth", () => {
     { value: undefined, restored: 320 },
   ])("$value → $restored", ({ value, restored }) => {
     expect(restoredListWidth(value, HISTORY_WIDTH)).toBe(restored);
+  });
+});
+
+// 一覧の列の掴みの開始幅と上限 (core/list-column.ts の listColumnDrag)。開始は
+// 見えている一覧の幅 (隣の変更ファイルの木を含めない)、上限は本文が要る幅を
+// 保てる幅 (範囲 240〜800 の中)。
+describe("listColumnDrag", () => {
+  test.each([
+    // 1600 の History 1 面: room 1292 − 木 240 − 本文 480 = 572 まで広げられる
+    {
+      name: "既定の幅から",
+      shown: 320,
+      preferred: 320,
+      fits: 572,
+      start: 320,
+      max: 572,
+    },
+    // 詰めた幅で出ているときは、見えている 240 から掴む (保存した幅からではない)
+    {
+      name: "詰めた幅から",
+      shown: 240,
+      preferred: 500,
+      fits: 252,
+      start: 240,
+      max: 252,
+    },
+    // 入る幅が下限より狭くても、下限までは掴める
+    {
+      name: "入る幅が下限より狭い",
+      shown: 240,
+      preferred: 320,
+      fits: 100,
+      start: 240,
+      max: 240,
+    },
+    // 広い窓でも範囲の上限 800 まで
+    {
+      name: "広い窓",
+      shown: 560,
+      preferred: 560,
+      fits: 1400,
+      start: 560,
+      max: 800,
+    },
+    // 一覧を隠しているときは保存した幅から
+    {
+      name: "一覧を隠している",
+      shown: 0,
+      preferred: 420,
+      fits: 700,
+      start: 420,
+      max: 700,
+    },
+  ])("$name → 開始 $start・上限 $max", ({
+    shown,
+    preferred,
+    fits,
+    start,
+    max,
+  }) => {
+    expect(
+      listColumnDrag({ shown, preferred, fits, size: HISTORY_WIDTH }),
+    ).toEqual({
+      start,
+      max,
+    });
   });
 });

@@ -21,7 +21,7 @@
 | 層 | 何か | 例 | 生の px |
 |---|---|---|---|
 | **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義。余白・角丸の段階 (`--space-*` `--radius-*`) もここ。一覧の行の高さ `--ui-row-h` だけは出所が TS (`views/shell/row-height.ts`。仮想表示が位置の計算に使うため) で、CSS は初回描画用の既定。表の行の高さ `--ui-table-row-h` は仮想表示に使わないので CSS だけ (`ui-surface.md` の決まり 7) | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--ui-row-h` `--ui-table-row-h` `--code-line-height` | **可**（ここだけ） |
-| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--panel-head-h` (右の列の頭 `#panel-head`) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--sidebar-w` `--history-w` (一覧の列の利用者の幅) `--list-w` (一覧の列のいまの幅。TS が書く) `--listcol-shown` (一覧の列が占める幅。出していなければ 0) `--annotation-panel-w` | **可**（その固定物の実寸なので） |
+| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--tabs-lead-w` (タブ列の左端のプロジェクト名 `#tabs-lead` の固定の幅。body で決める) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--sidebar-w` `--history-w` (一覧の列の利用者の幅) `--list-w` (一覧の列のいまの幅。TS が書く) `--listcol-shown` (一覧の列が占める幅。出していなければ 0) `--annotation-panel-w` | **可**（その固定物の実寸なので） |
 | **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--main-bottom` (メインの面の箱の下端。最下段の上) `--main-pane-h` (面の箱の高さ) `--panel-body-top` (右の列の本体の上端) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) | **不可。T2 の式に px リテラルを書かない** |
 | **T3** ローカルインセット | 「このエンベロープの内側に居座る家具の高さ」 | `--file-detail-head-h` | **可。ただし必ず命名し、ページスコープに宣言し、何の高さかコメントする** |
 
@@ -66,14 +66,16 @@ grep -n "100vh\|100dvh" web/style.css \
 
 画面は次の固定物で囲まれている: 左のサイドバー (`#app-nav`、幅 `--nav-w`)、最上段のタブ列
 (`#main-tabs`、`--main-tabs-h`。**上の行は無い**: `web/index.html` のコメントと da82d59。右端は右の
-列の左)、画面の右端の右の列 (上端から。頭 `#panel-head` の 1 段目 = タブ列の行に画面の入口の絵柄、
-2 段目 `--panel-head-h` に題名 = プロジェクト名とブランチ。幅 `--panelcol-shown`。本体は
-`--panel-body-top` から。**探して開くための木** = Files の木 `#sidebar` はここ)、**本文を選ぶための一覧**
+列の左。**左端はプロジェクト名とブランチ (= プロジェクトの切替 `#project-switcher`) の固定の枠
+`#tabs-lead`、幅 `--tabs-lead-w`**。画面・タブ・2 面・右の列の開閉・一覧の列の出入りのどれでも
+出したり消したり動かしたりしない (動くと押す場所がずれる。利用者の指示)。タブはその右から。2 面でも
+左の面のタブ列の左端)、画面の右端の右の列 (上端から。頭 `#panel-head` は 1 段 = タブ列の行に画面の
+入口の絵柄と、右端に畳むボタン。幅 `--panelcol-shown`。本体は `--panel-body-top` (= 頭の下) から。**探して開くための木** = Files の木 `#sidebar` はここ)、**本文を選ぶための一覧**
 を置く一覧の列 (左のサイドバーの右、タブ列の下。幅 `--listcol-shown`。下の「一覧の列と右の列」)、
 画面ごとのツールバー (`#topbar`、`--topbar-h`)、最下段のバー (`#statusbar`、`--statusbar-h`)。画面下の
 パネルは無い (Tools と Search はタブ。`orientation.md`)。右の列を畳むと (`body.gdp-sidebar-hidden`) `--panelcol-shown` が
-細い帯の幅になり、プロジェクト名と画面の入口 (`#view-head`) はタブ列の左の `#tabs-lead` へ移る
-(`views/sidebar.ts` の `placeSidebarToggle`)。自動で畳むのは、一覧の画面の間と 2 面の間 (下の
+細い帯の幅になり、画面の入口の絵柄 (`.view-strip`) は帯へ縦に移る (`views/sidebar.ts` の
+`placeSidebarToggle`。プロジェクト名は動かさない)。自動で畳むのは、一覧の画面の間と 2 面の間 (下の
 「一覧の列と右の列」)。
 
 ### 一覧の列と右の列

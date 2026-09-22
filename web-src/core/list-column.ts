@@ -56,6 +56,35 @@ export function listColumnLayout(input: ListColumnInput): ListColumnLayout {
   return { width: narrow, compact, tree: treeRail, treeFolded: true };
 }
 
+export type ListColumnDrag = {
+  /** 掴み始めの幅 (見えている一覧の幅)。 */
+  start: number;
+  /** 掴んで広げられる上限。 */
+  max: number;
+};
+
+/**
+ * 一覧の列の掴み (#history-resizer) の開始幅と上限。開始は見えている一覧の
+ * 幅 (隣の変更ファイルの木を含めない。含めると掴んだ瞬間に木の幅だけ広がり、
+ * 狭めても上限で止まった)。上限は、本文が要る幅を保てる一覧の幅まで (それを
+ * 超えて離すと詰めた幅へ跳ぶので、そこで止める)。下限・上限は size の範囲。
+ */
+export function listColumnDrag(input: {
+  /** 見えている一覧の幅 (出していなければ 0)。 */
+  shown: number;
+  /** 利用者の幅。 */
+  preferred: number;
+  /** listColumnLayout と同じ room / tree / need から出す、入る一覧の幅。 */
+  fits: number;
+  size: PanelSize;
+}): ListColumnDrag {
+  const { shown, preferred, fits, size } = input;
+  return {
+    start: shown > 0 ? shown : preferred,
+    max: Math.min(size.max, Math.max(size.min, fits)),
+  };
+}
+
 /**
  * 保存した一覧の列の幅 (設定の historyWidth) を読み戻す。範囲 (HISTORY_WIDTH の
  * 下限〜上限) の中ならそのまま、外や数でないものは既定。端へ寄せない: 範囲の

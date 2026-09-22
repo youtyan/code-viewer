@@ -129,10 +129,12 @@ describe("the file tree is one tab stop", () => {
     }).toEqual({ tag: "BUTTON", row: "src", connected: true });
   });
 
-  test("the diff list is left as it was (no tab stop)", () => {
+  // 差分の一覧も止まり場所を 1 つ持つ (views/list-tab-stop.ts。詳しくは
+  // list-keyboard.test.ts)。
+  test("the diff list has its own tab stop (the first row)", () => {
     installSidebarDom();
     createSidebarForTest().renderSidebar(FILES);
-    expect(snapshot().tabStops).toEqual([]);
+    expect(snapshot().tabStops).toEqual(["src"]);
   });
 });
 

@@ -43,6 +43,14 @@ import { attachStickyHScroll, detachStickyHScroll } from "./diff-hscroll";
 import { enhanceMediaCard } from "./media-embed";
 import { pageLanguage } from "./page-language";
 import type { PageView } from "./page-view";
+import {
+  adjacentRow,
+  type FocusedListRow,
+  focusedListRow,
+  type ListRowKeys,
+  onListRowKeys,
+  syncListTabStop,
+} from "./list-tab-stop";
 import { treeLevelPad } from "./tree-indent";
 import { showFormDialog } from "./ui-dialog";
 import type { WorktreeText } from "./worktree-i18n";
@@ -216,6 +224,14 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   let unsubscribeAgents: (() => void) | null = null;
 
   const listPanel = document.getElementById("worktree-panel");
+  // 一覧と変更ファイルの行 (Tab の止まり場所と行の上のキー。views/list-tab-stop.ts)。
+  // 変更ファイルは Files の木と同じ #filelist に描くので、この画面の行 (鍵か
+  // フォルダの印を持つ行) だけを見る。
+  const WORKTREE_ROW_SELECTOR = ".history-list > li.history-item";
+  const FILE_ROW_SELECTOR =
+    "#filelist li.tree-file[data-key], #filelist li.tree-dir[data-worktree-dir]";
+  /** 行の上のキーを受けるのをやめる (画面を離れるとき)。 */
+  let detachRowKeys: Array<() => void> = [];
 
   function text(): WorktreeText {
     return deps.getText();
@@ -319,6 +335,30 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     unsubscribeAgents = deps.subscribeAgents(() => {
       if (mounted) renderList();
     });
+    // 一覧と変更ファイルの行の上のキー (views/list-tab-stop.ts)。↑↓・Home / End
+    // は行から行へフォーカスを移すだけ (選ぶと画面が切り替わるので、選ぶのは
+    // Enter = 1 回押したのと同じ)。
+    const fileList = document.getElementById("filelist");
+    detachRowKeys = [
+      ...(listPanel
+        ? [
+            onListRowKeys(
+              listPanel,
+              WORKTREE_ROW_SELECTOR,
+              rowFocusKeys(() => worktreeRows()),
+            ),
+          ]
+        : []),
+      ...(fileList
+        ? [
+            onListRowKeys(
+              fileList,
+              FILE_ROW_SELECTOR,
+              rowFocusKeys(() => shownFileRows()),
+            ),
+          ]
+        : []),
+    ];
     deps.setPageMode();
     deps.syncHeaderMenu();
   }
@@ -351,6 +391,8 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     document
       .getElementById("filelist")
       ?.removeEventListener("click", onFileListClick);
+    for (const detach of detachRowKeys) detach();
+    detachRowKeys = [];
     for (const button of sidebarViewButtons()) {
       button.removeEventListener("click", onSidebarViewToggle);
     }
@@ -1246,7 +1288,61 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
 
   function renderList(): void {
     if (!listPanel) return;
+    // 一覧はエージェントの状態が変わるたびに頭ごと作り直す。頭の部品 (再読み込み・
+    // 作成・絞り込み欄) にあったフォーカスも、作り直した後の同じ部品へ戻す
+    // (戻さないと body へ落ち、Tab が一覧の先へ進めず、絞り込み欄の入力も途切れた)。
+    const head = focusedHeadControl(listPanel);
+    try {
+      renderListRows(listPanel);
+    } finally {
+      restoreHeadControl(listPanel, head);
+    }
+  }
+
+  type FocusedHeadControl =
+    | { kind: "filter"; start: number | null; end: number | null }
+    | { kind: "button"; index: number };
+
+  function headButtons(panel: HTMLElement): HTMLElement[] {
+    return [...panel.querySelectorAll<HTMLElement>(".history-head button")];
+  }
+
+  function focusedHeadControl(panel: HTMLElement): FocusedHeadControl | null {
+    const focused = document.activeElement as HTMLElement | null;
+    if (!focused || !panel.contains(focused)) return null;
+    if (focused === worktreeFilterInput)
+      return {
+        kind: "filter",
+        start: worktreeFilterInput.selectionStart,
+        end: worktreeFilterInput.selectionEnd,
+      };
+    const index = headButtons(panel).indexOf(focused);
+    return index < 0 ? null : { kind: "button", index };
+  }
+
+  function restoreHeadControl(
+    panel: HTMLElement,
+    head: FocusedHeadControl | null,
+  ): void {
+    if (!head) return;
+    if (head.kind === "button") {
+      headButtons(panel)[head.index]?.focus({ preventScroll: true });
+      return;
+    }
+    if (!worktreeFilterInput.isConnected) return;
+    worktreeFilterInput.focus({ preventScroll: true });
+    if (head.start !== null && head.end !== null)
+      worktreeFilterInput.setSelectionRange(head.start, head.end);
+  }
+
+  function renderListRows(listPanel: HTMLElement): void {
     const t = text();
+    // 作り直す前に、行にあったフォーカスを控える (作り直すと body へ落ちる)。
+    const focused = focusedListRow(
+      listPanel,
+      WORKTREE_ROW_SELECTOR,
+      worktreeKey,
+    );
     listPanel.replaceChildren();
 
     const head = el("div", "history-head");
@@ -1462,6 +1558,21 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       navigate({ wt: id, file: undefined, origin: undefined });
     });
     listPanel.appendChild(list);
+    // 行の中にボタン (取り込みのコピー・「…」・「開く」) があるので listbox に
+    // せず、並び (ol) のまま名前を付け、選んでいる行は aria-current で伝える。
+    list.setAttribute("aria-label", t.panes.worktrees);
+    for (const row of list.querySelectorAll<HTMLElement>(".history-item"))
+      if (row.classList.contains("active"))
+        row.setAttribute("aria-current", "true");
+    syncListTabStop(list, {
+      rows: worktreeRows(),
+      keyOf: worktreeKey,
+      isActive: (row) => row.classList.contains("active"),
+      actionSelector: "button, a[href]",
+      focused,
+      fallback: listPanel,
+      memo: listPanel,
+    });
 
     // メインの 1 本しか無いときは、この一覧に何が並ぶかを 1 行で伝える。
     if (data.worktrees.length === 1) {
@@ -1600,12 +1711,16 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     item: WorktreeItem,
     node: FileTree,
     depth: number,
+    path: string,
   ): void {
     for (const [rawName, rawChild] of node.dirs) {
       const [label, child] = collapseChain(rawName, rawChild);
       const li = el("li", "tree-dir");
       li.tabIndex = -1;
       li.dataset.type = "tree";
+      // 行の鍵 (描き直しをまたいでフォーカスを戻す)。区切り (未コミット /
+      // コミット済み) ごとに同じフォルダが出るので、区切りから始める。
+      li.dataset.worktreeDir = `${path}/${label}`;
       li.style.setProperty("--lvl-pad", treeLevelPad(depth));
       const chev = el("span", "chev");
       chev.innerHTML = chevronSvg();
@@ -1618,6 +1733,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         event.stopPropagation();
         const collapsed = li.classList.toggle("collapsed");
         icon.innerHTML = folderSvg(collapsed);
+        // 畳んだ中に止まり場所があれば、見えている行へ移す。
+        const list = document.getElementById("filelist");
+        if (list) syncFileTabStop(list);
       };
       chev.addEventListener("click", toggle);
       icon.addEventListener("click", toggle);
@@ -1626,7 +1744,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       // `#filelist.tree .tree-dir.collapsed + .tree-children` で畳むため、
       // 中に入れると折りたたみが効かず、行も横に並んでしまう。
       const children = el("ul", "tree-children");
-      renderTreeInto(children, item, child, depth + 1);
+      renderTreeInto(children, item, child, depth + 1, `${path}/${label}`);
       parent.appendChild(children);
     }
     for (const file of node.files) {
@@ -1751,6 +1869,115 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   function renderFiles(): void {
+    const list = document.getElementById("filelist");
+    // 作り直す前に、行にあったフォーカスを控える。
+    const focused = list
+      ? focusedListRow(list, FILE_ROW_SELECTOR, fileRowKey)
+      : null;
+    try {
+      renderFileRows();
+    } finally {
+      if (list && selectedWorktree()) syncFileTabStop(list, focused);
+    }
+  }
+
+  // ---- 行の Tab の止まり場所とキー ----
+
+  function worktreeKey(row: HTMLElement): string {
+    return row.dataset.wt ?? "";
+  }
+
+  function worktreeRows(): HTMLElement[] {
+    return listPanel
+      ? [...listPanel.querySelectorAll<HTMLElement>(WORKTREE_ROW_SELECTOR)]
+      : [];
+  }
+
+  function fileRowKey(row: HTMLElement): string {
+    return row.dataset.key ?? `dir:${row.dataset.worktreeDir ?? ""}`;
+  }
+
+  function fileRows(): HTMLElement[] {
+    return [...document.querySelectorAll<HTMLElement>(FILE_ROW_SELECTOR)];
+  }
+
+  /** 畳んだフォルダの中に居ない行。 */
+  function shownFileRows(): HTMLElement[] {
+    return fileRows().filter((row) => {
+      for (
+        let parent = row.parentElement;
+        parent && parent.id !== "filelist";
+        parent = parent.parentElement
+      ) {
+        if (
+          parent.classList.contains("tree-children") &&
+          parent.previousElementSibling?.classList.contains("collapsed")
+        )
+          return false;
+      }
+      return true;
+    });
+  }
+
+  /**
+   * 変更ファイルの止まり場所と role。木なら tree (フォルダの子は group)、平らなら
+   * listbox。区切りの見出し・コミットの行など、ファイルでない行は role を外す。
+   */
+  function syncFileTabStop(list: HTMLElement, focused?: FocusedListRow | null) {
+    const t = text();
+    const tree = list.classList.contains("tree");
+    list.setAttribute("role", tree ? "tree" : "listbox");
+    list.setAttribute("aria-label", t.panes.fileListLabel);
+    const rows = fileRows();
+    for (const item of list.querySelectorAll<HTMLElement>("li")) {
+      if (rows.includes(item)) {
+        item.setAttribute("role", tree ? "treeitem" : "option");
+        if (item.dataset.worktreeDir !== undefined)
+          item.setAttribute(
+            "aria-expanded",
+            String(!item.classList.contains("collapsed")),
+          );
+      } else item.setAttribute("role", "none");
+    }
+    for (const group of list.querySelectorAll<HTMLElement>(".tree-children"))
+      group.setAttribute("role", "group");
+    syncListTabStop(list, {
+      rows,
+      shown: shownFileRows(),
+      keyOf: fileRowKey,
+      isActive: (row) => row.classList.contains("active"),
+      ariaSelected: true,
+      ...(focused === undefined ? {} : { focused }),
+      fallback: document.getElementById("sidebar"),
+    });
+  }
+
+  /**
+   * 行の上のキー: ↑↓・Home / End は行から行へフォーカスを移すだけ (選ぶと画面が
+   * 切り替わる)。Enter は 1 回押したのと同じ (フォルダは開閉)。
+   */
+  function rowFocusKeys(rows: () => HTMLElement[]): ListRowKeys {
+    const focusRow = (row: HTMLElement | null | undefined) => row?.focus();
+    return {
+      ArrowDown: (row) => focusRow(adjacentRow(rows(), row, 1)),
+      ArrowUp: (row) => focusRow(adjacentRow(rows(), row, -1)),
+      Home: () => focusRow(rows()[0]),
+      End: () => {
+        const all = rows();
+        focusRow(all[all.length - 1]);
+      },
+      Enter: (row) => {
+        if (row.dataset.worktreeDir === undefined) {
+          row.click();
+          return;
+        }
+        // 開閉は chev の click (止まり場所の付け直しもそこで)。
+        row.querySelector<HTMLElement>(".chev")?.click();
+      },
+    };
+  }
+
+  function renderFileRows(): void {
     const t = text();
     const list = document.getElementById("filelist");
     const title = document.querySelector<HTMLElement>(".sb-title");
@@ -1808,7 +2035,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           group === "uncommitted" ? t.files.uncommitted : t.files.committed,
         ),
       );
-      if (tree) renderTreeInto(list, item, buildTree(files), 0);
+      if (tree) renderTreeInto(list, item, buildTree(files), 0, group);
       else {
         for (const file of files) {
           list.appendChild(fileRow(item, file, 0, file.path));

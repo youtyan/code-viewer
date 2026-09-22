@@ -98,7 +98,11 @@ import {
   resolveKeymapAction,
 } from "./core/keymap";
 import { isNativeLinkClick } from "./core/link-click";
-import { listColumnLayout, restoredListWidth } from "./core/list-column";
+import {
+  listColumnDrag,
+  listColumnLayout,
+  restoredListWidth,
+} from "./core/list-column";
 import type { PaneSide, TabTarget } from "./core/main-tabs";
 import { createNetworkActivityTracker } from "./core/network-activity";
 import { panelColumnAction } from "./core/panel-column-policy";
@@ -225,6 +229,11 @@ import {
   openHelpSection,
 } from "./views/help-page";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
+import { onListRowKeys } from "./views/list-tab-stop";
+import {
+  createListTreeOpen,
+  localizeListTreeOpen as setListTreeOpenLabel,
+} from "./views/list-tree-open";
 import { createHunkExpand } from "./views/hunk-expand";
 import { createImageTabView, type ImageTabHandle } from "./views/image-tab";
 import {
@@ -1438,6 +1447,10 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 幅の計算が引く。
    */
   let LIST_COLUMN_WIDTH = 0;
+  /** 見えている一覧だけの幅 (木を含めない。出していなければ 0)。掴みの開始幅。 */
+  let LIST_SHOWN_WIDTH = 0;
+  /** 本文が要る幅を保てる一覧の幅 (掴んで広げられる上限)。 */
+  let LIST_FITS_WIDTH = HISTORY_WIDTH.max;
   /** 一覧の列に出す一覧の要素 (body[data-list-column] の値ごと)。 */
   const LIST_COLUMN_IDS = {
     sidebar: "sidebar",
@@ -5261,6 +5274,46 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   localizeViewerChrome();
   prepareKeyboardPanels();
+  // Diff の変更ファイル (History の変更ファイルの木も) の行の上のキー。↑↓・
+  // Home / End は j k・gg / G と同じキー割り当てを呼び、Enter は 1 回押したのと
+  // 同じ (行の click)。作業ツリーの変更ファイルは worktree-view.ts が受ける。
+  const diffFileList = document.getElementById("filelist");
+  if (!diffFileList) throw new Error("#filelist is missing from index.html");
+  onListRowKeys(
+    diffFileList,
+    "#filelist[data-diff-list] li[data-path], #filelist[data-diff-list] li[data-dirpath]",
+    {
+      ArrowDown: (row) => moveDiffListFrom(row, "sidebar-next"),
+      ArrowUp: (row) => moveDiffListFrom(row, "sidebar-previous"),
+      Home: () => keepDiffListFocus("goto-top"),
+      End: () => keepDiffListFocus("goto-bottom"),
+      Enter: (row) => row.click(),
+    },
+  );
+  /** Tab で入った先頭の行 (まだ選んでいない) からも、その行を起点に動かす。 */
+  function moveDiffListFrom(
+    row: HTMLElement,
+    action: "sidebar-next" | "sidebar-previous",
+  ): void {
+    if (!row.classList.contains("active")) markActive(sidebarItemPath(row));
+    keepDiffListFocus(action);
+  }
+  /**
+   * j k・gg / G と同じキー割り当てを呼ぶ (選んだファイルの差分のカードへ送る)。
+   * キー割り当ては行を click するので本文へフォーカスを移すが、行の上の矢印
+   * キーでは一覧に残す (続けて ↑↓ で選べるように)。本文へ移す予約も取り消す。
+   */
+  function keepDiffListFocus(
+    action: "sidebar-next" | "sidebar-previous" | "goto-top" | "goto-bottom",
+  ): void {
+    dispatchKeymapAction(action, "sidebar");
+    MAIN_SURFACE_FOCUS_SEQ++;
+    document
+      .querySelector<HTMLElement>(
+        "#filelist[data-diff-list] li.active[data-path], #filelist[data-diff-list] li.active[data-dirpath]",
+      )
+      ?.focus({ preventScroll: true });
+  }
   const contentPanel = document.querySelector<HTMLElement>("#content");
   contentPanel?.addEventListener("focusin", () => setPanelFocusScope("main"));
   contentPanel?.addEventListener("mousedown", (event) => {
@@ -5378,9 +5431,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       const kind = listColumnKind();
       return kind ? document.getElementById(LIST_COLUMN_IDS[kind]) : null;
     },
-    // 詰めた幅で出しているときは、見えている端から掴む。
-    width: () => LIST_COLUMN_WIDTH || STATE.historyWidth,
-    clamp: (w) => clampPanelSize(HISTORY_WIDTH, w),
+    // 見えている一覧の端から掴み (木の幅を足さない)、本文が要る幅を保てる
+    // ところで止める (core/list-column.ts の listColumnDrag)。
+    width: () => historyDrag().start,
+    clamp: (w) => Math.min(historyDrag().max, clampPanelSize(HISTORY_WIDTH, w)),
     apply: (w) => applyHistoryWidth(w),
     reset: () => applyHistoryWidth(HISTORY_WIDTH.default),
   });
@@ -7238,6 +7292,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       !!kind && LIST_COLUMN_HIDDEN,
     );
     let total = 0;
+    let shown = 0;
     let treeFolded = false;
     if (kind) {
       // タブ列は左のサイドバーの右から右の列の左まで (= 一覧の列と本文)。
@@ -7254,6 +7309,9 @@ window.GdpExpandLogic = GdpExpandLogic;
           `--panelcol-rail-w is not a length: ${JSON.stringify(railValue)}`,
         );
       const split = MAIN_TABS.panes().split;
+      const need = split
+        ? COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH
+        : COMFORTABLE_PANE_WIDTH;
       const layout = listColumnLayout({
         room,
         preferred: LIST_COLUMN_HIDDEN ? 0 : STATE.historyWidth,
@@ -7262,10 +7320,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         tree: kind === "sidebar" ? 0 : STATE.sbWidth,
         treeRail,
         treeKeptOpen: LIST_TREE_KEPT_OPEN,
-        need: split
-          ? COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH
-          : COMFORTABLE_PANE_WIDTH,
+        need,
       });
+      // 掴んで広げられる上限 = 今の木の幅のままで本文が need を保てる幅。
+      LIST_FITS_WIDTH = room - layout.tree - need;
       if (!LIST_COLUMN_HIDDEN)
         document.documentElement.style.setProperty(
           "--list-w",
@@ -7273,13 +7331,25 @@ window.GdpExpandLogic = GdpExpandLogic;
         );
       treeFolded = layout.treeFolded;
       total = layout.width + layout.tree;
+      shown = LIST_COLUMN_HIDDEN ? 0 : layout.width;
     }
+    LIST_SHOWN_WIDTH = shown;
     // 木の幅そのものは CSS が --sidebar-w と帯の幅から作る (木の掴みでの
     // ドラッグを ResizeObserver で拾えるように)。ここは畳むかどうかだけ。
     body.toggleAttribute("data-list-tree-folded", treeFolded);
     if (total === LIST_COLUMN_WIDTH) return;
     LIST_COLUMN_WIDTH = total;
     MAIN_TABS.refit();
+  }
+
+  /** 一覧の列の掴みの開始幅と上限 (core/list-column.ts の listColumnDrag)。 */
+  function historyDrag() {
+    return listColumnDrag({
+      shown: LIST_SHOWN_WIDTH,
+      preferred: STATE.historyWidth,
+      fits: LIST_FITS_WIDTH,
+      size: HISTORY_WIDTH,
+    });
   }
 
   /**
@@ -7365,27 +7435,18 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 窓・左のサイドバー・右の列の幅 (タブ列の幅) と、History の変更ファイルの
   // 木の幅が変わったら、一覧の列の幅を決め直す。
   // 畳んだ変更ファイルの木の帯。押すと開き、このセッションは畳まない。
-  const listTreeOpen = document.createElement("button");
-  listTreeOpen.type = "button";
-  listTreeOpen.className = "list-tree-open";
-  listTreeOpen.innerHTML = iconSvg(
-    "list-tree-open-icon",
-    SIDEBAR_SHOW_16_PATHS,
-  );
-  listTreeOpen.addEventListener("click", () => {
-    LIST_TREE_KEPT_OPEN = true;
-    syncListColumn();
+  createListTreeOpen({
+    open: () => {
+      LIST_TREE_KEPT_OPEN = true;
+      syncListColumn();
+    },
+    label: () => uiText().sidebar.showTree,
   });
-  document.body.append(listTreeOpen);
-  localizeListTreeOpen();
 
   /** 言語の切替でも呼ばれる (ボタンを作る前にも呼ばれるので DOM から引く)。 */
   function localizeListTreeOpen(): void {
     const button = document.querySelector<HTMLButtonElement>(".list-tree-open");
-    if (!button) return;
-    const title = uiText().sidebar.showTree;
-    button.title = title;
-    button.setAttribute("aria-label", title);
+    if (button) setListTreeOpenLabel(button, uiText().sidebar.showTree);
   }
 
   const listColumnObserver = new ResizeObserver(() => syncListColumn());

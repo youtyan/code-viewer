@@ -30,6 +30,11 @@ import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
 import { pageLanguage } from "./page-language";
 import { repoViewText } from "./repo-view-i18n";
 import { rowHeightFor } from "./shell/row-height";
+import {
+  type FocusedListRow,
+  focusedListRow,
+  syncListTabStop,
+} from "./list-tab-stop";
 import { treeLevelPad } from "./tree-indent";
 
 export type ViewerFontSize = "compact" | "regular" | "large" | "xlarge";
@@ -323,39 +328,35 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   /**
-   * 木を畳む / 出すボタンと、プロジェクト名・ブランチ・画面の入口 (#view-head)
-   * の置き場所。名前と入口は右の列の頭 (#panel-head) に固定し、タブや画面を
-   * 切り替えても動かさない。右の列を畳んだときだけ、名前とブランチはタブ列の
-   * 左 (#tabs-lead) へ、入口の絵柄は右の列の細い帯 (#panel-rail) へ縦に移す。
-   * ボタンは出ているときは名前の行の右端、畳んだときは帯の頭 (どちらも右の列の
-   * 頭の右端)。
+   * 木を畳む / 出すボタンと画面の入口 (#view-head) の置き場所。入口の絵柄は右の
+   * 列の頭 (#panel-head) の 1 段目で、右の列を畳んだときだけ細い帯
+   * (#panel-rail) へ縦に移す。ボタンは出ているときは絵柄の行の右端
+   * (.view-head-row)、畳んだときは帯の頭 (どちらも右の列の頭の右端)。
+   * プロジェクト名とブランチ (#project-switcher) はタブ列の左端 (#tabs-lead) に
+   * 固定で、ここでは動かさない (画面や右の列の開閉で出たり消えたりしない)。
    */
   function placeSidebarToggle() {
     const head = document.querySelector<HTMLElement>("#view-head");
     const row = head?.querySelector<HTMLElement>(".view-head-row") ?? null;
-    const leftHead = document.querySelector<HTMLElement>("#panel-head");
+    const panelHead = document.querySelector<HTMLElement>("#panel-head");
     const rail = document.querySelector<HTMLElement>("#panel-rail");
-    const lead = document.querySelector<HTMLElement>("#tabs-lead");
-    if (!head || !row || !leftHead || !rail || !lead)
+    if (!head || !row || !panelHead || !rail)
       throw new Error(
         `view head: missing ${[
           ["#view-head", head],
           ["#view-head .view-head-row", row],
-          ["#panel-head", leftHead],
+          ["#panel-head", panelHead],
           ["#panel-rail", rail],
-          ["#tabs-lead", lead],
         ]
           .filter(([, el]) => !el)
           .map(([name]) => name)
           .join(", ")} in index.html`,
       );
     attachSidebarToggle(STATE.sidebarHidden ? rail : row, STATE.sidebarHidden);
-    const host = STATE.sidebarHidden ? lead : leftHead;
-    if (head.parentElement !== host) host.append(head);
+    if (head.parentElement !== panelHead) panelHead.prepend(head);
     // 畳んだときは画面の入口の絵柄 (.view-strip) だけを帯へ縦に並べる (帯 =
-    // 絵柄の列)。タブ列の左へ一緒に移すと、2 面の狭い面でタブの列が 1 枚も
-    // 読めない幅まで潰れた (1280 の 2 面で 38px)。右の列の頭では絵柄が 1 段目
-    // なので、名前の行より前に置く (Tab で移る順を見た目の順にそろえる)。
+    // 絵柄の列)。右の列の頭では絵柄が行の頭で、畳むボタンがその右端 (Tab で移る
+    // 順を見た目の順にそろえる)。
     const strip = document.querySelector<HTMLElement>(".view-strip");
     if (strip) {
       if (STATE.sidebarHidden) {
@@ -619,9 +620,15 @@ export function createSidebar(deps: SidebarDeps) {
         dirIcon.className = "dir-icon";
         li.appendChild(dirIcon);
         li.appendChild(createTreeDirLabel(dir, onFileClick));
-        li.appendChild(
-          createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
+        const openPath = createOpenPathButton(
+          dir.path,
+          "directory",
+          openDirectoryInOsTitle(),
         );
+        // 止まり場所の行のボタンだけ Tab に入れる (syncDiffListTabStop)。
+        openPath.tabIndex = -1;
+        openPath.dataset.rowAction = "";
+        li.appendChild(openPath);
         const collapsed = STATE.collapsedDirs.has(dir.path);
         if (collapsed) li.classList.add("collapsed");
         const updateIcon = () => {
@@ -642,6 +649,8 @@ export function createSidebar(deps: SidebarDeps) {
             STATE.collapsedDirs.delete(dir.path);
             persistCollapsedDirs({ removed: [dir.path] });
           }
+          // 畳んだ中に止まり場所があれば、見えている行へ移す。
+          syncDiffListTabStop();
         };
         if (!dir.children_omitted) {
           chev.addEventListener("click", toggleDir);
@@ -1615,6 +1624,8 @@ export function createSidebar(deps: SidebarDeps) {
       }
     }
     const treeMode = STATE.sbView === "tree" || repoSidebar;
+    // 作り直す前に、差分の一覧の行にあったフォーカスを控える。
+    const focused = focusedListRow(ul, DIFF_LIST_ROW_SELECTOR, sidebarItemPath);
     ul.innerHTML = "";
     // 差分の一覧を描いた印 (diff-view の shouldRenderDiffSidebar が読む)。
     ul.toggleAttribute("data-diff-list", !repoSidebar);
@@ -1658,6 +1669,65 @@ export function createSidebar(deps: SidebarDeps) {
     // Re-apply active highlight if any
     if (STATE.activeFile) markActive(STATE.activeFile);
     applyFilter();
+    syncDiffListRoles(ul, repoSidebar, treeMode);
+    syncDiffListTabStop(focused);
+  }
+
+  // 差分の一覧 (Diff の変更ファイル・History の変更ファイルの木。仮想表示で
+  // ない木と平らな一覧) も Tab の止まり場所を 1 つにする (views/list-tab-stop.ts。
+  // Files の木は仮想表示で syncTreeTabStop)。行は作り直さず印だけ変わるので、
+  // 選び直し・絞り込み・開閉のたびに付け直す。
+  const DIFF_LIST_ROW_SELECTOR = "li[data-path], li[data-dirpath]";
+
+  function syncDiffListTabStop(focused?: FocusedListRow | null) {
+    const ul = document.querySelector<HTMLElement>("#filelist");
+    if (
+      !ul?.hasAttribute("data-diff-list") ||
+      ul.classList.contains("tree-virtual")
+    )
+      return;
+    const rows = $$<HTMLElement>(SIDEBAR_ITEM_SELECTOR);
+    for (const row of rows)
+      if (row.dataset.dirpath !== undefined)
+        row.setAttribute(
+          "aria-expanded",
+          String(!row.classList.contains("collapsed")),
+        );
+    syncListTabStop(ul, {
+      rows,
+      shown: rows.filter(isSidebarRowVisible),
+      keyOf: sidebarItemPath,
+      isActive: (row) => row.classList.contains("active"),
+      actionSelector: "[data-row-action]",
+      ariaSelected: true,
+      ...(focused === undefined ? {} : { focused }),
+      fallback: document.querySelector<HTMLElement>("#sidebar"),
+    });
+  }
+
+  /**
+   * 差分の一覧の role と名前。木なら tree (フォルダの子は group)、平らなら
+   * listbox。Files の木 (仮想表示) には付けない (付いていたら外す)。
+   */
+  function syncDiffListRoles(
+    ul: HTMLElement,
+    repoSidebar: boolean,
+    treeMode: boolean,
+  ) {
+    if (repoSidebar) {
+      ul.removeAttribute("role");
+      ul.removeAttribute("aria-label");
+      return;
+    }
+    ul.setAttribute("role", treeMode ? "tree" : "listbox");
+    ul.setAttribute(
+      "aria-label",
+      DIFF_SCREEN_TEXT[pageLanguage()].fileListLabel,
+    );
+    for (const row of $$<HTMLElement>(SIDEBAR_ITEM_SELECTOR))
+      row.setAttribute("role", treeMode ? "treeitem" : "option");
+    for (const group of ul.querySelectorAll<HTMLElement>(".tree-children"))
+      group.setAttribute("role", "group");
   }
 
   function setAllSidebarDirsCollapsed(collapsed: boolean) {
@@ -1769,6 +1839,7 @@ export function createSidebar(deps: SidebarDeps) {
       if (active)
         requestAnimationFrame(() => scrollSidebarItemIntoView(active));
     }
+    syncDiffListTabStop();
   }
 
   function applyFilter() {
@@ -1807,6 +1878,7 @@ export function createSidebar(deps: SidebarDeps) {
     updateTreeDirVisibility(matches, filterActive);
     if (!isRepositorySidebarMode() && typeof applyViewedState === "function")
       applyViewedState();
+    syncDiffListTabStop();
   }
 
   function updateTreeDirVisibility(

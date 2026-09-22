@@ -185,6 +185,37 @@ describe("history ref chips", () => {
     });
   });
 
+  // 入りきらない札は縮めて細い線にせず、数を減らす: 札は縮めず 1 行の高さで
+  // 折り返し、次の行ごと切る。今の枝の札は先頭。
+  test("入りきらない札は数を減らす (縮めない・1 行で折り返して切る)", () => {
+    const chip = declarations([
+      ".history-ref",
+      "#history-panel .history-ref",
+      "#history-panel .history-item .history-ref",
+    ]);
+    const head = declarations([
+      "#history-panel .history-item .history-ref-head",
+    ]);
+    const vars = bodyVariables("none");
+    expect({
+      wrap: refs.get("flex-wrap"),
+      overflow: refs.get("overflow"),
+      rowHeight:
+        resolveVar(refs.get("height") ?? "", vars) ===
+        resolveVar(chip.get("line-height") ?? "", vars),
+      chipFlex: chip.get("flex"),
+      chipMax: chip.get("max-width"),
+      headOrder: head.get("order"),
+    }).toEqual({
+      wrap: "wrap",
+      overflow: "clip",
+      rowHeight: true,
+      chipFlex: "none",
+      chipMax: "100%",
+      headOrder: "-1",
+    });
+  });
+
   test("札の自動の最小幅が効く (min-width: auto・スクロールしない overflow)", () => {
     expect({
       minWidth: refs.get("min-width"),
@@ -200,5 +231,41 @@ describe("history ref chips", () => {
     expect(resolveVar(refs.get("width") ?? "", vars)).toBe(
       `calc((100% - ${gap}) * ${BRANCH_SHARE})`,
     );
+  });
+});
+
+// 1280px の窓で一覧の列を出した 1 面の Diff の帯 (約 50em) は、件数が大きいと
+// 全部の段を当てても中身が余った。54em 以下の段で比較対象の選択欄の文字の欄を
+// 狭め、選択欄の内側の余白と間隔を詰める (素の決まりより狭いこと)。
+describe("the Diff bar at about 50em", () => {
+  const all = loadStyleSheet();
+  const stage = all.filter(
+    (rule) => rule.atRule === "@container topbar (max-width: 54em)",
+  );
+  const base = baseRules(all);
+  const at = (rules: typeof all, selector: string, prop: string) =>
+    cascadedDeclarations(rules, (candidate) => candidate === selector).get(
+      prop,
+    );
+  const ch = (value: string | undefined) =>
+    Number.parseFloat((value ?? "").replace("ch", ""));
+  test("the ref field, its padding and the gap get narrower", () => {
+    expect({
+      field:
+        ch(at(stage, "#topbar .ref-selector .ref-input", "min-width")) <
+        ch(at(base, "#topbar .ref-selector .ref-input", "min-width")),
+      padding: [
+        at(base, "#topbar .ref-selector", "padding"),
+        at(stage, "#topbar .ref-selector", "padding"),
+      ],
+      gap: [
+        at(base, "#topbar > .ref-pickers", "gap"),
+        at(stage, "#topbar > .ref-pickers", "gap"),
+      ],
+    }).toEqual({
+      field: true,
+      padding: ["0 var(--space-3)", "0 var(--space-2)"],
+      gap: ["var(--space-2)", "var(--space-1)"],
+    });
   });
 });

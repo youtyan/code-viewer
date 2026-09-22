@@ -14,11 +14,14 @@ Requires Node.js 20 or newer. Development uses
   `matching / all` file counts in the header while it is active. Rows are
   real links: Cmd/Ctrl+click or middle-click opens a file in a new tab.
 - Keep files and screens open as tabs in the top row (there is no header row
-  above it). The project name, its branch and six view icons (Files / Diff /
-  History / Worktrees / Data / Work log, with the name and key on hover) sit
-  fixed at the head of the right column, next to the Files tree (the left
-  sidebar holds the projects and agents), so switching tabs never moves them;
-  they move to the left end of the tab row only when you fold the right column. On a narrow head the branch keeps its whole name up to about
+  above it). The project name and its branch (the project switcher, also `p`)
+  stay fixed at the left end of the tab row in a box of fixed width, and the
+  tabs start to its right; switching tabs or screens, splitting, folding the
+  right column or showing the list column never moves or hides it. The six
+  view icons (Files / Diff / History / Worktrees / Data / Work log, with the
+  name and key on hover) sit at the head of the right column, next to the
+  Files tree (the left sidebar holds the projects and agents), and move to the
+  right column's strip when you fold it. In a narrow box the branch keeps its whole name up to about
   40% of the width and the project name is shortened into the rest. The lists you pick
   the main area from (Diff's changed files, History's commits and a selected worktree's
   list) sit in a list column between the left sidebar and the main area; on those

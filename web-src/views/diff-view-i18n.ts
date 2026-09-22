@@ -61,6 +61,8 @@ export type DiffScreenText = DiffViewText & {
   kindTagBinary: string;
   kindTagHeavy: string;
   invalidRegex: string;
+  /** 差分の一覧 (変更ファイル) の名前 (支援技術向け)。 */
+  fileListLabel: string;
   showMoreLines: (count: number) => string;
   showMoreLinesUnknown: string;
   openInOs: string;
@@ -81,6 +83,7 @@ const EN: DiffScreenText = {
   kindTagBinary: "binary/media file",
   kindTagHeavy: "large diff",
   invalidRegex: "invalid regular expression",
+  fileListLabel: "Changed files",
   showMoreLines: (count) => `Show ${count} more lines`,
   showMoreLinesUnknown: "Show more lines",
   openInOs: "open in OS",
@@ -154,6 +157,7 @@ const JA: DiffScreenText = {
   kindTagBinary: "バイナリ・メディアのファイル",
   kindTagHeavy: "大きな差分",
   invalidRegex: "正規表現が正しくありません",
+  fileListLabel: "変更ファイル",
   showMoreLines: (count) => `あと ${count} 行を表示`,
   showMoreLinesUnknown: "続きの行を表示",
   openInOs: "OS で開く",

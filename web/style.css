@@ -394,10 +394,10 @@ html, body {
   /* メインの面の箱 (.main-pane-host) の高さ。右の面のソース表示は、本文の
      --content-h の代わりにこれで箱を作る (.main-pane-source)。 */
   --main-pane-h: calc(100vh - var(--global-header-h) - var(--main-bottom));
-  /* 右の列 (パネルの列。画面の右端の固定の列で、上端から)。頭 (#panel-head) の
-     1 段目 (タブ列と同じ高さ) に画面の入口の絵柄、2 段目にプロジェクト名と
-     ブランチ (= この列の題名)、その下に Files の木 (#sidebar。探して開くための
-     木) を出す。本文を選ぶための一覧 (Diff・History・選んでいる Worktrees) は
+  /* 右の列 (パネルの列。画面の右端の固定の列で、上端から)。頭 (#panel-head) は
+     1 段 (タブ列と同じ高さ) で画面の入口の絵柄と畳むボタン、その下に Files の木
+     (#sidebar。探して開くための木) を出す。プロジェクト名とブランチはタブ列の
+     左端 (#tabs-lead、幅 --tabs-lead-w) に固定。本文を選ぶための一覧 (Diff・History・選んでいる Worktrees) は
      右の列ではなく本文の左の一覧の列 (--listcol-shown) に出し、その画面の間は
      右の列を細い帯 (--panelcol-rail-w、開くボタン 1 つ分の実寸) へ自動で畳む
      (core/panel-column-policy.ts)。利用者が畳んだとき (gdp-sidebar-hidden) も帯。 */
@@ -406,9 +406,12 @@ html, body {
   /* 帯の幅 = 開くボタンと画面の入口の絵柄 1 つ分 (押せる領域の大きさ。密度で
      変わるので固定の px にしない。特大で絵柄が帯からはみ出した)。 */
   --panelcol-rail-w: var(--ui-control-sm);
-  /* 頭の 2 段目 (題名の行) の高さ。1 段目はタブ列の行 (--global-header-h)。 */
-  --panel-head-h: calc(var(--space-2) + var(--ui-control-sm) + var(--space-2));
-  --panel-body-top: calc(var(--global-header-h) + var(--panel-head-h));
+  /* 右の列の本体の上端 = 頭 (タブ列の行と同じ高さの 1 段) の下。 */
+  --panel-body-top: var(--global-header-h);
+  /* タブ列の左端のプロジェクト名とブランチ (#tabs-lead) の幅。固定で、画面・
+     タブ・右の列の開閉・2 面で変えない (出たり消えたり動いたりしない)。名前と
+     枝はこの中で fitBrandWidths の決まりで分ける (views/brand-fit.ts)。 */
+  --tabs-lead-w: calc(var(--space-unit) * 50);
   /* 本文 (route の中身: ツールバー・#content・面の箱) の左右の端。左は左の
      サイドバーの右、右は右の列の左。左右 2 面のときは左の面の幅に収める (面の
      幅 --split-*-w は views/main-tabs/main-tabs-view.ts が本文の幅で書く)。
@@ -1909,6 +1912,12 @@ body[data-list-tree-folded] .list-tree-open {
 }
 body[data-list-tree-folded] .list-tree-open:hover {
   background: var(--color-raised);
+  color: var(--color-text);
+}
+/* 帯そのものがボタン (押せる領域は帯の全体) なので、輪は帯の内側に描く。 */
+body[data-list-tree-folded] .list-tree-open:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
   color: var(--color-text);
 }
 .list-tree-open svg {
@@ -17479,35 +17488,35 @@ button.brand[aria-expanded="true"] {
   fill: currentColor;
 }
 
-/* ---- プロジェクト名と画面の入口 (#view-head) の置き場所 ----
-   右の列の頭 (#panel-head) に 2 段で。利用者が右の列を畳んだときだけタブ列の左
-   (#tabs-lead) に 1 行で (views/sidebar.ts の placeSidebarToggle)。 */
+/* ---- 画面の入口 (#view-head) とプロジェクト名 (#tabs-lead) の置き場所 ----
+   入口の絵柄は右の列の頭 (#panel-head) の 1 段 (右端に右の列を畳むボタン)。
+   利用者が右の列を畳んだら絵柄は帯へ縦に (views/sidebar.ts の
+   placeSidebarToggle)。プロジェクト名とブランチはタブ列の左端に固定。 */
 .view-head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
 }
-/* 右の列の頭 (#panel-head)。上端から: 1 段目 (タブ列の行) に絵柄の列、2 段目に
-   名前とブランチの行 (右端に列を畳むボタン)。タブを切り替えても動かない (右の列は
-   利用者が畳まない限りある)。
+/* 右の列の頭 (#panel-head)。タブ列の行と同じ高さの 1 段に絵柄の列と、右端に列を
+   畳むボタン。タブを切り替えても動かない。
    文字は文字の線 (--pad-text)、押せる領域の左端は面の線 (--pad-face)。 */
 #panel-head {
   position: fixed;
   right: 0;
   top: 0;
   width: var(--panelcol-w);
-  height: calc(var(--global-header-h) + var(--panel-head-h));
+  height: var(--global-header-h);
   z-index: 32;
   box-sizing: border-box;
-  padding: 0 var(--pad-face) var(--space-2);
+  padding: 0 var(--pad-face);
   background: var(--color-tree);
   /* 左の線は内側の影で引く (border だと幅 --sidebar-w のときだけ中身が 1px
      削られ、History で列が広がると畳むボタンが 1px 動く)。 */
   box-shadow: inset 1px 0 0 var(--color-line-soft);
 }
-/* 畳んだ右の列は細い帯。名前とブランチはタブ列の左へ移り、帯には開くボタン
-   (#panel-rail の頭、タブ列の行) と、その下に画面の入口の絵柄を縦に置く。 */
+/* 畳んだ右の列は細い帯。帯には開くボタン (#panel-rail の頭、タブ列の行) と、
+   その下に画面の入口の絵柄を縦に置く。 */
 body.gdp-sidebar-hidden #panel-head {
   width: var(--panelcol-shown);
   height: auto;
@@ -17545,52 +17554,44 @@ body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
   border-radius: 50%;
   background: var(--color-accent);
 }
-/* 1 段目 (タブ列の行) に絵柄、2 段目に題名 (名前とブランチ) と畳むボタン。
-   列は右端に付くので、History などで列が一覧の幅に広がっても畳むボタンは
-   右端のまま。 */
+/* 1 段 (タブ列の行) に絵柄と、右端に畳むボタン。 */
 #panel-head > #view-head {
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--space-2);
+  flex-direction: row;
+  align-items: center;
   width: 100%;
+  height: var(--global-header-h);
 }
 #panel-head > #view-head > .view-strip {
-  order: -1;
-  height: var(--global-header-h);
+  flex: 0 1 auto;
 }
 .view-head-row {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-  height: var(--ui-control-sm);
-}
-.view-head-row > .brand {
-  min-width: 0;
-  max-width: 100%;
-}
-/* 木を畳むボタンは名前の行の右端 (畳んだときの開くボタンは #panel-rail)。 */
-.view-head-row > #sidebar-toggle {
-  order: 2;
   flex: none;
   margin-left: auto;
 }
-/* 畳んだときのタブ列の左 (名前とブランチ)。縮めず、縮むのはタブの列のほう。
-   名前だけは上限の幅で省略する。入口の絵柄は帯 (#panel-rail) へ移るので、
-   ここには置かない (2 面の狭い面でタブが読めなくなった)。 */
+/* 木を畳むボタンは絵柄の行の右端 (畳んだときの開くボタンは #panel-rail)。 */
+.view-head-row > #sidebar-toggle {
+  flex: none;
+}
+/* タブ列の左端のプロジェクト名とブランチ (= プロジェクトの切替)。幅は固定の
+   --tabs-lead-w で、画面・タブ・右の列の開閉・2 面で変えない (出たり消えたり
+   動いたりすると、押す場所がずれる)。名前と枝はこの幅の中で分ける
+   (views/brand-fit.ts)。タブはその右から始まる。 */
 .tabs-lead {
   display: flex;
   align-items: center;
-  flex: none;
+  flex: 0 0 var(--tabs-lead-w);
+  width: var(--tabs-lead-w);
+  min-width: 0;
+  box-sizing: border-box;
   gap: var(--space-1);
   padding: 0 var(--space-2) 0 var(--pad-face);
 }
-/* 中身がどれも出ていない (木に名前がある・サイドバーも木も出ている) なら場所を取らない。 */
-.tabs-lead:not(:has(> :not([hidden]))) {
-  display: none;
-}
 .tabs-lead .brand {
-  max-width: calc(var(--space-unit) * 45);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   font-size: var(--ui-font-base);
 }
 .tabs-lead .project-branch {
@@ -21078,6 +21079,22 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
     display: none;
   }
 }
+/* 1280px の窓で一覧の列を出した 1 面の帯 (約 50em) では、上の段を全部当てても
+   件数が大きい (「16 files +2943 −0」) と中身が約 32px 余り、Split / Unified が
+   帯の外へ押し出された。比較対象の選択欄の文字の欄を 6ch にし (枝の名前の先頭
+   5 文字 + … は読める)、選択欄の内側の余白と選択欄の間隔を 1 段ずつ詰める。 */
+@container topbar (max-width: 54em) {
+  #topbar > .ref-pickers {
+    gap: var(--space-1);
+  }
+  #topbar .ref-selector {
+    padding: 0 var(--space-2);
+  }
+  #topbar .ref-selector .ref-input {
+    width: 6ch;
+    min-width: 6ch;
+  }
+}
 #topbar {
   overflow-x: auto;
   scrollbar-width: none;
@@ -21298,16 +21315,20 @@ body.gdp-history-page #diff {
      BRANCH_SHARE と同じ割合。間は .history-title の column-gap)。 */
   width: calc((100% - var(--space-3)) * 0.4);
   /* 自動の最小幅を効かせる (スクロールする箱にすると 0 になる。clip は
-     スクロールする箱ではないので効いたまま)。札が何枚もあって入りきらない分は
-     切る。 */
+     スクロールする箱ではないので効いたまま)。札は 1 行ぶんの高さに並べて
+     折り返し、入りきらない札は次の行ごと切って見せない (札を縮めると 12〜15px
+     の細い線になった。入らない札は数を減らす)。 */
   min-width: auto;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  height: calc(var(--space-unit) * 5);
   overflow: clip;
 }
+/* 札は縮めない。1 枚だけでも列より長い札は列の幅で省略する。 */
 #history-panel .history-item .history-ref,
 .gdp-file-history-panel .history-item .history-ref {
-  flex-shrink: 1;
-  min-width: 0;
+  flex: none;
+  max-width: 100%;
 }
 #history-panel .history-item .author,
 .gdp-file-history-panel .history-item .author {
@@ -21382,6 +21403,17 @@ body.gdp-history-page #diff {
   background: var(--color-select);
   box-shadow: var(--glow-select);
 }
+/* キーで届いた行 (Tab の止まり場所は 1 行)。行は一覧の端まで広がるので輪は
+   内側に描く。選んでいる行の光は残す (#filelist の行と同じ)。 */
+#history-panel .history-item:focus-visible,
+.gdp-file-history-panel .history-item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
+}
+#history-panel .history-item.active:focus-visible,
+.gdp-file-history-panel .history-item.active:focus-visible {
+  box-shadow: var(--focus-ring-inset), var(--glow-select);
+}
 #history-panel .history-item-in-range,
 .gdp-file-history-panel .history-item-in-range {
   background: color-mix(in srgb, var(--color-select) 45%, transparent);
@@ -21412,12 +21444,10 @@ body.gdp-history-page #diff {
   background: color-mix(in srgb, var(--color-accent) 70%, transparent);
   color: var(--color-on-accent);
 }
-/* 札が何枚もあって札の幅が足りないときは、今の枝の札は縮めず (札の列の幅までは
-   名前を全部出す)、ほかの札が縮む。 */
+/* 札が何枚もあって入りきらないときに残るのは先頭から。今の枝の札を先頭にする。 */
 #history-panel .history-item .history-ref-head,
 .gdp-file-history-panel .history-item .history-ref-head {
-  flex-shrink: 0;
-  max-width: 100%;
+  order: -1;
 }
 /* 日付の見出し: 補助の小さな文字。グラフの線はここも素通りする。 */
 #history-panel .history-group,
@@ -22411,6 +22441,14 @@ body.gdp-worktree-page:not([data-worktree-overview]) #worktree-panel .history-it
 body.gdp-worktree-page:not([data-worktree-overview]) #worktree-panel .history-item.active {
   background: var(--color-select);
   box-shadow: var(--glow-select);
+}
+/* キーで届いた行の輪は内側 (一覧だけのときも選んでいるときも)。 */
+body.gdp-worktree-page #worktree-panel .history-item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
+}
+body.gdp-worktree-page #worktree-panel .history-item.active:focus-visible {
+  box-shadow: var(--focus-ring-inset), var(--glow-select);
 }
 body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   display: -webkit-box;
