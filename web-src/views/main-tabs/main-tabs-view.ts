@@ -25,6 +25,7 @@ import {
   activate,
   activateIndex,
   activeTab,
+  COMMON_TABS_VERSION,
   canPlace,
   canSplit,
   close,
@@ -50,10 +51,13 @@ import {
   type PaneSide,
   type ParkedRight,
   parkRight,
+  parseCommonTabs,
   parseLayout,
   prevTab,
+  type SerializedCommonTabs,
   type SerializedLayout,
   sameTarget,
+  serializeCommonTabs,
   serializeLayout,
   setSplit,
   showHome,
@@ -63,6 +67,7 @@ import {
   tabMenu,
   unparkRight,
   unsplit,
+  withCommonTabs,
 } from "../../core/main-tabs";
 import type { AppRoute } from "../../core/routes";
 import { basenameOf } from "../../core/terminal-board";
@@ -104,10 +109,10 @@ export type MainTabsDeps = {
    */
   lead?: HTMLElement;
   /**
-   * 左の列 (タブ列の下の固定の列) の頭。面の幅はこの右 (本文) で数える。畳んで
-   * いれば幅 0 (display: none)。無ければ左の列は無いものとする。
+   * 右の列 (画面の右端の固定の列) の頭。本文の幅はタブ列の左端からこの左まで
+   * で数える (畳んでいれば細い帯の幅)。無ければ右の列は無いものとする。
    */
-  leftColumn?: HTMLElement;
+  panelColumn?: HTMLElement;
   getLanguage(): MainTabsLang;
   /** page のタブの名前 (画面の入口と同じ文言)。 */
   pageLabel(page: PageKind): string;
@@ -129,8 +134,17 @@ export type MainTabsDeps = {
   stopTerminal(session: string): void;
   /** ターミナルのタブの右クリックに足す、端末の操作 (文字の大きさなど)。 */
   terminalMenuItems(): ContextMenuItem[];
-  loadSaved(): Promise<unknown>;
-  save(layout: SerializedLayout, keepalive: boolean): Promise<void>;
+  /**
+   * 保存した配置。layout はこのプロジェクトの配置、common はプロジェクトに
+   * 属さないタブ (全プロジェクトで 1 つ)。どちらも無ければ null。
+   */
+  loadSaved(): Promise<{ layout: unknown; common: unknown }>;
+  /** common は、共通のタブを書いてよいとき (読めた・まだ無かった) だけ渡る。 */
+  save(
+    layout: SerializedLayout,
+    keepalive: boolean,
+    common?: SerializedCommonTabs,
+  ): Promise<void>;
   /**
    * 読めなかった保存値を、上書きする前に同じ場所へ退避する
    * (`main-tabs.json.broken-<時刻>`)。退避した先のパスを返す。
@@ -199,7 +213,7 @@ export type MainTabsHandle = {
   sideForRoute(route: FileRoute): PaneSide;
   /** 面にフォーカスを移す。2 面でなければ何もしない。 */
   focusSide(side: PaneSide): void;
-  /** 画面の x 座標がどちらの面か (2 面でないか、左の列の上なら null)。 */
+  /** 画面の x 座標がどちらの面か (2 面でないか、右の列の上なら null)。 */
   sideAt(clientX: number): PaneSide | null;
   focusOther(): void;
   /**
@@ -315,6 +329,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   const routes = new Map<string, AppRoute>();
   let restored = false;
   let saveEnabled = false;
+  /** 共通のタブも書くか。読めなかった・新しい版の値は上書きしない。 */
+  let commonSaveEnabled = false;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let dragId: string | null = null;
   /**
@@ -434,22 +450,21 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
 
   // ---- 幅 ----
 
-  /** 左の列の幅 (畳んでいれば 0)。 */
-  function leftColumnWidth(): number {
-    return deps.leftColumn?.getBoundingClientRect().width ?? 0;
-  }
-
-  /** 本文の左端 (左の列の右)。 */
-  function bodyLeft(): number {
-    return deps.mount.getBoundingClientRect().left + leftColumnWidth();
+  /** 右の列の幅 (畳んでいれば細い帯の幅)。 */
+  function panelColumnWidth(): number {
+    return deps.panelColumn?.getBoundingClientRect().width ?? 0;
   }
 
   /**
-   * 本文の横幅 (左の列の右から窓の右端まで)。面の最小幅はこの幅で数える
-   * (木の列を含めない)。
+   * 本文の横幅 (タブ列の左端から右の列の左まで)。面の最小幅はこの幅で数える
+   * (右の列を含めない)。
    */
   function mainWidth(): number {
-    return document.documentElement.clientWidth - bodyLeft();
+    return (
+      document.documentElement.clientWidth -
+      deps.mount.getBoundingClientRect().left -
+      panelColumnWidth()
+    );
   }
 
   /** 1 面で、左の前面が右に置ける種類 (ファイル・ターミナル・画像) か。 */
@@ -553,8 +568,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     followRouteSide("stay");
   });
   geometryObserver.observe(deps.mount);
-  // 左の列の幅が変わる (畳む・幅を変える・History の一覧の幅) と本文の幅も変わる。
-  if (deps.leftColumn) geometryObserver.observe(deps.leftColumn);
+  // 右の列の幅が変わる (畳む・幅を変える・History の一覧の幅) と本文の幅も変わる。
+  if (deps.panelColumn) geometryObserver.observe(deps.panelColumn);
 
   // ---- 保存 ----
 
@@ -568,8 +583,13 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     if (!saveTimer) return;
     clearTimeout(saveTimer);
     saveTimer = null;
+    const full = fullLayout();
     deps
-      .save(serializeLayout(fullLayout()), keepalive)
+      .save(
+        serializeLayout(full),
+        keepalive,
+        commonSaveEnabled ? serializeCommonTabs(full) : undefined,
+      )
       .catch((error: unknown) => {
         console.error("[code-viewer] main tabs could not be saved", error);
       });
@@ -1114,6 +1134,53 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         ?.focus({ preventScroll: true });
   }
 
+  /**
+   * 保存した共通のタブを読む。使えるなら並びを返し、書いてよいかを
+   * commonSaveEnabled に置く。まだ無ければ null (この配置の共通のタブが次の
+   * 保存で共通になる)。壊れていれば退避してから null、退避できなければ
+   * 書かない。新しい版の値も書かない。理由は全部 console に出す。
+   */
+  async function readCommonTabs(raw: unknown): Promise<TabTarget[] | null> {
+    let parsed: ReturnType<typeof parseCommonTabs>;
+    try {
+      parsed = parseCommonTabs(raw);
+    } catch (error) {
+      try {
+        const backup = await deps.backupSaved();
+        console.error(
+          `[code-viewer] main tabs: the saved common tabs are broken; the file was backed up to ${backup} and the common tabs start from this page. saved value:`,
+          JSON.stringify(raw),
+          error,
+        );
+        commonSaveEnabled = true;
+      } catch (backupError) {
+        console.error(
+          "[code-viewer] main tabs: the saved common tabs are broken and could not be backed up, so they are kept as they are and not saved on this page. saved value:",
+          JSON.stringify(raw),
+          error,
+          backupError,
+        );
+        commonSaveEnabled = false;
+      }
+      return null;
+    }
+    if (parsed.kind === "newer") {
+      console.error(
+        `[code-viewer] main tabs: the saved common tabs were written by a newer version (common tabs version ${parsed.version}, this page reads up to ${COMMON_TABS_VERSION}); they are kept as they are and not saved on this page`,
+      );
+      commonSaveEnabled = false;
+      return null;
+    }
+    commonSaveEnabled = true;
+    if (parsed.kind === "none") return null;
+    if (parsed.dropped.length > 0)
+      console.error(
+        `[code-viewer] main tabs: dropped ${parsed.dropped.length} saved common tab(s) of an unknown kind:`,
+        JSON.stringify(parsed.dropped),
+      );
+    return parsed.targets;
+  }
+
   async function restore(
     options: { rightRoute?: FileRoute; keepSavedFront?: boolean } = {},
   ): Promise<void> {
@@ -1124,8 +1191,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       if (options.rightRoute) openRightRoute(options.rightRoute, "sync", true);
     };
     let saved: unknown;
+    let savedCommon: unknown;
     try {
-      saved = await deps.loadSaved();
+      ({ layout: saved, common: savedCommon } = await deps.loadSaved());
     } catch (error) {
       // 読めなかった配置を、この画面の配置で上書きしない。
       console.error(
@@ -1135,17 +1203,25 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       openUrlRight();
       return;
     }
+    const commonTargets = await readCommonTabs(savedCommon);
+    // 配置を使えない道 (新しい版・保存が無い・壊れた) でも、共通のタブは出す。
+    const openCommonHere = () => {
+      if (commonTargets) commit(withCommonTabs(layout, commonTargets), "sync");
+    };
     if (isNewerLayoutVersion(saved)) {
       // 新しい版のアプリが保存した配置: 読めないが、ここで上書きすると新しい
       // 版へ戻ったときに配置が消える。このページでは保存しない。
       console.error(
         `[code-viewer] main tabs: the saved layout was written by a newer version (layout version ${JSON.stringify((saved as { version: unknown }).version)}, this page reads up to ${LAYOUT_VERSION}); it is kept as it is and tabs are not saved on this page`,
       );
+      commonSaveEnabled = false;
+      openCommonHere();
       openUrlRight();
       return;
     }
     if (saved === null || saved === undefined) {
       saveEnabled = true;
+      openCommonHere();
       scheduleSave();
       openUrlRight();
       return;
@@ -1166,6 +1242,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
           error,
           backupError,
         );
+        commonSaveEnabled = false;
+        openCommonHere();
         openUrlRight();
         return;
       }
@@ -1175,6 +1253,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         error,
       );
       saveEnabled = true;
+      openCommonHere();
       scheduleSave();
       openUrlRight();
       return;
@@ -1206,7 +1285,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const urlRoute = deps.currentRoute();
     const target = routeTarget(urlRoute);
     routes.clear();
-    const restoredLayout = parsed.layout;
+    const restoredLayout = commonTargets
+      ? withCommonTabs(parsed.layout, commonTargets)
+      : parsed.layout;
     if (options.rightRoute) {
       // URL は右の面のファイル: 左の面 (本文) は保存した前面のまま。
       layout = restoredLayout;
@@ -1332,9 +1413,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     focusSide,
     sideAt(clientX) {
       if (!layout.panes.right) return null;
-      const left = bodyLeft();
-      // 左の列 (木・一覧) は面の外: 木から開くときフォーカスを動かさない。
-      if (clientX < left) return null;
+      const left = deps.mount.getBoundingClientRect().left;
+      // 右の列 (木・一覧) と左のサイドバーは面の外: そこから開くときフォーカスを動かさない。
+      if (clientX < left || clientX >= left + mainWidth()) return null;
       return clientX < left + leftWidthFor(layout.split ?? DEFAULT_SPLIT)
         ? "left"
         : "right";

@@ -9,7 +9,11 @@ import {
   test,
   vi,
 } from "vitest";
-import type { SerializedLayout, TabTarget } from "../core/main-tabs";
+import type {
+  SerializedCommonTabs,
+  SerializedLayout,
+  TabTarget,
+} from "../core/main-tabs";
 import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
 import { closeContextMenu } from "../views/context-menu";
 import {
@@ -44,14 +48,16 @@ const fileRoute = (path: string, line?: number): AppRoute => ({
 /** 画面の route の移り変わりを、app.ts と同じ順 (移る → syncRoute) でまねる。 */
 function setup(
   loadSaved: () => Promise<unknown>,
-  leftColumn?: HTMLElement,
+  panelColumn?: HTMLElement,
   backupSaved: () => Promise<string> = async () =>
     "/state/main-tabs.json.broken-sample",
   initial: AppRoute = fileRoute("src/app.ts"),
+  loadCommon: () => Promise<unknown> = async () => null,
 ) {
   const mount = document.createElement("nav");
   document.body.append(mount);
   const saves: SerializedLayout[] = [];
+  const commonSaves: Array<SerializedCommonTabs | undefined> = [];
   const backups: string[] = [];
   const fronts: string[] = [];
   const terminals: Array<{ open: string[]; closed: string[] }> = [];
@@ -60,7 +66,7 @@ function setup(
   let current: AppRoute = initial;
   const handle: MainTabsHandle = createMainTabsView({
     mount,
-    ...(leftColumn ? { leftColumn } : {}),
+    ...(panelColumn ? { panelColumn } : {}),
     getLanguage: () => "en",
     pageLabel: (page) => page,
     navigate: (route) => {
@@ -80,9 +86,13 @@ function setup(
     terminalMenuItems: () => [
       { label: "Larger text (13)", onSelect: () => calls.push("larger") },
     ],
-    loadSaved,
-    save: async (layout) => {
+    loadSaved: async () => ({
+      layout: await loadSaved(),
+      common: await loadCommon(),
+    }),
+    save: async (layout, _keepalive, common) => {
       saves.push(layout);
+      commonSaves.push(common);
     },
     backupSaved: async () => {
       backups.push("backup");
@@ -105,6 +115,7 @@ function setup(
     mount,
     handle,
     saves,
+    commonSaves,
     backups,
     fronts,
     terminals,
@@ -286,6 +297,128 @@ describe("main tabs view: 読み戻し", () => {
     expect([saves.length, String(error.mock.calls[0])]).toEqual([
       0,
       expect.stringContaining("tabs are not saved on this page"),
+    ]);
+  });
+});
+
+// プロジェクトに属さないタブ (共通のタブ): プロジェクトを切り替える (= 別の
+// プロジェクトのページで読み戻す) と、そのプロジェクトの配置に共通のタブを
+// 突き合わせる。savedLayout は、このプロジェクトで保存した配置 (シェル
+// shell-ab12 を含む)。
+describe("main tabs view: 共通のタブ", () => {
+  const common = (...targets: TabTarget[]) => ({ version: 1, targets });
+  const shell = (session: string): TabTarget => ({ kind: "terminal", session });
+  test.each([
+    {
+      name: "別のプロジェクトでシェルを閉じ、ボードを開いた",
+      layout: savedLayout as unknown,
+      common: common({ kind: "page", page: "agents" }),
+      names: ["README.md", ">app.ts (preview)", "diff", "shot.png", "agents"],
+      saved: [{ kind: "page", page: "agents" }],
+    },
+    {
+      name: "初めて開くプロジェクト (配置が無い) にも共通のタブが出る",
+      layout: null,
+      common: common(shell("shell-ab12"), { kind: "page", page: "help" }),
+      names: [">app.ts (preview)", "Shell shell-ab12", "help"],
+      saved: [shell("shell-ab12"), { kind: "page", page: "help" }],
+    },
+    {
+      name: "共通がまだ無い (前の版の保存) なら配置のまま、次の保存で共通ができる",
+      layout: savedLayout as unknown,
+      common: null,
+      names: [
+        "README.md",
+        ">app.ts (preview)",
+        "diff",
+        "shot.png",
+        "Shell shell-ab12",
+      ],
+      saved: [shell("shell-ab12")],
+    },
+  ])("$name", async ({
+    layout,
+    common: saved,
+    names: expected,
+    saved: out,
+  }) => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { handle, names, commonSaves } = setup(
+      async () => layout,
+      undefined,
+      undefined,
+      undefined,
+      async () => saved,
+    );
+    await handle.restore();
+    handle.flush(false);
+    vi.useRealTimers();
+    expect([names(), commonSaves[commonSaves.length - 1]?.targets]).toEqual([
+      expected,
+      out,
+    ]);
+  });
+
+  test.each([
+    {
+      name: "新しい版の共通のタブは使わず、書かない",
+      common: { version: 99, targets: [] },
+      backup: async () => "/state/main-tabs.json.broken-sample",
+      written: false,
+      message: "written by a newer version (common tabs version 99",
+    },
+    {
+      name: "壊れた共通のタブは退避してから、この画面の共通のタブで書き直す",
+      common: { version: 1, targets: [{ kind: "file", path: "a" }] },
+      backup: async () => "/state/main-tabs.json.broken-sample",
+      written: true,
+      message: "backed up to /state/main-tabs.json.broken-sample",
+    },
+    {
+      name: "退避できなければ書かない",
+      common: { version: 1, targets: [{ kind: "file", path: "a" }] },
+      backup: async () => {
+        throw new Error("sample disk failure");
+      },
+      written: false,
+      message: "could not be backed up",
+    },
+  ])("$name (理由は console.error に)", async ({
+    common: saved,
+    backup,
+    written,
+    message,
+  }) => {
+    vi.useFakeTimers();
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { handle, names, commonSaves } = setup(
+      async () => savedLayout,
+      undefined,
+      backup,
+      undefined,
+      async () => saved,
+    );
+    await handle.restore();
+    handle.flush(false);
+    vi.useRealTimers();
+    const logged = error.mock.calls.map((call) => call.map(String).join(" "));
+    expect([
+      names(),
+      commonSaves[commonSaves.length - 1] !== undefined,
+      logged.some((line) => line.includes(message)),
+    ]).toEqual([
+      [
+        "README.md",
+        ">app.ts (preview)",
+        "diff",
+        "shot.png",
+        "Shell shell-ab12",
+      ],
+      written,
+      true,
     ]);
   });
 });
@@ -584,12 +717,51 @@ describe("main tabs view: ターミナルのタブ", () => {
       },
     ],
   };
+  const imageFront = {
+    ...terminalFront,
+    panes: [
+      {
+        ...terminalFront.panes[0],
+        activeId: "t4",
+        tabs: [
+          ...terminalFront.panes[0].tabs,
+          {
+            id: "t4",
+            preview: false,
+            target: { kind: "image", path: "/work/images/sample.png" },
+          },
+        ],
+      },
+    ],
+  };
   test.each([
     {
       url: "/database",
       route: { screen: "database", range } as AppRoute,
       search: "",
       front: ">database",
+    },
+    {
+      url: "/database (読み直し)",
+      route: { screen: "database", range } as AppRoute,
+      search: "",
+      reloaded: true,
+      front: ">Shell shell-ab12cd",
+    },
+    {
+      url: "/database (保存の前面が画像)",
+      route: { screen: "database", range } as AppRoute,
+      search: "",
+      saved: imageFront,
+      front: ">database",
+    },
+    {
+      url: "/database (保存の前面が画像・読み直し)",
+      route: { screen: "database", range } as AppRoute,
+      search: "",
+      saved: imageFront,
+      reloaded: true,
+      front: ">sample.png",
     },
     {
       url: "/file?path=README.md",
@@ -613,14 +785,22 @@ describe("main tabs view: ターミナルのタブ", () => {
     route,
     search,
     front,
+    ...row
   }) => {
+    const saved: unknown =
+      "saved" in row && row.saved ? row.saved : terminalFront;
     const { handle, names } = setup(
-      async () => terminalFront,
+      async () => saved,
       undefined,
       undefined,
       route,
     );
-    await handle.restore({ keepSavedFront: urlKeepsSavedFront(search) });
+    await handle.restore({
+      keepSavedFront: urlKeepsSavedFront(
+        search,
+        "reloaded" in row && row.reloaded === true,
+      ),
+    });
     expect(names().filter((name) => name.startsWith(">"))).toEqual([front]);
   });
 
@@ -869,12 +1049,12 @@ describe("main tabs view: 左右 2 面", () => {
     }
   });
 
-  // 面の最小幅 360 は本文 (左の列の右) の幅で数える。1 + 360 * 2 = 721px 要る。
+  // 面の最小幅 360 は本文 (右の列の右) の幅で数える。1 + 360 * 2 = 721px 要る。
   test.each([
     { window: 960, column: 240, split: false },
     { window: 961, column: 240, split: true },
     { window: 960, column: 0, split: true },
-  ])("窓 $window px・左の列 $column px なら分割できるか: $split", async ({
+  ])("窓 $window px・右の列 $column px なら分割できるか: $split", async ({
     window,
     column,
     split,
@@ -883,9 +1063,9 @@ describe("main tabs view: 左右 2 面", () => {
       configurable: true,
       value: window,
     });
-    const leftColumn = document.createElement("div");
-    leftColumn.getBoundingClientRect = () => new DOMRect(0, 0, column, 80);
-    const { handle, mount } = setup(async () => null, leftColumn);
+    const panelColumn = document.createElement("div");
+    panelColumn.getBoundingClientRect = () => new DOMRect(0, 0, column, 80);
+    const { handle, mount } = setup(async () => null, panelColumn);
     await handle.restore();
     handle.syncRoute({ screen: "diff", range });
     handle.openTerminal("shell-a1");

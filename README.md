@@ -16,15 +16,17 @@ Requires Node.js 20 or newer. Development uses
 - Keep files and screens open as tabs in the top row (there is no header row
   above it). The project name, its branch and six view icons (Files / Diff /
   History / Worktrees / Data / Work log, with the name and key on hover) sit
-  fixed at the head of the left column, so switching tabs never moves them;
-  they move to the left end of the tab row only when you fold the left column. A single click opens a file in a preview tab (italic) that
+  fixed at the head of the right column, next to the Files tree (the left
+  sidebar holds the projects and agents), so switching tabs never moves them;
+  they move to the left end of the tab row only when you fold the right column. A single click opens a file in a preview tab (italic) that
   the next file replaces; double-click or **Keep open** keeps it. Diff /
   History / Worktrees / Data / Work log each have one tab that comes back as
   you left it. Files is not a tab: the folder view is what the left side shows
   when no tab is selected (the Files icon, `g r`, or a folder in the tree).
   Right-click a tab to close it, the others or those to its right, or copy its
   path; drag to reorder; `g t` / `g T` / `g x` / `g 1`–`g 9` move and close
-  from the keyboard. The tabs are remembered per project. Files and screens
+  from the keyboard. The tabs are remembered per project; the agent board,
+  Tools, Settings & Help, terminals and terminal images stay open across projects. Files and screens
   stay on the left side; split the area to put a terminal or an image on the
   right (the split button, **Split right**, or drag one onto the right half),
   resize by dragging the line between, and press `g o` to switch sides. Image

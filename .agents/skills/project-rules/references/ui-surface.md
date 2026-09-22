@@ -24,7 +24,7 @@
 | 確認 / 入力ダイアログ | `views/ui-dialog.ts` の `showConfirmDialog` / `showAlertDialog` / `showPromptDialog` / `showFormDialog`。型は 1 つ (面は `--color-overlay`、内側 7 単位、右上の閉じる = 取り消し、ボタンは `gdp-dialog-cancel` / `gdp-dialog-confirm` / 危険は `danger`)。見出しの下の 1 文は `description`。本文の見出しつきの値・コードの枠・箇条書きは `agent-hooks-dialog-*` の部品 (`accounts-dialogs.ts` の `labeled`)。ボタンのクラスを呼び出し側で付け直さない |
 | 使用量 (5h / week の割合・バー・リセットまで・いつの値か) | `views/agents/usage-meter.ts` の `usageMeterRow` / `usageObservedText`。全体ボードのカードと最下段のポップオーバーが同じものを使う (場所で見え方を変えない) |
 | 全体ボードの操作 | 主の操作は `agents-primary`、枠つきの小さな操作は `agents-secondary`、文字だけは `agents-text-action`、アイコンは `agents-icon-action` (28px 角)。プロジェクトの見出しの開く・起動・⋯ は hover / フォーカスで出し、場所は最初から取る |
-| 設定の節 (Help ページの設定) | `views/viewer-settings.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: general / appearance / agents / accounts / advanced) を 1 つ付ける (付けないと全部の分類に出る)。左の列・検索欄・見出しは `help-page.ts` が描く。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (分類も切り替わる) |
+| 設定の節 (Help ページの設定) | `views/viewer-settings.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: general / appearance / agents / accounts / advanced) を 1 つ付ける (付けないと全部の分類に出る)。右の列・検索欄・見出しは `help-page.ts` が描く。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (分類も切り替わる) |
 | ⌘K のパレットの行き先 (ファイル以外) | `views/search-palette-ui.ts` の `PaletteCommand` (群 = projects / agents / sessions / actions。エージェントでないペインとシェルは sessions)。中身は `app.ts` の `paletteCommands()`、操作は `PALETTE_ACTIONS` (キー割り当てのある操作は `keymap` を書けばキーが右に出て、実行も同じ `dispatchKeymapAction`)。ファイルの絞り込み・grep の側には足さない |
 | 作業ツリーの一覧の行 | `views/worktree-view.ts`。何も選んでいないときは一覧だけの画面 (`body[data-worktree-overview]`、列は `--worktree-columns`)。行の「開く」はこのときだけ置き、選んだ後の狭い一覧は「…」だけ (選んだ瞬間にボタンを増やさない) |
 | Data の表の足元 | `views/database/table-grid.ts` の `db-grid-status` (件数) と `db-grid-pager` (見えている行の範囲と 1 画面ずつのページ送り)。表の行の高さは表示密度の値 (`views/shell/row-height.ts` の `currentRowHeight`、CSS は `--ui-row-h`)、列幅は TS が持つので、CSS は色と線だけ |
@@ -78,7 +78,7 @@
 2. **面ごとに内側の余白を 1 つ決め、その面の全部の行の文字の左端をそこにそろえる。**
    | 面 | 面の線 (押せる面・選択の面の端) | 文字の線 |
    |---|---|---|
-   | 左のサイドバー・ファイルのツリー・左の列の頭 (`#left-head`)・最下段 | `--pad-face` (8) | `--pad-text` (16) |
+   | 左のサイドバー・ファイルのツリー・右の列の頭 (`#panel-head`)・最下段 | `--pad-face` (8) | `--pad-text` (16) |
    | 文書の面 (パンくず・情報の行・目次・本文の始まり) | 文字の線 − `--pad-face` | `--pad-doc` (24) |
    選択や hover の面は面の線から描き (文字より外へ広げる)、文字は文字の線に乗せる。
    行ごとに別の字下げを持たせない。字下げは `--indent-step` (16) の倍数だけ
@@ -122,7 +122,7 @@ disabled / updated のすべてで箱の寸法を保つ。**
 
 ## 流動的な文言を狭い場所に置かない
 
-タブ列・左の列の頭・左のサイドバー・最下段のバー・topbar・コンパクトなツールバー・テーブルのフィルタ行・
+タブ列・右の列の頭・左のサイドバー・最下段のバー・topbar・コンパクトなツールバー・テーブルのフィルタ行・
 小さなアイコンボタンの隣に、**長さの変わる文言を置かない。**
 
 - 狭い場所では: アイコンのみのボタン / ドット / `aria-label`・`title` / disabled・busy 状態 /

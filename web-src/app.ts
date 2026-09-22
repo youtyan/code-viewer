@@ -1309,7 +1309,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   /** 開いたときの ?open-pane= (別のプロジェクトから移ってきた。同じく先に読む)。 */
   const INITIAL_OPEN_PANE = parseOpenPaneOverlay(window.location.search);
   /** 保存したタブの前面を URL の route より優先するか (同じく先に読む)。 */
-  const INITIAL_KEEPS_SAVED_FRONT = urlKeepsSavedFront(window.location.search);
+  const INITIAL_KEEPS_SAVED_FRONT = urlKeepsSavedFront(
+    window.location.search,
+    performance
+      .getEntriesByType("navigation")
+      .some(
+        (entry) => (entry as PerformanceNavigationTiming).type === "reload",
+      ),
+  );
   /** 開いたときの pane=right の、右の面のファイルの route (同じく先に読む)。 */
   const INITIAL_RIGHT_ROUTE = ((): Extract<
     AppRoute,
@@ -1413,9 +1420,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!lead) throw new Error("#tabs-lead is missing from index.html");
       return lead;
     })(),
-    leftColumn: (() => {
-      const head = document.getElementById("left-head");
-      if (!head) throw new Error("#left-head is missing from index.html");
+    panelColumn: (() => {
+      const head = document.getElementById("panel-head");
+      if (!head) throw new Error("#panel-head is missing from index.html");
       return head;
     })(),
     getLanguage: () => STATE.language,
@@ -1441,19 +1448,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     onNewTab: (side, anchor) => void openNewTabMenu(side, anchor),
     stopTerminal: (session) => void stopTerminal(session as ShellSessionId),
     terminalMenuItems: () => TERMINAL_VIEW.menuItems(),
-    loadSaved: async () =>
-      (
-        await loadStateResponse<{ layout: unknown }>(
-          apiUrl("stateTabs"),
-          "main tabs request failed",
-        )
-      ).layout,
-    save: async (layout, keepalive) => {
+    loadSaved: async () => {
+      const saved = await loadStateResponse<{
+        layout: unknown;
+        common?: unknown;
+      }>(apiUrl("stateTabs"), "main tabs request failed");
+      // common を返さないのは、この項を知らない版の裏 (共通のタブはまだ無い扱い)。
+      return { layout: saved.layout, common: saved.common ?? null };
+    },
+    save: async (layout, keepalive, common) => {
       const response = await fetch(apiUrl("stateTabs"), {
         method: "PUT",
         keepalive,
         headers: { ...actionHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ layout }),
+        body: JSON.stringify(common ? { layout, common } : { layout }),
       });
       if (!response.ok)
         throw new Error(await responseErrorMessage(response, "save main tabs"));
@@ -4174,7 +4182,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
-  /** 左の列に Files の木を出す (読み込み済みなら使い回す)。失敗は状態と console に出す。 */
+  /** 右の列に Files の木を出す (読み込み済みなら使い回す)。失敗は状態と console に出す。 */
   function showFilesTreeInLeftColumn(): void {
     const ref = STATE.repoRef || "worktree";
     REPO_VIEW.renderRepoBlobSidebar("", ref).catch((error: unknown) => {
@@ -4248,7 +4256,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-search-page",
       STATE.route.screen === "search",
     );
-    // 左の列: 自分の一覧を持たない画面は Files の木を出す (History・選んでいる
+    // 右の列: 自分の一覧を持たない画面は Files の木を出す (History・選んでいる
     // Worktrees は一覧パネル、repo / file / diff は #sidebar の自分の一覧)。
     const filesColumnRoute =
       STATE.route.screen === "journal" ||
@@ -5121,99 +5129,93 @@ window.GdpExpandLogic = GdpExpandLogic;
       else focusSidebarPanel();
     });
   })();
-  (function setupResizer() {
-    const handle = $("#sidebar-resizer");
+  /**
+   * 列の幅を掴んで変える (線を引き、離したときに 1 度だけ幅を当てる。重い本文を
+   * 動かすたびに組み直さない)。列が画面の右端に付いていれば (右の列) 左へ引くと
+   * 広がり、左に付いていれば (History の変更ファイルの列) 右へ引くと広がる。
+   */
+  function setupColumnResizer(opts: {
+    handle: HTMLElement | null;
+    previewId: string;
+    resizingClass: string;
+    column: () => HTMLElement | null;
+    width: () => number;
+    clamp: (width: number) => number;
+    apply: (width: number) => void;
+    reset: () => void;
+  }): void {
+    const { handle } = opts;
     if (!handle) return;
-    // Build a transient preview line so the heavy diff content doesn't
-    // reflow on every mousemove. The real width is applied once on mouseup.
     const preview = document.createElement("div");
-    preview.id = "sidebar-resize-preview";
+    preview.id = opts.previewId;
     document.body.appendChild(preview);
-
-    const clamp = (w: number) =>
-      Math.max(SIDEBAR_WIDTH.min, Math.min(SIDEBAR_WIDTH.max, w));
-    const sidebarLeft = () =>
-      document.getElementById("sidebar")?.getBoundingClientRect().left || 0;
-    let dragging = false,
-      startX = 0,
-      startW = 0,
-      startLeft = 0,
-      currentW = 0;
-
+    let drag: {
+      startX: number;
+      startW: number;
+      rect: DOMRect;
+      onRight: boolean;
+      width: number;
+    } | null = null;
+    const edge = (d: NonNullable<typeof drag>) =>
+      d.onRight ? d.rect.right - d.width : d.rect.left + d.width;
     handle.addEventListener("mousedown", (e) => {
-      dragging = true;
-      startX = e.clientX;
-      startW = STATE.sbWidth;
-      startLeft = sidebarLeft();
-      currentW = startW;
-      document.body.classList.add("gdp-resizing");
+      const column = opts.column();
+      if (!column) return;
+      const rect = column.getBoundingClientRect();
+      drag = {
+        startX: e.clientX,
+        startW: opts.width(),
+        rect,
+        onRight: rect.right >= document.documentElement.clientWidth - 1,
+        width: opts.width(),
+      };
+      document.body.classList.add(opts.resizingClass);
       preview.style.display = "block";
-      preview.style.left = `${startLeft + startW}px`;
+      preview.style.left = `${edge(drag)}px`;
       e.preventDefault();
     });
     window.addEventListener("mousemove", (e) => {
-      if (!dragging) return;
-      currentW = clamp(startW + (e.clientX - startX));
-      preview.style.left = `${startLeft + currentW}px`;
+      if (!drag) return;
+      const moved = e.clientX - drag.startX;
+      drag.width = opts.clamp(drag.startW + (drag.onRight ? -moved : moved));
+      preview.style.left = `${edge(drag)}px`;
     });
     window.addEventListener("mouseup", () => {
-      if (!dragging) return;
-      dragging = false;
+      if (!drag) return;
+      const { width } = drag;
+      drag = null;
       preview.style.display = "none";
-      document.body.classList.remove("gdp-resizing");
-      applySidebarWidth(currentW);
+      document.body.classList.remove(opts.resizingClass);
+      opts.apply(width);
     });
-    // double-click to reset
-    handle.addEventListener("dblclick", () =>
-      applySidebarWidth(SIDEBAR_WIDTH.default),
-    );
-  })();
-  (function setupHistoryResizer() {
-    const handle = document.getElementById("history-resizer");
-    if (!handle) return;
-    const preview = document.createElement("div");
-    preview.id = "history-resize-preview";
-    document.body.appendChild(preview);
-
-    const clamp = (w: number) => clampPanelSize(HISTORY_WIDTH, w);
-    // 一覧は左のサイドバーの右から始まる。線は画面の座標で置く。
-    const historyLeft = () =>
-      document.getElementById("history-panel")?.getBoundingClientRect().left ||
-      document.getElementById("worktree-panel")?.getBoundingClientRect().left ||
-      0;
-    let dragging = false,
-      startX = 0,
-      startW = 0,
-      startLeft = 0,
-      currentW = 0;
-
-    handle.addEventListener("mousedown", (e) => {
-      dragging = true;
-      startX = e.clientX;
-      startW = STATE.historyWidth;
-      currentW = startW;
-      document.body.classList.add("gdp-history-resizing");
-      startLeft = historyLeft();
-      preview.style.display = "block";
-      preview.style.left = `${startLeft + startW}px`;
-      e.preventDefault();
-    });
-    window.addEventListener("mousemove", (e) => {
-      if (!dragging) return;
-      currentW = clamp(startW + (e.clientX - startX));
-      preview.style.left = `${startLeft + currentW}px`;
-    });
-    window.addEventListener("mouseup", () => {
-      if (!dragging) return;
-      dragging = false;
-      preview.style.display = "none";
-      document.body.classList.remove("gdp-history-resizing");
-      applyHistoryWidth(currentW);
-    });
-    handle.addEventListener("dblclick", () =>
-      applyHistoryWidth(HISTORY_WIDTH.default),
-    );
-  })();
+    handle.addEventListener("dblclick", opts.reset);
+  }
+  setupColumnResizer({
+    handle: document.getElementById("sidebar-resizer"),
+    previewId: "sidebar-resize-preview",
+    resizingClass: "gdp-resizing",
+    column: () => document.getElementById("sidebar"),
+    width: () => STATE.sbWidth,
+    clamp: (w) => Math.max(SIDEBAR_WIDTH.min, Math.min(SIDEBAR_WIDTH.max, w)),
+    apply: (w) => applySidebarWidth(w),
+    reset: () => applySidebarWidth(SIDEBAR_WIDTH.default),
+  });
+  setupColumnResizer({
+    handle: document.getElementById("history-resizer"),
+    previewId: "history-resize-preview",
+    resizingClass: "gdp-history-resizing",
+    // 一覧パネル (History か、選んでいる作業ツリー)。見えているほう。
+    column: () =>
+      [
+        document.getElementById("history-panel"),
+        document.getElementById("worktree-panel"),
+      ].find((panel) => !!panel && panel.getBoundingClientRect().width > 0) ??
+      null,
+    width: () => STATE.historyWidth,
+    clamp: (w) => clampPanelSize(HISTORY_WIDTH, w),
+    apply: (w) => applyHistoryWidth(w),
+    reset: () => applyHistoryWidth(HISTORY_WIDTH.default),
+  });
 
   $$("#topbar .seg button").forEach((b) => {
     b.addEventListener("click", () =>
@@ -6437,7 +6439,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       );
       return virtual && virtual.offsetParent !== null ? virtual : root;
     };
-    // 本文だけのもの (body のクラス・木・左の列のボタン) は右の面では動かさない。
+    // 本文だけのもの (body のクラス・木・右の列のボタン) は右の面では動かさない。
     const noop = () => undefined;
     // 実体の依存は描くときの route を読む (pane は下で組む)。
     let pane: SidePane;
@@ -7566,7 +7568,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncHeaderMenu,
     onSidebarOwner: (owned) => {
       // 作業ツリーの変更ファイルを書くなら、Files の木はもう使い回せない。
-      // 一覧だけの表示なら左の列を Files の木に戻す (読み込み済みなら使い回す)。
+      // 一覧だけの表示なら右の列を Files の木に戻す (読み込み済みなら使い回す)。
       if (owned) invalidateRepoSidebar();
       else showFilesTreeInLeftColumn();
     },

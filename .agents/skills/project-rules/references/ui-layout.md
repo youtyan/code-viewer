@@ -21,8 +21,8 @@
 | 層 | 何か | 例 | 生の px |
 |---|---|---|---|
 | **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義。余白・角丸の段階 (`--space-*` `--radius-*`) もここ。一覧の行の高さ `--ui-row-h` だけは出所が TS (`views/shell/row-height.ts`。仮想表示が位置の計算に使うため) で、CSS は初回描画用の既定。表の行の高さ `--ui-table-row-h` は仮想表示に使わないので CSS だけ (`ui-surface.md` の決まり 7) | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--ui-row-h` `--ui-table-row-h` `--code-line-height` | **可**（ここだけ） |
-| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--left-head-h` (左の列の頭 `#left-head`) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--sidebar-w` `--history-w` `--annotation-panel-w` | **可**（その固定物の実寸なので） |
-| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--main-bottom` (メインの面の箱の下端。最下段の上) `--main-pane-h` (面の箱の高さ) `--left-body-top` (左の列の本体の上端) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) | **不可。T2 の式に px リテラルを書かない** |
+| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--panel-head-h` (右の列の頭 `#panel-head`) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--sidebar-w` `--history-w` `--annotation-panel-w` | **可**（その固定物の実寸なので） |
+| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--main-bottom` (メインの面の箱の下端。最下段の上) `--main-pane-h` (面の箱の高さ) `--panel-body-top` (右の列の本体の上端) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) | **不可。T2 の式に px リテラルを書かない** |
 | **T3** ローカルインセット | 「このエンベロープの内側に居座る家具の高さ」 | `--file-detail-head-h` | **可。ただし必ず命名し、ページスコープに宣言し、何の高さかコメントする** |
 
 ### 消費側の規則
@@ -62,15 +62,17 @@ grep -n "100vh\|100dvh" web/style.css \
 **ゼロが正しい状態。** 除外を `--content-h:` の決め打ちにしないこと。T2 が増えたときに
 正しいコードが違反として並び、逆に本物の違反が埋もれる。
 
-## 骨格 — 左と下の固定物
+## 骨格 — 左・右・下の固定物
 
 画面は次の固定物で囲まれている: 左のサイドバー (`#app-nav`、幅 `--nav-w`)、最上段のタブ列
-(`#main-tabs`、`--main-tabs-h`。**上の行は無い**: `web/index.html` のコメントと da82d59)、その下で
-サイドバーの右の左の列 (頭が `#left-head`、高さ `--left-head-h`、幅 `--leftcol-shown`。本体は
-`--left-body-top` から)、画面ごとのツールバー (`#topbar`、`--topbar-h`)、最下段のバー
-(`#statusbar`、`--statusbar-h`)。画面下のパネルは無い (Tools と Search はタブ。`orientation.md`)。左の列を畳むと
-(`body.gdp-sidebar-hidden`) `--leftcol-shown` が 0 になり、プロジェクト名と画面の入口
-(`#view-head`) はタブ列の左の `#tabs-lead` へ移る (`views/sidebar.ts` の `placeSidebarToggle`)。
+(`#main-tabs`、`--main-tabs-h`。**上の行は無い**: `web/index.html` のコメントと da82d59。右端は右の
+列の左)、画面の右端の右の列 (上端から。頭 `#panel-head` の 1 段目 = タブ列の行に画面の入口の絵柄、
+2 段目 `--panel-head-h` に題名 = プロジェクト名とブランチ。幅 `--panelcol-shown`。本体は
+`--panel-body-top` から。Files の木・History と選んでいる作業ツリーの一覧はここ)、画面ごとの
+ツールバー (`#topbar`、`--topbar-h`)、最下段のバー (`#statusbar`、`--statusbar-h`)。画面下の
+パネルは無い (Tools と Search はタブ。`orientation.md`)。右の列を畳むと (`body.gdp-sidebar-hidden`) `--panelcol-shown` が
+細い帯の幅になり、プロジェクト名と画面の入口 (`#view-head`) はタブ列の左の `#tabs-lead` へ移る
+(`views/sidebar.ts` の `placeSidebarToggle`)。自動では畳まない。
 
 - **上に居座る固定物の高さは `--global-header-h` だけを読む。** 今はタブ列だけなので
   `--global-header-h: var(--main-tabs-h)` (`style.css` の `html, body`)。ツールバーの `top`・各ページの
@@ -79,15 +81,15 @@ grep -n "100vh\|100dvh" web/style.css \
   `--main-tabs-h` を読む
 - **本文まわりの固定物 (ツールバー・読み込みの帯・ファイルの木・履歴や作業ツリーの面・注釈の面・
   `body` の左右の余白) の左右の端は `--page-left` / `--page-right` だけを読む。**
-  `--page-left = --chrome-left + --leftcol-shown` (左の列の右から)。メインの面を左右 2 面に分けたとき
-  (`body.main-split`)、本文 (route の中身) は左の面にだけ描くので `--page-right` に右の面と境界の幅を
-  足す。面の幅 `--split-left-w` / `--split-right-w` / `--split-divider-w` と本文の幅 `--main-w` は TS
+  `--page-left = --chrome-left`、`--page-right = --panelcol-shown` (右の列の左まで)。メインの面を左右
+  2 面に分けたとき (`body.main-split`)、本文 (route の中身) は左の面にだけ描くので `--page-right` に
+  右の面と境界の幅を足す。面の幅 `--split-left-w` / `--split-right-w` / `--split-divider-w` と本文の幅 `--main-w` は TS
   (`views/main-tabs/main-tabs-view.ts` の `applyGeometry`) が出所
 - **メインの面の箱 (`.main-pane-host`。`app.ts` の `PANE_HOSTS`) は `top: --global-header-h`・
-  `left: --page-left`・`bottom: --main-bottom`。** 左の列 (木) を覆わない。2 面では左の箱は
+  `left: --page-left`・`right: --panelcol-shown`・`bottom: --main-bottom`。** 右の列 (木) を覆わない。2 面では左の箱は
   `--split-left-w` の幅、右の箱は残り。右の面のソース表示 (`.main-pane-source`) は本文の
-  `--content-h` ではなく `--main-pane-h` で箱を作る。タブ列・最下段は面をまたぐので
-  `--chrome-left` のまま
+  `--content-h` ではなく `--main-pane-h` で箱を作る。タブ列は面をまたぐので左は `--chrome-left`、
+  右は `--panelcol-shown`。最下段は右の列の下もまたぐ
 - `--main-tabs-h` と `--global-header-h` は `html, body` で決める (密度の `--space-unit` の上書きが
   body に載るため。下の「T2 を宣言する要素を間違えない」と同じ理由)
 

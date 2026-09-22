@@ -368,23 +368,27 @@ html, body {
   /* メインの面の箱 (.main-pane-host) の高さ。右の面のソース表示は、本文の
      --content-h の代わりにこれで箱を作る (.main-pane-source)。 */
   --main-pane-h: calc(100vh - var(--global-header-h) - var(--main-bottom));
-  /* 左の列 (タブ列の下・左のサイドバーの右の固定の列)。頭に名前・ブランチ・
-     画面の入口 (#left-head)、その下に画面ごとの一覧を出す: History / Worktrees
-     (選んでいる間) は一覧パネル、それ以外は #sidebar (その画面の一覧か Files の
-     木)。利用者が畳んだとき (gdp-sidebar-hidden) だけ細い帯 (--leftcol-rail-w、
-     開くボタン 1 つ分の実寸) になる。頭の高さは名前の行と絵柄の行の 2 段 (密度に比例)。 */
-  --leftcol-w: var(--sidebar-w);
-  --leftcol-shown: var(--leftcol-w);
-  --leftcol-rail-w: 28px;
-  --left-head-h: calc(var(--space-3) + var(--ui-control-sm) * 2 + var(--space-1) + var(--space-2));
-  --left-body-top: calc(var(--global-header-h) + var(--left-head-h));
-  /* 本文 (route の中身: ツールバー・#content・面の箱) の左右の端。左の列の右から。
-     1 面ならメインの面いっぱい。左右 2 面のときは左の面の幅に収める (面の幅
-     --split-*-w は views/main-tabs/main-tabs-view.ts が本文の幅で書く)。
-     本文まわりの固定物はこの 2 つだけを読む (タブ列・下パネル・最下段は面を
-     またぐので --chrome-left のまま)。 */
-  --page-left: calc(var(--chrome-left) + var(--leftcol-shown));
-  --page-right: 0px;
+  /* 右の列 (パネルの列。画面の右端の固定の列で、上端から)。頭 (#panel-head) の
+     1 段目 (タブ列と同じ高さ) に画面の入口の絵柄、2 段目にプロジェクト名と
+     ブランチ (= この列の題名)、その下に画面ごとの一覧を出す: History /
+     Worktrees (選んでいる間) は一覧パネル、それ以外は #sidebar (その画面の一覧か
+     Files の木)。左のサイドバー (プロジェクトとエージェント) と中身の一覧を
+     左右に分け、どれが今のプロジェクトの中身かを分かるようにした。利用者が
+     畳んだとき (gdp-sidebar-hidden) だけ細い帯 (--panelcol-rail-w、開くボタン
+     1 つ分の実寸) になる。自動では畳まない。 */
+  --panelcol-w: var(--sidebar-w);
+  --panelcol-shown: var(--panelcol-w);
+  --panelcol-rail-w: 28px;
+  /* 頭の 2 段目 (題名の行) の高さ。1 段目はタブ列の行 (--global-header-h)。 */
+  --panel-head-h: calc(var(--space-2) + var(--ui-control-sm) + var(--space-2));
+  --panel-body-top: calc(var(--global-header-h) + var(--panel-head-h));
+  /* 本文 (route の中身: ツールバー・#content・面の箱) の左右の端。左は左の
+     サイドバーの右、右は右の列の左。左右 2 面のときは左の面の幅に収める (面の
+     幅 --split-*-w は views/main-tabs/main-tabs-view.ts が本文の幅で書く)。
+     本文まわりの固定物はこの 2 つだけを読む (下パネル・最下段は右の列の下も
+     またぐので --chrome-left と 0 のまま)。 */
+  --page-left: var(--chrome-left);
+  --page-right: var(--panelcol-shown);
 
 
   --code-font-size: 13px;
@@ -399,19 +403,19 @@ html, body {
   -moz-osx-font-smoothing: auto;
 }
 
-/* 左の列の幅: 一覧パネルを左の列に置く画面 (History・選んでいる Worktrees) は
+/* 右の列の幅: 一覧パネルを右の列に置く画面 (History・選んでいる Worktrees) は
    その一覧の幅。利用者が畳んだときだけ細い帯の幅 (T2 の上書き。body で決める)。 */
 body.gdp-history-page,
 body.gdp-worktree-page:not([data-worktree-overview]) {
-  --leftcol-w: var(--history-w);
+  --panelcol-w: var(--history-w);
 }
 body.gdp-sidebar-hidden {
-  --leftcol-shown: var(--leftcol-rail-w);
+  --panelcol-shown: var(--panelcol-rail-w);
 }
 
 /* 左右 2 面: 本文は左の面に収める (route のタブは左にしか置けない。T2 の上書き。body で決める)。 */
 body.main-split {
-  --page-right: calc(var(--split-right-w) + var(--split-divider-w));
+  --page-right: calc(var(--panelcol-shown) + var(--split-right-w) + var(--split-divider-w));
 }
 
 body[data-sidebar-font-size="compact"] {
@@ -1790,23 +1794,26 @@ body.gdp-diff-page #repo-target-wrap {
 #worktree-panel {
   display: none;
   position: fixed;
-  left: var(--chrome-left);
-  top: var(--left-body-top);
+  right: 0;
+  top: var(--panel-body-top);
   bottom: var(--chrome-bottom);
   width: var(--history-w);
   background: var(--bg-soft);
-  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
   overflow-y: auto;
   z-index: 31;
   flex-direction: column;
   font-size: var(--ui-font-base);
 }
 body.gdp-history-page #history-panel { display: flex; }
-/* History: 左の列は一覧パネル。変更ファイル (#sidebar) は本文の左の 2 列目
-   (ツールバーの下)。畳むのは左の列 (一覧) だけで、変更ファイルは残す。 */
+/* History: 右の列は一覧パネル。変更ファイル (#sidebar) は本文の左の 2 列目
+   (ツールバーの下)。畳むのは右の列 (一覧) だけで、変更ファイルは残す。 */
 body.gdp-history-page #sidebar {
   left: var(--page-left);
+  right: auto;
   top: var(--chrome-h);
+  border-left: 0;
+  border-right: 1px solid var(--border);
 }
 body.gdp-history-page main#content,
 body.gdp-history-page.gdp-sidebar-hidden main#content {
@@ -1814,6 +1821,7 @@ body.gdp-history-page.gdp-sidebar-hidden main#content {
 }
 body.gdp-history-page #sidebar-resizer {
   left: calc(var(--page-left) + var(--sidebar-w) - 4px);
+  right: auto;
   top: var(--chrome-h);
 }
 body.gdp-history-page #repo-target-wrap {
@@ -1822,9 +1830,9 @@ body.gdp-history-page #repo-target-wrap {
 #history-resizer {
   display: none;
   position: fixed;
-  top: var(--left-body-top);
+  top: var(--panel-body-top);
   bottom: var(--chrome-bottom);
-  left: calc(var(--chrome-left) + var(--history-w) - 4px);
+  right: calc(var(--history-w) - 4px);
   width: 8px;
   cursor: col-resize;
   z-index: 32;
@@ -2391,16 +2399,16 @@ body.gdp-history-page #history-commit-info:not([hidden]),
 }
 
 /* ===== Sidebar ===== */
-/* 既定は左の列の本体 (頭 #left-head の下)。一覧パネルを持つ画面では本文の
+/* 既定は右の列の本体 (頭 #panel-head の下)。一覧パネルを持つ画面では本文の
    左の 2 列目 (その画面の規則が left / top を上書きする)。 */
 #sidebar {
   position: fixed;
-  left: var(--chrome-left);
-  top: var(--left-body-top);
+  right: 0;
+  top: var(--panel-body-top);
   bottom: var(--chrome-bottom);
   width: var(--sidebar-w);
   background: var(--bg-soft);
-  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
   overflow-y: auto;
   padding: 0 0 32px;
   z-index: 30;
@@ -2432,6 +2440,8 @@ body.gdp-history-page #history-commit-info:not([hidden]),
 }
 #sidebar-toggle svg {
   display: block;
+  /* 絵は左の列の形 (左のサイドバーの畳むボタンと同じ)。右の列なので左右を返す。 */
+  transform: scaleX(-1);
 }
 .sidebar-toggle-label {
   display: none;
@@ -2625,12 +2635,12 @@ body[data-focus-scope="main"] #content {
   appearance: none;
 }
 
-/* ===== Sidebar resizer (drag right edge to resize) ===== */
+/* ===== Sidebar resizer (右の列は左端を、History の変更ファイルの列は右端を掴む) ===== */
 #sidebar-resizer {
   position: fixed;
-  top: var(--left-body-top);
+  top: var(--panel-body-top);
   bottom: var(--chrome-bottom);
-  left: calc(var(--chrome-left) + var(--sidebar-w) - 4px);
+  right: calc(var(--sidebar-w) - 4px);
   width: 8px;
   cursor: col-resize;
   z-index: 31;
@@ -3665,7 +3675,7 @@ body.gdp-help-page #content {
   --content-top-gap: 18px;
   /* 本文の左右の余白 (T3)。ソース表示はこの分だけ外へ出て、面を端まで敷く。 */
   --content-pad-x: 24px;
-  /* 左の列 (木) は --page-left に入っている (body の padding-left)。 */
+  /* 右の列 (木) は --page-left に入っている (body の padding-left)。 */
   margin-left: 0;
   padding: calc(var(--chrome-h) + var(--content-top-gap)) var(--content-pad-x) 80px;
   min-height: var(--content-h);
@@ -5869,7 +5879,7 @@ body.gdp-sidebar-hidden #sidebar,
 body.gdp-sidebar-hidden #sidebar-resizer {
   display: none !important;
 }
-/* 一覧パネルを左の列に置く画面では、畳むのは一覧 (左の列) で、2 列目の
+/* 一覧パネルを右の列に置く画面では、畳むのは一覧 (右の列) で、2 列目の
    変更ファイルは残す。 */
 body.gdp-sidebar-hidden.gdp-history-page #sidebar,
 body.gdp-sidebar-hidden.gdp-worktree-page:not([data-worktree-overview]) #sidebar,
@@ -8230,11 +8240,14 @@ body.gdp-worktree-page #worktree-panel {
   display: flex;
 }
 
-/* 以下 3 つは History 画面と同じ並べ方 (左の列 = 一覧パネル → 変更ファイル →
-   本文)。一覧だけを出しているとき (data-worktree-overview) は左の列が Files の木。 */
+/* 以下 3 つは History 画面と同じ並べ方 (右の列 = 一覧パネル → 変更ファイル →
+   本文)。一覧だけを出しているとき (data-worktree-overview) は右の列が Files の木。 */
 body.gdp-worktree-page:not([data-worktree-overview]) #sidebar {
   left: var(--page-left);
+  right: auto;
   top: var(--chrome-h);
+  border-left: 0;
+  border-right: 1px solid var(--border);
 }
 
 body.gdp-worktree-page:not([data-worktree-overview]) main#content,
@@ -8244,6 +8257,7 @@ body.gdp-worktree-page.gdp-sidebar-hidden:not([data-worktree-overview]) main#con
 
 body.gdp-worktree-page:not([data-worktree-overview]) #sidebar-resizer {
   left: calc(var(--page-left) + var(--sidebar-w) - 4px);
+  right: auto;
   top: var(--chrome-h);
 }
 
@@ -16745,7 +16759,7 @@ body.gdp-nav-resizing {
    フォーカスのある面の選択中のタブだけ、そのタブの幅だけ)。 */
 #main-tabs {
   position: fixed;
-  top: 0; left: var(--chrome-left); right: 0;
+  top: 0; left: var(--chrome-left); right: var(--panelcol-shown);
   height: var(--main-tabs-h);
   z-index: 60;
   display: flex;
@@ -16760,9 +16774,9 @@ body.gdp-nav-resizing {
   display: flex;
   align-items: stretch;
 }
-/* 左の面のタブ列は、左の列の上も含む (面の幅 --split-left-w は本文の幅)。 */
+/* 2 面の左の面のタブ列は左の面の幅 (右の列の上には伸ばさない)。 */
 body.main-split .main-tabs-pane[data-side="left"] {
-  flex: 0 0 calc(var(--leftcol-shown) + var(--split-left-w));
+  flex: 0 0 var(--split-left-w);
 }
 .main-tabs-strip {
   flex: 1 1 auto;
@@ -16917,13 +16931,13 @@ body.main-split .main-tabs-pane[data-side="left"] {
 }
 
 /* ---- メインの面の左右の箱 (.main-pane-host。app.ts の PANE_HOSTS) ----
-   前面のタブがターミナルか画像 (右の面ならファイルも) のとき、その面の位置 (タブ列の下・左の列の右・
-   本文の下端の上) に重ねて出す。左の列 (木) は覆わない。左の前面が route のタブか何も選んでいないときは出さない
+   前面のタブがターミナルか画像 (右の面ならファイルも) のとき、その面の位置 (タブ列の下・右の列の右・
+   本文の下端の上) に重ねて出す。右の列 (木) は覆わない。左の前面が route のタブか何も選んでいないときは出さない
    (下の本文が見える)。画面ごとのツールバー (50) より上、
    上の行・タブ列 (60) より下。 */
 .main-pane-host {
   position: fixed;
-  top: var(--global-header-h); left: var(--page-left); right: 0;
+  top: var(--global-header-h); left: var(--page-left); right: var(--panelcol-shown);
   bottom: var(--main-bottom);
   z-index: 55;
   display: none;
@@ -17109,7 +17123,7 @@ button.brand[aria-expanded="true"] {
 }
 
 /* ---- プロジェクト名と画面の入口 (#view-head) の置き場所 ----
-   左の列の頭 (#left-head) に 2 段で。利用者が左の列を畳んだときだけタブ列の左
+   右の列の頭 (#panel-head) に 2 段で。利用者が右の列を畳んだときだけタブ列の左
    (#tabs-lead) に 1 行で (views/sidebar.ts の placeSidebarToggle)。 */
 .view-head {
   display: flex;
@@ -17117,48 +17131,53 @@ button.brand[aria-expanded="true"] {
   gap: var(--space-2);
   min-width: 0;
 }
-/* 左の列の頭 (#left-head)。名前とブランチの行 (右端に木を畳むボタン)、その下に
-   絵柄の列。タブを切り替えても動かない (左の列は利用者が畳まない限りある)。
+/* 右の列の頭 (#panel-head)。上端から: 1 段目 (タブ列の行) に絵柄の列、2 段目に
+   名前とブランチの行 (右端に列を畳むボタン)。タブを切り替えても動かない (右の列は
+   利用者が畳まない限りある)。
    文字は文字の線 (--pad-text)、押せる領域の左端は面の線 (--pad-face)。 */
-#left-head {
+#panel-head {
   position: fixed;
-  left: var(--chrome-left);
-  top: var(--global-header-h);
-  width: var(--leftcol-w);
-  height: var(--left-head-h);
+  right: 0;
+  top: 0;
+  width: var(--panelcol-w);
+  height: calc(var(--global-header-h) + var(--panel-head-h));
   z-index: 32;
   box-sizing: border-box;
-  padding: var(--space-3) var(--pad-face) var(--space-2);
+  padding: 0 var(--pad-face) var(--space-2);
   background: var(--color-tree);
-  /* 右の線は内側の影で引く (border だと幅 --sidebar-w のときだけ中身が 1px
+  /* 左の線は内側の影で引く (border だと幅 --sidebar-w のときだけ中身が 1px
      削られ、History で列が広がると畳むボタンが 1px 動く)。 */
-  box-shadow: inset -1px 0 0 var(--color-line-soft);
+  box-shadow: inset 1px 0 0 var(--color-line-soft);
 }
-/* 畳んだ左の列は細い帯。名前・入口はタブ列の左へ移り、帯には開くボタン
-   (#left-rail の中) だけを、畳む前と同じ高さ・同じ列の右端に置く。 */
-body.gdp-sidebar-hidden #left-head {
-  width: var(--leftcol-shown);
+/* 畳んだ右の列は細い帯。名前・入口はタブ列の左へ移り、帯には開くボタン
+   (#panel-rail の中) だけを、タブ列の行に置く。 */
+body.gdp-sidebar-hidden #panel-head {
+  width: var(--panelcol-shown);
   height: auto;
   bottom: var(--chrome-bottom);
-  padding: var(--space-3) 0 0;
+  padding: 0;
 }
-.left-rail {
+.panel-rail {
   display: none;
 }
-body.gdp-sidebar-hidden .left-rail {
+body.gdp-sidebar-hidden .panel-rail {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  height: var(--ui-control-sm);
+  justify-content: center;
+  height: var(--global-header-h);
 }
-#left-head > #view-head {
+/* 1 段目 (タブ列の行) に絵柄、2 段目に題名 (名前とブランチ) と畳むボタン。
+   列は右端に付くので、History などで列が一覧の幅に広がっても畳むボタンは
+   右端のまま。 */
+#panel-head > #view-head {
   flex-direction: column;
   align-items: stretch;
-  gap: var(--space-1);
-  /* 中身の幅は木の幅で決める。History などで左の列が一覧の幅に広がっても、
-     右端の畳むボタンの位置を変えない。 */
-  width: calc(var(--sidebar-w) - var(--pad-face) * 2);
-  max-width: 100%;
+  gap: var(--space-2);
+  width: 100%;
+}
+#panel-head > #view-head > .view-strip {
+  order: -1;
+  height: var(--global-header-h);
 }
 .view-head-row {
   display: flex;
@@ -17171,7 +17190,7 @@ body.gdp-sidebar-hidden .left-rail {
   min-width: 0;
   max-width: 100%;
 }
-/* 木を畳むボタンは名前の行の右端 (畳んだときの開くボタンは #left-rail)。 */
+/* 木を畳むボタンは名前の行の右端 (畳んだときの開くボタンは #panel-rail)。 */
 .view-head-row > #sidebar-toggle {
   order: 2;
   flex: none;
@@ -21452,7 +21471,7 @@ body[data-worktree-overview] #history-resizer,
 body[data-worktree-overview] main#content {
   display: none;
 }
-/* 一覧だけのときは本文の場所いっぱい (左の列は Files の木)。2 面なら左の面まで
+/* 一覧だけのときは本文の場所いっぱい (右の列は Files の木)。2 面なら左の面まで
    (右の端を 0 にしていたので、右の列が右の面の下に潜っていた)。列の畳み方は
    この箱の幅で決める (@container worktree-overview)。 */
 body[data-worktree-overview] #worktree-panel {

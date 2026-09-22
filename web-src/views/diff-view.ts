@@ -143,7 +143,7 @@ export function isDiffShellDomIntact(
 }
 
 /**
- * `listShown`: 左の列 (#filelist) が今も差分の一覧か。タブで別の画面へ移ると
+ * `listShown`: 右の列 (#filelist) が今も差分の一覧か。タブで別の画面へ移ると
  * Files の木などに書き換わるので、一覧と差分の DOM が同じでも描き直す。
  */
 export function shouldRenderDiffSidebar(

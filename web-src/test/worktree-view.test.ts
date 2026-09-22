@@ -1459,7 +1459,7 @@ describe("sidebar file list", () => {
       }),
     ]);
 
-  // 選ぶ前 (一覧だけの表示) は、#sidebar は左の列の Files の木 (app が出す)。
+  // 選ぶ前 (一覧だけの表示) は、#sidebar は右の列の Files の木 (app が出す)。
   // この画面は書かず、持ち主でないことを知らせる。
   test("leaves the left column to the Files tree before a worktree is picked", async () => {
     const { filelist, owners } = await mountWith(withFiles());

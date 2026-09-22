@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   backupMainTabs,
+  loadMainTabs,
   loadProjectMainTabs,
   MAX_MAIN_TABS_LAYOUT_BYTES,
   MAX_MAIN_TABS_PROJECTS,
@@ -38,6 +39,67 @@ describe("main tabs store", () => {
       loadProjectMainTabs(path, "/work/sample-docs"),
       loadProjectMainTabs(path, "constructor"),
     ]).toEqual([layout, { other: true }, null, null]);
+  });
+
+  // 共通のタブ (プロジェクトに属さない) は同じファイルの common に 1 つ。
+  test.each([
+    {
+      name: "保存したプロジェクトとは別のプロジェクトでも同じ common を読む",
+      saves: [{ root: "/work/sample-app", common: { targets: ["a"] } }],
+      root: "/work/sample-lib",
+      expected: { layout: null, common: { targets: ["a"] } },
+    },
+    {
+      name: "common を渡さない保存 (前の版の画面) は前の common を残す",
+      saves: [
+        { root: "/work/sample-app", common: { targets: ["a"] } },
+        { root: "/work/sample-lib" },
+      ],
+      root: "/work/sample-lib",
+      expected: { layout, common: { targets: ["a"] } },
+    },
+    {
+      name: "後から保存した common が勝つ",
+      saves: [
+        { root: "/work/sample-app", common: { targets: ["a"] } },
+        { root: "/work/sample-lib", common: { targets: ["b"] } },
+      ],
+      root: "/work/sample-app",
+      expected: { layout, common: { targets: ["b"] } },
+    },
+    {
+      name: "common が一度も無ければ null (この版を初めて使う)",
+      saves: [{ root: "/work/sample-app" }],
+      root: "/work/sample-app",
+      expected: { layout, common: null },
+    },
+  ])("$name", async ({ saves, root, expected }) => {
+    let now = 1;
+    for (const save of saves)
+      await saveProjectMainTabs(
+        path,
+        save.root,
+        layout,
+        now++,
+        "common" in save ? save.common : undefined,
+      );
+    expect(loadMainTabs(path, root)).toEqual(expected);
+  });
+
+  test("common の形が違うファイルは読まず、上書きもしない", async () => {
+    const text = JSON.stringify({
+      version: 1,
+      projects: {},
+      common: { savedAt: 1 },
+    });
+    writeFileSync(path, text);
+    expect(() => loadMainTabs(path, "/work/sample-app")).toThrow(
+      "- common has no tabs",
+    );
+    await expect(
+      saveProjectMainTabs(path, "/work/sample-app", layout, 2, { targets: [] }),
+    ).rejects.toThrow("common has no tabs");
+    expect(readFileSync(path, "utf8")).toBe(text);
   });
 
   test("数を超えたら古く保存したものから忘れる", async () => {

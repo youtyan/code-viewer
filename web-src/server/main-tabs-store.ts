@@ -2,9 +2,11 @@
 // (`<状態ディレクトリ>/main-tabs.json`)。リポジトリの `.code-viewer/` には
 // 書かない: タブはその人の作業の途中の状態で、リポジトリの中身に付くものではない。
 //
-// 中身は `{ version: 1, projects: { <根のパス>: { layout, savedAt } } }`。
-// layout は画面の serializeLayout (core/main-tabs.ts) の値をそのまま置き、
-// 読み戻しの検査 (parseLayout) は画面が行う。ここが見るのは JSON であることと
+// 中身は `{ version: 1, projects: { <根のパス>: { layout, savedAt } },
+// common?: { tabs, savedAt } }`。layout は画面の serializeLayout
+// (core/main-tabs.ts) の値、common はプロジェクトに属さないタブ
+// (serializeCommonTabs) の値をそのまま置き、読み戻しの検査 (parseLayout・
+// parseCommonTabs) は画面が行う。common が無いのはこの項を知らない版の保存。ここが見るのは JSON であることと
 // 大きさだけ (壊れた配置の理由は画面が全部 console に出す)。
 //
 // 別々のプロジェクトの裏のプロセスが同じファイルを書くので、読んで・変えて・
@@ -26,7 +28,12 @@ export const MAX_MAIN_TABS_LAYOUT_BYTES = 64_000;
 export const MAX_MAIN_TABS_PROJECTS = 200;
 
 type ProjectEntry = { layout: unknown; savedAt: number };
-type MainTabsFile = { version: 1; projects: Record<string, ProjectEntry> };
+type CommonEntry = { tabs: unknown; savedAt: number };
+type MainTabsFile = {
+  version: 1;
+  projects: Record<string, ProjectEntry>;
+  common?: CommonEntry;
+};
 
 export function mainTabsPath(): string {
   return join(codeViewerStateDir(), "main-tabs.json");
@@ -79,6 +86,12 @@ function readMainTabsFile(path: string): MainTabsFile | null {
             `projects[${JSON.stringify(root)}].savedAt is not a number`,
           );
       }
+    if ("common" in raw) {
+      if (!isRecord(raw.common) || !("tabs" in raw.common))
+        problems.push("common has no tabs");
+      else if (typeof raw.common.savedAt !== "number")
+        problems.push("common.savedAt is not a number");
+    }
   }
   if (problems.length > 0)
     throw new MainTabsStoreError(
@@ -115,28 +128,52 @@ export async function backupMainTabs(
   });
 }
 
-/** このプロジェクトの配置。保存が無ければ null。 */
-export function loadProjectMainTabs(path: string, root: string): unknown {
+/**
+ * このプロジェクトの配置と、プロジェクトに属さないタブ。保存が無ければ
+ * それぞれ null。
+ */
+export function loadMainTabs(
+  path: string,
+  root: string,
+): { layout: unknown; common: unknown } {
   const file = readMainTabsFile(path);
-  if (!file) return null;
+  if (!file) return { layout: null, common: null };
   // 自分のプロパティだけを見る ("constructor" のような根の名前を継承元で拾わない)。
   const entry = Object.getOwnPropertyDescriptor(file.projects, root);
-  return entry ? (entry.value as ProjectEntry).layout : null;
+  return {
+    layout: entry ? (entry.value as ProjectEntry).layout : null,
+    common: file.common ? file.common.tabs : null,
+  };
 }
 
+/** このプロジェクトの配置。保存が無ければ null。 */
+export function loadProjectMainTabs(path: string, root: string): unknown {
+  return loadMainTabs(path, root).layout;
+}
+
+function checkSize(what: string, value: unknown): void {
+  const size = Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
+  if (size > MAX_MAIN_TABS_LAYOUT_BYTES)
+    throw new MainTabsStoreError(
+      `${what} is ${size} bytes (at most ${MAX_MAIN_TABS_LAYOUT_BYTES})`,
+    );
+}
+
+/**
+ * このプロジェクトの配置を保存する。common を渡せば、プロジェクトに属さない
+ * タブも同じロックの中で書く (渡さなければ前の値のまま)。
+ */
 export async function saveProjectMainTabs(
   path: string,
   root: string,
   layout: unknown,
   now: number = Date.now(),
+  common?: unknown,
 ): Promise<void> {
-  const size = Buffer.byteLength(JSON.stringify(layout) ?? "", "utf8");
-  if (layout === undefined || size > MAX_MAIN_TABS_LAYOUT_BYTES)
-    throw new MainTabsStoreError(
-      layout === undefined
-        ? "main tabs layout is missing"
-        : `main tabs layout is ${size} bytes (at most ${MAX_MAIN_TABS_LAYOUT_BYTES})`,
-    );
+  if (layout === undefined)
+    throw new MainTabsStoreError("main tabs layout is missing");
+  checkSize("main tabs layout", layout);
+  if (common !== undefined) checkSize("common tabs", common);
   await withFileLock(`${path}.lock`, () => {
     const current = readMainTabsFile(path) ?? { version: 1, projects: {} };
     const projects: Record<string, ProjectEntry> = {
@@ -149,9 +186,19 @@ export async function saveProjectMainTabs(
     for (const stale of roots.slice(MAX_MAIN_TABS_PROJECTS))
       delete projects[stale];
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const commonEntry =
+      common === undefined ? current.common : { tabs: common, savedAt: now };
     writeFileAtomic(
       path,
-      `${JSON.stringify({ version: 1, projects }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          version: 1,
+          projects,
+          ...(commonEntry ? { common: commonEntry } : {}),
+        },
+        null,
+        2,
+      )}\n`,
       0o600,
     );
   });

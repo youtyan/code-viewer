@@ -57,7 +57,7 @@ export type ManualLoadReason = "huge" | "minified" | "sourceMap" | "generated";
 
 /** app.ts の空の Diff の案内まで含めた Diff の画面の文言。 */
 export type DiffScreenText = DiffViewText & {
-  /** 左の列の印と、差分の行の展開 (hunk-expand)。 */
+  /** 右の列の印と、差分の行の展開 (hunk-expand)。 */
   kindTagBinary: string;
   kindTagHeavy: string;
   invalidRegex: string;

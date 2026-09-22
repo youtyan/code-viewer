@@ -2,9 +2,11 @@ import { describe, expect, test } from "vitest";
 import {
   activateIndex,
   assertLayout,
+  COMMON_TABS_VERSION,
   close,
   closeOthers,
   closeToRight,
+  isCommonTarget,
   keepOpen,
   type Layout,
   move,
@@ -13,9 +15,12 @@ import {
   open,
   openRight,
   openSide,
+  type PageKind,
   parkRight,
+  parseCommonTabs,
   parseLayout,
   prevTab,
+  serializeCommonTabs,
   serializeLayout,
   setSplit,
   showHome,
@@ -24,6 +29,7 @@ import {
   tabMenu,
   unparkRight,
   unsplit,
+  withCommonTabs,
 } from "../core/main-tabs";
 
 // 配置を短く書くための準備。"a" はファイル a、"~a" は画像 a、"$s" はシェル s
@@ -36,7 +42,7 @@ const terminal = (session: string): TabTarget => ({
   kind: "terminal",
   session,
 });
-const page = (name: "diff" | "history"): TabTarget => ({
+const page = (name: PageKind): TabTarget => ({
   kind: "page",
   page: name,
 });
@@ -56,7 +62,7 @@ function pane(spec: string) {
         : named.startsWith("$")
           ? terminal(name)
           : named.startsWith("@")
-            ? page(name as "diff" | "history")
+            ? page(name as PageKind)
             : file(name);
       return { id: name, target, preview, active };
     });
@@ -1397,5 +1403,137 @@ describe("窓が狭い間の右の面の預かり (parkRight / unparkRight)", ()
       undefined,
       2,
     ]);
+  });
+});
+
+// プロジェクトに属さないタブ (共通のタブ)。プロジェクトを切り替えても残る。
+describe("common tabs", () => {
+  /** 表と同じ書き方で、id ではなく中身で書く (足したタブの id は t<n>)。 */
+  const byTarget = (layout: Layout) =>
+    [layout.panes.left, ...(layout.panes.right ? [layout.panes.right] : [])]
+      .map((p) =>
+        p.tabs
+          .map((tab) => {
+            const t = tab.target;
+            const body =
+              t.kind === "file"
+                ? t.path
+                : t.kind === "image"
+                  ? `~${t.path}`
+                  : t.kind === "terminal"
+                    ? `$${t.session}`
+                    : `@${t.page}`;
+            return tab.id === p.activeId ? `[${body}]` : body;
+          })
+          .join(" "),
+      )
+      .join(" | ");
+
+  test.each<[string, TabTarget, boolean]>([
+    ["シェル・ペイン", terminal("shell-a1"), true],
+    ["全体ボード", page("agents"), true],
+    ["設定と案内", page("help"), true],
+    ["Tools", page("tools"), true],
+    ["Search (そのリポジトリの検索結果)", page("search"), false],
+    ["ターミナルに出た画像 (絶対パス)", image("/work/images/a.png"), true],
+    ["リポジトリの画像", image("docs/a.png"), false],
+    ["ファイル", file("src/a.ts"), false],
+    ["Diff", page("diff"), false],
+    ["History", page("history"), false],
+    ["Worktrees", page("worktree"), false],
+    ["Data", page("database"), false],
+    ["Work log", page("journal"), false],
+  ])("%s → 共通: %s", (_name, target, expected) => {
+    expect(isCommonTarget(target)).toBe(expected);
+  });
+
+  test("保存は共通のタブだけを左 → 右の並びで", () => {
+    expect(
+      serializeCommonTabs(layoutOf("a @agents [$s1] @diff", "$s2 b")),
+    ).toEqual({
+      version: COMMON_TABS_VERSION,
+      targets: [page("agents"), terminal("s1"), terminal("s2")],
+    });
+  });
+
+  test.each([
+    {
+      name: "別のプロジェクトで閉じた共通のタブは消え、前面は右隣",
+      layout: layoutOf("a @agents [$s1] @diff"),
+      common: [page("agents")],
+      expected: "a @agents [@diff]",
+    },
+    {
+      name: "別のプロジェクトで開いた共通のタブは左の面の末尾に足す (前面はそのまま)",
+      layout: layoutOf("[a] @diff"),
+      common: [terminal("s2"), page("help")],
+      expected: "[a] @diff $s2 @help",
+    },
+    {
+      name: "並びと前面はこのプロジェクトの配置のまま (共通の順では並べ替えない)",
+      layout: layoutOf("$s2 [a] $s1"),
+      common: [terminal("s1"), terminal("s2")],
+      expected: "$s2 [a] $s1",
+    },
+    {
+      name: "右の面の共通のタブが消えて右の面が空になれば 1 面に戻る",
+      layout: layoutOf("[a]", "[$s1]"),
+      common: [],
+      expected: "[a]",
+    },
+    {
+      name: "ファイルと画面のタブは共通の値に関係なく残す",
+      layout: layoutOf("[a] @diff ~docs/b.png"),
+      common: [],
+      expected: "[a] @diff ~docs/b.png",
+    },
+  ])("突き合わせ: $name", ({ layout, common, expected }) => {
+    const merged = withCommonTabs(layout, common);
+    assertLayout(merged);
+    expect(byTarget(merged)).toBe(expected);
+  });
+
+  test.each([
+    {
+      name: "無い (この版を初めて使う)",
+      raw: null,
+      expected: { kind: "none" },
+    },
+    {
+      name: "新しい版は読まない",
+      raw: { version: COMMON_TABS_VERSION + 1, targets: "anything" },
+      expected: { kind: "newer", version: COMMON_TABS_VERSION + 1 },
+    },
+    {
+      name: "知らない種類は落として知らせる",
+      raw: {
+        version: COMMON_TABS_VERSION,
+        targets: [terminal("s1"), { kind: "chart", name: "q" }],
+      },
+      expected: {
+        kind: "ok",
+        targets: [terminal("s1")],
+        dropped: [{ at: "targets[1]", raw: { kind: "chart", name: "q" } }],
+      },
+    },
+  ])("読み戻し: $name", ({ raw, expected }) => {
+    expect(parseCommonTabs(raw)).toEqual(expected);
+  });
+
+  test("壊れた共通のタブは理由を全部並べて投げる", () => {
+    expect(() =>
+      parseCommonTabs({
+        version: 0,
+        targets: [file("a"), terminal("s1"), terminal("s1"), { kind: "image" }],
+      }),
+    ).toThrow(
+      [
+        "common tabs are broken (4 problems):",
+        "- version is 0, expected 1",
+        '- targets[0]: file {"kind":"file","path":"a"} is not a common tab',
+        '- targets[2]: {"kind":"terminal","session":"s1"} appears twice',
+        "- targets[3]: image target has no path",
+      ].join("\n"),
+    );
   });
 });

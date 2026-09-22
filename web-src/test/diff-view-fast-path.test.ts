@@ -359,7 +359,7 @@ describe("diff view fast path", () => {
     [true, true, true, false],
     [true, false, true, true],
     [false, true, true, true],
-    // 別のタブで左の列が Files の木に書き換わった
+    // 別のタブで右の列が Files の木に書き換わった
     [true, true, false, true],
   ])("renders the sidebar (listSame=%s, domIntact=%s, listShown=%s) -> %s", (listSame, domIntact, listShown, expected) => {
     expect(shouldRenderDiffSidebar(listSame, domIntact, listShown)).toBe(
@@ -1687,7 +1687,7 @@ describe("diff view next-unviewed-file navigation", () => {
     view.renderShell(meta, null);
     view.renderShell(meta, null);
     expect(sidebarRenders()).toBe(1);
-    // 別のタブ (Agents など) で左の列が Files の木に書き換わった。
+    // 別のタブ (Agents など) で右の列が Files の木に書き換わった。
     document.querySelector("#filelist")?.removeAttribute("data-diff-list");
     const result = view.renderShell(meta, null);
     expect([sidebarRenders(), result.structureChanged]).toEqual([2, false]);

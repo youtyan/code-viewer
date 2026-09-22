@@ -57,14 +57,18 @@
     <div id="app-nav-resizer" class="app-nav-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="resize sidebar"></div>
   </aside>
   <!-- 上の行は持たない: タブ列が最上段。プロジェクト名・ブランチと画面の入口
-       (#view-head) は左の列の頭 (#left-head) に固定し、タブを切り替えても動かさない。
-       利用者が左の列を畳んだときだけタブ列の左 (#tabs-lead) へ移す
-       (views/sidebar.ts の placeSidebarToggle)。畳んだ左の列は細い帯 (#left-rail)
-       になり、開くボタンだけを畳む前と同じ列の頭の右端に置く。 -->
+       (#view-head) は右の列の頭 (#panel-head) に固定し、タブを切り替えても動かさない。
+       利用者が右の列を畳んだときだけタブ列の左 (#tabs-lead) へ移す
+       (views/sidebar.ts の placeSidebarToggle)。畳んだ右の列は細い帯 (#panel-rail)
+       になり、開くボタンだけをタブ列の行に置く。右の列はタブ列の後に置く
+       (キーボードの移る順: サイドバー → タブ → 右の列)。 -->
   <div id="tabs-lead" class="tabs-lead">
     <button id="nav-expand" class="global-icon-action" type="button" title="show sidebar" aria-label="show sidebar" hidden><span class="goi-icon" aria-hidden="true"></span></button>
   </div>
-  <div id="left-head" class="left-head">
+  <!-- メインの面のタブ列 (最上段)。中身は views/main-tabs/main-tabs-view.ts。
+       ファイル・各画面を開いたまま切り替える。高さは --main-tabs-h。 -->
+  <nav id="main-tabs" aria-label="Tabs"></nav>
+  <div id="panel-head" class="panel-head">
     <div id="view-head" class="view-head">
       <div class="view-head-row">
         <!-- リポジトリ名 = プロジェクトの切替 (views/projects/project-switcher.ts)。 -->
@@ -85,11 +89,8 @@
         <a class="app-menu-item view-strip-item" data-route="journal" href="/journal"><span class="goi-icon" aria-hidden="true"></span></a>
       </nav>
     </div>
-    <div id="left-rail" class="left-rail"></div>
+    <div id="panel-rail" class="panel-rail"></div>
   </div>
-  <!-- メインの面のタブ列 (最上段)。中身は views/main-tabs/main-tabs-view.ts。
-       ファイル・各画面を開いたまま切り替える。高さは --main-tabs-h。 -->
-  <nav id="main-tabs" aria-label="Tabs"></nav>
   <header id="topbar">
     <div id="meta"></div>
     <div class="ref-pickers">

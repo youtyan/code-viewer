@@ -652,13 +652,15 @@ export function parseOpenPaneOverlay(search: string): TmuxPaneId | null {
 }
 
 /**
- * 開いたときに、保存したタブの前面 (ターミナル) を URL の route より優先するか。
- * URL がシェル (?terminal=) か開くペイン (?open-pane=) を指すときだけ。
- * それ以外は URL の画面・ファイルのタブを前面にする (ブックマークで開いた画面を隠さない)。
+ * 開いたときに、保存したタブの前面 (ターミナル・画像) を URL の route より優先するか。
+ * 読み直し (reloaded) か、URL がシェル (?terminal=) か開くペイン (?open-pane=) を
+ * 指すとき。それ以外 (ブックマーク・直接の URL) は URL の画面・ファイルのタブを
+ * 前面にする (開いた画面を隠さない)。画像の前面は URL に出ないので、読み直しで見分ける。
  */
-export function urlKeepsSavedFront(search: string): boolean {
+export function urlKeepsSavedFront(search: string, reloaded: boolean): boolean {
   const terminal = parseTerminalOverlay(search);
   return (
+    reloaded ||
     (terminal !== null && terminal !== "open") ||
     parseOpenPaneOverlay(search) !== null
   );

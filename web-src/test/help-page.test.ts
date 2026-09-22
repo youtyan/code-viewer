@@ -228,7 +228,7 @@ describe("help page settings categories", () => {
 
   test("picking a category from a help section goes back to ?section=settings", () => {
     const view = renderSettings("storage");
-    // 左の列の Files の木は設定の画面でも出ている。節を変えても消さない。
+    // 右の列の Files の木は設定の画面でも出ている。節を変えても消さない。
     const filelist = document.getElementById("filelist");
     filelist?.append(document.createElement("li"));
     view.click("Agents");

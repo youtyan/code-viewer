@@ -948,6 +948,146 @@ export function parseLayout(raw: unknown): ParsedLayout {
   return { layout, dropped, retired, relocated };
 }
 
+// ---- プロジェクトに属さないタブ (共通のタブ) ----
+//
+// 全体ボード・Tools・設定と案内・ターミナル (シェルとペイン)・リポジトリの外の画像
+// (ターミナルに出た画像) は、プロジェクトを切り替えても残す。配置 (並び・面・
+// 前面) はプロジェクトごとの保存のまま持ち、共通のタブの集まりだけをユーザー
+// 単位でもう 1 つ保存して、読み戻しで突き合わせる (withCommonTabs)。別の
+// プロジェクトで閉じた共通のタブは消え、開いたものは左の面の末尾に足される。
+// 保存先は server/main-tabs-store.ts の同じファイルの common。
+
+/** 共通のタブの保存の版。プロジェクトの配置の版 (LAYOUT_VERSION) とは別に上げる。 */
+export const COMMON_TABS_VERSION = 1;
+
+// Tools (書き捨ての Markdown・Mermaid・JSON) はリポジトリの中身を見ない。
+// Search (grep の結果) はそのリポジトリの結果なのでプロジェクトごと。
+const COMMON_PAGES: ReadonlySet<PageKind> = new Set([
+  "agents",
+  "tools",
+  "help",
+]);
+
+/** プロジェクトを切り替えても残すタブか。 */
+export function isCommonTarget(target: TabTarget): boolean {
+  switch (target.kind) {
+    case "terminal":
+      return true;
+    case "image":
+      // ターミナルに出た画像は絶対パス。リポジトリの画像はリポジトリの中の相対パス。
+      return target.path.startsWith("/");
+    case "page":
+      return COMMON_PAGES.has(target.page);
+    case "file":
+      return false;
+  }
+}
+
+export type SerializedCommonTabs = {
+  version: number;
+  targets: TabTarget[];
+};
+
+export function serializeCommonTabs(layout: Layout): SerializedCommonTabs {
+  return {
+    version: COMMON_TABS_VERSION,
+    targets: sides(layout)
+      .flatMap((side) => (paneOf(layout, side) as Pane).tabs)
+      .map((tab) => tab.target)
+      .filter(isCommonTarget),
+  };
+}
+
+export type ParsedCommonTabs =
+  /** まだ保存が無い (この版を初めて使う)。プロジェクトの配置のまま使う。 */
+  | { kind: "none" }
+  /** 新しい版の保存。読めないので使わず、上書きもしない。 */
+  | { kind: "newer"; version: number }
+  | {
+      kind: "ok";
+      targets: TabTarget[];
+      /** 種類が分からず落とした項目 (場所と元の値)。 */
+      dropped: Array<{ at: string; raw: unknown }>;
+    };
+
+/**
+ * 保存した共通のタブを読む。壊れていれば理由を全部並べた Error を投げる。
+ * 共通に置かない種類 (ファイルなど) や重なりも壊れた値として扱う。
+ */
+export function parseCommonTabs(raw: unknown): ParsedCommonTabs {
+  if (raw === null || raw === undefined) return { kind: "none" };
+  if (!isRecord(raw)) throw new Error("common tabs: not an object");
+  if (typeof raw.version === "number" && raw.version > COMMON_TABS_VERSION)
+    return { kind: "newer", version: raw.version };
+  const problems: string[] = [];
+  if (raw.version !== COMMON_TABS_VERSION)
+    problems.push(
+      `version is ${JSON.stringify(raw.version)}, expected ${COMMON_TABS_VERSION}`,
+    );
+  const list = Array.isArray(raw.targets) ? raw.targets : null;
+  if (!list) problems.push("targets is not an array");
+  const targets: TabTarget[] = [];
+  const dropped: Array<{ at: string; raw: unknown }> = [];
+  (list ?? []).forEach((item, index) => {
+    const at = `targets[${index}]`;
+    const target = parseTarget(item);
+    if (target === null) {
+      dropped.push({ at, raw: item });
+      return;
+    }
+    if (typeof target === "string") {
+      problems.push(`${at}: ${target}`);
+      return;
+    }
+    if (!isCommonTarget(target)) {
+      problems.push(
+        `${at}: ${target.kind} ${JSON.stringify(target)} is not a common tab`,
+      );
+      return;
+    }
+    if (targets.some((seen) => sameTarget(seen, target))) {
+      problems.push(`${at}: ${JSON.stringify(target)} appears twice`);
+      return;
+    }
+    targets.push(target);
+  });
+  if (problems.length > 0)
+    throw new Error(
+      `common tabs are broken (${problems.length} problem${problems.length === 1 ? "" : "s"}):\n- ${problems.join("\n- ")}`,
+    );
+  return { kind: "ok", targets, dropped };
+}
+
+/**
+ * プロジェクトの配置に共通のタブを突き合わせる: 配置にあって共通に無いもの
+ * (別のプロジェクトで閉じた) は取り除き、共通にあって配置に無いもの (別の
+ * プロジェクトで開いた) は左の面の末尾に足す。並びと前面は配置のまま。
+ */
+export function withCommonTabs(
+  layout: Layout,
+  common: readonly TabTarget[],
+): Layout {
+  const kept = (target: TabTarget) =>
+    !isCommonTarget(target) || common.some((item) => sameTarget(item, target));
+  let next = layout;
+  for (const side of sides(layout)) {
+    const pane = paneOf(next, side) as Pane;
+    const ids = new Set(
+      pane.tabs.filter((tab) => !kept(tab.target)).map((tab) => tab.id),
+    );
+    if (ids.size > 0) next = removeIds(next, side, ids);
+  }
+  for (const target of common) {
+    if (findTarget(next, target)) continue;
+    const tab: Tab = { id: nextId(next), target, preview: false };
+    next = withPane(next, "left", {
+      ...next.panes.left,
+      tabs: [...next.panes.left.tabs, tab],
+    });
+  }
+  return next;
+}
+
 /** 不変条件の検査。破れていれば理由を全部並べて投げる (テストと開発用)。 */
 export function assertLayout(layout: Layout): void {
   const problems: string[] = [];

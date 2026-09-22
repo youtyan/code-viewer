@@ -11,7 +11,7 @@ import {
 } from "./database/handle-shared";
 import {
   backupMainTabs,
-  loadProjectMainTabs,
+  loadMainTabs,
   mainTabsPath,
   saveProjectMainTabs,
 } from "./main-tabs-store";
@@ -184,7 +184,7 @@ async function handleToolsPatch(cwd: string, req: Request): Promise<Response> {
 /** このプロジェクトのメインの面のタブの配置 (無ければ null)。 */
 async function handleTabsGet(cwd: string): Promise<Response> {
   try {
-    return json({ layout: loadProjectMainTabs(mainTabsPath(), cwd) });
+    return json(loadMainTabs(mainTabsPath(), cwd));
   } catch (error) {
     console.error("[code-viewer] main tabs are not loaded:", error);
     return textError(
@@ -200,7 +200,13 @@ async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
   if (!body || typeof body !== "object" || !("layout" in body))
     return textError("main tabs body has no layout", 400);
   try {
-    await saveProjectMainTabs(mainTabsPath(), cwd, body.layout);
+    await saveProjectMainTabs(
+      mainTabsPath(),
+      cwd,
+      body.layout,
+      Date.now(),
+      "common" in body ? body.common : undefined,
+    );
     return json({ ok: true });
   } catch (error) {
     console.error("[code-viewer] main tabs are not saved:", error);

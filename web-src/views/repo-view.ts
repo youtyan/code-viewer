@@ -83,7 +83,7 @@ export type RepoViewDeps = {
   repoFileTargetFromRoute(): string | null;
   /**
    * 一覧を持たない画面 (Work log・全体ボード・設定・Data・Worktrees の一覧表示)
-   * で左の列に Files の木を出すときの ref。そうでない画面は null。
+   * で右の列に Files の木を出すときの ref。そうでない画面は null。
    */
   filesColumnRef(): string | null;
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;

@@ -43,7 +43,7 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 | 全画面共通の取り直し・未読・通知・タブのタイトル | `views/agents/agent-monitor.ts` |
 | アカウントの帯（一覧の上）と、作る・ログイン・起動の画面 | `views/agents/accounts-band.ts`・`accounts-dialogs.ts` |
 | 設定の「エージェントの通知」「エージェント連携」「アカウント」の節 | `views/viewer-settings.ts`・`views/agents/agent-hooks-settings.ts`・`accounts-settings.ts` |
-| 左の列の頭（`#left-head`。左の列を畳んだときだけタブ列の左の `#tabs-lead`）のプロジェクト名 = プロジェクトの切替（`p`） | `views/projects/project-switcher.ts`（置き場所は `views/sidebar.ts` の `placeSidebarToggle`、サイドバー・全体ボードと共有する操作は `project-actions.ts`、⋯ のメニューは `project-menu.ts`） |
+| 右の列の頭（`#panel-head`。右の列を畳んだときだけタブ列の左の `#tabs-lead`）のプロジェクト名 = プロジェクトの切替（`p`） | `views/projects/project-switcher.ts`（置き場所は `views/sidebar.ts` の `placeSidebarToggle`、サイドバー・全体ボードと共有する操作は `project-actions.ts`、⋯ のメニューは `project-menu.ts`） |
 
 | サーバ側 | 役割 |
 |---|---|
@@ -506,6 +506,16 @@ reset が古い reset より許容差を超えて前へ戻るか、古い窓が�
   `--idle-stop` 秒（既定 10 分）経った入口の裏だけ。止めた裏は「落ちた」扱いにせず、次の
   要求で黙って起こす（画面は起こしている間「起動中」を出す）。状態の型（`starting` /
   `running` / `idle-stopped` / `unreachable`）と条件の細部は `server.md` の入口の節
+- 切替は読み直しのままだが、**プロジェクトに属さないタブ**（全体ボード・Tools・設定と案内・ターミナル
+  （シェルとペイン）・ターミナルに出た画像）は切り替えても残す。判定は `core/main-tabs.ts` の
+  `isCommonTarget` の 1 か所。配置（並び・面・前面）はプロジェクトごとの保存のまま、共通のタブの
+  集まりだけを同じファイル（`main-tabs.json` の `common`）にもう 1 つ持ち、読み戻しで突き合わせる
+  （`withCommonTabs`: 別のプロジェクトで閉じたものは消え、開いたものは左の面の末尾に足す）。
+  Files の木と画面ごとの一覧は右の列（題名がプロジェクト名）、プロジェクトとエージェントは左の
+  サイドバー、と左右で分けた（どれが今のプロジェクトの中身か分かるように）。
+  タブがプロジェクトをまたぐ案（1 ページで複数の裏に話す）は、フロントの画面の状態をすべて
+  プロジェクトごとに分ける必要があり、分け損ねが「別のプロジェクトの内容を出す・書く」になる
+  ので採らなかった（2026-09 の設計の比較）
 - 裏を止めても、ターミナル（tmux・シェル）・未読・通知・フックの申告は残る（全部入口に居る）。
   **裏に、止めると消える状態を足さない。** タブを裏に回すと SSE を切る（`app.ts` の
   `shouldConnectEventSource`）ので、長く裏にあるタブの裏のプロセスも止まり、表に戻したときに

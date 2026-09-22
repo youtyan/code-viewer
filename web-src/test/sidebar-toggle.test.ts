@@ -158,16 +158,16 @@ class FakeElement {
 
 function installFakeDom() {
   const body = new FakeElement("body");
-  // 左の列の頭 (#left-head) の中のプロジェクト名・画面の入口 (#view-head) と、
-  // 名前の行 (.view-head-row)。利用者が左の列を畳んだときだけタブ列の左へ移り、
-  // 左の列は細い帯 (#left-rail) になって開くボタンだけを置く。
+  // 右の列の頭 (#panel-head) の中のプロジェクト名・画面の入口 (#view-head) と、
+  // 名前の行 (.view-head-row)。利用者が右の列を畳んだときだけタブ列の左へ移り、
+  // 右の列は細い帯 (#panel-rail) になって開くボタンだけを置く。
   const tabsLead = new FakeElement("div", "tabs-lead");
-  const leftHead = new FakeElement("div", "left-head");
+  const leftHead = new FakeElement("div", "panel-head");
   const viewHead = new FakeElement("div", "view-head");
   const nameRow = new FakeElement("div");
   nameRow.className = "view-head-row";
   viewHead.appendChild(nameRow);
-  const rail = new FakeElement("div", "left-rail");
+  const rail = new FakeElement("div", "panel-rail");
   leftHead.append(viewHead, rail);
   const topbar = new FakeElement("div", "topbar");
   const sidebar = new FakeElement("aside", "sidebar");
@@ -287,9 +287,9 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
   });
 }
 
-// 名前・ブランチ・画面の入口は左の列の頭に固定し、画面を切り替えても動かさない。
-// 動くのは利用者が左の列を畳んだとき (タブ列の左へ) だけ。木を畳む / 出す
-// ボタンは左の列の頭の右端: 出ているときは名前の行、畳んだときは左の列の細い帯
+// 名前・ブランチ・画面の入口は右の列の頭に固定し、画面を切り替えても動かさない。
+// 動くのは利用者が右の列を畳んだとき (タブ列の左へ) だけ。木を畳む / 出す
+// ボタンは右の列の頭の右端: 出ているときは名前の行、畳んだときは右の列の細い帯
 // (ツールバーやタブ列へは行かない)。
 describe("project name and view entries placement", () => {
   test.each([
@@ -400,7 +400,7 @@ describe("sidebar toggle placement", () => {
     dom.tabsLead.remove();
     const sidebar = createSidebarForTest({ sidebarHidden: false });
     expect(() => sidebar.placeSidebarToggle()).toThrow(
-      "view head: missing #view-head, #view-head .view-head-row, #left-head, #left-rail, #tabs-lead in index.html",
+      "view head: missing #view-head, #view-head .view-head-row, #panel-head, #panel-rail, #tabs-lead in index.html",
     );
   });
 

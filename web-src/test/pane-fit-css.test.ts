@@ -30,7 +30,7 @@ test.each([
     "container",
     "worktree-overview / inline-size",
   ],
-  // 左の列の見出し: 「ツリー / 一覧」と題の語を折らない
+  // 右の列の見出し: 「ツリー / 一覧」と題の語を折らない
   ["#sidebar .sb-head .sb-view-seg", "min-width", "max-content"],
   ["#sidebar .sb-head > .sb-title", "white-space", "nowrap"],
 ])("%s has %s: %s", (selector, property, expected) => {
