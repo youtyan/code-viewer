@@ -697,6 +697,23 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       session.value = defaultLaunchSession(project, panes, fallback).session;
     }
 
+    /**
+     * 表示するコマンドだけを描く。起動コマンドは開いた時点の写しではなく今の値
+     * (別の画面で保存したものが、開き直すまで古いまま出ていた)。
+     */
+    function renderCommandPreview() {
+      const account = accounts.find((item) => item.id === accountSelect.value);
+      const agent = kind.value();
+      const current = deps.client.snapshot().data ?? data;
+      const command = current?.launchCommands[agent] ?? agent;
+      preview.textContent = launchCommandLine(
+        agent,
+        !account || account.builtin ? null : account.configDir,
+        command,
+        current?.home ?? "",
+      );
+    }
+
     function syncPreview() {
       const panes = deps.getOverview()?.panes ?? [];
       const exists = panes.some(
@@ -706,14 +723,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
         ? t.launchSessionExisting
         : t.launchSessionNew;
       const account = accounts.find((item) => item.id === accountSelect.value);
-      const agent = kind.value();
-      const command = data?.launchCommands[agent] ?? agent;
-      preview.textContent = launchCommandLine(
-        agent,
-        !account || account.builtin ? null : account.configDir,
-        command,
-        data?.home ?? "",
-      );
+      renderCommandPreview();
       copyResult.textContent = "";
       syncChoices();
       loginHint.textContent = launchLoginHint(account, t);
@@ -740,6 +750,11 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
       launchPreviewBlock(t.launchPreviewLabel, previewFrame, copyResult),
     );
 
+    // 開いている間に届いた一覧 (周期の取り直し) で、表示するコマンドを合わせ直す
+    // (コピーの結果の表示は消さない)。開いた時点でも 1 回取り直す (別の画面での
+    // 保存を待たずに拾う)。
+    const unsubscribe = deps.client.subscribe(renderCommandPreview);
+    void deps.client.load({ background: true });
     return showFormDialog({
       title: t.launchTitle,
       description: t.launchIntro,
@@ -767,7 +782,7 @@ export function createAccountDialogs(deps: AccountDialogDeps): AccountDialogs {
           ? `${message}\n${t.launchRememberFailed}\n${result.rememberError}`
           : message;
       },
-    });
+    }).finally(unsubscribe);
   }
 
   return { add, remove, rename, login, launch };

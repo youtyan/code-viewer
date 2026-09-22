@@ -57,6 +57,26 @@ test.each([
   [".db-root", "container", "db-pane / inline-size"],
   // 右の列の見出しも実幅で (件数を省く段階)
   ["#sidebar .sb-head", "container", "sidebar-head / inline-size"],
+  // 畳んだ右の列 (帯) は開くボタンと画面の入口の絵柄を縦に並べる (絵柄をタブ列の
+  // 左へ移すと、2 面の狭い面でタブが 38px まで潰れた)。帯の幅は押せる領域の
+  // 大きさ (密度で変わる。特大で絵柄がはみ出した)
+  ["body.gdp-sidebar-hidden .panel-rail", "flex-direction", "column"],
+  [".panel-rail > .view-strip", "flex-direction", "column"],
+  ["body", "--panelcol-rail-w", "var(--ui-control-sm)"],
+  // プロジェクト名より先にブランチの名前が縮む (名前が「r…」になった)
+  [".brand .title", "flex", "0 0 auto"],
+  // 木の見出しが狭い (日本語・特大) とき縮むのは題 (右端の切替を押し出さない)
+  ["#sidebar .sb-head > .sb-title", "min-width", "0"],
+  ["#sidebar .sb-head > .sb-title", "text-overflow", "ellipsis"],
+  // 全体ボード: 狭い面では絞り込みを折り返し、アカウントのカードは行を折る
+  [".agents-toolbar", "flex-wrap", "wrap"],
+  [".agents-filter", "flex-wrap", "wrap"],
+  // フォルダ表示もファイル表示と同じ本文の左右の余白 (左端が 8px ずれていた)
+  [
+    "body.gdp-repo-page #content",
+    "padding",
+    "var(--content-top-gap) var(--content-pad-x) 48px",
+  ],
   // 右の列の見出し: 「ツリー / 一覧」と題の語を折らない
   ["#sidebar .sb-head .sb-view-seg", "min-width", "max-content"],
   ["#sidebar .sb-head > .sb-title", "white-space", "nowrap"],
@@ -84,4 +104,18 @@ test.each([
       (candidate) => candidate === selector,
     ).get(property),
   ).toBe(expected);
+});
+
+// アカウントのカードは 1 行に最大 4 枚で、1 枚が最小の幅を下回るなら行を折る
+// (4 列固定だと面 486px で 1 枚 101px になり、使用量の文字がはみ出した)。
+test("account cards wrap instead of shrinking below their minimum width", () => {
+  const columns =
+    cascadedDeclarations(
+      rules,
+      (candidate) => candidate === ".agents-accounts-cards",
+    ).get("grid-template-columns") ?? "";
+  expect([
+    columns.replace(/\s+/g, " ").startsWith("repeat( auto-fill,"),
+    columns.includes("var(--agents-account-card-min)"),
+  ]).toEqual([true, true]);
 });

@@ -71,9 +71,9 @@ import {
   withCommonTabs,
 } from "../../core/main-tabs";
 import type { AppRoute } from "../../core/routes";
-import { isToolId } from "../../core/tools";
 import { basenameOf } from "../../core/terminal-board";
 import { terminalImageExtension } from "../../core/terminal-images";
+import { isToolId } from "../../core/tools";
 import type { ContextMenuItem } from "../context-menu";
 import { showContextMenu } from "../context-menu";
 import { type MainTabsLang, mainTabsText } from "./i18n";
@@ -962,6 +962,17 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     document.body.classList.remove("main-tab-dragging");
   }
 
+  // 描き直しで掴んだタブの要素が外れると、ブラウザによっては dragend が届かず、
+  // 掴んでいる印 (body.main-tab-dragging・右に分割の落とす先) が残る。ドラッグの
+  // 間はポインタの移動は届かないので、ボタンを離した移動が来たら終わっている。
+  document.addEventListener(
+    "pointermove",
+    (event) => {
+      if (dragId !== null && event.buttons === 0) endDrag();
+    },
+    { passive: true },
+  );
+
   function wireStrip(strip: HTMLElement, side: PaneSide): void {
     strip.addEventListener("dragover", (event) => {
       if (!dragId) return;
@@ -1048,6 +1059,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     );
     el.classList.toggle("main-tab-preview", tab.preview);
     el.classList.toggle("main-tab-file", tab.target.kind === "file");
+    // 掴んでいる最中に描き直した (端末の名前・未読の更新など) ときも、掴んで
+    // いるタブの印を付け直す (要素が入れ替わって印が消えていた)。
+    el.classList.toggle("main-tab-dragging", tab.id === dragId);
     el.dataset.tabId = tab.id;
     el.dataset.kind = tab.target.kind;
     el.setAttribute("role", "tab");

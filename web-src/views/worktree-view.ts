@@ -39,6 +39,7 @@ import {
   closeContextMenu,
   showContextMenu,
 } from "./context-menu";
+import { attachStickyHScroll, detachStickyHScroll } from "./diff-hscroll";
 import { enhanceMediaCard } from "./media-embed";
 import { pageLanguage } from "./page-language";
 import type { PageView } from "./page-view";
@@ -1916,6 +1917,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       ) {
         return;
       }
+      detachStickyHScroll(shell);
       body.replaceChildren();
       if (!res.diff.trim()) {
         body.appendChild(el("div", "gdp-info", t.panes.diffEmpty));
@@ -1957,6 +1959,8 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           hljs as ConstructorParameters<typeof window.Diff2HtmlUI>[3],
         );
         ui.draw();
+        // 長いカードでも横のスクロールバーを本文の下端に貼って見せる (Diff と同じ)。
+        attachStickyHScroll(shell);
         enhanceMediaCard(
           {
             path: file.path,

@@ -303,9 +303,10 @@ export function createSidebar(deps: SidebarDeps) {
   /**
    * 木を畳む / 出すボタンと、プロジェクト名・ブランチ・画面の入口 (#view-head)
    * の置き場所。名前と入口は右の列の頭 (#panel-head) に固定し、タブや画面を
-   * 切り替えても動かさない。利用者が右の列を畳んだときだけ、タブ列の左
-   * (#tabs-lead) へ移す。ボタンは出ているときは名前の行の右端、畳んだときは
-   * 右の列の細い帯 (#panel-rail) の頭 (どちらも右の列の頭の右端)。
+   * 切り替えても動かさない。右の列を畳んだときだけ、名前とブランチはタブ列の
+   * 左 (#tabs-lead) へ、入口の絵柄は右の列の細い帯 (#panel-rail) へ縦に移す。
+   * ボタンは出ているときは名前の行の右端、畳んだときは帯の頭 (どちらも右の列の
+   * 頭の右端)。
    */
   function placeSidebarToggle() {
     const head = document.querySelector<HTMLElement>("#view-head");
@@ -329,6 +330,14 @@ export function createSidebar(deps: SidebarDeps) {
     attachSidebarToggle(STATE.sidebarHidden ? rail : row);
     const host = STATE.sidebarHidden ? lead : leftHead;
     if (head.parentElement !== host) host.append(head);
+    // 畳んだときは画面の入口の絵柄 (.view-strip) だけを帯へ縦に並べる (帯 =
+    // 絵柄の列)。タブ列の左へ一緒に移すと、2 面の狭い面でタブの列が 1 枚も
+    // 読めない幅まで潰れた (1280 の 2 面で 38px)。
+    const strip = document.querySelector<HTMLElement>(".view-strip");
+    if (strip) {
+      const stripHost = STATE.sidebarHidden ? rail : head;
+      if (strip.parentElement !== stripHost) stripHost.append(strip);
+    }
     placeSidebarFilter();
   }
 

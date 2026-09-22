@@ -37,6 +37,7 @@ import type {
   SidebarItem,
 } from "../core/types";
 import { suppressWhitespaceOnlyInlineHighlights } from "../core/ws-highlight";
+import { attachStickyHScroll, detachStickyHScroll } from "./diff-hscroll";
 import { diffRowAfterLineNumber } from "./diff-line-select";
 import type { DiffViewText, ManualLoadReason } from "./diff-view-i18n";
 import type { ExpandStackElement } from "./hunk-expand";
@@ -1593,6 +1594,7 @@ export function createDiffView(deps: DiffViewDeps) {
       return;
     }
 
+    detachStickyHScroll(card);
     body.innerHTML = "";
     const layout = file.force_layout || STATE.layout;
     const hljsRef = getHljs();
@@ -1622,8 +1624,14 @@ export function createDiffView(deps: DiffViewDeps) {
 
     enhanceMediaCard(file, card);
     syncSideScrollCard(card);
+    attachStickyHScroll(card);
     appendStatSquaresToHeader(card, file);
     setupHunkExpand(card, file);
+    // 畳んだカードを描き直したら、新しい本文にも畳みを当て直す (Split /
+    // Unified の切替・静かな再検証・残りの hunk の読み込みで描き直すと、見出しは
+    // 畳んだままなのに中身が出ていた)。
+    if (card.classList.contains("gdp-file-collapsed"))
+      setFileCollapsed(card, true);
   }
 
   function setFileCollapsed(card: DiffCardElement, collapsed: boolean) {

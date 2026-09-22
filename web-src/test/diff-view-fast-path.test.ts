@@ -633,6 +633,58 @@ describe("diff view fast path", () => {
     }
   });
 
+  // 畳んだカードを描き直しても畳んだまま (Split / Unified の切替・再検証などで
+  // 描き直すと、見出しは畳んだままで中身が出ていた)。
+  test("redrawing a collapsed card keeps its body hidden", () => {
+    setupDiffDom();
+    const originalDiff2Html = window.Diff2HtmlUI;
+    window.Diff2HtmlUI = class {
+      constructor(private readonly element: HTMLElement) {}
+      draw() {
+        this.element.innerHTML =
+          '<div class="d2h-file-wrapper"><div class="d2h-file-header"></div>' +
+          '<div class="d2h-file-diff"><div class="d2h-code-wrapper"><table></table></div></div></div>';
+      }
+      highlightCode() {
+        /* not used */
+      }
+    } as unknown as typeof window.Diff2HtmlUI;
+    try {
+      const { view } = createDiffViewForShellTest();
+      const card = document.createElement("div") as DiffCardElement;
+      card.className = "gdp-file-shell";
+      card.dataset.path = "src/sample.ts";
+      card.innerHTML =
+        '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+      document.querySelector("#diff")?.appendChild(card);
+      const file: FileMeta = {
+        path: "src/sample.ts",
+        status: "M",
+        additions: 1,
+        deletions: 0,
+        size_class: "small",
+        highlight: false,
+        load_url: "/file_diff?path=sample",
+      };
+      const data = {
+        path: "src/sample.ts",
+        status: "M",
+        diff: "diff --git a/sample b/sample\n",
+      };
+      view.renderFile(file, data, card);
+      // 利用者が畳んだ
+      card.classList.add("gdp-file-collapsed");
+      card.querySelector(".d2h-file-diff")?.classList.add("d2h-d-none");
+      view.rerenderLoadedDiffs();
+      expect([
+        card.classList.contains("gdp-file-collapsed"),
+        card.querySelector(".d2h-file-diff")?.classList.contains("d2h-d-none"),
+      ]).toEqual([true, true]);
+    } finally {
+      window.Diff2HtmlUI = originalDiff2Html;
+    }
+  });
+
   test("a failed request for more hunks keeps the reason on the retry button", async () => {
     setupDiffDom();
     const originalDiff2Html = window.Diff2HtmlUI;

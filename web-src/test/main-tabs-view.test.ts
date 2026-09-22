@@ -1223,6 +1223,39 @@ describe("main tabs view: 左右 2 面", () => {
     expect(zone?.hidden).toBe(!dropZone);
   });
 
+  // 掴んでいる最中にタブ列を描き直しても、掴んだタブの印は付いたまま。
+  // 要素が外れて dragend が届かなくても、ボタンを離した移動で印を片付ける。
+  test("ドラッグ中の描き直しで印が消えず、終わったら残らない", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
+    handle.openTerminal("shell-a1");
+    const dragged = mount.querySelector<HTMLElement>(
+      '.main-tab[data-kind="terminal"]',
+    );
+    if (!dragged) throw new Error("no terminal tab to drag");
+    const id = dragged.dataset.tabId;
+    dragged.dispatchEvent(new Event("dragstart", { bubbles: true }));
+    // 描き直し (別のシェルのタブが増える)
+    handle.openTerminal("shell-b2");
+    const redrawn = mount.querySelector<HTMLElement>(
+      `.main-tab[data-tab-id="${id}"]`,
+    );
+    expect([
+      redrawn === dragged,
+      redrawn?.classList.contains("main-tab-dragging"),
+      document.body.classList.contains("main-tab-dragging"),
+    ]).toEqual([false, true, true]);
+    // 外れた要素には dragend が来ない。ボタンを離した移動で終わりと分かる
+    const moved = new Event("pointermove", { bubbles: true });
+    Object.defineProperty(moved, "buttons", { value: 0 });
+    document.dispatchEvent(moved);
+    expect([
+      document.body.classList.contains("main-tab-dragging"),
+      document.querySelector<HTMLElement>(".main-split-drop")?.hidden,
+    ]).toEqual([false, true]);
+  });
+
   test.each([
     { kind: "page", accepts: false },
     { kind: "file", accepts: true },

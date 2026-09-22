@@ -383,7 +383,9 @@ html, body {
      1 つ分の実寸) になる。自動では畳まない。 */
   --panelcol-w: var(--sidebar-w);
   --panelcol-shown: var(--panelcol-w);
-  --panelcol-rail-w: 28px;
+  /* 帯の幅 = 開くボタンと画面の入口の絵柄 1 つ分 (押せる領域の大きさ。密度で
+     変わるので固定の px にしない。特大で絵柄が帯からはみ出した)。 */
+  --panelcol-rail-w: var(--ui-control-sm);
   /* 頭の 2 段目 (題名の行) の高さ。1 段目はタブ列の行 (--global-header-h)。 */
   --panel-head-h: calc(var(--space-2) + var(--ui-control-sm) + var(--space-2));
   --panel-body-top: calc(var(--global-header-h) + var(--panel-head-h));
@@ -922,6 +924,11 @@ button.brand:focus-visible {
   outline-offset: 2px;
 }
 .brand .title {
+  /* 狭いとき先に縮むのはブランチの名前のほう。名前とブランチが同じ割合で
+     縮むと、短いプロジェクト名が「r…」の 1 文字になった (右の列の頭・畳んだ
+     ときのタブ列の左)。名前は長すぎるときだけ、この上限で省略する。 */
+  flex: 0 0 auto;
+  max-width: 60%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3685,6 +3692,9 @@ body.gdp-help-page #content {
   --content-top-gap: 18px;
   /* 本文の左右の余白 (T3)。ソース表示はこの分だけ外へ出て、面を端まで敷く。 */
   --content-pad-x: 24px;
+  /* 本文の下の余白 (T3)。箱の中で下端に貼り付くもの (差分のカードの横
+     スクロールバー) は、この分だけ下へ出して箱の下端に貼る。 */
+  --content-pad-bottom: 80px;
   position: fixed;
   top: var(--chrome-h);
   left: var(--page-left);
@@ -3694,7 +3704,7 @@ body.gdp-help-page #content {
   /* 端まで来たホイールを窓へ渡さない (窓は動かないが、親の箱へ連鎖させない)。 */
   overscroll-behavior: contain;
   margin-left: 0;
-  padding: var(--content-top-gap) var(--content-pad-x) 80px;
+  padding: var(--content-top-gap) var(--content-pad-x) var(--content-pad-bottom);
 }
 
 #diff > *:first-child { margin-top: 0; }
@@ -3832,13 +3842,15 @@ body.gdp-diff-page #diff::after {
   overflow-x: auto !important;
   overflow-y: hidden !important;
 }
-.d2h-code-wrapper::-webkit-scrollbar {
+.d2h-code-wrapper::-webkit-scrollbar,
+.gdp-hscroll-lane::-webkit-scrollbar {
   height: 8px;
 }
 .d2h-file-side-diff::-webkit-scrollbar {
   height: 8px;
 }
-.d2h-code-wrapper::-webkit-scrollbar-thumb {
+.d2h-code-wrapper::-webkit-scrollbar-thumb,
+.gdp-hscroll-lane::-webkit-scrollbar-thumb {
   background: #d0d7de;
   border: 0;
   border-radius: 4px;
@@ -3848,23 +3860,63 @@ body.gdp-diff-page #diff::after {
   border: 0;
   border-radius: 4px;
 }
-.d2h-code-wrapper::-webkit-scrollbar-track {
+.d2h-code-wrapper::-webkit-scrollbar-track,
+.gdp-hscroll-lane::-webkit-scrollbar-track {
   background: var(--bg-soft);
 }
 .d2h-file-side-diff::-webkit-scrollbar-track {
   background: var(--bg-soft);
 }
-[data-theme="dark"] .d2h-code-wrapper::-webkit-scrollbar-thumb {
+[data-theme="dark"] .d2h-code-wrapper::-webkit-scrollbar-thumb,
+[data-theme="dark"] .gdp-hscroll-lane::-webkit-scrollbar-thumb {
   background: #6e7681;
 }
 [data-theme="dark"] .d2h-file-side-diff::-webkit-scrollbar-thumb {
   background: #6e7681;
 }
-[data-theme="dark"] .d2h-code-wrapper::-webkit-scrollbar-track {
+[data-theme="dark"] .d2h-code-wrapper::-webkit-scrollbar-track,
+[data-theme="dark"] .gdp-hscroll-lane::-webkit-scrollbar-track {
   background: var(--bg-soft);
 }
 [data-theme="dark"] .d2h-file-side-diff::-webkit-scrollbar-track {
   background: var(--bg-soft);
+}
+
+/* 貼り付く横スクロールバー (views/diff-hscroll.ts)。本物のスクロールバーを
+   持つ薄い箱をカードの下端に sticky で置き、中身と横位置を同期する。長い
+   カードでも、上の方を読んでいる間に本文の箱の下端で横に送れる。カードの
+   下端が見えれば、ふつうにカードの下端に並ぶ。 */
+.gdp-hscroll {
+  position: sticky;
+  /* 本文の箱の中の sticky。箱の下の余白の分だけ下へ出して箱の下端に貼る
+     (出さないと余白の分だけ浮く)。箱の外には余白が無いので 0。 */
+  bottom: calc(0px - var(--content-pad-bottom, 0px));
+  /* ファイルの見出し (20) より下、行より上。 */
+  z-index: 15;
+  display: flex;
+  border-top: 1px solid var(--color-line-soft);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--color-code);
+}
+.gdp-hscroll[hidden],
+.gdp-file-collapsed .gdp-hscroll {
+  display: none;
+}
+/* Split は左右それぞれに 1 本 (中身の左右と同じ幅)。 */
+.gdp-hscroll-lane {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.gdp-hscroll-inner {
+  height: 1px;
+}
+/* 貼り付くバーがあるカードでは、中身の本物の横スクロールバーを隠す (二重に
+   出さない)。中身の横送り (ホイール・トラックパッド) はそのまま効く。 */
+.gdp-hscroll-host .d2h-code-wrapper,
+.gdp-hscroll-host .d2h-file-side-diff {
+  scrollbar-width: none;
 }
 
 .d2h-wrapper {
@@ -5886,16 +5938,12 @@ body.gdp-file-detail-page #topbar {
 body.gdp-repo-page #topbar {
   display: none;
 }
-body.gdp-file-detail-page #load-bar {
-  top: var(--global-header-h);
-}
-body.gdp-repo-page #load-bar {
-  top: var(--global-header-h);
-}
 body.gdp-repo-page #content {
   --content-top-gap: 24px;
   margin-left: 0;
-  padding: var(--content-top-gap) 32px 48px;
+  /* 左右はファイル表示と同じ本文の余白 (--content-pad-x)。32px にしていたので
+     フォルダ表示とファイル表示で本文の左端が 8px ずれていた。 */
+  padding: var(--content-top-gap) var(--content-pad-x) 48px;
 }
 body.gdp-sidebar-hidden #sidebar,
 body.gdp-sidebar-hidden #sidebar-resizer {
@@ -7271,11 +7319,6 @@ body.gdp-annotation-resizing {
 }
 /* Pages without the diff topbar start the panel right below the header. */
 body.gdp-repo-page #annotation-panel,
-body.gdp-file-detail-page #annotation-panel,
-body.gdp-help-page #annotation-panel,
-body.gdp-database-page #annotation-panel {
-  top: var(--global-header-h);
-}
 /* Keep code readable next to the panel instead of underneath it. */
 body.annotation-panel-open #content {
   margin-right: min(var(--annotation-panel-w), calc(100vw - 32px));
@@ -8230,9 +8273,6 @@ body.gdp-database-page {
   --chrome-h: var(--global-header-h);
 }
 
-body.gdp-database-page #load-bar {
-  top: var(--global-header-h);
-}
 
 /* ============================================================
    Worktrees
@@ -8705,9 +8745,6 @@ body.gdp-journal-page {
   --chrome-h: var(--global-header-h);
 }
 
-body.gdp-journal-page #load-bar {
-  top: var(--global-header-h);
-}
 
 .gdp-journal-page #content {
   --content-top-gap: 0px;
@@ -17183,8 +17220,8 @@ button.brand[aria-expanded="true"] {
      削られ、History で列が広がると畳むボタンが 1px 動く)。 */
   box-shadow: inset 1px 0 0 var(--color-line-soft);
 }
-/* 畳んだ右の列は細い帯。名前・入口はタブ列の左へ移り、帯には開くボタン
-   (#panel-rail の中) だけを、タブ列の行に置く。 */
+/* 畳んだ右の列は細い帯。名前とブランチはタブ列の左へ移り、帯には開くボタン
+   (#panel-rail の頭、タブ列の行) と、その下に画面の入口の絵柄を縦に置く。 */
 body.gdp-sidebar-hidden #panel-head {
   width: var(--panelcol-shown);
   height: auto;
@@ -17196,9 +17233,16 @@ body.gdp-sidebar-hidden #panel-head {
 }
 body.gdp-sidebar-hidden .panel-rail {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  height: var(--global-header-h);
+}
+/* 開くボタンはタブ列の行の高さの中に (タブ列とそろえる)。 */
+body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
+  flex: none;
+  margin: calc((var(--global-header-h) - var(--ui-control-sm)) / 2) 0;
+}
+.panel-rail > .view-strip {
+  flex-direction: column;
 }
 /* 2 面のために自動で畳んだ帯: 開くボタンの肩に小さな印を出し、手で畳んだ
    ときと見分けられるようにする (理由はボタンの title に入れる)。 */
@@ -17245,8 +17289,9 @@ body.gdp-sidebar-hidden .panel-rail {
   flex: none;
   margin-left: auto;
 }
-/* 畳んだときの帯は縮めない (2 面で面が狭くても名前と 6 つの絵柄を出したまま
-   にし、縮むのはタブの列のほう)。名前だけは上限の幅で省略する。 */
+/* 畳んだときのタブ列の左 (名前とブランチ)。縮めず、縮むのはタブの列のほう。
+   名前だけは上限の幅で省略する。入口の絵柄は帯 (#panel-rail) へ移るので、
+   ここには置かない (2 面の狭い面でタブが読めなくなった)。 */
 .tabs-lead {
   display: flex;
   align-items: center;
@@ -17261,9 +17306,6 @@ body.gdp-sidebar-hidden .panel-rail {
 .tabs-lead .brand {
   max-width: calc(var(--space-unit) * 45);
   font-size: var(--ui-font-base);
-}
-.tabs-lead .view-strip {
-  flex: none;
 }
 .tabs-lead .project-branch {
   font-size: var(--ui-font-sm);
@@ -18014,7 +18056,7 @@ body.gdp-files-column-page #sidebar .sb-head {
   grid-template:
     "title ref totals actions view toggle" var(--ui-control-sm)
     "filter filter filter filter filter filter" auto
-    / auto minmax(0, 1fr) auto auto auto auto;
+    / minmax(0, auto) minmax(0, 1fr) auto auto auto auto;
   align-items: center;
   column-gap: var(--space-1);
   row-gap: var(--space-2);
@@ -18024,10 +18066,15 @@ body.gdp-files-column-page #sidebar .sb-head {
 }
 #sidebar .sb-head > .sb-title {
   grid-area: title;
+  /* 幅が足りないとき (日本語・特大の密度) に縮むのは題のほう (… で省く)。
+     縮まないと右端の「ツリー / 一覧」が列の外へ押し出された。 */
+  min-width: 0;
+  overflow: hidden;
   color: var(--color-text-3);
   font-size: var(--ui-font-sm);
   font-weight: 600;
   letter-spacing: 0.06em;
+  text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -18855,7 +18902,17 @@ button.agents-section-title:focus-visible {
 }
 .agents-accounts-cards {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* 1 行に最大 4 枚。狭い面 (2 面の左など) では 1 枚が使用量の行の入る幅
+     (--agents-account-card-min) を下回らないよう、行を折り返す。4 列固定だと
+     面 486px で 1 枚 101px になり、使用量の文字がカードの外へはみ出した。 */
+  --agents-account-card-min: calc(var(--space-unit) * 50);
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(
+      max(var(--agents-account-card-min), calc((100% - 3 * var(--space-3)) / 4)),
+      1fr
+    )
+  );
   gap: var(--space-3);
 }
 .agents-account-card {
@@ -19006,13 +19063,16 @@ button.agents-account-name:hover {
 }
 .agents-toolbar {
   display: flex;
+  /* 狭い面では絞り込みと「すべてのペイン」を次の行へ折る (面の外へ押し出さない)。 */
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-2) var(--space-4);
   min-height: var(--ui-control-md);
   margin-bottom: var(--space-3);
 }
 .agents-filter {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: var(--space-1);
 }
 .agents-filter button {
