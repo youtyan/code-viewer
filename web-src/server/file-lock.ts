@@ -10,6 +10,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
+  linkSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -101,6 +102,37 @@ function readFileLock(file: string): FileLockEntry | null {
 }
 
 /**
+ * ロックの中身を書き終えてから、その場所に置く。置けたら true、既に誰かの
+ * ロックがあれば false。
+ *
+ * `wx` で直接書くと「空のファイルを作る → 中身を書く」の 2 段になり、その間
+ * に読んだ別のプロセスが空のファイルを JSON として解析して失敗する (実際に
+ * 起きた)。中身まで書いた一時ファイルを link で置くと、他から見えるのは
+ * 中身のあるロックだけになる (link は置き先が既にあれば EEXIST で失敗する)。
+ */
+function placeLockEntry(
+  file: string,
+  token: string,
+  entry: FileLockEntry,
+): boolean {
+  const temp = `${file}.${token}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(entry)}\n`, {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600,
+  });
+  try {
+    linkSync(temp, file);
+    return true;
+  } catch (error) {
+    if (errno(error) !== "EEXIST") throw error;
+    return false;
+  } finally {
+    unlinkSync(temp);
+  }
+}
+
+/**
  * 1 回だけ試す。持てたらロック、ほかの生きた持ち主が居れば null。
  * 持ち主が居ない・staleMs より古いロックは奪ってから取り直す。
  */
@@ -113,12 +145,7 @@ export function tryAcquireFileLock(
   const token = randomUUID();
   const entry: FileLockEntry = { token, pid: process.pid, createdAt: now };
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      writeFileSync(file, `${JSON.stringify(entry)}\n`, {
-        encoding: "utf8",
-        flag: "wx",
-        mode: 0o600,
-      });
+    if (placeLockEntry(file, token, entry)) {
       return {
         release() {
           const current = readFileLock(file);
@@ -131,8 +158,6 @@ export function tryAcquireFileLock(
           }
         },
       };
-    } catch (error) {
-      if (errno(error) !== "EEXIST") throw error;
     }
     const current = readFileLock(file);
     if (!current) continue;
