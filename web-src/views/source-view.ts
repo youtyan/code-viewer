@@ -733,6 +733,32 @@ export function createSourceView(deps: SourceViewDeps) {
     return null;
   }
 
+  /**
+   * 貼り付くファイルの見出しの高さを --doc-head-h に出す。Markdown の見出しの
+   * scroll-margin-top がこれを読み、URL の # で送ったとき (ブラウザが自分で
+   * スクロールする) に、見出しが貼り付いた見出しの下に潜らないようにする。
+   * 見出しは幅で 1〜3 段に変わる (doc-head の段) ので、大きさが変わるたびに書く。
+   */
+  function observeDocHeadHeight(wrapper: HTMLElement, sticky: HTMLElement) {
+    const write = () =>
+      wrapper.style.setProperty(
+        "--doc-head-h",
+        `${Math.ceil(sticky.getBoundingClientRect().height)}px`,
+      );
+    if (typeof ResizeObserver !== "function") {
+      write();
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      if (!sticky.isConnected) {
+        observer.disconnect();
+        return;
+      }
+      write();
+    });
+    observer.observe(sticky);
+  }
+
   function removeStandaloneSource() {
     scope()
       .querySelectorAll(".gdp-standalone-source")
@@ -2614,6 +2640,7 @@ export function createSourceView(deps: SourceViewDeps) {
       header.appendChild(back);
     }
     wrapper.appendChild(sticky);
+    observeDocHeadHeight(wrapper, sticky);
     const detailBody = document.createElement("div");
     detailBody.className = "gdp-file-detail-body";
     wrapper.appendChild(detailBody);

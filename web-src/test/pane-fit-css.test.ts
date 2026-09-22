@@ -117,6 +117,8 @@ test.each([
 // 入らない分の Split / Unified が帯の外へ押し出されていた)。56em 以下 (2 面の
 // 左の面など): 選択欄の頭の絵も省いて枝の名前に幅を回す。
 test.each([
+  // 80em 以下 (一覧が左の列に移った 1600px の帯 74.8em を含む): 閲覧の数を省く
+  ["80em", "#topbar #meta .chip-viewed", "display", "none"],
   ["68em", "#topbar .seg .seg-icon", "display", "block"],
   ["68em", "#topbar .seg .seg-label", "display", "none"],
   ["68em", "#topbar #meta .chip-next-unviewed", "display", "none"],
@@ -402,4 +404,26 @@ test.each([
       property,
     ),
   ).toBe(expected);
+});
+
+// Markdown の見出しへ URL の # で送ったとき、貼り付いたファイルの見出しの下に
+// 潜らない (見出しの高さは source-view.ts が --doc-head-h に書く)。目次で送る
+// とき (markdown-preview.ts) と同じく、その下に 12px 空ける。
+test("markdown headings leave room for the sticky file head", () => {
+  expect(
+    cascadedDeclarations(
+      rules,
+      (candidate) => candidate === ".gdp-markdown-preview h2",
+    ).get("scroll-margin-top"),
+  ).toBe("calc(var(--doc-head-h, 0px) + var(--space-3))");
+});
+
+// Data の空の面の案内は行の長さをそろえる (最後の行に「+.」だけが残った)。
+test("the data pane hint balances its lines", () => {
+  expect(
+    cascadedDeclarations(
+      rules,
+      (candidate) => candidate === ".db-pane-empty-hint",
+    ).get("text-wrap"),
+  ).toBe("balance");
 });

@@ -882,10 +882,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     agentRulesSave.textContent = text.agentRulesSave;
     agentRulesReset.textContent = text.agentRulesReset;
     saveNote.textContent = text.saveNote;
-    search.placeholder = text.searchPlaceholder;
-    search.setAttribute("aria-label", text.searchPlaceholder);
-    if (search.value.trim())
-      searchEmpty.textContent = text.searchNoMatch(search.value.trim());
+    applySearchText();
     resetButton.textContent = text.reset;
     renderGeneralSaveState();
 
@@ -1013,11 +1010,26 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   }
 
   /** 設定の検索欄。Help ページが見出しの下に置く。 */
+  /**
+   * 検索欄の文言。検索欄は設定の節を組む前 (ヘルプの節から開いたとき) にも
+   * 出すので、設定の節の文言 (applyText) とは別に当てる。以前は設定の節を一度
+   * 開くまで placeholder が空だった。
+   */
+  function applySearchText(): void {
+    const text = deps.getText();
+    search.placeholder = text.searchPlaceholder;
+    search.setAttribute("aria-label", text.searchPlaceholder);
+    if (search.value.trim())
+      searchEmpty.textContent = text.searchNoMatch(search.value.trim());
+  }
+
   function mountSearch(host: HTMLElement): void {
+    applySearchText();
     host.appendChild(searchWrap);
   }
 
   function localize(): void {
+    applySearchText();
     if (!root) return;
     applyText();
   }

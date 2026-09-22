@@ -5586,7 +5586,12 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-markdown-preview h4,
 .gdp-markdown-preview h5,
 .gdp-markdown-preview h6 {
-  scroll-margin-top: calc(var(--chrome-h) + 16px);
+  /* URL の # で送ったとき (ブラウザが自分でスクロールする) に、貼り付いたファイル
+     の見出しの下に潜らない。見出しは箱の余白の分だけ上 (top: -余白) に貼り付くので、
+     箱の上端から覆うのは見出しの高さ (--doc-head-h、source-view.ts が測って書く)。
+     目次で送るとき (markdown-preview.ts の stickyCoverInside) と同じ 12px を足す。
+     貼り付く見出しの無い所 (README・Tools・Diff のプレビュー) では 12px。 */
+  scroll-margin-top: calc(var(--doc-head-h, 0px) + var(--space-3));
   text-wrap: pretty;
 }
 .gdp-markdown-preview h1,
@@ -13703,6 +13708,8 @@ body.db-resizing {
   color: var(--fg-subtle);
   font-size: var(--db-font-sm);
   line-height: 1.5;
+  /* 行の長さをそろえ、最後の行に「+.」だけが残らないようにする。 */
+  text-wrap: balance;
 }
 .db-pane-empty-actions {
   display: flex;
@@ -21033,7 +21040,10 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
     gap: var(--space-1);
   }
 }
-@container topbar (max-width: 72em) {
+/* 80em: 上の段 (98em) の中身は約 78em (日本語、英語は約 76em)。一覧が本文の
+   左の列に移ってから、1600px の窓の帯は 74.8em になり、72em のままでは効かずに
+   Split / Unified が帯の外へ押し出されていた。 */
+@container topbar (max-width: 80em) {
   #topbar > #meta {
     gap: var(--space-1);
   }

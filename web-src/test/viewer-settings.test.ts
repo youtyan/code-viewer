@@ -341,6 +341,24 @@ describe("viewer settings form", () => {
     ]);
   });
 
+  // ヘルプの節 (設定以外) から開くと、設定の節を組む前に検索欄だけを出す。
+  // そのときも placeholder を出す (以前は設定の節を開くまで空だった)。
+  test("the search field has its placeholder before the settings are built", () => {
+    const { settings, setLanguage } = setup();
+    const search = document.createElement("div");
+    settings.mountSearch(search);
+    const input = search.querySelector<HTMLInputElement>("input");
+    if (!input) throw new Error("missing search input");
+    const before = [input.placeholder, input.getAttribute("aria-label")];
+    setLanguage("ja");
+    settings.localize();
+    expect([...before, input.placeholder]).toEqual([
+      "Search settings",
+      "Search settings",
+      JA_TEXT.searchPlaceholder,
+    ]);
+  });
+
   test("revealing a heading switches to the category that holds it", () => {
     const { settings, host } = setup();
     settings.revealHeading("sample-accounts-heading");

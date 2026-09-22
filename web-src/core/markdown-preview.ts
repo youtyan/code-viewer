@@ -643,6 +643,27 @@ function wireMarkdownInteractions(
       directory: link.dataset.gdpMdDir === "1",
     });
   });
+  // 同じ文書の中の見出しへのリンク (本文の `[…](#見出し)`)。ブラウザに任せると、
+  // # が変わったあとの popstate で画面を描き直してスクロールが先頭へ戻り、押しても
+  // 動かなかった。目次と同じく自分で送る (貼り付くファイルの見出しの下に潜らない)。
+  root.addEventListener("click", (e) => {
+    const link = (e.target as Element | null)?.closest<HTMLAnchorElement>(
+      'a[href^="#"]:not([data-target])',
+    );
+    if (!link || !root.contains(link)) return;
+    const id = decodeHashFragment(link.getAttribute("href") || "");
+    const section = id
+      ? root.querySelector<HTMLElement>(`#${CSS.escape(id)}`)
+      : null;
+    if (!section) return;
+    e.preventDefault();
+    history.replaceState(
+      history.state,
+      "",
+      `#${encodeURIComponent(section.id)}`,
+    );
+    scrollMarkdownSectionIntoView(section, "smooth");
+  });
   setupMarkdownScrollSpy(root);
   setupMermaidLightbox(root);
   void renderMermaidDiagrams(root);
