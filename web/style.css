@@ -140,7 +140,7 @@
   /* 幅の出所は TS (views/sidebar.ts の SIDEBAR_WIDTH)。初回描画用の既定。 */
   --sidebar-w: 240px;
   /* 幅の出所は TS (core/panel-sizes.ts の HISTORY_WIDTH)。初回描画用の既定。 */
-  --history-w: 440px;
+  --history-w: 560px;
   --sidebar-restore-rail-w: 44px;
   --annotation-panel-w: 380px;
   --journal-task-editor-w: 380px;
@@ -19941,16 +19941,13 @@ button.agents-account-name:hover {
    ボタンが画面の外に出ないよう、箱の高さに上限を置いて本文だけをスクロール
    させる (画面中央の overlay なので viewport 基準でよい。ui-layout.md)。 */
 .gdp-dialog-backdrop {
-  /* 上端の位置と、下に残す余白。高さの上限も同じ値から求める。 */
-  --gdp-dialog-top: min(14vh, calc(var(--space-unit) * 30));
-  --gdp-dialog-bottom-gap: var(--space-4);
   position: fixed;
   inset: 0;
   z-index: 1100;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding-top: var(--gdp-dialog-top);
+  padding: var(--space-4) 0;
   background: var(--color-backdrop);
 }
 .gdp-dialog {
@@ -19958,7 +19955,7 @@ button.agents-account-name:hover {
   display: flex;
   flex-direction: column;
   width: min(calc(var(--space-unit) * 120), calc(100vw - var(--space-6)));
-  max-height: calc(100vh - var(--gdp-dialog-top) - var(--gdp-dialog-bottom-gap));
+  max-height: calc(100vh - var(--space-4) * 2);
   padding: calc(var(--space-unit) * 7);
   border-radius: var(--radius-lg);
   background: var(--color-overlay);
@@ -21087,7 +21084,7 @@ body.gdp-history-page #diff {
    省略、作者・時刻・短いハッシュは列を固定。行の高さは表の行 (--ui-table-row-h)。
    一覧の幅で列を出し入れする。件名を最後まで残す: 件名の列は一覧の半分を
    下回らず、枝の札が先に縮む。狭くなると作者 → 絶対時刻 → ハッシュ → 時刻の
-   順に隠す (どれも詳細にある)。一覧の既定の幅は HISTORY_WIDTH (440px)。
+   順に隠す (どれも詳細にある)。一覧の既定の幅は HISTORY_WIDTH (560px)。
    行は隙間なく並べ、グラフの線が行をまたいでつながる。
    祖先・右端に :is() を使わない (ブラウザが規則を素早く外せず、全要素で照合する。
    長いファイルのスクロールでスタイル計算が増えたのを実測した)。 */
@@ -21275,6 +21272,8 @@ body.gdp-history-page #diff {
   display: flex;
 }
 .history-graph-cell {
+  justify-content: center;
+  width: calc(var(--space-unit) * 18);
   min-height: 0;
 }
 .history-graph {
@@ -22142,10 +22141,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-actions {
   background: var(--color-raised);
 }
 body[data-worktree-overview] #worktree-panel .worktree-row-menu {
-  width: var(--ui-control-sm);
-  height: var(--ui-control-sm);
-  border-radius: var(--radius-md);
-  opacity: 1;
+  display: none;
 }
 /* 選んでいる間の一覧: History の一覧と同じ面 (面の色・角丸・強い選択)。 */
 body.gdp-worktree-page:not([data-worktree-overview]) #worktree-panel {

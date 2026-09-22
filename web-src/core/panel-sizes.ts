@@ -17,7 +17,7 @@ export const SIDEBAR_WIDTH: PanelSize = { default: 240, min: 180, max: 900 };
  * 同じ幅を使う)。既定は件名が読める幅: 一覧の列が狭いと時刻・ハッシュに
  * 場所を取られて件名が数文字で切れる。
  */
-export const HISTORY_WIDTH: PanelSize = { default: 440, min: 220, max: 800 };
+export const HISTORY_WIDTH: PanelSize = { default: 560, min: 220, max: 800 };
 
 /** 画面下のパネル (Terminal / Tools / Search) の高さ。 */
 export const APP_PANEL_HEIGHT: PanelSize = {
