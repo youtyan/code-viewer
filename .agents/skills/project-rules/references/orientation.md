@@ -113,17 +113,22 @@ global の `my-reuse-first` に従う。ここに置くのは**このリポジ�
 | クライアント / サーバ共通の型 | `core/types.ts` |
 | キーボード操作・フォーカス制御 | `core/keymap.ts` / `core/focus-scope.ts` / `core/keyboard.ts`（xterm とダイアログの中では画面のキーを実行しない判定は `isPageKeymapBlockedTarget`） |
 | スクロール連鎖の抑止 | `core/scroll-chaining.ts` `blockScrollChaining` |
+| 戻る / 進むで本文のスクロール位置を戻す | `core/scroll-memory.ts` `createScrollMemory` / `scrollKeyOfHistoryState`（本文の箱は窓でないのでブラウザが戻さない。配線は `app.ts` の `restoreMainScroll`） |
+| 長い横スクロールの箱に、見えている下端へ貼り付く代わりのスクロールバーを付ける | `core/hscroll-proxy.ts`（数え方）+ `views/diff-hscroll.ts` `attachStickyHScroll` / `detachStickyHScroll` |
+| 入りきらないパンくずの真ん中を「…」に畳む | `core/breadcrumb-fit.ts` `collapsedBreadcrumbRange` + `views/breadcrumb-fit.ts` `fitBreadcrumb`（Diff・ファイル表示・フォルダ表示が共有） |
+| 2 面のときに右の列を畳む / 開くの判断 | `core/panel-column-policy.ts` `panelColumnAction`（DOM に触らない。配線は `app.ts` の `syncPanelColumn`） |
 | あいまい検索 | `core/fuzzy-search.ts` |
 | 制御文字の検出 | `core/control-chars.ts` `hasControlCharacter` |
 | ファイルのパスを画面に出す・コピーする | `core/file-path-copy.ts` の `filePathDisplayText`（制御文字・書式文字を含むパスだけ可視化した表記。表示とコピーは同じものを使う）と `filePathClipboardText` / `fileReferenceClipboardText` |
 | コピーの失敗をボタンに出す | `core/copy-failure.ts` `showCopyFailure`（failed の見た目・title に理由・console.error） |
 | エラーを画面の文字にする | `core/error-detail.ts` の `formatErrorDetail`（cause の連鎖ごと）・`errorWithCause`・`responseErrorMessage`（操作・HTTP status・本文） |
+| Data の画面で失敗を console と画面に出す | `views/database/report-failure.ts` `reportDatastoreFailure` / `requireOkResponse`（使い方は `server.md` の「ブラウザ側で失敗から回復するとき」） |
 | tmux コマンド実行 | `server/tmux/command.ts` `runTmux` / `tmuxArgs` / `TMUX_FIELD_SEP` |
 | JSON をファイルに永続化 | `server/json-store.ts` `createJsonFileStore` |
 | CLI からサーバを叩く | `server/cli-helpers.ts` `requestJson` |
 | リクエスト元の検証 | `server/request-origin.ts` |
 | ユーザー単位（全リポジトリ・全サーバ共通）のファイルの置き場所 | `server/user-state-dir.ts` `codeViewerStateDir`（テストでは `CODE_VIEWER_TEST_STATE_DIR` で逃げる） |
-| 複数のサーバが同じファイルを読み書きするときの排他 | `server/file-lock.ts` `withFileLock` |
+| 複数のサーバが同じファイルを読み書きするときの排他 | `server/file-lock.ts` `withFileLock`（ロックは中身まで書いた一時ファイルを `link` で置く。`wx` で空のファイルを作ってから書く形に戻さない: その間に別のプロセスが空のロックを読む） |
 | ユーザー単位の登録簿（JSON 1 ファイル）の読み方 | `server/registry-file.ts` `readRegistryFile` / `cachedRegistryReader` |
 | 利用者の設定ファイル（エージェントの settings.json など）を安全に書き換える | `server/terminal/settings-file.ts`（約束は `agents.md` の 4） |
 | 動いている全部の code-viewer サーバへ送る | `server/server-registry.ts` `listServerRegistry` + `server/terminal/hook-report.ts` `postToServer` |

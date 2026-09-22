@@ -203,6 +203,9 @@ error オブジェクトごと `console.error` に出し、画面に「失敗し
 画面の既存のエラー表示に全文（`responseErrorMessage` の操作・HTTP status・本文と、
 `formatErrorDetail` の cause の連鎖）を出す。道具は `orientation.md` の「既にあるもの」
 （`core/error-detail.ts`・`core/copy-failure.ts`・`core/stored-size.ts` の `reportStoredSizeFailure`）。
+Data の画面 (`views/database/*`) の catch は `views/database/report-failure.ts` の
+`reportDatastoreFailure(kind, 操作, error, ...対象)` を通し（console に操作・対象・error、戻り値の全文を
+画面へ）、`!res.ok` は `requireOkResponse(res, 操作)` で throw して同じ catch に通す。
 実例: `views/blame-view.ts` のエラー表示、`views/history-view.ts` の `fetchSingleCommit`、
 `core/markdown-preview.ts` の強調・Mermaid・リンクの decode、強調失敗の印 `gdp-highlight-failed`。
 

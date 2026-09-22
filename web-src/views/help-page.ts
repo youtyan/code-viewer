@@ -175,6 +175,14 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
+                text: "When the two sides would be narrower than 480px each with the right column open, the right column folds to its thin strip while the area is split (its button carries a mark and says why) and comes back when you return to one side; if you open it yourself while split, it stays open until you reload. History and a selected worktree keep their lists in the right column, so on those screens it stays open, and when two sides no longer fit, the right side is set aside until you move to another screen or widen the window (the split button says so).",
+              },
+              {
+                kind: "paragraph",
+                text: "The main area scrolls in its own box. The page itself does not scroll, so the scrollbar sits at the right edge of the main area instead of pushing the right column aside, and Back / Forward return to where you had scrolled. On a long diff card the horizontal scrollbar sticks to the bottom of the main area while the card is on screen (Split has one for each side), so you can scroll sideways without going to the end of the card. A breadcrumb too long for its row folds the middle folders into “…”; hover it for the full path.",
+              },
+              {
+                kind: "paragraph",
                 text: "Use the sidebar or file palette to open source files, Markdown previews, images, PDFs, and other browser-safe media. Large text files automatically switch to virtual mode. Sidebar rows are links: Cmd/Ctrl+click or middle-click opens a file in a new tab. View File on a diff card shows the full source in place and keeps the file list (and, on the History screen, the commit list) on screen; View Diff returns to the diff.",
               },
               {
@@ -212,7 +220,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "Ctrl+K opens the file palette and Ctrl+G the text palette; the Search box at the top of the left sidebar does the same (Shift+click for text). The two share one window: switching keeps what you typed, and reopening restores the last query, selected so typing replaces it. With an empty query the file palette lists the files you opened most recently, and the result line says when the ranking was cut at 50. The text palette has regex (Alt+R), match-case (Alt+C) and whole-word (Alt+W) toggles, and path:<dir or glob> tokens in the query narrow the search; matching is case-insensitive on every engine unless match-case is on. Opening a hit marks the matched text on the target line, and in a large virtualized file it pre-fills the in-file find bar. Pin (or Ctrl+Enter) moves the query into the Search tab, where the grouped result list stays open while you browse files; the Search tab also opens from the + menu of the tab row or the palette. The query is part of the URL (/search?q=) so a reload re-runs it.",
+                text: "Ctrl+K opens the file palette and Ctrl+G the text palette; the Search box at the top of the left sidebar does the same (Shift+click for text). The two share one window: switching keeps what you typed, and reopening restores the last query, selected so typing replaces it. With an empty query the file palette lists the files you opened most recently, and the result line says when the ranking was cut at 50. The text palette has regex (Alt+R), match-case (Alt+C) and whole-word (Alt+W) toggles, and path:<dir or glob> tokens in the query narrow the search; matching is case-insensitive on every engine unless match-case is on. Opening a hit marks the matched text on the target line, and in a large virtualized file it pre-fills the in-file find bar. Pin (or Ctrl+Enter) moves the query into the Search tab, where the grouped result list stays open while you browse files; the Search tab also opens from the + menu of the tab row or the palette. The query is part of the URL (/search?q=) so a reload re-runs it, and the Search tab remembers it with the tabs, so it comes back filled in after a reload even when another tab was in front.",
               },
               {
                 kind: "paragraph",
@@ -237,7 +245,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Each tool keeps its own draft in .code-viewer/tools.json, so the tab reopens where you left it. The open tool is part of the URL (/tools?tool=markdown), which makes it shareable and survives a reload, and the split between input and output is draggable.",
+                text: "Each tool keeps its own draft in .code-viewer/tools.json, so the tab reopens where you left it. The open tool is part of the URL (/tools?tool=markdown), which makes it shareable and survives a reload; the tab also remembers it with the tabs, so it comes back even when another tab was in front. The split between input and output is draggable.",
               },
             ],
           },
@@ -266,7 +274,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Choosing a tmux pane (from the ＋ menu, the sidebar, the palette or the board) takes you to it in a tab. If a shell already has that session open, that shell's tab comes forward and the pane becomes current; otherwise a shell is opened and attached for you, so you end up with one shell per tmux session rather than one per pane. Powerline separators and file icons render when a Nerd Font is installed on the machine running the browser; no font ships with the package. Panes need tmux on PATH; shells work without it. Opening shells needs the optional @lydell/node-pty package.",
+                text: "Choosing a tmux pane (from the ＋ menu, the sidebar, the palette or the board) takes you to it in a tab. If a shell already has that session open, that shell's tab comes forward and the pane becomes current; otherwise a shell is opened and attached for you, so you end up with one shell per tmux session rather than one per pane. This works from a shell that is itself inside tmux, or whose startup files start tmux: the attach runs with TMUX unset, so the pane shows up nested inside that tmux. Powerline separators and file icons render when a Nerd Font is installed on the machine running the browser; no font ships with the package. Panes need tmux on PATH; shells work without it. Opening shells needs the optional @lydell/node-pty package.",
               },
               {
                 kind: "paragraph",
@@ -283,7 +291,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "The counter at the right of the bottom bar shows how many agents need input and how many are working, on every screen; it turns amber only when something needs input, and clicking it opens the list (or the pane directly, when exactly one needs input). When an agent goes from working to needing input, or from working to stopped, the row gets an unread dot and the tab title gets the unread count, and a stopped one shows as Finished (without hooks too); opening or selecting the pane clears it. An agent of another project (its row, a notification, the palette) switches to that project first and then opens the pane in a tab. Desktop notifications are opt-in: press Enable notifications on the Agents screen, and choose which changes notify you under Settings → Agent notifications. Nothing is notified for a pane shown in the front terminal tab of either side while this window has focus. States come from screen rules evaluated against the live terminal.",
+                text: "The counter at the right of the bottom bar shows how many agents need input and how many are working, on every screen; it turns amber only when something needs input, and clicking it opens the list (or the pane directly, when exactly one needs input). When an agent goes from working to needing input, or from working to stopped, the row gets an unread dot and the tab title gets the unread count, and a stopped one shows as Finished (without hooks too); opening or selecting the pane clears it. An agent of another project (its row, a notification, the palette) switches to that project first and then opens the pane in a tab. Desktop notifications are opt-in: press Enable notifications on the Agents screen, or on the note the left sidebar shows the first time an agent needs input (the note goes away once you allow, block or close it), and choose which changes notify you under Settings → Agent notifications. Nothing is notified for a pane shown in the front terminal tab of either side while this window has focus. States come from screen rules evaluated against the live terminal.",
               },
               {
                 kind: "paragraph",
@@ -295,11 +303,11 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Once more than the default accounts exist, the Agents list shows which account each claude or codex runs with (read from that process's CLAUDE_CONFIG_DIR / CODEX_HOME only), and a band of account cards above the list shows sign-in state, every quota window present in the latest record with its reset time and when the value was received (80% and above is marked High), how many agents run with it, and its hooks. Missing windows are not invented; when one config directory holds records from two accounts, the card keeps the newest values and adds a Mixed note (hover it for the other account's windows and how to separate them). codex usage comes from its session logs. claude reports usage only to its status line, so Settings → Accounts → claude usage can wrap your statusLine command: the wrapper keeps the data it receives and returns your command's output unchanged; turning it off restores the original. New agent (on the Agents toolbar, or + on a project) starts claude or codex with the chosen account and project in a new tmux window, without typing into any shell; the command can be changed under Launch commands (it runs in your interactive shell, so shell functions work).",
+                text: "Once more than the default accounts exist, the Agents list shows which account each claude or codex runs with (read from that process's CLAUDE_CONFIG_DIR / CODEX_HOME only), and a band of account cards above the list shows sign-in state, every quota window present in the latest record with its reset time and when the value was received (80% and above is marked High), how many agents run with it, and its hooks. Missing windows are not invented; when one config directory holds records from two accounts, the card keeps the newest values and adds a Mixed note (hover it for the other account's windows and how to separate them). codex usage comes from its session logs. claude reports usage only to its status line, so Settings → Accounts → claude usage can wrap your statusLine command: the wrapper keeps the data it receives and returns your command's output unchanged; turning it off restores the original. New agent (on the Agents toolbar, or + on a project) starts claude or codex with the chosen account and project in a new tmux window, without typing into any shell; the command can be changed under Launch commands (it runs in your interactive shell, so shell functions work). The New agent dialog shows the command it will run (Command preview) with a copy button, and picks up a command you have just saved.",
               },
               {
                 kind: "paragraph",
-                text: "Register your projects to keep them in the Agents list even when no agent runs in them, in the order you choose (⋯ on a project heading: register, rename, move up / down, remove from projects — the repository itself is never touched). Open (on a heading) switches to that project in the same tab and on the same address (`/p/<key>/…`), so the browser's notification permission, the terminal shells and the unread marks stay; code-viewer starts the project's process first if it is not running. Processes that code-viewer started can be stopped from the ⋯ menu; the project shown on this screen cannot. Running `code-viewer` in another repository adds it to the code-viewer that is already running and prints its URL (`code-viewer --standalone` runs a separate server for one repository, as before). A project's process that nobody has used for 10 minutes is stopped and started again when you open the project (`--idle-stop <seconds>` changes the time; the terminals, the agents and the unread marks stay); if it stops by itself, the screen says so and offers Restart, with the reason under Details. The project name at the head of the file tree (or the left end of the tab row; p) switches between registered projects from any screen and keeps the screen you are on; type to filter, ↑↓ and Enter to go. Theme, language, font sizes, key bindings, notifications, dismissed hints and the layout (sidebar width and folding) are shared by all projects (Settings shows which sections), so switching does not change how code-viewer looks.",
+                text: "Register your projects to keep them in the Agents list even when no agent runs in them, in the order you choose (⋯ on a project heading: register, rename, move up / down, remove from projects — the repository itself is never touched). Open (on a heading) switches to that project in the same tab and on the same address (`/p/<key>/…`), so the browser's notification permission, the terminal shells and the unread marks stay; code-viewer starts the project's process first if it is not running. Processes that code-viewer started can be stopped from the ⋯ menu; the project shown on this screen cannot. Running `code-viewer` in another repository adds it to the code-viewer that is already running and prints its URL (`code-viewer --standalone` runs a separate server for one repository, as before). CLI commands that print a screen URL (annotate, query diff tables) print the same `/p/<key>/…` address (a `--standalone` server has none). A project's process that nobody has used for 10 minutes is stopped and started again when you open the project (`--idle-stop <seconds>` changes the time; the terminals, the agents and the unread marks stay); if it stops by itself, the screen says so and offers Restart, with the reason under Details. The project name at the head of the file tree (or the left end of the tab row; p) switches between registered projects from any screen and keeps the screen you are on; type to filter, ↑↓ and Enter to go. Theme, language, font sizes, key bindings, notifications, dismissed hints and the layout (sidebar width and folding) are shared by all projects (Settings shows which sections), so switching does not change how code-viewer looks.",
               },
             ],
           },
@@ -647,7 +655,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "Multi-DB tabs",
-                    "Open multiple databases side by side. Drag to reorder, + adds an empty tab, middle-click or × closes one (the last tab is reset to empty). Layout persists in .code-viewer/tabs.json.",
+                    "Open multiple databases side by side. Drag to reorder, + adds an empty tab, middle-click or × closes one (the last tab is reset to empty). Layout persists in .code-viewer/tabs.json. A tab with no datastore chosen is named New tab and says to pick one in the box at the top left or add one with Add datastore connection.",
                   ],
                   [
                     "Sidebar",
@@ -683,7 +691,15 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Footer dock (Query History / Session log)",
-                    "JetBrains-style bottom dock with two tabs. Query History: per-DB master/detail of saved queries, SSE-synced across tabs. Session log: every SQL the server runs in this session (read fetches, user queries, write commits) with timing, row count, and the executed SQL syntax-highlighted. Auto-follow keeps the newest entry pinned; scroll up or click a non-latest entry to pause. The active tab and open/closed state persist in tabs.json.",
+                    "A bottom dock with two tabs. Query History: per-DB master/detail of saved queries, SSE-synced across tabs. Session log: every SQL the server runs in this session (read fetches, user queries, write commits) with timing, row count, and the executed SQL syntax-highlighted. Auto-follow keeps the newest entry pinned; scroll up or click a non-latest entry to pause. The active tab and open/closed state persist in tabs.json.",
+                  ],
+                  [
+                    "Narrow panes",
+                    "Below 560px wide (the left side of a split, for example) the global search box stacks above its button and the query toolbar wraps, instead of squeezing the input; a failure message beside the datastore selector wraps to the next line.",
+                  ],
+                  [
+                    "Failures",
+                    "A failed load or write shows the whole reason on the screen (the operation, the HTTP status and the server's message, with every cause), and the browser console gets the same failure with the operation and its target (database, table, key, bucket, …).",
                   ],
                   [
                     "Datastore explorers",
@@ -1052,6 +1068,14 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
+                text: "右の列を開いたままだと左右の面がそれぞれ 480px に足りないときは、2 面の間だけ右の列を細い帯に畳みます (帯のボタンに印と理由が出ます)。1 面に戻すと開き直します。2 面の間に自分で開いたときは、再読み込みまで開いたままにします。History と選んでいる作業ツリーは一覧が右の列にあるので、その画面では畳みません。そのとき 2 面が入らなければ、別の画面へ移るか窓を広げるまで右の面を預けます (分割のボタンにそう出ます)。",
+              },
+              {
+                kind: "paragraph",
+                text: "本文は自分の箱の中でスクロールします。ページそのものは動かないので、スクロールバーは本文の右端に出て右の列を押さず、戻る・進むでは前にスクロールしていた位置に戻ります。長い差分のカードでは、カードが見えている間、横のスクロールバーが本文の下端に貼り付きます (Split では左右に 1 本ずつ)。カードの末尾まで行かなくても横に送れます。行に入りきらないパンくずは、真ん中のフォルダを「…」にまとめます。カーソルを置くと全体のパスが出ます。",
+              },
+              {
+                kind: "paragraph",
                 text: "サイドバーやファイルパレットから、ソース、Markdown プレビュー、画像、PDF などを開けます。大きいテキストファイルは自動で軽量な仮想表示に切り替わります。サイドバーの行はリンクなので、Cmd/Ctrl+クリックや中クリックで別タブに開けます。diff カードの View File はファイル一覧（履歴画面ではコミット一覧も）を残したままファイル全体を表示し、View Diff で差分に戻ります。",
               },
               {
@@ -1089,7 +1113,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "Ctrl+K でファイルパレット、Ctrl+G でコード検索パレットが開きます。左のサイドバーの上の「検索」でも同じです（Shift+クリックでコード検索）。2 つは 1 つのウィンドウを共有し、切り替えても入力中の検索語は残り、閉じて開き直すと前回の検索語が選択状態で戻ります。ファイルパレットは空のとき最近開いたファイルを並べ、結果が 50 件で切られたときはその旨を表示します。コード検索には正規表現（Alt+R）・大文字小文字の区別（Alt+C）・単語単位（Alt+W）の切り替えがあり、検索語の中の path:<ディレクトリ or glob> で対象を絞れます。大文字小文字は「区別する」を押さない限りどのエンジンでも区別しません。ヒットを開くと該当行の一致箇所が強調され、大きな仮想表示のファイルではファイル内検索バーに検索語が入ります。「固定」（または Ctrl+Enter）を押すと検索語が「検索」タブに移り、ファイルを開いて回る間も結果一覧が残ります。「検索」タブはタブ列の ＋ のメニューやパレットからも開けます。検索語は URL（/search?q=）に載るのでリロードしても同じ検索が走ります。",
+                text: "Ctrl+K でファイルパレット、Ctrl+G でコード検索パレットが開きます。左のサイドバーの上の「検索」でも同じです（Shift+クリックでコード検索）。2 つは 1 つのウィンドウを共有し、切り替えても入力中の検索語は残り、閉じて開き直すと前回の検索語が選択状態で戻ります。ファイルパレットは空のとき最近開いたファイルを並べ、結果が 50 件で切られたときはその旨を表示します。コード検索には正規表現（Alt+R）・大文字小文字の区別（Alt+C）・単語単位（Alt+W）の切り替えがあり、検索語の中の path:<ディレクトリ or glob> で対象を絞れます。大文字小文字は「区別する」を押さない限りどのエンジンでも区別しません。ヒットを開くと該当行の一致箇所が強調され、大きな仮想表示のファイルではファイル内検索バーに検索語が入ります。「固定」（または Ctrl+Enter）を押すと検索語が「検索」タブに移り、ファイルを開いて回る間も結果一覧が残ります。「検索」タブはタブ列の ＋ のメニューやパレットからも開けます。検索語は URL（/search?q=）に載るのでリロードしても同じ検索が走ります。「検索」タブの検索語はタブの並びと一緒に覚えるので、別のタブを前面にしたままリロードしても、検索語が入った状態で戻ります。",
               },
               {
                 kind: "paragraph",
@@ -1114,7 +1138,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "各ツールの入力は .code-viewer/tools.json に保存されるので、開き直すと続きから使えます。開いているツールは URL（/tools?tool=markdown）に載るので共有もリロードもでき、入力と出力の境目はドラッグで動かせます。",
+                text: "各ツールの入力は .code-viewer/tools.json に保存されるので、開き直すと続きから使えます。開いているツールは URL（/tools?tool=markdown）に載るので共有もリロードもできます。タブの並びと一緒にも覚えるので、別のタブを前面にしたままリロードしても同じツールで戻ります。入力と出力の境目はドラッグで動かせます。",
               },
             ],
           },
@@ -1143,7 +1167,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "tmux のペインを選ぶと (「＋」のメニュー・サイドバー・パレット・全体ボード)、タブでそこまで連れて行きます。そのセッションを既に開いているシェルがあれば、そのシェルのタブが前に出てペインがカレントになります。無ければ、こちらでシェルを開いて attach します。つまりペインごとではなく、tmux のセッション 1 つにつきシェル 1 本になります。powerline のセパレータやファイルアイコンは、ブラウザを動かしている環境に Nerd Font が入っていれば表示されます（フォントはパッケージに同梱していません）。ペインには tmux が PATH にあることが必要です (シェルは無くても使えます)。シェルを開くには任意依存の @lydell/node-pty が必要です。",
+                text: "tmux のペインを選ぶと (「＋」のメニュー・サイドバー・パレット・全体ボード)、タブでそこまで連れて行きます。そのセッションを既に開いているシェルがあれば、そのシェルのタブが前に出てペインがカレントになります。無ければ、こちらでシェルを開いて attach します。つまりペインごとではなく、tmux のセッション 1 つにつきシェル 1 本になります。シェルが tmux の中にある場合や、シェルの起動設定が tmux を自動で起こす場合も attach できます (TMUX を外して attach するので、その tmux の中に入れ子で出ます)。powerline のセパレータやファイルアイコンは、ブラウザを動かしている環境に Nerd Font が入っていれば表示されます（フォントはパッケージに同梱していません）。ペインには tmux が PATH にあることが必要です (シェルは無くても使えます)。シェルを開くには任意依存の @lydell/node-pty が必要です。",
               },
               {
                 kind: "paragraph",
@@ -1160,7 +1184,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "最下段の右の件数は、どの画面にいても入力待ちと作業中の数を出します。注意の色になるのは入力待ちがあるときだけです。押すと一覧へ、入力待ちが 1 件だけならそのペインを直接開きます。作業中から入力待ちに、または作業中から止まったに変わると、その行に未読の印が付き、タブのタイトルの先頭に未読の数が出ます。止まったものは (フックが無くても) 完了と出ます。そのペインを開くか一覧で選ぶと消えます。別のプロジェクトのエージェント (行・通知・パレット) は、そのプロジェクトへ移ってからペインをタブで開きます。デスクトップ通知は、エージェント画面の「通知を有効にする」を押したときだけ許可を求めます。どの変化で通知するかは 設定 → エージェントの通知 で選べます。この窓にフォーカスがある間、左右どちらかの前面のターミナルタブに出ているペインは通知しません。状態は生きているターミナルに画面ルールを当てて判定します。",
+                text: "最下段の右の件数は、どの画面にいても入力待ちと作業中の数を出します。注意の色になるのは入力待ちがあるときだけです。押すと一覧へ、入力待ちが 1 件だけならそのペインを直接開きます。作業中から入力待ちに、または作業中から止まったに変わると、その行に未読の印が付き、タブのタイトルの先頭に未読の数が出ます。止まったものは (フックが無くても) 完了と出ます。そのペインを開くか一覧で選ぶと消えます。別のプロジェクトのエージェント (行・通知・パレット) は、そのプロジェクトへ移ってからペインをタブで開きます。デスクトップ通知は、エージェント画面の「通知を有効にする」か、最初に入力待ちが出たときに左のサイドバーに出る案内のボタンを押したときだけ許可を求めます (案内は、許可かブロックを選ぶか閉じると出なくなります)。どの変化で通知するかは 設定 → エージェントの通知 で選べます。この窓にフォーカスがある間、左右どちらかの前面のターミナルタブに出ているペインは通知しません。状態は生きているターミナルに画面ルールを当てて判定します。",
               },
               {
                 kind: "paragraph",
@@ -1172,11 +1196,11 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "既定以外のアカウントがあると、エージェント一覧の各行に、その claude / codex がどのアカウントで動いているかが出ます (そのプロセスの CLAUDE_CONFIG_DIR / CODEX_HOME だけを読みます)。一覧の上にはアカウントの帯が出て、ログインの状態・直近の記録にある使用量の枠とリセットまでの時間・いつの値か (80% 以上は「注意」)・そのアカウントで動いているエージェントの数・フックの状態が並びます。記録に無い枠は補いません。1 つの設定ディレクトリに 2 つのアカウントの記録があるときは、新しいほうの値を出し、「混在」の札を付けます (カーソルを置くと、もう一方の枠と分け方が出ます)。codex の使用量はセッション記録から読みます。claude は使用量をステータスラインにだけ渡すので、設定 → アカウント → claude の使用量 でステータスラインのコマンドを包めます。包むスクリプトは受け取ったデータを保存し、あなたのコマンドの出力をそのまま返します。無効にすると元に戻ります。「新しいエージェント」(一覧のツールバー、またはプロジェクトの +) は、選んだアカウントとプロジェクトで claude か codex を tmux の新しいウィンドウに起動します。シェルにキー入力を送ることはしません。コマンドは「起動コマンド」で変えられます (対話シェルで動くので、シェルの関数も使えます)。",
+                text: "既定以外のアカウントがあると、エージェント一覧の各行に、その claude / codex がどのアカウントで動いているかが出ます (そのプロセスの CLAUDE_CONFIG_DIR / CODEX_HOME だけを読みます)。一覧の上にはアカウントの帯が出て、ログインの状態・直近の記録にある使用量の枠とリセットまでの時間・いつの値か (80% 以上は「注意」)・そのアカウントで動いているエージェントの数・フックの状態が並びます。記録に無い枠は補いません。1 つの設定ディレクトリに 2 つのアカウントの記録があるときは、新しいほうの値を出し、「混在」の札を付けます (カーソルを置くと、もう一方の枠と分け方が出ます)。codex の使用量はセッション記録から読みます。claude は使用量をステータスラインにだけ渡すので、設定 → アカウント → claude の使用量 でステータスラインのコマンドを包めます。包むスクリプトは受け取ったデータを保存し、あなたのコマンドの出力をそのまま返します。無効にすると元に戻ります。「新しいエージェント」(一覧のツールバー、またはプロジェクトの +) は、選んだアカウントとプロジェクトで claude か codex を tmux の新しいウィンドウに起動します。シェルにキー入力を送ることはしません。コマンドは「起動コマンド」で変えられます (対話シェルで動くので、シェルの関数も使えます)。「新しいエージェント」の画面には実行するコマンドがそのまま出て、コピーのボタンがあります。保存したばかりのコマンドもすぐに出ます。",
               },
               {
                 kind: "paragraph",
-                text: "プロジェクトを登録すると、エージェントが居なくてもエージェント一覧に、好きな順で常に並びます (見出しの ⋯ から登録・名前を変える・上へ / 下へ・登録を外す。リポジトリには触りません)。見出しの「開く」は、同じタブ・同じアドレスのまま (`/p/<鍵>/…`) そのプロジェクトへ切り替えます。ブラウザの通知の許可・ターミナルのシェル・未読の印はそのまま残ります。そのプロジェクトのプロセスが動いていなければ、先に起動してから移ります。code-viewer が起動したプロセスは ⋯ から止められます。この画面で選んでいるプロジェクトは止められません。別のリポジトリで `code-viewer` を実行すると、動いている code-viewer にそのリポジトリを加えて URL を表示します (`code-viewer --standalone` は、これまでどおり 1 つのリポジトリだけの別のサーバを起動します)。10 分使われていないプロジェクトのプロセスは止め、そのプロジェクトを開くと起動し直します (時間は `--idle-stop <秒>` で変えられます。ターミナル・エージェント・未読の印はそのまま残ります)。プロセスが自分で止まったときは、画面にそう出して「再起動」を出します。理由は「詳細」にあります。ファイルの木の見出し (木が無ければタブ列の左端) のプロジェクト名 (p) から、どの画面でも登録したプロジェクトへ切り替えられます。いまの画面のまま移ります。文字を打つと絞り込み、↑↓ と Enter で移ります。テーマ・言語・文字サイズ・キー割り当て・通知・閉じた案内・画面の配置 (サイドバーの幅と畳み) は全プロジェクト共通なので (設定画面にどの節かを表示します)、移っても見た目は変わりません。",
+                text: "プロジェクトを登録すると、エージェントが居なくてもエージェント一覧に、好きな順で常に並びます (見出しの ⋯ から登録・名前を変える・上へ / 下へ・登録を外す。リポジトリには触りません)。見出しの「開く」は、同じタブ・同じアドレスのまま (`/p/<鍵>/…`) そのプロジェクトへ切り替えます。ブラウザの通知の許可・ターミナルのシェル・未読の印はそのまま残ります。そのプロジェクトのプロセスが動いていなければ、先に起動してから移ります。code-viewer が起動したプロセスは ⋯ から止められます。この画面で選んでいるプロジェクトは止められません。別のリポジトリで `code-viewer` を実行すると、動いている code-viewer にそのリポジトリを加えて URL を表示します (`code-viewer --standalone` は、これまでどおり 1 つのリポジトリだけの別のサーバを起動します)。画面の URL を表示する CLI (annotate・query diff tables) も、同じ `/p/<鍵>/…` のアドレスを表示します (`--standalone` のサーバには付きません)。10 分使われていないプロジェクトのプロセスは止め、そのプロジェクトを開くと起動し直します (時間は `--idle-stop <秒>` で変えられます。ターミナル・エージェント・未読の印はそのまま残ります)。プロセスが自分で止まったときは、画面にそう出して「再起動」を出します。理由は「詳細」にあります。ファイルの木の見出し (木が無ければタブ列の左端) のプロジェクト名 (p) から、どの画面でも登録したプロジェクトへ切り替えられます。いまの画面のまま移ります。文字を打つと絞り込み、↑↓ と Enter で移ります。テーマ・言語・文字サイズ・キー割り当て・通知・閉じた案内・画面の配置 (サイドバーの幅と畳み) は全プロジェクト共通なので (設定画面にどの節かを表示します)、移っても見た目は変わりません。",
               },
             ],
           },
@@ -1524,7 +1548,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "マルチ DB タブ",
-                    "複数のデータベースを横並びで開きます。ドラッグで並び替え、+ で空タブ追加、× / 中クリックで閉じる（最後の1枚は空タブにリセット）。並びは .code-viewer/tabs.json に保存されます。",
+                    "複数のデータベースを横並びで開きます。ドラッグで並び替え、+ で空タブ追加、× / 中クリックで閉じる（最後の1枚は空タブにリセット）。並びは .code-viewer/tabs.json に保存されます。データストアを選んでいないタブは「新しいタブ」という名前で、左上の欄から選ぶか「データストア接続を追加」で足すよう案内します。",
                   ],
                   [
                     "サイドバー",
@@ -1560,7 +1584,15 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "フッタ Dock (クエリ履歴 / ログ)",
-                    "JetBrains 風の常駐 bottom dock に 2 タブ。「クエリ履歴」: DB ごとに保存されたクエリのマスター/ディテール、SSE で全タブにライブ同期。「ログ」: このセッションでサーバが実行した SQL すべて (テーブル読み込み / ユーザークエリ / 編集コミット) を所要時間・行数・実行 SQL (シンタックスハイライト) 付きで時系列表示。自動追従 ON で常に最新を表示、下スクロール or 最新以外をクリックすると追従解除。アクティブタブと開閉状態は tabs.json に永続化されます。",
+                    "常駐の bottom dock に 2 タブ。「クエリ履歴」: DB ごとに保存されたクエリのマスター/ディテール、SSE で全タブにライブ同期。「ログ」: このセッションでサーバが実行した SQL すべて (テーブル読み込み / ユーザークエリ / 編集コミット) を所要時間・行数・実行 SQL (シンタックスハイライト) 付きで時系列表示。自動追従 ON で常に最新を表示、下スクロール or 最新以外をクリックすると追従解除。アクティブタブと開閉状態は tabs.json に永続化されます。",
+                  ],
+                  [
+                    "狭い面",
+                    "幅が 560px より狭い面 (2 面の左の面など) では、全体検索の入力欄をボタンの上に積み、クエリのツールバーは折り返して、入力欄を潰しません。データストアの選択欄の横に出る失敗の文は次の行に送ります。",
+                  ],
+                  [
+                    "失敗の表示",
+                    "読み込みや書き込みに失敗すると、画面には理由の全文 (操作・HTTP の状態・サーバの文言と、元の原因のつながり) を出し、ブラウザの console には操作と対象 (データベース・テーブル・キー・バケットなど) を添えて同じ失敗を出します。",
                   ],
                   [
                     "データストア専用エクスプローラ",

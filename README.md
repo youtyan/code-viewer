@@ -29,7 +29,15 @@ Requires Node.js 20 or newer. Development uses
   Tools, Settings & Help, terminals and terminal images stay open across projects. Files and screens
   stay on the left side; split the area to put a terminal or an image on the
   right (the split button, **Split right**, or drag one onto the right half),
-  resize by dragging the line between, and press `g o` to switch sides. Image
+  resize by dragging the line between, and press `g o` to switch sides. When
+  the two sides would be narrower than 480px each, the right column folds to
+  its strip while split (with a mark on its button) and comes back on one
+  side; opening it yourself keeps it open until a reload. History and a
+  selected worktree keep their lists there, so it stays open on those screens
+  and the right side is set aside if two sides no longer fit. The main area
+  scrolls in its own box (the page never scrolls, and Back / Forward return to
+  the scroll position), and a breadcrumb too long for its row folds its middle
+  folders into `…` (hover for the full path). Image
   files open in an image tab (zoom, previous / next, copy path, open folder).
   The annotations, Copy AI context, auto-update, cancel-requests, theme and
   repository-page buttons are at the right of the bottom bar.
@@ -37,7 +45,9 @@ Requires Node.js 20 or newer. Development uses
   state, ignore-whitespace and hide-tests toggles, and dismissible per-line
   "reference pills" that copy `@path#start-end` for AI agents. View File on
   a diff card shows the full source in place while the file list stays on
-  screen; View Diff returns to the diff.
+  screen; View Diff returns to the diff. On a long card the horizontal
+  scrollbar sticks to the bottom of the main area while the card is on screen
+  (one per side in split layout).
 - Browse commit history per branch and open any commit's changed files and
   diff, with shareable `/history?ref=<branch>&commit=<sha>` links
   (`&source=<path>` while a file is open with View File; the commit list
@@ -104,7 +114,9 @@ Requires Node.js 20 or newer. Development uses
   bar shows needs-input and working agents on every screen, next to each
   account's usage, changed rows get an
   unread dot and the tab title an unread count, and desktop notifications can
-  be enabled from that screen (choose which changes notify under Settings).
+  be enabled from that screen or from the note the left sidebar shows the
+  first time an agent needs input (choose which changes notify under
+  Settings).
 - Turn on reliable finish detection from Settings → Agent integration. It adds
   hooks to claude (`settings.json` in `CLAUDE_CONFIG_DIR` or `~/.claude`) and
   codex (`hooks.json` in `CODEX_HOME` or `~/.codex`) after showing the exact
@@ -126,7 +138,8 @@ Requires Node.js 20 or newer. Development uses
   quota window present in the latest record and its reset time (codex from its
   session logs; claude through an optional status line wrapper that returns
   your status line unchanged), and New agent starts claude or codex with a
-  chosen account and project in a new tmux window. Missing windows are not
+  chosen account and project in a new tmux window, showing the exact command
+  with a copy button. Missing windows are not
   invented; when one config directory holds records from two accounts, the card
   keeps the newest values and adds a Mixed note that says how to separate them.
 - Register your projects so they stay in the Agents list (in your order) even
@@ -135,7 +148,9 @@ Requires Node.js 20 or newer. Development uses
   code-viewer serves every project on one port: switching reloads the page at
   `/p/<key>/…` on the same address, so notification permission, the terminal
   shells and unread marks carry over, and reload, back/forward and bookmarks
-  return to the same project and screen. Each project is shown by its own
+  return to the same project and screen; CLI commands that print a screen
+  URL (`annotate`, `query diff tables`) print that address too. Each project
+  is shown by its own
   process that code-viewer starts the first time you open it (and stops when
   code-viewer exits or after the configured idle period); processes it started
   can be stopped from the list. Theme,
@@ -165,7 +180,8 @@ Requires Node.js 20 or newer. Development uses
   pre-fills the in-file find bar with it. **Pin** (or `Ctrl+Enter`) moves
   the query into a **Search** tab, where the grouped result list stays
   open while you browse files; the query rides in the URL
-  (`/search?q=<query>`) so a reload re-runs it, and the Search tab can
+  (`/search?q=<query>`) so a reload re-runs it, the tab remembers it even
+  while another tab is in front, and the Search tab can
   also be opened from the tab row's `+` menu or the palette.
 - Jump from a function, class, or variable in source and diff code to its
   definition with `Cmd/Ctrl+click` or `g .`; choose from ranked candidates when
@@ -191,7 +207,8 @@ Requires Node.js 20 or newer. Development uses
   Mermaid preview with zoom and drag-pan, and a JSON / YAML tool that
   auto-detects the input and re-emits it as formatted JSON or YAML (also a
   validator and a JSON⇄YAML converter). Each tool keeps its own draft in
-  `.code-viewer/tools.json`, and the split between input and output is
+  `.code-viewer/tools.json`, the tab remembers the open tool even while
+  another tab is in front, and the split between input and output is
   draggable.
 - Run a real shell in the browser as a tab of the main area. The ＋ at the
   right of the tab row opens a menu with Open a file, New shell, and the
@@ -223,7 +240,9 @@ Requires Node.js 20 or newer. Development uses
 - Choosing a tmux pane takes you to it in a tab. If a shell already has that
   session open, that shell's tab comes forward and the pane becomes current;
   otherwise a shell is opened and attached for you, so you end up with one
-  shell per tmux session rather than one per pane. Powerline separators and
+  shell per tmux session rather than one per pane. This also works from a
+  shell that is inside tmux or whose startup starts tmux (the attach runs
+  with `TMUX` unset, so the pane shows up nested). Powerline separators and
   file icons render when a Nerd Font is installed — the terminal asks for the
   common Nerd Font families before falling back to the usual monospace stack,
   so no font ships with the package. Panes need `tmux` on `PATH`; shells work
@@ -627,7 +646,12 @@ Open Datastores in the global navigation to access:
 - **Multi-DB tabs** — open multiple databases side by side, with their own
   sidebar, panes, and history. `+` adds an empty tab; `×` or middle-click
   closes one (the last tab resets to empty instead of vanishing). Tabs can be
-  reordered by drag and drop and persist in `.code-viewer/tabs.json`.
+  reordered by drag and drop and persist in `.code-viewer/tabs.json`. A tab
+  with no datastore chosen is named New tab and points to the selector and
+  Add datastore connection. In a pane under 560px wide (the left side of a
+  split) the global search box stacks above its button and the query toolbar
+  wraps. A failure shows its whole reason on screen (operation, HTTP status,
+  server message, causes) and in the browser console with its target.
 - **PostgreSQL schema selector** — switch between schemas without reopening
   the database.
 - **Table browser** — paginated data grid with column sort, text filter, cell

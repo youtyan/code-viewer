@@ -72,7 +72,7 @@ grep -n "100vh\|100dvh" web/style.css \
 ツールバー (`#topbar`、`--topbar-h`)、最下段のバー (`#statusbar`、`--statusbar-h`)。画面下の
 パネルは無い (Tools と Search はタブ。`orientation.md`)。右の列を畳むと (`body.gdp-sidebar-hidden`) `--panelcol-shown` が
 細い帯の幅になり、プロジェクト名と画面の入口 (`#view-head`) はタブ列の左の `#tabs-lead` へ移る
-(`views/sidebar.ts` の `placeSidebarToggle`)。自動では畳まない。
+(`views/sidebar.ts` の `placeSidebarToggle`)。自動で畳むのは 2 面の間だけ (下の「2 面にした本文が…」)。
 
 - **本文 (`#content`) は自分の箱の中でスクロールする。窓 (`html` / `body`) は
   スクロールしない** (`html, body` の `overflow: hidden`)。`#content` は
@@ -96,11 +96,14 @@ grep -n "100vh\|100dvh" web/style.css \
     `restoreMainScroll`)
 - **2 面にした本文が、面 2 つ分のゆとり (`COMFORTABLE_PANE_WIDTH` × 2 + 仕切り)
   に足りないときは、2 面の間だけ右の列を細い帯へ自動で畳む** (`app.ts` の
-  `syncPanelColumnForSplit`)。2 面を解いたら戻す。利用者が 2 面の間に自分で
+  `syncPanelColumn`)。2 面を解いたら戻す。利用者が 2 面の間に自分で
   開いたら、そのセッションでは自動で畳まない (保存しない)。面の幅の下限は、
   自分で開いている間だけ `TIGHT_PANE_WIDTH` まで下げ、両面を同じ比で縮める。ただし一覧が右の列にある画面 (History・選んでいる作業ツリー) を出している
   間は畳まず (自動で畳んでいたら開く)、本文が 2 面の下限に足りなければ右の面を
   預ける (理由は分割のボタンの説明)。決まりは `core/panel-column-policy.ts`
+- **面の中で入力と操作を横 1 行に並べる画面は、窓の幅ではなく面の実幅で縦に積む**
+  (`@container`。2 面の左の面は窓の半分以下になるので `@media` では決まらない)。
+  実例: Data の `.db-root` の `container: db-pane` と `@container db-pane (max-width: 560px)`
 - **上に居座る固定物の高さは `--global-header-h` だけを読む。** 今はタブ列だけなので
   `--global-header-h: var(--main-tabs-h)` (`style.css` の `html, body`)。ツールバーの `top`・各ページの
   `--chrome-h` の上書き・sticky の `top`・面の箱の `top` はこれを読むので、上に固定物を足す / 消す
