@@ -139,8 +139,15 @@
   --statusbar-h: 28px;
   /* 幅の出所は TS (views/sidebar.ts の SIDEBAR_WIDTH)。初回描画用の既定。 */
   --sidebar-w: 240px;
-  /* 幅の出所は TS (core/panel-sizes.ts の HISTORY_WIDTH)。初回描画用の既定。 */
-  --history-w: 560px;
+  /* 本文の左の一覧の列 (Diff の変更ファイル・History のコミット・選んでいる
+     作業ツリー) の利用者の幅。出所は TS (core/panel-sizes.ts の HISTORY_WIDTH)。
+     初回描画用の既定。いま出している幅 (詰めた幅を含む) は --list-w で、
+     app.ts の syncListColumn が書く (core/list-column.ts)。 */
+  --history-w: 320px;
+  --list-w: var(--history-w);
+  /* 一覧の列が占めている幅。一覧の列を出す画面 (body[data-list-column]) だけ
+     --list-w にする (T1 の「既定 0 + 占有時に上書き」)。 */
+  --listcol-shown: 0px;
   --sidebar-restore-rail-w: 44px;
   --annotation-panel-w: 380px;
   --journal-task-editor-w: 380px;
@@ -378,12 +385,11 @@ html, body {
   --main-pane-h: calc(100vh - var(--global-header-h) - var(--main-bottom));
   /* 右の列 (パネルの列。画面の右端の固定の列で、上端から)。頭 (#panel-head) の
      1 段目 (タブ列と同じ高さ) に画面の入口の絵柄、2 段目にプロジェクト名と
-     ブランチ (= この列の題名)、その下に画面ごとの一覧を出す: History /
-     Worktrees (選んでいる間) は一覧パネル、それ以外は #sidebar (その画面の一覧か
-     Files の木)。左のサイドバー (プロジェクトとエージェント) と中身の一覧を
-     左右に分け、どれが今のプロジェクトの中身かを分かるようにした。利用者が
-     畳んだとき (gdp-sidebar-hidden) だけ細い帯 (--panelcol-rail-w、開くボタン
-     1 つ分の実寸) になる。自動では畳まない。 */
+     ブランチ (= この列の題名)、その下に Files の木 (#sidebar。探して開くための
+     木) を出す。本文を選ぶための一覧 (Diff・History・選んでいる Worktrees) は
+     右の列ではなく本文の左の一覧の列 (--listcol-shown) に出し、その画面の間は
+     右の列を細い帯 (--panelcol-rail-w、開くボタン 1 つ分の実寸) へ自動で畳む
+     (core/panel-column-policy.ts)。利用者が畳んだとき (gdp-sidebar-hidden) も帯。 */
   --panelcol-w: var(--sidebar-w);
   --panelcol-shown: var(--panelcol-w);
   /* 帯の幅 = 開くボタンと画面の入口の絵柄 1 つ分 (押せる領域の大きさ。密度で
@@ -396,8 +402,9 @@ html, body {
      サイドバーの右、右は右の列の左。左右 2 面のときは左の面の幅に収める (面の
      幅 --split-*-w は views/main-tabs/main-tabs-view.ts が本文の幅で書く)。
      本文まわりの固定物はこの 2 つだけを読む (下パネル・最下段は右の列の下も
-     またぐので --chrome-left と 0 のまま)。 */
-  --page-left: var(--chrome-left);
+     またぐので --chrome-left と 0 のまま)。左は一覧の列の右 (一覧の列は本文の
+     外。2 面でも本文全体の左に 1 本)。 */
+  --page-left: calc(var(--chrome-left) + var(--listcol-shown));
   --page-right: var(--panelcol-shown);
 
 
@@ -413,11 +420,10 @@ html, body {
   -moz-osx-font-smoothing: auto;
 }
 
-/* 右の列の幅: 一覧パネルを右の列に置く画面 (History・選んでいる Worktrees) は
-   その一覧の幅。利用者が畳んだときだけ細い帯の幅 (T2 の上書き。body で決める)。 */
-body.gdp-history-page,
-body.gdp-worktree-page:not([data-worktree-overview]) {
-  --panelcol-w: var(--history-w);
+/* 一覧の列を出す画面 (値は出す一覧: sidebar = Diff の変更ファイル、history、
+   worktree。app.ts が付ける)。利用者が一覧の列を隠した間 (帯のボタン) は 0。 */
+body[data-list-column]:not([data-list-column-hidden]) {
+  --listcol-shown: var(--list-w);
 }
 body.gdp-sidebar-hidden {
   --panelcol-shown: var(--panelcol-rail-w);
@@ -1806,25 +1812,39 @@ body.gdp-diff-page #repo-target-wrap {
 
 /* ===== Commit history panel ===== */
 /* 作業ツリー画面の 2 枚のパネルも同じ箱を使う。位置だけ Worktrees セクションで
-   上書きし、見た目はここ 1 箇所で決まる。 */
+   上書きし、見た目はここ 1 箇所で決まる。置き場所は本文の左の一覧の列 (左の
+   サイドバーの右、タブ列の下。幅は --list-w)。 */
 #history-panel,
 #worktree-panel {
   display: none;
   position: fixed;
-  right: 0;
-  top: var(--panel-body-top);
+  left: var(--chrome-left);
+  top: var(--global-header-h);
   bottom: var(--chrome-bottom);
-  width: var(--history-w);
+  width: var(--list-w);
   background: var(--bg-soft);
-  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   overflow-y: auto;
   z-index: 31;
   flex-direction: column;
   font-size: var(--ui-font-base);
 }
 body.gdp-history-page #history-panel { display: flex; }
-/* History: 右の列は一覧パネル。変更ファイル (#sidebar) は本文の左の 2 列目
-   (ツールバーの下)。畳むのは右の列 (一覧) だけで、変更ファイルは残す。 */
+/* Diff: 変更ファイルの一覧 (#sidebar) を一覧の列に置く (ふだんの #sidebar は
+   右の列の Files の木)。幅の掴みは一覧の列の #history-resizer なので、右の列の
+   掴みは出さない。 */
+body[data-list-column="sidebar"] #sidebar {
+  left: var(--chrome-left);
+  right: auto;
+  top: var(--global-header-h);
+  width: var(--list-w);
+  border-left: 0;
+}
+body[data-list-column="sidebar"] #sidebar-resizer {
+  display: none;
+}
+/* History: 一覧の列はコミットの一覧。変更ファイル (#sidebar) は本文の左の 2 列目
+   (一覧の列の右、ツールバーの下)。 */
 body.gdp-history-page #sidebar {
   left: var(--page-left);
   right: auto;
@@ -1847,18 +1867,18 @@ body.gdp-history-page #repo-target-wrap {
 #history-resizer {
   display: none;
   position: fixed;
-  top: var(--panel-body-top);
+  top: var(--global-header-h);
   bottom: var(--chrome-bottom);
-  right: calc(var(--history-w) - 4px);
+  left: calc(var(--page-left) - var(--space-1));
   width: 8px;
   cursor: col-resize;
   z-index: 32;
   background: transparent;
   transition: background 0.12s;
 }
-/* 一覧パネルを持つページ (data-history-list-panel。履歴・作業ツリー) でだけ
-   つまみを出す。 */
-body[data-history-list-panel] #history-resizer {
+/* 一覧の列 (data-list-column。Diff・履歴・選んでいる作業ツリー) を出している
+   間だけつまみを出す。 */
+body[data-list-column]:not([data-list-column-hidden]) #history-resizer {
   display: block;
 }
 #history-resizer:hover,
@@ -5968,21 +5988,17 @@ body.gdp-repo-page #content {
      フォルダ表示とファイル表示で本文の左端が 8px ずれていた。 */
   padding: var(--content-top-gap) var(--content-pad-x) 48px;
 }
-body.gdp-sidebar-hidden #sidebar,
-body.gdp-sidebar-hidden #sidebar-resizer {
+/* 右の列を帯に畳んだら、右の列の Files の木を隠す。一覧の列を出す画面の
+   #sidebar は右の列に居ない (Diff は一覧の列、History・選んでいる作業ツリーは
+   本文の 2 列目) ので、右の列を畳んでも隠さない。 */
+body.gdp-sidebar-hidden:not([data-list-column]) #sidebar,
+body.gdp-sidebar-hidden:not([data-list-column]) #sidebar-resizer {
   display: none !important;
 }
-/* 一覧パネルを右の列に置く画面では、畳むのは一覧 (右の列) で、2 列目の
-   変更ファイルは残す。 */
-body.gdp-sidebar-hidden.gdp-history-page #sidebar,
-body.gdp-sidebar-hidden.gdp-worktree-page:not([data-worktree-overview]) #sidebar,
-body.gdp-sidebar-hidden.gdp-history-page #sidebar-resizer,
-body.gdp-sidebar-hidden.gdp-worktree-page:not([data-worktree-overview]) #sidebar-resizer {
-  display: block !important;
-}
-body.gdp-sidebar-hidden #history-panel,
-body.gdp-sidebar-hidden #history-resizer,
-body.gdp-sidebar-hidden.gdp-worktree-page:not([data-worktree-overview]) #worktree-panel {
+/* 一覧の列を隠した (一覧の画面の帯のボタン) 間は一覧を隠す。 */
+body[data-list-column="sidebar"][data-list-column-hidden] #sidebar,
+body[data-list-column-hidden] #history-panel,
+body[data-list-column-hidden] #worktree-panel {
   display: none !important;
 }
 body.gdp-sidebar-hidden #content,
@@ -8339,8 +8355,9 @@ body.gdp-worktree-page #worktree-panel {
   display: flex;
 }
 
-/* 以下 3 つは History 画面と同じ並べ方 (右の列 = 一覧パネル → 変更ファイル →
-   本文)。一覧だけを出しているとき (data-worktree-overview) は右の列が Files の木。 */
+/* 以下 3 つは History 画面と同じ並べ方 (一覧の列 = 一覧パネル → 変更ファイル →
+   本文)。一覧だけを出しているとき (data-worktree-overview) は一覧が本文で、右の列が
+   Files の木。 */
 body.gdp-worktree-page:not([data-worktree-overview]) #sidebar {
   left: var(--page-left);
   right: auto;
@@ -8369,6 +8386,18 @@ body.gdp-worktree-page #repo-target-wrap {
 /* 頭のボタンは残り幅の右端に寄せる。 */
 body.gdp-worktree-page .history-head .worktree-head-btn:first-of-type {
   margin-left: auto;
+}
+/* 一覧の列の詰めた幅 (240) でもボタンが切れないよう、件数のほうを省略する
+   (件数は一覧の行を数えれば分かる)。 */
+body.gdp-worktree-page .history-head .worktree-count {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.gdp-worktree-page .history-head .worktree-head-btn {
+  flex: none;
 }
 
 /* 基準ブランチへそのまま入らない作業ツリーだけ、一覧の中で色を変える。
@@ -16924,9 +16953,10 @@ body.gdp-nav-resizing {
   display: flex;
   align-items: stretch;
 }
-/* 2 面の左の面のタブ列は左の面の幅 (右の列の上には伸ばさない)。 */
+/* 2 面の左の面のタブ列は左の面の幅 (右の列の上には伸ばさない)。タブ列は一覧の
+   列の上もまたぐので、一覧の列の幅を足して面の境界にそろえる。 */
 body.main-split .main-tabs-pane[data-side="left"] {
-  flex: 0 0 var(--split-left-w);
+  flex: 0 0 calc(var(--split-left-w) + var(--listcol-shown));
 }
 .main-tabs-strip {
   /* タブの最小幅を列の幅から決める (.main-tab の min-width が 100cqi を読む)。 */
@@ -17007,6 +17037,25 @@ body.main-split .main-tabs-pane[data-side="left"] {
 }
 .main-tab-preview .main-tab-name {
   font-style: italic;
+}
+/* 別のプロジェクトのペインのタブ: 「プロジェクト名 · 題」。狭くなったら
+   プロジェクト名が先に縮み (縮みやすさが題の 1000 倍)、題はプロジェクト名が
+   最小 (1 文字と省略記号) になってから縮む。 */
+.main-tab-name.main-tab-name-project {
+  display: flex;
+}
+.main-tab-project {
+  flex: 0 1000 auto;
+  min-width: calc(var(--space-unit) * 4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-3);
+}
+.main-tab-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* 閉じるは選択中と hover のときだけ見せる。場所は常に取る (名前を動かさない)。 */
 .main-tab-close {
@@ -21015,9 +21064,11 @@ body.gdp-history-page #diff {
    絵 (round3/history.png): コミットの一覧は 1 行 1 コミットの表。左の列にグラフ
    (主線はアクセント、分かれた線は別の落ち着いた色。線 2px・節点 6px)、件名は
    省略、作者・時刻・短いハッシュは列を固定。行の高さは表の行 (--ui-table-row-h)。
-   一覧の幅で列を出し入れする。件名を最後まで残す: 件名の列は一覧の半分を
-   下回らず、枝の札が先に縮む。狭くなると作者 → 絶対時刻 → ハッシュ → 時刻の
-   順に隠す (どれも詳細にある)。一覧の既定の幅は HISTORY_WIDTH (560px)。
+   一覧の幅で列を出し入れする。枝の札は自然な幅 (一覧の 40% まで) まで必ず出し、
+   件名が残りを使って省略する (件名が短ければ、余りは札が使う。右の列の頭の
+   名前と枝と同じ決まり: core/brand-fit.ts の fitBrandWidths)。狭くなると作者 →
+   絶対時刻 → ハッシュ → 時刻の順に隠す (どれも詳細にある)。一覧の既定の幅は
+   HISTORY_WIDTH (320px)、詰めた幅 (240px) では件名と札だけになる。
    行は隙間なく並べ、グラフの線が行をまたいでつながる。
    祖先・右端に :is() を使わない (ブラウザが規則を素早く外せず、全要素で照合する。
    長いファイルのスクロールでスタイル計算が増えたのを実測した)。 */
@@ -21030,13 +21081,14 @@ body.gdp-history-page #diff {
   container: history-list / inline-size;
   padding: var(--space-1) 0 var(--space-5);
 }
+/* 行は横 1 列の flex (並びは order で graph title author when sha。title は件名と
+   枝の札の箱)。札と件名の幅の分け方を flex の縮み方で決める: 札は縮みやすく
+   (flex-shrink が件名の 1000 倍) 先に縮むが、自動の最小幅 = min(自然な幅,
+   箱の 40%) より下には縮まない (flex-basis は中身、width が 40%。min-width: auto
+   の「指定の幅と中身の幅の小さいほう」)。そこで止まったら件名が縮む。 */
 #history-panel .history-item,
 .gdp-file-history-panel .history-item {
-  display: grid;
-  grid-template-columns: auto minmax(50%, 1fr) minmax(0, max-content) 0 auto auto;
-  grid-template-areas: "graph subject refs author when sha";
-  /* 行の高さを 1 本の行の軌道にする (グラフの SVG の 100% が行の高さになる)。 */
-  grid-template-rows: 100%;
+  display: flex;
   align-items: center;
   column-gap: var(--space-3);
   height: var(--ui-table-row-h);
@@ -21054,21 +21106,38 @@ body.gdp-history-page #diff {
 }
 #history-panel .history-item .history-graph-cell,
 .gdp-file-history-panel .history-item .history-graph-cell {
-  grid-area: graph;
+  flex: none;
+  /* 行の高さいっぱい (グラフの SVG の 100% が行の高さになり、線が行をまたぐ)。 */
   align-self: stretch;
   display: flex;
 }
+#history-panel .history-item .history-title,
+.gdp-file-history-panel .history-item .history-title {
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  column-gap: var(--space-3);
+}
 #history-panel .history-item .subject,
 .gdp-file-history-panel .history-item .subject {
-  grid-area: subject;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: var(--ui-font-md);
 }
 #history-panel .history-item .history-refs,
 .gdp-file-history-panel .history-item .history-refs {
-  grid-area: refs;
-  flex-basis: auto;
+  flex: 0 1000 content;
+  /* 札に必ず残す上限 = 件名と札の間を除いた幅の 40% (fitBrandWidths の
+     BRANCH_SHARE と同じ割合。間は .history-title の column-gap)。 */
+  width: calc((100% - var(--space-3)) * 0.4);
+  /* 自動の最小幅を効かせる (スクロールする箱にすると 0 になる。clip は
+     スクロールする箱ではないので効いたまま)。札が何枚もあって入りきらない分は
+     切る。 */
+  min-width: auto;
   flex-wrap: nowrap;
-  overflow: hidden;
+  overflow: clip;
 }
 #history-panel .history-item .history-ref,
 .gdp-file-history-panel .history-item .history-ref {
@@ -21077,7 +21146,8 @@ body.gdp-history-page #diff {
 }
 #history-panel .history-item .author,
 .gdp-file-history-panel .history-item .author {
-  grid-area: author;
+  order: 2;
+  flex: none;
   display: none;
   overflow: hidden;
   max-width: calc(var(--space-unit) * 30);
@@ -21087,7 +21157,8 @@ body.gdp-history-page #diff {
 }
 #history-panel .history-item .when,
 .gdp-file-history-panel .history-item .when {
-  grid-area: when;
+  order: 3;
+  flex: none;
   min-width: max-content;
   color: var(--color-text-2);
   font-size: var(--ui-font-sm);
@@ -21104,7 +21175,8 @@ body.gdp-history-page #diff {
 }
 #history-panel .history-item .sha,
 .gdp-file-history-panel .history-item .sha {
-  grid-area: sha;
+  order: 4;
+  flex: none;
   /* 列を固定する (枝の札のほうを縮める)。 */
   min-width: max-content;
   color: var(--color-text-3);
@@ -21123,10 +21195,6 @@ body.gdp-history-page #diff {
   }
 }
 @container history-list (min-width: 600px) {
-  #history-panel .history-item,
-  .gdp-file-history-panel .history-item {
-    grid-template-columns: auto minmax(50%, 1fr) minmax(0, max-content) auto auto auto;
-  }
   #history-panel .history-item .author,
   .gdp-file-history-panel .history-item .author {
     display: block;
@@ -21163,10 +21231,11 @@ body.gdp-history-page #diff {
   background: transparent;
   color: var(--color-text-2);
 }
-/* 枝の名前は小さな面の札 (今の枝はアクセントの面)。件名の場所を残すため短く切る。 */
+/* 枝の名前は小さな面の札 (今の枝はアクセントの面)。札 1 枚の上限は設けない
+   (札の列の幅は上の .history-refs が決め、足りなければ札が省略する)。 */
 #history-panel .history-ref,
 .gdp-file-history-panel .history-ref {
-  max-width: calc(var(--space-unit) * 20);
+  max-width: none;
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--color-raised);
@@ -21177,6 +21246,13 @@ body.gdp-history-page #diff {
 .gdp-file-history-panel .history-ref-head {
   background: color-mix(in srgb, var(--color-accent) 70%, transparent);
   color: var(--color-on-accent);
+}
+/* 札が何枚もあって札の幅が足りないときは、今の枝の札は縮めず (札の列の幅までは
+   名前を全部出す)、ほかの札が縮む。 */
+#history-panel .history-item .history-ref-head,
+.gdp-file-history-panel .history-item .history-ref-head {
+  flex-shrink: 0;
+  max-width: 100%;
 }
 /* 日付の見出し: 補助の小さな文字。グラフの線はここも素通りする。 */
 #history-panel .history-group,

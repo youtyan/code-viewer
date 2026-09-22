@@ -116,7 +116,9 @@ global の `my-reuse-first` に従う。ここに置くのは**このリポジ�
 | 戻る / 進むで本文のスクロール位置を戻す | `core/scroll-memory.ts` `createScrollMemory` / `scrollKeyOfHistoryState`（本文の箱は窓でないのでブラウザが戻さない。配線は `app.ts` の `restoreMainScroll`） |
 | 長い横スクロールの箱に、見えている下端へ貼り付く代わりのスクロールバーを付ける | `core/hscroll-proxy.ts`（数え方）+ `views/diff-hscroll.ts` `attachStickyHScroll` / `detachStickyHScroll` |
 | 入りきらないパンくずの真ん中を「…」に畳む | `core/breadcrumb-fit.ts` `collapsedBreadcrumbRange` + `views/breadcrumb-fit.ts` `fitBreadcrumb`（Diff・ファイル表示・フォルダ表示が共有） |
-| 2 面のときに右の列を畳む / 開くの判断 | `core/panel-column-policy.ts` `panelColumnAction`（DOM に触らない。配線は `app.ts` の `syncPanelColumn`） |
+| 一覧の画面と 2 面のときに右の列を畳む / 開くの判断 | `core/panel-column-policy.ts` `panelColumnAction`（DOM に触らない。配線は `app.ts` の `syncPanelColumn`） |
+| 本文の左の一覧の列の幅 (利用者の幅か詰めた幅) | `core/list-column.ts` `listColumnWidth`（配線は `app.ts` の `syncListColumn`） |
+| 札と名前の幅の分け方 (名前を省略し、札は自然な幅を 40% まで) | `core/brand-fit.ts` `fitBrandWidths`（右の列の頭。History の枝の札は同じ決まりを CSS の flex で: `style.css` の B-1） |
 | あいまい検索 | `core/fuzzy-search.ts` |
 | 制御文字の検出 | `core/control-chars.ts` `hasControlCharacter` |
 | ファイルのパスを画面に出す・コピーする | `core/file-path-copy.ts` の `filePathDisplayText`（制御文字・書式文字を含むパスだけ可視化した表記。表示とコピーは同じものを使う）と `filePathClipboardText` / `fileReferenceClipboardText` |

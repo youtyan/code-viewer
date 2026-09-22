@@ -19,12 +19,20 @@ Requires Node.js 20 or newer. Development uses
   fixed at the head of the right column, next to the Files tree (the left
   sidebar holds the projects and agents), so switching tabs never moves them;
   they move to the left end of the tab row only when you fold the right column. On a narrow head the branch keeps its whole name up to about
-  40% of the width and the project name is shortened into the rest. A single click opens a file in a preview tab (italic) that
-  the next file replaces; double-click or **Keep open** keeps it. Middle-click,
+  40% of the width and the project name is shortened into the rest. The lists you pick
+  the main area from (Diff's changed files, History's commits and a selected worktree's
+  list) sit in a list column between the left sidebar and the main area; on those
+  screens the right column folds to its strip, whose button hides or shows the list
+  instead. The list column keeps the width you drag it to (320px at first) and narrows
+  to 240px when the main area would be narrower than 480px. History's branch labels keep
+  their whole name up to about 40% of the room they share with the subject. A terminal
+  tab showing an agent from another project reads `project · title`, and a narrow tab
+  shortens the project name first. A single click opens a file in a preview tab (italic)
+  that the next file replaces; double-click or **Keep open** keeps it. Middle-click,
   ⌘/Ctrl+click (tree, Diff / History file lists, Search results, palette rows),
-  Shift+Enter in the palette, or **Open in new tab** on a tree file opens it in a
-  kept tab of its own (an open one comes to the front and is kept); Shift+click
-  still opens a new browser window. Diff /
+  Shift+Enter in the palette, or **Open in new tab** on a tree file opens it in a kept
+  tab of its own (an open one comes to the front and is kept); Shift+click still opens a
+  new browser window. Diff /
   History / Worktrees / Data / Work log each have one tab that comes back as
   you left it. Files is not a tab: the folder view is what the left side shows
   when no tab is selected (the Files icon, `g r`, or a folder in the tree).
@@ -43,9 +51,9 @@ Requires Node.js 20 or newer. Development uses
   resize by dragging the line between, and press `g o` to switch sides. When
   the two sides would be narrower than 480px each, the right column folds to
   its strip while split (with a mark on its button) and comes back on one
-  side; opening it yourself keeps it open until a reload. History and a
-  selected worktree keep their lists there, so it stays open on those screens
-  and the right side is set aside if two sides no longer fit. The main area
+  side; opening it yourself keeps it open until a reload. On Diff, History and
+  a selected worktree the list column narrows first, and the right side is set
+  aside if two sides still do not fit. The main area
   scrolls in its own box (the page never scrolls, and Back / Forward return to
   the scroll position), and a breadcrumb too long for its row folds its middle
   folders into `…` (hover for the full path; click it, or Tab to it and press

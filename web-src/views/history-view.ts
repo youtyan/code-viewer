@@ -746,12 +746,15 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return (
       `<li class="history-item${active}${fresh}${ranged}" data-sha="${deps.escapeHtml(commit.sha)}">` +
       `<span class="history-graph-cell">${graph}</span>` +
+      // 件名と枝の札は 1 つの箱で幅を分け合う (style.css の B-1)。
+      `<span class="history-title">` +
       `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` +
+      refChipsHtml(commit) +
+      `</span>` +
       `<span class="meta2">` +
       `<span class="sha">${deps.escapeHtml(shortSha(commit.sha))}</span>` +
       `<span class="author">${deps.escapeHtml(commit.author)}</span>` +
       `<span class="when" title="${deps.escapeHtml(absoluteWhen(commit.when))}">${displayWhenHtml(commit.when)}</span>` +
-      refChipsHtml(commit) +
       `</span>` +
       `</li>`
     );
@@ -778,7 +781,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return (
       `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}">` +
       `<span class="history-graph-cell"></span>` +
+      `<span class="history-title">` +
       `<span class="subject" title="${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}">${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}</span>` +
+      `</span>` +
       `<span class="meta2">` +
       `<span class="sha">HEAD..worktree</span>` +
       `<span class="author">Working tree</span>` +

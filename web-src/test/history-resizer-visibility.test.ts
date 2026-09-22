@@ -2,9 +2,10 @@ import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 
-// #history-resizer (左の一覧パネルの幅の掴み) を出すのは、一覧パネルを持つページ
-// (data-history-list-panel) だけ。ページクラスの列挙ではなく属性で判定する
-// (ui-layout.md「ページクラスの列挙をレイアウト規則に書かない」)。
+// #history-resizer (本文の左の一覧の列の幅の掴み) を出すのは、一覧の列を出して
+// いる間 (data-list-column があり、data-list-column-hidden が無い) だけ。ページ
+// クラスの列挙ではなく属性で判定する (ui-layout.md「ページクラスの列挙を
+// レイアウト規則に書かない」)。
 beforeAll(() => {
   GlobalRegistrator.register();
 });
@@ -17,7 +18,8 @@ afterEach(() => {
   document.body.innerHTML = "";
   document.head.innerHTML = "";
   document.body.className = "";
-  document.body.removeAttribute("data-history-list-panel");
+  document.body.removeAttribute("data-list-column");
+  document.body.removeAttribute("data-list-column-hidden");
 });
 
 function installDom(): void {
@@ -42,9 +44,20 @@ describe("history resizer visibility", () => {
     expect(computed("history-resizer", "display")).toBe("none");
   });
 
-  test("shown on pages with the list panel attribute", () => {
+  test.each([
+    "sidebar",
+    "history",
+    "worktree",
+  ])("shown while the list column shows the %s list", (list) => {
     installDom();
-    document.body.toggleAttribute("data-history-list-panel", true);
+    document.body.dataset.listColumn = list;
     expect(computed("history-resizer", "display")).toBe("block");
+  });
+
+  test("hidden while the list column is hidden", () => {
+    installDom();
+    document.body.dataset.listColumn = "history";
+    document.body.toggleAttribute("data-list-column-hidden", true);
+    expect(computed("history-resizer", "display")).toBe("none");
   });
 });

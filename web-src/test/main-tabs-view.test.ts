@@ -15,14 +15,18 @@ import type {
   SerializedLayout,
   TabTarget,
 } from "../core/main-tabs";
+import { listColumnWidth } from "../core/list-column";
 import { panelColumnAction } from "../core/panel-column-policy";
+import { HISTORY_WIDTH } from "../core/panel-sizes";
 import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
 import { closeContextMenu } from "../views/context-menu";
 import {
+  COMFORTABLE_PANE_WIDTH,
   createMainTabsView,
   type MainTabsDeps,
   type MainTabsHandle,
   routeTarget,
+  SPLIT_DIVIDER_WIDTH,
 } from "../views/main-tabs/main-tabs-view";
 
 beforeAll(() => {
@@ -1310,33 +1314,91 @@ describe("main tabs view: 左右 2 面", () => {
     }
   });
 
-  // 2 面のときの右の列 (ui-layout.md の「2 面と右の列」)。一覧が右の列にある画面
-  // (History・選んでいる作業ツリー。右の列は一覧の幅 560) は右の列を畳まず、
-  // 本文が 2 面の下限に足りなければ右の面を預ける。一覧の無い画面 (右の列 240)
-  // は、ゆとりが無ければ右の列を畳む。本文の幅 = 窓 − 左のサイドバー 280。
+  // 2 面のときの一覧の列と右の列 (ui-layout.md の「一覧の列と右の列」)。一覧の
+  // 画面 (Diff・History・選んでいる作業ツリー) は一覧を本文の左の列に出し、右の列は
+  // 帯 (28) に畳んだまま。一覧の列は本文が 2 面のゆとり (961) に足りなければ詰めた
+  // 幅 (240) にし (core/list-column.ts。app.ts が決めて listColumnWidth で渡す)、
+  // それでも 2 面の下限 (641) に足りなければ右の面を預ける。一覧の無い画面 (Files。
+  // 右の列 240) は、ゆとりが無ければ右の列を畳む。本文の幅 = 窓 − 左のサイドバー
+  // 280 − 右の列 − 一覧の列。
   test.each([
-    { screen: "History", window: 1280, parked: true, action: "keep" },
-    { screen: "History", window: 1440, parked: true, action: "keep" },
-    { screen: "History", window: 1480, parked: true, action: "keep" },
-    { screen: "History", window: 1481, parked: false, action: "keep" },
-    { screen: "History", window: 1600, parked: false, action: "keep" },
-    { screen: "Diff", window: 1280, parked: false, action: "collapse" },
-    { screen: "Diff", window: 1440, parked: false, action: "collapse" },
-    { screen: "Diff", window: 1600, parked: false, action: "keep" },
-  ] as const)("$screen・窓 $window px: 右の面を預けるか $parked・右の列 $action", async ({
+    {
+      screen: "History",
+      window: 1188,
+      list: 240,
+      parked: true,
+      action: "keep",
+    },
+    {
+      screen: "History",
+      window: 1189,
+      list: 240,
+      parked: false,
+      action: "keep",
+    },
+    {
+      screen: "History",
+      window: 1280,
+      list: 240,
+      parked: false,
+      action: "keep",
+    },
+    {
+      screen: "History",
+      window: 1588,
+      list: 240,
+      parked: false,
+      action: "keep",
+    },
+    {
+      screen: "History",
+      window: 1589,
+      list: 320,
+      parked: false,
+      action: "keep",
+    },
+    { screen: "Diff", window: 1280, list: 240, parked: false, action: "keep" },
+    { screen: "Diff", window: 1600, list: 320, parked: false, action: "keep" },
+    {
+      screen: "Files",
+      window: 1280,
+      list: 0,
+      parked: false,
+      action: "collapse",
+    },
+    {
+      screen: "Files",
+      window: 1440,
+      list: 0,
+      parked: false,
+      action: "collapse",
+    },
+    { screen: "Files", window: 1600, list: 0, parked: false, action: "keep" },
+  ] as const)("$screen・窓 $window px: 一覧の列 $list px・右の面を預けるか $parked・右の列 $action", async ({
     screen,
     window,
+    list,
     parked,
     action,
   }) => {
-    const holdsList = screen === "History";
+    const holdsList = screen !== "Files";
+    const rail = 28;
     Object.defineProperty(document.documentElement, "clientWidth", {
       configurable: true,
       value: window - 280,
     });
     const panelColumn = document.createElement("div");
     panelColumn.getBoundingClientRect = () =>
-      new DOMRect(0, 0, holdsList ? 560 : 240, 80);
+      new DOMRect(0, 0, holdsList ? rail : 240, 80);
+    const listWidth = holdsList
+      ? listColumnWidth({
+          room: window - 280 - rail,
+          preferred: HISTORY_WIDTH.default,
+          compact: HISTORY_WIDTH.min,
+          inset: 0,
+          need: COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH,
+        }).width
+      : 0;
     const saved = {
       version: 3,
       focused: "left",
@@ -1372,16 +1434,22 @@ describe("main tabs view: 左右 2 面", () => {
       undefined,
       undefined,
       undefined,
-      { panelColumnHoldsList: () => holdsList },
+      {
+        panelColumnHoldsList: () => holdsList,
+        listColumnWidth: () => listWidth,
+      },
     );
     await handle.restore();
     const split = panes(handle).split;
     expect({
+      list: listWidth,
       parked: !split,
       action: panelColumnAction({
         split,
         holdsList,
-        autoHidden: false,
+        leftList: false,
+        // 一覧の画面では右の列はもう一覧のために畳んである。
+        autoHidden: holdsList,
         userHidden: false,
         userOptedOut: false,
         fitsWithColumn: handle.splitFitsWithPanelColumn(),
@@ -1392,11 +1460,12 @@ describe("main tabs view: 左右 2 面", () => {
             "The right side (1 tab) is set aside to make room for this screen's list",
           )
         : null,
-    }).toEqual({ parked, action, reason: parked ? true : null });
+    }).toEqual({ list, parked, action, reason: parked ? true : null });
   });
 
-  // 利用者の選んだ状態は上書きしない。一覧の画面に入る / 1 面に戻ると、自動で
-  // 畳んだものだけ開く。
+  // 利用者の選んだ状態は上書きしない。一覧の画面 (一覧を本文の左の列に出す) に
+  // 入ると右の列を帯に畳み、一覧の画面を出る / 1 面に戻ると、自動で畳んだものだけ
+  // 開く。
   test.each([
     {
       name: "2 面・ゆとり無し",
@@ -1449,14 +1518,67 @@ describe("main tabs view: 左右 2 面", () => {
       action: "keep",
     },
     {
-      name: "一覧の画面・自動で畳んでいた",
+      name: "一覧の画面に入った (1 面)",
+      split: false,
+      holdsList: true,
+      autoHidden: false,
+      userHidden: false,
+      userOptedOut: false,
+      fits: true,
+      action: "collapse",
+    },
+    {
+      name: "一覧の画面に入った (2 面・ゆとり有り・開くと決めていた)",
+      split: true,
+      holdsList: true,
+      autoHidden: false,
+      userHidden: false,
+      userOptedOut: true,
+      fits: true,
+      action: "collapse",
+    },
+    {
+      name: "一覧の画面・2 面のためにもう自動で畳んでいた",
       split: true,
       holdsList: true,
       autoHidden: true,
       userHidden: false,
       userOptedOut: false,
       fits: false,
+      action: "keep",
+    },
+    {
+      name: "一覧の画面から出た (1 面)・一覧のために畳んでいた",
+      split: false,
+      holdsList: false,
+      leftList: true,
+      autoHidden: true,
+      userHidden: false,
+      userOptedOut: false,
+      fits: false,
       action: "restore",
+    },
+    {
+      name: "一覧の画面から出た (2 面)・一覧のために畳んでいた",
+      split: true,
+      holdsList: false,
+      leftList: true,
+      autoHidden: true,
+      userHidden: false,
+      userOptedOut: false,
+      fits: true,
+      action: "restore",
+    },
+    {
+      name: "一覧の画面から出た・利用者が畳んでいる",
+      split: true,
+      holdsList: false,
+      leftList: true,
+      autoHidden: false,
+      userHidden: true,
+      userOptedOut: false,
+      fits: true,
+      action: "keep",
     },
     {
       name: "一覧の画面・利用者が畳んでいる",
@@ -1494,7 +1616,9 @@ describe("main tabs view: 左右 2 面", () => {
     action,
     ...state
   }) => {
-    expect(panelColumnAction({ ...state, fitsWithColumn: fits })).toBe(action);
+    expect(
+      panelColumnAction({ leftList: false, ...state, fitsWithColumn: fits }),
+    ).toBe(action);
   });
 
   // 2 面を置ける下限は、詰めたときの面の幅 (320) 2 つ分 + 仕切り 1 = 641px。
@@ -1775,6 +1899,65 @@ describe("main tabs view: 左右 2 面", () => {
       0.35,
       [">app.ts", ">landscape.png"],
     ]);
+  });
+
+  // 別のプロジェクトのペインを映すタブは「プロジェクト名 · 題」(二つに分けて
+  // 描き、狭いときはプロジェクト名から省略する)。title と閉じるの説明は全体。
+  test.each([
+    {
+      name: "今のプロジェクト",
+      project: { name: "repo-a", current: true },
+      parts: null,
+      full: "claude · sample agent task",
+    },
+    {
+      name: "別のプロジェクト",
+      project: { name: "repo-b", current: false },
+      parts: ["repo-b · ", "claude · sample agent task"],
+      full: "repo-b · claude · sample agent task",
+    },
+    {
+      name: "プロジェクトが分からない",
+      project: null,
+      parts: null,
+      full: "claude · sample agent task",
+    },
+  ])("ターミナルのタブの名前: $name", async ({ project, parts, full }) => {
+    const { handle, mount } = setup(
+      async () => null,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        terminalInfo: () => ({
+          label: "claude · sample agent task",
+          state: "working",
+          project,
+        }),
+      },
+    );
+    await handle.restore();
+    handle.openTerminal("shell-a1");
+    const tab = mount.querySelector<HTMLElement>(
+      '.main-tab[data-kind="terminal"]',
+    );
+    const name = tab?.querySelector(".main-tab-name");
+    expect({
+      parts:
+        name?.querySelector(".main-tab-project") === null
+          ? null
+          : [...(name?.children ?? [])].map((child) => child.textContent),
+      text: name?.textContent,
+      title: tab?.title,
+      // 閉じるボタンは支援技術から隠す (aria-hidden) ので、名前は title で持つ。
+      close: tab?.querySelector(".main-tab-close")?.getAttribute("title"),
+    }).toEqual({
+      parts,
+      text: full,
+      title: full,
+      close: `Close ${full}`,
+    });
   });
 
   test("route が画像のファイルなら画像のタブ", () => {

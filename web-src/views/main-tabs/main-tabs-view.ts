@@ -79,6 +79,12 @@ import {
 import type { AppRoute } from "../../core/routes";
 import { basenameOf } from "../../core/terminal-board";
 import { terminalImageExtension } from "../../core/terminal-images";
+import {
+  TAB_PROJECT_SEPARATOR,
+  type TerminalTabName,
+  type TerminalTabProject,
+  terminalTabName,
+} from "../../core/terminal-tab-name";
 import { isToolId } from "../../core/tools";
 import type { ContextMenuItem } from "../context-menu";
 import { showContextMenu } from "../context-menu";
@@ -107,7 +113,8 @@ export const COMFORTABLE_PANE_WIDTH = 480;
  */
 export const TIGHT_PANE_WIDTH = 320;
 /** 面の境界の線の幅 (px)。CSS の --split-divider-w へ JS が書く。 */
-const DIVIDER_WIDTH = 1;
+export const SPLIT_DIVIDER_WIDTH = 1;
+const DIVIDER_WIDTH = SPLIT_DIVIDER_WIDTH;
 const SIDES: readonly PaneSide[] = ["left", "right"];
 
 export type FrontChange = "navigate" | "sync" | "stay";
@@ -170,8 +177,16 @@ export type MainTabsDeps = {
    * (`main-tabs.json.broken-<時刻>`)。退避した先のパスを返す。
    */
   backupSaved(): Promise<string>;
-  /** ターミナルのタブの名前と状態 (エージェントを映していれば、その状態)。 */
-  terminalInfo(session: string): { label: string; state: AgentState | null };
+  /**
+   * ターミナルのタブの名前と状態 (エージェントを映していれば、その状態)。
+   * project はエージェントのペインが属するプロジェクト (別のプロジェクトなら
+   * タブの名前の前に付ける。core/terminal-tab-name.ts)。
+   */
+  terminalInfo(session: string): {
+    label: string;
+    state: AgentState | null;
+    project?: TerminalTabProject | null;
+  };
   /**
    * 面の前面のタブ・フォーカス・分割が変わった。how は URL の扱い:
    * navigate = これから route へ移る (URL はそちらが積む)、sync = URL から
@@ -185,6 +200,11 @@ export type MainTabsDeps = {
    * 右の列を畳まないので、右の面を預けたときの説明をそれに合わせる。
    */
   panelColumnHoldsList?(): boolean;
+  /**
+   * 本文の左の一覧の列の幅 (出していなければ 0)。本文の幅はタブ列の左端から
+   * これと右の列を引いた幅。
+   */
+  listColumnWidth?(): number;
 };
 
 export type MainTabsHandle = {
@@ -277,6 +297,11 @@ export type MainTabsHandle = {
   }): Promise<void>;
   flush(keepalive: boolean): void;
   localize(): void;
+  /**
+   * 本文の幅が、観測できない理由 (一覧の列の幅) で変わった。面の幅と 2 面の
+   * 可否を合わせ直す。
+   */
+  refit(): void;
   /** テストと確認用。 */
   layout(): Layout;
 };
@@ -507,14 +532,15 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   }
 
   /**
-   * 本文の横幅 (タブ列の左端から右の列の左まで)。面の最小幅はこの幅で数える
-   * (右の列を含めない)。
+   * 本文の横幅 (タブ列の左端から右の列の左まで、一覧の列を除く)。面の最小幅は
+   * この幅で数える (右の列と一覧の列を含めない)。
    */
   function mainWidth(): number {
     return (
       document.documentElement.clientWidth -
       deps.mount.getBoundingClientRect().left -
-      panelColumnWidth()
+      panelColumnWidth() -
+      (deps.listColumnWidth?.() ?? 0)
     );
   }
 
@@ -1201,9 +1227,20 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     changeAndGo((l) => splitRight(l, id));
   });
 
+  /** タブの名前 (別のプロジェクトのペインならプロジェクト名つき)。 */
+  function nameOf(target: TabTarget): TerminalTabName {
+    if (target.kind === "terminal") {
+      const info = deps.terminalInfo(target.session);
+      return terminalTabName(info.label, info.project ?? null);
+    }
+    const title = labelOf(target);
+    return { project: null, title, full: title };
+  }
+
   function renderTab(tab: Tab, active: boolean, side: PaneSide): HTMLElement {
     const current = text();
-    const label = labelOf(tab.target);
+    const tabName = nameOf(tab.target);
+    const label = tabName.full;
     const el = document.createElement("div");
     el.className = "main-tab";
     el.classList.toggle("main-tab-active", active);
@@ -1240,7 +1277,19 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       : iconSvg("main-tab-svg", iconOf(tab.target));
     const name = document.createElement("span");
     name.className = "main-tab-name";
-    name.textContent = label;
+    if (tabName.project === null) name.textContent = label;
+    else {
+      // 狭くなったら題より先にプロジェクト名を省略する (style.css の
+      // .main-tab-project)。
+      const project = document.createElement("span");
+      project.className = "main-tab-project";
+      project.textContent = `${tabName.project}${TAB_PROJECT_SEPARATOR}`;
+      const title = document.createElement("span");
+      title.className = "main-tab-title";
+      title.textContent = tabName.title;
+      name.classList.add("main-tab-name-project");
+      name.append(project, title);
+    }
     const closeButton = document.createElement("button");
     closeButton.type = "button";
     closeButton.className = "main-tab-close";
@@ -1722,6 +1771,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     restore,
     flush,
     localize: render,
+    refit: () => followGeometry(),
     layout: () => layout,
   };
 }

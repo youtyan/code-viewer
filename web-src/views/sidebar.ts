@@ -102,6 +102,11 @@ export type SidebarDeps = {
    * 区別するために呼ぶ (app.ts の 2 面のときの自動の畳み)。
    */
   onUserToggledSidebarHidden?(hidden: boolean): void;
+  /**
+   * 帯のボタンを押した。一覧を本文の左の列に出す画面なら、右の列の代わりに
+   * 一覧の列を出し入れして true (app.ts の toggleListColumn)。
+   */
+  toggleListColumn?(): boolean;
   openDirectoryInOsTitle(): string;
   omittedDirectoryBadge(reason: RepoTreeEntry["children_omitted_reason"]): {
     label: string;
@@ -389,6 +394,7 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function toggleSidebarHidden() {
+    if (deps.toggleListColumn?.()) return;
     const hidden = !STATE.sidebarHidden;
     applySidebarHidden(hidden);
     deps.onUserToggledSidebarHidden?.(hidden);

@@ -61,7 +61,7 @@ const EN: MainTabsText = {
   rightParked: (count) =>
     `The right side (${count} tab${count === 1 ? "" : "s"}) is hidden because the window is too narrow for two sides. It comes back when the window is wide enough.`,
   rightParkedForList: (count) =>
-    `The right side (${count} tab${count === 1 ? "" : "s"}) is set aside to make room for this screen's list in the right column. It comes back when you move to another screen or widen the window.`,
+    `The right side (${count} tab${count === 1 ? "" : "s"}) is set aside to make room for this screen's list in the left column. It comes back when you move to another screen or widen the window.`,
   resizeSplit: "Resize the two sides",
   dropToSplit: "Drop to split right",
   fileHistory: "File history",
@@ -98,7 +98,7 @@ const JA: MainTabsText = {
   rightParked: (count) =>
     `窓が 2 面を出せる幅より狭いので、右の面 (タブ ${count} 枚) を隠しています。2 面を出せる幅になれば戻ります。`,
   rightParkedForList: (count) =>
-    `右の列の一覧 (履歴・作業ツリー) のために、右の面 (タブ ${count} 枚) を預けています。別の画面に移るか窓を広げると戻ります。`,
+    `左の列の一覧 (差分・履歴・作業ツリー) のために、右の面 (タブ ${count} 枚) を預けています。別の画面に移るか窓を広げると戻ります。`,
   resizeSplit: "左右の幅を変える",
   dropToSplit: "ここに落とすと右に分割",
   fileHistory: "ファイルの履歴",

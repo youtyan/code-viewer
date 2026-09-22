@@ -100,6 +100,8 @@ import {
 import { isNativeLinkClick } from "./core/link-click";
 import type { PaneSide, TabTarget } from "./core/main-tabs";
 import { createNetworkActivityTracker } from "./core/network-activity";
+import { listColumnWidth } from "./core/list-column";
+import type { TerminalTabProject } from "./core/terminal-tab-name";
 import { panelColumnAction } from "./core/panel-column-policy";
 import {
   clampPanelSize,
@@ -229,12 +231,14 @@ import {
   readRenderedLines,
 } from "./views/line-ref-pill";
 import {
+  COMFORTABLE_PANE_WIDTH,
   createMainTabsView,
   type FrontChange,
   isPageKind,
   isRouteTab,
   type PanesView,
   routeTarget,
+  SPLIT_DIVIDER_WIDTH,
 } from "./views/main-tabs/main-tabs-view";
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { createProjectActions } from "./views/projects/project-actions";
@@ -1419,6 +1423,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
+  /**
+   * 一覧の列を隠している (一覧の画面の帯のボタン)。このセッションだけ (保存
+   * しない。右の列の畳みの設定とは別)。配線は syncListColumn。
+   */
+  let LIST_COLUMN_HIDDEN = false;
+  /** 一覧の列のいまの幅 (出していなければ 0)。2 面の幅の計算が引く。 */
+  let LIST_COLUMN_WIDTH = 0;
+  /** 一覧の列に出す一覧の要素 (body[data-list-column] の値ごと)。 */
+  const LIST_COLUMN_IDS = {
+    sidebar: "sidebar",
+    history: "history-panel",
+    worktree: "worktree-panel",
+  } as const;
+
   const MAIN_TABS = createMainTabsView({
     mount: (() => {
       const mount = document.getElementById("main-tabs");
@@ -1435,6 +1453,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!head) throw new Error("#panel-head is missing from index.html");
       return head;
     })(),
+    listColumnWidth: () => LIST_COLUMN_WIDTH,
     getLanguage: () => STATE.language,
     pageLabel: (page) => uiText().nav[page],
     navigate: (route, replace) =>
@@ -1687,6 +1706,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     fileCountText: (count) => uiText().diff.files(count),
     sidebarToggleTitle: panelColumnToggleTitle,
     onUserToggledSidebarHidden,
+    toggleListColumn,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
     omittedDirectoryBadge: (reason) => {
       const text = uiText().sidebar;
@@ -2118,6 +2138,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterClearTitle: string;
         hide: string;
         show: string;
+        hideList: string;
+        showList: string;
         autoHiddenForSplit: string;
         repoTarget: string;
         openDirectoryInOs: string;
@@ -2288,6 +2310,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterClearTitle: "Clear file filter",
         hide: "hide sidebar",
         show: "show sidebar",
+        hideList: "hide the list",
+        showList: "show the list",
         autoHiddenForSplit:
           "collapsed to make room for the two panes - open it to keep it open",
         repoTarget: "repository target",
@@ -2679,6 +2703,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterClearTitle: "ファイル絞り込みを解除",
         hide: "サイドバーを隠す",
         show: "サイドバーを表示",
+        hideList: "一覧を隠す",
+        showList: "一覧を表示",
         autoHiddenForSplit:
           "2 面のために畳みました。開くと、そのまま開いたままにします",
         repoTarget: "リポジトリの対象",
@@ -4389,12 +4415,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       (STATE.route.screen === "worktree" && !STATE.route.wt);
     document.body.classList.toggle("gdp-files-column-page", filesColumnRoute);
     if (filesColumnRoute) showFilesTreeInLeftColumn();
-    // 左に --history-w の一覧パネル (#history-panel / #worktree-panel) を持つ
-    // ページ。#history-resizer の表示がこの属性を見る。
-    document.body.toggleAttribute(
-      "data-history-list-panel",
-      historyPanelRoute || STATE.route.screen === "worktree",
-    );
     const repoTargetWrap =
       document.querySelector<HTMLElement>("#repo-target-wrap");
     if (!repoSidebarRoute && repoTargetWrap) {
@@ -5226,6 +5246,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     document.documentElement.style.setProperty("--history-w", `${cw}px`);
     STATE.historyWidth = cw;
     if (persist) patchSettings({ historyWidth: cw });
+    syncListColumn();
   }
 
   // History and sidebar resizers (drag right edge)
@@ -5325,14 +5346,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     handle: document.getElementById("history-resizer"),
     previewId: "history-resize-preview",
     resizingClass: "gdp-history-resizing",
-    // 一覧パネル (History か、選んでいる作業ツリー)。見えているほう。
-    column: () =>
-      [
-        document.getElementById("history-panel"),
-        document.getElementById("worktree-panel"),
-      ].find((panel) => !!panel && panel.getBoundingClientRect().width > 0) ??
-      null,
-    width: () => STATE.historyWidth,
+    // 一覧の列 (Diff の変更ファイル・History・選んでいる作業ツリー)。
+    column: () => {
+      const kind = listColumnKind();
+      return kind ? document.getElementById(LIST_COLUMN_IDS[kind]) : null;
+    },
+    // 詰めた幅で出しているときは、見えている端から掴む。
+    width: () => LIST_COLUMN_WIDTH || STATE.historyWidth,
     clamp: (w) => clampPanelSize(HISTORY_WIDTH, w),
     apply: (w) => applyHistoryWidth(w),
     reset: () => applyHistoryWidth(HISTORY_WIDTH.default),
@@ -7106,25 +7126,76 @@ window.GdpExpandLogic = GdpExpandLogic;
   let PANEL_COLUMN_HOLDS_LIST = false;
 
   /**
-   * 一覧が右の列にある画面を出しているか。CSS で右の列の幅を一覧の幅
-   * (--history-w) にする条件 (style.css の body.gdp-history-page と、
-   * data-worktree-overview の無い body.gdp-worktree-page) と同じ。
+   * 本文の左の一覧の列に出す一覧 (body[data-list-column] の値)。Diff は変更
+   * ファイル (#sidebar)、History はコミット、選んでいる作業ツリーは作業ツリーの
+   * 一覧。どれでもない画面は null。画面の印 (body の class と
+   * data-worktree-overview) から決める: 作業ツリーの選択の印は worktree-view.ts
+   * が付けるので、route からでは遅れる。
    */
-  function panelColumnHoldsList(): boolean {
+  function listColumnKind(): "sidebar" | "history" | "worktree" | null {
     const body = document.body;
-    return (
-      body.classList.contains("gdp-history-page") ||
-      (body.classList.contains("gdp-worktree-page") &&
-        !body.hasAttribute("data-worktree-overview"))
+    if (body.classList.contains("gdp-diff-page")) return "sidebar";
+    if (body.classList.contains("gdp-history-page")) return "history";
+    if (
+      body.classList.contains("gdp-worktree-page") &&
+      !body.hasAttribute("data-worktree-overview")
+    )
+      return "worktree";
+    return null;
+  }
+
+  function panelColumnHoldsList(): boolean {
+    return listColumnKind() !== null;
+  }
+
+  /**
+   * 一覧の列を出す / 隠す印と、出す幅 (利用者の幅か詰めた幅。決まりは
+   * core/list-column.ts) を合わせる。幅が変わったら 2 面の幅も合わせ直す。
+   */
+  function syncListColumn(): void {
+    const body = document.body;
+    const kind = listColumnKind();
+    if (kind) body.dataset.listColumn = kind;
+    else delete body.dataset.listColumn;
+    body.toggleAttribute(
+      "data-list-column-hidden",
+      !!kind && LIST_COLUMN_HIDDEN,
     );
+    let width = 0;
+    if (kind && !LIST_COLUMN_HIDDEN) {
+      // タブ列は左のサイドバーの右から右の列の左まで (= 一覧の列と本文)。
+      const room = document
+        .getElementById("main-tabs")
+        ?.getBoundingClientRect().width;
+      if (room === undefined) throw new Error("#main-tabs is missing");
+      const split = MAIN_TABS.panes().split;
+      width = listColumnWidth({
+        room,
+        preferred: STATE.historyWidth,
+        compact: HISTORY_WIDTH.min,
+        // History・作業ツリーの変更ファイルの木は、1 面なら本文の横に居座る
+        // (2 面では左の面の中)。
+        inset: kind === "sidebar" || split ? 0 : STATE.sbWidth,
+        need: split
+          ? COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH
+          : COMFORTABLE_PANE_WIDTH,
+      }).width;
+      document.documentElement.style.setProperty("--list-w", `${width}px`);
+    }
+    if (width === LIST_COLUMN_WIDTH) return;
+    LIST_COLUMN_WIDTH = width;
+    MAIN_TABS.refit();
   }
 
   /**
    * 右の列を畳む / 出すボタンの説明。2 面のために自動で畳んだときは、その理由も
-   * 出す (手で畳んだときと区別が付かないと、なぜ消えたのか分からない)。
+   * 出す (手で畳んだときと区別が付かないと、なぜ消えたのか分からない)。一覧の
+   * 画面では、このボタンは一覧の列を出し入れする (toggleListColumn)。
    */
   function panelColumnToggleTitle(hidden: boolean): string {
     const text = uiText().sidebar;
+    if (listColumnKind())
+      return LIST_COLUMN_HIDDEN ? text.showList : text.hideList;
     if (!hidden) return text.hide;
     return PANEL_COLUMN_AUTO_HIDDEN
       ? `${text.show} (${text.autoHiddenForSplit})`
@@ -7136,14 +7207,30 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 畳む・開く。どちらも変わっていなければ何もしない (利用者の操作を上書きしない)。
    */
   function syncPanelColumn(split: boolean = PANEL_COLUMN_SPLIT): void {
+    syncListColumn();
     const holdsList = panelColumnHoldsList();
     if (split === PANEL_COLUMN_SPLIT && holdsList === PANEL_COLUMN_HOLDS_LIST)
       return;
+    const leftList = PANEL_COLUMN_HOLDS_LIST && !holdsList;
     PANEL_COLUMN_SPLIT = split;
     PANEL_COLUMN_HOLDS_LIST = holdsList;
+    applyPanelColumnAction(split, holdsList, leftList);
+    // 一覧の画面を出て開いた: 2 面なら、開いた幅でもう一度決める。
+    if (leftList && !PANEL_COLUMN_AUTO_HIDDEN)
+      applyPanelColumnAction(split, holdsList, false);
+    // 帯のボタンの意味 (右の列か一覧の列か) が画面で変わる。
+    markPanelRailAutoHidden();
+  }
+
+  function applyPanelColumnAction(
+    split: boolean,
+    holdsList: boolean,
+    leftList: boolean,
+  ): void {
     const action = panelColumnAction({
       split,
       holdsList,
+      leftList,
       autoHidden: PANEL_COLUMN_AUTO_HIDDEN,
       userHidden: STATE.sidebarHidden && !PANEL_COLUMN_AUTO_HIDDEN,
       userOptedOut: PANEL_COLUMN_AUTO_HIDE_OFF,
@@ -7155,12 +7242,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     markPanelRailAutoHidden();
   }
 
-  /** 帯の頭に「2 面のため畳みました」の印と説明を出す / 外す。 */
+  /**
+   * 帯の頭に「2 面のため畳みました」の印と説明を出す / 外す。一覧の画面では
+   * 一覧のために畳んでいるので印は出さず、説明は一覧の列の出し入れにする。
+   */
   function markPanelRailAutoHidden(): void {
     const rail = document.querySelector<HTMLElement>("#panel-rail");
     rail?.classList.toggle(
       "panel-rail-auto-hidden",
-      PANEL_COLUMN_AUTO_HIDDEN && STATE.sidebarHidden,
+      PANEL_COLUMN_AUTO_HIDDEN && STATE.sidebarHidden && !listColumnKind(),
     );
     const toggle = document.querySelector<HTMLButtonElement>("#sidebar-toggle");
     if (!toggle) return;
@@ -7176,6 +7266,28 @@ window.GdpExpandLogic = GdpExpandLogic;
     attributes: true,
     attributeFilter: ["class", "data-worktree-overview"],
   });
+
+  // 窓・左のサイドバー・右の列の幅 (タブ列の幅) と、History の変更ファイルの
+  // 木の幅が変わったら、一覧の列の幅を決め直す。
+  const listColumnObserver = new ResizeObserver(() => syncListColumn());
+  for (const id of ["main-tabs", "sidebar"]) {
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`#${id} is missing from index.html`);
+    listColumnObserver.observe(el);
+  }
+
+  /**
+   * 帯のボタン (と、そのキー) を一覧の画面で押した: 右の列は一覧の画面の間は
+   * 帯のまま (開いても出す木が無い) なので、代わりに一覧の列を出し入れする。
+   * 一覧の画面でなければ false (右の列を開く / 畳む)。
+   */
+  function toggleListColumn(): boolean {
+    if (!listColumnKind()) return false;
+    LIST_COLUMN_HIDDEN = !LIST_COLUMN_HIDDEN;
+    syncListColumn();
+    markPanelRailAutoHidden();
+    return true;
+  }
 
   function onUserToggledSidebarHidden(hidden: boolean): void {
     if (!hidden && PANEL_COLUMN_SPLIT) {
@@ -7266,11 +7378,23 @@ window.GdpExpandLogic = GdpExpandLogic;
   function terminalTabInfo(session: string): {
     label: string;
     state: AgentState | null;
+    project: TerminalTabProject | null;
   } {
     const pane = paneForShell(session);
     const a = agentsText(STATE.language);
-    if (pane?.kind)
-      return { label: paneText(pane, a).headline, state: pane.state };
+    if (pane?.kind) {
+      // 別のプロジェクトのペインは、タブの名前の前にプロジェクト名を付ける。
+      const info = AGENT_MONITOR.snapshot().overview?.projects.find(
+        (item) => item.root === pane.project,
+      );
+      return {
+        label: paneText(pane, a).headline,
+        state: pane.state,
+        project: info
+          ? { name: info.name, current: info.server.status === "current" }
+          : null,
+      };
+    }
     return {
       label: shellName(
         session,
@@ -7283,6 +7407,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         (id) => !!paneForShell(id)?.kind,
       ),
       state: null,
+      project: null,
     };
   }
 

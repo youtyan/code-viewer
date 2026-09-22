@@ -13,11 +13,12 @@ export const NAV_WIDTH: PanelSize = { default: 280, min: 220, max: 440 };
 export const SIDEBAR_WIDTH: PanelSize = { default: 240, min: 180, max: 900 };
 
 /**
- * History のコミットの一覧 (#history-panel。作業ツリーの一覧 #worktree-panel も
- * 同じ幅を使う)。既定は件名が読める幅: 一覧の列が狭いと時刻・ハッシュに
- * 場所を取られて件名が数文字で切れる。
+ * 本文の左の一覧の列 (Diff の変更ファイル #sidebar・History のコミット
+ * #history-panel・選んでいる作業ツリーの #worktree-panel。3 つで同じ幅)。
+ * 名前と設定の鍵 (historyWidth) は、この列が History の一覧だけだった頃のまま。
+ * 下限は詰めた幅 (core/list-column.ts) を兼ねる: 題と札だけが読める幅。
  */
-export const HISTORY_WIDTH: PanelSize = { default: 560, min: 220, max: 800 };
+export const HISTORY_WIDTH: PanelSize = { default: 320, min: 240, max: 800 };
 
 export function clampPanelSize(size: PanelSize, value: number): number {
   return Math.max(size.min, Math.min(size.max, value));
