@@ -315,6 +315,16 @@ code-viewer
 
 The published CLI runs on Node.js 20 or newer.
 
+SQLite features (the data viewer and snapshots) use `better-sqlite3`, an
+optional dependency with a native build step. With npm 11 or newer, installing
+may print an `allow-scripts` warning that `better-sqlite3` has install scripts
+not yet covered by `allowScripts`. To use SQLite, approve it with
+`npm approve-scripts better-sqlite3` (the command the warning names) and
+install again, or run `npm rebuild better-sqlite3` where code-viewer is
+installed. If you do not use SQLite, you can ignore the warning; everything
+else works without it. `code-viewer doctor` reports whether the SQLite driver
+loads and what to do if it does not.
+
 Common options:
 
 - `--cwd <dir>` — repository to view (default: current working directory).

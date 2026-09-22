@@ -930,24 +930,58 @@ export async function lastCommitDateForPathAsync(
   return res.stdout.trim() || null;
 }
 
+/**
+ * HEAD のコミット。まだコミットの無いリポジトリ (git init 直後) は unborn で、
+ * git の失敗として記録しない (--quiet は、無いときに stderr を出さず exit 1)。
+ * それ以外の失敗は unborn と取り違えない。
+ */
+export async function headCommitAsync(
+  cwd: string,
+): Promise<
+  | { kind: "commit"; sha: string }
+  | { kind: "unborn" }
+  | { kind: "error"; error: string; result: { code: number; stderr: string } }
+> {
+  const head = await runGitAsync(
+    ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+    cwd,
+  );
+  if (head.code === 0) return { kind: "commit", sha: head.stdout.trim() };
+  if (head.code === 1 && !head.stderr.trim()) return { kind: "unborn" };
+  return {
+    kind: "error",
+    error: gitFailureMessage(head, "git rev-parse HEAD failed"),
+    result: head,
+  };
+}
+
+/** 空の木。ハッシュの形 (sha1 / sha256) はリポジトリに合わせて git に作らせる。 */
+export async function emptyTreeAsync(
+  cwd: string,
+): Promise<{ ok: true; tree: string } | { ok: false; error: string }> {
+  const res = await runGitAsync(
+    ["git", "hash-object", "-t", "tree", "/dev/null"],
+    cwd,
+  );
+  if (res.code === 0) return { ok: true, tree: res.stdout.trim() };
+  return { ok: false, error: gitFailureMessage(res, "git hash-object failed") };
+}
+
 export async function worktreeCommitDatesAsync(
   paths: string[],
   cwd: string,
 ): Promise<Map<string, string>> {
   const dates = new Map<string, string>();
   if (!paths.length) return dates;
-  const head = await runGitAsync(
-    ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
-    cwd,
-  );
+  const head = await headCommitAsync(cwd);
   // An unborn HEAD has no history; other failures must not look like that state.
-  if (head.code === 1 && !head.stderr.trim()) return dates;
-  if (head.code !== 0)
+  if (head.kind === "unborn") return dates;
+  if (head.kind === "error")
     throw errorWithCause(
-      `Cannot resolve HEAD for file commit dates: ${gitFailureMessage(head, "git rev-parse failed")}`,
-      head,
+      `Cannot resolve HEAD for file commit dates: ${head.error}`,
+      head.result,
     );
-  const sha = head.stdout.trim();
+  const sha = head.sha;
   const pending = paths.values();
   // Pin every lookup to one commit and bound the process count for wide directories.
   await Promise.all(
