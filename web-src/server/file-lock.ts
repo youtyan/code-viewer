@@ -170,7 +170,10 @@ export function tryAcquireFileLock(
       if (errno(error) !== "ENOENT") throw error;
     }
   }
-  throw new Error(`lock ${file} kept changing`);
+  // 3 回とも「置けなかったが、読んだときには消えていた」= 他の持ち主が
+  // 取っては放している。取り合いが激しいだけで失敗ではないので、呼び出し側
+  // (withFileLock) に次の周回で取り直させる。
+  return null;
 }
 
 /** 読んで・変えて・書く短い処理を囲む。持てるまで待ち、持てなければ投げる。 */
