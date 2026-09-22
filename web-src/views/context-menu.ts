@@ -5,7 +5,7 @@
 // 1 つの関数に埋まっていて外から使えない。ここは**中身を渡す側と、開いて閉じる
 // 側を分けただけ**で、新しい見た目は作らない。
 //
-// 同時に 2 枚開かない。開いている間に外側をクリックするか Escape を押すか、
+// 同時に 2 枚開かない。開いている間に外側をクリックするか Escape か Tab を押すか、
 // 画面が動いたら閉じる。閉じたらフォーカスは既定で開いたボタンへ戻す
 // (キーボードで辿ってきた人が、メニューを閉じた瞬間に居場所を失わないように)。
 
@@ -112,7 +112,10 @@ export function showContextMenu(
   // ここで押す (既定の動作を止めるので 2 回は押されない)。使ったキーはページの
   // キー操作へ渡さない。
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "Escape") {
+    // Tab も Escape と同じく閉じて戻す。項目の中を Tab で進めると、開いたまま
+    // メニューの外 (後ろの画面) へ抜けていた。
+    if (event.key === "Escape" || event.key === "Tab") {
+      event.preventDefault();
       event.stopPropagation();
       closeContextMenu();
       focusReturn?.focus();

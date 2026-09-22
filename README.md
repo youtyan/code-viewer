@@ -40,7 +40,8 @@ Requires Node.js 20 or newer. Development uses
   and the right side is set aside if two sides no longer fit. The main area
   scrolls in its own box (the page never scrolls, and Back / Forward return to
   the scroll position), and a breadcrumb too long for its row folds its middle
-  folders into `…` (hover for the full path). Image
+  folders into `…` (hover for the full path; click it, or Tab to it and press
+  Enter, to pick a folded folder). Image
   files open in an image tab (zoom, previous / next, copy path, open folder).
   The annotations, Copy AI context, auto-update, cancel-requests, theme and
   repository-page buttons are at the right of the bottom bar.

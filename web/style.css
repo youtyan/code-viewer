@@ -74,7 +74,10 @@
   /* 選んでいる行の光。面の内側にだけ付け、箱の寸法を変えない。 */
   --glow-select: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 30%, transparent),
                  inset 0 0 16px color-mix(in srgb, var(--color-accent) 14%, transparent);
-  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--color-accent) 70%, transparent);
+  /* キーで届いた部品の輪。アクセントを薄めずに使う: 7 割に薄めた輪はライトの
+     地 (hover・選んでいる行も) で 3:1 に届かず、見えにくかった
+     (web-src/test/focus-ring-contrast.test.ts)。 */
+  --focus-ring: 0 0 0 2px var(--color-accent);
   --motion-fast: 0.12s;
 
   /* ---- 2. 互換の層 (値は 1 への参照だけ) ---- */
@@ -17251,6 +17254,16 @@ button.brand[aria-expanded="true"] {
   text-decoration: none;
 }
 .view-strip-item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+/* キーで届くのにブラウザの既定の輪だった部品 (色も太さもほかと違った): タブ列の
+   ＋と分割・右の列を畳むボタン・左のサイドバーの案内のリンク・パンくずの段と「…」。 */
+.main-tabs-action:focus-visible,
+#sidebar-toggle:focus-visible,
+.nav-note-link:focus-visible,
+.gdp-file-breadcrumb-part:focus-visible,
+.gdp-file-breadcrumb-ellipsis:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }

@@ -6,8 +6,13 @@
 // .gdp-file-breadcrumb-current と .gdp-file-breadcrumb-sep)。畳んだ段とその間の
 // 区切りを隠し、畳んだ所に「…」(title に全体のパス) を置く。幅が変わるたびに
 // 測り直す。
+//
+// 「…」は押せる (Tab で届く・Enter / Space / クリック)。押すと畳んだ段のメニューを
+// 開き、選ぶとその段を押したのと同じ。隠した段はキーでも読み上げでも届かない
+// ので、ここが畳んだ段への唯一の入口になる。読み上げの名前は全体のパス。
 
 import { collapsedBreadcrumbRange } from "../core/breadcrumb-fit";
+import { showContextMenu } from "./context-menu";
 
 const CRUMB_SELECTOR =
   ":scope > .gdp-file-breadcrumb-part, :scope > .gdp-file-breadcrumb-current";
@@ -32,12 +37,37 @@ export function fitBreadcrumb(nav: HTMLElement, fullPath: string): void {
   ellipsis.className = "gdp-file-breadcrumb-ellipsis";
   ellipsis.textContent = "…";
   ellipsis.title = fullPath;
+  ellipsis.tabIndex = 0;
+  ellipsis.setAttribute("role", "button");
+  ellipsis.setAttribute("aria-haspopup", "menu");
+  ellipsis.setAttribute("aria-label", fullPath);
+  const openHidden = () => {
+    const hidden = Array.from(
+      nav.querySelectorAll<HTMLElement>(CRUMB_SELECTOR),
+    ).filter((crumb) => crumb.hidden);
+    showContextMenu(
+      ellipsis,
+      hidden.map((crumb) => ({
+        label: crumb.textContent ?? "",
+        onSelect: () => crumb.click(),
+      })),
+    );
+  };
+  ellipsis.addEventListener("click", openHidden);
+  ellipsis.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openHidden();
+  });
 
   const refit = () => {
     const crumbs = Array.from(
       nav.querySelectorAll<HTMLElement>(CRUMB_SELECTOR),
     );
     if (crumbs.length === 0) return;
+    // 測り直しで「…」を外して付け直すので、フォーカスがあれば戻す (幅が
+    // 変わるたびにキーの居場所が消えないように)。
+    const focused = document.activeElement === ellipsis;
     // 一度全部を出してから測る (前に畳んだ分を戻す)。
     ellipsis.remove();
     nav.classList.remove("is-collapsed");
@@ -69,6 +99,7 @@ export function fitBreadcrumb(nav: HTMLElement, fullPath: string): void {
     }
     nav.insertBefore(ellipsis, crumbs[range.from] ?? null);
     nav.classList.add("is-collapsed");
+    if (focused) ellipsis.focus({ preventScroll: true });
   };
 
   if (typeof ResizeObserver === "undefined") return;

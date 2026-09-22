@@ -374,10 +374,11 @@ export function mountProjectSwitcher(
     button.setAttribute("aria-expanded", "false");
   }
 
+  // 読み上げの名前はボタンの中身 (プロジェクト名と枝)。aria-label を付けると
+  // 中身を上書きし、名前も枝も読まれなかった (省略した全体も中身の文字で読む)。
+  // 何をするボタンかは説明 (title) で伝える。
   function localize(): void {
-    const title = deps.getText().switcherButtonTitle(deps.shortcutLabel());
-    button.title = title;
-    button.setAttribute("aria-label", title);
+    button.title = deps.getText().switcherButtonTitle(deps.shortcutLabel());
     if (panel) {
       close();
       open();

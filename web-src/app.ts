@@ -45,6 +45,7 @@ import {
   focusMainPanel,
   focusSidebarPanel,
   isEditableKeyTarget,
+  isEnterForFocusedControl,
   isPageKeymapBlockedKey,
   keymapScope,
   mainScrollBox,
@@ -5658,6 +5659,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     // 名前は下パネルにターミナルがあった頃のまま (保存したキー割り当てを
     // 壊さない)。いまはフォーカスのある面の「＋」のメニューを開く。
     if (action === "toggle-terminal-panel") {
+      newTabMenuFocusReturn =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
       MAIN_TABS.openNewTabMenu();
       return true;
     }
@@ -5782,7 +5787,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       {
         scope,
         editable: isEditableKeyTarget(targetEl),
-        pageKeymapBlocked: isPageKeymapBlockedKey(targetEl, e.metaKey),
+        pageKeymapBlocked:
+          isPageKeymapBlockedKey(targetEl, e.metaKey) ||
+          isEnterForFocusedControl(targetEl, e.key),
         composing: isImeComposing(e),
         paletteOpen: isPaletteOpen(),
         pendingG:
@@ -6860,6 +6867,12 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
+   * キー (Ctrl+`) で「＋」のメニューを開くときの、フォーカスの戻し先。
+   * タブ列の openNewTabMenu が同期で openNewTabMenu (下) を呼ぶ間だけ持つ。
+   */
+  let newTabMenuFocusReturn: HTMLElement | null = null;
+
+  /**
    * タブ列の「＋」のメニュー: ファイルを開く・新しいシェル・既存のセッション
    * (このサーバのシェルと、このプロジェクトの tmux のペイン)。一覧は開く
    * 直前に取り直す。取れなかったら、理由をメニューの 1 行に出す (ファイルと
@@ -6869,6 +6882,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     side: PaneSide,
     anchor: HTMLElement,
   ): Promise<void> {
+    const back = newTabMenuFocusReturn;
+    newTabMenuFocusReturn = null;
     let list: ShellListResponse | Error;
     try {
       list = await TERMINAL_VIEW.loadShells();
@@ -6880,7 +6895,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       list = error instanceof Error ? error : new Error(String(error));
     }
     if (!anchor.isConnected) return;
-    showContextMenu(anchor, newTabMenuItems(side, list));
+    // キーで開いたなら、Escape で戻す先はキーを押した場所 (＋のボタンではない)。
+    // 何も選んでいなかった・もう無いなら＋のボタン (既定)。
+    showContextMenu(
+      anchor,
+      newTabMenuItems(side, list),
+      back && back !== document.body && back.isConnected
+        ? { focusReturn: back }
+        : {},
+    );
   }
 
   function newTabMenuItems(

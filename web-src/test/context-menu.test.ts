@@ -106,3 +106,50 @@ describe("context menu and the keyboard", () => {
     ]);
   });
 });
+
+// Escape と Tab は閉じて、フォーカスを戻す先へ戻す (既定は開いたボタン、
+// focusReturn で上書き)。Tab で項目を進めると、開いたまま後ろの画面へ抜けていた。
+// 使ったキーはページのキー操作へ渡さない。
+describe("context menu closes on Escape and Tab", () => {
+  test.each([
+    { key: "Escape", shift: false, returnTo: "anchor" },
+    { key: "Tab", shift: false, returnTo: "anchor" },
+    { key: "Tab", shift: true, returnTo: "anchor" },
+    { key: "Escape", shift: false, returnTo: "origin" },
+    { key: "Tab", shift: false, returnTo: "origin" },
+  ])("$key (shift: $shift) returns focus to the $returnTo", ({
+    key,
+    shift,
+    returnTo,
+  }) => {
+    document.body.innerHTML =
+      '<button id="origin">origin</button><button id="anchor">+</button>';
+    const anchor = document.getElementById("anchor") as HTMLElement;
+    const origin = document.getElementById("origin") as HTMLElement;
+    const reachedPage: string[] = [];
+    const page = (event: KeyboardEvent) => reachedPage.push(event.key);
+    document.addEventListener("keydown", page);
+    showContextMenu(
+      anchor,
+      [
+        { label: "Open a file", onSelect: () => undefined },
+        { label: "New shell", onSelect: () => undefined },
+      ],
+      returnTo === "origin" ? { focusReturn: origin } : {},
+    );
+    const event = new KeyboardEvent("keydown", {
+      key,
+      shiftKey: shift,
+      bubbles: true,
+      cancelable: true,
+    });
+    (document.activeElement ?? document.body).dispatchEvent(event);
+    document.removeEventListener("keydown", page);
+    expect([
+      isContextMenuOpen(),
+      document.activeElement?.id,
+      event.defaultPrevented,
+      reachedPage,
+    ]).toEqual([false, returnTo, true, []]);
+  });
+});

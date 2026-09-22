@@ -166,6 +166,10 @@ function installFakeDom() {
   const viewHead = new FakeElement("div", "view-head");
   const nameRow = new FakeElement("div");
   nameRow.className = "view-head-row";
+  // プロジェクト名の切替。畳むボタンはこの後 (右端) に置く。
+  const brand = new FakeElement("button", "project-switcher");
+  brand.className = "brand";
+  nameRow.appendChild(brand);
   viewHead.appendChild(nameRow);
   // 画面の入口の絵柄。畳んだときだけ帯 (#panel-rail) へ縦に移る。
   const strip = new FakeElement("nav");
@@ -305,6 +309,8 @@ describe("project name and view entries placement", () => {
       host: "leftHead" as const,
       toggleHost: "nameRow" as const,
       stripHost: "viewHead" as const,
+      toggleAt: "last",
+      stripAt: "first",
     },
     {
       name: "a screen without its own list: still the head of the left column",
@@ -313,6 +319,8 @@ describe("project name and view entries placement", () => {
       host: "leftHead" as const,
       toggleHost: "nameRow" as const,
       stripHost: "viewHead" as const,
+      toggleAt: "last",
+      stripAt: "first",
     },
     {
       // 絵柄はタブ列の左へ一緒に移さない (2 面の狭い面でタブが潰れた)。
@@ -322,8 +330,18 @@ describe("project name and view entries placement", () => {
       host: "tabsLead" as const,
       toggleHost: "rail" as const,
       stripHost: "rail" as const,
+      toggleAt: "first",
+      stripAt: "last",
     },
-  ])("$name", ({ hidden, screenHidesTree, host, toggleHost, stripHost }) => {
+  ])("$name", ({
+    hidden,
+    screenHidesTree,
+    host,
+    toggleHost,
+    stripHost,
+    toggleAt,
+    stripAt,
+  }) => {
     const dom = installFakeDom();
     dom.sidebar.visible = !screenHidesTree;
     const sidebar = createSidebarForTest({ sidebarHidden: hidden });
@@ -334,6 +352,20 @@ describe("project name and view entries placement", () => {
         (dom[toggleHost] as unknown as HTMLElement),
       dom.strip.parentElement === dom[stripHost],
     ]).toEqual([true, true, true]);
+    // 置き場所の中の順は見た目の順 (Tab で移る順): 名前の行では名前の後、帯では
+    // 頭。右の列の頭では絵柄が 1 段目なので名前の行より前。
+    const at = (element: FakeElement) => {
+      const siblings = element.parentElement?.children ?? [];
+      return siblings[0] === element
+        ? "first"
+        : siblings[siblings.length - 1] === element
+          ? "last"
+          : "middle";
+    };
+    const toggle = document.querySelector(
+      "#sidebar-toggle",
+    ) as unknown as FakeElement;
+    expect([at(toggle), at(dom.strip)]).toEqual([toggleAt, stripAt]);
   });
 
   test("folding and unfolding moves the view icons to the rail and back", () => {
@@ -362,9 +394,9 @@ describe("sidebar toggle placement", () => {
       toggle?.parentElement === (dom.rail as unknown as HTMLElement),
       dom.viewHead.parentElement === dom.tabsLead,
       toggle?.offsetParent === null,
-      toggle?.getAttribute("aria-pressed"),
+      toggle?.getAttribute("aria-expanded"),
       toggle?.innerHTML.includes("<svg"),
-    ]).toEqual([true, true, false, "true", true]);
+    ]).toEqual([true, true, false, "false", true]);
 
     toggle?.click();
     expect([
@@ -476,8 +508,8 @@ describe("sidebar toggle placement", () => {
       toggle === null,
       toggle?.parentElement === (dom.rail as unknown as HTMLElement),
       toggle?.offsetParent === null,
-      toggle?.getAttribute("aria-pressed"),
+      toggle?.getAttribute("aria-expanded"),
       toggle?.innerHTML.includes("<svg"),
-    ]).toEqual([false, true, false, "true", true]);
+    ]).toEqual([false, true, false, "false", true]);
   });
 });

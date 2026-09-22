@@ -285,7 +285,13 @@ export function createSidebar(deps: SidebarDeps) {
     let button = document.querySelector<HTMLButtonElement>("#sidebar-toggle");
     if (!button) button = createSidebarToggleButton();
     bindSidebarToggleButton(button);
-    button.setAttribute("aria-pressed", STATE.sidebarHidden ? "true" : "false");
+    // 文言が「畳む / 出す」と状態で変わるので、押した状態 (aria-pressed) は
+    // 付けない (「出す、押されている」と読まれて逆に聞こえた)。右の列が
+    // 出ているかを開閉 (aria-expanded) で伝える。
+    button.setAttribute(
+      "aria-expanded",
+      STATE.sidebarHidden ? "false" : "true",
+    );
     const toggleTitle = sidebarToggleTitle(STATE.sidebarHidden);
     button.title = toggleTitle;
     button.setAttribute("aria-label", toggleTitle);
@@ -293,11 +299,17 @@ export function createSidebar(deps: SidebarDeps) {
     return button;
   }
 
-  function attachSidebarToggle(host: HTMLElement) {
+  /**
+   * 置き場所の中の順は見た目の順 (Tab で移る順)。名前の行では名前の後 (右端)、
+   * 帯では頭 (上端)。CSS の order で見た目だけ並べ替えると、Tab が右端の
+   * ボタンから名前へ戻った。
+   */
+  function attachSidebarToggle(host: HTMLElement, first: boolean) {
     const button = ensureSidebarToggleButton();
     syncSidebarToggleIcon(button);
     if (button.parentElement === host) return;
-    host.prepend(button);
+    if (first) host.prepend(button);
+    else host.append(button);
   }
 
   /**
@@ -327,16 +339,18 @@ export function createSidebar(deps: SidebarDeps) {
           .map(([name]) => name)
           .join(", ")} in index.html`,
       );
-    attachSidebarToggle(STATE.sidebarHidden ? rail : row);
+    attachSidebarToggle(STATE.sidebarHidden ? rail : row, STATE.sidebarHidden);
     const host = STATE.sidebarHidden ? lead : leftHead;
     if (head.parentElement !== host) host.append(head);
     // 畳んだときは画面の入口の絵柄 (.view-strip) だけを帯へ縦に並べる (帯 =
     // 絵柄の列)。タブ列の左へ一緒に移すと、2 面の狭い面でタブの列が 1 枚も
-    // 読めない幅まで潰れた (1280 の 2 面で 38px)。
+    // 読めない幅まで潰れた (1280 の 2 面で 38px)。右の列の頭では絵柄が 1 段目
+    // なので、名前の行より前に置く (Tab で移る順を見た目の順にそろえる)。
     const strip = document.querySelector<HTMLElement>(".view-strip");
     if (strip) {
-      const stripHost = STATE.sidebarHidden ? rail : head;
-      if (strip.parentElement !== stripHost) stripHost.append(strip);
+      if (STATE.sidebarHidden) {
+        if (strip.parentElement !== rail) rail.append(strip);
+      } else if (head.firstElementChild !== strip) head.prepend(strip);
     }
     placeSidebarFilter();
   }

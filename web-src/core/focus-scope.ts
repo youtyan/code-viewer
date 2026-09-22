@@ -28,6 +28,27 @@ export function isPageKeymapBlockedKey(
   return target.closest(".xterm") !== null && !metaKey;
 }
 
+// Tab で届く、Enter で押せる部品。ページのキー割り当ての Enter (木の項目を開く) は
+// 部品の外 (本文・木の行・何も選んでいないとき) のためのもので、ここで拾うと
+// ボタンが押されない (New agent・画面の入口・右の列を畳むボタンが Enter で
+// 動かず、木のファイルが開いていた)。木の行のリンクは tabIndex -1 で Tab に
+// 入らないので、今までどおりページの Enter が開く。
+const ENTER_CONTROL_SELECTOR =
+  'button, a[href], select, summary, [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="option"]';
+
+/** Enter をページのキー割り当てへ渡さず、フォーカスのある部品に押させるか。 */
+export function isEnterForFocusedControl(
+  target: Element | null,
+  key: string,
+): boolean {
+  if (key !== "Enter" || !target || typeof target.matches !== "function")
+    return false;
+  return (
+    (target as HTMLElement).tabIndex >= 0 &&
+    target.matches(ENTER_CONTROL_SELECTOR)
+  );
+}
+
 /** 修飾キーを問わず塞がれる対象か (Meta の例外を含めない)。 */
 export function isPageKeymapBlockedTarget(target: Element | null): boolean {
   return isPageKeymapBlockedKey(target, false);
