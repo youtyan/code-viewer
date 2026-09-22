@@ -143,6 +143,42 @@ describe("main tabs contract: sameTarget", () => {
       right: { kind: "file", path: "sample/alpha.ts", line: 4 } as TabTarget,
       expected: true,
     },
+    // 版が違えば別のタブ。作業ツリーの版は ref を持たない。
+    {
+      name: "the worktree and a commit of one file",
+      left: FILE_A,
+      right: {
+        kind: "file",
+        path: "sample/alpha.ts",
+        ref: "1a2b3c4d5e6f",
+      } as TabTarget,
+      expected: false,
+    },
+    {
+      name: "two commits of one file",
+      left: { kind: "file", path: "sample/alpha.ts", ref: "HEAD" } as TabTarget,
+      right: {
+        kind: "file",
+        path: "sample/alpha.ts",
+        ref: "1a2b3c4d5e6f",
+      } as TabTarget,
+      expected: false,
+    },
+    {
+      name: "different lines of one commit are one target",
+      left: {
+        kind: "file",
+        path: "sample/alpha.ts",
+        ref: "HEAD",
+        line: 2,
+      } as TabTarget,
+      right: {
+        kind: "file",
+        path: "sample/alpha.ts",
+        ref: "HEAD",
+      } as TabTarget,
+      expected: true,
+    },
     {
       name: "different file paths",
       left: FILE_A,
@@ -490,6 +526,76 @@ describe("main tabs contract: splitBlocker", () => {
     },
   ])("$name → $expected", ({ state, expected }) => {
     expect(splitBlocker(state)).toBe(expected);
+  });
+});
+
+// 版が違えば別のタブ (History から開いたコミットの版が、作業ツリーの版のタブを差し替えない)。
+describe("main tabs contract: file versions", () => {
+  const AT_COMMIT: TabTarget = {
+    kind: "file",
+    path: "sample/alpha.ts",
+    ref: "1a2b3c4d5e6f",
+  };
+  test.each([
+    {
+      name: "a commit next to the worktree version is a new tab",
+      start: one([tab("a", FILE_A)]),
+      target: AT_COMMIT,
+      ids: ["a", "new"],
+    },
+    {
+      name: "the same commit again reuses its tab",
+      start: one([tab("a", FILE_A), tab("c", AT_COMMIT)], "a"),
+      target: { ...AT_COMMIT, line: 3 } as TabTarget,
+      ids: ["a", "c"],
+    },
+    {
+      name: "the worktree version next to a commit is a new tab",
+      start: one([tab("c", AT_COMMIT)]),
+      target: FILE_A,
+      ids: ["c", "new"],
+    },
+  ])("$name", ({ start, target, ids }) => {
+    const result = open(start, target, { newId: () => "new", preview: false });
+    expect(paneAt(result, "left")?.tabs.map((item) => item.id)).toEqual(ids);
+    expectValid(result);
+  });
+
+  test("a commit version is saved with its ref and read back", () => {
+    const state = one([tab("a", FILE_A), tab("c", AT_COMMIT)]);
+    const parsed = parseLayout(
+      JSON.parse(JSON.stringify(serializeLayout(state))),
+    );
+    expect(parsed.layout.panes.left.tabs.map((item) => item.target)).toEqual([
+      FILE_A,
+      AT_COMMIT,
+    ]);
+  });
+
+  test.each([
+    { name: "an empty ref", ref: "" },
+    { name: "the worktree written as a ref", ref: "worktree" },
+    { name: "a non-string ref", ref: 7 },
+  ])("rejects $name", ({ ref }) => {
+    expect(() =>
+      parseLayout({
+        version: 4,
+        focused: "left",
+        panes: [
+          {
+            side: "left",
+            activeId: "a",
+            tabs: [
+              {
+                id: "a",
+                preview: false,
+                target: { kind: "file", path: "sample/alpha.ts", ref },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(`file target has a bad ref: ${JSON.stringify(ref)}`);
   });
 });
 
@@ -1440,7 +1546,7 @@ describe("main tabs contract: persistence", () => {
     const serialized = serializeLayout(state);
     const parsed = parseLayout(JSON.parse(JSON.stringify(serialized)));
     expect(serialized).toEqual({
-      version: 3,
+      version: 4,
       focused: "right",
       panes: [
         {
@@ -1513,7 +1619,7 @@ describe("main tabs contract: persistence", () => {
         panes: [{ side: "left", activeId: null, tabs: [] }],
       },
       message:
-        "main tab layout is broken (1 problem):\n- version is 0, expected one of 1, 2, 3",
+        "main tab layout is broken (1 problem):\n- version is 0, expected one of 1, 2, 3, 4",
     },
     {
       name: "three panes",
@@ -1651,7 +1757,7 @@ describe("main tabs contract: persistence", () => {
       ],
     };
     expect(thrownMessage(() => parseLayout(raw))).toBe(
-      'main tab layout is broken (7 problems):\n- version is 7, expected one of 1, 2, 3\n- focused is "middle"\n- panes[0].tabs[1]: id "same" is also used at panes[0].tabs[0]\n- panes[0].tabs[3]: page {"kind":"page","page":"diff"} is also open at panes[0].tabs[2]\n- panes[0].tabs[4]: file target has no path\n- panes[0] has 2 preview tabs (same, same); at most 1\n- panes[0].activeId "missing" is not a tab of the pane',
+      'main tab layout is broken (7 problems):\n- version is 7, expected one of 1, 2, 3, 4\n- focused is "middle"\n- panes[0].tabs[1]: id "same" is also used at panes[0].tabs[0]\n- panes[0].tabs[3]: page {"kind":"page","page":"diff"} is also open at panes[0].tabs[2]\n- panes[0].tabs[4]: file target has no path\n- panes[0] has 2 preview tabs (same, same); at most 1\n- panes[0].activeId "missing" is not a tab of the pane',
     );
   });
 });

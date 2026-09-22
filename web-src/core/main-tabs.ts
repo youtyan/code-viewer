@@ -41,7 +41,16 @@ export const PAGE_KINDS = [
 export type PageKind = (typeof PAGE_KINDS)[number];
 
 export type TabTarget =
-  | { kind: "file"; path: string; line?: SourceLineTarget }
+  | {
+      kind: "file";
+      path: string;
+      line?: SourceLineTarget;
+      /**
+       * 作業ツリー以外の版 (コミット・ブランチ・HEAD)。作業ツリーなら持たない。
+       * 版が違えば別のタブ (sameTarget)。
+       */
+      ref?: string;
+    }
   | { kind: "terminal"; session: string }
   | { kind: "image"; path: string }
   | { kind: "page"; page: PageKind };
@@ -116,15 +125,21 @@ export type MoveResult =
     };
 
 /**
+ * 4: ファイルのタブが版 (ref) を持つ。同じパスでも版が違えば別のタブ。
+ *    3 までしか読めない古いアプリは版を読まずに同じパスのタブを 2 つと数え、
+ *    壊れた配置として捨てるので、版を分けて「版が違う」と報告させる。
  * 3: 右の面に file を置け、左右で同じファイルを開ける (同じ中身は面ごとに 1 つ)。
  *    形は 2 と同じ。版を分けたのは、2 までしか読めない古いアプリがこの配置を
  *    読まずに「版が違う」と報告するため (左右の同じファイルを壊れた配置として
  *    黙って捨てさせない)。
  * 2: repo の page タブを廃止し、左の面の activeId に null (本文の既定) を
  *    許した。
- * 1・2 の値も読む (repo のタブは落とし、右の面の page のタブは左へ移す)。
+ * 1〜3 の値も読む (repo のタブは落とし、右の面の page のタブは左へ移す。3 までのファイルのタブは作業ツリーの版)。
  */
-export const LAYOUT_VERSION = 3;
+export const LAYOUT_VERSION = 4;
+
+/** 作業ツリーの版。ファイルのタブの target には書かない (ref が無い = 作業ツリー)。 */
+export const WORKTREE_REF = "worktree";
 
 /** その種類のタブをその面に置けるか。page (本文の画面) は左の面だけ。 */
 export function canPlace(target: TabTarget, side: PaneSide): boolean {
@@ -142,7 +157,12 @@ export function emptyLayout(): Layout {
 export function sameTarget(a: TabTarget, b: TabTarget): boolean {
   switch (a.kind) {
     case "file":
-      return b.kind === "file" && a.path === b.path;
+      // 行の指定は見ない (同じ版の中の移動は同じタブ)。版は見る。
+      return (
+        b.kind === "file" &&
+        a.path === b.path &&
+        (a.ref ?? WORKTREE_REF) === (b.ref ?? WORKTREE_REF)
+      );
     case "image":
       return b.kind === "image" && a.path === b.path;
     case "terminal":
@@ -851,7 +871,7 @@ export type ParsedLayout = {
 };
 
 /** 読める版。1 は repo の page タブと、右の面の page のタブを持ちうる。 */
-const READABLE_VERSIONS: readonly unknown[] = [1, 2, LAYOUT_VERSION];
+const READABLE_VERSIONS: readonly unknown[] = [1, 2, 3, LAYOUT_VERSION];
 
 /**
  * このアプリより新しい版で保存された配置か (古い版のアプリへ戻したとき)。
@@ -919,9 +939,17 @@ function parseTarget(raw: unknown): TabTarget | null | string {
       const line = parseLine(raw.line);
       if (line === "bad")
         return `file target has a bad line: ${JSON.stringify(raw.line)}`;
-      return line === undefined
-        ? { kind: "file", path: raw.path as string }
-        : { kind: "file", path: raw.path as string, line };
+      if (
+        raw.ref !== undefined &&
+        (!nonEmpty(raw.ref) || raw.ref === WORKTREE_REF)
+      )
+        return `file target has a bad ref: ${JSON.stringify(raw.ref)}`;
+      return {
+        kind: "file",
+        path: raw.path as string,
+        ...(line === undefined ? {} : { line }),
+        ...(raw.ref === undefined ? {} : { ref: raw.ref as string }),
+      };
     }
     case "image":
       return nonEmpty(raw.path)

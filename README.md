@@ -33,7 +33,8 @@ Requires Node.js 20 or newer. Development uses
   ⌘/Ctrl+click (tree, Diff / History file lists, Search results, palette rows),
   Shift+Enter in the palette, or **Open in new tab** on a tree file opens it in a kept
   tab of its own (an open one comes to the front and is kept); Shift+click still opens a
-  new browser window. Diff /
+  new browser window. A file at another version (a commit from History, HEAD, a branch)
+  is a separate tab named like `a.ts @ 1a2b3c4`. Diff /
   History / Worktrees / Data / Work log each have one tab that comes back as
   you left it. Files is not a tab: the folder view is what the left side shows
   when no tab is selected (the Files icon, `g r`, or a folder in the tree).

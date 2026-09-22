@@ -1393,7 +1393,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         return {
           screen: "file",
           path: target.path,
-          ref: "worktree",
+          ref: target.ref ?? "worktree",
           range,
           view: "blob",
           ...(target.line === undefined ? {} : { line: target.line }),
@@ -1462,8 +1462,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     listColumnWidth: () => LIST_COLUMN_WIDTH,
     getLanguage: () => STATE.language,
     pageLabel: (page) => uiText().nav[page],
-    navigate: (route, replace) =>
-      replace ? replaceWithRoute(route) : navigateToRoute(route),
+    navigate: (route, replace) => {
+      if (replace) replaceWithRoute(route);
+      else navigateToRoute(route);
+      // 本文を裏で移しただけでフォーカスが右の面に残ったなら、URL は右の面の
+      // もの (setRoute の後と同じ)。分割のボタンで右に出した直後に、URL が
+      // 左の面のファイルのまま残っていた。
+      syncFocusedPaneUrl("replace");
+    },
     currentRoute: () => STATE.route,
     defaultRoute: defaultRouteForTab,
     homeRoute: () => ({

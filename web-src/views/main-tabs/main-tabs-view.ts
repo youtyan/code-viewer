@@ -71,6 +71,7 @@ import {
   splitRight,
   type Tab,
   type TabTarget,
+  WORKTREE_REF,
   tabMenu,
   unparkRight,
   unsplit,
@@ -312,6 +313,11 @@ export function isPageKind(value: string | undefined): value is PageKind {
   return (PAGE_KINDS as readonly (string | undefined)[]).includes(value);
 }
 
+/** タブの名前に添える版の印。コミットの sha は 7 文字、ほか (ブランチ・HEAD) はそのまま。 */
+export function shortRef(ref: string): string {
+  return /^[0-9a-f]{8,40}$/i.test(ref) ? ref.slice(0, 7) : ref;
+}
+
 /** ファイルと各画面 (route で中身が決まり、本文に描くタブ)。 */
 export function isRouteTab(tab: Tab | null): boolean {
   return tab?.target.kind === "file" || tab?.target.kind === "page";
@@ -331,9 +337,13 @@ export function routeTarget(route: AppRoute): TabTarget | null {
         (route.view === undefined || route.view === "blob")
       )
         return { kind: "image", path: route.path };
-      return route.line === undefined
-        ? { kind: "file", path: route.path }
-        : { kind: "file", path: route.path, line: route.line };
+      // 作業ツリー以外の版は別のタブ (target の ref。作業ツリーは書かない)。
+      return {
+        kind: "file",
+        path: route.path,
+        ...(route.line === undefined ? {} : { line: route.line }),
+        ...(route.ref && route.ref !== WORKTREE_REF ? { ref: route.ref } : {}),
+      };
     case "diff":
     case "history":
     case "worktree":
@@ -502,6 +512,10 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   function labelOf(target: TabTarget): string {
     switch (target.kind) {
       case "file":
+        // 作業ツリー以外の版だけ、版の短い印を添える (同じ名前のタブを見分ける)。
+        return target.ref === undefined
+          ? basenameOf(target.path)
+          : `${basenameOf(target.path)} @ ${shortRef(target.ref)}`;
       case "image":
         return basenameOf(target.path);
       case "terminal":
@@ -802,19 +816,23 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     if (how === "navigate") return;
     const side = routeSideOf(layout);
     if (!side) return;
+    // フォーカスが反対の面にあるなら、本文は裏で移すだけ。URL はフォーカスの
+    // ある面のもの (app の navigate が合わせ直す) なので、履歴を積まない
+    // (積むと、分割した直後の戻るが同じ URL に 1 回止まる)。
+    const replace = how === "sync" || layout.focused !== side;
     const tab = frontOf(layout, side);
     if (!tab) {
       // 本文の既定 (フォルダ表示)。どのフォルダかは URL が持つので、フォルダ
       // 表示ならそのまま。
       if (deps.currentRoute().screen === "repo") return;
       keepFocus = layout.focused;
-      deps.navigate(homeRoute(), how === "sync");
+      deps.navigate(homeRoute(), replace);
       return;
     }
     const route = routeOf(tab);
     if (JSON.stringify(route) === JSON.stringify(deps.currentRoute())) return;
     keepFocus = layout.focused;
-    deps.navigate(route, how === "sync");
+    deps.navigate(route, replace);
   }
 
   /**
@@ -1295,6 +1313,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       tab.target.kind === "file" || tab.target.kind === "image"
         ? tab.target.path
         : label;
+    if (tab.target.kind === "file" && tab.target.ref !== undefined)
+      el.title += ` @ ${tab.target.ref}`;
     if (tab.preview) el.title += `\n${current.previewHint}`;
     const icon = document.createElement("span");
     icon.className = "main-tab-icon";

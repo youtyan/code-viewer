@@ -18,6 +18,7 @@ import type {
 } from "../core/main-tabs";
 import { panelColumnAction } from "../core/panel-column-policy";
 import { HISTORY_WIDTH } from "../core/panel-sizes";
+import { lastTabNumber } from "../core/pwa";
 import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
 import { closeContextMenu } from "../views/context-menu";
 import {
@@ -71,13 +72,19 @@ function setup(
   const terminals: Array<{ open: string[]; closed: string[] }> = [];
   /** ＋ と、ターミナルのタブの右クリックから呼ばれたもの。 */
   const calls: string[] = [];
+  /** 本文を移した先と、履歴を積まない (replace) か。 */
+  const navigations: Array<{ to: string; replace: boolean }> = [];
   let current: AppRoute = initial;
   const handle: MainTabsHandle = createMainTabsView({
     mount,
     ...(panelColumn ? { panelColumn } : {}),
     getLanguage: () => "en",
     pageLabel: (page) => page,
-    navigate: (route) => {
+    navigate: (route, replace) => {
+      navigations.push({
+        to: route.screen === "file" ? route.path : route.screen,
+        replace: replace === true,
+      });
       current = route;
       handle.syncRoute(route);
     },
@@ -131,6 +138,7 @@ function setup(
     fronts,
     terminals,
     calls,
+    navigations,
     current: () => current,
     names: () =>
       [...mount.querySelectorAll(".main-tab")].map(
@@ -324,7 +332,7 @@ describe("main tabs view: 読み戻し", () => {
     const error = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
-    const newer = { version: 4, focused: "left", panes: [] };
+    const newer = { version: 5, focused: "left", panes: [] };
     const { handle, saves, names } = setup(async () => newer);
     await handle.restore();
     handle.syncRoute(fileRoute("src/other.ts"));
@@ -338,7 +346,7 @@ describe("main tabs view: 読み戻し", () => {
       0,
       [">other.ts (preview)"],
       [
-        "[code-viewer] main tabs: the saved layout was written by a newer version (layout version 4, this page reads up to 3); it is kept as it is and tabs are not saved on this page",
+        "[code-viewer] main tabs: the saved layout was written by a newer version (layout version 5, this page reads up to 4); it is kept as it is and tabs are not saved on this page",
       ],
     ]);
   });
@@ -664,6 +672,37 @@ describe("main tabs view: 操作", () => {
       active.classList.contains("main-tab"),
       active.dataset.tabId === id,
     ]).toEqual([false, true, true]);
+  });
+
+  // 版が違えば別のタブ。名前は作業ツリー以外の版だけ短い印を添える。
+  test.each([
+    {
+      name: "コミット (sha は 7 文字)",
+      ref: "1a2b3c4d5e6f7a8b",
+      label: "app.ts @ 1a2b3c4",
+    },
+    { name: "HEAD はそのまま", ref: "HEAD", label: "app.ts @ HEAD" },
+  ])("作業ツリーの版の横に $name の版を別のタブで開く", async ({
+    ref,
+    label,
+  }) => {
+    const { handle, mount, names } = setup(async () => null);
+    await handle.restore();
+    handle.openingNewTab(() =>
+      handle.syncRoute({
+        screen: "file",
+        path: "src/app.ts",
+        ref,
+        range,
+        view: "blob",
+      }),
+    );
+    const front = mount.querySelector<HTMLElement>(".main-tab-active");
+    expect([names(), front?.title]).toEqual([
+      // 作業ツリーの版の仮のタブは差し替わらずに残る。
+      ["app.ts (preview)", `>${label}`],
+      `src/app.ts @ ${ref}`,
+    ]);
   });
 
   // タブ列のキー (roving tabindex)。←→ Home End は移るだけで前面は変えない。
@@ -1241,6 +1280,74 @@ describe("main tabs view: 左右 2 面", () => {
       Number(divider?.getAttribute("aria-valuemin")) <
         Number(divider?.getAttribute("aria-valuemax")),
     ]).toEqual([["Open tabs, left side", "Open tabs, right side"], "50", true]);
+  });
+
+  // 分割のボタンで前面のファイルを右へ出すと、左の前面が別のタブに替わり、本文は
+  // 裏でそちらへ移る。フォーカスは右なので、本文を移しても履歴は積まない
+  // (URL は app の navigate が右の面へ合わせ直す)。
+  test("分割で左の前面が替わっても、フォーカスが右なら本文は履歴を積まずに移る", async () => {
+    const { handle, mount, navigations } = setup(async () => null);
+    await handle.restore();
+    handle.openingNewTab(() => handle.syncRoute(fileRoute("src/b.ts")));
+    navigations.length = 0;
+    splitButton(mount)?.click();
+    expect([panes(handle).focused, navigations]).toEqual([
+      "right",
+      [{ to: "src/app.ts", replace: true }],
+    ]);
+  });
+
+  test("左の面にフォーカスがあれば、本文を移すと履歴を積む (今までどおり)", async () => {
+    const { handle, mount, navigations } = setup(async () => null);
+    await handle.restore();
+    handle.openingNewTab(() => handle.syncRoute(fileRoute("src/b.ts")));
+    navigations.length = 0;
+    mount
+      .querySelector<HTMLElement>(".main-tab-active .main-tab-close")
+      ?.click();
+    expect(navigations).toEqual([{ to: "src/app.ts", replace: false }]);
+  });
+
+  // PWA の窓のタブのキー (core/pwa.ts → app.ts) が呼ぶ操作。番号・次 / 前・閉じる
+  // はフォーカスのある面の中で、閉じたものは ⌘/Ctrl+Shift+T で同じ面へ戻る。
+  test("PWA のキーの行き先: 面の中の番号・最後・次・閉じる・開き直す", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.openingNewTab(() => handle.syncRoute(fileRoute("src/b.ts")));
+    splitButton(mount)?.click();
+    handle.openingNewTab(() =>
+      handle.openRouteRight({
+        screen: "file",
+        path: "src/c.ts",
+        ref: "worktree",
+        range,
+        view: "blob",
+      }),
+    );
+    const front = () => {
+      const view = handle.panes();
+      const tab = view.fronts[view.focused];
+      return `${view.focused}:${tab?.target.kind === "file" ? tab.target.path : tab?.target.kind}`;
+    };
+    const seen: string[] = [front()];
+    handle.activateNth(1); // ⌘1
+    seen.push(front());
+    handle.activateNth(lastTabNumber(handle.layout())); // ⌘9
+    seen.push(front());
+    handle.next(); // Ctrl+Tab (面の中で折り返す)
+    seen.push(front());
+    handle.closeActive(); // ⌘W
+    seen.push(front());
+    handle.reopenClosed(); // ⌘⇧T
+    seen.push(front());
+    expect(seen).toEqual([
+      "right:src/c.ts",
+      "right:src/b.ts",
+      "right:src/c.ts",
+      "right:src/b.ts",
+      "right:src/c.ts",
+      "right:src/b.ts",
+    ]);
   });
 
   test("前面が画面のタブなら分割ボタンは押せない", async () => {

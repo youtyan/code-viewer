@@ -48,6 +48,9 @@ const TARGETS: TabTarget[] = [
   { kind: "file", path: "src/a.ts", line: 3 },
   { kind: "file", path: "src/b.ts" },
   { kind: "file", path: "docs/c.md", line: { start: 2, end: 4 } },
+  // 同じパスでも版が違えば別のタブ (sameTarget は ref も見る)。
+  { kind: "file", path: "src/a.ts", ref: "HEAD" },
+  { kind: "file", path: "src/a.ts", line: 3, ref: "1a2b3c4d5e6f" },
   { kind: "image", path: "img/d.png" },
   { kind: "terminal", session: "shell-1" },
   { kind: "terminal", session: "shell-2" },
