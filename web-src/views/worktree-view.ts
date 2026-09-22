@@ -89,6 +89,25 @@ export type WorktreeViewDeps = {
     path: string,
     kind: "directory" | "file-parent",
   ): Promise<boolean>;
+  /**
+   * 一覧のエージェント (全体ボードと同じもの)。作業ツリーの行に、そこで
+   * 動いているエージェントの状態を出す。cwd が作業ツリーの中にあるものを
+   * その行に数える。
+   */
+  getAgents(): WorktreeAgent[];
+  /** エージェントの一覧が変わったら呼ぶ。戻り値は購読の解除。 */
+  subscribeAgents(listener: () => void): () => void;
+};
+
+/** 作業ツリーの行に出すエージェント 1 つ。 */
+export type WorktreeAgent = {
+  /** ペインの cwd。 */
+  path: string;
+  /** 種類の名前 (claude / codex)。 */
+  kind: string;
+  state: "waiting" | "working" | "done" | "idle";
+  /** 状態の名前 (「入力待ち」など)。 */
+  stateLabel: string;
 };
 
 export type WorktreeView = PageView & {
@@ -184,6 +203,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   let diffFor: string | null = null;
   let restoredRouteKey: string | null = null;
   let observer: IntersectionObserver | null = null;
+  let unsubscribeAgents: (() => void) | null = null;
 
   const listPanel = document.getElementById("worktree-panel");
 
@@ -284,6 +304,10 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     document
       .getElementById("sb-collapse-all")
       ?.addEventListener("click", onCollapseAll);
+    // 行のエージェントの状態を追う (一覧だけ描き直す。差分は積み直さない)。
+    unsubscribeAgents = deps.subscribeAgents(() => {
+      if (mounted) renderList();
+    });
     deps.setPageMode();
     deps.syncHeaderMenu();
   }
@@ -327,6 +351,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     document.getElementById("filelist")?.replaceChildren();
     document.getElementById("diff")?.replaceChildren();
     document.body.classList.remove("gdp-worktree-page");
+    document.body.removeAttribute("data-worktree-overview");
+    unsubscribeAgents?.();
+    unsubscribeAgents = null;
     mounted = false;
   }
 
@@ -1064,6 +1091,69 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     return button;
   }
 
+  /**
+   * その作業ツリーで動いているエージェント (cwd が中にあるもの)。作業ツリーが
+   * 入れ子のときは、いちばん深い作業ツリーに数える。急ぐものを先に。
+   */
+  function agentsIn(item: WorktreeItem): WorktreeAgent[] {
+    const worktrees = data?.worktrees ?? [];
+    const inside = (path: string, root: string) =>
+      path === root || path.startsWith(`${root.replace(/\/+$/, "")}/`);
+    const rank = { waiting: 0, done: 1, working: 2, idle: 3 } as const;
+    return deps
+      .getAgents()
+      .filter((agent) => {
+        const owner = worktrees
+          .filter((worktree) => inside(agent.path, worktree.path))
+          .sort((a, b) => b.path.length - a.path.length)[0];
+        return owner?.id === item.id;
+      })
+      .sort((a, b) => rank[a.state] - rank[b.state]);
+  }
+
+  /** 行のエージェントの欄: いちばん急ぐものの印と状態、ほかは数だけ。 */
+  function agentsCell(item: WorktreeItem): HTMLElement {
+    const cell = el("span", "worktree-row-agents");
+    const agents = agentsIn(item);
+    const first = agents[0];
+    if (!first) return cell;
+    const mark = el("i", `terminal-mark terminal-mark-${first.state}`);
+    mark.setAttribute("aria-hidden", "true");
+    const label = el(
+      "span",
+      `worktree-row-agent-state worktree-row-agent-${first.state}`,
+      first.stateLabel,
+    );
+    cell.append(mark, label);
+    if (agents.length > 1)
+      cell.appendChild(
+        el("span", "worktree-row-agent-more", `+${agents.length - 1}`),
+      );
+    cell.title = agents
+      .map((agent) => `${agent.kind} · ${agent.stateLabel}`)
+      .join("\n");
+    return cell;
+  }
+
+  /**
+   * 行の右端の「開く」(メニューの「別タブで見る」と同じ操作)。場所は最初から
+   * 取ってあり、選んだときに現れたりしない (押し間違えない)。
+   */
+  function openButton(item: WorktreeItem): HTMLButtonElement | null {
+    if (item.missing || item.bare) return null;
+    const t = text();
+    const button = el("button", "gdp-btn worktree-row-open", t.openShort);
+    button.type = "button";
+    button.title = t.openTitle;
+    button.disabled = !!busyPath;
+    button.addEventListener("click", (event) => {
+      // 行のクリック (選択) と混ぜない。
+      event.stopPropagation();
+      void openWorktree(item);
+    });
+    return button;
+  }
+
   function note(body: string, isError = false): HTMLElement {
     const node = el("div", "history-status", body);
     node.hidden = false;
@@ -1081,6 +1171,10 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
 
     const head = el("div", "history-head");
     head.appendChild(el("span", "history-title", t.panes.worktrees));
+    if (data?.worktrees.length)
+      head.appendChild(
+        el("span", "worktree-count", t.panes.count(data.worktrees.length)),
+      );
     head.appendChild(
       headButton(t.refresh, t.refreshTitle, () => {
         void refresh();
@@ -1140,18 +1234,37 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       return;
     }
 
-    const list = el("ol", "history-list");
     const selected = route()?.wt;
+    // 選んでいないときは一覧だけを画面いっぱいに出す (行は列にそろえる)。
+    // 選ぶと今までどおり 一覧 → 変更ファイル → 差分。
+    document.body.toggleAttribute("data-worktree-overview", !selected);
+    const columns = el("div", "worktree-columns");
+    columns.setAttribute("aria-hidden", "true");
+    for (const label of [
+      t.columns.branch,
+      t.columns.compared(data.baseBranch || ""),
+      t.columns.changes,
+      t.columns.agents,
+      "",
+    ])
+      columns.appendChild(el("span", "", label));
+    listPanel.appendChild(columns);
+    const list = el("ol", "history-list");
     for (const item of items) {
       const row = el("li", "history-item");
       row.dataset.wt = item.id;
       if (item.id === selected) row.classList.add("active");
+      if (item.current) row.classList.add("worktree-current");
       if (item.divergence?.mergeState === "conflict") {
         row.classList.add("worktree-conflict");
       }
 
-      // 1 段目: 名前 + 状態バッジ (右寄せ)。
+      // 1 段目: 名前 + 状態バッジ (右寄せ)。一覧だけのときは名前の代わりに
+      // ブランチを見出しにする (フォルダは 2 段目のパスで読める)。
       const head = el("span", "worktree-row-head");
+      head.appendChild(
+        el("span", "worktree-row-branch", item.branch || t.badges.detached),
+      );
       const subject = el("span", "subject", item.name);
       subject.title = item.path;
       head.appendChild(subject);
@@ -1166,9 +1279,6 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         });
         head.appendChild(wrap);
       }
-      // 操作は「…」の中だけ。行を選ばなくても、その行に対して実行できる。
-      const menu = rowMenuButton(item);
-      if (menu) head.appendChild(menu);
       row.appendChild(head);
 
       // 2 段目: フォルダの場所。「それはどこのフォルダなのか」が一番知りたい
@@ -1182,7 +1292,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       row.appendChild(pathLine);
 
       // 3 段目: ブランチ・変更数・最終コミット。
-      const meta = el("span", "meta2");
+      const meta = el("span", "meta2 worktree-row-meta");
       // ブランチ名の枠。ブランチが無い作業ツリーはその旨を出し、他のバッジと
       // 同じように理由を title に添える。
       const branchName = el("span", "sha", item.branch || t.badges.detached);
@@ -1191,7 +1301,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       meta.appendChild(
         el(
           "span",
-          "author",
+          "author worktree-row-files",
           item.fileCount ? t.files.heading(item.fileCount) : t.files.none,
         ),
       );
@@ -1228,9 +1338,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       row.appendChild(meta);
 
       // 4 段目: マージできるか + 位置関係。フル文は title に。
-      const second = el("span", "meta2");
+      const second = el("span", "meta2 worktree-row-divergence");
       const summary = divergenceSummary(item);
-      const summaryText = el("span", "author", summary);
+      const summaryText = el("span", "author worktree-row-compare", summary);
       summaryText.title = summary;
       second.appendChild(summaryText);
       // そのまま入る行にだけ、取り込むコマンドのコピーを添える。文字は
@@ -1238,6 +1348,16 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       const merge = copyMergeButton(item);
       if (merge) second.appendChild(merge);
       row.appendChild(second);
+      row.appendChild(agentsCell(item));
+      // 操作: 「開く」と「…」。「…」は行を選ばなくても、その行に対して実行できる。
+      // 「開く」は一覧だけのとき (何も選んでいない) にだけ置く。選んだ後の
+      // 狭い一覧では今までどおり「…」だけ (選んだ瞬間にボタンが増えると誤爆する)。
+      const actions = el("span", "worktree-row-actions");
+      const open = selected ? null : openButton(item);
+      if (open) actions.appendChild(open);
+      const menu = rowMenuButton(item);
+      if (menu) actions.appendChild(menu);
+      row.appendChild(actions);
 
       if (item.error) {
         const error = el("span", "meta2");

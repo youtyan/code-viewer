@@ -118,6 +118,130 @@ describe("help page navigation", () => {
   });
 });
 
+describe("help page settings categories", () => {
+  function renderSettings(section: HelpSection) {
+    document.body.innerHTML = [
+      '<main id="diff"></main>',
+      '<div id="empty"></div>',
+      '<div id="meta"></div>',
+      '<div id="totals"></div>',
+      '<div id="filelist"></div>',
+    ].join("");
+    const range = { from: "HEAD", to: "worktree" };
+    let route: AppRoute = { screen: "help", lang: "en", section, range };
+    let category:
+      | "general"
+      | "appearance"
+      | "agents"
+      | "accounts"
+      | "advanced" = "general";
+    const searchHosts: HTMLElement[] = [];
+    const page = createHelpPage({
+      $: <T extends Element = HTMLElement>(sel: string): T => {
+        const found = document.querySelector(sel);
+        if (!found) throw new Error(`missing fixture element: ${sel}`);
+        return found as T;
+      },
+      getRoute: () => route,
+      setRoute: (next) => {
+        route = next;
+      },
+      setPageMode: () => undefined,
+      cancelActiveSourceLoad: () => true,
+      removeStandaloneSource: () => undefined,
+      clearLoadQueue: () => undefined,
+      currentRange: () => range,
+      syncHeaderMenu: () => undefined,
+      getLanguage: () => "en",
+      mountViewerSettings: () => undefined,
+      mountSettingsSearch: (host) => {
+        searchHosts.push(host);
+      },
+      settingsCategories: () => [
+        { id: "general", label: "General", description: "General text." },
+        { id: "agents", label: "Agents", description: "Agents text." },
+        { id: "accounts", label: "Accounts", description: "Accounts text." },
+        { id: "advanced", label: "Advanced", description: "Advanced text." },
+      ],
+      getSettingsCategory: () => category,
+      setSettingsCategory: (next) => {
+        category = next;
+      },
+      getKeyBindings: () => DEFAULT_KEY_BINDINGS,
+      decorateKeybindings: () => undefined,
+    });
+    page.renderHelpPage();
+    const nav = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>(".gdp-help-nav > *"),
+        (item) =>
+          `${item.tagName === "BUTTON" ? "" : "# "}${item.textContent}${item.classList.contains("active") ? " *" : ""}`,
+      );
+    const click = (label: string) => {
+      const button = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(".gdp-help-nav button"),
+      ).find((item) => item.textContent === label);
+      if (!button) throw new Error(`missing nav button: ${label}`);
+      button.click();
+    };
+    return {
+      nav,
+      click,
+      route: () => route,
+      category: () => category,
+      searchHosts,
+    };
+  }
+
+  test("lists the settings categories, then key bindings, then the help sections", () => {
+    const view = renderSettings("settings");
+    expect(view.nav()).toEqual([
+      "# Settings",
+      "General *",
+      "Agents",
+      "Accounts",
+      "Keybindings",
+      "Advanced",
+      "# Help",
+      "Getting Started",
+      "Project Files",
+      "AI Annotations",
+      "Datastores",
+      "Agent Skill",
+      "MCP Server",
+    ]);
+    expect(document.querySelector(".gdp-help-content h2")?.textContent).toBe(
+      "General",
+    );
+    expect(view.searchHosts).toHaveLength(1);
+  });
+
+  test("typing in the settings search on a help section moves to the settings section", () => {
+    const view = renderSettings("storage");
+    expect(view.searchHosts).toHaveLength(1);
+    const input = document.createElement("input");
+    view.searchHosts[0]?.append(input);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(view.route()).toMatchObject({ section: "settings" });
+    expect(view.searchHosts).toHaveLength(2);
+  });
+
+  test("picking a category from a help section goes back to ?section=settings", () => {
+    const view = renderSettings("storage");
+    view.click("Agents");
+    expect(view.category()).toBe("agents");
+    expect(view.route()).toMatchObject({ screen: "help", section: "settings" });
+    expect(view.nav()).toContain("Agents *");
+    expect(document.querySelector(".gdp-help-content h2")?.textContent).toBe(
+      "Agents",
+    );
+    view.click("Keybindings");
+    expect(view.route()).toMatchObject({ section: "keybindings" });
+    expect(view.nav()).toContain("Keybindings *");
+    expect(view.nav()).not.toContain("Agents *");
+  });
+});
+
 describe("help page CLI reference", () => {
   function renderHelp(
     lang: "en" | "ja",
@@ -157,6 +281,10 @@ describe("help page CLI reference", () => {
       syncHeaderMenu: () => undefined,
       getLanguage: () => lang,
       mountViewerSettings: () => undefined,
+      mountSettingsSearch: () => undefined,
+      settingsCategories: () => [],
+      getSettingsCategory: () => "general",
+      setSettingsCategory: () => undefined,
       getKeyBindings: () => DEFAULT_KEY_BINDINGS,
       decorateKeybindings: () => undefined,
     });

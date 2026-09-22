@@ -92,6 +92,10 @@ export type DbText = {
     filteredEmptyHint: string;
     filteredEmptyAction: string;
     statusRows: (n: string) => string;
+    /** 足元のページ送り: いま見えている行の範囲。 */
+    pagerRange: (first: string, last: string, total: string) => string;
+    pagerPrev: string;
+    pagerNext: string;
     statusSort: (column: string, dir: string) => string;
     statusFilters: (n: number) => string;
     statusRefreshing: (filters: number) => string;
@@ -499,6 +503,9 @@ const EN: DbText = {
       "The table was loaded, but the current search or column filters hide every row.",
     filteredEmptyAction: "Clear filters",
     statusRows: (n) => `${n} rows`,
+    pagerRange: (first, last, total) => `${first}–${last} of ${total} rows`,
+    pagerPrev: "Previous page",
+    pagerNext: "Next page",
     statusSort: (column, dir) => `Sort: ${column} ${dir}`,
     statusFilters: (n) => `${n} filter(s)`,
     statusRefreshing: (filters) =>
@@ -909,6 +916,9 @@ const JA: DbText = {
       "表は読み込めていますが、現在の検索/列フィルタですべての行が隠れています。",
     filteredEmptyAction: "フィルタ解除",
     statusRows: (n) => `${n} 行`,
+    pagerRange: (first, last, total) => `${total} 行中 ${first}–${last} 行`,
+    pagerPrev: "前のページ",
+    pagerNext: "次のページ",
     statusSort: (column, dir) => `並び替え: ${column} ${dir}`,
     statusFilters: (n) => `フィルタ ${n} 件`,
     statusRefreshing: (filters) =>

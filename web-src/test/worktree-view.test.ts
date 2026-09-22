@@ -15,6 +15,7 @@ import type { WorktreeFileChange, WorktreeItem } from "../core/worktree";
 import { worktreeText } from "../views/worktree-i18n";
 import {
   createWorktreeView,
+  type WorktreeAgent,
   type WorktreeView,
   type WorktreeViewOptions,
 } from "../views/worktree-view";
@@ -300,6 +301,7 @@ async function mountWith(
     sidebarView?: "tree" | "flat";
     highlighter?: unknown;
     commits?: CommitPayload;
+    agents?: WorktreeAgent[];
   } = {},
 ): Promise<Mounted> {
   installDiff2Html();
@@ -354,6 +356,8 @@ async function mountWith(
       openedPaths.push({ path, kind });
       return Promise.resolve(openPathResult);
     },
+    getAgents: () => options.agents ?? [],
+    subscribeAgents: () => () => undefined,
   });
   await view.enter();
   // 差分は「見えたものから」読む。IntersectionObserver の無い環境では全部
@@ -648,6 +652,74 @@ describe("worktree list panel", () => {
     // メニューは body 直下に居るので、畳んだ画面と一緒には消えない。
     view.suspend();
     expect(document.querySelector(".gdp-context-menu")).toBeNull();
+  });
+});
+
+describe("overview (nothing picked)", () => {
+  const worktrees = () =>
+    response([
+      item({ name: "repo", current: true }),
+      item({
+        name: "feature-x",
+        path: "/repo/.worktrees/feature-x",
+        displayPath: ".worktrees/feature-x",
+        branch: "feature-x",
+      }),
+    ]);
+
+  test("fills the screen with the list only while nothing is picked", async () => {
+    const { view, setCurrentRoute } = await mountWith(worktrees());
+    expect(document.body.hasAttribute("data-worktree-overview")).toBe(true);
+    setCurrentRoute({
+      screen: "worktree",
+      range: RANGE,
+      wt: "/repo/.worktrees/feature-x",
+    });
+    await view.enter();
+    expect(document.body.hasAttribute("data-worktree-overview")).toBe(false);
+    view.suspend();
+    expect(document.body.hasAttribute("data-worktree-overview")).toBe(false);
+  });
+
+  test("puts an Open button in each row from the start, next to the menu", async () => {
+    const { panel } = await mountWith(worktrees());
+    for (const row of panel.querySelectorAll(".history-item")) {
+      expect(texts(row, ".worktree-row-actions button")).toEqual(["Open", ""]);
+    }
+    expect(texts(panel, ".worktree-row-branch")).toEqual(["main", "feature-x"]);
+  });
+
+  test("shows the most urgent agent of each worktree and counts the rest", async () => {
+    const { panel } = await mountWith(worktrees(), {
+      agents: [
+        {
+          path: "/repo",
+          kind: "claude",
+          state: "idle",
+          stateLabel: "Idle",
+        },
+        {
+          path: "/repo/.worktrees/feature-x/src",
+          kind: "codex",
+          state: "working",
+          stateLabel: "Working",
+        },
+        {
+          path: "/repo/.worktrees/feature-x",
+          kind: "claude",
+          state: "waiting",
+          stateLabel: "Needs input",
+        },
+      ],
+    });
+    // 入れ子の作業ツリーの中の cwd は、いちばん深い作業ツリーに数える。
+    expect(texts(panel, ".worktree-row-agents")).toEqual([
+      "Idle",
+      "Needs input+1",
+    ]);
+    expect(
+      panel.querySelectorAll(".worktree-row-agents .terminal-mark-waiting"),
+    ).toHaveLength(1);
   });
 });
 

@@ -56,6 +56,7 @@ import {
   CHEVRON_DOWN_16_PATH,
   COMMENT_DISCUSSION_16_PATH,
   COPY_16_PATHS,
+  FOLDER_ICON_PATHS,
   GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
   iconSvg,
@@ -72,6 +73,7 @@ import {
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
   SYNC_16_PATH,
+  TERMINAL_16_PATHS,
   TRIANGLE_DOWN_16_PATH,
   UNDO_16_PATH,
   X_16_PATH,
@@ -91,6 +93,7 @@ import { createNetworkActivityTracker } from "./core/network-activity";
 import {
   APP_PANEL_HEIGHT,
   clampPanelSize,
+  HISTORY_WIDTH,
   SIDEBAR_WIDTH,
 } from "./core/panel-sizes";
 import { buildRepositoryWebTarget } from "./core/repository-web-url";
@@ -203,8 +206,14 @@ import { createQuickHelp } from "./views/quick-help";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
 import { createRepositoryWebLink } from "./views/repository-web-link";
-import { searchPaletteText } from "./views/search-palette-i18n";
-import { createSearchPalette } from "./views/search-palette-ui";
+import {
+  type PaletteActionId,
+  searchPaletteText,
+} from "./views/search-palette-i18n";
+import {
+  createSearchPalette,
+  type PaletteCommand,
+} from "./views/search-palette-ui";
 import { createSearchResultsView } from "./views/search-results-view";
 import { type AppNav, mountAppNav } from "./views/shell/app-nav";
 import { rememberEarlyLook } from "./views/shell/early-look";
@@ -219,6 +228,7 @@ import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
 import {
   createViewerSettings,
+  SETTINGS_CATEGORIES,
   type ViewerSettingsDraft,
   type ViewerSettingsText,
 } from "./views/viewer-settings";
@@ -1147,7 +1157,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       SIDEBAR_WIDTH.min,
       SIDEBAR_WIDTH.max,
     );
-    STATE.historyWidth = savedNumber(APP_SETTINGS.historyWidth, 320, 220, 640);
+    STATE.historyWidth = savedNumber(
+      APP_SETTINGS.historyWidth,
+      HISTORY_WIDTH.default,
+      HISTORY_WIDTH.min,
+      HISTORY_WIDTH.max,
+    );
     STATE.sidebarHidden = APP_SETTINGS.sidebarHidden === true;
     STATE.collapsedDirs = new Set(VIEW_STATE.collapsedDirs || []);
     STATE.lazyExpandedDirs = new Set(VIEW_STATE.lazyExpandedDirs || []);
@@ -1201,7 +1216,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         SIDEBAR_WIDTH.min,
         SIDEBAR_WIDTH.max,
       ),
-      historyWidth: savedNumber(APP_SETTINGS.historyWidth, 320, 220, 640),
+      historyWidth: savedNumber(
+        APP_SETTINGS.historyWidth,
+        HISTORY_WIDTH.default,
+        HISTORY_WIDTH.min,
+        HISTORY_WIDTH.max,
+      ),
       sidebarHidden: APP_SETTINGS.sidebarHidden === true,
       collapsedDirs: new Set<string>(VIEW_STATE.collapsedDirs),
       lazyExpandedDirs: new Set<string>(VIEW_STATE.lazyExpandedDirs),
@@ -1703,6 +1723,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       applyHideTests();
     },
     openSearchResults: (query) => openSearchSheet(query),
+    getPaletteCommands: () => paletteCommands(),
   });
   const { openSearchPalette, isPaletteOpen, paletteMode, clearRepoFileCache } =
     SEARCH_PALETTE;
@@ -2293,6 +2314,33 @@ window.GdpExpandLogic = GdpExpandLogic;
         agentRulesSaving: "Validating and saving…",
         agentRulesSourceDefault: "Source: built-in rules",
         agentRulesSourceSaved: "Source: saved rules (active immediately)",
+        categories: {
+          general: {
+            label: "General",
+            description:
+              "Uploads and the directories this repository skips or hides.",
+          },
+          appearance: {
+            label: "Appearance",
+            description: "Theme, language, and font sizes.",
+          },
+          agents: {
+            label: "Agents",
+            description: "Notifications and hooks.",
+          },
+          accounts: {
+            label: "Accounts",
+            description:
+              "Sign-in per settings directory, usage, and launch commands.",
+          },
+          advanced: {
+            label: "Advanced",
+            description:
+              "Datastores, file watching, and terminal status detection.",
+          },
+        },
+        searchPlaceholder: "Search settings",
+        searchNoMatch: (query) => `No settings match "${query}".`,
       },
       annotations: {
         title: "Annotations",
@@ -2693,6 +2741,32 @@ window.GdpExpandLogic = GdpExpandLogic;
         agentRulesSaving: "検証して保存しています…",
         agentRulesSourceDefault: "適用中: 組み込みルール",
         agentRulesSourceSaved: "適用中: 保存したルール（即時反映）",
+        categories: {
+          general: {
+            label: "一般",
+            description:
+              "アップロードと、このリポジトリで読まない・隠すディレクトリ。",
+          },
+          appearance: {
+            label: "表示",
+            description: "テーマ、言語、文字の大きさ。",
+          },
+          agents: {
+            label: "エージェント",
+            description: "通知とフック。",
+          },
+          accounts: {
+            label: "アカウント",
+            description:
+              "設定ディレクトリごとのログイン、使用量、起動コマンド。",
+          },
+          advanced: {
+            label: "詳細",
+            description: "データストア、ファイルの監視、端末の状態判定。",
+          },
+        },
+        searchPlaceholder: "設定を検索",
+        searchNoMatch: (query) => `「${query}」に当てはまる設定はありません。`,
       },
       annotations: {
         title: "注釈",
@@ -4458,6 +4532,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncHeaderMenu,
     getLanguage: () => STATE.language,
     mountViewerSettings: (host) => VIEWER_SETTINGS.mount(host),
+    mountSettingsSearch: (host) => VIEWER_SETTINGS.mountSearch(host),
+    settingsCategories: () => {
+      const labels = uiText().settings.categories;
+      return SETTINGS_CATEGORIES.map((id) => ({ id, ...labels[id] }));
+    },
+    getSettingsCategory: () => VIEWER_SETTINGS.getCategory(),
+    setSettingsCategory: (category) => VIEWER_SETTINGS.setCategory(category),
     getKeyBindings: activeKeyBindings,
     decorateKeybindings: (article, groups) =>
       KEYBINDING_EDITOR.decorate(article, groups),
@@ -4834,7 +4915,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   function applyHistoryWidth(w: number, persist = true) {
-    const cw = Math.max(220, Math.min(640, w));
+    const cw = clampPanelSize(HISTORY_WIDTH, w);
     document.documentElement.style.setProperty("--history-w", `${cw}px`);
     STATE.historyWidth = cw;
     if (persist) patchSettings({ historyWidth: cw });
@@ -4916,9 +4997,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     preview.id = "history-resize-preview";
     document.body.appendChild(preview);
 
-    const MIN = 220,
-      MAX = 640;
-    const clamp = (w: number) => Math.max(MIN, Math.min(MAX, w));
+    const clamp = (w: number) => clampPanelSize(HISTORY_WIDTH, w);
     // 一覧は左のサイドバーの右から始まる。線は画面の座標で置く。
     const historyLeft = () =>
       document.getElementById("history-panel")?.getBoundingClientRect().left ||
@@ -4953,7 +5032,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       document.body.classList.remove("gdp-history-resizing");
       applyHistoryWidth(currentW);
     });
-    handle.addEventListener("dblclick", () => applyHistoryWidth(320));
+    handle.addEventListener("dblclick", () =>
+      applyHistoryWidth(HISTORY_WIDTH.default),
+    );
   })();
 
   $$("#topbar .seg button").forEach((b) => {
@@ -6159,6 +6240,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       mergeLocalSettings({ terminalImageShelfCollapsed: collapsed });
       patchSettings({ terminalImageShelfCollapsed: collapsed });
     },
+    // セッションの一覧 (左の列) を開いたかも人に付く設定。再読み込みで畳まない。
+    isSessionsOpen: () => APP_SETTINGS.terminalSessionsOpen === true,
+    onSessionsOpenChange: (open) => {
+      mergeLocalSettings({ terminalSessionsOpen: open });
+      patchSettings({ terminalSessionsOpen: open });
+    },
     onCloseRequest: () => closeTerminalSheet(),
     onTargetChange: (id) => {
       updateUrlForTerminalOverlay(id ?? "open");
@@ -6230,6 +6317,190 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   }
 
+  /**
+   * Ctrl+K のパレットに混ぜる行き先。プロジェクト = 登録したものと tmux から
+   * 見つけたもの (選ぶとヘッダの切替と同じ関数で移る)、エージェント = 一覧の
+   * エージェント (選ぶとターミナルに開く)、操作 = キー割り当てのある操作と
+   * 新しいエージェント。キーは今の割り当てから出す。
+   */
+  const PALETTE_ACTIONS: ReadonlyArray<{
+    id: PaletteActionId;
+    keymap?: KeymapAction;
+    icon: string | string[];
+    suggested: boolean;
+    run?: () => void;
+  }> = [
+    {
+      id: "new-agent",
+      icon: PLUS_16_PATH,
+      suggested: true,
+      run: () => launchAgent(),
+    },
+    {
+      id: "open-settings",
+      keymap: "open-settings",
+      icon: GEAR_16_PATH,
+      suggested: true,
+    },
+    {
+      id: "toggle-theme",
+      keymap: "toggle-theme",
+      icon: MOON_16_PATH,
+      suggested: true,
+    },
+    {
+      id: "goto-repo",
+      keymap: "goto-repo",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-diff",
+      keymap: "goto-diff",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-history",
+      keymap: "goto-history",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-worktrees",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+      run: () => navigateToRoute({ screen: "worktree", range: currentRange() }),
+    },
+    {
+      id: "goto-database",
+      keymap: "goto-database",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-journal",
+      keymap: "goto-journal",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-agents",
+      keymap: "goto-agents",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "toggle-terminal-panel",
+      keymap: "toggle-terminal-panel",
+      icon: TERMINAL_16_PATHS,
+      suggested: false,
+    },
+    {
+      id: "toggle-sidebar",
+      keymap: "toggle-sidebar",
+      icon: SIDEBAR_SHOW_16_PATHS,
+      suggested: false,
+    },
+    {
+      id: "switch-project",
+      keymap: "switch-project",
+      icon: APPS_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "open-help",
+      keymap: "open-help",
+      icon: QUESTION_16_PATH,
+      suggested: false,
+    },
+  ];
+
+  function paletteCommands(): PaletteCommand[] {
+    const t = searchPaletteText(STATE.language);
+    const agents = agentsText(STATE.language);
+    const overview = AGENT_MONITOR.snapshot().overview;
+    const commands: PaletteCommand[] = [];
+    // 登録したもの (利用者の並び) を先に、見つけただけのものは名前順で後ろに。
+    const projects = [...(overview?.projects ?? [])].sort((a, b) =>
+      a.registered && b.registered
+        ? 0
+        : a.registered
+          ? -1
+          : b.registered
+            ? 1
+            : a.name.localeCompare(b.name),
+    );
+    projects.forEach((info, index) => {
+      const current = info.server.status === "current";
+      commands.push({
+        group: "projects",
+        id: `project:${info.root}`,
+        title: info.name,
+        detail: info.displayRoot,
+        status: current ? t.currentProject : "",
+        iconHtml: iconSvg("gdp-palette-icon", FOLDER_ICON_PATHS.closed),
+        suggested: index < 5,
+        run: () => {
+          if (!current) void PROJECT_ACTIONS.open(info, currentScreenPath());
+        },
+      });
+    });
+    const rank: Record<AgentPane["state"], number> = {
+      waiting: 0,
+      done: 1,
+      working: 2,
+      idle: 3,
+    };
+    const panes = (overview?.panes ?? [])
+      .filter((pane) => pane.kind !== null)
+      .sort((a, b) => rank[a.state] - rank[b.state]);
+    panes.forEach((pane, index) => {
+      commands.push({
+        group: "agents",
+        id: `pane:${pane.id}`,
+        title: pane.kind ? agents.kind[pane.kind] : agents.kindShell,
+        detail: paneTaskText(pane),
+        status: agents.state[pane.state],
+        statusTone: pane.state,
+        iconHtml: `<i class="terminal-mark terminal-mark-${pane.state}" aria-hidden="true"></i>`,
+        suggested: index < 5,
+        run: () => openAgentPane(pane.id),
+      });
+    });
+    const bindings = activeKeyBindings();
+    for (const action of PALETTE_ACTIONS) {
+      const binding = action.keymap
+        ? bindings.find((item) => item.action === action.keymap)
+        : undefined;
+      commands.push({
+        group: "actions",
+        id: `action:${action.id}`,
+        title: t.actions[action.id],
+        iconHtml: iconSvg("gdp-palette-icon", action.icon),
+        shortcut: binding ? formatKeyBinding(binding) : "",
+        suggested: action.suggested,
+        run: () => {
+          if (action.run) action.run();
+          else if (action.keymap)
+            dispatchKeymapAction(action.keymap, "global", false, null);
+        },
+      });
+    }
+    return commands;
+  }
+
+  /** 移った先でも同じ画面を開く (ナビで選ばれている画面の入口)。 */
+  function currentScreenPath(): string {
+    return (
+      document
+        .querySelector<HTMLAnchorElement>(
+          "a.app-menu-item.active, a.nav-board-link.active",
+        )
+        ?.getAttribute("href") ?? "/"
+    );
+  }
+
   /** そのペインを下のターミナルパネルで開く。ツリーで押したときと同じ経路。 */
   function openAgentPane(pane: string): void {
     AGENT_MONITOR.markRead(pane);
@@ -6240,12 +6511,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       closeToolsSheet();
     if (
       parseSearchResultsOverlay(window.location.search) !== null ||
-    // セッションの一覧 (左の列) を開いたかも人に付く設定。再読み込みで畳まない。
-    isSessionsOpen: () => APP_SETTINGS.terminalSessionsOpen === true,
-    onSessionsOpenChange: (open) => {
-      mergeLocalSettings({ terminalSessionsOpen: open });
-      patchSettings({ terminalSessionsOpen: open });
-    },
       SEARCH_RESULTS_VIEW.isOpen()
     )
       closeSearchSheet();
@@ -6284,6 +6549,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** 設定画面を開き、指定の見出しまで送る。 */
   function openSettingsAt(headingId: string): void {
+    VIEWER_SETTINGS.revealHeading(headingId);
     openHelpSection(helpSectionDeps(), "settings");
     requestAnimationFrame(() =>
       document.getElementById(headingId)?.scrollIntoView({ block: "start" }),
@@ -6324,13 +6590,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         getText: () => agentsText(STATE.language).projects,
         getOverview: () => AGENT_MONITOR.snapshot().overview,
         subscribe: (listener) => AGENT_MONITOR.subscribe(listener),
-        // 移った先でも同じ画面を開く (ナビで選ばれている画面の入口)。
-        currentPath: () =>
-          document
-            .querySelector<HTMLAnchorElement>(
-              "a.app-menu-item.active, a.nav-board-link.active",
-            )
-            ?.getAttribute("href") ?? "/",
+        currentPath: currentScreenPath,
         currentName: () => PROJECT_NAME,
         shortcutLabel: () => {
           const binding = activeKeyBindings().find(
@@ -6572,6 +6832,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     setStatus,
     createOpenPathButton,
     openPathInOs: (path, kind) => openPathInOs(path, kind),
+    getAgents: () => {
+      const text = agentsText(STATE.language);
+      return (AGENT_MONITOR.snapshot().overview?.panes ?? [])
+        .filter((pane) => pane.kind !== null)
+        .map((pane) => ({
+          path: pane.path,
+          kind: pane.kind ? text.kind[pane.kind] : text.kindShell,
+          state: pane.state,
+          stateLabel: text.state[pane.state],
+        }));
+    },
+    subscribeAgents: (listener) => AGENT_MONITOR.subscribe(listener),
   });
   relocalizeWorktree = () => WORKTREE_VIEW?.localize();
 

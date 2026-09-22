@@ -1,6 +1,7 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { FileRangeResponse, FileSearchListResponse } from "../core/types";
+import type { PaletteCommand } from "../views/search-palette-ui";
 import { q, waitFor } from "./_test-helpers";
 
 beforeAll(() => {
@@ -25,8 +26,10 @@ async function setup(options: {
   files: string[];
   truncated?: boolean;
   fileSelectionHistory?: string[];
+  commands?: PaletteCommand[];
 }) {
   const fileRequests: string[] = [];
+  const persisted: unknown[] = [];
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
     writable: true,
@@ -106,10 +109,15 @@ async function setup(options: {
     getGrepGroupByFile: () => false,
     getGrepPaletteWidth: () => undefined,
     getGrepPaletteHeight: () => undefined,
-    persistGrepSettings: async () => undefined,
+    persistGrepSettings: async (patch) => {
+      persisted.push(patch);
+    },
     applyGrepHideTests: () => undefined,
+    ...(options.commands
+      ? { getPaletteCommands: () => options.commands ?? [] }
+      : {}),
   });
-  return { palette, fileRequests };
+  return { palette, fileRequests, persisted };
 }
 
 function input(): HTMLInputElement {
@@ -288,6 +296,163 @@ describe("repository palette result counts", () => {
       typeQuery("file");
       await waitFor(() => status() === expected);
       expect(status()).toBe(expected);
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+});
+
+describe("palette projects, agents and actions", () => {
+  function command(
+    group: PaletteCommand["group"],
+    title: string,
+    detail: string,
+    suggested: boolean,
+    ran: string[],
+  ): PaletteCommand {
+    return {
+      group,
+      id: `${group}:${title}`,
+      title,
+      detail,
+      iconHtml: "",
+      suggested,
+      run: () => {
+        ran.push(title);
+      },
+    };
+  }
+
+  function commands(ran: string[]): PaletteCommand[] {
+    return [
+      command("projects", "sample-app", "~/work/sample-app", true, ran),
+      command("projects", "sample-lib", "~/work/sample-lib", false, ran),
+      command("agents", "claude", "Review plan", true, ran),
+      command("actions", "New agent", "", true, ran),
+      command("actions", "Toggle theme", "", false, ran),
+    ];
+  }
+
+  /** 見出しは "# 名前"、行は "名前|補助"、選んでいる行に " *"。 */
+  function listing(): string[] {
+    return Array.from(
+      document.querySelectorAll<HTMLElement>(
+        ".gdp-palette-list > .gdp-palette-group-heading, .gdp-palette-list > .gdp-palette-row",
+      ),
+      (el) =>
+        el.classList.contains("gdp-palette-group-heading")
+          ? `# ${el.textContent}`
+          : `${el.querySelector(".gdp-palette-row-title")?.textContent}|${el.querySelector(".gdp-palette-row-detail")?.textContent}${el.getAttribute("aria-selected") === "true" ? " *" : ""}`,
+    );
+  }
+
+  function key(name: string) {
+    input().dispatchEvent(
+      new KeyboardEvent("keydown", { key: name, bubbles: true }),
+    );
+  }
+
+  test("an empty query shows the suggested ones around the recent files, with the first file selected", async () => {
+    const ran: string[] = [];
+    const { palette } = await setup({
+      files: ["src/a.ts"],
+      fileSelectionHistory: ["src/a.ts"],
+      commands: commands(ran),
+    });
+    try {
+      palette.openSearchPalette("file");
+      await waitFor(() => status() === "Recent files - 1");
+      expect(listing()).toEqual([
+        "# Projects",
+        "sample-app|~/work/sample-app",
+        "# Agents",
+        "claude|Review plan",
+        "# Files",
+        "a.ts|src/a.ts *",
+        "# Actions",
+        "New agent|",
+      ]);
+      expect(input().placeholder).toBe(
+        "Search projects, agents, files, actions…",
+      );
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
+  test.each([
+    {
+      name: "a name matches loosely, a file stays selected",
+      query: "lib",
+      expected: [
+        "# Projects",
+        "sample-lib|~/work/sample-lib",
+        "# Files",
+        "lib.ts|src/lib.ts *",
+      ],
+    },
+    {
+      name: "the detail matches only as a substring",
+      query: "plan",
+      expected: ["# Agents", "claude|Review plan *"],
+    },
+    {
+      name: "a long detail does not match a scattered query",
+      query: "theme",
+      expected: ["# Actions", "Toggle theme| *"],
+    },
+  ])("$name", async ({ query, expected }) => {
+    const ran: string[] = [];
+    const { palette } = await setup({
+      files: ["src/lib.ts"],
+      commands: commands(ran),
+    });
+    try {
+      palette.openSearchPalette("file");
+      typeQuery(query);
+      await waitFor(() => listing().join("\n") === expected.join("\n"));
+      expect(listing()).toEqual(expected);
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
+  test("arrow keys cross the groups and Enter runs the command without saving file history", async () => {
+    const ran: string[] = [];
+    const { palette, persisted } = await setup({
+      files: ["src/a.ts"],
+      fileSelectionHistory: ["src/a.ts"],
+      commands: commands(ran),
+    });
+    try {
+      palette.openSearchPalette("file");
+      await waitFor(() => status() === "Recent files - 1");
+      key("ArrowUp");
+      expect(listing()).toContain("claude|Review plan *");
+      key("Enter");
+      await waitFor(() => ran.length === 1);
+      expect(ran).toEqual(["claude"]);
+      expect(palette.isPaletteOpen()).toBe(false);
+      expect(persisted).toEqual([]);
+    } finally {
+      palette.closeSearchPalette();
+    }
+  });
+
+  test("text search (grep) does not mix them in", async () => {
+    const ran: string[] = [];
+    const { palette } = await setup({
+      files: ["src/a.ts"],
+      commands: commands(ran),
+    });
+    try {
+      palette.openSearchPalette("grep");
+      typeQuery("sample");
+      expect(
+        document.querySelectorAll(
+          ".gdp-palette-group-heading, .gdp-palette-row-command",
+        ),
+      ).toHaveLength(0);
     } finally {
       palette.closeSearchPalette();
     }

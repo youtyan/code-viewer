@@ -6,6 +6,7 @@ import {
   buildHelpKeybindingGroups,
   type HelpKeybindingTableGroup,
 } from "./help-keybindings";
+import type { SettingsCategory } from "./viewer-settings";
 
 export type HelpPageDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -20,6 +21,16 @@ export type HelpPageDeps = {
   getLanguage(): HelpLanguage;
   /** 設定セクションの中身。フォームの実体は views/viewer-settings.ts が持つ */
   mountViewerSettings(host: HTMLElement): void;
+  /** 設定の検索欄 (実体は viewer-settings.ts)。見出しの下に置く。 */
+  mountSettingsSearch(host: HTMLElement): void;
+  /** 左の列に並べる設定の分類 (並び順どおり)。 */
+  settingsCategories(): Array<{
+    id: SettingsCategory;
+    label: string;
+    description: string;
+  }>;
+  getSettingsCategory(): SettingsCategory;
+  setSettingsCategory(category: SettingsCategory): void;
   /** ユーザーの差分を反映した、いま実際に効くバインド一覧 */
   getKeyBindings(): KeyBinding[];
   /**
@@ -53,6 +64,8 @@ type HelpBlock =
 type HelpContent = {
   languageLabel: string;
   title: string;
+  /** 左の列で、ヘルプの節の前に置く見出し。 */
+  helpNavGroup: string;
   sections: Record<
     HelpSection,
     {
@@ -81,6 +94,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
   en: {
     languageLabel: "Language",
     title: "Settings & Help",
+    helpNavGroup: "Help",
     sections: {
       settings: {
         nav: "Settings",
@@ -945,6 +959,7 @@ code-viewer annotate add-db --db app.db --tab query \\
   ja: {
     languageLabel: "言語",
     title: "設定・ヘルプ",
+    helpNavGroup: "ヘルプ",
     sections: {
       settings: {
         nav: "設定",
@@ -1964,30 +1979,71 @@ export function createHelpPage(deps: HelpPageDeps) {
     layout.className = "gdp-help-layout";
     const helpNav = document.createElement("nav");
     helpNav.className = "gdp-help-nav";
-    HELP_SECTIONS.forEach((helpSection) => {
+    const goToSection = (helpSection: HelpSection) => {
+      deps.setRoute({
+        screen: "help",
+        lang,
+        section: helpSection,
+        range: deps.currentRange(),
+      });
+      renderHelpPage();
+      deps.syncHeaderMenu();
+    };
+    const navButton = (label: string, active: boolean, onClick: () => void) => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = helpSection === section ? "active" : "";
-      button.textContent = content.sections[helpSection].nav;
-      button.addEventListener("click", () => {
-        deps.setRoute({
-          screen: "help",
-          lang,
-          section: helpSection,
-          range: deps.currentRange(),
-        });
-        renderHelpPage();
-        deps.syncHeaderMenu();
-      });
+      button.className = active ? "active" : "";
+      button.textContent = label;
+      button.addEventListener("click", onClick);
       helpNav.appendChild(button);
+    };
+    const navHeading = (label: string) => {
+      const heading = document.createElement("div");
+      heading.className = "gdp-help-nav-heading";
+      heading.textContent = label;
+      helpNav.appendChild(heading);
+    };
+    // 左の列: 設定の分類 (設定の節を分類ごとに出す) とキー割り当て、その下に
+    // ヘルプの節。?section= は今までどおり節を指す (分類は設定の節の中の状態)。
+    const categories = deps.settingsCategories();
+    const activeCategory = deps.getSettingsCategory();
+    navHeading(content.sections.settings.nav);
+    categories.forEach((category) => {
+      navButton(
+        category.label,
+        section === "settings" && category.id === activeCategory,
+        () => {
+          deps.setSettingsCategory(category.id);
+          goToSection("settings");
+        },
+      );
+      if (category.id === "accounts")
+        navButton(
+          content.sections.keybindings.nav,
+          section === "keybindings",
+          () => goToSection("keybindings"),
+        );
+    });
+    navHeading(content.helpNavGroup);
+    HELP_SECTIONS.forEach((helpSection) => {
+      if (helpSection === "settings" || helpSection === "keybindings") return;
+      navButton(
+        content.sections[helpSection].nav,
+        helpSection === section,
+        () => goToSection(helpSection),
+      );
     });
 
     const article = document.createElement("article");
     article.className = "gdp-help-content";
     const h2 = document.createElement("h2");
-    h2.textContent = sectionContent.title;
     const intro = document.createElement("p");
-    intro.textContent = sectionContent.intro;
+    const settingsCategory =
+      section === "settings"
+        ? categories.find((category) => category.id === activeCategory)
+        : undefined;
+    h2.textContent = settingsCategory?.label ?? sectionContent.title;
+    intro.textContent = settingsCategory?.description ?? sectionContent.intro;
     article.append(h2, intro);
     sectionGroups.forEach((group, index) => {
       const groupSection = document.createElement("section");
@@ -2011,7 +2067,18 @@ export function createHelpPage(deps: HelpPageDeps) {
       deps.decorateKeybindings(article, keybindingGroups);
 
     layout.append(helpNav, article);
-    shell.append(header, layout);
+    // 設定の検索はどの節でも同じ場所に置く (節を移っても左の列が動かない)。
+    // ヘルプの節で打ち始めたら、結果を出す設定の節へ移る。
+    const searchRow = document.createElement("div");
+    searchRow.className = "gdp-help-search-row";
+    deps.mountSettingsSearch(searchRow);
+    if (section !== "settings")
+      searchRow.addEventListener("input", (event) => {
+        const field = event.target;
+        goToSection("settings");
+        if (field instanceof HTMLInputElement) field.focus();
+      });
+    shell.append(header, searchRow, layout);
     target.replaceChildren(shell);
   }
 

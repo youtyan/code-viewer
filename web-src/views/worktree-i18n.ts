@@ -80,6 +80,8 @@ export type WorktreeText = {
   /** 3 つのペインの見出しと、まだ何も選んでいないときの案内。 */
   panes: {
     worktrees: string;
+    /** 一覧だけのときの見出しの下の件数。 */
+    count: (n: number) => string;
     files: string;
     diff: string;
     filterWorktrees: string;
@@ -150,6 +152,15 @@ export type WorktreeText = {
     overlapLegend: string;
   };
   open: string;
+  /** 行の右端の「開く」ボタン (open と同じ操作の短い名前)。 */
+  openShort: string;
+  /** 一覧だけのときの列の見出し。 */
+  columns: {
+    branch: string;
+    compared: (base: string) => string;
+    changes: string;
+    agents: string;
+  };
   openTitle: string;
   opening: string;
   openFailed: string;
@@ -298,6 +309,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     },
     panes: {
       worktrees: "Worktrees",
+      count: (n) => (n === 1 ? "1 worktree" : `${n} worktrees`),
       files: "Files",
       diff: "Diff",
       filterWorktrees: "Filter worktrees…",
@@ -351,6 +363,13 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       overlapLegend: "⇄ = another worktree is changing this file too",
     },
     open: "Open in a new tab",
+    openShort: "Open",
+    columns: {
+      branch: "Branch",
+      compared: (base) => (base ? `Compared with ${base}` : "Compared"),
+      changes: "Changes",
+      agents: "Agents",
+    },
     openTitle: "Start a code-viewer for this folder and open it in a new tab",
     opening: "Starting…",
     openFailed: "Failed to open this worktree.",
@@ -474,6 +493,7 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
     },
     panes: {
       worktrees: "作業ツリー",
+      count: (n) => `${n} 本`,
       files: "ファイル",
       diff: "差分",
       filterWorktrees: "作業ツリーを絞り込み…",
@@ -527,6 +547,13 @@ const TEXT: Record<WorktreeLang, WorktreeText> = {
       overlapLegend: "⇄ = 他の作業ツリーも同じファイルを触っている",
     },
     open: "別タブで見る",
+    openShort: "開く",
+    columns: {
+      branch: "ブランチ",
+      compared: (base) => (base ? `${base} との比較` : "比較"),
+      changes: "変更",
+      agents: "エージェント",
+    },
     openTitle: "このフォルダ専用の code-viewer を起動して新しいタブで開きます",
     opening: "起動中…",
     openFailed: "この作業ツリーを開けませんでした。",

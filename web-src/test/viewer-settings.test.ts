@@ -107,6 +107,15 @@ const EN_TEXT: ViewerSettingsText = {
   agentRulesSaving: "Saving rules…",
   agentRulesSourceDefault: "Built-in rules",
   agentRulesSourceSaved: "Saved rules",
+  categories: {
+    general: { label: "General", description: "General settings." },
+    appearance: { label: "Appearance", description: "Look." },
+    agents: { label: "Agents", description: "Agent settings." },
+    accounts: { label: "Accounts", description: "Sign-in." },
+    advanced: { label: "Advanced", description: "Rarely changed." },
+  },
+  searchPlaceholder: "Search settings",
+  searchNoMatch: (query) => `No settings match "${query}".`,
 };
 
 const JA_TEXT: ViewerSettingsText = {
@@ -234,8 +243,11 @@ function setup(
           '{\n  "version": 1,\n  "rules": ["default"]\n}\n';
         values.agentRulesSource = "default";
       }),
-    agentHooksSection: document.createElement("div"),
-    agentAccountsSection: document.createElement("div"),
+    agentHooksSection: sectionWithHeading("sample-hooks-heading", "Hooks"),
+    agentAccountsSection: sectionWithHeading(
+      "sample-accounts-heading",
+      "Accounts list",
+    ),
   });
 
   return {
@@ -249,6 +261,33 @@ function setup(
   };
 }
 
+function sectionWithHeading(id: string, title: string): HTMLElement {
+  const section = document.createElement("div");
+  const heading = document.createElement("strong");
+  heading.id = id;
+  heading.textContent = title;
+  section.append(heading);
+  return section;
+}
+
+/** 表示されている節の見出し (分類の切り替えと検索の結果)。 */
+function visibleSectionTitles(host: HTMLElement): string[] {
+  return Array.from(
+    host.querySelectorAll<HTMLElement>(".scope-settings > *"),
+    (element) => element,
+  )
+    .filter(
+      (element) =>
+        !element.hidden &&
+        !element.classList.contains("scope-settings-footer") &&
+        element.id !== "scope-settings-search-empty",
+    )
+    .map(
+      (element) =>
+        element.querySelector("strong")?.textContent?.trim() ?? element.tagName,
+    );
+}
+
 function fire(target: HTMLElement, type: "change" | "input"): void {
   target.dispatchEvent(new Event(type, { bubbles: true }));
 }
@@ -258,6 +297,63 @@ describe("viewer settings form", () => {
     document.body.innerHTML = "";
     shikiMock.load.mockReset();
     shikiMock.load.mockResolvedValue({ codeToHtml: () => "" });
+  });
+
+  test.each([
+    ["general", ["Uploads", "Excluded directories"]],
+    ["appearance", ["Display"]],
+    ["agents", ["Agent notifications", "Hooks"]],
+    ["accounts", ["Accounts list"]],
+    [
+      "advanced",
+      ["Datastores", "File change watcher", "Terminal state detection"],
+    ],
+  ] as const)("the %s category shows only its sections", (category, titles) => {
+    const { settings, host } = setup();
+    settings.mount(host);
+    settings.setCategory(category);
+    expect(settings.getCategory()).toBe(category);
+    expect(visibleSectionTitles(host)).toEqual(titles);
+  });
+
+  test("searching ignores the category and lists every matching section", () => {
+    const { settings, host } = setup();
+    settings.mount(host);
+    const search = document.createElement("div");
+    settings.mountSearch(search);
+    const input = search.querySelector<HTMLInputElement>("input");
+    if (!input) throw new Error("missing search input");
+    expect(input.placeholder).toBe("Search settings");
+    input.value = "notify";
+    fire(input, "input");
+    expect(visibleSectionTitles(host)).toEqual(["Agent notifications"]);
+    input.value = "no such setting";
+    fire(input, "input");
+    expect(visibleSectionTitles(host)).toEqual([]);
+    expect(
+      host.querySelector("#scope-settings-search-empty")?.textContent,
+    ).toBe('No settings match "no such setting".');
+    settings.setCategory("general");
+    expect(input.value).toBe("");
+    expect(visibleSectionTitles(host)).toEqual([
+      "Uploads",
+      "Excluded directories",
+    ]);
+  });
+
+  test("revealing a heading switches to the category that holds it", () => {
+    const { settings, host } = setup();
+    settings.revealHeading("sample-accounts-heading");
+    expect(settings.getCategory()).toBe("accounts");
+    settings.revealHeading("agent-notify-section-title");
+    expect(settings.getCategory()).toBe("agents");
+    settings.revealHeading("missing-heading");
+    expect(settings.getCategory()).toBe("agents");
+    settings.mount(host);
+    expect(visibleSectionTitles(host)).toEqual([
+      "Agent notifications",
+      "Hooks",
+    ]);
   });
 
   test("shows the saved values when it is mounted", () => {

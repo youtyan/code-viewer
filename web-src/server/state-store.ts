@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { sanitizeKeymapOverrides } from "../core/keymap";
 import {
   APP_PANEL_HEIGHT,
+  HISTORY_WIDTH,
   NAV_WIDTH,
   SIDEBAR_WIDTH,
 } from "../core/panel-sizes";
@@ -187,7 +188,11 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     SIDEBAR_WIDTH.max,
   );
   if (sidebarWidth !== undefined) out.sidebarWidth = sidebarWidth;
-  const historyWidth = optionalNumber(raw.historyWidth, 220, 640);
+  const historyWidth = optionalNumber(
+    raw.historyWidth,
+    HISTORY_WIDTH.min,
+    HISTORY_WIDTH.max,
+  );
   if (historyWidth !== undefined) out.historyWidth = historyWidth;
   const sidebarHidden = optionalBoolean(raw.sidebarHidden);
   if (sidebarHidden !== undefined) out.sidebarHidden = sidebarHidden;
@@ -314,14 +319,14 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   );
   if (terminalImageShelfCollapsed !== undefined)
     out.terminalImageShelfCollapsed = terminalImageShelfCollapsed;
+  const terminalSessionsOpen = optionalBoolean(raw.terminalSessionsOpen);
+  if (terminalSessionsOpen !== undefined)
+    out.terminalSessionsOpen = terminalSessionsOpen;
   const navCollapsed = optionalBoolean(raw.navCollapsed);
   if (navCollapsed !== undefined) out.navCollapsed = navCollapsed;
   const navWidth = optionalNumber(raw.navWidth, NAV_WIDTH.min, NAV_WIDTH.max);
   if (navWidth !== undefined) out.navWidth = navWidth;
   const navCollapsedProjects = normalizeStringList(raw.navCollapsedProjects, {
-  const terminalSessionsOpen = optionalBoolean(raw.terminalSessionsOpen);
-  if (terminalSessionsOpen !== undefined)
-    out.terminalSessionsOpen = terminalSessionsOpen;
     maxItems: MAX_PROJECTS,
     maxLen: 4096,
   });

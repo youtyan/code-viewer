@@ -7,10 +7,8 @@ import type {
   DbValue,
   RowMutation,
 } from "../../core/database/types";
-import { formatErrorDetail } from "../../core/error-detail";
-import { createDetailTable } from "./detail-table";
-import { createDetailTabs } from "./detail-tabs";
 import { attachDragResizer } from "../../core/drag-resizer";
+import { formatErrorDetail } from "../../core/error-detail";
 import { isEditableKeyTarget } from "../../core/focus-scope";
 import {
   DOWNLOAD_16_PATHS,
@@ -28,6 +26,8 @@ import {
 import { readStoredSize, writeStoredSize } from "../../core/stored-size";
 import type { AnnotationDatabaseDataState } from "../../core/types";
 import { showConfirmDialog } from "../ui-dialog";
+import { createDetailTable } from "./detail-table";
+import { createDetailTabs } from "./detail-tabs";
 import { type DbText, dbText } from "./i18n";
 
 const ROW_HEIGHT = 28;
@@ -343,6 +343,11 @@ export function createTableGrid(
   // 矢印キーでセルを移動するために、viewport 自体をフォーカス対象にする。
   // セルは div なので、セルをクリックするとフォーカスはここへ上がってくる。
   viewport.tabIndex = 0;
+  // 足元のページ送りの「見えている行の範囲」は、表の高さが変わったとき
+  // (セルの詳細を開く・下のパネルを動かす) にも合わせる。ResizeObserver の
+  // 無い DOM (テストの一部の環境) では、スクロールしたときにだけ合わせる。
+  if (typeof ResizeObserver === "function")
+    new ResizeObserver(() => syncPager()).observe(viewport);
 
   const spacer = document.createElement("div");
   spacer.className = "db-grid-spacer";
@@ -763,6 +768,19 @@ export function createTableGrid(
   let loadController = new AbortController();
   let rafId = 0;
   let statusEl: HTMLElement | null = null;
+  /**
+   * 足元のページ送り。表は仮想表示で全部の行をスクロールで読むので、ここは
+   * 「いま見えている行の範囲」を出し、前後のボタンで 1 画面ぶんスクロール
+   * するだけ (データの取り方は変えない)。statusEl と一緒に作り直す。
+   */
+  let pagerEl: {
+    root: HTMLElement;
+    range: HTMLElement;
+    prev: HTMLButtonElement;
+    next: HTMLButtonElement;
+    /** 最後に描いた中身。変わらないときは DOM に触らない (スクロールの毎フレーム呼ばれる)。 */
+    shown: string;
+  } | null = null;
   let isRefreshing = false;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedRowIndex = -1;
@@ -1194,6 +1212,7 @@ export function createTableGrid(
     spacer.style.height = "0px";
     statusEl?.remove();
     statusEl = null;
+    pagerEl = null;
     // 新しいテーブルをロードする前に選択をリセットする。これを怠ると、
     // 関連グリッドの使い回し時に前テーブルの行 index が別の行へ誤適用され、
     // getState() にも誤った行番号が混入する。
@@ -2521,6 +2540,7 @@ export function createTableGrid(
         );
       }
       syncFilteredEmptyState();
+      syncPager(scrollTop, viewHeight);
       // 行を組み直すとヘッダ側の scrollLeft が clamp されることがあるので、
       // 幅が確定したこのタイミングで横位置を引き直す。
       syncHorizontalScroll();
@@ -2572,12 +2592,74 @@ export function createTableGrid(
     a.remove();
   }
 
+  function createPager(): NonNullable<typeof pagerEl> {
+    const root = document.createElement("span");
+    root.className = "db-grid-pager";
+    const range = document.createElement("span");
+    range.className = "db-grid-pager-range";
+    const button = (className: string, glyph: string, direction: 1 | -1) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `db-grid-pager-btn ${className}`;
+      b.textContent = glyph;
+      b.addEventListener("click", () => {
+        // 1 画面ぶん (見えている最後の行が次の画面の先頭に残るよう 1 行引く)。
+        viewport.scrollTop +=
+          direction * Math.max(ROW_HEIGHT, viewport.clientHeight - ROW_HEIGHT);
+      });
+      return b;
+    };
+    const prev = button("db-grid-pager-prev", "‹", -1);
+    const next = button("db-grid-pager-next", "›", 1);
+    root.append(range, prev, next);
+    return { root, range, prev, next, shown: "" };
+  }
+
+  /**
+   * いま見えている行の範囲とボタンの押せる・押せないを合わせる。
+   * renderViewport からは DOM を組み直す前に読んだ scrollTop と高さを渡す
+   * (組み直した後に読むと、毎フレーム レイアウトを強制することになる)。
+   */
+  function syncPager(
+    scrollTop = viewport.scrollTop,
+    viewHeight = viewport.clientHeight,
+  ): void {
+    if (!pagerEl) return;
+    const t = text().grid;
+    const total = totalRows;
+    const first = Math.min(total, Math.floor(scrollTop / ROW_HEIGHT) + 1);
+    const last = Math.min(
+      total,
+      Math.max(first, Math.floor((scrollTop + viewHeight) / ROW_HEIGHT)),
+    );
+    const key = `${t.pagerNext}:${first}:${last}:${total}`;
+    if (key === pagerEl.shown) return;
+    pagerEl.shown = key;
+    pagerEl.root.hidden = total === 0;
+    pagerEl.range.textContent = t.pagerRange(
+      first.toLocaleString(),
+      last.toLocaleString(),
+      total.toLocaleString(),
+    );
+    pagerEl.prev.title = t.pagerPrev;
+    pagerEl.prev.setAttribute("aria-label", t.pagerPrev);
+    pagerEl.next.title = t.pagerNext;
+    pagerEl.next.setAttribute("aria-label", t.pagerNext);
+    pagerEl.prev.disabled = first <= 1;
+    pagerEl.next.disabled = last >= total;
+  }
+
   function updateStatus() {
     if (!statusEl) {
       statusEl = document.createElement("div");
       statusEl.className = "db-grid-status";
       el.appendChild(statusEl);
     }
+    if (!pagerEl) {
+      pagerEl = createPager();
+      statusEl.appendChild(pagerEl.root);
+    }
+    syncPager();
     const t = text().grid;
     const parts: string[] = [t.statusRows(totalRows.toLocaleString())];
     if (sort)

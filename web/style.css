@@ -131,7 +131,8 @@
   --statusbar-h: 28px;
   /* 幅の出所は TS (views/sidebar.ts の SIDEBAR_WIDTH)。初回描画用の既定。 */
   --sidebar-w: 240px;
-  --history-w: 320px;
+  /* 幅の出所は TS (core/panel-sizes.ts の HISTORY_WIDTH)。初回描画用の既定。 */
+  --history-w: 440px;
   --sidebar-restore-rail-w: 44px;
   --annotation-panel-w: 380px;
   --journal-task-editor-w: 380px;
@@ -21129,12 +21130,40 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 .d2h-file-side-diff > div {
   border-color: var(--color-line-soft) !important;
 }
+/* History では差分の列が一覧とファイルの列の横に来て狭くなる (1280px で
+   約 300px)。ファイルの見出しを 2 段に折り、名前の塊のボタンが右の
+   Viewed・View File に重ならないようにする (幅の狭い画面の @media と同じ形)。 */
+body.gdp-history-page #diff {
+  container: history-diff / inline-size;
+}
+@container history-diff (max-width: 560px) {
+  .d2h-file-header,
+  .d2h-file-header.d2h-sticky-header {
+    height: auto !important;
+    min-height: var(--ui-file-header-wrapped-h);
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: var(--space-1);
+  }
+  .d2h-file-header .d2h-file-name-wrapper {
+    flex: 1 1 calc(100% - var(--space-7));
+    order: 1;
+  }
+  .d2h-file-header > :not(.gdp-file-toggle, .d2h-file-name-wrapper) {
+    order: 2;
+  }
+  .d2h-file-header > .gdp-view-file {
+    margin-left: auto;
+  }
+}
 
 /* ---- B-1: History (views/history-view.ts・history-graph.ts) ----
    絵 (round3/history.png): コミットの一覧は 1 行 1 コミットの表。左の列にグラフ
    (主線はアクセント、分かれた線は別の落ち着いた色。線 2px・節点 6px)、件名は
    省略、作者・時刻・短いハッシュは列を固定。行の高さは表の行 (--ui-table-row-h)。
-   一覧の幅で列を出し入れする (狭いと作者と絶対時刻を隠す。どちらも詳細にある)。
+   一覧の幅で列を出し入れする。件名を最後まで残す: 件名の列は一覧の半分を
+   下回らず、枝の札が先に縮む。狭くなると作者 → 絶対時刻 → ハッシュ → 時刻の
+   順に隠す (どれも詳細にある)。一覧の既定の幅は HISTORY_WIDTH (440px)。
    行は隙間なく並べ、グラフの線が行をまたいでつながる。
    祖先・右端に :is() を使わない (ブラウザが規則を素早く外せず、全要素で照合する。
    長いファイルのスクロールでスタイル計算が増えたのを実測した)。 */
@@ -21150,7 +21179,7 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 #history-panel .history-item,
 .gdp-file-history-panel .history-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto 0 auto auto;
+  grid-template-columns: auto minmax(50%, 1fr) minmax(0, max-content) 0 auto auto;
   grid-template-areas: "graph subject refs author when sha";
   /* 行の高さを 1 本の行の軌道にする (グラフの SVG の 100% が行の高さになる)。 */
   grid-template-rows: 100%;
@@ -21185,6 +21214,12 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
   grid-area: refs;
   flex-basis: auto;
   flex-wrap: nowrap;
+  overflow: hidden;
+}
+#history-panel .history-item .history-ref,
+.gdp-file-history-panel .history-item .history-ref {
+  flex-shrink: 1;
+  min-width: 0;
 }
 #history-panel .history-item .author,
 .gdp-file-history-panel .history-item .author {
@@ -21199,6 +21234,7 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 #history-panel .history-item .when,
 .gdp-file-history-panel .history-item .when {
   grid-area: when;
+  min-width: max-content;
   color: var(--color-text-2);
   font-size: var(--ui-font-sm);
   white-space: nowrap;
@@ -21215,20 +21251,34 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 #history-panel .history-item .sha,
 .gdp-file-history-panel .history-item .sha {
   grid-area: sha;
+  /* 列を固定する (枝の札のほうを縮める)。 */
+  min-width: max-content;
   color: var(--color-text-3);
   font-size: var(--ui-font-sm);
 }
-@container history-list (min-width: 480px) {
+@container history-list (max-width: 399px) {
+  #history-panel .history-item .sha,
+  .gdp-file-history-panel .history-item .sha {
+    display: none;
+  }
+}
+@container history-list (max-width: 299px) {
+  #history-panel .history-item .when,
+  .gdp-file-history-panel .history-item .when {
+    display: none;
+  }
+}
+@container history-list (min-width: 600px) {
   #history-panel .history-item,
   .gdp-file-history-panel .history-item {
-    grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+    grid-template-columns: auto minmax(50%, 1fr) minmax(0, max-content) auto auto auto;
   }
   #history-panel .history-item .author,
   .gdp-file-history-panel .history-item .author {
     display: block;
   }
 }
-@container history-list (min-width: 680px) {
+@container history-list (min-width: 760px) {
   #history-panel .history-item .when-abs,
   .gdp-file-history-panel .history-item .when-abs {
     display: inline;
@@ -21393,6 +21443,9 @@ body.gdp-history-page #history-commit-info:not([hidden]),
 }
 #history-commit-info .hci-sha,
 .history-commit-info .hci-sha {
+  /* 狭い列では全桁を折り返す (切ると選んで写せなくなる)。 */
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--color-text-2);
   font-family: var(--font-mono);
 }
@@ -21450,4 +21503,1081 @@ body.gdp-history-page #history-commit-info:not([hidden]),
 }
 .gdp-file-history-commit-info:not([hidden]) {
   padding: var(--space-4) var(--pad-doc);
+}
+
+/* ---- B-2: 設定・ヘルプ (views/help-page.ts・viewer-settings.ts) ----
+   絵 (round2/settings.png): 見出しの下に設定の検索、左に分類の列 (210px)、
+   32px 空けて右に選んだ分類の中身。分類の行は --ui-control-md、選んでいる
+   分類は強い選択。節は枠で囲まず、見出しと間隔で区切る。切り替えは面の色と
+   形だけ (箱の寸法を変えない)。トグルはスイッチの形 (中身は checkbox のまま)。 */
+body.gdp-help-page #content {
+  --content-top-gap: var(--space-5);
+  padding-right: var(--pad-doc);
+  padding-left: var(--pad-doc);
+}
+.gdp-help-header {
+  margin-bottom: var(--space-4);
+}
+.gdp-help-header h1 {
+  color: var(--color-text);
+  font-size: var(--ui-font-heading);
+  font-weight: 600;
+}
+.gdp-help-search-row {
+  margin-bottom: var(--space-5);
+}
+.scope-settings-search-wrap {
+  position: relative;
+  width: min(calc(var(--space-unit) * 110), 100%);
+}
+.scope-settings-search-icon {
+  position: absolute;
+  top: 50%;
+  left: var(--space-3);
+  color: var(--color-text-3);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.scope-settings-search {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--ui-control-md);
+  /* 文字はアイコン (左 12・幅 16) の右に 8 空けて置く。 */
+  padding: 0 var(--space-3) 0 calc(var(--space-3) + var(--space-4) + var(--space-2));
+  border: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--ui-font-md);
+}
+.scope-settings-search::placeholder {
+  color: var(--color-text-3);
+}
+.scope-settings-search:focus {
+  border-color: var(--color-accent);
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.gdp-help-layout {
+  grid-template-columns: calc(var(--space-unit) * 52) minmax(0, 1fr);
+  gap: var(--space-6);
+}
+.gdp-help-nav {
+  top: calc(var(--global-header-h) + var(--space-5));
+  gap: 0;
+  padding-right: var(--space-4);
+  border-right: 1px solid var(--color-line-soft);
+}
+.gdp-help-nav-heading {
+  display: flex;
+  align-items: flex-end;
+  height: var(--ui-row-h);
+  padding: 0 var(--space-3) var(--space-1);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.gdp-help-nav-heading + button {
+  margin-top: var(--space-1);
+}
+.gdp-help-nav button + .gdp-help-nav-heading {
+  margin-top: var(--space-4);
+}
+.gdp-help-nav button {
+  height: var(--ui-control-md);
+  padding: 0 var(--space-3);
+  border-left: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+}
+.gdp-help-nav button:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.gdp-help-nav button.active {
+  border-left: 0;
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+  color: var(--color-text);
+  font-weight: 600;
+}
+.gdp-help-content h2 {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text);
+  font-size: var(--ui-font-heading);
+  font-weight: 600;
+}
+.gdp-help-content > p {
+  margin: 0 0 var(--space-5);
+  color: var(--color-text-2);
+}
+/* 設定のフォーム: 節は見出しと間隔で区切る。 */
+.scope-settings {
+  max-width: calc(var(--space-unit) * 225);
+}
+.scope-settings > [hidden] {
+  display: none;
+}
+.scope-settings-section + .scope-settings-section {
+  margin-top: var(--space-6);
+}
+.scope-settings-section-title,
+.scope-settings-title-row > .scope-settings-section-title {
+  margin-bottom: var(--space-2);
+  color: var(--color-text);
+  font-size: var(--ui-font-title);
+  font-weight: 600;
+}
+.scope-settings-title-row {
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+.scope-settings-shared {
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-text);
+}
+.scope-settings label {
+  color: var(--color-text-2);
+  font-size: var(--ui-font-base);
+}
+#display-settings-source,
+.scope-settings-help,
+#scope-omit-source {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+#viewer-theme,
+#viewer-language,
+#sidebar-font-size,
+#code-font-size,
+#scope-omit-dirs,
+#scope-exclude-names {
+  border-color: var(--color-line-soft);
+  background-color: var(--color-inset);
+  color: var(--color-text);
+}
+#viewer-theme,
+#viewer-language,
+#sidebar-font-size,
+#code-font-size {
+  width: min(calc(var(--space-unit) * 110), 100%);
+  height: var(--ui-control-md);
+}
+/* トグル: 文字が左、スイッチが右 (絵の通知の行)。 */
+.scope-settings-toggle {
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: var(--ui-control-md);
+  margin-top: 0;
+}
+.scope-settings label.scope-settings-toggle {
+  display: flex;
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+}
+.scope-settings-toggle + .scope-settings-toggle {
+  border-top: 1px solid var(--color-line-soft);
+}
+.scope-settings-toggle input[type="checkbox"] {
+  flex: 0 0 auto;
+  position: relative;
+  width: calc(var(--space-unit) * 9);
+  height: calc(var(--space-unit) * 5);
+  border-radius: calc(var(--space-unit) * 2.5);
+  background: var(--color-line-strong);
+  cursor: pointer;
+  appearance: none;
+  transition: background var(--motion-fast);
+}
+.scope-settings-toggle input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(var(--space-unit) * 4);
+  height: calc(var(--space-unit) * 4);
+  border-radius: 50%;
+  background: var(--color-text);
+  transition: transform var(--motion-fast);
+}
+.scope-settings-toggle input[type="checkbox"]:checked {
+  background: var(--color-accent);
+}
+.scope-settings-toggle input[type="checkbox"]:checked::before {
+  background: var(--color-on-accent);
+  transform: translateX(calc(var(--space-unit) * 4));
+}
+.scope-settings-toggle input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.scope-settings-footer {
+  margin-top: var(--space-6);
+  padding-top: 0;
+  border-top: 0;
+}
+.agent-screen-rules-section {
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* ---- B-2: ⌘K のパレット (views/search-palette-ui.ts) ----
+   絵 (round2/palette.png): 面は浮く面 (--color-overlay)・角丸 8・影、背景は均一に
+   暗くする。上に検索欄 (56px、虫眼鏡と Esc)、種類ごとの見出し (24px) と結果の行
+   (32px、左にアイコン・右にキー)、足元にキーの案内 (40px)。選んでいる行は強い
+   選択。右のコードの表示は既存の操作なので残す (面の半分)。grep の行は 2 行の
+   まま (本文の抜粋を読むため)。 */
+.gdp-palette-backdrop,
+[data-theme="dark"] .gdp-palette-backdrop {
+  background: var(--color-backdrop);
+}
+.gdp-palette {
+  grid-template-rows: auto auto auto auto 1fr auto;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--color-overlay);
+  box-shadow: 0 var(--space-5) calc(var(--space-unit) * 20) var(--color-shadow);
+}
+.gdp-palette-wide {
+  width: min(calc(var(--space-unit) * 280), calc(100vw - var(--space-7)));
+  height: min(calc(var(--space-unit) * 160), calc(100vh - var(--space-7)));
+}
+.gdp-palette-label {
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4) 0;
+  text-transform: none;
+}
+.gdp-palette-mode-button {
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-base);
+}
+.gdp-palette-mode-button:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.gdp-palette-mode-button[aria-pressed="true"] {
+  border: 0;
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+  color: var(--color-text);
+}
+.gdp-palette-input-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: calc(var(--space-unit) * 14);
+  margin: var(--space-2) var(--space-3) 0;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+}
+.gdp-palette-input-row:focus-within {
+  box-shadow: var(--glow-select);
+}
+.gdp-palette-input-icon {
+  flex: none;
+  color: var(--color-text-3);
+}
+.gdp-palette-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--ui-font-title);
+  line-height: normal;
+}
+.gdp-palette-input::placeholder {
+  color: var(--color-text-3);
+}
+.gdp-palette-input-key,
+.gdp-palette-row-key,
+.gdp-palette-footer kbd {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-raised);
+  color: var(--color-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-sm);
+  line-height: calc(var(--space-unit) * 5);
+  white-space: nowrap;
+}
+.gdp-palette-controls {
+  min-height: 0;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-4) 0;
+}
+.gdp-palette-controls:empty {
+  display: none;
+}
+.gdp-palette-mode-hint {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.gdp-palette-status {
+  min-height: 0;
+  padding: var(--space-1) var(--space-4) var(--space-2);
+  border-bottom: 1px solid var(--color-line-soft);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.gdp-palette-list {
+  padding: var(--space-1) var(--space-2) var(--space-2);
+}
+.gdp-palette-wide .gdp-palette-body {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.gdp-palette-wide .gdp-palette-list {
+  border-right: 1px solid var(--color-line-soft);
+}
+.gdp-palette-group-heading {
+  display: flex;
+  align-items: flex-end;
+  height: calc(var(--space-unit) * 6);
+  padding: 0 var(--space-2) var(--space-1);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-base);
+}
+.gdp-palette-row + .gdp-palette-group-heading {
+  margin-top: var(--space-1);
+}
+.gdp-palette-row {
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+}
+.gdp-palette-row:hover {
+  background: var(--color-raised);
+}
+.gdp-palette-row[aria-selected="true"] {
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+}
+/* ファイルの検索の行 (ファイル・プロジェクト・エージェント・操作): 1 行 32px。 */
+.gdp-palette-row-file,
+.gdp-palette-row-command {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 0;
+  height: var(--ui-control-md);
+  padding: 0 var(--space-2);
+}
+/* アイコンは左の線にそろえる (密度で箱が 16px より広くなっても、見出しの文字と同じ線)。 */
+.gdp-palette-row-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-start;
+  width: var(--space-4);
+  color: var(--color-text-2);
+}
+.gdp-palette-row-file .gdp-palette-row-title,
+.gdp-palette-row-command .gdp-palette-row-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--ui-font-md);
+  font-weight: 500;
+}
+.gdp-palette-row-file .gdp-palette-row-detail,
+.gdp-palette-row-command .gdp-palette-row-detail {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.gdp-palette-row-command .gdp-palette-row-detail {
+  font-family: inherit;
+  font-size: var(--ui-font-base);
+}
+.gdp-palette-row-title mark,
+.gdp-palette-row-detail mark {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+.gdp-palette-row-status {
+  flex: none;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-base);
+}
+.gdp-palette-row-status[data-tone="waiting"] {
+  color: var(--color-waiting);
+}
+.gdp-palette-row-status[data-tone="working"] {
+  color: var(--color-working);
+}
+.gdp-palette-row-status[data-tone="done"] {
+  color: var(--color-done);
+}
+.gdp-palette-row-key {
+  flex: none;
+  margin-left: auto;
+}
+.gdp-palette-row-status + .gdp-palette-row-key {
+  margin-left: 0;
+}
+.gdp-palette-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  height: calc(var(--space-unit) * 10);
+  border-top: 1px solid var(--color-line-soft);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.gdp-palette-footer-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* ---- B-2: Worktrees (views/worktree-view.ts) ----
+   絵 (round3/worktrees.png): 何も選んでいないときは作業ツリーの一覧だけを
+   画面いっぱいに出す (body[data-worktree-overview])。行は横長の面 (88px 以上、
+   行間 12、内側 16) で、ブランチ (見出し) とパス / 比較 / 変更 / エージェント /
+   開く を列にそろえる。行は面ごとに別の grid だが、列はすべて fr と固定幅なので
+   行をまたいでそろう。今の作業ツリーは一段明るい面。ahead / behind は補助の色の
+   文字 (成功・失敗の色にしない)。行を押すと今までどおり 一覧 → 変更ファイル →
+   差分 に切り替わる (選んでいる間の一覧は History の一覧と同じ面)。 */
+body[data-worktree-overview] {
+  --chrome-h: var(--global-header-h);
+  --worktree-columns: minmax(0, 2.4fr) minmax(0, 1.8fr) minmax(0, 1.1fr)
+    minmax(0, 1.3fr) calc(var(--space-unit) * 30);
+}
+body[data-worktree-overview] #topbar,
+body[data-worktree-overview] #sidebar,
+body[data-worktree-overview] #sidebar-resizer,
+body[data-worktree-overview] #history-resizer,
+body[data-worktree-overview] main#content {
+  display: none;
+}
+body[data-worktree-overview] #worktree-panel {
+  right: 0;
+  width: auto;
+  padding: 0 var(--space-6) var(--space-6);
+  border-right: 0;
+  background: var(--color-ground);
+}
+body[data-worktree-overview] #worktree-panel .history-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "title reload add"
+    "count reload add";
+  align-items: center;
+  column-gap: var(--space-2);
+  padding: var(--space-6) 0 var(--space-4);
+  border-bottom: 0;
+  background: var(--color-ground);
+}
+body[data-worktree-overview] #worktree-panel .history-title {
+  grid-area: title;
+  color: var(--color-text);
+  font-size: var(--ui-font-heading);
+  font-weight: 600;
+}
+body[data-worktree-overview] #worktree-panel .worktree-count {
+  grid-area: count;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+}
+body[data-worktree-overview] #worktree-panel .worktree-head-btn {
+  grid-row: 1 / 3;
+  height: var(--ui-control-md);
+  margin: 0;
+  padding: 0 var(--space-4);
+}
+body[data-worktree-overview] #worktree-panel .history-banner,
+body[data-worktree-overview] #worktree-panel .history-status {
+  margin: 0 0 var(--space-3);
+  border-radius: var(--radius-md);
+}
+body[data-worktree-overview] #worktree-panel .worktree-head-btn:last-of-type {
+  grid-area: add;
+  border-color: transparent;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+/* 虫眼鏡 (::before / ::after) の縦の位置は元の欄と同じ (上の余白 7px のまま)。
+   横は欄を面の線から始めるので、元の欄の左端からの距離 (11 / 22) にそろえる。 */
+body[data-worktree-overview] #worktree-panel .history-filter-wrap {
+  width: min(calc(var(--space-unit) * 110), 100%);
+  padding: calc(var(--space-2) - 1px) 0 var(--space-4);
+  border-bottom: 0;
+  background: transparent;
+}
+body[data-worktree-overview] #worktree-panel .history-filter-wrap::before {
+  left: calc(var(--space-3) - 1px);
+}
+body[data-worktree-overview] #worktree-panel .history-filter-wrap::after {
+  left: calc(var(--space-5) - 2px);
+}
+body[data-worktree-overview] #worktree-panel .history-filter {
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+}
+.worktree-columns {
+  display: none;
+}
+body[data-worktree-overview] .worktree-columns {
+  display: grid;
+  grid-template-columns: var(--worktree-columns);
+  column-gap: var(--space-5);
+  padding: 0 var(--space-4) var(--space-2);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-base);
+}
+body[data-worktree-overview] #worktree-panel .history-list {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0;
+}
+body[data-worktree-overview] #worktree-panel .history-item {
+  display: grid;
+  grid-template-columns: var(--worktree-columns);
+  grid-template-areas:
+    "title compare changes agents actions"
+    "path compare changes agents actions"
+    "error error error error error";
+  grid-template-rows: auto auto auto;
+  align-items: center;
+  column-gap: var(--space-5);
+  row-gap: var(--space-1);
+  min-height: calc(var(--space-unit) * 22);
+  padding: var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-doc);
+}
+body[data-worktree-overview] #worktree-panel .history-item:hover {
+  background: color-mix(in srgb, var(--color-raised) 60%, var(--color-doc));
+}
+body[data-worktree-overview] #worktree-panel .history-item.worktree-current {
+  background: color-mix(in srgb, var(--color-select) 70%, var(--color-doc));
+  box-shadow: var(--glow-select);
+}
+body[data-worktree-overview] #worktree-panel .history-item.worktree-conflict {
+  box-shadow: inset 2px 0 0 var(--color-failed);
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-head {
+  grid-area: title;
+  align-self: end;
+  align-items: center;
+  min-width: 0;
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-head .subject {
+  display: none;
+}
+.worktree-row-branch {
+  display: none;
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-branch {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: var(--ui-font-title);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-badges {
+  flex: 0 1 auto;
+  color: var(--color-text);
+  font-size: var(--ui-font-sm);
+}
+body[data-worktree-overview] #worktree-panel .worktree-badge {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  line-height: calc(var(--space-unit) * 5);
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-path {
+  grid-area: path;
+  align-self: start;
+  margin: 0;
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-sm);
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-divergence {
+  grid-area: compare;
+  flex-wrap: nowrap;
+  align-items: center;
+  margin: 0;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-md);
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-meta {
+  grid-area: changes;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 2px;
+  margin: 0;
+  font-size: var(--ui-font-sm);
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-meta .sha {
+  display: none;
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-files {
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-meta .when {
+  color: var(--color-text-3);
+}
+body[data-worktree-overview]
+  #worktree-panel
+  .history-item
+  > .meta2:not(.worktree-row-meta, .worktree-row-divergence) {
+  grid-area: error;
+}
+.worktree-row-agents {
+  display: none;
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-agents {
+  grid-area: agents;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--ui-font-md);
+}
+.worktree-row-agent-state {
+  overflow: hidden;
+  color: var(--color-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.worktree-row-agent-waiting {
+  color: var(--color-waiting);
+}
+.worktree-row-agent-working {
+  color: var(--color-working);
+}
+.worktree-row-agent-done {
+  color: var(--color-done);
+}
+.worktree-row-agent-more {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+/* 選んでいる間の狭い一覧: 「…」は行の右上 (前と同じ場所)。 */
+#worktree-panel .history-item {
+  position: relative;
+}
+#worktree-panel .worktree-row-actions {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+#worktree-panel .worktree-row-head {
+  padding-right: var(--space-6);
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-head {
+  padding-right: 0;
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-actions {
+  position: static;
+  grid-area: actions;
+  justify-content: flex-end;
+}
+.worktree-row-open {
+  width: calc(var(--space-unit) * 22);
+  height: var(--ui-control-md);
+  justify-content: center;
+  border-color: var(--color-line);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+}
+.worktree-row-open:hover:not(:disabled) {
+  background: var(--color-raised);
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-menu {
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  border-radius: var(--radius-md);
+  opacity: 1;
+}
+/* 選んでいる間の一覧: History の一覧と同じ面 (面の色・角丸・強い選択)。 */
+body.gdp-worktree-page:not([data-worktree-overview]) #worktree-panel {
+  background: var(--color-nav);
+}
+body.gdp-worktree-page:not([data-worktree-overview]) #worktree-panel .history-item {
+  margin: 0 var(--pad-face) var(--space-1);
+  padding: var(--space-2) calc(var(--pad-text) - var(--pad-face));
+  border: 0;
+  border-radius: var(--radius-md);
+}
+body.gdp-worktree-page:not([data-worktree-overview]) #worktree-panel .history-item:hover {
+  background: color-mix(in srgb, var(--color-raised) 70%, transparent);
+}
+body.gdp-worktree-page:not([data-worktree-overview]) #worktree-panel .history-item.active {
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+}
+body[data-worktree-overview] #worktree-panel .worktree-row-compare {
+  display: -webkit-box;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+/* 選んだ作業ツリーのコミット (件名と情報の 2 段) は一覧の行の高さに収まらない。
+   作業ツリーのファイルの一覧は仮想表示ではないので、高さを中身に任せる。 */
+#filelist li.worktree-commit {
+  height: auto;
+  padding: var(--space-1) var(--pad-text);
+}
+
+/* ---- B-2: Data (views/database/。table-grid.ts ほか) ----
+   絵 (round3/data.png): 左に接続とテーブルの木 (木の面・選んでいるテーブルは
+   強い選択)、右に結果の表。表の面は --color-code、罫線は薄い線 1px、見出しは
+   沈んだ面。行は縞にせず、選んだ行はわずかに明るく、選んだセルが主に分かる
+   (面 + 2px の線)。データの状態の文字 (Ready など) は無彩色のまま。
+   **行の高さ・列の幅は table-grid.ts が持つ (ROW_HEIGHT・列幅の計算)。ここでは
+   寸法を変えず、面・線・文字の色だけを当てる** (ui-layout.md)。足元は行の範囲と
+   ページ送り (1 画面ずつのスクロール)。 */
+.db-root {
+  background: var(--color-doc);
+}
+.db-root .db-tabs-bar {
+  background: var(--color-ground);
+  border-bottom-color: var(--color-line-soft);
+}
+.db-root .db-tabs-chip {
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-2);
+}
+.db-root .db-tabs-chip:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.db-root .db-tabs-chip.active {
+  border-color: transparent;
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+  color: var(--color-text);
+}
+.db-root .db-sidebar {
+  border-right: 1px solid var(--color-line-soft);
+  background: var(--color-tree);
+}
+.db-root .db-icon-toolbar,
+.db-root .db-toolbar,
+.db-root .db-prefs-bar,
+.db-root .db-table-filter-wrap {
+  border-bottom-color: transparent;
+  background: transparent;
+}
+.db-root .db-table-item {
+  border-left: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+}
+.db-root .db-table-item:hover {
+  background: color-mix(in srgb, var(--color-raised) 70%, transparent);
+}
+.db-root .db-table-item.active {
+  border-left: 0;
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+  color: var(--color-text);
+}
+.db-root .db-table-group-header {
+  color: var(--color-text-3);
+  letter-spacing: 0.06em;
+}
+.db-root .db-tab-bar {
+  border-bottom-color: var(--color-line-soft);
+  background: var(--color-doc);
+}
+.db-root .db-tab.active {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-text);
+}
+.db-root .db-grid {
+  background: var(--color-code);
+}
+.db-root .db-grid-filter-bar {
+  border-bottom-color: var(--color-line-soft);
+  background: var(--color-doc);
+}
+.db-root .db-grid-header-wrap {
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-inset);
+}
+.db-root .db-grid-header-label {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.db-root .db-grid-row {
+  border-bottom-color: var(--color-line-soft);
+}
+.db-root .db-grid-cell {
+  border-right-color: var(--color-line-soft);
+  color: var(--color-text);
+}
+.db-root .db-grid-row.alt {
+  background: transparent;
+}
+.db-root .db-grid-row:hover {
+  background: color-mix(in srgb, var(--color-raised) 55%, transparent);
+}
+.db-root .db-grid-row.selected {
+  background: color-mix(in srgb, var(--color-select) 40%, transparent) !important;
+  box-shadow: none;
+}
+.db-root .db-grid-rownum-header,
+.db-root .db-grid-rownum {
+  background: var(--color-inset);
+  color: var(--color-text-3);
+  box-shadow: 1px 0 0 var(--color-line-soft);
+}
+.db-root .db-grid-row.selected .db-grid-rownum {
+  background: color-mix(in srgb, var(--color-select) 70%, var(--color-inset));
+  color: var(--color-text);
+}
+.db-root .db-grid-cell.db-grid-cell-active {
+  background: var(--color-select);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  color: var(--color-text);
+}
+.db-root .db-grid-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  border-top: 1px solid var(--color-line-soft);
+  background: var(--color-doc);
+  color: var(--color-text-2);
+}
+.db-grid-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+.db-grid-pager[hidden] {
+  display: none;
+}
+.db-grid-pager-range {
+  margin-right: var(--space-2);
+  color: var(--color-text-2);
+  font-variant-numeric: tabular-nums;
+}
+.db-grid-pager-btn {
+  display: inline-grid;
+  place-items: center;
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-title);
+  cursor: pointer;
+}
+.db-grid-pager-btn:hover:not(:disabled) {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.db-grid-pager-btn:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.db-root .db-history-pane,
+.db-root .db-history-dock {
+  background: var(--color-nav);
+}
+.db-root .db-history-dock,
+.db-root .db-history-resizer {
+  border-top-color: var(--color-line-soft);
+}
+/* クエリの入力欄: コードの面。重ね描き (highlight と textarea) の余白と文字は
+   変えない (位置がずれるため)。 */
+.db-root .db-query-input {
+  padding: var(--space-3) var(--space-4);
+  border-bottom-color: var(--color-line-soft);
+}
+.db-root .db-query-editor-wrap {
+  border-color: var(--color-line-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-code);
+}
+.db-root .db-query-editor-wrap:focus-within {
+  border-color: var(--color-accent);
+  outline: none;
+  box-shadow: var(--glow-select);
+}
+.db-root .db-query-highlight {
+  background: var(--color-code);
+}
+
+/* ---- B-2: Work log (views/journal-view.ts) ----
+   絵は無い。Files の文書の面 (f603fc2) と History の一覧 (3da57ab) と同じ決まり:
+   頭の行は窓の地・文字の線 --pad-text、左の列 (暦・タスクの列) は木の面、
+   選んでいるもの (日・記録・カード・絞り込み) は強い選択 (--color-select +
+   --glow-select)、入力欄は沈んだ面で枠線を引かない、区切りは線より面の差。
+   寸法 (日のマスの高さ・列の幅・編集欄の幅) は変えない。 */
+.journal-page {
+  background: var(--color-doc);
+}
+.journal-header {
+  gap: var(--space-3);
+  padding: var(--space-2) var(--pad-text);
+  border-bottom: 1px solid var(--color-line-soft);
+  background: var(--color-ground);
+}
+.journal-title {
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+  font-weight: 600;
+}
+.journal-status {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.journal-related,
+.journal-task-editor {
+  border-left: 1px solid var(--color-line-soft);
+  background: var(--color-nav);
+}
+.journal-section-head button,
+.journal-editor-actions button {
+  border-color: var(--color-line-soft);
+  background: transparent;
+  color: var(--color-text);
+}
+.journal-section-head button:hover,
+.journal-editor-actions button:hover {
+  border-color: var(--color-line);
+  background: var(--color-raised);
+}
+.journal-editor {
+  gap: var(--space-3);
+  padding: var(--space-4) var(--pad-doc);
+}
+.journal-entry-row {
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  color: var(--color-text-2);
+}
+.journal-entry-row:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.journal-entry-row.active {
+  border-color: transparent;
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+  color: var(--color-text);
+}
+.journal-title-input,
+.journal-body-input,
+.journal-task-fields select,
+.journal-task-fields input,
+.journal-task-toolbar input,
+.journal-label-editor {
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  color: var(--color-text);
+}
+.journal-field-label {
+  color: var(--color-text-2);
+  font-weight: 600;
+}
+.journal-primary-action {
+  border-color: transparent;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+/* 編集欄 (右の列) の中身は縮ませない。縮むと札の欄が 1 段分の高さに潰れ、
+   2 段目の札が下の書式の行に重なった (高さが足りなければ列ごとスクロール)。 */
+.journal-task-editor > *,
+.journal-editor > * {
+  flex-shrink: 0;
+}
+.journal-task-toolbar {
+  gap: var(--space-3);
+  padding: var(--space-3) var(--pad-text);
+  border-bottom-color: var(--color-line-soft);
+  background: var(--color-doc);
+}
+.journal-label-filter {
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  color: var(--color-text-2);
+}
+.journal-label-filter:hover {
+  border-color: transparent;
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.journal-label-filter.active {
+  border-color: transparent;
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+  color: var(--color-text);
+}
+.journal-label-filter.active .journal-label-filter-count {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+.journal-task-board-wrap {
+  padding: var(--space-4) var(--pad-text);
+}
+.journal-task-column {
+  border-radius: var(--radius-lg);
+  background: var(--color-tree);
+}
+.journal-task-column-head {
+  color: var(--color-text-2);
+}
+.journal-task-card {
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-doc);
+}
+.journal-task-card:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--color-raised) 60%, var(--color-doc));
+  box-shadow: none;
+}
+.journal-task-card.selected {
+  border-color: transparent;
+  background: var(--color-select);
+  box-shadow: var(--glow-select);
+}
+.journal-github-toggle {
+  border-color: var(--color-line-soft);
+  background: transparent;
 }

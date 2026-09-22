@@ -77,7 +77,33 @@ export type SearchPaletteText = CodePreviewText & {
   resultsPlaceholder: string;
   resultsIdle: string;
   resultsScope: (ref: string) => string;
+  // Ctrl+K に混ぜるプロジェクト・エージェント・操作 (search-palette-ui.ts の PaletteCommand)。
+  searchEverything: string;
+  groups: Record<"projects" | "agents" | "files" | "actions", string>;
+  footerMove: string;
+  footerOpen: string;
+  footerClose: string;
+  footerSwitch: (mode: "file" | "grep") => string;
+  currentProject: string;
+  actions: Record<PaletteActionId, string>;
 };
+
+/** パレットの Actions に並べる操作 (app.ts が実行の仕方を持つ)。 */
+export type PaletteActionId =
+  | "new-agent"
+  | "open-settings"
+  | "toggle-theme"
+  | "goto-repo"
+  | "goto-diff"
+  | "goto-history"
+  | "goto-worktrees"
+  | "goto-database"
+  | "goto-journal"
+  | "goto-agents"
+  | "toggle-terminal-panel"
+  | "toggle-sidebar"
+  | "switch-project"
+  | "open-help";
 
 const EN: SearchPaletteText = {
   ...codePreviewText("en"),
@@ -159,6 +185,34 @@ const EN: SearchPaletteText = {
   resultsPlaceholder: "Search text (path:<dir or glob> narrows)",
   resultsIdle: "Type a search and press Enter",
   resultsScope: (ref) => `in ${ref}`,
+  searchEverything: "Search projects, agents, files, actions…",
+  groups: {
+    projects: "Projects",
+    agents: "Agents",
+    files: "Files",
+    actions: "Actions",
+  },
+  footerMove: "move",
+  footerOpen: "open",
+  footerClose: "close",
+  footerSwitch: (mode) => (mode === "file" ? "text search" : "file search"),
+  currentProject: "This screen",
+  actions: {
+    "new-agent": "New agent",
+    "open-settings": "Settings",
+    "toggle-theme": "Toggle theme",
+    "goto-repo": "Go to Files",
+    "goto-diff": "Go to Diff",
+    "goto-history": "Go to History",
+    "goto-worktrees": "Go to Worktrees",
+    "goto-database": "Go to Data",
+    "goto-journal": "Go to Work log",
+    "goto-agents": "Go to Agents",
+    "toggle-terminal-panel": "Toggle terminal panel",
+    "toggle-sidebar": "Toggle file sidebar",
+    "switch-project": "Switch project",
+    "open-help": "Quick help",
+  },
 };
 
 const JA: SearchPaletteText = {
@@ -239,6 +293,34 @@ const JA: SearchPaletteText = {
     "検索するコード（path:<ディレクトリ or glob> で絞り込み）",
   resultsIdle: "検索語を入力して Enter",
   resultsScope: (ref) => `${ref} 内`,
+  searchEverything: "プロジェクト・エージェント・ファイル・操作を検索…",
+  groups: {
+    projects: "プロジェクト",
+    agents: "エージェント",
+    files: "ファイル",
+    actions: "操作",
+  },
+  footerMove: "移動",
+  footerOpen: "開く",
+  footerClose: "閉じる",
+  footerSwitch: (mode) => (mode === "file" ? "コード検索" : "ファイル検索"),
+  currentProject: "この画面",
+  actions: {
+    "new-agent": "新しいエージェント",
+    "open-settings": "設定",
+    "toggle-theme": "テーマ切り替え",
+    "goto-repo": "ファイルへ移る",
+    "goto-diff": "差分へ移る",
+    "goto-history": "履歴へ移る",
+    "goto-worktrees": "作業ツリーへ移る",
+    "goto-database": "データストアへ移る",
+    "goto-journal": "ワークログへ移る",
+    "goto-agents": "エージェントへ移る",
+    "toggle-terminal-panel": "ターミナルのパネルを開く・閉じる",
+    "toggle-sidebar": "ファイルの列を出す・隠す",
+    "switch-project": "プロジェクトを切り替える",
+    "open-help": "クイックヘルプ",
+  },
 };
 
 export function searchPaletteText(

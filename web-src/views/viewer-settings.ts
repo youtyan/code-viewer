@@ -3,6 +3,7 @@
 // フォント適用などの副作用は deps 経由で app.ts に任せる。
 
 import { formatErrorDetail } from "../core/error-detail";
+import { iconSvg, SEARCH_16_PATH } from "../core/icons";
 import {
   highlightToInnerHtml,
   loadShikiHighlighter,
@@ -71,6 +72,10 @@ export type ViewerSettingsText = {
   agentRulesSaving: string;
   agentRulesSourceDefault: string;
   agentRulesSourceSaved: string;
+  /** 左の分類の名前と、分類を切り替えたときの見出しの下の 1 文。 */
+  categories: Record<SettingsCategory, { label: string; description: string }>;
+  searchPlaceholder: string;
+  searchNoMatch: (query: string) => string;
 };
 
 export type ViewerSettingsDraft = {
@@ -98,6 +103,19 @@ export type ViewerSettingsValues = ViewerSettingsDraft & {
   agentRulesSource: "default" | "saved";
   agentRulesErrors: string;
 };
+
+/**
+ * 設定の分類。Help ページの左の列に並べ、選んだ分類の節だけを出す。
+ * フォームは 1 つのまま (下書きと「変更を保存」は分類をまたいで効く)。
+ */
+export const SETTINGS_CATEGORIES = [
+  "general",
+  "appearance",
+  "agents",
+  "accounts",
+  "advanced",
+] as const;
+export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
 
 /** 設定の「テーマ」の選択肢 (ライト 1 つとダークの色違い 3 つ)。 */
 export const THEME_CHOICES = ["dark", "graphite", "warm", "light"] as const;
@@ -227,6 +245,21 @@ function setFieldValue(
 
 export function createViewerSettings(deps: ViewerSettingsDeps) {
   let root: HTMLElement | null = null;
+  let category: SettingsCategory = "general";
+  /** 節と、その節が属する分類。build() が埋める。 */
+  const categorized: Array<[HTMLElement, SettingsCategory]> = [];
+  const search = document.createElement("input");
+  search.type = "search";
+  search.id = "scope-settings-search";
+  search.className = "scope-settings-search";
+  search.autocomplete = "off";
+  search.spellcheck = false;
+  const searchWrap = document.createElement("div");
+  searchWrap.className = "scope-settings-search-wrap";
+  searchWrap.innerHTML = iconSvg("scope-settings-search-icon", SEARCH_16_PATH);
+  searchWrap.append(search);
+  const searchEmpty = helpText("scope-settings-search-empty");
+  searchEmpty.hidden = true;
 
   const theme = document.createElement("select");
   const themeHelp = helpText("viewer-theme-help");
@@ -484,7 +517,19 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       generalActions,
     );
 
+    categorized.push(
+      [display, "appearance"],
+      [uploads, "general"],
+      [agentNotify, "agents"],
+      [deps.agentAccountsSection, "accounts"],
+      [deps.agentHooksSection, "agents"],
+      [excluded, "general"],
+      [datastores, "advanced"],
+      [watch, "advanced"],
+      [ruleSettings, "advanced"],
+    );
     wrap.append(
+      searchEmpty,
       display,
       uploads,
       agentNotify,
@@ -496,7 +541,9 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       ruleSettings,
       footer,
     );
+    search.addEventListener("input", applyCategory);
     wire();
+    applyCategory();
     void initializeJsonHighlighting();
     return wrap;
   }
@@ -834,6 +881,10 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     agentRulesSave.textContent = text.agentRulesSave;
     agentRulesReset.textContent = text.agentRulesReset;
     saveNote.textContent = text.saveNote;
+    search.placeholder = text.searchPlaceholder;
+    search.setAttribute("aria-label", text.searchPlaceholder);
+    if (search.value.trim())
+      searchEmpty.textContent = text.searchNoMatch(search.value.trim());
     resetButton.textContent = text.reset;
     renderGeneralSaveState();
 
@@ -917,10 +968,66 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     );
   }
 
+  /**
+   * 選んだ分類の節だけを出す。検索欄に文字があれば分類を無視し、見出し・
+   * ラベル・説明に文字を含む節をすべて出す。
+   */
+  function applyCategory(): void {
+    const query = search.value.trim().toLocaleLowerCase();
+    let shown = 0;
+    for (const [element, owner] of categorized) {
+      const visible = query
+        ? (element.textContent ?? "").toLocaleLowerCase().includes(query)
+        : owner === category;
+      element.hidden = !visible;
+      if (visible) shown += 1;
+    }
+    searchEmpty.hidden = !query || shown > 0;
+    searchEmpty.textContent = query
+      ? deps.getText().searchNoMatch(search.value.trim())
+      : "";
+  }
+
+  function getCategory(): SettingsCategory {
+    return category;
+  }
+
+  function setCategory(next: SettingsCategory): void {
+    category = next;
+    search.value = "";
+    applyCategory();
+  }
+
+  /**
+   * ほかの画面から設定の見出しへ送るとき、その見出しを含む分類に切り替える。
+   * 見つからない (まだ組み立てていない) ときは分類を変えない。
+   */
+  function revealHeading(headingId: string): void {
+    if (!root) root = build();
+    const owner = categorized.find(
+      ([element]) =>
+        element.id === headingId || element.querySelector(`#${headingId}`),
+    );
+    if (owner) setCategory(owner[1]);
+  }
+
+  /** 設定の検索欄。Help ページが見出しの下に置く。 */
+  function mountSearch(host: HTMLElement): void {
+    host.appendChild(searchWrap);
+  }
+
   function localize(): void {
     if (!root) return;
     applyText();
   }
 
-  return { mount, sync, localize };
+  return {
+    mount,
+    mountSearch,
+    sync,
+    localize,
+    getCategory,
+    setCategory,
+    revealHeading,
+  };
 }
