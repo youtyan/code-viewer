@@ -19,8 +19,12 @@ const MAX_SCALE = 3;
 const BUTTON_STEP = 0.2;
 const WHEEL_STEP = 0.1;
 
-function clampScale(value: number): number {
+export function clampDiagramScale(value: number): number {
   return Math.max(MIN_SCALE, Math.min(MAX_SCALE, value));
+}
+
+export function stepDiagramScale(value: number, direction: -1 | 1): number {
+  return clampDiagramScale(value + direction * BUTTON_STEP);
 }
 
 export function createDiagramViewport(options: {
@@ -37,7 +41,7 @@ export function createDiagramViewport(options: {
   let scale = 1;
 
   function applyZoom(next: number): void {
-    scale = clampScale(next);
+    scale = clampDiagramScale(next);
     content.style.transform = `scale(${scale})`;
     content.style.transformOrigin = "top left";
     if (options.onScaleChange) options.onScaleChange(scale);
@@ -84,8 +88,8 @@ export function createDiagramViewport(options: {
   return {
     container,
     content,
-    zoomIn: () => applyZoom(scale + BUTTON_STEP),
-    zoomOut: () => applyZoom(scale - BUTTON_STEP),
+    zoomIn: () => applyZoom(stepDiagramScale(scale, 1)),
+    zoomOut: () => applyZoom(stepDiagramScale(scale, -1)),
     reset: () => applyZoom(1),
     dispose() {
       dragState = null;
