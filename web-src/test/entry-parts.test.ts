@@ -20,6 +20,7 @@ import {
 } from "../server/entry/entry-file";
 import { createEntryProjects } from "../server/entry/projects";
 import { isConnectionFailure, proxyToBackend } from "../server/entry/proxy";
+import { proxyTimeoutResponse } from "../server/entry/server";
 import { rootFileKey } from "../server/server-registry";
 import type { WorktreeOpenResult } from "../server/worktree/open";
 
@@ -29,6 +30,7 @@ describe("entry.json", () => {
   const record = {
     url: "http://127.0.0.1:64620/",
     pid: process.pid,
+    token: "0123456789abcdef",
     version: "1.0.0",
     started_at: "2026-01-01T00:00:00.000Z",
   };
@@ -62,6 +64,11 @@ describe("entry.json", () => {
       "no version",
       JSON.stringify({ ...record, version: "" }),
       "version: missing",
+    ],
+    [
+      "no token",
+      JSON.stringify({ ...record, token: "" }),
+      "token: expected 16 lower-case hexadecimal characters",
     ],
   ])("a broken record (%s) is reported, not treated as absent", (_label, text, reason) => {
     const file = join(mkdtempSync(join(tmpdir(), "entry-file-")), "entry.json");
@@ -192,6 +199,7 @@ describe("the project processes the entry starts", () => {
     const clock = { now: 1_000_000 };
     const deps: EntryBackendsDeps = {
       entryPid: 4242,
+      entryToken: "0123456789abcdef",
       controller: {
         openWorktreeServer: async (_root, open) => {
           opens.push(open);
@@ -241,6 +249,7 @@ describe("the project processes the entry starts", () => {
         port: 0,
         logFile: "/state/server-logs/sample.log",
         backendOf: 4242,
+        backendToken: "0123456789abcdef",
         serverArgs: ["--staged"],
       },
     ]);
@@ -646,7 +655,10 @@ describe("forwarding to a project process", () => {
       base,
       "/events",
       "",
-      { onBodyEnd: () => (ended += 1) },
+      {
+        onBodyEnd: () => (ended += 1),
+        responseStartMs: 10,
+      },
     );
     const response = (result as { response: Response }).response;
     expect(response.headers.get("content-type")).toBe("text/event-stream");
@@ -662,6 +674,90 @@ describe("forwarding to a project process", () => {
     expect(ended).toBe(0);
     await reader?.cancel();
     expect(ended).toBe(1);
+  });
+
+  test("a project process that does not start a response reaches the response-start deadline", async () => {
+    let receivedSignal: AbortSignal | null = null;
+    const result = await proxyToBackend(
+      new Request(`${ENTRY}/p/0123456789abcdef/_tree`),
+      "http://127.0.0.1:1/",
+      "/_tree",
+      "",
+      {
+        responseStartMs: 10,
+        fetch: async (_input, init) => {
+          const signal = init?.signal;
+          if (!(signal instanceof AbortSignal)) {
+            throw new Error("proxy fetch did not receive an AbortSignal");
+          }
+          receivedSignal = signal;
+          return await new Promise<Response>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            });
+          });
+        },
+      },
+    );
+
+    expect(result.status).toBe("timeout");
+    expect(receivedSignal?.aborted).toBe(true);
+    expect(result.status === "timeout" && String(result.error)).toContain(
+      "timed out after 10ms",
+    );
+  });
+
+  test("caller cancellation wins over the response-start deadline", async () => {
+    const caller = new AbortController();
+    caller.abort(new Error("caller left"));
+    const result = await proxyToBackend(
+      new Request(`${ENTRY}/p/0123456789abcdef/_tree`, {
+        signal: caller.signal,
+      }),
+      "http://127.0.0.1:1/",
+      "/_tree",
+      "",
+      {
+        responseStartMs: 1,
+        fetch: async (_input, init) => {
+          const signal = init?.signal;
+          if (!(signal instanceof AbortSignal)) {
+            throw new Error("proxy fetch did not receive an AbortSignal");
+          }
+          signal.throwIfAborted();
+          throw new Error("expected the request to be aborted");
+        },
+      },
+    );
+
+    expect(result.status).toBe("unreachable");
+    expect(result.status === "unreachable" && String(result.error)).toContain(
+      "caller left",
+    );
+  });
+
+  test("a response-start deadline becomes a 504 with the route, project, wait, and original error", async () => {
+    const response = proxyTimeoutResponse(
+      "GET",
+      "/_tree",
+      "0123456789abcdef",
+      "/work/sample-app",
+      120_000,
+      new Error("operation timed out after 120000ms"),
+    );
+
+    expect(response.status).toBe(504);
+    expect(await response.json()).toEqual({
+      error: "the project process did not start responding within 120 seconds",
+      code: "backend-timeout",
+      route: { method: "GET", path: "/_tree" },
+      project: {
+        key: "0123456789abcdef",
+        root: "/work/sample-app",
+      },
+      waitedSeconds: 120,
+      detail: "Error: operation timed out after 120000ms",
+    });
   });
 
   test("a download is streamed with its headers", async () => {

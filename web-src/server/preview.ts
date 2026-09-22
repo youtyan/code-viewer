@@ -56,9 +56,15 @@ import {
   parseExternalCommandOverride,
 } from "./command-resolver";
 import { isAbortLikeError } from "./database/adapters/abort";
+import { parseBoundedJsonBody } from "./database/handle-shared";
 import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
-import { readEntryRecord } from "./entry/entry-file";
+import {
+  isEntryToken,
+  readEntryRecord,
+  verifyEntryIdentity,
+} from "./entry/entry-file";
+import { processAlive } from "./file-lock";
 import { writeUploadedFiles } from "./file-upload";
 import * as git from "./git";
 import {
@@ -115,6 +121,7 @@ import {
   fileByteRangeResponseBody,
   fileReadableStream,
   readFileTextRange,
+  SSE_HEARTBEAT_INTERVAL_MS,
   startServer,
 } from "./runtime";
 import { DEFAULT_EXCLUDE_NAMES, normalizeGrepMax } from "./search";
@@ -157,6 +164,7 @@ const ENTRY_WATCH_INTERVAL_MS = 2000;
  * 自分で終わる (入口を kill したら裏も片付く)。
  */
 const ENTRY_ADOPT_GRACE_MS = 10_000;
+const MAX_ENTRY_ADOPT_BODY_BYTES = 16 * 1024;
 const SIZE_SMALL = 2000;
 const SIZE_MEDIUM = 8000;
 const SIZE_LARGE = 20000;
@@ -216,6 +224,10 @@ let cwdWasExplicit = false;
 let backendMode = false;
 // 裏を起こした入口の pid。居なくなったら裏は自分で終わる。
 let entryPid: number | null = null;
+// pid が使い回されても別の入口を持ち主にしない、起動ごとの本人確認 token。
+let entryToken: string | null = null;
+let entryOwnerGoneAt: number | null = null;
+let lastEntryOwnerFailure = "";
 // cwd が git 管理下か。"unknown" は git が無い・所有権エラー等で判定できなかった
 // 状態で、従来どおり git を叩いてその失敗を表に出す (握り潰さない)。
 // "outside" だけが「git を呼んでも失敗すると分かっている」状態で、diff と
@@ -353,6 +365,15 @@ Examples:
         process.exit(1);
       }
       entryPid = parsed;
+    } else if (arg === "--entry-token") {
+      const token = process.argv[++i];
+      if (!isEntryToken(token)) {
+        console.error(
+          "--entry-token requires 16 lower-case hexadecimal characters",
+        );
+        process.exit(1);
+      }
+      entryToken = token;
     } else if (arg === "--bin") {
       const next = process.argv[++i];
       if (!next) {
@@ -382,8 +403,8 @@ Examples:
     }
   }
   if (rest.length) cliArgs = rest;
-  if (backendMode && entryPid === null) {
-    console.error("--backend requires --entry-pid");
+  if (backendMode && (entryPid === null || entryToken === null)) {
+    console.error("--backend requires --entry-pid and --entry-token");
     process.exit(1);
   }
   const commandConfig = configureExternalCommands({
@@ -551,6 +572,86 @@ function requestAllowed(req: Request): boolean {
 
 function sideEffectRequestAllowed(req: Request): boolean {
   return sideEffectRequestAllowedForOrigin(req);
+}
+
+type EntryOwnerVerification = { ok: true } | { ok: false; detail: string };
+
+async function verifyEntryOwner(
+  pid: number,
+  token: string,
+): Promise<EntryOwnerVerification> {
+  const read = readEntryRecord();
+  if (read.ok === false) return { ok: false, detail: read.error };
+  const entry = read.registry;
+  if (!entry) return { ok: false, detail: "entry.json has no entry owner" };
+  if (entry.pid !== pid || entry.token !== token || entry.version !== VERSION) {
+    return {
+      ok: false,
+      detail: `entry.json does not match owner pid ${pid} and this version`,
+    };
+  }
+  const verified = await verifyEntryIdentity(entry);
+  if (verified.status === "ok") return { ok: true };
+  if (verified.status === "dead") {
+    return { ok: false, detail: `entry owner pid ${pid} is not alive` };
+  }
+  if (verified.status === "unreachable") {
+    return {
+      ok: false,
+      detail: `entry owner pid ${pid} did not answer:\n${formatErrorDetail(verified.error)}`,
+    };
+  }
+  return { ok: false, detail: verified.detail };
+}
+
+async function handleEntryAdopt(req: Request): Promise<Response> {
+  if (!backendMode) return text("not found", 404);
+  if (req.method !== "POST") return text("method not allowed", 405);
+  if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
+  const body = await parseBoundedJsonBody(
+    req,
+    MAX_ENTRY_ADOPT_BODY_BYTES,
+    "entry adoption request too large",
+  );
+  if (body instanceof Response) return body;
+  const fields = body as { pid?: unknown; token?: unknown } | null;
+  if (
+    !Number.isInteger(fields?.pid) ||
+    (fields?.pid as number) < 1 ||
+    !isEntryToken(fields?.token)
+  ) {
+    return text("entry adoption requires a valid pid and token", 400);
+  }
+  const pid = fields.pid as number;
+  const token = fields.token;
+  if (entryPid === pid && entryToken === token) {
+    return json({ ok: true, adopted: false });
+  }
+  if (entryPid === null || entryToken === null) {
+    return text("project process has no entry owner", 500);
+  }
+  if (processAlive(entryPid)) {
+    return text(`entry owner pid ${entryPid} is still alive`, 409);
+  }
+  const verified = await verifyEntryOwner(pid, token);
+  if (verified.ok === false) {
+    return json(
+      {
+        error: "new entry owner could not be verified",
+        detail: verified.detail,
+      },
+      { status: 409 },
+    );
+  }
+  const previousPid = entryPid;
+  entryPid = pid;
+  entryToken = token;
+  entryOwnerGoneAt = null;
+  lastEntryOwnerFailure = "";
+  console.log(
+    `the code-viewer entry server restarted (pid ${previousPid} -> ${pid}); this project process now follows it`,
+  );
+  return json({ ok: true, adopted: true });
 }
 
 function buildRangeArgs(range: { from?: string; to?: string }) {
@@ -2968,6 +3069,7 @@ const server = await startServer({
   async fetch(req) {
     if (!requestAllowed(req)) return text("forbidden", 403);
     const url = new URL(req.url);
+    if (url.pathname === "/_entry/adopt") return handleEntryAdopt(req);
     const staticResponse = staticFile(url.pathname);
     if (staticResponse) return staticResponse;
     if (url.pathname === "/diff.json") return await handleDiffJson(url);
@@ -3116,7 +3218,7 @@ const server = await startServer({
               } catch {
                 removeSseClient(controller);
               }
-            }, 15000);
+            }, SSE_HEARTBEAT_INTERVAL_MS);
             keepalive.unref?.();
             sseKeepalives.set(controller, keepalive);
           },
@@ -3287,57 +3389,48 @@ if (process.env.CODE_VIEWER_DEV === "1") {
   }, 1000).unref();
 }
 
-// 入口の裏のプロセスは、入口が居なくなったら自分で終わる (起こされるときに
-// detached で切り離されているので、入口と一緒には終わらない)。ただし入口が
-// 起動し直した (同じ版の入口が entry.json に居る) なら、その入口を新しい
-// 持ち主にして動き続ける。入口は登録簿からこの裏を拾い直す。
-if (backendMode && entryPid !== null) {
-  let owner = entryPid;
-  let ownerGoneAt: number | null = null;
+// 裏は pid だけで持ち主を決めない。entry.json と入口の HTTP 本人確認が同じ
+// 起動 token を返す間だけ残り、新しい入口への付け替えは adoption route だけで行う。
+if (backendMode && entryPid !== null && entryToken !== null) {
+  let ownerCheckRunning = false;
   setInterval(() => {
-    if (processAliveOrEperm(owner)) {
-      ownerGoneAt = null;
-      return;
-    }
-    const next = liveEntryOfThisVersion();
-    if (next !== null) {
+    if (ownerCheckRunning || entryPid === null || entryToken === null) return;
+    ownerCheckRunning = true;
+    const checkedPid = entryPid;
+    const checkedToken = entryToken;
+    void (async () => {
+      let verified: EntryOwnerVerification;
+      try {
+        verified = await verifyEntryOwner(checkedPid, checkedToken);
+      } catch (error) {
+        verified = {
+          ok: false,
+          detail: `entry owner verification raised an error:\n${formatErrorDetail(error)}`,
+        };
+      }
+      // adoption が確認中に持ち主を変えたなら、古い結果は現在の状態に使わない。
+      if (entryPid !== checkedPid || entryToken !== checkedToken) return;
+      if (verified.ok === true) {
+        entryOwnerGoneAt = null;
+        lastEntryOwnerFailure = "";
+        return;
+      }
+      if (lastEntryOwnerFailure !== verified.detail) {
+        lastEntryOwnerFailure = verified.detail;
+        console.error(
+          `[code-viewer] entry owner verification failed for pid ${checkedPid}:\n${verified.detail}`,
+        );
+      }
+      entryOwnerGoneAt ??= Date.now();
+      if (Date.now() - entryOwnerGoneAt < ENTRY_ADOPT_GRACE_MS) return;
       console.log(
-        `the code-viewer entry server restarted (pid ${owner} -> ${next}); this project process now follows it`,
+        `the code-viewer entry server (pid ${checkedPid}) could not be verified; shutting down this project process`,
       );
-      owner = next;
-      ownerGoneAt = null;
-      return;
-    }
-    ownerGoneAt ??= Date.now();
-    if (Date.now() - ownerGoneAt < ENTRY_ADOPT_GRACE_MS) return;
-    console.log(
-      `the code-viewer entry server (pid ${owner}) is gone; shutting down this project process`,
-    );
-    void shutdown(0);
+      void shutdown(0);
+    })().finally(() => {
+      ownerCheckRunning = false;
+    });
   }, ENTRY_WATCH_INTERVAL_MS).unref();
-}
-
-function processAliveOrEperm(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-/** entry.json に居る、生きている同じ版の入口の pid。読めなければ理由を出して null。 */
-function liveEntryOfThisVersion(): number | null {
-  const read = readEntryRecord();
-  if (read.ok === false) {
-    console.error(
-      `code-viewer could not read the entry record:\n${read.error}`,
-    );
-    return null;
-  }
-  const entry = read.registry;
-  if (!entry || entry.version !== VERSION) return null;
-  return processAliveOrEperm(entry.pid) ? entry.pid : null;
 }
 
 startDevAssetReload({

@@ -19,6 +19,7 @@
 // プロジェクト (ユーザー単位の設定 lastProjectRoot)、無ければ起動した
 // ディレクトリのプロジェクトへ送る。
 
+import { randomBytes } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { PROJECT_HEADER } from "../../core/api-url";
@@ -72,9 +73,9 @@ import {
 } from "./backends";
 import {
   acquireEntryStartLock,
-  entryProcessAlive,
   readEntryRecord,
   removeEntryRecord,
+  verifyEntryIdentity,
   writeEntryRecord,
 } from "./entry-file";
 import { createEntryProjects, type EntryProjects } from "./projects";
@@ -83,8 +84,6 @@ import { isConnectionFailure, proxyToBackend } from "./proxy";
 const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
   .version as string;
 
-/** 入口の本人確認の待ち時間。ローカルなので短く。 */
-const IDENTITY_TIMEOUT_MS = 1500;
 /** 別の CLI が入口を起こしている間、待つ上限。 */
 const START_WAIT_MS = 20_000;
 const START_POLL_MS = 150;
@@ -139,43 +138,25 @@ export async function findRunningEntry(): Promise<RunningEntry> {
   const read = readEntryRecord();
   if (read.ok === false) return { status: "broken", detail: read.error };
   const entry = read.registry;
-  if (!entry || !entryProcessAlive(entry)) return { status: "none" };
-  let res: Response;
-  try {
-    res = await fetchWithTimeout(
-      new URL("_entry", entry.url).href,
-      { redirect: "error" },
-      IDENTITY_TIMEOUT_MS,
-    );
-  } catch (error) {
+  if (!entry) return { status: "none" };
+  const verified = await verifyEntryIdentity(entry);
+  if (verified.status === "dead") return { status: "none" };
+  if (verified.status === "unreachable") {
     // 何も待ち受けていない = 落ちた入口の記録 (pid は別のプロセスに使い回された)。
-    if (isConnectionFailure(error)) return { status: "none" };
+    if (isConnectionFailure(verified.error)) return { status: "none" };
     return {
       status: "broken",
-      detail: `the entry server at ${entry.url} (pid ${entry.pid}) did not answer:\n${formatErrorDetail(error)}`,
+      detail: `the entry server at ${entry.url} (pid ${entry.pid}) did not answer:\n${formatErrorDetail(verified.error)}`,
     };
   }
-  let body: unknown;
-  try {
-    body = await res.json();
-  } catch (error) {
-    return {
-      status: "broken",
-      detail: `the entry server at ${entry.url} returned ${res.status} that is not JSON:\n${formatErrorDetail(error)}`,
-    };
-  }
-  const identity = body as { role?: unknown; pid?: unknown; version?: unknown };
-  if (!res.ok || identity.role !== "entry" || identity.pid !== entry.pid) {
-    return {
-      status: "broken",
-      detail: `the server at ${entry.url} is not the entry server recorded for pid ${entry.pid} (HTTP ${res.status}: ${JSON.stringify(body)})`,
-    };
+  if (verified.status === "invalid") {
+    return { status: "broken", detail: verified.detail };
   }
   return {
     status: "running",
     url: entry.url,
     pid: entry.pid,
-    version: typeof identity.version === "string" ? identity.version : "",
+    version: entry.version,
   };
 }
 
@@ -295,6 +276,7 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     return;
   }
 
+  const token = randomBytes(8).toString("hex");
   const projects = createEntryProjects();
   const launchKey = projects.allow(launchRoot);
   const launchArgs = [
@@ -305,12 +287,14 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
   const backends = createEntryBackends(
     defaultEntryBackendsDeps(
       process.pid,
+      token,
       (root) => (root === launchRoot ? launchArgs : []),
       idleStopMs,
     ),
   );
   const context: EntryContext = {
     url: "",
+    token,
     startedAt: new Date().toISOString(),
     launchRoot,
     projects,
@@ -339,6 +323,7 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     writeEntryRecord({
       url,
       pid: process.pid,
+      token,
       version: VERSION,
       started_at: context.startedAt,
     });
@@ -513,6 +498,7 @@ function createLastProject(launchRoot: string): LastProject {
 
 type EntryContext = {
   url: string;
+  token: string;
   startedAt: string;
   launchRoot: string;
   projects: EntryProjects;
@@ -705,6 +691,16 @@ async function handleProjectPath(
   });
   if (result.status === "ok") return result.response;
   if (req.signal.aborted) return textError("the request was cancelled", 499);
+  if (result.status === "timeout") {
+    return proxyTimeoutResponse(
+      req.method,
+      rest,
+      key,
+      root,
+      result.timeoutMs,
+      result.error,
+    );
+  }
   if (isConnectionFailure(result.error)) {
     const down = ctx.backends.noteUnreachable(root, result.error);
     if (down.status === "unreachable")
@@ -726,6 +722,28 @@ async function handleProjectPath(
   );
 }
 
+export function proxyTimeoutResponse(
+  method: string,
+  path: string,
+  key: string,
+  root: string,
+  timeoutMs: number,
+  error: unknown,
+): Response {
+  const waitedSeconds = timeoutMs / 1000;
+  return errorJson(
+    504,
+    "backend-timeout",
+    `the project process did not start responding within ${waitedSeconds} seconds`,
+    {
+      route: { method, path },
+      project: { key, root },
+      waitedSeconds,
+      detail: formatErrorDetail(error),
+    },
+  );
+}
+
 async function handleEntryRequest(
   req: Request,
   ctx: EntryContext,
@@ -737,6 +755,7 @@ async function handleEntryRequest(
     return json({
       role: "entry",
       pid: process.pid,
+      token: ctx.token,
       version: VERSION,
       url: ctx.url,
       startedAt: ctx.startedAt,

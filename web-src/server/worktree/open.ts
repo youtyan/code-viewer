@@ -24,6 +24,7 @@ import {
 } from "../../core/error-detail";
 import type { SettingsResponse } from "../../core/types";
 import { createLinkedAbortController } from "../abort";
+import { isEntryToken } from "../entry/entry-file";
 import {
   acquireServerStartLock,
   readServerRegistry,
@@ -41,7 +42,13 @@ export type WorktreeOpenResult =
   | { status: "error"; error: unknown };
 
 export type RunningWorktreeServerResult =
-  | { status: "running"; url: string; pid: number; launched: boolean }
+  | {
+      status: "running";
+      url: string;
+      pid: number;
+      launched: boolean;
+      backend?: boolean;
+    }
   | { status: "absent" }
   | { status: "unreachable"; error: unknown }
   | { status: "invalid"; error: unknown };
@@ -65,6 +72,8 @@ export type SpawnOptions = {
    * 完結したサーバ (`--standalone`)。
    */
   backendOf?: number;
+  /** `backendOf` の入口が起動ごとに作る本人確認 token。 */
+  backendToken?: string;
   /** 子に足す引数 (`--bin`・git の差分の引数など)。 */
   serverArgs?: readonly string[];
 };
@@ -194,6 +203,8 @@ async function terminateChild(child: ChildProcess): Promise<void> {
 function spawnServer(path: string, options: SpawnOptions): SpawnedServer {
   const entry = process.argv[1];
   if (!entry) throw new Error("cannot locate code-viewer entry point");
+  const ownerError = backendOwnerOptionsError(options);
+  if (ownerError) throw ownerError;
   const out = options.logFile ? openLogFile(options.logFile) : "ignore";
   let child: ChildProcess;
   try {
@@ -208,7 +219,13 @@ function spawnServer(path: string, options: SpawnOptions): SpawnedServer {
         String(options.port ?? 0),
         ...(options.backendOf === undefined
           ? ["--standalone"]
-          : ["--backend", "--entry-pid", String(options.backendOf)]),
+          : [
+              "--backend",
+              "--entry-pid",
+              String(options.backendOf),
+              "--entry-token",
+              options.backendToken as string,
+            ]),
         ...(options.serverArgs ?? []),
       ],
       {
@@ -232,6 +249,22 @@ function spawnServer(path: string, options: SpawnOptions): SpawnedServer {
     terminate: () => terminateChild(child),
     unref: () => child.unref(),
   };
+}
+
+function backendOwnerOptionsError(options: SpawnOptions): Error | null {
+  if (options.backendOf === undefined && options.backendToken === undefined) {
+    return null;
+  }
+  if (
+    !Number.isInteger(options.backendOf) ||
+    (options.backendOf as number) < 1 ||
+    !isEntryToken(options.backendToken)
+  ) {
+    return new Error(
+      "a project process requires both a valid entry pid and entry token",
+    );
+  }
+  return null;
 }
 
 function openLogFile(file: string): number {
@@ -373,7 +406,69 @@ export function createWorktreeServerController(
       url: url.href,
       pid: entry.pid,
       launched: entry.launched === true,
+      backend: entry.backend === true,
     };
+  }
+
+  async function reuseRunningServer(
+    existing: Extract<RunningWorktreeServerResult, { status: "running" }>,
+    options: SpawnOptions,
+  ): Promise<WorktreeOpenResult> {
+    const ownerError = backendOwnerOptionsError(options);
+    if (ownerError) return { status: "error", error: ownerError };
+    if (options.backendOf === undefined || !existing.backend) {
+      return { status: "ok", url: existing.url, started: false };
+    }
+    const url = new URL(existing.url);
+    const adoptionAbort = createLinkedAbortController(
+      undefined,
+      HEALTH_TIMEOUT_MS,
+    );
+    let response: Response;
+    try {
+      response = await runtime.fetch(new URL("_entry/adopt", url).href, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: url.origin,
+          "X-Code-Viewer-Action": "1",
+        },
+        body: JSON.stringify({
+          pid: options.backendOf,
+          token: options.backendToken,
+        }),
+        redirect: "error",
+        signal: adoptionAbort.signal,
+      });
+    } catch (error) {
+      return {
+        status: "error",
+        error: errorWithCause(
+          "could not tell the existing project process about the new entry owner",
+          error,
+        ),
+      };
+    } finally {
+      adoptionAbort.cleanup();
+    }
+    const detail = await response.text();
+    if (response.status === 404) {
+      return {
+        status: "error",
+        error: new Error(
+          `a project process of another version is running at ${existing.url} (pid ${existing.pid}); it does not support entry token adoption. Stop it, then try again.\n${detail}`,
+        ),
+      };
+    }
+    if (!response.ok) {
+      return {
+        status: "error",
+        error: new Error(
+          `the existing project process refused the new entry owner (HTTP ${response.status}):\n${detail}`,
+        ),
+      };
+    }
+    return { status: "ok", url: existing.url, started: false };
   }
 
   async function spawnWhileLocked(
@@ -383,7 +478,7 @@ export function createWorktreeServerController(
   ): Promise<WorktreeOpenResult> {
     const existing = await runningServerResult(key);
     if (existing.status === "running") {
-      return { status: "ok", url: existing.url, started: false };
+      return reuseRunningServer(existing, options);
     }
     if (existing.status === "invalid" || existing.status === "unreachable") {
       return { status: "error", error: existing.error };
@@ -472,6 +567,8 @@ export function createWorktreeServerController(
     path: string,
     options: SpawnOptions,
   ): Promise<WorktreeOpenResult> {
+    const ownerError = backendOwnerOptionsError(options);
+    if (ownerError) return { status: "error", error: ownerError };
     let key: string;
     try {
       key = realpathSync(path);
@@ -483,7 +580,7 @@ export function createWorktreeServerController(
     while (runtime.now() < deadline) {
       const existing = await runningServerResult(key);
       if (existing.status === "running") {
-        return { status: "ok", url: existing.url, started: false };
+        return reuseRunningServer(existing, options);
       }
       if (existing.status === "invalid" || existing.status === "unreachable") {
         return { status: "error", error: existing.error };

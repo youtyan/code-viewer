@@ -121,7 +121,12 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
 - 取り次ぎ (`entry/proxy.ts`) は本文も応答も溜めずに流す (SSE・ダウンロード・ファイルの
   送信)。書き込みは入口で `sideEffectRequestAllowed` を通ったものだけ `Origin` を裏の
   オリジンに付け替える。**裏に「入口からは信用する」口を作らない** (単体の裏と挙動が分かれる)
-- 裏に繋がらない = 502 (`backend-stopped`)、起きない = 503 (`backend-start-failed`)。
+- 取り次ぎは裏が応答の見出しを返すまで 120 秒待ち、越えたら経路・プロジェクト・待った秒数・
+  元のエラーを持つ 504 (`backend-timeout`) にする。見出しを受け取った後はダウンロードなどを
+  通信停止で切らない。SSE は裏が 15 秒ごとに送る heartbeat の 3 倍、データが来なければ切る。
+  ブラウザが要求を止めた場合は、これらの時間切れより先に裏への要求を止める
+- 裏に繋がらない = 502 (`backend-stopped`)、起きない = 503 (`backend-start-failed`)、
+  応答を始めない = 504 (`backend-timeout`)。
   形は `core/types.ts` の `EntryBackendFailure`。画面は fetch の包み (`onResponse`) で
   拾い、`views/backend-state.ts` が中央の面を空表示で覆って、理由の全文をダイアログの
   「詳細」に畳んで出す (再起動が失敗したときも同じ所に全文)。**502/503 を各画面で個別に
@@ -147,8 +152,11 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
   消えない。**裏に「止めると消える」ものを持たせない** (持たせるなら、アイドル停止の
   条件に加える)
 - 裏の起動・本人確認・停止は `worktree/open.ts` の仕組みをそのまま使う
-  (`backendOf` を渡すと `--backend --entry-pid`)。裏は入口が居なくなると 10 秒待って
-  終わる (その間に同じ版の入口が `entry.json` に現れれば、そちらに付き直す)
+  (`backendOf` と起動ごとの token を渡すと `--backend --entry-pid --entry-token`)。裏は
+  pid の生存だけで持ち主を決めず、`entry.json` と入口の `/_entry` が pid と token の両方を
+  返すことを確かめる。入口を起動し直したときは、古い pid が居なくなった後に新しい入口が
+  `/_entry/adopt` で新しい token を渡す。採用されなければ 10 秒後に裏は終わる。採用口が無い
+  古い版の裏は再利用しない
 
 ## クライアントとサーバで共有する型
 

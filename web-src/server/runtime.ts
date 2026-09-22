@@ -7,6 +7,9 @@ import {
 } from "node:http";
 import { Readable } from "node:stream";
 
+/** `/events` sends this often; the entry proxy allows three missed beats. */
+export const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
+
 export type RunResult = {
   code: number;
   stdout: string;

@@ -383,6 +383,9 @@ describe("the entry server", () => {
     const box = sandbox();
     const root = repo(box, "sample-app");
     const first = await startEntry(box, root);
+    const firstToken = JSON.parse(
+      readFileSync(join(box.stateDir, "entry.json"), "utf8"),
+    ).token as string;
     const key = rootFileKey(root);
     expect((await fetch(`${first.url}p/${key}/_settings`)).status).toBe(200);
     const kept = backendPid(box, root);
@@ -394,6 +397,11 @@ describe("the entry server", () => {
       5000,
     );
     const second = await startEntry(box, root);
+    const secondToken = JSON.parse(
+      readFileSync(join(box.stateDir, "entry.json"), "utf8"),
+    ).token as string;
+    expect(secondToken).toMatch(/^[0-9a-f]{16}$/);
+    expect(secondToken).not.toBe(firstToken);
     const settings = (await (
       await fetch(`${second.url}p/${key}/_settings`)
     ).json()) as { server: { pid: number } };
@@ -405,6 +413,54 @@ describe("the entry server", () => {
     second.proc.kill("SIGKILL");
     expect(await waitUntil(() => !alive(kept), 16_000)).toBe(true);
   }, 45_000);
+
+  test("a project process exits when the owner pid is alive but its entry token cannot be verified", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    const proc = spawn(
+      process.execPath,
+      [
+        CLI_BUNDLE,
+        "--cwd",
+        root,
+        "--port",
+        "0",
+        "--backend",
+        "--entry-pid",
+        String(process.pid),
+        "--entry-token",
+        "0123456789abcdef",
+      ],
+      { env: box.env, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    children.push(proc);
+    let output = "";
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+    });
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+    });
+
+    expect(
+      await waitUntil(
+        () =>
+          proc.exitCode !== null ||
+          proc.signalCode !== null ||
+          registeredPids(box.registryDir).includes(proc.pid ?? -1),
+        5000,
+      ),
+    ).toBe(true);
+    expect(proc.exitCode).toBeNull();
+    expect(proc.signalCode).toBeNull();
+    expect(
+      await waitUntil(
+        () => proc.exitCode !== null || proc.signalCode !== null,
+        16_000,
+      ),
+    ).toBe(true);
+    expect(output).toContain("entry owner verification failed");
+  }, 25_000);
 });
 
 describe("`code-viewer` in another folder", () => {
@@ -446,6 +502,7 @@ describe("`code-viewer` in another folder", () => {
         JSON.stringify({
           role: "entry",
           pid: process.pid,
+          token: "0123456789abcdef",
           version: "0.0.1-sample",
         }),
       );
@@ -458,6 +515,7 @@ describe("`code-viewer` in another folder", () => {
       JSON.stringify({
         url: `http://127.0.0.1:${port}/`,
         pid: process.pid,
+        token: "0123456789abcdef",
         version: "0.0.1-sample",
         started_at: "x",
       }),

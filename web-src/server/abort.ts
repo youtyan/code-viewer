@@ -1,6 +1,8 @@
 export type LinkedAbortController = {
   signal: AbortSignal;
-  abort(): void;
+  abort(reason?: unknown): void;
+  clearTimeout(): void;
+  didTimeout(): boolean;
   cleanup(): void;
 };
 
@@ -11,27 +13,34 @@ export function createLinkedAbortController(
 ): LinkedAbortController {
   const controller = new AbortController();
   const abortFromParent = () => controller.abort(parent?.reason);
+  let timedOut = false;
   if (parent?.aborted) {
     abortFromParent();
   } else {
     parent?.addEventListener("abort", abortFromParent, { once: true });
   }
-  const timer =
+  let timer =
     timeoutMs === undefined
       ? null
-      : setTimeout(
-          () =>
-            controller.abort(
-              new Error(`operation timed out after ${timeoutMs}ms`),
-            ),
-          timeoutMs,
-        );
+      : setTimeout(() => {
+          timedOut = true;
+          controller.abort(
+            new Error(`operation timed out after ${timeoutMs}ms`),
+          );
+        }, timeoutMs);
   timer?.unref?.();
+  const clearLinkedTimeout = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = null;
+  };
   return {
     signal: controller.signal,
-    abort: () => controller.abort(),
+    abort: (reason) => controller.abort(reason),
+    clearTimeout: clearLinkedTimeout,
+    didTimeout: () => timedOut,
     cleanup() {
-      if (timer) clearTimeout(timer);
+      clearLinkedTimeout();
       parent?.removeEventListener("abort", abortFromParent);
     },
   };

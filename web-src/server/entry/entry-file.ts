@@ -16,6 +16,8 @@
 
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { formatErrorDetail } from "../../core/error-detail";
+import { createLinkedAbortController } from "../abort";
 import { type FileLock, processAlive, tryAcquireFileLock } from "../file-lock";
 import { type RegistryFileRead, readRegistryFile } from "../registry-file";
 import { errno, writeFileAtomic } from "../terminal/settings-file";
@@ -24,9 +26,22 @@ import { codeViewerStateDir } from "../user-state-dir";
 export type EntryRecord = {
   url: string;
   pid: number;
+  token: string;
   version: string;
   started_at: string;
 };
+
+export const ENTRY_IDENTITY_TIMEOUT_MS = 1500;
+
+export type EntryIdentityVerification =
+  | { status: "ok" }
+  | { status: "dead" }
+  | { status: "unreachable"; error: unknown }
+  | { status: "invalid"; detail: string };
+
+export function isEntryToken(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{16}$/.test(value);
+}
 
 /** 起動ロックを古いとみなす時間。入口の起動 (待ち受けまで) より十分長く。 */
 const ENTRY_START_LOCK_STALE_MS = 30_000;
@@ -52,6 +67,9 @@ function parseEntryRecord(
   if (!Number.isInteger(entry.pid) || (entry.pid as number) < 1) {
     issues.push("pid: not a process id");
   }
+  if (!isEntryToken(entry.token)) {
+    issues.push("token: expected 16 lower-case hexadecimal characters");
+  }
   if (typeof entry.version !== "string" || !entry.version) {
     issues.push("version: missing");
   }
@@ -64,6 +82,7 @@ function parseEntryRecord(
     registry: {
       url: entry.url as string,
       pid: entry.pid as number,
+      token: entry.token as string,
       version: entry.version as string,
       started_at: entry.started_at as string,
     },
@@ -105,6 +124,56 @@ export function removeEntryRecord(
  */
 export function entryProcessAlive(entry: EntryRecord): boolean {
   return processAlive(entry.pid);
+}
+
+/** pid・token・version が entry.json と HTTP 本人確認の両方で一致するか。 */
+export async function verifyEntryIdentity(
+  entry: EntryRecord,
+): Promise<EntryIdentityVerification> {
+  if (!entryProcessAlive(entry)) return { status: "dead" };
+  const identityAbort = createLinkedAbortController(
+    undefined,
+    ENTRY_IDENTITY_TIMEOUT_MS,
+  );
+  let response: Response;
+  try {
+    response = await fetch(new URL("_entry", entry.url), {
+      redirect: "error",
+      signal: identityAbort.signal,
+    });
+  } catch (error) {
+    return { status: "unreachable", error };
+  } finally {
+    identityAbort.cleanup();
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    return {
+      status: "invalid",
+      detail: `the entry server at ${entry.url} returned ${response.status} that is not JSON:\n${formatErrorDetail(error)}`,
+    };
+  }
+  const identity = body as {
+    role?: unknown;
+    pid?: unknown;
+    token?: unknown;
+    version?: unknown;
+  };
+  if (
+    !response.ok ||
+    identity.role !== "entry" ||
+    identity.pid !== entry.pid ||
+    identity.token !== entry.token ||
+    identity.version !== entry.version
+  ) {
+    return {
+      status: "invalid",
+      detail: `the server at ${entry.url} is not the entry server recorded for pid ${entry.pid} (HTTP ${response.status}: ${JSON.stringify(body)})`,
+    };
+  }
+  return { status: "ok" };
 }
 
 /**

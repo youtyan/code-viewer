@@ -90,6 +90,7 @@ describe("runningServerResult", () => {
       url,
       pid: process.pid,
       launched: false,
+      backend: false,
     });
   });
 
@@ -183,6 +184,83 @@ describe("openWorktreeServer", () => {
       url,
       started: false,
     });
+  });
+
+  test("a new entry adopts a verified project process with its token", async () => {
+    const token = "0123456789abcdef";
+    let adopted: unknown = null;
+    let adoptionHeaders: Headers | null = null;
+    identityServer = await startServer({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        const path = new URL(req.url).pathname;
+        if (path === "/_settings") {
+          return new Response(
+            JSON.stringify({
+              server: { pid: process.pid, root: worktree },
+            }),
+          );
+        }
+        if (path === "/_entry/adopt" && req.method === "POST") {
+          adopted = await req.json();
+          adoptionHeaders = req.headers;
+          return new Response(JSON.stringify({ ok: true }));
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    const url = `http://127.0.0.1:${identityServer.port}/`;
+    writeServerRegistry({
+      url,
+      pid: process.pid,
+      root: worktree,
+      started_at: "2026-08-11T00:00:00.000Z",
+      backend: true,
+    });
+
+    expect(
+      await openWorktreeServer(worktree, {
+        backendOf: 4242,
+        backendToken: token,
+      }),
+    ).toEqual({ status: "ok", url, started: false });
+    expect(adopted).toEqual({ pid: 4242, token });
+    expect(adoptionHeaders?.get("x-code-viewer-action")).toBe("1");
+    expect(adoptionHeaders?.get("origin")).toBe(new URL(url).origin);
+  });
+
+  test("a project process without token adoption is an incompatible version", async () => {
+    identityServer = await startServer({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        if (new URL(req.url).pathname === "/_settings") {
+          return new Response(
+            JSON.stringify({ server: { pid: process.pid, root: worktree } }),
+          );
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    const url = `http://127.0.0.1:${identityServer.port}/`;
+    writeServerRegistry({
+      url,
+      pid: process.pid,
+      root: worktree,
+      started_at: "2026-08-11T00:00:00.000Z",
+      backend: true,
+    });
+
+    const result = await openWorktreeServer(worktree, {
+      backendOf: 4242,
+      backendToken: "0123456789abcdef",
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && String(result.error)).toContain(
+      `another version is running at ${url} (pid ${process.pid})`,
+    );
   });
 
   test("reports a worktree whose directory is gone", async () => {

@@ -62,6 +62,7 @@ type Controller = Pick<
 
 export type EntryBackendsDeps = {
   entryPid: number;
+  entryToken: string;
   controller: Controller;
   logFile(root: string): string;
   logTail(file: string): string;
@@ -78,11 +79,13 @@ export type EntryBackendsDeps = {
 
 export function defaultEntryBackendsDeps(
   entryPid: number,
+  entryToken: string,
   serverArgs: (root: string) => readonly string[],
   idleStopMs: number,
 ): EntryBackendsDeps {
   return {
     entryPid,
+    entryToken,
     controller: createWorktreeServerController(),
     logFile: serverLogFile,
     logTail,
@@ -137,6 +140,7 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
       port: 0,
       logFile: deps.logFile(root),
       backendOf: deps.entryPid,
+      backendToken: deps.entryToken,
       serverArgs: deps.serverArgs(root),
     });
     touch(root);
