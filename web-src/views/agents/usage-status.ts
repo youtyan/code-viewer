@@ -332,7 +332,20 @@ export function mountUsageStatus(deps: UsageStatusDeps): UsageStatus {
   function place(): void {
     if (!panel) return;
     const anchor = root.getBoundingClientRect();
-    panel.style.left = `${Math.max(0, anchor.left)}px`;
+    const tokenEdge = Number.parseFloat(
+      getComputedStyle(document.body).getPropertyValue("--space-4"),
+    );
+    const head = panel.querySelector<HTMLElement>(".usage-popover-head");
+    const computedEdge = head
+      ? Number.parseFloat(getComputedStyle(head).paddingLeft)
+      : Number.NaN;
+    const edge = Number.isFinite(tokenEdge) ? tokenEdge : computedEdge;
+    if (!Number.isFinite(edge)) {
+      throw new Error("usage popover viewport inset is not a finite length");
+    }
+    const panelWidth = panel.getBoundingClientRect().width;
+    const rightmost = window.innerWidth - panelWidth - edge;
+    panel.style.left = `${Math.max(edge, Math.min(anchor.left, rightmost))}px`;
     panel.style.bottom = `${Math.max(0, window.innerHeight - anchor.top)}px`;
   }
 

@@ -19118,8 +19118,10 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head > .sb-view-seg {
    さらに --pad-text 内側 (行の選択の面は表の端から描く)。 */
 .agents-page {
   --agents-grid:
-    minmax(0, 1.3fr) minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 2fr)
-    minmax(0, 1fr) minmax(0, 0.7fr) var(--dot-size);
+    minmax(0, 1.1fr) minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(0, 1.8fr)
+    minmax(0, 1fr) minmax(0, 0.65fr) var(--dot-size);
+  --ui-row-h: var(--ui-control-sm);
+  --ui-table-row-h: var(--ui-control-md);
   height: var(--content-h);
   min-height: 0;
   overflow: auto;
@@ -19147,7 +19149,7 @@ body:not(.app-panel-docked):has(.app-panel) .agents-page {
 }
 .agents-title {
   margin: 0;
-  font-size: var(--ui-font-heading);
+  font-size: calc(var(--space-unit) * 6);
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
@@ -19356,7 +19358,7 @@ button.agents-section-title:focus-visible {
 /* ---- アカウントの帯 ---- */
 .agents-accounts {
   padding: 0 var(--pad-doc);
-  margin-bottom: var(--space-6);
+  margin-bottom: var(--space-5);
 }
 .agents-accounts.entry {
   display: flex;
@@ -19404,7 +19406,7 @@ button.agents-section-title:focus-visible {
   min-width: 0;
   min-height: calc(var(--space-unit) * 38);
   padding: var(--space-4);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--color-doc);
 }
 .agents-account-card-head {
@@ -19850,7 +19852,7 @@ button.agents-account-name:hover {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-4);
   box-shadow: inset 0 -1px 0 var(--color-line);
 }
 .usage-popover-title {
@@ -19867,7 +19869,7 @@ button.agents-account-name:hover {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-4);
 }
 .usage-popover-account + .usage-popover-account {
   box-shadow: inset 0 1px 0 var(--color-line);

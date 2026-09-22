@@ -98,6 +98,7 @@ type Harness = {
 let harness: Harness;
 
 function mount(accounts: AccountStatus[]): void {
+  document.body.style.setProperty("--space-4", "16px");
   const root = document.createElement("div");
   root.id = "usage-status";
   document.body.appendChild(root);
@@ -155,9 +156,11 @@ function openPopover(): HTMLElement {
 
 beforeEach(() => {
   document.body.replaceChildren();
+  document.body.removeAttribute("style");
 });
 afterEach(() => {
   document.body.replaceChildren();
+  document.getElementById("usage-popover-placement-style")?.remove();
 });
 
 describe("the usage popover", () => {
@@ -338,6 +341,28 @@ describe("the usage popover", () => {
     expect(popover()).not.toBeNull();
     document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
     expect(popover()).toBeNull();
+  });
+
+  test("the popover keeps the surface inset from the viewport edge", () => {
+    mount([account({ id: "claude:default" })]);
+    document.body.style.setProperty("--space-4", "calc(4px * 4)");
+    const style = document.createElement("style");
+    style.id = "usage-popover-placement-style";
+    style.textContent = ".usage-popover-head { padding: 16px; }";
+    document.head.appendChild(style);
+    harness.root.getBoundingClientRect = () =>
+      ({
+        x: 0,
+        y: 900,
+        top: 900,
+        right: 0,
+        bottom: 928,
+        left: 0,
+        width: 0,
+        height: 28,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    expect(openPopover().style.left).toBe("16px");
   });
 
   test("a failed check-again is shown with its reason", async () => {
