@@ -30,6 +30,7 @@ export const USER_SETTING_KEYS = [
   "agentAccountsCollapsed",
   "terminalImageShelfCollapsed",
   "terminalSessionsOpen",
+  "terminalPanelOpen",
   "navCollapsed",
   "navWidth",
   "navCollapsedProjects",

@@ -75,7 +75,9 @@ Requires Node.js 20 or newer. Development uses
   registered projects first, in your order, then projects found in tmux that
   are not registered. Rows never reorder when states change; click a project
   name to switch to it in the same tab (an unregistered one is registered
-  first), click an agent to open its pane in the Terminal panel. The sidebar
+  first), click an agent to open its pane in a terminal tab of the main area
+  (Alt+click or right-click → Open in the bottom panel for the Terminal
+  panel). The sidebar
   folds away and its width, folding and the panel height follow you across
   projects.
 - See every coding agent running in tmux on this machine on the All agents
@@ -84,7 +86,7 @@ Requires Node.js 20 or newer. Development uses
   repository). Each row shows the
   state (needs input / working / idle), the agent kind, how long it has been in
   that state, the pane title, and its tmux location; needs-input rows come
-  first, and Enter opens the pane in the Terminal panel. A counter in the bottom
+  first, and Enter opens the pane in a terminal tab. A counter in the bottom
   bar shows needs-input and working agents on every screen, next to each
   account's usage, changed rows get an
   unread dot and the tab title an unread count, and desktop notifications can
@@ -183,7 +185,10 @@ Requires Node.js 20 or newer. Development uses
   agent on screen with its task and state, and its project on the right. Its ⋯
   menu turns input off when you only want to watch, changes the text size, and
   switches between Overlay and Docked. Typing `exit` closes the shell, just
-  like any other terminal.
+  like any other terminal. A shell can also be a tab of the main area (agents
+  open there by default); the same terminal moves between the tab and the
+  panel with its screen and half-typed input, `?terminal=<shell>` brings its
+  tab to the front, and closing the tab never stops the shell or the agent.
 - The session list opens from the button at the right of the panel header (it
   starts folded; agents are also in the left sidebar). It starts with a
   **Your turn** section for terminals

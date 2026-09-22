@@ -142,6 +142,30 @@ describe("state store", () => {
 
   test.each([
     {
+      name: "keeps the terminal panel open",
+      input: true as unknown,
+      expected: { version: 1, terminalPanelOpen: true },
+    },
+    {
+      name: "keeps the terminal panel closed",
+      input: false as unknown,
+      expected: { version: 1, terminalPanelOpen: false },
+    },
+    {
+      name: "drops a non-boolean terminal panel state",
+      input: "open" as unknown,
+      expected: { version: 1 },
+    },
+  ])("settings terminal panel sanitizer $name", async ({ input, expected }) => {
+    await withTempProject(async (dir) => {
+      expect(
+        await patchAppSettingsState(dir, { terminalPanelOpen: input }),
+      ).toEqual(expected);
+    });
+  });
+
+  test.each([
+    {
       name: "keeps a valid override",
       input: { "toggle-theme": [{ key: "x", ctrl: true }] },
       expected: {

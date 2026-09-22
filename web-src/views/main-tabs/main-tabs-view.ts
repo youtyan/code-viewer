@@ -12,6 +12,7 @@
 // 保存はプロジェクトごと (/_state/tabs)。読み戻しが済むまでは保存しない
 // (起動直後の 1 枚だけの配置で、保存してあった配置を上書きしないため)。
 
+import type { AgentState } from "../../core/agent-state";
 import { iconSvg } from "../../core/icons";
 import {
   activate,
@@ -32,6 +33,7 @@ import {
   parseLayout,
   prevTab,
   type SerializedLayout,
+  sameTarget,
   serializeLayout,
   type Tab,
   type TabTarget,
@@ -68,11 +70,34 @@ export type MainTabsDeps = {
   onNewTab(): void;
   loadSaved(): Promise<unknown>;
   save(layout: SerializedLayout, keepalive: boolean): Promise<void>;
+  /** ターミナルのタブの名前と状態 (エージェントを映していれば、その状態)。 */
+  terminalInfo(session: string): { label: string; state: AgentState | null };
+  /**
+   * 前面のタブが変わった。how は URL の扱い: navigate = これから route へ
+   * 移る (URL はそちらが積む)、sync = URL から来た (URL は触らない)、
+   * stay = 移らずに前面だけ変わった (URL を積み直す)。
+   */
+  onFront(tab: Tab | null, how: FrontChange): void;
+  /** 開いているターミナルのタブ (一覧の印) と、閉じたもの (購読をやめる)。 */
+  onTerminals(open: ReadonlySet<string>, closed: string[]): void;
 };
 
+export type FrontChange = "navigate" | "sync" | "stay";
+
 export type MainTabsHandle = {
-  /** route が変わった。その route のタブを開くか前面に出す。 */
-  syncRoute(route: AppRoute): void;
+  /**
+   * route が変わった。その route のタブを開くか前面に出す。activate = false
+   * (URL の置き換えだけ) なら、前面のタブは変えずに覚えた route だけ更新する。
+   */
+  syncRoute(route: AppRoute, activate?: boolean): void;
+  /** そのシェルのターミナルのタブを開いて前面に出す。 */
+  openTerminal(session: string): void;
+  /** そのシェルのターミナルのタブを閉じる (シェルは止めない)。 */
+  closeTerminal(session: string): void;
+  /** 前面のタブ。 */
+  front(): Tab | null;
+  /** そのシェルのターミナルのタブがあるか。 */
+  hasTerminal(session: string): boolean;
   /** そのファイルのタブを固定にする (木のダブルクリック)。 */
   keepFileOpen(path: string): void;
   /** page のタブがあれば、そのタブが最後に見ていた route。 */
@@ -157,7 +182,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       case "image":
         return basenameOf(target.path);
       case "terminal":
-        return target.session;
+        return deps.terminalInfo(target.session).label;
       case "page":
         return deps.pageLabel(target.page);
     }
@@ -197,38 +222,78 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       if (!findTab(layout, id)) routes.delete(id);
   }
 
-  function commit(next: Layout): void {
+  function terminalsOf(target: Layout): Set<string> {
+    const out = new Set<string>();
+    for (const tab of target.panes.left.tabs)
+      if (tab.target.kind === "terminal") out.add(tab.target.session);
+    return out;
+  }
+
+  function commit(next: Layout, how: FrontChange = "stay"): void {
+    const before = activeTab(layout);
+    const terminalsBefore = terminalsOf(layout);
     layout = next;
     pruneRoutes();
     render();
     scheduleSave();
+    const terminals = terminalsOf(layout);
+    const closed = [...terminalsBefore].filter((id) => !terminals.has(id));
+    if (closed.length > 0 || terminals.size !== terminalsBefore.size)
+      deps.onTerminals(terminals, closed);
+    const after = activeTab(layout);
+    if (after?.id !== before?.id) deps.onFront(after, how);
   }
 
   function routeOf(tab: Tab): AppRoute {
     return routes.get(tab.id) ?? deps.defaultRoute(tab.target);
   }
 
-  /** 今のタブの route を覚えてから、配置を変えて前面のタブへ移る。 */
+  /**
+   * 今のタブの route を覚えてから、配置を変えて前面のタブへ移る。ターミナルの
+   * タブは route を持たない (画面の route は下に残ったまま)。その route の
+   * タブへ戻るだけなら移り直さない (描き直してスクロールを失わない)。
+   */
   function changeAndGo(change: (current: Layout) => Layout): void {
     const before = activeTab(layout);
-    if (before) routes.set(before.id, deps.currentRoute());
-    commit(change(layout));
-    const after = activeTab(layout);
+    if (before && before.target.kind !== "terminal")
+      routes.set(before.id, deps.currentRoute());
+    const next = change(layout);
+    const after = activeTab(next);
     if (!after) {
+      commit(next, "navigate");
       // 面が空になった。空の面は URL で表せないので Files を開く。
       deps.navigate(deps.defaultRoute({ kind: "page", page: "repo" }));
       return;
     }
-    if (after.id !== before?.id) deps.navigate(routeOf(after));
+    if (after.id === before?.id || after.target.kind === "terminal") {
+      commit(next, "stay");
+      return;
+    }
+    const route = routeOf(after);
+    if (JSON.stringify(route) === JSON.stringify(deps.currentRoute())) {
+      commit(next, "stay");
+      return;
+    }
+    commit(next, "navigate");
+    deps.navigate(route);
   }
 
-  function syncRoute(route: AppRoute): void {
+  function syncRoute(route: AppRoute, activate = true): void {
     const target = routeTarget(route);
     if (!target) return;
+    const front = activeTab(layout);
+    if (!activate && front?.target.kind === "terminal") {
+      // 前面はターミナルのまま。下に残っている画面の route だけ覚え直す。
+      const existing = layout.panes.left.tabs.find((tab) =>
+        sameTarget(tab.target, target),
+      );
+      if (existing) routes.set(existing.id, route);
+      return;
+    }
     const next = open(layout, target);
     const tab = activeTab(next);
     if (tab) routes.set(tab.id, route);
-    commit(next);
+    commit(next, "sync");
   }
 
   function menuFor(tab: Tab): ContextMenuItem[] {
@@ -314,7 +379,14 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     if (tab.preview) el.title += `\n${current.previewHint}`;
     const icon = document.createElement("span");
     icon.className = "main-tab-icon";
-    icon.innerHTML = iconSvg("main-tab-svg", iconOf(tab.target));
+    const state =
+      tab.target.kind === "terminal"
+        ? deps.terminalInfo(tab.target.session).state
+        : null;
+    // エージェントを映しているターミナルは、絵の代わりに状態の印 (形で区別する)。
+    icon.innerHTML = state
+      ? `<i class="terminal-mark terminal-mark-${state}" aria-hidden="true"></i>`
+      : iconSvg("main-tab-svg", iconOf(tab.target));
     const name = document.createElement("span");
     name.className = "main-tab-name";
     name.textContent = label;
@@ -478,9 +550,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         `[code-viewer] main tabs: the saved layout has a right pane; its ${right.tabs.length} tab(s) were moved to the left pane`,
       );
     }
-    // この画面ではまだ開けない種類 (ターミナル・画像) は閉じる。黙って捨てない。
+    // この画面ではまだ開けない種類 (画像) は閉じる。黙って捨てない。
     const unsupported = next.panes.left.tabs.filter(
-      (tab) => tab.target.kind === "terminal" || tab.target.kind === "image",
+      (tab) => tab.target.kind === "image",
     );
     for (const tab of unsupported) next = close(next, tab.id);
     if (unsupported.length > 0)
@@ -494,13 +566,35 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     routes.clear();
     layout = next;
     if (currentRoute) syncRoute(currentRoute);
-    else commit(layout);
+    else commit(layout, "sync");
+    // 読み戻したターミナルのタブを一覧に知らせる (前面かどうかは URL が決める)。
+    deps.onTerminals(terminalsOf(layout), []);
   }
 
   render();
 
   return {
     syncRoute,
+    openTerminal(session) {
+      if (activeTab(layout)?.target.kind !== "terminal") {
+        const before = activeTab(layout);
+        if (before) routes.set(before.id, deps.currentRoute());
+      }
+      commit(open(layout, { kind: "terminal", session }));
+    },
+    closeTerminal(session) {
+      const tab = layout.panes.left.tabs.find(
+        (item) =>
+          item.target.kind === "terminal" && item.target.session === session,
+      );
+      if (tab) changeAndGo((l) => close(l, tab.id));
+    },
+    front: () => activeTab(layout),
+    hasTerminal: (session) =>
+      layout.panes.left.tabs.some(
+        (item) =>
+          item.target.kind === "terminal" && item.target.session === session,
+      ),
     keepFileOpen(path) {
       const tab = layout.panes.left.tabs.find(
         (item) => item.target.kind === "file" && item.target.path === path,

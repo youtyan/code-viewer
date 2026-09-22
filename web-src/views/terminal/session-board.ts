@@ -30,6 +30,7 @@ import {
 } from "../../core/agent-state";
 import {
   CHEVRON_DOWN_16_PATH,
+  FULLSCREEN_ENTER_16_PATHS,
   iconSvg,
   PLUS_16_PATH,
   TERMINAL_16_PATHS,
@@ -60,6 +61,10 @@ export type SessionBoardDeps = {
   onCreateShell(): void;
   onCloseShell(id: ShellSessionId): void;
   onMarkRead(row: BoardRow): void;
+  /** タブで開いているシェル (かそれが映しているペイン) の行を押した。 */
+  onShowTab(id: ShellSessionId): void;
+  /** 行の「タブで開く」。 */
+  onOpenInTab(row: BoardRow): void;
 };
 
 export type SessionBoardData = {
@@ -76,6 +81,8 @@ export type SessionBoardHandle = {
   el: HTMLElement;
   setData(data: SessionBoardData): void;
   setSelected(target: string | null): void;
+  /** タブで開いているシェル。その行 (と映しているペインの行) に印を付ける。 */
+  setTabbed(ids: ReadonlySet<string>): void;
   localize(): void;
 };
 
@@ -163,6 +170,7 @@ export function createSessionBoard(deps: SessionBoardDeps): SessionBoardHandle {
     stateErrors: [],
   };
   let selected: string | null = null;
+  let tabbed: ReadonlySet<string> = new Set();
   let stateFilter: AgentState | null = null;
   let scope: BoardScope = "repo";
   /**
@@ -260,8 +268,18 @@ export function createSessionBoard(deps: SessionBoardDeps): SessionBoardHandle {
   }
 
   /** 押されたときの振り分け。シェルは映すだけ、tmux は連れて行ってもらう。 */
+  /** その行のシェルがタブで開いていれば、そのシェルの id。 */
+  function tabbedShell(row: BoardRow): ShellSessionId | null {
+    if (row.kind === "shell" && tabbed.has(row.target)) return row.target;
+    if (row.linkedTarget && tabbed.has(row.linkedTarget))
+      return row.linkedTarget as ShellSessionId;
+    return null;
+  }
+
   function activate(row: BoardRow): void {
-    if (row.kind === "shell") deps.onSelectShell(row);
+    const inTab = tabbedShell(row);
+    if (inTab && row.kind === "shell") deps.onShowTab(inTab);
+    else if (row.kind === "shell") deps.onSelectShell(row);
     else deps.onOpenPane(row);
   }
 
@@ -346,6 +364,25 @@ export function createSessionBoard(deps: SessionBoardDeps): SessionBoardHandle {
       .join("\n");
     button.addEventListener("click", () => activate(row));
     wrap.appendChild(button);
+
+    // タブで開く。そのシェルがタブで開いていれば、同じボタンが「タブで表示中」の
+    // 印になり、押すとタブを前面に出す (行ごとに要素の数を変えない)。
+    const inTab = tabbedShell(row);
+    const toTab = document.createElement("button");
+    toTab.type = "button";
+    toTab.className = "terminal-row-tab";
+    toTab.classList.toggle("in-tab", inTab !== null);
+    toTab.innerHTML = iconSvg("octicon-tab", FULLSCREEN_ENTER_16_PATHS);
+    const tabLabel = inTab ? text.shownInTab : text.openInTab;
+    toTab.title = tabLabel;
+    toTab.setAttribute("aria-label", tabLabel);
+    toTab.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (inTab) deps.onShowTab(inTab);
+      else deps.onOpenInTab(row);
+    });
+    wrap.classList.toggle("terminal-row-in-tab", inTab !== null);
+    wrap.appendChild(toTab);
 
     if (row.kind === "shell") {
       const close = document.createElement("button");
@@ -647,6 +684,10 @@ export function createSessionBoard(deps: SessionBoardDeps): SessionBoardHandle {
     el,
     setData(next) {
       data = next;
+      render();
+    },
+    setTabbed(ids) {
+      tabbed = ids;
       render();
     },
     setSelected(target) {

@@ -246,6 +246,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
+                text: "A shell can also be a tab of the main area (an agent from the sidebar, the palette or the All agents board opens there; in the panel's session list, the button at the right of a row opens it in a tab). The same terminal moves between the tab and the panel as it is — the screen and what you were typing stay — and a shell shown in a tab is marked in the panel's list instead of being drawn twice. ?terminal=<shell> in the URL names the shell on screen: its tab comes to the front if it has one, otherwise the panel shows it. Closing a terminal tab never stops the shell or the agent. Whether the panel is open is remembered in your settings rather than the URL.",
+              },
+              {
+                kind: "paragraph",
                 text: "Typing goes to that shell, so you can answer a prompt without switching to the terminal. The ⋯ menu at the right of the panel header turns input off when you only want to watch (the header then shows read only); the same menu changes the text size and switches between Overlay and Docked. The header itself reads what is on screen: the agent, its task and its state, and on the right the project. The shell on screen is part of the URL (?terminal=shell-ab12cd), so a reload comes back to it. Shells live as long as the server does; typing exit ends one, and so does the × on its row.",
               },
               {
@@ -271,7 +275,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "The left sidebar lists your projects with the agents running in them, on every screen: registered projects first, in your order, and below them, under Found in tmux, projects that are not registered but have agents in tmux. Rows do not move when states change (the state mark, the counter at the bottom and notifications tell you what changed); agents inside a project follow their tmux place. Click a project name to switch to it (an unregistered one is registered first, without asking); click the chevron to fold it; click an agent to open its pane in the Terminal panel. The All agents board (the button next to Projects, or g a) lists every tmux pane on this machine where a coding agent runs, grouped by project — the git repository a pane's folder belongs to, with worktrees folded into their repository and folders outside git kept as their own group. It is the same list from whichever code-viewer you open it in. A row reads state, agent kind (claude, codex, or an agent that reports its state through a hook), how long it has been in that state, what it is doing (the pane title), and where it lives in tmux (session:window.pane). Needs input comes first, then Finished · unread, then Working, then the rest; Enter or a click opens that pane in the Terminal panel below. Plain shells show up only with All panes.",
+                text: "The left sidebar lists your projects with the agents running in them, on every screen: registered projects first, in your order, and below them, under Found in tmux, projects that are not registered but have agents in tmux. Rows do not move when states change (the state mark, the counter at the bottom and notifications tell you what changed); agents inside a project follow their tmux place. Click a project name to switch to it (an unregistered one is registered first, without asking); click the chevron to fold it; click an agent to open its pane in a terminal tab of the main area (Alt+click, or right-click → Open in the bottom panel, opens it in the Terminal panel instead). The All agents board (the button next to Projects, or g a) lists every tmux pane on this machine where a coding agent runs, grouped by project — the git repository a pane's folder belongs to, with worktrees folded into their repository and folders outside git kept as their own group. It is the same list from whichever code-viewer you open it in. A row reads state, agent kind (claude, codex, or an agent that reports its state through a hook), how long it has been in that state, what it is doing (the pane title), and where it lives in tmux (session:window.pane). Needs input comes first, then Finished · unread, then Working, then the rest; Enter or a click opens that pane in a terminal tab of the main area. Plain shells show up only with All panes.",
               },
               {
                 kind: "paragraph",
@@ -1115,6 +1119,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
+                text: "シェルはメインの面のタブでも開けます (サイドバー・パレット・エージェントの全体ボードのエージェントはタブで開きます。下パネルのセッションの一覧では、行の右のボタンでタブに開きます)。同じ端末がそのままタブとパネルの間を移るので、画面も打ちかけの文字も残ります。タブで開いているシェルは、パネルの一覧では印が付くだけで、2 か所には描きません。URL の ?terminal=<シェル> は映しているシェルで、そのシェルのタブがあればタブが前面に、無ければパネルで映します。ターミナルのタブを閉じても、シェルやエージェントは止まりません。パネルを開いているかは URL ではなく設定に覚えます。",
+              },
+              {
+                kind: "paragraph",
                 text: "打ったキーはそのシェルに届くので、ターミナルに切り替えずに返事ができます。見るだけにしたいときは、パネルの見出しの右の「⋯」で入力を切ってください (見出しに「閲覧のみ」と出ます)。同じメニューで文字の大きさと、重ねる / 画面内を切り替えられます。見出しには、映しているエージェント・作業内容・状態と、右にそのプロジェクトが出ます。表示中のシェルは URL（?terminal=shell-ab12cd）に載るので、リロードしても同じシェルに戻ります。シェルはサーバが動いている間だけ生き、exit と打てば閉じます（行の × でも同じです）。",
               },
               {
@@ -1140,7 +1148,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "左のサイドバーは、どの画面でもプロジェクトとその中で動いているエージェントを並べます。上に登録したプロジェクト (好きな順)、その下の「tmux で検出」に、登録していないが tmux でエージェントが動いているプロジェクトが出ます。状態が変わっても行は動きません (変化は状態の印・最下段の件数・通知で分かります)。プロジェクトの中のエージェントは tmux の場所の順です。プロジェクト名を押すとそのプロジェクトへ移り (登録していなければ確かめずに登録してから)、左の山形で畳み、エージェントを押すと下のターミナルパネルにそのペインが開きます。「すべてのエージェント」のボード (「プロジェクト」の横のボタン、g a) は、このマシンの tmux でコーディングエージェントが動いているペインを、プロジェクトごとに並べます。プロジェクトはペインのフォルダが属する git リポジトリで、作業ツリーは本体にまとめ、git 管理外のフォルダはそのフォルダで 1 つにします。どのリポジトリで開いた code-viewer からでも同じ一覧です。1 行に、状態・種類 (claude、codex、フックで状態を申告するエージェント)・その状態になってからの時間・作業内容 (ペインのタイトル)・tmux 上の場所 (セッション:ウィンドウ.ペイン) が並びます。入力待ちが先頭、次に完了・未読、作業中、その後にそれ以外。Enter かクリックで、下のターミナルパネルにそのペインが開きます。ただのシェルは「すべてのペイン」にしたときだけ出ます。",
+                text: "左のサイドバーは、どの画面でもプロジェクトとその中で動いているエージェントを並べます。上に登録したプロジェクト (好きな順)、その下の「tmux で検出」に、登録していないが tmux でエージェントが動いているプロジェクトが出ます。状態が変わっても行は動きません (変化は状態の印・最下段の件数・通知で分かります)。プロジェクトの中のエージェントは tmux の場所の順です。プロジェクト名を押すとそのプロジェクトへ移り (登録していなければ確かめずに登録してから)、左の山形で畳み、エージェントを押すとメインの面のターミナルのタブにそのペインが開きます (Alt+クリックか、右クリックの「下のパネルで開く」なら下のターミナルパネル)。「すべてのエージェント」のボード (「プロジェクト」の横のボタン、g a) は、このマシンの tmux でコーディングエージェントが動いているペインを、プロジェクトごとに並べます。プロジェクトはペインのフォルダが属する git リポジトリで、作業ツリーは本体にまとめ、git 管理外のフォルダはそのフォルダで 1 つにします。どのリポジトリで開いた code-viewer からでも同じ一覧です。1 行に、状態・種類 (claude、codex、フックで状態を申告するエージェント)・その状態になってからの時間・作業内容 (ペインのタイトル)・tmux 上の場所 (セッション:ウィンドウ.ペイン) が並びます。入力待ちが先頭、次に完了・未読、作業中、その後にそれ以外。Enter かクリックで、メインの面のターミナルのタブにそのペインが開きます。ただのシェルは「すべてのペイン」にしたときだけ出ます。",
               },
               {
                 kind: "paragraph",

@@ -43,6 +43,8 @@ function setup(loadSaved: () => Promise<unknown>) {
   const mount = document.createElement("nav");
   document.body.append(mount);
   const saves: SerializedLayout[] = [];
+  const fronts: string[] = [];
+  const terminals: Array<{ open: string[]; closed: string[] }> = [];
   let current: AppRoute = fileRoute("src/app.ts");
   const handle: MainTabsHandle = createMainTabsView({
     mount,
@@ -65,12 +67,25 @@ function setup(loadSaved: () => Promise<unknown>) {
     save: async (layout) => {
       saves.push(layout);
     },
+    terminalInfo: (session) =>
+      session === "shell-a1"
+        ? { label: "claude · Working", state: "working" }
+        : { label: `Shell ${session}`, state: null },
+    onFront: (tab, how) => {
+      fronts.push(`${tab?.target.kind ?? "none"}:${how}`);
+    },
+    onTerminals: (open, closed) => {
+      terminals.push({ open: [...open], closed });
+    },
   });
   handle.syncRoute(current);
   return {
     mount,
     handle,
     saves,
+    fronts,
+    terminals,
+    current: () => current,
     names: () =>
       [...mount.querySelectorAll(".main-tab")].map(
         (tab) =>
@@ -97,6 +112,11 @@ const savedLayout = {
         {
           id: "t4",
           preview: false,
+          target: { kind: "image", path: "docs/shot.png" },
+        },
+        {
+          id: "t5",
+          preview: false,
           target: { kind: "terminal", session: "shell-ab12" },
         },
       ],
@@ -109,7 +129,12 @@ describe("main tabs view: 読み戻し", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { handle, names } = setup(async () => savedLayout);
     await handle.restore();
-    expect(names()).toEqual(["README.md", ">app.ts (preview)", "diff"]);
+    expect(names()).toEqual([
+      "README.md",
+      ">app.ts (preview)",
+      "diff",
+      "Shell shell-ab12",
+    ]);
   });
 
   test("知らない種類と、まだ開けない種類のタブは件数と中身を console.error に出す", async () => {
@@ -225,6 +250,79 @@ describe("main tabs view: 操作", () => {
       "Split right (disabled)",
       "Move to other side (disabled)",
       "Copy path",
+    ]);
+  });
+});
+
+describe("main tabs view: ターミナルのタブ", () => {
+  test("開くと前面になり、名前はエージェントの種類と状態、印は状態の形", async () => {
+    const { handle, mount, names, fronts } = setup(async () => null);
+    await handle.restore();
+    handle.openTerminal("shell-a1");
+    const icon = mount.querySelector(".main-tab-active .main-tab-icon i");
+    expect([names(), icon?.className, fronts[fronts.length - 1]]).toEqual([
+      ["app.ts (preview)", ">claude · Working"],
+      "terminal-mark terminal-mark-working",
+      "terminal:stay",
+    ]);
+  });
+
+  test("ターミナルから前の画面のタブへ戻るとき、同じ route なら移り直さない", async () => {
+    const { handle, mount, fronts, current } = setup(async () => null);
+    await handle.restore();
+    const before = current();
+    handle.openTerminal("shell-a1");
+    mount.querySelector<HTMLElement>(".main-tab")?.click();
+    expect([current(), fronts[fronts.length - 1]]).toEqual([
+      before,
+      "file:stay",
+    ]);
+  });
+
+  test("URL の置き換え (activate = false) では前面のターミナルを奪わない", async () => {
+    const { handle, names } = setup(async () => null);
+    await handle.restore();
+    handle.openTerminal("shell-a1");
+    handle.syncRoute(fileRoute("src/app.ts", 3), false);
+    handle.syncRoute({ screen: "diff", range }, true);
+    expect(names()).toEqual(["app.ts (preview)", "claude · Working", ">diff"]);
+  });
+
+  test("閉じるとシェルの購読をやめるよう知らせる (シェルは止めない)", async () => {
+    const { handle, terminals, names } = setup(async () => null);
+    await handle.restore();
+    handle.openTerminal("shell-a1");
+    handle.openTerminal("shell-b2");
+    handle.closeTerminal("shell-a1");
+    expect([terminals[terminals.length - 1], names()]).toEqual([
+      { open: ["shell-b2"], closed: ["shell-a1"] },
+      ["app.ts (preview)", ">Shell shell-b2"],
+    ]);
+  });
+
+  test("URL のシェル (?terminal=) のタブがあれば、それを前面に出せる", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { handle, names, fronts } = setup(async () => savedLayout);
+    await handle.restore();
+    const known = [
+      handle.hasTerminal("shell-ab12"),
+      handle.hasTerminal("shell-zz"),
+    ];
+    handle.openTerminal("shell-ab12");
+    expect([known, names(), fronts[fronts.length - 1]]).toEqual([
+      [true, false],
+      ["README.md", "app.ts (preview)", "diff", ">Shell shell-ab12"],
+      "terminal:stay",
+    ]);
+  });
+
+  test("読み戻したターミナルのタブは残し、開いているシェルを知らせる", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { handle, names, terminals } = setup(async () => savedLayout);
+    await handle.restore();
+    expect([names(), terminals[terminals.length - 1]]).toEqual([
+      ["README.md", ">app.ts (preview)", "diff", "Shell shell-ab12"],
+      { open: ["shell-ab12"], closed: [] },
     ]);
   });
 });

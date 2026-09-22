@@ -54,6 +54,10 @@ export type TerminalText = {
   newShellTitle: string;
   /** シェルを閉じるボタン。 */
   closeShell: string;
+  /** 行の「タブで開く」。 */
+  openInTab: string;
+  /** タブで開いているシェルの行の印。押すとタブを前面に出す。 */
+  shownInTab: string;
   /** node-pty が無い環境。 */
   shellUnavailable: string;
   /** シェルがまだ 1 つも無い。 */
@@ -216,6 +220,8 @@ const EN: TerminalText = {
   newShell: "+ new shell",
   newShellTitle: "open a new shell in this repository",
   closeShell: "close this shell",
+  openInTab: "Open in a tab",
+  shownInTab: "Shown in a tab — bring it to the front",
   shellUnavailable:
     "Opening shells needs the optional node-pty package. Reinstall dependencies to enable it.",
   noShells: "No shell is open yet.",
@@ -338,6 +344,8 @@ const JA: TerminalText = {
   newShell: "+ 新しいシェル",
   newShellTitle: "このリポジトリで新しいシェルを開きます",
   closeShell: "このシェルを閉じる",
+  openInTab: "タブで開く",
+  shownInTab: "タブで表示中 — タブを前面に出す",
   shellUnavailable:
     "シェルを開くには任意依存の node-pty が必要です。依存を入れ直すと使えるようになります。",
   noShells: "開いているシェルはありません。",

@@ -28,6 +28,7 @@ import {
   KEBAB_16_PATH,
   PLUS_16_PATH,
 } from "../../core/icons";
+import { showContextMenu } from "../context-menu";
 import type { ProjectActions } from "../projects/project-actions";
 import { showProjectMenu } from "../projects/project-menu";
 import type { AgentMonitor } from "./agent-monitor";
@@ -38,8 +39,8 @@ export type AgentsSidebarDeps = {
   monitor: AgentMonitor;
   projects: ProjectActions;
   getText(): AgentsText;
-  /** そのペインを下のターミナルパネルで開く。 */
-  openPane(pane: string): void;
+  /** そのペインをターミナルで開く (既定はメインの面のタブ)。 */
+  openPane(pane: string, where?: "tab" | "panel"): void;
   /** いまターミナルで見ているペイン (行の選択の印)。 */
   viewingPane(): string | null;
   /** 「新しいエージェント」の画面。project は選んでおくプロジェクト。 */
@@ -148,6 +149,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         : "",
       age.title,
       current.openPane,
+      current.openPaneInPanelHint,
     ]
       .filter(Boolean)
       .join("\n");
@@ -155,10 +157,24 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       "aria-label",
       `${current.state[pane.state]} · ${kind.textContent} · ${task.textContent}`,
     );
-    row.addEventListener("click", () => {
+    const openHere = (where: "tab" | "panel") => {
       deps.monitor.markRead(pane.id);
-      deps.openPane(pane.id);
+      deps.openPane(pane.id, where);
       render(true);
+    };
+    row.addEventListener("click", (event) =>
+      openHere(event.altKey ? "panel" : "tab"),
+    );
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      showContextMenu(
+        row,
+        [
+          { label: current.openPane, onSelect: () => openHere("tab") },
+          { label: current.openPaneInPanel, onSelect: () => openHere("panel") },
+        ],
+        { at: { x: event.clientX, y: event.clientY } },
+      );
     });
     return row;
   }

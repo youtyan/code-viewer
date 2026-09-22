@@ -86,6 +86,8 @@ function createBoard(
     onCreateShell: vi.fn(),
     onCloseShell: vi.fn(),
     onMarkRead: vi.fn(),
+    onShowTab: vi.fn(),
+    onOpenInTab: vi.fn(),
   });
   board.setData({
     panes: panes(inRepo),
@@ -244,5 +246,92 @@ describe("your turn rows", () => {
     }
     expect(cards[0]?.querySelector(".terminal-card-read")).toBeNull();
     expect(cards[1]?.querySelector(".terminal-card-read")).not.toBeNull();
+  });
+});
+
+describe("タブで開いているシェルの印", () => {
+  const shell = {
+    id: "shell-a1" as const,
+    command: "/bin/sh",
+    cwd: "/work/sample-app",
+    createdAt: "2026-09-22T06:00:00.000Z",
+    cols: 80,
+    rows: 24,
+    exited: false,
+    exitCode: null,
+    tty: "",
+  };
+
+  function boardWithShell() {
+    const deps = {
+      getText: () => terminalText("en"),
+      onSelectShell: vi.fn(),
+      onOpenPane: vi.fn(),
+      onCreateShell: vi.fn(),
+      onCloseShell: vi.fn(),
+      onMarkRead: vi.fn(),
+      onShowTab: vi.fn(),
+      onOpenInTab: vi.fn(),
+    };
+    const board = createSessionBoard(deps);
+    board.setData({
+      panes: null,
+      shells: [shell],
+      clients: [],
+      shellAvailable: true,
+      shellUnavailableReason: "",
+      states: [],
+      stateErrors: [],
+    });
+    document.body.append(board.el);
+    const row = () =>
+      q<HTMLElement>(board.el, `[data-target="shell-a1"]`).closest(
+        ".terminal-row",
+      ) as HTMLElement;
+    return { board, deps, row };
+  }
+
+  test.each([
+    {
+      name: "タブで開いていない: 行を押すとパネルで映し、ボタンは「タブで開く」",
+      tabbed: [] as string[],
+      expected: {
+        marked: false,
+        title: "Open in a tab",
+        rowClick: "onSelectShell",
+        buttonClick: "onOpenInTab",
+      },
+    },
+    {
+      name: "タブで開いている: 印が付き、行もボタンもタブを前面に出す",
+      tabbed: ["shell-a1"],
+      expected: {
+        marked: true,
+        title: "Shown in a tab — bring it to the front",
+        rowClick: "onShowTab",
+        buttonClick: "onShowTab",
+      },
+    },
+  ])("$name", ({ tabbed, expected }) => {
+    const { board, deps, row } = boardWithShell();
+    board.setTabbed(new Set(tabbed));
+    const called = () =>
+      (["onSelectShell", "onShowTab", "onOpenInTab"] as const).filter(
+        (name) => deps[name].mock.calls.length > 0,
+      );
+    const button = q<HTMLButtonElement>(row(), ".terminal-row-tab");
+    const marked = row().classList.contains("terminal-row-in-tab");
+    const title = button.title;
+    q<HTMLButtonElement>(row(), ".terminal-row-item").click();
+    const afterRow = called();
+    for (const name of ["onSelectShell", "onShowTab", "onOpenInTab"] as const)
+      deps[name].mockClear();
+    q<HTMLButtonElement>(row(), ".terminal-row-tab").click();
+    expect({
+      marked,
+      title,
+      rowClick: afterRow.join(","),
+      buttonClick: called().join(","),
+    }).toEqual(expected);
   });
 });

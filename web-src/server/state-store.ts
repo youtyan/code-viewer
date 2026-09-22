@@ -323,6 +323,9 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   const terminalSessionsOpen = optionalBoolean(raw.terminalSessionsOpen);
   if (terminalSessionsOpen !== undefined)
     out.terminalSessionsOpen = terminalSessionsOpen;
+  const terminalPanelOpen = optionalBoolean(raw.terminalPanelOpen);
+  if (terminalPanelOpen !== undefined)
+    out.terminalPanelOpen = terminalPanelOpen;
   const navCollapsed = optionalBoolean(raw.navCollapsed);
   if (navCollapsed !== undefined) out.navCollapsed = navCollapsed;
   const navWidth = optionalNumber(raw.navWidth, NAV_WIDTH.min, NAV_WIDTH.max);

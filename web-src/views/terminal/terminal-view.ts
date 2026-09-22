@@ -80,6 +80,14 @@ export type TerminalViewDeps = {
   onCloseRequest?: () => void;
   /** 映している対象が変わったとき。URL 同期に使う。 */
   onTargetChange?: (id: string | null) => void;
+  /** タブで開いているシェルを選んだ。パネルでは映さず、そのタブを前面に出す。 */
+  onShowTab?: (id: ShellSessionId) => void;
+  /**
+   * 「タブで開く」。そのシェルのタブを開いて前面に出してもらう。pane は
+   * tmux ペインから開いたとき、そのペイン (シェルとペインの対応をサーバが
+   * まだ知らないときの名前付けに使う)。
+   */
+  onOpenInTab?: (session: ShellSession, pane?: string) => void;
 };
 
 export type TerminalViewHandle = {
@@ -101,6 +109,31 @@ export type TerminalViewHandle = {
   menuItems(): ContextMenuItem[];
   localize(): void;
   dispose(): void;
+  /** メインの面のターミナルのタブの箱。app が本文の位置に 1 度だけ置く。 */
+  tabElement: HTMLElement;
+  /**
+   * そのシェルをタブの箱で映す。パネルで映していれば、同じ xterm を箱ごと
+   * 付け替える (attach し直さない)。
+   */
+  showInTab(id: ShellSessionId): Promise<void>;
+  /** タブを閉じた。タブの箱がそのシェルを映していれば購読をやめる (シェルは止めない)。 */
+  releaseTab(id: ShellSessionId): void;
+  /** タブで映しているシェルを、同じ xterm のままパネルへ移す。 */
+  moveTabToPanel(id: ShellSessionId): Promise<void>;
+  /** タブで開いているシェル。一覧に印を付け、パネルでは映さない。 */
+  setTabbed(ids: ReadonlySet<string>): void;
+  /** tmux ペインを、そのセッションのシェルでタブに開く。 */
+  openPaneInTab(pane: string): Promise<void>;
+  /** タブの箱が映しているシェル。 */
+  getTabTarget(): string | null;
+  focusTab(): void;
+};
+
+/** xterm 1 つと、その下の状態の行。パネルとタブの間で箱ごと付け替える。 */
+type ScreenSlot = {
+  el: HTMLElement;
+  screen: TerminalScreenHandle;
+  status: HTMLElement;
 };
 
 export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
@@ -114,7 +147,22 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   let lastTargetId: string | null = null;
   let states: AgentStateRecord[] = [];
   let stateErrors: AgentStateObservationError[] = [];
-  let screen: TerminalScreenHandle | null = null;
+  /** パネルで映す枠。 */
+  let panel: ScreenSlot | null = null;
+  /** タブで映す枠。最初にタブで映すときに作る。 */
+  let tab: ScreenSlot | null = null;
+  /** パネルの中の、枠を置く場所。 */
+  let panelPane: HTMLElement | null = null;
+  const tabElement = document.createElement("div");
+  tabElement.id = "terminal-tab";
+  tabElement.className = "terminal-tab";
+  const tabPane = document.createElement("div");
+  tabPane.className = "terminal-pane";
+  tabElement.append(tabPane);
+  /** タブで開いているシェル。 */
+  let tabbed: ReadonlySet<string> = new Set();
+  /** タブの箱の attach の世代。待つ間に別のタブへ切り替わったら、後から来た結果を捨てる。 */
+  let tabGeneration = 0;
   /** 見出しの行 (パネルのタブの行) に置く、このビューの小さな操作。 */
   let viewActions: HTMLElement | null = null;
   let sessionsToggle: HTMLButtonElement | null = null;
@@ -126,7 +174,6 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
    * 移動で畳まれてしまわないように)。
    */
   let listsOpen = deps.isSessionsOpen();
-  let statusEl: HTMLElement | null = null;
   let listEl: HTMLElement | null = null;
   let attached: ShellSession | null = null;
   let panes: TmuxPanesResponse | null = null;
@@ -158,10 +205,54 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     return deps.$<HTMLElement>("#terminal-sheet-overlay");
   }
 
+  function writeStatus(el: HTMLElement, message: string | null): void {
+    el.textContent = message ?? "";
+    el.hidden = !message;
+  }
+
+  /** パネルの状態の行。 */
   function setStatus(message: string | null): void {
-    if (!statusEl) return;
-    statusEl.textContent = message ?? "";
-    statusEl.hidden = !message;
+    if (panel) writeStatus(panel.status, message);
+  }
+
+  function slots(): ScreenSlot[] {
+    return [panel, tab].filter((slot): slot is ScreenSlot => slot !== null);
+  }
+
+  function createSlot(): ScreenSlot {
+    const status = document.createElement("p");
+    status.className = "terminal-status";
+    status.role = "status";
+    status.hidden = true;
+    const screen = createTerminalScreen({
+      trackLoad: deps.trackLoad,
+      actionHeaders: deps.actionHeaders,
+      getText: text,
+      getFontSize: () => clampTerminalFontSize(deps.getFontSize()),
+      // 状態の行は枠の中にあるので、付け替えても映しているシェルの状態が付いて行く。
+      onStatus: (message) => writeStatus(status, message),
+      onTargetGone: () => {
+        void loadLists(generation);
+      },
+      isImageShelfCollapsed: deps.isImageShelfCollapsed,
+      setImageShelfCollapsed: deps.onImageShelfCollapsedChange,
+    });
+    screen.setInputEnabled(inputEnabled);
+    const el = document.createElement("div");
+    el.className = "terminal-slot";
+    el.append(screen.el, status);
+    return { el, screen, status };
+  }
+
+  /** パネルとタブの枠を入れ替える。xterm は作り直さず、DOM の親だけ変わる。 */
+  function swapSlots(): void {
+    if (!panel || !panelPane) return;
+    const toTab = panel;
+    const toPanel = tab ?? createSlot();
+    panel = toPanel;
+    tab = toTab;
+    panelPane.replaceChildren(toPanel.el);
+    tabPane.replaceChildren(toTab.el);
   }
 
   function applyListWidth(width: number): void {
@@ -184,12 +275,12 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     );
     if (next === clampTerminalFontSize(deps.getFontSize())) return;
     deps.onFontSizeChange(next);
-    screen?.applyFontSize();
+    for (const slot of slots()) slot.screen.applyFontSize();
   }
 
   function setInputEnabled(enabled: boolean): void {
     inputEnabled = enabled;
-    screen?.setInputEnabled(inputEnabled);
+    for (const slot of slots()) slot.screen.setInputEnabled(inputEnabled);
     syncViewActions();
   }
 
@@ -199,7 +290,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     getMount()?.classList.toggle("terminal-lists-open", open);
     syncViewActions();
     // 画面の幅が変わるので桁数を測り直す。
-    screen?.refit();
+    panel?.screen.refit();
   }
 
   /** 見出しの行の操作の文言と状態。開いていない間は出さない。 */
@@ -250,6 +341,11 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   }
 
   function selectShell(session: ShellSession): void {
+    // タブで開いているシェルはパネルでは映さない (同じシェルを 2 か所に描かない)。
+    if (tabbed.has(session.id)) {
+      deps.onShowTab?.(session.id);
+      return;
+    }
     attached = session;
     lastTargetId = session.id;
     board?.setSelected(session.id);
@@ -257,11 +353,11 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     // attach は xterm の読み込みを挟むので、完了を待たずに focus しても
     // ターミナルがまだ無い。待ってから当てる。待つ間に別の対象へ切り替え
     // られていたら、そちらの focus を横取りしない。
-    const attaching = screen?.attach(session);
+    const attaching = panel?.screen.attach(session);
     if (!attaching) return;
     void attaching.then(
       () => {
-        if (attached?.id === session.id) screen?.focus();
+        if (attached?.id === session.id) panel?.screen.focus();
       },
       (error: unknown) => {
         if (attached?.id !== session.id || disposed) return;
@@ -336,7 +432,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       // 映していたシェルが無くなっていたら選択を解く。
       if (attached && !findShell(attached.id)) {
         attached = null;
-        screen?.detach();
+        panel?.screen.detach();
         deps.onTargetChange?.(null);
         setStatus(text().shellClosed);
       }
@@ -397,58 +493,91 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
    * で分かるが、こちらは返ってきたシェルを映すだけでよい (既に映しているものと
    * 同じなら、画面はそのまま tmux が切り替わる)。
    */
-  async function openPane(pane: string): Promise<void> {
-    const myGen = generation;
-    const size = screen?.measure();
-    try {
-      const res = await deps.trackLoad(
-        fetch(apiUrl("tmuxOpen"), {
-          method: "POST",
-          headers: {
-            ...deps.actionHeaders(),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            pane,
-            shell: attached?.id ?? null,
-            cols: size?.cols,
-            rows: size?.rows,
-          }),
-        }),
-      );
-      if (myGen !== generation || disposed) return;
-      if (res.status === 410) {
-        setStatus(await responseErrorMessage(res, text().paneClosed));
-        await loadLists(myGen);
-        return;
-      }
-      if (res.status === 429) {
-        setStatus(await responseErrorMessage(res, text().shellLimitReached));
-        return;
-      }
-      if (!res.ok) {
-        setStatus(await responseErrorMessage(res, text().paneOpenFailed));
-        return;
-      }
-      const body = (await res.json()) as {
+  type PaneShellResult =
+    | {
+        ok: true;
         session: ShellSession;
         action: "switched" | "attached";
-      };
+      }
+    | { ok: false; gone: boolean };
+
+  /**
+   * tmux ペインを、そのセッションのシェルで見られる状態にしてもらう
+   * (apiUrl("tmuxOpen"))。既にそのセッションを映しているシェルがあればそれが、
+   * 無ければ新しく開いたシェルが返る。失敗は理由を report に渡す。
+   */
+  async function requestPaneShell(
+    pane: string,
+    size: { cols: number; rows: number } | null | undefined,
+    report: (message: string) => void,
+  ): Promise<PaneShellResult> {
+    const res = await deps.trackLoad(
+      fetch(apiUrl("tmuxOpen"), {
+        method: "POST",
+        headers: {
+          ...deps.actionHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          pane,
+          shell: attached?.id ?? null,
+          cols: size?.cols,
+          rows: size?.rows,
+        }),
+      }),
+    );
+    if (res.status === 410) {
+      report(await responseErrorMessage(res, text().paneClosed));
+      return { ok: false, gone: true };
+    }
+    if (res.status === 429) {
+      report(await responseErrorMessage(res, text().shellLimitReached));
+      return { ok: false, gone: false };
+    }
+    if (!res.ok) {
+      report(await responseErrorMessage(res, text().paneOpenFailed));
+      return { ok: false, gone: false };
+    }
+    const body = (await res.json()) as {
+      session: ShellSession;
+      action: "switched" | "attached";
+    };
+    return { ok: true, ...body };
+  }
+
+  /** 新しく開いたシェルを一覧に載せる (取り直しを待たずに選べるように)。 */
+  function addShell(session: ShellSession): void {
+    shells = {
+      available: true,
+      sessions: [...(shells?.sessions ?? []), session],
+    };
+    renderLists();
+  }
+
+  async function openPane(pane: string): Promise<void> {
+    const myGen = generation;
+    try {
+      const result = await requestPaneShell(
+        pane,
+        panel?.screen.measure(),
+        (message) => {
+          if (myGen === generation && !disposed) setStatus(message);
+        },
+      );
       if (myGen !== generation || disposed) return;
+      if (result.ok === false) {
+        if (result.gone) await loadLists(myGen);
+        return;
+      }
       setStatus(null);
-      if (body.action === "attached") {
-        // 新しく開いたシェル。一覧に載せてから選ぶ (取り直しを待たない)。
-        shells = {
-          available: true,
-          sessions: [...(shells?.sessions ?? []), body.session],
-        };
-        renderLists();
-        selectShell(body.session);
+      if (result.action === "attached") {
+        addShell(result.session);
+        selectShell(result.session);
         return;
       }
       // 既にあるシェルの tmux が動いただけ。映しているものが同じなら画面は
       // そのまま追従するので、選び直すのは別のシェルだったときだけ。
-      if (attached?.id !== body.session.id) selectShell(body.session);
+      if (attached?.id !== result.session.id) selectShell(result.session);
       // ツリーの「今出ている行」の印は、どのペインを映しているかで決まる。
       // 切り替えたばかりの対応を反映するために取り直す。
       await loadLists(myGen);
@@ -459,9 +588,113 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     }
   }
 
+  /** タブの箱の状態の行 (まだ枠が無ければ作る)。 */
+  function tabSlot(): ScreenSlot {
+    if (!tab) {
+      tab = createSlot();
+      tabPane.replaceChildren(tab.el);
+    }
+    return tab;
+  }
+
+  async function openPaneInTab(pane: string): Promise<void> {
+    const slot = tabSlot();
+    try {
+      const result = await requestPaneShell(
+        pane,
+        slot.screen.measure() ?? panel?.screen.measure(),
+        (message) => writeStatus(slot.status, message),
+      );
+      if (disposed || !result.ok) return;
+      if (result.action === "attached") addShell(result.session);
+      deps.onOpenInTab?.(result.session, pane);
+    } catch (error) {
+      if (disposed) return;
+      console.error("[code-viewer] tmux pane open in tab failed", error);
+      writeStatus(
+        slot.status,
+        `${text().paneOpenFailed}\n${formatErrorDetail(error)}`,
+      );
+    }
+  }
+
+  /** 一覧に無ければ取り直して探す。閉じられていれば null。 */
+  async function resolveShell(id: string): Promise<ShellSession | null> {
+    const known = findShell(id);
+    if (known) return known;
+    const res = await deps.trackLoad(fetch(apiUrl("shellList")));
+    if (!res.ok)
+      throw new Error(await responseErrorMessage(res, text().shellListFailed));
+    const list = (await res.json()) as ShellListResponse;
+    return list.sessions.find((item) => item.id === id) ?? null;
+  }
+
+  async function showInTab(id: ShellSessionId): Promise<void> {
+    if (disposed) return;
+    const myGen = ++tabGeneration;
+    if (panel && panel.screen.getAttached()?.id === id) {
+      // パネルで映しているシェルをタブへ。同じ xterm を箱ごと付け替える。
+      // パネルに来る枠 (前のタブの枠) は、別のシェルを映していれば離す。
+      swapSlots();
+      panel.screen.detach();
+      attached = null;
+      lastTargetId = null;
+      board?.setSelected(null);
+      deps.onTargetChange?.(null);
+      if (isOpen()) setStatus(text().selectPane);
+      return;
+    }
+    const slot = tabSlot();
+    if (slot.screen.getAttached()?.id === id) return;
+    try {
+      const session = await resolveShell(id);
+      if (myGen !== tabGeneration || disposed) return;
+      if (!session) {
+        slot.screen.detach();
+        writeStatus(slot.status, text().shellClosed);
+        return;
+      }
+      await slot.screen.attach(session);
+      if (myGen === tabGeneration && !disposed) slot.screen.focus();
+    } catch (error) {
+      if (myGen !== tabGeneration || disposed) return;
+      console.error("[code-viewer] terminal tab attach failed", error);
+      writeStatus(
+        slot.status,
+        `${text().loadFailed}\n${formatErrorDetail(error)}`,
+      );
+    }
+  }
+
+  function releaseTab(id: ShellSessionId): void {
+    if (tab?.screen.getAttached()?.id !== id) return;
+    tabGeneration += 1;
+    tab.screen.detach();
+  }
+
+  async function moveTabToPanel(id: ShellSessionId): Promise<void> {
+    const session = tab?.screen.getAttached();
+    if (session?.id !== id) {
+      // タブの箱が映していない (まだ前面に出していない) なら、パネルで開くだけ。
+      await open(id);
+      return;
+    }
+    if (!isOpen()) await open(null);
+    if (disposed || !isOpen() || tab?.screen.getAttached()?.id !== id) return;
+    panel?.screen.detach();
+    swapSlots();
+    tabGeneration += 1;
+    attached = session;
+    lastTargetId = session.id;
+    board?.setSelected(session.id);
+    deps.onTargetChange?.(session.id);
+    setStatus(null);
+    panel?.screen.focus();
+  }
+
   async function createShell(): Promise<void> {
     const myGen = generation;
-    const size = screen?.measure();
+    const size = panel?.screen.measure();
     try {
       const res = await deps.trackLoad(
         fetch(apiUrl("shellCreate"), {
@@ -525,9 +758,10 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     if (myGen !== generation || disposed) return;
     if (attached?.id === id) {
       attached = null;
-      screen?.detach();
+      panel?.screen.detach();
       deps.onTargetChange?.(null);
     }
+    if (tab?.screen.getAttached()?.id === id) tab.screen.detach();
     shells = {
       available: shells?.available ?? true,
       sessions: (shells?.sessions ?? []).filter((item) => item.id !== id),
@@ -549,7 +783,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   }
 
   function mount(host: HTMLElement): void {
-    if (board && screen && host.childElementCount > 0) return;
+    if (board && panel && host.childElementCount > 0) return;
     const current = text();
     host.replaceChildren();
 
@@ -585,8 +819,20 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       onOpenPane: (row) => void openPane(row.target),
       onCreateShell: () => void createShell(),
       onCloseShell: (id) => void closeShell(id),
+      onShowTab: (id) => deps.onShowTab?.(id),
+      onOpenInTab: (row) => {
+        if (row.kind === "tmux") {
+          void openPaneInTab(row.target);
+          return;
+        }
+        const session = findShell(row.target);
+        if (session) deps.onOpenInTab?.(session);
+      },
       onMarkRead: (row) => void markRead(row.target),
     });
+
+    // 一覧を作る前に知らされたタブの印を渡す。
+    board.setTabbed(tabbed);
 
     const lists = document.createElement("div");
     lists.className = "terminal-lists";
@@ -607,7 +853,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       getSize: () => listEl?.getBoundingClientRect().width ?? 0,
       applySize: (width) => {
         applyListWidth(width);
-        screen?.refit();
+        panel?.screen.refit();
       },
       // 右へ引くと左の一覧が広がる。
       direction: 1,
@@ -619,30 +865,14 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       activeClassName: "terminal-list-resizing",
     });
 
-    screen = createTerminalScreen({
-      trackLoad: deps.trackLoad,
-      actionHeaders: deps.actionHeaders,
-      getText: text,
-      getFontSize: () => clampTerminalFontSize(deps.getFontSize()),
-      onStatus: setStatus,
-      onTargetGone: () => {
-        void loadLists(generation);
-      },
-      isImageShelfCollapsed: deps.isImageShelfCollapsed,
-      setImageShelfCollapsed: deps.onImageShelfCollapsedChange,
-    });
-    screen.setInputEnabled(inputEnabled);
-
-    statusEl = document.createElement("p");
-    statusEl.className = "terminal-status";
-    statusEl.role = "status";
-    statusEl.hidden = true;
+    panel = createSlot();
 
     // 左にツリー、右にターミナル。縦積みだとツリーが数行しか見えず、どれを
     // 選ぶかを決める前に画面が尽きる。
     const pane = document.createElement("div");
     pane.className = "terminal-pane";
-    pane.append(screen.el, statusEl);
+    pane.append(panel.el);
+    panelPane = pane;
 
     const body = document.createElement("div");
     body.className = "terminal-body";
@@ -718,7 +948,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     // 何を映していたかは覚えておく。Tools タブへ移って戻ったときに選び直させ
     // られると、毎回一覧から選ぶことになる。
     if (attached) lastTargetId = attached.id;
-    screen?.detach();
+    panel?.screen.detach();
     attached = null;
   }
 
@@ -726,7 +956,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     if (!board) return;
     syncViewActions();
     board.localize();
-    screen?.localize();
+    for (const slot of slots()) slot.screen.localize();
     renderLists();
   }
 
@@ -742,15 +972,29 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     close,
     isOpen,
     getActiveTarget: () => attached?.id ?? lastTargetId,
-    refit: () => screen?.refit(),
+    tabElement,
+    showInTab,
+    releaseTab,
+    moveTabToPanel,
+    setTabbed(ids) {
+      tabbed = ids;
+      board?.setTabbed(ids);
+    },
+    openPaneInTab,
+    getTabTarget: () => tab?.screen.getAttached()?.id ?? null,
+    focusTab: () => tab?.screen.focus(),
+    refit: () => {
+      for (const slot of slots()) slot.screen.refit();
+    },
     menuItems,
     localize,
     dispose() {
       disposed = true;
       generation += 1;
       stopPolling();
-      screen?.dispose();
-      screen = null;
+      for (const slot of slots()) slot.screen.dispose();
+      panel = null;
+      tab = null;
       board = null;
     },
   };

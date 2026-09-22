@@ -375,6 +375,10 @@ html, body {
      だけで、消費側は触らない (ui-layout.md の「固定物を足す / 消すときの型」)。 */
   --chrome-left: var(--nav-w);
   --chrome-bottom: var(--statusbar-h);
+  /* メインの面のターミナルのタブの箱の下端。最下段と下パネルの上。画面内
+     (docked) はパネルの実高さ、重ねるときもパネルの見出しの行 (畳んでいても
+     出ている) の上で止め、端末の最下行 (tmux の状態の行など) を覆わせない。 */
+  --main-bottom: calc(var(--chrome-bottom) + max(var(--app-panel-visible-height), var(--app-panel-tabbar-height)));
 
 
   --code-font-size: 13px;
@@ -15948,6 +15952,15 @@ html[data-theme="dark"] .tools-code span[style] {
   display: flex;
   flex-direction: column;
 }
+/* xterm 1 つと状態の行の組 (views/terminal/terminal-view.ts の ScreenSlot)。
+   パネルとメインのタブの間で、この箱ごと付け替える。 */
+.terminal-slot {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 /* 左の一覧。幅はハンドルで変えられる。 */
 .terminal-lists {
   flex: 0 0 auto;
@@ -18024,6 +18037,59 @@ body.gdp-nav-resizing {
   width: var(--icon-md);
   height: var(--icon-md);
 }
+/* ターミナルのタブは名前 (種類 · 状態) が長いので幅の上限を広げる (絵の指定 240)。 */
+.main-tab[data-kind="terminal"] {
+  max-width: calc(var(--space-unit) * 60);
+}
+.main-tab-icon .terminal-mark {
+  margin: auto;
+}
+
+/* ---- メインの面のターミナルのタブの箱 (#terminal-tab) ----
+   前面のタブがターミナルのときだけ、本文の位置 (タブ列の下・左のサイドバーの
+   右・本文の下端の上) に重ねて出す。下の画面の route はそのまま残る。
+   画面ごとのツールバー (50) より上、上の行・タブ列・下パネル (60) より下。 */
+.terminal-tab {
+  position: fixed;
+  top: var(--global-header-h); left: var(--chrome-left); right: 0;
+  bottom: var(--main-bottom);
+  z-index: 55;
+  display: none;
+  background: var(--color-term);
+}
+body.main-terminal-front .terminal-tab {
+  display: flex;
+}
+/* 一覧の行の「タブで開く」。タブで表示中なら同じボタンが印になる。 */
+.terminal-row-tab {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-3);
+  cursor: pointer;
+  opacity: 0;
+}
+.terminal-row:hover .terminal-row-tab,
+.terminal-row-tab:focus-visible,
+.terminal-row-tab.in-tab {
+  opacity: 1;
+}
+.terminal-row-tab.in-tab {
+  color: var(--color-accent);
+}
+.terminal-row-tab:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.terminal-row-tab svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
 .global-header-spacer {
   flex: 1 1 auto;
   min-width: var(--space-2);
@@ -19089,7 +19155,7 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head {
 .terminal-pane-body:has(.terminal-screen:empty) {
   display: none;
 }
-.terminal-pane:has(.terminal-screen:empty) > .terminal-status {
+.terminal-slot:has(.terminal-screen:empty) > .terminal-status {
   flex: 1 1 auto;
   display: grid;
   place-items: center;
