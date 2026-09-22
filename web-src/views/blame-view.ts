@@ -1,4 +1,9 @@
 import { apiUrl } from "../core/api-url";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 // Standalone file-blame view. Fetches /_file_blame, groups same-sha runs into
 // row-span blocks, paints an Older → Newer time bar legend, and reuses the
 // existing file shell DOM so tabs/sticky header stay consistent across views.
@@ -141,23 +146,18 @@ export function createBlameView(deps: BlameViewDeps) {
     params.set("path", target.path);
     params.set("ref", target.ref);
     const url = `${apiUrl("fileBlame")}?${params.toString()}`;
-    try {
-      return await deps.trackLoad(
-        fetch(url).then(async (r) => {
-          if (!r.ok) throw new Error(await r.text());
-          const data = (await r.json()) as BlameResponse;
-          if (
-            data.generation !== undefined &&
-            requestGeneration !== activeGeneration
-          )
-            return null;
-          return data;
-        }),
-      );
-    } catch (err) {
-      console.error("blame fetch failed", err);
-      return null;
-    }
+    return await deps.trackLoad(
+      fetch(url).then(async (r) => {
+        if (!r.ok) throw new Error(await responseErrorMessage(r, "load blame"));
+        const data = (await r.json()) as BlameResponse;
+        if (
+          data.generation !== undefined &&
+          requestGeneration !== activeGeneration
+        )
+          return null;
+        return data;
+      }),
+    );
   }
 
   async function fetchSource(
@@ -177,17 +177,19 @@ export function createBlameView(deps: BlameViewDeps) {
     params.set("path", target.path);
     params.set("ref", sourceRef);
     const url = `${apiUrl("file")}?${params.toString()}`;
-    try {
-      const res = await deps.trackLoad(
-        fetch(url).then(async (r) => {
-          if (!r.ok) throw new Error(await r.text());
-          return r.text();
-        }),
-      );
-      return res;
-    } catch {
-      return "";
-    }
+    return await deps.trackLoad(
+      fetch(url).then(async (r) => {
+        if (!r.ok) {
+          throw new Error(
+            await responseErrorMessage(
+              r,
+              `load ${target.path} at ${sourceRef}`,
+            ),
+          );
+        }
+        return r.text();
+      }),
+    );
   }
 
   function buildBlameTable(
@@ -346,25 +348,42 @@ export function createBlameView(deps: BlameViewDeps) {
     const sourceShikiLang = normalizeSourceShikiLang(
       deps.inferLang(target.path),
     );
-    const [blameResp, srcText, highlighter] = await Promise.all([
-      fetchBlame(target, generation),
-      fetchSource(target, base),
-      deps.getSyntaxHighlight() && sourceShikiLang
-        ? deps.loadSourceShikiHighlighter(sourceShikiLang)
-        : Promise.resolve(null),
-    ]);
-    if (generation !== activeGeneration) return;
+    let loaded: [BlameResponse | null, string, SourceShikiHighlighter | null];
+    try {
+      loaded = await Promise.all([
+        fetchBlame(target, generation),
+        fetchSource(target, base),
+        deps.getSyntaxHighlight() && sourceShikiLang
+          ? deps.loadSourceShikiHighlighter(sourceShikiLang)
+          : Promise.resolve(null),
+      ]);
+    } catch (error) {
+      if (generation !== activeGeneration) return;
+      const failure = errorWithCause(
+        `loading blame for ${target.path} failed`,
+        error,
+      );
+      console.error(failure);
+      body.replaceChildren(blameError(formatErrorDetail(failure)));
+      return;
+    }
+    const [blameResp, srcText, highlighter] = loaded;
+    if (generation !== activeGeneration || !blameResp) return;
     body.replaceChildren();
-    if (!blameResp || (!blameResp.lines.length && blameResp.error)) {
-      const err = document.createElement("div");
-      err.className = "gdp-blame-error";
-      err.textContent = blameResp?.error || "Failed to load blame";
-      body.appendChild(err);
+    if (!blameResp.lines.length && blameResp.error) {
+      body.appendChild(blameError(blameResp.error));
       return;
     }
     body.appendChild(
       buildBlameTable(card, target, blameResp, srcText, highlighter),
     );
+  }
+
+  function blameError(detail: string): HTMLElement {
+    const err = document.createElement("div");
+    err.className = "gdp-blame-error";
+    err.textContent = detail;
+    return err;
   }
 
   function buildLoading(): HTMLElement {

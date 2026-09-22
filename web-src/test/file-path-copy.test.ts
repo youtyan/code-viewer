@@ -3,6 +3,7 @@ import { normalizeNewDirectoryName } from "../core/directory-name";
 import {
   fileNameClipboardText,
   filePathClipboardText,
+  filePathDisplayText,
   fileReferenceClipboardText,
   fileReferenceWithCodeClipboardText,
 } from "../core/file-path-copy";
@@ -20,6 +21,60 @@ describe("filePathClipboardText", () => {
     expect(fileNameClipboardText("web-src/app.ts")).toBe("app.ts");
     expect(fileNameClipboardText("web-src")).toBe("web-src");
     expect(fileNameClipboardText("")).toBe("");
+  });
+
+  test.each([
+    {
+      name: "newline",
+      path: "dir/line\nname.txt",
+      visible: "dir/line\\nname.txt",
+    },
+    { name: "tab", path: "dir/tab\tname.txt", visible: "dir/tab\\tname.txt" },
+    {
+      name: "C0",
+      path: "dir/null\u0000name.txt",
+      visible: "dir/null\\u{0000}name.txt",
+    },
+    {
+      name: "C1",
+      path: "dir/next\u0085name.txt",
+      visible: "dir/next\\u{0085}name.txt",
+    },
+    {
+      name: "zero-width",
+      path: "dir/zero\u200bname.txt",
+      visible: "dir/zero\\u{200B}name.txt",
+    },
+    {
+      name: "RTL override",
+      path: "dir/right\u202ename.txt",
+      visible: "dir/right\\u{202E}name.txt",
+    },
+  ])("uses the same visible escaped text for $name paths", ({
+    path,
+    visible,
+  }) => {
+    expect(filePathDisplayText(path)).toBe(visible);
+    const copied = filePathClipboardText(path);
+    expect(copied).toBe(visible);
+    expect(
+      [...copied].every((character) => {
+        const codePoint = character.codePointAt(0) ?? 0;
+        return (
+          codePoint > 0x1f &&
+          (codePoint < 0x7f || codePoint > 0x9f) &&
+          codePoint !== 0x200b &&
+          codePoint !== 0x202e
+        );
+      }),
+    ).toBe(true);
+  });
+
+  test("uses visible path text inside file references", () => {
+    expect(fileReferenceClipboardText("dir/line\nname.txt", 2, 2)).toBe(
+      "@dir/line\\nname.txt#2",
+    );
+    expect(fileNameClipboardText("dir/tab\tname.txt")).toBe("tab\\tname.txt");
   });
 });
 

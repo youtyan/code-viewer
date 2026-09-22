@@ -69,7 +69,6 @@ describe("buildRepositoryWebTarget", () => {
 
   test.each([
     { name: "missing remote", repoWebUrl: null },
-    { name: "local path", repoWebUrl: "/tmp/sample" },
     { name: "unsupported protocol", repoWebUrl: "file:///tmp/sample" },
   ])("returns null for $name", ({ repoWebUrl }) => {
     expect(
@@ -79,6 +78,23 @@ describe("buildRepositoryWebTarget", () => {
         kind: "blob",
       }),
     ).toBeNull();
+  });
+
+  test("keeps the URL parse failure as the error cause", () => {
+    let failure: unknown;
+    try {
+      buildRepositoryWebTarget("/tmp/sample", {
+        ref: "main",
+        path: "src/index.ts",
+        kind: "blob",
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      message: "repository web URL is invalid",
+      cause: expect.any(TypeError),
+    });
   });
 });
 

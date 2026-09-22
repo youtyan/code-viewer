@@ -6,6 +6,7 @@ import { apiUrl } from "../core/api-url";
 import { classifyDiffFileKind } from "../core/diff-file-kinds";
 import { compileFileFilter } from "../core/file-filter";
 import { nextVisibleFileIndex } from "../core/file-navigation";
+import { filePathDisplayText } from "../core/file-path-copy";
 import {
   COLLAPSE_ALL_16_PATHS,
   EXPAND_ALL_16_PATHS,
@@ -424,8 +425,8 @@ export function createSidebar(deps: SidebarDeps) {
     const label = document.createElement("span");
     label.className = "dir-label";
     const dn = createRowLink("dir-name", () => dirRowHref(dir, onFileClick));
-    dn.textContent = dir.name;
-    dn.title = dir.path;
+    dn.textContent = filePathDisplayText(dir.name);
+    dn.title = filePathDisplayText(dir.path);
     label.appendChild(dn);
     if (dir.status) label.appendChild(fileBadge(dir.status));
     if (dir.children_omitted) {
@@ -911,10 +912,9 @@ export function createSidebar(deps: SidebarDeps) {
     const broken = f.symlink_target_type === "missing";
     const label = document.createElement("span");
     label.className = broken ? "symlink-target broken" : "symlink-target";
-    label.textContent = `→ ${f.symlink_target || "?"}`;
-    label.title = broken
-      ? `Broken symlink → ${f.symlink_target || ""}`
-      : `Symlink → ${f.symlink_target || ""}`;
+    const target = filePathDisplayText(f.symlink_target || "?");
+    label.textContent = `→ ${target}`;
+    label.title = broken ? `Broken symlink → ${target}` : `Symlink → ${target}`;
     return label;
   }
 
@@ -970,8 +970,8 @@ export function createSidebar(deps: SidebarDeps) {
         ? null
         : sidebarItemHref(f, onFileClick ? "repo" : "diff"),
     );
-    name.textContent = f.path.split("/").pop();
-    name.title = f.path;
+    name.textContent = filePathDisplayText(f.path.split("/").pop());
+    name.title = filePathDisplayText(f.path);
     li.appendChild(name);
     const symlinkLabel = symlinkTargetLabel(f);
     if (symlinkLabel) li.appendChild(symlinkLabel);
@@ -1416,8 +1416,8 @@ export function createSidebar(deps: SidebarDeps) {
       const name = createRowLink("name", () =>
         sidebarItemHref(f, onFileClick ? "repo" : "diff"),
       );
-      name.textContent = f.path;
-      name.title = f.path;
+      name.textContent = filePathDisplayText(f.path);
+      name.title = filePathDisplayText(f.path);
       li.appendChild(name);
       const kindTag = fileKindTag(f);
       if (kindTag) li.appendChild(kindTag);

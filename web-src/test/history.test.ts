@@ -706,6 +706,95 @@ describe("history view lifecycle", () => {
     expect(emptyDiffRenders).toBe(0);
   });
 
+  test.each([
+    {
+      name: "HTTP 400 (ref does not exist)",
+      single: () =>
+        Promise.resolve(new Response("unknown revision", { status: 400 })),
+      banner: ["commit not found: cccc333"],
+      logged: false,
+    },
+    {
+      name: "HTTP 500 with a body",
+      single: () =>
+        Promise.resolve(
+          new Response("sample server failure", {
+            status: 500,
+            statusText: "Internal Server Error",
+          }),
+        ),
+      banner: [
+        "failed to load commit: cccc333",
+        "HTTP 500 Internal Server Error",
+        "sample server failure",
+      ],
+      logged: true,
+    },
+    {
+      name: "a network failure",
+      single: () => Promise.reject(new TypeError("sample network failure")),
+      banner: [
+        "failed to load commit: cccc333",
+        "Caused by: TypeError: sample network failure",
+      ],
+      logged: true,
+    },
+  ])("deep link lookup after $name shows the reason in the banner", async ({
+    single,
+    banner: expectedBanner,
+    logged,
+  }) => {
+    const { panel, list, banner, status, sentinel } = installHistoryViewDom();
+    globalThis.fetch = ((input: RequestInfo | URL) =>
+      String(input).includes("ref=cccc333")
+        ? single()
+        : Promise.resolve(
+            new Response(JSON.stringify({ commits: [], hasMore: false }), {
+              status: 200,
+            }),
+          )) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      commit: "cccc333",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const errors: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+    };
+    try {
+      const view = createHistoryView({
+        $: (selector) => {
+          if (selector === "#history-panel") return panel as unknown as never;
+          if (selector === "#history-list") return list as unknown as never;
+          if (selector === "#history-banner") return banner as unknown as never;
+          if (selector === "#history-status") return status as unknown as never;
+          if (selector === "#history-sentinel")
+            return sentinel as unknown as never;
+          throw new Error(`unexpected selector: ${selector}`);
+        },
+        escapeHtml: (value) => String(value),
+        getRoute: () => route,
+        setRoute: () => undefined,
+        applyCommitRange: async () => undefined,
+        showEmptyDiffPane: () => undefined,
+        getSyntaxHighlight: () => false,
+        getLanguage: () => "ja",
+        trackLoad: (promise) => promise,
+      });
+      await view.enterHistory();
+    } finally {
+      console.error = originalError;
+    }
+    expect(banner.hidden).toBe(false);
+    for (const part of expectedBanner) {
+      expect(banner.textContent).toContain(part);
+    }
+    expect(errors.length > 0).toBe(logged);
+  });
+
   test("leaveHistory prevents an in-flight enter from showing stale empty diff state", async () => {
     const panel = new FakeElement();
     const list = new FakeElement();

@@ -2184,6 +2184,47 @@ describe("event wiring", () => {
     }
   });
 
+  test("shows why the new tab could not be opened instead of starting a server", async () => {
+    const mounted = await mountWith(response([item({ name: "other" })]), {
+      postResponse: { url: "http://127.0.0.1:4321/" },
+    });
+    const originalOpen = window.open;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      value: () => {
+        throw new DOMException("sample popup refusal", "SecurityError");
+      },
+    });
+    const errors: unknown[][] = [];
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args: unknown[]) => {
+        errors.push(args);
+      });
+    try {
+      openRowMenu(mounted.panel, 0);
+      menuItem(TEXT.open).click();
+      for (let i = 0; i < 8; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      expect(
+        texts(mounted.panel, ".history-status").some(
+          (message) =>
+            message.includes(TEXT.openFailed) &&
+            message.includes("SecurityError: sample popup refusal"),
+        ),
+      ).toBe(true);
+      expect(errors.length).toBe(1);
+    } finally {
+      errorSpy.mockRestore();
+      Object.defineProperty(window, "open", {
+        configurable: true,
+        value: originalOpen,
+      });
+    }
+  });
+
   test("does not refresh or rewrite the page after a suspended action finishes", async () => {
     const mounted = await mountWith(response([item({ name: "repo" })]), {
       route: { wt: "/repo" },

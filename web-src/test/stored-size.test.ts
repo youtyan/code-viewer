@@ -1,6 +1,10 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
-import { readStoredSize, writeStoredSize } from "../core/stored-size";
+import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  readStoredSize,
+  reportStoredSizeFailure,
+  writeStoredSize,
+} from "../core/stored-size";
 
 GlobalRegistrator.register();
 
@@ -51,31 +55,73 @@ describe("readStoredSize", () => {
     { name: "NaN は fallback", stored: "NaN", expected: 380 },
   ])("$name", ({ stored, expected }) => {
     window.localStorage.setItem(KEY, stored);
-    expect(readStoredSize(KEY, 380)).toBe(expected);
+    expect(readStoredSize(KEY, 380)).toEqual({ ok: true, value: expected });
   });
 
   test("保存が無ければ fallback を返す", () => {
-    expect(readStoredSize(KEY, 380)).toBe(380);
+    expect(readStoredSize(KEY, 380)).toEqual({ ok: true, value: 380 });
   });
 });
 
 describe("writeStoredSize", () => {
   test("書いた寸法を読み戻せる", () => {
-    writeStoredSize(KEY, 512);
-    expect(readStoredSize(KEY, 380)).toBe(512);
+    expect(writeStoredSize(KEY, 512)).toEqual({ ok: true });
+    expect(readStoredSize(KEY, 380)).toEqual({ ok: true, value: 512 });
   });
 });
 
 describe("localStorage に触れない文脈", () => {
-  test("読めなければ fallback を返す", () => {
+  test("読み取り失敗を既定値と元の例外に分けて返す", () => {
     withBlockedStorage(() => {
-      expect(readStoredSize(KEY, 380)).toBe(380);
+      const result = readStoredSize(KEY, 380);
+      expect(result.ok).toBe(false);
+      if (!("error" in result)) throw new Error("expected blocked storage");
+      expect(result.value).toBe(380);
+      expect(result.error).toBeInstanceOf(Error);
+      expect(result.error).toMatchObject({ message: "blocked" });
     });
   });
 
-  test("書けなくても操作を落とさない", () => {
+  test("書き込み失敗で元の例外を返す", () => {
     withBlockedStorage(() => {
-      expect(() => writeStoredSize(KEY, 512)).not.toThrow();
+      const result = writeStoredSize(KEY, 512);
+      expect(result.ok).toBe(false);
+      if (!("error" in result)) throw new Error("expected blocked storage");
+      expect(result.error).toBeInstanceOf(Error);
+      expect(result.error).toMatchObject({ message: "blocked" });
     });
+  });
+
+  test("失敗は操作ごとに 1 回だけ、元の例外を cause に付けて出す", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* asserted below */
+    });
+    try {
+      withBlockedStorage(() => {
+        for (let i = 0; i < 3; i++) {
+          reportStoredSizeFailure(
+            readStoredSize(KEY, 380),
+            "reading the sample width failed",
+          );
+          reportStoredSizeFailure(
+            writeStoredSize(KEY, 512),
+            "saving the sample width failed",
+          );
+        }
+      });
+      reportStoredSizeFailure({ ok: true }, "saving the sample width failed");
+      expect(errorSpy.mock.calls.map(([error]) => error)).toEqual([
+        expect.objectContaining({
+          message: "reading the sample width failed",
+          cause: expect.objectContaining({ message: "blocked" }),
+        }),
+        expect.objectContaining({
+          message: "saving the sample width failed",
+          cause: expect.objectContaining({ message: "blocked" }),
+        }),
+      ]);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

@@ -6,9 +6,14 @@
 import { apiUrl, withoutProjectPrefix } from "../core/api-url";
 import { changedPathsCoverPath } from "../core/changed-paths";
 import { hasControlCharacter } from "../core/control-chars";
+import { showCopyFailure } from "../core/copy-failure";
 import { summarizeDiffFileKinds } from "../core/diff-file-kinds";
-import { errorWithCause } from "../core/error-detail";
-import { filePathClipboardText } from "../core/file-path-copy";
+import { errorWithCause, formatErrorDetail } from "../core/error-detail";
+import {
+  filePathClipboardText,
+  filePathDisplayText,
+  filePathNeedsEscaping,
+} from "../core/file-path-copy";
 import {
   CHEVRON_DOWN_16_PATH,
   COLLAPSE_ALL_16_PATHS,
@@ -1194,7 +1199,7 @@ export function createDiffView(deps: DiffViewDeps) {
       escapeHtml(f.status || "M") +
       "</span>" +
       '<span class="path">' +
-      escapeHtml(f.display_path || f.path) +
+      escapeHtml(filePathDisplayText(f.display_path || f.path)) +
       "</span>" +
       '<span class="stats">' +
       '<span class="a">+' +
@@ -1547,6 +1552,13 @@ export function createDiffView(deps: DiffViewDeps) {
       hljsRef,
     );
     ui.draw();
+    // diff2html prints the raw name, where a newline or U+202E would make the
+    // header disagree with Copy path. Only replace it when escaping is needed so
+    // its "old → new" rename label survives for ordinary paths.
+    const fileName = body.querySelector<HTMLElement>(".d2h-file-name");
+    if (fileName && filePathNeedsEscaping(file.path)) {
+      fileName.textContent = filePathDisplayText(file.path);
+    }
     if (STATE.ignoreWs) suppressWhitespaceOnlyInlineHighlights(body);
 
     enhanceMediaCard(file, card);
@@ -1613,7 +1625,7 @@ export function createDiffView(deps: DiffViewDeps) {
         index === allParts.length - 1
           ? "gdp-file-breadcrumb-current"
           : "gdp-file-breadcrumb-part";
-      crumb.textContent = part;
+      crumb.textContent = filePathDisplayText(part);
       if (!isCurrent && crumb instanceof HTMLButtonElement) {
         crumb.type = "button";
         crumb.addEventListener("click", () => {
@@ -1630,7 +1642,7 @@ export function createDiffView(deps: DiffViewDeps) {
     if (!allParts.length) {
       const crumb = document.createElement("span");
       crumb.className = "gdp-file-breadcrumb-current";
-      crumb.textContent = path;
+      crumb.textContent = filePathDisplayText(path);
       nav.appendChild(crumb);
     }
     return nav;
@@ -1735,11 +1747,14 @@ export function createDiffView(deps: DiffViewDeps) {
           setTimeout(() => {
             copy.classList.remove("copied");
           }, 1200);
-        } catch {
-          copy.classList.add("failed");
-          setTimeout(() => {
-            copy.classList.remove("failed");
-          }, 1200);
+        } catch (error) {
+          showCopyFailure(
+            copy,
+            "copying the file path failed",
+            error,
+            "copy file path",
+            1200,
+          );
         }
       });
       const statusTag = nameWrapper
@@ -2013,8 +2028,14 @@ export function createDiffView(deps: DiffViewDeps) {
         }).value;
         s.classList.add("hljs", `language-${lang}`);
         s.classList.remove("plaintext");
-      } catch {
-        // Keep the original text when highlight.js cannot parse a line.
+      } catch (error) {
+        const failure = errorWithCause(
+          `syntax highlighting failed for ${filePathDisplayText(file.path)}`,
+          error,
+        );
+        console.error(failure);
+        s.classList.add("gdp-highlight-failed");
+        s.title = formatErrorDetail(failure);
       }
     }
     return true;

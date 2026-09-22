@@ -2090,6 +2090,7 @@ body.gdp-history-page #topbar .ref-pickers {
   background: var(--bg-mute);
   color: var(--fg-muted);
   font-size: 12px;
+  white-space: pre-wrap;
 }
 #history-list,
 .history-list { list-style: none; margin: 0; padding: 0 0 24px; }
@@ -5605,6 +5606,19 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-markdown-preview pre .mkdp-code-copy:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+/* 失敗して原文を出している印。理由は title に入る。箱の寸法は変えない。 */
+.gdp-markdown-preview pre .mkdp-code-copy.failed {
+  opacity: 1;
+  color: var(--color-failed);
+}
+.gdp-highlight-failed {
+  box-shadow: inset 2px 0 0 var(--color-failed);
+}
+.gdp-markdown-preview a.mkdp-link-decode-failed {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: var(--color-failed);
 }
 .gdp-markdown-preview table {
   display: table;
@@ -15060,6 +15074,7 @@ body.db-resizing {
 }
 .gdp-blame-error {
   color: var(--danger, #c33);
+  white-space: pre-wrap;
 }
 
 /* ===== Doctor sheet (right-side drawer) ===== */

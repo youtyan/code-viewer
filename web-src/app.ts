@@ -130,7 +130,7 @@ import {
 import { rememberPaletteSelection } from "./core/search-palette";
 import type { ShellListResponse, ShellSessionId } from "./core/shell";
 import { sourceInternalPathKind } from "./core/source-meta";
-import { readStoredSize } from "./core/stored-size";
+import { readStoredSize, reportStoredSizeFailure } from "./core/stored-size";
 import {
   type TerminalImageRef,
   type TerminalImagesResponse,
@@ -3554,7 +3554,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     const path = active?.dataset.path;
     if (!path) return false;
-    void navigator.clipboard.writeText(filePathClipboardText(path));
+    navigator.clipboard
+      .writeText(filePathClipboardText(path))
+      .catch((error: unknown) => {
+        console.error(
+          errorWithCause("copying the selected file path failed", error),
+        );
+        setStatus("error");
+      });
     return true;
   }
 
@@ -5148,7 +5155,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       ok: boolean,
       withCode: boolean,
       lineCount: number,
-      reason?: "empty",
+      reason?: "empty" | Error,
     ) => {
       const label =
         reason === "empty"
@@ -5174,8 +5181,11 @@ window.GdpExpandLogic = GdpExpandLogic;
             : "failed";
       button.classList.remove("copied", "failed", "warn");
       if (stateClass) button.classList.add(stateClass);
-      button.title = label;
-      button.setAttribute("aria-label", label);
+      button.title =
+        reason instanceof Error
+          ? `${label}\n${formatErrorDetail(reason)}`
+          : label;
+      button.setAttribute("aria-label", button.title);
       if (feedback) {
         feedback.textContent = label;
         feedback.classList.remove("copied", "failed", "warn");
@@ -5201,8 +5211,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     try {
       await navigator.clipboard.writeText(text);
       finish(true, !!selectionCode, selectionCode?.lines.length ?? 0);
-    } catch {
-      finish(false, false, 0);
+    } catch (error) {
+      const failure = errorWithCause("copying the AI context failed", error);
+      console.error(failure);
+      finish(false, false, 0, failure);
     }
   });
   localizeViewerChrome();
@@ -6412,10 +6424,18 @@ window.GdpExpandLogic = GdpExpandLogic;
   let appPanelHeight = APP_PANEL_HEIGHT.default;
 
   function savedAppPanelHeight(): number {
-    return (
-      APP_SETTINGS.appPanelHeight ??
-      readStoredSize(APP_PANEL_HEIGHT_STORAGE_KEY, APP_PANEL_HEIGHT.default)
+    if (APP_SETTINGS.appPanelHeight != null) {
+      return APP_SETTINGS.appPanelHeight;
+    }
+    const result = readStoredSize(
+      APP_PANEL_HEIGHT_STORAGE_KEY,
+      APP_PANEL_HEIGHT.default,
     );
+    reportStoredSizeFailure(
+      result,
+      "reading the saved app panel height failed",
+    );
+    return result.value;
   }
 
   function applyAppPanelHeight(height: number): void {

@@ -509,16 +509,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
    * ユーザー操作から離れた呼び出しとしてポップアップブロックに掛かる。
    */
   function openBlankTab(): Window | null {
-    try {
-      // "noopener" を features に渡すと、仕様上 window.open は null を返す。
-      // タブだけが about:blank のまま開き、URL を入れる先が無くなるので
-      // 渡さない。参照は受け取ったうえで opener を切る。
-      const tab = window.open("", "_blank");
-      if (tab) tab.opener = null;
-      return tab;
-    } catch {
-      return null;
-    }
+    // "noopener" を features に渡すと、仕様上 window.open は null を返す。
+    // タブだけが about:blank のまま開き、URL を入れる先が無くなるので
+    // 渡さない。参照は受け取ったうえで opener を切る。
+    const tab = window.open("", "_blank");
+    if (tab) tab.opener = null;
+    return tab;
   }
 
   async function openWorktree(item: WorktreeItem): Promise<void> {
@@ -534,9 +530,10 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     busyPath = item.path;
     setMessage(text().opening);
     renderList();
-    const tab = openBlankTab();
+    let tab: Window | null = null;
     let completion: { detail: string; error: boolean } | null = null;
     try {
+      tab = openBlankTab();
       const result = await deps.trackLoad(
         postWorktreeAction(apiUrl("worktreeOpen"), { path: item.path }),
       );
@@ -548,8 +545,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       if (!tab) completion = { detail: url, error: true };
     } catch (error) {
       tab?.close();
+      console.error("[code-viewer] opening the worktree failed", error);
       completion = {
-        detail: error instanceof Error ? error.message : text().openFailed,
+        detail: `${text().openFailed}\n${formatErrorDetail(error)}`,
         error: true,
       };
     } finally {

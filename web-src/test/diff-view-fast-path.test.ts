@@ -514,6 +514,132 @@ describe("diff view fast path", () => {
     }
   });
 
+  test.each([
+    {
+      name: "a highlighter failure keeps the line text and marks it with the reason",
+      path: "src/sample.ts",
+      rawName: "src/sample.ts",
+      highlightFails: true,
+      shownName: "src/sample.ts",
+    },
+    {
+      name: "a path with a newline shows and copies the same escaped text",
+      path: "src/line\nname.ts",
+      rawName: "src/line\nname.ts",
+      highlightFails: false,
+      shownName: "src/line\\nname.ts",
+    },
+    {
+      name: "a path with U+202E shows and copies the same escaped text",
+      path: "src/right\u202ename.ts",
+      rawName: "src/right\u202ename.ts",
+      highlightFails: false,
+      shownName: "src/right\\u{202E}name.ts",
+    },
+    {
+      name: "an ordinary rename keeps the diff2html label",
+      path: "src/new.ts",
+      rawName: "src/old.ts → src/new.ts",
+      highlightFails: false,
+      shownName: "src/old.ts → src/new.ts",
+    },
+  ])("$name", async ({ path, rawName, highlightFails, shownName }) => {
+    setupDiffDom();
+    const originalDiff2Html = window.Diff2HtmlUI;
+    const originalRequestIdleCallback = window.requestIdleCallback;
+    let idleWork: IdleRequestCallback | null = null;
+    window.requestIdleCallback = ((callback: IdleRequestCallback) => {
+      idleWork = callback;
+      return 1;
+    }) as typeof window.requestIdleCallback;
+    window.Diff2HtmlUI = class {
+      constructor(private readonly element: HTMLElement) {}
+      draw() {
+        this.element.innerHTML =
+          '<div class="d2h-file-wrapper"><div class="d2h-file-header">' +
+          '<span class="d2h-file-name-wrapper"><span class="d2h-file-name"></span></span>' +
+          '</div><table class="d2h-diff-table"><tbody>' +
+          '<tr><td class="d2h-code-line"><span class="d2h-code-line-ctn">const value = 1;</span></td></tr>' +
+          "</tbody></table></div>";
+        const name = this.element.querySelector(".d2h-file-name");
+        if (name) name.textContent = rawName;
+      }
+      highlightCode() {
+        /* not used: highlighting is deferred */
+      }
+    } as unknown as typeof window.Diff2HtmlUI;
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          written.push(text);
+        },
+      },
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* asserted below */
+    });
+    try {
+      const { view } = createDiffViewForShellTest(defaultDiffText, {
+        syntaxHighlight: true,
+        inferLang: () => "ts",
+        getHljs: () =>
+          ({
+            getLanguage: () => true,
+            highlight: (code: string) => {
+              if (highlightFails) throw new Error("sample grammar failure");
+              return { value: `<span class="tok">${code}</span>` };
+            },
+          }) as never,
+      });
+      const card = document.createElement("div") as DiffCardElement;
+      card.className = "gdp-file-shell";
+      card.dataset.path = path;
+      card.innerHTML =
+        '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+      document.querySelector("#diff")?.appendChild(card);
+      const file: FileMeta = {
+        path,
+        status: "M",
+        additions: 1,
+        deletions: 0,
+        size_class: "small",
+        highlight: true,
+        load_url: "/file_diff?path=sample",
+      };
+      view.renderFile(
+        file,
+        { path, status: "M", diff: "diff --git a/sample b/sample\n" },
+        card,
+      );
+      idleWork?.({
+        didTimeout: false,
+        timeRemaining: () => 50,
+      } as IdleDeadline);
+
+      expect(card.querySelector(".d2h-file-name")?.textContent).toBe(shownName);
+      const span = card.querySelector<HTMLElement>(".d2h-code-line-ctn");
+      expect(span?.textContent).toBe("const value = 1;");
+      expect(span?.classList.contains("gdp-highlight-failed")).toBe(
+        highlightFails,
+      );
+      if (highlightFails) {
+        expect(span?.title).toContain("Error: sample grammar failure");
+        expect(errorSpy).toHaveBeenCalledOnce();
+      } else {
+        expect(errorSpy).not.toHaveBeenCalled();
+        card.querySelector<HTMLButtonElement>(".gdp-copy-path")?.click();
+        await waitFor(() => written.length === 1);
+        expect(written).toEqual([rawName === path ? shownName : path]);
+      }
+    } finally {
+      errorSpy.mockRestore();
+      window.Diff2HtmlUI = originalDiff2Html;
+      window.requestIdleCallback = originalRequestIdleCallback;
+    }
+  });
+
   test("resets a reused loaded card when full-path render changes its diff signature", () => {
     setupDiffDom();
     const originalObserver = globalThis.IntersectionObserver;

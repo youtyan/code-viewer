@@ -3,6 +3,8 @@ import type Renderer from "markdown-it/lib/renderer.mjs";
 import type Token from "markdown-it/lib/token.mjs";
 import markdownItAnchor from "markdown-it-anchor";
 import markdownItFootnote from "markdown-it-footnote";
+import { showCopyFailure } from "./copy-failure";
+import { errorWithCause, formatErrorDetail } from "./error-detail";
 import { CHECK_16_PATHS, COPY_16_PATHS, iconSvg } from "./icons";
 import { isImeComposing } from "./keyboard";
 import { buildRawFileUrl, type SourceFileTarget } from "./routes";
@@ -130,7 +132,7 @@ export function markdownSlugify(text: string): string {
 export function resolveMarkdownLinkTarget(
   currentPath: string,
   href: string,
-): Omit<MarkdownNavigationTarget, "ref"> | null {
+): (Omit<MarkdownNavigationTarget, "ref"> & { decodeError?: Error }) | null {
   if (!href || href.startsWith("#")) return null;
   if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) return null;
   const hashAt = href.indexOf("#");
@@ -140,15 +142,23 @@ export function resolveMarkdownLinkTarget(
     "",
   );
   if (!cleanHref) return null;
-  const path = resolveRepoRelative(
-    currentPath,
-    decodeUriComponentSafe(cleanHref),
-  );
+  const decodedPath = decodeUriComponentAsWritten(cleanHref);
+  const path = resolveRepoRelative(currentPath, decodedPath.value);
   if (path == null) return null;
+  const decodedHash = decodeUriComponentAsWritten(hash);
+  const decodeError = decodedPath.error ?? decodedHash.error;
   return {
     path,
-    hash: decodeUriComponentSafe(hash),
+    hash: decodedHash.value,
     directory: cleanHref.endsWith("/"),
+    ...(decodeError
+      ? {
+          decodeError: errorWithCause(
+            `markdown link "${href}" has invalid percent-encoding; it is used as written`,
+            decodeError,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -166,12 +176,16 @@ export function resolveMarkdownAssetPath(
 }
 
 /** Markdown 内の href/fragment は手書きなので、壊れた %xx で
- * decodeURIComponent が投げてもリンク解決ごと落とさない。 */
-function decodeUriComponentSafe(value: string): string {
+ * decodeURIComponent が投げてもリンク解決ごと落とさず書かれたまま使う。
+ * 失敗は呼び出し側が表示できるよう元の例外ごと返す。 */
+function decodeUriComponentAsWritten(value: string): {
+  value: string;
+  error?: unknown;
+} {
   try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
+    return { value: decodeURIComponent(value) };
+  } catch (error) {
+    return { value, error };
   }
 }
 
@@ -230,8 +244,13 @@ function createMarkdownIt(
             themes: { light: "github-light", dark: "github-dark" },
             defaultColor: false,
           });
-        } catch {
-          // Fall through to escaped code.
+        } catch (error) {
+          const failure = errorWithCause(
+            `syntax highlighting failed for a ${language} code block; showing it as plain text`,
+            error,
+          );
+          console.error(failure);
+          return `<pre class="gdp-highlight-failed" title="${md.utils.escapeHtml(formatErrorDetail(failure))}"><code>${md.utils.escapeHtml(code)}</code></pre>`;
         }
       }
       return `<pre><code>${md.utils.escapeHtml(code)}</code></pre>`;
@@ -417,6 +436,11 @@ function createMarkdownIt(
       token.attrSet("data-gdp-md-ref", target.ref || "worktree");
       if (link.hash) token.attrSet("data-gdp-md-hash", link.hash);
       if (link.directory) token.attrSet("data-gdp-md-dir", "1");
+      if (link.decodeError) {
+        console.error(link.decodeError);
+        token.attrSet("title", formatErrorDetail(link.decodeError));
+        token.attrJoin("class", "mkdp-link-decode-failed");
+      }
     } else if (/^(?:https?:)?\/\//i.test(href)) {
       token.attrSet("target", "_blank");
       token.attrSet("rel", "noopener noreferrer");
@@ -543,9 +567,14 @@ function enhanceCodeBlocks(root: HTMLElement) {
         window.setTimeout(() => {
           button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
         }, 1500);
-      } catch {
-        // Clipboard access can fail in insecure contexts; leave the button
-        // untouched rather than spamming the console.
+      } catch (error) {
+        showCopyFailure(
+          button,
+          "copying the code block failed",
+          error,
+          "Copy code",
+          1500,
+        );
       }
     });
     pre.appendChild(button);
@@ -610,7 +639,7 @@ function wireMarkdownInteractions(
   });
   setupMarkdownScrollSpy(root);
   setupMermaidLightbox(root);
-  renderMermaidDiagrams(root);
+  void renderMermaidDiagrams(root);
 }
 
 function setupMarkdownScrollSpy(root: HTMLElement) {
@@ -712,7 +741,18 @@ function scrollInitialMarkdownHash(root: HTMLElement) {
 }
 
 function decodeHashFragment(hash: string): string {
-  return decodeUriComponentSafe(hash.startsWith("#") ? hash.slice(1) : hash);
+  const decoded = decodeUriComponentAsWritten(
+    hash.startsWith("#") ? hash.slice(1) : hash,
+  );
+  if (decoded.error) {
+    console.error(
+      errorWithCause(
+        `location hash "${hash}" has invalid percent-encoding; it is used as written`,
+        decoded.error,
+      ),
+    );
+  }
+  return decoded.value;
 }
 
 /** プレビューが独自のスクロール領域 (tools ドロワーの出力ペインなど) に
@@ -795,12 +835,21 @@ async function renderMermaidDiagrams(root: HTMLElement) {
     root.querySelectorAll<HTMLElement>(".markdown-body .mermaid"),
   );
   if (!nodes.length) return;
-  const mermaid = await loadMermaid();
-  if (!mermaid) return;
+  let mermaid: MermaidApi;
+  try {
+    mermaid = await loadMermaid();
+  } catch (error) {
+    const failure = errorWithCause("loading Mermaid failed", error);
+    console.error(failure);
+    for (const node of nodes) renderMermaidErrorDetail(node, failure);
+    return;
+  }
+  let runFailure: Error | null = null;
   try {
     await mermaid.run({ nodes, suppressErrors: true });
-  } catch {
-    // Error details are rendered per node below.
+  } catch (error) {
+    runFailure = errorWithCause("rendering Mermaid diagrams failed", error);
+    console.error(runFailure);
   }
   for (const node of nodes) {
     if (
@@ -808,7 +857,7 @@ async function renderMermaidDiagrams(root: HTMLElement) {
       !isMermaidErrorSvg(node.querySelector("svg"))
     )
       continue;
-    await renderMermaidError(node, mermaid);
+    await renderMermaidError(node, mermaid, runFailure);
   }
 }
 
@@ -816,22 +865,36 @@ function isMermaidErrorSvg(svg: SVGSVGElement | null): boolean {
   return !!svg && /Syntax error/i.test(svg.textContent || "");
 }
 
-async function renderMermaidError(node: HTMLElement, mermaid: MermaidApi) {
+async function renderMermaidError(
+  node: HTMLElement,
+  mermaid: MermaidApi,
+  runFailure: Error | null,
+) {
   const src = node.dataset.gdpMermaidSource || node.textContent || "";
-  let detail = "";
+  let detail = runFailure ? formatErrorDetail(runFailure) : "";
   if (src && mermaid.parse) {
     try {
       await mermaid.parse(src);
-      detail = "Mermaid could not render this diagram.";
+      detail ||= "Mermaid could not render this diagram.";
     } catch (err) {
-      detail = err instanceof Error ? err.message : String(err);
+      detail = [formatErrorDetail(err), detail].filter(Boolean).join("\n\n");
     }
   }
+  renderMermaidErrorDetail(node, detail);
+}
+
+function renderMermaidErrorDetail(node: HTMLElement, failure: Error | string) {
+  const src = node.dataset.gdpMermaidSource || node.textContent || "";
+  const detail =
+    typeof failure === "string" ? failure : formatErrorDetail(failure);
   const wrap = document.createElement("div");
   wrap.className = "mkdp-mermaid-error";
   const title = document.createElement("div");
   title.className = "mkdp-mermaid-error-title";
-  title.textContent = "Mermaid syntax error";
+  title.textContent =
+    typeof failure === "string"
+      ? "Mermaid syntax error"
+      : "Mermaid could not be loaded";
   const pre = document.createElement("pre");
   pre.className = "mkdp-mermaid-error-detail";
   pre.textContent = detail || "No detail available.";
@@ -871,6 +934,11 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
   document.body.appendChild(overlay);
 
   const bbox = safeSvgBox(svg);
+  if (bbox.error) {
+    console.error(bbox.error);
+    hint.textContent += " · size estimated from the layout";
+    hint.title = formatErrorDetail(bbox.error);
+  }
   let scale = 1;
   let tx = 0;
   let ty = 0;
@@ -972,7 +1040,12 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
   fitImage();
 }
 
-function safeSvgBox(svg: SVGSVGElement): { width: number; height: number } {
+function safeSvgBox(svg: SVGSVGElement): {
+  width: number;
+  height: number;
+  error?: Error;
+} {
+  let error: Error | undefined;
   try {
     const box = svg.getBBox();
     if (box.width > 0 && box.height > 0) {
@@ -984,9 +1057,12 @@ function safeSvgBox(svg: SVGSVGElement): { width: number; height: number } {
       svg.setAttribute("height", String(box.height));
       return { width: box.width, height: box.height };
     }
-  } catch {
-    // Use layout fallback below.
+  } catch (cause) {
+    error = errorWithCause(
+      "measuring the diagram failed; using its layout size",
+      cause,
+    );
   }
   const rect = svg.getBoundingClientRect();
-  return { width: rect.width || 800, height: rect.height || 600 };
+  return { width: rect.width || 800, height: rect.height || 600, error };
 }

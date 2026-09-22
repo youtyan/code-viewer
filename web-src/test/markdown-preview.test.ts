@@ -131,7 +131,12 @@ describe("markdown preview", () => {
       name: "壊れた percent-encoding はそのまま扱う",
       currentPath: "docs/README.md",
       href: "./a%zz.md",
-      expected: { path: "docs/a%zz.md", hash: "", directory: false },
+      expected: {
+        path: "docs/a%zz.md",
+        hash: "",
+        directory: false,
+        decodeError: expect.any(Error),
+      },
     },
     {
       name: "リポジトリルート起点の絶対パス",

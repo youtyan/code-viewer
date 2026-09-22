@@ -26,7 +26,11 @@ import {
 } from "../core/journal";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute, DiffRange } from "../core/routes";
-import { readStoredSize, writeStoredSize } from "../core/stored-size";
+import {
+  readStoredSize,
+  reportStoredSizeFailure,
+  writeStoredSize,
+} from "../core/stored-size";
 import type { PageView } from "./page-view";
 import { showConfirmDialog } from "./ui-dialog";
 
@@ -503,14 +507,19 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
       `${clamped}px`,
     );
     if (!persist) return;
-    writeStoredSize(TASK_EDITOR_WIDTH_STORAGE_KEY, clamped);
+    reportStoredSizeFailure(
+      writeStoredSize(TASK_EDITOR_WIDTH_STORAGE_KEY, clamped),
+      "saving the journal editor width failed",
+    );
   }
 
   function restoreTaskEditorWidth(): void {
-    applyTaskEditorWidth(
-      readStoredSize(TASK_EDITOR_WIDTH_STORAGE_KEY, TASK_EDITOR_DEFAULT_WIDTH),
-      false,
+    const result = readStoredSize(
+      TASK_EDITOR_WIDTH_STORAGE_KEY,
+      TASK_EDITOR_DEFAULT_WIDTH,
     );
+    reportStoredSizeFailure(result, "reading the journal editor width failed");
+    applyTaskEditorWidth(result.value, false);
   }
 
   function startTaskEditorResize(

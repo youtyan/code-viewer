@@ -1,3 +1,5 @@
+import { showCopyFailure } from "../core/copy-failure";
+import { filePathClipboardText } from "../core/file-path-copy";
 import { COPY_16_PATHS, iconSvg } from "../core/icons";
 import type { AppRoute, DiffRange, SourceFileTarget } from "../core/routes";
 import { isPreviewableSource, sourceDisplayKind } from "../core/source-meta";
@@ -237,12 +239,17 @@ function createFilePathCopyButton(target: SourceFileTarget): HTMLButtonElement {
   copy.addEventListener("click", async (event) => {
     event.stopPropagation();
     try {
-      await navigator.clipboard.writeText(target.path);
+      await navigator.clipboard.writeText(filePathClipboardText(target.path));
       copy.classList.add("copied");
       setTimeout(() => copy.classList.remove("copied"), 1200);
-    } catch {
-      copy.classList.add("failed");
-      setTimeout(() => copy.classList.remove("failed"), 1200);
+    } catch (error) {
+      showCopyFailure(
+        copy,
+        "copying the file path failed",
+        error,
+        "copy file path",
+        1200,
+      );
     }
   });
   return copy;

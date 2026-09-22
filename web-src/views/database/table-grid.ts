@@ -24,7 +24,11 @@ import {
   loadShikiHighlighter,
   type ShikiHighlighter,
 } from "../../core/shiki-loader";
-import { readStoredSize, writeStoredSize } from "../../core/stored-size";
+import {
+  readStoredSize,
+  reportStoredSizeFailure,
+  writeStoredSize,
+} from "../../core/stored-size";
 import type { AnnotationDatabaseDataState } from "../../core/types";
 import { showConfirmDialog } from "../ui-dialog";
 import { createDetailTable } from "./detail-table";
@@ -872,9 +876,15 @@ export function createTableGrid(
       : RELATED_PANEL_DEFAULT_HEIGHT;
   // 関連パネル左リストの幅。ドラッグで変えた値は localStorage に覚える
   // (「その画面でどれくらい引き伸ばしたか」はブラウザ側の都合なので)。
-  let relatedListWidth = clampRelatedListWidth(
-    readStoredSize(RELATED_LIST_WIDTH_KEY, RELATED_LIST_DEFAULT_WIDTH),
+  const storedRelatedListWidth = readStoredSize(
+    RELATED_LIST_WIDTH_KEY,
+    RELATED_LIST_DEFAULT_WIDTH,
   );
+  reportStoredSizeFailure(
+    storedRelatedListWidth,
+    "reading the related-record list width failed",
+  );
+  let relatedListWidth = clampRelatedListWidth(storedRelatedListWidth.value);
   let relatedListResizeDetach: (() => void) | null = null;
 
   function clampRelatedListWidth(width: number): number {
@@ -1396,7 +1406,11 @@ export function createTableGrid(
       applySize: applyRelatedListWidth,
       direction: 1,
       axis: "x",
-      onEnd: () => writeStoredSize(RELATED_LIST_WIDTH_KEY, relatedListWidth),
+      onEnd: () =>
+        reportStoredSizeFailure(
+          writeStoredSize(RELATED_LIST_WIDTH_KEY, relatedListWidth),
+          "saving the related-record list width failed",
+        ),
       activeClassTarget: relatedPanel,
       activeClassName: "db-related-list-resizing",
     });

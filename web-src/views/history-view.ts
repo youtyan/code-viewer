@@ -1,4 +1,9 @@
 import { apiUrl } from "../core/api-url";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 // Commit history screen (left panel). Renders the commit list, handles
 // infinite scroll / deep links, and delegates diff rendering to the existing
 // diff pipeline via deps.applyCommitRange().
@@ -1153,25 +1158,35 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (selectionGen !== selectionGeneration || gen !== generation) return;
   }
 
-  // Set when fetchSingleCommit fails for reasons other than "the server says
-  // the ref does not exist" (HTTP 400) — e.g. network errors or 5xx.
-  let lookupFailed = false;
-
-  async function fetchSingleCommit(sha: string): Promise<HistoryCommit | null> {
+  // HTTP 400 means the server says the ref does not exist; every other
+  // failure (network, 5xx, bad JSON) is kept with its cause for the banner.
+  async function fetchSingleCommit(
+    sha: string,
+  ): Promise<
+    | { kind: "found"; commit: HistoryCommit }
+    | { kind: "missing" }
+    | { kind: "failed"; error: Error }
+  > {
     const url = `${apiUrl("log")}?ref=${encodeURIComponent(sha)}&skip=0&limit=1`;
-    lookupFailed = false;
     try {
       const res = await deps.trackLoad(
         fetch(url).then(async (r) => {
           if (r.status === 400) return null;
-          if (!r.ok) throw new Error(await r.text());
+          if (!r.ok) {
+            throw new Error(
+              await responseErrorMessage(r, `load commit ${sha}`),
+            );
+          }
           return (await r.json()) as HistoryLogResponse;
         }),
       );
-      return res?.commits[0] || null;
-    } catch {
-      lookupFailed = true;
-      return null;
+      const commit = res?.commits[0];
+      return commit ? { kind: "found", commit } : { kind: "missing" };
+    } catch (error) {
+      return {
+        kind: "failed",
+        error: errorWithCause(`failed to load commit: ${sha}`, error),
+      };
     }
   }
 
@@ -1206,18 +1221,20 @@ export function createHistoryView(deps: HistoryViewDeps) {
       pagesLoaded++;
       if (!got && !hasMore) break;
     }
-    const single = await fetchSingleCommit(sha);
+    const lookup = await fetchSingleCommit(sha);
     if (gen !== generation) return;
-    if (!single) {
+    if (lookup.kind !== "found") {
+      if (lookup.kind === "failed") console.error(lookup.error);
       setBanner(
-        lookupFailed
-          ? `failed to load commit: ${sha}`
+        lookup.kind === "failed"
+          ? formatErrorDetail(lookup.error)
           : `commit not found: ${sha}`,
       );
       await updateCommitInfo(null);
       deps.showEmptyDiffPane();
       return;
     }
+    const single = lookup.commit;
     setBanner(`showing commit outside the loaded ${ref} log`);
     commits = [single, ...commits];
     renderList();
