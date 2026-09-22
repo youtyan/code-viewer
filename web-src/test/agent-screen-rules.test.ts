@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -142,6 +149,21 @@ describe("terminal screen rule persistence", () => {
       code: "ENOENT",
     });
   });
+
+  test("marker を書けなければ保存ファイルと有効ルールを変えない", async () => {
+    await saveAgentScreenRules(SAMPLE_RULES);
+    const marker = agentScreenRulesMigratedPath();
+    await rm(marker);
+    await mkdir(marker);
+
+    await expect(resetAgentScreenRules()).rejects.toMatchObject({
+      code: "EISDIR",
+    });
+    expect(
+      JSON.parse(await readFile(agentScreenRulesFilePath(), "utf8")),
+    ).toEqual(SAMPLE_RULES);
+    expect(getActiveAgentScreenRules()).toEqual(SAMPLE_RULES);
+  });
 });
 
 describe("moving the saved rules from the repository to the user", () => {
@@ -171,6 +193,25 @@ describe("moving the saved rules from the repository to the user", () => {
       rules: { version: 1, rules: [] },
       source: "saved",
     });
+  });
+
+  test("a user file without a marker is kept and repairs the marker", async () => {
+    const root = await mkdtemp(join(tmpdir(), "screen-rules-"));
+    const userRules = { version: 1 as const, rules: [] };
+    await writeFile(
+      agentScreenRulesFilePath(),
+      `${JSON.stringify(userRules)}\n`,
+      "utf8",
+    );
+    await writeRepoRules(root, JSON.stringify(SAMPLE_RULES));
+
+    await expect(reloadAgentScreenRules(root)).resolves.toMatchObject({
+      rules: userRules,
+      source: "saved",
+    });
+    expect(
+      JSON.parse(await readFile(agentScreenRulesMigratedPath(), "utf8")),
+    ).toMatchObject({ reason: "existing-user-rules" });
   });
 
   test("after going back to the defaults, the repository's old rules do not come back", async () => {

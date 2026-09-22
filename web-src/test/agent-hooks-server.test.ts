@@ -39,6 +39,13 @@ import {
   launcherHealth,
   planAgentHooks,
 } from "../server/terminal/hooks";
+import {
+  commitJsonSettingsChange,
+  contentHash,
+  DEFAULT_WRITE_OPS,
+  readJsonSettingsFile,
+  settingsFileIdentity,
+} from "../server/terminal/settings-file";
 
 let root: string;
 let configDir: string;
@@ -90,7 +97,7 @@ function settingsPath(agent: HookAgent = "claude"): string {
   return agentHookFile(agent, configDir);
 }
 
-function apply(
+async function apply(
   action: "install" | "uninstall",
   agent: HookAgent = "claude",
   ops?: Parameters<typeof applyAgentHooks>[5],
@@ -98,11 +105,11 @@ function apply(
   const plan = planAgentHooks(target(agent), action, launcher, NOW);
   return {
     plan,
-    result: applyAgentHooks(
+    result: await applyAgentHooks(
       target(agent),
       action,
       launcher,
-      plan.baseHash,
+      plan,
       NOW,
       ops,
     ),
@@ -177,12 +184,14 @@ describe("install and uninstall", () => {
   ] satisfies {
     name: string;
     initial: string | null;
-  }[])("install, reinstall, uninstall round-trips ($name)", ({ initial }) => {
+  }[])("install, reinstall, uninstall round-trips ($name)", async ({
+    initial,
+  }) => {
     for (const agent of ["claude", "codex"] as const) {
       const path = settingsPath(agent);
       if (initial !== null) writeFileSync(path, initial, "utf8");
 
-      const first = apply("install", agent);
+      const first = await apply("install", agent);
       expect(first.result.changed).toBe(true);
       const afterInstall = readFileSync(path, "utf8");
       // 確認画面の計画と、実際に書いた中身が一致する。
@@ -205,12 +214,12 @@ describe("install and uninstall", () => {
       );
       expect(agentHookStatus(target(agent), launcher).state).toBe("installed");
 
-      const second = apply("install", agent);
+      const second = await apply("install", agent);
       expect(second.result.changed).toBe(false);
       expect(second.result.backupPath).toBeNull();
       expect(readFileSync(path, "utf8")).toBe(afterInstall);
 
-      const removed = apply("uninstall", agent);
+      const removed = await apply("uninstall", agent);
       expect(removed.result.changed).toBe(true);
       // 無かったファイルは消さずに空のオブジェクトとして残す (作ったのが
       // 自分かどうかを外すときには見分けられず、ファイルは消さない)。
@@ -219,21 +228,21 @@ describe("install and uninstall", () => {
     }
   });
 
-  test("keeps other tools' hooks and reports how many", () => {
+  test("keeps other tools' hooks and reports how many", async () => {
     writeFileSync(settingsPath(), JSON.stringify(FOREIGN), "utf8");
     const plan = planAgentHooks(target(), "install", launcher, NOW);
     expect(plan.kept).toBe(2);
-    apply("install");
+    await apply("install");
     const written = JSON.parse(readFileSync(settingsPath(), "utf8"));
     expect(written.hooks.PreToolUse).toEqual(FOREIGN.hooks.PreToolUse);
     expect(written.hooks.Stop[0]).toEqual(FOREIGN.hooks.Stop[0]);
     expect(written.model).toBe("sample-model");
   });
 
-  test("writes a backup of the previous content before writing", () => {
+  test("writes a backup of the previous content before writing", async () => {
     const initial = `${JSON.stringify(FOREIGN, null, 2)}\n`;
     writeFileSync(settingsPath(), initial, "utf8");
-    const { plan, result } = apply("install");
+    const { plan, result } = await apply("install");
     const expectedBackup = join(
       configDir,
       "settings.json.code-viewer-backup-20260102-030405",
@@ -243,24 +252,24 @@ describe("install and uninstall", () => {
     expect(readFileSync(expectedBackup, "utf8")).toBe(initial);
   });
 
-  test("a second backup in the same second gets its own name", () => {
+  test("a second backup in the same second gets its own name", async () => {
     writeFileSync(settingsPath(), "{}\n", "utf8");
-    apply("install");
-    apply("uninstall");
+    await apply("install");
+    await apply("uninstall");
     expect(backups().sort()).toEqual([
       "settings.json.code-viewer-backup-20260102-030405",
       "settings.json.code-viewer-backup-20260102-030405-2",
     ]);
   });
 
-  test("no backup is written when the file did not exist", () => {
-    const { result } = apply("install");
+  test("no backup is written when the file did not exist", async () => {
+    const { result } = await apply("install");
     expect(result.backupPath).toBeNull();
     expect(backups()).toEqual([]);
   });
 
-  test("writes the launcher, which names node and code-viewer", () => {
-    const { result } = apply("install");
+  test("writes the launcher, which names node and code-viewer", async () => {
+    const { result } = await apply("install");
     expect(result.launcherWritten).toBe(true);
     expect(readFileSync(launcher.path, "utf8")).toBe(
       hookLauncherScript(launcher),
@@ -280,7 +289,7 @@ describe("refuses to write", () => {
       text: '{"hooks": {"Stop": {}}}',
       detail: "$.hooks.Stop: ",
     },
-  ])("$name", ({ text, detail }) => {
+  ])("$name", async ({ text, detail }) => {
     writeFileSync(settingsPath(), text, "utf8");
     const status = agentHookStatus(target(), launcher);
     expect(status.state).toBe("unreadable");
@@ -289,33 +298,93 @@ describe("refuses to write", () => {
       expect(() => planAgentHooks(target(), action, launcher, NOW)).toThrow(
         AgentHookError,
       );
-      expect(() =>
-        applyAgentHooks(target(), action, launcher, "0".repeat(64), NOW),
-      ).toThrow(AgentHookError);
+      await expect(
+        applyAgentHooks(
+          target(),
+          action,
+          launcher,
+          {
+            baseHash: "0".repeat(64),
+            realPath: settingsPath(),
+            fileIdentity: "missing",
+          },
+          NOW,
+        ),
+      ).rejects.toBeInstanceOf(AgentHookError);
     }
     expect(readFileSync(settingsPath(), "utf8")).toBe(text);
     expect(backups()).toEqual([]);
     expect(existsSync(launcher.path)).toBe(false);
   });
 
-  test("when the file changed after it was shown", () => {
+  test("when the file changed after it was shown", async () => {
     writeFileSync(settingsPath(), "{}\n", "utf8");
     const plan = planAgentHooks(target(), "install", launcher, NOW);
     writeFileSync(settingsPath(), '{"model": "changed"}\n', "utf8");
-    expect(() =>
-      applyAgentHooks(target(), "install", launcher, plan.baseHash, NOW),
-    ).toThrow(/changed after it was shown/);
+    await expect(
+      applyAgentHooks(target(), "install", launcher, plan, NOW),
+    ).rejects.toThrow(/changed after it was shown/);
     expect(readFileSync(settingsPath(), "utf8")).toBe('{"model": "changed"}\n');
     expect(backups()).toEqual([]);
   });
 
-  test("when the backup cannot be written", () => {
+  test("a same-base update waiting behind another update is rejected", async () => {
+    writeFileSync(settingsPath(), "{}\n", "utf8");
+    const planned = readJsonSettingsFile(configDir, settingsPath(), () => []);
+    const baseHash = contentHash(planned);
+    const revision = {
+      baseHash,
+      realPath: "realPath" in planned ? planned.realPath : settingsPath(),
+      fileIdentity: settingsFileIdentity(planned),
+    };
+    const makeError = (
+      code: "conflict" | "failed",
+      message: string,
+      cause?: unknown,
+    ) => Object.assign(new Error(message), { code, cause });
+    let inner: Promise<unknown> | undefined;
+    const outer = commitJsonSettingsChange({
+      configDir,
+      path: settingsPath(),
+      check: () => [],
+      ...revision,
+      next: (root) => `${JSON.stringify({ ...root, outer: true })}\n`,
+      now: NOW,
+      ops: {
+        writeBackup(path, text, mode) {
+          DEFAULT_WRITE_OPS.writeBackup(path, text, mode);
+          inner = Promise.resolve(
+            commitJsonSettingsChange({
+              configDir,
+              path: settingsPath(),
+              check: () => [],
+              ...revision,
+              next: (root) => `${JSON.stringify({ ...root, inner: true })}\n`,
+              now: NOW,
+              ops: DEFAULT_WRITE_OPS,
+              error: makeError,
+            }),
+          );
+        },
+      },
+      error: makeError,
+    });
+
+    await outer;
+    expect(inner).toBeDefined();
+    await expect(inner).rejects.toMatchObject({ code: "conflict" });
+    expect(JSON.parse(readFileSync(settingsPath(), "utf8"))).toEqual({
+      outer: true,
+    });
+  });
+
+  test("when the backup cannot be written", async () => {
     const initial = `${JSON.stringify(FOREIGN, null, 2)}\n`;
     writeFileSync(settingsPath(), initial, "utf8");
     const failure = Object.assign(new Error("disk full"), { code: "ENOSPC" });
     let caught: unknown;
     try {
-      apply("install", "claude", {
+      await apply("install", "claude", {
         writeBackup() {
           throw failure;
         },
@@ -329,7 +398,7 @@ describe("refuses to write", () => {
     expect(readFileSync(settingsPath(), "utf8")).toBe(initial);
   });
 
-  test("when the settings directory is not writable", () => {
+  test("when the settings directory is not writable", async () => {
     writeFileSync(settingsPath(), "{}\n", "utf8");
     chmodSync(configDir, 0o555);
     const plan = planAgentHooks(target(), "install", launcher, NOW);
@@ -337,9 +406,9 @@ describe("refuses to write", () => {
     expect(agentHookStatus(target(), launcher).writeBlocked).toContain(
       "is not writable",
     );
-    expect(() =>
-      applyAgentHooks(target(), "install", launcher, plan.baseHash, NOW),
-    ).toThrow(/cannot write/);
+    await expect(
+      applyAgentHooks(target(), "install", launcher, plan, NOW),
+    ).rejects.toThrow(/cannot write/);
     chmodSync(configDir, 0o755);
     expect(readFileSync(settingsPath(), "utf8")).toBe("{}\n");
     expect(backups()).toEqual([]);
@@ -356,16 +425,16 @@ describe("refuses to write", () => {
 });
 
 describe("file properties", () => {
-  test.each([0o600, 0o640, 0o644])("keeps the mode %s", (mode) => {
+  test.each([0o600, 0o640, 0o644])("keeps the mode %s", async (mode) => {
     writeFileSync(settingsPath(), "{}\n", { encoding: "utf8", mode });
     chmodSync(settingsPath(), mode);
-    apply("install");
+    await apply("install");
     expect(statSync(settingsPath()).mode & 0o777).toBe(mode);
     const [backup] = backups();
     expect(statSync(join(configDir, backup as string)).mode & 0o777).toBe(mode);
   });
 
-  test("updates a symlink's target and keeps the link", () => {
+  test("updates a symlink's target and keeps the link", async () => {
     const linked = join(root, "linked");
     mkdirSync(linked);
     const real = join(linked, "settings.json");
@@ -373,7 +442,7 @@ describe("file properties", () => {
     writeFileSync(real, initial, "utf8");
     symlinkSync(real, settingsPath());
 
-    const { plan, result } = apply("install");
+    const { plan, result } = await apply("install");
     expect(plan.symlink).toBe(true);
     expect(plan.realPath).toBe(realpathSync(real));
     expect(lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
@@ -383,12 +452,51 @@ describe("file properties", () => {
     expect(result.backupPath?.startsWith(configDir)).toBe(true);
     expect(readdirSync(linked)).toEqual(["settings.json"]);
 
-    apply("uninstall");
+    await apply("uninstall");
     expect(lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
     expect(readFileSync(real, "utf8")).toBe(initial);
   });
 
-  test("a link whose target is read-only is reported, not written", () => {
+  test.each([
+    {
+      name: "same content",
+      replacement: "{}\n",
+      reasons: ["resolved path", "file identity"],
+    },
+    {
+      name: "different content",
+      replacement: '{"model":"changed"}\n',
+      reasons: ["resolved path", "file identity", "content"],
+    },
+  ])("rejects a symlink retargeted to $name and reports every conflict", async ({
+    replacement,
+    reasons,
+  }) => {
+    const linked = join(root, "linked");
+    mkdirSync(linked);
+    const first = join(linked, "first.json");
+    const second = join(linked, "second.json");
+    writeFileSync(first, "{}\n", "utf8");
+    writeFileSync(second, replacement, "utf8");
+    symlinkSync(first, settingsPath());
+    const plan = planAgentHooks(target(), "install", launcher, NOW);
+    rmSync(settingsPath());
+    symlinkSync(second, settingsPath());
+
+    let caught: unknown;
+    try {
+      await applyAgentHooks(target(), "install", launcher, plan, NOW);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({ code: "conflict" });
+    for (const reason of reasons) {
+      expect((caught as Error).message).toContain(reason);
+    }
+    expect(readFileSync(second, "utf8")).toBe(replacement);
+  });
+
+  test("a link whose target is read-only is reported, not written", async () => {
     const linked = join(root, "linked");
     mkdirSync(linked);
     const real = join(linked, "settings.json");
@@ -401,16 +509,16 @@ describe("file properties", () => {
     expect(status.state).toBe("none");
     expect(status.writeBlocked).toContain(linked);
     const plan = planAgentHooks(target(), "install", launcher, NOW);
-    expect(() =>
-      applyAgentHooks(target(), "install", launcher, plan.baseHash, NOW),
-    ).toThrow(/cannot write/);
+    await expect(
+      applyAgentHooks(target(), "install", launcher, plan, NOW),
+    ).rejects.toThrow(/cannot write/);
     chmodSync(linked, 0o755);
     chmodSync(real, 0o644);
     expect(readFileSync(real, "utf8")).toBe("{}\n");
     expect(backups()).toEqual([]);
   });
 
-  test("a chain of links is judged at its end, not at the first hop", () => {
+  test("a chain of links is judged at its end, not at the first hop", async () => {
     // 設定ファイルが「読み取り専用の場所にあるリンク」を経て、書ける実ファイルに
     // 行き着く形。1 段目のリンク先だけを見て「書けない」と誤って伝えた経緯がある。
     const writable = join(root, "writable");
@@ -427,7 +535,7 @@ describe("file properties", () => {
     expect(status.realPath).toBe(realpathSync(real));
     expect(status.writeBlocked).toBe("");
 
-    const { result } = apply("install");
+    const { result } = await apply("install");
     expect(lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
     expect(lstatSync(join(readOnlyHop, "settings.json")).isSymbolicLink()).toBe(
       true,
@@ -458,8 +566,8 @@ describe("status", () => {
     { name: "code-viewer gone", setup: "no-cli", expected: "broken" },
     { name: "one hook removed by hand", setup: "partial", expected: "partial" },
     { name: "healthy", setup: "none", expected: "installed" },
-  ])("$name -> $expected", ({ setup, expected }) => {
-    apply("install");
+  ])("$name -> $expected", async ({ setup, expected }) => {
+    await apply("install");
     if (setup === "no-launcher") rmSync(launcher.path);
     if (setup === "no-cli") rmSync(launcher.cli);
     if (setup === "partial") {
@@ -472,18 +580,18 @@ describe("status", () => {
     if (setup === "no-cli") expect(status.detail).toContain(launcher.cli);
   });
 
-  test("a read-only settings file still lets the launcher be repaired", () => {
-    apply("install");
+  test("a read-only settings file still lets the launcher be repaired", async () => {
+    await apply("install");
     rmSync(launcher.path);
     chmodSync(configDir, 0o555);
     const plan = planAgentHooks(target(), "install", launcher, NOW);
     expect(plan.writeBlocked).toContain("is not writable");
     expect(plan.changed).toBe(false);
-    const result = applyAgentHooks(
+    const result = await applyAgentHooks(
       target(),
       "install",
       launcher,
-      plan.baseHash,
+      plan,
       NOW,
     );
     expect(result).toMatchObject({ changed: false, launcherWritten: true });
@@ -491,11 +599,11 @@ describe("status", () => {
     expect(agentHookStatus(target(), launcher).state).toBe("installed");
   });
 
-  test("repairing a broken install rewrites the launcher only", () => {
-    apply("install");
+  test("repairing a broken install rewrites the launcher only", async () => {
+    await apply("install");
     const before = readFileSync(settingsPath(), "utf8");
     rmSync(launcher.path);
-    const { plan, result } = apply("install");
+    const { plan, result } = await apply("install");
     expect(plan.changed).toBe(false);
     expect(plan.launcher.write).toBe(true);
     expect(result.launcherWritten).toBe(true);

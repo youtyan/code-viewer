@@ -516,10 +516,8 @@ async function handleHooksApplyPost(req: Request): Promise<Response> {
   if (!body || typeof body !== "object") {
     return textError("invalid hook request", 400);
   }
-  const { agent, action, baseHash, launcherOnly } = body as Record<
-    string,
-    unknown
-  >;
+  const { agent, action, baseHash, realPath, fileIdentity, launcherOnly } =
+    body as Record<string, unknown>;
   if (!isHookAgent(agent)) return textError("invalid agent", 400);
   if (!isHookAction(action)) return textError("invalid action", 400);
   if (launcherOnly !== undefined && typeof launcherOnly !== "boolean") {
@@ -543,14 +541,19 @@ async function handleHooksApplyPost(req: Request): Promise<Response> {
   if (typeof baseHash !== "string" || !/^[0-9a-f]{64}$/.test(baseHash)) {
     return textError("invalid baseHash", 400);
   }
+  if (typeof realPath !== "string" || !realPath.startsWith("/")) {
+    return textError("invalid realPath", 400);
+  }
+  if (typeof fileIdentity !== "string" || fileIdentity === "") {
+    return textError("invalid fileIdentity", 400);
+  }
   try {
     return json(
-      applyAgentHooks(
-        hookTarget(agent),
-        action,
-        currentHookLauncher(),
+      await applyAgentHooks(hookTarget(agent), action, currentHookLauncher(), {
         baseHash,
-      ),
+        realPath,
+        fileIdentity,
+      }),
     );
   } catch (error) {
     return hookError(error);

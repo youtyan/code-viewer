@@ -482,6 +482,8 @@ export type AgentHookPlanResponse = {
   writeBlocked: string;
   /** このときの中身のハッシュ。実行時に照らし合わせる。 */
   baseHash: string;
+  /** 同じ内容の別ファイルへのリンク差し替えも見分ける不透明な識別子。 */
+  fileIdentity: string;
 };
 
 export type AgentHookApplyResponse = {

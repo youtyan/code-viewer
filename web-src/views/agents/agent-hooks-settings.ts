@@ -424,6 +424,8 @@ export function createAgentHooksSettings(
             agent: plan.agent,
             action: plan.action,
             baseHash: plan.baseHash,
+            realPath: plan.realPath,
+            fileIdentity: plan.fileIdentity,
             ...(launcherOnly ? { launcherOnly: true } : {}),
           }),
         }),

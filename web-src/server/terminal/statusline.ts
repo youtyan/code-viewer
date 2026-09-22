@@ -46,6 +46,8 @@ import {
   errno,
   type JsonFileRead,
   readJsonSettingsFile,
+  settingsFileIdentity,
+  settingsRevisionConflicts,
   type SettingsWriteOps,
   type ShapeIssue,
   writeBlockedReason,
@@ -437,21 +439,26 @@ export function planStatusLine(
     usageDir,
     writeBlocked: writeBlockedReason(path, file),
     baseHash: contentHash(file),
+    fileIdentity: settingsFileIdentity(file),
   };
 }
 
-export function applyStatusLine(
+export async function applyStatusLine(
   configDir: string,
   action: StatusLineAction,
   usageDir: string,
-  baseHash: string,
+  expected: Pick<
+    StatusLinePlanResponse,
+    "baseHash" | "realPath" | "fileIdentity"
+  >,
   now: Date = new Date(),
   ops: SettingsWriteOps = DEFAULT_WRITE_OPS,
-): StatusLineApplyResponse {
+): Promise<StatusLineApplyResponse> {
   const plan = planStatusLine(configDir, action, usageDir, now);
-  if (plan.baseHash !== baseHash) {
+  const conflicts = settingsRevisionConflicts(plan, expected);
+  if (conflicts.length > 0) {
     throw new StatusLineError(
-      `${plan.path} changed after it was shown for confirmation; nothing was changed. Review it again.`,
+      `${plan.path} changed after it was shown for confirmation; nothing was changed. Review it again.\n${conflicts.map((reason) => `- ${reason}`).join("\n")}`,
       "conflict",
     );
   }
@@ -482,11 +489,11 @@ export function applyStatusLine(
     };
   }
   const wrapper = statusLineWrapperPath(usageDir);
-  const { backupPath } = commitJsonSettingsChange({
+  const { backupPath } = await commitJsonSettingsChange({
     configDir,
     path: plan.path,
     check: checkStatusLineShape,
-    baseHash,
+    ...expected,
     next: (root, text) =>
       serializeHookFile(planStatusLineChange(root, action, wrapper).next, text),
     now,

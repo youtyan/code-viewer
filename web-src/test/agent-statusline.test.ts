@@ -63,9 +63,9 @@ function write(value: unknown, indent = 2): string {
   return text;
 }
 
-function roundTrip(action: "install" | "uninstall") {
+async function roundTrip(action: "install" | "uninstall") {
   const plan = planStatusLine(configDir, action, usageDir, NOW);
-  return applyStatusLine(configDir, action, usageDir, plan.baseHash, NOW);
+  return applyStatusLine(configDir, action, usageDir, plan, NOW);
 }
 
 describe("the wrapped command", () => {
@@ -114,15 +114,15 @@ describe("install and uninstall", () => {
       initial: { statusLine: { type: "command", command: ORIGINAL } },
       indent: "\t",
     },
-  ])("round trip with $name: install twice adds nothing, uninstall restores the bytes", ({
+  ])("round trip with $name: install twice adds nothing, uninstall restores the bytes", async ({
     initial,
     indent,
   }) => {
     const original = write(initial, indent as unknown as number);
-    const first = roundTrip("install");
+    const first = await roundTrip("install");
     expect(first.changed).toBe(true);
     const installed = readFileSync(settingsPath(), "utf8");
-    const again = roundTrip("install");
+    const again = await roundTrip("install");
     expect(again.changed).toBe(false);
     expect(readFileSync(settingsPath(), "utf8")).toBe(installed);
     const parsed = JSON.parse(installed) as { statusLine: { command: string } };
@@ -130,19 +130,19 @@ describe("install and uninstall", () => {
       kind: "wrapped",
       original: "statusLine" in initial ? ORIGINAL : null,
     });
-    roundTrip("uninstall");
+    await roundTrip("uninstall");
     expect(readFileSync(settingsPath(), "utf8")).toBe(original);
   });
 
-  test("a missing file is created with a minimal statusLine and removed again", () => {
-    roundTrip("install");
+  test("a missing file is created with a minimal statusLine and removed again", async () => {
+    await roundTrip("install");
     const created = JSON.parse(readFileSync(settingsPath(), "utf8"));
     expect(created.statusLine.type).toBe("command");
-    roundTrip("uninstall");
+    await roundTrip("uninstall");
     expect(JSON.parse(readFileSync(settingsPath(), "utf8"))).toEqual({});
   });
 
-  test("only statusLine.command changes; everything else is kept", () => {
+  test("only statusLine.command changes; everything else is kept", async () => {
     write({
       a: 1,
       statusLine: {
@@ -153,7 +153,7 @@ describe("install and uninstall", () => {
       },
       z: [1],
     });
-    roundTrip("install");
+    await roundTrip("install");
     const after = JSON.parse(readFileSync(settingsPath(), "utf8"));
     expect(after.a).toBe(1);
     expect(after.z).toEqual([1]);
@@ -161,11 +161,11 @@ describe("install and uninstall", () => {
     expect(after.statusLine.refreshInterval).toBe(5);
   });
 
-  test("writes a backup of the previous content, and the wrapper", () => {
+  test("writes a backup of the previous content, and the wrapper", async () => {
     const original = write({
       statusLine: { type: "command", command: ORIGINAL },
     });
-    const result = roundTrip("install");
+    const result = await roundTrip("install");
     expect(result.backupPath).toBe(
       `${settingsPath()}.code-viewer-backup-20260102-030405`,
     );
@@ -174,14 +174,14 @@ describe("install and uninstall", () => {
     expect(statSync(statusLineWrapperPath(usageDir)).mode & 0o111).not.toBe(0);
   });
 
-  test("status follows the file", () => {
+  test("status follows the file", async () => {
     expect(statusLineStatus(configDir, usageDir).state).toBe("none");
     write({ statusLine: { type: "command", command: ORIGINAL } });
     expect(statusLineStatus(configDir, usageDir)).toMatchObject({
       state: "plain",
       command: ORIGINAL,
     });
-    roundTrip("install");
+    await roundTrip("install");
     expect(statusLineStatus(configDir, usageDir)).toMatchObject({
       state: "wrapped",
       command: ORIGINAL,
@@ -219,26 +219,26 @@ describe("refuses to write", () => {
     expect(existsSync(usageDir)).toBe(false);
   });
 
-  test("when the file changed after it was shown", () => {
+  test("when the file changed after it was shown", async () => {
     write({ statusLine: { type: "command", command: ORIGINAL } });
     const plan = planStatusLine(configDir, "install", usageDir, NOW);
     const changed = write({
       statusLine: { type: "command", command: "echo other" },
     });
-    expect(() =>
-      applyStatusLine(configDir, "install", usageDir, plan.baseHash, NOW),
-    ).toThrow(expect.objectContaining({ code: "conflict" }));
+    await expect(
+      applyStatusLine(configDir, "install", usageDir, plan, NOW),
+    ).rejects.toMatchObject({ code: "conflict" });
     expect(readFileSync(settingsPath(), "utf8")).toBe(changed);
   });
 
-  test("when the backup cannot be written", () => {
+  test("when the backup cannot be written", async () => {
     const original = write({
       statusLine: { type: "command", command: ORIGINAL },
     });
     const plan = planStatusLine(configDir, "install", usageDir, NOW);
     let caught: unknown;
     try {
-      applyStatusLine(configDir, "install", usageDir, plan.baseHash, NOW, {
+      await applyStatusLine(configDir, "install", usageDir, plan, NOW, {
         writeBackup() {
           throw Object.assign(new Error("sample disk full"), {
             code: "ENOSPC",
@@ -256,41 +256,41 @@ describe("refuses to write", () => {
     expect(readFileSync(settingsPath(), "utf8")).toBe(original);
   });
 
-  test("when the settings directory is not writable", () => {
+  test("when the settings directory is not writable", async () => {
     const original = write({
       statusLine: { type: "command", command: ORIGINAL },
     });
     chmodSync(configDir, 0o555);
     const plan = planStatusLine(configDir, "install", usageDir, NOW);
     expect(plan.writeBlocked).not.toBe("");
-    expect(() =>
-      applyStatusLine(configDir, "install", usageDir, plan.baseHash, NOW),
-    ).toThrow(expect.objectContaining({ code: "blocked" }));
+    await expect(
+      applyStatusLine(configDir, "install", usageDir, plan, NOW),
+    ).rejects.toMatchObject({ code: "blocked" });
     expect(readFileSync(settingsPath(), "utf8")).toBe(original);
   });
 });
 
 describe("file properties", () => {
-  test.each([0o600, 0o640, 0o644])("keeps the mode %s", (mode) => {
+  test.each([0o600, 0o640, 0o644])("keeps the mode %s", async (mode) => {
     write({ statusLine: { type: "command", command: ORIGINAL } });
     chmodSync(settingsPath(), mode);
-    roundTrip("install");
+    await roundTrip("install");
     expect(statSync(settingsPath()).mode & 0o777).toBe(mode);
   });
 
-  test("updates a symlink's target and keeps the link; the backup sits by the link", () => {
+  test("updates a symlink's target and keeps the link; the backup sits by the link", async () => {
     const linked = join(root, "linked");
     mkdirSync(linked);
     const target = join(linked, "settings.json");
     const original = `${JSON.stringify({ statusLine: { type: "command", command: ORIGINAL } }, null, 2)}\n`;
     writeFileSync(target, original);
     symlinkSync(target, settingsPath());
-    const result = roundTrip("install");
+    const result = await roundTrip("install");
     expect(lstatSync(settingsPath()).isSymbolicLink()).toBe(true);
     expect(readlinkSync(settingsPath())).toBe(target);
     expect(readFileSync(target, "utf8")).toContain("code-viewer-statusline");
     expect(result.backupPath?.startsWith(configDir)).toBe(true);
-    roundTrip("uninstall");
+    await roundTrip("uninstall");
     expect(readFileSync(target, "utf8")).toBe(original);
   });
 
@@ -321,9 +321,9 @@ describe("the wrapper script", () => {
     },
   });
 
-  function install(initial: unknown): string {
+  async function install(initial: unknown): Promise<string> {
     write(initial);
-    roundTrip("install");
+    await roundTrip("install");
     return JSON.parse(readFileSync(settingsPath(), "utf8")).statusLine.command;
   }
 
@@ -348,11 +348,11 @@ describe("the wrapper script", () => {
       env: { CLAUDE_CONFIG_DIR: "/home/sample/w" },
       key: "/home/sample/w",
     },
-  ])("returns the original output and exit code, and saves the input ($name)", ({
+  ])("returns the original output and exit code, and saves the input ($name)", async ({
     env,
     key,
   }) => {
-    const wrapped = install({
+    const wrapped = await install({
       statusLine: { type: "command", command: `${ORIGINAL}; exit 3` },
     });
     const plain = run(`${ORIGINAL}; exit 3`, env);
@@ -363,8 +363,8 @@ describe("the wrapper script", () => {
     expect(readFileSync(claudeUsageFile(usageDir, key), "utf8")).toBe(INPUT);
   });
 
-  test("the original sees exactly the same bytes (no newline added or lost)", () => {
-    const wrapped = install({
+  test("the original sees exactly the same bytes (no newline added or lost)", async () => {
+    const wrapped = await install({
       statusLine: { type: "command", command: "od -c | head -1" },
     });
     for (const input of ["{}", "{}\n", "{}\n\n"]) {
@@ -382,11 +382,11 @@ describe("the wrapper script", () => {
       input: INPUT,
     },
     { name: "the input is empty", prepare: () => undefined, input: "" },
-  ])("a failed save ($name) still returns the original output and is recorded", ({
+  ])("a failed save ($name) still returns the original output and is recorded", async ({
     prepare,
     input,
   }) => {
-    const wrapped = install({
+    const wrapped = await install({
       statusLine: { type: "command", command: ORIGINAL },
     });
     prepare();
@@ -401,8 +401,8 @@ describe("the wrapper script", () => {
     ).toEqual([]);
   });
 
-  test("an unwritable usage directory still returns the original output", () => {
-    const wrapped = install({
+  test("an unwritable usage directory still returns the original output", async () => {
+    const wrapped = await install({
       statusLine: { type: "command", command: ORIGINAL },
     });
     chmodSync(usageDir, 0o555);
@@ -423,11 +423,11 @@ describe("the wrapper script", () => {
       input: '{"session_id":"x"}',
       expected: "usage: n/a\n",
     },
-  ])("without an original status line it prints usage in one line: $name", ({
+  ])("without an original status line it prints usage in one line: $name", async ({
     input,
     expected,
   }) => {
-    const wrapped = install({});
+    const wrapped = await install({});
     expect(run(wrapped, {}, input).stdout).toBe(expected);
   });
 });

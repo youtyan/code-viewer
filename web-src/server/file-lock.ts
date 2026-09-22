@@ -9,8 +9,14 @@
 // ロックで永久に止まらないため)。
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { errorWithCause } from "../core/error-detail";
 
 export type FileLock = {
@@ -25,6 +31,32 @@ type FileLockEntry = {
 
 function errno(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException).code;
+}
+
+/** 無いファイルも、存在する最も近い親まで実パスにして同じ鍵へ揃える。 */
+export function resolvedFilePath(file: string): string {
+  let existing = file;
+  const missing: string[] = [];
+  for (;;) {
+    try {
+      return join(realpathSync(existing), ...missing);
+    } catch (error) {
+      if (errno(error) !== "ENOENT") {
+        throw errorWithCause(`failed to resolve ${file}`, error);
+      }
+      const parent = dirname(existing);
+      if (parent === existing) {
+        throw errorWithCause(`failed to resolve ${file}`, error);
+      }
+      missing.unshift(basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+/** 同じ実体を指す別のリンクも同じロックを使う。 */
+export function resolvedFileLockPath(file: string): string {
+  return `${resolvedFilePath(file)}.lock`;
 }
 
 /** pid のプロセスが居るか。権限が無くても居ることは分かる (EPERM)。 */

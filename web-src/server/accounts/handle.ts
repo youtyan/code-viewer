@@ -152,7 +152,7 @@ export async function handleAccountsPost(req: Request): Promise<Response> {
   try {
     if (fields.op === "remove") {
       if (typeof fields.id !== "string") return textError("invalid id", 400);
-      return json({ removed: applyRemoveAccount(paths, fields.id) });
+      return json({ removed: await applyRemoveAccount(paths, fields.id) });
     }
     if (fields.op === "preferences") {
       const commands = fields.launchCommands;
@@ -167,7 +167,7 @@ export async function handleAccountsPost(req: Request): Promise<Response> {
         }
         next[key] = command.trim();
       }
-      updateAccountRegistry(paths.registry, (registry) => ({
+      await updateAccountRegistry(paths.registry, (registry) => ({
         registry: {
           ...registry,
           launchCommands: Object.fromEntries(
@@ -190,12 +190,17 @@ export async function handleAccountsPost(req: Request): Promise<Response> {
       const share = shareOf(fields.share);
       if (!share) return textError("invalid share", 400);
       return json({
-        added: applyCreateAccount(paths, { agent, name, configDir, share }),
+        added: await applyCreateAccount(paths, {
+          agent,
+          name,
+          configDir,
+          share,
+        }),
       });
     }
     if (fields.op === "register") {
       return json({
-        added: applyRegisterAccount(paths, agent, name, configDir),
+        added: await applyRegisterAccount(paths, agent, name, configDir),
       });
     }
     return textError("invalid op", 400);
@@ -270,7 +275,7 @@ export async function handleLaunchPost(req: Request): Promise<Response> {
     // 添えて返す (画面に出す)。
     let rememberError = "";
     try {
-      updateAccountRegistry(service.paths.registry, (registry) => ({
+      await updateAccountRegistry(service.paths.registry, (registry) => ({
         registry: {
           ...registry,
           lastLaunch: {
@@ -331,21 +336,28 @@ export async function handleStatusLineApplyPost(
     "statusline request too large",
   );
   if (body instanceof Response) return body;
-  const { account, action, baseHash } = (body ?? {}) as Record<string, unknown>;
+  const { account, action, baseHash, realPath, fileIdentity } = (body ??
+    {}) as Record<string, unknown>;
   if (action !== "install" && action !== "uninstall") {
     return textError("invalid action", 400);
   }
   if (typeof baseHash !== "string" || !/^[0-9a-f]{64}$/.test(baseHash)) {
     return textError("invalid baseHash", 400);
   }
+  if (typeof realPath !== "string" || !realPath.startsWith("/")) {
+    return textError("invalid realPath", 400);
+  }
+  if (typeof fileIdentity !== "string" || fileIdentity === "") {
+    return textError("invalid fileIdentity", 400);
+  }
   try {
     const entry = claudeAccount(account);
     return json(
-      applyStatusLine(
+      await applyStatusLine(
         entry.configDir,
         action,
         sharedAccountService().paths.usageDir,
-        baseHash,
+        { baseHash, realPath, fileIdentity },
       ),
     );
   } catch (error) {

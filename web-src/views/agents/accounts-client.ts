@@ -255,7 +255,13 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
     async applyStatusLine(plan, account) {
       const result = await post<StatusLineApplyResponse>(
         apiUrl("agentStatuslineApply"),
-        { account, action: plan.action, baseHash: plan.baseHash },
+        {
+          account,
+          action: plan.action,
+          baseHash: plan.baseHash,
+          realPath: plan.realPath,
+          fileIdentity: plan.fileIdentity,
+        },
         "change the statusLine",
       );
       await load();

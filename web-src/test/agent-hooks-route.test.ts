@@ -225,6 +225,8 @@ describe("/_agent/hooks", () => {
       agent: "claude",
       action: "install",
       baseHash: install.baseHash,
+      realPath: install.realPath,
+      fileIdentity: install.fileIdentity,
     });
     expect(applied?.status).toBe(200);
     const result = (await applied?.json()) as AgentHookApplyResponse;
@@ -236,6 +238,8 @@ describe("/_agent/hooks", () => {
       agent: "claude",
       action: "uninstall",
       baseHash: remove.baseHash,
+      realPath: remove.realPath,
+      fileIdentity: remove.fileIdentity,
     });
     expect(readFileSync(join(claudeDir, "settings.json"), "utf8")).toBe(
       '{\n  "model": "sample"\n}\n',
@@ -249,6 +253,8 @@ describe("/_agent/hooks", () => {
       agent: "codex",
       action: "install",
       baseHash: install.baseHash,
+      realPath: install.realPath,
+      fileIdentity: install.fileIdentity,
     });
     expect(res?.status).toBe(409);
     const body = (await res?.json()) as { error: string; code: string };
@@ -288,6 +294,25 @@ describe("/_agent/hooks", () => {
     {
       name: "bad hash",
       body: { agent: "claude", action: "install", baseHash: "abc" },
+    },
+    {
+      name: "bad resolved path",
+      body: {
+        agent: "claude",
+        action: "install",
+        baseHash: "0".repeat(64),
+        realPath: "relative",
+        fileIdentity: "missing",
+      },
+    },
+    {
+      name: "missing file identity",
+      body: {
+        agent: "claude",
+        action: "install",
+        baseHash: "0".repeat(64),
+        realPath: "/tmp/sample-settings.json",
+      },
     },
     { name: "not an object", body: "[]" },
   ])("apply rejects $name", async ({ body }) => {

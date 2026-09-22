@@ -5,8 +5,8 @@
 //
 // - 書く前に読む。JSON として読めない・想定外の形なら書かない
 // - 確認画面に出した差分は、そのとき読んだ中身のハッシュと一緒に返す。
-//   書くときに読み直してハッシュが違えば書かない (見せたものと書くものを
-//   ずらさない)
+//   書くときに同じ実体パスのロック内で読み直し、ハッシュ・実体パス・
+//   ファイル identity が違えば書かない (見せたものと書くものをずらさない)
 // - 書く直前に同じディレクトリへバックアップを作る。失敗したら書かない
 // - 一時ファイルに書いてから置き換える。元の権限を保つ
 // - シンボリックリンクはリンクのまま残し、リンク先を書き換える
@@ -26,6 +26,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
+import { resolvedFilePath, withFileLock } from "../file-lock";
 
 export function errno(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | undefined)?.code;
@@ -72,7 +73,47 @@ export type JsonFileRead =
       text: string;
       root: Record<string, unknown>;
       mode: number;
+      fileIdentity: string;
     };
+
+function identityFor(
+  realPath: string,
+  stat: { dev: number; ino: number; size: number; mtimeMs: number },
+): string {
+  if (
+    Number.isSafeInteger(stat.dev) &&
+    Number.isSafeInteger(stat.ino) &&
+    (stat.dev !== 0 || stat.ino !== 0)
+  ) {
+    return `device:${stat.dev}|inode:${stat.ino}`;
+  }
+  return `path:${realPath}|size:${stat.size}|mtime:${stat.mtimeMs}`;
+}
+
+export function settingsFileIdentity(read: JsonFileRead): string {
+  return read.kind === "ok"
+    ? read.fileIdentity
+    : `${read.kind}:${"realPath" in read ? read.realPath : ""}`;
+}
+
+export function settingsRevisionConflicts(
+  actual: { baseHash: string; realPath: string; fileIdentity: string },
+  expected: { baseHash: string; realPath: string; fileIdentity: string },
+): string[] {
+  const conflicts: string[] = [];
+  if (actual.realPath !== expected.realPath) {
+    conflicts.push(
+      `the resolved path changed from ${expected.realPath} to ${actual.realPath}`,
+    );
+  }
+  if (actual.fileIdentity !== expected.fileIdentity) {
+    conflicts.push("the file identity changed");
+  }
+  if (actual.baseHash !== expected.baseHash) {
+    conflicts.push("the content changed");
+  }
+  return conflicts;
+}
 
 /**
  * 設定ファイルを読む。JSON として読めない・check が問題を返したら
@@ -113,13 +154,23 @@ export function readJsonSettingsFile(
         detail: formatErrorDetail(dirError),
       };
     }
-    return { kind: "missing", realPath: path };
+    try {
+      return { kind: "missing", realPath: resolvedFilePath(path) };
+    } catch (error) {
+      return {
+        kind: "unreadable",
+        realPath: path,
+        symlink,
+        detail: formatErrorDetail(error),
+      };
+    }
   }
   let realPath = path;
   try {
     realPath = realpathSync(path);
     const text = readFileSync(realPath, "utf8");
-    const mode = statSync(realPath).mode & 0o7777;
+    const stat = statSync(realPath);
+    const mode = stat.mode & 0o7777;
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
@@ -149,6 +200,7 @@ export function readJsonSettingsFile(
       text,
       root: parsed as Record<string, unknown>,
       mode,
+      fileIdentity: identityFor(realPath, stat),
     };
   } catch (error) {
     return {
@@ -236,11 +288,13 @@ export function writeBackupUnique(
  * @param error 呼び出し側の例外の型に合わせて作る。cause は必ず載せる。
  * @returns バックアップの場所 (ファイルが無かったなら null)
  */
-export function commitJsonSettingsChange(options: {
+export async function commitJsonSettingsChange(options: {
   configDir: string;
   path: string;
   check: (root: unknown) => ShapeIssue[];
   baseHash: string;
+  realPath: string;
+  fileIdentity: string;
   next: (root: Record<string, unknown> | null, text: string | null) => string;
   now: Date;
   ops: SettingsWriteOps;
@@ -249,54 +303,73 @@ export function commitJsonSettingsChange(options: {
     message: string,
     cause?: unknown,
   ) => Error;
-}): { backupPath: string | null } {
+}): Promise<{ backupPath: string | null }> {
   const { path } = options;
-  const read = readJsonSettingsFile(options.configDir, path, options.check);
-  if (
-    (read.kind !== "ok" && read.kind !== "missing") ||
-    contentHash(read) !== options.baseHash
-  ) {
-    throw options.error(
-      "conflict",
-      `${path} changed while it was being written; nothing was changed. Review it again.`,
+  return withFileLock(`${options.realPath}.lock`, () => {
+    const read = readJsonSettingsFile(options.configDir, path, options.check);
+    const conflicts: string[] = [];
+    if (read.kind !== "ok" && read.kind !== "missing") {
+      conflicts.push(
+        read.kind === "unreadable"
+          ? `the current file cannot be read: ${read.detail}`
+          : "the settings directory no longer exists",
+      );
+    } else {
+      conflicts.push(
+        ...settingsRevisionConflicts(
+          {
+            baseHash: contentHash(read),
+            realPath: read.realPath,
+            fileIdentity: settingsFileIdentity(read),
+          },
+          options,
+        ),
+      );
+    }
+    if (conflicts.length > 0) {
+      throw options.error(
+        "conflict",
+        `${path} changed after it was shown for confirmation; nothing was changed. Review it again.\n${conflicts.map((reason) => `- ${reason}`).join("\n")}`,
+      );
+    }
+    const current = read as Extract<JsonFileRead, { kind: "ok" | "missing" }>;
+    let backupPath: string | null = null;
+    if (current.kind === "ok") {
+      try {
+        backupPath = writeBackupUnique(
+          options.ops,
+          path,
+          options.now,
+          current.text,
+          current.mode,
+        );
+      } catch (cause) {
+        throw options.error(
+          "failed",
+          `failed to back up ${path}; nothing was changed.`,
+          cause,
+        );
+      }
+    }
+    const text = options.next(
+      current.kind === "ok" ? current.root : null,
+      current.kind === "ok" ? current.text : null,
     );
-  }
-  let backupPath: string | null = null;
-  if (read.kind === "ok") {
     try {
-      backupPath = writeBackupUnique(
-        options.ops,
-        path,
-        options.now,
-        read.text,
-        read.mode,
+      writeFileAtomic(
+        current.realPath,
+        text,
+        current.kind === "ok" ? current.mode : 0o600,
       );
     } catch (cause) {
       throw options.error(
         "failed",
-        `failed to back up ${path}; nothing was changed.`,
+        `failed to write ${current.realPath}. ${
+          backupPath ? `The previous content is in ${backupPath}.` : ""
+        }`,
         cause,
       );
     }
-  }
-  const text = options.next(
-    read.kind === "ok" ? read.root : null,
-    read.kind === "ok" ? read.text : null,
-  );
-  try {
-    writeFileAtomic(
-      read.realPath,
-      text,
-      read.kind === "ok" ? read.mode : 0o600,
-    );
-  } catch (cause) {
-    throw options.error(
-      "failed",
-      `failed to write ${read.realPath}. ${
-        backupPath ? `The previous content is in ${backupPath}.` : ""
-      }`,
-      cause,
-    );
-  }
-  return { backupPath };
+    return { backupPath };
+  });
 }

@@ -1043,6 +1043,8 @@ export type StatusLinePlanResponse = {
   usageDir: string;
   writeBlocked: string;
   baseHash: string;
+  /** 同じ内容の別ファイルへのリンク差し替えも見分ける不透明な識別子。 */
+  fileIdentity: string;
 };
 
 export type StatusLineApplyResponse = {

@@ -46,6 +46,7 @@ import {
   applyRemoveAccount,
   planCreateAccount,
   readAccountRegistry,
+  updateAccountRegistry,
 } from "../server/accounts/registry";
 import {
   claudeUsageFile,
@@ -113,7 +114,7 @@ function seedMixedClaude(): void {
   writeFileSync(join(dir, "state.sqlite"), "");
 }
 
-function create(share: string[] | "default", name = "Work") {
+async function create(share: string[] | "default", name = "Work") {
   const plan = planCreateAccount(paths, "claude", name);
   return applyCreateAccount(
     paths,
@@ -164,9 +165,9 @@ describe("creating an account", () => {
     ]);
   });
 
-  test("by default links the shared settings only, and registers the account", () => {
+  test("by default links the shared settings only, and registers the account", async () => {
     seedMixedClaude();
-    const account = create("default");
+    const account = await create("default");
     const dir = account.configDir;
     const made = readdirSync(dir).sort();
     expect(made).toEqual(["CLAUDE.md", "settings.json", "skills"]);
@@ -208,9 +209,11 @@ describe("creating an account", () => {
       expected: ["CLAUDE.md"],
     },
     { name: "nothing", share: [], expected: [] },
-  ])("links exactly what was chosen: $name", ({ share, expected }) => {
+  ])("links exactly what was chosen: $name", async ({ share, expected }) => {
     seedMixedClaude();
-    expect(readdirSync(create(share).configDir).sort()).toEqual(expected);
+    expect(readdirSync((await create(share)).configDir).sort()).toEqual(
+      expected,
+    );
   });
 
   test.each([
@@ -244,7 +247,7 @@ describe("creating an account", () => {
       code: "invalid",
       message: "mcp.json is listed twice",
     },
-  ])("refuses a selection with $name and creates nothing", ({
+  ])("refuses a selection with $name and creates nothing", async ({
     share,
     code,
     message,
@@ -252,7 +255,7 @@ describe("creating an account", () => {
     seedMixedClaude();
     let caught: unknown;
     try {
-      create(share);
+      await create(share);
     } catch (error) {
       caught = error;
     }
@@ -274,7 +277,7 @@ describe("creating an account", () => {
     }
   });
 
-  test("codex: config, instructions, hooks and rules are shared; auth.json cannot be", () => {
+  test("codex: config, instructions, hooks and rules are shared; auth.json cannot be", async () => {
     const dir = join(paths.home, ".codex");
     writeFileSync(join(dir, "config.toml"), 'model = "sample"\n');
     writeFileSync(join(dir, "AGENTS.md"), "# sample\n");
@@ -293,7 +296,7 @@ describe("creating an account", () => {
       ["installation_id", "blocked"],
       ["sample.sqlite", "blocked"],
     ]);
-    const account = applyCreateAccount(paths, {
+    const account = await applyCreateAccount(paths, {
       agent: "codex",
       name: "Personal",
       configDir: plan.configDir,
@@ -330,28 +333,63 @@ describe("creating an account", () => {
     );
   });
 
-  test("refuses when the directory shown is no longer the one to create", () => {
+  test("refuses when the directory shown is no longer the one to create", async () => {
     seedDefaultClaude();
     const plan = planCreateAccount(paths, "claude", "Work");
     mkdirSync(plan.configDir, { recursive: true });
-    expect(() =>
+    await expect(
       applyCreateAccount(paths, {
         agent: "claude",
         name: "Work",
         configDir: plan.configDir,
         share: [],
       }),
-    ).toThrow(expect.objectContaining({ code: "conflict" }));
+    ).rejects.toMatchObject({ code: "conflict" });
     expect(readdirSync(plan.configDir)).toEqual([]);
   });
 });
 
+describe("account registry updates", () => {
+  test("a nested update reads the result of the update holding the lock", async () => {
+    let inner: unknown;
+    const outer = updateAccountRegistry(paths.registry, (registry) => {
+      inner = updateAccountRegistry(paths.registry, (current) => ({
+        registry: {
+          ...current,
+          launchCommands: { ...current.launchCommands, codex: "inner" },
+        },
+        result: null,
+      }));
+      return {
+        registry: {
+          ...registry,
+          launchCommands: { ...registry.launchCommands, claude: "outer" },
+        },
+        result: null,
+      };
+    });
+
+    await outer;
+    await inner;
+    const read = readAccountRegistry(paths.registry);
+    expect(read.ok && read.registry.launchCommands).toEqual({
+      claude: "outer",
+      codex: "inner",
+    });
+  });
+});
+
 describe("registering, removing and a broken registry", () => {
-  test("registers an existing directory without touching it", () => {
+  test("registers an existing directory without touching it", async () => {
     const dir = join(root, "existing");
     mkdirSync(dir);
     writeFileSync(join(dir, "keep.txt"), "sample");
-    const added = applyRegisterAccount(paths, "codex", "Personal", `${dir}/`);
+    const added = await applyRegisterAccount(
+      paths,
+      "codex",
+      "Personal",
+      `${dir}/`,
+    );
     expect(added.configDir).toBe(dir);
     expect(readdirSync(dir)).toEqual(["keep.txt"]);
   });
@@ -376,27 +414,27 @@ describe("registering, removing and a broken registry", () => {
       path: () => join(paths.home, ".codex"),
       code: "invalid",
     },
-  ])("refuses $name", ({ path, code }) => {
-    expect(() => applyRegisterAccount(paths, "codex", "x", path())).toThrow(
-      expect.objectContaining({ code }),
-    );
+  ])("refuses $name", async ({ path, code }) => {
+    await expect(
+      applyRegisterAccount(paths, "codex", "x", path()),
+    ).rejects.toMatchObject({ code });
     expect(existsSync(paths.registry)).toBe(false);
   });
 
-  test("refuses to register the same directory twice", () => {
+  test("refuses to register the same directory twice", async () => {
     const dir = join(root, "existing");
     mkdirSync(dir);
-    applyRegisterAccount(paths, "codex", "One", dir);
-    expect(() => applyRegisterAccount(paths, "codex", "Two", dir)).toThrow(
-      /already registered as "One"/,
-    );
+    await applyRegisterAccount(paths, "codex", "One", dir);
+    await expect(
+      applyRegisterAccount(paths, "codex", "Two", dir),
+    ).rejects.toThrow(/already registered as "One"/);
   });
 
-  test("removing keeps the settings directory", () => {
+  test("removing keeps the settings directory", async () => {
     const dir = join(root, "existing");
     mkdirSync(dir);
-    const added = applyRegisterAccount(paths, "codex", "Personal", dir);
-    expect(applyRemoveAccount(paths, added.id).id).toBe(added.id);
+    const added = await applyRegisterAccount(paths, "codex", "Personal", dir);
+    expect((await applyRemoveAccount(paths, added.id)).id).toBe(added.id);
     expect(existsSync(dir)).toBe(true);
     const read = readAccountRegistry(paths.registry);
     expect(read.ok && read.registry.accounts).toEqual([]);
@@ -405,16 +443,14 @@ describe("registering, removing and a broken registry", () => {
   test.each([
     { id: "claude:default", code: "builtin" },
     { id: "missing", code: "not-found" },
-  ])("removing $id is refused", ({ id, code }) => {
-    expect(() => applyRemoveAccount(paths, id)).toThrow(
-      expect.objectContaining({ code }),
-    );
+  ])("removing $id is refused", async ({ id, code }) => {
+    await expect(applyRemoveAccount(paths, id)).rejects.toMatchObject({ code });
   });
 
   test.each([
     { name: "not JSON", text: "{ broken" },
     { name: "an unexpected shape", text: '{"version":1,"accounts":"x"}' },
-  ])("a registry that is $name is reported and never overwritten", ({
+  ])("a registry that is $name is reported and never overwritten", async ({
     text,
   }) => {
     mkdirSync(paths.stateDir, { recursive: true });
@@ -425,7 +461,7 @@ describe("registering, removing and a broken registry", () => {
     mkdirSync(dir);
     let caught: unknown;
     try {
-      applyRegisterAccount(paths, "codex", "x", dir);
+      await applyRegisterAccount(paths, "codex", "x", dir);
     } catch (error) {
       caught = error;
     }

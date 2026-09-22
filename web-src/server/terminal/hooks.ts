@@ -52,6 +52,8 @@ import {
   errno,
   readJsonSettingsFile,
   type SettingsWriteOps,
+  settingsFileIdentity,
+  settingsRevisionConflicts,
   writeBlockedReason,
   writeFileAtomic,
 } from "./settings-file";
@@ -352,6 +354,7 @@ export function planAgentHooks(
     },
     writeBlocked: writeBlockedReason(path, read),
     baseHash: contentHash(read),
+    fileIdentity: settingsFileIdentity(read),
   };
 }
 
@@ -365,21 +368,25 @@ export type AgentHookApplyResult = {
 /**
  * 確認画面で見せた計画を実行する。
  *
- * @param baseHash 確認画面を作ったときの中身のハッシュ。今の中身と違えば
- *   書かない (その間にほかの誰かが書き換えた)。
+ * @param expected 確認画面を作ったときの中身・実体パス・ファイル identity。
+ *   どれかが違えば書かない。
  */
-export function applyAgentHooks(
+export async function applyAgentHooks(
   target: AgentHookTarget,
   action: HookAction,
   launcher: HookLauncher,
-  baseHash: string,
+  expected: Pick<
+    AgentHookPlanResponse,
+    "baseHash" | "realPath" | "fileIdentity"
+  >,
   now: Date = new Date(),
   ops: SettingsWriteOps = DEFAULT_WRITE_OPS,
-): AgentHookApplyResult {
+): Promise<AgentHookApplyResult> {
   const plan = planAgentHooks(target, action, launcher, now);
-  if (plan.baseHash !== baseHash) {
+  const conflicts = settingsRevisionConflicts(plan, expected);
+  if (conflicts.length > 0) {
     throw new AgentHookError(
-      `${plan.path} changed after it was shown for confirmation; nothing was changed. Review it again.`,
+      `${plan.path} changed after it was shown for confirmation; nothing was changed. Review it again.\n${conflicts.map((reason) => `- ${reason}`).join("\n")}`,
       "conflict",
     );
   }
@@ -399,11 +406,11 @@ export function applyAgentHooks(
       launcherWritten,
     };
   }
-  const { backupPath } = commitJsonSettingsChange({
+  const { backupPath } = await commitJsonSettingsChange({
     configDir: target.configDir,
     path: plan.path,
     check: checkHookShape,
-    baseHash,
+    ...expected,
     next: (root, text) =>
       serializeHookFile(
         planHookChange(

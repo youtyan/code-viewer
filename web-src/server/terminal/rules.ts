@@ -15,7 +15,7 @@
 // 変える外部状態と戻し方: この 2 つのファイルだけ。消せば既定のルールに戻り、
 // 次の起動でリポジトリの上書きがあれば写し直す。
 
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   type AgentScreenRuleIssue,
@@ -26,9 +26,10 @@ import {
   parseAgentScreenRuleSet,
 } from "../../core/agent-screen";
 import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
-import { withFileLock } from "../file-lock";
+import { resolvedFileLockPath, withFileLock } from "../file-lock";
 import { createJsonFileStore } from "../json-store";
 import { codeViewerStateDir } from "../user-state-dir";
+import { writeFileAtomic } from "./settings-file";
 
 export const MAX_AGENT_SCREEN_RULES_BYTES = 200_000;
 const RULES_FILE_NAME = "agent-screen-rules.json";
@@ -143,11 +144,16 @@ async function fileExists(path: string): Promise<boolean> {
 async function writeMigratedMark(
   detail: Record<string, string>,
 ): Promise<void> {
-  await writeFile(
+  await mkdir(codeViewerStateDir(), { recursive: true, mode: 0o700 });
+  writeFileAtomic(
     agentScreenRulesMigratedPath(),
     `${JSON.stringify({ ...detail, at: new Date().toISOString() }, null, 2)}\n`,
-    { encoding: "utf8", mode: 0o600 },
+    0o600,
   );
+}
+
+function withAgentScreenRulesLock<T>(run: () => T | Promise<T>): Promise<T> {
+  return withFileLock(resolvedFileLockPath(agentScreenRulesFilePath()), run);
 }
 
 /**
@@ -157,7 +163,11 @@ async function writeMigratedMark(
 async function migrateRepoRules(root: string): Promise<void> {
   const userFile = agentScreenRulesFilePath();
   const marker = agentScreenRulesMigratedPath();
-  if ((await fileExists(userFile)) || (await fileExists(marker))) return;
+  if (await fileExists(marker)) return;
+  if (await fileExists(userFile)) {
+    await writeMigratedMark({ reason: "existing-user-rules" });
+    return;
+  }
   const repoFile = repoAgentScreenRulesFilePath(root);
   let text: string;
   try {
@@ -178,11 +188,8 @@ async function migrateRepoRules(root: string): Promise<void> {
       error,
     );
   }
-  await withFileLock(`${userFile}.lock`, async () => {
-    if ((await fileExists(userFile)) || (await fileExists(marker))) return;
-    await rulesStore.save(codeViewerStateDir(), rules);
-    await writeMigratedMark({ from: repoFile });
-  });
+  await rulesStore.save(codeViewerStateDir(), rules);
+  await writeMigratedMark({ from: repoFile });
 }
 
 /**
@@ -193,13 +200,15 @@ export async function reloadAgentScreenRules(
   root: string,
 ): Promise<AgentScreenRulesResponse> {
   try {
-    await migrateRepoRules(root);
-    const rules = await rulesStore.load(codeViewerStateDir());
-    return activate(
-      rules === null
-        ? defaultResponse()
-        : { rules, source: "saved", errors: [] },
-    );
+    return await withAgentScreenRulesLock(async () => {
+      await migrateRepoRules(root);
+      const rules = await rulesStore.load(codeViewerStateDir());
+      return activate(
+        rules === null
+          ? defaultResponse()
+          : { rules, source: "saved", errors: [] },
+      );
+    });
   } catch (error) {
     console.error("[code-viewer] terminal rule load failed", error);
     return activate(defaultResponse(issuesFromLoadError(error)));
@@ -211,15 +220,21 @@ export async function saveAgentScreenRules(
 ): Promise<AgentScreenRulesResponse | { errors: AgentScreenRuleIssue[] }> {
   const parsed = parseAgentScreenRuleSet(raw);
   if ("errors" in parsed) return { errors: parsed.errors };
-  await rulesStore.save(codeViewerStateDir(), parsed.value);
-  await writeMigratedMark({ reason: "saved" });
-  return activate({ rules: parsed.value, source: "saved", errors: [] });
+  return withAgentScreenRulesLock(async () => {
+    // 印を先に置けば、本体の保存途中で止まっても旧リポジトリ版は戻らない。
+    await writeMigratedMark({ reason: "saved" });
+    await rulesStore.save(codeViewerStateDir(), parsed.value);
+    return activate({ rules: parsed.value, source: "saved", errors: [] });
+  });
 }
 
 export async function resetAgentScreenRules(): Promise<AgentScreenRulesResponse> {
-  await rulesStore.remove(codeViewerStateDir());
-  await writeMigratedMark({ reason: "reset" });
-  return activate(defaultResponse());
+  return withAgentScreenRulesLock(async () => {
+    // 印を先に置けば、本体を消した直後に止まっても旧リポジトリ版は戻らない。
+    await writeMigratedMark({ reason: "reset" });
+    await rulesStore.remove(codeViewerStateDir());
+    return activate(defaultResponse());
+  });
 }
 
 export function resetAgentScreenRulesForTest(): void {

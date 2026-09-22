@@ -50,6 +50,7 @@ import {
   type StoredAccount,
 } from "../../core/agent-accounts";
 import { errorWithCause } from "../../core/error-detail";
+import { resolvedFilePath, withFileLock } from "../file-lock";
 import {
   cachedRegistryReader,
   type RegistryFileRead,
@@ -140,16 +141,19 @@ export function writeAccountRegistry(
 }
 
 /** 読めることを確かめて、変えて、書く。 */
-export function updateAccountRegistry<T>(
+export async function updateAccountRegistry<T>(
   path: string,
   change: (registry: AccountRegistry) => {
     registry: AccountRegistry;
     result: T;
   },
-): T {
-  const { registry, result } = change(registryOrThrow(path));
-  writeAccountRegistry(path, registry);
-  return result;
+): Promise<T> {
+  const realPath = resolvedFilePath(path);
+  return withFileLock(`${realPath}.lock`, () => {
+    const { registry, result } = change(registryOrThrow(realPath));
+    writeAccountRegistry(realPath, registry);
+    return result;
+  });
 }
 
 function addIssueMessage(issue: AddAccountIssue): string {
@@ -300,7 +304,7 @@ function shareIssueMessage(issue: ShareSelectionIssue): string {
  * 作り直し、場所が変わっていれば作らない。選択は画面の検査に頼らず
  * ここで検査し、共有できないものを含むなら何も作らない。
  */
-export function applyCreateAccount(
+export async function applyCreateAccount(
   paths: AccountPaths,
   request: {
     agent: AccountAgent;
@@ -309,7 +313,7 @@ export function applyCreateAccount(
     share: readonly string[];
   },
   now: number = Date.now(),
-): StoredAccount {
+): Promise<StoredAccount> {
   const plan = planCreateAccount(paths, request.agent, request.name);
   if (plan.configDir !== request.configDir) {
     throw new AccountError(
@@ -350,7 +354,7 @@ export function applyCreateAccount(
     );
   }
   try {
-    return updateAccountRegistry(paths.registry, (registry) => {
+    return await updateAccountRegistry(paths.registry, (registry) => {
       const input: AddAccountInput = {
         agent: plan.agent,
         name: plan.name,
@@ -409,13 +413,13 @@ export function planRegisterAccount(
 }
 
 /** 既にあるディレクトリを登録する。中身には触らない。 */
-export function applyRegisterAccount(
+export async function applyRegisterAccount(
   paths: AccountPaths,
   agent: AccountAgent,
   name: string,
   configDir: string,
   now: number = Date.now(),
-): StoredAccount {
+): Promise<StoredAccount> {
   const plan = planRegisterAccount(paths, agent, name, configDir);
   if (!plan.exists || !plan.isDirectory) {
     throw new AccountError(
@@ -441,10 +445,10 @@ export function applyRegisterAccount(
 }
 
 /** 登録簿から外す。設定ディレクトリは消さない。 */
-export function applyRemoveAccount(
+export async function applyRemoveAccount(
   paths: AccountPaths,
   id: string,
-): StoredAccount {
+): Promise<StoredAccount> {
   return updateAccountRegistry(paths.registry, (registry) => {
     const result = removeAccount(registry, id);
     if (result.ok === false) {
