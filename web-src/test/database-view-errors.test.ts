@@ -1898,6 +1898,10 @@ describe("database view SQL error rendering", () => {
 
     const view = createViewForTest();
     await view.enter("docker:db");
+    // 開いて自動で選んだだけでは保存しない (リポジトリに tabs.json を作らない)。
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(tabPuts).toHaveLength(0);
+    document.querySelector<HTMLButtonElement>(".db-tabs-new-btn")?.click();
     await waitFor(() => tabPuts.length === 1);
     expect(Boolean(tabPuts[0]?.keepalive)).toBe(false);
 
@@ -2555,6 +2559,7 @@ describe("database view SQL error rendering", () => {
 
     const view = createViewForTest();
     await view.enter("docker:db");
+    document.querySelector<HTMLButtonElement>(".db-tabs-new-btn")?.click();
     await waitFor(() =>
       Boolean(
         document

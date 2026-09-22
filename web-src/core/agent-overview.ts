@@ -474,6 +474,23 @@ export function agentTransition(
   return null;
 }
 
+/**
+ * 画面に出す状態。フックの申告が無くても、作業中 → 止まったのを見てまだ
+ * 読んでいないもの (未読の finished) は「完了」にする。完了を申告だけに頼ると、
+ * フックを入れていない人には見出しの印・全体ボードの並び・パレットの上位で
+ * 完了が出ない。読めば未読が解けて待機に戻る (申告の done が read で戻るのと同じ)。
+ */
+export function withFinishedAsDone(
+  panes: AgentPane[],
+  unread: ReadonlyMap<TmuxPaneId, AgentTransition>,
+): AgentPane[] {
+  return panes.map((pane) =>
+    pane.state === "idle" && unread.get(pane.id) === "finished"
+      ? { ...pane, state: "done" }
+      : pane,
+  );
+}
+
 export type AgentUnreadUpdate = {
   /** 更新後の未読。ペイン ID → 何で未読になったか。 */
   unread: Map<TmuxPaneId, AgentTransition>;

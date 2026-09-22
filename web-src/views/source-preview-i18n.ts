@@ -64,11 +64,19 @@ export const SOURCE_READING_TEXT = {
   en: {
     line: "Go to line",
     go: "Go",
+    tabPreview: "Preview",
+    tabCode: "Code",
+    tabBlame: "Blame",
+    tabHistory: "History",
     total: (n: number) => `${n.toLocaleString()} lines`,
   },
   ja: {
     line: "行へ移動",
     go: "移動",
+    tabPreview: "プレビュー",
+    tabCode: "コード",
+    tabBlame: "Blame",
+    tabHistory: "履歴",
     total: (n: number) => `${n.toLocaleString()} 行`,
   },
 };

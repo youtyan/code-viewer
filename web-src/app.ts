@@ -1654,6 +1654,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     isTestPath: isTestFilePath,
     filterCountTitle: (visible, total) =>
       uiText().sidebar.filterCountTitle(visible, total),
+    fileCountText: (count) => uiText().diff.files(count),
     sidebarToggleTitle: (hidden) =>
       hidden ? uiText().sidebar.show : uiText().sidebar.hide,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
@@ -2082,6 +2083,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         nextUnviewedTitle: string;
         allViewed: string;
         allViewedTitle: string;
+        viewed: string;
+        preview: string;
+        previewTitle: string;
+        viewFile: string;
+        viewFileTitle: string;
+        viewDiff: string;
+        viewDiffTitle: string;
+        collapseFile: string;
+        copyFilePath: string;
         noChangesTitle: string;
         noChangesBody: string;
         noChangesReload: string;
@@ -2219,7 +2229,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         queryHistory: "query history",
         settings: "viewer settings",
         theme: "toggle theme",
-        search: "Search files (Ctrl+K) · Shift+click: grep (Ctrl+G)",
+        search:
+          "Search projects, agents, sessions and files (Ctrl+K) · Shift+click: grep (Ctrl+G)",
         lineHistory: "Line history",
         recentRef: "Recently used ref",
         olderRevision: "Older revision of this file",
@@ -2283,6 +2294,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         nextUnviewedTitle: "Jump to the next unviewed file (n)",
         allViewed: "all viewed",
         allViewedTitle: "All visible files are viewed",
+        viewed: "Viewed",
+        preview: "Preview",
+        previewTitle: "Preview rendered file",
+        viewFile: "View File",
+        viewFileTitle: "View file",
+        viewDiff: "View Diff",
+        viewDiffTitle: "View diff",
+        collapseFile: "Collapse file",
+        copyFilePath: "copy file path",
         noChangesTitle: "No changes",
         noChangesBody: "The working tree is clean against this ref.",
         noChangesReload: "Reload diff",
@@ -2645,7 +2665,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         queryHistory: "クエリ履歴",
         settings: "ビューア設定",
         theme: "テーマ切り替え",
-        search: "ファイルを検索 (Ctrl+K)・Shift+クリックで grep (Ctrl+G)",
+        search:
+          "プロジェクト・エージェント・セッション・ファイルを検索 (Ctrl+K)・Shift+クリックで grep (Ctrl+G)",
         lineHistory: "この行の履歴",
         recentRef: "最近使った ref",
         olderRevision: "このファイルの 1 つ前のリビジョン",
@@ -2708,6 +2729,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         nextUnviewedTitle: "次の未確認ファイルへ移動 (n)",
         allViewed: "すべて確認済み",
         allViewedTitle: "表示中のファイルはすべて確認済みです",
+        viewed: "確認済み",
+        preview: "プレビュー",
+        previewTitle: "描画したファイルをプレビュー",
+        viewFile: "ファイルを見る",
+        viewFileTitle: "ファイルを見る",
+        viewDiff: "差分を見る",
+        viewDiffTitle: "差分を見る",
+        collapseFile: "ファイルを畳む",
+        copyFilePath: "ファイルのパスをコピー",
         noChangesTitle: "変更はありません",
         noChangesBody: "この参照との差分はありません。",
         noChangesReload: "diff を更新",
@@ -6108,6 +6138,26 @@ window.GdpExpandLogic = GdpExpandLogic;
         return null;
       });
   }
+  /** 保存した配置に残った、サーバにもう無いシェルのタブを閉じる。 */
+  function closeTabsOfGoneShells(): void {
+    // 読み戻した時点のタブだけを見る (この後に開いたシェルは、一覧に載る前に
+    // 取り直しが返っても閉じない)。
+    const saved = MAIN_TABS.terminalSessions();
+    TERMINAL_VIEW.loadShells().then(
+      (list) => {
+        // シェルを使えないサーバ (available: false) では一覧が空。閉じない。
+        if (!list.available) return;
+        const live = new Set(list.sessions.map((session) => session.id));
+        MAIN_TABS.closeTerminals(saved.filter((id) => !live.has(id)));
+      },
+      (error: unknown) =>
+        console.error(
+          "[code-viewer] could not check whether the saved terminal tabs still have their shells",
+          error,
+        ),
+    );
+  }
+
   loadInitialState().finally(() => {
     MAIN_TABS.syncRoute(STATE.route);
     // ?terminal= のタブが前面になるかは、読み戻したタブの並びで決まる。
@@ -6126,6 +6176,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       )
         setRoute(INITIAL_RIGHT_ROUTE, true);
       syncTerminalFromUrl(INITIAL_TERMINAL_PARAM);
+      closeTabsOfGoneShells();
       // 移ってきた先で開くペイン。一度きりなので、開いたら URL から外す
       // (読み直しで開き直さない)。行き先の判定は通さない (食い違ったときに
       // 移り直しを繰り返さない)。

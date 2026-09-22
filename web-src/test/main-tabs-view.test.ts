@@ -522,6 +522,16 @@ describe("main tabs view: ターミナルのタブ", () => {
     ]);
   });
 
+  test("指定したシェルのタブだけを閉じる (入口を起こし直した後の消えたシェル)", async () => {
+    const { handle, names } = setup(async () => null);
+    await handle.restore();
+    handle.openTerminal("shell-a1");
+    handle.openTerminal("shell-b2");
+    expect(handle.terminalSessions()).toEqual(["shell-a1", "shell-b2"]);
+    handle.closeTerminals(["shell-a1"]);
+    expect(names()).toEqual(["app.ts (preview)", ">Shell shell-b2"]);
+  });
+
   test("URL のシェル (?terminal=) のタブがあれば、それを前面に出せる", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { handle, names, fronts } = setup(async () => savedLayout);

@@ -3,6 +3,8 @@ import { filePathClipboardText } from "../core/file-path-copy";
 import { COPY_16_PATHS, iconSvg } from "../core/icons";
 import type { AppRoute, DiffRange, SourceFileTarget } from "../core/routes";
 import { isPreviewableSource, sourceDisplayKind } from "../core/source-meta";
+import { pageLanguage } from "./page-language";
+import { SOURCE_READING_TEXT } from "./source-preview-i18n";
 
 export type FileShellView = "blob" | "blame" | "history";
 export type SourceBlobTab = "preview" | "code";
@@ -137,7 +139,8 @@ function createBlobSourceTabButton(
   btn.dataset.fileView = "blob";
   btn.dataset.fileTab = sourceTab;
   btn.dataset.sourceTab = sourceTab;
-  btn.textContent = sourceTab === "preview" ? "Preview" : "Code";
+  const text = SOURCE_READING_TEXT[pageLanguage()];
+  btn.textContent = sourceTab === "preview" ? text.tabPreview : text.tabCode;
   btn.addEventListener("click", () => {
     if (active) return;
     deps.setPreferredSourceTab?.(sourceTab);
@@ -199,7 +202,7 @@ export function appendFileViewTabs(
         deps,
         target,
         "blame",
-        "Blame",
+        SOURCE_READING_TEXT[pageLanguage()].tabBlame,
         activeTab === "blame",
       ),
     );
@@ -208,7 +211,7 @@ export function appendFileViewTabs(
         deps,
         target,
         "history",
-        "History",
+        SOURCE_READING_TEXT[pageLanguage()].tabHistory,
         activeTab === "history",
       ),
     );

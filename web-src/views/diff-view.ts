@@ -104,6 +104,16 @@ export type DiffViewText = {
   nextUnviewedTitle: string;
   allViewed: string;
   allViewedTitle: string;
+  /** ファイルの見出し (diff2html の「Viewed」も書き換える)。 */
+  viewed: string;
+  preview: string;
+  previewTitle: string;
+  viewFile: string;
+  viewFileTitle: string;
+  viewDiff: string;
+  viewDiffTitle: string;
+  collapseFile: string;
+  copyFilePath: string;
 };
 
 function validatedFileDiffUrl(value: string): string {
@@ -1621,10 +1631,11 @@ export function createDiffView(deps: DiffViewDeps) {
     sourceMode: boolean,
   ) {
     if (!button) return;
+    const text = diffText();
     button.classList.add("gdp-btn", "gdp-btn-sm");
-    button.textContent = sourceMode ? "View Diff" : "View File";
+    button.textContent = sourceMode ? text.viewDiff : text.viewFile;
     button.setAttribute("aria-pressed", sourceMode ? "true" : "false");
-    button.title = sourceMode ? "View diff" : "View file";
+    button.title = sourceMode ? text.viewDiffTitle : text.viewFileTitle;
   }
 
   function createFileBreadcrumb(path: string, ref?: string): HTMLElement {
@@ -1725,12 +1736,20 @@ export function createDiffView(deps: DiffViewDeps) {
   function appendStatSquaresToHeader(card: DiffCardElement, file: FileMeta) {
     const header = card.querySelector(".d2h-file-header");
     if (!header) return;
+    const text = diffText();
+    // diff2html が英語で入れる「Viewed」の文字を画面の言語に。
+    for (const label of header.querySelectorAll(".d2h-file-collapse")) {
+      const word = [...label.childNodes].find(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+      );
+      if (word) word.textContent = ` ${text.viewed}`;
+    }
     if (!header.querySelector(".gdp-file-toggle")) {
       const toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "gdp-file-header-icon gdp-file-toggle";
-      toggle.title = "Collapse file";
-      toggle.setAttribute("aria-label", "Collapse file");
+      toggle.title = text.collapseFile;
+      toggle.setAttribute("aria-label", text.collapseFile);
       toggle.setAttribute("aria-expanded", "true");
       toggle.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
       toggle.addEventListener("click", (e) => {
@@ -1755,8 +1774,8 @@ export function createDiffView(deps: DiffViewDeps) {
       const copy = document.createElement("button");
       copy.type = "button";
       copy.className = "gdp-file-header-icon gdp-copy-path";
-      copy.title = "copy file path";
-      copy.setAttribute("aria-label", "copy file path");
+      copy.title = text.copyFilePath;
+      copy.setAttribute("aria-label", text.copyFilePath);
       copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
       copy.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -1773,7 +1792,7 @@ export function createDiffView(deps: DiffViewDeps) {
             copy,
             "copying the file path failed",
             error,
-            "copy file path",
+            text.copyFilePath,
             1200,
           );
         }
@@ -1857,8 +1876,8 @@ export function createDiffView(deps: DiffViewDeps) {
       const previewFile = document.createElement("button");
       previewFile.type = "button";
       previewFile.className = "gdp-preview-file gdp-btn gdp-btn-sm";
-      previewFile.textContent = "Preview";
-      previewFile.title = "Preview rendered file";
+      previewFile.textContent = text.preview;
+      previewFile.title = text.previewTitle;
       previewFile.addEventListener("click", (e) => {
         e.stopPropagation();
         const target = fileSourceTarget(file);

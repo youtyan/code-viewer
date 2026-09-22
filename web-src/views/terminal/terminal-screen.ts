@@ -1055,6 +1055,9 @@ export function createTerminalScreen(
     clearAttachments();
     closeSource();
     attached = null;
+    // 付いていたシェルの画面を残さない (閉じたシェルのタブに、直前にこの枠が
+    // 映していた別のシェルの画面が出ていた)。
+    term?.reset();
     pendingInput = "";
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = null;

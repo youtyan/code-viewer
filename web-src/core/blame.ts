@@ -106,28 +106,33 @@ export function blameTimeBins(
   return result;
 }
 
-export function blameRelativeTime(
+/**
+ * 相対の時刻 ("5m ago" / "5分前")。`language` は画面の設定の言語 (ブラウザの
+ * 言語ではない。画面では views/page-language.ts の `pageLanguage()`)。blame・作業ツリー・
+ * History・比較対象の選択が共有する。
+ */
+export function relativeTimeText(
   authorTimeSec: number,
+  language: string,
   nowMs: number = Date.now(),
 ): string {
   if (!authorTimeSec || authorTimeSec <= 0) return "";
+  const format = new Intl.RelativeTimeFormat(language, {
+    style: "narrow",
+    numeric: "auto",
+  });
   const sec = Math.max(0, Math.round(nowMs / 1000 - authorTimeSec));
-  if (sec < 60) return "just now";
+  if (sec < 60) return format.format(0, "second");
   const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m ago`;
+  if (min < 60) return format.format(-min, "minute");
   const hour = Math.round(min / 60);
-  if (hour < 24) return `${hour}h ago`;
+  if (hour < 24) return format.format(-hour, "hour");
   const day = Math.round(hour / 24);
-  if (day === 1) return "yesterday";
-  if (day < 7) return `${day} days ago`;
-  if (day < 14) return "last week";
-  if (day < 30) return `${Math.round(day / 7)} weeks ago`;
+  if (day < 7) return format.format(-day, "day");
+  if (day < 30) return format.format(-Math.round(day / 7), "week");
   const month = Math.round(day / 30);
-  if (month === 1) return "last month";
-  if (month < 12) return `${month} months ago`;
-  const year = Math.round(month / 12);
-  if (year === 1) return "last year";
-  return `${year} years ago`;
+  if (month < 12) return format.format(-month, "month");
+  return format.format(-Math.round(month / 12), "year");
 }
 
 // ai-dup-check: allow -- 7-char short SHA helper, intentionally a thin string utility.

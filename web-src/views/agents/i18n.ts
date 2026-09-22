@@ -521,7 +521,9 @@ const EN: AgentsText = {
     ariaLabel: "Projects and agents",
     projects: "Projects",
     board: "All agents (g a)",
-    search: "Search projects",
+    // 押すと開くパレットはプロジェクト・エージェント・ファイルなどをまとめて探す
+    // (ボタンの title と同じ意味の短い形。app.ts の global.search)。
+    search: "Search",
     collapse: "Hide sidebar",
     expand: "Show sidebar",
     resize: "Resize sidebar",
@@ -648,7 +650,7 @@ const JA: AgentsText = {
     ariaLabel: "プロジェクトとエージェント",
     projects: "プロジェクト",
     board: "すべてのエージェント (g a)",
-    search: "プロジェクトを検索",
+    search: "検索",
     collapse: "サイドバーを隠す",
     expand: "サイドバーを表示",
     resize: "サイドバーの幅を変える",

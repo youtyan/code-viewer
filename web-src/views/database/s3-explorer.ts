@@ -27,6 +27,7 @@ import {
   sourceDisplayKind,
   sourcePreviewKind,
 } from "../../core/source-meta";
+import { pageLanguage } from "../page-language";
 import {
   appendMediaEmbed,
   renderDelimitedPreview,
@@ -338,7 +339,7 @@ export function createS3Explorer(
     const metaText = [
       objectTypeLabel(object.key, object.contentType),
       formatBytes(object.sizeBytes),
-      formatFileDate(object.updatedAt),
+      formatFileDate(object.updatedAt, pageLanguage()),
     ]
       .filter(Boolean)
       .join(" / ");
@@ -488,7 +489,7 @@ export function createS3Explorer(
       meta.className = "s3-object-meta";
       const kind = objectTypeLabel(object.key, object.contentType);
       const size = formatBytes(object.sizeBytes);
-      const updated = formatFileDate(object.updatedAt);
+      const updated = formatFileDate(object.updatedAt, pageLanguage());
       meta.textContent = [kind, size, updated].filter(Boolean).join(" / ");
       row.appendChild(meta);
 
@@ -779,7 +780,7 @@ export function createS3Explorer(
     meta.textContent = [
       objectTypeLabel(object.key, object.contentType),
       formatBytes(object.sizeBytes),
-      formatFileDate(object.updatedAt),
+      formatFileDate(object.updatedAt, pageLanguage()),
     ]
       .filter(Boolean)
       .join(" / ");

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   EXT_TO_LANG,
   FILENAME_TO_LANG,
+  formatFileDate,
   isDotenvName,
   isLikelyTextBytes,
   isPreviewableSource,
@@ -45,6 +46,13 @@ describe("source metadata", () => {
   ])("classifies $name for preview", ({ path, previewable, kind }) => {
     expect(isPreviewableSource(path)).toBe(previewable);
     expect(sourcePreviewKind(path)).toBe(kind);
+  });
+
+  test.each([
+    ["en", /^Sep \d+, 2026/],
+    ["ja", /^2026年9月\d+日/],
+  ])("formats file dates in the setting language (%s), not the browser's", (language, expected) => {
+    expect(formatFileDate("2026-09-22T12:00:00Z", language)).toMatch(expected);
   });
 
   test("treats dotenv examples and variants as text sources", () => {

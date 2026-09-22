@@ -6697,7 +6697,13 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   }
 }
 
-@media (min-width: 901px) and (max-width: 1100px) {
+/* ファイルの見出しを 2 段にする (名前を 1 段目、操作を 2 段目)。窓ではなく
+   ファイルの箱の幅で決める。2 面の左の面や狭い窓で、名前が 0 幅に潰れて
+   「確認済み」が縦に折れていた。 */
+.d2h-file-wrapper {
+  container: diff-file / inline-size;
+}
+@container diff-file (max-width: 40em) {
   .d2h-file-header,
   .d2h-file-header.d2h-sticky-header {
     height: auto !important;
@@ -6756,42 +6762,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   #status { padding: 0 6px 0 8px; }
   #status::before { margin-right: 0; }
   #meta { flex-wrap: wrap; row-gap: 4px; }
-  .d2h-file-header,
-  .d2h-file-header.d2h-sticky-header {
-    height: auto !important;
-    min-height: var(--ui-file-header-wrapped-h);
-    flex-wrap: wrap;
-    align-items: center;
-    align-content: center;
-    row-gap: 6px;
-  }
-  .d2h-file-header .d2h-file-name-wrapper {
-    flex: 1 1 calc(100% - 44px);
-    min-width: 160px;
-    order: 1;
-  }
-  .d2h-file-header > .gdp-file-toggle {
-    order: 0;
-  }
-  .d2h-file-header > .d2h-file-collapse {
-    order: 2;
-    margin-left: 0;
-  }
-  .d2h-file-header > .gdp-stat-text {
-    order: 3;
-    margin-left: 0;
-  }
-  .d2h-file-header > .gdp-stat-squares {
-    order: 4;
-  }
-  .d2h-file-header > .gdp-preview-file {
-    order: 5;
-    margin-left: auto;
-  }
-  .d2h-file-header > .gdp-view-file {
-    order: 6;
-    margin-left: 0;
-  }
   body.gdp-history-page #history-panel {
     position: static;
     width: auto;
@@ -18065,6 +18035,10 @@ body.gdp-sidebar-hidden .left-rail {
   padding: 0;
   font-size: var(--ui-font-sm);
 }
+/* 目次の見出しは画面の言語で (html の lang は設定の言語)。 */
+:root:lang(ja) .gdp-markdown-toc::before {
+  content: "このページの見出し";
+}
 .gdp-source-viewer .gdp-markdown-toc::before,
 .gdp-repo-readme .gdp-markdown-toc::before {
   margin: 0 0 var(--space-2);
@@ -20811,6 +20785,18 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
   #topbar #meta .chip-viewed {
     display: none;
   }
+}
+/* 2 面の左の面など、帯がさらに狭いとき: 次の未閲覧 (キーの n とファイルの見出し
+   の確認済みで代わりが利く) も省く。それでも入らない分は帯の中を横に送って
+   見る (面の外へ押し出して届かなくしない)。 */
+@container topbar (max-width: 56em) {
+  #topbar #meta .chip-next-unviewed {
+    display: none;
+  }
+}
+#topbar {
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 /* ファイルの箱: 線と影を消し、コードの面を角丸で置く。箱の間は間隔で分ける。 */
 .d2h-file-wrapper {

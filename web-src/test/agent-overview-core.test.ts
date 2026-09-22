@@ -23,6 +23,7 @@ import {
   paneTaskText,
   shouldNotifyAgent,
   titleWithUnread,
+  withFinishedAsDone,
 } from "../core/agent-overview";
 import type { AgentState, AgentStateSource } from "../core/agent-state";
 
@@ -549,6 +550,33 @@ describe("nextAgentUnread", () => {
     );
     expect([...update.unread]).toEqual(expected);
     expect(update.transitions).toEqual([]);
+  });
+});
+
+describe("withFinishedAsDone", () => {
+  // フックが無くても、作業中 → 止まったを見てまだ読んでいないものは完了に出す。
+  test.each<{
+    state: AgentState;
+    transition: AgentTransition | null;
+    expected: AgentState;
+  }>([
+    { state: "idle", transition: "finished", expected: "done" },
+    { state: "idle", transition: null, expected: "idle" },
+    { state: "idle", transition: "waiting", expected: "idle" },
+    { state: "waiting", transition: "waiting", expected: "waiting" },
+    { state: "working", transition: "finished", expected: "working" },
+    { state: "done", transition: "finished", expected: "done" },
+  ])("$state + 未読 $transition → $expected", ({
+    state,
+    transition,
+    expected,
+  }) => {
+    const unread = new Map<string, AgentTransition>(
+      transition ? [["%1", transition]] : [],
+    );
+    expect(
+      withFinishedAsDone([pane({ id: "%1", state })], unread)[0]?.state,
+    ).toBe(expected);
   });
 });
 

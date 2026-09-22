@@ -581,14 +581,14 @@ describe("worktree list panel", () => {
     const whens = panel.querySelectorAll<HTMLElement>(".history-item .when");
     // 最終コミットの相対時刻と、mtime ベースの最終更新の両方が出る。
     expect(whens).toHaveLength(2);
-    expect(whens[1].textContent).toBe(TEXT.lastTouched("just now"));
+    expect(whens[1].textContent).toBe(TEXT.lastTouched("now"));
     expect(whens[1].title).toBe(
-      new Date(Date.parse(touchedIso)).toLocaleString(),
+      new Date(Date.parse(touchedIso)).toLocaleString("en"),
     );
     // 最終コミットの title は件名と絶対日時の両方を持つ。
     expect(whens[0].title).toContain("sample subject");
     expect(whens[0].title).toContain(
-      new Date("2026-08-10T00:00:00.000Z").toLocaleString(),
+      new Date("2026-08-10T00:00:00.000Z").toLocaleString("en"),
     );
   });
 
@@ -1542,7 +1542,7 @@ describe("sidebar file list", () => {
     ]);
     expect(
       filelist.querySelector<HTMLElement>(".worktree-commit .when")?.title,
-    ).toBe(new Date("2026-08-12T09:30:00.000Z").toLocaleString());
+    ).toBe(new Date("2026-08-12T09:30:00.000Z").toLocaleString("en"));
     const commitRow = filelist.querySelector(".worktree-commit");
     const fileRow = filelist.querySelector(".tree-file[data-key]");
     expect(

@@ -5,6 +5,7 @@ import {
   formatErrorDetail,
   responseErrorMessage,
 } from "../core/error-detail";
+import { pageLanguage } from "./page-language";
 // Standalone file-blame view. Fetches /_file_blame, groups same-sha runs into
 // row-span blocks, paints an Older → Newer time bar legend, and reuses the
 // existing file shell DOM so tabs/sticky header stay consistent across views.
@@ -13,10 +14,10 @@ import {
   BLAME_TIME_BIN_COUNT,
   type BlameCommit,
   type BlameResponse,
-  blameRelativeTime,
   blameShortSha,
   blameTimeBins,
   groupBlameLines,
+  relativeTimeText,
 } from "../core/blame";
 import type {
   AppRoute,
@@ -258,7 +259,7 @@ export function createBlameView(deps: BlameViewDeps) {
           time.className = "gdp-blame-time";
           time.textContent = group.commit.isUncommitted
             ? "Uncommitted"
-            : blameRelativeTime(group.commit.authorTime);
+            : relativeTimeText(group.commit.authorTime, pageLanguage());
           meta.appendChild(time);
           const author = document.createElement("span");
           author.className = "gdp-blame-author";

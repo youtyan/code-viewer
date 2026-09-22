@@ -2,10 +2,10 @@ import { describe, expect, test } from "vitest";
 import {
   BLAME_ZERO_SHA,
   type BlameCommit,
-  blameRelativeTime,
   blameShortSha,
   blameTimeBins,
   groupBlameLines,
+  relativeTimeText,
 } from "../core/blame";
 
 function commit(
@@ -99,30 +99,30 @@ describe("blameTimeBins", () => {
   });
 });
 
-describe("blameRelativeTime", () => {
-  test("renders human-readable durations", () => {
-    // Pick a "now" comfortably past the largest delta we test (~400 days).
-    const now = 60 * 60 * 24 * 365 * 100;
-    expect(blameRelativeTime(now - 10, now * 1000)).toBe("just now");
-    expect(blameRelativeTime(now - 60 * 5, now * 1000)).toBe("5m ago");
-    expect(blameRelativeTime(now - 60 * 60 * 3, now * 1000)).toBe("3h ago");
-    expect(blameRelativeTime(now - 60 * 60 * 24, now * 1000)).toBe("yesterday");
-    expect(blameRelativeTime(now - 60 * 60 * 24 * 3, now * 1000)).toBe(
-      "3 days ago",
-    );
-    expect(blameRelativeTime(now - 60 * 60 * 24 * 30, now * 1000)).toBe(
-      "last month",
-    );
-    expect(blameRelativeTime(now - 60 * 60 * 24 * 60, now * 1000)).toBe(
-      "2 months ago",
-    );
-    expect(blameRelativeTime(now - 60 * 60 * 24 * 400, now * 1000)).toBe(
-      "last year",
-    );
+describe("relativeTimeText", () => {
+  // Pick a "now" comfortably past the largest delta we test (~400 days).
+  const now = 60 * 60 * 24 * 365 * 100;
+  const day = 60 * 60 * 24;
+  // 画面の設定の言語で出す (ブラウザの言語ではない)。
+  test.each([
+    [10, "now", "今"],
+    [60 * 5, "5m ago", "5分前"],
+    [60 * 60 * 3, "3h ago", "3時間前"],
+    [day, "yesterday", "昨日"],
+    [day * 3, "3d ago", "3日前"],
+    [day * 14, "2w ago", "2週間前"],
+    [day * 30, "last mo.", "先月"],
+    [day * 60, "2mo ago", "2か月前"],
+    [day * 400, "last yr.", "昨年"],
+  ])("%i seconds ago -> %s / %s", (ago, en, ja) => {
+    expect([
+      relativeTimeText(now - ago, "en", now * 1000),
+      relativeTimeText(now - ago, "ja", now * 1000),
+    ]).toEqual([en, ja]);
   });
 
   test("returns empty when authorTime is missing", () => {
-    expect(blameRelativeTime(0)).toBe("");
+    expect(relativeTimeText(0, "en")).toBe("");
   });
 });
 

@@ -917,7 +917,8 @@ export function createRepoView(deps: RepoViewDeps) {
         committed.className = "commit-date";
         const labels = sortColumnLabels();
         committed.textContent =
-          formatFileDate(entry.commit_updated_at) || labels.noCommit;
+          formatFileDate(entry.commit_updated_at, STATE.language) ||
+          labels.noCommit;
         committed.title = labels.committedHint;
         if (entry.commit_updated_at) {
           committed.dateTime = entry.commit_updated_at;
@@ -1197,8 +1198,9 @@ export function createRepoView(deps: RepoViewDeps) {
     }
     const updated = formatFileDate(
       ref === "worktree" || ref === "" ? entry.updated_at : undefined,
+      STATE.language,
     );
-    const created = formatFileDate(entry.created_at);
+    const created = formatFileDate(entry.created_at, STATE.language);
     meta.title = sortColumnLabels().updatedHint;
     if (browsable && updated) {
       meta.textContent = updated;
@@ -1430,9 +1432,9 @@ export function createRepoView(deps: RepoViewDeps) {
     addItem("Size", meta.size == null ? "" : formatBytes(meta.size));
     addItem(
       "Updated",
-      formatFileDate(meta.updated_at || meta.commit_updated_at),
+      formatFileDate(meta.updated_at || meta.commit_updated_at, STATE.language),
     );
-    addItem("Created", formatFileDate(meta.created_at));
+    addItem("Created", formatFileDate(meta.created_at, STATE.language));
     // 取れなかったことは「情報が無い」と区別して、ボタンの中に理由つきで出す。
     if (meta.error) {
       wrap.classList.add("failed");

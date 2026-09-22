@@ -158,6 +158,14 @@ export type MainTabsHandle = {
   openTerminal(session: string, pane?: OpenOptions["pane"]): void;
   /** そのシェルのターミナルのタブを閉じる (シェルは止めない)。 */
   closeTerminal(session: string): void;
+  /** 端末のタブが映しているシェル。 */
+  terminalSessions(): string[];
+  /**
+   * それらのシェルの端末のタブを閉じる。入口のサーバを起こし直すと、保存した
+   * 配置のシェルは全部消えて付き直せない (シェルは入口のプロセスの子)。残すと
+   * 番号の無い「Shell」のタブが並んだ (app.ts の closeTabsOfGoneShells)。
+   */
+  closeTerminals(sessions: readonly string[]): void;
   /** 画像のタブを開いて前面に出す。 */
   openImage(path: string, pane?: OpenOptions["pane"]): void;
   /** フォーカスのある面の＋のメニューを開く (キー操作・パレットから)。 */
@@ -1265,6 +1273,13 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     closeTerminal(session) {
       const tab = findTerminal(session);
       if (tab) changeAndGo((l) => close(l, tab.id));
+    },
+    terminalSessions: () => [...terminalsOf(layout)],
+    closeTerminals(sessions) {
+      for (const session of sessions) {
+        const tab = findTerminal(session);
+        if (tab) changeAndGo((l) => close(l, tab.id));
+      }
     },
     openImage(path, pane = "focused") {
       rememberRoute();

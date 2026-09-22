@@ -86,6 +86,8 @@ export type SidebarDeps = {
   isTestPath(path: string): boolean;
   // Tooltip for the "matching / all files" count shown while filtering.
   filterCountTitle(visible: number, total: number): string;
+  /** 差分の一覧の件数 ("3 files" / "3ファイル")。 */
+  fileCountText(count: number): string;
   sidebarToggleTitle(hidden: boolean): string;
   openDirectoryInOsTitle(): string;
   omittedDirectoryBadge(reason: RepoTreeEntry["children_omitted_reason"]): {
@@ -1509,9 +1511,7 @@ export function createSidebar(deps: SidebarDeps) {
       renderFlat(files, ul, onFileClick);
     }
     setSidebarTotals(
-      !repoSidebar && files.length
-        ? `${files.length} file${files.length === 1 ? "" : "s"}`
-        : "",
+      !repoSidebar && files.length ? deps.fileCountText(files.length) : "",
     );
     // Update view-toggle visual
     const effectiveView = treeMode ? "tree" : STATE.sbView;

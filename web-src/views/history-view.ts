@@ -4,10 +4,12 @@ import {
   formatErrorDetail,
   responseErrorMessage,
 } from "../core/error-detail";
+
 // Commit history screen (left panel). Renders the commit list, handles
 // infinite scroll / deep links, and delegates diff rendering to the existing
 // diff pipeline via deps.applyCommitRange().
 
+import { relativeTimeText } from "../core/blame";
 import {
   commitDiffRange,
   EMPTY_TREE_SHA,
@@ -638,15 +640,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function relativeWhen(iso: string): string {
     const t = Date.parse(iso);
     if (!Number.isFinite(t)) return iso;
-    const sec = Math.round((Date.now() - t) / 1000);
-    if (sec < 60) return "just now";
-    const min = Math.round(sec / 60);
-    if (min < 60) return `${min}m ago`;
-    const hour = Math.round(min / 60);
-    if (hour < 24) return `${hour}h ago`;
-    const day = Math.round(hour / 24);
-    if (day < 30) return `${day}d ago`;
-    return iso.slice(0, 10);
+    // 30 日より前は日付だけ (相対では幅をとるうえに読み取りにくい)。
+    if (Date.now() - t >= 30 * 24 * 60 * 60 * 1000) return iso.slice(0, 10);
+    return relativeTimeText(t / 1000, deps.getLanguage());
   }
 
   function absoluteWhen(iso: string): string {
@@ -882,7 +878,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const t = Date.parse(commit.when);
     set(
       ".hci-date",
-      Number.isFinite(t) ? new Date(t).toLocaleString() : commit.when,
+      Number.isFinite(t)
+        ? new Date(t).toLocaleString(deps.getLanguage())
+        : commit.when,
     );
     set(".hci-subject", commit.subject);
     const body = info.querySelector<HTMLElement>(".hci-body");

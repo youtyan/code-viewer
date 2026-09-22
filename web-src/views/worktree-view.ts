@@ -1,4 +1,5 @@
 import { apiUrl, projectKey } from "../core/api-url";
+
 // 作業ツリーの画面。骨格も行の見た目も History 画面のものをそのまま使う。
 //
 //   #worktree-panel  作業ツリー一覧   (#history-panel と同じ箱・同じ行)
@@ -13,7 +14,7 @@ import { apiUrl, projectKey } from "../core/api-url";
 // 作業ツリーとは無関係 (server/worktree/handle.ts の handleDiffGet)。だから
 // 1 つのサーバから全部の作業ツリーの中身が読める。
 
-import { blameRelativeTime } from "../core/blame";
+import { relativeTimeText } from "../core/blame";
 import { formatErrorDetail } from "../core/error-detail";
 import {
   CHEVRON_DOWN_16_PATH,
@@ -39,6 +40,7 @@ import {
   showContextMenu,
 } from "./context-menu";
 import { enhanceMediaCard } from "./media-embed";
+import { pageLanguage } from "./page-language";
 import type { PageView } from "./page-view";
 import { treeLevelPad } from "./tree-indent";
 import { showFormDialog } from "./ui-dialog";
@@ -1388,12 +1390,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           "span",
           "when",
           Number.isFinite(parsed)
-            ? blameRelativeTime(Math.round(parsed / 1000))
+            ? relativeTimeText(Math.round(parsed / 1000), pageLanguage())
             : item.lastCommit.when,
         );
         // ホバーでは件名と絶対日時の両方を出す。
         when.title = Number.isFinite(parsed)
-          ? `${item.lastCommit.subject}\n${new Date(parsed).toLocaleString()}`
+          ? `${item.lastCommit.subject}\n${new Date(parsed).toLocaleString(pageLanguage())}`
           : item.lastCommit.subject;
         meta.appendChild(when);
       }
@@ -1404,11 +1406,13 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           "span",
           "when",
           Number.isFinite(parsed)
-            ? t.lastTouched(blameRelativeTime(Math.round(parsed / 1000)))
+            ? t.lastTouched(
+                relativeTimeText(Math.round(parsed / 1000), pageLanguage()),
+              )
             : t.lastTouched(item.lastTouched),
         );
         when.title = Number.isFinite(parsed)
-          ? new Date(parsed).toLocaleString()
+          ? new Date(parsed).toLocaleString(pageLanguage())
           : item.lastTouched;
         meta.appendChild(when);
       }
@@ -1728,11 +1732,11 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         "span",
         "when",
         Number.isFinite(parsed)
-          ? blameRelativeTime(Math.round(parsed / 1000))
+          ? relativeTimeText(Math.round(parsed / 1000), pageLanguage())
           : commit.when,
       );
       when.title = Number.isFinite(parsed)
-        ? new Date(parsed).toLocaleString()
+        ? new Date(parsed).toLocaleString(pageLanguage())
         : commit.when;
       meta.appendChild(when);
       row.append(subject, meta);

@@ -15,6 +15,10 @@ test.each([
   [".image-tab-actions", "flex", "none"],
   // Diff の帯の詰め方は窓でなく帯の実幅 (@container topbar) で決める
   ["#topbar", "container", "topbar / inline-size"],
+  // 入らない分は帯の中を横に送る (面の外に押し出さない)
+  ["#topbar", "overflow-x", "auto"],
+  // ファイルの見出しの 2 段化は窓でなく箱の幅 (@container diff-file) で決める
+  [".d2h-file-wrapper", "container", "diff-file / inline-size"],
   // 左の列の見出し: 「ツリー / 一覧」と題の語を折らない
   ["#sidebar .sb-head .sb-view-seg", "min-width", "max-content"],
   ["#sidebar .sb-head > .sb-title", "white-space", "nowrap"],

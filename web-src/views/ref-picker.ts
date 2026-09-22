@@ -1,11 +1,14 @@
 import { apiUrl } from "../core/api-url";
+
 // Ref picker popover (branch / tag / commit selector), extracted from app.ts.
 // createRefPicker() wires the popover, the #ref-from/#ref-to inputs, and the
 // #repo-target input at construction time.
 
+import { relativeTimeText } from "../core/blame";
 import { isImeComposing } from "../core/keyboard";
 import type { AppRoute, DiffRange } from "../core/routes";
 import type { RefCommitResponse, RefResponse } from "../core/types";
+import { pageLanguage } from "./page-language";
 
 export type RefPickerDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -221,15 +224,9 @@ export function createRefPicker(deps: RefPickerDeps) {
   function relativeWhen(iso: string): string {
     const t = Date.parse(iso);
     if (!Number.isFinite(t)) return iso;
-    const sec = Math.round((Date.now() - t) / 1000);
-    if (sec < 60) return "just now";
-    const min = Math.round(sec / 60);
-    if (min < 60) return `${min}m ago`;
-    const hour = Math.round(min / 60);
-    if (hour < 24) return `${hour}h ago`;
-    const day = Math.round(hour / 24);
-    if (day < 30) return `${day}d ago`;
-    return iso.slice(0, 10);
+    // 30 日より前は日付だけ (相対では幅をとるうえに読み取りにくい)。
+    if (Date.now() - t >= 30 * 24 * 60 * 60 * 1000) return iso.slice(0, 10);
+    return relativeTimeText(t / 1000, pageLanguage());
   }
 
   function absoluteWhen(iso: string): string {

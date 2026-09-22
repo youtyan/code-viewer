@@ -115,6 +115,15 @@ const defaultDiffText: DiffViewText = {
   nextUnviewedTitle: "Jump to the next unviewed file (n)",
   allViewed: "all viewed",
   allViewedTitle: "All visible files are viewed",
+  viewed: "Viewed",
+  preview: "Preview",
+  previewTitle: "Preview rendered file",
+  viewFile: "View File",
+  viewFileTitle: "View file",
+  viewDiff: "View Diff",
+  viewDiffTitle: "View diff",
+  collapseFile: "Collapse file",
+  copyFilePath: "copy file path",
 };
 
 function createDiffViewForShellTest(

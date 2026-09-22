@@ -26,6 +26,7 @@ import {
   type AgentTransition,
   nextAgentUnread,
   shouldNotifyAgent,
+  withFinishedAsDone,
 } from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
 import {
@@ -88,6 +89,8 @@ function notificationApi(): typeof Notification | null {
 }
 
 export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
+  /** サーバの応答そのもの。画面へは状態に未読の完了を重ねた overview を渡す。 */
+  let received: AgentOverviewResponse | null = null;
   let overview: AgentOverviewResponse | null = null;
   let error = "";
   let notifyError = "";
@@ -171,7 +174,15 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     notifyError = failures.join("\n");
     unread = next.unread ? serverUnread(next) : update.unread;
     previous = new Map(next.panes.map((pane) => [pane.id, pane.state]));
-    overview = next;
+    received = next;
+    show();
+  }
+
+  function show(): void {
+    overview = received && {
+      ...received,
+      panes: withFinishedAsDone(received.panes, unread),
+    };
   }
 
   /**
@@ -247,6 +258,7 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
    */
   function forget(message: string): void {
     error = message;
+    received = null;
     overview = null;
     previous = null;
   }
@@ -329,9 +341,12 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
       return () => listeners.delete(listener);
     },
     markRead(pane) {
-      const current = overview?.panes.find((item) => item.id === pane);
+      // サーバに read を送るのは申告の done だけ (未読から出した完了は、
+      // 未読を解けば待機に戻る)。
+      const current = received?.panes.find((item) => item.id === pane);
       const hadUnread = unread.delete(pane);
-      if (hadUnread && overview?.unread) clearOnServer(pane);
+      if (hadUnread && received?.unread) clearOnServer(pane);
+      if (hadUnread) show();
       if (current?.state === "done") {
         markReadOnServer(pane).then(
           () => refresh(),

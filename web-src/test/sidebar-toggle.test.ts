@@ -262,6 +262,7 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
     },
     isTestPath: () => false,
     filterCountTitle: () => "",
+    fileCountText: (count) => `${count} files`,
     sidebarToggleTitle: (hidden) => (hidden ? "show sidebar" : "hide sidebar"),
     openDirectoryInOsTitle: () => "open this folder in OS",
     omittedDirectoryBadge: (reason) =>

@@ -283,7 +283,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "The counter at the right of the bottom bar shows how many agents need input and how many are working, on every screen; it turns amber only when something needs input, and clicking it opens the list (or the pane directly, when exactly one needs input). When an agent goes from working to needing input, or from working to stopped, the row gets an unread dot and the tab title gets the unread count; opening or selecting the pane clears it. Desktop notifications are opt-in: press Enable notifications on the Agents screen, and choose which changes notify you under Settings → Agent notifications. Nothing is notified for a pane shown in the front terminal tab of either side while this window has focus. States come from screen rules evaluated against the live terminal.",
+                text: "The counter at the right of the bottom bar shows how many agents need input and how many are working, on every screen; it turns amber only when something needs input, and clicking it opens the list (or the pane directly, when exactly one needs input). When an agent goes from working to needing input, or from working to stopped, the row gets an unread dot and the tab title gets the unread count, and a stopped one shows as Finished (without hooks too); opening or selecting the pane clears it. An agent of another project (its row, a notification, the palette) switches to that project first and then opens the pane in a tab. Desktop notifications are opt-in: press Enable notifications on the Agents screen, and choose which changes notify you under Settings → Agent notifications. Nothing is notified for a pane shown in the front terminal tab of either side while this window has focus. States come from screen rules evaluated against the live terminal.",
               },
               {
                 kind: "paragraph",
@@ -1160,7 +1160,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "最下段の右の件数は、どの画面にいても入力待ちと作業中の数を出します。注意の色になるのは入力待ちがあるときだけです。押すと一覧へ、入力待ちが 1 件だけならそのペインを直接開きます。作業中から入力待ちに、または作業中から止まったに変わると、その行に未読の印が付き、タブのタイトルの先頭に未読の数が出ます。そのペインを開くか一覧で選ぶと消えます。デスクトップ通知は、エージェント画面の「通知を有効にする」を押したときだけ許可を求めます。どの変化で通知するかは 設定 → エージェントの通知 で選べます。この窓にフォーカスがある間、左右どちらかの前面のターミナルタブに出ているペインは通知しません。状態は生きているターミナルに画面ルールを当てて判定します。",
+                text: "最下段の右の件数は、どの画面にいても入力待ちと作業中の数を出します。注意の色になるのは入力待ちがあるときだけです。押すと一覧へ、入力待ちが 1 件だけならそのペインを直接開きます。作業中から入力待ちに、または作業中から止まったに変わると、その行に未読の印が付き、タブのタイトルの先頭に未読の数が出ます。止まったものは (フックが無くても) 完了と出ます。そのペインを開くか一覧で選ぶと消えます。別のプロジェクトのエージェント (行・通知・パレット) は、そのプロジェクトへ移ってからペインをタブで開きます。デスクトップ通知は、エージェント画面の「通知を有効にする」を押したときだけ許可を求めます。どの変化で通知するかは 設定 → エージェントの通知 で選べます。この窓にフォーカスがある間、左右どちらかの前面のターミナルタブに出ているペインは通知しません。状態は生きているターミナルに画面ルールを当てて判定します。",
               },
               {
                 kind: "paragraph",

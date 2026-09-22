@@ -423,11 +423,15 @@ export function formatBytes(bytes: number): string {
   );
 }
 
-export function formatFileDate(value: string | undefined): string {
+/** 日時を画面の設定の言語 (`language`) で出す。ブラウザの言語には任せない。 */
+export function formatFileDate(
+  value: string | undefined,
+  language: string,
+): string {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString(undefined, {
+  return date.toLocaleString(language, {
     year: "numeric",
     month: "short",
     day: "numeric",

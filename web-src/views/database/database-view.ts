@@ -3783,21 +3783,30 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
     if (tabsById.size === 0) {
       // 初回 enter (永続化なし): URL の引数を初期 state にして 1 タブ作る。
-      const id = openTab(
-        {
-          dbId: db || null,
-          schema: schema || null,
-          table: table || null,
-          view: view || "data",
-        },
-        {
-          autoSelectFirst: !db,
-          ...options,
-        },
-      );
-      const ready = paneReadyById.get(id);
-      if (ready) await ready;
+      // 開いて自動で選んだだけの状態は保存しない (開いただけでリポジトリに
+      // .code-viewer/tabs.json を作らない)。利用者が何か変えたら保存する。
+      const finishRestoring = beginRestoring();
+      let id: string;
+      try {
+        id = openTab(
+          {
+            dbId: db || null,
+            schema: schema || null,
+            table: table || null,
+            view: view || "data",
+          },
+          {
+            autoSelectFirst: !db,
+            ...options,
+          },
+        );
+        const ready = paneReadyById.get(id);
+        if (ready) await ready;
+      } finally {
+        finishRestoring();
+      }
       if (!mounted || seq !== lifecycleSeq) return;
+      syncActiveRoute();
       if (tabsLoadError) {
         tabsById
           .get(id)
