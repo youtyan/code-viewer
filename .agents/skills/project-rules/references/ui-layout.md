@@ -98,7 +98,9 @@ grep -n "100vh\|100dvh" web/style.css \
   に足りないときは、2 面の間だけ右の列を細い帯へ自動で畳む** (`app.ts` の
   `syncPanelColumnForSplit`)。2 面を解いたら戻す。利用者が 2 面の間に自分で
   開いたら、そのセッションでは自動で畳まない (保存しない)。面の幅の下限は、
-  自分で開いている間だけ `TIGHT_PANE_WIDTH` まで下げ、両面を同じ比で縮める
+  自分で開いている間だけ `TIGHT_PANE_WIDTH` まで下げ、両面を同じ比で縮める。ただし一覧が右の列にある画面 (History・選んでいる作業ツリー) を出している
+  間は畳まず (自動で畳んでいたら開く)、本文が 2 面の下限に足りなければ右の面を
+  預ける (理由は分割のボタンの説明)。決まりは `core/panel-column-policy.ts`
 - **上に居座る固定物の高さは `--global-header-h` だけを読む。** 今はタブ列だけなので
   `--global-header-h: var(--main-tabs-h)` (`style.css` の `html, body`)。ツールバーの `top`・各ページの
   `--chrome-h` の上書き・sticky の `top`・面の箱の `top` はこれを読むので、上に固定物を足す / 消す

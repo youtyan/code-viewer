@@ -39,6 +39,7 @@ import type {
   UndoActionResponse,
 } from "../core/types";
 import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
+import { fitBreadcrumb } from "./breadcrumb-fit";
 import { fileRouteKeepingActiveView } from "./file-shell";
 import {
   type MarkdownLinkNavigationDeps,
@@ -718,6 +719,11 @@ export function createRepoView(deps: RepoViewDeps) {
       });
       nav.appendChild(button);
     });
+    // 深いフォルダで入りきらないときは真ん中の段を「…」に畳む。
+    fitBreadcrumb(
+      nav,
+      [root.textContent ?? "", ...parts].filter(Boolean).join("/"),
+    );
     return nav;
   }
 
@@ -1379,11 +1385,31 @@ export function createRepoView(deps: RepoViewDeps) {
     return header;
   }
 
-  async function loadRawFileInfo(
+  /**
+   * 同じファイルの HEAD を同時に何本も出さない。1 回の表示で、見出しの情報・
+   * 表示の種類の判定・変化の検知 (app.ts の署名) が同じ URL を同時に 3 本
+   * 出していた。終わった要求は覚えない (次に聞いたときは取り直す)。
+   */
+  const RAW_FILE_INFO_IN_FLIGHT = new Map<string, Promise<RawFileInfo>>();
+
+  function loadRawFileInfo(target: SourceFileTarget): Promise<RawFileInfo> {
+    const url = buildRawFileUrl(target);
+    const inFlight = RAW_FILE_INFO_IN_FLIGHT.get(url);
+    if (inFlight) return inFlight;
+    const request = requestRawFileInfo(target, url).finally(() => {
+      if (RAW_FILE_INFO_IN_FLIGHT.get(url) === request)
+        RAW_FILE_INFO_IN_FLIGHT.delete(url);
+    });
+    RAW_FILE_INFO_IN_FLIGHT.set(url, request);
+    return request;
+  }
+
+  async function requestRawFileInfo(
     target: SourceFileTarget,
+    url: string,
   ): Promise<RawFileInfo> {
     try {
-      const res = await fetch(buildRawFileUrl(target), { method: "HEAD" });
+      const res = await fetch(url, { method: "HEAD" });
       // 404 は「その ref にファイルが無い」という確定状態。取得失敗の {} と
       // 区別して返す (SSE 再描画ゲートが削除を変化として検知するため)。
       if (res.status === 404) return { missing: true };

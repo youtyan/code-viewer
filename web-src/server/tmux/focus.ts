@@ -121,8 +121,13 @@ function shellQuote(value: string): string {
  *
  * ここで実行ファイル名を解決しておくので、`--bin tmux=...` や
  * CODE_VIEWER_BIN_TMUX がブラウザから開いたシェルでもそのまま効く。
+ *
+ * `env -u TMUX` を前に付ける: シェルの起動設定が tmux を自動で起こす環境では、
+ * 開いたシェルがもう tmux の中にいて、そのままでは attach が「sessions should be
+ * nested with care」で断られた。TMUX を外せば入れ子で繋がる。`env` は外部の
+ * コマンドなので、zsh / bash / fish のどれでも同じに働く。
  */
 export function tmuxAttachCommandLine(paneId: TmuxPaneId): string {
   const tmux = shellQuote(commandForExternal("tmux"));
-  return `${tmux} attach-session -t ${shellQuote(paneId)}\r`;
+  return `env -u TMUX ${tmux} attach-session -t ${shellQuote(paneId)}\r`;
 }

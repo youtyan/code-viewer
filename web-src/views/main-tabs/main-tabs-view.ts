@@ -174,6 +174,11 @@ export type MainTabsDeps = {
   onPanes(view: PanesView, how: FrontChange): void;
   /** 開いているターミナルのタブ (一覧の印) と、閉じたもの (購読をやめる)。 */
   onTerminals(open: ReadonlySet<string>, closed: string[]): void;
+  /**
+   * 右の列に今の画面の一覧 (History・作業ツリー) を出しているか。出している間は
+   * 右の列を畳まないので、右の面を預けたときの説明をそれに合わせる。
+   */
+  panelColumnHoldsList?(): boolean;
 };
 
 export type MainTabsHandle = {
@@ -1165,7 +1170,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       const label = !left
         ? current.unsplit
         : parked
-          ? current.rightParked(parked.pane.tabs.length)
+          ? deps.panelColumnHoldsList?.()
+            ? current.rightParkedForList(parked.pane.tabs.length)
+            : current.rightParked(parked.pane.tabs.length)
           : allowed
             ? current.splitRight
             : current.splitUnavailable;

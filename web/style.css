@@ -5074,6 +5074,22 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   flex-shrink: 0;
   margin: 0 2px;
 }
+/* 入りきらないとき真ん中の段を畳んだ印 (views/breadcrumb-fit.ts)。全体の
+   パスは title。畳んだ段と区切りは hidden で隠す (段の display に負けないよう)。 */
+.gdp-file-breadcrumb-ellipsis {
+  flex: none;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.gdp-file-breadcrumb > [hidden] {
+  display: none;
+}
+/* 畳んでもまだ入りきらないとき (とても狭い面): 残した段は同じ割合で縮める。
+   フォルダの段だけ先に縮むと (flex-shrink 10)「r / … / w / 名前」の 1 文字に
+   なった。 */
+.gdp-file-breadcrumb.is-collapsed > .gdp-file-breadcrumb-part {
+  flex-shrink: 1;
+}
 .gdp-file-detail-header .gdp-view-file {
   flex-shrink: 0;
 }

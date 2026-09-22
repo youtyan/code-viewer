@@ -21,8 +21,8 @@ import {
   withoutProjectPrefix,
 } from "./core/api-url";
 import {
-  catchUpKind,
   type CatchUpReason,
+  catchUpKind,
   createCatchUpGate,
   shouldAutoLoadForRoute,
 } from "./core/catch-up";
@@ -99,6 +99,7 @@ import {
 import { isNativeLinkClick } from "./core/link-click";
 import type { PaneSide, TabTarget } from "./core/main-tabs";
 import { createNetworkActivityTracker } from "./core/network-activity";
+import { panelColumnAction } from "./core/panel-column-policy";
 import {
   clampPanelSize,
   HISTORY_WIDTH,
@@ -1490,6 +1491,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     terminalInfo: (session) => terminalTabInfo(session),
     onPanes: (view, how) => showPanes(view, how),
+    panelColumnHoldsList,
     onTerminals: (_open, closed) => {
       for (const id of closed) TERMINAL_VIEW.releaseTab(id as ShellSessionId);
     },
@@ -7023,11 +7025,28 @@ window.GdpExpandLogic = GdpExpandLogic;
   // ---- 2 面のときの右の列 (ui-layout.md の「2 面と右の列」) ----
   // 2 面にした本文が、ゆとりのある面の最小幅 2 つ分に足りないなら、右の列を
   // 細い帯へ自動で畳む (Data の検索欄などが 0 幅に潰れるため)。2 面を解いたら
-  // 元へ戻す。利用者が 2 面の間に自分で開いたら、その意思を優先して、この
+  // 元へ戻す。一覧が右の列にある画面 (History・選んでいる作業ツリー) の間は
+  // 畳まない。利用者が 2 面の間に自分で開いたら、その意思を優先して、この
   // セッションでは二度と自動で畳まない (保存はしない = 読み直しで元に戻る)。
+  // 決まりそのものは core/panel-column-policy.ts。
   let PANEL_COLUMN_AUTO_HIDDEN = false;
   let PANEL_COLUMN_AUTO_HIDE_OFF = false;
   let PANEL_COLUMN_SPLIT = false;
+  let PANEL_COLUMN_HOLDS_LIST = false;
+
+  /**
+   * 一覧が右の列にある画面を出しているか。CSS で右の列の幅を一覧の幅
+   * (--history-w) にする条件 (style.css の body.gdp-history-page と、
+   * data-worktree-overview の無い body.gdp-worktree-page) と同じ。
+   */
+  function panelColumnHoldsList(): boolean {
+    const body = document.body;
+    return (
+      body.classList.contains("gdp-history-page") ||
+      (body.classList.contains("gdp-worktree-page") &&
+        !body.hasAttribute("data-worktree-overview"))
+    );
+  }
 
   /**
    * 右の列を畳む / 出すボタンの説明。2 面のために自動で畳んだときは、その理由も
@@ -7041,21 +7060,27 @@ window.GdpExpandLogic = GdpExpandLogic;
       : text.show;
   }
 
-  function syncPanelColumnForSplit(split: boolean): void {
-    if (split === PANEL_COLUMN_SPLIT) return;
-    PANEL_COLUMN_SPLIT = split;
-    if (split) {
-      if (PANEL_COLUMN_AUTO_HIDE_OFF) return;
-      if (STATE.sidebarHidden) return;
-      if (MAIN_TABS.splitFitsWithPanelColumn()) return;
-      PANEL_COLUMN_AUTO_HIDDEN = true;
-      SIDEBAR.applySidebarHidden(true, { persist: false });
-      markPanelRailAutoHidden();
+  /**
+   * 2 面になった / 解いた、または一覧のある画面に入った / 出たときに、右の列を
+   * 畳む・開く。どちらも変わっていなければ何もしない (利用者の操作を上書きしない)。
+   */
+  function syncPanelColumn(split: boolean = PANEL_COLUMN_SPLIT): void {
+    const holdsList = panelColumnHoldsList();
+    if (split === PANEL_COLUMN_SPLIT && holdsList === PANEL_COLUMN_HOLDS_LIST)
       return;
-    }
-    if (!PANEL_COLUMN_AUTO_HIDDEN) return;
-    PANEL_COLUMN_AUTO_HIDDEN = false;
-    SIDEBAR.applySidebarHidden(false, { persist: false });
+    PANEL_COLUMN_SPLIT = split;
+    PANEL_COLUMN_HOLDS_LIST = holdsList;
+    const action = panelColumnAction({
+      split,
+      holdsList,
+      autoHidden: PANEL_COLUMN_AUTO_HIDDEN,
+      userHidden: STATE.sidebarHidden && !PANEL_COLUMN_AUTO_HIDDEN,
+      userOptedOut: PANEL_COLUMN_AUTO_HIDE_OFF,
+      fitsWithColumn: MAIN_TABS.splitFitsWithPanelColumn(),
+    });
+    if (action === "keep") return;
+    PANEL_COLUMN_AUTO_HIDDEN = action === "collapse";
+    SIDEBAR.applySidebarHidden(action === "collapse", { persist: false });
     markPanelRailAutoHidden();
   }
 
@@ -7073,6 +7098,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     toggle.setAttribute("aria-label", title);
   }
 
+  // 一覧のある画面に入った / 出た (本文の route・作業ツリーの選択) ときも合わせる。
+  // 画面の印は app.ts の画面の切替と worktree-view.ts の何か所かで付くので、
+  // 付け忘れが起きないよう body の印そのものを見る。
+  new MutationObserver(() => syncPanelColumn()).observe(document.body, {
+    attributes: true,
+    attributeFilter: ["class", "data-worktree-overview"],
+  });
+
   function onUserToggledSidebarHidden(hidden: boolean): void {
     if (!hidden && PANEL_COLUMN_SPLIT) {
       // 2 面の間に自分で開いた = これ以降は自動で畳まない。
@@ -7083,7 +7116,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function showPanes(view: PanesView, how: FrontChange): void {
-    syncPanelColumnForSplit(view.split);
+    syncPanelColumn(view.split);
     for (const side of ["left", "right"] as const) {
       const host = PANE_HOSTS[side];
       const tab = view.fronts[side];

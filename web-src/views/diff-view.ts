@@ -37,6 +37,7 @@ import type {
   SidebarItem,
 } from "../core/types";
 import { suppressWhitespaceOnlyInlineHighlights } from "../core/ws-highlight";
+import { fitBreadcrumb } from "./breadcrumb-fit";
 import { attachStickyHScroll, detachStickyHScroll } from "./diff-hscroll";
 import { diffRowAfterLineNumber } from "./diff-line-select";
 import type { DiffViewText, ManualLoadReason } from "./diff-view-i18n";
@@ -1714,6 +1715,8 @@ export function createDiffView(deps: DiffViewDeps) {
       crumb.textContent = filePathDisplayText(path);
       nav.appendChild(crumb);
     }
+    // 深いパスで入りきらないときは真ん中の段を「…」に畳む。
+    fitBreadcrumb(nav, allParts.map(filePathDisplayText).join("/"));
     return nav;
   }
 

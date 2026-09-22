@@ -14,10 +14,12 @@ import type {
   SerializedLayout,
   TabTarget,
 } from "../core/main-tabs";
+import { panelColumnAction } from "../core/panel-column-policy";
 import { type AppRoute, urlKeepsSavedFront } from "../core/routes";
 import { closeContextMenu } from "../views/context-menu";
 import {
   createMainTabsView,
+  type MainTabsDeps,
   type MainTabsHandle,
   routeTarget,
 } from "../views/main-tabs/main-tabs-view";
@@ -53,6 +55,7 @@ function setup(
     "/state/main-tabs.json.broken-sample",
   initial: AppRoute = fileRoute("src/app.ts"),
   loadCommon: () => Promise<unknown> = async () => null,
+  extra: Partial<MainTabsDeps> = {},
 ) {
   const mount = document.createElement("nav");
   document.body.append(mount);
@@ -111,6 +114,7 @@ function setup(
     onTerminals: (open, closed) => {
       terminals.push({ open: [...open], closed });
     },
+    ...extra,
   });
   handle.syncRoute(current);
   return {
@@ -1099,6 +1103,193 @@ describe("main tabs view: 左右 2 面", () => {
     } finally {
       globalThis.ResizeObserver = OriginalResizeObserver;
     }
+  });
+
+  // 2 面のときの右の列 (ui-layout.md の「2 面と右の列」)。一覧が右の列にある画面
+  // (History・選んでいる作業ツリー。右の列は一覧の幅 560) は右の列を畳まず、
+  // 本文が 2 面の下限に足りなければ右の面を預ける。一覧の無い画面 (右の列 240)
+  // は、ゆとりが無ければ右の列を畳む。本文の幅 = 窓 − 左のサイドバー 280。
+  test.each([
+    { screen: "History", window: 1280, parked: true, action: "keep" },
+    { screen: "History", window: 1440, parked: true, action: "keep" },
+    { screen: "History", window: 1480, parked: true, action: "keep" },
+    { screen: "History", window: 1481, parked: false, action: "keep" },
+    { screen: "History", window: 1600, parked: false, action: "keep" },
+    { screen: "Diff", window: 1280, parked: false, action: "collapse" },
+    { screen: "Diff", window: 1440, parked: false, action: "collapse" },
+    { screen: "Diff", window: 1600, parked: false, action: "keep" },
+  ] as const)("$screen・窓 $window px: 右の面を預けるか $parked・右の列 $action", async ({
+    screen,
+    window,
+    parked,
+    action,
+  }) => {
+    const holdsList = screen === "History";
+    Object.defineProperty(document.documentElement, "clientWidth", {
+      configurable: true,
+      value: window - 280,
+    });
+    const panelColumn = document.createElement("div");
+    panelColumn.getBoundingClientRect = () =>
+      new DOMRect(0, 0, holdsList ? 560 : 240, 80);
+    const saved = {
+      version: 3,
+      focused: "left",
+      split: 0.5,
+      panes: [
+        {
+          side: "left",
+          activeId: "a",
+          tabs: [
+            {
+              id: "a",
+              preview: false,
+              target: { kind: "file", path: "src/app.ts" },
+            },
+          ],
+        },
+        {
+          side: "right",
+          activeId: "t",
+          tabs: [
+            {
+              id: "t",
+              preview: false,
+              target: { kind: "terminal", session: "shell-a1" },
+            },
+          ],
+        },
+      ],
+    };
+    const { handle, mount } = setup(
+      async () => saved,
+      panelColumn,
+      undefined,
+      undefined,
+      undefined,
+      { panelColumnHoldsList: () => holdsList },
+    );
+    await handle.restore();
+    const split = panes(handle).split;
+    expect({
+      parked: !split,
+      action: panelColumnAction({
+        split,
+        holdsList,
+        autoHidden: false,
+        userHidden: false,
+        userOptedOut: false,
+        fitsWithColumn: handle.splitFitsWithPanelColumn(),
+      }),
+      // 預けた理由は、一覧のために預けたとき専用の説明
+      reason: !split
+        ? splitButton(mount)?.title.startsWith(
+            "The right side (1 tab) is set aside to make room for this screen's list",
+          )
+        : null,
+    }).toEqual({ parked, action, reason: parked ? true : null });
+  });
+
+  // 利用者の選んだ状態は上書きしない。一覧の画面に入る / 1 面に戻ると、自動で
+  // 畳んだものだけ開く。
+  test.each([
+    {
+      name: "2 面・ゆとり無し",
+      split: true,
+      holdsList: false,
+      autoHidden: false,
+      userHidden: false,
+      userOptedOut: false,
+      fits: false,
+      action: "collapse",
+    },
+    {
+      name: "2 面・ゆとり有り",
+      split: true,
+      holdsList: false,
+      autoHidden: false,
+      userHidden: false,
+      userOptedOut: false,
+      fits: true,
+      action: "keep",
+    },
+    {
+      name: "2 面・もう自動で畳んだ",
+      split: true,
+      holdsList: false,
+      autoHidden: true,
+      userHidden: false,
+      userOptedOut: false,
+      fits: false,
+      action: "keep",
+    },
+    {
+      name: "2 面・利用者が畳んでいる",
+      split: true,
+      holdsList: false,
+      autoHidden: false,
+      userHidden: true,
+      userOptedOut: false,
+      fits: false,
+      action: "keep",
+    },
+    {
+      name: "2 面・利用者が 2 面の間に開いた",
+      split: true,
+      holdsList: false,
+      autoHidden: false,
+      userHidden: false,
+      userOptedOut: true,
+      fits: false,
+      action: "keep",
+    },
+    {
+      name: "一覧の画面・自動で畳んでいた",
+      split: true,
+      holdsList: true,
+      autoHidden: true,
+      userHidden: false,
+      userOptedOut: false,
+      fits: false,
+      action: "restore",
+    },
+    {
+      name: "一覧の画面・利用者が畳んでいる",
+      split: true,
+      holdsList: true,
+      autoHidden: false,
+      userHidden: true,
+      userOptedOut: false,
+      fits: false,
+      action: "keep",
+    },
+    {
+      name: "1 面・自動で畳んでいた",
+      split: false,
+      holdsList: false,
+      autoHidden: true,
+      userHidden: false,
+      userOptedOut: false,
+      fits: false,
+      action: "restore",
+    },
+    {
+      name: "1 面・利用者が畳んでいる",
+      split: false,
+      holdsList: false,
+      autoHidden: false,
+      userHidden: true,
+      userOptedOut: false,
+      fits: false,
+      action: "keep",
+    },
+  ] as const)("右の列の決まり: $name → $action", ({
+    name: _name,
+    fits,
+    action,
+    ...state
+  }) => {
+    expect(panelColumnAction({ ...state, fitsWithColumn: fits })).toBe(action);
   });
 
   // 2 面を置ける下限は、詰めたときの面の幅 (320) 2 つ分 + 仕切り 1 = 641px。

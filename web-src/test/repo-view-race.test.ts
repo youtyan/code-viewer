@@ -474,3 +474,51 @@ describe("repo sidebar refresh failures", () => {
     errors.mockRestore();
   });
 });
+
+// 1 回のファイルの表示で、見出しの情報・表示の種類の判定・変化の検知が同じ
+// HEAD /_file を同時に 3 本出していた。同時の要求は 1 本にまとめ、終わったら
+// 次は取り直す。
+describe("file details (HEAD /_file)", () => {
+  test("同じファイルへの同時の要求は 1 本にまとめ、終わった後は取り直す", async () => {
+    installNullDocument();
+    const { view } = makeRepoView(diffRoute);
+    const gate = deferred<Response>();
+    const requests: string[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init) => {
+      requests.push(`${init?.method ?? "GET"} ${String(input)}`);
+      return gate.promise;
+    }) as typeof fetch;
+    const target = { path: "src/sample.ts", ref: "worktree" };
+    const pending = [
+      view.loadRawFileInfo(target),
+      view.loadRawFileInfo(target),
+      view.loadRawFileInfo({ path: "src/other.ts", ref: "worktree" }),
+    ];
+    gate.resolve(
+      new Response(null, {
+        status: 200,
+        headers: { "content-length": "12" },
+      }),
+    );
+    const [first, second] = await Promise.all(pending);
+    expect([requests.length, first, second]).toEqual([
+      2,
+      {
+        size: 12,
+        type: undefined,
+        created_at: undefined,
+        updated_at: undefined,
+        commit_updated_at: undefined,
+      },
+      {
+        size: 12,
+        type: undefined,
+        created_at: undefined,
+        updated_at: undefined,
+        commit_updated_at: undefined,
+      },
+    ]);
+    await view.loadRawFileInfo(target);
+    expect(requests.length).toBe(3);
+  });
+});

@@ -22,6 +22,11 @@ export type MainTabsText = {
   unsplit: string;
   /** 窓が狭くて右の面を隠している間の、分割のボタンの説明。 */
   rightParked: (count: number) => string;
+  /**
+   * 右の列の一覧 (History・作業ツリー) を出すために右の面を隠している間の説明。
+   * 一覧が右の列にある画面では右の列を畳まないので、本文が狭くなる。
+   */
+  rightParkedForList: (count: number) => string;
   resizeSplit: string;
   dropToSplit: string;
   /** 画像のタブのメニュー: そのファイルの履歴。 */
@@ -49,6 +54,8 @@ const EN: MainTabsText = {
     "Back to one side (moves the right tabs to the left; a file already open on the left closes on the right)",
   rightParked: (count) =>
     `The right side (${count} tab${count === 1 ? "" : "s"}) is hidden because the window is too narrow for two sides. It comes back when the window is wide enough.`,
+  rightParkedForList: (count) =>
+    `The right side (${count} tab${count === 1 ? "" : "s"}) is set aside to make room for this screen's list in the right column. It comes back when you move to another screen or widen the window.`,
   resizeSplit: "Resize the two sides",
   dropToSplit: "Drop to split right",
   fileHistory: "File history",
@@ -76,6 +83,8 @@ const JA: MainTabsText = {
     "1 面に戻す (右のタブを左へ移します。左で開いているファイルは右を閉じます)",
   rightParked: (count) =>
     `窓が 2 面を出せる幅より狭いので、右の面 (タブ ${count} 枚) を隠しています。2 面を出せる幅になれば戻ります。`,
+  rightParkedForList: (count) =>
+    `右の列の一覧 (履歴・作業ツリー) のために、右の面 (タブ ${count} 枚) を預けています。別の画面に移るか窓を広げると戻ります。`,
   resizeSplit: "左右の幅を変える",
   dropToSplit: "ここに落とすと右に分割",
   fileHistory: "ファイルの履歴",
