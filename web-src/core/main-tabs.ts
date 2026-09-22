@@ -168,10 +168,16 @@ function selectIn(pane: Pane, id: string | null): Pane {
 }
 
 function nextId(layout: Layout, newId?: () => string): string {
-  if (newId) return newId();
   const used = new Set<string>();
   for (const side of sides(layout))
     for (const tab of paneOf(layout, side)?.tabs ?? []) used.add(tab.id);
+  if (newId) {
+    const id = newId();
+    if (id.length === 0) throw new Error("new tab id must be non-empty");
+    if (used.has(id))
+      throw new Error(`new tab id already exists: ${JSON.stringify(id)}`);
+    return id;
+  }
   let n = used.size + 1;
   while (used.has(`t${n}`)) n += 1;
   return `t${n}`;
