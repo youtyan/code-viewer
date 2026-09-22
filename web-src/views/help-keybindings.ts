@@ -218,8 +218,8 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
       {
         selectors: [{ action: "toggle-terminal-panel" }],
         description: {
-          en: "Open or close the terminal panel",
-          ja: "ターミナルパネルを開閉",
+          en: "Open a terminal: the ＋ menu of the focused side (new shell or session)",
+          ja: "ターミナルを開く: フォーカスのある面の「＋」のメニュー (新しいシェル・セッション)",
         },
       },
       {

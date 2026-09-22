@@ -244,22 +244,17 @@
 
   <div id="doctor-sheet-overlay" class="doctor-sheet-overlay" hidden aria-hidden="true"></div>
   <aside id="doctor-sheet" class="doctor-sheet" hidden aria-hidden="true" inert aria-label="environment doctor"></aside>
-  <!-- 画面下のパネル。IDE のターミナルパネルと同じで、タブで中身を切り替え、
-       上端のハンドルで高さを変える。中身 (#terminal-sheet / #tools-sheet) は
-       右ドロワーだった頃と同じ id のままなので、各ビューの実装は変わらない。 -->
+  <!-- 画面下のパネル。タブで中身 (Tools / Search) を切り替え、上端のハンドルで
+       高さを変える。ターミナルはメインの面のタブだけに出す (ここには置かない)。
+       #tools-sheet は右ドロワーだった頃と同じ id のまま。 -->
   <section id="app-panel" class="app-panel">
     <div id="app-panel-resizer" class="app-panel-resizer" role="separator" tabindex="0" aria-orientation="horizontal" aria-label="resize panel"></div>
-    <!-- 見出しの細い 1 行: 左にタブ (Terminal / Tools / Search) と、映しているペインの
-         種類・作業内容・状態。右に、そのペインのプロジェクト、映しているビューの小さな
-         操作、「⋯」(表示の仕方・文字の大きさなど)、開く / 畳むの山形。 -->
+    <!-- 見出しの細い 1 行: 左にタブ (Tools / Search)。右に「⋯」(表示の仕方) と、
+         開く / 畳むの山形。 -->
     <div class="app-panel-tabs" role="tablist" aria-label="panel">
-      <button type="button" id="panel-tab-terminal" class="app-panel-tab" role="tab" data-panel="terminal" data-route="terminal" aria-selected="false">Terminal</button>
-      <div id="app-panel-context" class="app-panel-context" hidden></div>
-      <button type="button" id="panel-tab-tools" class="app-panel-tab app-panel-tab-quiet" role="tab" data-panel="tools" data-route="tools" aria-selected="false">Tools</button>
-      <button type="button" id="panel-tab-search" class="app-panel-tab app-panel-tab-quiet" role="tab" data-panel="search" data-route="search" aria-selected="false">Search</button>
+      <button type="button" id="panel-tab-tools" class="app-panel-tab" role="tab" data-panel="tools" data-route="tools" aria-selected="false">Tools</button>
+      <button type="button" id="panel-tab-search" class="app-panel-tab" role="tab" data-panel="search" data-route="search" aria-selected="false">Search</button>
       <span class="app-panel-spacer"></span>
-      <span id="app-panel-place" class="app-panel-place" hidden></span>
-      <div id="app-panel-view-actions" class="app-panel-view-actions" hidden></div>
       <!-- 表示の仕方 (重ねる / 画面内) の切替そのもの。見出しの行では「⋯」の中に
            入れるので隠してあるが、状態 (active / aria-pressed) はここが持つ。 -->
       <div class="seg app-panel-layout-switch" role="group" aria-label="panel layout" hidden>
@@ -272,7 +267,6 @@
     <div class="app-panel-bodies">
       <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
       <aside id="search-sheet" class="search-sheet" hidden aria-hidden="true" inert aria-label="search results"></aside>
-      <aside id="terminal-sheet" class="terminal-sheet" hidden aria-hidden="true" inert aria-label="terminal"></aside>
     </div>
   </section>
   <main id="content">

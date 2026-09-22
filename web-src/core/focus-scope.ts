@@ -14,7 +14,7 @@ export function isEditableKeyTarget(target: Element | null): boolean {
 }
 
 export function keymapScope(target: Element | null): KeymapScope {
-  // 下パネル (ターミナル / Tools) は #content の外にあるので、先に見る。
+  // 下パネル (Tools / Search) は #content の外にあるので、先に見る。
   // ここを分けておかないと、パネルのタブにフォーカスがあるときに j や k が
   // サイドバーの移動として発火してしまう。
   if (target?.closest("#app-panel")) return "panel";

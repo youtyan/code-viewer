@@ -216,11 +216,9 @@ export type AppSettingsState = {
   agentAccountsCollapsed?: boolean;
   /** ターミナルの右の画像の棚を畳んだ。 */
   terminalImageShelfCollapsed?: boolean;
-  /** ターミナルのセッションの一覧 (左の列) を開いている。 */
-  terminalSessionsOpen?: boolean;
   /**
-   * 下のターミナルパネルを開いているか。URL には載せない (?terminal= は
-   * 映しているシェルだけ)。再読み込みで開いたまま戻す。
+   * 下パネル (Tools / Search) を開いているか。再読み込みで開いたまま戻す。
+   * 名前は下パネルにターミナルがあった頃のまま (保存してある値を読むため)。
    */
   terminalPanelOpen?: boolean;
   /** 左のサイドバー (プロジェクトとエージェント) を畳んだ。 */

@@ -96,8 +96,15 @@ export type MainTabsDeps = {
   /** 覚えた route が無いタブ (読み戻したタブ) を開くときの route。 */
   defaultRoute(target: TabTarget): AppRoute;
   copyPath(path: string): void;
-  /** ＋ボタン。 */
-  onNewTab(): void;
+  /**
+   * ＋ボタン。その面の新しいタブのメニュー (ファイル・新しいシェル・既存の
+   * セッション) を anchor の下に開く。
+   */
+  onNewTab(side: PaneSide, anchor: HTMLElement): void;
+  /** ターミナルのタブの右クリックの「セッションを止める」。 */
+  stopTerminal(session: string): void;
+  /** ターミナルのタブの右クリックに足す、端末の操作 (文字の大きさなど)。 */
+  terminalMenuItems(): ContextMenuItem[];
   loadSaved(): Promise<unknown>;
   save(layout: SerializedLayout, keepalive: boolean): Promise<void>;
   /** ターミナルのタブの名前と状態 (エージェントを映していれば、その状態)。 */
@@ -124,6 +131,8 @@ export type MainTabsHandle = {
   closeTerminal(session: string): void;
   /** 画像のタブを開いて前面に出す。 */
   openImage(path: string, pane?: OpenOptions["pane"]): void;
+  /** フォーカスのある面の＋のメニューを開く (キー操作・パレットから)。 */
+  openNewTabMenu(): void;
   /** フォーカスのある面の前面のタブ。 */
   front(): Tab | null;
   /** 今の面の様子 (前面・フォーカス・本文を置く面)。 */
@@ -289,7 +298,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     );
     newButton.addEventListener("click", () => {
       focusSide(side);
-      deps.onNewTab();
+      deps.onNewTab(side, newButton);
     });
     const splitButton = document.createElement("button");
     splitButton.type = "button";
@@ -575,6 +584,22 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         onSelect: () => changeAndGo((l) => moveToOtherSide(l, tab.id)),
       },
       { kind: "separator" },
+      // ターミナルのタブ: 端末の操作と、シェルそのものを止める (閉じるはタブだけ)。
+      ...(tab.target.kind === "terminal"
+        ? [
+            ...deps.terminalMenuItems(),
+            { kind: "separator" as const },
+            {
+              label: current.stopSession,
+              title: current.stopSessionTitle,
+              danger: true,
+              onSelect: () => {
+                if (tab.target.kind === "terminal")
+                  deps.stopTerminal(tab.target.session);
+              },
+            },
+          ]
+        : []),
       // リポジトリの中の画像は、ファイルの画面の履歴 (History) へ行けるように。
       ...(repoImage !== null
         ? [
@@ -935,6 +960,10 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     openImage(path, pane = "focused") {
       rememberRoute();
       commit(open(layout, { kind: "image", path }, { pane }));
+    },
+    openNewTabMenu() {
+      const side = layout.panes.right ? layout.focused : "left";
+      deps.onNewTab(side, sections[side].newButton);
     },
     front: () => activeTab(layout),
     panes: () => panesView(layout),

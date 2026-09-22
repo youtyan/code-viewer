@@ -116,43 +116,27 @@ describe("state store", () => {
     });
   });
 
-  test.each([
-    {
-      name: "keeps the session list open",
-      input: true,
-      expected: { version: 1, terminalSessionsOpen: true },
-    },
-    {
-      name: "keeps the session list collapsed",
-      input: false,
-      expected: { version: 1, terminalSessionsOpen: false },
-    },
-    {
-      name: "drops a non-boolean session list state",
-      input: "open",
-      expected: { version: 1 },
-    },
-  ])("settings session list sanitizer $name", async ({ input, expected }) => {
+  test("drops the retired session list state (the bottom panel no longer has a terminal)", async () => {
     await withTempProject(async (dir) => {
       expect(
-        await patchAppSettingsState(dir, { terminalSessionsOpen: input }),
-      ).toEqual(expected);
+        await patchAppSettingsState(dir, { terminalSessionsOpen: true }),
+      ).toEqual({ version: 1 });
     });
   });
 
   test.each([
     {
-      name: "keeps the terminal panel open",
+      name: "keeps the bottom panel open",
       input: true as unknown,
       expected: { version: 1, terminalPanelOpen: true },
     },
     {
-      name: "keeps the terminal panel closed",
+      name: "keeps the bottom panel closed",
       input: false as unknown,
       expected: { version: 1, terminalPanelOpen: false },
     },
     {
-      name: "drops a non-boolean terminal panel state",
+      name: "drops a non-boolean bottom panel state",
       input: "open" as unknown,
       expected: { version: 1 },
     },

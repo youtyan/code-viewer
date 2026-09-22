@@ -125,7 +125,7 @@ import {
   withToolsOverlay,
 } from "./core/routes";
 import { rememberPaletteSelection } from "./core/search-palette";
-import type { ShellSessionId } from "./core/shell";
+import type { ShellListResponse, ShellSessionId } from "./core/shell";
 import { sourceInternalPathKind } from "./core/source-meta";
 import { readStoredSize } from "./core/stored-size";
 import {
@@ -253,6 +253,7 @@ import { terminalText } from "./views/terminal/i18n";
 import { createTerminalView } from "./views/terminal/terminal-view";
 import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
+import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
   SETTINGS_CATEGORIES,
@@ -1363,7 +1364,9 @@ window.GdpExpandLogic = GdpExpandLogic;
           setStatus("error");
         });
     },
-    onNewTab: () => openSearchPalette("file"),
+    onNewTab: (side, anchor) => void openNewTabMenu(side, anchor),
+    stopTerminal: (session) => void stopTerminal(session as ShellSessionId),
+    terminalMenuItems: () => TERMINAL_VIEW.menuItems(),
     loadSaved: async () =>
       (
         await loadStateResponse<{ layout: unknown }>(
@@ -1383,8 +1386,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     terminalInfo: (session) => terminalTabInfo(session),
     onPanes: (view, how) => showPanes(view, how),
-    onTerminals: (open, closed) => {
-      TERMINAL_VIEW.setTabbed(open);
+    onTerminals: (_open, closed) => {
       for (const id of closed) TERMINAL_VIEW.releaseTab(id as ShellSessionId);
     },
   });
@@ -1917,6 +1919,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         docked: string;
         dockedTitle: string;
         close: string;
+        /** 畳んでいるときの山形: 開く (Tools を出す)。 */
+        open: string;
         resize: string;
       };
       global: {
@@ -2112,6 +2116,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         docked: "Docked",
         dockedTitle: "Keep the panel inside the window",
         close: "Close panel",
+        open: "Open panel (Tools / Search)",
         resize: "Resize panel height",
       },
       global: {
@@ -2537,6 +2542,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         docked: "画面内",
         dockedTitle: "本文と分けて画面内に表示",
         close: "パネルを閉じる",
+        open: "パネルを開く (Tools / Search)",
         resize: "パネルの高さを変更",
       },
       global: {
@@ -3027,17 +3033,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       .querySelector<HTMLElement>("#tools-sheet")
       ?.setAttribute("aria-label", toolsChrome.title);
     relocalizeTools?.();
-    const terminalChrome = terminalText(STATE.language);
-    const terminalBtn = document.querySelector<HTMLButtonElement>(
-      "#panel-tab-terminal",
-    );
-    if (terminalBtn) {
-      terminalBtn.textContent = terminalChrome.title;
-      terminalBtn.title = terminalChrome.open;
-    }
-    document
-      .querySelector<HTMLElement>("#terminal-sheet")
-      ?.setAttribute("aria-label", terminalChrome.title);
     relocalizeTerminal?.();
     const searchChrome = searchPaletteText(STATE.language);
     const searchTabBtn =
@@ -3838,12 +3833,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   let WORKTREE_VIEW: WorktreeView | null = null;
   let AGENTS_VIEW: AgentsView | null = null;
   let APP_NAV: AppNav | null = null;
-  /**
-   * 下パネルの見出しの行に、映しているペインの種類・作業内容・状態と、その
-   * プロジェクトを書く。エージェントの状態の取り直しができてから本物に差し
-   * 替える (それまでは何もしない)。
-   */
-  let renderPanelContext: () => void = () => undefined;
   let AGENTS_SIDEBAR: AgentsSidebar | null = null;
   let PROJECT_SWITCHER: ProjectSwitcher | null = null;
 
@@ -3869,44 +3858,22 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   // buildRoute は AppRoute しか知らないので、そこに乗らないオーバーレイの状態
-  // (doctor / tools) は現在の URL から明示的に引き継ぐ。落とすと画面を移動した
-  // 瞬間にシートの状態が URL から消える。history に積む URL とヘッダメニューの
-  // href の両方がこれを通る必要がある。
+  // (doctor / tools / search) は現在の URL から明示的に引き継ぐ。落とすと画面を
+  // 移動した瞬間にシートの状態が URL から消える。history に積む URL とヘッダ
+  // メニューの href の両方がこれを通る必要がある。?terminal= は引き継がない:
+  // 前面のタブがターミナルでない画面へ移るので、映しているシェルは無い
+  // (ターミナルのタブが前面になるときは showPanes がそのシェルを積む)。
   function withOverlayState(url: string): string {
     return withSearchResultsOverlay(
-      withTerminalOverlay(
-        withToolsOverlay(
-          withDoctorOverlay(
-            url,
-            parseDoctorOverlay(routePathname(), window.location.search),
-          ),
-          parseToolsOverlay(window.location.search),
+      withToolsOverlay(
+        withDoctorOverlay(
+          url,
+          parseDoctorOverlay(routePathname(), window.location.search),
         ),
-        panelTerminalParam(),
+        parseToolsOverlay(window.location.search),
       ),
       parseSearchResultsOverlay(window.location.search),
     );
-  }
-
-  /**
-   * 新しく積む URL の ?terminal=。前面のタブがターミナルでない画面へ移るので、
-   * 下パネルが映しているシェル (無ければ付けない)。パネルの開閉は URL に載せず
-   * ユーザー単位の設定 (terminalPanelOpen) に置く。ターミナルのタブが前面に
-   * なるときは showMainFront がそのシェルを積む。
-   */
-  function panelTerminalParam(): TerminalOverlayState {
-    return terminalPanelShown() ? TERMINAL_VIEW.getActiveTarget() : null;
-  }
-
-  /**
-   * 下パネルのターミナルが開いているか。TERMINAL_VIEW.isOpen() と同じ基準
-   * (#terminal-sheet の hidden) を DOM から読む。起動の途中 (ビューを作る前) の
-   * syncHeaderMenu からも呼ばれるため。開くのはビューだけなので、開いていれば
-   * ビューは作られている。
-   */
-  function terminalPanelShown(): boolean {
-    const sheet = document.getElementById("terminal-sheet");
-    return sheet ? !sheet.hidden : false;
   }
 
   function urlForRoute(route: AppRoute): string {
@@ -4320,8 +4287,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function syncHeaderMenu() {
-    // Terminal / Tools はページ遷移ではなく下パネルの中身なので、ヘッダーの
-    // 並びには居ない。選択状態は URL (?terminal= / ?tools=) から決める。
+    // Tools / Search はページ遷移ではなく下パネルの中身なので、ヘッダーの
+    // 並びには居ない。選択状態は URL (?tools= / ?results=) から決める。
     syncAppPanel();
     document
       .querySelectorAll<HTMLAnchorElement>(ROUTE_LINK_SELECTOR)
@@ -4972,24 +4939,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     event.preventDefault();
     openToolsSheet();
   });
-  $("#panel-tab-terminal")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    openTerminalSheet();
-  });
   $("#panel-tab-search")?.addEventListener("click", (event) => {
     event.preventDefault();
     openSearchSheet();
   });
-  // 見出しの行の山形: 開いていれば畳み、畳んでいればターミナルを開く。
+  // 見出しの行の山形: 開いていれば畳み、畳んでいれば Tools を開く。
   $("#app-panel-close")?.addEventListener("click", (event) => {
     event.preventDefault();
     if (
       document.getElementById("app-panel")?.classList.contains("app-panel-open")
     )
       closeAppPanel();
-    else openTerminalSheet();
+    else openToolsSheet();
   });
-  // 見出しの行の「⋯」: 表示の仕方 (重ねる / 画面内) と、映しているビューの操作。
+  // 見出しの行の「⋯」: 表示の仕方 (重ねる / 画面内)。
   $("#app-panel-menu")?.addEventListener("click", (event) => {
     event.stopPropagation();
     const button = event.currentTarget as HTMLElement;
@@ -5007,8 +4970,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         onSelect: () => setAppPanelDocked(true),
       },
     ];
-    const viewItems = TERMINAL_VIEW.menuItems();
-    if (viewItems.length > 0) items.push({ kind: "separator" }, ...viewItems);
     showContextMenu(button, items);
   });
   document
@@ -5572,9 +5533,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       applySidebarHidden(!STATE.sidebarHidden);
       return true;
     }
+    // 名前は下パネルにターミナルがあった頃のまま (保存したキー割り当てを
+    // 壊さない)。いまはフォーカスのある面の「＋」のメニューを開く。
     if (action === "toggle-terminal-panel") {
-      if (TERMINAL_VIEW.isOpen()) closeTerminalSheet();
-      else openTerminalSheet();
+      MAIN_TABS.openNewTabMenu();
       return true;
     }
     if (action === "undo-last-action") {
@@ -5940,10 +5902,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     MAIN_TABS.syncRoute(STATE.route);
     // ?terminal= のタブが前面になるかは、読み戻したタブの並びで決まる。
     void MAIN_TABS.restore().then(() => {
-      syncTerminalSheetFromUrl(INITIAL_TERMINAL_PARAM);
-      // パネルの開閉は設定から戻す (URL がタブのシェルを指していても)。
-      if (APP_SETTINGS.terminalPanelOpen && !TERMINAL_VIEW.isOpen())
-        openTerminalSheet();
+      syncTerminalFromUrl(INITIAL_TERMINAL_PARAM);
+      // 下パネルの開閉は設定から戻す (URL が Tools も Search も指していないとき)。
+      if (
+        APP_SETTINGS.terminalPanelOpen &&
+        parseToolsOverlay(window.location.search) === null &&
+        parseSearchResultsOverlay(window.location.search) === null
+      )
+        openToolsSheet();
     });
     if (STATE.route.screen === "help") {
       setStatus("live");
@@ -6210,29 +6176,25 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * 画面下のパネル。中身は Terminal と Tools で、出せるのは一度に 1 つ。
+   * 画面下のパネル。中身は Tools と Search で、出せるのは一度に 1 つ。
+   * ターミナルはメインの面のタブだけに出す (下パネルには置かない)。
    *
-   * 開いているかどうかは中身が持っている (それぞれの isOpen)。パネル自身は
-   * 器なので、状態を二重に持たずに中身から引き直す。ここを別々に持つと、
+   * 開いているかどうかは URL (?tools= / ?results=) が持っている。パネル自身は
+   * 器なので、状態を二重に持たずに URL から引き直す。ここを別々に持つと、
    * URL から復元したときにタブと中身がずれる。
    */
   function syncAppPanel(): void {
     // 中身の open() は非同期なので、直後に isOpen() を見ると閉じたままに
-    // 見える。URL は開いた時点で同期的に入るので、そちらを正とする
-    // (ヘッダーのメニューが押下状態を出していたときと同じ決め方)。
+    // 見える。URL は開いた時点で同期的に入るので、そちらを正とする。
     const tools = parseToolsOverlay(window.location.search) !== null;
-    // ターミナルの開閉は URL に載せないので、ビューの状態 (open() が同期で
-    // 開く) を正とする。
-    const terminal = terminalPanelShown();
     const search = parseSearchResultsOverlay(window.location.search) !== null;
-    const open = tools || terminal || search;
+    const open = tools || search;
     const panel = document.getElementById("app-panel");
     if (panel) {
       panel.classList.toggle("app-panel-open", open);
     }
     for (const [id, selected] of [
       ["#panel-tab-tools", tools],
-      ["#panel-tab-terminal", terminal],
       ["#panel-tab-search", search],
     ] as const) {
       const tab = document.querySelector<HTMLButtonElement>(id);
@@ -6242,15 +6204,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     const toggle =
       document.querySelector<HTMLButtonElement>("#app-panel-close");
     if (toggle) {
-      const label = open
-        ? uiText().appPanel.close
-        : terminalText(STATE.language).title;
+      const label = open ? uiText().appPanel.close : uiText().appPanel.open;
       toggle.title = label;
       toggle.setAttribute("aria-label", label);
       toggle.setAttribute("aria-expanded", String(open));
     }
     syncAppPanelLayout();
-    renderPanelContext();
   }
 
   function syncAppPanelLayout(): void {
@@ -6273,21 +6232,21 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function closeAppPanel(): void {
-    if (
-      parseSearchResultsOverlay(window.location.search) !== null ||
-      SEARCH_RESULTS_VIEW.isOpen()
-    )
-      closeSearchSheet();
-    if (
-      parseToolsOverlay(window.location.search) !== null ||
-      TOOLS_VIEW.isOpen()
-    )
-      closeToolsSheet();
-    if (
-      parseTerminalOverlay(window.location.search) !== null ||
-      TERMINAL_VIEW.isOpen()
-    )
-      closeTerminalSheet();
+    hideSearchSheet();
+    hideToolsSheet();
+    setAppPanelOpen(false);
+    syncAppPanel();
+  }
+
+  /**
+   * 下パネルを開いているか (再読み込みで戻す)。保存のキーは下パネルに
+   * ターミナルがあった頃の名前 (terminalPanelOpen) のまま: 保存してある値を
+   * そのまま読めるように。
+   */
+  function setAppPanelOpen(open: boolean): void {
+    if ((APP_SETTINGS.terminalPanelOpen === true) === open) return;
+    mergeLocalSettings({ terminalPanelOpen: open });
+    patchSettings({ terminalPanelOpen: open });
   }
 
   /**
@@ -6347,16 +6306,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function openToolsSheet(tool?: ToolId): void {
     // タブなので、他は畳む。2 つ並べると 1 つあたりが狭くなりすぎる。
-    if (
-      parseTerminalOverlay(window.location.search) !== null ||
-      TERMINAL_VIEW.isOpen()
-    )
-      closeTerminalSheet();
-    if (
-      parseSearchResultsOverlay(window.location.search) !== null ||
-      SEARCH_RESULTS_VIEW.isOpen()
-    )
-      closeSearchSheet();
+    hideSearchSheet();
+    setAppPanelOpen(true);
     // 実際に出すツールが決まるのは保存状態を読んだ後だが、「開いた」ことは
     // その場で URL に出す。読み込みが止まっても URL と画面が食い違わない。
     updateUrlForToolsOverlay(tool ?? TOOLS_VIEW.getActiveTool());
@@ -6364,9 +6315,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncAppPanel();
   }
 
-  function closeToolsSheet(): void {
+  /** Tools を畳む (パネルの開閉の設定は呼び出し側が決める)。 */
+  function hideToolsSheet(): void {
+    if (
+      parseToolsOverlay(window.location.search) === null &&
+      !TOOLS_VIEW.isOpen()
+    )
+      return;
     TOOLS_VIEW.close();
     updateUrlForToolsOverlay(null);
+  }
+
+  function closeToolsSheet(): void {
+    hideToolsSheet();
+    setAppPanelOpen(false);
     syncAppPanel();
   }
 
@@ -6437,25 +6399,22 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function openSearchSheet(query?: string): void {
-    if (
-      parseTerminalOverlay(window.location.search) !== null ||
-      TERMINAL_VIEW.isOpen()
-    )
-      closeTerminalSheet();
-    if (
-      parseToolsOverlay(window.location.search) !== null ||
-      TOOLS_VIEW.isOpen()
-    )
-      closeToolsSheet();
+    hideToolsSheet();
+    setAppPanelOpen(true);
     updateUrlForSearchResultsOverlay(query ?? SEARCH_RESULTS_VIEW.getQuery());
     SEARCH_RESULTS_VIEW.open(query);
     syncAppPanel();
   }
 
-  function closeSearchSheet(): void {
+  /** Search を畳む (パネルの開閉の設定は呼び出し側が決める)。 */
+  function hideSearchSheet(): void {
+    if (
+      parseSearchResultsOverlay(window.location.search) === null &&
+      !SEARCH_RESULTS_VIEW.isOpen()
+    )
+      return;
     SEARCH_RESULTS_VIEW.close();
     updateUrlForSearchResultsOverlay(null);
-    syncAppPanel();
   }
 
   function syncSearchSheetFromUrl(): void {
@@ -6467,12 +6426,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncAppPanel();
   }
 
-  // Terminal sheet — tools sheet と同じ独立オーバーレイ。URL に載るのは
-  // 映している対象の ID で、tmux ペイン (?terminal=%14) かこのドロワーから
-  // 開いたシェル (?terminal=shell-…)。何も選ぶ前は ?terminal=open。
+  // メインの面のターミナルのタブ。URL の ?terminal= は、フォーカスのある面の
+  // 前面のターミナルのタブが映しているシェル (?terminal=shell-…)。
   const TERMINAL_VIEW = createTerminalView({
-    $: <T extends Element = HTMLElement>(sel: string) =>
-      document.querySelector<T>(sel),
     trackLoad,
     getLanguage: () => STATE.language,
     actionHeaders,
@@ -6491,23 +6447,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       mergeLocalSettings({ terminalImageShelfCollapsed: collapsed });
       patchSettings({ terminalImageShelfCollapsed: collapsed });
     },
-    // セッションの一覧 (左の列) を開いたかも人に付く設定。再読み込みで畳まない。
-    isSessionsOpen: () => APP_SETTINGS.terminalSessionsOpen === true,
-    onSessionsOpenChange: (open) => {
-      mergeLocalSettings({ terminalSessionsOpen: open });
-      patchSettings({ terminalSessionsOpen: open });
-    },
-    onCloseRequest: () => closeTerminalSheet(),
-    onTargetChange: (id) => {
-      updateUrlForTerminalOverlay(id);
-      renderPanelContext();
-    },
-    onShowTab: (id) => MAIN_TABS.openTerminal(id),
     onOpenInTab: (session, pane) => {
       if (pane) TAB_SHELL_PANES.set(session.id, pane);
       MAIN_TABS.openTerminal(session.id);
     },
-    focusedSide: () => MAIN_TABS.panes().focused,
     onOpenImage: (image, gallery) => {
       IMAGE_REFS.set(image.path, { image, images: gallery });
       MAIN_TABS.openImage(image.path, "other-if-split");
@@ -6656,82 +6599,174 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
   relocalizeTerminal = () => TERMINAL_VIEW.localize();
 
-  function updateUrlForTerminalOverlay(state: TerminalOverlayState): void {
-    // ターミナルのタブが前面の間、URL はそのタブのシェルを指している。
-    if (MAIN_TABS.front()?.target.kind === "terminal") return;
-    const current = window.location.pathname + window.location.search;
-    const next = withTerminalOverlay(current, state);
-    if (next !== current) {
-      history.replaceState(history.state, "", next + window.location.hash);
+  /**
+   * URL の ?terminal= (映しているシェル) に合わせる。そのシェルのタブを開いて
+   * 前面に出す (無ければ作る)。`open` は下パネルにターミナルがあった頃の
+   * 「パネルを開くだけ」の値で、いまは意味を持たないので URL から外すだけ
+   * (route はそのまま。ルートの URL なら Files)。
+   */
+  function syncTerminalFromUrl(state: TerminalOverlayState): void {
+    if (state === "open") {
+      const path = window.location.pathname + window.location.search;
+      const next = withTerminalOverlay(path, null);
+      if (next !== path)
+        history.replaceState(history.state, "", next + window.location.hash);
+      return;
     }
-    // メニューの Terminal は URL の ?terminal= を見て押下状態を出す。
-    syncHeaderMenu();
-  }
-
-  function openTerminalSheet(id?: string | null): void {
-    // タブなので、他は畳む。
-    if (
-      parseToolsOverlay(window.location.search) !== null ||
-      TOOLS_VIEW.isOpen()
-    )
-      closeToolsSheet();
-    if (
-      parseSearchResultsOverlay(window.location.search) !== null ||
-      SEARCH_RESULTS_VIEW.isOpen()
-    )
-      closeSearchSheet();
-    const remembered = id ?? TERMINAL_VIEW.getActiveTarget();
-    // タブで開いているシェルはパネルでは映さない。
-    const target =
-      remembered && MAIN_TABS.hasTerminal(remembered) ? null : remembered;
-    // 開閉は URL ではなくユーザー単位の設定に置く (再読み込みで戻る)。
-    setTerminalPanelOpen(true);
-    updateUrlForTerminalOverlay(target);
-    void TERMINAL_VIEW.open(target);
-    syncAppPanel();
-  }
-
-  function closeTerminalSheet(): void {
-    TERMINAL_VIEW.close();
-    setTerminalPanelOpen(false);
-    updateUrlForTerminalOverlay(null);
-    syncAppPanel();
-  }
-
-  function setTerminalPanelOpen(open: boolean): void {
-    if ((APP_SETTINGS.terminalPanelOpen === true) === open) return;
-    mergeLocalSettings({ terminalPanelOpen: open });
-    patchSettings({ terminalPanelOpen: open });
+    if (state) MAIN_TABS.openTerminal(state);
   }
 
   /**
-   * URL の ?terminal= (映しているシェル) に合わせる。そのシェルのタブがあれば
-   * タブを前面に、無ければ下パネルで映す。`open` はパネルを開くだけ。パネルの
-   * 開閉は URL に載せないので、値が無くてもパネルは閉じない。
+   * タブ列の「＋」のメニュー: ファイルを開く・新しいシェル・既存のセッション
+   * (このサーバのシェルと、このプロジェクトの tmux のペイン)。一覧は開く
+   * 直前に取り直す。取れなかったら、理由をメニューの 1 行に出す (ファイルと
+   * 新しいシェルは使えるままにする)。
    */
-  function syncTerminalSheetFromUrl(state: TerminalOverlayState): void {
-    if (state && state !== "open" && MAIN_TABS.hasTerminal(state)) {
-      MAIN_TABS.openTerminal(state);
-      syncAppPanel();
+  async function openNewTabMenu(
+    side: PaneSide,
+    anchor: HTMLElement,
+  ): Promise<void> {
+    let list: ShellListResponse | Error;
+    try {
+      list = await TERMINAL_VIEW.loadShells();
+    } catch (error) {
+      console.error(
+        "[code-viewer] shell list for the new-tab menu failed",
+        error,
+      );
+      list = error instanceof Error ? error : new Error(String(error));
+    }
+    if (!anchor.isConnected) return;
+    showContextMenu(anchor, newTabMenuItems(side, list));
+  }
+
+  function newTabMenuItems(
+    side: PaneSide,
+    list: ShellListResponse | Error,
+  ): ContextMenuItem[] {
+    const t = terminalText(STATE.language);
+    const a = agentsText(STATE.language);
+    const overview = AGENT_MONITOR.snapshot().overview;
+    const unread = AGENT_MONITOR.snapshot().unread;
+    const items: ContextMenuItem[] = [
+      { label: t.newTabOpenFile, onSelect: () => openSearchPalette("file") },
+      {
+        label: t.newShell,
+        title:
+          list instanceof Error || list.available
+            ? t.newShellTitle
+            : `${t.shellUnavailable}\n${list.reason ?? ""}`,
+        disabled: !(list instanceof Error) && !list.available,
+        onSelect: () => {
+          TERMINAL_VIEW.createShell(side).catch((error: unknown) => {
+            console.error("[code-viewer] shell create failed", error);
+            void showAlertDialog({
+              title: t.shellCreateFailed,
+              body: formatErrorDetail(error),
+            });
+          });
+        },
+      },
+    ];
+    const sessions: ContextMenuItem[] = [];
+    /** タブで開いていない未読のペイン (印を付け、まとめて読んだことにできる)。 */
+    const unreadPanes: string[] = [];
+    const mark = (paneId: string | undefined, tabbed: boolean): string => {
+      if (!paneId || tabbed || !unread.has(paneId)) return "";
+      unreadPanes.push(paneId);
+      return "● ";
+    };
+    if (list instanceof Error) {
+      sessions.push({
+        label: t.shellListFailed,
+        title: formatErrorDetail(list),
+        disabled: true,
+        onSelect: () => undefined,
+      });
+    } else {
+      for (const session of list.sessions) {
+        const tabbed = MAIN_TABS.hasTerminal(session.id);
+        const pane = paneForShell(session.id);
+        sessions.push({
+          label: `${mark(pane?.id, tabbed)}${terminalTabInfo(session.id).label}${tabbed ? ` · ${t.inTab}` : ""}`,
+          title: [pane ? paneTaskText(pane) : session.command, session.cwd]
+            .filter(Boolean)
+            .join("\n"),
+          onSelect: () => MAIN_TABS.openTerminal(session.id),
+        });
+      }
+    }
+    // このプロジェクトの tmux のペインのうち、上のシェルが映していないもの。
+    const shown = new Set(
+      list instanceof Error ? [] : list.sessions.map((item) => item.id),
+    );
+    const current = overview?.projects.find(
+      (item) => item.server.status === "current",
+    );
+    for (const pane of overview?.panes ?? []) {
+      if (pane.project !== current?.root) continue;
+      if (pane.shownInShell !== "" && shown.has(pane.shownInShell)) continue;
+      const name = pane.kind ? a.kind[pane.kind] : a.kindShell;
+      sessions.push({
+        // メニューの幅で後ろが切れても見分けが付くよう、場所を作業内容より前に。
+        label: `${mark(pane.id, false)}${name} · ${pane.label} · ${paneTaskText(pane)}`,
+        title: `${a.state[pane.state]} · ${pane.label}\n${paneTaskText(pane)}`,
+        onSelect: () => openAgentPane(pane.id),
+      });
+    }
+    if (sessions.length > 0) items.push({ kind: "separator" }, ...sessions);
+    else if (!(list instanceof Error))
+      items.push(
+        { kind: "separator" },
+        { label: t.noShells, disabled: true, onSelect: () => undefined },
+      );
+    items.push({ kind: "separator" });
+    if (unreadPanes.length > 0)
+      items.push({
+        label: t.markAllRead(unreadPanes.length),
+        title: t.unreadTitle,
+        onSelect: () => {
+          for (const pane of unreadPanes) AGENT_MONITOR.markRead(pane);
+        },
+      });
+    items.push({
+      label: t.allSessions,
+      onSelect: () =>
+        navigateToRoute({ screen: "agents", range: currentRange() }),
+    });
+    return items;
+  }
+
+  /** タブの右クリックの「セッションを止める」。確かめてから止め、タブも閉じる。 */
+  async function stopTerminal(session: ShellSessionId): Promise<void> {
+    const t = terminalText(STATE.language);
+    const name = terminalTabInfo(session).label;
+    const ok = await showConfirmDialog({
+      title: t.stopConfirmTitle,
+      body: t.stopConfirmMessage(name),
+      confirmLabel: t.stopConfirm,
+      cancelLabel: t.cancel,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await TERMINAL_VIEW.closeShell(session);
+    } catch (error) {
+      console.error("[code-viewer] shell close failed", error);
+      await showAlertDialog({
+        title: t.shellCloseFailed,
+        body: formatErrorDetail(error),
+      });
       return;
     }
-    const target = state === "open" ? null : state;
-    if (
-      state &&
-      (!TERMINAL_VIEW.isOpen() ||
-        (target && TERMINAL_VIEW.getActiveTarget() !== target))
-    ) {
-      openTerminalSheet(target);
-      return;
-    }
-    syncAppPanel();
+    MAIN_TABS.closeTerminal(session);
   }
 
   /**
    * 面の前面・フォーカス・分割が変わった。面ごとの箱にターミナル・画像・
    * 置き札を出し、本文を出す面を体のクラスで決める。フォーカスのある面の
    * 前面がターミナルなら URL にそのシェルを積み、そうでないタブへ route を
-   * 移らずに戻ったときは ?terminal= をパネルの状態へ積み直す。
+   * 移らずに戻ったときは ?terminal= を外す。
    */
   function showPanes(view: PanesView, how: FrontChange): void {
     document.body.classList.toggle(
@@ -6781,7 +6816,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     if (how !== "stay") return;
-    const next = withTerminalOverlay(path, panelTerminalParam());
+    const next = withTerminalOverlay(path, null);
     if (next !== path)
       history.pushState(history.state, "", next + window.location.hash);
   }
@@ -6824,16 +6859,14 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // エージェントの状態。どの画面にいても取り直し、ヘッダの件数・未読・通知に
   // 流す。一覧の画面 (/agents) も同じ結果を描く。
-  /** いま映しているシェル: 前面のターミナルのタブ、無ければ下パネル。 */
+  /** いま映しているシェル: 左右の面の前面のターミナルのタブ。 */
   function viewedShells(): string[] {
     const { fronts } = MAIN_TABS.panes();
-    const tabs = [fronts.left, fronts.right].map((tab) =>
-      tab?.target.kind === "terminal" ? tab.target.session : null,
-    );
-    const panel = TERMINAL_VIEW.isOpen()
-      ? TERMINAL_VIEW.getActiveTarget()
-      : null;
-    return [...tabs, panel].filter((id): id is string => id !== null);
+    return [fronts.left, fronts.right]
+      .map((tab) =>
+        tab?.target.kind === "terminal" ? tab.target.session : null,
+      )
+      .filter((id): id is string => id !== null);
   }
 
   function isViewingAgentPane(pane: AgentPane): boolean {
@@ -6980,22 +7013,43 @@ window.GdpExpandLogic = GdpExpandLogic;
       working: 2,
       idle: 3,
     };
-    const panes = (overview?.panes ?? [])
-      .filter((pane) => pane.kind !== null)
-      .sort((a, b) => rank[a.state] - rank[b.state]);
+    // エージェントを先に (状態の順)、ただの tmux のペインを後ろに。候補 (何も
+    // 打っていないとき) に出すのはエージェントの上位だけ。
+    const panes = [...(overview?.panes ?? [])].sort(
+      (a, b) =>
+        Number(a.kind === null) - Number(b.kind === null) ||
+        rank[a.state] - rank[b.state],
+    );
     panes.forEach((pane, index) => {
       commands.push({
         group: "agents",
         id: `pane:${pane.id}`,
         title: pane.kind ? agents.kind[pane.kind] : agents.kindShell,
-        detail: paneTaskText(pane),
+        detail: `${paneTaskText(pane)} · ${pane.label}`,
         status: agents.state[pane.state],
         statusTone: pane.state,
         iconHtml: `<i class="terminal-mark terminal-mark-${pane.state}" aria-hidden="true"></i>`,
-        suggested: index < 5,
+        suggested: pane.kind !== null && index < 5,
         run: () => openAgentPane(pane.id),
       });
     });
+    // このサーバのシェル (最後に取った一覧。「＋」のメニューを開くたびと、
+    // タブを映すときに取り直す)。tmux のペインを映しているシェルは上のペインの
+    // 行と同じ行き先なので出さない。
+    const terminal = terminalText(STATE.language);
+    for (const session of TERMINAL_VIEW.knownShells()?.sessions ?? []) {
+      if (paneForShell(session.id)) continue;
+      commands.push({
+        group: "agents",
+        id: `shell:${session.id}`,
+        title: terminalTabInfo(session.id).label,
+        detail: session.cwd,
+        status: MAIN_TABS.hasTerminal(session.id) ? terminal.inTab : "",
+        iconHtml: iconSvg("gdp-palette-icon", TERMINAL_16_PATHS),
+        suggested: false,
+        run: () => MAIN_TABS.openTerminal(session.id),
+      });
+    }
     const bindings = activeKeyBindings();
     for (const action of PALETTE_ACTIONS) {
       const binding = action.keymap
@@ -7030,53 +7084,24 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   }
 
-  /** そのペインを下のターミナルパネルで開く。ツリーで押したときと同じ経路。 */
   /**
-   * そのペインをターミナルで開く。既定はメインの面のタブ (サイドバー・パレット・
-   * 全体ボード・通知・最下段)。where = "panel" は下パネル (サイドバーの
-   * Alt+クリックと行のメニュー)。タブで開いていれば、同じ xterm のまま移す。
+   * そのペインをメインの面のタブで開く (サイドバー・パレット・全体ボード・
+   * 通知・最下段・「＋」のメニュー)。下パネルにターミナルは無いので、
+   * 呼び出し側が「下パネルで」を渡してきてもタブで開く。
    */
-  function openAgentPane(pane: string, where: "tab" | "panel" = "tab"): void {
+  function openAgentPane(pane: string): void {
     AGENT_MONITOR.markRead(pane);
-    if (where === "tab") {
-      // もうタブで開いていれば、そのタブを前面に出すだけ (シェルを増やさない)。
-      const tabbed = [...TAB_SHELL_PANES].find(
-        ([shell, opened]) =>
-          (opened === pane || paneForShell(shell)?.id === pane) &&
-          MAIN_TABS.hasTerminal(shell),
-      );
-      if (tabbed) {
-        MAIN_TABS.openTerminal(tabbed[0]);
-        return;
-      }
-      void TERMINAL_VIEW.openPaneInTab(pane, MAIN_TABS.panes().focused);
-      return;
-    }
-    const shell = [...TAB_SHELL_PANES.keys()].find(
-      (id) => paneForShell(id)?.id === pane && MAIN_TABS.hasTerminal(id),
+    // もうタブで開いていれば、そのタブを前面に出すだけ (シェルを増やさない)。
+    const tabbed = [...TAB_SHELL_PANES].find(
+      ([shell, opened]) =>
+        (opened === pane || paneForShell(shell)?.id === pane) &&
+        MAIN_TABS.hasTerminal(shell),
     );
-    if (shell) {
-      setTerminalPanelOpen(true);
-      void TERMINAL_VIEW.moveTabToPanel(shell as ShellSessionId).then(() => {
-        MAIN_TABS.closeTerminal(shell);
-        updateUrlForTerminalOverlay(shell);
-        syncAppPanel();
-      });
+    if (tabbed) {
+      MAIN_TABS.openTerminal(tabbed[0]);
       return;
     }
-    if (
-      parseToolsOverlay(window.location.search) !== null ||
-      TOOLS_VIEW.isOpen()
-    )
-      closeToolsSheet();
-    if (
-      parseSearchResultsOverlay(window.location.search) !== null ||
-      SEARCH_RESULTS_VIEW.isOpen()
-    )
-      closeSearchSheet();
-    setTerminalPanelOpen(true);
-    void TERMINAL_VIEW.openPane(pane);
-    syncAppPanel();
+    void TERMINAL_VIEW.openPaneInTab(pane, MAIN_TABS.panes().focused);
   }
 
   const AGENT_MONITOR = createAgentMonitor({
@@ -7169,62 +7194,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   }
 
-  renderPanelContext = () => {
-    const context = document.getElementById("app-panel-context");
-    const place = document.getElementById("app-panel-place");
-    if (!context || !place) return;
-    const terminalOpen = terminalPanelShown();
-    context.hidden = !terminalOpen;
-    place.hidden = true;
-    if (!terminalOpen) return;
-    const t = terminalText(STATE.language);
-    const a = agentsText(STATE.language);
-    const piece = (className: string, text: string) => {
-      const el = document.createElement("span");
-      el.className = className;
-      el.textContent = text;
-      return el;
-    };
-    const target = TERMINAL_VIEW.getActiveTarget();
-    const overview = AGENT_MONITOR.snapshot().overview;
-    const pane = target
-      ? overview?.panes.find(
-          (item) => item.shownInShell !== "" && item.shownInShell === target,
-        )
-      : undefined;
-    if (!target) {
-      context.replaceChildren(piece("app-panel-context-muted", t.noTarget));
-      return;
-    }
-    if (!pane?.kind) {
-      context.replaceChildren(piece("app-panel-context-kind", t.shellTarget));
-      return;
-    }
-    const mark = document.createElement("i");
-    mark.className = `terminal-mark terminal-mark-${pane.state}`;
-    mark.setAttribute("aria-hidden", "true");
-    const state = document.createElement("span");
-    state.className = `app-panel-context-state app-panel-context-${pane.state}`;
-    state.append(mark, a.state[pane.state]);
-    context.replaceChildren(
-      piece("app-panel-context-kind", a.kind[pane.kind]),
-      piece("app-panel-context-task", paneTaskText(pane)),
-      state,
-    );
-    // そのペインのプロジェクトと、分かる範囲の枝 (作業ツリーの名前か、
-    // この画面のプロジェクトならヘッダのブランチ)。
-    const info = overview?.projects.find((item) => item.root === pane.project);
-    const branch =
-      pane.worktree ||
-      (info?.server.status === "current"
-        ? (document.querySelector(".project-branch-name")?.textContent ?? "")
-        : "");
-    const text = [info?.name ?? "", branch].filter(Boolean).join(" · ");
-    place.textContent = text;
-    place.hidden = text === "";
-  };
   AGENT_MONITOR.subscribe(() => {
-    renderPanelContext();
     // ターミナルのタブの名前 (エージェントの状態) を当て直す。
     MAIN_TABS.localize();
   });
@@ -7276,7 +7246,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           getWidth: () => APP_SETTINGS.navWidth,
           isCollapsed: () => APP_SETTINGS.navCollapsed === true,
           save: (patch) => patchSettings(patch),
-          // 下パネルの幅が変わるので端末の桁数を取り直す。
+          // 面の幅が変わるので端末の桁数を取り直す。
           onResize: () => TERMINAL_VIEW.refit(),
         })
       : null;
@@ -7541,7 +7511,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncLineRefPill();
     syncDoctorSheetFromUrl();
     syncToolsSheetFromUrl();
-    syncTerminalSheetFromUrl(terminalParam);
+    syncTerminalFromUrl(terminalParam);
     syncSearchSheetFromUrl();
     if (
       isSameBlobFileRoute(previousRoute, STATE.route) &&

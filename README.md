@@ -79,9 +79,8 @@ Requires Node.js 20 or newer. Development uses
   registered projects first, in your order, then projects found in tmux that
   are not registered. Rows never reorder when states change; click a project
   name to switch to it in the same tab (an unregistered one is registered
-  first), click an agent to open its pane in a terminal tab of the main area
-  (Alt+click or right-click → Open in the bottom panel for the Terminal
-  panel). The sidebar
+  first), click an agent to open its pane in a terminal tab of the main area.
+  The sidebar
   folds away and its width, folding and the panel height follow you across
   projects.
 - See every coding agent running in tmux on this machine on the All agents
@@ -181,32 +180,21 @@ Requires Node.js 20 or newer. Development uses
   validator and a JSON⇄YAML converter). Each tool keeps its own draft in
   `.code-viewer/tools.json`, and the drawer width is draggable from its left
   edge.
-- Run a real shell in the browser with the Terminal panel (the `Terminal` tab
-  of the bottom panel, or `?terminal=<shell>` on any URL). It is an ordinary
-  login shell on a PTY, rendered with xterm.js, so `tmux` inside it behaves
-  exactly as it does in any other terminal — the panel resizes the PTY and
-  whatever runs in it follows on its own. The panel header is one line: the
-  agent on screen with its task and state, and its project on the right. Its ⋯
-  menu turns input off when you only want to watch, changes the text size, and
-  switches between Overlay and Docked. Typing `exit` closes the shell, just
-  like any other terminal. A shell can also be a tab of the main area (agents
-  open there by default); the same terminal moves between the tab and the
-  panel with its screen and half-typed input, `?terminal=<shell>` brings its
-  tab to the front, and closing the tab never stops the shell or the agent.
-  Images the agent writes are listed on a shelf beside the terminal; a click
-  opens them in an image tab (on the other side when split), Alt+click in the
-  full-screen viewer.
-- The session list opens from the button at the right of the panel header (it
-  starts folded; agents are also in the left sidebar). It starts with a
-  **Your turn** section for terminals
-  that are waiting for input or finished but unread. Below it, the session list
-  can be scoped to this repository or all tmux sessions, filtered by state, and
-  searched by task, place, or id. Its two-tier tree puts shells opened by this
-  panel at the top; a shell running tmux carries a terminal icon and its
-  session name, and that session's windows and panes hang underneath it. The
-  bottom tier is the tmux sessions no shell has opened yet. Each pane is
-  labelled with the title tmux shows for it — a coding agent usually puts what
-  it is doing there, so the tree alone tells you which pane is busy.
+- Run a real shell in the browser as a tab of the main area. The ＋ at the
+  right of the tab row opens a menu with Open a file, New shell, and the
+  existing sessions — the shells of this server and the tmux panes of this
+  project, with ● on unread ones that are not in a tab (``Ctrl+` ``
+  opens the same menu). It is an ordinary login shell on a PTY, rendered with
+  xterm.js, so `tmux` inside it behaves exactly as it does in any other
+  terminal. `?terminal=<shell>` on any URL brings that shell's tab to the
+  front (creating it if needed). The tab's right-click menu turns input off
+  when you only want to watch, changes the text size, and has Stop session,
+  which ends the shell after asking; closing the tab never stops the shell or
+  the agent. The same terminal moves to the other side with its screen and
+  half-typed input. Images the agent writes are listed on a shelf beside the
+  terminal; a click opens them in an image tab (on the other side when split),
+  Alt+click in the full-screen viewer. The palette (`Ctrl+K`) lists agents,
+  shells and plain tmux panes under Agents & sessions.
 - Terminal status combines lifecycle reports with priority-based matching of
   the live terminal title and recent visible lines. Matching rules can report
   working, waiting, idle, or keep the previous state. A target is tracked only
@@ -219,18 +207,17 @@ Requires Node.js 20 or newer. Development uses
   the built-in set removes the saved override so later releases can supply
   updated defaults. The editor includes an expandable field guide, a valid
   example, and live JSON syntax highlighting.
-- Click a pane and the panel takes you to it. If a shell already has that
-  session open, it switches to that shell and makes the pane current; otherwise
-  a shell is opened and attached for you. A session moves up to the top tier the
-  moment a shell opens it and drops back down when that shell closes, so you end
-  up with one shell per tmux session rather than one per pane. Powerline
-  separators and file icons render when a Nerd Font is installed — the panel
-  asks for the common Nerd Font families before falling back to the usual
-  monospace stack, so no font ships with the package. The tree needs `tmux` on
-  `PATH`; it says so when it is missing, and shells still work without it.
+- Choosing a tmux pane takes you to it in a tab. If a shell already has that
+  session open, that shell's tab comes forward and the pane becomes current;
+  otherwise a shell is opened and attached for you, so you end up with one
+  shell per tmux session rather than one per pane. Powerline separators and
+  file icons render when a Nerd Font is installed — the terminal asks for the
+  common Nerd Font families before falling back to the usual monospace stack,
+  so no font ships with the package. Panes need `tmux` on `PATH`; shells work
+  without it.
   Opening shells needs the optional `@lydell/node-pty` package.
 - One tmux caveat worth knowing: a tmux window can only have one size, so when
-  the same session is attached from both this panel and another terminal, they
+  the same session is attached from both a terminal tab and another terminal, they
   share it. With tmux's default `window-size latest` the window snaps to
   whichever terminal you touched last, and the smaller one gets its right and
   bottom edges cut off. `set -g window-size smallest` makes every attached

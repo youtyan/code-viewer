@@ -14,6 +14,9 @@ export type MainTabsText = {
   moveToOtherSide: string;
   copyPath: string;
   newTab: string;
+  /** ターミナルのタブの右クリック: シェルを止める (タブを閉じるのとは別)。 */
+  stopSession: string;
+  stopSessionTitle: string;
   splitUnavailable: string;
   resizeSplit: string;
   dropToSplit: string;
@@ -35,7 +38,10 @@ const EN: MainTabsText = {
   splitRight: "Split right",
   moveToOtherSide: "Move to other side",
   copyPath: "Copy path",
-  newTab: "Open a file (⌘K)",
+  newTab: "New tab: a file, a new shell, or a session",
+  stopSession: "Stop session",
+  stopSessionTitle:
+    "End this shell (Close only hides the tab and keeps the shell running)",
   splitUnavailable:
     "Split right (needs two tabs, one side, and a window wide enough for two)",
   resizeSplit: "Resize the two sides",
@@ -57,7 +63,10 @@ const JA: MainTabsText = {
   splitRight: "右に分割",
   moveToOtherSide: "反対側へ移す",
   copyPath: "パスをコピー",
-  newTab: "ファイルを開く (⌘K)",
+  newTab: "新しいタブ: ファイル・新しいシェル・セッション",
+  stopSession: "セッションを止める",
+  stopSessionTitle:
+    "このシェルを終了します (閉じるはタブを隠すだけで、シェルは動き続けます)",
   splitUnavailable:
     "右に分割 (タブが 2 つ以上・1 面・2 面が置ける窓の幅のときに使えます)",
   resizeSplit: "左右の幅を変える",

@@ -320,9 +320,6 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   );
   if (terminalImageShelfCollapsed !== undefined)
     out.terminalImageShelfCollapsed = terminalImageShelfCollapsed;
-  const terminalSessionsOpen = optionalBoolean(raw.terminalSessionsOpen);
-  if (terminalSessionsOpen !== undefined)
-    out.terminalSessionsOpen = terminalSessionsOpen;
   const terminalPanelOpen = optionalBoolean(raw.terminalPanelOpen);
   if (terminalPanelOpen !== undefined)
     out.terminalPanelOpen = terminalPanelOpen;

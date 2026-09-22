@@ -47,6 +47,8 @@ function setup(loadSaved: () => Promise<unknown>) {
   const saves: SerializedLayout[] = [];
   const fronts: string[] = [];
   const terminals: Array<{ open: string[]; closed: string[] }> = [];
+  /** ＋ と、ターミナルのタブの右クリックから呼ばれたもの。 */
+  const calls: string[] = [];
   let current: AppRoute = fileRoute("src/app.ts");
   const handle: MainTabsHandle = createMainTabsView({
     mount,
@@ -64,7 +66,12 @@ function setup(loadSaved: () => Promise<unknown>) {
           ? { screen: "repo", ref: "worktree", path: "", range }
           : { screen: "diff", range },
     copyPath: () => undefined,
-    onNewTab: () => undefined,
+    onNewTab: (side, anchor) =>
+      calls.push(`new:${side}:${anchor.getAttribute("aria-label")}`),
+    stopTerminal: (session) => calls.push(`stop:${session}`),
+    terminalMenuItems: () => [
+      { label: "Larger text (13)", onSelect: () => calls.push("larger") },
+    ],
     loadSaved,
     save: async (layout) => {
       saves.push(layout);
@@ -88,6 +95,7 @@ function setup(loadSaved: () => Promise<unknown>) {
     saves,
     fronts,
     terminals,
+    calls,
     current: () => current,
     names: () =>
       [...mount.querySelectorAll(".main-tab")].map(
@@ -255,7 +263,69 @@ describe("main tabs view: 操作", () => {
   });
 });
 
+/** 開いている右クリックのメニューの項目 (押せないものに印)。 */
+function menuLabels(): string[] {
+  return [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      ".gdp-context-menu [role=menuitem]",
+    ),
+  ].map((item) => `${item.textContent}${item.disabled ? " (disabled)" : ""}`);
+}
+
 describe("main tabs view: ターミナルのタブ", () => {
+  test("右クリックに端末の操作と「セッションを止める」が並び、止めるはそのシェルで呼ぶ", async () => {
+    const { handle, mount, calls } = setup(async () => null);
+    await handle.restore();
+    handle.openTerminal("shell-a1");
+    mount
+      .querySelector(".main-tab-active")
+      ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    const labels = menuLabels();
+    const stop = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        ".gdp-context-menu [role=menuitem]",
+      ),
+    ].find((item) => item.textContent === "Stop session");
+    stop?.click();
+    expect([labels, stop?.classList.contains("danger"), calls]).toEqual([
+      [
+        "Close",
+        "Close others",
+        "Close to the right (disabled)",
+        "Keep open (disabled)",
+        "Split right (disabled)",
+        "Move to other side (disabled)",
+        "Larger text (13)",
+        "Stop session",
+        "Copy path (disabled)",
+      ],
+      true,
+      ["stop:shell-a1"],
+    ]);
+  });
+
+  test("ファイルのタブの右クリックには「セッションを止める」を出さない", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    mount
+      .querySelector(".main-tab")
+      ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    expect(menuLabels().filter((label) => label === "Stop session")).toEqual(
+      [],
+    );
+  });
+
+  test("＋ はその面のボタンを渡してメニューを頼み、キー操作はフォーカスのある面の ＋", async () => {
+    const { handle, mount, calls } = setup(async () => null);
+    await handle.restore();
+    mount.querySelector<HTMLButtonElement>(".main-tabs-action")?.click();
+    handle.openNewTabMenu();
+    expect(calls).toEqual([
+      "new:left:New tab: a file, a new shell, or a session",
+      "new:left:New tab: a file, a new shell, or a session",
+    ]);
+  });
+
   test("開くと前面になり、名前はエージェントの種類と状態、印は状態の形", async () => {
     const { handle, mount, names, fronts } = setup(async () => null);
     await handle.restore();

@@ -365,7 +365,7 @@ describe("palette projects, agents and actions", () => {
       expect(listing()).toEqual([
         "# Projects",
         "sample-app|~/work/sample-app",
-        "# Agents",
+        "# Agents & sessions",
         "claude|Review plan",
         "# Files",
         "a.ts|src/a.ts *",
@@ -394,7 +394,7 @@ describe("palette projects, agents and actions", () => {
     {
       name: "the detail matches only as a substring",
       query: "plan",
-      expected: ["# Agents", "claude|Review plan *"],
+      expected: ["# Agents & sessions", "claude|Review plan *"],
     },
     {
       name: "a long detail does not match a scattered query",
