@@ -4,6 +4,7 @@ import {
   baseRules,
   cascadedDeclarations,
   loadStyleSheet,
+  resolveVar,
 } from "./_css-fixture";
 
 const allRules = loadStyleSheet();
@@ -168,18 +169,97 @@ test("account cards wrap instead of shrinking below their minimum width", () => 
   ]).toEqual([true, true]);
 });
 
-// タブの最小幅: ふだん 120、列に全部が 120 で入らないときは列の幅をタブの数で
-// 割った幅まで、88 で止める (畳んだ 1280 の左の面でタブが 120 固定で 1.8 枚
-// しか見えなかった)。タブの数は main-tabs-view.ts が --main-tab-count へ書く。
-test("main tabs shrink to the strip width divided by the tab count, down to 88px", () => {
-  const minWidth = (
-    cascadedDeclarations(rules, (candidate) => candidate === ".main-tab").get(
-      "min-width",
-    ) ?? ""
-  ).replace(/\s+/g, " ");
-  expect(minWidth).toBe(
-    "clamp( calc(var(--space-unit) * 22), (100cqi - (var(--main-tab-count, 1) - 1) * 1px) / var(--main-tab-count, 1), calc(var(--space-unit) * 30) )",
+// タブの最小幅: ふだん 120、列に全部が 120 で入らないときは、列の幅から ＋ の箱
+// (最後のタブのすぐ右。ボタンと左右の余白) を除いてタブの数で割った幅まで縮め、
+// 88 で止める (畳んだ 1280 の左の面でタブが 120 固定で 1.8 枚しか見えなかった)。
+// タブの数は main-tabs-view.ts が --main-tab-count へ書く。宣言を文字列で固定せず、
+// 変数を解いて数で比べる (px を調整しても落ちず、式の形が壊れたときに落ちる)。
+const tokens = cascadedDeclarations(
+  rules,
+  (candidate) =>
+    candidate === ":root" || candidate === "html" || candidate === "body",
+);
+const px = (value: string) => evalCss(resolveVar(value, tokens));
+
+/** calc / clamp と px だけの式を数にする (100cqi などは先に置き換えておく)。 */
+function evalCss(expression: string): number {
+  const js = expression.replace(/calc\(/g, "(").replace(/(\d*\.?\d+)px/g, "$1");
+  if (!/^[\d\s.+\-*/(),clamp]*$/.test(js))
+    throw new Error(`not a plain length expression: ${expression}`);
+  return Function(
+    "clamp",
+    `return ${js};`,
+  )((low: number, value: number, high: number) =>
+    Math.min(Math.max(low, value), high),
+  ) as number;
+}
+
+function tabMinWidth(stripWidth: number, count: number): number {
+  const declaration = cascadedDeclarations(
+    rules,
+    (candidate) => candidate === ".main-tab",
+  ).get("min-width");
+  const strip = cascadedDeclarations(
+    rules,
+    (candidate) => candidate === ".main-tabs-strip",
   );
+  const withStrip = new Map(tokens);
+  for (const [name, value] of strip)
+    if (name.startsWith("--")) withStrip.set(name, value);
+  return evalCss(
+    resolveVar(
+      (declaration ?? "").replace(/var\(--main-tab-count, 1\)/g, String(count)),
+      withStrip,
+    ).replace(/100cqi/g, `${stripWidth}px`),
+  );
+}
+
+/** ＋ の箱の実寸 (ボタンの幅と左右の余白)。タブの最小幅が除く分と一致すること。 */
+function newButtonBox(): number {
+  const button = cascadedDeclarations(
+    rules,
+    (candidate) => candidate === ".main-tabs-action",
+  );
+  const placed = cascadedDeclarations(
+    rules,
+    (candidate) => candidate === ".main-tabs-strip > .main-tabs-new",
+  );
+  const [, side] = (placed.get("margin") ?? "").split(/\s+/);
+  return px(button.get("width") ?? "") + 2 * px(side ?? "");
+}
+
+test.each([
+  {
+    name: "wide strip, few tabs: the usual 120",
+    width: 1200,
+    count: 3,
+    shape: "max",
+  },
+  { name: "tabs just fit next to ＋", width: 600, count: 5, shape: "fit" },
+  {
+    name: "many tabs: stop at 88 and scroll",
+    width: 600,
+    count: 13,
+    shape: "min",
+  },
+])("main tab min width: $name", ({ width, count, shape }) => {
+  const min = tabMinWidth(width, count);
+  const unit = px("var(--space-unit)");
+  // タブ同士の間と、最後のタブと ＋ の間に列の隙間 (タブの数だけ)。
+  const gap = px(
+    cascadedDeclarations(
+      rules,
+      (candidate) => candidate === ".main-tabs-strip",
+    ).get("gap") ?? "",
+  );
+  const used = count * min + count * gap + newButtonBox();
+  expect(
+    shape === "max"
+      ? min === unit * 30
+      : shape === "min"
+        ? min === unit * 22
+        : Math.abs(used - width) < 0.01,
+  ).toBe(true);
 });
 
 // Tools の面が狭い (2 面の左の面 486px など) ときは入力を上、出力を下に積む。

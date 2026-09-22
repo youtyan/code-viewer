@@ -10,7 +10,7 @@
 | 置き場所 | 使うもの |
 |---|---|
 | 最下段の右の操作の塊 (`.statusbar-actions`。上の行が無くなって移った注釈・AI 向けのコピー・自動更新・通信の中止・テーマ・Web ページ) と、タブ列の左 (`#tabs-lead`) のアイコンボタン | `global-icon-action` クラス (外部リンクは `global-icon-link`)。上の行 (`#global-header`) は無い (`web/index.html` のコメント) |
-| メインの面のタブ列 (`#main-tabs`、上の行の直下) | `views/main-tabs/main-tabs-view.ts`。タブは `main-tab` (絵 `main-tab-icon`・名前 `main-tab-name`・閉じる `main-tab-close` は選択中と hover だけ見せ、場所は常に取る)。右端の操作は `main-tabs-action` (＋ と分割)。種類ごとの絵は `views/main-tabs/tab-icons.ts`、page の名前は上の行の入口と同じ文言 (`uiText().nav`)。右クリックの項目の有効・無効は `core/main-tabs.ts` の `tabMenu` だけが決める。選択中の面は `--color-tab-active` |
+| メインの面のタブ列 (`#main-tabs`、上の行の直下) | `views/main-tabs/main-tabs-view.ts`。タブは `main-tab` (絵 `main-tab-icon`・名前 `main-tab-name`・閉じる `main-tab-close` は選択中と hover だけ見せ、場所は常に取る)。＋ (`main-tabs-action main-tabs-new`) は最後のタブのすぐ右、分割 (`main-tabs-action main-tabs-split`) は列の外の右端 (下の「タブの決まり」)。種類ごとの絵は `views/main-tabs/tab-icons.ts`、page の名前は上の行の入口と同じ文言 (`uiText().nav`)。右クリックの項目の有効・無効は `core/main-tabs.ts` の `tabMenu` だけが決める。選択中の面は `--color-tab-active` |
 | 同じ場所のテキストボタン | 同上 + `width: auto; padding: 0 var(--space-2);` 程度の上書きに留める |
 | 左のサイドバー (`#app-nav`) の下端の項目 | `nav-foot-item` (アイコン + 文字)。見出しの横の小さな操作は `nav-icon-action` |
 | 左のサイドバーの行の操作 (hover で出る) | `nav-row-action`。場所を確保せず行の上に重ねる (`.nav-project-actions`) |
@@ -73,12 +73,22 @@
 - **閉じる**: タブの ×・中ボタン・`g x`・タブ列の Delete。閉じたら同じ面の最近使った順で次を前面に。
   ブラウザのタブの中では ⌘W / Ctrl+W はブラウザのタブを閉じる (取らない。`core/keymap.ts` のコメント)
 - **閉じたタブを開き直す**: 利用者が閉じたタブ (上の閉じ方) を全体で 1 本の履歴に新しい順で 10 件まで
-  積み (`core/main-tabs.ts` の `pushClosed`)、`reopenClosed` が固定のタブで閉じた面に開き直す
-  (その面が無ければ左)。シェルが消えて閉じたタブは積まない。保存しない
+  積み (`core/main-tabs.ts` の `pushClosed`)、`reopenClosed` が固定のタブで**閉じた面の元の位置**に
+  開き直す (位置が無くなっていればその面の末尾、面が無ければ左の面の末尾)。シェルが消えて閉じたタブは
+  積まない。保存しない
+- **戻る・進む**は本文 (URL) だけを動かし、タブの配置は変えない。その route のタブがどちらかの面に
+  あれば前面に出すだけで、新しい仮のタブは作らない (右の面にだけあるファイルは右の面の前面に。
+  app の popstate と `MAIN_TABS.sideHolding`)
 - **PWA (インストールした窓)** ではブラウザのタブのキー (⌘/Ctrl+W・1〜9・Ctrl+Tab など) がアプリのタブに
   効く。どのキーを何に振り向けるかの表は `core/pwa.ts` の `PWA_TAB_KEYS` だけに書く (ここに写さない)。
   振り向け先は上と同じタブの操作 (閉じる・次 / 前・n 番目、最後に閉じたタブは `MAIN_TABS.reopenClosed()`)
   で、PWA だけの開き方・閉じ方を作らない。ブラウザのタブの中では変えない
+- **「＋」は最後のタブのすぐ右** (列の右端ではない。ブラウザのタブと同じ)。タブが増えれば一緒に右へ動き、
+  列に入りきらず横に送るときも一緒に送られる。前面が最後のタブなら ＋ まで見せ、＋ を押した直後
+  (⌘/Ctrl+T も) は ＋ が見える位置まで送る。タブが 0 枚なら列の左端。分割のボタン・預けの札は列の外の
+  右端のまま。作りは `.main-tabs-strip` (横に送る箱・幅の入れ物) の中に、タブだけを持つ
+  `.main-tabs-list` (role=tablist、配置では `display: contents`) と `.main-tabs-new`。タブの最小幅は
+  列の幅から ＋ の箱と隙間を除いてタブの数で割る (`--main-tabs-new-w`)
 - **タブ列のキー**: Tab で列に入る (前面のタブだけ `tabindex=0`)・←→ Home End でタブを移る・
   Enter / Space で前面に・Delete で閉じる・Ctrl+Shift+PageUp / PageDown で並べ替え (OS やブラウザが
   先に取る環境のために Ctrl+Shift+← → と ⌘+Shift+← → も同じ。右クリックの「左へ移す」「右へ移す」でも)・

@@ -17062,6 +17062,8 @@ body.main-split .main-tabs-pane[data-side="left"] {
 .main-tabs-strip {
   /* タブの最小幅を列の幅から決める (.main-tab の min-width が 100cqi を読む)。 */
   container-type: inline-size;
+  /* ＋ の箱の幅 (ボタン + 左右の余白)。タブの最小幅はこの分を除いて割る。 */
+  --main-tabs-new-w: calc(var(--ui-control-sm) + var(--space-1) * 2);
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
@@ -17069,6 +17071,17 @@ body.main-split .main-tabs-pane[data-side="left"] {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
+}
+/* タブの並び (role=tablist)。配置では透明にし、タブと ＋ を列の直接の並びにする
+   (箱を持たせると、箱の最小幅がタブの中身の幅の合計になり、タブが 88 まで
+   縮まずに 100 前後で止まった)。＋ は最後のタブのすぐ右 (列の右端ではない)。 */
+.main-tabs-list {
+  display: contents;
+}
+.main-tabs-strip > .main-tabs-new {
+  flex: 0 0 auto;
+  align-self: center;
+  margin: 0 var(--space-1);
 }
 .main-tabs-strip::-webkit-scrollbar {
   display: none;
@@ -17086,7 +17099,7 @@ body.main-split .main-tabs-pane[data-side="left"] {
      が列の --main-tab-count へ書く。 */
   min-width: clamp(
     calc(var(--space-unit) * 22),   /* 88 */
-    (100cqi - (var(--main-tab-count, 1) - 1) * 1px) / var(--main-tab-count, 1),
+    (100cqi - var(--main-tabs-new-w) - var(--main-tab-count, 1) * 1px) / var(--main-tab-count, 1),
     calc(var(--space-unit) * 30)    /* 120 */
   );
   max-width: calc(var(--space-unit) * 45);   /* 180 */

@@ -425,16 +425,16 @@ describe("main tabs contract: opening an existing target kept or preview", () =>
 
 // 最後に閉じたタブを開き直す (PWA の窓の ⌘/Ctrl+Shift+T)。全体で 1 本、新しい順、上限あり。
 describe("main tabs contract: closed tab history", () => {
-  test("closedTabs lists the tabs that are gone, with their side", () => {
+  test("closedTabs lists the tabs that are gone, with their side and position", () => {
     const before = two(
       pane([tab("a", FILE_A), tab("b", FILE_B)]),
       pane([tab("c", IMAGE_C)]),
     );
     expect(closedTabs(before, closeOthers(before, "a"))).toEqual([
-      { target: FILE_B, side: "left" },
+      { target: FILE_B, side: "left", index: 1 },
     ]);
     expect(closedTabs(before, close(before, "c"))).toEqual([
-      { target: IMAGE_C, side: "right" },
+      { target: IMAGE_C, side: "right", index: 0 },
     ]);
   });
 
@@ -442,6 +442,7 @@ describe("main tabs contract: closed tab history", () => {
     const item = (n: number): ClosedTab => ({
       target: { kind: "file", path: `sample/${n}.ts` },
       side: "left",
+      index: 0,
     });
     let history: ClosedTab[] = [];
     for (let n = 0; n < CLOSED_HISTORY_LIMIT + 2; n += 1)
@@ -457,8 +458,8 @@ describe("main tabs contract: closed tab history", () => {
       name: "reopens the newest as a kept tab on its side",
       start: two(pane([tab("a", FILE_A)]), pane([tab("b", IMAGE_B)])),
       history: [
-        { target: IMAGE_C, side: "right" as const },
-        { target: FILE_B, side: "left" as const },
+        { target: IMAGE_C, side: "right" as const, index: 1 },
+        { target: FILE_B, side: "left" as const, index: 1 },
       ],
       side: "right" as const,
       previews: [false, false],
@@ -467,7 +468,7 @@ describe("main tabs contract: closed tab history", () => {
     {
       name: "falls back to the left side when the right one is gone",
       start: one([tab("a", FILE_A)]),
-      history: [{ target: IMAGE_C, side: "right" as const }],
+      history: [{ target: IMAGE_C, side: "right" as const, index: 0 }],
       side: "left" as const,
       previews: [false, false],
       rest: 0,
@@ -476,8 +477,8 @@ describe("main tabs contract: closed tab history", () => {
       name: "skips and drops a target that is open again",
       start: one([tab("a", FILE_A)]),
       history: [
-        { target: FILE_A, side: "left" as const },
-        { target: FILE_B, side: "left" as const },
+        { target: FILE_A, side: "left" as const, index: 0 },
+        { target: FILE_B, side: "left" as const, index: 1 },
       ],
       side: "left" as const,
       previews: [false, false],
@@ -494,9 +495,47 @@ describe("main tabs contract: closed tab history", () => {
     expectValid(result.layout);
   });
 
+  // ⌘⇧T はブラウザと同じく元の位置へ戻す。位置が無くなっていれば面の末尾、
+  // 閉じた面が無ければ左の面の末尾。
+  test.each([
+    {
+      name: "the first tab goes back to the front of the row",
+      start: one([tab("b", FILE_B), tab("c", FILE_C)], "c"),
+      closed: { target: FILE_A, side: "left" as const, index: 0 },
+      expected: ["new", "b", "c"],
+    },
+    {
+      name: "a middle tab goes back between its neighbours",
+      start: one([tab("a", FILE_A), tab("c", FILE_C)], "c"),
+      closed: { target: FILE_B, side: "left" as const, index: 1 },
+      expected: ["a", "new", "c"],
+    },
+    {
+      name: "a position that is gone becomes the end",
+      start: one([tab("a", FILE_A)]),
+      closed: { target: FILE_C, side: "left" as const, index: 4 },
+      expected: ["a", "new"],
+    },
+    {
+      name: "a side that is gone becomes the end of the left side",
+      start: one([tab("a", FILE_A), tab("b", FILE_B)], "a"),
+      closed: { target: IMAGE_C, side: "right" as const, index: 0 },
+      expected: ["a", "b", "new"],
+    },
+  ])("reopenClosed: $name", ({ start, closed, expected }) => {
+    const result = reopenClosed(start, [closed], { newId: () => "new" });
+    expect([
+      paneAt(result.layout, "left")?.tabs.map((item) => item.id),
+      paneAt(result.layout, "left")?.activeId,
+    ]).toEqual([expected, "new"]);
+    expectValid(result.layout);
+  });
+
   test("nothing to reopen leaves the layout as it is", () => {
     const start = one([tab("a", FILE_A)]);
-    const result = reopenClosed(start, [{ target: FILE_A, side: "left" }]);
+    const result = reopenClosed(start, [
+      { target: FILE_A, side: "left", index: 0 },
+    ]);
     expect(result).toEqual({ layout: start, history: [], reopened: null });
   });
 });

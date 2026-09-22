@@ -26,6 +26,7 @@ import {
   activate,
   activateIndex,
   activeTab,
+  allTabs,
   type ClosedTab,
   COMMON_TABS_VERSION,
   canPlace,
@@ -38,6 +39,7 @@ import {
   emptyLayout,
   findTab,
   focusPane,
+  frontTab,
   isNewerLayoutVersion,
   keepOpen,
   LAYOUT_VERSION,
@@ -67,14 +69,15 @@ import {
   serializeLayout,
   setSplit,
   showHome,
+  sideOfTarget,
   splitBlocker,
   splitRight,
   type Tab,
   type TabTarget,
-  WORKTREE_REF,
   tabMenu,
   unparkRight,
   unsplit,
+  WORKTREE_REF,
   withCommonTabs,
 } from "../../core/main-tabs";
 import type { AppRoute } from "../../core/routes";
@@ -100,7 +103,7 @@ import {
 const SAVE_DELAY_MS = 300;
 const DRAG_TYPE = "application/x-code-viewer-main-tab";
 /** 2 面のときの各面の最小の幅 (px)。これが 2 つ置けない幅では分割しない。 */
-export const MIN_PANE_WIDTH = 360;
+const MIN_PANE_WIDTH = 360;
 /**
  * 2 面がゆとりを持って並ぶ幅。これを下回るなら、右の列を畳めば並ぶので、
  * 2 面の間だけ自動で畳む (app.ts の syncPanelColumnForSplit)。Data の全体検索と
@@ -112,10 +115,9 @@ export const COMFORTABLE_PANE_WIDTH = 480;
  * 利用者が自分で右の列を開いたときだけ許す、面の幅の下限。ここまでは両面を
  * 同じ比で縮め、中身は自分の箱の中で横に送ってもらう (右の面を先に畳まない)。
  */
-export const TIGHT_PANE_WIDTH = 320;
+const TIGHT_PANE_WIDTH = 320;
 /** 面の境界の線の幅 (px)。CSS の --split-divider-w へ JS が書く。 */
 export const SPLIT_DIVIDER_WIDTH = 1;
-const DIVIDER_WIDTH = SPLIT_DIVIDER_WIDTH;
 const SIDES: readonly PaneSide[] = ["left", "right"];
 
 export type FrontChange = "navigate" | "sync" | "stay";
@@ -267,6 +269,11 @@ export type MainTabsHandle = {
   openRouteRight(route: FileRoute, fromUrl?: boolean): boolean;
   /** そのファイルの route を面を指定せずに開いたら、どちらの面の前面に出るか。 */
   sideForRoute(route: FileRoute): PaneSide;
+  /**
+   * その route のタブが今ある面 (左を先に見る)。無ければ null。戻る・進むで
+   * 既にあるタブを前面に出すだけにするために使う (新しい仮のタブを作らない)。
+   */
+  sideHolding(route: AppRoute): PaneSide | null;
   /** 面にフォーカスを移す。2 面でなければ何もしない。 */
   focusSide(side: PaneSide): void;
   /** 画面の x 座標がどちらの面か (2 面でないか、右の列の上なら null)。 */
@@ -314,7 +321,7 @@ export function isPageKind(value: string | undefined): value is PageKind {
 }
 
 /** タブの名前に添える版の印。コミットの sha は 7 文字、ほか (ブランチ・HEAD) はそのまま。 */
-export function shortRef(ref: string): string {
+function shortRef(ref: string): string {
   return /^[0-9a-f]{8,40}$/i.test(ref) ? ref.slice(0, 7) : ref;
 }
 
@@ -360,23 +367,13 @@ export function routeTarget(route: AppRoute): TabTarget | null {
   }
 }
 
-function allTabs(layout: Layout): Tab[] {
-  return [...layout.panes.left.tabs, ...(layout.panes.right?.tabs ?? [])];
-}
-
-function frontOf(layout: Layout, side: PaneSide): Tab | null {
-  const pane = side === "left" ? layout.panes.left : layout.panes.right;
-  if (!pane?.activeId) return null;
-  return pane.tabs.find((tab) => tab.id === pane.activeId) ?? null;
-}
-
 /**
  * 本文を出す面。route のタブは左の面にしか置けないので、左の前面が route の
  * タブか、何も選んでいない (本文の既定) なら左。左の前面がターミナルか画像
  * なら本文は隠れる (null)。
  */
-export function routeSideOf(layout: Layout): PaneSide | null {
-  const front = frontOf(layout, "left");
+function routeSideOf(layout: Layout): PaneSide | null {
+  const front = frontTab(layout, "left");
   return front === null || isRouteTab(front) ? "left" : null;
 }
 
@@ -384,7 +381,10 @@ function panesView(layout: Layout): PanesView {
   return {
     split: !!layout.panes.right,
     focused: layout.focused,
-    fronts: { left: frontOf(layout, "left"), right: frontOf(layout, "right") },
+    fronts: {
+      left: frontTab(layout, "left"),
+      right: frontTab(layout, "right"),
+    },
     routeSide: routeSideOf(layout),
   };
 }
@@ -431,10 +431,13 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     return openingKept ? { preview: false } : {};
   }
 
-  // 面ごとのタブ列 (タブの並び + 右端の ＋ と分割)。
+  // 面ごとのタブ列。strip は横に送る箱 (タブの幅の入れ物) で、中にタブの並び
+  // (list、role=tablist) と、そのすぐ右の ＋ を置く (ブラウザのタブと同じく、
+  // ＋ はタブと一緒に動き、一緒に送られる)。分割のボタンは列の外の右端。
   type Section = {
     el: HTMLElement;
     strip: HTMLElement;
+    list: HTMLElement;
     newButton: HTMLButtonElement;
     splitButton: HTMLButtonElement;
   };
@@ -469,12 +472,15 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     el.dataset.side = side;
     const strip = document.createElement("div");
     strip.className = "main-tabs-strip";
-    strip.setAttribute("role", "tablist");
+    // tablist にはタブだけを置く (押せるボタンを混ぜない)。
+    const list = document.createElement("div");
+    list.className = "main-tabs-list";
+    list.setAttribute("role", "tablist");
     const actions = document.createElement("div");
     actions.className = "main-tabs-actions";
     const newButton = document.createElement("button");
     newButton.type = "button";
-    newButton.className = "main-tabs-action";
+    newButton.className = "main-tabs-action main-tabs-new";
     newButton.innerHTML = iconSvg(
       "main-tabs-action-icon",
       pageIconPaths("new"),
@@ -483,11 +489,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     newButton.setAttribute("aria-haspopup", "menu");
     newButton.addEventListener("click", () => {
       focusSide(side);
-      deps.onNewTab(side, newButton);
+      openNewTabMenuIn(side);
     });
     const splitButton = document.createElement("button");
     splitButton.type = "button";
-    splitButton.className = "main-tabs-action";
+    splitButton.className = "main-tabs-action main-tabs-split";
     // 右の面は 2 面のときだけあるので、右の面のボタンは常に「1 面に戻す」。
     splitButton.innerHTML = iconSvg(
       "main-tabs-action-icon",
@@ -498,15 +504,16 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
         changeAndGo(unsplit);
         return;
       }
-      const front = frontOf(layout, "left");
+      const front = frontTab(layout, "left");
       if (front && splitBlocker(layout) === null && splitAllowed())
         changeAndGo((l) => splitRight(l, front.id));
     });
-    actions.append(newButton, splitButton);
+    actions.append(splitButton);
+    strip.append(list, newButton);
     if (side === "left" && deps.lead) el.append(deps.lead);
     el.append(strip, actions);
     wireStrip(strip, side);
-    return { el, strip, newButton, splitButton };
+    return { el, strip, list, newButton, splitButton };
   }
 
   function labelOf(target: TabTarget): string {
@@ -564,7 +571,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
    * splitFitsWithPanelColumn() を見る側 (app.ts) が行う。
    */
   function splitAllowed(): boolean {
-    return mainWidth() >= TIGHT_PANE_WIDTH * 2 + DIVIDER_WIDTH;
+    return mainWidth() >= TIGHT_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH;
   }
 
   /**
@@ -574,17 +581,17 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   function leftWidthFor(ratio: number): number {
     const width = mainWidth();
     const { min, max } = paneBounds(width);
-    if (max < min) return Math.round((width - DIVIDER_WIDTH) / 2);
+    if (max < min) return Math.round((width - SPLIT_DIVIDER_WIDTH) / 2);
     return Math.min(max, Math.max(min, Math.round(width * ratio)));
   }
 
   /** 左の面の幅の下限と上限 (px)。ゆとりの最小幅を守れないときは詰めた下限。 */
   function paneBounds(width: number): { min: number; max: number } {
     const min =
-      width >= MIN_PANE_WIDTH * 2 + DIVIDER_WIDTH
+      width >= MIN_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH
         ? MIN_PANE_WIDTH
         : TIGHT_PANE_WIDTH;
-    return { min, max: width - min - DIVIDER_WIDTH };
+    return { min, max: width - min - SPLIT_DIVIDER_WIDTH };
   }
 
   /** 預かっている右の面を戻した配置 (保存とターミナルの数え方に使う)。 */
@@ -629,8 +636,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     }
     const left = leftWidthFor(layout.split ?? DEFAULT_SPLIT);
     root.setProperty("--split-left-w", `${left}px`);
-    root.setProperty("--split-right-w", `${width - left - DIVIDER_WIDTH}px`);
-    root.setProperty("--split-divider-w", `${DIVIDER_WIDTH}px`);
+    root.setProperty(
+      "--split-right-w",
+      `${width - left - SPLIT_DIVIDER_WIDTH}px`,
+    );
+    root.setProperty("--split-divider-w", `${SPLIT_DIVIDER_WIDTH}px`);
     if (width <= 0) return;
     const { min, max } = paneBounds(width);
     const percent = (px: number) => String(Math.round((px / width) * 100));
@@ -663,10 +673,31 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   function revealFront(strip: HTMLElement): void {
     const tab = strip.querySelector<HTMLElement>(".main-tab-active");
     if (!tab) return;
+    // 前面が最後のタブなら、すぐ右の ＋ まで見せる (タブだけだと ＋ が数 px
+    // だけ列の外に残った)。
+    const plus = tab.nextElementSibling
+      ? null
+      : strip.querySelector<HTMLElement>(".main-tabs-new");
+    revealIn(strip, plus ?? tab);
+    if (plus) revealIn(strip, tab);
+  }
+
+  /** strip の中の el が見えるところまで、列だけを横に送る。 */
+  function revealIn(strip: HTMLElement, el: HTMLElement): void {
     const box = strip.getBoundingClientRect();
-    const rect = tab.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
     if (rect.left < box.left) strip.scrollLeft -= box.left - rect.left;
     else if (rect.right > box.right) strip.scrollLeft += rect.right - box.right;
+  }
+
+  /**
+   * その面の ＋ のメニューを開く。＋ はタブと一緒に送られるので、列の外に
+   * 出ていれば先に見える位置まで送る (メニューを ＋ の下に出すため)。
+   */
+  function openNewTabMenuIn(side: PaneSide): void {
+    const { strip, newButton } = sections[side];
+    revealIn(strip, newButton);
+    deps.onNewTab(side, newButton);
   }
   // 列が狭くなると (窓・面・右の列の幅) 前面のタブが列の外へ出ることがある。
   const stripObserver = new ResizeObserver((entries) => {
@@ -732,9 +763,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   }
 
   /**
-   * 保存する page のタブの route。Search の検索語と Tools の道具だけ (ほかの
-   * 欄は target と今の画面から作り直せる)。前面でないタブの中身が、リロード
-   * のたびに空に戻っていたのを止める。
+   * 保存するタブの route。Search の検索語と Tools の道具、ファイルの Preview
+   * だけ (ほかの欄は target と今の画面から作り直せる)。前面でないタブの中身が、
+   * リロードのたびに空に戻る・Code に戻るのを止める。
    */
   function savedPageRoute(tab: Tab): SerializedPageRoute | undefined {
     const route = routes.get(tab.id);
@@ -742,19 +773,23 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     if (route.screen === "search") return route.q ? { q: route.q } : undefined;
     if (route.screen === "tools")
       return route.tool ? { tool: route.tool } : undefined;
+    if (route.screen === "file")
+      return route.preview ? { preview: true } : undefined;
     return undefined;
   }
 
-  /** 読み戻した page のタブに、保存してあった検索語・道具を戻す。 */
+  /** 読み戻したタブに、保存してあった検索語・道具・Preview を戻す。 */
   function seedPageRoutes(
     target: Layout,
     saved: Record<string, SerializedPageRoute>,
   ): void {
     for (const tab of allTabs(target)) {
       const route = saved[tab.id];
-      if (!route || tab.target.kind !== "page") continue;
+      if (!route) continue;
       const base = deps.defaultRoute(tab.target);
-      if (base.screen === "search" && route.q !== undefined) {
+      if (base.screen === "file" && route.preview) {
+        routes.set(tab.id, { ...base, preview: true });
+      } else if (base.screen === "search" && route.q !== undefined) {
         routes.set(tab.id, { ...base, q: route.q });
       } else if (base.screen === "tools" && route.tool !== undefined) {
         // この版に無い道具は選べない。既定 (道具なし) に落とすが、黙って
@@ -820,7 +855,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     // ある面のもの (app の navigate が合わせ直す) なので、履歴を積まない
     // (積むと、分割した直後の戻るが同じ URL に 1 回止まる)。
     const replace = how === "sync" || layout.focused !== side;
-    const tab = frontOf(layout, side);
+    const tab = frontTab(layout, side);
     if (!tab) {
       // 本文の既定 (フォルダ表示)。どのフォルダかは URL が持つので、フォルダ
       // 表示ならそのまま。
@@ -883,7 +918,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   function rememberRoute(): void {
     const side = routeSideOf(layout);
     if (!side) return;
-    const tab = frontOf(layout, side);
+    const tab = frontTab(layout, side);
     const current = deps.currentRoute();
     if (tab) routes.set(tab.id, current);
     else if (current.screen === "repo") lastHome = current;
@@ -949,7 +984,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     if (!layout.panes.right && !splitAllowed()) return false;
     if (!restoring) rememberRoute();
     const next = openRight(layout, target, keptOption());
-    const tab = frontOf(next, "right");
+    const tab = frontTab(next, "right");
     if (tab && target.kind === "file") routes.set(tab.id, route);
     commit(next, how);
     return true;
@@ -1404,8 +1439,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     const blocker = splitBlocker(layout) ?? (splitAllowed() ? null : "narrow");
     const allowed = blocker === null;
     for (const side of SIDES) {
-      const { newButton, splitButton, strip } = sections[side];
-      strip.setAttribute(
+      const { newButton, splitButton, list } = sections[side];
+      list.setAttribute(
         "aria-label",
         current.tabList(layout.panes.right ? side : null),
       );
@@ -1464,7 +1499,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       // 送り直すとスクロールが起きる (開いているメニューがそれで閉じる)。
       // 位置を戻しておけば、前面のタブが見えている限り何も動かない。
       const scrollLeft = strip.scrollLeft;
-      strip.replaceChildren(
+      sections[side].list.replaceChildren(
         ...pane.tabs.map((tab) =>
           renderTab(tab, tab.id === pane.activeId, side),
         ),
@@ -1652,14 +1687,14 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       return;
     }
     const shown = [routeSideOf(restoredLayout), restoredLayout.focused]
-      .map((side) => (side ? frontOf(restoredLayout, side) : null))
+      .map((side) => (side ? frontTab(restoredLayout, side) : null))
       .filter((tab): tab is Tab => tab !== null);
     // 本文を出す面が無い (前面がどちらもターミナルか画像) なら、URL は下に
     // 残った route を指している。そのタブが配置にあれば一致とみなす。
     const home = urlRoute.screen === "repo";
     const agrees = home
       ? // フォルダ表示: 保存した左の面が何も選んでいないか、前面がターミナル・画像
-        frontOf(restoredLayout, "left") === null ||
+        frontTab(restoredLayout, "left") === null ||
         routeSideOf(restoredLayout) === null
       : target !== null &&
         (shown.some((tab) => sameTarget(tab.target, target)) ||
@@ -1733,13 +1768,12 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       changeAndGo(showHome);
     },
     openNewTabMenu() {
-      const side = layout.panes.right ? layout.focused : "left";
-      deps.onNewTab(side, sections[side].newButton);
+      openNewTabMenuIn(layout.panes.right ? layout.focused : "left");
     },
     front: () => activeTab(layout),
     panes: () => panesView(layout),
     splitFitsWithPanelColumn: () =>
-      mainWidth() >= COMFORTABLE_PANE_WIDTH * 2 + DIVIDER_WIDTH,
+      mainWidth() >= COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH,
     hasTerminal: (session) => findTerminal(session) !== undefined,
     openingNewTab(run) {
       openingKept = true;
@@ -1757,11 +1791,15 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     },
     paneRoute(side) {
       if (side === "left") return null;
-      const tab = frontOf(layout, side);
+      const tab = frontTab(layout, side);
       return tab?.target.kind === "file" ? routeOf(tab) : null;
     },
     openRouteRight: (route, fromUrl = false) =>
       openRightRoute(route, fromUrl ? "sync" : "stay"),
+    sideHolding(route) {
+      const target = routeTarget(route);
+      return target ? sideOfTarget(layout, target) : null;
+    },
     sideForRoute(route) {
       const target = routeTarget(route);
       return target ? openSide(layout, target) : "left";

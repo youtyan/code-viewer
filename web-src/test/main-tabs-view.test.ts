@@ -226,6 +226,39 @@ describe("main tabs view: page のタブの検索語と道具", () => {
     ctx.handle.activateNth(2);
     expect(ctx.current()).toEqual(toolsRoute);
   });
+  // ファイルのタブは Preview を見ていたかを覚える (前面でないタブがリロードで
+  // Code に戻っていた。?preview=1 の見出しへの # が行き先を失う件の片割れ)。
+  test("背面のファイルのタブの Preview を保存し、読み戻して戻ると Preview", async () => {
+    const previewRoute: AppRoute = {
+      screen: "file",
+      path: "docs/notes.md",
+      ref: "worktree",
+      range,
+      view: "blob",
+      preview: true,
+    };
+    const first = setup(async () => null, undefined, undefined, previewRoute);
+    await first.handle.restore();
+    first.handle.openingNewTab(() => first.handle.syncRoute(previewRoute));
+    first.handle.openingNewTab(() =>
+      first.handle.syncRoute(fileRoute("src/app.ts")),
+    );
+    first.handle.flush(false);
+    const saved = first.saves[first.saves.length - 1];
+    if (!saved) throw new Error("expected a saved layout");
+    const again = setup(
+      async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+    );
+    await again.handle.restore();
+    again.handle.activateNth(1);
+    expect([
+      saved.panes[0]?.tabs.map((tab) => tab.route),
+      again.current(),
+    ]).toEqual([[{ preview: true }, undefined], previewRoute]);
+  });
 });
 
 describe("main tabs view: 読み戻し", () => {
@@ -702,6 +735,38 @@ describe("main tabs view: 操作", () => {
       // 作業ツリーの版の仮のタブは差し替わらずに残る。
       ["app.ts (preview)", `>${label}`],
       `src/app.ts @ ${ref}`,
+    ]);
+  });
+
+  // ＋ は最後のタブのすぐ右 (列の右端でなく、タブと一緒に動き一緒に送られる)。
+  // tablist にはタブだけ。分割のボタンは列の外の右端。タブが 0 枚なら ＋ は列の左端。
+  test.each([
+    { name: "タブ 0 枚", count: 0 },
+    { name: "タブ 1 枚", count: 1 },
+    { name: "タブ 3 枚", count: 3 },
+  ])("＋ の置き場所: $name", async ({ count }) => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.closeActive();
+    for (let n = 0; n < count; n += 1)
+      handle.openingNewTab(() => handle.syncRoute(fileRoute(`src/t${n}.ts`)));
+    const strip = mount.querySelector<HTMLElement>(".main-tabs-strip");
+    const list = strip?.querySelector<HTMLElement>("[role=tablist]");
+    const plus = mount.querySelector<HTMLElement>(".main-tabs-new");
+    expect([
+      [...(strip?.children ?? [])].map((child) => child.className),
+      [...(list?.children ?? [])].every((child) =>
+        child.classList.contains("main-tab"),
+      ),
+      list?.children.length,
+      plus?.previousElementSibling === list,
+      mount.querySelector(".main-tabs-split")?.closest(".main-tabs-strip"),
+    ]).toEqual([
+      ["main-tabs-list", "main-tabs-action main-tabs-new"],
+      true,
+      count,
+      true,
+      null,
     ]);
   });
 
@@ -1194,7 +1259,7 @@ describe("main tabs view: 左右 2 面", () => {
 
   const splitButton = (mount: HTMLElement) =>
     mount.querySelector<HTMLButtonElement>(
-      '.main-tabs-pane[data-side="left"] .main-tabs-action:nth-child(2)',
+      '.main-tabs-pane[data-side="left"] .main-tabs-split',
     );
 
   test("分割ボタンは前面のターミナルを右の面へ出し、本文は左の面に残る", async () => {
@@ -1219,7 +1284,7 @@ describe("main tabs view: 左右 2 面", () => {
     handle.openTerminal("shell-a1");
     splitButton(mount)?.click();
     const button = mount.querySelector<HTMLButtonElement>(
-      '.main-tabs-pane[data-side="right"] .main-tabs-action:nth-child(2)',
+      '.main-tabs-pane[data-side="right"] .main-tabs-split',
     );
     expect([
       button?.getAttribute("aria-disabled") === "true",
@@ -1273,8 +1338,8 @@ describe("main tabs view: 左右 2 面", () => {
     splitButton(mount)?.click();
     const divider = document.querySelector(".main-split-divider");
     expect([
-      [...mount.querySelectorAll(".main-tabs-strip")].map((strip) =>
-        strip.getAttribute("aria-label"),
+      [...mount.querySelectorAll("[role=tablist]")].map((list) =>
+        list.getAttribute("aria-label"),
       ),
       divider?.getAttribute("aria-valuenow"),
       Number(divider?.getAttribute("aria-valuemin")) <
@@ -1348,6 +1413,21 @@ describe("main tabs view: 左右 2 面", () => {
       "right:src/c.ts",
       "right:src/b.ts",
     ]);
+  });
+
+  // 戻る・進むはタブの配置を変えない: 既にあるタブの面を返し、app はそれを
+  // 前面に出すだけにする (右の面にだけあるファイルを左に仮で開き直さない)。
+  test("sideHolding: その route のタブがある面 (左を先に見る)", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.openingNewTab(() => handle.syncRoute(fileRoute("src/b.ts")));
+    splitButton(mount)?.click();
+    expect([
+      handle.sideHolding(fileRoute("src/b.ts")),
+      handle.sideHolding(fileRoute("src/app.ts")),
+      handle.sideHolding(fileRoute("src/missing.ts")),
+      handle.sideHolding({ screen: "repo", ref: "worktree", path: "", range }),
+    ]).toEqual(["right", "left", null, null]);
   });
 
   test("前面が画面のタブなら分割ボタンは押せない", async () => {

@@ -272,8 +272,10 @@ export function parseRoute(
         path,
         ref,
         range,
-        view: target ? "blob" : "detail",
-        ...(target && preview ? { preview: true as const } : {}),
+        // ?preview=1 だけでも Preview で開く (target / view を省いた URL。手で
+        // 書いた URL や見出しへの # リンクで preview が落ち、Code で開いていた)。
+        view: target || preview ? "blob" : "detail",
+        ...(preview ? { preview: true as const } : {}),
         ...(line ? { line } : {}),
         ...(params.get("virtual") === "off" ? { virtual: "off" as const } : {}),
       };

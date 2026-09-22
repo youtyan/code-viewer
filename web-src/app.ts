@@ -8414,9 +8414,29 @@ window.GdpExpandLogic = GdpExpandLogic;
     load();
   }
   window.addEventListener("popstate", () => {
+    // 戻る・進むは本文 (URL) だけを動かし、タブの配置は変えない。そのファイル
+    // のタブが右の面にだけあるなら、左の面に仮のタブを作らずに右の面の前面に
+    // 出す (分割した後の戻るで、左に同じファイルが開き直っていた)。
+    if (frontRightTabForLocation()) return;
     applyRouteFromLocation();
     restoreMainScroll();
   });
+
+  /** 今の URL (右の面の印なし) のファイルのタブが右の面にだけあれば前面に出して true。 */
+  function frontRightTabForLocation(): boolean {
+    if (parsePaneOverlay(window.location.search) === "right") return false;
+    const route = normalizeInternalFileRoute(
+      parseRoute(routePathname(), window.location.search, currentRange()),
+    );
+    if (
+      route.screen !== "file" ||
+      route.view === "history" ||
+      routeTarget(route)?.kind !== "file" ||
+      MAIN_TABS.sideHolding(route) !== "right"
+    )
+      return false;
+    return openInRightPane(route, true);
+  }
   // 本文の箱の位置を、いまの履歴の項に覚え続ける (scroll は上がってこないので
   // capture で受ける)。
   document.addEventListener(

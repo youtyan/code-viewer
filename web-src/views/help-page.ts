@@ -280,7 +280,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
             blocks: [
               {
                 kind: "paragraph",
-                text: "Terminals open as tabs of the main area. The ＋ at the right of the tab row opens a menu with Open a file, New shell, and the existing sessions: the shells of this server and the tmux panes of this project (● marks one that is unread and not in a tab; Mark all as read clears them; All sessions in every project goes to the Agents board). An agent from the left sidebar, the palette (Ctrl+K: agents under Agents, shells and plain tmux panes under Sessions), the All agents board or the bottom bar opens in a tab too, and Ctrl+` opens the ＋ menu of the focused side. Each terminal is an ordinary login shell running on a PTY and drawn with xterm.js, so anything you would run in a terminal works here — including tmux, which follows the tab's size on its own.",
+                text: "Terminals open as tabs of the main area. The ＋ just after the last tab opens a menu with Open a file, New shell, and the existing sessions: the shells of this server and the tmux panes of this project (● marks one that is unread and not in a tab; Mark all as read clears them; All sessions in every project goes to the Agents board). An agent from the left sidebar, the palette (Ctrl+K: agents under Agents, shells and plain tmux panes under Sessions), the All agents board or the bottom bar opens in a tab too, and Ctrl+` opens the ＋ menu of the focused side. Each terminal is an ordinary login shell running on a PTY and drawn with xterm.js, so anything you would run in a terminal works here — including tmux, which follows the tab's size on its own.",
               },
               {
                 kind: "paragraph",
@@ -1198,7 +1198,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "ターミナルはメインの面のタブで開きます。タブ列の右の「＋」を押すと、「ファイルを開く」「新しいシェル」と、既存のセッション (このサーバのシェルと、このプロジェクトの tmux のペイン) が並ぶメニューが出ます (● はタブで開いていない未読。「すべて読んだことにする」で消せます。「すべてのプロジェクトのセッション…」はエージェントの一覧へ)。左のサイドバー・パレット (Ctrl+K。エージェントは「エージェント」、シェルとただの tmux のペインは「セッション」の群)・全体ボード・最下段から開くエージェントもタブで開き、Ctrl+` でフォーカスのある面の「＋」のメニューが開きます。中身は PTY 上のふつうのログインシェルを xterm.js で描いたものなので、ターミナルでできることはそのままできます。tmux もそのひとつで、タブの大きさに自分で追従します。",
+                text: "ターミナルはメインの面のタブで開きます。最後のタブのすぐ右の「＋」を押すと、「ファイルを開く」「新しいシェル」と、既存のセッション (このサーバのシェルと、このプロジェクトの tmux のペイン) が並ぶメニューが出ます (● はタブで開いていない未読。「すべて読んだことにする」で消せます。「すべてのプロジェクトのセッション…」はエージェントの一覧へ)。左のサイドバー・パレット (Ctrl+K。エージェントは「エージェント」、シェルとただの tmux のペインは「セッション」の群)・全体ボード・最下段から開くエージェントもタブで開き、Ctrl+` でフォーカスのある面の「＋」のメニューが開きます。中身は PTY 上のふつうのログインシェルを xterm.js で描いたものなので、ターミナルでできることはそのままできます。tmux もそのひとつで、タブの大きさに自分で追従します。",
               },
               {
                 kind: "paragraph",

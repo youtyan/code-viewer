@@ -258,8 +258,8 @@ Requires Node.js 20 or newer. Development uses
   another tab is in front, and the split between input and output is
   draggable (in a pane under 560px wide the input sits above the output,
   without the divider).
-- Run a real shell in the browser as a tab of the main area. The ＋ at the
-  right of the tab row opens a menu with Open a file, New shell, and the
+- Run a real shell in the browser as a tab of the main area. The ＋ just
+  after the last tab opens a menu with Open a file, New shell, and the
   existing sessions — the shells of this server and the tmux panes of this
   project, with ● on unread ones that are not in a tab (``Ctrl+` ``
   opens the same menu). It is an ordinary login shell on a PTY, rendered with

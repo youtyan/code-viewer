@@ -18,7 +18,7 @@ export const STANDALONE_MEDIA_QUERY = "(display-mode: standalone)";
  */
 export type PwaKeyTarget = "page" | "terminal" | "blocked";
 
-export type PwaKeyContext = {
+type PwaKeyContext = {
   standalone: boolean;
   /** macOS か。ブラウザのタブ操作の修飾キーが Cmd (mac) か Ctrl (それ以外) かを決める */
   mac: boolean;
@@ -30,7 +30,7 @@ export type PwaKeyContext = {
  * keymap.ts の既存のタブ操作と、キー割り当てに名前の無い 3 つ (最後のタブ・
  * 最後に閉じたタブを開き直す・「＋」のメニュー)。
  */
-export type PwaTabAction =
+type PwaTabAction =
   | Extract<
       KeymapAction,
       | "main-tab-close"

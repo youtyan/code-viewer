@@ -285,6 +285,17 @@ describe("routes", () => {
       preview: true,
       range: defaultRange,
     });
+    // target と view を省いた ?preview=1 も Preview (見出しへの # は URL に残る)。
+    expect(
+      parseRoute("/file", "?path=README.md&preview=1", defaultRange),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "blob",
+      preview: true,
+      range: defaultRange,
+    });
     expect(
       parseRoute(
         "/file",

@@ -98,7 +98,7 @@ export type OpenOptions = {
   newId?: () => string;
 };
 
-export type TabMenuState = {
+type TabMenuState = {
   close: boolean;
   closeOthers: boolean;
   closeToRight: boolean;
@@ -111,7 +111,7 @@ export type TabMenuState = {
   copyPath: boolean;
 };
 
-export type MoveResult =
+type MoveResult =
   | { layout: Layout; moved: true }
   | {
       layout: Layout;
@@ -180,10 +180,6 @@ function paneOf(layout: Layout, side: PaneSide): Pane | null {
   return side === "left" ? layout.panes.left : (layout.panes.right ?? null);
 }
 
-export function isSplit(layout: Layout): boolean {
-  return !!layout.panes.right;
-}
-
 export function findTab(
   layout: Layout,
   id: string,
@@ -211,11 +207,29 @@ function findTarget(
   return null;
 }
 
-/** フォーカスのある面の選択中のタブ。 */
-export function activeTab(layout: Layout): Tab | null {
-  const pane = paneOf(layout, layout.focused);
+/** その面の選択中のタブ (面が無いか、何も選んでいなければ null)。 */
+export function frontTab(layout: Layout, side: PaneSide): Tab | null {
+  const pane = paneOf(layout, side);
   if (!pane?.activeId) return null;
   return pane.tabs.find((tab) => tab.id === pane.activeId) ?? null;
+}
+
+/** フォーカスのある面の選択中のタブ。 */
+export function activeTab(layout: Layout): Tab | null {
+  return frontTab(layout, layout.focused);
+}
+
+/** 両方の面のタブ (左の面から順に)。 */
+export function allTabs(layout: Layout): Tab[] {
+  return sides(layout).flatMap((side) => (paneOf(layout, side) as Pane).tabs);
+}
+
+/** 同じ中身のタブがある面 (左を先に見る)。無ければ null。 */
+export function sideOfTarget(
+  layout: Layout,
+  target: TabTarget,
+): PaneSide | null {
+  return findTarget(layout, target)?.side ?? null;
 }
 
 function withPane(layout: Layout, side: PaneSide, pane: Pane): Layout {
@@ -605,14 +619,17 @@ export function move(
 
 export const CLOSED_HISTORY_LIMIT = 10;
 
-export type ClosedTab = { target: TabTarget; side: PaneSide };
+/** 閉じたタブ。index は閉じる前のその面の中の位置 (0 始まり)。 */
+export type ClosedTab = { target: TabTarget; side: PaneSide; index: number };
 
 /** before にあって after に無いタブ (閉じたタブ)。面ごとに並びの順。 */
 export function closedTabs(before: Layout, after: Layout): ClosedTab[] {
   const out: ClosedTab[] = [];
   for (const side of sides(before))
-    for (const tab of (paneOf(before, side) as Pane).tabs)
-      if (!findTab(after, tab.id)) out.push({ target: tab.target, side });
+    (paneOf(before, side) as Pane).tabs.forEach((tab, index) => {
+      if (!findTab(after, tab.id))
+        out.push({ target: tab.target, side, index });
+    });
   return out;
 }
 
@@ -634,8 +651,9 @@ export function pushClosed(
 }
 
 /**
- * いちばん新しく閉じたタブを固定のタブで開き直し、前面に出す。閉じた面が
- * もう無ければ (1 面に戻った) 左の面に開く。今開いているものは飛ばして
+ * いちばん新しく閉じたタブを固定のタブで開き直し、前面に出す。閉じた面の
+ * 元の位置に入れ、その位置がもう無ければ (タブが減った) 面の末尾。閉じた面が
+ * もう無ければ (1 面に戻った) 左の面の末尾。今開いているものは飛ばして
  * 履歴から落とす。開き直せるものが無ければ layout はそのまま、reopened は null。
  */
 export function reopenClosed(
@@ -653,15 +671,22 @@ export function reopenClosed(
       : findTarget(layout, item.target) !== null;
     if (isOpen) continue;
     const side = paneOf(layout, item.side) ? item.side : "left";
-    return {
-      layout: open(layout, item.target, {
-        ...opts,
-        pane: side,
-        preview: false,
-      }),
-      history: rest,
-      reopened: item,
-    };
+    const opened = open(layout, item.target, {
+      ...opts,
+      pane: side,
+      preview: false,
+    });
+    const tab = activeTab(opened) as Tab;
+    const at = findTab(opened, tab.id) as { side: PaneSide };
+    const count = (paneOf(opened, at.side) as Pane).tabs.length;
+    const index =
+      at.side === item.side && item.index < count ? item.index : count - 1;
+    const placed = move(opened, tab.id, at.side, index);
+    if (placed.moved === false)
+      throw new Error(
+        `main tabs: the reopened tab ${tab.id} could not be placed: ${placed.reason}`,
+      );
+    return { layout: placed.layout, history: rest, reopened: item };
   }
   return { layout, history: rest, reopened: null };
 }
@@ -674,7 +699,7 @@ export function canSplit(layout: Layout): boolean {
  * タブ列の分割のボタンで左の前面を右へ出せない理由 (出せるなら null)。
  * 窓の幅はここでは見ない (描画側が足す)。
  */
-export type SplitBlocker = "split" | "no-front" | "page";
+type SplitBlocker = "split" | "no-front" | "page";
 
 export function splitBlocker(layout: Layout): SplitBlocker | null {
   if (!canSplit(layout)) return "split";
@@ -796,15 +821,21 @@ export function tabMenu(layout: Layout, id: string): TabMenuState {
 // ---- 保存 ----
 
 /**
- * page のタブが覚えている route のうち、保存して読み戻すもの。Search の検索語と
+ * タブが覚えている route のうち、保存して読み戻すもの。Search の検索語と
  * Tools の道具は URL からも target からも作り直せないので、これだけ載せる
- * (別のタブを前面にしてリロードすると Search が空で戻っていた)。
+ * (別のタブを前面にしてリロードすると Search が空で戻っていた)。ファイルの
+ * タブは Preview を見ていたか (preview。前面でないタブがリロードで Code に
+ * 戻っていた)。
  *
  * 省略できる欄なので `LAYOUT_VERSION` は上げない。これを持たない古い保存値は
  * 今までどおり読め、この欄を知らない古いアプリはこの欄を見ないだけで済む
  * (版を上げると、古いアプリが配置ごと「版が違う」と断ってしまう)。
  */
-export type SerializedPageRoute = { q?: string; tool?: string };
+export type SerializedPageRoute = {
+  q?: string;
+  tool?: string;
+  preview?: true;
+};
 
 export type SerializedLayout = {
   version: typeof LAYOUT_VERSION;
@@ -824,8 +855,8 @@ export type SerializedLayout = {
 };
 
 /**
- * `pageRoute` は page のタブが今見せている route を返す (画面側が持っている)。
- * 渡さなければ route を書かない。
+ * `pageRoute` は page とファイルのタブが今見せている route を返す (画面側が
+ * 持っている)。渡さなければ route を書かない。
  */
 export function serializeLayout(
   layout: Layout,
@@ -845,7 +876,9 @@ export function serializeLayout(
         activeId: pane.activeId,
         tabs: pane.tabs.map((tab) => {
           const route =
-            tab.target.kind === "page" ? pageRoute?.(tab) : undefined;
+            tab.target.kind === "page" || tab.target.kind === "file"
+              ? pageRoute?.(tab)
+              : undefined;
           return {
             id: tab.id,
             preview: tab.preview,
@@ -858,7 +891,7 @@ export function serializeLayout(
   };
 }
 
-export type ParsedLayout = {
+type ParsedLayout = {
   layout: Layout;
   /** 種類が分からず落としたタブ (場所と元の値)。 */
   dropped: Array<{ at: string; raw: unknown }>;
@@ -923,6 +956,11 @@ function parsePageRoute(
     if (typeof value !== "string" || value.length === 0)
       return `route.${key} is ${JSON.stringify(value)}`;
     out[key] = value;
+  }
+  if (raw.preview !== undefined) {
+    if (raw.preview !== true)
+      return `route.preview is ${JSON.stringify(raw.preview)}`;
+    out.preview = true;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -1170,14 +1208,13 @@ export type SerializedCommonTabs = {
 export function serializeCommonTabs(layout: Layout): SerializedCommonTabs {
   return {
     version: COMMON_TABS_VERSION,
-    targets: sides(layout)
-      .flatMap((side) => (paneOf(layout, side) as Pane).tabs)
+    targets: allTabs(layout)
       .map((tab) => tab.target)
       .filter(isCommonTarget),
   };
 }
 
-export type ParsedCommonTabs =
+type ParsedCommonTabs =
   /** まだ保存が無い (この版を初めて使う)。プロジェクトの配置のまま使う。 */
   | { kind: "none" }
   /** 新しい版の保存。読めないので使わず、上書きもしない。 */

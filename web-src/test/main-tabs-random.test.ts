@@ -10,6 +10,7 @@ import {
   activateIndex,
   assertLayout,
   close,
+  closedTabs,
   closeOthers,
   closeToRight,
   emptyLayout,
@@ -26,6 +27,8 @@ import {
   parkRight,
   parseLayout,
   prevTab,
+  pushClosed,
+  reopenClosed,
   serializeLayout,
   setSplit,
   showHome,
@@ -117,6 +120,30 @@ function randomStep(pick: (n: number) => number, layout: Layout): Step {
         const { layout: parked, parked: stash } = parkRight(l);
         const opened = open(parked, target, { preview });
         return stash ? unparkRight(opened, stash) : opened;
+      },
+    },
+    {
+      // ⌘W → ⌘⇧T: 閉じたタブは元の面の元の位置に戻る (面が残っていて、位置が
+      // まだあるとき)。戻らなければ理由を投げる (1 手ごとの検査が拾う)。
+      name: `close ${id} and reopen it`,
+      apply: (l) => {
+        const closedLayout = close(l, id);
+        const closed = closedTabs(l, closedLayout);
+        const result = reopenClosed(closedLayout, pushClosed([], closed));
+        const item = closed[0];
+        if (!item || !result.reopened) return result.layout;
+        const pane =
+          item.side === "left"
+            ? result.layout.panes.left
+            : result.layout.panes.right;
+        if (pane && item.index < pane.tabs.length) {
+          const at = pane.tabs.findIndex((tab) => tab.id === pane.activeId);
+          if (at !== item.index)
+            throw new Error(
+              `reopened ${JSON.stringify(item)} at ${item.side}[${at}], not at its old position`,
+            );
+        }
+        return result.layout;
       },
     },
     {

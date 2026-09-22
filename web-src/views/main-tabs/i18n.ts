@@ -3,7 +3,7 @@
 
 export type MainTabsLang = "en" | "ja";
 
-export type MainTabsText = {
+type MainTabsText = {
   /** タブ列の名前。2 面なら左右が分かるように (side が null なら 1 面)。 */
   tabList: (side: "left" | "right" | null) => string;
   close: string;

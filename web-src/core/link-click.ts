@@ -1,4 +1,4 @@
-export type LinkClickLike = Pick<
+type LinkClickLike = Pick<
   MouseEvent,
   "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "button"
 >;
