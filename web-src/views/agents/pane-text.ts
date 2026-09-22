@@ -42,3 +42,22 @@ export function paneText(pane: AgentPane, text: AgentsText): PaneText {
     title: `${task === null ? state : `${state} · ${task}`}\n${place} · ${pane.command}`,
   };
 }
+
+/**
+ * エージェントを映していないシェルの名前 (タブ・「＋」の行・パレット)。
+ * 「Shell」＋このプロジェクトのサーバで開いた順の番号。id (`shell-…`) は
+ * 出さない。番号は一覧 (開いた時刻の順) の位置なので、前のシェルを閉じると
+ * 詰まる。一覧にまだ載っていない (取り直し前の) シェルは番号を付けない。
+ */
+export function shellName(
+  session: string,
+  sessions: readonly { id: string; createdAt: string }[],
+  word: string,
+): string {
+  const order = [...sessions].sort(
+    (a, b) =>
+      a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+  );
+  const index = order.findIndex((item) => item.id === session);
+  return index < 0 ? word : `${word} ${index + 1}`;
+}

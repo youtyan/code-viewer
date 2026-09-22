@@ -168,7 +168,7 @@ import {
 } from "./views/agents/agents-sidebar";
 import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
 import { agentsText } from "./views/agents/i18n";
-import { paneText } from "./views/agents/pane-text";
+import { paneText, shellName } from "./views/agents/pane-text";
 import { mountUsageStatus } from "./views/agents/usage-status";
 import { createAnnotationsPlayer } from "./views/annotations-player";
 import {
@@ -1575,7 +1575,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       const start =
         typeof route.line === "number" ? route.line : route.line.start;
       const end = typeof route.line === "number" ? route.line : route.line.end;
-      LINE_REF_PILL.show(route.path, start, end);
+      // コードを写すときは選択のある面の行を読む (同じパスを左右で別の ref
+      // に開いていても、反対の面を読まない)。
+      LINE_REF_PILL.show(route.path, start, end, () =>
+        right ? (RIGHT_SOURCE?.root ?? null) : $("#content"),
+      );
       return;
     }
     if (right) LINE_REF_PILL.hide();
@@ -5148,11 +5152,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     const selectionTarget = resolveSelectionTarget(STATE.route);
     let selectionCode: { lines: string[]; lang?: string | null } | undefined;
     if (event.shiftKey && selectionTarget) {
-      const renderedLines = readRenderedLines(
-        selectionTarget.path,
-        selectionTarget.start,
-        selectionTarget.end,
-      );
+      // STATE.route は左の本文の route なので、左の本文から読む。
+      const content = $("#content");
+      const renderedLines = content
+        ? readRenderedLines(
+            selectionTarget.path,
+            selectionTarget.start,
+            selectionTarget.end,
+            content,
+          )
+        : [];
       if (renderedLines.length > 0) {
         selectionCode = {
           lines: renderedLines,
@@ -7265,7 +7274,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (pane?.kind)
       return { label: paneText(pane, a).headline, state: pane.state };
     return {
-      label: `${terminalText(STATE.language).shellTarget} ${session.replace(/^shell-/, "")}`,
+      label: shellName(
+        session,
+        TERMINAL_VIEW.knownShells()?.sessions ?? [],
+        terminalText(STATE.language).shellTarget,
+      ),
       state: null,
     };
   }

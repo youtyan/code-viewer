@@ -616,7 +616,7 @@ find web-src -name '*.ts' -not -path 'web-src/server/*' -not -path 'web-src/test
 | `<状態>/agent-usage/` | statusLine を包むスクリプト・claude の使用量・`failures.log` | 同上 |
 | `<状態>/projects.json` | プロジェクトの登録簿 | 同上 |
 | `<状態>/settings.json` | 全プロジェクト共通の設定 | 同上 |
-| `<状態>/main-tabs.json` | メインの面のタブの配置をプロジェクト（根のパス）ごとに。ファイルの包みは version 1、各配置は version 2。配置 version 1 も読み、Files のタブを除き、右の route タブを左へ移して version 2 にする。読めない配置は上書きせず、先に `POST /_state/tabs/backup` で同じ場所の `main-tabs.json.broken-<時刻>` へ写してから空で始める（写せなければ保存しない。理由は console.error）。`/_state/tabs`、`server/main-tabs-store.ts` の `backupMainTabs`、`core/main-tabs.ts` の `parseLayout` | 同上 |
+| `<状態>/main-tabs.json` | メインの面のタブの配置をプロジェクト（根のパス）ごとに。ファイルの包みは version 1、各配置は version 3（`core/main-tabs.ts` の `LAYOUT_VERSION`。左右で同じファイルを開ける）。配置の version 1・2 も読み（repo の page のタブは落とし、右の page のタブは左へ移す）、次の保存で 3 にする。3 より新しい版は使わず上書きもしない（`isNewerLayoutVersion`）。`/_state/tabs`、`server/main-tabs-store.ts`、`core/main-tabs.ts` の `parseLayout`。読めない配置は上書きせず、先に `POST /_state/tabs/backup` で同じ場所の `main-tabs.json.broken-<時刻>` へ写してから空で始める（写せなければ保存しない。理由は console.error）。`/_state/tabs`、`server/main-tabs-store.ts` の `backupMainTabs`、`core/main-tabs.ts` の `parseLayout` | 同上 | 同上 |
 | `<状態>/server-logs/` | code-viewer が起こしたサーバ・裏の出力（起動に失敗したとき・落ちたとき末尾を理由に添える） | 同上 |
 | `<状態>/entry.json`・`entry.json.start.lock` | 動いている入口の `{url, pid, token, version, started_at}` と起動の排他 | 同上 |
 | `<状態>/agent-screen-rules.json`・`agent-screen-rules.migrated` | 画面ルールの保存済み上書き（ユーザー単位）と、リポジトリから写した・保存した・戻した印 | 同上 |

@@ -204,6 +204,15 @@ async function readJsonResponse<T>(
   }
 }
 
+/**
+ * 左の列 (.db-sidebar) を掴んで動かしたときの幅。列の左端からポインタまでの
+ * 距離を 120〜600px に収める。clientX は窓の左端からなので、そのまま使うと
+ * 左にサイドバーがある画面では掴んだだけで幅がその分跳ぶ。
+ */
+export function dbSidebarWidthAt(clientX: number, sidebarLeft: number): number {
+  return Math.max(120, Math.min(600, clientX - sidebarLeft));
+}
+
 // ----- 内部: 1 タブ分の view (元 createDatabaseView の中身) -----
 
 type TabPaneCallbacks = {
@@ -710,7 +719,10 @@ function createTabPane(
     resizeHandle.classList.add("active");
     const onMove = (ev: MouseEvent) => {
       if (!resizing) return;
-      const w = Math.max(120, Math.min(600, ev.clientX));
+      const w = dbSidebarWidthAt(
+        ev.clientX,
+        sidebar.getBoundingClientRect().left,
+      );
       sidebar.style.width = `${w}px`;
     };
     const onUp = () => {

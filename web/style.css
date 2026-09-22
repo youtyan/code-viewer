@@ -932,12 +932,6 @@ button.brand:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.brand-icon {
-  width: calc(var(--ui-font-title) + 5px);
-  height: calc(var(--ui-font-title) + 5px);
-  display: block;
-  border-radius: 5px;
-}
 .brand .title {
   min-width: 0;
   overflow: hidden;
@@ -1017,14 +1011,6 @@ button.brand:focus-visible {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
-}
-.global-actions-sep {
-  /* Quiet divider between the view-tool / session / help groups. */
-  flex: none;
-  width: 1px;
-  height: 18px;
-  margin: 0 2px;
-  background: var(--border);
 }
 .global-actions #theme,
 .global-icon-action {
@@ -5944,7 +5930,6 @@ body.gdp-file-detail-page #empty {
   margin: 0;
   font-size: var(--ui-font-md);
 }
-.gdp-repo-header,
 .gdp-repo-toolbar {
   padding-left: 0;
   padding-right: 0;
@@ -6689,17 +6674,8 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
    1547px は、何も詰めないと追加後のナビがあふれ始める幅 (実測)。 */
 @media (max-width: 1547px) {
   /* 件数表示そのものの詰め方は、その基本の規則より後 (Agents の節) に置く。 */
-  #agent-status + .global-actions-sep {
-    display: none;
-  }
-  .global-actions-sep.app-menu-sep {
-    margin-inline: 2px;
-  }
   .global-actions {
     gap: 4px;
-  }
-  .global-actions-sep {
-    margin-inline: 0;
   }
 }
 /* 900px 以下で効いていた「稼働中」を点だけにする詰め方も、同じ理由で早める
@@ -6719,9 +6695,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 @media (max-width: 1100px) {
   .global-actions {
     gap: 4px;
-  }
-  .global-actions-sep {
-    margin-inline: 0;
   }
 }
 
@@ -6786,8 +6759,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
     overflow-x: auto;
     scrollbar-width: thin;
   }
-  .ai-context-label { display: none; }
-  .ai-context-action { padding: 0; }
   #status .status-label { display: none; }
   #status { padding: 0 6px 0 8px; }
   #status::before { margin-right: 0; }
@@ -6848,10 +6819,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   body {
     --topbar-h: 112px;
   }
-  #global-header {
-    gap: 8px;
-    padding: 0 10px;
-  }
   #topbar {
     align-items: flex-start;
     padding-top: 8px;
@@ -6862,9 +6829,7 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
     max-width: 28px;
   }
   .brand .title,
-  #project-branch,
-  .global-actions .global-help-link,
-  .product-label {
+  #project-branch {
     display: none;
   }
   .app-menu {
@@ -7775,11 +7740,6 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   margin-top: 8px;
   font-size: var(--ui-font-base);
   color: var(--fg-muted);
-}
-.db-query-history-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
 }
 .db-query-history-truncated {
   margin-top: 4px;
@@ -9208,7 +9168,12 @@ body.gdp-journal-page #load-bar {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--journal-task-editor-w);
+  /* 編集欄は覚えた幅 (--journal-task-editor-w) だが、板を最低 160px 残す。
+     1280px の窓の 2 面 (左の面が約 375px) では 380px の編集欄が面を埋め、
+     板が 32px に潰れて見えなくなっていた。 */
+  grid-template-columns:
+    minmax(0, 1fr)
+    min(var(--journal-task-editor-w), calc(100% - 160px));
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
     "toolbar toolbar"
@@ -10214,14 +10179,6 @@ body.journal-task-editor-resizing * {
   flex-direction: column;
 }
 .db-history-pane[hidden] { display: none; }
-.db-tools-section {
-  border-top: 1px solid var(--border);
-  padding: 6px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex-shrink: 0;
-}
 
 /* ---------- Icon toolbar (案 B 改: TablePlus / Beekeeper 風) ---------- */
 .db-icon-toolbar {
@@ -10330,37 +10287,10 @@ body.journal-task-editor-resizing * {
   width: 1.25em;
   height: 1.25em;
 }
-.db-tool-btn {
-  width: 100%;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg-muted);
-  font-size: var(--db-font-base);
-  font-family: inherit;
-  cursor: pointer;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.db-tool-btn:hover {
-  background: var(--bg-mute);
-  color: var(--fg);
-}
-.db-tool-btn.active {
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
-  color: var(--accent);
-  border-color: var(--accent);
-  font-weight: 600;
-}
 /* ---------- [hidden] 属性を効かせる ---------- */
 /* `.db-*` クラスの多くが `display: flex` を主張しており、ブラウザ標準の
    `[hidden] { display: none }` (specificity 0,1,0) と CSS specificity が
    同点で後勝ちで負ける。各要素について [hidden] 専用ルールを明示する。 */
-.db-tools-section[hidden],
-.db-tool-btn[hidden],
 .db-tab-bar[hidden],
 .db-history-dock[hidden],
 .db-history-pane[hidden],
@@ -10379,7 +10309,9 @@ body.journal-task-editor-resizing * {
 .db-sidebar {
   width: 260px;
   min-width: 120px;
-  max-width: 600px;
+  /* 表の側に面の半分を残す (1280px の窓の 2 面では、左の面が約 385px で
+     260px の列が表を 120px に押し込んでいた)。 */
+  max-width: min(600px, 50%);
   border-right: 1px solid var(--border);
   background: var(--bg-soft);
   display: flex;
@@ -11041,12 +10973,6 @@ body.journal-task-editor-resizing * {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-}
-/* 編集モードがオンのトグルは accent で塗る (.controls > button.active と同系統)。 */
-.db-grid-edit-toggle.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
 }
 .db-grid-edit-status {
   font-size: var(--db-font-sm);
@@ -12299,10 +12225,6 @@ body.db-resizing * {
   text-align: center;
   color: var(--fg-muted);
 }
-.db-docker-notice-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
-}
 .db-docker-notice h3 {
   font-size: 18px;
   color: var(--fg);
@@ -12312,22 +12234,6 @@ body.db-resizing * {
   margin: 4px 0;
   font-size: var(--db-font-md);
   max-width: 500px;
-}
-.db-docker-notice-hint {
-  color: var(--fg-subtle);
-}
-.db-docker-notice-code {
-  margin-top: 12px;
-  padding: 10px 16px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: var(--db-font-base);
-  color: var(--fg);
-  text-align: left;
-  max-width: 600px;
-  overflow-x: auto;
 }
 
 /* ---------- Query History Panel Resizer ---------- */
@@ -12474,12 +12380,6 @@ body.db-resizing {
   font-size: var(--db-font-base);
   color: var(--fg-muted);
   line-height: 1.6;
-}
-.db-snapshot-guide-note {
-  font-size: calc(var(--db-font-base) - 1px);
-  color: var(--fg-muted);
-  margin-top: 4px;
-  font-style: italic;
 }
 .db-snapshot-note-field {
   display: flex;
@@ -12973,8 +12873,7 @@ body.db-resizing {
 .db-snapshot-select-actions button:hover {
   background: var(--bg-mute);
 }
-.db-snapshot-note-input,
-.db-snapshot-diff-note-input {
+.db-snapshot-note-input {
   padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -13038,10 +12937,6 @@ body.db-resizing {
   align-items: center;
   font-size: var(--db-font-base);
   flex: 1;
-}
-.db-snapshot-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--accent);
 }
 .db-snapshot-date {
   color: var(--fg-muted);
@@ -13107,101 +13002,9 @@ body.db-resizing {
   color: var(--fg);
   font-size: var(--db-font-base);
 }
-/* diff-btn の旧独自青塗りは廃止。上の confirm/cancel と同じ neutral + accent
- * subtle スタイル (line 8119-) を共有する。 */
-.db-snapshot-diff-section {
-  margin-top: 16px;
-}
-.db-snapshot-diff-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  margin-bottom: 6px;
-  gap: 8px;
-}
-.db-snapshot-diff-info {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  align-items: center;
-  font-size: var(--db-font-base);
-  flex: 1;
-}
-.db-snapshot-diff-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--accent);
-}
-.db-snapshot-diff-date {
-  color: var(--fg-muted);
-}
-.db-snapshot-diff-status {
-  padding: 1px 6px;
-  border-radius: 10px;
-  font-size: calc(var(--db-font-base) - 1px);
-}
-.db-snapshot-diff-status.done {
-  background: color-mix(in srgb, var(--success) 15%, var(--bg));
-  color: var(--success);
-}
-.db-snapshot-diff-status.running {
-  background: color-mix(in srgb, var(--warning, #d29922) 15%, var(--bg));
-  color: var(--warning, #d29922);
-}
-.db-snapshot-diff-status.error {
-  background: color-mix(in srgb, var(--danger) 15%, var(--bg));
-  color: var(--danger);
-}
-.db-snapshot-diff-range {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--fg-muted);
-}
-.db-snapshot-diff-note-text {
-  width: 100%;
-  color: var(--fg-muted);
-  font-style: italic;
-}
-.db-snapshot-diff-actions {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-.db-snapshot-diff-actions button {
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
-  cursor: pointer;
-  font-size: calc(var(--db-font-base) - 1px);
-}
-.db-snapshot-diff-actions button:hover {
-  background: var(--bg-mute);
-}
-.db-snapshot-back-btn {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
-  cursor: pointer;
-  font-size: var(--db-font-base);
-  margin-bottom: 8px;
-}
-.db-snapshot-back-btn:hover {
-  background: var(--bg-mute);
-}
 .db-snapshot-diff-summary {
   padding: 8px 0;
   color: var(--fg-muted);
-  font-size: var(--db-font-base);
-}
-.db-snapshot-no-changes {
-  padding: 12px 0;
-  color: var(--fg-muted);
-  font-style: italic;
   font-size: var(--db-font-base);
 }
 .db-snapshot-diff-table {
@@ -15517,52 +15320,9 @@ body.app-panel-docked .app-panel.app-panel-open {
   overflow: auto;
 }
 
-/* ドロワー左端の掴みしろ。annotation パネルのリサイザーと同じ作り (境界を
-   またぐ 8px の透明な帯) だが、ドロワーが画面の大半を覆って端が分かりにくい
-   ので、掴める位置を示すグリップを常時出す。 */
-.tools-sheet-resizer {
-  position: absolute;
-  left: -4px;
-  top: 0;
-  bottom: 0;
-  width: 8px;
-  cursor: col-resize;
-  touch-action: none;
-  z-index: 1;
-}
-.tools-sheet-resizer::before {
-  content: "";
-  position: absolute;
-  left: 2px;
-  top: 50%;
-  width: 4px;
-  height: 48px;
-  transform: translateY(-50%);
-  border-radius: 2px;
-  background: var(--fg-muted, #57606a);
-  opacity: 0.45;
-}
-.tools-sheet-resizer:hover,
-.tools-sheet-resizing .tools-sheet-resizer {
-  background: var(--accent-muted, rgba(9, 105, 218, 0.2));
-}
-.tools-sheet-resizer:hover::before,
-.tools-sheet-resizing .tools-sheet-resizer::before {
-  background: var(--accent, #0969da);
-  opacity: 1;
-}
-.tools-sheet-resizer:focus-visible {
-  outline: 2px solid var(--accent, #0969da);
-  outline-offset: -2px;
-}
-/* ドラッグ中はスライドのトランジションを切る (追従が遅れて見えるため)。 */
-.tools-sheet-resizing {
-  transition: none;
-}
-.tools-header,
 /* 見出しはパネルのタブ列が持つので、ここに残るのは中身固有の操作だけ。
    帯として場所を取らないよう詰める。 */
-.terminal-header {
+.tools-header {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -15571,36 +15331,12 @@ body.app-panel-docked .app-panel.app-panel-open {
   padding: 4px 10px;
   border-bottom: 1px solid var(--border, #d0d7de);
 }
-.tools-header h1,
-.terminal-header h1 {
+.tools-header h1 {
   font-size: 16px;
   margin: 0;
 }
 .tools-tabs {
   margin-left: 4px;
-}
-.tools-close,
-.terminal-close {
-  font: inherit;
-  font-size: 18px;
-  line-height: 1;
-  width: 28px;
-  height: 28px;
-  margin-left: auto;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--fg-muted, #57606a);
-  cursor: pointer;
-}
-/* terminal 側は閉じるボタンの左に他のアクションが並ぶので、余白の押し出しは
-   その並び (.terminal-header-actions) 側で行う。 */
-.terminal-close {
-  margin-left: 0;
-}
-.tools-close:hover {
-  background: var(--bg-mute, #eaeef2);
-  color: var(--fg, #1f2328);
 }
 .tools-body {
   flex: 1 1 auto;
@@ -15802,11 +15538,6 @@ html[data-theme="dark"] .tools-code span[style] {
    ターミナル本体」という中身のレイアウトだけ。 */
 /* 文字サイズの増減。押しても寸法が動かないよう、値の欄は桁を固定する。
    上限・下限では無効にするだけで、ボタン自体は消さない (押し損ねるため)。 */
-.terminal-font-size {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
 .terminal-font-btn {
   appearance: none;
   width: 22px;
@@ -15827,55 +15558,6 @@ html[data-theme="dark"] .tools-code span[style] {
 .terminal-font-btn:disabled {
   opacity: 0.4;
   cursor: default;
-}
-.terminal-font-value {
-  min-width: 20px;
-  text-align: center;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--fg-muted, #57606a);
-}
-.terminal-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-}
-.terminal-reload {
-  font: inherit;
-  font-size: 15px;
-  line-height: 1;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--fg-muted, #57606a);
-  cursor: pointer;
-}
-.terminal-reload:hover {
-  background: var(--bg-soft, #f6f8fa);
-  color: var(--fg, #1f2328);
-}
-/* 打鍵を tmux に送るかどうかのトグル。topbar のトグルと同じ見え方。
-   ラベルが「入力する」/「閲覧のみ」で入れ替わるので、min-width で
-   クリック位置が動かないようにしておく。 */
-.terminal-input-toggle {
-  font: inherit;
-  font-size: 12px;
-  min-width: 88px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border, #d0d7de);
-  background: var(--bg-soft, #f6f8fa);
-  color: var(--fg-muted, #57606a);
-  cursor: pointer;
-}
-.terminal-input-toggle.active {
-  background: var(--accent-muted, rgba(9, 105, 218, 0.14));
-  border-color: var(--accent, #0969da);
-  color: var(--accent, #0969da);
 }
 /* ドロワーの中のスクロールは、端まで来ても後ろのページへ渡さない。パネルは
    ページに重ねて出しているので、渡すと後ろで見ていた画面まで一緒に動く。
@@ -15959,34 +15641,6 @@ html[data-theme="dark"] .tools-code span[style] {
 }
 .terminal-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.terminal-tag {
-  padding: 0 5px;
-  border-radius: 4px;
-  border: 1px solid var(--border, #d0d7de);
-  background: var(--bg, #fff);
-  font-size: 10px;
-  color: var(--fg-muted, #57606a);
-  white-space: nowrap;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.terminal-kind {
-  padding: 0 5px;
-  border-radius: 4px;
-  border: 1px solid var(--border, #d0d7de);
-  font-size: 10px;
-  text-align: center;
-  white-space: nowrap;
-}
-.terminal-kind-tmux {
-  border-color: var(--accent, #0969da);
-  color: var(--accent, #0969da);
-}
-.terminal-kind-shell {
-  border-color: var(--success, #1a7f37);
-  color: var(--success, #1a7f37);
 }
 /* ターミナルと、その上の添付の帯・右の画像の棚をまとめた入れ物。 */
 .terminal-pane-body {
@@ -17336,14 +16990,6 @@ body.gdp-nav-resizing {
   user-select: none;
 }
 
-/* ---- 中央の上の 1 行 ---- */
-#global-header {
-  gap: var(--space-3);
-  padding: 0 var(--pad-face);
-  background: var(--color-ground);
-  border-bottom: 1px solid var(--color-line-soft);
-}
-
 /* ---- メインの面のタブ列 (最上段。views/main-tabs/main-tabs-view.ts) ----
    高さは --main-tabs-h。タブが収まらなければタブの並びだけが横に送られ、
    右端の ＋ と分割は隠れない。選択の強さは面の明るさ + 上端の 2px の線 (線は
@@ -18219,10 +17865,6 @@ body.gdp-sidebar-hidden .left-rail {
 .terminal-screen {
   background: var(--color-term);
 }
-.terminal-header {
-  background: var(--color-ground);
-  border-bottom: 1px solid var(--color-line-soft);
-}
 
 /* 画面ごとのツールバー (#topbar) も上の行と同じ地。 */
 #topbar {
@@ -18516,10 +18158,6 @@ body.gdp-sidebar-hidden .left-rail {
 /* ツリーの頭 (見出し・対象・切替・絞り込み) も面の線から。 */
 #sidebar .sb-head {
   padding: var(--space-3) var(--pad-face) var(--space-2);
-}
-/* ターミナルの操作の行: 右端の押せる領域を面の線に。 */
-.terminal-header {
-  padding: var(--space-1) var(--pad-face);
 }
 /* 切替の中に同居するコピーのボタンは、切替の文字から 1 段離す。 */
 .gdp-file-detail-sticky .gdp-source-tabs .gdp-copy-source {
@@ -19545,9 +19183,6 @@ button.agents-account-name:hover {
 .agents-account-running {
   flex: 0 0 auto;
 }
-.agents-accounts-message {
-  margin-top: var(--space-2);
-}
 /* 使用量の 1 枠 (カードとポップオーバー共通)。名前・割合・バーの列をそろえる。 */
 .usage-meter {
   display: grid;
@@ -19655,6 +19290,11 @@ button.agents-account-name:hover {
   accent-color: var(--color-accent);
 }
 .agents-hint {
+  /* 1280px の窓では絞り込みの行に収まらず、行ごと横に溢れていた。縮むのは
+     この案内だけにして、末尾を省く (全文は title)。 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--color-text-3);
   font-size: var(--ui-font-sm);
   white-space: nowrap;
@@ -20936,7 +20576,13 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
 #topbar > .ref-pickers {
   order: 1;
   flex: 0 1 auto;
-  min-width: 0;
+  /* 中身の最小 (選択欄 2 つの最小・間の印・戻す / 取り直しのボタン・間隔 4 つ)
+     より縮めない。0 だと 1280px の窓で 2 つのボタンが件数の上にはみ出して
+     重なった。 */
+  min-width: calc(
+    var(--space-unit) * 16 * 2 + var(--space-4) + var(--ui-control-sm) * 2 +
+      var(--space-2) * 4
+  );
   gap: var(--space-2);
   margin-left: 0;
 }
@@ -20981,6 +20627,11 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
   font-size: var(--ui-font-md);
 }
 #topbar .ref-dots {
+  /* 幅を決めておく (上の .ref-pickers の最小幅の計算に使う)。 */
+  flex: none;
+  justify-content: center;
+  width: var(--space-4);
+  padding: 0;
   color: var(--color-text-3);
 }
 #topbar .ref-pickers > button {
@@ -21127,6 +20778,19 @@ table.d2h-diff-table .gdp-annotation-row.active .gdp-annotation-inline {
   }
   #topbar .controls > button:not(.seg button) {
     padding: 0 var(--space-1);
+  }
+}
+/* 左のサイドバーと左の列を出したままの 1280px 前後では、上の詰め方でも
+   比較対象の選択欄の最小が入らない (件数・切替と重なる)。閲覧の数 (0/2 viewed)
+   だけを省き、間隔をもう 1 段詰める。閲覧の数はファイルの見出しの Viewed と
+   サイドバーの印に残る。1359px は、既定の密度・英語で 1 行に収まる幅 (実測)。 */
+@media (max-width: 1359px) {
+  #topbar,
+  #topbar > #meta {
+    gap: var(--space-1);
+  }
+  #topbar #meta .chip-viewed {
+    display: none;
   }
 }
 /* ファイルの箱: 線と影を消し、コードの面を角丸で置く。箱の間は間隔で分ける。 */
@@ -22211,6 +21875,11 @@ body[data-worktree-overview] #worktree-panel .worktree-row-head .subject {
 }
 body[data-worktree-overview] #worktree-panel .worktree-row-branch {
   display: block;
+  /* 名前は札 (this folder・running) より先に縮めない。同じ割合で縮むと、
+     1280px の窓で "main" のような短い名前まで「m…」になっていた。長い名前は
+     列の幅で省く (札は 0 まで縮む)。 */
+  flex-shrink: 0;
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
   color: var(--color-text);

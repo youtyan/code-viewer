@@ -250,7 +250,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Typing goes to that shell, so you can answer a prompt without leaving the tab. The tab's right-click menu also turns input off when you only want to watch (Read only) and changes the text size; both apply to every terminal tab. A terminal tab is named after what it shows: the agent and its state, or Shell and its id. Shells live as long as the server does; typing exit ends one, and so does Stop session.",
+                text: "Typing goes to that shell, so you can answer a prompt without leaving the tab. The tab's right-click menu also turns input off when you only want to watch (Read only) and changes the text size; both apply to every terminal tab. A terminal tab is named after what it shows: the agent and its state, or Shell and a number in the order the shells were opened. Shells live as long as the server does; typing exit ends one, and so does Stop session.",
               },
               {
                 kind: "paragraph",

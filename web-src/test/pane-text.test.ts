@@ -8,7 +8,7 @@ import { describe, expect, test } from "vitest";
 import type { AgentPane } from "../core/agent-overview";
 import { paneTaskSummary } from "../core/agent-overview";
 import { agentsText } from "../views/agents/i18n";
-import { paneText } from "../views/agents/pane-text";
+import { paneText, shellName } from "../views/agents/pane-text";
 
 function pane(title: string): AgentPane {
   return {
@@ -81,5 +81,38 @@ describe("pane text: one rule for every place", () => {
     });
     for (const value of Object.values(text))
       expect(value).not.toContain("sample-host");
+  });
+});
+
+describe("shell name: Shell and the order it was opened, never the id", () => {
+  const sessions = [
+    { id: "shell-zzzz01", createdAt: "2026-01-01T00:00:02.000Z" },
+    { id: "shell-aaaa01", createdAt: "2026-01-01T00:00:01.000Z" },
+    { id: "shell-bbbb01", createdAt: "2026-01-01T00:00:02.000Z" },
+  ];
+  test.each([
+    { name: "the first opened", session: "shell-aaaa01", expected: "Shell 1" },
+    {
+      name: "the same time falls back to the id order",
+      session: "shell-bbbb01",
+      expected: "Shell 2",
+    },
+    { name: "the last opened", session: "shell-zzzz01", expected: "Shell 3" },
+    {
+      name: "not in the list yet (before it is fetched)",
+      session: "shell-cccc01",
+      expected: "Shell",
+    },
+  ])("$name → $expected", ({ session, expected }) => {
+    expect(shellName(session, sessions, "Shell")).toBe(expected);
+  });
+
+  test("closing an earlier shell renumbers the later ones", () => {
+    const rest = sessions.filter((item) => item.id !== "shell-aaaa01");
+    expect(shellName("shell-zzzz01", rest, "Shell")).toBe("Shell 2");
+  });
+
+  test("an empty list names every shell by the word alone", () => {
+    expect(shellName("shell-aaaa01", [], "シェル")).toBe("シェル");
   });
 });

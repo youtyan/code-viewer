@@ -20,7 +20,16 @@ import {
 import { EXT_TO_LANG } from "../core/source-meta";
 
 export type LineRefPill = {
-  show(path: string, start: number, end: number): void;
+  /**
+   * `scope` は選択のある面 (左の本文 / 右の面の箱)。同じパスを左右で別の ref
+   * に開いていても、コードを写すときはその面の行を読む。省けば document。
+   */
+  show(
+    path: string,
+    start: number,
+    end: number,
+    scope?: () => ParentNode | null,
+  ): void;
   hide(): void;
 };
 
@@ -64,14 +73,16 @@ export function langFromPath(path: string): string {
 
 // Read the rendered code text for [start..end] lines belonging to `path` from
 // whichever surface is currently shown (source/blame/history table, or
-// diff2html after-side). Returns an empty array when nothing is rendered so
-// callers degrade silently to the ref-only clipboard text.
+// diff2html after-side) inside `scope` (the pane that holds the selection).
+// Returns an empty array when nothing is rendered so callers degrade silently
+// to the ref-only clipboard text.
 export function readRenderedLines(
   path: string,
   start: number,
   end: number,
+  scope: ParentNode = document,
 ): string[] {
-  const card = document.querySelector<HTMLElement>(
+  const card = scope.querySelector<HTMLElement>(
     `.gdp-file-shell[data-path="${CSS.escape(path)}"]`,
   );
   if (!card) return [];
@@ -177,6 +188,7 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
   let currentPath = "";
   let currentStart = 0;
   let currentEnd = 0;
+  let currentScope: () => ParentNode | null = () => document;
   let githubUrl = "";
   let feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   let githubFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -247,7 +259,10 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     let payload = refText;
     let copiedCode = false;
     if (withCode && currentPath) {
-      const lines = readRenderedLines(currentPath, currentStart, currentEnd);
+      const scope = currentScope();
+      const lines = scope
+        ? readRenderedLines(currentPath, currentStart, currentEnd, scope)
+        : [];
       if (lines.length > 0) {
         payload = fileReferenceWithCodeClipboardText(
           currentPath,
@@ -305,12 +320,13 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
   });
 
   return {
-    show(path: string, start: number, end: number) {
+    show(path, start, end, scope = () => document) {
       const next = fileReferenceClipboardText(path, start, end);
       if (!next) return;
       const changed = next !== refText;
       refText = next;
       currentPath = path;
+      currentScope = scope;
       currentStart = Math.max(1, Math.floor(Math.min(start, end)));
       currentEnd = Math.max(1, Math.floor(Math.max(start, end)));
       githubUrl =
@@ -335,6 +351,7 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
       currentPath = "";
       currentStart = 0;
       currentEnd = 0;
+      currentScope = () => document;
       githubUrl = "";
       githubActions.hidden = true;
       pill.hidden = true;

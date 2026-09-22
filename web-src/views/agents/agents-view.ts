@@ -821,6 +821,8 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     allPanesLabel.title = current.allPanesTitle;
     allPanesInput.checked = allPanes;
     hint.textContent = current.keyboardHint;
+    // 狭いと末尾を省くので、全文はカーソルを置いたときに出す。
+    hint.title = current.keyboardHint;
     refreshButton.title = current.refresh;
     refreshButton.setAttribute("aria-label", current.refresh);
     launchLabel.textContent = current.accounts.launchButton;
