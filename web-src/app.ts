@@ -98,7 +98,7 @@ import {
   resolveKeymapAction,
 } from "./core/keymap";
 import { isNativeLinkClick } from "./core/link-click";
-import type { Tab as MainTab, TabTarget } from "./core/main-tabs";
+import type { PaneSide, TabTarget } from "./core/main-tabs";
 import { createNetworkActivityTracker } from "./core/network-activity";
 import {
   APP_PANEL_HEIGHT,
@@ -128,6 +128,11 @@ import { rememberPaletteSelection } from "./core/search-palette";
 import type { ShellSessionId } from "./core/shell";
 import { sourceInternalPathKind } from "./core/source-meta";
 import { readStoredSize } from "./core/stored-size";
+import {
+  type TerminalImageRef,
+  type TerminalImagesResponse,
+  terminalImageExtension,
+} from "./core/terminal-images";
 import { clampTerminalFontSize } from "./core/tmux";
 import type { ToolId } from "./core/tools";
 import {
@@ -199,6 +204,7 @@ import {
 } from "./views/help-page";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
+import { createImageTabView, type ImageTabHandle } from "./views/image-tab";
 import {
   createJournalView,
   type JournalView,
@@ -209,10 +215,13 @@ import {
   langFromPath,
   readRenderedLines,
 } from "./views/line-ref-pill";
+import { mainTabsText } from "./views/main-tabs/i18n";
 import {
   createMainTabsView,
   type FrontChange,
   isPageKind,
+  isRouteTab,
+  type PanesView,
   routeTarget,
 } from "./views/main-tabs/main-tabs-view";
 import { createProjectActions } from "./views/projects/project-actions";
@@ -1327,9 +1336,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         }
       case "terminal":
       case "image":
-        // この画面ではまだ開けない種類 (読み戻しで閉じてある)。来たら不具合。
+        // ターミナルと画像は route を持たない (面の箱に描く)。来たら不具合。
         throw new Error(
-          `main tabs: ${target.kind} tabs cannot be opened yet: ${JSON.stringify(target)}`,
+          `main tabs: ${target.kind} tabs have no route: ${JSON.stringify(target)}`,
         );
     }
   }
@@ -1342,7 +1351,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     })(),
     getLanguage: () => STATE.language,
     pageLabel: (page) => uiText().nav[page],
-    navigate: (route) => navigateToRoute(route),
+    navigate: (route, replace) =>
+      replace ? replaceWithRoute(route) : navigateToRoute(route),
     currentRoute: () => STATE.route,
     defaultRoute: defaultRouteForTab,
     copyPath: (path) => {
@@ -1372,12 +1382,21 @@ window.GdpExpandLogic = GdpExpandLogic;
         throw new Error(await responseErrorMessage(response, "save main tabs"));
     },
     terminalInfo: (session) => terminalTabInfo(session),
-    onFront: (tab, how) => showMainFront(tab, how),
+    onPanes: (view, how) => showPanes(view, how),
     onTerminals: (open, closed) => {
       TERMINAL_VIEW.setTabbed(open);
       for (const id of closed) TERMINAL_VIEW.releaseTab(id as ShellSessionId);
     },
   });
+
+  // 言語の当て直し (起動の途中でも呼ばれる) が読むので、ここで宣言する。
+  /** 面ごとの画像の部品 (使い回す。setImage で差し替える)。 */
+  const IMAGE_VIEWS: Partial<Record<PaneSide, ImageTabHandle>> = {};
+  /** 画像のパス → 引いた画像と前後の並び (棚から開いたときは棚の並び)。 */
+  const IMAGE_REFS = new Map<
+    string,
+    { image: TerminalImageRef; images: TerminalImageRef[] }
+  >();
 
   /**
    * 画面へ移る。その画面のタブが開いていれば、そのタブが最後に見ていた
@@ -2950,6 +2969,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (route && text.nav[route]) link.textContent = text.nav[route];
     });
     MAIN_TABS.localize();
+    for (const view of Object.values(IMAGE_VIEWS))
+      view?.setLanguage(STATE.language);
     // The repo link is icon-only; the label lives in title/aria-label
     // instead of visible text.
     const repoWebLink =
@@ -4395,18 +4416,17 @@ window.GdpExpandLogic = GdpExpandLogic;
    * ここで握り潰すと利用者に何も伝わらない — 成功しても失敗しても画面が
    * 無反応になる。失敗の理由はコンソールにも残す。
    */
+  /**
+   * そのパス (か親のフォルダ) を OS で開く。失敗は理由を cause に付けて投げる
+   * (以前は握りつぶして false を返していた)。見た目で伝えるのは呼び出し側。
+   */
   async function openPathInOs(
     path: string,
     kind: "directory" | "file-parent",
-    button?: HTMLButtonElement,
-  ): Promise<boolean> {
-    const oldTitle = button?.title;
-    if (button) {
-      button.disabled = true;
-      button.classList.remove("failed");
-    }
+  ): Promise<void> {
+    let res: Response;
     try {
-      const res = await fetch(apiUrl("openPath"), {
+      res = await fetch(apiUrl("openPath"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -4414,25 +4434,40 @@ window.GdpExpandLogic = GdpExpandLogic;
         },
         body: JSON.stringify({ path, kind }),
       });
-      if (!res.ok) throw new Error(await res.text());
-      button?.classList.add("opened");
+    } catch (error) {
+      throw errorWithCause(`failed to open ${path} in the OS`, error);
+    }
+    if (!res.ok)
+      throw new Error(
+        await responseErrorMessage(res, `failed to open ${path} in the OS`),
+      );
+  }
+
+  /** ボタンから OS で開く。成否はボタンの色と title で伝え、理由はコンソールへ。 */
+  async function openPathFromButton(
+    path: string,
+    kind: "directory" | "file-parent",
+    button: HTMLButtonElement,
+  ): Promise<void> {
+    const oldTitle = button.title;
+    button.disabled = true;
+    button.classList.remove("failed");
+    try {
+      await openPathInOs(path, kind);
+      button.classList.add("opened");
       setTimeout(() => {
-        button?.classList.remove("opened");
+        button.classList.remove("opened");
       }, 1200);
-      return true;
     } catch (error) {
       console.error("[code-viewer] failed to open path in OS", error);
-      if (button) {
-        button.classList.add("failed");
-        button.title = "failed to open in OS";
-        setTimeout(() => {
-          button.classList.remove("failed");
-          button.title = oldTitle || "open in OS";
-        }, 1600);
-      }
-      return false;
+      button.classList.add("failed");
+      button.title = "failed to open in OS";
+      setTimeout(() => {
+        button.classList.remove("failed");
+        button.title = oldTitle || "open in OS";
+      }, 1600);
     } finally {
-      if (button) button.disabled = false;
+      button.disabled = false;
     }
   }
 
@@ -4478,7 +4513,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     button.innerHTML = iconSvg("octicon-link-external", OPEN_EXTERNAL_16_PATH);
     button.addEventListener("click", (e) => {
       e.stopPropagation();
-      openPathInOs(path, kind, button);
+      void openPathFromButton(path, kind, button);
     });
     return button;
   }
@@ -5572,6 +5607,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       MAIN_TABS.closeActive();
       return true;
     }
+    if (action === "main-pane-other") {
+      MAIN_TABS.focusOther();
+      return true;
+    }
     const nthTab = /^main-tab-([1-9])$/.exec(action);
     if (nthTab) {
       MAIN_TABS.activateNth(Number(nthTab[1]));
@@ -6468,10 +6507,153 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (pane) TAB_SHELL_PANES.set(session.id, pane);
       MAIN_TABS.openTerminal(session.id);
     },
+    focusedSide: () => MAIN_TABS.panes().focused,
+    onOpenImage: (image, gallery) => {
+      IMAGE_REFS.set(image.path, { image, images: gallery });
+      MAIN_TABS.openImage(image.path, "other-if-split");
+    },
   });
-  // ターミナルのタブの箱。本文の位置に固定で置き、前面のタブがターミナルの
-  // ときだけ出す (body.main-terminal-front)。
-  document.getElementById("app")?.append(TERMINAL_VIEW.tabElement);
+
+  /**
+   * メインの面の左右の箱。前面のタブがターミナル・画像・本文を出していない
+   * route のタブ (置き札) のとき、その面の位置に出す。本文 (route の中身) を
+   * 出している面の箱は隠し、下の本文が見える。
+   */
+  const PANE_HOSTS: Record<PaneSide, HTMLElement> = {
+    left: createPaneHost("left"),
+    right: createPaneHost("right"),
+  };
+
+  function createPaneHost(side: PaneSide): HTMLElement {
+    const app = document.getElementById("app");
+    if (!app) throw new Error("#app is missing from index.html");
+    const host = document.createElement("div");
+    host.className = "main-pane-host";
+    host.dataset.side = side;
+    app.append(host);
+    return host;
+  }
+
+  /**
+   * パスから画像を引く (既存の /_agent/images。URL はサーバが組み立てる)。
+   * リポジトリのファイルなら、木の同じフォルダの画像を前後の並びにする。
+   */
+  async function resolveImage(
+    path: string,
+  ): Promise<{ image: TerminalImageRef; images: TerminalImageRef[] }> {
+    const known = IMAGE_REFS.get(path);
+    if (known) return known;
+    const folder = path.includes("/")
+      ? path.slice(0, path.lastIndexOf("/"))
+      : "";
+    const siblings = path.startsWith("/")
+      ? [path]
+      : getSidebarFiles()
+          .map((item) => item.path)
+          .filter(
+            (item) =>
+              terminalImageExtension(item) !== null &&
+              (item.includes("/")
+                ? item.slice(0, item.lastIndexOf("/"))
+                : "") === folder,
+          );
+    const paths = siblings.includes(path) ? siblings : [path, ...siblings];
+    const params = new URLSearchParams();
+    for (const item of paths) params.append("path", item);
+    const res = await trackLoad(
+      fetch(`${apiUrl("agentImages")}?${params.toString()}`),
+    );
+    if (!res.ok)
+      throw new Error(await responseErrorMessage(res, `load image ${path}`));
+    const body = (await res.json()) as TerminalImagesResponse;
+    const image = body.images.find(
+      (item) => item.candidate === path || item.path === path,
+    );
+    if (!image) {
+      const rejected = body.rejected.find((item) => item.candidate === path);
+      throw new Error(
+        `image ${path} cannot be shown: ${rejected ? JSON.stringify(rejected) : "not in the response"}`,
+      );
+    }
+    const resolved = { image, images: body.images };
+    IMAGE_REFS.set(path, resolved);
+    return resolved;
+  }
+
+  /** その面の箱に画像を出す。読めなければ理由を箱に出す (黙って空にしない)。 */
+  function showImageIn(side: PaneSide, path: string): void {
+    const host = PANE_HOSTS[side];
+    void resolveImage(path).then(
+      ({ image, images }) => {
+        const front = MAIN_TABS.panes().fronts[side];
+        if (front?.target.kind !== "image" || front.target.path !== path)
+          return;
+        let view = IMAGE_VIEWS[side];
+        if (view) view.setImage(image, images);
+        else {
+          view = createImageTabView({
+            image,
+            images,
+            imageUrlFor: (ref) => ref.url,
+            copyPath: (target) =>
+              navigator.clipboard.writeText(filePathClipboardText(target)),
+            openPath: (target) => openPathInOs(target, "file-parent"),
+            language: STATE.language,
+          });
+          IMAGE_VIEWS[side] = view;
+        }
+        host.replaceChildren(view.el);
+        if (MAIN_TABS.panes().focused === side) view.focus();
+      },
+      (error: unknown) => {
+        console.error("[code-viewer] image tab could not be shown", error);
+        const front = MAIN_TABS.panes().fronts[side];
+        if (front?.target.kind !== "image" || front.target.path !== path)
+          return;
+        const message = document.createElement("p");
+        message.className = "main-pane-message";
+        message.textContent = formatErrorDetail(error);
+        host.replaceChildren(message);
+      },
+    );
+  }
+
+  // 2 面のとき、面の中 (本文・箱) を押したらその面へフォーカスを移す。
+  // 上の行・タブ列 (タブを押せばその面へ移る)・サイドバー・下パネル・最下段・
+  // メニューやダイアログは面の外なので見ない。
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      const side = MAIN_TABS.sideAt(event.clientX);
+      if (!side) return;
+      const target = event.target as Element | null;
+      if (
+        target?.closest(
+          "#app-nav, #global-header, #main-tabs, #app-panel, #statusbar, .main-split-divider, .gdp-context-menu, [role=dialog]",
+        )
+      )
+        return;
+      MAIN_TABS.focusSide(side);
+    },
+    true,
+  );
+
+  /** 本文を出していない面の route のタブの置き札。押すとその面へフォーカス。 */
+  function placeholderFor(side: PaneSide, label: string): HTMLElement {
+    const text = mainTabsText(STATE.language);
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "main-pane-placeholder";
+    const name = document.createElement("span");
+    name.className = "main-pane-placeholder-name";
+    name.textContent = text.shownElsewhere(label);
+    const hint = document.createElement("span");
+    hint.className = "main-pane-placeholder-hint";
+    hint.textContent = text.showHere;
+    card.append(name, hint);
+    card.addEventListener("click", () => MAIN_TABS.focusSide(side));
+    return card;
+  }
   relocalizeTerminal = () => TERMINAL_VIEW.localize();
 
   function updateUrlForTerminalOverlay(state: TerminalOverlayState): void {
@@ -6546,18 +6728,50 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * 前面のタブが変わった。ターミナルならタブの箱で映して URL にそのシェルを
-   * 積む。ターミナルでないタブへ route を移らずに戻ったときは、URL の
-   * ?terminal= をパネルの状態へ積み直す。
+   * 面の前面・フォーカス・分割が変わった。面ごとの箱にターミナル・画像・
+   * 置き札を出し、本文を出す面を体のクラスで決める。フォーカスのある面の
+   * 前面がターミナルなら URL にそのシェルを積み、そうでないタブへ route を
+   * 移らずに戻ったときは ?terminal= をパネルの状態へ積み直す。
    */
-  function showMainFront(tab: MainTab | null, how: FrontChange): void {
-    const session = tab?.target.kind === "terminal" ? tab.target.session : null;
-    document.body.classList.toggle("main-terminal-front", session !== null);
+  function showPanes(view: PanesView, how: FrontChange): void {
+    document.body.classList.toggle(
+      "route-in-right",
+      view.split && view.routeSide === "right",
+    );
+    for (const side of ["left", "right"] as const) {
+      const host = PANE_HOSTS[side];
+      const tab = view.fronts[side];
+      const present = side === "left" || view.split;
+      const shown =
+        present &&
+        tab !== null &&
+        !(isRouteTab(tab) && view.routeSide === side);
+      host.classList.toggle("is-shown", shown);
+      host.dataset.kind = shown && tab ? tab.target.kind : "";
+      if (!shown || !tab) continue;
+      if (tab.target.kind === "terminal") {
+        host.replaceChildren(TERMINAL_VIEW.tabPaneFor(side));
+        void TERMINAL_VIEW.showInTab(
+          tab.target.session as ShellSessionId,
+          side,
+        );
+      } else if (tab.target.kind === "image") {
+        showImageIn(side, tab.target.path);
+      } else {
+        const label =
+          tab.target.kind === "file"
+            ? tab.target.path
+            : uiText().nav[tab.target.page];
+        host.replaceChildren(placeholderFor(side, label));
+      }
+    }
     syncHeaderMenu();
     AGENTS_SIDEBAR?.refresh();
+    const front = view.fronts[view.focused];
+    const session =
+      front?.target.kind === "terminal" ? front.target.session : null;
     const path = window.location.pathname + window.location.search;
     if (session) {
-      void TERMINAL_VIEW.showInTab(session as ShellSessionId);
       if (parseTerminalOverlay(window.location.search) !== session)
         history.pushState(
           history.state,
@@ -6612,12 +6826,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 流す。一覧の画面 (/agents) も同じ結果を描く。
   /** いま映しているシェル: 前面のターミナルのタブ、無ければ下パネル。 */
   function viewedShells(): string[] {
-    const front = MAIN_TABS.front();
-    const tab = front?.target.kind === "terminal" ? front.target.session : null;
+    const { fronts } = MAIN_TABS.panes();
+    const tabs = [fronts.left, fronts.right].map((tab) =>
+      tab?.target.kind === "terminal" ? tab.target.session : null,
+    );
     const panel = TERMINAL_VIEW.isOpen()
       ? TERMINAL_VIEW.getActiveTarget()
       : null;
-    return [tab, panel].filter((id): id is string => id !== null);
+    return [...tabs, panel].filter((id): id is string => id !== null);
   }
 
   function isViewingAgentPane(pane: AgentPane): boolean {
@@ -6833,7 +7049,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         MAIN_TABS.openTerminal(tabbed[0]);
         return;
       }
-      void TERMINAL_VIEW.openPaneInTab(pane);
+      void TERMINAL_VIEW.openPaneInTab(pane, MAIN_TABS.panes().focused);
       return;
     }
     const shell = [...TAB_SHELL_PANES.keys()].find(
@@ -7248,6 +7464,12 @@ window.GdpExpandLogic = GdpExpandLogic;
    * キーボードから画面を移る。メニューのリンクを踏んだときと同じ経路を
    * 通したいので、URL を積んでから applyRouteFromLocation に任せる。
    */
+  /** 履歴を積まずにその route へ (本文の面を合わせ直すとき)。 */
+  function replaceWithRoute(route: AppRoute): void {
+    history.replaceState(historyStateForRoute(route), "", urlForRoute(route));
+    applyRouteFromLocation();
+  }
+
   function navigateToRoute(route: AppRoute): void {
     history.pushState(historyStateForRoute(route), "", urlForRoute(route));
     window.scrollTo(0, 0);

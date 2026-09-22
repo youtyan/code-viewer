@@ -16,6 +16,7 @@
 
 import { CHEVRON_DOWN_16_PATH, IMAGE_16_PATH, iconSvg } from "../../core/icons";
 import { elapsedBucket } from "../../core/terminal-board";
+import { showContextMenu } from "../context-menu";
 import type { TerminalText } from "./i18n";
 import type { ShelfEntry } from "./image-shelf-list";
 
@@ -27,19 +28,27 @@ export type ImageShelfDeps = {
   isCollapsed(): boolean;
   /** 畳む・開く。保存は呼び出し側 (ユーザー単位の設定)。 */
   setCollapsed(collapsed: boolean): void;
-  /** 項目を押した。読めたものは拡大表示、読めなかったものは確かめ直し。 */
-  onOpen(entry: ShelfEntry): void;
+  /**
+   * 項目を押した。読めたものは画像のタブ (mode = tab) か覆いの拡大表示
+   * (overlay)、読めなかったものは確かめ直し。
+   */
+  onOpen(entry: ShelfEntry, mode: ShelfOpenMode): void;
   /** サムネイルが読めなかった (消された・壊れた)。理由を聞き直してもらう。 */
   onImageError(entry: ShelfEntry): void;
   /** いまの時刻 (テストで差し替える)。 */
   now?(): number;
 };
 
+/** 棚の項目の開き方。既定はタブ。Alt / Shift を押しながらか、右クリックで覆い。 */
+export type ShelfOpenMode = "tab" | "overlay";
+
 export type ImageShelfHandle = {
   el: HTMLElement;
   render(list: readonly ShelfEntry[]): void;
   /** パスにカーソルが載った画像を強調し、棚の見える位置へ送る。null で外す。 */
   highlight(key: string | null): void;
+  /** 画像のタブで開いている画像に印を付ける (右の画像と棚の枠を一致させる)。null で外す。 */
+  setOpened(key: string | null): void;
   localize(): void;
   dispose(): void;
 };
@@ -182,9 +191,33 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
       meta,
       url: undefined,
     };
-    open.addEventListener("click", () => {
+    open.addEventListener("click", (event) => {
       const current = entries.find((item) => item.key === li.dataset.key);
-      if (current) deps.onOpen(current);
+      if (current)
+        deps.onOpen(
+          current,
+          event.altKey || event.shiftKey ? "overlay" : "tab",
+        );
+    });
+    open.addEventListener("contextmenu", (event) => {
+      const current = entries.find((item) => item.key === li.dataset.key);
+      if (!current?.image) return;
+      event.preventDefault();
+      const text = deps.getText();
+      showContextMenu(
+        open,
+        [
+          {
+            label: text.imageOpenInTab,
+            onSelect: () => deps.onOpen(current, "tab"),
+          },
+          {
+            label: text.imageOpenInViewer,
+            onSelect: () => deps.onOpen(current, "overlay"),
+          },
+        ],
+        { at: { x: event.clientX, y: event.clientY } },
+      );
     });
     return parts;
   }
@@ -283,6 +316,15 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
       ordered.every((li, index) => list.children[index] === li);
     if (!same) list.replaceChildren(...ordered);
     if (linkedKey && !keep.has(linkedKey)) highlight(null);
+    markOpened();
+  }
+
+  let openedKey: string | null = null;
+  function markOpened(): void {
+    for (const [key, parts] of items) {
+      if (key === openedKey) parts.li.dataset.opened = "true";
+      else delete parts.li.dataset.opened;
+    }
   }
 
   /**
@@ -322,6 +364,10 @@ export function createImageShelf(deps: ImageShelfDeps): ImageShelfHandle {
     el,
     render,
     highlight,
+    setOpened(key) {
+      openedKey = key;
+      markOpened();
+    },
     localize() {
       localizeHead();
       for (const entry of entries) {

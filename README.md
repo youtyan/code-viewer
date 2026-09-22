@@ -19,7 +19,11 @@ Requires Node.js 20 or newer. Development uses
   Work log each have one tab that comes back as you left it. Right-click a
   tab to close it, the others or those to its right, or copy its path; drag
   to reorder; `g t` / `g T` / `g x` / `g 1`–`g 9` move and close from the
-  keyboard. The tabs are remembered per project.
+  keyboard. The tabs are remembered per project. Split the area into two
+  sides (the split button, **Split right**, or drag a tab onto the right
+  half), resize them by dragging the line between, and move tabs across or
+  press `g o` to switch sides. Image files open in an image tab (zoom,
+  previous / next, copy path, open folder).
 - View git diffs with unified or split layout, lazy loading, viewed-file
   state, ignore-whitespace and hide-tests toggles, and dismissible per-line
   "reference pills" that copy `@path#start-end` for AI agents. View File on
@@ -189,6 +193,9 @@ Requires Node.js 20 or newer. Development uses
   open there by default); the same terminal moves between the tab and the
   panel with its screen and half-typed input, `?terminal=<shell>` brings its
   tab to the front, and closing the tab never stops the shell or the agent.
+  Images the agent writes are listed on a shelf beside the terminal; a click
+  opens them in an image tab (on the other side when split), Alt+click in the
+  full-screen viewer.
 - The session list opens from the button at the right of the panel header (it
   starts folded; agents are also in the left sidebar). It starts with a
   **Your turn** section for terminals

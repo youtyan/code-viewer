@@ -130,6 +130,10 @@ export type TerminalText = {
   copyImagePathFailed: string;
   /** 画像の棚の見出し。 */
   imageShelfTitle: string;
+  /** 棚の項目の右クリック: 画像のタブで開く (既定の押し方と同じ)。 */
+  imageOpenInTab: string;
+  /** 棚の項目の右クリック: 覆いの拡大表示で開く (Alt / Shift + クリックと同じ)。 */
+  imageOpenInViewer: string;
   /** 棚を畳む・開く。 */
   imageShelfCollapse: string;
   imageShelfExpand: (count: number) => string;
@@ -270,6 +274,8 @@ const EN: TerminalText = {
   imagePathCopied: "path copied",
   copyImagePathFailed: "Could not copy the path.",
   imageShelfTitle: "Images",
+  imageOpenInTab: "Open in a tab",
+  imageOpenInViewer: "Open in the viewer (Alt+click)",
   imageShelfCollapse: "collapse images",
   imageShelfExpand: (count) => `show images (${count})`,
   imageSize: (width, height) => `${width} × ${height}`,
@@ -395,6 +401,8 @@ const JA: TerminalText = {
   imagePathCopied: "パスをコピーしました",
   copyImagePathFailed: "パスをコピーできませんでした。",
   imageShelfTitle: "画像",
+  imageOpenInTab: "タブで開く",
+  imageOpenInViewer: "拡大表示で開く (Alt+クリック)",
   imageShelfCollapse: "画像の棚を畳む",
   imageShelfExpand: (count) => `画像の棚を開く (${count} 件)`,
   imageSize: (width, height) => `${width} × ${height}`,

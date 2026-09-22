@@ -3,6 +3,7 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   test,
@@ -13,6 +14,7 @@ import type { AppRoute } from "../core/routes";
 import {
   createMainTabsView,
   type MainTabsHandle,
+  routeTarget,
 } from "../views/main-tabs/main-tabs-view";
 
 beforeAll(() => {
@@ -71,7 +73,8 @@ function setup(loadSaved: () => Promise<unknown>) {
       session === "shell-a1"
         ? { label: "claude · Working", state: "working" }
         : { label: `Shell ${session}`, state: null },
-    onFront: (tab, how) => {
+    onPanes: (view, how) => {
+      const tab = view.fronts[view.focused];
       fronts.push(`${tab?.target.kind ?? "none"}:${how}`);
     },
     onTerminals: (open, closed) => {
@@ -133,11 +136,12 @@ describe("main tabs view: 読み戻し", () => {
       "README.md",
       ">app.ts (preview)",
       "diff",
+      "shot.png",
       "Shell shell-ab12",
     ]);
   });
 
-  test("知らない種類と、まだ開けない種類のタブは件数と中身を console.error に出す", async () => {
+  test("知らない種類のタブは件数と中身を console.error に出す (画像とターミナルは残す)", async () => {
     const error = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
@@ -147,9 +151,6 @@ describe("main tabs view: 読み戻し", () => {
     expect(messages).toEqual([
       expect.stringContaining(
         'dropped 1 saved tab(s) of an unknown kind: [{"at":"panes[0].tabs[2]"',
-      ),
-      expect.stringContaining(
-        'closed 1 saved tab(s) that cannot be opened yet: [{"id":"t4"',
       ),
     ]);
   });
@@ -311,7 +312,13 @@ describe("main tabs view: ターミナルのタブ", () => {
     handle.openTerminal("shell-ab12");
     expect([known, names(), fronts[fronts.length - 1]]).toEqual([
       [true, false],
-      ["README.md", "app.ts (preview)", "diff", ">Shell shell-ab12"],
+      [
+        "README.md",
+        "app.ts (preview)",
+        "diff",
+        "shot.png",
+        ">Shell shell-ab12",
+      ],
       "terminal:stay",
     ]);
   });
@@ -321,8 +328,142 @@ describe("main tabs view: ターミナルのタブ", () => {
     const { handle, names, terminals } = setup(async () => savedLayout);
     await handle.restore();
     expect([names(), terminals[terminals.length - 1]]).toEqual([
-      ["README.md", ">app.ts (preview)", "diff", "Shell shell-ab12"],
+      [
+        "README.md",
+        ">app.ts (preview)",
+        "diff",
+        "shot.png",
+        "Shell shell-ab12",
+      ],
       { open: ["shell-ab12"], closed: [] },
     ]);
+  });
+});
+
+describe("main tabs view: 左右 2 面", () => {
+  // 2 面を置ける窓の幅 (各面 360px 以上) にする。happy-dom の既定は 0。
+  beforeEach(() => {
+    Object.defineProperty(document.documentElement, "clientWidth", {
+      configurable: true,
+      value: 1600,
+    });
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(document.documentElement, "clientWidth");
+  });
+
+  const panes = (handle: MainTabsHandle) => {
+    const view = handle.panes();
+    return {
+      split: view.split,
+      focused: view.focused,
+      routeSide: view.routeSide,
+      left: view.fronts.left?.target,
+      right: view.fronts.right?.target,
+    };
+  };
+
+  test("分割ボタンで左の前面のタブが右の面へ移り、本文は右の面に出る", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
+    mount
+      .querySelector<HTMLButtonElement>(
+        '.main-tabs-pane[data-side="left"] .main-tabs-action:nth-child(2)',
+      )
+      ?.click();
+    expect(panes(handle)).toEqual({
+      split: true,
+      focused: "right",
+      routeSide: "right",
+      left: { kind: "file", path: "src/app.ts" },
+      right: { kind: "page", page: "diff" },
+    });
+  });
+
+  test("左の面へフォーカスを移すと、本文をその面のタブの route に合わせる", async () => {
+    const { handle, mount, current } = setup(async () => null);
+    await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
+    mount
+      .querySelector<HTMLButtonElement>(
+        '.main-tabs-pane[data-side="left"] .main-tabs-action:nth-child(2)',
+      )
+      ?.click();
+    handle.focusSide("left");
+    expect([panes(handle).routeSide, panes(handle).focused, current()]).toEqual(
+      ["left", "left", fileRoute("src/app.ts")],
+    );
+  });
+
+  test("画像は 2 面なら反対の面で開き、その面にフォーカスが移る", async () => {
+    const { handle, mount } = setup(async () => null);
+    await handle.restore();
+    handle.syncRoute({ screen: "diff", range });
+    mount
+      .querySelector<HTMLButtonElement>(
+        '.main-tabs-pane[data-side="left"] .main-tabs-action:nth-child(2)',
+      )
+      ?.click();
+    handle.openImage("/work/images/landscape.png", "other-if-split");
+    expect(panes(handle)).toEqual({
+      split: true,
+      focused: "left",
+      routeSide: "right",
+      left: { kind: "image", path: "/work/images/landscape.png" },
+      right: { kind: "page", page: "diff" },
+    });
+  });
+
+  test("保存した 2 面・比・画像の前面が戻る (URL が下に残った route を指していても)", async () => {
+    const saved = {
+      version: 1,
+      focused: "right",
+      split: 0.35,
+      panes: [
+        {
+          side: "left",
+          activeId: "t1",
+          tabs: [
+            {
+              id: "t1",
+              preview: false,
+              target: { kind: "file", path: "src/app.ts" },
+            },
+          ],
+        },
+        {
+          side: "right",
+          activeId: "t2",
+          tabs: [
+            {
+              id: "t2",
+              preview: false,
+              target: { kind: "image", path: "/work/images/landscape.png" },
+            },
+          ],
+        },
+      ],
+    };
+    const { handle, names } = setup(async () => saved);
+    await handle.restore();
+    expect([panes(handle), handle.layout().split, names()]).toEqual([
+      {
+        split: true,
+        focused: "right",
+        routeSide: "left",
+        left: { kind: "file", path: "src/app.ts" },
+        right: { kind: "image", path: "/work/images/landscape.png" },
+      },
+      0.35,
+      [">app.ts", ">landscape.png"],
+    ]);
+  });
+
+  test("route が画像のファイルなら画像のタブ", () => {
+    expect(routeTarget(fileRoute("docs/images/dunes.png"))).toEqual({
+      kind: "image",
+      path: "docs/images/dunes.png",
+    });
   });
 });

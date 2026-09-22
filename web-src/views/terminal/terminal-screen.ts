@@ -26,6 +26,7 @@ import {
   MAX_TERMINAL_IMAGE_QUERY,
   stripAnsi,
   type TerminalImageHistoryResponse,
+  type TerminalImageRef,
   type TerminalImagesResponse,
 } from "../../core/terminal-images";
 import {
@@ -43,7 +44,7 @@ import {
 } from "../../core/xterm-loader";
 import type { TerminalText } from "./i18n";
 import { openImageLightbox } from "./image-lightbox";
-import { createImageShelf } from "./image-shelf";
+import { createImageShelf, type ShelfOpenMode } from "./image-shelf";
 import {
   mergeShelf,
   type ShelfEntry,
@@ -120,6 +121,8 @@ export type TerminalScreenDeps = {
   isImageShelfCollapsed(): boolean;
   /** 棚を畳んだ・開いた。保存は呼び出し側。 */
   setImageShelfCollapsed(collapsed: boolean): void;
+  /** 棚の画像を画像のタブで開く。無ければ覆いで開く。 */
+  onOpenImage?: (image: TerminalImageRef, gallery: TerminalImageRef[]) => void;
 };
 
 export type TerminalScreenHandle = {
@@ -191,7 +194,7 @@ export function createTerminalScreen(
     getText: () => deps.getText(),
     isCollapsed: () => deps.isImageShelfCollapsed(),
     setCollapsed: (collapsed) => deps.setImageShelfCollapsed(collapsed),
-    onOpen: (entry) => openShelfEntry(entry),
+    onOpen: (entry, mode) => openShelfEntry(entry, mode),
     onImageError: (entry) => recheckShelfEntry(entry),
   });
 
@@ -579,12 +582,18 @@ export function createTerminalScreen(
    * 棚の項目を開く。画像のタブができたら開き先をここで差し替える (開く口は
    * これ 1 つ)。読めなかった項目は、押すと確かめ直す。
    */
-  function openShelfEntry(entry: ShelfEntry): void {
+  function openShelfEntry(entry: ShelfEntry, mode: ShelfOpenMode): void {
     if (!entry.image) {
       recheckShelfEntry(entry);
       return;
     }
     const gallery = shelfGallery(shelfEntries);
+    // 既定は画像のタブ (分割していれば隣の面)。覆いは Alt / Shift か右クリック。
+    if (mode === "tab" && deps.onOpenImage) {
+      shelf.setOpened(entry.key);
+      deps.onOpenImage(entry.image, gallery);
+      return;
+    }
     const index = gallery.findIndex((image) => image.path === entry.key);
     openImageLightbox(
       { images: gallery, index: Math.max(index, 0) },
@@ -725,10 +734,11 @@ export function createTerminalScreen(
         text: link.candidate,
         decorations: { pointerCursor: true, underline: true },
         activate: (event) => {
-          // 修飾キー付きの押し方は xterm の選択などに任せる。
+          // 修飾キー付きの押し方は xterm の選択などに任せる。Alt は覆いで開く。
           if (event.metaKey || event.ctrlKey || event.shiftKey) return;
           const current = shelfEntryByCandidate(shelfEntries, link.candidate);
-          if (current) openShelfEntry(current);
+          if (current)
+            openShelfEntry(current, event.altKey ? "overlay" : "tab");
         },
         hover: () => {
           const current = shelfEntryByCandidate(shelfEntries, link.candidate);
@@ -1025,6 +1035,7 @@ export function createTerminalScreen(
     shelfSeq = 0;
     shelf.render([]);
     shelf.highlight(null);
+    shelf.setOpened(null);
     queriedImagePaths = new Map<string, number>();
     pastedImagePaths = new Set<string>();
     recheckedUrls = new Set<string>();

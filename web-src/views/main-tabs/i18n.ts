@@ -15,6 +15,13 @@ export type MainTabsText = {
   copyPath: string;
   newTab: string;
   splitUnavailable: string;
+  resizeSplit: string;
+  dropToSplit: string;
+  /** 本文を出していない面の、route のタブの置き札。 */
+  shownElsewhere: (name: string) => string;
+  showHere: string;
+  /** 画像のタブのメニュー: そのファイルの履歴。 */
+  fileHistory: string;
   previewHint: string;
 };
 
@@ -29,7 +36,13 @@ const EN: MainTabsText = {
   moveToOtherSide: "Move to other side",
   copyPath: "Copy path",
   newTab: "Open a file (⌘K)",
-  splitUnavailable: "Split right (not available yet)",
+  splitUnavailable:
+    "Split right (needs two tabs, one side, and a window wide enough for two)",
+  resizeSplit: "Resize the two sides",
+  dropToSplit: "Drop to split right",
+  shownElsewhere: (name) => `${name} is shown on the other side`,
+  showHere: "Click to show it here",
+  fileHistory: "File history",
   previewHint:
     "Preview tab: the next file you open replaces it. Double-click to keep it open.",
 };
@@ -45,7 +58,13 @@ const JA: MainTabsText = {
   moveToOtherSide: "反対側へ移す",
   copyPath: "パスをコピー",
   newTab: "ファイルを開く (⌘K)",
-  splitUnavailable: "右に分割 (まだ使えません)",
+  splitUnavailable:
+    "右に分割 (タブが 2 つ以上・1 面・2 面が置ける窓の幅のときに使えます)",
+  resizeSplit: "左右の幅を変える",
+  dropToSplit: "ここに落とすと右に分割",
+  shownElsewhere: (name) => `${name} は反対側の面に出ています`,
+  showHere: "押すとここに出します",
+  fileHistory: "ファイルの履歴",
   previewHint:
     "仮のタブ: 次に開いたファイルで置き換わります。ダブルクリックで開いたままにします。",
 };

@@ -33,6 +33,7 @@ import type {
   ShellSessionId,
 } from "../../core/shell";
 import { readStoredSize, writeStoredSize } from "../../core/stored-size";
+import type { TerminalImageRef } from "../../core/terminal-images";
 import {
   clampTerminalFontSize,
   MAX_TERMINAL_FONT_SIZE,
@@ -88,6 +89,10 @@ export type TerminalViewDeps = {
    * まだ知らないときの名前付けに使う)。
    */
   onOpenInTab?: (session: ShellSession, pane?: string) => void;
+  /** メインの面のフォーカスのある側 (タブで開いたときの失敗をその面の箱に出す)。 */
+  focusedSide?: () => TabSide;
+  /** 棚の画像を画像のタブで開く (既定の押し方)。 */
+  onOpenImage?: (image: TerminalImageRef, gallery: TerminalImageRef[]) => void;
 };
 
 export type TerminalViewHandle = {
@@ -109,25 +114,26 @@ export type TerminalViewHandle = {
   menuItems(): ContextMenuItem[];
   localize(): void;
   dispose(): void;
-  /** メインの面のターミナルのタブの箱。app が本文の位置に 1 度だけ置く。 */
-  tabElement: HTMLElement;
+  /** メインの面 (左 / 右) のターミナルの置き場所。app がその面の箱に置く。 */
+  tabPaneFor(side: TabSide): HTMLElement;
   /**
-   * そのシェルをタブの箱で映す。パネルで映していれば、同じ xterm を箱ごと
-   * 付け替える (attach し直さない)。
+   * そのシェルを面の箱で映す。パネルかもう一方の面で映していれば、同じ
+   * xterm を枠ごと付け替える (attach し直さない)。
    */
-  showInTab(id: ShellSessionId): Promise<void>;
+  showInTab(id: ShellSessionId, side: TabSide): Promise<void>;
   /** タブを閉じた。タブの箱がそのシェルを映していれば購読をやめる (シェルは止めない)。 */
   releaseTab(id: ShellSessionId): void;
   /** タブで映しているシェルを、同じ xterm のままパネルへ移す。 */
   moveTabToPanel(id: ShellSessionId): Promise<void>;
   /** タブで開いているシェル。一覧に印を付け、パネルでは映さない。 */
   setTabbed(ids: ReadonlySet<string>): void;
-  /** tmux ペインを、そのセッションのシェルでタブに開く。 */
-  openPaneInTab(pane: string): Promise<void>;
-  /** タブの箱が映しているシェル。 */
-  getTabTarget(): string | null;
-  focusTab(): void;
+  /** tmux ペインを、そのセッションのシェルでタブに開く。失敗はその面の箱に出す。 */
+  openPaneInTab(pane: string, side: TabSide): Promise<void>;
+  focusTab(side: TabSide): void;
 };
+
+/** メインの面の左右。core/main-tabs.ts の PaneSide と同じ値。 */
+export type TabSide = "left" | "right";
 
 /** xterm 1 つと、その下の状態の行。パネルとタブの間で箱ごと付け替える。 */
 type ScreenSlot = {
@@ -149,20 +155,19 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   let stateErrors: AgentStateObservationError[] = [];
   /** パネルで映す枠。 */
   let panel: ScreenSlot | null = null;
-  /** タブで映す枠。最初にタブで映すときに作る。 */
-  let tab: ScreenSlot | null = null;
+  /** 面ごとにタブで映す枠。最初にその面で映すときに作る。 */
+  const tabs: Record<TabSide, ScreenSlot | null> = { left: null, right: null };
   /** パネルの中の、枠を置く場所。 */
   let panelPane: HTMLElement | null = null;
-  const tabElement = document.createElement("div");
-  tabElement.id = "terminal-tab";
-  tabElement.className = "terminal-tab";
-  const tabPane = document.createElement("div");
-  tabPane.className = "terminal-pane";
-  tabElement.append(tabPane);
+  /** 面ごとの、枠を置く場所 (app がその面の箱に入れる)。 */
+  const tabPanes: Record<TabSide, HTMLElement> = {
+    left: createTabPane(),
+    right: createTabPane(),
+  };
   /** タブで開いているシェル。 */
   let tabbed: ReadonlySet<string> = new Set();
-  /** タブの箱の attach の世代。待つ間に別のタブへ切り替わったら、後から来た結果を捨てる。 */
-  let tabGeneration = 0;
+  /** 面ごとの attach の世代。待つ間に別のタブへ切り替わったら、後から来た結果を捨てる。 */
+  const tabGeneration: Record<TabSide, number> = { left: 0, right: 0 };
   /** 見出しの行 (パネルのタブの行) に置く、このビューの小さな操作。 */
   let viewActions: HTMLElement | null = null;
   let sessionsToggle: HTMLButtonElement | null = null;
@@ -216,7 +221,9 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   }
 
   function slots(): ScreenSlot[] {
-    return [panel, tab].filter((slot): slot is ScreenSlot => slot !== null);
+    return [panel, tabs.left, tabs.right].filter(
+      (slot): slot is ScreenSlot => slot !== null,
+    );
   }
 
   function createSlot(): ScreenSlot {
@@ -236,6 +243,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       },
       isImageShelfCollapsed: deps.isImageShelfCollapsed,
       setImageShelfCollapsed: deps.onImageShelfCollapsedChange,
+      onOpenImage: deps.onOpenImage,
     });
     screen.setInputEnabled(inputEnabled);
     const el = document.createElement("div");
@@ -244,15 +252,35 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     return { el, screen, status };
   }
 
-  /** パネルとタブの枠を入れ替える。xterm は作り直さず、DOM の親だけ変わる。 */
-  function swapSlots(): void {
+  function createTabPane(): HTMLElement {
+    const pane = document.createElement("div");
+    pane.className = "terminal-pane";
+    return pane;
+  }
+
+  /** パネルとその面の枠を入れ替える。xterm は作り直さず、DOM の親だけ変わる。 */
+  function swapPanelWith(side: TabSide): void {
     if (!panel || !panelPane) return;
     const toTab = panel;
-    const toPanel = tab ?? createSlot();
+    const toPanel = tabs[side] ?? createSlot();
     panel = toPanel;
-    tab = toTab;
+    tabs[side] = toTab;
     panelPane.replaceChildren(toPanel.el);
-    tabPane.replaceChildren(toTab.el);
+    tabPanes[side].replaceChildren(toTab.el);
+  }
+
+  /** 左右の面の枠を入れ替える (反対側へ移したタブの xterm を付け替える)。 */
+  function swapSides(): void {
+    const left = tabs.right ?? createSlot();
+    const right = tabs.left ?? createSlot();
+    tabs.left = left;
+    tabs.right = right;
+    tabPanes.left.replaceChildren(left.el);
+    tabPanes.right.replaceChildren(right.el);
+  }
+
+  function otherSide(side: TabSide): TabSide {
+    return side === "left" ? "right" : "left";
   }
 
   function applyListWidth(width: number): void {
@@ -588,17 +616,18 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     }
   }
 
-  /** タブの箱の状態の行 (まだ枠が無ければ作る)。 */
-  function tabSlot(): ScreenSlot {
-    if (!tab) {
-      tab = createSlot();
-      tabPane.replaceChildren(tab.el);
-    }
-    return tab;
+  /** その面の枠 (まだ無ければ作る)。 */
+  function tabSlot(side: TabSide): ScreenSlot {
+    const existing = tabs[side];
+    if (existing) return existing;
+    const created = createSlot();
+    tabs[side] = created;
+    tabPanes[side].replaceChildren(created.el);
+    return created;
   }
 
-  async function openPaneInTab(pane: string): Promise<void> {
-    const slot = tabSlot();
+  async function openPaneInTab(pane: string, side: TabSide): Promise<void> {
+    const slot = tabSlot(side);
     try {
       const result = await requestPaneShell(
         pane,
@@ -629,13 +658,18 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     return list.sessions.find((item) => item.id === id) ?? null;
   }
 
-  async function showInTab(id: ShellSessionId): Promise<void> {
+  async function showInTab(id: ShellSessionId, side: TabSide): Promise<void> {
     if (disposed) return;
-    const myGen = ++tabGeneration;
+    const myGen = ++tabGeneration[side];
+    if (tabs[otherSide(side)]?.screen.getAttached()?.id === id) {
+      // もう一方の面で映していたシェル (反対側へ移したタブ)。枠ごと付け替える。
+      swapSides();
+      return;
+    }
     if (panel && panel.screen.getAttached()?.id === id) {
       // パネルで映しているシェルをタブへ。同じ xterm を箱ごと付け替える。
       // パネルに来る枠 (前のタブの枠) は、別のシェルを映していれば離す。
-      swapSlots();
+      swapPanelWith(side);
       panel.screen.detach();
       attached = null;
       lastTargetId = null;
@@ -644,20 +678,20 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       if (isOpen()) setStatus(text().selectPane);
       return;
     }
-    const slot = tabSlot();
+    const slot = tabSlot(side);
     if (slot.screen.getAttached()?.id === id) return;
     try {
       const session = await resolveShell(id);
-      if (myGen !== tabGeneration || disposed) return;
+      if (myGen !== tabGeneration[side] || disposed) return;
       if (!session) {
         slot.screen.detach();
         writeStatus(slot.status, text().shellClosed);
         return;
       }
       await slot.screen.attach(session);
-      if (myGen === tabGeneration && !disposed) slot.screen.focus();
+      if (myGen === tabGeneration[side] && !disposed) slot.screen.focus();
     } catch (error) {
-      if (myGen !== tabGeneration || disposed) return;
+      if (myGen !== tabGeneration[side] || disposed) return;
       console.error("[code-viewer] terminal tab attach failed", error);
       writeStatus(
         slot.status,
@@ -667,23 +701,35 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   }
 
   function releaseTab(id: ShellSessionId): void {
-    if (tab?.screen.getAttached()?.id !== id) return;
-    tabGeneration += 1;
-    tab.screen.detach();
+    for (const side of ["left", "right"] as const) {
+      const slot = tabs[side];
+      if (slot?.screen.getAttached()?.id !== id) continue;
+      tabGeneration[side] += 1;
+      slot.screen.detach();
+    }
+  }
+
+  /** そのシェルを映している面。 */
+  function sideShowing(id: string): TabSide | null {
+    if (tabs.left?.screen.getAttached()?.id === id) return "left";
+    if (tabs.right?.screen.getAttached()?.id === id) return "right";
+    return null;
   }
 
   async function moveTabToPanel(id: ShellSessionId): Promise<void> {
-    const session = tab?.screen.getAttached();
-    if (session?.id !== id) {
-      // タブの箱が映していない (まだ前面に出していない) なら、パネルで開くだけ。
+    const side = sideShowing(id);
+    const session = side ? tabs[side]?.screen.getAttached() : null;
+    if (!side || !session) {
+      // 面の箱が映していない (まだ前面に出していない) なら、パネルで開くだけ。
       await open(id);
       return;
     }
     if (!isOpen()) await open(null);
-    if (disposed || !isOpen() || tab?.screen.getAttached()?.id !== id) return;
+    if (disposed || !isOpen() || tabs[side]?.screen.getAttached()?.id !== id)
+      return;
     panel?.screen.detach();
-    swapSlots();
-    tabGeneration += 1;
+    swapPanelWith(side);
+    tabGeneration[side] += 1;
     attached = session;
     lastTargetId = session.id;
     board?.setSelected(session.id);
@@ -761,7 +807,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       panel?.screen.detach();
       deps.onTargetChange?.(null);
     }
-    if (tab?.screen.getAttached()?.id === id) tab.screen.detach();
+    releaseTab(id);
     shells = {
       available: shells?.available ?? true,
       sessions: (shells?.sessions ?? []).filter((item) => item.id !== id),
@@ -822,7 +868,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       onShowTab: (id) => deps.onShowTab?.(id),
       onOpenInTab: (row) => {
         if (row.kind === "tmux") {
-          void openPaneInTab(row.target);
+          void openPaneInTab(row.target, deps.focusedSide?.() ?? "left");
           return;
         }
         const session = findShell(row.target);
@@ -972,7 +1018,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     close,
     isOpen,
     getActiveTarget: () => attached?.id ?? lastTargetId,
-    tabElement,
+    tabPaneFor: (side) => tabPanes[side],
     showInTab,
     releaseTab,
     moveTabToPanel,
@@ -981,8 +1027,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       board?.setTabbed(ids);
     },
     openPaneInTab,
-    getTabTarget: () => tab?.screen.getAttached()?.id ?? null,
-    focusTab: () => tab?.screen.focus(),
+    focusTab: (side) => tabs[side]?.screen.focus(),
     refit: () => {
       for (const slot of slots()) slot.screen.refit();
     },
@@ -994,7 +1039,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       stopPolling();
       for (const slot of slots()) slot.screen.dispose();
       panel = null;
-      tab = null;
+      tabs.left = null;
+      tabs.right = null;
       board = null;
     },
   };

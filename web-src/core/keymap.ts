@@ -85,6 +85,7 @@ export const KEYMAP_ACTIONS = [
   "main-tab-7",
   "main-tab-8",
   "main-tab-9",
+  "main-pane-other",
 ] as const;
 
 export type KeymapAction = (typeof KEYMAP_ACTIONS)[number];
@@ -314,6 +315,8 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "main-tab-7", key: "7", pendingG: true },
   { action: "main-tab-8", key: "8", pendingG: true },
   { action: "main-tab-9", key: "9", pendingG: true },
+  // 2 面のとき、もう一方の面へフォーカスを移す (other)。
+  { action: "main-pane-other", key: "o", pendingG: true },
 ];
 
 export function resolveKeymapAction(

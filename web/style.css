@@ -379,6 +379,13 @@ html, body {
      (docked) はパネルの実高さ、重ねるときもパネルの見出しの行 (畳んでいても
      出ている) の上で止め、端末の最下行 (tmux の状態の行など) を覆わせない。 */
   --main-bottom: calc(var(--chrome-bottom) + max(var(--app-panel-visible-height), var(--app-panel-tabbar-height)));
+  /* 本文 (route の中身: ツールバー・ファイルの木・#content・右の面) の左右の端。
+     1 面ならメインの面いっぱい。左右 2 面のときは本文を出す面の幅に収める
+     (views/main-tabs/main-tabs-view.ts の routeSide。面の幅 --split-*-w は TS が書く)。
+     本文まわりの固定物はこの 2 つだけを読む (上の行・タブ列・下パネル・最下段は
+     面をまたぐので --chrome-left のまま)。 */
+  --page-left: var(--chrome-left);
+  --page-right: 0px;
 
 
   --code-font-size: 13px;
@@ -391,6 +398,15 @@ html, body {
    * which renders text slightly thicker than -webkit-font-smoothing:antialiased */
   -webkit-font-smoothing: auto;
   -moz-osx-font-smoothing: auto;
+}
+
+/* 左右 2 面: 本文を出す面に本文を収める (T2 の上書き。body で決める)。 */
+body.main-split {
+  --page-right: calc(var(--split-right-w) + var(--split-divider-w));
+}
+body.main-split.route-in-right {
+  --page-left: calc(var(--chrome-left) + var(--split-left-w) + var(--split-divider-w));
+  --page-right: 0px;
 }
 
 body[data-sidebar-font-size="compact"] {
@@ -833,7 +849,7 @@ body[data-code-font-size="xlarge"] {
 /* ===== Topbar ===== */
 #topbar {
   position: fixed;
-  top: var(--global-header-h); left: var(--chrome-left); right: 0;
+  top: var(--global-header-h); left: var(--page-left); right: var(--page-right);
   height: var(--topbar-h);
   display: flex;
   align-items: center;
@@ -1743,7 +1759,7 @@ body.gdp-diff-page #repo-target-wrap {
 #load-bar {
   position: fixed;
   top: var(--chrome-h);
-  left: var(--chrome-left); right: 0;
+  left: var(--page-left); right: var(--page-right);
   height: 2px;
   z-index: 49;
   pointer-events: none;
@@ -1857,7 +1873,7 @@ body.gdp-diff-page #repo-target-wrap {
 #worktree-panel {
   display: none;
   position: fixed;
-  left: var(--chrome-left);
+  left: var(--page-left);
   top: var(--chrome-h);
   bottom: var(--chrome-bottom);
   width: var(--history-w);
@@ -1869,7 +1885,7 @@ body.gdp-diff-page #repo-target-wrap {
   font-size: var(--ui-font-base);
 }
 body.gdp-history-page #history-panel { display: flex; }
-body.gdp-history-page #sidebar { left: calc(var(--chrome-left) + var(--history-w)); }
+body.gdp-history-page #sidebar { left: calc(var(--page-left) + var(--history-w)); }
 body.gdp-history-page main#content {
   margin-left: calc(var(--history-w) + var(--sidebar-w));
 }
@@ -1877,7 +1893,7 @@ body.gdp-history-page.gdp-sidebar-hidden main#content {
   margin-left: var(--history-w);
 }
 body.gdp-history-page #sidebar-resizer {
-  left: calc(var(--chrome-left) + var(--history-w) + var(--sidebar-w) - 4px);
+  left: calc(var(--page-left) + var(--history-w) + var(--sidebar-w) - 4px);
 }
 body.gdp-history-page #repo-target-wrap {
   display: none !important;
@@ -1887,7 +1903,7 @@ body.gdp-history-page #repo-target-wrap {
   position: fixed;
   top: var(--chrome-h);
   bottom: var(--chrome-bottom);
-  left: calc(var(--chrome-left) + var(--history-w) - 4px);
+  left: calc(var(--page-left) + var(--history-w) - 4px);
   width: 8px;
   cursor: col-resize;
   z-index: 32;
@@ -2455,7 +2471,7 @@ body.gdp-history-page #history-commit-info:not([hidden]),
 /* ===== Sidebar ===== */
 #sidebar {
   position: fixed;
-  left: var(--chrome-left);
+  left: var(--page-left);
   top: var(--chrome-h);
   bottom: var(--chrome-bottom);
   width: var(--sidebar-w);
@@ -2690,7 +2706,7 @@ body[data-focus-scope="main"] #content {
   position: fixed;
   top: var(--chrome-h);
   bottom: var(--chrome-bottom);
-  left: calc(var(--chrome-left) + var(--sidebar-w) - 4px);
+  left: calc(var(--page-left) + var(--sidebar-w) - 4px);
   width: 8px;
   cursor: col-resize;
   z-index: 31;
@@ -3838,8 +3854,8 @@ body.gdp-diff-page #diff::after {
 .empty.backend-state {
   position: fixed;
   top: var(--global-header-h);
-  left: var(--chrome-left);
-  right: 0;
+  left: var(--page-left);
+  right: var(--page-right);
   bottom: calc(var(--chrome-bottom) + var(--app-panel-visible-height));
   z-index: 55;
   margin: 0;
@@ -7309,7 +7325,7 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
 
 #annotation-panel {
   position: fixed;
-  right: 0;
+  right: var(--page-right);
   top: var(--chrome-h);
   bottom: var(--chrome-bottom);
   width: min(var(--annotation-panel-w), calc(100vw - 32px));
@@ -7357,8 +7373,8 @@ body.annotation-panel-open #content {
 /* ---- Query History right-panel ---- */
 #query-history-panel {
   position: fixed;
-  left: var(--chrome-left);
-  right: 0;
+  left: var(--page-left);
+  right: var(--page-right);
   bottom: var(--chrome-bottom);
   height: min(45vh, 400px);
   z-index: 45;
@@ -8346,7 +8362,7 @@ body.gdp-worktree-page #worktree-panel {
 
 /* 以下 4 つは History 画面と同じ並べ方 (左パネル → サイドバー → 本文)。 */
 body.gdp-worktree-page #sidebar {
-  left: calc(var(--chrome-left) + var(--history-w));
+  left: calc(var(--page-left) + var(--history-w));
 }
 
 body.gdp-worktree-page main#content {
@@ -8358,7 +8374,7 @@ body.gdp-worktree-page.gdp-sidebar-hidden main#content {
 }
 
 body.gdp-worktree-page #sidebar-resizer {
-  left: calc(var(--chrome-left) + var(--history-w) + var(--sidebar-w) - 4px);
+  left: calc(var(--page-left) + var(--history-w) + var(--sidebar-w) - 4px);
 }
 
 /* サイドバーで意味を持たないのは「対象 ref」だけ。ツリー / 一覧の切替と
@@ -17434,7 +17450,8 @@ body.gdp-agents-page {
 
 /* 本文 (窓のスクロール) も左のサイドバーの右、最下段の上から。 */
 body {
-  padding-left: var(--chrome-left);
+  padding-left: var(--page-left);
+  padding-right: var(--page-right);
   padding-bottom: var(--chrome-bottom);
 }
 /* 畳んでいる間。html の属性にしてあるのは、index.html の head のスクリプトが
@@ -17897,7 +17914,18 @@ body.gdp-nav-resizing {
   z-index: 60;
   display: flex;
   align-items: stretch;
+  gap: var(--split-divider-w, 1px);
   background: var(--color-ground);
+}
+/* 面ごとのタブ列 (タブの並び + 右端の ＋ と分割)。2 面なら左は左の面の幅。 */
+.main-tabs-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+body.main-split .main-tabs-pane[data-side="left"] {
+  flex: 0 0 var(--split-left-w);
 }
 .main-tabs-strip {
   flex: 1 1 auto;
@@ -17934,7 +17962,7 @@ body.gdp-nav-resizing {
   background: var(--color-tab-active);
   color: var(--color-text);
 }
-.main-tab.main-tab-active::before {
+.main-tab.main-tab-focused::before {
   content: "";
   position: absolute;
   left: 0; right: 0; top: 0;
@@ -18045,20 +18073,130 @@ body.gdp-nav-resizing {
   margin: auto;
 }
 
-/* ---- メインの面のターミナルのタブの箱 (#terminal-tab) ----
-   前面のタブがターミナルのときだけ、本文の位置 (タブ列の下・左のサイドバーの
-   右・本文の下端の上) に重ねて出す。下の画面の route はそのまま残る。
-   画面ごとのツールバー (50) より上、上の行・タブ列・下パネル (60) より下。 */
-.terminal-tab {
+/* ---- メインの面の左右の箱 (.main-pane-host。app.ts の PANE_HOSTS) ----
+   前面のタブがターミナル・画像・本文を出していない route のタブ (置き札) の
+   とき、その面の位置 (タブ列の下・本文の下端の上) に重ねて出す。本文を出して
+   いる面の箱は出さない (下の本文が見える)。画面ごとのツールバー (50) より上、
+   上の行・タブ列・下パネル (60) より下。 */
+.main-pane-host {
   position: fixed;
   top: var(--global-header-h); left: var(--chrome-left); right: 0;
   bottom: var(--main-bottom);
   z-index: 55;
   display: none;
+  background: var(--color-doc);
+}
+.main-pane-host.is-shown {
+  display: flex;
+}
+.main-pane-host[data-kind="terminal"] {
   background: var(--color-term);
 }
-body.main-terminal-front .terminal-tab {
-  display: flex;
+body.main-split .main-pane-host[data-side="left"] {
+  right: auto;
+  width: var(--split-left-w);
+}
+body.main-split .main-pane-host[data-side="right"] {
+  left: auto;
+  width: var(--split-right-w);
+}
+.main-pane-host > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+/* 本文を出していない面の route のタブ: 名前と「押すとここに出す」。 */
+.main-pane-placeholder {
+  display: grid;
+  place-content: center;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 0;
+  background: var(--color-doc);
+  color: var(--color-text-2);
+  font: inherit;
+  font-size: var(--ui-font-md);
+  text-align: center;
+  cursor: pointer;
+}
+.main-pane-placeholder:hover {
+  background: color-mix(in srgb, var(--color-doc) 70%, var(--color-raised));
+}
+.main-pane-placeholder-hint {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.main-pane-message {
+  margin: 0;
+  padding: var(--space-5);
+  color: var(--color-failed);
+  font-size: var(--ui-font-md);
+  white-space: pre-wrap;
+}
+/* 面の境界。線は 1px、掴みしろは 6px (線の左右 3px ずつ)。ホバー・ドラッグ中は
+   2px の強調と左右のリサイズカーソル。面を太い枠では囲まない。 */
+.main-split-divider {
+  position: fixed;
+  top: var(--header-row-h);
+  bottom: var(--main-bottom);
+  left: calc(var(--chrome-left) + var(--split-left-w) - var(--space-unit) * 0.5);
+  width: calc(var(--space-unit) * 1.5);
+  z-index: 61;
+  display: none;
+  cursor: col-resize;
+  touch-action: none;
+}
+body.main-split .main-split-divider {
+  display: block;
+}
+.main-split-divider::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  left: calc(var(--space-unit) * 0.5);
+  width: var(--split-divider-w, 1px);
+  background: var(--color-line-strong);
+}
+.main-split-divider:hover::before,
+.main-split-divider:focus-visible::before,
+body.main-split-resizing .main-split-divider::before {
+  left: calc(var(--space-unit) * 0.5 - 0.5px);
+  width: 2px;
+  background: var(--color-accent);
+}
+body.main-split-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+/* タブを右端へドラッグしたときの「右に分割」のドロップ先。ドラッグ中だけ、
+   本文の右半分に出す (タブ列・サイドバーは覆わない)。 */
+.main-split-drop {
+  position: fixed;
+  top: var(--global-header-h);
+  bottom: var(--main-bottom);
+  right: 0;
+  /* 本文の横幅の半分。幅 --main-w は TS (main-tabs-view.ts の applyGeometry) が書く。 */
+  width: calc(var(--main-w, 50vw) / 2);
+  z-index: 58;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-2);
+  border: 2px dashed var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-accent-strong);
+  font-size: var(--ui-font-md);
+  pointer-events: auto;
+}
+.main-split-drop[hidden] {
+  display: none;
+}
+.main-split-drop-over {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+.main-split-drop-icon svg {
+  width: var(--space-6);
+  height: var(--space-6);
 }
 /* 一覧の行の「タブで開く」。タブで表示中なら同じボタンが印になる。 */
 .terminal-row-tab {
@@ -19407,7 +19545,8 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head {
   box-shadow: 0 0 0 1px var(--color-line-strong);
 }
 /* 文字の中のパスにカーソルが載った画像。棚の同じ列で強い選択は 1 つだけ。 */
-.terminal-image-shelf-item[data-linked] .terminal-image-shelf-frame {
+.terminal-image-shelf-item[data-linked] .terminal-image-shelf-frame,
+.terminal-image-shelf-list:not(:has([data-linked])) .terminal-image-shelf-item[data-opened] .terminal-image-shelf-frame {
   box-shadow: 0 0 0 2px var(--color-accent-strong), var(--glow-select);
 }
 .terminal-image-shelf-name {

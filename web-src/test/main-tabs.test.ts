@@ -14,6 +14,7 @@ import {
   parseLayout,
   prevTab,
   serializeLayout,
+  setSplit,
   splitRight,
   type TabTarget,
   tabMenu,
@@ -615,5 +616,71 @@ describe("保存と読み戻し", () => {
     expect(caught).toBeInstanceOf(Error);
     for (const message of messages)
       expect((caught as Error).message).toContain(message);
+  });
+});
+
+describe("左右の幅の比", () => {
+  test.each([
+    {
+      name: "分割した直後は半分",
+      run: (l: Layout) => splitRight(l, "b"),
+      before: layoutOf("a [b]"),
+      expected: 0.5,
+    },
+    {
+      name: "比を変える",
+      run: (l: Layout) => setSplit(l, 0.3),
+      before: layoutOf("[a]", "[b]"),
+      expected: 0.3,
+    },
+    {
+      name: "0 は面が消えるので変えない",
+      run: (l: Layout) => setSplit(l, 0),
+      before: layoutOf("[a]", "[b]"),
+      expected: undefined,
+    },
+    {
+      name: "1 面では持たない",
+      run: (l: Layout) => setSplit(l, 0.3),
+      before: layoutOf("[a]"),
+      expected: undefined,
+    },
+    {
+      name: "1 面に戻ると消える",
+      run: (l: Layout) => close(setSplit(l, 0.3), "b"),
+      before: layoutOf("[a]", "[b]"),
+      expected: undefined,
+    },
+  ])("$name", ({ run, before, expected }) => {
+    expect(run(before).split).toBe(expected);
+  });
+
+  test("保存して読み戻すと 2 面と比が戻る", () => {
+    const layout = setSplit(layoutOf("a [b]", "[c]"), 0.35);
+    const parsed = parseLayout(
+      JSON.parse(JSON.stringify(serializeLayout(layout))),
+    );
+    expect([show(parsed.layout), parsed.layout.split]).toEqual([
+      "a [b] | [c] (left)",
+      0.35,
+    ]);
+  });
+
+  test.each([
+    { name: "0 以下", split: 0 },
+    { name: "1 以上", split: 1.2 },
+    { name: "数でない", split: "half" },
+  ])("壊れた比 ($name) は理由を出す", ({ split }) => {
+    expect(() =>
+      parseLayout({
+        version: 1,
+        focused: "left",
+        split,
+        panes: [
+          { side: "left", activeId: null, tabs: [] },
+          { side: "right", activeId: null, tabs: [] },
+        ],
+      }),
+    ).toThrow(`split is ${JSON.stringify(split)} (0 < split < 1)`);
   });
 });

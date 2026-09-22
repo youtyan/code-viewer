@@ -53,7 +53,21 @@ export type Pane = {
 export type Layout = {
   panes: { left: Pane; right?: Pane };
   focused: PaneSide;
+  /**
+   * 2 面のときの左の面の幅の比 (0 より大きく 1 より小さい)。1 面では持たない。
+   * 画面の幅に対する比で持つので、窓の幅が変わっても比が保たれる。
+   */
+  split?: number;
 };
+
+/** 分割した直後の左の面の比。 */
+export const DEFAULT_SPLIT = 0.5;
+
+/** 左の面の比を変える。1 面なら何もしない。0 と 1 は面が消えるので含めない。 */
+export function setSplit(layout: Layout, ratio: number): Layout {
+  if (!layout.panes.right || !(ratio > 0 && ratio < 1)) return layout;
+  return { ...layout, split: ratio };
+}
 
 export type OpenOptions = {
   pane?: "focused" | "left" | "right" | "other-if-split";
@@ -393,6 +407,7 @@ export function splitRight(layout: Layout, id: string): Layout {
   return {
     panes: { left, right: selectIn(emptyPaneWith(found.tab), id) },
     focused: "right",
+    split: DEFAULT_SPLIT,
   };
 }
 
@@ -463,6 +478,8 @@ export function tabMenu(layout: Layout, id: string): TabMenuState {
 export type SerializedLayout = {
   version: typeof LAYOUT_VERSION;
   focused: PaneSide;
+  /** 2 面のときだけ。左の面の幅の比。 */
+  split?: number;
   panes: Array<{
     side: PaneSide;
     activeId: string | null;
@@ -474,6 +491,10 @@ export function serializeLayout(layout: Layout): SerializedLayout {
   return {
     version: LAYOUT_VERSION,
     focused: layout.focused,
+    // 比を持っている 2 面だけ書く (持っていない配置に既定の値を作って書かない)。
+    ...(layout.panes.right && layout.split !== undefined
+      ? { split: layout.split }
+      : {}),
     panes: sides(layout).map((side) => {
       const pane = paneOf(layout, side) as Pane;
       return {
@@ -559,6 +580,11 @@ export function parseLayout(raw: unknown): ParsedLayout {
     problems.push(
       `version is ${JSON.stringify(raw.version)}, expected ${LAYOUT_VERSION}`,
     );
+  if (
+    raw.split !== undefined &&
+    !(typeof raw.split === "number" && raw.split > 0 && raw.split < 1)
+  )
+    problems.push(`split is ${JSON.stringify(raw.split)} (0 < split < 1)`);
   if (raw.focused !== "left" && raw.focused !== "right")
     problems.push(`focused is ${JSON.stringify(raw.focused)}`);
   const panesRaw = Array.isArray(raw.panes) ? raw.panes : null;
@@ -657,6 +683,9 @@ export function parseLayout(raw: unknown): ParsedLayout {
       ...(panes.right ? { right: panes.right } : {}),
     },
     focused: raw.focused as PaneSide,
+    ...(panes.right
+      ? { split: typeof raw.split === "number" ? raw.split : DEFAULT_SPLIT }
+      : {}),
   };
   layout = collapseEmpty(layout);
   if (!paneOf(layout, layout.focused)) layout = { ...layout, focused: "left" };

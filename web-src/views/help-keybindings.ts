@@ -348,6 +348,13 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
           ja: "1〜9 番目のタブへ",
         },
       },
+      {
+        selectors: [{ action: "main-pane-other" }],
+        description: {
+          en: "Move focus to the other side of a split main area",
+          ja: "左右に分けたメインの面で、もう一方の面へ",
+        },
+      },
     ],
   },
   {

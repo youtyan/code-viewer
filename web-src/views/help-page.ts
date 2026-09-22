@@ -167,7 +167,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "The row of tabs under the top bar keeps files and screens open. A file opened with one click (tree, palette, a line link, View File) opens in a preview tab with an italic name, and the next file replaces it; double-click the tree row or the tab, or choose Keep open, to keep it. Files, Diff, History, Worktrees, Data and Work log each have one tab: pressing them brings that tab back as you left it. Right-click a tab for Close / Close others / Close to the right / Keep open / Copy path, drag tabs to reorder, and use g t / g T (next / previous), g x (close) and g 1–9. The tabs are remembered per project.",
+                text: "The row of tabs under the top bar keeps files and screens open. A file opened with one click (tree, palette, a line link, View File) opens in a preview tab with an italic name, and the next file replaces it; double-click the tree row or the tab, or choose Keep open, to keep it. Files, Diff, History, Worktrees, Data and Work log each have one tab: pressing them brings that tab back as you left it. Right-click a tab for Close / Close others / Close to the right / Keep open / Copy path, drag tabs to reorder, and use g t / g T (next / previous), g x (close) and g 1–9. The tabs are remembered per project. The split button at the right of the row (or Split right on a tab, or dragging a tab onto the right half) shows two sides; drag the line between them to resize, drag tabs between the sides or use Move to other side, and press g o to move to the other side. Files and screens are drawn on one side at a time: the other side shows a card that brings them over when clicked. Image files open in an image tab with zoom, previous / next, Copy path and Open folder.",
               },
               {
                 kind: "paragraph",
@@ -246,7 +246,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "A shell can also be a tab of the main area (an agent from the sidebar, the palette or the All agents board opens there; in the panel's session list, the button at the right of a row opens it in a tab). The same terminal moves between the tab and the panel as it is — the screen and what you were typing stay — and a shell shown in a tab is marked in the panel's list instead of being drawn twice. ?terminal=<shell> in the URL names the shell on screen: its tab comes to the front if it has one, otherwise the panel shows it. Closing a terminal tab never stops the shell or the agent. Whether the panel is open is remembered in your settings rather than the URL.",
+                text: "A shell can also be a tab of the main area (an agent from the sidebar, the palette or the All agents board opens there; in the panel's session list, the button at the right of a row opens it in a tab). The same terminal moves between the tab and the panel as it is — the screen and what you were typing stay — and a shell shown in a tab is marked in the panel's list instead of being drawn twice. ?terminal=<shell> in the URL names the shell on screen: its tab comes to the front if it has one, otherwise the panel shows it. Closing a terminal tab never stops the shell or the agent. Whether the panel is open is remembered in your settings rather than the URL. Images the agent wrote are listed on the shelf at the right of the terminal; clicking one (or the path in the terminal) opens it in an image tab — on the other side when the area is split — and Alt+click or the item's right-click menu opens the full-screen viewer instead.",
               },
               {
                 kind: "paragraph",
@@ -1040,7 +1040,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "上の行の直下のタブ列に、開いたファイルと画面が並びます。1 回押して開いたファイル (木・パレット・行リンク・View File) は名前が斜体の仮のタブで、次に開いたファイルに置き換わります。木の行かタブをダブルクリックするか、「開いたままにする」で固定します。Files・Diff・History・Worktrees・Data・Work log はそれぞれタブが 1 つで、押すとそのタブが前に見ていた状態で前面に出ます。タブの右クリックで閉じる・ほかを閉じる・右側を閉じる・開いたままにする・パスをコピー、ドラッグで並べ替え、g t / g T (次 / 前)、g x (閉じる)、g 1〜9 で移れます。タブの並びはプロジェクトごとに覚えます。",
+                text: "上の行の直下のタブ列に、開いたファイルと画面が並びます。1 回押して開いたファイル (木・パレット・行リンク・View File) は名前が斜体の仮のタブで、次に開いたファイルに置き換わります。木の行かタブをダブルクリックするか、「開いたままにする」で固定します。Files・Diff・History・Worktrees・Data・Work log はそれぞれタブが 1 つで、押すとそのタブが前に見ていた状態で前面に出ます。タブの右クリックで閉じる・ほかを閉じる・右側を閉じる・開いたままにする・パスをコピー、ドラッグで並べ替え、g t / g T (次 / 前)、g x (閉じる)、g 1〜9 で移れます。タブの並びはプロジェクトごとに覚えます。タブ列の右端の分割ボタン (タブの「右に分割」、タブを右半分へドラッグでも) で左右 2 面になり、間の線をドラッグで幅を変え、タブを面の間でドラッグするか「反対側へ移す」で移し、g o でもう一方の面へ移ります。ファイルと各画面は一度に片方の面にだけ描くので、もう一方の面には押すとこちらに出す札が出ます。画像のファイルは、倍率・前後・パスのコピー・フォルダを開くが付いた画像のタブで開きます。",
               },
               {
                 kind: "paragraph",
@@ -1119,7 +1119,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "シェルはメインの面のタブでも開けます (サイドバー・パレット・エージェントの全体ボードのエージェントはタブで開きます。下パネルのセッションの一覧では、行の右のボタンでタブに開きます)。同じ端末がそのままタブとパネルの間を移るので、画面も打ちかけの文字も残ります。タブで開いているシェルは、パネルの一覧では印が付くだけで、2 か所には描きません。URL の ?terminal=<シェル> は映しているシェルで、そのシェルのタブがあればタブが前面に、無ければパネルで映します。ターミナルのタブを閉じても、シェルやエージェントは止まりません。パネルを開いているかは URL ではなく設定に覚えます。",
+                text: "シェルはメインの面のタブでも開けます (サイドバー・パレット・エージェントの全体ボードのエージェントはタブで開きます。下パネルのセッションの一覧では、行の右のボタンでタブに開きます)。同じ端末がそのままタブとパネルの間を移るので、画面も打ちかけの文字も残ります。タブで開いているシェルは、パネルの一覧では印が付くだけで、2 か所には描きません。URL の ?terminal=<シェル> は映しているシェルで、そのシェルのタブがあればタブが前面に、無ければパネルで映します。ターミナルのタブを閉じても、シェルやエージェントは止まりません。パネルを開いているかは URL ではなく設定に覚えます。エージェントが書き出した画像はターミナルの右の棚に並び、押す (ターミナルの中のパスを押す) と画像のタブで開きます (左右 2 面なら反対側の面)。Alt+クリックか項目の右クリックのメニューなら、これまでの拡大表示で開きます。",
               },
               {
                 kind: "paragraph",

@@ -16,7 +16,8 @@
 | 左のサイドバーの行の操作 (hover で出る) | `nav-row-action`。場所を確保せず行の上に重ねる (`.nav-project-actions`) |
 | 最下段のバー (`#statusbar`) | 押せる塊は `usage-status-item` / `statusbar-icon-action`。流動的な文言は幅を固定した塊の中だけ |
 | 下パネルの見出しの行 (`.app-panel-tabs`) | 1 行だけ。ビュー固有の小さな操作は `#app-panel-view-actions` に置き (`app-panel-icon`)、それ以外の操作は「⋯」(`#app-panel-menu`) に入れる。ビューは `menuItems()` で項目を渡す (例: `TerminalViewHandle.menuItems`)。行を 2 段にしない |
-| メインの面のターミナルのタブ | 箱は `views/terminal/terminal-view.ts` の `tabElement` (`#terminal-tab`)。前面のタブがターミナルのときだけ `body.main-terminal-front` で出す。タブの名前はエージェントを映していれば「種類 · 状態」(`agentsText().kind` / `.state`)、絵は状態の印 (`.terminal-mark-*`)。下パネルの一覧の行の「タブで開く」は `terminal-row-tab` (タブで表示中なら同じボタンが印) |
+| メインの面の左右の箱 (ターミナル・画像・置き札) | `app.ts` の `PANE_HOSTS` (`.main-pane-host[data-side]`)。前面のタブがターミナル・画像・本文を出していない route のタブ (置き札 `.main-pane-placeholder`) のときだけ `is-shown`。画像は `views/image-tab.ts` を面ごとに 1 つ使い回す。面の境界は `.main-split-divider` (掴みしろ 6px・線 1px・ホバー/ドラッグ中 2px)、右に分割のドロップ先は `.main-split-drop` |
+| メインの面のターミナルのタブ | 置き場所は `views/terminal/terminal-view.ts` の `tabPaneFor(side)` (面ごとの枠)。タブの名前はエージェントを映していれば「種類 · 状態」(`agentsText().kind` / `.state`)、絵は状態の印 (`.terminal-mark-*`)。下パネルの一覧の行の「タブで開く」は `terminal-row-tab` (タブで表示中なら同じボタンが印) |
 | ターミナルの画面に付く補助 (出力に出た画像など) | 文字の上に重ねない。画面の箱の中に別の列を取る (`views/terminal/image-shelf.ts` の画像の棚。仕様は `agents.md` の 12) |
 | 補助の情報 (大きさ・日時など) | 行にしない。情報のボタン (`.gdp-file-detail-meta` の形: 押せる領域は固定、hover / フォーカスで小さな面) に入れる |
 | topbar のトグルボタン | `.controls > button` パターン（`#ignore-ws` `#hide-tests` が実例） |

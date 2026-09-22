@@ -14,6 +14,7 @@ import { apiUrl, projectKey } from "../core/api-url";
 // 1 つのサーバから全部の作業ツリーの中身が読める。
 
 import { blameRelativeTime } from "../core/blame";
+import { formatErrorDetail } from "../core/error-detail";
 import {
   CHEVRON_DOWN_16_PATH,
   COPY_16_PATHS,
@@ -84,12 +85,9 @@ export type WorktreeViewDeps = {
   ): HTMLButtonElement;
   /**
    * 同じ操作を、ボタンを介さずに実行する。メニューの項目にはボタンが無いので
-   * こちらを使う。**成否が返る**ので、失敗をこの画面のメッセージ欄に出せる。
+   * こちらを使う。**失敗は理由を付けて投げる**ので、この画面のメッセージ欄に出せる。
    */
-  openPathInOs(
-    path: string,
-    kind: "directory" | "file-parent",
-  ): Promise<boolean>;
+  openPathInOs(path: string, kind: "directory" | "file-parent"): Promise<void>;
   /**
    * 一覧のエージェント (全体ボードと同じもの)。作業ツリーの行に、そこで
    * 動いているエージェントの状態を出す。cwd が作業ツリーの中にあるものを
@@ -910,6 +908,22 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     renderList();
   }
 
+  /** 失敗を投げる操作。理由はコンソールと、この画面のメッセージ欄に出す。 */
+  async function runThrowingAction(
+    run: () => Promise<void>,
+    failure: string,
+  ): Promise<void> {
+    const seq = lifecycle;
+    try {
+      await run();
+    } catch (error) {
+      console.error(`[code-viewer] ${failure}`, error);
+      if (!isCurrent(seq)) return;
+      setMessage(`${failure}\n${formatErrorDetail(error)}`, true);
+      renderList();
+    }
+  }
+
   /**
    * クリップボードへ写す。**失敗を握り潰さない。** 呼び出し側が見た目を
    * 変えられるように成否を返し、理由はコンソールに残す (権限拒否など、
@@ -1031,7 +1045,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           onSelect: () => {
             // メニューにはボタンが無いので、色を変えて伝えることができない。
             // 失敗はこの画面のメッセージ欄に出す (黙って終わるのが一番困る)。
-            void runAction(
+            void runThrowingAction(
               () => deps.openPathInOs(openArg, "directory"),
               t.actions.openFolderFailed,
             );

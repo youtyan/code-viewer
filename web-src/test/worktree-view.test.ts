@@ -8,7 +8,7 @@
 // 「何を渡したか」だけを見る。
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
+import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { AppRoute, DiffRange } from "../core/routes";
 import type { CommitMeta, WorktreesResponse } from "../core/types";
 import type { WorktreeFileChange, WorktreeItem } from "../core/worktree";
@@ -354,7 +354,9 @@ async function mountWith(
     // 何をどう呼んだかを記録する。成否は openPathResult で差し替える。
     openPathInOs: (path, kind) => {
       openedPaths.push({ path, kind });
-      return Promise.resolve(openPathResult);
+      return openPathResult
+        ? Promise.resolve()
+        : Promise.reject(new Error("sample open failure"));
     },
     getAgents: () => options.agents ?? [],
     subscribeAgents: () => () => undefined,
@@ -1055,11 +1057,17 @@ describe("row actions", () => {
     // 失敗したことは画面のどこかに出ないと、押した人には何も分からない。
     openPathResult = false;
     openRowMenu(panel, 0);
+    const logged = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     menuItem(TEXT.actions.openFolder).click();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    // 失敗の理由 (投げられたエラー) も一緒に出す。
     expect(texts(panel, ".history-status")).toContain(
-      TEXT.actions.openFolderFailed,
+      `${TEXT.actions.openFolderFailed}\nError: sample open failure`,
     );
+    expect(logged).toHaveBeenCalledTimes(1);
+    logged.mockRestore();
   });
 
   test("opens the repository root itself for the main worktree", async () => {

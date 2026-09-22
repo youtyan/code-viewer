@@ -98,9 +98,12 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 - エージェントを開く既定はタブ (`app.ts` の `openAgentPane`。サイドバー・パレット・全体ボード・
   通知・最下段)。サイドバーの Alt+クリックと行の右クリックが下パネル。経路はどちらも
   `/_tmux/open` (ペイン → そのセッションのシェル) で、タブの中身はシェル (`shell-…`)
-- xterm は `views/terminal/terminal-view.ts` の枠 (`ScreenSlot`) ごとに 1 つで、枠はパネル用とタブ用の 2 つ。
+- xterm は `views/terminal/terminal-view.ts` の枠 (`ScreenSlot`) ごとに 1 つで、枠はパネル用と、メインの面の左右それぞれの 3 つ。
   **同じシェルを 2 か所に描かない**: タブのあるシェルはパネルでは映さず、一覧に印を付ける。
-  タブ ⇄ パネルの移動は枠を入れ替えて DOM の親を変えるだけ (attach し直さない)
+  タブ ⇄ パネル、左の面 ⇄ 右の面の移動は枠を入れ替えて DOM の親を変えるだけ (attach し直さない)。
+  画像の棚は枠の一部なので一緒に移る
+- 棚の項目とターミナルの画像パスを押すと画像のタブで開く (2 面なら反対の面、`other-if-split`)。
+  覆い (拡大表示) は Alt / Shift + クリックか、棚の項目の右クリックのメニュー
 - URL の `?terminal=<shell>` は「映しているシェル」。そのシェルのタブがあればタブを前面に、
   無ければパネルで映す。パネルの開閉は URL に載せずユーザー単位の設定 `terminalPanelOpen`
 - ターミナルのタブを閉じても、シェルもエージェントも止めない (止めるのは今までの場所だけ)
@@ -411,8 +414,9 @@ codex は `CODEX_HOME` にそのディレクトリを渡すと、認証・履歴
 - 一覧では、画面が選んでいるプロジェクト（要求の `PROJECT_HEADER`）が `current`、
   裏が動いているものが `running`（URL は `/p/<鍵>/`）、動いていないものが `absent`。
   `absent` の登録済みを「開く」と、入口が裏を起こしてから移る（サイドバーの「起動中…」）
-- 裏は入口が居なくなると 10 秒待って自分で終わる。その間に同じ版の入口が
-  `entry.json` に現れれば、そちらに付き直す（入口の起動し直しで裏を拾い直すため）
+- 裏は入口の pid と起動ごとの token を `entry.json` と `/_entry` の両方で確かめる。
+  入口が居なくなると 10 秒待って自分で終わる。その間に新しい入口が `/_entry/adopt` で
+  新しい token を渡し、古い pid が居なければ、そちらに付き直す
 - 裏が落ちたら 502、起きなければ 503（理由と `server-logs/` の末尾）。画面は中央の面を
   「このプロジェクトのプロセスが止まっています」の空表示で覆い、理由の全文はダイアログの
   「詳細」に畳む（`views/backend-state.ts`）。SSE の繋ぎ直しで起こし直すのは 1 回まで
@@ -536,7 +540,7 @@ find web-src -name '*.ts' -not -path 'web-src/server/*' -not -path 'web-src/test
 | `<状態>/settings.json` | 全プロジェクト共通の設定 | 同上 |
 | `<状態>/main-tabs.json` | メインの面のタブの配置をプロジェクト (根のパス) ごとに。`/_state/tabs`、`server/main-tabs-store.ts`。読み戻しの検査は画面 (`core/main-tabs.ts` の `parseLayout`) | 同上 |
 | `<状態>/server-logs/` | code-viewer が起こしたサーバ・裏の出力（起動に失敗したとき・落ちたとき末尾を理由に添える） | 同上 |
-| `<状態>/entry.json`・`entry.json.start.lock` | 動いている入口の `{url, pid, version, started_at}` と起動の排他 | 同上 |
+| `<状態>/entry.json`・`entry.json.start.lock` | 動いている入口の `{url, pid, token, version, started_at}` と起動の排他 | 同上 |
 | `<状態>/agent-screen-rules.json`・`agent-screen-rules.migrated` | 画面ルールの保存済み上書き（ユーザー単位）と、リポジトリから写した・保存した・戻した印 | 同上 |
 | `~/.cache/code-viewer/servers/` | サーバ登録簿（1 リポジトリ 1 ファイル、起動ロック） | `CODE_VIEWER_TEST_SERVER_REGISTRY_DIR` |
 | `<リポジトリ>/.code-viewer/settings.json` | リポジトリごとの設定（ユーザー単位の項目は初回の引き継ぎ元） | テストは一時ディレクトリのリポジトリで |
