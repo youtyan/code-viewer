@@ -15,12 +15,13 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { errorWithCause } from "../core/error-detail";
+import { errorWithCause, errorWithCauses } from "../core/error-detail";
 
 export type FileLock = {
   release(): void;
@@ -103,6 +104,56 @@ function readFileLock(file: string): FileLockEntry | null {
   };
 }
 
+/** ロックの token か、読めない (空・壊れた JSON・欄が無い) 理由。 */
+function lockTokenOrUnreadable(file: string): string | { unreadable: unknown } {
+  try {
+    const entry = readFileLock(file);
+    if (entry) return entry.token;
+    return { unreadable: new Error(`lock ${file} disappeared`) };
+  } catch (error) {
+    return { unreadable: error };
+  }
+}
+
+/**
+ * 古いと判断したロックを消す (奪う)。読んだもの (token。読めなかったなら
+ * null) がまだそこにあるときだけ消す。
+ *
+ * 「読む → unlink」だと、その間に別のプロセスが同じ古いロックを奪って置き
+ * 直した新しいロックを消し、2 者とも持ててしまう。自分だけの名前へ rename
+ * で退避すると (rename は原子的。相手が先に退避していれば ENOENT)、退避した
+ * ものが読んだものと違う (= 相手の新しいロック) と分かったら元の場所へ戻せる。
+ */
+function removeStaleLock(
+  file: string,
+  expected: string | null,
+  token: string,
+): void {
+  const aside = `${file}.${token}.stale`;
+  try {
+    renameSync(file, aside);
+  } catch (error) {
+    if (errno(error) === "ENOENT") return;
+    throw error;
+  }
+  try {
+    const moved = lockTokenOrUnreadable(aside);
+    if (expected === null ? typeof moved !== "string" : moved === expected) {
+      return;
+    }
+    try {
+      linkSync(aside, file);
+    } catch (error) {
+      throw errorWithCauses(
+        `the lock ${file} was replaced by another owner while taking over a stale one, and could not be put back`,
+        typeof moved === "string" ? [error] : [error, moved.unreadable],
+      );
+    }
+  } finally {
+    unlinkSync(aside);
+  }
+}
+
 /**
  * 読めないロックが staleMs より古ければ、理由を出して消す (奪う)。消したら
  * true。新しい (書きかけかもしれない) か、もう無いなら false。
@@ -112,6 +163,7 @@ function takeOverUnreadableLock(
   cause: unknown,
   now: number,
   staleMs: number,
+  token: string,
 ): boolean {
   let mtimeMs: number;
   try {
@@ -125,11 +177,7 @@ function takeOverUnreadableLock(
     `[code-viewer] removing unreadable lock ${file} (last written ${new Date(mtimeMs).toISOString()}):`,
     cause,
   );
-  try {
-    unlinkSync(file);
-  } catch (error) {
-    if (errno(error) !== "ENOENT") throw error;
-  }
+  removeStaleLock(file, null, token);
   return true;
 }
 
@@ -199,7 +247,7 @@ export function tryAcquireFileLock(
       // 書きかけのまま落ちると残る。放っておくと、このロックを使う経路が
       // ずっと失敗し続けるので、staleMs より古ければ理由を出して奪う。
       // 新しいものは、書きかけかもしれないので今までどおり投げる。
-      if (!takeOverUnreadableLock(file, error, now, options.staleMs)) {
+      if (!takeOverUnreadableLock(file, error, now, options.staleMs, token)) {
         throw error;
       }
       continue;
@@ -208,11 +256,7 @@ export function tryAcquireFileLock(
     const stale =
       now - current.createdAt > options.staleMs || !processAlive(current.pid);
     if (!stale) return null;
-    try {
-      unlinkSync(file);
-    } catch (error) {
-      if (errno(error) !== "ENOENT") throw error;
-    }
+    removeStaleLock(file, current.token, token);
   }
   // 3 回とも「置けなかったが、読んだときには消えていた」= 他の持ち主が
   // 取っては放している。取り合いが激しいだけで失敗ではないので、呼び出し側

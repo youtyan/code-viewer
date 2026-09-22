@@ -16,6 +16,7 @@ import {
   accessSync,
   chmodSync,
   constants,
+  copyFileSync,
   lstatSync,
   readFileSync,
   realpathSync,
@@ -248,13 +249,18 @@ export function backupPathFor(path: string, now: Date): string {
 }
 
 export type SettingsWriteOps = {
-  /** バックアップを書く。既にあれば失敗させる。 */
-  writeBackup(path: string, text: string, mode: number): void;
+  /**
+   * source (書き換える実体) をバイト列のまま path に写す。既にあれば失敗
+   * させる。解読した文字列から書くと、UTF-8 として正しくないバイトが
+   * U+FFFD に置き換わり、元の中身がどこにも残らない。
+   */
+  writeBackup(path: string, source: string, mode: number): void;
 };
 
 export const DEFAULT_WRITE_OPS: SettingsWriteOps = {
-  writeBackup(path, text, mode) {
-    writeFileSync(path, text, { encoding: "utf8", flag: "wx", mode });
+  writeBackup(path, source, mode) {
+    copyFileSync(source, path, constants.COPYFILE_EXCL);
+    chmodSync(path, mode);
   },
 };
 
@@ -262,14 +268,14 @@ export function writeBackupUnique(
   ops: SettingsWriteOps,
   path: string,
   now: Date,
-  text: string,
+  source: string,
   mode: number,
 ): string {
   const first = backupPathFor(path, now);
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const candidate = attempt === 0 ? first : `${first}-${attempt + 1}`;
     try {
-      ops.writeBackup(candidate, text, mode);
+      ops.writeBackup(candidate, source, mode);
       return candidate;
     } catch (error) {
       if (errno(error) === "EEXIST") continue;
@@ -340,7 +346,7 @@ export async function commitJsonSettingsChange(options: {
           options.ops,
           path,
           options.now,
-          current.text,
+          current.realPath,
           current.mode,
         );
       } catch (cause) {

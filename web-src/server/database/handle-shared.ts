@@ -280,18 +280,31 @@ async function readBoundedJsonBody(
 ): Promise<unknown | Response> {
   const contentLength = Number(req.headers.get("content-length") || "0");
   if (contentLength > maxBytes) return textError(tooLargeMessage, 413);
-  let raw: string;
+  // content-length が無い本文 (入口の取り次ぎを通ったものは全部こう) も、
+  // 溜めながら数えて上限を越えた所で読むのをやめる。全部溜めてから比べると、
+  // 上限が溜めるメモリを守らない。
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const reader = req.body?.getReader();
   try {
-    raw = await req.text();
+    while (reader) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      total += chunk.value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel(tooLargeMessage);
+        return textError(tooLargeMessage, 413);
+      }
+      chunks.push(chunk.value);
+    }
   } catch (error) {
     return textError(
       `could not read the request body: ${formatErrorDetail(error)}`,
       400,
     );
   }
-  if (Buffer.byteLength(raw, "utf8") > maxBytes) {
-    return textError(tooLargeMessage, 413);
-  }
+  // req.text() と同じ解読 (UTF-8・先頭の BOM を除く)。
+  const raw = new TextDecoder().decode(Buffer.concat(chunks));
   try {
     return JSON.parse(raw);
   } catch (error) {

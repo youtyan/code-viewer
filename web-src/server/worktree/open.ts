@@ -122,7 +122,8 @@ function processAlive(pid: number): boolean {
   }
 }
 
-function registryKey(path: string): string {
+/** 登録簿の鍵 (実パス。無いパスはそのまま)。起こす側と確かめる側で揃える。 */
+export function registryKey(path: string): string {
   try {
     return realpathSync(path);
   } catch (error) {

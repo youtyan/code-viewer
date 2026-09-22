@@ -153,6 +153,7 @@ export const KNOWN_SNAKE_CASE_IDENTIFIERS: readonly string[] = [
   "project_id",
   "prompt_box",
   "rate_limits",
+  "reload_failed",
   "resets_at",
   "resolve_project",
   "resolved_path",

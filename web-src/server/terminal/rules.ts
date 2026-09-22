@@ -101,7 +101,11 @@ export function getAgentScreenRuleErrors(): AgentScreenRuleIssue[] {
   return activeErrors.map((error) => ({ ...error }));
 }
 
-function issuesFromLoadError(error: unknown): AgentScreenRuleIssue[] {
+/**
+ * 保存したファイルの中身が壊れている (JSON でない・検証に通らない) ときの
+ * 理由。読めなかった (ロックを待ちきれない・I/O の失敗) なら null。
+ */
+function issuesFromInvalidRules(error: unknown): AgentScreenRuleIssue[] | null {
   const seen = new Set<unknown>();
   let current: unknown = error;
   while (current && typeof current === "object" && !seen.has(current)) {
@@ -121,7 +125,7 @@ function issuesFromLoadError(error: unknown): AgentScreenRuleIssue[] {
       return [errorIssue("invalid_json", current)];
     current = (current as { cause?: unknown }).cause;
   }
-  return [errorIssue("load_failed", error)];
+  return null;
 }
 
 function activate(response: LoadedRules): AgentScreenRulesResponse {
@@ -195,6 +199,11 @@ async function migrateRepoRules(root: string): Promise<void> {
 /**
  * root: 判定するサーバのリポジトリ (入口なら起動したディレクトリ)。以前の
  * リポジトリごとの上書きを移すときにだけ読む。
+ *
+ * 保存したファイルが壊れていれば、理由を付けて既定のルールにする。読めな
+ * かった (別のプロセスがロックを持っている間に待ちきれない、など) ときは、
+ * 前に有効だったルールのまま投げる。既定に落とすと、保存したルールでの判定が
+ * 黙って既定の判定に切り替わる。
  */
 export async function reloadAgentScreenRules(
   root: string,
@@ -210,8 +219,15 @@ export async function reloadAgentScreenRules(
       );
     });
   } catch (error) {
+    const invalid = issuesFromInvalidRules(error);
+    if (!invalid) {
+      throw errorWithCause(
+        "could not reload the terminal rules; the previously active rules stay in use",
+        error,
+      );
+    }
     console.error("[code-viewer] terminal rule load failed", error);
-    return activate(defaultResponse(issuesFromLoadError(error)));
+    return activate(defaultResponse(invalid));
   }
 }
 

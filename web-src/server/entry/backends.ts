@@ -35,6 +35,7 @@ import {
   createWorktreeServerController,
   logTail,
   type RunningWorktreeServerResult,
+  registryKey,
 } from "../worktree/open";
 
 export type BackendTarget =
@@ -54,7 +55,11 @@ type BackendRecord =
       backend: boolean;
       since: number;
     }
-  /** アイドル停止の最中。終わるまで次の起動を待たせる。 */
+  /**
+   * アイドル停止の最中。終わるまで次の起動を待たせる。`done` は失敗しても
+   * reject しない (止められなければ記録は running に戻り、待っていた要求は
+   * 動いている裏で答える。失敗は止める周期の側が出す)。
+   */
   | { state: "stopping"; done: Promise<void> }
   | { state: "idle-stopped"; since: number }
   | { state: "unreachable"; detail: string; log: string };
@@ -100,7 +105,9 @@ export function defaultEntryBackendsDeps(
     logTail,
     registryEntry: (root) => {
       try {
-        const entry = readServerRegistry(root);
+        // 裏は実パスで自分を登録する。受け取った根のまま引くと、根がシンボ
+        // リックリンクを通るときに「登録しなかった」ことになる。
+        const entry = readServerRegistry(registryKey(root));
         return entry
           ? { status: "found", pid: entry.pid, backend: entry.backend === true }
           : { status: "absent" };
@@ -344,25 +351,30 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
     const known = records.get(root);
     if (known?.state !== "running") return;
     // 止め終わるまでの Promise を「stopping」として置く。その間に来た要求は
-    // これを待ってから起こし直す。失敗時は running に戻して呼び出し元へ返す。
-    const done = (async () => {
+    // これを待ってから、その時点の記録で答える。
+    const failure = (async () => {
       try {
         await deps.controller.stopWorktreeServer(root);
         records.set(root, { state: "idle-stopped", since: deps.now() });
         deps.log(
           `stopped the project process for ${root} (idle: no subscribers or streams for ${formatDuration(idleMs)}; it ran ${formatDuration(deps.now() - known.since)})`,
         );
+        return null;
       } catch (error) {
         // 止められなかった。動いているものとして扱い続け、次の周期でも試す。
         records.set(root, known);
-        throw errorWithCause(
+        return errorWithCause(
           `could not stop the idle project process for ${root}`,
           error,
         );
       }
     })();
-    records.set(root, { state: "stopping", done });
-    await done;
+    records.set(root, {
+      state: "stopping",
+      done: failure.then(() => undefined),
+    });
+    const error = await failure;
+    if (error) throw error;
   }
 
   /** 使われていない裏を止める (入口が一定の間隔で呼ぶ)。 */

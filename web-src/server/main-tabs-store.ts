@@ -180,9 +180,14 @@ export async function saveProjectMainTabs(
       ...current.projects,
       [root]: { layout, savedAt: now },
     };
-    const roots = Object.keys(projects).sort(
-      (a, b) => projects[b].savedAt - projects[a].savedAt,
-    );
+    // いま保存したものは先頭に置く。時計が戻った後の savedAt は他より古く
+    // 見え、並べるだけだと同じ書き込みの中で消える。
+    const roots = [
+      root,
+      ...Object.keys(projects)
+        .filter((other) => other !== root)
+        .sort((a, b) => projects[b].savedAt - projects[a].savedAt),
+    ];
     for (const stale of roots.slice(MAX_MAIN_TABS_PROJECTS))
       delete projects[stale];
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });

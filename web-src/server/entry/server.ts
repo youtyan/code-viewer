@@ -289,8 +289,10 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, START_POLL_MS));
   }
   // ロックを取った後にもう一度見る (取る直前に別の CLI が起動を終えていたら使う)。
+  // 何も無いとき以外 (動いている・読めない) は最初の判断からやり直す。読めない
+  // まま進むと、読めない entry.json を上書きする。
   const recheck = await findRunningEntry();
-  if (recheck.status === "running") {
+  if (recheck.status !== "none") {
     lock.release();
     await runEntry(argv);
     return;
@@ -727,8 +729,14 @@ async function handleProjectPath(
   if (isAppEntryPath(rest)) {
     await ctx.lastProject.remember(root);
     // 画面を返している間に裏を起こし始める (最初の取得を待たせる時間を縮める)。
-    // 失敗はその取得が 503 と理由で受け取る。
-    void ctx.backends.target(root);
+    // 起こせなかったときはその取得が 503 と理由で受け取る。ここで投げたものを
+    // 投げっぱなしにすると、拾われない reject として入口ごと終わる。
+    ctx.backends.target(root).catch((error: unknown) => {
+      console.error(
+        `[code-viewer] entry: starting the project process for ${root} failed:`,
+        error,
+      );
+    });
     return staticFile(rest) ?? textError("not found", 404);
   }
   const events = rest === "/events";

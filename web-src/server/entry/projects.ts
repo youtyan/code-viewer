@@ -58,14 +58,22 @@ export function createEntryProjects(
   deps: EntryProjectsDeps = defaultEntryProjectsDeps(),
 ) {
   const allowed = new Map<string, string>();
-  const worktreeCache = new Map<string, { at: number; paths: string[] }>();
+  const worktreeCache = new Map<
+    string,
+    { at: number; paths: Promise<string[]> }
+  >();
 
-  async function worktreesOf(root: string): Promise<string[]> {
+  function worktreesOf(root: string): Promise<string[]> {
     const hit = worktreeCache.get(root);
     if (hit && deps.now() - hit.at < WORKTREE_CACHE_TTL_MS) return hit.paths;
-    const paths = await deps.worktreePaths(root);
-    worktreeCache.set(root, { at: deps.now(), paths });
-    return paths;
+    // 返る前に来た同じ根の引きも、この 1 本を待つ (重なった要求の数だけ git
+    // を立てない)。失敗は待っていた全員が受け取り、覚えずに次で取り直す。
+    const entry = { at: deps.now(), paths: deps.worktreePaths(root) };
+    worktreeCache.set(root, entry);
+    entry.paths.then(undefined, () => {
+      if (worktreeCache.get(root) === entry) worktreeCache.delete(root);
+    });
+    return entry.paths;
   }
 
   /** この根を開いてよいものにする。返すのは鍵。 */

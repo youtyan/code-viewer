@@ -486,7 +486,10 @@ export function startAgentActivityWatch(
   watching = { cwd, options: paneListOptions };
   // 起動した直後は見られている扱い (開いたタブがすぐ取りに来る)。
   lastWatchedAt = Date.now();
-  void reloadAgentScreenRules(cwd);
+  // 読めなければ既定のルールで始め、理由を出す (投げっぱなしにすると入口ごと終わる)。
+  reloadAgentScreenRules(cwd).catch((error: unknown) => {
+    console.error("[code-viewer] terminal rule load failed", error);
+  });
   schedule();
 }
 

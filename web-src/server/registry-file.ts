@@ -48,6 +48,8 @@ export function readRegistryFile<T>(
 /**
  * 大きさ・更新時刻・inode が前回と同じなら前回の結果を返す読み方。書き手は
  * 一時ファイルから rename するので、書き換わると inode が変わる。
+ * 読めなかった結果は覚えない (権限を直すなど、中身を変えずに読めるように
+ * なることがある)。
  */
 export function cachedRegistryReader<T>(
   read: (path: string) => RegistryFileRead<T>,
@@ -65,7 +67,8 @@ export function cachedRegistryReader<T>(
     const hit = cache.get(path);
     if (hit && hit.key === key) return hit.read;
     const result = read(path);
-    cache.set(path, { key, read: result });
+    if (result.ok) cache.set(path, { key, read: result });
+    else cache.delete(path);
     return result;
   };
 }

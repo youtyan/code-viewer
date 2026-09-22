@@ -222,7 +222,11 @@ async function handleStatesGet(url: URL): Promise<Response> {
   } satisfies AgentStatesResponse);
 }
 
-function ruleOperationError(code: string, error: unknown): Response {
+function ruleOperationError(
+  code: string,
+  error: unknown,
+  status = 500,
+): Response {
   console.error(`[code-viewer] terminal rule ${code} failed`, error);
   const errors: AgentScreenRuleIssue[] = [
     {
@@ -232,11 +236,16 @@ function ruleOperationError(code: string, error: unknown): Response {
       ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
     },
   ];
-  return json({ errors }, 500);
+  return json({ errors }, status);
 }
 
 async function handleRulesGet(cwd: string): Promise<Response> {
-  return json(await reloadAgentScreenRules(cwd));
+  try {
+    return json(await reloadAgentScreenRules(cwd));
+  } catch (error) {
+    // 読み直せなかった (ロックを待ちきれない・I/O)。前のルールのまま動いている。
+    return ruleOperationError("reload_failed", error, 503);
+  }
 }
 
 async function handleRulesPut(req: Request): Promise<Response> {
