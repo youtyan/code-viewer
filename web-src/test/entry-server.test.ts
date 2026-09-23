@@ -210,11 +210,12 @@ function startBackend(
   root: string,
   entryPid: number,
   entryToken: string,
+  bundle = CLI_BUNDLE,
 ): { proc: ChildProcess; output: () => string } {
   const proc = spawn(
     process.execPath,
     [
-      CLI_BUNDLE,
+      bundle,
       "--cwd",
       root,
       "--port",
@@ -243,8 +244,15 @@ async function identityServer(identity: {
   pid: number;
   token: string;
   version: string;
-}): Promise<{ url: string; close: () => Promise<void> }> {
+}): Promise<{
+  url: string;
+  close: () => Promise<void>;
+  /** 繋がりは受けるが答えない (古い入口のポートを別のサーバが使っている)。 */
+  silence: () => void;
+}> {
+  let silent = false;
   const server = createServer((_req, res) => {
+    if (silent) return;
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ role: "entry", ...identity }));
   });
@@ -257,6 +265,37 @@ async function identityServer(identity: {
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
     },
+    silence: () => {
+      silent = true;
+      server.closeAllConnections();
+    },
+  };
+}
+
+/**
+ * 入れ直しを写しで作る: 配布物と package.json を写した置き場。`install` で
+ * package.json の版だけを書き換える (そこから起きるプロセスはその版で動く)。
+ */
+function packageCopy(box: Sandbox): {
+  bundle: string;
+  install: (version: string) => void;
+} {
+  const pkg = join(box.dir, "package");
+  const bundle = join(pkg, "dist", "code-viewer.js");
+  mkdirSync(join(pkg, "dist"), { recursive: true });
+  copyFileSync(CLI_BUNDLE, bundle);
+  symlinkSync(join(REPO_ROOT, "web"), join(pkg, "web"));
+  symlinkSync(join(REPO_ROOT, "node_modules"), join(pkg, "node_modules"));
+  const manifest = JSON.parse(
+    readFileSync(join(REPO_ROOT, "package.json"), "utf8"),
+  );
+  return {
+    bundle,
+    install: (version) =>
+      writeFileSync(
+        join(pkg, "package.json"),
+        JSON.stringify({ ...manifest, version }),
+      ),
   };
 }
 
@@ -635,23 +674,9 @@ describe("the entry server", () => {
   test("an entry server left running across an update of code-viewer says it is out of date, stops starting project processes, and a restart tries again", async () => {
     const box = sandbox();
     const root = repo(box, "sample-app");
-    // 入れ直しを写しで作る: 配布物と package.json を写した置き場から入口を
-    // 起こし、動いている間に package.json の版だけを書き換える (裏は入口と
-    // 同じ置き場から起きるので、書き換えた版で動く)。
-    const pkg = join(box.dir, "package");
-    const bundle = join(pkg, "dist", "code-viewer.js");
-    mkdirSync(join(pkg, "dist"), { recursive: true });
-    copyFileSync(CLI_BUNDLE, bundle);
-    symlinkSync(join(REPO_ROOT, "web"), join(pkg, "web"));
-    symlinkSync(join(REPO_ROOT, "node_modules"), join(pkg, "node_modules"));
-    const manifest = JSON.parse(
-      readFileSync(join(REPO_ROOT, "package.json"), "utf8"),
-    );
-    const install = (version: string) =>
-      writeFileSync(
-        join(pkg, "package.json"),
-        JSON.stringify({ ...manifest, version }),
-      );
+    // 写した置き場から入口を起こし、動いている間に版だけを書き換える (裏は
+    // 入口と同じ置き場から起きるので、書き換えた版で動く)。
+    const { bundle, install } = packageCopy(box);
     install("0.0.1-sample");
     const entry = await startEntry(box, root, [], bundle);
     install("0.0.2-sample");
@@ -676,6 +701,7 @@ describe("the entry server", () => {
     expect(first.status).toBe(503);
     expect(first.body).toMatchObject({
       code: "backend-start-failed",
+      entryOutdated: true,
       error: `code-viewer was updated or reinstalled while this entry server (version 0.0.1-sample, pid ${entryPid}) was running, so the entry server is out of date. Stop the entry server (Ctrl+C where code-viewer was started, or kill ${entryPid}) and run code-viewer again.`,
       project: { key, root },
     });
@@ -715,7 +741,69 @@ describe("the entry server", () => {
     expect((await fetch(`${entry.url}p/${key}/_settings`)).status).toBe(200);
   }, 45_000);
 
-  test("a restarted entry adopts a project process even when the old entry's pid now belongs to another program", async () => {
+  // 入れ直して入口を起こし直した直後: 古い版の裏は新しい入口の採用を断る。
+  // 入口はそれを待たずに止め (待つと裏が自分で終わる約 10 秒開けなかった)、
+  // 新しい版の裏を起こす。
+  test("a restarted entry of a new version replaces the old version's project process at once", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    const { bundle, install } = packageCopy(box);
+    install("0.0.1-sample");
+    const oldEntryProc = spawn(
+      process.execPath,
+      ["-e", "setInterval(() => {}, 1 << 30)"],
+      { stdio: "ignore" },
+    );
+    children.push(oldEntryProc);
+    const oldEntryPid = oldEntryProc.pid as number;
+    const oldEntry = await identityServer({
+      pid: oldEntryPid,
+      token: SAMPLE_TOKEN,
+      version: "0.0.1-sample",
+    });
+    writeEntryJson(box, {
+      url: oldEntry.url,
+      pid: oldEntryPid,
+      token: SAMPLE_TOKEN,
+      version: "0.0.1-sample",
+    });
+    const old = startBackend(box, root, oldEntryPid, SAMPLE_TOKEN, bundle);
+    expect(
+      await waitUntil(
+        () => registeredPids(box.registryDir).includes(old.proc.pid ?? -1),
+        5000,
+      ),
+    ).toBe(true);
+    // 古い入口が終わり、新しい版の入口が起きる。
+    await oldEntry.close();
+    oldEntryProc.kill("SIGKILL");
+    expect(await waitUntil(() => !alive(oldEntryPid), 2000)).toBe(true);
+    const entry = await startEntry(box, root);
+
+    const startedAt = Date.now();
+    const res = await fetch(`${entry.url}p/${rootFileKey(root)}/_settings`);
+    const tookMs = Date.now() - startedAt;
+    const body = (await res.json()) as { server?: { pid?: number } };
+    const oldExited = await waitUntil(
+      () => old.proc.exitCode !== null || old.proc.signalCode !== null,
+      3000,
+    );
+    expect({
+      status: res.status,
+      replaced: body.server?.pid !== old.proc.pid,
+      oldExited,
+    }).toEqual({ status: 200, replaced: true, oldExited: true });
+    expect(tookMs).toBeLessThan(8000);
+  }, 30_000);
+
+  // 古い入口のポートを答えない別のサーバが使っていても、採用は入口の側の上限
+  // (worktree/open.ts の 1.5 秒) に収まる (古い入口の確認は 300ms で打ち切る)。
+  test.each([
+    { how: "stopped listening", stop: "close" as const },
+    { how: "accepts connections but never answers", stop: "silence" as const },
+  ])("a restarted entry adopts a project process even when the old entry's pid now belongs to another program ($how)", async ({
+    stop,
+  }) => {
     const box = sandbox();
     const root = repo(box, "sample-app");
     // 古い入口の pid を別のプログラムが使っている: pid は生きているが、古い
@@ -778,12 +866,16 @@ describe("the entry server", () => {
       `entry owner pid ${reusedPid} is still alive`,
     ]);
     // 古い入口が答えなくなれば、pid が生きていても新しい入口を採用する。
-    await oldEntry.close();
+    if (stop === "close") await oldEntry.close();
+    else oldEntry.silence();
+    const startedAt = Date.now();
     const adopted = await adopt();
+    const tookMs = Date.now() - startedAt;
     expect([adopted.status, await adopted.text()]).toEqual([
       200,
       JSON.stringify({ ok: true, adopted: true }),
     ]);
+    expect(tookMs).toBeLessThan(1000);
     expect(output()).toContain(
       `the code-viewer entry server restarted (pid ${reusedPid} -> ${process.pid})`,
     );

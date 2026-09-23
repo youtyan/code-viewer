@@ -7022,6 +7022,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       MAIN_TABS.openTerminal(session.id, side);
     },
     onShellEnded: (id) => closeEndedTerminal(id),
+    onOpenFailed: (message) => TERMINAL_NOTICE.show(message),
     tmuxWindow: (id) => TMUX_WINDOWS.get(id) ?? null,
     // 大きさを変えた後の取り直しは全画面共通の取り直しに相乗りする (重なれば
     // 走っているものを待つ)。
@@ -8320,7 +8321,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   let TMUX_WINDOWS = new Map<string, TmuxClientWindow | null>();
   /** 前面でないタブのシェルの終わりを、取り直しの一覧から拾う。 */
   const SHELL_ENDS = createShellEndTracker();
-  const SHELL_END_NOTICE = createShellEndNotice(
+  /** 最下段の短い知らせ: シェルが終わってタブを閉じた・ペインを開けなかった。 */
+  const TERMINAL_NOTICE = createShellEndNotice(
     $("#statusbar .statusbar-actions"),
   );
 
@@ -8338,7 +8340,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const name = TAB_LAST_LABELS.get(session) ?? terminalTabInfo(session).label;
     TAB_LAST_LABELS.delete(session);
     MAIN_TABS.closeTerminal(session);
-    SHELL_END_NOTICE.show(terminalText(STATE.language).tabEnded(name));
+    TERMINAL_NOTICE.show(terminalText(STATE.language).tabEnded(name));
   }
 
   /** そのシェルが映しているエージェントのペイン。 */

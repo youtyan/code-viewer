@@ -12435,28 +12435,6 @@ body.db-resizing * {
   user-select: none !important;
 }
 
-/* ---------- Context Menu ---------- */
-.db-context-menu {
-  z-index: 100;
-  min-width: 200px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
-  padding: 4px 0;
-  font-size: var(--db-font-md);
-}
-.db-context-menu-item {
-  padding: 6px 14px;
-  cursor: pointer;
-  color: var(--fg);
-  white-space: nowrap;
-}
-.db-context-menu-item:hover {
-  background: var(--accent-subtle);
-  color: var(--accent);
-}
-
 /* ---------- Schema Section Headers ---------- */
 .db-schema-section-header {
   padding: 8px 12px 4px;
@@ -23790,8 +23768,12 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
   /* ソフトキーボードが出ている間は、帯と最下段を隠して端末を広く取る。
      隠れている高さ --sp-keyboard-h (T1) の出所は mobile-shell.ts
-     (visualViewport。html に書く)。 */
-  body.mobile-keyboard-open {
+     (visualViewport。html に書く)。--chrome-bottom を決める上と横向きの節の
+     セレクタのそれぞれに印を 1 つ足し、どれよりも詳細度を高くする。 */
+  body.mobile-keyboard-open,
+  body.mobile-keyboard-open.gdp-sidebar-hidden,
+  body.mobile-keyboard-open.main-split,
+  body.mobile-keyboard-open[data-list-column]:not([data-list-column-hidden]) {
     --chrome-bottom: var(--sp-keyboard-h, 0px);
   }
   body.mobile-keyboard-open #statusbar,

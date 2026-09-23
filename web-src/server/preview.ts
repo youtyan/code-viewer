@@ -70,7 +70,9 @@ import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
 import {
   ENTRY_OUTDATED_EXIT_CODE,
+  ENTRY_VERSION_REFUSED,
   isEntryToken,
+  PREVIOUS_ENTRY_IDENTITY_TIMEOUT_MS,
   readEntryRecord,
   verifyEntryIdentity,
   verifyServerIdentity,
@@ -638,7 +640,8 @@ function sideEffectRequestAllowed(req: Request): boolean {
 
 type EntryOwnerVerification =
   | { ok: true; url: string }
-  | { ok: false; detail: string };
+  // entryVersion: entry.json の持ち主は合っているが、版がこの裏と違う。
+  | { ok: false; detail: string; entryVersion?: string };
 
 async function verifyEntryOwner(
   pid: number,
@@ -648,10 +651,14 @@ async function verifyEntryOwner(
   if (read.ok === false) return { ok: false, detail: read.error };
   const entry = read.registry;
   if (!entry) return { ok: false, detail: "entry.json has no entry owner" };
-  if (entry.pid !== pid || entry.token !== token || entry.version !== VERSION) {
+  if (entry.pid !== pid || entry.token !== token) {
+    return { ok: false, detail: `entry.json does not match owner pid ${pid}` };
+  }
+  if (entry.version !== VERSION) {
     return {
       ok: false,
-      detail: `entry.json does not match owner pid ${pid} and this version`,
+      entryVersion: entry.version,
+      detail: `the entry server (pid ${pid}) is version ${entry.version}, but this project process is version ${VERSION}`,
     };
   }
   const verified = await verifyEntryIdentity(entry);
@@ -704,6 +711,7 @@ async function handleEntryAdopt(req: Request): Promise<Response> {
     const previous = await verifyServerIdentity(
       { url: entryUrl, pid: entryPid, token: entryToken, version: VERSION },
       "entry",
+      { timeoutMs: PREVIOUS_ENTRY_IDENTITY_TIMEOUT_MS },
     );
     if (previous.status === "ok") {
       return text(`entry owner pid ${entryPid} is still alive`, 409);
@@ -717,10 +725,15 @@ async function handleEntryAdopt(req: Request): Promise<Response> {
   }
   const verified = await verifyEntryOwner(pid, token);
   if (verified.ok === false) {
+    // 版が違えば採用しない。入口は code を見て、この裏を止めて新しい裏を起こす
+    // (worktree/open.ts の reuseRunningServer)。
     return json(
       {
         error: "new entry owner could not be verified",
         detail: verified.detail,
+        ...(verified.entryVersion === undefined
+          ? {}
+          : { code: ENTRY_VERSION_REFUSED }),
       },
       { status: 409 },
     );

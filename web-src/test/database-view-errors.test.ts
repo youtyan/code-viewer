@@ -2742,8 +2742,10 @@ describe("database view SQL error rendering", () => {
       ".db-table-item",
     ) as unknown as FakeElement;
     await table.contextmenu();
+    // 共有のメニュー (views/context-menu.ts)。この偽の DOM は単純なセレクタだけ読む。
     const createItem = Array.from(
-      document.querySelectorAll(".db-context-menu-item"),
+      document.querySelector(".gdp-context-menu")?.querySelectorAll("button") ??
+        [],
     ).find((item) => item.textContent === "View CREATE TABLE") as unknown as
       | FakeElement
       | undefined;

@@ -22,6 +22,7 @@ import {
   openHelpKeybindings,
   openHelpSection,
 } from "../views/help-page";
+import { mobileShellText } from "../views/mobile-shell-i18n";
 import type { SettingsCategory } from "../views/viewer-settings";
 
 /** インストールの案内を出さないブラウザ (案内の中身は pwa.test.ts)。 */
@@ -506,6 +507,14 @@ describe("help page CLI reference", () => {
       expect(commands.join("\n")).toContain("--bin rg=/opt/bin/rg");
       expect(commands.join("\n")).toContain("--bin tmux=/opt/bin/tmux");
     }
+  });
+
+  // 利用者の呼び方は「SP」。日本語の案内に「電話」を混ぜない。
+  test("the Japanese help calls the phone layout SP", () => {
+    const { text } = renderHelp("ja", "overview");
+    expect(text).toContain("SP (640px 以下の窓");
+    expect(text).not.toContain("電話");
+    expect(mobileShellText("ja").tabsParkedTitle).not.toContain("電話");
   });
 });
 

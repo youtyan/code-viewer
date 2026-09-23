@@ -134,7 +134,8 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
   古い表示が残る
 - 裏に繋がらない = 502 (`backend-stopped`)、起きない = 503 (`backend-start-failed`)、
   応答を始めない = 504 (`backend-timeout`)。
-  形は `core/types.ts` の `EntryBackendFailure`。画面は fetch の包み (`onResponse`) で
+  形は `core/types.ts` の `EntryBackendFailure` (入口の版が古いときは `entryOutdated` と、
+  `error` に入口の止め方の案内。画面は最初からそれを出す)。画面は fetch の包み (`onResponse`) で
   拾い、`views/backend-state.ts` が中央の面を空表示で覆って、理由の全文をダイアログの
   「詳細」に畳んで出す (再起動が失敗したときも同じ所に全文)。**502/503 を各画面で個別に
   扱わない** (各画面は受け取った本文をそのまま出すことがあるが、覆われて見えない)
@@ -163,7 +164,10 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
   pid の生存だけで持ち主を決めず、`entry.json` と入口の `/_entry` が pid と token の両方を
   返すことを確かめる。入口を起動し直したときは、古い pid が居なくなった後に新しい入口が
   `/_entry/adopt` で新しい token を渡す。採用されなければ 10 秒後に裏は終わる。採用口が無い
-  古い版の裏は再利用しない
+  古い版の裏は再利用しない。版が違う裏は 409 と `code: "entry-version"` (`ENTRY_VERSION_REFUSED`)
+  で断り、入口はその 10 秒を待たずにその裏を止めて新しい裏を起こす (`reuseRunningServer`)。
+  採用の中で古い入口を確かめる時限は `PREVIOUS_ENTRY_IDENTITY_TIMEOUT_MS` (300ms) で、採用の
+  要求の上限 (1.5 秒) に収める
 - `entry.json` は `entry/entry-file.ts` の `readEntryRecord` で読む。**ファイルが無い**は
   `{ ok: true, registry: null }`、読めない・JSON が壊れている・必須欄が欠けるは
   `{ ok: false, error }` であり、同じ扱いにしない。読めない記録は上書きも削除もせず理由を

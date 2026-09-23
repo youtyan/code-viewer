@@ -2,6 +2,7 @@ import type { DbColumn, DbTableInfo } from "../../core/database/types";
 import { formatErrorDetail } from "../../core/error-detail";
 import { COPY_16_PATHS, iconSvg, X_16_PATH } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
+import { closeContextMenu, showContextMenu } from "../context-menu";
 import { type DbLang, dbText } from "./i18n";
 import { setPaneStatus } from "./pane-status";
 
@@ -73,107 +74,48 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     return message;
   }
 
-  /* ---- Context menu ---- */
-  let contextMenu: HTMLDivElement | null = null;
-  let contextMenuClick: ((ev: MouseEvent) => void) | null = null;
-  let contextMenuKeyDown: ((ev: KeyboardEvent) => void) | null = null;
-  let contextMenuTimer: ReturnType<typeof setTimeout> | null = null;
+  /* ---- Context menu (共有のメニュー。2 枚同時に出さない) ---- */
+  /** このリストが開いたメニュー。閉じると文書から外れる。 */
+  let contextMenu: HTMLElement | null = null;
 
-  function closeContextMenu() {
-    if (contextMenuTimer) {
-      clearTimeout(contextMenuTimer);
-      contextMenuTimer = null;
-    }
-    if (contextMenuClick) {
-      document.removeEventListener("click", contextMenuClick, true);
-      contextMenuClick = null;
-    }
-    if (contextMenuKeyDown) {
-      document.removeEventListener("keydown", contextMenuKeyDown, true);
-      contextMenuKeyDown = null;
-    }
-    if (contextMenu) {
-      contextMenu.remove();
-      contextMenu = null;
-    }
+  function closeOwnContextMenu() {
+    if (contextMenu?.isConnected) closeContextMenu();
+    contextMenu = null;
   }
 
-  function showContextMenu(e: MouseEvent, tableName: string) {
+  function showTableMenu(e: MouseEvent, row: HTMLElement, tableName: string) {
     e.preventDefault();
-    closeContextMenu();
-
-    const menu = document.createElement("div");
-    menu.className = "db-context-menu";
-    menu.style.position = "absolute";
-    menu.style.left = `${e.pageX}px`;
-    menu.style.top = `${e.pageY}px`;
-
-    const items: { label: string; action: () => void }[] = [
-      {
-        label: text().copyTableName,
-        action: () => {
-          navigator.clipboard.writeText(tableName).catch((error) => {
-            reportCopyFailure(error, "Failed to copy table name");
-          });
-        },
-      },
-      {
-        label: text().copySelect,
-        action: () => {
-          const sql = `SELECT * FROM "${tableName}" LIMIT 100`;
-          navigator.clipboard.writeText(sql).catch((error) => {
-            reportCopyFailure(error, "Failed to copy SELECT statement");
-          });
-        },
-      },
-      {
-        label: text().viewCreate,
-        action: () => {
-          callbacks.onViewCreateTable?.(tableName);
-        },
-      },
-      {
-        label: text().viewDefinition,
-        action: () => {
-          callbacks.onViewDefinition?.(tableName);
-        },
-      },
-    ];
-
-    for (const item of items) {
-      const row = document.createElement("div");
-      row.className = "db-context-menu-item";
-      row.textContent = item.label;
-      row.addEventListener("click", () => {
-        item.action();
-        closeContextMenu();
+    const copy = (value: string, operation: string) => {
+      navigator.clipboard.writeText(value).catch((error) => {
+        reportCopyFailure(error, operation);
       });
-      menu.appendChild(row);
-    }
-
-    document.body.appendChild(menu);
-    contextMenu = menu;
-
-    // Close on outside click
-    const onDocClick = (ev: MouseEvent) => {
-      if (!menu.contains(ev.target as Node)) {
-        closeContextMenu();
-      }
     };
-    const onKeyDown = (ev: KeyboardEvent) => {
-      if (isImeComposing(ev)) return;
-      if (ev.key === "Escape") {
-        closeContextMenu();
-      }
-    };
-    contextMenuClick = onDocClick;
-    contextMenuKeyDown = onKeyDown;
-    // Use setTimeout so the current event cycle doesn't immediately close it
-    contextMenuTimer = setTimeout(() => {
-      contextMenuTimer = null;
-      document.addEventListener("click", onDocClick, true);
-      document.addEventListener("keydown", onKeyDown, true);
-    }, 0);
+    contextMenu = showContextMenu(
+      row,
+      [
+        {
+          label: text().copyTableName,
+          onSelect: () => copy(tableName, "Failed to copy table name"),
+        },
+        {
+          label: text().copySelect,
+          onSelect: () =>
+            copy(
+              `SELECT * FROM "${tableName}" LIMIT 100`,
+              "Failed to copy SELECT statement",
+            ),
+        },
+        {
+          label: text().viewCreate,
+          onSelect: () => callbacks.onViewCreateTable?.(tableName),
+        },
+        {
+          label: text().viewDefinition,
+          onSelect: () => callbacks.onViewDefinition?.(tableName),
+        },
+      ],
+      { at: { x: e.clientX, y: e.clientY } },
+    );
   }
 
   async function renderColumns(container: HTMLElement, tableName: string) {
@@ -391,7 +333,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
           callbacks.onSelectTable(table.name),
         );
         row.addEventListener("contextmenu", (e) =>
-          showContextMenu(e, table.name),
+          showTableMenu(e, row, table.name),
         );
 
         node.append(row, children);
@@ -409,7 +351,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     }
     columnCache.clear();
     activeTable = null;
-    closeContextMenu();
+    closeOwnContextMenu();
     filterInput.value = "";
     renderFiltered(tables, "");
   }
@@ -489,7 +431,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
   }
 
   function dispose(): void {
-    closeContextMenu();
+    closeOwnContextMenu();
     wrapper.removeEventListener("keydown", handleListKey);
     allTables = [];
     expandedTables.clear();

@@ -64,6 +64,11 @@ export type TerminalViewDeps = {
    * (購読していない)。app が全画面共通の取り直しで拾う。
    */
   onShellEnded(id: ShellSessionId): void;
+  /**
+   * tmux のペインを開けなかった。理由はその面の状態の行にも出すが、前面が
+   * その端末でないと見えないので、常に見える場所にも出してもらう。
+   */
+  onOpenFailed(message: string): void;
   /** そのシェルの中の tmux の端末とウインドウの大きさ。無ければ null。 */
   tmuxWindow(id: ShellSessionId): TmuxClientWindow | null;
   /** 端末の大きさを変えた。tmux の大きさを早めに取り直してもらう。 */
@@ -319,7 +324,10 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
 
   async function openPaneInTab(pane: string, side: TabSide): Promise<void> {
     const slot = tabSlot(side);
-    const report = (message: string) => writeStatus(slot, message);
+    const report = (message: string) => {
+      writeStatus(slot, message);
+      deps.onOpenFailed(message);
+    };
     try {
       const size = slot.screen.measure();
       const res = await deps.trackLoad(

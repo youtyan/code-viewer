@@ -1,7 +1,9 @@
+import { spawn } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { processAlive } from "../server/file-lock";
 import { type StartedServer, startServer } from "../server/runtime";
 import {
   readServerRegistry,
@@ -264,6 +266,110 @@ describe("openWorktreeServer", () => {
     expect(result.status === "error" && String(result.error)).toContain(
       `another version is running at ${url} (pid ${process.pid})`,
     );
+  });
+
+  // 入口を新しい版で起こし直した直後: 古い版の裏は採用を断る。版違いの断りなら
+  // 自分で終わるのを待たず (約 10 秒開けなかった) 止めて新しい裏を起こす。
+  // ほかの断り (古い入口がまだ答える) では止めない。
+  test.each([
+    {
+      name: "版違い",
+      refusal: () =>
+        new Response(
+          JSON.stringify({
+            error: "new entry owner could not be verified",
+            detail: "the entry server (pid 4242) is version 2",
+            code: "entry-version",
+          }),
+          { status: 409, headers: { "content-type": "application/json" } },
+        ),
+      replaced: true,
+    },
+    {
+      name: "古い入口がまだ答える",
+      refusal: () =>
+        new Response("entry owner pid 4241 is still alive", { status: 409 }),
+      replaced: false,
+    },
+  ])("a project process that refuses a new entry ($name)", async ({
+    refusal,
+    replaced,
+  }) => {
+    const old = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e9)"], {
+      stdio: "ignore",
+    });
+    const oldPid = old.pid as number;
+    const calls: string[] = [];
+    let clock = 0;
+    writeServerRegistry({
+      url: "http://127.0.0.1:4321/",
+      pid: oldPid,
+      root: worktree,
+      started_at: "2026-08-11T00:00:00.000Z",
+      backend: true,
+    });
+    const controller = createWorktreeServerController({
+      now: () => clock,
+      pollIntervalMs: 1,
+      startTimeoutMs: 50,
+      delay: async (ms) => {
+        clock += ms;
+      },
+      spawnServer: () => {
+        calls.push("spawn");
+        writeServerRegistry({
+          url: "http://127.0.0.1:4322/",
+          pid: process.pid,
+          root: worktree,
+          started_at: "2026-08-11T00:00:01.000Z",
+          backend: true,
+        });
+        return fakeSpawn(() => undefined);
+      },
+      fetch: async (input) => {
+        const url = new URL(input);
+        calls.push(`${url.port} ${url.pathname}`);
+        if (url.pathname === "/_entry/adopt") return refusal();
+        const pid = url.port === "4321" ? oldPid : process.pid;
+        return new Response(
+          JSON.stringify({ server: { pid, root: worktree } }),
+        );
+      },
+    });
+    try {
+      const result = await controller.openWorktreeServer(worktree, {
+        backendOf: 4242,
+        backendToken: "0123456789abcdef",
+      });
+      expect({
+        result: result.status === "ok" ? result : result.status,
+        calls,
+        oldAlive: processAlive(oldPid),
+      }).toEqual(
+        replaced
+          ? {
+              result: {
+                status: "ok",
+                url: "http://127.0.0.1:4322/",
+                started: true,
+              },
+              calls: [
+                "4321 /_settings",
+                "4321 /_entry/adopt",
+                "spawn",
+                "4322 /_settings",
+              ],
+              oldAlive: false,
+            }
+          : {
+              result: "error",
+              calls: ["4321 /_settings", "4321 /_entry/adopt"],
+              oldAlive: true,
+            },
+      );
+    } finally {
+      old.kill("SIGKILL");
+    }
   });
 
   test("reports a worktree whose directory is gone", async () => {

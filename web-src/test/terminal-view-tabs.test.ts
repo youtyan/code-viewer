@@ -97,6 +97,7 @@ function setup(responses: Array<() => Response | Promise<Response>>) {
   );
   const opened: string[] = [];
   const ended: string[] = [];
+  const openFailures: string[] = [];
   const view = createTerminalView({
     trackLoad: (promise) => promise,
     actionHeaders: () => ({}),
@@ -110,10 +111,11 @@ function setup(responses: Array<() => Response | Promise<Response>>) {
         pane ? `${session.id}:${pane}:${side}` : `${session.id}:${side}`,
       ),
     onShellEnded: (id) => ended.push(id),
+    onOpenFailed: (message) => openFailures.push(message),
     tmuxWindow: () => null,
     onTmuxWindowStale: () => undefined,
   });
-  return { view, requests, opened, ended };
+  return { view, requests, opened, ended, openFailures };
 }
 
 const json = (body: unknown, status = 200) =>
@@ -160,6 +162,42 @@ describe("terminal view: シェルの作成と停止", () => {
       'POST /_tmux/open {"pane":"%1","shell":null,"cols":80,"rows":24}',
     ]);
     expect(opened).toEqual(["shell-a1:%1:right"]);
+  });
+
+  // 状態の行はその面の前面がこの端末のときしか見えないので、同じ理由を
+  // 常に見える知らせ (app が最下段に出す) にも渡す。
+  test.each([
+    {
+      name: "閉じたペイン",
+      respond: () => new Response("gone", { status: 410 }),
+      message: "This pane has been closed. (HTTP 410): gone",
+    },
+    {
+      name: "上限",
+      respond: () => new Response("limit 8", { status: 429 }),
+      message: "Too many shells are open. Close one first. (HTTP 429): limit 8",
+    },
+    {
+      name: "それ以外",
+      respond: () => new Response("tmux failed", { status: 500 }),
+      message: "Could not open this pane. (HTTP 500): tmux failed",
+    },
+    {
+      name: "届かない",
+      respond: () => Promise.reject(new TypeError("network down")),
+      message: "Could not open this pane.\nTypeError: network down",
+    },
+  ])("ペインを開けなければ理由を知らせにも渡し、タブは開かない ($name)", async ({
+    respond,
+    message,
+  }) => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { view, opened, openFailures } = setup([respond]);
+    await view.openPaneInTab("%1", "left");
+    consoleError.mockRestore();
+    expect([opened, openFailures]).toEqual([[], [message]]);
   });
 
   test.each([

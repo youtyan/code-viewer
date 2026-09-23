@@ -610,6 +610,11 @@ export type EntryBackendFailure = {
   detail: string;
   /** 裏のプロセスの出力の末尾 (`<状態>/server-logs/`)。 */
   log: string;
+  /**
+   * 入口の版が入れ直した code-viewer より古いので起こせない。`error` がその
+   * 案内 (設定の言語。入口の止め方と打ち直し) で、画面は最初からそれを出す。
+   */
+  entryOutdated?: true;
 };
 
 export function isEntryBackendFailure(

@@ -671,6 +671,7 @@ function backendFailure(
     project: { key, root },
     detail: outdated ? `${outdated}\n\n${target.detail}` : target.detail,
     log: target.log,
+    ...(outdated ? { entryOutdated: true as const } : {}),
   };
   return json(body, status);
 }

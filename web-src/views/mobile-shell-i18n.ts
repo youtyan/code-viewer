@@ -103,7 +103,7 @@ const JA: MobileShellText = {
   tabsEmpty: "開いているタブはありません",
   tabsParked: "右",
   tabsParkedTitle:
-    "右の面のタブです (電話では右の面を出しません)。開くと左の面へ移します。",
+    "右の面のタブです (SP では右の面を出しません)。開くと左の面へ移します。",
   closeTab: (name) => `${name} を閉じる`,
 };
 

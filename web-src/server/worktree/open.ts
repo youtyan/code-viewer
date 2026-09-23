@@ -26,6 +26,7 @@ import type { SettingsResponse } from "../../core/types";
 import { createLinkedAbortController } from "../abort";
 import {
   ENTRY_OUTDATED_EXIT_CODE,
+  ENTRY_VERSION_REFUSED,
   EntryOutdatedError,
   isEntryToken,
 } from "../entry/entry-file";
@@ -390,10 +391,16 @@ export function createWorktreeServerController(
     };
   }
 
+  /**
+   * 動いている裏を使う。入口の裏なら新しい入口を持ち主として採用させる。
+   * 版が違うと断られたら、その裏を止めて `stopped` を返す (呼び出し側が新しい
+   * 裏を起こす。古い裏は自分で終わるまで約 10 秒残り、その間開けなかった)。
+   */
   async function reuseRunningServer(
+    key: string,
     existing: Extract<RunningWorktreeServerResult, { status: "running" }>,
     options: SpawnOptions,
-  ): Promise<WorktreeOpenResult> {
+  ): Promise<WorktreeOpenResult | { status: "stopped" }> {
     const ownerError = backendOwnerOptionsError(options);
     if (ownerError) return { status: "error", error: ownerError };
     if (options.backendOf === undefined || !existing.backend) {
@@ -432,6 +439,35 @@ export function createWorktreeServerController(
       adoptionAbort.cleanup();
     }
     const detail = await response.text();
+    let refusal: { code?: unknown } | null = null;
+    if (response.headers.get("content-type")?.includes("application/json")) {
+      try {
+        refusal = JSON.parse(detail);
+      } catch (error) {
+        return {
+          status: "error",
+          error: errorWithCause(
+            `the existing project process answered the entry owner change with invalid JSON (HTTP ${response.status}):\n${detail}`,
+            error,
+          ),
+        };
+      }
+    }
+    if (response.status === 409 && refusal?.code === ENTRY_VERSION_REFUSED) {
+      try {
+        await runtime.terminatePid(existing.pid);
+        removeServerRegistry(key, existing.pid);
+      } catch (error) {
+        return {
+          status: "error",
+          error: errorWithCause(
+            `could not stop the project process of another version at ${existing.url} (pid ${existing.pid}):\n${detail}`,
+            error,
+          ),
+        };
+      }
+      return { status: "stopped" };
+    }
     if (response.status === 404) {
       return {
         status: "error",
@@ -458,9 +494,12 @@ export function createWorktreeServerController(
   ): Promise<WorktreeOpenResult> {
     const existing = await runningServerResult(key);
     if (existing.status === "running") {
-      return reuseRunningServer(existing, options);
-    }
-    if (existing.status === "invalid" || existing.status === "unreachable") {
+      const reused = await reuseRunningServer(key, existing, options);
+      if (reused.status !== "stopped") return reused;
+    } else if (
+      existing.status === "invalid" ||
+      existing.status === "unreachable"
+    ) {
       return { status: "error", error: existing.error };
     }
 
@@ -563,7 +602,9 @@ export function createWorktreeServerController(
     while (runtime.now() < deadline) {
       const existing = await runningServerResult(key);
       if (existing.status === "running") {
-        return reuseRunningServer(existing, options);
+        const reused = await reuseRunningServer(key, existing, options);
+        if (reused.status !== "stopped") return reused;
+        continue;
       }
       if (existing.status === "invalid" || existing.status === "unreachable") {
         return { status: "error", error: existing.error };

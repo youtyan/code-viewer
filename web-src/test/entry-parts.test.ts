@@ -102,10 +102,8 @@ describe("entry.json", () => {
   });
 
   test("identity verification reports every mismatch without exposing tokens", async () => {
-    const verification = await verifyServerIdentity(
-      record,
-      "entry",
-      async () =>
+    const verification = await verifyServerIdentity(record, "entry", {
+      request: async () =>
         new Response(
           JSON.stringify({
             role: "standalone",
@@ -115,7 +113,7 @@ describe("entry.json", () => {
           }),
           { headers: { "content-type": "application/json" } },
         ),
-    );
+    });
 
     expect(verification.status).toBe("invalid");
     if (verification.status !== "invalid") {

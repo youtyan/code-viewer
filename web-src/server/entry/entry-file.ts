@@ -38,10 +38,23 @@ export type EntryRecordRemovalResult =
 export const ENTRY_IDENTITY_TIMEOUT_MS = 1500;
 
 /**
+ * 採用 (`/_entry/adopt`) の中で、古い入口がまだ答えるかを確かめる時限。採用の
+ * 要求は入口の側で 1.5 秒で切れる (worktree/open.ts)。古い入口のポートを答えない
+ * 別のサーバが使っていても、その中に収まるよう短くする。
+ */
+export const PREVIOUS_ENTRY_IDENTITY_TIMEOUT_MS = 300;
+
+/**
  * 裏が「自分を起こした入口の版が違う」(入口を動かしたまま入れ直した) で起動を
  * やめるときの終了コード。入口はこれで「入口の版が古い」を見分ける。
  */
 export const ENTRY_OUTDATED_EXIT_CODE = 3;
+
+/**
+ * 裏が採用 (`/_entry/adopt`) を「入口の版が違う」で断ったときの 409 の `code`。
+ * 入口はこれを見て、古い版の裏が自分で終わるのを待たずに止めて起こし直す。
+ */
+export const ENTRY_VERSION_REFUSED = "entry-version";
 
 /** 裏が ENTRY_OUTDATED_EXIT_CODE で終わった (worktree/open.ts が作る)。 */
 export class EntryOutdatedError extends Error {}
@@ -162,14 +175,13 @@ export function entryProcessAlive(entry: EntryRecord): boolean {
 export async function verifyServerIdentity(
   expected: ServerIdentityRecord,
   role: ServerIdentityRole,
-  request: ServerIdentityRequest = (url, signal) =>
-    fetch(url, { redirect: "error", signal }),
+  {
+    request = (url, signal) => fetch(url, { redirect: "error", signal }),
+    timeoutMs = ENTRY_IDENTITY_TIMEOUT_MS,
+  }: { request?: ServerIdentityRequest; timeoutMs?: number } = {},
 ): Promise<EntryIdentityVerification> {
   if (!processAlive(expected.pid)) return { status: "dead" };
-  const identityAbort = createLinkedAbortController(
-    undefined,
-    ENTRY_IDENTITY_TIMEOUT_MS,
-  );
+  const identityAbort = createLinkedAbortController(undefined, timeoutMs);
   let response: Response;
   try {
     response = await request(

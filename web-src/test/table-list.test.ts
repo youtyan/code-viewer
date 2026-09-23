@@ -5,6 +5,10 @@ import type { DbColumn } from "../core/database/types";
 GlobalRegistrator.register();
 
 const { createTableList } = await import("../views/database/table-list");
+const { closeContextMenu, showContextMenu } = await import(
+  "../views/context-menu"
+);
+const { dbText } = await import("../views/database/i18n");
 
 afterAll(() => {
   GlobalRegistrator.unregister();
@@ -180,6 +184,62 @@ describe("database table list", () => {
     );
   });
 
+  // 右クリックのメニューは共有のメニュー。ほかの画面のメニューと 2 枚同時に
+  // 出さず、リストを捨てても開いているほかのメニューは閉じない。
+  test("the table menu is the shared menu, so only one menu is open at a time", () => {
+    const view = createTableList({ onSelectTable: () => undefined });
+    document.body.appendChild(view.el);
+    view.render([{ name: "sample_table", type: "table", rowCount: 1 }]);
+    const other = document.createElement("button");
+    document.body.appendChild(other);
+    const openOther = () =>
+      showContextMenu(other, [{ label: "Other", onSelect: () => undefined }]);
+    const openTableMenu = () =>
+      view.el.querySelector(".db-table-item")?.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+    const menus = () =>
+      Array.from(
+        document.querySelectorAll(".gdp-context-menu, .db-context-menu"),
+        (menu) =>
+          Array.from(
+            menu.querySelectorAll("button, .db-context-menu-item"),
+            (item) => item.textContent,
+          ),
+      );
+    const labels = dbText("en").tableList;
+    const tableMenu = [
+      labels.copyTableName,
+      labels.copySelect,
+      labels.viewCreate,
+      labels.viewDefinition,
+    ];
+
+    openOther();
+    openTableMenu();
+    const afterTable = menus();
+    openOther();
+    const afterOther = menus();
+    view.dispose();
+    const afterDispose = menus();
+    openTableMenu();
+    view.dispose();
+    const disposedOwn = menus();
+    closeContextMenu();
+
+    expect({ afterTable, afterOther, afterDispose, disposedOwn }).toEqual({
+      afterTable: [tableMenu],
+      afterOther: [["Other"]],
+      afterDispose: [["Other"]],
+      disposedOwn: [],
+    });
+  });
+
   test("shows clipboard error reasons for column and context-menu copies", async () => {
     const failure = new DOMException(
       "clipboard permission denied",
@@ -218,7 +278,7 @@ describe("database table list", () => {
       }),
     );
     const menuItem = document.querySelector<HTMLElement>(
-      ".db-context-menu-item",
+      ".gdp-context-menu [role=menuitem]",
     );
     menuItem?.click();
     await waitFor(() =>

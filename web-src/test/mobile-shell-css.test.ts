@@ -329,10 +329,45 @@ describe("電話の段の骨格", () => {
       named: bodyVariables(withTiers(SOFT_KEYS, PHONE)).has("--tabs-lead-w"),
     }).toEqual({ width: undefined, flex: "none", named: false });
   });
+});
 
-  test("ソフトキーボードが出ている間は下端をキーボードの上にする", () => {
-    const vars = declarationsOf(rules, ["body.mobile-keyboard-open"]);
-    expect(vars.get("--chrome-bottom")).toBe("var(--sp-keyboard-h, 0px)");
+// キーボードの上書きは、下端 (--chrome-bottom) を決める body の規則のどれにも
+// 勝つ。一覧の列を出した Diff・History では、詳細度の高い一覧の列の規則が
+// 上書きを負かし、帯と最下段の分だけ端末がキーボードの下に沈んでいた。
+// body に当たる規則は happy-dom で選ぶ。
+describe("ソフトキーボードが出ている間は下端をキーボードの上にする", () => {
+  beforeAll(() => {
+    GlobalRegistrator.register();
+  });
+  afterAll(() => {
+    GlobalRegistrator.unregister();
+  });
+
+  test.each([
+    { body: "印なし", className: "", listColumn: undefined },
+    { body: "一覧の列を出す", className: "", listColumn: "diff" },
+    {
+      body: "ファイル一覧を畳む",
+      className: "gdp-sidebar-hidden",
+      listColumn: undefined,
+    },
+    { body: "2 面", className: "main-split", listColumn: "history" },
+  ])("$body (縦・横向き)", ({ className, listColumn }) => {
+    document.body.className = `mobile-keyboard-open ${className}`.trim();
+    if (listColumn) document.body.dataset.listColumn = listColumn;
+    else delete document.body.dataset.listColumn;
+    const onBody = (selector: string) =>
+      /^body\S*$/.test(selector) && document.body.matches(selector);
+    const bottoms = [
+      withTiers(SOFT_KEYS, PHONE),
+      withTiers(SOFT_KEYS, PHONE, PHONE_LANDSCAPE),
+    ].map((rules) =>
+      cascadedDeclarations(rules, onBody).get("--chrome-bottom"),
+    );
+    expect(bottoms).toEqual([
+      "var(--sp-keyboard-h, 0px)",
+      "var(--sp-keyboard-h, 0px)",
+    ]);
   });
 });
 

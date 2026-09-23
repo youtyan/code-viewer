@@ -195,7 +195,9 @@ export function createBackendState(deps: BackendStateDeps) {
         shown.code === "backend-stopped"
           ? text.backendStoppedTitle(name)
           : text.backendFailedTitle(name),
-      description: opening?.message ?? text.backendDialogText,
+      description:
+        opening?.message ??
+        (shown.entryOutdated ? shown.error : text.backendDialogText),
       body: details.root,
       submitLabel: text.backendRestart,
       cancelLabel: text.close,
@@ -221,7 +223,8 @@ export function createBackendState(deps: BackendStateDeps) {
       body.code === "backend-stopped"
         ? text.backendStoppedHeading
         : text.backendFailedTitle(name),
-      text.backendSurfaceText(name),
+      // 入口が古いなら「再起動」では直らない。入口の止め方をここで出す。
+      body.entryOutdated ? body.error : text.backendSurfaceText(name),
     );
     const actions = el.querySelector<HTMLElement>(".empty-actions");
     actions?.replaceChildren(
