@@ -3785,6 +3785,52 @@ describe("runQueryCli integration", () => {
     });
   });
 
+  // --server に入口の前置き (`/p/<鍵>`) ごと渡したとき、直す前は
+  // new URL(path, server) が経路を置き換えて鍵が落ちていた。
+  test("diff tables keeps the /p/<key> prefix of --server in diffUrl", async () => {
+    const projectServer = `${SERVER}/p/0123456789abcdef`;
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          beforeId: "snap-a",
+          afterId: "snap-b",
+          dbId: "app.db",
+          schema: "public",
+          tables: [],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      projectServer,
+      "diff",
+      "tables",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+      "--json",
+    ]);
+
+    expect(harness.requests[1].url).toBe(
+      `${projectServer}/_db/snapshot/diff/tables?before=snap-a&after=snap-b`,
+    );
+    const route = buildRoute({
+      screen: "database",
+      db: "app.db",
+      schema: "public",
+      tab: "snapshot",
+      diffBefore: "snap-a",
+      diffAfter: "snap-b",
+      range: { from: "", to: "" },
+    });
+    expect(JSON.parse(harness.logs[0]).diffUrl).toBe(
+      `${projectServer}${route}`,
+    );
+  });
+
   test("diff tables (default) prints the summary line and a paste-safe diff rows hint per table", async () => {
     const payload = {
       beforeId: "snap-a",
@@ -4332,7 +4378,22 @@ describe("runQueryCli search integration", () => {
     expect(harness.errs.join("\n")).toMatch(/search error: boom/);
   });
 
-  test("timeout cancels the search job best-effort and exits with the timeout reason", async () => {
+  test.each([
+    {
+      name: "the cancel succeeds",
+      cancel: { body: JSON.stringify({ ok: true }) },
+      message: "search timed out after 1s (cancelled job job-timeout)",
+    },
+    {
+      name: "the cancel fails",
+      cancel: { status: 500, contentType: "text/plain", body: "cancel failed" },
+      message:
+        "search timed out after 1s and cancelling job job-timeout failed: POST /_db/search/cancel (HTTP 500): cancel failed",
+    },
+  ])("timeout cancels the search job and says whether $name", async ({
+    cancel,
+    message,
+  }) => {
     withZeroPollInterval();
     const nowValues = [0, 0, 1001];
     let nowIndex = 0;
@@ -4350,7 +4411,7 @@ describe("runQueryCli search integration", () => {
           done: false,
         }),
       },
-      { status: 500, contentType: "text/plain", body: "cancel failed" },
+      cancel,
     ]);
 
     await runAndCatchExit([
@@ -4371,9 +4432,28 @@ describe("runQueryCli search integration", () => {
       body: { id: "job-timeout" },
     });
     expect(harness.exits).toEqual([1]);
-    expect(harness.errs.join("\n")).toMatch(
-      /search timed out after 1s \(cancelled job job-timeout\)/,
-    );
+    expect(harness.errs).toContain(message);
+  });
+
+  test("a poll interval that is not a number stops instead of falling back", async () => {
+    process.env.CODE_VIEWER_SEARCH_POLL_MS = "soon";
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ jobId: "job-poll" }) },
+    ]);
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "x",
+    ]);
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs).toEqual([
+      'CODE_VIEWER_SEARCH_POLL_MS must be a non-negative number of milliseconds (got "soon")',
+    ]);
   });
 
   test("--timeout 0 is rejected at parse-time so the CLI never hangs forever", () => {

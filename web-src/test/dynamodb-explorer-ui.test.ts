@@ -1,5 +1,5 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
+import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { waitFor } from "./_test-helpers";
 
 GlobalRegistrator.register();
@@ -7,6 +7,7 @@ GlobalRegistrator.register();
 const { createDynamoDbExplorer } = await import(
   "../views/database/dynamodb-explorer"
 );
+const { dbText } = await import("../views/database/i18n");
 
 function json(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -26,7 +27,10 @@ type FetchState = {
   tableRequestSignal?: AbortSignal;
 };
 
-function installFetchMock(): FetchState {
+// fail が Error を返せば通信の失敗として投げ、Response を返せばそれを応答する。
+function installFetchMock(
+  fail?: (url: URL) => Error | Response | null,
+): FetchState {
   const state: FetchState = { calls: [] };
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
@@ -34,6 +38,9 @@ function installFetchMock(): FetchState {
     value: (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost");
       state.calls.push(url);
+      const failure = fail?.(url);
+      if (failure instanceof Response) return failure;
+      if (failure) throw failure;
       if (url.pathname === "/_db/dynamodb/tables") {
         state.tableRequestSignal = init?.signal ?? undefined;
         if (url.searchParams.get("exclusiveStartTableName")) {
@@ -103,12 +110,29 @@ afterAll(() => {
 
 async function mountExplorer(options?: {
   trackLoad?: <T>(promise: Promise<T>) => Promise<T>;
+  getText?: () => ReturnType<typeof dbText>;
+  initial?: Parameters<ReturnType<typeof createDynamoDbExplorer>["load"]>[1];
 }): Promise<ReturnType<typeof createDynamoDbExplorer>> {
-  const view = createDynamoDbExplorer({ trackLoad: options?.trackLoad });
+  const view = createDynamoDbExplorer({
+    trackLoad: options?.trackLoad,
+    getText: options?.getText,
+  });
   explorer = view;
   document.body.append(view.sidebarSlot, view.el);
-  await view.load("mock");
+  await view.load("mock", options?.initial);
   return view;
+}
+
+function failureWithCause(message: string): Error {
+  return Object.assign(new Error(message), {
+    cause: new Error("network is unreachable"),
+  });
+}
+
+function dynamoLogs(calls: unknown[][], operation: string): unknown[][] {
+  return calls.filter(
+    (args) => args[0] === `[code-viewer] DynamoDB ${operation} failed`,
+  );
 }
 
 describe("DynamoDB explorer UI", () => {
@@ -204,6 +228,266 @@ describe("DynamoDB explorer UI", () => {
     );
 
     expect(copy?.textContent).toBe("Copy key");
+  });
+
+  // 直す前は err.message だけを出し、console にも cause にも何も残らなかった。
+  // HTTP の失敗は画面に本文を出すだけで、操作も状態も console も無かった。
+  const FAILURE_CASES = [
+    {
+      operation: "table list",
+      httpOperation: "load DynamoDB tables",
+      fails: (url: URL) =>
+        url.pathname === "/_db/dynamodb/tables" &&
+        !url.searchParams.get("exclusiveStartTableName"),
+      open: async () => {
+        // 開くだけ (load の中で失敗する)。
+      },
+      shown: (view: ReturnType<typeof createDynamoDbExplorer>) =>
+        view.sidebarSlot.querySelector(".dynamodb-table-list .db-pane-error")
+          ?.textContent,
+    },
+    {
+      operation: "item list",
+      httpOperation: "load DynamoDB items",
+      fails: (url: URL) =>
+        url.pathname === "/_db/dynamodb/items" &&
+        !url.searchParams.get("exclusiveStartKey"),
+      open: async () => {
+        // 開くだけ (最初のテーブルを選んだところで失敗する)。
+      },
+      shown: (view: ReturnType<typeof createDynamoDbExplorer>) =>
+        view.el.querySelector(".dynamodb-item-list .db-pane-error")
+          ?.textContent,
+    },
+    {
+      operation: "table describe",
+      httpOperation: "describe DynamoDB table",
+      fails: (url: URL) => url.pathname === "/_db/dynamodb/table",
+      open: async () => {
+        // 開くだけ (最初のテーブルを選んだところで失敗する)。
+      },
+      shown: (view: ReturnType<typeof createDynamoDbExplorer>) =>
+        view.el.querySelector(".db-detail-pane .db-pane-error")?.textContent,
+    },
+    {
+      operation: "table list page",
+      httpOperation: "load DynamoDB tables",
+      fails: (url: URL) =>
+        url.pathname === "/_db/dynamodb/tables" &&
+        !!url.searchParams.get("exclusiveStartTableName"),
+      open: async (view: ReturnType<typeof createDynamoDbExplorer>) => {
+        click(view.sidebarSlot.querySelector(".dynamodb-table-more-btn"));
+      },
+      shown: (view: ReturnType<typeof createDynamoDbExplorer>) =>
+        view.sidebarSlot.querySelector<HTMLElement>(".dynamodb-table-more-btn")
+          ?.title,
+    },
+  ];
+  test.each(
+    FAILURE_CASES.flatMap((failureCase) => [
+      { ...failureCase, via: "network" as const },
+      { ...failureCase, via: "http" as const },
+    ]),
+  )("$operation の $via の失敗は理由を画面と console に出す", async ({
+    operation,
+    httpOperation,
+    via,
+    fails,
+    open,
+    shown,
+  }) => {
+    const failure = failureWithCause(`${operation} request failed`);
+    installFetchMock((url) =>
+      fails(url)
+        ? via === "network"
+          ? failure
+          : new Response("sample failure", { status: 500 })
+        : null,
+    );
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const view = await mountExplorer();
+      await open(view);
+      await waitFor(() => !!shown(view));
+
+      const text = shown(view) ?? "";
+      expect(text).not.toContain("Error: Error:");
+      const logs = dynamoLogs(consoleError.mock.calls, operation);
+      expect(logs.length).toBe(1);
+      const logged = logs[0]?.[logs[0].length - 1];
+      if (via === "network") {
+        expect(text).toContain(`${operation} request failed`);
+        expect(text).toContain("Caused by");
+        expect(text).toContain("network is unreachable");
+        expect(logged).toBe(failure);
+      } else {
+        const detail = `${httpOperation} (HTTP 500): sample failure`;
+        expect(text).toContain(`Error: ${detail}`);
+        expect((logged as Error).message).toBe(detail);
+      }
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  // 直す前は「属性値の JSON が不正です」だけで、どこが読めないかが出なかった。
+  test.each([
+    {
+      name: "読めない JSON",
+      value: '{":pk": ',
+      reason: /^Invalid attribute values JSON: SyntaxError: .+/,
+    },
+    {
+      name: "オブジェクトでない JSON",
+      value: "[1]",
+      reason:
+        /^Invalid attribute values JSON: write the attribute values as a JSON object$/,
+    },
+  ])("属性値の $name は理由を添えて断る", async ({ value, reason }) => {
+    const state = installFetchMock();
+    const view = await mountExplorer();
+    await waitFor(
+      () => view.el.querySelectorAll(".dynamodb-item-row").length === 1,
+    );
+    const before = state.calls.length;
+    const input = view.el.querySelector<HTMLTextAreaElement>(
+      ".dynamodb-attribute-values-input",
+    );
+    if (!input) throw new Error("attribute values input is missing");
+    input.value = value;
+    view.el
+      .querySelector("form.dynamodb-query-form")
+      ?.dispatchEvent(new Event("submit", { cancelable: true }));
+
+    const error = view.el.querySelector<HTMLElement>(".dynamodb-query-error");
+    expect(error?.hidden).toBe(false);
+    expect(error?.textContent).toMatch(reason);
+    expect(state.calls.length).toBe(before);
+  });
+
+  test("保存したアイテムの復元に失敗しても一覧は出し、理由を console に残す", async () => {
+    // 直す前は HTTP の失敗も例外も黙って捨てていた。
+    installFetchMock();
+    const fetchMock = globalThis.fetch;
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/_db/dynamodb/item") {
+          return new Response("sample failure", { status: 500 });
+        }
+        return fetchMock(input, init);
+      }) as typeof fetch,
+    });
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const view = await mountExplorer({
+        initial: {
+          table: "sample_table_1",
+          itemKey: JSON.stringify({ id: { S: "item_1" } }),
+        },
+      });
+
+      expect(view.el.querySelectorAll(".dynamodb-item-row").length).toBe(1);
+      const logs = dynamoLogs(consoleError.mock.calls, "item restore");
+      expect(logs.length).toBe(1);
+      const logged = logs[0]?.[logs[0].length - 1] as Error;
+      expect(logged.message).toBe(
+        "get DynamoDB item (HTTP 500): sample failure",
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  test("キーのコピーに失敗したら、理由を title と console に出す", async () => {
+    // 直す前は「コピーに失敗しました」だけで、理由がどこにも残らなかった。
+    installFetchMock();
+    const failure = new Error("clipboard is not allowed");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(failure) },
+    });
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const view = await mountExplorer();
+      click(view.el.querySelector(".dynamodb-item-row"));
+      click(view.el.querySelector(".dynamodb-copy-key-btn"));
+      const status = () =>
+        view.el.querySelector<HTMLElement>(".dynamodb-copy-status");
+      await waitFor(() => !!status()?.title);
+
+      expect(status()?.title).toBe("Error: clipboard is not allowed");
+      const logs = dynamoLogs(consoleError.mock.calls, "copy key");
+      expect(logs.length).toBe(1);
+      expect(logs[0]?.[logs[0].length - 1]).toBe(failure);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  // 直す前は日本語の設定でも「Loading items...」と件数の行が英語のままだった。
+  test.each([
+    { language: "en" as const, status: "1 shown / 1 scanned" },
+    { language: "ja" as const, status: "1 件表示 / 1 件スキャン" },
+  ])("件数の行を表示の言語で描く: $language", async ({ language, status }) => {
+    installFetchMock();
+    const view = await mountExplorer({ getText: () => dbText(language) });
+    await waitFor(
+      () =>
+        view.el.querySelector(".dynamodb-item-status")?.textContent === status,
+    );
+  });
+
+  test("言語を切り替えると件数の行も描き直す", async () => {
+    installFetchMock();
+    let language: "en" | "ja" = "en";
+    const view = await mountExplorer({ getText: () => dbText(language) });
+    const status = () =>
+      view.el.querySelector(".dynamodb-item-status")?.textContent;
+    await waitFor(() => status() === "1 shown / 1 scanned");
+
+    language = "ja";
+    view.localize();
+
+    expect(status()).toBe("1 件表示 / 1 件スキャン");
+  });
+
+  test("読み込み中の表示を表示の言語で描く", async () => {
+    let releaseItems: (() => void) | undefined;
+    installFetchMock();
+    const fetchMock = globalThis.fetch;
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/_db/dynamodb/items") {
+          await new Promise<void>((resolve) => {
+            releaseItems = resolve;
+          });
+        }
+        return fetchMock(input, init);
+      }) as typeof fetch,
+    });
+    const view = createDynamoDbExplorer({ getText: () => dbText("ja") });
+    explorer = view;
+    document.body.append(view.sidebarSlot, view.el);
+    const loading = view.load("mock");
+    await waitFor(() => releaseItems !== undefined);
+
+    expect(view.el.querySelector(".dynamodb-item-list")?.textContent).toBe(
+      "アイテムを読み込み中...",
+    );
+    releaseItems?.();
+    await loading;
   });
 
   test("disposeで進行中のテーブル一覧取得を中断する", async () => {

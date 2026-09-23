@@ -25,7 +25,7 @@ import {
   closeShellSession,
   createShellSession,
   describeShellAvailability,
-  listShellSessions,
+  listShellSessionsForMatching,
   resizeShell,
   subscribeShell,
   writeToShell,
@@ -110,8 +110,15 @@ function createShellStreamResponse(id: ShellSessionId): Response {
       subscription = sub;
       send("open", "ok");
       // 購読していない間に出ていた分を先に流す。開き直したときに画面が
-      // 真っ白にならない。
-      if (sub.replay) send("output", JSON.stringify({ data: sub.replay }));
+      // 真っ白にならない。前の購読者に渡った分には流し直しの印を付ける:
+      // 中にある端末への問い合わせ (tmux が attach したときの DA など) には
+      // そのときの端末が答えており、答え直すと、誰も待っていない PTY に
+      // `1;2c` のような文字として入る。まだ誰にも渡っていない分は印を付けず、
+      // 端末に答えさせる (tmux はその答えを待っている)。
+      if (sub.replay) {
+        send("output", JSON.stringify({ data: sub.replay, replay: true }));
+      }
+      if (sub.unseen) send("output", JSON.stringify({ data: sub.unseen }));
       keepaliveTimer = setInterval(() => {
         if (closed || !controller) return;
         try {
@@ -133,7 +140,10 @@ function createShellStreamResponse(id: ShellSessionId): Response {
 async function handleList(): Promise<Response> {
   const availability = await describeShellAvailability();
   if (availability.available) {
-    return json({ available: true, sessions: listShellSessions() });
+    return json({
+      available: true,
+      sessions: await listShellSessionsForMatching(),
+    });
   }
   return json({
     available: false,

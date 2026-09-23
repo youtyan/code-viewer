@@ -8,6 +8,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { errorWithCause } from "../core/error-detail";
 import type { WatchChildConfig, WatchChildMessage } from "./watch-child";
 
 export type WatchSupervisorOptions = {
@@ -93,18 +94,22 @@ export function startWatchSupervisor(
     victim.removeAllListeners?.();
     victim.stdout?.removeAllListeners?.();
     victim.stderr?.removeAllListeners?.();
-    try {
-      victim.kill("SIGTERM");
-    } catch {
-      /* already gone */
-    }
-    const grace = setTimer(() => {
+    // kill() returns false for a child that is already gone; it throws only
+    // when the signal could not be sent (its "error" listener was removed above).
+    const signal = (name: NodeJS.Signals) => {
       try {
-        victim.kill("SIGKILL");
-      } catch {
-        /* already gone */
+        victim.kill(name);
+      } catch (error) {
+        report(
+          errorWithCause(
+            `could not send ${name} to the abandoned watch child (pid ${victim.pid})`,
+            error,
+          ),
+        );
       }
-    }, KILL_GRACE_MS);
+    };
+    signal("SIGTERM");
+    const grace = setTimer(() => signal("SIGKILL"), KILL_GRACE_MS);
     grace.unref?.();
   };
 
@@ -131,6 +136,28 @@ export function startWatchSupervisor(
       return;
     }
     if (message.type === "warn") report(new Error(message.message));
+  };
+
+  // A malformed line or a throwing handler is not worth tearing the child down,
+  // but neither is dropped silently.
+  const handleLine = (line: string) => {
+    let message: WatchChildMessage;
+    try {
+      message = JSON.parse(line) as WatchChildMessage;
+    } catch (error) {
+      report(
+        errorWithCause(
+          `watch child sent a line that is not JSON: ${JSON.stringify(line.slice(0, 200))}`,
+          error,
+        ),
+      );
+      return;
+    }
+    try {
+      handleMessage(message);
+    } catch (error) {
+      report(error);
+    }
   };
 
   const start = () => {
@@ -179,13 +206,7 @@ export function startWatchSupervisor(
       while (newline !== -1) {
         const line = buffer.slice(0, newline).trim();
         buffer = buffer.slice(newline + 1);
-        if (line) {
-          try {
-            handleMessage(JSON.parse(line) as WatchChildMessage);
-          } catch {
-            /* a partial or malformed line is not worth tearing the child down */
-          }
-        }
+        if (line) handleLine(line);
         newline = buffer.indexOf("\n");
       }
     });
@@ -197,8 +218,13 @@ export function startWatchSupervisor(
     });
 
     spawned.on("error", (error) => report(error));
-    spawned.on("exit", () => {
+    spawned.on("exit", (code, signal) => {
       if (closed || child !== spawned) return;
+      report(
+        new Error(
+          `watch child exited (code ${code}, signal ${signal}); restarting`,
+        ),
+      );
       if (!sawReady) watchFailures++;
       child = null;
       // Crash-looping must not spin the CPU; one heartbeat interval is a long

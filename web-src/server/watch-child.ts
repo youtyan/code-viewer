@@ -15,6 +15,8 @@
 import { createHash } from "node:crypto";
 import { createReadStream, lstatSync } from "node:fs";
 import { join } from "node:path";
+import { formatErrorDetail } from "../core/error-detail";
+import { processAlive } from "./file-lock";
 import { runAsync } from "./runtime";
 import { isSkippableSearchPath } from "./search";
 import {
@@ -133,9 +135,10 @@ export function parsePorcelainV2(raw: string): {
   return { head, entries };
 }
 
-async function readWorktreeSnapshot(
-  config: WatchChildConfig,
-): Promise<WorktreeSnapshot | null> {
+/** git status から作業ツリーの今の状態を読む。git が失敗したら理由付きで投げる。 */
+export async function readWorktreeSnapshot(
+  config: Pick<WatchChildConfig, "root" | "omitDirNames" | "excludeNames">,
+): Promise<WorktreeSnapshot> {
   // --no-optional-locks keeps a background poll from fighting the user's git for
   // the index lock. core.fsmonitor=false matters more: if the user has a
   // filesystem monitor configured, git status would answer from the very
@@ -155,7 +158,11 @@ async function readWorktreeSnapshot(
     config.root,
     { timeout: 60_000 },
   );
-  if (result.code !== 0) return null;
+  if (result.code !== 0) {
+    throw new Error(
+      `git status exited with code ${result.code}${result.stderr.trim() ? `: ${result.stderr.trim()}` : ""}`,
+    );
+  }
   const parsed = parsePorcelainV2(result.stdout);
   const entries = new Map<string, string>();
   for (const entry of parsed.entries) {
@@ -173,7 +180,7 @@ async function readWorktreeSnapshot(
   return { head: parsed.head, entries };
 }
 
-async function pathSignature(
+export async function pathSignature(
   root: string,
   entry: { path: string; status: string },
 ): Promise<string> {
@@ -181,9 +188,13 @@ async function pathSignature(
   let stats: ReturnType<typeof lstatSync>;
   try {
     stats = lstatSync(full);
-  } catch {
-    // Deleted on disk: the status line alone identifies this state.
-    return `${entry.status}:absent`;
+  } catch (error) {
+    // Deleted on disk: the status line alone identifies this state. Any other
+    // failure (permissions, I/O) is not "deleted" and is thrown to the poll.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR")
+      return `${entry.status}:absent`;
+    throw error;
   }
   const base = `${entry.status}:${stats.size}:${stats.mtimeMs}:${stats.mode}`;
   // git status reports "changed" without saying how, so two different edits of
@@ -241,10 +252,7 @@ export async function runWatchChild(): Promise<void> {
       onUpdate: (paths) => send({ type: "update", paths }),
       onWatchLimit: (limit) => send({ type: "watch-limit", limit }),
       onError: (error) =>
-        send({
-          type: "warn",
-          message: error instanceof Error ? error.message : String(error),
-        }),
+        send({ type: "warn", message: formatErrorDetail(error) }),
     });
     watching = watch.started;
   }
@@ -258,12 +266,10 @@ export async function runWatchChild(): Promise<void> {
 
   // Signal 0 only probes for existence. Without this, a force-killed parent
   // would leave this process watching the worktree forever.
+  // Only a parent that is gone (ESRCH) ends this process; a probe that cannot
+  // tell throws, and the child's crash reaches the supervisor's exit report.
   setInterval(() => {
-    try {
-      process.kill(config.parentPid, 0);
-    } catch {
-      process.exit(0);
-    }
+    if (!processAlive(config.parentPid)) process.exit(0);
   }, config.heartbeatIntervalMs);
 
   // The poll is not a fallback for a dead watcher only. libuv discards the
@@ -279,7 +285,6 @@ export async function runWatchChild(): Promise<void> {
   let baselineEstablished = false;
   const poll = async () => {
     const next = await readWorktreeSnapshot(config);
-    if (!next) return;
     if (!snapshot) {
       snapshot = next;
       // The first baseline has not observed anything change, so it must not
@@ -297,12 +302,20 @@ export async function runWatchChild(): Promise<void> {
     }
     if (diff.paths.length) send({ type: "update", paths: diff.paths });
   };
+  // A failing poll warns once per distinct reason, not on every interval; a
+  // success clears it so the next failure is reported again.
+  let lastPollFailure = "";
   setInterval(() => {
-    void poll().catch((error) =>
-      send({
-        type: "warn",
-        message: error instanceof Error ? error.message : String(error),
-      }),
+    void poll().then(
+      () => {
+        lastPollFailure = "";
+      },
+      (error: unknown) => {
+        const message = formatErrorDetail(error);
+        if (message === lastPollFailure) return;
+        lastPollFailure = message;
+        send({ type: "warn", message });
+      },
     );
   }, config.pollIntervalMs);
 }

@@ -1,21 +1,40 @@
+import type { AgentHooksResponse } from "./core/agent-hooks";
+import {
+  type AgentPane,
+  headerAgentCounts,
+  titleWithUnread,
+} from "./core/agent-overview";
 import {
   type AgentScreenRuleIssue,
   type AgentScreenRulesResponse,
   DEFAULT_AGENT_SCREEN_RULES,
   formatAgentScreenRuleSet,
 } from "./core/agent-screen";
+import type { AgentState } from "./core/agent-state";
 import {
   AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD,
   aiContextClipboardText,
   resolveSelectionTarget,
 } from "./core/ai-context-copy";
 import {
+  apiUrl,
+  PROJECT_HEADER,
+  pageUrl,
+  projectApiUrl,
+  projectKey,
+  projectKeyOfServerUrl,
+  projectRequest,
+  routePathname,
+  withoutProjectPrefix,
+} from "./core/api-url";
+import { renderMarkdownPreview } from "./core/markdown-preview";
+import {
+  type CatchUpReason,
+  catchUpKind,
   createCatchUpGate,
   shouldAutoLoadForRoute,
-  shouldCatchUpDiff,
 } from "./core/catch-up";
 import { changedPathsCoverPath } from "./core/changed-paths";
-import { attachDragResizer } from "./core/drag-resizer";
 import {
   errorWithCause,
   errorWithCauses,
@@ -24,7 +43,10 @@ import {
 } from "./core/error-detail";
 import { GdpExpandLogic } from "./core/expand-logic";
 import { isTestFilePath } from "./core/file-filter";
-import { filePathClipboardText } from "./core/file-path-copy";
+import {
+  filePathClipboardText,
+  filePathDisplayText,
+} from "./core/file-path-copy";
 import {
   fileSignatureUnchanged,
   rawFileInfoSignature,
@@ -34,7 +56,10 @@ import {
   focusMainPanel,
   focusSidebarPanel,
   isEditableKeyTarget,
+  isEnterForFocusedControl,
+  isInModalDialog,
   keymapScope,
+  mainScrollBox,
   prepareKeyboardPanels,
   setPanelFocusScope,
 } from "./core/focus-scope";
@@ -44,70 +69,169 @@ import {
 } from "./core/highlight-languages";
 import type { FileRevisionNeighbors } from "./core/history";
 import {
+  APPS_16_PATH,
   ARROW_RIGHT_16_PATH,
+  BOOK_16_PATH,
   CHEVRON_DOWN_12_PATH,
   COMMENT_DISCUSSION_16_PATH,
   COPY_16_PATHS,
+  DIFF_SPLIT_16_PATH,
+  DIFF_UNIFIED_16_PATHS,
+  FOLDER_ICON_PATHS,
+  GEAR_16_PATH,
   GIT_BRANCH_16_PATH,
   iconSvg,
   MARK_GITHUB_16_PATH,
   MOON_16_PATH,
   NEXT_16_PATHS,
   OPEN_EXTERNAL_16_PATH,
+  PLUS_16_PATH,
   PREVIOUS_16_PATHS,
   PULSE_16_PATH,
   QUESTION_16_PATH,
   SEARCH_16_PATH,
+  SIDEBAR_HIDE_16_PATHS,
+  SIDEBAR_SHOW_16_PATHS,
   SYNC_16_PATH,
+  TERMINAL_16_PATHS,
   TRIANGLE_DOWN_16_PATH,
   UNDO_16_PATH,
   X_16_PATH,
 } from "./core/icons";
 import { isImeComposing } from "./core/keyboard";
 import {
-  DEFAULT_KEY_BINDINGS,
+  defaultKeyBindings,
   type KeyBinding,
   type KeymapAction,
   type KeymapOverrides,
   type KeymapScope,
   resolveKeyBindings,
-  resolveKeymapAction,
+  resolveKeyOutcome,
 } from "./core/keymap";
 import { isNativeLinkClick } from "./core/link-click";
+import {
+  type ListColumnKind,
+  listColumnDrag,
+  listColumnKindFor,
+  listColumnLayout,
+  restoredListWidth,
+} from "./core/list-column";
+import type { PaneSide, Tab, TabTarget } from "./core/main-tabs";
+import {
+  diffLayoutFor,
+  PHONE_MEDIA_QUERY,
+  PHONE_TERMINAL_FONT_SIZE,
+} from "./core/mobile-layout";
 import { createNetworkActivityTracker } from "./core/network-activity";
+import {
+  PAGE_MODE_CLASSES,
+  pageModeClasses,
+  worktreeOverview,
+} from "./core/page-mode";
+import {
+  bootFileListFold,
+  fileListAction,
+  listColumnBodyWidth,
+} from "./core/panel-column-policy";
+import {
+  clampPanelSize,
+  HISTORY_WIDTH,
+  SIDEBAR_WIDTH,
+} from "./core/panel-sizes";
+import { isProjectColor, projectInitials } from "./core/project-colors";
+import {
+  createInstallOffer,
+  isPwaWindowKey,
+  lastTabNumber,
+  STANDALONE_MEDIA_QUERY,
+  syncThemeColor,
+} from "./core/pwa";
 import { buildRepositoryWebTarget } from "./core/repository-web-url";
 import {
   type AppRoute,
+  buildRawFileUrl,
   buildRoute,
   type DiffRange,
+  legacyPanelRoute,
   parseDoctorOverlay,
+  parseOpenPaneOverlay,
+  parsePaneOverlay,
   parseRoute,
-  parseSearchResultsOverlay,
   parseTerminalOverlay,
-  parseToolsOverlay,
+  projectSwitchPath,
   type SourceFileTarget,
   type SourceLineTarget,
+  screenToLeave,
   type TerminalOverlayState,
+  urlKeepsSavedFront,
   withDoctorOverlay,
-  withSearchResultsOverlay,
+  withOpenPaneOverlay,
+  withPaneOverlay,
   withTerminalOverlay,
-  withToolsOverlay,
 } from "./core/routes";
+import {
+  createScrollMemory,
+  scrollKeyOfHistoryState,
+} from "./core/scroll-memory";
 import { rememberPaletteSelection } from "./core/search-palette";
+import {
+  isShellSessionId,
+  type ShellListResponse,
+  type ShellSessionId,
+} from "./core/shell";
 import { sourceInternalPathKind } from "./core/source-meta";
-import { readStoredSize, writeStoredSize } from "./core/stored-size";
-import { clampTerminalFontSize } from "./core/tmux";
-import type { ToolId } from "./core/tools";
-import type {
-  AppSettingsState,
-  DiffCardElement,
-  DiffMeta,
-  FileMeta,
-  HljsApi,
-  SettingsResponse,
-  UndoActionResponse,
-  ViewState,
+import {
+  readStoredSize,
+  reportStoredSizeFailure,
+  writeStoredSize,
+} from "./core/stored-size";
+import {
+  type TerminalImageRef,
+  type TerminalImagesResponse,
+  terminalImageExtension,
+  validateTerminalImageResponseUrls,
+} from "./core/terminal-images";
+import {
+  projectRootOfPath,
+  type TerminalTabProject,
+} from "./core/terminal-tab-name";
+import { clampTerminalFontSize, type TmuxClientWindow } from "./core/tmux";
+import { isToolId, type ToolId } from "./core/tools";
+import {
+  type AppSettingsState,
+  type DiffCardElement,
+  type DiffMeta,
+  type FileMeta,
+  type HljsApi,
+  type SettingsResponse,
+  type SidebarItem,
+  THEME_PALETTES,
+  type ThemePalette,
+  type UndoActionResponse,
+  type ViewState,
 } from "./core/types";
+import { createAccountsBand } from "./views/agents/accounts-band";
+import { createAccountsClient } from "./views/agents/accounts-client";
+import { createAccountDialogs } from "./views/agents/accounts-dialogs";
+import {
+  ACCOUNTS_SECTION_ID,
+  createAccountsSettings,
+} from "./views/agents/accounts-settings";
+import {
+  AGENT_HOOKS_SECTION_ID,
+  createAgentHooksSettings,
+} from "./views/agents/agent-hooks-settings";
+import { createAgentMonitor } from "./views/agents/agent-monitor";
+import { createAgentPaneOpener } from "./views/agents/agent-pane-opener";
+import { mountAgentStatus } from "./views/agents/agent-status";
+import {
+  type AgentsSidebar,
+  mountAgentsSidebar,
+} from "./views/agents/agents-sidebar";
+import { type AgentsView, createAgentsView } from "./views/agents/agents-view";
+import { agentsText } from "./views/agents/i18n";
+import { paneText, shellName } from "./views/agents/pane-text";
+import { mountUsageStatus } from "./views/agents/usage-status";
 import { createAnnotationsPlayer } from "./views/annotations-player";
 import {
   ANNOTATION_ENTRY_PARAM,
@@ -116,11 +240,15 @@ import {
   type AnnotationsUi,
   createAnnotationsUi,
 } from "./views/annotations-ui";
-import { createBlameView } from "./views/blame-view";
+import { createBackendState } from "./views/backend-state";
+import { type BlameViewDeps, createBlameView } from "./views/blame-view";
+import { fitBrand } from "./views/brand-fit";
+import { type ContextMenuItem, showContextMenu } from "./views/context-menu";
 import { createDatabaseView } from "./views/database/database-view";
 import { createDefinitionJump } from "./views/definition-jump";
 import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
+import { DIFF_SCREEN_TEXT, type DiffScreenText } from "./views/diff-view-i18n";
 import { createDoctorView, doctorText } from "./views/doctor-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
 import {
@@ -132,7 +260,8 @@ import {
   fileRouteKeepingActiveView,
   isBlobOrBlameFileRoute,
 } from "./views/file-shell";
-import { createHelpKeybindingEditor } from "./views/help-keybinding-editor";
+import { createShortcutSettings } from "./views/help-keybinding-editor";
+import { formatKeyBinding } from "./views/help-keybindings";
 import {
   createHelpPage,
   helpLanguageFromRoute,
@@ -142,6 +271,7 @@ import {
 } from "./views/help-page";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
+import { createImageTabView, type ImageTabHandle } from "./views/image-tab";
 import {
   createJournalView,
   type JournalView,
@@ -152,29 +282,109 @@ import {
   langFromPath,
   readRenderedLines,
 } from "./views/line-ref-pill";
+import { onListRowKeys } from "./views/list-tab-stop";
+import {
+  createColumnFold,
+  createColumnOpen,
+  createListTreeOpen,
+  localizeListTreeOpen as setListTreeOpenLabel,
+} from "./views/list-tree-open";
+import {
+  COMFORTABLE_PANE_WIDTH,
+  createMainTabsView,
+  type FrontChange,
+  isPageKind,
+  type PanesView,
+  routeTarget,
+  type SavedTabs,
+  type SavedWrite,
+  SPLIT_DIVIDER_WIDTH,
+} from "./views/main-tabs/main-tabs-view";
+import { mainTabsText } from "./views/main-tabs/i18n";
+import { pageIconPaths } from "./views/main-tabs/tab-icons";
+import { installMobileShell } from "./views/mobile-shell";
+import { createProjectActions } from "./views/projects/project-actions";
+import {
+  PROJECT_LOOKS,
+  paintProjectColor,
+  projectMark,
+} from "./views/projects/project-looks";
+import {
+  mountProjectSwitcher,
+  type ProjectSwitcher,
+} from "./views/projects/project-switcher";
 import { createQuickHelp } from "./views/quick-help";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
 import { createRepositoryWebLink } from "./views/repository-web-link";
-import { searchPaletteText } from "./views/search-palette-i18n";
-import { createSearchPalette } from "./views/search-palette-ui";
+import {
+  type PaletteActionId,
+  searchPaletteText,
+} from "./views/search-palette-i18n";
+import {
+  createSearchPalette,
+  type PaletteCommand,
+} from "./views/search-palette-ui";
 import { createSearchResultsView } from "./views/search-results-view";
-import { createSidebar, type ViewerFontSize } from "./views/sidebar";
+import { type AppNav, mountAppNav } from "./views/shell/app-nav";
+import {
+  readEarlyLook,
+  rememberEarlyLook,
+  rememberEarlyProject,
+} from "./views/shell/early-look";
+import {
+  CHANGES_LIST_DOM,
+  createSidebar,
+  FILE_LIST_DOM,
+  type SidebarDeps,
+  type SidebarDom,
+  type ViewerFontSize,
+} from "./views/sidebar";
 import {
   createSourceView,
+  type SourceViewDeps,
   type VirtualSourcePagingKeyboardEvent,
 } from "./views/source-view";
+import {
+  currentStatusLabel,
+  renderStatusLabel,
+  STATUS_LABEL_TEXT,
+} from "./views/status-label";
 import { terminalText } from "./views/terminal/i18n";
+import {
+  createShellEndNotice,
+  createShellEndTracker,
+} from "./views/terminal/shell-ends";
 import { createTerminalView } from "./views/terminal/terminal-view";
 import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
+import { showAlertDialog, showConfirmDialog } from "./views/ui-dialog";
 import {
   createViewerSettings,
+  SETTINGS_CATEGORIES,
   type ViewerSettingsDraft,
   type ViewerSettingsText,
 } from "./views/viewer-settings";
 import { worktreeText } from "./views/worktree-i18n";
 import { createWorktreeView, type WorktreeView } from "./views/worktree-view";
+
+/** 画面の入口の絵柄と、その画面へ移るキー (Worktrees にはキーが無い)。 */
+const VIEW_STRIP_KEYS: Record<
+  "repo" | "diff" | "history" | "worktree" | "database" | "journal",
+  KeymapAction | null
+> = {
+  repo: "goto-repo",
+  diff: "goto-diff",
+  history: "goto-history",
+  worktree: null,
+  database: "goto-database",
+  journal: "goto-journal",
+};
+
+/** macOS か。ブラウザのタブ操作の修飾キー (⌘ か Ctrl か) と既定のキーを決める。 */
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+/** この OS の既定のキー (PWA の窓のキーを含む)。利用者の割り当てはこの上に重ねる。 */
+const PLATFORM_KEY_BINDINGS = defaultKeyBindings(IS_MAC);
 
 window.GdpExpandLogic = GdpExpandLogic;
 
@@ -245,10 +455,34 @@ window.GdpExpandLogic = GdpExpandLogic;
     viewedFiles: [],
   };
 
+  // 入口のサーバの下で、このプロジェクトの裏のプロセスが止まった (502)・
+  // 起きなかった (503)・起動中。どの画面の取得でも同じ応答が来るので、fetch の
+  // 包みで拾って中央に 1 つだけ出す。
+  const BACKEND_STATE = createBackendState({
+    text: () => agentsText(STATE.language).projects,
+    reload: () => window.location.reload(),
+    reportError: reportPersistenceError,
+  });
   const NETWORK_ACTIVITY = createNetworkActivityTracker({
     onChange: updateNetworkActivity,
+    // 入口のサーバの下の画面では、前置きとプロジェクトの鍵を足す。
+    prepareRequest: projectRequest,
+    onResponse: (response) => BACKEND_STATE.inspect(response),
   });
   NETWORK_ACTIVITY.installFetch(window);
+  // 入口のサーバの下の画面では、index.html に書いた画面のリンクにも前置きを
+  // 付ける。クリックは横取りして pushState するが、中クリック・新しいタブでは
+  // 素の href が開くため。
+  if (projectKey()) {
+    for (const link of document.querySelectorAll<HTMLAnchorElement>(
+      'a[href^="/"]',
+    )) {
+      const href = link.getAttribute("href") ?? "";
+      if (!href.startsWith("//") && !href.startsWith("/p/")) {
+        link.setAttribute("href", pageUrl(href));
+      }
+    }
+  }
 
   function updateNetworkActivity(state = NETWORK_ACTIVITY.getState()): void {
     const loadBar = document.querySelector<HTMLElement>("#load-bar");
@@ -259,8 +493,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       statusEl.title =
         state.inFlight > 0
           ? text.statusInFlightTitle(state.inFlight, state.cancellable)
-          : (statusEl.querySelector<HTMLElement>(".status-label")
-              ?.textContent ?? "");
+          : currentStatusLabel(statusEl);
     }
     const cancelButton =
       document.querySelector<HTMLButtonElement>("#cancel-requests");
@@ -316,8 +549,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     repeated = false,
     unit: "line" | "page" = "line",
   ) {
-    if (moveSourceCursor(direction, unit)) return;
-    const target = findMainScrollTarget();
+    const source = activeSourceView();
+    if (source.moveSourceCursor(direction, unit)) return;
+    const target = source.mainScrollTarget();
     const viewportHeight =
       target?.clientHeight ||
       document.scrollingElement?.clientHeight ||
@@ -325,7 +559,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const top =
       direction *
       (unit === "line"
-        ? Math.round(sourceLineScrollAmount() || 32)
+        ? Math.round(source.sourceLineScrollAmount() || 32)
         : Math.round(viewportHeight * 0.55));
     const behavior: ScrollBehavior = repeated ? "auto" : "smooth";
     if (target) target.scrollBy({ top, behavior });
@@ -335,7 +569,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   let MAIN_SURFACE_FOCUS_SEQ = 0;
 
   function focusMainSurface() {
-    const target = findMainScrollTarget();
+    const source = activeSourceView();
+    const target = source.mainScrollTarget();
+    // 右の面のソース表示: その面の scroller (無ければ枠) にフォーカスを置く。
+    if (source !== SOURCE_VIEW) {
+      (target ?? RIGHT_SOURCE?.root)?.focus({ preventScroll: true });
+      setPanelFocusScope("main");
+      return;
+    }
     if (target?.matches("#content .gdp-source-virtual-scroller")) {
       target.focus({ preventScroll: true });
       setPanelFocusScope("main");
@@ -359,8 +600,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function scrollMainToEdge(edge: "top" | "bottom") {
-    if (moveSourceCursor(edge === "bottom" ? 1 : -1, "edge", edge)) return;
-    const target = findMainScrollTarget();
+    const source = activeSourceView();
+    if (source.moveSourceCursor(edge === "bottom" ? 1 : -1, "edge", edge))
+      return;
+    const target = source.mainScrollTarget();
     if (target) {
       target.scrollTo({
         top: edge === "top" ? 0 : target.scrollHeight,
@@ -368,14 +611,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
       return;
     }
-    const top =
-      edge === "top"
-        ? 0
-        : Math.max(
-            document.documentElement.scrollHeight,
-            document.body.scrollHeight,
-          );
-    window.scrollTo({ top, behavior: "auto" });
+    // 動かせる箱が見つからないとき (中身がまだ無い) も、窓ではなく本文の箱。
+    const box = mainScrollBox();
+    box?.scrollTo({
+      top: edge === "top" ? 0 : box.scrollHeight,
+      behavior: "auto",
+    });
   }
 
   function isFocusableClickTarget(target: EventTarget | null): boolean {
@@ -429,15 +670,49 @@ window.GdpExpandLogic = GdpExpandLogic;
       .sort((a, b) => a.localeCompare(b));
   }
 
+  /** エージェントの未読の数。タブのタイトルの先頭に出す。 */
+  let AGENT_UNREAD_COUNT = 0;
+
+  function applyDocumentTitle(): void {
+    const base = PROJECT_NAME ? `${PROJECT_NAME} - code viewer` : "code viewer";
+    document.title = titleWithUnread(base, AGENT_UNREAD_COUNT);
+  }
+
   function setProjectName(project: string) {
     if (!project) return;
     PROJECT_NAME = project;
-    document.title = `${project} - code viewer`;
-    const projectTitle = document.querySelector<HTMLElement>("#project-title");
-    if (projectTitle) {
-      projectTitle.textContent = project;
-      projectTitle.title = project;
+    applyDocumentTitle();
+    renderProjectHead();
+  }
+
+  /**
+   * 一覧の列の頭の 1 段目 (いま見ているプロジェクト): 色の四角と頭文字・名前。名前と
+   * 色は、一覧 (views/projects/project-looks.ts) に載っていればそれ (左のサイドバー・
+   * 切替の小窓と同じ。登録簿で名前を変えたものはその名前)、載るまでは設定の名前と
+   * 色なし。
+   */
+  function renderProjectHead(): void {
+    const look = PROJECT_LOOKS.current();
+    const name = look?.name || PROJECT_NAME;
+    if (!name) return;
+    const title = document.querySelector<HTMLElement>("#project-title");
+    if (title) {
+      title.textContent = name;
+      title.title = name;
     }
+    // 名前は省略 (…) されることがあるので、読み上げの名前は全文 (何をするボタンかは
+    // project-switcher.ts が title に書く)。
+    document
+      .querySelector<HTMLElement>("#project-switcher")
+      ?.setAttribute("aria-label", name);
+    const mark = document.querySelector<HTMLElement>("#project-mark");
+    const initials = look?.initials ?? projectInitials(name);
+    if (mark) {
+      mark.textContent = initials;
+      // 一覧に載るまでは、最初の描画 (#first-project) が控えから塗った色のまま。
+      if (look) paintProjectColor(mark, look.color);
+    }
+    rememberProjectHead(name, initials, mark?.dataset.projectColor);
   }
 
   function setProjectBranch(branch: string) {
@@ -447,7 +722,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     el.hidden = !branch;
     const name = el.querySelector<HTMLElement>(".project-branch-name");
     if (name) name.textContent = branch;
-    el.title = branch ? `Current branch: ${branch}` : "";
+    el.title = branch ? uiText().diff.currentBranch(branch) : "";
+    renderProjectHead();
+  }
+
+  /** 頭の 1 段目を、次に開いたときの最初の描画 (index.html の #first-project) に控える。 */
+  function rememberProjectHead(
+    name: string,
+    mark: string,
+    color: string | undefined,
+  ): void {
+    rememberEarlyProject(projectKey() ?? "", {
+      name,
+      branch: PROJECT_BRANCH,
+      mark,
+      color: isProjectColor(color) ? color : null,
+    });
   }
 
   type SettingsPatch = Partial<Omit<AppSettingsState, "version">> &
@@ -492,14 +782,32 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 作り直し、変わらなければ前回の配列をそのまま返す。keydown ごとに
   // 展開し直さずに済み、更新の呼び忘れも起きない。
   let cachedKeymapOverrides: KeymapOverrides | undefined;
-  let cachedKeyBindings: KeyBinding[] = DEFAULT_KEY_BINDINGS;
+  let cachedKeyBindings: KeyBinding[] = PLATFORM_KEY_BINDINGS;
 
   function activeKeyBindings(): KeyBinding[] {
     if (APP_SETTINGS.keybindings !== cachedKeymapOverrides) {
       cachedKeymapOverrides = APP_SETTINGS.keybindings;
-      cachedKeyBindings = resolveKeyBindings(cachedKeymapOverrides);
+      cachedKeyBindings = resolveKeyBindings(
+        cachedKeymapOverrides,
+        PLATFORM_KEY_BINDINGS,
+      );
     }
     return cachedKeyBindings;
+  }
+
+  /** インストールした窓 (PWA) で開いているか。PWA の行はこのときだけ効く。 */
+  function isStandaloneWindow(): boolean {
+    return window.matchMedia(STANDALONE_MEDIA_QUERY).matches;
+  }
+
+  /**
+   * 画面の入口の title・パレット・プロジェクトの切替にキーを添えるときの割り当て。
+   * この窓で効かない PWA の行を外す (通常のタブで ⌘W を案内しない)。ヘルプの
+   * 一覧は activeKeyBindings ((PWA) を付けて全部出す)。
+   */
+  function shownKeyBindings(): KeyBinding[] {
+    const standalone = isStandaloneWindow();
+    return activeKeyBindings().filter((binding) => standalone || !binding.pwa);
   }
 
   let pendingSettingsPatch: SettingsPatch | null = null;
@@ -539,7 +847,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     keepalive = false,
   ): Promise<AppSettingsState> {
     const response = await trackLoad(
-      fetch("/_state/settings", {
+      fetch(apiUrl("stateSettings"), {
         method: "PATCH",
         headers: actionHeaders(),
         body: JSON.stringify(patch),
@@ -687,7 +995,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     let saved = false;
     try {
       const response = await trackLoad(
-        fetch("/_state/view", {
+        fetch(apiUrl("stateView"), {
           method: "PATCH",
           headers: actionHeaders(),
           body: JSON.stringify(patch),
@@ -847,12 +1155,49 @@ window.GdpExpandLogic = GdpExpandLogic;
       : "side-by-side";
   }
 
+  /** 電話の段 (core/mobile-layout.ts。style.css の SP の節と同じ条件)。 */
+  const PHONE_QUERY = window.matchMedia(PHONE_MEDIA_QUERY);
+  /** 電話の段で切り替えた差分の並べ方 (保存しない。diffLayoutFor)。 */
+  let phoneDiffLayout: LayoutMode | null = null;
+
+  /**
+   * 電話の段の端末の文字の大きさ。設定 (terminalFontSize) は全部の端末で共有
+   * するデスクトップの値なので、電話ではこのブラウザにだけ覚える (ピンチ・
+   * 右クリックの大きさの操作。core/stored-size.ts)。
+   */
+  const PHONE_TERMINAL_FONT_SIZE_KEY = "code-viewer:phone-terminal-font-size";
+  function terminalFontSize(): number {
+    if (!PHONE_QUERY.matches)
+      return clampTerminalFontSize(APP_SETTINGS.terminalFontSize);
+    const result = readStoredSize(
+      PHONE_TERMINAL_FONT_SIZE_KEY,
+      PHONE_TERMINAL_FONT_SIZE,
+    );
+    reportStoredSizeFailure(
+      result,
+      "reading the phone terminal font size failed",
+    );
+    return clampTerminalFontSize(result.value);
+  }
+
+  /** いま見せる差分の並べ方 (電話の段では 1 列が既定)。 */
+  function shownLayout(): LayoutMode {
+    return diffLayoutFor(
+      PHONE_QUERY.matches ? "phone" : "desktop",
+      savedLayout(),
+      phoneDiffLayout,
+    );
+  }
+
+  // 未設定ならダーク (既定のテーマ)。light / dark を保存している人はその値。
   function savedTheme(): ThemeMode {
-    return APP_SETTINGS.theme === "light" || APP_SETTINGS.theme === "dark"
-      ? APP_SETTINGS.theme
-      : matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
+    return APP_SETTINGS.theme === "light" ? "light" : "dark";
+  }
+
+  function savedPalette(): ThemePalette {
+    return (
+      THEME_PALETTES.find((value) => value === APP_SETTINGS.palette) ?? "violet"
+    );
   }
 
   function savedSidebarView(): SidebarView {
@@ -881,7 +1226,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   async function loadSettings(): Promise<SettingsResponse> {
-    const res = await trackLoad(fetch("/_settings"));
+    const res = await trackLoad(fetch(apiUrl("settings")));
     if (!res.ok) {
       throw new Error(
         await responseErrorMessage(res, "settings request failed"),
@@ -987,7 +1332,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   async function loadAgentScreenRules(): Promise<void> {
     const generation = ++AGENT_SCREEN_RULE_REQUEST_GENERATION;
     const response = await agentScreenRuleResponse(
-      await trackLoad(fetch("/_agent/rules")),
+      await trackLoad(fetch(apiUrl("agentRules"))),
     );
     if (generation !== AGENT_SCREEN_RULE_REQUEST_GENERATION) return;
     applyAgentScreenRuleResponse(response);
@@ -1003,7 +1348,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const generation = ++AGENT_SCREEN_RULE_REQUEST_GENERATION;
     const response = await agentScreenRuleResponse(
       await trackLoad(
-        fetch("/_agent/rules", {
+        fetch(apiUrl("agentRules"), {
           method: "PUT",
           headers: actionHeaders(),
           body: JSON.stringify(rules),
@@ -1018,7 +1363,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const generation = ++AGENT_SCREEN_RULE_REQUEST_GENERATION;
     const response = await agentScreenRuleResponse(
       await trackLoad(
-        fetch("/_agent/rules", {
+        fetch(apiUrl("agentRules"), {
           method: "DELETE",
           headers: actionHeaders(),
         }),
@@ -1046,23 +1391,51 @@ window.GdpExpandLogic = GdpExpandLogic;
   async function loadPersistedState(): Promise<void> {
     const [settings, view] = await Promise.all([
       loadStateResponse<AppSettingsState>(
-        "/_state/settings",
+        apiUrl("stateSettings"),
         "settings state request failed",
       ),
-      loadStateResponse<ViewState>("/_state/view", "view state request failed"),
+      loadStateResponse<ViewState>(
+        apiUrl("stateView"),
+        "view state request failed",
+      ),
     ]);
     APP_SETTINGS = settings;
     VIEW_STATE = view;
   }
 
+  /**
+   * 下パネルがあった頃の URL (?tools= / ?results=) を、そのタブの URL
+   * (/tools?tool= / /search?q=) に書き換える。URL から route を読む入口
+   * (読み込み・戻る進む) の最初に呼ぶ。
+   */
+  function upgradeLegacyPanelUrl(): void {
+    const legacy = legacyPanelRoute(window.location.search, savedRange());
+    if (!legacy) return;
+    history.replaceState(
+      history.state,
+      "",
+      buildRoute(legacy) + window.location.hash,
+    );
+  }
+
   function routeFromLocation(): AppRoute {
+    upgradeLegacyPanelUrl();
     const savedLanguage =
       viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
     const parsedRoute = parseRoute(
-      window.location.pathname,
+      routePathname(),
       window.location.search,
       savedRange(),
     );
+    // URL が右の面のファイル (pane=right) なら、本文はフォルダ表示から起こす
+    // (本文の面の前面はタブの読み戻しが決め、右の面は INITIAL_RIGHT_ROUTE)。
+    if (INITIAL_RIGHT_ROUTE && parsePaneOverlay(window.location.search))
+      return {
+        screen: "repo",
+        ref: INITIAL_RIGHT_ROUTE.ref,
+        path: "",
+        range: parsedRoute.range,
+      };
     const routeBase =
       parsedRoute.screen === "unknown"
         ? { screen: "diff" as const, range: parsedRoute.range }
@@ -1077,12 +1450,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     const route = routeFromLocation();
     const savedLanguage =
       viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
-    STATE.layout = savedLayout();
+    STATE.layout = shownLayout();
     STATE.theme = savedTheme();
     STATE.language = savedLanguage;
     STATE.sbView = savedSidebarView();
-    STATE.sbWidth = savedNumber(APP_SETTINGS.sidebarWidth, 308, 180, 900);
-    STATE.historyWidth = savedNumber(APP_SETTINGS.historyWidth, 320, 220, 640);
+    STATE.sbWidth = savedNumber(
+      APP_SETTINGS.sidebarWidth,
+      SIDEBAR_WIDTH.default,
+      SIDEBAR_WIDTH.min,
+      SIDEBAR_WIDTH.max,
+    );
+    STATE.historyWidth = restoredListWidth(
+      APP_SETTINGS.historyWidth,
+      HISTORY_WIDTH,
+    );
     STATE.sidebarHidden = APP_SETTINGS.sidebarHidden === true;
     STATE.collapsedDirs = new Set(VIEW_STATE.collapsedDirs || []);
     STATE.lazyExpandedDirs = new Set(VIEW_STATE.lazyExpandedDirs || []);
@@ -1105,30 +1486,85 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyPersistedStateToState();
     applySidebarFontSize();
     applyCodeFontSize();
-    applySidebarHidden(STATE.sidebarHidden, { persist: false });
+    // 利用者が畳んでいれば、それは自動の畳みではない (幅が足りても開かない)。
+    if (STATE.sidebarHidden) FILE_LIST_AUTO_HIDDEN = false;
+    applySidebarHidden(STATE.sidebarHidden || FILE_LIST_AUTO_HIDDEN, {
+      persist: false,
+    });
     applyHistoryWidth(STATE.historyWidth, false);
     applySidebarWidth(STATE.sbWidth, { persist: false });
-    syncAppPanelLayout();
     ANNOTATIONS_UI?.applyAnnotationPanelWidth(
       APP_SETTINGS.annotationPanelWidth ?? 380,
       false,
     );
     setLayout(STATE.layout, false);
     applyTheme();
+    APP_NAV?.sync();
+    AGENTS_SIDEBAR?.syncCollapsed();
     localizeViewerChrome();
+    rememberLayoutLook();
   }
+
+  /**
+   * 画面の並びの寸法と言語を、次に開いたときの最初の描画の控えに書く
+   * (views/shell/early-look.ts。index.html の body の頭の早いスクリプトが読む)。
+   */
+  function rememberLayoutLook(): void {
+    rememberEarlyLook({
+      language: STATE.language,
+      // 利用者が畳んだものだけ (幅による自動の畳みは早いスクリプトが幅で決める)。
+      sidebarHidden: STATE.sidebarHidden && !FILE_LIST_AUTO_HIDDEN,
+      sidebarWidth: STATE.sbWidth,
+      historyWidth: STATE.historyWidth,
+    });
+  }
+
+  /** 開いたときの ?terminal= (起動の途中で URL が書き直される前に読む)。 */
+  const INITIAL_TERMINAL_PARAM = parseTerminalOverlay(window.location.search);
+  /** 開いたときの ?terminal= がシェル (タブを読み戻した後、その端末が前面になる)。 */
+  const TERMINAL_FRONT_AT_BOOT =
+    INITIAL_TERMINAL_PARAM !== null && INITIAL_TERMINAL_PARAM !== "open";
+  /** 開いたときの ?open-pane= (別のプロジェクトから移ってきた。同じく先に読む)。 */
+  const INITIAL_OPEN_PANE = parseOpenPaneOverlay(window.location.search);
+  /** 保存したタブの前面を URL の route より優先するか (同じく先に読む)。 */
+  const INITIAL_KEEPS_SAVED_FRONT = urlKeepsSavedFront(
+    window.location.search,
+    performance
+      .getEntriesByType("navigation")
+      .some(
+        (entry) => (entry as PerformanceNavigationTiming).type === "reload",
+      ),
+  );
+  /** 開いたときの pane=right の、右の面のファイルの route (同じく先に読む)。 */
+  const INITIAL_RIGHT_ROUTE = ((): Extract<
+    AppRoute,
+    { screen: "file" }
+  > | null => {
+    if (parsePaneOverlay(window.location.search) !== "right") return null;
+    const route = parseRoute(
+      routePathname(),
+      window.location.search,
+      savedRange(),
+    );
+    return route.screen === "file" && route.view !== "history" ? route : null;
+  })();
 
   const STATE: AppState = (() => {
     const route = routeFromLocation();
     return {
-      layout: savedLayout(),
+      layout: shownLayout(),
       theme: savedTheme(),
       language:
         viewerLanguageFromSearch(window.location.search) ||
         savedViewerLanguage(),
       sbView: savedSidebarView(),
-      sbWidth: savedNumber(APP_SETTINGS.sidebarWidth, 308, 180, 900),
-      historyWidth: savedNumber(APP_SETTINGS.historyWidth, 320, 220, 640),
+      sbWidth: savedNumber(
+        APP_SETTINGS.sidebarWidth,
+        SIDEBAR_WIDTH.default,
+        SIDEBAR_WIDTH.min,
+        SIDEBAR_WIDTH.max,
+      ),
+      historyWidth: restoredListWidth(APP_SETTINGS.historyWidth, HISTORY_WIDTH),
       sidebarHidden: APP_SETTINGS.sidebarHidden === true,
       collapsedDirs: new Set<string>(VIEW_STATE.collapsedDirs),
       lazyExpandedDirs: new Set<string>(VIEW_STATE.lazyExpandedDirs),
@@ -1149,6 +1585,235 @@ window.GdpExpandLogic = GdpExpandLogic;
       autoUpdate: APP_SETTINGS.autoUpdate !== false,
     };
   })();
+
+  /** 読み戻したタブ (覚えた route が無い) を開くときの route。 */
+  function defaultRouteForTab(target: TabTarget): AppRoute {
+    const range = currentRange();
+    switch (target.kind) {
+      case "file":
+        return {
+          screen: "file",
+          path: target.path,
+          ref: target.ref ?? "worktree",
+          range,
+          view: "blob",
+          ...(target.line === undefined ? {} : { line: target.line }),
+        };
+      case "page":
+        switch (target.page) {
+          case "history":
+            return { screen: "history", ref: "HEAD", range };
+          case "help":
+            return {
+              screen: "help",
+              range,
+              lang: STATE.language,
+              section: "settings",
+            };
+          default:
+            return { screen: target.page, range };
+        }
+      case "terminal":
+      case "image":
+        // ターミナルと画像は route を持たない (面の箱に描く)。来たら不具合。
+        throw new Error(
+          `main tabs: ${target.kind} tabs have no route: ${JSON.stringify(target)}`,
+        );
+    }
+  }
+
+  /**
+   * 利用者が一覧 (Diff の変更ファイルの一覧・History・作業ツリー) を手で畳んだ
+   * (列の右端の畳むボタン)。このセッションだけ (保存しない。ファイル一覧の畳みの
+   * 設定とは別)。配線は syncListColumn。
+   */
+  let LIST_COLUMN_HIDDEN = false;
+  /** 利用者が History・作業ツリーの変更ファイルの一覧を手で畳んだ (このセッションだけ)。 */
+  let LIST_TREE_HIDDEN = false;
+  /**
+   * 利用者が畳んだ変更ファイルの一覧を開いた (このセッションは畳まない)。
+   * 配線は syncListColumn。
+   */
+  let LIST_TREE_KEPT_OPEN = false;
+  /**
+   * 一覧の列のいまの幅 (ファイル一覧 + 一覧 + 変更ファイルの一覧。出していない
+   * ものは 0)。2 面の幅の計算が引く。
+   */
+  let LIST_COLUMN_WIDTH = 0;
+  /**
+   * 2 面の本文の幅 (面 2 つ分のゆとりと仕切り)。一覧の列を 2 面のために詰める・
+   * 畳むときに本文へ残す幅 (syncListColumn・splitListColumnWidth)。
+   */
+  const SPLIT_NEED = COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH;
+  /**
+   * 左の面の前面が画面 (route) のタブか、何も選んでいない (showPanes が控える)。
+   * false (端末・画像) なら一覧の列に一覧を出さない (listColumnKind)。
+   */
+  let LEFT_FRONT_IS_PAGE = !TERMINAL_FRONT_AT_BOOT;
+  /**
+   * 保存したタブを読み戻すまでの間 (起動の途中)。開いたときの ?terminal= にシェルが
+   * あれば、読み戻した後に端末が前面になる (syncTerminalFromUrl) ので、その前に
+   * URL の画面のタブ (MAIN_TABS.syncRoute) が前面に来ても一覧を出さない。
+   * index.html の #first-screen と同じ見方 (出してから外すと、読み込み直すたびに
+   * 本文が 2 回動いた)。
+   */
+  let RESTORING_TABS = true;
+  /** 控えに書いた 2 面か (rememberSplitForFirstScreen)。まだ書いていなければ null。 */
+  let EARLY_SPLIT: boolean | null = null;
+  /**
+   * タブを読み戻すまで、一覧の列を 2 面として数えるか (控えの split。#first-screen と
+   * 同じ見方。1 面で数え直すと、早いスクリプトが 2 面で畳んだ列を開き直して動いた)。
+   */
+  let BOOT_SPLIT = false;
+  /** 一覧と変更ファイルの一覧を畳む / 開くボタン (syncListColumn の後ろで作る)。 */
+  let LIST_COLUMN_FOLDS: {
+    listFold: HTMLButtonElement;
+    listOpen: HTMLButtonElement;
+    sidebarFold: HTMLButtonElement;
+    sidebarOpen: HTMLButtonElement;
+    treeOpen: HTMLButtonElement;
+  } | null = null;
+  /** 見えている一覧だけの幅 (変更ファイルの一覧を含めない。出していなければ 0)。掴みの開始幅。 */
+  let LIST_SHOWN_WIDTH = 0;
+  /** 本文が要る幅を保てる一覧の幅 (掴んで広げられる上限)。 */
+  let LIST_FITS_WIDTH = HISTORY_WIDTH.max;
+  /** 一覧の列に出す一覧の要素 (body[data-list-column] の値ごと)。 */
+  const LIST_COLUMN_IDS = {
+    sidebar: "sidebar",
+    history: "history-panel",
+    worktree: "worktree-panel",
+  } as const;
+
+  const MAIN_TABS = createMainTabsView({
+    // 電話の段のタブ列の右端の「開いているタブ」(MOBILE_SHELL は後で作る)。
+    onTabList: () => MOBILE_SHELL.openTabs(),
+    mount: (() => {
+      const mount = document.getElementById("main-tabs");
+      if (!mount) throw new Error("#main-tabs is missing from index.html");
+      return mount;
+    })(),
+    lead: (() => {
+      const lead = document.getElementById("tabs-lead");
+      if (!lead) throw new Error("#tabs-lead is missing from index.html");
+      return lead;
+    })(),
+    columnHead: (() => {
+      const head = document.getElementById("panel-head");
+      if (!head) throw new Error("#panel-head is missing from index.html");
+      return head;
+    })(),
+    listColumnWidth: () => listColumnShownWidth(),
+    splitListColumnWidth: () => splitListColumnWidth(),
+    getLanguage: () => STATE.language,
+    pageLabel: (page) => uiText().nav[page],
+    navigate: (route, replace) => {
+      if (replace) replaceWithRoute(route);
+      else navigateToRoute(route);
+      // 本文を裏で移しただけでフォーカスが右の面に残ったなら、URL は右の面の
+      // もの (setRoute の後と同じ)。分割のボタンで右に出した直後に、URL が
+      // 左の面のファイルのまま残っていた。
+      syncFocusedPaneUrl("replace");
+    },
+    currentRoute: () => STATE.route,
+    defaultRoute: defaultRouteForTab,
+    homeRoute: () => ({
+      screen: "repo",
+      ref: STATE.repoRef || "worktree",
+      path: "",
+      range: currentRange(),
+    }),
+    copyPath: (path) => {
+      navigator.clipboard
+        .writeText(filePathClipboardText(path))
+        .catch((error: unknown) => {
+          console.error("[code-viewer] copying the tab path failed", error);
+          setStatus("error");
+        });
+    },
+    onNewTab: (side, anchor) => void openNewTabMenu(side, anchor),
+    stopTerminal: (session) => void stopTerminal(session as ShellSessionId),
+    terminalMenuItems: () => TERMINAL_VIEW.menuItems(),
+    // 全プロジェクト共通の配置 (server/main-tabs-store.ts)。root はこの裏の根で、
+    // タブの持ち物のプロジェクトになる。
+    loadSaved: () =>
+      loadStateResponse<SavedTabs>(
+        apiUrl("stateTabs"),
+        "main tabs request failed",
+      ),
+    save: async (layout, keepalive, base) => {
+      const response = await fetch(apiUrl("stateTabs"), {
+        method: "PUT",
+        keepalive,
+        headers: { ...actionHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseRev: base.rev,
+          base: base.layout,
+          layout,
+        }),
+      });
+      if (!response.ok)
+        throw new Error(await responseErrorMessage(response, "save main tabs"));
+      const written = (await response.json()) as SavedWrite & {
+        migration?: unknown;
+      };
+      if (written.migration !== undefined)
+        console.info(
+          "[code-viewer] main tabs: the per-project tabs were moved into one set of tabs while saving:",
+          JSON.stringify(written.migration),
+        );
+      return written;
+    },
+    newTabId: () => `t-${crypto.randomUUID().slice(0, 8)}`,
+    projectLook: (root) => PROJECT_LOOKS.get(root),
+    projectOrder: () => PROJECT_LOOKS.order(),
+    terminalProject: (session) => terminalProjectOf(session),
+    switchProject: (root, route, tab) =>
+      openProjectAt(root, projectTabPath(route, tab)),
+    // 別のプロジェクトのファイルを /p/<鍵> から読めるのは入口のサーバの下だけ。
+    foreignInPlace: () => projectKey() !== null,
+    backupSaved: async () => {
+      const response = await fetch(apiUrl("stateTabsBackup"), {
+        method: "POST",
+        headers: actionHeaders(),
+      });
+      if (!response.ok)
+        throw new Error(
+          await responseErrorMessage(response, "back up the saved main tabs"),
+        );
+      const body = (await response.json()) as { backup?: unknown };
+      if (typeof body.backup !== "string")
+        throw new Error(
+          `back up the saved main tabs: the answer has no backup path: ${JSON.stringify(body)}`,
+        );
+      return body.backup;
+    },
+    terminalInfo: (session) => terminalTabInfo(session),
+    onPanes: (view, how) => showPanes(view, how),
+    listColumnHoldsList: () => listColumnKind() !== null,
+    onTerminals: (_open, closed) => {
+      for (const id of closed) TERMINAL_VIEW.releaseTab(id as ShellSessionId);
+    },
+  });
+
+  // 言語の当て直し (起動の途中でも呼ばれる) が読むので、ここで宣言する。
+  /** 面ごとの画像の部品 (使い回す。setImage で差し替える)。 */
+  const IMAGE_VIEWS: Partial<Record<PaneSide, ImageTabHandle>> = {};
+  /** 画像のパス → 引いた画像と前後の並び (棚から開いたときは棚の並び)。 */
+  const IMAGE_REFS = new Map<
+    string,
+    { image: TerminalImageRef; images: TerminalImageRef[] }
+  >();
+
+  /**
+   * 画面へ移る。その画面のタブが開いていれば、そのタブが最後に見ていた
+   * 状態へ (画面の入口の絵柄や g d などで、選んでいたコミットや表を失わない)。
+   */
+  function navigateToPageTab(route: AppRoute): void {
+    const target = routeTarget(route);
+    const stored =
+      target?.kind === "page" ? MAIN_TABS.routeForPage(target.page) : null;
+    navigateToRoute(stored ?? route);
+  }
 
   // (declarations recovered during the source-view extraction)
   let highlightConfigured = false;
@@ -1227,25 +1892,39 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function syncLineRefPill() {
-    const route = STATE.route;
+    // 右の面のファイルにフォーカスがあれば、札はその面の行を指す。
+    const view = MAIN_TABS.panes();
+    const right =
+      view.focused === "right" && view.fronts.right?.target.kind === "file"
+        ? MAIN_TABS.paneRoute("right")
+        : null;
+    const route = right ?? STATE.route;
     if (route.screen === "diff") return;
     DIFF_LINE_SELECT.clear();
     if (route.screen === "file" && route.line) {
       const start =
         typeof route.line === "number" ? route.line : route.line.start;
       const end = typeof route.line === "number" ? route.line : route.line.end;
-      LINE_REF_PILL.show(route.path, start, end);
+      // コードを写すときは選択のある面の行を読む (同じパスを左右で別の ref
+      // に開いていても、反対の面を読まない)。
+      LINE_REF_PILL.show(route.path, start, end, () =>
+        right ? (RIGHT_SOURCE?.root ?? null) : $("#content"),
+      );
       return;
     }
-    if (route.screen === "file") clearRenderedSourceLineTargets();
+    if (right) LINE_REF_PILL.hide();
+    else if (route.screen === "file") clearRenderedSourceLineTargets();
   }
 
   // ---------- Sidebar: extracted to sidebar.ts ----------
-  const SIDEBAR = createSidebar({
+  // 一覧は 2 つ。ファイル一覧 (FILE_LIST。リポジトリの木で、どの画面でも出す) と
+  // 変更ファイルの一覧 (SIDEBAR。Diff の一覧・History と作業ツリーの一覧の右)。
+  const SIDEBAR_DEPS: Omit<SidebarDeps, "dom" | "repository"> = {
     $,
     $$,
     STATE,
     openDiffFile: (path) => DIFF_VIEW.openDiffFile(path),
+    openFileAs: (file, intent, list) => openFileAs(file, intent, list),
     // Where a plain click on the row takes the app; mirrors the diff sidebar
     // (openDiffFile) and the repository sidebar handler in repo-view.ts.
     sidebarItemHref: (item, mode) => {
@@ -1290,8 +1969,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     createOpenPathButton,
     normalizeViewerFontSize,
     getSidebarFontSize: savedSidebarFontSizeSetting,
-    persistSidebarHidden: (hidden) => patchSettings({ sidebarHidden: hidden }),
-    persistSidebarWidth: (width) => patchSettings({ sidebarWidth: width }),
+    persistSidebarHidden: (hidden) => {
+      rememberLayoutLook();
+      return patchSettings({ sidebarHidden: hidden });
+    },
+    persistSidebarWidth: (width) => {
+      rememberLayoutLook();
+      return patchSettings({ sidebarWidth: width });
+    },
     scheduleMainSurfaceFocus,
     setChevronIcon,
     trackLoad,
@@ -1302,8 +1987,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     isTestPath: isTestFilePath,
     filterCountTitle: (visible, total) =>
       uiText().sidebar.filterCountTitle(visible, total),
-    sidebarToggleTitle: (hidden) =>
-      hidden ? uiText().sidebar.show : uiText().sidebar.hide,
+    fileCountText: (count) => uiText().diff.files(count),
+    sidebarToggleTitle: fileListToggleTitle,
+    onUserToggledSidebarHidden,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
     omittedDirectoryBadge: (reason) => {
       const text = uiText().sidebar;
@@ -1323,59 +2009,84 @@ window.GdpExpandLogic = GdpExpandLogic;
             title: text.commitEntryGitlinkTitle,
           };
     },
+  };
+  const SIDEBAR = createSidebar({
+    ...SIDEBAR_DEPS,
+    dom: CHANGES_LIST_DOM,
+    repository: false,
   });
+  const FILE_LIST = createSidebar({
+    ...SIDEBAR_DEPS,
+    dom: FILE_LIST_DOM,
+    repository: true,
+  });
+  type FileListHandle = typeof FILE_LIST;
+  /**
+   * キーで動かす一覧: フォーカスのある一覧。どちらにも無ければ画面の一覧
+   * (Diff・History・選んでいる作業ツリーは変更ファイルの一覧、ほかはファイル一覧)。
+   */
+  function keyList(): FileListHandle {
+    const active = document.activeElement;
+    if (active?.closest(FILE_LIST_DOM.root)) return FILE_LIST;
+    if (active?.closest(CHANGES_LIST_DOM.root)) return SIDEBAR;
+    return listColumnKind() ? SIDEBAR : FILE_LIST;
+  }
+  // 骨格 (列を畳むボタン・幅・文字の大きさ) はファイル一覧の側が持つ。
   const {
-    renderSidebar,
-    refreshRepoSidebarTree,
-    applyFilter,
-    scheduleApplyFilter,
-    flushSidebarFilter,
-    syncSidebarFilterClearButton,
-    clearSidebarFilter,
-    markActive,
-    rerenderVirtualSidebar,
-    ensureVirtualSidebarDirLoaded,
-    scrollVirtualSidebarPathIntoView,
-    shouldLazyLoadSidebarDir,
-    setFolderIcon,
-    isRepositorySidebarMode,
     placeSidebarToggle,
     applySidebarHidden,
     applySidebarWidth,
     applySidebarFontSize,
     savedSidebarFontSize,
-    syncSidebarHeaderHeight,
-    observeSidebarHeaderHeight,
-    setSidebarTreeActionIcons,
-    setAllSidebarDirsCollapsed,
+  } = FILE_LIST;
+  function syncSidebarHeaderHeight(): void {
+    FILE_LIST.syncSidebarHeaderHeight();
+    SIDEBAR.syncSidebarHeaderHeight();
+  }
+  // 変更ファイルの一覧 (Diff の描画・絞り込み・Tests を隠す)。
+  const {
+    renderSidebar,
+    rerenderVirtualSidebar,
     updateTreeDirVisibility,
-    moveActiveSidebarItem,
-    moveActiveSidebarPage,
-    moveActiveSidebarToEdge,
-    openActiveSidebarItem,
-    setActiveSidebarDirectoryCollapsed,
-    toggleActiveSidebarDirectoryCollapsed,
     isVirtualSidebarActive,
-    selectVirtualSidebarIndex,
-    virtualSidebarActiveIndex,
-    adjacentVisibleSidebarItem,
-    scrollSidebarItemIntoView,
-    sidebarItemPath,
-    visibleSidebarItems,
-    getSidebarRowByPath,
-    getSidebarVirtualActivePath,
-    getSidebarFiles,
-    getSidebarOnFileClick,
-    getSidebarVisibleRows,
-    visibleSidebarItemFrom,
   } = SIDEBAR;
+  // キーで動かす一覧 (keyList)。
+  const isRepositorySidebarMode = () => keyList().isRepositorySidebarMode();
+  const markActive = (path: string, options?: { reveal?: boolean }) =>
+    keyList().markActive(path, options);
+  const moveActiveSidebarPage = (direction: 1 | -1) =>
+    keyList().moveActiveSidebarPage(direction);
+  const moveActiveSidebarToEdge = (edge: "top" | "bottom") =>
+    keyList().moveActiveSidebarToEdge(edge);
+  const openActiveSidebarItem = () => keyList().openActiveSidebarItem();
+  const setActiveSidebarDirectoryCollapsed = (collapsed: boolean) =>
+    keyList().setActiveSidebarDirectoryCollapsed(collapsed);
+  const toggleActiveSidebarDirectoryCollapsed = () =>
+    keyList().toggleActiveSidebarDirectoryCollapsed();
+  const selectVirtualSidebarIndex: FileListHandle["selectVirtualSidebarIndex"] =
+    (...args) => keyList().selectVirtualSidebarIndex(...args);
+  const virtualSidebarActiveIndex = () => keyList().virtualSidebarActiveIndex();
+  const adjacentVisibleSidebarItem = (direction: 1 | -1) =>
+    keyList().adjacentVisibleSidebarItem(direction);
+  const scrollSidebarItemIntoView: FileListHandle["scrollSidebarItemIntoView"] =
+    (...args) => keyList().scrollSidebarItemIntoView(...args);
+  const sidebarItemPath = (item: HTMLElement) =>
+    keyList().sidebarItemPath(item);
+  const getSidebarVisibleRows = () => keyList().getSidebarVisibleRows();
+  const visibleSidebarItemFrom: FileListHandle["visibleSidebarItemFrom"] = (
+    ...args
+  ) => keyList().visibleSidebarItemFrom(...args);
 
   // ---------- Source view: extracted to source-view.ts ----------
-  const SOURCE_VIEW = createSourceView({
-    $$,
-    $,
+  // 本文 (左の面) のソース表示の依存。右の面のソース表示はこれを土台に、
+  // route・探す範囲・差し込み先・本文だけの操作を差し替える (createSidePane)。
+  const SOURCE_VIEW_DEPS: SourceViewDeps = {
     STATE,
+    route: () => STATE.route,
     setRoute,
+    scope: () => $("#content"),
+    mountRoot: () => $("#diff"),
+    mainScrollTarget: () => findMainScrollTarget(),
     setPageMode,
     currentRange,
     trackLoad,
@@ -1405,19 +2116,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     isPaletteOpen: () => SEARCH_PALETTE.isPaletteOpen(),
     getLanguage: () => STATE.language,
     onSourceRendered: applyInlineAnnotations,
-  });
+  };
+  const SOURCE_VIEW = createSourceView(SOURCE_VIEW_DEPS);
   const {
-    renderStandaloneSource,
     applySourceRouteToShell,
     removeStandaloneSource,
     cancelActiveSourceLoad,
     sourceTargetFromRoute,
     fileSourceTarget,
-    switchSourceTab,
-    sourceLineScrollAmount,
-    moveSourceCursor,
-    handleVirtualSourcePagingKeydown,
-    openVirtualSourceSearchFromKeyboard,
   } = SOURCE_VIEW;
 
   const DEFINITION_JUMP = createDefinitionJump({
@@ -1443,13 +2149,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
       void renderStandaloneSource({ path, ref });
     },
-    openSearchSheet,
+    openSearch: (query) => openSearchPage(query),
   });
   DEFINITION_JUMP.install($("#content"));
 
-  const BLAME_VIEW = createBlameView({
-    $,
-    STATE,
+  const BLAME_VIEW_DEPS: BlameViewDeps = {
+    mountRoot: () => $("#diff"),
+    scope: () => $("#content"),
     setRoute,
     applyRouteFromLocation,
     setPageMode,
@@ -1478,10 +2184,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     repoFileTargetFromRoute,
     renderRepoBlobSidebar: (path: string, ref: string) =>
       REPO_VIEW.renderRepoBlobSidebar(path, ref),
-  });
+  };
+  const BLAME_VIEW = createBlameView(BLAME_VIEW_DEPS);
 
   // ---------- Repository view: extracted to repo-view.ts ----------
   const REPO_VIEW = createRepoView({
+    openTreeFileAs: (path, intent) =>
+      openFileAs({ path, type: "blob" }, intent, "repo"),
     $,
     STATE,
     setRoute,
@@ -1490,21 +2199,25 @@ window.GdpExpandLogic = GdpExpandLogic;
     setProjectName,
     currentRange,
     appendScopeParams,
-    markActive,
-    applyFilter,
-    renderSidebar,
-    refreshRepoSidebarTree,
-    rerenderVirtualSidebar,
-    ensureVirtualSidebarDirLoaded,
-    scrollVirtualSidebarPathIntoView,
-    shouldLazyLoadSidebarDir,
-    setFolderIcon,
-    isRepositorySidebarMode,
+    // Files の画面の木はファイル一覧 (FILE_LIST)。
+    markActive: FILE_LIST.markActive,
+    applyFilter: FILE_LIST.applyFilter,
+    renderSidebar: FILE_LIST.renderSidebar,
+    refreshRepoSidebarTree: FILE_LIST.refreshRepoSidebarTree,
+    rerenderVirtualSidebar: FILE_LIST.rerenderVirtualSidebar,
+    ensureVirtualSidebarDirLoaded: FILE_LIST.ensureVirtualSidebarDirLoaded,
+    scrollVirtualSidebarPathIntoView:
+      FILE_LIST.scrollVirtualSidebarPathIntoView,
+    shouldLazyLoadSidebarDir: FILE_LIST.shouldLazyLoadSidebarDir,
+    setFolderIcon: FILE_LIST.setFolderIcon,
+    isRepositorySidebarMode: FILE_LIST.isRepositorySidebarMode,
     placeSidebarToggle,
     createOpenPathButton,
     removeStandaloneSource,
     renderStandaloneSource,
     repoFileTargetFromRoute,
+    // Files とファイルの画面の外でも、ファイル一覧は Files の対象の ref を出す。
+    filesColumnRef: () => STATE.repoRef || "worktree",
     trackLoad,
     isAbortError,
     syncSidebarHeaderHeight,
@@ -1514,10 +2227,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRepoSidebarRef: (ref: string | null) => {
       REPO_SIDEBAR_REF = ref;
     },
-    getSidebarOnFileClick: () => SIDEBAR.getSidebarOnFileClick(),
+    getSidebarOnFileClick: () => FILE_LIST.getSidebarOnFileClick(),
     syncHeaderMenu,
-    getSidebarRowByPath,
-    getSidebarVirtualActivePath,
+    getSidebarRowByPath: FILE_LIST.getSidebarRowByPath,
+    getSidebarVirtualActivePath: FILE_LIST.getSidebarVirtualActivePath,
     pushUndo: (undo: UndoActionResponse) => {
       UNDO_STACK.unshift(undo);
     },
@@ -1586,7 +2299,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     loadRepo,
     renderRepoBlobSidebar,
     syncRepoTargetInput,
-    closeRepoContextMenu,
     handleSidebarContextMenu,
     invalidateRepoSidebar,
     refreshRepoSidebar,
@@ -1597,6 +2309,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   const SEARCH_PALETTE = createSearchPalette({
     STATE,
     setRoute,
+    openingNewTab: (run) => MAIN_TABS.openingNewTab(run),
     currentRange,
     appendScopeParams,
     isAbortError,
@@ -1629,7 +2342,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.hideTests = hidden;
       applyHideTests();
     },
-    openSearchResults: (query) => openSearchSheet(query),
+    openSearchResults: (query) => openSearchPage(query),
+    getPaletteCommands: () => paletteCommands(),
   });
   const { openSearchPalette, isPaletteOpen, paletteMode, clearRepoFileCache } =
     SEARCH_PALETTE;
@@ -1644,20 +2358,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         | "journal"
         | "database"
         | "worktree"
+        | "agents"
         | "tools"
+        | "search"
         | "help",
         string
       >;
-      appPanel: {
-        tabs: string;
-        layout: string;
-        overlay: string;
-        overlayTitle: string;
-        docked: string;
-        dockedTitle: string;
-        close: string;
-        resize: string;
-      };
       global: {
         annotations: string;
         queryHistory: string;
@@ -1680,7 +2386,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         statusInFlightTitle: (count: number, cancellable: number) => string;
         cancelRequestsActiveTitle: (count: number) => string;
         cancelRequestsInactiveTitle: string;
-        brandHome: string;
         menuViews: string;
         repoWebLink: string;
         copyLineReference: string;
@@ -1707,33 +2412,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         autoUpdateOnTitle: string;
         autoUpdateOffTitle: string;
       };
-      diff: {
-        files: (count: number) => string;
-        updated: (time: string) => string;
-        updatedTitle: string;
-        kindAdded: string;
-        kindDeleted: string;
-        kindRenamed: string;
-        kindHeavy: string;
-        kindBinary: string;
-        kindMedia: string;
-        viewedProgress: (viewed: number, total: number) => string;
-        viewedProgressTitle: string;
-        nextUnviewed: string;
-        nextUnviewedTitle: string;
-        allViewed: string;
-        allViewedTitle: string;
-        noChangesTitle: string;
-        noChangesBody: string;
-        noChangesReload: string;
-        noChangesReloadTitle: string;
-        noChangesHistory: string;
-        noChangesHistoryTitle: string;
-        emptyDiffTitle: string;
-        emptyDiffBody: string;
-        noCommitSelectedTitle: string;
-        noCommitSelectedBody: string;
-      };
+      diff: DiffScreenText;
       changeBanner: {
         text: string;
         reload: string;
@@ -1760,8 +2439,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterCountTitle: (visible: number, total: number) => string;
         filterClear: string;
         filterClearTitle: string;
+        filterLabel: string;
         hide: string;
         show: string;
+        hideList: string;
+        showList: string;
+        hideTree: string;
+        showTree: string;
+        autoHidden: string;
         repoTarget: string;
         openDirectoryInOs: string;
         omittedHeavyLabel: string;
@@ -1834,31 +2519,24 @@ window.GdpExpandLogic = GdpExpandLogic;
   > = {
     en: {
       nav: {
-        repo: "Repository",
-        diff: "Diff Viewer",
+        repo: "Files",
+        diff: "Diff",
         history: "History",
-        journal: "Work Log",
-        database: "Datastores",
+        journal: "Work log",
+        database: "Data",
         worktree: "Worktrees",
+        agents: "Agents",
         tools: "Tools",
+        search: "Search",
         help: "Settings & Help",
-      },
-      appPanel: {
-        tabs: "Panel",
-        layout: "Panel layout",
-        overlay: "Overlay",
-        overlayTitle: "Show the panel over the page",
-        docked: "Docked",
-        dockedTitle: "Keep the panel inside the window",
-        close: "Close panel",
-        resize: "Resize panel height",
       },
       global: {
         annotations: "code annotations",
         queryHistory: "query history",
         settings: "viewer settings",
         theme: "toggle theme",
-        search: "Search files (Ctrl+K) · Shift+click: grep (Ctrl+G)",
+        search:
+          "Search projects, agents, sessions and files (Ctrl+K) · Shift+click: grep (Ctrl+G)",
         lineHistory: "Line history",
         recentRef: "Recently used ref",
         olderRevision: "Older revision of this file",
@@ -1869,10 +2547,10 @@ window.GdpExpandLogic = GdpExpandLogic;
           `Copied AI context + code (${lines} line${lines === 1 ? "" : "s"})`,
         copyAiContextFailed: "Copy failed",
         copyAiContextEmpty: "Nothing to copy here",
-        statusLive: "Live",
-        statusLoading: "Loading",
-        statusError: "Error",
-        statusIdle: "Idle",
+        statusLive: STATUS_LABEL_TEXT.en.live,
+        statusLoading: STATUS_LABEL_TEXT.en.loading,
+        statusError: STATUS_LABEL_TEXT.en.error,
+        statusIdle: STATUS_LABEL_TEXT.en.idle,
         statusInFlightTitle: (count, cancellable) =>
           `${count} request${count === 1 ? "" : "s"} in flight${
             cancellable > 0 ? " (cancellable)" : ""
@@ -1880,7 +2558,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         cancelRequestsActiveTitle: (count) =>
           `cancel ${count} in-flight request${count === 1 ? "" : "s"}`,
         cancelRequestsInactiveTitle: "no in-flight requests",
-        brandHome: "Repository home",
         menuViews: "Views",
         repoWebLink: "open repository web page",
         copyLineReference: "Copy AI reference",
@@ -1907,34 +2584,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         autoUpdateOnTitle: "auto update on file change",
         autoUpdateOffTitle: "auto update off — manual reload",
       },
-      diff: {
-        files: (count) => `${count} file${count === 1 ? "" : "s"}`,
-        updated: (time) => `updated ${time}`,
-        updatedTitle: "last updated",
-        kindAdded: "added",
-        kindDeleted: "deleted",
-        kindRenamed: "renamed",
-        kindHeavy: "heavy",
-        kindBinary: "binary",
-        kindMedia: "media",
-        viewedProgress: (viewed, total) => `${viewed}/${total} viewed`,
-        viewedProgressTitle: "review progress",
-        nextUnviewed: "next unviewed",
-        nextUnviewedTitle: "Jump to the next unviewed file (n)",
-        allViewed: "all viewed",
-        allViewedTitle: "All visible files are viewed",
-        noChangesTitle: "No changes",
-        noChangesBody: "The working tree is clean against this ref.",
-        noChangesReload: "Reload diff",
-        noChangesReloadTitle: "Reload this diff range",
-        noChangesHistory: "Open history",
-        noChangesHistoryTitle: "Open commit history for this range",
-        emptyDiffTitle: "Empty diff",
-        emptyDiffBody: "This commit has no changes against its first parent.",
-        noCommitSelectedTitle: "No commit selected",
-        noCommitSelectedBody:
-          "Select a commit from the list to see its changes.",
-      },
+      diff: DIFF_SCREEN_TEXT.en,
       changeBanner: {
         text: "Files changed",
         reload: "Reload",
@@ -1964,8 +2614,15 @@ window.GdpExpandLogic = GdpExpandLogic;
           `${visible} of ${total} files match the filter`,
         filterClear: "Clear",
         filterClearTitle: "Clear file filter",
-        hide: "hide sidebar",
-        show: "show sidebar",
+        filterLabel: "Filter files",
+        hide: "Hide the file list",
+        show: "Show the file list",
+        hideList: "Hide the list",
+        showList: "Show the list",
+        hideTree: "Hide the changed files",
+        showTree: "Show the changed files",
+        autoHidden:
+          "folded to make room for the main area - open it to keep it open",
         repoTarget: "repository target",
         openDirectoryInOs: "open this folder in OS",
         omittedHeavyLabel: "skipped",
@@ -2021,7 +2678,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         refreshTitle: "Refresh commit history",
       },
       journal: {
-        locale: "en",
         ariaLabel: "Work log and tasks",
         title: "Work Log",
         tabs: {
@@ -2046,9 +2702,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         },
         statusField: "Status",
         priorityField: "Priority",
-        previousMonth: "Previous month",
-        nextMonth: "Next month",
-        weekDays: ["S", "M", "T", "W", "T", "F", "S"],
         noEntries: "No logs",
         noRelatedTasks: "No related tasks",
         noBody: "No body",
@@ -2127,6 +2780,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       },
       settings: {
         display: "Display",
+        theme: "Theme",
+        themeHelp:
+          "Applies right away. The T key switches between light and the dark theme you picked.",
+        themeNames: {
+          dark: "Dark (violet)",
+          graphite: "Dark (graphite)",
+          warm: "Dark (warm gray)",
+          light: "Light",
+        },
         language: "Language",
         fileListFontSize: "UI font size",
         fileListFontSizeHelp: "Applies to all UI except code content.",
@@ -2135,7 +2797,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         sizeRegular: "Regular",
         sizeLarge: "Large",
         sizeExtraLarge: "Extra Large",
-        displaySource: "Applies to all projects in this browser.",
+        displaySource:
+          "Theme, language, font sizes, key bindings, notifications and dismissed hints are shared by all projects. Excluded directories and the settings below them apply to this repository only.",
+        sharedTag: "All projects",
+        sharedTagTitle:
+          "Shared by all projects: changing it here changes it everywhere, and it stays the same when you switch projects.",
+        userSettingsError: (detail) =>
+          `The settings shared by all projects cannot be used, so this repository's settings are shown. Changes to them are not saved until this is fixed:\n${detail}`,
         excludedDirectories: "Excluded directories",
         omitDirs: "Skip these directory names while browsing and searching",
         omitDirsHelp:
@@ -2159,6 +2827,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         uploadEnabledLabel: "Allow file uploads into worktree folders",
         uploadEnabledHelp:
           "Disable to make the worktree read-only for everyone using this server.",
+        agentNotifyTitle: "Agent notifications",
+        agentNotifyWaitingLabel:
+          "Notify when an agent starts waiting for input",
+        agentNotifyDoneLabel: "Notify when an agent finishes working",
+        agentNotifyHelp:
+          "Desktop notifications from the Agents screen. The browser asks for permission once, from the Enable notifications button there. Nothing is shown while you are looking at that pane.",
         datastoreTitle: "Datastores",
         datastoreInferFkLabel:
           "Infer FK from Rails-style naming (<name>_id → <names>.id)",
@@ -2198,11 +2872,45 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   ]
 }`,
-        agentRulesSave: "Validate and save",
         agentRulesReset: "Use built-in rules",
-        agentRulesSaving: "Validating and saving…",
         agentRulesSourceDefault: "Source: built-in rules",
-        agentRulesSourceSaved: "Source: saved rules (active immediately)",
+        agentRulesSourceSaved: "Source: saved rules",
+        agentRulesSourceEdited:
+          "Edited: Save changes validates these rules and uses them right away.",
+        agentRulesSourceRestore:
+          "Built-in rules: Save changes removes the saved rules and uses the built-in ones.",
+        categories: {
+          general: {
+            label: "General",
+            description:
+              "Uploads and the directories this repository skips or hides.",
+          },
+          appearance: {
+            label: "Appearance",
+            description: "Theme, language, and font sizes.",
+          },
+          agents: {
+            label: "Agents",
+            description: "Notifications and hooks.",
+          },
+          shortcuts: {
+            label: "Shortcuts",
+            description:
+              "Keys for every action, where each key works, and JSON export and import.",
+          },
+          accounts: {
+            label: "Accounts",
+            description:
+              "Sign-in per settings directory, usage, and launch commands.",
+          },
+          advanced: {
+            label: "Advanced",
+            description:
+              "Datastores, file watching, and terminal status detection.",
+          },
+        },
+        searchPlaceholder: "Search settings",
+        searchNoMatch: (query) => `No settings match "${query}".`,
       },
       annotations: {
         title: "Annotations",
@@ -2215,31 +2923,24 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     ja: {
       nav: {
-        repo: "リポジトリ",
-        diff: "Diff ビューア",
+        repo: "ファイル",
+        diff: "差分",
         history: "履歴",
         journal: "ワークログ",
         database: "データストア",
         worktree: "作業ツリー",
+        agents: "エージェント",
         tools: "ツール",
+        search: "検索",
         help: "設定・ヘルプ",
-      },
-      appPanel: {
-        tabs: "パネル",
-        layout: "パネルの表示方法",
-        overlay: "重ねる",
-        overlayTitle: "本文に重ねて表示",
-        docked: "画面内",
-        dockedTitle: "本文と分けて画面内に表示",
-        close: "パネルを閉じる",
-        resize: "パネルの高さを変更",
       },
       global: {
         annotations: "コード注釈",
         queryHistory: "クエリ履歴",
         settings: "ビューア設定",
         theme: "テーマ切り替え",
-        search: "ファイルを検索 (Ctrl+K)・Shift+クリックで grep (Ctrl+G)",
+        search:
+          "プロジェクト・エージェント・セッション・ファイルを検索 (Ctrl+K)・Shift+クリックで grep (Ctrl+G)",
         lineHistory: "この行の履歴",
         recentRef: "最近使った ref",
         olderRevision: "このファイルの 1 つ前のリビジョン",
@@ -2251,16 +2952,15 @@ window.GdpExpandLogic = GdpExpandLogic;
           `コピーしました（コード付き・${lines}行）`,
         copyAiContextFailed: "コピーに失敗しました",
         copyAiContextEmpty: "コピーする内容がありません",
-        statusLive: "稼働中",
-        statusLoading: "更新中",
-        statusError: "エラー",
-        statusIdle: "待機中",
+        statusLive: STATUS_LABEL_TEXT.ja.live,
+        statusLoading: STATUS_LABEL_TEXT.ja.loading,
+        statusError: STATUS_LABEL_TEXT.ja.error,
+        statusIdle: STATUS_LABEL_TEXT.ja.idle,
         statusInFlightTitle: (count, cancellable) =>
           `${count}件のリクエストを実行中${cancellable > 0 ? "（キャンセル可能）" : ""}`,
         cancelRequestsActiveTitle: (count) =>
           `実行中のリクエストを${count}件キャンセル`,
         cancelRequestsInactiveTitle: "実行中のリクエストはありません",
-        brandHome: "リポジトリホーム",
         menuViews: "ビュー切り替え",
         repoWebLink: "リポジトリのウェブページを開く",
         copyLineReference: "AI参照をコピー",
@@ -2287,33 +2987,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         autoUpdateOnTitle: "ファイル変更時に自動更新",
         autoUpdateOffTitle: "自動更新オフ — 手動で再読み込み",
       },
-      diff: {
-        files: (count) => `${count}ファイル`,
-        updated: (time) => `更新 ${time}`,
-        updatedTitle: "最終更新",
-        kindAdded: "追加",
-        kindDeleted: "削除",
-        kindRenamed: "名前変更",
-        kindHeavy: "大容量",
-        kindBinary: "バイナリ",
-        kindMedia: "メディア",
-        viewedProgress: (viewed, total) => `${viewed}/${total} 確認済み`,
-        viewedProgressTitle: "確認進捗",
-        nextUnviewed: "次の未確認",
-        nextUnviewedTitle: "次の未確認ファイルへ移動 (n)",
-        allViewed: "すべて確認済み",
-        allViewedTitle: "表示中のファイルはすべて確認済みです",
-        noChangesTitle: "変更はありません",
-        noChangesBody: "この参照との差分はありません。",
-        noChangesReload: "diff を更新",
-        noChangesReloadTitle: "この差分範囲を再読み込み",
-        noChangesHistory: "履歴を開く",
-        noChangesHistoryTitle: "この範囲のコミット履歴を開く",
-        emptyDiffTitle: "空の差分",
-        emptyDiffBody: "このコミットは最初の親との差分がありません。",
-        noCommitSelectedTitle: "コミット未選択",
-        noCommitSelectedBody: "一覧からコミットを選ぶと変更内容を表示します。",
-      },
+      diff: DIFF_SCREEN_TEXT.ja,
       changeBanner: {
         text: "ファイルに変更がありました",
         reload: "再読み込みする",
@@ -2343,8 +3017,15 @@ window.GdpExpandLogic = GdpExpandLogic;
           `${total} ファイル中 ${visible} 件が一致`,
         filterClear: "解除",
         filterClearTitle: "ファイル絞り込みを解除",
-        hide: "サイドバーを隠す",
-        show: "サイドバーを表示",
+        filterLabel: "ファイル絞り込み",
+        hide: "ファイル一覧を隠す",
+        show: "ファイル一覧を表示",
+        hideList: "一覧を隠す",
+        showList: "一覧を表示",
+        hideTree: "変更ファイルの一覧を隠す",
+        showTree: "変更ファイルの一覧を表示",
+        autoHidden:
+          "本文の幅のために畳みました。開くと、そのまま開いたままにします",
         repoTarget: "リポジトリの対象",
         openDirectoryInOs: "このフォルダをOSで開く",
         omittedHeavyLabel: "省略",
@@ -2404,7 +3085,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         refreshTitle: "コミット履歴を更新",
       },
       journal: {
-        locale: "ja",
         ariaLabel: "ワークログとタスク",
         title: "ワークログ",
         tabs: {
@@ -2429,9 +3109,6 @@ window.GdpExpandLogic = GdpExpandLogic;
         },
         statusField: "ステータス",
         priorityField: "優先度",
-        previousMonth: "前の月",
-        nextMonth: "次の月",
-        weekDays: ["日", "月", "火", "水", "木", "金", "土"],
         noEntries: "ログはありません",
         noRelatedTasks: "関連タスクはありません",
         noBody: "本文はありません",
@@ -2511,6 +3188,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       },
       settings: {
         display: "表示",
+        theme: "テーマ",
+        themeHelp:
+          "選ぶとすぐに変わります。T キーでライトと、選んだダークを切り替えます。",
+        themeNames: {
+          dark: "ダーク (紫)",
+          graphite: "ダーク (無彩色)",
+          warm: "ダーク (暖かい灰色)",
+          light: "ライト",
+        },
         language: "言語",
         fileListFontSize: "UIの文字サイズ",
         fileListFontSizeHelp: "コード本文を除くUI全体に適用されます。",
@@ -2519,7 +3205,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         sizeRegular: "標準",
         sizeLarge: "大",
         sizeExtraLarge: "特大",
-        displaySource: "このブラウザのすべてのプロジェクトに適用されます。",
+        displaySource:
+          "テーマ・言語・文字サイズ・キー割り当て・通知・閉じた案内は、全プロジェクト共通です。除外ディレクトリから下の設定は、このリポジトリだけの設定です。",
+        sharedTag: "全プロジェクト共通",
+        sharedTagTitle:
+          "全プロジェクト共通: ここで変えるとどのプロジェクトでも変わり、プロジェクトを移っても同じです。",
+        userSettingsError: (detail) =>
+          `全プロジェクト共通の設定を使えないため、このリポジトリの設定で表示しています。直るまで、この節の変更は保存されません:\n${detail}`,
         excludedDirectories: "除外ディレクトリ",
         omitDirs: "閲覧と検索でスキップするディレクトリ名",
         omitDirsHelp:
@@ -2543,6 +3235,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         uploadEnabledLabel: "ワークツリーへのファイルアップロードを許可する",
         uploadEnabledHelp:
           "オフにすると、このサーバを使う全員に対してワークツリーは読み取り専用になります。",
+        agentNotifyTitle: "エージェントの通知",
+        agentNotifyWaitingLabel: "エージェントが入力待ちになったら通知する",
+        agentNotifyDoneLabel: "エージェントの作業が終わったら通知する",
+        agentNotifyHelp:
+          "エージェント画面からデスクトップ通知を出します。ブラウザの許可は、その画面の「通知を有効にする」から 1 度だけ求めます。そのペインをいま見ているときは通知しません。",
         datastoreTitle: "データストア",
         datastoreInferFkLabel:
           "Rails 命名規約 (<name>_id → <names>.id) から FK を推測",
@@ -2582,11 +3279,44 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   ]
 }`,
-        agentRulesSave: "検証して保存",
         agentRulesReset: "組み込みルールに戻す",
-        agentRulesSaving: "検証して保存しています…",
         agentRulesSourceDefault: "適用中: 組み込みルール",
-        agentRulesSourceSaved: "適用中: 保存したルール（即時反映）",
+        agentRulesSourceSaved: "適用中: 保存したルール",
+        agentRulesSourceEdited:
+          "編集中: 「変更を保存」で検証し、すぐに使います。",
+        agentRulesSourceRestore:
+          "組み込みルール: 「変更を保存」で保存したルールを消し、組み込みのルールを使います。",
+        categories: {
+          general: {
+            label: "一般",
+            description:
+              "アップロードと、このリポジトリで読まない・隠すディレクトリ。",
+          },
+          appearance: {
+            label: "表示",
+            description: "テーマ、言語、文字の大きさ。",
+          },
+          agents: {
+            label: "エージェント",
+            description: "通知とフック。",
+          },
+          shortcuts: {
+            label: "ショートカット",
+            description:
+              "操作ごとのキーと、キーの効く所。JSON の書き出し・読み込み。",
+          },
+          accounts: {
+            label: "アカウント",
+            description:
+              "設定ディレクトリごとのログイン、使用量、起動コマンド。",
+          },
+          advanced: {
+            label: "詳細",
+            description: "データストア、ファイルの監視、端末の状態判定。",
+          },
+        },
+        searchPlaceholder: "設定を検索",
+        searchNoMatch: (query) => `「${query}」に当てはまる設定はありません。`,
       },
       annotations: {
         title: "注釈",
@@ -2609,6 +3339,24 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (el) el.textContent = text;
   }
 
+  // Split / Unified は絵と文字を持ち、帯が狭いと CSS が文字を畳んで絵だけに
+  // する (@container topbar)。畳んでも名前が分かるよう title と aria-label にも入れる。
+  function setLayoutButtonLabel(
+    selector: string,
+    paths: string | string[],
+    label: string,
+  ) {
+    const button = document.querySelector<HTMLButtonElement>(selector);
+    if (!button) return;
+    button.innerHTML = iconSvg("seg-icon", paths);
+    const name = document.createElement("span");
+    name.className = "seg-label";
+    name.textContent = label;
+    button.append(name);
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+
   function setButtonLabel(button: HTMLButtonElement | null, text: string) {
     if (button) button.textContent = text;
   }
@@ -2616,12 +3364,36 @@ window.GdpExpandLogic = GdpExpandLogic;
   function localizeViewerChrome() {
     const text = uiText();
     document.documentElement.lang = STATE.language;
-    // Tools はリンクではなくボタンなので HTMLElement で拾う (ラベルの当て方は
-    // 他のメニュー項目と同じ data-route 経由)。
-    document.querySelectorAll<HTMLElement>(".app-menu-item").forEach((link) => {
-      const route = link.dataset.route as keyof typeof text.nav;
-      if (route && text.nav[route]) link.textContent = text.nav[route];
-    });
+    // 最下段の接続状態も今の言語で書き直す (状態は #status の class にある)。
+    const status = $("#status").classList;
+    setStatus(
+      (["live", "refreshing", "error"] as const).find((s) =>
+        status.contains(s),
+      ) ?? null,
+    );
+    // 画面の入口 (木の見出しの絵柄の列)。絵だけなので、名前とキーは
+    // title / aria-label に出す。
+    const bindings = shownKeyBindings();
+    document
+      .querySelectorAll<HTMLElement>(".view-strip-item")
+      .forEach((link) => {
+        const route = link.dataset.route as keyof typeof VIEW_STRIP_KEYS;
+        const name = text.nav[route];
+        if (!name) throw new Error(`view strip: no label for route ${route}`);
+        const action = VIEW_STRIP_KEYS[route];
+        const binding = action
+          ? bindings.find((item) => item.action === action)
+          : undefined;
+        const label = binding ? `${name} (${formatKeyBinding(binding)})` : name;
+        link.title = label;
+        link.setAttribute("aria-label", label);
+        const icon = link.querySelector<HTMLElement>(".goi-icon");
+        if (icon && !icon.firstElementChild)
+          icon.innerHTML = iconSvg("view-strip-icon", pageIconPaths(route));
+      });
+    MAIN_TABS.localize();
+    for (const view of Object.values(IMAGE_VIEWS))
+      view?.setLanguage(STATE.language);
     // The repo link is icon-only; the label lives in title/aria-label
     // instead of visible text.
     const repoWebLink =
@@ -2630,9 +3402,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       repoWebLink.title = text.global.repoWebLink;
       repoWebLink.setAttribute("aria-label", text.global.repoWebLink);
     }
-    document
-      .querySelector<HTMLAnchorElement>(".brand")
-      ?.setAttribute("aria-label", text.global.brandHome);
     document
       .querySelector<HTMLElement>(".app-menu")
       ?.setAttribute("aria-label", text.global.menuViews);
@@ -2670,67 +3439,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     document
       .querySelector<HTMLElement>("#doctor-sheet")
       ?.setAttribute("aria-label", doctorTitle);
-    const toolsChrome = toolsText(STATE.language);
-    const toolsBtn =
-      document.querySelector<HTMLButtonElement>("#panel-tab-tools");
-    if (toolsBtn) {
-      toolsBtn.textContent = toolsChrome.title;
-      toolsBtn.title = toolsChrome.open;
-    }
     document
       .querySelector<HTMLElement>("#tools-sheet")
-      ?.setAttribute("aria-label", toolsChrome.title);
+      ?.setAttribute("aria-label", toolsText(STATE.language).title);
     relocalizeTools?.();
-    const terminalChrome = terminalText(STATE.language);
-    const terminalBtn = document.querySelector<HTMLButtonElement>(
-      "#panel-tab-terminal",
-    );
-    if (terminalBtn) {
-      terminalBtn.textContent = terminalChrome.title;
-      terminalBtn.title = terminalChrome.open;
-    }
-    document
-      .querySelector<HTMLElement>("#terminal-sheet")
-      ?.setAttribute("aria-label", terminalChrome.title);
     relocalizeTerminal?.();
-    const searchChrome = searchPaletteText(STATE.language);
-    const searchTabBtn =
-      document.querySelector<HTMLButtonElement>("#panel-tab-search");
-    if (searchTabBtn) {
-      searchTabBtn.textContent = searchChrome.resultsTitle;
-      searchTabBtn.title = searchChrome.resultsOpen;
-    }
     relocalizeSearchResults?.();
-    document
-      .querySelector<HTMLElement>(".app-panel-tabs")
-      ?.setAttribute("aria-label", text.appPanel.tabs);
-    const panelLayout = document.querySelector<HTMLElement>(
-      ".app-panel-layout-switch",
-    );
-    panelLayout?.setAttribute("aria-label", text.appPanel.layout);
-    const overlayLayout = document.querySelector<HTMLButtonElement>(
-      '[data-panel-layout="overlay"]',
-    );
-    if (overlayLayout) {
-      overlayLayout.textContent = text.appPanel.overlay;
-      overlayLayout.title = text.appPanel.overlayTitle;
-    }
-    const dockedLayout = document.querySelector<HTMLButtonElement>(
-      '[data-panel-layout="docked"]',
-    );
-    if (dockedLayout) {
-      dockedLayout.textContent = text.appPanel.docked;
-      dockedLayout.title = text.appPanel.dockedTitle;
-    }
-    const panelClose =
-      document.querySelector<HTMLButtonElement>("#app-panel-close");
-    if (panelClose) {
-      panelClose.title = text.appPanel.close;
-      panelClose.setAttribute("aria-label", text.appPanel.close);
-    }
-    document
-      .querySelector<HTMLElement>("#app-panel-resizer")
-      ?.setAttribute("aria-label", text.appPanel.resize);
     const copyAiContext =
       document.querySelector<HTMLButtonElement>("#copy-ai-context");
     if (copyAiContext) {
@@ -2750,12 +3464,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     const layoutGroup = document.querySelector<HTMLElement>("#topbar .seg");
     layoutGroup?.setAttribute("aria-label", text.topbar.layout);
-    setElementText(
+    setLayoutButtonLabel(
       '#topbar .seg button[data-layout="line-by-line"]',
+      DIFF_UNIFIED_16_PATHS,
       text.topbar.unified,
     );
-    setElementText(
+    setLayoutButtonLabel(
       '#topbar .seg button[data-layout="side-by-side"]',
+      DIFF_SPLIT_16_PATH,
       text.topbar.split,
     );
     const ignoreWs = document.querySelector<HTMLButtonElement>("#ignore-ws");
@@ -2771,20 +3487,40 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyAutoUpdateButton();
     setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
 
-    setElementText(".sb-title", text.sidebar.files);
-    const sidebarActions = document.querySelector<HTMLElement>(".sb-actions");
-    sidebarActions?.setAttribute("aria-label", text.sidebar.actions);
-    const expandAll =
-      document.querySelector<HTMLButtonElement>("#sb-expand-all");
-    if (expandAll) {
-      expandAll.title = text.sidebar.expandAll;
-      expandAll.setAttribute("aria-label", text.sidebar.expandAll);
-    }
-    const collapseAll =
-      document.querySelector<HTMLButtonElement>("#sb-collapse-all");
-    if (collapseAll) {
-      collapseAll.title = text.sidebar.collapseAll;
-      collapseAll.setAttribute("aria-label", text.sidebar.collapseAll);
+    syncSidebarTitle();
+    // ファイル一覧と変更ファイルの一覧の見出しの操作と絞り込み。
+    for (const dom of [FILE_LIST_DOM, CHANGES_LIST_DOM]) {
+      document
+        .querySelector<HTMLElement>(`${dom.root} .sb-actions`)
+        ?.setAttribute("aria-label", text.sidebar.actions);
+      const expandAll = document.querySelector<HTMLButtonElement>(
+        dom.expandAll,
+      );
+      if (expandAll) {
+        expandAll.title = text.sidebar.expandAll;
+        expandAll.setAttribute("aria-label", text.sidebar.expandAll);
+      }
+      const collapseAll = document.querySelector<HTMLButtonElement>(
+        dom.collapseAll,
+      );
+      if (collapseAll) {
+        collapseAll.title = text.sidebar.collapseAll;
+        collapseAll.setAttribute("aria-label", text.sidebar.collapseAll);
+      }
+      const filter = document.querySelector<HTMLInputElement>(dom.filter);
+      if (filter) {
+        filter.placeholder = text.sidebar.filter;
+        filter.title = text.sidebar.filterTitle;
+        filter.setAttribute("aria-label", text.sidebar.filterLabel);
+      }
+      const filterClear = document.querySelector<HTMLButtonElement>(
+        dom.filterClear,
+      );
+      if (filterClear) {
+        filterClear.textContent = text.sidebar.filterClear;
+        filterClear.title = text.sidebar.filterClearTitle;
+        filterClear.setAttribute("aria-label", text.sidebar.filterClearTitle);
+      }
     }
     const sbView = document.querySelector<HTMLElement>(".sb-view-seg");
     sbView?.setAttribute("aria-label", text.sidebar.view);
@@ -2798,18 +3534,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       '.sb-view-seg button[data-view="flat"]',
     );
     if (sbViewFlat) sbViewFlat.title = text.sidebar.flatTitle;
-    const filter = document.querySelector<HTMLInputElement>("#sb-filter");
-    if (filter) {
-      filter.placeholder = text.sidebar.filter;
-      filter.title = text.sidebar.filterTitle;
-    }
-    const filterClear =
-      document.querySelector<HTMLButtonElement>("#sb-filter-clear");
-    if (filterClear) {
-      filterClear.textContent = text.sidebar.filterClear;
-      filterClear.title = text.sidebar.filterClearTitle;
-      filterClear.setAttribute("aria-label", text.sidebar.filterClearTitle);
-    }
     const repoTarget = document.querySelector<HTMLInputElement>("#repo-target");
     if (repoTarget) {
       repoTarget.title = text.sidebar.repoTarget;
@@ -2818,12 +3542,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     const sidebarToggle =
       document.querySelector<HTMLButtonElement>("#sidebar-toggle");
     if (sidebarToggle) {
-      const sidebarToggleTitle = STATE.sidebarHidden
-        ? text.sidebar.show
-        : text.sidebar.hide;
+      const sidebarToggleTitle = fileListToggleTitle(STATE.sidebarHidden);
       sidebarToggle.title = sidebarToggleTitle;
       sidebarToggle.setAttribute("aria-label", sidebarToggleTitle);
     }
+    localizeListColumnFolds();
     setElementText(".sidebar-toggle-label", text.sidebar.files);
 
     setElementText(".history-title", text.history.title);
@@ -2844,6 +3567,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     relocalizeHistory?.();
     relocalizeJournal?.();
     relocalizeWorktree?.();
+    relocalizeAgents?.();
     // 設定フォームの文言は viewer-settings.ts が自分で貼る。
     relocalizeViewerSettings?.();
     SOURCE_VIEW.localize();
@@ -2887,6 +3611,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let relocalizeHistory: (() => void) | null = null;
   let relocalizeJournal: (() => void) | null = null;
   let relocalizeWorktree: (() => void) | null = null;
+  let relocalizeAgents: (() => void) | null = null;
   let relocalizeTools: (() => void) | null = null;
   let relocalizeViewerSettings: (() => void) | null = null;
   let relocalizeTerminal: (() => void) | null = null;
@@ -2899,11 +3624,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   function setViewerLanguage(language: ViewerLanguage, persist = true) {
     const next = normalizeViewerLanguage(language);
     STATE.language = next;
-    if (persist) patchSettings({ language: next });
+    if (persist) {
+      rememberLayoutLook();
+      patchSettings({ language: next });
+    }
     const select =
       document.querySelector<HTMLSelectElement>("#viewer-language");
     if (select) select.value = next;
     localizeViewerChrome();
+    // 開いている Diff の帯とカードは描いたときの言語のまま残るので描き直す。
+    applyHideTestsToMeta();
+    DIFF_VIEW.relocalize();
     if (STATE.route.screen === "help") {
       setRoute(
         {
@@ -2934,15 +3665,43 @@ window.GdpExpandLogic = GdpExpandLogic;
             ? text.global.statusError
             : text.global.statusIdle;
     const labelEl = el.querySelector<HTMLElement>(".status-label");
-    if (labelEl) labelEl.textContent = label;
+    if (labelEl)
+      renderStatusLabel(
+        labelEl,
+        [
+          text.global.statusLive,
+          text.global.statusLoading,
+          text.global.statusError,
+          text.global.statusIdle,
+        ],
+        label,
+      );
     el.setAttribute("aria-label", label);
     updateNetworkActivity();
   }
 
   function applyTheme() {
     document.documentElement.dataset.theme = STATE.theme;
+    // 既定の紫は属性なし。色違いはダークのときだけ効く (style.css 先頭)。
+    const palette = savedPalette();
+    if (palette === "violet") delete document.documentElement.dataset.palette;
+    else document.documentElement.dataset.palette = palette;
+    rememberEarlyLook({
+      theme: STATE.theme,
+      palette: palette === "violet" ? undefined : palette,
+    });
     $<HTMLLinkElement>("#hljs-light").disabled = STATE.theme === "dark";
     $<HTMLLinkElement>("#hljs-dark").disabled = STATE.theme !== "dark";
+    syncWindowFrameColor();
+  }
+
+  /**
+   * インストールした窓の枠の色 (core/pwa.ts)。いま見ているプロジェクトの色、
+   * 登録していない・まだ一覧が来ていなければ今の地。
+   */
+  function syncWindowFrameColor(): void {
+    const color = PROJECT_LOOKS.current()?.color;
+    syncThemeColor(document, color ? `--project-${color}` : "--color-ground");
   }
 
   function getHljs(): HljsApi | null {
@@ -3007,7 +3766,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         reject(new Error("failed to load highlight.js"));
       };
       document.head.appendChild(script);
-    }).catch(() => {
+    }).catch((error: unknown) => {
+      // 次に使うときに読み直す。ボタンは失敗の見た目、理由はここに残す。
+      console.error("[code-viewer] highlight.js could not be loaded", error);
       highlightLoadPromise = null;
       return null;
     });
@@ -3044,7 +3805,9 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function setLayout(layout: LayoutMode, persist = true) {
     STATE.layout = layout;
-    if (persist) patchSettings({ layout });
+    // 電話の段での切替はその場だけ (デスクトップの既定を変えない)。
+    if (persist && PHONE_QUERY.matches) phoneDiffLayout = layout;
+    else if (persist) patchSettings({ layout });
     $$("#topbar .seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.layout === layout);
     });
@@ -3110,14 +3873,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     VIEWER_SETTINGS.sync();
   }
 
-  /** サイドバーで選ばれているファイルのパスをクリップボードへ。 */
+  /** キーで動かす一覧 (keyList) で選ばれているファイルのパスをクリップボードへ。 */
   function copyActiveFilePath(): boolean {
+    const dom = keyList() === FILE_LIST ? FILE_LIST_DOM : CHANGES_LIST_DOM;
     const active = document.querySelector<HTMLElement>(
-      "#filelist li.active[data-path]",
+      `${dom.list} li.active[data-path]`,
     );
     const path = active?.dataset.path;
     if (!path) return false;
-    void navigator.clipboard.writeText(filePathClipboardText(path));
+    navigator.clipboard
+      .writeText(filePathClipboardText(path))
+      .catch((error: unknown) => {
+        console.error(
+          errorWithCause("copying the selected file path failed", error),
+        );
+        setStatus("error");
+      });
     return true;
   }
 
@@ -3158,6 +3929,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       excludeNames: serverScopeExcludeNamesDefault().join("\n"),
       watchLimit: SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
       uploadEnabled: true,
+      agentNotifyWaiting: true,
+      agentNotifyDone: true,
       inferFkRails: false,
       s3TooltipEnabled: true,
     };
@@ -3189,6 +3962,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         normalizeScopeWatchLimit(draft.watchLimit) ??
         SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
       uploadEnabled: draft.uploadEnabled,
+      agentNotifyWaiting: draft.agentNotifyWaiting,
+      agentNotifyDone: draft.agentNotifyDone,
       inferFkRails: draft.inferFkRails,
       s3TooltipEnabled: draft.s3TooltipEnabled,
     };
@@ -3207,6 +3982,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         scopeExcludeNames: null,
         scopeWatchLimit: null,
         uploadEnabled: null,
+        agentNotifyWaiting: null,
+        agentNotifyDone: null,
       });
       dbPrefsPatch.inferFkRails = null;
       dbPrefsPatch.s3TooltipEnabled = null;
@@ -3223,6 +4000,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         appPatch.scopeWatchLimit = normalized.watchLimit;
       if (changed.has("uploadEnabled"))
         appPatch.uploadEnabled = normalized.uploadEnabled;
+      if (changed.has("agentNotifyWaiting"))
+        appPatch.agentNotifyWaiting = normalized.agentNotifyWaiting;
+      if (changed.has("agentNotifyDone"))
+        appPatch.agentNotifyDone = normalized.agentNotifyDone;
       if (changed.has("inferFkRails"))
         dbPrefsPatch.inferFkRails = normalized.inferFkRails;
       if (changed.has("s3TooltipEnabled"))
@@ -3442,7 +4223,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const historyRoute = { ...route, view: "history" as const };
     const mount = renderFileHistoryShellView(
       {
-        $,
+        mountRoot: () => $("#diff"),
         repoFileTargetFromRoute,
         renderRepoBlobSidebar: (path, ref) =>
           REPO_VIEW.renderRepoBlobSidebar(path, ref),
@@ -3470,6 +4251,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   let ANNOTATIONS_UI: AnnotationsUi | null = null;
   let JOURNAL_VIEW: JournalView | null = null;
   let WORKTREE_VIEW: WorktreeView | null = null;
+  let AGENTS_VIEW: AgentsView | null = null;
+  let APP_NAV: AppNav | null = null;
+  let AGENTS_SIDEBAR: AgentsSidebar | null = null;
+  let PROJECT_SWITCHER: ProjectSwitcher | null = null;
 
   function applyInlineAnnotations() {
     ANNOTATIONS_UI?.applyInlineAnnotations();
@@ -3493,25 +4278,16 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   // buildRoute は AppRoute しか知らないので、そこに乗らないオーバーレイの状態
-  // (doctor / tools) は現在の URL から明示的に引き継ぐ。落とすと画面を移動した
-  // 瞬間にシートの状態が URL から消える。history に積む URL とヘッダメニューの
-  // href の両方がこれを通る必要がある。
+  // (doctor) は現在の URL から明示的に引き継ぐ。落とすと画面を移動した瞬間に
+  // シートの状態が URL から消える。history に積む URL とヘッダメニューの href の
+  // 両方がこれを通る必要がある。?terminal= は引き継がない: 前面のタブが
+  // ターミナルでない画面へ移るので、映しているシェルは無い (ターミナルのタブが
+  // 前面になるときは showPanes がそのシェルを積む)。Tools と Search はタブ
+  // (route の画面) なので、ここでは運ばない。
   function withOverlayState(url: string): string {
-    return withSearchResultsOverlay(
-      withTerminalOverlay(
-        withToolsOverlay(
-          withDoctorOverlay(
-            url,
-            parseDoctorOverlay(
-              window.location.pathname,
-              window.location.search,
-            ),
-          ),
-          parseToolsOverlay(window.location.search),
-        ),
-        parseTerminalOverlay(window.location.search),
-      ),
-      parseSearchResultsOverlay(window.location.search),
+    return withDoctorOverlay(
+      url,
+      parseDoctorOverlay(routePathname(), window.location.search),
     );
   }
 
@@ -3519,15 +4295,99 @@ window.GdpExpandLogic = GdpExpandLogic;
     return withOverlayState(withAnnotationSessionParam(buildRoute(route)));
   }
 
-  function historyStateForRoute(route: AppRoute): unknown {
-    return route.screen === "file"
-      ? {
-          screen: "file",
-          path: route.path,
-          ref: route.ref,
-          view: route.view || "detail",
-        }
-      : { view: route.screen };
+  // ---- 戻る/進むのスクロール位置 ----
+  // 本文は窓ではなく自分の箱 (#content) で動くので、ブラウザは位置を戻さない。
+  // 履歴の項ごとの鍵で覚えて、戻ったときにその位置へ戻す (core/scroll-memory)。
+  const SCROLL_MEMORY = createScrollMemory();
+  let SCROLL_KEY_SEQ = 0;
+
+  function currentScrollKey(): string | null {
+    return scrollKeyOfHistoryState(history.state);
+  }
+
+  /**
+   * いまの履歴の項の鍵。無ければその場で付ける (最初に開いた項・外から来た項は
+   * この仕組みを通っていないので鍵を持たない)。
+   */
+  function ensureScrollKey(): string {
+    const existing = currentScrollKey();
+    if (existing) return existing;
+    const key = `h${++SCROLL_KEY_SEQ}`;
+    const state = history.state;
+    history.replaceState(
+      { ...(typeof state === "object" && state ? state : {}), scrollKey: key },
+      "",
+    );
+    return key;
+  }
+
+  /** いま見ている位置を、いまの履歴の項に覚える。 */
+  function rememberMainScroll(): void {
+    const box = mainScrollBox();
+    if (box) SCROLL_MEMORY.remember(ensureScrollKey(), box.scrollTop);
+  }
+
+  /**
+   * 履歴に積む state。`keep` は同じ項を書き換えるとき (replaceState) で、
+   * 覚えた位置を捨てないように鍵をそのまま使う。
+   */
+  function historyStateForRoute(route: AppRoute, keep = false): unknown {
+    const base =
+      route.screen === "file"
+        ? {
+            screen: "file",
+            path: route.path,
+            ref: route.ref,
+            view: route.view || "detail",
+          }
+        : { view: route.screen };
+    const key = (keep ? currentScrollKey() : null) || `h${++SCROLL_KEY_SEQ}`;
+    // 新しい項へ移る前に、いま見ていた位置を覚えておく。
+    if (!keep) rememberMainScroll();
+    return { ...base, scrollKey: key };
+  }
+
+  /** 本文の箱を先頭へ (新しい画面は先頭から見せる)。 */
+  function scrollMainToTop(): void {
+    const box = mainScrollBox();
+    if (box) box.scrollTop = 0;
+  }
+
+  /**
+   * 戻る/進むで来た項の位置へ戻す。中身は後から描き終わるので、箱がその高さに
+   * なるまで何度か試し、途中で別の画面へ移ったらやめる。
+   */
+  let SCROLL_RESTORE_SEQ = 0;
+  /** 中身が描き終わるまでの間、位置を当て直す時点 (ミリ秒)。 */
+  const SCROLL_RESTORE_DELAYS = [0, 120, 400, 900, 1500];
+  function restoreMainScroll(): void {
+    const key = currentScrollKey();
+    const top = SCROLL_MEMORY.recall(key);
+    const seq = ++SCROLL_RESTORE_SEQ;
+    // 中身は後から届くので (差分のカードは遅れて描かれ、その分だけ上が伸びる)、
+    // 描き終わるまで何度か当て直す。利用者が自分で動かしたらそこでやめる。
+    const stop = new AbortController();
+    for (const event of ["wheel", "pointerdown", "keydown"] as const) {
+      window.addEventListener(event, () => stop.abort(), {
+        once: true,
+        passive: true,
+        signal: stop.signal,
+      });
+    }
+    const apply = () => {
+      if (seq !== SCROLL_RESTORE_SEQ || stop.signal.aborted) return;
+      const box = mainScrollBox();
+      if (box) box.scrollTop = top;
+    };
+    apply();
+    requestAnimationFrame(apply);
+    for (const delay of SCROLL_RESTORE_DELAYS) {
+      setTimeout(() => {
+        apply();
+        if (delay === SCROLL_RESTORE_DELAYS[SCROLL_RESTORE_DELAYS.length - 1])
+          stop.abort();
+      }, delay);
+    }
   }
 
   function replaceUrlWithCurrentRoute(): void {
@@ -3535,7 +4395,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const current = window.location.pathname + window.location.search;
     if (url !== current) {
       history.replaceState(
-        historyStateForRoute(STATE.route),
+        historyStateForRoute(STATE.route, true),
         "",
         url + window.location.hash,
       );
@@ -3605,8 +4465,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         dispatchFileRoute(routeNow, { refresh: true });
       });
     // 中断 (cancelInFlightRequests) は再描画しない。次の通知で再検証する。
-    fileRouteSignatureCheck.catch(() => {
+    fileRouteSignatureCheck.catch((error: unknown) => {
       fileRouteSignatureCheck = null;
+      if (!isAbortError(error))
+        console.error(
+          "[code-viewer] could not check whether %s changed",
+          key,
+          error,
+        );
     });
   }
 
@@ -3692,7 +4558,50 @@ window.GdpExpandLogic = GdpExpandLogic;
     return route.screen === "file" && route.view === "blob" && !!route.preview;
   }
 
+  /**
+   * 自分の箱を本文の面に置く画面を離れるなら、その画面の後片付け (箱を外し、
+   * 隠した #diff を戻す)。setRoute と URL からの移動の両方がここを通る。
+   */
+  function leaveScreen(previous: AppRoute, next: AppRoute): void {
+    const leaving = screenToLeave(previous, next);
+    switch (leaving) {
+      case "database":
+        DATABASE_VIEW.suspend();
+        return;
+      case "journal":
+        JOURNAL_VIEW?.suspend();
+        return;
+      case "worktree":
+        WORKTREE_VIEW?.suspend();
+        return;
+      case "agents":
+        AGENTS_VIEW?.suspend();
+        return;
+      case "tools":
+      case "search":
+        leaveToolOrSearchPage(leaving);
+        return;
+      case null:
+        return;
+    }
+  }
+
   function setRoute(route: AppRoute, replace = false) {
+    // 右の面にフォーカスがあるときの木・パレット・リンクで開くファイルは、
+    // 右の面で開く (本文は描き直さない)。履歴を置き換えるだけの呼び出し
+    // (本文の行の選択など) は本文のもの。
+    if (!replace && route.screen === "file") {
+      const fileRoute = normalizeInternalFileRoute(route);
+      if (
+        fileRoute.screen === "file" &&
+        fileRoute.view !== "history" &&
+        routeTarget(fileRoute)?.kind === "file" &&
+        MAIN_TABS.panes().split &&
+        MAIN_TABS.sideForRoute(fileRoute) === "right" &&
+        openInRightPane(fileRoute)
+      )
+        return;
+    }
     const previousRoute = STATE.route;
     let nextRoute =
       route.screen === "unknown"
@@ -3705,15 +4614,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       preHistoryRange = null;
       removeFileHistoryShell();
     }
-    if (previousRoute.screen === "journal" && nextRoute.screen !== "journal") {
-      JOURNAL_VIEW?.suspend();
-    }
-    if (
-      previousRoute.screen === "worktree" &&
-      nextRoute.screen !== "worktree"
-    ) {
-      WORKTREE_VIEW?.suspend();
-    }
+    leaveScreen(previousRoute, nextRoute);
     STATE.route = nextRoute;
     STATE.from = nextRoute.range.from;
     STATE.to = nextRoute.range.to;
@@ -3727,9 +4628,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.repoRef = nextRoute.ref || "worktree";
     }
     const url = urlForRoute(nextRoute);
-    const state = historyStateForRoute(nextRoute);
+    const state = historyStateForRoute(nextRoute, replace);
     if (replace) history.replaceState(state, "", url);
     else history.pushState(state, "", url);
+    MAIN_TABS.syncRoute(nextRoute, !replace);
+    // 右の面にフォーカスが残っている (本文を裏で移した) なら URL は右の面のもの。
+    syncFocusedPaneUrl("replace");
     syncHeaderMenu();
     syncLineRefPill();
     // Picking another commit (or clearing the file) on the history screen
@@ -3746,9 +4650,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       isSameBlobFileRoute(previousRoute, nextRoute) &&
       routeBlobPreview(previousRoute) !== routeBlobPreview(nextRoute)
     ) {
-      switchSourceTab(routeBlobPreview(nextRoute) ? "preview" : "code", {
-        updateRoute: false,
-      });
+      SOURCE_VIEW.switchSourceTab(
+        routeBlobPreview(nextRoute) ? "preview" : "code",
+        { updateRoute: false },
+      );
     }
     if (shouldDispatchFileRouteAfterSetRoute(previousRoute, nextRoute)) {
       dispatchFileRoute(nextRoute);
@@ -3765,6 +4670,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       removeStandaloneSource();
       void WORKTREE_VIEW?.enter();
     }
+    if (nextRoute.screen === "agents") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      removeStandaloneSource();
+      void AGENTS_VIEW?.enter();
+    }
+    enterToolOrSearchPage();
   }
 
   // ---- Query History right-panel open/close ----
@@ -3779,9 +4691,24 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
+  /**
+   * Files とファイルの画面の外で、ファイル一覧を出す (読み込み済みなら選択も
+   * スクロールもそのまま)。失敗は状態と console に出す。
+   */
+  function showFileList(): void {
+    const ref = STATE.repoRef || "worktree";
+    REPO_VIEW.ensureFileList(ref).catch((error: unknown) => {
+      console.error(
+        "[code-viewer] the file list (%s) could not be loaded",
+        ref,
+        error,
+      );
+      setStatus("error");
+    });
+  }
+
   function setPageMode() {
     const historyPanelRoute = STATE.route.screen === "history";
-    const fileHistoryRoute = isFileHistoryRoute(STATE.route);
     const fileRepoBlobRoute =
       STATE.route.screen === "file" &&
       (STATE.route.view === "blob" ||
@@ -3798,56 +4725,19 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.route.screen === "history" &&
       !!STATE.route.source &&
       SOURCE_VIEW.sourceTargetFromRoute() !== null;
-    document.body.classList.toggle(
-      "gdp-file-detail-page",
-      STATE.route.screen === "file" || hostedSourceOpen,
-    );
-    document.body.classList.toggle("gdp-repo-blob-page", fileRepoBlobRoute);
-    document.body.classList.toggle(
-      "gdp-repo-page",
-      STATE.route.screen === "repo",
-    );
-    document.body.classList.toggle(
-      "gdp-diff-page",
-      STATE.route.screen === "diff",
-    );
-    document.body.classList.toggle(
-      "gdp-help-page",
-      STATE.route.screen === "help",
-    );
-    document.body.classList.toggle("gdp-history-page", historyPanelRoute);
-    document.body.classList.toggle("gdp-file-history-page", fileHistoryRoute);
-    document.body.classList.toggle(
-      "gdp-database-page",
-      STATE.route.screen === "database",
-    );
-    document.body.classList.toggle(
-      "gdp-journal-page",
-      STATE.route.screen === "journal",
-    );
-    document.body.classList.toggle(
-      "gdp-worktree-page",
-      STATE.route.screen === "worktree",
-    );
-    // docked の下パネルと場所を分け合うとき、#content がスクロール容器になる
-    // ページ。style.css の body.app-panel-docked[data-content-scrolls-when-docked]
-    // 規則群がこの属性だけを見る (ページクラスの列挙はしない)。
-    // journal / database は自分の箱が --content-h から高さを取るので立てない。
-    document.body.toggleAttribute(
-      "data-content-scrolls-when-docked",
-      STATE.route.screen === "diff" ||
-        STATE.route.screen === "history" ||
-        STATE.route.screen === "repo" ||
-        STATE.route.screen === "file" ||
-        STATE.route.screen === "help" ||
-        STATE.route.screen === "worktree",
-    );
-    // 左に --history-w の一覧パネル (#history-panel / #worktree-panel) を持つ
-    // ページ。#history-resizer の表示がこの属性を見る。
-    document.body.toggleAttribute(
-      "data-history-list-panel",
-      historyPanelRoute || STATE.route.screen === "worktree",
-    );
+    // 画面の印 (core/page-mode.ts。index.html の早いスクリプトも同じ印を付ける)。
+    const pageMode = pageModeClasses(STATE.route, hostedSourceOpen);
+    for (const name of PAGE_MODE_CLASSES)
+      document.body.classList.toggle(name, pageMode.has(name));
+    // 作業ツリーの一覧だけの表示かも同じときに route から (外すのは worktree-view.ts
+    // が画面を離れるとき)。
+    if (STATE.route.screen === "worktree")
+      document.body.toggleAttribute(
+        "data-worktree-overview",
+        worktreeOverview(STATE.route),
+      );
+    // ファイル一覧はどの画面でも出す (Files とファイルの画面は repo-view が描く)。
+    if (!repoSidebarRoute) showFileList();
     const repoTargetWrap =
       document.querySelector<HTMLElement>("#repo-target-wrap");
     if (!repoSidebarRoute && repoTargetWrap) {
@@ -3886,26 +4776,37 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyHideTests();
   }
 
+  /**
+   * 画面を移るリンク (中央上のタブ・左のサイドバーの全体ボードと設定・
+   * アイコンのリンク)。選択の印と、ページを読み直さない移動の対象。
+   */
+  const ROUTE_LINK_SELECTOR =
+    "a.app-menu-item, a.global-icon-link, a.nav-board-link, a.nav-foot-item";
+
+  /**
+   * いまの画面の入口 (.active を付ける。見た目の印は付けず、プロジェクトを
+   * 移るときの移り先 currentScreenPath などが読む)。フォーカスのある面の選択
+   * タブで決める: page はその入口、file は Files、ターミナルは無し。タブが
+   * まだ無い (本文の既定を出している) ときは route から決める。
+   */
+  function headerRouteForFront(): string | null {
+    const front = MAIN_TABS.front();
+    if (front?.target.kind === "page") return front.target.page;
+    if (front?.target.kind === "file") return "repo";
+    if (front) return null;
+    if (STATE.route.screen !== "file") return STATE.route.screen;
+    return STATE.route.view === "blob" ||
+      STATE.route.view === "blame" ||
+      STATE.route.view === "history"
+      ? "repo"
+      : "diff";
+  }
+
   function syncHeaderMenu() {
-    // Terminal / Tools はページ遷移ではなく下パネルの中身なので、ヘッダーの
-    // 並びには居ない。選択状態は URL (?terminal= / ?tools=) から決める。
-    syncAppPanel();
     document
-      .querySelectorAll<HTMLAnchorElement>(
-        "a.app-menu-item, a.global-icon-link",
-      )
+      .querySelectorAll<HTMLAnchorElement>(ROUTE_LINK_SELECTOR)
       .forEach((link) => {
-        const fileRouteOwner =
-          STATE.route.screen === "file" &&
-          (STATE.route.view === "blob" ||
-            STATE.route.view === "blame" ||
-            STATE.route.view === "history")
-            ? "repo"
-            : "diff";
-        const active =
-          link.dataset.route === STATE.route.screen ||
-          (STATE.route.screen === "file" &&
-            link.dataset.route === fileRouteOwner);
+        const active = link.dataset.route === headerRouteForFront();
         link.classList.toggle("active", active);
         link.setAttribute("aria-current", active ? "page" : "false");
         // href にもオーバーレイの状態を載せる。載せないと、Tools や Doctor を
@@ -3963,6 +4864,11 @@ window.GdpExpandLogic = GdpExpandLogic;
             }),
           );
         }
+        if (link.dataset.route === "agents") {
+          link.href = withOverlayState(
+            buildRoute({ screen: "agents", range: currentRange() }),
+          );
+        }
         if (link.dataset.route === "help") {
           link.href = withOverlayState(
             buildRoute({
@@ -3971,7 +4877,11 @@ window.GdpExpandLogic = GdpExpandLogic;
                 STATE.route.screen === "help"
                   ? helpLanguageFromRoute(STATE.route)
                   : STATE.language,
-              section: helpSectionFromRoute(STATE.route),
+              // 左下の「設定」は、いつも設定の節を開く入口。
+              section:
+                link.id === "nav-settings"
+                  ? "settings"
+                  : helpSectionFromRoute(STATE.route),
               range: currentRange(),
             }),
           );
@@ -3986,18 +4896,17 @@ window.GdpExpandLogic = GdpExpandLogic;
    * ここで握り潰すと利用者に何も伝わらない — 成功しても失敗しても画面が
    * 無反応になる。失敗の理由はコンソールにも残す。
    */
+  /**
+   * そのパス (か親のフォルダ) を OS で開く。失敗は理由を cause に付けて投げる
+   * (以前は握りつぶして false を返していた)。見た目で伝えるのは呼び出し側。
+   */
   async function openPathInOs(
     path: string,
     kind: "directory" | "file-parent",
-    button?: HTMLButtonElement,
-  ): Promise<boolean> {
-    const oldTitle = button?.title;
-    if (button) {
-      button.disabled = true;
-      button.classList.remove("failed");
-    }
+  ): Promise<void> {
+    let res: Response;
     try {
-      const res = await fetch("/_open_path", {
+      res = await fetch(apiUrl("openPath"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -4005,31 +4914,46 @@ window.GdpExpandLogic = GdpExpandLogic;
         },
         body: JSON.stringify({ path, kind }),
       });
-      if (!res.ok) throw new Error(await res.text());
-      button?.classList.add("opened");
+    } catch (error) {
+      throw errorWithCause(`failed to open ${path} in the OS`, error);
+    }
+    if (!res.ok)
+      throw new Error(
+        await responseErrorMessage(res, `failed to open ${path} in the OS`),
+      );
+  }
+
+  /** ボタンから OS で開く。成否はボタンの色と title で伝え、理由はコンソールへ。 */
+  async function openPathFromButton(
+    path: string,
+    kind: "directory" | "file-parent",
+    button: HTMLButtonElement,
+  ): Promise<void> {
+    const oldTitle = button.title;
+    button.disabled = true;
+    button.classList.remove("failed");
+    try {
+      await openPathInOs(path, kind);
+      button.classList.add("opened");
       setTimeout(() => {
-        button?.classList.remove("opened");
+        button.classList.remove("opened");
       }, 1200);
-      return true;
     } catch (error) {
       console.error("[code-viewer] failed to open path in OS", error);
-      if (button) {
-        button.classList.add("failed");
-        button.title = "failed to open in OS";
-        setTimeout(() => {
-          button.classList.remove("failed");
-          button.title = oldTitle || "open in OS";
-        }, 1600);
-      }
-      return false;
+      button.classList.add("failed");
+      button.title = uiText().diff.openInOsFailed;
+      setTimeout(() => {
+        button.classList.remove("failed");
+        button.title = oldTitle || uiText().diff.openInOs;
+      }, 1600);
     } finally {
-      if (button) button.disabled = false;
+      button.disabled = false;
     }
   }
 
   async function runUndoAction(action: UndoActionResponse) {
     if (action.type !== "trash") return false;
-    const res = await fetch("/_restore_trash", {
+    const res = await fetch(apiUrl("restoreTrash"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -4059,7 +4983,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function createOpenPathButton(
     path: string,
     kind: "directory" | "file-parent",
-    title = "open folder in OS",
+    title = uiText().sidebar.openDirectoryInOs,
   ): HTMLButtonElement {
     const button = document.createElement("button");
     button.type = "button";
@@ -4069,7 +4993,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     button.innerHTML = iconSvg("octicon-link-external", OPEN_EXTERNAL_16_PATH);
     button.addEventListener("click", (e) => {
       e.stopPropagation();
-      openPathInOs(path, kind, button);
+      void openPathFromButton(path, kind, button);
     });
     return button;
   }
@@ -4116,10 +5040,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       ref: target.ref || "worktree",
     });
     void trackLoad<FileRevisionNeighbors>(
-      fetch(`/_file_revisions?${params.toString()}`).then(async (r) => {
-        if (!r.ok) throw new Error(await r.text());
-        return r.json();
-      }),
+      fetch(`${apiUrl("fileRevisions")}?${params.toString()}`).then(
+        async (r) => {
+          if (!r.ok) throw new Error(await r.text());
+          return r.json();
+        },
+      ),
     )
       .then((neighbors) => {
         if (!nav.isConnected) return;
@@ -4173,12 +5099,91 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!document.hidden) enqueueInitialLoads();
   });
 
+  // ---------- Agent integration (hooks): agent-hooks-settings.ts ----------
+  // 設定画面の節と、エージェント一覧の案内が同じ状態を見る。取り直すのは
+  // 設定画面の節と一覧に入ったときだけ (周期では取らない)。
+  let AGENT_HOOK_STATUS: AgentHooksResponse | null = null;
+  const AGENT_HOOKS_SETTINGS = createAgentHooksSettings({
+    getText: () => agentsText(STATE.language).hooks,
+    trackLoad,
+    actionHeaders,
+    onChanged: (status) => {
+      AGENT_HOOK_STATUS = status;
+      AGENTS_VIEW?.localize();
+    },
+  });
+
+  // ---------- Accounts: views/agents/accounts-*.ts ----------
+  // エージェント一覧の帯と設定画面の節が同じ結果を見る。取り直すのは、
+  // どちらかが画面にある間だけ (retain)。
+  const ACCOUNTS_CLIENT = createAccountsClient({ trackLoad, actionHeaders });
+  const ACCOUNT_DIALOGS = createAccountDialogs({
+    client: ACCOUNTS_CLIENT,
+    getText: () => agentsText(STATE.language).accounts,
+    // 一覧の監視役と画面の関数は後で作られる。押されたときにだけ呼ぶ。
+    openPane: (pane) => openAgentPane(pane),
+    getOverview: () => AGENT_MONITOR.snapshot().overview,
+    serverRoot: () => ACCOUNTS_CLIENT.snapshot().data?.serverRoot ?? "",
+    refreshOverview: () => AGENT_MONITOR.refresh(),
+  });
+  const ACCOUNTS_SETTINGS = createAccountsSettings({
+    client: ACCOUNTS_CLIENT,
+    dialogs: ACCOUNT_DIALOGS,
+    getText: () => agentsText(STATE.language).accounts,
+  });
+
+  // ---------- Shortcuts (settings): help-keybinding-editor.ts ----------
+  // 保存はページの「変更を保存」(draft)。保存先はユーザー単位のサーバの設定
+  // (ブラウザと PWA で共通。core/user-settings.ts の keybindings)。
+  const SHORTCUT_SETTINGS = createShortcutSettings({
+    getLanguage: () => STATE.language,
+    mac: IS_MAC,
+    getSaved: () => APP_SETTINGS.keybindings || {},
+    save: async (next) => {
+      // 差分が空になったら丸ごと消す。次に読んだときは素直にデフォルトへ。
+      await persistSettingsPatch({
+        keybindings: Object.keys(next).length ? next : null,
+      });
+      renderHelpPage();
+    },
+    getSharedTag: () => ({
+      text: uiText().settings.sharedTag,
+      title: uiText().settings.sharedTagTitle,
+    }),
+    download: (fileName, text) => {
+      const url = URL.createObjectURL(
+        new Blob([text], { type: "application/json" }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+  });
+
   // ---------- Viewer settings: extracted to viewer-settings.ts ----------
   // 以前はヘッダの歯車から出るポップオーバーだった。今は Help ページの
   // 設定セクションが唯一の置き場で、ここは値の出し入れだけを受け持つ。
   const VIEWER_SETTINGS = createViewerSettings({
     getText: () => uiText().settings,
+    getTheme: () => {
+      if (STATE.theme === "light") return "light";
+      const palette = savedPalette();
+      return palette === "violet" ? "dark" : palette;
+    },
+    setTheme: (choice) => {
+      STATE.theme = choice === "light" ? "light" : "dark";
+      // ライトを選んでも、ダークの色違いの選択は残す (T で戻ったときに使う)。
+      const palette: ThemePalette | undefined =
+        choice === "light" ? undefined : choice === "dark" ? "violet" : choice;
+      patchSettings(
+        palette ? { theme: STATE.theme, palette } : { theme: STATE.theme },
+      );
+      applyTheme();
+    },
     getValues: () => ({
+      userSettingsError: APP_SETTINGS.userSettingsError ?? "",
       language: STATE.language,
       sidebarFontSize: savedSidebarFontSize(),
       codeFontSize: savedCodeFontSize(),
@@ -4189,6 +5194,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       watchLimitMax: SERVER_SCOPE_WATCH_LIMIT_MAX,
       watchLimitDefault: SERVER_SCOPE_WATCH_LIMIT_DEFAULT,
       uploadEnabled: APP_SETTINGS.uploadEnabled !== false,
+      agentNotifyWaiting: APP_SETTINGS.agentNotifyWaiting !== false,
+      agentNotifyDone: APP_SETTINGS.agentNotifyDone !== false,
       inferFkRails: DATABASE_VIEW.getDbUiPref("inferFkRails", false),
       s3TooltipEnabled: DATABASE_VIEW.getDbUiPref("s3TooltipEnabled", true),
       scopeSource: uiText().settings.scopeSource(
@@ -4196,6 +5203,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         scopeOmitSourceLabel(),
       ),
       agentRulesJson: AGENT_SCREEN_RULES,
+      agentRulesDefaultJson: formatAgentScreenRuleSet(
+        DEFAULT_AGENT_SCREEN_RULES,
+      ),
       agentRulesSource: AGENT_SCREEN_RULES_SOURCE,
       agentRulesErrors: agentScreenRuleErrorsText(AGENT_SCREEN_RULE_ERRORS),
     }),
@@ -4205,26 +5215,25 @@ window.GdpExpandLogic = GdpExpandLogic;
         loadSettings(),
         loadAgentScreenRules(),
         DATABASE_VIEW.loadDbUiPrefs(),
+        AGENT_HOOKS_SETTINGS.refresh(),
+        ACCOUNTS_SETTINGS.refresh(),
       ]);
+      SHORTCUT_SETTINGS.refresh();
     },
     onSave: saveViewerSettings,
     onAgentRulesSave: saveAgentScreenRules,
     onAgentRulesReset: resetAgentScreenRuleSettings,
+    agentHooksSection: AGENT_HOOKS_SETTINGS.element,
+    agentAccountsSection: ACCOUNTS_SETTINGS.element,
+    shortcutsSection: SHORTCUT_SETTINGS.element,
+    drafts: [ACCOUNTS_SETTINGS.draft, SHORTCUT_SETTINGS.draft],
   });
-  relocalizeViewerSettings = () => VIEWER_SETTINGS.localize();
-
-  // ---------- Keybinding editor: extracted to help-keybinding-editor.ts ----
-  const KEYBINDING_EDITOR = createHelpKeybindingEditor({
-    getLanguage: () => STATE.language,
-    getOverrides: () => APP_SETTINGS.keybindings || {},
-    saveOverrides: (next) => {
-      // 差分が空になったら丸ごと消す。次に読んだときは素直にデフォルトへ。
-      patchSettings({
-        keybindings: Object.keys(next).length ? next : null,
-      });
-    },
-    onChanged: () => renderHelpPage(),
-  });
+  relocalizeViewerSettings = () => {
+    VIEWER_SETTINGS.localize();
+    AGENT_HOOKS_SETTINGS.localize();
+    ACCOUNTS_SETTINGS.localize();
+    SHORTCUT_SETTINGS.localize();
+  };
 
   // ---------- Help page: extracted to help-page.ts ----------
   const { renderHelpPage } = createHelpPage({
@@ -4239,9 +5248,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncHeaderMenu,
     getLanguage: () => STATE.language,
     mountViewerSettings: (host) => VIEWER_SETTINGS.mount(host),
+    mountSettingsSearch: (host) => VIEWER_SETTINGS.mountSearch(host),
+    settingsCategories: () => {
+      const labels = uiText().settings.categories;
+      return SETTINGS_CATEGORIES.map((id) => ({ id, ...labels[id] }));
+    },
+    getSettingsCategory: () => VIEWER_SETTINGS.getCategory(),
+    setSettingsCategory: (category) => VIEWER_SETTINGS.setCategory(category),
+    // ヘルプの一覧は PWA の窓のキーも (PWA) を付けて出す (通常のタブでも案内する)。
     getKeyBindings: activeKeyBindings,
-    decorateKeybindings: (article, groups) =>
-      KEYBINDING_EDITOR.decorate(article, groups),
+    openShortcutSettings: () => openSettingsAt("shortcut-settings-title"),
+    // インストールの案内 (PWA)。ブラウザが出す 1 度きりの event を今から受けておく。
+    installOffer: createInstallOffer(window),
   });
 
   // ---------- Hunk expand: extracted to hunk-expand.ts ----------
@@ -4386,6 +5404,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (quickHelpIcon) {
       quickHelpIcon.innerHTML = iconSvg("octicon-question", QUESTION_16_PATH);
     }
+    const navIcons: [string, string, string | string[]][] = [
+      ["#nav-collapse", "octicon-sidebar-collapse", SIDEBAR_HIDE_16_PATHS],
+      ["#nav-expand", "octicon-sidebar-expand", SIDEBAR_SHOW_16_PATHS],
+      ["#nav-board-link", "octicon-apps", APPS_16_PATH],
+      ["#nav-launch", "octicon-plus", PLUS_16_PATH],
+      ["#nav-settings", "octicon-gear", GEAR_16_PATH],
+    ];
+    for (const [selector, className, paths] of navIcons) {
+      const icon = document.querySelector<HTMLElement>(`${selector} .goi-icon`);
+      if (icon) icon.innerHTML = iconSvg(className, paths);
+    }
     const searchIcon = document.querySelector<HTMLElement>(
       "#search-btn .goi-icon",
     );
@@ -4414,58 +5443,66 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
+  // ---- 一覧の列のファイル一覧 (ui-layout.md の「一覧の列」) ----
+  // ファイル一覧を自動で畳んでいる (幅が足りないとき。core/list-column.ts の
+  // 順の最後)。利用者が手で開いたら、このセッションは自動で畳まない
+  // (FILE_LIST_KEPT_OPEN。保存はしない = 読み直しで元に戻る)。決まりは
+  // core/panel-column-policy.ts の fileListAction。
+  let FILE_LIST_AUTO_HIDDEN = false;
+  let FILE_LIST_KEPT_OPEN = false;
+  // index.html の早いスクリプト (#first-screen) が付けたファイル一覧の畳みは
+  // 外さずに引き継ぐ (core/panel-column-policy.ts の bootFileListFold)。
+  {
+    const early = readEarlyLook();
+    // 控えが読めないなら、利用者の畳みかは設定を読むまで分からない。自動の
+    // 畳みとして扱い (幅で決め直す)、読めなかった理由は残す。
+    if ("error" in early)
+      console.warn(
+        "[code-viewer] could not read the early look; a folded file list is treated as folded for width",
+        early.error,
+      );
+    const boot = bootFileListFold({
+      bodyHidden: document.body.classList.contains("gdp-sidebar-hidden"),
+      earlyUserHidden:
+        "look" in early ? early.look?.sidebarHidden === true : null,
+    });
+    if (boot.userHidden) STATE.sidebarHidden = true;
+    FILE_LIST_AUTO_HIDDEN = boot.autoHidden;
+    BOOT_SPLIT = "look" in early && early.look?.split === true;
+  }
+
   // ----- wiring -----
   applySidebarFontSize();
   applyCodeFontSize();
-  applySidebarHidden(STATE.sidebarHidden, { persist: false });
-  observeSidebarHeaderHeight();
+  applySidebarHidden(STATE.sidebarHidden || FILE_LIST_AUTO_HIDDEN, {
+    persist: false,
+  });
+  FILE_LIST.observeSidebarHeaderHeight();
+  SIDEBAR.observeSidebarHeaderHeight();
   installHistoryPageDom();
   hydrateRefSelectorMounts();
-  setSidebarTreeActionIcons();
+  FILE_LIST.setSidebarTreeActionIcons();
+  SIDEBAR.setSidebarTreeActionIcons();
   setGlobalHeaderIcons();
   setRefActionIcons();
-  // Sidebar view toggle (tree / flat)
+  // 変更ファイルの一覧の tree / flat (ファイル一覧は木に固定)。
   $$(".sb-view-seg button").forEach((b) => {
     b.addEventListener("click", () => {
       STATE.sbView = (b.dataset.view as SidebarView) || "tree";
       patchSettings({ sidebarView: STATE.sbView });
-      if (getSidebarFiles().length)
-        renderSidebar(getSidebarFiles(), getSidebarOnFileClick());
+      if (SIDEBAR.getSidebarFiles().length)
+        SIDEBAR.renderSidebar(
+          SIDEBAR.getSidebarFiles(),
+          SIDEBAR.getSidebarOnFileClick(),
+        );
     });
   });
-  $("#sb-expand-all").addEventListener("click", () =>
-    setAllSidebarDirsCollapsed(false),
-  );
-  $("#sb-collapse-all").addEventListener("click", () =>
-    setAllSidebarDirsCollapsed(true),
-  );
+  SIDEBAR.bindTreeActions();
+  FILE_LIST.bindTreeActions();
   $("#doctor-btn")?.addEventListener("click", (event) => {
     event.preventDefault();
     toggleDoctorSheet();
   });
-  $("#panel-tab-tools")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    openToolsSheet();
-  });
-  $("#panel-tab-terminal")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    openTerminalSheet();
-  });
-  $("#panel-tab-search")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    openSearchSheet();
-  });
-  $("#app-panel-close")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    closeAppPanel();
-  });
-  document
-    .querySelectorAll<HTMLButtonElement>("[data-panel-layout]")
-    .forEach((button) => {
-      button.addEventListener("click", () => {
-        setAppPanelDocked(button.dataset.panelLayout === "docked");
-      });
-    });
   let copyAiContextFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   $("#copy-ai-context")?.addEventListener("click", async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
@@ -4475,11 +5512,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     const selectionTarget = resolveSelectionTarget(STATE.route);
     let selectionCode: { lines: string[]; lang?: string | null } | undefined;
     if (event.shiftKey && selectionTarget) {
-      const renderedLines = readRenderedLines(
-        selectionTarget.path,
-        selectionTarget.start,
-        selectionTarget.end,
-      );
+      // STATE.route は左の本文の route なので、左の本文から読む。
+      const content = $("#content");
+      const renderedLines = content
+        ? readRenderedLines(
+            selectionTarget.path,
+            selectionTarget.start,
+            selectionTarget.end,
+            content,
+          )
+        : [];
       if (renderedLines.length > 0) {
         selectionCode = {
           lines: renderedLines,
@@ -4508,7 +5550,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       ok: boolean,
       withCode: boolean,
       lineCount: number,
-      reason?: "empty",
+      reason?: "empty" | Error,
     ) => {
       const label =
         reason === "empty"
@@ -4534,8 +5576,11 @@ window.GdpExpandLogic = GdpExpandLogic;
             : "failed";
       button.classList.remove("copied", "failed", "warn");
       if (stateClass) button.classList.add(stateClass);
-      button.title = label;
-      button.setAttribute("aria-label", label);
+      button.title =
+        reason instanceof Error
+          ? `${label}\n${formatErrorDetail(reason)}`
+          : label;
+      button.setAttribute("aria-label", button.title);
       if (feedback) {
         feedback.textContent = label;
         feedback.classList.remove("copied", "failed", "warn");
@@ -4561,12 +5606,55 @@ window.GdpExpandLogic = GdpExpandLogic;
     try {
       await navigator.clipboard.writeText(text);
       finish(true, !!selectionCode, selectionCode?.lines.length ?? 0);
-    } catch {
-      finish(false, false, 0);
+    } catch (error) {
+      const failure = errorWithCause("copying the AI context failed", error);
+      console.error(failure);
+      finish(false, false, 0, failure);
     }
   });
   localizeViewerChrome();
   prepareKeyboardPanels();
+  // Diff の変更ファイル (History の変更ファイルの一覧も) の行の上のキー。↑↓・
+  // Home / End は j k・gg / G と同じキー割り当てを呼び、Enter は 1 回押したのと
+  // 同じ (行の click)。作業ツリーの変更ファイルは worktree-view.ts が受ける。
+  const diffFileList = document.getElementById("filelist");
+  if (!diffFileList) throw new Error("#filelist is missing from index.html");
+  onListRowKeys(
+    diffFileList,
+    "#filelist[data-diff-list] li[data-path], #filelist[data-diff-list] li[data-dirpath]",
+    {
+      ArrowDown: (row) => moveDiffListFrom(row, "sidebar-next"),
+      ArrowUp: (row) => moveDiffListFrom(row, "sidebar-previous"),
+      Home: () => keepDiffListFocus("goto-top"),
+      End: () => keepDiffListFocus("goto-bottom"),
+      Enter: (row) => row.click(),
+    },
+  );
+  /** Tab で入った先頭の行 (まだ選んでいない) からも、その行を起点に動かす。 */
+  function moveDiffListFrom(
+    row: HTMLElement,
+    action: "sidebar-next" | "sidebar-previous",
+  ): void {
+    if (!row.classList.contains("active"))
+      SIDEBAR.markActive(SIDEBAR.sidebarItemPath(row));
+    keepDiffListFocus(action);
+  }
+  /**
+   * j k・gg / G と同じキー割り当てを呼ぶ (選んだファイルの差分のカードへ送る)。
+   * キー割り当ては行を click するので本文へフォーカスを移すが、行の上の矢印
+   * キーでは一覧に残す (続けて ↑↓ で選べるように)。本文へ移す予約も取り消す。
+   */
+  function keepDiffListFocus(
+    action: "sidebar-next" | "sidebar-previous" | "goto-top" | "goto-bottom",
+  ): void {
+    dispatchKeymapAction(action, "sidebar");
+    MAIN_SURFACE_FOCUS_SEQ++;
+    document
+      .querySelector<HTMLElement>(
+        "#filelist[data-diff-list] li.active[data-path], #filelist[data-diff-list] li.active[data-dirpath]",
+      )
+      ?.focus({ preventScroll: true });
+  }
   const contentPanel = document.querySelector<HTMLElement>("#content");
   contentPanel?.addEventListener("focusin", () => setPanelFocusScope("main"));
   contentPanel?.addEventListener("mousedown", (event) => {
@@ -4575,10 +5663,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   function applyHistoryWidth(w: number, persist = true) {
-    const cw = Math.max(220, Math.min(640, w));
+    const cw = clampPanelSize(HISTORY_WIDTH, w);
     document.documentElement.style.setProperty("--history-w", `${cw}px`);
     STATE.historyWidth = cw;
-    if (persist) patchSettings({ historyWidth: cw });
+    if (persist) {
+      rememberLayoutLook();
+      patchSettings({ historyWidth: cw });
+    }
+    syncListColumn();
   }
 
   // History and sidebar resizers (drag right edge)
@@ -4603,91 +5695,99 @@ window.GdpExpandLogic = GdpExpandLogic;
       else focusSidebarPanel();
     });
   })();
-  (function setupResizer() {
-    const handle = $("#sidebar-resizer");
+  /**
+   * 列の幅を掴んで変える (線を引き、離したときに 1 度だけ幅を当てる。重い本文を
+   * 動かすたびに組み直さない)。一覧の列の列 (ファイル一覧・一覧・変更ファイルの
+   * 一覧) は左に付いているので右へ引くと広がる。画面の右端に付いた列なら左へ引く
+   * と広がる。
+   */
+  function setupColumnResizer(opts: {
+    handle: HTMLElement | null;
+    previewId: string;
+    resizingClass: string;
+    column: () => HTMLElement | null;
+    width: () => number;
+    clamp: (width: number) => number;
+    apply: (width: number) => void;
+    reset: () => void;
+  }): void {
+    const { handle } = opts;
     if (!handle) return;
-    // Build a transient preview line so the heavy diff content doesn't
-    // reflow on every mousemove. The real width is applied once on mouseup.
     const preview = document.createElement("div");
-    preview.id = "sidebar-resize-preview";
+    preview.id = opts.previewId;
     document.body.appendChild(preview);
-
-    const MIN = 180,
-      MAX = 900;
-    const clamp = (w: number) => Math.max(MIN, Math.min(MAX, w));
-    const sidebarLeft = () =>
-      document.getElementById("sidebar")?.getBoundingClientRect().left || 0;
-    let dragging = false,
-      startX = 0,
-      startW = 0,
-      startLeft = 0,
-      currentW = 0;
-
+    let drag: {
+      startX: number;
+      startW: number;
+      rect: DOMRect;
+      onRight: boolean;
+      width: number;
+    } | null = null;
+    const edge = (d: NonNullable<typeof drag>) =>
+      d.onRight ? d.rect.right - d.width : d.rect.left + d.width;
     handle.addEventListener("mousedown", (e) => {
-      dragging = true;
-      startX = e.clientX;
-      startW = STATE.sbWidth;
-      startLeft = sidebarLeft();
-      currentW = startW;
-      document.body.classList.add("gdp-resizing");
+      const column = opts.column();
+      if (!column) return;
+      const rect = column.getBoundingClientRect();
+      drag = {
+        startX: e.clientX,
+        startW: opts.width(),
+        rect,
+        onRight: rect.right >= document.documentElement.clientWidth - 1,
+        width: opts.width(),
+      };
+      document.body.classList.add(opts.resizingClass);
       preview.style.display = "block";
-      preview.style.left = `${startLeft + startW}px`;
+      preview.style.left = `${edge(drag)}px`;
       e.preventDefault();
     });
     window.addEventListener("mousemove", (e) => {
-      if (!dragging) return;
-      currentW = clamp(startW + (e.clientX - startX));
-      preview.style.left = `${startLeft + currentW}px`;
+      if (!drag) return;
+      const moved = e.clientX - drag.startX;
+      drag.width = opts.clamp(drag.startW + (drag.onRight ? -moved : moved));
+      preview.style.left = `${edge(drag)}px`;
     });
     window.addEventListener("mouseup", () => {
-      if (!dragging) return;
-      dragging = false;
+      if (!drag) return;
+      const { width } = drag;
+      drag = null;
       preview.style.display = "none";
-      document.body.classList.remove("gdp-resizing");
-      applySidebarWidth(currentW);
+      document.body.classList.remove(opts.resizingClass);
+      opts.apply(width);
     });
-    // double-click to reset
-    handle.addEventListener("dblclick", () => applySidebarWidth(308));
-  })();
-  (function setupHistoryResizer() {
-    const handle = document.getElementById("history-resizer");
-    if (!handle) return;
-    const preview = document.createElement("div");
-    preview.id = "history-resize-preview";
-    document.body.appendChild(preview);
-
-    const MIN = 220,
-      MAX = 640;
-    const clamp = (w: number) => Math.max(MIN, Math.min(MAX, w));
-    let dragging = false,
-      startX = 0,
-      startW = 0,
-      currentW = 0;
-
-    handle.addEventListener("mousedown", (e) => {
-      dragging = true;
-      startX = e.clientX;
-      startW = STATE.historyWidth;
-      currentW = startW;
-      document.body.classList.add("gdp-history-resizing");
-      preview.style.display = "block";
-      preview.style.left = `${startW}px`;
-      e.preventDefault();
+    handle.addEventListener("dblclick", opts.reset);
+  }
+  // ファイル一覧と、History・作業ツリーの変更ファイルの一覧は同じ幅 (--sidebar-w)。
+  for (const [id, resizingClass] of [
+    ["sidebar", "gdp-resizing"],
+    ["file-list", "gdp-file-list-resizing"],
+  ] as const)
+    setupColumnResizer({
+      handle: document.getElementById(`${id}-resizer`),
+      previewId: `${id}-resize-preview`,
+      resizingClass,
+      column: () => document.getElementById(id),
+      width: () => STATE.sbWidth,
+      clamp: (w) => Math.max(SIDEBAR_WIDTH.min, Math.min(SIDEBAR_WIDTH.max, w)),
+      apply: (w) => applySidebarWidth(w),
+      reset: () => applySidebarWidth(SIDEBAR_WIDTH.default),
     });
-    window.addEventListener("mousemove", (e) => {
-      if (!dragging) return;
-      currentW = clamp(startW + (e.clientX - startX));
-      preview.style.left = `${currentW}px`;
-    });
-    window.addEventListener("mouseup", () => {
-      if (!dragging) return;
-      dragging = false;
-      preview.style.display = "none";
-      document.body.classList.remove("gdp-history-resizing");
-      applyHistoryWidth(currentW);
-    });
-    handle.addEventListener("dblclick", () => applyHistoryWidth(320));
-  })();
+  setupColumnResizer({
+    handle: document.getElementById("history-resizer"),
+    previewId: "history-resize-preview",
+    resizingClass: "gdp-history-resizing",
+    // 一覧の列 (Diff の変更ファイル・History・選んでいる作業ツリー)。
+    column: () => {
+      const kind = listColumnKind();
+      return kind ? document.getElementById(LIST_COLUMN_IDS[kind]) : null;
+    },
+    // 見えている一覧の端から掴み (木の幅を足さない)、本文が要る幅を保てる
+    // ところで止める (core/list-column.ts の listColumnDrag)。
+    width: () => historyDrag().start,
+    clamp: (w) => Math.min(historyDrag().max, clampPanelSize(HISTORY_WIDTH, w)),
+    apply: (w) => applyHistoryWidth(w),
+    reset: () => applyHistoryWidth(HISTORY_WIDTH.default),
+  });
 
   $$("#topbar .seg button").forEach((b) => {
     b.addEventListener("click", () =>
@@ -4700,52 +5800,56 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyTheme();
   });
 
-  function jumpToActiveOrFirstFilteredItem() {
-    if (isVirtualSidebarActive()) {
-      const current = virtualSidebarActiveIndex();
-      selectVirtualSidebarIndex(current >= 0 ? current : 0, { open: true });
-      $<HTMLInputElement>("#sb-filter").blur();
-      return;
-    }
-    const items = visibleSidebarItems();
-    const active = items.find((li) => li.classList.contains("active"));
-    const target = active || items[0];
-    if (target) {
-      target.click();
-      $<HTMLInputElement>("#sb-filter").blur();
-    }
-  }
-  const sbFilter = $<HTMLInputElement>("#sb-filter");
-  if (sbFilter) {
-    sbFilter.addEventListener("input", () => {
-      syncSidebarFilterClearButton();
-      scheduleApplyFilter();
+  // 一覧の絞り込み (ファイル一覧と変更ファイルの一覧のそれぞれ)。
+  function wireListFilter(list: FileListHandle, dom: SidebarDom): void {
+    const input = $<HTMLInputElement>(dom.filter);
+    const jumpToActiveOrFirstFilteredItem = () => {
+      if (list.isVirtualSidebarActive()) {
+        const current = list.virtualSidebarActiveIndex();
+        list.selectVirtualSidebarIndex(current >= 0 ? current : 0, {
+          open: true,
+        });
+        input.blur();
+        return;
+      }
+      const items = list.visibleSidebarItems();
+      const active = items.find((li) => li.classList.contains("active"));
+      const target = active || items[0];
+      if (target) {
+        target.click();
+        input.blur();
+      }
+    };
+    input.addEventListener("input", () => {
+      list.syncSidebarFilterClearButton();
+      list.scheduleApplyFilter();
     });
-    sbFilter.addEventListener("keydown", (e) => {
+    input.addEventListener("keydown", (e) => {
       if (isImeComposing(e)) return;
       if (e.key === "Enter") {
         e.preventDefault();
-        flushSidebarFilter();
+        list.flushSidebarFilter();
         jumpToActiveOrFirstFilteredItem();
       } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        flushSidebarFilter();
-        moveActiveSidebarItem(e.key === "ArrowDown" ? 1 : -1);
+        list.flushSidebarFilter();
+        list.moveActiveSidebarItem(e.key === "ArrowDown" ? 1 : -1);
       } else if (e.key === "Escape") {
-        if (sbFilter.value) {
-          clearSidebarFilter();
+        if (input.value) {
+          list.clearSidebarFilter();
         } else {
-          sbFilter.blur();
+          input.blur();
         }
       }
     });
+    list.syncSidebarFilterClearButton();
+    $<HTMLButtonElement>(dom.filterClear).addEventListener(
+      "click",
+      list.clearSidebarFilter,
+    );
   }
-  const sbFilterClear =
-    document.querySelector<HTMLButtonElement>("#sb-filter-clear");
-  if (sbFilterClear) {
-    syncSidebarFilterClearButton();
-    sbFilterClear.addEventListener("click", clearSidebarFilter);
-  }
+  wireListFilter(FILE_LIST, FILE_LIST_DOM);
+  wireListFilter(SIDEBAR, CHANGES_LIST_DOM);
   // Header search button: the palettes were keyboard-only before this, so a
   // mouse user had no way to discover them. Plain click = files, Shift+click
   // = grep; either palette can switch to the other from its label row.
@@ -4754,10 +5858,26 @@ window.GdpExpandLogic = GdpExpandLogic;
     ?.addEventListener("click", (event) => {
       openSearchPalette(event.shiftKey ? "grep" : "file");
     });
+  /**
+   * 「/」の絞り込み: 画面の一覧の絞り込み (Diff・History・選んでいる作業ツリーは
+   * 変更ファイルの一覧、ほかはファイル一覧)。ファイル一覧を畳んでいれば開く。
+   */
   function focusFileFilter() {
-    const input = $<HTMLInputElement>("#sb-filter");
+    const changes = listColumnKind() !== null;
+    if (!changes && STATE.sidebarHidden) {
+      applySidebarHidden(false);
+      onUserToggledSidebarHidden(false);
+    }
+    const input = $<HTMLInputElement>(
+      changes ? CHANGES_LIST_DOM.filter : FILE_LIST_DOM.filter,
+    );
     input.focus();
     input.select();
+  }
+
+  function focusActiveMainTabSurface() {
+    const front = MAIN_TABS.front();
+    if (front && MAIN_TABS.isRouteTab(front)) scheduleMainSurfaceFocus();
   }
 
   function dispatchKeymapAction(
@@ -4783,7 +5903,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "focus-sidebar") {
-      if (STATE.sidebarHidden) applySidebarHidden(false);
+      // 一覧を出す画面では変更ファイルの一覧、ほかはファイル一覧 (畳んでいれば開く)。
+      if (!listColumnKind() && STATE.sidebarHidden) {
+        applySidebarHidden(false);
+        onUserToggledSidebarHidden(false);
+      }
       focusSidebarPanel();
       return true;
     }
@@ -4792,10 +5916,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "cancel-source-load") {
-      // Escape は手前にあるものから畳む。下パネルの中にいればパネルを閉じ、
-      // 行を選んでいればその解除、どちらでもなければ読み込みを止める。
+      // Escape は手前にあるものから畳む。Tools / Search の中にいればそのタブを
+      // 閉じ (下パネルだった頃の「パネルを閉じる」)、行を選んでいればその解除、
+      // どちらでもなければ読み込みを止める。
       if (scope === "panel") {
-        closeAppPanel();
+        if (STATE.route.screen === "tools" || STATE.route.screen === "search")
+          MAIN_TABS.closeActive();
         return true;
       }
       if (clearLineSelection()) return true;
@@ -4903,7 +6029,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "tab-preview" || action === "tab-code") {
-      return switchSourceTab(action === "tab-preview" ? "preview" : "code");
+      return activeSourceView().switchSourceTab(
+        action === "tab-preview" ? "preview" : "code",
+      );
     }
     if (action === "goto-definition")
       return DEFINITION_JUMP.triggerFromKeyboard();
@@ -4924,14 +6052,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (scope === "main") scrollMainToEdge(edge);
       else if (scope === "sidebar") moveActiveSidebarToEdge(edge);
       else
-        window.scrollTo({
-          top:
-            edge === "top"
-              ? 0
-              : Math.max(
-                  document.documentElement.scrollHeight,
-                  document.body.scrollHeight,
-                ),
+        mainScrollBox()?.scrollTo({
+          top: edge === "top" ? 0 : (mainScrollBox()?.scrollHeight ?? 0),
           behavior: "auto",
         });
       return true;
@@ -4978,7 +6100,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (action === "next-hunk" || action === "previous-hunk")
       return DIFF_VIEW.scrollToAdjacentHunk(action === "next-hunk" ? 1 : -1);
     if (action === "goto-diff") {
-      navigateToRoute({ screen: "diff", range: currentRange() });
+      navigateToPageTab({ screen: "diff", range: currentRange() });
       return true;
     }
     if (action === "goto-history") {
@@ -4999,22 +6121,20 @@ window.GdpExpandLogic = GdpExpandLogic;
       );
       return true;
     }
+    // Files はタブではなく左の面の本文の既定 (フォルダ表示)。選択を外して出す。
     if (action === "goto-repo") {
-      navigateToRoute({
-        screen: "repo",
-        ref: STATE.repoRef || "worktree",
-        path: "",
-        range: currentRange(),
-      });
+      MAIN_TABS.showHome();
       return true;
     }
     if (action === "toggle-sidebar") {
-      applySidebarHidden(!STATE.sidebarHidden);
+      // ファイル一覧を畳む / 出す (頭の畳むボタンと同じ)。
+      FILE_LIST.toggleSidebarHidden();
       return true;
     }
+    // 名前は下パネルにターミナルがあった頃のまま (保存したキー割り当てを
+    // 壊さない)。いまはフォーカスのある面の「＋」のメニューを開く。
     if (action === "toggle-terminal-panel") {
-      if (TERMINAL_VIEW.isOpen()) closeTerminalSheet();
-      else openTerminalSheet();
+      openNewTabMenuFromKeys();
       return true;
     }
     if (action === "undo-last-action") {
@@ -5022,13 +6142,74 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "find-in-source")
-      return openVirtualSourceSearchFromKeyboard(target);
+      return activeSourceView().openVirtualSourceSearchFromKeyboard(target);
     if (action === "goto-journal") {
-      navigateToRoute({ screen: "journal", range: currentRange() });
+      navigateToPageTab({ screen: "journal", range: currentRange() });
       return true;
     }
     if (action === "goto-database") {
-      navigateToRoute({ screen: "database", range: currentRange() });
+      navigateToPageTab({ screen: "database", range: currentRange() });
+      return true;
+    }
+    if (action === "goto-agents") {
+      navigateToPageTab({ screen: "agents", range: currentRange() });
+      return true;
+    }
+    if (action === "goto-worktrees") {
+      navigateToRoute({ screen: "worktree", range: currentRange() });
+      return true;
+    }
+    if (action === "goto-tools") {
+      openToolsPage();
+      return true;
+    }
+    if (action === "goto-search") {
+      openSearchPage();
+      return true;
+    }
+    if (action === "new-agent") {
+      launchAgent();
+      return true;
+    }
+    if (action === "main-tab-next") {
+      MAIN_TABS.next();
+      focusActiveMainTabSurface();
+      return true;
+    }
+    if (action === "main-tab-previous") {
+      MAIN_TABS.previous();
+      focusActiveMainTabSurface();
+      return true;
+    }
+    if (action === "main-tab-close") {
+      MAIN_TABS.closeActive();
+      focusActiveMainTabSurface();
+      return true;
+    }
+    if (action === "main-tab-menu") return MAIN_TABS.openFrontMenu();
+    if (action === "project-previous" || action === "project-next") {
+      switchToAdjacentProject(action === "project-next" ? 1 : -1);
+      return true;
+    }
+    if (action === "main-pane-other") {
+      MAIN_TABS.focusOther();
+      focusActiveMainTabSurface();
+      return true;
+    }
+    if (action === "main-tab-last") {
+      MAIN_TABS.activateNth(lastTabNumber(MAIN_TABS.layout()));
+      focusActiveMainTabSurface();
+      return true;
+    }
+    if (action === "main-tab-reopen") {
+      // 開き直せるものが無ければ何もしない (インストールした窓は閉じさせない)。
+      if (MAIN_TABS.reopenClosed()) focusActiveMainTabSurface();
+      return true;
+    }
+    const nthTab = /^main-tab-([1-9])$/.exec(action);
+    if (nthTab) {
+      MAIN_TABS.activateNth(Number(nthTab[1]));
+      focusActiveMainTabSurface();
       return true;
     }
     if (action === "nav-back") {
@@ -5056,6 +6237,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       openHelpSection(helpSectionDeps(), "settings");
       return true;
     }
+    if (action === "switch-project") {
+      if (!PROJECT_SWITCHER) return false;
+      PROJECT_SWITCHER.toggle();
+      return true;
+    }
     if (
       action === "code-font-size-increase" ||
       action === "code-font-size-decrease"
@@ -5075,25 +6261,41 @@ window.GdpExpandLogic = GdpExpandLogic;
     return false;
   }
 
-  document.addEventListener("keydown", handleVirtualSourcePagingKeydown, {
-    capture: true,
-  });
-  document.addEventListener("click", closeRepoContextMenu);
-  $("#filelist").addEventListener("contextmenu", handleSidebarContextMenu);
+  document.addEventListener(
+    "keydown",
+    (event) => activeSourceView().handleVirtualSourcePagingKeydown(event),
+    { capture: true },
+  );
+  $("#file-list-rows").addEventListener(
+    "contextmenu",
+    handleSidebarContextMenu,
+  );
 
-  document.addEventListener("keydown", async (e) => {
-    if (isImeComposing(e)) return;
-    if (e.key === "Escape") closeRepoContextMenu();
+  // ページのキー割り当て。インストールした窓 (PWA) のブラウザのタブ操作のキー
+  // (⌘W・⌘T・⌘1〜9・Ctrl+Tab・⌘← → など) も同じ表 (core/keymap.ts の
+  // pwaKeyBindings、設定で変えられる) で受け、割り当ての無い窓のキーは既定の
+  // 動作 (窓を閉じる・窓を増やす) だけを止める (core/pwa.ts の isPwaWindowKey)。
+  document.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
     if ((e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled)
       return;
     const targetEl = e.target as Element | null;
     const scope = keymapScope(targetEl);
-    const action = resolveKeymapAction(
+    const standalone = isStandaloneWindow();
+    const terminal = !!targetEl?.closest?.(".xterm");
+    const composing = isImeComposing(e);
+    const outcome = resolveKeyOutcome(
       e,
       {
         scope,
         editable: isEditableKeyTarget(targetEl),
-        composing: isImeComposing(e),
+        terminal,
+        standalone,
+        mac: IS_MAC,
+        pageKeymapBlocked:
+          isInModalDialog(targetEl) ||
+          isEnterForFocusedControl(targetEl, e.key),
+        composing,
         paletteOpen: isPaletteOpen(),
         pendingG:
           PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL,
@@ -5101,16 +6303,34 @@ window.GdpExpandLogic = GdpExpandLogic;
       },
       activeKeyBindings(),
     );
-    if (!action) return;
-    if (dispatchKeymapAction(action, scope, e.repeat, targetEl))
+    if (!outcome) return;
+    if (outcome.kind === "swallow") {
+      e.preventDefault();
+      return;
+    }
+    const handled = dispatchKeymapAction(
+      outcome.action,
+      scope,
+      e.repeat,
+      targetEl,
+    );
+    // 窓のキーは、操作が何もしなくても窓を閉じさせない。
+    if (
+      handled ||
+      isPwaWindowKey(e, { standalone, mac: IS_MAC, terminal, composing })
+    )
       e.preventDefault();
   });
 
   // ----- initial state + live updates -----
   applyTheme();
-  setLayout(STATE.layout);
+  // 読んだ設定を当てるだけ。書き戻すと、開くたびにリポジトリへ
+  // .code-viewer/settings.json を作ってしまう (利用者は何も変えていない)。
+  setLayout(STATE.layout, false);
+  // 電話の段に入る・出ると、見せる差分の並べ方が変わる (電話では 1 列が既定)。
+  PHONE_QUERY.addEventListener("change", () => setLayout(shownLayout(), false));
   setPageMode();
-  if (window.location.pathname === "/") {
+  if (routePathname() === "/") {
     setRoute(STATE.route, true);
   }
 
@@ -5155,7 +6375,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     event.preventDefault();
     const route = emptyDiffHistoryRoute();
     history.pushState(historyStateForRoute(route), "", urlForRoute(route));
-    window.scrollTo(0, 0);
+    scrollMainToTop();
     applyRouteFromLocation();
   }
 
@@ -5275,6 +6495,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.route.screen === "worktree") {
       return (WORKTREE_VIEW?.reload() ?? Promise.resolve()).then(() => null);
     }
+    if (STATE.route.screen === "agents") {
+      void AGENTS_VIEW?.enter();
+      setStatus("live");
+      return Promise.resolve(null);
+    }
+    if (enterToolOrSearchPage()) return Promise.resolve(null);
     if (
       STATE.route.screen === "file" &&
       !(isFileHistoryRoute(STATE.route) && activeHistoryPathFilter) &&
@@ -5317,8 +6543,21 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.to) params.set("to", STATE.to);
     if (activeHistoryPathFilter) params.set("path", activeHistoryPathFilter);
     if (options.force) params.set("nocache", "1");
-    const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
-    return trackLoad<DiffMeta>(fetch(url).then((r) => r.json()))
+    const url = `${apiUrl("diffJson")}${params.toString() ? `?${params.toString()}` : ""}`;
+    // HTTP の失敗を差分として描かない。裏のプロセスが止まると入口は 502 と
+    // `{error, code, project: {key, root}, …}` を返し、それを DiffMeta として
+    // 読むと見出しのプロジェクト名が "[object Object]" になり、差分が空になった。
+    const request = fetch(url).then(async (response) => {
+      if (!response.ok)
+        throw new Error(
+          await responseErrorMessage(
+            response,
+            `diff ${fromAtRequest}..${toAtRequest} request failed`,
+          ),
+        );
+      return (await response.json()) as DiffMeta;
+    });
+    return trackLoad<DiffMeta>(request)
       .then((data) => {
         if (!isCurrentDiffRequest()) return null;
         const result = renderShell(data, options.changedPaths);
@@ -5326,13 +6565,100 @@ window.GdpExpandLogic = GdpExpandLogic;
         setStatus(data.error ? "error" : "live");
         return result;
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!isCurrentDiffRequest()) return null;
+        if (!isAbortError(error))
+          console.error(
+            "[code-viewer] the diff %s..%s could not be loaded or drawn",
+            fromAtRequest,
+            toAtRequest,
+            error,
+          );
         setStatus("error");
         return null;
       });
   }
+  /** タブを読み戻し終えた: 一覧の列を今の左の面の前面で決め直す。 */
+  function endTabRestore(): void {
+    if (!RESTORING_TABS) return;
+    RESTORING_TABS = false;
+    const panes = MAIN_TABS.panes();
+    LEFT_FRONT_IS_PAGE = leftFrontIsPage(panes.fronts.left);
+    syncListColumn();
+    rememberSplitForFirstScreen(panes.split);
+  }
+
+  /**
+   * 2 面かを控える (index.html の #first-screen が、次に開いたとき一覧の列を 2 面の
+   * 本文の幅で数える。数え違うと、読み込むたびに一覧の列が詰めた幅へ動いた)。
+   * 読み戻す前の 1 面は書かない。
+   */
+  function rememberSplitForFirstScreen(split: boolean): void {
+    if (RESTORING_TABS || split === EARLY_SPLIT) return;
+    EARLY_SPLIT = split;
+    rememberEarlyLook({ split });
+  }
+
+  /** 保存した配置に残った、サーバにもう無いシェルのタブを閉じる。 */
+  function closeTabsOfGoneShells(): void {
+    // 読み戻した時点のタブだけを見る (この後に開いたシェルは、一覧に載る前に
+    // 取り直しが返っても閉じない)。
+    const saved = MAIN_TABS.terminalSessions();
+    TERMINAL_VIEW.loadShells().then(
+      (list) => {
+        // シェルを使えないサーバ (available: false) では一覧が空。閉じない。
+        if (!list.available) return;
+        const live = new Set(list.sessions.map((session) => session.id));
+        MAIN_TABS.closeTerminals(saved.filter((id) => !live.has(id)));
+      },
+      (error: unknown) =>
+        console.error(
+          "[code-viewer] could not check whether the saved terminal tabs still have their shells",
+          error,
+        ),
+    );
+  }
+
   loadInitialState().finally(() => {
+    MAIN_TABS.syncRoute(STATE.route);
+    // ?terminal= のタブが前面になるかは、読み戻したタブの並びで決まる。
+    const restoring = MAIN_TABS.restore({
+      ...(INITIAL_RIGHT_ROUTE ? { rightRoute: INITIAL_RIGHT_ROUTE } : {}),
+      // URL がシェルかペインを指すときだけ、保存した前面 (ターミナル) を残す。
+      keepSavedFront: INITIAL_KEEPS_SAVED_FRONT,
+    }).then(() => {
+      // 右の面に開けなかった (1 面で狭い) なら、そのファイルは本文で開く。
+      const right = MAIN_TABS.paneRoute("right");
+      if (
+        INITIAL_RIGHT_ROUTE &&
+        !(
+          right?.screen === "file" &&
+          right.path === INITIAL_RIGHT_ROUTE.path &&
+          right.ref === INITIAL_RIGHT_ROUTE.ref
+        )
+      )
+        setRoute(INITIAL_RIGHT_ROUTE, true);
+      syncTerminalFromUrl(INITIAL_TERMINAL_PARAM);
+      closeTabsOfGoneShells();
+      // 移ってきた先で開くペイン。一度きりなので、開いたら URL から外す
+      // (読み直しで開き直さない)。行き先の判定は通さない (食い違ったときに
+      // 移り直しを繰り返さない)。
+      if (INITIAL_OPEN_PANE) {
+        openAgentPaneHere(INITIAL_OPEN_PANE);
+        history.replaceState(
+          history.state,
+          "",
+          withOpenPaneOverlay(
+            window.location.pathname + window.location.search,
+            null,
+          ) + window.location.hash,
+        );
+      }
+    });
+    // 読み戻し (と ?terminal= の端末を開くこと) が済んだら一覧の列を決め直す。失敗
+    // しても URL の ?terminal= で止めたままにしない。失敗は finally の先の拒否として
+    // 今までどおり外へ出る (ここで受けない)。
+    void restoring.finally(endTabRestore);
     if (STATE.route.screen === "help") {
       setStatus("live");
       renderHelpPage();
@@ -5356,14 +6682,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       void JOURNAL_VIEW?.enter();
     } else if (STATE.route.screen === "worktree") {
       void WORKTREE_VIEW?.enter();
-    } else load();
+    } else if (STATE.route.screen === "agents") {
+      setStatus("live");
+      void AGENTS_VIEW?.enter();
+    } else if (!enterToolOrSearchPage()) load();
     // Deep links land here without going through setRoute; reflect a line=
     // selection in the copy pill on first paint too.
     syncLineRefPill();
     syncDoctorSheetFromUrl();
-    syncToolsSheetFromUrl();
-    syncTerminalSheetFromUrl();
-    syncSearchSheetFromUrl();
   });
 
   // Ref picker (from / to)
@@ -5376,7 +6702,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   function setRange(from: string, to: string) {
     // An explicit range pick supersedes whatever was parked for history.
     preHistoryRange = null;
-    const wasDatabaseRoute = STATE.route.screen === "database";
     STATE.from = from || "";
     STATE.to = to || "";
     patchSettings({ range: currentRange() });
@@ -5399,8 +6724,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       );
       renderHelpPage();
     } else {
+      // Data を離れる後片付けは setRoute (leaveScreen) がする。
       setRoute({ screen: "diff", range }, true);
-      if (wasDatabaseRoute) DATABASE_VIEW.suspend();
       // Leaving the history screen here: drop its body class and panel layout.
       setPageMode();
       load();
@@ -5496,6 +6821,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     $,
     getLanguage: () => STATE.language,
     getText: () => uiText().quickHelp,
+    getKeyBindings: activeKeyBindings,
     openFullKeybindings: () => openHelpKeybindings(helpSectionDeps()),
     openSettings: () => openHelpSection(helpSectionDeps(), "settings"),
   });
@@ -5524,7 +6850,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   function isDoctorOverlayOpen(): boolean {
-    return parseDoctorOverlay(window.location.pathname, window.location.search);
+    return parseDoctorOverlay(routePathname(), window.location.search);
   }
 
   function updateUrlForDoctorOverlay(open: boolean): void {
@@ -5575,183 +6901,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     trackLoad,
     getLanguage: () => STATE.language,
     actionHeaders,
-    onCloseRequest: () => closeToolsSheet(),
-    onToolChange: (tool) => updateUrlForToolsOverlay(tool),
+    // 道具の面の閉じる = Tools のタブを閉じる (前面のときだけ押せる)。
+    onCloseRequest: () => {
+      if (STATE.route.screen === "tools") MAIN_TABS.closeActive();
+    },
+    onToolChange: (tool) => rememberPageRoute("tools", tool),
   });
   relocalizeTools = () => TOOLS_VIEW.localize();
 
-  function openToolsOverlay(): ToolId | null {
-    return parseToolsOverlay(window.location.search);
-  }
-
-  function updateUrlForToolsOverlay(tool: ToolId | null): void {
-    const current = window.location.pathname + window.location.search;
-    const next = withToolsOverlay(current, tool);
-    if (next !== current) {
-      history.replaceState(history.state, "", next + window.location.hash);
-    }
-    // メニューの Tools は URL の ?tools= を見て押下状態を出すので、URL を
-    // 書き換えたらその場で貼り直す。
-    syncHeaderMenu();
-  }
-
-  /**
-   * 画面下のパネル。中身は Terminal と Tools で、出せるのは一度に 1 つ。
-   *
-   * 開いているかどうかは中身が持っている (それぞれの isOpen)。パネル自身は
-   * 器なので、状態を二重に持たずに中身から引き直す。ここを別々に持つと、
-   * URL から復元したときにタブと中身がずれる。
-   */
-  function syncAppPanel(): void {
-    // 中身の open() は非同期なので、直後に isOpen() を見ると閉じたままに
-    // 見える。URL は開いた時点で同期的に入るので、そちらを正とする
-    // (ヘッダーのメニューが押下状態を出していたときと同じ決め方)。
-    const tools = parseToolsOverlay(window.location.search) !== null;
-    const terminal = parseTerminalOverlay(window.location.search) !== null;
-    const search = parseSearchResultsOverlay(window.location.search) !== null;
-    const open = tools || terminal || search;
-    const panel = document.getElementById("app-panel");
-    if (panel) {
-      panel.classList.toggle("app-panel-open", open);
-    }
-    for (const [id, selected] of [
-      ["#panel-tab-tools", tools],
-      ["#panel-tab-terminal", terminal],
-      ["#panel-tab-search", search],
-    ] as const) {
-      const tab = document.querySelector<HTMLButtonElement>(id);
-      if (!tab) continue;
-      tab.setAttribute("aria-selected", String(selected));
-    }
-    syncAppPanelLayout();
-  }
-
-  function syncAppPanelLayout(): void {
-    const docked = APP_SETTINGS.appPanelDocked === true;
-    document.body.classList.toggle("app-panel-docked", docked);
-    for (const button of document.querySelectorAll<HTMLButtonElement>(
-      "[data-panel-layout]",
-    )) {
-      const active =
-        button.dataset.panelLayout === (docked ? "docked" : "overlay");
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-pressed", String(active));
-    }
-  }
-
-  function setAppPanelDocked(docked: boolean): void {
-    if ((APP_SETTINGS.appPanelDocked === true) === docked) return;
-    patchSettings({ appPanelDocked: docked });
-    syncAppPanelLayout();
-  }
-
-  function closeAppPanel(): void {
-    if (
-      parseSearchResultsOverlay(window.location.search) !== null ||
-      SEARCH_RESULTS_VIEW.isOpen()
-    )
-      closeSearchSheet();
-    if (
-      parseToolsOverlay(window.location.search) !== null ||
-      TOOLS_VIEW.isOpen()
-    )
-      closeToolsSheet();
-    if (
-      parseTerminalOverlay(window.location.search) !== null ||
-      TERMINAL_VIEW.isOpen()
-    )
-      closeTerminalSheet();
-  }
-
-  /** パネルの高さ (px) の許容範囲。上限は CSS の max-height が持つ。 */
-  const MIN_APP_PANEL_HEIGHT = 160;
-  const MAX_APP_PANEL_HEIGHT = 1400;
-  /** CSS 側の既定値 (--app-panel-height の fallback) と揃える。 */
-  const DEFAULT_APP_PANEL_HEIGHT = 420;
-  const APP_PANEL_HEIGHT_STORAGE_KEY = "code-viewer:app-panel-height";
-
-  /** 最後に適用した高さ。ドラッグが終わった時点でこれを保存する。 */
-  let appPanelHeight = DEFAULT_APP_PANEL_HEIGHT;
-
-  function applyAppPanelHeight(height: number): void {
-    appPanelHeight = Math.min(
-      MAX_APP_PANEL_HEIGHT,
-      Math.max(MIN_APP_PANEL_HEIGHT, Math.round(height)),
-    );
-    // 高さはパネル自身だけでなく #content の下余白も決める。パネル要素に
-    // 置くと兄弟の #content から見えないので、:root に置く。
-    document.documentElement.style.setProperty(
-      "--app-panel-height",
-      `${appPanelHeight}px`,
-    );
-  }
-
-  {
-    const panel = document.getElementById("app-panel");
-    const handle = document.getElementById("app-panel-resizer");
-    // 前回引き伸ばした高さで開く。パネルを出す前に当てておけば、開いた瞬間に
-    // 既定値からの跳ねが出ない。
-    applyAppPanelHeight(
-      readStoredSize(APP_PANEL_HEIGHT_STORAGE_KEY, DEFAULT_APP_PANEL_HEIGHT),
-    );
-    if (panel && handle) {
-      attachDragResizer({
-        handle,
-        getSize: () => panel.getBoundingClientRect().height,
-        // 上へ引くほど高くなる。ハンドルはパネルの上端にある。
-        direction: -1,
-        axis: "y",
-        applySize: (height) => {
-          applyAppPanelHeight(height);
-          // 高さが変わると端末の桁数・行数も変わる。追従させる。
-          TERMINAL_VIEW.refit();
-        },
-        // 保存はドラッグ / キー操作が終わった時だけ。動かしている間ずっと
-        // 書くと、1 回のドラッグで数十回 localStorage を叩くことになる。
-        onEnd: () =>
-          writeStoredSize(APP_PANEL_HEIGHT_STORAGE_KEY, appPanelHeight),
-        activeClassTarget: panel,
-        activeClassName: "app-panel-resizing",
-      });
-    }
-  }
-
-  function openToolsSheet(tool?: ToolId): void {
-    // タブなので、他は畳む。2 つ並べると 1 つあたりが狭くなりすぎる。
-    if (
-      parseTerminalOverlay(window.location.search) !== null ||
-      TERMINAL_VIEW.isOpen()
-    )
-      closeTerminalSheet();
-    if (
-      parseSearchResultsOverlay(window.location.search) !== null ||
-      SEARCH_RESULTS_VIEW.isOpen()
-    )
-      closeSearchSheet();
-    // 実際に出すツールが決まるのは保存状態を読んだ後だが、「開いた」ことは
-    // その場で URL に出す。読み込みが止まっても URL と画面が食い違わない。
-    updateUrlForToolsOverlay(tool ?? TOOLS_VIEW.getActiveTool());
-    void TOOLS_VIEW.open(tool);
-    syncAppPanel();
-  }
-
-  function closeToolsSheet(): void {
-    TOOLS_VIEW.close();
-    updateUrlForToolsOverlay(null);
-    syncAppPanel();
-  }
-
-  function syncToolsSheetFromUrl(): void {
-    const tool = openToolsOverlay();
-    const open = TOOLS_VIEW.isOpen();
-    if (tool && (!open || TOOLS_VIEW.getActiveTool() !== tool))
-      void TOOLS_VIEW.open(tool);
-    else if (!tool && open) TOOLS_VIEW.close();
-    syncAppPanel();
-  }
-
-  // Search results sheet — same independent overlay as tools; the URL holds
-  // the grep query (?results=<query>) so a reload re-runs it.
+  // grep の結果の一覧 (Search のタブ)。URL の /search?q= が検索語を持つので、
+  // 読み直すと同じ検索をやり直す。
   const SEARCH_RESULTS_VIEW = createSearchResultsView({
     $: <T extends Element = HTMLElement>(sel: string) =>
       document.querySelector<T>(sel),
@@ -5777,13 +6936,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         applyHideTests();
       }
     },
-    openMatch: ({ path, line, hl }) => {
+    openMatch: ({ path, line, hl }, intent) => {
       const route = STATE.route;
       const ref =
         route.screen === "repo" || route.screen === "file"
           ? route.ref || "worktree"
           : STATE.repoRef || "worktree";
-      setRoute({
+      const fileRoute: FileRoute = {
         screen: "file",
         path,
         ref,
@@ -5791,125 +6950,2165 @@ window.GdpExpandLogic = GdpExpandLogic;
         line,
         ...(hl ? { hl } : {}),
         range: currentRange(),
-      });
+      };
+      if (intent === "other-pane") {
+        openFileInOtherPane(fileRoute);
+        return;
+      }
+      if (intent === "new-tab")
+        MAIN_TABS.openingNewTab(() => setRoute(fileRoute));
+      else setRoute(fileRoute);
       void renderStandaloneSource({ path, ref });
     },
-    onQueryChange: (query) => updateUrlForSearchResultsOverlay(query),
+    onQueryChange: (query) => rememberPageRoute("search", query),
   });
   relocalizeSearchResults = () => SEARCH_RESULTS_VIEW.localize();
 
-  function updateUrlForSearchResultsOverlay(query: string | null): void {
-    const current = window.location.pathname + window.location.search;
-    const next = withSearchResultsOverlay(current, query);
-    if (next !== current) {
-      history.replaceState(history.state, "", next + window.location.hash);
+  /**
+   * Tools と Search はメインの面のタブ (page の画面)。中身の箱 (#tools-sheet /
+   * #search-sheet) は index.html で本文 (#content) の中にあり、画面に入ると
+   * #diff を隠して中身を開き、離れると閉じて #diff を戻す (agents と同じ形)。
+   */
+  // 道具・検索語を渡されたらそれを開く (タブが覚えている前の検索語に負けない)。
+  // 渡されなければタブが最後に見ていた route へ戻る。
+  function openToolsPage(tool?: ToolId): void {
+    if (tool) navigateToRoute({ screen: "tools", tool, range: currentRange() });
+    else navigateToPageTab({ screen: "tools", range: currentRange() });
+  }
+
+  function openSearchPage(query?: string): void {
+    if (query)
+      navigateToRoute({ screen: "search", q: query, range: currentRange() });
+    else navigateToPageTab({ screen: "search", range: currentRange() });
+  }
+
+  /** Tools / Search の画面に入る (setRoute・戻る進む・読み込みの全部がここ)。 */
+  function enterToolOrSearchPage(): boolean {
+    const route = STATE.route;
+    if (route.screen !== "tools" && route.screen !== "search") return false;
+    cancelActiveSourceLoad("navigation");
+    setPageMode();
+    removeStandaloneSource();
+    document.getElementById("diff")?.setAttribute("hidden", "true");
+    document.getElementById("empty")?.classList.add("hidden");
+    document
+      .getElementById("history-commit-info")
+      ?.setAttribute("hidden", "true");
+    if (route.screen === "tools") {
+      if (!TOOLS_VIEW.isOpen() || TOOLS_VIEW.getActiveTool() !== route.tool)
+        void TOOLS_VIEW.open(route.tool);
+    } else if (
+      !SEARCH_RESULTS_VIEW.isOpen() ||
+      SEARCH_RESULTS_VIEW.getQuery() !== (route.q ?? "")
+    ) {
+      SEARCH_RESULTS_VIEW.open(route.q);
     }
-    syncHeaderMenu();
+    setStatus("live");
+    return true;
   }
 
-  function openSearchSheet(query?: string): void {
-    if (
-      parseTerminalOverlay(window.location.search) !== null ||
-      TERMINAL_VIEW.isOpen()
-    )
-      closeTerminalSheet();
-    if (
-      parseToolsOverlay(window.location.search) !== null ||
-      TOOLS_VIEW.isOpen()
-    )
-      closeToolsSheet();
-    updateUrlForSearchResultsOverlay(query ?? SEARCH_RESULTS_VIEW.getQuery());
-    SEARCH_RESULTS_VIEW.open(query);
-    syncAppPanel();
+  /** Tools / Search の画面を離れる (leaveScreen)。 */
+  function leaveToolOrSearchPage(screen: "tools" | "search"): void {
+    if (screen === "tools") TOOLS_VIEW.close();
+    else SEARCH_RESULTS_VIEW.close();
+    document.getElementById("diff")?.removeAttribute("hidden");
   }
 
-  function closeSearchSheet(): void {
-    SEARCH_RESULTS_VIEW.close();
-    updateUrlForSearchResultsOverlay(null);
-    syncAppPanel();
+  /**
+   * 画面の中で道具・検索語が変わった: route と URL とタブの記憶だけを
+   * 書き換える (画面に入り直さない)。
+   */
+  function rememberPageRoute(
+    screen: "tools" | "search",
+    value: string | null,
+  ): void {
+    const route = STATE.route;
+    if (route.screen !== screen) return;
+    if (route.screen === "tools") {
+      STATE.route = isToolId(value)
+        ? { ...route, tool: value }
+        : { screen: "tools", range: route.range };
+    } else {
+      STATE.route = value
+        ? { ...route, q: value }
+        : { screen: "search", range: route.range };
+    }
+    replaceUrlWithCurrentRoute();
+    MAIN_TABS.syncRoute(STATE.route, false);
   }
 
-  function syncSearchSheetFromUrl(): void {
-    const query = parseSearchResultsOverlay(window.location.search);
-    const open = SEARCH_RESULTS_VIEW.isOpen();
-    if (query !== null && (!open || SEARCH_RESULTS_VIEW.getQuery() !== query))
-      SEARCH_RESULTS_VIEW.open(query);
-    else if (query === null && open) SEARCH_RESULTS_VIEW.close();
-    syncAppPanel();
-  }
-
-  // Terminal sheet — tools sheet と同じ独立オーバーレイ。URL に載るのは
-  // 映している対象の ID で、tmux ペイン (?terminal=%14) かこのドロワーから
-  // 開いたシェル (?terminal=shell-…)。何も選ぶ前は ?terminal=open。
+  // メインの面のターミナルのタブ。URL の ?terminal= は、フォーカスのある面の
+  // 前面のターミナルのタブが映しているシェル (?terminal=shell-…)。
   const TERMINAL_VIEW = createTerminalView({
-    $: <T extends Element = HTMLElement>(sel: string) =>
-      document.querySelector<T>(sel),
     trackLoad,
     getLanguage: () => STATE.language,
     actionHeaders,
     // 文字サイズは他の表示設定と同じ置き場 (app settings) に持たせる。
     // 保存の経路も codeFontSize などと同じ patchSettings に乗せる。
-    getFontSize: () => clampTerminalFontSize(APP_SETTINGS.terminalFontSize),
+    getFontSize: terminalFontSize,
     onFontSizeChange: (size) => {
       const next = clampTerminalFontSize(size);
+      if (PHONE_QUERY.matches) {
+        reportStoredSizeFailure(
+          writeStoredSize(PHONE_TERMINAL_FONT_SIZE_KEY, next),
+          "saving the phone terminal font size failed",
+        );
+        return;
+      }
       mergeLocalSettings({ terminalFontSize: next });
       patchSettings({ terminalFontSize: next });
     },
-    onCloseRequest: () => closeTerminalSheet(),
-    onTargetChange: (id) => updateUrlForTerminalOverlay(id ?? "open"),
+    // 画像の棚を畳んだかは人に付く設定 (プロジェクトを移っても同じ)。
+    isImageShelfCollapsed: () =>
+      APP_SETTINGS.terminalImageShelfCollapsed === true,
+    onImageShelfCollapsedChange: (collapsed) => {
+      mergeLocalSettings({ terminalImageShelfCollapsed: collapsed });
+      patchSettings({ terminalImageShelfCollapsed: collapsed });
+    },
+    onOpenInTab: (session, pane, side) => {
+      if (pane) TAB_SHELL_PANES.set(session.id, pane);
+      MAIN_TABS.openTerminal(session.id, side);
+    },
+    onShellEnded: (id) => closeEndedTerminal(id),
+    onOpenFailed: (message) => TERMINAL_NOTICE.show(message),
+    tmuxWindow: (id) => TMUX_WINDOWS.get(id) ?? null,
+    // 大きさを変えた後の取り直しは全画面共通の取り直しに相乗りする (重なれば
+    // 走っているものを待つ)。
+    onTmuxWindowStale: () => void AGENT_MONITOR.refresh(),
+    onOpenImage: (image, gallery, kept) => {
+      IMAGE_REFS.set(image.path, { image, images: gallery });
+      const open = () => MAIN_TABS.openImage(image.path, "other-if-split");
+      if (kept) MAIN_TABS.openingNewTab(open);
+      else open();
+    },
   });
+
+  /**
+   * メインの面の左右の箱。前面のタブがターミナル・画像・本文を出していない
+   * route のタブ (置き札) のとき、その面の位置に出す。本文 (route の中身) を
+   * 出している面の箱は隠し、下の本文が見える。
+   */
+  const PANE_HOSTS: Record<PaneSide, HTMLElement> = {
+    left: createPaneHost("left"),
+    right: createPaneHost("right"),
+  };
+
+  function createPaneHost(side: PaneSide): HTMLElement {
+    const app = document.getElementById("app");
+    if (!app) throw new Error("#app is missing from index.html");
+    const host = document.createElement("div");
+    host.className = "main-pane-host";
+    host.dataset.side = side;
+    app.append(host);
+    return host;
+  }
+
+  // ---- 右の面のソース表示 ----
+  // 右の面の前面がファイルのとき、面の箱に 2 つ目のソース表示 (と Blame) を
+  // 描く。本文 (左の面) の実体と同じ createSourceView を、route・探す範囲・
+  // 差し込み先を右の面のものにして呼ぶ。行の選択・読み込みの取り消し・仮想
+  // スクロールは実体ごと、ファイルの取得・強調器・注釈の保存は共有。
+
+  type FileRoute = Extract<AppRoute, { screen: "file" }>;
+
+  type SidePane = {
+    /** 面の箱に入れる枠。スクロールはこの中。 */
+    root: HTMLElement;
+    /** カードを差し込む先 (本文の #diff にあたる)。 */
+    body: HTMLElement;
+    /** 描いている route (右の前面のタブの route)。 */
+    route: FileRoute;
+    /** 最後に描いた route。同じなら描き直さない (スクロールを失わない)。 */
+    rendered: string | null;
+    source: ReturnType<typeof createSourceView>;
+    blame: ReturnType<typeof createBlameView>;
+  };
+
+  let RIGHT_SOURCE: SidePane | null = null;
+
+  function rightSourcePane(route: FileRoute): SidePane {
+    if (RIGHT_SOURCE) return RIGHT_SOURCE;
+    const root = document.createElement("div");
+    root.className = "main-pane-source";
+    root.tabIndex = -1;
+    const body = document.createElement("div");
+    body.className = "main-pane-source-body";
+    root.append(body);
+    const scrollTarget = (): HTMLElement => {
+      const virtual = root.querySelector<HTMLElement>(
+        ".gdp-source-virtual-scroller",
+      );
+      return virtual && virtual.offsetParent !== null ? virtual : root;
+    };
+    // 本文だけのもの (body のクラス・一覧・一覧の列の畳むボタン) は右の面では動かさない。
+    const noop = () => undefined;
+    // 実体の依存は描くときの route を読む (pane は下で組む)。
+    let pane: SidePane;
+    const source = createSourceView({
+      ...SOURCE_VIEW_DEPS,
+      route: () => pane.route,
+      setRoute: (next, replace) => setRightPaneRoute(next, replace),
+      scope: () => root,
+      mountRoot: () => body,
+      mainScrollTarget: scrollTarget,
+      focusPanel: () => root.focus({ preventScroll: true }),
+      setPageMode: noop,
+      repoFileTargetFromRoute: () => pane.route.ref,
+      renderRepoBlobSidebar: noop,
+      placeSidebarToggle: noop,
+    });
+    const blame = createBlameView({
+      ...BLAME_VIEW_DEPS,
+      mountRoot: () => body,
+      scope: () => root,
+      setRoute: (next, replace) => setRightPaneRoute(next, replace),
+      setPageMode: noop,
+      removeStandaloneSource: () => pane.source.removeStandaloneSource(),
+      placeSidebarToggle: noop,
+      repoFileTargetFromRoute: () => pane.route.ref,
+      renderRepoBlobSidebar: noop,
+      currentSourceLineTarget: (target) =>
+        pane.source.currentSourceLineTarget(target),
+      lineInSourceTarget: (lineNumber, target) =>
+        pane.source.lineInSourceTarget(lineNumber, target),
+      bindSourceLineNumber: (num, card, target, line) =>
+        pane.source.bindSourceLineNumber(num, card, target, line),
+      setPreferredSourceTab: (tab) => pane.source.setPreferredSourceTab(tab),
+    });
+    pane = { root, body, route, rendered: null, source, blame };
+    DEFINITION_JUMP.install(root);
+    RIGHT_SOURCE = pane;
+    return pane;
+  }
+
+  // ---- 別のプロジェクトのファイル (その場で出す) ----
+  // 別のプロジェクトのファイルのタブは、面の箱にそのプロジェクトの `/p/<鍵>` から
+  // 読むソース表示で出す (設計: ファイル一覧はいまのプロジェクトのまま)。本文の
+  // 実体と同じ createSourceView に、読む先 (requestUrl)・パンくず・中の移動を
+  // そのプロジェクトのものにした依存を渡す。このページのプロジェクトに付くもの
+  // (注釈・ごみ箱・OS で開く・履歴・定義へ飛ぶ・フォルダ表示) は渡さない: 同じ
+  // パスのこのプロジェクトのファイルに当たってしまう。
+
+  /** プロジェクトの根 → 鍵 (`/p/<鍵>`)。 */
+  const PROJECT_KEYS = new Map<string, string>();
+
+  /** そのプロジェクトの鍵。動いていなければ入口に起こしてもらって知る。 */
+  async function projectKeyFor(root: string): Promise<string> {
+    const known = PROJECT_KEYS.get(root);
+    if (known) return known;
+    const info = AGENT_MONITOR.snapshot().overview?.projects.find(
+      (item) => item.root === root,
+    );
+    let url = info?.server.status === "running" ? info.server.url : null;
+    if (!url) {
+      const res = await trackLoad(
+        fetch(apiUrl("agentProjectsOpen"), {
+          method: "POST",
+          headers: actionHeaders(),
+          body: JSON.stringify({ root }),
+        }),
+      );
+      if (!res.ok)
+        throw new Error(
+          await responseErrorMessage(res, `open the project ${root}`),
+        );
+      url = ((await res.json()) as { url: string }).url;
+    }
+    const key = projectKeyOfServerUrl(url);
+    if (!key)
+      throw new Error(
+        `the project ${root} has no /p/<key> address (${url}), so its files cannot be shown here`,
+      );
+    PROJECT_KEYS.set(root, key);
+    return key;
+  }
+
+  type ForeignPane = {
+    root: HTMLElement;
+    body: HTMLElement;
+    /** 描いているタブ・プロジェクト・鍵・route。 */
+    tabId: string;
+    project: string;
+    key: string;
+    route: FileRoute;
+    rendered: string | null;
+    source: ReturnType<typeof createSourceView>;
+  };
+
+  const FOREIGN_PANES: Partial<Record<PaneSide, ForeignPane>> = {};
+
+  /** 別のプロジェクトのパンくず: 色の四角と名前、パス (押せない)。 */
+  function foreignBreadcrumb(project: string, path: string): HTMLElement {
+    const nav = document.createElement("nav");
+    nav.className = "gdp-file-breadcrumb main-pane-foreign-crumb";
+    nav.setAttribute("aria-label", DIFF_SCREEN_TEXT[STATE.language].filePath);
+    const look = PROJECT_LOOKS.get(project);
+    const name = look?.name ?? (project.split("/").pop() || project);
+    nav.append(
+      projectMark(
+        look ?? {
+          root: project,
+          name,
+          initials: projectInitials(name),
+          color: null,
+        },
+        "main-pane-foreign-mark",
+      ),
+    );
+    const parts = [name, ...path.split("/").filter(Boolean)];
+    parts.forEach((part, index) => {
+      if (index > 0) {
+        const sep = document.createElement("span");
+        sep.className = "gdp-file-breadcrumb-sep";
+        sep.textContent = "/";
+        nav.append(sep);
+      }
+      const crumb = document.createElement("span");
+      crumb.className =
+        index === parts.length - 1
+          ? "gdp-file-breadcrumb-current"
+          : "gdp-file-breadcrumb-part";
+      crumb.textContent = filePathDisplayText(part);
+      nav.append(crumb);
+    });
+    return nav;
+  }
+
+  function foreignPane(side: PaneSide): ForeignPane {
+    const existing = FOREIGN_PANES[side];
+    if (existing) return existing;
+    const root = document.createElement("div");
+    root.className = "main-pane-source main-pane-foreign";
+    root.tabIndex = -1;
+    const body = document.createElement("div");
+    body.className = "main-pane-source-body";
+    root.append(body);
+    const noop = () => undefined;
+    const hidden = () => {
+      const el = document.createElement("span");
+      el.hidden = true;
+      return el;
+    };
+    const toForeign = (url: string) => projectApiUrl(url, pane.key);
+    let pane: ForeignPane;
+    const source = createSourceView({
+      ...SOURCE_VIEW_DEPS,
+      route: () => pane.route,
+      setRoute: (next) => setForeignRoute(side, next),
+      scope: () => root,
+      mountRoot: () => body,
+      mainScrollTarget: () => {
+        const virtual = root.querySelector<HTMLElement>(
+          ".gdp-source-virtual-scroller",
+        );
+        return virtual && virtual.getClientRects().length > 0 ? virtual : root;
+      },
+      focusPanel: () => root.focus({ preventScroll: true }),
+      setPageMode: noop,
+      loadRepo: async () => undefined,
+      repoFileTargetFromRoute: () => pane.route.ref,
+      renderRepoBlobSidebar: noop,
+      placeSidebarToggle: noop,
+      createFileBreadcrumb: (path) => foreignBreadcrumb(pane.project, path),
+      createRepositoryWebLink: undefined,
+      createRevisionNav: undefined,
+      createOpenPathButton: hidden,
+      createMoveToTrashButton: hidden,
+      canTrashWorktreeRef: () => false,
+      loadRawFileInfo: (target) =>
+        REPO_VIEW.loadRawFileInfo(target, toForeign(buildRawFileUrl(target))),
+      renderMarkdownPreview: (text, target, options) =>
+        renderMarkdownPreview(text, target, {
+          ...options,
+          resolveAssetUrl: (path) =>
+            toForeign(buildRawFileUrl({ path, ref: target.ref || "worktree" })),
+        }),
+      onSourceRendered: undefined,
+      requestUrl: toForeign,
+    });
+    pane = {
+      root,
+      body,
+      tabId: "",
+      project: "",
+      key: "",
+      route: {
+        screen: "file",
+        path: "",
+        ref: "worktree",
+        view: "blob",
+        range: currentRange(),
+      },
+      rendered: null,
+      source,
+    };
+    FOREIGN_PANES[side] = pane;
+    return pane;
+  }
+
+  /**
+   * 別のプロジェクトのファイルの中の移動。同じファイルの Code / Preview・行は
+   * その場で、ほか (別のファイル・履歴・Blame・フォルダ) はそのプロジェクトへ移る。
+   */
+  function setForeignRoute(side: PaneSide, next: AppRoute): void {
+    const pane = FOREIGN_PANES[side];
+    if (!pane) return;
+    if (
+      next.screen === "file" &&
+      next.path === pane.route.path &&
+      (next.view === undefined || next.view === "blob")
+    ) {
+      MAIN_TABS.setTabRoute(pane.tabId, next);
+      pane.route = next;
+      pane.rendered = null;
+      pane.source.applySourceRouteToShell();
+      return;
+    }
+    openProjectAt(pane.project, withoutProjectPrefix(buildRoute(next)));
+  }
+
+  /** 面の箱に文言だけを出す (移る途中・読めない理由)。 */
+  function showPaneMessage(side: PaneSide, message: string): void {
+    const el = document.createElement("p");
+    el.className = "main-pane-message";
+    el.textContent = message;
+    PANE_HOSTS[side].replaceChildren(el);
+  }
+
+  /** 別のプロジェクトのファイルのタブを、その面の箱に出す。 */
+  function showForeignFile(side: PaneSide, tab: Tab): void {
+    const project = tab.target.kind === "file" ? tab.target.project : undefined;
+    const route = MAIN_TABS.tabRoute(tab);
+    if (!project || route?.screen !== "file")
+      throw new Error(
+        `main tabs: ${JSON.stringify(tab.target)} is not a file of another project`,
+      );
+    const existing = FOREIGN_PANES[side];
+    if (!existing || existing.root.parentElement !== PANE_HOSTS[side])
+      showPaneMessage(
+        side,
+        mainTabsText(STATE.language).switchingProject(
+          PROJECT_LOOKS.get(project)?.name ?? project,
+        ),
+      );
+    projectKeyFor(project).then(
+      (key) => {
+        if (MAIN_TABS.panes().fronts[side]?.id !== tab.id) return;
+        const pane = foreignPane(side);
+        const host = PANE_HOSTS[side];
+        if (pane.root.parentElement !== host) {
+          host.replaceChildren(pane.root);
+          pane.rendered = null;
+        }
+        pane.tabId = tab.id;
+        pane.project = project;
+        pane.key = key;
+        pane.route = route;
+        const signature = JSON.stringify([key, route]);
+        if (pane.rendered === signature) return;
+        pane.rendered = signature;
+        pane.source.applySourceRouteToShell();
+      },
+      (error: unknown) => {
+        console.error(
+          `[code-viewer] the file ${JSON.stringify(tab.target)} of another project could not be shown`,
+          error,
+        );
+        if (MAIN_TABS.panes().fronts[side]?.id !== tab.id) return;
+        showPaneMessage(side, formatErrorDetail(error));
+      },
+    );
+  }
+
+  /**
+   * 木・差分の一覧のファイルの行を、固定のタブ (new-tab) か反対の面
+   * (other-pane) で開く (ui-surface.md の「タブの決まり」)。木は今見ている
+   * 表示 (Code / Blame) を保ち、差分の一覧はその差分の新しい側の版 (消した
+   * ファイルは古い側) を Code で開く。フォルダはタブにならないので普通の
+   * クリックと同じ。
+   */
+  function openFileAs(
+    file: SidebarItem,
+    intent: "new-tab" | "other-pane",
+    list: "diff" | "repo",
+  ): void {
+    const ref = REPO_SIDEBAR_REF || STATE.repoRef || "worktree";
+    if (file.type === "tree") {
+      setRoute(REPO_VIEW.repoRoute(ref, file.resolved_path ?? file.path));
+      void REPO_VIEW.loadRepo();
+      return;
+    }
+    const range = currentRange();
+    const route: FileRoute =
+      list === "diff"
+        ? {
+            screen: "file",
+            path: file.path,
+            ref: file.status === "D" ? range.from : range.to,
+            view: "blob",
+            range,
+          }
+        : fileRouteKeepingActiveView(
+            STATE.route,
+            { path: file.path, ref },
+            range,
+          );
+    if (intent === "new-tab") {
+      MAIN_TABS.openingNewTab(() => setRoute(route));
+      if (route.view === "blob")
+        void renderStandaloneSource({ path: route.path, ref: route.ref });
+      return;
+    }
+    openFileInOtherPane(route);
+  }
+
+  /**
+   * 反対の面で開く。1 面か左にフォーカスがあれば右の面 (1 面なら右に分ける)、
+   * 右にフォーカスがあれば左 (本文)。右の面では History を持たないので、その
+   * 表示は Code に落とす。
+   */
+  function openFileInOtherPane(keep: FileRoute): void {
+    const route: FileRoute =
+      keep.view === "history" ? { ...keep, view: "blob" } : keep;
+    const view = MAIN_TABS.panes();
+    if (view.split && view.focused === "right") {
+      MAIN_TABS.focusSide("left");
+      setRoute(route);
+      return;
+    }
+    // 2 面を置けない幅: 反対の面が無いので本文で開く。
+    if (!openInRightPane(route)) setRoute(route);
+  }
+
+  /** キー操作・スクロールの相手: フォーカスのある面のソース表示。 */
+  function activeSourceView(): ReturnType<typeof createSourceView> {
+    const view = MAIN_TABS.panes();
+    return view.focused === "right" &&
+      view.fronts.right?.target.kind === "file" &&
+      RIGHT_SOURCE
+      ? RIGHT_SOURCE.source
+      : SOURCE_VIEW;
+  }
+
+  /** 右の面の箱に、前面のファイルのタブの route を描く (同じ route なら何もしない)。 */
+  function showSourceInRight(): void {
+    const route = MAIN_TABS.paneRoute("right");
+    if (route?.screen !== "file")
+      throw new Error(
+        `right pane: the front tab has no file route (${JSON.stringify(route)})`,
+      );
+    const pane = rightSourcePane(route);
+    const host = PANE_HOSTS.right;
+    if (pane.root.parentElement !== host) host.replaceChildren(pane.root);
+    pane.route = route;
+    const key = JSON.stringify(route);
+    if (pane.rendered === key) return;
+    pane.rendered = key;
+    const target = { path: route.path, ref: route.ref };
+    if (route.view === "blame") {
+      pane.source.cancelActiveSourceLoad("navigation");
+      pane.source.removeStandaloneSource();
+      void pane.blame.renderBlamePage(target);
+      return;
+    }
+    pane.blame.removeBlamePage();
+    pane.source.applySourceRouteToShell();
+  }
+
+  /**
+   * 右の面へファイルの route を開く (右にフォーカスがあるときの木・パレット、
+   * Alt+クリック、右の面の中の移動)。開けなければ (1 面で狭い) false。
+   */
+  function openInRightPane(route: FileRoute, replace = false): boolean {
+    if (!MAIN_TABS.openRouteRight(route)) return false;
+    showSourceInRight();
+    syncLineRefPill();
+    FILE_LIST.markActive(route.path);
+    const url = withPaneOverlay(urlForRoute(route), "right");
+    if (url !== window.location.pathname + window.location.search) {
+      if (replace)
+        history.replaceState(historyStateForRoute(route, true), "", url);
+      else history.pushState(historyStateForRoute(route), "", url);
+    }
+    return true;
+  }
+
+  /**
+   * 右の面のソース表示・Blame が route を変える。右で描けないもの (ファイル
+   * の History・フォルダ・Diff・History) は本文 (左の面) で開く。
+   */
+  function setRightPaneRoute(route: AppRoute, replace = false): void {
+    if (
+      route.screen === "file" &&
+      route.view !== "history" &&
+      routeTarget(route)?.kind === "file" &&
+      openInRightPane(route, replace)
+    )
+      return;
+    MAIN_TABS.focusSide("left");
+    setRoute(route, replace);
+  }
+
+  /**
+   * 木・パレット・定義ジャンプなどが route を置いた後に呼ぶソースの描画。
+   * いま右の面に開いたファイルなら右の面の実体、それ以外は本文の実体。
+   */
+  function renderStandaloneSource(
+    target: SourceFileTarget,
+    options?: { refresh?: boolean },
+  ): Promise<unknown> {
+    const view = MAIN_TABS.panes();
+    const route = MAIN_TABS.paneRoute("right");
+    if (
+      view.focused === "right" &&
+      RIGHT_SOURCE &&
+      route?.screen === "file" &&
+      route.path === target.path &&
+      route.ref === target.ref
+    )
+      return RIGHT_SOURCE.source.renderStandaloneSource(target, options);
+    return SOURCE_VIEW.renderStandaloneSource(target, options);
+  }
+
+  /**
+   * URL をフォーカスのある面に合わせる: 右の面のファイルなら その route に
+   * pane=right を足したもの、そうでないのに pane=right が残っていれば本文の
+   * route に戻す。
+   */
+  function syncFocusedPaneUrl(mode: "push" | "replace"): void {
+    const view = MAIN_TABS.panes();
+    const right = MAIN_TABS.paneRoute("right");
+    const current = window.location.pathname + window.location.search;
+    let next: string | null = null;
+    if (view.focused === "right" && right?.screen === "file")
+      next = withPaneOverlay(urlForRoute(right), "right");
+    else if (parsePaneOverlay(window.location.search))
+      next = urlForRoute(STATE.route);
+    if (next === null || next === current) return;
+    const state = historyStateForRoute(
+      view.focused === "right" && right ? right : STATE.route,
+      mode === "replace",
+    );
+    if (mode === "push") history.pushState(state, "", next);
+    else history.replaceState(state, "", next);
+  }
+
+  /**
+   * パスから画像を引く (既存の /_agent/images。URL はサーバが組み立てる)。
+   * リポジトリのファイルなら、木の同じフォルダの画像を前後の並びにする。
+   */
+  async function resolveImage(
+    path: string,
+    project: string | null = null,
+  ): Promise<{ image: TerminalImageRef; images: TerminalImageRef[] }> {
+    const cacheKey = project === null ? path : `${project}\u0000${path}`;
+    const known = IMAGE_REFS.get(cacheKey);
+    if (known) return known;
+    // 別のプロジェクトの画像は、そのプロジェクトの鍵で引く (パスはその根から)。
+    // 木の並びはこのページのプロジェクトのものなので、前後の並びにしない。
+    const foreignKey = project === null ? null : await projectKeyFor(project);
+    const folder = path.includes("/")
+      ? path.slice(0, path.lastIndexOf("/"))
+      : "";
+    const siblings =
+      path.startsWith("/") || foreignKey !== null
+        ? [path]
+        : FILE_LIST.getSidebarFiles()
+            .map((item) => item.path)
+            .filter(
+              (item) =>
+                terminalImageExtension(item) !== null &&
+                (item.includes("/")
+                  ? item.slice(0, item.lastIndexOf("/"))
+                  : "") === folder,
+            );
+    const paths = siblings.includes(path) ? siblings : [path, ...siblings];
+    const params = new URLSearchParams();
+    for (const item of paths) params.append("path", item);
+    const res = await trackLoad(
+      fetch(
+        `${apiUrl("agentImages")}?${params.toString()}`,
+        foreignKey === null
+          ? undefined
+          : { headers: { [PROJECT_HEADER]: foreignKey } },
+      ),
+    );
+    if (!res.ok)
+      throw new Error(await responseErrorMessage(res, `load image ${path}`));
+    const body = validateTerminalImageResponseUrls(
+      (await res.json()) as TerminalImagesResponse,
+      window.location.href,
+    );
+    const image = body.images.find(
+      (item) => item.candidate === path || item.path === path,
+    );
+    if (!image) {
+      const rejected = body.rejected.find((item) => item.candidate === path);
+      throw new Error(
+        `image ${path} cannot be shown: ${rejected ? JSON.stringify(rejected) : "not in the response"}`,
+      );
+    }
+    const resolved = { image, images: body.images };
+    IMAGE_REFS.set(cacheKey, resolved);
+    return resolved;
+  }
+
+  /** その面の箱に画像を出す。読めなければ理由を箱に出す (黙って空にしない)。 */
+  function showImageIn(
+    side: PaneSide,
+    path: string,
+    project: string | null = null,
+  ): void {
+    const host = PANE_HOSTS[side];
+    void resolveImage(path, project).then(
+      ({ image, images }) => {
+        const front = MAIN_TABS.panes().fronts[side];
+        if (front?.target.kind !== "image" || front.target.path !== path)
+          return;
+        let view = IMAGE_VIEWS[side];
+        if (view) view.setImage(image, images);
+        else {
+          view = createImageTabView({
+            image,
+            images,
+            imageUrlFor: (ref) => ref.url,
+            copyPath: (target) =>
+              navigator.clipboard.writeText(filePathClipboardText(target)),
+            openPath: (target) => openPathInOs(target, "file-parent"),
+            language: STATE.language,
+          });
+          IMAGE_VIEWS[side] = view;
+        }
+        host.replaceChildren(view.el);
+        if (MAIN_TABS.panes().focused === side) view.focus();
+      },
+      (error: unknown) => {
+        console.error("[code-viewer] image tab could not be shown", error);
+        const front = MAIN_TABS.panes().fronts[side];
+        if (front?.target.kind !== "image" || front.target.path !== path)
+          return;
+        const message = document.createElement("p");
+        message.className = "main-pane-message";
+        message.textContent = formatErrorDetail(error);
+        host.replaceChildren(message);
+      },
+    );
+  }
+
+  // 2 面のとき、面の中 (本文・箱) を押したらその面へフォーカスを移す。
+  // タブ列 (タブを押せばその面へ移る)・サイドバー・最下段・
+  // メニューやダイアログは面の外なので見ない。
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      const side = MAIN_TABS.sideAt(event.clientX);
+      if (!side) return;
+      const target = event.target as Element | null;
+      if (
+        target?.closest(
+          "#app-nav, #main-tabs, #statusbar, .main-split-divider, .gdp-context-menu, [role=dialog]",
+        )
+      )
+        return;
+      MAIN_TABS.focusSide(side);
+    },
+    true,
+  );
+
   relocalizeTerminal = () => TERMINAL_VIEW.localize();
 
-  function updateUrlForTerminalOverlay(state: TerminalOverlayState): void {
-    const current = window.location.pathname + window.location.search;
-    const next = withTerminalOverlay(current, state);
-    if (next !== current) {
-      history.replaceState(history.state, "", next + window.location.hash);
+  // 電話の幅の骨格 (引き出し・下からの面・下端の帯・端末の操作札)。2 面は
+  // 無いので、端末は左の面のものに送る。
+  const MOBILE_SHELL = installMobileShell({
+    getLanguage: () => STATE.language,
+    sendTerminalKey: (key) => TERMINAL_VIEW.sendSoftKey("left", key),
+    focusTerminal: () => TERMINAL_VIEW.focusTab("left"),
+    tabs: {
+      list: () => MAIN_TABS.tabList(),
+      bringToFront: (id) => MAIN_TABS.bringToFront(id),
+      close: (id) => MAIN_TABS.closeTab(id),
+      onRender: (listener) => MAIN_TABS.onRender(listener),
+    },
+    terminalFontSize,
+    setTerminalFontSize: (size) => {
+      reportStoredSizeFailure(
+        writeStoredSize(
+          PHONE_TERMINAL_FONT_SIZE_KEY,
+          clampTerminalFontSize(size),
+        ),
+        "saving the phone terminal font size failed",
+      );
+      TERMINAL_VIEW.applyFontSize();
+    },
+  });
+  // 電話の段に出入りすると、端末の文字の大きさの出所 (電話の値と設定) が替わる。
+  PHONE_QUERY.addEventListener("change", () => TERMINAL_VIEW.applyFontSize());
+
+  /**
+   * URL の ?terminal= (映しているシェル) に合わせる。そのシェルのタブを開いて
+   * 前面に出す (無ければ作る)。`open` は下パネルにターミナルがあった頃の
+   * 「パネルを開くだけ」の値で、いまは意味を持たないので URL から外すだけ
+   * (route はそのまま。ルートの URL なら Files)。
+   */
+  function syncTerminalFromUrl(state: TerminalOverlayState): void {
+    if (state === "open") {
+      const path = window.location.pathname + window.location.search;
+      const next = withTerminalOverlay(path, null);
+      if (next !== path)
+        history.replaceState(history.state, "", next + window.location.hash);
+      return;
     }
-    // メニューの Terminal は URL の ?terminal= を見て押下状態を出す。
+    if (state) MAIN_TABS.openTerminal(state);
+  }
+
+  /**
+   * キー (Ctrl+`) で「＋」のメニューを開くときの、フォーカスの戻し先。
+   * タブ列の openNewTabMenu が同期で openNewTabMenu (下) を呼ぶ間だけ持つ。
+   */
+  let newTabMenuFocusReturn: HTMLElement | null = null;
+
+  /** キー (Ctrl+`・PWA の窓の ⌘/Ctrl+T) で、フォーカスのある面の「＋」のメニューを開く。 */
+  function openNewTabMenuFromKeys(): void {
+    newTabMenuFocusReturn =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    MAIN_TABS.openNewTabMenu();
+  }
+
+  /**
+   * タブ列の「＋」のメニュー: ファイルを開く・新しいシェル・既存のセッション
+   * (このサーバのシェルと、このプロジェクトの tmux のペイン)。一覧は開く
+   * 直前に取り直す。取れなかったら、理由をメニューの 1 行に出す (ファイルと
+   * 新しいシェルは使えるままにする)。
+   */
+  async function openNewTabMenu(
+    side: PaneSide,
+    anchor: HTMLElement,
+  ): Promise<void> {
+    const back = newTabMenuFocusReturn;
+    newTabMenuFocusReturn = null;
+    let list: ShellListResponse | Error;
+    try {
+      list = await TERMINAL_VIEW.loadShells();
+    } catch (error) {
+      console.error(
+        "[code-viewer] shell list for the new-tab menu failed",
+        error,
+      );
+      list = error instanceof Error ? error : new Error(String(error));
+    }
+    if (!anchor.isConnected) return;
+    // キーで開いたなら、Escape で戻す先はキーを押した場所 (＋のボタンではない)。
+    // 何も選んでいなかった・もう無いなら＋のボタン (既定)。
+    showContextMenu(
+      anchor,
+      newTabMenuItems(side, list),
+      back && back !== document.body && back.isConnected
+        ? { focusReturn: back }
+        : {},
+    );
+  }
+
+  function newTabMenuItems(
+    side: PaneSide,
+    list: ShellListResponse | Error,
+  ): ContextMenuItem[] {
+    const t = terminalText(STATE.language);
+    const a = agentsText(STATE.language);
+    const overview = AGENT_MONITOR.snapshot().overview;
+    const unread = AGENT_MONITOR.snapshot().unread;
+    const items: ContextMenuItem[] = [
+      {
+        label: t.newTabOpenFile,
+        // その面の＋から開いたファイルは、その面に開く (右の面にも置ける)。
+        onSelect: () => {
+          MAIN_TABS.focusSide(side);
+          openSearchPalette("file");
+        },
+      },
+      {
+        label: t.newShell,
+        title:
+          list instanceof Error || list.available
+            ? t.newShellTitle
+            : `${t.shellUnavailable}\n${list.reason ?? ""}`,
+        disabled: !(list instanceof Error) && !list.available,
+        onSelect: () => {
+          TERMINAL_VIEW.createShell(side).catch((error: unknown) => {
+            console.error("[code-viewer] shell create failed", error);
+            void showAlertDialog({
+              title: t.shellCreateFailed,
+              body: formatErrorDetail(error),
+            });
+          });
+        },
+      },
+      // Tools と Search は page のタブ (左の面にだけ開く)。
+      { label: uiText().nav.tools, onSelect: () => openToolsPage() },
+      { label: uiText().nav.search, onSelect: () => openSearchPage() },
+    ];
+    const sessions: ContextMenuItem[] = [];
+    /** タブで開いていない未読のペイン (印を付け、まとめて読んだことにできる)。 */
+    const unreadPanes: string[] = [];
+    const mark = (paneId: string | undefined, tabbed: boolean): string => {
+      if (!paneId || tabbed || !unread.has(paneId)) return "";
+      unreadPanes.push(paneId);
+      return "● ";
+    };
+    if (list instanceof Error) {
+      sessions.push({
+        label: t.shellListFailed,
+        title: formatErrorDetail(list),
+        disabled: true,
+        onSelect: () => undefined,
+      });
+    } else {
+      for (const session of list.sessions) {
+        const tabbed = MAIN_TABS.hasTerminal(session.id);
+        const pane = paneForShell(session.id);
+        sessions.push({
+          label: `${mark(pane?.id, tabbed)}${terminalTabInfo(session.id).label}${tabbed ? ` · ${t.inTab}` : ""}`,
+          title: [pane ? paneText(pane, a).title : session.command, session.cwd]
+            .filter(Boolean)
+            .join("\n"),
+          onSelect: () => MAIN_TABS.openTerminal(session.id),
+        });
+      }
+    }
+    // このプロジェクトの tmux のペインのうち、上のシェルが映していないもの。
+    const shown = new Set(
+      list instanceof Error ? [] : list.sessions.map((item) => item.id),
+    );
+    const current = overview?.projects.find(
+      (item) => item.server.status === "current",
+    );
+    for (const pane of overview?.panes ?? []) {
+      if (pane.project !== current?.root) continue;
+      if (pane.shownInShell !== "" && shown.has(pane.shownInShell)) continue;
+      // 行の形はサイドバー・パレット・タブと同じ決まり (pane-text.ts)。
+      const row = paneText(pane, a);
+      sessions.push({
+        label: `${mark(pane.id, false)}${row.row}`,
+        title: row.title,
+        onSelect: () => openAgentPane(pane.id),
+      });
+    }
+    if (sessions.length > 0) items.push({ kind: "separator" }, ...sessions);
+    else if (!(list instanceof Error))
+      items.push(
+        { kind: "separator" },
+        { label: t.noShells, disabled: true, onSelect: () => undefined },
+      );
+    items.push({ kind: "separator" });
+    if (unreadPanes.length > 0)
+      items.push({
+        label: t.markAllRead(unreadPanes.length),
+        title: t.unreadTitle,
+        onSelect: () => {
+          for (const pane of unreadPanes) AGENT_MONITOR.markRead(pane);
+        },
+      });
+    items.push({
+      label: t.allSessions,
+      onSelect: () =>
+        navigateToRoute({ screen: "agents", range: currentRange() }),
+    });
+    return items;
+  }
+
+  /** タブの右クリックの「セッションを止める」。確かめてから止め、タブも閉じる。 */
+  async function stopTerminal(session: ShellSessionId): Promise<void> {
+    const t = terminalText(STATE.language);
+    const name = terminalTabInfo(session).label;
+    const ok = await showConfirmDialog({
+      title: t.stopConfirmTitle,
+      body: t.stopConfirmMessage(name),
+      confirmLabel: t.stopConfirm,
+      cancelLabel: t.cancel,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await TERMINAL_VIEW.closeShell(session);
+    } catch (error) {
+      console.error("[code-viewer] shell close failed", error);
+      await showAlertDialog({
+        title: t.shellCloseFailed,
+        body: formatErrorDetail(error),
+      });
+      return;
+    }
+    MAIN_TABS.closeTerminal(session);
+  }
+
+  /**
+   * 面の前面・フォーカス・分割が変わった。面ごとの箱にターミナル・画像・
+   * 右の面のファイルを出す (本文 = route の中身は左の面にしか出ないので、左の
+   * 前面が route のタブか何も選んでいないときは箱を隠して本文を見せる)。
+   * URL はフォーカスのある面に合わせる: 右の面のファイルなら pane=right、
+   * ターミナルならそのシェルを積み、そうでないタブへ route を移らずに戻った
+   * ときは ?terminal= を外す。
+   */
+  // ---- 一覧の列 (ファイル一覧・一覧・変更ファイルの一覧) ----
+  // 状態は wiring の前に宣言してある (FILE_LIST_AUTO_HIDDEN など)。
+
+  /**
+   * 一覧の列に出す一覧 (core/list-column.ts の listColumnKindFor)。画面の印
+   * (body の class と data-worktree-overview) と、左の面の前面が画面のタブか
+   * (showPanes が控える LEFT_FRONT_IS_PAGE) から決める: 作業ツリーの選択の印は
+   * worktree-view.ts が付けるので、route からでは遅れる。
+   */
+  function listColumnKind(): ListColumnKind | null {
+    const body = document.body;
+    return listColumnKindFor({
+      has: (pageClass) => body.classList.contains(pageClass),
+      worktreeOverview: body.hasAttribute("data-worktree-overview"),
+      leftFrontIsPage: LEFT_FRONT_IS_PAGE,
+    });
+  }
+
+  function requireColumnHead(): HTMLElement {
+    const head = document.getElementById("panel-head");
+    if (!head) throw new Error("#panel-head is missing from index.html");
+    return head;
+  }
+
+  /**
+   * 一覧の列が本文の横に取っている幅 (core/panel-column-policy.ts の
+   * listColumnBodyWidth)。
+   */
+  function listColumnShownWidth(): number {
+    return listColumnBodyWidth({
+      overlaid: window.matchMedia(PHONE_MEDIA_QUERY).matches,
+      shown: LIST_COLUMN_WIDTH,
+      headWidth: requireColumnHead().getBoundingClientRect().width,
+    });
+  }
+
+  /** body で決まる長さの変数 (密度で変わる) を px で読む。 */
+  function bodyLength(name: string): number {
+    const value = getComputedStyle(document.body).getPropertyValue(name);
+    const length = Number.parseFloat(value);
+    if (!Number.isFinite(length))
+      throw new Error(`${name} is not a length: ${JSON.stringify(value)}`);
+    return length;
+  }
+
+  /**
+   * 一覧の列を合わせる: 出す一覧の印、ファイル一覧・一覧・変更ファイルの一覧の
+   * 幅と畳み (決まりは core/list-column.ts と core/panel-column-policy.ts)。
+   * 幅が変わったら 2 面の幅も合わせ直す。
+   */
+  /**
+   * 今の画面の一覧の列を、本文に need を残す形で決める (core/list-column.ts の
+   * listColumnLayout)。DOM の印は変えない。
+   */
+  function listColumnLayoutFor(need: number) {
+    const kind = listColumnKind();
+    // 一覧の列と本文 = 一覧の列の頭の左端 (左のサイドバーの右) から窓の右端まで。
+    const room =
+      document.documentElement.clientWidth -
+      requireColumnHead().getBoundingClientRect().left;
+    // 畳んだ列の帯の幅 (--panelcol-rail-w。密度で変わる)。
+    const rail = bodyLength("--panelcol-rail-w");
+    // 畳んだファイル一覧が残す画面の入口の縦の帯の幅 (--view-rail-w)。
+    const filesRail = bodyLength("--view-rail-w");
+    const userHidden = STATE.sidebarHidden && !FILE_LIST_AUTO_HIDDEN;
+    const hasTree = kind === "history" || kind === "worktree";
+    const layout = listColumnLayout({
+      room,
+      files: userHidden ? 0 : STATE.sbWidth,
+      filesRail,
+      filesKeptOpen: FILE_LIST_KEPT_OPEN,
+      // 手で畳んだ一覧・変更ファイルの一覧は帯 (開くボタン) の幅。
+      preferred: !kind ? 0 : LIST_COLUMN_HIDDEN ? rail : STATE.historyWidth,
+      compact: HISTORY_WIDTH.min,
+      tree: !hasTree ? 0 : LIST_TREE_HIDDEN ? rail : STATE.sbWidth,
+      treeRail: rail,
+      treeKeptOpen: LIST_TREE_KEPT_OPEN || LIST_TREE_HIDDEN,
+      need,
+    });
+    // 一覧の列が本文の横に取る幅 (ファイル一覧・一覧・変更ファイルの一覧)。
+    const width =
+      (userHidden || layout.filesFolded ? filesRail : STATE.sbWidth) +
+      (kind ? layout.width + layout.tree : 0);
+    return { kind, room, userHidden, hasTree, layout, width };
+  }
+
+  /**
+   * 2 面にしたときの一覧の列の幅 (main-tabs-view が 2 面を置けるかを数える)。
+   * 電話では重ねて出す面なので、今の幅 (頭の実幅) のまま。
+   */
+  function splitListColumnWidth(): number {
+    if (window.matchMedia(PHONE_MEDIA_QUERY).matches)
+      return listColumnShownWidth();
+    return listColumnLayoutFor(SPLIT_NEED).width;
+  }
+
+  function syncListColumn(): void {
+    const body = document.body;
+    const split = RESTORING_TABS ? BOOT_SPLIT : MAIN_TABS.panes().split;
+    const need = split ? SPLIT_NEED : COMFORTABLE_PANE_WIDTH;
+    const { kind, room, userHidden, hasTree, layout } =
+      listColumnLayoutFor(need);
+    if (kind) body.dataset.listColumn = kind;
+    else delete body.dataset.listColumn;
+    body.toggleAttribute(
+      "data-list-column-hidden",
+      !!kind && LIST_COLUMN_HIDDEN,
+    );
+    // 電話では一覧の列は重ねて出す面なので、幅では畳まない。
+    const overlaid = window.matchMedia(PHONE_MEDIA_QUERY).matches;
+    const action = fileListAction({
+      folded: layout.filesFolded && !overlaid,
+      autoHidden: FILE_LIST_AUTO_HIDDEN,
+      userHidden,
+    });
+    if (action !== "keep") {
+      FILE_LIST_AUTO_HIDDEN = action === "collapse";
+      applySidebarHidden(FILE_LIST_AUTO_HIDDEN, { persist: false });
+    }
+    markFileListAutoHidden();
+    const files = STATE.sidebarHidden
+      ? bodyLength("--view-rail-w")
+      : STATE.sbWidth;
+    // 掴んで広げられる一覧の上限 = 今のファイル一覧と変更ファイルの一覧のままで
+    // 本文が need を保てる幅。
+    LIST_FITS_WIDTH = room - files - layout.tree - need;
+    if (kind && !LIST_COLUMN_HIDDEN)
+      document.documentElement.style.setProperty(
+        "--list-w",
+        `${layout.width}px`,
+      );
+    // 変更ファイルの一覧の幅そのものは CSS が --sidebar-w と帯の幅から作る (掴み
+    // でのドラッグを ResizeObserver で拾えるように)。ここは畳むかどうかだけ。
+    body.toggleAttribute(
+      "data-list-tree-folded",
+      hasTree && (layout.treeFolded || LIST_TREE_HIDDEN),
+    );
+    LIST_SHOWN_WIDTH = kind && !LIST_COLUMN_HIDDEN ? layout.width : 0;
+    localizeListColumnFolds();
+    const total = files + (kind ? layout.width + layout.tree : 0);
+    if (total === LIST_COLUMN_WIDTH) return;
+    LIST_COLUMN_WIDTH = total;
+    MAIN_TABS.refit();
+  }
+
+  /**
+   * 見出しの題。ファイル一覧は Files、#sidebar は変更ファイルの一覧。言語の切替
+   * (localizeViewerChrome) で当てる。
+   */
+  function syncSidebarTitle(): void {
+    const text = uiText();
+    setElementText(`${FILE_LIST_DOM.root} .sb-title`, text.sidebar.files);
+    setElementText(
+      `${CHANGES_LIST_DOM.root} .sb-title`,
+      text.diff.fileListLabel,
+    );
+  }
+
+  /** 一覧の列の掴みの開始幅と上限 (core/list-column.ts の listColumnDrag)。 */
+  function historyDrag() {
+    return listColumnDrag({
+      shown: LIST_SHOWN_WIDTH,
+      preferred: STATE.historyWidth,
+      fits: LIST_FITS_WIDTH,
+      size: HISTORY_WIDTH,
+    });
+  }
+
+  /**
+   * ファイル一覧を畳む / 出すボタンの説明。幅が足りずに自動で畳んだときは、その
+   * 理由も出す (手で畳んだときと区別が付かないと、なぜ消えたのか分からない)。
+   */
+  function fileListToggleTitle(hidden: boolean): string {
+    const text = uiText().sidebar;
+    if (!hidden) return text.hide;
+    return FILE_LIST_AUTO_HIDDEN
+      ? `${text.show} (${text.autoHidden})`
+      : text.show;
+  }
+
+  /**
+   * 畳むボタン (一覧の列の頭の右端) に「幅のために畳みました」の印と説明を出す /
+   * 外す。
+   */
+  function markFileListAutoHidden(): void {
+    const toggle = document.querySelector<HTMLButtonElement>("#sidebar-toggle");
+    if (!toggle) return;
+    toggle.classList.toggle(
+      "sidebar-toggle-auto-hidden",
+      FILE_LIST_AUTO_HIDDEN && STATE.sidebarHidden,
+    );
+    const title = fileListToggleTitle(STATE.sidebarHidden);
+    toggle.title = title;
+    toggle.setAttribute("aria-label", title);
+  }
+
+  // 一覧のある画面に入った / 出た (本文の route・作業ツリーの選択) ときも合わせる。
+  // 画面の印は app.ts の画面の切替と worktree-view.ts の何か所かで付くので、
+  // 付け忘れが起きないよう body の印そのものを見る。
+  new MutationObserver(() => syncListColumn()).observe(document.body, {
+    attributes: true,
+    attributeFilter: ["class", "data-worktree-overview"],
+  });
+
+  // 一覧と変更ファイルの一覧を手で畳むボタン (列の右端の線の中ほど) と、畳んだ
+  // 帯の開くボタン (views/list-tree-open.ts)。一覧 (History・作業ツリー) の分は
+  // #worktree-panel の後、#sidebar (Diff の一覧・History と作業ツリーの変更
+  // ファイルの一覧) の分は #sidebar の後に置く (Tab の順)。
+  LIST_COLUMN_FOLDS = (() => {
+    const sidebar = document.getElementById("sidebar");
+    const worktreePanel = document.getElementById("worktree-panel");
+    if (!sidebar || !worktreePanel)
+      throw new Error("#sidebar or #worktree-panel is missing from index.html");
+    const listPanel = (): HTMLElement => {
+      const kind = listColumnKind();
+      const id = kind ? LIST_COLUMN_IDS[kind] : "history-panel";
+      const panel = document.getElementById(id);
+      if (!panel) throw new Error(`#${id} is missing from index.html`);
+      return panel;
+    };
+    const foldList = () => {
+      LIST_COLUMN_HIDDEN = true;
+      syncListColumn();
+    };
+    const foldTree = () => {
+      LIST_TREE_HIDDEN = true;
+      syncListColumn();
+    };
+    const openList = () => {
+      LIST_COLUMN_HIDDEN = false;
+      syncListColumn();
+    };
+    const listStop = () =>
+      listPanel().querySelector<HTMLElement>('[tabindex="0"]') ?? listPanel();
+    return {
+      // 一覧 (History・作業ツリー) を畳む / 開く。
+      listFold: createColumnFold({
+        className: "list-fold",
+        after: worktreePanel,
+        fold: foldList,
+        label: () => uiText().sidebar.hideList,
+      }),
+      listOpen: createColumnOpen({
+        className: "list-open",
+        after: worktreePanel,
+        open: openList,
+        focusStop: listStop,
+        label: () => uiText().sidebar.showList,
+      }),
+      // #sidebar: Diff では一覧そのもの、History・作業ツリーでは変更ファイルの一覧。
+      sidebarFold: createColumnFold({
+        className: "sidebar-fold",
+        after: sidebar,
+        fold: () => (listColumnKind() === "sidebar" ? foldList() : foldTree()),
+        label: () =>
+          listColumnKind() === "sidebar"
+            ? uiText().sidebar.hideList
+            : uiText().sidebar.hideTree,
+      }),
+      sidebarOpen: createColumnOpen({
+        className: "sidebar-open",
+        after: sidebar,
+        open: openList,
+        focusStop: listStop,
+        label: () => uiText().sidebar.showList,
+      }),
+      // 変更ファイルの一覧を開く帯 (幅が足りずに畳んだときも出る)。押したらこの
+      // セッションは畳まない。
+      treeOpen: createListTreeOpen({
+        open: () => {
+          LIST_TREE_HIDDEN = false;
+          LIST_TREE_KEPT_OPEN = true;
+          syncListColumn();
+        },
+        label: () => uiText().sidebar.showTree,
+      }),
+    };
+  })();
+
+  /** 畳む / 開くボタンの名前 (画面と言語で変わる)。言語の切替でも呼ばれる。 */
+  function localizeListColumnFolds(): void {
+    // 言語の切替はボタンを作る前 (起動の途中) にも呼ばれる。
+    if (!LIST_COLUMN_FOLDS) return;
+    const text = uiText().sidebar;
+    const diff = listColumnKind() === "sidebar";
+    setListTreeOpenLabel(LIST_COLUMN_FOLDS.listFold, text.hideList);
+    setListTreeOpenLabel(LIST_COLUMN_FOLDS.listOpen, text.showList);
+    setListTreeOpenLabel(
+      LIST_COLUMN_FOLDS.sidebarFold,
+      diff ? text.hideList : text.hideTree,
+    );
+    setListTreeOpenLabel(LIST_COLUMN_FOLDS.sidebarOpen, text.showList);
+    const treeAuto =
+      document.body.hasAttribute("data-list-tree-folded") && !LIST_TREE_HIDDEN;
+    setListTreeOpenLabel(
+      LIST_COLUMN_FOLDS.treeOpen,
+      treeAuto ? `${text.showTree} (${text.autoHidden})` : text.showTree,
+    );
+  }
+
+  const listColumnObserver = new ResizeObserver(() => syncListColumn());
+  for (const id of ["main-tabs", "sidebar", "file-list"]) {
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`#${id} is missing from index.html`);
+    listColumnObserver.observe(el);
+  }
+
+  function onUserToggledSidebarHidden(hidden: boolean): void {
+    // 手で開いた = このセッションは幅のために自動で畳まない。
+    if (!hidden) FILE_LIST_KEPT_OPEN = true;
+    FILE_LIST_AUTO_HIDDEN = false;
+    markFileListAutoHidden();
+    syncListColumn();
+  }
+
+  function leftFrontIsPage(leftFront: PanesView["fronts"]["left"]): boolean {
+    if (RESTORING_TABS && TERMINAL_FRONT_AT_BOOT) return false;
+    return leftFront === null || MAIN_TABS.isRouteTab(leftFront);
+  }
+
+  function showPanes(view: PanesView, how: FrontChange): void {
+    // 端末・画像のタブが左の前面なら、背面の画面の一覧は出さない (列は前面の
+    // タブの画面で決める)。
+    LEFT_FRONT_IS_PAGE = leftFrontIsPage(view.fronts.left);
+    syncListColumn();
+    rememberSplitForFirstScreen(view.split);
+    for (const side of ["left", "right"] as const) {
+      const host = PANE_HOSTS[side];
+      const tab = view.fronts[side];
+      const present = side === "left" || view.split;
+      const shown =
+        present &&
+        tab !== null &&
+        (!MAIN_TABS.isRouteTab(tab) ||
+          (side === "right" && tab.target.kind === "file"));
+      host.classList.toggle("is-shown", shown);
+      host.dataset.kind = shown && tab ? tab.target.kind : "";
+      if (!shown || !tab) continue;
+      const foreign =
+        MAIN_TABS.groupOf(tab) !== null &&
+        tab.target.kind !== "terminal" &&
+        MAIN_TABS.groupOf(tab) !== MAIN_TABS.currentProject();
+      if (
+        foreign &&
+        (tab.target.kind === "page" ||
+          (tab.target.kind === "file" && projectKey() === null))
+      ) {
+        // 別のプロジェクトの画面: そのプロジェクトへ移る途中 (main-tabs-view の
+        // switchToTab が移る)。
+        showPaneMessage(
+          side,
+          mainTabsText(STATE.language).switchingProject(
+            PROJECT_LOOKS.get(MAIN_TABS.groupOf(tab) ?? "")?.name ??
+              (MAIN_TABS.groupOf(tab) as string),
+          ),
+        );
+      } else if (foreign && tab.target.kind === "file") {
+        showForeignFile(side, tab);
+      } else if (tab.target.kind === "file") {
+        showSourceInRight();
+      } else if (tab.target.kind === "terminal") {
+        host.replaceChildren(TERMINAL_VIEW.tabPaneFor(side));
+        void TERMINAL_VIEW.showInTab(
+          tab.target.session as ShellSessionId,
+          side,
+        );
+      } else if (tab.target.kind === "image") {
+        showImageIn(
+          side,
+          tab.target.path,
+          foreign ? (tab.target.project ?? null) : null,
+        );
+      }
+    }
     syncHeaderMenu();
-  }
-
-  function openTerminalSheet(id?: string | null): void {
-    // タブなので、他は畳む。
-    if (
-      parseToolsOverlay(window.location.search) !== null ||
-      TOOLS_VIEW.isOpen()
-    )
-      closeToolsSheet();
-    if (
-      parseSearchResultsOverlay(window.location.search) !== null ||
-      SEARCH_RESULTS_VIEW.isOpen()
-    )
-      closeSearchSheet();
-    const target = id ?? TERMINAL_VIEW.getActiveTarget();
-    // 実際に何を映すかは一覧を取った後に決まるが、「開いた」ことはその場で
-    // URL に出す。読み込みが止まっても URL と画面が食い違わない。
-    updateUrlForTerminalOverlay(target ?? "open");
-    void TERMINAL_VIEW.open(target);
-    syncAppPanel();
-  }
-
-  function closeTerminalSheet(): void {
-    TERMINAL_VIEW.close();
-    updateUrlForTerminalOverlay(null);
-    syncAppPanel();
-  }
-
-  function syncTerminalSheetFromUrl(): void {
-    const state = parseTerminalOverlay(window.location.search);
-    const open = TERMINAL_VIEW.isOpen();
-    const target = state === "open" ? null : state;
-    if (
-      state &&
-      (!open || (target && TERMINAL_VIEW.getActiveTarget() !== target))
-    ) {
-      void TERMINAL_VIEW.open(target);
-    } else if (!state && open) {
-      TERMINAL_VIEW.close();
+    AGENTS_SIDEBAR?.refresh();
+    syncLineRefPill();
+    // ファイル一覧の選択の印は、フォーカスのある面のファイル。
+    {
+      const right =
+        view.focused === "right" && view.fronts.right?.target.kind === "file"
+          ? MAIN_TABS.paneRoute("right")
+          : null;
+      const focusedRoute = right ?? STATE.route;
+      if (focusedRoute.screen === "file")
+        FILE_LIST.markActive(focusedRoute.path);
     }
-    syncAppPanel();
+    if (how !== "navigate")
+      syncFocusedPaneUrl(how === "stay" ? "push" : "replace");
+    const front = view.fronts[view.focused];
+    const session =
+      front?.target.kind === "terminal" ? front.target.session : null;
+    const path = window.location.pathname + window.location.search;
+    if (session) {
+      if (parseTerminalOverlay(window.location.search) !== session)
+        history.pushState(
+          history.state,
+          "",
+          withTerminalOverlay(path, session) + window.location.hash,
+        );
+      return;
+    }
+    if (how !== "stay") return;
+    const next = withTerminalOverlay(path, null);
+    if (next !== path)
+      history.pushState(history.state, "", next + window.location.hash);
   }
+
+  /**
+   * タブで開いたシェルと、開いたときのペイン。シェルとペインの対応は本来
+   * エージェントの一覧 (shownInShell) から引くが、サーバがシェルの端末名を
+   * まだ知らないうちは空になるので、開いたときの対応で補う。
+   */
+  const TAB_SHELL_PANES = new Map<string, string>();
+
+  /**
+   * ターミナルのタブが最後にエージェントを映していたときの名前。シェルの終わりに
+   * 気付く時点では、映していたペインがもう一覧から消えていて、名前を引き直すと
+   * 「Shell 2」になる。知らせには終わったもの (エージェント) の名前を出す。
+   */
+  const TAB_LAST_LABELS = new Map<string, string>();
+  /** シェルごとの、中の tmux の端末とウインドウの大きさ (全画面共通の取り直し)。 */
+  let TMUX_WINDOWS = new Map<string, TmuxClientWindow | null>();
+  /** 前面でないタブのシェルの終わりを、取り直しの一覧から拾う。 */
+  const SHELL_ENDS = createShellEndTracker();
+  /** 最下段の短い知らせ: シェルが終わってタブを閉じた・ペインを開けなかった。 */
+  const TERMINAL_NOTICE = createShellEndNotice(
+    $("#statusbar .statusbar-actions"),
+  );
+
+  /**
+   * シェルが終わったタブを閉じ、最下段に短く知らせる。閉じた後の前面は、
+   * 利用者が閉じたときと同じ決まり (同じ面の最近使った順)。閉じたタブは
+   * 「閉じたタブを開き直す」の履歴に積まない (開き直してもシェルが無い)。
+   */
+  function closeEndedTerminal(session: string): void {
+    TAB_SHELL_PANES.delete(session);
+    if (!MAIN_TABS.hasTerminal(session)) {
+      TAB_LAST_LABELS.delete(session);
+      return;
+    }
+    const name = TAB_LAST_LABELS.get(session) ?? terminalTabInfo(session).label;
+    TAB_LAST_LABELS.delete(session);
+    MAIN_TABS.closeTerminal(session);
+    TERMINAL_NOTICE.show(terminalText(STATE.language).tabEnded(name));
+  }
+
+  /** そのシェルが映しているエージェントのペイン。 */
+  function paneForShell(session: string): AgentPane | undefined {
+    const panes = AGENT_MONITOR.snapshot().overview?.panes ?? [];
+    const opened = TAB_SHELL_PANES.get(session);
+    return (
+      panes.find(
+        (item) => item.shownInShell !== "" && item.shownInShell === session,
+      ) ?? panes.find((item) => item.id === opened)
+    );
+  }
+
+  /**
+   * シェルのタブのグループ (プロジェクトの根)。映しているペインのプロジェクト、
+   * 無ければシェルを起こしたフォルダを含むプロジェクト (一覧の根の前方一致の
+   * いちばん深いもの)。どれでもなければ null (タブ列の右端)、一覧がまだ届いて
+   * いなければ undefined。
+   */
+  function terminalProjectOf(session: string): string | null | undefined {
+    // 一覧とシェルの一覧が届くまでは分からない (保存した控えで描く)。
+    if (!AGENT_MONITOR.snapshot().overview) return undefined;
+    const pane = paneForShell(session);
+    if (pane) return pane.project || null;
+    const shells = TERMINAL_VIEW.knownShells();
+    if (!shells) return undefined;
+    const cwd = shells.sessions.find((item) => item.id === session)?.cwd;
+    if (!cwd) return null;
+    return projectRootOfPath(cwd, PROJECT_LOOKS.order());
+  }
+
+  /**
+   * そのプロジェクトへ移るときの画面のパス (前置きなし)。画面・ファイルのタブは
+   * その route、シェルは `?terminal=`、画像はその画像を開く route、タブが無ければ
+   * フォルダ表示。
+   */
+  function projectTabPath(route: AppRoute | null, tab: Tab | null): string {
+    if (tab?.target.kind === "terminal" && isShellSessionId(tab.target.session))
+      return withTerminalOverlay("/", tab.target.session);
+    if (tab?.target.kind === "image" && !tab.target.path.startsWith("/"))
+      return withoutProjectPrefix(
+        buildRoute({
+          screen: "file",
+          path: tab.target.path,
+          ref: "worktree",
+          view: "blob",
+          range: currentRange(),
+        }),
+      );
+    return route ? withoutProjectPrefix(buildRoute(route)) : "/";
+  }
+
+  /**
+   * そのプロジェクトの path へ移る (動いていなければ起こしてから)。confirmRegister は
+   * 登録していないプロジェクトを登録して開く前に確かめるか (切替の小窓・パレットは
+   * 確かめる。左の一覧の見出しは押しただけで移る入口なので確かめない)。
+   */
+  function openProjectAt(
+    root: string,
+    path: string,
+    confirmRegister = false,
+  ): void {
+    const info = AGENT_MONITOR.snapshot().overview?.projects.find(
+      (item) => item.root === root,
+    );
+    if (!info) {
+      // 一覧にまだ載っていない (取り直しの前): 移れない理由を出す。
+      console.error(
+        `[code-viewer] cannot switch to the project ${JSON.stringify(root)}: it is not in the project list yet`,
+      );
+      setStatus("error");
+      return;
+    }
+    void PROJECT_ACTIONS.open(info, path, { confirmRegister });
+  }
+
+  /**
+   * 左の一覧のプロジェクトの見出し・⌘⇧↑↓: そのプロジェクトへ移り、そのグループで
+   * 最後に前面だったタブを前面に出す (無ければそのプロジェクトのフォルダ表示)。
+   */
+  function switchToProjectGroup(root: string, confirmRegister = false): void {
+    if (root === MAIN_TABS.currentProject()) return;
+    const tab = MAIN_TABS.prepareProjectSwitch(root);
+    openProjectAt(
+      root,
+      projectTabPath(tab ? MAIN_TABS.tabRoute(tab) : null, tab),
+      confirmRegister,
+    );
+  }
+
+  /** 左の一覧の並びで前 (-1) / 次 (+1) のプロジェクトへ (端では回る)。 */
+  function switchToAdjacentProject(delta: -1 | 1): void {
+    const order = PROJECT_LOOKS.order();
+    const here = MAIN_TABS.currentProject() ?? PROJECT_LOOKS.current()?.root;
+    if (order.length < 2 || !here) return;
+    const index = order.indexOf(here);
+    const next =
+      order[
+        (((index < 0 ? 0 : index + delta) % order.length) + order.length) %
+          order.length
+      ];
+    if (next !== here) switchToProjectGroup(next);
+  }
+
+  /** ターミナルのタブの名前と印。エージェントを映していれば、その種類と状態。 */
+  function terminalTabInfo(session: string): {
+    label: string;
+    state: AgentState | null;
+    project: TerminalTabProject | null;
+  } {
+    const pane = paneForShell(session);
+    const a = agentsText(STATE.language);
+    if (pane?.kind) {
+      // 別のプロジェクトのペインは、タブの名前の前にプロジェクト名を付ける。
+      const info = AGENT_MONITOR.snapshot().overview?.projects.find(
+        (item) => item.root === pane.project,
+      );
+      return {
+        label: paneText(pane, a).headline,
+        state: pane.state,
+        project: info
+          ? { name: info.name, current: info.server.status === "current" }
+          : null,
+      };
+    }
+    return {
+      label: shellName(
+        session,
+        TERMINAL_VIEW.knownShells()?.sessions ?? [],
+        {
+          shell: terminalText(STATE.language).shellTarget,
+          signIn: a.accounts.loginButton,
+          defaultAccount: a.accounts.defaultName,
+        },
+        (id) => !!paneForShell(id)?.kind,
+      ),
+      state: null,
+      project: null,
+    };
+  }
+
+  // エージェントの状態。どの画面にいても取り直し、ヘッダの件数・未読・通知に
+  // 流す。一覧の画面 (/agents) も同じ結果を描く。
+  /** いま映しているシェル: 左右の面の前面のターミナルのタブ。 */
+  function viewedShells(): string[] {
+    const { fronts } = MAIN_TABS.panes();
+    return [fronts.left, fronts.right]
+      .map((tab) =>
+        tab?.target.kind === "terminal" ? tab.target.session : null,
+      )
+      .filter((id): id is string => id !== null);
+  }
+
+  function isViewingAgentPane(pane: AgentPane): boolean {
+    return (
+      document.visibilityState === "visible" &&
+      document.hasFocus() &&
+      pane.shownInShell !== "" &&
+      viewedShells().includes(pane.shownInShell)
+    );
+  }
+
+  /**
+   * Ctrl+K のパレットに混ぜる行き先。プロジェクト = 登録したものと tmux から
+   * 見つけたもの (選ぶとヘッダの切替と同じ関数で移る)、エージェント = 一覧の
+   * エージェント (選ぶとターミナルに開く)、セッション = 通常のシェル、
+   * 操作 = キー割り当てのある操作と新しいエージェント。キーは今の割り当てから出す。
+   */
+  const PALETTE_ACTIONS: ReadonlyArray<{
+    id: PaletteActionId;
+    /** 実行とキーの表示は同じ操作 (設定のショートカットで変えたキーも出る) */
+    keymap: KeymapAction;
+    icon: string | string[];
+    suggested: boolean;
+  }> = [
+    {
+      id: "new-agent",
+      keymap: "new-agent",
+      icon: PLUS_16_PATH,
+      suggested: true,
+    },
+    {
+      id: "open-settings",
+      keymap: "open-settings",
+      icon: GEAR_16_PATH,
+      suggested: true,
+    },
+    {
+      id: "toggle-theme",
+      keymap: "toggle-theme",
+      icon: MOON_16_PATH,
+      suggested: true,
+    },
+    {
+      id: "goto-repo",
+      keymap: "goto-repo",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-diff",
+      keymap: "goto-diff",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-history",
+      keymap: "goto-history",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-worktrees",
+      keymap: "goto-worktrees",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-database",
+      keymap: "goto-database",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-journal",
+      keymap: "goto-journal",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-agents",
+      keymap: "goto-agents",
+      icon: ARROW_RIGHT_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-tools",
+      keymap: "goto-tools",
+      icon: BOOK_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "goto-search",
+      keymap: "goto-search",
+      icon: SEARCH_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "toggle-terminal-panel",
+      keymap: "toggle-terminal-panel",
+      icon: TERMINAL_16_PATHS,
+      suggested: false,
+    },
+    {
+      id: "toggle-sidebar",
+      keymap: "toggle-sidebar",
+      icon: SIDEBAR_SHOW_16_PATHS,
+      suggested: false,
+    },
+    {
+      id: "switch-project",
+      keymap: "switch-project",
+      icon: APPS_16_PATH,
+      suggested: false,
+    },
+    {
+      id: "open-help",
+      keymap: "open-help",
+      icon: QUESTION_16_PATH,
+      suggested: false,
+    },
+  ];
+
+  function paletteCommands(): PaletteCommand[] {
+    const t = searchPaletteText(STATE.language);
+    const agents = agentsText(STATE.language);
+    const overview = AGENT_MONITOR.snapshot().overview;
+    const commands: PaletteCommand[] = [];
+    // 登録したもの (利用者の並び) を先に、見つけただけのものは名前順で後ろに。
+    const projects = [...(overview?.projects ?? [])].sort((a, b) =>
+      a.registered && b.registered
+        ? 0
+        : a.registered
+          ? -1
+          : b.registered
+            ? 1
+            : a.name.localeCompare(b.name),
+    );
+    projects.forEach((info, index) => {
+      const current = info.server.status === "current";
+      commands.push({
+        group: "projects",
+        id: `project:${info.root}`,
+        title: info.name,
+        detail: info.displayRoot,
+        status: current ? t.currentProject : "",
+        iconHtml: iconSvg("gdp-palette-icon", FOLDER_ICON_PATHS.closed),
+        suggested: index < 5,
+        run: () => {
+          // 左の一覧の見出しと同じく、そのグループで最後に前面だったタブへ。
+          if (!current) switchToProjectGroup(info.root, true);
+        },
+      });
+    });
+    const rank: Record<AgentPane["state"], number> = {
+      waiting: 0,
+      done: 1,
+      working: 2,
+      idle: 3,
+    };
+    // エージェントを先に (状態の順)、ただの tmux のペインを後ろに。候補 (何も
+    // 打っていないとき) に出すのはエージェントの上位だけ。
+    const panes = [...(overview?.panes ?? [])].sort(
+      (a, b) =>
+        Number(a.kind === null) - Number(b.kind === null) ||
+        rank[a.state] - rank[b.state],
+    );
+    panes.forEach((pane, index) => {
+      commands.push({
+        group: pane.kind === null ? "sessions" : "agents",
+        id: `pane:${pane.id}`,
+        title: paneText(pane, agents).kind,
+        detail: paneText(pane, agents).detail,
+        status: agents.state[pane.state],
+        statusTone: pane.state,
+        iconHtml: `<i class="terminal-mark terminal-mark-${pane.state}" aria-hidden="true"></i>`,
+        suggested: pane.kind !== null && index < 5,
+        run: () => openAgentPane(pane.id),
+      });
+    });
+    // このサーバのシェル (最後に取った一覧。「＋」のメニューを開くたびと、
+    // タブを映すときに取り直す)。tmux のペインを映しているシェルは上のペインの
+    // 行と同じ行き先なので出さない。
+    const terminal = terminalText(STATE.language);
+    for (const session of TERMINAL_VIEW.knownShells()?.sessions ?? []) {
+      if (paneForShell(session.id)) continue;
+      commands.push({
+        group: "sessions",
+        id: `shell:${session.id}`,
+        title: terminalTabInfo(session.id).label,
+        detail: session.cwd,
+        status: MAIN_TABS.hasTerminal(session.id) ? terminal.inTab : "",
+        iconHtml: iconSvg("gdp-palette-icon", TERMINAL_16_PATHS),
+        suggested: false,
+        run: () => MAIN_TABS.openTerminal(session.id),
+      });
+    }
+    const bindings = shownKeyBindings();
+    for (const action of PALETTE_ACTIONS) {
+      const binding = bindings.find((item) => item.action === action.keymap);
+      commands.push({
+        group: "actions",
+        id: `action:${action.id}`,
+        title: t.actions[action.id],
+        iconHtml: iconSvg("gdp-palette-icon", action.icon),
+        shortcut: binding ? formatKeyBinding(binding) : "",
+        suggested: action.suggested,
+        run: () => {
+          dispatchKeymapAction(action.keymap, "global", false, null);
+        },
+      });
+    }
+    return commands;
+  }
+
+  /** 移った先でも同じ画面を開く (ナビで選ばれている画面の入口)。 */
+  /** いまの画面のパス (前置きを外したもの)。プロジェクトを移るときの移り先。 */
+  function currentScreenPath(): string {
+    return projectSwitchPath(
+      withoutProjectPrefix(
+        document
+          .querySelector<HTMLAnchorElement>(
+            "a.app-menu-item.active, a.nav-board-link.active",
+          )
+          ?.getAttribute("href") ?? "/",
+      ),
+      window.location.search,
+    );
+  }
+
+  /**
+   * エージェントのペインを開く (通知・サイドバー・全体ボード・パレット)。
+   * 別のプロジェクトのペインならそのプロジェクトへ移る (agent-pane-opener.ts)。
+   */
+  function openAgentPane(pane: string, destination?: "opposite"): void {
+    // 電話の段で引き出しや面が開いたままだと、開いた端末がその下に隠れる
+    // (引き出しと面の中の行は押したときに自分で閉じるが、通知・最下段の件数・
+    // 全体ボード・パレットから来たときは閉じていなかった)。
+    MOBILE_SHELL.close();
+    AGENT_PANE_OPENER(pane, destination);
+  }
+
+  /** この画面のメインの面のタブで開く。サイドバーの修飾操作だけ反対面。 */
+  function openAgentPaneHere(pane: string, destination?: "opposite"): void {
+    AGENT_MONITOR.markRead(pane);
+    const panes = MAIN_TABS.panes();
+    const side: PaneSide =
+      destination === "opposite"
+        ? panes.split
+          ? panes.focused === "left"
+            ? "right"
+            : "left"
+          : "right"
+        : panes.focused;
+    // もうタブで開いていれば、そのタブを前面に出すだけ (シェルを増やさない)。
+    const tabbed = [...TAB_SHELL_PANES].find(
+      ([shell, opened]) =>
+        (opened === pane || paneForShell(shell)?.id === pane) &&
+        MAIN_TABS.hasTerminal(shell),
+    );
+    if (tabbed) {
+      MAIN_TABS.openTerminal(
+        tabbed[0],
+        destination === "opposite" ? side : undefined,
+      );
+      return;
+    }
+    void TERMINAL_VIEW.openPaneInTab(pane, side);
+  }
+
+  const AGENT_MONITOR = createAgentMonitor({
+    getText: () => agentsText(STATE.language),
+    getNotifySettings: () => ({
+      waiting: APP_SETTINGS.agentNotifyWaiting !== false,
+      finished: APP_SETTINGS.agentNotifyDone !== false,
+    }),
+    isViewing: isViewingAgentPane,
+    onUnreadCountChange: (count) => {
+      if (count === AGENT_UNREAD_COUNT) return;
+      AGENT_UNREAD_COUNT = count;
+      applyDocumentTitle();
+    },
+    onNotificationClick: (pane) => openAgentPane(pane.id),
+    actionHeaders,
+  });
+
+  const agentStatusButton =
+    document.querySelector<HTMLButtonElement>("#agent-status");
+  const AGENT_STATUS = agentStatusButton
+    ? mountAgentStatus(agentStatusButton, {
+        monitor: AGENT_MONITOR,
+        getText: () => agentsText(STATE.language),
+        openList: () =>
+          navigateToRoute({ screen: "agents", range: currentRange() }),
+        openPane: openAgentPane,
+      })
+    : null;
+
+  /** 設定画面を開き、指定の見出しまで送る。 */
+  function openSettingsAt(headingId: string): void {
+    VIEWER_SETTINGS.revealHeading(headingId);
+    openHelpSection(helpSectionDeps(), "settings");
+    requestAnimationFrame(() =>
+      document.getElementById(headingId)?.scrollIntoView({ block: "start" }),
+    );
+  }
+
+  let releaseAccounts: (() => void) | null = null;
+  const ACCOUNTS_BAND = createAccountsBand({
+    client: ACCOUNTS_CLIENT,
+    dialogs: ACCOUNT_DIALOGS,
+    getText: () => agentsText(STATE.language).accounts,
+    hookStateLabel: (state) => agentsText(STATE.language).hooks.state[state],
+    getOverview: () => AGENT_MONITOR.snapshot().overview,
+    isCollapsed: () => APP_SETTINGS.agentAccountsCollapsed === true,
+    setCollapsed: (collapsed) => {
+      void patchSettings({ agentAccountsCollapsed: collapsed });
+      AGENTS_VIEW?.localize();
+    },
+    openSettings: () => openSettingsAt(ACCOUNTS_SECTION_ID),
+    requestRender: () => AGENTS_VIEW?.localize(),
+  });
+  ACCOUNTS_CLIENT.subscribe(() => AGENTS_VIEW?.localize());
+
+  const PROJECT_ACTIONS = createProjectActions({
+    getText: () => agentsText(STATE.language).projects,
+    trackLoad,
+    actionHeaders,
+    refresh: () => AGENT_MONITOR.refresh(),
+    navigate: (url) => window.location.assign(url),
+  });
+
+  const AGENT_PANE_OPENER = createAgentPaneOpener({
+    overview: () => AGENT_MONITOR.snapshot().overview,
+    currentPath: currentScreenPath,
+    openProject: (info, path) =>
+      PROJECT_ACTIONS.open(info, path, { confirmRegister: false }),
+    openHere: openAgentPaneHere,
+  });
+
+  const projectSwitcherButton =
+    document.querySelector<HTMLElement>("#project-switcher");
+  // 名前と枝の名前の幅を、頭の 1 段目の幅に合わせて分ける (枝を 1 文字にしない)。
+  fitBrand(
+    (() => {
+      const row = document.getElementById("project-head");
+      if (!row) throw new Error("#project-head is missing from index.html");
+      return row;
+    })(),
+  );
+  PROJECT_SWITCHER = projectSwitcherButton
+    ? mountProjectSwitcher({
+        button: projectSwitcherButton,
+        actions: PROJECT_ACTIONS,
+        getText: () => agentsText(STATE.language).projects,
+        getOverview: () => AGENT_MONITOR.snapshot().overview,
+        subscribe: (listener) => AGENT_MONITOR.subscribe(listener),
+        currentPath: currentScreenPath,
+        currentName: () => PROJECT_NAME,
+        switchProject: (info) => switchToProjectGroup(info.root, true),
+        shortcutLabel: () => {
+          const binding = shownKeyBindings().find(
+            (item) => item.action === "switch-project",
+          );
+          return binding ? formatKeyBinding(binding) : "";
+        },
+      })
+    : null;
+
+  function launchAgent(project?: string): void {
+    ACCOUNT_DIALOGS.launch({ project }).then(
+      () => AGENTS_VIEW?.localize(),
+      (error: unknown) =>
+        console.error("[code-viewer] launch dialog failed", error),
+    );
+  }
+
+  // プロジェクトの色と頭文字の口 (views/projects/project-looks.ts) に一覧を渡す。
+  // 色・名前・いま見ているものが変わったら窓の枠の色も当て直す。
+  PROJECT_LOOKS.subscribe(syncWindowFrameColor);
+  PROJECT_LOOKS.subscribe(renderProjectHead);
+  // タブのグループの札の色・名前と、グループの並び (左の一覧の並び)。
+  PROJECT_LOOKS.subscribe(() => MAIN_TABS.localize());
+  AGENT_MONITOR.subscribe(() =>
+    PROJECT_LOOKS.update(AGENT_MONITOR.snapshot().overview),
+  );
+
+  // 電話の段の下端の帯の「エージェント」に、最下段と同じ数え方の入力待ちの件数。
+  AGENT_MONITOR.subscribe(() =>
+    MOBILE_SHELL.setWaitingAgents(
+      headerAgentCounts(AGENT_MONITOR.snapshot().overview?.panes ?? []).waiting,
+    ),
+  );
+
+  AGENT_MONITOR.subscribe(() => {
+    // 開いたときのペインが一覧から消えたら、その対応を捨てる。ペイン ID は
+    // tmux サーバの中でしか一意でなく、tmux が起き直すと同じ `%0` が別の
+    // ペインに付く (ログインのウィンドウを閉じた後の最初の起動がそう)。
+    // 残すと、新しいエージェントを閉じ終わった古いシェルのタブで開いてしまう。
+    const overview = AGENT_MONITOR.snapshot().overview;
+    // 前面でないタブのシェルは終わりが届かない。一覧から消えたら閉じる。
+    // ペインとの対応を捨てる下の処理より先に、覚えている名前で知らせる。
+    // shells の無い古い版のサーバでは何もしない。
+    if (overview?.shells) {
+      TMUX_WINDOWS = new Map(
+        overview.shells.map((shell) => [shell.id, shell.window]),
+      );
+      const ended = SHELL_ENDS.update(
+        overview.shells.map((shell) => shell.id),
+        MAIN_TABS.terminalSessions(),
+      );
+      for (const session of ended) closeEndedTerminal(session);
+    }
+    if (overview && !overview.tmux.error) {
+      const live = new Set(overview.panes.map((pane) => pane.id));
+      for (const [shell, pane] of TAB_SHELL_PANES) {
+        if (!live.has(pane)) TAB_SHELL_PANES.delete(shell);
+      }
+    }
+    for (const session of MAIN_TABS.terminalSessions()) {
+      if (paneForShell(session)?.kind || !TAB_LAST_LABELS.has(session))
+        TAB_LAST_LABELS.set(session, terminalTabInfo(session).label);
+    }
+    TERMINAL_VIEW.updateTmuxCovers();
+    // ターミナルのタブの名前 (エージェントの状態) を当て直す。
+    MAIN_TABS.localize();
+  });
+
+  /** いまターミナルで見ているエージェントのペイン (サイドバーの選択の印)。 */
+  function viewingAgentPane(): string | null {
+    const target = viewedShells()[0];
+    if (!target) return null;
+    return (
+      AGENT_MONITOR.snapshot().overview?.panes.find(
+        (pane) => pane.shownInShell !== "" && pane.shownInShell === target,
+      )?.id ?? null
+    );
+  }
+
+  const navProjectsRoot = document.querySelector<HTMLElement>("#nav-projects");
+  AGENTS_SIDEBAR = navProjectsRoot
+    ? mountAgentsSidebar({
+        root: navProjectsRoot,
+        monitor: AGENT_MONITOR,
+        projects: PROJECT_ACTIONS,
+        switchProject: (info) => switchToProjectGroup(info.root),
+        getText: () => agentsText(STATE.language),
+        openPane: openAgentPane,
+        viewingPane: viewingAgentPane,
+        launch: launchAgent,
+        openBoard: () =>
+          navigateToRoute({ screen: "agents", range: currentRange() }),
+        getCollapsed: () => APP_SETTINGS.navCollapsedProjects ?? [],
+        currentName: () => PROJECT_NAME,
+        saveCollapsed: (roots) =>
+          patchSettings({ navCollapsedProjects: roots }),
+        notifyHintDismissed: () =>
+          APP_SETTINGS.agentNotifyHintDismissed === true,
+        dismissNotifyHint: () =>
+          patchSettings({ agentNotifyHintDismissed: true }),
+      })
+    : null;
+  document
+    .querySelector<HTMLButtonElement>("#nav-launch")
+    ?.addEventListener("click", () => launchAgent());
+
+  const appNavElement = document.querySelector<HTMLElement>("#app-nav");
+  const appNavResizer = document.querySelector<HTMLElement>("#app-nav-resizer");
+  const navCollapse = document.querySelector<HTMLElement>("#nav-collapse");
+  const navExpand = document.querySelector<HTMLElement>("#nav-expand");
+  APP_NAV =
+    appNavElement && appNavResizer && navCollapse && navExpand
+      ? mountAppNav({
+          nav: appNavElement,
+          resizer: appNavResizer,
+          collapseButton: navCollapse,
+          expandButton: navExpand,
+          getWidth: () => APP_SETTINGS.navWidth,
+          isCollapsed: () => APP_SETTINGS.navCollapsed === true,
+          save: (patch) => patchSettings(patch),
+          // 面の幅が変わるので端末の桁数を取り直す。
+          onResize: () => TERMINAL_VIEW.refit(),
+        })
+      : null;
+
+  /** 左のサイドバーの枠の文言 (中の一覧は AGENTS_SIDEBAR が貼る)。 */
+  function localizeAppNav(): void {
+    const t = agentsText(STATE.language).sidebar;
+    document
+      .querySelector<HTMLElement>("#app-nav")
+      ?.setAttribute("aria-label", t.ariaLabel);
+    setElementText(".nav-section-title", t.projects);
+    setElementText(".nav-search-label", t.search);
+    setElementText(
+      ".nav-search-key",
+      /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K",
+    );
+    setElementText("#nav-launch .nav-foot-label", t.newAgent);
+    setElementText("#nav-settings .nav-foot-label", t.settings);
+    setElementText("#quick-help-btn .nav-foot-label", t.help);
+    for (const [selector, label] of [
+      ["#nav-collapse", t.collapse],
+      ["#nav-expand", t.expand],
+      ["#nav-board-link", t.board],
+      ["#app-nav-resizer", t.resize],
+    ] as const) {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (!el) continue;
+      el.title = label;
+      el.setAttribute("aria-label", label);
+    }
+  }
+  localizeAppNav();
+
+  // 使用量は最下段に常に出すので、アカウントの一覧はずっと取り直す
+  // (周期の取り直しは通信中の表示の対象外。accounts-client.ts)。
+  ACCOUNTS_CLIENT.retain();
+  void ACCOUNTS_CLIENT.load({ background: true });
+  const usageStatusRoot = document.querySelector<HTMLElement>("#usage-status");
+  const USAGE_STATUS = usageStatusRoot
+    ? mountUsageStatus({
+        root: usageStatusRoot,
+        client: ACCOUNTS_CLIENT,
+        getText: () => agentsText(STATE.language),
+        openSettings: () => openSettingsAt(ACCOUNTS_SECTION_ID),
+        login: (account) => ACCOUNT_DIALOGS.login(account),
+      })
+    : null;
+
+  AGENTS_VIEW = createAgentsView({
+    projects: PROJECT_ACTIONS,
+    monitor: AGENT_MONITOR,
+    getText: () => agentsText(STATE.language),
+    setPageMode,
+    syncHeaderMenu,
+    openPane: openAgentPane,
+    openNotificationSettings: () =>
+      openSettingsAt("agent-notify-section-title"),
+    getHookStatus: () => AGENT_HOOK_STATUS,
+    refreshHookStatus: AGENT_HOOKS_SETTINGS.refresh,
+    hookHintDismissed: () => APP_SETTINGS.agentHookHintDismissed === true,
+    dismissHookHint: () => patchSettings({ agentHookHintDismissed: true }),
+    openHookSettings: () => openSettingsAt(AGENT_HOOKS_SECTION_ID),
+    accountsBand: ACCOUNTS_BAND,
+    getAccounts: () => ACCOUNTS_CLIENT.snapshot().data,
+    launch: launchAgent,
+    onVisibilityChange: (visible) => {
+      releaseAccounts?.();
+      releaseAccounts = null;
+      if (visible) {
+        releaseAccounts = ACCOUNTS_CLIENT.retain();
+        void ACCOUNTS_CLIENT.load();
+      }
+    },
+  });
+  relocalizeAgents = () => {
+    PROJECT_SWITCHER?.localize();
+    AGENTS_VIEW?.localize();
+    AGENT_STATUS?.localize();
+    AGENTS_SIDEBAR?.localize();
+    USAGE_STATUS?.localize();
+    localizeAppNav();
+  };
+  AGENT_MONITOR.start();
 
   JOURNAL_VIEW = createJournalView({
     getRoute: () => STATE.route,
@@ -5942,9 +9141,24 @@ window.GdpExpandLogic = GdpExpandLogic;
     getText: () => worktreeText(STATE.language),
     setPageMode,
     syncHeaderMenu,
+    // 作業ツリーの変更ファイルは変更ファイルの一覧 (#sidebar) に描く。ファイル一覧
+    // (#file-list) は別の要素なので、持ち主が変わっても何もしない。
+    onSidebarOwner: () => undefined,
     setStatus,
     createOpenPathButton,
     openPathInOs: (path, kind) => openPathInOs(path, kind),
+    getAgents: () => {
+      const text = agentsText(STATE.language);
+      return (AGENT_MONITOR.snapshot().overview?.panes ?? [])
+        .filter((pane) => pane.kind !== null)
+        .map((pane) => ({
+          path: pane.path,
+          kind: pane.kind ? text.kind[pane.kind] : text.kindShell,
+          state: pane.state,
+          stateLabel: text.state[pane.state],
+        }));
+    },
+    subscribeAgents: (listener) => AGENT_MONITOR.subscribe(listener),
   });
   relocalizeWorktree = () => WORKTREE_VIEW?.localize();
 
@@ -6002,28 +9216,65 @@ window.GdpExpandLogic = GdpExpandLogic;
    * キーボードから画面を移る。メニューのリンクを踏んだときと同じ経路を
    * 通したいので、URL を積んでから applyRouteFromLocation に任せる。
    */
+  /** 履歴を積まずにその route へ (本文の面を合わせ直すとき)。 */
+  function replaceWithRoute(route: AppRoute): void {
+    history.replaceState(
+      historyStateForRoute(route, true),
+      "",
+      urlForRoute(route),
+    );
+    applyRouteFromLocation();
+  }
+
   function navigateToRoute(route: AppRoute): void {
     history.pushState(historyStateForRoute(route), "", urlForRoute(route));
-    window.scrollTo(0, 0);
+    scrollMainToTop();
     applyRouteFromLocation();
   }
 
   function applyRouteFromLocation() {
+    upgradeLegacyPanelUrl();
+    // URL が右の面のファイル (pane=right): 右の面で開き、本文は描き直さない。
+    // 右に開けない (1 面で狭い・ファイルでない) なら pane=right を外して本文へ。
+    if (parsePaneOverlay(window.location.search) === "right") {
+      const paneRoute = normalizeInternalFileRoute(
+        parseRoute(routePathname(), window.location.search, currentRange()),
+      );
+      if (
+        paneRoute.screen === "file" &&
+        paneRoute.view !== "history" &&
+        routeTarget(paneRoute)?.kind === "file" &&
+        MAIN_TABS.openRouteRight(paneRoute, true)
+      ) {
+        showSourceInRight();
+        return;
+      }
+      history.replaceState(
+        history.state,
+        "",
+        withPaneOverlay(
+          window.location.pathname + window.location.search,
+          null,
+        ) + window.location.hash,
+      );
+    }
     const previousRoute = STATE.route;
+    // replaceUrlWithCurrentRoute が ?terminal= を今の状態で書き直す前に読む。
+    const terminalParam = parseTerminalOverlay(window.location.search);
     // Leaving the history screen: bring back the range the user had picked
     // for the other screens before the URL fallback below reads it.
     if (
       isHistoryPanelRoute(previousRoute) &&
-      window.location.pathname !== "/history" &&
+      routePathname() !== "/history" &&
       !(
-        window.location.pathname === "/file" &&
+        routePathname() === "/file" &&
         new URLSearchParams(window.location.search).get("view") === "history"
       )
     ) {
       restoreRangeAfterHistory();
     }
     const parsedRoute = parseRoute(
-      window.location.pathname,
+      routePathname(),
       window.location.search,
       currentRange(),
     );
@@ -6035,12 +9286,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         ? { screen: "diff", range: parsedRoute.range }
         : parsedRoute;
     nextRoute = normalizeInternalFileRoute(nextRoute);
-    if (previousRoute.screen === "database" && nextRoute.screen !== "database")
-      DATABASE_VIEW.suspend();
-    if (previousRoute.screen === "journal" && nextRoute.screen !== "journal")
-      JOURNAL_VIEW?.suspend();
-    if (previousRoute.screen === "worktree" && nextRoute.screen !== "worktree")
-      WORKTREE_VIEW?.suspend();
+    leaveScreen(previousRoute, nextRoute);
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
       HISTORY_VIEW.leaveHistory();
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
@@ -6063,19 +9309,19 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.repoRef = STATE.route.ref || "worktree";
     ANNOTATIONS_UI?.restoreSessionFromUrl();
     replaceUrlWithCurrentRoute();
+    MAIN_TABS.syncRoute(STATE.route);
     syncRefInputs();
     syncHeaderMenu();
     syncLineRefPill();
     syncDoctorSheetFromUrl();
-    syncToolsSheetFromUrl();
-    syncTerminalSheetFromUrl();
-    syncSearchSheetFromUrl();
+    syncTerminalFromUrl(terminalParam);
     if (
       isSameBlobFileRoute(previousRoute, STATE.route) &&
       routeBlobPreview(previousRoute) !== routeBlobPreview(STATE.route) &&
-      switchSourceTab(routeBlobPreview(STATE.route) ? "preview" : "code", {
-        updateRoute: false,
-      })
+      SOURCE_VIEW.switchSourceTab(
+        routeBlobPreview(STATE.route) ? "preview" : "code",
+        { updateRoute: false },
+      )
     ) {
       setStatus("live");
       return;
@@ -6132,6 +9378,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       void WORKTREE_VIEW?.enter();
       return;
     }
+    if (STATE.route.screen === "agents") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      removeStandaloneSource();
+      void AGENTS_VIEW?.enter();
+      setStatus("live");
+      return;
+    }
+    if (enterToolOrSearchPage()) return;
     if (STATE.route.screen !== "file") {
       cancelActiveSourceLoad("navigation");
       setPageMode();
@@ -6144,8 +9399,43 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     load();
   }
-  window.addEventListener("popstate", applyRouteFromLocation);
-  window.addEventListener("pagehide", () => flushViewStatePatch(true));
+  window.addEventListener("popstate", () => {
+    // 戻る・進むは本文 (URL) だけを動かし、タブの配置は変えない。そのファイル
+    // のタブが右の面にだけあるなら、左の面に仮のタブを作らずに右の面の前面に
+    // 出す (分割した後の戻るで、左に同じファイルが開き直っていた)。
+    if (frontRightTabForLocation()) return;
+    applyRouteFromLocation();
+    restoreMainScroll();
+  });
+
+  /** 今の URL (右の面の印なし) のファイルのタブが右の面にだけあれば前面に出して true。 */
+  function frontRightTabForLocation(): boolean {
+    if (parsePaneOverlay(window.location.search) === "right") return false;
+    const route = normalizeInternalFileRoute(
+      parseRoute(routePathname(), window.location.search, currentRange()),
+    );
+    if (
+      route.screen !== "file" ||
+      route.view === "history" ||
+      routeTarget(route)?.kind !== "file" ||
+      MAIN_TABS.sideHolding(route) !== "right"
+    )
+      return false;
+    return openInRightPane(route, true);
+  }
+  // 本文の箱の位置を、いまの履歴の項に覚え続ける (scroll は上がってこないので
+  // capture で受ける)。
+  document.addEventListener(
+    "scroll",
+    (event) => {
+      if (event.target === mainScrollBox()) rememberMainScroll();
+    },
+    { capture: true, passive: true },
+  );
+  window.addEventListener("pagehide", () => {
+    flushViewStatePatch(true);
+    MAIN_TABS.flush(true);
+  });
 
   // Header logo and menu links navigate within the SPA. A full page load here
   // re-lays-out the whole app from scratch (the layout shift the menu was
@@ -6154,9 +9444,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // state to the destination URL. Modified clicks (new tab etc.) keep native
   // anchor behavior.
   document
-    .querySelectorAll<HTMLAnchorElement>(
-      "a.brand, a.app-menu-item, a.global-icon-link",
-    )
+    .querySelectorAll<HTMLAnchorElement>(ROUTE_LINK_SELECTOR)
     .forEach((link) => {
       // External links (the GitHub repo link) keep native anchor behavior;
       // hijacking them would push their pathname onto the local origin.
@@ -6164,6 +9452,22 @@ window.GdpExpandLogic = GdpExpandLogic;
       link.addEventListener("click", (e) => {
         if (isNativeLinkClick(e)) return;
         e.preventDefault();
+        // 画面の入口 (木の見出しの絵柄の列) と全体ボードは、その画面のタブが
+        // 開いていれば、そのタブが最後に見ていた状態を前面に出す。Files は
+        // タブではなく本文の既定なので、左の面の選択を外して出す。
+        const page = link.dataset.route;
+        if (link.matches("a.app-menu-item") && page === "repo") {
+          MAIN_TABS.showHome();
+          return;
+        }
+        const stored =
+          link.matches("a.app-menu-item, a.nav-board-link") && isPageKind(page)
+            ? MAIN_TABS.routeForPage(page)
+            : null;
+        if (stored) {
+          navigateToRoute(stored);
+          return;
+        }
         const target = new URL(link.href, window.location.origin);
         history.pushState(
           null,
@@ -6171,7 +9475,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           withOverlayState(target.pathname + target.search),
         );
         // Mimic a fresh page load: menu navigation starts at the top.
-        window.scrollTo(0, 0);
+        scrollMainToTop();
         applyRouteFromLocation();
       });
     });
@@ -6217,7 +9521,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function applyHideTests() {
     const btn = $("#hide-tests");
     if (btn) btn.classList.toggle("active", STATE.hideTests);
-    const effective = STATE.hideTests && !isRepositorySidebarMode();
+    const effective = STATE.hideTests && !SIDEBAR.isRepositorySidebarMode();
     document
       .querySelectorAll<HTMLElement>(".gdp-file-shell")
       .forEach((card) => {
@@ -6239,7 +9543,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function visibleDiffMetaForBrief(meta: DiffMeta): DiffMeta {
     if (!meta.totals) return meta;
-    const effective = STATE.hideTests && !isRepositorySidebarMode();
+    const effective = STATE.hideTests && !SIDEBAR.isRepositorySidebarMode();
     if (!effective) return meta;
     let additions = 0;
     let deletions = 0;
@@ -6579,7 +9883,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (route.screen !== "diff" && route.screen !== "history") {
       return;
     }
-    const savedScroll = window.scrollY;
+    // 位置を持っているのは本文の箱 (窓は動かない)。
+    const box = mainScrollBox();
+    const savedScroll = box?.scrollTop ?? 0;
     const savedActive = STATE.activeFile;
     load({ changedPaths: paths }).then((result) => {
       if (result?.preservedDom) return;
@@ -6592,7 +9898,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           return;
         }
       }
-      window.scrollTo(0, savedScroll);
+      if (box) box.scrollTop = savedScroll;
     });
   }
 
@@ -6644,7 +9950,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function connectEventSource(): void {
     if (!shouldConnectEventSource()) return;
     if (eventSource) return;
-    const es = new EventSource("/events");
+    const es = new EventSource(apiUrl("events"));
     eventSource = es;
     es.addEventListener("update", (event) => {
       const raw = (event as MessageEvent).data;
@@ -6653,8 +9959,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         try {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed.paths)) paths = parsed.paths;
-        } catch {
-          /* ignore parse errors */
+        } catch (error) {
+          // 壊れた本文でも、変わったことは確か。どのファイルかが分からない
+          // だけなので、全体を読み直す (paths = null) 形で続ける。本文は残す。
+          console.error(
+            "[code-viewer] the SSE update event has a body that is not JSON; reloading everything",
+            raw,
+            error,
+          );
         }
       }
       if (isHistoryPanelRoute(STATE.route)) HISTORY_VIEW.notePossibleUpdate();
@@ -6675,20 +9987,36 @@ window.GdpExpandLogic = GdpExpandLogic;
     es.addEventListener("journal", () => {
       JOURNAL_VIEW?.handleSse();
     });
+    // タブの配置 (全プロジェクト共通) を別の窓・別のプロジェクトの画面が書いた。
+    es.addEventListener("tabs", () => {
+      void MAIN_TABS.refreshFromServer();
+    });
     es.addEventListener("db-query", (event) => {
       DATABASE_VIEW.handleSse("db-query", (event as MessageEvent).data);
     });
     es.addEventListener("db-snapshot", (event) => {
       DATABASE_VIEW.handleSse("db-snapshot", (event as MessageEvent).data);
     });
-    es.addEventListener("error", () => setStatus("error"));
+    es.addEventListener("error", () => {
+      setStatus("error");
+      // 入口のサーバの下で、裏のプロセスが止まっていると入口は 502 を返し、
+      // EventSource は繋ぎ直しをやめる。理由と再起動を出すため、同じ入口に
+      // 1 回だけ問い合わせる (応答は inspectBackendResponse が見る)。
+      if (projectKey() && es.readyState === EventSource.CLOSED) {
+        void fetch(apiUrl("settings")).catch((error: unknown) => {
+          console.error("[code-viewer] project process check failed", error);
+        });
+      }
+    });
     es.addEventListener("open", () => {
       setStatus("live");
       if (!openedOnce) {
         openedOnce = true;
         return;
       }
-      catchUpDiff();
+      catchUpMissedChanges("reconnect");
+      // 切れていた間のタブの変更 (SSE の tabs は届いていない)。
+      void MAIN_TABS.refreshFromServer();
     });
   }
 
@@ -6710,12 +10038,26 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   scheduleEventSourceConnect();
   window.addEventListener("pagehide", disconnectEventSource);
+  // 入口の下で、このプロジェクトの裏を起こしている最中なら「起動中」を出す。
+  // 画面の組み立てが終わってから聞く (fetch の包みと状態表示を使うため)。
+  if (projectKey()) {
+    BACKEND_STATE.checkStarting().catch((error: unknown) =>
+      reportPersistenceError(
+        "check the state of this project's process",
+        error,
+      ),
+    );
+  }
 
-  function catchUpDiff() {
+  function catchUpMissedChanges(reason: CatchUpReason) {
     const historyWorktreeSelected = HISTORY_VIEW.isWorktreeSelected();
-    if (!shouldAutoLoadCurrentRoute()) return;
-    if (!shouldCatchUpDiff(STATE.route, { historyWorktreeSelected })) return;
-    if (!catchUpGate()) return;
+    const kind = catchUpKind(STATE.route, { historyWorktreeSelected });
+    if (!kind) return;
+    if (!catchUpGate(reason)) return;
+    if (kind === "files") {
+      scheduleSseLoad(null);
+      return;
+    }
     if (!STATE.autoUpdate) {
       showChangeBanner(null);
       return;
@@ -6729,12 +10071,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     scheduleEventSourceConnect();
-    catchUpDiff();
+    catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
+    // 裏にあった間は SSE を切っているので、別の窓のタブの変更を取り直す。
+    void MAIN_TABS.refreshFromServer();
   });
   window.addEventListener("focus", () => {
     scheduleEventSourceConnect();
-    catchUpDiff();
+    catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
+    void MAIN_TABS.refreshFromServer();
   });
 })();

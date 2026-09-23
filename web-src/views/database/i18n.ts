@@ -25,8 +25,6 @@ export type DbText = {
     refreshDatastoresUnchanged: string;
     refreshDatastoresChanged: (added: number, removed: number) => string;
     toolbar: string;
-    query: string;
-    queryTitle: string;
     er: string;
     erTitle: string;
     search: string;
@@ -41,6 +39,9 @@ export type DbText = {
     noDatastores: string;
     noDatastoresHint: string;
     noDatastoreTab: string;
+    // 新しいタブ (データストアを選んでいない) の本文の案内。
+    chooseDatastore: string;
+    chooseDatastoreHint: string;
     dockerLimitReached: string;
     // Rails 命名規約 (<name>_id → <names>.id) からの仮想 FK 推測トグル。
     inferFkLabel: string;
@@ -48,6 +49,13 @@ export type DbText = {
     // 推測 FK の右ペインリストに付ける小バッジ。
     inferredBadge: string;
     inferredBadgeTitle: string;
+    datastoresError: (detail: string) => string;
+    rowCountError: (detail: string) => string;
+    tabsLoadError: (detail: string) => string;
+    stateSaveError: (detail: string) => string;
+    closeDatastoreError: (detail: string) => string;
+    viewLoadError: (detail: string) => string;
+    eventError: (detail: string) => string;
   };
   tableList: {
     filter: string;
@@ -58,6 +66,13 @@ export type DbText = {
     views: string;
     keyboardHint: string;
     result: (visible: number, total: number) => string;
+    copyTableName: string;
+    copySelect: string;
+    viewCreate: string;
+    viewDefinition: string;
+    copyColumnName: (column: string) => string;
+    copyFailed: (detail: string) => string;
+    columnsError: (detail: string) => string;
   };
   detail: {
     cell: string;
@@ -92,6 +107,10 @@ export type DbText = {
     filteredEmptyHint: string;
     filteredEmptyAction: string;
     statusRows: (n: string) => string;
+    /** 足元のページ送り: いま見えている行の範囲。 */
+    pagerRange: (first: string, last: string, total: string) => string;
+    pagerPrev: string;
+    pagerNext: string;
     statusSort: (column: string, dir: string) => string;
     statusFilters: (n: number) => string;
     statusRefreshing: (filters: number) => string;
@@ -115,6 +134,8 @@ export type DbText = {
   };
   // スキーマビュー。
   schema: {
+    /** 構造の欄の見出し。テーブルの説明があれば後ろに添える。 */
+    header: (table: string, comment?: string) => string;
     columns: string;
     foreignKeys: string;
     indexes: string;
@@ -125,6 +146,8 @@ export type DbText = {
     refreshingLabel: string;
     copyDdl: string;
     copied: string;
+    copyFailed: (detail: string) => string;
+    loadError: (detail: string) => string;
     colName: string;
     colType: string;
     colNullable: string;
@@ -142,10 +165,14 @@ export type DbText = {
   // クエリエディタ。
   editor: {
     sqlPlaceholder: string;
+    collapseInput: string;
+    expandInput: string;
+    resizeInput: string;
     run: string;
     runTitle: string;
     explain: string;
     explainTitle: string;
+    explainUnsupported: string;
     localHistory: string;
     localHistoryTitle: string;
     running: string;
@@ -155,10 +182,12 @@ export type DbText = {
     noRows: string;
     historyLoading: string;
     historyEmpty: string;
-    historyError: string;
+    historyError: (detail: string) => string;
     statusError: (ms: number) => string;
     statusSuccess: (rows: number, suffix: string, ms: number) => string;
     statusExplain: (ms: number) => string;
+    /** 失敗の全文 (操作・HTTP の状態・本文・cause の連鎖) を畳んだ欄の見出し。 */
+    errorDetails: string;
   };
   // クエリ履歴ペイン。
   history: {
@@ -166,6 +195,9 @@ export type DbText = {
     refreshTitle: string;
     refreshResultAdded: (count: number) => string;
     refreshResultUnchanged: string;
+    refreshError: (detail: string) => string;
+    deleteError: (detail: string) => string;
+    clearError: (detail: string) => string;
     clearAll: string;
     clearTitle: string;
     selectPlaceholder: string;
@@ -180,6 +212,8 @@ export type DbText = {
     executorUser: string;
     rowsLabel: (rows: number, truncated: boolean) => string;
     elapsedLabel: (ms: number) => string;
+    /** 失敗した問い合わせの印。 */
+    failedMark: string;
     truncatedRows: (saved: number, total: number) => string;
   };
   // セッションログペイン (session 限定。SQL 実行 / 編集コミットの成否を記録)。
@@ -209,6 +243,7 @@ export type DbText = {
     copyMermaid: string;
     copyMermaidTitle: string;
     copied: string;
+    copyFailed: (detail: string) => string;
     noTables: string;
     loadError: string;
     renderError: string;
@@ -286,6 +321,59 @@ export type DbText = {
     coverageNoteBeforeOnly: (rows: number) => string;
     coverageNoteAfterOnly: (rows: number) => string;
   };
+  // 取得・実行の失敗の詳細の頭に付ける操作名。responseErrorMessage が
+  // 「<操作名> (HTTP 500): <本文>」の形にして、画面とセッションログに出す。
+  failure: {
+    fetchSchemas: string;
+    fetchSchema: string;
+    fetchTableCount: string;
+    fetchTable: string;
+    fetchColumns: string;
+    fetchDdl: string;
+    executeQuery: string;
+    saveChanges: string;
+    loadDatastores: string;
+    loadDatabaseTabs: string;
+    saveDatabaseTabs: string;
+    saveDatabaseTabsOnUnload: string;
+    loadUiSettings: string;
+    saveUiSettings: string;
+    saveColumnWidths: string;
+    saveExpandedTables: string;
+    saveSnapshotTables: string;
+    listSnapshots: string;
+    createSnapshot: string;
+    cancelSnapshot: string;
+    updateSnapshotNote: string;
+    deleteSnapshot: string;
+    closeDatastore: (dbId: string) => string;
+    loadLocalHistory: string;
+    refreshHistory: string;
+    deleteHistoryEntry: string;
+    clearHistory: string;
+    s3Buckets: string;
+    s3Objects: string;
+    s3ObjectHead: string;
+    s3ObjectText: string;
+    s3Folder: string;
+    s3Write: string;
+    dynamodbTables: string;
+    dynamodbTable: string;
+    dynamodbItems: string;
+    dynamodbItem: string;
+    esIndices: string;
+    esMapping: string;
+    esDocs: string;
+    esDoc: string;
+    esWrite: string;
+    redisDatabases: string;
+    redisKeys: string;
+    redisValue: string;
+    redisWrite: string;
+    searchStart: string;
+    searchStatus: string;
+    searchCancel: string;
+  };
   // データストアエクスプローラ (redis / elasticsearch / s3)。共通文言は
   // common に集約し、各データストア固有の文言を redis/es/s3 に分ける。
   explorer: {
@@ -298,6 +386,8 @@ export type DbText = {
       delete: string;
       saving: string;
       saveError: (message: string) => string;
+      shownCount: (count: string) => string;
+      scannedCount: (count: string) => string;
     };
     redis: {
       databases: string;
@@ -316,6 +406,17 @@ export type DbText = {
       newKeyValuePlaceholder: string;
       confirmDeleteKey: (key: string) => string;
       create: string;
+      loadingDatabases: string;
+      loadingKeys: string;
+      loadingValue: string;
+      fieldHeader: string;
+      valueHeader: string;
+      binaryNotice: (fullSize: string) => string;
+      binaryTruncatedNotice: (fullSize: string, shownSize: string) => string;
+      truncatedString: (shownSize: string, fullSize: string) => string;
+      truncatedFields: (shown: string, total: string) => string;
+      truncatedItems: (shown: string, total: string) => string;
+      truncatedEntries: (shown: string, total: string) => string;
     };
     es: {
       indices: string;
@@ -338,6 +439,11 @@ export type DbText = {
       confirmDeleteDoc: (id: string) => string;
       invalidJson: string;
       create: string;
+      loadingMapping: string;
+      loadingDocs: string;
+      loadingDoc: string;
+      unknownType: string;
+      indexMeta: (docCount: string, size: string) => string;
     };
     s3: {
       bucket: string;
@@ -364,6 +470,23 @@ export type DbText = {
       confirmDeleteObject: (key: string) => string;
       editTextHint: string;
       create: string;
+      listView: string;
+      explorerView: string;
+      /** オブジェクトの種類の短い札 (詳しい種類は title に出す)。 */
+      kind: Record<
+        "image" | "video" | "audio" | "pdf" | "text" | "unsupported",
+        string
+      >;
+      loadMoreFailed: (detail: string) => string;
+      loadingBuckets: string;
+      loadingObjects: string;
+      loadingPreview: string;
+      loadingFolder: string;
+      emptyFolder: string;
+      noMatchesInScan: (scanned: string) => string;
+      newestFirstInScan: string;
+      sortedByKey: string;
+      scanCapReached: string;
     };
     dynamodb: {
       table: string;
@@ -377,10 +500,13 @@ export type DbText = {
       selectItem: string;
       noItems: string;
       noTables: string;
+      loadingTable: string;
+      loadingTables: string;
       copyKey: string;
       copied: string;
       copyFailed: string;
       invalidAttributeValues: string;
+      attributeValuesNotObject: string;
       runQuery: string;
       structureTab: string;
       itemTab: string;
@@ -396,6 +522,7 @@ export type DbText = {
       projectionInclude: (attrs: string) => string;
       keySchemaOnlyHint: string;
       inferredAttributesNote: (count: number) => string;
+      loadingItems: string;
     };
   };
 };
@@ -422,8 +549,6 @@ const EN: DbText = {
         .filter(Boolean)
         .join(" / "),
     toolbar: "Datastore tools",
-    query: "Query",
-    queryTitle: "Query Editor",
     er: "ER",
     erTitle: "Entity Relationship Diagram",
     search: "Search",
@@ -440,12 +565,25 @@ const EN: DbText = {
     noDatastoresHint:
       "Start a database service or add a SQLite file, then refresh this list.",
     noDatastoreTab: "No datastore",
+    chooseDatastore: "Choose a datastore",
+    chooseDatastoreHint:
+      "Pick one in the box at the top left, or add a connection with +.",
     dockerLimitReached:
       "Docker discovery reached the service limit; some compose services may be hidden.",
     inferFkLabel: "Rails FK inference",
     inferFkTitle: "Infer FK from Rails-style <name>_id → <names>.id",
     inferredBadge: "inferred",
     inferredBadgeTitle: "Inferred from Rails-style naming, not declared in DB",
+    datastoresError: (detail) => `Failed to load datastores: ${detail}`,
+    rowCountError: (detail) => `Failed to refresh row count: ${detail}`,
+    tabsLoadError: (detail) => `Failed to restore tabs: ${detail}`,
+    stateSaveError: (detail) =>
+      `Your changes are active, but were not saved: ${detail}`,
+    closeDatastoreError: (detail) =>
+      `Failed to close the datastore connection: ${detail}`,
+    viewLoadError: (detail) => `Failed to load the database view: ${detail}`,
+    eventError: (detail) =>
+      `A database update could not be read; refreshing all data: ${detail}`,
   },
   tableList: {
     filter: "Filter tables…",
@@ -456,6 +594,13 @@ const EN: DbText = {
     views: "Views",
     keyboardHint: "↑ ↓ Select · Enter Open · → Expand · Esc Clear",
     result: (visible, total) => `${visible} / ${total} tables`,
+    copyTableName: "Copy table name",
+    copySelect: "Copy SELECT statement",
+    viewCreate: "View CREATE TABLE",
+    viewDefinition: "View table definition",
+    copyColumnName: (column) => `Copy column name: ${column}`,
+    copyFailed: (detail) => `Copy failed: ${detail}`,
+    columnsError: (detail) => `Failed to load columns: ${detail}`,
   },
   detail: {
     cell: "Cell",
@@ -499,6 +644,9 @@ const EN: DbText = {
       "The table was loaded, but the current search or column filters hide every row.",
     filteredEmptyAction: "Clear filters",
     statusRows: (n) => `${n} rows`,
+    pagerRange: (first, last, total) => `${first}–${last} of ${total} rows`,
+    pagerPrev: "Previous page",
+    pagerNext: "Next page",
     statusSort: (column, dir) => `Sort: ${column} ${dir}`,
     statusFilters: (n) => `${n} filter(s)`,
     statusRefreshing: (filters) =>
@@ -524,6 +672,8 @@ const EN: DbText = {
       "This table has no primary key. Existing rows cannot be edited or deleted (you can still add new rows).",
   },
   schema: {
+    header: (table, comment) =>
+      comment ? `Schema: ${table} — ${comment}` : `Schema: ${table}`,
     columns: "Columns",
     foreignKeys: "Foreign Keys",
     indexes: "Indexes",
@@ -534,6 +684,8 @@ const EN: DbText = {
     refreshingLabel: "Refreshing...",
     copyDdl: "Copy DDL",
     copied: "Copied!",
+    copyFailed: (detail) => `Copy DDL failed: ${detail}`,
+    loadError: (detail) => `Failed to load table definition: ${detail}`,
     colName: "Column",
     colType: "Type",
     colNullable: "Nullable",
@@ -550,10 +702,15 @@ const EN: DbText = {
   },
   editor: {
     sqlPlaceholder: "SELECT * FROM ...",
+    collapseInput: "Collapse query input",
+    expandInput: "Expand query input",
+    resizeInput: "Resize query input",
     run: "Run",
     runTitle: "Execute query (Ctrl+Enter)",
     explain: "Explain",
     explainTitle: "Show query execution plan",
+    explainUnsupported:
+      "Explain works on SQLite, D1, PostgreSQL and MySQL only",
     localHistory: "Local History",
     localHistoryTitle: "Local editor history",
     running: "Running…",
@@ -563,16 +720,20 @@ const EN: DbText = {
     noRows: "No rows",
     historyLoading: "Loading…",
     historyEmpty: "No history",
-    historyError: "Failed to load history",
+    historyError: (detail) => `Failed to load history: ${detail}`,
     statusError: (ms) => `Error (${ms}ms)`,
     statusSuccess: (rows, suffix, ms) => `${rows}${suffix} rows (${ms}ms)`,
     statusExplain: (ms) => `Explain (${ms}ms)`,
+    errorDetails: "Details",
   },
   history: {
     refresh: "Refresh history",
     refreshTitle: "Refresh query history",
     refreshResultAdded: (count) => `+${count} queries`,
     refreshResultUnchanged: "No new queries",
+    refreshError: (detail) => `Failed to refresh query history: ${detail}`,
+    deleteError: (detail) => `Failed to delete query history: ${detail}`,
+    clearError: (detail) => `Failed to clear query history: ${detail}`,
     clearAll: "Clear All",
     clearTitle: "Delete all query history",
     selectPlaceholder: "Select a query to view details",
@@ -587,6 +748,7 @@ const EN: DbText = {
     executorUser: "User",
     rowsLabel: (rows, truncated) => `${rows}${truncated ? "+" : ""} rows`,
     elapsedLabel: (ms) => `${ms}ms`,
+    failedMark: "Failed",
     truncatedRows: (saved, total) => `Showing ${saved} of ${total} rows`,
   },
   sessionLog: {
@@ -616,6 +778,7 @@ const EN: DbText = {
     copyMermaid: "Copy Mermaid",
     copyMermaidTitle: "Copy mermaid source to clipboard",
     copied: "Copied!",
+    copyFailed: (detail) => `Copy Mermaid failed: ${detail}`,
     noTables: "No tables to display.",
     loadError: "Failed to load mermaid.js",
     renderError: "Failed to render ER diagram.",
@@ -694,6 +857,57 @@ const EN: DbText = {
     coverageNoteAfterOnly: (rows) =>
       `Only in the after snapshot (${rows} rows). Not selected for the before snapshot, so no comparison.`,
   },
+  failure: {
+    fetchSchemas: "failed to fetch schemas",
+    fetchSchema: "failed to fetch schema",
+    fetchTableCount: "failed to fetch table count",
+    fetchTable: "failed to fetch table",
+    fetchColumns: "failed to fetch columns",
+    fetchDdl: "failed to fetch DDL",
+    executeQuery: "failed to execute query",
+    saveChanges: "failed to save changes",
+    loadDatastores: "load datastores",
+    loadDatabaseTabs: "load database tabs",
+    saveDatabaseTabs: "save database tabs",
+    saveDatabaseTabsOnUnload: "save database tabs on unload",
+    loadUiSettings: "load database UI settings",
+    saveUiSettings: "save database UI settings",
+    saveColumnWidths: "save database column widths",
+    saveExpandedTables: "save database expandedTables",
+    saveSnapshotTables: "save database snapshotSelectedTables",
+    listSnapshots: "failed to list snapshots",
+    createSnapshot: "failed to create snapshot",
+    cancelSnapshot: "failed to cancel snapshot",
+    updateSnapshotNote: "failed to save snapshot note",
+    deleteSnapshot: "failed to delete snapshot",
+    closeDatastore: (dbId) => `close datastore ${dbId}`,
+    loadLocalHistory: "load query Local History",
+    refreshHistory: "refresh query history",
+    deleteHistoryEntry: "delete query history entry",
+    clearHistory: "clear query history",
+    s3Buckets: "load S3 buckets",
+    s3Objects: "load S3 objects",
+    s3ObjectHead: "load S3 object metadata",
+    s3ObjectText: "load S3 object text",
+    s3Folder: "load S3 folder",
+    s3Write: "write S3 object",
+    dynamodbTables: "load DynamoDB tables",
+    dynamodbTable: "describe DynamoDB table",
+    dynamodbItems: "load DynamoDB items",
+    dynamodbItem: "get DynamoDB item",
+    esIndices: "load Elasticsearch indices",
+    esMapping: "load Elasticsearch mapping",
+    esDocs: "load Elasticsearch documents",
+    esDoc: "load Elasticsearch document",
+    esWrite: "write Elasticsearch document",
+    redisDatabases: "load Redis databases",
+    redisKeys: "load Redis keys",
+    redisValue: "load Redis value",
+    redisWrite: "write Redis key",
+    searchStart: "start search",
+    searchStatus: "read search progress",
+    searchCancel: "cancel search",
+  },
   explorer: {
     common: {
       loadMore: "Load more",
@@ -704,6 +918,8 @@ const EN: DbText = {
       delete: "Delete",
       saving: "Saving…",
       saveError: (message) => `Save failed: ${message}`,
+      shownCount: (count) => `${count} shown`,
+      scannedCount: (count) => `${count} scanned`,
     },
     redis: {
       databases: "Databases",
@@ -722,6 +938,22 @@ const EN: DbText = {
       newKeyValuePlaceholder: "value",
       confirmDeleteKey: (key) => `Delete key "${key}"?`,
       create: "Create",
+      loadingDatabases: "Loading databases...",
+      loadingKeys: "Loading keys...",
+      loadingValue: "Loading value...",
+      fieldHeader: "Field",
+      valueHeader: "Value",
+      binaryNotice: (fullSize) => `(binary, base64; full size ${fullSize})`,
+      binaryTruncatedNotice: (fullSize, shownSize) =>
+        `(binary, base64; full size ${fullSize}, showing first ${shownSize})`,
+      truncatedString: (shownSize, fullSize) =>
+        `(showing first ${shownSize} of ${fullSize})`,
+      truncatedFields: (shown, total) =>
+        `(showing ${shown} of ${total} fields, truncated)`,
+      truncatedItems: (shown, total) =>
+        `(showing ${shown} of ${total} items, truncated)`,
+      truncatedEntries: (shown, total) =>
+        `(showing ${shown} of ${total} entries, truncated)`,
     },
     es: {
       indices: "Indices",
@@ -744,6 +976,11 @@ const EN: DbText = {
       confirmDeleteDoc: (id) => `Delete document "${id}"?`,
       invalidJson: "Invalid JSON",
       create: "Create",
+      loadingMapping: "Loading mapping...",
+      loadingDocs: "Loading docs...",
+      loadingDoc: "Loading doc...",
+      unknownType: "(unknown)",
+      indexMeta: (docCount, size) => `${docCount} docs / ${size}`,
     },
     s3: {
       bucket: "Bucket",
@@ -771,6 +1008,28 @@ const EN: DbText = {
       confirmDeleteObject: (key) => `Delete object "${key}"?`,
       editTextHint: "Only text objects can be edited in the browser.",
       create: "Create",
+      listView: "List",
+      explorerView: "Explorer",
+      kind: {
+        image: "Image",
+        video: "Video",
+        audio: "Audio",
+        pdf: "PDF",
+        text: "Text",
+        unsupported: "Binary",
+      },
+      loadMoreFailed: (detail) => `Load more failed: ${detail}`,
+      loadingBuckets: "Loading buckets...",
+      loadingObjects: "Loading objects...",
+      loadingPreview: "Loading preview...",
+      loadingFolder: "Loading…",
+      emptyFolder: "(empty)",
+      noMatchesInScan: (scanned) =>
+        `(no matches in the first ${scanned} scanned objects; narrow the prefix and search again)`,
+      newestFirstInScan: "newest first in scanned objects",
+      sortedByKey: "sorted by key",
+      scanCapReached:
+        "scan cap reached; narrow the prefix to search more precisely",
     },
     dynamodb: {
       table: "Table",
@@ -784,10 +1043,13 @@ const EN: DbText = {
       selectItem: "Select an item to preview.",
       noItems: "(no items)",
       noTables: "(no tables)",
+      loadingTable: "Loading table...",
+      loadingTables: "Loading tables...",
       copyKey: "Copy key",
       copied: "Copied",
       copyFailed: "Copy failed",
       invalidAttributeValues: "Invalid attribute values JSON",
+      attributeValuesNotObject: "write the attribute values as a JSON object",
       runQuery: "Run",
       structureTab: "Structure",
       itemTab: "Item",
@@ -807,6 +1069,7 @@ const EN: DbText = {
         `Attributes beyond the key schema are inferred from ${count.toLocaleString()} loaded item${
           count === 1 ? "" : "s"
         } and may not reflect every item.`,
+      loadingItems: "Loading items...",
     },
   },
 };
@@ -833,8 +1096,6 @@ const JA: DbText = {
         .filter(Boolean)
         .join(" / "),
     toolbar: "データストアツール",
-    query: "クエリ",
-    queryTitle: "クエリエディタ",
     er: "ER",
     erTitle: "ER 図 (リレーション図)",
     search: "検索",
@@ -851,6 +1112,8 @@ const JA: DbText = {
     noDatastoresHint:
       "DB サービスを起動するか SQLite ファイルを追加してから、一覧を更新してください。",
     noDatastoreTab: "未検出",
+    chooseDatastore: "データストアを選んでください",
+    chooseDatastoreHint: "左上の欄から選ぶか、＋ から接続を追加してください。",
     dockerLimitReached:
       "Docker のサービス数が上限に達しました。一部の compose サービスは表示されていない可能性があります。",
     inferFkLabel: "Rails FK 推測",
@@ -858,6 +1121,18 @@ const JA: DbText = {
     inferredBadge: "推測",
     inferredBadgeTitle:
       "Rails 命名規約から推測した FK (DB の宣言ではありません)",
+    datastoresError: (detail) =>
+      `データストアの読み込みに失敗しました: ${detail}`,
+    rowCountError: (detail) => `行数の更新に失敗しました: ${detail}`,
+    tabsLoadError: (detail) => `タブの復元に失敗しました: ${detail}`,
+    stateSaveError: (detail) =>
+      `変更は反映されていますが保存できませんでした: ${detail}`,
+    closeDatastoreError: (detail) =>
+      `データストア接続を閉じられませんでした: ${detail}`,
+    viewLoadError: (detail) =>
+      `データベース画面の読み込みに失敗しました: ${detail}`,
+    eventError: (detail) =>
+      `データベース更新を読み取れなかったため全体を再読み込みします: ${detail}`,
   },
   tableList: {
     filter: "テーブルを絞り込み…",
@@ -868,6 +1143,13 @@ const JA: DbText = {
     views: "ビュー",
     keyboardHint: "↑ ↓ 選択 · Enter 開く · → 列を展開 · Esc 解除",
     result: (visible, total) => `${visible} / ${total} テーブル`,
+    copyTableName: "テーブル名をコピー",
+    copySelect: "SELECT 文をコピー",
+    viewCreate: "CREATE TABLE を表示",
+    viewDefinition: "テーブル定義を表示",
+    copyColumnName: (column) => `カラム名をコピー: ${column}`,
+    copyFailed: (detail) => `コピーに失敗しました: ${detail}`,
+    columnsError: (detail) => `カラムの読み込みに失敗しました: ${detail}`,
   },
   detail: {
     cell: "セル",
@@ -909,6 +1191,9 @@ const JA: DbText = {
       "表は読み込めていますが、現在の検索/列フィルタですべての行が隠れています。",
     filteredEmptyAction: "フィルタ解除",
     statusRows: (n) => `${n} 行`,
+    pagerRange: (first, last, total) => `${total} 行中 ${first}–${last} 行`,
+    pagerPrev: "前のページ",
+    pagerNext: "次のページ",
     statusSort: (column, dir) => `並び替え: ${column} ${dir}`,
     statusFilters: (n) => `フィルタ ${n} 件`,
     statusRefreshing: (filters) =>
@@ -934,6 +1219,8 @@ const JA: DbText = {
       "このテーブルには主キーがありません。既存行の編集・削除はできません(新規行の追加は可能です)。",
   },
   schema: {
+    header: (table, comment) =>
+      comment ? `スキーマ: ${table} — ${comment}` : `スキーマ: ${table}`,
     columns: "カラム",
     foreignKeys: "外部キー",
     indexes: "インデックス",
@@ -944,6 +1231,8 @@ const JA: DbText = {
     refreshingLabel: "更新中...",
     copyDdl: "DDL をコピー",
     copied: "コピーしました",
+    copyFailed: (detail) => `DDL のコピーに失敗しました: ${detail}`,
+    loadError: (detail) => `テーブル定義の読み込みに失敗しました: ${detail}`,
     colName: "カラム",
     colType: "型",
     colNullable: "NULL 許可",
@@ -960,10 +1249,15 @@ const JA: DbText = {
   },
   editor: {
     sqlPlaceholder: "SELECT * FROM ...",
+    collapseInput: "クエリ入力欄を畳む",
+    expandInput: "クエリ入力欄を開く",
+    resizeInput: "クエリ入力欄の高さを変更",
     run: "実行",
     runTitle: "クエリを実行 (Ctrl+Enter)",
-    explain: "Explain",
+    explain: "実行計画",
     explainTitle: "実行計画を表示",
+    explainUnsupported:
+      "実行計画は SQLite・D1・PostgreSQL・MySQL だけで見られます",
     localHistory: "ローカル履歴",
     localHistoryTitle: "エディタのローカル履歴",
     running: "実行中…",
@@ -973,16 +1267,20 @@ const JA: DbText = {
     noRows: "行がありません",
     historyLoading: "読み込み中…",
     historyEmpty: "履歴がありません",
-    historyError: "履歴の読み込みに失敗しました",
+    historyError: (detail) => `履歴の読み込みに失敗しました: ${detail}`,
     statusError: (ms) => `エラー (${ms}ms)`,
     statusSuccess: (rows, suffix, ms) => `${rows}${suffix} 行 (${ms}ms)`,
-    statusExplain: (ms) => `Explain (${ms}ms)`,
+    statusExplain: (ms) => `実行計画 (${ms}ms)`,
+    errorDetails: "詳細",
   },
   history: {
     refresh: "クエリ履歴を更新",
     refreshTitle: "クエリ履歴を再読み込み",
     refreshResultAdded: (count) => `+${count} 件`,
     refreshResultUnchanged: "新しいクエリはありません",
+    refreshError: (detail) => `クエリ履歴の更新に失敗しました: ${detail}`,
+    deleteError: (detail) => `クエリ履歴の削除に失敗しました: ${detail}`,
+    clearError: (detail) => `クエリ履歴の全削除に失敗しました: ${detail}`,
     clearAll: "すべて削除",
     clearTitle: "クエリ履歴をすべて削除",
     selectPlaceholder: "クエリを選択すると詳細が表示されます",
@@ -997,6 +1295,7 @@ const JA: DbText = {
     executorUser: "ユーザー",
     rowsLabel: (rows, truncated) => `${rows}${truncated ? "+" : ""} 行`,
     elapsedLabel: (ms) => `${ms}ms`,
+    failedMark: "失敗",
     truncatedRows: (saved, total) => `全 ${total} 行中 ${saved} 行を表示`,
   },
   sessionLog: {
@@ -1025,6 +1324,7 @@ const JA: DbText = {
     copyMermaid: "Mermaid をコピー",
     copyMermaidTitle: "Mermaid ソースをクリップボードにコピー",
     copied: "コピーしました",
+    copyFailed: (detail) => `Mermaid のコピーに失敗しました: ${detail}`,
     noTables: "表示できるテーブルがありません。",
     loadError: "mermaid.js の読み込みに失敗しました",
     renderError: "ER 図の描画に失敗しました。",
@@ -1105,6 +1405,58 @@ const JA: DbText = {
     coverageNoteAfterOnly: (rows) =>
       `比較先のみに存在 (${rows}行)。比較元では対象テーブルに選ばれていないため比較できません。`,
   },
+  failure: {
+    fetchSchemas: "スキーマの一覧を取得できませんでした",
+    fetchSchema: "スキーマを取得できませんでした",
+    fetchTableCount: "テーブルの行数を取得できませんでした",
+    fetchTable: "テーブルを取得できませんでした",
+    fetchColumns: "列を取得できませんでした",
+    fetchDdl: "DDL を取得できませんでした",
+    executeQuery: "クエリを実行できませんでした",
+    saveChanges: "変更を保存できませんでした",
+    loadDatastores: "データストアの一覧を読み込めませんでした",
+    loadDatabaseTabs: "データストアのタブを読み込めませんでした",
+    saveDatabaseTabs: "データストアのタブを保存できませんでした",
+    saveDatabaseTabsOnUnload:
+      "閉じる前にデータストアのタブを保存できませんでした",
+    loadUiSettings: "Data の表示設定を読み込めませんでした",
+    saveUiSettings: "Data の表示設定を保存できませんでした",
+    saveColumnWidths: "列幅を保存できませんでした",
+    saveExpandedTables: "展開したテーブルを保存できませんでした",
+    saveSnapshotTables: "スナップショットの対象テーブルを保存できませんでした",
+    listSnapshots: "スナップショットの一覧を読み込めませんでした",
+    createSnapshot: "スナップショットを取得できませんでした",
+    cancelSnapshot: "スナップショットの取得を中止できませんでした",
+    updateSnapshotNote: "スナップショットのメモを保存できませんでした",
+    deleteSnapshot: "スナップショットを削除できませんでした",
+    closeDatastore: (dbId) => `データストア ${dbId} を閉じられませんでした`,
+    loadLocalHistory: "クエリのローカル履歴を読み込めませんでした",
+    refreshHistory: "クエリ履歴を更新できませんでした",
+    deleteHistoryEntry: "クエリ履歴の項目を削除できませんでした",
+    clearHistory: "クエリ履歴を消去できませんでした",
+    s3Buckets: "S3 のバケットの一覧を読み込めませんでした",
+    s3Objects: "S3 のオブジェクトの一覧を読み込めませんでした",
+    s3ObjectHead: "S3 のオブジェクトの情報を読み込めませんでした",
+    s3ObjectText: "S3 のオブジェクトの内容を読み込めませんでした",
+    s3Folder: "S3 のフォルダを読み込めませんでした",
+    s3Write: "S3 のオブジェクトに書き込めませんでした",
+    dynamodbTables: "DynamoDB のテーブルの一覧を読み込めませんでした",
+    dynamodbTable: "DynamoDB のテーブルの情報を読み込めませんでした",
+    dynamodbItems: "DynamoDB のアイテムを読み込めませんでした",
+    dynamodbItem: "DynamoDB のアイテムを取得できませんでした",
+    esIndices: "Elasticsearch のインデックスの一覧を読み込めませんでした",
+    esMapping: "Elasticsearch のマッピングを読み込めませんでした",
+    esDocs: "Elasticsearch のドキュメントの一覧を読み込めませんでした",
+    esDoc: "Elasticsearch のドキュメントを読み込めませんでした",
+    esWrite: "Elasticsearch のドキュメントに書き込めませんでした",
+    redisDatabases: "Redis のデータベースの一覧を読み込めませんでした",
+    redisKeys: "Redis のキーの一覧を読み込めませんでした",
+    redisValue: "Redis の値を読み込めませんでした",
+    redisWrite: "Redis のキーに書き込めませんでした",
+    searchStart: "検索を始められませんでした",
+    searchStatus: "検索の進み具合を読み込めませんでした",
+    searchCancel: "検索を止められませんでした",
+  },
   explorer: {
     common: {
       loadMore: "さらに読み込む",
@@ -1115,6 +1467,8 @@ const JA: DbText = {
       delete: "削除",
       saving: "保存中…",
       saveError: (message) => `保存に失敗しました: ${message}`,
+      shownCount: (count) => `${count} 件表示`,
+      scannedCount: (count) => `${count} 件スキャン`,
     },
     redis: {
       databases: "データベース",
@@ -1133,6 +1487,22 @@ const JA: DbText = {
       newKeyValuePlaceholder: "値",
       confirmDeleteKey: (key) => `キー "${key}" を削除しますか?`,
       create: "作成",
+      loadingDatabases: "データベースを読み込み中...",
+      loadingKeys: "キーを読み込み中...",
+      loadingValue: "値を読み込み中...",
+      fieldHeader: "フィールド",
+      valueHeader: "値",
+      binaryNotice: (fullSize) => `(バイナリ, base64。全体 ${fullSize})`,
+      binaryTruncatedNotice: (fullSize, shownSize) =>
+        `(バイナリ, base64。全体 ${fullSize} のうち先頭 ${shownSize} を表示)`,
+      truncatedString: (shownSize, fullSize) =>
+        `(${fullSize} のうち先頭 ${shownSize} を表示)`,
+      truncatedFields: (shown, total) =>
+        `(${total} フィールドのうち ${shown} 件を表示。残りは省略)`,
+      truncatedItems: (shown, total) =>
+        `(${total} 要素のうち ${shown} 件を表示。残りは省略)`,
+      truncatedEntries: (shown, total) =>
+        `(${total} 件のうち ${shown} 件を表示。残りは省略)`,
     },
     es: {
       indices: "インデックス",
@@ -1155,6 +1525,11 @@ const JA: DbText = {
       confirmDeleteDoc: (id) => `ドキュメント "${id}" を削除しますか?`,
       invalidJson: "JSON が不正です",
       create: "作成",
+      loadingMapping: "マッピングを読み込み中...",
+      loadingDocs: "ドキュメントを読み込み中...",
+      loadingDoc: "ドキュメントを読み込み中...",
+      unknownType: "(不明)",
+      indexMeta: (docCount, size) => `${docCount} 件 / ${size}`,
     },
     s3: {
       bucket: "バケット",
@@ -1182,6 +1557,28 @@ const JA: DbText = {
       confirmDeleteObject: (key) => `オブジェクト "${key}" を削除しますか?`,
       editTextHint: "ブラウザで編集できるのはテキストオブジェクトのみです。",
       create: "作成",
+      listView: "一覧",
+      explorerView: "フォルダ",
+      kind: {
+        image: "画像",
+        video: "動画",
+        audio: "音声",
+        pdf: "PDF",
+        text: "テキスト",
+        unsupported: "バイナリ",
+      },
+      loadMoreFailed: (detail) => `続きを読み込めませんでした: ${detail}`,
+      loadingBuckets: "バケットを読み込み中...",
+      loadingObjects: "オブジェクトを読み込み中...",
+      loadingPreview: "プレビューを読み込み中...",
+      loadingFolder: "読み込み中…",
+      emptyFolder: "(空)",
+      noMatchesInScan: (scanned) =>
+        `(スキャンした先頭 ${scanned} 件に一致するものがありません。プレフィックスを絞って検索し直してください)`,
+      newestFirstInScan: "スキャンした中で更新が新しい順",
+      sortedByKey: "キー名順",
+      scanCapReached:
+        "スキャンの上限に達しました。プレフィックスを絞るとより正確に検索できます",
     },
     dynamodb: {
       table: "テーブル",
@@ -1195,10 +1592,13 @@ const JA: DbText = {
       selectItem: "アイテムを選択するとプレビューが表示されます。",
       noItems: "(アイテムがありません)",
       noTables: "(テーブルがありません)",
+      loadingTable: "テーブルを読み込み中...",
+      loadingTables: "テーブルの一覧を読み込み中...",
       copyKey: "キーをコピー",
       copied: "コピーしました",
       copyFailed: "コピーに失敗しました",
       invalidAttributeValues: "属性値の JSON が不正です",
+      attributeValuesNotObject: "属性値は JSON のオブジェクトで書いてください",
       runQuery: "実行",
       structureTab: "構造",
       itemTab: "アイテム",
@@ -1216,6 +1616,7 @@ const JA: DbText = {
         "DynamoDBがスキーマとして強制するのはキー属性のみです。アイテムを読み込むと追加の属性がここに表示されます。",
       inferredAttributesNote: (count) =>
         `キー以外の属性は、読み込み済みの${count.toLocaleString()}件のアイテムから検出したものです (全アイテムを網羅するとは限りません)。`,
+      loadingItems: "アイテムを読み込み中...",
     },
   },
 };

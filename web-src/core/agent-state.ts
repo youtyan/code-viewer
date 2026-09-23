@@ -45,6 +45,11 @@ export const AGENT_EVENTS = [
   "read",
   /** セッションが閉じた。 */
   "exit",
+  /**
+   * セッションが始まった、または作業を中断して入力を待てる状態に戻った。
+   * 閉じたのではないので、種類 (claude など) はそのまま覚えておく。
+   */
+  "ready",
 ] as const;
 
 export type AgentEvent = (typeof AGENT_EVENTS)[number];
@@ -68,6 +73,7 @@ const STATE_BY_EVENT: Record<Exclude<AgentEvent, "read">, AgentState> = {
   ask: "waiting",
   stop: "done",
   exit: "idle",
+  ready: "idle",
 };
 
 export function agentStateForEvent(
@@ -77,6 +83,21 @@ export function agentStateForEvent(
   if (event === "read")
     return current === "done" ? "idle" : (current ?? "idle");
   return STATE_BY_EVENT[event];
+}
+
+/**
+ * フックが名乗ってきたエージェントの種類。プロセス名から見分けられない
+ * もの (node として動く claude など) を一覧に出すために使う。
+ */
+export const REPORTED_AGENTS = ["claude", "codex"] as const;
+
+export type ReportedAgent = (typeof REPORTED_AGENTS)[number];
+
+export function isReportedAgent(value: unknown): value is ReportedAgent {
+  return (
+    typeof value === "string" &&
+    (REPORTED_AGENTS as readonly string[]).includes(value)
+  );
 }
 
 /** 状態の出どころ。UI で「申告なので確か」と「当て推量」を区別するために持つ。 */
@@ -89,14 +110,38 @@ export type AgentStateRecord = {
   source: AgentStateSource;
   /** 最後に状態が変わった時刻 (epoch ms)。 */
   updatedAt: number;
+  /**
+   * updatedAt が「状態が変わった瞬間」を本当に捉えたものか。
+   *
+   * 申告 (hook) か、観測中に状態が変わったのを見たときだけ true。サーバが
+   * 見始めた時点で既にその状態だったもの (最初の観測) は false で、updatedAt は
+   * 「遅くともこの時刻からこの状態」という下限でしかない。これを経過時間として
+   * 出すと、何時間も前から待機しているものが「数分」と出る。
+   */
+  changeObserved: boolean;
   /** 人間が最後に出した指示。フックが送ってきたときだけ入る。 */
   lastPrompt: string;
   /** エージェント側の一言。フックが送ってきたときだけ入る。 */
   note: string;
+  /** フックが名乗った種類。名乗っていなければ無い。 */
+  agent?: ReportedAgent;
+  /**
+   * 最後の申告がセッションの終了 (exit) だった。そのペインではもう
+   * エージェントが動いていないので、一覧では種類を持たないペインに戻す。
+   */
+  ended?: boolean;
 };
 
 export type AgentStateObservationError = {
-  operation: "list_terminals" | "capture_screen";
+  operation:
+    | "list_terminals"
+    | "capture_screen"
+    /** エージェント一覧: どの端末がどのペインを映しているかを引けなかった。 */
+    | "list_clients"
+    /** エージェント一覧: ペインの cwd から git のルートを求められなかった。 */
+    | "resolve_project"
+    /** エージェント一覧: プロジェクトを開いているサーバを確かめられなかった。 */
+    | "find_server";
   target: string;
   at: number;
   /** Error の cause と独自フィールドを保持した表示用詳細。 */

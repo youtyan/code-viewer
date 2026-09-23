@@ -7,17 +7,110 @@ Requires Node.js 20 or newer. Development uses
 
 ## Features
 
-- Browse repository files and folders in a persistent sidebar with live
-  worktree change updates over SSE. The sidebar filter takes plain text
+- Browse repository files and folders in the file list, shown on every screen
+  next to the left sidebar, with live worktree change updates over SSE. Its
+  filter takes plain text
   (substring), `/pattern/` (regex), `~text` (fuzzy, same matcher as the file
   palette) and globs such as `*.ts` or `src/**`, and shows
   `matching / all` file counts in the header while it is active. Rows are
   real links: Cmd/Ctrl+click or middle-click opens a file in a new tab.
+- Keep files and screens open as tabs in the top row (there is no header row
+  above it). The head of the list column, at the left end of the top row, has
+  two rows: the project you are looking at (a colored square with its
+  initials, its name — the project switcher, also `p` — and its branch on the
+  right), and below it the six view icons (Files / Diff / History / Worktrees /
+  Data / Work log, with the name and key on hover) with the button that folds
+  the file list. The tab row starts to its right; switching tabs or screens,
+  splitting, folding a column or showing the lists never moves or hides the
+  head. In a narrow head the branch keeps its whole name up to about 40% of the
+  width and the project name is shortened into the rest (hover for the whole
+  name). The left
+  sidebar holds the projects and agents; the list column to its right shows the
+  file list on every screen and, next to it, the list you pick the main area
+  from (Diff's changed files, History's commits and a selected worktree's list,
+  with the changed files of History and a selected worktree next to the list).
+  The columns follow the tab in front: with a terminal in front only the file
+  list stays. The list keeps the width you drag it to (320px at first); when the
+  main area would be narrower than 480px it narrows to 240px, then the changed
+  files fold to a strip, then the file list folds away. Every column folds by
+  hand (the file list with its button, the lists with the handle on their right
+  edge), and a column you open yourself stays open until a reload. While the
+  file list is folded, the view icons and its open button stand as a narrow
+  strip down the left edge under the project row. History's branch labels keep
+  their whole name up to about 40% of the room they share with the subject. The tabs are
+  shared by all projects and grouped by project: each group starts with a label in
+  the project's color (its initials and ▾ for Switch to this project / Collapse /
+  Close this group; the name is in the tooltip) and its tabs are underlined in that color, in the order of the
+  sidebar; tabs of no project (agent board, Tools, Settings & Help) sit at the right
+  end, and a terminal belongs to the project of its folder. Click a label to
+  collapse a group. Files, terminals and images of another project open in place;
+  its Diff / History / Worktrees / Search / Data / Work log switch to that project
+  first. Clicking a project heading in the sidebar (or ⌘⇧↑ / ⌘⇧↓, Ctrl+Shift+↑ / ↓
+  elsewhere) switches to it and brings back the tab of its group you last had in
+  front. Two windows share the tabs without overwriting each other. A terminal
+  tab outside a group showing an agent from another project reads `project · title`,
+  and a narrow tab shortens the project name first. A single click opens a file in a preview tab (italic)
+  that the next file replaces; double-click or **Keep open** keeps it. Middle-click,
+  ⌘/Ctrl+click (tree, Diff / History file lists, Search results, palette rows),
+  Shift+Enter in the palette, or **Open in new tab** on a tree file opens it in a kept
+  tab of its own (an open one comes to the front and is kept); Shift+click still opens a
+  new browser window. A file at another version (a commit from History, HEAD, a branch)
+  is a separate tab named like `a.ts @ 1a2b3c4`. Diff /
+  History / Worktrees / Data / Work log each have one tab per project that comes
+  back as you left it. Files is not a tab: the folder view is what the left side shows
+  when no tab is selected (the Files icon, `g r`, or a folder in the tree).
+  Right-click a tab to close it, the others or those to its right, or copy its
+  path (Shift+F10 on a tab opens the same menu); drag to reorder; `g t` / `g T` /
+  `g x` / `g 1`–`g 9` move and close from the keyboard. On the tab row, ←/→,
+  Home and End move, Enter brings a tab to the front, Delete closes it and
+  Ctrl+Shift+PageUp / PageDown (or Ctrl+Shift+←/→, ⌘+Shift+←/→, **Move left** /
+  **Move right**) reorders it. With two sides, the focused side's tab row is
+  underlined across its width. A tab is as wide as its name (up to 200px); tabs that do
+  not fit all shrink by the same ratio but keep about eight letters of their name, then
+  the row scrolls sideways and keeps the front tab in view. Collapsing a group never
+  moves the tabs before it. The tabs are saved once for all projects. Files and screens
+  stay on the left side; split the area to put a terminal or an image on the
+  right (the split button — its tooltip says why when it cannot split —,
+  **Split right**, Alt+click, **Open to the right**, or drag one onto the
+  dashed area on the right half),
+  resize by dragging the line between, and press `g o` to switch sides. When
+  the two sides would be narrower than 480px each, the list column makes room
+  in the same order while split (with a mark on the file list button when it
+  folds) and comes back on one side, and the right side is set aside if two
+  sides still do not fit. The main area
+  scrolls in its own box (the page never scrolls, and Back / Forward return to
+  the scroll position), and a breadcrumb too long for its row folds its middle
+  folders into `…` (hover for the full path; click it, or Tab to it and press
+  Enter, to pick a folded folder). Image
+  files open in an image tab (zoom, previous / next, copy path, open folder).
+  The annotations, Copy AI context, auto-update, cancel-requests, theme and
+  repository-page buttons are at the right of the bottom bar.
+- Install it as an app from Chrome: the install icon at the right of the
+  address bar, ⋮ → Cast, save, and share → Install page as app, or the
+  Install code-viewer button in Settings & Help → Getting Started → Install
+  as an app. It opens in its own window, whose title bar follows the app
+  theme, and there the browser's tab keys work on these tabs: ⌘W / Ctrl+W
+  closes the front tab (never the window; ⌘⇧W / Ctrl+Shift+W still closes
+  the window), ⌘T / Ctrl+T opens the `+` menu, ⌘⇧T / Ctrl+Shift+T reopens
+  the last closed tab, ⌘1–8 / Ctrl+1–8 pick a tab and ⌘9 / Ctrl+9 the last,
+  Ctrl+Tab / Ctrl+Shift+Tab (⌘⇧] / ⌘⇧[ on a Mac) and ⌘← / ⌘→ (Ctrl+← /
+  Ctrl+→ on Windows and Linux) move to the previous / next tab of the
+  focused side, and ⌘N / Ctrl+N does nothing. In a text field ⌘← / ⌘→ still
+  move within the line; in a terminal tab they move between tabs, and the
+  other Ctrl keys still go to the terminal. In an ordinary browser tab
+  nothing changes (⌘← / ⌘→ stay Back / Forward). To try it, start
+  `code-viewer`, open its address in Chrome and install it; in the new
+  window open a few files, then press ⌘T (the `+` menu opens), ⌘1, ⌘9 and
+  Ctrl+Tab (the front tab changes) and ⌘W (the front tab closes, the window
+  stays).
 - View git diffs with unified or split layout, lazy loading, viewed-file
   state, ignore-whitespace and hide-tests toggles, and dismissible per-line
   "reference pills" that copy `@path#start-end` for AI agents. View File on
   a diff card shows the full source in place while the file list stays on
-  screen; View Diff returns to the diff.
+  screen; View Diff returns to the diff. On a long card the horizontal
+  scrollbar sticks to the bottom of the main area while the card is on screen
+  (one per side in split layout). A diff box that scrolls sideways is a Tab
+  stop, and ←/→ scroll it once it has focus.
 - Browse commit history per branch and open any commit's changed files and
   diff, with shareable `/history?ref=<branch>&commit=<sha>` links
   (`&source=<path>` while a file is open with View File; the commit list
@@ -44,10 +137,9 @@ Requires Node.js 20 or newer. Development uses
   Blame groups consecutive lines from the same commit with an Older→Newer
   colour bar and lets you jump to the originating commit; History embeds the
   same commit list and diff renderer used by `/history` inside the file's
-  tab shell, filtered to that path. Both tabs keep the Repository sidebar
-  visible.
-- Browse every worktree of the repository from the `Worktrees` item in the
-  header menu, in the same three-pane shape as History: worktrees on the left,
+  tab shell, filtered to that path. Both tabs keep the file list visible.
+- Browse every worktree of the repository from the `Worktrees` icon at the
+  head of the list column, in the same shape as History: worktrees on the left,
   the picked one's changed files in the middle, the diff on the right. Changed
   images, video, and audio show a before / after preview there too, with the
   same media card as the Diff Viewer, read from that worktree. Each row
@@ -64,6 +156,92 @@ Requires Node.js 20 or newer. Development uses
   the command that merges it back, or delete it. Create a worktree under
   `.worktrees/` (the dialog shows the exact path before you commit to it);
   deleting one removes its folder from disk and keeps the branch.
+- Keep your projects and their agents in the left sidebar on every screen:
+  registered projects first, in your order, then projects found in tmux that
+  are not registered. Rows never reorder when states change. Drag a registered
+  project's heading (its agents move with it) to reorder, or press Alt+↑ / Alt+↓
+  on it, or use Move up / Move down in its right-click menu; the order is saved
+  with the project list, so every browser and window shows the same one. Each project is a
+  bold heading with its state mark and agent count (＋ and … on hover); its
+  agents sit under it as indented two-line cards: the task title (or the kind)
+  with a badge when it started waiting or finished while you were away, then
+  the kind, state, elapsed time and worktree. Click a project name to switch
+  to it in the same tab (an unregistered one is registered first), or click an
+  agent to open its pane in a terminal tab of the main area. Alt+click or the
+  row menu opens it in the opposite pane, splitting a single pane to the right.
+  Rest the pointer on an agent (or reach it with the keyboard) to see the last
+  lines of its screen in a read-only preview that refreshes every second;
+  Escape closes it.
+  The sidebar folds away and its width and folding follow you across
+  projects.
+- See every coding agent running in tmux on this machine on the All agents
+  board (the button next to Projects in the sidebar, or `g a`), grouped by
+  project (the git repository of each pane's folder; worktrees fold into their
+  repository). Each agent is the same two-line card as in the sidebar, with
+  the account and the tmux location added to its second line. Projects follow
+  the same order as the sidebar; inside each, needs-input rows come first, and
+  Enter opens the pane in a terminal tab. The same screen preview appears under
+  a row you rest the pointer on. A counter in the bottom
+  bar shows needs-input and working agents on every screen, next to each
+  account's usage, changed rows get an
+  unread dot and the tab title an unread count, and desktop notifications can
+  be enabled from that screen or from the note the left sidebar shows the
+  first time an agent needs input (choose which changes notify under
+  Settings).
+- Turn on reliable finish detection from Settings → Agent integration. It adds
+  hooks to claude (`settings.json` in `CLAUDE_CONFIG_DIR` or `~/.claude`) and
+  codex (`hooks.json` in `CODEX_HOME` or `~/.codex`) after showing the exact
+  file, what is added, where the backup goes, and how many existing hooks stay
+  (other hooks are never removed or reordered). The hooks run
+  `code-viewer terminal hook`, which reports to every running code-viewer and
+  always exits 0; reports that did not arrive are listed in the same section.
+  Finished turns then show as "Finished · unread", and agents that cannot be
+  recognized by process name are listed too. codex runs a new hook only after
+  you trust it in `/hooks`.
+- Keep several claude and codex accounts from Settings → Accounts. An account
+  is a settings directory (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`); code-viewer can
+  create one that links your settings from the default directory (you choose
+  what to share; sign-in, account identity, history and caches can never be
+  shared) or register one you already
+  have, showing what will be created and linked first. Each account is one row
+  with its email (claude also shows the plan), its state (Signed in, Not signed
+  in, or Unknown with the reason) and when it was last checked; the state and
+  email come from the CLI itself (`claude auth status`, `codex login status`
+  and `codex app-server`), never from reading tokens. Sign in once per account
+  with the official command, opened in a new tmux window. The Agents list then
+  shows which account each agent runs with, a band of account cards with every
+  quota window present in the latest record and its reset time (codex from its
+  session logs; claude through an optional status line wrapper that returns
+  your status line unchanged), and New agent starts claude or codex with a
+  chosen account and project in a new tmux window, showing the exact command
+  with a copy button. Missing windows are not
+  invented; when one config directory holds records from two accounts, the card
+  keeps the newest values and adds a Mixed note that says how to separate them.
+- Register your projects so they stay in the Agents list (in your order) even
+  with no agent running, and switch between them from the project name at
+  the head of the list column (`p`) or from the left sidebar on any screen. One
+  code-viewer serves every project on one port: switching reloads the page at
+  `/p/<key>/…` on the same address, so notification permission, the terminal
+  shells and unread marks carry over, and reload, back/forward and bookmarks
+  return to the same project and screen; CLI commands that print a screen
+  URL (`annotate`, `query diff tables`) print that address too. Each project
+  is shown by its own
+  process that code-viewer starts the first time you open it (and stops when
+  code-viewer exits or after the configured idle period); processes it started
+  can be stopped from the list. If you update or reinstall code-viewer while
+  it keeps running, it can no longer start project processes and says so on
+  the screen and in its terminal: stop it (Ctrl+C) and run `code-viewer`
+  again. Theme,
+  language, font sizes, key bindings and notifications are shared by all
+  projects, so switching does not change how it looks.
+- Each registered project gets a color and two initials (`code-viewer` →
+  CV), shown as a square before its name in the left sidebar, at the head of
+  the list column, on the All agents board and in the project switcher. The
+  project on screen has its heading tinted with that color, notifications put
+  the initials before the project name, and an installed window's title bar
+  takes the color. A new
+  project gets a color nobody else uses; change it with **Color…** in the
+  heading's ⋯ or right-click menu.
 - Open files directly from the repository or diff view, including text-like
   config/prompt files and large generated files (virtualized source viewer
   with copy/open-full-view).
@@ -72,8 +250,8 @@ Requires Node.js 20 or newer. Development uses
 - Preview browser-safe media and show metadata for binary files that cannot
   be rendered.
 - Find files and grep across the repository with `Ctrl+K` (file palette) and
-  `Ctrl+G` (text palette), or from the search button at the left of the
-  header icons (plain click: files, Shift+click: grep). The two palettes
+  `Ctrl+G` (text palette), or from the Search box at the top of the
+  left sidebar (plain click: files, Shift+click: grep). The two palettes
   share one window: `Ctrl+K` /
   `Ctrl+G` (or the Files / Grep buttons in its label row) switch modes while
   keeping what you typed, and reopening a palette restores its last query,
@@ -86,10 +264,11 @@ Requires Node.js 20 or newer. Development uses
   engine unless you turn match-case on. Opening a hit marks the matched
   text on the target line (`?hl=`), and in large virtualized files it
   pre-fills the in-file find bar with it. **Pin** (or `Ctrl+Enter`) moves
-  the query into the bottom panel's **Search** tab, where the grouped
-  result list stays open while you browse files; the query rides in the
-  URL (`?results=<query>`) so a reload re-runs it, and the Search tab can
-  also be opened directly from the panel's tab row.
+  the query into a **Search** tab, where the grouped result list stays
+  open while you browse files; the query rides in the URL
+  (`/search?q=<query>`) so a reload re-runs it, the tab remembers it even
+  while another tab is in front, and the Search tab can
+  also be opened from the tab row's `+` menu or the palette.
 - Jump from a function, class, or variable in source and diff code to its
   definition with `Cmd/Ctrl+click` or `g .`; choose from ranked candidates when
   several definitions match — a code preview of the highlighted candidate
@@ -104,66 +283,87 @@ Requires Node.js 20 or newer. Development uses
   too, without needing a `docker-compose.yml`.
   Table descriptions appear inside expanded table entries and in the Schema
   tab header when the database provides them.
-- Read the built-in Settings & Help page (last item in the header menu) for getting
+- Read the built-in Settings & Help page (Settings and Help at the bottom of the left sidebar) for getting
   started, the `.code-viewer/` project files, AI annotations, datastores,
   the agent skill, and keybindings.
-- Scratch on pasted text without leaving the current screen with the Tools
-  drawer (the `Tools` item in the header menu, or `?tools=<tool>` on any
-  URL): Markdown
+- Change any shortcut in Settings → Shortcuts: every action of the app is
+  listed with a filter; open one, press Add key and then the key. An action
+  can have several keys, a key another action uses asks before it is moved,
+  and each key can work in text fields, in terminals, or only in the
+  installed app window (keys a browser tab keeps for itself, such as ⌘W or
+  ⌘T, are marked as app-window only). Restore one action or all of them,
+  and export, import or edit the changes as JSON (a mistake is shown by line
+  and column and nothing is saved). The keys are saved with the settings
+  shared by every project, the browser and the app window.
+- Scratch on pasted text in a Tools tab (the tab row's `+` menu, the
+  palette, or `/tools?tool=<tool>`): Markdown
   preview (same renderer as file preview, so table of contents, task lists,
   frontmatter, code highlighting and ` ```mermaid ` fences all work),
   Mermaid preview with zoom and drag-pan, and a JSON / YAML tool that
   auto-detects the input and re-emits it as formatted JSON or YAML (also a
   validator and a JSON⇄YAML converter). Each tool keeps its own draft in
-  `.code-viewer/tools.json`, and the drawer width is draggable from its left
-  edge.
-- Run a real shell in the browser with the Terminal panel (the `Terminal` item
-  in the header menu, or `?terminal=<shell>` on any URL). It is an ordinary
-  login shell on a PTY, rendered with xterm.js, so `tmux` inside it behaves
-  exactly as it does in any other terminal — the panel resizes the PTY and
-  whatever runs in it follows on its own. The toggle in the panel header turns
-  input off when you only want to watch. Typing `exit` closes the shell, just
-  like any other terminal.
-- The left side of the panel starts with a **Your turn** section for terminals
-  that are waiting for input or finished but unread. Below it, the session list
-  can be scoped to this repository or all tmux sessions, filtered by state, and
-  searched by task, place, or id. Its two-tier tree puts shells opened by this
-  panel at the top; a shell running tmux carries a terminal icon and its
-  session name, and that session's windows and panes hang underneath it. The
-  bottom tier is the tmux sessions no shell has opened yet. Each pane is
-  labelled with the title tmux shows for it — a coding agent usually puts what
-  it is doing there, so the tree alone tells you which pane is busy.
+  `.code-viewer/tools.json`, the tab remembers the open tool even while
+  another tab is in front, and the split between input and output is
+  draggable (in a pane under 560px wide the input sits above the output,
+  without the divider).
+- Run a real shell in the browser as a tab of the main area. The ＋ just
+  after the last tab opens a menu with Open a file, New shell, and the
+  existing sessions — the shells of this server and the tmux panes of this
+  project, with ● on unread ones that are not in a tab (``Ctrl+` ``
+  opens the same menu). It is an ordinary login shell on a PTY, rendered with
+  xterm.js, so `tmux` inside it behaves exactly as it does in any other
+  terminal. `?terminal=<shell>` on any URL brings that shell's tab to the
+  front (creating it if needed). The tab's right-click menu turns input off
+  when you only want to watch, changes the text size, and has Stop session,
+  which ends the shell after asking; closing the tab never stops the shell or
+  the agent. The same terminal moves to the other side with its screen and
+  half-typed input. Images the agent writes are listed on a shelf beside the
+  terminal; a click opens them in an image tab (on the other side when split),
+  a middle-click or ⌘/Ctrl+click in a kept one, Alt+click in the full-screen viewer. The palette (`Ctrl+K`) lists agents
+  under Agents, and shells and plain tmux panes under Sessions.
 - Terminal status combines lifecycle reports with priority-based matching of
   the live terminal title and recent visible lines. Matching rules can report
   working, waiting, idle, or keep the previous state. A target is tracked only
   after a lifecycle report or a visible rule identifies it; screen motion is
   then used as a fallback. A working match expires when its title and screen
   stop changing, so a stale status line does not stay active. Edit the complete
-  JSON rule set under Settings & Help → Settings. Its regular expressions use a
-  bounded safe subset; combine conditions with `all` / `any`. Invalid changes
-  list every validation error and do not replace the active rules; restoring
-  the built-in set removes the saved override so later releases can supply
-  updated defaults. The editor includes an expandable field guide, a valid
+  JSON rule set under Settings & Help → Settings → Advanced; the rules are
+  saved with the page's Save changes, like every other setting. Its regular
+  expressions use a bounded safe subset; combine conditions with `all` /
+  `any`. Invalid changes list every validation error and do not replace the
+  active rules; Use built-in rules followed by Save changes removes the saved
+  override so later releases can supply updated defaults. If the saved rules cannot be read again (for example,
+  another code-viewer holds their lock), the rules in use stay and Settings
+  shows why, instead of falling back to the built-in set. The editor includes an expandable field guide, a valid
   example, and live JSON syntax highlighting.
-- Click a pane and the panel takes you to it. If a shell already has that
-  session open, it switches to that shell and makes the pane current; otherwise
-  a shell is opened and attached for you. A session moves up to the top tier the
-  moment a shell opens it and drops back down when that shell closes, so you end
-  up with one shell per tmux session rather than one per pane. Powerline
-  separators and file icons render when a Nerd Font is installed — the panel
-  asks for the common Nerd Font families before falling back to the usual
-  monospace stack, so no font ships with the package. The tree needs `tmux` on
-  `PATH`; it says so when it is missing, and shells still work without it.
+- Choosing a tmux pane takes you to it in a tab. If a shell already has that
+  session open, that shell's tab comes forward and the pane becomes current;
+  otherwise a shell is opened and attached for you, so you end up with one
+  shell per tmux session rather than one per pane. This also works from a
+  shell that is inside tmux or whose startup starts tmux (the attach runs
+  with `TMUX` unset, so the pane shows up nested). That tab shows the pane's
+  tmux window: when the pane ends and other panes are left in that window, the
+  tab stays and follows the pane tmux brings to the front. It closes when the
+  window ends (it does not move on to another window of the session) and when
+  you leave tmux (the session ends or you detach); a short note at the bottom
+  right names what ended. A shell ended with `exit` closes its tab
+  the same way. When the same session is also open in a smaller terminal, tmux
+  shrinks the window and fills the rest with dots; the tab covers that area
+  and shows the window size and why. Powerline separators and
+  file icons render when a Nerd Font is installed — the terminal asks for the
+  common Nerd Font families before falling back to the usual monospace stack,
+  so no font ships with the package. Panes need `tmux` on `PATH`; shells work
+  without it.
   Opening shells needs the optional `@lydell/node-pty` package.
 - One tmux caveat worth knowing: a tmux window can only have one size, so when
-  the same session is attached from both this panel and another terminal, they
+  the same session is attached from both a terminal tab and another terminal, they
   share it. With tmux's default `window-size latest` the window snaps to
   whichever terminal you touched last, and the smaller one gets its right and
   bottom edges cut off. `set -g window-size smallest` makes every attached
   terminal show the whole window at the cost of some empty space in the larger
   one.
 - Inspect the runtime with the Environment Doctor (right-side sheet,
-  toggled by the 🩺 icon in the header): runtime (Node / Bun / ABI),
+  toggled by the pulse icon in the bottom bar): runtime (Node / Bun / ABI),
   `@youtyan/code-viewer` version and execution origin (npx cache vs
   local), SQLite driver and snapshot store, Git, `rg`, GitHub CLI, discovery summary,
   per-source datastore connectivity (each discovered SQLite / docker
@@ -184,6 +384,53 @@ Requires Node.js 20 or newer. Development uses
   AI agents can call status, file, search, and datastore tools directly
   over JSON-RPC instead of spawning CLI subprocesses.
 
+## Getting started
+
+1. From inside a git repository, run `npx @youtyan/code-viewer --open`. It
+   prints a local URL (`http://127.0.0.1:<port>/p/<key>/`) and opens it. The
+   repository is registered and listed under **Projects** at the top of the
+   left sidebar. A folder outside git is shown but not registered; use
+   **Register by path…** in the sidebar to add a repository.
+2. To add another repository, run `code-viewer` inside it: the running
+   code-viewer adds it and prints its URL instead of starting a second server.
+3. Agents need [tmux](https://github.com/tmux/tmux). **New agent** at the
+   bottom of the sidebar starts claude or codex in a new tmux session (tmux is
+   started for you). Its state (Needs input, Working) shows in the sidebar, the
+   bottom bar and the tab title; **Enable notifications** on the Agents screen
+   turns on desktop notifications.
+4. **Settings → Accounts** signs in (the default `~/.claude` and `~/.codex`
+   are created on the first sign-in or start) and adds more accounts.
+5. When something does not work, `code-viewer doctor` lists what is missing
+   (git, tmux, an old code-viewer still running, …) and how to fix it.
+
+### On a phone
+
+In a window 640px wide or less (or a phone turned sideways) the layout is
+reduced to three tasks: checking agents and answering one that needs input,
+reading diffs and files, and switching projects. A bar at the bottom opens
+**Projects** (the left sidebar; it also follows your finger in from the left
+edge), **Files**, **Diff**, **Agents** and **List** (the file tree or the
+current screen's list, as a sheet from the bottom; on History and a worktree
+the sheet shows the list on top and the chosen commit's changed files below).
+The bar marks the current screen, and **Agents** shows how many agents wait
+for input. Split view is off (a saved split comes back on a wide window).
+Diffs default to one column there, and **Wrap** at the end of the Diff bar
+wraps long lines. Opening an agent from a notification, the bottom counter or
+the All agents board closes the sidebar and the sheet. On a touch screen,
+buttons, tabs, rows and the file tree are at least 44px tall, and a terminal
+tab shows the keys an on-screen keyboard lacks (Esc, Tab, ⇧Tab, Ctrl+C, ↑, ↓,
+Enter, and ⌨ to bring up or put away the keyboard). The square with a number
+at the right end of the tab strip lists every open tab, including those of a
+saved right side (opening one moves it to the left). Swiping up from the
+bottom bar opens **List**, and swiping down on a sheet's header closes it.
+Holding a finger on an agent, a tab or a file row opens its right-click menu.
+Pinching on a terminal changes its text size for this browser (the phone
+starts at 12px; the desktop size is kept). A phone turned sideways hides the
+status bar and thins the bottom bar. Settings open as contents first; pick a
+section, and the row at the top goes back. Browser notifications
+need a secure page (https, or localhost on the same machine), so they are not
+available when the page is opened over plain http from another device.
+
 ## Usage
 
 From inside a git repository, run it without installing:
@@ -192,8 +439,11 @@ From inside a git repository, run it without installing:
 npx @youtyan/code-viewer
 ```
 
-The server prints a local URL. Add `--open` if you want the browser opened
-automatically:
+The server prints a local URL. Running `code-viewer` again in another
+repository adds that repository to the running code-viewer and prints its URL
+instead of starting a second server (if a code-viewer of another version is
+running, it tells you where and does not start). Add `--open` if you want the
+browser opened automatically:
 
 ```sh
 npx @youtyan/code-viewer --open
@@ -220,11 +470,29 @@ code-viewer
 
 The published CLI runs on Node.js 20 or newer.
 
+SQLite features (the data viewer and snapshots) use `better-sqlite3`, an
+optional dependency with a native build step. With npm 11 or newer, installing
+may print an `allow-scripts` warning that `better-sqlite3` has install scripts
+not yet covered by `allowScripts`. To use SQLite, approve it with
+`npm approve-scripts better-sqlite3` (the command the warning names) and
+install again, or run `npm rebuild better-sqlite3` where code-viewer is
+installed. If you do not use SQLite, you can ignore the warning; everything
+else works without it. `code-viewer doctor` reports whether the SQLite driver
+loads and what to do if it does not.
+
 Common options:
 
 - `--cwd <dir>` — repository to view (default: current working directory).
 - `--open` — open the printed URL in the default browser.
 - `--port <port>` — bind to a specific port (default: pick a free port).
+- `--idle-stop <seconds>` — stop a project's process after nobody has used it
+  for this long (default `600`; `0` never stops). It is started again on the
+  next request; terminals, agents and unread marks are not affected.
+  When a code-viewer is already running, `--port` and `--idle-stop` are not
+  used (it prints a warning and the running one's URL).
+- `--standalone` — run one self-contained server for this repository only, the
+  way code-viewer worked before it served every project from one address
+  (scripts and tests use this).
 - `--bin <name>=<absolute-path>` — override an external command path
   (`git`, `rg`, `docker`, `gh`, or `tmux`). The same values can be supplied through
   `CODE_VIEWER_BIN_GIT`, `CODE_VIEWER_BIN_RG`, `CODE_VIEWER_BIN_DOCKER`, and
@@ -248,15 +516,15 @@ code-viewer --cwd /path/to/repo --staged
 PATH differs from the environment that starts code-viewer. Override paths must
 be absolute executable files outside the opened repository.
 
-Open **Settings & Help** from the header menu to change display options such
-as theme, layout, sidebar mode, font sizes, and UI language. The language
+Open **Settings** at the bottom of the left sidebar to change display options such
+as theme (dark in violet, graphite or warm gray, or light), font sizes (file list and code), and UI language. The language
 setting translates the viewer chrome itself, including that page, settings labels,
 sidebars, history controls, datastore viewer, and annotation panel labels.
 
 ## Repository View
 
-Open the root URL to browse the repository tree. Folder pages keep the sidebar
-visible, and file pages show a preview when the browser can safely render the
+Open the project's URL (`/p/<key>/`) to browse the repository tree. Folder
+pages keep the file list visible, and file pages show a preview when the browser can safely render the
 file. Unsupported binary files show a clear unavailable state with file
 metadata instead of dumping bytes as text.
 
@@ -294,7 +562,10 @@ preview. Media files (images, video, audio, PDF) show a **Preview** tab only
 their own canonical URL (`view=blame`, `view=history`), so deep links and
 the browser back/forward stay in sync. Opening another file from the
 repository tree keeps the active tab (a file that cannot be previewed falls
-back to Code). The Blame tab reuses the source
+back to Code). In a narrow header these tabs move to a row of their own, and
+under about 510px the breadcrumb takes the whole first row with the buttons
+beside it (copy path, open in the OS, info, previous / next, delete) on the
+second. The Blame tab reuses the source
 view's row component, so line numbers, drag-selection of `line=` ranges,
 syntax highlighting and the code font size from Settings & Help all match the
 Code tab.
@@ -315,9 +586,12 @@ by default and can be tuned from Settings & Help → **File change watcher**
 (range slider + numeric input, 16–65536); when the cap is hit the viewer
 shows a banner so reloads are not silently missed.
 
-Large repositories load folder children on demand. The sidebar remembers which
+Large repositories load folder children on demand. The file list remembers which
 lazy-loaded folders you opened and re-expands them on the next reload, so the
 tree state survives navigation and refresh.
+Tab reaches the tree once, on the selected row; ↑ / ↓, Home / End, → (open a
+folder), ← (fold it or go to its parent) and Enter work there, next to the
+existing j / k / l / h keys.
 
 Symlinks get a distinct icon and a "→ target" label instead of looking like a
 regular file, and clicking one navigates straight to its resolved target.
@@ -344,7 +618,7 @@ where an ignore rule names a file specifically.
 ## Uploads and Scope Settings
 
 File uploads are available for the local worktree target by default. Git tree
-views remain read-only. Open **Settings & Help** from the header menu to toggle
+views remain read-only. Open **Settings** at the bottom of the left sidebar to toggle
 uploads off, edit the directories to skip while browsing/searching, and hide
 files or directory names completely.
 
@@ -383,6 +657,12 @@ tree, and its text files can be inspected in the Code view, but it remains
 excluded from repository searches and diffs. Treat the files as diagnostic
 state rather than hand-edited configuration. Add `.code-viewer/` to
 `.gitignore` if you do not want to share its contents through git.
+
+What is shared by all projects (settings such as theme and language, the
+project list, accounts, the tab layout and the running code-viewer's record)
+lives in `$XDG_STATE_HOME/code-viewer`, or `~/.local/state/code-viewer` when
+`XDG_STATE_HOME` is not set. A relative `XDG_STATE_HOME` is ignored, as the
+XDG specification says, and code-viewer prints why once.
 
 ## Datastore Viewer
 
@@ -477,7 +757,7 @@ offered there.
 
 ### Browser UI
 
-Open Datastores in the global navigation to access:
+Open Data (the Data icon at the head of the list column, or `g b`) to access:
 
 - **Saved connections** — use the `+` action beside the datastore selector to
   add PostgreSQL, MySQL, Cloudflare D1, Redis, Elasticsearch, S3-compatible
@@ -515,7 +795,12 @@ Open Datastores in the global navigation to access:
 - **Multi-DB tabs** — open multiple databases side by side, with their own
   sidebar, panes, and history. `+` adds an empty tab; `×` or middle-click
   closes one (the last tab resets to empty instead of vanishing). Tabs can be
-  reordered by drag and drop and persist in `.code-viewer/tabs.json`.
+  reordered by drag and drop and persist in `.code-viewer/tabs.json`. A tab
+  with no datastore chosen is named New tab and points to the selector and
+  Add datastore connection. In a pane under 560px wide (the left side of a
+  split) the global search box stacks above its button and the query toolbar
+  wraps. A failure shows its whole reason on screen (operation, HTTP status,
+  server message, causes) and in the browser console with its target.
 - **PostgreSQL schema selector** — switch between schemas without reopening
   the database.
 - **Table browser** — paginated data grid with column sort, text filter, cell
@@ -547,7 +832,12 @@ Open Datastores in the global navigation to access:
 - **Rails FK inference toggle** — opt-in heuristic that adds virtual foreign
   keys following Rails naming conventions (e.g. `user_id → users.id`) on top
   of the database-declared FKs.
-- **Query editor** — execute read-only SQL with syntax highlighting. The
+- **Query editor** — sits above the result grid on the same screen (drag
+  the divider, or focus it and press ↑ / ↓, to resize it; it can also be
+  collapsed). Choosing a table puts the SQL that fetched its rows (with the
+  page's `LIMIT` / `OFFSET`) into the editor, Run / Explain results show in
+  the same place, and the Data tab goes back to the table. It executes
+  read-only SQL with syntax highlighting. The
   allowlist depends on the engine (SQLite: `SELECT`, `PRAGMA`, `EXPLAIN`,
   `WITH`; PostgreSQL and MySQL also accept `SHOW` and `DESCRIBE`, and
   PostgreSQL queries run inside `BEGIN TRANSACTION READ ONLY`). Per-DB results
@@ -1016,7 +1306,7 @@ survives reloads and server restarts. See **Uploads and Scope Settings**
 above for how `.code-viewer/` is treated by the viewer and how to opt out of
 sharing it through git.
 
-In the browser, the annotation icon in the header opens a searchable library.
+In the browser, the annotation icon in the bottom bar opens a searchable library.
 Search titles, full Markdown bodies, file paths, and session names, or show only
 notes for the current file or datastore location. Sessions can be collapsed,
 renamed, or deleted; original step numbers remain stable when filtering.
@@ -1047,10 +1337,15 @@ references the annotation by URL for sharing back into the originating agent.
 The panel-open state, selected session, and selected annotation are also kept
 in the URL, so a reload or shared link restores the same walkthrough context.
 
-The `annotate` subcommand talks to the running server for the repository
-(discovered via `~/.cache/code-viewer/servers/`); start one with
-`code-viewer` first. Pass `--cwd <repo>` when annotating a repository other
-than the current directory, or `--server <url>` to target a specific server.
+The `annotate` subcommand (like `query`, `journal` and `search`) talks to the
+repository's server (discovered via `~/.cache/code-viewer/servers/`). When
+code-viewer is running but that repository's project process is not (the
+project was never opened, or it was stopped after `--idle-stop`), the CLI asks
+the running code-viewer to start it, the same way opening the project in the
+browser does, and waits up to 30 seconds for each request. With no
+code-viewer running, start one with `code-viewer` first and leave it running.
+Pass `--cwd <repo>` when annotating a repository other than the current
+directory, or `--server <url>` to target a specific server.
 
 `add` appends to the most recent session (creating one when none exists);
 run `annotate start` again to begin a new session, or pass `--session <id>`

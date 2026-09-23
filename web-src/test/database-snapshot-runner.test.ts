@@ -86,7 +86,7 @@ describe("database snapshot runner", () => {
       const snapshots = await listSnapshots(dir);
       expect(snapshots).toHaveLength(1);
       expect(snapshots[0].status).toBe("error");
-      expect(snapshots[0].errorMessage).toBe("snapshot cancelled");
+      expect(snapshots[0].errorMessage).toBe("AbortError: snapshot cancelled");
     });
   });
 
@@ -216,7 +216,7 @@ describe("database snapshot runner", () => {
       expect(snapshots).toHaveLength(1);
       expect(snapshots[0].status).toBe("error");
       expect(snapshots[0].errorMessage).toBe(
-        "snapshot started callback failed",
+        "Error: snapshot started callback failed",
       );
     });
   });

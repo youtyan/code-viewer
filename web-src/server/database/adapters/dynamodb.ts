@@ -445,8 +445,15 @@ async function readResponseBytesWithTimeout(
   } finally {
     try {
       reader.releaseLock();
-    } catch {
-      /* reader may already be cancelled */
+    } catch (error) {
+      // 取り消し済み・読みかけの reader は TypeError で断る (想定内)。finally の
+      // 中なので投げずに、それ以外は記録する (読み取りの結果・失敗を上書きしない)。
+      if (!(error instanceof TypeError)) {
+        console.error(
+          "[code-viewer] releasing the DynamoDB response reader failed:",
+          error,
+        );
+      }
     }
   }
   if (chunks.length === 1) return chunks[0];
@@ -496,7 +503,7 @@ async function dockerCurlFetch(opts: {
       });
       throw new DynamoDbHttpError(
         503,
-        `DynamoDB HTTP transport failed via docker exec${stderr ? `: ${stderr.slice(0, 240)}` : ""}`,
+        `DynamoDB HTTP transport failed via docker exec (exit ${proc.status ?? "none"})${stderr ? `: ${stderr}` : ""}`,
       );
     }
     return responseFromCurlOutput(
@@ -524,7 +531,7 @@ async function dockerCurlFetch(opts: {
     throwIfDockerCommandUnavailableResult({ code: proc.code, stderr });
     throw new DynamoDbHttpError(
       503,
-      `DynamoDB HTTP transport failed via docker exec${stderr ? `: ${stderr.slice(0, 240)}` : ""}`,
+      `DynamoDB HTTP transport failed via docker exec (exit ${proc.code})${stderr ? `: ${stderr}` : ""}`,
     );
   }
   return responseFromCurlOutput(new Uint8Array(proc.stdout));

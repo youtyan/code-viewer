@@ -3,22 +3,28 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   closeShellSession: vi.fn(),
   createShellSession: vi.fn(),
-  listShellSessions: vi.fn(),
+  findShellSessionForTmuxSession: vi.fn(),
+  listShellSessionsForMatching: vi.fn(),
+  rememberShellTmuxAttachment: vi.fn(),
   writeToShellWhenReady: vi.fn(),
   listTmuxClients: vi.fn(),
   resolvePaneSession: vi.fn(),
   selectTmuxPane: vi.fn(),
+  watchAttachedShell: vi.fn(),
 }));
 
 vi.mock("../server/shell/session", () => ({
   closeShellSession: mocks.closeShellSession,
   createShellSession: mocks.createShellSession,
-  listShellSessions: mocks.listShellSessions,
+  findShellSessionForTmuxSession: mocks.findShellSessionForTmuxSession,
+  listShellSessionsForMatching: mocks.listShellSessionsForMatching,
+  rememberShellTmuxAttachment: mocks.rememberShellTmuxAttachment,
   writeToShellWhenReady: mocks.writeToShellWhenReady,
 }));
 
 vi.mock("../server/tmux/clients", () => ({
-  findClientByTty: () => null,
+  findClientByTty: (clients: { tty: string }[], tty: string) =>
+    clients.find((client) => client.tty === tty) ?? null,
   listTmuxClients: mocks.listTmuxClients,
 }));
 
@@ -28,8 +34,22 @@ vi.mock("../server/tmux/focus", () => ({
   tmuxAttachCommandLine: () => "attach sample pane\r",
 }));
 
-import type { ShellSession } from "../core/shell";
-import { openTmuxPaneInShell } from "../server/terminal/open";
+vi.mock("../server/terminal/attach-watch", () => ({
+  watchAttachedShell: mocks.watchAttachedShell,
+}));
+
+import { LOGIN_SESSION } from "../core/agent-accounts";
+import type { ShellPurpose, ShellSession } from "../core/shell";
+import {
+  openTmuxPaneInShell,
+  rememberSignInPane,
+} from "../server/terminal/open";
+
+const SIGN_IN: ShellPurpose = {
+  kind: "sign-in",
+  agent: "claude",
+  account: "Work",
+};
 
 const SESSION: ShellSession = {
   id: "shell-sample1",
@@ -52,12 +72,79 @@ describe("openTmuxPaneInShell", () => {
     });
     mocks.selectTmuxPane.mockResolvedValue({ status: "ok" });
     mocks.listTmuxClients.mockResolvedValue({ status: "ok", clients: [] });
-    mocks.listShellSessions.mockReturnValue([]);
+    mocks.listShellSessionsForMatching.mockResolvedValue([]);
+    mocks.findShellSessionForTmuxSession.mockReturnValue(null);
     mocks.createShellSession.mockResolvedValue({
       status: "ok",
       session: SESSION,
     });
     mocks.closeShellSession.mockResolvedValue({ status: "ok" });
+  });
+
+  test("opening two panes in one tmux session keeps one browser shell", async () => {
+    let attached: ShellSession | null = null;
+    mocks.findShellSessionForTmuxSession.mockImplementation(() => attached);
+    mocks.rememberShellTmuxAttachment.mockImplementation(() => {
+      attached = SESSION;
+    });
+    mocks.writeToShellWhenReady.mockResolvedValue({ status: "ok" });
+
+    await expect(openTmuxPaneInShell("%1", "/sample")).resolves.toMatchObject({
+      status: "ok",
+      action: "attached",
+    });
+    await expect(openTmuxPaneInShell("%2", "/sample")).resolves.toMatchObject({
+      status: "ok",
+      action: "switched",
+    });
+
+    expect(mocks.createShellSession).toHaveBeenCalledTimes(1);
+    expect(mocks.rememberShellTmuxAttachment).toHaveBeenCalledWith(
+      SESSION.id,
+      "sample-session",
+      "%1",
+      null,
+    );
+    // 映していたペインが終わったら閉じる見張りは、attach を打ち込んだ 1 回だけ。
+    expect(mocks.watchAttachedShell.mock.calls).toEqual([
+      [SESSION.id, "/sample"],
+    ]);
+  });
+
+  test("does not watch a shell where the user started tmux by hand", async () => {
+    // 利用者が自分で tmux を起こしたシェルは、利用者のもの。ペインが終わっても閉じない。
+    const manual = { ...SESSION, id: "shell-manual" };
+    mocks.listShellSessionsForMatching.mockResolvedValue([manual]);
+    mocks.listTmuxClients.mockResolvedValue({
+      status: "ok",
+      clients: [{ tty: manual.tty, session: "sample-session", pane: "%1" }],
+    });
+    await expect(openTmuxPaneInShell("%1", "/sample")).resolves.toMatchObject({
+      status: "ok",
+      action: "switched",
+    });
+    expect(mocks.watchAttachedShell).not.toHaveBeenCalled();
+  });
+
+  // ログインのウィンドウのペインだけに用途が付く。tmux が起き直して同じ ID が
+  // 別のセッションのペインに付いても、そちらには付けない。
+  test.each([
+    { session: LOGIN_SESSION, expected: SIGN_IN },
+    { session: "sample-session", expected: null },
+  ])("a pane in $session gets the purpose $expected", async ({
+    session,
+    expected,
+  }) => {
+    rememberSignInPane("%7", SIGN_IN);
+    mocks.resolvePaneSession.mockResolvedValue({ status: "ok", session });
+    mocks.writeToShellWhenReady.mockResolvedValue({ status: "ok" });
+    await openTmuxPaneInShell("%7", "/sample");
+    expect(mocks.rememberShellTmuxAttachment).toHaveBeenCalledWith(
+      SESSION.id,
+      session,
+      "%7",
+      expected,
+    );
   });
 
   test("returns a delayed shell write failure instead of reporting success", async () => {

@@ -1,3 +1,4 @@
+import { formatErrorDetail } from "../core/error-detail";
 import {
   commandForExternal,
   commandNotFoundDetail,
@@ -122,8 +123,12 @@ export function normalizeGithubIssueListItem(
 export function parseGithubIssueListOutput(
   stdout: string,
 ): GithubIssueListItem[] {
-  const parsed = JSON.parse(stdout);
-  if (!Array.isArray(parsed)) return [];
+  const parsed: unknown = JSON.parse(stdout);
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      `gh issue list printed ${parsed === null ? "null" : typeof parsed} instead of a JSON array`,
+    );
+  }
   return parsed
     .map(normalizeGithubIssueListItem)
     .filter((issue): issue is GithubIssueListItem => issue !== null);
@@ -184,22 +189,38 @@ export function buildGithubIssueViewArgs(
   return args;
 }
 
+function ghFailure(
+  command: string,
+  proc: { code: number; stderr: string },
+): GithubIssueListError {
+  if (isCommandNotFoundResult("gh", proc))
+    return new GithubIssueListError(commandNotFoundDetail("gh"));
+  const stderr = proc.stderr.trim();
+  return new GithubIssueListError(
+    `${command} exited with code ${proc.code}${stderr ? `: ${stderr}` : ""}`,
+  );
+}
+
+function parseFailure(command: string, error: unknown): GithubIssueListError {
+  return Object.assign(
+    new GithubIssueListError(
+      `failed to parse ${command} output: ${formatErrorDetail(error)}`,
+    ),
+    { cause: error },
+  );
+}
+
 export async function readGithubIssueListAsync(
   options: GithubIssueListOptions,
 ): Promise<GithubIssueListItem[]> {
   const proc = await runAsync(buildGithubIssueListArgs(options), options.cwd, {
     timeout: 30000,
   });
-  if (proc.code !== 0) {
-    const detail = isCommandNotFoundResult("gh", proc)
-      ? commandNotFoundDetail("gh")
-      : proc.stderr.trim() || `gh issue list exited with code ${proc.code}`;
-    throw new GithubIssueListError(detail);
-  }
+  if (proc.code !== 0) throw ghFailure("gh issue list", proc);
   try {
     return parseGithubIssueListOutput(proc.stdout);
-  } catch {
-    throw new GithubIssueListError("failed to parse gh issue list output");
+  } catch (error) {
+    throw parseFailure("gh issue list", error);
   }
 }
 
@@ -209,16 +230,11 @@ export async function readGithubIssueAsync(
   const proc = await runAsync(buildGithubIssueViewArgs(options), options.cwd, {
     timeout: 30000,
   });
-  if (proc.code !== 0) {
-    const detail = isCommandNotFoundResult("gh", proc)
-      ? commandNotFoundDetail("gh")
-      : proc.stderr.trim() || `gh issue view exited with code ${proc.code}`;
-    throw new GithubIssueListError(detail);
-  }
+  if (proc.code !== 0) throw ghFailure("gh issue view", proc);
   try {
     return parseGithubIssueViewOutput(proc.stdout);
   } catch (error) {
     if (error instanceof GithubIssueListError) throw error;
-    throw new GithubIssueListError("failed to parse gh issue output");
+    throw parseFailure("gh issue view", error);
   }
 }

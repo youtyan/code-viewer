@@ -7,6 +7,7 @@ import type {
   DbValue,
   RowMutation,
 } from "../../../core/database/types";
+import { errorWithCauses, formatErrorDetail } from "../../../core/error-detail";
 import { buildMutationStatements } from "../mutate";
 import {
   buildRowKeyJson,
@@ -23,7 +24,7 @@ import {
   filterOrderByColumns,
   sanitizeIdentifier,
 } from "../sql-utils";
-import { loadSqliteClass } from "../sqlite-driver";
+import { loadSqliteClass, rollbackAfter } from "../sqlite-driver";
 import { recordSql } from "./sql-capture";
 import {
   assertReadonlySqliteStatement,
@@ -33,11 +34,12 @@ import {
   sqliteForeignKeyListSql,
   sqliteIndexInfoSql,
   sqliteIndexListSql,
+  sqliteReadonlyAttempts,
+  sqliteReadonlyAttemptsFailed,
   sqliteRowCountSql,
   sqliteRowCountUnionSql,
   sqliteTableInfoFromRow,
   sqliteTableInfoSql,
-  stripTrailingSemicolon,
 } from "./sqlite-introspection";
 import type {
   DatabaseAdapter,
@@ -98,13 +100,8 @@ type SqliteDb = {
 
 function safePrepare(db: SqliteDb, sql: string): SqliteStmt {
   const stmt = db.prepare(sql);
-  if (typeof stmt.safeIntegers === "function") {
-    try {
-      stmt.safeIntegers(true);
-    } catch {
-      // some drivers reject for non-SELECT; ignore
-    }
-  }
+  // better-sqlite3・bun:sqlite とも、書き込みの文にも投げずに受ける。
+  if (typeof stmt.safeIntegers === "function") stmt.safeIntegers(true);
   return stmt;
 }
 
@@ -119,8 +116,12 @@ const SQLITE_BUSY_TIMEOUT_MS = 2000;
 function applyBusyTimeout(db: SqliteDb): void {
   try {
     db.prepare(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`).get();
-  } catch {
-    // PRAGMA is best-effort; a driver that rejects it still opens the DB.
+  } catch (error) {
+    // 断る driver でも DB は開ける。ただし待ちの上限が効かないので記録する。
+    console.error(
+      "[code-viewer] setting the SQLite busy_timeout failed; a locked database may block the server:",
+      error,
+    );
   }
 }
 
@@ -250,8 +251,9 @@ function createSqliteAdapter(
               toColumn: row.to,
             });
           }
-        } catch {
-          // virtual tables (FTS, etc.) may not support this PRAGMA
+        } catch (error) {
+          // 読み込めない module の仮想表 (FTS など) だけ飛ばす。ほかは投げる。
+          if (!/no such module/i.test(formatErrorDetail(error))) throw error;
         }
       }
       return fks;
@@ -412,25 +414,21 @@ function createSqliteAdapter(
       maxRows = 1000,
     ): QueryResult {
       assertReadonlySqliteStatement(sql);
-      const limited = stripTrailingSemicolon(sql);
-      const wrappedSql = `SELECT * FROM (${limited}) LIMIT ${maxRows + 1}`;
-      let rows: Record<string, DbValue>[];
-      try {
-        rows = safePrepare(db, wrappedSql).all(...(params || [])) as Record<
-          string,
-          DbValue
-        >[];
-      } catch (wrapErr) {
-        const fallbackSql = `${limited} LIMIT ${maxRows + 1}`;
+      const attempts = sqliteReadonlyAttempts(sql, maxRows);
+      const errors: unknown[] = [];
+      let rows: Record<string, DbValue>[] | undefined;
+      for (const attempt of attempts) {
         try {
-          rows = safePrepare(db, fallbackSql).all(...(params || [])) as Record<
+          rows = safePrepare(db, attempt.sql).all(...(params || [])) as Record<
             string,
             DbValue
           >[];
-        } catch {
-          throw wrapErr;
+          break;
+        } catch (err) {
+          errors.push(err);
         }
       }
+      if (!rows) throw sqliteReadonlyAttemptsFailed(attempts, errors);
       const truncated = rows.length > maxRows;
       if (truncated) rows = rows.slice(0, maxRows);
       if (rows.length === 0) {
@@ -500,26 +498,30 @@ function createSqliteAdapter(
         }
         wdb.prepare("COMMIT").run();
       } catch (err) {
-        try {
-          wdb.prepare("ROLLBACK").run();
-        } catch {
-          // ロールバック失敗は元のエラーを優先するため握りつぶす。
-        }
+        rollbackAfter(() => wdb.prepare("ROLLBACK").run(), err);
         throw err;
       }
       return { affected };
     },
 
     close(): void {
-      if (writeDb) {
+      const handles = [writeDb, db];
+      writeDb = null;
+      const failures: unknown[] = [];
+      for (const handle of handles) {
         try {
-          writeDb.close();
-        } catch {
-          // ignore
+          handle?.close();
+        } catch (error) {
+          failures.push(error);
         }
-        writeDb = null;
       }
-      db.close();
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) {
+        throw errorWithCauses(
+          "closing the SQLite connections failed",
+          failures,
+        );
+      }
     },
 
     async *iterateForSnapshot(

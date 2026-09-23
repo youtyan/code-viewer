@@ -13,6 +13,16 @@ describe("rawFileInfoSignature", () => {
       expected: null,
     },
     {
+      name: "取得に失敗した理由があるときも署名にならない (失敗を変化と見なさない)",
+      info: { error: "HEAD a.ts (worktree) failed: 500 Internal Server Error" },
+      expected: null,
+    },
+    {
+      name: "理由つきの失敗は、ほかの欄が残っていても署名にしない",
+      info: { size: 3, updated_at: "t", error: "network" },
+      expected: null,
+    },
+    {
       name: "404 はファイル削除という確定状態として署名になる",
       info: { missing: true },
       expected: "missing",

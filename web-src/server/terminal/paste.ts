@@ -10,6 +10,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { formatErrorDetail } from "../../core/error-detail";
 import { makeTimedId } from "../../core/id";
 import {
   base64ByteLength,
@@ -51,12 +52,8 @@ export async function savePastedImage(
     return { status: "invalid", message: "image too large" };
   }
 
-  let bytes: Buffer;
-  try {
-    bytes = Buffer.from(base64, "base64");
-  } catch {
-    return { status: "invalid", message: "invalid image data" };
-  }
+  // Buffer.from は base64 でない文字を読み飛ばすだけで投げない。空になったら不正。
+  const bytes = Buffer.from(base64, "base64");
   if (bytes.length === 0) {
     return { status: "invalid", message: "invalid image data" };
   }
@@ -72,10 +69,7 @@ export async function savePastedImage(
     await mkdir(dir, { recursive: true });
     await writeFile(path, bytes);
   } catch (error) {
-    return {
-      status: "error",
-      message: error instanceof Error ? error.message : String(error),
-    };
+    return { status: "error", message: formatErrorDetail(error) };
   }
   return { status: "ok", path, name, bytes: bytes.length };
 }

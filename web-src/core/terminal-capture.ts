@@ -32,6 +32,12 @@ export type CaptureSlice = {
   reset: boolean;
 };
 
+/** GET /_agent/capture の応答。 */
+export type TerminalCaptureResponse = {
+  target: string;
+  kind: "tmux" | "shell";
+} & CaptureSlice;
+
 /**
  * 位置の照合に使う行数。最終行 1 本だけで見ると、シェルのプロンプトのように
  * 何度も同じ文字列が出る行で誤って一致し、その間に増えた本文が黙って落ちる。

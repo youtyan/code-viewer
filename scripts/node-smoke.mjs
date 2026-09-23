@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const bundle = readFileSync("dist/code-viewer.js", "utf8");
 if (bundle.includes("Bun.")) {
@@ -7,11 +9,31 @@ if (bundle.includes("Bun.")) {
   process.exit(1);
 }
 
+// 起こすサーバの登録簿と状態ディレクトリは一時ディレクトリに向ける。
+// 向けないと開発者の ~/.cache/code-viewer/servers に登録を書き、サーバの
+// 起動時の片付け (落ちたサーバの登録を消す) がそこを触る。tmux のソケットも
+// 同じく分け、TMUX・TMUX_PANE を外す (サーバは tmux を巡回するので、
+// 分けないと開発者の tmux を読む)。
+const isolated = mkdtempSync(join(tmpdir(), "code-viewer-smoke-"));
+mkdirSync(join(isolated, "tmux"));
+const env = {
+  ...process.env,
+  CODE_VIEWER_TEST_SERVER_REGISTRY_DIR: join(isolated, "servers"),
+  CODE_VIEWER_TEST_STATE_DIR: join(isolated, "state"),
+  TMUX_TMPDIR: join(isolated, "tmux"),
+};
+delete env.TMUX;
+delete env.TMUX_PANE;
+process.on("exit", () => {
+  rmSync(isolated, { recursive: true, force: true });
+});
+
 const child = spawn(
   process.execPath,
-  ["dist/code-viewer.js", "--cwd", ".", "--port", "0"],
+  ["dist/code-viewer.js", "--standalone", "--cwd", ".", "--port", "0"],
   {
     cwd: process.cwd(),
+    env,
     stdio: ["ignore", "pipe", "pipe"],
   },
 );
@@ -124,5 +146,6 @@ try {
   clearTimeout(hardLimit);
   child.kill("SIGTERM");
 } catch (error) {
-  fail(error instanceof Error ? error.message : String(error));
+  // 元の error ごと (スタックと cause まで) 出す。
+  fail(error);
 }

@@ -17,6 +17,18 @@ export type ShellSessionId = string;
  * core/id.ts の makeTimedId が `<prefix>-<...>` を返すので、それに合わせる。 */
 export const SHELL_ID_PREFIX = "shell-";
 
+/**
+ * シェルの用途。null は普通のシェル (開いたシェル・エージェントを映すシェル)。
+ * sign-in はアカウントのログインのウィンドウを映すシェルで、タブの名前が
+ * 「Sign in · <アカウント>」になる (views/agents/pane-text.ts の shellName)。
+ * account は登録した表示名、既定のアカウントは空。
+ */
+export type ShellPurpose = {
+  kind: "sign-in";
+  agent: "claude" | "codex";
+  account: string;
+};
+
 export type ShellSession = {
   id: ShellSessionId;
   /** 起動したコマンド (表示用)。 */
@@ -31,7 +43,7 @@ export type ShellSession = {
   exited: boolean;
   exitCode: number | null;
   /**
-   * この PTY の端末デバイス (`/dev/ttys012`)。引けなかった環境では空。
+   * この PTY の端末デバイス (`/dev/ttys012`)。まだ引けない間は空。
    *
    * このシェルの中で tmux を起動すると、その tmux クライアントは同じ端末に
    * 載る。つまりこの名前が tmux 側の `#{client_tty}` と一致するので、
@@ -39,6 +51,8 @@ export type ShellSession = {
    * られる。tmux へ的を絞った指示を出すときの宛先でもある。
    */
   tty: string;
+  /** 用途。無い・null は普通のシェル。tmux のペインを映すたびに付け直す。 */
+  purpose?: ShellPurpose | null;
 };
 
 export type ShellListResponse = {

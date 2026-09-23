@@ -1,5 +1,6 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
+import { formatErrorDetail } from "../core/error-detail";
 
 export const EXTERNAL_COMMAND_NAMES = [
   "git",
@@ -163,14 +164,21 @@ function validateExecutablePath(
     return { error: "path must be single-line and must not contain NUL" };
   }
   if (!isAbsolute(raw)) return { error: "path must be absolute" };
-  let realPath: string;
+  let realPath = raw;
+  // どの操作がどのパスで落ちたかを理由と一緒に返す (ENOENT と EACCES を
+  // 同じ 1 文にしない)。
+  let step = "realpath";
   try {
     realPath = realpathSync(raw);
+    step = "stat";
     const st = statSync(realPath);
     if (!st.isFile()) return { error: "path must point to a file" };
+    step = "access (X_OK)";
     accessSync(realPath, constants.X_OK);
-  } catch {
-    return { error: "path must point to an executable file" };
+  } catch (error) {
+    return {
+      error: `path must point to an executable file: ${step} ${realPath} failed\n${formatErrorDetail(error)}`,
+    };
   }
   for (const root of forbiddenRoots) {
     if (sameOrInside(realPath, root)) {
@@ -189,8 +197,10 @@ function forbiddenExecutableRoots(
   let cwdReal: string;
   try {
     cwdReal = realpathSync(cwd);
-  } catch {
-    return { error: `--cwd must point to an existing directory: ${cwd}` };
+  } catch (error) {
+    return {
+      error: `--cwd must point to an existing directory: ${cwd}\n${formatErrorDetail(error)}`,
+    };
   }
   const roots = [cwdReal];
   const gitRoot = findGitRootByWalking(cwdReal);
@@ -206,8 +216,9 @@ function findGitRootByWalking(start: string): string | null {
     try {
       statSync(join(current, ".git"));
       return realpathSync(current);
-    } catch {
-      // keep walking
+    } catch (error) {
+      // .git が無いだけなら親へ。読めないなど、ほかの理由は隠さない。
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
     const parent = dirname(current);
     if (parent === current) return null;

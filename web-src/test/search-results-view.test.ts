@@ -1,6 +1,7 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { GrepResponse } from "../core/types";
+import { searchPaletteText } from "../views/search-palette-i18n";
 import { createSearchResultsView } from "../views/search-results-view";
 import { q, waitFor } from "./_test-helpers";
 
@@ -17,12 +18,17 @@ afterEach(() => {
 });
 
 function setup(
-  options: { regex?: boolean; matches?: GrepResponse["matches"] } = {},
+  options: {
+    regex?: boolean;
+    matches?: GrepResponse["matches"];
+    language?: () => "en" | "ja";
+  } = {},
 ) {
   document.body.innerHTML =
     '<aside id="search-sheet" hidden aria-hidden="true" inert></aside>';
   const urls: string[] = [];
   const opened: Array<{ path: string; line: number; hl?: string }> = [];
+  const intents: string[] = [];
   const patches: unknown[] = [];
   const queries: string[] = [];
   let regex = options.regex === true;
@@ -59,7 +65,7 @@ function setup(
   const view = createSearchResultsView({
     $: (sel) => document.querySelector(sel),
     trackLoad: (promise) => promise,
-    getLanguage: () => "en",
+    getLanguage: options.language ?? (() => "en"),
     appendScopeParams: () => undefined,
     getRef: () => "worktree",
     getServerGeneration: () => 1,
@@ -72,17 +78,30 @@ function setup(
       patches.push(patch);
       if (patch.grepRegex !== undefined) regex = patch.grepRegex;
     },
-    openMatch: (match) => {
+    openMatch: (match, intent) => {
       opened.push(match);
+      intents.push(intent);
     },
     onQueryChange: (query) => {
       queries.push(query);
     },
   });
-  return { view, urls, opened, patches, queries };
+  return { view, urls, opened, intents, patches, queries };
 }
 
 describe("search results sheet", () => {
+  test("the query box is named in the current language", () => {
+    let language: "en" | "ja" = "en";
+    const { view } = setup({ language: () => language });
+    view.open();
+    const box = q<HTMLInputElement>(document, ".search-results-input");
+    const named = () => box.getAttribute("aria-label");
+    expect(named()).toBe(searchPaletteText("en").resultsPlaceholder);
+    language = "ja";
+    view.localize();
+    expect(named()).toBe(searchPaletteText("ja").resultsPlaceholder);
+  });
+
   test("opening with a query runs it, groups hits by file and reports the count", async () => {
     const { view, urls, queries } = setup();
     view.open("needle path:src/");
@@ -123,6 +142,28 @@ describe("search results sheet", () => {
       { path: "src/a.ts", line: 3, hl: "needle" },
       { path: "src/a.ts", line: 9, hl: "needle" },
     ]);
+  });
+
+  // ui-surface.md の「タブの決まり」: 押し方で開き方が決まる (Shift・右ボタンはブラウザ)。
+  test.each([
+    ["click", "click", {}, ["preview"]],
+    ["Cmd+click", "click", { metaKey: true }, ["new-tab"]],
+    ["Ctrl+click", "click", { ctrlKey: true }, ["new-tab"]],
+    ["middle click", "auxclick", { button: 1 }, ["new-tab"]],
+    ["double click", "dblclick", {}, ["new-tab"]],
+    ["Alt+click", "click", { altKey: true }, ["other-pane"]],
+    ["Shift+click", "click", { shiftKey: true }, []],
+    ["right button", "auxclick", { button: 2 }, []],
+  ])("%s on a hit opens it as %j", async (_label, type, init, expected) => {
+    const { view, intents } = setup();
+    view.open("needle");
+    await waitFor(
+      () => document.querySelectorAll(".gdp-palette-row").length === 3,
+    );
+    q<HTMLElement>(document, ".gdp-palette-row").dispatchEvent(
+      new MouseEvent(type, { bubbles: true, cancelable: true, ...init }),
+    );
+    expect(intents).toEqual(expected);
   });
 
   test("the opened hit stays marked as the current row, also after the same search is re-run", async () => {
@@ -167,9 +208,19 @@ describe("search results sheet", () => {
   test("Enter in the query box re-runs the search and the URL hook sees it", async () => {
     const { view, urls, queries } = setup();
     view.open();
-    expect(q(document, ".search-results-status").textContent).toBe(
+    // 検索する前は、件数の欄は空で、案内の箱に一行とキーが出る (一覧の外)。
+    const idle = q(document, ".search-results-idle");
+    expect([
+      q(document, ".search-results-status").textContent,
+      idle.querySelector("h2")?.textContent,
+      [...idle.querySelectorAll(".empty-key kbd")].map((k) => k.textContent),
+      idle.closest("[role=listbox]"),
+    ]).toEqual([
+      "",
       "Type a search and press Enter",
-    );
+      ["Enter", "⌘G", "⌘K"],
+      null,
+    ]);
     const input = q<HTMLInputElement>(document, ".search-results-input");
     input.value = "other";
     input.dispatchEvent(

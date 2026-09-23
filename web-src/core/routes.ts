@@ -1,9 +1,11 @@
+import { apiUrl, pageUrl } from "./api-url";
 import {
   formatHistoryLineRange,
   type HistoryLineRange,
   parseHistoryLineRange,
 } from "./history";
 import { isShellSessionId, type ShellSessionId } from "./shell";
+import { isTmuxPaneId, type TmuxPaneId } from "./tmux";
 import { isToolId, type ToolId } from "./tools";
 
 export type DiffRange = {
@@ -76,6 +78,23 @@ export type AppRoute =
       range: DiffRange;
     }
   | {
+      /** tmux で動いているエージェントの一覧。全プロジェクトぶん。 */
+      screen: "agents";
+      range: DiffRange;
+    }
+  | {
+      /** 変換の道具 (Markdown / Mermaid / JSON)。tool は出している道具。 */
+      screen: "tools";
+      tool?: ToolId;
+      range: DiffRange;
+    }
+  | {
+      /** grep の結果の一覧。q は検索語 (無ければ、まだ何も検索していない)。 */
+      screen: "search";
+      q?: string;
+      range: DiffRange;
+    }
+  | {
       screen: "journal";
       tab?: "journal" | "tasks";
       date?: string;
@@ -112,6 +131,9 @@ export const SPA_PATHS = [
   "/journal",
   "/database",
   "/worktree",
+  "/agents",
+  "/tools",
+  "/search",
   "/doctor",
 ] as const;
 export const APP_ENTRY_PATHS = ["/", "/index.html"] as const;
@@ -250,8 +272,10 @@ export function parseRoute(
         path,
         ref,
         range,
-        view: target ? "blob" : "detail",
-        ...(target && preview ? { preview: true as const } : {}),
+        // ?preview=1 だけでも Preview で開く (target / view を省いた URL。手で
+        // 書いた URL や見出しへの # リンクで preview が落ち、Code で開いていた)。
+        view: target || preview ? "blob" : "detail",
+        ...(preview ? { preview: true as const } : {}),
         ...(line ? { line } : {}),
         ...(params.get("virtual") === "off" ? { virtual: "off" as const } : {}),
       };
@@ -304,6 +328,16 @@ export function parseRoute(
         ...(source ? { source } : {}),
         range,
       };
+    }
+    case "/agents":
+      return { screen: "agents", range };
+    case "/tools": {
+      const tool = params.get("tool");
+      return { screen: "tools", ...(isToolId(tool) ? { tool } : {}), range };
+    }
+    case "/search": {
+      const q = params.get("q") || "";
+      return { screen: "search", ...(q ? { q } : {}), range };
     }
     case "/journal": {
       const tabRaw = params.get("tab");
@@ -360,6 +394,10 @@ export function parseRoute(
 }
 
 export function buildRoute(route: AppRoute): string {
+  return pageUrl(buildRoutePath(route));
+}
+
+function buildRoutePath(route: AppRoute): string {
   switch (route.screen) {
     case "repo": {
       const params = new URLSearchParams();
@@ -474,6 +512,14 @@ export function buildRoute(route: AppRoute): string {
       const qs = params.toString();
       return `/history${qs ? `?${qs}` : ""}`;
     }
+    case "agents":
+      return "/agents";
+    case "tools":
+      return route.tool ? `/tools?tool=${route.tool}` : "/tools";
+    case "search":
+      return route.q
+        ? `/search?${new URLSearchParams({ q: route.q })}`
+        : "/search";
     case "journal": {
       const params = new URLSearchParams();
       // "tasks" is the default tab, so only "journal" needs the explicit
@@ -510,7 +556,8 @@ export function buildRoute(route: AppRoute): string {
 
 export function buildRawFileUrl(target: SourceFileTarget): string {
   return (
-    "/_file?path=" +
+    apiUrl("file") +
+    "?path=" +
     encodeURIComponent(target.path) +
     "&ref=" +
     encodeURIComponent(target.ref || "worktree")
@@ -548,16 +595,22 @@ export function withDoctorOverlay(url: string, open: boolean): string {
   return withQueryParam(url, "doctor", open ? "open" : null);
 }
 
-// Tools overlay is the same kind of AppRoute-independent state as the doctor
-// sheet, except the query value also carries which tool is on screen
-// (`?tools=markdown`). An unknown value counts as closed.
-export function parseToolsOverlay(search: string): ToolId | null {
-  const raw = new URLSearchParams(search).get("tools");
-  return isToolId(raw) ? raw : null;
-}
-
-export function withToolsOverlay(url: string, tool: ToolId | null): string {
-  return withQueryParam(url, "tools", tool);
+/**
+ * 下パネルがあった頃の URL (`?tools=markdown` / `?results=<検索語>`) を、その
+ * タブの route に読み替える。Tools と Search はいまメインの面のタブ (page) で、
+ * route は `/tools?tool=` と `/search?q=`。知らない道具・キーが無いなら null
+ * (`?results=` は空でも「Search を開く」)。
+ */
+export function legacyPanelRoute(
+  search: string,
+  range: DiffRange,
+): Extract<AppRoute, { screen: "tools" | "search" }> | null {
+  const params = new URLSearchParams(search);
+  const tool = params.get("tools");
+  if (isToolId(tool)) return { screen: "tools", tool, range };
+  const results = params.get("results");
+  if (results === null) return null;
+  return { screen: "search", ...(results ? { q: results } : {}), range };
 }
 
 /**
@@ -589,16 +642,100 @@ export function withTerminalOverlay(
   return withQueryParam(url, "terminal", state);
 }
 
-// Search results sheet (third tab of the bottom panel). The query key holds
-// the grep query so a reload re-runs the same search; an empty value means
-// "open, nothing searched yet". Same AppRoute-independent shape as ?tools=.
-export function parseSearchResultsOverlay(search: string): string | null {
-  return new URLSearchParams(search).get("results");
+/**
+ * プロジェクトを移るときに持っていく画面の path。画面のメニューの項目の href
+ * (ファイルやコミットのような、そのプロジェクトにしか無いものは持っていかない)
+ * に、前面のシェル (`?terminal=`) を足す。シェルのタブはどのプロジェクトにも
+ * ある共通のタブで、前面がシェルのときはメニューに選ばれた項目が無いので、
+ * 足さないと移った先がフォルダの表示になり、どのタブも前面でなくなった。
+ */
+export function projectSwitchPath(screenHref: string, search: string): string {
+  const terminal = parseTerminalOverlay(search);
+  if (terminal === null || terminal === "open") return screenHref;
+  return withTerminalOverlay(screenHref, terminal);
 }
 
-export function withSearchResultsOverlay(
+/**
+ * 読み込んだらタブで開くエージェントのペイン (`?open-pane=%12`)。別の
+ * プロジェクトのエージェントを開くとき、そのプロジェクトへ移ってから開くための
+ * 一度きりの行き先で、開いたら URL から外す。`?pane=right` (右の面) とは別の
+ * キー。tmux のペイン ID の形でなければ無い扱い。
+ */
+export function parseOpenPaneOverlay(search: string): TmuxPaneId | null {
+  const raw = new URLSearchParams(search).get("open-pane");
+  return isTmuxPaneId(raw) ? raw : null;
+}
+
+/**
+ * 開いたときに、保存したタブの前面 (ターミナル・画像) を URL の route より優先するか。
+ * 読み直し (reloaded) か、URL がシェル (?terminal=) か開くペイン (?open-pane=) を
+ * 指すとき。それ以外 (ブックマーク・直接の URL) は URL の画面・ファイルのタブを
+ * 前面にする (開いた画面を隠さない)。画像の前面は URL に出ないので、読み直しで見分ける。
+ */
+export function urlKeepsSavedFront(search: string, reloaded: boolean): boolean {
+  const terminal = parseTerminalOverlay(search);
+  return (
+    reloaded ||
+    (terminal !== null && terminal !== "open") ||
+    parseOpenPaneOverlay(search) !== null
+  );
+}
+
+export function withOpenPaneOverlay(
   url: string,
-  query: string | null,
+  pane: TmuxPaneId | null,
 ): string {
-  return withQueryParam(url, "results", query);
+  return withQueryParam(url, "open-pane", pane);
+}
+
+/**
+ * URL の path と route が右の面のファイルを指していること (`?pane=right`)。
+ * 右の面にフォーカスがあり前面がファイルのとき、URL はそのファイルの route に
+ * これを足したもの。無ければ URL の route は本文 (左の面)。値は right だけ。
+ */
+export function parsePaneOverlay(search: string): "right" | null {
+  return new URLSearchParams(search).get("pane") === "right" ? "right" : null;
+}
+
+/**
+ * 自分の箱を本文の面に置き、#diff を隠す画面。離れるときにその画面の後片付け
+ * (箱を外して #diff を戻す) が要る。設定 (help) は #diff を描き直すだけなので
+ * 入らない。History は範囲の戻しを伴う別の後片付け (app.ts) を持つ。
+ */
+export type LeavableScreen =
+  | "database"
+  | "worktree"
+  | "journal"
+  | "agents"
+  | "tools"
+  | "search";
+
+const LEAVABLE_SCREENS: readonly LeavableScreen[] = [
+  "database",
+  "worktree",
+  "journal",
+  "agents",
+  "tools",
+  "search",
+];
+
+function isLeavableScreen(screen: string): screen is LeavableScreen {
+  return (LEAVABLE_SCREENS as readonly string[]).includes(screen);
+}
+
+/**
+ * route を移るとき、後片付けの要る画面を離れるならその画面、そうでなければ
+ * null。setRoute (木・パレット・タブ) と URL からの移動 (戻る・進む) の両方が
+ * これを使う (片方にだけ画面を足す取りこぼしを起こさない)。
+ */
+export function screenToLeave(
+  previous: AppRoute,
+  next: AppRoute,
+): LeavableScreen | null {
+  if (previous.screen === next.screen) return null;
+  return isLeavableScreen(previous.screen) ? previous.screen : null;
+}
+
+export function withPaneOverlay(url: string, side: "right" | null): string {
+  return withQueryParam(url, "pane", side);
 }

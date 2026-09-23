@@ -5,10 +5,12 @@ import {
   handleError,
   logResponseWithReason,
   MAX_LOGGED_ERROR_BODY,
+  parseBoundedJsonBody,
+  parsePostJsonBody,
 } from "../server/database/handle-shared";
 
 type ConsoleMethod = "log" | "warn" | "error";
-type CapturedLine = { kind: ConsoleMethod; line: string };
+type CapturedLine = { kind: ConsoleMethod; line: string; args: unknown[] };
 
 let captured: CapturedLine[] = [];
 let originalLog: typeof console.log;
@@ -20,13 +22,13 @@ beforeAll(() => {
   originalWarn = console.warn;
   originalError = console.error;
   console.log = (...args: unknown[]) => {
-    captured.push({ kind: "log", line: args.join(" ") });
+    captured.push({ kind: "log", line: args.join(" "), args });
   };
   console.warn = (...args: unknown[]) => {
-    captured.push({ kind: "warn", line: args.join(" ") });
+    captured.push({ kind: "warn", line: args.join(" "), args });
   };
   console.error = (...args: unknown[]) => {
-    captured.push({ kind: "error", line: args.join(" ") });
+    captured.push({ kind: "error", line: args.join(" "), args });
   };
 });
 
@@ -205,6 +207,72 @@ describe("logResponseWithReason", () => {
   });
 });
 
+// ログのための読み取りが失敗しても応答は壊さないが、失敗の理由は元の error ごと
+// console.error に残す (直す前は空の catch で黙って捨てていた)。
+describe("ログのための読み取りに失敗したとき", () => {
+  function consumedResponse(): Promise<Response> {
+    const res = new Response("already read", {
+      status: 400,
+      headers: { "Content-Type": "text/plain" },
+    });
+    return res.text().then(() => res);
+  }
+
+  function brokenBodyResponse(failure: Error): Response {
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.error(failure);
+        },
+      }),
+      { status: 500, headers: { "Content-Type": "text/plain" } },
+    );
+  }
+
+  test.each([
+    {
+      name: "extractErrorReason: 読み終えた応答は clone できない",
+      run: async () => extractErrorReason(await consumedResponse()),
+      message: "could not clone a 400 response to read its failure reason",
+      cause: (error: unknown) => expect(error).toBeInstanceOf(TypeError),
+    },
+    {
+      name: "extractErrorReason: 本文の読み取りが失敗する",
+      run: async () =>
+        extractErrorReason(brokenBodyResponse(new Error("stream broke"))),
+      message: "could not read the body of a 500 response for the log",
+      cause: (error: unknown) =>
+        expect((error as Error).message).toBe("stream broke"),
+    },
+  ])("$name", async ({ run, message, cause }) => {
+    reset();
+    expect(await run()).toBe("");
+    const errors = captured.filter((entry) => entry.kind === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.line).toContain(message);
+    const args = errors[0]?.args ?? [];
+    cause(args[args.length - 1]);
+  });
+
+  test("logResponseWithReason: clone できなくても head の行は出し、理由も残す", async () => {
+    reset();
+    const res = await consumedResponse();
+    logResponseWithReason("[code-viewer]", makeReq(), makeUrl(), res, 0);
+    await drainLogs();
+    const errors = captured.filter((entry) => entry.kind === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.line).toContain(
+      "could not clone the response for the log line: [code-viewer] GET /_db/foo 400",
+    );
+    const args = errors[0]?.args ?? [];
+    expect(args[args.length - 1]).toBeInstanceOf(TypeError);
+    const warns = captured.filter((entry) => entry.kind === "warn");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]?.line).toMatch(" 400 ");
+    expect(warns[0]?.line.includes("::")).toBe(false);
+  });
+});
+
 describe("handleError abort handling", () => {
   test("AbortError-named errors return 503 silently (no console.error)", async () => {
     reset();
@@ -246,12 +314,18 @@ describe("handleError abort handling", () => {
 
   test("plain Error with no abort markers logs to console.error and returns 500", async () => {
     reset();
-    const res = handleError("database", "read schema", new Error("boom"));
+    const failure = new Error("boom");
+    const res = handleError("database", "read schema", failure);
     expect(res.status).toBe(500);
-    expect(await res.text()).toBe("failed to read schema: boom");
+    expect(await res.text()).toBe("failed to read schema: Error: boom");
     const errs = captured.filter((c) => c.kind === "error");
     expect(errs).toHaveLength(1);
-    expect(errs[0]?.line ?? "").toBe("[code-viewer] database error: boom");
+    // 元の error をそのまま (スタックごと) 出す。
+    expect(errs[0]?.args).toStrictEqual([
+      "[code-viewer] database error:",
+      failure,
+    ]);
+    expect(errs[0]?.args[1]).toBe(failure);
   });
 
   test("Postgres-style 'transaction is aborted' message must NOT be classified as cancellation", async () => {
@@ -273,5 +347,52 @@ describe("handleError abort handling", () => {
     const res = handleError("database", "read schema", err, controller.signal);
     expect(res.status).toBe(503);
     expect(captured.filter((c) => c.kind === "error")).toHaveLength(0);
+  });
+});
+
+// 直す前は parsePostJsonBody だけ上限が無く、解析の失敗も "invalid JSON body"
+// の 1 行に潰れていた (どこが壊れているか分からない)。
+describe("POST の JSON 本文の読み取り", () => {
+  function postRequest(body: string, headers: Record<string, string> = {}) {
+    return new Request("http://127.0.0.1/_db/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body,
+    });
+  }
+
+  test.each([
+    { name: "汎用の口", parse: (req: Request) => parsePostJsonBody(req) },
+    {
+      name: "上限つきの口",
+      parse: (req: Request) =>
+        parseBoundedJsonBody(req, 1_048_576, "payload too large"),
+    },
+  ])("解析の失敗は理由を返す: $name", async ({ parse }) => {
+    const result = await parse(postRequest('{"db":'));
+
+    expect(result).toBeInstanceOf(Response);
+    const res = result as Response;
+    expect(res.status).toBe(400);
+    const body = await res.text();
+    expect(body.startsWith("invalid JSON body: ")).toBe(true);
+    // 解析器の理由 (SyntaxError) を落とさない。
+    expect(body).toContain("SyntaxError");
+  });
+
+  test("申告した大きさが上限を超えたら読まずに 413", async () => {
+    const result = await parsePostJsonBody(
+      postRequest("{}", { "Content-Length": "2000000" }),
+    );
+
+    expect((result as Response).status).toBe(413);
+  });
+
+  test("上限までの本文はそのまま読める", async () => {
+    const result = await parsePostJsonBody<{ db: string }>(
+      postRequest('{"db":"sample.db"}'),
+    );
+
+    expect(result).toEqual({ db: "sample.db" });
   });
 });

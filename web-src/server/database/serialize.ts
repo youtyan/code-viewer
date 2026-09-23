@@ -1,6 +1,7 @@
 import type { DbValue } from "../../core/database/types";
 
-export type RawDbValue = DbValue | bigint;
+// driver は JSON 列を object・配列のまま返す (pg など)。
+export type RawDbValue = DbValue | bigint | object;
 export type RawDbRow = RawDbValue[];
 
 const MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
@@ -17,11 +18,10 @@ export function serializeDbValue(value: RawDbValue): DbValue {
     return `<blob ${value.byteLength} bytes>`;
   }
   if (typeof value === "object") {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
+    // driver が返す JSON 列の中の bigint は文字列にする (JSON.stringify は投げる)。
+    return JSON.stringify(value, (_key, inner: unknown) =>
+      typeof inner === "bigint" ? inner.toString() : inner,
+    );
   }
   return value;
 }

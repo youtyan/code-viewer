@@ -91,6 +91,7 @@ function sanitizeEntry(raw: unknown): QueryHistoryEntry | null {
   const schema = optionalString(entry.schema, MAX_SCHEMA_LEN);
   const title = optionalString(entry.title, MAX_TEXT_LEN);
   const body = optionalString(entry.body, MAX_TEXT_LEN);
+  const error = optionalString(entry.error, MAX_TEXT_LEN);
   return {
     id,
     dbId,
@@ -108,6 +109,7 @@ function sanitizeEntry(raw: unknown): QueryHistoryEntry | null {
       optionalString(entry.executedAt, 64) ?? new Date(0).toISOString(),
     executedBy: entry.executedBy === "ai" ? "ai" : "user",
     source: entry.source === "cli" ? "cli" : "browser",
+    ...(error ? { error } : {}),
   };
 }
 

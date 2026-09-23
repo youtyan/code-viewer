@@ -1,5 +1,5 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
+import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   type AppRoute,
   buildRoute,
@@ -152,12 +152,12 @@ function testDeps(
     syncHighlights(card);
   };
   return {
-    $: <T extends Element = HTMLElement>(sel: string) => {
-      const el = document.querySelector<T>(sel);
-      if (!el) throw new Error(`missing ${sel}`);
+    mountRoot: () => {
+      const el = document.querySelector<HTMLElement>("#diff");
+      if (!el) throw new Error("missing #diff");
       return el;
     },
-    STATE: state,
+    scope: () => document,
     setRoute(route: AppRoute, replace?: boolean) {
       state.route = route;
       const url = buildRoute(route);
@@ -643,6 +643,150 @@ describe("file view shell routing", () => {
     expect(document.querySelector(".gdp-blame-summary")?.textContent).toBe(
       "Newer render",
     );
+  });
+});
+
+describe("blame and file header failures", () => {
+  test.each([
+    {
+      name: "the source request answers HTTP 500",
+      failPath: "/_file",
+      fail: () =>
+        new Response("sample source failure", {
+          status: 500,
+          statusText: "Internal Server Error",
+        }),
+      expected: [
+        "loading blame for README.md failed",
+        "HTTP 500 Internal Server Error",
+        "sample source failure",
+      ],
+    },
+    {
+      name: "the blame request answers HTTP 500",
+      failPath: "/_file_blame",
+      fail: () => new Response("sample blame failure", { status: 500 }),
+      expected: ["load blame (HTTP 500)", "sample blame failure"],
+    },
+    {
+      name: "the source request cannot reach the server",
+      failPath: "/_file",
+      fail: () => {
+        throw new TypeError("sample network failure");
+      },
+      expected: ["Caused by: TypeError: sample network failure"],
+    },
+  ])("blame shows the full reason when $name", async ({
+    failPath,
+    fail,
+    expected,
+  }) => {
+    const passThrough = globalThis.fetch;
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === failPath) return fail();
+        return passThrough(input, init);
+      }) as typeof fetch,
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* asserted below */
+    });
+    try {
+      const state: { route: AppRoute } = {
+        route: {
+          screen: "file",
+          path: "README.md",
+          ref: "worktree",
+          view: "blame",
+          range: RANGE,
+        } satisfies AppRoute,
+      };
+      const blame = createBlameView(testDeps(state, []));
+      await blame.renderBlamePage({ path: "README.md", ref: "worktree" });
+
+      const error = document.querySelector(".gdp-blame-error")?.textContent;
+      for (const part of expected) expect(error).toContain(part);
+      expect(document.querySelector(".gdp-blame-table")).toBeNull();
+      expect(errorSpy).toHaveBeenCalledOnce();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  test.each([
+    {
+      name: "a copy refused by the browser shows the reason on the button",
+      writeText: () =>
+        Promise.reject(new DOMException("sample refusal", "NotAllowedError")),
+      path: "src/example.ts",
+      copied: [] as string[],
+      failed: true,
+    },
+    {
+      name: "a path with a newline copies the same escaped text it shows",
+      writeText: null,
+      path: "dir/line\nname.txt",
+      copied: ["dir/line\\nname.txt"],
+      failed: false,
+    },
+  ])("$name", async ({ writeText, path, copied, failed }) => {
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText:
+          writeText ??
+          (async (text: string) => {
+            written.push(text);
+          }),
+      },
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* asserted below */
+    });
+    try {
+      const { sticky } = createFileShellSticky(
+        {
+          currentRange: () => RANGE,
+          setRoute() {
+            /* not exercised */
+          },
+          setPreferredSourceTab() {
+            /* not exercised */
+          },
+          createFileBreadcrumb(breadcrumbPath: string) {
+            const span = document.createElement("span");
+            span.textContent = breadcrumbPath;
+            return span;
+          },
+        },
+        { path, ref: "worktree" },
+        "code",
+      );
+      document.body.replaceChildren(sticky);
+      const copy = sticky.querySelector<HTMLButtonElement>(".gdp-copy-path");
+      copy?.click();
+      await waitFor(
+        () =>
+          !!copy?.classList.contains("failed") ||
+          !!copy?.classList.contains("copied"),
+      );
+
+      expect(written).toEqual(copied);
+      expect(copy?.classList.contains("failed")).toBe(failed);
+      if (failed) {
+        expect(copy?.title).toContain("copying the file path failed");
+        expect(copy?.title).toContain("NotAllowedError: sample refusal");
+        expect(errorSpy).toHaveBeenCalledOnce();
+      } else {
+        expect(errorSpy).not.toHaveBeenCalled();
+      }
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 

@@ -73,8 +73,11 @@ function findPackageJson(packageName, baseDir) {
   });
 }
 
-function readPackage(packageName, baseDir) {
-  const packageJsonPath = findPackageJson(packageName, baseDir);
+function readPackage(
+  packageName,
+  baseDir,
+  packageJsonPath = findPackageJson(packageName, baseDir),
+) {
   const packageDir = dirname(packageJsonPath);
   const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
   const key = `${pkg.name}@${pkg.version}`;
@@ -105,15 +108,21 @@ function readPackage(packageName, baseDir) {
     readPackage(depName, packageDir);
   }
   for (const depName of Object.keys(pkg.optionalDependencies || {}).sort()) {
+    // 入っていない (見つからない) optional だけを飛ばす。入っているのに読めない・
+    // 壊れているものは投げる。理由は配布物に載るので、手元のパスを含む cause は
+    // 載せず 1 行目だけにする。
+    let optionalPackageJson;
     try {
-      readPackage(depName, packageDir);
+      optionalPackageJson = findPackageJson(depName, packageDir);
     } catch (error) {
       skippedOptional.push({
         from: key,
         name: depName,
         reason: error instanceof Error ? error.message : String(error),
       });
+      continue;
     }
+    readPackage(depName, packageDir, optionalPackageJson);
   }
 }
 

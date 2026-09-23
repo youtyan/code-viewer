@@ -22,6 +22,7 @@ import {
   DEFAULT_SHELL_COLS,
   DEFAULT_SHELL_ROWS,
   SHELL_ID_PREFIX,
+  type ShellPurpose,
   type ShellSession,
   type ShellSessionId,
 } from "../../core/shell";
@@ -66,8 +67,21 @@ type SessionEntry = {
    * 渡すときの位置がこれになる (core/terminal-capture の sliceShellBuffer)。
    */
   totalChars: number;
+  /**
+   * replay の末尾のうち、まだどの購読者にも渡っていない文字数。渡った分の
+   * 中の端末への問い合わせには、そのとき見ていた端末が答えている。渡って
+   * いない分 (シェルを作ってから購読が始まるまでに出た tmux の attach の
+   * 問い合わせなど) は、まだ誰も答えていない。
+   */
+  unseenChars: number;
   listeners: Set<(chunk: string) => void>;
   exitListeners: Set<(exitCode: number) => void>;
+  /**
+   * 出力が出たことだけを知りたい者 (terminal/attach-watch.ts の見張り)。購読者
+   * (listeners) とは別に持つ: 購読者に数えると、まだ誰にも渡っていない出力
+   * (unseenChars) を渡したことになり、端末への問い合わせに誰も答えなくなる。
+   */
+  outputWatchers: Set<() => void>;
   /**
    * 最初の出力を受けたか。プロンプトが出た = シェルが入力を読む状態になった
    * 合図として使う (writeToShellWhenReady)。
@@ -78,6 +92,10 @@ type SessionEntry = {
     data: string;
     resolve(result: ShellWriteResult): void;
   }>;
+  /** code-viewer がこのシェルから接続した tmux の宛先。TTY がまだ空でも使う。 */
+  tmuxAttachment: { session: string; pane: string } | null;
+  /** 同じ空TTYを同時に問い合わせないための、進行中の再取得。 */
+  ttyRefresh: Promise<void> | null;
 };
 
 const sessions = new Map<ShellSessionId, SessionEntry>();
@@ -121,15 +139,15 @@ function resolveShellCommand(): string {
   return process.env.SHELL || "/bin/sh";
 }
 
-/** ps が応答しないときに待ち続けない。ローカルの ps は数 ms で返る。 */
+/** spawn 直後に TTY が見えるまで待つ上限。ps 自体の上限も残り時間に揃える。 */
 const PS_TIMEOUT_MS = 2000;
 
 /**
  * この PTY の端末デバイス名を引く。
  *
  * node-pty は tty 名を公開していないので、PTY の「中」で動いているプロセス
- * の側から ps で引く。PTY を作った時点で端末は確定しているので、spawn 直後に
- * 1 度だけ引けばよい (以後は変わらない)。
+ * の側から ps で引く。spawn 直後は `?` のことがあるため短く再試行する。
+ * 端末名そのものは一度取れれば変わらない。
  *
  * ps が返すのは `ttys012` や `pts/3` のような /dev を落とした形なので、
  * tmux の `#{client_tty}` と同じ絶対パスに揃える。端末を持たないプロセスは
@@ -138,12 +156,16 @@ const PS_TIMEOUT_MS = 2000;
  * `ps` の実行自体が失敗した場合は、端末を特定できなかった事実を呼出側へ返す。
  * 端末を持たないことを表す正常な `?` / `??` だけは空文字として扱う。
  */
-async function resolvePtyTty(pid: number, cwd: string): Promise<string> {
+async function queryPtyTty(
+  pid: number,
+  cwd: string,
+  timeout: number,
+): Promise<string> {
   try {
     const result = await runAsync(
       ["ps", "-o", "tty=", "-p", String(pid)],
       cwd,
-      { timeout: PS_TIMEOUT_MS },
+      { timeout },
     );
     if (result.code !== 0) {
       const details = [
@@ -161,10 +183,103 @@ async function resolvePtyTty(pid: number, cwd: string): Promise<string> {
   }
 }
 
+async function resolvePtyTty(pid: number, cwd: string): Promise<string> {
+  const deadline = Date.now() + PS_TIMEOUT_MS;
+  while (true) {
+    const tty = await queryPtyTty(pid, cwd, Math.max(1, deadline - Date.now()));
+    if (tty) return tty;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return "";
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, Math.min(50, remaining));
+      timer.unref?.();
+    });
+  }
+}
+
 export function listShellSessions(): ShellSession[] {
   return [...sessions.values()]
     .map((entry) => entry.meta)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+async function refreshSessionTty(entry: SessionEntry): Promise<void> {
+  if (entry.meta.tty || entry.meta.exited) return;
+  if (entry.ttyRefresh) return entry.ttyRefresh;
+  const refresh = queryPtyTty(
+    entry.pty.pid,
+    entry.meta.cwd,
+    PS_TIMEOUT_MS,
+  ).then((tty) => {
+    if (tty) entry.meta.tty = tty;
+  });
+  entry.ttyRefresh = refresh;
+  try {
+    await refresh;
+  } finally {
+    if (entry.ttyRefresh === refresh) entry.ttyRefresh = null;
+  }
+}
+
+/** shownInShell を突き合わせる直前に、まだ空のTTYを毎回取り直す。 */
+export async function listShellSessionsForMatching(): Promise<ShellSession[]> {
+  await Promise.all([...sessions.values()].map(refreshSessionTty));
+  return listShellSessions();
+}
+
+/** 同じ tmux セッションへ code-viewer が既に接続したシェルを先に探す。 */
+export function findShellSessionForTmuxSession(
+  session: string,
+): ShellSession | null {
+  for (const entry of sessions.values()) {
+    if (!entry.meta.exited && entry.tmuxAttachment?.session === session) {
+      return entry.meta;
+    }
+  }
+  return null;
+}
+
+/**
+ * attach/select が成功した後だけ、サーバ内の接続先を更新する。用途も
+ * 映したペインのものに付け直す (ログインのウィンドウから別のペインへ移れば
+ * 普通のシェルに戻る)。
+ */
+export function rememberShellTmuxAttachment(
+  id: ShellSessionId,
+  session: string,
+  pane: string,
+  purpose: ShellPurpose | null = null,
+): void {
+  const entry = sessions.get(id);
+  if (!entry || entry.meta.exited) return;
+  entry.tmuxAttachment = { session, pane };
+  entry.meta.purpose = purpose;
+}
+
+/** code-viewer がそのシェルから接続した tmux の宛先 (まだ・もう無ければ null)。 */
+export function shellTmuxAttachment(
+  id: ShellSessionId,
+): { session: string; pane: string } | null {
+  const entry = sessions.get(id);
+  if (!entry || entry.meta.exited || !entry.tmuxAttachment) return null;
+  return { ...entry.tmuxAttachment };
+}
+
+/**
+ * シェルに出力が出るたびに呼ぶ。中身は渡さず、購読とは数えない (溜め置きの
+ * 渡し方を変えない)。シェルが終われば呼ばれなくなる。戻り値で止める。
+ * シェルがもう無ければ null。
+ */
+export function watchShellOutput(
+  id: ShellSessionId,
+  onOutput: () => void,
+): (() => void) | null {
+  const entry = sessions.get(id);
+  if (!entry || entry.meta.exited) return null;
+  entry.outputWatchers.add(onOutput);
+  return () => {
+    entry.outputWatchers.delete(onOutput);
+  };
 }
 
 export function getShellSession(id: ShellSessionId): ShellSession | null {
@@ -254,26 +369,35 @@ export async function createShellSession(
       rows,
       exited: false,
       exitCode: null,
-      // 端末は PTY を作った時点で確定しているので、ここで 1 度引けば足りる。
-      // このシェルの中で tmux を起動したとき、これが宛先になる。
+      // このシェルの中で tmux を起動したとき、これが宛先になる。まだ空なら
+      // shownInShell の照合時に取り直し、値を得た時点で meta に覚える。
       tty,
     },
     pty: child,
     replay: "",
     totalChars: 0,
+    unseenChars: 0,
     listeners: new Set(),
     exitListeners: new Set(),
+    outputWatchers: new Set(),
     ready: false,
     queued: [],
+    tmuxAttachment: null,
+    ttyRefresh: null,
   };
 
   child.onData((chunk) => {
     entry.replay = `${entry.replay}${chunk}`.slice(-REPLAY_BUFFER_LIMIT);
     entry.totalChars += chunk.length;
+    entry.unseenChars =
+      entry.listeners.size > 0
+        ? 0
+        : Math.min(entry.unseenChars + chunk.length, entry.replay.length);
     // 最初の出力が出た = プロンプトが立ち、シェルが入力を読む状態になった。
     // 待たせていた入力があればここで流す。
     markShellReady(entry);
     for (const listener of [...entry.listeners]) listener(chunk);
+    for (const watcher of [...entry.outputWatchers]) watcher();
   });
   child.onExit(({ exitCode }) => {
     entry.meta.exited = true;
@@ -289,6 +413,7 @@ export async function createShellSession(
     // 生きているので、ここには来ない。
     entry.listeners.clear();
     entry.exitListeners.clear();
+    entry.outputWatchers.clear();
     sessions.delete(id);
   });
 
@@ -305,8 +430,13 @@ export async function createShellSession(
 }
 
 export type ShellSubscription = {
-  /** 購読開始時点までに溜まっていた出力。 */
+  /**
+   * 購読開始時点までに溜まっていた出力のうち、前の購読者に渡った分。流し
+   * 直しなので、中の問い合わせに端末が答え直してはいけない。
+   */
   replay: string;
+  /** 溜まっていた出力のうち、まだ誰にも渡っていない分 (replay の続き)。 */
+  unseen: string;
   unsubscribe(): void;
 };
 
@@ -319,8 +449,11 @@ export function subscribeShell(
   if (!entry) return null;
   entry.listeners.add(onData);
   entry.exitListeners.add(onExit);
+  const seenChars = entry.replay.length - entry.unseenChars;
+  entry.unseenChars = 0;
   return {
-    replay: entry.replay,
+    replay: entry.replay.slice(0, seenChars),
+    unseen: entry.replay.slice(seenChars),
     unsubscribe() {
       entry.listeners.delete(onData);
       entry.exitListeners.delete(onExit);
@@ -459,6 +592,7 @@ export async function closeShellSession(
   if (!entry) return { status: "gone" };
   sessions.delete(id);
   entry.listeners.clear();
+  entry.outputWatchers.clear();
   const queued = entry.queued.splice(0);
   entry.ready = true;
   for (const item of queued) item.resolve({ status: "gone" });

@@ -23,6 +23,7 @@ describe("agentStateForEvent", () => {
     { name: "質問で止まったら待ち", event: "ask", expected: "waiting" },
     { name: "ターンが終わったら未読", event: "stop", expected: "done" },
     { name: "セッションが閉じたら停止", event: "exit", expected: "idle" },
+    { name: "始まった・中断されたら待機", event: "ready", expected: "idle" },
   ] satisfies {
     name: string;
     event: AgentEvent;

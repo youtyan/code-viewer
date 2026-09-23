@@ -17,7 +17,7 @@ CSS の生文字列を検査するテストが **2 回壊れた**。CSS を複�
 expect(style.includes("max-height: calc(100vh - var(--global-header-h) - 40px);")).toBe(true);
 ```
 
-というアサーションがあるが、**この文字列が `style.css` に存在するのは `.app-panel` の規則
+というアサーションがあったが、**この文字列が `style.css` に存在したのは当時の下パネル `.app-panel` の規則
 だけ**で、検査したかった `.gdp-markdown-toc` の値はもう別物になっている。
 
 > **文字列テストは壊れるだけでなく、黙って別の規則を守り始める。**
@@ -111,7 +111,7 @@ grep -rln 'web/style\.css' web-src/test/
 **書き換えの実例**（そのまま手本にしてよい）: `web-src/test/markdown-preview.test.ts` の
 TOC の検査は、`.gdp-markdown-toc` のブロックを改行込みで丸ごと固定し、さらに無関係な
 `.app-panel` の規則を守っていた。`.app-panel` を直した瞬間に、TOC を一切触っていないのに
-落ちた。いまは「下パネルの占有高さを変えると TOC の上限も変わる」を見る形に置き換えてある。
+落ちた。いまは「最下段の高さを変えると TOC の上限も変わる」を見る形に置き換えてある。
 同じファイルには**まだセレクタ存在の文字列検査が残っている**（既存違反。触ったときに直す）。
 
 > 「違反件数が増えたら落ちる」ラチェットテストは**未実装**。入れるかはユーザー判断待ち。
@@ -123,8 +123,18 @@ TOC の検査は、`.gdp-markdown-toc` のブロックを改行込みで丸ご�
 | `fileParallelism: false` | 実プロセス（preview サーバ / git / docker CLI）を起動するテストが多く、並列だと互いに遅れてランダムに落ちるため。**タイミング依存の失敗を「並列だから」と説明しない** |
 | `environment: "node"` | DOM が要るファイルは**各自** `@happy-dom/global-registrator` を登録する。全体に被せると node 側のテストが本来無いグローバルを掴む |
 | `globalSetup` が `dist/code-viewer.js` を焼く | CLI を起動するテストが依存している |
+| サーバを起こすテストは `--standalone` を付ける | 既定の `code-viewer` は入口のサーバ（`entry.json` を見て、動いている入口があれば委ねて終わる）。入口そのものを確かめるテスト（`entry-server.test.ts`）は、状態ディレクトリ・登録簿・`TMUX_TMPDIR` をテストごとの一時ディレクトリにし、`TMUX`・`TMUX_PANE` を外す（入口は tmux を巡回する）。テスト全体でも、`scripts/vitest-global-setup.mjs` が `TMUX_TMPDIR` を必ずテスト専用の場所へ上書きし、`TMUX`・`TMUX_PANE` を外す。`test-env-isolation.test.ts` が、この一時パスと 2 変数の不在を守る。vitest の外で起こす `scripts/node-smoke.mjs` は自分で同じ分離を行う |
+| `globalSetup`（と `scripts/node-smoke.mjs`）がサーバ登録簿と状態ディレクトリを一時ディレクトリへ向ける | `globalSetup` は `CODE_VIEWER_TEST_SERVER_REGISTRY_DIR` と `CODE_VIEWER_TEST_STATE_DIR` が呼び出し側にあればその値を保ち、無ければ一時パスを入れる。`node-smoke.mjs` は常に自分の一時パスを使う。向けないとテストが開発者の実データを書き換える（実際に消した・溜めた）。新しい置き場所を足すときの決まりは `agents.md` の 8 と 9 |
 | `testTimeout` / `hookTimeout` = 30s | 既定の 5s では足りないテストがあるため |
 | `web-src/test/_*.ts` はグロブに入らない | 共有ヘルパの置き場。`_test-helpers.ts` / `_fake-dom.ts` / `_git-fixture.ts` / `_io-fixture.ts` / `_dialog-helpers.ts` / `_documented-cli-fixture.ts` |
+
+`pnpm run verify` を外からさらに隔離したいときは、実行前に
+`CODE_VIEWER_TEST_SERVER_REGISTRY_DIR` と `CODE_VIEWER_TEST_STATE_DIR` を自分の一時パスへ向ける。
+Vitest はその値を保ち、node smoke は独立した一時パスを使う。`TMUX_TMPDIR` はどちらも内部で
+一時パスへ向け直すので、呼び出し側の値には頼らない。
+シェルに `FORCE_COLOR` が入っていると、テストが `NO_COLOR` を付けて起こした CLI に Node が
+「NO_COLOR is ignored」の警告を stderr へ出し、stderr が空であることを確かめるテスト
+（`agent-help.test.ts`）が落ちる。`env -u FORCE_COLOR` を付けて回す。
 
 ## テストデータ
 

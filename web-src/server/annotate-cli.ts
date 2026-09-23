@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import type {
   AnnotationDatabaseTab,
   AnnotationEntry,
@@ -9,9 +8,11 @@ import type {
 import { normalizeDatabaseTab, parseAnnotationLine } from "./annotations";
 import {
   ensureServerUrl,
+  readFlagFile,
   readStdin,
   requestJson,
   resolveRepoRoot,
+  screenBaseUrl,
   takeGlobalCliOption,
   takeValue,
 } from "./cli-helpers";
@@ -110,9 +111,10 @@ type AnnotationAddCommonOptions = {
 export const ANNOTATE_HELP = `code-viewer annotate — attach explanations to code locations
 
 The annotations show up live in the code-viewer browser UI and are stored
-in <repo>/.code-viewer/annotations.json. A running code-viewer server for
-the repository is required: start one with "code-viewer" before using
-annotate (or point at one explicitly with --server).
+in <repo>/.code-viewer/annotations.json. A running code-viewer is
+required: start one with "code-viewer" before using annotate (or point at
+a server explicitly with --server). If this repository's project process
+is not running, annotate asks the running code-viewer to start it.
 
 Run "code-viewer annotate agent-help" for an AI-agent oriented guide
 (workflow, conventions, and pitfalls for writing good walkthroughs).
@@ -172,8 +174,10 @@ location and renders your explanation directly under the annotated lines.
 
 ## Requirements
 
-- A code-viewer server must already be running for the repository
-  (the human starts it with: code-viewer). This command never starts one.
+- code-viewer must already be running (the human starts it with:
+  code-viewer, and leaves it running). This command never starts
+  code-viewer itself; when this repository's project process is not
+  running, it asks the running code-viewer to start it (stderr says so).
 - Run from inside the repository, or pass --cwd <repo>.
 - If "code-viewer" is not on PATH (e.g. the human runs it via npx), invoke
   every command below as: npx -y @youtyan/code-viewer annotate ...
@@ -642,7 +646,7 @@ function printList(state: AnnotationsState): void {
 function printAddedAnnotation(
   result: AnnotateAddResponse,
   location: string,
-  serverUrl: string,
+  screenBase: string,
 ): void {
   const sessionTitle = result.session_title || "Untitled session";
   if (result.created_session) {
@@ -655,7 +659,7 @@ function printAddedAnnotation(
       `[${result.entry.id}] in session ${result.session_id} (${sessionTitle})`,
   );
   console.error(
-    `view annotations at ${serverUrl}/ with the code annotations panel`,
+    `view annotations at ${screenBase}/ with the code annotations panel`,
   );
 }
 
@@ -665,12 +669,7 @@ async function annotationBodyFromCommand(command: {
 }): Promise<string> {
   let body = command.body;
   if (body === undefined && command.bodyFile !== undefined) {
-    try {
-      body = readFileSync(command.bodyFile, "utf8");
-    } catch {
-      console.error(`could not read --body-file: ${command.bodyFile}`);
-      process.exit(1);
-    }
+    body = readFlagFile("--body-file", command.bodyFile);
   }
   if (body === undefined) body = await readStdin();
   if (!body.trim()) {
@@ -708,7 +707,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     })) as { session: AnnotationSession };
     console.log(`session ${result.session.id}  ${result.session.title}`);
     console.error(
-      `view annotations at ${serverUrl}/ with the code annotations panel`,
+      `view annotations at ${screenBaseUrl(root, serverUrl)}/ with the code annotations panel`,
     );
     return;
   }
@@ -730,7 +729,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     printAddedAnnotation(
       result,
       `${result.entry.path}${formatLine(result.entry.line)}`,
-      serverUrl,
+      screenBaseUrl(root, serverUrl),
     );
     return;
   }
@@ -738,12 +737,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     const body = await annotationBodyFromCommand(command);
     let sql = command.sql;
     if (sql === undefined && command.sqlFile !== undefined) {
-      try {
-        sql = readFileSync(command.sqlFile, "utf8");
-      } catch {
-        console.error(`could not read --sql-file: ${command.sqlFile}`);
-        process.exit(1);
-      }
+      sql = readFlagFile("--sql-file", command.sqlFile);
     }
     const dataState =
       command.gridSearch ||
@@ -806,7 +800,11 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
         position: command.position,
       },
     )) as AnnotateAddResponse;
-    printAddedAnnotation(result, result.entry.path, serverUrl);
+    printAddedAnnotation(
+      result,
+      result.entry.path,
+      screenBaseUrl(root, serverUrl),
+    );
     return;
   }
   if (command.kind === "list") {
@@ -831,7 +829,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
   if (command.kind === "edit") {
     let bodyText = command.body;
     if (command.bodyFile !== undefined)
-      bodyText = readFileSync(command.bodyFile, "utf8");
+      bodyText = readFlagFile("--body-file", command.bodyFile);
     if (bodyText === undefined) {
       const stdin = await readStdin();
       if (stdin.trim()) bodyText = stdin;

@@ -1,3 +1,8 @@
+import { apiUrl } from "../../core/api-url";
+import {
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../../core/error-detail";
 // Tools overlay. 画面を離れずに開ける貼り付け専用のスクラッチパッド置き場で、
 // Markdown / Mermaid / JSON・YAML の 3 ツールをタブで切り替える。
 // 開閉の作りは doctor sheet (views/doctor-view.ts) と同じ右ドロワー
@@ -68,12 +73,12 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
   /** 送信中の保存を離脱時に打ち切るためのハンドル。 */
   let saveController: AbortController | null = null;
   /** 「保存できません」を出したペイン。保存が通ったらそこだけ消す。 */
-  /** 送り直しても通らない保存が残っている。 */
-  let saveFailed = false;
+  /** 送り直しても通らない保存が残っている (その理由の全文)。 */
+  let saveFailed: string | null = null;
   /** 連続した保存失敗の回数。無期限に再送し続けないための歯止め。 */
   let saveRetries = 0;
-  /** 保存済みの下書きをまだ読み出せていない。 */
-  let loadFailed = false;
+  /** 保存済みの下書きをまだ読み出せていない (その理由の全文)。 */
+  let loadFailed: string | null = null;
   /** dispose 済み。後から返ってきた非同期処理が再開しないようにする。 */
   let disposed = false;
   // GET を待つ間にユーザーが動かしたかどうか。動かしていたら、読み込んだ
@@ -107,30 +112,33 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
   function syncFailureStatus(): void {
     if (!panes) return;
     const current = text();
-    const message = loadFailed
-      ? current.loadFailed
-      : saveFailed
-        ? current.saveFailed
-        : null;
+    const message =
+      loadFailed !== null
+        ? `${current.loadFailed}\n${loadFailed}`
+        : saveFailed !== null
+          ? `${current.saveFailed}\n${saveFailed}`
+          : null;
     for (const id of TOOL_IDS) panes[id].setPinnedStatus(message);
   }
 
-  function reportSaveFailure(): void {
-    saveFailed = true;
+  function reportSaveFailure(error: unknown): void {
+    console.error("[code-viewer] saving tools drafts failed", error);
+    saveFailed = formatErrorDetail(error);
     syncFailureStatus();
   }
 
   function clearSaveFailure(): void {
     saveRetries = 0;
-    if (!saveFailed) return;
-    saveFailed = false;
+    if (saveFailed === null) return;
+    saveFailed = null;
     syncFailureStatus();
   }
 
   /** 読み出せなかったことを伝える。黙って空で始めると、ユーザーが空欄に
    * 書いた瞬間に既存の下書きを上書きしてしまう。 */
-  function reportLoadFailure(): void {
-    loadFailed = true;
+  function reportLoadFailure(error: unknown): void {
+    console.error("[code-viewer] loading tools drafts failed", error);
+    loadFailed = formatErrorDetail(error);
     syncFailureStatus();
   }
 
@@ -171,7 +179,7 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
     }
     void deps
       .trackLoad(
-        fetch("/_state/tools", {
+        fetch(apiUrl("stateTools"), {
           method: "PATCH",
           headers: deps.actionHeaders(),
           body,
@@ -179,26 +187,29 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
           signal: controller.signal,
         }),
       )
-      .then((res) => {
+      .then(async (res) => {
         if (res.ok) {
           clearSaveFailure();
           return;
         }
+        const failure = new Error(
+          await responseErrorMessage(res, "saving tools drafts"),
+        );
         if (isPermanentSaveFailure(res.status)) {
           // 送り直しても通らない。書きかけを抱え続けず、理由を出して諦める。
-          reportSaveFailure();
+          reportSaveFailure(failure);
           return;
         }
-        throw new Error(`HTTP ${res.status}`);
+        throw failure;
       })
-      .catch(() => {
+      .catch((error) => {
         if (disposed) return;
         dirty = true;
         saveRetries += 1;
         if (saveRetries > SAVE_RETRY_LIMIT) {
           // 落ち続けているサーバに投げ続けても仕方がない。次にユーザーが
           // 何か変えたら (scheduleSave が回数を戻して) また送りに行く。
-          reportSaveFailure();
+          reportSaveFailure(error);
           return;
         }
         // 離脱時の keepalive 送信は再試行しても届かないので、ここでは張らない。
@@ -312,7 +323,7 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
   async function loadState(myGen: number): Promise<void> {
     if (stateLoaded) return;
     try {
-      const res = await deps.trackLoad(fetch("/_state/tools"));
+      const res = await deps.trackLoad(fetch(apiUrl("stateTools")));
       // 世代が変わっていたらこの読み込みは無効。stateLoaded も立てない
       // (立てると開き直したときに二度と読みに行かなくなる)。本文を読み切る
       // までは「読めた」と見なさない。
@@ -320,14 +331,16 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
       if (!res.ok) {
         // 読めていないまま空で始めると、ユーザーが空欄に書いた瞬間に既存の
         // 下書きを上書きしてしまう。開き直したときに読み直せるようにする。
-        reportLoadFailure();
+        reportLoadFailure(
+          new Error(await responseErrorMessage(res, "loading tools drafts")),
+        );
         return;
       }
       const data = (await res.json()) as ToolsState;
       if (myGen !== generation) return;
       stateLoaded = true;
-      if (loadFailed) {
-        loadFailed = false;
+      if (loadFailed !== null) {
+        loadFailed = null;
         syncFailureStatus();
       }
       // 待っている間にユーザーが動かした分は、保存値で巻き戻さない。
@@ -341,9 +354,9 @@ export function createToolsView(deps: ToolsViewDeps): ToolsViewHandle {
         drafts[id] = draft;
         panes?.[id].setText(draft);
       }
-    } catch {
+    } catch (error) {
       // 中断・通信断も同じ。読めていないことを伝え、次に開いたときに読み直す。
-      if (myGen === generation) reportLoadFailure();
+      if (myGen === generation) reportLoadFailure(error);
     }
   }
 

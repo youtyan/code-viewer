@@ -1,5 +1,5 @@
 // web-src/test/annotation-player-core.test.ts
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   createAnnotationPlayerCore,
   type PlayerCoreDeps,
@@ -235,31 +235,49 @@ describe("annotation-player-core", () => {
     expect(h.states).toHaveLength(0);
   });
 
-  test("jump rejection still advances playback", async () => {
-    const states: PlayerState[] = [];
-    let callCount = 0;
+  test.each([
+    { when: "playing", failedEntry: "a", index: 0, status: "playing" },
+    { when: "paused and moved", failedEntry: "b", index: 1, status: "paused" },
+  ])("a jump that fails while $when keeps playback and logs the failure", async ({
+    when,
+    failedEntry,
+    index,
+    status,
+  }) => {
+    const failure = new Error("jump failed");
     const items = [
       { entryId: "a", speechText: "Hello" },
       { entryId: "b", speechText: "World" },
     ];
     const deps: PlayerCoreDeps = {
       items: () => items,
-      jump: () => {
-        callCount++;
-        if (callCount === 1) return Promise.reject(new Error("jump failed"));
-        return Promise.resolve();
-      },
+      jump: (id) =>
+        id === failedEntry ? Promise.reject(failure) : Promise.resolve(),
       speak: () => () => undefined,
       schedule: () => () => undefined,
       displayMs: () => 3000,
       speechAvailable: () => true,
-      onStateChange: (s) => states.push(s),
+      onStateChange: () => undefined,
     };
-    const core = createAnnotationPlayerCore(deps);
-    core.play();
-    await flush();
-    // Should still be playing (not stuck/stopped) after jump rejection
-    expect(core.getState().status).toBe("playing");
-    expect(core.getState().index).toBe(0);
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const core = createAnnotationPlayerCore(deps);
+      core.play();
+      await flush();
+      if (when !== "playing") {
+        core.pause();
+        core.next();
+        await flush();
+      }
+      // Should still be playing (not stuck/stopped) after jump rejection
+      expect(core.getState()).toMatchObject({ status, index });
+      expect(errors.mock.calls).toEqual([
+        [`annotation player: could not jump to entry ${failedEntry}`, failure],
+      ]);
+    } finally {
+      errors.mockRestore();
+    }
   });
 });

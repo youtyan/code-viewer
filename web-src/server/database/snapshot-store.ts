@@ -10,8 +10,9 @@ import type {
   SnapshotMeta,
   SnapshotTableSummary,
 } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
 import { canonicalizeDockerDbId, parseDockerDbId } from "./discovery";
-import { loadSqliteClass } from "./sqlite-driver";
+import { loadSqliteClass, rollbackAfter } from "./sqlite-driver";
 
 const CODE_VIEWER_DIR = ".code-viewer";
 const SNAPSHOT_DB_NAME = "db-snapshots.sqlite";
@@ -140,8 +141,12 @@ async function getStoreDb(cwd: string): Promise<SqliteDb> {
   if (storeDb) {
     try {
       storeDb.close();
-    } catch {
-      // ignore
+    } catch (error) {
+      // 別の場所の store に切り替えるので、閉じ損ねは記録して先へ進む。
+      console.error(
+        `[code-viewer] closing the snapshot store failed: ${storeDbPath}`,
+        error,
+      );
     }
   }
   mkdirSync(join(cwd, CODE_VIEWER_DIR), { recursive: true });
@@ -151,17 +156,25 @@ async function getStoreDb(cwd: string): Promise<SqliteDb> {
   storeDb.exec("PRAGMA journal_mode=WAL");
   storeDb.exec("PRAGMA foreign_keys=ON");
   storeDb.exec(SCHEMA_SQL);
-  try {
-    storeDb.exec("ALTER TABLE snapshots ADD COLUMN schema_name TEXT");
-  } catch {
-    // Column already exists in databases created after schema support was added.
-  }
-  try {
-    storeDb.exec("ALTER TABLE snapshot_tables ADD COLUMN revision_id TEXT");
-  } catch {
-    // Column already exists in databases created after table revisions were added.
-  }
+  addColumnIfMissing(
+    storeDb,
+    "ALTER TABLE snapshots ADD COLUMN schema_name TEXT",
+  );
+  addColumnIfMissing(
+    storeDb,
+    "ALTER TABLE snapshot_tables ADD COLUMN revision_id TEXT",
+  );
   return storeDb;
+}
+
+// 後から足した列。その列を持って作られた DB では「duplicate column name」に
+// なるので、それだけ黙って飛ばす。ほかの失敗 (読み取り専用・壊れた DB) は投げる。
+function addColumnIfMissing(db: SqliteDb, sql: string): void {
+  try {
+    db.exec(sql);
+  } catch (error) {
+    if (!/duplicate column name/i.test(formatErrorDetail(error))) throw error;
+  }
 }
 
 function makeId(prefix: string): string {
@@ -310,11 +323,7 @@ export async function beginSnapshotTableRevision(
     );
     db.exec("COMMIT");
   } catch (err) {
-    try {
-      db.exec("ROLLBACK");
-    } catch {
-      // ignore rollback failure; original error is more useful.
-    }
+    rollbackAfter(() => db.exec("ROLLBACK"), err);
     throw err;
   }
   return id;
@@ -352,11 +361,7 @@ export async function addSnapshotTableRows(
     }
     db.exec("COMMIT");
   } catch (err) {
-    try {
-      db.exec("ROLLBACK");
-    } catch {
-      // ignore rollback failure; original error is more useful.
-    }
+    rollbackAfter(() => db.exec("ROLLBACK"), err);
     throw err;
   }
 }
@@ -511,11 +516,7 @@ export async function finalizeSnapshotTableRevision(
     );
     db.exec("COMMIT");
   } catch (err) {
-    try {
-      db.exec("ROLLBACK");
-    } catch {
-      // ignore rollback failure; original error is more useful.
-    }
+    rollbackAfter(() => db.exec("ROLLBACK"), err);
     throw err;
   }
 }
@@ -538,11 +539,7 @@ export async function finalizeSnapshot(
       ).run(error, snapshotId);
       db.exec("COMMIT");
     } catch (err) {
-      try {
-        db.exec("ROLLBACK");
-      } catch {
-        // ignore rollback failure; original error is more useful.
-      }
+      rollbackAfter(() => db.exec("ROLLBACK"), err);
       throw err;
     }
   } else {
@@ -653,11 +650,7 @@ export async function deleteSnapshot(
     deleteOrphanPayloads(db);
     db.exec("COMMIT");
   } catch (err) {
-    try {
-      db.exec("ROLLBACK");
-    } catch {
-      // ignore rollback failure; original error is more useful.
-    }
+    rollbackAfter(() => db.exec("ROLLBACK"), err);
     throw err;
   }
 }

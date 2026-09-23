@@ -435,7 +435,27 @@ describe("runStatusCli against a fixture repo", () => {
     }
   });
 
-  test("unborn repositories still report staged and untracked changes", async () => {
+  // まだコミットの無いリポジトリ (git init 直後) は空の木と比べるので、git の
+  // 失敗を stderr に出さず、履歴も「失敗」ではなく空になる。1 コミット後は HEAD と比べる。
+  test.each([
+    {
+      name: "just after git init",
+      commitFirst: false,
+      changed: [
+        "staged-before-first-commit.ts",
+        "untracked-before-first-commit.ts",
+      ],
+      staged: ["staged-before-first-commit.ts"],
+      commits: 0,
+    },
+    {
+      name: "after the first commit",
+      commitFirst: true,
+      changed: ["untracked-before-first-commit.ts"],
+      staged: [],
+      commits: 1,
+    },
+  ])("$name: reports changes with nothing on stderr", async (row) => {
     const emptyRepo = mkdtempSync(join(tmpdir(), "code-viewer-status-empty-"));
     try {
       git(emptyRepo, ["init", "-b", "main"]);
@@ -443,28 +463,21 @@ describe("runStatusCli against a fixture repo", () => {
       git(emptyRepo, ["config", "user.name", "sample-author"]);
       writeFileSync(join(emptyRepo, "staged-before-first-commit.ts"), "1\n");
       git(emptyRepo, ["add", "staged-before-first-commit.ts"]);
+      if (row.commitFirst) git(emptyRepo, ["commit", "-m", "sample first"]);
       writeFileSync(join(emptyRepo, "untracked-before-first-commit.ts"), "2\n");
 
       const io = captureIo();
       await runAndCatchExit(["--cwd", emptyRepo, "--json"]);
       expect(io.exits).toEqual([]);
+      expect(io.errs).toEqual([]);
       const payload = JSON.parse(io.logs[0]);
-      const changedPaths = payload.changed.files.map(
-        (f: { path: string }) => f.path,
-      );
-      const stagedPaths = payload.staged.files.map(
-        (f: { path: string }) => f.path,
-      );
-
-      expect(changedPaths).toEqual([
-        "staged-before-first-commit.ts",
-        "untracked-before-first-commit.ts",
-      ]);
-      expect(stagedPaths).toEqual(["staged-before-first-commit.ts"]);
-      expect(payload.recentCommits).toEqual([]);
-      expect(payload.recentCommitsError).toBe(
-        "fatal: Needed a single revision",
-      );
+      const paths = (group: { files: { path: string }[] }) =>
+        group.files.map((f) => f.path);
+      expect(paths(payload.changed)).toEqual(row.changed);
+      expect(paths(payload.staged)).toEqual(row.staged);
+      expect(payload.changed.error).toBeUndefined();
+      expect(payload.recentCommits).toHaveLength(row.commits);
+      expect(payload.recentCommitsError).toBeUndefined();
     } finally {
       rmSync(emptyRepo, { recursive: true, force: true });
     }

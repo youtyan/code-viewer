@@ -14,6 +14,7 @@
 //   - container !== "" && done === false: そのテーブルの処理開始 (index/total 付き)
 //   - container === "" && done === true: 全体完了 (最後に 1 度だけ)
 
+import { errorWithCauses, formatErrorDetail } from "../../core/error-detail";
 import type { DbKind } from "../../core/database/types";
 import { isAbortLikeError, throwIfAborted } from "./adapters/abort";
 import { asAsync } from "./adapters/async-facade";
@@ -155,8 +156,14 @@ export async function runSnapshot(
     onProgress?.({ container: "", done: true, index: total, total });
     return snapshotId;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await finalizeSnapshot(cwd, snapshotId, msg);
+    try {
+      await finalizeSnapshot(cwd, snapshotId, formatErrorDetail(err));
+    } catch (finalizeError) {
+      throw errorWithCauses(
+        "the snapshot failed, and recording the failure also failed",
+        [err, finalizeError],
+      );
+    }
     throw err;
   }
 }

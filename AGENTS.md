@@ -68,6 +68,7 @@ git history.
 
 - This app is a local desktop tool. Do not spend implementation effort on phone or narrow mobile layouts unless the user explicitly asks for mobile support in that specific task.
 - Prefer dense desktop workflows, resizable panels, stable dimensions, keyboard and pointer ergonomics, and wide-screen information layout.
+- Phone layout (width ≤ 640px, or a touch screen ≤ 500px tall) was started at the user's request on 2026-09-23 and covers three tasks only: checking agents and answering one that needs input, reading diffs and files, and switching projects. The rules live in the "Phone (SP)" section at the end of `web/style.css` and in `web-src/views/mobile-shell.ts`; other screens only need to not break.
 
 ## Request Lifecycle Discipline (Anti-Stuck)
 

@@ -1,12 +1,19 @@
+import { apiUrl } from "../core/api-url";
+import { showCopyFailure, showHighlightFailure } from "../core/copy-failure";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 // Standalone source view: text/virtual/paged renderers, shiki highlight,
 // HTML/markdown preview tabs, line selection + keyboard cursor, in-source
 // search, and the source load/cancel machinery. Extracted from app.ts as a
 // deps-injected factory.
 
 import {
-  findMainScrollTarget,
   focusMainPanel,
   isEditableKeyTarget,
+  isPageKeymapBlockedTarget,
 } from "../core/focus-scope";
 import { COPY_16_PATHS, iconSvg } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
@@ -46,6 +53,7 @@ import type {
   HljsApi,
   RawFileInfo,
 } from "../core/types";
+import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
 import {
   appendFileViewTabs,
   createFileShellSticky,
@@ -77,8 +85,6 @@ export type VirtualSourcePagingKeyboardEvent = KeyboardEvent & {
 };
 
 export type SourceViewDeps = {
-  $: <T extends Element = HTMLElement>(sel: string) => T;
-  $$: <T extends Element = HTMLElement>(sel: string) => T[];
   STATE: {
     route: AppRoute;
     from: string;
@@ -86,7 +92,19 @@ export type SourceViewDeps = {
     files: FileMeta[];
     syntaxHighlight: boolean;
   };
+  /**
+   * この実体が描く route。左の面 (本文) なら STATE.route、右の面ならその面の
+   * 前面のタブの route。STATE.route を直接読まない (面ごとに違うため)。
+   */
+  route(): AppRoute;
+  /** この実体の route を変える (左は app の setRoute、右はその面の route)。 */
   setRoute(route: AppRoute, replace?: boolean): void;
+  /** この実体が描いたものを探す範囲 (左は #content、右はその面の箱)。 */
+  scope(): ParentNode;
+  /** ソースのカードを差し込む先 (左は #diff、右はその面の箱の本体)。 */
+  mountRoot(): HTMLElement;
+  /** この実体のスクロール先 (左は本文の scroller、右はその面の箱の scroller)。 */
+  mainScrollTarget(): HTMLElement | null;
   setPageMode(): void;
   currentRange(): DiffRange;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
@@ -130,17 +148,30 @@ export type SourceViewDeps = {
     unit?: "line" | "page",
   ): void;
   focusMainSurface(): void;
+  /**
+   * Code / Preview を切り替えた後にキー操作の相手を置く先。無ければ本文
+   * (#content)。右の面の実体はその面の枠。
+   */
+  focusPanel?(): void;
   isPaletteOpen(): boolean;
   getLanguage(): DelimitedPreviewLanguage;
   onSourceRendered?(): void;
+  /**
+   * この実体が読む URL (ファイルの中身・範囲・生のリンク) を送る先へ直す。別の
+   * プロジェクトのファイルを出す実体は、そのプロジェクトの `/p/<鍵>` へ向ける
+   * (app.ts の別のプロジェクトの面)。無ければこのページのプロジェクト。
+   */
+  requestUrl?(url: string): string;
 };
 
 export function createSourceView(deps: SourceViewDeps) {
   const {
-    $,
-    $$,
     STATE,
+    route: currentRoute,
     setRoute,
+    scope,
+    mountRoot,
+    mainScrollTarget,
     setPageMode,
     currentRange,
     trackLoad,
@@ -165,6 +196,12 @@ export function createSourceView(deps: SourceViewDeps) {
     isPaletteOpen,
     getLanguage,
   } = deps;
+
+  /** この実体の route がファイルなら、その route。 */
+  function currentFileRoute(): Extract<AppRoute, { screen: "file" }> | null {
+    const route = currentRoute();
+    return route.screen === "file" ? route : null;
+  }
 
   function markdownLinkNavigationDeps(): MarkdownLinkNavigationDeps {
     return {
@@ -212,19 +249,19 @@ export function createSourceView(deps: SourceViewDeps) {
   const SOURCE_CURSOR_TOTALS = new Map<string, number>();
 
   function sourceLineScrollAmount(): number | null {
-    const virtualRow = document.querySelector<HTMLElement>(
-      "#content .gdp-source-virtual:not([hidden]) .gdp-source-virtual-row",
+    const virtualRow = scope().querySelector<HTMLElement>(
+      ".gdp-source-virtual:not([hidden]) .gdp-source-virtual-row",
     );
     if (virtualRow)
       return (
         virtualRow.getBoundingClientRect().height || VIRTUAL_SOURCE_ROW_HEIGHT
       );
-    const sourceRow = document.querySelector<HTMLElement>(
-      "#content .gdp-source-table:not([hidden]) tr",
+    const sourceRow = scope().querySelector<HTMLElement>(
+      ".gdp-source-table:not([hidden]) tr",
     );
     if (sourceRow) return sourceRow.getBoundingClientRect().height || 20;
-    const preview = document.querySelector<HTMLElement>(
-      "#content .gdp-markdown-preview:not([hidden])",
+    const preview = scope().querySelector<HTMLElement>(
+      ".gdp-markdown-preview:not([hidden])",
     );
     if (preview) {
       const previewLineHeight = Number.parseFloat(
@@ -243,8 +280,8 @@ export function createSourceView(deps: SourceViewDeps) {
 
   function hasVisibleSourceCodeSurface(): boolean {
     return Array.from(
-      document.querySelectorAll<HTMLElement>(
-        "#content .gdp-source-virtual-scroller, #content .gdp-source-table",
+      scope().querySelectorAll<HTMLElement>(
+        ".gdp-source-virtual-scroller, .gdp-source-table",
       ),
     ).some((item) => item.offsetParent !== null);
   }
@@ -270,8 +307,8 @@ export function createSourceView(deps: SourceViewDeps) {
       SOURCE_CURSOR_ROWS.every((row) => !row.isConnected)
     ) {
       SOURCE_CURSOR_ROWS = Array.from(
-        document.querySelectorAll<HTMLElement>(
-          "#content .gdp-source-table tr.gdp-source-cursor, #content .gdp-source-virtual-row.gdp-source-cursor",
+        scope().querySelectorAll<HTMLElement>(
+          ".gdp-source-table tr.gdp-source-cursor, .gdp-source-virtual-row.gdp-source-cursor",
         ),
       );
     }
@@ -282,16 +319,14 @@ export function createSourceView(deps: SourceViewDeps) {
     if (!SOURCE_CURSOR || !sourceTargetsEqual(SOURCE_CURSOR.target, target))
       return;
     const line = String(SOURCE_CURSOR.line);
-    const table = document.querySelector<HTMLTableElement>(
-      "#content .gdp-source-table",
-    );
+    const table = scope().querySelector<HTMLTableElement>(".gdp-source-table");
     const tableRow = table?.rows[SOURCE_CURSOR.line - 1];
     if (tableRow?.dataset.line === line) {
       tableRow.classList.add("gdp-source-cursor");
       SOURCE_CURSOR_ROWS.push(tableRow);
     }
-    const windowEl = document.querySelector<HTMLElement>(
-      "#content .gdp-source-virtual-window",
+    const windowEl = scope().querySelector<HTMLElement>(
+      ".gdp-source-virtual-window",
     );
     if (windowEl) {
       const firstLine = Number(
@@ -310,16 +345,19 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function visibleSourceLineFallback(): number {
-    const scroller = findMainScrollTarget();
+    const scroller = mainScrollTarget();
     const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
     if (scroller)
       return Math.max(1, Math.floor(scroller.scrollTop / rowHeight) + 1);
-    const rows = $$<HTMLElement>("#content .gdp-source-table tr[data-line]");
-    const contentTop =
-      document.querySelector<HTMLElement>("#content")?.getBoundingClientRect()
-        .top ?? 0;
+    const rows = Array.from(
+      scope().querySelectorAll<HTMLElement>(".gdp-source-table tr[data-line]"),
+    );
+    const scopeTop =
+      scope() instanceof HTMLElement
+        ? (scope() as HTMLElement).getBoundingClientRect().top
+        : 0;
     const row = rows.find(
-      (item) => item.getBoundingClientRect().bottom >= Math.max(0, contentTop),
+      (item) => item.getBoundingClientRect().bottom >= Math.max(0, scopeTop),
     );
     return Math.max(1, Number(row?.dataset.line || "1"));
   }
@@ -351,7 +389,7 @@ export function createSourceView(deps: SourceViewDeps) {
     cursor: { target: SourceFileTarget; line: number },
     edge: "nearest" | "center" | "start" = "nearest",
   ) {
-    const scroller = findMainScrollTarget();
+    const scroller = mainScrollTarget();
     if (scroller) {
       const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
       const top = (cursor.line - 1) * rowHeight;
@@ -374,8 +412,8 @@ export function createSourceView(deps: SourceViewDeps) {
       syncSourceCursorRows(cursor.target);
       return;
     }
-    document
-      .querySelector<HTMLElement>(`#content [data-line="${cursor.line}"]`)
+    scope()
+      .querySelector<HTMLElement>(`[data-line="${cursor.line}"]`)
       ?.scrollIntoView({ block: edge });
   }
 
@@ -399,7 +437,7 @@ export function createSourceView(deps: SourceViewDeps) {
     const pageRows = Math.max(
       1,
       Math.floor(
-        ((findMainScrollTarget()?.clientHeight || window.innerHeight) * 0.55) /
+        ((mainScrollTarget()?.clientHeight || window.innerHeight) * 0.55) /
           (sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT),
       ),
     );
@@ -411,7 +449,7 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function setSourceTabRoute(tab: SourceBlobTab): void {
-    const route = STATE.route;
+    const route = currentRoute();
     if (route.screen !== "file") return;
     setRoute({
       screen: "file",
@@ -447,9 +485,7 @@ export function createSourceView(deps: SourceViewDeps) {
     tab: "preview" | "code",
     options: { updateRoute?: boolean } = {},
   ): boolean {
-    const tabs = document.querySelector<HTMLElement>(
-      "#content .gdp-source-tabs",
-    );
+    const tabs = scope().querySelector<HTMLElement>(".gdp-source-tabs");
     if (!tabs) return false;
     const button = tabs.querySelector<HTMLButtonElement>(
       `button[data-source-tab="${tab}"]`,
@@ -462,11 +498,11 @@ export function createSourceView(deps: SourceViewDeps) {
       const previewButton = tabs.querySelector<HTMLButtonElement>(
         'button[data-source-tab="preview"]',
       );
-      const codePane = document.querySelector<HTMLElement>(
-        '#content [data-source-pane="code"]',
+      const codePane = scope().querySelector<HTMLElement>(
+        '[data-source-pane="code"]',
       );
-      const previewPane = document.querySelector<HTMLElement>(
-        '#content [data-source-pane="preview"]',
+      const previewPane = scope().querySelector<HTMLElement>(
+        '[data-source-pane="preview"]',
       );
       if (!codeButton || !codePane) return false;
       const applied = applyRenderedSourceTab(
@@ -477,11 +513,11 @@ export function createSourceView(deps: SourceViewDeps) {
         previewPane,
         false,
       );
-      if (applied) focusMainPanel();
+      if (applied) (deps.focusPanel ?? focusMainPanel)();
       return applied;
     }
     button.click();
-    focusMainPanel();
+    (deps.focusPanel ?? focusMainPanel)();
     return true;
   }
 
@@ -495,27 +531,33 @@ export function createSourceView(deps: SourceViewDeps) {
     });
   }
 
+  /**
+   * Shiki で行ごとの HTML にする。失敗したら理由 (言語と元の例外) を付けて
+   * 投げる: 呼び出し側が原文のまま失敗の印を付ける (showHighlightFailure)。
+   */
   function sourceShikiLines(
     textValue: string,
     lang: string,
     highlighter: ShikiHighlighter,
-  ): string[] | null {
+  ): string[] {
+    let html: string;
     try {
-      const html = highlighter.codeToHtml(textValue || " ", {
+      html = highlighter.codeToHtml(textValue || " ", {
         lang,
         themes: { light: "github-light", dark: "github-dark" },
         defaultColor: false,
       });
-      const template = document.createElement("template");
-      template.innerHTML = html;
-      const renderedLines = Array.from(
-        template.content.querySelectorAll<HTMLElement>(".line"),
-      );
-      if (!renderedLines.length) return null;
-      return renderedLines.map((line) => line.innerHTML || " ");
-    } catch {
-      return null;
+    } catch (error) {
+      throw errorWithCause(`shiki could not highlight ${lang}`, error);
     }
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const renderedLines = Array.from(
+      template.content.querySelectorAll<HTMLElement>(".line"),
+    );
+    if (!renderedLines.length)
+      throw new Error(`shiki returned no lines for ${lang}`);
+    return renderedLines.map((line) => line.innerHTML || " ");
   }
 
   function scheduleSourceHighlight(
@@ -572,7 +614,11 @@ export function createSourceView(deps: SourceViewDeps) {
           });
         })
         .catch((err: unknown) => {
-          console.error("Failed to apply source syntax highlighting", err);
+          showHighlightFailure(
+            table,
+            `syntax highlighting failed for ${target.path}`,
+            err,
+          );
         });
     }, 0);
   }
@@ -615,7 +661,11 @@ export function createSourceView(deps: SourceViewDeps) {
           onReplace(next);
         })
         .catch((err: unknown) => {
-          console.error("Failed to apply preview syntax highlighting", err);
+          showHighlightFailure(
+            preview,
+            `preview syntax highlighting failed for ${target.path}`,
+            err,
+          );
         });
     }, 0);
   }
@@ -626,12 +676,9 @@ export function createSourceView(deps: SourceViewDeps) {
 
   function preferredSourceTabFor(previewable: boolean): SourceBlobTab {
     if (!previewable) return "code";
+    const fileRoute = currentFileRoute();
     const routeTab =
-      STATE.route.screen === "file" &&
-      STATE.route.view === "blob" &&
-      STATE.route.preview
-        ? "preview"
-        : "code";
+      fileRoute?.view === "blob" && fileRoute.preview ? "preview" : "code";
     return PREFERRED_SOURCE_TAB || routeTab;
   }
 
@@ -681,7 +728,7 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function sourceTargetFromRoute(): SourceFileTarget | null {
-    const route = STATE.route;
+    const route = currentRoute();
     if (route.screen === "file") return { path: route.path, ref: route.ref };
     if (route.screen === "history" && route.source) {
       // Resolved through the loaded diff so a deleted file reads from the
@@ -692,13 +739,43 @@ export function createSourceView(deps: SourceViewDeps) {
     return null;
   }
 
+  /**
+   * 貼り付くファイルの見出しの高さを --doc-head-h に出す。Markdown の見出しの
+   * scroll-margin-top がこれを読み、URL の # で送ったとき (ブラウザが自分で
+   * スクロールする) に、見出しが貼り付いた見出しの下に潜らないようにする。
+   * 見出しは幅で 1〜3 段に変わる (doc-head の段) ので、大きさが変わるたびに書く。
+   */
+  function observeDocHeadHeight(wrapper: HTMLElement, sticky: HTMLElement) {
+    const write = () =>
+      wrapper.style.setProperty(
+        "--doc-head-h",
+        `${Math.ceil(sticky.getBoundingClientRect().height)}px`,
+      );
+    if (typeof ResizeObserver !== "function") {
+      write();
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      if (!sticky.isConnected) {
+        observer.disconnect();
+        return;
+      }
+      write();
+    });
+    observer.observe(sticky);
+  }
+
   function removeStandaloneSource() {
-    document.querySelectorAll(".gdp-standalone-source").forEach((el) => {
-      el.remove();
-    });
-    document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
-      el.remove();
-    });
+    scope()
+      .querySelectorAll(".gdp-standalone-source")
+      .forEach((el) => {
+        el.remove();
+      });
+    scope()
+      .querySelectorAll(".gdp-repo-blob-layout")
+      .forEach((el) => {
+        el.remove();
+      });
   }
 
   function renderSourceLoading(
@@ -719,17 +796,18 @@ export function createSourceView(deps: SourceViewDeps) {
     spinner.textContent = "";
     const title = document.createElement("strong");
     title.className = "gdp-source-loading-title";
-    title.textContent = "Loading file";
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    title.textContent = text.loadingFile;
     const message = document.createElement("div");
     message.className = "gdp-source-loading-message";
-    message.textContent = `${target.path} at ${target.ref}`;
+    message.textContent = text.fileAtRef(target.path, target.ref);
     content.append(spinner, title, message);
     if (onCancel) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "gdp-btn gdp-btn-sm gdp-source-cancel";
-      button.textContent = "Cancel";
-      button.title = "Cancel loading (Esc)";
+      button.textContent = text.cancel;
+      button.title = text.cancelTitle;
       button.addEventListener("click", (e) => {
         e.stopPropagation();
         onCancel();
@@ -757,8 +835,9 @@ export function createSourceView(deps: SourceViewDeps) {
           1,
           Math.floor((Date.now() - startedAt) / 1000),
         );
-        title.textContent = `Still loading file (${elapsed}s)`;
-        slowNote.textContent = `Taking longer than usual (${elapsed}s elapsed). You can cancel below.`;
+        const later = SOURCE_READING_TEXT[getLanguage()];
+        title.textContent = later.stillLoading(elapsed);
+        slowNote.textContent = later.slowNote(elapsed);
       };
       updateSlowNote();
       interval = window.setInterval(updateSlowNote, 1000);
@@ -777,7 +856,9 @@ export function createSourceView(deps: SourceViewDeps) {
     );
     const view = document.createElement("div");
     view.className = "gdp-source-viewer error";
-    view.textContent = message || `Cannot load ${target.path} at ${target.ref}`;
+    view.textContent =
+      message ||
+      SOURCE_READING_TEXT[getLanguage()].cannotLoad(target.path, target.ref);
     if (body) body.replaceWith(view);
     else card.appendChild(view);
     setSourceCardState(card, "error");
@@ -796,14 +877,15 @@ export function createSourceView(deps: SourceViewDeps) {
     content.className = "gdp-source-loading-content";
     const title = document.createElement("strong");
     title.className = "gdp-source-loading-title";
-    title.textContent = "Loading cancelled";
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    title.textContent = text.loadingCancelled;
     const message = document.createElement("div");
     message.className = "gdp-source-loading-message";
-    message.textContent = `${target.path} at ${target.ref}`;
+    message.textContent = text.fileAtRef(target.path, target.ref);
     const retry = document.createElement("button");
     retry.type = "button";
     retry.className = "gdp-btn gdp-btn-sm";
-    retry.textContent = "Reopen";
+    retry.textContent = text.reopen;
     retry.addEventListener("click", () =>
       renderStandaloneSource(sourceTargetFromRoute() || target),
     );
@@ -824,12 +906,13 @@ export function createSourceView(deps: SourceViewDeps) {
     const info = createSourceFileInfo(target, "unsupported file");
     const link = document.createElement("a");
     link.className = "gdp-btn gdp-btn-sm gdp-source-download";
-    link.href = buildRawFileUrl(target);
-    link.textContent = "Download raw";
+    link.href = rawFileUrl(target);
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    link.textContent = text.downloadRaw;
     link.target = "_blank";
     link.rel = "noreferrer";
     const view = renderUnsupportedPreview({
-      message: "This file type cannot be previewed safely in the browser.",
+      message: text.unsupported,
       extraChildren: [info, link],
     });
     if (body) body.replaceWith(view);
@@ -848,7 +931,7 @@ export function createSourceView(deps: SourceViewDeps) {
       loadMeta: false,
     });
     const view = renderUnsupportedPreview({
-      message: "Git internal metadata is not previewed from the file viewer.",
+      message: SOURCE_READING_TEXT[getLanguage()].internalMetadata,
       extraChildren: [info],
     });
     if (body) body.replaceWith(view);
@@ -872,11 +955,21 @@ export function createSourceView(deps: SourceViewDeps) {
     info.className = "gdp-source-file-info";
     const type = document.createElement("span");
     type.className = "kind";
-    type.textContent = humanFileKind(target.path, undefined, kind);
+    type.textContent = humanFileKind(
+      target.path,
+      undefined,
+      kind,
+      getLanguage(),
+    );
     info.appendChild(type);
     if (options.loadMeta === false) return info;
     loadRawFileInfo(target).then((meta) => {
-      type.textContent = humanFileKind(target.path, meta.type, kind);
+      type.textContent = humanFileKind(
+        target.path,
+        meta.type,
+        kind,
+        getLanguage(),
+      );
       if (meta.size != null) {
         const size = document.createElement("span");
         size.textContent = formatBytes(meta.size);
@@ -886,13 +979,22 @@ export function createSourceView(deps: SourceViewDeps) {
     return info;
   }
 
-  function createSourceCopyButton(textValue: string): HTMLButtonElement {
+  /**
+   * 中身をコピーするボタン。textValue が null なら読み込む前の場所取り
+   * (押せない。読み込んだら本物と差し替える)。
+   */
+  function createSourceCopyButton(textValue: string | null): HTMLButtonElement {
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className = "gdp-file-header-icon gdp-copy-source";
-    copy.title = "Copy source";
-    copy.setAttribute("aria-label", "Copy source");
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    copy.title = text.copySource;
+    copy.setAttribute("aria-label", text.copySource);
     copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+    if (textValue === null) {
+      copy.disabled = true;
+      return copy;
+    }
     copy.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(textValue);
@@ -900,11 +1002,14 @@ export function createSourceView(deps: SourceViewDeps) {
         setTimeout(() => {
           copy.classList.remove("copied");
         }, 1200);
-      } catch {
-        copy.classList.add("failed");
-        setTimeout(() => {
-          copy.classList.remove("failed");
-        }, 1200);
+      } catch (error) {
+        showCopyFailure(
+          copy,
+          "copy the source to the clipboard",
+          error,
+          text.copySource,
+          1600,
+        );
       }
     });
     return copy;
@@ -915,7 +1020,12 @@ export function createSourceView(deps: SourceViewDeps) {
     const form = document.createElement("form");
     form.className = "gdp-source-line-jump";
     const label = document.createElement("label");
-    label.textContent = text.line;
+    // 文字は span に包む: 狭い面では CSS がこれだけを畳む (欄は残す)。
+    // localize は label の最初の子の文字を書き換える。
+    const labelText = document.createElement("span");
+    labelText.className = "gdp-source-line-jump-label";
+    labelText.textContent = text.line;
+    label.appendChild(labelText);
     const input = document.createElement("input");
     input.type = "number";
     input.min = "1";
@@ -932,7 +1042,7 @@ export function createSourceView(deps: SourceViewDeps) {
     button.textContent = text.go;
     const count = document.createElement("span");
     count.className = "gdp-source-line-count";
-    count.textContent = total ? text.total(total) : "";
+    count.textContent = total ? text.total(total) : text.totalPending;
     form.append(count, label, button);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -946,10 +1056,15 @@ export function createSourceView(deps: SourceViewDeps) {
     return form;
   }
 
+  /**
+   * 見出しの右の切替・行へ移る欄・コピー。textValue が null なら読み込む前の
+   * 場所取り (コピーは押せない)、undefined ならコピーを置かない (大きいファイル
+   * を分けて読むとき)。
+   */
   function createSourceTabs(
     target: SourceFileTarget,
     active: SourceBlobTab,
-    textValue?: string,
+    textValue?: string | null,
     options: { previewable?: boolean } = {},
   ) {
     const tabs = document.createElement("div");
@@ -961,11 +1076,11 @@ export function createSourceView(deps: SourceViewDeps) {
       active,
       {
         includeFileTabs:
-          STATE.route.screen === "file" &&
+          currentRoute().screen === "file" &&
           sourceInternalPathKind(target.path) !== "code-viewer",
         previewable: !!options.previewable || active === "preview",
         sourceTabClick: "manual",
-        ...(textValue != null
+        ...(textValue !== undefined
           ? { sourceCopyButton: createSourceCopyButton(textValue) }
           : {}),
       },
@@ -1278,7 +1393,7 @@ export function createSourceView(deps: SourceViewDeps) {
         ? Math.max(0, Math.min(meta.size, UNKNOWN_TEXT_SNIFF_BYTES) - 1)
         : UNKNOWN_TEXT_SNIFF_BYTES - 1;
     const response = await trackLoad(
-      fetch(buildRawFileUrl(target), {
+      fetch(rawFileUrl(target), {
         headers: { Range: `bytes=0-${end}` },
         signal,
       }),
@@ -1288,9 +1403,7 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function isVirtualSourceDisabled(): boolean {
-    return (
-      deps.STATE.route.screen === "file" && deps.STATE.route.virtual === "off"
-    );
+    return currentFileRoute()?.virtual === "off";
   }
 
   function buildCurrentFileRouteWithVirtualMode(
@@ -1301,11 +1414,17 @@ export function createSourceView(deps: SourceViewDeps) {
       screen: "file",
       path: target.path,
       ref: target.ref,
-      view: STATE.route.screen === "file" ? STATE.route.view : "blob",
+      view: currentFileRoute()?.view ?? "blob",
       range: currentRange(),
       ...(virtualMode === "off" ? { virtual: "off" as const } : {}),
     };
     return buildRoute(route);
+  }
+
+  /** ファイルの中身の URL (この実体が読むプロジェクトの)。 */
+  function rawFileUrl(target: SourceFileTarget): string {
+    const url = buildRawFileUrl(target);
+    return deps.requestUrl ? deps.requestUrl(url) : url;
   }
 
   function buildFileRangeUrl(
@@ -1313,25 +1432,25 @@ export function createSourceView(deps: SourceViewDeps) {
     start: number,
     end: number,
   ): string {
-    return (
-      "/file_range?path=" +
+    const url =
+      apiUrl("fileRange") +
+      "?path=" +
       encodeURIComponent(target.path) +
       "&ref=" +
       encodeURIComponent(target.ref || "worktree") +
       "&start=" +
       encodeURIComponent(String(start)) +
       "&end=" +
-      encodeURIComponent(String(end))
-    );
+      encodeURIComponent(String(end));
+    return deps.requestUrl ? deps.requestUrl(url) : url;
   }
 
   function currentSourceLineTarget(
     target: SourceFileTarget,
   ): SourceLineTarget | undefined {
     const routeTarget = sourceTargetFromRoute();
-    return sourceTargetsEqual(routeTarget, target) &&
-      STATE.route.screen === "file"
-      ? STATE.route.line
+    return sourceTargetsEqual(routeTarget, target)
+      ? currentFileRoute()?.line
       : undefined;
   }
 
@@ -1341,11 +1460,11 @@ export function createSourceView(deps: SourceViewDeps) {
     target: SourceFileTarget,
   ): string | undefined {
     const routeTarget = sourceTargetFromRoute();
+    const fileRoute = currentFileRoute();
     return sourceTargetsEqual(routeTarget, target) &&
-      STATE.route.screen === "file" &&
-      STATE.route.line &&
-      STATE.route.hl
-      ? STATE.route.hl
+      fileRoute?.line &&
+      fileRoute.hl
+      ? fileRoute.hl
       : undefined;
   }
 
@@ -1435,13 +1554,14 @@ export function createSourceView(deps: SourceViewDeps) {
     target: SourceFileTarget,
     line: SourceLineTarget,
   ) {
-    if (STATE.route.screen !== "file") return;
+    const fileRoute = currentFileRoute();
+    if (!fileRoute) return;
     setRoute(
       {
         screen: "file",
         path: target.path,
         ref: target.ref,
-        view: STATE.route.view,
+        view: fileRoute.view,
         range: currentRange(),
         line,
       },
@@ -1586,20 +1706,21 @@ export function createSourceView(deps: SourceViewDeps) {
     bar.className = "gdp-source-virtual-search";
     const input = document.createElement("input");
     input.type = "search";
-    input.placeholder = "Find in file";
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    input.placeholder = text.findInFile;
     input.autocomplete = "off";
     input.spellcheck = false;
     const count = document.createElement("span");
     count.className = "gdp-source-virtual-search-count";
     const previous = document.createElement("button");
     previous.type = "button";
-    previous.textContent = "Prev";
+    previous.textContent = text.findPrev;
     const next = document.createElement("button");
     next.type = "button";
-    next.textContent = "Next";
+    next.textContent = text.findNext;
     const close = document.createElement("button");
     close.type = "button";
-    close.textContent = "Close";
+    close.textContent = text.findClose;
     bar.append(input, count, previous, next, close);
     wrap.querySelector(".gdp-source-virtual-info")?.appendChild(bar);
     bar.hidden = true;
@@ -1623,7 +1744,7 @@ export function createSourceView(deps: SourceViewDeps) {
         renderFn();
         return;
       }
-      count.textContent = "Searching...";
+      count.textContent = text.searching;
       findMatches(query)
         .then((nextMatches) => {
           if (version !== searchVersion) return;
@@ -1634,6 +1755,7 @@ export function createSourceView(deps: SourceViewDeps) {
           count.textContent = matches.length
             ? `${active + 1} / ${matches.length}`
             : "0 / 0";
+          count.removeAttribute("title");
           if (active >= 0) {
             const rowHeight =
               sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
@@ -1644,11 +1766,17 @@ export function createSourceView(deps: SourceViewDeps) {
           }
           renderFn();
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           if (version !== searchVersion) return;
+          const failure = errorWithCause(
+            `in-file search for ${JSON.stringify(query)} failed`,
+            error,
+          );
+          console.error(failure);
           matches = [];
           active = -1;
-          count.textContent = "Search failed";
+          count.textContent = text.searchFailed;
+          count.title = formatErrorDetail(failure);
           renderFn();
         });
     };
@@ -1700,11 +1828,12 @@ export function createSourceView(deps: SourceViewDeps) {
   function openVirtualSourceSearchFromKeyboard(
     targetEl: Element | null,
   ): boolean {
-    const active = targetEl?.closest<VirtualSourceSearchRoot>(
-      "#content .gdp-source-virtual",
+    const closest = targetEl?.closest<VirtualSourceSearchRoot>(
+      ".gdp-source-virtual",
     );
-    const fallback = document.querySelector<VirtualSourceSearchRoot>(
-      "#content .gdp-source-viewer.virtual .gdp-source-virtual:not([hidden])",
+    const active = closest && scope().contains(closest) ? closest : null;
+    const fallback = scope().querySelector<VirtualSourceSearchRoot>(
+      ".gdp-source-viewer.virtual .gdp-source-virtual:not([hidden])",
     );
     const search =
       active?.__gdpVirtualSourceSearch || fallback?.__gdpVirtualSourceSearch;
@@ -1726,22 +1855,22 @@ export function createSourceView(deps: SourceViewDeps) {
     info.className = "gdp-source-virtual-info";
     const badge = document.createElement("span");
     badge.className = "gdp-source-virtual-badge";
-    badge.textContent = "Virtual mode";
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    badge.textContent = text.virtualMode;
     const summary = document.createElement("span");
     summary.className = "gdp-source-virtual-summary";
-    summary.textContent =
-      lines.length.toLocaleString() +
-      " lines, " +
-      formatBytes(textValue.length) +
-      ". Only visible rows are rendered. Highlighting is per-line.";
+    summary.textContent = text.virtualSummary(
+      lines.length.toLocaleString(),
+      formatBytes(textValue.length),
+    );
     const actions = document.createElement("span");
     actions.className = "gdp-source-virtual-actions";
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className =
       "gdp-file-header-icon gdp-copy-source gdp-source-virtual-copy";
-    copy.title = "Copy source";
-    copy.setAttribute("aria-label", "Copy source");
+    copy.title = text.copySource;
+    copy.setAttribute("aria-label", text.copySource);
     copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
     copy.addEventListener("click", async () => {
       try {
@@ -1750,19 +1879,21 @@ export function createSourceView(deps: SourceViewDeps) {
         setTimeout(() => {
           copy.classList.remove("copied");
         }, 1200);
-      } catch {
-        copy.classList.add("failed");
-        setTimeout(() => {
-          copy.classList.remove("failed");
-        }, 1600);
+      } catch (error) {
+        showCopyFailure(
+          copy,
+          "copy the source to the clipboard",
+          error,
+          text.copySource,
+          1600,
+        );
       }
     });
     const full = document.createElement("a");
     full.className = "gdp-source-virtual-action";
     full.href = buildCurrentFileRouteWithVirtualMode(target, "off");
-    full.textContent = "Open full view";
-    full.title =
-      "Render every line without virtualization. This can be slow for large files.";
+    full.textContent = text.openFullView;
+    full.title = text.openFullViewTitle;
     full.addEventListener("click", (e) => {
       e.preventDefault();
       const url = new URL(full.href, window.location.origin);
@@ -1775,7 +1906,7 @@ export function createSourceView(deps: SourceViewDeps) {
     scroller.className = "gdp-source-virtual-scroller";
     scroller.tabIndex = 0;
     scroller.setAttribute("role", "region");
-    scroller.setAttribute("aria-label", `${target.path} source code`);
+    scroller.setAttribute("aria-label", text.sourceCode(target.path));
     const spacer = document.createElement("div");
     spacer.className = "gdp-source-virtual-spacer";
     spacer.style.height = `${Math.max(
@@ -1862,8 +1993,13 @@ export function createSourceView(deps: SourceViewDeps) {
               ignoreIllegals: true,
             }).value;
             code.classList.add("hljs");
-          } catch {
+          } catch (error) {
             code.textContent = line;
+            showHighlightFailure(
+              code,
+              `syntax highlighting failed for line ${index + 1} of ${target.path}`,
+              error,
+            );
           }
         } else {
           code.textContent = line;
@@ -1932,23 +2068,23 @@ export function createSourceView(deps: SourceViewDeps) {
     info.className = "gdp-source-virtual-info";
     const badge = document.createElement("span");
     badge.className = "gdp-source-virtual-badge";
-    badge.textContent = "Virtual mode";
+    const text = SOURCE_READING_TEXT[getLanguage()];
+    badge.textContent = text.virtualMode;
     const summary = document.createElement("span");
     summary.className = "gdp-source-virtual-summary";
     const actions = document.createElement("span");
     actions.className = "gdp-source-virtual-actions";
     const raw = document.createElement("a");
     raw.className = "gdp-source-virtual-action";
-    raw.href = buildRawFileUrl(target);
+    raw.href = rawFileUrl(target);
     raw.target = "_blank";
     raw.rel = "noreferrer";
-    raw.textContent = "Open raw";
+    raw.textContent = text.openRaw;
     const full = document.createElement("a");
     full.className = "gdp-source-virtual-action";
     full.href = buildCurrentFileRouteWithVirtualMode(target, "off");
-    full.textContent = "Open full view";
-    full.title =
-      "Render every line without paged loading. This can be slow for large files.";
+    full.textContent = text.openFullView;
+    full.title = text.openFullViewPagedTitle;
     full.addEventListener("click", (e) => {
       e.preventDefault();
       const url = new URL(full.href, window.location.origin);
@@ -1962,7 +2098,7 @@ export function createSourceView(deps: SourceViewDeps) {
     scroller.className = "gdp-source-virtual-scroller";
     scroller.tabIndex = 0;
     scroller.setAttribute("role", "region");
-    scroller.setAttribute("aria-label", `${target.path} source code`);
+    scroller.setAttribute("aria-label", text.sourceCode(target.path));
     const spacer = document.createElement("div");
     spacer.className = "gdp-source-virtual-spacer";
     const windowEl = document.createElement("div");
@@ -1973,7 +2109,8 @@ export function createSourceView(deps: SourceViewDeps) {
 
     const lines = new Map<number, string>();
     const requestedPages = new Set<number>();
-    const failedPages = new Set<number>();
+    /** 読めなかったページと、その理由 (行に失敗の印と title で出す)。 */
+    const failedPages = new Map<number, string>();
     const targetLine = lineTargetStart(currentSourceLineTarget(target)) || 1;
     let complete = initialComplete;
     let totalRows = initialComplete
@@ -2001,13 +2138,12 @@ export function createSourceView(deps: SourceViewDeps) {
 
     const updateTotals = () => {
       SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), totalRows);
-      summary.textContent =
-        (complete
+      summary.textContent = text.pagedSummary(
+        complete
           ? totalRows.toLocaleString()
-          : `${lines.size.toLocaleString()}+`) +
-        " lines loaded from " +
-        formatBytes(size) +
-        ". More rows load as you scroll.";
+          : `${lines.size.toLocaleString()}+`,
+        formatBytes(size),
+      );
       const rowHeight = sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT;
       spacer.style.height = `${Math.max(1, totalRows * rowHeight)}px`;
     };
@@ -2025,11 +2161,18 @@ export function createSourceView(deps: SourceViewDeps) {
       const end = start + VIRTUAL_SOURCE_PAGE_SIZE - 1;
       trackLoad(
         fetch(buildFileRangeUrl(target, start, end), { signal })
-          .then((res) =>
-            res.ok ? (res.json() as Promise<FileRangeResponse>) : null,
-          )
+          .then(async (res) => {
+            if (!res.ok)
+              throw new Error(
+                await responseErrorMessage(
+                  res,
+                  `load lines ${start}-${end} of ${target.path}`,
+                ),
+              );
+            return res.json() as Promise<FileRangeResponse>;
+          })
           .then((data) => {
-            if (!data || signal?.aborted) return;
+            if (signal?.aborted) return;
             data.lines.forEach((lineValue, index) => {
               lines.set(data.start + index, lineValue);
             });
@@ -2044,7 +2187,12 @@ export function createSourceView(deps: SourceViewDeps) {
           })
           .catch((err) => {
             if (!isAbortError(err)) {
-              failedPages.add(page);
+              const failure = errorWithCause(
+                `lines ${start}-${end} of ${target.path} could not be loaded`,
+                err,
+              );
+              console.error(failure);
+              failedPages.set(page, formatErrorDetail(failure));
               renderedStart = -1;
               renderedEnd = -1;
               schedule();
@@ -2106,8 +2254,16 @@ export function createSourceView(deps: SourceViewDeps) {
         const code = document.createElement("span");
         code.className = "gdp-source-virtual-line-code";
         const line = lines.get(lineNumber);
+        const failedReason = failedPages.get(
+          Math.floor((lineNumber - 1) / VIRTUAL_SOURCE_PAGE_SIZE),
+        );
         if (line == null) {
           code.textContent = "";
+          // 読めなかった範囲の行は空のままにせず、失敗の印と理由を付ける。
+          if (failedReason) {
+            code.classList.add("gdp-highlight-failed");
+            code.title = failedReason;
+          }
         } else if (
           appendVirtualSourceLineCode(
             code,
@@ -2130,8 +2286,13 @@ export function createSourceView(deps: SourceViewDeps) {
               ignoreIllegals: true,
             }).value;
             code.classList.add("hljs");
-          } catch {
+          } catch (error) {
             code.textContent = line;
+            showHighlightFailure(
+              code,
+              `syntax highlighting failed for line ${lineNumber} of ${target.path}`,
+              error,
+            );
           }
         } else {
           code.textContent = line;
@@ -2269,11 +2430,18 @@ export function createSourceView(deps: SourceViewDeps) {
     const initial = await trackLoad(
       fetch(buildFileRangeUrl(target, initialStart, initialEnd), {
         signal,
-      }).then((res) =>
-        res.ok ? (res.json() as Promise<FileRangeResponse>) : null,
-      ),
+      }).then(async (res) => {
+        // 失敗は呼び出し側の catch が理由ごと画面と console に出す。
+        if (!res.ok)
+          throw new Error(
+            await responseErrorMessage(
+              res,
+              `loading lines ${initialStart}-${initialEnd} of ${target.path}`,
+            ),
+          );
+        return res.json() as Promise<FileRangeResponse>;
+      }),
     );
-    if (!initial) return false;
     if (signal?.aborted) return false;
     SOURCE_CURSOR_TOTALS.set(
       sourceCursorKey(target),
@@ -2324,7 +2492,7 @@ export function createSourceView(deps: SourceViewDeps) {
       meta.textContent = `${target.path} @ ${target.ref}`;
       view.appendChild(meta);
     }
-    const url = buildRawFileUrl(target);
+    const url = rawFileUrl(target);
     const info = createSourceFileInfo(target, mediaKind);
     view.appendChild(info);
     appendMediaEmbed(view, {
@@ -2353,8 +2521,8 @@ export function createSourceView(deps: SourceViewDeps) {
     const view = document.createElement("div");
     view.className = "gdp-source-viewer binary";
     const link = document.createElement("a");
-    link.href = buildRawFileUrl(target);
-    link.textContent = "Open raw file";
+    link.href = rawFileUrl(target);
+    link.textContent = SOURCE_READING_TEXT[getLanguage()].openRawFile;
     link.target = "_blank";
     link.rel = "noreferrer";
     if (!isStandalone) {
@@ -2380,7 +2548,7 @@ export function createSourceView(deps: SourceViewDeps) {
   function mountedStandaloneSourceCard(
     target: SourceFileTarget,
   ): DiffCardElement | null {
-    const card = document.querySelector<DiffCardElement>(
+    const card = scope().querySelector<DiffCardElement>(
       ".gdp-standalone-source",
     );
     if (!card) return null;
@@ -2414,9 +2582,7 @@ export function createSourceView(deps: SourceViewDeps) {
         syncSourceHighlightMarks(mounted, target);
         scrollStandaloneSourceLine(
           mounted,
-          lineTargetStart(
-            STATE.route.screen === "file" ? STATE.route.line : undefined,
-          ),
+          lineTargetStart(currentFileRoute()?.line),
         );
         return;
       }
@@ -2428,9 +2594,11 @@ export function createSourceView(deps: SourceViewDeps) {
     const repoTarget = repoFileTargetFromRoute();
     setPageMode();
     removeStandaloneSource();
-    document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
-      el.remove();
-    });
+    scope()
+      .querySelectorAll(".gdp-repo-blob-layout")
+      .forEach((el) => {
+        el.remove();
+      });
     const card = document.createElement("article") as DiffCardElement;
     card.className =
       "gdp-file-shell loaded gdp-standalone-source gdp-source-mode";
@@ -2442,11 +2610,10 @@ export function createSourceView(deps: SourceViewDeps) {
     wrapper.className = "gdp-file-detail-wrapper";
     const mediaOnly = !internalKind && isMediaPreviewOnlySource(target.path);
     const activeTab: SourceBlobTab =
-      mediaOnly ||
-      (!internalKind && STATE.route.screen === "file" && STATE.route.preview)
+      mediaOnly || (!internalKind && !!currentFileRoute()?.preview)
         ? "preview"
         : "code";
-    const { sticky, header } = createFileShellSticky(
+    const { sticky, header, tabsHost } = createFileShellSticky(
       {
         currentRange,
         setRoute,
@@ -2459,13 +2626,25 @@ export function createSourceView(deps: SourceViewDeps) {
       activeTab,
       internalKind ? { includeFileTabs: false, previewable: false } : {},
     );
+    // 文字のファイルは、読み込んだ後の切替・行へ移る欄・コピーを読み込む前から
+    // 同じ関数で置く。後から足すと、右寄せの切替が左へ伸びて見出しが動いていた
+    // (約 250px)。大きいファイル (分けて読む) はコピーを置かないので、そのとき
+    // だけコピーの幅の分が残る。
+    if (!internalKind && sourceDisplayKind(target.path) === "text") {
+      const previewable = isPreviewableSource(target.path);
+      tabsHost.replaceChildren(
+        createSourceTabs(target, preferredSourceTabFor(previewable), null, {
+          previewable,
+        }).tabs,
+      );
+    }
     const pathActions =
       header.querySelector<HTMLElement>(".gdp-file-detail-path") || header;
     pathActions.appendChild(
       createOpenPathButton(
         target.path,
         "file-parent",
-        "open parent folder in OS",
+        DIFF_SCREEN_TEXT[getLanguage()].openParentFolder,
       ),
     );
     if (repoTarget && canTrashWorktreeRef(repoTarget)) {
@@ -2493,7 +2672,7 @@ export function createSourceView(deps: SourceViewDeps) {
       back.className = "gdp-view-file gdp-btn gdp-btn-sm";
       setViewFileButtonState(back, true);
       back.addEventListener("click", () => {
-        const route = STATE.route;
+        const route = currentRoute();
         setRoute(
           route.screen === "history"
             ? { ...route, source: undefined }
@@ -2505,6 +2684,7 @@ export function createSourceView(deps: SourceViewDeps) {
       header.appendChild(back);
     }
     wrapper.appendChild(sticky);
+    observeDocHeadHeight(wrapper, sticky);
     const detailBody = document.createElement("div");
     detailBody.className = "gdp-file-detail-body";
     wrapper.appendChild(detailBody);
@@ -2513,7 +2693,12 @@ export function createSourceView(deps: SourceViewDeps) {
     // (hidden via body.gdp-repo-blob-page CSS), so leaving the blob view does
     // not force a full diff reload.
     mountFileShellCard(
-      { $, repoFileTargetFromRoute, renderRepoBlobSidebar, placeSidebarToggle },
+      {
+        mountRoot,
+        repoFileTargetFromRoute,
+        renderRepoBlobSidebar,
+        placeSidebarToggle,
+      },
       target,
       card,
       repoTarget,
@@ -2591,11 +2776,10 @@ export function createSourceView(deps: SourceViewDeps) {
             )
               return;
             if (!rendered) {
-              // The only way to get here with a current req is the initial
-              // range request failing (an abort always bumps SOURCE_REQ_SEQ
-              // first). Land on "error" instead of leaving the card stuck in
-              // "loading", which the idempotent-mount guard would otherwise
-              // treat as in-progress and refuse to retry on re-click.
+              // An aborted load with a current req. Land on "error" instead
+              // of leaving the card stuck in "loading", which the
+              // idempotent-mount guard would otherwise treat as in-progress
+              // and refuse to retry on re-click.
               finishSourceLoad(req);
               renderSourceError(
                 card,
@@ -2604,33 +2788,23 @@ export function createSourceView(deps: SourceViewDeps) {
               );
               return;
             }
-            scrollStandaloneSourceLine(
-              card,
-              lineTargetStart(
-                STATE.route.screen === "file" ? STATE.route.line : undefined,
-              ),
-            );
+            scrollToLineOrRemembered(card, target);
             setSourceCardState(card, "done");
             finishSourceLoad(req);
             return;
           }
           const response = await trackLoad(
-            fetch(buildRawFileUrl(target), { signal: controller.signal }),
+            fetch(rawFileUrl(target), { signal: controller.signal }),
           );
           if (
             req !== SOURCE_REQ_SEQ ||
             !sourceTargetsEqual(sourceTargetFromRoute(), target)
           )
             return;
-          if (!response.ok) {
-            finishSourceLoad(req);
-            renderSourceError(
-              card,
-              target,
-              `Cannot load ${target.path} at ${target.ref}`,
+          if (!response.ok)
+            throw new Error(
+              await responseErrorMessage(response, `loading ${target.path}`),
             );
-            return;
-          }
           const textValue = await response.text();
           if (
             req !== SOURCE_REQ_SEQ ||
@@ -2649,12 +2823,7 @@ export function createSourceView(deps: SourceViewDeps) {
           )
             return;
           if (!rendered) return;
-          scrollStandaloneSourceLine(
-            card,
-            lineTargetStart(
-              STATE.route.screen === "file" ? STATE.route.line : undefined,
-            ),
-          );
+          scrollToLineOrRemembered(card, target);
           setSourceCardState(card, "done");
           finishSourceLoad(req);
         }
@@ -2669,10 +2838,14 @@ export function createSourceView(deps: SourceViewDeps) {
           renderSourceCancelled(card, target);
           return;
         }
+        console.error(
+          `[code-viewer] loading ${target.path} at ${target.ref} failed`,
+          err,
+        );
         renderSourceError(
           card,
           target,
-          `Cannot load ${target.path} at ${target.ref}`,
+          `Cannot load ${target.path} at ${target.ref}\n${formatErrorDetail(err)}`,
         );
       }
     })();
@@ -2681,6 +2854,60 @@ export function createSourceView(deps: SourceViewDeps) {
     });
     card._loadPromise = completed;
     return completed;
+  }
+
+  // ---- ファイルごとのスクロール位置 (この実体の面の中。セッション中だけ) ----
+  // タブを切り替えて同じファイルへ戻ったとき、描き直しても前の位置へ戻す。
+  // 行の指定 (line=) がある route はその行が優先。保存はしない。
+  const SOURCE_SCROLL = new Map<string, number>();
+
+  function sourceScrollTop(): number {
+    const scroller = mainScrollTarget();
+    return scroller ? scroller.scrollTop : window.scrollY;
+  }
+
+  // 見えている描き終わったカードが今の route のファイルなら、その位置を覚える。
+  // route が移った後に届くスクロール (前の画面の位置の戻り) は覚えない。
+  document.addEventListener(
+    "scroll",
+    () => {
+      const route = currentFileRoute();
+      if (route?.view !== "blob") return;
+      const card = scope().querySelector<HTMLElement>(
+        '.gdp-standalone-source[data-source-state="done"]',
+      );
+      if (
+        !card ||
+        card.offsetParent === null ||
+        card.dataset.path !== route.path ||
+        card.dataset.sourceRef !== (route.ref || "worktree")
+      )
+        return;
+      SOURCE_SCROLL.set(
+        sourceCursorKey({ path: route.path, ref: route.ref }),
+        sourceScrollTop(),
+      );
+    },
+    { capture: true, passive: true },
+  );
+
+  /** 描き終わったとき: 行の指定があればその行、無ければ覚えた位置 (無ければ先頭)。 */
+  function scrollToLineOrRemembered(
+    card: HTMLElement,
+    target: SourceFileTarget,
+  ): void {
+    const route = currentFileRoute();
+    // ファイルの route でない (History の画面の中のソースなど) は今までどおり動かさない。
+    if (!route) return;
+    const line = lineTargetStart(route.line);
+    if (line) {
+      scrollStandaloneSourceLine(card, line);
+      return;
+    }
+    const top = SOURCE_SCROLL.get(sourceCursorKey(target)) ?? 0;
+    const scroller = mainScrollTarget();
+    if (scroller) scroller.scrollTop = top;
+    else window.scrollTo(0, top);
   }
 
   function scrollStandaloneSourceLine(
@@ -2746,6 +2973,7 @@ export function createSourceView(deps: SourceViewDeps) {
     if (
       e.defaultPrevented ||
       isImeComposing(e) ||
+      isPageKeymapBlockedTarget(targetEl) ||
       isPaletteOpen() ||
       document.querySelector(".mkdp-lightbox")
     )
@@ -2760,8 +2988,11 @@ export function createSourceView(deps: SourceViewDeps) {
     const isCtrlArrowKey =
       (key === "arrowdown" || key === "arrowup") && e.ctrlKey && !e.shiftKey;
     if (!isPlainPageKey && !isCtrlArrowKey) return false;
-    const scroller = findMainScrollTarget();
-    if (!scroller?.matches("#content .gdp-source-virtual-scroller"))
+    const scroller = mainScrollTarget();
+    if (
+      !scroller?.matches(".gdp-source-virtual-scroller") ||
+      !scope().contains(scroller)
+    )
       return false;
     const pageDown = key === "pagedown" || key === "arrowdown";
     const pageUp = key === "pageup" || key === "arrowup";
@@ -2791,8 +3022,10 @@ export function createSourceView(deps: SourceViewDeps) {
         if (label?.firstChild) label.firstChild.textContent = text.line;
         input?.setAttribute("aria-label", text.line);
         if (button) button.textContent = text.go;
-        if (count && input?.max)
-          count.textContent = text.total(Number(input.max));
+        if (count)
+          count.textContent = input?.max
+            ? text.total(Number(input.max))
+            : text.totalPending;
       });
     document
       .querySelectorAll<DelimitedPreviewElement>(".gdp-csv-preview")
@@ -2837,5 +3070,7 @@ export function createSourceView(deps: SourceViewDeps) {
     shouldVirtualizeSource,
     inferLang,
     localize,
+    /** この実体のスクロール先 (キー操作のスクロールが使う)。 */
+    mainScrollTarget,
   };
 }

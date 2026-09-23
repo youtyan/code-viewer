@@ -1,11 +1,14 @@
+import { apiUrl } from "../../core/api-url";
 import type {
   DbTableInfo,
   SnapshotDiffRow,
   SnapshotDiffTableSummary,
   SnapshotMeta,
 } from "../../core/database/types";
+import { errorWithCause } from "../../core/error-detail";
 import { isImeComposing } from "../../core/keyboard";
 import { type DbText, dbText } from "./i18n";
+import { reportDatastoreFailure, requireOkResponse } from "./report-failure";
 
 export type SnapshotViewDeps = {
   getDbId: () => string | null;
@@ -64,8 +67,28 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   const text = (): DbText => deps.getText?.() ?? dbText("en");
   const trackLoad = <T>(p: Promise<T>): Promise<T> =>
     deps.trackLoad ? deps.trackLoad(p) : p;
-  const postJson = (path: string, body: unknown): Promise<Response> =>
-    trackLoad(
+  // 通信の失敗も 4xx / 5xx も、操作の名前を付けて投げる (以前は POST の
+  // 応答を見ずに成功扱いにし、GET の失敗は決まり文句だけを出していた)。
+  const requestOk = async (
+    operation: string,
+    request: Promise<Response>,
+  ): Promise<Response> => {
+    let response: Response;
+    try {
+      response = await trackLoad(request);
+    } catch (error) {
+      throw errorWithCause(operation, error);
+    }
+    await requireOkResponse(response, operation);
+    return response;
+  };
+  const postJson = (
+    path: string,
+    body: unknown,
+    operation: string,
+  ): Promise<Response> =>
+    requestOk(
+      operation,
       fetch(path, {
         method: "POST",
         headers: {
@@ -75,7 +98,25 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         body: JSON.stringify(body),
       }),
     );
-  const getJson = (path: string): Promise<Response> => trackLoad(fetch(path));
+  const getJson = (path: string, operation: string): Promise<Response> =>
+    requestOk(operation, fetch(path));
+  /** 失敗を console に出し、画面に出す `.db-snapshot-error` を作る。 */
+  const failureElement = (operation: string, error: unknown): HTMLElement => {
+    const box = document.createElement("div");
+    box.className = "db-snapshot-error";
+    box.dataset.snapshotFailure = operation;
+    box.textContent = reportDatastoreFailure("SQL", operation, error);
+    return box;
+  };
+  /** 一覧・選択欄の先頭の失敗の表示を差し替える (無ければ足す)。 */
+  const showFailureIn = (
+    host: HTMLElement,
+    operation: string,
+    error: unknown,
+  ): void => {
+    host.querySelector(":scope > [data-snapshot-failure]")?.remove();
+    host.prepend(failureElement(operation, error));
+  };
   const changeTypeLabel = (type: SnapshotDiffRow["changeType"]): string => {
     if (type === "inserted") return "+";
     return "−";
@@ -255,9 +296,17 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     cancellingJobs.add(id);
     renderProgress();
     try {
-      await postJson("/_db/snapshot/cancel", { id });
-    } catch {
-      // ignore: SSE 側で aborted/error が届くまで row を維持する
+      // 通れば SSE 側で aborted/error が届くまで row を維持する。
+      await postJson(
+        apiUrl("dbSnapshotCancel"),
+        { id },
+        text().failure.cancelSnapshot,
+      );
+    } catch (error) {
+      // 取り消しが届いていないので SSE も来ない。「取り消し中」を外して理由を出す。
+      cancellingJobs.delete(id);
+      renderProgress();
+      if (!disposed) showFailureIn(leftPane, "snapshot cancel", error);
     }
   }
 
@@ -486,16 +535,22 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     confirmBtn.textContent = text().snapshot.creating;
 
     try {
-      await postJson("/_db/snapshot/create", {
-        db: dbId,
-        ...(schema ? { schema } : {}),
-        tables,
-        note: noteInput.value.trim(),
-      });
+      await postJson(
+        apiUrl("dbSnapshotCreate"),
+        {
+          db: dbId,
+          ...(schema ? { schema } : {}),
+          tables,
+          note: noteInput.value.trim(),
+        },
+        text().failure.createSnapshot,
+      );
+      tableSelector.querySelector(":scope > [data-snapshot-failure]")?.remove();
       setTableSelectorVisible(false);
       scheduleAutoRefresh(dbId, schema);
-    } catch {
-      // ignore
+    } catch (error) {
+      // 選択欄は開いたままにして、押し直せるようにする。
+      if (!disposed) showFailureIn(tableSelector, "snapshot create", error);
     } finally {
       if (!disposed) {
         confirmBtn.disabled = false;
@@ -544,18 +599,15 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     try {
       const params = new URLSearchParams({ db: dbId });
       if (schema) params.set("schema", schema);
-      const snapRes = await getJson(`/_db/snapshot/list?${params}`);
-      if (snapRes.ok) {
-        const data = (await snapRes.json()) as { snapshots: SnapshotMeta[] };
-        if (
-          disposed ||
-          deps.getDbId() !== dbId ||
-          deps.getSchema() !== schema
-        ) {
-          return;
-        }
-        snapshots = data.snapshots;
+      const snapRes = await getJson(
+        `${apiUrl("dbSnapshotList")}?${params}`,
+        text().failure.listSnapshots,
+      );
+      const data = (await snapRes.json()) as { snapshots: SnapshotMeta[] };
+      if (disposed || deps.getDbId() !== dbId || deps.getSchema() !== schema) {
+        return;
       }
+      snapshots = data.snapshots;
       if (disposed || deps.getDbId() !== dbId || deps.getSchema() !== schema)
         return;
       renderMain();
@@ -579,8 +631,11 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
           currentDiff = null;
         }
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      if (disposed || deps.getDbId() !== dbId || deps.getSchema() !== schema)
+        return;
+      // 前の一覧は残し (古いかもしれない)、先頭に読めなかった理由を出す。
+      showFailureIn(leftPane, "snapshot list", error);
     }
   }
 
@@ -834,32 +889,20 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
     try {
       const res = await getJson(
-        `/_db/snapshot/diff/tables?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}`,
+        `${apiUrl("dbSnapshotDiffTables")}?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}`,
+        text().snapshot.diffError,
       );
-      if (!res.ok) {
-        // 失敗時は currentDiff を巻き戻して restoreDiffFromRoute の重複防止
-        // ガード (同じ before/after では再 fetch しない) が再試行を block しない
-        // ようにする。URL は残しておくとリロードで再試行できる。
-        currentDiff = null;
-        loading.innerHTML = "";
-        const error = document.createElement("div");
-        error.className = "db-snapshot-error";
-        error.textContent = text().snapshot.diffError;
-        loading.appendChild(error);
-        return;
-      }
       const data = (await res.json()) as {
         tables: SnapshotDiffTableSummary[];
       };
       loading.remove();
       renderDiffInline(beforeId, afterId, data.tables);
-    } catch {
+    } catch (error) {
+      // 失敗時は currentDiff を巻き戻して restoreDiffFromRoute の重複防止
+      // ガード (同じ before/after では再 fetch しない) が再試行を block しない
+      // ようにする。URL は残しておくとリロードで再試行できる。
       currentDiff = null;
-      loading.innerHTML = "";
-      const error = document.createElement("div");
-      error.className = "db-snapshot-error";
-      error.textContent = text().snapshot.diffError;
-      loading.appendChild(error);
+      loading.replaceChildren(failureElement("snapshot diff", error));
     }
   }
 
@@ -1126,27 +1169,16 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     container.appendChild(loading);
     try {
       const res = await getJson(
-        `/_db/snapshot/diff/rows?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}&table=${encodeURIComponent(table)}&limit=200`,
+        `${apiUrl("dbSnapshotDiffRows")}?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}&table=${encodeURIComponent(table)}&limit=200`,
+        text().snapshot.loadError,
       );
-      if (!res.ok) {
-        container.innerHTML = "";
-        const error = document.createElement("div");
-        error.className = "db-snapshot-error";
-        error.textContent = text().snapshot.loadError;
-        container.appendChild(error);
-        return;
-      }
       const data = (await res.json()) as {
         rows: SnapshotDiffRow[];
         total: number;
       };
       renderDiffRows(container, data.rows, data.total);
-    } catch {
-      container.innerHTML = "";
-      const error = document.createElement("div");
-      error.className = "db-snapshot-error";
-      error.textContent = text().snapshot.loadError;
-      container.appendChild(error);
+    } catch (error) {
+      container.replaceChildren(failureElement("snapshot diff rows", error));
     }
   }
 
@@ -1333,10 +1365,17 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     cancelDlgBtn.addEventListener("click", () => dialog.remove());
     saveBtn.addEventListener("click", async () => {
       if (disposed) return;
-      await postJson("/_db/snapshot/update-note", {
-        id: snapshotId,
-        note: input.value,
-      });
+      try {
+        await postJson(
+          apiUrl("dbSnapshotUpdateNote"),
+          { id: snapshotId, note: input.value },
+          text().failure.updateSnapshotNote,
+        );
+      } catch (error) {
+        // 入力欄は残し、書いたメモを失わずに押し直せるようにする。
+        if (!disposed) showFailureIn(leftPane, "snapshot note update", error);
+        return;
+      }
       if (disposed) return;
       dialog.remove();
       refresh();
@@ -1360,65 +1399,77 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
   async function deleteSnap(snapshotId: string) {
     if (disposed) return;
-    await postJson("/_db/snapshot/delete", { id: snapshotId });
+    try {
+      await postJson(
+        apiUrl("dbSnapshotDelete"),
+        { id: snapshotId },
+        text().failure.deleteSnapshot,
+      );
+    } catch (error) {
+      if (!disposed) showFailureIn(leftPane, "snapshot delete", error);
+      return;
+    }
     if (disposed) return;
     refresh();
   }
 
   function handleSse(data: string) {
     if (disposed) return;
+    let parsed: {
+      action: string;
+      dbId?: string;
+      schema?: string;
+      id?: string | null;
+      table?: string;
+      done?: boolean;
+      index?: number;
+      total?: number;
+      error?: string;
+    };
     try {
-      const parsed = JSON.parse(data) as {
-        action: string;
-        dbId?: string;
-        schema?: string;
-        id?: string | null;
-        table?: string;
-        done?: boolean;
-        index?: number;
-        total?: number;
-        error?: string;
-      };
-      const dbId = deps.getDbId();
-      const schema = deps.getSchema();
-      if (parsed.dbId && dbId && parsed.dbId !== dbId) return;
-      if (parsed.schema && parsed.schema !== schema) return;
-      const id = parsed.id ?? null;
-      if (parsed.action === "started" && id) {
-        upsertJob(id, {
-          done: false,
-          total: parsed.total ?? 0,
-          index: 0,
-        });
-      }
-      if (parsed.action === "progress" && id) {
-        upsertJob(id, {
-          table: parsed.table,
-          index: parsed.index,
-          total: parsed.total ?? 0,
-          done: parsed.done === true,
-        });
-      }
-      if (parsed.action === "created" && id) {
-        upsertJob(id, { done: true });
-        scheduleJobRemove(id);
-        void refreshAndAutoDiff();
-      }
-      if (parsed.action === "aborted" && id) {
-        upsertJob(id, { done: true, aborted: true });
-        scheduleJobRemove(id);
-        void refresh();
-      }
-      if (parsed.action === "error" && id) {
-        upsertJob(id, {
-          done: true,
-          errorMessage: parsed.error || text().snapshot.failed,
-        });
-        scheduleJobRemove(id);
-        void refresh();
-      }
-    } catch {
-      // ignore
+      parsed = JSON.parse(data);
+    } catch (error) {
+      // 壊れた 1 件だけを捨てて次のイベントを待つ。捨てたことと中身は残す。
+      console.error("[code-viewer] snapshot event is not JSON", data, error);
+      return;
+    }
+    const dbId = deps.getDbId();
+    const schema = deps.getSchema();
+    if (parsed.dbId && dbId && parsed.dbId !== dbId) return;
+    if (parsed.schema && parsed.schema !== schema) return;
+    const id = parsed.id ?? null;
+    if (parsed.action === "started" && id) {
+      upsertJob(id, {
+        done: false,
+        total: parsed.total ?? 0,
+        index: 0,
+      });
+    }
+    if (parsed.action === "progress" && id) {
+      upsertJob(id, {
+        table: parsed.table,
+        index: parsed.index,
+        total: parsed.total ?? 0,
+        done: parsed.done === true,
+      });
+    }
+    if (parsed.action === "created" && id) {
+      upsertJob(id, { done: true });
+      scheduleJobRemove(id);
+      void refreshAndAutoDiff();
+    }
+    if (parsed.action === "aborted" && id) {
+      upsertJob(id, { done: true, aborted: true });
+      scheduleJobRemove(id);
+      void refresh();
+    }
+    if (parsed.action === "error" && id) {
+      upsertJob(id, {
+        done: true,
+        errorMessage: parsed.error || text().snapshot.failed,
+      });
+      scheduleJobRemove(id);
+      void refresh();
     }
   }
 

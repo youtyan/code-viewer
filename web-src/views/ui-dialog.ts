@@ -10,7 +10,16 @@
 //   - showConfirmDialog → Promise<boolean>。OK / Cancel / Esc / backdrop。
 //   - showPromptDialog  → Promise<string | null>。入力 + Enter で確定、Esc で null。
 //   - 多重起動は許容しない (既存ダイアログを閉じてから開く)。
+import { formatErrorDetail } from "../core/error-detail";
+import { iconSvg, X_16_PATH } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
+import { pageLanguage } from "./page-language";
+
+/** ボタンの既定の文言 (呼び出し側が渡さなかったとき)。 */
+const DIALOG_TEXT = {
+  en: { ok: "OK", cancel: "Cancel", save: "Save" },
+  ja: { ok: "OK", cancel: "キャンセル", save: "保存" },
+};
 
 const BACKDROP_CLASS = "gdp-dialog-backdrop";
 const DIALOG_CLASS = "gdp-dialog";
@@ -19,10 +28,13 @@ function closeOpenDialog(): void {
   document.querySelector<HTMLElement>(`.${BACKDROP_CLASS}`)?.remove();
 }
 
+/** 閉じるボタンの説明。文言の表を持たない部品なので、呼び出し側の取り消しの
+ * ラベル (Cancel / キャンセル) をそのまま使う。 */
 function createDialogShell(
   titleText: string | undefined,
   bodyText: string | undefined,
   actions: HTMLElement[],
+  close: { label: string; run(): void },
 ): { backdrop: HTMLElement; body: HTMLElement } {
   closeOpenDialog();
   const backdrop = document.createElement("div");
@@ -40,6 +52,16 @@ function createDialogShell(
     heading.textContent = titleText;
     dialog.appendChild(heading);
   }
+  // 右上の閉じる。取り消しと同じ扱い (Esc・背景を押すのと同じ)。
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "gdp-dialog-close";
+  closeButton.innerHTML = iconSvg("octicon-x", X_16_PATH);
+  closeButton.title = close.label;
+  closeButton.setAttribute("aria-label", close.label);
+  closeButton.tabIndex = -1;
+  closeButton.addEventListener("click", () => close.run());
+  dialog.appendChild(closeButton);
   const bodyId = "gdp-dialog-body";
   dialog.setAttribute("aria-describedby", bodyId);
   const body = document.createElement("div");
@@ -57,8 +79,13 @@ function createDialogShell(
 }
 
 // Tab / Shift+Tab の forward/backward を focusables 配列内で循環させる。
-function trapTabKey(event: KeyboardEvent, focusables: HTMLElement[]): boolean {
+// 押せない部品 (値が正しくない間の確定など) は輪に入れない。入れると、その手前の
+// 部品からの Tab がブラウザに任され、押せない部品を飛ばして dialog の外へ出た。
+function trapTabKey(event: KeyboardEvent, candidates: HTMLElement[]): boolean {
   if (event.key !== "Tab") return false;
+  const focusables = candidates.filter(
+    (element) => !element.matches(":disabled") && !element.hidden,
+  );
   const index = focusables.indexOf(document.activeElement as HTMLElement);
   if (index < 0) {
     event.preventDefault();
@@ -97,13 +124,13 @@ export function showConfirmDialog(
       opts.focusReturnTarget ?? (document.activeElement as HTMLElement | null);
     const cancel = document.createElement("button");
     cancel.type = "button";
-    cancel.className = "gdp-btn gdp-btn-sm";
-    cancel.textContent = opts.cancelLabel ?? "Cancel";
+    cancel.className = "gdp-dialog-button gdp-dialog-cancel";
+    cancel.textContent = opts.cancelLabel ?? DIALOG_TEXT[pageLanguage()].cancel;
     const confirm = document.createElement("button");
     confirm.type = "button";
-    confirm.className = "gdp-btn gdp-btn-sm";
+    confirm.className = "gdp-dialog-button gdp-dialog-confirm";
     if (opts.danger) confirm.classList.add("gdp-dialog-danger");
-    confirm.textContent = opts.confirmLabel ?? "OK";
+    confirm.textContent = opts.confirmLabel ?? DIALOG_TEXT[pageLanguage()].ok;
     const done = (ok: boolean) => {
       document.removeEventListener("keydown", onKeydown);
       closeOpenDialog();
@@ -127,10 +154,12 @@ export function showConfirmDialog(
     };
     cancel.addEventListener("click", () => done(false));
     confirm.addEventListener("click", () => done(true));
-    const { backdrop } = createDialogShell(opts.title, opts.body, [
-      cancel,
-      confirm,
-    ]);
+    const { backdrop } = createDialogShell(
+      opts.title,
+      opts.body,
+      [cancel, confirm],
+      { label: cancel.textContent ?? "", run: () => done(false) },
+    );
     backdrop.addEventListener("pointerdown", (event) => {
       if (event.target === backdrop) done(false);
     });
@@ -154,9 +183,9 @@ export function showAlertDialog(opts: AlertDialogOptions): Promise<void> {
       opts.focusReturnTarget ?? (document.activeElement as HTMLElement | null);
     const ok = document.createElement("button");
     ok.type = "button";
-    ok.className = "gdp-btn gdp-btn-sm";
+    ok.className = "gdp-dialog-button gdp-dialog-confirm";
     if (opts.danger) ok.classList.add("gdp-dialog-danger");
-    ok.textContent = opts.confirmLabel ?? "OK";
+    ok.textContent = opts.confirmLabel ?? DIALOG_TEXT[pageLanguage()].ok;
     const done = () => {
       document.removeEventListener("keydown", onKeydown);
       closeOpenDialog();
@@ -174,7 +203,10 @@ export function showAlertDialog(opts: AlertDialogOptions): Promise<void> {
       trapTabKey(event, [ok]);
     };
     ok.addEventListener("click", done);
-    const { backdrop } = createDialogShell(opts.title, opts.body, [ok]);
+    const { backdrop } = createDialogShell(opts.title, opts.body, [ok], {
+      label: ok.textContent ?? "",
+      run: done,
+    });
     backdrop.addEventListener("pointerdown", (event) => {
       if (event.target === backdrop) done();
     });
@@ -206,12 +238,12 @@ export function showPromptDialog(
       opts.focusReturnTarget ?? (document.activeElement as HTMLElement | null);
     const cancel = document.createElement("button");
     cancel.type = "button";
-    cancel.className = "gdp-btn gdp-btn-sm";
-    cancel.textContent = opts.cancelLabel ?? "Cancel";
+    cancel.className = "gdp-dialog-button gdp-dialog-cancel";
+    cancel.textContent = opts.cancelLabel ?? DIALOG_TEXT[pageLanguage()].cancel;
     const submit = document.createElement("button");
     submit.type = "button";
-    submit.className = "gdp-btn gdp-btn-sm";
-    submit.textContent = opts.confirmLabel ?? "OK";
+    submit.className = "gdp-dialog-button gdp-dialog-confirm";
+    submit.textContent = opts.confirmLabel ?? DIALOG_TEXT[pageLanguage()].ok;
     const input = document.createElement("input");
     input.className = "gdp-dialog-input";
     input.type = "text";
@@ -267,7 +299,12 @@ export function showPromptDialog(
     cancel.addEventListener("click", () => done(null));
     submit.addEventListener("click", trySubmit);
     input.addEventListener("input", syncValidity);
-    const { body } = createDialogShell(opts.title, opts.body, [cancel, submit]);
+    const { body } = createDialogShell(
+      opts.title,
+      opts.body,
+      [cancel, submit],
+      { label: cancel.textContent ?? "", run: () => done(null) },
+    );
     body.append(input, error);
     body.parentElement?.parentElement?.addEventListener(
       "pointerdown",
@@ -285,6 +322,8 @@ export function showPromptDialog(
 
 export type FormDialogOptions<T> = {
   title?: string;
+  /** 見出しの下の 1 文 (何をする画面か)。 */
+  description?: string;
   body: HTMLElement;
   submit: () => T | Promise<T>;
   validate?: () => string | null;
@@ -294,6 +333,8 @@ export type FormDialogOptions<T> = {
   danger?: boolean;
   focusTarget?: HTMLElement | null;
   focusReturnTarget?: HTMLElement | null;
+  /** 本文に整形済みの長い中身 (JSON など) を出すとき、横幅を広げる。 */
+  wide?: boolean;
 };
 
 export function showFormDialog<T>(
@@ -304,13 +345,13 @@ export function showFormDialog<T>(
       opts.focusReturnTarget ?? (document.activeElement as HTMLElement | null);
     const cancel = document.createElement("button");
     cancel.type = "button";
-    cancel.className = "gdp-btn gdp-btn-sm";
-    cancel.textContent = opts.cancelLabel ?? "Cancel";
+    cancel.className = "gdp-dialog-button gdp-dialog-cancel";
+    cancel.textContent = opts.cancelLabel ?? DIALOG_TEXT[pageLanguage()].cancel;
     const submit = document.createElement("button");
     submit.type = "button";
-    submit.className = "gdp-btn gdp-btn-sm";
+    submit.className = "gdp-dialog-button gdp-dialog-confirm";
     if (opts.danger) submit.classList.add("gdp-dialog-danger");
-    submit.textContent = opts.submitLabel ?? "Save";
+    submit.textContent = opts.submitLabel ?? DIALOG_TEXT[pageLanguage()].save;
     const error = document.createElement("div");
     error.className = "gdp-dialog-error";
     error.setAttribute("role", "alert");
@@ -319,7 +360,7 @@ export function showFormDialog<T>(
     const focusables = (): HTMLElement[] => [
       ...Array.from(
         opts.body.querySelectorAll<HTMLElement>(
-          "input:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), textarea:not([disabled]):not([hidden]), button:not([disabled]):not([hidden])",
+          'input:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), textarea:not([disabled]):not([hidden]), button:not([disabled]):not([hidden]), a[href]:not([hidden]), [tabindex]:not([tabindex="-1"]):not([disabled]):not([hidden])',
         ),
       ).filter((element) => element.offsetParent !== null),
       cancel,
@@ -348,7 +389,8 @@ export function showFormDialog<T>(
         busy = false;
         cancel.disabled = false;
         submit.disabled = false;
-        error.textContent = err instanceof Error ? err.message : String(err);
+        console.error("[code-viewer] dialog submit failed", err);
+        error.textContent = formatErrorDetail(err);
       }
     };
     const onKeydown = (event: KeyboardEvent) => {
@@ -364,8 +406,10 @@ export function showFormDialog<T>(
         !(document.activeElement instanceof HTMLTextAreaElement)
       ) {
         event.preventDefault();
+        // 本文のボタンとリンクは押す (リンクの上の Enter で保存しない)。
         if (
-          document.activeElement instanceof HTMLButtonElement &&
+          (document.activeElement instanceof HTMLButtonElement ||
+            document.activeElement instanceof HTMLAnchorElement) &&
           opts.body.contains(document.activeElement)
         ) {
           document.activeElement.click();
@@ -378,11 +422,29 @@ export function showFormDialog<T>(
     };
     cancel.addEventListener("click", () => done(null));
     submit.addEventListener("click", () => void trySubmit());
-    const { backdrop, body } = createDialogShell(opts.title, undefined, [
-      cancel,
-      submit,
-    ]);
+    const { backdrop, body } = createDialogShell(
+      opts.title,
+      undefined,
+      [cancel, submit],
+      {
+        label: cancel.textContent ?? "",
+        run: () => {
+          if (!busy) done(null);
+        },
+      },
+    );
+    if (opts.description) {
+      const description = document.createElement("p");
+      description.className = "gdp-dialog-description";
+      description.textContent = opts.description;
+      body.before(description);
+    }
     body.append(opts.body, error);
+    if (opts.wide) {
+      backdrop
+        .querySelector(`.${DIALOG_CLASS}`)
+        ?.classList.add("gdp-dialog-wide");
+    }
     backdrop.addEventListener("pointerdown", (event) => {
       if (event.target === backdrop && !busy) done(null);
     });

@@ -1,15 +1,19 @@
+import { apiUrl } from "../core/api-url";
 // Hunk expand subsystem (GitHub-style ↕ controls at hunk separators).
 //
 // Extracted from app.ts: parses @@ headers, attaches per-gap expand stacks
 // (20-line steps via /file_range) plus one-shot full-gap expansion used by
 // "expand all context", and trailing expansion below the last hunk.
 
+import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import { GdpExpandLogic } from "../core/expand-logic";
 import type {
   DiffCardElement,
   FileMeta,
   FileRangeResponse,
 } from "../core/types";
+import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
+import { pageLanguage } from "./page-language";
 
 type HunkInfo = {
   oldStart: number;
@@ -44,6 +48,128 @@ export type HunkExpandDeps = {
   getToRef(): string;
   highlightInsertedSpans(card: Element, file: FileMeta): void;
 };
+
+/** 行を読めなかったときの帯の見出し (理由はその後ろに全文で続ける)。 */
+const EXPAND_FAILURE_TEXT = {
+  en: "Could not load more lines",
+  ja: "行を読み込めませんでした",
+} as const;
+
+/**
+ * /file_range を読む。HTTP の失敗も、行 (lines) の無い応答も投げる。以前は
+ * `r.json()` だけで読み、失敗の本文や行の無い応答で展開のボタンが黙って戻り、
+ * 何が起きたかがどこにも残らなかった。
+ */
+async function readFileRange(
+  url: string,
+  operation: string,
+): Promise<FileRangeResponse & { lines: string[] }> {
+  const response = await fetch(url);
+  if (!response.ok)
+    throw new Error(await responseErrorMessage(response, operation));
+  const data = (await response.json()) as FileRangeResponse;
+  if (!Array.isArray(data?.lines))
+    throw new Error(
+      `${operation}: the response has no lines (${JSON.stringify(data)})`,
+    );
+  return data as FileRangeResponse & { lines: string[] };
+}
+
+/**
+ * 展開の失敗を console と、失敗した行のすぐ下の帯に出す (2 面の差分は両側の
+ * 表に同じ帯を入れて行の高さをそろえる)。もう一度押せば読み直す。
+ */
+function showExpandFailure(
+  anchors: HTMLTableRowElement[],
+  operation: string,
+  error: unknown,
+): void {
+  console.error(`[code-viewer] ${operation} failed`, error);
+  const text = `${EXPAND_FAILURE_TEXT[pageLanguage()]}: ${formatErrorDetail(error)}`;
+  anchors.forEach((anchor, index) => {
+    clearExpandFailure([anchor]);
+    const row = document.createElement("tr");
+    row.className = "gdp-expand-error-row";
+    const cell = document.createElement("td");
+    cell.colSpan = Math.max(
+      1,
+      [...anchor.cells].reduce((sum, td) => sum + td.colSpan, 0),
+    );
+    const message = document.createElement("div");
+    message.className = "gdp-error";
+    if (index === 0) message.setAttribute("role", "alert");
+    message.textContent = text;
+    cell.appendChild(message);
+    row.appendChild(cell);
+    anchor.after(row);
+  });
+}
+
+function clearExpandFailure(anchors: HTMLTableRowElement[]): void {
+  for (const anchor of anchors) {
+    const next = anchor.nextElementSibling;
+    if (next?.classList.contains("gdp-expand-error-row")) next.remove();
+  }
+}
+
+export type ExpandButtonSpec = {
+  direction: "up" | "down";
+  title: string;
+  onClick: () => void;
+};
+
+const EXPAND_ICON_PATHS = {
+  up: "M8 3.5 3.75 7.75l1.06 1.06L7.25 6.37V13h1.5V6.37l2.44 2.44 1.06-1.06L8 3.5z",
+  down: "M8 12.5 12.25 8.25l-1.06-1.06L8.75 9.63V3h-1.5v6.63L4.81 7.19 3.75 8.25 8 12.5z",
+};
+
+export function createExpandStack(buttons: ExpandButtonSpec[]) {
+  const stack = document.createElement("div");
+  stack.className = "gdp-expand-stack";
+  buttons.forEach((spec) => {
+    const button = document.createElement("button");
+    button.className = "gdp-expand-btn";
+    button.title = spec.title;
+    button.setAttribute("aria-label", spec.title);
+    button.innerHTML =
+      '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+      '<path fill="currentColor" d="' +
+      EXPAND_ICON_PATHS[spec.direction] +
+      '"/></svg>';
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (button.disabled) return;
+      spec.onClick();
+    });
+    stack.appendChild(button);
+  });
+  return stack;
+}
+
+/**
+ * 最後のハンクの後の「下へ広げる」行 (ボタンは呼び出し側が ln に入れる)。
+ * 本物の行 (attachTrailingExpandControls) と、Diff のカードの見積もりで高さを
+ * 測る見本 (views/diff-view.ts の measuredCardMetrics) が同じ形を使う。
+ */
+export function createTrailingExpandRow(isSplit: boolean): {
+  tr: HTMLTableRowElement;
+  ln: HTMLTableCellElement;
+} {
+  const tr = document.createElement("tr");
+  tr.className = "gdp-hunk-row gdp-trailing-expand-row";
+  const ln = document.createElement("td");
+  ln.className = isSplit
+    ? "d2h-code-side-linenumber d2h-info"
+    : "d2h-code-linenumber d2h-info";
+  const info = document.createElement("td");
+  info.className = "d2h-info";
+  const spacer = document.createElement("div");
+  spacer.className = isSplit ? "d2h-code-side-line" : "d2h-code-line";
+  info.appendChild(spacer);
+  tr.appendChild(ln);
+  tr.appendChild(info);
+  return { tr, ln };
+}
 
 export function createHunkExpand(deps: HunkExpandDeps) {
   // ---------- Hunk expand (mimics GitHub's ↕ at hunk separators) ----------
@@ -166,13 +292,17 @@ export function createHunkExpand(deps: HunkExpandDeps) {
     const trailingIndex = GdpExpandLogic.trailingExpandTargetIndex(
       infoRows.length,
     );
-    if (trailingIndex != null) {
-      probeAndAttachTrailingExpandControls(
-        infoRows[trailingIndex],
-        file,
-        ref,
-        refPath,
-      );
+    // 削除したファイルには新しい側が無いので、最後のハンクの後ろを問い合わせ
+    // ない (作業ツリーに無いファイルを問い合わせて、エラーの行が出ていた)。
+    if (trailingIndex != null && file.status !== "D") {
+      const last = infoRows[trailingIndex];
+      // 最後のハンクの後ろの文脈が 3 行ちょうどなら、まだ行が続く見込み
+      // (row_basis.tail_more。core/diff-card-estimate.ts)。描いた時点で行を置き
+      // (カードの見積もりにもこの行が入っている)、問い合わせで行が無いと
+      // 分かったら外す。後から足すと、その分だけ下のカードが下がっていた。
+      if (file.row_basis?.tail_more)
+        attachTrailingExpandControls(last, file, ref, refPath);
+      probeAndAttachTrailingExpandControls(last, file, ref, refPath);
     }
   }
 
@@ -247,7 +377,8 @@ export function createHunkExpand(deps: HunkExpandDeps) {
       if (end < start) return Promise.resolve();
       setBusy(true);
       const url =
-        "/file_range?path=" +
+        apiUrl("fileRange") +
+        "?path=" +
         refPath +
         "&ref=" +
         encodeURIComponent(ref) +
@@ -255,13 +386,12 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         start +
         "&end=" +
         end;
+      const operation = `expanding ${file.path} lines ${start}-${end} at ${ref}`;
+      const anchors = (item.siblings || [{ tr: item.tr }]).map((sib) => sib.tr);
       return deps
-        .trackLoad<{ lines?: string[] }>(fetch(url).then((r) => r.json()))
+        .trackLoad(readFileRange(url, operation))
         .then((data) => {
-          if (!data?.lines) {
-            setBusy(false);
-            return;
-          }
+          clearExpandFailure(anchors);
           const oldStartForGap = prevHunkEndOld + (start - prevHunkEndNew);
           const card = item.tr.closest(".d2h-file-wrapper");
           const sibs = item.siblings || [{ tr: item.tr, sideIndex: 0 }];
@@ -290,8 +420,9 @@ export function createHunkExpand(deps: HunkExpandDeps) {
           }
           attachExpandControls(item, file, ref, refPath);
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           setBusy(false);
+          showExpandFailure(anchors, operation, error);
         });
     };
 
@@ -314,7 +445,9 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         // hunk in the file. Repeated clicks walk further up the file.
         buttons.push({
           direction: "up",
-          title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+          title: DIFF_SCREEN_TEXT[pageLanguage()].showMoreLines(
+            Math.min(STEP, remainingSize),
+          ),
           onClick: () =>
             fetchAndInsert(
               Math.max(remainingStart, remainingEnd - STEP + 1),
@@ -327,7 +460,9 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         //            ↓ pulls high end (toward this hunk, below @@).
         buttons.push({
           direction: "up",
-          title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+          title: DIFF_SCREEN_TEXT[pageLanguage()].showMoreLines(
+            Math.min(STEP, remainingSize),
+          ),
           onClick: () =>
             fetchAndInsert(
               remainingStart,
@@ -337,7 +472,9 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         });
         buttons.push({
           direction: "down",
-          title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+          title: DIFF_SCREEN_TEXT[pageLanguage()].showMoreLines(
+            Math.min(STEP, remainingSize),
+          ),
           onClick: () =>
             fetchAndInsert(
               Math.max(remainingStart, remainingEnd - STEP + 1),
@@ -379,40 +516,6 @@ export function createHunkExpand(deps: HunkExpandDeps) {
     }
   }
 
-  type ExpandButtonSpec = {
-    direction: "up" | "down";
-    title: string;
-    onClick: () => void;
-  };
-
-  const EXPAND_ICON_PATHS = {
-    up: "M8 3.5 3.75 7.75l1.06 1.06L7.25 6.37V13h1.5V6.37l2.44 2.44 1.06-1.06L8 3.5z",
-    down: "M8 12.5 12.25 8.25l-1.06-1.06L8.75 9.63V3h-1.5v6.63L4.81 7.19 3.75 8.25 8 12.5z",
-  };
-
-  function createExpandStack(buttons: ExpandButtonSpec[]) {
-    const stack = document.createElement("div");
-    stack.className = "gdp-expand-stack";
-    buttons.forEach((spec) => {
-      const button = document.createElement("button");
-      button.className = "gdp-expand-btn";
-      button.title = spec.title;
-      button.setAttribute("aria-label", spec.title);
-      button.innerHTML =
-        '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
-        '<path fill="currentColor" d="' +
-        EXPAND_ICON_PATHS[spec.direction] +
-        '"/></svg>';
-      button.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (button.disabled) return;
-        spec.onClick();
-      });
-      stack.appendChild(button);
-    });
-    return stack;
-  }
-
   function syncExpandRowHeights(
     rows: HTMLTableRowElement[],
     stackRow: HTMLTableRowElement,
@@ -449,19 +552,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         const tbody = sib.tr.parentElement;
         if (!tbody) return null;
         const isSplit = !!sib.tr.querySelector("td.d2h-code-side-linenumber");
-        const tr = document.createElement("tr");
-        tr.className = "gdp-hunk-row gdp-trailing-expand-row";
-        const ln = document.createElement("td");
-        ln.className = isSplit
-          ? "d2h-code-side-linenumber d2h-info"
-          : "d2h-code-linenumber d2h-info";
-        const info = document.createElement("td");
-        info.className = "d2h-info";
-        const spacer = document.createElement("div");
-        spacer.className = isSplit ? "d2h-code-side-line" : "d2h-code-line";
-        info.appendChild(spacer);
-        tr.appendChild(ln);
-        tr.appendChild(info);
+        const { tr, ln } = createTrailingExpandRow(isSplit);
         tbody.appendChild(tr);
         return { tr, ln, sideIndex: sib.sideIndex || 0 };
       })
@@ -482,7 +573,8 @@ export function createHunkExpand(deps: HunkExpandDeps) {
       const myGen = deps.getServerGeneration();
       setBusy(true);
       const url =
-        "/file_range?path=" +
+        apiUrl("fileRange") +
+        "?path=" +
         refPath +
         "&ref=" +
         encodeURIComponent(ref) +
@@ -490,9 +582,12 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         range.start +
         "&end=" +
         range.end;
+      const operation = `expanding ${file.path} lines ${range.start}-${range.end} at ${ref}`;
+      const anchors = rows.map((row) => row.tr);
       return deps
-        .trackLoad<FileRangeResponse>(fetch(url).then((r) => r.json()))
+        .trackLoad(readFileRange(url, operation))
         .then((data) => {
+          clearExpandFailure(anchors);
           if (
             myGen !== deps.getServerGeneration() ||
             (data.generation && data.generation !== deps.getServerGeneration())
@@ -501,7 +596,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
             return;
           }
           if (!item.tr.isConnected) return;
-          const lines = data?.lines || [];
+          const lines = data.lines;
           if (!lines.length) {
             rows.forEach((row) => {
               row.tr.remove();
@@ -535,8 +630,9 @@ export function createHunkExpand(deps: HunkExpandDeps) {
           }
           setBusy(false);
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           setBusy(false);
+          showExpandFailure(anchors, operation, error);
         });
     };
     // One-shot expansion to EOF for "expand all context": a single large
@@ -551,7 +647,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
       const stack = createExpandStack([
         {
           direction: "down",
-          title: "Show more lines",
+          title: DIFF_SCREEN_TEXT[pageLanguage()].showMoreLinesUnknown,
           onClick: () => void fetchAndInsert(),
         },
       ]) as ExpandStackElement;
@@ -573,7 +669,8 @@ export function createHunkExpand(deps: HunkExpandDeps) {
     const start = nextNewLine(item.hunk);
     const myGen = deps.getServerGeneration();
     const url =
-      "/file_range?path=" +
+      apiUrl("fileRange") +
+      "?path=" +
       refPath +
       "&ref=" +
       encodeURIComponent(ref) +
@@ -581,25 +678,40 @@ export function createHunkExpand(deps: HunkExpandDeps) {
       start +
       "&end=" +
       start;
+    const operation = `checking for lines after the last hunk of ${file.path} (line ${start}) at ${ref}`;
+    const anchors = (item.siblings || [{ tr: item.tr }]).map((sib) => sib.tr);
     deps
-      .trackLoad<FileRangeResponse>(fetch(url).then((r) => r.json()))
+      .trackLoad(readFileRange(url, operation))
       .then((data) => {
         if (myGen !== deps.getServerGeneration()) return;
         if (data.generation && data.generation !== deps.getServerGeneration())
           return;
         if (!item.tr.isConnected) return;
-        const hasTrailingRow = (item.siblings || []).some(
-          (sib) =>
-            !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"),
-        );
-        if (hasTrailingRow) return;
-        if (
-          !GdpExpandLogic.shouldAttachTrailingExpand(data?.lines?.length || 0)
-        )
+        const trailingRows = (item.siblings || []).flatMap((sib) => [
+          ...(sib.tr.parentElement?.querySelectorAll(
+            ".gdp-trailing-expand-row",
+          ) ?? []),
+        ]);
+        if (!GdpExpandLogic.shouldAttachTrailingExpand(data.lines.length)) {
+          // 見込みで置いた行 (最後の文脈がちょうど 3 行でファイルが終わる) は外す。
+          for (const row of trailingRows) row.remove();
           return;
+        }
+        if (trailingRows.length > 0) return;
         attachTrailingExpandControls(item, file, ref, refPath);
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        // 差分を描き直した後の古い問い合わせの失敗は、行が無いので console
+        // にだけ出す。
+        if (myGen !== deps.getServerGeneration() || !item.tr.isConnected) {
+          console.error(
+            `[code-viewer] ${operation} failed (the diff was redrawn since)`,
+            error,
+          );
+          return;
+        }
+        showExpandFailure(anchors, operation, error);
+      });
   }
 
   // Insert context rows around the `@@` info row.

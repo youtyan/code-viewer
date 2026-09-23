@@ -1,5 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
+import {
+  baseRules,
+  cascadedDeclarations,
+  loadStyleSheet,
+} from "./_css-fixture";
 import { sourceFixture } from "./source-fixture";
 
 const html = readFileSync("web/index.html", "utf8");
@@ -68,9 +73,15 @@ describe("mark viewed toolbar button", () => {
         "applyViewedToCard(card, STATE.viewedFiles.has(file.path), true)",
       ),
     ).toBe(true);
-    expect(style.includes("#filelist li.viewed")).toBe(true);
-    expect(style.includes("#filelist li.viewed::after")).toBe(true);
-    expect(style.includes('content: "✓"')).toBe(true);
+    // 閲覧済みの行の印 (行末のチェック)。変更ファイルの一覧とファイル一覧で同じ
+    // 規則 (生の文字列ではなく、宣言のカスケードで見る。testing.md)。
+    const rules = baseRules(loadStyleSheet());
+    const viewedMark = cascadedDeclarations(
+      rules,
+      (selector) =>
+        selector === ":is(#filelist, #file-list-rows) li.viewed::after",
+    );
+    expect(viewedMark.get("content")).toBe('"✓"');
     expect(style.includes("border-left-color: var(--success)")).toBe(true);
     expect(style.includes(".gdp-viewed-checkbox")).toBe(false);
     expect(style.includes(".gdp-file-shell.viewed {\n  opacity")).toBe(false);

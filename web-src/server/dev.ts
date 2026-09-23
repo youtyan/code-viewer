@@ -6,6 +6,7 @@ import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type BuildContext, context } from "esbuild";
 import { type DevChildProcess, terminateChild } from "./dev-process";
+import { errno } from "./terminal/settings-file";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = normalize(join(HERE, "..", ".."));
@@ -40,16 +41,19 @@ function walkTsFiles(dir: string): string[] {
   let entries: string[];
   try {
     entries = readdirSync(dir);
-  } catch {
-    return out;
+  } catch (error) {
+    // 途中で消えたフォルダ (ブランチの切り替えなど) だけ飛ばす。
+    if (isGone(error)) return out;
+    throw error;
   }
   for (const name of entries) {
     const full = join(dir, name);
     let isDir = false;
     try {
       isDir = statSync(full).isDirectory();
-    } catch {
-      continue;
+    } catch (error) {
+      if (isGone(error)) continue;
+      throw error;
     }
     if (isDir) {
       out.push(...walkTsFiles(full));
@@ -67,13 +71,19 @@ function watchedFiles() {
 }
 
 function fileSignature(file: string): string {
-  // A watched file may disappear mid-flight (branch switch, rename);
-  // that must never crash the watcher loop and orphan the children.
+  // A watched file may disappear mid-flight (branch switch, rename). Other
+  // failures reach the tick's catch, which logs them and keeps the loop alive.
   try {
     return `${file}:${statSync(file).mtimeMs}`;
-  } catch {
-    return `${file}:missing`;
+  } catch (error) {
+    if (isGone(error)) return `${file}:missing`;
+    throw error;
   }
+}
+
+function isGone(error: unknown): boolean {
+  const code = errno(error);
+  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 function watchSignature() {
@@ -91,7 +101,10 @@ function spawnDevChild(command: string, args: string[]): DevChildProcess {
     kill: (signal?: string) => child.kill(signal as NodeJS.Signals | undefined),
     exited: new Promise<number>((resolve) => {
       child.on("close", (code) => resolve(code ?? 0));
-      child.on("error", () => resolve(1));
+      child.on("error", (error) => {
+        console.error(`code-viewer dev: ${command} failed to run:`, error);
+        resolve(1);
+      });
     }),
   };
 }
@@ -109,13 +122,15 @@ async function startBuild() {
   await buildCtx.watch();
 }
 
+// CLI の入口 (cli.ts) を起こすので、引数が無ければ入口のサーバになる
+// (`pnpm dev -- --standalone` で今までの 1 つで完結するサーバ)。入口が起こす
+// プロジェクトの裏のプロセスは CODE_VIEWER_DEV を受け継ぎ、親 (入口) が
+// 居なくなると 1 秒で終わる。ソースを直すと入口が起き直すので、裏も
+// 起き直す (次の要求で入口が起こす)。
 function startServer() {
   const args = serverArgs();
   firstStart = false;
-  server = spawnDevChild(TSX, [
-    join("web-src", "server", "preview.ts"),
-    ...args,
-  ]);
+  server = spawnDevChild(TSX, [join("web-src", "server", "cli.ts"), ...args]);
 }
 
 async function restartServer() {
@@ -124,7 +139,9 @@ async function restartServer() {
   const old = server;
   server = null;
   if (old) {
-    await terminateChild(old).catch(() => 1);
+    await terminateChild(old).catch((error: unknown) => {
+      console.error("code-viewer dev: stopping the old server failed:", error);
+    });
   }
   startServer();
   restarting = false;
@@ -148,9 +165,14 @@ async function shutdown() {
   server = null;
   const ctx = buildCtx;
   buildCtx = null;
-  if (child) await terminateChild(child).catch(() => undefined);
-  if (ctx) await ctx.dispose().catch(() => undefined);
-  process.exit(0);
+  let exitCode = 0;
+  const report = (step: string) => (error: unknown) => {
+    console.error(`code-viewer dev: ${step} failed during shutdown:`, error);
+    exitCode = 1;
+  };
+  if (child) await terminateChild(child).catch(report("stopping the server"));
+  if (ctx) await ctx.dispose().catch(report("stopping the web build"));
+  process.exit(exitCode);
 }
 
 process.on("SIGINT", () => void shutdown());
@@ -173,6 +195,6 @@ setInterval(() => {
     console.log("server source changed; restarting preview server");
     restartServer();
   } catch (error) {
-    console.warn(`watch tick failed: ${String(error)}`);
+    console.warn("watch tick failed:", error);
   }
 }, 500);

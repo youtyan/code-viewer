@@ -1,3 +1,5 @@
+import { errorWithCause } from "./error-detail";
+
 export type RepositoryWebTarget = {
   url: string;
   provider: "github" | "web";
@@ -36,8 +38,8 @@ export function buildRepositoryWebTarget(
   let remote: URL;
   try {
     remote = new URL(repoWebUrl);
-  } catch {
-    return null;
+  } catch (error) {
+    throw errorWithCause("repository web URL is invalid", error);
   }
   if (remote.protocol !== "http:" && remote.protocol !== "https:") return null;
   remote.search = "";

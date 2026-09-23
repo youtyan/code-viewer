@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import type {
   DbCellInput,
   DbColumn,
@@ -7,10 +8,8 @@ import type {
   DbValue,
   RowMutation,
 } from "../../core/database/types";
-import { formatErrorDetail } from "../../core/error-detail";
-import { createDetailTable } from "./detail-table";
-import { createDetailTabs } from "./detail-tabs";
 import { attachDragResizer } from "../../core/drag-resizer";
+import { formatErrorDetail } from "../../core/error-detail";
 import { isEditableKeyTarget } from "../../core/focus-scope";
 import {
   DOWNLOAD_16_PATHS,
@@ -25,14 +24,22 @@ import {
   loadShikiHighlighter,
   type ShikiHighlighter,
 } from "../../core/shiki-loader";
-import { readStoredSize, writeStoredSize } from "../../core/stored-size";
+import {
+  readStoredSize,
+  reportStoredSizeFailure,
+  writeStoredSize,
+} from "../../core/stored-size";
 import type { AnnotationDatabaseDataState } from "../../core/types";
+import { currentRowHeight } from "../shell/row-height";
 import { showConfirmDialog } from "../ui-dialog";
+import { createDetailTable } from "./detail-table";
+import { createDetailTabs } from "./detail-tabs";
 import { type DbText, dbText } from "./i18n";
+import { reportDatastoreFailure } from "./report-failure";
 
-const ROW_HEIGHT = 28;
+// 行の高さは一覧の行と同じ表示密度の値 (views/shell/row-height.ts)。CSS の
+// .db-grid-row は同じ値を --ui-row-h で読む。
 // 行番号列の幅。CSS の .db-grid-rownum (flex: 0 0 50px) と対で維持する。
-// ROW_HEIGHT が .db-grid-row の height と対になっているのと同じ扱いで、
 // 矢印キー移動で「移動先の列が見えているか」を測るのに使う。
 const ROWNUM_WIDTH = 50;
 const OVERSCAN = 20;
@@ -343,6 +350,11 @@ export function createTableGrid(
   // 矢印キーでセルを移動するために、viewport 自体をフォーカス対象にする。
   // セルは div なので、セルをクリックするとフォーカスはここへ上がってくる。
   viewport.tabIndex = 0;
+  // 足元のページ送りの「見えている行の範囲」は、表の高さが変わったとき
+  // (セルの詳細を開く・下のパネルを動かす) にも合わせる。ResizeObserver の
+  // 無い DOM (テストの一部の環境) では、スクロールしたときにだけ合わせる。
+  if (typeof ResizeObserver === "function")
+    new ResizeObserver(() => syncPager()).observe(viewport);
 
   const spacer = document.createElement("div");
   spacer.className = "db-grid-spacer";
@@ -520,8 +532,8 @@ export function createTableGrid(
   function scrollCellIntoView(rowIndex: number, colIndex: number) {
     const viewHeight = viewport.clientHeight;
     if (viewHeight > 0) {
-      const top = rowIndex * ROW_HEIGHT;
-      const bottom = top + ROW_HEIGHT;
+      const top = rowIndex * currentRowHeight();
+      const bottom = top + currentRowHeight();
       if (top < viewport.scrollTop) viewport.scrollTop = top;
       else if (bottom > viewport.scrollTop + viewHeight) {
         viewport.scrollTop = bottom - viewHeight;
@@ -763,6 +775,19 @@ export function createTableGrid(
   let loadController = new AbortController();
   let rafId = 0;
   let statusEl: HTMLElement | null = null;
+  /**
+   * 足元のページ送り。表は仮想表示で全部の行をスクロールで読むので、ここは
+   * 「いま見えている行の範囲」を出し、前後のボタンで 1 画面ぶんスクロール
+   * するだけ (データの取り方は変えない)。statusEl と一緒に作り直す。
+   */
+  let pagerEl: {
+    root: HTMLElement;
+    range: HTMLElement;
+    prev: HTMLButtonElement;
+    next: HTMLButtonElement;
+    /** 最後に描いた中身。変わらないときは DOM に触らない (スクロールの毎フレーム呼ばれる)。 */
+    shown: string;
+  } | null = null;
   let isRefreshing = false;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedRowIndex = -1;
@@ -826,6 +851,7 @@ export function createTableGrid(
   };
   let relatedPanel: HTMLElement | null = null;
   let relatedListEl: HTMLElement | null = null;
+  let relatedCopyBtn: HTMLButtonElement | null = null;
   let relatedListResizeEl: HTMLElement | null = null;
   let relatedGridHost: HTMLElement | null = null;
   // 参照先が 0 件のときに出す空表示。
@@ -853,9 +879,15 @@ export function createTableGrid(
       : RELATED_PANEL_DEFAULT_HEIGHT;
   // 関連パネル左リストの幅。ドラッグで変えた値は localStorage に覚える
   // (「その画面でどれくらい引き伸ばしたか」はブラウザ側の都合なので)。
-  let relatedListWidth = clampRelatedListWidth(
-    readStoredSize(RELATED_LIST_WIDTH_KEY, RELATED_LIST_DEFAULT_WIDTH),
+  const storedRelatedListWidth = readStoredSize(
+    RELATED_LIST_WIDTH_KEY,
+    RELATED_LIST_DEFAULT_WIDTH,
   );
+  reportStoredSizeFailure(
+    storedRelatedListWidth,
+    "reading the related-record list width failed",
+  );
+  let relatedListWidth = clampRelatedListWidth(storedRelatedListWidth.value);
   let relatedListResizeDetach: (() => void) | null = null;
 
   function clampRelatedListWidth(width: number): number {
@@ -1123,7 +1155,7 @@ export function createTableGrid(
     const refreshFilterKey = JSON.stringify(collectFilters());
     const scrollTop = viewport.scrollTop;
     const pageStart =
-      Math.floor(scrollTop / ROW_HEIGHT / PAGE_SIZE) * PAGE_SIZE;
+      Math.floor(scrollTop / currentRowHeight() / PAGE_SIZE) * PAGE_SIZE;
     refreshBtn.disabled = true;
     refreshBtn.classList.add("spinning");
     isRefreshing = true;
@@ -1194,6 +1226,7 @@ export function createTableGrid(
     spacer.style.height = "0px";
     statusEl?.remove();
     statusEl = null;
+    pagerEl = null;
     // 新しいテーブルをロードする前に選択をリセットする。これを怠ると、
     // 関連グリッドの使い回し時に前テーブルの行 index が別の行へ誤適用され、
     // getState() にも誤った行番号が混入する。
@@ -1330,19 +1363,22 @@ export function createTableGrid(
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
     copyBtn.className = "db-btn db-grid-detail-copy db-related-copy";
-    copyBtn.textContent = "Copy";
+    copyBtn.textContent = text().detail.copy;
+    relatedCopyBtn = copyBtn;
     copyBtn.addEventListener("click", () => {
       const target = currentRelatedTarget();
       if (!target) return;
       navigator.clipboard.writeText(target.value).then(
         () => {
-          copyBtn.textContent = "Copied";
+          copyBtn.textContent = text().detail.copied;
           setTimeout(() => {
-            copyBtn.textContent = "Copy";
+            copyBtn.textContent = text().detail.copy;
           }, 800);
         },
-        () => {
-          copyBtn.textContent = "Copy failed";
+        // 詳細の欄のコピーと同じく、失敗の理由を出す。
+        (error: unknown) => {
+          console.error(error);
+          copyBtn.textContent = `${text().detail.copyFailed}: ${formatErrorDetail(error)}`;
         },
       );
     });
@@ -1376,7 +1412,11 @@ export function createTableGrid(
       applySize: applyRelatedListWidth,
       direction: 1,
       axis: "x",
-      onEnd: () => writeStoredSize(RELATED_LIST_WIDTH_KEY, relatedListWidth),
+      onEnd: () =>
+        reportStoredSizeFailure(
+          writeStoredSize(RELATED_LIST_WIDTH_KEY, relatedListWidth),
+          "saving the related-record list width failed",
+        ),
       activeClassTarget: relatedPanel,
       activeClassName: "db-related-list-resizing",
     });
@@ -1630,7 +1670,15 @@ export function createTableGrid(
       if (relatedEmptyEl) relatedEmptyEl.hidden = data.totalRows > 0;
     } catch (err) {
       if (gen !== relatedGen || isAbortError(err)) return;
-      grid.showError(err instanceof Error ? err.message : String(err));
+      grid.showError(
+        reportDatastoreFailure(
+          "SQL",
+          "related rows",
+          err,
+          drillTable,
+          relatedEq,
+        ),
+      );
     }
   }
 
@@ -1780,16 +1828,21 @@ export function createTableGrid(
     } else {
       const str =
         typeof value === "object" ? JSON.stringify(value) : String(value);
+      let parsed: unknown;
+      let isJson = false;
       if (str.length > 0 && (str[0] === "{" || str[0] === "[")) {
         try {
-          const parsed = JSON.parse(str);
-          const pre = document.createElement("pre");
-          pre.className = "db-grid-detail-json";
-          showJsonDetail(pre, JSON.stringify(parsed, null, 2));
-          content.appendChild(pre);
+          parsed = JSON.parse(str);
+          isJson = true;
         } catch {
-          content.textContent = str;
+          // 括弧で始まるだけの文字列の値。JSON として整形せず、そのまま出す。
         }
+      }
+      if (isJson) {
+        const pre = document.createElement("pre");
+        pre.className = "db-grid-detail-json";
+        showJsonDetail(pre, JSON.stringify(parsed, null, 2));
+        content.appendChild(pre);
       } else {
         content.textContent = str || t.emptyString;
       }
@@ -2035,7 +2088,15 @@ export function createTableGrid(
       .catch((err) => {
         if (gen !== loadGeneration || isAbortError(err)) return;
         if (gen === loadGeneration) {
-          showError(err instanceof Error ? err.message : String(err));
+          showError(
+            reportDatastoreFailure(
+              "SQL",
+              "table page",
+              err,
+              currentTable,
+              pageStart,
+            ),
+          );
         }
       });
     const tracked = promise.finally(() => {
@@ -2297,11 +2358,8 @@ export function createTableGrid(
             );
             if (!inp) return;
             inp.focus?.();
-            try {
-              inp.setSelectionRange?.(inp.value.length, inp.value.length);
-            } catch {
-              // 一部 input type では setSelectionRange 不可。focus のみで十分。
-            }
+            // 編集欄は type="text" だけなので setSelectionRange は投げない。
+            inp.setSelectionRange?.(inp.value.length, inp.value.length);
           });
         };
         // input の blur / Enter / Escape で表示モードへ戻す。
@@ -2461,14 +2519,14 @@ export function createTableGrid(
       const viewHeight = viewport.clientHeight;
       const startRow = Math.max(
         0,
-        Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN,
+        Math.floor(scrollTop / currentRowHeight()) - OVERSCAN,
       );
       // setActiveCell が body 内インデックスを計算するために参照する。
       renderStartRow = startRow;
       // 編集モードでは末尾に新規行ドラフトを足すので表示行数が増える。
       const endRow = Math.min(
         displayRowCount(),
-        Math.ceil((scrollTop + viewHeight) / ROW_HEIGHT) + OVERSCAN,
+        Math.ceil((scrollTop + viewHeight) / currentRowHeight()) + OVERSCAN,
       );
 
       // ページ取得はデータ行 (< totalRows) の範囲だけ行う。
@@ -2513,7 +2571,7 @@ export function createTableGrid(
       body.innerHTML = "";
       selectedRowElement = null;
       activeCellElement = null;
-      body.style.transform = `translateY(${startRow * ROW_HEIGHT}px)`;
+      body.style.transform = `translateY(${startRow * currentRowHeight()}px)`;
 
       for (let i = startRow; i < endRow; i++) {
         body.appendChild(
@@ -2521,6 +2579,7 @@ export function createTableGrid(
         );
       }
       syncFilteredEmptyState();
+      syncPager(scrollTop, viewHeight);
       // 行を組み直すとヘッダ側の scrollLeft が clamp されることがあるので、
       // 幅が確定したこのタイミングで横位置を引き直す。
       syncHorizontalScroll();
@@ -2531,14 +2590,11 @@ export function createTableGrid(
         );
         if (next) {
           next.focus?.();
-          try {
-            next.setSelectionRange?.(
-              focusRestore.start ?? next.value.length,
-              focusRestore.end ?? next.value.length,
-            );
-          } catch {
-            // 一部 input type では setSelectionRange 不可。フォーカスだけで十分。
-          }
+          // 編集欄は type="text" だけなので setSelectionRange は投げない。
+          next.setSelectionRange?.(
+            focusRestore.start ?? next.value.length,
+            focusRestore.end ?? next.value.length,
+          );
         }
       }
     });
@@ -2565,11 +2621,78 @@ export function createTableGrid(
       params.set("eq", JSON.stringify(baseEq));
     }
     const a = document.createElement("a");
-    a.href = `/_db/export?${params}`;
+    a.href = `${apiUrl("dbExport")}?${params}`;
     a.download = `${currentTable}.${format}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
+  }
+
+  function createPager(): NonNullable<typeof pagerEl> {
+    const root = document.createElement("span");
+    root.className = "db-grid-pager";
+    const range = document.createElement("span");
+    range.className = "db-grid-pager-range";
+    const button = (className: string, glyph: string, direction: 1 | -1) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `db-grid-pager-btn ${className}`;
+      b.textContent = glyph;
+      b.addEventListener("click", () => {
+        // 1 画面ぶん (見えている最後の行が次の画面の先頭に残るよう 1 行引く)。
+        viewport.scrollTop +=
+          direction *
+          Math.max(
+            currentRowHeight(),
+            viewport.clientHeight - currentRowHeight(),
+          );
+      });
+      return b;
+    };
+    const prev = button("db-grid-pager-prev", "‹", -1);
+    const next = button("db-grid-pager-next", "›", 1);
+    root.append(range, prev, next);
+    return { root, range, prev, next, shown: "" };
+  }
+
+  /**
+   * いま見えている行の範囲とボタンの押せる・押せないを合わせる。
+   * renderViewport からは DOM を組み直す前に読んだ scrollTop と高さを渡す
+   * (組み直した後に読むと、毎フレーム レイアウトを強制することになる)。
+   */
+  function syncPager(
+    scrollTop = viewport.scrollTop,
+    viewHeight = viewport.clientHeight,
+  ): void {
+    if (!pagerEl) return;
+    const t = text().grid;
+    const total = totalRows;
+    const first = Math.min(
+      total,
+      Math.floor(scrollTop / currentRowHeight()) + 1,
+    );
+    const last = Math.min(
+      total,
+      Math.max(
+        first,
+        Math.floor((scrollTop + viewHeight) / currentRowHeight()),
+      ),
+    );
+    const key = `${t.pagerNext}:${first}:${last}:${total}`;
+    if (key === pagerEl.shown) return;
+    pagerEl.shown = key;
+    pagerEl.root.hidden = total === 0;
+    pagerEl.range.textContent = t.pagerRange(
+      first.toLocaleString(),
+      last.toLocaleString(),
+      total.toLocaleString(),
+    );
+    pagerEl.prev.title = t.pagerPrev;
+    pagerEl.prev.setAttribute("aria-label", t.pagerPrev);
+    pagerEl.next.title = t.pagerNext;
+    pagerEl.next.setAttribute("aria-label", t.pagerNext);
+    pagerEl.prev.disabled = first <= 1;
+    pagerEl.next.disabled = last >= total;
   }
 
   function updateStatus() {
@@ -2578,6 +2701,11 @@ export function createTableGrid(
       statusEl.className = "db-grid-status";
       el.appendChild(statusEl);
     }
+    if (!pagerEl) {
+      pagerEl = createPager();
+      statusEl.appendChild(pagerEl.root);
+    }
+    syncPager();
     const t = text().grid;
     const parts: string[] = [t.statusRows(totalRows.toLocaleString())];
     if (sort)
@@ -2652,7 +2780,7 @@ export function createTableGrid(
     if (targetRowIndex >= 0) {
       await firstPage;
       selectedRowIndex = targetRowIndex;
-      viewport.scrollTop = Math.max(0, targetRowIndex * ROW_HEIGHT);
+      viewport.scrollTop = Math.max(0, targetRowIndex * currentRowHeight());
       renderViewport();
     }
   }
@@ -2734,7 +2862,18 @@ export function createTableGrid(
   body.addEventListener("compositionstart", onCompositionStart);
   body.addEventListener("compositionend", onCompositionEnd);
 
+  // 表示密度を変えると行の高さが変わるので、仮想表示の高さと位置を取り直す。
+  const densityObserver = new MutationObserver(() => {
+    syncSpacer();
+    renderViewport();
+  });
+  densityObserver.observe(document.body, {
+    attributes: true,
+    attributeFilter: ["data-sidebar-font-size"],
+  });
+
   function destroy() {
+    densityObserver.disconnect();
     clear();
     embeddedGrid?.destroy();
     embeddedGrid = null;
@@ -2765,6 +2904,7 @@ export function createTableGrid(
     discardBtn.textContent = t.edit.discard;
     showPendingStatus();
     if (relatedEmptyEl) relatedEmptyEl.textContent = t.grid.relatedEmpty;
+    if (relatedCopyBtn) relatedCopyBtn.textContent = t.detail.copy;
     if (currentTable) {
       renderHeader(); // FK アイコンの title や列フィルタを再構築
       updateStatus();
@@ -2863,7 +3003,7 @@ export function createTableGrid(
   }
 
   function syncSpacer(): void {
-    spacer.style.height = `${displayRowCount() * ROW_HEIGHT}px`;
+    spacer.style.height = `${displayRowCount() * currentRowHeight()}px`;
   }
 
   function setEditStatus(message: string): void {
@@ -3042,7 +3182,9 @@ export function createTableGrid(
     } catch (err) {
       setEditStatus(
         text().edit.commitError(
-          err instanceof Error ? err.message : String(err),
+          reportDatastoreFailure("SQL", "save changes", err, currentTable, {
+            changes: mutations.length,
+          }),
         ),
       );
     } finally {

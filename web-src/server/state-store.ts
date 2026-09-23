@@ -1,5 +1,8 @@
 import { join } from "node:path";
+import { hasControlCharacter } from "../core/control-chars";
 import { sanitizeKeymapOverrides } from "../core/keymap";
+import { HISTORY_WIDTH, NAV_WIDTH, SIDEBAR_WIDTH } from "../core/panel-sizes";
+import { MAX_PROJECTS } from "../core/projects";
 import {
   MAX_GREP_PALETTE_HEIGHT,
   MAX_GREP_PALETTE_WIDTH,
@@ -14,13 +17,14 @@ import {
   TOOL_IDS,
   type ToolId,
 } from "../core/tools";
-import type {
-  AppSettingsState,
-  DbUiPrefs,
-  DbUiState,
-  ToolsState,
-  ViewerFontSizeSetting,
-  ViewState,
+import {
+  type AppSettingsState,
+  type DbUiPrefs,
+  type DbUiState,
+  THEME_PALETTES,
+  type ToolsState,
+  type ViewerFontSizeSetting,
+  type ViewState,
 } from "../core/types";
 import { createJsonFileStore, type JsonFileStore } from "./json-store";
 import {
@@ -168,13 +172,23 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   if (raw.layout === "side-by-side" || raw.layout === "line-by-line")
     out.layout = raw.layout;
   if (raw.theme === "light" || raw.theme === "dark") out.theme = raw.theme;
+  const palette = THEME_PALETTES.find((value) => value === raw.palette);
+  if (palette) out.palette = palette;
   if (raw.language === "en" || raw.language === "ja")
     out.language = raw.language;
   if (raw.sidebarView === "tree" || raw.sidebarView === "flat")
     out.sidebarView = raw.sidebarView;
-  const sidebarWidth = optionalNumber(raw.sidebarWidth, 180, 900);
+  const sidebarWidth = optionalNumber(
+    raw.sidebarWidth,
+    SIDEBAR_WIDTH.min,
+    SIDEBAR_WIDTH.max,
+  );
   if (sidebarWidth !== undefined) out.sidebarWidth = sidebarWidth;
-  const historyWidth = optionalNumber(raw.historyWidth, 220, 640);
+  const historyWidth = optionalNumber(
+    raw.historyWidth,
+    HISTORY_WIDTH.min,
+    HISTORY_WIDTH.max,
+  );
   if (historyWidth !== undefined) out.historyWidth = historyWidth;
   const sidebarHidden = optionalBoolean(raw.sidebarHidden);
   if (sidebarHidden !== undefined) out.sidebarHidden = sidebarHidden;
@@ -189,8 +203,6 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     MAX_TERMINAL_FONT_SIZE,
   );
   if (terminalFontSize !== undefined) out.terminalFontSize = terminalFontSize;
-  const appPanelDocked = optionalBoolean(raw.appPanelDocked);
-  if (appPanelDocked !== undefined) out.appPanelDocked = appPanelDocked;
   const syntaxHighlight = optionalBoolean(raw.syntaxHighlight);
   if (syntaxHighlight !== undefined) out.syntaxHighlight = syntaxHighlight;
   const autoUpdate = optionalBoolean(raw.autoUpdate);
@@ -285,6 +297,46 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   if (scopeWatchLimit !== undefined) out.scopeWatchLimit = scopeWatchLimit;
   const uploadEnabled = optionalBoolean(raw.uploadEnabled);
   if (uploadEnabled !== undefined) out.uploadEnabled = uploadEnabled;
+  const agentNotifyWaiting = optionalBoolean(raw.agentNotifyWaiting);
+  if (agentNotifyWaiting !== undefined)
+    out.agentNotifyWaiting = agentNotifyWaiting;
+  const agentNotifyDone = optionalBoolean(raw.agentNotifyDone);
+  if (agentNotifyDone !== undefined) out.agentNotifyDone = agentNotifyDone;
+  const agentHookHintDismissed = optionalBoolean(raw.agentHookHintDismissed);
+  if (agentHookHintDismissed !== undefined)
+    out.agentHookHintDismissed = agentHookHintDismissed;
+  const agentNotifyHintDismissed = optionalBoolean(
+    raw.agentNotifyHintDismissed,
+  );
+  if (agentNotifyHintDismissed !== undefined)
+    out.agentNotifyHintDismissed = agentNotifyHintDismissed;
+  const agentAccountsCollapsed = optionalBoolean(raw.agentAccountsCollapsed);
+  if (agentAccountsCollapsed !== undefined)
+    out.agentAccountsCollapsed = agentAccountsCollapsed;
+  const terminalImageShelfCollapsed = optionalBoolean(
+    raw.terminalImageShelfCollapsed,
+  );
+  if (terminalImageShelfCollapsed !== undefined)
+    out.terminalImageShelfCollapsed = terminalImageShelfCollapsed;
+  const terminalPanelOpen = optionalBoolean(raw.terminalPanelOpen);
+  if (terminalPanelOpen !== undefined)
+    out.terminalPanelOpen = terminalPanelOpen;
+  const navCollapsed = optionalBoolean(raw.navCollapsed);
+  if (navCollapsed !== undefined) out.navCollapsed = navCollapsed;
+  const navWidth = optionalNumber(raw.navWidth, NAV_WIDTH.min, NAV_WIDTH.max);
+  if (navWidth !== undefined) out.navWidth = navWidth;
+  const navCollapsedProjects = normalizeStringList(raw.navCollapsedProjects, {
+    maxItems: MAX_PROJECTS,
+    maxLen: 4096,
+  });
+  if (navCollapsedProjects) out.navCollapsedProjects = navCollapsedProjects;
+  const lastProjectRoot = optionalString(raw.lastProjectRoot, 4096);
+  if (
+    lastProjectRoot?.startsWith("/") &&
+    !hasControlCharacter(lastProjectRoot)
+  ) {
+    out.lastProjectRoot = lastProjectRoot;
+  }
   // 差分が空なら書かない。全部デフォルトに戻したときにファイルへ {} が
   // 残らないので、次に読んだときは素直に「未設定」として扱える。
   const keybindings = sanitizeKeymapOverrides(raw.keybindings);

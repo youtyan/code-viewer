@@ -1,3 +1,5 @@
+import { apiUrl } from "../core/api-url";
+import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import {
   COMMENT_DISCUSSION_16_PATH,
   GRABBER_16_PATH,
@@ -25,12 +27,15 @@ import {
 } from "../core/journal";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute, DiffRange } from "../core/routes";
-import { readStoredSize, writeStoredSize } from "../core/stored-size";
+import {
+  readStoredSize,
+  reportStoredSizeFailure,
+  writeStoredSize,
+} from "../core/stored-size";
 import type { PageView } from "./page-view";
 import { showConfirmDialog } from "./ui-dialog";
 
 export type JournalViewText = {
-  locale: string;
   ariaLabel: string;
   title: string;
   tabs: Record<ActiveTab, string>;
@@ -41,9 +46,6 @@ export type JournalViewText = {
   priorityLabels: Record<JournalTaskPriority, string>;
   statusField: string;
   priorityField: string;
-  previousMonth: string;
-  nextMonth: string;
-  weekDays: string[];
   noEntries: string;
   noRelatedTasks: string;
   noBody: string;
@@ -188,21 +190,6 @@ function taskCoversDate(task: JournalTask, date: string): boolean {
   return !!range && range.start <= date && date <= range.end;
 }
 
-function monthKey(date: string): string {
-  return date.slice(0, 7);
-}
-
-function monthTitle(date: string, locale: string): string {
-  const parsed = new Date(`${monthKey(date)}-01T00:00:00`);
-  return parsed.toLocaleString(locale, { month: "long", year: "numeric" });
-}
-
-function offsetMonth(date: string, delta: number): string {
-  const parsed = new Date(`${monthKey(date)}-01T00:00:00`);
-  parsed.setMonth(parsed.getMonth() + delta);
-  return `${todayIsoDate(parsed).slice(0, 7)}-01`;
-}
-
 function labelChip(label: string): HTMLElement {
   const chip = document.createElement("span");
   chip.className = "journal-label-chip";
@@ -226,8 +213,8 @@ function taskField(
 function createLabelEditor(
   initialLabels: string[],
   placeholder: string,
-  suggestionLabels: string[] = [],
-  removeLabelText: (label: string) => string = (label) => `Remove ${label}`,
+  suggestionLabels: string[],
+  removeLabelText: (label: string) => string,
 ): { element: HTMLElement; getLabels(): string[] } {
   const root = document.createElement("div");
   root.className = "journal-label-editor";
@@ -521,14 +508,19 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
       `${clamped}px`,
     );
     if (!persist) return;
-    writeStoredSize(TASK_EDITOR_WIDTH_STORAGE_KEY, clamped);
+    reportStoredSizeFailure(
+      writeStoredSize(TASK_EDITOR_WIDTH_STORAGE_KEY, clamped),
+      "saving the journal editor width failed",
+    );
   }
 
   function restoreTaskEditorWidth(): void {
-    applyTaskEditorWidth(
-      readStoredSize(TASK_EDITOR_WIDTH_STORAGE_KEY, TASK_EDITOR_DEFAULT_WIDTH),
-      false,
+    const result = readStoredSize(
+      TASK_EDITOR_WIDTH_STORAGE_KEY,
+      TASK_EDITOR_DEFAULT_WIDTH,
     );
+    reportStoredSizeFailure(result, "reading the journal editor width failed");
+    applyTaskEditorWidth(result.value, false);
   }
 
   function startTaskEditorResize(
@@ -678,7 +670,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
   ): Promise<JournalActionResponse> {
     deps.setStatus("refreshing");
     const res = await deps.trackLoad(
-      fetch("/_journal", {
+      fetch(apiUrl("journal"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -687,11 +679,20 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
         body: JSON.stringify({ action, ...body }),
       }),
     );
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok)
+      throw new Error(await responseErrorMessage(res, `journal ${action}`));
     const response = (await res.json()) as JournalActionResponse;
     afterResponse?.(response);
     await refresh();
     return response;
+  }
+
+  /** 失敗を console に出し、状態の行に操作の失敗と理由の全文を出す。 */
+  function showFailure(operation: string, error: unknown): void {
+    console.error(`[code-viewer] journal: ${operation}`, error);
+    message = `${operation}\n${formatErrorDetail(error)}`;
+    deps.setStatus("error");
+    render();
   }
 
   async function refresh(): Promise<void> {
@@ -701,8 +702,11 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     deps.setStatus("refreshing");
     try {
       const next = await deps.trackLoad(
-        fetch("/_journal").then(async (res) => {
-          if (!res.ok) throw new Error(await res.text());
+        fetch(apiUrl("journal")).then(async (res) => {
+          if (!res.ok)
+            throw new Error(
+              await responseErrorMessage(res, "loading the journal"),
+            );
           return (await res.json()) as JournalDataResponse;
         }),
       );
@@ -730,9 +734,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
       render();
     } catch (error) {
       if (seq !== lifecycle) return;
-      message = error instanceof Error ? error.message : text().loadFailed;
-      deps.setStatus("error");
-      render();
+      showFailure(text().loadFailed, error);
     }
   }
 
@@ -782,123 +784,6 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
 
     header.append(title, tabs, refreshButton, status);
     return header;
-  }
-
-  function renderCalendar(): HTMLElement {
-    const panel = document.createElement("aside");
-    panel.className = "journal-calendar";
-    const head = document.createElement("div");
-    head.className = "journal-calendar-head";
-    const prev = document.createElement("button");
-    prev.type = "button";
-    prev.textContent = "<";
-    prev.setAttribute("aria-label", text().previousMonth);
-    const next = document.createElement("button");
-    next.type = "button";
-    next.textContent = ">";
-    next.setAttribute("aria-label", text().nextMonth);
-    const title = document.createElement("strong");
-    title.textContent = monthTitle(selectedDate, text().locale);
-    prev.addEventListener("click", () => {
-      selectedDate = offsetMonth(selectedDate, -1);
-      selectedEntryId = "";
-      creatingEntry = false;
-      setRoute({ date: selectedDate });
-    });
-    next.addEventListener("click", () => {
-      selectedDate = offsetMonth(selectedDate, 1);
-      selectedEntryId = "";
-      creatingEntry = false;
-      setRoute({ date: selectedDate });
-    });
-    head.append(prev, title, next);
-
-    const days = document.createElement("div");
-    days.className = "journal-calendar-grid";
-    for (const label of text().weekDays) {
-      const day = document.createElement("span");
-      day.className = "journal-weekday";
-      day.textContent = label;
-      days.appendChild(day);
-    }
-
-    const monthStart = new Date(`${monthKey(selectedDate)}-01T00:00:00`);
-    const first = new Date(monthStart);
-    first.setDate(first.getDate() - first.getDay());
-    const entryDates = new Set(
-      (data?.journal.entries || []).map((entry) => entry.date),
-    );
-    const monthTasks = (data?.tasks.tasks || [])
-      .filter((task) => {
-        const range = taskDateRange(task);
-        return (
-          !!range &&
-          range.end >= todayIsoDate(first) &&
-          range.start <=
-            todayIsoDate(new Date(first.getTime() + 41 * 24 * 60 * 60 * 1000))
-        );
-      })
-      .slice(0, 60);
-    const today = todayIsoDate();
-    for (let i = 0; i < 42; i++) {
-      const current = new Date(first);
-      current.setDate(first.getDate() + i);
-      const value = todayIsoDate(current);
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "journal-day-button";
-      button.classList.toggle(
-        "muted",
-        monthKey(value) !== monthKey(selectedDate),
-      );
-      button.classList.toggle("active", value === selectedDate);
-      button.classList.toggle("today", value === today);
-      button.classList.toggle("has-entry", entryDates.has(value));
-      const number = document.createElement("span");
-      number.className = "journal-day-number";
-      number.textContent = String(current.getDate());
-      const bars = document.createElement("span");
-      bars.className = "journal-day-ranges";
-      const tasksForDay = monthTasks.filter((item) =>
-        taskCoversDate(item, value),
-      );
-      for (const task of tasksForDay.slice(0, 3)) {
-        const range = taskDateRange(task);
-        if (!range) continue;
-        const bar = document.createElement("span");
-        bar.className = `journal-day-range journal-range-${task.priority}`;
-        bar.classList.toggle("start", value === range.start);
-        bar.classList.toggle("end", value === range.end);
-        bar.classList.toggle(
-          "single",
-          value === range.start && value === range.end,
-        );
-        if (value === range.start) bar.textContent = task.title;
-        bar.title = `${task.title} (${range.start} - ${range.end})`;
-        bars.appendChild(bar);
-      }
-      if (tasksForDay.length > 3) {
-        const more = document.createElement("span");
-        more.className = "journal-day-range-more";
-        more.textContent = text().moreTasks(tasksForDay.length - 3);
-        more.title = tasksForDay
-          .slice(3)
-          .map((task) => task.title)
-          .join("\n");
-        bars.appendChild(more);
-      }
-      button.append(number, bars);
-      button.addEventListener("click", () => {
-        selectedDate = value;
-        creatingEntry = false;
-        selectedEntryId =
-          data?.journal.entries.find((entry) => entry.date === value)?.id || "";
-        setRoute({ date: value, tab: "journal" });
-      });
-      days.appendChild(button);
-    }
-    panel.append(head, days);
-    return panel;
   }
 
   function renderJournalEntryList(entries: DailyJournalEntry[]): HTMLElement {
@@ -996,10 +881,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
             }
           });
       } catch (error) {
-        message =
-          error instanceof Error ? error.message : text().saveEntryFailed;
-        deps.setStatus("error");
-        render();
+        showFailure(text().saveEntryFailed, error);
       } finally {
         setButtonBusy(save, false);
       }
@@ -1025,10 +907,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
           selectedEntryId = "";
           creatingEntry = false;
         } catch (error) {
-          message =
-            error instanceof Error ? error.message : text().deleteEntryFailed;
-          deps.setStatus("error");
-          render();
+          showFailure(text().deleteEntryFailed, error);
         } finally {
           setButtonBusy(del, false);
         }
@@ -1071,7 +950,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
   function renderJournalTab(): HTMLElement {
     const body = document.createElement("div");
     body.className = "journal-daily-layout";
-    body.append(renderCalendar(), renderJournalEditor(), renderRelatedTasks());
+    body.append(renderJournalEditor(), renderRelatedTasks());
     return body;
   }
 
@@ -1502,9 +1381,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
         selectedTaskId = id;
       });
     } catch (error) {
-      message = error instanceof Error ? error.message : text().moveTaskFailed;
-      deps.setStatus("error");
-      render();
+      showFailure(text().moveTaskFailed, error);
     }
   }
 
@@ -1662,7 +1539,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     deps.setStatus("refreshing");
     try {
       const res = await deps.trackLoad(
-        fetch("/_journal", {
+        fetch(apiUrl("journal"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1678,7 +1555,10 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
           }),
         }),
       );
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok)
+        throw new Error(
+          await responseErrorMessage(res, "journal list-github-issues"),
+        );
       const response = (await res.json()) as GithubIssueListResponse;
       if (seq !== githubIssueGeneration) return;
       githubIssues = stableGithubIssues(response.issues || []);
@@ -1686,6 +1566,10 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
       deps.setStatus("live");
     } catch (error) {
       if (seq !== githubIssueGeneration) return;
+      console.error(
+        "[code-viewer] journal: loading GitHub issues failed",
+        error,
+      );
       if (
         error instanceof Error &&
         /rate limit|secondary rate limit/i.test(error.message)
@@ -1699,8 +1583,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
           }
         }, GITHUB_ISSUE_RATE_LIMIT_RETRY_MS + 50);
       } else {
-        githubIssuesError =
-          error instanceof Error ? error.message : text().githubLoadFailed;
+        githubIssuesError = `${text().githubLoadFailed}\n${formatErrorDetail(error)}`;
       }
       githubIssuesLoaded = false;
       deps.setStatus("error");
@@ -1740,10 +1623,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
         return response.task.id;
       }
     } catch (error) {
-      message =
-        error instanceof Error ? error.message : text().githubLinkTaskFailed;
-      deps.setStatus("error");
-      render();
+      showFailure(text().githubLinkTaskFailed, error);
     } finally {
       stopTaskDragAutoScroll();
       draggingGithubIssueNumber = null;
@@ -2258,10 +2138,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
           if (response.task) setRoute({ tab: "tasks", task: response.task.id });
         }
       } catch (error) {
-        message =
-          error instanceof Error ? error.message : text().saveTaskFailed;
-        deps.setStatus("error");
-        render();
+        showFailure(text().saveTaskFailed, error);
       } finally {
         setButtonBusy(save, false);
       }
@@ -2276,10 +2153,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
         try {
           await requestJournal("claim-task", { id: task.id, by: "user" });
         } catch (error) {
-          message =
-            error instanceof Error ? error.message : text().claimTaskFailed;
-          deps.setStatus("error");
-          render();
+          showFailure(text().claimTaskFailed, error);
         } finally {
           setButtonBusy(claim, false);
         }
@@ -2297,10 +2171,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
             source: "user",
           });
         } catch (error) {
-          message =
-            error instanceof Error ? error.message : text().doneTaskFailed;
-          deps.setStatus("error");
-          render();
+          showFailure(text().doneTaskFailed, error);
         } finally {
           setButtonBusy(done, false);
         }
@@ -2321,14 +2192,14 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
         setButtonBusy(del, true);
         try {
           const result = await requestJournal("delete-task", { id: task.id });
-          if (!result.removed) throw new Error(text().deleteTaskFailed);
+          if (!result.removed)
+            throw new Error(
+              "the server reported that the task was not removed",
+            );
           selectedTaskId = "";
           setRoute({ tab: "tasks", task: undefined });
         } catch (error) {
-          message =
-            error instanceof Error ? error.message : text().deleteTaskFailed;
-          deps.setStatus("error");
-          render();
+          showFailure(text().deleteTaskFailed, error);
         } finally {
           setButtonBusy(del, false);
         }

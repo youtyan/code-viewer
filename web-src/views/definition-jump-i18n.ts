@@ -9,7 +9,6 @@ export type DefinitionJumpText = {
   referencesHeader: (count: number, truncated: boolean) => string;
   openSearchPanel: string;
   searchFailed: (message: string) => string;
-  unknownError: string;
 };
 
 const EN: DefinitionJumpText = {
@@ -19,7 +18,6 @@ const EN: DefinitionJumpText = {
     `References (${count}${truncated ? "+" : ""})`,
   openSearchPanel: "Search this symbol in the search panel",
   searchFailed: (message) => `Definition search failed: ${message}`,
-  unknownError: "unknown error",
 };
 
 const JA: DefinitionJumpText = {
@@ -29,7 +27,6 @@ const JA: DefinitionJumpText = {
     `参照箇所 (${count}${truncated ? "+" : ""} 件)`,
   openSearchPanel: "このシンボル名で検索パネルを開く",
   searchFailed: (message) => `定義の検索に失敗しました: ${message}`,
-  unknownError: "不明なエラー",
 };
 
 export function definitionJumpText(

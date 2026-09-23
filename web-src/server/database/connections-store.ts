@@ -134,10 +134,14 @@ async function hydrateFromKeychainAsync(
         .then((stored) => {
           if (stored) runtimeSecrets.set(key, extractSecrets(stored));
         })
-        // 読み出しは内部で握り潰される想定だが、万一 reject しても
-        // map に失敗 promise が残り続けないようにする。
-        .catch(() => {
+        // 読み出しの失敗は中で記録される。万一 reject しても map に失敗
+        // promise を残さず、理由は記録する。
+        .catch((error: unknown) => {
           keychainLookups.delete(key);
+          console.error(
+            "[code-viewer] reading datastore secrets from the keychain failed:",
+            error,
+          );
         });
       keychainLookups.set(key, lookup);
       return lookup;
@@ -379,7 +383,14 @@ const store = createJsonFileStore<ConnectionsState>({
 });
 
 async function protectFile(cwd: string): Promise<void> {
-  await chmod(connectionsFilePath(cwd), 0o600).catch(() => undefined);
+  // 権限を絞れない場所 (chmod を持たないファイルシステムなど) でも保存は
+  // 続けるが、絞れなかったことは記録する。
+  await chmod(connectionsFilePath(cwd), 0o600).catch((error: unknown) => {
+    console.error(
+      "[code-viewer] restricting the datastore connections file to 0600 failed:",
+      error,
+    );
+  });
 }
 
 export async function loadDatastoreConnections(

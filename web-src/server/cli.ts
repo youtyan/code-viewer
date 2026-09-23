@@ -105,5 +105,14 @@ if (process.argv[2] === "agent-help") {
   process.argv[2] = "--help";
   await import("./preview");
 } else {
-  await import("./preview");
+  // 既定は入口のサーバ (1 つのポートで全プロジェクトを扱う)。今までの 1 つで
+  // 完結するサーバは `--standalone` (テスト・スクリプト・CI もこちら)。入口が
+  // 起こす裏のプロセス (`--backend`) と `--help`・`--version` も preview.ts。
+  const { runsStandaloneServer } = await import("./entry/args");
+  if (runsStandaloneServer(process.argv.slice(2))) {
+    await import("./preview");
+  } else {
+    const { runEntry } = await import("./entry/server");
+    await runEntry(process.argv.slice(2));
+  }
 }

@@ -160,16 +160,67 @@ describe("external command resolver", () => {
       ok: false,
       error: "--bin git: path must be absolute",
     });
+  });
 
-    expect(
-      configureExternalCommands({
-        cwd: root,
-        env: {},
-        cliOverrides: [{ name: "git", path: join(root, "missing-git") }],
-      }),
-    ).toEqual({
+  // どの操作がどのパスで、どの理由 (code) で落ちたかを返す。
+  test.each([
+    {
+      name: "missing",
+      make: () => undefined,
+      step: "realpath",
+      code: "ENOENT",
+    },
+    {
+      name: "not executable",
+      make: (path: string) => {
+        writeFileSync(path, "#!/bin/sh\nexit 0\n");
+        chmodSync(path, 0o644);
+      },
+      step: "access (X_OK)",
+      code: "EACCES",
+    },
+  ])("says which check failed for a $name override", ({ make, step, code }) => {
+    const root = realpathSync(tempRoot("code-viewer-command-reason-"));
+    const path = join(root, "sample-git");
+    make(path);
+
+    const configured = configureExternalCommands({
+      cwd: tempRoot("code-viewer-command-reason-cwd-"),
+      env: {},
+      cliOverrides: [{ name: "git", path }],
+    });
+    const [head, ...detail] =
+      configured.ok === false ? configured.error.split("\n") : [""];
+    expect({
+      ok: configured.ok,
+      head,
+      code: detail.join("\n").includes(`"code":"${code}"`),
+    }).toEqual({
       ok: false,
-      error: "--bin git: path must point to an executable file",
+      head: `--bin git: path must point to an executable file: ${step} ${path} failed`,
+      code: true,
+    });
+  });
+
+  test("says why --cwd cannot be read when an override is configured", () => {
+    const cwd = join(tempRoot("code-viewer-command-gone-"), "gone");
+    const git = executable(tempRoot("code-viewer-command-gone-bin-"), "git");
+
+    const configured = configureExternalCommands({
+      cwd,
+      env: {},
+      cliOverrides: [{ name: "git", path: git }],
+    });
+    const [head, ...detail] =
+      configured.ok === false ? configured.error.split("\n") : [""];
+    expect({
+      ok: configured.ok,
+      head,
+      code: detail.join("\n").includes('"code":"ENOENT"'),
+    }).toEqual({
+      ok: false,
+      head: `--cwd must point to an existing directory: ${cwd}`,
+      code: true,
     });
   });
 

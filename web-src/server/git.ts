@@ -34,6 +34,8 @@ import {
   commandNotFoundDetail,
   isCommandNotFoundResult,
 } from "./command-resolver";
+import { errno } from "./terminal/settings-file";
+import { skipUnreadablePath } from "./unreadable-path";
 import { compileNamePatterns, type NamePatternSet } from "./name-pattern";
 import {
   type RunAsyncOptions,
@@ -41,6 +43,7 @@ import {
   runAsync,
   runBytesAsync,
   runSync,
+  type SpawnStreamExit,
   spawnStream,
 } from "./runtime";
 
@@ -243,7 +246,7 @@ function run(
 function runGitAsync(
   args: string[],
   cwd: string,
-  options: Pick<RunAsyncOptions, "signal" | "stdin" | "timeout"> = {},
+  options: Pick<RunAsyncOptions, "env" | "signal" | "stdin" | "timeout"> = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return runAsync(resolveGitArgs(args), cwd, {
     ...options,
@@ -274,7 +277,7 @@ export function gitFailureMessage(
   fallback: string,
 ): string {
   const message = isCommandNotFoundResult("git", res)
-    ? commandNotFoundDetail("git")
+    ? `${commandNotFoundDetail("git")}. Install git, add its directory to PATH, or pass --bin git=/absolute/path.`
     : res.stderr?.trim() || fallback;
   console.error(`[code-viewer] ${fallback} (git exit ${res.code}): ${message}`);
   return message;
@@ -584,6 +587,62 @@ export function repoRootResult(
   return { kind: "error", error: stderr || "git rev-parse failed" };
 }
 
+/**
+ * 任意のディレクトリが属するプロジェクト。エージェント一覧がペインの cwd を
+ * 束ねるのに使う。
+ *
+ * - root: 本体の作業ツリーのルート。worktree の中なら、その worktree ではなく
+ *   本体に寄せる (共通の .git の親)。bare や別置きの git ディレクトリで親が
+ *   決まらないときは、その作業ツリー自身
+ * - toplevel: そのディレクトリを含む作業ツリーのルート
+ *
+ * git 管理外と、git を呼べなかった場合を分けて返す (repoRootResult と同じく
+ * 英語のメッセージで見分ける)。ディレクトリが消えていても -C の失敗として
+ * error で返る。
+ */
+export async function projectRootResultAsync(
+  dir: string,
+  cwd: string,
+): Promise<
+  | { kind: "root"; root: string; toplevel: string }
+  | { kind: "outside" }
+  | { kind: "error"; error: string }
+> {
+  const res = await runGitAsync(
+    [
+      "git",
+      "-C",
+      dir,
+      "rev-parse",
+      "--path-format=absolute",
+      "--show-toplevel",
+      "--git-common-dir",
+    ],
+    cwd,
+    { env: { ...process.env, LC_ALL: "C" } },
+  );
+  if (res.code === 0) {
+    const [toplevel = "", commonDir = ""] = res.stdout.trimEnd().split("\n");
+    if (!toplevel || !commonDir) {
+      return {
+        kind: "error",
+        error: `unexpected git rev-parse output for ${dir}: ${JSON.stringify(res.stdout)}`,
+      };
+    }
+    const root = commonDir.endsWith("/.git") ? dirname(commonDir) : toplevel;
+    return { kind: "root", root, toplevel };
+  }
+  if (isCommandNotFoundResult("git", res)) {
+    return { kind: "error", error: commandNotFoundDetail("git") };
+  }
+  const stderr = res.stderr.trim();
+  if (/not a git repository/i.test(stderr)) return { kind: "outside" };
+  return {
+    kind: "error",
+    error: `git rev-parse failed for ${dir} (exit ${res.code}): ${stderr}`,
+  };
+}
+
 export function currentBranchAsync(cwd: string): Promise<string | null> {
   return runGitRefLookupAsync(
     ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -819,7 +878,7 @@ export function catFileBlobStream(
   cwd: string,
 ): {
   stream: ReadableStream<Uint8Array>;
-  exited: Promise<number>;
+  exited: Promise<SpawnStreamExit>;
   kill(signal?: string): void;
 } {
   return spawnStream(resolveGitArgs(["git", "cat-file", "blob", oid]), cwd);
@@ -874,21 +933,58 @@ export async function lastCommitDateForPathAsync(
   return res.stdout.trim() || null;
 }
 
+/**
+ * HEAD のコミット。まだコミットの無いリポジトリ (git init 直後) は unborn で、
+ * git の失敗として記録しない (--quiet は、無いときに stderr を出さず exit 1)。
+ * それ以外の失敗は unborn と取り違えない。
+ */
+export async function headCommitAsync(
+  cwd: string,
+): Promise<
+  | { kind: "commit"; sha: string }
+  | { kind: "unborn" }
+  | { kind: "error"; error: string; result: { code: number; stderr: string } }
+> {
+  const head = await runGitAsync(
+    ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+    cwd,
+  );
+  if (head.code === 0) return { kind: "commit", sha: head.stdout.trim() };
+  if (head.code === 1 && !head.stderr.trim()) return { kind: "unborn" };
+  return {
+    kind: "error",
+    error: gitFailureMessage(head, "git rev-parse HEAD failed"),
+    result: head,
+  };
+}
+
+/** 空の木。ハッシュの形 (sha1 / sha256) はリポジトリに合わせて git に作らせる。 */
+export async function emptyTreeAsync(
+  cwd: string,
+): Promise<{ ok: true; tree: string } | { ok: false; error: string }> {
+  const res = await runGitAsync(
+    ["git", "hash-object", "-t", "tree", "/dev/null"],
+    cwd,
+  );
+  if (res.code === 0) return { ok: true, tree: res.stdout.trim() };
+  return { ok: false, error: gitFailureMessage(res, "git hash-object failed") };
+}
+
 export async function worktreeCommitDatesAsync(
   paths: string[],
   cwd: string,
 ): Promise<Map<string, string>> {
   const dates = new Map<string, string>();
   if (!paths.length) return dates;
-  const head = await runGitAsync(
-    ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
-    cwd,
-  );
+  const head = await headCommitAsync(cwd);
   // An unborn HEAD has no history; other failures must not look like that state.
-  if (head.code === 1 && !head.stderr.trim()) return dates;
-  if (head.code !== 0)
-    throw errorWithCause("Cannot resolve HEAD for file commit dates", head);
-  const sha = head.stdout.trim();
+  if (head.kind === "unborn") return dates;
+  if (head.kind === "error")
+    throw errorWithCause(
+      `Cannot resolve HEAD for file commit dates: ${head.error}`,
+      head.result,
+    );
+  const sha = head.sha;
   const pending = paths.values();
   // Pin every lookup to one commit and bound the process count for wide directories.
   await Promise.all(
@@ -1713,15 +1809,14 @@ function syntheticUncommittedBlameFromWorktree(
       isSynthetic: true,
     };
   } catch (err) {
-    if (
-      typeof err === "object" &&
-      err !== null &&
-      "code" in err &&
-      (err as { code?: unknown }).code === "ENOENT"
-    ) {
+    if (errno(err) === "ENOENT") {
       return { lines: [], commits: {}, error: "file not found" };
     }
-    return { lines: [], commits: {}, error: "file not readable" };
+    return {
+      lines: [],
+      commits: {},
+      error: `file not readable: ${formatErrorDetail(err)}`,
+    };
   }
 }
 
@@ -1900,8 +1995,13 @@ function realpathWithinRepo(
       return null;
     if (rel === "" && !allowRoot) return null;
     return realFull;
-  } catch {
-    return null;
+  } catch (error) {
+    // 無い・リンクが回っている場所は「中に入れない」。ほかの理由は投げる。
+    const code = errno(error);
+    if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+      return null;
+    }
+    throw error;
   }
 }
 
@@ -1920,7 +2020,10 @@ function resolveWorktreeSymlinkTarget(
   let symlink_target: string | undefined;
   try {
     symlink_target = readlinkSync(full);
-  } catch {
+  } catch (error) {
+    // 一覧を読んだ後に消えた・リンクでなくなったものだけ、行き先なしにする。
+    const code = errno(error);
+    if (code !== "ENOENT" && code !== "EINVAL") throw error;
     symlink_target = undefined;
   }
   let symlink_target_type: "tree" | "blob" | "missing" = "missing";
@@ -1932,7 +2035,11 @@ function resolveWorktreeSymlinkTarget(
         : stat.isFile()
           ? "blob"
           : "missing";
-    } catch {
+    } catch (error) {
+      const code = errno(error);
+      if (code !== "ENOENT" && code !== "ENOTDIR" && code !== "ELOOP") {
+        throw error;
+      }
       symlink_target_type = "missing";
     }
   }
@@ -2056,8 +2163,11 @@ async function worktreeFilesystemEntriesAsync(
         )
         .filter((entry) => entry.path),
     );
-  } catch {
-    return [];
+  } catch (error) {
+    // 無いフォルダは空の一覧。読めないなど、ほかの理由は投げる。
+    const code = errno(error);
+    if (code === "ENOENT" || code === "ENOTDIR") return [];
+    throw error;
   }
   if (!recursive) return directEntries;
 
@@ -2098,7 +2208,8 @@ async function worktreeFilesystemEntriesAsync(
     let entries: Dirent[];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      skipUnreadablePath(dir, error, "the worktree file walk");
       return;
     }
     for (const entry of entries) {
@@ -2153,9 +2264,10 @@ function hasDotGitEntry(dir: string): boolean {
     lstatSync(join(dir, ".git"));
     return true;
   } catch (err) {
-    return (
-      !!err && typeof err === "object" && "code" in err && err.code !== "ENOENT"
-    );
+    if (errno(err) === "ENOENT") return false;
+    // 確かめられない場所は入れ子のリポジトリと同じく中へ入らない (記録はする)。
+    skipUnreadablePath(dir, err, "the worktree file walk");
+    return true;
   }
 }
 
@@ -2480,7 +2592,28 @@ export async function untrackedFileDiffAsync(
   if (isCommandNotFoundResult("git", res)) {
     return { ...res, stderr: commandNotFoundDetail("git"), status: 503 };
   }
-  return res;
+  if (path.startsWith("./")) return res;
+  return { ...res, stdout: withoutDotSlashInHeader(res.stdout, path) };
+}
+
+/**
+ * 上で前置した `./` を、差分の見出し (`diff --git a/./x b/./x` と `+++ b/./x`)
+ * から外す。git は受け取ったパスをそのまま見出しに書くので、Diff のカードの題が
+ * `./docs/x.md` になり、追跡中のファイルの題 (`docs/x.md`) と揃わなかった。
+ * 本文 (@@ から後) には触らない。
+ */
+export function withoutDotSlashInHeader(
+  diffText: string,
+  path: string,
+): string {
+  const bodyStart = diffText.indexOf("\n@@");
+  const header = bodyStart < 0 ? diffText : diffText.slice(0, bodyStart);
+  const fixed = header
+    .split(`a/./${path}`)
+    .join(`a/${path}`)
+    .split(`b/./${path}`)
+    .join(`b/${path}`);
+  return bodyStart < 0 ? fixed : fixed + diffText.slice(bodyStart);
 }
 
 export function splitHunks(diffText: string): {

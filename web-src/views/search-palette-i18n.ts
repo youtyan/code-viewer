@@ -68,16 +68,52 @@ export type SearchPaletteText = CodePreviewText & {
   searchFailed: (error: string) => string;
   savingSelection: string;
   selectionSaveFailed: (error: string) => string;
-  // Results sheet (bottom panel tab that keeps a grep result list open).
+  // Results sheet (the Search tab that keeps a grep result list open).
   pinResults: string;
   pinResultsTitle: string;
   resultsTitle: string;
-  resultsOpen: string;
   resultsRun: string;
   resultsPlaceholder: string;
   resultsIdle: string;
+  /** 検索の結果の画面の初期の案内 (views/empty-state.ts): 補足とキーの説明。 */
+  resultsIdleHint: string;
+  resultsIdleKeys: { run: string; anywhere: string; openFile: string };
+  resultsIdleKeysLabel: string;
   resultsScope: (ref: string) => string;
+  // Ctrl+K に混ぜるプロジェクト・エージェント・セッション・操作 (search-palette-ui.ts の PaletteCommand)。
+  searchEverything: string;
+  groups: Record<
+    "projects" | "agents" | "sessions" | "files" | "actions",
+    string
+  >;
+  footerMove: string;
+  footerOpen: string;
+  /** Shift+Enter: 固定のタブで開く (ui-surface.md の「タブの決まり」)。 */
+  footerOpenNewTab: string;
+  footerClose: string;
+  footerSwitch: (mode: "file" | "grep") => string;
+  currentProject: string;
+  actions: Record<PaletteActionId, string>;
 };
+
+/** パレットの Actions に並べる操作 (app.ts が実行の仕方を持つ)。 */
+export type PaletteActionId =
+  | "new-agent"
+  | "open-settings"
+  | "toggle-theme"
+  | "goto-repo"
+  | "goto-diff"
+  | "goto-history"
+  | "goto-worktrees"
+  | "goto-database"
+  | "goto-journal"
+  | "goto-agents"
+  | "goto-tools"
+  | "goto-search"
+  | "toggle-terminal-panel"
+  | "toggle-sidebar"
+  | "switch-project"
+  | "open-help";
 
 const EN: SearchPaletteText = {
   ...codePreviewText("en"),
@@ -152,13 +188,52 @@ const EN: SearchPaletteText = {
   selectionSaveFailed: (error) => `Failed to save selection: ${error}`,
   pinResults: "Pin",
   pinResultsTitle:
-    "Keep these results open in the bottom panel while you browse (Ctrl+Enter)",
+    "Keep these results open in the Search tab while you browse (Ctrl+Enter)",
   resultsTitle: "Search",
-  resultsOpen: "Open the search results panel",
   resultsRun: "Search",
   resultsPlaceholder: "Search text (path:<dir or glob> narrows)",
   resultsIdle: "Type a search and press Enter",
+  resultsIdleHint:
+    "Every file of the project is searched. Add path:src/ to narrow it to a folder.",
+  resultsIdleKeys: {
+    run: "Search",
+    anywhere: "Search from anywhere",
+    openFile: "Open a file",
+  },
+  resultsIdleKeysLabel: "Keys",
   resultsScope: (ref) => `in ${ref}`,
+  searchEverything: "Search projects, agents, sessions, files, actions…",
+  groups: {
+    projects: "Projects",
+    agents: "Agents",
+    sessions: "Sessions",
+    files: "Files",
+    actions: "Actions",
+  },
+  footerMove: "move",
+  footerOpen: "open",
+  footerOpenNewTab: "new tab",
+  footerClose: "close",
+  footerSwitch: (mode) => (mode === "file" ? "text search" : "file search"),
+  currentProject: "This screen",
+  actions: {
+    "new-agent": "New agent",
+    "open-settings": "Settings",
+    "toggle-theme": "Toggle theme",
+    "goto-repo": "Go to Files",
+    "goto-diff": "Go to Diff",
+    "goto-history": "Go to History",
+    "goto-worktrees": "Go to Worktrees",
+    "goto-database": "Go to Data",
+    "goto-journal": "Go to Work log",
+    "goto-agents": "Go to Agents",
+    "goto-tools": "Go to Tools",
+    "goto-search": "Go to Search",
+    "toggle-terminal-panel": "Open a terminal (new shell or session)",
+    "toggle-sidebar": "Show / hide the file list",
+    "switch-project": "Switch project",
+    "open-help": "Quick help",
+  },
 };
 
 const JA: SearchPaletteText = {
@@ -231,14 +306,55 @@ const JA: SearchPaletteText = {
   savingSelection: "選択履歴を保存中...",
   selectionSaveFailed: (error) => `選択履歴を保存できませんでした: ${error}`,
   pinResults: "固定",
-  pinResultsTitle: "この結果を下パネルに出したまま閲覧を続ける (Ctrl+Enter)",
+  pinResultsTitle:
+    "この結果を「検索」タブに出したまま閲覧を続ける (Ctrl+Enter)",
   resultsTitle: "検索",
-  resultsOpen: "検索結果パネルを開く",
   resultsRun: "検索",
   resultsPlaceholder:
     "検索するコード（path:<ディレクトリ or glob> で絞り込み）",
   resultsIdle: "検索語を入力して Enter",
+  resultsIdleHint:
+    "プロジェクトのすべてのファイルから探します。path:src/ を足すとフォルダを絞れます。",
+  resultsIdleKeys: {
+    run: "検索",
+    anywhere: "どこからでも検索",
+    openFile: "ファイルを開く",
+  },
+  resultsIdleKeysLabel: "キー",
   resultsScope: (ref) => `${ref} 内`,
+  searchEverything:
+    "プロジェクト・エージェント・セッション・ファイル・操作を検索…",
+  groups: {
+    projects: "プロジェクト",
+    agents: "エージェント",
+    sessions: "セッション",
+    files: "ファイル",
+    actions: "操作",
+  },
+  footerMove: "移動",
+  footerOpen: "開く",
+  footerOpenNewTab: "新しいタブ",
+  footerClose: "閉じる",
+  footerSwitch: (mode) => (mode === "file" ? "コード検索" : "ファイル検索"),
+  currentProject: "この画面",
+  actions: {
+    "new-agent": "新しいエージェント",
+    "open-settings": "設定",
+    "toggle-theme": "テーマ切り替え",
+    "goto-repo": "ファイルへ移る",
+    "goto-diff": "差分へ移る",
+    "goto-history": "履歴へ移る",
+    "goto-worktrees": "作業ツリーへ移る",
+    "goto-database": "データストアへ移る",
+    "goto-journal": "ワークログへ移る",
+    "goto-agents": "エージェントへ移る",
+    "goto-tools": "ツールへ移る",
+    "goto-search": "検索へ移る",
+    "toggle-terminal-panel": "ターミナルを開く (新しいシェル・セッション)",
+    "toggle-sidebar": "ファイル一覧を出す・隠す",
+    "switch-project": "プロジェクトを切り替える",
+    "open-help": "クイックヘルプ",
+  },
 };
 
 export function searchPaletteText(

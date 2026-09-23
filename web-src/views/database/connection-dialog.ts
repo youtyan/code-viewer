@@ -1,9 +1,12 @@
+import { apiUrl } from "../../core/api-url";
 import type { DbKind } from "../../core/database/types";
+import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import {
   showAlertDialog,
   showConfirmDialog,
   showFormDialog,
 } from "../ui-dialog";
+import { requireOkResponse } from "./report-failure";
 
 type PublicConnection = {
   id: string;
@@ -175,8 +178,8 @@ async function loadConnection(
   deps: ConnectionDialogDeps,
   id: string,
 ): Promise<PublicConnection | null> {
-  const response = await deps.trackLoad(fetch("/_db/connections"));
-  if (!response.ok) return null;
+  const response = await deps.trackLoad(fetch(apiUrl("dbConnections")));
+  await requireOkResponse(response, text(deps.language).requestFailed);
   const body = (await response.json()) as { connections?: PublicConnection[] };
   return body.connections?.find((entry) => entry.id === id) ?? null;
 }
@@ -460,7 +463,7 @@ export async function showDatastoreConnectionDialog(
     const generation = ++testGeneration;
     void deps
       .trackLoad(
-        fetch("/_db/connections/test", {
+        fetch(apiUrl("dbConnectionsTest"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -471,17 +474,20 @@ export async function showDatastoreConnectionDialog(
       )
       .then(async (response) => {
         if (generation !== testGeneration) return;
-        if (!response.ok) {
-          throw new Error(labels.testFailed);
-        }
+        await requireOkResponse(response, labels.testFailed);
         testStatus.dataset.state = "success";
         testStatus.textContent = labels.testSucceeded;
       })
       .catch((err) => {
         if (generation !== testGeneration) return;
+        // 入力の中身 (資格情報を含む) は console に出さない。種類だけを添える。
+        console.error(
+          "[code-viewer] datastore connection test failed",
+          kind.value,
+          err,
+        );
         testStatus.dataset.state = "error";
-        testStatus.textContent =
-          err instanceof Error && err.message ? err.message : labels.testFailed;
+        testStatus.textContent = formatErrorDetail(err);
       })
       .finally(() => {
         testButton.disabled = false;
@@ -499,7 +505,7 @@ export async function showDatastoreConnectionDialog(
     submit: async () => {
       const payload = buildPayload();
       const response = await deps.trackLoad(
-        fetch("/_db/connections", {
+        fetch(apiUrl("dbConnections"), {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -508,9 +514,7 @@ export async function showDatastoreConnectionDialog(
           body: JSON.stringify(payload),
         }),
       );
-      if (!response.ok) {
-        throw new Error((await response.text()) || labels.requestFailed);
-      }
+      await requireOkResponse(response, labels.requestFailed);
       const result = (await response.json()) as {
         connection: PublicConnection;
       };
@@ -533,7 +537,7 @@ export async function deleteDatastoreConnectionFromUi(
   });
   if (!confirmed) return false;
   const response = await deps.trackLoad(
-    fetch("/_db/connections", {
+    fetch(apiUrl("dbConnections"), {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",
@@ -542,13 +546,19 @@ export async function deleteDatastoreConnectionFromUi(
       body: JSON.stringify({ id }),
     }),
   );
-  if (!response.ok)
-    throw new Error((await response.text()) || labels.requestFailed);
+  await requireOkResponse(response, labels.requestFailed);
   // 接続は消えたがキーチェーン項目が残った場合 (ロック中など) は黙って
-  // 成功扱いにしない。残った資格情報の存在をユーザーに知らせる。
-  const body = (await response.json().catch(() => ({}))) as {
-    secretsRemoved?: boolean;
-  };
+  // 成功扱いにしない。残った資格情報の存在をユーザーに知らせる。本文が
+  // 読めないときも「消えた」とは言えないので、理由ごと投げる。
+  let body: { secretsRemoved?: boolean };
+  try {
+    body = (await response.json()) as { secretsRemoved?: boolean };
+  } catch (error) {
+    throw errorWithCause(
+      `${labels.requestFailed}: the connection was deleted, but the response did not say whether its keychain credentials were removed`,
+      error,
+    );
+  }
   if (body.secretsRemoved === false) {
     await showAlertDialog({
       title: labels.secretsLeftTitle,

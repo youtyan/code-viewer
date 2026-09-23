@@ -8,13 +8,22 @@
 // 「何を渡したか」だけを見る。
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import type { AppRoute, DiffRange } from "../core/routes";
 import type { CommitMeta, WorktreesResponse } from "../core/types";
 import type { WorktreeFileChange, WorktreeItem } from "../core/worktree";
 import { worktreeText } from "../views/worktree-i18n";
 import {
   createWorktreeView,
+  type WorktreeAgent,
   type WorktreeView,
   type WorktreeViewOptions,
 } from "../views/worktree-view";
@@ -269,6 +278,8 @@ function stubFetch(
 
 type Mounted = {
   panel: HTMLElement;
+  /** #sidebar の持ち主の知らせ (true = この画面が変更ファイルを書く)。 */
+  owners: boolean[];
   filelist: HTMLElement;
   diff: HTMLElement;
   routes: AppRoute[];
@@ -300,6 +311,7 @@ async function mountWith(
     sidebarView?: "tree" | "flat";
     highlighter?: unknown;
     commits?: CommitPayload;
+    agents?: WorktreeAgent[];
   } = {},
 ): Promise<Mounted> {
   installDiff2Html();
@@ -316,6 +328,7 @@ async function mountWith(
     ...options.route,
   };
   const routes: AppRoute[] = [];
+  const owners: boolean[] = [];
   let displayOptions: WorktreeViewOptions = {
     layout: "line-by-line",
     ignoreWs: false,
@@ -337,6 +350,7 @@ async function mountWith(
     getText: () => TEXT,
     setPageMode: () => undefined,
     syncHeaderMenu: () => undefined,
+    onSidebarOwner: (owned) => owners.push(owned),
     setStatus: () => undefined,
     // 実物 (app.ts) と同じ形のボタンを返す。中身の挙動はここでは見ない。
     createOpenPathButton: (_path, _kind, title) => {
@@ -352,8 +366,12 @@ async function mountWith(
     // 何をどう呼んだかを記録する。成否は openPathResult で差し替える。
     openPathInOs: (path, kind) => {
       openedPaths.push({ path, kind });
-      return Promise.resolve(openPathResult);
+      return openPathResult
+        ? Promise.resolve()
+        : Promise.reject(new Error("sample open failure"));
     },
+    getAgents: () => options.agents ?? [],
+    subscribeAgents: () => () => undefined,
   });
   await view.enter();
   // 差分は「見えたものから」読む。IntersectionObserver の無い環境では全部
@@ -367,6 +385,7 @@ async function mountWith(
   if (!panel || !filelist || !diff) throw new Error("boxes were not mounted");
   return {
     panel,
+    owners,
     filelist,
     diff,
     routes,
@@ -414,6 +433,16 @@ function menuItem(label: string): HTMLButtonElement {
 function lastRoute(routes: AppRoute[]): AppRoute | undefined {
   return routes[routes.length - 1];
 }
+
+// テストで開いたまま終わったダイアログ・メニューを閉じる。閉じないと document の
+// keydown を受け続け、後のテストで押した Enter で送信してフォーカスを開く前の
+// 場所へ戻した (ui-dialog.ts)。受け手は Escape で外れる。
+afterEach(async () => {
+  document.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
 
 beforeEach(() => {
   installDom();
@@ -570,14 +599,14 @@ describe("worktree list panel", () => {
     const whens = panel.querySelectorAll<HTMLElement>(".history-item .when");
     // 最終コミットの相対時刻と、mtime ベースの最終更新の両方が出る。
     expect(whens).toHaveLength(2);
-    expect(whens[1].textContent).toBe(TEXT.lastTouched("just now"));
+    expect(whens[1].textContent).toBe(TEXT.lastTouched("now"));
     expect(whens[1].title).toBe(
-      new Date(Date.parse(touchedIso)).toLocaleString(),
+      new Date(Date.parse(touchedIso)).toLocaleString("en"),
     );
     // 最終コミットの title は件名と絶対日時の両方を持つ。
     expect(whens[0].title).toContain("sample subject");
     expect(whens[0].title).toContain(
-      new Date("2026-08-10T00:00:00.000Z").toLocaleString(),
+      new Date("2026-08-10T00:00:00.000Z").toLocaleString("en"),
     );
   });
 
@@ -648,6 +677,74 @@ describe("worktree list panel", () => {
     // メニューは body 直下に居るので、畳んだ画面と一緒には消えない。
     view.suspend();
     expect(document.querySelector(".gdp-context-menu")).toBeNull();
+  });
+});
+
+describe("overview (nothing picked)", () => {
+  const worktrees = () =>
+    response([
+      item({ name: "repo", current: true }),
+      item({
+        name: "feature-x",
+        path: "/repo/.worktrees/feature-x",
+        displayPath: ".worktrees/feature-x",
+        branch: "feature-x",
+      }),
+    ]);
+
+  test("fills the screen with the list only while nothing is picked", async () => {
+    const { view, setCurrentRoute } = await mountWith(worktrees());
+    expect(document.body.hasAttribute("data-worktree-overview")).toBe(true);
+    setCurrentRoute({
+      screen: "worktree",
+      range: RANGE,
+      wt: "/repo/.worktrees/feature-x",
+    });
+    await view.enter();
+    expect(document.body.hasAttribute("data-worktree-overview")).toBe(false);
+    view.suspend();
+    expect(document.body.hasAttribute("data-worktree-overview")).toBe(false);
+  });
+
+  test("puts an Open button in each row from the start, next to the menu", async () => {
+    const { panel } = await mountWith(worktrees());
+    for (const row of panel.querySelectorAll(".history-item")) {
+      expect(texts(row, ".worktree-row-actions button")).toEqual(["Open", ""]);
+    }
+    expect(texts(panel, ".worktree-row-branch")).toEqual(["main", "feature-x"]);
+  });
+
+  test("shows the most urgent agent of each worktree and counts the rest", async () => {
+    const { panel } = await mountWith(worktrees(), {
+      agents: [
+        {
+          path: "/repo",
+          kind: "claude",
+          state: "idle",
+          stateLabel: "Idle",
+        },
+        {
+          path: "/repo/.worktrees/feature-x/src",
+          kind: "codex",
+          state: "working",
+          stateLabel: "Working",
+        },
+        {
+          path: "/repo/.worktrees/feature-x",
+          kind: "claude",
+          state: "waiting",
+          stateLabel: "Needs input",
+        },
+      ],
+    });
+    // 入れ子の作業ツリーの中の cwd は、いちばん深い作業ツリーに数える。
+    expect(texts(panel, ".worktree-row-agents")).toEqual([
+      "Idle",
+      "Needs input+1",
+    ]);
+    expect(
+      panel.querySelectorAll(".worktree-row-agents .terminal-mark-waiting"),
+    ).toHaveLength(1);
   });
 });
 
@@ -983,11 +1080,17 @@ describe("row actions", () => {
     // 失敗したことは画面のどこかに出ないと、押した人には何も分からない。
     openPathResult = false;
     openRowMenu(panel, 0);
+    const logged = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     menuItem(TEXT.actions.openFolder).click();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    // 失敗の理由 (投げられたエラー) も一緒に出す。
     expect(texts(panel, ".history-status")).toContain(
-      TEXT.actions.openFolderFailed,
+      `${TEXT.actions.openFolderFailed}\nError: sample open failure`,
     );
+    expect(logged).toHaveBeenCalledTimes(1);
+    logged.mockRestore();
   });
 
   test("opens the repository root itself for the main worktree", async () => {
@@ -1374,10 +1477,16 @@ describe("sidebar file list", () => {
       }),
     ]);
 
-  test("asks for a worktree before showing anything", async () => {
-    const { filelist } = await mountWith(withFiles());
-    expect(filelist.textContent).toContain(TEXT.panes.selectWorktree);
-    expect(filelist.querySelectorAll(".tree-file[data-key]")).toHaveLength(0);
+  // 選ぶ前 (一覧だけの表示) は、#sidebar は右の列の Files の木 (app が出す)。
+  // この画面は書かず、持ち主でないことを知らせる。
+  test("leaves the left column to the Files tree before a worktree is picked", async () => {
+    const { filelist, owners } = await mountWith(withFiles());
+    expect([
+      filelist.querySelectorAll(".tree-file[data-key]").length,
+      filelist.textContent?.includes(TEXT.panes.selectWorktree),
+      owners.includes(true),
+      owners[owners.length - 1],
+    ]).toEqual([0, false, false, false]);
   });
 
   test("lists the files of the picked worktree with their status", async () => {
@@ -1451,7 +1560,7 @@ describe("sidebar file list", () => {
     ]);
     expect(
       filelist.querySelector<HTMLElement>(".worktree-commit .when")?.title,
-    ).toBe(new Date("2026-08-12T09:30:00.000Z").toLocaleString());
+    ).toBe(new Date("2026-08-12T09:30:00.000Z").toLocaleString("en"));
     const commitRow = filelist.querySelector(".worktree-commit");
     const fileRow = filelist.querySelector(".tree-file[data-key]");
     expect(
@@ -1816,7 +1925,10 @@ describe("page level state", () => {
       status: 500,
       body: "git is unavailable",
     });
-    expect(texts(panel, ".history-status")).toContain("git is unavailable");
+    // 何ができなかったかの後に、操作・HTTP の状態・本文を続ける。
+    expect(texts(panel, ".history-status")).toContain(
+      `${TEXT.loadFailed}\nError: loading the worktree list (HTTP 500): git is unavailable`,
+    );
     expect(panel.querySelectorAll(".history-item")).toHaveLength(0);
   });
 
@@ -2060,6 +2172,80 @@ describe("event wiring", () => {
     expect(routes.length - before).toBe(1);
   });
 
+  test("does not navigate a new tab to an untrusted server URL", async () => {
+    const mounted = await mountWith(response([item({ name: "other" })]), {
+      postResponse: { url: "https://example.invalid/" },
+    });
+    const close = vi.fn();
+    const tab = { opener: null, location: { href: "" }, close };
+    const originalOpen = window.open;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      value: () => tab,
+    });
+    try {
+      openRowMenu(mounted.panel, 0);
+      menuItem(TEXT.open).click();
+      for (let i = 0; i < 8; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      expect(tab.location.href).toBe("");
+      expect(close).toHaveBeenCalledOnce();
+      expect(
+        texts(mounted.panel, ".history-status").some((message) =>
+          message.includes("project server URL must be an HTTP loopback URL"),
+        ),
+      ).toBe(true);
+    } finally {
+      Object.defineProperty(window, "open", {
+        configurable: true,
+        value: originalOpen,
+      });
+    }
+  });
+
+  test("shows why the new tab could not be opened instead of starting a server", async () => {
+    const mounted = await mountWith(response([item({ name: "other" })]), {
+      postResponse: { url: "http://127.0.0.1:4321/" },
+    });
+    const originalOpen = window.open;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      value: () => {
+        throw new DOMException("sample popup refusal", "SecurityError");
+      },
+    });
+    const errors: unknown[][] = [];
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args: unknown[]) => {
+        errors.push(args);
+      });
+    try {
+      openRowMenu(mounted.panel, 0);
+      menuItem(TEXT.open).click();
+      for (let i = 0; i < 8; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      expect(
+        texts(mounted.panel, ".history-status").some(
+          (message) =>
+            message.includes(TEXT.openFailed) &&
+            message.includes("SecurityError: sample popup refusal"),
+        ),
+      ).toBe(true);
+      expect(errors.length).toBe(1);
+    } finally {
+      errorSpy.mockRestore();
+      Object.defineProperty(window, "open", {
+        configurable: true,
+        value: originalOpen,
+      });
+    }
+  });
+
   test("does not refresh or rewrite the page after a suspended action finishes", async () => {
     const mounted = await mountWith(response([item({ name: "repo" })]), {
       route: { wt: "/repo" },
@@ -2112,5 +2298,239 @@ describe("event wiring", () => {
         value: originalOpen,
       });
     }
+  });
+});
+
+// 一覧と変更ファイルの Tab の止まり場所と行の上のキー (views/list-tab-stop.ts)。
+// 止まり場所は選んでいる行 (無ければ先頭の行) 1 つ。行の中のボタンは止まり場所の
+// 行の分だけ Tab に入る。↑↓・Home / End はフォーカスを移すだけ (選ぶと画面が
+// 切り替わる)。Enter は 1 回押したのと同じ。
+describe("worktree rows by keyboard", () => {
+  function press(target: HTMLElement, key: string): boolean {
+    const event = new KeyboardEvent("keydown", {
+      key,
+      bubbles: true,
+      cancelable: true,
+    });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+
+  const three = () =>
+    response([
+      item({ name: "repo" }),
+      item({ name: "one" }),
+      item({ name: "two" }),
+    ]);
+
+  function rowsOf(panel: HTMLElement): HTMLElement[] {
+    return [...panel.querySelectorAll<HTMLElement>(".history-list > li")];
+  }
+
+  function nameOf(row: Element | null | undefined): string {
+    return row?.querySelector(".subject")?.textContent ?? "";
+  }
+
+  test.each([
+    { name: "nothing picked: the first row", route: {}, stop: "repo" },
+    {
+      name: "a picked worktree: its row",
+      route: { wt: "/repo/.worktrees/two" },
+      stop: "two",
+    },
+  ])("the list is one tab stop — $name", async ({ route, stop }) => {
+    const { panel } = await mountWith(three(), { route });
+    const rows = rowsOf(panel);
+    const list = panel.querySelector(".history-list");
+    expect({
+      stops: rows.filter((row) => row.tabIndex === 0).map(nameOf),
+      buttonsInTab: [
+        ...panel.querySelectorAll<HTMLElement>(".history-list button"),
+      ]
+        .filter((button) => button.tabIndex >= 0)
+        .map((button) => nameOf(button.closest("li")))
+        .filter((name, index, all) => all.indexOf(name) === index),
+      label: list?.getAttribute("aria-label"),
+      current: rows
+        .filter((row) => row.getAttribute("aria-current") === "true")
+        .map(nameOf),
+    }).toEqual({
+      stops: [stop],
+      buttonsInTab: [stop],
+      label: "Worktrees",
+      current: "wt" in route ? [stop] : [],
+    });
+  });
+
+  test.each([
+    { key: "ArrowDown", from: 0, focused: "one" },
+    { key: "ArrowUp", from: 2, focused: "one" },
+    { key: "End", from: 0, focused: "two" },
+    { key: "Home", from: 2, focused: "repo" },
+    { key: "ArrowUp", from: 0, focused: "repo" },
+  ])("$key moves the focus without picking", async ({ key, from, focused }) => {
+    const { panel, routes } = await mountWith(three(), {
+      route: { wt: "/repo" },
+    });
+    const row = rowsOf(panel)[from];
+    row.focus();
+    const prevented = press(row, key);
+    expect({
+      prevented,
+      focused: nameOf(document.activeElement),
+      navigated: routes.length,
+    }).toEqual({ prevented: true, focused, navigated: 0 });
+  });
+
+  test("Enter picks the row and keeps the focus on it after the redraw", async () => {
+    const mounted = await mountWith(three(), { route: { wt: "/repo" } });
+    const row = rowsOf(mounted.panel)[1];
+    row.focus();
+    press(row, "Enter");
+    const route = lastRoute(mounted.routes);
+    expect(route?.screen === "worktree" ? route.wt : null).toBe(
+      "/repo/.worktrees/one",
+    );
+    // 画面が URL を読み直して一覧を描き直す (選んだ行が active)。
+    if (route) mounted.setCurrentRoute(route);
+    await mounted.view.enter();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const focused = document.activeElement;
+    expect({
+      name: nameOf(focused),
+      connected: focused?.isConnected,
+      stop: rowsOf(mounted.panel)
+        .filter((item) => item.tabIndex === 0)
+        .map(nameOf),
+    }).toEqual({ name: "one", connected: true, stop: ["one"] });
+  });
+
+  // 一覧はエージェントの状態が変わるたびに頭ごと作り直すので、頭の部品に
+  // あったフォーカスも戻す (戻さないと body に落ち、Tab が一覧の先へ進めない)。
+  test.each([
+    {
+      name: "the filter field",
+      pick: (panel: HTMLElement) =>
+        panel.querySelector<HTMLElement>(".history-filter-wrap input"),
+    },
+    {
+      name: "the Reload button",
+      pick: (panel: HTMLElement) =>
+        panel.querySelector<HTMLElement>(".history-head button"),
+    },
+  ])("a redraw keeps the focus on $name", async ({ pick }) => {
+    const mounted = await mountWith(three(), { route: { wt: "/repo" } });
+    const before = pick(mounted.panel);
+    if (!before) throw new Error("missing control");
+    before.focus();
+    await mounted.view.enter();
+    const after = pick(mounted.panel);
+    expect({
+      same: document.activeElement === after,
+      connected: document.activeElement?.isConnected,
+    }).toEqual({ same: true, connected: true });
+  });
+
+  // 変更ファイルの列の見出しは「Files」ではなく「Changed files」(Files の木と
+  // 見分ける。History の変更ファイルの列も同じ)。
+  test("the changed files column is titled Changed files", async () => {
+    await mountWith(three(), { route: { wt: "/repo" } });
+    expect(document.querySelector(".sb-title")?.textContent).toBe(
+      "Changed files",
+    );
+  });
+
+  const withFiles = () =>
+    response([
+      item({
+        name: "repo",
+        files: [
+          file({ path: "src/a/one.ts" }),
+          file({ path: "src/b/two.ts" }),
+          file({ path: "top.ts" }),
+        ],
+      }),
+    ]);
+
+  function fileRows(filelist: HTMLElement): HTMLElement[] {
+    return [
+      ...filelist.querySelectorAll<HTMLElement>(
+        "li.tree-file[data-key], li.tree-dir[data-worktree-dir]",
+      ),
+    ];
+  }
+
+  function fileName(row: Element | null | undefined): string {
+    return row?.querySelector(".name")?.textContent ?? "";
+  }
+
+  test("the changed files are one tab stop in a named tree", async () => {
+    const { filelist } = await mountWith(withFiles(), {
+      route: { wt: "/repo" },
+      sidebarView: "tree",
+      diff: { diff: "@@ -1 +1 @@\n-a\n+b\n" },
+    });
+    const rows = fileRows(filelist);
+    expect({
+      role: filelist.getAttribute("role"),
+      label: filelist.getAttribute("aria-label"),
+      rowRoles: [...new Set(rows.map((row) => row.getAttribute("role")))],
+      stops: rows.filter((row) => row.tabIndex === 0).map(fileName),
+      expanded: rows
+        .filter((row) => row.dataset.worktreeDir !== undefined)
+        .map((row) => row.getAttribute("aria-expanded")),
+    }).toEqual({
+      role: "tree",
+      label: "Changed files",
+      rowRoles: ["treeitem"],
+      stops: ["src"],
+      expanded: ["true", "true", "true"],
+    });
+  });
+
+  test("↓ moves between shown rows; Enter on a folder folds it", async () => {
+    const { filelist, routes } = await mountWith(withFiles(), {
+      route: { wt: "/repo" },
+      sidebarView: "tree",
+      diff: { diff: "@@ -1 +1 @@\n-a\n+b\n" },
+    });
+    const [src, a] = fileRows(filelist);
+    src.focus();
+    press(src, "ArrowDown");
+    const afterDown = fileName(document.activeElement);
+    press(a, "Enter");
+    const folded = a.classList.contains("collapsed");
+    press(a, "ArrowDown");
+    const afterFold = fileName(document.activeElement);
+    expect({
+      afterDown,
+      folded,
+      expanded: a.getAttribute("aria-expanded"),
+      afterFold,
+      navigated: routes.length,
+    }).toEqual({
+      afterDown: "a",
+      folded: true,
+      expanded: "false",
+      afterFold: "b",
+      navigated: 0,
+    });
+  });
+
+  test("Enter on a file row opens it (same as one click)", async () => {
+    const { filelist, routes } = await mountWith(withFiles(), {
+      route: { wt: "/repo" },
+      sidebarView: "flat",
+      diff: { diff: "@@ -1 +1 @@\n-a\n+b\n" },
+    });
+    const row = fileRows(filelist).find((item) => fileName(item) === "top.ts");
+    if (!row) throw new Error("missing top.ts");
+    row.focus();
+    press(row, "Enter");
+    const route = lastRoute(routes);
+    expect({
+      role: filelist.getAttribute("role"),
+      file: route?.screen === "worktree" ? route.file : null,
+    }).toEqual({ role: "listbox", file: "top.ts" });
   });
 });

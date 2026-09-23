@@ -229,6 +229,52 @@ describe("database tabs store", () => {
     });
   });
 
+  // 直す前は、版違い・形違いを空で返していたので、次の保存が元の値を上書き
+  // して、何があったかの手がかりごと消えていた。JSON が壊れているときと同じ
+  // 経路 (退避 + 理由の記録) に寄せる。
+  test.each([
+    {
+      name: "知らない版",
+      content: '{"version":2,"tabs":[],"activeTabId":null}',
+    },
+    { name: "配列", content: "[]" },
+    { name: "object でない", content: '"tabs"' },
+    { name: "版が無い", content: '{"tabs":[]}' },
+  ])("版と形の食い違いも退避して理由を残す: $name", async ({ content }) => {
+    await withTempProject(async (dir) => {
+      const storeDir = join(dir, ".code-viewer");
+      mkdirSync(storeDir, { recursive: true });
+      writeFileSync(join(storeDir, "tabs.json"), content, "utf8");
+      const logged: unknown[][] = [];
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => {
+        logged.push(args);
+      };
+      try {
+        expect(await loadTabsAsync(dir)).toEqual({
+          version: 1,
+          activeTabId: null,
+          tabs: [],
+        });
+      } finally {
+        console.error = originalError;
+      }
+
+      const files = readdirSync(storeDir);
+      expect(files.includes("tabs.json")).toBe(false);
+      expect(files.some((file) => file.startsWith("tabs.json.bak-"))).toBe(
+        true,
+      );
+      expect(logged.length).toBe(1);
+      expect(logged[0]?.[0]).toBe(
+        "[code-viewer] invalid JSON state was moved aside",
+      );
+      expect(String((logged[0]?.[1] as { cause?: unknown })?.cause)).toContain(
+        "database tabs state",
+      );
+    });
+  });
+
   test("truncates large drafts and rejects unsafe css sizes", async () => {
     await withTempProject(async (dir) => {
       await saveTabsAsync(dir, {

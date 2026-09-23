@@ -5,7 +5,15 @@
 // core/diagram-viewport の持ち物なので、ここでは操作と倍率表示の配線を見る。
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import { terminalText } from "../views/terminal/i18n";
 import { openImageLightbox } from "../views/terminal/image-lightbox";
 
@@ -131,5 +139,112 @@ describe("画像の拡大表示", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     document.removeEventListener("keydown", listener);
     expect(reached).toBe(true);
+  });
+});
+
+describe("棚の並びごと開いたとき", () => {
+  const GALLERY = [
+    IMAGE,
+    OTHER,
+    { ...IMAGE, url: "/third", name: "third.png", path: "/tmp/third.png" },
+  ];
+  const src = () => overlay()?.querySelector("img")?.getAttribute("src");
+  const path = () =>
+    overlay()?.querySelector(".terminal-lightbox-path")?.textContent;
+  const navButtons = () => [
+    ...(overlay()?.querySelectorAll<HTMLButtonElement>(
+      ".terminal-lightbox-nav button",
+    ) ?? []),
+  ];
+
+  test.each([
+    { name: "→ で次", keys: ["ArrowRight"], expected: "/tmp/other.png" },
+    {
+      name: "← で前 (先頭からは末尾へ回る)",
+      keys: ["ArrowLeft"],
+      expected: "/tmp/third.png",
+    },
+    {
+      name: "→ → → で一周",
+      keys: ["ArrowRight", "ArrowRight", "ArrowRight"],
+      expected: "/tmp/out.png",
+    },
+  ])("$name", ({ keys, expected }) => {
+    openImageLightbox({ images: GALLERY, index: 0 }, text());
+    for (const key of keys) {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key }));
+    }
+    expect(path()).toBe(expected);
+    expect(src()).toBe(GALLERY.find((item) => item.path === expected)?.url);
+  });
+
+  test("index の画像から見せる", () => {
+    openImageLightbox({ images: GALLERY, index: 1 }, text());
+    expect(src()).toBe(OTHER.url);
+    expect(overlay()?.getAttribute("aria-label")).toBe("other.png");
+  });
+
+  test("前へ・次へのボタンでも移れる", () => {
+    openImageLightbox({ images: GALLERY, index: 0 }, text());
+    const [previous, next] = navButtons();
+    next?.click();
+    expect(path()).toBe("/tmp/other.png");
+    previous?.click();
+    expect(path()).toBe("/tmp/out.png");
+  });
+
+  test("1 枚だけなら前へ・次へは押せないが場所は残る", () => {
+    openImageLightbox(IMAGE, text());
+    const [previous, next, copy] = navButtons();
+    expect(previous?.disabled).toBe(true);
+    expect(next?.disabled).toBe(true);
+    expect(copy?.disabled).toBe(false);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
+    expect(src()).toBe(IMAGE.url);
+  });
+
+  test("パスをコピーできる (いま見ている画像のパス)", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    openImageLightbox({ images: GALLERY, index: 1 }, text());
+    navButtons()[2]?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalledWith("/tmp/other.png");
+    expect(
+      overlay()?.querySelector(".terminal-lightbox-hint")?.textContent,
+    ).toBe(text().imagePathCopied);
+  });
+
+  test("コピーに失敗したら理由を出す", async () => {
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: () => Promise.reject(new Error("permission denied")),
+      },
+    });
+    try {
+      openImageLightbox(IMAGE, text());
+      navButtons()[2]?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(
+        overlay()?.querySelector(".terminal-lightbox-hint")?.textContent,
+      ).toBe(`${text().copyImagePathFailed} Error: permission denied`);
+      expect(errors).toHaveBeenCalledTimes(1);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  test("空の並びでは開かない", () => {
+    expect(() => openImageLightbox({ images: [], index: 0 }, text())).toThrow(
+      "openImageLightbox needs at least one image",
+    );
   });
 });

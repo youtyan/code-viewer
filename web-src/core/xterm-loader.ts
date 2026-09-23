@@ -37,11 +37,54 @@ export type XtermTheme = {
   cursor?: string;
   cursorAccent?: string;
   selectionBackground?: string;
+  /** ANSI の色。テーマの地に合わせて読める色へ差し替える分だけ。 */
+  red?: string;
+  green?: string;
+  yellow?: string;
+  magenta?: string;
+  white?: string;
+  brightWhite?: string;
+};
+
+/** バッファの 1 マス。 */
+export type XtermBufferCell = {
+  /** 入っている字。空のマスは空文字。 */
+  getChars(): string;
+  /** 何マスぶんの字か (全角は 2、その後ろ半分は 0)。 */
+  getWidth(): number;
 };
 
 /** バッファの 1 行。文字列に起こして中身を見るためだけに使う。 */
 export type XtermBufferLine = {
+  /** 前の行から折り返された続きか。 */
+  readonly isWrapped: boolean;
+  /** マス目の数 (端末の桁数)。 */
+  readonly length: number;
+  getCell(x: number): XtermBufferCell | undefined;
   translateToString(trimRight?: boolean): string;
+};
+
+/** リンクの範囲。x・y とも 1 始まりで、end は含む。 */
+export type XtermBufferRange = {
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+};
+
+export type XtermLink = {
+  range: XtermBufferRange;
+  text: string;
+  decorations?: { pointerCursor: boolean; underline: boolean };
+  activate(event: MouseEvent, text: string): void;
+  hover?(event: MouseEvent, text: string): void;
+  leave?(event: MouseEvent, text: string): void;
+};
+
+export type XtermLinkProvider = {
+  /** bufferLineNumber は 1 始まり。 */
+  provideLinks(
+    bufferLineNumber: number,
+    callback: (links: XtermLink[] | undefined) => void,
+  ): void;
 };
 
 export type XtermBuffer = {
@@ -59,6 +102,8 @@ export type XtermTerminal = {
   readonly element: HTMLElement | undefined;
   readonly textarea: HTMLTextAreaElement | undefined;
   readonly buffer: { readonly active: XtermBuffer };
+  /** 端末のモード。カーソルキーのモード (DECCKM) で矢印の送り方が変わる。 */
+  readonly modes: { readonly applicationCursorKeysMode: boolean };
   options: XtermOptions;
   open(parent: HTMLElement): void;
   write(data: string | Uint8Array, callback?: () => void): void;
@@ -83,6 +128,12 @@ export type XtermTerminal = {
   scrollLines(amount: number): void;
   /** 表示位置が変わった。引数は画面先頭の行番号 (buffer.viewportY と同じ)。 */
   onScroll(handler: (viewportY: number) => void): XtermDisposable;
+  /**
+   * 文字の範囲をリンクにする。xterm がカーソルの出入りと押下を知らせ、下線も
+   * 引く (描き直しのたびに聞き直すので、全画面を描き直すアプリの下でも位置が
+   * ずれない)。
+   */
+  registerLinkProvider(provider: XtermLinkProvider): XtermDisposable;
   /** 描画のたびに呼ばれる。重ねている DOM の置き直しはここで判断する。 */
   onRender(
     handler: (range: { start: number; end: number }) => void,

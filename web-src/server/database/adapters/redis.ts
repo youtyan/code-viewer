@@ -1,3 +1,4 @@
+import { errorWithCause, formatErrorDetail } from "../../../core/error-detail";
 import { createHash } from "node:crypto";
 import { createClient } from "@redis/client";
 import type {
@@ -287,9 +288,7 @@ function createRedisDriverExecutor(config: RedisConfig): {
           stdout: "",
           stderr: timedOut
             ? `redis request timed out after ${timeoutMs}ms`
-            : error instanceof Error
-              ? error.message
-              : String(error),
+            : formatErrorDetail(error),
           code: 1,
         };
       } finally {
@@ -332,19 +331,15 @@ function safeJsonParse<T>(stdout: string, command: string): T {
   try {
     return JSON.parse(stdout) as T;
   } catch (err) {
-    throw new Error(
+    throw errorWithCause(
       `${command} 返却 JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`,
+      err,
     );
   }
 }
 
 function isValidUtf8(buf: Buffer): boolean {
-  try {
-    const decoded = buf.toString("utf8");
-    return Buffer.from(decoded, "utf8").equals(buf);
-  } catch {
-    return false;
-  }
+  return Buffer.from(buf.toString("utf8"), "utf8").equals(buf);
 }
 
 // Lua 5.1 で各要素を hex に詰めてから cjson.encode する prelude。

@@ -1,7 +1,13 @@
+import { apiUrl } from "../../core/api-url";
 import type {
   QueryHistoryEntry,
   QueryHistoryState,
 } from "../../core/database/types";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../../core/error-detail";
 import { iconSvg, SYNC_16_PATH } from "../../core/icons";
 import { type DbText, dbText } from "./i18n";
 import { formatQueryValue } from "./query-value";
@@ -26,7 +32,8 @@ export type QueryHistoryView = {
 type RefreshResult =
   | { type: "none" }
   | { type: "added"; count: number }
-  | { type: "unchanged" };
+  | { type: "unchanged" }
+  | { type: "error"; message: string };
 
 export function createQueryHistoryView(
   callbacks: QueryHistoryViewCallbacks,
@@ -109,6 +116,8 @@ export function createQueryHistoryView(
         return text().history.refreshResultAdded(refreshResultState.count);
       case "unchanged":
         return text().history.refreshResultUnchanged;
+      case "error":
+        return refreshResultState.message;
       default: {
         const exhaustive: never = refreshResultState;
         return exhaustive;
@@ -123,6 +132,10 @@ export function createQueryHistoryView(
     refreshResult.classList.toggle(
       "changed",
       refreshResultState.type === "added",
+    );
+    refreshResult.classList.toggle(
+      "db-pane-error",
+      refreshResultState.type === "error",
     );
   }
 
@@ -142,6 +155,30 @@ export function createQueryHistoryView(
     refreshResultState =
       added > 0 ? { type: "added", count: added } : { type: "unchanged" };
     syncRefreshResult();
+  }
+
+  function reportHistoryError(
+    operation: string,
+    message: string,
+    error: unknown,
+  ): void {
+    console.error(operation, error);
+    refreshResultState = { type: "error", message };
+    syncRefreshResult();
+  }
+
+  async function parseHistoryResponse(
+    response: Response,
+    operation: string,
+  ): Promise<QueryHistoryState> {
+    if (!response.ok) {
+      throw new Error(await responseErrorMessage(response, operation));
+    }
+    try {
+      return (await response.json()) as QueryHistoryState;
+    } catch (error) {
+      throw errorWithCause(`${operation}: response is not valid JSON`, error);
+    }
   }
 
   syncRefreshButtonLabel();
@@ -198,9 +235,11 @@ export function createQueryHistoryView(
     if (options.announceResult) clearRefreshResult();
     setRefreshBusy(true);
     const promise = (async () => {
-      const res = await fetch(`/_db/history${params}`);
-      if (!res.ok) return;
-      const state = (await res.json()) as QueryHistoryState;
+      const res = await fetch(`${apiUrl("dbHistory")}${params}`);
+      const state = await parseHistoryResponse(
+        res,
+        text().failure.refreshHistory,
+      );
       if (currentRefreshParams().key !== refreshKey) return;
       entries = state.entries;
       if (previousEntries) setRefreshResult(previousEntries, entries);
@@ -213,8 +252,12 @@ export function createQueryHistoryView(
         clearDetail();
       }
       render();
-    })().catch(() => {
-      /* ignore */
+    })().catch((error) => {
+      reportHistoryError(
+        "Failed to refresh query history",
+        text().history.refreshError(formatErrorDetail(error)),
+        error,
+      );
     });
     inFlightRefresh = { key: refreshKey, promise };
     try {
@@ -317,6 +360,13 @@ export function createQueryHistoryView(
 
     detailCol.append(meta, actions, sqlBlock);
 
+    if (entry.error !== undefined) {
+      const errorBlock = document.createElement("pre");
+      errorBlock.className = "db-query-error";
+      errorBlock.textContent = entry.error;
+      detailCol.appendChild(errorBlock);
+    }
+
     if (entry.body) {
       const bodyBlock = document.createElement("div");
       bodyBlock.className = "db-query-history-body";
@@ -392,6 +442,12 @@ export function createQueryHistoryView(
       entry.rowCount,
       entry.truncated,
     )}, ${text().history.elapsedLabel(entry.elapsedMs)}`;
+    if (entry.error !== undefined) {
+      // 失敗した問い合わせ: 行数の代わりに「失敗」の印 (理由は詳細に出す)。
+      stats.classList.add("db-query-history-failed");
+      stats.textContent = `${text().history.failedMark}, ${text().history.elapsedLabel(entry.elapsedMs)}`;
+      stats.title = entry.error;
+    }
 
     meta.append(byIcon, time, stats);
     return meta;
@@ -458,7 +514,7 @@ export function createQueryHistoryView(
 
   async function deleteEntry(id: string) {
     try {
-      await fetch("/_db/history/delete", {
+      const response = await fetch(apiUrl("dbHistoryDelete"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -466,6 +522,14 @@ export function createQueryHistoryView(
         },
         body: JSON.stringify({ id }),
       });
+      if (!response.ok) {
+        throw new Error(
+          await responseErrorMessage(
+            response,
+            text().failure.deleteHistoryEntry,
+          ),
+        );
+      }
       entries = entries.filter((e) => e.id !== id);
       expandedIds.delete(id);
       if (selectedEntryId === id) resetDetailCol();
@@ -477,8 +541,12 @@ export function createQueryHistoryView(
       } else {
         render();
       }
-    } catch {
-      /* ignore */
+    } catch (error) {
+      reportHistoryError(
+        "Failed to delete query history entry",
+        text().history.deleteError(formatErrorDetail(error)),
+        error,
+      );
     }
   }
 
@@ -503,7 +571,7 @@ export function createQueryHistoryView(
     }
     try {
       const schema = callbacks.getSchema();
-      await fetch("/_db/history/clear", {
+      const response = await fetch(apiUrl("dbHistoryClear"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -513,11 +581,20 @@ export function createQueryHistoryView(
           dbId ? { db: dbId, ...(schema ? { schema } : {}) } : {},
         ),
       });
+      if (!response.ok) {
+        throw new Error(
+          await responseErrorMessage(response, text().failure.clearHistory),
+        );
+      }
       entries = [];
       clearRefreshResult();
       render();
-    } catch {
-      /* ignore */
+    } catch (error) {
+      reportHistoryError(
+        "Failed to clear query history",
+        text().history.clearError(formatErrorDetail(error)),
+        error,
+      );
     }
   });
 
@@ -580,9 +657,13 @@ export function createQueryHistoryView(
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) {
+      throw new RangeError(`Invalid query history timestamp: ${iso}`);
+    }
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  } catch {
+  } catch (error) {
+    console.error("Failed to format query history timestamp", error);
     return iso;
   }
 }

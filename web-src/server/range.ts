@@ -1,3 +1,15 @@
+// 要る分を読み終えた後、残りの読み取りを止める。止められなくても読んだ分は
+// 正しいので返すが、流している側 (git の子プロセスなど) が残るかもしれないので記録する。
+async function cancelRestOfStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<void> {
+  try {
+    await reader.cancel();
+  } catch (error) {
+    console.error("[code-viewer] could not cancel the rest of a stream", error);
+  }
+}
+
 export type DiffRange = {
   from?: string;
   to?: string;
@@ -101,11 +113,7 @@ export async function collectLineRangeFromStream(
     }
   }
   if (hasMore) {
-    try {
-      await reader.cancel();
-    } catch {
-      /* best effort */
-    }
+    await cancelRestOfStream(reader);
     return { lines, total: lineNo - 1, complete: false };
   }
   pending += decoder.decode();
@@ -171,11 +179,7 @@ export async function collectByteRangeFromStream(
     }
     offset = chunkEnd;
   }
-  try {
-    await reader.cancel();
-  } catch {
-    /* best effort */
-  }
+  await cancelRestOfStream(reader);
   if (chunks.length === 1) return chunks[0];
   const bytes = new Uint8Array(total);
   let writeOffset = 0;

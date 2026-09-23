@@ -3,9 +3,29 @@
 // re-anchoring, idle syntax highlight, and the diff meta header.
 // Extracted from app.ts.
 
+import { apiUrl, withoutProjectPrefix } from "../core/api-url";
 import { changedPathsCoverPath } from "../core/changed-paths";
+import { hasControlCharacter } from "../core/control-chars";
+import { showCopyFailure } from "../core/copy-failure";
+import {
+  type DiffCardHScrollMetrics,
+  type DiffCardLayout,
+  type DiffCardMetrics,
+  estimateDiffCardHeight,
+  tabbedTextWidth,
+} from "../core/diff-card-estimate";
 import { summarizeDiffFileKinds } from "../core/diff-file-kinds";
-import { filePathClipboardText } from "../core/file-path-copy";
+import {
+  errorWithCause,
+  errorWithCauses,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
+import {
+  filePathClipboardText,
+  filePathDisplayText,
+  filePathNeedsEscaping,
+} from "../core/file-path-copy";
 import {
   CHEVRON_DOWN_16_PATH,
   COLLAPSE_ALL_16_PATHS,
@@ -24,8 +44,15 @@ import type {
   SidebarItem,
 } from "../core/types";
 import { suppressWhitespaceOnlyInlineHighlights } from "../core/ws-highlight";
+import { fitBreadcrumb } from "./breadcrumb-fit";
+import { attachStickyHScroll, detachStickyHScroll } from "./diff-hscroll";
 import { diffRowAfterLineNumber } from "./diff-line-select";
-import type { ExpandStackElement } from "./hunk-expand";
+import type { DiffViewText, ManualLoadReason } from "./diff-view-i18n";
+import {
+  createExpandStack,
+  createTrailingExpandRow,
+  type ExpandStackElement,
+} from "./hunk-expand";
 import { enhanceMediaCard } from "./media-embed";
 
 export type DiffViewDeps = {
@@ -76,23 +103,30 @@ export type DiffViewDeps = {
   isEmbeddedDiffMode?(): boolean;
 };
 
-export type DiffViewText = {
-  files(count: number): string;
-  updated(time: string): string;
-  updatedTitle: string;
-  kindAdded: string;
-  kindDeleted: string;
-  kindRenamed: string;
-  kindHeavy: string;
-  kindBinary: string;
-  kindMedia: string;
-  viewedProgress(viewed: number, total: number): string;
-  viewedProgressTitle: string;
-  nextUnviewed: string;
-  nextUnviewedTitle: string;
-  allViewed: string;
-  allViewedTitle: string;
-};
+function validatedFileDiffUrl(value: string): string {
+  const expected = apiUrl("fileDiff");
+  const validationBase = new URL("http://localhost");
+  let target: URL;
+  try {
+    target = new URL(value, validationBase);
+  } catch (cause) {
+    throw errorWithCause("diff response URL is invalid", cause);
+  }
+  if (
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    hasControlCharacter(value) ||
+    target.origin !== validationBase.origin ||
+    (target.pathname !== expected &&
+      target.pathname !== withoutProjectPrefix(expected)) ||
+    target.username ||
+    target.password ||
+    target.hash
+  ) {
+    throw new Error("diff response URL must use the internal diff endpoint");
+  }
+  return value;
+}
 
 type LoadQueueItem = {
   file: FileMeta;
@@ -121,8 +155,17 @@ export function isDiffShellDomIntact(
   });
 }
 
-export function shouldRenderDiffSidebar(listSame: boolean, domIntact: boolean) {
-  return !listSame || !domIntact;
+/**
+ * `listShown`: 変更ファイルの一覧 (#filelist) が今も差分の一覧か。タブで History・
+ * 作業ツリーへ移ると、同じ一覧がそのコミット・作業ツリーの変更ファイルに書き換わる
+ * ので、一覧と差分の DOM が同じでも描き直す。
+ */
+export function shouldRenderDiffSidebar(
+  listSame: boolean,
+  domIntact: boolean,
+  listShown: boolean,
+) {
+  return !listSame || !domIntact || !listShown;
 }
 
 function collectDiffCardsByKey(target: Element): Map<string, DiffCardElement> {
@@ -186,6 +229,39 @@ export function createDiffView(deps: DiffViewDeps) {
         }
         scheduleIdleHighlight(card, file);
       });
+  }
+
+  /**
+   * 言語を切り替えたとき。カードの見出し・置き札・帯・失敗の表示は描くときに
+   * 文言を入れるので、畳み・行の展開の状態を保ったまま描き直す。
+   */
+  function relocalize() {
+    const cards = [
+      ...document.querySelectorAll<DiffCardElement>(".gdp-file-shell"),
+    ];
+    const expanded = cards.filter((card) =>
+      card.classList.contains("gdp-context-expanded"),
+    );
+    const collapsed = new Set(
+      cards.filter((card) => card.classList.contains("gdp-file-collapsed")),
+    );
+    for (const card of expanded) card.classList.remove("gdp-context-expanded");
+    rerenderLoadedDiffs();
+    for (const card of cards) {
+      const file = card._file;
+      if (!file) continue;
+      if (card.classList.contains("loaded")) {
+        setFileCollapsed(card, collapsed.has(card));
+      } else if (card.dataset.manualRendered === "1") {
+        delete card.dataset.manualRendered;
+        renderManualLoadPlaceholder(card, file);
+      } else if (card.classList.contains("error")) {
+        renderLoadFailure(card, file);
+      }
+    }
+    for (const card of expanded) {
+      if (card._file) void expandAllFileContext(card, card._file);
+    }
   }
 
   function shouldSyncSourceRouteToShell(): boolean {
@@ -274,7 +350,9 @@ export function createDiffView(deps: DiffViewDeps) {
   ) {
     if (!button) return;
     button.setAttribute("aria-pressed", expanded ? "true" : "false");
-    const label = expanded ? "Collapse expanded lines" : "Expand all lines";
+    button.classList.remove("failed");
+    const text = diffText();
+    const label = expanded ? text.collapseExpandedLines : text.expandAllLines;
     button.title = label;
     button.setAttribute("aria-label", label);
     button.innerHTML = expanded
@@ -289,7 +367,7 @@ export function createDiffView(deps: DiffViewDeps) {
     // Keep the static icon markup intact; only the name text changes.
     const name = el.querySelector<HTMLElement>(".project-branch-name");
     if (name) name.textContent = branch;
-    el.title = branch ? `Current branch: ${branch}` : "";
+    el.title = branch ? diffText().currentBranch(branch) : "";
   }
 
   let metaFilesForViewedProgress: FileMeta[] = [];
@@ -904,7 +982,9 @@ export function createDiffView(deps: DiffViewDeps) {
     delete card.dataset.manualMode;
     delete card.dataset.stale;
     delete card.dataset.staleLoading;
-    card.style.minHeight = `${file.estimated_height_px || 80}px`;
+    card.style.minHeight = `${placeholderHeight(file) || 80}px`;
+    card.dataset.estimatedHeight = "";
+    watchPlaceholderWidth();
     card._diffData = null;
     card._loadedSig = null;
     card._loadedSigUrl = null;
@@ -931,7 +1011,11 @@ export function createDiffView(deps: DiffViewDeps) {
     const empty = getEmptyPane?.() || $("#empty");
     const expectedKeys = newFiles.map(fileKey);
     const domIntact = isDiffShellDomIntact(target, expectedKeys);
-    const sidebarNeedsRender = shouldRenderDiffSidebar(listSame, domIntact);
+    const sidebarNeedsRender = shouldRenderDiffSidebar(
+      listSame,
+      domIntact,
+      $("#filelist").hasAttribute("data-diff-list"),
+    );
     if (!newFiles.length) {
       prevListSignature = newListSig;
       prevCardSignatures.clear();
@@ -974,7 +1058,8 @@ export function createDiffView(deps: DiffViewDeps) {
     let invalidatedCards = 0;
 
     if (listSame && domIntact) {
-      // Fast path: file list structure unchanged — skip replaceChildren and renderSidebar.
+      // Fast path: file list structure unchanged — skip replaceChildren (and
+      // renderSidebar, unless another tab replaced #filelist meanwhile).
       // Index the cards once — a per-file linear scan from both loops below
       // is O(n²) on large diffs.
       const cardsByKey = collectDiffCardsByKey(target);
@@ -1060,7 +1145,11 @@ export function createDiffView(deps: DiffViewDeps) {
           }
         }
       }
-      if (sidebarNeedsStatsUpdate && canUpdateSidebar)
+      if (sidebarNeedsRender && canUpdateSidebar) {
+        renderSidebar(newFiles);
+        if (typeof applyHideTests === "function") applyHideTests();
+        applyViewedState();
+      } else if (sidebarNeedsStatsUpdate && canUpdateSidebar)
         updateSidebarStats(newFiles);
       prevCardSignatures = newCardSigs;
       prevListSignature = newListSig;
@@ -1144,6 +1233,221 @@ export function createDiffView(deps: DiffViewDeps) {
     return { structureChanged: true, invalidatedCards, preservedDom: false };
   }
 
+  // 見積もりに使う寸法 (1 行・見出し・広げるボタン 1 段)。密度・文字の大きさ・
+  // 並べ方・本文の幅で変わる。1 行は表の組み方で --code-line-height より少し
+  // 高い (22px の設定で 22.44)、見出しはカードの幅が狭いと 2 段になる
+  // (style.css の @container diff-file) ので、見本の差分をカードと同じ幅で本文の
+  // 流れの中に見えないまま描いて測り、すぐ外す (描画の前に外すので画面は動かない)。
+  // 組み合わせごとに覚える。測れない (描く道具が無い・本文が描かれていない)
+  // ときは null で、覚えない (次に測り直す)。
+  const CARD_METRICS = new Map<string, DiffCardMetrics>();
+  // 表の枠から必ずはみ出す長さの本文 (行の本文以外の幅と、横のスクロール
+  // バーの行の高さを測る)。
+  const METRICS_SAMPLE_LONG = "x".repeat(1000);
+  const METRICS_SAMPLE_DIFF = [
+    "diff --git a/sample.txt b/sample.txt",
+    "--- a/sample.txt",
+    "+++ b/sample.txt",
+    "@@ -1,3 +1,3 @@",
+    " sample",
+    "-old",
+    "+new",
+    ` ${METRICS_SAMPLE_LONG}`,
+    "",
+  ].join("\n");
+
+  function cardLayoutFor(f: FileMeta): DiffCardLayout | null {
+    const layout = f.force_layout || STATE.layout;
+    return layout === "side-by-side" || layout === "line-by-line"
+      ? layout
+      : null;
+  }
+
+  function measuredCardMetrics(layout: DiffCardLayout): DiffCardMetrics | null {
+    if (typeof window.Diff2HtmlUI !== "function") return null;
+    const root = getDiffRoot?.() || $("#diff");
+    if (!root) return null;
+    const style = getComputedStyle(document.body);
+    const lineHeight = style.getPropertyValue("--code-line-height").trim();
+    const width = root.clientWidth;
+    if (width <= 0) return null;
+    const key = [
+      layout,
+      width,
+      document.body.dataset.sidebarFontSize ?? "",
+      lineHeight,
+      style.getPropertyValue("--code-font-size").trim(),
+    ].join("|");
+    const known = CARD_METRICS.get(key);
+    if (known) return known;
+    const gapRowHeight = Number.parseFloat(lineHeight);
+    if (!Number.isFinite(gapRowHeight) || gapRowHeight <= 0) return null;
+    const probe = document.createElement("div");
+    probe.className = "gdp-file-shell loaded";
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.cssText =
+      "visibility:hidden;pointer-events:none;content-visibility:visible";
+    const body = document.createElement("div");
+    body.className = "gdp-shell-body";
+    probe.appendChild(body);
+    root.appendChild(probe);
+    try {
+      new window.Diff2HtmlUI(
+        body,
+        METRICS_SAMPLE_DIFF,
+        {
+          drawFileList: false,
+          matching: "lines",
+          outputFormat: layout,
+          synchronisedScroll: false,
+          highlight: false,
+          fileListToggle: false,
+          fileContentToggle: false,
+        },
+        null,
+      ).draw();
+      const headerHeight =
+        body.querySelector(".d2h-file-header")?.getBoundingClientRect()
+          .height ?? 0;
+      const row = [...body.querySelectorAll("tbody tr")].find((tr) =>
+        tr.querySelector("td.d2h-cntx, td.d2h-ins, td.d2h-del"),
+      );
+      const rowHeight = row?.getBoundingClientRect().height ?? 0;
+      if (headerHeight <= 0 || rowHeight <= 0) return null;
+      const hscroll = measuredHScroll(probe, body);
+      // 最後の「下へ広げる」行 (本物と同じ組み立て。views/hunk-expand.ts)。
+      // 左右の表示では左右の表に 1 行ずつ並ぶので、高さは 1 行分。
+      let trailingRowHeight = 0;
+      for (const tbody of body.querySelectorAll("tbody")) {
+        const { tr, ln } = createTrailingExpandRow(layout === "side-by-side");
+        ln.appendChild(
+          createExpandStack([
+            { direction: "down", title: "", onClick: () => undefined },
+          ]),
+        );
+        tbody.appendChild(tr);
+        trailingRowHeight = tr.getBoundingClientRect().height;
+      }
+      const metrics = {
+        rowHeight,
+        headerHeight,
+        gapRowHeight,
+        trailingRowHeight,
+        hscroll,
+      };
+      CARD_METRICS.set(key, metrics);
+      return metrics;
+    } finally {
+      probe.remove();
+    }
+  }
+
+  /**
+   * 横のスクロールバーの判定に使う寸法を、見本のカードで測る。見本の長い行で
+   * 表をはみ出させ、はみ出した幅 (scrollWidth) から本文の幅を引いて行番号・印・
+   * 余白の幅を出す。ハンクの見出しは組み方が違うので、長い行を縮めて見出しを
+   * 長くしてから同じように測る。字体で測れない (canvas が無い) ときは無し。
+   */
+  function measuredHScroll(
+    probe: HTMLElement,
+    body: HTMLElement,
+  ): DiffCardHScrollMetrics | undefined {
+    const tables = [...body.querySelectorAll<HTMLElement>(".d2h-code-wrapper")];
+    const longLines = [
+      ...body.querySelectorAll<HTMLElement>(".d2h-code-line-ctn"),
+    ].filter((el) => el.textContent === METRICS_SAMPLE_LONG);
+    const head = body.querySelector<HTMLElement>(
+      "td.d2h-info .d2h-code-side-line, td.d2h-info .d2h-code-line",
+    );
+    const lineWidth = textWidthIn(longLines[0]);
+    const headWidth = textWidthIn(head);
+    if (!lineWidth || !headWidth || !head || tables.length === 0) return;
+    const room = (table: HTMLElement, width: number) =>
+      table.clientWidth - (table.scrollWidth - width);
+    const long = lineWidth(METRICS_SAMPLE_LONG);
+    const lineRoom = tables.map((table) => room(table, long));
+    // 本物と同じ組み立て (views/diff-hscroll.ts)。見本ははみ出しているので出る。
+    attachStickyHScroll(probe);
+    const rowHeight =
+      probe.querySelector(".gdp-hscroll")?.getBoundingClientRect().height ?? 0;
+    detachStickyHScroll(probe);
+    for (const el of longLines) el.textContent = "x";
+    head.textContent = METRICS_SAMPLE_LONG;
+    const headRoom = room(tables[0], headWidth(METRICS_SAMPLE_LONG));
+    if (rowHeight <= 0) return;
+    return { rowHeight, lineRoom, headRoom, lineWidth, headWidth };
+  }
+
+  /** その要素の字体で、文字の幅を測る関数 (タブは要素の tab-size)。 */
+  function textWidthIn(
+    el: Element | null | undefined,
+  ): ((text: string) => number) | null {
+    if (!el) return null;
+    const context = document.createElement("canvas").getContext("2d");
+    if (!context) return null;
+    const style = getComputedStyle(el);
+    context.font = [
+      style.fontStyle,
+      style.fontWeight,
+      style.fontSize,
+      style.fontFamily,
+    ].join(" ");
+    const tabSize = Number.parseFloat(style.tabSize);
+    return (text) =>
+      tabbedTextWidth(text, (part) => context.measureText(part).width, tabSize);
+  }
+
+  /**
+   * 中身が届くまでカードが取る高さ。サーバの材料 (row_basis) と画面の実際の
+   * 寸法から数える (core/diff-card-estimate.ts)。材料が無い・寸法が測れない
+   * ときはサーバの見積もり。
+   */
+  function placeholderHeight(f: FileMeta): number | null {
+    const layout = cardLayoutFor(f);
+    const metrics = f.row_basis && layout ? measuredCardMetrics(layout) : null;
+    if (layout && metrics) {
+      const height = estimateDiffCardHeight({
+        additions: f.additions || 0,
+        deletions: f.deletions || 0,
+        status: f.status,
+        binary: f.binary,
+        basis: f.row_basis,
+        layout,
+        metrics,
+      });
+      if (height !== null) return height;
+    }
+    return f.estimated_height_px || null;
+  }
+
+  // 本文の幅が変わったら (一覧の列が後から出る・窓の幅)、見積もりで高さを
+  // 取っているカードだけを測り直す。ResizeObserver は描画の前に呼ばれるので、
+  // 幅の変わった同じフレームで高さもそろう。再検証中のカード (前の中身の高さを
+  // 保っている) は data-estimated-height が無いので触らない。
+  let widthObservedRoot: HTMLElement | null = null;
+  let placeholderWidthObserver: ResizeObserver | null = null;
+
+  function watchPlaceholderWidth(): void {
+    if (typeof ResizeObserver === "undefined") return;
+    const root = getDiffRoot?.() || $("#diff");
+    if (!root || root === widthObservedRoot) return;
+    placeholderWidthObserver?.disconnect();
+    widthObservedRoot = root;
+    let lastWidth = root.clientWidth;
+    placeholderWidthObserver = new ResizeObserver(() => {
+      if (root.clientWidth === lastWidth) return;
+      lastWidth = root.clientWidth;
+      for (const card of root.querySelectorAll<DiffCardElement>(
+        ".gdp-file-shell.pending[data-estimated-height], .gdp-file-shell.loading[data-estimated-height]",
+      )) {
+        if (!card._file) continue;
+        const height = placeholderHeight(card._file);
+        if (height) card.style.minHeight = `${height}px`;
+      }
+    });
+    placeholderWidthObserver.observe(root);
+  }
+
   function createPlaceholder(f: FileMeta): DiffCardElement {
     const card = document.createElement("div") as DiffCardElement;
     card.className = "gdp-file-shell pending";
@@ -1153,8 +1457,11 @@ export function createDiffView(deps: DiffViewDeps) {
     card.dataset.status = f.status || "M";
     card._file = f;
     card.classList.toggle("viewed", STATE.viewedFiles.has(f.path));
-    if (f.estimated_height_px) {
-      card.style.minHeight = `${f.estimated_height_px}px`;
+    const height = placeholderHeight(f);
+    if (height) {
+      card.style.minHeight = `${height}px`;
+      card.dataset.estimatedHeight = "";
+      watchPlaceholderWidth();
     }
 
     const head = document.createElement("div");
@@ -1166,7 +1473,7 @@ export function createDiffView(deps: DiffViewDeps) {
       escapeHtml(f.status || "M") +
       "</span>" +
       '<span class="path">' +
-      escapeHtml(f.display_path || f.path) +
+      escapeHtml(filePathDisplayText(f.display_path || f.path)) +
       "</span>" +
       '<span class="stats">' +
       '<span class="a">+' +
@@ -1265,14 +1572,13 @@ export function createDiffView(deps: DiffViewDeps) {
     }
   }
 
-  function manualLoadReason(file: FileMeta): string | null {
+  function manualLoadReason(file: FileMeta): ManualLoadReason | null {
     const path = file.path || "";
-    if (file.size_class === "huge") return "huge diff";
-    if (/\.(min|bundle)\.(js|mjs|css)$/i.test(path))
-      return "minified or bundled file";
-    if (/\.map$/i.test(path)) return "source map";
+    if (file.size_class === "huge") return "huge";
+    if (/\.(min|bundle)\.(js|mjs|css)$/i.test(path)) return "minified";
+    if (/\.map$/i.test(path)) return "sourceMap";
     if (/(^|\/)(vendor|node_modules|dist|build|out)\//i.test(path))
-      return "generated or vendored path";
+      return "generated";
     return null;
   }
 
@@ -1293,11 +1599,13 @@ export function createDiffView(deps: DiffViewDeps) {
 
     const note = document.createElement("div");
     note.className = "gdp-manual-note";
-    note.textContent = `${manualLoadReason(file)} - click to load diff`;
+    const text = diffText();
+    const reason = manualLoadReason(file);
+    note.textContent = text.manualNote(reason ? text.manualReason[reason] : "");
 
     const previewBtn = document.createElement("button");
     previewBtn.className = "gdp-show-full";
-    previewBtn.textContent = "Load preview";
+    previewBtn.textContent = text.loadPreview;
     previewBtn.addEventListener("click", () => {
       body.innerHTML = "";
       card.dataset.manualLoad = "1";
@@ -1308,8 +1616,8 @@ export function createDiffView(deps: DiffViewDeps) {
 
     const openFileBtn = document.createElement("button");
     openFileBtn.className = "gdp-show-full";
-    openFileBtn.textContent = "Open as file";
-    openFileBtn.title = "Open this file in the virtualized source viewer";
+    openFileBtn.textContent = text.openAsFile;
+    openFileBtn.title = text.openAsFileTitle;
     openFileBtn.addEventListener("click", () => {
       setRoute(sourceRouteForDiffFile(file));
       applySourceRouteToShell();
@@ -1317,9 +1625,8 @@ export function createDiffView(deps: DiffViewDeps) {
 
     const fullBtn = document.createElement("button");
     fullBtn.className = "gdp-show-full secondary";
-    fullBtn.textContent = "Load full diff";
-    fullBtn.title =
-      "Render the full diff with Diff2Html. This can be slow for large files.";
+    fullBtn.textContent = text.loadFullDiff;
+    fullBtn.title = text.loadFullDiffTitle;
     fullBtn.addEventListener("click", () => {
       body.innerHTML = "";
       card.dataset.manualLoad = "1";
@@ -1398,10 +1705,13 @@ export function createDiffView(deps: DiffViewDeps) {
     };
 
     const request = trackLoad<FileDiffResponse>(
-      fetch(url).then(async (r) => {
-        if (!r.ok) throw new Error(await r.text());
-        return r.json();
-      }),
+      Promise.resolve()
+        .then(() => fetch(validatedFileDiffUrl(url)))
+        .then(async (r) => {
+          if (!r.ok)
+            throw new Error(await responseErrorMessage(r, "loading the diff"));
+          return r.json();
+        }),
     )
       .then(async (data) => {
         if (String(myReq) !== card.dataset.reqId) return; // superseded by newer request
@@ -1443,30 +1753,47 @@ export function createDiffView(deps: DiffViewDeps) {
           console.error("[code-viewer] silent diff revalidation failed", error);
           return;
         }
-        console.error("[code-viewer] failed to load diff", error);
+        const failure = errorWithCause(
+          `loading the diff of ${file.path} failed`,
+          error,
+        );
+        console.error(failure);
         card.classList.remove("loading");
         card.classList.add("error");
         // Drop the stale-while-revalidate height reservation: the error
         // panel replaces the old content, so the card must shrink to fit.
         card.style.minHeight = "";
-        const body = card.querySelector<HTMLElement>(".gdp-shell-body");
-        if (!body) return;
-        body.innerHTML =
-          '<div class="gdp-error">failed to load — <button class="retry">retry</button></div>';
-        const btn = body.querySelector(".retry");
-        if (btn)
-          btn.addEventListener("click", () => {
-            card.classList.remove("error");
-            card.classList.add("pending");
-            body.innerHTML = "";
-            enqueueLoad(file, card, 1);
-          });
+        card._loadFailure = failure;
+        renderLoadFailure(card, file);
       });
     const completed = request.finally(() => {
       if (card._loadPromise === completed) delete card._loadPromise;
     });
     card._loadPromise = completed;
     return completed;
+  }
+
+  /** 読み込みに失敗したカード。理由は title に全文 (言語を切り替えたら描き直す)。 */
+  function renderLoadFailure(card: DiffCardElement, file: FileMeta) {
+    const body = card.querySelector<HTMLElement>(".gdp-shell-body");
+    if (!body || !card._loadFailure) return;
+    const text = diffText();
+    const panel = document.createElement("div");
+    panel.className = "gdp-error";
+    panel.title = formatErrorDetail(card._loadFailure);
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "retry";
+    retry.textContent = text.retry;
+    retry.addEventListener("click", () => {
+      delete card._loadFailure;
+      card.classList.remove("error");
+      card.classList.add("pending");
+      body.innerHTML = "";
+      enqueueLoad(file, card, 1);
+    });
+    panel.append(`${text.loadFailed} — `, retry);
+    body.replaceChildren(panel);
   }
 
   async function loadDiffFile(path: string): Promise<boolean> {
@@ -1494,11 +1821,14 @@ export function createDiffView(deps: DiffViewDeps) {
     const body = card.querySelector<HTMLElement>(".gdp-shell-body");
     if (!body) return;
     if (!data.diff?.trim()) {
-      body.innerHTML = "";
-      body.innerHTML = '<div class="gdp-info">No content</div>';
+      const info = document.createElement("div");
+      info.className = "gdp-info";
+      info.textContent = diffText().noContent;
+      body.replaceChildren(info);
       return;
     }
 
+    detachStickyHScroll(card);
     body.innerHTML = "";
     const layout = file.force_layout || STATE.layout;
     const hljsRef = getHljs();
@@ -1517,12 +1847,25 @@ export function createDiffView(deps: DiffViewDeps) {
       hljsRef,
     );
     ui.draw();
+    // diff2html prints the raw name, where a newline or U+202E would make the
+    // header disagree with Copy path. Only replace it when escaping is needed so
+    // its "old → new" rename label survives for ordinary paths.
+    const fileName = body.querySelector<HTMLElement>(".d2h-file-name");
+    if (fileName && filePathNeedsEscaping(file.path)) {
+      fileName.textContent = filePathDisplayText(file.path);
+    }
     if (STATE.ignoreWs) suppressWhitespaceOnlyInlineHighlights(body);
 
     enhanceMediaCard(file, card);
     syncSideScrollCard(card);
+    attachStickyHScroll(card);
     appendStatSquaresToHeader(card, file);
     setupHunkExpand(card, file);
+    // 畳んだカードを描き直したら、新しい本文にも畳みを当て直す (Split /
+    // Unified の切替・静かな再検証・残りの hunk の読み込みで描き直すと、見出しは
+    // 畳んだままなのに中身が出ていた)。
+    if (card.classList.contains("gdp-file-collapsed"))
+      setFileCollapsed(card, true);
   }
 
   function setFileCollapsed(card: DiffCardElement, collapsed: boolean) {
@@ -1540,7 +1883,8 @@ export function createDiffView(deps: DiffViewDeps) {
     const button = card.querySelector<HTMLButtonElement>(".gdp-file-toggle");
     if (button) {
       button.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      const toggleLabel = collapsed ? "Expand file" : "Collapse file";
+      const text = diffText();
+      const toggleLabel = collapsed ? text.expandFile : text.collapseFile;
       button.title = toggleLabel;
       button.setAttribute("aria-label", toggleLabel);
     }
@@ -1558,16 +1902,17 @@ export function createDiffView(deps: DiffViewDeps) {
     sourceMode: boolean,
   ) {
     if (!button) return;
+    const text = diffText();
     button.classList.add("gdp-btn", "gdp-btn-sm");
-    button.textContent = sourceMode ? "View Diff" : "View File";
+    button.textContent = sourceMode ? text.viewDiff : text.viewFile;
     button.setAttribute("aria-pressed", sourceMode ? "true" : "false");
-    button.title = sourceMode ? "View diff" : "View file";
+    button.title = sourceMode ? text.viewDiffTitle : text.viewFileTitle;
   }
 
   function createFileBreadcrumb(path: string, ref?: string): HTMLElement {
     const nav = document.createElement("nav");
     nav.className = "gdp-file-breadcrumb";
-    nav.setAttribute("aria-label", "File path");
+    nav.setAttribute("aria-label", diffText().filePath);
     const parts = path.split("/").filter(Boolean);
     const allParts = getProjectName() ? [getProjectName(), ...parts] : parts;
     allParts.forEach((part, index) => {
@@ -1583,7 +1928,7 @@ export function createDiffView(deps: DiffViewDeps) {
         index === allParts.length - 1
           ? "gdp-file-breadcrumb-current"
           : "gdp-file-breadcrumb-part";
-      crumb.textContent = part;
+      crumb.textContent = filePathDisplayText(part);
       if (!isCurrent && crumb instanceof HTMLButtonElement) {
         crumb.type = "button";
         crumb.addEventListener("click", () => {
@@ -1600,9 +1945,11 @@ export function createDiffView(deps: DiffViewDeps) {
     if (!allParts.length) {
       const crumb = document.createElement("span");
       crumb.className = "gdp-file-breadcrumb-current";
-      crumb.textContent = path;
+      crumb.textContent = filePathDisplayText(path);
       nav.appendChild(crumb);
     }
+    // 深いパスで入りきらないときは真ん中の段を「…」に畳む。
+    fitBreadcrumb(nav, allParts.map(filePathDisplayText).join("/"));
     return nav;
   }
 
@@ -1630,6 +1977,7 @@ export function createDiffView(deps: DiffViewDeps) {
     }
     const button = card.querySelector<HTMLButtonElement>(".gdp-file-unfold");
     if (button) button.disabled = true;
+    const failures: unknown[] = [];
     try {
       // Expand every gap fully in parallel: each stack exposes a one-shot
       // whole-gap fetch, so a round costs one request per gap instead of
@@ -1642,18 +1990,25 @@ export function createDiffView(deps: DiffViewDeps) {
           .map((stack) => stack._gdpExpandFully)
           .filter((fn): fn is () => Promise<void> => !!fn);
         if (!tasks.length) break;
-        const results = await Promise.all(
-          tasks.map((fn) =>
-            fn().then(
-              () => true,
-              () => false,
-            ),
-          ),
-        );
-        if (!results.some(Boolean)) break;
+        const results = await Promise.allSettled(tasks.map((fn) => fn()));
+        for (const result of results) {
+          if (result.status === "rejected") failures.push(result.reason);
+        }
+        if (!results.some((result) => result.status === "fulfilled")) break;
       }
       card.classList.add("gdp-context-expanded");
       setUnfoldButtonState(button || null, true);
+      if (failures.length > 0 && button) {
+        // 失敗の理由を捨てない: console に全文、ボタンの title にも出す。
+        const failure = errorWithCauses(
+          `showing the hidden lines of ${file.path} failed (${failures.length} of the gaps)`,
+          failures,
+        );
+        console.error(failure, failures);
+        button.classList.add("failed");
+        button.title = `${diffText().expandContextFailed}\n${formatErrorDetail(failure)}`;
+        button.setAttribute("aria-label", button.title);
+      }
     } finally {
       if (button) button.disabled = false;
     }
@@ -1662,12 +2017,20 @@ export function createDiffView(deps: DiffViewDeps) {
   function appendStatSquaresToHeader(card: DiffCardElement, file: FileMeta) {
     const header = card.querySelector(".d2h-file-header");
     if (!header) return;
+    const text = diffText();
+    // diff2html が英語で入れる「Viewed」の文字を画面の言語に。
+    for (const label of header.querySelectorAll(".d2h-file-collapse")) {
+      const word = [...label.childNodes].find(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+      );
+      if (word) word.textContent = ` ${text.viewed}`;
+    }
     if (!header.querySelector(".gdp-file-toggle")) {
       const toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "gdp-file-header-icon gdp-file-toggle";
-      toggle.title = "Collapse file";
-      toggle.setAttribute("aria-label", "Collapse file");
+      toggle.title = text.collapseFile;
+      toggle.setAttribute("aria-label", text.collapseFile);
       toggle.setAttribute("aria-expanded", "true");
       toggle.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
       toggle.addEventListener("click", (e) => {
@@ -1692,8 +2055,8 @@ export function createDiffView(deps: DiffViewDeps) {
       const copy = document.createElement("button");
       copy.type = "button";
       copy.className = "gdp-file-header-icon gdp-copy-path";
-      copy.title = "copy file path";
-      copy.setAttribute("aria-label", "copy file path");
+      copy.title = text.copyFilePath;
+      copy.setAttribute("aria-label", text.copyFilePath);
       copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
       copy.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -1705,11 +2068,14 @@ export function createDiffView(deps: DiffViewDeps) {
           setTimeout(() => {
             copy.classList.remove("copied");
           }, 1200);
-        } catch {
-          copy.classList.add("failed");
-          setTimeout(() => {
-            copy.classList.remove("failed");
-          }, 1200);
+        } catch (error) {
+          showCopyFailure(
+            copy,
+            "copying the file path failed",
+            error,
+            text.copyFilePath,
+            1200,
+          );
         }
       });
       const statusTag = nameWrapper
@@ -1741,7 +2107,7 @@ export function createDiffView(deps: DiffViewDeps) {
       const openPath = createOpenPathButton(
         file.path,
         "file-parent",
-        "open parent folder in OS",
+        text.openParentFolder,
       );
       if (unfold) unfold.insertAdjacentElement("afterend", openPath);
       else header.appendChild(openPath);
@@ -1791,8 +2157,8 @@ export function createDiffView(deps: DiffViewDeps) {
       const previewFile = document.createElement("button");
       previewFile.type = "button";
       previewFile.className = "gdp-preview-file gdp-btn gdp-btn-sm";
-      previewFile.textContent = "Preview";
-      previewFile.title = "Preview rendered file";
+      previewFile.textContent = text.preview;
+      previewFile.title = text.previewTitle;
       previewFile.addEventListener("click", (e) => {
         e.stopPropagation();
         const target = fileSourceTarget(file);
@@ -1837,6 +2203,7 @@ export function createDiffView(deps: DiffViewDeps) {
     card.classList.remove("loading", "pending");
     card.classList.add("loaded");
     card.style.minHeight = "";
+    delete card.dataset.estimatedHeight;
 
     mountDiff(card, file, data);
     applyInlineAnnotations();
@@ -1864,7 +2231,7 @@ export function createDiffView(deps: DiffViewDeps) {
     ) {
       applyDiffRouteFocus();
     }
-    card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, file.estimated_height_px || 200)}px`;
+    card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, placeholderHeight(file) || 200)}px`;
     applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
 
     if (data.truncated && data.mode === "preview") {
@@ -1898,20 +2265,21 @@ export function createDiffView(deps: DiffViewDeps) {
     const wrap = document.createElement("div");
     wrap.className = "gdp-show-full-wrap";
 
+    const text = diffText();
     const step = Math.min(10, remaining);
     const moreBtn = document.createElement("button");
     moreBtn.className = "gdp-show-full";
-    moreBtn.textContent = `Show next ${step} hunk${step === 1 ? "" : "s"}`;
+    moreBtn.textContent = text.showNextHunks(step);
     moreBtn.addEventListener("click", () => loadMore(rendered + step, false));
 
     const allBtn = document.createElement("button");
     allBtn.className = "gdp-show-full secondary";
-    allBtn.textContent = `Show all (${remaining} remaining)`;
+    allBtn.textContent = text.showAllHunks(remaining);
     allBtn.addEventListener("click", () => loadMore(total, true));
 
     const note = document.createElement("span");
     note.className = "gdp-hunk-note";
-    note.textContent = `${rendered} / ${total} hunks shown`;
+    note.textContent = text.hunksShown(rendered, total);
 
     wrap.appendChild(note);
     wrap.appendChild(moreBtn);
@@ -1920,13 +2288,26 @@ export function createDiffView(deps: DiffViewDeps) {
 
     function loadMore(count: number, full: boolean) {
       moreBtn.disabled = allBtn.disabled = true;
-      moreBtn.textContent = "Loading…";
+      moreBtn.textContent = text.loading;
       const myGen = getServerGeneration();
-      const url = full ? file.load_url : buildPreviewUrl(file, count);
-      trackLoad<FileDiffResponse>(fetch(url).then((r) => r.json()))
+      trackLoad<FileDiffResponse>(
+        Promise.resolve()
+          .then(() => (full ? file.load_url : buildPreviewUrl(file, count)))
+          .then((url) => fetch(validatedFileDiffUrl(url)))
+          .then((response) =>
+            response.ok
+              ? response.json()
+              : responseErrorMessage(
+                  response,
+                  `load more hunks of ${file.path}`,
+                ).then((message) => {
+                  throw new Error(message);
+                }),
+          ),
+      )
         .then((next) => {
           if (myGen !== getServerGeneration()) {
-            moreBtn.textContent = "Data changed — reload";
+            moreBtn.textContent = text.dataChanged;
             moreBtn.disabled = allBtn.disabled = false;
             return;
           }
@@ -1941,9 +2322,16 @@ export function createDiffView(deps: DiffViewDeps) {
             addExpandHunksUI(file, next, card);
           }
         })
-        .catch(() => {
+        .catch((error: unknown) => {
+          // 失敗の理由を捨てない: console に全文、ボタンの title にも出す。
+          const failure = errorWithCause(
+            `loading more hunks of ${file.path} failed`,
+            error,
+          );
+          console.error(failure);
           moreBtn.disabled = allBtn.disabled = false;
-          moreBtn.textContent = "Failed — retry";
+          moreBtn.textContent = text.failedRetry;
+          moreBtn.title = formatErrorDetail(failure);
         });
     }
   }
@@ -1979,8 +2367,14 @@ export function createDiffView(deps: DiffViewDeps) {
         }).value;
         s.classList.add("hljs", `language-${lang}`);
         s.classList.remove("plaintext");
-      } catch {
-        // Keep the original text when highlight.js cannot parse a line.
+      } catch (error) {
+        const failure = errorWithCause(
+          `syntax highlighting failed for ${filePathDisplayText(file.path)}`,
+          error,
+        );
+        console.error(failure);
+        s.classList.add("gdp-highlight-failed");
+        s.title = formatErrorDetail(failure);
       }
     }
     return true;
@@ -2088,6 +2482,7 @@ export function createDiffView(deps: DiffViewDeps) {
     renderShell,
     renderFile,
     rerenderLoadedDiffs,
+    relocalize,
     mountDiff,
     addExpandHunksUI,
     scheduleIdleHighlight,

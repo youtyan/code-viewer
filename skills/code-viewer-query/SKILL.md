@@ -28,8 +28,11 @@ browser's Database > Search tab, so the human can review the same workflow.
 
 ## Requirements
 
-- A code-viewer server must already be running for the repository
-  (the human starts it with: `code-viewer`). The CLI never starts one.
+- code-viewer must already be running (the human starts it with: `code-viewer`,
+  in any repository, and leaves it running). The CLI never starts code-viewer
+  itself. When this repository's project process is not running yet (the
+  project was never opened, or it was stopped as idle), the CLI asks the running
+  code-viewer to start it and says so on stderr; that can take a few seconds.
 - Run from inside the repository, or pass `--cwd <repo>`.
 - If `code-viewer` is not on PATH, prefix every command with
   `npx -y @youtyan/code-viewer`.

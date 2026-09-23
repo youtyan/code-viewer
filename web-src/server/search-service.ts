@@ -28,11 +28,16 @@ import type {
   GrepMatch,
   GrepResponse,
 } from "../core/types";
-import { commandForExternal } from "./command-resolver";
+import {
+  commandForExternal,
+  isCommandNotFoundResult,
+} from "./command-resolver";
 import { throwIfAborted } from "./database/adapters/abort";
 import { spawnTextAsync } from "./database/adapters/spawn-runner";
 import * as git from "./git";
 import { compileNamePatterns } from "./name-pattern";
+import { errno } from "./terminal/settings-file";
+import { skipUnreadablePath } from "./unreadable-path";
 import {
   buildFileSearchList,
   buildRgArgs,
@@ -92,6 +97,14 @@ export async function rgAvailableAsync(cwd: string): Promise<boolean> {
     timeoutMessage: "rg version timed out after 5000ms",
     rejectOnError: false,
   });
+  if (proc.code !== 0 && !isCommandNotFoundResult("rg", proc)) {
+    // 入っているのに答えない rg は、組み込みの検索に切り替えるが、覚えずに
+    // 次も試し、理由を記録する (見つからないときだけ覚える)。
+    console.error(
+      `[code-viewer] rg --version exited with ${proc.code}; searching without rg this time: ${proc.stderr.trim()}`,
+    );
+    return false;
+  }
   rgAvailableCache = proc.code === 0;
   return rgAvailableCache;
 }
@@ -132,8 +145,12 @@ export function safeWorktreePath(env: SearchEnv, path: string): string | null {
   try {
     realCwd = realpathSync(env.cwd);
     realFull = realpathSync(full);
-  } catch {
-    return null;
+  } catch (error) {
+    // 確かめた直後に消えた・リンクが回っているものは「無い」。ほかは投げる。
+    const code = errno(error);
+    if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP")
+      return null;
+    throw error;
   }
   const rel = relative(realCwd, realFull);
   if (
@@ -217,7 +234,8 @@ async function fallbackCandidatePaths(
     let stat: Awaited<ReturnType<typeof lstat>>;
     try {
       stat = await lstat(full);
-    } catch {
+    } catch (error) {
+      skipUnreadablePath(full, error, "the built-in search");
       continue;
     }
     if (!stat.isDirectory()) {
@@ -264,7 +282,8 @@ async function grepWorktreeFallback(
     let stat: Awaited<ReturnType<typeof lstat>>;
     try {
       stat = await lstat(full);
-    } catch {
+    } catch (error) {
+      skipUnreadablePath(full, error, "the built-in search");
       continue;
     }
     if (
@@ -276,7 +295,8 @@ async function grepWorktreeFallback(
     let data: Buffer;
     try {
       data = await readFile(full);
-    } catch {
+    } catch (error) {
+      skipUnreadablePath(full, error, "the built-in search");
       continue;
     }
     if (data.subarray(0, 8192).includes(0)) continue;

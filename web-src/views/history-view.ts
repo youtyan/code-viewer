@@ -1,7 +1,15 @@
+import { apiUrl } from "../core/api-url";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
+
 // Commit history screen (left panel). Renders the commit list, handles
 // infinite scroll / deep links, and delegates diff rendering to the existing
 // diff pipeline via deps.applyCommitRange().
 
+import { relativeTimeText } from "../core/blame";
 import {
   commitDiffRange,
   EMPTY_TREE_SHA,
@@ -24,6 +32,21 @@ import {
 import { isImeComposing } from "../core/keyboard";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute } from "../core/routes";
+import {
+  buildHistoryGraph,
+  type GraphRow,
+  historyGraphPassSvg,
+  historyGraphSvg,
+  passingLanes,
+} from "./history-graph";
+import {
+  type FocusedListRow,
+  focusedListRow,
+  type ListRowKeys,
+  onListRowKeys,
+  syncListTabStop,
+} from "./list-tab-stop";
+import { pageLanguage } from "./page-language";
 
 export const HISTORY_BODY_COLLAPSE_LINES = 10;
 export const HISTORY_WORKTREE_COMMIT = "worktree";
@@ -53,6 +76,8 @@ export type HistoryText = {
   comparing: (from: string, to: string) => string;
   clearCompare: string;
   refTitle: (kind: HistoryCommitRef["kind"], name: string) => string;
+  panelLabel: string;
+  selectedCommit: string;
 };
 
 type HistoryRefreshStatus = { type: "none" } | { type: "pending" };
@@ -60,6 +85,8 @@ type HistoryRefreshStatus = { type: "none" } | { type: "pending" };
 const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
   en: {
     worktreeLabel: "Uncommitted changes (Working tree)",
+    panelLabel: "Commit history",
+    selectedCommit: "Selected commit",
     bodyExpandClose: "Collapse",
     bodyExpandMore: (n) => `Show more (${n} lines)`,
     refreshLabel: "Refresh",
@@ -93,6 +120,8 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
   },
   ja: {
     worktreeLabel: "未コミット変更 (Working tree)",
+    panelLabel: "コミットの履歴",
+    selectedCommit: "選んだコミット",
     bodyExpandClose: "閉じる",
     bodyExpandMore: (n) => `もっと見る (${n} 行)`,
     refreshLabel: "更新",
@@ -185,7 +214,7 @@ export function buildHistoryPanelDom(
   } else {
     panel.className = "gdp-file-history-panel";
   }
-  panel.setAttribute("aria-label", "Commit history");
+  panel.setAttribute("aria-label", historyText(pageLanguage()).panelLabel);
   // Focusable so j / k land in the "history" keymap scope after a click.
   panel.tabIndex = -1;
 
@@ -193,7 +222,7 @@ export function buildHistoryPanelDom(
   panelHead.className = "history-head";
   const title = document.createElement("span");
   title.className = "history-title";
-  title.textContent = "Commits";
+  title.textContent = historyText(pageLanguage()).commitsTitle;
   panelHead.appendChild(title);
 
   const refreshButton = document.createElement("button");
@@ -300,7 +329,7 @@ export function buildHistoryCommitInfoDom(
     ? "history-commit-info"
     : "history-commit-info gdp-file-history-commit-info";
   info.hidden = true;
-  info.setAttribute("aria-label", "Selected commit");
+  info.setAttribute("aria-label", historyText(pageLanguage()).selectedCommit);
   const head = document.createElement("div");
   head.className = "hci-head";
   const sha = document.createElement("span");
@@ -415,6 +444,8 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let statusEl = defaultMount.status;
   let sentinel = defaultMount.sentinel;
   let attachedList: HTMLOListElement | null = null;
+  /** 一覧の行の上のキーを受けるのをやめる (一覧の箱を付け替えるとき)。 */
+  let detachListKeys: (() => void) | null = null;
   let attachedFilterInput: HTMLInputElement | null = null;
   let attachedFilterClearButton: HTMLButtonElement | null = null;
   let attachedRefreshButton: HTMLButtonElement | null = null;
@@ -625,15 +656,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function relativeWhen(iso: string): string {
     const t = Date.parse(iso);
     if (!Number.isFinite(t)) return iso;
-    const sec = Math.round((Date.now() - t) / 1000);
-    if (sec < 60) return "just now";
-    const min = Math.round(sec / 60);
-    if (min < 60) return `${min}m ago`;
-    const hour = Math.round(min / 60);
-    if (hour < 24) return `${hour}h ago`;
-    const day = Math.round(hour / 24);
-    if (day < 30) return `${day}d ago`;
-    return iso.slice(0, 10);
+    // 30 日より前は日付だけ (相対では幅をとるうえに読み取りにくい)。
+    if (Date.now() - t >= 30 * 24 * 60 * 60 * 1000) return iso.slice(0, 10);
+    return relativeTimeText(t / 1000, deps.getLanguage());
   }
 
   function absoluteWhen(iso: string): string {
@@ -644,12 +669,15 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
-  function displayWhen(iso: string): string {
+  /** 「相対 (絶対)」の時刻を、相対と絶対の 2 つの span に分けて返す。一覧が
+   * 狭いときは CSS が絶対の方を隠す (列の幅をそろえるため)。相対が絶対と同じ
+   * (古いコミット) なら絶対だけ。 */
+  function displayWhenHtml(iso: string): string {
     const relative = relativeWhen(iso);
     const absolute = absoluteWhen(iso);
     if (relative === absolute || relative === absolute.slice(0, 10))
-      return absolute;
-    return `${relative} (${absolute})`;
+      return `<span class="when-abs">${deps.escapeHtml(absolute)}</span>`;
+    return `<span class="when-rel">${deps.escapeHtml(relative)}</span> <span class="when-abs">(${deps.escapeHtml(absolute)})</span>`;
   }
 
   function historyItemSelector(sha: string): string {
@@ -674,11 +702,12 @@ export function createHistoryView(deps: HistoryViewDeps) {
       if (lineRange) params.set("lines", formatHistoryLineRange(lineRange));
       if (routeRef === "worktree") params.set("worktree", "1");
     }
-    const url = `/_log?${params.toString()}`;
+    const url = `${apiUrl("log")}?${params.toString()}`;
     return deps
       .trackLoad(
         fetch(url).then(async (r) => {
-          if (!r.ok) throw new Error(await r.text());
+          if (!r.ok)
+            throw new Error(await responseErrorMessage(r, "loading the log"));
           const page = (await r.json()) as HistoryLogResponse;
           if (page.generation !== undefined && requestGeneration !== generation)
             return null;
@@ -686,7 +715,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
         }),
       )
       .catch((err) => {
-        setBanner(err instanceof Error ? err.message : "failed to load log");
+        // null は「描かない」。失敗の理由は帯と console に残す。
+        console.error("[code-viewer] loading the log failed", err);
+        setBanner(formatErrorDetail(err));
         return null;
       });
   }
@@ -711,23 +742,33 @@ export function createHistoryView(deps: HistoryViewDeps) {
         `<span class="history-ref history-ref-merge" title="${deps.escapeHtml(text.mergeBadge)}">${deps.escapeHtml(text.mergeBadge)}</span>`,
       );
     }
+    // 入りきらない札は隠れる (style.css の B-1) ので、全部の名前は title に。
+    const names = (commit.refs ?? []).map((ref) => ref.name).join(", ");
     return chips.length
-      ? `<span class="history-refs">${chips.join("")}</span>`
+      ? `<span class="history-refs"${names ? ` title="${deps.escapeHtml(names)}"` : ""}>${chips.join("")}</span>`
       : "";
   }
 
-  function commitRow(commit: HistoryCommit, inRange: boolean): string {
+  function commitRow(
+    commit: HistoryCommit,
+    inRange: boolean,
+    graph: string,
+  ): string {
     const active = commit.sha === selectedSha ? " active" : "";
     const fresh = commit.sha === freshSha ? " history-item-fresh" : "";
     const ranged = inRange ? " history-item-in-range" : "";
     return (
-      `<li class="history-item${active}${fresh}${ranged}" data-sha="${deps.escapeHtml(commit.sha)}">` +
+      `<li class="history-item${active}${fresh}${ranged}" data-sha="${deps.escapeHtml(commit.sha)}" role="option" tabindex="-1">` +
+      `<span class="history-graph-cell">${graph}</span>` +
+      // 件名と枝の札は 1 つの箱で幅を分け合う (style.css の B-1)。
+      `<span class="history-title">` +
       `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` +
+      refChipsHtml(commit) +
+      `</span>` +
       `<span class="meta2">` +
       `<span class="sha">${deps.escapeHtml(shortSha(commit.sha))}</span>` +
       `<span class="author">${deps.escapeHtml(commit.author)}</span>` +
-      `<span class="when">${deps.escapeHtml(displayWhen(commit.when))}</span>` +
-      refChipsHtml(commit) +
+      `<span class="when" title="${deps.escapeHtml(absoluteWhen(commit.when))}">${displayWhenHtml(commit.when)}</span>` +
       `</span>` +
       `</li>`
     );
@@ -752,8 +793,11 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function worktreeRow(): string {
     const active = selectedSha === HISTORY_WORKTREE_COMMIT ? " active" : "";
     return (
-      `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}">` +
+      `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}" role="option" tabindex="-1">` +
+      `<span class="history-graph-cell"></span>` +
+      `<span class="history-title">` +
       `<span class="subject" title="${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}">${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}</span>` +
+      `</span>` +
       `<span class="meta2">` +
       `<span class="sha">HEAD..worktree</span>` +
       `<span class="author">Working tree</span>` +
@@ -768,24 +812,90 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const now = new Date();
     const html: string[] = mode === "history" ? [worktreeRow()] : [];
     const inRange = rangeShas();
+    // 枝の線は全体の履歴のときだけ。絞り込み中・1 ファイルの履歴は並んだ行が
+    // 親子とは限らないので、行を上から順につないだ 1 本の線にする。
+    const graphCommits = commits.filter(
+      (commit) => commit.sha !== HISTORY_WORKTREE_COMMIT,
+    );
+    const graph = buildHistoryGraph(graphCommits, {
+      linear: mode !== "history" || query !== "" || !!pathFilter,
+    });
+    const graphRows = new Map<string, GraphRow>();
+    graphCommits.forEach((commit, i) => {
+      graphRows.set(commit.sha, graph.rows[i]);
+    });
     let lastGroup = "";
     for (const commit of commits) {
       if (commit.sha === HISTORY_WORKTREE_COMMIT) {
         html.push(worktreeRow());
         continue;
       }
+      const row = graphRows.get(commit.sha);
       const group = historyGroupLabel(commit.when, now);
       if (group !== lastGroup) {
         html.push(
-          `<li class="history-group" aria-hidden="true">${deps.escapeHtml(group)}</li>`,
+          `<li class="history-group" aria-hidden="true"><span class="history-graph-cell">${historyGraphPassSvg(passingLanes(row), graph.lanes)}</span>${deps.escapeHtml(group)}</li>`,
         );
         lastGroup = group;
       }
-      html.push(commitRow(commit, inRange.has(commit.sha)));
+      html.push(
+        commitRow(
+          commit,
+          inRange.has(commit.sha),
+          row ? historyGraphSvg(row, graph.lanes) : "",
+        ),
+      );
     }
+    // 作り直す前に、行にあったフォーカスを控える (作り直すと body へ落ちる)。
+    const focused = focusedListRow(list, HISTORY_ROW_SELECTOR, rowSha);
     list.innerHTML = html.join("");
     activeHistoryRow = list.querySelector<HTMLElement>(".history-item.active");
+    syncListTabStopHere(focused);
     syncRefreshStatusText();
+  }
+
+  // コミットの一覧は Tab の止まり場所を 1 つにする (views/list-tab-stop.ts):
+  // 選んでいる行 (無ければ先頭の行) だけが tabIndex 0。選び直したら選んだ行へ
+  // フォーカスを移す。行の上の ↑↓ は j k と同じ moveSelection、Home / End は
+  // 先頭 / 末尾のコミット、Enter は 1 回押したのと同じ (行の click)。
+  const HISTORY_ROW_SELECTOR = ".history-item";
+
+  function rowSha(row: HTMLElement): string {
+    return row.dataset.sha ?? "";
+  }
+
+  function syncListTabStopHere(focused?: FocusedListRow | null) {
+    syncListTabStop(list, {
+      rows: [...list.querySelectorAll<HTMLElement>(HISTORY_ROW_SELECTOR)],
+      keyOf: rowSha,
+      isActive: (row) => row.classList.contains("active"),
+      ariaSelected: true,
+      ...(focused === undefined ? {} : { focused }),
+      fallback: panel,
+    });
+  }
+
+  function historyRowKeys(): ListRowKeys {
+    return {
+      ArrowDown: (row) => void moveSelection(1, rowSha(row)),
+      ArrowUp: (row) => void moveSelection(-1, rowSha(row)),
+      Home: () => void selectEdge("first"),
+      End: () => void selectEdge("last"),
+      Enter: (row) => {
+        row.click();
+        // click は j k のために一覧の箱へフォーカスを移すので、行へ戻す。
+        row.focus({ preventScroll: true });
+      },
+    };
+  }
+
+  async function selectEdge(edge: "first" | "last") {
+    if (!historyScopeFromRoute()) return;
+    const shas = selectableShas();
+    const sha = edge === "first" ? shas[0] : shas[shas.length - 1];
+    if (!sha) return;
+    await selectSha(sha);
+    scrollToSelected();
   }
 
   function syncRefreshButton(button?: HTMLButtonElement | null) {
@@ -841,7 +951,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const t = Date.parse(commit.when);
     set(
       ".hci-date",
-      Number.isFinite(t) ? new Date(t).toLocaleString() : commit.when,
+      Number.isFinite(t)
+        ? new Date(t).toLocaleString(deps.getLanguage())
+        : commit.when,
     );
     set(".hci-subject", commit.subject);
     const body = info.querySelector<HTMLElement>(".hci-body");
@@ -977,6 +1089,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       : null;
     activeHistoryRow?.classList.add("active");
     updateRangeRows();
+    syncListTabStopHere();
   }
 
   // Toggle the Shift+click range tint in place (no list rebuild, so row
@@ -1008,11 +1121,16 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (commit) await selectCommit(commit);
   }
 
-  async function moveSelection(delta: 1 | -1) {
+  /**
+   * 選んでいるコミットの隣を選ぶ (j k・↑↓)。from は行の上の ↑↓ のときの起点
+   * (Tab で入った、まだ選んでいない行からも、その行の隣へ動かす)。
+   */
+  async function moveSelection(delta: 1 | -1, from?: string) {
     if (!historyScopeFromRoute()) return;
     let shas = selectableShas();
     if (shas.length === 0) return;
-    let index = selectedSha ? shas.indexOf(selectedSha) : -1;
+    const origin = from ?? selectedSha;
+    let index = origin ? shas.indexOf(origin) : -1;
     if (index < 0) index = delta > 0 ? -1 : shas.length;
     let nextIndex = index + delta;
     if (nextIndex >= shas.length && hasMore && !loading) {
@@ -1117,25 +1235,35 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (selectionGen !== selectionGeneration || gen !== generation) return;
   }
 
-  // Set when fetchSingleCommit fails for reasons other than "the server says
-  // the ref does not exist" (HTTP 400) — e.g. network errors or 5xx.
-  let lookupFailed = false;
-
-  async function fetchSingleCommit(sha: string): Promise<HistoryCommit | null> {
-    const url = `/_log?ref=${encodeURIComponent(sha)}&skip=0&limit=1`;
-    lookupFailed = false;
+  // HTTP 400 means the server says the ref does not exist; every other
+  // failure (network, 5xx, bad JSON) is kept with its cause for the banner.
+  async function fetchSingleCommit(
+    sha: string,
+  ): Promise<
+    | { kind: "found"; commit: HistoryCommit }
+    | { kind: "missing" }
+    | { kind: "failed"; error: Error }
+  > {
+    const url = `${apiUrl("log")}?ref=${encodeURIComponent(sha)}&skip=0&limit=1`;
     try {
       const res = await deps.trackLoad(
         fetch(url).then(async (r) => {
           if (r.status === 400) return null;
-          if (!r.ok) throw new Error(await r.text());
+          if (!r.ok) {
+            throw new Error(
+              await responseErrorMessage(r, `load commit ${sha}`),
+            );
+          }
           return (await r.json()) as HistoryLogResponse;
         }),
       );
-      return res?.commits[0] || null;
-    } catch {
-      lookupFailed = true;
-      return null;
+      const commit = res?.commits[0];
+      return commit ? { kind: "found", commit } : { kind: "missing" };
+    } catch (error) {
+      return {
+        kind: "failed",
+        error: errorWithCause(`failed to load commit: ${sha}`, error),
+      };
     }
   }
 
@@ -1170,18 +1298,20 @@ export function createHistoryView(deps: HistoryViewDeps) {
       pagesLoaded++;
       if (!got && !hasMore) break;
     }
-    const single = await fetchSingleCommit(sha);
+    const lookup = await fetchSingleCommit(sha);
     if (gen !== generation) return;
-    if (!single) {
+    if (lookup.kind !== "found") {
+      if (lookup.kind === "failed") console.error(lookup.error);
       setBanner(
-        lookupFailed
-          ? `failed to load commit: ${sha}`
+        lookup.kind === "failed"
+          ? formatErrorDetail(lookup.error)
           : `commit not found: ${sha}`,
       );
       await updateCommitInfo(null);
       deps.showEmptyDiffPane();
       return;
     }
+    const single = lookup.commit;
     setBanner(`showing commit outside the loaded ${ref} log`);
     commits = [single, ...commits];
     renderList();
@@ -1204,9 +1334,15 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const force = options.force === true;
     const mount = options.mount || (force ? activeMount : defaultMount);
     activateMount(mount);
+    // 1 回の失敗で後の enter が止まらないよう、列は失敗しても続ける。ただし
+    // 理由は捨てずに console とバナーへ出す。
     entering = entering
       .then(() => doEnterHistory(force))
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        const failure = errorWithCause("opening the history failed", error);
+        console.error(failure);
+        setBanner(formatErrorDetail(failure));
+      });
     return entering;
   }
 
@@ -1420,6 +1556,8 @@ export function createHistoryView(deps: HistoryViewDeps) {
     }
     if (attachedList) {
       attachedList.removeEventListener("click", handleListClick);
+      detachListKeys?.();
+      detachListKeys = null;
       attachedList = null;
     }
     if (attachedFilterInput) {
@@ -1454,6 +1592,11 @@ export function createHistoryView(deps: HistoryViewDeps) {
     sentinel = mount.sentinel;
 
     list.addEventListener("click", handleListClick);
+    detachListKeys = onListRowKeys(
+      list,
+      HISTORY_ROW_SELECTOR,
+      historyRowKeys(),
+    );
     attachedList = list;
     const input = mount.filterInput ?? null;
     if (input) {
@@ -1505,14 +1648,18 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   function syncPanelTitle() {
-    const title = panel.querySelector?.<HTMLElement>(".history-title");
-    if (!title) return;
     const text = historyText(deps.getLanguage());
-    title.textContent = lineRange
+    const label = lineRange
       ? text.commitsForLines(lineRange.start, lineRange.end)
       : mode === "history" && pathFilter
         ? text.commitsIn(pathFilter)
         : text.commitsTitle;
+    // 行は選べる項目 (中にボタンが無い) なので listbox。名前は見出しと同じ。
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", label);
+    const title = panel.querySelector?.<HTMLElement>(".history-title");
+    if (!title) return;
+    title.textContent = label;
   }
 
   // "author:<name>" suggestions for the filter, loaded once per ref the
@@ -1525,10 +1672,15 @@ export function createHistoryView(deps: HistoryViewDeps) {
     authorsLoadedFor = key;
     void deps
       .trackLoad(
-        fetch(`/_authors?ref=${encodeURIComponent(ref)}`).then(async (r) => {
-          if (!r.ok) throw new Error(await r.text());
-          return (await r.json()) as HistoryAuthorsResponse;
-        }),
+        fetch(`${apiUrl("authors")}?ref=${encodeURIComponent(ref)}`).then(
+          async (r) => {
+            if (!r.ok)
+              throw new Error(
+                await responseErrorMessage(r, "loading history authors"),
+              );
+            return (await r.json()) as HistoryAuthorsResponse;
+          },
+        ),
       )
       .then((res) => {
         if (activeMount.authorList !== list || key !== ref) return;

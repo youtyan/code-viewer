@@ -15,7 +15,6 @@ const RANGE: DiffRange = { from: "HEAD", to: "worktree" };
 const NOW = "2026-07-02T00:00:00.000Z";
 
 const TEXT: JournalViewText = {
-  locale: "ja",
   ariaLabel: "ワークログ",
   title: "ワークログ",
   tabs: { journal: "ログ", tasks: "タスク" },
@@ -32,9 +31,6 @@ const TEXT: JournalViewText = {
   priorityLabels: { p0: "P0", p1: "P1", p2: "P2", p3: "P3" },
   statusField: "ステータス",
   priorityField: "優先度",
-  previousMonth: "前の月",
-  nextMonth: "次の月",
-  weekDays: ["日", "月", "火", "水", "木", "金", "土"],
   noEntries: "ログなし",
   noRelatedTasks: "関連タスクなし",
   noBody: "本文はありません",
@@ -312,14 +308,11 @@ describe("journal view", () => {
     click(q(document, ".gdp-dialog-danger"));
 
     await waitFor(() => posts.some((post) => post.action === "delete-task"));
-    await waitFor(
-      () =>
-        q(document, ".journal-status").textContent === TEXT.deleteTaskFailed,
-    );
+    // 何ができなかったかの後に、サーバが消さなかったという理由を続ける。
+    const shown = `${TEXT.deleteTaskFailed}\nError: the server reported that the task was not removed`;
+    await waitFor(() => q(document, ".journal-status").textContent === shown);
     expect(setRouteCalls).toEqual([]);
-    expect(q(document, ".journal-status").textContent).toBe(
-      TEXT.deleteTaskFailed,
-    );
+    expect(q(document, ".journal-status").textContent).toBe(shown);
     expect(
       q(document, ".journal-task-card.selected").textContent || "",
     ).toMatch(/Sample task/);

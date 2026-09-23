@@ -1,14 +1,22 @@
+import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
   statSync,
+  unwatchFile,
   watch,
+  watchFile,
 } from "node:fs";
+import { stat } from "node:fs/promises";
 import { basename, dirname, extname, join, relative } from "node:path";
+import {
+  type DiffRowBasis,
+  estimateDiffCardHeight,
+} from "../core/diff-card-estimate";
 import { normalizeNewDirectoryName } from "../core/directory-name";
-import { formatErrorDetail } from "../core/error-detail";
+import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import { parseHistoryLineRange } from "../core/history";
 import {
   collectJournalLabels,
@@ -17,7 +25,6 @@ import {
   type JournalTaskPriority,
   type JournalTaskStatus,
 } from "../core/journal";
-import { APP_ENTRY_PATHS, SPA_PATHS } from "../core/routes";
 import type {
   AnnotationTarget,
   AppSettingsState,
@@ -30,6 +37,7 @@ import type {
   SettingsResponse,
   UndoActionResponse,
 } from "../core/types";
+import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
 import {
   ANNOTATION_BODY_MAX_BYTES,
   addAnnotationEntry,
@@ -45,6 +53,7 @@ import {
 } from "./annotations";
 import {
   cacheFresh,
+  DiffRangeError,
   fileDiffCacheKey,
   MAX_TIMED_CACHE_ENTRIES,
   setTimedCacheEntry,
@@ -57,10 +66,25 @@ import {
   parseExternalCommandOverride,
 } from "./command-resolver";
 import { isAbortLikeError } from "./database/adapters/abort";
+import {
+  parseBoundedJsonBody,
+  readBoundedJsonBody,
+} from "./database/handle-shared";
 import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
+import {
+  ENTRY_OUTDATED_EXIT_CODE,
+  ENTRY_VERSION_REFUSED,
+  isEntryToken,
+  PREVIOUS_ENTRY_IDENTITY_TIMEOUT_MS,
+  readEntryRecord,
+  verifyEntryIdentity,
+  verifyServerIdentity,
+} from "./entry/entry-file";
+import { processAlive } from "./file-lock";
 import { writeUploadedFiles } from "./file-upload";
 import * as git from "./git";
+import { mainTabsPath } from "./main-tabs-store";
 import {
   GithubIssueListError,
   normalizeGithubIssueListLimit,
@@ -111,10 +135,14 @@ import {
   sideEffectRequestAllowed as sideEffectRequestAllowedForOrigin,
 } from "./request-origin";
 import { ROOT } from "./root";
+import { diffRowBasisFor, readFileHead } from "./row-basis";
 import {
   fileByteRangeResponseBody,
   fileReadableStream,
   readFileTextRange,
+  SSE_HEARTBEAT_INTERVAL_MS,
+  SSE_RETRY_MS,
+  type SpawnStreamExit,
   startServer,
 } from "./runtime";
 import { DEFAULT_EXCLUDE_NAMES, normalizeGrepMax } from "./search";
@@ -126,10 +154,20 @@ import {
   type SearchEnv,
   safeWorktreePath as safeWorktreePathInEnv,
 } from "./search-service";
-import { removeServerRegistry, writeServerRegistry } from "./server-registry";
+import {
+  pruneDeadServerRegistry,
+  removeServerRegistry,
+  rootFileKey,
+  writeServerRegistry,
+} from "./server-registry";
+import { createProcessShutdown, reportFatalAndShutdown } from "./shutdown";
+import { applySseClientOperation } from "./sse-clients";
 import { loadAppSettingsState } from "./state-store";
+import { staticFile, WEB_ROOT } from "./static-files";
+import { errno } from "./terminal/settings-file";
 import type { ListTmuxPanesOptions } from "./tmux/panes";
 import { startWatchSupervisor, type WatchSupervisor } from "./watch-supervisor";
+import { LAUNCHED_BY_ENV } from "./worktree/open";
 import {
   DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT,
   MAX_WORKTREE_WATCH_DIRECTORY_LIMIT,
@@ -137,13 +175,20 @@ import {
   supportsNativeRecursiveWatch,
 } from "./worktree-watcher";
 
-const WEB_ROOT = join(ROOT, "web");
 const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
   .version as string;
 const DEFAULT_ARGS = ["HEAD"];
 const PREVIEW_HUNKS_DEFAULT = 3;
 const PREVIEW_LINES_DEFAULT = 1200;
 const WATCHED_ASSET_FILES = ["index.html", "style.css", "app.js"];
+/** 裏のプロセスが入口の生存を確かめる間隔。 */
+const ENTRY_WATCH_INTERVAL_MS = 2000;
+/**
+ * 入口が居なくなってから、起動し直した入口を待つ時間。これを過ぎたら裏は
+ * 自分で終わる (入口を kill したら裏も片付く)。
+ */
+const ENTRY_ADOPT_GRACE_MS = 10_000;
+const MAX_ENTRY_ADOPT_BODY_BYTES = 16 * 1024;
 const SIZE_SMALL = 2000;
 const SIZE_MEDIUM = 8000;
 const SIZE_LARGE = 20000;
@@ -198,6 +243,18 @@ let listenPort = 0;
 let openAfterStart = false;
 const commandOverrides: ExternalCommandOverride[] = [];
 let cwdWasExplicit = false;
+// 入口のサーバが起こしたプロジェクトの裏のプロセスか (`--backend`)。裏は
+// 閲覧の処理だけを持ち、tmux の巡回・フックの受け口・シェルは入口が持つ。
+let backendMode = false;
+// 裏を起こした入口の pid。居なくなったら裏は自分で終わる。
+let entryPid: number | null = null;
+// pid が使い回されても別の入口を持ち主にしない、起動ごとの本人確認 token。
+let entryToken: string | null = null;
+// 持ち主の入口の URL (entry.json で pid と token が合ったもの)。入口を起こし
+// 直したとき、古い pid が生きていても本当に古い入口かをここで確かめる。
+let entryUrl: string | null = null;
+let entryOwnerGoneAt: number | null = null;
+let lastEntryOwnerFailure = "";
 // cwd が git 管理下か。"unknown" は git が無い・所有権エラー等で判定できなかった
 // 状態で、従来どおり git を叩いてその失敗を表に出す (握り潰さない)。
 // "outside" だけが「git を呼んでも失敗すると分かっている」状態で、diff と
@@ -217,6 +274,7 @@ const sseKeepalives = new Map<
   ReadableStreamDefaultController<Uint8Array>,
   ReturnType<typeof setInterval>
 >();
+let worktreeWatch: WatchSupervisor | null = null;
 const fileCache = new Map<string, TimedCacheEntry<{ diffText: string }>>();
 // blame result cache, keyed by base/ref/path (+mtime+size for worktree base).
 // Capped LRU to keep memory bounded across many edits and refs.
@@ -248,7 +306,7 @@ function parseCli() {
       console.log(`code-viewer ${VERSION}
 
 Usage:
-  code-viewer [--cwd <repo>] [--port <port>] [--open] [--bin <name>=<path>] [git-diff-args...]
+  code-viewer [--cwd <repo>] [--port <port>] [--open] [--idle-stop <seconds>] [--standalone] [--bin <name>=<path>] [git-diff-args...]
   code-viewer status [--cwd <repo>] [--bin git=<path>] [--ref <ref>] [--limit <N>] [--json]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
   code-viewer journal <list|add|edit|tasks|task-add|task-update|task-next|github-issues|task-link-issue|task-claim|task-done|task-delete> [options]
@@ -262,7 +320,20 @@ Usage:
   code-viewer help
 
 AI-agent index (start here):  code-viewer agent-help
-Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search|file|skill|doctor> agent-help
+Subcommand guides (AI agents): code-viewer <status|annotate|journal|query|search|file|terminal|skill|doctor> agent-help
+
+One code-viewer serves every project on one port. Running it again in another
+repository adds that repository to the running one and prints its URL.
+Each project runs in its own process behind that port; a process nobody has
+used for --idle-stop seconds (default 600, 0 = never) is stopped and started
+again on the next request. --standalone runs a separate server for this
+repository only.
+
+Getting started: run code-viewer inside a git repository and open the printed
+URL; the repository is listed under Projects in the left sidebar. New agent
+there starts claude or codex in tmux (tmux must be installed). When something
+is missing (git, tmux, an older code-viewer still running), run
+code-viewer doctor.
 
 Examples:
   code-viewer --open
@@ -296,8 +367,10 @@ Examples:
       try {
         cwd = realpathSync(next);
         cwdWasExplicit = true;
-      } catch {
-        console.error("--cwd must point to an existing directory");
+      } catch (error) {
+        console.error(
+          `--cwd must point to an existing directory: ${next}\n${formatErrorDetail(error)}`,
+        );
         process.exit(1);
       }
     } else if (arg === "--port") {
@@ -310,6 +383,33 @@ Examples:
       listenPort = parsed;
     } else if (arg === "--open") {
       openAfterStart = true;
+    } else if (arg === "--standalone") {
+      // 1 つで完結するサーバ (今までの動き)。cli.ts がこの印でここへ来る。
+    } else if (arg === "--idle-stop") {
+      // 入口だけの引数。git の差分の引数として渡ると、分かりにくい git の
+      // 失敗になるので、ここで断る。
+      console.error(
+        "--idle-stop applies to the entry server only; it cannot be used with --standalone",
+      );
+      process.exit(1);
+    } else if (arg === "--backend") {
+      backendMode = true;
+    } else if (arg === "--entry-pid") {
+      const parsed = Number(process.argv[++i]);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        console.error("--entry-pid requires a process id");
+        process.exit(1);
+      }
+      entryPid = parsed;
+    } else if (arg === "--entry-token") {
+      const token = process.argv[++i];
+      if (!isEntryToken(token)) {
+        console.error(
+          "--entry-token requires 16 lower-case hexadecimal characters",
+        );
+        process.exit(1);
+      }
+      entryToken = token;
     } else if (arg === "--bin") {
       const next = process.argv[++i];
       if (!next) {
@@ -339,6 +439,29 @@ Examples:
     }
   }
   if (rest.length) cliArgs = rest;
+  if (backendMode && (entryPid === null || entryToken === null)) {
+    console.error("--backend requires --entry-pid and --entry-token");
+    process.exit(1);
+  }
+  // 起こした入口の版が違う (入口を動かしたまま入れ直した) なら、待ち受ける前に
+  // 終わる。入口は終了コードで見分けて「入口が古い」と案内する。読めない
+  // entry.json はここでは判断せず、持ち主の確認の周期が理由を出す。
+  if (backendMode) {
+    const read = readEntryRecord();
+    const owner =
+      read.ok &&
+      read.registry?.pid === entryPid &&
+      read.registry.token === entryToken
+        ? read.registry
+        : null;
+    if (owner && owner.version !== VERSION) {
+      console.error(
+        `[code-viewer] this project process is version ${VERSION}, but the entry server that started it (pid ${entryPid}) is version ${owner.version}. code-viewer was updated or reinstalled while the entry server was running: stop the entry server (Ctrl+C where code-viewer was started, or kill ${entryPid}) and run code-viewer again.`,
+      );
+      process.exit(ENTRY_OUTDATED_EXIT_CODE);
+    }
+    entryUrl = owner?.url ?? null;
+  }
   const commandConfig = configureExternalCommands({
     cwd,
     cliOverrides: commandOverrides,
@@ -370,14 +493,12 @@ Examples:
 }
 
 function warnIfLegacyConfigPresent() {
-  try {
-    if (existsSync(join(cwd, ".code-viewer.json"))) {
-      console.warn(
-        "[code-viewer] .code-viewer.json is no longer used; configure scope and upload from Viewer Settings instead. The file can be safely removed.",
-      );
-    }
-  } catch {
-    // best effort only
+  // existsSync は投げずに false を返すので、包む必要が無い。包んでいた
+  // 空の catch は、万一の失敗をここで消すだけだった。
+  if (existsSync(join(cwd, ".code-viewer.json"))) {
+    console.warn(
+      "[code-viewer] .code-viewer.json is no longer used; configure scope and upload from Viewer Settings instead. The file can be safely removed.",
+    );
   }
 }
 
@@ -389,13 +510,31 @@ function classifyGitRepository(
   return "unknown";
 }
 
-// stat に失敗したら .git は見えないものとして扱う (ENOENT が本命。権限エラー
-// 等でも状態は変えない)。
+// stat に失敗したら .git は見えないものとして扱う。「無い」(ENOENT) は想定
+// どおりなので黙って null。それ以外 (権限・リンクの輪など) は「無い」と同じ
+// 答えを返しつつ理由を残す。要求のたびに呼ばれるので、同じ理由が続く間は
+// 1 回だけ出す。
+let reportedGitDirStatCode: string | null = null;
+
 function gitDirSignature(): string | null {
+  const gitDir = join(cwd, ".git");
   try {
-    const stats = statSync(join(cwd, ".git"));
+    const stats = statSync(gitDir);
+    reportedGitDirStatCode = null;
     return `${stats.ino}:${stats.mtimeMs}:${stats.size}`;
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? "";
+    if (code === "ENOENT") {
+      reportedGitDirStatCode = null;
+      return null;
+    }
+    if (reportedGitDirStatCode !== code) {
+      reportedGitDirStatCode = code;
+      console.error(
+        `[code-viewer] cannot read ${gitDir}; treating this directory as outside a git repository:`,
+        error,
+      );
+    }
     return null;
   }
 }
@@ -506,50 +645,116 @@ function sideEffectRequestAllowed(req: Request): boolean {
   return sideEffectRequestAllowedForOrigin(req);
 }
 
-function staticFile(pathname: string): Response | null {
-  const map: Record<string, [string, string]> = {
-    "/favicon.png": ["favicon.png", "image/png"],
-    "/style.css": ["style.css", "text/css; charset=utf-8"],
-    "/app.js": ["app.js", "application/javascript; charset=utf-8"],
-    "/mermaid.js": ["mermaid.js", "application/javascript; charset=utf-8"],
-    "/shiki.js": ["shiki.js", "application/javascript; charset=utf-8"],
-    "/yaml.js": ["yaml.js", "application/javascript; charset=utf-8"],
-    "/xterm.js": ["xterm.js", "application/javascript; charset=utf-8"],
-    "/vendor/xterm/xterm.css": [
-      "vendor/xterm/xterm.css",
-      "text/css; charset=utf-8",
-    ],
-    "/vendor/diff2html/diff2html.min.css": [
-      "vendor/diff2html/diff2html.min.css",
-      "text/css; charset=utf-8",
-    ],
-    "/vendor/diff2html/diff2html-ui.min.js": [
-      "vendor/diff2html/diff2html-ui.min.js",
-      "application/javascript; charset=utf-8",
-    ],
-    "/vendor/highlight.js/highlight.min.js": [
-      "vendor/highlight.js/highlight.min.js",
-      "application/javascript; charset=utf-8",
-    ],
-    "/vendor/highlight.js/styles/github.min.css": [
-      "vendor/highlight.js/styles/github.min.css",
-      "text/css; charset=utf-8",
-    ],
-    "/vendor/highlight.js/styles/github-dark.min.css": [
-      "vendor/highlight.js/styles/github-dark.min.css",
-      "text/css; charset=utf-8",
-    ],
-  };
-  for (const spaPath of [...APP_ENTRY_PATHS, ...SPA_PATHS]) {
-    map[spaPath] = ["index.html", "text/html; charset=utf-8"];
+type EntryOwnerVerification =
+  | { ok: true; url: string }
+  // entryVersion: entry.json の持ち主は合っているが、版がこの裏と違う。
+  | { ok: false; detail: string; entryVersion?: string };
+
+async function verifyEntryOwner(
+  pid: number,
+  token: string,
+): Promise<EntryOwnerVerification> {
+  const read = readEntryRecord();
+  if (read.ok === false) return { ok: false, detail: read.error };
+  const entry = read.registry;
+  if (!entry) return { ok: false, detail: "entry.json has no entry owner" };
+  if (entry.pid !== pid || entry.token !== token) {
+    return { ok: false, detail: `entry.json does not match owner pid ${pid}` };
   }
-  const spec = map[pathname];
-  if (!spec) return null;
-  const full = join(WEB_ROOT, spec[0]);
-  if (!existsSync(full)) return text("not found", 404);
-  return new Response(readFileSync(full), {
-    headers: { "Content-Type": spec[1], "Cache-Control": "no-store" },
-  });
+  if (entry.version !== VERSION) {
+    return {
+      ok: false,
+      entryVersion: entry.version,
+      detail: `the entry server (pid ${pid}) is version ${entry.version}, but this project process is version ${VERSION}`,
+    };
+  }
+  const verified = await verifyEntryIdentity(entry);
+  if (verified.status === "ok") return { ok: true, url: entry.url };
+  if (verified.status === "dead") {
+    return { ok: false, detail: `entry owner pid ${pid} is not alive` };
+  }
+  if (verified.status === "unreachable") {
+    return {
+      ok: false,
+      detail: `entry owner pid ${pid} did not answer:\n${formatErrorDetail(verified.error)}`,
+    };
+  }
+  return { ok: false, detail: verified.detail };
+}
+
+async function handleEntryAdopt(req: Request): Promise<Response> {
+  if (!backendMode) return text("not found", 404);
+  if (req.method !== "POST") return text("method not allowed", 405);
+  if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
+  const body = await parseBoundedJsonBody(
+    req,
+    MAX_ENTRY_ADOPT_BODY_BYTES,
+    "entry adoption request too large",
+  );
+  if (body instanceof Response) return body;
+  const fields = body as { pid?: unknown; token?: unknown } | null;
+  if (
+    !Number.isInteger(fields?.pid) ||
+    (fields?.pid as number) < 1 ||
+    !isEntryToken(fields?.token)
+  ) {
+    return text("entry adoption requires a valid pid and token", 400);
+  }
+  const pid = fields.pid as number;
+  const token = fields.token;
+  if (entryPid === pid && entryToken === token) {
+    return json({ ok: true, adopted: false });
+  }
+  if (entryPid === null || entryToken === null) {
+    return text("project process has no entry owner", 500);
+  }
+  // pid は使い回される。生きていても、覚えている古い入口の URL が古い token で
+  // 答えなければもう古い入口ではない。URL を知らなければ確かめられないので断る。
+  let previousOwnerGone = "";
+  if (processAlive(entryPid)) {
+    if (entryUrl === null) {
+      return text(`entry owner pid ${entryPid} is still alive`, 409);
+    }
+    const previous = await verifyServerIdentity(
+      { url: entryUrl, pid: entryPid, token: entryToken, version: VERSION },
+      "entry",
+      { timeoutMs: PREVIOUS_ENTRY_IDENTITY_TIMEOUT_MS },
+    );
+    if (previous.status === "ok") {
+      return text(`entry owner pid ${entryPid} is still alive`, 409);
+    }
+    previousOwnerGone =
+      previous.status === "unreachable"
+        ? `the old entry server at ${entryUrl} did not answer:\n${formatErrorDetail(previous.error)}`
+        : previous.status === "invalid"
+          ? previous.detail
+          : `pid ${entryPid} exited while it was being checked`;
+  }
+  const verified = await verifyEntryOwner(pid, token);
+  if (verified.ok === false) {
+    // 版が違えば採用しない。入口は code を見て、この裏を止めて新しい裏を起こす
+    // (worktree/open.ts の reuseRunningServer)。
+    return json(
+      {
+        error: "new entry owner could not be verified",
+        detail: verified.detail,
+        ...(verified.entryVersion === undefined
+          ? {}
+          : { code: ENTRY_VERSION_REFUSED }),
+      },
+      { status: 409 },
+    );
+  }
+  const previousPid = entryPid;
+  entryPid = pid;
+  entryToken = token;
+  entryUrl = verified.url;
+  entryOwnerGoneAt = null;
+  lastEntryOwnerFailure = "";
+  console.log(
+    `the code-viewer entry server restarted (pid ${previousPid} -> ${pid}); this project process now follows it${previousOwnerGone ? `\npid ${previousPid} is alive but is no longer that entry server:\n${previousOwnerGone}` : ""}`,
+  );
+  return json({ ok: true, adopted: true });
 }
 
 function buildRangeArgs(range: { from?: string; to?: string }) {
@@ -593,14 +798,33 @@ function classify(file: git.GitFileMeta) {
   return "huge";
 }
 
-function estimateHeight(file: git.GitFileMeta, sizeClass: string) {
+/**
+ * 画面が寸法を測れないときのカードの高さ (標準の密度・左右に並べる表示の寸法)。
+ * 材料 (row_basis) があれば画面は自分の寸法で数え直す (core/diff-card-estimate.ts)。
+ */
+const NOMINAL_DIFF_CARD_METRICS = {
+  rowHeight: 22,
+  headerHeight: 46,
+  gapRowHeight: 22,
+};
+
+function estimateHeight(
+  file: git.GitFileMeta,
+  sizeClass: string,
+  basis: DiffRowBasis | undefined,
+) {
   if (file.binary) return 380;
-  if (sizeClass === "small")
-    return Math.min(
-      800,
-      ((file.additions || 0) + (file.deletions || 0) + 10) * 22,
-    );
-  return 140;
+  if (sizeClass !== "small") return 140;
+  return (
+    estimateDiffCardHeight({
+      additions: file.additions || 0,
+      deletions: file.deletions || 0,
+      status: file.status,
+      basis,
+      layout: "side-by-side",
+      metrics: NOMINAL_DIFF_CARD_METRICS,
+    }) ?? 140
+  );
 }
 
 function buildQuery(params: Record<string, unknown>) {
@@ -619,6 +843,7 @@ function fileToMeta(
   range: { from?: string; to?: string },
   extraQs: Record<string, string>,
   responseGeneration: number,
+  rowBasis?: DiffRowBasis,
 ): FileMeta {
   const sizeClass = classify(file);
   const q = {
@@ -650,7 +875,8 @@ function fileToMeta(
     highlight: sizeClass === "small",
     load_url: `/file_diff${buildQuery(q)}`,
     preview_url: previewUrl,
-    estimated_height_px: estimateHeight(file, sizeClass),
+    estimated_height_px: estimateHeight(file, sizeClass, rowBasis),
+    ...(rowBasis ? { row_basis: rowBasis } : {}),
     untracked: file.untracked || false,
   };
 }
@@ -709,8 +935,24 @@ async function computePayload(
     if (e === "-w" || e === "--ignore-all-space") extraQs.ignore_ws = "1";
     if (e === "--ignore-blank-lines") extraQs.ignore_blank = "1";
   }
+  // 小さいファイル (中身を丸ごと描くカード) の見積もりの材料 (server/row-basis.ts)。
+  const rowBasis = await diffRowBasisFor(
+    filteredFiles.filter((file) => !file.binary && classify(file) === "small"),
+    {
+      diffText: (paths) =>
+        git.fileDiffTextAsync([...extras, ...args], paths, cwd),
+      fileSize: async (path) => (await stat(join(cwd, path))).size,
+      readHead: (path, bytes) => readFileHead(join(cwd, path), bytes),
+    },
+  );
   const meta = filteredFiles.map((file) =>
-    fileToMeta(file, range, extraQs, responseGeneration),
+    fileToMeta(
+      file,
+      range,
+      extraQs,
+      responseGeneration,
+      rowBasis.basis.get(file.path),
+    ),
   );
   const totals = meta.reduce(
     (acc, file) => {
@@ -728,6 +970,9 @@ async function computePayload(
     branch: await currentBranchMetadata(),
     generation: responseGeneration,
     ...(metaError ? { error: metaError } : {}),
+    ...(rowBasis.errors.length > 0
+      ? { row_basis_errors: rowBasis.errors }
+      : {}),
   };
 }
 
@@ -942,11 +1187,18 @@ function safeOpenWorktreePath(path: string): string | null {
       const realCwd = realpathSync(cwd);
       if (git.isGitInternalPath(realCwd)) return null;
       return realCwd;
-    } catch {
-      return null;
+    } catch (error) {
+      // 開いているリポジトリが消えたときだけ「無い」。ほかの理由は投げる。
+      if (isGonePath(error)) return null;
+      throw error;
     }
   }
   return safeWorktreePath(path);
+}
+
+function isGonePath(error: unknown): boolean {
+  const code = errno(error);
+  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 function parentRepoPath(path: string): string {
@@ -974,8 +1226,10 @@ function worktreeFileMetadata(path: string, knownSize?: number): FileMetadata {
       created_at: isoDate(stat.birthtimeMs),
       updated_at: isoDate(stat.mtimeMs),
     };
-  } catch {
-    return {};
+  } catch (error) {
+    // 読んだ直後に消えたファイルは日付なし。ほかの理由は投げる。
+    if (isGonePath(error)) return {};
+    throw error;
   }
 }
 
@@ -1011,8 +1265,9 @@ async function directoryMetadata(
         created_at: isoDate(stat.birthtimeMs),
         updated_at: isoDate(stat.mtimeMs),
       };
-    } catch {
-      return {};
+    } catch (error) {
+      if (isGonePath(error)) return {};
+      throw error;
     }
   }
   const commitUpdatedAt =
@@ -1089,8 +1344,10 @@ async function readReadme(
       if (!full) continue;
       try {
         return { path, text: readFileSync(full, "utf8") };
-      } catch {
-        continue;
+      } catch (error) {
+        // 同じ名前のフォルダ・消えたファイルは次の候補へ。読めない README は投げる。
+        if (isGonePath(error) || errno(error) === "EISDIR") continue;
+        throw error;
       }
     }
     const res = await git.showAsync(target, path, cwd);
@@ -1182,7 +1439,11 @@ async function handleTree(url: URL) {
     !recursive && statusMap ? deletedTreeEntriesForPath(statusMap, path) : [];
   const listing = [...entries, ...deletedEntries].map(withStatus);
   const commitDates =
-    !recursive && worktreeTarget && currentGitRepositoryState() !== "outside"
+    !recursive &&
+    worktreeTarget &&
+    url.searchParams.get(TREE_WITHOUT_COMMIT_DATES[0]) !==
+      TREE_WITHOUT_COMMIT_DATES[1] &&
+    currentGitRepositoryState() !== "outside"
       ? await git.worktreeCommitDatesAsync(
           listing
             .filter((entry) => entry.status !== "U" && entry.status !== "I")
@@ -1406,7 +1667,9 @@ async function handleLog(url: URL) {
   let hasWorktree = false;
   if (wantsWorktreeHead) {
     const status = await git.statusPorcelainForPathAsync(path, cwd);
-    if (status.ok && status.stdout.length > 0) {
+    // 未コミットの変更があるかを確かめられなかったことを、「無い」にしない。
+    if (status.ok === false) return text(status.error, 500);
+    if (status.stdout.length > 0) {
       // Any non-empty record means the path has uncommitted changes.
       const parts = status.stdout.split("\0").filter(Boolean);
       if (parts.length > 0) {
@@ -1438,8 +1701,9 @@ function blamePathKey(p: string): string {
   try {
     const st = statSync(join(cwd, p));
     return `${st.mtimeMs}:${st.size}`;
-  } catch {
-    return "missing";
+  } catch (error) {
+    if (isGonePath(error)) return "missing";
+    throw error;
   }
 }
 
@@ -1555,8 +1819,9 @@ async function handleFileDiff(url: URL) {
       args,
       cwd,
     });
-  } catch {
-    return text("invalid diff range", 400);
+  } catch (error) {
+    if (!(error instanceof DiffRangeError)) throw error;
+    return text(`invalid diff range: ${error.message}`, 400);
   }
   const cached = fileCache.get(cacheKey);
   let diffText: string;
@@ -1626,8 +1891,10 @@ function worktreeLineIndexSignature(full: string): string | null {
       ino?: number;
     };
     return `size:${stat.size}|mtime:${stat.mtimeMs}|ctime:${stat.ctimeMs}|ino:${stat.ino || 0}`;
-  } catch {
-    return null;
+  } catch (error) {
+    // 消えたファイルは索引なし (読み直しの側が理由ごと失敗する)。ほかは投げる。
+    if (isGonePath(error)) return null;
+    throw error;
   }
 }
 
@@ -1728,23 +1995,43 @@ async function collectGitBlobLineRangeWithIndex(
     range.start,
     range.endExclusive,
   );
-  await shown.exited;
+  blobStreamExitCode(await shown.exited, oid);
   if (bytes.byteLength !== range.endExclusive - range.start) return null;
   const textValue = new TextDecoder().decode(bytes);
   return collectLineRangeFromIndexedText(textValue, index, start, end);
 }
 
+/**
+ * cat-file の終わり方を終了コードにする。起動できなかった (git が無い・権限が
+ * 無い) 場合は「その ref にその中身が無い」と混ぜず、理由を cause に残して
+ * 投げる。呼び出し側の 404 / null は「動いたが 0 で終わらなかった」だけを指す。
+ */
+// ref に無い・blob でない。git が理由を言っていれば後ろに付ける。
+function notInRef(stderr: string): string {
+  return stderr.trim() ? `not in ref: ${stderr.trim()}` : "not in ref";
+}
+
+function blobStreamExitCode(exit: SpawnStreamExit, oid: string): number {
+  if (exit.kind === "failed")
+    throw errorWithCause(
+      `git cat-file blob ${oid} could not start`,
+      exit.error,
+    );
+  return exit.code;
+}
+
 async function readGitBlobBytesWithIndex(
   oid: string,
   sizeHint: number,
-): Promise<{ bytes: Uint8Array; index: LineOffsetIndex } | null> {
+): Promise<{ bytes: Uint8Array; index: LineOffsetIndex }> {
   const shown = git.catFileBlobStream(oid, cwd);
   const result = await collectBytesWithLineOffsetIndexFromStream(
     shown.stream,
     sizeHint,
   );
-  const code = await shown.exited;
-  if (code !== 0) return null;
+  const code = blobStreamExitCode(await shown.exited, oid);
+  if (code !== 0)
+    throw new Error(`git cat-file blob ${oid} exited with ${code}`);
   return result;
 }
 
@@ -1752,11 +2039,14 @@ async function collectGitBlobLineRangeFromStream(
   oid: string,
   start: number,
   end: number,
-): Promise<LineRangeResult | null> {
+): Promise<LineRangeResult> {
   const shown = git.catFileBlobStream(oid, cwd);
   const result = await collectLineRangeFromStream(shown.stream, start, end);
-  const code = await shown.exited;
-  if (code !== 0 && result.complete) return null;
+  const code = blobStreamExitCode(await shown.exited, oid);
+  // 途中で読むのをやめた (complete でない) ときの終了は想定内。
+  if (code !== 0 && result.complete) {
+    throw new Error(`git cat-file blob ${oid} exited with ${code}`);
+  }
   return result;
 }
 
@@ -1766,7 +2056,7 @@ async function collectIndexedGitBlobLineRange(
   size: number,
   start: number,
   end: number,
-): Promise<LineRangeResult | null> {
+): Promise<LineRangeResult> {
   const cacheKey = `${oid}\0${path}`;
   const cached = cachedBlobLineRange(cacheKey, start, end);
   if (cached) return cached;
@@ -1785,7 +2075,6 @@ async function collectIndexedGitBlobLineRange(
   if (size > LINE_INDEX_MAX_FILE_BYTES)
     return collectGitBlobLineRangeFromStream(oid, start, end);
   const indexedBlob = await readGitBlobBytesWithIndex(oid, size);
-  if (!indexedBlob) return null;
   setBlobLineCache(cacheKey, indexedBlob.bytes, indexedBlob.index);
   return (
     cachedBlobLineRange(cacheKey, start, end) ||
@@ -1852,9 +2141,11 @@ async function handleFileRange(url: URL) {
     if (refCheck.ok !== true)
       return text(refCheck.error, refCheck.status ?? 400);
     const oid = await git.objectIdAsync(ref, path, cwd);
-    if (oid.code !== 0 || !oid.oid) return text("not in ref", 404);
+    if (oid.code !== 0 || !oid.oid) return text(notInRef(oid.stderr), 404);
     const size = await git.objectByteSizeAsync(oid.oid, cwd);
-    if (size.code !== 0) return text("cannot read ref", 500);
+    if (size.code !== 0) {
+      return text(git.gitFailureMessage(size, "cannot read ref"), 500);
+    }
     const result = await collectIndexedGitBlobLineRange(
       path,
       oid.oid,
@@ -1862,7 +2153,6 @@ async function handleFileRange(url: URL) {
       start,
       end,
     );
-    if (!result) return text("cannot read ref", 500);
     const body: FileRangeResponse = {
       path,
       ref,
@@ -1886,9 +2176,11 @@ async function handleRawFile(req: Request, url: URL) {
     if (refCheck.ok !== true)
       return text(refCheck.error, refCheck.status ?? 400);
     const oid = await git.objectIdAsync(ref, path, cwd);
-    if (oid.code !== 0 || !oid.oid) return text("not in ref", 404);
+    if (oid.code !== 0 || !oid.oid) return text(notInRef(oid.stderr), 404);
     const sizeResult = await git.objectByteSizeAsync(oid.oid, cwd);
-    if (sizeResult.code !== 0) return text("cannot read ref", 500);
+    if (sizeResult.code !== 0) {
+      return text(git.gitFailureMessage(sizeResult, "cannot read ref"), 500);
+    }
     const size = sizeResult.size;
     const metadata = await gitFileMetadata(ref, path, size);
     const rangeResult = req.headers.get("range")
@@ -1918,8 +2210,10 @@ async function handleRawFile(req: Request, url: URL) {
         range.start,
         range.end + 1,
       );
-      const code = await shown.exited;
-      if (code !== 0) return text("not in ref", 404);
+      const code = blobStreamExitCode(await shown.exited, oid.oid);
+      if (code !== 0) {
+        throw new Error(`git cat-file blob ${oid.oid} exited with ${code}`);
+      }
       const body = bytes.buffer.slice(
         bytes.byteOffset,
         bytes.byteOffset + bytes.byteLength,
@@ -2001,8 +2295,9 @@ async function rawFileSize(path: string, ref: string): Promise<number | null> {
     // Report anything but a regular file as missing so /_file answers 404 -
     // the client uses that to tell a directory link apart from a file link.
     return stats.isFile() ? stats.size : null;
-  } catch {
-    return null;
+  } catch (error) {
+    if (isGonePath(error)) return null;
+    throw error;
   }
 }
 
@@ -2084,8 +2379,8 @@ async function handleUploadFiles(req: Request) {
   let form: FormData;
   try {
     form = await req.formData();
-  } catch {
-    return text("invalid form data", 400);
+  } catch (error) {
+    return text(`invalid form data: ${formatErrorDetail(error)}`, 400);
   }
 
   const dir = String(form.get("dir") || "").replace(/^\/+|\/+$/g, "");
@@ -2170,14 +2465,9 @@ async function handleOpenPath(req: Request) {
   const length = Number(req.headers.get("content-length") || "0");
   if (length > 1024) return text("payload too large", 413);
 
-  let body: { path?: unknown; kind?: unknown } = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > 1024) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, 1024, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as { path?: unknown; kind?: unknown };
 
   const path =
     typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
@@ -2212,14 +2502,9 @@ async function handleTrashPath(req: Request) {
   const length = Number(req.headers.get("content-length") || "0");
   if (length > 1024) return text("payload too large", 413);
 
-  let body: { path?: unknown } = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > 1024) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, 1024, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as { path?: unknown };
 
   const path =
     typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
@@ -2271,14 +2556,9 @@ async function handleCreateDirectory(req: Request) {
     return text("invalid content length", 400);
   if (length > 2048) return text("payload too large", 413);
 
-  let body: { dir?: unknown; name?: unknown } = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > 2048) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, 2048, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as { dir?: unknown; name?: unknown };
 
   const dir =
     typeof body.dir === "string"
@@ -2300,9 +2580,12 @@ async function handleCreateDirectory(req: Request) {
   try {
     mkdirSync(target, { recursive: false });
   } catch (error) {
-    if ((error as { code?: string }).code === "EEXIST")
-      return text("already exists", 409);
-    return text("create failed", 500);
+    if (errno(error) === "EEXIST") return text("already exists", 409);
+    console.error(
+      `[code-viewer] creating the folder ${targetPath} failed:`,
+      error,
+    );
+    return text(`create failed: ${formatErrorDetail(error)}`, 500);
   }
   // 空ディレクトリの作成は diff に影響しない。パス付きで通知して、開いている
   // Diff 画面のロード済みカードが全部 stale 扱いされるのを避ける。
@@ -2319,14 +2602,12 @@ async function handleRestoreTrash(req: Request) {
   const length = Number(req.headers.get("content-length") || "0");
   if (length > 1024) return text("payload too large", 413);
 
-  let body: { original_path?: unknown; trashPath?: unknown } = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > 1024) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, 1024, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as {
+    original_path?: unknown;
+    trashPath?: unknown;
+  };
 
   const originalPath =
     typeof body.original_path === "string"
@@ -2510,14 +2791,9 @@ async function handleJournal(req: Request): Promise<Response> {
   const length = Number(req.headers.get("content-length") || "0");
   if (length > maxBytes) return text("payload too large", 413);
 
-  let body: Record<string, unknown> = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > maxBytes) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, maxBytes, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as Record<string, unknown>;
 
   try {
     const action = body.action;
@@ -2769,14 +3045,9 @@ async function handleAnnotations(req: Request) {
   const length = Number(req.headers.get("content-length") || "0");
   if (length > maxBytes) return text("payload too large", 413);
 
-  let body: Record<string, unknown> = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > maxBytes) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, maxBytes, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as Record<string, unknown>;
 
   const action = body.action;
   if (action === "start") {
@@ -2915,13 +3186,9 @@ const isCodeViewerInternalPath = git.isToolInternalPath;
 
 function sendSse(event: string, data = "tick") {
   const payload = enc.encode(`event: ${event}\ndata: ${data}\n\n`);
-  for (const client of [...sseClients]) {
-    try {
-      client.enqueue(payload);
-    } catch {
-      removeSseClient(client);
-    }
-  }
+  applySseClientOperation([...sseClients], "send", removeSseClient, (client) =>
+    client.enqueue(payload),
+  );
 }
 
 function removeSseClient(ctrl: ReadableStreamDefaultController<Uint8Array>) {
@@ -2932,17 +3199,27 @@ function removeSseClient(ctrl: ReadableStreamDefaultController<Uint8Array>) {
 }
 
 function closeSseClients() {
-  for (const client of [...sseClients]) {
-    removeSseClient(client);
-    try {
+  applySseClientOperation(
+    [...sseClients],
+    "close",
+    removeSseClient,
+    (client) => {
+      removeSseClient(client);
       client.close();
-    } catch {
-      /* client may already be closed */
-    }
-  }
+    },
+  );
 }
 
 parseCli();
+// 単体サーバを登録簿の URL や pid だけで信用しないための、起動ごとの本人確認。
+// 登録簿は 0600 で保存され、HTTP 側は同じ値を `/_entry` から返す。
+const standaloneIdentityToken = backendMode
+  ? null
+  : randomBytes(8).toString("hex");
+// code-viewer が起こしたサーバか (worktree/open.ts)。読んだらすぐ消す。残すと
+// このサーバのブラウザシェルから利用者が起動したサーバにまで引き継がれる。
+const launchedByCodeViewer = process.env[LAUNCHED_BY_ENV] === "code-viewer";
+delete process.env[LAUNCHED_BY_ENV];
 applyPersistedSettings(await loadAppSettingsState(cwd));
 
 // Directory count the worktree watcher capped at, or null while under the cap.
@@ -2954,12 +3231,33 @@ const shellHandleModule = import("./shell/handle");
 const agentHandleModule = import("./terminal/handle");
 const worktreeHandleModule = import("./worktree/handle");
 
+const ENTRY_ONLY_PATH =
+  /^\/(?:_tmux|_shell|_agent)\/|^\/_worktree\/(?:open|stop)$/;
+
+// 待ち受けに失敗したら理由 (ポートが塞がっていれば次の一手) を 1 回出して終える。
 const server = await startServer({
   hostname: "127.0.0.1",
   port: listenPort,
+  // 待ち受けた後のサーバのエラーは、ログだけ出して壊れたまま動き続けない。
+  // 共通の終了処理へ渡す (shutdown はこの下で組み立てるので、呼ぶときに読む)。
+  onError: (error) =>
+    reportFatalAndShutdown("server error", error, (code) => shutdown.run(code)),
   async fetch(req) {
     if (!requestAllowed(req)) return text("forbidden", 403);
     const url = new URL(req.url);
+    if (url.pathname === "/_entry") {
+      if (backendMode || standaloneIdentityToken === null) {
+        return text("not found", 404);
+      }
+      if (req.method !== "GET") return text("method not allowed", 405);
+      return json({
+        role: "standalone",
+        pid: process.pid,
+        token: standaloneIdentityToken,
+        version: VERSION,
+      });
+    }
+    if (url.pathname === "/_entry/adopt") return handleEntryAdopt(req);
     const staticResponse = staticFile(url.pathname);
     if (staticResponse) return staticResponse;
     if (url.pathname === "/diff.json") return await handleDiffJson(url);
@@ -3008,6 +3306,15 @@ const server = await startServer({
       );
       if (dbResponse) return dbResponse;
     }
+    // 裏のプロセスは tmux・シェル・エージェント・作業ツリー操作を受けない。
+    // 入口の取り次ぎはこれらを裏へ送らないので、ここへ来るのは古い版の
+    // フックや直接叩いた要求だけ。黙って受けて状態を分けない。
+    if (backendMode && ENTRY_ONLY_PATH.test(url.pathname)) {
+      return text(
+        `${url.pathname} is served by the code-viewer entry server, not by this project process`,
+        404,
+      );
+    }
     if (url.pathname.startsWith("/_tmux/")) {
       const { handleTmuxRoute } = await tmuxHandleModule;
       const tmuxResponse = await handleTmuxRoute(
@@ -3027,6 +3334,9 @@ const server = await startServer({
         cwd,
         generation,
         sideEffectRequestAllowed,
+        backendMode
+          ? { serverUrlFor: (path) => `/p/${rootFileKey(path)}/` }
+          : {},
       );
       if (worktreeResponse) return worktreeResponse;
     }
@@ -3082,7 +3392,9 @@ const server = await startServer({
           start(controller) {
             ctrl = controller;
             sseClients.add(controller);
-            controller.enqueue(enc.encode("event: open\ndata: ok\n\n"));
+            controller.enqueue(
+              enc.encode(`retry: ${SSE_RETRY_MS}\nevent: open\ndata: ok\n\n`),
+            );
             if (watchLimitReached !== null) {
               controller.enqueue(
                 enc.encode(
@@ -3091,12 +3403,13 @@ const server = await startServer({
               );
             }
             keepalive = setInterval(() => {
-              try {
-                controller.enqueue(enc.encode(": ping\n\n"));
-              } catch {
-                removeSseClient(controller);
-              }
-            }, 15000);
+              applySseClientOperation(
+                [controller],
+                "heartbeat",
+                removeSseClient,
+                (client) => client.enqueue(enc.encode(": ping\n\n")),
+              );
+            }, SSE_HEARTBEAT_INTERVAL_MS);
             keepalive.unref?.();
             sseKeepalives.set(controller, keepalive);
           },
@@ -3114,6 +3427,11 @@ const server = await startServer({
     }
     return text("not found", 404);
   },
+}).catch((error: unknown) => {
+  console.error(
+    `code-viewer could not start the server on port ${listenPort}:\n${formatErrorDetail(error)}`,
+  );
+  process.exit(1);
 });
 
 // startServer 後に実際にバインドされたポートを listenPort に反映する。
@@ -3132,12 +3450,36 @@ writeServerRegistry({
   pid: process.pid,
   root: cwd,
   started_at: new Date().toISOString(),
+  ...(standaloneIdentityToken === null
+    ? {}
+    : { token: standaloneIdentityToken, version: VERSION }),
+  ...(launchedByCodeViewer ? { launched: true } : {}),
+  ...(backendMode ? { backend: true } : {}),
 });
+// 落ちたサーバの登録を片付ける。起動を待たせず、失敗しても起動は止めない
+// (どの登録がなぜ残ったかは全部ログに出す)。
+void pruneDeadServerRegistry().then(
+  (pruned) => {
+    if (pruned.removed.length > 0) {
+      console.log(
+        `code-viewer removed ${pruned.removed.length} server registry entries of servers that are gone`,
+      );
+    }
+    for (const failure of pruned.errors) {
+      console.error(
+        `code-viewer could not clean up the server registry entry ${failure.file}:\n${formatErrorDetail(failure.error)}`,
+      );
+    }
+  },
+  (error: unknown) => {
+    console.error(
+      `code-viewer server registry cleanup failed:\n${formatErrorDetail(error)}`,
+    );
+  },
+);
 // Watching runs in a child process. close() here kills that child; it never
 // touches an fs.watch handle, so unlike the old in-process watcher it cannot
 // block shutdown on libuv's FSEvents semaphore.
-let worktreeWatch: WatchSupervisor | null = null;
-let shuttingDown = false;
 let registryCleanupAttempted = false;
 
 function removeOwnServerRegistry(): void {
@@ -3145,69 +3487,48 @@ function removeOwnServerRegistry(): void {
   removeServerRegistry(cwd, process.pid);
 }
 
-async function shutdown(exitCode = 0) {
-  if (shuttingDown) {
-    process.exit(1);
-  }
-  shuttingDown = true;
-  try {
-    removeOwnServerRegistry();
-  } catch (error) {
-    exitCode = 1;
-    console.error(
-      `code-viewer registry cleanup failed:\n${formatErrorDetail(error)}`,
-    );
-  }
-  closeSseClients();
-  try {
-    const [{ closeShellStreams }, { closeAllShellSessions }] =
-      await Promise.all([shellHandleModule, import("./shell/session")]);
-    closeShellStreams();
-    // ブラウザから開いたシェルはこのサーバの子。残したまま終わらない。
-    const closeResult = await closeAllShellSessions();
-    if (closeResult.status === "error") {
-      exitCode = 1;
-      console.error(
-        `code-viewer shell close failed:\n${formatErrorDetail(closeResult.error)}`,
-      );
-    }
-  } catch (error) {
-    exitCode = 1;
-    console.error(
-      `code-viewer shell close failed:\n${formatErrorDetail(error)}`,
-    );
-  }
-  try {
-    const { stopAgentActivityWatch } = await import("./terminal/activity");
-    stopAgentActivityWatch();
-  } catch (error) {
-    console.warn(`code-viewer agent watch stop skipped: ${String(error)}`);
-  }
-  worktreeWatch?.close();
-  try {
-    await server.close();
-  } catch (error) {
-    console.warn(`code-viewer server close skipped: ${String(error)}`);
-  }
-  process.exit(exitCode);
-}
+const shutdown = createProcessShutdown([
+  { label: "code-viewer registry cleanup", run: removeOwnServerRegistry },
+  { label: "code-viewer SSE client close", run: closeSseClients },
+  {
+    label: "code-viewer shell stream close",
+    run: async () => (await shellHandleModule).closeShellStreams(),
+  },
+  {
+    label: "code-viewer shell session close",
+    run: async () => {
+      // ブラウザから開いたシェルはこのサーバの子。残したまま終わらない。
+      const closed = await (
+        await import("./shell/session")
+      ).closeAllShellSessions();
+      if (closed.status === "error") throw closed.error;
+    },
+  },
+  {
+    label: "code-viewer agent watch stop",
+    run: async () =>
+      (await import("./terminal/activity")).stopAgentActivityWatch(),
+  },
+  {
+    label: "code-viewer worktree watch stop",
+    run: () => {
+      const watcher = worktreeWatch;
+      worktreeWatch = null;
+      watcher?.close();
+    },
+  },
+  {
+    label: "code-viewer main tabs watch stop",
+    run: () => unwatchFile(mainTabsWatched),
+  },
+  { label: "code-viewer server close", run: () => server.close() },
+]);
 
-// Last line of defence: a local viewer must not die because one request hit an
-// unexpected error. Node/Bun turn an unhandled 'error' from a stream that is
-// already piped to the response (e.g. reading a directory yields EISDIR) into a
-// process-wide crash, which takes down every other open tab with it. Log it and
-// keep serving; the request itself is already lost either way.
 process.on("uncaughtException", (error) => {
-  console.error(
-    "[code-viewer] uncaught exception (server kept running):",
-    error,
-  );
+  reportFatalAndShutdown("uncaught exception", error, shutdown.run);
 });
 process.on("unhandledRejection", (reason) => {
-  console.error(
-    "[code-viewer] unhandled rejection (server kept running):",
-    reason,
-  );
+  reportFatalAndShutdown("unhandled rejection", reason, shutdown.run);
 });
 
 process.on("exit", () => {
@@ -3216,16 +3537,24 @@ process.on("exit", () => {
       removeOwnServerRegistry();
     } catch (error) {
       process.exitCode = 1;
-      console.error(
-        `code-viewer registry cleanup failed:\n${formatErrorDetail(error)}`,
-      );
+      console.error("code-viewer registry cleanup failed:", error);
     }
   }
-  closeSseClients();
-  worktreeWatch?.close();
+  try {
+    closeSseClients();
+  } catch (error) {
+    process.exitCode = 1;
+    console.error("code-viewer SSE client close failed:", error);
+  }
+  try {
+    worktreeWatch?.close();
+  } catch (error) {
+    process.exitCode = 1;
+    console.error("code-viewer worktree watch stop failed:", error);
+  }
 });
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-  process.on(signal, () => void shutdown(0));
+  process.on(signal, () => void shutdown.run(0));
 }
 
 // Under the dev wrapper, exit when the parent dies so a crashed or
@@ -3237,12 +3566,77 @@ if (process.env.CODE_VIEWER_DEV === "1") {
   setInterval(() => {
     try {
       process.kill(parentPid, 0);
-    } catch {
+    } catch (error) {
+      // ESRCH (居ない)・EPERM (pid が別の持ち主に使い回された) は親が居ない。
+      // ほかの理由でも親を確かめられないので終えるが、理由は出す。
+      const code = errno(error);
+      if (code !== "ESRCH" && code !== "EPERM") {
+        console.error("dev wrapper check failed:", error);
+      }
       console.log("dev wrapper exited; shutting down preview server");
-      void shutdown(0);
+      void shutdown.run(0);
     }
   }, 1000).unref();
 }
+
+// 裏は pid だけで持ち主を決めない。entry.json と入口の HTTP 本人確認が同じ
+// 起動 token を返す間だけ残り、新しい入口への付け替えは adoption route だけで行う。
+if (backendMode && entryPid !== null && entryToken !== null) {
+  let ownerCheckRunning = false;
+  setInterval(() => {
+    if (ownerCheckRunning || entryPid === null || entryToken === null) return;
+    ownerCheckRunning = true;
+    const checkedPid = entryPid;
+    const checkedToken = entryToken;
+    void (async () => {
+      let verified: EntryOwnerVerification;
+      try {
+        verified = await verifyEntryOwner(checkedPid, checkedToken);
+      } catch (error) {
+        verified = {
+          ok: false,
+          detail: `entry owner verification raised an error:\n${formatErrorDetail(error)}`,
+        };
+      }
+      // adoption が確認中に持ち主を変えたなら、古い結果は現在の状態に使わない。
+      if (entryPid !== checkedPid || entryToken !== checkedToken) return;
+      if (verified.ok === true) {
+        entryUrl = verified.url;
+        entryOwnerGoneAt = null;
+        lastEntryOwnerFailure = "";
+        return;
+      }
+      if (lastEntryOwnerFailure !== verified.detail) {
+        lastEntryOwnerFailure = verified.detail;
+        console.error(
+          `[code-viewer] entry owner verification failed for pid ${checkedPid}:\n${verified.detail}`,
+        );
+      }
+      entryOwnerGoneAt ??= Date.now();
+      if (Date.now() - entryOwnerGoneAt < ENTRY_ADOPT_GRACE_MS) return;
+      console.log(
+        `the code-viewer entry server (pid ${checkedPid}) could not be verified; shutting down this project process`,
+      );
+      void shutdown.run(0);
+    })().finally(() => {
+      ownerCheckRunning = false;
+    });
+  }, ENTRY_WATCH_INTERVAL_MS).unref();
+}
+
+// タブの配置 (全プロジェクト共通、main-tabs.json) は、別のプロジェクトの裏や
+// 別の窓が書く。書き換わったら画面へ知らせ、画面が取り直して自分の配置に重ねる
+// (views/main-tabs の refreshFromServer)。書き込みは原子的な置き換え (rename) なので、
+// fs.watch ではなく時刻を見る (置き換えた後も同じパスを見続ける)。
+const MAIN_TABS_WATCH_INTERVAL_MS = 1000;
+const mainTabsWatched = mainTabsPath();
+watchFile(
+  mainTabsWatched,
+  { interval: MAIN_TABS_WATCH_INTERVAL_MS, persistent: false },
+  (now, before) => {
+    if (now.mtimeMs !== before.mtimeMs) sendSse("tabs", String(now.mtimeMs));
+  },
+);
 
 startDevAssetReload({
   enabled: process.env.CODE_VIEWER_DEV === "1",
@@ -3270,29 +3664,18 @@ function startScopedWorktreeWatch(): WatchSupervisor {
       );
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`code-viewer worktree watch skipped: ${message}`);
+      console.warn("code-viewer worktree watch skipped:", error);
     },
   });
 }
 
 function restartWorktreeWatch() {
-  // Guard against being called during the synchronous startup phase, before
-  // `worktreeWatch` / `shuttingDown` are reached by their let declarations.
-  // Touching them inside the TDZ throws ReferenceError.
-  try {
-    if (shuttingDown) return;
-    if (!worktreeWatch) return;
-  } catch {
-    return;
-  }
-  try {
-    worktreeWatch.close();
-  } catch (error) {
-    console.warn(
-      `code-viewer worktree watch restart close skipped: ${String(error)}`,
-    );
-  }
+  // 起動時の applyPersistedSettings からも呼ばれる。その時点では worktreeWatch が
+  // まだ null で、`shutdown` (下の const) は初期化前なので先に触ると
+  // ReferenceError になる。null の確認を先に置く。
+  if (!worktreeWatch) return;
+  if (shutdown.started()) return;
+  worktreeWatch.close();
   worktreeWatch = startScopedWorktreeWatch();
 }
 
@@ -3300,9 +3683,15 @@ worktreeWatch = startScopedWorktreeWatch();
 
 // フックを入れていないセッションを、画面の動きだけで「稼働 / 停止」に
 // 振り分ける観測。申告のある対象には触らない (terminal/activity.ts 参照)。
-void import("./terminal/activity").then(({ startAgentActivityWatch }) =>
-  startAgentActivityWatch(cwd, tmuxPaneListOptions),
-);
+// 裏のプロセスは巡回しない (入口が 1 本だけ巡回する)。
+if (!backendMode) {
+  void import("./terminal/activity").then(({ startAgentActivityWatch }) =>
+    startAgentActivityWatch(cwd, tmuxPaneListOptions),
+  );
+}
 
 console.log(`GDP_LISTEN_URL=http://127.0.0.1:${server.port}/`);
-console.log(`git-diff-preview serving ${cwd}`);
+// 人が読む行 (機械が読むのは上の行)。入口の「code-viewer entry server: <URL>」にそろえる。
+console.log(
+  `code-viewer ${backendMode ? "project process" : "standalone server"}: http://127.0.0.1:${server.port}/ (${cwd})`,
+);

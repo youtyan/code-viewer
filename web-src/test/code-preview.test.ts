@@ -288,5 +288,9 @@ describe("code preview", () => {
     expect(q(document, ".gdp-code-preview-message").textContent).toContain(
       "could not be parsed (HTTP 200)",
     );
+    // 画面の文にも cause の連鎖を残す (以前は message だけだった)。
+    expect(q(document, ".gdp-code-preview-message").textContent).toContain(
+      "\nCaused by: SyntaxError: ",
+    );
   });
 });

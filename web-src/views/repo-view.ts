@@ -1,14 +1,19 @@
+import { apiUrl } from "../core/api-url";
 // Repository browsing view: tree listing, breadcrumbs, context menu,
 // new-folder / move-to-trash actions, upload panel, and the repo blob
 // sidebar. Extracted from app.ts as a deps-injected factory.
 
-import { isImeComposing } from "../core/keyboard";
 import { normalizeNewDirectoryName } from "../core/directory-name";
-import { errorWithCause, formatErrorDetail } from "../core/error-detail";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 import {
   fileNameClipboardText,
   filePathClipboardText,
 } from "../core/file-path-copy";
+import { mainScrollBox } from "../core/focus-scope";
 import {
   COPY_16_PATHS,
   FILE_16_PATH,
@@ -18,6 +23,7 @@ import {
   PLUS_16_PATH,
   TRASH_16_PATH,
 } from "../core/icons";
+import { isImeComposing } from "../core/keyboard";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import {
   type AppRoute,
@@ -32,11 +38,15 @@ import type {
   SidebarItem,
   UndoActionResponse,
 } from "../core/types";
+import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
+import { fitBreadcrumb } from "./breadcrumb-fit";
+import { type ContextMenuItem, showContextMenu } from "./context-menu";
 import { fileRouteKeepingActiveView } from "./file-shell";
 import {
   type MarkdownLinkNavigationDeps,
   openMarkdownLink,
 } from "./markdown-link-navigation";
+import { type RepoViewLanguage, repoViewText } from "./repo-view-i18n";
 import { createRepositoryWebLink as renderRepositoryWebLink } from "./repository-web-link";
 import { sidebarAncestorDirs } from "./sidebar";
 import {
@@ -47,6 +57,11 @@ import {
 
 export type RepoViewDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;
+  /**
+   * 木のファイルの右クリックの「新しいタブで開く」「右に分割して開く」
+   * (木の行の中ボタン・Alt＋クリックと同じ開き方。ui-surface.md のタブの決まり)。
+   */
+  openTreeFileAs(path: string, intent: "new-tab" | "other-pane"): void;
   setPageMode(): void;
   setStatus(s: "live" | "refreshing" | "error" | null): void;
   setProjectName(project: string): void;
@@ -74,6 +89,11 @@ export type RepoViewDeps = {
   removeStandaloneSource(): void;
   renderStandaloneSource(target: SourceFileTarget): Promise<unknown>;
   repoFileTargetFromRoute(): string | null;
+  /**
+   * Files とファイルの画面の外 (Diff・History・Data など) でファイル一覧に出す
+   * ref。ファイル一覧はどの画面でも出している。
+   */
+  filesColumnRef(): string | null;
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;
   isAbortError(err: unknown): boolean;
   setRepoSidebarRef(ref: string | null): void;
@@ -134,6 +154,7 @@ export type RepoViewDeps = {
     route: AppRoute;
     files: { path: string }[];
     syntaxHighlight: boolean;
+    language: RepoViewLanguage;
   };
 };
 
@@ -162,6 +183,7 @@ export function createRepoView(deps: RepoViewDeps) {
     removeStandaloneSource,
     renderStandaloneSource,
     repoFileTargetFromRoute,
+    filesColumnRef,
     trackLoad,
     isAbortError,
     syncSidebarHeaderHeight,
@@ -213,7 +235,7 @@ export function createRepoView(deps: RepoViewDeps) {
   }
 
   function isRepoSidebarDomReusable(): boolean {
-    const filelist = document.querySelector<HTMLElement>("#filelist");
+    const filelist = document.querySelector<HTMLElement>("#file-list-rows");
     if (!filelist || !getSidebarOnFileClick()) return false;
     return !!filelist.querySelector("[data-path], [data-dirpath]");
   }
@@ -224,6 +246,9 @@ export function createRepoView(deps: RepoViewDeps) {
     if (!input || !wrap) return;
     const activeRef = activeRepoTreeRef();
     input.value = activeRef || ref || "worktree";
+    // 既定 (worktree) のときはツリーの頭で小さなアイコンだけにし、ほかの ref を
+    // 選んでいるときは値を出す (style.css のツリーの頭の節)。
+    wrap.dataset.defaultRef = String(input.value === "worktree");
     wrap.hidden = activeRef == null;
     wrap.style.display = activeRef == null ? "none" : "";
     syncSidebarHeaderHeight();
@@ -233,7 +258,7 @@ export function createRepoView(deps: RepoViewDeps) {
     const fileRef = repoFileTargetFromRoute();
     if (fileRef != null) return fileRef || "worktree";
     if (STATE.route.screen === "repo") return STATE.route.ref || "worktree";
-    return null;
+    return filesColumnRef();
   }
 
   function isActiveRepoTreeRef(ref: string) {
@@ -295,18 +320,15 @@ export function createRepoView(deps: RepoViewDeps) {
     );
   }
 
-  function closeRepoContextMenu() {
-    document.querySelector<HTMLElement>(".gdp-context-menu")?.remove();
-  }
-
   function confirmMoveToTrash(
     path: string,
     focusReturnTarget?: HTMLElement | null,
   ): Promise<boolean> {
+    const text = repoViewText(STATE.language);
     return showConfirmDialog({
-      title: "Move to Trash?",
-      body: `Move "${path}" to Trash?`,
-      confirmLabel: "Move to Trash",
+      title: text.moveToTrashTitle,
+      body: text.moveToTrashBody(path),
+      confirmLabel: text.moveToTrash,
       danger: true,
       focusReturnTarget,
     });
@@ -316,15 +338,15 @@ export function createRepoView(deps: RepoViewDeps) {
     path: string,
     focusReturnTarget?: HTMLElement | null,
   ): Promise<string | null> {
+    const text = repoViewText(STATE.language);
     return showPromptDialog({
-      title: "New Folder",
-      body: `Create a folder in "${path || getProjectName() || "repository"}".`,
-      placeholder: "Folder name",
-      ariaLabel: "Folder name",
-      confirmLabel: "Create",
+      title: text.newFolder,
+      body: text.newFolderBody(path || getProjectName() || "repository"),
+      placeholder: text.folderName,
+      ariaLabel: text.folderName,
+      confirmLabel: text.create,
       validate: (v) => normalizeNewDirectoryName(v),
-      invalidMessage:
-        "Use a folder name without slashes, control characters, . or ..",
+      invalidMessage: text.invalidFolderName,
       focusReturnTarget,
     });
   }
@@ -339,7 +361,7 @@ export function createRepoView(deps: RepoViewDeps) {
     if (!name) return;
     creatingDirectory = true;
     try {
-      const res = await fetch("/_create_directory", {
+      const res = await fetch(apiUrl("createDirectory"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -349,7 +371,10 @@ export function createRepoView(deps: RepoViewDeps) {
       });
       if (!res.ok) {
         showCreateDirectoryError(
-          `Failed to create "${name}": ${await res.text()}`,
+          repoViewText(STATE.language).createFailed(
+            name,
+            await responseErrorMessage(res, "creating the folder"),
+          ),
         );
         return;
       }
@@ -386,8 +411,9 @@ export function createRepoView(deps: RepoViewDeps) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "gdp-file-header-icon gdp-copy-path";
-    button.title = "copy folder path";
-    button.setAttribute("aria-label", "copy folder path");
+    const label = repoViewText(STATE.language).copyFolderPath;
+    button.title = label;
+    button.setAttribute("aria-label", label);
     button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
     button.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -397,10 +423,17 @@ export function createRepoView(deps: RepoViewDeps) {
         setTimeout(() => {
           button.classList.remove("copied");
         }, 1200);
-      } catch {
+      } catch (error) {
+        console.error("[code-viewer] copy folder path failed", path, error);
+        // 理由は押した場所の title に出す (箱の寸法は変えない)。
+        const idleTitle = button.title;
+        button.title = repoViewText(STATE.language).copyPathFailed(
+          formatErrorDetail(error),
+        );
         button.classList.add("failed");
         setTimeout(() => {
           button.classList.remove("failed");
+          button.title = idleTitle;
         }, 1200);
       }
     });
@@ -435,66 +468,70 @@ export function createRepoView(deps: RepoViewDeps) {
     if (entry.children_omitted_reason === "internal") return false;
     if (entry.type !== "tree" && entry.type !== "blob") return false;
     event.preventDefault();
-    closeRepoContextMenu();
 
-    const menu = document.createElement("div");
-    menu.className = "gdp-context-menu";
-    const anchor = event.target as Element | null;
-    const focusReturnTarget = anchor?.closest<HTMLElement>("li, .gdp-repo-row");
-    const anchorRect = anchor
-      ?.closest<HTMLElement>("li, .gdp-repo-row")
-      ?.getBoundingClientRect();
-    const anchorX =
-      event.clientX > 0
-        ? event.clientX
-        : anchorRect?.left || window.innerWidth / 2;
-    const anchorY =
-      event.clientY > 0
-        ? event.clientY
-        : anchorRect?.bottom || window.innerHeight / 2;
-    menu.style.left = `${anchorX}px`;
-    menu.style.top = `${anchorY}px`;
+    // 開く・閉じるは context-menu.ts に任せる (同時に 1 枚・外を押す / Escape で
+    // 閉じる・キーの受け手の後始末)。ここで要素だけを消すと、別の場所で開いた
+    // メニューまで消し、キーとスクロールの受け手が残った。
+    const row =
+      (event.target as Element | null)?.closest<HTMLElement>(
+        "li, .gdp-repo-row",
+      ) ?? null;
+    const rowRect = row?.getBoundingClientRect();
+    const at = {
+      x:
+        event.clientX > 0
+          ? event.clientX
+          : rowRect?.left || window.innerWidth / 2,
+      y:
+        event.clientY > 0
+          ? event.clientY
+          : rowRect?.bottom || window.innerHeight / 2,
+    };
 
-    const copyPath = document.createElement("button");
-    copyPath.type = "button";
-    copyPath.textContent = "Copy Path";
-    copyPath.addEventListener("click", async () => {
-      closeRepoContextMenu();
-      await copyRepoContextText(filePathClipboardText(entry.path));
-    });
-    const copyName = document.createElement("button");
-    copyName.type = "button";
-    copyName.textContent = "Copy Name";
-    copyName.addEventListener("click", async () => {
-      closeRepoContextMenu();
-      await copyRepoContextText(fileNameClipboardText(entry.path));
-    });
-    const createDir = document.createElement("button");
-    createDir.type = "button";
-    createDir.textContent = "New Folder...";
-    createDir.addEventListener("click", async () => {
-      closeRepoContextMenu();
-      const targetPath =
-        entry.type === "blob" ? parentRepoPath(entry.path) : entry.path;
-      await requestCreateDirectory(targetPath, onChanged, {
-        focusReturnTarget,
-      });
-    });
-    const trash = document.createElement("button");
-    trash.type = "button";
-    trash.className = "danger";
-    trash.textContent = "Move to Trash...";
-    trash.addEventListener("click", async () => {
-      closeRepoContextMenu();
-      await requestMoveToTrash(entry.path, onChanged, { focusReturnTarget });
-    });
-    menu.append(copyPath, copyName, createDir, trash);
-    document.body.appendChild(menu);
-    const rect = menu.getBoundingClientRect();
-    const left = Math.min(anchorX, window.innerWidth - rect.width - 8);
-    const top = Math.min(anchorY, window.innerHeight - rect.height - 8);
-    menu.style.left = `${Math.max(8, left)}px`;
-    menu.style.top = `${Math.max(8, top)}px`;
+    const text = repoViewText(STATE.language);
+    const items: ContextMenuItem[] =
+      entry.type === "blob"
+        ? [
+            {
+              label: text.openInNewTab,
+              onSelect: () => deps.openTreeFileAs(entry.path, "new-tab"),
+            },
+            {
+              label: text.openToTheRight,
+              onSelect: () => deps.openTreeFileAs(entry.path, "other-pane"),
+            },
+          ]
+        : [];
+    items.push(
+      {
+        label: text.copyPath,
+        onSelect: () =>
+          void copyRepoContextText(filePathClipboardText(entry.path)),
+      },
+      {
+        label: text.copyName,
+        onSelect: () =>
+          void copyRepoContextText(fileNameClipboardText(entry.path)),
+      },
+      {
+        label: text.newFolderMenu,
+        onSelect: () =>
+          void requestCreateDirectory(
+            entry.type === "blob" ? parentRepoPath(entry.path) : entry.path,
+            onChanged,
+            { focusReturnTarget: row },
+          ),
+      },
+      {
+        label: text.moveToTrashMenu,
+        danger: true,
+        onSelect: () =>
+          void requestMoveToTrash(entry.path, onChanged, {
+            focusReturnTarget: row,
+          }),
+      },
+    );
+    showContextMenu(row ?? document.body, items, { at, focusReturn: row });
     return true;
   }
 
@@ -505,7 +542,7 @@ export function createRepoView(deps: RepoViewDeps) {
   } | null {
     if (!isRepositorySidebarMode()) return null;
     const row = (event.target as Element | null)?.closest<HTMLElement>(
-      "#filelist li",
+      "#file-list-rows li",
     );
     if (!row) return null;
     const path = row.dataset.path || row.dataset.dirpath || "";
@@ -586,8 +623,9 @@ export function createRepoView(deps: RepoViewDeps) {
     const error = document.createElement("div");
     error.className = "gdp-upload-error";
 
-    const fail = (message = uploadFailedMessage()) => {
-      error.textContent = message;
+    const fail = (uploadError: unknown) => {
+      console.error("[code-viewer] uploading files failed", path, uploadError);
+      error.textContent = `${uploadFailedMessage()}\n${formatErrorDetail(uploadError)}`;
       dropPanel.classList.add("failed");
       setTimeout(() => dropPanel.classList.remove("failed"), 1600);
     };
@@ -597,11 +635,7 @@ export function createRepoView(deps: RepoViewDeps) {
         if (input.files?.length) await uploadFiles(path, input.files);
         error.textContent = "";
       } catch (uploadError) {
-        fail(
-          uploadError instanceof Error
-            ? uploadError.message
-            : uploadFailedMessage(),
-        );
+        fail(uploadError);
       } finally {
         input.value = "";
       }
@@ -622,11 +656,7 @@ export function createRepoView(deps: RepoViewDeps) {
         if (files?.length) await uploadFiles(path, files);
         error.textContent = "";
       } catch (uploadError) {
-        fail(
-          uploadError instanceof Error
-            ? uploadError.message
-            : uploadFailedMessage(),
-        );
+        fail(uploadError);
       }
     });
 
@@ -690,6 +720,11 @@ export function createRepoView(deps: RepoViewDeps) {
       });
       nav.appendChild(button);
     });
+    // 深いフォルダで入りきらないときは真ん中の段を「…」に畳む。
+    fitBreadcrumb(
+      nav,
+      [root.textContent ?? "", ...parts].filter(Boolean).join("/"),
+    );
     return nav;
   }
 
@@ -703,7 +738,8 @@ export function createRepoView(deps: RepoViewDeps) {
     setPageMode();
     removeStandaloneSource();
     $("#empty").classList.add("hidden");
-    if (!isRepoSidebarReusable(meta.ref)) $("#totals").textContent = "";
+    if (!isRepoSidebarReusable(meta.ref))
+      $("#file-list-totals").textContent = "";
     STATE.files = [];
     clearLoadQueue();
     renderRepoBlobSidebar(meta.path || "", meta.ref);
@@ -893,7 +929,8 @@ export function createRepoView(deps: RepoViewDeps) {
         committed.className = "commit-date";
         const labels = sortColumnLabels();
         committed.textContent =
-          formatFileDate(entry.commit_updated_at) || labels.noCommit;
+          formatFileDate(entry.commit_updated_at, STATE.language) ||
+          labels.noCommit;
         committed.title = labels.committedHint;
         if (entry.commit_updated_at) {
           committed.dateTime = entry.commit_updated_at;
@@ -971,11 +1008,24 @@ export function createRepoView(deps: RepoViewDeps) {
             },
           ),
         );
-      } catch {
+      } catch (error) {
+        console.error(
+          "[code-viewer] README markdown render failed",
+          meta.readme.path,
+          error,
+        );
+        // 生の文字に落として読めるようにするが、落ちた理由も並べて残す。
+        const reason = document.createElement("div");
+        reason.className = "gdp-markdown-fallback-reason";
+        const lead = document.createElement("p");
+        lead.textContent = repoViewText(STATE.language).readmeRenderFailed;
+        const detail = document.createElement("pre");
+        detail.textContent = formatErrorDetail(error);
+        reason.append(lead, detail);
         const fallback = document.createElement("pre");
         fallback.className = "gdp-markdown-fallback";
         fallback.textContent = meta.readme.text;
-        wrapper.appendChild(fallback);
+        wrapper.append(reason, fallback);
       }
       readme.appendChild(wrapper);
       shell.appendChild(readme);
@@ -995,11 +1045,13 @@ export function createRepoView(deps: RepoViewDeps) {
     REPO_RENDER_SIGNATURE = signature;
     const sameLocation = location === REPO_RENDER_LOCATION;
     REPO_RENDER_LOCATION = location;
-    const savedScroll = window.scrollY;
+    // 位置を持っているのは本文の箱 (窓は動かない)。
+    const box = mainScrollBox();
+    const savedScroll = box?.scrollTop ?? 0;
     target.replaceChildren(shell);
     // 同じディレクトリの再描画 (SSE 更新) なら読んでいた位置を保ち、別の
     // ディレクトリへ移動したときは先頭から表示する。
-    window.scrollTo(0, sameLocation ? savedScroll : 0);
+    if (box) box.scrollTop = sameLocation ? savedScroll : 0;
     placeSidebarToggle();
   }
 
@@ -1045,13 +1097,19 @@ export function createRepoView(deps: RepoViewDeps) {
     }
     const params = new URLSearchParams();
     params.set("ref", normalizedRef);
+    params.set(...TREE_WITHOUT_COMMIT_DATES);
     appendScopeParams(params);
     REPO_SIDEBAR_LOAD_REF = normalizedRef;
     const load = trackLoad<RepoTreeResponse>(
-      fetch(`/_tree?${params.toString()}`).then((r) => {
-        if (!r.ok) throw new Error("failed to load repository tree");
-        return r.json();
-      }),
+      // 成功時は r.json() をそのまま返す (async にすると 1 手遅れ、loadRepo の
+      // 直後に木がまだ描かれていない)。失敗時だけ本文を読んで理由にする。
+      fetch(`${apiUrl("tree")}?${params.toString()}`).then((r) =>
+        r.ok
+          ? r.json()
+          : responseErrorMessage(r, "load repository tree").then((message) => {
+              throw new Error(message);
+            }),
+      ),
     )
       .then(async (meta) => {
         if (!isActiveRepoTreeRef(normalizedRef)) return;
@@ -1080,11 +1138,20 @@ export function createRepoView(deps: RepoViewDeps) {
         });
         await activateRepoSidebarPath(currentPath);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!isActiveRepoTreeRef(normalizedRef)) return;
+        console.error(
+          "[code-viewer] repository tree load failed",
+          normalizedRef,
+          error,
+        );
         setRepoSidebarRef(null);
         renderSidebar([], undefined);
-        $("#totals").textContent = "Cannot load tree";
+        // 件数の枠 (#file-list-totals) は幅の決まった枠なので、1 行の文言はそのまま出し、理由の
+        // 全文 (cause の連鎖ごと) は title に置く。
+        const totals = $("#file-list-totals");
+        totals.textContent = repoViewText(STATE.language).cannotLoadTree;
+        totals.title = formatErrorDetail(error);
       })
       .finally(() => {
         if (REPO_SIDEBAR_LOAD === load) {
@@ -1094,6 +1161,22 @@ export function createRepoView(deps: RepoViewDeps) {
       });
     REPO_SIDEBAR_LOAD = load;
     return load;
+  }
+
+  /**
+   * Files とファイルの画面の外でファイル一覧を出す。同じ ref で読み込み済みなら
+   * 何もしない (選んでいる行もスクロールも動かさない)。
+   */
+  function ensureFileList(ref: string): Promise<void> {
+    const normalizedRef = ref || "worktree";
+    if (isRepoSidebarReusable(normalizedRef)) {
+      syncRepoTargetInput(normalizedRef);
+      return Promise.resolve();
+    }
+    return renderRepoBlobSidebar(
+      getSidebarVirtualActivePath() || "",
+      normalizedRef,
+    );
   }
 
   async function loadRepoSidebarAncestors(currentPath: string) {
@@ -1147,15 +1230,17 @@ export function createRepoView(deps: RepoViewDeps) {
       meta.classList.add("symlink-target");
       if (broken) meta.classList.add("broken");
       meta.textContent = `→ ${entry.symlink_target || "?"}`;
+      const text = repoViewText(STATE.language);
       meta.title = broken
-        ? `Broken symlink → ${entry.symlink_target || ""}`
-        : `Symlink → ${entry.symlink_target || ""}`;
+        ? text.brokenSymlink(entry.symlink_target || "")
+        : text.symlink(entry.symlink_target || "");
       return meta;
     }
     const updated = formatFileDate(
       ref === "worktree" || ref === "" ? entry.updated_at : undefined,
+      STATE.language,
     );
-    const created = formatFileDate(entry.created_at);
+    const created = formatFileDate(entry.created_at, STATE.language);
     meta.title = sortColumnLabels().updatedHint;
     if (browsable && updated) {
       meta.textContent = updated;
@@ -1318,15 +1403,44 @@ export function createRepoView(deps: RepoViewDeps) {
     return header;
   }
 
-  async function loadRawFileInfo(
+  /**
+   * 同じファイルの HEAD を同時に何本も出さない。1 回の表示で、見出しの情報・
+   * 表示の種類の判定・変化の検知 (app.ts の署名) が同じ URL を同時に 3 本
+   * 出していた。終わった要求は覚えない (次に聞いたときは取り直す)。
+   */
+  const RAW_FILE_INFO_IN_FLIGHT = new Map<string, Promise<RawFileInfo>>();
+
+  /** url を渡すと、その URL で聞く (別のプロジェクトのファイル。app.ts)。 */
+  function loadRawFileInfo(
     target: SourceFileTarget,
+    url: string = buildRawFileUrl(target),
+  ): Promise<RawFileInfo> {
+    const inFlight = RAW_FILE_INFO_IN_FLIGHT.get(url);
+    if (inFlight) return inFlight;
+    const request = requestRawFileInfo(target, url).finally(() => {
+      if (RAW_FILE_INFO_IN_FLIGHT.get(url) === request)
+        RAW_FILE_INFO_IN_FLIGHT.delete(url);
+    });
+    RAW_FILE_INFO_IN_FLIGHT.set(url, request);
+    return request;
+  }
+
+  async function requestRawFileInfo(
+    target: SourceFileTarget,
+    url: string,
   ): Promise<RawFileInfo> {
     try {
-      const res = await fetch(buildRawFileUrl(target), { method: "HEAD" });
+      const res = await fetch(url, { method: "HEAD" });
       // 404 は「その ref にファイルが無い」という確定状態。取得失敗の {} と
       // 区別して返す (SSE 再描画ゲートが削除を変化として検知するため)。
       if (res.status === 404) return { missing: true };
-      if (!res.ok) return {};
+      if (!res.ok) {
+        // HEAD なので本文は無い。状態と対象を理由に残す。
+        return {
+          error:
+            `HEAD ${target.path} (${target.ref}) failed: ${res.status} ${res.statusText}`.trim(),
+        };
+      }
       const rawSize = res.headers.get("content-length");
       const size = rawSize == null ? NaN : Number(rawSize);
       return {
@@ -1337,8 +1451,13 @@ export function createRepoView(deps: RepoViewDeps) {
         commit_updated_at:
           res.headers.get("x-code-viewer-commit-updated-at") || undefined,
       };
-    } catch {
-      return {};
+    } catch (error) {
+      const failure = errorWithCause(
+        `could not read the details of ${target.path} (${target.ref})`,
+        error,
+      );
+      console.error("[code-viewer] file details failed", failure);
+      return { error: formatErrorDetail(failure) };
     }
   }
 
@@ -1346,8 +1465,21 @@ export function createRepoView(deps: RepoViewDeps) {
     target: SourceFileTarget,
     meta: RawFileInfo,
   ): HTMLElement {
+    // 大きさ・日時は補助の情報なので行としては出さず、パンくずの横の小さな
+    // 情報のボタンに入れる (hover かフォーカスで一覧が出る。style.css の
+    // 文書の面の節)。
     const wrap = document.createElement("div");
     wrap.className = "gdp-file-detail-meta";
+    wrap.tabIndex = 0;
+    const text = repoViewText(STATE.language);
+    wrap.setAttribute("aria-label", text.fileDetails);
+    const icon = document.createElement("span");
+    icon.className = "gdp-file-detail-meta-icon";
+    icon.textContent = "i";
+    icon.setAttribute("aria-hidden", "true");
+    const list = document.createElement("span");
+    list.className = "gdp-file-detail-meta-list";
+    wrap.append(icon, list);
     const addItem = (label: string, value: string) => {
       if (!value) return;
       const item = document.createElement("span");
@@ -1359,15 +1491,20 @@ export function createRepoView(deps: RepoViewDeps) {
       valueEl.className = "value";
       valueEl.textContent = value;
       item.append(labelEl, valueEl);
-      wrap.appendChild(item);
+      list.appendChild(item);
     };
-    addItem("Size", meta.size == null ? "" : formatBytes(meta.size));
+    addItem(text.size, meta.size == null ? "" : formatBytes(meta.size));
     addItem(
-      "Updated",
-      formatFileDate(meta.updated_at || meta.commit_updated_at),
+      text.updated,
+      formatFileDate(meta.updated_at || meta.commit_updated_at, STATE.language),
     );
-    addItem("Created", formatFileDate(meta.created_at));
-    if (!wrap.childElementCount) {
+    addItem(text.created, formatFileDate(meta.created_at, STATE.language));
+    // 取れなかったことは「情報が無い」と区別して、ボタンの中に理由つきで出す。
+    if (meta.error) {
+      wrap.classList.add("failed");
+      addItem(text.detailsFailed, meta.error);
+    }
+    if (!list.childElementCount) {
       wrap.hidden = true;
       wrap.dataset.path = target.path;
     }
@@ -1386,7 +1523,7 @@ export function createRepoView(deps: RepoViewDeps) {
     if (routePath) params.set("path", routePath);
     appendScopeParams(params);
     return trackLoad<RepoTreeResponse>(
-      fetch(`/_tree?${params.toString()}`).then(async (r) => {
+      fetch(`${apiUrl("tree")}?${params.toString()}`).then(async (r) => {
         if (!r.ok)
           throw errorWithCause(
             `Repository listing failed (${r.status}): ${routeRef}:${routePath}`,
@@ -1429,15 +1566,21 @@ export function createRepoView(deps: RepoViewDeps) {
   let creatingDirectory = false;
 
   function showTrashError(message: string) {
-    void showAlertDialog({ title: "Trash failed", body: message });
+    void showAlertDialog({
+      title: repoViewText(STATE.language).trashFailed,
+      body: message,
+    });
   }
 
   function showCreateDirectoryError(message: string) {
-    void showAlertDialog({ title: "New folder failed", body: message });
+    void showAlertDialog({
+      title: repoViewText(STATE.language).newFolderFailed,
+      body: message,
+    });
   }
 
   async function moveRepoPathToTrash(path: string) {
-    const res = await fetch("/_trash_path", {
+    const res = await fetch(apiUrl("trashPath"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1446,7 +1589,9 @@ export function createRepoView(deps: RepoViewDeps) {
       body: JSON.stringify({ path }),
     });
     if (!res.ok) {
-      showTrashError(`Failed to move "${path}" to Trash: ${await res.text()}`);
+      showTrashError(
+        await responseErrorMessage(res, `moving "${path}" to Trash`),
+      );
       return false;
     }
     const body = (await res.json()) as { undo?: UndoActionResponse };
@@ -1471,12 +1616,13 @@ export function createRepoView(deps: RepoViewDeps) {
     list.forEach((file) => {
       form.append("files", file, file.name);
     });
-    const res = await fetch("/_upload_files", {
+    const res = await fetch(apiUrl("uploadFiles"), {
       method: "POST",
       headers: { "X-Code-Viewer-Action": "1" },
       body: form,
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok)
+      throw new Error(await responseErrorMessage(res, "uploading files"));
     invalidateRepoSidebar();
     await loadRepo();
   }
@@ -1516,10 +1662,15 @@ export function createRepoView(deps: RepoViewDeps) {
     try {
       const params = new URLSearchParams();
       params.set("ref", ref);
+      params.set(...TREE_WITHOUT_COMMIT_DATES);
       appendScopeParams(params);
       const meta = await trackLoad<RepoTreeResponse>(
-        fetch(`/_tree?${params.toString()}`).then((r) => {
-          if (!r.ok) throw new Error("failed to load repository tree");
+        fetch(`${apiUrl("tree")}?${params.toString()}`).then(async (r) => {
+          if (!r.ok) {
+            throw new Error(
+              await responseErrorMessage(r, "refresh repository tree"),
+            );
+          }
           return r.json();
         }),
       );
@@ -1528,8 +1679,14 @@ export function createRepoView(deps: RepoViewDeps) {
       await refreshRepoSidebarTree(
         repoTreeEntriesToSidebarItems(meta.entries, ref),
       );
-    } catch {
-      /* best-effort: 次の SSE か手動更新で追いつく */
+    } catch (error) {
+      // 取り直しは次の SSE か手動更新で追いつくので、今のツリーはそのまま
+      // 残す。ただし失敗した事実と理由は捨てない。
+      console.error(
+        "[code-viewer] repository sidebar refresh failed",
+        ref,
+        error,
+      );
     } finally {
       REPO_SIDEBAR_REFRESHING = false;
       if (REPO_SIDEBAR_REFRESH_QUEUED) {
@@ -1547,8 +1704,8 @@ export function createRepoView(deps: RepoViewDeps) {
     loadRawFileInfo,
     repoRoute,
     renderRepoBlobSidebar,
+    ensureFileList,
     syncRepoTargetInput,
-    closeRepoContextMenu,
     handleSidebarContextMenu,
     fileEntryIcon,
     invalidateRepoSidebar,

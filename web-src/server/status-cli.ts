@@ -27,9 +27,11 @@ import {
 import {
   commitHistoryAsync,
   currentBranchAsync,
+  emptyTreeAsync,
   fileMetaResultAsync,
   type GitFileMeta,
   type GitHistoryCommit,
+  headCommitAsync,
   remoteWebUrlAsync,
 } from "./git";
 import { readServerRegistry } from "./server-registry";
@@ -277,12 +279,6 @@ function mergeMissingByPath(
   return merged;
 }
 
-function isMissingDiffBaseError(error: string | undefined): boolean {
-  return (
-    !!error && /ambiguous argument 'HEAD'|bad revision 'HEAD'/i.test(error)
-  );
-}
-
 // Compose a paste-safe `code-viewer <subcommand>` line.
 //   - server URL is optional. When present, --server '<url>' is pinned
 //     so paste-into-another-shell does not silently fall back to
@@ -399,25 +395,35 @@ export async function buildStatusReport(opts: {
   // since the last commit?", which is the orient question. With no ref
   // arg, git diff is worktree-vs-index — that would silently miss
   // staged-only changes from the summary.
+  // まだコミットの無いリポジトリ (unborn) は HEAD と比べられないので、
+  // 空の木と比べる (全部が新しいファイル)。失敗してから後始末すると、
+  // git の失敗が stderr に出る。
+  const head = await headCommitAsync(root);
+  const base: Awaited<ReturnType<typeof emptyTreeAsync>> =
+    head.kind === "commit"
+      ? { ok: true, tree: "HEAD" }
+      : head.kind === "unborn"
+        ? await emptyTreeAsync(root)
+        : { ok: false, error: head.error };
   const stagedResult = await fileMetaResultAsync(["--cached"], root, false);
-  const changedResult = await fileMetaResultAsync(["HEAD"], root, true);
-  const worktreeFallbackResult = isMissingDiffBaseError(changedResult.error)
-    ? await fileMetaResultAsync([], root, true)
-    : null;
+  const changedResult =
+    "tree" in base
+      ? await fileMetaResultAsync([base.tree], root, true)
+      : { files: [], error: base.error };
   const stagedFiles = stagedResult.files;
   const changedFiles = changedResult.error
-    ? worktreeFallbackResult
-      ? mergeMissingByPath(worktreeFallbackResult.files, stagedFiles)
-      : []
+    ? []
     : mergeMissingByPath(changedResult.files, stagedFiles);
   const changed = buildGroup(
     changedFiles,
-    worktreeFallbackResult
-      ? worktreeFallbackResult.error || stagedResult.error
-      : changedResult.error || stagedResult.error,
+    changedResult.error || stagedResult.error,
   );
   const staged = buildGroup(stagedFiles, stagedResult.error);
-  const history = await commitHistoryAsync(root, { ref, skip: 0, limit });
+  // 既定の ref (HEAD) でコミットがまだ無いなら、履歴は空 (失敗ではない)。
+  const history: { commits: GitHistoryCommit[]; error?: string } =
+    head.kind === "unborn" && ref === STATUS_DEFAULT_REF
+      ? { commits: [] }
+      : await commitHistoryAsync(root, { ref, skip: 0, limit });
   const branch = await currentBranchAsync(root);
   const remote = await remoteWebUrlAsync(root);
   const registry = readServerRegistry(root);

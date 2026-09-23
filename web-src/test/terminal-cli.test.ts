@@ -212,6 +212,7 @@ describe("formatStateLine", () => {
     state: "waiting",
     source: "hook",
     updatedAt: 0,
+    changeObserved: true,
     lastPrompt: "",
     note: "",
     ...over,

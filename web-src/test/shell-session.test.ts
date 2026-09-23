@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { formatErrorDetail } from "../core/error-detail";
+import { linkShellsAndPanes } from "../core/terminal-board";
 
 const mocks = vi.hoisted(() => ({
   runAsync: vi.fn(),
@@ -13,6 +14,8 @@ import {
   closeAllShellSessions,
   closeShellSession,
   createShellSession,
+  listShellSessionsForMatching,
+  subscribeShell,
   writeToShellWhenReady,
 } from "../server/shell/session";
 
@@ -72,6 +75,48 @@ afterEach(async () => {
 });
 
 describe("createShellSession PTY terminal resolution", () => {
+  test("retries a temporarily missing tty and links the shell to its tmux pane", async () => {
+    mocks.runAsync
+      .mockResolvedValueOnce({ code: 0, stdout: "?\n", stderr: "" })
+      .mockResolvedValueOnce({ code: 0, stdout: "ttys031\n", stderr: "" });
+
+    const result = await createShellSession(process.cwd());
+
+    if (result.status !== "ok") throw new Error("expected a shell session");
+    expect(result.session.tty).toBe("/dev/ttys031");
+    const linked = linkShellsAndPanes(
+      [result.session],
+      [{ tty: "/dev/ttys031", session: "sample-session", pane: "%31" }],
+    );
+    expect(linked.paneToShell.get("%31")).toBe(result.session.id);
+  });
+
+  test("rechecks an empty tty for matching and remembers the first resolved value", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.runAsync.mockResolvedValue({ code: 0, stdout: "?\n", stderr: "" });
+      const creating = createShellSession(process.cwd());
+      await vi.advanceTimersByTimeAsync(2000);
+      const created = await creating;
+      if (created.status !== "ok") throw new Error("expected a shell session");
+      expect(created.session.tty).toBe("");
+
+      mocks.runAsync.mockResolvedValue({
+        code: 0,
+        stdout: "ttys031\n",
+        stderr: "",
+      });
+      const matched = await listShellSessionsForMatching();
+      const callsAfterResolution = mocks.runAsync.mock.calls.length;
+      expect(matched[0]?.tty).toBe("/dev/ttys031");
+
+      await listShellSessionsForMatching();
+      expect(mocks.runAsync).toHaveBeenCalledTimes(callsAfterResolution);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test.each([
     {
       name: "a non-zero ps result",
@@ -226,5 +271,80 @@ describe("closeShellSession", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// 購読し直したときの流し直しは、前の購読者に渡った分 (replay) と、まだ誰にも
+// 渡っていない分 (unseen) に分かれる。渡った分の中の端末への問い合わせには
+// そのときの端末が答えているので、答え直すと PTY に文字として入る。渡って
+// いない分 (シェルを作ってから購読が始まるまでに出た tmux の問い合わせなど)
+// には、まだ誰も答えていない。
+describe("subscribeShell replay split", () => {
+  test.each([
+    {
+      name: "output before the first subscriber is unseen for it, and seen for the next",
+      before: "q1",
+      during: "",
+      after: "",
+      first: { replay: "", unseen: "q1" },
+      next: { replay: "q1", unseen: "" },
+    },
+    {
+      name: "output delivered live is seen",
+      before: "",
+      during: "x",
+      after: "",
+      first: { replay: "", unseen: "" },
+      next: { replay: "x", unseen: "" },
+    },
+    {
+      name: "output after the subscriber left is unseen",
+      before: "",
+      during: "",
+      after: "q2",
+      first: { replay: "", unseen: "" },
+      next: { replay: "", unseen: "q2" },
+    },
+    {
+      name: "seen output comes first, then the unseen tail",
+      before: "q1",
+      during: "x",
+      after: "q2",
+      first: { replay: "", unseen: "q1" },
+      next: { replay: "q1x", unseen: "q2" },
+    },
+  ])("$name", async ({ before, during, after, first, next }) => {
+    const created = await createShellSession(process.cwd());
+    if (created.status !== "ok") throw new Error("expected a shell session");
+    const id = created.session.id;
+    const noop = () => undefined;
+
+    if (before) pty.emitData(before);
+    const firstSub = subscribeShell(id, noop, noop);
+    if (during) pty.emitData(during);
+    firstSub?.unsubscribe();
+    if (after) pty.emitData(after);
+    const nextSub = subscribeShell(id, noop, noop);
+
+    expect({ replay: firstSub?.replay, unseen: firstSub?.unseen }).toEqual(
+      first,
+    );
+    expect({ replay: nextSub?.replay, unseen: nextSub?.unseen }).toEqual(next);
+  });
+
+  test("unseen output larger than the buffer leaves nothing marked as seen", async () => {
+    const created = await createShellSession(process.cwd());
+    if (created.status !== "ok") throw new Error("expected a shell session");
+    const id = created.session.id;
+    const noop = () => undefined;
+    const firstSub = subscribeShell(id, noop, noop);
+    pty.emitData("x");
+    firstSub?.unsubscribe();
+
+    pty.emitData("y".repeat(300_000));
+    const sub = subscribeShell(id, noop, noop);
+
+    expect(sub?.replay).toBe("");
+    expect(sub?.unseen.startsWith("y")).toBe(true);
   });
 });

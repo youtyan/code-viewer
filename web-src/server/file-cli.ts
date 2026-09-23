@@ -9,8 +9,9 @@
 // Git invocations stay in `git.ts`, so this CLI can never drift from the
 // browser's per-file inspection views.
 
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import {
   resolveRepoRoot,
   takeGlobalCliOption,
@@ -36,6 +37,7 @@ import {
   untrackedFileDiffAsync,
 } from "./git";
 import { isSameWorktreeRange } from "./range";
+import { errno } from "./terminal/settings-file";
 
 export type FileBlameCommand = {
   kind: "blame";
@@ -795,7 +797,8 @@ export function sliceLines(
 
 // Resolve a repo-relative path against the worktree, rejecting paths that
 // escape the repo via symlinks or "..". Returns the resolved absolute
-// path or null when the path is unsafe / missing. Exported so MCP tools
+// path or null when the path is unsafe / missing, and throws (with the
+// reason) when it cannot be resolved for another reason. Exported so MCP tools
 // can perform the same gate (the closure-bound `safeWorktreePath` in
 // preview.ts has the same intent but receives `cwd` differently).
 export function safeWorktreePathFromRoot(
@@ -804,24 +807,28 @@ export function safeWorktreePathFromRoot(
 ): string | null {
   if (validatePath(path)) return null;
   const full = join(root, path);
-  if (!existsSync(full)) return null;
+  let realFull: string;
   try {
-    const realRoot = realpathSync(root);
-    const realFull = realpathSync(full);
-    const rel = relative(realRoot, realFull);
-    if (
-      rel === "" ||
-      rel.startsWith("..") ||
-      rel.startsWith("/") ||
-      rel.startsWith("\\")
-    ) {
+    realFull = realpathSync(full);
+  } catch (error) {
+    // 無い・途中がファイル・リンクが回っている、だけを「無い」にする。読めない
+    // (権限など) は理由ごと投げる (「無い」と言うと原因を探せない)。
+    const code = errno(error);
+    if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP")
       return null;
-    }
-    if (validatePath(rel)) return null;
-    return realFull;
-  } catch {
+    throw errorWithCause(`failed to resolve ${full}`, error);
+  }
+  const rel = relative(realpathSync(root), realFull);
+  if (
+    rel === "" ||
+    rel.startsWith("..") ||
+    rel.startsWith("/") ||
+    rel.startsWith("\\")
+  ) {
     return null;
   }
+  if (validatePath(rel)) return null;
+  return realFull;
 }
 
 // Read the requested ref's content. Worktree paths go through
@@ -834,22 +841,26 @@ export async function readShowTextAsync(
   if (command.ref !== "worktree" && command.ref !== "") {
     return showAsync(command.ref, command.path, root);
   }
-  const full = safeWorktreePathFromRoot(root, command.path);
-  if (!full) {
-    return {
-      code: 1,
-      stdout: "",
-      stderr: "file not found or forbidden",
-    };
-  }
   try {
+    const full = safeWorktreePathFromRoot(root, command.path);
+    if (!full) {
+      return {
+        code: 1,
+        stdout: "",
+        stderr: "file not found or forbidden",
+      };
+    }
     const stat = statSync(full);
     if (!stat.isFile()) {
       return { code: 1, stdout: "", stderr: "not a file" };
     }
     return { code: 0, stdout: readFileSync(full, "utf8"), stderr: "" };
-  } catch {
-    return { code: 1, stdout: "", stderr: "file not readable" };
+  } catch (error) {
+    return {
+      code: 1,
+      stdout: "",
+      stderr: `file not readable: ${formatErrorDetail(error)}`,
+    };
   }
 }
 

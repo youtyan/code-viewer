@@ -8,6 +8,7 @@ import { waitFor } from "./_test-helpers";
 GlobalRegistrator.register();
 
 const { createS3Explorer } = await import("../views/database/s3-explorer");
+const { dbText } = await import("../views/database/i18n");
 
 type FolderLevel = { folders: string[]; objects: Array<{ key: string }> };
 
@@ -36,12 +37,16 @@ function json(body: unknown): Response {
   });
 }
 
-function installFetchMock(): void {
+// fail が Error を返せば通信の失敗として投げ、Response を返せばそれを応答する。
+function installFetchMock(fail?: (url: URL) => Error | Response | null): void {
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
     writable: true,
     value: (async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://localhost");
+      const failure = fail?.(url);
+      if (failure instanceof Response) return failure;
+      if (failure) throw failure;
       const p = url.pathname;
       if (p === "/_db/s3/buckets")
         return json({ dbId: "mock", buckets: [{ name: "media" }] });
@@ -101,8 +106,10 @@ afterAll(() => {
   GlobalRegistrator.unregister();
 });
 
-async function mountExplorer(): Promise<ReturnType<typeof createS3Explorer>> {
-  const view = createS3Explorer();
+async function mountExplorer(
+  callbacks: Parameters<typeof createS3Explorer>[0] = {},
+): Promise<ReturnType<typeof createS3Explorer>> {
+  const view = createS3Explorer(callbacks);
   explorer = view;
   // sidebarSlot は本番では db-sidebar の dbToolbar 直下に mount される。
   // テストでは同じ document.body に並べて、querySelector で両方を辿れるようにする。
@@ -139,6 +146,157 @@ describe("S3 explorer UI", () => {
       '.s3-object-item[data-key="notes.txt"]',
     );
     expect(txtRow?.querySelector(".s3-kind-badge.kind-text")).toBeTruthy();
+  });
+
+  test("日本語では表示の切替と種別バッジも日本語になる", async () => {
+    document.documentElement.lang = "ja";
+    try {
+      const view = await mountExplorer({ getText: () => dbText("ja") });
+      await waitFor(() => !!view.sidebarSlot.querySelector(".s3-object-item"));
+      const seg = [
+        ...view.sidebarSlot.querySelectorAll(".s3-view-seg button"),
+      ].map((button) => button.textContent);
+      expect(seg).toEqual(["一覧", "フォルダ"]);
+      const badge = view.sidebarSlot.querySelector(
+        '.s3-object-item[data-key="a.png"] .s3-kind-badge',
+      );
+      expect(badge?.textContent).toBe("画像");
+      expect(badge?.getAttribute("title")).toBe("PNG 画像");
+    } finally {
+      document.documentElement.lang = "";
+    }
+  });
+
+  // 直す前は日本語の設定でも、状態の行・スキャン上限の文言・空のフォルダ・
+  // 読み込み中の表示が英語のままだった。英語の出力は今までどおり。
+  test.each([
+    {
+      language: "en" as const,
+      status: "3 shown / 3 scanned / newest first in scanned objects",
+    },
+    {
+      language: "ja" as const,
+      status: "3 件表示 / 3 件スキャン / スキャンした中で更新が新しい順",
+    },
+  ])("状態の行を表示の言語で描く: $language", async ({ language, status }) => {
+    const view = await mountExplorer({ getText: () => dbText(language) });
+    const line = () =>
+      view.sidebarSlot.querySelector(".s3-object-status")?.textContent;
+    await waitFor(() => !!line());
+    expect(line()).toBe(status);
+  });
+
+  test("言語を切り替えると状態の行も描き直す", async () => {
+    let language: "en" | "ja" = "en";
+    const view = await mountExplorer({ getText: () => dbText(language) });
+    const line = () =>
+      view.sidebarSlot.querySelector(".s3-object-status")?.textContent;
+    await waitFor(() => !!line());
+    language = "ja";
+    view.localize();
+    expect(line()).toBe(
+      "3 件表示 / 3 件スキャン / スキャンした中で更新が新しい順",
+    );
+  });
+
+  test.each([
+    {
+      language: "en" as const,
+      empty:
+        "(no matches in the first 1,000 scanned objects; narrow the prefix and search again)",
+      cap: "scan cap reached; narrow the prefix to search more precisely",
+    },
+    {
+      language: "ja" as const,
+      empty:
+        "(スキャンした先頭 1,000 件に一致するものがありません。プレフィックスを絞って検索し直してください)",
+      cap: "スキャンの上限に達しました。プレフィックスを絞るとより正確に検索できます",
+    },
+  ])("スキャン上限の文言を表示の言語で描く: $language", async ({
+    language,
+    empty,
+    cap,
+  }) => {
+    const fetchMock = globalThis.fetch;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/_db/s3/objects") {
+        return json({
+          dbId: "mock",
+          bucket: "media",
+          prefix: "",
+          search: "sample",
+          mode: "contains",
+          sort: "key",
+          objects: [],
+          truncated: true,
+          scannedObjects: 1000,
+          scannedPages: 1,
+          scanLimitReached: true,
+        });
+      }
+      return fetchMock(input, init);
+    }) as typeof fetch;
+    const view = await mountExplorer({ getText: () => dbText(language) });
+    const list = () =>
+      view.sidebarSlot.querySelector(".s3-object-list")?.textContent;
+    await waitFor(() => list() === empty);
+    expect(
+      view.sidebarSlot.querySelector(".s3-object-status")?.textContent,
+    ).toContain(cap);
+  });
+
+  test.each([
+    { language: "en" as const, loading: "Loading…", empty: "(empty)" },
+    { language: "ja" as const, loading: "読み込み中…", empty: "(空)" },
+  ])("フォルダの読み込み中と空の行を表示の言語で描く: $language", async ({
+    language,
+    loading,
+    empty,
+  }) => {
+    let release: (() => void) | undefined;
+    const fetchMock = globalThis.fetch;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = new URL(String(input), "http://localhost");
+      if (
+        url.pathname === "/_db/s3/folder" &&
+        url.searchParams.get("prefix") === "videos/"
+      ) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return json({
+          dbId: "mock",
+          bucket: "media",
+          prefix: "videos/",
+          folders: [],
+          objects: [],
+        });
+      }
+      return fetchMock(input, init);
+    }) as typeof fetch;
+    const view = await mountExplorer({ getText: () => dbText(language) });
+    await switchToExplorer(view);
+    click(
+      [...view.sidebarSlot.querySelectorAll(".s3-tree .tree-dir")].find(
+        (dir) => dir.querySelector(".dir-name")?.textContent === "videos",
+      ),
+    );
+    await waitFor(() => release !== undefined);
+    expect(
+      view.sidebarSlot.querySelector(".s3-tree-loading")?.textContent,
+    ).toContain(loading);
+    release?.();
+    await waitFor(() => !!view.sidebarSlot.querySelector(".s3-tree-empty"));
+    expect(
+      view.sidebarSlot.querySelector(".s3-tree-empty")?.textContent,
+    ).toContain(empty);
   });
 
   test("Explorer に切り替えると List 専用の検索/ソート行が hidden になる", async () => {
@@ -214,6 +372,264 @@ describe("S3 explorer UI", () => {
     );
     expect(active.length).toBe(1);
     expect((active[0] as HTMLElement).dataset.key).toBe("b.png");
+  });
+
+  // 直す前は err.message だけをボタンに出し、console にも cause にも何も
+  // 残らなかった。今は cause の連鎖ごとの全文が画面に出て、error そのものが
+  // console.error に渡る。
+  test("続きの読み込みに失敗したら、理由を cause ごと画面と console に出す", async () => {
+    const failure = Object.assign(new Error("failed to fetch s3 folder"), {
+      cause: new Error("network is unreachable"),
+    });
+    let failFolder = false;
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/_db/s3/buckets")
+          return json({ dbId: "mock", buckets: [{ name: "media" }] });
+        if (url.pathname === "/_db/s3/folder") {
+          if (failFolder) throw failure;
+          return json({
+            dbId: "mock",
+            bucket: "media",
+            prefix: "",
+            folders: [],
+            objects: [{ key: "a.png" }],
+            nextToken: "page-2",
+          });
+        }
+        return json({});
+      }) as typeof fetch,
+    });
+    const view = await mountExplorer();
+    click(view.sidebarSlot.querySelectorAll(".s3-view-seg button")[1]);
+    await waitFor(() => !!view.sidebarSlot.querySelector(".s3-tree-more"));
+
+    const logged: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+    try {
+      failFolder = true;
+      const more =
+        view.sidebarSlot.querySelector<HTMLButtonElement>(".s3-tree-more");
+      click(more);
+      await waitFor(() => !!view.sidebarSlot.querySelector(".s3-tree-error"));
+
+      // 失敗の文言はボタンのラベルに入れず、ボタンの直後の状態の行に出す
+      // (ラベルが伸びると押せる領域が動くため)。
+      const row = more?.nextElementSibling;
+      expect(row?.classList.contains("s3-tree-error")).toBe(true);
+      expect(row?.tagName).not.toBe("BUTTON");
+      expect(row?.textContent).toContain("failed to fetch s3 folder");
+      expect(row?.textContent).toContain("Caused by");
+      expect(row?.textContent).toContain("network is unreachable");
+      expect(more?.textContent).toBe("Load more");
+      expect(more?.disabled).toBe(false);
+      expect(logged.length).toBe(1);
+      expect(logged[0]?.[0]).toBe("[code-viewer] S3 load more failed");
+      expect(logged[0]?.[logged[0].length - 1]).toBe(failure);
+
+      // もう一度押して成功すれば、前の失敗の行は残らない。
+      failFolder = false;
+      click(more);
+      await waitFor(() => !more?.isConnected);
+      expect(view.sidebarSlot.querySelector(".s3-tree-error")).toBeNull();
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  // 直す前は err.message だけを出し、console にも cause にも何も残らなかった。
+  // HTTP の失敗は画面に本文を出すだけで、操作も状態も console も無かった。
+  const FAILURE_CASES = [
+    {
+      operation: "bucket list",
+      httpOperation: "load S3 buckets",
+      fails: (url: URL) => url.pathname === "/_db/s3/buckets",
+      open: async () => {
+        // 開くだけ (load の中で失敗する)。
+      },
+      where: ".s3-object-list .db-pane-error",
+    },
+    {
+      operation: "object list",
+      httpOperation: "load S3 objects",
+      fails: (url: URL) => url.pathname === "/_db/s3/objects",
+      open: async () => {
+        // 開くだけ (load の中で失敗する)。
+      },
+      where: ".s3-object-list .db-pane-error",
+    },
+    {
+      operation: "folder tree",
+      httpOperation: "load S3 folder",
+      fails: (url: URL) =>
+        url.pathname === "/_db/s3/folder" && !url.searchParams.get("prefix"),
+      open: async (view: ReturnType<typeof createS3Explorer>) => {
+        click(view.sidebarSlot.querySelectorAll(".s3-view-seg button")[1]);
+      },
+      where: ".s3-tree .db-pane-error",
+    },
+    {
+      operation: "folder",
+      httpOperation: "load S3 folder",
+      fails: (url: URL) =>
+        url.pathname === "/_db/s3/folder" &&
+        url.searchParams.get("prefix") === "images/",
+      open: async (view: ReturnType<typeof createS3Explorer>) => {
+        await switchToExplorer(view);
+        click(
+          [...view.sidebarSlot.querySelectorAll(".s3-tree .tree-dir")].find(
+            (dir) => dir.querySelector(".dir-name")?.textContent === "images",
+          ),
+        );
+      },
+      where: ".s3-tree-error",
+    },
+    {
+      operation: "object preview",
+      httpOperation: "load S3 object text",
+      fails: (url: URL) => url.pathname === "/_db/s3/text",
+      open: async (view: ReturnType<typeof createS3Explorer>) => {
+        await waitFor(
+          () =>
+            !!view.sidebarSlot.querySelector(
+              '.s3-object-item[data-key="sample.csv"]',
+            ),
+        );
+        click(
+          view.sidebarSlot.querySelector(
+            '.s3-object-item[data-key="sample.csv"]',
+          ),
+        );
+      },
+      where: ".s3-preview-pane .db-pane-error",
+    },
+  ];
+  test.each(
+    FAILURE_CASES.flatMap((failureCase) => [
+      { ...failureCase, via: "network" as const },
+      { ...failureCase, via: "http" as const },
+    ]),
+  )("$operation の $via の失敗は理由を画面と console に出す", async ({
+    operation,
+    httpOperation,
+    via,
+    fails,
+    open,
+    where,
+  }) => {
+    const failure = Object.assign(new Error(`${operation} request failed`), {
+      cause: new Error("network is unreachable"),
+    });
+    installFetchMock((url) =>
+      fails(url)
+        ? via === "network"
+          ? failure
+          : new Response("sample failure", { status: 500 })
+        : null,
+    );
+    const logged: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+    try {
+      const view = await mountExplorer();
+      await open(view);
+      const root = document.body;
+      await waitFor(() => !!root.querySelector(where));
+
+      const shown = root.querySelector(where)?.textContent ?? "";
+      expect(shown).not.toContain("Error: Error:");
+      const s3Logs = logged.filter(
+        (args) => args[0] === `[code-viewer] S3 ${operation} failed`,
+      );
+      expect(s3Logs.length).toBe(1);
+      const logged0 = s3Logs[0]?.[s3Logs[0].length - 1];
+      if (via === "network") {
+        expect(shown).toContain(`${operation} request failed`);
+        expect(shown).toContain("Caused by");
+        expect(shown).toContain("network is unreachable");
+        expect(logged0).toBe(failure);
+      } else {
+        const detail = `${httpOperation} (HTTP 500): sample failure`;
+        expect(shown).toContain(`Error: ${detail}`);
+        expect((logged0 as Error).message).toBe(detail);
+      }
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  test("HTTP の失敗の操作名を表示の言語で出す", async () => {
+    installFetchMock((url) =>
+      url.pathname === "/_db/s3/buckets"
+        ? new Response("sample failure", { status: 500 })
+        : null,
+    );
+    const originalError = console.error;
+    console.error = () => undefined;
+    try {
+      await mountExplorer({ getText: () => dbText("ja") });
+      expect(
+        document.body.querySelector(".s3-object-list .db-pane-error")
+          ?.textContent,
+      ).toBe(
+        "Error: S3 のバケットの一覧を読み込めませんでした (HTTP 500): sample failure",
+      );
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  test("S3 URI のコピーに失敗したら、ラベルは動かさず理由を title と console に出す", async () => {
+    const failure = new Error("clipboard is not allowed");
+    const clipboard = navigator.clipboard;
+    const originalWrite = clipboard.writeText;
+    clipboard.writeText = async () => {
+      throw failure;
+    };
+    const logged: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+    try {
+      const view = await mountExplorer();
+      await waitFor(
+        () =>
+          !!view.sidebarSlot.querySelector('.s3-object-item[data-key="a.png"]'),
+      );
+      click(
+        view.sidebarSlot.querySelector('.s3-object-item[data-key="a.png"]'),
+      );
+      await waitFor(
+        () =>
+          !![...view.el.querySelectorAll("button")].find(
+            (button) => button.textContent === "Copy S3 URI",
+          ),
+      );
+      const copy = [...view.el.querySelectorAll("button")].find(
+        (button) => button.textContent === "Copy S3 URI",
+      );
+      click(copy);
+      await waitFor(() => copy?.classList.contains("failed") === true);
+
+      expect(copy?.textContent).toBe("Copy failed");
+      expect(copy?.title).toContain("copy s3 uri s3://media/a.png");
+      expect(copy?.title).toContain("clipboard is not allowed");
+      expect(logged.length).toBe(1);
+      const logged0 = logged[0]?.[0] as Error & { cause?: unknown };
+      expect(logged0.cause).toBe(failure);
+    } finally {
+      console.error = originalError;
+      clipboard.writeText = originalWrite;
+    }
   });
 
   test("未選択プレビューは共通の空状態 (db-pane-empty) で表示する", async () => {

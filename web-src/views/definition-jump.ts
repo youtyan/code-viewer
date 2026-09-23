@@ -1,3 +1,4 @@
+import { apiUrl } from "../core/api-url";
 // Definition lookup is limited to standalone source code and the main diff in
 // v1. Blame, markdown code blocks, worktree diffs, and embedded history diffs
 // deliberately fall through without intercepting the user's input.
@@ -8,7 +9,11 @@ import {
   isJumpableSymbol,
   rankDefinitionMatches,
 } from "../core/definition-search";
-import { errorWithCause, responseErrorMessage } from "../core/error-detail";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 import type { AppRoute } from "../core/routes";
 import { buildGrepRequestParams } from "../core/search-palette";
 import type { ShikiHighlighter } from "../core/shiki-loader";
@@ -156,7 +161,7 @@ export type DefinitionJumpDeps = {
     line: number;
     hl?: string;
   }): void;
-  openSearchSheet(query: string): void;
+  openSearch(query: string): void;
   caretFromPoint?(x: number, y: number): { node: Node; offset: number } | null;
 };
 
@@ -323,24 +328,26 @@ function grepRequest(
   });
   deps.appendScopeParams(params);
   return deps.trackLoad<GrepResponse>(
-    fetch(`/_grep?${params.toString()}`, { signal }).then(async (response) => {
-      if (!response.ok) {
-        throw new Error(
-          await responseErrorMessage(
-            response,
-            "definition grep request failed",
-          ),
-        );
-      }
-      try {
-        return (await response.json()) as GrepResponse;
-      } catch (err) {
-        throw errorWithCause(
-          `definition grep response could not be parsed (HTTP ${response.status})`,
-          err,
-        );
-      }
-    }),
+    fetch(`${apiUrl("grep")}?${params.toString()}`, { signal }).then(
+      async (response) => {
+        if (!response.ok) {
+          throw new Error(
+            await responseErrorMessage(
+              response,
+              "definition grep request failed",
+            ),
+          );
+        }
+        try {
+          return (await response.json()) as GrepResponse;
+        } catch (err) {
+          throw errorWithCause(
+            `definition grep response could not be parsed (HTTP ${response.status})`,
+            err,
+          );
+        }
+      },
+    ),
   );
 }
 
@@ -603,7 +610,7 @@ function createDefinitionSearchRunner(
           { kind: "separator" },
           {
             label: text.openSearchPanel,
-            onSelect: () => deps.openSearchSheet(trigger.symbol),
+            onSelect: () => deps.openSearch(trigger.symbol),
           },
         ];
         ownMenu = openSearchMenu(trigger, items, {
@@ -617,10 +624,8 @@ function createDefinitionSearchRunner(
         }
         if (!canApply()) return;
         console.error("Definition search failed", err);
-        const message =
-          err instanceof Error && err.message ? err.message : text.unknownError;
         ownMenu = openSearchMenu(trigger, [
-          disabledMenuItem(text.searchFailed(message)),
+          disabledMenuItem(text.searchFailed(formatErrorDetail(err))),
         ]);
       } finally {
         clearOwnTimer();

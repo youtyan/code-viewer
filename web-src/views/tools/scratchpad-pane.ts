@@ -8,6 +8,8 @@
 // 同じ考え方を、fetch ではなく描画に当てたもの)。
 
 import { attachDragResizer } from "../../core/drag-resizer";
+import { formatErrorDetail } from "../../core/error-detail";
+import { renderEmptyState } from "../empty-state";
 import type { ToolsText } from "./i18n";
 
 const RENDER_DEBOUNCE_MS = 200;
@@ -106,6 +108,7 @@ export function createScratchpadPane(
   input.className = "tools-textarea";
   input.spellcheck = false;
   input.placeholder = placeholder;
+  input.setAttribute("aria-label", placeholder);
   input.value = options.initialText;
   inputSide.append(inputHead, input);
 
@@ -144,6 +147,8 @@ export function createScratchpadPane(
 
   function applyStatus(state: StatusState): void {
     status.textContent = state.message;
+    // 行は幅を固定して省略するので、失敗の全文は title で読めるようにする。
+    status.title = state.message;
     status.classList.toggle("tools-pane-status-error", state.tone === "error");
   }
 
@@ -189,10 +194,16 @@ export function createScratchpadPane(
     renderController = controller;
     const value = input.value;
     if (!value.trim()) {
-      const empty = document.createElement("p");
-      empty.className = "tools-pane-empty";
-      empty.textContent = currentText.pane.emptyInput;
-      output.replaceChildren(empty);
+      // 入力が空: 何をするか (一行と補足) と主なキー (共通の空の案内)。
+      output.replaceChildren(
+        renderEmptyState({
+          title: currentText.pane.emptyTitle,
+          hint: currentText.pane.emptyInput,
+          keys: [{ keys: "⌘V", label: currentText.pane.emptyKeyPaste }],
+          keysLabel: currentText.pane.emptyKeysLabel,
+          compact: true,
+        }),
+      );
       setStatus("");
       return;
     }
@@ -201,8 +212,8 @@ export function createScratchpadPane(
         await options.render(value, output, controller.signal);
       } catch (err) {
         if (controller.signal.aborted) return;
-        const message = err instanceof Error ? err.message : String(err);
-        setStatus(message, "error");
+        console.error("[code-viewer] tools render failed", err);
+        setStatus(formatErrorDetail(err), "error");
       }
     })();
   }
@@ -271,6 +282,7 @@ export function createScratchpadPane(
       resizer.setAttribute("aria-label", nextText.pane.resize);
       outputTitleEl.textContent = nextOutputTitle;
       input.placeholder = nextPlaceholder;
+      input.setAttribute("aria-label", nextPlaceholder);
     },
     focus: () => input.focus(),
     dispose() {

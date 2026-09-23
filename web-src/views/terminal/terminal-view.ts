@@ -1,64 +1,40 @@
-// Terminal ドロワー。映すのは PTY のシェル 1 本だけで、tmux はその中で
-// 普通に動く。
+import { apiUrl } from "../../core/api-url";
+// メインの面 (左 / 右) のターミナルのタブの中身。映すのは PTY のシェルで、
+// tmux はその中で普通に動く。
 //
-// 左のツリーが「今 tmux がどうなっているか」を見せ、右がターミナル本体。
-// ツリーの tmux ペインを押すと、そのペインが見える状態にしてもらう
-// (今映しているシェルで tmux が動いていればそれを動かし、動いていなければ
-// サーバがシェルを 1 つ開いて attach する)。ドロワー自身は tmux の画面を
-// 描かないので、寸法合わせは PTY のリサイズだけで済む。
+// xterm の枠は面ごとに 1 つ (tabs.left / tabs.right)。タブを切り替えても
+// 枠は作り直さず、映すシェルを付け替える。反対側へ移したタブは枠ごと
+// 入れ替える (attach し直さない)。
 //
-// 開閉の作りは tools ドロワー (views/tools/tools-view.ts) と同じ右ドロワー。
-//
-// 一覧は開いている間だけ定期的に取り直す。tmux 上の AI CLI は作業内容を
-// ペインタイトルに出すので、一覧が固定だと「今どれが動いているか」が分から
-// なくなる。取り直しは generation で世代を照合し、切り替え後に届いた古い
-// レスポンスで画面を巻き戻さない。
+// シェルの一覧はここが最後に取ったものを覚えておく (knownShells)。タブ列の
+// 「＋」のメニューとパレットがそれを読み、開く直前に取り直す。
 
-import type {
-  AgentStateObservationError,
-  AgentStateRecord,
-  AgentStatesResponse,
-} from "../../core/agent-state";
-import { attachDragResizer } from "../../core/drag-resizer";
 import {
   formatErrorDetail,
   responseErrorMessage,
 } from "../../core/error-detail";
-import { blockScrollChaining } from "../../core/scroll-chaining";
+import type { TerminalSoftKey } from "../../core/mobile-layout";
 import type {
   ShellListResponse,
   ShellSession,
   ShellSessionId,
 } from "../../core/shell";
-import { readStoredSize, writeStoredSize } from "../../core/stored-size";
-import type { BoardRow } from "../../core/terminal-board";
+import type { TerminalImageRef } from "../../core/terminal-images";
+import type { TmuxClientWindow } from "../../core/tmux";
 import {
   clampTerminalFontSize,
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
   TERMINAL_FONT_SIZE_STEP,
-  type TmuxClientsResponse,
-  type TmuxPanesResponse,
 } from "../../core/tmux";
+import type { ContextMenuItem } from "../context-menu";
 import { type TerminalLang, type TerminalText, terminalText } from "./i18n";
-import { createSessionBoard, type SessionBoardHandle } from "./session-board";
 import {
   createTerminalScreen,
   type TerminalScreenHandle,
 } from "./terminal-screen";
 
-/** 一覧を取り直す間隔。ペインタイトルの変化に追従するための頻度。 */
-const PANE_LIST_INTERVAL_MS = 3000;
-
-/** 左の一覧の幅 (px) の許容範囲。 */
-const MIN_LIST_WIDTH = 300;
-const MAX_LIST_WIDTH = 720;
-/** CSS 側の既定値 (--terminal-list-width の fallback) と揃える。 */
-const DEFAULT_LIST_WIDTH = 440;
-const LIST_WIDTH_STORAGE_KEY = "code-viewer:terminal-list-width";
-
 export type TerminalViewDeps = {
-  $: <T extends Element = HTMLElement>(sel: string) => T | null;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
   /** 副作用リクエスト用のヘッダ (app.ts の actionHeaders)。 */
   actionHeaders(): HeadersInit;
@@ -67,101 +43,212 @@ export type TerminalViewDeps = {
   getFontSize(): number;
   /** 文字サイズが変わった。保存は呼び出し側 (app.ts) が持つ。 */
   onFontSizeChange(size: number): void;
-  onCloseRequest?: () => void;
-  /** 映している対象が変わったとき。URL 同期に使う。 */
-  onTargetChange?: (id: string | null) => void;
+  /** 画像の棚を畳んでいるか (ユーザー単位の設定)。 */
+  isImageShelfCollapsed(): boolean;
+  /** 棚を畳んだ・開いた。保存は呼び出し側 (app.ts) が持つ。 */
+  onImageShelfCollapsedChange(collapsed: boolean): void;
+  /**
+   * そのシェルのタブを開いて前面に出してもらう。pane は tmux ペインから
+   * 開いたとき、そのペイン (シェルとペインの対応をサーバがまだ知らないときの
+   * 名前付けに使う)。
+   */
+  onOpenInTab(
+    session: ShellSession,
+    pane: string | undefined,
+    side: TabSide,
+  ): void;
+  /**
+   * そのシェルが終わった (exit・tmux から抜けた・映していたペインが終わった)。
+   * タブを閉じて知らせてもらう。「セッションを止める」で止めたシェルには呼ばない
+   * (止めた人は知っている)。前面でないタブのシェルの終わりはここには来ない
+   * (購読していない)。app が全画面共通の取り直しで拾う。
+   */
+  onShellEnded(id: ShellSessionId): void;
+  /**
+   * tmux のペインを開けなかった。理由はその面の状態の行にも出すが、前面が
+   * その端末でないと見えないので、常に見える場所にも出してもらう。
+   */
+  onOpenFailed(message: string): void;
+  /** そのシェルの中の tmux の端末とウインドウの大きさ。無ければ null。 */
+  tmuxWindow(id: ShellSessionId): TmuxClientWindow | null;
+  /** 端末の大きさを変えた。tmux の大きさを早めに取り直してもらう。 */
+  onTmuxWindowStale(): void;
+  /** 棚の画像を画像のタブで開く (既定の押し方)。 */
+  onOpenImage?: (
+    image: TerminalImageRef,
+    gallery: TerminalImageRef[],
+    kept: boolean,
+  ) => void;
 };
 
 export type TerminalViewHandle = {
-  open(targetId?: string | null): Promise<void>;
-  close(): void;
-  isOpen(): boolean;
-  getActiveTarget(): string | null;
   /** 器の大きさが変わったとき。端末の桁数・行数を測り直す。 */
   refit(): void;
+  /**
+   * ターミナルのタブの右クリックに足す操作 (文字の大きさ・入力のオンオフ)。
+   * 文字の大きさと入力のオンオフは全部のタブに効く。
+   */
+  menuItems(): ContextMenuItem[];
   localize(): void;
   dispose(): void;
+  /** メインの面 (左 / 右) のターミナルの置き場所。app がその面の箱に置く。 */
+  tabPaneFor(side: TabSide): HTMLElement;
+  /**
+   * そのシェルを面の箱で映す。もう一方の面で映していれば、同じ xterm を
+   * 枠ごと付け替える (attach し直さない)。
+   */
+  showInTab(id: ShellSessionId, side: TabSide): Promise<void>;
+  /** タブを閉じた。タブの箱がそのシェルを映していれば購読をやめる (シェルは止めない)。 */
+  releaseTab(id: ShellSessionId): void;
+  /** tmux ペインを、そのセッションのシェルでタブに開く。失敗はその面の箱に出す。 */
+  openPaneInTab(pane: string, side: TabSide): Promise<void>;
+  /** 新しいシェルを開き、そのタブを前面に出してもらう。失敗は reject する。 */
+  createShell(side: TabSide): Promise<void>;
+  /** シェルを止める。映していたタブの購読もやめる。失敗は reject する。 */
+  closeShell(id: ShellSessionId): Promise<void>;
+  /** シェルの一覧を取り直す。失敗は reject する (覚えている一覧は変えない)。 */
+  loadShells(): Promise<ShellListResponse>;
+  /** 最後に取ったシェルの一覧 (まだ取っていなければ null)。 */
+  knownShells(): ShellListResponse | null;
+  /** tmux の大きさが新しく届いた。映している端末の覆いを描き直す。 */
+  updateTmuxCovers(): void;
+  focusTab(side: TabSide): void;
+  /** その面の端末へ操作札のキーを送る (映していなければ何もしない)。 */
+  sendSoftKey(side: TabSide, key: TerminalSoftKey): void;
+  /**
+   * 文字の大きさ (deps.getFontSize) を全部の端末に当て直す。電話の段の出入りと
+   * ピンチで、読む値が変わったとき。
+   */
+  applyFontSize(): void;
+};
+
+/** メインの面の左右。core/main-tabs.ts の PaneSide と同じ値。 */
+export type TabSide = "left" | "right";
+
+/** xterm 1 つと、その下の状態の行。左右の面の間で箱ごと付け替える。 */
+type ScreenSlot = {
+  el: HTMLElement;
+  screen: TerminalScreenHandle;
+  /** 画面の下端の 1 行 (画面を映している間の状態)。 */
+  status: HTMLElement;
+  /**
+   * 何も映していない間に、画面の代わりに真ん中に出す案内 (文字は status と同じ)。
+   * status とは別の要素にする: 同じ要素を真ん中から下端へ動かすと、画面が
+   * 付いたときにレイアウトシフトになっていた (読み込みで 0.30)。
+   */
+  hint: HTMLElement;
 };
 
 export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
-  let board: SessionBoardHandle | null = null;
-  /**
-   * 最後に映していたシェル。閉じても残す。
-   *
-   * パネルは Terminal と Tools がタブになっていて、切り替えると閉じる扱いに
-   * なる。ここを捨てると、戻ってきたときに「選んでください」になってしまう。
-   */
-  let lastTargetId: string | null = null;
-  let states: AgentStateRecord[] = [];
-  let stateErrors: AgentStateObservationError[] = [];
-  let screen: TerminalScreenHandle | null = null;
-  let reloadBtn: HTMLButtonElement | null = null;
-  let fontSmaller: HTMLButtonElement | null = null;
-  let fontLarger: HTMLButtonElement | null = null;
-  let fontValue: HTMLElement | null = null;
-  let inputToggle: HTMLButtonElement | null = null;
-  let statusEl: HTMLElement | null = null;
-  let listEl: HTMLElement | null = null;
-  let attached: ShellSession | null = null;
-  let panes: TmuxPanesResponse | null = null;
+  /** 面ごとにタブで映す枠。最初にその面で映すときに作る。 */
+  const tabs: Record<TabSide, ScreenSlot | null> = { left: null, right: null };
+  /** 面ごとの、枠を置く場所 (app がその面の箱に入れる)。 */
+  const tabPanes: Record<TabSide, HTMLElement> = {
+    left: createTabPane(),
+    right: createTabPane(),
+  };
+  /** 面ごとの attach の世代。待つ間に別のタブへ切り替わったら、後から来た結果を捨てる。 */
+  const tabGeneration: Record<TabSide, number> = { left: 0, right: 0 };
   let shells: ShellListResponse | null = null;
-  let clients: TmuxClientsResponse | null = null;
-  let inputEnabled = true;
-  // 最後に適用した一覧の幅。ドラッグが終わった時点でこれを保存する。
-  let listWidth = DEFAULT_LIST_WIDTH;
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let disposed = false;
-  // open / 一覧取得の世代。閉じたり開き直したりした後に、待っていた GET の
-  // 続きが一覧や選択を書き換えないようにする。
-  let generation = 0;
-  // 一覧取得そのものの世代。generation は開閉でしか動かないので、これだけ
-  // では周期取得どうしの追い越しを弾けない。取得のたびに増やし、最後に
-  // 始めた取得の応答だけを反映する。これが無いと、シェルを作った直後に
-  // 古い一覧が後から届いて、作ったばかりのシェルが消え選択も外れる。
+  /**
+   * 一覧取得の世代。最後に始めた取得の応答だけを反映する。これが無いと、
+   * シェルを作った直後に古い一覧が後から届いて、作ったばかりのシェルが消える。
+   */
   let listGeneration = 0;
+  let inputEnabled = true;
+  let disposed = false;
+  /** 「セッションを止める」で止めている最中のシェル。終わっても知らせない。 */
+  const stopping = new Set<ShellSessionId>();
 
   function text(): TerminalText {
     return terminalText(deps.getLanguage());
   }
 
-  function getMount(): HTMLElement | null {
-    return deps.$<HTMLElement>("#terminal-sheet");
+  function writeStatus(
+    slot: Pick<ScreenSlot, "status" | "hint">,
+    message: string | null,
+  ): void {
+    for (const el of [slot.status, slot.hint]) {
+      el.textContent = message ?? "";
+      el.hidden = !message;
+    }
   }
 
-  function getOverlay(): HTMLElement | null {
-    return deps.$<HTMLElement>("#terminal-sheet-overlay");
-  }
-
-  function setStatus(message: string | null): void {
-    if (!statusEl) return;
-    statusEl.textContent = message ?? "";
-    statusEl.hidden = !message;
-  }
-
-  function applyListWidth(width: number): void {
-    listWidth = Math.min(
-      MAX_LIST_WIDTH,
-      Math.max(MIN_LIST_WIDTH, Math.round(width)),
+  function slots(): ScreenSlot[] {
+    return [tabs.left, tabs.right].filter(
+      (slot): slot is ScreenSlot => slot !== null,
     );
-    const host = getMount();
-    if (!host) return;
-    host.style.setProperty("--terminal-list-width", `${listWidth}px`);
   }
 
-  function createFontButton(label: string): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "terminal-font-btn";
-    button.textContent = label;
-    return button;
+  function createSlot(): ScreenSlot {
+    const status = document.createElement("p");
+    status.className = "terminal-status";
+    status.role = "status";
+    status.hidden = true;
+    // 見えるのは status か hint のどちらか一方だけ (style.css)。読み上げも
+    // 見えている方から届く。
+    const hint = document.createElement("p");
+    hint.className = "terminal-empty-hint";
+    hint.role = "status";
+    hint.hidden = true;
+    const screen = createTerminalScreen({
+      trackLoad: deps.trackLoad,
+      actionHeaders: deps.actionHeaders,
+      getText: text,
+      getFontSize: () => clampTerminalFontSize(deps.getFontSize()),
+      // 状態の行は枠の中にあるので、付け替えても映しているシェルの状態が付いて行く。
+      onStatus: (message) => writeStatus({ status, hint }, message),
+      onTargetGone: (session) => forgetShell(session.id),
+      onShellExited: (session) => {
+        forgetShell(session.id);
+        if (!stopping.has(session.id)) deps.onShellEnded(session.id);
+      },
+      tmuxWindow: (session) => deps.tmuxWindow(session.id),
+      onTmuxWindowStale: deps.onTmuxWindowStale,
+      isImageShelfCollapsed: deps.isImageShelfCollapsed,
+      setImageShelfCollapsed: deps.onImageShelfCollapsedChange,
+      onOpenImage: deps.onOpenImage,
+    });
+    screen.setInputEnabled(inputEnabled);
+    const el = document.createElement("div");
+    el.className = "terminal-slot";
+    el.append(screen.el, hint, status);
+    return { el, screen, status, hint };
+  }
+
+  function createTabPane(): HTMLElement {
+    const pane = document.createElement("div");
+    pane.className = "terminal-pane";
+    return pane;
+  }
+
+  /** 左右の面の枠を入れ替える (反対側へ移したタブの xterm を付け替える)。 */
+  function swapSides(): void {
+    const left = tabs.right ?? createSlot();
+    const right = tabs.left ?? createSlot();
+    tabs.left = left;
+    tabs.right = right;
+    tabPanes.left.replaceChildren(left.el);
+    tabPanes.right.replaceChildren(right.el);
+  }
+
+  function otherSide(side: TabSide): TabSide {
+    return side === "left" ? "right" : "left";
+  }
+
+  /** その面の枠 (まだ無ければ作る)。 */
+  function tabSlot(side: TabSide): ScreenSlot {
+    const existing = tabs[side];
+    if (existing) return existing;
+    const created = createSlot();
+    tabs[side] = created;
+    tabPanes[side].replaceChildren(created.el);
+    return created;
   }
 
   /**
-   * 文字サイズを 1 段変える。
-   *
-   * 上限・下限に当たったらボタンを無効にするだけで、押しても寸法は動かない
-   * (無効時に消すと押し損ねる)。値の表示は桁を固定してあるので、2 桁と 1 桁で
-   * 隣のボタンがずれることもない。
+   * 文字サイズを 1 段変える。上限・下限では何もしない (メニューの項目は
+   * そのとき押せなくしてある)。
    */
   function stepFontSize(direction: 1 | -1): void {
     const next = clampTerminalFontSize(
@@ -169,281 +256,155 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     );
     if (next === clampTerminalFontSize(deps.getFontSize())) return;
     deps.onFontSizeChange(next);
-    screen?.applyFontSize();
-    syncFontSize();
+    for (const slot of slots()) slot.screen.applyFontSize();
   }
 
-  function syncFontSize(): void {
+  function setInputEnabled(enabled: boolean): void {
+    inputEnabled = enabled;
+    for (const slot of slots()) slot.screen.setInputEnabled(inputEnabled);
+  }
+
+  function menuItems(): ContextMenuItem[] {
+    const current = text();
     const size = clampTerminalFontSize(deps.getFontSize());
-    const current = text();
-    if (fontValue) fontValue.textContent = String(size);
-    if (fontSmaller) {
-      fontSmaller.disabled = size <= MIN_TERMINAL_FONT_SIZE;
-      fontSmaller.title = current.fontSmaller;
-      fontSmaller.setAttribute("aria-label", current.fontSmaller);
-    }
-    if (fontLarger) {
-      fontLarger.disabled = size >= MAX_TERMINAL_FONT_SIZE;
-      fontLarger.title = current.fontLarger;
-      fontLarger.setAttribute("aria-label", current.fontLarger);
-    }
-  }
-
-  function syncInputToggle(): void {
-    if (!inputToggle) return;
-    const current = text();
-    inputToggle.classList.toggle("active", inputEnabled);
-    inputToggle.setAttribute("aria-pressed", String(inputEnabled));
-    inputToggle.textContent = inputEnabled
-      ? current.writable
-      : current.readOnly;
-    inputToggle.title = inputEnabled
-      ? current.writableTitle
-      : current.readOnlyTitle;
-  }
-
-  function selectShell(session: ShellSession): void {
-    attached = session;
-    lastTargetId = session.id;
-    board?.setSelected(session.id);
-    deps.onTargetChange?.(session.id);
-    // attach は xterm の読み込みを挟むので、完了を待たずに focus しても
-    // ターミナルがまだ無い。待ってから当てる。待つ間に別の対象へ切り替え
-    // られていたら、そちらの focus を横取りしない。
-    const attaching = screen?.attach(session);
-    if (!attaching) return;
-    void attaching.then(
-      () => {
-        if (attached?.id === session.id) screen?.focus();
+    return [
+      {
+        label: `${current.fontLarger} (${size})`,
+        disabled: size >= MAX_TERMINAL_FONT_SIZE,
+        onSelect: () => stepFontSize(1),
       },
-      (error: unknown) => {
-        if (attached?.id !== session.id || disposed) return;
-        console.error("[code-viewer] terminal attach failed", error);
-        setStatus(`${text().loadFailed}\n${formatErrorDetail(error)}`);
+      {
+        label: `${current.fontSmaller} (${size})`,
+        disabled: size <= MIN_TERMINAL_FONT_SIZE,
+        onSelect: () => stepFontSize(-1),
       },
-    );
+      {
+        label: inputEnabled ? current.readOnly : current.writable,
+        title: inputEnabled ? current.readOnlyTitle : current.writableTitle,
+        onSelect: () => setInputEnabled(!inputEnabled),
+      },
+    ];
   }
 
-  /** 一覧の中から id に一致するシェルを探す。閉じられていれば null。 */
-  function findShell(id: string): ShellSession | null {
-    return shells?.sessions.find((item) => item.id === id) ?? null;
-  }
-
-  function renderLists(): void {
-    board?.setData({
-      panes,
-      shells: shells?.sessions ?? [],
-      clients: clients?.clients ?? [],
-      shellAvailable: shells?.available ?? true,
-      shellUnavailableReason: shells?.reason ?? "",
-      states,
-      stateErrors,
-    });
-    board?.setSelected(attached?.id ?? null);
-  }
-
-  async function loadLists(myGen: number): Promise<void> {
+  async function loadShells(): Promise<ShellListResponse> {
     const myList = ++listGeneration;
-    /** 開閉が起きたか、これより後の取得が始まっていたら、この応答は捨てる。 */
-    const stale = () =>
-      myGen !== generation || myList !== listGeneration || disposed;
-    try {
-      const [paneRes, shellRes, stateRes, clientRes] = await Promise.all([
-        deps.trackLoad(fetch("/_tmux/panes")),
-        deps.trackLoad(fetch("/_shell/list")),
-        deps.trackLoad(fetch("/_agent/states")),
-        deps.trackLoad(fetch("/_tmux/clients")),
-      ]);
-      if (stale()) return;
-      const failed = [
-        [paneRes, text().paneListFailed],
-        [shellRes, text().shellListFailed],
-        [stateRes, text().stateListFailed],
-        [clientRes, text().clientListFailed],
-      ] as const;
-      const messages = await Promise.all(
-        failed
-          .filter(([response]) => !response.ok)
-          .map(([response, operation]) =>
-            responseErrorMessage(response, operation),
-          ),
-      );
-      if (stale()) return;
-      if (messages.length > 0) {
-        setStatus(messages.join("\n\n"));
-        return;
-      }
-      const nextPanes = (await paneRes.json()) as TmuxPanesResponse;
-      const nextShells = (await shellRes.json()) as ShellListResponse;
-      const nextStateResponse = (await stateRes.json()) as AgentStatesResponse;
-      const nextClients = (await clientRes.json()) as TmuxClientsResponse;
-      if (stale()) return;
-      panes = nextPanes;
-      shells = nextShells;
-      states = nextStateResponse.states ?? [];
-      stateErrors = nextStateResponse.errors ?? [];
-      clients = nextClients;
-
-      renderLists();
-
-      // 映していたシェルが無くなっていたら選択を解く。
-      if (attached && !findShell(attached.id)) {
-        attached = null;
-        screen?.detach();
-        deps.onTargetChange?.(null);
-        setStatus(text().shellClosed);
-      }
-    } catch (error) {
-      if (stale()) return;
-      console.error("[code-viewer] terminal list refresh failed", error);
-      setStatus(`${text().listLoadFailed}\n${formatErrorDetail(error)}`);
-    }
+    const res = await deps.trackLoad(fetch(apiUrl("shellList")));
+    if (!res.ok)
+      throw new Error(await responseErrorMessage(res, text().shellListFailed));
+    const list = (await res.json()) as ShellListResponse;
+    if (myList === listGeneration && !disposed) shells = list;
+    return list;
   }
 
-  /**
-   * 未読を読んだことにする。人間が結果を見た合図なので、上段のボードから
-   * 消えるだけで、稼働中や入力待ちの対象には効かない (サーバ側で判定する)。
-   */
-  async function markRead(target: string): Promise<void> {
-    const myGen = generation;
-    try {
-      const res = await deps.trackLoad(
-        fetch("/_agent/state", {
-          method: "POST",
-          headers: {
-            ...deps.actionHeaders(),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ target, event: "read", at: Date.now() }),
-        }),
-      );
-      if (myGen !== generation || disposed) return;
-      if (!res.ok) {
-        setStatus(await responseErrorMessage(res, text().markReadFailed));
-        return;
-      }
-      await loadLists(myGen);
-    } catch (error) {
-      if (myGen !== generation || disposed) return;
-      console.error("[code-viewer] terminal mark-read failed", error);
-      setStatus(`${text().markReadFailed}\n${formatErrorDetail(error)}`);
-    }
+  /** 新しく開いたシェルを一覧に載せる (取り直しを待たずに選べるように)。 */
+  function addShell(session: ShellSession): void {
+    listGeneration += 1;
+    shells = {
+      available: true,
+      sessions: [...(shells?.sessions ?? []), session],
+    };
   }
 
-  /**
-   * tmux ペインを見える状態にしてもらう。
-   *
-   * 今映しているシェルの中で tmux が動いていればそれが動き、動いていなければ
-   * サーバが新しいシェルを開いて attach する。どちらになったかは応答の action
-   * で分かるが、こちらは返ってきたシェルを映すだけでよい (既に映しているものと
-   * 同じなら、画面はそのまま tmux が切り替わる)。
-   */
-  async function openPane(row: BoardRow): Promise<void> {
-    const myGen = generation;
-    const size = screen?.measure();
+  function forgetShell(id: string): void {
+    if (!shells) return;
+    listGeneration += 1;
+    shells = {
+      ...shells,
+      sessions: shells.sessions.filter((item) => item.id !== id),
+    };
+  }
+
+  /** 覚えている一覧に無ければ取り直して探す。閉じられていれば null。 */
+  async function resolveShell(id: string): Promise<ShellSession | null> {
+    const known = shells?.sessions.find((item) => item.id === id);
+    if (known) return known;
+    const list = await loadShells();
+    return list.sessions.find((item) => item.id === id) ?? null;
+  }
+
+  async function openPaneInTab(pane: string, side: TabSide): Promise<void> {
+    const slot = tabSlot(side);
+    const report = (message: string) => {
+      writeStatus(slot, message);
+      deps.onOpenFailed(message);
+    };
     try {
+      const size = slot.screen.measure();
       const res = await deps.trackLoad(
-        fetch("/_tmux/open", {
+        fetch(apiUrl("tmuxOpen"), {
           method: "POST",
           headers: {
             ...deps.actionHeaders(),
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            pane: row.target,
-            shell: attached?.id ?? null,
+            pane,
+            shell: null,
             cols: size?.cols,
             rows: size?.rows,
           }),
         }),
       );
-      if (myGen !== generation || disposed) return;
+      if (disposed) return;
       if (res.status === 410) {
-        setStatus(await responseErrorMessage(res, text().paneClosed));
-        await loadLists(myGen);
+        report(await responseErrorMessage(res, text().paneClosed));
         return;
       }
       if (res.status === 429) {
-        setStatus(await responseErrorMessage(res, text().shellLimitReached));
+        report(await responseErrorMessage(res, text().shellLimitReached));
         return;
       }
       if (!res.ok) {
-        setStatus(await responseErrorMessage(res, text().paneOpenFailed));
+        report(await responseErrorMessage(res, text().paneOpenFailed));
         return;
       }
       const body = (await res.json()) as {
         session: ShellSession;
         action: "switched" | "attached";
       };
-      if (myGen !== generation || disposed) return;
-      setStatus(null);
-      if (body.action === "attached") {
-        // 新しく開いたシェル。一覧に載せてから選ぶ (取り直しを待たない)。
-        shells = {
-          available: true,
-          sessions: [...(shells?.sessions ?? []), body.session],
-        };
-        renderLists();
-        selectShell(body.session);
-        return;
-      }
-      // 既にあるシェルの tmux が動いただけ。映しているものが同じなら画面は
-      // そのまま追従するので、選び直すのは別のシェルだったときだけ。
-      if (attached?.id !== body.session.id) selectShell(body.session);
-      // ツリーの「今出ている行」の印は、どのペインを映しているかで決まる。
-      // 切り替えたばかりの対応を反映するために取り直す。
-      await loadLists(myGen);
+      if (disposed) return;
+      if (body.action === "attached") addShell(body.session);
+      deps.onOpenInTab(body.session, pane, side);
     } catch (error) {
-      if (myGen !== generation || disposed) return;
-      console.error("[code-viewer] tmux pane open failed", error);
-      setStatus(`${text().paneOpenFailed}\n${formatErrorDetail(error)}`);
+      if (disposed) return;
+      console.error("[code-viewer] tmux pane open in tab failed", error);
+      report(`${text().paneOpenFailed}\n${formatErrorDetail(error)}`);
     }
   }
 
-  async function createShell(): Promise<void> {
-    const myGen = generation;
-    const size = screen?.measure();
-    try {
-      const res = await deps.trackLoad(
-        fetch("/_shell/create", {
-          method: "POST",
-          headers: {
-            ...deps.actionHeaders(),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ cols: size?.cols, rows: size?.rows }),
-        }),
+  async function createShell(side: TabSide): Promise<void> {
+    const size = tabs[side]?.screen.measure();
+    const res = await deps.trackLoad(
+      fetch(apiUrl("shellCreate"), {
+        method: "POST",
+        headers: {
+          ...deps.actionHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ cols: size?.cols, rows: size?.rows }),
+      }),
+    );
+    if (res.status === 429)
+      throw new Error(
+        await responseErrorMessage(res, text().shellLimitReached),
       );
-      if (myGen !== generation || disposed) return;
-      if (res.status === 429) {
-        setStatus(await responseErrorMessage(res, text().shellLimitReached));
-        return;
-      }
-      if (!res.ok) {
-        setStatus(await responseErrorMessage(res, text().shellCreateFailed));
-        return;
-      }
-      const created = (await res.json()) as { session: ShellSession };
-      if (myGen !== generation || disposed) return;
-      // 一覧に載せてから選ぶ。取り直しを待たずに操作できる。
-      shells = {
-        available: true,
-        sessions: [...(shells?.sessions ?? []), created.session],
-      };
-      renderLists();
-      selectShell(created.session);
-    } catch (error) {
-      if (myGen !== generation || disposed) return;
-      console.error("[code-viewer] shell create failed", error);
-      setStatus(`${text().shellCreateFailed}\n${formatErrorDetail(error)}`);
-    }
+    if (!res.ok)
+      throw new Error(
+        await responseErrorMessage(res, text().shellCreateFailed),
+      );
+    const created = (await res.json()) as { session: ShellSession };
+    if (disposed) return;
+    addShell(created.session);
+    deps.onOpenInTab(created.session, undefined, side);
   }
 
   async function closeShell(id: ShellSessionId): Promise<void> {
-    const myGen = generation;
+    // 止めたことは止めた人が知っている。終わりの知らせ (onShellEnded) は出さない。
+    // 止める応答より先に「終わった」が流れに届くので、頼む前に印を付ける。
+    stopping.add(id);
     try {
       const res = await deps.trackLoad(
-        fetch("/_shell/close", {
+        fetch(apiUrl("shellClose"), {
           method: "POST",
           headers: {
             ...deps.actionHeaders(),
@@ -452,257 +413,87 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
           body: JSON.stringify({ id }),
         }),
       );
-      if (myGen !== generation || disposed) return;
-      if (!res.ok) {
-        setStatus(await responseErrorMessage(res, text().shellCloseFailed));
-        return;
-      }
-    } catch (error) {
-      if (myGen !== generation || disposed) return;
-      console.error("[code-viewer] shell close failed", error);
-      setStatus(`${text().shellCloseFailed}\n${formatErrorDetail(error)}`);
+      if (!res.ok)
+        throw new Error(
+          await responseErrorMessage(res, text().shellCloseFailed),
+        );
+      if (disposed) return;
+      releaseTab(id);
+      forgetShell(id);
+    } finally {
+      stopping.delete(id);
+    }
+  }
+
+  async function showInTab(id: ShellSessionId, side: TabSide): Promise<void> {
+    if (disposed) return;
+    const myGen = ++tabGeneration[side];
+    if (tabs[otherSide(side)]?.screen.getAttached()?.id === id) {
+      // もう一方の面で映していたシェル (反対側へ移したタブ)。枠ごと付け替える。
+      swapSides();
+      tabs[side]?.screen.focus();
       return;
     }
-    if (myGen !== generation || disposed) return;
-    if (attached?.id === id) {
-      attached = null;
-      screen?.detach();
-      deps.onTargetChange?.(null);
+    const slot = tabSlot(side);
+    if (slot.screen.getAttached()?.id === id) {
+      slot.screen.focus();
+      return;
     }
-    shells = {
-      available: shells?.available ?? true,
-      sessions: (shells?.sessions ?? []).filter((item) => item.id !== id),
-    };
-    renderLists();
-  }
-
-  function startPolling(): void {
-    if (pollTimer) return;
-    pollTimer = setInterval(() => {
-      if (!isOpen()) return;
-      void loadLists(generation);
-    }, PANE_LIST_INTERVAL_MS);
-  }
-
-  function stopPolling(): void {
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = null;
-  }
-
-  function mount(host: HTMLElement): void {
-    if (board && screen && host.childElementCount > 0) return;
-    const current = text();
-    host.replaceChildren();
-
-    // 見出しと閉じるはパネルのタブ列が持つ。ここには中身固有の操作だけ置く。
-    const header = document.createElement("header");
-    header.className = "terminal-header";
-
-    const actions = document.createElement("div");
-    actions.className = "terminal-header-actions";
-
-    inputToggle = document.createElement("button");
-    inputToggle.type = "button";
-    inputToggle.className = "terminal-input-toggle";
-    inputToggle.addEventListener("click", () => {
-      inputEnabled = !inputEnabled;
-      screen?.setInputEnabled(inputEnabled);
-      syncInputToggle();
-    });
-
-    fontSmaller = createFontButton("−");
-    fontSmaller.addEventListener("click", () => stepFontSize(-1));
-    fontValue = document.createElement("span");
-    fontValue.className = "terminal-font-value";
-    fontLarger = createFontButton("+");
-    fontLarger.addEventListener("click", () => stepFontSize(1));
-    const fontGroup = document.createElement("div");
-    fontGroup.className = "terminal-font-size";
-    fontGroup.append(fontSmaller, fontValue, fontLarger);
-
-    reloadBtn = document.createElement("button");
-    reloadBtn.type = "button";
-    reloadBtn.className = "terminal-reload";
-    reloadBtn.textContent = "⟳";
-    reloadBtn.title = current.reload;
-    reloadBtn.setAttribute("aria-label", current.reload);
-    reloadBtn.addEventListener("click", () => {
-      void loadLists(generation);
-    });
-
-    actions.append(fontGroup, inputToggle, reloadBtn);
-    header.append(actions);
-
-    board = createSessionBoard({
-      getText: text,
-      onSelectShell: (row) => {
-        const session = findShell(row.target);
-        if (session) selectShell(session);
-      },
-      onOpenPane: (row) => void openPane(row),
-      onCreateShell: () => void createShell(),
-      onCloseShell: (id) => void closeShell(id),
-      onMarkRead: (row) => void markRead(row.target),
-    });
-
-    const lists = document.createElement("div");
-    lists.className = "terminal-lists";
-    lists.append(board.el);
-    listEl = lists;
-
-    const listResizer = document.createElement("div");
-    listResizer.className = "terminal-list-resizer";
-    listResizer.role = "separator";
-    listResizer.tabIndex = 0;
-    listResizer.setAttribute("aria-orientation", "vertical");
-    listResizer.setAttribute("aria-label", current.resizeList);
-    // 前回引き伸ばした幅で開く。組み立て直後に当てるので、既定の幅が一瞬
-    // 見えてから縮む、ということにならない。
-    applyListWidth(readStoredSize(LIST_WIDTH_STORAGE_KEY, DEFAULT_LIST_WIDTH));
-    attachDragResizer({
-      handle: listResizer,
-      getSize: () => listEl?.getBoundingClientRect().width ?? 0,
-      applySize: (width) => {
-        applyListWidth(width);
-        screen?.refit();
-      },
-      // 右へ引くと左の一覧が広がる。
-      direction: 1,
-      axis: "x",
-      // 保存はドラッグ / キー操作が終わった時だけ。動かしている間ずっと書くと、
-      // 1 回のドラッグで数十回 localStorage を叩くことになる。
-      onEnd: () => writeStoredSize(LIST_WIDTH_STORAGE_KEY, listWidth),
-      activeClassTarget: host,
-      activeClassName: "terminal-list-resizing",
-    });
-
-    screen = createTerminalScreen({
-      trackLoad: deps.trackLoad,
-      actionHeaders: deps.actionHeaders,
-      getText: text,
-      getFontSize: () => clampTerminalFontSize(deps.getFontSize()),
-      onStatus: setStatus,
-      onTargetGone: () => {
-        void loadLists(generation);
-      },
-    });
-    screen.setInputEnabled(inputEnabled);
-
-    statusEl = document.createElement("p");
-    statusEl.className = "terminal-status";
-    statusEl.role = "status";
-    statusEl.hidden = true;
-
-    // 左にツリー、右にターミナル。縦積みだとツリーが数行しか見えず、どれを
-    // 選ぶかを決める前に画面が尽きる。
-    const pane = document.createElement("div");
-    pane.className = "terminal-pane";
-    pane.append(screen.el, statusEl);
-
-    const body = document.createElement("div");
-    body.className = "terminal-body";
-    body.append(lists, listResizer, pane);
-    // 組み立てるたびに作り直す箱なので、ここで付ければ二重に登録されない。
-    blockScrollChaining(body);
-
-    host.append(header, body);
-    syncInputToggle();
-    syncFontSize();
-  }
-
-  function isOpen(): boolean {
-    const host = getMount();
-    return host ? !host.hidden : false;
-  }
-
-  async function open(id?: string | null): Promise<void> {
-    const host = getMount();
-    if (!host || disposed) return;
-    const myGen = ++generation;
-    mount(host);
-    host.hidden = false;
-    host.setAttribute("aria-hidden", "false");
-    // ドロワーはスライドアウトのため [hidden] でも display:block のままなので、
-    // 閉じている間に Tab フォーカスが入らないよう inert を併用する。
-    host.removeAttribute("inert");
-    const overlay = getOverlay();
-    if (overlay) {
-      overlay.hidden = false;
-      overlay.setAttribute("aria-hidden", "false");
-    }
-    document.body.classList.add("terminal-sheet-open");
-    // 既定の幅と一覧の高さは CSS 側の fallback 値が受け持つ。ここで初期値を
-    // 書き込むと、ドラッグで変えた値を開き直すたびに巻き戻してしまう。
-    startPolling();
-    setStatus(text().selectPane);
-
-    await loadLists(myGen);
-    // 待つ間に閉じられた / 開き直された場合、この open はもう過去のもの。
-    if (myGen !== generation || !isOpen() || disposed) return;
-
-    if (id) {
-      const session = findShell(id);
-      if (session) {
-        renderLists();
-        selectShell(session);
-      } else {
-        setStatus(text().shellClosed);
+    try {
+      const session = await resolveShell(id);
+      if (myGen !== tabGeneration[side] || disposed) return;
+      if (!session) {
+        slot.screen.detach();
+        writeStatus(slot, text().shellClosed);
+        return;
       }
+      await slot.screen.attach(session);
+      if (myGen === tabGeneration[side] && !disposed) slot.screen.focus();
+    } catch (error) {
+      if (myGen !== tabGeneration[side] || disposed) return;
+      console.error("[code-viewer] terminal tab attach failed", error);
+      writeStatus(slot, `${text().loadFailed}\n${formatErrorDetail(error)}`);
     }
   }
 
-  function close(): void {
-    const host = getMount();
-    if (!host) return;
-    host.hidden = true;
-    host.setAttribute("aria-hidden", "true");
-    host.setAttribute("inert", "");
-    const overlay = getOverlay();
-    if (overlay) {
-      overlay.hidden = true;
-      overlay.setAttribute("aria-hidden", "true");
+  function releaseTab(id: ShellSessionId): void {
+    for (const side of ["left", "right"] as const) {
+      const slot = tabs[side];
+      if (slot?.screen.getAttached()?.id !== id) continue;
+      tabGeneration[side] += 1;
+      slot.screen.detach();
     }
-    document.body.classList.remove("terminal-sheet-open");
-    // 読み込み中だった GET と、その後の選択を無効化する。
-    generation += 1;
-    stopPolling();
-    // 閉じている間まで購読を続けない。シェル自体は残るので、開き直せば
-    // 続きから見られる。
-    //
-    // 何を映していたかは覚えておく。Tools タブへ移って戻ったときに選び直させ
-    // られると、毎回一覧から選ぶことになる。
-    if (attached) lastTargetId = attached.id;
-    screen?.detach();
-    attached = null;
-  }
-
-  function localize(): void {
-    if (!board) return;
-    const current = text();
-    if (reloadBtn) {
-      reloadBtn.title = current.reload;
-      reloadBtn.setAttribute("aria-label", current.reload);
-    }
-    syncInputToggle();
-    syncFontSize();
-    board.localize();
-    renderLists();
   }
 
   return {
-    open,
-    close,
-    isOpen,
-    getActiveTarget: () => attached?.id ?? lastTargetId,
-    refit: () => screen?.refit(),
-    localize,
+    tabPaneFor: (side) => tabPanes[side],
+    showInTab,
+    releaseTab,
+    openPaneInTab,
+    createShell,
+    closeShell,
+    loadShells,
+    knownShells: () => shells,
+    updateTmuxCovers: () => {
+      for (const slot of slots()) slot.screen.updateTmuxCover();
+    },
+    focusTab: (side) => tabs[side]?.screen.focus(),
+    sendSoftKey: (side, key) => tabs[side]?.screen.sendSoftKey(key),
+    refit: () => {
+      for (const slot of slots()) slot.screen.refit();
+    },
+    applyFontSize: () => {
+      for (const slot of slots()) slot.screen.applyFontSize();
+    },
+    menuItems,
+    localize() {
+      for (const slot of slots()) slot.screen.localize();
+    },
     dispose() {
       disposed = true;
-      generation += 1;
-      stopPolling();
-      screen?.dispose();
-      screen = null;
-      board = null;
+      for (const slot of slots()) slot.screen.dispose();
+      tabs.left = null;
+      tabs.right = null;
     },
   };
 }

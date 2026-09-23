@@ -7,6 +7,8 @@
 import { describe, expect, test } from "vitest";
 import {
   ACTIVITY_IDLE_AFTER_MS,
+  ACTIVITY_POLL_INTERVAL_MS,
+  type ActivitySeen,
   nextActivityState,
   nextObservedState,
   OVERRIDE_CHANGE_STREAK,
@@ -312,6 +314,85 @@ describe("nextObservedState", () => {
   });
 });
 
+describe("作業中から待機への見送り", () => {
+  // 待機中も入力欄の飾りで画面が動き続けるエージェントでは、同じ画面が
+  // 2 回続くことが無い。見送りが 1 回で終わらないと作業中のまま戻らない。
+  const idleFrames = [
+    "  Worked for 1m · done 10:00\n⠁   ⠄\n› Ask sample agent\n⠈  ⢀",
+    "  Worked for 1m · done 10:00\n ⠂ ⠈\n› Ask sample agent\n⢀  ⠁",
+    "  Worked for 1m · done 10:00\n⠐  ⡀\n› Ask sample agent\n ⠄ ⠠",
+  ];
+
+  test("画面が動き続けても、待機の表示が 2 回続けば待機を確定する", () => {
+    const working = nextObservedState(
+      undefined,
+      "• Working (5s • esc to interrupt)\n› Ask sample agent",
+      undefined,
+      AT,
+      undefined,
+      "working",
+    );
+    const first = nextObservedState(
+      working.seen,
+      idleFrames[0] ?? "",
+      undefined,
+      AT + ACTIVITY_POLL_INTERVAL_MS,
+      undefined,
+      "working",
+    );
+    const second = nextObservedState(
+      first.seen,
+      idleFrames[1] ?? "",
+      undefined,
+      AT + ACTIVITY_POLL_INTERVAL_MS * 2,
+      undefined,
+      "working",
+    );
+
+    expect([first.kind, second]).toEqual([
+      "hold",
+      expect.objectContaining({
+        kind: "record",
+        state: "idle",
+        ruleId: "input_composer",
+      }),
+    ]);
+  });
+
+  test("見送った後に作業中へ戻れば、次の待機の表示もまた 1 回見送る", () => {
+    const held = nextObservedState(
+      { hash: "working", changedAt: AT, changeStreak: 0 },
+      idleFrames[0] ?? "",
+      undefined,
+      AT + 1,
+      undefined,
+      "working",
+    );
+    const back = nextObservedState(
+      held.seen,
+      "• Working (6s • esc to interrupt)\n› Ask sample agent",
+      undefined,
+      AT + 2,
+      undefined,
+      "working",
+    );
+    const again = nextObservedState(
+      back.seen,
+      idleFrames[2] ?? "",
+      undefined,
+      AT + 3,
+      undefined,
+      "working",
+    );
+
+    expect([held.kind, back.kind, again.kind]).toEqual([
+      "hold",
+      "record",
+      "hold",
+    ]);
+  });
+});
+
 describe("申告を上書きしてよいかの判定", () => {
   // 一度入った申告が二度と更新されないセッションは、放っておくと永久に
   // 「あなたの番」に居座る。画面が動き続けていれば入力待ちではありえないので、
@@ -341,6 +422,43 @@ describe("申告を上書きしてよいかの判定", () => {
     const result = nextActivityState(previous, "h1", AT + 1);
     expect(result.override).toBe(true);
     expect(result.state).toBe("working");
+  });
+
+  // 上書きの条件は「回数」ではなく「動き続けた時間」。巡回の間隔を変えても
+  // 時間が縮まないこと (時計や候補の一瞬の再描画で上書きしない) を見る。
+  test.each([
+    {
+      name: "間隔 1 回ぶん動いただけ",
+      motionMs: ACTIVITY_POLL_INTERVAL_MS,
+      override: false,
+    },
+    {
+      name: "11 秒台まで動き続けても上書きしない",
+      motionMs: 11_999,
+      override: false,
+    },
+    {
+      name: "12 秒動き続けたら上書きしてよい",
+      motionMs: 12_000,
+      override: true,
+    },
+  ])("$name", ({ motionMs, override }) => {
+    let seen: ActivitySeen | undefined = nextActivityState(
+      undefined,
+      "h0",
+      AT,
+    ).seen;
+    let result = nextActivityState(seen, "h0", AT);
+    // 巡回ごとに画面が変わり続けた、を motionMs に達するまで繰り返す。
+    for (
+      let at = AT + ACTIVITY_POLL_INTERVAL_MS, n = 1;
+      at <= AT + motionMs;
+      at += ACTIVITY_POLL_INTERVAL_MS, n += 1
+    ) {
+      result = nextActivityState(seen, `h${n}`, at);
+      seen = result.seen;
+    }
+    expect(result.override).toBe(override);
   });
 
   test("止まった瞬間に連続回数は 0 に戻る", () => {

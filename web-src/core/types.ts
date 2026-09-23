@@ -1,3 +1,4 @@
+import type { DiffRowBasis } from "./diff-card-estimate";
 import type { GdpExpandLogic } from "./expand-logic";
 import type { KeymapOverrides } from "./keymap";
 import type { ToolId } from "./tools";
@@ -24,6 +25,11 @@ export type FileMeta = {
   load_url: string;
   preview_url?: string | null;
   estimated_height_px?: number;
+  /**
+   * カードの高さの見積もりの材料 (小さいファイルだけ)。画面は自分の寸法で数え直す
+   * (core/diff-card-estimate.ts)。無ければ estimated_height_px を使う。
+   */
+  row_basis?: DiffRowBasis;
   untracked?: boolean;
   size?: number;
   created_at?: string;
@@ -43,6 +49,17 @@ export type DiffMeta = {
   project?: string;
   generation?: number;
   error?: string;
+  /** 見積もりの材料を数えられなかった理由。1 件ずつ (Diff は出せる。見積もりが粗くなるだけ)。 */
+  row_basis_errors?: RowBasisError[];
+};
+
+/** 見積もりの材料を数えられなかった 1 件 (server/row-basis.ts)。 */
+export type RowBasisError = {
+  /** 読めなかったファイル (差分全体の失敗には無い)。 */
+  path?: string;
+  /** 失敗した操作 (`stat untracked file`・`read untracked file`・`git diff`・`read git diff`)。 */
+  operation: string;
+  message: string;
 };
 
 // ai-dup-check: allow -- client response DTO is intentionally kept in core types.
@@ -68,6 +85,13 @@ export type RepoTreeEntry = {
   resolved_path?: string;
   status?: string;
 };
+
+/**
+ * The tree endpoint with `commit_dates=0` leaves out `commit_updated_at`. Each entry costs one
+ * `git log` process, so a 1,000-file folder took about 1.7 s; the file tree in
+ * the sidebar shows no dates and asks without them.
+ */
+export const TREE_WITHOUT_COMMIT_DATES = ["commit_dates", "0"] as const;
 
 export type RepoTreeResponse = {
   ref: string;
@@ -152,12 +176,18 @@ export type WorktreeDiffResponse = {
   generation: number;
 };
 
+/** ダークテーマの色違い。既定は "violet"。 */
+export const THEME_PALETTES = ["violet", "graphite", "warm"] as const;
+export type ThemePalette = (typeof THEME_PALETTES)[number];
+
 export type ViewerFontSizeSetting = "compact" | "regular" | "large" | "xlarge";
 
 export type AppSettingsState = {
   version: 1;
   layout?: "side-by-side" | "line-by-line";
   theme?: "light" | "dark";
+  /** ダークの色違い。未設定なら既定 (紫)。ライトのときは使わない。 */
+  palette?: ThemePalette;
   language?: "en" | "ja";
   sidebarView?: "tree" | "flat";
   sidebarWidth?: number;
@@ -171,8 +201,6 @@ export type AppSettingsState = {
    * 桁数・行数も変わるので、PTY のリサイズもここから連動する。
    */
   terminalFontSize?: number;
-  /** 下パネルを本文と高さを分けて表示する。false / 未設定なら重ねて表示。 */
-  appPanelDocked?: boolean;
   syntaxHighlight?: boolean;
   autoUpdate?: boolean;
   queryHistoryPanelWidth?: number;
@@ -198,6 +226,37 @@ export type AppSettingsState = {
   scopeWatchLimit?: number;
   uploadEnabled?: boolean;
   /**
+   * エージェントが作業中から入力待ちになったとき、ブラウザの通知を出すか。
+   * 未設定なら出す (通知そのものはブラウザの許可が要る)。
+   */
+  agentNotifyWaiting?: boolean;
+  /** エージェントが作業中から止まった (終わった) とき通知を出すか。未設定なら出す。 */
+  agentNotifyDone?: boolean;
+  /** エージェント一覧の「フックを入れられます」の案内を閉じた。 */
+  agentHookHintDismissed?: boolean;
+  /** 最初の入力待ちで出す「通知を許可すると…」の案内を閉じた (許可を訊いた後も)。 */
+  agentNotifyHintDismissed?: boolean;
+  /** エージェント一覧のアカウントの帯を畳んだ。 */
+  agentAccountsCollapsed?: boolean;
+  /** ターミナルの右の画像の棚を畳んだ。 */
+  terminalImageShelfCollapsed?: boolean;
+  /**
+   * 下パネル (Tools / Search) を開いていたか。下パネルは無くなり (Tools と
+   * Search はタブ)、いまは読まない。保存してある値の形を変えないために残す。
+   */
+  terminalPanelOpen?: boolean;
+  /** 左のサイドバー (プロジェクトとエージェント) を畳んだ。 */
+  navCollapsed?: boolean;
+  /** 左のサイドバーの幅 (px)。範囲は core/panel-sizes.ts の NAV_WIDTH。 */
+  navWidth?: number;
+  /** 左のサイドバーで畳んだプロジェクト (プロジェクトの root)。 */
+  navCollapsedProjects?: string[];
+  /**
+   * 入口のサーバで最後に開いたプロジェクトの根 (実パス)。前置きの無い URL
+   * (`/`・古いブックマーク) をどのプロジェクトへ送るかに使う。画面は書かない。
+   */
+  lastProjectRoot?: string;
+  /**
    * ユーザーが変更したキー割り当てだけを持つ差分。ここに無いアクションは
    * デフォルトのまま動くので、後からデフォルトを変えても、触っていない
    * ものは新しい割り当てに追従する。
@@ -207,6 +266,11 @@ export type AppSettingsState = {
     from: string;
     to: string;
   };
+  /**
+   * 応答にだけ載る。全プロジェクト共通の設定を読めなかった理由 (その間は
+   * リポジトリの設定で表示している)。保存はしない。
+   */
+  userSettingsError?: string;
 };
 
 export type ViewState = {
@@ -409,6 +473,8 @@ export type DiffCardElement = HTMLElement & {
   _diffData?: FileDiffResponse | null;
   _file?: FileMeta | null;
   _loadPromise?: Promise<void>;
+  /** 読み込みの失敗。失敗の表示を今の言語で描き直すために持つ。 */
+  _loadFailure?: Error;
   // 静かな再検証 (silent revalidation) の比較基準。最後に既定 URL から取得した
   // 応答の署名と、その URL (generation クエリ除去済み)。展開読み込みでは更新しない。
   _loadedSig?: string | null;
@@ -527,4 +593,62 @@ export type RawFileInfo = {
   // HEAD /_file が 404 を返した (ファイルがその ref に存在しない) ことの明示。
   // ネットワーク失敗・中断の {} と区別するために立てる。
   missing?: boolean;
+  // 取得そのものに失敗した理由 (HTTP の状態・例外)。「情報が無い」(全部の
+  // 欄が空) とは違い、失敗は情報のボタンの中に理由つきで出す。
+  error?: string;
+};
+
+/**
+ * 入口のサーバが、プロジェクトの裏のプロセスに取り次げなかったときの応答
+ * (502: 止まった・503: 起きなかった)。画面は理由と「再起動」を出す。
+ */
+export type EntryBackendFailure = {
+  error: string;
+  code: "backend-stopped" | "backend-start-failed";
+  project: { key: string; root: string };
+  /** 理由の全文。 */
+  detail: string;
+  /** 裏のプロセスの出力の末尾 (`<状態>/server-logs/`)。 */
+  log: string;
+  /**
+   * 入口の版が入れ直した code-viewer より古いので起こせない。`error` がその
+   * 案内 (設定の言語。入口の止め方と打ち直し) で、画面は最初からそれを出す。
+   */
+  entryOutdated?: true;
+};
+
+export function isEntryBackendFailure(
+  value: unknown,
+): value is EntryBackendFailure {
+  if (!value || typeof value !== "object") return false;
+  const body = value as Record<string, unknown>;
+  const project = body.project as Record<string, unknown> | undefined;
+  return (
+    (body.code === "backend-stopped" || body.code === "backend-start-failed") &&
+    typeof body.detail === "string" &&
+    typeof body.log === "string" &&
+    !!project &&
+    typeof project.key === "string" &&
+    typeof project.root === "string"
+  );
+}
+
+/**
+ * 入口のサーバから見た、プロジェクトの裏のプロセスの状態 (apiUrl の entryBackend)。
+ * - absent: 入口がまだ扱っていない (次の要求で起こす)
+ * - starting: 起こしている最中 (要求は起き終わるのを待つ)
+ * - running: 取り次げる
+ * - idle-stopped: 使われていないので入口が止めた (次の要求で黙って起こす)
+ * - unreachable: 落ちた (要求は 502。画面の「再起動」で戻す)
+ */
+export type EntryBackendState =
+  | "absent"
+  | "starting"
+  | "running"
+  | "idle-stopped"
+  | "unreachable";
+
+export type EntryBackendStateResponse = {
+  state: EntryBackendState;
+  project: { key: string; root: string };
 };

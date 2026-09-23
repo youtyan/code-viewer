@@ -18,11 +18,13 @@ import type {
   S3SearchMode,
   S3SortMode,
 } from "../core/database/types";
+import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import { buildRoute } from "../core/routes";
 import {
   ensureServerUrl,
   requestJson,
   resolveRepoRoot,
+  screenBaseUrl,
   shellSingleQuote,
   takeGlobalCliOption,
   takeValue,
@@ -297,7 +299,8 @@ can review what you queried.
 
 ## Requirements
 
-- A code-viewer server must be running for the repository.
+- code-viewer must be running. When this repository's project process is not
+  running, the CLI asks the running code-viewer to start it (stderr says so).
 - Only SELECT, PRAGMA, EXPLAIN, WITH queries are allowed (for exec).
 - Results are persisted and visible to the human.
 
@@ -1935,7 +1938,8 @@ export async function runQueryCli(argv: string[]): Promise<void> {
     return runSnapshotDelete(serverUrl, command);
   if (command.kind === "snapshot-note")
     return runSnapshotNote(serverUrl, command);
-  if (command.kind === "diff-tables") return runDiffTables(serverUrl, command);
+  if (command.kind === "diff-tables")
+    return runDiffTables(serverUrl, screenBaseUrl(root, serverUrl), command);
   if (command.kind === "diff-rows") return runDiffRows(serverUrl, command);
   if (command.kind === "search") return runSearch(serverUrl, command);
   if (command.kind === "redis-databases")
@@ -2791,8 +2795,10 @@ function buildSnapshotPollCommand(
 // (web-src/core/routes.ts buildRoute) をそのまま再利用するので、URL の形が
 // ブラウザの実際のルーティングと常に一致する (二重エンコード等のズレが出ない)。
 // range はデータベース画面では未使用だが AppRoute の型上必須なので空文字で埋める。
+// screenBase は screenBaseUrl の値。入口の下では `/p/<鍵>` を含むので、
+// `new URL(path, base)` で経路ごと置き換えず、後ろに繋ぐ。
 function buildSnapshotDiffUrl(
-  serverUrl: string,
+  screenBase: string,
   dbId: string,
   schema: string,
   beforeId: string,
@@ -2807,7 +2813,7 @@ function buildSnapshotDiffUrl(
     diffAfter: afterId,
     range: { from: "", to: "" },
   });
-  return new URL(path, serverUrl).toString();
+  return new URL(`${screenBase}${path}`).toString();
 }
 
 // diff tables の各行から row 詳細を見るための paste-safe な diff rows コマンド。
@@ -2980,13 +2986,17 @@ async function waitForSnapshotDone(
   command: Extract<QueryCommand, { kind: "snapshot-create" }>,
   snapshotId: string,
 ): Promise<SnapshotMetaOut> {
-  const pollIntervalMs = snapshotPollIntervalMs();
+  const pollIntervalMs = pollIntervalFromEnv("CODE_VIEWER_SNAPSHOT_POLL_MS");
   const deadline = Date.now() + command.timeoutSec * 1000;
   while (true) {
     if (Date.now() >= deadline) {
-      await cancelSnapshotBestEffort(serverUrl, snapshotId);
+      const cancelFailure = await cancelAfterTimeout(
+        serverUrl,
+        "/_db/snapshot/cancel",
+        snapshotId,
+      );
       console.error(
-        `snapshot create timed out after ${command.timeoutSec}s (cancelled ${snapshotId})`,
+        `snapshot create timed out after ${command.timeoutSec}s ${cancelFailure === null ? `(cancelled ${snapshotId})` : `and cancelling ${snapshotId} failed: ${cancelFailure}`}`,
       );
       process.exit(1);
     }
@@ -3006,34 +3016,6 @@ async function waitForSnapshotDone(
     }
     if (meta.status !== "running") return meta;
     await sleep(pollIntervalMs);
-  }
-}
-
-// snapshot 専用の poll interval (search とは別 env var で独立に上書き可能)。
-function snapshotPollIntervalMs(): number {
-  const raw = process.env.CODE_VIEWER_SNAPSHOT_POLL_MS;
-  if (raw === undefined) return 500;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return 500;
-  return n;
-}
-
-async function cancelSnapshotBestEffort(
-  serverUrl: string,
-  snapshotId: string,
-): Promise<void> {
-  try {
-    await fetch(`${serverUrl}/_db/snapshot/cancel`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Origin: new URL(serverUrl).origin,
-        "X-Code-Viewer-Action": "1",
-      },
-      body: JSON.stringify({ id: snapshotId }),
-    });
-  } catch {
-    // Timeout reporting is more useful than cancel failure details here.
   }
 }
 
@@ -3122,6 +3104,7 @@ async function runSnapshotNote(
 
 async function runDiffTables(
   serverUrl: string,
+  screenBase: string,
   command: Extract<QueryCommand, { kind: "diff-tables" }>,
 ): Promise<void> {
   const qs = `?before=${encodeURIComponent(command.before)}&after=${encodeURIComponent(command.after)}`;
@@ -3153,7 +3136,7 @@ async function runDiffTables(
   const enriched = {
     ...body,
     diffUrl: buildSnapshotDiffUrl(
-      serverUrl,
+      screenBase,
       body.dbId,
       body.schema,
       body.beforeId,
@@ -3234,12 +3217,19 @@ type SearchStatus = {
 };
 
 // 単体テストでは polling 間隔を 0 にして同期的に進めたい。
-// CLI 表面に出すと「裏技 flag」になるので環境変数経由で受ける。
-function searchPollIntervalMs(): number {
-  const raw = process.env.CODE_VIEWER_SEARCH_POLL_MS;
+// CLI 表面に出すと「裏技 flag」になるので環境変数経由で受ける
+// (search は CODE_VIEWER_SEARCH_POLL_MS、snapshot は CODE_VIEWER_SNAPSHOT_POLL_MS)。
+// 読めない値は黙って既定に戻さず、止める。
+function pollIntervalFromEnv(name: string): number {
+  const raw = process.env[name];
   if (raw === undefined) return 500;
   const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return 500;
+  if (raw.trim() === "" || !Number.isFinite(n) || n < 0) {
+    console.error(
+      `${name} must be a non-negative number of milliseconds (got ${JSON.stringify(raw)})`,
+    );
+    process.exit(1);
+  }
   return n;
 }
 
@@ -3248,22 +3238,26 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function cancelSearchJobBestEffort(
+// 時間切れの後の取り消し。失敗しても時間切れとして終わるが、取り消せたかは
+// 文に残す (取り消せなかったのに「cancelled」と言わない)。失敗の理由か null。
+async function cancelAfterTimeout(
   serverUrl: string,
-  jobId: string,
-): Promise<void> {
+  route: "/_db/search/cancel" | "/_db/snapshot/cancel",
+  id: string,
+): Promise<string | null> {
   try {
-    await fetch(`${serverUrl}/_db/search/cancel`, {
+    const res = await fetch(`${serverUrl}${route}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Origin: new URL(serverUrl).origin,
         "X-Code-Viewer-Action": "1",
       },
-      body: JSON.stringify({ id: jobId }),
+      body: JSON.stringify({ id }),
     });
-  } catch {
-    // Timeout reporting is more useful than cancel failure details here.
+    return res.ok ? null : await responseErrorMessage(res, `POST ${route}`);
+  } catch (error) {
+    return formatErrorDetail(error);
   }
 }
 
@@ -3294,14 +3288,18 @@ async function runSearch(
     process.exit(1);
   }
 
-  const pollIntervalMs = searchPollIntervalMs();
+  const pollIntervalMs = pollIntervalFromEnv("CODE_VIEWER_SEARCH_POLL_MS");
   const deadline = Date.now() + command.timeoutSec * 1000;
   let status: SearchStatus | undefined;
   while (true) {
     if (Date.now() >= deadline) {
-      await cancelSearchJobBestEffort(serverUrl, jobId);
+      const cancelFailure = await cancelAfterTimeout(
+        serverUrl,
+        "/_db/search/cancel",
+        jobId,
+      );
       console.error(
-        `search timed out after ${command.timeoutSec}s (cancelled job ${jobId})`,
+        `search timed out after ${command.timeoutSec}s ${cancelFailure === null ? `(cancelled job ${jobId})` : `and cancelling job ${jobId} failed: ${cancelFailure}`}`,
       );
       process.exit(1);
     }

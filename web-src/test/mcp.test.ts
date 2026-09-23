@@ -861,7 +861,7 @@ describe("/_mcp HTTP route", () => {
     );
     serverProc = spawn(
       process.execPath,
-      [CLI_BUNDLE, "--cwd", repo, "--port", "0"],
+      [CLI_BUNDLE, "--standalone", "--cwd", repo, "--port", "0"],
       {
         cwd: repoRoot,
         env: { ...process.env, NO_COLOR: "1" },

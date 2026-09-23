@@ -9,6 +9,7 @@
 // CODE_VIEWER_BIN_TMUX がそのまま効く)。シェルは経由せず、必ず引数配列で
 // 渡す。ペイン ID もキー入力も外から来た文字列なので、シェル展開に載せない。
 
+import { statSync } from "node:fs";
 import { errorWithCause } from "../../core/error-detail";
 import {
   commandForExternal,
@@ -62,6 +63,11 @@ export type TmuxRunResult =
   | { status: "no-target" }
   | { status: "error"; error: Error };
 
+export type TmuxServerGenerationResult =
+  | { status: "ok"; generation: string }
+  | { status: "missing" | "no-server" }
+  | { status: "error"; error: Error };
+
 /** 実行ファイル名を解決した引数列。 */
 export function tmuxArgs(args: string[]): string[] {
   return [commandForExternal("tmux"), ...args];
@@ -75,11 +81,12 @@ function stderrIncludesAny(stderr: string, markers: string[]): boolean {
 export async function runTmux(
   args: string[],
   cwd: string,
+  timeoutMs = TMUX_TIMEOUT_MS,
 ): Promise<TmuxRunResult> {
   let result: Awaited<ReturnType<typeof runAsync>>;
   try {
     result = await runAsync(tmuxArgs(args), cwd, {
-      timeout: TMUX_TIMEOUT_MS,
+      timeout: timeoutMs,
     });
   } catch (error) {
     return {
@@ -107,4 +114,53 @@ export async function runTmux(
         .join("\n"),
     ),
   };
+}
+
+/** tmux の再起動を pane id の再利用と区別する、サーバ単位の識別子。 */
+export async function readTmuxServerGeneration(
+  cwd: string,
+): Promise<TmuxServerGenerationResult> {
+  const result = await runTmux(
+    [
+      "display-message",
+      "-p",
+      ["#{pid}", "#{start_time}", "#{socket_path}"].join(TMUX_FIELD_SEP),
+    ],
+    cwd,
+  );
+  if (result.status === "missing") return result;
+  if (result.status === "no-server" || result.status === "no-target") {
+    return { status: "no-server" };
+  }
+  if (result.status === "error") return result;
+  const [rawPid, rawStartTime, rawSocket] = result.stdout
+    .trimEnd()
+    .split(TMUX_FIELD_SEP);
+  const pid = rawPid?.trim() ?? "";
+  const startTime = rawStartTime?.trim() ?? "";
+  if (pid && startTime) {
+    return { status: "ok", generation: `${pid}:${startTime}` };
+  }
+  const socket =
+    rawSocket?.trim() || process.env.TMUX?.split(",", 1)[0]?.trim() || "";
+  if (!socket) {
+    return {
+      status: "error",
+      error: new Error(
+        "tmux server did not report pid/start_time or a socket path",
+      ),
+    };
+  }
+  try {
+    const stat = statSync(socket);
+    return {
+      status: "ok",
+      generation: `socket:${stat.ino}:${stat.ctimeMs}`,
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      error: errorWithCause(`failed to stat tmux socket ${socket}`, error),
+    };
+  }
 }

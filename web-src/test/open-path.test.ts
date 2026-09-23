@@ -8,8 +8,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import { defaultKeyBindings, resolveKeyOutcome } from "../core/keymap";
 import { isGitInternalPath } from "../server/git";
 import { safeWorktreePath } from "../server/search-service";
+import {
+  baseRules,
+  cascadedDeclarations,
+  loadStyleSheet,
+} from "./_css-fixture";
 import { runGit as git } from "./_git-fixture";
 import { sourceFixture } from "./source-fixture";
 
@@ -101,6 +107,7 @@ describe("open path in OS action", () => {
   });
 
   test("UI adds open actions to directory-oriented surfaces", () => {
+    // The parent-folder label comes from the Diff text table (diff-view-i18n.ts).
     // The directory-row button's label is localized via
     // SidebarDeps.openDirectoryInOsTitle() instead of a hardcoded English
     // string; see the DOM-behavior coverage in
@@ -113,12 +120,12 @@ describe("open path in OS action", () => {
     ).toBe(true);
     expect(
       app.includes(
-        "createOpenPathButton(target.path, 'file-parent', 'open parent folder in OS')",
+        "createOpenPathButton(target.path, 'file-parent', DIFF_SCREEN_TEXT[getLanguage()].openParentFolder)",
       ),
     ).toBe(true);
     expect(
       app.includes(
-        "createOpenPathButton(file.path, 'file-parent', 'open parent folder in OS')",
+        "createOpenPathButton(file.path, 'file-parent', text.openParentFolder)",
       ),
     ).toBe(true);
     expect(app.includes("body: JSON.stringify({ path, kind })")).toBe(true);
@@ -143,15 +150,13 @@ describe("sidebar tree bulk actions", () => {
     ).toBe(true);
     expect(app.includes("function setSidebarTreeActionIcons()")).toBe(true);
     expect(
-      app.includes("const sidebarToggle = ensureSidebarToggleButton()"),
-    ).toBe(true);
-    expect(
       app.includes("function syncSidebarToggleIcon(button: HTMLButtonElement)"),
     ).toBe(true);
     expect(app.includes("button.innerHTML = iconSvg('octicon-sidebar',")).toBe(
       true,
     );
-    expect(app.includes("syncSidebarToggleIcon(sidebarToggle)")).toBe(true);
+    // 畳むボタンの絵はファイル一覧の側だけが付ける (振る舞いは
+    // sidebar-toggle.test.ts の「the toggle belongs to the file list」)。
     expect(
       app.includes(
         "expand.innerHTML = iconSvg('octicon-chevron-down', EXPAND_ALL_16_PATHS)",
@@ -162,16 +167,8 @@ describe("sidebar tree bulk actions", () => {
         "collapse.innerHTML = iconSvg('octicon-chevron-up', COLLAPSE_ALL_16_PATHS)",
       ),
     ).toBe(true);
-    expect(
-      app.includes(
-        "$('#sb-expand-all').addEventListener('click', () => setAllSidebarDirsCollapsed(false))",
-      ),
-    ).toBe(true);
-    expect(
-      app.includes(
-        "$('#sb-collapse-all').addEventListener('click', () => setAllSidebarDirsCollapsed(true))",
-      ),
-    ).toBe(true);
+    // 全部開く / 畳むのボタンの配線 (一覧ごと) は振る舞いで見る
+    // (file-tree-keyboard.test.ts の「expand and collapse all」)。
     expect(style.includes(".sb-actions")).toBe(true);
     expect(style.includes(".sb-icon-action")).toBe(true);
   });
@@ -254,8 +251,49 @@ describe("repository scope omit settings", () => {
 });
 
 describe("search palette shortcuts", () => {
+  // 押したキーの行き先はソースの文字ではなく、app の keydown と同じ解決
+  // (resolveKeyOutcome) で見る。Ctrl+K / Ctrl+G は入力欄の中 (ファイルの絞り込み)
+  // からも開き、/ は入力欄の外だけ。
+  test.each([
+    {
+      name: "Ctrl+K in the file filter",
+      key: "k",
+      ctrl: true,
+      editable: true,
+      action: "open-file-palette",
+    },
+    {
+      name: "Ctrl+G in the file filter",
+      key: "g",
+      ctrl: true,
+      editable: true,
+      action: "open-grep-palette",
+    },
+    {
+      name: "/ outside a text field",
+      key: "/",
+      ctrl: false,
+      editable: false,
+      action: "focus-file-filter",
+    },
+    {
+      name: "/ inside a text field",
+      key: "/",
+      ctrl: false,
+      editable: true,
+      action: null,
+    },
+  ])("$name resolves to $action", ({ key, ctrl, editable, action }) => {
+    expect(
+      resolveKeyOutcome(
+        { key, ctrlKey: ctrl },
+        { scope: "sidebar", editable, mac: false },
+        defaultKeyBindings(false),
+      ),
+    ).toEqual(action ? { kind: "run", action } : null);
+  });
+
   test("Ctrl+K and Ctrl+G open the palette while slash keeps sidebar filter focus", () => {
-    expect(app.includes("resolveKeymapAction")).toBe(true);
     expect(app.includes("openSearchPalette('file')")).toBe(true);
     expect(app.includes("openSearchPalette('grep')")).toBe(true);
     expect(app.includes("if (action === 'focus-file-filter')")).toBe(true);
@@ -279,12 +317,17 @@ describe("search palette shortcuts", () => {
     expect(app.includes("row.classList.toggle('gdp-source-line-target'")).toBe(
       true,
     );
-    expect(style.includes(".gdp-source-line-target")).toBe(true);
-    expect(style.includes("--line-hit-bg:    #fff8c5;")).toBe(true);
-    expect(style.includes("--line-hit-border:var(--accent);")).toBe(true);
-    expect(
-      style.includes(".gdp-source-line-target .gdp-source-line-code"),
-    ).toBe(true);
+    // 色の値は固定しない (テーマで変わる)。目印の行が、ルートの色の名前を
+    // 実際に塗りに使っていることを見る。
+    const rules = baseRules(loadStyleSheet());
+    const rootVars = cascadedDeclarations(rules, (s) => s === ":root");
+    expect(rootVars.get("--line-hit-bg")).toBeTruthy();
+    expect(rootVars.get("--line-hit-border")).toBeTruthy();
+    const target = cascadedDeclarations(
+      rules,
+      (s) => s === ".gdp-source-line-target .gdp-source-line-code",
+    );
+    expect(target.get("background-color")).toContain("var(--line-hit-bg)");
   });
 
   test("diff grep selection stores and focuses a diff line route", () => {

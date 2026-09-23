@@ -7,7 +7,7 @@ import {
   expect,
   test,
 } from "vitest";
-import { createLineRefPill } from "../views/line-ref-pill";
+import { createLineRefPill, readRenderedLines } from "../views/line-ref-pill";
 
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://localhost/" });
@@ -133,5 +133,94 @@ describe("line reference pill line history action", () => {
       document.querySelector<HTMLButtonElement>("#line-ref-pill-history")
         ?.hidden,
     ).toBe(true);
+  });
+});
+
+describe("line reference pill reads the pane that holds the selection", () => {
+  // 同じパスを左右で別の ref に開いた形: 左の本文と右の面の箱に同じ data-path。
+  function twoPanes(): { left: HTMLElement; right: HTMLElement } {
+    const pane = (id: string, code: string) => {
+      const root = document.createElement("div");
+      root.id = id;
+      root.innerHTML = `<div class="gdp-file-shell" data-path="src/sample.ts"><table class="gdp-source-table"><tr data-line="2"><td class="gdp-source-line-code">${code}</td></tr></table></div>`;
+      document.body.append(root);
+      return root;
+    };
+    return {
+      left: pane("left-pane", "left line"),
+      right: pane("right-pane", "right line"),
+    };
+  }
+
+  test.each([
+    { name: "the left pane", side: "left", expected: ["left line"] },
+    { name: "the right pane", side: "right", expected: ["right line"] },
+  ] as const)("readRenderedLines in $name", ({ side, expected }) => {
+    const panes = twoPanes();
+    expect(readRenderedLines("src/sample.ts", 2, 2, panes[side])).toEqual(
+      expected,
+    );
+  });
+
+  test("Shift+click copies the lines of the pane given to show, not the first match", async () => {
+    const copied: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          copied.push(value);
+        },
+      },
+    });
+    const { right } = twoPanes();
+    const pill = createLineRefPill({
+      onClose() {
+        /* noop */
+      },
+      githubUrlForSelection: () => null,
+      copyReferenceLabel: () => "Copy AI reference",
+      lineCountLabel: (count) => `${count} lines`,
+      githubOpenTitle: () => "Open selected lines on GitHub",
+      githubCopyTitle: () => "Copy GitHub link",
+    });
+    pill.show("src/sample.ts", 2, 2, () => right);
+    document
+      .querySelector<HTMLButtonElement>("#line-ref-pill-copy")
+      ?.dispatchEvent(new MouseEvent("click", { shiftKey: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(copied).toHaveLength(1);
+    expect(copied[0]).toContain("right line");
+    expect(copied[0]).not.toContain("left line");
+  });
+
+  test("a pane that is gone copies the reference alone", async () => {
+    const copied: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          copied.push(value);
+        },
+      },
+    });
+    twoPanes();
+    const pill = createLineRefPill({
+      onClose() {
+        /* noop */
+      },
+      githubUrlForSelection: () => null,
+      copyReferenceLabel: () => "Copy AI reference",
+      lineCountLabel: (count) => `${count} lines`,
+      githubOpenTitle: () => "Open selected lines on GitHub",
+      githubCopyTitle: () => "Copy GitHub link",
+    });
+    pill.show("src/sample.ts", 2, 2, () => null);
+    document
+      .querySelector<HTMLButtonElement>("#line-ref-pill-copy")
+      ?.dispatchEvent(new MouseEvent("click", { shiftKey: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(copied).toEqual(["@src/sample.ts#2"]);
   });
 });

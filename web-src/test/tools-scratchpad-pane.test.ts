@@ -55,6 +55,17 @@ beforeEach(() => {
   document.body.replaceChildren();
 });
 
+describe("scratchpad pane input name", () => {
+  test("the input is named by its placeholder, also after switching language", () => {
+    const pane = createPendingPane("");
+    const input = pane.el.querySelector<HTMLTextAreaElement>(".tools-textarea");
+    expect(input?.getAttribute("aria-label")).toBe("Input");
+    const ja = toolsText("ja");
+    pane.localize(ja, ja.markdown.output, ja.markdown.placeholder);
+    expect(input?.getAttribute("aria-label")).toBe(ja.markdown.placeholder);
+  });
+});
+
 describe("scratchpad pane render lifecycle", () => {
   test("typing aborts the render that is still running", () => {
     const pane = createPendingPane("first");
@@ -86,7 +97,14 @@ describe("scratchpad pane render lifecycle", () => {
     pane.refresh();
 
     expect(calls).toEqual([]);
-    expect(pane.output.textContent).toBe(TEXT.pane.emptyInput);
+    // 共通の空の案内: 一行・補足 (今までの一文)・貼り付けのキー。
+    expect([
+      pane.output.querySelector("h2")?.textContent,
+      pane.output.querySelector("p")?.textContent,
+      [...pane.output.querySelectorAll(".empty-key kbd")].map(
+        (key) => key.textContent,
+      ),
+    ]).toEqual([TEXT.pane.emptyTitle, TEXT.pane.emptyInput, ["⌘V"]]);
     pane.dispose();
   });
 

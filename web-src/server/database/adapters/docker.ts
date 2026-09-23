@@ -184,6 +184,18 @@ function setDockerSchemasCache(
   return [...cachedValue];
 }
 
+// 一覧が取れないときは既定の DB・public を出す (仕様)。取れなかった理由は記録する。
+function reportDockerListFallback(
+  what: "databases" | "schemas",
+  target: string | undefined,
+  failure: unknown,
+): void {
+  console.error(
+    `[code-viewer] listing ${what} of ${target ?? "the container"} failed; showing the default instead:`,
+    failure,
+  );
+}
+
 function fallbackDockerDatabases(defaultDb: string): string[] {
   return defaultDb ? [defaultDb] : [];
 }
@@ -397,7 +409,12 @@ function createSqlDriverExecutor(config: SqlCliConfig): {
         }
       },
       close() {
-        void pool.end().catch(() => undefined);
+        void pool.end().catch((error: unknown) => {
+          console.error(
+            "[code-viewer] closing the PostgreSQL pool failed:",
+            error,
+          );
+        });
       },
     };
   }
@@ -448,7 +465,9 @@ function createSqlDriverExecutor(config: SqlCliConfig): {
       }
     },
     close() {
-      void pool.end().catch(() => undefined);
+      void pool.end().catch((error: unknown) => {
+        console.error("[code-viewer] closing the MySQL pool failed:", error);
+      });
     },
   };
 }
@@ -681,7 +700,9 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
     // recordSql は execInContainerAsync 内部で 1 度だけ呼ぶ (重複防止)。
     const result = await execInContainerAsync(config, sql, 10000, signal);
     if (result.code !== 0) {
-      throw new Error(result.stderr.trim() || "query failed");
+      throw new Error(
+        result.stderr.trim() || `query failed (exit ${result.code})`,
+      );
     }
     return parseTsvOutput(
       result.stdout,
@@ -857,28 +878,24 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
       } else {
         sql = `SELECT table_name, column_name, referenced_table_name, referenced_column_name FROM information_schema.key_column_usage WHERE table_schema = DATABASE() AND referenced_table_name IS NOT NULL`;
       }
-      try {
-        const result = await execAsync(sql, signal);
-        return result.rows.map((row) =>
-          config.kind === "postgresql"
-            ? {
-                fromSchema: row[0],
-                fromTable: row[1],
-                fromColumn: row[2],
-                toSchema: row[3],
-                toTable: row[4],
-                toColumn: row[5],
-              }
-            : {
-                fromTable: row[0],
-                fromColumn: row[1],
-                toTable: row[2],
-                toColumn: row[3],
-              },
-        );
-      } catch {
-        return [];
-      }
+      const result = await execAsync(sql, signal);
+      return result.rows.map((row) =>
+        config.kind === "postgresql"
+          ? {
+              fromSchema: row[0],
+              fromTable: row[1],
+              fromColumn: row[2],
+              toSchema: row[3],
+              toTable: row[4],
+              toColumn: row[5],
+            }
+          : {
+              fromTable: row[0],
+              fromColumn: row[1],
+              toTable: row[2],
+              toColumn: row[3],
+            },
+      );
     },
 
     async getColumnsMultiAsync(
@@ -1009,7 +1026,11 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
             result.set(t, r.rows.length > 0 ? Number(r.rows[0][0]) || 0 : 0);
           } catch (innerErr) {
             if (isAbortLikeError(innerErr, signal)) throw innerErr;
-            result.set(t, 0);
+            // 数えられない表は 0 にせず、件数なし (不明) のまま残す。
+            console.error(
+              `[code-viewer] counting rows of ${t} failed:`,
+              innerErr,
+            );
           }
         });
         const fallbackResults = await Promise.allSettled(fallbackPromises);
@@ -1263,29 +1284,17 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
       signal?: AbortSignal,
     ): Promise<string> {
       if (config.kind === "mysql") {
-        try {
-          const result = await execAsync(
-            `SHOW CREATE TABLE ${tableIdentifier(table)}`,
-            signal,
-          );
-          return result.rows.length > 0 ? result.rows[0][1] || "" : "";
-        } catch (err) {
-          if (isAbortLikeError(err, signal)) throw err;
-          if (err instanceof DockerCommandUnavailableError) throw err;
-          return "";
-        }
-      }
-      try {
         const result = await execAsync(
-          `SELECT 'CREATE TABLE ' || ${escapeSqlString(tableIdentifier(table))} || ' (...)' AS ddl`,
+          `SHOW CREATE TABLE ${tableIdentifier(table)}`,
           signal,
         );
-        return result.rows.length > 0 ? result.rows[0][0] || "" : "";
-      } catch (err) {
-        if (isAbortLikeError(err, signal)) throw err;
-        if (err instanceof DockerCommandUnavailableError) throw err;
-        return "";
+        return result.rows.length > 0 ? result.rows[0][1] || "" : "";
       }
+      const result = await execAsync(
+        `SELECT 'CREATE TABLE ' || ${escapeSqlString(tableIdentifier(table))} || ' (...)' AS ddl`,
+        signal,
+      );
+      return result.rows.length > 0 ? result.rows[0][0] || "" : "";
     },
 
     async getTriggersAsync(
@@ -1298,17 +1307,11 @@ export function createSqlCliAdapter(config: SqlCliConfig): DockerSource {
       } else {
         sql = `SELECT tgname, pg_get_triggerdef(oid) FROM pg_trigger WHERE tgrelid = ${postgresRegclassLiteral(table)}::regclass AND NOT tgisinternal`;
       }
-      try {
-        const result = await execAsync(sql, signal);
-        return result.rows.map((row) => ({
-          name: row[0],
-          sql: row[1] || "",
-        }));
-      } catch (err) {
-        if (isAbortLikeError(err, signal)) throw err;
-        if (err instanceof DockerCommandUnavailableError) throw err;
-        return [];
-      }
+      const result = await execAsync(sql, signal);
+      return result.rows.map((row) => ({
+        name: row[0],
+        sql: row[1] || "",
+      }));
     },
 
     close(): void {
@@ -1423,6 +1426,7 @@ export async function listDockerDatabasesAsync(
     }
     const result = await execInContainerAsync(config, sql, 10000, signal);
     if (result.code !== 0) {
+      reportDockerListFallback("databases", serviceName, result);
       const fallback = fallbackDockerDatabases(defaultDb);
       if (fallback.length > 0) return fallback;
       return setDockerDatabasesCache(
@@ -1451,6 +1455,7 @@ export async function listDockerDatabasesAsync(
   } catch (err) {
     if (isAbortLikeError(err, signal)) throw err;
     if (err instanceof DockerCommandUnavailableError) throw err;
+    reportDockerListFallback("databases", serviceName, err);
     const fallback = fallbackDockerDatabases(defaultDb);
     if (fallback.length > 0) return fallback;
     return setDockerDatabasesCache(
@@ -1514,6 +1519,7 @@ async function fetchPostgresSchemasViaContainerAsync(
     const sql = `SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('pg_catalog', 'information_schema') AND schema_name NOT LIKE 'pg_toast%' AND schema_name NOT LIKE 'pg_temp_%' AND schema_name NOT LIKE 'pg_toast_temp_%' AND has_schema_privilege(schema_name, 'USAGE') ORDER BY CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END, schema_name`;
     const result = await execInContainerAsync(config, sql, 10000, signal);
     if (result.code !== 0) {
+      reportDockerListFallback("schemas", config.containerName, result);
       return setDockerSchemasCache(
         cacheKey,
         ["public"],
@@ -1540,6 +1546,7 @@ async function fetchPostgresSchemasViaContainerAsync(
   } catch (err) {
     if (isAbortLikeError(err, signal)) throw err;
     if (err instanceof DockerCommandUnavailableError) throw err;
+    reportDockerListFallback("schemas", config.containerName, err);
     return setDockerSchemasCache(
       cacheKey,
       ["public"],

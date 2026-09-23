@@ -8,7 +8,11 @@
 //   (diff-view-fast-path / ai-context-copy で同形だった)
 // - captureErrorAsync(fn): 投げられたエラーのメッセージを取り出す
 //   (投げられた側のメッセージを直接見たいケース向け)
+// - agentPane(over): エージェントのペインの偽データ (エージェント系の 8 つの
+//   テストファイルの 9 か所が全欄を書き写していた。AgentPane に欄が増えたら
+//   ここだけ直す)
 
+import type { AgentPane } from "../core/agent-overview";
 import type { DiffMeta, FileMeta } from "../core/types";
 
 // 同期・非同期どちらの throw も拾う。呼び出しが投げなければテストを失敗させる。
@@ -33,6 +37,29 @@ export function makeDiffMeta(
       deletions: files.reduce((sum, f) => sum + (f.deletions || 0), 0),
     },
     ...overrides,
+  };
+}
+
+/** 既定は /work/sample の claude の、観測の無い待機のペイン。テストが見る欄だけを上書きする。 */
+export function agentPane(
+  over: Partial<AgentPane> & Pick<AgentPane, "id">,
+): AgentPane {
+  return {
+    label: `sample:0.${over.id.slice(1)}`,
+    session: "sample",
+    title: "",
+    command: "claude",
+    path: "/work/sample",
+    kind: "claude",
+    state: "idle",
+    source: null,
+    updatedAt: 0,
+    watchedSince: 0,
+    project: "/work/sample",
+    worktree: "",
+    shownInShell: "",
+    account: null,
+    ...over,
   };
 }
 

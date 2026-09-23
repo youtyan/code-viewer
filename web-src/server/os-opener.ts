@@ -10,6 +10,25 @@ type OpenCommand = {
 
 const OPEN_TIMEOUT_MS = 15_000;
 
+// cmd.exe は /c の後ろをもう一度自分で読み、& | < > ^ を命令の区切りと
+// リダイレクトに、%名前% を環境変数にする。Node も WSL の受け渡しも、空白の
+// 無い引数は引用符で囲まずに渡すので、作業ツリーのフォルダ名 `a&calc` は
+// start の後ろで calc を起こす。そういう文字を含むものは cmd.exe に渡さない
+// (WSL ではこの失敗を持ったまま gio・xdg-open を試す)。
+const CMD_INTERPRETED = /[&|<>^%"\r\n]/;
+
+function cmdStartCommand(target: string, cwd: string): OpenCommand {
+  if (CMD_INTERPRETED.test(target)) {
+    throw Object.assign(
+      new Error(
+        `cmd.exe was not run: it would read part of ${JSON.stringify(target)} as a command (& | < > ^ % " or a line break)`,
+      ),
+      { target, cwd },
+    );
+  }
+  return { args: ["cmd.exe", "/c", "start", "", target], cwd };
+}
+
 function directoryCommands(
   path: string,
   platform: NodeJS.Platform,
@@ -35,7 +54,7 @@ function urlCommands(
     return [{ args: ["open", url], cwd }];
   }
   if (platform === "win32") {
-    return [{ args: ["cmd.exe", "/c", "start", "", url], cwd }];
+    return [cmdStartCommand(url, cwd)];
   }
   return [
     { args: ["xdg-open", url], cwd },
@@ -126,11 +145,10 @@ async function openWslDirectory(path: string): Promise<void> {
       args: ["wslpath", "-w", path],
       cwd: path,
     });
-    const windowsCwd = await wslWindowsCommandCwd(path);
-    const command = {
-      args: ["cmd.exe", "/c", "start", "", windowsPath],
-      cwd: windowsCwd,
-    };
+    const command = cmdStartCommand(
+      windowsPath,
+      await wslWindowsCommandCwd(path),
+    );
     const result = await executeOpenCommand(command);
     if (commandSucceeded(result)) return;
     errors.push(commandResultError(command, result));
@@ -154,11 +172,7 @@ async function openWslDirectory(path: string): Promise<void> {
 async function openWslUrl(url: string, cwd: string): Promise<void> {
   const errors: Error[] = [];
   try {
-    const windowsCwd = await wslWindowsCommandCwd(cwd);
-    const command = {
-      args: ["cmd.exe", "/c", "start", "", url],
-      cwd: windowsCwd,
-    };
+    const command = cmdStartCommand(url, await wslWindowsCommandCwd(cwd));
     const result = await executeOpenCommand(command);
     if (commandSucceeded(result)) return;
     errors.push(commandResultError(command, result));
@@ -191,7 +205,7 @@ export function openDirectoryInOs(
   );
 }
 
-export function openUrlInOs(
+export async function openUrlInOs(
   url: string,
   cwd: string,
   platform: NodeJS.Platform = process.platform,

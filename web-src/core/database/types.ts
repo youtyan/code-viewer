@@ -176,6 +176,8 @@ export type QueryHistoryEntry = {
   executedAt: string;
   executedBy: "user" | "ai";
   source: "cli" | "browser";
+  /** 失敗した問い合わせなら、その理由 (サーバの応答の error)。成功なら無い。 */
+  error?: string;
 };
 
 export type QueryHistoryState = {

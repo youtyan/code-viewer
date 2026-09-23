@@ -5,10 +5,13 @@ import {
   focusSidebarPanel,
   getPanelFocusScope,
   isEditableKeyTarget,
+  isPageKeymapBlockedKey,
+  isPageKeymapBlockedTarget,
   keymapScope,
   restorePanelFocusScope,
   setPanelFocusScope,
 } from "../core/focus-scope";
+import { resolveKeymapAction } from "../core/keymap";
 
 function target(
   tagName: string,
@@ -22,8 +25,14 @@ function target(
 
 describe("focus scope helpers", () => {
   test("detects sidebar and main keymap scopes from the event target", () => {
-    expect(keymapScope(target("BUTTON", { "#sidebar": true }))).toBe("sidebar");
+    // ファイル一覧と変更ファイルの一覧は同じキー (sidebar)。
+    expect(
+      keymapScope(target("BUTTON", { "#sidebar, #file-list": true })),
+    ).toBe("sidebar");
     expect(keymapScope(target("BUTTON", { "#content": true }))).toBe("main");
+    expect(keymapScope(target("BUTTON", { ".main-pane-source": true }))).toBe(
+      "main",
+    );
     expect(keymapScope(target("BODY"))).toBe("global");
   });
 
@@ -42,10 +51,10 @@ describe("focus scope helpers", () => {
       expected: "history",
     },
     {
-      name: "app panel still wins over everything",
+      name: "the Tools / Search tab content wins over #content",
       closest: {
-        "#app-panel": true,
-        "#history-panel, .gdp-file-history-panel": true,
+        "#tools-sheet, #search-sheet": true,
+        "#content": true,
       },
       expected: "panel",
     },
@@ -62,6 +71,99 @@ describe("focus scope helpers", () => {
     expect(isEditableKeyTarget(target("BUTTON"))).toBe(false);
   });
 
+  test.each([
+    ["xterm", { ".xterm": true }, true],
+    ["modal dialog", { '[role="dialog"]:not(.gdp-palette)': true }, true],
+    ["search palette", {}, false],
+    ["ordinary button", {}, false],
+  ])("blocks the page keymap for %s", (_name, closest, expected) => {
+    expect(isPageKeymapBlockedTarget(target("BUTTON", closest))).toBe(expected);
+  });
+
+  // ターミナルは ⌘ (Meta) 付きのキーだけページの keymap に渡す。Ctrl は全部
+  // ターミナルへ。ダイアログは ⌘ も塞ぐ。
+  test.each([
+    {
+      name: "terminal Meta+K",
+      on: ".xterm",
+      key: "k",
+      ctrl: false,
+      meta: true,
+      action: "open-file-palette",
+    },
+    {
+      name: "terminal Meta+G",
+      on: ".xterm",
+      key: "g",
+      ctrl: false,
+      meta: true,
+      action: "open-grep-palette",
+    },
+    {
+      name: "terminal Ctrl+K",
+      on: ".xterm",
+      key: "k",
+      ctrl: true,
+      meta: false,
+      action: null,
+    },
+    {
+      name: "terminal Ctrl+C",
+      on: ".xterm",
+      key: "c",
+      ctrl: true,
+      meta: false,
+      action: null,
+    },
+    {
+      name: "terminal plain k",
+      on: ".xterm",
+      key: "k",
+      ctrl: false,
+      meta: false,
+      action: null,
+    },
+    {
+      name: "dialog Meta+K",
+      on: '[role="dialog"]:not(.gdp-palette)',
+      key: "k",
+      ctrl: false,
+      meta: true,
+      action: null,
+    },
+    {
+      name: "ordinary button Ctrl+K",
+      on: null,
+      key: "k",
+      ctrl: true,
+      meta: false,
+      action: "open-file-palette",
+    },
+  ])("$name reaches the page keymap as $action", ({
+    on,
+    key,
+    ctrl,
+    meta,
+    action,
+  }) => {
+    // xterm は textarea でキーを受ける (編集できる対象)。
+    const el = target("TEXTAREA", on ? { [on]: true } : {});
+    const event = {
+      key,
+      ctrlKey: ctrl,
+      metaKey: meta,
+      altKey: false,
+      shiftKey: false,
+    } as KeyboardEvent;
+    expect(
+      resolveKeymapAction(event, {
+        scope: "global",
+        editable: true,
+        pageKeymapBlocked: isPageKeymapBlockedKey(el, meta),
+      }),
+    ).toBe(action);
+  });
+
   test("stores the active panel focus scope on the document body", () => {
     const doc = { body: { dataset: {} } } as Document;
 
@@ -75,67 +177,71 @@ describe("focus scope helpers", () => {
     expect(getPanelFocusScope(doc)).toBeNull();
   });
 
-  test("panel focus helpers update the visual focus scope", () => {
-    const calls: string[] = [];
-    const sidebar = { focus: () => calls.push("sidebar") };
-    const content = { focus: () => calls.push("content") };
-    const doc = {
-      body: { dataset: {} },
+  // 一覧へのフォーカス: 一覧を出す画面 (body[data-list-column]) は変更ファイルの
+  // 一覧 (#sidebar)、ほかの画面はファイル一覧 (#file-list)。
+  function panelDoc(listColumn: boolean, calls: string[]) {
+    const lists = listColumn
+      ? { root: "#sidebar", rows: "#filelist" }
+      : { root: "#file-list", rows: "#file-list-rows" };
+    return {
+      body: { dataset: {}, hasAttribute: () => listColumn },
       querySelector: (selector: string) => {
         if (
           selector ===
-          "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]"
+          `${lists.rows} li.active[data-path], ${lists.rows} .tree-dir.active[data-dirpath]`
         )
           return null;
-        if (selector === "#sidebar") return sidebar;
-        if (selector === "#content") return content;
+        if (selector === lists.root)
+          return { focus: () => calls.push(lists.root) };
+        if (selector === "#content")
+          return { focus: () => calls.push("content") };
         return null;
       },
     } as unknown as Document;
+  }
+
+  test.each([
+    { listColumn: true, list: "#sidebar" },
+    { listColumn: false, list: "#file-list" },
+  ])("panel focus helpers update the visual focus scope (list column $listColumn → $list)", ({
+    listColumn,
+    list,
+  }) => {
+    const calls: string[] = [];
+    const doc = panelDoc(listColumn, calls);
 
     focusSidebarPanel(doc);
-    expect(calls).toEqual(["sidebar"]);
+    expect(calls).toEqual([list]);
     expect(getPanelFocusScope(doc)).toBe("sidebar");
 
     focusMainPanel(doc);
-    expect(calls).toEqual(["sidebar", "content"]);
+    expect(calls).toEqual([list, "content"]);
     expect(getPanelFocusScope(doc)).toBe("main");
   });
 
   test("restores saved panel focus through the focus helpers", () => {
     const calls: string[] = [];
-    const sidebar = { focus: () => calls.push("sidebar") };
-    const content = { focus: () => calls.push("content") };
-    const doc = {
-      body: { dataset: {} },
-      querySelector: (selector: string) => {
-        if (
-          selector ===
-          "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]"
-        )
-          return null;
-        if (selector === "#sidebar") return sidebar;
-        if (selector === "#content") return content;
-        return null;
-      },
-    } as unknown as Document;
+    const doc = panelDoc(true, calls);
 
     restorePanelFocusScope("main", doc);
     restorePanelFocusScope("sidebar", doc);
     restorePanelFocusScope(null, doc);
 
-    expect(calls).toEqual(["content", "sidebar"]);
+    expect(calls).toEqual(["content", "#sidebar"]);
     expect(getPanelFocusScope(doc)).toBeNull();
   });
 
+  // 「画面に出ているか」は getClientRects で見る (本文の箱は position: fixed
+  // なので offsetParent は常に null。ui-layout.md の「本文の箱」)。
   test("finds a scrollable main-panel target beyond virtual source views", () => {
+    const onScreen = () => [{}] as unknown as DOMRectList;
     const scrollable = {
-      offsetParent: {},
+      getClientRects: onScreen,
       scrollHeight: 500,
       clientHeight: 200,
-    } as HTMLElement;
+    } as unknown as HTMLElement;
     const content = {
-      offsetParent: {},
+      getClientRects: onScreen,
       querySelectorAll: (selector: string) =>
         selector ===
         ".gdp-source-viewer, .gdp-markdown-layout, .gdp-markdown-preview, .d2h-files-diff, .d2h-file-diff"
@@ -145,7 +251,7 @@ describe("focus scope helpers", () => {
     const doc = {
       activeElement: null,
       scrollingElement: {
-        offsetParent: {},
+        getClientRects: onScreen,
         scrollHeight: 1000,
         clientHeight: 400,
       },

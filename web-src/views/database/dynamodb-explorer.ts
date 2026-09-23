@@ -1,3 +1,4 @@
+import { apiUrl } from "../../core/api-url";
 import type {
   DynamoDbAttributeValue,
   DynamoDbExplorerSelection,
@@ -10,6 +11,7 @@ import type {
   DynamoDbTableResponse,
   DynamoDbTablesResponse,
 } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
 import { isImeComposing } from "../../core/keyboard";
 import { formatBytes } from "../../core/source-meta";
 import { createAbortGuard } from "./abort-guard";
@@ -17,6 +19,7 @@ import { createDetailTable } from "./detail-table";
 import { createDetailTabs } from "./detail-tabs";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
+import { reportDatastoreFailure, requireOkResponse } from "./report-failure";
 
 export type DynamoDbExplorerCallbacks = {
   onSelectionChange?: (selection: DynamoDbExplorerSelection) => void;
@@ -126,19 +129,23 @@ function itemKeyToken(key: DynamoDbKey): string {
   return JSON.stringify(sorted);
 }
 
+// 読めなかったときは理由 (JSON.parse の位置つきの文、またはオブジェクトで
+// ないこと) を返し、画面に出す。
 function parseAttributeValuesJson(
   raw: string,
-): Record<string, DynamoDbAttributeValue> | null {
-  if (!raw.trim()) return {};
+  notObject: string,
+): { values: Record<string, DynamoDbAttributeValue> } | { reason: string } {
+  if (!raw.trim()) return { values: {} };
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, DynamoDbAttributeValue>;
-  } catch {
-    return null;
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { reason: formatErrorDetail(err) };
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { reason: notObject };
+  }
+  return { values: parsed as Record<string, DynamoDbAttributeValue> };
 }
 
 export function createDynamoDbExplorer(
@@ -146,6 +153,8 @@ export function createDynamoDbExplorer(
 ): DynamoDbExplorerView {
   const text = (): DbText["explorer"] =>
     (callbacks.getText?.() ?? dbText("en")).explorer;
+  const tFailure = (): DbText["failure"] =>
+    (callbacks.getText?.() ?? dbText("en")).failure;
   const trackLoad = <T>(promise: Promise<T>): Promise<T> =>
     callbacks.trackLoad ? callbacks.trackLoad(promise) : promise;
 
@@ -522,12 +531,19 @@ export function createDynamoDbExplorer(
     copyStatus.setAttribute("aria-live", "polite");
     copyBtn.addEventListener("click", async () => {
       copyStatus.textContent = "";
+      copyStatus.title = "";
       try {
         const key = extractItemKey(item, currentTableInfo?.KeySchema);
         await navigator.clipboard.writeText(JSON.stringify(key));
         copyStatus.textContent = text().dynamodb.copied;
-      } catch {
+      } catch (err) {
         copyStatus.textContent = text().dynamodb.copyFailed;
+        copyStatus.title = reportDatastoreFailure(
+          "DynamoDB",
+          "copy key",
+          err,
+          currentTable,
+        );
       }
     });
     header.append(title, copyBtn, copyStatus);
@@ -536,8 +552,15 @@ export function createDynamoDbExplorer(
     pre.className = "dynamodb-item-source";
     try {
       pre.textContent = JSON.stringify(unwrapItem(item), null, 2);
-    } catch {
-      pre.textContent = String(item);
+    } catch (err) {
+      // 描けなかった理由を、項目の代わりにその場に出す (以前は
+      // String(item) の "[object Object]" を黙って出していた)。
+      pre.textContent = reportDatastoreFailure(
+        "DynamoDB",
+        "item render",
+        err,
+        currentTable,
+      );
     }
     itemBody.appendChild(pre);
   }
@@ -555,12 +578,18 @@ export function createDynamoDbExplorer(
     notifySelectionChange();
   }
 
+  function renderItemStatus(): void {
+    const t = text().common;
+    itemStatus.textContent = `${t.shownCount(cumulativeShownCount.toLocaleString())} / ${t.scannedCount(cumulativeScannedCount.toLocaleString())}`;
+  }
+
   async function loadItems(append: boolean): Promise<void> {
     if (!currentDbId || !currentTable || disposed) return;
     const keyConditionExpression = keyConditionInput.value.trim();
     const filterExpression = filterInput.value.trim();
-    const attributeValues = parseAttributeValuesJson(
+    const parsedValues = parseAttributeValuesJson(
       attributeValuesInput.value,
+      text().dynamodb.attributeValuesNotObject,
     );
     queryError.hidden = true;
     // itemsGuard.start() より前に検証する。start() 後に return すると
@@ -570,11 +599,12 @@ export function createDynamoDbExplorer(
       queryError.textContent = text().dynamodb.keyConditionPlaceholder;
       return;
     }
-    if (attributeValues === null) {
+    if ("reason" in parsedValues) {
       queryError.hidden = false;
-      queryError.textContent = text().dynamodb.invalidAttributeValues;
+      queryError.textContent = `${text().dynamodb.invalidAttributeValues}: ${parsedValues.reason}`;
       return;
     }
+    const attributeValues = parsedValues.values;
     const slot = itemsGuard.start();
     const requestRunId = loadRunId;
     const requestDbId = currentDbId;
@@ -590,7 +620,7 @@ export function createDynamoDbExplorer(
       currentNextToken = undefined;
       cumulativeShownCount = 0;
       cumulativeScannedCount = 0;
-      setPaneStatus(itemList, "Loading items...");
+      setPaneStatus(itemList, text().dynamodb.loadingItems);
     }
     try {
       const params = new URLSearchParams({
@@ -614,16 +644,12 @@ export function createDynamoDbExplorer(
         params.set("exclusiveStartKey", JSON.stringify(currentNextToken));
       }
       const res = await trackLoad(
-        fetch(`/_db/dynamodb/items?${params}`, { signal: slot.signal }),
+        fetch(`${apiUrl("dbDynamodbItems")}?${params}`, {
+          signal: slot.signal,
+        }),
       );
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const errText = await res.text();
-        setPaneStatus(itemList, `Error: ${errText || res.statusText}`, {
-          error: true,
-        });
-        return;
-      }
+      await requireOkResponse(res, tFailure().dynamodbItems);
       const data = (await res.json()) as DynamoDbItemsResponse;
       if (
         disposed ||
@@ -649,13 +675,19 @@ export function createDynamoDbExplorer(
       moreBtn.hidden = !data.lastEvaluatedKey;
       cumulativeShownCount += data.items.length;
       cumulativeScannedCount += data.scannedCount;
-      itemStatus.textContent = `${cumulativeShownCount.toLocaleString()} shown / ${cumulativeScannedCount.toLocaleString()} scanned`;
+      renderItemStatus();
       highlightActiveItem(currentItemKeyToken);
     } catch (err) {
       if (slot.isStale()) return;
       setPaneStatus(
         itemList,
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        reportDatastoreFailure(
+          "DynamoDB",
+          "item list",
+          err,
+          requestTable,
+          requestMode,
+        ),
         { error: true },
       );
     } finally {
@@ -676,16 +708,12 @@ export function createDynamoDbExplorer(
     try {
       const params = new URLSearchParams({ db: requestDbId, table });
       const res = await trackLoad(
-        fetch(`/_db/dynamodb/table?${params}`, { signal: slot.signal }),
+        fetch(`${apiUrl("dbDynamodbTable")}?${params}`, {
+          signal: slot.signal,
+        }),
       );
       if (isStaleRequest()) return;
-      if (!res.ok) {
-        const errText = await res.text();
-        setPaneStatus(structureBody, `Error: ${errText || res.statusText}`, {
-          error: true,
-        });
-        return;
-      }
+      await requireOkResponse(res, tFailure().dynamodbTable);
       const data = (await res.json()) as DynamoDbTableResponse;
       if (isStaleRequest()) return;
       currentTableInfo = data.table;
@@ -697,7 +725,7 @@ export function createDynamoDbExplorer(
       if (isStaleRequest()) return;
       setPaneStatus(
         structureBody,
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        reportDatastoreFailure("DynamoDB", "table describe", err, table),
         { error: true },
       );
     } finally {
@@ -718,10 +746,10 @@ export function createDynamoDbExplorer(
         key: JSON.stringify(key),
       });
       const res = await trackLoad(
-        fetch(`/_db/dynamodb/item?${params}`, { signal: slot.signal }),
+        fetch(`${apiUrl("dbDynamodbItem")}?${params}`, { signal: slot.signal }),
       );
       if (disposed || slot.isStale()) return;
-      if (!res.ok) return;
+      await requireOkResponse(res, tFailure().dynamodbItem);
       const data = (await res.json()) as DynamoDbItemResponse;
       if (
         disposed ||
@@ -734,8 +762,17 @@ export function createDynamoDbExplorer(
         return;
       }
       selectItem(data.item);
-    } catch {
-      // ベストエフォート: 初期選択の復元に失敗しても一覧表示は継続する。
+    } catch (err) {
+      // 初期選択の復元に失敗しても一覧表示は継続する。理由は console に残す。
+      if (!slot.isStale()) {
+        reportDatastoreFailure(
+          "DynamoDB",
+          "item restore",
+          err,
+          requestTable,
+          key,
+        );
+      }
     } finally {
       slot.finish();
     }
@@ -757,7 +794,7 @@ export function createDynamoDbExplorer(
     itemsByKeyToken.clear();
     itemRowsByKeyToken.clear();
     structureBody.innerHTML = "";
-    setPaneStatus(structureBody, "Loading table...");
+    setPaneStatus(structureBody, text().dynamodb.loadingTable);
     itemBody.innerHTML = "";
     setPaneEmpty(itemBody, text().dynamodb.selectItem);
     setDetailTab("structure");
@@ -804,13 +841,12 @@ export function createDynamoDbExplorer(
         exclusiveStartTableName: requestToken,
       });
       const res = await trackLoad(
-        fetch(`/_db/dynamodb/tables?${params}`, { signal: slot.signal }),
+        fetch(`${apiUrl("dbDynamodbTables")}?${params}`, {
+          signal: slot.signal,
+        }),
       );
       if (disposed || slot.isStale() || requestDbId !== currentDbId) return;
-      if (!res.ok) {
-        tableMoreBtn.title = (await res.text()) || res.statusText;
-        return;
-      }
+      await requireOkResponse(res, tFailure().dynamodbTables);
       const data = (await res.json()) as DynamoDbTablesResponse;
       if (disposed || slot.isStale() || requestDbId !== currentDbId) return;
       renderTables(data.tableNames, true);
@@ -819,7 +855,13 @@ export function createDynamoDbExplorer(
       if (currentTable) highlightActiveTable(currentTable);
     } catch (err) {
       if (slot.isStale()) return;
-      tableMoreBtn.title = err instanceof Error ? err.message : String(err);
+      tableMoreBtn.title = reportDatastoreFailure(
+        "DynamoDB",
+        "table list page",
+        err,
+        requestDbId,
+        requestToken,
+      );
     } finally {
       slot.finish();
       if (!slot.isStale()) tableMoreBtn.disabled = false;
@@ -882,21 +924,15 @@ export function createDynamoDbExplorer(
     itemBody.innerHTML = "";
     setPaneEmpty(itemBody, text().dynamodb.selectItem);
     setDetailTab("structure");
-    setPaneStatus(tableList, "Loading tables...");
+    setPaneStatus(tableList, text().dynamodb.loadingTables);
     try {
       const res = await trackLoad(
-        fetch(`/_db/dynamodb/tables?db=${encodeURIComponent(dbId)}`, {
+        fetch(`${apiUrl("dbDynamodbTables")}?db=${encodeURIComponent(dbId)}`, {
           signal: slot.signal,
         }),
       );
       if (disposed || slot.isStale()) return;
-      if (!res.ok) {
-        const errText = await res.text();
-        setPaneStatus(tableList, `Error: ${errText || res.statusText}`, {
-          error: true,
-        });
-        return;
-      }
+      await requireOkResponse(res, tFailure().dynamodbTables);
       const data = (await res.json()) as DynamoDbTablesResponse;
       if (
         disposed ||
@@ -924,8 +960,14 @@ export function createDynamoDbExplorer(
           try {
             const key = JSON.parse(initial.itemKey) as DynamoDbKey;
             await selectItemByKey(key);
-          } catch {
-            // 保存済み itemKey が壊れていても致命的ではないので無視する。
+          } catch (err) {
+            // 保存済み itemKey が壊れていても一覧は出す。理由は console に残す。
+            reportDatastoreFailure(
+              "DynamoDB",
+              "saved item key",
+              err,
+              initial.itemKey,
+            );
           }
         }
         // selectItemByKey() (→ selectItem()) はアイテム復元のため常に "item"
@@ -940,7 +982,7 @@ export function createDynamoDbExplorer(
       if (slot.isStale()) return;
       setPaneStatus(
         tableList,
-        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        reportDatastoreFailure("DynamoDB", "table list", err, dbId),
         { error: true },
       );
     } finally {
@@ -1029,6 +1071,7 @@ export function createDynamoDbExplorer(
     else setPaneEmpty(structureBody, t.dynamodb.selectTable);
     if (lastRenderedItem) renderItemDetail(lastRenderedItem);
     else setPaneEmpty(itemBody, t.dynamodb.selectItem);
+    if (itemStatus.textContent) renderItemStatus();
   }
 
   return {

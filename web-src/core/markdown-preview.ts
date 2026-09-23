@@ -3,6 +3,10 @@ import type Renderer from "markdown-it/lib/renderer.mjs";
 import type Token from "markdown-it/lib/token.mjs";
 import markdownItAnchor from "markdown-it-anchor";
 import markdownItFootnote from "markdown-it-footnote";
+import { pageLanguage } from "../views/page-language";
+import { MARKDOWN_PREVIEW_TEXT } from "../views/source-preview-i18n";
+import { showCopyFailure } from "./copy-failure";
+import { errorWithCause, formatErrorDetail } from "./error-detail";
 import { CHECK_16_PATHS, COPY_16_PATHS, iconSvg } from "./icons";
 import { isImeComposing } from "./keyboard";
 import { buildRawFileUrl, type SourceFileTarget } from "./routes";
@@ -130,7 +134,7 @@ export function markdownSlugify(text: string): string {
 export function resolveMarkdownLinkTarget(
   currentPath: string,
   href: string,
-): Omit<MarkdownNavigationTarget, "ref"> | null {
+): (Omit<MarkdownNavigationTarget, "ref"> & { decodeError?: Error }) | null {
   if (!href || href.startsWith("#")) return null;
   if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) return null;
   const hashAt = href.indexOf("#");
@@ -140,15 +144,23 @@ export function resolveMarkdownLinkTarget(
     "",
   );
   if (!cleanHref) return null;
-  const path = resolveRepoRelative(
-    currentPath,
-    decodeUriComponentSafe(cleanHref),
-  );
+  const decodedPath = decodeUriComponentAsWritten(cleanHref);
+  const path = resolveRepoRelative(currentPath, decodedPath.value);
   if (path == null) return null;
+  const decodedHash = decodeUriComponentAsWritten(hash);
+  const decodeError = decodedPath.error ?? decodedHash.error;
   return {
     path,
-    hash: decodeUriComponentSafe(hash),
+    hash: decodedHash.value,
     directory: cleanHref.endsWith("/"),
+    ...(decodeError
+      ? {
+          decodeError: errorWithCause(
+            `markdown link "${href}" has invalid percent-encoding; it is used as written`,
+            decodeError,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -166,12 +178,16 @@ export function resolveMarkdownAssetPath(
 }
 
 /** Markdown 内の href/fragment は手書きなので、壊れた %xx で
- * decodeURIComponent が投げてもリンク解決ごと落とさない。 */
-function decodeUriComponentSafe(value: string): string {
+ * decodeURIComponent が投げてもリンク解決ごと落とさず書かれたまま使う。
+ * 失敗は呼び出し側が表示できるよう元の例外ごと返す。 */
+function decodeUriComponentAsWritten(value: string): {
+  value: string;
+  error?: unknown;
+} {
   try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
+    return { value: decodeURIComponent(value) };
+  } catch (error) {
+    return { value, error };
   }
 }
 
@@ -230,8 +246,13 @@ function createMarkdownIt(
             themes: { light: "github-light", dark: "github-dark" },
             defaultColor: false,
           });
-        } catch {
-          // Fall through to escaped code.
+        } catch (error) {
+          const failure = errorWithCause(
+            `syntax highlighting failed for a ${language} code block; showing it as plain text`,
+            error,
+          );
+          console.error(failure);
+          return `<pre class="gdp-highlight-failed" title="${md.utils.escapeHtml(formatErrorDetail(failure))}"><code>${md.utils.escapeHtml(code)}</code></pre>`;
         }
       }
       return `<pre><code>${md.utils.escapeHtml(code)}</code></pre>`;
@@ -417,6 +438,11 @@ function createMarkdownIt(
       token.attrSet("data-gdp-md-ref", target.ref || "worktree");
       if (link.hash) token.attrSet("data-gdp-md-hash", link.hash);
       if (link.directory) token.attrSet("data-gdp-md-dir", "1");
+      if (link.decodeError) {
+        console.error(link.decodeError);
+        token.attrSet("title", formatErrorDetail(link.decodeError));
+        token.attrJoin("class", "mkdp-link-decode-failed");
+      }
     } else if (/^(?:https?:)?\/\//i.test(href)) {
       token.attrSet("target", "_blank");
       token.attrSet("rel", "noopener noreferrer");
@@ -533,8 +559,9 @@ function enhanceCodeBlocks(root: HTMLElement) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "mkdp-code-copy";
-    button.setAttribute("aria-label", "Copy code");
-    button.title = "Copy code";
+    const label = MARKDOWN_PREVIEW_TEXT[pageLanguage()].copyCode;
+    button.setAttribute("aria-label", label);
+    button.title = label;
     button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
     button.addEventListener("click", async () => {
       try {
@@ -543,9 +570,14 @@ function enhanceCodeBlocks(root: HTMLElement) {
         window.setTimeout(() => {
           button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
         }, 1500);
-      } catch {
-        // Clipboard access can fail in insecure contexts; leave the button
-        // untouched rather than spamming the console.
+      } catch (error) {
+        showCopyFailure(
+          button,
+          "copying the code block failed",
+          error,
+          label,
+          1500,
+        );
       }
     });
     pre.appendChild(button);
@@ -570,7 +602,10 @@ function createMarkdownToc(
 ): HTMLElement {
   const nav = document.createElement("nav");
   nav.className = "gdp-markdown-toc table-of-contents";
-  nav.setAttribute("aria-label", "Markdown contents");
+  nav.setAttribute(
+    "aria-label",
+    MARKDOWN_PREVIEW_TEXT[pageLanguage()].contents,
+  );
   const list = document.createElement("ul");
   entries.forEach((entry) => {
     const item = document.createElement("li");
@@ -608,9 +643,30 @@ function wireMarkdownInteractions(
       directory: link.dataset.gdpMdDir === "1",
     });
   });
+  // 同じ文書の中の見出しへのリンク (本文の `[…](#見出し)`)。ブラウザに任せると、
+  // # が変わったあとの popstate で画面を描き直してスクロールが先頭へ戻り、押しても
+  // 動かなかった。目次と同じく自分で送る (貼り付くファイルの見出しの下に潜らない)。
+  root.addEventListener("click", (e) => {
+    const link = (e.target as Element | null)?.closest<HTMLAnchorElement>(
+      'a[href^="#"]:not([data-target])',
+    );
+    if (!link || !root.contains(link)) return;
+    const id = decodeHashFragment(link.getAttribute("href") || "");
+    const section = id
+      ? root.querySelector<HTMLElement>(`#${CSS.escape(id)}`)
+      : null;
+    if (!section) return;
+    e.preventDefault();
+    history.replaceState(
+      history.state,
+      "",
+      `#${encodeURIComponent(section.id)}`,
+    );
+    scrollMarkdownSectionIntoView(section, "smooth");
+  });
   setupMarkdownScrollSpy(root);
   setupMermaidLightbox(root);
-  renderMermaidDiagrams(root);
+  void renderMermaidDiagrams(root);
 }
 
 function setupMarkdownScrollSpy(root: HTMLElement) {
@@ -712,7 +768,18 @@ function scrollInitialMarkdownHash(root: HTMLElement) {
 }
 
 function decodeHashFragment(hash: string): string {
-  return decodeUriComponentSafe(hash.startsWith("#") ? hash.slice(1) : hash);
+  const decoded = decodeUriComponentAsWritten(
+    hash.startsWith("#") ? hash.slice(1) : hash,
+  );
+  if (decoded.error) {
+    console.error(
+      errorWithCause(
+        `location hash "${hash}" has invalid percent-encoding; it is used as written`,
+        decoded.error,
+      ),
+    );
+  }
+  return decoded.value;
 }
 
 /** プレビューが独自のスクロール領域 (tools ドロワーの出力ペインなど) に
@@ -729,6 +796,32 @@ function scrollableAncestor(element: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/**
+ * 箱の中で上に貼り付くファイルの見出しが、貼り付いたときに箱の上端から覆う高さ
+ * (箱の上の余白 + 貼り付く位置 `top` + 見出しの高さ。貼り付く位置は箱の余白の
+ * 内側から数える)。本文が自分の箱 (#content) でスクロールするようになってから、
+ * 目次で送った見出しが箱の上端から 12px の所、つまり貼り付いたファイルの見出しの
+ * 下に隠れていた。
+ */
+function stickyCoverInside(container: HTMLElement): number {
+  const padding = Number.parseFloat(getComputedStyle(container).paddingTop);
+  let cover = 0;
+  for (const header of container.querySelectorAll<HTMLElement>(
+    ".gdp-file-detail-sticky",
+  )) {
+    const style = getComputedStyle(header);
+    if (style.position !== "sticky" || style.display === "none") continue;
+    const top = Number.parseFloat(style.top);
+    cover = Math.max(
+      cover,
+      (Number.isFinite(padding) ? padding : 0) +
+        (Number.isFinite(top) ? top : 0) +
+        header.getBoundingClientRect().height,
+    );
+  }
+  return cover;
+}
+
 function scrollMarkdownSectionIntoView(
   section: HTMLElement,
   behavior: ScrollBehavior,
@@ -739,6 +832,7 @@ function scrollMarkdownSectionIntoView(
       section.getBoundingClientRect().top -
       container.getBoundingClientRect().top +
       container.scrollTop -
+      stickyCoverInside(container) -
       12;
     container.scrollTo({ top: Math.max(0, top), behavior });
     return;
@@ -754,7 +848,7 @@ function scrollMarkdownSectionIntoView(
 function markdownAnchorOffset(): number {
   const bottoms = Array.from(
     document.querySelectorAll<HTMLElement>(
-      "#global-header, .gdp-file-detail-sticky",
+      "#main-tabs, .gdp-file-detail-sticky",
     ),
   )
     .map((element) => {
@@ -795,12 +889,21 @@ async function renderMermaidDiagrams(root: HTMLElement) {
     root.querySelectorAll<HTMLElement>(".markdown-body .mermaid"),
   );
   if (!nodes.length) return;
-  const mermaid = await loadMermaid();
-  if (!mermaid) return;
+  let mermaid: MermaidApi;
+  try {
+    mermaid = await loadMermaid();
+  } catch (error) {
+    const failure = errorWithCause("loading Mermaid failed", error);
+    console.error(failure);
+    for (const node of nodes) renderMermaidErrorDetail(node, failure);
+    return;
+  }
+  let runFailure: Error | null = null;
   try {
     await mermaid.run({ nodes, suppressErrors: true });
-  } catch {
-    // Error details are rendered per node below.
+  } catch (error) {
+    runFailure = errorWithCause("rendering Mermaid diagrams failed", error);
+    console.error(runFailure);
   }
   for (const node of nodes) {
     if (
@@ -808,7 +911,7 @@ async function renderMermaidDiagrams(root: HTMLElement) {
       !isMermaidErrorSvg(node.querySelector("svg"))
     )
       continue;
-    await renderMermaidError(node, mermaid);
+    await renderMermaidError(node, mermaid, runFailure);
   }
 }
 
@@ -816,31 +919,46 @@ function isMermaidErrorSvg(svg: SVGSVGElement | null): boolean {
   return !!svg && /Syntax error/i.test(svg.textContent || "");
 }
 
-async function renderMermaidError(node: HTMLElement, mermaid: MermaidApi) {
+async function renderMermaidError(
+  node: HTMLElement,
+  mermaid: MermaidApi,
+  runFailure: Error | null,
+) {
   const src = node.dataset.gdpMermaidSource || node.textContent || "";
-  let detail = "";
+  let detail = runFailure ? formatErrorDetail(runFailure) : "";
   if (src && mermaid.parse) {
     try {
       await mermaid.parse(src);
-      detail = "Mermaid could not render this diagram.";
+      detail ||= MARKDOWN_PREVIEW_TEXT[pageLanguage()].mermaidRenderFailed;
     } catch (err) {
-      detail = err instanceof Error ? err.message : String(err);
+      detail = [formatErrorDetail(err), detail].filter(Boolean).join("\n\n");
     }
   }
+  renderMermaidErrorDetail(node, detail);
+}
+
+function renderMermaidErrorDetail(node: HTMLElement, failure: Error | string) {
+  const src = node.dataset.gdpMermaidSource || node.textContent || "";
+  const detail =
+    typeof failure === "string" ? failure : formatErrorDetail(failure);
+  const text = MARKDOWN_PREVIEW_TEXT[pageLanguage()];
   const wrap = document.createElement("div");
   wrap.className = "mkdp-mermaid-error";
   const title = document.createElement("div");
   title.className = "mkdp-mermaid-error-title";
-  title.textContent = "Mermaid syntax error";
+  title.textContent =
+    typeof failure === "string"
+      ? text.mermaidSyntaxError
+      : text.mermaidLoadFailed;
   const pre = document.createElement("pre");
   pre.className = "mkdp-mermaid-error-detail";
-  pre.textContent = detail || "No detail available.";
+  pre.textContent = detail || text.noDetail;
   wrap.append(title, pre);
   if (src) {
     const details = document.createElement("details");
     details.className = "mkdp-mermaid-error-srcwrap";
     const summary = document.createElement("summary");
-    summary.textContent = "source";
+    summary.textContent = text.source;
     const source = document.createElement("pre");
     source.className = "mkdp-mermaid-error-source";
     source.textContent = src;
@@ -863,14 +981,19 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
   const toolbar = document.createElement("div");
   toolbar.className = "mkdp-lightbox-toolbar";
   overlay.appendChild(toolbar);
+  const text = MARKDOWN_PREVIEW_TEXT[pageLanguage()];
   const hint = document.createElement("div");
   hint.className = "mkdp-lightbox-hint";
-  hint.textContent =
-    "drag to pan · wheel to zoom · double-click to fit · ESC to close";
+  hint.textContent = text.lightboxHint;
   overlay.appendChild(hint);
   document.body.appendChild(overlay);
 
   const bbox = safeSvgBox(svg);
+  if (bbox.error) {
+    console.error(bbox.error);
+    hint.textContent += text.sizeEstimated;
+    hint.title = formatErrorDetail(bbox.error);
+  }
   let scale = 1;
   let tx = 0;
   let ty = 0;
@@ -916,10 +1039,10 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
     window.removeEventListener("resize", fitImage);
     overlay.remove();
   };
-  button("+", "zoom in", () => zoomCentered(1.25));
-  button("-", "zoom out", () => zoomCentered(1 / 1.25));
-  button("fit", "fit", fitImage);
-  button("x", "close", close);
+  button("+", text.zoomIn, () => zoomCentered(1.25));
+  button("-", text.zoomOut, () => zoomCentered(1 / 1.25));
+  button("fit", text.fit, fitImage);
+  button("x", text.close, close);
 
   overlay.addEventListener(
     "wheel",
@@ -972,7 +1095,12 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
   fitImage();
 }
 
-function safeSvgBox(svg: SVGSVGElement): { width: number; height: number } {
+function safeSvgBox(svg: SVGSVGElement): {
+  width: number;
+  height: number;
+  error?: Error;
+} {
+  let error: Error | undefined;
   try {
     const box = svg.getBBox();
     if (box.width > 0 && box.height > 0) {
@@ -984,9 +1112,12 @@ function safeSvgBox(svg: SVGSVGElement): { width: number; height: number } {
       svg.setAttribute("height", String(box.height));
       return { width: box.width, height: box.height };
     }
-  } catch {
-    // Use layout fallback below.
+  } catch (cause) {
+    error = errorWithCause(
+      "measuring the diagram failed; using its layout size",
+      cause,
+    );
   }
   const rect = svg.getBoundingClientRect();
-  return { width: rect.width || 800, height: rect.height || 600 };
+  return { width: rect.width || 800, height: rect.height || 600, error };
 }

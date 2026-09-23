@@ -20,6 +20,8 @@ export type TmuxPane = {
   /** そのペインで動いているコマンド名 (`zsh`, `node`, ...)。 */
   command: string;
   path: string;
+  /** ペインで最初に起動したプロセス (ふつうはシェル) の pid。 */
+  pid: number;
   /** 桁数と行数。xterm 側をこのサイズに合わせると capture がずれない。 */
   width: number;
   height: number;
@@ -68,6 +70,30 @@ export type TmuxClient = {
   session: string;
   /** 見ているペイン。 */
   pane: TmuxPaneId;
+  /** 見ているウインドウ (`@3`)。読めなかった行には無い。 */
+  windowId?: string;
+  /** その端末の大きさと、見ているウインドウの大きさ。読めなかった行には無い。 */
+  window?: TmuxClientWindow;
+};
+
+/**
+ * 端末 (tmux のクライアント) の大きさと、そこに映っているウインドウの大きさ。
+ *
+ * tmux のウインドウは 1 つの大きさしか持てない。同じセッションを大きさの違う
+ * 端末で開いていると (`window-size smallest` など)、小さい方に合わせたウインドウの
+ * 外側を tmux が点で埋める。アプリの端末がその点を覆うための材料
+ * (views/terminal/tmux-cover.ts)。単位は桁と行。
+ */
+export type TmuxClientWindow = {
+  clientCols: number;
+  clientRows: number;
+  windowCols: number;
+  windowRows: number;
+  /** ステータスの行数 (tmux の `status`: off = 0、on = 1、2〜5)。 */
+  statusLines: number;
+  statusAt: "top" | "bottom";
+  /** そのセッションに繋がっている端末の数 (自分を含む)。 */
+  sessionClients: number;
 };
 
 export type TmuxClientsResponse = {

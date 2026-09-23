@@ -1,11 +1,17 @@
+import { apiUrl } from "../core/api-url";
+import { formatErrorDetail } from "../core/error-detail";
+
 // Search results sheet: the result list of the Ctrl+G palette, kept open in the
-// bottom panel (third tab next to Terminal / Tools) so it survives opening
-// files. The query travels in the URL (?results=) and is re-run on reload.
+// Search tab of the main area so it survives opening files. The query travels
+// in the URL (/search?q=) and is re-run on reload.
 // Toggles (regex / match case / whole word / no test) are the same persisted
 // settings the palette uses, so both always search the same way.
 
+import { SEARCH_16_PATH } from "../core/icons";
+import { linkOpenIntent, type OpenIntent } from "../core/link-click";
 import { buildGrepRequestParams, parseGrepQuery } from "../core/search-palette";
 import type { GrepResponse } from "../core/types";
+import { renderEmptyState } from "./empty-state";
 import {
   type SearchPaletteLanguage,
   searchPaletteText,
@@ -30,8 +36,14 @@ export type SearchResultsViewDeps = {
     grepWholeWord?: boolean;
     hideTests?: boolean;
   }): Promise<void>;
-  /** Opens one hit (file at line, with the hit text to mark). */
-  openMatch(match: { path: string; line: number; hl?: string }): void;
+  /**
+   * Opens one hit (file at line, with the hit text to mark). intent is how it
+   * was pressed (the tab rules in ui-surface.md: preview / kept tab / other side).
+   */
+  openMatch(
+    match: { path: string; line: number; hl?: string },
+    intent: OpenIntent,
+  ): void;
   /** Fired when a search runs; the app mirrors the query into the URL. */
   onQueryChange?(query: string): void;
 };
@@ -55,6 +67,8 @@ export function createSearchResultsView(
   let controls: HTMLElement | null = null;
   let status: HTMLElement | null = null;
   let list: HTMLElement | null = null;
+  /** 検索する前の案内 (一覧 role=listbox の外に置く)。 */
+  let idle: HTMLElement | null = null;
   let query = "";
   let controller: AbortController | null = null;
   let generation = 0;
@@ -103,9 +117,7 @@ export function createSearchResultsView(
       if (status)
         status.textContent = text().saveFailed(
           text().regexMode,
-          err instanceof Error && err.message
-            ? err.message
-            : text().unknownError,
+          formatErrorDetail(err),
         );
     } finally {
       settingsPending = false;
@@ -182,15 +194,34 @@ export function createSearchResultsView(
     list = document.createElement("div");
     list.className = "gdp-palette-list search-results-list";
     list.setAttribute("role", "listbox");
-    el.append(head, controls, status, list);
+    idle = document.createElement("div");
+    idle.className = "search-results-idle";
+    el.append(head, controls, status, idle, list);
     localize();
   }
 
   function renderResults(): void {
-    if (!list || !status) return;
+    if (!list || !status || !idle) return;
     list.replaceChildren();
+    idle.replaceChildren();
     if (!lastResponse) {
-      status.textContent = text().resultsIdle;
+      // 検索する前: 何をするか (一行と補足) と主なキー。件数の欄は空。
+      const current = text();
+      status.textContent = "";
+      idle.appendChild(
+        renderEmptyState({
+          icon: SEARCH_16_PATH,
+          title: current.resultsIdle,
+          hint: current.resultsIdleHint,
+          keys: [
+            { keys: "Enter", label: current.resultsIdleKeys.run },
+            { keys: "⌘G", label: current.resultsIdleKeys.anywhere },
+            { keys: "⌘K", label: current.resultsIdleKeys.openFile },
+          ],
+          keysLabel: current.resultsIdleKeysLabel,
+          compact: true,
+        }),
+      );
       return;
     }
     const { response, term } = lastResponse;
@@ -232,15 +263,20 @@ export function createSearchResultsView(
         detail.className = "gdp-palette-row-detail";
         detail.textContent = match.preview;
         row.append(title, detail);
-        row.addEventListener("click", () => {
+        const openRow = (event: MouseEvent) => {
+          const intent = linkOpenIntent(event);
+          if (intent === null) return;
+          event.preventDefault();
           setActiveRow(key);
           const hl = match.matchText || (deps.getGrepRegex() ? "" : term);
-          deps.openMatch({
-            path: match.path,
-            line: match.line,
-            ...(hl ? { hl } : {}),
-          });
-        });
+          deps.openMatch(
+            { path: match.path, line: match.line, ...(hl ? { hl } : {}) },
+            intent,
+          );
+        };
+        row.addEventListener("click", openRow);
+        row.addEventListener("auxclick", openRow);
+        row.addEventListener("dblclick", openRow);
         rows.appendChild(row);
       }
       group.append(heading, rows);
@@ -291,15 +327,15 @@ export function createSearchResultsView(
     controller = abort;
     void deps
       .trackLoad<GrepResponse>(
-        fetch(`/_grep?${params.toString()}`, { signal: abort.signal }).then(
-          async (r) => {
-            if (!r.ok)
-              throw new Error(
-                `grep request failed (${r.status}): ${await r.text()}`,
-              );
-            return r.json();
-          },
-        ),
+        fetch(`${apiUrl("grep")}?${params.toString()}`, {
+          signal: abort.signal,
+        }).then(async (r) => {
+          if (!r.ok)
+            throw new Error(
+              `grep request failed (${r.status}): ${await r.text()}`,
+            );
+          return r.json();
+        }),
       )
       .then((response) => {
         if (myGeneration !== generation || abort.signal.aborted) return;
@@ -335,18 +371,17 @@ export function createSearchResultsView(
         lastResponse = null;
         renderResults();
         if (status)
-          status.textContent = text().searchFailed(
-            err instanceof Error && err.message
-              ? err.message
-              : text().unknownError,
-          );
+          status.textContent = text().searchFailed(formatErrorDetail(err));
       });
   }
 
   function localize(): void {
     if (!mounted) return;
     const current = text();
-    if (input) input.placeholder = current.resultsPlaceholder;
+    if (input) {
+      input.placeholder = current.resultsPlaceholder;
+      input.setAttribute("aria-label", current.resultsPlaceholder);
+    }
     if (runButton) {
       runButton.textContent = current.resultsRun;
       runButton.title = current.resultsRun;

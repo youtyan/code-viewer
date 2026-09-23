@@ -1,4 +1,6 @@
+import { formatErrorDetail } from "../core/error-detail";
 import type { AppSettingsState } from "../core/types";
+import { splitSettingsPatch, withUserSettings } from "../core/user-settings";
 import {
   dispatchRoutes,
   handleError,
@@ -8,6 +10,13 @@ import {
   textError,
 } from "./database/handle-shared";
 import {
+  backupMainTabs,
+  loadMainTabs,
+  MainTabsStoreError,
+  mainTabsPath,
+  saveMainTabs,
+} from "./main-tabs-store";
+import {
   loadAppSettingsState,
   loadToolsState,
   loadViewState,
@@ -15,6 +24,12 @@ import {
   patchToolsState,
   patchViewState,
 } from "./state-store";
+import {
+  ensureUserSettings,
+  patchUserSettings,
+  UserSettingsError,
+  userSettingsPath,
+} from "./user-settings";
 
 const MAX_STATE_PATCH_BODY_BYTES = 1_000_000;
 // tools の下書きは 1 ツール 200,000 コード単位 × 3 ツールで、UTF-8 では最悪
@@ -60,16 +75,57 @@ async function handleStatePatch<T>(
     const message = err instanceof Error ? err.message : String(err);
     if (message === tooLargeMessage) return textError(message, 413);
     console.error("[code-viewer] state error:", err);
-    return textError(saveFailedMessage, 500);
+    // 理由を捨てない。画面の保存失敗の表示 (reportPersistenceError) に全文が出る。
+    return textError(`${saveFailedMessage}: ${formatErrorDetail(err)}`, 500);
+  }
+}
+
+/**
+ * 画面に返す設定。人に付く項目はユーザー単位の設定 (user-settings.ts) から、
+ * それ以外はリポジトリの設定から。ユーザー単位の設定が壊れていれば
+ * リポジトリの設定で表示し、読めない理由を userSettingsError で返す。
+ */
+async function settingsForScreen(cwd: string): Promise<AppSettingsState> {
+  const repo = await loadAppSettingsState(cwd);
+  try {
+    return withUserSettings(
+      repo,
+      await ensureUserSettings(userSettingsPath(), repo),
+    );
+  } catch (error) {
+    if (!(error instanceof UserSettingsError)) throw error;
+    console.error("[code-viewer] user settings are not used:", error);
+    return { ...repo, userSettingsError: formatErrorDetail(error) };
   }
 }
 
 async function handleSettingsGet(cwd: string): Promise<Response> {
   return jsonLoadResponse(
-    () => loadAppSettingsState(cwd),
+    () => settingsForScreen(cwd),
     "state",
     "failed to load settings state",
   );
+}
+
+/** 人に付く項目はユーザー単位へ、残りはリポジトリの設定へ書く。 */
+async function patchSettingsForScreen(
+  cwd: string,
+  patch: unknown,
+): Promise<AppSettingsState> {
+  const { user, repo } = splitSettingsPatch(
+    patch && typeof patch === "object" && !Array.isArray(patch)
+      ? (patch as Record<string, unknown>)
+      : {},
+  );
+  const repoState =
+    Object.keys(repo).length > 0
+      ? await patchAppSettingsState(cwd, repo)
+      : await loadAppSettingsState(cwd);
+  const userState =
+    Object.keys(user).length > 0
+      ? await patchUserSettings(userSettingsPath(), user, repoState)
+      : await ensureUserSettings(userSettingsPath(), repoState);
+  return withUserSettings(repoState, userState);
 }
 
 async function handleSettingsPatch(
@@ -80,7 +136,7 @@ async function handleSettingsPatch(
   return handleStatePatch(
     cwd,
     req,
-    patchAppSettingsState,
+    patchSettingsForScreen,
     "settings state too large",
     "failed to save settings state",
     MAX_STATE_PATCH_BODY_BYTES,
@@ -126,6 +182,106 @@ async function handleToolsPatch(cwd: string, req: Request): Promise<Response> {
   );
 }
 
+/**
+ * メインの面のタブの配置 (全プロジェクト共通) と版の番号、この裏の根 (画面が
+ * タブの持ち物のプロジェクトに使う)。前の版の保存なら移してから返す (migration)。
+ */
+async function handleTabsGet(cwd: string): Promise<Response> {
+  try {
+    const loaded = await loadMainTabs(mainTabsPath());
+    switch (loaded.kind) {
+      case "none":
+        return json({ root: cwd, layout: null, rev: null });
+      case "newer":
+        return json({
+          root: cwd,
+          layout: null,
+          rev: null,
+          newer: loaded.version,
+        });
+      case "ok":
+        return json({
+          root: cwd,
+          layout: loaded.layout,
+          rev: loaded.rev,
+          ...(loaded.migration ? { migration: loaded.migration } : {}),
+        });
+    }
+  } catch (error) {
+    console.error("[code-viewer] main tabs are not loaded:", error);
+    return textError(
+      `failed to load main tabs: ${formatErrorDetail(error)}`,
+      500,
+    );
+  }
+}
+
+/**
+ * 配置を書く。本文は `{ baseRev, base, layout }` (MainTabsWrite)。別の窓が先に
+ * 書いていれば重ねて書き、重ねた値を返す。新しい版のファイルは書かない (409)。
+ */
+async function handleTabsPut(req: Request): Promise<Response> {
+  const body = await parseJsonBody(req, MAX_STATE_PATCH_BODY_BYTES);
+  if (body instanceof Response) return body;
+  if (!body || typeof body !== "object" || !("layout" in body))
+    return textError("main tabs body has no layout", 400);
+  const rawRev = "baseRev" in body ? body.baseRev : undefined;
+  const baseRev =
+    rawRev === null
+      ? null
+      : typeof rawRev === "number" && Number.isInteger(rawRev) && rawRev >= 0
+        ? rawRev
+        : undefined;
+  if (baseRev === undefined)
+    return textError(
+      `main tabs body has a bad baseRev: ${JSON.stringify(rawRev)}`,
+      400,
+    );
+  const base = "base" in body ? body.base : undefined;
+  if (base === undefined)
+    return textError("main tabs body has no base (null when unknown)", 400);
+  let saved: Awaited<ReturnType<typeof saveMainTabs>>;
+  try {
+    saved = await saveMainTabs(mainTabsPath(), {
+      baseRev,
+      base,
+      layout: body.layout,
+    });
+  } catch (error) {
+    console.error("[code-viewer] main tabs are not saved:", error);
+    return textError(
+      `failed to save main tabs: ${formatErrorDetail(error)}`,
+      error instanceof MainTabsStoreError && error.code === "invalid-input"
+        ? 400
+        : 500,
+    );
+  }
+  if (saved.kind === "newer")
+    return textError(
+      `the saved main tabs were written by a newer version (file version ${saved.version}); they are not overwritten`,
+      409,
+    );
+  return json({
+    rev: saved.rev,
+    layout: saved.layout,
+    merged: saved.merged,
+    ...(saved.migration ? { migration: saved.migration } : {}),
+  });
+}
+
+/** 画面が読めなかった保存値を上書きの前に退避する。写した先のパスを返す。 */
+async function handleTabsBackup(): Promise<Response> {
+  try {
+    return json({ backup: await backupMainTabs(mainTabsPath()) });
+  } catch (error) {
+    console.error("[code-viewer] main tabs are not backed up:", error);
+    return textError(
+      `failed to back up main tabs: ${formatErrorDetail(error)}`,
+      500,
+    );
+  }
+}
+
 export async function handleStateRoute(
   req: Request,
   url: URL,
@@ -150,6 +306,17 @@ export async function handleStateRoute(
         sideEffect: (method) => method !== "GET",
         handler: () =>
           req.method === "GET" ? handleViewGet(cwd) : handleViewPatch(cwd, req),
+      },
+      "/_state/tabs": {
+        methods: ["GET", "PUT"],
+        sideEffect: (method) => method !== "GET",
+        handler: () =>
+          req.method === "GET" ? handleTabsGet(cwd) : handleTabsPut(req),
+      },
+      "/_state/tabs/backup": {
+        methods: ["POST"],
+        sideEffect: () => true,
+        handler: () => handleTabsBackup(),
       },
       "/_state/tools": {
         methods: ["GET", "PATCH"],

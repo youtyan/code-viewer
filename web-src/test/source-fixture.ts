@@ -22,6 +22,13 @@ function normalizeSourceText(text: string): string {
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
     if (quote) {
+      // ' と " の文字列は行をまたがない。またいで見えるのは正規表現の中の
+      // 引用符 (/[&<>"']/ など) なので、行の終わりで文字列を閉じる。
+      if (char === "\n" && quote !== "`") {
+        quote = null;
+        index--;
+        continue;
+      }
       if (char === "\\") {
         output += char;
         if (index + 1 < source.length) output += source[++index];
@@ -33,6 +40,18 @@ function normalizeSourceText(text: string): string {
         continue;
       }
       output += char;
+      continue;
+    }
+    // コメントは読み飛ばす (コメントの中のアポストロフィを引用符と数えると、
+    // それより後ろのソース全体の引用符の対がずれ、無関係な検査が落ちる)。
+    if (char === "/" && source[index + 1] === "/") {
+      const end = source.indexOf("\n", index);
+      index = end === -1 ? source.length : end - 1;
+      continue;
+    }
+    if (char === "/" && source[index + 1] === "*") {
+      const end = source.indexOf("*/", index + 2);
+      index = end === -1 ? source.length : end + 1;
       continue;
     }
     if (char === "'" || char === '"' || char === "`") {

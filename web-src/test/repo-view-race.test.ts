@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { RepoTreeResponse, SidebarItem } from "../core/types";
 import { createRepoView, type RepoViewDeps } from "../views/repo-view";
@@ -40,7 +40,7 @@ function installNullDocument() {
 function installFilelistDocument(hasEntries: () => boolean) {
   globalThis.document = {
     querySelector: (selector: string) =>
-      selector === "#filelist"
+      selector === "#file-list-rows"
         ? ({
             querySelector: () => (hasEntries() ? ({} as Element) : null),
           } as unknown as HTMLElement)
@@ -56,8 +56,12 @@ function makeRepoView(
     repoSidebarDomReady?: boolean;
     polluteSidebarAfterRender?: boolean;
     sidebarRows?: Record<string, { kind: "dir"; dir: { path: string } }>;
+    /** `$` が返す要素 (指定した selector だけ)。ほかは今までどおり投げる。 */
+    elements?: Record<string, HTMLElement>;
     lazyDirPaths?: Set<string>;
     lazyLoadChildren?: Record<string, string[]>;
+    /** Files とファイルの画面の外でファイル一覧に出す ref (app.ts は常に出す)。 */
+    filesColumnRef?: string | null;
   } = {},
 ) {
   let repoSidebarRef: string | null = options.repoSidebarRef ?? null;
@@ -67,6 +71,7 @@ function makeRepoView(
     route,
     files: [],
     syntaxHighlight: false,
+    language: "en",
   };
   const calls = {
     statuses: [] as Array<"live" | "refreshing" | "error" | null>,
@@ -79,6 +84,9 @@ function makeRepoView(
   };
   const deps: RepoViewDeps = {
     STATE: state,
+    openTreeFileAs() {
+      /* noop */
+    },
     setRoute(nextRoute) {
       state.route = nextRoute;
     },
@@ -136,6 +144,7 @@ function makeRepoView(
       /* noop */
     },
     renderStandaloneSource: async () => undefined,
+    filesColumnRef: () => options.filesColumnRef ?? null,
     repoFileTargetFromRoute: () =>
       state.route.screen === "file" && state.route.view === "blob"
         ? state.route.ref
@@ -209,9 +218,11 @@ function makeRepoView(
     fileBadge: () => {
       throw new Error("stale repository render touched the DOM");
     },
-    $: () => {
+    $: ((selector: string) => {
+      const element = options.elements?.[selector];
+      if (element) return element;
       throw new Error("stale repository render touched the DOM");
-    },
+    }) as RepoViewDeps["$"],
   };
   return {
     view: createRepoView({
@@ -390,5 +401,169 @@ describe("repo view route races", () => {
       "src/stale.ts",
       "src/fresh.ts",
     ]);
+  });
+});
+
+// ファイル一覧はどの画面でも出す (Diff・History なども)。その画面へ移るたびに
+// app.ts が ensureFileList を呼ぶ。
+describe("the file list on screens other than Files", () => {
+  test.each([
+    {
+      name: "already loaded for the ref",
+      loaded: true,
+      fetches: 0,
+      renders: 0,
+    },
+    { name: "not loaded yet", loaded: false, fetches: 1, renders: 1 },
+  ])("$name: fetches $fetches, renders $renders", async ({
+    loaded,
+    fetches,
+    renders,
+  }) => {
+    installFilelistDocument(() => loaded);
+    const urls: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return Promise.resolve(jsonResponse(treeResponse()));
+    }) as unknown as typeof fetch;
+    const { view, calls } = makeRepoView(diffRoute, {
+      repoMode: true,
+      repoSidebarRef: loaded ? "worktree" : null,
+      repoSidebarDomReady: loaded,
+      filesColumnRef: "worktree",
+    });
+
+    await view.ensureFileList("worktree");
+
+    expect({
+      fetches: urls.length,
+      renders: calls.sidebarRenders.length,
+      // 読み込み済みなら選んでいる行を付け直さない (スクロールも動かさない)。
+      marked: loaded ? calls.activePaths : [],
+    }).toEqual({ fetches, renders, marked: [] });
+  });
+});
+
+describe("repo sidebar refresh failures", () => {
+  // 直す前は catch が引数を受け取らず、console にも画面にも理由が残らなかった
+  // (同じファイルのほかの 3 か所は理由を出していた)。
+  test("木の読み込みに失敗したら、理由を console とファイル一覧の件数 (#file-list-totals) の title に出す", async () => {
+    installNullDocument();
+    const totals = {
+      textContent: "",
+      title: "",
+      removeAttribute(name: string) {
+        if (name === "title") this.title = "";
+      },
+    };
+    globalThis.fetch = (async () =>
+      new Response("tree read failed: sample cause", {
+        status: 500,
+        statusText: "Internal Server Error",
+      })) as typeof fetch;
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { view } = makeRepoView(
+      {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blob",
+        range,
+      },
+      { elements: { "#file-list-totals": totals as unknown as HTMLElement } },
+    );
+
+    await view.renderRepoBlobSidebar("README.md", "worktree");
+
+    expect(totals.textContent).toBe("Cannot load tree");
+    expect(totals.title).toContain(
+      "load repository tree (HTTP 500 Internal Server Error): tree read failed: sample cause",
+    );
+    expect(errors).toHaveBeenCalledTimes(1);
+    const [message, ref, error] = errors.mock.calls[0];
+    expect([message, ref, (error as Error).message]).toEqual([
+      "[code-viewer] repository tree load failed",
+      "worktree",
+      "load repository tree (HTTP 500 Internal Server Error): tree read failed: sample cause",
+    ]);
+    errors.mockRestore();
+  });
+
+  test("keeps the tree and logs the HTTP status and body of a failed refresh", async () => {
+    installFilelistDocument(() => true);
+    globalThis.fetch = (async () =>
+      new Response("tree read failed: sample cause", {
+        status: 500,
+        statusText: "Internal Server Error",
+      })) as typeof fetch;
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { view, calls } = makeRepoView(
+      { screen: "repo", ref: "worktree", path: "", range },
+      { repoMode: true, repoSidebarRef: "worktree", repoSidebarDomReady: true },
+    );
+
+    await view.refreshRepoSidebar();
+
+    expect(calls.sidebarRenders).toEqual([]);
+    expect(errors).toHaveBeenCalledTimes(1);
+    const [message, ref, error] = errors.mock.calls[0];
+    expect([message, ref, (error as Error).message]).toEqual([
+      "[code-viewer] repository sidebar refresh failed",
+      "worktree",
+      "refresh repository tree (HTTP 500 Internal Server Error): tree read failed: sample cause",
+    ]);
+    errors.mockRestore();
+  });
+});
+
+// 1 回のファイルの表示で、見出しの情報・表示の種類の判定・変化の検知が同じ
+// HEAD /_file を同時に 3 本出していた。同時の要求は 1 本にまとめ、終わったら
+// 次は取り直す。
+describe("file details (HEAD /_file)", () => {
+  test("同じファイルへの同時の要求は 1 本にまとめ、終わった後は取り直す", async () => {
+    installNullDocument();
+    const { view } = makeRepoView(diffRoute);
+    const gate = deferred<Response>();
+    const requests: string[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init) => {
+      requests.push(`${init?.method ?? "GET"} ${String(input)}`);
+      return gate.promise;
+    }) as typeof fetch;
+    const target = { path: "src/sample.ts", ref: "worktree" };
+    const pending = [
+      view.loadRawFileInfo(target),
+      view.loadRawFileInfo(target),
+      view.loadRawFileInfo({ path: "src/other.ts", ref: "worktree" }),
+    ];
+    gate.resolve(
+      new Response(null, {
+        status: 200,
+        headers: { "content-length": "12" },
+      }),
+    );
+    const [first, second] = await Promise.all(pending);
+    expect([requests.length, first, second]).toEqual([
+      2,
+      {
+        size: 12,
+        type: undefined,
+        created_at: undefined,
+        updated_at: undefined,
+        commit_updated_at: undefined,
+      },
+      {
+        size: 12,
+        type: undefined,
+        created_at: undefined,
+        updated_at: undefined,
+        commit_updated_at: undefined,
+      },
+    ]);
+    await view.loadRawFileInfo(target);
+    expect(requests.length).toBe(3);
   });
 });

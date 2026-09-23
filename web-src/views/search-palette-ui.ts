@@ -1,7 +1,9 @@
+import { apiUrl } from "../core/api-url";
 // Search palette (Ctrl+K file / Ctrl+G grep): overlay UI, ranked file
 // matching, repo-wide grep, and result navigation. Extracted from app.ts.
 
 import { attachDragResizer } from "../core/drag-resizer";
+import { formatErrorDetail } from "../core/error-detail";
 import { isTestFilePath } from "../core/file-filter";
 import {
   getPanelFocusScope,
@@ -17,7 +19,13 @@ import {
   type PathMatchStats,
   rankPathMatches,
 } from "../core/fuzzy-search";
+import { FILE_16_PATH, iconSvg, SEARCH_16_PATH } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
+import {
+  keyOpenIntent,
+  linkOpenIntent,
+  type OpenIntent,
+} from "../core/link-click";
 import type { AppRoute } from "../core/routes";
 import {
   buildGrepRequestParams,
@@ -44,8 +52,44 @@ import {
   searchPaletteText,
 } from "./search-palette-i18n";
 
+/**
+ * ファイルの検索 (Ctrl+K) に混ぜて出す、ファイル以外の行き先。持ち主は app.ts
+ * (プロジェクト・エージェント・セッションの一覧と、キー割り当てのある操作)。検索の
+ * ロジック (ファイルの絞り込み・grep) には関わらず、名前をあいまい一致で
+ * 絞るだけ。
+ */
+export type PaletteCommandGroup =
+  | "projects"
+  | "agents"
+  | "sessions"
+  | "actions";
+export type PaletteCommand = {
+  group: PaletteCommandGroup;
+  /** 並べ替えても同じ行を指す値。 */
+  id: string;
+  title: string;
+  /** 補助の文字 (パス・作業内容)。 */
+  detail?: string;
+  /** 行の右寄りに出す状態の文字 (「この画面」・「入力待ち」など)。 */
+  status?: string;
+  /** status の見た目の種類 (エージェントの状態の名前)。 */
+  statusTone?: string;
+  /** 左のアイコン (信頼できる固定の SVG・印の HTML だけを渡す)。 */
+  iconHtml: string;
+  /** 右端に出すキー。 */
+  shortcut?: string;
+  /** 検索欄が空のときにも出す (最近のプロジェクト・エージェント・セッション、よく使う操作)。 */
+  suggested: boolean;
+  run(): void;
+};
+
+/** 1 つの種類から出す行の上限 (ファイルの行は PALETTE_RESULT_LIMIT)。 */
+const PALETTE_COMMAND_GROUP_LIMIT = 5;
+
 export type SearchPaletteDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;
+  /** run の中で置いた route を固定のタブで開く (main-tabs-view の openingNewTab)。 */
+  openingNewTab(run: () => void): void;
   currentRange(): { from: string; to: string };
   appendScopeParams(params: URLSearchParams): void;
   isAbortError(err: unknown): boolean;
@@ -89,8 +133,10 @@ export type SearchPaletteDeps = {
     grepPaletteHeight?: number;
   }): Promise<void>;
   applyGrepHideTests(hidden: boolean): void;
-  /** "Pin": hand the current query to the results sheet in the bottom panel. */
+  /** "Pin": hand the current query to the Search tab. */
   openSearchResults?(query: string): void;
+  /** ファイルの検索に混ぜるプロジェクト・エージェント・セッション・操作。 */
+  getPaletteCommands?(): PaletteCommand[];
   STATE: {
     route: AppRoute;
     files: FileMeta[];
@@ -130,6 +176,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     persistGrepSettings,
     applyGrepHideTests,
     openSearchResults,
+    getPaletteCommands,
   } = deps;
 
   type PaletteMode = "file" | "grep";
@@ -159,7 +206,12 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     ref: string;
     source: "diff" | "repo";
   };
-  type PaletteItem = PaletteFileItem | PaletteGrepItem;
+  type PaletteCommandItem = {
+    kind: "command";
+    command: PaletteCommand;
+    ranges: FuzzyRange[];
+  };
+  type PaletteItem = PaletteFileItem | PaletteGrepItem | PaletteCommandItem;
   type PaletteState = {
     root: HTMLElement;
     input: HTMLInputElement;
@@ -295,6 +347,17 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     input.setAttribute("aria-expanded", "true");
     input.setAttribute("aria-controls", "gdp-palette-list");
     input.value = initialQuery;
+    if (mode === "file" && getPaletteCommands) {
+      input.placeholder = text().searchEverything;
+    }
+    input.setAttribute("aria-label", input.placeholder);
+    const inputRow = document.createElement("div");
+    inputRow.className = "gdp-palette-input-row";
+    inputRow.innerHTML = iconSvg("gdp-palette-input-icon", SEARCH_16_PATH);
+    const escKey = document.createElement("kbd");
+    escKey.className = "gdp-palette-input-key";
+    escKey.textContent = "Esc";
+    inputRow.append(input, escKey);
     const status = document.createElement("div");
     status.className = "gdp-palette-status";
     const controls = document.createElement("div");
@@ -311,7 +374,23 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     const body = document.createElement("div");
     body.className = "gdp-palette-body";
     body.append(list, previewHost);
-    dialog.append(label, input, controls, status, body);
+    const footer = document.createElement("div");
+    footer.className = "gdp-palette-footer";
+    for (const [keys, label] of [
+      ["↑↓", text().footerMove],
+      ["Enter", text().footerOpen],
+      ["Shift+Enter", text().footerOpenNewTab],
+      ["Esc", text().footerClose],
+      [mode === "file" ? "Ctrl+G" : "Ctrl+K", text().footerSwitch(mode)],
+    ] as const) {
+      const hint = document.createElement("span");
+      hint.className = "gdp-palette-footer-hint";
+      const key = document.createElement("kbd");
+      key.textContent = keys;
+      hint.append(key, document.createTextNode(label));
+      footer.appendChild(hint);
+    }
+    dialog.append(label, inputRow, controls, status, body, footer);
     const resizeX = document.createElement("div");
     const resizeY = document.createElement("div");
     resizeX.className = "gdp-palette-resizer gdp-palette-resizer-x";
@@ -580,7 +659,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       if (PALETTE === state) {
         state.status.textContent = text().saveFailed(
           label,
-          errorMessage(err, text().unknownError),
+          formatErrorDetail(err),
         );
       }
     } finally {
@@ -590,10 +669,6 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
         state.input.focus();
       }
     }
-  }
-
-  function errorMessage(err: unknown, fallback: string): string {
-    return err instanceof Error && err.message ? err.message : fallback;
   }
 
   function responseGenerationIsStale(
@@ -623,7 +698,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       if (PALETTE === state) {
         state.status.textContent = text().saveFailed(
           label,
-          errorMessage(err, text().unknownError),
+          formatErrorDetail(err),
         );
       }
     }
@@ -647,7 +722,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       if (PALETTE === state) {
         state.status.textContent = text().saveFailed(
           text().fileGrouping,
-          errorMessage(err, text().unknownError),
+          formatErrorDetail(err),
         );
         renderPalette(state);
       }
@@ -678,7 +753,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       if (PALETTE === state) {
         state.status.textContent = text().saveFailed(
           text().regexMode,
-          errorMessage(err, text().unknownError),
+          formatErrorDetail(err),
         );
       }
     } finally {
@@ -709,7 +784,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       if (PALETTE === state) {
         state.status.textContent = text().saveFailed(
           text().testExclusion,
-          errorMessage(err, text().unknownError),
+          formatErrorDetail(err),
         );
       }
     } finally {
@@ -757,7 +832,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     return item.matchText || (item.regex ? "" : item.term);
   }
 
-  function palettePreviewTarget(item: PaletteItem): {
+  function palettePreviewTarget(item: PaletteFileItem | PaletteGrepItem): {
     path: string;
     ref: string;
   } {
@@ -773,6 +848,12 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     const item = state.items[state.selected];
     if (!item) {
       state.codePreview.clear(text().selectResult);
+      return;
+    }
+    if (item.kind === "command") {
+      state.codePreview.clear(
+        [item.command.title, item.command.detail].filter(Boolean).join(" — "),
+      );
       return;
     }
     const target = palettePreviewTarget(item);
@@ -812,23 +893,49 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       "aria-selected",
       index === state.selected ? "true" : "false",
     );
+    row.classList.add(`gdp-palette-row-${item.kind}`);
     const title = document.createElement("span");
     title.className = "gdp-palette-row-title";
     const detail = document.createElement("span");
     detail.className = "gdp-palette-row-detail";
-    if (item.kind === "file") {
+    if (item.kind === "command") {
+      const icon = document.createElement("span");
+      icon.className = "gdp-palette-row-icon";
+      icon.innerHTML = item.command.iconHtml;
+      appendHighlightedPath(title, item.command.title, item.ranges);
+      detail.textContent = item.command.detail ?? "";
+      row.append(icon, title, detail);
+      if (item.command.status) {
+        const status = document.createElement("span");
+        status.className = "gdp-palette-row-status";
+        if (item.command.statusTone)
+          status.dataset.tone = item.command.statusTone;
+        status.textContent = item.command.status;
+        row.appendChild(status);
+      }
+      if (item.command.shortcut) {
+        const key = document.createElement("kbd");
+        key.className = "gdp-palette-row-key";
+        key.textContent = item.command.shortcut;
+        row.appendChild(key);
+      }
+    } else if (item.kind === "file") {
+      const icon = document.createElement("span");
+      icon.className = "gdp-palette-row-icon";
+      icon.innerHTML = iconSvg("gdp-palette-icon", FILE_16_PATH);
       title.textContent = item.path.split("/").pop() || item.path;
       appendHighlightedPath(detail, item.displayPath, item.ranges);
       if (item.old_path && item.displayPath !== item.old_path) {
         detail.appendChild(document.createTextNode(`  ${item.old_path}`));
       }
+      row.append(icon, title, detail);
     } else {
       title.textContent = grouped
         ? text().line(item.line, item.column)
         : `${item.path}:${item.line}`;
       detail.textContent = item.preview;
+      row.append(title, detail);
     }
-    row.append(title, detail);
     row.addEventListener("mousemove", (event) => {
       if (
         state.pointerClientX === event.clientX &&
@@ -846,12 +953,20 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       state.selected = index;
       syncPaletteSelection(state);
     });
-    row.addEventListener("click", (e) => {
+    // 中ボタン・⌘/Ctrl＋クリックは固定のタブで (ui-surface.md の「タブの決まり」)。
+    const openRow = (e: MouseEvent) => {
+      const intent = linkOpenIntent(e);
+      if (intent === null) return;
       e.preventDefault();
       state.selected = index;
       syncPaletteSelection(state);
-      void selectPaletteItem(state);
-    });
+      void selectPaletteItem(
+        state,
+        intent === "new-tab" ? "new-tab" : "preview",
+      );
+    };
+    row.addEventListener("click", openRow);
+    row.addEventListener("auxclick", openRow);
     return row;
   }
 
@@ -894,7 +1009,21 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
         state.list.appendChild(group);
       }
     } else {
+      // ファイルの検索では種類ごとに見出しを置く (Projects / Agents /
+      // Sessions / Files / Actions)。見出しは行ではない (↑↓ は行だけを移る)。
+      let group = "";
       state.items.forEach((item, index) => {
+        if (state.mode === "file") {
+          const next = item.kind === "command" ? item.command.group : "files";
+          if (next !== group) {
+            group = next;
+            const heading = document.createElement("div");
+            heading.className = "gdp-palette-group-heading";
+            heading.setAttribute("role", "presentation");
+            heading.textContent = text().groups[next];
+            state.list.appendChild(heading);
+          }
+        }
         state.list.appendChild(createPaletteRow(state, item, index, false));
       });
     }
@@ -937,7 +1066,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     params.set("ref", ref);
     appendScopeParams(params);
     const res = await trackLoad<FileSearchListResponse>(
-      fetch(`/_files?${params.toString()}`).then(async (r) => {
+      fetch(`${apiUrl("files")}?${params.toString()}`).then(async (r) => {
         if (!r.ok)
           throw new Error(
             `file search request failed (${r.status}): ${await r.text()}`,
@@ -1001,6 +1130,57 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     };
   }
 
+  /**
+   * ファイルの行の前に名前が一致したプロジェクト・エージェント・セッション、後ろに操作を
+   * 足す (空欄のときは suggested のものだけ)。選ぶ行は今までどおり最初の
+   * ファイル (打って Enter でファイルが開く動きを変えない)。ファイルが無ければ先頭。
+   */
+  function setFileModeItems(
+    state: PaletteState,
+    query: string,
+    files: PaletteFileItem[],
+  ): void {
+    const groups: Record<PaletteCommandGroup, PaletteCommandItem[]> = {
+      projects: [],
+      agents: [],
+      sessions: [],
+      actions: [],
+    };
+    const trimmed = query.trim();
+    const scored: Array<{ item: PaletteCommandItem; score: number }> = [];
+    for (const command of getPaletteCommands?.() ?? []) {
+      if (!trimmed) {
+        if (command.suggested)
+          groups[command.group].push({ kind: "command", command, ranges: [] });
+        continue;
+      }
+      // 名前はあいまい一致、補助の文字 (長いパス・作業内容) は含むかだけを見る
+      // (長い文字列へのあいまい一致は、ほとんど何にでも当たってしまう)。
+      const title = fuzzyMatchPath(trimmed, command.title);
+      const inDetail = (command.detail ?? "")
+        .toLocaleLowerCase()
+        .includes(trimmed.toLocaleLowerCase());
+      if (!title && !inDetail) continue;
+      scored.push({
+        item: { kind: "command", command, ranges: title?.ranges ?? [] },
+        score: title?.score ?? Number.NEGATIVE_INFINITY,
+      });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    for (const { item } of scored) groups[item.command.group].push(item);
+    const cap = (items: PaletteCommandItem[]) =>
+      items.slice(0, PALETTE_COMMAND_GROUP_LIMIT);
+    state.items = [
+      ...cap(groups.projects),
+      ...cap(groups.agents),
+      ...cap(groups.sessions),
+      ...files,
+      ...cap(groups.actions),
+    ];
+    const firstFile = state.items.findIndex((item) => item.kind === "file");
+    state.selected = firstFile >= 0 ? firstFile : state.items.length ? 0 : -1;
+  }
+
   // Empty-query view of the repository palette: the files the user opened
   // most recently (newest first), limited to paths that still exist on the
   // current ref so a stale entry cannot open a 404.
@@ -1010,8 +1190,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
   ): Promise<void> {
     const recent = [...state.fileHistory].reverse();
     if (recent.length === 0) {
-      state.items = [];
-      state.selected = -1;
+      setFileModeItems(state, "", []);
       state.status.textContent = text().typeToSearchFiles;
       renderPalette(state);
       return;
@@ -1034,7 +1213,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       return;
     REPO_FILE_CACHE.set(repoFileCacheKey(ref), response);
     const existing = new Set(response.files.map((file) => file.path));
-    state.items = limitPaletteResults(
+    const files = limitPaletteResults(
       recent
         .filter(
           (path) =>
@@ -1050,9 +1229,9 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
           ranges: [],
         })),
     );
-    state.selected = state.items.length ? 0 : -1;
-    state.status.textContent = state.items.length
-      ? text().recentFiles(state.items.length)
+    setFileModeItems(state, "", files);
+    state.status.textContent = files.length
+      ? text().recentFiles(files.length)
       : text().typeToSearchFiles;
     renderPalette(state);
   }
@@ -1086,10 +1265,13 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
                 };
               })
           : [];
-      state.items = limitPaletteResults(
-        rankPaletteResultsByHistory(base, state.fileHistory),
+      setFileModeItems(
+        state,
+        "",
+        limitPaletteResults(
+          rankPaletteResultsByHistory(base, state.fileHistory),
+        ),
       );
-      state.selected = state.items.length ? 0 : -1;
       state.status.textContent =
         source === "diff"
           ? text().diffFiles(base.length)
@@ -1099,9 +1281,10 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     }
     let totalMatches = 0;
     let candidatesTruncated = false;
+    let files: PaletteFileItem[];
     if (source === "diff") {
       const ranked = diffFilePaletteItems(state, query);
-      state.items = ranked.items;
+      files = ranked.items;
       totalMatches = ranked.total;
     } else {
       state.status.textContent = text().loadingFiles;
@@ -1125,7 +1308,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
         (file) => !state.grepHideTests || !isTestFilePath(file.path),
       );
       const stats: PathMatchStats = { total: 0 };
-      state.items = limitPaletteResults(
+      files = limitPaletteResults(
         rankPaletteResultsByHistory(
           rankPathMatches(query, visibleFiles, PALETTE_RESULT_LIMIT, stats).map(
             (match) => ({
@@ -1143,11 +1326,11 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       totalMatches = stats.total;
       candidatesTruncated = response.truncated;
     }
-    state.selected = state.items.length ? 0 : -1;
-    state.status.textContent = state.items.length
+    setFileModeItems(state, query, files);
+    state.status.textContent = files.length
       ? text().results(
-          state.items.length,
-          totalMatches > state.items.length ? totalMatches : undefined,
+          files.length,
+          totalMatches > files.length ? totalMatches : undefined,
           candidatesTruncated,
         )
       : text().noResults;
@@ -1223,7 +1406,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       const controller = new AbortController();
       state.controller = controller;
       trackLoad<GrepResponse>(
-        fetch(`/_grep?${params.toString()}`, {
+        fetch(`${apiUrl("grep")}?${params.toString()}`, {
           signal: controller.signal,
         }).then(async (r) => {
           if (!r.ok)
@@ -1290,7 +1473,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
           state.items = [];
           state.selected = -1;
           state.status.textContent = text().searchFailed(
-            errorMessage(err, text().unknownError),
+            formatErrorDetail(err),
           );
           renderPalette(state);
         });
@@ -1303,18 +1486,24 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       updateFilePalette(state, query).catch((err) => {
         if (PALETTE !== state || state.input.value !== query) return;
         console.error("File search failed", err);
-        state.status.textContent = text().searchFailed(
-          errorMessage(err, text().unknownError),
-        );
+        state.status.textContent = text().searchFailed(formatErrorDetail(err));
       });
     } else {
       updateGrepPalette(state, query);
     }
   }
 
-  async function selectPaletteItem(state: PaletteState): Promise<void> {
+  async function selectPaletteItem(
+    state: PaletteState,
+    intent: OpenIntent = "preview",
+  ): Promise<void> {
     const item = state.items[state.selected];
     if (!item || state.opening) return;
+    if (item.kind === "command") {
+      closeSearchPalette();
+      item.command.run();
+      return;
+    }
     const history =
       item.kind === "file" ? state.fileHistory : state.grepHistory;
     const nextHistory = rememberPaletteSelection(history, item.path);
@@ -1332,7 +1521,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
         state.opening = false;
         if (PALETTE === state) {
           state.status.textContent = text().selectionSaveFailed(
-            errorMessage(err, text().unknownError),
+            formatErrorDetail(err),
           );
         }
         return;
@@ -1342,22 +1531,31 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
     }
     if (PALETTE !== state) return;
     closeSearchPalette();
+    // 固定のタブで開くときは、route を置くところだけを印の中で行う
+    // (上の保存を待った後なので、ここは同期)。差分の中の行は差分の画面の中の
+    // 移動なので、固定で開くときはその版のファイルを開く。
+    const place = (run: () => void) =>
+      intent === "new-tab" ? deps.openingNewTab(run) : run();
+    const diffAsFile = intent === "new-tab" && item.source === "diff";
+    const ref = diffAsFile ? currentRange().to : item.ref;
     if (item.kind === "file") {
-      if (item.source === "diff") {
+      if (item.source === "diff" && !diffAsFile) {
         openDiffFile(item.path);
       } else {
-        setRoute({
-          screen: "file",
-          path: item.path,
-          ref: item.ref,
-          view: "blob",
-          range: currentRange(),
-        });
-        void renderStandaloneSource({ path: item.path, ref: item.ref });
+        place(() =>
+          setRoute({
+            screen: "file",
+            path: item.path,
+            ref,
+            view: "blob",
+            range: currentRange(),
+          }),
+        );
+        void renderStandaloneSource({ path: item.path, ref });
       }
       return;
     }
-    if (item.source === "diff") {
+    if (item.source === "diff" && !diffAsFile) {
       setRoute({
         screen: "diff",
         range: currentRange(),
@@ -1369,16 +1567,18 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       // hl= lets the source view mark the hit text on the target line, so
       // the eye lands on the column, not just the line.
       const hl = grepHighlightText(item);
-      setRoute({
-        screen: "file",
-        path: item.path,
-        ref: item.ref,
-        view: "blob",
-        line: item.line,
-        ...(hl ? { hl } : {}),
-        range: currentRange(),
-      });
-      void renderStandaloneSource({ path: item.path, ref: item.ref });
+      place(() =>
+        setRoute({
+          screen: "file",
+          path: item.path,
+          ref,
+          view: "blob",
+          line: item.line,
+          ...(hl ? { hl } : {}),
+          range: currentRange(),
+        }),
+      );
+      void renderStandaloneSource({ path: item.path, ref });
     }
   }
 
@@ -1400,7 +1600,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
         pinResults(state);
         return;
       }
-      void selectPaletteItem(state);
+      void selectPaletteItem(state, keyOpenIntent(e));
       return;
     }
     if (state.mode === "grep" && e.altKey && e.key.toLowerCase() === "r") {

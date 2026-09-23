@@ -68,10 +68,9 @@ function installFetchStub(): void {
       });
       patchSignals.push(init.signal ?? undefined);
       if (patchStatus !== null) {
-        return Promise.resolve({
-          ok: false,
-          status: patchStatus,
-        } as unknown as Response);
+        return Promise.resolve(
+          new Response("sample failure", { status: patchStatus }),
+        );
       }
       if (deferPatch) {
         return new Promise<Response>((resolve) => {
@@ -84,7 +83,7 @@ function installFetchStub(): void {
     }
     getCalls += 1;
     if (getFails)
-      return Promise.resolve({ ok: false, status: 500 } as unknown as Response);
+      return Promise.resolve(new Response("sample failure", { status: 500 }));
     // deferred のときは resolveGet を呼ぶまで読み込みが終わらない。読み込み中
     // に起きた操作 (入力・閉じる) との競合を組み立てるために使う。
     if (deferGet) {
@@ -95,6 +94,12 @@ function installFetchStub(): void {
     return Promise.resolve(jsonResponse(storedState));
   }) as typeof fetch;
 }
+
+// 失敗の行は「何ができなかったか」の後に理由の全文 (操作・HTTP の状態・本文) を続ける。
+const SAVE_REJECTED =
+  "could not save this draft\nError: saving tools drafts (HTTP 413): sample failure";
+const LOAD_FAILED =
+  "could not load saved drafts\nError: loading tools drafts (HTTP 500): sample failure";
 
 /** promise チェーンを進める。実時間は待たない。 */
 async function settle(): Promise<void> {
@@ -219,8 +224,8 @@ describe("tools overlay shell", () => {
     expect(tabLabels()).toEqual(["Markdown", "Mermaid", "JSON / YAML"]);
   });
 
-  // 閉じるボタンと見出しは下パネルのタブ列が持つようになったので、この
-  // ビュー自身は持たない。パネル側の開閉は app.ts の配線が担う。
+  // 閉じるボタンと見出しはメインの面のタブが持つので、このビュー自身は
+  // 持たない。タブの開閉は app.ts の配線が担う。
   test("does not render its own title or close button", async () => {
     await createView().open();
     expect(document.querySelector(".tools-close")).toBeNull();
@@ -288,7 +293,7 @@ describe("tools overlay drafts", () => {
     expect(textareaFor("mermaid").value).toBe("");
   });
 
-  // 幅は右ドロワーだった頃の設定。下パネルは高さだけを持つので、古い保存値が
+  // 幅は右ドロワーだった頃の設定。いまは幅を持たないので、古い保存値が
   // 残っていても読み飛ばす (型には残してあるが誰も使わない)。
   test("ignores a stored drawer width", async () => {
     storedState = { version: 1, width: 900 };
@@ -524,7 +529,7 @@ describe("tools overlay drafts", () => {
     input.dispatchEvent(new Event("input", { bubbles: true }));
     view.close();
     await settle();
-    expect(statusFor("markdown")).toBe("could not save this draft");
+    expect(statusFor("markdown")).toBe(SAVE_REJECTED);
 
     patchStatus = null;
     await view.open();
@@ -592,7 +597,7 @@ describe("tools overlay drafts", () => {
     const view = createView();
     await view.open();
     expect(getCalls).toBe(1);
-    expect(statusFor("markdown")).toBe("could not load saved drafts");
+    expect(statusFor("markdown")).toBe(LOAD_FAILED);
 
     // 読めていないので「空だった」とは扱わない。開き直せば読みに行く。
     getFails = false;
@@ -622,7 +627,9 @@ describe("tools overlay drafts", () => {
       await settle();
     }
     expect(patches.length).toBe(4);
-    expect(statusFor("markdown")).toBe("could not save this draft");
+    expect(statusFor("markdown")).toBe(
+      "could not save this draft\nError: aborted",
+    );
 
     // ユーザーが何か変えたら、また送りに行く。
     input.value = "# typed again";
@@ -637,7 +644,7 @@ describe("tools overlay drafts", () => {
     getFails = true;
     const view = createView();
     await view.open();
-    expect(statusFor("markdown")).toBe("could not load saved drafts");
+    expect(statusFor("markdown")).toBe(LOAD_FAILED);
 
     // 保存が通っても、読めていないという状況は変わらない。
     const input = textareaFor("markdown");
@@ -647,7 +654,7 @@ describe("tools overlay drafts", () => {
     await settle();
     expect(patches.length).toBe(1);
 
-    expect(statusFor("markdown")).toBe("could not load saved drafts");
+    expect(statusFor("markdown")).toBe(LOAD_FAILED);
   });
 
   test("keeps showing the save failure across tab switches and redraws", async () => {
@@ -659,7 +666,7 @@ describe("tools overlay drafts", () => {
     input.dispatchEvent(new Event("input", { bubbles: true }));
     view.close();
     await settle();
-    expect(statusFor("markdown")).toBe("could not save this draft");
+    expect(statusFor("markdown")).toBe(SAVE_REJECTED);
 
     await view.open();
     document
@@ -667,7 +674,7 @@ describe("tools overlay drafts", () => {
       .click();
 
     // 別タブに移っても、保存できていないことは出したままにする。
-    expect(statusFor("mermaid")).toBe("could not save this draft");
+    expect(statusFor("mermaid")).toBe(SAVE_REJECTED);
   });
 
   test("re-renders the pinned failure in the new language", async () => {
@@ -682,12 +689,14 @@ describe("tools overlay drafts", () => {
     });
     views.push(view);
     await view.open();
-    expect(statusFor("markdown")).toBe("could not load saved drafts");
+    expect(statusFor("markdown")).toBe(LOAD_FAILED);
 
     language = "ja";
     view.localize();
 
-    expect(statusFor("markdown")).toBe("保存済みの下書きを読み出せません");
+    expect(statusFor("markdown")).toBe(
+      "保存済みの下書きを読み出せません\nError: loading tools drafts (HTTP 500): sample failure",
+    );
   });
 
   test("clearing the input empties that draft", async () => {

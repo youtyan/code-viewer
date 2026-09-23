@@ -144,6 +144,18 @@ export const DEFAULT_AGENT_SCREEN_RULES: AgentScreenRuleSet = {
       any: [{ lineRegex: ["^\\s*[✢✻✽✶✳]"] }, { lineRegex: ["(?i)^\\s*·"] }],
     },
     {
+      // 作業中の行 (`✻ 動詞… (経過 · …)`) を画面全体から探す。入力欄の下に
+      // 積まれる行 (区切り線・ステータスライン・モード) の数や、作業中の行と
+      // 入力欄の間に挟まる行 (ヒント・積まれた送信待ちの文) は利用者ごとに違う
+      // ので、下からの行数では決めない。完了後の `✻ 動詞 for 経過 · done` には
+      // `…` が無いので一致しない。`thinking` は出ない時間帯があるので条件にしない。
+      id: "live_spinner",
+      state: "working",
+      priority: 960,
+      region: "whole_recent",
+      lineRegex: ["^[·✢✳✶✻✽] .+… \\("],
+    },
+    {
       id: "prompt_box",
       state: "idle",
       priority: 950,
@@ -158,9 +170,19 @@ export const DEFAULT_AGENT_SCREEN_RULES: AgentScreenRuleSet = {
       ],
     },
     {
+      // 区切り線に挟まれた入力欄。ステータスラインが何行あっても見つかる。
+      // 同じ画面に作業中の行や確認の画面があれば、そちらが上の優先度で勝つ。
+      id: "framed_prompt",
+      state: "idle",
+      priority: 940,
+      region: "whole_recent",
+      regex: ["─\\n❯[^\\n]*\\n─"],
+    },
+    {
       id: "strong_input_request",
       state: "waiting",
-      priority: 900,
+      // 作業中の行が残ったまま確認を出すことがあるので live_spinner より上。
+      priority: 963,
       region: "bottom_non_empty",
       lines: 12,
       any: [
@@ -173,7 +195,7 @@ export const DEFAULT_AGENT_SCREEN_RULES: AgentScreenRuleSet = {
     {
       id: "permission_request",
       state: "waiting",
-      priority: 850,
+      priority: 962,
       region: "bottom_non_empty",
       lines: 14,
       contains: ["do you want to proceed?"],
@@ -208,6 +230,26 @@ export const DEFAULT_AGENT_SCREEN_RULES: AgentScreenRuleSet = {
       lines: 3,
       lineRegex: ["^[•◦]\\s+Working"],
       not: [{ contains: ["conversation interrupted"] }],
+    },
+    {
+      // 作業中の行 (`• 見出し (経過 • esc to interrupt)`) を画面全体から探す。
+      // 入力欄の周りの飾りや送信待ちの文で、下から数行には収まらない。
+      id: "live_interrupt_hint",
+      state: "working",
+      priority: 490,
+      region: "whole_recent",
+      lineRegex: ["^[•◦] .+esc to interrupt\\)"],
+    },
+    {
+      // 入力欄 (`›`) の周りに飾りを描き続けるエージェントは、待機中も画面が
+      // 止まらない。変化量に任せると作業中のまま戻らないので、入力欄を見る。
+      id: "input_composer",
+      state: "idle",
+      priority: 350,
+      region: "bottom_non_empty",
+      lines: 8,
+      lineRegex: ["^›"],
+      not: [...BLOCKING_HINTS, { contains: ["esc to interrupt"] }],
     },
     {
       id: "last_prompt",

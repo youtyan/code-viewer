@@ -10,6 +10,7 @@ import {
   test,
   vi,
 } from "vitest";
+import type { AnnotationEntry } from "../core/types";
 import type { AnnotationsUiDeps } from "../views/annotations-ui";
 import { createAnnotationsUi } from "../views/annotations-ui";
 import { clickDialogCancel, clickDialogConfirm } from "./_dialog-helpers";
@@ -228,6 +229,56 @@ describe("annotation URL state", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe("annotation panel open state persistence", () => {
+  // 直す前は、起動と URL からの復元が必ず保存を呼んでいたので、ページを
+  // 開くだけでリポジトリに .code-viewer/settings.json ができていた。
+  test.each([
+    {
+      name: "開いただけ (URL に注釈の状態なし)",
+      url: "/file?path=sample.ts",
+      savedOpen: false,
+    },
+    {
+      name: "URL が欄を開く指定を持つ",
+      url: "/file?path=sample.ts&annotations=open",
+      savedOpen: false,
+    },
+    {
+      name: "保存した設定が「開く」",
+      url: "/file?path=sample.ts",
+      savedOpen: true,
+    },
+  ])("復元では開閉を保存しない: $name", async ({ url, savedOpen }) => {
+    setupDom();
+    window.history.replaceState(null, "", url);
+    const saved: boolean[] = [];
+    const ui = createAnnotationsUi(
+      createDeps({
+        getAnnotationPanelOpen: () => savedOpen,
+        setAnnotationPanelOpenState: (open) => saved.push(open),
+      }),
+    );
+
+    ui.restoreSessionFromUrl();
+
+    expect(saved).toEqual([]);
+  });
+
+  test("利用者が開閉したときは保存する", () => {
+    setupDom();
+    window.history.replaceState(null, "", "/file?path=sample.ts");
+    const saved: boolean[] = [];
+    createAnnotationsUi(
+      createDeps({ setAnnotationPanelOpenState: (open) => saved.push(open) }),
+    );
+
+    q<HTMLButtonElement>(document, "#annotations-toggle").click();
+    q<HTMLButtonElement>(document, "#annotation-panel-close").click();
+
+    expect(saved).toEqual([true, false]);
   });
 });
 
@@ -1068,6 +1119,33 @@ describe("reading notes beneath code", () => {
     ).toBe(false);
   });
 
+  // 左右の面に同じファイルを開いたとき、右の面のソース表示 (.main-pane-source)
+  // のカードにも同じ注釈を出す。2 枚目の行の id には番号を付けて重ねない。
+  test("shows a note on the right pane copy of the same file with distinct ids", async () => {
+    const { ui } = await inlineHarness();
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<div class="main-pane-source"><div class="gdp-file-shell gdp-standalone-source" data-path="src/example.ts"><table class="gdp-source-table"><tbody><tr data-line="4"><td>example</td></tr></tbody></table></div></div>',
+    );
+    await ui.openAnnotationEntry("note-alpha");
+    ui.applyInlineAnnotations();
+    const rows = [
+      ...document.querySelectorAll<HTMLElement>(
+        '.gdp-annotation-row[data-annotation-id="note-alpha"]',
+      ),
+    ];
+    expect(
+      rows.map((row) => [
+        row.closest(".main-pane-source") !== null,
+        q(row, ".gdp-annotation-inline-title").id,
+        q(row, ".gdp-annotation-inline-body").id,
+      ]),
+    ).toEqual([
+      [false, "annotation-title-note-alpha", "annotation-body-note-alpha"],
+      [true, "annotation-title-note-alpha-2", "annotation-body-note-alpha-2"],
+    ]);
+  });
+
   test("renders paragraphs, code, and tables as prose inside a code table", async () => {
     const { ui, state } = await inlineHarness();
     state.sessions[0].entries[0].body =
@@ -1103,6 +1181,44 @@ describe("reading notes beneath code", () => {
     expect(q(document, "#annotation-detail-body").textContent).toContain(
       "Detailed finding",
     );
+  });
+
+  // 直す前はデータの注釈の場所の頭が、日本語でも "Datastores" のままだった。
+  test.each([
+    {
+      language: "en" as const,
+      expected: "Datastores / sample.db / sample_table / data",
+    },
+    {
+      language: "ja" as const,
+      expected: "データストア / sample.db / sample_table / data",
+    },
+  ])("labels a data note's location in the list: $language", async ({
+    language,
+    expected,
+  }) => {
+    const { ui, state } = await inlineHarness({ getLanguage: () => language });
+    const entries: AnnotationEntry[] = state.sessions[0].entries;
+    entries.push({
+      id: "note-data",
+      created_at: "2026-01-01T00:00:00.000Z",
+      path: "",
+      range: { from: "HEAD", to: "worktree" },
+      target: {
+        kind: "database",
+        db: "sample.db",
+        table: "sample_table",
+        tab: "data",
+      },
+      title: "Data finding",
+      body: "A note about a table",
+    });
+    await ui.refreshAnnotations();
+    const location = q(
+      document,
+      '[data-entry-id="note-data"] .annotation-entry-location',
+    );
+    expect(location.textContent).toBe(expected);
   });
 
   test("updates inline controls when the language changes", async () => {

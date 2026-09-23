@@ -1,6 +1,10 @@
+import { showCopyFailure } from "../core/copy-failure";
+import { filePathClipboardText } from "../core/file-path-copy";
 import { COPY_16_PATHS, iconSvg } from "../core/icons";
 import type { AppRoute, DiffRange, SourceFileTarget } from "../core/routes";
 import { isPreviewableSource, sourceDisplayKind } from "../core/source-meta";
+import { pageLanguage } from "./page-language";
+import { SOURCE_READING_TEXT } from "./source-preview-i18n";
 
 export type FileShellView = "blob" | "blame" | "history";
 export type SourceBlobTab = "preview" | "code";
@@ -11,7 +15,8 @@ export type BlobOrBlameFileRoute = Extract<AppRoute, { screen: "file" }> & {
 };
 
 export type FileShellMountDeps = {
-  $: <T extends Element = HTMLElement>(sel: string) => T;
+  /** カードを差し込む先 (本文なら #diff、右の面ならその面の箱の本体)。 */
+  mountRoot(): HTMLElement;
   repoFileTargetFromRoute(): string | null;
   renderRepoBlobSidebar(path: string, ref: string): Promise<unknown> | unknown;
   placeSidebarToggle(): void;
@@ -134,7 +139,8 @@ function createBlobSourceTabButton(
   btn.dataset.fileView = "blob";
   btn.dataset.fileTab = sourceTab;
   btn.dataset.sourceTab = sourceTab;
-  btn.textContent = sourceTab === "preview" ? "Preview" : "Code";
+  const text = SOURCE_READING_TEXT[pageLanguage()];
+  btn.textContent = sourceTab === "preview" ? text.tabPreview : text.tabCode;
   btn.addEventListener("click", () => {
     if (active) return;
     deps.setPreferredSourceTab?.(sourceTab);
@@ -196,7 +202,7 @@ export function appendFileViewTabs(
         deps,
         target,
         "blame",
-        "Blame",
+        SOURCE_READING_TEXT[pageLanguage()].tabBlame,
         activeTab === "blame",
       ),
     );
@@ -205,7 +211,7 @@ export function appendFileViewTabs(
         deps,
         target,
         "history",
-        "History",
+        SOURCE_READING_TEXT[pageLanguage()].tabHistory,
         activeTab === "history",
       ),
     );
@@ -230,18 +236,24 @@ function createFilePathCopyButton(target: SourceFileTarget): HTMLButtonElement {
   const copy = document.createElement("button");
   copy.type = "button";
   copy.className = "gdp-file-header-icon gdp-copy-path";
-  copy.title = "copy file path";
-  copy.setAttribute("aria-label", "copy file path");
+  const label = SOURCE_READING_TEXT[pageLanguage()].copyFilePath;
+  copy.title = label;
+  copy.setAttribute("aria-label", label);
   copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
   copy.addEventListener("click", async (event) => {
     event.stopPropagation();
     try {
-      await navigator.clipboard.writeText(target.path);
+      await navigator.clipboard.writeText(filePathClipboardText(target.path));
       copy.classList.add("copied");
       setTimeout(() => copy.classList.remove("copied"), 1200);
-    } catch {
-      copy.classList.add("failed");
-      setTimeout(() => copy.classList.remove("failed"), 1200);
+    } catch (error) {
+      showCopyFailure(
+        copy,
+        "copying the file path failed",
+        error,
+        "copy file path",
+        1200,
+      );
     }
   });
   return copy;
@@ -285,7 +297,7 @@ export function mountFileShellCard(
   repoTarget = deps.repoFileTargetFromRoute(),
   options: { loadSidebar?: boolean } = {},
 ): void {
-  const root = deps.$<HTMLElement>("#diff");
+  const root = deps.mountRoot();
   if (repoTarget) {
     const layout = document.createElement("div");
     layout.className = "gdp-repo-blob-layout";

@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   unlinkSync,
   utimesSync,
@@ -17,18 +18,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
-import type { RepoTreeResponse } from "../core/types";
+import {
+  type RepoTreeResponse,
+  TREE_WITHOUT_COMMIT_DATES,
+} from "../core/types";
+import {
+  readServerRegistry,
+  serverRegistryFilePath,
+} from "../server/server-registry";
 import { supportsNativeRecursiveWatch } from "../server/worktree-watcher";
 import { runGit as git } from "./_git-fixture";
+import { fetchPwaAssets, SERVED_PWA_ICONS } from "./_pwa-fixture";
 
 /** 配布物と同じバンドル。vitest の globalSetup が焼いてある。 */
-const CLI_BUNDLE = join(
+const REPO_ROOT = join(
   fileURLToPath(new URL(".", import.meta.url)),
   "..",
   "..",
-  "dist",
-  "code-viewer.js",
 );
+const CLI_BUNDLE = join(REPO_ROOT, "dist", "code-viewer.js");
+const PACKAGE_VERSION = JSON.parse(
+  readFileSync(join(REPO_ROOT, "package.json"), "utf8"),
+).version as string;
 
 const tmpRoots: string[] = [];
 
@@ -317,7 +328,7 @@ async function startTestPreview(
 ) {
   const proc = spawn(
     process.execPath,
-    [CLI_BUNDLE, "--port", "0", "--cwd", root],
+    [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
     {
       cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
       env: {
@@ -368,6 +379,42 @@ async function refreshPreview(url: string): Promise<Response> {
 }
 
 describe("preview CLI", () => {
+  test("a standalone server publishes the same private identity in its registry and endpoint", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-identity-"));
+    tmpRoots.push(root);
+    const preview = await startTestPreview(root, makeFakeMissingGitCommand());
+
+    try {
+      const response = await fetchWithTimeout(
+        new URL("/_entry", preview.url).href,
+        3000,
+      );
+      expect(response.status).toBe(200);
+      const identity = (await response.json()) as Record<string, unknown>;
+      let registered = readServerRegistry(realpathSync(root));
+      const deadline = Date.now() + 3000;
+      while (!registered && Date.now() < deadline) {
+        await sleep(10);
+        registered = readServerRegistry(realpathSync(root));
+      }
+
+      expect(registered).not.toBeNull();
+      expect(identity).toMatchObject({
+        role: "standalone",
+        pid: registered?.pid,
+        token: registered?.token,
+        version: PACKAGE_VERSION,
+      });
+      expect(registered?.version).toBe(PACKAGE_VERSION);
+      expect(registered?.token).toMatch(/^[0-9a-f]{16}$/);
+      expect(
+        statSync(serverRegistryFilePath(realpathSync(root))).mode & 0o777,
+      ).toBe(0o600);
+    } finally {
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
   test.each([
     {
       ref: "worktree",
@@ -461,7 +508,89 @@ describe("preview CLI", () => {
     }
   });
 
+  test("the sidebar request leaves out worktree commit dates and nothing else", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-tree-no-dates-"));
+    tmpRoots.push(root);
+    git(root, ["init"]);
+    git(root, ["config", "user.name", "Sample"]);
+    git(root, ["config", "user.email", "sample@example.test"]);
+    mkdirSync(join(root, "sub"));
+    for (const path of ["one.txt", "sub/two.txt"])
+      writeFileSync(join(root, path), "first\n");
+    git(root, ["add", "."]);
+    git(root, ["commit", "-m", "initial"]);
+    writeFileSync(join(root, "one.txt"), "edited\n");
+    const preview = await startTestPreview(root);
+    try {
+      const read = async (query: string) => {
+        const response = await fetchWithTimeout(
+          new URL(`/_tree?ref=worktree${query}`, preview.url).toString(),
+          5000,
+        );
+        expect(response.status).toBe(200);
+        return ((await response.json()) as RepoTreeResponse).entries;
+      };
+      const full = await read("");
+      const bare = await read(`&${TREE_WITHOUT_COMMIT_DATES.join("=")}`);
+      const dated = (entries: typeof full) =>
+        Object.fromEntries(
+          entries.map((entry) => [entry.path, !!entry.commit_updated_at]),
+        );
+      expect(dated(full)).toMatchObject({ "one.txt": true, sub: true });
+      expect(bare).toEqual(
+        full.map(({ commit_updated_at: _dropped, ...rest }) => rest),
+      );
+    } finally {
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
   const runOrSkip = process.platform === "win32" ? test.skip : test;
+
+  // 直す前は .git を stat できない理由を全部「無い」と同じに潰していたので、
+  // 権限やリンクの輪で読めないときも何も出なかった。ENOENT だけを「無い」と
+  // し、それ以外は理由を残す。
+  runOrSkip(
+    "reports why .git could not be read instead of staying silent",
+    async () => {
+      const root = mkdtempSync(
+        join(tmpdir(), "code-viewer-gitdir-unreadable-"),
+      );
+      tmpRoots.push(root);
+      // 自分を指すシンボリックリンクは stat が ELOOP で失敗する (ENOENT ではない)。
+      symlinkSync(".git", join(root, ".git"));
+      const proc = spawn(
+        process.execPath,
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
+        {
+          cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
+          env: { ...process.env },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stderr = "";
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+      try {
+        await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(15000).then(() => {
+            throw new Error(`preview did not start; stderr=${stderr}`);
+          }),
+        ]);
+        expect(
+          await waitForOutput(() => stderr, /cannot read .*\.git/, 5000),
+        ).toBe(true);
+        expect(stderr).toContain("ELOOP");
+      } finally {
+        await stopTestPreview(proc, exited);
+      }
+    },
+  );
 
   runOrSkip(
     "--open launches the browser after the server port exists",
@@ -471,7 +600,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--open"],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--open"],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           env: {
@@ -514,6 +643,26 @@ describe("preview CLI", () => {
     },
   );
 
+  test("a standalone server serves the installed-window manifest and its icons", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-pwa-"));
+    tmpRoots.push(root);
+    const preview = await startTestPreview(root, makeFakeMissingGitCommand());
+    try {
+      const served = await fetchPwaAssets(preview.url);
+      expect([
+        served.contentType,
+        served.manifest.display,
+        served.icons,
+      ]).toEqual([
+        "application/manifest+json; charset=utf-8",
+        "standalone",
+        SERVED_PWA_ICONS,
+      ]);
+    } finally {
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
   test("rejects requests with a non-loopback Host", async () => {
     const root = mkdtempSync(join(tmpdir(), "code-viewer-request-host-"));
     tmpRoots.push(root);
@@ -553,6 +702,86 @@ describe("preview CLI", () => {
     }
   });
 
+  // 失敗した要求は、固定の 1 文 (invalid json・not in ref・空の一覧) でなく理由を返す。
+  test("failed requests answer with the reason", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-preview-reasons-"));
+    tmpRoots.push(root);
+    git(root, ["init", "-q", "-b", "main", "."]);
+    git(root, ["config", "user.email", "sample-author"]);
+    git(root, ["config", "user.name", "sample-author"]);
+    writeFileSync(join(root, "sample.txt"), "sample\n");
+    git(root, ["add", "sample.txt"]);
+    git(root, ["commit", "-q", "-m", "sample commit"]);
+    const locked = join(root, "locked");
+    mkdirSync(locked);
+    chmodSync(locked, 0);
+    const preview = await startTestPreview(root);
+    const origin = new URL(preview.url).origin;
+    const cases = [
+      {
+        name: "a broken JSON body",
+        request: new Request(new URL("/_create_directory", preview.url), {
+          method: "POST",
+          headers: {
+            Origin: origin,
+            "X-Code-Viewer-Action": "1",
+            "Content-Type": "application/json",
+          },
+          body: "{broken",
+        }),
+        expected: { status: 400, text: /^invalid JSON body: SyntaxError: / },
+      },
+      {
+        name: "a path that is not in the ref",
+        request: new Request(
+          new URL("/_file?path=gone.txt&ref=HEAD", preview.url),
+        ),
+        expected: { status: 404, text: /^not in ref: fatal: / },
+      },
+      {
+        name: "an untracked diff outside the worktree",
+        request: new Request(
+          new URL(
+            "/file_diff?path=sample.txt&untracked=1&from=HEAD&to=main",
+            preview.url,
+          ),
+        ),
+        expected: {
+          status: 400,
+          text: /^invalid diff range: untracked file diffs require a worktree range$/,
+        },
+      },
+      {
+        name: "a folder that cannot be read",
+        request: new Request(
+          new URL("/_tree?ref=worktree&path=locked", preview.url),
+        ),
+        expected: { status: 500, text: /"code":"EACCES"/ },
+      },
+    ];
+    try {
+      const answers = [];
+      for (const { name, request } of cases) {
+        const response = await fetch(request);
+        answers.push({
+          name,
+          status: response.status,
+          text: await response.text(),
+        });
+      }
+      expect(answers).toEqual(
+        cases.map(({ name, expected }) => ({
+          name,
+          status: expected.status,
+          text: expect.stringMatching(expected.text),
+        })),
+      );
+    } finally {
+      chmodSync(locked, 0o700);
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
   test("/_grep keeps an unknown ref as a client error", async () => {
     const root = mkdtempSync(join(tmpdir(), "code-viewer-grep-ref-"));
     tmpRoots.push(root);
@@ -585,7 +814,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           env: {
@@ -666,7 +895,7 @@ describe("preview CLI", () => {
 
     const proc = spawn(
       process.execPath,
-      [CLI_BUNDLE, "--port", "0", "--cwd", explicitCwd],
+      [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", explicitCwd],
       {
         cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
         stdio: ["ignore", "pipe", "pipe"],
@@ -709,7 +938,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -798,7 +1027,7 @@ describe("preview CLI", () => {
 
     const proc = spawn(
       process.execPath,
-      [CLI_BUNDLE, "--port", "0", "--cwd", root],
+      [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
       {
         cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
         stdio: ["ignore", "pipe", "pipe"],
@@ -849,7 +1078,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -903,7 +1132,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", explicitCwd],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", explicitCwd],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           env: { ...process.env, CODE_VIEWER_BIN_GIT: fakeGit },
@@ -971,7 +1200,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -1042,7 +1271,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -1111,7 +1340,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -1187,7 +1416,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -1281,7 +1510,7 @@ describe("preview CLI", () => {
 
       const proc = spawn(
         process.execPath,
-        [CLI_BUNDLE, "--port", "0", "--cwd", root],
+        [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
         {
           cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
           stdio: ["ignore", "pipe", "pipe"],
@@ -1376,7 +1605,7 @@ describe("preview CLI", () => {
       /code-viewer query <sources\|schemas\|schema\|columns\|ddl\|exec\|list\|clear\|snapshot\|diff\|search\|redis\|elasticsearch\|s3>/,
     );
     expect(stdout).toMatch(
-      /code-viewer <status\|annotate\|journal\|query\|search\|file\|skill\|doctor> agent-help/,
+      /code-viewer <status\|annotate\|journal\|query\|search\|file\|terminal\|skill\|doctor> agent-help/,
     );
     expect(stdout).toMatch(/code-viewer search code --term <text>/);
     expect(stdout).toMatch(/code-viewer search files --term <pattern>/);
@@ -1831,7 +2060,7 @@ describe("preview CLI", () => {
 
     const proc = spawn(
       process.execPath,
-      [CLI_BUNDLE, "--port", "0", "--cwd", root],
+      [CLI_BUNDLE, "--standalone", "--port", "0", "--cwd", root],
       {
         cwd: join(fileURLToPath(new URL(".", import.meta.url)), "..", ".."),
         stdio: ["ignore", "pipe", "pipe"],
@@ -1863,4 +2092,127 @@ describe("preview CLI", () => {
       await stopTestPreview(proc, exited);
     }
   });
+
+  // Diff のカードの高さの見積もりの材料 (core/diff-card-estimate.ts の
+  // DiffRowBasis)。画面はこれに自分の寸法を当てて、中身が届くまでの高さに
+  // する。追跡中は差分の本文から、追跡外 (新規) は追加の行とファイルの先頭から
+  // 数える。
+  runOrSkip(
+    "diff metadata carries the row basis for the card height estimate",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-row-basis-"));
+      tmpRoots.push(root);
+      git(root, ["init", "-b", "main"]);
+      git(root, ["config", "user.email", "sample-author"]);
+      git(root, ["config", "user.name", "sample-author"]);
+      const longLines = Array.from({ length: 120 }, (_, i) => `line ${i + 1}`);
+      writeFileSync(join(root, "short.txt"), "base\n");
+      writeFileSync(join(root, "long.txt"), `${longLines.join("\n")}\n`);
+      writeFileSync(join(root, "removed.txt"), "one\ntwo\nthree\n");
+      git(root, ["add", "."]);
+      git(root, ["commit", "-m", "sample initial commit"]);
+      writeFileSync(join(root, "short.txt"), "first\n");
+      const changed = [...longLines];
+      changed[9] = "line 10 changed";
+      changed[99] = "line 100 changed";
+      writeFileSync(join(root, "long.txt"), `${changed.join("\n")}\n`);
+      unlinkSync(join(root, "removed.txt"));
+      writeFileSync(join(root, "fresh.txt"), "new one\nnew two\n");
+      const preview = await startTestPreview(root);
+      try {
+        const response = await fetchWithTimeout(
+          `${preview.url}diff.json?nocache=1`,
+          5000,
+        );
+        const body = (await response.json()) as {
+          files: Array<{
+            path: string;
+            estimated_height_px?: number;
+            row_basis?: unknown;
+          }>;
+          row_basis_errors?: unknown[];
+        };
+        expect({
+          status: response.status,
+          errors: body.row_basis_errors,
+          files: body.files.map((file) => ({
+            path: file.path,
+            height: file.estimated_height_px,
+            basis: file.row_basis,
+          })),
+        }).toEqual({
+          status: 200,
+          errors: undefined,
+          files: [
+            {
+              // 追跡外 (新規) は差分の本文を読まないので tail_more を持たない
+              // (= false)。横に長い行はファイルの先頭から選び、見出しは git が
+              // 新規のファイルに付けるもの。
+              path: "fresh.txt",
+              height: 90,
+              basis: {
+                hunks: 1,
+                context: 0,
+                split_changes: 2,
+                lead_gap: false,
+                widest: {
+                  old: [],
+                  new: ["new one"],
+                  head: ["@@ -0,0 +1,2 @@"],
+                },
+              },
+            },
+            {
+              // 10 行目と 100 行目: 2 ハンク、それぞれ前後 3 行の文脈。最後の
+              // ハンクの後ろが 3 行ちょうどなので、まだ行が続く見込み (tail_more)。
+              path: "long.txt",
+              height: 46 + 14 * 22 + 3 * 22,
+              basis: {
+                hunks: 2,
+                context: 12,
+                split_changes: 2,
+                lead_gap: true,
+                tail_more: true,
+                widest: {
+                  old: ["line 100"],
+                  new: ["line 100 changed"],
+                  head: ["@@ -97,7 +97,7 @@ line 96"],
+                },
+              },
+            },
+            {
+              path: "removed.txt",
+              height: 46 + 3 * 22,
+              basis: {
+                hunks: 1,
+                context: 0,
+                split_changes: 3,
+                lead_gap: false,
+                tail_more: false,
+                widest: { old: ["three"], new: [], head: ["@@ -1,3 +0,0 @@"] },
+              },
+            },
+            {
+              path: "short.txt",
+              height: 46 + 22,
+              basis: {
+                hunks: 1,
+                context: 0,
+                split_changes: 1,
+                lead_gap: false,
+                tail_more: false,
+                widest: {
+                  old: ["base"],
+                  new: ["first"],
+                  head: ["@@ -1 +1 @@"],
+                },
+              },
+            },
+          ],
+        });
+      } finally {
+        await stopTestPreview(preview.proc, preview.exited);
+      }
+    },
+  );
 });

@@ -1,10 +1,15 @@
+import { apiUrl } from "../core/api-url";
+
 // Ref picker popover (branch / tag / commit selector), extracted from app.ts.
 // createRefPicker() wires the popover, the #ref-from/#ref-to inputs, and the
 // #repo-target input at construction time.
 
+import { relativeTimeText } from "../core/blame";
+import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import { isImeComposing } from "../core/keyboard";
 import type { AppRoute, DiffRange } from "../core/routes";
 import type { RefCommitResponse, RefResponse } from "../core/types";
+import { pageLanguage } from "./page-language";
 
 export type RefPickerDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -30,6 +35,14 @@ export type RefPickerDeps = {
 
 // The quick chips are always offered; picking one is not worth remembering.
 const QUICK_REF_VALUES = new Set(["worktree", "HEAD", "--staged"]);
+
+function isAbortError(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    (error as { name?: unknown }).name === "AbortError"
+  );
+}
 
 export function createRefPicker(deps: RefPickerDeps) {
   function wireRefSelectorInput(
@@ -106,25 +119,39 @@ export function createRefPicker(deps: RefPickerDeps) {
 
   let refsLoaded = false;
   let refsLoading = false;
-  let refsError = false;
+  /** 枝・タグを読めなかった理由 (候補の欄に出す)。読めていれば null。 */
+  let refsError: string | null = null;
   let refsInFlight: Promise<void> | null = null;
+
+  /**
+   * JSON を読む前に HTTP の失敗を投げる。以前は r.json() だけで、失敗の本文を
+   * 候補として読んだり、コミットの検索の失敗を黙って捨てたりしていた。
+   */
+  async function readJson<T>(
+    response: Response,
+    operation: string,
+  ): Promise<T> {
+    if (!response.ok)
+      throw new Error(await responseErrorMessage(response, operation));
+    return (await response.json()) as T;
+  }
 
   function fetchRefs(): Promise<void> {
     if (refsLoaded) return Promise.resolve();
     if (refsInFlight) return refsInFlight;
     refsLoading = true;
-    refsError = false;
-    const request = fetch("/_refs")
-      .then((r) => r.json())
+    refsError = null;
+    const request = fetch(apiUrl("refs"))
+      .then((r) => readJson<RefResponse>(r, "loading branches and tags"))
       .then((refs: RefResponse) => {
         Object.assign(REFS, refs);
         refsLoaded = true;
         if (!popover.hidden && popTab !== "commits")
           buildPopBody(popSearch.value);
       })
-      .catch((error) => {
-        refsError = true;
-        console.error("[code-viewer] failed to load refs", error);
+      .catch((error: unknown) => {
+        refsError = formatErrorDetail(error);
+        console.error("[code-viewer] loading branches and tags failed", error);
       })
       .finally(() => {
         refsLoading = false;
@@ -145,6 +172,8 @@ export function createRefPicker(deps: RefPickerDeps) {
   let commitAppendLoading = false;
   let commitHasMore = false;
   let commitQuery = "";
+  /** コミットの検索に失敗した理由 (候補の欄に出す)。 */
+  let commitSearchError: string | null = null;
 
   function appendUniqueCommits(commits: RefCommitResponse["commits"]) {
     const seen = new Set(REFS.commits.map((commit) => commit.sha));
@@ -170,11 +199,13 @@ export function createRefPicker(deps: RefPickerDeps) {
       commitAppendLoading = false;
       commitHasMore = false;
     }
+    commitSearchError = null;
     const url =
-      `/_commits?max=${COMMIT_PAGE_SIZE}&skip=${skip}` +
+      `${apiUrl("commits")}?max=${COMMIT_PAGE_SIZE}&skip=${skip}` +
       `&q=${encodeURIComponent(normalizedQuery)}`;
+    const operation = `searching commits for "${normalizedQuery}" (from ${skip})`;
     return fetch(url, { signal: commitSearchAbort.signal })
-      .then((r) => r.json())
+      .then((r) => readJson<RefCommitResponse>(r, operation))
       .then((refs: RefCommitResponse) => {
         if (seq !== commitSearchSeq) return;
         commitSearchLoading = false;
@@ -187,11 +218,22 @@ export function createRefPicker(deps: RefPickerDeps) {
           if (append) popBody.scrollTop = previousScrollTop;
         }
       })
-      .catch(() => {
-        if (seq === commitSearchSeq) {
-          commitSearchLoading = false;
-          commitAppendLoading = false;
+      .catch((error: unknown) => {
+        // 次の検索に置き換えられて止めたもの (AbortError) は失敗ではない。
+        if (seq !== commitSearchSeq) {
+          if (!isAbortError(error))
+            console.error(
+              `[code-viewer] ${operation} failed (a newer search replaced it)`,
+              error,
+            );
+          return;
         }
+        commitSearchLoading = false;
+        commitAppendLoading = false;
+        commitSearchError = formatErrorDetail(error);
+        console.error(`[code-viewer] ${operation} failed`, error);
+        if (!popover.hidden && popTab === "commits")
+          buildPopBody(popSearch.value);
       });
   }
 
@@ -220,15 +262,9 @@ export function createRefPicker(deps: RefPickerDeps) {
   function relativeWhen(iso: string): string {
     const t = Date.parse(iso);
     if (!Number.isFinite(t)) return iso;
-    const sec = Math.round((Date.now() - t) / 1000);
-    if (sec < 60) return "just now";
-    const min = Math.round(sec / 60);
-    if (min < 60) return `${min}m ago`;
-    const hour = Math.round(min / 60);
-    if (hour < 24) return `${hour}h ago`;
-    const day = Math.round(hour / 24);
-    if (day < 30) return `${day}d ago`;
-    return iso.slice(0, 10);
+    // 30 日より前は日付だけ (相対では幅をとるうえに読み取りにくい)。
+    if (Date.now() - t >= 30 * 24 * 60 * 60 * 1000) return iso.slice(0, 10);
+    return relativeTimeText(t / 1000, pageLanguage());
   }
 
   function absoluteWhen(iso: string): string {
@@ -261,7 +297,7 @@ export function createRefPicker(deps: RefPickerDeps) {
       const commits = (REFS.commits || []).filter((commit) =>
         m(`${commit.sha} ${commit.subject} ${commit.author}`),
       );
-      if (!commits.length) {
+      if (!commits.length && !commitSearchError) {
         html.push('<div class="rp-empty">no commits</div>');
       }
       for (const commit of commits) {
@@ -292,15 +328,25 @@ export function createRefPicker(deps: RefPickerDeps) {
             "</div>",
         );
       }
-      if (commitAppendLoading) {
+      if (commitSearchError) {
+        html.push(
+          '<div class="rp-empty" role="alert">' +
+            deps.escapeHtml(`failed to search commits: ${commitSearchError}`) +
+            "</div>",
+        );
+      } else if (commitAppendLoading) {
         html.push('<div class="rp-empty">loading more commits...</div>');
       } else if (commitHasMore) {
         html.push('<div class="rp-empty">scroll for more commits...</div>');
       }
     } else if (refsLoading) {
       html.push('<div class="rp-empty">loading refs...</div>');
-    } else if (refsError) {
-      html.push('<div class="rp-empty">failed to load refs</div>');
+    } else if (refsError !== null) {
+      html.push(
+        '<div class="rp-empty" role="alert">' +
+          deps.escapeHtml(`failed to load refs: ${refsError}`) +
+          "</div>",
+      );
     } else if (popTab === "branches") {
       const branches = (REFS.branches || []).filter((b) => m(b.name));
       if (!branches.length) {

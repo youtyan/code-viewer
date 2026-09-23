@@ -1,5 +1,14 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
+import { findMainScrollTarget } from "../core/focus-scope";
 import type { AppRoute } from "../core/routes";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 import type { SourceViewDeps } from "../views/source-view";
@@ -81,17 +90,20 @@ function createSourceViewForCursorTest(
     syntaxHighlight: false,
   };
   return createSourceView({
-    $: <T extends Element = HTMLElement>(sel: string): T => {
-      const el = document.querySelector<T>(sel);
-      if (!el) throw new Error(`missing ${sel}`);
-      return el;
-    },
-    $$: <T extends Element = HTMLElement>(sel: string): T[] =>
-      Array.from(document.querySelectorAll<T>(sel)),
     STATE: state,
+    // 本文の実体と同じく、渡された STATE の route を読む (STATE を差し替える
+    // テストがある)。
+    route: () => (overrides.STATE ?? state).route,
     setRoute(nextRoute) {
       state.route = nextRoute;
     },
+    scope: () => document,
+    mountRoot: () => {
+      const el = document.querySelector<HTMLElement>("#diff");
+      if (!el) throw new Error("missing #diff");
+      return el;
+    },
+    mainScrollTarget: () => findMainScrollTarget(),
     setPageMode() {
       /* noop */
     },
@@ -411,6 +423,12 @@ describe("renderStandaloneSource idempotency", () => {
       document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
         .sourceState,
     ).toBe("error");
+    // 失敗の理由 (操作・HTTP の状態・本文) を決まり文句の後に続ける。
+    expect(
+      document.querySelector(".gdp-source-viewer.error")?.textContent,
+    ).toBe(
+      "Cannot load a.txt at worktree\nError: loading a.txt (HTTP 500): boom",
+    );
 
     await view.renderStandaloneSource(target);
 
@@ -775,6 +793,97 @@ describe("renderStandaloneSource loading-state guard and paged retry", () => {
     }
   });
 
+  // 強調の失敗は黙って原文に戻さない: 表に失敗の印と理由 (title) を付け、
+  // console に元の例外ごと出す。コードは原文のまま読める。
+  test("marks the table with the reason when syntax highlighting fails", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async () =>
+        new Response("const sample = 1;", { status: 200 })) as typeof fetch,
+    });
+    const logged: unknown[] = [];
+    vi.spyOn(console, "error").mockImplementation((error) => {
+      logged.push(error);
+    });
+    const state: SourceViewDeps["STATE"] = {
+      route: blobRoute("sample.ts"),
+      from: "HEAD",
+      to: "worktree",
+      files: [],
+      syntaxHighlight: true,
+    };
+    const view = createSourceViewForCursorTest(state.route, {
+      STATE: state,
+      loadSourceHighlighter: async () => ({
+        codeToHtml: () => {
+          throw new Error("grammar is missing");
+        },
+      }),
+    });
+
+    await view.renderStandaloneSource({ path: "sample.ts", ref: "worktree" });
+    const table = document.querySelector<HTMLElement>(".gdp-source-table");
+    await waitFor(
+      () => table?.classList.contains("gdp-highlight-failed") === true,
+    );
+    expect([
+      table?.querySelector(".gdp-source-line-code")?.textContent,
+      table?.title.split("\n"),
+      logged.length,
+    ]).toEqual([
+      "const sample = 1;",
+      [
+        "Error: syntax highlighting failed for sample.ts",
+        "Caused by: Error: shiki could not highlight typescript",
+        "Caused by: Error: grammar is missing",
+      ],
+      1,
+    ]);
+  });
+
+  // タブを切り替えて同じファイルへ戻ると、描き直しても前の位置へ戻る (面ごと・
+  // ファイルごと、セッション中だけ)。行の指定の無い初めてのファイルは先頭。
+  test("restores the scroll position of each file after switching back", async () => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async () =>
+        new Response("line one\nline two", { status: 200 })) as typeof fetch,
+    });
+    const scroller = document.createElement("div");
+    document.body.append(scroller);
+    const state: SourceViewDeps["STATE"] = {
+      route: blobRoute("first.ts"),
+      from: "HEAD",
+      to: "worktree",
+      files: [],
+      syntaxHighlight: false,
+    };
+    const view = createSourceViewForCursorTest(state.route, {
+      STATE: state,
+      mainScrollTarget: () => scroller,
+    });
+    const open = async (path: string) => {
+      state.route = blobRoute(path);
+      await view.renderStandaloneSource({ path, ref: "worktree" });
+    };
+
+    await open("first.ts");
+    scroller.scrollTop = 300;
+    scroller.dispatchEvent(new Event("scroll"));
+    await open("second.ts");
+    const onSecond = scroller.scrollTop;
+    scroller.scrollTop = 40;
+    scroller.dispatchEvent(new Event("scroll"));
+    await open("first.ts");
+    const backOnFirst = scroller.scrollTop;
+    await open("second.ts");
+    expect([onSecond, backOnFirst, scroller.scrollTop]).toEqual([0, 300, 40]);
+  });
+
   test("does not apply a late syntax result to the next file", async () => {
     document.body.innerHTML = '<div id="diff"></div>';
     Object.defineProperty(globalThis, "fetch", {
@@ -913,6 +1022,11 @@ describe("renderStandaloneSource loading-state guard and paged retry", () => {
       document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
         .sourceState,
     ).toBe("error");
+    expect(
+      document.querySelector(".gdp-source-viewer.error")?.textContent,
+    ).toBe(
+      "Cannot load big.txt at worktree\nError: loading lines 1-2000 of big.txt (HTTP 500): boom",
+    );
 
     await view.renderStandaloneSource(target);
     expect(rangeCalls).toBe(2);
@@ -968,5 +1082,74 @@ describe("visible source line navigation", () => {
     expect(document.querySelector(".gdp-source-line-count")?.textContent).toBe(
       "3 行",
     );
+  });
+});
+
+// 見出しの右の切替・行へ移る欄・コピーは、読み込む前から読み込んだ後と同じ
+// 並びで置く (後から足すと、右寄せの切替が左へ伸びて見出しが動いていた)。
+// ui-layout.md の「切替で CLS 0 を保つ」。
+describe("file header tabs keep their place while the file loads", () => {
+  const shape = () => {
+    const tabs = document.querySelector<HTMLElement>(
+      ".gdp-file-detail-tabs .gdp-source-tabs",
+    );
+    if (!tabs) throw new Error("no file header tabs");
+    return [...tabs.children].map((child) => {
+      const el = child as HTMLElement;
+      const inner =
+        el.tagName === "FORM"
+          ? `(${[...el.children].map((part) => part.className || part.tagName.toLowerCase()).join(" ")})`
+          : "";
+      return `${el.tagName.toLowerCase()}.${[...el.classList].join(".")}[${el.dataset.sourceTab ?? ""}]${inner}`;
+    });
+  };
+
+  test.each([
+    { path: "src/sample.ts", name: "code only" },
+    { path: "docs/sample.md", name: "previewable" },
+  ])("$name ($path)", async ({ path }) => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    const gate = deferred<Response>();
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/_file") return gate.promise;
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
+    });
+    const view = createSourceViewForCursorTest(blobRoute(path));
+    const rendered = view.renderStandaloneSource({ path, ref: "worktree" });
+    await waitFor(
+      () =>
+        document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+          .sourceState === "loading",
+    );
+    const copy = () =>
+      document.querySelector<HTMLButtonElement>(
+        ".gdp-file-detail-tabs .gdp-copy-source",
+      );
+    const count = () =>
+      document.querySelector(".gdp-file-detail-tabs .gdp-source-line-count")
+        ?.textContent;
+    const before = {
+      shape: shape(),
+      copyDisabled: copy()?.disabled,
+      count: count(),
+    };
+
+    gate.resolve(new Response("line one\nline two", { status: 200 }));
+    await rendered;
+
+    expect(before).toEqual({
+      shape: shape(),
+      copyDisabled: true,
+      count: "– lines",
+    });
+    expect({ copyDisabled: copy()?.disabled, count: count() }).toEqual({
+      copyDisabled: false,
+      count: "2 lines",
+    });
   });
 });

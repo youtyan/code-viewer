@@ -1,4 +1,10 @@
-import { errorWithCause, responseErrorMessage } from "../core/error-detail";
+import { apiUrl } from "../core/api-url";
+import { showHighlightFailure } from "../core/copy-failure";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 import { normalizeSourceShikiLang } from "../core/source-meta";
 import type { FileRangeResponse } from "../core/types";
@@ -51,10 +57,6 @@ function requestKey(request: CodePreviewRequest): string {
     match?.caseSensitive ?? "",
     action?.label ?? "",
   ].join("\0");
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export function createCodePreview(
@@ -142,7 +144,7 @@ export function createCodePreview(
 
     void deps
       .trackLoad<FileRangeResponse>(
-        fetch(`/file_range?${params.toString()}`, {
+        fetch(`${apiUrl("fileRange")}?${params.toString()}`, {
           signal: abort.signal,
         }).then(async (response) => {
           if (!response.ok) {
@@ -234,11 +236,23 @@ export function createCodePreview(
           !isCurrent(myGeneration, abort.signal)
         )
           return;
-        const highlightedLines = deps.sourceShikiLines(
-          response.lines.join("\n"),
-          lang,
-          highlighter,
-        );
+        // 強調に失敗したら原文のまま、表に失敗の印と理由を付ける (下見の
+        // 読み込みの失敗とは分ける: コードは読めている)。
+        let highlightedLines: string[] | null;
+        try {
+          highlightedLines = deps.sourceShikiLines(
+            response.lines.join("\n"),
+            lang,
+            highlighter,
+          );
+        } catch (error) {
+          showHighlightFailure(
+            table,
+            `syntax highlighting failed for ${target.path}`,
+            error,
+          );
+          return;
+        }
         if (
           !highlightedLines ||
           !table.isConnected ||
@@ -270,10 +284,7 @@ export function createCodePreview(
           return;
         console.error("Failed to load code preview", error);
         const text = codePreviewText(deps.getLanguage());
-        renderFrame(
-          request,
-          text.codeLoadFailed(errorMessage(error, text.unknownError)),
-        );
+        renderFrame(request, text.codeLoadFailed(formatErrorDetail(error)));
       });
   };
 

@@ -423,11 +423,15 @@ export function formatBytes(bytes: number): string {
   );
 }
 
-export function formatFileDate(value: string | undefined): string {
+/** 日時を画面の設定の言語 (`language`) で出す。ブラウザの言語には任せない。 */
+export function formatFileDate(
+  value: string | undefined,
+  language: string,
+): string {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString(undefined, {
+  return date.toLocaleString(language, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -436,33 +440,104 @@ export function formatFileDate(value: string | undefined): string {
   });
 }
 
+type FileKindWord =
+  | "image"
+  | "document"
+  | "archive"
+  | "video"
+  | "audio"
+  | "file";
+
+/** 拡張子で分かる形式の名前と、その種類。 */
+const FILE_FORMATS: Record<string, [string, FileKindWord]> = {
+  png: ["PNG", "image"],
+  jpg: ["JPEG", "image"],
+  jpeg: ["JPEG", "image"],
+  gif: ["GIF", "image"],
+  webp: ["WebP", "image"],
+  svg: ["SVG", "image"],
+  pdf: ["PDF", "document"],
+  zip: ["ZIP", "archive"],
+  mp4: ["MP4", "video"],
+  webm: ["WebM", "video"],
+  mp3: ["MP3", "audio"],
+  wav: ["WAV", "audio"],
+  ogg: ["Ogg", "audio"],
+  flac: ["FLAC", "audio"],
+  m4a: ["M4A", "audio"],
+  aac: ["AAC", "audio"],
+  opus: ["Opus", "audio"],
+  mid: ["MIDI", "file"],
+  midi: ["MIDI", "file"],
+};
+
+type FileKindText = {
+  word: Record<FileKindWord, string>;
+  image: string;
+  video: string;
+  audio: string;
+  binary: string;
+  /** 呼び出し側の既定の種類の名前 (無ければ先頭を大文字にして出す)。 */
+  fallback: Record<string, string>;
+};
+
+const FILE_KIND_TEXT: Record<"en" | "ja", FileKindText> = {
+  en: {
+    word: {
+      image: "image",
+      document: "document",
+      archive: "archive",
+      video: "video",
+      audio: "audio",
+      file: "file",
+    },
+    image: "Image",
+    video: "Video",
+    audio: "Audio",
+    binary: "Binary file",
+    fallback: {},
+  },
+  ja: {
+    word: {
+      image: "画像",
+      document: "文書",
+      archive: "圧縮ファイル",
+      video: "動画",
+      audio: "音声",
+      file: "ファイル",
+    },
+    image: "画像",
+    video: "動画",
+    audio: "音声",
+    binary: "バイナリファイル",
+    fallback: {
+      image: "画像",
+      video: "動画",
+      audio: "音声",
+      pdf: "PDF 文書",
+      text: "テキスト",
+      "internal metadata": "内部のファイル",
+    },
+  },
+};
+
 export function humanFileKind(
   path: string,
   mime: string | undefined,
   fallback: string,
+  language: "en" | "ja",
 ): string {
+  const text = FILE_KIND_TEXT[language];
   const ext = (path.split(".").pop() || "").toLowerCase();
-  if (ext === "png") return "PNG image";
-  if (ext === "jpg" || ext === "jpeg") return "JPEG image";
-  if (ext === "gif") return "GIF image";
-  if (ext === "webp") return "WebP image";
-  if (ext === "svg") return "SVG image";
-  if (ext === "pdf") return "PDF document";
-  if (ext === "zip") return "ZIP archive";
-  if (ext === "mp4") return "MP4 video";
-  if (ext === "webm") return "WebM video";
-  if (ext === "mp3") return "MP3 audio";
-  if (ext === "wav") return "WAV audio";
-  if (ext === "ogg") return "Ogg audio";
-  if (ext === "flac") return "FLAC audio";
-  if (ext === "m4a") return "M4A audio";
-  if (ext === "aac") return "AAC audio";
-  if (ext === "opus") return "Opus audio";
-  if (ext === "mid" || ext === "midi") return "MIDI file";
-  if (mime?.startsWith("image/")) return "Image";
-  if (mime?.startsWith("video/")) return "Video";
-  if (mime?.startsWith("audio/")) return "Audio";
-  if (mime === "application/pdf") return "PDF document";
-  if (fallback === "unsupported file") return "Binary file";
-  return fallback.charAt(0).toUpperCase() + fallback.slice(1);
+  const format = FILE_FORMATS[ext];
+  if (format) return `${format[0]} ${text.word[format[1]]}`;
+  if (mime?.startsWith("image/")) return text.image;
+  if (mime?.startsWith("video/")) return text.video;
+  if (mime?.startsWith("audio/")) return text.audio;
+  if (mime === "application/pdf") return `PDF ${text.word.document}`;
+  if (fallback === "unsupported file") return text.binary;
+  return (
+    text.fallback[fallback] ??
+    fallback.charAt(0).toUpperCase() + fallback.slice(1)
+  );
 }

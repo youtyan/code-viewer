@@ -46,23 +46,19 @@ const SNAKE_CASE = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g;
 // 中立プレースホルダは常に許可する (これを使うのが正解なので一覧に載せない)。
 const PLACEHOLDER_PREFIXES = ["sample_", "example_"];
 
-function collectFiles(): string[] {
+// 読めないフォルダは飛ばさない (飛ばすと、見たつもりで何も見ていない緑になる)。
+// readdirSync / statSync の例外がそのまま落とし、場所はその message に出る。
+function collectFiles(directories = SCAN_DIRECTORIES): string[] {
   const found = [...SCAN_FILES];
   const walk = (dir: string) => {
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return;
-    }
-    for (const name of entries) {
+    for (const name of readdirSync(dir)) {
       if (SKIP_DIRECTORIES.has(name)) continue;
       const full = join(dir, name);
       if (statSync(full).isDirectory()) walk(full);
       else if (SCAN_EXTENSIONS.has(extname(name))) found.push(full);
     }
   };
-  for (const dir of SCAN_DIRECTORIES) walk(dir);
+  for (const dir of directories) walk(dir);
   return found;
 }
 
@@ -108,6 +104,12 @@ describe("public repository data hygiene", () => {
     //   2. 技術用語・SQL の予約語・自プロジェクトの識別子なら、
     //      _hygiene-known-identifiers.ts へ 1 行足す。
     expect(Object.fromEntries(unknown)).toEqual({});
+  });
+
+  test("a scan directory that cannot be read fails with its path instead of being skipped", () => {
+    expect(() => collectFiles(["web-src/test/__missing_scan_dir__"])).toThrow(
+      /ENOENT.*web-src\/test\/__missing_scan_dir__/,
+    );
   });
 
   test("the known-identifier list stays sorted and free of duplicates", () => {

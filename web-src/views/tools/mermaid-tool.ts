@@ -3,6 +3,7 @@
 // createDiagramViewport を使うので、操作感は DB の ER タブと揃う。
 
 import { createDiagramViewport } from "../../core/diagram-viewport";
+import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { loadMermaid } from "../../core/mermaid-loader";
 import type { ToolsText } from "./i18n";
 import {
@@ -45,12 +46,14 @@ export function createMermaidTool(
       onInput,
       outputActions: [zoomIn, zoomOut, zoomReset],
       render: async (value, output, signal) => {
-        const mermaid = await loadMermaid();
-        if (signal.aborted) return;
-        if (!mermaid) {
-          pane.setStatus(currentText.mermaid.loadError, "error");
-          return;
+        let mermaid: Awaited<ReturnType<typeof loadMermaid>>;
+        try {
+          mermaid = await loadMermaid();
+        } catch (error) {
+          // 投げ直した失敗は createScratchpadPane が console とステータス行に出す。
+          throw errorWithCause(currentText.mermaid.loadError, error);
         }
+        if (signal.aborted) return;
         const node = document.createElement("div");
         node.className = "mermaid";
         node.textContent = value;
@@ -61,15 +64,30 @@ export function createMermaidTool(
           // suppressErrors: false だと mermaid が図の代わりにエラー画像を
           // 差し込むので、失敗はこちらのステータス行だけで伝える。
           await mermaid.run({ nodes: [node], suppressErrors: true });
-        } catch {
-          if (signal.aborted) return;
-          pane.setStatus(currentText.mermaid.renderError, "error");
-          return;
+        } catch (error) {
+          throw errorWithCause(currentText.mermaid.renderError, error);
         }
         if (signal.aborted) return;
         // 解析に失敗したときは例外ではなく「SVG が生えない」形で返ってくる。
-        if (node.querySelector("svg")) pane.setStatus("");
-        else pane.setStatus(currentText.mermaid.renderError, "error");
+        if (node.querySelector("svg")) {
+          pane.setStatus("");
+          return;
+        }
+        // 記法の誤りは利用者の入力なので console には出さず、parse の理由を
+        // ステータス行に添える (理由が取れないときは案内だけ)。
+        let syntaxError: unknown = null;
+        try {
+          await mermaid.parse?.(value);
+        } catch (error) {
+          syntaxError = error;
+        }
+        if (signal.aborted) return;
+        pane.setStatus(
+          syntaxError === null
+            ? currentText.mermaid.renderError
+            : `${currentText.mermaid.renderError}\n${formatErrorDetail(syntaxError)}`,
+          "error",
+        );
       },
     },
   );

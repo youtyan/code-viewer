@@ -6,6 +6,7 @@ import type { RawFileInfo } from "./types";
 // (呼び出し側は判定不能として画面に触れず、次の通知で再検証する)。
 export function rawFileInfoSignature(info: RawFileInfo): string | null {
   if (info.missing) return "missing";
+  if (info.error) return null;
   if (info.size == null && !info.updated_at && !info.commit_updated_at)
     return null;
   return `${info.size ?? ""}|${info.updated_at ?? ""}|${info.commit_updated_at ?? ""}`;

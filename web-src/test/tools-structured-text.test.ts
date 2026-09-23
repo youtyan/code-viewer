@@ -167,3 +167,19 @@ describe("structured text formatting", () => {
     );
   });
 });
+
+describe("structured text parsing keeps the kind of error", () => {
+  test("names the error a YAML alias explosion throws", () => {
+    const text = [
+      "a: &a [x, x, x, x, x, x, x, x, x]",
+      "b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a]",
+      "c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b]",
+      "d: [*c, *c, *c, *c, *c, *c, *c, *c, *c]",
+    ].join("\n");
+    expect(parseStructuredText(text, YAML)).toEqual({
+      status: "error",
+      message:
+        "ReferenceError: Excessive alias count indicates a resource exhaustion attack",
+    });
+  });
+});

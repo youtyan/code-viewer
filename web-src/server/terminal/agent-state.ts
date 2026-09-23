@@ -13,8 +13,10 @@ import type {
   AgentState,
   AgentStateRecord,
   AgentStateSource,
+  ReportedAgent,
 } from "../../core/agent-state";
 import { agentStateForEvent, needsAttention } from "../../core/agent-state";
+import { noteAgentStateChange } from "./unread";
 
 /**
  * 覚えておく対象の数。閉じたペインの分が積み上がらないように上限を掛ける。
@@ -26,6 +28,31 @@ const MAX_TRACKED_TARGETS = 200;
 const MAX_TEXT_LENGTH = 2000;
 
 const states = new Map<string, AgentStateRecord>();
+let tmuxGeneration: string | null = null;
+
+/** pane id を現在の tmux サーバ世代に結び付ける、メモリ内ストアの鍵。 */
+export function agentTargetKey(target: string): string {
+  return `${tmuxGeneration ?? "pending"}\0${target}`;
+}
+
+/**
+ * 現在の tmux サーバ世代を置く。初回は先に届いたフックを現世代へ移し、
+ * 変更時は再利用されうる pane id の記録をすべて捨てる。
+ */
+export function setAgentTmuxGeneration(generation: string): {
+  changed: boolean;
+  previous: string | null;
+} {
+  if (!generation) throw new RangeError("tmux generation must not be empty");
+  const previous = tmuxGeneration;
+  if (previous === generation) return { changed: false, previous };
+  const records = previous === null ? [...states.values()] : [];
+  states.clear();
+  tmuxGeneration = generation;
+  for (const record of records)
+    states.set(agentTargetKey(record.target), record);
+  return { changed: previous !== null, previous };
+}
 
 function clip(value: string): string {
   return value.length > MAX_TEXT_LENGTH
@@ -70,6 +97,8 @@ export type RecordAgentStateInput = {
   override?: boolean;
   lastPrompt?: string;
   note?: string;
+  /** フックが名乗った種類。送られてこなければ前の値を残す。 */
+  agent?: ReportedAgent;
 };
 
 /**
@@ -85,7 +114,8 @@ export type RecordAgentStateInput = {
 export function recordAgentState(
   input: RecordAgentStateInput,
 ): AgentStateRecord | null {
-  const previous = states.get(input.target);
+  const key = agentTargetKey(input.target);
+  const previous = states.get(key);
   const next =
     input.state ??
     (input.event
@@ -128,18 +158,35 @@ export function recordAgentState(
       input.source !== "hook" && previous?.state === next
         ? previous.updatedAt
         : at,
+    changeObserved:
+      input.source === "hook"
+        ? true
+        : previous === undefined
+          ? false
+          : previous.state === next
+            ? previous.changeObserved
+            : true,
     // 添え物は送られてこなければ前の値を残す。ターンの途中で毎回指示文を
     // 送り直させないため。
     lastPrompt: clip(input.lastPrompt ?? previous?.lastPrompt ?? ""),
     note: clip(input.note ?? previous?.note ?? ""),
   };
-  states.set(input.target, record);
+  // 種類と終了の印は申告だけが決める。画面観測の記録でも前の値を引き継ぐ。
+  const agent = input.agent ?? previous?.agent;
+  if (agent) record.agent = agent;
+  const ended =
+    input.source === "hook" ? input.event === "exit" : previous?.ended;
+  if (ended) record.ended = true;
+  if (previous?.state !== next) {
+    noteAgentStateChange(key, previous?.state, next);
+  }
+  states.set(key, record);
   evictOldest();
   return record;
 }
 
 export function getAgentState(target: string): AgentStateRecord | null {
-  return states.get(target) ?? null;
+  return states.get(agentTargetKey(target)) ?? null;
 }
 
 /** 一覧。人間の番のものが先、その中では待たせている順に並べる。 */
@@ -152,7 +199,7 @@ export function listAgentStates(): AgentStateRecord[] {
 }
 
 export function forgetAgentState(target: string): boolean {
-  return states.delete(target);
+  return states.delete(agentTargetKey(target));
 }
 
 /**
@@ -162,9 +209,9 @@ export function forgetAgentState(target: string): boolean {
  */
 export function retainAgentStates(known: Set<string>): number {
   let removed = 0;
-  for (const target of [...states.keys()]) {
-    if (!known.has(target)) {
-      states.delete(target);
+  for (const [key, record] of [...states]) {
+    if (!known.has(record.target)) {
+      states.delete(key);
       removed += 1;
     }
   }
@@ -174,4 +221,5 @@ export function retainAgentStates(known: Set<string>): number {
 /** テストとサーバ終了用。持ち越すと次のテストに漏れる。 */
 export function clearAgentStates(): void {
   states.clear();
+  tmuxGeneration = null;
 }

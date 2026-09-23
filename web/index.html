@@ -1,10 +1,17 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- viewport-fit=cover: 電話の切り欠き・ホームバーの下まで描き、安全領域は
+     style.css の Phone (SP) の節が env(safe-area-inset-*) で空ける。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>code viewer</title>
 <link rel="icon" type="image/png" href="/favicon.png" />
+<!-- インストールした窓 (PWA)。色は骨格の地 (--color-ground)。キーの扱いは web-src/core/pwa.ts。 -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#101014" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#f3f1f7" media="(prefers-color-scheme: light)" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 
 <!-- diff2html/highlight.js assets are vendored so the preview works offline
      and does not make network requests from the browser. The highlighter JS is
@@ -17,42 +24,205 @@
 <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
 <script src="/vendor/diff2html/diff2html-ui.min.js"></script>
 
+<!-- 前回の骨格の見た目 (テーマ・左のサイドバー) を CSS より先に当てる。
+     控えを書くのは web-src/views/shell/early-look.ts (キーと形はそちらと同じ)。
+     控えが無い・読めないときは既定 (ダーク・開いたサイドバー) のまま描く。 -->
+<script>
+(function () {
+  var raw = window.localStorage.getItem("code-viewer:early-look");
+  if (!raw) return;
+  var look = JSON.parse(raw);
+  var root = document.documentElement;
+  if (look.theme === "light" || look.theme === "dark") root.dataset.theme = look.theme;
+  if (look.palette) root.dataset.palette = look.palette;
+  if (look.navCollapsed) root.dataset.navCollapsed = "";
+  if (look.navWidth > 0) root.style.setProperty("--nav-w", look.navWidth + "px");
+})();
+</script>
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
+<!-- 最初の描画で、開いた画面の並びの場所を取る (URL から画面の印を付ける)。
+     app.js が画面を描くまで並びが Files のままだと、Diff・History・選んでいる
+     作業ツリーを直接開いたときに本文・上の帯・一覧の列が大きく動いていた。
+     付けるのは app.ts が付けるのと同じ印 (core/page-mode.ts の pageModeClasses・
+     一覧の列 core/list-column.ts の listColumnLayout: 一覧の幅・変更ファイルの一覧と
+     ファイル一覧を幅のために畳むか)。app.ts が同じ印を付け直す。同じであることは
+     web-src/test/first-screen.test.ts が URL と窓の幅の表で確かめる。寸法の控えは
+     views/shell/early-look.ts が書く。body の頭に置くのは body に印を付けるため
+     (head では body がまだ無い。style.css は読み終わっているので変数を読める)。 -->
+<script id="first-screen">
+(function () {
+  var raw = window.localStorage.getItem("code-viewer:early-look");
+  var look = raw ? JSON.parse(raw) : {};
+  var root = document.documentElement;
+  var body = document.body;
+  if (look.sidebarWidth > 0) root.style.setProperty("--sidebar-w", look.sidebarWidth + "px");
+  if (look.historyWidth > 0) root.style.setProperty("--history-w", look.historyWidth + "px");
+  // 利用者がファイル一覧を畳んでいる。
+  var userHidden = look.sidebarHidden === true;
+  if (userHidden) body.classList.add("gdp-sidebar-hidden");
+  var path = location.pathname.replace(/^\/p\/[0-9a-f]{16}(?=[\/?#]|$)/, "");
+  if (path.charAt(0) !== "/") path = "/" + path;
+  var q = new URLSearchParams(location.search);
+  var screen = {
+    "/": "repo", "/index.html": "repo", "/doctor": "repo", "/todif": "diff", "/todiff": "diff",
+    "/file": "file", "/help": "help", "/worktree": "worktree", "/history": "history",
+    "/agents": "agents", "/tools": "tools", "/search": "search", "/journal": "journal",
+    "/database": "database"
+  }[path];
+  if (screen === "file" && !q.get("path")) screen = undefined;
+  if (!screen) return;
+  var view = q.get("view");
+  var fileView = screen !== "file" ? "" :
+    view === "blob" || view === "blame" || view === "history" ? view :
+    q.get("target") || q.get("preview") === "1" ? "blob" : "detail";
+  var selectedWorktree = screen === "worktree" && !!q.get("wt");
+  if (fileView || (screen === "history" && q.get("source"))) body.classList.add("gdp-file-detail-page");
+  if (fileView === "blob" || fileView === "blame" || fileView === "history") body.classList.add("gdp-repo-blob-page");
+  if (fileView === "history") body.classList.add("gdp-file-history-page");
+  if (screen !== "file") body.classList.add("gdp-" + screen + "-page");
+  if (screen === "worktree" && !selectedWorktree) body.setAttribute("data-worktree-overview", "");
+  // core/list-column.ts の listColumnKindFor (前面は URL の画面のタブ)。Diff から
+  // 開いたファイルの詳細 (差分の 1 ファイル) も変更ファイルの一覧を出す。?terminal=
+  // にシェル (core/shell.ts の isShellSessionId) があれば前面は端末 (app.ts の
+  // syncTerminalFromUrl が開く) なので一覧は出さない。1 面で数える (下の幅と同じ)。
+  var terminalFront = /^shell-[0-9a-z]{6,}$/.test(q.get("terminal") || "");
+  var list = terminalFront ? "" : screen === "diff" || fileView === "detail" ? "sidebar" : screen === "history" ? "history" : selectedWorktree ? "worktree" : "";
+  if (list) body.setAttribute("data-list-column", list);
+  var css = getComputedStyle(body);
+  var px = function (name) {
+    var value = parseFloat(css.getPropertyValue(name));
+    if (!(value >= 0)) throw new Error(name + " is not a length: " + JSON.stringify(css.getPropertyValue(name)));
+    return value;
+  };
+  // listColumnLayout と同じ決まり (1 面の本文 480 = COMFORTABLE_PANE_WIDTH、2 面の本文
+  // 961 = その 2 つ分と仕切り SPLIT_DIVIDER_WIDTH、詰めた幅 240 = HISTORY_WIDTH.min)。縮める
+  // 順: 一覧を詰める → 変更ファイルの一覧を帯に畳む → ファイル一覧を畳む。2 面かは保存
+  // したタブを読むまで分からないので、控え (前に見ていた画面が 2 面か) で数える。
+  var need = look.split === true ? 961 : 480;
+  var room = root.clientWidth - px("--nav-w");
+  // 利用者が畳んだファイル一覧も、画面の入口の縦の帯の幅 (--view-rail-w) は取る。
+  var files = userHidden ? px("--view-rail-w") : px("--sidebar-w");
+  var preferred = list ? px("--history-w") : 0;
+  var narrow = Math.min(preferred, 240);
+  var tree = list === "history" || list === "worktree" ? px("--sidebar-w") : 0;
+  var rail = px("--panelcol-rail-w");
+  var width = preferred;
+  var treeFolded = false;
+  var filesFolded = false;
+  if (room - files - preferred - tree < need) {
+    width = narrow;
+    if (room - files - narrow - tree < need) {
+      treeFolded = tree !== 0;
+      var treeWidth = treeFolded ? rail : tree;
+      filesFolded = !userHidden && room - files - narrow - treeWidth < need;
+    }
+  }
+  if (filesFolded) body.classList.add("gdp-sidebar-hidden");
+  if (!list) return;
+  root.style.setProperty("--list-w", width + "px");
+  if (treeFolded) body.setAttribute("data-list-tree-folded", "");
+})();
+</script>
 <div id="app">
-  <header id="global-header">
-    <a class="brand" href="/" aria-label="Repository home">
-      <img class="brand-icon" src="/favicon.png" alt="" width="20" height="20" />
-      <span class="title" id="project-title">repository</span>
-      <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
-    </a>
-    <nav class="app-menu" aria-label="Views">
-      <a class="app-menu-item active" data-route="repo" href="/">Repository</a>
-      <a class="app-menu-item" data-route="database" href="/database">Datastores</a>
-      <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
-      <a class="app-menu-item" data-route="history" href="/history">History</a>
-      <a class="app-menu-item" data-route="worktree" href="/worktree">Worktrees</a>
-      <a class="app-menu-item" data-route="journal" href="/journal">Work Log</a>
-      <span class="global-actions-sep app-menu-sep" aria-hidden="true"></span>
-      <a class="app-menu-item" data-route="help" href="/help">Settings &amp; Help</a>
-    </nav>
-    <div class="global-actions">
-      <button id="search-btn" class="global-icon-action" title="search files (Ctrl+K) · Shift+click: grep (Ctrl+G)" aria-label="search files (Ctrl+K) · Shift+click: grep (Ctrl+G)"><span class="goi-icon" aria-hidden="true"></span></button>
-      <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations"><span class="goi-icon" aria-hidden="true"></span><span id="annotations-count" hidden></span></button>
-      <button id="doctor-btn" class="global-icon-action" title="environment doctor" aria-label="environment doctor"><span class="goi-icon" aria-hidden="true"></span><span id="doctor-badge" class="doctor-badge" hidden></span></button>
-      <span class="global-actions-sep" aria-hidden="true"></span>
-      <button id="copy-ai-context" class="global-icon-action" title="Copy AI context" aria-label="Copy AI context"><span class="goi-icon" aria-hidden="true"></span></button>
-      <span id="copy-ai-context-feedback" class="goi-feedback" role="status" hidden></span>
-      <button id="auto-update" class="global-icon-action active" title="auto update on file change" aria-label="auto update on file change"><span class="goi-icon" aria-hidden="true"></span></button>
-      <button id="cancel-requests" class="global-icon-action" title="no in-flight requests" aria-label="no in-flight requests" disabled><span class="goi-icon" aria-hidden="true"></span></button>
-      <button id="theme" title="toggle theme" aria-label="toggle theme"></button>
-      <span class="global-actions-sep" aria-hidden="true"></span>
-      <span id="status" class="status" role="status" aria-live="polite"><span class="status-label"></span></span>
-      <a id="repo-web-link" class="global-icon-link" href="#" target="_blank" rel="noopener" hidden><span class="goi-icon" aria-hidden="true"></span></a>
-      <button id="quick-help-btn" class="global-icon-action" title="quick help (shortcuts)" aria-label="quick help (shortcuts)"><span class="goi-icon" aria-hidden="true"></span></button>
+  <!-- 左のサイドバー: 検索の入口・プロジェクトとエージェントの一覧・
+       新しいエージェント / 設定 / ヘルプ。一覧の中身は
+       views/agents/agents-sidebar.ts、畳む・幅は views/shell/app-nav.ts。 -->
+  <aside id="app-nav" aria-label="Projects and agents">
+    <div class="nav-head">
+      <button id="search-btn" class="nav-search" type="button" title="Search projects, agents, sessions and files (Ctrl+K) · Shift+click: grep (Ctrl+G)" aria-label="Search projects, agents, sessions and files (Ctrl+K) · Shift+click: grep (Ctrl+G)"><span class="goi-icon" aria-hidden="true"></span><span class="nav-search-label">Search</span><kbd class="nav-search-key">⌘K</kbd></button>
+      <button id="nav-collapse" class="nav-icon-action" type="button" title="hide sidebar" aria-label="hide sidebar"><span class="goi-icon" aria-hidden="true"></span></button>
     </div>
-  </header>
+    <div class="nav-section-head">
+      <span class="nav-section-title">Projects</span>
+      <a id="nav-board-link" class="nav-icon-action nav-board-link" data-route="agents" href="/agents" title="All agents" aria-label="All agents"><span class="goi-icon" aria-hidden="true"></span></a>
+    </div>
+    <div id="nav-projects" class="nav-projects"></div>
+    <div class="nav-foot">
+      <button id="nav-launch" class="nav-foot-item" type="button"><span class="goi-icon" aria-hidden="true"></span><span class="nav-foot-label">New agent</span></button>
+      <a id="nav-settings" class="nav-foot-item" data-route="help" href="/help?section=settings"><span class="goi-icon" aria-hidden="true"></span><span class="nav-foot-label">Settings</span></a>
+      <button id="quick-help-btn" class="nav-foot-item" type="button" title="quick help (shortcuts)" aria-label="quick help (shortcuts)"><span class="goi-icon" aria-hidden="true"></span><span class="nav-foot-label">Help</span></button>
+    </div>
+    <div id="app-nav-resizer" class="app-nav-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="resize sidebar"></div>
+  </aside>
+  <!-- 上の行は持たない: 最上段は一覧の列の頭の 1 段目とタブ列。
+       一覧の列の頭 (#panel-head) は左のサイドバーの右の 2 段で、幅は固定
+       (--column-head-w)。1 段目 (#project-head) はタブ列と同じ高さで、いま見ている
+       プロジェクトの色の四角と頭文字・名前 (= プロジェクトの切替。
+       views/projects/project-switcher.ts) と、右寄せでブランチ。2 段目は画面の入口の
+       絵柄 (#view-head) と、右端にファイル一覧を畳むボタン。ファイル一覧はその下から。
+       画面の切替でも一覧の列の開閉 (手・自動) でも頭は動かない (畳むのは頭の下の一覧
+       だけ)。タブ列は頭の右から (左端に名前の枠は置かない)。
+       キーボードの移る順は DOM の順: 左のサイドバー → 一覧の列の頭 → タブ列 →
+       ファイル一覧 → 一覧 → 変更ファイルの一覧 → 本文 → 最下段。 -->
+  <div id="panel-head" class="panel-head">
+    <div id="project-head" class="project-head">
+      <!-- 左のサイドバーを畳んだときだけ出る。頭の先頭に置き、頭はその幅だけ広がる
+           (タブ列はその分右から)。 -->
+      <button id="nav-expand" class="global-icon-action" type="button" title="show sidebar" aria-label="show sidebar" hidden><span class="goi-icon" aria-hidden="true"></span></button>
+      <!-- 名前と ▾ がプロジェクトの切替 (▾ は project-switcher.ts が足す)。色の四角と
+           頭文字はプロジェクトの色 (views/projects/project-looks.ts。色が分かるまでは
+           色なし)。四角・名前・ブランチの中身は最初の描画から出す (下の #first-project)。 -->
+      <button id="project-switcher" class="brand" type="button">
+        <span id="project-mark" class="project-mark" data-project-color="none" aria-hidden="true"></span>
+        <span class="title" id="project-title"></span>
+      </button>
+      <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
+    </div>
+    <div id="view-head" class="view-head">
+      <!-- 画面の入口。押すとその画面のタブを開くか前面に出す (Files は本文の
+           既定 = フォルダ表示)。何を見ているかはタブだけが示すので、選択の印は
+           付けない。 -->
+      <nav class="app-menu view-strip" aria-label="Views">
+        <a class="app-menu-item view-strip-item" data-route="repo" href="/"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="diff" href="/todif?from=HEAD&to=worktree"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="history" href="/history"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="worktree" href="/worktree"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="database" href="/database"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="journal" href="/journal"><span class="goi-icon" aria-hidden="true"></span></a>
+      </nav>
+      <!-- ファイル一覧を畳むボタン (絵柄の行の右端。views/sidebar.ts が絵と名前を付ける)。
+           最初から置いて場所を取る (JS が後から差し込むと、絵柄が 56px 動いた)。 -->
+      <div class="view-head-row">
+        <button id="sidebar-toggle" type="button" title="hide file list" aria-label="hide file list">
+          <span class="sidebar-toggle-label">Files</span>
+        </button>
+      </div>
+    </div>
+  </div>
+  <!-- いま見ているプロジェクトの名前・ブランチ・頭文字・色 (決め方は app.ts の
+       renderProjectHead。ここでは作らない) を、app.js を待たずに控え
+       (views/shell/early-look.ts の projects。プロジェクトの鍵ごと) から出す。控えに
+       無い (初めて開いた) プロジェクトは空のまま描き、app.ts が設定を読んで入れる。
+       場所は CSS が最初から取るので、中身が入っても頭の部品は動かない。
+       web-src/test/first-screen.test.ts が控えと URL の表で確かめる。 -->
+  <script id="first-project">
+  (function () {
+    var raw = window.localStorage.getItem("code-viewer:early-look");
+    var look = raw ? JSON.parse(raw) : {};
+    var key = (/^\/p\/([0-9a-f]{16})(?=[\/?#]|$)/.exec(location.pathname) || [])[1] || "";
+    var project = look.projects && look.projects[key];
+    if (!project || !project.name) return;
+    document.getElementById("project-title").textContent = project.name;
+    document.getElementById("project-title").title = project.name;
+    document.getElementById("project-switcher").setAttribute("aria-label", project.name);
+    var mark = document.getElementById("project-mark");
+    mark.textContent = project.mark || "";
+    if (project.color) mark.dataset.projectColor = project.color;
+    if (!project.branch) return;
+    var branch = document.getElementById("project-branch");
+    branch.querySelector(".project-branch-name").textContent = project.branch;
+    branch.hidden = false;
+  })();
+  </script>
+  <!-- タブ列の左端の置き場所 (main-tabs-view.ts が左の面のタブ列の先頭へ移す)。
+       デスクトップでは空 (幅 0)。SP の引き出しを開くボタンだけが入る
+       (views/mobile-shell.ts)。 -->
+  <div id="tabs-lead" class="tabs-lead"></div>
+  <!-- メインの面のタブ列 (最上段)。中身は views/main-tabs/main-tabs-view.ts。
+       ファイル・各画面を開いたまま切り替える。高さは --main-tabs-h。 -->
+  <nav id="main-tabs" aria-label="Tabs"></nav>
   <header id="topbar">
     <div id="meta"></div>
     <div class="ref-pickers">
@@ -109,18 +279,39 @@
     </div>
   </div>
 
+  <!-- ファイル一覧 (リポジトリの木)。どの画面でも左のサイドバーの右に出す (畳む・
+       幅を変えるは頭のボタンと右端の掴み)。中身は views/sidebar.ts の createSidebar
+       (FILE_LIST_DOM) と views/repo-view.ts。Diff・History・作業ツリーの一覧はこの右。 -->
+  <aside id="file-list" aria-label="Files">
+    <div class="sb-head">
+      <span class="sb-title">Files</span>
+      <span id="file-list-totals" class="sb-totals"></span>
+      <span data-ref-selector-mount data-ref-id="repo-target" data-wrapper-id="repo-target-wrap" data-extra-class="ref-selector-in-grid" data-placeholder="target..." data-title="repository target" hidden></span>
+      <div class="sb-actions" role="group" aria-label="file list actions">
+        <button id="file-list-expand-all" class="sb-icon-action sb-tree-action" title="expand all folders" aria-label="expand all folders"></button>
+        <button id="file-list-collapse-all" class="sb-icon-action sb-tree-action" title="collapse all folders" aria-label="collapse all folders"></button>
+      </div>
+      <div class="sb-filter-wrap">
+        <input id="file-list-filter" class="sb-filter" type="search" placeholder="filter files…  /  ⌘K" title="Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help." autocomplete="off" />
+        <button id="file-list-filter-clear" type="button" class="sb-filter-clear" title="Clear file filter" aria-label="Clear file filter" hidden>Clear</button>
+      </div>
+    </div>
+    <ul id="file-list-rows"></ul>
+    <div id="file-list-resizer" aria-hidden="true"></div>
+  </aside>
   <aside id="history-panel" hidden></aside>
   <div id="history-resizer" aria-hidden="true"></div>
   <!-- 作業ツリー画面の一覧。中身は worktree-view が入れる。見た目は
        #history-panel と同じ規則を共有している。変更ファイルは Repository と
        同じ #sidebar、差分は #diff を使うので、増える箱はこれだけ。 -->
   <aside id="worktree-panel" hidden></aside>
-  <aside id="sidebar">
+  <!-- 変更ファイルの一覧。Diff では一覧そのもの、History と選んでいる作業ツリーでは
+       一覧の右に出す。ほかの画面では出さない。 -->
+  <aside id="sidebar" aria-label="Changed files">
     <div class="sb-head">
-      <span class="sb-title">Files</span>
-      <span id="totals"></span>
-      <span data-ref-selector-mount data-ref-id="repo-target" data-wrapper-id="repo-target-wrap" data-extra-class="ref-selector-in-grid" data-placeholder="target..." data-title="repository target" hidden></span>
-      <div class="sb-actions" role="group" aria-label="sidebar actions">
+      <span class="sb-title">Changed files</span>
+      <span id="totals" class="sb-totals"></span>
+      <div class="sb-actions" role="group" aria-label="changed file list actions">
         <button id="sb-expand-all" class="sb-icon-action sb-tree-action" title="expand all folders" aria-label="expand all folders"></button>
         <button id="sb-collapse-all" class="sb-icon-action sb-tree-action" title="collapse all folders" aria-label="collapse all folders"></button>
       </div>
@@ -130,15 +321,12 @@
       </div>
     </div>
     <div class="sb-filter-wrap">
-      <input id="sb-filter" type="search" placeholder="filter files…  /  ⌘K" title="Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help." autocomplete="off" />
+      <input id="sb-filter" class="sb-filter" type="search" placeholder="filter files…  /  ⌘K" title="Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help." autocomplete="off" />
       <button id="sb-filter-clear" type="button" class="sb-filter-clear" title="Clear file filter" aria-label="Clear file filter" hidden>Clear</button>
     </div>
     <ul id="filelist"></ul>
     <div id="sidebar-resizer" aria-hidden="true"></div>
   </aside>
-  <button id="sidebar-toggle" title="hide sidebar" aria-label="hide sidebar">
-    <span class="sidebar-toggle-label">Files</span>
-  </button>
 
   <div id="quick-help-popover" hidden role="dialog" aria-label="quick help" aria-modal="false">
     <div class="quick-help-head">
@@ -210,28 +398,6 @@
 
   <div id="doctor-sheet-overlay" class="doctor-sheet-overlay" hidden aria-hidden="true"></div>
   <aside id="doctor-sheet" class="doctor-sheet" hidden aria-hidden="true" inert aria-label="environment doctor"></aside>
-  <!-- 画面下のパネル。IDE のターミナルパネルと同じで、タブで中身を切り替え、
-       上端のハンドルで高さを変える。中身 (#terminal-sheet / #tools-sheet) は
-       右ドロワーだった頃と同じ id のままなので、各ビューの実装は変わらない。 -->
-  <section id="app-panel" class="app-panel">
-    <div id="app-panel-resizer" class="app-panel-resizer" role="separator" tabindex="0" aria-orientation="horizontal" aria-label="resize panel"></div>
-    <div class="app-panel-tabs" role="tablist" aria-label="panel">
-      <button type="button" id="panel-tab-terminal" class="app-panel-tab" role="tab" data-panel="terminal" data-route="terminal" aria-selected="false">Terminal</button>
-      <button type="button" id="panel-tab-tools" class="app-panel-tab" role="tab" data-panel="tools" data-route="tools" aria-selected="false">Tools</button>
-      <button type="button" id="panel-tab-search" class="app-panel-tab" role="tab" data-panel="search" data-route="search" aria-selected="false">Search</button>
-      <span class="app-panel-spacer"></span>
-      <div class="seg app-panel-layout-switch" role="group" aria-label="panel layout">
-        <button type="button" data-panel-layout="overlay" class="active" aria-pressed="true">Overlay</button>
-        <button type="button" data-panel-layout="docked" aria-pressed="false">Docked</button>
-      </div>
-      <button type="button" id="app-panel-close" class="app-panel-close" title="close panel" aria-label="close panel">×</button>
-    </div>
-    <div class="app-panel-bodies">
-      <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
-      <aside id="search-sheet" class="search-sheet" hidden aria-hidden="true" inert aria-label="search results"></aside>
-      <aside id="terminal-sheet" class="terminal-sheet" hidden aria-hidden="true" inert aria-label="terminal"></aside>
-    </div>
-  </section>
   <main id="content">
     <section id="history-commit-info" hidden></section>
     <div id="empty" class="empty hidden">
@@ -254,7 +420,54 @@
       <p>The working tree is clean against this ref.</p>
     </div>
     <div id="diff"></div>
+    <!-- Tools と Search のタブの中身。画面に入ると #diff を隠して開く
+         (app.ts の enterToolOrSearchPage)。#tools-sheet は右ドロワーだった頃の id のまま。 -->
+    <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
+    <aside id="search-sheet" class="search-sheet" hidden aria-hidden="true" inert aria-label="search results"></aside>
   </main>
+  <!-- 最下段: アカウントごとの使用量 (views/agents/usage-status.ts)、
+       エージェントの件数 (views/agents/agent-status.ts)、サーバの状態と診断。 -->
+  <footer id="statusbar">
+    <div id="usage-status" class="usage-status" role="group" aria-label="Usage"></div>
+    <span class="statusbar-spacer"></span>
+    <!-- エージェントの件数 (入力待ち / 作業中)。中身は views/agents/agent-status.ts が入れる。 -->
+    <button id="agent-status" class="agent-status" type="button" hidden></button>
+    <span class="statusbar-sep" aria-hidden="true"></span>
+    <span id="status" class="status" role="status" aria-live="polite"><span class="status-label"></span></span>
+    <!-- 接続状態の文言を最初の描画から全部重ねて置く (幅は一番長い文言。app.ts の
+         setStatus が同じ並びで描き直す。文言は views/status-label.ts の
+         STATUS_LABEL_TEXT と同じ。web-src/test/first-screen.test.ts)。空のまま描くと
+         JS の後に枠が 28px から広がり、隣の部品が動いた。 -->
+    <script id="first-status">
+    (function () {
+      var raw = window.localStorage.getItem("code-viewer:early-look");
+      var look = raw ? JSON.parse(raw) : {};
+      var asked = new URLSearchParams(location.search).get("lang");
+      var language = asked ? asked : look.language;
+      var labels = language === "ja" ? ["稼働中", "更新中", "エラー", "待機中"] : ["Live", "Loading", "Error", "Idle"];
+      var host = document.querySelector("#status .status-label");
+      for (var i = 0; i < labels.length; i += 1) {
+        var span = document.createElement("span");
+        span.textContent = labels[i];
+        if (i === labels.length - 1) span.className = "is-current";
+        else span.setAttribute("aria-hidden", "true");
+        host.appendChild(span);
+      }
+    })();
+    </script>
+    <!-- 上の行の右端にあった操作 (注釈・AI 向けのコピー・自動更新・通信の中止・
+         テーマ・リポジトリの Web ページ)。id はそのまま (app.ts が絵と状態を貼る)。 -->
+    <div class="global-actions statusbar-actions" role="group" aria-label="Actions">
+      <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations"><span class="goi-icon" aria-hidden="true"></span><span id="annotations-count" hidden></span></button>
+      <button id="copy-ai-context" class="global-icon-action" title="Copy AI context" aria-label="Copy AI context"><span class="goi-icon" aria-hidden="true"></span></button>
+      <span id="copy-ai-context-feedback" class="goi-feedback" role="status" hidden></span>
+      <button id="auto-update" class="global-icon-action active" title="auto update on file change" aria-label="auto update on file change"><span class="goi-icon" aria-hidden="true"></span></button>
+      <button id="cancel-requests" class="global-icon-action" title="no in-flight requests" aria-label="no in-flight requests" disabled><span class="goi-icon" aria-hidden="true"></span></button>
+      <button id="theme" class="global-icon-action" title="toggle theme" aria-label="toggle theme"></button>
+      <a id="repo-web-link" class="global-icon-link" href="#" target="_blank" rel="noopener" hidden><span class="goi-icon" aria-hidden="true"></span></a>
+    </div>
+    <button id="doctor-btn" class="statusbar-icon-action" type="button" title="environment doctor" aria-label="environment doctor"><span class="goi-icon" aria-hidden="true"></span><span id="doctor-badge" class="doctor-badge" hidden></span></button>
+  </footer>
 </div>
 
 <script src="/app.js"></script>

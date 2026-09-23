@@ -1,3 +1,4 @@
+import { errorWithCause, formatErrorDetail } from "../../../core/error-detail";
 import type {
   EsIndexInfo,
   EsMapping,
@@ -193,11 +194,10 @@ async function execEsRequestAsync(
       return {
         code: 1,
         stdout: "",
+        // fetch は "fetch failed" だけを言い、繋がらない理由は cause に入る。
         stderr: timedOut
           ? `elasticsearch request timed out after ${timeoutMs}ms`
-          : error instanceof Error
-            ? error.message
-            : String(error),
+          : formatErrorDetail(error),
       };
     } finally {
       clearTimeout(timer);
@@ -238,8 +238,9 @@ function safeJsonParse<T>(stdout: string, label: string): T {
   try {
     return JSON.parse(stdout) as T;
   } catch (err) {
-    throw new Error(
+    throw errorWithCause(
       `${label} レスポンス JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`,
+      err,
     );
   }
 }

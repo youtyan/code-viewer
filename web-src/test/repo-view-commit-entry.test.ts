@@ -1,9 +1,39 @@
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { RepoTreeResponse, SidebarItem } from "../core/types";
+import {
+  closeContextMenu,
+  isContextMenuOpen,
+  showContextMenu,
+} from "../views/context-menu";
 import { createRepoView, type RepoViewDeps } from "../views/repo-view";
+
+const markdownPreview = vi.hoisted(() => ({ failWith: null as Error | null }));
+
+vi.mock("../core/markdown-preview", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../core/markdown-preview")>();
+  return {
+    ...actual,
+    renderMarkdownPreview: (
+      ...args: Parameters<typeof actual.renderMarkdownPreview>
+    ) =>
+      markdownPreview.failWith
+        ? Promise.reject(markdownPreview.failWith)
+        : actual.renderMarkdownPreview(...args),
+  };
+});
+
 import { deferred } from "./_test-helpers";
 
 const range = { from: "HEAD", to: "worktree" };
@@ -20,6 +50,8 @@ afterAll(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  // 開いたままのメニューは document のキーと押下の受け手を持ち続ける。
+  closeContextMenu();
   document.body.innerHTML = "";
 });
 
@@ -33,9 +65,9 @@ function response(data: RepoTreeResponse): Response {
 function setupDom() {
   document.body.innerHTML = `
     <div id="empty"></div>
-    <div id="totals"></div>
+    <div id="file-list-totals"></div>
     <div id="diff"></div>
-    <ul id="filelist"></ul>
+    <ul id="file-list-rows"></ul>
   `;
 }
 
@@ -57,13 +89,18 @@ function makeRepoView(
     route,
     files: [],
     syntaxHighlight: false,
+    language: "en",
   };
   const calls = {
     renderedFiles: [] as SidebarItem[][],
     standaloneSources: [] as string[],
+    openedAs: [] as string[][],
   };
   const view = createRepoView({
     STATE: state,
+    openTreeFileAs(path, intent) {
+      calls.openedAs.push([path, intent]);
+    },
     setRoute(nextRoute) {
       state.route = nextRoute;
     },
@@ -113,6 +150,7 @@ function makeRepoView(
       calls.standaloneSources.push(target.path);
     },
     repoFileTargetFromRoute: () => null,
+    filesColumnRef: () => null,
     trackLoad: (promise) => promise,
     isAbortError: () => false,
     setRepoSidebarRef() {
@@ -246,6 +284,115 @@ describe("repo view commit entries", () => {
     );
     expect(input.value).toBe("");
     expect(document.querySelectorAll(".gdp-repo-row")).toHaveLength(3);
+  });
+
+  // ui-surface.md の「タブの決まり」: ファイルの右クリックで固定のタブ・反対の面に開ける。
+  test.each([
+    ["Open in new tab", "new-tab"],
+    ["Open to the right", "other-pane"],
+  ])("the file menu item %s opens the file as %s", async (label, intent) => {
+    setupDom();
+    globalThis.fetch = (async () =>
+      response({
+        ref: "worktree",
+        path: "",
+        project: "sample-repo",
+        entries: [{ name: "alpha.ts", path: "alpha.ts", type: "blob" }],
+      })) as typeof fetch;
+    const { view, calls } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+    await view.loadRepo();
+    document
+      .querySelector(".gdp-repo-row")
+      ?.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    const items = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(".gdp-context-menu button"),
+    );
+    items.find((item) => item.textContent === label)?.click();
+    expect([
+      items.map((item) => item.textContent).slice(0, 2),
+      calls.openedAs,
+    ]).toEqual([
+      ["Open in new tab", "Open to the right"],
+      [["alpha.ts", intent]],
+    ]);
+  });
+
+  // 行のメニューも開け閉めは context-menu.ts の 1 つの経路 (同時に 1 枚・Escape と
+  // 外を押すと閉じ、キーの受け手も外れる)。行のメニューだけが要素を直に消して
+  // いた頃は、別のメニューの項目から開いた次のメニューを消し、Escape でも外を
+  // 押しても行のメニューが残った。
+  test.each([
+    [
+      "Escape",
+      () =>
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        ),
+    ],
+    [
+      "a press outside",
+      () =>
+        document.body.dispatchEvent(
+          new Event("pointerdown", { bubbles: true }),
+        ),
+    ],
+  ])("the row menu is the one shared menu and closes on %s", async (_name, close) => {
+    setupDom();
+    globalThis.fetch = (async () =>
+      response({
+        ref: "worktree",
+        path: "",
+        project: "sample-repo",
+        entries: [{ name: "alpha.ts", path: "alpha.ts", type: "blob" }],
+      })) as typeof fetch;
+    const { view } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+    await view.loadRepo();
+    const other = document.createElement("button");
+    document.body.append(other);
+    showContextMenu(other, [
+      {
+        label: "Other menu",
+        onSelect() {
+          /* noop */
+        },
+      },
+    ]);
+    document
+      .querySelector(".gdp-repo-row")
+      ?.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    const opened = [
+      [...document.querySelectorAll(".gdp-context-menu")].map(
+        (menu) => menu.querySelector("button")?.textContent,
+      ),
+      isContextMenuOpen(),
+    ];
+    close();
+    const arrow = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(arrow);
+    expect([
+      opened,
+      document.querySelectorAll(".gdp-context-menu").length,
+      isContextMenuOpen(),
+      arrow.defaultPrevented,
+    ]).toEqual([[["Open in new tab"], true], 0, false, false]);
   });
 
   test.each([
@@ -1121,5 +1268,95 @@ describe("repo view re-render suppression", () => {
     expect(secondShell).not.toBe(firstShell as Element);
     // 差し替え後も一覧は 1 つだけ (先に消してから作る白抜け方式ではない)。
     expect(document.querySelectorAll("#diff > .gdp-repo-shell").length).toBe(1);
+  });
+});
+
+describe("repo view keeps failure reasons", () => {
+  afterEach(() => {
+    markdownPreview.failWith = null;
+    vi.restoreAllMocks();
+  });
+
+  test("a README that cannot be rendered shows the raw text with the reason", async () => {
+    setupDom();
+    markdownPreview.failWith = Object.assign(
+      new Error("sample render failure"),
+      { cause: new Error("sample cause") },
+    );
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    globalThis.fetch = (async () =>
+      response({
+        ref: "HEAD",
+        path: "",
+        project: "sample-repo",
+        entries: [{ name: "README.md", path: "README.md", type: "blob" }],
+        readme: { path: "README.md", text: "# sample title" },
+      })) as typeof fetch;
+    const { view } = makeRepoView({
+      screen: "repo",
+      ref: "HEAD",
+      path: "",
+      range,
+    });
+
+    await view.loadRepo();
+
+    expect(document.querySelector(".gdp-markdown-fallback")?.textContent).toBe(
+      "# sample title",
+    );
+    expect(
+      document.querySelector(".gdp-markdown-fallback-reason")?.textContent,
+    ).toBe(
+      "Could not render the Markdown, so the raw text is shown.Error: sample render failure\nCaused by: Error: sample cause",
+    );
+    expect(errors).toHaveBeenCalledWith(
+      "[code-viewer] README markdown render failed",
+      "README.md",
+      markdownPreview.failWith,
+    );
+  });
+
+  test("a folder path that cannot be copied keeps the reason on the button and in the console", async () => {
+    setupDom();
+    const failure = new Error("sample clipboard denied");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(failure) },
+    });
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    globalThis.fetch = (async () =>
+      response({
+        ref: "HEAD",
+        path: "src",
+        project: "sample-repo",
+        entries: [{ name: "app.ts", path: "src/app.ts", type: "blob" }],
+      })) as typeof fetch;
+    const { view } = makeRepoView({
+      screen: "repo",
+      ref: "HEAD",
+      path: "src",
+      range,
+    });
+    await view.loadRepo();
+    const button = document.querySelector<HTMLButtonElement>(".gdp-copy-path");
+    if (!button) throw new Error("missing copy folder path button");
+
+    button.click();
+    await vi.waitFor(() =>
+      expect(button.classList.contains("failed")).toBe(true),
+    );
+
+    expect(button.title).toBe(
+      "Could not copy the folder path\nError: sample clipboard denied",
+    );
+    expect(errors).toHaveBeenCalledWith(
+      "[code-viewer] copy folder path failed",
+      "src",
+      failure,
+    );
   });
 });

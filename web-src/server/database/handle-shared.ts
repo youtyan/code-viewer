@@ -1,4 +1,5 @@
 import type { DbKind } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
 import { abortError, isAbortLikeError } from "./adapters/abort";
 import { isD1HttpError } from "./adapters/d1";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
@@ -139,8 +140,12 @@ export async function extractErrorReason(res: Response): Promise<string> {
   let cloned: Response;
   try {
     cloned = res.clone();
-  } catch {
-    // Intentional: 既に消費された Response は理由抽出を諦める
+  } catch (error) {
+    // 理由抽出は諦めるが、諦めた理由は残す (応答そのものは壊さない)。
+    console.error(
+      `[code-viewer] could not clone a ${res.status} response to read its failure reason`,
+      error,
+    );
     return "";
   }
   try {
@@ -151,8 +156,12 @@ export async function extractErrorReason(res: Response): Promise<string> {
     return trimmed.length > MAX_LOGGED_ERROR_BODY
       ? `${trimmed.slice(0, MAX_LOGGED_ERROR_BODY)}...`
       : trimmed;
-  } catch {
-    // Intentional: body 読取失敗時はログだけ簡略化する
+  } catch (error) {
+    // ログを簡略化するだけだが、読めなかった理由は残す。
+    console.error(
+      `[code-viewer] could not read the body of a ${res.status} response for the log`,
+      error,
+    );
     return "";
   }
 }
@@ -192,8 +201,12 @@ export function logResponseWithReason(
   let cloned: Response | null = null;
   try {
     cloned = res.clone();
-  } catch {
-    // Intentional: clone 失敗時は理由なしでログだけ出す
+  } catch (error) {
+    // 理由なしでログ行は出すが、理由を読めなかったこと自体は残す。
+    console.error(
+      `[code-viewer] could not clone the response for the log line: ${head}`,
+      error,
+    );
   }
   enqueueLogLine(async () => {
     const reason = cloned ? await extractErrorReason(cloned) : "";
@@ -256,16 +269,48 @@ export async function parseBoundedJsonBody(
   if (!contentType.toLowerCase().startsWith("application/json")) {
     return textError("unsupported media type", 415);
   }
+  return readBoundedJsonBody(req, maxBytes, tooLargeMessage);
+}
+
+/** 上限つきの読み取り本体。失敗は「読めなかった」と「JSON でない」を分ける。 */
+export async function readBoundedJsonBody(
+  req: Request,
+  maxBytes: number,
+  tooLargeMessage: string,
+): Promise<unknown | Response> {
   const contentLength = Number(req.headers.get("content-length") || "0");
   if (contentLength > maxBytes) return textError(tooLargeMessage, 413);
+  // content-length が無い本文 (入口の取り次ぎを通ったものは全部こう) も、
+  // 溜めながら数えて上限を越えた所で読むのをやめる。全部溜めてから比べると、
+  // 上限が溜めるメモリを守らない。
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const reader = req.body?.getReader();
   try {
-    const raw = await req.text();
-    if (Buffer.byteLength(raw, "utf8") > maxBytes) {
-      return textError(tooLargeMessage, 413);
+    while (reader) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      total += chunk.value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel(tooLargeMessage);
+        return textError(tooLargeMessage, 413);
+      }
+      chunks.push(chunk.value);
     }
+  } catch (error) {
+    return textError(
+      `could not read the request body: ${formatErrorDetail(error)}`,
+      400,
+    );
+  }
+  // req.text() と同じ解読 (UTF-8・先頭の BOM を除く)。
+  const raw = new TextDecoder().decode(Buffer.concat(chunks));
+  try {
     return JSON.parse(raw);
-  } catch {
-    return textError("invalid JSON body", 400);
+  } catch (error) {
+    // "invalid JSON body" だけでは、本文のどこが壊れているのか分からな
+    // かった。解析器の理由 (位置を含む) をそのまま返す。
+    return textError(`invalid JSON body: ${formatErrorDetail(error)}`, 400);
   }
 }
 
@@ -301,20 +346,6 @@ function waitForCallerAbort<T>(
       },
     );
   });
-}
-
-function isFilesystemAccessError(err: unknown): boolean {
-  const code = (err as NodeJS.ErrnoException | undefined)?.code;
-  return (
-    code === "EACCES" ||
-    code === "EBUSY" ||
-    code === "EIO" ||
-    code === "EISDIR" ||
-    code === "ENOSPC" ||
-    code === "ENOTDIR" ||
-    code === "EPERM" ||
-    code === "EROFS"
-  );
 }
 
 export async function resolveDockerExplorerAsync<
@@ -444,17 +475,29 @@ export async function dispatchRoutes(
   }
 }
 
+/**
+ * この口を通る本文の上限。いちばん大きいのは端末への貼り付け (`/_shell/keys`)
+ * と SQL の下書きで、どちらも 1 MiB には届かない。上限の無い読み取りを置かない
+ * ための値で、経路ごとの検証はそれぞれのハンドラが続けて行う。
+ */
+const MAX_POST_JSON_BODY_BYTES = 1_048_576;
+
+/**
+ * 汎用の POST 本文。`parseBoundedJsonBody` と同じ上限つきの読み取りを使う
+ * (この口だけ上限が無かった)。content-type は見ない: 既存の呼び出し元には
+ * 付けずに送るものがあり、415 を新しく返すと壊れる。
+ */
 export async function parsePostJsonBody<T>(
   req: Request,
 ): Promise<T | Response> {
   if (req.method !== "POST") {
     return textError("method not allowed", 405);
   }
-  try {
-    return (await req.json()) as T;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  return (await readBoundedJsonBody(
+    req,
+    MAX_POST_JSON_BODY_BYTES,
+    "payload too large",
+  )) as T | Response;
 }
 
 export function handleError(
@@ -467,19 +510,22 @@ export function handleError(
   if (isAbortLikeError(err, signal)) {
     return textError(`${action} aborted`, 503);
   }
-  const message = err instanceof Error ? err.message : String(err);
-  console.error(`[code-viewer] ${prefix} error:`, message);
+  console.error(`[code-viewer] ${prefix} error:`, err);
   if (isDockerComposeServiceUnavailableError(err)) {
-    return textError(message, err.status);
+    return textError(guidanceWithCause(err), err.status);
   }
   // D1 は SQL 系の共通ルートを通るので、S3/DynamoDB のような専用ハンドラが
   // 無い。Cloudflare が返した実ステータス (401 認証失敗など) を 500 に
   // 潰さず、そのままクライアントへ伝える。
   if (isD1HttpError(err)) {
-    return textError(message, err.status);
+    return textError(guidanceWithCause(err), err.status);
   }
-  if (isFilesystemAccessError(err)) {
-    return textError(`failed to ${action}`, 500);
-  }
-  return textError(`failed to ${action}: ${message}`, 500);
+  return textError(`failed to ${action}: ${formatErrorDetail(err)}`, 500);
+}
+
+// 案内の文を持つ error は 1 行目をそのまま出し、元の失敗 (cause) があれば続ける。
+function guidanceWithCause(err: Error & { cause?: unknown }): string {
+  return err.cause === undefined
+    ? err.message
+    : `${err.message}\nCaused by: ${formatErrorDetail(err.cause)}`;
 }

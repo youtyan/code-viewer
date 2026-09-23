@@ -1,3 +1,5 @@
+import { apiUrl } from "../core/api-url";
+import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 // Doctor screen. Fetches /_doctor and renders OK/WARN/ERROR pills with
 // remediation hints. Uses module-level generation counter to drop stale
 // responses (see AGENTS.md Request Lifecycle Discipline).
@@ -181,10 +183,10 @@ export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
     const summary = mount.querySelector<HTMLElement>(".doctor-summary");
     if (summary) summary.textContent = "";
     try {
-      const res = await deps.trackLoad(fetch("/_doctor"));
+      const res = await deps.trackLoad(fetch(apiUrl("doctor")));
       if (myGen !== viewGeneration) return;
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+        throw new Error(await responseErrorMessage(res, "GET /_doctor"));
       }
       const data = (await res.json()) as DoctorReport;
       if (myGen !== viewGeneration) return;
@@ -192,8 +194,12 @@ export function createDoctorView(deps: DoctorViewDeps): DoctorViewHandle {
       deps.onWorstStatusChange?.(data.worstStatus);
     } catch (err) {
       if (myGen !== viewGeneration) return;
+      console.error(
+        "[code-viewer] the doctor report could not be loaded:",
+        err,
+      );
       if (content) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = formatErrorDetail(err);
         content.innerHTML = `<div class="doctor-empty">${deps.escapeHtml(`${text.loadFailed}: ${message}`)}</div>`;
       }
       deps.onWorstStatusChange?.(null);

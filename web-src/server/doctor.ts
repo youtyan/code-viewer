@@ -1,6 +1,8 @@
 import { accessSync, constants, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { accountEntries, emptyAccountRegistry } from "../core/agent-accounts";
+import { AGENT_HOOK_MARKER, HOOK_AGENTS } from "../core/agent-hooks";
 import type { DbFileInfo, DbFilesResponse } from "../core/database/types";
 import type {
   DoctorGroup,
@@ -8,7 +10,16 @@ import type {
   DoctorRow,
   DoctorStatus,
 } from "../core/doctor-types";
-import { formatErrorDetail } from "../core/error-detail";
+import {
+  errorWithCause,
+  errorWithCauses,
+  formatErrorDetail,
+} from "../core/error-detail";
+import {
+  type AccountPaths,
+  accountPaths,
+  readAccountRegistry,
+} from "./accounts/registry";
 import { shellSingleQuote } from "./cli-helpers";
 import {
   commandForExternal,
@@ -42,12 +53,28 @@ import {
   type SqliteDriverStatus,
 } from "./database/sqlite-driver";
 import { worktreeListResultAsync } from "./git";
+import { projectRegistryPath, readProjectRegistry } from "./projects/registry";
 import type { RunResult } from "./runtime";
 import {
   describeShellAvailability,
   type ShellAvailability,
 } from "./shell/session";
+import {
+  type AgentHookTarget,
+  agentHookStatus,
+  currentHookLauncher,
+  defaultAgentConfigDir,
+  type HookLauncher,
+  launcherHealth,
+} from "./terminal/hooks";
+import { errno } from "./terminal/settings-file";
+import {
+  STATUSLINE_MARKER,
+  statusLineStatus,
+  statusLineWrapperPath,
+} from "./terminal/statusline";
 import { tmuxArgs } from "./tmux/command";
+import { readUserSettings, userSettingsPath } from "./user-settings";
 import {
   mapWithConcurrency,
   serverWorktreeRoot,
@@ -90,9 +117,9 @@ const TIMEOUT = {
 
 type CacheEntry<T> = { value: T; expiresAt: number };
 
-const versionCache = new Map<string, CacheEntry<RunResult | null>>();
-const gitCache = new Map<string, CacheEntry<RunResult | null>>();
-const dockerInfoCache = new Map<string, CacheEntry<RunResult | null>>();
+const versionCache = new Map<string, CacheEntry<RunResult>>();
+const gitCache = new Map<string, CacheEntry<RunResult>>();
+const dockerInfoCache = new Map<string, CacheEntry<RunResult>>();
 
 // Non-printable separator: prevents argv-boundary collisions
 // (e.g. ["a","bc"] vs ["ab","c"]) when composing the cache key.
@@ -102,15 +129,9 @@ const dockerInfoCache = new Map<string, CacheEntry<RunResult | null>>();
 const CACHE_KEY_SEP = String.fromCharCode(1);
 const composeConfigCache = new Map<
   string,
-  CacheEntry<{ result: RunResult | null; services: string[] | null }>
+  CacheEntry<{ result: RunResult; services: RunResult | null }>
 >();
-const composePsCache = new Map<
-  string,
-  CacheEntry<{
-    result: RunResult | null;
-    parsed: ComposePsRow[] | null;
-  }>
->();
+const composePsCache = new Map<string, CacheEntry<RunResult>>();
 
 type ComposePsRow = {
   Service?: string;
@@ -136,33 +157,30 @@ function computeWorst(groups: DoctorGroup[]): DoctorStatus {
 }
 
 async function runCached(
-  cache: Map<string, CacheEntry<RunResult | null>>,
+  cache: Map<string, CacheEntry<RunResult>>,
   ttl: number,
   command: string,
   args: string[],
   timeoutMs: number,
   signal: AbortSignal | undefined,
   cwd?: string,
-): Promise<RunResult | null> {
+): Promise<RunResult> {
   const key = [cwd || "", command, ...args].join(CACHE_KEY_SEP);
   const now = Date.now();
   const cached = cache.get(key);
   if (cached && cached.expiresAt > now) return cached.value;
-  let result: RunResult | null;
-  try {
-    result = await spawnTextAsync({
-      command,
-      args,
-      ...(cwd ? { cwd } : {}),
-      timeoutMs,
-      signal,
-      abortMessage: "doctor aborted",
-      timeoutMessage: `${command} ${args.join(" ")} timed out after ${timeoutMs}ms`,
-      rejectOnError: false,
-    });
-  } catch {
-    result = null;
-  }
+  // 起動の失敗は rejectOnError: false で結果 (code と stderr) になる。投げるのは
+  // 中断とプログラムの誤りだけなので、行にせず上へ投げる (null を覚えない)。
+  const result = await spawnTextAsync({
+    command,
+    args,
+    ...(cwd ? { cwd } : {}),
+    timeoutMs,
+    signal,
+    abortMessage: "doctor aborted",
+    timeoutMessage: `${command} ${args.join(" ")} timed out after ${timeoutMs}ms`,
+    rejectOnError: false,
+  });
   cache.set(key, { value: result, expiresAt: now + ttl });
   return result;
 }
@@ -174,17 +192,14 @@ function firstLine(text: string | undefined): string {
 function commandVersionFailureDetail(
   command: ExternalCommandName,
   args: string[],
-  result: RunResult | null,
+  result: RunResult,
 ): string {
-  if (!result)
-    return `${command} version check failed before returning a result`;
-  if (isCommandNotFoundResult(command, result)) {
-    return commandNotFoundDetail(command);
-  }
   return [
-    `${command} ${args.join(" ")} exited with ${result.code}`,
-    result.stderr ? `stderr: ${result.stderr}` : "",
-    result.stdout ? `stdout: ${result.stdout}` : "",
+    isCommandNotFoundResult(command, result)
+      ? commandNotFoundDetail(command)
+      : `${command} ${args.join(" ")} exited with ${result.code}`,
+    result.stderr.trim() ? `stderr: ${result.stderr.trim()}` : "",
+    result.stdout.trim() ? `stdout: ${result.stdout.trim()}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -240,36 +255,42 @@ function detectExecutionOrigin(): { kind: string; path: string } {
   return { kind: "unknown", path: argv1 };
 }
 
-function findCodeViewerPackageJson(): {
+function moduleDirectory(): string {
+  try {
+    return dirname(fileURLToPath(import.meta.url));
+  } catch (error) {
+    // file: でない読み込み方 (data: など) のときだけ、起動した script の場所から探す。
+    if (errno(error) !== "ERR_INVALID_URL_SCHEME") throw error;
+    return dirname(process.argv[1] || ".");
+  }
+}
+
+export function findCodeViewerPackageJson(start = moduleDirectory()): {
   version?: string;
   path?: string;
+  failures: string[];
 } {
-  try {
-    let cursor: string;
+  const failures: string[] = [];
+  let cursor = start;
+  for (let depth = 0; depth < 8; depth += 1) {
+    const candidate = join(cursor, "package.json");
     try {
-      cursor = dirname(fileURLToPath(import.meta.url));
-    } catch {
-      cursor = dirname(process.argv[1] || ".");
-    }
-    for (let depth = 0; depth < 8; depth += 1) {
-      const candidate = join(cursor, "package.json");
-      try {
-        const raw = readFileSync(candidate, "utf8");
-        const pkg = JSON.parse(raw) as { name?: string; version?: string };
-        if (pkg.name === "@youtyan/code-viewer") {
-          return { version: pkg.version, path: candidate };
-        }
-      } catch {
-        // continue
+      const raw = readFileSync(candidate, "utf8");
+      const pkg = JSON.parse(raw) as { name?: string; version?: string };
+      if (pkg.name === "@youtyan/code-viewer") {
+        return { version: pkg.version, path: candidate, failures };
       }
-      const next = dirname(cursor);
-      if (next === cursor) break;
-      cursor = next;
+    } catch (error) {
+      // package.json の無い階層は上へ探し続ける。読めない・壊れたものは理由を残す。
+      if (errno(error) !== "ENOENT") {
+        failures.push(`${candidate}: ${formatErrorDetail(error)}`);
+      }
     }
-  } catch {
-    // ignore
+    const next = dirname(cursor);
+    if (next === cursor) break;
+    cursor = next;
   }
-  return {};
+  return { failures };
 }
 
 function checkPackageOrigin(): DoctorGroup {
@@ -278,10 +299,13 @@ function checkPackageOrigin(): DoctorGroup {
   rows.push({
     id: "package.version",
     title: "@youtyan/code-viewer version",
-    status: "ok",
-    detail: pkg.version
-      ? `v${pkg.version}${pkg.path ? ` (${pkg.path})` : ""}`
-      : "package.json not located (running from bundle?)",
+    status: pkg.failures.length > 0 ? "warn" : "ok",
+    detail: [
+      pkg.version
+        ? `v${pkg.version}${pkg.path ? ` (${pkg.path})` : ""}`
+        : "package.json not located (running from bundle?)",
+      ...pkg.failures,
+    ].join("\n"),
   });
   const origin = detectExecutionOrigin();
   const isNpxCache = origin.kind === "npx cache";
@@ -371,23 +395,17 @@ async function trySnapshotDbOpen(
   const dbPath = join(cwd, SNAPSHOT_DB_REL);
   try {
     statSync(dbPath);
-  } catch {
-    return { kind: "skipped" };
+  } catch (err) {
+    // まだ作られていない DB だけは試さずに済ませる。ほかの理由は失敗として出す。
+    if (errno(err) === "ENOENT") return { kind: "skipped" };
+    return { kind: "error", message: formatErrorDetail(err) };
   }
   try {
     const DbClass = await loadSqliteClass<{ close(): void }>();
-    const db = new DbClass(dbPath, { readonly: true });
-    try {
-      db.close();
-    } catch {
-      // ignore
-    }
+    new DbClass(dbPath, { readonly: true }).close();
     return { kind: "ok", path: dbPath };
   } catch (err) {
-    return {
-      kind: "error",
-      message: err instanceof Error ? err.message : String(err),
-    };
+    return { kind: "error", message: formatErrorDetail(err) };
   }
 }
 
@@ -400,24 +418,31 @@ function checkSnapshotStore(cwd: string): DoctorGroup {
   try {
     accessSync(dir, constants.W_OK);
     dirDetail = `${dir} (writable)`;
-  } catch {
-    try {
-      statSync(dir);
+  } catch (error) {
+    // まだ無いフォルダは最初の snapshot で作る。ほかの理由は理由ごと出す。
+    if (errno(error) === "ENOENT") {
+      dirDetail = `${dir} (will be created on first snapshot)`;
+    } else {
       dirStatus = "error";
-      dirDetail = `${dir} (not writable)`;
+      dirDetail = `${dir} (not writable)\n${formatErrorDetail(error)}`;
       dirHint =
         "Snapshot creation will fail until the directory is writable. " +
         "Check filesystem permissions on the .code-viewer directory.";
-    } catch {
-      dirDetail = `${dir} (will be created on first snapshot)`;
     }
   }
-  let dbDetail = dbPath;
+  let dbStatus: DoctorStatus = "ok";
+  let dbDetail: string;
   try {
     const stat = statSync(dbPath);
     dbDetail = `${dbPath} (${stat.size.toLocaleString()} bytes)`;
-  } catch {
-    dbDetail = `${dbPath} (not created yet — created on first snapshot)`;
+  } catch (error) {
+    // まだ無い DB は最初の snapshot で作る。ほかの理由は理由ごと出す。
+    if (errno(error) === "ENOENT") {
+      dbDetail = `${dbPath} (not created yet — created on first snapshot)`;
+    } else {
+      dbStatus = "error";
+      dbDetail = `${dbPath}\n${formatErrorDetail(error)}`;
+    }
   }
   return {
     id: "snapshot",
@@ -433,7 +458,7 @@ function checkSnapshotStore(cwd: string): DoctorGroup {
       {
         id: "snapshot.db",
         title: "Snapshot DB file",
-        status: "ok",
+        status: dbStatus,
         detail: dbDetail,
       },
     ],
@@ -452,7 +477,7 @@ async function checkGit(
     TIMEOUT.version,
     signal,
   );
-  if (!versionRes || versionRes.code !== 0) {
+  if (versionRes.code !== 0) {
     return {
       id: "git",
       title: "Git",
@@ -461,10 +486,7 @@ async function checkGit(
           id: "git.binary",
           title: "git binary",
           status: "error",
-          detail:
-            versionRes && isCommandNotFoundResult("git", versionRes)
-              ? commandNotFoundDetail("git")
-              : "git command failed",
+          detail: commandVersionFailureDetail("git", ["--version"], versionRes),
           hint: "git is required for diff, history, and blame features. Install git, add its directory to PATH, or pass --bin git=/absolute/path.",
         },
       ],
@@ -478,26 +500,31 @@ async function checkGit(
       detail: firstLine(versionRes.stdout),
     },
   ];
+  const repoArgs = ["rev-parse", "--is-inside-work-tree"];
   const repoCheck = await runCached(
     gitCache,
     TTL.gitRepo,
     commandForExternal("git"),
-    ["rev-parse", "--is-inside-work-tree"],
+    repoArgs,
     TIMEOUT.git,
     signal,
     cwd,
   );
-  if (repoCheck && repoCheck.code === 0 && /true/.test(repoCheck.stdout)) {
-    const topRes = await runCached(
-      gitCache,
-      TTL.gitRepo,
-      commandForExternal("git"),
-      ["rev-parse", "--show-toplevel"],
-      TIMEOUT.git,
-      signal,
-      cwd,
-    );
-    const top = topRes?.stdout.trim() || cwd;
+  const topArgs = ["rev-parse", "--show-toplevel"];
+  const topRes =
+    repoCheck.code === 0 && /true/.test(repoCheck.stdout)
+      ? await runCached(
+          gitCache,
+          TTL.gitRepo,
+          commandForExternal("git"),
+          topArgs,
+          TIMEOUT.git,
+          signal,
+          cwd,
+        )
+      : null;
+  if (topRes?.code === 0) {
+    const top = topRes.stdout.trim();
     const insideCwd = relative(top, cwd) || ".";
     rows.push({
       id: "git.repo",
@@ -506,11 +533,18 @@ async function checkGit(
       detail: `${top}${insideCwd && insideCwd !== "." ? ` (cwd is ${insideCwd})` : ""}`,
     });
   } else {
+    // git が答えなかった理由 (所有者の違う作業ツリー・壊れた .git など) を
+    // 「作業ツリーの外」と同じ 1 文に潰さない。
+    const failed = topRes ?? (repoCheck.code !== 0 ? repoCheck : null);
     rows.push({
       id: "git.repo",
       title: "Working tree",
       status: "warn",
-      detail: `${cwd} is not inside a git work tree`,
+      detail: `${cwd} is not inside a git work tree${
+        failed
+          ? `\n${commandVersionFailureDetail("git", failed === topRes ? topArgs : repoArgs, failed)}`
+          : ""
+      }`,
       hint: "Diff, blame, and history features require running inside a git repository. `cd` into a repo or pass --cwd to a git work tree.",
     });
   }
@@ -529,7 +563,7 @@ async function checkSearchTools(
     TIMEOUT.version,
     signal,
   );
-  const available = versionRes?.code === 0;
+  const available = versionRes.code === 0;
   return {
     id: "search",
     title: "Search",
@@ -562,7 +596,7 @@ async function checkGithubCli(
     TIMEOUT.version,
     signal,
   );
-  if (!versionRes || versionRes.code !== 0) {
+  if (versionRes.code !== 0) {
     return {
       id: "github",
       title: "GitHub CLI",
@@ -571,10 +605,7 @@ async function checkGithubCli(
           id: "github.gh",
           title: "gh binary",
           status: "warn",
-          detail:
-            versionRes && isCommandNotFoundResult("gh", versionRes)
-              ? commandNotFoundDetail("gh")
-              : "gh --version failed",
+          detail: commandVersionFailureDetail("gh", ["--version"], versionRes),
           hint: "GitHub issue listing and issue-to-task linking require gh. Install GitHub CLI or pass --bin gh=/absolute/path.",
         },
       ],
@@ -629,7 +660,7 @@ async function checkTerminalTools(
     ),
     describeShellAvailability(),
   ]);
-  const tmuxAvailable = tmuxVersion?.code === 0;
+  const tmuxAvailable = tmuxVersion.code === 0;
   return {
     id: "terminal",
     title: "Terminal",
@@ -652,20 +683,193 @@ async function checkTerminalTools(
   };
 }
 
+/**
+ * 設定画面の「エージェント連携」で入れたフック (terminal/hooks.ts)。
+ * エージェントの設定ファイルと状態ディレクトリに残るものなので、機能を
+ * 消しても最低 1 リリースはこの検出を残す (server.md)。読むだけで書かない。
+ */
+export function checkAgentHooks(
+  targets: AgentHookTarget[] = HOOK_AGENTS.map((agent) => ({
+    agent,
+    configDir: defaultAgentConfigDir(agent),
+  })),
+  launcher: HookLauncher = currentHookLauncher(),
+): DoctorGroup {
+  const removeHint = (path: string) =>
+    `To remove: Settings > Agent integration > Remove, or delete the hooks whose command contains "${AGENT_HOOK_MARKER}" from ${path}. Earlier content is kept next to it as ${basename(path)}.code-viewer-backup-*.`;
+  const rows: DoctorRow[] = targets.map((target) => {
+    const status = agentHookStatus(target, launcher);
+    const problem =
+      status.state === "partial" ||
+      status.state === "broken" ||
+      status.state === "unreadable";
+    return {
+      id: `agent-hooks.${target.agent}`,
+      title: `${target.agent} state hooks`,
+      status: problem ? "warn" : "ok",
+      detail: `${status.state}: ${status.path}${status.detail ? `\n${status.detail}` : ""}`,
+      ...(status.state === "none" || status.state === "no-config-dir"
+        ? {}
+        : { hint: removeHint(status.path) }),
+    };
+  });
+  const health = launcherHealth(launcher);
+  rows.push({
+    id: "agent-hooks.launcher",
+    title: "Agent hook launcher",
+    status:
+      health.state === "target-missing" || health.state === "unreadable"
+        ? "warn"
+        : "ok",
+    detail: `${health.state}: ${health.path}${health.detail ? `\n${health.detail}` : ""}`,
+    ...(health.state === "missing"
+      ? {}
+      : {
+          hint: `Written by Settings > Agent integration. Safe to delete once no agent settings file names it; "Repair" rewrites it.`,
+        }),
+  });
+  return { id: "agent-hooks", title: "Agent hooks", rows };
+}
+
+/**
+ * アカウントの登録簿と、claude の statusLine を包んだもの
+ * (accounts/registry.ts・terminal/statusline.ts)。ユーザーの状態ディレクトリと
+ * エージェントの設定ファイルに残るので、機能を消しても最低 1 リリースは
+ * この検出を残す (server.md)。読むだけで書かない。
+ */
+export function checkAgentAccounts(
+  paths: AccountPaths = accountPaths(),
+): DoctorGroup {
+  const read = readAccountRegistry(paths.registry);
+  const rows: DoctorRow[] = [];
+  if (read.ok === false) {
+    rows.push({
+      id: "agent-accounts.registry",
+      title: "Account registry",
+      status: "warn",
+      detail: read.error,
+      hint: `code-viewer does not overwrite it. Fix or move ${paths.registry}; without it only the default accounts are listed.`,
+    });
+  } else {
+    const managed = read.registry.accounts.filter((account) => account.managed);
+    rows.push({
+      id: "agent-accounts.registry",
+      title: "Account registry",
+      status: "ok",
+      detail: `${read.registry.accounts.length} registered: ${paths.registry}`,
+      ...(read.registry.accounts.length === 0
+        ? {}
+        : {
+            hint: `Remove entries from Settings > Accounts, or delete ${paths.registry}. Settings directories are kept${
+              managed.length > 0
+                ? `; the ones code-viewer created are under ${paths.managedRoot} (they hold that account's login and history, delete them with rm -r only if you no longer need it)`
+                : ""
+            }.`,
+          }),
+    });
+  }
+  const accounts = accountEntries(
+    read.ok ? read.registry : emptyAccountRegistry(),
+    paths.home,
+    { claude: "default", codex: "default" },
+  ).filter((account) => account.agent === "claude");
+  for (const account of accounts) {
+    const status = statusLineStatus(account.configDir, paths.usageDir);
+    const ours = status.state === "wrapped" || status.state === "added";
+    if (!ours && status.state !== "unreadable") continue;
+    rows.push({
+      id: `agent-accounts.statusline.${account.id}`,
+      title: `claude statusLine (${account.name})`,
+      status:
+        status.state === "unreadable" || status.wrapperMissing ? "warn" : "ok",
+      detail: `${status.state}: ${status.path}${status.detail ? `\n${status.detail}` : ""}${
+        status.wrapperMissing
+          ? `\nthe wrapper is missing: ${statusLineWrapperPath(paths.usageDir)}`
+          : ""
+      }`,
+      hint: `To restore: Settings > Accounts > Usage > Remove, or set statusLine.command in ${status.path} back to the quoted command after "${STATUSLINE_MARKER}" (remove statusLine if nothing follows it). Earlier content is kept next to it as settings.json.code-viewer-backup-*.`,
+    });
+  }
+  return { id: "agent-accounts", title: "Agent accounts", rows };
+}
+
+/**
+ * プロジェクトの登録簿と、全プロジェクト共通の設定 (projects/registry.ts・
+ * user-settings.ts)。どちらもユーザーの状態ディレクトリに残るので、機能を
+ * 消しても最低 1 リリースはこの検出を残す (server.md)。読むだけで書かない。
+ */
+export function checkProjects(
+  registryPath: string = projectRegistryPath(),
+  settingsPath: string = userSettingsPath(),
+): DoctorGroup {
+  const rows: DoctorRow[] = [];
+  const read = readProjectRegistry(registryPath);
+  rows.push(
+    read.ok === false
+      ? {
+          id: "projects.registry",
+          title: "Project registry",
+          status: "warn",
+          detail: read.error,
+          hint: `code-viewer does not overwrite it. Fix or move ${registryPath}; until then no project is registered.`,
+        }
+      : {
+          id: "projects.registry",
+          title: "Project registry",
+          status: "ok",
+          detail: `${read.registry.projects.length} registered: ${registryPath}`,
+          ...(read.registry.projects.length === 0
+            ? {}
+            : {
+                hint: `Remove entries from the Agents list (⋯ > Remove from projects), or delete ${registryPath}. Repositories are never touched.`,
+              }),
+        },
+  );
+  let settingsRow: DoctorRow;
+  try {
+    const settings = readUserSettings(settingsPath);
+    settingsRow = {
+      id: "projects.user-settings",
+      title: "Settings shared by all projects",
+      status: "ok",
+      detail: settings ? settingsPath : `not created yet: ${settingsPath}`,
+      ...(settings
+        ? {
+            hint: `Delete ${settingsPath} to take them over again from the next repository you open. Repository settings (.code-viewer/settings.json) are not changed by it.`,
+          }
+        : {}),
+    };
+  } catch (error) {
+    settingsRow = {
+      id: "projects.user-settings",
+      title: "Settings shared by all projects",
+      status: "warn",
+      detail: formatErrorDetail(error),
+      hint: `code-viewer does not overwrite it and shows each repository's own settings meanwhile. Fix or delete ${settingsPath}.`,
+    };
+  }
+  rows.push(settingsRow);
+  return { id: "projects", title: "Projects", rows };
+}
+
 type DockerCmd = { binary: string; subcommand: string[] };
 
-async function detectComposeBinary(
-  signal: AbortSignal | undefined,
-): Promise<{ cmd: DockerCmd | null; v2Version?: string; v1Version?: string }> {
+async function detectComposeBinary(signal: AbortSignal | undefined): Promise<{
+  cmd: DockerCmd | null;
+  v2Version?: string;
+  v2Failure?: string;
+  v1Version?: string;
+}> {
+  const v2Args = ["compose", "version", "--short"];
   const v2 = await runCached(
     versionCache,
     TTL.version,
     commandForExternal("docker"),
-    ["compose", "version", "--short"],
+    v2Args,
     TIMEOUT.version,
     signal,
   );
-  if (v2 && v2.code === 0) {
+  if (v2.code === 0) {
     return {
       cmd: { binary: commandForExternal("docker"), subcommand: ["compose"] },
       v2Version: firstLine(v2.stdout),
@@ -679,29 +883,33 @@ async function detectComposeBinary(
     TIMEOUT.version,
     signal,
   );
-  if (v1 && v1.code === 0) {
+  const v2Failure = commandVersionFailureDetail("docker", v2Args, v2);
+  if (v1.code === 0) {
     return {
       cmd: { binary: "docker-compose", subcommand: [] },
       v1Version: firstLine(v1.stdout),
+      v2Failure,
     };
   }
-  return { cmd: null };
+  return { cmd: null, v2Failure };
 }
 
-function parseComposePs(stdout: string): ComposePsRow[] | null {
+function parseComposePs(stdout: string): ComposePsRow[] | { error: string } {
   const trimmed = stdout.trim();
   if (!trimmed) return [];
   try {
     if (trimmed.startsWith("[")) {
       const parsed = JSON.parse(trimmed);
-      return Array.isArray(parsed) ? (parsed as ComposePsRow[]) : null;
+      return Array.isArray(parsed)
+        ? (parsed as ComposePsRow[])
+        : { error: `expected a JSON array, got ${typeof parsed}` };
     }
     return trimmed
       .split(/\r?\n/)
       .filter(Boolean)
       .map((line) => JSON.parse(line) as ComposePsRow);
-  } catch {
-    return null;
+  } catch (error) {
+    return { error: formatErrorDetail(error) };
   }
 }
 
@@ -754,16 +962,14 @@ async function checkDocker(
     TIMEOUT.version,
     signal,
   );
-  const dockerOk = dockerVersion?.code === 0;
+  const dockerOk = dockerVersion.code === 0;
   rows.push({
     id: "docker.binary",
     title: "docker CLI",
     status: dockerOk ? "ok" : dockerSourcesPresent ? "error" : "warn",
     detail: dockerOk
       ? firstLine(dockerVersion.stdout)
-      : dockerVersion && isCommandNotFoundResult("docker", dockerVersion)
-        ? commandNotFoundDetail("docker")
-        : "docker command failed",
+      : commandVersionFailureDetail("docker", ["--version"], dockerVersion),
     ...(dockerOk
       ? {}
       : {
@@ -786,7 +992,7 @@ async function checkDocker(
       id: "docker.compose-v2",
       title: "docker compose (v2 plugin)",
       status: dockerSourcesPresent ? "error" : "warn",
-      detail: "not available",
+      detail: `not available\n${compose.v2Failure}`,
       hint: dockerSourcesPresent
         ? "Install the Docker Compose v2 plugin (bundled with Docker Desktop, or `apt-get install docker-compose-plugin` on Linux)."
         : "Compose v2 plugin is required only when this project uses Docker compose services.",
@@ -813,8 +1019,8 @@ async function checkDocker(
         signal,
       )
     : null;
-  if (dockerOk) {
-    if (dockerInfo && dockerInfo.code === 0) {
+  if (dockerInfo) {
+    if (dockerInfo.code === 0) {
       rows.push({
         id: "docker.daemon",
         title: "docker daemon",
@@ -822,12 +1028,13 @@ async function checkDocker(
         detail: `Server v${firstLine(dockerInfo.stdout)}`,
       });
     } else {
-      const stderr = firstLine(dockerInfo?.stderr || "");
       rows.push({
         id: "docker.daemon",
         title: "docker daemon",
         status: dockerSourcesPresent ? "error" : "warn",
-        detail: stderr || "cannot connect to the Docker daemon",
+        detail:
+          dockerInfo.stderr.trim() ||
+          `docker info exited with ${dockerInfo.code}`,
         hint: "Start Docker Desktop (or `sudo systemctl start docker` on Linux), then re-run doctor.",
       });
     }
@@ -867,75 +1074,51 @@ async function checkComposeConfig(
   const cacheKey = `${cmd.binary}|${composeDir}`;
   const now = Date.now();
   const cached = composeConfigCache.get(cacheKey);
-  let result: RunResult | null;
-  let services: string[] | null;
+  const compose = (args: string[]) =>
+    spawnTextAsync({
+      command: cmd.binary,
+      args: [...cmd.subcommand, ...args],
+      cwd: composeDir,
+      timeoutMs: TIMEOUT.composeConfig,
+      signal,
+      abortMessage: "doctor aborted",
+      timeoutMessage: `${cmd.binary} ${[...cmd.subcommand, ...args].join(" ")} timed out`,
+      rejectOnError: false,
+    });
+  let result: RunResult;
+  let listed: RunResult | null;
   if (cached && cached.expiresAt > now) {
     result = cached.value.result;
-    services = cached.value.services;
+    listed = cached.value.services;
   } else {
-    const args = [...cmd.subcommand, "config", "--quiet"];
-    try {
-      result = await spawnTextAsync({
-        command: cmd.binary,
-        args,
-        cwd: composeDir,
-        timeoutMs: TIMEOUT.composeConfig,
-        signal,
-        abortMessage: "doctor aborted",
-        timeoutMessage: `${cmd.binary} ${args.join(" ")} timed out`,
-        rejectOnError: false,
-      });
-    } catch {
-      result = null;
-    }
-    if (result && result.code === 0) {
-      const servicesArgs = [...cmd.subcommand, "config", "--services"];
-      try {
-        const svcRes = await spawnTextAsync({
-          command: cmd.binary,
-          args: servicesArgs,
-          cwd: composeDir,
-          timeoutMs: TIMEOUT.composeConfig,
-          signal,
-          abortMessage: "doctor aborted",
-          timeoutMessage: `${cmd.binary} ${servicesArgs.join(" ")} timed out`,
-          rejectOnError: false,
-        });
-        services =
-          svcRes.code === 0
-            ? svcRes.stdout
-                .split(/\r?\n/)
-                .map((s) => s.trim())
-                .filter(Boolean)
-            : null;
-      } catch {
-        services = null;
-      }
-    } else {
-      services = null;
-    }
+    result = await compose(["config", "--quiet"]);
+    listed = result.code === 0 ? await compose(["config", "--services"]) : null;
     composeConfigCache.set(cacheKey, {
-      value: { result, services },
+      value: { result, services: listed },
       expiresAt: now + TTL.composeConfig,
     });
-  }
-  if (!result) {
-    return {
-      id: `docker.compose-config:${composeDir}`,
-      title: `compose config — ${composeDir}`,
-      status: "error",
-      detail: "command failed to run",
-    };
   }
   if (result.code !== 0) {
     return {
       id: `docker.compose-config:${composeDir}`,
       title: `compose config — ${composeDir}`,
       status: "error",
-      detail: firstLine(result.stderr) || `exit code ${result.code}`,
+      detail: result.stderr.trim() || `exit code ${result.code}`,
       hint: "`docker compose config --quiet` failed. Fix YAML syntax / env interpolation errors before relying on this compose file.",
     };
   }
+  if (listed && listed.code !== 0) {
+    return {
+      id: `docker.compose-config:${composeDir}`,
+      title: `compose config — ${composeDir}`,
+      status: "warn",
+      detail: `\`docker compose config --services\` failed: ${listed.stderr.trim() || `exit code ${listed.code}`}`,
+    };
+  }
+  const services = listed?.stdout
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (services) {
     // profile-gated なサービスは未指定 profile では --services から外れるのが
     // 正常挙動なので missing に数えない (例: `profiles: [test]` の db-test)。
@@ -981,53 +1164,45 @@ async function checkComposePs(
   const cacheKey = `${cmd.binary}|ps|${composeDir}`;
   const now = Date.now();
   const cached = composePsCache.get(cacheKey);
-  let result: RunResult | null;
-  let parsed: ComposePsRow[] | null;
+  let result: RunResult;
   if (cached && cached.expiresAt > now) {
-    result = cached.value.result;
-    parsed = cached.value.parsed;
+    result = cached.value;
   } else {
     const args = [...cmd.subcommand, "ps", "--all", "--format", "json"];
-    try {
-      result = await spawnTextAsync({
-        command: cmd.binary,
-        args,
-        cwd: composeDir,
-        timeoutMs: TIMEOUT.composePs,
-        signal,
-        abortMessage: "doctor aborted",
-        timeoutMessage: `${cmd.binary} ${args.join(" ")} timed out`,
-        rejectOnError: false,
-      });
-    } catch {
-      result = null;
-    }
-    parsed = result && result.code === 0 ? parseComposePs(result.stdout) : null;
+    result = await spawnTextAsync({
+      command: cmd.binary,
+      args,
+      cwd: composeDir,
+      timeoutMs: TIMEOUT.composePs,
+      signal,
+      abortMessage: "doctor aborted",
+      timeoutMessage: `${cmd.binary} ${args.join(" ")} timed out`,
+      rejectOnError: false,
+    });
     composePsCache.set(cacheKey, {
-      value: { result, parsed },
+      value: result,
       expiresAt: now + TTL.composePs,
     });
   }
-  if (!result || result.code !== 0) {
+  if (result.code !== 0) {
     return [
       {
         id: `docker.compose-ps:${composeDir}`,
         title: `compose ps — ${composeDir}`,
         status: "warn",
-        detail:
-          firstLine(result?.stderr || "") ||
-          "could not query running containers",
+        detail: result.stderr.trim() || `exit code ${result.code}`,
         hint: "`docker compose ps` failed. The discovered services may still be valid; verify with `docker compose up -d`.",
       },
     ];
   }
-  if (!parsed) {
+  const parsed = parseComposePs(result.stdout);
+  if (!Array.isArray(parsed)) {
     return [
       {
         id: `docker.compose-ps:${composeDir}`,
         title: `compose ps — ${composeDir}`,
         status: "warn",
-        detail: "could not parse `docker compose ps --format json` output",
+        detail: `could not parse \`docker compose ps --format json\` output: ${parsed.error}`,
       },
     ];
   }
@@ -1099,7 +1274,7 @@ async function checkDiscovery(
       signal,
     );
   } catch (err) {
-    dockerError = err instanceof Error ? err.message : String(err);
+    dockerError = formatErrorDetail(err);
   }
   let sqliteCount = 0;
   let sqliteError: string | null = null;
@@ -1111,7 +1286,7 @@ async function checkDiscovery(
     );
     sqliteCount = result.length;
   } catch (err) {
-    sqliteError = err instanceof Error ? err.message : String(err);
+    sqliteError = formatErrorDetail(err);
   }
   const rows: DoctorRow[] = [
     {
@@ -1206,6 +1381,33 @@ async function defaultDatastoreProbe(
   }
 }
 
+// 最小の読み取りの後に閉じる。閉じる失敗も probe の失敗として出す (読み取りも
+// 失敗していたら、両方を並べる)。
+export async function readThenClose(
+  resource: { close(): void },
+  read: () => Promise<unknown>,
+  signal: AbortSignal,
+): Promise<void> {
+  let readFailure: { error: unknown } | null = null;
+  try {
+    signal.throwIfAborted();
+    await read();
+  } catch (error) {
+    readFailure = { error };
+  }
+  try {
+    resource.close();
+  } catch (closeError) {
+    throw readFailure
+      ? errorWithCauses("the probe failed, and closing it also failed", [
+          readFailure.error,
+          closeError,
+        ])
+      : errorWithCause("closing after the probe failed", closeError);
+  }
+  if (readFailure) throw readFailure.error;
+}
+
 async function probeSqliteSource(
   file: DbFileInfo,
   cwd: string,
@@ -1215,16 +1417,7 @@ async function probeSqliteSource(
   if (!resolved) throw new Error("path validation failed");
   signal.throwIfAborted();
   const adapter = await sqliteAdapterFactory.open(resolved);
-  try {
-    signal.throwIfAborted();
-    await adapter.getTablesAsync(signal);
-  } finally {
-    try {
-      adapter.close();
-    } catch {
-      // best-effort cleanup; the original probe error wins.
-    }
-  }
+  await readThenClose(adapter, () => adapter.getTablesAsync(signal), signal);
 }
 
 async function probeDockerSqlSource(
@@ -1255,16 +1448,7 @@ async function probeDockerSqlSource(
     undefined,
     signal,
   );
-  try {
-    signal.throwIfAborted();
-    await adapter.getTablesAsync(signal);
-  } finally {
-    try {
-      adapter.close();
-    } catch {
-      // best-effort
-    }
-  }
+  await readThenClose(adapter, () => adapter.getTablesAsync(signal), signal);
 }
 
 async function probeSupabaseSource(
@@ -1286,16 +1470,7 @@ async function probeSupabaseSource(
     undefined,
     signal,
   );
-  try {
-    signal.throwIfAborted();
-    await adapter.getTablesAsync(signal);
-  } finally {
-    try {
-      adapter.close();
-    } catch {
-      // best-effort
-    }
-  }
+  await readThenClose(adapter, () => adapter.getTablesAsync(signal), signal);
 }
 
 async function probeRedisSource(
@@ -1317,16 +1492,11 @@ async function probeRedisSource(
     info.composeDir,
     signal,
   );
-  try {
-    signal.throwIfAborted();
-    await explorer.listDatabasesAsync(signal);
-  } finally {
-    try {
-      explorer.close();
-    } catch {
-      // best-effort
-    }
-  }
+  await readThenClose(
+    explorer,
+    () => explorer.listDatabasesAsync(signal),
+    signal,
+  );
 }
 
 // ai-dup-check: allow -- fp: probeRedisSource と同型の
@@ -1351,16 +1521,11 @@ async function probeEsSource(
     info.composeDir,
     signal,
   );
-  try {
-    signal.throwIfAborted();
-    await explorer.listIndicesAsync(signal);
-  } finally {
-    try {
-      explorer.close();
-    } catch {
-      // best-effort
-    }
-  }
+  await readThenClose(
+    explorer,
+    () => explorer.listIndicesAsync(signal),
+    signal,
+  );
 }
 
 async function probeS3Source(
@@ -1377,16 +1542,7 @@ async function probeS3Source(
   );
   if (!info) throw new Error("docker service not found");
   const explorer = await openS3ExplorerAsync(info, signal);
-  try {
-    signal.throwIfAborted();
-    await explorer.listBuckets(signal);
-  } finally {
-    try {
-      explorer.close();
-    } catch {
-      // best-effort
-    }
-  }
+  await readThenClose(explorer, () => explorer.listBuckets(signal), signal);
 }
 
 type ProbeOutcome =
@@ -1425,7 +1581,7 @@ async function runProbeWithTimeout(
     (err) =>
       ({
         kind: "fail",
-        reason: err instanceof Error ? err.message : String(err),
+        reason: formatErrorDetail(err),
         timedOut: false,
       }) as const,
   );
@@ -1481,7 +1637,7 @@ export async function checkDatastoreConnectivity(
     const response = await deps.listSources(cwd, omitDirNames, signal);
     files = response.files;
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
+    const reason = formatErrorDetail(err);
     return {
       id: "datastore",
       title: "Datastore connectivity",
@@ -1565,6 +1721,7 @@ export async function checkServer(
           ? `http://localhost:${listenPort}/`
           : "port not yet bound",
     },
+    await entryServerRow(),
   ];
   const root = serverWorktreeRoot(cwd);
   const listed = await worktreeListResultAsync(root, {
@@ -1620,6 +1777,43 @@ export async function checkServer(
   return { id: "server", title: "Server", rows };
 }
 
+/**
+ * 動いている入口のサーバ (`code-viewer` が 1 つだけ起こす、全プロジェクトの
+ * 窓口)。版の違う入口が居ると新しい `code-viewer` は起動しないので、その
+ * 原因と止め方をここにも出す。判定は起動と同じ findRunningEntry を使う。
+ */
+async function entryServerRow(): Promise<DoctorRow> {
+  const { findRunningEntry } = await import("./entry/server");
+  const running = await findRunningEntry();
+  const base = { id: "server.entry", title: "Entry server" } as const;
+  if (running.status === "none") {
+    return {
+      ...base,
+      status: "ok",
+      detail: "not running (`code-viewer` starts it)",
+    };
+  }
+  if (running.status === "broken") {
+    return {
+      ...base,
+      status: "error",
+      detail: running.detail,
+      hint: "`code-viewer` does not start until this is resolved. The record is entry.json in code-viewer's state directory.",
+    };
+  }
+  const version = findCodeViewerPackageJson().version;
+  const detail = `${running.url} (pid ${running.pid}, v${running.version})`;
+  if (version && running.version !== version) {
+    return {
+      ...base,
+      status: "warn",
+      detail,
+      hint: `This is v${version}; \`code-viewer\` does not start while an entry server of another version runs. Stop it (Ctrl+C where it was started, or kill ${running.pid}), then run code-viewer again.`,
+    };
+  }
+  return { ...base, status: "ok", detail };
+}
+
 export async function buildDoctorReport(
   ctx: DoctorContext,
 ): Promise<DoctorReport> {
@@ -1649,6 +1843,9 @@ export async function buildDoctorReport(
   );
   const terminal = await checkTerminalTools(ctx.signal);
   const server = await checkServer(ctx.listenPort, ctx.cwd, ctx.signal);
+  const agentHooks = checkAgentHooks();
+  const agentAccounts = checkAgentAccounts();
+  const projects = checkProjects();
   const groups: DoctorGroup[] = [
     runtime,
     packageGroup,
@@ -1661,6 +1858,9 @@ export async function buildDoctorReport(
     datastore,
     docker,
     terminal,
+    agentHooks,
+    agentAccounts,
+    projects,
     server,
   ];
   return { generation, groups, worstStatus: computeWorst(groups) };
@@ -1676,17 +1876,13 @@ export async function handleDoctor(ctx: DoctorContext): Promise<Response> {
       },
     });
   } catch (err) {
-    return new Response(
-      JSON.stringify({
-        error: err instanceof Error ? err.message : String(err),
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          "Cache-Control": "no-store",
-        },
+    console.error("[code-viewer] the doctor report could not be built:", err);
+    return new Response(JSON.stringify({ error: formatErrorDetail(err) }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
       },
-    );
+    });
   }
 }

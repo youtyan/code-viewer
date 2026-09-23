@@ -1,3 +1,5 @@
+import { apiUrl, projectKey } from "../core/api-url";
+
 // 作業ツリーの画面。骨格も行の見た目も History 画面のものをそのまま使う。
 //
 //   #worktree-panel  作業ツリー一覧   (#history-panel と同じ箱・同じ行)
@@ -12,7 +14,8 @@
 // 作業ツリーとは無関係 (server/worktree/handle.ts の handleDiffGet)。だから
 // 1 つのサーバから全部の作業ツリーの中身が読める。
 
-import { blameRelativeTime } from "../core/blame";
+import { relativeTimeText } from "../core/blame";
+import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import {
   CHEVRON_DOWN_16_PATH,
   COPY_16_PATHS,
@@ -20,6 +23,7 @@ import {
   iconSvg,
   KEBAB_16_PATH,
 } from "../core/icons";
+import { projectDestination } from "../core/projects";
 import type { AppRoute } from "../core/routes";
 import type {
   CommitMeta,
@@ -35,8 +39,19 @@ import {
   closeContextMenu,
   showContextMenu,
 } from "./context-menu";
+import { attachStickyHScroll, detachStickyHScroll } from "./diff-hscroll";
+import {
+  adjacentRow,
+  type FocusedListRow,
+  focusedListRow,
+  type ListRowKeys,
+  onListRowKeys,
+  syncListTabStop,
+} from "./list-tab-stop";
 import { enhanceMediaCard } from "./media-embed";
+import { pageLanguage } from "./page-language";
 import type { PageView } from "./page-view";
+import { treeLevelPad } from "./tree-indent";
 import { showFormDialog } from "./ui-dialog";
 import type { WorktreeText } from "./worktree-i18n";
 
@@ -69,6 +84,12 @@ export type WorktreeViewDeps = {
   getText(): WorktreeText;
   setPageMode(): void;
   syncHeaderMenu(): void;
+  /**
+   * #sidebar (#filelist。変更ファイルの一覧) の持ち主が変わる。true = この画面が
+   * 作業ツリーの変更ファイルを書く。false = 一覧だけの表示で、#sidebar は使わない
+   * (ファイル一覧は別の要素 #file-list なので、app.ts は今は何もしない)。
+   */
+  onSidebarOwner(owned: boolean): void;
   setStatus(status: "live" | "refreshing" | "error" | null): void;
   /**
    * フォルダを OS のファイルマネージャで開くボタン。Repository / Diff /
@@ -82,12 +103,28 @@ export type WorktreeViewDeps = {
   ): HTMLButtonElement;
   /**
    * 同じ操作を、ボタンを介さずに実行する。メニューの項目にはボタンが無いので
-   * こちらを使う。**成否が返る**ので、失敗をこの画面のメッセージ欄に出せる。
+   * こちらを使う。**失敗は理由を付けて投げる**ので、この画面のメッセージ欄に出せる。
    */
-  openPathInOs(
-    path: string,
-    kind: "directory" | "file-parent",
-  ): Promise<boolean>;
+  openPathInOs(path: string, kind: "directory" | "file-parent"): Promise<void>;
+  /**
+   * 一覧のエージェント (全体ボードと同じもの)。作業ツリーの行に、そこで
+   * 動いているエージェントの状態を出す。cwd が作業ツリーの中にあるものを
+   * その行に数える。
+   */
+  getAgents(): WorktreeAgent[];
+  /** エージェントの一覧が変わったら呼ぶ。戻り値は購読の解除。 */
+  subscribeAgents(listener: () => void): () => void;
+};
+
+/** 作業ツリーの行に出すエージェント 1 つ。 */
+export type WorktreeAgent = {
+  /** ペインの cwd。 */
+  path: string;
+  /** 種類の名前 (claude / codex)。 */
+  kind: string;
+  state: "waiting" | "working" | "done" | "idle";
+  /** 状態の名前 (「入力待ち」など)。 */
+  stateLabel: string;
 };
 
 export type WorktreeView = PageView & {
@@ -118,8 +155,14 @@ async function postWorktreeAction(
     headers: ACTION_HEADERS,
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error((await res.text()) || `${res.status}`);
+  if (!res.ok) throw new Error(await responseErrorMessage(res, `POST ${path}`));
   return (await res.json()) as WorktreeActionResponse;
+}
+
+/** 失敗を console に出し、画面に出す「操作の失敗と理由の全文」を返す。 */
+function failureMessage(operation: string, error: unknown): string {
+  console.error(`[code-viewer] ${operation}`, error);
+  return `${operation}\n${formatErrorDetail(error)}`;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -159,6 +202,7 @@ function matches(haystack: string, needle: string): boolean {
 
 export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   let mounted = false;
+  let viewGeneration = 0;
   let lifecycle = 0;
   let acceptedServerGeneration = 0;
   let data: WorktreesResponse | null = null;
@@ -183,8 +227,17 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   let diffFor: string | null = null;
   let restoredRouteKey: string | null = null;
   let observer: IntersectionObserver | null = null;
+  let unsubscribeAgents: (() => void) | null = null;
 
   const listPanel = document.getElementById("worktree-panel");
+  // 一覧と変更ファイルの行 (Tab の止まり場所と行の上のキー。views/list-tab-stop.ts)。
+  // 変更ファイルは Files の木と同じ #filelist に描くので、この画面の行 (鍵か
+  // フォルダの印を持つ行) だけを見る。
+  const WORKTREE_ROW_SELECTOR = ".history-list > li.history-item";
+  const FILE_ROW_SELECTOR =
+    "#filelist li.tree-file[data-key], #filelist li.tree-dir[data-worktree-dir]";
+  /** 行の上のキーを受けるのをやめる (画面を離れるとき)。 */
+  let detachRowKeys: Array<() => void> = [];
 
   function text(): WorktreeText {
     return deps.getText();
@@ -267,6 +320,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       ?.setAttribute("hidden", "true");
     listPanel.hidden = false;
     mounted = true;
+    viewGeneration++;
     document.body.classList.add("gdp-worktree-page");
     // サイドバーの絞り込みはこの画面でも使う。既定のハンドラは STATE.files を
     // 見ていて作業ツリーの一覧には効かないので、こちらでも拾う。
@@ -283,6 +337,34 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     document
       .getElementById("sb-collapse-all")
       ?.addEventListener("click", onCollapseAll);
+    // 行のエージェントの状態を追う (一覧だけ描き直す。差分は積み直さない)。
+    unsubscribeAgents = deps.subscribeAgents(() => {
+      if (mounted) renderList();
+    });
+    // 一覧と変更ファイルの行の上のキー (views/list-tab-stop.ts)。↑↓・Home / End
+    // は行から行へフォーカスを移すだけ (選ぶと画面が切り替わるので、選ぶのは
+    // Enter = 1 回押したのと同じ)。
+    const fileList = document.getElementById("filelist");
+    detachRowKeys = [
+      ...(listPanel
+        ? [
+            onListRowKeys(
+              listPanel,
+              WORKTREE_ROW_SELECTOR,
+              rowFocusKeys(() => worktreeRows()),
+            ),
+          ]
+        : []),
+      ...(fileList
+        ? [
+            onListRowKeys(
+              fileList,
+              FILE_ROW_SELECTOR,
+              rowFocusKeys(() => shownFileRows()),
+            ),
+          ]
+        : []),
+    ];
     deps.setPageMode();
     deps.syncHeaderMenu();
   }
@@ -290,6 +372,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   function suspend(): void {
     // 進行中の読み込みの結果を捨てる。画面を離れた後に書き換えない。
     lifecycle++;
+    viewGeneration++;
     // 開いたままのメニューは body 直下に居るので、この画面を畳んでも残る。
     closeContextMenu();
     observer?.disconnect();
@@ -314,6 +397,8 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     document
       .getElementById("filelist")
       ?.removeEventListener("click", onFileListClick);
+    for (const detach of detachRowKeys) detach();
+    detachRowKeys = [];
     for (const button of sidebarViewButtons()) {
       button.removeEventListener("click", onSidebarViewToggle);
     }
@@ -326,6 +411,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     document.getElementById("filelist")?.replaceChildren();
     document.getElementById("diff")?.replaceChildren();
     document.body.classList.remove("gdp-worktree-page");
+    document.body.removeAttribute("data-worktree-overview");
+    unsubscribeAgents?.();
+    unsubscribeAgents = null;
     mounted = false;
   }
 
@@ -374,8 +462,11 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     deps.setStatus("refreshing");
     try {
       const next = await deps.trackLoad(
-        fetch("/_worktree/list").then(async (res) => {
-          if (!res.ok) throw new Error((await res.text()) || `${res.status}`);
+        fetch(apiUrl("worktreeList")).then(async (res) => {
+          if (!res.ok)
+            throw new Error(
+              await responseErrorMessage(res, "loading the worktree list"),
+            );
           return (await res.json()) as WorktreesResponse;
         }),
       );
@@ -395,10 +486,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       deps.setStatus(next.error ? "error" : "live");
     } catch (error) {
       if (!isCurrent(seq)) return;
-      setMessage(
-        error instanceof Error ? error.message : text().loadFailed,
-        true,
-      );
+      setMessage(failureMessage(text().loadFailed, error), true);
       deps.setStatus("error");
     } finally {
       if (isCurrent(seq)) {
@@ -433,51 +521,100 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
 
   // ---- 操作 ----
 
+  async function switchToWorktree(item: WorktreeItem): Promise<void> {
+    const seq = lifecycle;
+    const viewGen = viewGeneration;
+    busyPath = item.path;
+    setMessage(text().opening);
+    renderList();
+    try {
+      const result = await deps.trackLoad(
+        postWorktreeAction(apiUrl("worktreeOpen"), { path: item.path }),
+      );
+      if (!result.url) throw new Error(text().openFailed);
+      const url = projectDestination(result.url, "/");
+      // 移るまで「開いています」を出したままにする (押し直しで 2 度起こさない)。
+      window.location.assign(url);
+    } catch (error) {
+      busyPath = "";
+      if (isCurrent(seq)) {
+        const detail = failureMessage(text().openFailed, error);
+        await refresh();
+        if (mounted && viewGeneration === viewGen && route()) {
+          const refreshDetail = message;
+          setMessage(
+            refreshDetail && refreshDetail !== detail
+              ? `${detail}\n${refreshDetail}`
+              : detail,
+            true,
+          );
+          renderList();
+        }
+      }
+    }
+  }
+
   /**
    * 別タブは先に開いておく。URL が返ってくるまで待ってから window.open すると、
    * ユーザー操作から離れた呼び出しとしてポップアップブロックに掛かる。
    */
   function openBlankTab(): Window | null {
-    try {
-      // "noopener" を features に渡すと、仕様上 window.open は null を返す。
-      // タブだけが about:blank のまま開き、URL を入れる先が無くなるので
-      // 渡さない。参照は受け取ったうえで opener を切る。
-      const tab = window.open("", "_blank");
-      if (tab) tab.opener = null;
-      return tab;
-    } catch {
-      return null;
-    }
+    // "noopener" を features に渡すと、仕様上 window.open は null を返す。
+    // タブだけが about:blank のまま開き、URL を入れる先が無くなるので
+    // 渡さない。参照は受け取ったうえで opener を切る。
+    const tab = window.open("", "_blank");
+    if (tab) tab.opener = null;
+    return tab;
   }
 
   async function openWorktree(item: WorktreeItem): Promise<void> {
     if (busyPath) return;
+    // 入口のサーバの下では、作業ツリーも 1 つのプロジェクトとして同じタブで
+    // 移る (同じオリジンのまま。別のポートのタブを増やさない)。
+    if (projectKey()) {
+      await switchToWorktree(item);
+      return;
+    }
     const seq = lifecycle;
+    const viewGen = viewGeneration;
     busyPath = item.path;
     setMessage(text().opening);
     renderList();
-    const tab = openBlankTab();
+    let tab: Window | null = null;
+    let completion: { detail: string; error: boolean } | null = null;
     try {
+      tab = openBlankTab();
       const result = await deps.trackLoad(
-        postWorktreeAction("/_worktree/open", { path: item.path }),
+        postWorktreeAction(apiUrl("worktreeOpen"), { path: item.path }),
       );
-      const url = result.url || "";
-      if (!url) throw new Error(text().openFailed);
+      if (!result.url) throw new Error(text().openFailed);
+      const url = projectDestination(result.url, "/");
       if (tab) tab.location.href = url;
       // ブロックされてタブを開けなかったときは、URL を残して自分で開けるように
       // する (黙って何も起きないのが一番困る)。
-      if (isCurrent(seq)) setMessage(tab ? "" : url, !tab);
+      if (!tab) completion = { detail: url, error: true };
     } catch (error) {
       tab?.close();
-      if (isCurrent(seq)) {
-        setMessage(
-          error instanceof Error ? error.message : text().openFailed,
-          true,
-        );
-      }
+      console.error("[code-viewer] opening the worktree failed", error);
+      completion = {
+        detail: `${text().openFailed}\n${formatErrorDetail(error)}`,
+        error: true,
+      };
     } finally {
       busyPath = "";
-      if (isCurrent(seq)) await refresh();
+      if (isCurrent(seq)) {
+        await refresh();
+        if (completion && mounted && viewGeneration === viewGen && route()) {
+          const refreshDetail = message;
+          setMessage(
+            refreshDetail && refreshDetail !== completion.detail
+              ? `${completion.detail}\n${refreshDetail}`
+              : completion.detail,
+            completion.error || messageIsError,
+          );
+          renderList();
+        }
+      }
     }
   }
 
@@ -575,13 +712,13 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     let createdPath = "";
     try {
       const result = await deps.trackLoad(
-        postWorktreeAction("/_worktree/add", submitted),
+        postWorktreeAction(apiUrl("worktreeAdd"), submitted),
       );
       if (isCurrent(seq)) setMessage("");
       createdPath = result.path || "";
     } catch (error) {
       if (isCurrent(seq)) {
-        setMessage(error instanceof Error ? error.message : t.addFailed, true);
+        setMessage(failureMessage(t.addFailed, error), true);
       }
     }
     // 作ったものをそのまま選ぶ。refresh が世代を進めるので先に選び、
@@ -633,7 +770,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       // 読む前に押せてしまう。
       const warn = el("p", "worktree-warn");
       warn.appendChild(
-        el("span", "", `⚠ ${t.removeDialog.dirtyNote(item.changedCount)}`),
+        el("span", "", `! ${t.removeDialog.dirtyNote(item.changedCount)}`),
       );
       warn.appendChild(document.createElement("br"));
       warn.appendChild(el("span", "", t.removeDialog.dirtyLose));
@@ -664,7 +801,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     renderList();
     try {
       await deps.trackLoad(
-        postWorktreeAction("/_worktree/remove", {
+        postWorktreeAction(apiUrl("worktreeRemove"), {
           path: item.path,
           force: submitted.force,
         }),
@@ -676,10 +813,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       }
     } catch (error) {
       if (isCurrent(seq)) {
-        setMessage(
-          error instanceof Error ? error.message : t.removeFailed,
-          true,
-        );
+        setMessage(failureMessage(t.removeFailed, error), true);
       }
     } finally {
       busyPath = "";
@@ -850,6 +984,22 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     renderList();
   }
 
+  /** 失敗を投げる操作。理由はコンソールと、この画面のメッセージ欄に出す。 */
+  async function runThrowingAction(
+    run: () => Promise<void>,
+    failure: string,
+  ): Promise<void> {
+    const seq = lifecycle;
+    try {
+      await run();
+    } catch (error) {
+      const message = failureMessage(failure, error);
+      if (!isCurrent(seq)) return;
+      setMessage(message, true);
+      renderList();
+    }
+  }
+
   /**
    * クリップボードへ写す。**失敗を握り潰さない。** 呼び出し側が見た目を
    * 変えられるように成否を返し、理由はコンソールに残す (権限拒否など、
@@ -914,15 +1064,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     renderList();
     try {
       await deps.trackLoad(
-        postWorktreeAction("/_worktree/stop", { path: item.path }),
+        postWorktreeAction(apiUrl("worktreeStop"), { path: item.path }),
       );
       if (isCurrent(seq)) setMessage("");
     } catch (error) {
       if (isCurrent(seq)) {
-        setMessage(
-          error instanceof Error ? error.message : text().actions.stopFailed,
-          true,
-        );
+        setMessage(failureMessage(text().actions.stopFailed, error), true);
       }
     } finally {
       busyPath = "";
@@ -931,7 +1078,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   /**
-   * `/_open_path` に渡す引数。
+   * `apiUrl("openPath")` (OS で開く要求) に渡す引数。
    *
    * **あのエンドポイントが取るのはリポジトリからの相対パスで、絶対パスは
    * 受け付けない** (`isSafePath` が `/` 始まりを弾き、先頭の `/` を削った
@@ -971,7 +1118,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           onSelect: () => {
             // メニューにはボタンが無いので、色を変えて伝えることができない。
             // 失敗はこの画面のメッセージ欄に出す (黙って終わるのが一番困る)。
-            void runAction(
+            void runThrowingAction(
               () => deps.openPathInOs(openArg, "directory"),
               t.actions.openFolderFailed,
             );
@@ -1002,7 +1149,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         label: t.actions.copyServerUrl,
         title: t.actions.copyServerUrlTitle(item.serverUrl),
         onSelect: () => {
-          void runAction(() => copyText(item.serverUrl), t.actions.copyFailed);
+          // 入口の下では `/p/<鍵>/` の形で返るので、開ける URL にして写す。
+          const address = projectDestination(item.serverUrl, "/");
+          void runAction(() => copyText(address), t.actions.copyFailed);
         },
       });
     }
@@ -1063,6 +1212,69 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     return button;
   }
 
+  /**
+   * その作業ツリーで動いているエージェント (cwd が中にあるもの)。作業ツリーが
+   * 入れ子のときは、いちばん深い作業ツリーに数える。急ぐものを先に。
+   */
+  function agentsIn(item: WorktreeItem): WorktreeAgent[] {
+    const worktrees = data?.worktrees ?? [];
+    const inside = (path: string, root: string) =>
+      path === root || path.startsWith(`${root.replace(/\/+$/, "")}/`);
+    const rank = { waiting: 0, done: 1, working: 2, idle: 3 } as const;
+    return deps
+      .getAgents()
+      .filter((agent) => {
+        const owner = worktrees
+          .filter((worktree) => inside(agent.path, worktree.path))
+          .sort((a, b) => b.path.length - a.path.length)[0];
+        return owner?.id === item.id;
+      })
+      .sort((a, b) => rank[a.state] - rank[b.state]);
+  }
+
+  /** 行のエージェントの欄: いちばん急ぐものの印と状態、ほかは数だけ。 */
+  function agentsCell(item: WorktreeItem): HTMLElement {
+    const cell = el("span", "worktree-row-agents");
+    const agents = agentsIn(item);
+    const first = agents[0];
+    if (!first) return cell;
+    const mark = el("i", `terminal-mark terminal-mark-${first.state}`);
+    mark.setAttribute("aria-hidden", "true");
+    const label = el(
+      "span",
+      `worktree-row-agent-state worktree-row-agent-${first.state}`,
+      first.stateLabel,
+    );
+    cell.append(mark, label);
+    if (agents.length > 1)
+      cell.appendChild(
+        el("span", "worktree-row-agent-more", `+${agents.length - 1}`),
+      );
+    cell.title = agents
+      .map((agent) => `${agent.kind} · ${agent.stateLabel}`)
+      .join("\n");
+    return cell;
+  }
+
+  /**
+   * 行の右端の「開く」(メニューの「別タブで見る」と同じ操作)。場所は最初から
+   * 取ってあり、選んだときに現れたりしない (押し間違えない)。
+   */
+  function openButton(item: WorktreeItem): HTMLButtonElement | null {
+    if (item.missing || item.bare) return null;
+    const t = text();
+    const button = el("button", "gdp-btn worktree-row-open", t.openShort);
+    button.type = "button";
+    button.title = t.openTitle;
+    button.disabled = !!busyPath;
+    button.addEventListener("click", (event) => {
+      // 行のクリック (選択) と混ぜない。
+      event.stopPropagation();
+      void openWorktree(item);
+    });
+    return button;
+  }
+
   function note(body: string, isError = false): HTMLElement {
     const node = el("div", "history-status", body);
     node.hidden = false;
@@ -1075,11 +1287,69 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
 
   function renderList(): void {
     if (!listPanel) return;
+    // 一覧はエージェントの状態が変わるたびに頭ごと作り直す。頭の部品 (再読み込み・
+    // 作成・絞り込み欄) にあったフォーカスも、作り直した後の同じ部品へ戻す
+    // (戻さないと body へ落ち、Tab が一覧の先へ進めず、絞り込み欄の入力も途切れた)。
+    const head = focusedHeadControl(listPanel);
+    try {
+      renderListRows(listPanel);
+    } finally {
+      restoreHeadControl(listPanel, head);
+    }
+  }
+
+  type FocusedHeadControl =
+    | { kind: "filter"; start: number | null; end: number | null }
+    | { kind: "button"; index: number };
+
+  function headButtons(panel: HTMLElement): HTMLElement[] {
+    return [...panel.querySelectorAll<HTMLElement>(".history-head button")];
+  }
+
+  function focusedHeadControl(panel: HTMLElement): FocusedHeadControl | null {
+    const focused = document.activeElement as HTMLElement | null;
+    if (!focused || !panel.contains(focused)) return null;
+    if (focused === worktreeFilterInput)
+      return {
+        kind: "filter",
+        start: worktreeFilterInput.selectionStart,
+        end: worktreeFilterInput.selectionEnd,
+      };
+    const index = headButtons(panel).indexOf(focused);
+    return index < 0 ? null : { kind: "button", index };
+  }
+
+  function restoreHeadControl(
+    panel: HTMLElement,
+    head: FocusedHeadControl | null,
+  ): void {
+    if (!head) return;
+    if (head.kind === "button") {
+      headButtons(panel)[head.index]?.focus({ preventScroll: true });
+      return;
+    }
+    if (!worktreeFilterInput.isConnected) return;
+    worktreeFilterInput.focus({ preventScroll: true });
+    if (head.start !== null && head.end !== null)
+      worktreeFilterInput.setSelectionRange(head.start, head.end);
+  }
+
+  function renderListRows(listPanel: HTMLElement): void {
     const t = text();
+    // 作り直す前に、行にあったフォーカスを控える (作り直すと body へ落ちる)。
+    const focused = focusedListRow(
+      listPanel,
+      WORKTREE_ROW_SELECTOR,
+      worktreeKey,
+    );
     listPanel.replaceChildren();
 
     const head = el("div", "history-head");
     head.appendChild(el("span", "history-title", t.panes.worktrees));
+    if (data?.worktrees.length)
+      head.appendChild(
+        el("span", "worktree-count", t.panes.count(data.worktrees.length)),
+      );
     head.appendChild(
       headButton(t.refresh, t.refreshTitle, () => {
         void refresh();
@@ -1139,18 +1409,37 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       return;
     }
 
-    const list = el("ol", "history-list");
     const selected = route()?.wt;
+    // 選んでいないときは一覧だけを画面いっぱいに出す (行は列にそろえる)。
+    // 選ぶと今までどおり 一覧 → 変更ファイル → 差分。
+    document.body.toggleAttribute("data-worktree-overview", !selected);
+    const columns = el("div", "worktree-columns");
+    columns.setAttribute("aria-hidden", "true");
+    for (const label of [
+      t.columns.branch,
+      t.columns.compared(data.baseBranch || ""),
+      t.columns.changes,
+      t.columns.agents,
+      "",
+    ])
+      columns.appendChild(el("span", "", label));
+    listPanel.appendChild(columns);
+    const list = el("ol", "history-list");
     for (const item of items) {
       const row = el("li", "history-item");
       row.dataset.wt = item.id;
       if (item.id === selected) row.classList.add("active");
+      if (item.current) row.classList.add("worktree-current");
       if (item.divergence?.mergeState === "conflict") {
         row.classList.add("worktree-conflict");
       }
 
-      // 1 段目: 名前 + 状態バッジ (右寄せ)。
+      // 1 段目: 名前 + 状態バッジ (右寄せ)。一覧だけのときは名前の代わりに
+      // ブランチを見出しにする (フォルダは 2 段目のパスで読める)。
       const head = el("span", "worktree-row-head");
+      head.appendChild(
+        el("span", "worktree-row-branch", item.branch || t.badges.detached),
+      );
       const subject = el("span", "subject", item.name);
       subject.title = item.path;
       head.appendChild(subject);
@@ -1165,9 +1454,6 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         });
         head.appendChild(wrap);
       }
-      // 操作は「…」の中だけ。行を選ばなくても、その行に対して実行できる。
-      const menu = rowMenuButton(item);
-      if (menu) head.appendChild(menu);
       row.appendChild(head);
 
       // 2 段目: フォルダの場所。「それはどこのフォルダなのか」が一番知りたい
@@ -1181,7 +1467,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       row.appendChild(pathLine);
 
       // 3 段目: ブランチ・変更数・最終コミット。
-      const meta = el("span", "meta2");
+      const meta = el("span", "meta2 worktree-row-meta");
       // ブランチ名の枠。ブランチが無い作業ツリーはその旨を出し、他のバッジと
       // 同じように理由を title に添える。
       const branchName = el("span", "sha", item.branch || t.badges.detached);
@@ -1190,7 +1476,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       meta.appendChild(
         el(
           "span",
-          "author",
+          "author worktree-row-files",
           item.fileCount ? t.files.heading(item.fileCount) : t.files.none,
         ),
       );
@@ -1200,12 +1486,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           "span",
           "when",
           Number.isFinite(parsed)
-            ? blameRelativeTime(Math.round(parsed / 1000))
+            ? relativeTimeText(Math.round(parsed / 1000), pageLanguage())
             : item.lastCommit.when,
         );
         // ホバーでは件名と絶対日時の両方を出す。
         when.title = Number.isFinite(parsed)
-          ? `${item.lastCommit.subject}\n${new Date(parsed).toLocaleString()}`
+          ? `${item.lastCommit.subject}\n${new Date(parsed).toLocaleString(pageLanguage())}`
           : item.lastCommit.subject;
         meta.appendChild(when);
       }
@@ -1216,20 +1502,22 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           "span",
           "when",
           Number.isFinite(parsed)
-            ? t.lastTouched(blameRelativeTime(Math.round(parsed / 1000)))
+            ? t.lastTouched(
+                relativeTimeText(Math.round(parsed / 1000), pageLanguage()),
+              )
             : t.lastTouched(item.lastTouched),
         );
         when.title = Number.isFinite(parsed)
-          ? new Date(parsed).toLocaleString()
+          ? new Date(parsed).toLocaleString(pageLanguage())
           : item.lastTouched;
         meta.appendChild(when);
       }
       row.appendChild(meta);
 
       // 4 段目: マージできるか + 位置関係。フル文は title に。
-      const second = el("span", "meta2");
+      const second = el("span", "meta2 worktree-row-divergence");
       const summary = divergenceSummary(item);
-      const summaryText = el("span", "author", summary);
+      const summaryText = el("span", "author worktree-row-compare", summary);
       summaryText.title = summary;
       second.appendChild(summaryText);
       // そのまま入る行にだけ、取り込むコマンドのコピーを添える。文字は
@@ -1237,6 +1525,16 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       const merge = copyMergeButton(item);
       if (merge) second.appendChild(merge);
       row.appendChild(second);
+      row.appendChild(agentsCell(item));
+      // 操作: 「開く」と「…」。「…」は行を選ばなくても、その行に対して実行できる。
+      // 「開く」は一覧だけのとき (何も選んでいない) にだけ置く。選んだ後の
+      // 狭い一覧では今までどおり「…」だけ (選んだ瞬間にボタンが増えると誤爆する)。
+      const actions = el("span", "worktree-row-actions");
+      const open = selected ? null : openButton(item);
+      if (open) actions.appendChild(open);
+      const menu = rowMenuButton(item);
+      if (menu) actions.appendChild(menu);
+      row.appendChild(actions);
 
       if (item.error) {
         const error = el("span", "meta2");
@@ -1259,6 +1557,21 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       navigate({ wt: id, file: undefined, origin: undefined });
     });
     listPanel.appendChild(list);
+    // 行の中にボタン (取り込みのコピー・「…」・「開く」) があるので listbox に
+    // せず、並び (ol) のまま名前を付け、選んでいる行は aria-current で伝える。
+    list.setAttribute("aria-label", t.panes.worktrees);
+    for (const row of list.querySelectorAll<HTMLElement>(".history-item"))
+      if (row.classList.contains("active"))
+        row.setAttribute("aria-current", "true");
+    syncListTabStop(list, {
+      rows: worktreeRows(),
+      keyOf: worktreeKey,
+      isActive: (row) => row.classList.contains("active"),
+      actionSelector: "button, a[href]",
+      focused,
+      fallback: listPanel,
+      memo: listPanel,
+    });
 
     // メインの 1 本しか無いときは、この一覧に何が並ぶかを 1 行で伝える。
     if (data.worktrees.length === 1) {
@@ -1365,7 +1678,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     ) {
       row.classList.add("active");
     }
-    row.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+    row.style.setProperty("--lvl-pad", treeLevelPad(depth));
     row.appendChild(el("span", "chev-spacer"));
     const badge = el("span", `badge ${file.status}`, file.status);
     badge.title = t.files.statusTitles[file.status] || file.status;
@@ -1397,13 +1710,17 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     item: WorktreeItem,
     node: FileTree,
     depth: number,
+    path: string,
   ): void {
     for (const [rawName, rawChild] of node.dirs) {
       const [label, child] = collapseChain(rawName, rawChild);
       const li = el("li", "tree-dir");
       li.tabIndex = -1;
       li.dataset.type = "tree";
-      li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+      // 行の鍵 (描き直しをまたいでフォーカスを戻す)。区切り (未コミット /
+      // コミット済み) ごとに同じフォルダが出るので、区切りから始める。
+      li.dataset.worktreeDir = `${path}/${label}`;
+      li.style.setProperty("--lvl-pad", treeLevelPad(depth));
       const chev = el("span", "chev");
       chev.innerHTML = chevronSvg();
       const icon = el("span", "dir-icon");
@@ -1415,6 +1732,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         event.stopPropagation();
         const collapsed = li.classList.toggle("collapsed");
         icon.innerHTML = folderSvg(collapsed);
+        // 畳んだ中に止まり場所があれば、見えている行へ移す。
+        const list = document.getElementById("filelist");
+        if (list) syncFileTabStop(list);
       };
       chev.addEventListener("click", toggle);
       icon.addEventListener("click", toggle);
@@ -1423,7 +1743,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       // `#filelist.tree .tree-dir.collapsed + .tree-children` で畳むため、
       // 中に入れると折りたたみが効かず、行も横に並んでしまう。
       const children = el("ul", "tree-children");
-      renderTreeInto(children, item, child, depth + 1);
+      renderTreeInto(children, item, child, depth + 1, `${path}/${label}`);
       parent.appendChild(children);
     }
     for (const file of node.files) {
@@ -1442,9 +1762,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     try {
       const next = await deps.trackLoad(
         fetch(
-          `/_worktree/commits?${new URLSearchParams({ path: item.path }).toString()}`,
+          `${apiUrl("worktreeCommits")}?${new URLSearchParams({ path: item.path }).toString()}`,
         ).then(async (res) => {
-          if (!res.ok) throw new Error((await res.text()) || `${res.status}`);
+          if (!res.ok)
+            throw new Error(
+              await responseErrorMessage(res, "loading the worktree commits"),
+            );
           return (await res.json()) as WorktreeCommitsResponse;
         }),
       );
@@ -1473,8 +1796,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       ) {
         return;
       }
-      commitsError =
-        error instanceof Error ? error.message : text().commits.loadFailed;
+      commitsError = failureMessage(text().commits.loadFailed, error);
     } finally {
       if (
         isCurrent(seq) &&
@@ -1530,11 +1852,11 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         "span",
         "when",
         Number.isFinite(parsed)
-          ? blameRelativeTime(Math.round(parsed / 1000))
+          ? relativeTimeText(Math.round(parsed / 1000), pageLanguage())
           : commit.when,
       );
       when.title = Number.isFinite(parsed)
-        ? new Date(parsed).toLocaleString()
+        ? new Date(parsed).toLocaleString(pageLanguage())
         : commit.when;
       meta.appendChild(when);
       row.append(subject, meta);
@@ -1548,6 +1870,115 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
   }
 
   function renderFiles(): void {
+    const list = document.getElementById("filelist");
+    // 作り直す前に、行にあったフォーカスを控える。
+    const focused = list
+      ? focusedListRow(list, FILE_ROW_SELECTOR, fileRowKey)
+      : null;
+    try {
+      renderFileRows();
+    } finally {
+      if (list && selectedWorktree()) syncFileTabStop(list, focused);
+    }
+  }
+
+  // ---- 行の Tab の止まり場所とキー ----
+
+  function worktreeKey(row: HTMLElement): string {
+    return row.dataset.wt ?? "";
+  }
+
+  function worktreeRows(): HTMLElement[] {
+    return listPanel
+      ? [...listPanel.querySelectorAll<HTMLElement>(WORKTREE_ROW_SELECTOR)]
+      : [];
+  }
+
+  function fileRowKey(row: HTMLElement): string {
+    return row.dataset.key ?? `dir:${row.dataset.worktreeDir ?? ""}`;
+  }
+
+  function fileRows(): HTMLElement[] {
+    return [...document.querySelectorAll<HTMLElement>(FILE_ROW_SELECTOR)];
+  }
+
+  /** 畳んだフォルダの中に居ない行。 */
+  function shownFileRows(): HTMLElement[] {
+    return fileRows().filter((row) => {
+      for (
+        let parent = row.parentElement;
+        parent && parent.id !== "filelist";
+        parent = parent.parentElement
+      ) {
+        if (
+          parent.classList.contains("tree-children") &&
+          parent.previousElementSibling?.classList.contains("collapsed")
+        )
+          return false;
+      }
+      return true;
+    });
+  }
+
+  /**
+   * 変更ファイルの止まり場所と role。木なら tree (フォルダの子は group)、平らなら
+   * listbox。区切りの見出し・コミットの行など、ファイルでない行は role を外す。
+   */
+  function syncFileTabStop(list: HTMLElement, focused?: FocusedListRow | null) {
+    const t = text();
+    const tree = list.classList.contains("tree");
+    list.setAttribute("role", tree ? "tree" : "listbox");
+    list.setAttribute("aria-label", t.panes.fileListLabel);
+    const rows = fileRows();
+    for (const item of list.querySelectorAll<HTMLElement>("li")) {
+      if (rows.includes(item)) {
+        item.setAttribute("role", tree ? "treeitem" : "option");
+        if (item.dataset.worktreeDir !== undefined)
+          item.setAttribute(
+            "aria-expanded",
+            String(!item.classList.contains("collapsed")),
+          );
+      } else item.setAttribute("role", "none");
+    }
+    for (const group of list.querySelectorAll<HTMLElement>(".tree-children"))
+      group.setAttribute("role", "group");
+    syncListTabStop(list, {
+      rows,
+      shown: shownFileRows(),
+      keyOf: fileRowKey,
+      isActive: (row) => row.classList.contains("active"),
+      ariaSelected: true,
+      ...(focused === undefined ? {} : { focused }),
+      fallback: document.getElementById("sidebar"),
+    });
+  }
+
+  /**
+   * 行の上のキー: ↑↓・Home / End は行から行へフォーカスを移すだけ (選ぶと画面が
+   * 切り替わる)。Enter は 1 回押したのと同じ (フォルダは開閉)。
+   */
+  function rowFocusKeys(rows: () => HTMLElement[]): ListRowKeys {
+    const focusRow = (row: HTMLElement | null | undefined) => row?.focus();
+    return {
+      ArrowDown: (row) => focusRow(adjacentRow(rows(), row, 1)),
+      ArrowUp: (row) => focusRow(adjacentRow(rows(), row, -1)),
+      Home: () => focusRow(rows()[0]),
+      End: () => {
+        const all = rows();
+        focusRow(all[all.length - 1]);
+      },
+      Enter: (row) => {
+        if (row.dataset.worktreeDir === undefined) {
+          row.click();
+          return;
+        }
+        // 開閉は chev の click (止まり場所の付け直しもそこで)。
+        row.querySelector<HTMLElement>(".chev")?.click();
+      },
+    };
+  }
+
+  function renderFileRows(): void {
     const t = text();
     const list = document.getElementById("filelist");
     const title = document.querySelector<HTMLElement>(".sb-title");
@@ -1565,16 +1996,18 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     )) {
       button.disabled = !tree;
     }
-    if (title) title.textContent = t.panes.files;
     const item = selectedWorktree();
-    if (totals) {
-      totals.textContent = item ? t.files.heading(item.fileCount) : "";
-    }
-    list.replaceChildren();
+    // 一覧だけのとき #sidebar (変更ファイルの一覧) は出さない。触らない。
     if (!item) {
-      list.appendChild(note(t.panes.selectWorktree));
+      deps.onSidebarOwner(false);
       return;
     }
+    deps.onSidebarOwner(true);
+    // 見出しは app.ts の syncSidebarTitle と同じ「変更ファイル」。
+    if (title) title.textContent = t.panes.fileListLabel;
+    if (totals) totals.textContent = t.files.heading(item.fileCount);
+    list.removeAttribute("data-diff-list");
+    list.replaceChildren();
     renderCommits(list, item);
     if (!item.fileCount) {
       list.appendChild(note(t.files.none));
@@ -1604,7 +2037,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           group === "uncommitted" ? t.files.uncommitted : t.files.committed,
         ),
       );
-      if (tree) renderTreeInto(list, item, buildTree(files), 0);
+      if (tree) renderTreeInto(list, item, buildTree(files), 0, group);
       else {
         for (const file of files) {
           list.appendChild(fileRow(item, file, 0, file.path));
@@ -1679,12 +2112,19 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     if (deps.getOptions().ignoreWs) params.set("ignore_ws", "1");
     try {
       const res = await deps.trackLoad(
-        fetch(`/_worktree/diff?${params.toString()}`).then(async (response) => {
-          if (!response.ok) {
-            throw new Error((await response.text()) || `${response.status}`);
-          }
-          return (await response.json()) as WorktreeDiffResponse;
-        }),
+        fetch(`${apiUrl("worktreeDiff")}?${params.toString()}`).then(
+          async (response) => {
+            if (!response.ok) {
+              throw new Error(
+                await responseErrorMessage(
+                  response,
+                  "loading the worktree diff",
+                ),
+              );
+            }
+            return (await response.json()) as WorktreeDiffResponse;
+          },
+        ),
       );
       if (
         !isCurrent(seq) ||
@@ -1711,6 +2151,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       ) {
         return;
       }
+      detachStickyHScroll(shell);
       body.replaceChildren();
       if (!res.diff.trim()) {
         body.appendChild(el("div", "gdp-info", t.panes.diffEmpty));
@@ -1752,6 +2193,8 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           hljs as ConstructorParameters<typeof window.Diff2HtmlUI>[3],
         );
         ui.draw();
+        // 長いカードでも横のスクロールバーを本文の下端に貼って見せる (Diff と同じ)。
+        attachStickyHScroll(shell);
         enhanceMediaCard(
           {
             path: file.path,
@@ -1766,7 +2209,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
           shell,
           {
             fileUrl: (side) =>
-              `/_worktree/file?${new URLSearchParams({
+              `${apiUrl("worktreeFile")}?${new URLSearchParams({
                 path: item.path,
                 file: file.path,
                 origin: file.origin,
@@ -1791,7 +2234,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       const failure = el(
         "div",
         "gdp-info",
-        error instanceof Error ? error.message : t.panes.diffFailed,
+        failureMessage(t.panes.diffFailed, error),
       );
       failure.setAttribute("role", "alert");
       body.appendChild(failure);

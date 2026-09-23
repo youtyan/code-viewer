@@ -85,25 +85,26 @@ export function startWorktreeUpdateWatch(
     options.readdirSync ||
     ((path: string) =>
       nodeReaddirSync(path, { withFileTypes: true }) as DirectoryEntry[]);
+  // 通知の後に消えた (ENOENT・途中がファイルの ENOTDIR) パスは「フォルダでない」
+  // でよい。読めないなど、ほかの失敗は onError に渡してから同じ扱いにする。
+  const lstatOrNull = (path: string) => {
+    try {
+      return lstatSync(path);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") options.onError?.(error);
+      return null;
+    }
+  };
   const isDirectory =
     options.isDirectory ||
-    ((path: string) => {
-      try {
-        return lstatSync(path).isDirectory();
-      } catch {
-        return false;
-      }
-    });
+    ((path: string) => lstatOrNull(path)?.isDirectory() === true);
   const directorySignature =
     options.directorySignature ||
     ((path: string) => {
-      try {
-        const stats = lstatSync(path);
-        if (!stats.isDirectory()) return null;
-        return `${stats.dev}:${stats.ino}`;
-      } catch {
-        return null;
-      }
+      const stats = lstatOrNull(path);
+      if (!stats?.isDirectory()) return null;
+      return `${stats.dev}:${stats.ino}`;
     });
   const setTimer = options.setTimeoutFn || setTimeout;
   const clearTimer = options.clearTimeoutFn || clearTimeout;

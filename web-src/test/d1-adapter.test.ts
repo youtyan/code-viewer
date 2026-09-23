@@ -324,6 +324,39 @@ describe("d1 adapter cancellation", () => {
   });
 });
 
+// 直す前は EXPLAIN もサブクエリに包み、包めなければ末尾に LIMIT を足していた。
+// 中の SELECT が LIMIT を持つと両方とも構文エラーになり、1 つ目の理由だけを返した。
+describe("d1 adapter read-only query forms", () => {
+  test("sends EXPLAIN as written", async () => {
+    const statement =
+      'EXPLAIN QUERY PLAN SELECT * FROM "sample_table" LIMIT 200 OFFSET 0';
+    const calls = stubD1([
+      [statement, { columns: ["detail"], rows: [["SCAN sample_table"]] }],
+    ]);
+    const adapter = createD1Adapter(CONFIG);
+
+    const result = await adapter.executeReadonlyQueryAsync(statement);
+
+    expect(calls.map((call) => call.body.sql)).toEqual([statement]);
+    expect(result.rows).toEqual([["SCAN sample_table"]]);
+  });
+
+  test("names the reason of every form it tried when all of them fail", async () => {
+    stubD1Failure(200, "no such table: missing_table");
+    const adapter = createD1Adapter(CONFIG);
+
+    expect(
+      await captureErrorAsync(() =>
+        adapter.executeReadonlyQueryAsync("SELECT * FROM missing_table"),
+      ),
+    ).toBe(
+      "the query failed in every form it was tried (" +
+        "as a subquery: no such table: missing_table (sql: SELECT * FROM (SELECT * FROM missing_table) LIMIT 1001); " +
+        "with LIMIT appended: no such table: missing_table (sql: SELECT * FROM missing_table LIMIT 1001))",
+    );
+  });
+});
+
 describe("d1 adapter read-only guard", () => {
   test.each([
     { sql: "INSERT INTO sample_table (id) VALUES (1)", message: NOT_READONLY },

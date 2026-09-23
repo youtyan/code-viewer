@@ -35,9 +35,24 @@ describe("focusTmuxPane", () => {
 });
 
 describe("tmuxAttachCommandLine", () => {
-  test("ペインを引用して attach する 1 行を返す", () => {
-    // `%3` はシェルにとってジョブ指定。引用しないと意図しない展開に化ける。
-    expect(tmuxAttachCommandLine("%3")).toBe("'tmux' attach-session -t '%3'\r");
+  // `%3` はシェルにとってジョブ指定。引用しないと意図しない展開に化ける。
+  // TMUX を外して打つ (シェルが tmux の中でも入れ子で繋がる)。止める系の
+  // tmux のコマンドは決して入れない。
+  test.each([
+    {
+      pane: "%3",
+      line: "env -u TMUX 'tmux' attach-session -t '%3' && exit\r",
+    },
+    {
+      pane: "%12",
+      line: "env -u TMUX 'tmux' attach-session -t '%12' && exit\r",
+    },
+  ] as const)("$pane を引用し、TMUX を外して attach し、抜けたらシェルも終える 1 行を返す", ({
+    pane,
+    line,
+  }) => {
+    const typed = tmuxAttachCommandLine(pane);
+    expect([typed, /kill-|detach/.test(typed)]).toEqual([line, false]);
   });
 
   test("実行するために改行で終える", () => {

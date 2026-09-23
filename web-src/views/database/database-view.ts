@@ -1,3 +1,4 @@
+import { apiUrl, routePathname } from "../../core/api-url";
 import { inferRailsForeignKeys } from "../../core/database/infer-fk";
 import type {
   DbColumn,
@@ -49,6 +50,7 @@ import { localizePrefToggle, makePrefToggle } from "./pref-toggle";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
 import { createRedisExplorer } from "./redis-explorer";
+import { requireOkResponse } from "./report-failure";
 import { createS3Explorer } from "./s3-explorer";
 import { createSchemaView } from "./schema-view";
 import { createSessionLog, type SessionLogStore } from "./session-log";
@@ -127,6 +129,7 @@ export type DatabaseView = {
 };
 
 type TabName = "data" | "query" | "schema" | "er" | "search" | "snapshot";
+type LoadRecovery<T> = { ok: true; value: T } | { ok: false; error: unknown };
 type DatabaseAnnotationTarget = Extract<AnnotationTarget, { kind: "database" }>;
 type DatabaseEnterOptions = {
   autoSelectFirst?: boolean;
@@ -155,11 +158,51 @@ function looksReadOnlySql(sql: string): boolean {
   return /^(select|with|pragma|explain)\b/i.test(normalized);
 }
 
+function queryForTableResult(data: DbTableDataResponse): string | null {
+  if (!data.executedSql) return null;
+  for (let i = data.executedSql.length - 1; i >= 0; i--) {
+    const sql = data.executedSql[i]?.trim();
+    if (
+      sql &&
+      /^select\b/i.test(sql) &&
+      /\blimit\b/i.test(sql) &&
+      !/\bcount\s*\(/i.test(sql)
+    ) {
+      return sql.replace(
+        /\blimit\s+\?\s+offset\s+\?\s*;?$/i,
+        `LIMIT ${data.limit} OFFSET ${data.offset}`,
+      );
+    }
+  }
+  return null;
+}
+
 function isAbortError(err: unknown): boolean {
   return (
     (err instanceof DOMException && err.name === "AbortError") ||
     (err instanceof Error && err.name === "AbortError")
   );
+}
+
+async function readJsonResponse<T>(
+  response: Response,
+  operation: string,
+): Promise<T> {
+  await requireOkResponse(response, operation);
+  try {
+    return (await response.json()) as T;
+  } catch (error) {
+    throw errorWithCause(`${operation}: response is not valid JSON`, error);
+  }
+}
+
+/**
+ * 左の列 (.db-sidebar) を掴んで動かしたときの幅。列の左端からポインタまでの
+ * 距離を 120〜600px に収める。clientX は窓の左端からなので、そのまま使うと
+ * 左にサイドバーがある画面では掴んだだけで幅がその分跳ぶ。
+ */
+export function dbSidebarWidthAt(clientX: number, sidebarLeft: number): number {
+  return Math.max(120, Math.min(600, clientX - sidebarLeft));
 }
 
 // ----- 内部: 1 タブ分の view (元 createDatabaseView の中身) -----
@@ -188,6 +231,7 @@ type TabPaneInternal = {
   getLabel: () => string;
   dispose: () => void;
   localize: () => void;
+  showError: (message: string) => void;
 };
 
 // TabPane のすべての永続化対象 state を 1 箇所で受け取る。pane の構築時に
@@ -245,7 +289,7 @@ export const TABLE_SELECT_FETCH_DELAY_MS = 50;
 
 type DbVisibility = {
   toolsHidden: boolean;
-  // JetBrains 風 bottom dock: タブストリップ自体は SQL モードのとき常時表示
+  // 下端の常駐 dock: タブストリップ自体は SQL モードのとき常時表示
   // (pane open/close と独立)。historyPaneHidden が pane の本体 (展開部) の
   // 表示/非表示で、tabStrip だけ常駐させる。
   historyTabStripHidden: boolean;
@@ -271,7 +315,7 @@ function computeVisibility(
   userPrefersHistoryOpen: boolean,
 ): DbVisibility {
   const sqlMode = isSqlKind(kind);
-  const tableScopedTab = tab === "data" || tab === "schema";
+  const tableScopedTab = tab === "data" || tab === "query" || tab === "schema";
   const historyVisible = sqlMode && userPrefersHistoryOpen;
   return {
     toolsHidden: !sqlMode,
@@ -281,7 +325,7 @@ function computeVisibility(
     tableListHidden: !sqlMode,
     tabBarHidden: !sqlMode || !tableScopedTab,
     gridHidden: !sqlMode || tab !== "data",
-    queryHidden: !sqlMode || tab !== "query",
+    queryHidden: !sqlMode || (tab !== "data" && tab !== "query"),
     schemaHidden: !sqlMode || tab !== "schema",
     erHidden: !sqlMode || tab !== "er",
     searchHidden: !sqlMode || tab !== "search",
@@ -301,8 +345,11 @@ function normalizeViewForDb(
   return view && isSqlView(view) ? view : "data";
 }
 
-function labelFromDbId(dbId: string | null | undefined): string {
-  if (!dbId) return "(empty)";
+function labelFromDbId(
+  dbId: string | null | undefined,
+  emptyLabel: string,
+): string {
+  if (!dbId) return emptyLabel;
   if (dbId.startsWith("docker:")) {
     const rest = dbId.slice("docker:".length);
     const service = rest.split(/[@:]/, 1)[0];
@@ -374,6 +421,11 @@ function createTabPane(
   }
   let lastFiles: DbFileInfo[] = [];
   let noDatastoresAvailable = false;
+  // データストアはあるが、このタブではまだ選んでいない (新しいタブ)。
+  let awaitingDatastoreChoice = false;
+  // そのとき select の先頭に置く「データストアを選択」の行。
+  let datastorePlaceholder: HTMLOptionElement | null = null;
+  let datastoreListError: unknown | null = null;
   let currentSchema: string | null = initial.schema ?? null;
   let currentTable: string | null = initial.table ?? null;
   let loadGeneration = 0;
@@ -419,12 +471,13 @@ function createTabPane(
     },
   };
   function runConnectionAction(action: () => Promise<void>): void {
-    void action().catch((err) =>
-      showAlertDialog({
+    void action().catch((err) => {
+      console.error("[code-viewer] datastore connection action failed", err);
+      return showAlertDialog({
         body: errorMessage(err),
         danger: true,
-      }),
-    );
+      });
+    });
   }
   const addConnectionBtn = makeIconButton({
     label: paneText().nav.addConnection,
@@ -584,16 +637,9 @@ function createTabPane(
     toolsSection.setAttribute("aria-label", paneText().nav.toolbar);
   });
 
-  const queryBtn = makeIconButton({
-    label: "Query",
-    title: "Query Editor",
-    pathD: ICON_PATH_QUERY,
-    onClick: () => setActiveTab("query"),
-  });
-
   const erBtn = makeIconButton({
-    label: "ER Diagram",
-    title: "Entity Relationship Diagram",
+    label: paneText().nav.er,
+    title: paneText().nav.erTitle,
     pathD: ICON_PATH_ER,
     onClick: () => {
       setActiveTab("er");
@@ -602,15 +648,15 @@ function createTabPane(
   });
 
   const searchBtn = makeIconButton({
-    label: "Search",
-    title: "Search across tables",
+    label: paneText().nav.search,
+    title: paneText().nav.searchTitle,
     pathD: SEARCH_16_PATH,
     onClick: () => setActiveTab("search"),
   });
 
   const snapshotBtn = makeIconButton({
-    label: "Snapshot",
-    title: "Snapshot & Diff",
+    label: paneText().nav.snapshot,
+    title: paneText().nav.snapshotTitle,
     pathD: ICON_PATH_SNAPSHOT,
     onClick: () => {
       setActiveTab("snapshot");
@@ -634,13 +680,12 @@ function createTabPane(
       t.refreshDatastoresTitle,
     );
     syncDbRefreshButton();
-    localizeIconButton(queryBtn, t.query, t.queryTitle);
     localizeIconButton(erBtn, t.er, t.erTitle);
     localizeIconButton(searchBtn, t.search, t.searchTitle);
     localizeIconButton(snapshotBtn, t.snapshot, t.snapshotTitle);
   });
 
-  toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
+  toolsSection.append(erBtn, searchBtn, snapshotBtn);
 
   // 設定トグル (Rails FK 推測など) はビューア設定パネルへ移したので、
   // ここの prefs バーは現状空。#16 (Edit モードトグル集約) で再利用予定。
@@ -674,7 +719,10 @@ function createTabPane(
     resizeHandle.classList.add("active");
     const onMove = (ev: MouseEvent) => {
       if (!resizing) return;
-      const w = Math.max(120, Math.min(600, ev.clientX));
+      const w = dbSidebarWidthAt(
+        ev.clientX,
+        sidebar.getBoundingClientRect().left,
+      );
       sidebar.style.width = `${w}px`;
     };
     const onUp = () => {
@@ -753,11 +801,14 @@ function createTabPane(
     localizePrefToggle(editModeToggle, e.editMode, e.editModeTitle);
   });
 
+  let preserveInitialSqlDraft = Boolean(initial.sqlDraft);
   const queryEditor = createQueryEditor({
     executeQuery: (sql) => executeQuery(sql),
+    getKind: () => currentDbInfo?.kind,
     loadHistory: () =>
       outerDeps.loadSqlHistory(currentDbInfo?.id || null, currentSchema),
     onSqlChange: () => cb.onStateChange(),
+    onResultShown: () => setActiveTab("query"),
     getText: () => paneText(),
   });
   // 復元すべき SQL draft があれば初期化時に流し込む (これも onSqlChange を
@@ -796,7 +847,7 @@ function createTabPane(
       // window.location を直読みすると URL クエリ名の規約が将来変わったとき
       // routes.ts と此処の 2 箇所を直さないと壊れる。
       const parsed = parseRoute(
-        window.location.pathname,
+        routePathname(),
         window.location.search,
         deps.currentRange(),
       );
@@ -831,7 +882,8 @@ function createTabPane(
     getText: () => paneText(),
     copySqlToQuery: (sql) => {
       queryEditor.setSql(sql);
-      setActiveTab("query");
+      setActiveTab("data");
+      queryEditor.focus();
     },
   });
   // ログタブ用 view。store は database-view で 1 つ。各 tab pane が view を
@@ -842,7 +894,8 @@ function createTabPane(
     getText: () => paneText(),
     copySqlToQuery: (sql) => {
       queryEditor.setSql(sql);
-      setActiveTab("query");
+      setActiveTab("data");
+      queryEditor.focus();
     },
   });
 
@@ -895,6 +948,14 @@ function createTabPane(
 
   function renderNoDatastoresEmpty(): void {
     const t = paneText().nav;
+    if (datastoreListError) {
+      setPaneStatus(
+        noDatastoresPane,
+        t.datastoresError(errorMessage(datastoreListError)),
+        { error: true },
+      );
+      return;
+    }
     setPaneEmpty(noDatastoresPane, t.noDatastores, {
       hint: t.noDatastoresHint,
       iconPath: ICON_PATH_SNAPSHOT,
@@ -908,23 +969,45 @@ function createTabPane(
     refresh.addEventListener("click", () => {
       void refreshDatastoreList();
     });
-    const addConnection = document.createElement("button");
-    addConnection.type = "button";
-    addConnection.className = "db-btn db-no-datastores-action";
-    addConnection.textContent = t.addConnection;
-    addConnection.addEventListener("click", () => addConnectionBtn.click());
-    actionRow.append(refresh, addConnection);
+    actionRow.append(refresh, addConnectionAction());
     noDatastoresPane
       .querySelector<HTMLElement>(".db-pane-empty")
       ?.appendChild(actionRow);
+  }
+
+  function addConnectionAction(): HTMLButtonElement {
+    const addConnection = document.createElement("button");
+    addConnection.type = "button";
+    addConnection.className = "db-btn db-no-datastores-action";
+    addConnection.textContent = paneText().nav.addConnection;
+    addConnection.addEventListener("click", () => addConnectionBtn.click());
+    return addConnection;
+  }
+
+  // 新しいタブの本文。データストアの無いときと同じ面・同じ見せ方で、
+  // 選ぶ場所と接続の足し方を案内する。
+  function renderDatastoreChoice(): void {
+    const t = paneText().nav;
+    setPaneEmpty(noDatastoresPane, t.chooseDatastore, {
+      hint: t.chooseDatastoreHint,
+      iconPath: ICON_PATH_SNAPSHOT,
+    });
+    const actionRow = document.createElement("div");
+    actionRow.className = "db-no-datastores-actions";
+    actionRow.append(addConnectionAction());
+    noDatastoresPane
+      .querySelector<HTMLElement>(".db-pane-empty")
+      ?.appendChild(actionRow);
+    if (datastorePlaceholder)
+      datastorePlaceholder.textContent = t.selectDatastore;
   }
 
   const mainContent = document.createElement("div");
   mainContent.className = "db-main-content";
   mainContent.append(
     tabBar,
-    grid.el,
     queryEditor.el,
+    grid.el,
     schemaView.el,
     erDiagram.el,
     globalSearchView.el,
@@ -961,7 +1044,7 @@ function createTabPane(
   logTabContent.appendChild(sessionLogView.el);
   historyPane.append(historyTabContent, logTabContent);
 
-  // JetBrains 風 bottom dock: タブストリップは pane の外 (常駐領域) に
+  // 下端の常駐 dock: タブストリップは pane の外 (常駐領域) に
   // 置く。クリックでアクティブ切替 + pane を開く / アクティブタブ再クリック
   // で pane を閉じる。右端の close ボタンでも閉じられる。
   const historyDock = document.createElement("div");
@@ -1013,7 +1096,7 @@ function createTabPane(
   setActiveHistoryTab(activeHistoryTab);
   // タブクリック: pane が閉じてれば開く + そのタブをアクティブに、
   // 既に開いていて active なタブを再クリックしたら pane を閉じる
-  // (JetBrains の Tool Window タブと同じ挙動)。
+  // (IDE のツール窓のタブと同じ挙動)。
   function handleHistoryTabClick(which: "history" | "log"): void {
     if (userPrefersHistoryOpen && activeHistoryTab === which) {
       userPrefersHistoryOpen = false;
@@ -1077,7 +1160,8 @@ function createTabPane(
       currentTab,
       userPrefersHistoryOpen,
     );
-    noDatastoresPane.hidden = !noDatastoresAvailable;
+    noDatastoresPane.hidden =
+      !noDatastoresAvailable && !awaitingDatastoreChoice;
     toolsSection.hidden = visibility.toolsHidden;
     // prefs バー (Rails FK 推測トグル) は toolsSection と同じ SQL kind 限定。
     prefsBar.hidden = visibility.toolsHidden;
@@ -1134,7 +1218,6 @@ function createTabPane(
       explorerSidebarHost.hidden = true;
     }
     if (!sqlMode) {
-      queryBtn.classList.remove("active");
       erBtn.classList.remove("active");
       searchBtn.classList.remove("active");
       snapshotBtn.classList.remove("active");
@@ -1206,26 +1289,26 @@ function createTabPane(
 
   function setActiveTab(tab: TabName, updateUrl = true) {
     currentTab = normalizeViewForDb(tab, currentDbInfo);
-    // アイコン (Query / ER / Search / Snapshot) は「テーブルに紐づかない」
-    // 操作なので、これらを active にしたときは table list の active 表示を
-    // 外す (= アイコン中はテーブル選択を持たない)。
-    // 逆にテーブルクリックで Data / Schema に戻したときは tableList.setActive
-    // が selectTable / showSchema から呼ばれるのでそちらで反映される。
-    const tableScopedTab = currentTab === "data" || currentTab === "schema";
+    // Data と query result は同じテーブル作業面を共有する。ER / Search /
+    // Snapshot のようなテーブルに紐づかない面だけ選択表示を外す。
+    const tableScopedTab =
+      currentTab === "data" ||
+      currentTab === "query" ||
+      currentTab === "schema";
     if (!tableScopedTab) {
       currentTable = null;
       tableList.setActive(null);
     }
-    tabData.classList.toggle("active", currentTab === "data");
+    tabData.classList.toggle(
+      "active",
+      currentTab === "data" || currentTab === "query",
+    );
     tabSchema.classList.toggle("active", currentTab === "schema");
-    queryBtn.classList.toggle("active", currentTab === "query");
     erBtn.classList.toggle("active", currentTab === "er");
     searchBtn.classList.toggle("active", currentTab === "search");
     snapshotBtn.classList.toggle("active", currentTab === "snapshot");
-    // Data / Schema の inner tabBar は「テーブルの中身を表示してるとき」
-    // だけ表示する。Query / ER / Search / Snapshot 中は無関係なので隠す。
+    if (currentTab === "data") queryEditor.showTableResult();
     applyVisibility();
-    if (currentTab === "query") queryEditor.focus();
     if (updateUrl && currentDbInfo) {
       deps.setRoute(
         {
@@ -1252,10 +1335,11 @@ function createTabPane(
 
   async function fetchDbFiles(): Promise<DbFilesResponse> {
     if (deps.fetchDbFiles) return deps.fetchDbFiles();
-    const res = await deps.trackLoad(fetch("/_db/files"));
-    if (!res.ok) return { files: [] };
-    const data = (await res.json()) as DbFilesResponse;
-    return data;
+    const res = await deps.trackLoad(fetch(apiUrl("dbFiles")));
+    return readJsonResponse<DbFilesResponse>(
+      res,
+      paneText().failure.loadDatastores,
+    );
   }
 
   function withCurrentSchema(params: URLSearchParams): URLSearchParams {
@@ -1270,10 +1354,10 @@ function createTabPane(
     const params = new URLSearchParams({ db: dbId });
     if (preferredSchema) params.set("schema", preferredSchema);
     return logSqlFetch<DbSchemasResponse>({
-      url: `/_db/schemas?${params}`,
+      url: `${apiUrl("dbSchemas")}?${params}`,
       kind: "query",
       label: `_db/schemas db=${dbId}`,
-      errorPrefix: "failed to fetch schemas",
+      errorPrefix: paneText().failure.fetchSchemas,
     });
   }
 
@@ -1299,10 +1383,10 @@ function createTabPane(
       new URLSearchParams({ db: dbId, includeColumns: "1" }),
     );
     return logSqlFetch<DbSchemaResponse>({
-      url: `/_db/schema?${params}`,
+      url: `${apiUrl("dbSchema")}?${params}`,
       kind: "query",
       label: `_db/schema db=${dbId}`,
-      errorPrefix: "failed to fetch schema",
+      errorPrefix: paneText().failure.fetchSchema,
     });
   }
 
@@ -1330,10 +1414,10 @@ function createTabPane(
     const params = new URLSearchParams({ db: dbId, table });
     if (schema) params.set("schema", schema);
     return logSqlFetch<DbTableCountResponse>({
-      url: `/_db/table-count?${params}`,
+      url: `${apiUrl("dbTableCount")}?${params}`,
       kind: "query",
       label: `_db/table-count ${table}`,
-      errorPrefix: "failed to fetch table count",
+      errorPrefix: paneText().failure.fetchTableCount,
       rowCountOf: (r) => r.rowCount ?? undefined,
     });
   }
@@ -1356,7 +1440,8 @@ function createTabPane(
       syncCachedTableRowCount(table, data.rowCount);
     } catch (err) {
       if (!isAbortError(err)) {
-        console.warn(`failed to refresh table count: ${errorMessage(err)}`);
+        console.error("Failed to refresh table count", err);
+        showPaneError(paneText().nav.rowCountError(errorMessage(err)));
       }
     }
   }
@@ -1396,12 +1481,12 @@ function createTabPane(
       params.set("eq", JSON.stringify(eq));
     }
     const data = await logSqlFetch<DbTableDataResponse>({
-      url: `/_db/table?${params}`,
+      url: `${apiUrl("dbTable")}?${params}`,
       init: signal ? { signal } : undefined,
       kind: "query",
       label: `SELECT FROM ${table}`,
       trackLoad: false,
-      errorPrefix: "failed to fetch table",
+      errorPrefix: paneText().failure.fetchTable,
       rowCountOf: (r) => r.rows.length,
     });
     if (
@@ -1502,7 +1587,7 @@ function createTabPane(
         status: "error",
         label: opts.label,
         detail: opts.fallbackDetail,
-        message: err.message,
+        message: errorMessage(err),
         elapsedMs: Date.now() - startedAt,
       });
       throw err;
@@ -1513,7 +1598,7 @@ function createTabPane(
     if (!currentDbInfo) throw new Error("no database selected");
     const label = sql.split("\n")[0]?.trim() || sql;
     return logSqlFetch<DbQueryResponse>({
-      url: "/_db/query",
+      url: apiUrl("dbQuery"),
       init: {
         method: "POST",
         headers: {
@@ -1533,7 +1618,7 @@ function createTabPane(
       label,
       fallbackDetail: sql,
       trackLoad: false,
-      errorPrefix: "failed to execute query",
+      errorPrefix: paneText().failure.executeQuery,
       rowCountOf: (r) => r.rowCount ?? r.rows.length,
     });
   }
@@ -1550,7 +1635,7 @@ function createTabPane(
       2,
     );
     await logSqlFetch<DbMutateResponse>({
-      url: "/_db/mutate",
+      url: apiUrl("dbMutate"),
       init: {
         method: "POST",
         headers: {
@@ -1567,7 +1652,7 @@ function createTabPane(
       kind: "mutate",
       label,
       fallbackDetail: fallback,
-      errorPrefix: "failed to save changes",
+      errorPrefix: paneText().failure.saveChanges,
       rowCountOf: () => mutations.length,
     });
   }
@@ -1646,9 +1731,16 @@ function createTabPane(
     if (isPostgresKind(currentDbInfo?.kind)) {
       const desiredSchema =
         preferredSchema !== undefined ? preferredSchema : currentSchema;
-      const schemas = await fetchSchemas(dbId, desiredSchema).catch((err) => {
-        if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
-        const message = errorMessage(err);
+      const schemasResult = await fetchSchemas(dbId, desiredSchema).then(
+        (value): LoadRecovery<DbSchemasResponse> => ({ ok: true, value }),
+        (error): LoadRecovery<DbSchemasResponse> => {
+          console.error("Failed to fetch schemas", error);
+          return { ok: false, error };
+        },
+      );
+      if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
+      if (schemasResult.ok === false) {
+        const message = errorMessage(schemasResult.error);
         currentSchema = null;
         renderSchemaOptions([], null);
         schemaCache = null;
@@ -1658,10 +1750,9 @@ function createTabPane(
         schemaView.clear();
         erDiagram.clear();
         cb.onStateChange();
-        return null;
-      });
-      if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
-      if (!schemas) return;
+        return;
+      }
+      const schemas = schemasResult.value;
       const schemaNames = schemas.schemas.map((s) => s.name);
       currentSchema =
         schemas.selectedSchema ||
@@ -1673,9 +1764,16 @@ function createTabPane(
       currentSchema = null;
       renderSchemaOptions([], null);
     }
-    const schema = await fetchSchema(dbId).catch((err) => {
-      if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
-      const message = errorMessage(err);
+    const schemaResult = await fetchSchema(dbId).then(
+      (value): LoadRecovery<DbSchemaResponse> => ({ ok: true, value }),
+      (error): LoadRecovery<DbSchemaResponse> => {
+        console.error("Failed to fetch schema", error);
+        return { ok: false, error };
+      },
+    );
+    if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
+    if (schemaResult.ok === false) {
+      const message = errorMessage(schemaResult.error);
       schemaCache = null;
       tableList.render([]);
       setTableListStatus(message, { error: true });
@@ -1684,10 +1782,9 @@ function createTabPane(
       erDiagram.clear();
       setActiveTab("data", false);
       cb.onStateChange();
-      return null;
-    });
-    if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
-    if (!schema) return;
+      return;
+    }
+    const schema = schemaResult.value;
     currentSchema = schema.schema || currentSchema;
     schemaCache = schema;
     await outerDeps.ensureDbUiState();
@@ -1699,7 +1796,10 @@ function createTabPane(
     const normalizedTargetView = normalizeViewForDb(targetView, currentDbInfo);
     setActiveTab(normalizedTargetView === "schema" ? "schema" : "data", false);
     const initialTable = preferredTable || schema.tables[0]?.name;
-    if (initialTable && normalizedTargetView === "data") {
+    if (
+      initialTable &&
+      (normalizedTargetView === "data" || normalizedTargetView === "query")
+    ) {
       await selectTable(initialTable, generation);
     } else if (initialTable && normalizedTargetView === "schema") {
       await selectTableSchemaOnly(initialTable, generation);
@@ -1719,10 +1819,7 @@ function createTabPane(
     tableList.setActive(table);
     if (!currentDbInfo) return;
     const requestDbId = currentDbInfo.id;
-    // テーブル選択は「テーブル中身の表示」なので、Query / ER / Search /
-    // Snapshot のような「テーブルに紐づかない」ビュー中だった場合は
-    // Data に戻す。これによりアイコンの active も自動で外れる
-    // (setActiveTab 内のクラス操作)。
+    // テーブル選択は「テーブル中身の表示」なので、別の面から Data に戻す。
     if (
       currentTab === "query" ||
       currentTab === "er" ||
@@ -1773,6 +1870,13 @@ function createTabPane(
         return;
       }
       grid.load(table, data);
+      queryEditor.showTableResult();
+      if (preserveInitialSqlDraft) {
+        preserveInitialSqlDraft = false;
+      } else {
+        const tableQuery = queryForTableResult(data);
+        if (tableQuery) queryEditor.setSql(tableQuery);
+      }
     } catch (err) {
       if (
         slot.isStale() ||
@@ -1783,23 +1887,31 @@ function createTabPane(
       ) {
         return;
       }
+      console.error(`Failed to load table ${table}`, err);
       grid.showError(errorMessage(err));
     } finally {
       slot.finish();
     }
     if (currentTab === "schema") {
-      const columns = await fetchColumns(table);
-      if (
-        generation !== loadGeneration ||
-        currentDbInfo?.id !== requestDbId ||
-        currentTable !== table
-      ) {
-        return;
+      try {
+        const columns = await fetchColumns(table);
+        if (
+          generation !== loadGeneration ||
+          currentDbInfo?.id !== requestDbId ||
+          currentTable !== table
+        ) {
+          return;
+        }
+        schemaView.render(table, columns, schemaCache?.indexes || [], {
+          tableComment: schemaCache?.tables.find(
+            (entry) => entry.name === table,
+          )?.comment,
+        });
+      } catch (error) {
+        if (generation !== loadGeneration || isAbortError(error)) return;
+        console.error(`Failed to load schema for ${table}`, error);
+        schemaView.showError(paneText().schema.loadError(errorMessage(error)));
       }
-      schemaView.render(table, columns, schemaCache?.indexes || [], {
-        tableComment: schemaCache?.tables.find((entry) => entry.name === table)
-          ?.comment,
-      });
     }
   }
 
@@ -1813,50 +1925,57 @@ function createTabPane(
     if (!currentDbInfo) return;
     const requestDbId = currentDbInfo.id;
     setActiveTab("schema", false);
-    const columns = await fetchColumns(table);
-    if (
-      generation !== loadGeneration ||
-      currentDbInfo?.id !== requestDbId ||
-      currentTable !== table
-    ) {
-      return;
+    try {
+      const columns = await fetchColumns(table);
+      if (
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== requestDbId ||
+        currentTable !== table
+      ) {
+        return;
+      }
+      schemaView.render(table, columns, schemaCache?.indexes || [], {
+        tableComment: schemaCache?.tables.find((entry) => entry.name === table)
+          ?.comment,
+      });
+    } catch (error) {
+      if (generation !== loadGeneration || isAbortError(error)) return;
+      console.error(`Failed to load schema for ${table}`, error);
+      schemaView.showError(paneText().schema.loadError(errorMessage(error)));
     }
-    schemaView.render(table, columns, schemaCache?.indexes || [], {
-      tableComment: schemaCache?.tables.find((entry) => entry.name === table)
-        ?.comment,
-    });
   }
 
   async function fetchColumns(table: string): Promise<DbColumn[]> {
     if (schemaCache?.columnsMap?.[table]) {
       return schemaCache.columnsMap[table];
     }
-    if (!currentDbInfo) return [];
-    try {
-      const data = await logSqlFetch<{
-        columns: DbColumn[];
-        executedSql?: string[];
-      }>({
-        url: `/_db/columns?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
-        kind: "query",
-        label: `_db/columns ${table}`,
-        trackLoad: false,
-        errorPrefix: "failed to fetch columns",
-      });
-      return data.columns;
-    } catch {
-      return [];
-    }
+    if (!currentDbInfo) throw new Error("no database selected");
+    const data = await logSqlFetch<{
+      columns: DbColumn[];
+      executedSql?: string[];
+    }>({
+      url: `${apiUrl("dbColumns")}?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
+      kind: "query",
+      label: `_db/columns ${table}`,
+      trackLoad: false,
+      errorPrefix: paneText().failure.fetchColumns,
+    });
+    return data.columns;
   }
 
   async function showSchema(table: string) {
     setActiveTab("schema");
     if (!currentDbInfo) return;
-    const columns = await fetchColumns(table);
-    schemaView.render(table, columns, schemaCache?.indexes || [], {
-      tableComment: schemaCache?.tables.find((entry) => entry.name === table)
-        ?.comment,
-    });
+    try {
+      const columns = await fetchColumns(table);
+      schemaView.render(table, columns, schemaCache?.indexes || [], {
+        tableComment: schemaCache?.tables.find((entry) => entry.name === table)
+          ?.comment,
+      });
+    } catch (error) {
+      console.error(`Failed to load schema for ${table}`, error);
+      schemaView.showError(paneText().schema.loadError(errorMessage(error)));
+    }
   }
 
   async function refreshCurrentSchemaView(): Promise<void> {
@@ -1911,7 +2030,9 @@ function createTabPane(
       ) {
         return;
       }
+      console.error(`Failed to refresh schema for ${table}`, err);
       setTableListStatus(errorMessage(err), { error: true });
+      schemaView.showError(paneText().schema.loadError(errorMessage(err)));
     } finally {
       schemaView.setRefreshBusy(false);
     }
@@ -1926,11 +2047,11 @@ function createTabPane(
         triggers: { name: string; sql: string }[];
         executedSql?: string[];
       }>({
-        url: `/_db/ddl?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
+        url: `${apiUrl("dbDdl")}?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
         kind: "query",
         label: `_db/ddl ${table}`,
         trackLoad: false,
-        errorPrefix: "failed to fetch DDL",
+        errorPrefix: paneText().failure.fetchDdl,
       });
       const columns = await fetchColumns(table);
       schemaView.render(table, columns, schemaCache?.indexes || [], {
@@ -1940,8 +2061,9 @@ function createTabPane(
         tableComment: schemaCache?.tables.find((entry) => entry.name === table)
           ?.comment,
       });
-    } catch {
-      /* ignore */
+    } catch (error) {
+      console.error(`Failed to load DDL for ${table}`, error);
+      schemaView.showError(paneText().schema.loadError(errorMessage(error)));
     }
   }
 
@@ -1954,11 +2076,26 @@ function createTabPane(
       }
     } else {
       const tables = schemaCache.tables.filter((t) => t.type !== "view");
-      const results = await Promise.all(
-        tables.map((t) =>
-          fetchColumns(t.name).then((cols) => ({ name: t.name, cols })),
-        ),
-      );
+      let results: Array<{ name: string; cols: DbColumn[] }>;
+      try {
+        results = await Promise.all(
+          tables.map((t) =>
+            fetchColumns(t.name).then((cols) => ({ name: t.name, cols })),
+          ),
+        );
+      } catch (error) {
+        console.error("Failed to load columns for ER diagram", error);
+        const statusHost =
+          erDiagram.el.querySelector<HTMLElement>(".db-er-svg-wrap");
+        if (statusHost) {
+          setPaneStatus(
+            statusHost,
+            paneText().schema.loadError(errorMessage(error)),
+            { error: true },
+          );
+        }
+        return;
+      }
       for (const { name, cols } of results) {
         if (cols.length > 0) columnsMap.set(name, cols);
       }
@@ -1980,18 +2117,28 @@ function createTabPane(
       "aria-busy",
       isRefreshingDatastores ? "true" : "false",
     );
-    syncDatastoreRefreshResult();
   }
 
-  function syncDatastoreRefreshResult(): void {
+  function clearDatastoreRefreshResult(): void {
     dbRefreshResult.hidden = true;
     dbRefreshResult.textContent = "";
     dbRefreshResult.classList.toggle("changed", false);
+    dbRefreshResult.classList.remove("db-pane-error");
+    dbRefreshResult.title = "";
+  }
+
+  function showPaneError(message: string): void {
+    dbRefreshResult.hidden = false;
+    dbRefreshResult.textContent = message;
+    dbRefreshResult.classList.toggle("changed", false);
+    dbRefreshResult.classList.add("db-pane-error");
+    dbRefreshResult.title = message;
   }
 
   async function refreshDatastoreList(): Promise<void> {
     if (dbRefreshBtn.disabled) return;
     isRefreshingDatastores = true;
+    clearDatastoreRefreshResult();
     dbRefreshBtn.disabled = true;
     dbRefreshBtn.classList.add("spinning");
     syncDbRefreshButton();
@@ -2038,7 +2185,7 @@ function createTabPane(
   async function handleDbSelectChange(): Promise<void> {
     const dbId = dbSelect.value;
     if (!dbId) return;
-    syncDatastoreRefreshResult();
+    clearDatastoreRefreshResult();
     const generation = ++loadGeneration;
     const file = lastFiles.find((f) => f.id === dbId);
     const option = dbSelect.selectedOptions[0];
@@ -2085,11 +2232,30 @@ function createTabPane(
     options: DatabaseEnterOptions = {},
   ) {
     const generation = ++loadGeneration;
-    const filesResponse = await fetchDbFiles();
+    let filesResponse: DbFilesResponse;
+    try {
+      filesResponse = await fetchDbFiles();
+      datastoreListError = null;
+      clearDatastoreRefreshResult();
+    } catch (error) {
+      if (generation !== loadGeneration || isAbortError(error)) return;
+      datastoreListError = error;
+      console.error("Failed to load datastores", error);
+      if (lastFiles.length === 0) {
+        noDatastoresAvailable = true;
+        renderNoDatastoresEmpty();
+      } else {
+        showPaneError(paneText().nav.datastoresError(errorMessage(error)));
+      }
+      applyVisibility();
+      cb.onStateChange();
+      return;
+    }
     if (generation !== loadGeneration) return;
     const files = filesResponse.files;
     lastFiles = files;
     noDatastoresAvailable = files.length === 0;
+    awaitingDatastoreChoice = false;
     if (filesResponse.truncated) {
       showDockerNotice(paneText().nav.dockerLimitReached);
     } else {
@@ -2145,7 +2311,14 @@ function createTabPane(
       db = autoSelectFirst ? files[0].id : null;
     }
     if (!db && !autoSelectFirst) {
+      // 選んでいないことを select にも出す (value だけ空にすると空の箱になる)。
+      datastorePlaceholder = document.createElement("option");
+      datastorePlaceholder.value = "";
+      datastorePlaceholder.disabled = true;
+      dbSelect.prepend(datastorePlaceholder);
       dbSelect.value = "";
+      awaitingDatastoreChoice = true;
+      renderDatastoreChoice();
       currentDbInfo = null;
       syncConnectionActions();
       currentSchema = null;
@@ -2161,6 +2334,7 @@ function createTabPane(
       s3Explorer.clear();
       dynamodbExplorer.clear();
       setActiveTab("data", false);
+      applyVisibility();
       cb.onStateChange();
       return;
     }
@@ -2226,7 +2400,7 @@ function createTabPane(
     }
     if (generation !== loadGeneration) return;
     const normalizedView = normalizeViewForDb(view, currentDbInfo);
-    if (normalizedView !== "data") {
+    if (normalizedView !== "data" && normalizedView !== "query") {
       setActiveTab(normalizedView);
       if (normalizedView === "schema") {
         const activeTable = tableList.el.querySelector<HTMLElement>(
@@ -2256,7 +2430,7 @@ function createTabPane(
       grid.applyState(target.data);
     }
     if (target.query) {
-      setActiveTab("query");
+      setActiveTab("data");
       if (target.query.sql)
         queryEditor.setSql(target.query.sql, { silent: true });
       if (target.query.autoRun && target.query.sql) {
@@ -2266,6 +2440,8 @@ function createTabPane(
         void (target.query.mode === "explain"
           ? queryEditor.explain()
           : queryEditor.run());
+      } else {
+        queryEditor.focus();
       }
     }
     if (target.search) {
@@ -2392,7 +2568,8 @@ function createTabPane(
 
   function getLabel(): string {
     if (noDatastoresAvailable) return paneText().nav.noDatastoreTab;
-    if (!currentDbInfo) return labelFromDbId(initial.dbId);
+    if (!currentDbInfo)
+      return labelFromDbId(initial.dbId, paneText().nav.newTab);
     const suffix = currentSchema ? ` / ${currentSchema}` : "";
     if (currentDbInfo.savedConnection) {
       return `${currentDbInfo.name}${suffix}`;
@@ -2451,6 +2628,7 @@ function createTabPane(
   function localizePane() {
     for (const fn of paneLocalizers) fn();
     if (noDatastoresAvailable) renderNoDatastoresEmpty();
+    else if (awaitingDatastoreChoice) renderDatastoreChoice();
     grid.localize();
     tableList.localize();
     schemaView.localize();
@@ -2474,15 +2652,13 @@ function createTabPane(
     getLabel,
     dispose,
     localize: localizePane,
+    showError: showPaneError,
   };
 }
 
 // ----- アイコンツールバー (案 B 改: TablePlus / Beekeeper 風) -----
 // octicon / bootstrap-icons ベースの 16x16 path。currentColor で描画して
 // hover / active 時の色変更を CSS から制御できるようにする。
-
-const ICON_PATH_QUERY =
-  "M5.72 4.22a.75.75 0 0 1 0 1.06L2.81 8l2.91 2.72a.75.75 0 1 1-1.06 1.06L1.22 8.53a.75.75 0 0 1 0-1.06l3.44-3.25a.75.75 0 0 1 1.06 0Zm4.56 0a.75.75 0 0 1 1.06 0l3.44 3.25a.75.75 0 0 1 0 1.06l-3.44 3.25a.75.75 0 1 1-1.06-1.06L13.19 8l-2.91-2.72a.75.75 0 0 1 0-1.06Z";
 
 const ICON_PATH_ER =
   "M1.5 1.75A.75.75 0 0 1 2.25 1h4.5a.75.75 0 0 1 .75.75v3.5h2v-1.5A.75.75 0 0 1 10.25 3h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75V6.5h-2v3h2v-.75A.75.75 0 0 1 10.25 8h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75v-1.5h-2v3.5a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1-.75-.75v-3.5A.75.75 0 0 1 2.25 9h4.5a.75.75 0 0 1 .75.75v.75h-.5v-1H3v3h3V11h.5v-.75a.75.75 0 0 0-.75-.75H3V6.5h2.5V2.5H3Z";
@@ -2568,6 +2744,15 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   // 履歴 pane 内「ログ」タブで時系列表示する (view は tabPane 側で生成)。
   const sessionLog = createSessionLog();
 
+  function reportActivePaneError(
+    operation: string,
+    error: unknown,
+    message = outerText().nav.viewLoadError(errorMessage(error)),
+  ): void {
+    console.error(operation, error);
+    if (activeTabId) tabsById.get(activeTabId)?.pane.showError(message);
+  }
+
   function isRestoring(): boolean {
     return restoringDepth > 0;
   }
@@ -2579,13 +2764,36 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     };
   }
 
+  async function persistDbUiPatch(
+    patch: Record<string, unknown>,
+    operation: string,
+  ): Promise<void> {
+    try {
+      const response = await fetch(apiUrl("dbUi"), {
+        method: "PATCH",
+        headers: actionHeaders(),
+        body: JSON.stringify(patch),
+      });
+      await requireOkResponse(response, operation);
+    } catch (error) {
+      reportActivePaneError(
+        operation,
+        error,
+        outerText().nav.stateSaveError(errorMessage(error)),
+      );
+    }
+  }
+
   async function ensureDbUiState(): Promise<void> {
     if (dbUiLoadPromise) return dbUiLoadPromise;
     const operation = (async () => {
-      const response = await deps.trackLoad(fetch("/_db/ui"));
+      const response = await deps.trackLoad(fetch(apiUrl("dbUi")));
       if (!response.ok) {
         throw new Error(
-          await responseErrorMessage(response, "load database UI settings"),
+          await responseErrorMessage(
+            response,
+            outerText().failure.loadUiSettings,
+          ),
         );
       }
       let state: DbUiState;
@@ -2593,7 +2801,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         state = (await response.json()) as DbUiState;
       } catch (error) {
         throw errorWithCause(
-          "load database UI settings: response is not valid JSON",
+          `${outerText().failure.loadUiSettings}: response is not valid JSON`,
           error,
         );
       }
@@ -2630,11 +2838,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     // PATCH のレスポンスは local state には流し込まない: 連続書込時に古い
     // レスポンスが後勝ちして新しいローカル値を巻き戻す race を避ける。サーバ
     // 側 merge は idempotent なので、各 PATCH が独立に届けば十分。
-    void fetch("/_db/ui", {
-      method: "PATCH",
-      headers: actionHeaders(),
-      body: JSON.stringify({ columnWidths: { [dbId]: { [table]: widths } } }),
-    }).catch(() => undefined);
+    void persistDbUiPatch(
+      { columnWidths: { [dbId]: { [table]: widths } } },
+      outerText().failure.saveColumnWidths,
+    );
   }
 
   // dbUiState 内の `Record<scope, string[]>` 形フィールドを 1 か所で更新する
@@ -2658,15 +2865,16 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (nextMap) nextState[stateKey] = nextMap;
     else delete nextState[stateKey];
     applyDbUiState(nextState);
-    void fetch("/_db/ui", {
-      method: "PATCH",
-      headers: actionHeaders(),
-      body: JSON.stringify({
+    void persistDbUiPatch(
+      {
         [stateKey]: {
           [scopeKey]: nextTables.length > 0 ? nextTables : null,
         },
-      }),
-    }).catch(() => undefined);
+      },
+      stateKey === "expandedTables"
+        ? outerText().failure.saveExpandedTables
+        : outerText().failure.saveSnapshotTables,
+    );
   }
 
   function getExpandedTables(scopeKey: string): string[] {
@@ -2718,7 +2926,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }>,
   ): Promise<void> {
     const response = await deps.trackLoad(
-      fetch("/_db/ui", {
+      fetch(apiUrl("dbUi"), {
         method: "PATCH",
         headers: actionHeaders(),
         body: JSON.stringify({ prefs: patch }),
@@ -2726,7 +2934,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     );
     if (!response.ok) {
       throw new Error(
-        await responseErrorMessage(response, "save database UI settings"),
+        await responseErrorMessage(
+          response,
+          outerText().failure.saveUiSettings,
+        ),
       );
     }
     let saved: DbUiState;
@@ -2734,7 +2945,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       saved = (await response.json()) as DbUiState;
     } catch (error) {
       throw errorWithCause(
-        "save database UI settings: response is not valid JSON",
+        `${outerText().failure.saveUiSettings}: response is not valid JSON`,
         error,
       );
     }
@@ -2754,9 +2965,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (!dbId) return [];
     const params = new URLSearchParams({ db: dbId });
     if (schema) params.set("schema", schema);
-    const res = await fetch(`/_db/history?${params}`);
-    if (!res.ok) return [];
-    const state = (await res.json()) as QueryHistoryState;
+    const res = await fetch(`${apiUrl("dbHistory")}?${params}`);
+    const state = await readJsonResponse<QueryHistoryState>(
+      res,
+      outerText().failure.loadLocalHistory,
+    );
     const seen = new Set<string>();
     const history: string[] = [];
     for (const entry of state.entries) {
@@ -2786,21 +2999,18 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }
     if (dbFilesCache?.promise) return dbFilesCache.promise;
     const promise = deps
-      .trackLoad(fetch("/_db/files"))
+      .trackLoad(fetch(apiUrl("dbFiles")))
       .then(async (res) => {
-        if (!res.ok) {
-          const value: DbFilesResponse = { files: [] };
-          dbFilesCache = { value, expiresAt: Date.now() + 10_000 };
-          return value;
-        }
-        const value = (await res.json()) as DbFilesResponse;
+        const value = await readJsonResponse<DbFilesResponse>(
+          res,
+          outerText().failure.loadDatastores,
+        );
         dbFilesCache = { value, expiresAt: Date.now() + 10_000 };
         return value;
       })
-      .catch(() => {
-        const value: DbFilesResponse = { files: [] };
-        dbFilesCache = { value, expiresAt: Date.now() + 10_000 };
-        return value;
+      .catch((error) => {
+        dbFilesCache = null;
+        throw error;
       })
       .finally(() => {
         if (dbFilesCache?.promise === promise) dbFilesCache = null;
@@ -2836,7 +3046,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     abortActiveSave();
     if (options.keepalive) {
       try {
-        await fetch("/_db/tabs", {
+        const response = await fetch(apiUrl("dbTabs"), {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -2845,21 +3055,35 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           body: raw,
           keepalive: true,
         });
+        await requireOkResponse(
+          response,
+          outerText().failure.saveDatabaseTabsOnUnload,
+        );
         lastSavedTabsRaw = raw;
-      } catch {
-        // ベストエフォート。失敗してもユーザー操作は妨げない。
+      } catch (error) {
+        reportActivePaneError(
+          "Failed to save database tabs on unload",
+          error,
+          outerText().nav.stateSaveError(errorMessage(error)),
+        );
       } finally {
         if (pendingSavedTabsRaw === raw) pendingSavedTabsRaw = null;
       }
       return;
     }
     saveChain = saveChain
-      .catch(() => undefined)
+      .catch((error) => {
+        reportActivePaneError(
+          "Previous database tab save failed",
+          error,
+          outerText().nav.stateSaveError(errorMessage(error)),
+        );
+      })
       .then(async () => {
         const controller = new AbortController();
         saveController = controller;
         try {
-          await fetch("/_db/tabs", {
+          const response = await fetch(apiUrl("dbTabs"), {
             method: "PUT",
             headers: {
               "Content-Type": "application/json",
@@ -2868,10 +3092,18 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
             body: raw,
             signal: controller.signal,
           });
+          await requireOkResponse(
+            response,
+            outerText().failure.saveDatabaseTabs,
+          );
           lastSavedTabsRaw = raw;
-        } catch (err) {
-          if (!isAbortError(err)) {
-            // ベストエフォート。失敗してもユーザー操作は妨げない。
+        } catch (error) {
+          if (!isAbortError(error)) {
+            reportActivePaneError(
+              "Failed to save database tabs",
+              error,
+              outerText().nav.stateSaveError(errorMessage(error)),
+            );
           }
         } finally {
           if (saveController === controller) saveController = null;
@@ -2893,14 +3125,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     flushPendingSave({ keepalive: true });
   }
 
-  async function fetchTabs(): Promise<TabsResponse | null> {
-    try {
-      const res = await fetch("/_db/tabs");
-      if (!res.ok) return null;
-      return (await res.json()) as TabsResponse;
-    } catch {
-      return null;
-    }
+  async function fetchTabs(): Promise<TabsResponse> {
+    const res = await fetch(apiUrl("dbTabs"));
+    return readJsonResponse<TabsResponse>(
+      res,
+      outerText().failure.loadDatabaseTabs,
+    );
   }
 
   const tabsBar = document.createElement("div");
@@ -2935,7 +3165,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (!isRestoring()) syncActiveRoute();
     scheduleSave();
     if (mounted && !isRestoring()) {
-      void ensureInitialEnter(id)?.catch(() => undefined);
+      void ensureInitialEnter(id)?.catch((error) => {
+        reportActivePaneError(
+          "Failed to initialize database tab",
+          error,
+          outerText().nav.viewLoadError(errorMessage(error)),
+        );
+      });
     }
   }
 
@@ -3015,9 +3251,25 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       "Content-Type": "application/json",
       "X-Code-Viewer-Action": "1",
     };
-    void fetch("/_db/close", { method: "POST", headers, body }).catch(
-      () => undefined,
-    );
+    void (async () => {
+      try {
+        const response = await fetch(apiUrl("dbClose"), {
+          method: "POST",
+          headers,
+          body,
+        });
+        await requireOkResponse(
+          response,
+          outerText().failure.closeDatastore(dbId),
+        );
+      } catch (error) {
+        reportActivePaneError(
+          `Failed to close datastore ${dbId}`,
+          error,
+          outerText().nav.closeDatastoreError(errorMessage(error)),
+        );
+      }
+    })();
   }
 
   function clearDropTarget(): void {
@@ -3189,7 +3441,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
     const labelEl = document.createElement("span");
     labelEl.className = "db-tabs-chip-label";
-    const initialLabel = labelFromDbId(initial?.dbId);
+    const initialLabel = labelFromDbId(initial?.dbId, outerText().nav.newTab);
     labelEl.textContent = initialLabel;
     labelEl.title = initialLabel;
 
@@ -3306,6 +3558,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           options,
         );
         refreshChipLabel(id);
+      } catch (error) {
+        console.error(`Failed to initialize database tab ${id}`, error);
+        pane.showError(outerText().nav.viewLoadError(errorMessage(error)));
       } finally {
         finishRestoring?.();
         paneReadyById.delete(id);
@@ -3472,8 +3727,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     try {
       const parsed = JSON.parse(data) as { dbId?: unknown };
       return typeof parsed.dbId === "string" ? parsed.dbId : null;
-    } catch {
-      return null;
+    } catch (error) {
+      throw errorWithCause(
+        `parse database event dbId; response body: ${data}`,
+        error,
+      );
     }
   }
 
@@ -3482,8 +3740,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     try {
       const parsed = JSON.parse(data) as { schema?: unknown };
       return typeof parsed.schema === "string" ? parsed.schema : null;
-    } catch {
-      return null;
+    } catch (error) {
+      throw errorWithCause(
+        `parse database event schema; response body: ${data}`,
+        error,
+      );
     }
   }
 
@@ -3496,6 +3757,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     options: DatabaseEnterOptions = {},
   ): Promise<void> {
     if (seq !== lifecycleSeq) return;
+    let tabsLoadError: unknown | null = null;
     const firstMount = !mounted;
     if (firstMount) {
       const content = document.getElementById("content");
@@ -3516,7 +3778,15 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       deps.syncHeaderMenu();
 
       // suspend 復帰時はメモリ上のタブをそのまま使い、永続化タブを重ねない。
-      const restored = tabsById.size === 0 ? await fetchTabs() : null;
+      let restored: TabsResponse | null = null;
+      if (tabsById.size === 0) {
+        try {
+          restored = await fetchTabs();
+        } catch (error) {
+          tabsLoadError = error;
+          console.error("Failed to restore database tabs", error);
+        }
+      }
       if (!mounted || seq !== lifecycleSeq) return;
       if (restored && restored.tabs.length > 0) {
         const hasRouteTarget = Boolean(db || schema || table || view);
@@ -3572,21 +3842,37 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
     if (tabsById.size === 0) {
       // 初回 enter (永続化なし): URL の引数を初期 state にして 1 タブ作る。
-      const id = openTab(
-        {
-          dbId: db || null,
-          schema: schema || null,
-          table: table || null,
-          view: view || "data",
-        },
-        {
-          autoSelectFirst: !db,
-          ...options,
-        },
-      );
-      const ready = paneReadyById.get(id);
-      if (ready) await ready;
+      // 開いて自動で選んだだけの状態は保存しない (開いただけでリポジトリに
+      // .code-viewer/tabs.json を作らない)。利用者が何か変えたら保存する。
+      const finishRestoring = beginRestoring();
+      let id: string;
+      try {
+        id = openTab(
+          {
+            dbId: db || null,
+            schema: schema || null,
+            table: table || null,
+            view: view || "data",
+          },
+          {
+            autoSelectFirst: !db,
+            ...options,
+          },
+        );
+        const ready = paneReadyById.get(id);
+        if (ready) await ready;
+      } finally {
+        finishRestoring();
+      }
       if (!mounted || seq !== lifecycleSeq) return;
+      syncActiveRoute();
+      if (tabsLoadError) {
+        tabsById
+          .get(id)
+          ?.pane.showError(
+            outerText().nav.tabsLoadError(errorMessage(tabsLoadError)),
+          );
+      }
       return;
     }
     if (!activeTabId) return;
@@ -3611,16 +3897,26 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   ): Promise<void> {
     const seq = lifecycleSeq;
     enterQueue = enterQueue
-      .catch(() => undefined)
-      .then(() => doEnter(seq, db, schema, table, view, options));
+      .catch((error) => {
+        reportActivePaneError("Previous database view load failed", error);
+      })
+      .then(() => doEnter(seq, db, schema, table, view, options))
+      .catch((error) => {
+        reportActivePaneError("Failed to load database view", error);
+      });
     await enterQueue;
   }
 
   async function refreshDatastores(): Promise<void> {
     const seq = lifecycleSeq;
     enterQueue = enterQueue
-      .catch(() => undefined)
-      .then(() => doRefreshDatastores(seq));
+      .catch((error) => {
+        reportActivePaneError("Previous datastore refresh failed", error);
+      })
+      .then(() => doRefreshDatastores(seq))
+      .catch((error) => {
+        reportActivePaneError("Failed to refresh datastores", error);
+      });
     await enterQueue;
   }
 
@@ -3692,8 +3988,20 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   function handleSse(event?: string, data?: string): void {
     if (!mounted) return;
-    const dbId = parseSseDbId(data);
-    const schema = parseSseSchema(data);
+    let dbId: string | null;
+    let schema: string | null;
+    try {
+      dbId = parseSseDbId(data);
+      schema = parseSseSchema(data);
+    } catch (error) {
+      reportActivePaneError(
+        "Failed to parse database event",
+        error,
+        outerText().nav.eventError(errorMessage(error)),
+      );
+      void refreshDatastores();
+      return;
+    }
     for (const [, entry] of tabsById) {
       const state = entry.pane.getState();
       if (dbId && state.dbId !== dbId) continue;

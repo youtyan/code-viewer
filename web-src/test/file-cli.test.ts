@@ -1050,6 +1050,17 @@ describe("runFileCli file diff against a sample fixture repo", () => {
     expect(payload.to).toBe("worktree");
     expect(payload.diff).toMatch(/\+fresh/);
     expect(payload.diff).toMatch(/\+file/);
+    // オプションに見えないよう前置した `./` は見出しに残さない (カードの題が
+    // `./sample_untracked.ts` になっていた)。
+    expect(
+      payload.diff
+        .split("\n")
+        .filter((line: string) => /^(diff --git|---|\+\+\+) /.test(line)),
+    ).toEqual([
+      "diff --git a/sample_untracked.ts b/sample_untracked.ts",
+      "--- /dev/null",
+      "+++ b/sample_untracked.ts",
+    ]);
   });
 
   test("diff for a missing path reports a git error and exits 1", async () => {

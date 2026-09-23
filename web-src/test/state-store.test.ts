@@ -92,26 +92,46 @@ describe("state store", () => {
     });
   });
 
-  test.each([
-    {
-      name: "keeps docked panel mode",
-      input: true,
-      expected: { version: 1, appPanelDocked: true },
-    },
-    {
-      name: "keeps overlay panel mode",
-      input: false,
-      expected: { version: 1, appPanelDocked: false },
-    },
-    {
-      name: "drops a non-boolean panel mode",
-      input: "docked",
-      expected: { version: 1 },
-    },
-  ])("settings panel mode sanitizer $name", async ({ input, expected }) => {
+  // 下パネルは無くなった (Tools と Search はタブ)。その表示の仕方と高さは読まない。
+  test("drops the retired bottom panel mode and height", async () => {
     await withTempProject(async (dir) => {
       expect(
-        await patchAppSettingsState(dir, { appPanelDocked: input }),
+        await patchAppSettingsState(dir, {
+          appPanelDocked: true,
+          appPanelHeight: 320,
+        }),
+      ).toEqual({ version: 1 });
+    });
+  });
+
+  test("drops the retired session list state (the bottom panel no longer has a terminal)", async () => {
+    await withTempProject(async (dir) => {
+      expect(
+        await patchAppSettingsState(dir, { terminalSessionsOpen: true }),
+      ).toEqual({ version: 1 });
+    });
+  });
+
+  test.each([
+    {
+      name: "keeps the bottom panel open",
+      input: true as unknown,
+      expected: { version: 1, terminalPanelOpen: true },
+    },
+    {
+      name: "keeps the bottom panel closed",
+      input: false as unknown,
+      expected: { version: 1, terminalPanelOpen: false },
+    },
+    {
+      name: "drops a non-boolean bottom panel state",
+      input: "open" as unknown,
+      expected: { version: 1 },
+    },
+  ])("settings terminal panel sanitizer $name", async ({ input, expected }) => {
+    await withTempProject(async (dir) => {
+      expect(
+        await patchAppSettingsState(dir, { terminalPanelOpen: input }),
       ).toEqual(expected);
     });
   });

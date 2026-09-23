@@ -1,5 +1,6 @@
 import { lstatSync } from "node:fs";
 import { join } from "node:path";
+import { errno } from "./terminal/settings-file";
 
 // Short enough that a browser reload self-heals stale git data, while still
 // coalescing bursts from one render pass.
@@ -46,10 +47,16 @@ export function fileSignatureFromStats(stats: FileSignatureStats): string {
 export function worktreeFileSignature(path: string, cwd: string): string {
   try {
     return fileSignatureFromStats(lstatSync(join(cwd, path)));
-  } catch {
-    return "state:missing";
+  } catch (error) {
+    // 無いファイルは「無い」という状態として鍵に入れる。ほかの理由は投げる。
+    const code = errno(error);
+    if (code === "ENOENT" || code === "ENOTDIR") return "state:missing";
+    throw error;
   }
 }
+
+/** 差分の範囲の指定が組み合わせとして成り立たない (利用者の入力の誤り)。 */
+export class DiffRangeError extends Error {}
 
 export function fileDiffCacheKey(options: {
   path: string;
@@ -65,7 +72,7 @@ export function fileDiffCacheKey(options: {
     !options.range.to ||
     options.range.to === "worktree";
   if (options.isUntracked && !worktreeTarget) {
-    throw new Error("untracked file diffs require a worktree range");
+    throw new DiffRangeError("untracked file diffs require a worktree range");
   }
   const signature = worktreeTarget
     ? `\0${worktreeFileSignature(options.path, options.cwd)}`

@@ -28,6 +28,8 @@ const PANE_FIELDS = [
   "#{pane_height}",
   "#{pane_current_command}",
   "#{pane_current_path}",
+  // エージェントのプロセスを探す起点 (ペインのシェル)。
+  "#{pane_pid}",
   // タイトルは自由文字列なので必ず最後に置く。
   "#{pane_title}",
 ];
@@ -48,7 +50,8 @@ const FIELD = {
   paneHeight: 9,
   paneCommand: 10,
   panePath: 11,
-  paneTitle: 12,
+  panePid: 12,
+  paneTitle: 13,
 } as const;
 
 function toInt(value: string | undefined): number {
@@ -118,6 +121,7 @@ export function parseTmuxPanes(
       paneIndex,
       title: fields[FIELD.paneTitle] ?? "",
       command: fields[FIELD.paneCommand] ?? "",
+      pid: toInt(fields[FIELD.panePid]),
       path: fields[FIELD.panePath] ?? "",
       width: toInt(fields[FIELD.paneWidth]),
       height: toInt(fields[FIELD.paneHeight]),

@@ -14,10 +14,11 @@ import type { DiffCardElement, DiffMeta, FileMeta } from "../core/types";
 import {
   createDiffView,
   type DiffViewDeps,
-  type DiffViewText,
   isDiffShellDomIntact,
   shouldRenderDiffSidebar,
 } from "../views/diff-view";
+import { DIFF_SCREEN_TEXT, type DiffViewText } from "../views/diff-view-i18n";
+import type { ExpandStackElement } from "../views/hunk-expand";
 import { deferred, makeDiffMeta, waitFor } from "./_test-helpers";
 
 beforeAll(() => {
@@ -99,23 +100,7 @@ function makeMeta(files: FileMeta[]): DiffMeta {
   return makeDiffMeta(files, { generation: 1 });
 }
 
-const defaultDiffText: DiffViewText = {
-  files: (count) => `${count} file${count === 1 ? "" : "s"}`,
-  updated: (time) => `updated ${time}`,
-  updatedTitle: "last updated",
-  kindAdded: "added",
-  kindDeleted: "deleted",
-  kindRenamed: "renamed",
-  kindHeavy: "heavy",
-  kindBinary: "binary",
-  kindMedia: "media",
-  viewedProgress: (viewed, total) => `${viewed}/${total} viewed`,
-  viewedProgressTitle: "review progress",
-  nextUnviewed: "next unviewed",
-  nextUnviewedTitle: "Jump to the next unviewed file (n)",
-  allViewed: "all viewed",
-  allViewedTitle: "All visible files are viewed",
-};
+const defaultDiffText: DiffViewText = DIFF_SCREEN_TEXT.en;
 
 function createDiffViewForShellTest(
   text: DiffViewText = defaultDiffText,
@@ -189,6 +174,8 @@ function createDiffViewForShellTest(
     },
     renderSidebar() {
       sidebarRenders++;
+      // 本物 (sidebar.ts) と同じく、差分の一覧を描いた印を付ける。
+      document.querySelector("#filelist")?.setAttribute("data-diff-list", "");
     },
     isRepositorySidebarMode: () => false,
     loadRepo: async () => undefined,
@@ -303,6 +290,41 @@ describe("diff view fast path", () => {
     expect(await result).toBe(true);
   });
 
+  test("does not fetch an external diff URL returned by the server", async () => {
+    setupDiffDom();
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ diff: "", generation: 1 }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      const { view, state } = createDiffViewForShellTest();
+      const file = makeFile(
+        "src/sample.ts",
+        1,
+        0,
+        "https://example.invalid/file_diff",
+      );
+      state.files = [file];
+      const card = document.createElement("article") as DiffCardElement;
+      card.className = "gdp-file-shell pending";
+      card.dataset.path = file.path;
+      card._file = file;
+      card.innerHTML =
+        '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+      document.querySelector("#diff")?.appendChild(card);
+
+      expect(await view.loadDiffFile(file.path)).toBe(false);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(card.classList.contains("error")).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("accepts the fast path only when direct diff cards match the file list", () => {
     expect(
       isDiffShellDomIntact(
@@ -333,10 +355,16 @@ describe("diff view fast path", () => {
     expect(isDiffShellDomIntact(target([repoShell]), ["src/a.ts"])).toBe(false);
   });
 
-  test("refreshes the sidebar when the file list is unchanged but the diff DOM was replaced", () => {
-    expect(shouldRenderDiffSidebar(true, true)).toBe(false);
-    expect(shouldRenderDiffSidebar(true, false)).toBe(true);
-    expect(shouldRenderDiffSidebar(false, true)).toBe(true);
+  test.each([
+    [true, true, true, false],
+    [true, false, true, true],
+    [false, true, true, true],
+    // 別のタブで右の列が Files の木に書き換わった
+    [true, true, false, true],
+  ])("renders the sidebar (listSame=%s, domIntact=%s, listShown=%s) -> %s", (listSame, domIntact, listShown, expected) => {
+    expect(shouldRenderDiffSidebar(listSame, domIntact, listShown)).toBe(
+      expected,
+    );
   });
 
   test("renders viewed progress from the displayed diff files", () => {
@@ -476,6 +504,254 @@ describe("diff view fast path", () => {
     } finally {
       window.Diff2HtmlUI = originalDiff2Html;
       window.requestIdleCallback = originalRequestIdleCallback;
+    }
+  });
+
+  test.each([
+    {
+      name: "a highlighter failure keeps the line text and marks it with the reason",
+      path: "src/sample.ts",
+      rawName: "src/sample.ts",
+      highlightFails: true,
+      shownName: "src/sample.ts",
+    },
+    {
+      name: "a path with a newline shows and copies the same escaped text",
+      path: "src/line\nname.ts",
+      rawName: "src/line\nname.ts",
+      highlightFails: false,
+      shownName: "src/line\\nname.ts",
+    },
+    {
+      name: "a path with U+202E shows and copies the same escaped text",
+      path: "src/right\u202ename.ts",
+      rawName: "src/right\u202ename.ts",
+      highlightFails: false,
+      shownName: "src/right\\u{202E}name.ts",
+    },
+    {
+      name: "an ordinary rename keeps the diff2html label",
+      path: "src/new.ts",
+      rawName: "src/old.ts → src/new.ts",
+      highlightFails: false,
+      shownName: "src/old.ts → src/new.ts",
+    },
+  ])("$name", async ({ path, rawName, highlightFails, shownName }) => {
+    setupDiffDom();
+    const originalDiff2Html = window.Diff2HtmlUI;
+    const originalRequestIdleCallback = window.requestIdleCallback;
+    let idleWork: IdleRequestCallback | null = null;
+    window.requestIdleCallback = ((callback: IdleRequestCallback) => {
+      idleWork = callback;
+      return 1;
+    }) as typeof window.requestIdleCallback;
+    window.Diff2HtmlUI = class {
+      constructor(private readonly element: HTMLElement) {}
+      draw() {
+        this.element.innerHTML =
+          '<div class="d2h-file-wrapper"><div class="d2h-file-header">' +
+          '<span class="d2h-file-name-wrapper"><span class="d2h-file-name"></span></span>' +
+          '</div><table class="d2h-diff-table"><tbody>' +
+          '<tr><td class="d2h-code-line"><span class="d2h-code-line-ctn">const value = 1;</span></td></tr>' +
+          "</tbody></table></div>";
+        const name = this.element.querySelector(".d2h-file-name");
+        if (name) name.textContent = rawName;
+      }
+      highlightCode() {
+        /* not used: highlighting is deferred */
+      }
+    } as unknown as typeof window.Diff2HtmlUI;
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          written.push(text);
+        },
+      },
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* asserted below */
+    });
+    try {
+      const { view } = createDiffViewForShellTest(defaultDiffText, {
+        syntaxHighlight: true,
+        inferLang: () => "ts",
+        getHljs: () =>
+          ({
+            getLanguage: () => true,
+            highlight: (code: string) => {
+              if (highlightFails) throw new Error("sample grammar failure");
+              return { value: `<span class="tok">${code}</span>` };
+            },
+          }) as never,
+      });
+      const card = document.createElement("div") as DiffCardElement;
+      card.className = "gdp-file-shell";
+      card.dataset.path = path;
+      card.innerHTML =
+        '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+      document.querySelector("#diff")?.appendChild(card);
+      const file: FileMeta = {
+        path,
+        status: "M",
+        additions: 1,
+        deletions: 0,
+        size_class: "small",
+        highlight: true,
+        load_url: "/file_diff?path=sample",
+      };
+      view.renderFile(
+        file,
+        { path, status: "M", diff: "diff --git a/sample b/sample\n" },
+        card,
+      );
+      idleWork?.({
+        didTimeout: false,
+        timeRemaining: () => 50,
+      } as IdleDeadline);
+
+      expect(card.querySelector(".d2h-file-name")?.textContent).toBe(shownName);
+      const span = card.querySelector<HTMLElement>(".d2h-code-line-ctn");
+      expect(span?.textContent).toBe("const value = 1;");
+      expect(span?.classList.contains("gdp-highlight-failed")).toBe(
+        highlightFails,
+      );
+      if (highlightFails) {
+        expect(span?.title).toContain("Error: sample grammar failure");
+        expect(errorSpy).toHaveBeenCalledOnce();
+      } else {
+        expect(errorSpy).not.toHaveBeenCalled();
+        card.querySelector<HTMLButtonElement>(".gdp-copy-path")?.click();
+        await waitFor(() => written.length === 1);
+        expect(written).toEqual([rawName === path ? shownName : path]);
+      }
+    } finally {
+      errorSpy.mockRestore();
+      window.Diff2HtmlUI = originalDiff2Html;
+      window.requestIdleCallback = originalRequestIdleCallback;
+    }
+  });
+
+  // 畳んだカードを描き直しても畳んだまま (Split / Unified の切替・再検証などで
+  // 描き直すと、見出しは畳んだままで中身が出ていた)。
+  test("redrawing a collapsed card keeps its body hidden", () => {
+    setupDiffDom();
+    const originalDiff2Html = window.Diff2HtmlUI;
+    window.Diff2HtmlUI = class {
+      constructor(private readonly element: HTMLElement) {}
+      draw() {
+        this.element.innerHTML =
+          '<div class="d2h-file-wrapper"><div class="d2h-file-header"></div>' +
+          '<div class="d2h-file-diff"><div class="d2h-code-wrapper"><table></table></div></div></div>';
+      }
+      highlightCode() {
+        /* not used */
+      }
+    } as unknown as typeof window.Diff2HtmlUI;
+    try {
+      const { view } = createDiffViewForShellTest();
+      const card = document.createElement("div") as DiffCardElement;
+      card.className = "gdp-file-shell";
+      card.dataset.path = "src/sample.ts";
+      card.innerHTML =
+        '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+      document.querySelector("#diff")?.appendChild(card);
+      const file: FileMeta = {
+        path: "src/sample.ts",
+        status: "M",
+        additions: 1,
+        deletions: 0,
+        size_class: "small",
+        highlight: false,
+        load_url: "/file_diff?path=sample",
+      };
+      const data = {
+        path: "src/sample.ts",
+        status: "M",
+        diff: "diff --git a/sample b/sample\n",
+      };
+      view.renderFile(file, data, card);
+      // 利用者が畳んだ
+      card.classList.add("gdp-file-collapsed");
+      card.querySelector(".d2h-file-diff")?.classList.add("d2h-d-none");
+      view.rerenderLoadedDiffs();
+      expect([
+        card.classList.contains("gdp-file-collapsed"),
+        card.querySelector(".d2h-file-diff")?.classList.contains("d2h-d-none"),
+      ]).toEqual([true, true]);
+    } finally {
+      window.Diff2HtmlUI = originalDiff2Html;
+    }
+  });
+
+  test("a failed request for more hunks keeps the reason on the retry button", async () => {
+    setupDiffDom();
+    const originalDiff2Html = window.Diff2HtmlUI;
+    const originalFetch = globalThis.fetch;
+    window.Diff2HtmlUI = class {
+      constructor(private readonly element: HTMLElement) {}
+      draw() {
+        this.element.innerHTML =
+          '<div class="d2h-file-wrapper"><div class="d2h-file-header"></div></div>';
+      }
+      highlightCode() {
+        /* not used */
+      }
+    } as unknown as typeof window.Diff2HtmlUI;
+    globalThis.fetch = (async () =>
+      new Response("sample diff failure", {
+        status: 500,
+        statusText: "Internal Server Error",
+      })) as typeof fetch;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* asserted below */
+    });
+    try {
+      const { view } = createDiffViewForShellTest();
+      const card = document.createElement("div") as DiffCardElement;
+      card.className = "gdp-file-shell";
+      card.dataset.path = "src/sample.ts";
+      card.innerHTML =
+        '<div class="gdp-shell-header"></div><div class="gdp-shell-body"></div>';
+      document.querySelector("#diff")?.appendChild(card);
+      view.renderFile(
+        {
+          path: "src/sample.ts",
+          status: "M",
+          additions: 1,
+          deletions: 0,
+          size_class: "small",
+          load_url: "/file_diff?path=src%2Fsample.ts",
+        },
+        {
+          path: "src/sample.ts",
+          status: "M",
+          diff: "diff --git a/src/sample.ts b/src/sample.ts\n",
+          mode: "preview",
+          truncated: true,
+          hunk_count: 20,
+          rendered_hunk_count: 10,
+        },
+        card,
+      );
+      const more = card.querySelector<HTMLButtonElement>(".gdp-show-full");
+      // 「Show all」は load_url をそのまま使う (次の N 件は location から URL を
+      // 組み立てるが、happy-dom には origin が無い)。失敗の表示は同じボタン。
+      card
+        .querySelector<HTMLButtonElement>(".gdp-show-full.secondary")
+        ?.click();
+      await waitFor(() => more?.textContent === "Failed — retry");
+      expect(more?.title).toContain(
+        "loading more hunks of src/sample.ts failed",
+      );
+      expect(more?.title).toContain("HTTP 500 Internal Server Error");
+      expect(more?.title).toContain("sample diff failure");
+      expect(errorSpy).toHaveBeenCalledOnce();
+    } finally {
+      errorSpy.mockRestore();
+      globalThis.fetch = originalFetch;
+      window.Diff2HtmlUI = originalDiff2Html;
     }
   });
 
@@ -1456,6 +1732,19 @@ describe("diff view next-unviewed-file navigation", () => {
     ).toBe(false);
   });
 
+  test("the fast path renders the sidebar again after another tab replaced #filelist", () => {
+    setupDiffDom();
+    const { view, sidebarRenders } = createDiffViewForShellTest();
+    const meta = makeMeta([makeFile("a.ts", 1, 0, "/a")]);
+    view.renderShell(meta, null);
+    view.renderShell(meta, null);
+    expect(sidebarRenders()).toBe(1);
+    // 別のタブ (Agents など) で右の列が Files の木に書き換わった。
+    document.querySelector("#filelist")?.removeAttribute("data-diff-list");
+    const result = view.renderShell(meta, null);
+    expect([sidebarRenders(), result.structureChanged]).toEqual([2, false]);
+  });
+
   test("disables the next-unviewed button after a filter-preserving renderShell refresh hides every row", () => {
     setupDiffDom();
     const { view } = createDiffViewForShellTest();
@@ -1748,5 +2037,44 @@ describe("diff view silent revalidation", () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+});
+
+// 「すべての行を表示」で隠れた行の取得に失敗したら、理由を捨てずにボタンと console に出す。
+describe("diff view expand all lines", () => {
+  test.each([
+    { name: "a gap fails", gaps: ["ok", "fail"], failed: true },
+    { name: "every gap loads", gaps: ["ok", "ok"], failed: false },
+  ])("$name → failed: $failed", async ({ gaps, failed }) => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* checked below */
+    });
+    document.body.innerHTML =
+      '<div class="gdp-file-shell"><button class="gdp-file-unfold"></button></div>';
+    const card = document.querySelector<DiffCardElement>(".gdp-file-shell");
+    if (!card) throw new Error("missing card");
+    for (const gap of gaps) {
+      const stack = document.createElement("div") as ExpandStackElement;
+      stack.className = "gdp-expand-stack";
+      stack._gdpExpandFully = async () => {
+        if (gap === "fail") throw new Error("HTTP 500 sample-reason");
+        stack.remove();
+      };
+      card.appendChild(stack);
+    }
+    const { view } = createDiffViewForShellTest();
+    await view.expandAllFileContext(
+      card,
+      makeFile("src/sample.ts", 1, 0, "/file_diff?path=src%2Fsample.ts"),
+    );
+    const button = card.querySelector<HTMLButtonElement>(".gdp-file-unfold");
+    expect({
+      failed: button?.classList.contains("failed"),
+      reason: button?.title.includes("HTTP 500 sample-reason"),
+      logged: errorSpy.mock.calls.some((args) =>
+        String(args[0]).includes("src/sample.ts"),
+      ),
+    }).toEqual({ failed, reason: failed, logged: failed });
+    errorSpy.mockRestore();
   });
 });
