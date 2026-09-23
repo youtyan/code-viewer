@@ -23,7 +23,10 @@ import { addProject } from "../core/projects";
 import type { AppSettingsState } from "../core/types";
 import { checkProjects } from "../server/doctor";
 import { tryAcquireFileLock } from "../server/file-lock";
-import { handleProjectsPost } from "../server/projects/handle";
+import {
+  handleProjectOpenPost,
+  handleProjectsPost,
+} from "../server/projects/handle";
 import {
   ProjectRegistryError,
   projectRegistryPath,
@@ -56,6 +59,7 @@ import type {
   SpawnOptions,
   WorktreeOpenResult,
 } from "../server/worktree/open";
+import { responseFailure } from "../views/agents/accounts-client";
 
 let dir: string;
 let registryPath: string;
@@ -454,6 +458,32 @@ describe("opening a registered project", () => {
       project: { root: ROOT, name: "sample-repo", addedAt: "x" },
     }));
   }
+
+  // 本文の code は JSON の欄で返す。error の文にも Details として入れると、
+  // 画面 (serverReason が「(code)」を足す) で同じことが 2 回出る。原因の欄は残す。
+  test("a failed open states its code once, keeping the fields of the cause", async () => {
+    const cause = Object.assign(new Error("sample spawn failure"), {
+      code: "ENOENT",
+    });
+    const res = await handleProjectOpenPost(
+      new Request("http://127.0.0.1/_agent/projects/open", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ root: ROOT }),
+      }),
+      () => undefined,
+      async () => {
+        throw new ProjectRegistryError("sample open failure", "failed", {
+          cause,
+        });
+      },
+    );
+    expect(res.status).toBe(500);
+    const failure = await responseFailure(res, "POST /_agent/projects/open");
+    expect(failure.message).toBe(
+      'POST /_agent/projects/open (HTTP 500): Error: sample open failure\nCaused by: Error: sample spawn failure\nDetails: {"code":"ENOENT"} (failed)',
+    );
+  });
 
   test("running: goes there without starting anything", async () => {
     await register();

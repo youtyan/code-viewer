@@ -211,6 +211,13 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
     if (previous?.state === "unreachable") records.set(root, previous);
     else records.delete(root);
     const log = deps.logTail(deps.logFile(root));
+    // 起動中に終わった子の理由 (worktree/open.ts) は、同じ出力の末尾を既に
+    // 含む。出力は log の欄で返すので、理由の文からは外す (外さないと、画面・
+    // 500 の本文で同じ段落が 2 度出る)。読み直した末尾が違えば両方を残す。
+    const reasonOf = (error: unknown) => {
+      const text = formatErrorDetail(error);
+      return log ? text.replace(`\n${log}`, "") : text;
+    };
     if (
       result.status === "error" &&
       result.error instanceof EntryOutdatedError
@@ -223,7 +230,7 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
       entryOutdated = {
         status: "failed",
         entryOutdated: true,
-        detail: `the project process for ${root} stopped at start because this entry server is out of date:\n${formatErrorDetail(result.error)}`,
+        detail: `the project process for ${root} stopped at start because this entry server is out of date:\n${reasonOf(result.error)}`,
         log,
       };
       return entryOutdated;
@@ -244,7 +251,7 @@ export function createEntryBackends(deps: EntryBackendsDeps) {
     }
     return {
       status: "failed",
-      detail: `could not start the project process for ${root}:\n${formatErrorDetail(result.error)}`,
+      detail: `could not start the project process for ${root}:\n${reasonOf(result.error)}`,
       log,
     };
   }

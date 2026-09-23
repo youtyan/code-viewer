@@ -259,6 +259,8 @@ describe("/_agent/hooks", () => {
     expect(res?.status).toBe(409);
     const body = (await res?.json()) as { error: string; code: string };
     expect(body.code).toBe("conflict");
+    // code は欄で 1 度だけ (文に Details として重ねない)。
+    expect(body.error).not.toContain('"code":"conflict"');
     expect(readFileSync(join(codexDir, "hooks.json"), "utf8")).toBe("{}\n");
   });
 
