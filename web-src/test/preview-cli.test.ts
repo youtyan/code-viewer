@@ -2012,4 +2012,103 @@ describe("preview CLI", () => {
       await stopTestPreview(proc, exited);
     }
   });
+
+  // Diff のカードの高さの見積もりの材料 (core/diff-card-estimate.ts の
+  // DiffRowBasis)。画面はこれに自分の寸法を当てて、中身が届くまでの高さに
+  // する。追跡中は差分の本文から、追跡外 (新規) は追加の行から数える。
+  runOrSkip(
+    "diff metadata carries the row basis for the card height estimate",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-row-basis-"));
+      tmpRoots.push(root);
+      git(root, ["init", "-b", "main"]);
+      git(root, ["config", "user.email", "sample-author"]);
+      git(root, ["config", "user.name", "sample-author"]);
+      const longLines = Array.from({ length: 120 }, (_, i) => `line ${i + 1}`);
+      writeFileSync(join(root, "short.txt"), "base\n");
+      writeFileSync(join(root, "long.txt"), `${longLines.join("\n")}\n`);
+      writeFileSync(join(root, "removed.txt"), "one\ntwo\nthree\n");
+      git(root, ["add", "."]);
+      git(root, ["commit", "-m", "sample initial commit"]);
+      writeFileSync(join(root, "short.txt"), "first\n");
+      const changed = [...longLines];
+      changed[9] = "line 10 changed";
+      changed[99] = "line 100 changed";
+      writeFileSync(join(root, "long.txt"), `${changed.join("\n")}\n`);
+      unlinkSync(join(root, "removed.txt"));
+      writeFileSync(join(root, "fresh.txt"), "new one\nnew two\n");
+      const preview = await startTestPreview(root);
+      try {
+        const response = await fetchWithTimeout(
+          `${preview.url}diff.json?nocache=1`,
+          5000,
+        );
+        const body = (await response.json()) as {
+          files: Array<{
+            path: string;
+            estimated_height_px?: number;
+            row_basis?: unknown;
+          }>;
+          row_basis_error?: string;
+        };
+        expect({
+          status: response.status,
+          error: body.row_basis_error,
+          files: body.files.map((file) => ({
+            path: file.path,
+            height: file.estimated_height_px,
+            basis: file.row_basis,
+          })),
+        }).toEqual({
+          status: 200,
+          error: undefined,
+          files: [
+            {
+              path: "fresh.txt",
+              height: 90,
+              basis: {
+                hunks: 1,
+                context: 0,
+                split_changes: 2,
+                lead_gap: false,
+              },
+            },
+            {
+              // 10 行目と 100 行目: 2 ハンク、それぞれ前後 3 行の文脈。
+              path: "long.txt",
+              height: 46 + 14 * 22 + 3 * 22,
+              basis: {
+                hunks: 2,
+                context: 12,
+                split_changes: 2,
+                lead_gap: true,
+              },
+            },
+            {
+              path: "removed.txt",
+              height: 46 + 3 * 22,
+              basis: {
+                hunks: 1,
+                context: 0,
+                split_changes: 3,
+                lead_gap: false,
+              },
+            },
+            {
+              path: "short.txt",
+              height: 46 + 22,
+              basis: {
+                hunks: 1,
+                context: 0,
+                split_changes: 1,
+                lead_gap: false,
+              },
+            },
+          ],
+        });
+      } finally {
+        await stopTestPreview(preview.proc, preview.exited);
+      }
+    },
+  );
 });

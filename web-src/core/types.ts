@@ -1,3 +1,4 @@
+import type { DiffRowBasis } from "./diff-card-estimate";
 import type { GdpExpandLogic } from "./expand-logic";
 import type { KeymapOverrides } from "./keymap";
 import type { ToolId } from "./tools";
@@ -24,6 +25,11 @@ export type FileMeta = {
   load_url: string;
   preview_url?: string | null;
   estimated_height_px?: number;
+  /**
+   * カードの高さの見積もりの材料 (小さいファイルだけ)。画面は自分の寸法で数え直す
+   * (core/diff-card-estimate.ts)。無ければ estimated_height_px を使う。
+   */
+  row_basis?: DiffRowBasis;
   untracked?: boolean;
   size?: number;
   created_at?: string;
@@ -43,6 +49,8 @@ export type DiffMeta = {
   project?: string;
   generation?: number;
   error?: string;
+  /** 見積もりの材料を数えられなかった理由 (Diff は出せる。見積もりが粗くなるだけ)。 */
+  row_basis_error?: string;
 };
 
 // ai-dup-check: allow -- client response DTO is intentionally kept in core types.

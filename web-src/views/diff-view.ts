@@ -5,6 +5,11 @@
 
 import { apiUrl, withoutProjectPrefix } from "../core/api-url";
 import { changedPathsCoverPath } from "../core/changed-paths";
+import {
+  type DiffCardLayout,
+  type DiffCardMetrics,
+  estimateDiffCardHeight,
+} from "../core/diff-card-estimate";
 import { hasControlCharacter } from "../core/control-chars";
 import { showCopyFailure } from "../core/copy-failure";
 import { summarizeDiffFileKinds } from "../core/diff-file-kinds";
@@ -970,7 +975,9 @@ export function createDiffView(deps: DiffViewDeps) {
     delete card.dataset.manualMode;
     delete card.dataset.stale;
     delete card.dataset.staleLoading;
-    card.style.minHeight = `${file.estimated_height_px || 80}px`;
+    card.style.minHeight = `${placeholderHeight(file) || 80}px`;
+    card.dataset.estimatedHeight = "";
+    watchPlaceholderWidth();
     card._diffData = null;
     card._loadedSig = null;
     card._loadedSigUrl = null;
@@ -1219,6 +1226,142 @@ export function createDiffView(deps: DiffViewDeps) {
     return { structureChanged: true, invalidatedCards, preservedDom: false };
   }
 
+  // 見積もりに使う寸法 (1 行・見出し・広げるボタン 1 段)。密度・文字の大きさ・
+  // 並べ方・本文の幅で変わる。1 行は表の組み方で --code-line-height より少し
+  // 高い (22px の設定で 22.44)、見出しはカードの幅が狭いと 2 段になる
+  // (style.css の @container diff-file) ので、見本の差分をカードと同じ幅で本文の
+  // 流れの中に見えないまま描いて測り、すぐ外す (描画の前に外すので画面は動かない)。
+  // 組み合わせごとに覚える。測れない (描く道具が無い・本文が描かれていない)
+  // ときは null で、覚えない (次に測り直す)。
+  const CARD_METRICS = new Map<string, DiffCardMetrics>();
+  const METRICS_SAMPLE_DIFF = [
+    "diff --git a/sample.txt b/sample.txt",
+    "--- a/sample.txt",
+    "+++ b/sample.txt",
+    "@@ -1,2 +1,2 @@",
+    " sample",
+    "-old",
+    "+new",
+    "",
+  ].join("\n");
+
+  function cardLayoutFor(f: FileMeta): DiffCardLayout | null {
+    const layout = f.force_layout || STATE.layout;
+    return layout === "side-by-side" || layout === "line-by-line"
+      ? layout
+      : null;
+  }
+
+  function measuredCardMetrics(layout: DiffCardLayout): DiffCardMetrics | null {
+    if (typeof window.Diff2HtmlUI !== "function") return null;
+    const root = getDiffRoot?.() || $("#diff");
+    if (!root) return null;
+    const style = getComputedStyle(document.body);
+    const lineHeight = style.getPropertyValue("--code-line-height").trim();
+    const width = root.clientWidth;
+    if (width <= 0) return null;
+    const key = [
+      layout,
+      width,
+      document.body.dataset.sidebarFontSize ?? "",
+      lineHeight,
+      style.getPropertyValue("--code-font-size").trim(),
+    ].join("|");
+    const known = CARD_METRICS.get(key);
+    if (known) return known;
+    const gapRowHeight = Number.parseFloat(lineHeight);
+    if (!Number.isFinite(gapRowHeight) || gapRowHeight <= 0) return null;
+    const probe = document.createElement("div");
+    probe.className = "gdp-file-shell loaded";
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.cssText =
+      "visibility:hidden;pointer-events:none;content-visibility:visible";
+    const body = document.createElement("div");
+    body.className = "gdp-shell-body";
+    probe.appendChild(body);
+    root.appendChild(probe);
+    try {
+      new window.Diff2HtmlUI(
+        body,
+        METRICS_SAMPLE_DIFF,
+        {
+          drawFileList: false,
+          matching: "lines",
+          outputFormat: layout,
+          synchronisedScroll: false,
+          highlight: false,
+          fileListToggle: false,
+          fileContentToggle: false,
+        },
+        null,
+      ).draw();
+      const headerHeight =
+        body.querySelector(".d2h-file-header")?.getBoundingClientRect()
+          .height ?? 0;
+      const row = [...body.querySelectorAll("tbody tr")].find((tr) =>
+        tr.querySelector("td.d2h-cntx, td.d2h-ins, td.d2h-del"),
+      );
+      const rowHeight = row?.getBoundingClientRect().height ?? 0;
+      if (headerHeight <= 0 || rowHeight <= 0) return null;
+      const metrics = { rowHeight, headerHeight, gapRowHeight };
+      CARD_METRICS.set(key, metrics);
+      return metrics;
+    } finally {
+      probe.remove();
+    }
+  }
+
+  /**
+   * 中身が届くまでカードが取る高さ。サーバの材料 (row_basis) と画面の実際の
+   * 寸法から数える (core/diff-card-estimate.ts)。材料が無い・寸法が測れない
+   * ときはサーバの見積もり。
+   */
+  function placeholderHeight(f: FileMeta): number | null {
+    const layout = cardLayoutFor(f);
+    const metrics = f.row_basis && layout ? measuredCardMetrics(layout) : null;
+    if (layout && metrics) {
+      const height = estimateDiffCardHeight({
+        additions: f.additions || 0,
+        deletions: f.deletions || 0,
+        status: f.status,
+        binary: f.binary,
+        basis: f.row_basis,
+        layout,
+        metrics,
+      });
+      if (height !== null) return height;
+    }
+    return f.estimated_height_px || null;
+  }
+
+  // 本文の幅が変わったら (一覧の列が後から出る・窓の幅)、見積もりで高さを
+  // 取っているカードだけを測り直す。ResizeObserver は描画の前に呼ばれるので、
+  // 幅の変わった同じフレームで高さもそろう。再検証中のカード (前の中身の高さを
+  // 保っている) は data-estimated-height が無いので触らない。
+  let widthObservedRoot: HTMLElement | null = null;
+  let placeholderWidthObserver: ResizeObserver | null = null;
+
+  function watchPlaceholderWidth(): void {
+    if (typeof ResizeObserver === "undefined") return;
+    const root = getDiffRoot?.() || $("#diff");
+    if (!root || root === widthObservedRoot) return;
+    placeholderWidthObserver?.disconnect();
+    widthObservedRoot = root;
+    let lastWidth = root.clientWidth;
+    placeholderWidthObserver = new ResizeObserver(() => {
+      if (root.clientWidth === lastWidth) return;
+      lastWidth = root.clientWidth;
+      for (const card of root.querySelectorAll<DiffCardElement>(
+        ".gdp-file-shell.pending[data-estimated-height], .gdp-file-shell.loading[data-estimated-height]",
+      )) {
+        if (!card._file) continue;
+        const height = placeholderHeight(card._file);
+        if (height) card.style.minHeight = `${height}px`;
+      }
+    });
+    placeholderWidthObserver.observe(root);
+  }
+
   function createPlaceholder(f: FileMeta): DiffCardElement {
     const card = document.createElement("div") as DiffCardElement;
     card.className = "gdp-file-shell pending";
@@ -1228,8 +1371,11 @@ export function createDiffView(deps: DiffViewDeps) {
     card.dataset.status = f.status || "M";
     card._file = f;
     card.classList.toggle("viewed", STATE.viewedFiles.has(f.path));
-    if (f.estimated_height_px) {
-      card.style.minHeight = `${f.estimated_height_px}px`;
+    const height = placeholderHeight(f);
+    if (height) {
+      card.style.minHeight = `${height}px`;
+      card.dataset.estimatedHeight = "";
+      watchPlaceholderWidth();
     }
 
     const head = document.createElement("div");
@@ -1970,6 +2116,7 @@ export function createDiffView(deps: DiffViewDeps) {
     card.classList.remove("loading", "pending");
     card.classList.add("loaded");
     card.style.minHeight = "";
+    delete card.dataset.estimatedHeight;
 
     mountDiff(card, file, data);
     applyInlineAnnotations();
@@ -1997,7 +2144,7 @@ export function createDiffView(deps: DiffViewDeps) {
     ) {
       applyDiffRouteFocus();
     }
-    card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, file.estimated_height_px || 200)}px`;
+    card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, placeholderHeight(file) || 200)}px`;
     applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
 
     if (data.truncated && data.mode === "preview") {

@@ -8,6 +8,11 @@ import {
   watch,
 } from "node:fs";
 import { basename, dirname, extname, join, relative } from "node:path";
+import {
+  type DiffRowBasis,
+  diffRowBasisFromText,
+  estimateDiffCardHeight,
+} from "../core/diff-card-estimate";
 import { normalizeNewDirectoryName } from "../core/directory-name";
 import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import { parseHistoryLineRange } from "../core/history";
@@ -769,14 +774,97 @@ function classify(file: git.GitFileMeta) {
   return "huge";
 }
 
-function estimateHeight(file: git.GitFileMeta, sizeClass: string) {
+/**
+ * 画面が寸法を測れないときのカードの高さ (標準の密度・左右に並べる表示の寸法)。
+ * 材料 (row_basis) があれば画面は自分の寸法で数え直す (core/diff-card-estimate.ts)。
+ */
+const NOMINAL_DIFF_CARD_METRICS = {
+  rowHeight: 22,
+  headerHeight: 46,
+  gapRowHeight: 22,
+};
+
+function estimateHeight(
+  file: git.GitFileMeta,
+  sizeClass: string,
+  basis: DiffRowBasis | undefined,
+) {
   if (file.binary) return 380;
-  if (sizeClass === "small")
-    return Math.min(
-      800,
-      ((file.additions || 0) + (file.deletions || 0) + 10) * 22,
+  if (sizeClass !== "small") return 140;
+  return (
+    estimateDiffCardHeight({
+      additions: file.additions || 0,
+      deletions: file.deletions || 0,
+      status: file.status,
+      basis,
+      layout: "side-by-side",
+      metrics: NOMINAL_DIFF_CARD_METRICS,
+    }) ?? 140
+  );
+}
+
+/** 見積もりの材料を数える差分の上限 (これを超えたら数えず、画面が数え直す)。 */
+const ROW_BASIS_LINE_BUDGET = 20000;
+const ROW_BASIS_FILE_BUDGET = 500;
+
+/**
+ * 小さいファイル (中身を丸ごと描くカード) の見積もりの材料。追跡中のファイルは
+ * 差分の本文を 1 回読んで数え、追跡外 (新規) は追加の行だけ。数えられなかった
+ * ときは空の材料と理由を返す (画面は追加・削除から数え直す。理由は応答の
+ * row_basis_error に載せて、黙って捨てない)。
+ */
+async function diffRowBasisFor(
+  files: git.GitFileMeta[],
+  diffArgs: string[],
+): Promise<{ basis: Map<string, DiffRowBasis>; error?: string }> {
+  const basis = new Map<string, DiffRowBasis>();
+  const small = files.filter(
+    (file) => !file.binary && classify(file) === "small",
+  );
+  for (const file of small) {
+    if (!file.untracked) continue;
+    const additions = file.additions || 0;
+    basis.set(file.path, {
+      hunks: additions > 0 ? 1 : 0,
+      context: 0,
+      split_changes: additions,
+      lead_gap: false,
+    });
+  }
+  const tracked = small.filter((file) => !file.untracked);
+  const lines = tracked.reduce(
+    (sum, file) => sum + (file.additions || 0) + (file.deletions || 0),
+    0,
+  );
+  if (
+    tracked.length === 0 ||
+    tracked.length > ROW_BASIS_FILE_BUDGET ||
+    lines > ROW_BASIS_LINE_BUDGET
+  )
+    return { basis };
+  const paths = tracked.flatMap((file) =>
+    file.old_path && file.old_path !== file.path
+      ? [file.old_path, file.path]
+      : [file.path],
+  );
+  const res = await git.fileDiffTextAsync(diffArgs, paths, cwd);
+  if (res.code !== 0) {
+    const error = `counting diff rows for the card height estimate failed (git diff exit ${res.code}, ${paths.length} paths): ${res.stderr.trim()}`;
+    console.error(`[code-viewer] ${error}`);
+    return { basis, error };
+  }
+  try {
+    for (const [path, rows] of diffRowBasisFromText(res.stdout))
+      basis.set(path, rows);
+  } catch (err) {
+    const failure = errorWithCause(
+      `reading the git diff for the card height estimate failed (${paths.length} paths)`,
+      err,
     );
-  return 140;
+    console.error(failure);
+    return { basis, error: formatErrorDetail(failure) };
+  }
+  return { basis };
 }
 
 function buildQuery(params: Record<string, unknown>) {
@@ -795,6 +883,7 @@ function fileToMeta(
   range: { from?: string; to?: string },
   extraQs: Record<string, string>,
   responseGeneration: number,
+  rowBasis?: DiffRowBasis,
 ): FileMeta {
   const sizeClass = classify(file);
   const q = {
@@ -826,7 +915,8 @@ function fileToMeta(
     highlight: sizeClass === "small",
     load_url: `/file_diff${buildQuery(q)}`,
     preview_url: previewUrl,
-    estimated_height_px: estimateHeight(file, sizeClass),
+    estimated_height_px: estimateHeight(file, sizeClass, rowBasis),
+    ...(rowBasis ? { row_basis: rowBasis } : {}),
     untracked: file.untracked || false,
   };
 }
@@ -885,8 +975,15 @@ async function computePayload(
     if (e === "-w" || e === "--ignore-all-space") extraQs.ignore_ws = "1";
     if (e === "--ignore-blank-lines") extraQs.ignore_blank = "1";
   }
+  const rowBasis = await diffRowBasisFor(filteredFiles, [...extras, ...args]);
   const meta = filteredFiles.map((file) =>
-    fileToMeta(file, range, extraQs, responseGeneration),
+    fileToMeta(
+      file,
+      range,
+      extraQs,
+      responseGeneration,
+      rowBasis.basis.get(file.path),
+    ),
   );
   const totals = meta.reduce(
     (acc, file) => {
@@ -904,6 +1001,7 @@ async function computePayload(
     branch: await currentBranchMetadata(),
     generation: responseGeneration,
     ...(metaError ? { error: metaError } : {}),
+    ...(rowBasis.error ? { row_basis_error: rowBasis.error } : {}),
   };
 }
 
