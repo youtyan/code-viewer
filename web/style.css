@@ -429,12 +429,12 @@ html, body {
   /* 一覧の列 (左のサイドバーの右、本文の左)。左から、ファイル一覧 (#file-list。
      どの画面でも出す)、一覧 (Diff の変更ファイルの一覧 #sidebar・History の
      コミット・選んでいる作業ツリー)、変更ファイルの一覧 (History・選んでいる作業
-     ツリーの #sidebar。一覧の右)。頭 (#panel-head) はタブ列の行の左端の 1 段で、
-     画面の入口の絵柄と、右端にファイル一覧を畳むボタン。幅は固定
+     ツリーの #sidebar。一覧の右)。頭 (#panel-head) は左上の 2 段で、1 段目はタブ列と
+     同じ高さにいま見ているプロジェクト (色の四角と頭文字・名前 = 切替・ブランチ)、
+     2 段目に画面の入口の絵柄と、右端にファイル一覧を畳むボタン。幅は固定
      (--column-head-w) で、画面の切替でも列の開閉 (手・自動) でも動かない (畳むのは
-     頭の下の列だけ)。タブ列は頭の右から。プロジェクト名とブランチはタブ列の左端
-     (#tabs-lead、幅 --tabs-lead-w) に固定。 */
-  /* 頭の絵柄の行の幅。中身 (絵柄 6 つ・間・畳むボタン・左右の余白) より広く、既定の
+     頭の下の列だけ)。タブ列は頭の右から。一覧の列の中身はどれも頭の下から。 */
+  /* 頭の幅。2 段目の中身 (絵柄 6 つ・間・畳むボタン・左右の余白) より広く、既定の
      密度ではファイル一覧の既定の幅 (240) にそろう (頭の右端と一覧の右端が並ぶ)。
      密度で変わるので固定の px にしない。 */
   --listcol-head-w: calc(var(--space-unit) * 60);
@@ -446,17 +446,17 @@ html, body {
   --panelcol-rail-w: var(--ui-control-sm);
   /* 一覧・変更ファイルの一覧を畳むつまみの幅 (列の右端の線に重ねる)。 */
   --column-fold-w: var(--space-4);
-  /* 一覧の列の本体の上端 = 頭 (タブ列の行と同じ高さの 1 段) の下。 */
-  --panel-body-top: var(--global-header-h);
+  /* 頭の 2 段目 (画面の入口の絵柄の段) の高さ。1 段目はタブ列と同じ高さ。 */
+  --view-head-h: var(--main-tabs-h);
+  /* 一覧の列の頭の高さ (2 段)。 */
+  --column-head-h: calc(var(--main-tabs-h) + var(--view-head-h));
+  /* 一覧の列の本体の上端 = 頭の下 (頭は窓の上端から)。 */
+  --panel-body-top: var(--column-head-h);
   /* ファイル一覧が占めている幅。畳んだ間 (gdp-sidebar-hidden) は 0。 */
   --files-shown: var(--sidebar-w);
-  /* タブ列の左端のプロジェクト名とブランチ (#tabs-lead) の幅。固定で、画面・
-     タブ・右の列の開閉・2 面で変えない (出たり消えたり動いたりしない)。名前と
-     枝はこの中で fitBrandWidths の決まりで分ける (views/brand-fit.ts)。 */
-  --tabs-lead-w: calc(var(--space-unit) * 50);
   /* 右端に付く固定物の幅。デスクトップには無い (0。電話は安全領域)。 */
   --chrome-right: 0px;
-  /* 一覧の列の頭の幅 (絵柄の行と、左のサイドバーを畳んだときの開くボタン)。
+  /* 一覧の列の頭の幅 (2 段の共通の幅と、左のサイドバーを畳んだときの開くボタン)。
      タブ列はこの右から。 */
   --column-head-w: calc(var(--listcol-head-w) + var(--nav-expand-w));
   /* 本文 (route の中身: ツールバー・#content・面の箱) の左右の端。左は一覧の列の
@@ -944,118 +944,6 @@ body[data-code-font-size="xlarge"] {
   border-bottom: 1px solid var(--border);
   z-index: 50;
 }
-.brand {
-  display: flex; align-items: center; gap: 8px;
-  font-weight: 600;
-  font-size: var(--ui-font-title);
-  color: var(--fg);
-  min-width: 0;
-  max-width: min(40vw, 560px);
-  flex: 0 1 auto;
-  text-decoration: none;
-}
-.brand:hover { color: var(--fg); text-decoration: none; }
-/* リポジトリ名はプロジェクトの切替のボタン。リンクだったときと同じ大きさの
-   まま (ヘッダの幅を増やさない)。押せることは hover の下地で示す。 */
-button.brand {
-  appearance: none;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  font-family: inherit;
-  line-height: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-/* いつも薄い面を敷いて「押せる」ことを示す。面は box-shadow で外へ広げるので
-   寸法は変わらない。ホバー・開いている間は一段濃く。 */
-button.brand {
-  background: var(--bg-soft);
-  box-shadow: 0 0 0 4px var(--bg-soft);
-}
-button.brand:hover,
-button.brand[aria-expanded="true"] {
-  background: var(--bg-mute);
-  box-shadow: 0 0 0 4px var(--bg-mute);
-}
-/* 入口の印の分だけ、ブランドの中の間隔とナビとの間隔を詰める (ヘッダの幅を
-   増やさない。ナビの項目は自分の左右の余白を持つので、見た目の間隔は残る)。 */
-button.brand {
-  gap: 5px;
-  margin-right: -10px;
-}
-.brand-chevron {
-  display: inline-flex;
-  flex: none;
-  margin-left: -2px;
-  color: var(--fg-muted);
-}
-.brand-chevron svg {
-  width: 12px;
-  height: 12px;
-  fill: currentColor;
-}
-button.brand:hover .brand-chevron,
-button.brand:focus-visible .brand-chevron,
-button.brand[aria-expanded="true"] .brand-chevron {
-  color: var(--fg);
-}
-button.brand[aria-expanded="true"] .brand-chevron svg {
-  transform: rotate(180deg);
-}
-button.brand:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-.brand .title {
-  /* 名前と枝の幅は views/brand-fit.ts が分ける: 枝は自然な幅 (上限は見出しの
-     約 40%) まで出し、残りを名前が使って省略する。どちらかだけを縮めない形に
-     すると、狭い見出しで名前が「r…」、枝が「m」の 1 文字になった。
-     変数が無い間 (JS の前) は今までの上限。 */
-  flex: 0 1 auto;
-  max-width: var(--brand-name-max, 60%);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.project-branch {
-  /* Quiet branch indicator next to the brand: a small git-branch icon and
-     the mono branch name, no pill. The old bordered chip with a green dot
-     read like a notification badge. */
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  /* 幅は views/brand-fit.ts が決めた上限まで (縮めない)。 */
-  flex: 0 0 auto;
-  min-width: 0;
-  max-width: var(--brand-branch-max, min(20vw, 260px));
-  overflow: hidden;
-  color: var(--fg-muted);
-  font-size: var(--ui-font-sm);
-  line-height: 1;
-}
-.project-branch .goi-icon {
-  display: inline-flex;
-  flex: none;
-  color: var(--fg-subtle);
-}
-.project-branch .goi-icon svg {
-  width: 12px;
-  height: 12px;
-  display: block;
-}
-.project-branch-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-weight: 500;
-}
-
 .global-icon-link {
   /* Icon-only header links (help page, repository web page): same 28x28
      shell as .global-icon-action so the action cluster reads as one
@@ -1904,13 +1792,13 @@ body.gdp-diff-page #repo-target-wrap {
 /* ===== Commit history panel ===== */
 /* 作業ツリー画面の 2 枚のパネルも同じ箱を使う。位置だけ Worktrees セクションで
    上書きし、見た目はここ 1 箇所で決まる。置き場所は一覧の列のファイル一覧の右
-   (タブ列の下。幅は --list-w)。 */
+   (一覧の列の頭の下。幅は --list-w)。 */
 #history-panel,
 #worktree-panel {
   display: none;
   position: fixed;
   left: calc(var(--chrome-left) + var(--files-shown));
-  top: var(--global-header-h);
+  top: var(--panel-body-top);
   bottom: var(--chrome-bottom);
   width: var(--list-w);
   background: var(--bg-soft);
@@ -1972,7 +1860,7 @@ body[data-list-column="history"][data-list-column-hidden] .list-open,
 body[data-list-column="worktree"][data-list-column-hidden] .list-open,
 body[data-list-column="sidebar"][data-list-column-hidden] .sidebar-open {
   position: fixed;
-  top: var(--global-header-h);
+  top: var(--panel-body-top);
   bottom: var(--chrome-bottom);
   z-index: 30;
   display: flex;
@@ -2026,7 +1914,7 @@ body[data-list-column="sidebar"]:not([data-list-column-hidden]) .sidebar-fold,
 body[data-list-column="history"]:not([data-list-tree-folded]) .sidebar-fold,
 body[data-list-column="worktree"]:not([data-list-tree-folded]) .sidebar-fold {
   position: fixed;
-  top: var(--global-header-h);
+  top: var(--panel-body-top);
   bottom: var(--chrome-bottom);
   z-index: 33;
   display: grid;
@@ -2070,7 +1958,7 @@ body.gdp-history-page #repo-target-wrap {
 #history-resizer {
   display: none;
   position: fixed;
-  top: var(--global-header-h);
+  top: var(--panel-body-top);
   bottom: var(--chrome-bottom);
   left: calc(var(--chrome-left) + var(--files-shown) + var(--list-shown) - var(--space-1));
   width: 8px;
@@ -7027,15 +6915,11 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   }
 }
 
+/* 狭いデスクトップの窓 (641〜900)。並び (一覧の列・本文の箱) はどの幅でも同じ固定の
+   骨格で、足りない幅は一覧の列の縮める順 (core/list-column.ts の listColumnLayout) が
+   詰める・畳む。ここでは帯の中の文言だけを詰める (上に積む古い並びは置かない:
+   #sidebar・History の一覧を流れに戻すと、固定の一覧の列と本文に重なった)。 */
 @media (max-width: 900px) {
-  #sidebar {
-    position: static;
-    width: auto;
-    max-height: 220px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-  #content { margin-left: 0; max-width: none; padding-top: 240px; }
   .controls input[type="search"] { width: 130px; }
   .app-menu {
     flex-shrink: 1;
@@ -7047,20 +6931,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   #status { padding: 0 6px 0 8px; }
   #status::before { margin-right: 0; }
   #meta { flex-wrap: wrap; row-gap: 4px; }
-  body.gdp-history-page #history-panel {
-    position: static;
-    width: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-  body.gdp-history-page #sidebar { left: 0; }
-  body.gdp-history-page #history-resizer {
-    display: none;
-  }
-  body.gdp-history-page main#content,
-  body.gdp-history-page.gdp-sidebar-hidden main#content {
-    margin-left: 0;
-  }
 }
 
 @media (max-width: 640px) {
@@ -7071,14 +6941,6 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
     align-items: flex-start;
     padding-top: 8px;
     padding-bottom: 8px;
-  }
-  .brand {
-    flex: 0 0 auto;
-    max-width: 28px;
-  }
-  .brand .title,
-  #project-branch {
-    display: none;
   }
   .app-menu {
     flex: 1 1 0;
@@ -17674,35 +17536,6 @@ body.main-split-resizing {
 #nav-expand[hidden] {
   display: none;
 }
-button.brand,
-button.brand:hover,
-button.brand[aria-expanded="true"] {
-  margin-right: 0;
-  padding: 0 calc(var(--pad-text) - var(--pad-face));
-  height: var(--ui-control-sm);
-  gap: var(--space-2);
-  background: transparent;
-  box-shadow: none;
-}
-button.brand:hover,
-button.brand[aria-expanded="true"] {
-  background: var(--color-raised);
-}
-.brand {
-  font-size: var(--ui-font-title);
-  max-width: 32vw;
-}
-.project-branch {
-  gap: var(--space-2);
-  padding-left: var(--space-2);
-  border-left: 1px solid var(--color-line);
-  color: var(--color-text-2);
-  font-size: var(--ui-font-base);
-}
-.project-branch-name {
-  font-family: var(--font-ui);
-  font-weight: 400;
-}
 /* ---- 画面の入口 (#view-head の .view-strip) ----
    6 つの絵柄 (Files / Diff / History / Worktrees / Data / Work log)。押せる
    領域は --ui-control-sm (28) 角。何を見ているかはタブだけが示すので、選んで
@@ -17745,7 +17578,7 @@ button.brand[aria-expanded="true"] {
 }
 /* 外の輪 (4px) が切れる所は内側に描く (部品の位置は動かさない)。
    - 窓の上端に接する部品: 左のサイドバーの頭 (検索・畳む)・タブ列の操作 (最後の
-     タブの右の＋・右端の分割)・タブ列の左端のプロジェクトの切替
+     タブの右の＋・右端の分割)・一覧の列の頭の 1 段目のプロジェクトの切替
    - 右の列を畳むボタン: 右の列の頭 (上端) か畳んだ帯 (右端) のどちらかにいる
    - 窓の下端に接する部品: 最下段の件数・使用量・操作
    - 画面の絵柄: 右の列の頭では上端、畳んだ帯では右端に接する
@@ -17753,7 +17586,7 @@ button.brand[aria-expanded="true"] {
 .nav-head > .nav-search:focus-visible,
 .nav-head > .nav-icon-action:focus-visible,
 .main-tabs-action:focus-visible,
-#tabs-lead button.brand:focus-visible,
+#project-head button.brand:focus-visible,
 #sidebar-toggle:focus-visible,
 #statusbar .usage-status-item:focus-visible,
 #statusbar .statusbar-icon-action:focus-visible,
@@ -17825,30 +17658,30 @@ button.brand[aria-expanded="true"] {
   fill: currentColor;
 }
 
-/* ---- 画面の入口 (#view-head) とプロジェクト名 (#tabs-lead) の置き場所 ----
-   入口の絵柄は一覧の列の頭 (#panel-head。タブ列の行の左端) の 1 段 (右端に
-   ファイル一覧を畳むボタン)。ファイル一覧を畳んでも頭の行はそのまま (畳むのは
-   頭の下の一覧だけ。views/sidebar.ts の placeSidebarToggle)。プロジェクト名と
-   ブランチはタブ列の左端 (頭の右) に固定。 */
+/* ---- 一覧の列の頭 (#panel-head): 1 段目にプロジェクト、2 段目に画面の入口 ----
+   左のサイドバーの右の 2 段。1 段目 (#project-head) はタブ列と同じ高さで、色の
+   四角と頭文字・名前 ▾ (= プロジェクトの切替) と、右寄せでブランチ。2 段目
+   (#view-head) は画面の入口の絵柄と、右端にファイル一覧を畳むボタン。ファイル一覧を
+   畳んでも頭はそのまま (畳むのは頭の下の一覧だけ。views/sidebar.ts の
+   placeSidebarToggle)。 */
 .view-head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
 }
-/* 一覧の列の頭 (#panel-head)。タブ列の行と同じ高さの 1 段に絵柄の列と、右端に
-   ファイル一覧を畳むボタン。幅は固定 (--column-head-w) で、画面の切替でも一覧の
-   列の開閉 (自動で畳むときを含む) でも動かない。左のサイドバーを畳んだときだけ、
-   先頭に「サイドバーを出す」が出て、その幅だけ広がる。押せる領域の左端は面の線
-   (--pad-face)。 */
+/* 幅は固定 (--column-head-w)・高さは 2 段 (--column-head-h) で、画面の切替でも一覧の
+   列の開閉 (自動で畳むときを含む) でもプロジェクト名の長さでも動かない。左の
+   サイドバーを畳んだときだけ、1 段目の先頭に「サイドバーを出す」が出て、その幅だけ
+   広がる。押せる領域の左端は面の線 (--pad-face)。 */
 #panel-head {
   position: fixed;
   left: var(--chrome-left);
   top: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   width: var(--column-head-w);
-  height: var(--global-header-h);
+  height: var(--column-head-h);
   z-index: 32;
   box-sizing: border-box;
   padding: 0 var(--pad-face);
@@ -17856,11 +17689,114 @@ button.brand[aria-expanded="true"] {
   /* 右の線は内側の影で引く (border だと中身が 1px 削られ、畳むボタンが動く)。 */
   box-shadow: inset -1px 0 0 var(--color-line-soft);
 }
-/* 左のサイドバーを畳んだときの「サイドバーを出す」: 頭の先頭 (幅は
-   --nav-expand-w = ボタンと間)。 */
-#panel-head > #nav-expand {
+/* 1 段目。名前と枝の幅は views/brand-fit.ts が段の幅で分ける (--brand-name-max /
+   --brand-branch-max を段に書く)。 */
+.project-head {
+  display: flex;
+  align-items: center;
   flex: none;
-  margin-right: var(--space-2);
+  gap: var(--space-2);
+  height: var(--main-tabs-h);
+  min-width: 0;
+}
+/* 左のサイドバーを畳んだときの「サイドバーを出す」: 1 段目の先頭 (幅は
+   --nav-expand-w = ボタンと間)。 */
+#project-head > #nav-expand {
+  flex: none;
+}
+/* 名前と ▾ (プロジェクトの切替)。四角・名前・▾ を 1 つのボタンにし、押せることは
+   hover の面で示す。箱の寸法は状態で変えない。 */
+button.brand {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  gap: var(--space-2);
+  min-width: 0;
+  height: var(--ui-control-sm);
+  margin: 0;
+  padding: 0 calc(var(--pad-text) - var(--pad-face));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--ui-font-base);
+  font-weight: 600;
+  line-height: 1;
+  text-align: left;
+  cursor: pointer;
+}
+button.brand:hover,
+button.brand[aria-expanded="true"] {
+  background: var(--color-raised);
+}
+/* 長い名前は省略 (…)。全文は名前の title と、ボタンの aria-label (app.ts の
+   setProjectName)。 */
+.brand .title {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: var(--brand-name-max, none);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 開くことを示す山形 (project-switcher.ts が足す)。 */
+.brand-chevron {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-text-3);
+}
+.brand-chevron svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  fill: currentColor;
+}
+button.brand:hover .brand-chevron,
+button.brand:focus-visible .brand-chevron,
+button.brand[aria-expanded="true"] .brand-chevron {
+  color: var(--color-text);
+}
+button.brand[aria-expanded="true"] .brand-chevron svg {
+  transform: rotate(180deg);
+}
+/* ブランチ (右寄せ。押せない)。絵と名前だけで札にしない。幅は views/brand-fit.ts が
+   決めた上限まで (縮めない)。文字の右端は名前の左端と同じ距離だけ面の端から離す。 */
+.project-branch {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: var(--brand-branch-max, 40%);
+  margin-left: auto;
+  padding-right: calc(var(--pad-text) - var(--pad-face));
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  line-height: 1;
+}
+.project-branch[hidden] {
+  display: none;
+}
+/* 絵は JS が後から入れるので、箱は最初から絵の大きさ。 */
+.project-branch .goi-icon {
+  display: inline-flex;
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  color: var(--color-text-3);
+}
+.project-branch svg {
+  display: block;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.project-branch-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* 幅が足りずに自動で畳んだ: 開くボタンの肩に小さな印を出し、手で畳んだ
    ときと見分けられるようにする (理由はボタンの title に入れる。app.ts の
@@ -17878,12 +17814,12 @@ button.brand[aria-expanded="true"] {
   border-radius: 50%;
   background: var(--color-accent);
 }
-/* 1 段 (タブ列の行) に絵柄と、右端に畳むボタン。 */
+/* 2 段目に絵柄と、右端に畳むボタン。 */
 #panel-head > #view-head {
-  flex: 1 1 auto;
+  flex: none;
   flex-direction: row;
   align-items: center;
-  height: var(--global-header-h);
+  height: var(--view-head-h);
 }
 #panel-head > #view-head > .view-strip {
   flex: 0 1 auto;
@@ -17898,32 +17834,12 @@ button.brand[aria-expanded="true"] {
 .view-head-row > #sidebar-toggle {
   flex: none;
 }
-/* タブ列の左端のプロジェクト名とブランチ (= プロジェクトの切替)。幅は固定の
-   --tabs-lead-w で、画面・タブ・一覧の列の開閉・2 面で変えない (出たり消えたり
-   動いたりすると、押す場所がずれる)。名前と枝はこの幅の中で分ける
-   (views/brand-fit.ts)。タブはその右から始まる。 */
+/* タブ列の左端の置き場所 (#tabs-lead)。デスクトップでは空 (SP の引き出しを開く
+   ボタンだけが入る)。 */
 .tabs-lead {
   display: flex;
   align-items: center;
   flex: none;
-}
-.tabs-lead-name {
-  display: flex;
-  align-items: center;
-  flex: 0 0 var(--tabs-lead-w);
-  width: var(--tabs-lead-w);
-  min-width: 0;
-  box-sizing: border-box;
-  padding: 0 var(--space-2) 0 var(--pad-face);
-}
-.tabs-lead .brand {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  font-size: var(--ui-font-base);
-}
-.tabs-lead .project-branch {
-  font-size: var(--ui-font-sm);
 }
 
 /* ---- 最下段の右の操作 (上の行の右端から移したもの) ---- */
@@ -23393,10 +23309,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     --main-pane-h: calc(100dvh - var(--global-header-h) - var(--main-bottom));
     /* 下から出す面の上端 (T2)。上に本文を少し残し、面であると分かるようにする。 */
     --sp-sheet-top: calc(var(--global-header-h) + 12vh);
-    --panel-body-top: calc(var(--sp-sheet-top) + var(--main-tabs-h));
-    /* タブ列の左端 (T1): 引き出しを開くボタンと、省略したプロジェクト名だけ。
-       デスクトップの固定の幅 (200) ではタブが 1 枚ぶんしか残らない。 */
-    --tabs-lead-w: calc(var(--sp-touch) + var(--space-unit) * 30);
+    --panel-body-top: calc(var(--sp-sheet-top) + var(--column-head-h));
   }
   /* ソフトキーボードが出ている間は、帯と最下段を隠して端末を広く取る。
      隠れている高さ --sp-keyboard-h (T1) の出所は mobile-shell.ts
@@ -23425,10 +23338,8 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     flex-shrink: 0;
   }
   #content {
-    /* 本文の左右の余白 (T3) を詰める。上の 900px の古い節の padding-top
-       (上に積んだ木の分) を戻す。 */
+    /* 本文の左右の余白 (T3) を詰める。 */
     --content-pad-x: var(--space-3);
-    padding-top: var(--content-top-gap);
   }
 
   /* タブ列: 安全領域の下から。一覧の列の頭は面へ移すので、左端から右端まで。 */
@@ -23528,7 +23439,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
 
   /* ---- 一覧の列 = 下から出す面 ----
-     一覧の列の頭 (画面の入口) と、その画面の一覧 (一覧の無い画面はファイル一覧、
+     一覧の列の頭 (1 段目のプロジェクトと 2 段目の画面の入口) と、その画面の一覧 (一覧の無い画面はファイル一覧、
      Diff は変更ファイルの一覧、History と作業ツリーは一覧と変更ファイルの一覧) を
      まとめて下から出す。閉じている
      間は画面の外で、visibility で Tab と読み上げからも外す (display は他の規則が
@@ -23539,10 +23450,6 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   #sidebar,
   body[data-list-column] #sidebar,
   #history-panel,
-  /* 上の 900px の古い節の body.gdp-history-page #history-panel (position:
-     static) を同じ詳細度で上書きする。負けると History の一覧だけが面の位置に
-     来ず、画面の上端から本文に重なった。 */
-  body.gdp-history-page #history-panel,
   body:not([data-worktree-overview]) #worktree-panel {
     position: fixed;
     top: var(--panel-body-top);
@@ -23569,7 +23476,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     top: var(--sp-sheet-top);
     bottom: auto;
     width: auto;
-    height: var(--main-tabs-h);
+    height: var(--column-head-h);
     padding: 0 var(--pad-face);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     box-shadow: 0 -1px 0 var(--color-line-soft);
@@ -23630,34 +23537,11 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body.gdp-worktree-page.gdp-sidebar-hidden:not([data-worktree-overview]) main#content {
     margin-left: 0;
   }
-  /* タブ列の左端の名前と枝: 上の 640px の古い節 (上の行があった頃の詰め方) が
-     .brand を 28px にし、名前と枝を隠すので戻す。枝を CSS だけで隠すと、名前と枝の
-     幅分け (views/brand-fit.ts) が見えない枝の分を空けて名前を削る。 */
-  /* 電話では引き出しのボタン (#mobile-nav-open) も幅 --tabs-lead-w の中に入れる
-     (その幅はボタンの分を含む)。デスクトップの名前の枠 (.tabs-lead-name) は
-     外の #tabs-lead に溶かし、名前をボタンの隣の子として並べる。 */
+  /* タブ列の左端: 引き出しを開くボタン (#mobile-nav-open) だけ。プロジェクトの名前と
+     ブランチは、デスクトップと同じく一覧の列の頭の 1 段目 (下から出す面の頭)。 */
   .tabs-lead {
-    flex: 0 0 var(--tabs-lead-w);
-    width: var(--tabs-lead-w);
-    min-width: 0;
     box-sizing: border-box;
-    gap: 0;
     padding: 0 var(--space-1) 0 var(--pad-face);
-  }
-  .tabs-lead-name {
-    display: contents;
-  }
-  .tabs-lead .brand {
-    flex: 0 1 auto;
-    max-width: 100%;
-    gap: var(--space-1);
-    padding: 0 var(--space-1);
-  }
-  .tabs-lead .brand .title {
-    display: block;
-  }
-  .tabs-lead #project-branch:not([hidden]) {
-    display: inline-flex;
   }
   /* 列を畳む・一覧を隠す・幅を変えるは電話では使わない (面の開け閉めが代わる)。 */
   #sidebar-toggle,

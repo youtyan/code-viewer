@@ -1,7 +1,7 @@
-// ファイル一覧を畳む = 頭の下の一覧だけを畳む。一覧の列の頭 (#panel-head: 画面の
-// 入口の絵柄と畳むボタン。タブ列の行の左端) は同じ場所と幅で残り、タブ列の左端
-// (名前の枠)・右端 (分割のボタン) は動かない (ui-layout.md の「一覧の列」)。本文は
-// 一覧の列の残りの右から使う。
+// ファイル一覧を畳む = 頭の下の一覧だけを畳む。一覧の列の頭 (#panel-head: 1 段目に
+// いま見ているプロジェクト、2 段目に画面の入口の絵柄と畳むボタン。左のサイドバーの
+// 右) は同じ場所・幅・高さで残り、タブ列の左端・右端 (分割のボタン) は動かない
+// (ui-layout.md の「一覧の列」)。本文は一覧の列の残りの右から使う。
 //
 // 状態は body の印の組み合わせ (ファイル一覧を畳んだ・2 面・一覧を出す画面・一覧や
 // 変更ファイルの一覧を畳んだ)。値は固定せず、骨格の変数から組み立てた式と比べる。
@@ -87,17 +87,76 @@ describe("一覧の列の頭の行は畳んでも残る", () => {
     });
   });
 
-  test.each(STATES)("$name: 頭の行は 1 段のまま (高さ・下端を変えない)", ({
+  test.each(
+    STATES,
+  )("$name: 頭は 2 段のまま (1 段目はタブ列と同じ高さ、下端は一覧の列の本体の上端)", ({
     marks,
   }) => {
-    const on = declarationsOn("#panel-head", marks);
+    const head = declarationsOn("#panel-head", marks);
+    const tabs = declarationsOn("#main-tabs", marks);
     expect({
-      height: resolved(on.get("height"), marks),
-      bottom: on.get("bottom"),
+      top: head.get("top"),
+      height: resolved(head.get("height"), marks),
+      bottom: head.get("bottom"),
+      firstRow: resolved(
+        declarationsOn(".project-head", marks).get("height"),
+        marks,
+      ),
+      secondRow: resolved(
+        declarationsOn("#panel-head > #view-head", marks).get("height"),
+        marks,
+      ),
     }).toEqual({
-      height: resolved("var(--global-header-h)", marks),
+      top: "0",
+      height: resolved("var(--panel-body-top)", marks),
       bottom: undefined,
+      firstRow: resolved(tabs.get("height"), marks),
+      secondRow: resolved("var(--view-head-h)", marks),
     });
+  });
+
+  test("頭の高さは 2 段の和 (2 段目の高さを変えると、頭と一覧の列の本体の上端が一緒に変わる)", () => {
+    const vars = variables([]);
+    const withTallerRow = new Map(vars).set("--view-head-h", "99px");
+    expect({
+      head: resolveVar("var(--column-head-h)", vars),
+      body: resolveVar("var(--panel-body-top)", withTallerRow),
+    }).toEqual({
+      head: resolveVar("calc(var(--main-tabs-h) + var(--view-head-h))", vars),
+      body: resolveVar("calc(var(--main-tabs-h) + 99px)", vars),
+    });
+  });
+
+  // 頭の下の一覧の列の中身は、どれも頭の下から (ファイル一覧を畳むと一覧が頭の下に
+  // 来るので、タブ列の下から始めると 2 段目に隠れる)。
+  test.each([
+    "#file-list",
+    "#sidebar",
+    "#file-list-resizer",
+    "#sidebar-resizer",
+    "#history-panel",
+    "#worktree-panel",
+    "#history-resizer",
+    ".sidebar-open",
+    ".list-open",
+    ".list-tree-open",
+    ".list-fold",
+    ".sidebar-fold",
+  ])("%s の上端を決める規則はどれも頭の下 (--panel-body-top)", (element) => {
+    // 一覧だけの作業ツリー (data-worktree-overview) は一覧が本文なので本文の上端から。
+    const tops = rules
+      .filter(
+        (rule) =>
+          (rule.selector === element ||
+            rule.selector.endsWith(` ${element}`)) &&
+          !rule.selector.includes("[data-worktree-overview]") &&
+          rule.declarations.has("top"),
+      )
+      .map((rule) => [rule.selector, rule.declarations.get("top")]);
+    expect(tops.length).toBeGreaterThan(0);
+    expect(tops).toEqual(
+      tops.map(([selector]) => [selector, "var(--panel-body-top)"]),
+    );
   });
 
   test.each(

@@ -395,11 +395,10 @@ export function createSidebar(deps: SidebarDeps) {
 
   /**
    * ファイル一覧を畳む / 出すボタンと画面の入口 (#view-head) の置き場所。入口の
-   * 絵柄とボタンは一覧の列の頭 (#panel-head。タブ列の行の左端) の 1 段で、
-   * ファイル一覧を畳んでも動かさない (畳むのは頭の下の一覧だけ。ui-layout.md の
-   * 「一覧の列」)。ボタンは絵柄の行の右端 (.view-head-row)。プロジェクト名と
-   * ブランチ (#project-switcher) はタブ列の左端 (#tabs-lead) に固定で、ここでは
-   * 動かさない。
+   * 絵柄とボタンは一覧の列の頭 (#panel-head) の 2 段目で、ファイル一覧を畳んでも
+   * 動かさない (畳むのは頭の下の一覧だけ。ui-layout.md の「一覧の列」)。ボタンは
+   * 絵柄の行の右端 (.view-head-row)。1 段目 (#project-head。プロジェクトの名前と
+   * ブランチ) はここでは動かさない。
    */
   function placeSidebarToggle() {
     const head = document.querySelector<HTMLElement>("#view-head");

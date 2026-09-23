@@ -95,7 +95,7 @@ export function attachStickyHScroll(card: HTMLElement): void {
 
     measure();
     if (typeof ResizeObserver !== "undefined") {
-      // 枠の幅 (面の幅・右の列) と中身の幅 (行の展開・構文の色付けで字の幅が
+      // 枠の幅 (面の幅・一覧の列の開閉) と中身の幅 (行の展開・構文の色付けで字の幅が
       // 変わる) のどちらが変わっても測り直す。
       const observer = new ResizeObserver(measure);
       for (const lane of lanes) {

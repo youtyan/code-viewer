@@ -15,6 +15,8 @@
 // 1 つで完結するサーバ (`--standalone`) を新しいポートで開いたときだけ
 // (そこでは既定のダーク・開いたサイドバーで描き始める)。
 
+import type { ProjectColor } from "../../core/project-colors";
+
 export const EARLY_LOOK_STORAGE_KEY = "code-viewer:early-look";
 
 export type EarlyLook = {
@@ -35,7 +37,26 @@ export type EarlyLook = {
   sidebarWidth?: number;
   /** 一覧の列の利用者の幅。 */
   historyWidth?: number;
+  /**
+   * 一覧の列の頭の 1 段目 (プロジェクトの名前・ブランチ・頭文字・色)。index.html の
+   * #first-project が読む。控えはオリジンで 1 つで、入口の下ではプロジェクトを
+   * 移ってもオリジンが同じなので、プロジェクトの鍵 (`/p/<鍵>`、前置きの無い
+   * 画面は "") ごとに持つ (1 つだけだと、移った直後に前のプロジェクトの名前が出る)。
+   */
+  projects?: Record<string, EarlyProject>;
 };
+
+export type EarlyProject = {
+  name: string;
+  branch: string;
+  /** 頭文字 (core/project-colors.ts の projectInitials)。 */
+  mark: string;
+  /** 色の四角の色 (data-project-color の値)。分からなければ null (色なし)。 */
+  color: ProjectColor | null;
+};
+
+/** 控えるプロジェクトの数の上限 (古いものから落とす)。 */
+export const EARLY_PROJECTS_MAX = 24;
 
 let current: EarlyLook | null = null;
 
@@ -59,12 +80,48 @@ export function readEarlyLook():
   }
 }
 
+/**
+ * プロジェクトの名前などを控える (最近のものを最後に置き、上限を超えたら最初から
+ * 落とす)。ほかのプロジェクトの控えは残す。
+ */
+export function withEarlyProject(
+  projects: Record<string, EarlyProject> | undefined,
+  key: string,
+  project: EarlyProject,
+): Record<string, EarlyProject> {
+  const entries = Object.entries(projects ?? {}).filter(([k]) => k !== key);
+  entries.push([key, project]);
+  return Object.fromEntries(entries.slice(-EARLY_PROJECTS_MAX));
+}
+
+export function rememberEarlyProject(key: string, project: EarlyProject): void {
+  rememberEarlyLook({
+    projects: withEarlyProject(sessionLook().projects, key, project),
+  });
+}
+
+/**
+ * このセッションで書いた控え。まだ書いていなければ、保存済みの控えのうち
+ * ほかのプロジェクトの控え (projects) だけを引き継ぐ (ほかの値は app.ts が設定から
+ * 全部書き直すが、ほかのプロジェクトの名前はこの画面では分からない)。
+ */
+function sessionLook(): Partial<EarlyLook> {
+  if (current) return current;
+  const stored = readEarlyLook();
+  if ("error" in stored) {
+    console.warn("[code-viewer] could not read the early look", stored.error);
+    return {};
+  }
+  const projects = stored.look?.projects;
+  return projects ? { projects } : {};
+}
+
 export function rememberEarlyLook(patch: Partial<EarlyLook>): void {
   current = {
     theme: "dark",
     navCollapsed: false,
     navWidth: 0,
-    ...current,
+    ...sessionLook(),
     ...patch,
   };
   try {

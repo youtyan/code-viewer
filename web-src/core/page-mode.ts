@@ -61,3 +61,14 @@ export function pageModeClasses(
   if (page) on.add(page);
   return on;
 }
+
+/**
+ * 作業ツリーの一覧だけの表示 (body[data-worktree-overview]。一覧が本文) か。
+ * Worktrees の画面で作業ツリーを選んでいない (`wt` が無い) とき。印は画面の印と
+ * 同じときに route から付ける (worktree-view.ts は一覧を読んだ後に同じ印を付け
+ * 直す。それまで「選んでいる作業ツリー」の並びで描くと、一覧が一覧の列の位置から
+ * 本文の位置へ動いた)。
+ */
+export function worktreeOverview(route: AppRoute): boolean {
+  return route.screen === "worktree" && !route.wt;
+}

@@ -1,12 +1,11 @@
-// タブ列の左端の名前の枠 (#tabs-lead) と、キーボードで移る順 (DOM の並び)。
+// いま見ているプロジェクトの名前は一覧の列の頭 (#panel-head) の 1 段目
+// (#project-head) にあり、タブ列の左端 (#tabs-lead) には名前の枠を置かない
+// (タブ列はその分だけ左から始まる)。左のサイドバーを畳んだときだけ出る
+// 「サイドバーを出す」は 1 段目の先頭。
 //
-// 名前の枠は幅 --tabs-lead-w で、画面・2 面・左のサイドバーの開閉で名前の
-// 位置を変えない。左のサイドバーを畳んだときだけ出る「サイドバーを出す」は
-// 枠の外に置く (枠の中に置くと、名前が 28px 右へずれて縮んだ)。いまは最上段の
-// 左端 = 一覧の列の頭 (#panel-head) の先頭。
-//
-// Tab で移る順は見た目の順 (DOM の並び): 左のサイドバー → 一覧の列の頭 →
-// タブ列 → ファイル一覧 → 一覧 → 変更ファイルの一覧 → 本文 → 最下段。
+// Tab で移る順は見た目の順 (DOM の並び): 左のサイドバー → 一覧の列の頭 (1 段目の
+// サイドバーを出す・名前 → 2 段目の絵柄・畳む) → タブ列 → ファイル一覧 → 一覧 →
+// 変更ファイルの一覧 → 本文 → 最下段。
 
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -35,40 +34,60 @@ function byId(id: string): HTMLElement {
   return element;
 }
 
-describe("the name box at the left end of the tab row", () => {
-  test("the project name is inside the name box", () => {
-    const box = byId("project-switcher").closest(".tabs-lead-name");
-    expect(box?.parentElement?.id).toBe("tabs-lead");
+describe("the project name lives in the first row of the column head", () => {
+  test("the name, its mark and the branch are in the first row; the view strip is in the second", () => {
+    const head = byId("panel-head");
+    const rows = [...head.children].map((row) => row.id);
+    expect(rows).toEqual(["project-head", "view-head"]);
+    expect(
+      [
+        "project-switcher",
+        "project-title",
+        "project-mark",
+        "project-branch",
+      ].map((id) => byId(id).closest(".project-head")?.id),
+    ).toEqual(["project-head", "project-head", "project-head", "project-head"]);
+    // 名前と ▾ だけが切替のボタン (ブランチは押せない)。
+    expect(byId("project-branch").closest("button")).toBeNull();
+    expect(byId("project-title").parentElement?.id).toBe("project-switcher");
   });
 
-  test("the show-sidebar button is outside the name box, first in the column head", () => {
+  test("the tab row lead holds no name box", () => {
+    const lead = byId("tabs-lead");
+    expect(lead.children.length).toBe(0);
+    expect(page.querySelector(".tabs-lead-name")).toBeNull();
+  });
+
+  test("the show-sidebar button comes first in the first row", () => {
     const expand = byId("nav-expand");
-    expect(expand.closest(".tabs-lead-name")).toBeNull();
-    expect(expand.parentElement?.id).toBe("panel-head");
-    expect(expand.nextElementSibling).toBe(byId("view-head"));
+    expect(expand.parentElement?.id).toBe("project-head");
+    expect(expand.nextElementSibling).toBe(byId("project-switcher"));
+    const rules = baseRules(loadStyleSheet());
+    expect(
+      cascadedDeclarations(
+        rules,
+        (s) => s === "#project-head > #nav-expand",
+      ).get("flex"),
+    ).toBe("none");
   });
 
-  test("the name box keeps the fixed width and the button does not take from it", () => {
+  test("the tab row lead takes no width on the desktop", () => {
     const rules = baseRules(loadStyleSheet());
-    // 変数は :root と html, body に分かれている。body の値が html の値を継ぐ。
+    const lead = cascadedDeclarations(rules, (s) => s === ".tabs-lead");
+    expect({
+      width: lead.get("width"),
+      flex: lead.get("flex"),
+      padding: lead.get("padding"),
+    }).toEqual({ width: undefined, flex: "none", padding: undefined });
+    // 名前の枠の幅の変数はデスクトップには無い。
     const vars = new Map([
       ...cascadedDeclarations(rules, (s) => s === ":root" || s === "html"),
       ...cascadedDeclarations(rules, (s) => s === "body"),
     ]);
-    const width = resolveVar("var(--tabs-lead-w)", vars);
-    expect(width).not.toBe("");
-    const box = cascadedDeclarations(rules, (s) => s === ".tabs-lead-name");
-    expect(resolveVar(box.get("width") ?? "", vars)).toBe(width);
-    expect(resolveVar(box.get("flex") ?? "", vars)).toBe(`0 0 ${width}`);
-    // 外側の #tabs-lead は幅を持たない (名前の枠の幅だけ)
-    const lead = cascadedDeclarations(rules, (s) => s === ".tabs-lead");
-    expect(lead.get("width")).toBeUndefined();
-    expect(lead.get("flex")).toBe("none");
-    const expand = cascadedDeclarations(
-      rules,
-      (s) => s === "#panel-head > #nav-expand",
+    expect(vars.has("--tabs-lead-w")).toBe(false);
+    expect(() => resolveVar("var(--tabs-lead-w)", vars)).toThrow(
+      "Unresolved CSS variable --tabs-lead-w",
     );
-    expect(expand.get("flex")).toBe("none");
   });
 });
 

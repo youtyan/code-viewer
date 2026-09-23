@@ -327,7 +327,7 @@ describe("the diff card header's Viewed and the hidden-line buttons draw the sha
 //
 // - 自前の outline かブラウザの既定の輪だった部品は、共有の外の輪
 // - 外の輪 (4px) が切れる所は内側の輪 (部品の位置は動かさない):
-//   窓の上端に接する (左のサイドバーの頭・タブ列の操作・タブ列の左端の
+//   窓の上端に接する (左のサイドバーの頭・タブ列の操作・一覧の列の頭の 1 段目の
 //   プロジェクトの切替・右の列の頭)、右端に接する (畳んだ右の列の帯)、下端に接する
 //   (最下段)、画面の絵柄 (右の列の頭
 //   では上端、畳んだ帯では右端)、overflow で切る枠の中 (Diff の上の段と木の切替・
@@ -360,13 +360,7 @@ describe("a focused control draws the ring that fits where it sits", () => {
     </div>
     <nav id="main-tabs">
       <div class="main-tabs-pane">
-        <div id="tabs-lead" class="tabs-lead">
-          <div id="view-head" class="view-head">
-            <div class="view-head-row">
-              <button id="lead-switcher" class="brand">sample</button>
-            </div>
-          </div>
-        </div>
+        <div id="tabs-lead" class="tabs-lead"></div>
         <div class="main-tabs-strip">
           <button id="tab-new" class="main-tabs-action">new</button>
         </div>
@@ -376,13 +370,14 @@ describe("a focused control draws the ring that fits where it sits", () => {
       </div>
     </nav>
     <div id="panel-head" class="panel-head">
+      <div id="project-head" class="project-head">
+        <button id="project-switcher" class="brand">sample</button>
+      </div>
       <div class="view-head">
-        <div class="view-head-row">
-          <button id="project-switcher" class="brand">sample</button>
-        </div>
         <nav class="app-menu view-strip">
           <a id="head-view" class="app-menu-item view-strip-item" href="#files">files</a>
         </nav>
+        <div class="view-head-row"></div>
       </div>
       <button id="sidebar-toggle">show</button>
     </div>
@@ -460,8 +455,7 @@ describe("a focused control draws the ring that fits where it sits", () => {
   const OUTER = "var(--focus-ring)";
   const INSET = "var(--focus-ring-inset)";
   test.each([
-    // 自前の outline だった: プロジェクトの切替 (右の列の頭)・木の全部開く / 畳む
-    ["project-switcher", OUTER],
+    // 自前の outline だった: 木の全部開く / 畳む
     ["sb-expand-all", OUTER],
     ["sb-collapse-all", OUTER],
     // ブラウザの既定の輪だった: 本文のボタン・Diff の上の段・Files の一覧の並べ替え
@@ -475,7 +469,8 @@ describe("a focused control draws the ring that fits where it sits", () => {
     // 窓の上端に接する
     ["search-btn", INSET],
     ["nav-collapse", INSET],
-    ["lead-switcher", INSET],
+    // 一覧の列の頭の 1 段目のプロジェクトの切替
+    ["project-switcher", INSET],
     // 窓の下端に接する (最下段)
     ["agent-status", INSET],
     ["usage-item", INSET],

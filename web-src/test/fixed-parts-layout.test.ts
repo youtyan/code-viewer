@@ -123,6 +123,7 @@ describe("JS が後から絵を差し込む箱は、最初から絵と同じ大�
     { host: ".nav-search", part: "左のサイドバーの検索" },
     { host: ".nav-foot-item", part: "左のサイドバーの足元" },
     { host: ".nav-icon-action", part: "左のサイドバーの頭の絵のボタン" },
+    { host: ".project-branch", part: "一覧の列の頭の 1 段目のブランチの絵" },
   ])("$part ($host)", ({ host }) => {
     const size = (selector: string) => {
       const declarations = cascadedDeclarations(rules, (s) => s === selector);
@@ -133,6 +134,37 @@ describe("JS が後から絵を差し込む箱は、最初から絵と同じ大�
       });
     };
     expect(size(`${host} .goi-icon`)).toEqual(size(`${host} svg`));
+  });
+});
+
+// 名前・頭文字・ブランチは控えか設定から後で入る (index.html の #first-project・
+// app.ts の setProjectName)。入っても、名前の左端・2 段目・タブ列は動かない。
+describe("一覧の列の頭の 1 段目は、中身が入る前から場所を取る", () => {
+  const at = (selector: string) =>
+    cascadedDeclarations(rules, (s) => s === selector);
+
+  test("段の高さはタブ列の高さ、色の四角 (.project-mark) は決まった大きさの正方形で縮まない", () => {
+    const mark = at(".project-mark");
+    expect({
+      row: at(".project-head").get("height"),
+      rowFlex: at(".project-head").get("flex"),
+      markWidth: mark.get("width"),
+      markHeight: mark.get("height"),
+      markFlex: mark.get("flex"),
+    }).toEqual({
+      row: at("#main-tabs").get("height"),
+      rowFlex: "none",
+      markWidth: "var(--project-mark-size)",
+      markHeight: "var(--project-mark-size)",
+      markFlex: "none",
+    });
+  });
+
+  test("ブランチは右寄せ (出ても名前の左端を押さない)。隠すときは display: none", () => {
+    expect({
+      margin: at(".project-branch").get("margin-left"),
+      hidden: at(".project-branch[hidden]").get("display"),
+    }).toEqual({ margin: "auto", hidden: "none" });
   });
 });
 

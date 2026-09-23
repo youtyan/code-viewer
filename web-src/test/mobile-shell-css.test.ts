@@ -281,18 +281,19 @@ describe("電話の段の骨格", () => {
   });
 
   // 変数を最後まで解決する (骨格の名前が消えたら resolveVar が投げて落ちる)。
-  test("面の一覧は面の頭 (タブ列と同じ高さの 1 段) の下から", () => {
+  test("面の一覧は面の頭 (1 段目のプロジェクトと 2 段目の絵柄) の下から", () => {
     const vars = bodyVariables(withTiers(SOFT_KEYS, PHONE));
     vars.set("--global-header-h", "H");
     vars.set("--main-tabs-h", "M");
+    vars.set("--view-head-h", "V");
     expect(resolveVar(vars.get("--panel-body-top") ?? "", vars)).toBe(
-      "calc(calc(H + 12vh) + M)",
+      "calc(calc(H + 12vh) + calc(M + V))",
     );
     expect(
       declarationsOf(withTiers(SOFT_KEYS, PHONE), ["#panel-head"]).get(
         "height",
       ),
-    ).toBe("var(--main-tabs-h)");
+    ).toBe("var(--column-head-h)");
   });
 
   // ファイル一覧を畳んでも (一覧を出す画面・利用者が畳んだ) 絵柄は頭の行に残る
@@ -320,12 +321,13 @@ describe("電話の段の骨格", () => {
     });
   });
 
-  test("タブ列の左端は引き出しのボタンと短い名前の幅", () => {
-    const vars = bodyVariables(withTiers(SOFT_KEYS, PHONE));
-    vars.set("--space-unit", "U");
-    expect(resolveVar(vars.get("--tabs-lead-w") ?? "", vars)).toBe(
-      "calc(44px + U * 30)",
-    );
+  test("タブ列の左端は引き出しのボタンだけ (名前は面の頭の 1 段目)", () => {
+    const lead = declarationsOf(withTiers(SOFT_KEYS, PHONE), [".tabs-lead"]);
+    expect({
+      width: lead.get("width"),
+      flex: lead.get("flex"),
+      named: bodyVariables(withTiers(SOFT_KEYS, PHONE)).has("--tabs-lead-w"),
+    }).toEqual({ width: undefined, flex: "none", named: false });
   });
 
   test("ソフトキーボードが出ている間は下端をキーボードの上にする", () => {
@@ -529,10 +531,11 @@ describe("the bottom bar marks the current view and waiting agents", () => {
   });
 });
 
-// 電話の幅では、上の行があった頃の古い節 (900px・640px) も効く。そのうち
-// body.gdp-history-page #history-panel (position: static) が SP の節の
+// 電話の幅では、上の行があった頃の古い節 (900px・640px) も効く。以前は 900px の
+// 節の body.gdp-history-page #history-panel (position: static) が SP の節の
 // #history-panel (fixed) に詳細度で勝ち、History の一覧だけが面の位置に来ず、
-// 画面の上端から本文に重なっていた。電話の幅で効く節を全部重ね、実際の要素に
+// 画面の上端から本文に重なっていた (いまは 900px の節に並びの規則は無い)。
+// 電話の幅で効く節を全部重ね、実際の要素に
 // 当たる規則だけで解く (当たりは happy-dom)。
 describe("on a phone the History list sits in the sheet", () => {
   beforeAll(() => {

@@ -140,19 +140,30 @@
     </div>
     <div id="app-nav-resizer" class="app-nav-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="resize sidebar"></div>
   </aside>
-  <!-- 上の行は持たない: 最上段は一覧の列の頭とタブ列の 1 段。
-       一覧の列の頭 (#panel-head) はその段の左端 (左のサイドバーの右) で、画面の入口の
-       絵柄 (#view-head) と、右端にファイル一覧を畳むボタン。幅は固定 (--listcol-head-w)
-       で、画面の切替でも一覧の列の開閉 (手・自動) でも動かない (畳むのは頭の下の一覧
-       だけ)。その右がタブ列で、左端にプロジェクト名・ブランチ (= プロジェクトの切替。
-       #tabs-lead。幅は固定の --tabs-lead-w)。
+  <!-- 上の行は持たない: 最上段は一覧の列の頭の 1 段目とタブ列。
+       一覧の列の頭 (#panel-head) は左のサイドバーの右の 2 段で、幅は固定
+       (--column-head-w)。1 段目 (#project-head) はタブ列と同じ高さで、いま見ている
+       プロジェクトの色の四角と頭文字・名前 (= プロジェクトの切替。
+       views/projects/project-switcher.ts) と、右寄せでブランチ。2 段目は画面の入口の
+       絵柄 (#view-head) と、右端にファイル一覧を畳むボタン。ファイル一覧はその下から。
+       画面の切替でも一覧の列の開閉 (手・自動) でも頭は動かない (畳むのは頭の下の一覧
+       だけ)。タブ列は頭の右から (左端に名前の枠は置かない)。
        キーボードの移る順は DOM の順: 左のサイドバー → 一覧の列の頭 → タブ列 →
        ファイル一覧 → 一覧 → 変更ファイルの一覧 → 本文 → 最下段。 -->
   <div id="panel-head" class="panel-head">
-    <!-- 左のサイドバーを畳んだときだけ出る。段の左端 (頭の中の先頭) に置き、絵柄と
-         畳むボタンとタブ列はその幅だけ右から始まる (プロジェクト名の枠の幅と枠の中の
-         名前の位置は変えない)。 -->
-    <button id="nav-expand" class="global-icon-action" type="button" title="show sidebar" aria-label="show sidebar" hidden><span class="goi-icon" aria-hidden="true"></span></button>
+    <div id="project-head" class="project-head">
+      <!-- 左のサイドバーを畳んだときだけ出る。頭の先頭に置き、頭はその幅だけ広がる
+           (タブ列はその分右から)。 -->
+      <button id="nav-expand" class="global-icon-action" type="button" title="show sidebar" aria-label="show sidebar" hidden><span class="goi-icon" aria-hidden="true"></span></button>
+      <!-- 名前と ▾ がプロジェクトの切替 (▾ は project-switcher.ts が足す)。色の四角と
+           頭文字はプロジェクトの色 (views/projects/project-looks.ts。色が分かるまでは
+           色なし)。四角・名前・ブランチの中身は最初の描画から出す (下の #first-project)。 -->
+      <button id="project-switcher" class="brand" type="button">
+        <span id="project-mark" class="project-mark" data-project-color="none" aria-hidden="true"></span>
+        <span class="title" id="project-title"></span>
+      </button>
+      <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
+    </div>
     <div id="view-head" class="view-head">
       <!-- 画面の入口。押すとその画面のタブを開くか前面に出す (Files は本文の
            既定 = フォルダ表示)。何を見ているかはタブだけが示すので、選択の印は
@@ -174,15 +185,35 @@
       </div>
     </div>
   </div>
-  <div id="tabs-lead" class="tabs-lead">
-    <div class="tabs-lead-name">
-      <!-- リポジトリ名 = プロジェクトの切替 (views/projects/project-switcher.ts)。 -->
-      <button id="project-switcher" class="brand" type="button">
-        <span class="title" id="project-title">repository</span>
-        <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
-      </button>
-    </div>
-  </div>
+  <!-- いま見ているプロジェクトの名前・ブランチ・頭文字・色 (決め方は app.ts の
+       renderProjectHead。ここでは作らない) を、app.js を待たずに控え
+       (views/shell/early-look.ts の projects。プロジェクトの鍵ごと) から出す。控えに
+       無い (初めて開いた) プロジェクトは空のまま描き、app.ts が設定を読んで入れる。
+       場所は CSS が最初から取るので、中身が入っても頭の部品は動かない。
+       web-src/test/first-screen.test.ts が控えと URL の表で確かめる。 -->
+  <script id="first-project">
+  (function () {
+    var raw = window.localStorage.getItem("code-viewer:early-look");
+    var look = raw ? JSON.parse(raw) : {};
+    var key = (/^\/p\/([0-9a-f]{16})(?=[\/?#]|$)/.exec(location.pathname) || [])[1] || "";
+    var project = look.projects && look.projects[key];
+    if (!project || !project.name) return;
+    document.getElementById("project-title").textContent = project.name;
+    document.getElementById("project-title").title = project.name;
+    document.getElementById("project-switcher").setAttribute("aria-label", project.name);
+    var mark = document.getElementById("project-mark");
+    mark.textContent = project.mark || "";
+    if (project.color) mark.dataset.projectColor = project.color;
+    if (!project.branch) return;
+    var branch = document.getElementById("project-branch");
+    branch.querySelector(".project-branch-name").textContent = project.branch;
+    branch.hidden = false;
+  })();
+  </script>
+  <!-- タブ列の左端の置き場所 (main-tabs-view.ts が左の面のタブ列の先頭へ移す)。
+       デスクトップでは空 (幅 0)。SP の引き出しを開くボタンだけが入る
+       (views/mobile-shell.ts)。 -->
+  <div id="tabs-lead" class="tabs-lead"></div>
   <!-- メインの面のタブ列 (最上段)。中身は views/main-tabs/main-tabs-view.ts。
        ファイル・各画面を開いたまま切り替える。高さは --main-tabs-h。 -->
   <nav id="main-tabs" aria-label="Tabs"></nav>

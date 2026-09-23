@@ -162,15 +162,15 @@ class FakeElement {
 
 function installFakeDom() {
   const body = new FakeElement("body");
-  // 一覧の列の頭 (#panel-head。タブ列の行の左端) の中の画面の入口 (#view-head) と、
-  // 畳むボタンの置き場所 (.view-head-row)。プロジェクト名の切替はタブ列の左端
-  // (#tabs-lead) に固定 (index.html)。ファイル一覧を畳んでも頭の行 (ボタンと絵柄)
-  // はそのまま。
-  const tabsLead = new FakeElement("div", "tabs-lead");
+  // 一覧の列の頭 (#panel-head) の 2 段目の画面の入口 (#view-head) と、畳むボタンの
+  // 置き場所 (.view-head-row)。プロジェクト名の切替は 1 段目 (#project-head) に固定
+  // (index.html)。ファイル一覧を畳んでも頭 (1 段目・ボタンと絵柄) はそのまま。
+  const leftHead = new FakeElement("div", "panel-head");
+  const projectHead = new FakeElement("div", "project-head");
   const brand = new FakeElement("button", "project-switcher");
   brand.className = "brand";
-  tabsLead.appendChild(brand);
-  const leftHead = new FakeElement("div", "panel-head");
+  projectHead.appendChild(brand);
+  leftHead.appendChild(projectHead);
   const viewHead = new FakeElement("div", "view-head");
   const nameRow = new FakeElement("div");
   nameRow.className = "view-head-row";
@@ -192,7 +192,7 @@ function installFakeDom() {
   label.className = "sidebar-toggle-label";
   toggle.appendChild(label);
   sidebar.append(sidebarHead, filter, filelist);
-  body.append(tabsLead, leftHead, topbar, sidebar, toggle);
+  body.append(leftHead, topbar, sidebar, toggle);
   globalThis.document = {
     body,
     createElement: (tagName: string) => new FakeElement(tagName),
@@ -205,7 +205,7 @@ function installFakeDom() {
   })) as unknown as typeof getComputedStyle;
   return {
     body,
-    tabsLead,
+    projectHead,
     brand,
     leftHead,
     viewHead,
@@ -363,8 +363,9 @@ describe("project name and view entries placement", () => {
       document.querySelector<HTMLElement>("#sidebar-toggle")?.parentElement ===
         (dom[toggleHost] as unknown as HTMLElement),
       dom.strip.parentElement === dom[stripHost],
-      dom.brand.parentElement === dom.tabsLead,
-    ]).toEqual([true, true, true, true]);
+      dom.brand.parentElement === dom.projectHead,
+      dom.leftHead.children[0] === dom.projectHead,
+    ]).toEqual([true, true, true, true, true]);
     // 置き場所の中の順は見た目の順 (Tab で移る順): 畳むボタンは絵柄の行の右端の
     // 置き場所 (中はボタンだけ)。一覧の列の頭では絵柄が行の頭。
     const at = (element: FakeElement) => {
@@ -432,8 +433,8 @@ describe("sidebar toggle placement", () => {
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");
     expect([
       toggle?.parentElement === (dom.nameRow as unknown as HTMLElement),
-      // 名前はタブ列の左端のまま、入口は一覧の列の頭のまま。
-      dom.brand.parentElement === dom.tabsLead &&
+      // 名前は頭の 1 段目のまま、入口は頭 (2 段目) のまま。
+      dom.brand.parentElement === dom.projectHead &&
         dom.viewHead.parentElement === dom.leftHead,
       toggle?.offsetParent === null,
       toggle?.getAttribute("aria-expanded"),
@@ -491,7 +492,6 @@ describe("sidebar toggle placement", () => {
   test("reports every missing box of the head instead of skipping the placement", () => {
     const dom = installFakeDom();
     dom.leftHead.remove();
-    dom.tabsLead.remove();
     const sidebar = createSidebarForTest({ sidebarHidden: false });
     expect(() => sidebar.placeSidebarToggle()).toThrow(
       "view head: missing #view-head, #view-head .view-head-row, #panel-head in index.html",

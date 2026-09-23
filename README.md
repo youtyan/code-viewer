@@ -15,14 +15,16 @@ Requires Node.js 20 or newer. Development uses
   `matching / all` file counts in the header while it is active. Rows are
   real links: Cmd/Ctrl+click or middle-click opens a file in a new tab.
 - Keep files and screens open as tabs in the top row (there is no header row
-  above it). The project name and its branch (the project switcher, also `p`)
-  stay fixed at the left end of the tab row in a box of fixed width, and the
-  tabs start to its right; switching tabs or screens, splitting, folding a
-  column or showing the lists never moves or hides it. The six view icons
-  (Files / Diff / History / Worktrees / Data / Work log, with the name and key
-  on hover) sit at the head of the list column, at the left end of the top row,
-  with the button that folds the file list. In a narrow box the branch keeps its whole name up to about
-  40% of the width and the project name is shortened into the rest. The left
+  above it). The head of the list column, at the left end of the top row, has
+  two rows: the project you are looking at (a colored square with its
+  initials, its name — the project switcher, also `p` — and its branch on the
+  right), and below it the six view icons (Files / Diff / History / Worktrees /
+  Data / Work log, with the name and key on hover) with the button that folds
+  the file list. The tab row starts to its right; switching tabs or screens,
+  splitting, folding a column or showing the lists never moves or hides the
+  head. In a narrow head the branch keeps its whole name up to about 40% of the
+  width and the project name is shortened into the rest (hover for the whole
+  name). The left
   sidebar holds the projects and agents; the list column to its right shows the
   file list on every screen and, next to it, the list you pick the main area
   from (Diff's changed files, History's commits and a selected worktree's list,
@@ -198,7 +200,7 @@ Requires Node.js 20 or newer. Development uses
   keeps the newest values and adds a Mixed note that says how to separate them.
 - Register your projects so they stay in the Agents list (in your order) even
   with no agent running, and switch between them from the project name at
-  the left end of the tab row (`p`) or from the left sidebar on any screen. One
+  the head of the list column (`p`) or from the left sidebar on any screen. One
   code-viewer serves every project on one port: switching reloads the page at
   `/p/<key>/…` on the same address, so notification permission, the terminal
   shells and unread marks carry over, and reload, back/forward and bookmarks
@@ -214,10 +216,11 @@ Requires Node.js 20 or newer. Development uses
   language, font sizes, key bindings and notifications are shared by all
   projects, so switching does not change how it looks.
 - Each registered project gets a color and two initials (`code-viewer` →
-  CV), shown as a square before its name in the left sidebar, on the All
-  agents board and in the project switcher. The project on screen has its
-  heading tinted with that color, notifications put the initials before the
-  project name, and an installed window's title bar takes the color. A new
+  CV), shown as a square before its name in the left sidebar, at the head of
+  the list column, on the All agents board and in the project switcher. The
+  project on screen has its heading tinted with that color, notifications put
+  the initials before the project name, and an installed window's title bar
+  takes the color. A new
   project gets a color nobody else uses; change it with **Color…** in the
   heading's ⋯ or right-click menu.
 - Open files directly from the repository or diff view, including text-like

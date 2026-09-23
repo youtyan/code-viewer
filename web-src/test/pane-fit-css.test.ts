@@ -67,11 +67,14 @@ test.each([
   // 大きさ (密度で変わる。特大で絵柄がはみ出した)
   ["#panel-head > #view-head", "flex-direction", "row"],
   ["body", "--panelcol-rail-w", "var(--ui-control-sm)"],
-  // プロジェクト名と枝の名前の幅は views/brand-fit.ts が分ける。枝は自然な幅
-  // (上限は約 40%) まで出して縮めず、名前が残りで省略する (枝が「m」になった)
-  [".brand .title", "max-width", "var(--brand-name-max, 60%)"],
+  // プロジェクト名と枝の名前の幅は views/brand-fit.ts が一覧の列の頭の 1 段目の
+  // 幅で分ける。枝は自然な幅 (上限は約 40%) まで出して縮めず、名前が残りで省略
+  // する (枝が「m」になった)。枝は右寄せ
+  [".brand .title", "max-width", "var(--brand-name-max, none)"],
+  [".brand .title", "text-overflow", "ellipsis"],
   [".project-branch", "flex", "0 0 auto"],
-  [".project-branch", "max-width", "var(--brand-branch-max, min(20vw, 260px))"],
+  [".project-branch", "max-width", "var(--brand-branch-max, 40%)"],
+  [".project-branch", "margin-left", "auto"],
   // Diff から開いたファイルの「差分を見る」は自分の欄に置く (欄が無いと空の
   // 間 (0 まで縮む) に自動で置かれ、情報の丸と表示の切替に重なった)
   [

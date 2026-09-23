@@ -43,7 +43,7 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 | 全画面共通の取り直し・未読・通知・タブのタイトル | `views/agents/agent-monitor.ts` |
 | アカウントの帯（一覧の上）と、作る・ログイン・起動の画面 | `views/agents/accounts-band.ts`・`accounts-dialogs.ts` |
 | 設定の「エージェントの通知」「エージェント連携」「アカウント」の節 | `views/viewer-settings.ts`・`views/agents/agent-hooks-settings.ts`・`accounts-settings.ts` |
-| タブ列の左端（`#tabs-lead`。幅は固定の `--tabs-lead-w`、どの画面・状態でも動かさない）のプロジェクト名 = プロジェクトの切替（`p`） | `views/projects/project-switcher.ts`（置き場所は `web/index.html` の `#tabs-lead` に固定、サイドバー・全体ボードと共有する操作は `project-actions.ts`、⋯ のメニューは `project-menu.ts`） |
+| 一覧の列の頭の 1 段目（`#project-head`。どの画面・状態でも動かさない）のプロジェクト名 = プロジェクトの切替（`p`） | `views/projects/project-switcher.ts`（置き場所は `web/index.html` の `#project-head` に固定、サイドバー・全体ボードと共有する操作は `project-actions.ts`、⋯ のメニューは `project-menu.ts`） |
 
 | サーバ側 | 役割 |
 |---|---|

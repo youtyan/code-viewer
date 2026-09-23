@@ -1,4 +1,4 @@
-// index.html の body の早いスクリプト (#first-screen・#first-status) が、最初の
+// index.html の body の早いスクリプト (#first-screen・#first-status・#first-project) が、最初の
 // 描画で付ける印と置く文言が、app.js が後から付けるものと同じであること。違えば
 // JS の後に並びが動く (読み込みの CLS)。
 //
@@ -20,13 +20,22 @@ import {
   describe,
   expect,
   test,
+  vi,
 } from "vitest";
 import { withoutProjectPrefix } from "../core/api-url";
 import { listColumnKindFor, listColumnLayout } from "../core/list-column";
-import { PAGE_MODE_CLASSES, pageModeClasses } from "../core/page-mode";
+import {
+  PAGE_MODE_CLASSES,
+  pageModeClasses,
+  worktreeOverview,
+} from "../core/page-mode";
 import { HISTORY_WIDTH, SIDEBAR_WIDTH } from "../core/panel-sizes";
 import { parseRoute } from "../core/routes";
 import { COMFORTABLE_PANE_WIDTH } from "../views/main-tabs/main-tabs-view";
+import {
+  EARLY_PROJECTS_MAX,
+  withEarlyProject,
+} from "../views/shell/early-look";
 import { renderStatusLabel, STATUS_LABEL_TEXT } from "../views/status-label";
 import {
   baseRules,
@@ -57,6 +66,7 @@ const TREE_RAIL = cssPx("--panelcol-rail-w");
 const NAV_W = cssPx("--nav-w");
 
 type Look = {
+  projects?: ReturnType<typeof withEarlyProject>;
   navCollapsed?: boolean;
   navWidth?: number;
   sidebarHidden?: boolean;
@@ -139,7 +149,7 @@ function expected(url: string, width: number, look: Look, nav: number) {
     route.screen === "history" && !!parsed.searchParams.get("source");
   const pageClasses = pageModeClasses(route, hostedSourceOpen);
   const page = [...pageClasses].sort();
-  const overview = route.screen === "worktree" && !route.wt;
+  const overview = worktreeOverview(route);
   // 直接開いたときの前面は URL の画面のタブ。
   const list = listColumnKindFor({
     has: (pageClass) => pageClasses.has(pageClass as never),
@@ -339,5 +349,238 @@ describe("ファイル一覧を畳むボタンは最初から頭の行の右端�
       afterStrip: true,
       head: "view-head",
     });
+  });
+});
+
+// 一覧の列の頭の 1 段目 (いま見ているプロジェクト) は、app.ts が控えた
+// (views/shell/early-look.ts の rememberEarlyProject) 名前・ブランチ・頭文字を、
+// #first-project が最初の描画で出す。控えはプロジェクトの鍵 (`/p/<鍵>`) ごと。
+describe("頭の 1 段目のプロジェクトは最初の描画から控えで出す (#first-project)", () => {
+  const KEY_A = "0123456789abcdef";
+  const KEY_B = "fedcba9876543210";
+  const SAMPLE = {
+    name: "sample-app",
+    branch: "main",
+    mark: "SA",
+    color: "green" as const,
+  };
+  const OTHER = {
+    name: "other-app",
+    branch: "topic",
+    mark: "OA",
+    color: "blue" as const,
+  };
+
+  function runFirstProject(url: string, look: Look | null) {
+    const markup = html
+      .replace(/<link [^>]*>/g, "")
+      .replace(/<script[\s\S]*?<\/script>/g, "");
+    const page = new DOMParser().parseFromString(markup, "text/html");
+    const head = page.getElementById("panel-head");
+    if (!head) throw new Error("index.html has no #panel-head");
+    document.body.innerHTML = head.outerHTML;
+    (
+      window as unknown as { happyDOM: { setURL(url: string): void } }
+    ).happyDOM.setURL(`http://127.0.0.1${url}`);
+    if (look)
+      localStorage.setItem("code-viewer:early-look", JSON.stringify(look));
+    new Function(inlineScript("first-project"))();
+    const branch = document.getElementById("project-branch");
+    return {
+      name: document.getElementById("project-title")?.textContent,
+      title: document.getElementById("project-title")?.title,
+      label: document
+        .getElementById("project-switcher")
+        ?.getAttribute("aria-label"),
+      mark: document.getElementById("project-mark")?.textContent,
+      color: document.getElementById("project-mark")?.dataset.projectColor,
+      branch: branch?.hidden
+        ? null
+        : branch?.querySelector(".project-branch-name")?.textContent,
+    };
+  }
+
+  const shown = (
+    project: { name: string; mark: string; color: string | null },
+    branch: string | null,
+  ) => ({
+    name: project.name,
+    title: project.name,
+    label: project.name,
+    mark: project.mark,
+    color: project.color ?? "none",
+    branch,
+  });
+  // 控えが無ければ、四角は色なし (index.html の既定) で中身は空。
+  const empty = {
+    name: "",
+    title: "",
+    label: null,
+    mark: "",
+    color: "none",
+    branch: null,
+  };
+
+  test.each([
+    {
+      name: "入口の下の画面: その鍵の控え",
+      url: `/p/${KEY_A}/history`,
+      look: { projects: withEarlyProject({}, KEY_A, SAMPLE) },
+      expected: shown(SAMPLE, "main"),
+    },
+    {
+      name: "ほかのプロジェクトの控えがあっても、その鍵の控えだけ",
+      url: `/p/${KEY_B}/`,
+      look: {
+        projects: withEarlyProject(
+          withEarlyProject({}, KEY_B, OTHER),
+          KEY_A,
+          SAMPLE,
+        ),
+      },
+      expected: shown(OTHER, "topic"),
+    },
+    {
+      name: "その鍵の控えが無い (初めて開いたプロジェクト): 空のまま",
+      url: `/p/${KEY_B}/file?path=README.md`,
+      look: { projects: withEarlyProject({}, KEY_A, SAMPLE) },
+      expected: empty,
+    },
+    {
+      name: "前置きの無い画面 (1 つで完結するサーバ): 鍵は空",
+      url: "/todif?from=HEAD&to=worktree",
+      look: { projects: withEarlyProject({}, "", SAMPLE) },
+      expected: shown(SAMPLE, "main"),
+    },
+    {
+      name: "ブランチが無い (HEAD が切り離されている): ブランチは出さない",
+      url: `/p/${KEY_A}/`,
+      look: {
+        projects: withEarlyProject({}, KEY_A, { ...SAMPLE, branch: "" }),
+      },
+      expected: shown(SAMPLE, null),
+    },
+    {
+      name: "色が分からない (登録していない) プロジェクト: 四角は色なし",
+      url: `/p/${KEY_A}/`,
+      look: {
+        projects: withEarlyProject({}, KEY_A, { ...SAMPLE, color: null }),
+      },
+      expected: shown({ ...SAMPLE, color: null }, "main"),
+    },
+    {
+      name: "控えが無い",
+      url: `/p/${KEY_A}/`,
+      look: null,
+      expected: empty,
+    },
+    {
+      name: "プロジェクトの控えを持たない古い控え",
+      url: `/p/${KEY_A}/`,
+      look: { sidebarWidth: 240 },
+      expected: empty,
+    },
+  ])("$name", ({ url, look, expected }) => {
+    expect(runFirstProject(url, look)).toEqual(expected);
+  });
+});
+
+describe("プロジェクトの控えは最近のものから上限まで (withEarlyProject)", () => {
+  const entry = (name: string) => ({
+    name,
+    branch: "main",
+    mark: "SA",
+    color: "violet" as const,
+  });
+  const keys = (count: number) =>
+    Array.from({ length: count }, (_, index) =>
+      index.toString(16).padStart(16, "0"),
+    );
+
+  test.each([
+    {
+      name: "新しい鍵は最後に足す",
+      before: ["a"],
+      key: "b",
+      after: ["a", "b"],
+    },
+    {
+      name: "ある鍵は最後へ移して書き直す (ほかは残す)",
+      before: ["a", "b", "c"],
+      key: "a",
+      after: ["b", "c", "a"],
+    },
+    {
+      name: "上限を超えたら古いものから落とす",
+      before: keys(EARLY_PROJECTS_MAX),
+      key: "new",
+      after: [...keys(EARLY_PROJECTS_MAX).slice(1), "new"],
+    },
+  ])("$name", ({ before, key, after }) => {
+    const projects = Object.fromEntries(
+      before.map((k) => [k, entry(`old-${k}`)]),
+    );
+    const next = withEarlyProject(projects, key, entry("fresh"));
+    expect({ keys: Object.keys(next), written: next[key] }).toEqual({
+      keys: after,
+      written: entry("fresh"),
+    });
+  });
+});
+
+// このセッションで初めて控えを書くのが別の値 (テーマなど) でも、ほかの
+// プロジェクトの控えは消さない (入口の下でプロジェクトを行き来すると、行った先
+// ごとに控えが 1 つずつ残る)。
+describe("控えを書き直しても、ほかのプロジェクトの控えは残る", () => {
+  test.each([
+    { name: "先に別の値を書く", first: "look" },
+    { name: "先にプロジェクトを書く", first: "project" },
+  ] as const)("$name", async ({ first }) => {
+    vi.resetModules();
+    const saved = {
+      name: "saved-app",
+      branch: "main",
+      mark: "SA",
+      color: "orange" as const,
+    };
+    localStorage.setItem(
+      "code-viewer:early-look",
+      JSON.stringify({ theme: "dark", projects: { aaaa: saved } }),
+    );
+    const early = await import("../views/shell/early-look");
+    const here = {
+      name: "sample-app",
+      branch: "topic",
+      mark: "SA",
+      color: null,
+    };
+    if (first === "look") early.rememberEarlyLook({ theme: "light" });
+    early.rememberEarlyProject("bbbb", here);
+    early.rememberEarlyLook({ theme: "light" });
+    const stored = JSON.parse(
+      localStorage.getItem("code-viewer:early-look") ?? "{}",
+    );
+    expect({ theme: stored.theme, projects: stored.projects }).toEqual({
+      theme: "light",
+      projects: { aaaa: saved, bbbb: here },
+    });
+  });
+});
+
+// 作業ツリーの一覧だけの表示かは route だけで決まる (app.ts は画面の印と同じときに
+// 付ける。worktree-view.ts が一覧を読むまで待つと、一覧が列の位置から本文へ動いた)。
+describe("作業ツリーの一覧だけの表示 (worktreeOverview)", () => {
+  test.each([
+    { url: "/worktree", overview: true },
+    { url: "/worktree?wt=%2Fsample%2Frepo-a-wt", overview: false },
+    { url: "/history", overview: false },
+    { url: "/", overview: false },
+  ])("$url → $overview", ({ url, overview }) => {
+    const parsed = new URL(`http://127.0.0.1${url}`);
+    const route = parseRoute(parsed.pathname, parsed.search, {
+      from: "HEAD",
+      to: "worktree",
+    });
+    expect(worktreeOverview(route)).toBe(overview);
   });
 });

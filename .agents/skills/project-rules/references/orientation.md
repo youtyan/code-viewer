@@ -120,7 +120,7 @@ global の `my-reuse-first` に従う。ここに置くのは**このリポジ�
 | 一覧の列の幅と畳む順 (一覧を詰める → 変更ファイルの一覧を畳む → ファイル一覧を畳む) | `core/list-column.ts` `listColumnLayout`（配線は `app.ts` の `syncListColumn`） |
 | ファイル一覧と変更ファイルの一覧を描く | `views/sidebar.ts` `createSidebar`（`FILE_LIST_DOM` / `CHANGES_LIST_DOM` で 2 つ作る。app.ts の `FILE_LIST` / `SIDEBAR`） |
 | 列を手で畳むつまみと、畳んだ列の開く帯 | `views/list-tree-open.ts` `createColumnFold` / `createColumnOpen` / `createListTreeOpen` |
-| 札と名前の幅の分け方 (名前を省略し、札は自然な幅を 40% まで) | `core/brand-fit.ts` `fitBrandWidths`（タブ列の左端のプロジェクト名。別のプロジェクトのタブの名前も同じ決まりを CSS で。History の枝の札は同じ決まりを CSS の flex で: `style.css` の B-1） |
+| 札と名前の幅の分け方 (名前を省略し、札は自然な幅を 40% まで) | `core/brand-fit.ts` `fitBrandWidths`（一覧の列の頭の 1 段目のプロジェクト名とブランチ。別のプロジェクトのタブの名前も同じ決まりを CSS で。History の枝の札は同じ決まりを CSS の flex で: `style.css` の B-1） |
 | あいまい検索 | `core/fuzzy-search.ts` |
 | 制御文字の検出 | `core/control-chars.ts` `hasControlCharacter` |
 | ファイルのパスを画面に出す・コピーする | `core/file-path-copy.ts` の `filePathDisplayText`（制御文字・書式文字を含むパスだけ可視化した表記。表示とコピーは同じものを使う）と `filePathClipboardText` / `fileReferenceClipboardText` |

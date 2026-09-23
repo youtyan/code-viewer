@@ -154,8 +154,9 @@ export function isDiffShellDomIntact(
 }
 
 /**
- * `listShown`: 右の列 (#filelist) が今も差分の一覧か。タブで別の画面へ移ると
- * Files の木などに書き換わるので、一覧と差分の DOM が同じでも描き直す。
+ * `listShown`: 変更ファイルの一覧 (#filelist) が今も差分の一覧か。タブで History・
+ * 作業ツリーへ移ると、同じ一覧がそのコミット・作業ツリーの変更ファイルに書き換わる
+ * ので、一覧と差分の DOM が同じでも描き直す。
  */
 export function shouldRenderDiffSidebar(
   listSame: boolean,

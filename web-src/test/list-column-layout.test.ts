@@ -170,7 +170,7 @@ describe("list column layout", () => {
     });
   });
 
-  test("History: 変更ファイルの一覧は一覧の右、本文の左端の手前に置く", () => {
+  test("History: 変更ファイルの一覧は一覧の右、本文の左端の手前、一覧の列の頭の下に置く", () => {
     const vars = bodyVariables("history");
     const tree = declarationsOn("#sidebar", "history");
     expect({
@@ -180,7 +180,7 @@ describe("list column layout", () => {
     }).toEqual({
       left: `calc(${resolved("--chrome-left", "history")} + ${resolved("--files-shown", "history")} + ${resolved("--list-w", "history")})`,
       width: resolved("--sidebar-w", "history"),
-      top: resolved("--global-header-h", "history"),
+      top: resolved("--panel-body-top", "history"),
     });
   });
 

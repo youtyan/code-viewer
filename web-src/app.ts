@@ -116,7 +116,11 @@ import {
   PHONE_TERMINAL_FONT_SIZE,
 } from "./core/mobile-layout";
 import { createNetworkActivityTracker } from "./core/network-activity";
-import { PAGE_MODE_CLASSES, pageModeClasses } from "./core/page-mode";
+import {
+  PAGE_MODE_CLASSES,
+  pageModeClasses,
+  worktreeOverview,
+} from "./core/page-mode";
 import {
   bootFileListFold,
   fileListAction,
@@ -127,6 +131,7 @@ import {
   HISTORY_WIDTH,
   SIDEBAR_WIDTH,
 } from "./core/panel-sizes";
+import { isProjectColor, projectInitials } from "./core/project-colors";
 import {
   createInstallOffer,
   lastTabNumber,
@@ -282,7 +287,10 @@ import {
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { installMobileShell } from "./views/mobile-shell";
 import { createProjectActions } from "./views/projects/project-actions";
-import { PROJECT_LOOKS } from "./views/projects/project-looks";
+import {
+  PROJECT_LOOKS,
+  paintProjectColor,
+} from "./views/projects/project-looks";
 import {
   mountProjectSwitcher,
   type ProjectSwitcher,
@@ -301,7 +309,11 @@ import {
 } from "./views/search-palette-ui";
 import { createSearchResultsView } from "./views/search-results-view";
 import { type AppNav, mountAppNav } from "./views/shell/app-nav";
-import { readEarlyLook, rememberEarlyLook } from "./views/shell/early-look";
+import {
+  readEarlyLook,
+  rememberEarlyLook,
+  rememberEarlyProject,
+} from "./views/shell/early-look";
 import {
   CHANGES_LIST_DOM,
   createSidebar,
@@ -643,11 +655,37 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!project) return;
     PROJECT_NAME = project;
     applyDocumentTitle();
-    const projectTitle = document.querySelector<HTMLElement>("#project-title");
-    if (projectTitle) {
-      projectTitle.textContent = project;
-      projectTitle.title = project;
+    renderProjectHead();
+  }
+
+  /**
+   * 一覧の列の頭の 1 段目 (いま見ているプロジェクト): 色の四角と頭文字・名前。名前と
+   * 色は、一覧 (views/projects/project-looks.ts) に載っていればそれ (左のサイドバー・
+   * 切替の小窓と同じ。登録簿で名前を変えたものはその名前)、載るまでは設定の名前と
+   * 色なし。
+   */
+  function renderProjectHead(): void {
+    const look = PROJECT_LOOKS.current();
+    const name = look?.name || PROJECT_NAME;
+    if (!name) return;
+    const title = document.querySelector<HTMLElement>("#project-title");
+    if (title) {
+      title.textContent = name;
+      title.title = name;
     }
+    // 名前は省略 (…) されることがあるので、読み上げの名前は全文 (何をするボタンかは
+    // project-switcher.ts が title に書く)。
+    document
+      .querySelector<HTMLElement>("#project-switcher")
+      ?.setAttribute("aria-label", name);
+    const mark = document.querySelector<HTMLElement>("#project-mark");
+    const initials = look?.initials ?? projectInitials(name);
+    if (mark) {
+      mark.textContent = initials;
+      // 一覧に載るまでは、最初の描画 (#first-project) が控えから塗った色のまま。
+      if (look) paintProjectColor(mark, look.color);
+    }
+    rememberProjectHead(name, initials, mark?.dataset.projectColor);
   }
 
   function setProjectBranch(branch: string) {
@@ -658,6 +696,21 @@ window.GdpExpandLogic = GdpExpandLogic;
     const name = el.querySelector<HTMLElement>(".project-branch-name");
     if (name) name.textContent = branch;
     el.title = branch ? uiText().diff.currentBranch(branch) : "";
+    renderProjectHead();
+  }
+
+  /** 頭の 1 段目を、次に開いたときの最初の描画 (index.html の #first-project) に控える。 */
+  function rememberProjectHead(
+    name: string,
+    mark: string,
+    color: string | undefined,
+  ): void {
+    rememberEarlyProject(projectKey() ?? "", {
+      name,
+      branch: PROJECT_BRANCH,
+      mark,
+      color: isProjectColor(color) ? color : null,
+    });
   }
 
   type SettingsPatch = Partial<Omit<AppSettingsState, "version">> &
@@ -4577,6 +4630,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     const pageMode = pageModeClasses(STATE.route, hostedSourceOpen);
     for (const name of PAGE_MODE_CLASSES)
       document.body.classList.toggle(name, pageMode.has(name));
+    // 作業ツリーの一覧だけの表示かも同じときに route から (外すのは worktree-view.ts
+    // が画面を離れるとき)。
+    if (STATE.route.screen === "worktree")
+      document.body.toggleAttribute(
+        "data-worktree-overview",
+        worktreeOverview(STATE.route),
+      );
     // ファイル一覧はどの画面でも出す (Files とファイルの画面は repo-view が描く)。
     if (!repoSidebarRoute) showFileList();
     const repoTargetWrap =
@@ -8247,8 +8307,14 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const projectSwitcherButton =
     document.querySelector<HTMLElement>("#project-switcher");
-  // 名前と枝の名前の幅を、置き場所の幅に合わせて分ける (枝を 1 文字にしない)。
-  if (projectSwitcherButton) fitBrand(projectSwitcherButton);
+  // 名前と枝の名前の幅を、頭の 1 段目の幅に合わせて分ける (枝を 1 文字にしない)。
+  fitBrand(
+    (() => {
+      const row = document.getElementById("project-head");
+      if (!row) throw new Error("#project-head is missing from index.html");
+      return row;
+    })(),
+  );
   PROJECT_SWITCHER = projectSwitcherButton
     ? mountProjectSwitcher({
         button: projectSwitcherButton,
@@ -8278,6 +8344,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // プロジェクトの色と頭文字の口 (views/projects/project-looks.ts) に一覧を渡す。
   // 色・名前・いま見ているものが変わったら窓の枠の色も当て直す。
   PROJECT_LOOKS.subscribe(syncWindowFrameColor);
+  PROJECT_LOOKS.subscribe(renderProjectHead);
   AGENT_MONITOR.subscribe(() =>
     PROJECT_LOOKS.update(AGENT_MONITOR.snapshot().overview),
   );
