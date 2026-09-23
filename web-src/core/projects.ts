@@ -16,6 +16,13 @@ import type {
 } from "./agent-overview";
 import { hasControlCharacter } from "./control-chars";
 import { errorWithCause } from "./error-detail";
+import {
+  isProjectColor,
+  nextProjectColor,
+  PROJECT_COLORS,
+  type ProjectColor,
+  withProjectColors,
+} from "./project-colors";
 import { withOpenPaneOverlay } from "./routes";
 
 /** 登録簿の 1 件。 */
@@ -26,6 +33,12 @@ export type StoredProject = {
   name: string;
   /** 登録した時刻 (ISO 8601)。 */
   addedAt: string;
+  /**
+   * 色 (core/project-colors.ts)。登録したときに空いている色から決める。
+   * 色の無い版が書いた登録簿は、最初に読んだときに登録の順で配って保存する
+   * (withRegistryColors)。
+   */
+  color?: ProjectColor;
 };
 
 /** 並び順は配列の順。利用者が上下で変えられる。 */
@@ -90,7 +103,7 @@ export function parseProjectRegistry(
     }
     // 以前の版はプロジェクトごとのポート (port) を書いていた。入口のサーバで
     // オリジンが 1 つになったので使わない。読み飛ばし、次に書くときに落ちる。
-    const { root, name, addedAt } = entry;
+    const { root, name, addedAt, color } = entry;
     if (typeof root !== "string") {
       issues.push(`${at}.root: not a string`);
       return;
@@ -107,10 +120,16 @@ export function parseProjectRegistry(
     if (typeof addedAt !== "string" || !addedAt) {
       issues.push(`${at}.addedAt: not a string`);
     }
+    if (color !== undefined && !isProjectColor(color)) {
+      issues.push(
+        `${at}.color: ${JSON.stringify(color)} is not one of ${PROJECT_COLORS.join(", ")}`,
+      );
+    }
     projects.push({
       root,
       name: typeof name === "string" ? name.trim() : "",
       addedAt: typeof addedAt === "string" ? addedAt : "",
+      ...(isProjectColor(color) ? { color } : {}),
     });
   });
   if (issues.length > 0) return { ok: false, issues };
@@ -158,6 +177,7 @@ export function addProject(
     root: input.root,
     name,
     addedAt: new Date(now).toISOString(),
+    color: nextProjectColor(registry.projects.map((item) => item.color)),
   };
   return {
     ok: true,
@@ -216,6 +236,30 @@ export function renameProject(
   if (issue) return { ok: false, issue: { code: "name", issue } };
   const current = registry.projects[index] as StoredProject;
   return replaceAt(registry, index, { ...current, name: next });
+}
+
+/** 色を変える (右クリックのメニューの「色」)。同じ色なら書かない。 */
+export function recolorProject(
+  registry: ProjectRegistry,
+  root: string,
+  color: ProjectColor,
+): ProjectRegistryChange {
+  const index = findIndex(registry, root);
+  if (typeof index !== "number") return index;
+  const current = registry.projects[index] as StoredProject;
+  if (current.color === color) return { ok: true, registry, project: current };
+  return replaceAt(registry, index, { ...current, color });
+}
+
+/**
+ * 色の無い登録に、登録の順で空いている色を配る。全部あれば同じ登録簿を
+ * 返す (書かなくてよい)。
+ */
+export function withRegistryColors(registry: ProjectRegistry): ProjectRegistry {
+  const projects = withProjectColors(registry.projects);
+  return projects === registry.projects
+    ? registry
+    : { version: 1, projects: [...projects] };
 }
 
 /**
@@ -286,6 +330,8 @@ export function projectDropBefore(
 export type RegisteredProjectInfo = {
   root: string;
   name: string;
+  /** 色。保存できなかったときも登録の順で配った色が入る。 */
+  color: ProjectColor;
   /** 登録簿の中の位置 (0 始まり)。利用者が決めた順。 */
   order: number;
 };
@@ -301,9 +347,10 @@ export type ProjectRegistrySnapshot = {
 export function registeredProjectInfos(
   registry: ProjectRegistry,
 ): RegisteredProjectInfo[] {
-  return registry.projects.map((project, order) => ({
+  return withProjectColors(registry.projects).map((project, order) => ({
     root: project.root,
     name: project.name,
+    color: project.color,
     order,
   }));
 }

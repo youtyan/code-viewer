@@ -81,7 +81,7 @@ export type AgentOverviewDeps = {
   /** findServer の覚えた結果を捨てる。 */
   forgetServer(root: string): void;
   /** 登録したプロジェクト (エージェントが居なくても一覧に載せる)。 */
-  readRegistry(): ProjectRegistrySnapshot;
+  readRegistry(): ProjectRegistrySnapshot | Promise<ProjectRegistrySnapshot>;
   /** 登録したフォルダがまだ在るか (消えたものは見出しに理由を出す)。 */
   rootExists(root: string): boolean;
   /**
@@ -131,7 +131,7 @@ export async function buildAgentOverview(
       panes: [],
       projects: [],
       errors,
-      registry: deps.readRegistry(),
+      registry: await deps.readRegistry(),
     };
   }
   const tmuxPanes = panes.running ? flattenTmuxPanes(panes.sessions) : [];
@@ -248,7 +248,7 @@ export async function buildAgentOverview(
 
   // 登録したプロジェクトを合わせる。同じ git ルートなら 1 つにまとめ、
   // 表示名は登録の名前にする。エージェントの居ないものは行の無い見出しになる。
-  const registry = deps.readRegistry();
+  const registry = await deps.readRegistry();
   for (const registered of registry.projects) {
     const found = projects.get(registered.root);
     if (found) {

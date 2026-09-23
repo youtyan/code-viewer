@@ -99,13 +99,14 @@ claude / codex の複数アカウントを使い分け、登録したプロジ�
 サイドバーは 2 つの区画に分ける。上 (「PROJECTS」) は登録したプロジェクトで、エージェントが
 居なくても常に 1 行。下 (「tmux で検出」) は未登録でエージェントが居るもの。起動・終了で
 出入りするのは下の区画だけで、上の行の位置は動かない。0 件なら下の区画ごと出さない。
-プロジェクト見出しの印は、人の番のもの（入力待ち > 完了・未読 > 作業中）があればその印、
-無ければフォルダで、サーバを起こしている最中だけ回る点線と「起動中…」を優先する。
+プロジェクト見出しの頭はプロジェクトの色の四角と頭文字（7 の「色と頭文字」）。名前の後ろに、
+人の番のもの（入力待ち > 完了・未読 > 作業中）があればその印を出し、サーバを起こしている
+最中だけ回る点線と「起動中…」を優先する。
 見出しは `+` と `⋯` の幅を常に確保し、畳んでいてもこの印で中の状態を伝える（件数は最下段）。
 エージェントの行は状態の印・種類・作業内容・経過時間・未読を出す。経過時間は
 変わった瞬間を見たもの（`updatedAt` が 0 でない）だけに出し、見始めてからの下限しか
 分からないものは「—」にしてツールチップに下限を出す（`views/agents/agents-sidebar.ts` の `ageText`）。
-選択の見た目は 2 段で、いま見ているプロジェクトの見出しは控えめな面だけ、メインの面で
+選択の見た目は 2 段で、いま見ているプロジェクトの見出しはその色で薄く塗った面だけ、メインの面で
 開いているエージェントの行が強い選択（面 + 細い枠 + 内側の光）。
 
 **ターミナルはメインの面のタブでも映す。** 決まりは次のとおり。
@@ -536,6 +537,33 @@ reset が古い reset より許容差を超えて前へ戻るか、古い窓が�
   `shouldConnectEventSource`）ので、長く裏にあるタブの裏のプロセスも止まり、表に戻したときに
   起こし直す
 
+### 色と頭文字
+
+各プロジェクトに色 1 つと頭文字 2 文字を付け、左のサイドバーの見出し・全体ボードの見出し・
+切替の小窓の行・OS の通知の題（頭文字だけ）・インストールした窓の上端の帯（`theme-color`）で
+同じものを使う（2026-09-23 に利用者と決めた。タブのグループの札と線・ファイル一覧の頭も使う）。
+決まりは `core/project-colors.ts`、色の値は `web/style.css` の名前の層（`--project-<色>`・
+`--project-ink`）、画面から取る口は `views/projects/project-looks.ts`。
+
+| 決まり | 理由・中身 |
+|---|---|
+| 色は登録簿（`projects.json` の各項目の `color`）に持つ。登録していないもの（tmux で見つけただけ）は色なし（灰色 `--project-none`） | 窓・ブラウザ・入口の起こし直しをまたいで同じ色にするため。色を変えるのは右クリック（⋯）のメニューの「色…」→ `POST /_agent/projects` の `color` |
+| 配るのは `nextProjectColor`: まだ誰も使っていない色の最初、全部使っていれば使っている数が最も少ない色の最初 | 外したプロジェクトの色は次に登録したものに回る。組の並び（`PROJECT_COLORS`）は配る順で、隣どうしを離れた色相にしてある |
+| 色の無い版が書いた登録簿は、最初に一覧が読んだとき（`projectRegistrySnapshot`）か最初に変えるときに、登録の順で配ってロックの中で保存する（`withRegistryColors`）。保存できなければ配った色で一覧を出し、理由を `registry.error` に載せる | 「すでに登録してあるものには登録の順で配る」の決定。書けない環境でも色は出る（次の取り直しでまた保存を試す） |
+| 組の外の色の名前は登録簿の問題として断る（全体を読めないにする） | 読み飛ばすと次に書いたときにその色が消える。古い版は `color` を知らないので、古い版が書くと色は落ち、新しい版が読み直して配り直す（7 の「古い版と混ざったとき」と同じ限界） |
+| 頭文字は `projectInitials`: 名前の区切り（英数字と文字以外・camelCase の境目）の最初の 2 語の頭、1 語なら先頭 2 文字。`sample-v2` は SV（版の印も 1 語） | 同じ頭文字は色で見分ける。色だけに頼らないよう頭文字をいつも一緒に出す |
+| 1 色目の violet はアプリのアクセントの紫と同じ系統 | 見分けにくい色を避ける代わりにアクセントを 1 色目として扱う（利用者と合意した絵のとおり） |
+| 四角の地と頭文字の差は明るい配色・暗い配色の両方で 4.5:1 以上 | `project-colors.test.ts` が style.css の値で確かめる。暗い配色は明るめの地に濃い字、明るい配色は濃い地に白い字 |
+
+画面から使うとき（タブのグループ・ファイル一覧の頭も同じ）:
+
+- 値は `PROJECT_LOOKS.get(root)` / `PROJECT_LOOKS.current()`（型 `ProjectLook`: root・name・initials・color）。
+  変わったら `PROJECT_LOOKS.subscribe` で知る。元は `app.ts` が一覧の取り直しのたびに渡す
+- 四角は `projectMark(look, className)`（`.project-mark`）。要素を色で塗るなら
+  `paintProjectColor(el, color)` で `data-project-color` を付け、CSS は `var(--project-color)`
+  （線・薄い面は `color-mix`）と `var(--project-ink)` を読む。16 進を書かない
+- CSS 変数を読めない先（`meta[name=theme-color]`）へは `projectColorValue(color)`
+
 ### 以前の方式（1 つで完結するサーバを並べる。`--standalone` はこれ）
 
 **プロジェクトごとにサーバを立てる作りのまま**、次を足していた。
@@ -652,7 +680,7 @@ find web-src -name '*.ts' -not -path 'web-src/server/*' -not -path 'web-src/test
 | `<状態>/agent-hooks/` | フックの起動スクリプト・`failures.jsonl` | `CODE_VIEWER_TEST_STATE_DIR` |
 | `<状態>/accounts.json`・`<状態>/accounts/` | アカウントの登録簿・「新しく作る」の設定ディレクトリ | 同上 |
 | `<状態>/agent-usage/` | statusLine を包むスクリプト・claude の使用量・`failures.log` | 同上 |
-| `<状態>/projects.json` | プロジェクトの登録簿 | 同上 |
+| `<状態>/projects.json` | プロジェクトの登録簿（並び・名前・色） | 同上 |
 | `<状態>/settings.json` | 全プロジェクト共通の設定 | 同上 |
 | `<状態>/main-tabs.json` | メインの面のタブの配置をプロジェクト（根のパス）ごとに。ファイルの包みは version 1、各配置は version 3（`core/main-tabs.ts` の `LAYOUT_VERSION`。左右で同じファイルを開ける）。配置の version 1・2 も読み（repo の page のタブは落とし、右の page のタブは左へ移す）、次の保存で 3 にする。3 より新しい版は使わず上書きもしない（`isNewerLayoutVersion`）。`/_state/tabs`、`server/main-tabs-store.ts`、`core/main-tabs.ts` の `parseLayout`。読めない配置は上書きせず、先に `POST /_state/tabs/backup` で同じ場所の `main-tabs.json.broken-<時刻>` へ写してから空で始める（写せなければ保存しない。理由は console.error）。`/_state/tabs`、`server/main-tabs-store.ts` の `backupMainTabs`、`core/main-tabs.ts` の `parseLayout` | 同上 |
 | `<状態>/server-logs/` | code-viewer が起こしたサーバ・裏の出力（起動に失敗したとき・落ちたとき末尾を理由に添える） | 同上 |

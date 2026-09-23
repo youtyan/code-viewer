@@ -45,6 +45,7 @@ import {
 import { renderEmptyState } from "../empty-state";
 import type { PageView } from "../page-view";
 import type { ProjectActions } from "../projects/project-actions";
+import { projectLook, projectMark } from "../projects/project-looks";
 import { showProjectMenu } from "../projects/project-menu";
 import type { AccountsBand } from "./accounts-band";
 import { fillAgentCard } from "./agent-card";
@@ -414,8 +415,8 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     toggle.setAttribute(NAV_ATTR, `project:${group.info.root}`);
     toggle.tabIndex = -1;
     toggle.setAttribute("aria-expanded", String(!isCollapsed));
-    // 見出しは名前だけにする (絵のとおり)。パス・件数・Git の外かどうかは
-    // ツールチップに書く。
+    // 見出しはプロジェクトの色の四角と頭文字・名前だけにする (絵のとおり)。
+    // パス・件数・Git の外かどうかはツールチップに書く。
     toggle.title = [
       group.info.git
         ? group.info.displayRoot
@@ -431,7 +432,11 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     twisty.classList.toggle("collapsed", isCollapsed);
     twisty.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
     twisty.setAttribute("aria-hidden", "true");
-    toggle.append(name, twisty);
+    toggle.append(
+      projectMark(projectLook(group.info), "agents-project-mark"),
+      name,
+      twisty,
+    );
     toggle.addEventListener("click", () => {
       if (collapsed.has(group.info.root)) collapsed.delete(group.info.root);
       else collapsed.add(group.info.root);

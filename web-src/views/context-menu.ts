@@ -19,6 +19,13 @@ export type ContextMenuItem =
       /** 取り返しのつかない操作。`.danger` が付いて色が変わる。 */
       danger?: boolean;
       disabled?: boolean;
+      /** 文字の前に置く絵 (プロジェクトの色の四角など)。 */
+      leading?: HTMLElement;
+      /**
+       * 選び方の一覧 (色など) の今の値か。持つ項目は role=menuitemradio に
+       * なり、aria-checked で今の値を伝える。
+       */
+      checked?: boolean;
       onSelect(): void;
     }
   | { kind: "separator" };
@@ -74,8 +81,19 @@ export function showContextMenu(
     }
     const button = document.createElement("button");
     button.type = "button";
-    button.setAttribute("role", "menuitem");
-    button.textContent = item.label;
+    button.setAttribute(
+      "role",
+      item.checked === undefined ? "menuitem" : "menuitemradio",
+    );
+    if (item.checked !== undefined) {
+      button.setAttribute("aria-checked", String(item.checked));
+    }
+    if (item.leading) {
+      button.classList.add("gdp-context-menu-leading");
+      button.append(item.leading, item.label);
+    } else {
+      button.textContent = item.label;
+    }
     if (item.title) button.title = item.title;
     if (item.danger) button.classList.add("danger");
     button.disabled = !!item.disabled;

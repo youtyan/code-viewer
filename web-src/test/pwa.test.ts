@@ -539,6 +539,21 @@ describe("the window frame color follows the app theme", () => {
     expect(seen[4]).toBe(seen[0]);
   });
 
+  // いま見ているプロジェクトの色 (app がその変数を渡す)。テーマで値が替わる。
+  test.each([
+    ["light", ":root"],
+    ["dark", '[data-theme="dark"]'],
+  ])("theme %s paints the current project's color from %s", (theme, selector) => {
+    const green = cascadedDeclarations(
+      baseRules(loadStyleSheet()),
+      (s) => s === selector,
+    ).get("--project-green");
+    if (!green) throw new Error(`${selector} does not set --project-green`);
+    setLook(theme, "");
+    syncThemeColor(document, "--project-green");
+    expect(themeColors()).toEqual([green, green]);
+  });
+
   test("a page without the stylesheet is reported instead of painting an empty color", () => {
     style.remove();
     setLook("dark", "");

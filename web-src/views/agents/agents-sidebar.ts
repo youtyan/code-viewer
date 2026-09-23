@@ -3,12 +3,13 @@ import { formatErrorDetail } from "../../core/error-detail";
 // 左のサイドバーの「プロジェクト → エージェント」の一覧。どの画面にいても出る。
 //
 //   PROJECTS                              [全体ボード]
-//   ▾ ▣ sample-app            ●              ← いま見ているプロジェクト
+//   ▾ SA sample-app ◆                        ← いま見ているプロジェクト (その色で薄く塗る)
 //       ◆ claude  Review plan        3m      ← 押すとターミナルでそのペインを開く
 //       ◠ codex   Add tests          8m
-//   ▾ ▣ sample-lib
+//   ▾ SL sample-lib
 //       ○ claude  Idle              12m
-//   ▸ ▣ sample-docs                          ← エージェントの居ないプロジェクトは 1 行
+//   ▸ SD sample-docs                         ← エージェントの居ないプロジェクトは 1 行
+//   (SA などはプロジェクトの色の四角と頭文字。views/projects/project-looks.ts)
 //
 // 並び・登録プロジェクトと tmux から見つかったプロジェクトの合流・未読は
 // エージェントの全体ボード (agents-view.ts) と同じ純関数 (core/agent-overview)
@@ -25,7 +26,6 @@ import {
 } from "../../core/agent-overview";
 import {
   CHEVRON_DOWN_16_PATH,
-  FOLDER_ICON_PATHS,
   iconSvg,
   KEBAB_16_PATH,
   PLUS_16_PATH,
@@ -34,6 +34,11 @@ import { SOFT_KEYS_MEDIA_QUERY } from "../../core/mobile-layout";
 import { projectDropBefore } from "../../core/projects";
 import { showContextMenu } from "../context-menu";
 import type { ProjectActions } from "../projects/project-actions";
+import {
+  paintProjectColor,
+  projectLook,
+  projectMark,
+} from "../projects/project-looks";
 import { showProjectMenu } from "../projects/project-menu";
 import { agentStateMark, fillAgentCard } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
@@ -224,6 +229,8 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
 
     const head = el("div", "nav-project-head");
     head.classList.toggle("current", here);
+    // いま見ているプロジェクトの見出しは、その色で薄く塗る (.current)。
+    paintProjectColor(head, info.registered?.color ?? null);
     const starting = deps.projects.activity(info.root)?.kind === "starting";
     head.classList.toggle("starting", starting);
 
@@ -263,8 +270,9 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     ]
       .filter(Boolean)
       .join("\n");
-    // 見出しの絵: 起こしている最中は回る点線、人の番のもの (入力待ち・完了)
-    // があればその印 (畳んでいても中に何があるか分かる)、無ければフォルダ。
+    // 見出しの頭はプロジェクトの色の四角と頭文字 (タブのグループ・ファイル一覧の
+    // 頭と同じ)。名前の後ろに、起こしている最中は回る点線、人の番のもの (入力待ち・
+    // 完了・作業中) があればその印 (畳んでいても中に何があるか分かる)。
     const projectState =
       group.counts.waiting > 0
         ? "waiting"
@@ -273,20 +281,18 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
           : group.counts.working > 0
             ? "working"
             : null;
-    const icon = el("span", "nav-project-icon");
-    icon.setAttribute("aria-hidden", "true");
-    if (starting) {
-      icon.appendChild(el("i", "terminal-mark nav-mark-starting"));
-    } else if (projectState) {
-      icon.appendChild(agentStateMark(projectState));
-    } else {
-      icon.innerHTML = iconSvg(
-        "octicon-file-directory",
-        FOLDER_ICON_PATHS.closed,
-      );
-    }
     const name = el("span", "nav-project-name", info.name);
-    toggle.append(icon, name);
+    toggle.append(projectMark(projectLook(info), "nav-project-mark"), name);
+    if (starting || projectState) {
+      const state = el("span", "nav-project-state");
+      state.setAttribute("aria-hidden", "true");
+      state.appendChild(
+        starting
+          ? el("i", "terminal-mark nav-mark-starting")
+          : agentStateMark(projectState as NonNullable<typeof projectState>),
+      );
+      toggle.appendChild(state);
+    }
     if (starting) {
       toggle.appendChild(
         el("span", "nav-project-status", current.sidebar.starting),

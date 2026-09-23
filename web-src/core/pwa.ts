@@ -150,22 +150,26 @@ export function lastTabNumber(layout: Layout): number {
 }
 
 /**
- * 窓の枠の色 (インストールした窓のタイトルバー) を、いまのテーマの窓の地
- * (--color-ground) に合わせる。head の theme-color は OS の明暗で選ぶ 2 本だが、
- * アプリのテーマは OS と別に選べるので、どちらも今の地にする。
+ * 窓の枠の色 (インストールした窓のタイトルバー) を、いまのテーマでの variable
+ * の値に合わせる。既定は窓の地 (--color-ground)。app はいま見ているプロジェクトの
+ * 色 (--project-<色>) を渡す。head の theme-color は OS の明暗で選ぶ 2 本だが、
+ * アプリのテーマは OS と別に選べるので、どちらも今の値にする。
  */
-export function syncThemeColor(doc: Document): void {
-  const ground = getComputedStyle(doc.documentElement)
-    .getPropertyValue("--color-ground")
+export function syncThemeColor(
+  doc: Document,
+  variable = "--color-ground",
+): void {
+  const value = getComputedStyle(doc.documentElement)
+    .getPropertyValue(variable)
     .trim();
-  if (!ground)
+  if (!value)
     throw new Error(
-      `pwa: --color-ground is empty on <html data-theme="${doc.documentElement.dataset.theme}" data-palette="${doc.documentElement.dataset.palette ?? ""}">`,
+      `pwa: ${variable} is empty on <html data-theme="${doc.documentElement.dataset.theme}" data-palette="${doc.documentElement.dataset.palette ?? ""}">`,
     );
   for (const meta of doc.querySelectorAll<HTMLMetaElement>(
     'meta[name="theme-color"]',
   ))
-    meta.content = ground;
+    meta.content = value;
 }
 
 /** navigator.userAgentData の brands (Chromium だけが持つ。標準の型に無い)。 */

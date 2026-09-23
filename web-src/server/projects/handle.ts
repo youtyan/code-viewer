@@ -1,8 +1,8 @@
 // プロジェクトの登録簿・開く・止めるの HTTP 入口。振り分けは terminal/handle.ts
 // の /_agent/ の表に載せる (並行するルータは作らない)。
 //
-// - POST /_agent/projects       足す (パス・このサーバのリポジトリ)・外す・名前・並べ替え
-//                               (並べ替えは 1 つ上下か、別のプロジェクトの前へ)
+// - POST /_agent/projects       足す (パス・このサーバのリポジトリ)・外す・名前・色・
+//                               並べ替え (並べ替えは 1 つ上下か、別のプロジェクトの前へ)
 // - POST /_agent/projects/open  登録したプロジェクトのサーバを (無ければ起こして) 返す
 // - POST /_agent/projects/stop  code-viewer が起こしたサーバを止める
 //
@@ -12,6 +12,7 @@
 import { realpathSync } from "node:fs";
 import { hasControlCharacter } from "../../core/control-chars";
 import { formatErrorDetail } from "../../core/error-detail";
+import { isProjectColor, PROJECT_COLORS } from "../../core/project-colors";
 import {
   MAX_PROJECT_NAME_LENGTH,
   type ProjectOpenResponse,
@@ -108,6 +109,12 @@ function parseChange(
     if (name === null) return "invalid name";
     return { action, root, name };
   }
+  if (action === "color") {
+    if (!isProjectColor(body.color)) {
+      return `color must be one of ${PROJECT_COLORS.join(", ")}`;
+    }
+    return { action, root, color: body.color };
+  }
   if (action === "move") {
     // before: その前へ置く (null は末尾。ドラッグで落とした位置)。
     // direction: 1 つ上 (-1) か下 (+1) (メニュー・Alt+↑↓)。
@@ -122,7 +129,7 @@ function parseChange(
     }
     return { action, root, direction: body.direction };
   }
-  return "action must be add, remove, rename or move";
+  return "action must be add, remove, rename, color or move";
 }
 
 export async function handleProjectsPost(

@@ -34,6 +34,7 @@ import {
   responseErrorMessage,
 } from "../../core/error-detail";
 import { BACKGROUND_REQUEST_HEADER } from "../../core/network-activity";
+import { projectInitials } from "../../core/project-colors";
 import type { TmuxPaneId } from "../../core/tmux";
 import type { AgentsText } from "./i18n";
 import { paneText } from "./pane-text";
@@ -121,9 +122,11 @@ export function createAgentMonitor(deps: AgentMonitorDeps): AgentMonitor {
     const api = notificationApi();
     if (!api) return;
     const text = deps.getText();
-    const project =
-      overview?.projects.find((info) => info.root === pane.project)?.name ??
-      pane.project;
+    // 通知に色は出せないので、プロジェクト名の前に頭文字 (左の一覧の四角と同じ)。
+    const info = overview?.projects.find((item) => item.root === pane.project);
+    const project = info
+      ? `${projectInitials(info.name)} ${info.name}`
+      : pane.project;
     const title =
       transition === "waiting"
         ? text.notifyWaitingTitle(project)

@@ -446,7 +446,7 @@ describe("buildAgentOverview", () => {
 
 describe("registered projects in the overview", () => {
   function registeredInfo(root: string, name: string, order: number) {
-    return { root, name, order, port: null };
+    return { root, name, order, color: "violet" as const, port: null };
   }
 
   test("the same git root is one project with the registered name; registered-only projects are listed without panes", async () => {

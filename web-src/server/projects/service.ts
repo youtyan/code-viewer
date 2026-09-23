@@ -12,11 +12,13 @@
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { formatErrorDetail } from "../../core/error-detail";
+import type { ProjectColor } from "../../core/project-colors";
 import {
   addProject,
   moveProject,
   type ProjectOpenResponse,
   placeProject,
+  recolorProject,
   removeProject,
   renameProject,
   type StoredProject,
@@ -73,6 +75,7 @@ export type ProjectChange =
   | { action: "add"; path: string; name?: string }
   | { action: "remove"; root: string }
   | { action: "rename"; root: string; name: string }
+  | { action: "color"; root: string; color: ProjectColor }
   | { action: "move"; root: string; direction: -1 | 1 }
   | { action: "move"; root: string; before: string | null };
 
@@ -92,6 +95,9 @@ export async function changeProjects(
     if (change.action === "remove") return removeProject(registry, change.root);
     if (change.action === "rename") {
       return renameProject(registry, change.root, change.name);
+    }
+    if (change.action === "color") {
+      return recolorProject(registry, change.root, change.color);
     }
     return "before" in change
       ? placeProject(registry, change.root, change.before)

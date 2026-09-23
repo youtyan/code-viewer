@@ -9,6 +9,8 @@
 // 一時ファイルから rename する (途中で落ちても半端なファイルを残さない)。
 //
 // 壊れた登録簿は上書きしない。読めない間は変更を断り、理由を全部返す。
+// 色の無い版が書いた登録簿は、最初に読んだとき (一覧の取り直し) か最初に
+// 変えるときに、登録の順で色を配って保存する。
 // 登録簿から外してもリポジトリには何もしない。
 //
 // 変える外部状態と戻し方 (server.md「外部状態を変える機能」): このファイル
@@ -16,6 +18,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { formatErrorDetail } from "../../core/error-detail";
 import {
   emptyProjectRegistry,
   type ProjectRegistry,
@@ -25,6 +28,7 @@ import {
   parseProjectRegistry,
   registeredProjectInfos,
   type StoredProject,
+  withRegistryColors,
 } from "../../core/projects";
 import { withFileLock } from "../file-lock";
 import {
@@ -73,11 +77,33 @@ export function readProjectRegistry(path: string): ProjectRegistryRead {
 export const readProjectRegistryCached =
   cachedRegistryReader(readProjectRegistry);
 
-/** 一覧・切替に載せる形。読めなければ空の一覧と理由の全文。 */
-export function projectRegistrySnapshot(path: string): ProjectRegistrySnapshot {
+/**
+ * 一覧・切替に載せる形。読めなければ空の一覧と理由の全文。色の無い登録が
+ * あれば配って保存する。保存できなければ、配った色で一覧を出し、理由を
+ * error に載せる (次の取り直しでまた保存を試す)。
+ */
+export async function projectRegistrySnapshot(
+  path: string,
+): Promise<ProjectRegistrySnapshot> {
   const read = readProjectRegistryCached(path);
   if (read.ok === false) return { projects: [], error: read.error, path };
-  return { projects: registeredProjectInfos(read.registry), error: "", path };
+  if (withRegistryColors(read.registry) === read.registry) {
+    return { projects: registeredProjectInfos(read.registry), error: "", path };
+  }
+  try {
+    const saved = await rewriteProjectRegistry(path, (registry) => ({
+      registry,
+      result: registry,
+    }));
+    return { projects: registeredProjectInfos(saved), error: "", path };
+  } catch (error) {
+    console.error("[code-viewer] saving the project colors failed", error);
+    return {
+      projects: registeredProjectInfos(read.registry),
+      error: `the project colors could not be saved to ${path}: ${formatErrorDetail(error)}`,
+      path,
+    };
+  }
 }
 
 // ai-dup-check: allow -- fp:switch over a different issue union (projects, not accounts)
@@ -103,13 +129,16 @@ function issueCode(issue: ProjectRegistryIssue): ProjectRegistryError["code"] {
 }
 
 /**
- * ロックを持って、読めることを確かめて、変えて、書く。変えた結果が同じ
- * 登録簿 (上へ・下への端など) なら書かない。
+ * ロックを持って、読めることを確かめて、色の無い登録に色を配ってから変えて、
+ * 書く。読んだものと同じ登録簿 (上へ・下への端など) なら書かない。
  */
-export async function updateProjectRegistry(
+async function rewriteProjectRegistry<T>(
   path: string,
-  change: (registry: ProjectRegistry) => ProjectRegistryChange,
-): Promise<StoredProject> {
+  change: (registry: ProjectRegistry) => {
+    registry: ProjectRegistry;
+    result: T;
+  },
+): Promise<T> {
   return withFileLock(`${path}.lock`, () => {
     const read = readProjectRegistry(path);
     if (read.ok === false) {
@@ -118,13 +147,7 @@ export async function updateProjectRegistry(
         "unreadable",
       );
     }
-    const result = change(read.registry);
-    if (result.ok === false) {
-      throw new ProjectRegistryError(
-        issueMessage(result.issue),
-        issueCode(result.issue),
-      );
-    }
+    const result = change(withRegistryColors(read.registry));
     if (result.registry !== read.registry) {
       try {
         writeFileAtomic(
@@ -138,6 +161,22 @@ export async function updateProjectRegistry(
         });
       }
     }
-    return result.project;
+    return result.result;
+  });
+}
+
+export async function updateProjectRegistry(
+  path: string,
+  change: (registry: ProjectRegistry) => ProjectRegistryChange,
+): Promise<StoredProject> {
+  return rewriteProjectRegistry(path, (registry) => {
+    const result = change(registry);
+    if (result.ok === false) {
+      throw new ProjectRegistryError(
+        issueMessage(result.issue),
+        issueCode(result.issue),
+      );
+    }
+    return { registry: result.registry, result: result.project };
   });
 }

@@ -282,6 +282,7 @@ import {
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { installMobileShell } from "./views/mobile-shell";
 import { createProjectActions } from "./views/projects/project-actions";
+import { PROJECT_LOOKS } from "./views/projects/project-looks";
 import {
   mountProjectSwitcher,
   type ProjectSwitcher,
@@ -3542,8 +3543,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
     $<HTMLLinkElement>("#hljs-light").disabled = STATE.theme === "dark";
     $<HTMLLinkElement>("#hljs-dark").disabled = STATE.theme !== "dark";
-    // インストールした窓の枠の色も今の地に (core/pwa.ts)。
-    syncThemeColor(document);
+    syncWindowFrameColor();
+  }
+
+  /**
+   * インストールした窓の枠の色 (core/pwa.ts)。いま見ているプロジェクトの色、
+   * 登録していない・まだ一覧が来ていなければ今の地。
+   */
+  function syncWindowFrameColor(): void {
+    const color = PROJECT_LOOKS.current()?.color;
+    syncThemeColor(document, color ? `--project-${color}` : "--color-ground");
   }
 
   function getHljs(): HljsApi | null {
@@ -8268,6 +8277,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         console.error("[code-viewer] launch dialog failed", error),
     );
   }
+
+  // プロジェクトの色と頭文字の口 (views/projects/project-looks.ts) に一覧を渡す。
+  // 色・名前・いま見ているものが変わったら窓の枠の色も当て直す。
+  PROJECT_LOOKS.subscribe(syncWindowFrameColor);
+  AGENT_MONITOR.subscribe(() =>
+    PROJECT_LOOKS.update(AGENT_MONITOR.snapshot().overview),
+  );
 
   // 電話の段の下端の帯の「エージェント」に、最下段と同じ数え方の入力待ちの件数。
   AGENT_MONITOR.subscribe(() =>

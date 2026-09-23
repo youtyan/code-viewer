@@ -70,6 +70,7 @@ async function mountBoard(
     },
     unregister: async () => undefined,
     rename: async () => undefined,
+    recolor: async () => undefined,
     move: async () => undefined,
     place: async () => undefined,
     stop: async () => undefined,

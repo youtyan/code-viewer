@@ -7,6 +7,7 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -17,7 +18,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { addProject } from "../core/projects";
 import type { AppSettingsState } from "../core/types";
 import { checkProjects } from "../server/doctor";
 import { tryAcquireFileLock } from "../server/file-lock";
@@ -169,7 +171,7 @@ describe("the project registry on disk", () => {
         );
         return [
           res.status,
-          projectRegistrySnapshot(path).projects.map((p) => p.root),
+          (await projectRegistrySnapshot(path)).projects.map((p) => p.root),
         ];
       };
       expect([
@@ -220,6 +222,132 @@ describe("the project registry on disk", () => {
     expect((error as ProjectRegistryError).code).toBe("unreadable");
     expect((error as Error).message).toContain(registryPath);
     expect(readFileSync(registryPath, "utf8")).toBe(text);
+  });
+
+  // 色の無い版が書いた登録簿: 最初に一覧が読んだとき、登録の順で配って保存する。
+  test("an older registry without colors gets them in its order when the list first reads it, and keeps them", async () => {
+    mkdirSync(join(dir, "state"), { recursive: true });
+    const older = {
+      version: 1,
+      projects: ["sample-a", "sample-b", "sample-c"].map((name) => ({
+        root: `/work/${name}`,
+        name,
+        addedAt: "2026-09-20T00:00:00.000Z",
+      })),
+    };
+    writeFileSync(registryPath, JSON.stringify(older));
+    const listed = async () =>
+      (await projectRegistrySnapshot(registryPath)).projects.map((p) => [
+        p.name,
+        p.color,
+      ]);
+    const saved = () =>
+      (
+        JSON.parse(readFileSync(registryPath, "utf8")) as {
+          projects: { color?: string }[];
+        }
+      ).projects.map((p) => p.color);
+    const expected = [
+      ["sample-a", "violet"],
+      ["sample-b", "green"],
+      ["sample-c", "orange"],
+    ];
+    expect(await listed()).toEqual(expected);
+    expect(saved()).toEqual(["violet", "green", "orange"]);
+    // 次に登録するものは空いている色、並べ替えても色はそのまま。
+    await updateProjectRegistry(registryPath, (registry) =>
+      addProject(registry, { root: "/work/sample-d" }, 1),
+    );
+    await changeProjects(
+      { action: "move", root: "/work/sample-c", direction: -1 },
+      dir,
+      1,
+      registryPath,
+    );
+    expect(await listed()).toEqual([
+      ["sample-a", "violet"],
+      ["sample-c", "orange"],
+      ["sample-b", "green"],
+      ["sample-d", "blue"],
+    ]);
+  });
+
+  test("colors that cannot be saved are still listed, with the reason", async () => {
+    mkdirSync(join(dir, "state"), { recursive: true });
+    writeFileSync(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        projects: [{ root: "/work/sample-a", name: "sample-a", addedAt: "x" }],
+      }),
+    );
+    chmodSync(join(dir, "state"), 0o500);
+    const logged = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const snapshot = await projectRegistrySnapshot(registryPath);
+      expect(snapshot.projects.map((p) => p.color)).toEqual(["violet"]);
+      expect(snapshot.error).toContain(
+        `the project colors could not be saved to ${registryPath}`,
+      );
+      expect(logged).toHaveBeenCalledWith(
+        "[code-viewer] saving the project colors failed",
+        expect.any(Error),
+      );
+    } finally {
+      logged.mockRestore();
+      chmodSync(join(dir, "state"), 0o700);
+    }
+    expect(readProjectRegistry(registryPath)).toEqual({
+      ok: true,
+      registry: {
+        version: 1,
+        projects: [{ root: "/work/sample-a", name: "sample-a", addedAt: "x" }],
+      },
+    });
+  });
+
+  test("the menu's color is saved through the HTTP handler", async () => {
+    const saved = process.env.CODE_VIEWER_TEST_STATE_DIR;
+    process.env.CODE_VIEWER_TEST_STATE_DIR = join(dir, "state");
+    try {
+      const path = projectRegistryPath();
+      const [a, b] = ["repo-a", "repo-b"].map(makeRepo);
+      for (const root of [a, b]) {
+        await changeProjects({ action: "add", path: root }, root, 1, path);
+      }
+      const post = async (body: unknown) => {
+        const res = await handleProjectsPost(
+          new Request("http://127.0.0.1/_agent/projects", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+          a,
+        );
+        return [
+          res.status,
+          (await projectRegistrySnapshot(path)).projects.map((p) => p.color),
+        ];
+      };
+      expect([
+        await post({ action: "color", root: b, color: "red" }),
+        await post({ action: "color", root: a, color: "red" }),
+        await post({ action: "color", root: a, color: "teal" }),
+        await post({ action: "color", root: a }),
+        await post({ action: "color", root: join(dir, "x"), color: "blue" }),
+      ]).toEqual([
+        [200, ["violet", "red"]],
+        [200, ["red", "red"]],
+        [400, ["red", "red"]],
+        [400, ["red", "red"]],
+        [404, ["red", "red"]],
+      ]);
+    } finally {
+      if (saved === undefined) delete process.env.CODE_VIEWER_TEST_STATE_DIR;
+      else process.env.CODE_VIEWER_TEST_STATE_DIR = saved;
+    }
   });
 
   test("concurrent writers do not lose each other's projects", async () => {

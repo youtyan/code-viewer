@@ -15,6 +15,7 @@ import {
   beforeAll,
   describe,
   expect,
+  onTestFinished,
   test,
   vi,
 } from "vitest";
@@ -26,6 +27,7 @@ import type {
 import type { AgentState } from "../core/agent-state";
 import { BACKGROUND_REQUEST_HEADER } from "../core/network-activity";
 import { PANE_PREVIEW_DELAY_MS } from "../core/pane-preview";
+import { PROJECT_COLORS, type ProjectColor } from "../core/project-colors";
 import type {
   AgentMonitor,
   AgentMonitorSnapshot,
@@ -71,7 +73,15 @@ function info(
     git: true,
     error: "",
     server,
-    registered: order === null ? null : { root, name, order },
+    registered:
+      order === null
+        ? null
+        : {
+            root,
+            name,
+            order,
+            color: PROJECT_COLORS[order % PROJECT_COLORS.length],
+          },
   };
 }
 
@@ -112,6 +122,7 @@ function overview(
           root: item.root,
           name: item.name,
           order: item.registered?.order ?? 0,
+          color: item.registered?.color ?? "violet",
           port: null,
         })),
       error: "",
@@ -170,6 +181,8 @@ function fakeActions(): ProjectActions & {
     | { root: string; direction: -1 | 1 }
     | { root: string; before: string | null }
   )[];
+  /** 色のメニューで選んだもの。 */
+  recolored: { root: string; color: ProjectColor }[];
 } {
   const opened: { root: string; path: string; confirmRegister?: boolean }[] =
     [];
@@ -177,9 +190,11 @@ function fakeActions(): ProjectActions & {
     | { root: string; direction: -1 | 1 }
     | { root: string; before: string | null }
   )[] = [];
+  const recolored: { root: string; color: ProjectColor }[] = [];
   return {
     opened,
     reordered,
+    recolored,
     activity: () => null,
     signature: () => "",
     dismiss: () => undefined,
@@ -196,6 +211,9 @@ function fakeActions(): ProjectActions & {
     registerByPath: async () => undefined,
     unregister: async () => undefined,
     rename: async () => undefined,
+    recolor: async (item, color) => {
+      recolored.push({ root: item.root, color });
+    },
     move: async (item, direction) => {
       reordered.push({ root: item.root, direction });
     },
@@ -462,7 +480,6 @@ describe("agents sidebar heading marks", () => {
       ["working"],
       ".terminal-mark-working",
     ],
-    ["idle keeps the folder", ["idle"], "svg"],
   ])("%s", (_name, states, selector) => {
     const { root } = mount(
       overview(
@@ -478,7 +495,103 @@ describe("agents sidebar heading marks", () => {
       (el) =>
         el.querySelector(".nav-project-name")?.textContent === "sample-lib",
     );
-    expect(lib?.querySelector(`.nav-project-icon ${selector}`)).not.toBeNull();
+    expect(lib?.querySelector(`.nav-project-state ${selector}`)).not.toBeNull();
+  });
+
+  test("an idle project has no mark after its name", () => {
+    const { root } = mount(
+      overview(
+        [pane("%1", "work:0.0", "/work/sample-lib", "idle")],
+        REGISTERED,
+      ),
+    );
+    expect(root.querySelectorAll(".nav-project-state")).toHaveLength(0);
+  });
+
+  // 見出しの頭はフォルダの絵ではなく、プロジェクトの色の四角と頭文字。
+  // 登録していないもの (tmux で見つけただけ) は色なし。
+  test("each heading starts with its color square and initials", () => {
+    const { root } = mount(
+      overview(
+        [pane("%1", "work:0.0", "/work/other-repo", "idle")],
+        [...REGISTERED, info("/work/other-repo", null)],
+      ),
+    );
+    expect(
+      [...root.querySelectorAll<HTMLElement>(".nav-project-head")].map(
+        (head) => {
+          const mark = head.querySelector<HTMLElement>(
+            ".nav-project-toggle > .project-mark:first-child",
+          );
+          return [
+            head.querySelector(".nav-project-name")?.textContent,
+            mark?.textContent,
+            mark?.dataset.projectColor,
+            head.dataset.projectColor,
+            head.classList.contains("current"),
+          ];
+        },
+      ),
+    ).toEqual([
+      ["sample-app", "SA", "violet", "violet", true],
+      ["sample-lib", "SL", "green", "green", false],
+      ["sample-docs", "SD", "orange", "orange", false],
+      ["other-repo", "OR", "none", "none", false],
+    ]);
+  });
+
+  test("the menu's Color… lists the palette and saves the chosen color", async () => {
+    // リポジトリの画面と同じく、文書の click で開いているメニューを閉じる
+    // (repo-view.ts の closeRepoContextMenu)。「色…」の click がここまで
+    // 届いても、色の一覧は残る。
+    const closeOnDocumentClick = () =>
+      document.querySelector(".gdp-context-menu")?.remove();
+    document.addEventListener("click", closeOnDocumentClick);
+    onTestFinished(() =>
+      document.removeEventListener("click", closeOnDocumentClick),
+    );
+    const actions = fakeActions();
+    const { root } = mount(overview([], REGISTERED), actions);
+    const head = [
+      ...root.querySelectorAll<HTMLElement>(".nav-project-head"),
+    ][1];
+    head?.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    );
+    const menuItems = () => [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        ".gdp-context-menu button",
+      ),
+    ];
+    const text = agentsText("en").projects;
+    menuItems()
+      .find((item) => item.textContent === text.color)
+      ?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      menuItems().map((item) => [
+        item.textContent,
+        item.getAttribute("role"),
+        item.getAttribute("aria-checked"),
+      ]),
+    ).toEqual(
+      PROJECT_COLORS.map((color) => [
+        `SL${text.colorNames[color]}`,
+        "menuitemradio",
+        String(color === "green"),
+      ]),
+    );
+    expect(
+      menuItems().map(
+        (item) =>
+          item.querySelector<HTMLElement>(".project-mark")?.dataset
+            .projectColor,
+      ),
+    ).toEqual([...PROJECT_COLORS]);
+    menuItems()[3]?.click();
+    expect(actions.recolored).toEqual([
+      { root: "/work/sample-lib", color: PROJECT_COLORS[3] },
+    ]);
   });
 
   test("a starting project shows its progress mark and label", () => {
@@ -491,7 +604,7 @@ describe("agents sidebar heading marks", () => {
         .find(
           (el) => el.querySelector(".nav-project-name")?.textContent === name,
         )
-        ?.querySelector(".nav-project-icon");
+        ?.querySelector(".nav-project-state");
     expect(
       icon("sample-docs")?.querySelector(".nav-mark-starting"),
     ).not.toBeNull();

@@ -1,6 +1,8 @@
 // プロジェクトの登録・開く・止める・ヘッダの切替の文言。エージェント一覧の
 // 文言 (views/agents/i18n.ts) の projects に入れて、同じ言語設定で切り替える。
 
+import type { ProjectColor } from "../../core/project-colors";
+
 export type ProjectsText = {
   /** 見出しのメニューを開くボタン。 */
   menu: string;
@@ -10,6 +12,10 @@ export type ProjectsText = {
   unregister: string;
   unregisterTitle: string;
   rename: string;
+  /** メニューの「色」。押すと色の一覧に替わる。 */
+  color: string;
+  colorTitle: string;
+  colorNames: Record<ProjectColor, string>;
   moveUp: string;
   moveDown: string;
   stopServer: string;
@@ -84,6 +90,20 @@ export const PROJECTS_EN: ProjectsText = {
   unregisterTitle:
     "Remove it from the registered projects. The repository is not touched.",
   rename: "Rename…",
+  color: "Color…",
+  colorTitle:
+    "The project's color and initials, shared by the sidebar, the board, the switcher and the window's title bar",
+  colorNames: {
+    violet: "Violet",
+    green: "Green",
+    orange: "Orange",
+    blue: "Blue",
+    amber: "Amber",
+    pink: "Pink",
+    cyan: "Cyan",
+    red: "Red",
+    olive: "Olive",
+  },
   moveUp: "Move up",
   moveDown: "Move down",
   stopServer: "Stop its code-viewer…",
@@ -164,6 +184,20 @@ export const PROJECTS_JA: ProjectsText = {
   unregister: "登録を外す…",
   unregisterTitle: "登録したプロジェクトから外します。リポジトリには触りません",
   rename: "名前を変える…",
+  color: "色…",
+  colorTitle:
+    "プロジェクトの色と頭文字。左の一覧・全体ボード・切替の小窓・窓の上端の帯で同じものを使います",
+  colorNames: {
+    violet: "紫",
+    green: "緑",
+    orange: "橙",
+    blue: "青",
+    amber: "黄",
+    pink: "桃",
+    cyan: "水色",
+    red: "赤",
+    olive: "黄緑",
+  },
   moveUp: "上へ",
   moveDown: "下へ",
   stopServer: "code-viewer を止める…",

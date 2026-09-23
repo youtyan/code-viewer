@@ -2,9 +2,9 @@
 //
 //   ┌ プロジェクト                 ↑↓ 移動 · Enter 開く ┐
 //   │ [絞り込む                                    ]    │
-//   │ ● sample-repo   ~/work/sample-repo   この画面     │
-//   │   another-repo  ~/work/another-repo  ◆1 ●2        │
-//   │   third-repo    ~/work/third-repo    停止中        │
+//   │ SR sample-repo   ~/work/sample-repo   この画面    │
+//   │ AR another-repo  ~/work/another-repo  ◆1 ●2       │
+//   │ TR third-repo    ~/work/third-repo    停止中       │
 //   │ ───────────────────────────────────────────────── │
 //   │ パスを入力して登録…                               │
 //   └────────────────────────────────────────────────────┘
@@ -14,6 +14,7 @@
 // 結果をそのまま使う (新しい取得は足さない)。選ぶと同じタブで、いまと同じ
 // 画面へ移る。動いていなければ起こしてから (project-actions)。
 //
+// 行の頭はプロジェクトの色の四角と頭文字 (左のサイドバーの見出しと同じ)。
 // 登録が 1 つも無いときは、いま見ているリポジトリを登録する案内だけを出す。
 // ヘッダの幅は増やさない (ボタンは既存のリポジトリ名そのもの)。
 
@@ -25,6 +26,7 @@ import {
 import { CHEVRON_DOWN_12_PATH, iconSvg } from "../../core/icons";
 import { matchesProjectQuery } from "../../core/projects";
 import type { ProjectActions } from "./project-actions";
+import { projectLook, projectMark } from "./project-looks";
 import type { ProjectsText } from "./projects-i18n";
 
 export type ProjectSwitcherDeps = {
@@ -148,7 +150,12 @@ export function mountProjectSwitcher(
         status.appendChild(label);
       }
     }
-    item.append(name, path, status);
+    item.append(
+      projectMark(projectLook(info), "project-switcher-mark"),
+      name,
+      path,
+      status,
+    );
     item.title = [
       info.root,
       t.switcherCounts(counts.waiting, counts.working),

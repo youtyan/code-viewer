@@ -213,6 +213,13 @@ Requires Node.js 20 or newer. Development uses
   again. Theme,
   language, font sizes, key bindings and notifications are shared by all
   projects, so switching does not change how it looks.
+- Each registered project gets a color and two initials (`code-viewer` →
+  CV), shown as a square before its name in the left sidebar, on the All
+  agents board and in the project switcher. The project on screen has its
+  heading tinted with that color, notifications put the initials before the
+  project name, and an installed window's title bar takes the color. A new
+  project gets a color nobody else uses; change it with **Color…** in the
+  heading's ⋯ or right-click menu.
 - Open files directly from the repository or diff view, including text-like
   config/prompt files and large generated files (virtualized source viewer
   with copy/open-full-view).

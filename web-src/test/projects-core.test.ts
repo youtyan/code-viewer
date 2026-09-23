@@ -10,6 +10,7 @@ import {
   groupAgentPanesByPlace,
 } from "../core/agent-overview";
 import type { AgentState } from "../core/agent-state";
+import { PROJECT_COLORS, type ProjectColor } from "../core/project-colors";
 import {
   addProject,
   canStopProjectServer,
@@ -22,8 +23,11 @@ import {
   placeProject,
   projectDestination,
   projectDropBefore,
+  recolorProject,
+  registeredProjectInfos,
   removeProject,
   renameProject,
+  withRegistryColors,
 } from "../core/projects";
 import type { AppSettingsState } from "../core/types";
 import {
@@ -103,6 +107,20 @@ describe("parseProjectRegistry", () => {
       { version: 1, projects: ["/work/a"] },
       ["projects[0]: not an object"],
     ],
+    [
+      "a color outside the palette (not dropped: the next write would lose it)",
+      {
+        version: 1,
+        projects: [
+          { root: "/work/a", name: "a", addedAt: "x", color: "teal" },
+          { root: "/work/b", name: "b", addedAt: "x", color: 3 },
+        ],
+      },
+      [
+        `projects[0].color: "teal" is not one of ${PROJECT_COLORS.join(", ")}`,
+        `projects[1].color: 3 is not one of ${PROJECT_COLORS.join(", ")}`,
+      ],
+    ],
   ])("rejects %s with every reason", (_label, raw, issues) => {
     expect(parseProjectRegistry(raw)).toEqual({ ok: false, issues });
   });
@@ -139,6 +157,7 @@ describe("changing the registry", () => {
       root,
       name: expected,
       addedAt: "2026-09-21T00:00:00.000Z",
+      color: "violet",
     });
     expect(roots(result.registry)).toEqual([root]);
   });
@@ -304,6 +323,10 @@ describe("changing the registry", () => {
       (value: ProjectRegistry) => renameProject(value, "/work/x", "x"),
     ],
     ["move", (value: ProjectRegistry) => moveProject(value, "/work/x", 1)],
+    [
+      "recolor",
+      (value: ProjectRegistry) => recolorProject(value, "/work/x", "blue"),
+    ],
   ])("%s of an unknown project is not-found", (_label, change) => {
     expect(change(registry("/work/a"))).toEqual({
       ok: false,
@@ -326,8 +349,104 @@ describe("changing the registry", () => {
     });
   });
 
+  test("a registry without colors (an older version's) reads as it is", () => {
+    const raw = {
+      version: 1,
+      projects: [
+        { root: "/work/a", name: "a", addedAt: "x" },
+        { root: "/work/b", name: "b", addedAt: "x", color: "pink" },
+      ],
+    };
+    expect(parseProjectRegistry(raw)).toEqual({ ok: true, registry: raw });
+  });
+
   test("an empty registry has version 1", () => {
     expect(emptyProjectRegistry()).toEqual({ version: 1, projects: [] });
+  });
+});
+
+describe("project colors in the registry", () => {
+  function colored(...entries: [string, ProjectColor | undefined][]) {
+    return {
+      version: 1 as const,
+      projects: entries.map(([root, color]) => ({
+        root,
+        name: root.slice(root.lastIndexOf("/") + 1),
+        addedAt: "2026-09-20T00:00:00.000Z",
+        ...(color ? { color } : {}),
+      })),
+    };
+  }
+  const colors = (value: ProjectRegistry) =>
+    value.projects.map((project) => project.color);
+
+  test.each<[string, ProjectRegistry, ProjectColor]>([
+    ["the first registration gets the first color", colored(), "violet"],
+    [
+      "a registration takes a color nobody uses",
+      colored(["/work/a", "violet"], ["/work/b", "green"]),
+      "orange",
+    ],
+    [
+      "the color of a removed project is handed out again",
+      colored(["/work/a", "violet"], ["/work/c", "orange"]),
+      "green",
+    ],
+  ])("%s", (_label, start, expected) => {
+    const result = addProject(start, { root: "/work/new" }, NOW);
+    if (result.ok === false) throw new Error(JSON.stringify(result.issue));
+    expect(result.project.color).toBe(expected);
+  });
+
+  test("recolorProject changes only that project's color", () => {
+    const result = recolorProject(
+      colored(["/work/a", "violet"], ["/work/b", "green"]),
+      "/work/b",
+      "red",
+    );
+    if (result.ok === false) throw new Error(JSON.stringify(result.issue));
+    expect(colors(result.registry)).toEqual(["violet", "red"]);
+  });
+
+  test("recolorProject to the same color returns the same registry (nothing to write)", () => {
+    const start = colored(["/work/a", "violet"]);
+    const result = recolorProject(start, "/work/a", "violet");
+    expect(result.ok && result.registry).toBe(start);
+  });
+
+  test.each<[string, ProjectRegistry, ProjectColor[]]>([
+    [
+      "every project of an older registry gets a color in its order",
+      colored(
+        ["/work/a", undefined],
+        ["/work/b", undefined],
+        ["/work/c", undefined],
+      ),
+      ["violet", "green", "orange"],
+    ],
+    [
+      "colors already chosen stay and are not handed out twice",
+      colored(["/work/a", undefined], ["/work/b", "violet"]),
+      ["green", "violet"],
+    ],
+  ])("withRegistryColors: %s", (_label, start, expected) => {
+    expect(colors(withRegistryColors(start))).toEqual(expected);
+  });
+
+  test("withRegistryColors returns the same registry when every project has a color", () => {
+    const start = colored(["/work/a", "blue"]);
+    expect(withRegistryColors(start)).toBe(start);
+  });
+
+  test("registeredProjectInfos always has a color (even before it is saved)", () => {
+    expect(
+      registeredProjectInfos(
+        colored(["/work/a", undefined], ["/work/b", "violet"]),
+      ),
+    ).toEqual([
+      { root: "/work/a", name: "a", color: "green", order: 0 },
+      { root: "/work/b", name: "b", color: "violet", order: 1 },
+    ]);
   });
 });
 
@@ -483,7 +602,8 @@ describe("groupAgentPanes with registered projects", () => {
       git: true,
       error: "",
       server: { status: "absent" },
-      registered: order === null ? null : { root, name, order },
+      registered:
+        order === null ? null : { root, name, order, color: "violet" },
     };
   }
   function pane(id: string, project: string, state: AgentState): AgentPane {
@@ -579,7 +699,8 @@ describe("groupAgentPanesByPlace (the sidebar order)", () => {
       git: true,
       error: "",
       server: { status: "absent" },
-      registered: order === null ? null : { root, name, order },
+      registered:
+        order === null ? null : { root, name, order, color: "violet" },
     };
   }
   function pane(

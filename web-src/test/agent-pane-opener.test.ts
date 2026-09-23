@@ -26,7 +26,10 @@ function project(
     git: options.git ?? true,
     error: "",
     server,
-    registered: options.registered === false ? null : { root, name, order: 0 },
+    registered:
+      options.registered === false
+        ? null
+        : { root, name, order: 0, color: "violet" },
   };
 }
 

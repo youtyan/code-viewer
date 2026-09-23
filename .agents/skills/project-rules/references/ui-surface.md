@@ -15,6 +15,7 @@
 | 左のサイドバー (`#app-nav`) の下端の項目 | `nav-foot-item` (アイコン + 文字)。見出しの横の小さな操作は `nav-icon-action` |
 | 左のサイドバーの行の操作 (hover で出る) | `nav-row-action`。場所を確保せず行の上に重ねる (`.nav-project-actions`) |
 | エージェントの行 (左のサイドバー・全体ボード) | `views/agents/agent-card.ts` の `fillAgentCard` (`.agent-card`)。2 行組のカード: 1 行目 = 状態の印・名前・札 (未読の入力待ち・完了)、2 行目 = 補足。プロジェクトはカードにしない (太く大きい見出しの行 + 件数)。場所ごとの補足は `extra` で足す (全体ボードのアカウント・tmux の場所) |
+| プロジェクトの色と頭文字 (左のサイドバーの見出し・全体ボード・切替の小窓・タブのグループ・ファイル一覧の頭) | `views/projects/project-looks.ts` の `projectMark` (`.project-mark`、色の四角に頭文字) と `PROJECT_LOOKS`。塗るのは `paintProjectColor` で `data-project-color` を付けて `var(--project-color)` を読む。決まりは `agents.md` の 7「色と頭文字」 |
 | 最下段のバー (`#statusbar`) | 押せる塊は `usage-status-item` / `statusbar-icon-action`。流動的な文言は幅を固定した塊の中だけ |
 | メインの面の左右の箱 (ターミナル・画像・置き札) | `app.ts` の `PANE_HOSTS` (`.main-pane-host[data-side]`)。前面のタブがターミナル・画像・本文を出していない route のタブ (置き札 `.main-pane-placeholder`) のときだけ `is-shown`。画像は `views/image-tab.ts` を面ごとに 1 つ使い回す。面の境界は `.main-split-divider` (掴みしろ 6px・線 1px・ホバー/ドラッグ中 2px)、右に分割のドロップ先は `.main-split-drop` |
 | メインの面のターミナルのタブ | 置き場所は `views/terminal/terminal-view.ts` の `tabPaneFor(side)` (面ごとの枠)。タブの名前はエージェントを映していれば「種類 · 状態」(`agentsText().kind` / `.state`)、絵は状態の印 (`.terminal-mark-*`) |
@@ -127,6 +128,7 @@
 | 文字の段階 | `--color-text` / `--color-text-2` / `--color-text-3` / `--color-on-accent` |
 | 線 | `--color-line` / `--color-line-soft` / `--color-line-strong`。**線は最後の手段。** 面の明るさの差で分けられるなら線を引かない |
 | アクセントと状態 | `--color-accent` / `--color-accent-strong`、`--color-waiting` `--color-working` `--color-done` `--color-failed` `--color-idle` |
+| プロジェクトの色 | `--project-<色>` (`core/project-colors.ts` の `PROJECT_COLORS` と `none`)・頭文字の `--project-ink`。部品は `data-project-color` の下で `--project-color` を読む。色違いのダーク (graphite / warm) もダークの 1 組を使う |
 | 選んでいる行の光 | `--glow-select` (内側の box-shadow。箱の寸法を変えない) |
 | 余白 / 角丸 | `--space-1`〜`--space-6` (4〜32px) / `--radius-sm` `--radius-md` `--radius-lg` |
 | 文字の大きさ・行の高さ | 密度の段階 (T0): `--ui-font-*`・`--ui-control-*`・`--ui-row-h`・`--ui-table-row-h` (`ui-layout.md`、下の決まり 7) |

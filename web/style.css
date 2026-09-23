@@ -58,6 +58,22 @@
   /* 履歴のグラフの線。主線はアクセント、分かれた線は別の落ち着いた色。
      状態の色 (入力待ち・作業中など) と混ぜない。 */
   --graph-main:         var(--color-accent);
+  /* プロジェクトの色 (core/project-colors.ts の PROJECT_COLORS。none は登録して
+     いないもの)。四角の地に頭文字 (--project-ink) を載せて 4.5:1 以上
+     (project-colors.test.ts)。要素は data-project-color を付けて
+     var(--project-color) を読む (下の「プロジェクトの色と頭文字」)。 */
+  --project-violet:     #7453a6;
+  --project-green:      #2c7a4b;
+  --project-orange:     #b04a12;
+  --project-blue:       #2f62b8;
+  --project-amber:      #8a5d00;
+  --project-pink:       #a83c85;
+  --project-cyan:       #0f6f86;
+  --project-red:        #b3333f;
+  --project-olive:      #5f6b12;
+  --project-none:       #6f6879;
+  --project-ink:        #ffffff;
+  --project-color:      var(--project-none);
   --graph-branch:       #56709a;
 
   /* 余白の段階 (--space-*) は表示密度で比例して変わるので、:root ではなく
@@ -222,6 +238,19 @@
   --syntax-function:    #e4dcf2;
   --syntax-comment:     #978fa4;
   --graph-branch:       #7e91b8;
+  /* プロジェクトの色。暗い地では明るめの色に濃い頭文字。色違いのダーク
+     (graphite / warm) もこの 1 組を使う。 */
+  --project-violet:     #a68ae6;
+  --project-green:      #6cc28a;
+  --project-orange:     #f0955a;
+  --project-blue:       #6fa3f0;
+  --project-amber:      #e6bd52;
+  --project-pink:       #e98ac8;
+  --project-cyan:       #4fc0d6;
+  --project-red:        #f08080;
+  --project-olive:      #b0c25a;
+  --project-none:       #8f8799;
+  --project-ink:        #16121f;
 
   /* 差分の面は控えめにし、＋／− の印と文字の色でも伝える。色違いの
      ダーク (graphite / warm) もこの 1 組を使う。 */
@@ -364,6 +393,7 @@ html, body {
   --icon-md: calc(var(--space-unit) * 3.5);      /* 14 */
   --mark-size: calc(var(--space-unit) * 2.5);    /* 10: 状態の印 */
   --dot-size: calc(var(--space-unit) * 1.5);     /* 6:  未読・いま見ているの点 */
+  --project-mark-size: calc(var(--space-unit) * 4.5); /* 18: プロジェクトの色の四角 */
   /* 画面の見出し (全体ボードの「Agents」) と節の見出し (「Accounts」)。
      密度で比例させるため --space-unit から作る。 */
   --ui-font-heading: calc(var(--space-unit) * 5.5);  /* 22 */
@@ -6444,6 +6474,21 @@ body.gdp-file-detail-page #empty {
 .gdp-context-menu .danger {
   color: var(--color-failed);
 }
+/* 文字の前に絵を置く項目 (プロジェクトの色の一覧)。今の値は印と太さで示す
+   (色だけに頼らない)。 */
+.gdp-context-menu button.gdp-context-menu-leading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.gdp-context-menu button[aria-checked="true"] {
+  font-weight: 600;
+}
+.gdp-context-menu button[aria-checked="true"]::after {
+  content: "✓";
+  margin-left: auto;
+  color: var(--color-text-2);
+}
 /* 押せない項目 (理由は title)。危険な操作の色より優先して、押せないと分かる色に。 */
 .gdp-context-menu button:disabled {
   color: var(--color-text-3);
@@ -8701,7 +8746,8 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 .project-switcher-row {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;
+  grid-template-columns:
+    max-content minmax(0, max-content) minmax(0, 1fr) max-content;
   align-items: center;
   gap: 10px;
   min-height: var(--ui-dense-row-h, 30px);
@@ -8716,10 +8762,6 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 }
 .project-switcher-row.active {
   background: var(--bg-soft);
-}
-.project-switcher-row.current .project-switcher-name::before {
-  content: "● ";
-  color: var(--accent);
 }
 .project-switcher-name {
   font-weight: 600;
@@ -16927,15 +16969,14 @@ html[data-nav-collapsed] #app-nav {
 .nav-twisty.empty {
   opacity: 0.45;
 }
-.nav-project-icon {
+/* 名前の後ろの印 (人の番のもの・起こしている最中)。名前の右に付くだけなので、
+   出入りしても名前と行は動かない。 */
+.nav-project-state {
   flex: none;
   display: inline-grid;
   place-items: center;
-  color: var(--color-text-3);
-}
-.nav-project-icon svg {
   width: var(--icon-md);
-  height: var(--icon-md);
+  color: var(--color-text-3);
 }
 .nav-project-name {
   min-width: 0;
@@ -16943,15 +16984,44 @@ html[data-nav-collapsed] #app-nav {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.nav-project-head.current .nav-project-icon {
-  color: var(--color-accent);
+/* プロジェクトの色と頭文字 (views/projects/project-looks.ts)。色を付けた要素の
+   子孫は var(--project-color) で読む (タブのグループ・ファイル一覧の頭も)。
+   四角は色だけに頼らないよう頭文字をいつも載せる。 */
+[data-project-color="violet"] { --project-color: var(--project-violet); }
+[data-project-color="green"]  { --project-color: var(--project-green); }
+[data-project-color="orange"] { --project-color: var(--project-orange); }
+[data-project-color="blue"]   { --project-color: var(--project-blue); }
+[data-project-color="amber"]  { --project-color: var(--project-amber); }
+[data-project-color="pink"]   { --project-color: var(--project-pink); }
+[data-project-color="cyan"]   { --project-color: var(--project-cyan); }
+[data-project-color="red"]    { --project-color: var(--project-red); }
+[data-project-color="olive"]  { --project-color: var(--project-olive); }
+[data-project-color="none"]   { --project-color: var(--project-none); }
+.project-mark {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--project-mark-size);
+  height: var(--project-mark-size);
+  border-radius: var(--radius-sm);
+  background: var(--project-color);
+  color: var(--project-ink);
+  font-family: var(--font-ui);
+  font-size: var(--ui-font-xs);
+  font-weight: 700;
+  font-style: normal;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
 }
 /* 選択は 2 段。いま見ているプロジェクト = 控えめな面だけ (枠も光も無し、
-   名前の太さで補う)。ターミナルで開いているエージェントの行 = 強い選択
-   (.nav-agent.active: 面 + 細い枠 + 内側の光)。強い選択は縦に 1 つだけ。 */
+   そのプロジェクトの色で薄く塗る。タブのグループと同じ色)。ターミナルで開いて
+   いるエージェントの行 = 強い選択 (.nav-agent.active: 面 + 細い枠 + 内側の光)。
+   強い選択は縦に 1 つだけ。 */
 .nav-project-head.current,
 .nav-project-head.current:hover {
-  background: color-mix(in srgb, var(--color-select) 45%, transparent);
+  background: color-mix(in srgb, var(--project-color) 22%, transparent);
   box-shadow: none;
 }
 .nav-project-head.current .nav-project-toggle {
@@ -18606,10 +18676,6 @@ button.brand[aria-expanded="true"] {
   color: var(--color-text-3);
   font-size: var(--ui-font-base);
 }
-.nav-project-icon {
-  width: var(--icon-md);
-  justify-content: center;
-}
 .nav-project-activity-head {
   display: flex;
   align-items: center;
@@ -19779,6 +19845,10 @@ button.agents-account-name:hover {
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 色の四角と名前の間は、名前と山形の間 (--space-1) より一段空ける。 */
+.agents-project-mark {
+  margin-right: var(--space-1);
 }
 .agents-project-empty .agents-project-name {
   color: var(--color-text-2);

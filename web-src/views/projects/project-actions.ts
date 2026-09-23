@@ -1,5 +1,5 @@
 import { apiUrl } from "../../core/api-url";
-// プロジェクトの操作 (登録・外す・名前・並べ替え・開く・止める)。エージェント
+// プロジェクトの操作 (登録・外す・名前・色・並べ替え・開く・止める)。エージェント
 // 一覧の見出しとヘッダの切替が同じものを使う。
 //
 // 開くは同じタブで移る。動いていなければ、登録したプロジェクトに限って
@@ -13,6 +13,7 @@ import { apiUrl } from "../../core/api-url";
 
 import type { AgentProjectInfo } from "../../core/agent-overview";
 import { formatErrorDetail } from "../../core/error-detail";
+import type { ProjectColor } from "../../core/project-colors";
 import {
   decideProjectOpen,
   defaultProjectName,
@@ -60,6 +61,7 @@ export type ProjectActions = {
   registerByPath(): Promise<void>;
   unregister(info: AgentProjectInfo): Promise<void>;
   rename(info: AgentProjectInfo): Promise<void>;
+  recolor(info: AgentProjectInfo, color: ProjectColor): Promise<void>;
   move(info: AgentProjectInfo, direction: -1 | 1): Promise<void>;
   /** before の前へ (null は末尾)。左のサイドバーのドラッグ。 */
   place(info: AgentProjectInfo, before: string | null): Promise<void>;
@@ -230,6 +232,9 @@ export function createProjectActions(deps: ProjectActionsDeps): ProjectActions {
       if (name !== null) {
         await change(info.root, { action: "rename", root: info.root, name });
       }
+    },
+    async recolor(info, color) {
+      await change(info.root, { action: "color", root: info.root, color });
     },
     async move(info, direction) {
       await change(info.root, { action: "move", root: info.root, direction });
