@@ -1,13 +1,16 @@
 import { apiUrl } from "../core/api-url";
+
 // Search results sheet: the result list of the Ctrl+G palette, kept open in the
 // Search tab of the main area so it survives opening files. The query travels
 // in the URL (/search?q=) and is re-run on reload.
 // Toggles (regex / match case / whole word / no test) are the same persisted
 // settings the palette uses, so both always search the same way.
 
+import { SEARCH_16_PATH } from "../core/icons";
 import { linkOpenIntent, type OpenIntent } from "../core/link-click";
 import { buildGrepRequestParams, parseGrepQuery } from "../core/search-palette";
 import type { GrepResponse } from "../core/types";
+import { renderEmptyState } from "./empty-state";
 import {
   type SearchPaletteLanguage,
   searchPaletteText,
@@ -63,6 +66,8 @@ export function createSearchResultsView(
   let controls: HTMLElement | null = null;
   let status: HTMLElement | null = null;
   let list: HTMLElement | null = null;
+  /** 検索する前の案内 (一覧 role=listbox の外に置く)。 */
+  let idle: HTMLElement | null = null;
   let query = "";
   let controller: AbortController | null = null;
   let generation = 0;
@@ -190,15 +195,34 @@ export function createSearchResultsView(
     list = document.createElement("div");
     list.className = "gdp-palette-list search-results-list";
     list.setAttribute("role", "listbox");
-    el.append(head, controls, status, list);
+    idle = document.createElement("div");
+    idle.className = "search-results-idle";
+    el.append(head, controls, status, idle, list);
     localize();
   }
 
   function renderResults(): void {
-    if (!list || !status) return;
+    if (!list || !status || !idle) return;
     list.replaceChildren();
+    idle.replaceChildren();
     if (!lastResponse) {
-      status.textContent = text().resultsIdle;
+      // 検索する前: 何をするか (一行と補足) と主なキー。件数の欄は空。
+      const current = text();
+      status.textContent = "";
+      idle.appendChild(
+        renderEmptyState({
+          icon: SEARCH_16_PATH,
+          title: current.resultsIdle,
+          hint: current.resultsIdleHint,
+          keys: [
+            { keys: "Enter", label: current.resultsIdleKeys.run },
+            { keys: "⌘G", label: current.resultsIdleKeys.anywhere },
+            { keys: "⌘K", label: current.resultsIdleKeys.openFile },
+          ],
+          keysLabel: current.resultsIdleKeysLabel,
+          compact: true,
+        }),
+      );
       return;
     }
     const { response, term } = lastResponse;

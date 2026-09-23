@@ -208,9 +208,19 @@ describe("search results sheet", () => {
   test("Enter in the query box re-runs the search and the URL hook sees it", async () => {
     const { view, urls, queries } = setup();
     view.open();
-    expect(q(document, ".search-results-status").textContent).toBe(
+    // 検索する前は、件数の欄は空で、案内の箱に一行とキーが出る (一覧の外)。
+    const idle = q(document, ".search-results-idle");
+    expect([
+      q(document, ".search-results-status").textContent,
+      idle.querySelector("h2")?.textContent,
+      [...idle.querySelectorAll(".empty-key kbd")].map((k) => k.textContent),
+      idle.closest("[role=listbox]"),
+    ]).toEqual([
+      "",
       "Type a search and press Enter",
-    );
+      ["Enter", "⌘G", "⌘K"],
+      null,
+    ]);
     const input = q<HTMLInputElement>(document, ".search-results-input");
     input.value = "other";
     input.dispatchEvent(

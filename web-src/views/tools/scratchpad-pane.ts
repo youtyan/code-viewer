@@ -8,6 +8,7 @@
 // 同じ考え方を、fetch ではなく描画に当てたもの)。
 
 import { attachDragResizer } from "../../core/drag-resizer";
+import { renderEmptyState } from "../empty-state";
 import type { ToolsText } from "./i18n";
 
 const RENDER_DEBOUNCE_MS = 200;
@@ -190,10 +191,16 @@ export function createScratchpadPane(
     renderController = controller;
     const value = input.value;
     if (!value.trim()) {
-      const empty = document.createElement("p");
-      empty.className = "tools-pane-empty";
-      empty.textContent = currentText.pane.emptyInput;
-      output.replaceChildren(empty);
+      // 入力が空: 何をするか (一行と補足) と主なキー (共通の空の案内)。
+      output.replaceChildren(
+        renderEmptyState({
+          title: currentText.pane.emptyTitle,
+          hint: currentText.pane.emptyInput,
+          keys: [{ keys: "⌘V", label: currentText.pane.emptyKeyPaste }],
+          keysLabel: currentText.pane.emptyKeysLabel,
+          compact: true,
+        }),
+      );
       setStatus("");
       return;
     }

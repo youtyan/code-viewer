@@ -42,6 +42,7 @@ import {
   SYNC_16_PATH,
   X_16_PATH,
 } from "../../core/icons";
+import { renderEmptyState } from "../empty-state";
 import type { PageView } from "../page-view";
 import type { ProjectActions } from "../projects/project-actions";
 import { showProjectMenu } from "../projects/project-menu";
@@ -496,27 +497,49 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     return section;
   }
 
+  /** 一覧の中の空の案内 (共通の部品 views/empty-state.ts)。 */
   function emptyState(
     heading: string,
     body: string,
     action?: { label: string; run(): void },
   ): HTMLElement {
-    const box = document.createElement("div");
-    box.className = "agents-empty";
-    const h = document.createElement("strong");
-    h.textContent = heading;
-    const p = document.createElement("p");
-    p.textContent = body;
-    box.append(h, p);
-    if (action) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "agents-secondary";
-      button.textContent = action.label;
-      button.addEventListener("click", action.run);
-      box.appendChild(button);
-    }
-    return box;
+    return renderEmptyState({
+      title: heading,
+      ...(body ? { hint: body } : {}),
+      actions: action ? [action] : [],
+      compact: true,
+    });
+  }
+
+  /**
+   * エージェントが 1 つも居ないときの案内: 次にやること (新しいエージェント・
+   * プロジェクトの登録) と、ボードへ戻るキー。ペインはあるがエージェントで
+   * ないだけなら、登録の代わりに「すべてのペインを表示」を出す (今までの操作)。
+   */
+  function noAgentsState(showAllPanes: (() => void) | null): HTMLElement {
+    const current = text();
+    return renderEmptyState({
+      icon: PLUS_16_PATH,
+      title: current.emptyNoAgentsTitle,
+      hint: current.emptyNoAgentsBody,
+      actions: [
+        {
+          label: current.accounts.launchButton,
+          title: current.accounts.launchButtonTitle,
+          primary: true,
+          run: () => deps.launch(),
+        },
+        showAllPanes
+          ? { label: current.emptyNoAgentsAction, run: showAllPanes }
+          : {
+              label: current.emptyRegisterProject,
+              run: () => void deps.projects.registerByPath(),
+            },
+      ],
+      keys: [{ keys: "g a", label: current.emptyKeyBoard }],
+      keysLabel: current.emptyKeysLabel,
+      compact: true,
+    });
   }
 
   function renderNotify(): void {
@@ -686,17 +709,12 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     }
     if (scoped.length === 0) {
       list.appendChild(
-        emptyState(
-          current.emptyNoAgentsTitle,
-          current.emptyNoAgentsBody,
+        noAgentsState(
           allPanes || panes.length === 0
-            ? undefined
-            : {
-                label: current.emptyNoAgentsAction,
-                run: () => {
-                  allPanes = true;
-                  render(true);
-                },
+            ? null
+            : () => {
+                allPanes = true;
+                render(true);
               },
         ),
       );

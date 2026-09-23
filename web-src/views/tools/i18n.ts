@@ -28,6 +28,10 @@ export type ToolsText = {
     copyFailed: string;
     resize: string;
     emptyInput: string;
+    /** 入力が空のときの案内 (views/empty-state.ts) の一行とキー。 */
+    emptyTitle: string;
+    emptyKeyPaste: string;
+    emptyKeysLabel: string;
   };
   markdown: {
     output: string;
@@ -82,6 +86,9 @@ const TEXT: Record<ToolsLang, ToolsText> = {
       copyFailed: "copy failed",
       resize: "Resize input and output panes",
       emptyInput: "Paste something into Input to see it rendered here.",
+      emptyTitle: "Paste into Input",
+      emptyKeyPaste: "Paste",
+      emptyKeysLabel: "Keys",
     },
     markdown: {
       output: "Preview",
@@ -134,6 +141,9 @@ const TEXT: Record<ToolsLang, ToolsText> = {
       copyFailed: "コピーできません",
       resize: "入力と出力の幅を変える",
       emptyInput: "入力に貼り付けると、ここに結果が出ます。",
+      emptyTitle: "入力に貼り付けてください",
+      emptyKeyPaste: "貼り付け",
+      emptyKeysLabel: "キー",
     },
     markdown: {
       output: "プレビュー",

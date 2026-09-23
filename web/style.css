@@ -15450,7 +15450,6 @@ body.db-resizing {
   overflow: auto;
   padding: 12px 16px;
 }
-.tools-pane-empty,
 .tools-pane-error {
   margin: 0;
   padding: 24px 8px;
@@ -19741,31 +19740,32 @@ button.agents-account-name:hover {
   margin: var(--space-2) 0 0;
   white-space: pre-wrap;
 }
-/* 空の状態 (tmux が無い・エージェントが居ない・絞り込みに合うものが無い)。
-   中央寄せの見出しと短い説明、操作は 1 つだけ。 */
-.agents-empty {
+/* ---- 空の状態の案内 (views/empty-state.ts) ----
+   形は既存の .empty (絵の箱・見出し・一文・.empty-actions) をそのまま使い、
+   ここではキーの行と、画面の一部に置くときの詰めた余白だけを足す。キーキャップ
+   はパレットの足元と同じ見た目 (.gdp-palette-footer kbd の規則を共有)。 */
+.empty.empty-compact {
+  padding: var(--space-6) var(--space-4);
+}
+.empty-keys {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-4) 0 0;
+}
+.empty-key {
+  display: flex;
   align-items: center;
   gap: var(--space-2);
-  max-width: calc(var(--space-unit) * 150);
-  margin: var(--space-6) auto;
-  padding: var(--space-5) var(--space-4);
-  text-align: center;
 }
-.agents-empty strong {
-  font-size: var(--ui-font-section);
-  font-weight: 600;
-}
-.agents-empty p {
+.empty-key dt,
+.empty-key dd {
   margin: 0;
-  color: var(--color-text-2);
 }
-.agents-empty p:empty {
-  display: none;
-}
-.agents-empty .agents-secondary {
-  margin-top: var(--space-2);
+.empty-key dd {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
 }
 /* ---- 使用量のポップオーバー (views/agents/usage-status.ts) ----
    最下段の使用量のすぐ上に、左端をそろえて開く。背景は暗くしない。
@@ -22055,7 +22055,8 @@ body.gdp-help-page #content {
 }
 .gdp-palette-input-key,
 .gdp-palette-row-key,
-.gdp-palette-footer kbd {
+.gdp-palette-footer kbd,
+.empty-key kbd {
   padding: 0 var(--space-1);
   border-radius: var(--radius-sm);
   background: var(--color-raised);

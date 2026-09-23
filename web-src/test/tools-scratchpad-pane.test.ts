@@ -97,7 +97,14 @@ describe("scratchpad pane render lifecycle", () => {
     pane.refresh();
 
     expect(calls).toEqual([]);
-    expect(pane.output.textContent).toBe(TEXT.pane.emptyInput);
+    // 共通の空の案内: 一行・補足 (今までの一文)・貼り付けのキー。
+    expect([
+      pane.output.querySelector("h2")?.textContent,
+      pane.output.querySelector("p")?.textContent,
+      [...pane.output.querySelectorAll(".empty-key kbd")].map(
+        (key) => key.textContent,
+      ),
+    ]).toEqual([TEXT.pane.emptyTitle, TEXT.pane.emptyInput, ["⌘V"]]);
     pane.dispose();
   });
 

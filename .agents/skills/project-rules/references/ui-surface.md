@@ -29,6 +29,7 @@
 | ⌘K のパレットの行き先 (ファイル以外) | `views/search-palette-ui.ts` の `PaletteCommand` (群 = projects / agents / sessions / actions。エージェントでないペインとシェルは sessions)。中身は `app.ts` の `paletteCommands()`、操作は `PALETTE_ACTIONS` (キー割り当てのある操作は `keymap` を書けばキーが右に出て、実行も同じ `dispatchKeymapAction`)。ファイルの絞り込み・grep の側には足さない |
 | 作業ツリーの一覧の行 | `views/worktree-view.ts`。何も選んでいないときは一覧だけの画面 (`body[data-worktree-overview]`、列は `--worktree-columns`)。行の「開く」はこのときだけ置き、選んだ後の狭い一覧は「…」だけ (選んだ瞬間にボタンを増やさない) |
 | Data の表の足元 | `views/database/table-grid.ts` の `db-grid-status` (件数) と `db-grid-pager` (見えている行の範囲と 1 画面ずつのページ送り)。表の行の高さは表示密度の値 (`views/shell/row-height.ts` の `currentRowHeight`、CSS は `--ui-row-h`)、列幅は TS が持つので、CSS は色と線だけ |
+| 空の状態の案内 (何も無い場所で次にやること) | `views/empty-state.ts` の `renderEmptyState` (絵・一行・補足・操作 2 つまで・キー 3 つまでをキーキャップで)。形は既存の `.empty` (`.empty-icon`・`h2`・`p`・`.empty-actions` の `.empty-action` / `-primary`) に `.empty-keys` を足したもの。画面の一部に置くときは `compact`。文言は置き場の i18n。実例: 全体ボードのエージェント 0・Search の初期・Tools の入力が空 |
 | アイコン SVG | `core/icons.ts` の path 定数 + `iconSvg(className, paths)` |
 
 `alert` / `confirm` / `prompt` は `biome.jsonc` が **error で落とす**ので、そもそも書けない。

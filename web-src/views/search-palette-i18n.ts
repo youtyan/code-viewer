@@ -75,6 +75,10 @@ export type SearchPaletteText = CodePreviewText & {
   resultsRun: string;
   resultsPlaceholder: string;
   resultsIdle: string;
+  /** 検索の結果の画面の初期の案内 (views/empty-state.ts): 補足とキーの説明。 */
+  resultsIdleHint: string;
+  resultsIdleKeys: { run: string; anywhere: string; openFile: string };
+  resultsIdleKeysLabel: string;
   resultsScope: (ref: string) => string;
   // Ctrl+K に混ぜるプロジェクト・エージェント・セッション・操作 (search-palette-ui.ts の PaletteCommand)。
   searchEverything: string;
@@ -189,6 +193,14 @@ const EN: SearchPaletteText = {
   resultsRun: "Search",
   resultsPlaceholder: "Search text (path:<dir or glob> narrows)",
   resultsIdle: "Type a search and press Enter",
+  resultsIdleHint:
+    "Every file of the project is searched. Add path:src/ to narrow it to a folder.",
+  resultsIdleKeys: {
+    run: "Search",
+    anywhere: "Search from anywhere",
+    openFile: "Open a file",
+  },
+  resultsIdleKeysLabel: "Keys",
   resultsScope: (ref) => `in ${ref}`,
   searchEverything: "Search projects, agents, sessions, files, actions…",
   groups: {
@@ -301,6 +313,14 @@ const JA: SearchPaletteText = {
   resultsPlaceholder:
     "検索するコード（path:<ディレクトリ or glob> で絞り込み）",
   resultsIdle: "検索語を入力して Enter",
+  resultsIdleHint:
+    "プロジェクトのすべてのファイルから探します。path:src/ を足すとフォルダを絞れます。",
+  resultsIdleKeys: {
+    run: "検索",
+    anywhere: "どこからでも検索",
+    openFile: "ファイルを開く",
+  },
+  resultsIdleKeysLabel: "キー",
   resultsScope: (ref) => `${ref} 内`,
   searchEverything:
     "プロジェクト・エージェント・セッション・ファイル・操作を検索…",

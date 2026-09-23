@@ -78,6 +78,10 @@ export type AgentsText = {
   emptyNoAgentsTitle: string;
   emptyNoAgentsBody: string;
   emptyNoAgentsAction: string;
+  /** エージェント 0 の案内: プロジェクトを登録する操作と、キーの説明。 */
+  emptyRegisterProject: string;
+  emptyKeysLabel: string;
+  emptyKeyBoard: string;
   emptyNoMatchTitle: (filter: string) => string;
   emptyNoMatchBody: string;
   emptyNoMatchAction: string;
@@ -466,6 +470,9 @@ const EN: AgentsText = {
   emptyNoAgentsBody:
     "Start one with New agent, or launch claude or codex in a tmux pane; it appears here, grouped by project.",
   emptyNoAgentsAction: "Show all panes",
+  emptyRegisterProject: "Register a project…",
+  emptyKeysLabel: "Keys",
+  emptyKeyBoard: "All agents",
   emptyNoMatchTitle: (filter) => `No agents are “${filter}”`,
   emptyNoMatchBody: "Agents in other states are hidden by the filter.",
   emptyNoMatchAction: "Clear filter",
@@ -589,6 +596,9 @@ const JA: AgentsText = {
   emptyNoAgentsBody:
     "「新しいエージェント」で起動するか、tmux のペインで claude や codex を起動すると、プロジェクトごとにここへ並びます。",
   emptyNoAgentsAction: "すべてのペインを表示",
+  emptyRegisterProject: "プロジェクトを登録…",
+  emptyKeysLabel: "キー",
+  emptyKeyBoard: "すべてのエージェント",
   emptyNoMatchTitle: (filter) => `「${filter}」のエージェントはありません`,
   emptyNoMatchBody: "ほかの状態のエージェントは絞り込みで隠れています。",
   emptyNoMatchAction: "絞り込みを解除",
