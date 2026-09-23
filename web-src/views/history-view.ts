@@ -706,7 +706,8 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return deps
       .trackLoad(
         fetch(url).then(async (r) => {
-          if (!r.ok) throw new Error(await r.text());
+          if (!r.ok)
+            throw new Error(await responseErrorMessage(r, "loading the log"));
           const page = (await r.json()) as HistoryLogResponse;
           if (page.generation !== undefined && requestGeneration !== generation)
             return null;
@@ -714,7 +715,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
         }),
       )
       .catch((err) => {
-        setBanner(err instanceof Error ? err.message : "failed to load log");
+        // null は「描かない」。失敗の理由は帯と console に残す。
+        console.error("[code-viewer] loading the log failed", err);
+        setBanner(formatErrorDetail(err));
         return null;
       });
   }
@@ -1671,7 +1674,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
       .trackLoad(
         fetch(`${apiUrl("authors")}?ref=${encodeURIComponent(ref)}`).then(
           async (r) => {
-            if (!r.ok) throw new Error(await r.text());
+            if (!r.ok)
+              throw new Error(
+                await responseErrorMessage(r, "loading history authors"),
+              );
             return (await r.json()) as HistoryAuthorsResponse;
           },
         ),

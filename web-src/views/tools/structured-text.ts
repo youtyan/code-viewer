@@ -1,6 +1,7 @@
 // JSON / YAML ツールの純ロジック。DOM にも lazy import にも触らないので、
 // パーサ (YamlApi) は呼び出し側から注入する。
 
+import { formatErrorDetail } from "../../core/error-detail";
 import type { YamlApi } from "../../core/yaml-loader";
 
 export type StructuredFormat = "json" | "yaml";
@@ -50,10 +51,9 @@ export function parseStructuredText(
       ...(warnings.length ? { warnings } : {}),
     };
   } catch (err) {
-    return {
-      status: "error",
-      message: err instanceof Error ? err.message : String(err),
-    };
+    // toJS は入力の別名 (alias) の解決で投げる (ReferenceError・過剰な別名の
+    // Error)。入力の誤りとして見せるが、種類と cause を落とさない。
+    return { status: "error", message: formatErrorDetail(err) };
   }
 }
 

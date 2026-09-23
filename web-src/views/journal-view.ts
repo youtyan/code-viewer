@@ -1,4 +1,5 @@
 import { apiUrl } from "../core/api-url";
+import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import {
   COMMENT_DISCUSSION_16_PATH,
   GRABBER_16_PATH,
@@ -678,11 +679,20 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
         body: JSON.stringify({ action, ...body }),
       }),
     );
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok)
+      throw new Error(await responseErrorMessage(res, `journal ${action}`));
     const response = (await res.json()) as JournalActionResponse;
     afterResponse?.(response);
     await refresh();
     return response;
+  }
+
+  /** 失敗を console に出し、状態の行に操作の失敗と理由の全文を出す。 */
+  function showFailure(operation: string, error: unknown): void {
+    console.error(`[code-viewer] journal: ${operation}`, error);
+    message = `${operation}\n${formatErrorDetail(error)}`;
+    deps.setStatus("error");
+    render();
   }
 
   async function refresh(): Promise<void> {
@@ -693,7 +703,10 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
     try {
       const next = await deps.trackLoad(
         fetch(apiUrl("journal")).then(async (res) => {
-          if (!res.ok) throw new Error(await res.text());
+          if (!res.ok)
+            throw new Error(
+              await responseErrorMessage(res, "loading the journal"),
+            );
           return (await res.json()) as JournalDataResponse;
         }),
       );
@@ -721,9 +734,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
       render();
     } catch (error) {
       if (seq !== lifecycle) return;
-      message = error instanceof Error ? error.message : text().loadFailed;
-      deps.setStatus("error");
-      render();
+      showFailure(text().loadFailed, error);
     }
   }
 
@@ -870,10 +881,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
             }
           });
       } catch (error) {
-        message =
-          error instanceof Error ? error.message : text().saveEntryFailed;
-        deps.setStatus("error");
-        render();
+        showFailure(text().saveEntryFailed, error);
       } finally {
         setButtonBusy(save, false);
       }
@@ -899,10 +907,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
           selectedEntryId = "";
           creatingEntry = false;
         } catch (error) {
-          message =
-            error instanceof Error ? error.message : text().deleteEntryFailed;
-          deps.setStatus("error");
-          render();
+          showFailure(text().deleteEntryFailed, error);
         } finally {
           setButtonBusy(del, false);
         }
@@ -1376,9 +1381,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
         selectedTaskId = id;
       });
     } catch (error) {
-      message = error instanceof Error ? error.message : text().moveTaskFailed;
-      deps.setStatus("error");
-      render();
+      showFailure(text().moveTaskFailed, error);
     }
   }
 
@@ -1552,7 +1555,10 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
           }),
         }),
       );
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok)
+        throw new Error(
+          await responseErrorMessage(res, "journal list-github-issues"),
+        );
       const response = (await res.json()) as GithubIssueListResponse;
       if (seq !== githubIssueGeneration) return;
       githubIssues = stableGithubIssues(response.issues || []);
@@ -1560,6 +1566,10 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
       deps.setStatus("live");
     } catch (error) {
       if (seq !== githubIssueGeneration) return;
+      console.error(
+        "[code-viewer] journal: loading GitHub issues failed",
+        error,
+      );
       if (
         error instanceof Error &&
         /rate limit|secondary rate limit/i.test(error.message)
@@ -1573,8 +1583,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
           }
         }, GITHUB_ISSUE_RATE_LIMIT_RETRY_MS + 50);
       } else {
-        githubIssuesError =
-          error instanceof Error ? error.message : text().githubLoadFailed;
+        githubIssuesError = `${text().githubLoadFailed}\n${formatErrorDetail(error)}`;
       }
       githubIssuesLoaded = false;
       deps.setStatus("error");
@@ -1614,10 +1623,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
         return response.task.id;
       }
     } catch (error) {
-      message =
-        error instanceof Error ? error.message : text().githubLinkTaskFailed;
-      deps.setStatus("error");
-      render();
+      showFailure(text().githubLinkTaskFailed, error);
     } finally {
       stopTaskDragAutoScroll();
       draggingGithubIssueNumber = null;
@@ -2132,10 +2138,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
           if (response.task) setRoute({ tab: "tasks", task: response.task.id });
         }
       } catch (error) {
-        message =
-          error instanceof Error ? error.message : text().saveTaskFailed;
-        deps.setStatus("error");
-        render();
+        showFailure(text().saveTaskFailed, error);
       } finally {
         setButtonBusy(save, false);
       }
@@ -2150,10 +2153,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
         try {
           await requestJournal("claim-task", { id: task.id, by: "user" });
         } catch (error) {
-          message =
-            error instanceof Error ? error.message : text().claimTaskFailed;
-          deps.setStatus("error");
-          render();
+          showFailure(text().claimTaskFailed, error);
         } finally {
           setButtonBusy(claim, false);
         }
@@ -2171,10 +2171,7 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
             source: "user",
           });
         } catch (error) {
-          message =
-            error instanceof Error ? error.message : text().doneTaskFailed;
-          deps.setStatus("error");
-          render();
+          showFailure(text().doneTaskFailed, error);
         } finally {
           setButtonBusy(done, false);
         }
@@ -2195,14 +2192,14 @@ export function createJournalView(deps: JournalViewDeps): JournalView {
         setButtonBusy(del, true);
         try {
           const result = await requestJournal("delete-task", { id: task.id });
-          if (!result.removed) throw new Error(text().deleteTaskFailed);
+          if (!result.removed)
+            throw new Error(
+              "the server reported that the task was not removed",
+            );
           selectedTaskId = "";
           setRoute({ tab: "tasks", task: undefined });
         } catch (error) {
-          message =
-            error instanceof Error ? error.message : text().deleteTaskFailed;
-          deps.setStatus("error");
-          render();
+          showFailure(text().deleteTaskFailed, error);
         } finally {
           setButtonBusy(del, false);
         }

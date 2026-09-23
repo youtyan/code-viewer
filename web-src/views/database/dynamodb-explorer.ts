@@ -553,9 +553,14 @@ export function createDynamoDbExplorer(
     try {
       pre.textContent = JSON.stringify(unwrapItem(item), null, 2);
     } catch (err) {
-      // 描けない値でもアイテムは出す。描けなかった理由は console に残す。
-      reportDatastoreFailure("DynamoDB", "item render", err, currentTable);
-      pre.textContent = String(item);
+      // 描けなかった理由を、項目の代わりにその場に出す (以前は
+      // String(item) の "[object Object]" を黙って出していた)。
+      pre.textContent = reportDatastoreFailure(
+        "DynamoDB",
+        "item render",
+        err,
+        currentTable,
+      );
     }
     itemBody.appendChild(pre);
   }

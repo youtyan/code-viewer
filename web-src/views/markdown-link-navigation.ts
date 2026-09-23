@@ -94,6 +94,10 @@ async function isMarkdownDirectoryLink(
     if (deps.isAbortError(err)) return null;
     // ネットワーク断はファイル扱いに倒す。blob ビューなら読み込み失敗が
     // そのまま画面に出るが、tree ビューだと空の一覧に見えてしまう。
+    console.error(
+      `[code-viewer] checking whether ${target.path} is a folder failed; opening it as a file`,
+      err,
+    );
     return false;
   }
 }

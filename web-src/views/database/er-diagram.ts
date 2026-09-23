@@ -1,6 +1,6 @@
 import type { DbColumn, DbSchemaResponse } from "../../core/database/types";
 import { createDiagramViewport } from "../../core/diagram-viewport";
-import { formatErrorDetail } from "../../core/error-detail";
+import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { loadMermaid } from "../../core/mermaid-loader";
 import { type DbText, dbText } from "./i18n";
 
@@ -172,9 +172,11 @@ export function createErDiagram(
     const markup = buildErMarkup(schema, columnsMap);
     lastMarkup = markup;
 
-    const mermaid = await loadMermaid();
-    if (!mermaid) {
-      svgWrap.textContent = text().er.loadError;
+    let mermaid: Awaited<ReturnType<typeof loadMermaid>>;
+    try {
+      mermaid = await loadMermaid();
+    } catch (error) {
+      showFailure(text().er.loadError, error);
       return;
     }
 
@@ -185,9 +187,15 @@ export function createErDiagram(
 
     try {
       await mermaid.run({ nodes: [node], suppressErrors: true });
-    } catch {
-      svgWrap.textContent = text().er.renderError;
+    } catch (error) {
+      showFailure(text().er.renderError, error);
     }
+  }
+
+  function showFailure(message: string, error: unknown) {
+    const failure = errorWithCause(message, error);
+    console.error(failure);
+    svgWrap.textContent = formatErrorDetail(failure);
   }
 
   function clear() {

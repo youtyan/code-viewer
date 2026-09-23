@@ -6,7 +6,6 @@ export type CodePreviewText = {
   lines: (start: number, end: number, total?: number) => string;
   noText: string;
   codeLoadFailed: (error: string) => string;
-  unknownError: string;
 };
 
 const EN: CodePreviewText = {
@@ -16,7 +15,6 @@ const EN: CodePreviewText = {
     `Lines ${start}-${end}${total === undefined ? "" : ` of ${total}`}`,
   noText: "No text is available for this range.",
   codeLoadFailed: (error) => `Failed to load code context: ${error}`,
-  unknownError: "unknown error",
 };
 
 const JA: CodePreviewText = {
@@ -27,7 +25,6 @@ const JA: CodePreviewText = {
     `${start}-${end} 行${total === undefined ? "" : ` / 全 ${total} 行`}`,
   noText: "この範囲に表示できるテキストはありません。",
   codeLoadFailed: (error) => `コードの前後を読み込めませんでした: ${error}`,
-  unknownError: "不明なエラー",
 };
 
 export function codePreviewText(

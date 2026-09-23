@@ -1925,7 +1925,10 @@ describe("page level state", () => {
       status: 500,
       body: "git is unavailable",
     });
-    expect(texts(panel, ".history-status")).toContain("git is unavailable");
+    // 何ができなかったかの後に、操作・HTTP の状態・本文を続ける。
+    expect(texts(panel, ".history-status")).toContain(
+      `${TEXT.loadFailed}\nError: loading the worktree list (HTTP 500): git is unavailable`,
+    );
     expect(panel.querySelectorAll(".history-item")).toHaveLength(0);
   });
 

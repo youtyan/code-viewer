@@ -24,6 +24,7 @@ import {
   type AgentOverviewResponse,
   abbreviateHome,
 } from "../../core/agent-overview";
+import { formatErrorDetail } from "../../core/error-detail";
 import { CHEVRON_DOWN_16_PATH, iconSvg, KEBAB_16_PATH } from "../../core/icons";
 import { showContextMenu } from "../context-menu";
 import type { AccountsClient } from "./accounts-client";
@@ -90,7 +91,7 @@ export function createAccountsBand(deps: AccountsBandDeps): AccountsBand {
       console.error("[code-viewer] account action failed", error);
       message = {
         ok: false,
-        text: error instanceof Error ? error.message : String(error),
+        text: formatErrorDetail(error),
       };
     } finally {
       busy = false;

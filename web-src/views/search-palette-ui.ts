@@ -3,6 +3,7 @@ import { apiUrl } from "../core/api-url";
 // matching, repo-wide grep, and result navigation. Extracted from app.ts.
 
 import { attachDragResizer } from "../core/drag-resizer";
+import { formatErrorDetail } from "../core/error-detail";
 import { isTestFilePath } from "../core/file-filter";
 import {
   getPanelFocusScope,
@@ -658,7 +659,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       if (PALETTE === state) {
         state.status.textContent = text().saveFailed(
           label,
-          errorMessage(err, text().unknownError),
+          formatErrorDetail(err),
         );
       }
     } finally {
@@ -668,10 +669,6 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
         state.input.focus();
       }
     }
-  }
-
-  function errorMessage(err: unknown, fallback: string): string {
-    return err instanceof Error && err.message ? err.message : fallback;
   }
 
   function responseGenerationIsStale(
@@ -701,7 +698,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       if (PALETTE === state) {
         state.status.textContent = text().saveFailed(
           label,
-          errorMessage(err, text().unknownError),
+          formatErrorDetail(err),
         );
       }
     }
@@ -725,7 +722,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       if (PALETTE === state) {
         state.status.textContent = text().saveFailed(
           text().fileGrouping,
-          errorMessage(err, text().unknownError),
+          formatErrorDetail(err),
         );
         renderPalette(state);
       }
@@ -756,7 +753,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       if (PALETTE === state) {
         state.status.textContent = text().saveFailed(
           text().regexMode,
-          errorMessage(err, text().unknownError),
+          formatErrorDetail(err),
         );
       }
     } finally {
@@ -787,7 +784,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       if (PALETTE === state) {
         state.status.textContent = text().saveFailed(
           text().testExclusion,
-          errorMessage(err, text().unknownError),
+          formatErrorDetail(err),
         );
       }
     } finally {
@@ -1476,7 +1473,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
           state.items = [];
           state.selected = -1;
           state.status.textContent = text().searchFailed(
-            errorMessage(err, text().unknownError),
+            formatErrorDetail(err),
           );
           renderPalette(state);
         });
@@ -1489,9 +1486,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
       updateFilePalette(state, query).catch((err) => {
         if (PALETTE !== state || state.input.value !== query) return;
         console.error("File search failed", err);
-        state.status.textContent = text().searchFailed(
-          errorMessage(err, text().unknownError),
-        );
+        state.status.textContent = text().searchFailed(formatErrorDetail(err));
       });
     } else {
       updateGrepPalette(state, query);
@@ -1526,7 +1521,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
         state.opening = false;
         if (PALETTE === state) {
           state.status.textContent = text().selectionSaveFailed(
-            errorMessage(err, text().unknownError),
+            formatErrorDetail(err),
           );
         }
         return;

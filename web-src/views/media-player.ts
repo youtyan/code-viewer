@@ -1,3 +1,4 @@
+import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import {
   FULLSCREEN_ENTER_16_PATHS,
   FULLSCREEN_EXIT_16_PATHS,
@@ -159,11 +160,25 @@ export function createMediaPlayer(
     }
   }
 
+  function play() {
+    void media.play().catch((error) => {
+      // 再生の開始前に pause() や src の差し替えが入ると AbortError で打ち切ら
+      // れる。これは失敗ではない。
+      if ((error as { name?: unknown } | null)?.name === "AbortError") return;
+      const failure = errorWithCause(
+        `playing ${media.currentSrc || media.src} failed`,
+        error,
+      );
+      console.error(failure);
+      // 再生ボタンの title に理由を出す (次の再生・一時停止で元の文言に戻る)。
+      playButton.title = formatErrorDetail(failure);
+      playButton.setAttribute("aria-label", playButton.title);
+    });
+  }
+
   function togglePlay() {
     if (media.paused) {
-      void media.play().catch(() => {
-        // Autoplay restrictions or unloaded media; ignore.
-      });
+      play();
     } else {
       media.pause();
     }
@@ -218,11 +233,7 @@ export function createMediaPlayer(
     media.pause();
   });
   seek.addEventListener("mouseup", () => {
-    if (wasPlayingBeforeSeek) {
-      void media.play().catch(() => {
-        // Playback may be blocked or media unavailable; keep state consistent.
-      });
-    }
+    if (wasPlayingBeforeSeek) play();
   });
   media.addEventListener("click", togglePlay);
   media.addEventListener("play", updatePlayButton);

@@ -423,6 +423,12 @@ describe("renderStandaloneSource idempotency", () => {
       document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
         .sourceState,
     ).toBe("error");
+    // 失敗の理由 (操作・HTTP の状態・本文) を決まり文句の後に続ける。
+    expect(
+      document.querySelector(".gdp-source-viewer.error")?.textContent,
+    ).toBe(
+      "Cannot load a.txt at worktree\nError: loading a.txt (HTTP 500): boom",
+    );
 
     await view.renderStandaloneSource(target);
 
@@ -1016,6 +1022,11 @@ describe("renderStandaloneSource loading-state guard and paged retry", () => {
       document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
         .sourceState,
     ).toBe("error");
+    expect(
+      document.querySelector(".gdp-source-viewer.error")?.textContent,
+    ).toBe(
+      "Cannot load big.txt at worktree\nError: loading lines 1-2000 of big.txt (HTTP 500): boom",
+    );
 
     await view.renderStandaloneSource(target);
     expect(rangeCalls).toBe(2);

@@ -971,6 +971,10 @@ describe("definition search flow", () => {
 
     const error = logged.mock.calls[0][1] as Error & { cause?: unknown };
     expect(error.cause).toBe(bodyFailure);
+    // 画面の項目にも cause の連鎖を残す (以前は message だけだった)。
+    expect(q(document, ".gdp-context-menu").textContent).toContain(
+      "\nCaused by: TypeError: sample body read failure",
+    );
   });
 
   test("uses the same flow for a keyboard selection", async () => {

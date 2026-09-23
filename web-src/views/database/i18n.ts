@@ -341,6 +341,11 @@ export type DbText = {
     saveColumnWidths: string;
     saveExpandedTables: string;
     saveSnapshotTables: string;
+    listSnapshots: string;
+    createSnapshot: string;
+    cancelSnapshot: string;
+    updateSnapshotNote: string;
+    deleteSnapshot: string;
     closeDatastore: (dbId: string) => string;
     loadLocalHistory: string;
     refreshHistory: string;
@@ -870,6 +875,11 @@ const EN: DbText = {
     saveColumnWidths: "save database column widths",
     saveExpandedTables: "save database expandedTables",
     saveSnapshotTables: "save database snapshotSelectedTables",
+    listSnapshots: "failed to list snapshots",
+    createSnapshot: "failed to create snapshot",
+    cancelSnapshot: "failed to cancel snapshot",
+    updateSnapshotNote: "failed to save snapshot note",
+    deleteSnapshot: "failed to delete snapshot",
     closeDatastore: (dbId) => `close datastore ${dbId}`,
     loadLocalHistory: "load query Local History",
     refreshHistory: "refresh query history",
@@ -1414,6 +1424,11 @@ const JA: DbText = {
     saveColumnWidths: "列幅を保存できませんでした",
     saveExpandedTables: "展開したテーブルを保存できませんでした",
     saveSnapshotTables: "スナップショットの対象テーブルを保存できませんでした",
+    listSnapshots: "スナップショットの一覧を読み込めませんでした",
+    createSnapshot: "スナップショットを取得できませんでした",
+    cancelSnapshot: "スナップショットの取得を中止できませんでした",
+    updateSnapshotNote: "スナップショットのメモを保存できませんでした",
+    deleteSnapshot: "スナップショットを削除できませんでした",
     closeDatastore: (dbId) => `データストア ${dbId} を閉じられませんでした`,
     loadLocalHistory: "クエリのローカル履歴を読み込めませんでした",
     refreshHistory: "クエリ履歴を更新できませんでした",

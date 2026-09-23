@@ -34,6 +34,7 @@ import {
   matchesStateFilter,
   notifyPermissionView,
 } from "../../core/agent-overview";
+import { formatErrorDetail } from "../../core/error-detail";
 import {
   CHEVRON_DOWN_16_PATH,
   iconSvg,
@@ -583,9 +584,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
               "[code-viewer] notification permission failed",
               cause,
             );
-            notifyRequestError = `${current.notifyRequestFailed}: ${
-              cause instanceof Error ? cause.message : String(cause)
-            }`;
+            notifyRequestError = `${current.notifyRequestFailed}: ${formatErrorDetail(cause)}`;
             render(true);
           },
         );

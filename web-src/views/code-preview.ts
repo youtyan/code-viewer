@@ -1,6 +1,10 @@
 import { apiUrl } from "../core/api-url";
 import { showHighlightFailure } from "../core/copy-failure";
-import { errorWithCause, responseErrorMessage } from "../core/error-detail";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 import type { ShikiHighlighter } from "../core/shiki-loader";
 import { normalizeSourceShikiLang } from "../core/source-meta";
 import type { FileRangeResponse } from "../core/types";
@@ -53,10 +57,6 @@ function requestKey(request: CodePreviewRequest): string {
     match?.caseSensitive ?? "",
     action?.label ?? "",
   ].join("\0");
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export function createCodePreview(
@@ -284,10 +284,7 @@ export function createCodePreview(
           return;
         console.error("Failed to load code preview", error);
         const text = codePreviewText(deps.getLanguage());
-        renderFrame(
-          request,
-          text.codeLoadFailed(errorMessage(error, text.unknownError)),
-        );
+        renderFrame(request, text.codeLoadFailed(formatErrorDetail(error)));
       });
   };
 

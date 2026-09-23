@@ -8,6 +8,7 @@
 // 同じ考え方を、fetch ではなく描画に当てたもの)。
 
 import { attachDragResizer } from "../../core/drag-resizer";
+import { formatErrorDetail } from "../../core/error-detail";
 import { renderEmptyState } from "../empty-state";
 import type { ToolsText } from "./i18n";
 
@@ -146,6 +147,8 @@ export function createScratchpadPane(
 
   function applyStatus(state: StatusState): void {
     status.textContent = state.message;
+    // 行は幅を固定して省略するので、失敗の全文は title で読めるようにする。
+    status.title = state.message;
     status.classList.toggle("tools-pane-status-error", state.tone === "error");
   }
 
@@ -209,8 +212,8 @@ export function createScratchpadPane(
         await options.render(value, output, controller.signal);
       } catch (err) {
         if (controller.signal.aborted) return;
-        const message = err instanceof Error ? err.message : String(err);
-        setStatus(message, "error");
+        console.error("[code-viewer] tools render failed", err);
+        setStatus(formatErrorDetail(err), "error");
       }
     })();
   }

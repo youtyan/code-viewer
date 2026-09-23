@@ -308,14 +308,11 @@ describe("journal view", () => {
     click(q(document, ".gdp-dialog-danger"));
 
     await waitFor(() => posts.some((post) => post.action === "delete-task"));
-    await waitFor(
-      () =>
-        q(document, ".journal-status").textContent === TEXT.deleteTaskFailed,
-    );
+    // 何ができなかったかの後に、サーバが消さなかったという理由を続ける。
+    const shown = `${TEXT.deleteTaskFailed}\nError: the server reported that the task was not removed`;
+    await waitFor(() => q(document, ".journal-status").textContent === shown);
     expect(setRouteCalls).toEqual([]);
-    expect(q(document, ".journal-status").textContent).toBe(
-      TEXT.deleteTaskFailed,
-    );
+    expect(q(document, ".journal-status").textContent).toBe(shown);
     expect(
       q(document, ".journal-task-card.selected").textContent || "",
     ).toMatch(/Sample task/);

@@ -9,6 +9,7 @@
 // 閉じてから開く。
 
 import { createDiagramViewport } from "../../core/diagram-viewport";
+import { formatErrorDetail } from "../../core/error-detail";
 import { filePathClipboardText } from "../../core/file-path-copy";
 import {
   CHECK_16_PATHS,
@@ -175,9 +176,7 @@ export function openImageLightbox(
       },
       (error: unknown) => {
         console.error("[code-viewer] image path copy failed", error);
-        hint.textContent = `${text.copyImagePathFailed} ${
-          error instanceof Error ? error.message : String(error)
-        }`;
+        hint.textContent = `${text.copyImagePathFailed} ${formatErrorDetail(error)}`;
       },
     );
   });

@@ -15,7 +15,7 @@ import { apiUrl, projectKey } from "../core/api-url";
 // 1 つのサーバから全部の作業ツリーの中身が読める。
 
 import { relativeTimeText } from "../core/blame";
-import { formatErrorDetail } from "../core/error-detail";
+import { formatErrorDetail, responseErrorMessage } from "../core/error-detail";
 import {
   CHEVRON_DOWN_16_PATH,
   COPY_16_PATHS,
@@ -40,9 +40,6 @@ import {
   showContextMenu,
 } from "./context-menu";
 import { attachStickyHScroll, detachStickyHScroll } from "./diff-hscroll";
-import { enhanceMediaCard } from "./media-embed";
-import { pageLanguage } from "./page-language";
-import type { PageView } from "./page-view";
 import {
   adjacentRow,
   type FocusedListRow,
@@ -51,6 +48,9 @@ import {
   onListRowKeys,
   syncListTabStop,
 } from "./list-tab-stop";
+import { enhanceMediaCard } from "./media-embed";
+import { pageLanguage } from "./page-language";
+import type { PageView } from "./page-view";
 import { treeLevelPad } from "./tree-indent";
 import { showFormDialog } from "./ui-dialog";
 import type { WorktreeText } from "./worktree-i18n";
@@ -155,8 +155,14 @@ async function postWorktreeAction(
     headers: ACTION_HEADERS,
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error((await res.text()) || `${res.status}`);
+  if (!res.ok) throw new Error(await responseErrorMessage(res, `POST ${path}`));
   return (await res.json()) as WorktreeActionResponse;
+}
+
+/** 失敗を console に出し、画面に出す「操作の失敗と理由の全文」を返す。 */
+function failureMessage(operation: string, error: unknown): string {
+  console.error(`[code-viewer] ${operation}`, error);
+  return `${operation}\n${formatErrorDetail(error)}`;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -457,7 +463,10 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     try {
       const next = await deps.trackLoad(
         fetch(apiUrl("worktreeList")).then(async (res) => {
-          if (!res.ok) throw new Error((await res.text()) || `${res.status}`);
+          if (!res.ok)
+            throw new Error(
+              await responseErrorMessage(res, "loading the worktree list"),
+            );
           return (await res.json()) as WorktreesResponse;
         }),
       );
@@ -477,10 +486,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       deps.setStatus(next.error ? "error" : "live");
     } catch (error) {
       if (!isCurrent(seq)) return;
-      setMessage(
-        error instanceof Error ? error.message : text().loadFailed,
-        true,
-      );
+      setMessage(failureMessage(text().loadFailed, error), true);
       deps.setStatus("error");
     } finally {
       if (isCurrent(seq)) {
@@ -532,8 +538,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     } catch (error) {
       busyPath = "";
       if (isCurrent(seq)) {
-        const detail =
-          error instanceof Error ? error.message : text().openFailed;
+        const detail = failureMessage(text().openFailed, error);
         await refresh();
         if (mounted && viewGeneration === viewGen && route()) {
           const refreshDetail = message;
@@ -713,7 +718,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       createdPath = result.path || "";
     } catch (error) {
       if (isCurrent(seq)) {
-        setMessage(error instanceof Error ? error.message : t.addFailed, true);
+        setMessage(failureMessage(t.addFailed, error), true);
       }
     }
     // 作ったものをそのまま選ぶ。refresh が世代を進めるので先に選び、
@@ -808,10 +813,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       }
     } catch (error) {
       if (isCurrent(seq)) {
-        setMessage(
-          error instanceof Error ? error.message : t.removeFailed,
-          true,
-        );
+        setMessage(failureMessage(t.removeFailed, error), true);
       }
     } finally {
       busyPath = "";
@@ -991,9 +993,9 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
     try {
       await run();
     } catch (error) {
-      console.error(`[code-viewer] ${failure}`, error);
+      const message = failureMessage(failure, error);
       if (!isCurrent(seq)) return;
-      setMessage(`${failure}\n${formatErrorDetail(error)}`, true);
+      setMessage(message, true);
       renderList();
     }
   }
@@ -1067,10 +1069,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       if (isCurrent(seq)) setMessage("");
     } catch (error) {
       if (isCurrent(seq)) {
-        setMessage(
-          error instanceof Error ? error.message : text().actions.stopFailed,
-          true,
-        );
+        setMessage(failureMessage(text().actions.stopFailed, error), true);
       }
     } finally {
       busyPath = "";
@@ -1765,7 +1764,10 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         fetch(
           `${apiUrl("worktreeCommits")}?${new URLSearchParams({ path: item.path }).toString()}`,
         ).then(async (res) => {
-          if (!res.ok) throw new Error((await res.text()) || `${res.status}`);
+          if (!res.ok)
+            throw new Error(
+              await responseErrorMessage(res, "loading the worktree commits"),
+            );
           return (await res.json()) as WorktreeCommitsResponse;
         }),
       );
@@ -1794,8 +1796,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       ) {
         return;
       }
-      commitsError =
-        error instanceof Error ? error.message : text().commits.loadFailed;
+      commitsError = failureMessage(text().commits.loadFailed, error);
     } finally {
       if (
         isCurrent(seq) &&
@@ -2114,7 +2115,12 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
         fetch(`${apiUrl("worktreeDiff")}?${params.toString()}`).then(
           async (response) => {
             if (!response.ok) {
-              throw new Error((await response.text()) || `${response.status}`);
+              throw new Error(
+                await responseErrorMessage(
+                  response,
+                  "loading the worktree diff",
+                ),
+              );
             }
             return (await response.json()) as WorktreeDiffResponse;
           },
@@ -2228,7 +2234,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       const failure = el(
         "div",
         "gdp-info",
-        error instanceof Error ? error.message : t.panes.diffFailed,
+        failureMessage(t.panes.diffFailed, error),
       );
       failure.setAttribute("role", "alert");
       body.appendChild(failure);

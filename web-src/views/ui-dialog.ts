@@ -10,6 +10,7 @@
 //   - showConfirmDialog → Promise<boolean>。OK / Cancel / Esc / backdrop。
 //   - showPromptDialog  → Promise<string | null>。入力 + Enter で確定、Esc で null。
 //   - 多重起動は許容しない (既存ダイアログを閉じてから開く)。
+import { formatErrorDetail } from "../core/error-detail";
 import { iconSvg, X_16_PATH } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
 import { pageLanguage } from "./page-language";
@@ -388,7 +389,8 @@ export function showFormDialog<T>(
         busy = false;
         cancel.disabled = false;
         submit.disabled = false;
-        error.textContent = err instanceof Error ? err.message : String(err);
+        console.error("[code-viewer] dialog submit failed", err);
+        error.textContent = formatErrorDetail(err);
       }
     };
     const onKeydown = (event: KeyboardEvent) => {

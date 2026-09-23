@@ -25,6 +25,7 @@ import {
   usageIsStale,
   usageWindowViews,
 } from "../../core/agent-accounts";
+import { formatErrorDetail } from "../../core/error-detail";
 import { iconSvg, SYNC_16_PATH } from "../../core/icons";
 import type { AccountsClient } from "./accounts-client";
 import { accountDisplayName, el } from "./accounts-dialogs";
@@ -254,7 +255,7 @@ export function mountUsageStatus(deps: UsageStatusDeps): UsageStatus {
       console.error("[code-viewer] usage popover action failed", error);
       message = {
         ok: false,
-        text: error instanceof Error ? error.message : String(error),
+        text: formatErrorDetail(error),
       };
     } finally {
       busy = false;

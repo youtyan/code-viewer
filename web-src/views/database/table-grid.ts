@@ -1828,16 +1828,21 @@ export function createTableGrid(
     } else {
       const str =
         typeof value === "object" ? JSON.stringify(value) : String(value);
+      let parsed: unknown;
+      let isJson = false;
       if (str.length > 0 && (str[0] === "{" || str[0] === "[")) {
         try {
-          const parsed = JSON.parse(str);
-          const pre = document.createElement("pre");
-          pre.className = "db-grid-detail-json";
-          showJsonDetail(pre, JSON.stringify(parsed, null, 2));
-          content.appendChild(pre);
+          parsed = JSON.parse(str);
+          isJson = true;
         } catch {
-          content.textContent = str;
+          // 括弧で始まるだけの文字列の値。JSON として整形せず、そのまま出す。
         }
+      }
+      if (isJson) {
+        const pre = document.createElement("pre");
+        pre.className = "db-grid-detail-json";
+        showJsonDetail(pre, JSON.stringify(parsed, null, 2));
+        content.appendChild(pre);
       } else {
         content.textContent = str || t.emptyString;
       }
@@ -2353,11 +2358,8 @@ export function createTableGrid(
             );
             if (!inp) return;
             inp.focus?.();
-            try {
-              inp.setSelectionRange?.(inp.value.length, inp.value.length);
-            } catch {
-              // 一部 input type では setSelectionRange 不可。focus のみで十分。
-            }
+            // 編集欄は type="text" だけなので setSelectionRange は投げない。
+            inp.setSelectionRange?.(inp.value.length, inp.value.length);
           });
         };
         // input の blur / Enter / Escape で表示モードへ戻す。
@@ -2588,14 +2590,11 @@ export function createTableGrid(
         );
         if (next) {
           next.focus?.();
-          try {
-            next.setSelectionRange?.(
-              focusRestore.start ?? next.value.length,
-              focusRestore.end ?? next.value.length,
-            );
-          } catch {
-            // 一部 input type では setSelectionRange 不可。フォーカスだけで十分。
-          }
+          // 編集欄は type="text" だけなので setSelectionRange は投げない。
+          next.setSelectionRange?.(
+            focusRestore.start ?? next.value.length,
+            focusRestore.end ?? next.value.length,
+          );
         }
       }
     });

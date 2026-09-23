@@ -1,4 +1,5 @@
 import { apiUrl } from "../core/api-url";
+import { formatErrorDetail } from "../core/error-detail";
 
 // Search results sheet: the result list of the Ctrl+G palette, kept open in the
 // Search tab of the main area so it survives opening files. The query travels
@@ -116,9 +117,7 @@ export function createSearchResultsView(
       if (status)
         status.textContent = text().saveFailed(
           text().regexMode,
-          err instanceof Error && err.message
-            ? err.message
-            : text().unknownError,
+          formatErrorDetail(err),
         );
     } finally {
       settingsPending = false;
@@ -372,11 +371,7 @@ export function createSearchResultsView(
         lastResponse = null;
         renderResults();
         if (status)
-          status.textContent = text().searchFailed(
-            err instanceof Error && err.message
-              ? err.message
-              : text().unknownError,
-          );
+          status.textContent = text().searchFailed(formatErrorDetail(err));
       });
   }
 

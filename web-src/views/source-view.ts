@@ -2430,11 +2430,18 @@ export function createSourceView(deps: SourceViewDeps) {
     const initial = await trackLoad(
       fetch(buildFileRangeUrl(target, initialStart, initialEnd), {
         signal,
-      }).then((res) =>
-        res.ok ? (res.json() as Promise<FileRangeResponse>) : null,
-      ),
+      }).then(async (res) => {
+        // 失敗は呼び出し側の catch が理由ごと画面と console に出す。
+        if (!res.ok)
+          throw new Error(
+            await responseErrorMessage(
+              res,
+              `loading lines ${initialStart}-${initialEnd} of ${target.path}`,
+            ),
+          );
+        return res.json() as Promise<FileRangeResponse>;
+      }),
     );
-    if (!initial) return false;
     if (signal?.aborted) return false;
     SOURCE_CURSOR_TOTALS.set(
       sourceCursorKey(target),
@@ -2769,11 +2776,10 @@ export function createSourceView(deps: SourceViewDeps) {
             )
               return;
             if (!rendered) {
-              // The only way to get here with a current req is the initial
-              // range request failing (an abort always bumps SOURCE_REQ_SEQ
-              // first). Land on "error" instead of leaving the card stuck in
-              // "loading", which the idempotent-mount guard would otherwise
-              // treat as in-progress and refuse to retry on re-click.
+              // An aborted load with a current req. Land on "error" instead
+              // of leaving the card stuck in "loading", which the
+              // idempotent-mount guard would otherwise treat as in-progress
+              // and refuse to retry on re-click.
               finishSourceLoad(req);
               renderSourceError(
                 card,
@@ -2795,15 +2801,10 @@ export function createSourceView(deps: SourceViewDeps) {
             !sourceTargetsEqual(sourceTargetFromRoute(), target)
           )
             return;
-          if (!response.ok) {
-            finishSourceLoad(req);
-            renderSourceError(
-              card,
-              target,
-              `Cannot load ${target.path} at ${target.ref}`,
+          if (!response.ok)
+            throw new Error(
+              await responseErrorMessage(response, `loading ${target.path}`),
             );
-            return;
-          }
           const textValue = await response.text();
           if (
             req !== SOURCE_REQ_SEQ ||
@@ -2837,10 +2838,14 @@ export function createSourceView(deps: SourceViewDeps) {
           renderSourceCancelled(card, target);
           return;
         }
+        console.error(
+          `[code-viewer] loading ${target.path} at ${target.ref} failed`,
+          err,
+        );
         renderSourceError(
           card,
           target,
-          `Cannot load ${target.path} at ${target.ref}`,
+          `Cannot load ${target.path} at ${target.ref}\n${formatErrorDetail(err)}`,
         );
       }
     })();

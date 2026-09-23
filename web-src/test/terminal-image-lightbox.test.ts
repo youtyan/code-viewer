@@ -235,7 +235,7 @@ describe("棚の並びごと開いたとき", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(
         overlay()?.querySelector(".terminal-lightbox-hint")?.textContent,
-      ).toBe(`${text().copyImagePathFailed} permission denied`);
+      ).toBe(`${text().copyImagePathFailed} Error: permission denied`);
       expect(errors).toHaveBeenCalledTimes(1);
     } finally {
       errors.mockRestore();

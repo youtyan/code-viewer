@@ -1,6 +1,6 @@
 import { apiUrl } from "../../core/api-url";
 import type { DbKind } from "../../core/database/types";
-import { formatErrorDetail } from "../../core/error-detail";
+import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import {
   showAlertDialog,
   showConfirmDialog,
@@ -548,10 +548,17 @@ export async function deleteDatastoreConnectionFromUi(
   );
   await requireOkResponse(response, labels.requestFailed);
   // 接続は消えたがキーチェーン項目が残った場合 (ロック中など) は黙って
-  // 成功扱いにしない。残った資格情報の存在をユーザーに知らせる。
-  const body = (await response.json().catch(() => ({}))) as {
-    secretsRemoved?: boolean;
-  };
+  // 成功扱いにしない。残った資格情報の存在をユーザーに知らせる。本文が
+  // 読めないときも「消えた」とは言えないので、理由ごと投げる。
+  let body: { secretsRemoved?: boolean };
+  try {
+    body = (await response.json()) as { secretsRemoved?: boolean };
+  } catch (error) {
+    throw errorWithCause(
+      `${labels.requestFailed}: the connection was deleted, but the response did not say whether its keychain credentials were removed`,
+      error,
+    );
+  }
   if (body.secretsRemoved === false) {
     await showAlertDialog({
       title: labels.secretsLeftTitle,

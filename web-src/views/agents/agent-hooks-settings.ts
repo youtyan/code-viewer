@@ -27,6 +27,7 @@ import { abbreviateHome } from "../../core/agent-overview";
 import { formatErrorDetail } from "../../core/error-detail";
 import { BACKGROUND_REQUEST_HEADER } from "../../core/network-activity";
 import { showFormDialog } from "../ui-dialog";
+import { responseFailure } from "./accounts-client";
 import type { AgentHooksText } from "./i18n";
 
 export type AgentHooksSettingsDeps = {
@@ -50,18 +51,6 @@ const AGENT_HOOKS_POLL_MS = 3000;
 export const AGENT_HOOKS_SECTION_ID = "agent-hooks-section-title";
 
 type RowResult = { ok: boolean; text: string };
-
-async function failureText(res: Response, operation: string): Promise<string> {
-  const body = await res.text();
-  let detail = body;
-  try {
-    const parsed = JSON.parse(body) as { error?: unknown };
-    if (typeof parsed.error === "string") detail = parsed.error;
-  } catch {
-    // JSON でなければ本文をそのまま出す。
-  }
-  return `${operation} (HTTP ${res.status}): ${detail || res.statusText}`;
-}
 
 /** 足す・消すものを、設定ファイルの hooks と同じ形にまとめて見せる。 */
 function changesJson(changes: HookChange[]): string {
@@ -159,7 +148,7 @@ export function createAgentHooksSettings(
             headers: { [BACKGROUND_REQUEST_HEADER]: "1" },
           })
         : await deps.trackLoad(fetch(apiUrl("agentHooks")));
-      if (!res.ok) throw new Error(await failureText(res, text.loadFailed));
+      if (!res.ok) throw await responseFailure(res, text.loadFailed);
       const next = (await res.json()) as AgentHooksResponse;
       if (mine !== generation) return;
       status = next;
@@ -299,8 +288,7 @@ export function createAgentHooksSettings(
     const res = await deps.trackLoad(
       fetch(`${apiUrl("agentHooksPlan")}?${query}`),
     );
-    if (!res.ok)
-      throw new Error(await failureText(res, deps.getText().planFailed));
+    if (!res.ok) throw await responseFailure(res, deps.getText().planFailed);
     return (await res.json()) as AgentHookPlanResponse;
   }
 
@@ -430,7 +418,7 @@ export function createAgentHooksSettings(
           }),
         }),
       );
-      if (!res.ok) throw new Error(await failureText(res, text.applyFailed));
+      if (!res.ok) throw await responseFailure(res, text.applyFailed);
       const result = (await res.json()) as AgentHookApplyResponse;
       const lines = launcherOnly
         ? [text.dialogCopied]
@@ -509,8 +497,7 @@ export function createAgentHooksSettings(
           headers: deps.actionHeaders(),
         }),
       );
-      if (!res.ok)
-        throw new Error(await failureText(res, text.failuresClearFailed));
+      if (!res.ok) throw await responseFailure(res, text.failuresClearFailed);
     } catch (error) {
       console.error("[code-viewer] clearing hook failures failed", error);
       failuresError.textContent = formatErrorDetail(error);

@@ -17,7 +17,7 @@ import type {
   StatusLinePlanResponse,
   StoredAccount,
 } from "../../core/agent-accounts";
-import { formatErrorDetail } from "../../core/error-detail";
+import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import { BACKGROUND_REQUEST_HEADER } from "../../core/network-activity";
 
 /** 周期の取り直しの間隔。使用量とログインの状態はそう速く変わらない。 */
@@ -77,20 +77,41 @@ export type AccountsClient = {
   clearUsageFailures(): Promise<void>;
 };
 
-/** 失敗の応答を、操作名・HTTP の状態・本文の理由 (全文) の 1 つの文にする。 */
+/**
+ * 失敗の応答を、操作名・HTTP の状態・本文の理由 (全文) の 1 つの文にする。
+ * 本文がサーバの `{error, code}` だけなら理由の文と code に縮め、ほかの欄が
+ * ある・JSON でない本文は全文を出す (欄を黙って捨てない)。
+ */
 export async function responseFailure(
   res: Response,
   operation: string,
 ): Promise<Error> {
-  const body = await res.text();
-  let detail = body;
-  if (body.startsWith("{")) {
-    const parsed = JSON.parse(body) as { error?: unknown };
-    if (typeof parsed.error === "string") detail = parsed.error;
+  const statusText = res.statusText ? ` ${res.statusText}` : "";
+  const prefix = `${operation} (HTTP ${res.status}${statusText})`;
+  let body: string;
+  try {
+    body = await res.text();
+  } catch (error) {
+    return errorWithCause(`${prefix}: failed to read response body`, error);
   }
-  return new Error(
-    `${operation} (HTTP ${res.status}): ${detail || res.statusText}`,
-  );
+  const detail = serverReason(body) ?? body;
+  return new Error(detail ? `${prefix}: ${detail}` : prefix);
+}
+
+function serverReason(body: string): string | null {
+  if (!body.startsWith("{")) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    // 括弧で始まるだけの本文。呼び出し側が全文を出す。
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const { error, code, ...rest } = parsed as Record<string, unknown>;
+  if (typeof error !== "string" || Object.keys(rest).length > 0) return null;
+  if (code === undefined) return error;
+  return typeof code === "string" ? `${error} (${code})` : null;
 }
 
 export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {

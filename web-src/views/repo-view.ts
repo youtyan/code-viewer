@@ -371,7 +371,10 @@ export function createRepoView(deps: RepoViewDeps) {
       });
       if (!res.ok) {
         showCreateDirectoryError(
-          repoViewText(STATE.language).createFailed(name, await res.text()),
+          repoViewText(STATE.language).createFailed(
+            name,
+            await responseErrorMessage(res, "creating the folder"),
+          ),
         );
         return;
       }
@@ -620,8 +623,9 @@ export function createRepoView(deps: RepoViewDeps) {
     const error = document.createElement("div");
     error.className = "gdp-upload-error";
 
-    const fail = (message = uploadFailedMessage()) => {
-      error.textContent = message;
+    const fail = (uploadError: unknown) => {
+      console.error("[code-viewer] uploading files failed", path, uploadError);
+      error.textContent = `${uploadFailedMessage()}\n${formatErrorDetail(uploadError)}`;
       dropPanel.classList.add("failed");
       setTimeout(() => dropPanel.classList.remove("failed"), 1600);
     };
@@ -631,11 +635,7 @@ export function createRepoView(deps: RepoViewDeps) {
         if (input.files?.length) await uploadFiles(path, input.files);
         error.textContent = "";
       } catch (uploadError) {
-        fail(
-          uploadError instanceof Error
-            ? uploadError.message
-            : uploadFailedMessage(),
-        );
+        fail(uploadError);
       } finally {
         input.value = "";
       }
@@ -656,11 +656,7 @@ export function createRepoView(deps: RepoViewDeps) {
         if (files?.length) await uploadFiles(path, files);
         error.textContent = "";
       } catch (uploadError) {
-        fail(
-          uploadError instanceof Error
-            ? uploadError.message
-            : uploadFailedMessage(),
-        );
+        fail(uploadError);
       }
     });
 
@@ -1593,7 +1589,9 @@ export function createRepoView(deps: RepoViewDeps) {
       body: JSON.stringify({ path }),
     });
     if (!res.ok) {
-      showTrashError(`Failed to move "${path}" to Trash: ${await res.text()}`);
+      showTrashError(
+        await responseErrorMessage(res, `moving "${path}" to Trash`),
+      );
       return false;
     }
     const body = (await res.json()) as { undo?: UndoActionResponse };
@@ -1623,7 +1621,8 @@ export function createRepoView(deps: RepoViewDeps) {
       headers: { "X-Code-Viewer-Action": "1" },
       body: form,
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok)
+      throw new Error(await responseErrorMessage(res, "uploading files"));
     invalidateRepoSidebar();
     await loadRepo();
   }

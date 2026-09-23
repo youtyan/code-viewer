@@ -1,5 +1,13 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import type { MarkdownNavigationTarget } from "../core/markdown-preview";
 import type { AppRoute } from "../core/routes";
 import {
@@ -178,14 +186,31 @@ describe("markdown link navigation", () => {
     expect(recorded.opened).toEqual([{ path: "LICENSE", ref: "worktree" }]);
   });
 
-  test("falls back to the file view when the kind probe fails", async () => {
+  test("falls back to the file view when the kind probe fails, and logs why", async () => {
     const { deps, recorded } = harness();
+    const failure = new Error("network down");
     globalThis.fetch = (async () => {
-      throw new Error("network down");
+      throw failure;
     }) as unknown as typeof fetch;
-    await openMarkdownLink(link({ path: "docs/sub", directory: false }), deps);
-    expect(recorded.routes.map((route) => route.screen)).toEqual(["file"]);
-    expect(recorded.repoLoads).toBe(0);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      await openMarkdownLink(
+        link({ path: "docs/sub", directory: false }),
+        deps,
+      );
+      expect(recorded.routes.map((route) => route.screen)).toEqual(["file"]);
+      expect(recorded.repoLoads).toBe(0);
+      expect(consoleError.mock.calls).toEqual([
+        [
+          "[code-viewer] checking whether docs/sub is a folder failed; opening it as a file",
+          failure,
+        ],
+      ]);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   // 500/403 は「ディレクトリだから読めなかった」の証拠にならない。tree

@@ -5,6 +5,7 @@
 // lines, so an AI can reason about the code without re-fetching.
 
 import { AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD } from "../core/ai-context-copy";
+import { showCopyFailure } from "../core/copy-failure";
 import {
   fileReferenceClipboardText,
   fileReferenceWithCodeClipboardText,
@@ -277,8 +278,15 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
     try {
       await navigator.clipboard.writeText(payload);
       render(copiedCode ? "copied-code" : "copied");
-    } catch {
+    } catch (error) {
       render("failed");
+      showCopyFailure(
+        copyButton,
+        "copying the line reference failed",
+        error,
+        deps.copyReferenceLabel(),
+        1200,
+      );
     }
     if (feedbackTimer) clearTimeout(feedbackTimer);
     feedbackTimer = setTimeout(() => {
@@ -296,8 +304,14 @@ export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
         ".lrp-github-copy-icon",
       );
       if (icon) icon.innerHTML = CHECK_ICON;
-    } catch {
-      githubCopy.classList.add("failed");
+    } catch (error) {
+      showCopyFailure(
+        githubCopy,
+        "copying the GitHub link failed",
+        error,
+        deps.githubCopyTitle(),
+        1200,
+      );
     }
     if (githubFeedbackTimer) clearTimeout(githubFeedbackTimer);
     githubFeedbackTimer = setTimeout(() => {

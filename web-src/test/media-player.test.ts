@@ -1,5 +1,13 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import { createMediaPlayer } from "../views/media-player";
 
 beforeAll(() => {
@@ -104,6 +112,48 @@ describe("media player", () => {
     expect(media.paused).toBe(false);
     click(button);
     expect(media.paused).toBe(true);
+  });
+
+  test.each([
+    {
+      name: "a refused play shows the reason on the play button",
+      failure: new DOMException("sample playback refused", "NotAllowedError"),
+      title:
+        "Error: playing /_file?path=clip.mp4 failed\nCaused by: NotAllowedError: sample playback refused",
+      logged: 1,
+    },
+    {
+      name: "a play cut short by pause is not a failure",
+      failure: new DOMException("sample interrupted", "AbortError"),
+      title: "Play",
+      logged: 0,
+    },
+  ])("$name", async ({ failure, title, logged }) => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const player = createMediaPlayer(
+        "/_file?path=clip.mp4",
+        "video",
+        "clip.mp4",
+      );
+      document.body.appendChild(player);
+      const media = getMedia(player);
+      media.play = () => Promise.reject(failure);
+      const button = getPlayButton(player);
+
+      click(button);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect([button.title, consoleError.mock.calls.length]).toEqual([
+        title,
+        logged,
+      ]);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   test("space key toggles playback", () => {

@@ -196,7 +196,7 @@ describe("rename dialog", () => {
       await submitWith("Newer"),
       document.querySelector(".gdp-dialog") !== null,
     ]).toEqual([
-      'rename the account (HTTP 409 Conflict): "Newer" is already the name of another codex account ("Newer")',
+      'Error: rename the account (HTTP 409 Conflict): "Newer" is already the name of another codex account ("Newer")',
       true,
     ]);
   });

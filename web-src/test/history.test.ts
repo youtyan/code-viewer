@@ -795,6 +795,53 @@ describe("history view lifecycle", () => {
     expect(errors.length > 0).toBe(logged);
   });
 
+  test("a log page that fails to load shows the status and body in the banner", async () => {
+    const { panel, list, banner, status, sentinel } = installHistoryViewDom();
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response("sample log failure", { status: 500 }),
+      )) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const errors: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+    };
+    try {
+      const view = createHistoryView({
+        $: (selector) => {
+          if (selector === "#history-panel") return panel as unknown as never;
+          if (selector === "#history-list") return list as unknown as never;
+          if (selector === "#history-banner") return banner as unknown as never;
+          if (selector === "#history-status") return status as unknown as never;
+          if (selector === "#history-sentinel")
+            return sentinel as unknown as never;
+          throw new Error(`unexpected selector: ${selector}`);
+        },
+        escapeHtml: (value) => String(value),
+        getRoute: () => route,
+        setRoute: () => undefined,
+        applyCommitRange: async () => undefined,
+        showEmptyDiffPane: () => undefined,
+        getSyntaxHighlight: () => false,
+        getLanguage: () => "en",
+        trackLoad: (promise) => promise,
+      });
+      await view.enterHistory();
+    } finally {
+      console.error = originalError;
+    }
+    expect([banner.hidden, banner.textContent, errors.length]).toEqual([
+      false,
+      "Error: loading the log (HTTP 500): sample log failure",
+      1,
+    ]);
+  });
+
   test("an unexpected failure while entering shows the reason and later enters still run", async () => {
     const { panel, list, banner, status, sentinel } = installHistoryViewDom();
     globalThis.fetch = (() =>

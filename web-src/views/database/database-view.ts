@@ -471,12 +471,13 @@ function createTabPane(
     },
   };
   function runConnectionAction(action: () => Promise<void>): void {
-    void action().catch((err) =>
-      showAlertDialog({
+    void action().catch((err) => {
+      console.error("[code-viewer] datastore connection action failed", err);
+      return showAlertDialog({
         body: errorMessage(err),
         danger: true,
-      }),
-    );
+      });
+    });
   }
   const addConnectionBtn = makeIconButton({
     label: paneText().nav.addConnection,
@@ -1886,6 +1887,7 @@ function createTabPane(
       ) {
         return;
       }
+      console.error(`Failed to load table ${table}`, err);
       grid.showError(errorMessage(err));
     } finally {
       slot.finish();

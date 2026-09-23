@@ -7,7 +7,7 @@ import { apiUrl } from "../core/api-url";
 // toggle). Extracted from app.ts.
 
 import { classifyDiffFileKind } from "../core/diff-file-kinds";
-import { responseErrorMessage } from "../core/error-detail";
+import { errorWithCause, responseErrorMessage } from "../core/error-detail";
 import {
   type CompiledFileFilter,
   compileFileFilter,
@@ -1582,7 +1582,16 @@ export function createSidebar(deps: SidebarDeps) {
       [...SIDEBAR_LAZY_LOADED_DIRS].map(async (path) => {
         const node = findSidebarTreeDir(root, path);
         if (!node) return null;
-        const entries = await fetchSidebarDirEntries(node).catch(() => null);
+        // 取り直せなかったフォルダは前の中身のまま残す。理由は console に残す。
+        const entries = await fetchSidebarDirEntries(node).catch((error) => {
+          console.error(
+            errorWithCause(
+              `refreshing the sidebar folder ${path} failed; keeping the entries shown`,
+              error,
+            ),
+          );
+          return null;
+        });
         return entries ? { path, entries } : null;
       }),
     );

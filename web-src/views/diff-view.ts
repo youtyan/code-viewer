@@ -5,6 +5,8 @@
 
 import { apiUrl, withoutProjectPrefix } from "../core/api-url";
 import { changedPathsCoverPath } from "../core/changed-paths";
+import { hasControlCharacter } from "../core/control-chars";
+import { showCopyFailure } from "../core/copy-failure";
 import {
   type DiffCardHScrollMetrics,
   type DiffCardLayout,
@@ -12,8 +14,6 @@ import {
   estimateDiffCardHeight,
   tabbedTextWidth,
 } from "../core/diff-card-estimate";
-import { hasControlCharacter } from "../core/control-chars";
-import { showCopyFailure } from "../core/copy-failure";
 import { summarizeDiffFileKinds } from "../core/diff-file-kinds";
 import {
   errorWithCause,
@@ -1708,7 +1708,8 @@ export function createDiffView(deps: DiffViewDeps) {
       Promise.resolve()
         .then(() => fetch(validatedFileDiffUrl(url)))
         .then(async (r) => {
-          if (!r.ok) throw new Error(await r.text());
+          if (!r.ok)
+            throw new Error(await responseErrorMessage(r, "loading the diff"));
           return r.json();
         }),
     )

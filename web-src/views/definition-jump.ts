@@ -9,7 +9,11 @@ import {
   isJumpableSymbol,
   rankDefinitionMatches,
 } from "../core/definition-search";
-import { errorWithCause, responseErrorMessage } from "../core/error-detail";
+import {
+  errorWithCause,
+  formatErrorDetail,
+  responseErrorMessage,
+} from "../core/error-detail";
 import type { AppRoute } from "../core/routes";
 import { buildGrepRequestParams } from "../core/search-palette";
 import type { ShikiHighlighter } from "../core/shiki-loader";
@@ -620,10 +624,8 @@ function createDefinitionSearchRunner(
         }
         if (!canApply()) return;
         console.error("Definition search failed", err);
-        const message =
-          err instanceof Error && err.message ? err.message : text.unknownError;
         ownMenu = openSearchMenu(trigger, [
-          disabledMenuItem(text.searchFailed(message)),
+          disabledMenuItem(text.searchFailed(formatErrorDetail(err))),
         ]);
       } finally {
         clearOwnTimer();
