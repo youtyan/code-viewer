@@ -33,6 +33,10 @@ const CLIENT_FIELDS = [
   "#{status}",
   "#{status-position}",
   "#{session_attached}",
+  // 見ているウインドウ。映していたペインが終わったとき、tmux が同じウインドウの
+  // 別のペインを前面にしたのか、別のウインドウへ移したのかを見分ける
+  // (terminal/attach-watch.ts)。
+  "#{window_id}",
 ];
 
 const CLIENT_FORMAT = CLIENT_FIELDS.join(FIELD_SEP);
@@ -49,6 +53,7 @@ const FIELD = {
   status: 7,
   statusPosition: 8,
   sessionClients: 9,
+  windowId: 10,
 } as const;
 
 /** 1 以上の整数でなければ null (空・`-`・小数)。 */
@@ -113,10 +118,12 @@ export function parseTmuxClients(stdout: string): TmuxClient[] {
     const tty = fields[FIELD.tty] ?? "";
     if (!tty) continue;
     const window = parseClientWindow(fields);
+    const windowId = fields[FIELD.windowId];
     clients.push({
       tty,
       session: fields[FIELD.session] ?? "",
       pane: fields[FIELD.pane] ?? "",
+      ...(windowId ? { windowId } : {}),
       ...(window ? { window } : {}),
     });
   }

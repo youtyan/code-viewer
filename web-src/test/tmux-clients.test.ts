@@ -155,7 +155,22 @@ describe("parseTmuxClients", () => {
       "#{status}",
       "#{status-position}",
       "#{session_attached}",
+      "#{window_id}",
     ]);
+  });
+
+  test.each([
+    { name: "ウインドウの列がある", id: "@7", expected: { windowId: "@7" } },
+    { name: "ウインドウの列が空", id: "", expected: {} },
+  ])("見ているウインドウ: $name", ({ id, expected }) => {
+    const size = ["80", "24", "80", "23", "on", "bottom", "1"];
+    const stdout = [line("/dev/ttys001", "work", "%3"), ...size, id].join(SEP);
+    const [client] = parseTmuxClients(stdout);
+    expect({ tty: client?.tty, windowId: client?.windowId }).toEqual({
+      tty: "/dev/ttys001",
+      windowId: undefined,
+      ...expected,
+    });
   });
 
   test("末尾の改行で空の 1 件を作らない", () => {

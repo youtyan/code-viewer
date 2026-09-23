@@ -70,6 +70,8 @@ export type TmuxClient = {
   session: string;
   /** 見ているペイン。 */
   pane: TmuxPaneId;
+  /** 見ているウインドウ (`@3`)。読めなかった行には無い。 */
+  windowId?: string;
   /** その端末の大きさと、見ているウインドウの大きさ。読めなかった行には無い。 */
   window?: TmuxClientWindow;
 };

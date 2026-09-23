@@ -1,14 +1,19 @@
 // code-viewer が tmux のペインを映すために開いたシェルを見張り、映していた
-// ペインが終わったらシェルを閉じる (そのシェルのタブもブラウザで閉じる)。
+// ウインドウが終わったらシェルを閉じる (そのシェルのタブもブラウザで閉じる)。
 //
-// なぜ要るか: tmux は、映していたペインが終わっても同じセッションに別の
-// ペインが残っていれば、クライアントをそちらへ移す。タブはそのまま、別の
-// エージェントを映し始める。映していたペインが終わったのにタブが残るのも、
-// 同じタブに別のものが映るのも、利用者の期待と違う。
+// タブが映しているのは、attach したペインのウインドウ全体 (そのウインドウの
+// ペイン全部)。ウインドウの中のペインが 1 つ終わっても、同じウインドウに
+// ペインが残っていれば、tmux はそのウインドウの別のペインを前面にするだけで、
+// タブは同じウインドウを映し続けている。閉じない (宛先をその前面のペインへ
+// 移す。タブの名前は、一覧の名前と同じくそのペインで付く)。
+//
+// 閉じるのは、ウインドウが終わって tmux がクライアントを別のウインドウ
+// (別のエージェント) へ移したとき。タブがそのまま別のものを映し始めるのは、
+// 利用者の期待と違う。
 //
 // tmux から抜けた (セッションが終わった・detach した) 場合は、打ち込んだ
 // attach の 1 行の `&& exit` (tmux/focus.ts) でシェルが自分で終わる。ここが
-// 見るのは、tmux が別のペインへ移した場合と、ペインが無くなったのに
+// 見るのは、tmux が別のウインドウへ移した場合と、ペインが無くなったのに
 // シェルが残っている場合。
 //
 // 利用者の tmux には何も書かない (hook やオプションを置かない。以前
@@ -44,18 +49,21 @@ export type AttachedPaneDecision =
   | { kind: "keep" }
   /** 利用者が tmux の中で別のペインへ移った。見張る宛先をそちらへ移す。 */
   | { kind: "follow"; session: string; pane: string }
-  /** 映していたペインが終わった。シェルを閉じる。 */
+  /** 映していたウインドウが終わった。シェルを閉じる。 */
   | { kind: "close" };
 
 /**
- * 見張っているペイン・そのシェルの tmux クライアントが今映しているもの・
- * 見張っているペインがまだあるか、から次の手を決める。
+ * 見張っているペイン・そのペインのウインドウ (見張りが最後に見たもの)・その
+ * シェルの tmux クライアントが今映しているもの・見張っているペインがまだあるか、
+ * から次の手を決める。
  *
  * - クライアントが見張っているペインを映していれば何もしない
+ * - 見張っていたペインが無く、クライアントが同じウインドウの別のペインを映して
+ *   いる: そのウインドウのペインが 1 つ終わっただけ。宛先を移す
+ * - 見張っていたペインが無く、それ以外 (別のウインドウへ移された・クライアントも
+ *   居ない・ウインドウをまだ見ていない): 閉じる
  * - 別のペインを映していて、見張っていたペインがまだあれば、利用者が tmux の
  *   中で移っただけ。宛先を移す
- * - 見張っていたペインが無ければ閉じる (tmux が残った別のペインへ移した、
- *   またはクライアントも居ない)
  * - クライアントが居ないのにペインがある: attach を打ち込んだ直後でまだ
  *   繋がっていないか、繋げずにシェルへ戻った (tmux の理由が画面に出ている)。
  *   閉じない
@@ -64,12 +72,17 @@ export type AttachedPaneDecision =
  * 聞かないので null。
  */
 export function decideAttachedPane(
-  watched: { session: string; pane: string },
-  client: { session: string; pane: string } | null,
+  watched: { session: string; pane: string; window: string | null },
+  client: { session: string; pane: string; windowId?: string } | null,
   watchedPaneExists: boolean | null,
 ): AttachedPaneDecision {
   if (client?.pane === watched.pane) return { kind: "keep" };
-  if (watchedPaneExists === false) return { kind: "close" };
+  if (watchedPaneExists === false)
+    return client &&
+      watched.window !== null &&
+      client.windowId === watched.window
+      ? { kind: "follow", session: client.session, pane: client.pane }
+      : { kind: "close" };
   if (watchedPaneExists === null) return { kind: "keep" };
   if (client)
     return { kind: "follow", session: client.session, pane: client.pane };
@@ -107,6 +120,8 @@ function defaultDeps(cwd: string): AttachWatchDeps {
 async function checkAttachedShell(
   id: ShellSessionId,
   deps: AttachWatchDeps,
+  /** 見張っているペインのウインドウ (クライアントがそのペインを映していたときに覚える)。 */
+  seen: { window: string | null },
 ): Promise<boolean> {
   const watched = deps.attachment(id);
   if (!watched) return true;
@@ -122,6 +137,7 @@ async function checkAttachedShell(
     listed.status === "ok"
       ? findClientByTty(listed.clients, deps.tty(id))
       : null;
+  if (client?.pane === watched.pane) seen.window = client.windowId ?? null;
   let exists: boolean | null = null;
   if (client?.pane !== watched.pane) {
     const resolved = await deps.resolvePane(watched.pane);
@@ -140,9 +156,14 @@ async function checkAttachedShell(
   if (!current) return true;
   if (current.pane !== watched.pane || current.session !== watched.session)
     return false;
-  const decision = decideAttachedPane(watched, client, exists);
+  const decision = decideAttachedPane(
+    { ...watched, window: seen.window },
+    client,
+    exists,
+  );
   if (decision.kind === "follow") {
     deps.follow(id, decision.session, decision.pane);
+    seen.window = client?.windowId ?? null;
     return false;
   }
   if (decision.kind === "keep") return false;
@@ -170,6 +191,7 @@ export function watchAttachedShell(
   let dirty = false;
   let stopped = false;
   let unwatch: (() => void) | null = null;
+  const seen: { window: string | null } = { window: null };
 
   const stop = () => {
     stopped = true;
@@ -183,7 +205,7 @@ export function watchAttachedShell(
     running = true;
     dirty = false;
     try {
-      if (await checkAttachedShell(id, deps)) stop();
+      if (await checkAttachedShell(id, deps, seen)) stop();
     } catch (error) {
       console.error(
         `[code-viewer] checking the tmux pane shown in shell ${id} failed`,
