@@ -101,8 +101,8 @@ describe("quick help popover", () => {
     expect(rowText.includes("grep palette")).toBe(true);
     expect(rowText.includes("next unviewed file")).toBe(true);
 
-    // Sidebar-only rows must not leak into the compact panel.
-    expect(groupTitles.includes("Sidebar")).toBe(false);
+    // File-list-only rows must not leak into the compact panel.
+    expect(groupTitles.includes("File list")).toBe(false);
   });
 
   test("shows the keys the user assigned in the shortcut settings", () => {

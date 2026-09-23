@@ -34,7 +34,9 @@ Requires Node.js 20 or newer. Development uses
   main area would be narrower than 480px it narrows to 240px, then the changed
   files fold to a strip, then the file list folds away. Every column folds by
   hand (the file list with its button, the lists with the handle on their right
-  edge), and a column you open yourself stays open until a reload. History's branch labels keep
+  edge), and a column you open yourself stays open until a reload. While the
+  file list is folded, the view icons and its open button stand as a narrow
+  strip down the left edge under the project row. History's branch labels keep
   their whole name up to about 40% of the room they share with the subject. The tabs are
   shared by all projects and grouped by project: each group starts with a label in
   the project's color (its initials and ▾ for Switch to this project / Collapse /
@@ -54,8 +56,8 @@ Requires Node.js 20 or newer. Development uses
   tab of its own (an open one comes to the front and is kept); Shift+click still opens a
   new browser window. A file at another version (a commit from History, HEAD, a branch)
   is a separate tab named like `a.ts @ 1a2b3c4`. Diff /
-  History / Worktrees / Data / Work log each have one tab that comes back as
-  you left it. Files is not a tab: the folder view is what the left side shows
+  History / Worktrees / Data / Work log each have one tab per project that comes
+  back as you left it. Files is not a tab: the folder view is what the left side shows
   when no tab is selected (the Files icon, `g r`, or a folder in the tree).
   Right-click a tab to close it, the others or those to its right, or copy its
   path (Shift+F10 on a tab opens the same menu); drag to reorder; `g t` / `g T` /
@@ -339,10 +341,12 @@ Requires Node.js 20 or newer. Development uses
   otherwise a shell is opened and attached for you, so you end up with one
   shell per tmux session rather than one per pane. This also works from a
   shell that is inside tmux or whose startup starts tmux (the attach runs
-  with `TMUX` unset, so the pane shows up nested). That tab closes when the
-  pane it shows ends — it does not switch to another pane left in the session —
-  and when you leave tmux (the session ends or you detach); a short note at
-  the bottom right names what ended. A shell ended with `exit` closes its tab
+  with `TMUX` unset, so the pane shows up nested). That tab shows the pane's
+  tmux window: when the pane ends and other panes are left in that window, the
+  tab stays and follows the pane tmux brings to the front. It closes when the
+  window ends (it does not move on to another window of the session) and when
+  you leave tmux (the session ends or you detach); a short note at the bottom
+  right names what ended. A shell ended with `exit` closes its tab
   the same way. When the same session is also open in a smaller terminal, tmux
   shrinks the window and fills the rest with dots; the tab covers that area
   and shows the window size and why. Powerline separators and
@@ -484,6 +488,8 @@ Common options:
 - `--idle-stop <seconds>` — stop a project's process after nobody has used it
   for this long (default `600`; `0` never stops). It is started again on the
   next request; terminals, agents and unread marks are not affected.
+  When a code-viewer is already running, `--port` and `--idle-stop` are not
+  used (it prints a warning and the running one's URL).
 - `--standalone` — run one self-contained server for this repository only, the
   way code-viewer worked before it served every project from one address
   (scripts and tests use this).
@@ -511,14 +517,14 @@ PATH differs from the environment that starts code-viewer. Override paths must
 be absolute executable files outside the opened repository.
 
 Open **Settings** at the bottom of the left sidebar to change display options such
-as theme (dark in violet, graphite or warm gray, or light), layout, sidebar mode, font sizes, and UI language. The language
+as theme (dark in violet, graphite or warm gray, or light), font sizes (file list and code), and UI language. The language
 setting translates the viewer chrome itself, including that page, settings labels,
 sidebars, history controls, datastore viewer, and annotation panel labels.
 
 ## Repository View
 
-Open the root URL to browse the repository tree. Folder pages keep the sidebar
-visible, and file pages show a preview when the browser can safely render the
+Open the project's URL (`/p/<key>/`) to browse the repository tree. Folder
+pages keep the file list visible, and file pages show a preview when the browser can safely render the
 file. Unsupported binary files show a clear unavailable state with file
 metadata instead of dumping bytes as text.
 
@@ -580,7 +586,7 @@ by default and can be tuned from Settings & Help → **File change watcher**
 (range slider + numeric input, 16–65536); when the cap is hit the viewer
 shows a banner so reloads are not silently missed.
 
-Large repositories load folder children on demand. The sidebar remembers which
+Large repositories load folder children on demand. The file list remembers which
 lazy-loaded folders you opened and re-expands them on the next reload, so the
 tree state survives navigation and refresh.
 Tab reaches the tree once, on the selected row; ↑ / ↓, Home / End, → (open a
@@ -751,7 +757,7 @@ offered there.
 
 ### Browser UI
 
-Open Datastores in the global navigation to access:
+Open Data (the Data icon at the head of the list column, or `g b`) to access:
 
 - **Saved connections** — use the `+` action beside the datastore selector to
   add PostgreSQL, MySQL, Cloudflare D1, Redis, Elasticsearch, S3-compatible
@@ -826,7 +832,12 @@ Open Datastores in the global navigation to access:
 - **Rails FK inference toggle** — opt-in heuristic that adds virtual foreign
   keys following Rails naming conventions (e.g. `user_id → users.id`) on top
   of the database-declared FKs.
-- **Query editor** — execute read-only SQL with syntax highlighting. The
+- **Query editor** — sits above the result grid on the same screen (drag
+  the divider, or focus it and press ↑ / ↓, to resize it; it can also be
+  collapsed). Choosing a table puts the SQL that fetched its rows (with the
+  page's `LIMIT` / `OFFSET`) into the editor, Run / Explain results show in
+  the same place, and the Data tab goes back to the table. It executes
+  read-only SQL with syntax highlighting. The
   allowlist depends on the engine (SQLite: `SELECT`, `PRAGMA`, `EXPLAIN`,
   `WITH`; PostgreSQL and MySQL also accept `SHOW` and `DESCRIBE`, and
   PostgreSQL queries run inside `BEGIN TRANSACTION READ ONLY`). Per-DB results

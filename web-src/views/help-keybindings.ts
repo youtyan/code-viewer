@@ -38,7 +38,7 @@ const GROUP_TITLES: Record<KeymapGroup | "focused", HelpText> = {
   panels: { en: "Panels", ja: "パネル" },
   screens: { en: "Screens", ja: "画面" },
   tabs: { en: "Tabs", ja: "タブ" },
-  sidebar: { en: "Sidebar", ja: "サイドバー" },
+  sidebar: { en: "File list", ja: "ファイル一覧" },
   main: { en: "Main Panel", ja: "メインパネル" },
   focused: { en: "Focused Controls", ja: "フォーカス中の操作" },
 };
@@ -200,7 +200,10 @@ export const KEYMAP_ACTION_INFO: Record<KeymapAction, KeymapActionInfo> = {
   },
   "focus-sidebar": {
     group: "panels",
-    label: { en: "Focus sidebar", ja: "サイドバーへフォーカス" },
+    label: {
+      en: "Focus the file list (or the list of the screen)",
+      ja: "ファイル一覧 (一覧のある画面ではその一覧) へフォーカス",
+    },
   },
   "focus-main": {
     group: "panels",

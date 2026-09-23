@@ -135,7 +135,7 @@ describe("the list of actions", () => {
       // 前・次のプロジェクトへ (タブのグループの作業で足した 2 つの操作)。
       keysOf(root, "project-next"),
     ]).toEqual([
-      ["Global", "Panels", "Screens", "Tabs", "Sidebar", "Main Panel"],
+      ["Global", "Panels", "Screens", "Tabs", "File list", "Main Panel"],
       82,
       ["t"],
       [
