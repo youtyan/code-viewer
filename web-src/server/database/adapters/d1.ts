@@ -13,6 +13,7 @@
 //
 // 書き込みは実装しない (applyMutations 未定義)。閲覧専用の接続として扱う。
 
+import { formatErrorDetail } from "../../../core/error-detail";
 import type {
   DbColumn,
   DbForeignKey,
@@ -114,8 +115,10 @@ class D1HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    cause?: unknown,
   ) {
     super(message);
+    if (cause !== undefined) Object.assign(this, { cause });
   }
 }
 
@@ -143,8 +146,15 @@ function d1ErrorMessage(
   status: number,
   sql: string,
 ): string {
-  const first = envelope.errors?.find((entry) => entry?.message);
-  const detail = first?.message?.replace(/\s+/g, " ").trim().slice(0, 240);
+  // Cloudflare が返した errors は全件、code ごと残す。
+  const detail = (envelope.errors ?? [])
+    .filter((entry) => entry?.message || entry?.code !== undefined)
+    .map((entry) =>
+      [entry.code, entry.message?.replace(/\s+/g, " ").trim()]
+        .filter((part) => part !== undefined && part !== "")
+        .join(": "),
+    )
+    .join("; ");
   const statement = sql.replace(/\s+/g, " ").trim().slice(0, 160);
   return `${detail || `D1 HTTP ${status}`} (sql: ${statement})`;
 }
@@ -207,6 +217,7 @@ async function d1Fetch(
     throw new D1HttpError(
       503,
       `D1 request failed: ${err instanceof Error ? err.message : String(err)}`,
+      err,
     );
   } finally {
     clearTimeout(timer);
@@ -253,8 +264,12 @@ export function createD1Adapter(config: D1Config): D1Source {
     let envelope: D1ApiEnvelope;
     try {
       envelope = (await res.json()) as D1ApiEnvelope;
-    } catch {
-      throw new D1HttpError(res.status, `D1 HTTP ${res.status}: invalid JSON`);
+    } catch (error) {
+      throw new D1HttpError(
+        res.status,
+        `D1 HTTP ${res.status}: invalid JSON`,
+        error,
+      );
     }
     if (!res.ok || envelope.success === false) {
       // Cloudflare が 200 + success:false を返すクエリエラーは、クライアントへは
@@ -406,6 +421,11 @@ export function createD1Adapter(config: D1Config): D1Source {
               // スキーマ」を成功として返してしまう。
               if (isAbortLikeError(err, signal)) throw err;
               // 1 つのインデックスが内省できなくてもスキーマ全体は返す。
+              // 欠けた理由は記録する。
+              console.error(
+                `[code-viewer] describing the D1 index ${index.name} failed:`,
+                err,
+              );
               return null;
             }
           }),
@@ -438,7 +458,9 @@ export function createD1Adapter(config: D1Config): D1Source {
             } catch (err) {
               // 中断は握り潰さない (欠けた FK 一覧を成功として返さない)。
               if (isAbortLikeError(err, signal)) throw err;
-              // 仮想テーブル等は PRAGMA foreign_key_list に応えない。
+              // 読み込めない module の仮想表だけは PRAGMA foreign_key_list に
+              // 応えないので飛ばす。ほかの失敗は投げる。
+              if (!/no such module/i.test(formatErrorDetail(err))) throw err;
               return [];
             }
           }),
@@ -468,15 +490,20 @@ export function createD1Adapter(config: D1Config): D1Source {
         );
         for (const row of rows) result.set(String(row.tbl), Number(row.cnt));
         return result;
-      } catch {
+      } catch (unionErr) {
+        if (isAbortLikeError(unionErr, signal)) throw unionErr;
         // UNION ALL が長すぎる / 1 テーブルが読めない等で失敗したら
         // テーブル単位に落とす。読めない 1 つのために全体を落とさない
-        // (件数が取れなかったテーブルは呼び出し側で 0 として扱われる)。
+        // (件数が取れなかったテーブルは件数なし = 不明になる)。
         for (const table of countable) {
           try {
             result.set(table, await countRows(table, signal));
           } catch (err) {
             if (isAbortLikeError(err, signal)) throw err;
+            console.error(
+              `[code-viewer] counting rows of the D1 table ${table} failed:`,
+              err,
+            );
           }
         }
         return result;

@@ -10,6 +10,7 @@ import { lstat, open, readdir, readFile, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { hasControlCharacter } from "../../core/control-chars";
 import type { DbFileInfo, DbKind } from "../../core/database/types";
+import { errno } from "../terminal/settings-file";
 
 const SQLITE_EXTENSIONS = new Set([".db", ".sqlite", ".sqlite3", ".s3db"]);
 const SQLITE_MAGIC = "SQLite format 3\0";
@@ -17,6 +18,22 @@ const MAX_SCAN_DEPTH = 3;
 const MAX_ENTRIES = 50;
 const DOCKER_DISCOVERY_TTL_MS = 5_000;
 const SQLITE_DISCOVERY_TTL_MS = 5_000;
+
+// 探索の途中で消えた場所 (ENOENT・ENOTDIR) は黙って飛ばす。権限の無い場所
+// (root の docker volume など) も飛ばすが、どこを飛ばしたかは 1 度だけ記録する。
+// ほかの失敗は探索の失敗として投げる。
+const reportedUnreadablePaths = new Set<string>();
+function skipUnreadablePath(path: string, error: unknown): void {
+  const code = errno(error);
+  if (code === "ENOENT" || code === "ENOTDIR") return;
+  if (code !== "EACCES" && code !== "EPERM") throw error;
+  if (reportedUnreadablePaths.has(path)) return;
+  reportedUnreadablePaths.add(path);
+  console.warn(
+    `[code-viewer] database discovery skipped a path it cannot read: ${path}`,
+    error,
+  );
+}
 
 function isSqliteFile(fullPath: string): boolean {
   try {
@@ -30,8 +47,13 @@ function isSqliteFile(fullPath: string): boolean {
       closeSync(fd);
     }
     return buf.toString("utf8", 0, 16) === SQLITE_MAGIC;
-  } catch {
-    return false;
+  } catch (error) {
+    // 無い・フォルダだったものは SQLite でない。ほかの理由は呼び出し元へ投げる。
+    const code = errno(error);
+    if (code === "ENOENT" || code === "ENOTDIR" || code === "EISDIR") {
+      return false;
+    }
+    throw error;
   }
 }
 
@@ -47,7 +69,8 @@ async function isSqliteFileAsync(fullPath: string): Promise<boolean> {
     } finally {
       await file.close();
     }
-  } catch {
+  } catch (error) {
+    skipUnreadablePath(fullPath, error);
     return false;
   }
 }
@@ -95,7 +118,8 @@ export async function discoverSqliteFilesAsync(
     let entries: string[];
     try {
       entries = await readdir(dir);
-    } catch {
+    } catch (error) {
+      skipUnreadablePath(dir, error);
       return;
     }
     for (const entry of entries) {
@@ -106,7 +130,8 @@ export async function discoverSqliteFilesAsync(
       let entryStat: Awaited<ReturnType<typeof lstat>>;
       try {
         entryStat = await lstat(full);
-      } catch {
+      } catch (error) {
+        skipUnreadablePath(full, error);
         continue;
       }
       if (entryStat.isSymbolicLink()) continue;
@@ -162,8 +187,11 @@ export function validateDbPath(cwd: string, dbPath: string): string | null {
   try {
     realCwd = realpathSync(cwd);
     realFull = realpathSync(full);
-  } catch {
-    return null;
+  } catch (error) {
+    // 確かめた直後に消えたものは「無い」。ほかの理由は呼び出し元へ投げる。
+    const code = errno(error);
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw error;
   }
   const rel = relative(realCwd, realFull);
   if (rel === "" || rel.startsWith("..") || rel.startsWith("/")) return null;
@@ -395,8 +423,10 @@ async function readDotenvAsync(
   try {
     const content = await readFile(join(composeDir, ".env"), "utf-8");
     return parseDotenvContent(content);
-  } catch {
-    return {};
+  } catch (error) {
+    // .env が無いのは普通。読めない .env を黙って空にすると、違う資格情報で繋ぐ。
+    if (errno(error) === "ENOENT") return {};
+    throw error;
   }
 }
 
@@ -717,7 +747,8 @@ async function parseComposeFileAsync(
   let content: string;
   try {
     content = await readFile(filepath, "utf-8");
-  } catch {
+  } catch (error) {
+    skipUnreadablePath(filepath, error);
     return;
   }
   const composeDirEnv = await readDotenvAsync(composeDir);
@@ -759,7 +790,8 @@ async function pathExistsAsync(path: string): Promise<boolean> {
   try {
     await stat(path);
     return true;
-  } catch {
+  } catch (error) {
+    skipUnreadablePath(path, error);
     return false;
   }
 }
@@ -785,7 +817,8 @@ async function walkForMarkerFileAsync(
   let entries: string[];
   try {
     entries = await readdir(dir);
-  } catch {
+  } catch (error) {
+    skipUnreadablePath(dir, error);
     return;
   }
   for (const entry of entries) {
@@ -795,7 +828,8 @@ async function walkForMarkerFileAsync(
     let entryStat: Awaited<ReturnType<typeof lstat>>;
     try {
       entryStat = await lstat(full);
-    } catch {
+    } catch (error) {
+      skipUnreadablePath(full, error);
       continue;
     }
     if (entryStat.isSymbolicLink()) continue;
@@ -1083,32 +1117,34 @@ export async function discoverSupabaseCliProjectsAsync(
     async (dir) => {
       const configPath = join(dir, "supabase", "config.toml");
       if (!(await pathExistsAsync(configPath))) return;
+      let content: string;
       try {
-        const content = await readFile(configPath, "utf-8");
-        const parsed = parseSupabaseConfigToml(content);
-        if (!parsed) return;
-        const relDir = relative(cwd, dir);
-        const isRoot = relDir === "" || relDir === ".";
-        const relDirSlash = relDir.replace(/\\/g, "/");
-        const id = isRoot
-          ? `supabase:${parsed.projectId}`
-          : `supabase:${parsed.projectId}@${encodeURIComponent(relDirSlash)}`;
-        const labelPath = isRoot ? "" : ` — ${relDirSlash}`;
-        results.push({
-          id,
-          path: isRoot
-            ? "supabase/config.toml"
-            : `${relDirSlash}/supabase/config.toml`,
-          name: `${parsed.projectId} (Supabase CLI, postgres@127.0.0.1:${parsed.dbPort}/postgres${labelPath})`,
-          sizeBytes: 0,
-          kind: "postgresql",
-          projectId: parsed.projectId,
-          relDirSlash,
-          dbPort: parsed.dbPort,
-        });
-      } catch {
-        // 読めない/壊れた config.toml は無視して探索を続ける。
+        content = await readFile(configPath, "utf-8");
+      } catch (error) {
+        skipUnreadablePath(configPath, error);
+        return;
       }
+      const parsed = parseSupabaseConfigToml(content);
+      if (!parsed) return;
+      const relDir = relative(cwd, dir);
+      const isRoot = relDir === "" || relDir === ".";
+      const relDirSlash = relDir.replace(/\\/g, "/");
+      const id = isRoot
+        ? `supabase:${parsed.projectId}`
+        : `supabase:${parsed.projectId}@${encodeURIComponent(relDirSlash)}`;
+      const labelPath = isRoot ? "" : ` — ${relDirSlash}`;
+      results.push({
+        id,
+        path: isRoot
+          ? "supabase/config.toml"
+          : `${relDirSlash}/supabase/config.toml`,
+        name: `${parsed.projectId} (Supabase CLI, postgres@127.0.0.1:${parsed.dbPort}/postgres${labelPath})`,
+        sizeBytes: 0,
+        kind: "postgresql",
+        projectId: parsed.projectId,
+        relDirSlash,
+        dbPort: parsed.dbPort,
+      });
     },
     signal,
   );

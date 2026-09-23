@@ -30,14 +30,22 @@ function evictOldest(): void {
   if (oldestKey) {
     const entry = pool.get(oldestKey);
     if (entry) {
-      clearTimeout(entry.timer);
-      try {
-        entry.adapter.close();
-      } catch {
-        // ignore close errors
-      }
+      closePooled(entry);
       pool.delete(oldestKey);
     }
+  }
+}
+
+// プールから外す接続を閉じる。閉じる失敗で残りの片付けを止めず、理由は記録する。
+function closePooled(entry: PoolEntry): void {
+  clearTimeout(entry.timer);
+  try {
+    entry.adapter.close();
+  } catch (error) {
+    console.error(
+      `[code-viewer] closing the database connection failed: ${entry.path}`,
+      error,
+    );
   }
 }
 
@@ -46,11 +54,7 @@ function scheduleEviction(key: string, entry: PoolEntry): void {
   entry.timer = setTimeout(() => {
     const current = pool.get(key);
     if (current === entry) {
-      try {
-        current.adapter.close();
-      } catch {
-        // ignore
-      }
+      closePooled(current);
       pool.delete(key);
     }
   }, IDLE_TIMEOUT_MS);
@@ -86,24 +90,12 @@ export async function getConnection(
 export function closeConnection(resolvedPath: string): boolean {
   const entry = pool.get(resolvedPath);
   if (!entry) return false;
-  clearTimeout(entry.timer);
-  try {
-    entry.adapter.close();
-  } catch {
-    // ignore
-  }
+  closePooled(entry);
   pool.delete(resolvedPath);
   return true;
 }
 
 export function closeAllConnections(): void {
-  for (const [, entry] of pool) {
-    clearTimeout(entry.timer);
-    try {
-      entry.adapter.close();
-    } catch {
-      // ignore
-    }
-  }
+  for (const entry of pool.values()) closePooled(entry);
   pool.clear();
 }

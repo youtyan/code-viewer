@@ -14,6 +14,7 @@ import type {
   QueryHistoryState,
   RowMutation,
 } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
 import { makeId } from "../../core/id";
 import { createLinkedAbortController } from "../abort";
 import { loadDbUiState, patchDbUiState } from "../state-store";
@@ -82,6 +83,7 @@ import {
   logResponseWithReason,
   parseBoundedJsonBody,
   parsePostJsonBody,
+  readBoundedJsonBody,
   textError,
 } from "./handle-shared";
 import {
@@ -383,7 +385,7 @@ function toFileInfo(entry: {
 }
 
 function errorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
+  const raw = formatErrorDetail(err);
   const withoutControl = Array.from(raw, (ch) =>
     hasControlCharacter(ch) ? " " : ch,
   ).join("");
@@ -658,7 +660,8 @@ export async function createDbSchemaResponse(
     });
     const tablesWithCount = result.tables.map((t) => ({
       ...t,
-      rowCount: t.type === "table" ? (result.countMap.get(t.name) ?? 0) : null,
+      rowCount:
+        t.type === "table" ? (result.countMap.get(t.name) ?? null) : null,
     }));
     const body: DbSchemaResponse = {
       dbId: r.dbId,
@@ -711,37 +714,48 @@ const MAX_FILTER_VALUE_LEN = 4096;
 function parseColumnValuePairs(
   url: URL,
   param: string,
-): { column: string; value: string }[] {
+): { column: string; value: string }[] | Response {
   const raw = url.searchParams.get(param);
   if (!raw) return [];
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (f: unknown): f is { column: string; value: string } =>
-          !!f &&
-          typeof f === "object" &&
-          typeof (f as Record<string, unknown>).column === "string" &&
-          typeof (f as Record<string, unknown>).value === "string",
-      )
-      .filter(
-        (f) =>
-          f.column.length <= MAX_FILTER_COLUMN_LEN &&
-          f.value.length <= MAX_FILTER_VALUE_LEN,
-      )
-      .slice(0, MAX_COLUMN_VALUE_PAIRS);
-  } catch {
-    return [];
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    // 壊れた条件を黙って捨てると、絞らずに全行を返してしまう。
+    return textError(
+      `invalid ${param} parameter: ${formatErrorDetail(error)}`,
+      400,
+    );
   }
+  if (!Array.isArray(parsed)) {
+    return textError(`invalid ${param} parameter: expected a JSON array`, 400);
+  }
+  return parsed
+    .filter(
+      (f: unknown): f is { column: string; value: string } =>
+        !!f &&
+        typeof f === "object" &&
+        typeof (f as Record<string, unknown>).column === "string" &&
+        typeof (f as Record<string, unknown>).value === "string",
+    )
+    .filter(
+      (f) =>
+        f.column.length <= MAX_FILTER_COLUMN_LEN &&
+        f.value.length <= MAX_FILTER_VALUE_LEN,
+    )
+    .slice(0, MAX_COLUMN_VALUE_PAIRS);
 }
 
-function parseFilters(url: URL): { column: string; value: string }[] {
+function parseFilters(
+  url: URL,
+): { column: string; value: string }[] | Response {
   return parseColumnValuePairs(url, "filters");
 }
 
 /** `eq` パラメータ: カラム完全一致条件（FK 参照の WHERE 用）。 */
-function parseExactConditions(url: URL): { column: string; value: string }[] {
+function parseExactConditions(
+  url: URL,
+): { column: string; value: string }[] | Response {
   return parseColumnValuePairs(url, "eq");
 }
 
@@ -793,7 +807,9 @@ async function handleTable(
     ];
   }
   const filters = parseFilters(url);
+  if (filters instanceof Response) return filters;
   const exact = parseExactConditions(url);
+  if (exact instanceof Response) return exact;
   try {
     const adapter = await getAdapter(r, cwd, signal);
     const { result: meta, executedSql } = await captureSql(() =>
@@ -1031,7 +1047,7 @@ export async function createDbQueryResponse(
       rowCount: 0,
       truncated: false,
       elapsedMs: elapsed,
-      error: err instanceof Error ? err.message : String(err),
+      error: formatErrorDetail(err),
     };
     return { ok: false, response: json(errorResponse, 400) };
   }
@@ -1239,13 +1255,9 @@ async function handleHistoryClear(
   req: Request,
   sendSse?: (event: string, data?: string) => void,
 ): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { db?: string; schema?: string };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    body = {};
-  }
+  // 読めない本文を「全部消す」({}) として扱わない。
+  const body = await parsePostJsonBody<{ db?: string; schema?: string }>(req);
+  if (body instanceof Response) return body;
   const schema = normalizeSchemaParam(body.schema);
   if (schema instanceof Response) return schema;
   await updateQueryHistoryAsync(cwd, (state) => ({
@@ -1313,7 +1325,9 @@ async function handleExport(
     ];
   }
   const filters = parseFilters(url);
+  if (filters instanceof Response) return filters;
   const exact = parseExactConditions(url);
+  if (exact instanceof Response) return exact;
 
   try {
     const adapter = await getAdapter(r, cwd, signal);
@@ -1645,7 +1659,8 @@ async function handleSearchStart(
       job.currentTable = undefined;
     } catch (err) {
       if (!isAbortLikeError(err, ac.signal)) {
-        job.error = err instanceof Error ? err.message : String(err);
+        console.error("[code-viewer] database search failed:", err);
+        job.error = formatErrorDetail(err);
       }
       job.done = true;
       job.currentTable = undefined;
@@ -1962,10 +1977,7 @@ async function handleSnapshotCreate(
     } catch (err) {
       const aborted = isAbortLikeError(err, abortController.signal);
       if (!aborted) {
-        console.error(
-          "[code-viewer] snapshot error:",
-          err instanceof Error ? err.message : String(err),
-        );
+        console.error("[code-viewer] snapshot error:", err);
       }
       // id 確定前に死んだ場合は ack も失敗にする (id 確定後の Promise は no-op)。
       rejectIdAck(err);
@@ -1976,9 +1988,7 @@ async function handleSnapshotCreate(
           dbId: snapshotDbId,
           schema: body.schema,
           id: activeSnapshotId,
-          ...(aborted
-            ? {}
-            : { error: err instanceof Error ? err.message : String(err) }),
+          ...(aborted ? {} : { error: formatErrorDetail(err) }),
         }),
       );
     } finally {
@@ -1989,8 +1999,12 @@ async function handleSnapshotCreate(
       if (closeSourceAfterSnapshot) {
         try {
           (source as { close?: () => void }).close?.();
-        } catch {
-          // ignore close errors after snapshot completion
+        } catch (error) {
+          // snapshot の結果は上で出し終えている。閉じ損ねは記録だけする。
+          console.error(
+            "[code-viewer] closing the snapshot source failed:",
+            error,
+          );
         }
       }
     }
@@ -2000,8 +2014,10 @@ async function handleSnapshotCreate(
   try {
     snapshotId = await idAck;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return textError(`failed to start snapshot: ${message}`, 500);
+    return textError(
+      `failed to start snapshot: ${formatErrorDetail(err)}`,
+      500,
+    );
   }
   return json({ ok: true, message: "snapshot started", snapshotId });
 }
@@ -2106,20 +2122,12 @@ async function handleTabsGet(cwd: string): Promise<Response> {
 }
 
 async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
-  const contentLength = Number(req.headers.get("content-length") || "0");
-  if (contentLength > MAX_TABS_BODY_BYTES) {
-    return textError("tabs body too large", 413);
-  }
-  let body: unknown;
-  try {
-    const raw = await req.text();
-    if (Buffer.byteLength(raw, "utf8") > MAX_TABS_BODY_BYTES) {
-      return textError("tabs body too large", 413);
-    }
-    body = JSON.parse(raw);
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await readBoundedJsonBody(
+    req,
+    MAX_TABS_BODY_BYTES,
+    "tabs body too large",
+  );
+  if (body instanceof Response) return body;
   if (
     !body ||
     typeof body !== "object" ||
@@ -2134,11 +2142,11 @@ async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
     );
     return json({ ok: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message === "tabs state too large") {
-      return textError(message, 413);
+    if (err instanceof Error && err.message === "tabs state too large") {
+      return textError(err.message, 413);
     }
-    return textError(`failed to save tabs: ${message}`, 500);
+    console.error("[code-viewer] saving the database tabs failed:", err);
+    return textError(`failed to save tabs: ${formatErrorDetail(err)}`, 500);
   }
 }
 
@@ -2176,11 +2184,21 @@ async function handleConnections(cwd: string, req: Request): Promise<Response> {
       closeSavedConnection(connection.id, connection.kind);
       return json({ connection: publicConnection(connection) });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "invalid datastore connection";
+      // 入力の誤りだけ 4xx。書き込み・keychain の失敗は理由ごと 500。
+      const message = err instanceof Error ? err.message : "";
+      if (message === "invalid datastore connection") {
+        return textError(message, 400);
+      }
+      if (message === "too many datastore connections") {
+        return textError(message, 409);
+      }
+      console.error(
+        "[code-viewer] saving the datastore connection failed:",
+        err,
+      );
       return textError(
-        message,
-        message === "too many datastore connections" ? 409 : 400,
+        `failed to save the datastore connection: ${formatErrorDetail(err)}`,
+        500,
       );
     }
   }
@@ -2309,10 +2327,14 @@ async function handleDbUiPatch(cwd: string, req: Request): Promise<Response> {
   try {
     return json(await patchDbUiState(cwd, body));
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message === "db UI state too large") return textError(message, 413);
+    if (err instanceof Error && err.message === "db UI state too large") {
+      return textError(err.message, 413);
+    }
     console.error("[code-viewer] db UI error:", err);
-    return textError("failed to save db UI state", 500);
+    return textError(
+      `failed to save db UI state: ${formatErrorDetail(err)}`,
+      500,
+    );
   }
 }
 
@@ -2426,8 +2448,8 @@ async function handleMutate(
       return textError("mutation aborted", 503);
     }
     // 検証エラー (未知のカラム/主キー欠落等) や DB 制約違反はユーザーに見せる。
-    const message = err instanceof Error ? err.message : String(err);
-    return textError(message, 400);
+    console.error("[code-viewer] database mutation failed:", err);
+    return textError(formatErrorDetail(err), 400);
   }
 }
 

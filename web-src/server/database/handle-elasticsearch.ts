@@ -5,6 +5,7 @@ import type {
   EsMappingResponse,
   EsQueryResponse,
 } from "../../core/database/types";
+import { formatErrorDetail } from "../../core/error-detail";
 import { isAbortLikeError } from "./adapters/abort";
 import { asAsyncDoc } from "./adapters/async-facade";
 import {
@@ -106,12 +107,19 @@ async function handleDocs(
   const sa = url.searchParams.get("searchAfter");
   let searchAfter: unknown[] | undefined;
   if (sa) {
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(sa);
-      if (Array.isArray(parsed)) searchAfter = parsed;
-    } catch {
+      parsed = JSON.parse(sa);
+    } catch (error) {
+      return textError(
+        `invalid searchAfter (must be JSON array): ${formatErrorDetail(error)}`,
+        400,
+      );
+    }
+    if (!Array.isArray(parsed)) {
       return textError("invalid searchAfter (must be JSON array)", 400);
     }
+    searchAfter = parsed;
   }
   try {
     const result = await asAsyncDoc(r.explorer).searchDocs({
@@ -196,14 +204,13 @@ async function handleSearch(
     if (isAbortLikeError(err, req.signal)) {
       return textError("search elasticsearch aborted", 503);
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[code-viewer] elasticsearch error:", msg);
+    console.error("[code-viewer] elasticsearch error:", err);
     const body: EsQueryResponse = {
       dbId: r.dbId,
       status: 0,
       body: null,
       elapsedMs: 0,
-      error: msg,
+      error: formatErrorDetail(err),
     };
     return json(body, 400);
   }

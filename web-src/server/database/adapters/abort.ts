@@ -20,8 +20,12 @@ export function waitForAbortableResource<T>(
   const disposeSafely = (resource: T) => {
     try {
       dispose(resource);
-    } catch {
-      // Abort cleanup is best-effort; the abort error remains authoritative.
+    } catch (error) {
+      // 中断の結果は abort のまま返す。閉じ損ねた資源は理由ごと記録する。
+      console.error(
+        "[code-viewer] disposing a resource that arrived after the abort failed:",
+        error,
+      );
     }
   };
   if (!signal) return promise;

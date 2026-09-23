@@ -4,6 +4,7 @@ import {
   commandNotFoundDetail,
   isCommandNotFoundResult,
 } from "../../command-resolver";
+import { formatErrorDetail } from "../../../core/error-detail";
 import { isAbortLikeError, throwIfAborted } from "./abort";
 import { spawnTextAsync } from "./spawn-runner";
 
@@ -45,10 +46,12 @@ export class DockerComposeServiceUnavailableError extends Error {
   readonly cwd: string;
   readonly status = 503;
 
-  constructor(serviceName: string, cwd: string) {
+  /** cause: `docker compose ps` 自体が失敗していたときの理由 (見つからなかったのではない)。 */
+  constructor(serviceName: string, cwd: string, cause?: string) {
     super(
       `Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`,
     );
+    if (cause) Object.assign(this, { cause });
     this.name = "DockerComposeServiceUnavailableError";
     this.serviceName = serviceName;
     this.cwd = cwd;
@@ -70,10 +73,12 @@ export class SupabaseDbContainerUnavailableError extends Error {
   readonly projectId: string;
   readonly status = 503;
 
-  constructor(projectId: string) {
+  /** cause: `docker ps` 自体が失敗していたときの理由 (見つからなかったのではない)。 */
+  constructor(projectId: string, cause?: string) {
     super(
       `Supabase local DB container for project "${projectId}" is not running. Start it with: supabase start`,
     );
+    if (cause) Object.assign(this, { cause });
     this.name = "SupabaseDbContainerUnavailableError";
     this.projectId = projectId;
   }
@@ -258,10 +263,7 @@ export async function resolveRunningComposeContainerNameAsync(
           if (isAbortLikeError(err, controller.signal)) throw err;
           cacheComposePsFailure(
             cwd,
-            {
-              code: 1,
-              stderr: err instanceof Error ? err.message : String(err),
-            },
+            { code: 1, stderr: formatErrorDetail(err) },
             startedAt,
           );
           return null;
@@ -280,13 +282,13 @@ export async function resolveRunningComposeContainerNameAsync(
               startedAt + COMPOSE_CONTAINER_NAME_NEGATIVE_TTL_MS,
           });
           return byService;
-        } catch {
+        } catch (error) {
           composePsCache.set(cwd, {
             containers: null,
             positiveExpiresAt: startedAt,
             negativeExpiresAt:
               startedAt + COMPOSE_CONTAINER_NAME_NEGATIVE_TTL_MS,
-            error: "could not parse docker compose ps output",
+            error: `could not parse docker compose ps output: ${formatErrorDetail(error)}`,
           });
           return null;
         }
@@ -337,7 +339,11 @@ export async function resolveRunningComposeContainerNameOrThrowAsync(
   );
   if (!containerName) {
     throwIfCachedComposeDockerCommandUnavailable(cwd);
-    throw new DockerComposeServiceUnavailableError(serviceName, cwd);
+    throw new DockerComposeServiceUnavailableError(
+      serviceName,
+      cwd,
+      composePsCache.get(cwd)?.error,
+    );
   }
   return containerName;
 }
@@ -359,6 +365,8 @@ type SupabaseContainerCacheEntry = {
   containerName: string | null;
   positiveExpiresAt: number;
   negativeExpiresAt: number;
+  /** `docker ps` 自体の失敗 (動いていないのではない)。 */
+  failure?: string;
 };
 
 type SupabaseContainerPendingEntry = {
@@ -430,11 +438,12 @@ export async function resolveRunningSupabaseDbContainerAsync(
       done: false,
       promise: (async () => {
         const startedAt = Date.now();
-        const cacheMiss = (negativeTtlMs: number): null => {
+        const cacheMiss = (negativeTtlMs: number, failure?: string): null => {
           supabaseContainerCache.set(projectId, {
             containerName: null,
             positiveExpiresAt: startedAt,
             negativeExpiresAt: startedAt + negativeTtlMs,
+            ...(failure ? { failure } : {}),
           });
           return null;
         };
@@ -457,17 +466,26 @@ export async function resolveRunningSupabaseDbContainerAsync(
           );
         } catch (err) {
           if (isAbortLikeError(err, controller.signal)) throw err;
-          return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+          return cacheMiss(
+            SUPABASE_CONTAINER_NEGATIVE_TTL_MS,
+            formatErrorDetail(err),
+          );
         }
         if (proc.code !== 0) {
           throwIfDockerCommandUnavailableResult(proc);
-          return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+          return cacheMiss(
+            SUPABASE_CONTAINER_NEGATIVE_TTL_MS,
+            `docker ps exited with ${proc.code}: ${proc.stderr.trim()}`,
+          );
         }
         let containers: DockerPsContainer[];
         try {
           containers = parseDockerPsOutput(proc.stdout);
-        } catch {
-          return cacheMiss(SUPABASE_CONTAINER_NEGATIVE_TTL_MS);
+        } catch (error) {
+          return cacheMiss(
+            SUPABASE_CONTAINER_NEGATIVE_TTL_MS,
+            `could not parse docker ps output: ${formatErrorDetail(error)}`,
+          );
         }
         const match = containers.some(
           (c) => (c.Names || "").replace(/^\//, "") === containerName,
@@ -522,7 +540,10 @@ export async function resolveRunningSupabaseDbContainerOrThrowAsync(
     signal,
   );
   if (!containerName) {
-    throw new SupabaseDbContainerUnavailableError(projectId);
+    throw new SupabaseDbContainerUnavailableError(
+      projectId,
+      supabaseContainerCache.get(projectId)?.failure,
+    );
   }
   return containerName;
 }

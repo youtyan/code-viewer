@@ -5,6 +5,12 @@
 // import は静的に解決させない。任意依存なので、入っていない環境でもサーバ自体
 // は起動できる必要がある。バンドル側では external にしてある。
 
+import {
+  errorWithCause,
+  errorWithCauses,
+  formatErrorDetail,
+} from "../../core/error-detail";
+
 export type SqliteOpenOptions = {
   readonly?: boolean;
   create?: boolean;
@@ -26,12 +32,30 @@ export async function loadSqliteClass<T = unknown>(): Promise<
     const mod = (await import("better-sqlite3")) as { default?: unknown };
     cachedDbClass = (mod.default || mod) as unknown as SqliteClassCtor<T>;
     return cachedDbClass as SqliteClassCtor<T>;
-  } catch {
-    // not installed
+  } catch (error) {
+    throw errorWithCause(
+      "No SQLite driver available. Install better-sqlite3 to use SQLite features.",
+      error,
+    );
   }
-  throw new Error(
-    "No SQLite driver available. Install better-sqlite3 to use SQLite features.",
-  );
+}
+
+/**
+ * 失敗した transaction を戻す。SQLite が先に自分で戻した後の「no transaction is
+ * active」だけは戻す物が無いので黙る。ほかの失敗は元の失敗と並べて投げる。
+ */
+export function rollbackAfter(rollback: () => void, failure: unknown): void {
+  try {
+    rollback();
+  } catch (rollbackError) {
+    if (/no transaction is active/i.test(formatErrorDetail(rollbackError))) {
+      return;
+    }
+    throw errorWithCauses(
+      "the transaction failed, and rolling it back also failed",
+      [failure, rollbackError],
+    );
+  }
 }
 
 export type SqliteDriverStatus =
@@ -139,8 +163,6 @@ export async function describeSqliteDriver(): Promise<SqliteDriverStatus> {
     new Database(":memory:").close();
     return { kind: "ok", driver: "better-sqlite3" };
   } catch (err) {
-    return _classifySqliteLoadError(
-      err instanceof Error ? err.message : String(err),
-    );
+    return _classifySqliteLoadError(formatErrorDetail(err));
   }
 }

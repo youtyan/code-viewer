@@ -314,12 +314,18 @@ describe("handleError abort handling", () => {
 
   test("plain Error with no abort markers logs to console.error and returns 500", async () => {
     reset();
-    const res = handleError("database", "read schema", new Error("boom"));
+    const failure = new Error("boom");
+    const res = handleError("database", "read schema", failure);
     expect(res.status).toBe(500);
-    expect(await res.text()).toBe("failed to read schema: boom");
+    expect(await res.text()).toBe("failed to read schema: Error: boom");
     const errs = captured.filter((c) => c.kind === "error");
     expect(errs).toHaveLength(1);
-    expect(errs[0]?.line ?? "").toBe("[code-viewer] database error: boom");
+    // 元の error をそのまま (スタックごと) 出す。
+    expect(errs[0]?.args).toStrictEqual([
+      "[code-viewer] database error:",
+      failure,
+    ]);
+    expect(errs[0]?.args[1]).toBe(failure);
   });
 
   test("Postgres-style 'transaction is aborted' message must NOT be classified as cancellation", async () => {

@@ -273,7 +273,7 @@ export async function parseBoundedJsonBody(
 }
 
 /** 上限つきの読み取り本体。失敗は「読めなかった」と「JSON でない」を分ける。 */
-async function readBoundedJsonBody(
+export async function readBoundedJsonBody(
   req: Request,
   maxBytes: number,
   tooLargeMessage: string,
@@ -346,20 +346,6 @@ function waitForCallerAbort<T>(
       },
     );
   });
-}
-
-function isFilesystemAccessError(err: unknown): boolean {
-  const code = (err as NodeJS.ErrnoException | undefined)?.code;
-  return (
-    code === "EACCES" ||
-    code === "EBUSY" ||
-    code === "EIO" ||
-    code === "EISDIR" ||
-    code === "ENOSPC" ||
-    code === "ENOTDIR" ||
-    code === "EPERM" ||
-    code === "EROFS"
-  );
 }
 
 export async function resolveDockerExplorerAsync<
@@ -524,19 +510,22 @@ export function handleError(
   if (isAbortLikeError(err, signal)) {
     return textError(`${action} aborted`, 503);
   }
-  const message = err instanceof Error ? err.message : String(err);
-  console.error(`[code-viewer] ${prefix} error:`, message);
+  console.error(`[code-viewer] ${prefix} error:`, err);
   if (isDockerComposeServiceUnavailableError(err)) {
-    return textError(message, err.status);
+    return textError(guidanceWithCause(err), err.status);
   }
   // D1 は SQL 系の共通ルートを通るので、S3/DynamoDB のような専用ハンドラが
   // 無い。Cloudflare が返した実ステータス (401 認証失敗など) を 500 に
   // 潰さず、そのままクライアントへ伝える。
   if (isD1HttpError(err)) {
-    return textError(message, err.status);
+    return textError(guidanceWithCause(err), err.status);
   }
-  if (isFilesystemAccessError(err)) {
-    return textError(`failed to ${action}`, 500);
-  }
-  return textError(`failed to ${action}: ${message}`, 500);
+  return textError(`failed to ${action}: ${formatErrorDetail(err)}`, 500);
+}
+
+// 案内の文を持つ error は 1 行目をそのまま出し、元の失敗 (cause) があれば続ける。
+function guidanceWithCause(err: Error & { cause?: unknown }): string {
+  return err.cause === undefined
+    ? err.message
+    : `${err.message}\nCaused by: ${formatErrorDetail(err.cause)}`;
 }

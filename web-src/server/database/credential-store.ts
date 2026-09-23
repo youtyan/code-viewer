@@ -88,10 +88,13 @@ async function runSecurityAsync(opts: {
   };
 }
 
-function warnKeychain(action: string, detail: string): void {
-  console.warn(
-    `[code-viewer] keychain ${action} failed: ${detail.replace(/\s+/g, " ").trim().slice(0, 200)}`,
-  );
+// security の失敗は exit code と stderr の全文、例外は元の error ごと出す。
+function warnKeychain(action: string, failure: unknown): void {
+  console.warn(`[code-viewer] keychain ${action} failed:`, failure);
+}
+
+function commandFailure(result: { code: number; stderr: string }): string {
+  return `security exited with ${result.code}: ${result.stderr.trim()}`;
 }
 
 // 資格情報一式を JSON にして base64 で預ける。base64 なら引用符も改行も
@@ -121,12 +124,12 @@ export async function saveConnectionSecretsAsync(
       input: `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a ${account} -l ${label} -w "${payload}"\n`,
     });
     if (result.code !== 0) {
-      warnKeychain("save", result.stderr || `exit ${result.code}`);
+      warnKeychain("save", commandFailure(result));
       return false;
     }
     return true;
   } catch (err) {
-    warnKeychain("save", err instanceof Error ? err.message : String(err));
+    warnKeychain("save", err);
     return false;
   }
 }
@@ -153,7 +156,7 @@ export async function loadConnectionSecretsAsync(
     });
     if (result.code === ERR_SEC_ITEM_NOT_FOUND) return null;
     if (result.code !== 0) {
-      warnKeychain("read", result.stderr || `exit ${result.code}`);
+      warnKeychain("read", commandFailure(result));
       return null;
     }
     const decoded = Buffer.from(result.stdout.trim(), "base64").toString(
@@ -161,6 +164,7 @@ export async function loadConnectionSecretsAsync(
     );
     const parsed = JSON.parse(decoded) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      warnKeychain("read", "the stored item is not a JSON object");
       return null;
     }
     const secrets: ConnectionSecrets = {};
@@ -169,7 +173,7 @@ export async function loadConnectionSecretsAsync(
     }
     return Object.keys(secrets).length > 0 ? secrets : null;
   } catch (err) {
-    warnKeychain("read", err instanceof Error ? err.message : String(err));
+    warnKeychain("read", err);
     return null;
   }
 }
@@ -187,12 +191,12 @@ export async function deleteConnectionSecretsAsync(
     });
     // 元から無い場合も「消えている」ので成功として扱う。
     if (result.code !== 0 && result.code !== ERR_SEC_ITEM_NOT_FOUND) {
-      warnKeychain("delete", result.stderr || `exit ${result.code}`);
+      warnKeychain("delete", commandFailure(result));
       return false;
     }
     return true;
   } catch (err) {
-    warnKeychain("delete", err instanceof Error ? err.message : String(err));
+    warnKeychain("delete", err);
     return false;
   }
 }

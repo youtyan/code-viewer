@@ -164,7 +164,7 @@ describe("database file response fault isolation", () => {
           kind: "sqlite",
         },
       ],
-      dockerError: "compose scan failed",
+      dockerError: "Error: compose scan failed",
     });
   });
 
@@ -178,7 +178,7 @@ describe("database file response fault isolation", () => {
       discoverSupabaseCliProjects: async () => [],
     });
 
-    expect(body.dockerError).toBe("compose scan failed retry");
+    expect(body.dockerError).toBe("Error: compose scan failed retry");
   });
 
   test("keeps a Docker service visible when database listing fails", async () => {
@@ -201,7 +201,7 @@ describe("database file response fault isolation", () => {
           kind: "postgresql",
         },
       ],
-      dockerError: "pg: database list failed",
+      dockerError: "pg: Error: database list failed",
     });
   });
 });

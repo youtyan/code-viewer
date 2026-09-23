@@ -233,9 +233,11 @@ function decodeXml(value: string): string {
 }
 
 function sanitizeS3Error(status: number, text: string): S3HttpError {
+  // Code (NoSuchBucket など) と Message の両方を残す。
   const message =
-    xmlText(text, "Message") ||
-    xmlText(text, "Code") ||
+    [xmlText(text, "Code"), xmlText(text, "Message")]
+      .filter(Boolean)
+      .join(": ") ||
     text.replace(/\s+/g, " ").trim().slice(0, 240) ||
     "S3 request failed";
   return new S3HttpError(status, `S3 HTTP ${status}: ${message}`);
@@ -448,8 +450,15 @@ async function readResponseBytesWithTimeout(
   } finally {
     try {
       reader.releaseLock();
-    } catch {
-      /* the reader may already be cancelled by timeout/abort */
+    } catch (error) {
+      // 取り消し済み・読みかけの reader は TypeError で断る (想定内)。finally の
+      // 中なので投げずに、それ以外は記録する (読み取りの結果・失敗を上書きしない)。
+      if (!(error instanceof TypeError)) {
+        console.error(
+          "[code-viewer] releasing the S3 response reader failed:",
+          error,
+        );
+      }
     }
   }
   if (chunks.length === 1) return chunks[0];
@@ -527,7 +536,7 @@ async function dockerCurlFetch(opts: {
       });
       throw new S3HttpError(
         503,
-        `S3 HTTP transport failed via docker exec${stderr ? `: ${stderr.slice(0, 240)}` : ""}`,
+        `S3 HTTP transport failed via docker exec (exit ${proc.status ?? "none"})${stderr ? `: ${stderr}` : ""}`,
       );
     }
     return responseFromCurlOutput(
@@ -558,7 +567,7 @@ async function dockerCurlFetch(opts: {
     });
     throw new S3HttpError(
       503,
-      `S3 HTTP transport failed via docker exec${stderr ? `: ${stderr.slice(0, 240)}` : ""}`,
+      `S3 HTTP transport failed via docker exec (exit ${proc.code})${stderr ? `: ${stderr}` : ""}`,
     );
   }
   return responseFromCurlOutput(new Uint8Array(proc.stdout));
