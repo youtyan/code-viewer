@@ -95,6 +95,8 @@ export const KEYMAP_ACTIONS = [
   "main-tab-last",
   "main-tab-reopen",
   "main-pane-other",
+  "project-previous",
+  "project-next",
 ] as const;
 
 export type KeymapAction = (typeof KEYMAP_ACTIONS)[number];
@@ -354,6 +356,12 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "main-tab-9", key: "9", pendingG: true },
   // 2 面のとき、もう一方の面へフォーカスを移す (other)。
   { action: "main-pane-other", key: "o", pendingG: true },
+  // 左の一覧の並びで前・次のプロジェクトへ (⌘⇧↑↓。Windows / Linux は Ctrl+Shift)。
+  // 移った先の前面は、そのプロジェクトのタブのグループで最後に前面だったタブ。
+  { action: "project-previous", key: "arrowup", meta: true, shift: true },
+  { action: "project-previous", key: "arrowup", ctrl: true, shift: true },
+  { action: "project-next", key: "arrowdown", meta: true, shift: true },
+  { action: "project-next", key: "arrowdown", ctrl: true, shift: true },
 ];
 
 /**

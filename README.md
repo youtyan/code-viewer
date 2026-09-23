@@ -35,9 +35,19 @@ Requires Node.js 20 or newer. Development uses
   files fold to a strip, then the file list folds away. Every column folds by
   hand (the file list with its button, the lists with the handle on their right
   edge), and a column you open yourself stays open until a reload. History's branch labels keep
-  their whole name up to about 40% of the room they share with the subject. A terminal
-  tab showing an agent from another project reads `project · title`, and a narrow tab
-  shortens the project name first. A single click opens a file in a preview tab (italic)
+  their whole name up to about 40% of the room they share with the subject. The tabs are
+  shared by all projects and grouped by project: each group starts with a label in
+  the project's color (its initials and ▾ for Switch to this project / Collapse /
+  Close this group; the name is in the tooltip) and its tabs are underlined in that color, in the order of the
+  sidebar; tabs of no project (agent board, Tools, Settings & Help) sit at the right
+  end, and a terminal belongs to the project of its folder. Click a label to
+  collapse a group. Files, terminals and images of another project open in place;
+  its Diff / History / Worktrees / Search / Data / Work log switch to that project
+  first. Clicking a project heading in the sidebar (or ⌘⇧↑ / ⌘⇧↓, Ctrl+Shift+↑ / ↓
+  elsewhere) switches to it and brings back the tab of its group you last had in
+  front. Two windows share the tabs without overwriting each other. A terminal
+  tab outside a group showing an agent from another project reads `project · title`,
+  and a narrow tab shortens the project name first. A single click opens a file in a preview tab (italic)
   that the next file replaces; double-click or **Keep open** keeps it. Middle-click,
   ⌘/Ctrl+click (tree, Diff / History file lists, Search results, palette rows),
   Shift+Enter in the palette, or **Open in new tab** on a tree file opens it in a kept
@@ -53,10 +63,10 @@ Requires Node.js 20 or newer. Development uses
   Home and End move, Enter brings a tab to the front, Delete closes it and
   Ctrl+Shift+PageUp / PageDown (or Ctrl+Shift+←/→, ⌘+Shift+←/→, **Move left** /
   **Move right**) reorders it. With two sides, the focused side's tab row is
-  underlined across its width. Tabs that do not fit shrink down to 88px each (the name
-  is shortened), then the row scrolls sideways and keeps the front tab in view.
-  The tabs are remembered per project; the agent board,
-  Tools, Settings & Help, terminals and terminal images stay open across projects. Files and screens
+  underlined across its width. A tab is as wide as its name (up to 200px); tabs that do
+  not fit all shrink by the same ratio but keep about eight letters of their name, then
+  the row scrolls sideways and keeps the front tab in view. Collapsing a group never
+  moves the tabs before it. The tabs are saved once for all projects. Files and screens
   stay on the left side; split the area to put a terminal or an image on the
   right (the split button — its tooltip says why when it cannot split —,
   **Split right**, Alt+click, **Open to the right**, or drag one onto the

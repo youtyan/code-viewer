@@ -38,6 +38,20 @@ type MainTabsText = {
   /** 画像のタブのメニュー: そのファイルの履歴。 */
   fileHistory: string;
   previewHint: string;
+  /** グループ (プロジェクト) の札。押すと畳む・開く。 */
+  groupToggle: (name: string, collapsed: boolean, count: number) => string;
+  /** グループの札の ▾ (メニュー)。 */
+  groupMenu: (name: string) => string;
+  /** グループのタブ列の名前 (読み上げ)。 */
+  groupTabs: (name: string) => string;
+  closeGroup: string;
+  switchToProject: string;
+  /** 今見ているプロジェクトのグループの「切り替える」が押せない理由。 */
+  currentProject: string;
+  collapseGroup: string;
+  expandGroup: string;
+  /** 別のプロジェクトの画面のタブを前面に出したとき、移るまで面に出す文言。 */
+  switchingProject: (name: string) => string;
 };
 
 const EN: MainTabsText = {
@@ -74,6 +88,18 @@ const EN: MainTabsText = {
   fileHistory: "File history",
   previewHint:
     "Preview tab: the next file you open replaces it. Double-click to keep it open.",
+  groupToggle: (name, collapsed, count) =>
+    collapsed
+      ? `${name}: ${count} tab${count === 1 ? "" : "s"} (collapsed). Click to expand`
+      : `${name}: click to collapse the tabs of this project`,
+  groupMenu: (name) => `${name}: group menu`,
+  groupTabs: (name) => `Open tabs of ${name}`,
+  closeGroup: "Close this group",
+  switchToProject: "Switch to this project",
+  currentProject: "This project is already open",
+  collapseGroup: "Collapse",
+  expandGroup: "Expand",
+  switchingProject: (name) => `Opening ${name}…`,
 };
 
 const JA: MainTabsText = {
@@ -114,6 +140,18 @@ const JA: MainTabsText = {
   fileHistory: "ファイルの履歴",
   previewHint:
     "仮のタブ: 次に開いたファイルで置き換わります。ダブルクリックで開いたままにします。",
+  groupToggle: (name, collapsed, count) =>
+    collapsed
+      ? `${name}: タブ ${count} 枚 (畳んでいます)。押すと開きます`
+      : `${name}: 押すとこのプロジェクトのタブを畳みます`,
+  groupMenu: (name) => `${name}: グループのメニュー`,
+  groupTabs: (name) => `${name} の開いているタブ`,
+  closeGroup: "このグループを閉じる",
+  switchToProject: "このプロジェクトに切り替える",
+  currentProject: "いま見ているプロジェクトです",
+  collapseGroup: "畳む",
+  expandGroup: "開く",
+  switchingProject: (name) => `${name} を開いています…`,
 };
 
 export function mainTabsText(lang: MainTabsLang): MainTabsText {

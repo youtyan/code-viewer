@@ -156,6 +156,12 @@ export type SourceViewDeps = {
   isPaletteOpen(): boolean;
   getLanguage(): DelimitedPreviewLanguage;
   onSourceRendered?(): void;
+  /**
+   * この実体が読む URL (ファイルの中身・範囲・生のリンク) を送る先へ直す。別の
+   * プロジェクトのファイルを出す実体は、そのプロジェクトの `/p/<鍵>` へ向ける
+   * (app.ts の別のプロジェクトの面)。無ければこのページのプロジェクト。
+   */
+  requestUrl?(url: string): string;
 };
 
 export function createSourceView(deps: SourceViewDeps) {
@@ -900,7 +906,7 @@ export function createSourceView(deps: SourceViewDeps) {
     const info = createSourceFileInfo(target, "unsupported file");
     const link = document.createElement("a");
     link.className = "gdp-btn gdp-btn-sm gdp-source-download";
-    link.href = buildRawFileUrl(target);
+    link.href = rawFileUrl(target);
     const text = SOURCE_READING_TEXT[getLanguage()];
     link.textContent = text.downloadRaw;
     link.target = "_blank";
@@ -1387,7 +1393,7 @@ export function createSourceView(deps: SourceViewDeps) {
         ? Math.max(0, Math.min(meta.size, UNKNOWN_TEXT_SNIFF_BYTES) - 1)
         : UNKNOWN_TEXT_SNIFF_BYTES - 1;
     const response = await trackLoad(
-      fetch(buildRawFileUrl(target), {
+      fetch(rawFileUrl(target), {
         headers: { Range: `bytes=0-${end}` },
         signal,
       }),
@@ -1415,12 +1421,18 @@ export function createSourceView(deps: SourceViewDeps) {
     return buildRoute(route);
   }
 
+  /** ファイルの中身の URL (この実体が読むプロジェクトの)。 */
+  function rawFileUrl(target: SourceFileTarget): string {
+    const url = buildRawFileUrl(target);
+    return deps.requestUrl ? deps.requestUrl(url) : url;
+  }
+
   function buildFileRangeUrl(
     target: SourceFileTarget,
     start: number,
     end: number,
   ): string {
-    return (
+    const url =
       apiUrl("fileRange") +
       "?path=" +
       encodeURIComponent(target.path) +
@@ -1429,8 +1441,8 @@ export function createSourceView(deps: SourceViewDeps) {
       "&start=" +
       encodeURIComponent(String(start)) +
       "&end=" +
-      encodeURIComponent(String(end))
-    );
+      encodeURIComponent(String(end));
+    return deps.requestUrl ? deps.requestUrl(url) : url;
   }
 
   function currentSourceLineTarget(
@@ -2064,7 +2076,7 @@ export function createSourceView(deps: SourceViewDeps) {
     actions.className = "gdp-source-virtual-actions";
     const raw = document.createElement("a");
     raw.className = "gdp-source-virtual-action";
-    raw.href = buildRawFileUrl(target);
+    raw.href = rawFileUrl(target);
     raw.target = "_blank";
     raw.rel = "noreferrer";
     raw.textContent = text.openRaw;
@@ -2473,7 +2485,7 @@ export function createSourceView(deps: SourceViewDeps) {
       meta.textContent = `${target.path} @ ${target.ref}`;
       view.appendChild(meta);
     }
-    const url = buildRawFileUrl(target);
+    const url = rawFileUrl(target);
     const info = createSourceFileInfo(target, mediaKind);
     view.appendChild(info);
     appendMediaEmbed(view, {
@@ -2502,7 +2514,7 @@ export function createSourceView(deps: SourceViewDeps) {
     const view = document.createElement("div");
     view.className = "gdp-source-viewer binary";
     const link = document.createElement("a");
-    link.href = buildRawFileUrl(target);
+    link.href = rawFileUrl(target);
     link.textContent = SOURCE_READING_TEXT[getLanguage()].openRawFile;
     link.target = "_blank";
     link.rel = "noreferrer";
@@ -2776,7 +2788,7 @@ export function createSourceView(deps: SourceViewDeps) {
             return;
           }
           const response = await trackLoad(
-            fetch(buildRawFileUrl(target), { signal: controller.signal }),
+            fetch(rawFileUrl(target), { signal: controller.signal }),
           );
           if (
             req !== SOURCE_REQ_SEQ ||

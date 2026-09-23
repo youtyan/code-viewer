@@ -10,7 +10,7 @@
 | 置き場所 | 使うもの |
 |---|---|
 | 最下段の右の操作の塊 (`.statusbar-actions`。上の行が無くなって移った注釈・AI 向けのコピー・自動更新・通信の中止・テーマ・Web ページ) と、一覧の列の頭の 1 段目 (`#project-head`) のアイコンボタン (`#nav-expand`) | `global-icon-action` クラス (外部リンクは `global-icon-link`)。上の行 (`#global-header`) は無い (`web/index.html` のコメント) |
-| メインの面のタブ列 (`#main-tabs`、上の行の直下) | `views/main-tabs/main-tabs-view.ts`。タブは `main-tab` (絵 `main-tab-icon`・名前 `main-tab-name`・閉じる `main-tab-close` は選択中と hover だけ見せ、場所は常に取る)。＋ (`main-tabs-action main-tabs-new`) は最後のタブのすぐ右、分割 (`main-tabs-action main-tabs-split`) は列の外の右端 (下の「タブの決まり」)。種類ごとの絵は `views/main-tabs/tab-icons.ts`、page の名前は上の行の入口と同じ文言 (`uiText().nav`)。右クリックの項目の有効・無効は `core/main-tabs.ts` の `tabMenu` だけが決める。選択中の面は `--color-tab-active` |
+| メインの面のタブ列 (`#main-tabs`、上の行の直下) | `views/main-tabs/main-tabs-view.ts`。タブは `main-tab` (絵 `main-tab-icon`・名前 `main-tab-name`・閉じる `main-tab-close` は選択中と hover だけ見せ、場所は常に取る)。プロジェクトごとのグループは札 `main-tab-group` (`main-tab-group-toggle` = 色の四角・名前・畳んだときの枚数、`main-tab-group-menu` = ▾) と並び `main-tabs-group-list` (下の「タブのグループ」)。＋ (`main-tabs-action main-tabs-new`) は最後のタブのすぐ右、分割 (`main-tabs-action main-tabs-split`) は列の外の右端 (下の「タブの決まり」)。種類ごとの絵は `views/main-tabs/tab-icons.ts`、page の名前は上の行の入口と同じ文言 (`uiText().nav`)。右クリックの項目の有効・無効は `core/main-tabs.ts` の `tabMenu` だけが決める。選択中の面は `--color-tab-active` |
 | 同じ場所のテキストボタン | 同上 + `width: auto; padding: 0 var(--space-2);` 程度の上書きに留める |
 | 左のサイドバー (`#app-nav`) の下端の項目 | `nav-foot-item` (アイコン + 文字)。見出しの横の小さな操作は `nav-icon-action` |
 | 左のサイドバーの行の操作 (hover で出る) | `nav-row-action`。場所を確保せず行の上に重ねる (`.nav-project-actions`) |
@@ -93,8 +93,13 @@
   列に入りきらず横に送るときも一緒に送られる。前面が最後のタブなら ＋ まで見せ、＋ を押した直後
   (⌘/Ctrl+T も) は ＋ が見える位置まで送る。タブが 0 枚なら列の左端。分割のボタン・預けの札は列の外の
   右端のまま。作りは `.main-tabs-strip` (横に送る箱・幅の入れ物) の中に、タブだけを持つ
-  `.main-tabs-list` (role=tablist、配置では `display: contents`) と `.main-tabs-new`。タブの最小幅は
-  列の幅から ＋ の箱と隙間を除いてタブの数で割る (`--main-tabs-new-w`)
+  `.main-tabs-list` (role=tablist、配置では `display: contents`) と `.main-tabs-new`
+- **タブの幅は中身** (絵・名前の全文・閉じる)。上限は 200 (ターミナルは 240)。列に入りきらないときだけ
+  全部のタブを同じ割合で縮め (`core/tab-widths.ts` の `fitTabWidths`。画面は `main-tabs-view.ts` の
+  `fitTabs` が各タブの `--main-tab-w` に書く)、名前が 8 文字ほど (日本語 5〜6 文字) 読める下限
+  (`TAB_FLOOR_UNITS`) で止め、その先は列を横に送る。列の幅をタブの数で割った幅にそろえない (1280 で
+  名前が 1〜2 文字しか読めなかった)。畳んだグループのタブも中身の幅と隙間で数に入れ、札の枚数は除く
+  (畳む・開くで割合が変わると、畳んだグループより左のタブが動く)
 - **タブ列のキー**: Tab で列に入る (前面のタブだけ `tabindex=0`)・←→ Home End でタブを移る・
   Enter / Space で前面に・Delete で閉じる・Ctrl+Shift+PageUp / PageDown で並べ替え (OS やブラウザが
   先に取る環境のために Ctrl+Shift+← → と ⌘+Shift+← → も同じ。右クリックの「左へ移す」「右へ移す」でも)・
@@ -106,6 +111,44 @@
 - 右クリックの項目名は英日で同じ語を使う: 新しいタブで開く / Open in new tab、右に分割して開く /
   Open to the right、開いたままにする / Keep open、右に分割 / Split right、左へ移す / Move left、
   右へ移す / Move right
+
+### タブのグループ (全プロジェクト共通のタブ)
+
+タブは全プロジェクト共通の 1 つの配置で、どのプロジェクトを見ていても同じタブが並ぶ (2026-09-23 に
+利用者と決めた。設計: タブとプロジェクト)。タブは持ち物のプロジェクトを持つ (`core/main-tabs.ts` の
+target の `project`、判定は `isProjectKind`): ファイル・リポジトリの画像・Diff / History / 作業ツリー /
+Search / Data / Work log はそのプロジェクト、シェルはそのシェルが動いているフォルダのプロジェクト
+(`app.ts` の `terminalProjectOf`)、全体ボード・Tools・設定と案内・ターミナルに出た画像と、どの
+プロジェクトにも入らないシェルは「どのプロジェクトのものでもない」。
+
+- **グループ**: タブ列は面ごとに、プロジェクトのグループに分けて並ぶ (`regroup`・`tabGroups`)。
+  グループの並びは左の一覧のプロジェクトの並び (`PROJECT_LOOKS.order()`)、中のタブの順は利用者が
+  並べたとおり。どのプロジェクトのものでもないタブは右端に色なしで。**タブを別のグループへは移せない**
+  (ドラッグは落とす先にせず印も出さない・左へ / 右へ はグループの端で止まる。持ち物が違う)
+- **札**: グループの頭に、色の四角と頭文字 (`projectMark`) と ▾ だけ。名前は title・aria-label と
+  ▾ のメニューの頭 (一覧の列の頭の 1 段目に同じ名前が出ているので、札に並べると 2 回出て、タブの幅を
+  食った)。札を押すと畳む / 開く (畳むと頭文字の横に枚数。札の右が伸びる。前面のタブは畳んでも見せる)。
+  ▾ (と札の右クリック) のメニューは「このプロジェクトに切り替える」「畳む / 開く」「このグループを
+  閉じる」。グループのタブと札の下端に、その色の 2px の線
+- **並び**: グループがあるときの列は [グループ…][＋][どのプロジェクトのものでもないタブ (右端に寄せる)]。
+  グループが無ければ今までどおり [タブ][＋]
+- **＋**・木・パレットで開くファイルは、いま見ているプロジェクトのグループに入る (前面が同じグループ
+  ならその右、別のグループならそのグループの末尾)。**仮のタブは面ごと・プロジェクトごとに 1 つ**
+  (別のプロジェクトで見ていた仮のタブを置き換えない)
+- **いま見ているプロジェクト** (ファイル一覧・Diff・History が見せるもの) はページの `/p/<鍵>`。
+  左の一覧のプロジェクトの見出し・⌘⇧↑↓ (Windows / Linux は Ctrl+Shift。`core/keymap.ts` の
+  `project-previous` / `project-next`)・▾ の「切り替える」・切替の小窓 (p)・パレットのプロジェクトで
+  移る (読み直し。どれも `app.ts` の `switchToProjectGroup`)。前面はそのグループで最後に
+  前面だったタブ (`groupFront`。配置の `groupFronts`)、無ければそのプロジェクトのフォルダ表示
+- **別のプロジェクトのタブを前面に出す**: ファイル・シェル・画像はその場で面の箱に出す (ファイルは
+  そのプロジェクトの `/p/<鍵>` から読む。`app.ts` の `showForeignFile`。ファイル一覧はいまの
+  プロジェクトのまま。入口のサーバの下だけで、1 つで完結するサーバでは移って出す)。Diff・History・
+  作業ツリー・Search などの画面は、そのプロジェクトへ移って (読み直して) 出す。移るのは利用者がその
+  タブを前面に出したときだけで、閉じた後の次の前面が別のプロジェクトの画面になるときは移らずに
+  このプロジェクトのタブ (無ければフォルダ表示) にする
+- **窓が 2 つ**: 保存は前に読んだ版 (`rev` と値) を添えて書き、別の窓が先に書いていればサーバが
+  重ねる (`core/main-tabs-merge.ts`: 開いた・閉じた・並べ替えた・前面は窓ごと)。もう一方の窓は SSE の
+  `tabs` で取り直して重ねる (`refreshFromServer`)
 
 入口ごとの例外 (表に無い入口は上の表のとおり):
 

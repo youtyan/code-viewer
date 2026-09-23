@@ -1,14 +1,22 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { LAYOUT_VERSION } from "../core/main-tabs";
 import {
   backupMainTabs,
   loadMainTabs,
-  loadProjectMainTabs,
+  MAIN_TABS_FILE_VERSION,
   MAX_MAIN_TABS_LAYOUT_BYTES,
-  MAX_MAIN_TABS_PROJECTS,
-  saveProjectMainTabs,
+  MainTabsStoreError,
+  saveMainTabs,
 } from "../server/main-tabs-store";
 
 let dir = "";
@@ -23,128 +31,404 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const layout = { version: 1, focused: "left", panes: [] };
+/** 左の面にファイルのタブ (id = パス、プロジェクト /work/sample-app) を並べた配置。 */
+function layoutOf(...names: string[]) {
+  return {
+    version: LAYOUT_VERSION,
+    focused: "left",
+    panes: [
+      {
+        side: "left",
+        activeId: names[0] ?? null,
+        tabs: names.map((name) => ({
+          id: name,
+          preview: false,
+          target: { kind: "file", path: name, project: "/work/sample-app" },
+        })),
+      },
+    ],
+  };
+}
+
+const idsOf = (layout: unknown) =>
+  (layout as ReturnType<typeof layoutOf>).panes.flatMap((pane) =>
+    pane.tabs.map((tab) => tab.id),
+  );
 
 describe("main tabs store", () => {
-  test("保存が無ければ null", () => {
-    expect(loadProjectMainTabs(path, "/work/sample-app")).toBe(null);
+  test("保存が無ければ none", async () => {
+    expect(await loadMainTabs(path)).toEqual({ kind: "none" });
   });
 
-  test("プロジェクトごとに分けて覚える", async () => {
-    await saveProjectMainTabs(path, "/work/sample-app", layout, 1);
-    await saveProjectMainTabs(path, "/work/sample-lib", { other: true }, 2);
+  test("書くたびに版の番号が 1 つ進み、書いた値を読み戻す", async () => {
+    const first = await saveMainTabs(path, {
+      baseRev: null,
+      base: null,
+      layout: layoutOf("a"),
+    });
+    const second = await saveMainTabs(path, {
+      baseRev: 1,
+      base: layoutOf("a"),
+      layout: layoutOf("a", "b"),
+    });
+    expect([first, second, await loadMainTabs(path)]).toEqual([
+      { kind: "ok", rev: 1, layout: layoutOf("a"), merged: false },
+      { kind: "ok", rev: 2, layout: layoutOf("a", "b"), merged: false },
+      { kind: "ok", rev: 2, layout: layoutOf("a", "b") },
+    ]);
+  });
+
+  // 窓 2 つ: どちらも rev 1 を読んだあと、A が a を開いて書き、B が b を開いて
+  // (A の書き込みを知らずに) 書く。前は B の全体の上書きで A の a が消えていた。
+  test("窓 2 つ: 後から書いた窓が、もう一方の窓で開いたタブを消さない", async () => {
+    await saveMainTabs(path, {
+      baseRev: null,
+      base: null,
+      layout: layoutOf("base"),
+    });
+    const read = await loadMainTabs(path);
+    if (read.kind !== "ok") throw new Error("not saved");
+    const fromA = await saveMainTabs(path, {
+      baseRev: read.rev,
+      base: read.layout,
+      layout: layoutOf("base", "a"),
+    });
+    const fromB = await saveMainTabs(path, {
+      baseRev: read.rev,
+      base: read.layout,
+      layout: layoutOf("base", "b"),
+    });
+    const after = await loadMainTabs(path);
     expect([
-      loadProjectMainTabs(path, "/work/sample-app"),
-      loadProjectMainTabs(path, "/work/sample-lib"),
-      loadProjectMainTabs(path, "/work/sample-docs"),
-      loadProjectMainTabs(path, "constructor"),
-    ]).toEqual([layout, { other: true }, null, null]);
+      fromA.kind === "ok" && fromA.merged,
+      fromB.kind === "ok" && fromB.merged,
+      after.kind === "ok" ? [after.rev, idsOf(after.layout)] : after,
+      // b は B の窓で左隣だった base のすぐ右に入る (a はその右へ押される)。
+    ]).toEqual([false, true, [3, ["base", "b", "a"]]]);
   });
 
-  // 共通のタブ (プロジェクトに属さない) は同じファイルの common に 1 つ。
-  test.each([
-    {
-      name: "保存したプロジェクトとは別のプロジェクトでも同じ common を読む",
-      saves: [{ root: "/work/sample-app", common: { targets: ["a"] } }],
-      root: "/work/sample-lib",
-      expected: { layout: null, common: { targets: ["a"] } },
-    },
-    {
-      name: "common を渡さない保存 (前の版の画面) は前の common を残す",
-      saves: [
-        { root: "/work/sample-app", common: { targets: ["a"] } },
-        { root: "/work/sample-lib" },
-      ],
-      root: "/work/sample-lib",
-      expected: { layout, common: { targets: ["a"] } },
-    },
-    {
-      name: "後から保存した common が勝つ",
-      saves: [
-        { root: "/work/sample-app", common: { targets: ["a"] } },
-        { root: "/work/sample-lib", common: { targets: ["b"] } },
-      ],
-      root: "/work/sample-app",
-      expected: { layout, common: { targets: ["b"] } },
-    },
-    {
-      name: "common が一度も無ければ null (この版を初めて使う)",
-      saves: [{ root: "/work/sample-app" }],
-      root: "/work/sample-app",
-      expected: { layout, common: null },
-    },
-  ])("$name", async ({ saves, root, expected }) => {
-    let now = 1;
-    for (const save of saves)
-      await saveProjectMainTabs(
-        path,
-        save.root,
-        layout,
-        now++,
-        "common" in save ? save.common : undefined,
-      );
-    expect(loadMainTabs(path, root)).toEqual(expected);
+  test("窓 2 つ: 一方が閉じたタブは、もう一方の古い保存で戻らない", async () => {
+    await saveMainTabs(path, {
+      baseRev: null,
+      base: null,
+      layout: layoutOf("a", "b"),
+    });
+    await saveMainTabs(path, {
+      baseRev: 1,
+      base: layoutOf("a", "b"),
+      layout: layoutOf("a"),
+    });
+    // 窓 B は rev 1 のまま、c を開いた。
+    await saveMainTabs(path, {
+      baseRev: 1,
+      base: layoutOf("a", "b"),
+      layout: layoutOf("a", "b", "c"),
+    });
+    const after = await loadMainTabs(path);
+    expect(after.kind === "ok" ? idsOf(after.layout) : after).toEqual([
+      "a",
+      "c",
+    ]);
   });
 
-  test("common の形が違うファイルは読まず、上書きもしない", async () => {
+  test("新しい版のファイルは使わず、上書きもしない", async () => {
     const text = JSON.stringify({
-      version: 1,
-      projects: {},
-      common: { savedAt: 1 },
+      version: MAIN_TABS_FILE_VERSION + 1,
+      anything: true,
     });
     writeFileSync(path, text);
-    expect(() => loadMainTabs(path, "/work/sample-app")).toThrow(
-      "- common has no tabs",
-    );
-    await expect(
-      saveProjectMainTabs(path, "/work/sample-app", layout, 2, { targets: [] }),
-    ).rejects.toThrow("common has no tabs");
-    expect(readFileSync(path, "utf8")).toBe(text);
-  });
-
-  test("数を超えたら古く保存したものから忘れる", async () => {
-    for (let n = 0; n <= MAX_MAIN_TABS_PROJECTS; n += 1)
-      await saveProjectMainTabs(path, `/work/p${n}`, layout, n);
     expect([
-      loadProjectMainTabs(path, "/work/p0"),
-      loadProjectMainTabs(path, "/work/p1"),
-      loadProjectMainTabs(path, `/work/p${MAX_MAIN_TABS_PROJECTS}`),
-    ]).toEqual([null, layout, layout]);
+      await loadMainTabs(path),
+      await saveMainTabs(path, {
+        baseRev: null,
+        base: null,
+        layout: layoutOf("a"),
+      }),
+      readFileSync(path, "utf8"),
+    ]).toEqual([
+      { kind: "newer", version: MAIN_TABS_FILE_VERSION + 1 },
+      { kind: "newer", version: MAIN_TABS_FILE_VERSION + 1 },
+      text,
+    ]);
   });
 
   test.each([
     { name: "JSON でない", text: "{broken", message: "are not valid JSON" },
     {
-      name: "形が違う (版と projects)",
-      text: JSON.stringify({ version: 2, projects: [] }),
-      message: "- version is 2, expected 1\n- projects is not an object",
+      name: "形が違う",
+      text: JSON.stringify({ version: 2, rev: -1 }),
+      message: "- rev is -1\n- savedAt is not a number\n- there is no layout",
+    },
+    {
+      name: "版が無い",
+      text: JSON.stringify({ rev: 1, savedAt: 1, layout: null }),
+      message: "- version is undefined, expected 1 or 2",
     },
   ])("壊れたファイル ($name) は読まず、上書きもしない", async ({
     text,
     message,
   }) => {
     writeFileSync(path, text);
-    expect(() => loadProjectMainTabs(path, "/work/sample-app")).toThrow(
-      message,
-    );
+    await expect(loadMainTabs(path)).rejects.toThrow(message);
     await expect(
-      saveProjectMainTabs(path, "/work/sample-app", layout),
+      saveMainTabs(path, { baseRev: null, base: null, layout: layoutOf("a") }),
     ).rejects.toThrow(message);
     expect(readFileSync(path, "utf8")).toBe(text);
   });
 
-  test("大きすぎる配置は保存しない", async () => {
-    const big = { text: "x".repeat(MAX_MAIN_TABS_LAYOUT_BYTES) };
+  test("別の窓の保存が壊れていて重ねられなければ、何も書かない", async () => {
+    const text = JSON.stringify({
+      version: 2,
+      rev: 4,
+      savedAt: 1,
+      layout: { version: LAYOUT_VERSION, focused: "middle", panes: [] },
+    });
+    writeFileSync(path, text);
     await expect(
-      saveProjectMainTabs(path, "/work/sample-app", big),
-    ).rejects.toThrow(`(at most ${MAX_MAIN_TABS_LAYOUT_BYTES})`);
+      saveMainTabs(path, { baseRev: 3, base: null, layout: layoutOf("a") }),
+    ).rejects.toThrow(
+      "could not be merged with the layout saved by another window (rev 4, this window read rev 3), so nothing was written",
+    );
+    expect(readFileSync(path, "utf8")).toBe(text);
+  });
+
+  test.each([
+    {
+      name: "大きすぎる配置",
+      write: {
+        baseRev: null,
+        base: null,
+        layout: { text: "x".repeat(MAX_MAIN_TABS_LAYOUT_BYTES) },
+      },
+      message: `(at most ${MAX_MAIN_TABS_LAYOUT_BYTES})`,
+    },
+    {
+      name: "読めない配置",
+      write: { baseRev: null, base: null, layout: { version: 0 } },
+      message: "the main tabs layout to save is broken",
+    },
+  ])("$name は画面の誤りとして断り、書かない", async ({ write, message }) => {
+    const error = await saveMainTabs(path, write).catch((e: unknown) => e);
+    expect([
+      error instanceof MainTabsStoreError && error.code,
+      String(error),
+      existsSync(path),
+    ]).toEqual(["invalid-input", expect.stringContaining(message), false]);
+  });
+});
+
+describe("main tabs store: 前の版 (プロジェクトごと) の保存を移す", () => {
+  // 前の版の形: プロジェクト 2 つ分の配置と、プロジェクトに属さないタブ。
+  const oldFile = {
+    version: 1,
+    projects: {
+      "/work/sample-app": {
+        savedAt: 20,
+        layout: {
+          version: 4,
+          focused: "left",
+          panes: [
+            {
+              side: "left",
+              activeId: "t2",
+              tabs: [
+                {
+                  id: "t1",
+                  preview: false,
+                  target: { kind: "file", path: "src/app.ts" },
+                },
+                {
+                  id: "t2",
+                  preview: true,
+                  target: { kind: "file", path: "README.md" },
+                },
+                {
+                  id: "t3",
+                  preview: false,
+                  target: { kind: "page", page: "diff" },
+                },
+                {
+                  id: "t4",
+                  preview: false,
+                  target: { kind: "terminal", session: "shell-ab12" },
+                },
+              ],
+            },
+          ],
+        },
+      },
+      "/work/sample-lib": {
+        savedAt: 10,
+        layout: {
+          version: 4,
+          focused: "left",
+          panes: [
+            {
+              side: "left",
+              activeId: "t1",
+              tabs: [
+                {
+                  id: "t1",
+                  preview: false,
+                  target: { kind: "file", path: "src/app.ts" },
+                },
+                {
+                  id: "t2",
+                  preview: false,
+                  target: { kind: "terminal", session: "shell-ab12" },
+                },
+                {
+                  id: "t3",
+                  preview: false,
+                  target: { kind: "page", page: "search" },
+                  route: { q: "sample" },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    },
+    common: {
+      savedAt: 20,
+      tabs: {
+        version: 1,
+        targets: [
+          { kind: "terminal", session: "shell-ab12" },
+          { kind: "page", page: "agents" },
+        ],
+      },
+    },
+  };
+
+  test("読んだら 1 つの配置へ移して書き直し、元は .v1-<時刻> に残す。タブは 1 枚も消えない", async () => {
+    const text = JSON.stringify(oldFile);
+    writeFileSync(path, text);
+    const now = Date.UTC(2026, 8, 23, 1, 2, 3, 4);
+    const loaded = await loadMainTabs(path, now);
+    if (loaded.kind !== "ok") throw new Error(`not loaded: ${loaded.kind}`);
+    const tabs = (
+      loaded.layout as {
+        panes: Array<{
+          tabs: Array<{ id: string; target: unknown; route?: unknown }>;
+        }>;
+      }
+    ).panes.flatMap((pane) => pane.tabs);
+    expect([
+      tabs.map((tab) => [tab.id, tab.target, tab.route ?? null]),
+      loaded.rev,
+      loaded.migration,
+      readFileSync(`${path}.v1-2026-09-23T01-02-03-004Z`, "utf8"),
+      JSON.parse(readFileSync(path, "utf8")).version,
+    ]).toEqual([
+      [
+        [
+          "t1",
+          { kind: "file", path: "src/app.ts", project: "/work/sample-app" },
+          null,
+        ],
+        [
+          "t2",
+          { kind: "file", path: "README.md", project: "/work/sample-app" },
+          null,
+        ],
+        [
+          "t3",
+          { kind: "page", page: "diff", project: "/work/sample-app" },
+          null,
+        ],
+        ["t4", { kind: "terminal", session: "shell-ab12" }, null],
+        [
+          "t1-2",
+          { kind: "file", path: "src/app.ts", project: "/work/sample-lib" },
+          null,
+        ],
+        [
+          "t3-2",
+          { kind: "page", page: "search", project: "/work/sample-lib" },
+          { q: "sample" },
+        ],
+        ["c1", { kind: "page", page: "agents" }, null],
+      ],
+      1,
+      {
+        moved: 7,
+        merged: [
+          {
+            at: 'projects["/work/sample-lib"].layout left t2-2',
+            target: { kind: "terminal", session: "shell-ab12" },
+          },
+        ],
+        retired: [],
+        unmigrated: [],
+        backup: `${path}.v1-2026-09-23T01-02-03-004Z`,
+      },
+      text,
+      2,
+    ]);
+  });
+
+  test("読めない配置と知らない種類は捨てずに、場所・理由・元の値を返す", async () => {
+    const broken = { version: 4, focused: "middle", panes: [] };
+    const chart = { id: "t9", preview: false, target: { kind: "chart" } };
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 1,
+        projects: {
+          "/work/sample-app": {
+            savedAt: 2,
+            layout: {
+              version: 4,
+              focused: "left",
+              panes: [{ side: "left", activeId: null, tabs: [chart] }],
+            },
+          },
+          "/work/sample-lib": { savedAt: 1, layout: broken },
+        },
+      }),
+    );
+    const loaded = await loadMainTabs(path, 0);
+    expect(loaded.kind === "ok" && loaded.migration?.unmigrated).toEqual([
+      {
+        at: 'projects["/work/sample-app"].layout.panes[0].tabs[0]',
+        reason: "unknown tab kind",
+        raw: chart,
+      },
+      {
+        at: 'projects["/work/sample-lib"]',
+        reason:
+          'main tab layout is broken (2 problems):\n- focused is "middle"\n- panes has 0 entries (1 or 2 allowed)',
+        raw: broken,
+      },
+    ]);
+  });
+
+  test("書くときに前の版のファイルだったら、移してから重ねる", async () => {
+    writeFileSync(path, JSON.stringify(oldFile));
+    const saved = await saveMainTabs(
+      path,
+      { baseRev: null, base: null, layout: layoutOf("new.ts") },
+      0,
+    );
+    expect(
+      saved.kind === "ok" && [saved.rev, saved.merged, idsOf(saved.layout)],
+    ).toEqual([
+      2,
+      true,
+      ["t1", "t2", "t3", "t4", "t1-2", "t3-2", "c1", "new.ts"],
+    ]);
+    expect(readdirSync(dir).some((name) => name.includes(".v1-"))).toBe(true);
   });
 });
 
 describe("main tabs store: 壊れた保存値の退避", () => {
   test("ファイル全体を同じ場所の main-tabs.json.broken-<時刻> へ写し、元は残す", async () => {
-    await saveProjectMainTabs(path, "/work/sample-app", layout, 1);
-    await saveProjectMainTabs(path, "/work/sample-lib", { other: true }, 2);
+    await saveMainTabs(path, {
+      baseRev: null,
+      base: null,
+      layout: layoutOf("a"),
+    });
     const before = readFileSync(path, "utf8");
     const now = Date.UTC(2026, 8, 22, 12, 34, 56, 789);
     const first = await backupMainTabs(path, now);

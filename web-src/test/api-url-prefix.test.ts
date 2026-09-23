@@ -5,7 +5,9 @@ import {
   apiUrl,
   PROJECT_HEADER,
   pageUrl,
+  projectApiUrl,
   projectKey,
+  projectKeyOfServerUrl,
   projectRequest,
   routePathname,
   withoutProjectPrefix,
@@ -117,5 +119,56 @@ describe("projectRequest (every fetch)", () => {
       input: "/file_diff?x=1",
       init: undefined,
     });
+  });
+});
+
+// 別のプロジェクトのファイルをその場で出すときの読む先 (app.ts の別のプロジェクトの面)。
+describe("requests to another project", () => {
+  const OTHER = "fedcba9876543210";
+  test.each([
+    [
+      "このページの前置き付き",
+      `/p/${KEY}/_file?path=a.ts`,
+      `/p/${OTHER}/_file?path=a.ts`,
+    ],
+    [
+      "前置きなし",
+      "/file_range?path=a.ts&start=1",
+      `/p/${OTHER}/file_range?path=a.ts&start=1`,
+    ],
+  ])("%s", (_name, url, expected) => {
+    expect(projectApiUrl(url, OTHER)).toBe(expected);
+  });
+
+  test.each([
+    [
+      "入口の経路は前置きで送らない",
+      "/_agent/images?path=a.png",
+      "is not a project route",
+    ],
+    ["鍵の形でない", "/_file?path=a", "project key must be 16 hex digits"],
+  ])("断る: %s", (_name, url, message) => {
+    expect(() =>
+      projectApiUrl(url, url.startsWith("/_file") ? "nothex" : OTHER),
+    ).toThrow(message);
+  });
+
+  test("サーバの URL から鍵を読む", () => {
+    expect([
+      projectKeyOfServerUrl(`http://127.0.0.1:4000/p/${OTHER}/`),
+      projectKeyOfServerUrl("http://127.0.0.1:4000/"),
+    ]).toEqual([OTHER, null]);
+  });
+
+  test("入口の経路に呼んだ側が付けたプロジェクトの鍵は残す (別のプロジェクトの画像)", () => {
+    atPath(`/p/${KEY}/file`);
+    const sent = projectRequest("/_agent/images?path=a.png", {
+      headers: { [PROJECT_HEADER]: OTHER },
+    });
+    const plain = projectRequest("/_agent/images?path=a.png");
+    expect([
+      new Headers(sent.init?.headers).get(PROJECT_HEADER),
+      new Headers(plain.init?.headers).get(PROJECT_HEADER),
+    ]).toEqual([OTHER, KEY]);
   });
 });

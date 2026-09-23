@@ -18,12 +18,16 @@ import {
 } from "./core/ai-context-copy";
 import {
   apiUrl,
+  PROJECT_HEADER,
   pageUrl,
+  projectApiUrl,
   projectKey,
+  projectKeyOfServerUrl,
   projectRequest,
   routePathname,
   withoutProjectPrefix,
 } from "./core/api-url";
+import { renderMarkdownPreview } from "./core/markdown-preview";
 import {
   type CatchUpReason,
   catchUpKind,
@@ -39,7 +43,10 @@ import {
 } from "./core/error-detail";
 import { GdpExpandLogic } from "./core/expand-logic";
 import { isTestFilePath } from "./core/file-filter";
-import { filePathClipboardText } from "./core/file-path-copy";
+import {
+  filePathClipboardText,
+  filePathDisplayText,
+} from "./core/file-path-copy";
 import {
   fileSignatureUnchanged,
   rawFileInfoSignature,
@@ -109,7 +116,7 @@ import {
   listColumnLayout,
   restoredListWidth,
 } from "./core/list-column";
-import type { PaneSide, TabTarget } from "./core/main-tabs";
+import type { PaneSide, Tab, TabTarget } from "./core/main-tabs";
 import {
   diffLayoutFor,
   PHONE_MEDIA_QUERY,
@@ -142,6 +149,7 @@ import {
 import { buildRepositoryWebTarget } from "./core/repository-web-url";
 import {
   type AppRoute,
+  buildRawFileUrl,
   buildRoute,
   type DiffRange,
   legacyPanelRoute,
@@ -166,7 +174,11 @@ import {
   scrollKeyOfHistoryState,
 } from "./core/scroll-memory";
 import { rememberPaletteSelection } from "./core/search-palette";
-import type { ShellListResponse, ShellSessionId } from "./core/shell";
+import {
+  isShellSessionId,
+  type ShellListResponse,
+  type ShellSessionId,
+} from "./core/shell";
 import { sourceInternalPathKind } from "./core/source-meta";
 import {
   readStoredSize,
@@ -179,7 +191,10 @@ import {
   terminalImageExtension,
   validateTerminalImageResponseUrls,
 } from "./core/terminal-images";
-import type { TerminalTabProject } from "./core/terminal-tab-name";
+import {
+  projectRootOfPath,
+  type TerminalTabProject,
+} from "./core/terminal-tab-name";
 import { clampTerminalFontSize, type TmuxClientWindow } from "./core/tmux";
 import { isToolId, type ToolId } from "./core/tools";
 import {
@@ -279,17 +294,20 @@ import {
   createMainTabsView,
   type FrontChange,
   isPageKind,
-  isRouteTab,
   type PanesView,
   routeTarget,
+  type SavedTabs,
+  type SavedWrite,
   SPLIT_DIVIDER_WIDTH,
 } from "./views/main-tabs/main-tabs-view";
+import { mainTabsText } from "./views/main-tabs/i18n";
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
 import { installMobileShell } from "./views/mobile-shell";
 import { createProjectActions } from "./views/projects/project-actions";
 import {
   PROJECT_LOOKS,
   paintProjectColor,
+  projectMark,
 } from "./views/projects/project-looks";
 import {
   mountProjectSwitcher,
@@ -1697,24 +1715,44 @@ window.GdpExpandLogic = GdpExpandLogic;
     onNewTab: (side, anchor) => void openNewTabMenu(side, anchor),
     stopTerminal: (session) => void stopTerminal(session as ShellSessionId),
     terminalMenuItems: () => TERMINAL_VIEW.menuItems(),
-    loadSaved: async () => {
-      const saved = await loadStateResponse<{
-        layout: unknown;
-        common?: unknown;
-      }>(apiUrl("stateTabs"), "main tabs request failed");
-      // common を返さないのは、この項を知らない版の裏 (共通のタブはまだ無い扱い)。
-      return { layout: saved.layout, common: saved.common ?? null };
-    },
-    save: async (layout, keepalive, common) => {
+    // 全プロジェクト共通の配置 (server/main-tabs-store.ts)。root はこの裏の根で、
+    // タブの持ち物のプロジェクトになる。
+    loadSaved: () =>
+      loadStateResponse<SavedTabs>(
+        apiUrl("stateTabs"),
+        "main tabs request failed",
+      ),
+    save: async (layout, keepalive, base) => {
       const response = await fetch(apiUrl("stateTabs"), {
         method: "PUT",
         keepalive,
         headers: { ...actionHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify(common ? { layout, common } : { layout }),
+        body: JSON.stringify({
+          baseRev: base.rev,
+          base: base.layout,
+          layout,
+        }),
       });
       if (!response.ok)
         throw new Error(await responseErrorMessage(response, "save main tabs"));
+      const written = (await response.json()) as SavedWrite & {
+        migration?: unknown;
+      };
+      if (written.migration !== undefined)
+        console.info(
+          "[code-viewer] main tabs: the per-project tabs were moved into one set of tabs while saving:",
+          JSON.stringify(written.migration),
+        );
+      return written;
     },
+    newTabId: () => `t-${crypto.randomUUID().slice(0, 8)}`,
+    projectLook: (root) => PROJECT_LOOKS.get(root),
+    projectOrder: () => PROJECT_LOOKS.order(),
+    terminalProject: (session) => terminalProjectOf(session),
+    switchProject: (root, route, tab) =>
+      openProjectAt(root, projectTabPath(route, tab)),
+    // 別のプロジェクトのファイルを /p/<鍵> から読めるのは入口のサーバの下だけ。
+    foreignInPlace: () => projectKey() !== null,
     backupSaved: async () => {
       const response = await fetch(apiUrl("stateTabsBackup"), {
         method: "POST",
@@ -5818,7 +5856,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function focusActiveMainTabSurface() {
     const front = MAIN_TABS.front();
-    if (front && isRouteTab(front)) scheduleMainSurfaceFocus();
+    if (front && MAIN_TABS.isRouteTab(front)) scheduleMainSurfaceFocus();
   }
 
   function dispatchKeymapAction(
@@ -6128,6 +6166,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "main-tab-menu") return MAIN_TABS.openFrontMenu();
+    if (action === "project-previous" || action === "project-next") {
+      switchToAdjacentProject(action === "project-next" ? 1 : -1);
+      return true;
+    }
     if (action === "main-pane-other") {
       MAIN_TABS.focusOther();
       focusActiveMainTabSurface();
@@ -7090,6 +7132,245 @@ window.GdpExpandLogic = GdpExpandLogic;
     return pane;
   }
 
+  // ---- 別のプロジェクトのファイル (その場で出す) ----
+  // 別のプロジェクトのファイルのタブは、面の箱にそのプロジェクトの `/p/<鍵>` から
+  // 読むソース表示で出す (設計: ファイル一覧はいまのプロジェクトのまま)。本文の
+  // 実体と同じ createSourceView に、読む先 (requestUrl)・パンくず・中の移動を
+  // そのプロジェクトのものにした依存を渡す。このページのプロジェクトに付くもの
+  // (注釈・ごみ箱・OS で開く・履歴・定義へ飛ぶ・フォルダ表示) は渡さない: 同じ
+  // パスのこのプロジェクトのファイルに当たってしまう。
+
+  /** プロジェクトの根 → 鍵 (`/p/<鍵>`)。 */
+  const PROJECT_KEYS = new Map<string, string>();
+
+  /** そのプロジェクトの鍵。動いていなければ入口に起こしてもらって知る。 */
+  async function projectKeyFor(root: string): Promise<string> {
+    const known = PROJECT_KEYS.get(root);
+    if (known) return known;
+    const info = AGENT_MONITOR.snapshot().overview?.projects.find(
+      (item) => item.root === root,
+    );
+    let url = info?.server.status === "running" ? info.server.url : null;
+    if (!url) {
+      const res = await trackLoad(
+        fetch(apiUrl("agentProjectsOpen"), {
+          method: "POST",
+          headers: actionHeaders(),
+          body: JSON.stringify({ root }),
+        }),
+      );
+      if (!res.ok)
+        throw new Error(
+          await responseErrorMessage(res, `open the project ${root}`),
+        );
+      url = ((await res.json()) as { url: string }).url;
+    }
+    const key = projectKeyOfServerUrl(url);
+    if (!key)
+      throw new Error(
+        `the project ${root} has no /p/<key> address (${url}), so its files cannot be shown here`,
+      );
+    PROJECT_KEYS.set(root, key);
+    return key;
+  }
+
+  type ForeignPane = {
+    root: HTMLElement;
+    body: HTMLElement;
+    /** 描いているタブ・プロジェクト・鍵・route。 */
+    tabId: string;
+    project: string;
+    key: string;
+    route: FileRoute;
+    rendered: string | null;
+    source: ReturnType<typeof createSourceView>;
+  };
+
+  const FOREIGN_PANES: Partial<Record<PaneSide, ForeignPane>> = {};
+
+  /** 別のプロジェクトのパンくず: 色の四角と名前、パス (押せない)。 */
+  function foreignBreadcrumb(project: string, path: string): HTMLElement {
+    const nav = document.createElement("nav");
+    nav.className = "gdp-file-breadcrumb main-pane-foreign-crumb";
+    nav.setAttribute("aria-label", DIFF_SCREEN_TEXT[STATE.language].filePath);
+    const look = PROJECT_LOOKS.get(project);
+    const name = look?.name ?? (project.split("/").pop() || project);
+    nav.append(
+      projectMark(
+        look ?? {
+          root: project,
+          name,
+          initials: projectInitials(name),
+          color: null,
+        },
+        "main-pane-foreign-mark",
+      ),
+    );
+    const parts = [name, ...path.split("/").filter(Boolean)];
+    parts.forEach((part, index) => {
+      if (index > 0) {
+        const sep = document.createElement("span");
+        sep.className = "gdp-file-breadcrumb-sep";
+        sep.textContent = "/";
+        nav.append(sep);
+      }
+      const crumb = document.createElement("span");
+      crumb.className =
+        index === parts.length - 1
+          ? "gdp-file-breadcrumb-current"
+          : "gdp-file-breadcrumb-part";
+      crumb.textContent = filePathDisplayText(part);
+      nav.append(crumb);
+    });
+    return nav;
+  }
+
+  function foreignPane(side: PaneSide): ForeignPane {
+    const existing = FOREIGN_PANES[side];
+    if (existing) return existing;
+    const root = document.createElement("div");
+    root.className = "main-pane-source main-pane-foreign";
+    root.tabIndex = -1;
+    const body = document.createElement("div");
+    body.className = "main-pane-source-body";
+    root.append(body);
+    const noop = () => undefined;
+    const hidden = () => {
+      const el = document.createElement("span");
+      el.hidden = true;
+      return el;
+    };
+    const toForeign = (url: string) => projectApiUrl(url, pane.key);
+    let pane: ForeignPane;
+    const source = createSourceView({
+      ...SOURCE_VIEW_DEPS,
+      route: () => pane.route,
+      setRoute: (next) => setForeignRoute(side, next),
+      scope: () => root,
+      mountRoot: () => body,
+      mainScrollTarget: () => {
+        const virtual = root.querySelector<HTMLElement>(
+          ".gdp-source-virtual-scroller",
+        );
+        return virtual && virtual.getClientRects().length > 0 ? virtual : root;
+      },
+      focusPanel: () => root.focus({ preventScroll: true }),
+      setPageMode: noop,
+      loadRepo: async () => undefined,
+      repoFileTargetFromRoute: () => pane.route.ref,
+      renderRepoBlobSidebar: noop,
+      placeSidebarToggle: noop,
+      createFileBreadcrumb: (path) => foreignBreadcrumb(pane.project, path),
+      createRepositoryWebLink: undefined,
+      createRevisionNav: undefined,
+      createOpenPathButton: hidden,
+      createMoveToTrashButton: hidden,
+      canTrashWorktreeRef: () => false,
+      loadRawFileInfo: (target) =>
+        REPO_VIEW.loadRawFileInfo(target, toForeign(buildRawFileUrl(target))),
+      renderMarkdownPreview: (text, target, options) =>
+        renderMarkdownPreview(text, target, {
+          ...options,
+          resolveAssetUrl: (path) =>
+            toForeign(buildRawFileUrl({ path, ref: target.ref || "worktree" })),
+        }),
+      onSourceRendered: undefined,
+      requestUrl: toForeign,
+    });
+    pane = {
+      root,
+      body,
+      tabId: "",
+      project: "",
+      key: "",
+      route: {
+        screen: "file",
+        path: "",
+        ref: "worktree",
+        view: "blob",
+        range: currentRange(),
+      },
+      rendered: null,
+      source,
+    };
+    FOREIGN_PANES[side] = pane;
+    return pane;
+  }
+
+  /**
+   * 別のプロジェクトのファイルの中の移動。同じファイルの Code / Preview・行は
+   * その場で、ほか (別のファイル・履歴・Blame・フォルダ) はそのプロジェクトへ移る。
+   */
+  function setForeignRoute(side: PaneSide, next: AppRoute): void {
+    const pane = FOREIGN_PANES[side];
+    if (!pane) return;
+    if (
+      next.screen === "file" &&
+      next.path === pane.route.path &&
+      (next.view === undefined || next.view === "blob")
+    ) {
+      MAIN_TABS.setTabRoute(pane.tabId, next);
+      pane.route = next;
+      pane.rendered = null;
+      pane.source.applySourceRouteToShell();
+      return;
+    }
+    openProjectAt(pane.project, withoutProjectPrefix(buildRoute(next)));
+  }
+
+  /** 面の箱に文言だけを出す (移る途中・読めない理由)。 */
+  function showPaneMessage(side: PaneSide, message: string): void {
+    const el = document.createElement("p");
+    el.className = "main-pane-message";
+    el.textContent = message;
+    PANE_HOSTS[side].replaceChildren(el);
+  }
+
+  /** 別のプロジェクトのファイルのタブを、その面の箱に出す。 */
+  function showForeignFile(side: PaneSide, tab: Tab): void {
+    const project = tab.target.kind === "file" ? tab.target.project : undefined;
+    const route = MAIN_TABS.tabRoute(tab);
+    if (!project || route?.screen !== "file")
+      throw new Error(
+        `main tabs: ${JSON.stringify(tab.target)} is not a file of another project`,
+      );
+    const existing = FOREIGN_PANES[side];
+    if (!existing || existing.root.parentElement !== PANE_HOSTS[side])
+      showPaneMessage(
+        side,
+        mainTabsText(STATE.language).switchingProject(
+          PROJECT_LOOKS.get(project)?.name ?? project,
+        ),
+      );
+    projectKeyFor(project).then(
+      (key) => {
+        if (MAIN_TABS.panes().fronts[side]?.id !== tab.id) return;
+        const pane = foreignPane(side);
+        const host = PANE_HOSTS[side];
+        if (pane.root.parentElement !== host) {
+          host.replaceChildren(pane.root);
+          pane.rendered = null;
+        }
+        pane.tabId = tab.id;
+        pane.project = project;
+        pane.key = key;
+        pane.route = route;
+        const signature = JSON.stringify([key, route]);
+        if (pane.rendered === signature) return;
+        pane.rendered = signature;
+        pane.source.applySourceRouteToShell();
+      },
+      (error: unknown) => {
+        console.error(
+          `[code-viewer] the file ${JSON.stringify(tab.target)} of another project could not be shown`,
+          error,
+        );
+        if (MAIN_TABS.panes().fronts[side]?.id !== tab.id) return;
+        showPaneMessage(side, formatErrorDetail(error));
+      },
+    );
+  }
+
   /**
    * 木・差分の一覧のファイルの行を、固定のタブ (new-tab) か反対の面
    * (other-pane) で開く (ui-surface.md の「タブの決まり」)。木は今見ている
@@ -7269,28 +7550,39 @@ window.GdpExpandLogic = GdpExpandLogic;
    */
   async function resolveImage(
     path: string,
+    project: string | null = null,
   ): Promise<{ image: TerminalImageRef; images: TerminalImageRef[] }> {
-    const known = IMAGE_REFS.get(path);
+    const cacheKey = project === null ? path : `${project}\u0000${path}`;
+    const known = IMAGE_REFS.get(cacheKey);
     if (known) return known;
+    // 別のプロジェクトの画像は、そのプロジェクトの鍵で引く (パスはその根から)。
+    // 木の並びはこのページのプロジェクトのものなので、前後の並びにしない。
+    const foreignKey = project === null ? null : await projectKeyFor(project);
     const folder = path.includes("/")
       ? path.slice(0, path.lastIndexOf("/"))
       : "";
-    const siblings = path.startsWith("/")
-      ? [path]
-      : FILE_LIST.getSidebarFiles()
-          .map((item) => item.path)
-          .filter(
-            (item) =>
-              terminalImageExtension(item) !== null &&
-              (item.includes("/")
-                ? item.slice(0, item.lastIndexOf("/"))
-                : "") === folder,
-          );
+    const siblings =
+      path.startsWith("/") || foreignKey !== null
+        ? [path]
+        : FILE_LIST.getSidebarFiles()
+            .map((item) => item.path)
+            .filter(
+              (item) =>
+                terminalImageExtension(item) !== null &&
+                (item.includes("/")
+                  ? item.slice(0, item.lastIndexOf("/"))
+                  : "") === folder,
+            );
     const paths = siblings.includes(path) ? siblings : [path, ...siblings];
     const params = new URLSearchParams();
     for (const item of paths) params.append("path", item);
     const res = await trackLoad(
-      fetch(`${apiUrl("agentImages")}?${params.toString()}`),
+      fetch(
+        `${apiUrl("agentImages")}?${params.toString()}`,
+        foreignKey === null
+          ? undefined
+          : { headers: { [PROJECT_HEADER]: foreignKey } },
+      ),
     );
     if (!res.ok)
       throw new Error(await responseErrorMessage(res, `load image ${path}`));
@@ -7308,14 +7600,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       );
     }
     const resolved = { image, images: body.images };
-    IMAGE_REFS.set(path, resolved);
+    IMAGE_REFS.set(cacheKey, resolved);
     return resolved;
   }
 
   /** その面の箱に画像を出す。読めなければ理由を箱に出す (黙って空にしない)。 */
-  function showImageIn(side: PaneSide, path: string): void {
+  function showImageIn(
+    side: PaneSide,
+    path: string,
+    project: string | null = null,
+  ): void {
     const host = PANE_HOSTS[side];
-    void resolveImage(path).then(
+    void resolveImage(path, project).then(
       ({ image, images }) => {
         const front = MAIN_TABS.panes().fronts[side];
         if (front?.target.kind !== "image" || front.target.path !== path)
@@ -7923,7 +8219,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     // 端末・画像のタブが左の前面なら、背面の画面の一覧は出さない (列は前面の
     // タブの画面で決める)。
     const leftFront = view.fronts.left;
-    LEFT_FRONT_IS_PAGE = leftFront === null || isRouteTab(leftFront);
+    LEFT_FRONT_IS_PAGE = leftFront === null || MAIN_TABS.isRouteTab(leftFront);
     syncListColumn();
     for (const side of ["left", "right"] as const) {
       const host = PANE_HOSTS[side];
@@ -7932,11 +8228,32 @@ window.GdpExpandLogic = GdpExpandLogic;
       const shown =
         present &&
         tab !== null &&
-        (!isRouteTab(tab) || (side === "right" && tab.target.kind === "file"));
+        (!MAIN_TABS.isRouteTab(tab) ||
+          (side === "right" && tab.target.kind === "file"));
       host.classList.toggle("is-shown", shown);
       host.dataset.kind = shown && tab ? tab.target.kind : "";
       if (!shown || !tab) continue;
-      if (tab.target.kind === "file") {
+      const foreign =
+        MAIN_TABS.groupOf(tab) !== null &&
+        tab.target.kind !== "terminal" &&
+        MAIN_TABS.groupOf(tab) !== MAIN_TABS.currentProject();
+      if (
+        foreign &&
+        (tab.target.kind === "page" ||
+          (tab.target.kind === "file" && projectKey() === null))
+      ) {
+        // 別のプロジェクトの画面: そのプロジェクトへ移る途中 (main-tabs-view の
+        // switchToTab が移る)。
+        showPaneMessage(
+          side,
+          mainTabsText(STATE.language).switchingProject(
+            PROJECT_LOOKS.get(MAIN_TABS.groupOf(tab) ?? "")?.name ??
+              (MAIN_TABS.groupOf(tab) as string),
+          ),
+        );
+      } else if (foreign && tab.target.kind === "file") {
+        showForeignFile(side, tab);
+      } else if (tab.target.kind === "file") {
         showSourceInRight();
       } else if (tab.target.kind === "terminal") {
         host.replaceChildren(TERMINAL_VIEW.tabPaneFor(side));
@@ -7945,7 +8262,11 @@ window.GdpExpandLogic = GdpExpandLogic;
           side,
         );
       } else if (tab.target.kind === "image") {
-        showImageIn(side, tab.target.path);
+        showImageIn(
+          side,
+          tab.target.path,
+          foreign ? (tab.target.project ?? null) : null,
+        );
       }
     }
     syncHeaderMenu();
@@ -8029,6 +8350,97 @@ window.GdpExpandLogic = GdpExpandLogic;
         (item) => item.shownInShell !== "" && item.shownInShell === session,
       ) ?? panes.find((item) => item.id === opened)
     );
+  }
+
+  /**
+   * シェルのタブのグループ (プロジェクトの根)。映しているペインのプロジェクト、
+   * 無ければシェルを起こしたフォルダを含むプロジェクト (一覧の根の前方一致の
+   * いちばん深いもの)。どれでもなければ null (タブ列の右端)、一覧がまだ届いて
+   * いなければ undefined。
+   */
+  function terminalProjectOf(session: string): string | null | undefined {
+    // 一覧とシェルの一覧が届くまでは分からない (保存した控えで描く)。
+    if (!AGENT_MONITOR.snapshot().overview) return undefined;
+    const pane = paneForShell(session);
+    if (pane) return pane.project || null;
+    const shells = TERMINAL_VIEW.knownShells();
+    if (!shells) return undefined;
+    const cwd = shells.sessions.find((item) => item.id === session)?.cwd;
+    if (!cwd) return null;
+    return projectRootOfPath(cwd, PROJECT_LOOKS.order());
+  }
+
+  /**
+   * そのプロジェクトへ移るときの画面のパス (前置きなし)。画面・ファイルのタブは
+   * その route、シェルは `?terminal=`、画像はその画像を開く route、タブが無ければ
+   * フォルダ表示。
+   */
+  function projectTabPath(route: AppRoute | null, tab: Tab | null): string {
+    if (tab?.target.kind === "terminal" && isShellSessionId(tab.target.session))
+      return withTerminalOverlay("/", tab.target.session);
+    if (tab?.target.kind === "image" && !tab.target.path.startsWith("/"))
+      return withoutProjectPrefix(
+        buildRoute({
+          screen: "file",
+          path: tab.target.path,
+          ref: "worktree",
+          view: "blob",
+          range: currentRange(),
+        }),
+      );
+    return route ? withoutProjectPrefix(buildRoute(route)) : "/";
+  }
+
+  /**
+   * そのプロジェクトの path へ移る (動いていなければ起こしてから)。confirmRegister は
+   * 登録していないプロジェクトを登録して開く前に確かめるか (切替の小窓・パレットは
+   * 確かめる。左の一覧の見出しは押しただけで移る入口なので確かめない)。
+   */
+  function openProjectAt(
+    root: string,
+    path: string,
+    confirmRegister = false,
+  ): void {
+    const info = AGENT_MONITOR.snapshot().overview?.projects.find(
+      (item) => item.root === root,
+    );
+    if (!info) {
+      // 一覧にまだ載っていない (取り直しの前): 移れない理由を出す。
+      console.error(
+        `[code-viewer] cannot switch to the project ${JSON.stringify(root)}: it is not in the project list yet`,
+      );
+      setStatus("error");
+      return;
+    }
+    void PROJECT_ACTIONS.open(info, path, { confirmRegister });
+  }
+
+  /**
+   * 左の一覧のプロジェクトの見出し・⌘⇧↑↓: そのプロジェクトへ移り、そのグループで
+   * 最後に前面だったタブを前面に出す (無ければそのプロジェクトのフォルダ表示)。
+   */
+  function switchToProjectGroup(root: string, confirmRegister = false): void {
+    if (root === MAIN_TABS.currentProject()) return;
+    const tab = MAIN_TABS.prepareProjectSwitch(root);
+    openProjectAt(
+      root,
+      projectTabPath(tab ? MAIN_TABS.tabRoute(tab) : null, tab),
+      confirmRegister,
+    );
+  }
+
+  /** 左の一覧の並びで前 (-1) / 次 (+1) のプロジェクトへ (端では回る)。 */
+  function switchToAdjacentProject(delta: -1 | 1): void {
+    const order = PROJECT_LOOKS.order();
+    const here = MAIN_TABS.currentProject() ?? PROJECT_LOOKS.current()?.root;
+    if (order.length < 2 || !here) return;
+    const index = order.indexOf(here);
+    const next =
+      order[
+        (((index < 0 ? 0 : index + delta) % order.length) + order.length) %
+          order.length
+      ];
+    if (next !== here) switchToProjectGroup(next);
   }
 
   /** ターミナルのタブの名前と印。エージェントを映していれば、その種類と状態。 */
@@ -8226,7 +8638,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         iconHtml: iconSvg("gdp-palette-icon", FOLDER_ICON_PATHS.closed),
         suggested: index < 5,
         run: () => {
-          if (!current) void PROJECT_ACTIONS.open(info, currentScreenPath());
+          // 左の一覧の見出しと同じく、そのグループで最後に前面だったタブへ。
+          if (!current) switchToProjectGroup(info.root, true);
         },
       });
     });
@@ -8435,6 +8848,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         subscribe: (listener) => AGENT_MONITOR.subscribe(listener),
         currentPath: currentScreenPath,
         currentName: () => PROJECT_NAME,
+        switchProject: (info) => switchToProjectGroup(info.root, true),
         shortcutLabel: () => {
           const binding = shownKeyBindings().find(
             (item) => item.action === "switch-project",
@@ -8456,6 +8870,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 色・名前・いま見ているものが変わったら窓の枠の色も当て直す。
   PROJECT_LOOKS.subscribe(syncWindowFrameColor);
   PROJECT_LOOKS.subscribe(renderProjectHead);
+  // タブのグループの札の色・名前と、グループの並び (左の一覧の並び)。
+  PROJECT_LOOKS.subscribe(() => MAIN_TABS.localize());
   AGENT_MONITOR.subscribe(() =>
     PROJECT_LOOKS.update(AGENT_MONITOR.snapshot().overview),
   );
@@ -8518,6 +8934,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         root: navProjectsRoot,
         monitor: AGENT_MONITOR,
         projects: PROJECT_ACTIONS,
+        switchProject: (info) => switchToProjectGroup(info.root),
         getText: () => agentsText(STATE.language),
         openPane: openAgentPane,
         viewingPane: viewingAgentPane,
@@ -9514,6 +9931,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     es.addEventListener("journal", () => {
       JOURNAL_VIEW?.handleSse();
     });
+    // タブの配置 (全プロジェクト共通) を別の窓・別のプロジェクトの画面が書いた。
+    es.addEventListener("tabs", () => {
+      void MAIN_TABS.refreshFromServer();
+    });
     es.addEventListener("db-query", (event) => {
       DATABASE_VIEW.handleSse("db-query", (event as MessageEvent).data);
     });
@@ -9538,6 +9959,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         return;
       }
       catchUpMissedChanges("reconnect");
+      // 切れていた間のタブの変更 (SSE の tabs は届いていない)。
+      void MAIN_TABS.refreshFromServer();
     });
   }
 
@@ -9594,10 +10017,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     scheduleEventSourceConnect();
     catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
+    // 裏にあった間は SSE を切っているので、別の窓のタブの変更を取り直す。
+    void MAIN_TABS.refreshFromServer();
   });
   window.addEventListener("focus", () => {
     scheduleEventSourceConnect();
     catchUpMissedChanges("visible");
     void ANNOTATIONS_UI?.refreshAnnotations();
+    void MAIN_TABS.refreshFromServer();
   });
 })();

@@ -41,6 +41,12 @@ export type ProjectSwitcherDeps = {
   currentName(): string;
   /** ボタンの説明に出すキー (キー割り当ての表示)。 */
   shortcutLabel(): string;
+  /**
+   * 選んだプロジェクトへ移る。左の一覧の見出しと同じく、そのプロジェクトのタブの
+   * グループで最後に前面だったタブを前面に (app.ts の switchToProjectGroup)。無ければ
+   * いまの画面のまま移る (currentPath)。
+   */
+  switchProject?(info: AgentProjectInfo): void;
 };
 
 export type ProjectSwitcher = {
@@ -175,6 +181,10 @@ export function mountProjectSwitcher(
   function choose(info: AgentProjectInfo): void {
     if (info.server.status === "current") {
       close();
+      return;
+    }
+    if (deps.switchProject) {
+      deps.switchProject(info);
       return;
     }
     void deps.actions.open(info, deps.currentPath());

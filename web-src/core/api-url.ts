@@ -13,6 +13,8 @@
  * 1 つで完結するサーバ (`--standalone`) の画面は前置きが無く、URL は今までと同じ。
  */
 
+import { errorWithCause } from "./error-detail";
+
 export type ApiZone = "project" | "entry";
 
 /**
@@ -201,6 +203,37 @@ export function apiUrl(endpoint: ApiEndpoint): string {
   return zone === "project" ? projectPrefix() + path : path;
 }
 
+/** サーバが返した URL (`http://…/p/<鍵>/`) のプロジェクトの鍵。無ければ null。 */
+export function projectKeyOfServerUrl(url: string): string | null {
+  let pathname: string;
+  try {
+    pathname = new URL(url).pathname;
+  } catch (cause) {
+    throw errorWithCause(
+      `project server URL is not a URL: ${JSON.stringify(url)}`,
+      cause,
+    );
+  }
+  return projectKey(pathname);
+}
+
+/**
+ * 別のプロジェクトの裏へ送る URL: apiUrl の値 (このページの前置き付き・無し
+ * どちらも) の前置きを、鍵 key のプロジェクトのものにする。プロジェクトの経路
+ * だけ (入口の経路は前置きで送らない)。
+ */
+export function projectApiUrl(url: string, key: string): string {
+  if (!/^[0-9a-f]{16}$/.test(key))
+    throw new Error(
+      `project key must be 16 hex digits: ${JSON.stringify(key)}`,
+    );
+  const bare = withoutProjectPrefix(url);
+  const path = bare.split(/[?#]/, 1)[0] ?? bare;
+  if (!PATHS_BY_ZONE.project.has(path))
+    throw new Error(`${JSON.stringify(path)} is not a project route`);
+  return `/p/${key}${bare}`;
+}
+
 /** 画面の URL (`/file?…`・`/todif?…` など)。`buildRoute` が通す。 */
 export function pageUrl(path: string): string {
   return projectPrefix() + path;
@@ -240,7 +273,8 @@ export function projectRequest(
   }
   if (PATHS_BY_ZONE.entry.has(path)) {
     const headers = new Headers(init?.headers);
-    headers.set(PROJECT_HEADER, key);
+    // 別のプロジェクトの画像を引くときは、呼んだ側がそのプロジェクトの鍵を付ける。
+    if (!headers.has(PROJECT_HEADER)) headers.set(PROJECT_HEADER, key);
     return { input, init: { ...init, headers } };
   }
   return { input, init };

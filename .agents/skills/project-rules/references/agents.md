@@ -533,17 +533,19 @@ reset が古い reset より許容差を超えて前へ戻るか、古い窓が�
   `--idle-stop` 秒（既定 10 分）経った入口の裏だけ。止めた裏は「落ちた」扱いにせず、次の
   要求で黙って起こす（画面は起こしている間「起動中」を出す）。状態の型（`starting` /
   `running` / `idle-stopped` / `unreachable`）と条件の細部は `server.md` の入口の節
-- 切替は読み直しのままだが、**プロジェクトに属さないタブ**（全体ボード・Tools・設定と案内・ターミナル
-  （シェルとペイン）・ターミナルに出た画像）は切り替えても残す。判定は `core/main-tabs.ts` の
-  `isCommonTarget` の 1 か所。配置（並び・面・前面）はプロジェクトごとの保存のまま、共通のタブの
-  集まりだけを同じファイル（`main-tabs.json` の `common`）にもう 1 つ持ち、読み戻しで突き合わせる
-  （`withCommonTabs`: 別のプロジェクトで閉じたものは消え、開いたものは左の面の末尾に足す）。
+- 切替は読み直しのままだが、**タブは全プロジェクト共通**（2026-09-23 に利用者と決めた。前は
+  プロジェクトに属さないタブだけを共通にし、配置はプロジェクトごとだった）。タブは持ち物の
+  プロジェクトを持ち、タブ列はプロジェクトごとのグループに並ぶ（決まりは `ui-surface.md` の
+  「タブのグループ」）。保存は `main-tabs.json` の 1 つの配置で、窓どうしは版の番号 (`rev`) で
+  突き合わせる（8 の表）。別のプロジェクトのファイルはその場で `/p/<鍵>` から読み、Diff などの画面は
+  そのプロジェクトへ移って出す。1 ページで複数の裏に話すのは、**ファイルを読むことだけ**に限る
+  （そのプロジェクトの面に渡す依存からは、注釈・ごみ箱・OS で開く・履歴・定義へ飛ぶ・フォルダ表示を
+  外す: 同じパスのこのプロジェクトのファイルに当たる。`app.ts` の `foreignPane`）。画面の状態を
+  すべてプロジェクトごとに分ける案（読み直さずに切り替える）は 2 回目の作業に回した。
   プロジェクトとエージェントは左のサイドバー、今のプロジェクトの中身 (ファイル一覧と、Diff・
   History・作業ツリーの一覧) はその右の一覧の列 (`ui-layout.md` の「一覧の列」)。
-  別のプロジェクトのペインを映すターミナルのタブは「プロジェクト名 · 題」（`core/terminal-tab-name.ts`）。
-  タブがプロジェクトをまたぐ案（1 ページで複数の裏に話す）は、フロントの画面の状態をすべて
-  プロジェクトごとに分ける必要があり、分け損ねが「別のプロジェクトの内容を出す・書く」になる
-  ので採らなかった（2026-09 の設計の比較）
+  グループに入っていない別のプロジェクトのペインを映すターミナルのタブは「プロジェクト名 · 題」
+  （`core/terminal-tab-name.ts`。グループに入っていれば札がプロジェクトを示すので題だけ）
 - 裏を止めても、ターミナル（tmux・シェル）・未読・通知・フックの申告は残る（全部入口に居る）。
   **裏に、止めると消える状態を足さない。** タブを裏に回すと SSE を切る（`app.ts` の
   `shouldConnectEventSource`）ので、長く裏にあるタブの裏のプロセスも止まり、表に戻したときに
@@ -694,7 +696,7 @@ find web-src -name '*.ts' -not -path 'web-src/server/*' -not -path 'web-src/test
 | `<状態>/agent-usage/` | statusLine を包むスクリプト・claude の使用量・`failures.log` | 同上 |
 | `<状態>/projects.json` | プロジェクトの登録簿（並び・名前・色） | 同上 |
 | `<状態>/settings.json` | 全プロジェクト共通の設定 | 同上 |
-| `<状態>/main-tabs.json` | メインの面のタブの配置をプロジェクト（根のパス）ごとに。ファイルの包みは version 1、各配置は version 3（`core/main-tabs.ts` の `LAYOUT_VERSION`。左右で同じファイルを開ける）。配置の version 1・2 も読み（repo の page のタブは落とし、右の page のタブは左へ移す）、次の保存で 3 にする。3 より新しい版は使わず上書きもしない（`isNewerLayoutVersion`）。`/_state/tabs`、`server/main-tabs-store.ts`、`core/main-tabs.ts` の `parseLayout`。読めない配置は上書きせず、先に `POST /_state/tabs/backup` で同じ場所の `main-tabs.json.broken-<時刻>` へ写してから空で始める（写せなければ保存しない。理由は console.error）。`/_state/tabs`、`server/main-tabs-store.ts` の `backupMainTabs`、`core/main-tabs.ts` の `parseLayout` | 同上 |
+| `<状態>/main-tabs.json` | メインの面のタブの配置（全プロジェクト共通の 1 つ）。形は `{ version: 2, rev, savedAt, layout }`（`server/main-tabs-store.ts`）、配置は `core/main-tabs.ts` の `LAYOUT_VERSION` 5（タブが持ち物のプロジェクトを持つ）。書くたびに `rev` が進み、画面は前に読んだ `rev` と値を添えて書く。進んでいれば（別の窓が先に書いた）サーバが `core/main-tabs-merge.ts` で重ねて書く。各裏はこのファイルを `watchFile` で見て SSE の `tabs` を送り、画面が取り直す。前の版（`{ version: 1, projects: { <根>: { layout } }, common }`）を読んだらロックの中で 1 つの配置へ移し（`core/main-tabs-migrate.ts`。移せなかったものは場所・理由・元の値を返す）、元を `main-tabs.json.v1-<時刻>` に写す。新しい版のファイルは使わず上書きもしない。読めない配置は上書きせず、先に `POST /_state/tabs/backup` で `main-tabs.json.broken-<時刻>` へ写してから空で始める（写せなければ保存しない。理由は console.error）。`/_state/tabs` | 同上 |
 | `<状態>/server-logs/` | code-viewer が起こしたサーバ・裏の出力（起動に失敗したとき・落ちたとき末尾を理由に添える） | 同上 |
 | `<状態>/entry.json`・`entry.json.start.lock` | 動いている入口の `{url, pid, token, version, started_at}` と起動の排他 | 同上 |
 | `<状態>/agent-screen-rules.json`・`agent-screen-rules.migrated` | 画面ルールの保存済み上書き（ユーザー単位）と、リポジトリから写した・保存した・戻した印 | 同上 |

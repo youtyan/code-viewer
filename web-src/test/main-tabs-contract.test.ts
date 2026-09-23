@@ -1585,7 +1585,7 @@ describe("main tabs contract: persistence", () => {
     const serialized = serializeLayout(state);
     const parsed = parseLayout(JSON.parse(JSON.stringify(serialized)));
     expect(serialized).toEqual({
-      version: 4,
+      version: 5,
       focused: "right",
       panes: [
         {
@@ -1658,7 +1658,7 @@ describe("main tabs contract: persistence", () => {
         panes: [{ side: "left", activeId: null, tabs: [] }],
       },
       message:
-        "main tab layout is broken (1 problem):\n- version is 0, expected one of 1, 2, 3, 4",
+        "main tab layout is broken (1 problem):\n- version is 0, expected one of 1, 2, 3, 4, 5",
     },
     {
       name: "three panes",
@@ -1796,7 +1796,7 @@ describe("main tabs contract: persistence", () => {
       ],
     };
     expect(thrownMessage(() => parseLayout(raw))).toBe(
-      'main tab layout is broken (7 problems):\n- version is 7, expected one of 1, 2, 3, 4\n- focused is "middle"\n- panes[0].tabs[1]: id "same" is also used at panes[0].tabs[0]\n- panes[0].tabs[3]: page {"kind":"page","page":"diff"} is also open at panes[0].tabs[2]\n- panes[0].tabs[4]: file target has no path\n- panes[0] has 2 preview tabs (same, same); at most 1\n- panes[0].activeId "missing" is not a tab of the pane',
+      'main tab layout is broken (7 problems):\n- version is 7, expected one of 1, 2, 3, 4, 5\n- focused is "middle"\n- panes[0].tabs[1]: id "same" is also used at panes[0].tabs[0]\n- panes[0].tabs[3]: page {"kind":"page","page":"diff"} is also open at panes[0].tabs[2]\n- panes[0].tabs[4]: file target has no path\n- panes[0] has 2 preview tabs (same, same); at most 1\n- panes[0].activeId "missing" is not a tab of the pane',
     );
   });
 });

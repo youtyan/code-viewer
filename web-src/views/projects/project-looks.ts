@@ -5,6 +5,7 @@
 //
 //   PROJECT_LOOKS.get(root)     そのプロジェクトの色と頭文字 (知らなければ null)
 //   PROJECT_LOOKS.current()     いま見ているプロジェクト
+//   PROJECT_LOOKS.order()       一覧の並び (根。左の一覧と同じ順。タブのグループの並び)
 //   PROJECT_LOOKS.subscribe(fn) 色・名前・いま見ているものが変わったら呼ぶ
 //   projectMark(look)           色の四角と頭文字の要素 (.project-mark)
 //   paintProjectColor(el, c)    要素に色を付ける。子孫の CSS は var(--project-color)
@@ -78,6 +79,7 @@ export type ProjectLooks = {
   update(overview: AgentOverviewResponse | null): void;
   get(root: string): ProjectLook | null;
   current(): ProjectLook | null;
+  order(): readonly string[];
   subscribe(listener: () => void): () => void;
 };
 
@@ -104,6 +106,7 @@ export function createProjectLooks(): ProjectLooks {
     },
     get: (root) => looks.get(root) ?? null,
     current: () => (current === null ? null : (looks.get(current) ?? null)),
+    order: () => [...looks.keys()],
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

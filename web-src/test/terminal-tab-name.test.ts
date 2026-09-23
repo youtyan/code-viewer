@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { BRANCH_SHARE } from "../core/brand-fit";
-import { terminalTabName } from "../core/terminal-tab-name";
+import { projectRootOfPath, terminalTabName } from "../core/terminal-tab-name";
 import {
   baseRules,
   cascadedDeclarations,
@@ -99,5 +99,27 @@ describe("terminal tab name css", () => {
       titleEllipsis: ["hidden", "ellipsis"],
       titleMin: "0",
     });
+  });
+});
+
+// シェルのタブのグループ: シェルを起こしたフォルダを含むプロジェクト。
+describe("projectRootOfPath", () => {
+  const roots = [
+    "/work/sample-app",
+    "/work/sample-app/vendor/lib",
+    "/work/other",
+  ];
+  test.each([
+    ["根そのもの", "/work/sample-app", "/work/sample-app"],
+    ["中のフォルダ", "/work/sample-app/src", "/work/sample-app"],
+    [
+      "入れ子はいちばん深いもの",
+      "/work/sample-app/vendor/lib/x",
+      "/work/sample-app/vendor/lib",
+    ],
+    ["名前の前方だけ同じものは入らない", "/work/sample-application", null],
+    ["どれにも入らない", "/tmp", null],
+  ])("%s", (_name, path, expected) => {
+    expect(projectRootOfPath(path, roots)).toBe(expected);
   });
 });

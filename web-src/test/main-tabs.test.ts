@@ -4,16 +4,20 @@ import {
   assertLayout,
   COMMON_TABS_VERSION,
   close,
+  closeGroup,
   closeOthers,
   closeParked,
   closeToRight,
-  isCommonTarget,
+  emptyLayout,
+  groupFront,
+  isProjectKind,
   keepOpen,
   LAYOUT_VERSION,
   type Layout,
   move,
   moveToOtherSide,
   nextTab,
+  noteGroupFronts,
   open,
   openRight,
   openSide,
@@ -22,17 +26,20 @@ import {
   parseCommonTabs,
   parseLayout,
   prevTab,
-  serializeCommonTabs,
+  regroup,
+  sameTarget,
   serializeLayout,
+  setCollapsed,
   setSplit,
   showHome,
   splitRight,
   type TabTarget,
+  tabGroups,
   tabMenu,
   takeParked,
   unparkRight,
   unsplit,
-  withCommonTabs,
+  withProject,
 } from "../core/main-tabs";
 
 // 配置を短く書くための準備。"a" はファイル a、"~a" は画像 a、"$s" はシェル s
@@ -1597,95 +1604,444 @@ describe("預けた右の面のタブ (takeParked / closeParked)", () => {
 });
 
 // プロジェクトに属さないタブ (共通のタブ)。プロジェクトを切り替えても残る。
-describe("common tabs", () => {
-  /** 表と同じ書き方で、id ではなく中身で書く (足したタブの id は t<n>)。 */
-  const byTarget = (layout: Layout) =>
-    [layout.panes.left, ...(layout.panes.right ? [layout.panes.right] : [])]
-      .map((p) =>
-        p.tabs
-          .map((tab) => {
-            const t = tab.target;
-            const body =
-              t.kind === "file"
-                ? t.path
-                : t.kind === "image"
-                  ? `~${t.path}`
-                  : t.kind === "terminal"
-                    ? `$${t.session}`
-                    : `@${t.page}`;
-            return tab.id === p.activeId ? `[${body}]` : body;
-          })
-          .join(" "),
-      )
-      .join(" | ");
+// ---- タブの持ち物のプロジェクトとグループ (全プロジェクト共通のタブ) ----
+//
+// 前の版はプロジェクトに属さないタブ (共通のタブ) だけを別に持ち、読み戻しで
+// 突き合わせていた。今はタブが全部共通の 1 つの配置で、タブがプロジェクトの
+// 持ち物を持つ。下の表は前の版の「共通か」の表を「プロジェクトの持ち物か」に
+// 書き換えたもの (同じ 13 行、期待値は逆)。
 
+/** プロジェクト p の持ち物にする。 */
+const owned = (target: TabTarget, p: string): TabTarget =>
+  target.kind === "terminal" ? target : { ...target, project: `/w/${p}` };
+
+describe("project ownership", () => {
   test.each<[string, TabTarget, boolean]>([
-    ["シェル・ペイン", terminal("shell-a1"), true],
-    ["全体ボード", page("agents"), true],
-    ["設定と案内", page("help"), true],
-    ["Tools", page("tools"), true],
-    ["Search (そのリポジトリの検索結果)", page("search"), false],
-    ["ターミナルに出た画像 (絶対パス)", image("/work/images/a.png"), true],
-    ["リポジトリの画像", image("docs/a.png"), false],
-    ["ファイル", file("src/a.ts"), false],
-    ["Diff", page("diff"), false],
-    ["History", page("history"), false],
-    ["Worktrees", page("worktree"), false],
-    ["Data", page("database"), false],
-    ["Work log", page("journal"), false],
-  ])("%s → 共通: %s", (_name, target, expected) => {
-    expect(isCommonTarget(target)).toBe(expected);
+    [
+      "シェル・ペイン (グループは動いているフォルダで画面が決める)",
+      terminal("shell-a1"),
+      false,
+    ],
+    ["全体ボード", page("agents"), false],
+    ["設定と案内", page("help"), false],
+    ["Tools", page("tools"), false],
+    ["Search (そのリポジトリの検索結果)", page("search"), true],
+    ["ターミナルに出た画像 (絶対パス)", image("/work/images/a.png"), false],
+    ["リポジトリの画像", image("docs/a.png"), true],
+    ["ファイル", file("src/a.ts"), true],
+    ["Diff", page("diff"), true],
+    ["History", page("history"), true],
+    ["Worktrees", page("worktree"), true],
+    ["Data", page("database"), true],
+    ["Work log", page("journal"), true],
+  ])("%s → プロジェクトの持ち物: %s", (_name, target, expected) => {
+    expect(isProjectKind(target)).toBe(expected);
   });
 
-  test("保存は共通のタブだけを左 → 右の並びで", () => {
-    expect(
-      serializeCommonTabs(layoutOf("a @agents [$s1] @diff", "$s2 b")),
-    ).toEqual({
-      version: COMMON_TABS_VERSION,
-      targets: [page("agents"), terminal("s1"), terminal("s2")],
+  test.each([
+    {
+      name: "持ち物を付ける",
+      target: file("a"),
+      expected: owned(file("a"), "p"),
+    },
+    {
+      name: "持っていれば変えない",
+      target: owned(file("a"), "q"),
+      expected: owned(file("a"), "q"),
+    },
+    {
+      name: "シェルには付けない",
+      target: terminal("s"),
+      expected: terminal("s"),
+    },
+    {
+      name: "全体ボードには付けない",
+      target: page("agents"),
+      expected: page("agents"),
+    },
+  ])("withProject: $name", ({ target, expected }) => {
+    expect(withProject(target, "/w/p")).toEqual(expected);
+  });
+
+  test.each([
+    { a: owned(file("a"), "p"), b: owned(file("a"), "p"), same: true },
+    { a: owned(file("a"), "p"), b: owned(file("a"), "q"), same: false },
+    { a: owned(file("a"), "p"), b: file("a"), same: false },
+    { a: owned(page("diff"), "p"), b: owned(page("diff"), "q"), same: false },
+    {
+      a: owned(image("x.png"), "p"),
+      b: owned(image("x.png"), "p"),
+      same: true,
+    },
+    { a: terminal("s"), b: terminal("s"), same: true },
+  ])("sameTarget $a.project / $b.project → $same", ({ a, b, same }) => {
+    expect(sameTarget(a, b)).toBe(same);
+  });
+
+  test("同じパスでもプロジェクトが違えば別のタブ (左右ではなく同じ面に 2 枚)", () => {
+    const one = open(emptyLayout(), owned(file("a"), "p"), {
+      preview: false,
+      newId: () => "p-a",
     });
+    const two = open(one, owned(file("a"), "q"), {
+      preview: false,
+      newId: () => "q-a",
+    });
+    assertLayout(two);
+    expect(two.panes.left.tabs.map((tab) => tab.id)).toEqual(["p-a", "q-a"]);
+  });
+});
+
+describe("groups", () => {
+  /** "p:a" は /w/p のファイル a、"-:a" はプロジェクトの無いファイル a。 */
+  const tab = (spec: string) => {
+    const [p, name] = spec.split(":");
+    return {
+      id: spec,
+      target: p === "-" ? file(name) : owned(file(name), p),
+      preview: false,
+    };
+  };
+  const layoutWith = (specs: string[], active?: string): Layout => ({
+    panes: {
+      left: {
+        tabs: specs.map(tab),
+        activeId: active ?? null,
+        recent: active ? [active] : [],
+      },
+    },
+    focused: "left",
+  });
+  const keyOf = (item: { target: TabTarget }) =>
+    item.target.kind === "terminal" ? null : (item.target.project ?? null);
+  const order = ["/w/b", "/w/a"];
+  const rankOf = (item: { target: TabTarget }) => {
+    const key = keyOf(item);
+    if (key === null) return Number.MAX_SAFE_INTEGER;
+    const index = order.indexOf(key);
+    return index >= 0 ? index : order.length;
+  };
+  const ids = (layout: Layout) => layout.panes.left.tabs.map((t) => t.id);
+
+  test.each([
+    {
+      name: "グループは一覧の並び、中の順は今のまま",
+      before: ["a:1", "b:1", "a:2", "b:2"],
+      expected: ["b:1", "b:2", "a:1", "a:2"],
+    },
+    {
+      name: "どのプロジェクトのものでもないタブは右端",
+      before: ["-:x", "a:1", "-:y", "b:1"],
+      expected: ["b:1", "a:1", "-:x", "-:y"],
+    },
+    {
+      name: "一覧に無いプロジェクトは一覧のものの後ろ、どれでもないものの前",
+      before: ["-:x", "c:1", "a:1"],
+      expected: ["a:1", "c:1", "-:x"],
+    },
+    {
+      name: "並んでいれば同じ layout を返す",
+      before: ["b:1", "a:1", "-:x"],
+      expected: ["b:1", "a:1", "-:x"],
+    },
+  ])("regroup: $name", ({ before, expected }) => {
+    const layout = layoutWith(before);
+    const after = regroup(layout, rankOf);
+    expect([ids(after), after === layout]).toEqual([
+      expected,
+      JSON.stringify(before) === JSON.stringify(expected),
+    ]);
+  });
+
+  test("tabGroups は続いている同じ鍵のまとまり", () => {
+    const groups = tabGroups(
+      layoutWith(["b:1", "b:2", "a:1", "-:x"]).panes.left.tabs,
+      keyOf,
+    );
+    expect(groups.map((g) => [g.key, g.tabs.map((t) => t.id)])).toEqual([
+      ["/w/b", ["b:1", "b:2"]],
+      ["/w/a", ["a:1"]],
+      [null, ["-:x"]],
+    ]);
   });
 
   test.each([
     {
-      name: "別のプロジェクトで閉じた共通のタブは消え、前面は右隣",
-      layout: layoutOf("a @agents [$s1] @diff"),
-      common: [page("agents")],
-      expected: "a @agents [@diff]",
+      name: "前面が同じグループなら、その右",
+      before: layoutWith(["b:1", "b:2", "a:1"], "b:1"),
+      target: owned(file("new"), "b"),
+      expected: ["b:1", "n1", "b:2", "a:1"],
     },
     {
-      name: "別のプロジェクトで開いた共通のタブは左の面の末尾に足す (前面はそのまま)",
-      layout: layoutOf("[a] @diff"),
-      common: [terminal("s2"), page("help")],
-      expected: "[a] @diff $s2 @help",
+      name: "前面が別のグループなら、同じグループの末尾の右 (＋はいまのプロジェクトのグループへ)",
+      before: layoutWith(["b:1", "b:2", "a:1"], "a:1"),
+      target: owned(file("new"), "b"),
+      expected: ["b:1", "b:2", "n1", "a:1"],
     },
     {
-      name: "並びと前面はこのプロジェクトの配置のまま (共通の順では並べ替えない)",
-      layout: layoutOf("$s2 [a] $s1"),
-      common: [terminal("s1"), terminal("s2")],
-      expected: "$s2 [a] $s1",
+      name: "同じグループが無ければ面の末尾 (並べ直しは regroup)",
+      before: layoutWith(["b:1", "-:x"], "b:1"),
+      target: owned(file("new"), "a"),
+      expected: ["b:1", "-:x", "n1"],
     },
-    {
-      name: "右の面の共通のタブが消えて右の面が空になれば 1 面に戻る",
-      layout: layoutOf("[a]", "[$s1]"),
-      common: [],
-      expected: "[a]",
-    },
-    {
-      name: "ファイルと画面のタブは共通の値に関係なく残す",
-      layout: layoutOf("[a] @diff ~docs/b.png"),
-      common: [],
-      expected: "[a] @diff ~docs/b.png",
-    },
-  ])("突き合わせ: $name", ({ layout, common, expected }) => {
-    const merged = withCommonTabs(layout, common);
-    assertLayout(merged);
-    expect(byTarget(merged)).toBe(expected);
+  ])("open の入れる場所: $name", ({ before, target, expected }) => {
+    const after = open(before, target, {
+      preview: false,
+      newId: () => "n1",
+      groupOf: (t) => (t.kind === "terminal" ? null : (t.project ?? null)),
+    });
+    assertLayout(after);
+    expect(ids(after)).toEqual(expected);
+  });
+
+  test("仮のタブは同じグループの仮のタブだけを置き換える (プロジェクトごとに 1 つ)", () => {
+    const start: Layout = {
+      panes: {
+        left: {
+          tabs: [
+            { id: "pa", target: owned(file("a"), "p"), preview: true },
+            { id: "qb", target: owned(file("b"), "q"), preview: true },
+          ],
+          activeId: "qb",
+          recent: ["qb"],
+        },
+      },
+      focused: "left",
+    };
+    const after = open(start, owned(file("c"), "q"), { newId: () => "qc" });
+    assertLayout(after);
+    expect(
+      after.panes.left.tabs.map((t) => `${t.id}${t.preview ? "*" : ""}`),
+    ).toEqual(["pa*", "qc*"]);
   });
 
   test.each([
+    { id: "b:1", left: false, right: true },
+    { id: "b:2", left: true, right: false },
+    { id: "a:1", left: false, right: false },
+  ])("右クリックの左へ・右へはグループの中だけ ($id)", ({
+    id,
+    left,
+    right,
+  }) => {
+    const layout = layoutWith(["b:1", "b:2", "a:1", "-:x"]);
+    const menu = tabMenu(layout, id, keyOf);
+    expect([menu.moveLeft, menu.moveRight]).toEqual([left, right]);
+  });
+
+  test("グループの前面を覚え、グループの前面のタブを返す (無ければ先頭)", () => {
+    const layout = noteGroupFronts(
+      layoutWith(["b:1", "b:2", "a:1"], "b:2"),
+      keyOf,
+    );
+    expect([
+      layout.groupFronts,
+      groupFront(layout, "/w/b", keyOf)?.id,
+      groupFront(layout, "/w/a", keyOf)?.id,
+      groupFront(layout, "/w/c", keyOf),
+    ]).toEqual([{ "/w/b": "b:2" }, "b:2", "a:1", null]);
+  });
+
+  test("畳む・開く、グループを閉じる (閉じたら畳んだ印も外す)", () => {
+    const folded = setCollapsed(
+      layoutWith(["b:1", "a:1", "a:2"], "b:1"),
+      "/w/a",
+      true,
+    );
+    const closed = closeGroup(folded, "/w/a", keyOf);
+    assertLayout(closed);
+    expect([
+      folded.collapsed,
+      setCollapsed(folded, "/w/a", false).collapsed,
+      ids(closed),
+      closed.collapsed,
+    ]).toEqual([["/w/a"], undefined, ["b:1"], undefined]);
+  });
+});
+
+describe("persistence of projects and groups", () => {
+  test("持ち物・グループの前面・畳んだグループ・シェルのグループの控えは保存して読み戻せる", () => {
+    const layout: Layout = {
+      panes: {
+        left: {
+          tabs: [
+            { id: "a", target: owned(file("a.ts"), "p"), preview: false },
+            { id: "d", target: owned(page("diff"), "q"), preview: false },
+            { id: "s", target: terminal("s1"), preview: false },
+          ],
+          activeId: "a",
+          recent: ["a"],
+        },
+      },
+      focused: "left",
+      groupFronts: { "/w/p": "a", "/w/q": "d" },
+      collapsed: ["/w/q"],
+      terminalGroups: { s1: "/w/q" },
+    };
+    const parsed = parseLayout(
+      JSON.parse(JSON.stringify(serializeLayout(layout))),
+    );
+    expect(parsed.layout).toEqual(layout);
+  });
+
+  test("4 までの (プロジェクトごとの) 配置は、渡したプロジェクトの持ち物として読む", () => {
+    const parsed = parseLayout(
+      {
+        version: 4,
+        focused: "left",
+        panes: [
+          {
+            side: "left",
+            activeId: "a",
+            tabs: [
+              {
+                id: "a",
+                preview: false,
+                target: { kind: "file", path: "a.ts" },
+              },
+              {
+                id: "s",
+                preview: false,
+                target: { kind: "terminal", session: "s1" },
+              },
+              {
+                id: "h",
+                preview: false,
+                target: { kind: "page", page: "help" },
+              },
+              {
+                id: "d",
+                preview: false,
+                target: { kind: "page", page: "diff" },
+              },
+            ],
+          },
+        ],
+      },
+      { project: "/w/p" },
+    );
+    expect(parsed.layout.panes.left.tabs.map((t) => t.target)).toEqual([
+      owned(file("a.ts"), "p"),
+      terminal("s1"),
+      page("help"),
+      owned(page("diff"), "p"),
+    ]);
+  });
+
+  test("壊れた持ち物・グループの値は理由を全部並べて投げる", () => {
+    expect(() =>
+      parseLayout({
+        version: LAYOUT_VERSION,
+        focused: "left",
+        groupFronts: { "/w/p": 3 },
+        collapsed: "all",
+        panes: [
+          {
+            side: "left",
+            activeId: null,
+            tabs: [
+              {
+                id: "a",
+                preview: false,
+                target: { kind: "file", path: "a", project: "rel" },
+              },
+              {
+                id: "b",
+                preview: false,
+                target: { kind: "page", page: "help", project: "/w/p" },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(
+      [
+        "main tab layout is broken (2 problems):",
+        '- panes[0].tabs[0]: file target has a bad project: "rel"',
+        '- panes[0].tabs[1]: page target cannot belong to a project: "/w/p"',
+      ].join("\n"),
+    );
+    expect(() =>
+      parseLayout({
+        version: LAYOUT_VERSION,
+        focused: "left",
+        groupFronts: { "/w/p": 3 },
+        collapsed: "all",
+        panes: [{ side: "left", activeId: null, tabs: [] }],
+      }),
+    ).toThrow(
+      [
+        "main tab layout is broken (2 problems):",
+        '- groupFronts["/w/p"] is 3',
+        '- collapsed is "all"',
+      ].join("\n"),
+    );
+  });
+
+  test("もう無いタブを指すグループの前面は落として知らせる", () => {
+    const parsed = parseLayout({
+      version: LAYOUT_VERSION,
+      focused: "left",
+      groupFronts: { "/w/p": "gone" },
+      panes: [{ side: "left", activeId: null, tabs: [] }],
+    });
+    expect([parsed.layout.groupFronts, parsed.staleGroupFronts]).toEqual([
+      undefined,
+      [{ group: "/w/p", id: "gone" }],
+    ]);
+  });
+
+  test("仮のタブは面ごと・プロジェクトごとに 1 つ (2 つのプロジェクトなら 2 つ読める)", () => {
+    const tabs = [
+      {
+        id: "a",
+        preview: true,
+        target: { kind: "file", path: "a", project: "/w/p" },
+      },
+      {
+        id: "b",
+        preview: true,
+        target: { kind: "file", path: "b", project: "/w/q" },
+      },
+    ];
+    const ok = parseLayout({
+      version: LAYOUT_VERSION,
+      focused: "left",
+      panes: [{ side: "left", activeId: "a", tabs }],
+    });
+    expect(ok.layout.panes.left.tabs.map((t) => t.preview)).toEqual([
+      true,
+      true,
+    ]);
+    expect(() =>
+      parseLayout({
+        version: LAYOUT_VERSION,
+        focused: "left",
+        panes: [
+          {
+            side: "left",
+            activeId: "a",
+            tabs: [
+              tabs[0],
+              {
+                id: "c",
+                preview: true,
+                target: { kind: "file", path: "c", project: "/w/p" },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(
+      'panes[0] has 2 preview tabs (a, c); at most 1 in project "/w/p"',
+    );
+  });
+});
+
+describe("the common tabs of the previous version (read to migrate)", () => {
+  test.each([
     {
-      name: "無い (この版を初めて使う)",
+      name: "無い",
       raw: null,
       expected: { kind: "none" },
     },

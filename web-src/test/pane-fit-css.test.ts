@@ -90,9 +90,10 @@ test.each([
   // Tools の入力・出力の並べ方は面の実幅で決める。見出しの語は折らない
   [".tools-body", "container", "tools-pane / inline-size"],
   [".tools-pane-title", "white-space", "nowrap"],
-  // タブの最小幅は列の幅から決める (列が入れ物)。入らないときタブは縮む
-  [".main-tabs-strip", "container-type", "inline-size"],
-  [".main-tab", "flex", "0 1 auto"],
+  // タブの幅は中身か、列に入らないときに fitTabs が書く --main-tab-w (flex では
+  // 縮めない: 縮め方は core/tab-widths.ts)。名前は幅の中で省略する
+  [".main-tab", "flex", "0 0 auto"],
+  [".main-tab-name", "min-width", "0"],
   [".main-tab-icon", "flex", "0 0 auto"],
   [".main-tab-close", "flex", "0 0 auto"],
   [".main-tab-name", "text-overflow", "ellipsis"],
@@ -183,97 +184,47 @@ test("account cards wrap instead of shrinking below their minimum width", () => 
   ]).toEqual([true, true]);
 });
 
-// タブの最小幅: ふだん 120、列に全部が 120 で入らないときは、列の幅から ＋ の箱
-// (最後のタブのすぐ右。ボタンと左右の余白) を除いてタブの数で割った幅まで縮め、
-// 88 で止める (畳んだ 1280 の左の面でタブが 120 固定で 1.8 枚しか見えなかった)。
-// タブの数は main-tabs-view.ts が --main-tab-count へ書く。宣言を文字列で固定せず、
-// 変数を解いて数で比べる (px を調整しても落ちず、式の形が壊れたときに落ちる)。
+// タブの幅は中身 (絵・名前の全文・閉じる) で決める。上限は 200 (ターミナルは 240)。
+// 列に入りきらないときだけ main-tabs-view.ts の fitTabs が同じ割合で縮めた幅を
+// --main-tab-w に書く (縮め方の表は main-tab-widths.test.ts)。前は列の幅をタブの数で
+// 割った幅 (88〜120) にしていて、1280 で名前が 1〜2 文字しか読めなかった。
+// 宣言を文字列で固定せず、変数を解いて数で比べる。
 const tokens = cascadedDeclarations(
   rules,
   (candidate) =>
     candidate === ":root" || candidate === "html" || candidate === "body",
 );
-const px = (value: string) => evalCss(resolveVar(value, tokens));
-
-/** calc / clamp と px だけの式を数にする (100cqi などは先に置き換えておく)。 */
+/** calc と px だけの式を数にする。 */
 function evalCss(expression: string): number {
   const js = expression.replace(/calc\(/g, "(").replace(/(\d*\.?\d+)px/g, "$1");
-  if (!/^[\d\s.+\-*/(),clamp]*$/.test(js))
+  if (!/^[\d\s.+\-*/()]*$/.test(js))
     throw new Error(`not a plain length expression: ${expression}`);
-  return Function(
-    "clamp",
-    `return ${js};`,
-  )((low: number, value: number, high: number) =>
-    Math.min(Math.max(low, value), high),
-  ) as number;
+  return Function(`return ${js};`)() as number;
 }
+const px = (value: string) => evalCss(resolveVar(value, tokens));
+const unitPx = () => px("var(--space-unit)");
 
-function tabMinWidth(stripWidth: number, count: number): number {
-  const declaration = cascadedDeclarations(
+test("main tab width follows its content, capped, and is narrowed only through --main-tab-w", () => {
+  const tab = cascadedDeclarations(rules, (c) => c === ".main-tab");
+  const terminal = cascadedDeclarations(
     rules,
-    (candidate) => candidate === ".main-tab",
-  ).get("min-width");
-  const strip = cascadedDeclarations(
-    rules,
-    (candidate) => candidate === ".main-tabs-strip",
+    (c) => c === '.main-tab[data-kind="terminal"]',
   );
-  const withStrip = new Map(tokens);
-  for (const [name, value] of strip)
-    if (name.startsWith("--")) withStrip.set(name, value);
-  return evalCss(
-    resolveVar(
-      (declaration ?? "").replace(/var\(--main-tab-count, 1\)/g, String(count)),
-      withStrip,
-    ).replace(/100cqi/g, `${stripWidth}px`),
-  );
-}
-
-/** ＋ の箱の実寸 (ボタンの幅と左右の余白)。タブの最小幅が除く分と一致すること。 */
-function newButtonBox(): number {
-  const button = cascadedDeclarations(
-    rules,
-    (candidate) => candidate === ".main-tabs-action",
-  );
-  const placed = cascadedDeclarations(
-    rules,
-    (candidate) => candidate === ".main-tabs-strip > .main-tabs-new",
-  );
-  const [, side] = (placed.get("margin") ?? "").split(/\s+/);
-  return px(button.get("width") ?? "") + 2 * px(side ?? "");
-}
-
-test.each([
-  {
-    name: "wide strip, few tabs: the usual 120",
-    width: 1200,
-    count: 3,
-    shape: "max",
-  },
-  { name: "tabs just fit next to ＋", width: 600, count: 5, shape: "fit" },
-  {
-    name: "many tabs: stop at 88 and scroll",
-    width: 600,
-    count: 13,
-    shape: "min",
-  },
-])("main tab min width: $name", ({ width, count, shape }) => {
-  const min = tabMinWidth(width, count);
-  const unit = px("var(--space-unit)");
-  // タブ同士の間と、最後のタブと ＋ の間に列の隙間 (タブの数だけ)。
-  const gap = px(
-    cascadedDeclarations(
-      rules,
-      (candidate) => candidate === ".main-tabs-strip",
-    ).get("gap") ?? "",
-  );
-  const used = count * min + count * gap + newButtonBox();
-  expect(
-    shape === "max"
-      ? min === unit * 30
-      : shape === "min"
-        ? min === unit * 22
-        : Math.abs(used - width) < 0.01,
-  ).toBe(true);
+  const maxWidth = px(tab.get("max-width") ?? "");
+  expect({
+    flex: tab.get("flex"),
+    width: tab.get("width"),
+    // 列の幅をタブの数で割る最小幅は持たない (名前を削りすぎた)。
+    minWidth: tab.get("min-width") ?? null,
+    maxInRange: maxWidth >= unitPx() * 50 && maxWidth <= unitPx() * 60,
+    terminalMax: px(terminal.get("max-width") ?? "") / unitPx(),
+  }).toEqual({
+    flex: "0 0 auto",
+    width: "var(--main-tab-w, auto)",
+    minWidth: null,
+    maxInRange: true,
+    terminalMax: 60,
+  });
 });
 
 // Tools の面が狭い (2 面の左の面 486px など) ときは入力を上、出力を下に積む。

@@ -12,8 +12,9 @@ import {
 import {
   backupMainTabs,
   loadMainTabs,
+  MainTabsStoreError,
   mainTabsPath,
-  saveProjectMainTabs,
+  saveMainTabs,
 } from "./main-tabs-store";
 import {
   loadAppSettingsState,
@@ -181,10 +182,31 @@ async function handleToolsPatch(cwd: string, req: Request): Promise<Response> {
   );
 }
 
-/** このプロジェクトのメインの面のタブの配置 (無ければ null)。 */
+/**
+ * メインの面のタブの配置 (全プロジェクト共通) と版の番号、この裏の根 (画面が
+ * タブの持ち物のプロジェクトに使う)。前の版の保存なら移してから返す (migration)。
+ */
 async function handleTabsGet(cwd: string): Promise<Response> {
   try {
-    return json(loadMainTabs(mainTabsPath(), cwd));
+    const loaded = await loadMainTabs(mainTabsPath());
+    switch (loaded.kind) {
+      case "none":
+        return json({ root: cwd, layout: null, rev: null });
+      case "newer":
+        return json({
+          root: cwd,
+          layout: null,
+          rev: null,
+          newer: loaded.version,
+        });
+      case "ok":
+        return json({
+          root: cwd,
+          layout: loaded.layout,
+          rev: loaded.rev,
+          ...(loaded.migration ? { migration: loaded.migration } : {}),
+        });
+    }
   } catch (error) {
     console.error("[code-viewer] main tabs are not loaded:", error);
     return textError(
@@ -194,27 +216,57 @@ async function handleTabsGet(cwd: string): Promise<Response> {
   }
 }
 
-async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
+/**
+ * 配置を書く。本文は `{ baseRev, base, layout }` (MainTabsWrite)。別の窓が先に
+ * 書いていれば重ねて書き、重ねた値を返す。新しい版のファイルは書かない (409)。
+ */
+async function handleTabsPut(req: Request): Promise<Response> {
   const body = await parseJsonBody(req, MAX_STATE_PATCH_BODY_BYTES);
   if (body instanceof Response) return body;
   if (!body || typeof body !== "object" || !("layout" in body))
     return textError("main tabs body has no layout", 400);
-  try {
-    await saveProjectMainTabs(
-      mainTabsPath(),
-      cwd,
-      body.layout,
-      Date.now(),
-      "common" in body ? body.common : undefined,
+  const rawRev = "baseRev" in body ? body.baseRev : undefined;
+  const baseRev =
+    rawRev === null
+      ? null
+      : typeof rawRev === "number" && Number.isInteger(rawRev) && rawRev >= 0
+        ? rawRev
+        : undefined;
+  if (baseRev === undefined)
+    return textError(
+      `main tabs body has a bad baseRev: ${JSON.stringify(rawRev)}`,
+      400,
     );
-    return json({ ok: true });
+  const base = "base" in body ? body.base : undefined;
+  if (base === undefined)
+    return textError("main tabs body has no base (null when unknown)", 400);
+  let saved: Awaited<ReturnType<typeof saveMainTabs>>;
+  try {
+    saved = await saveMainTabs(mainTabsPath(), {
+      baseRev,
+      base,
+      layout: body.layout,
+    });
   } catch (error) {
     console.error("[code-viewer] main tabs are not saved:", error);
     return textError(
       `failed to save main tabs: ${formatErrorDetail(error)}`,
-      500,
+      error instanceof MainTabsStoreError && error.code === "invalid-input"
+        ? 400
+        : 500,
     );
   }
+  if (saved.kind === "newer")
+    return textError(
+      `the saved main tabs were written by a newer version (file version ${saved.version}); they are not overwritten`,
+      409,
+    );
+  return json({
+    rev: saved.rev,
+    layout: saved.layout,
+    merged: saved.merged,
+    ...(saved.migration ? { migration: saved.migration } : {}),
+  });
 }
 
 /** 画面が読めなかった保存値を上書きの前に退避する。写した先のパスを返す。 */
@@ -259,7 +311,7 @@ export async function handleStateRoute(
         methods: ["GET", "PUT"],
         sideEffect: (method) => method !== "GET",
         handler: () =>
-          req.method === "GET" ? handleTabsGet(cwd) : handleTabsPut(cwd, req),
+          req.method === "GET" ? handleTabsGet(cwd) : handleTabsPut(req),
       },
       "/_state/tabs/backup": {
         methods: ["POST"],

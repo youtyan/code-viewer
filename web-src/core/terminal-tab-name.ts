@@ -34,3 +34,21 @@ export function terminalTabName(
     full: `${project.name}${TAB_PROJECT_SEPARATOR}${title}`,
   };
 }
+
+/**
+ * パス (シェルを起こしたフォルダ) を含むプロジェクトの根。いちばん深いものを
+ * 選ぶ (入れ子のリポジトリで外側に寄せない)。どれにも入らなければ null。
+ * シェルのタブのグループ (views/main-tabs) に使う。
+ */
+export function projectRootOfPath(
+  path: string,
+  roots: readonly string[],
+): string | null {
+  let best: string | null = null;
+  for (const root of roots) {
+    const inside =
+      path === root || path.startsWith(root.endsWith("/") ? root : `${root}/`);
+    if (inside && (best === null || root.length > best.length)) best = root;
+  }
+  return best;
+}

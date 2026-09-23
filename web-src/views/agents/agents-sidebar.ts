@@ -72,6 +72,12 @@ export type AgentsSidebarDeps = {
   dismissNotifyHint(): void;
   /** 行に載せたときの覗き窓 (既定は全体ボードと共有の 1 つ)。 */
   preview?: PanePreview;
+  /**
+   * プロジェクトの見出しを押した: そのプロジェクトへ移る。前面はそのプロジェクトの
+   * タブのグループで最後に前面だったタブ (無ければフォルダ表示)。app.ts の
+   * switchToProjectGroup。無ければ、いま見ている画面のまま移る。
+   */
+  switchProject?(info: AgentProjectInfo): void;
 };
 
 export type AgentsSidebar = {
@@ -302,8 +308,11 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       // いま見ているプロジェクトは何もしない (読み直さない)。起こしている
       // 最中の押し直しは project-actions が無視する。
       if (here || !info.git) return;
-      // 同じタブで、いま見ている画面のまま移る (ヘッダの切替と同じ)。
-      // 登録していなければ確かめずに登録してから移る。
+      // 同じタブで移る。登録していなければ確かめずに登録してから移る。
+      if (deps.switchProject) {
+        deps.switchProject(info);
+        return;
+      }
       void deps.projects.open(info, currentPath(), { confirmRegister: false });
     });
     head.append(twisty, toggle);

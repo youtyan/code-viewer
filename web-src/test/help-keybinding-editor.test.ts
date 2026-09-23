@@ -132,9 +132,11 @@ describe("the list of actions", () => {
       keysOf(root, "toggle-theme"),
       keysOf(root, "main-tab-previous"),
       keysOf(root, "new-agent"),
+      // 前・次のプロジェクトへ (タブのグループの作業で足した 2 つの操作)。
+      keysOf(root, "project-next"),
     ]).toEqual([
       ["Global", "Panels", "Screens", "Tabs", "Sidebar", "Main Panel"],
-      80,
+      82,
       ["t"],
       [
         "g+Shift+T",
@@ -144,6 +146,7 @@ describe("the list of actions", () => {
         "Meta+ArrowLeft (PWA)",
       ],
       [],
+      ["Meta+Shift+ArrowDown", "Ctrl+Shift+ArrowDown"],
     ]);
   });
 

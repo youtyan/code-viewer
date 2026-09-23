@@ -11,11 +11,9 @@ import {
   vi,
 } from "vitest";
 import { listColumnLayout } from "../core/list-column";
-import type {
-  SerializedCommonTabs,
-  SerializedLayout,
-  TabTarget,
-} from "../core/main-tabs";
+import { TAB_FLOOR_UNITS } from "../core/tab-widths";
+import type { SavedBase } from "../views/main-tabs/main-tabs-view";
+import type { SerializedLayout, TabTarget } from "../core/main-tabs";
 import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import { HISTORY_WIDTH } from "../core/panel-sizes";
 import { lastTabNumber } from "../core/pwa";
@@ -60,13 +58,15 @@ function setup(
   backupSaved: () => Promise<string> = async () =>
     "/state/main-tabs.json.broken-sample",
   initial: AppRoute = fileRoute("src/app.ts"),
-  loadCommon: () => Promise<unknown> = async () => null,
+  /** このページのプロジェクトの根 (読み戻しの応答の root)。 */
+  root: string | null = null,
   extra: Partial<MainTabsDeps> = {},
 ) {
   const mount = document.createElement("nav");
   document.body.append(mount);
   const saves: SerializedLayout[] = [];
-  const commonSaves: Array<SerializedCommonTabs | undefined> = [];
+  /** 書くときに添えた base (前に読んだ・書いた保存)。 */
+  const bases: SavedBase[] = [];
   const backups: string[] = [];
   const fronts: string[] = [];
   const terminals: Array<{ open: string[]; closed: string[] }> = [];
@@ -105,11 +105,13 @@ function setup(
     ],
     loadSaved: async () => ({
       layout: await loadSaved(),
-      common: await loadCommon(),
+      rev: 1,
+      root,
     }),
-    save: async (layout, _keepalive, common) => {
+    save: async (layout, _keepalive, base) => {
       saves.push(layout);
-      commonSaves.push(common);
+      bases.push(base);
+      return undefined;
     },
     backupSaved: async () => {
       backups.push("backup");
@@ -133,7 +135,7 @@ function setup(
     mount,
     handle,
     saves,
-    commonSaves,
+    bases,
     backups,
     fronts,
     terminals,
@@ -365,7 +367,7 @@ describe("main tabs view: 読み戻し", () => {
     const error = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
-    const newer = { version: 5, focused: "left", panes: [] };
+    const newer = { version: 6, focused: "left", panes: [] };
     const { handle, saves, names } = setup(async () => newer);
     await handle.restore();
     handle.syncRoute(fileRoute("src/other.ts"));
@@ -379,7 +381,7 @@ describe("main tabs view: 読み戻し", () => {
       0,
       [">other.ts (preview)"],
       [
-        "[code-viewer] main tabs: the saved layout was written by a newer version (layout version 5, this page reads up to 4); it is kept as it is and tabs are not saved on this page",
+        "[code-viewer] main tabs: the saved layout was written by a newer version (layout version 6, this page reads up to layout version 5); it is kept as it is and tabs are not saved on this page",
       ],
     ]);
   });
@@ -407,120 +409,543 @@ describe("main tabs view: 読み戻し", () => {
 // プロジェクトのページで読み戻す) と、そのプロジェクトの配置に共通のタブを
 // 突き合わせる。savedLayout は、このプロジェクトで保存した配置 (シェル
 // shell-ab12 を含む)。
-describe("main tabs view: 共通のタブ", () => {
-  const common = (...targets: TabTarget[]) => ({ version: 1, targets });
-  const shell = (session: string): TabTarget => ({ kind: "terminal", session });
-  test.each([
-    {
-      name: "別のプロジェクトでシェルを閉じ、ボードを開いた",
-      layout: savedLayout as unknown,
-      common: common({ kind: "page", page: "agents" }),
-      names: ["README.md", ">app.ts (preview)", "diff", "shot.png", "agents"],
-      saved: [{ kind: "page", page: "agents" }],
-    },
-    {
-      name: "初めて開くプロジェクト (配置が無い) にも共通のタブが出る",
-      layout: null,
-      common: common(shell("shell-ab12"), { kind: "page", page: "help" }),
-      names: [">app.ts (preview)", "Shell shell-ab12", "help"],
-      saved: [shell("shell-ab12"), { kind: "page", page: "help" }],
-    },
-    {
-      name: "共通がまだ無い (前の版の保存) なら配置のまま、次の保存で共通ができる",
-      layout: savedLayout as unknown,
-      common: null,
-      names: [
-        "README.md",
-        ">app.ts (preview)",
-        "diff",
-        "shot.png",
-        "Shell shell-ab12",
-      ],
-      saved: [shell("shell-ab12")],
-    },
-  ])("$name", async ({
-    layout,
-    common: saved,
-    names: expected,
-    saved: out,
-  }) => {
-    vi.useFakeTimers();
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const { handle, names, commonSaves } = setup(
-      async () => layout,
-      undefined,
-      undefined,
-      undefined,
+// タブは全プロジェクト共通で、プロジェクトごとのグループに並ぶ (設計: タブと
+// プロジェクト)。前の版の「共通のタブ」の節 (別のプロジェクトで開閉した共通の
+// タブの突き合わせ) は、タブが全部共通になったので、この節に置き換えた。
+describe("main tabs view: プロジェクトのグループ", () => {
+  const APP = "/work/sample-app";
+  const LIB = "/work/sample-lib";
+  const looks: Record<string, { name: string; initials: string }> = {
+    [APP]: { name: "sample-app", initials: "SA" },
+    [LIB]: { name: "sample-lib", initials: "SL" },
+  };
+  const groupDeps = (
+    calls: string[] = [],
+    extra: Partial<MainTabsDeps> = {},
+  ): Partial<MainTabsDeps> => ({
+    projectOrder: () => [LIB, APP],
+    projectLook: (root) =>
+      looks[root]
+        ? { root, ...looks[root], color: root === APP ? "violet" : "green" }
+        : null,
+    terminalProject: (session) => (session === "shell-lib" ? LIB : null),
+    switchProject: (root, route, tab) =>
+      calls.push(
+        `switch:${root}:${route ? (route.screen === "file" ? route.path : route.screen) : "-"}:${tab?.id ?? "-"}`,
+      ),
+    foreignInPlace: () => true,
+    newTabId: (() => {
+      let n = 0;
+      return () => `n${++n}`;
+    })(),
+    ...extra,
+  });
+  const owned = (id: string, target: object, project: string) => ({
+    id,
+    preview: false,
+    target: { ...target, project },
+  });
+  const saved = {
+    version: 5,
+    focused: "left",
+    panes: [
+      {
+        side: "left",
+        activeId: "a1",
+        tabs: [
+          {
+            id: "ag",
+            preview: false,
+            target: { kind: "page", page: "agents" },
+          },
+          owned("l1", { kind: "file", path: "lib.ts" }, LIB),
+          owned("a1", { kind: "file", path: "src/app.ts" }, APP),
+          owned("ld", { kind: "page", page: "diff" }, LIB),
+          {
+            id: "sh",
+            preview: false,
+            target: { kind: "terminal", session: "shell-lib" },
+          },
+          owned("a2", { kind: "file", path: "README.md" }, APP),
+        ],
+      },
+    ],
+  };
+  /** 左の面のタブ列を、並びのまま短く書く (札は [頭文字 枚数?]、＋ は +)。 */
+  const strip = (mount: HTMLElement) =>
+    [
+      ...(mount.querySelector<HTMLElement>(
+        '.main-tabs-pane[data-side="left"] .main-tabs-strip',
+      )?.children ?? []),
+    ].map((child) => {
+      if (child.classList.contains("main-tab-group")) {
+        const collapsed = child.classList.contains("main-tab-group-collapsed");
+        return `[${child.querySelector(".project-mark")?.textContent}${collapsed ? ` ${child.querySelector(".main-tab-group-count")?.textContent}` : ""}]`;
+      }
+      if (child.classList.contains("main-tabs-new")) return "+";
+      const tabs = [...child.querySelectorAll(".main-tab")].map(
+        (tab) =>
+          `${tab.classList.contains("main-tab-active") ? ">" : ""}${tab.querySelector(".main-tab-name")?.textContent}`,
+      );
+      return `${child.getAttribute("data-group") ?? "-"}(${tabs.join(" ")})`;
+    });
+
+  test("グループは左の一覧の並び、＋は最後のグループのタブの右、どのプロジェクトのものでもないタブは右端", async () => {
+    const { handle, mount } = setup(
       async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps(),
     );
     await handle.restore();
-    handle.flush(false);
-    vi.useRealTimers();
-    expect([names(), commonSaves[commonSaves.length - 1]?.targets]).toEqual([
-      expected,
-      out,
+    expect(strip(mount)).toEqual([
+      "[SL]",
+      `${LIB}(lib.ts diff Shell shell-lib)`,
+      "[SA]",
+      `${APP}(>app.ts README.md)`,
+      "+",
+      "-(agents)",
     ]);
+  });
+
+  test("シェルのグループが分かるまでは保存した控えで並べる (読み込み直後にタブが動かない)", async () => {
+    let known = false;
+    const { handle, mount } = setup(
+      async () => ({ ...saved, terminalGroups: { "shell-lib": LIB } }),
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps([], {
+        terminalProject: (session) =>
+          known ? (session === "shell-lib" ? LIB : null) : undefined,
+      }),
+    );
+    await handle.restore();
+    const before = strip(mount);
+    known = true;
+    handle.localize();
+    expect(before).toEqual(strip(mount));
+    expect(before[1]).toBe(`${LIB}(lib.ts diff Shell shell-lib)`);
+  });
+
+  test("取り直しの答えがこの窓の保存より古い版なら重ねない (閉じたタブを古い値で戻さない)", async () => {
+    vi.useFakeTimers();
+    const layouts: unknown[] = [];
+    let loads = 0;
+    const { handle, mount } = setup(
+      async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps([], {
+        // 1 回目は読み戻し (rev 1)。2 回目 (取り直し) は、保存 (rev 2) より前の
+        // rev 1 が遅れて届く。
+        loadSaved: async () => {
+          loads += 1;
+          return { layout: saved, rev: 1, root: APP };
+        },
+        save: async (layout) => {
+          layouts.push(layout);
+          return { rev: 2, layout, merged: false };
+        },
+      }),
+    );
+    await handle.restore();
+    mount
+      .querySelector<HTMLElement>('.main-tab[data-tab-id="l1"] .main-tab-close')
+      ?.click();
+    vi.advanceTimersByTime(1000);
+    await vi.waitFor(() => expect(layouts.length).toBe(1));
+    await Promise.resolve();
+    await handle.refreshFromServer();
+    vi.useRealTimers();
+    expect([loads, strip(mount)[1]]).toEqual([
+      2,
+      `${LIB}(diff Shell shell-lib)`,
+    ]);
+  });
+
+  // タブの幅 (fitTabs)。happy-dom は配置をしないので、タブの中身の幅を名前の長さから
+  // 作り、列の幅を決めて見る。縮めた幅は各タブの --main-tab-w (style.css の .main-tab)。
+  describe("タブの幅", () => {
+    const NAME_PX = 8;
+    const geometry = (stripWidth: number) => {
+      vi.spyOn(
+        HTMLElement.prototype,
+        "getBoundingClientRect",
+      ).mockImplementation(function (this: HTMLElement) {
+        let width = 0;
+        if (this.classList.contains("main-tab")) {
+          const set = this.style.getPropertyValue("--main-tab-w");
+          width = set
+            ? Number.parseFloat(set)
+            : 60 +
+              (this.querySelector(".main-tab-name")?.textContent?.length ?? 0) *
+                NAME_PX;
+        } else if (this.classList.contains("main-tab-group")) width = 60;
+        else if (this.classList.contains("main-tab-group-count")) width = 10;
+        else if (this.classList.contains("main-tabs-new")) width = 28;
+        return {
+          left: 0,
+          top: 0,
+          width,
+          height: 34,
+          right: width,
+          bottom: 34,
+        } as DOMRect;
+      });
+      for (const strip of document.querySelectorAll<HTMLElement>(
+        ".main-tabs-strip",
+      )) {
+        Object.defineProperty(strip, "clientWidth", {
+          configurable: true,
+          get: () => stripWidth,
+        });
+        strip.style.setProperty("--space-unit", "4px");
+      }
+    };
+    const widths = (mount: HTMLElement) =>
+      Object.fromEntries(
+        [...mount.querySelectorAll<HTMLElement>(".main-tab")].map((tab) => [
+          tab.querySelector(".main-tab-name")?.textContent,
+          tab.style.getPropertyValue("--main-tab-w") || "auto",
+        ]),
+      );
+
+    test("入りきるなら中身の幅のまま、あふれたら同じ割合で縮め、名前を削りすぎない", async () => {
+      const { handle, mount } = setup(
+        async () => saved,
+        undefined,
+        undefined,
+        fileRoute("src/app.ts"),
+        APP,
+        groupDeps(),
+      );
+      await handle.restore();
+      geometry(2000);
+      handle.localize();
+      const wide = widths(mount);
+      geometry(700);
+      handle.localize();
+      const narrow = widths(mount);
+      const floor = 4 * TAB_FLOOR_UNITS;
+      // 中身の幅 (この表の作り: 60 + 名前の字数 × 8)。
+      const natural = (name: string) => 60 + name.length * NAME_PX;
+      expect([
+        Object.values(wide).every((w) => w === "auto"),
+        // 縮めても下限 (名前が 8 文字ほど読める幅) より細くしない。もともと下限より
+        // 細いタブはそのまま (名前は全部出る)。
+        Object.entries(narrow).map(([name, w]) => [
+          name,
+          Number.parseFloat(w) >= Math.min(natural(name ?? ""), floor),
+        ]),
+        narrow["Shell shell-lib"],
+      ]).toEqual([
+        true,
+        Object.keys(narrow).map((name) => [name, true]),
+        `${floor}px`,
+      ]);
+    });
+
+    test("グループを畳む・開くで、畳んだグループより左のタブの幅は変わらない", async () => {
+      const { handle, mount } = setup(
+        async () => saved,
+        undefined,
+        undefined,
+        fileRoute("src/app.ts"),
+        APP,
+        groupDeps(),
+      );
+      await handle.restore();
+      geometry(700);
+      handle.localize();
+      const before = widths(mount);
+      mount
+        .querySelector<HTMLElement>(
+          `.main-tab-group[data-group="${APP}"] .main-tab-group-toggle`,
+        )
+        ?.click();
+      geometry(700);
+      handle.localize();
+      const folded = widths(mount);
+      // sample-lib (左) のタブと、畳んだ sample-app の前面のタブの幅。
+      expect([
+        folded["lib.ts"],
+        folded.diff,
+        folded["Shell shell-lib"],
+        folded["app.ts"],
+      ]).toEqual([
+        before["lib.ts"],
+        before.diff,
+        before["Shell shell-lib"],
+        before["app.ts"],
+      ]);
+      // 縮めていた (列があふれていた) ことも確かめる。
+      expect(before["Shell shell-lib"]).not.toBe("auto");
+    });
+  });
+
+  test("札を押すと畳み (前面のタブと枚数は残す)、もう一度押すと開く。畳んだことは保存する", async () => {
+    vi.useFakeTimers();
+    const { handle, mount, saves } = setup(
+      async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps(),
+    );
+    await handle.restore();
+    const toggle = (root: string) =>
+      mount
+        .querySelector<HTMLElement>(
+          `.main-tab-group[data-group="${root}"] .main-tab-group-toggle`,
+        )
+        ?.click();
+    toggle(APP);
+    toggle(LIB);
+    const folded = strip(mount);
+    handle.flush(false);
+    const savedCollapsed = saves[saves.length - 1]?.collapsed;
+    toggle(APP);
+    vi.useRealTimers();
+    expect([folded, savedCollapsed, strip(mount)]).toEqual([
+      ["[SL 3]", `${LIB}()`, "[SA 2]", `${APP}(>app.ts)`, "+", "-(agents)"],
+      [APP, LIB],
+      [
+        "[SL 3]",
+        `${LIB}()`,
+        "[SA]",
+        `${APP}(>app.ts README.md)`,
+        "+",
+        "-(agents)",
+      ],
+    ]);
+  });
+
+  test("別のプロジェクトの画面のタブを前面に出すと、そのプロジェクトへ移る (このページでは開かない)", async () => {
+    const calls: string[] = [];
+    const { handle, mount, navigations } = setup(
+      async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps(calls),
+    );
+    await handle.restore();
+    const before = navigations.length;
+    mount.querySelector<HTMLElement>('.main-tab[data-tab-id="ld"]')?.click();
+    expect([
+      calls,
+      navigations.slice(before),
+      handle.panes().fronts.left?.id,
+      handle.panes().routeSide,
+    ]).toEqual([[`switch:${LIB}:diff:ld`], [], "ld", null]);
+  });
+
+  test.each([
+    { name: "入口の下 (その場で出せる)", inPlace: true, calls: [] },
+    {
+      name: "1 つで完結するサーバ (移って出す)",
+      inPlace: false,
+      calls: [`switch:${LIB}:lib.ts:l1`],
+    },
+  ])("別のプロジェクトのファイル: $name", async ({
+    inPlace,
+    calls: expected,
+  }) => {
+    const calls: string[] = [];
+    const { handle, mount, navigations } = setup(
+      async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps(calls, { foreignInPlace: () => inPlace }),
+    );
+    await handle.restore();
+    const before = navigations.length;
+    mount.querySelector<HTMLElement>('.main-tab[data-tab-id="l1"]')?.click();
+    // 本文 (このページの route) は移らない: ファイルは面の箱に出す (app.ts)。
+    expect([
+      calls,
+      navigations.slice(before),
+      handle.panes().fronts.left?.id,
+      handle.isRouteTab(handle.panes().fronts.left),
+      handle.paneRoute("right"),
+    ]).toEqual([expected, [], "l1", false, null]);
   });
 
   test.each([
     {
-      name: "新しい版の共通のタブは使わず、書かない",
-      common: { version: 99, targets: [] },
-      backup: async () => "/state/main-tabs.json.broken-sample",
-      written: false,
-      message: "written by a newer version (common tabs version 99",
+      name: "前に見ていたこのプロジェクトのタブへ",
+      tabs: ["ld", "a1", "a2"],
+      seen: ["a1", "a2"],
+      expected: "a1",
     },
     {
-      name: "壊れた共通のタブは退避してから、この画面の共通のタブで書き直す",
-      common: { version: 1, targets: [{ kind: "file", path: "a" }] },
-      backup: async () => "/state/main-tabs.json.broken-sample",
-      written: true,
-      message: "backed up to /state/main-tabs.json.broken-sample",
+      name: "このプロジェクトのタブが無ければ本文の既定 (フォルダ表示)",
+      tabs: ["ld", "a2"],
+      seen: ["a2"],
+      expected: null,
     },
-    {
-      name: "退避できなければ書かない",
-      common: { version: 1, targets: [{ kind: "file", path: "a" }] },
-      backup: async () => {
-        throw new Error("sample disk failure");
-      },
-      written: false,
-      message: "could not be backed up",
-    },
-  ])("$name (理由は console.error に)", async ({
-    common: saved,
-    backup,
-    written,
-    message,
+  ])("閉じたあとの前面が別のプロジェクトの画面になるなら、移らない: $name", async ({
+    tabs,
+    seen,
+    expected,
   }) => {
-    vi.useFakeTimers();
-    const error = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const { handle, names, commonSaves } = setup(
-      async () => savedLayout,
+    const calls: string[] = [];
+    const all = saved.panes[0].tabs;
+    const layout = {
+      ...saved,
+      panes: [
+        {
+          side: "left",
+          activeId: seen[0],
+          tabs: tabs.map((id) => all.find((tab) => tab.id === id)),
+        },
+      ],
+    };
+    const { handle, mount } = setup(
+      async () => layout,
       undefined,
-      backup,
       undefined,
-      async () => saved,
+      fileRoute("README.md"),
+      APP,
+      groupDeps(calls),
     );
     await handle.restore();
-    handle.flush(false);
-    vi.useRealTimers();
-    const logged = error.mock.calls.map((call) => call.map(String).join(" "));
-    expect([
-      names(),
-      commonSaves[commonSaves.length - 1] !== undefined,
-      logged.some((line) => line.includes(message)),
-    ]).toEqual([
+    for (const id of seen)
+      mount
+        .querySelector<HTMLElement>(`.main-tab[data-tab-id="${id}"]`)
+        ?.click();
+    // 最後に見た a2 を閉じる: 並びの隣は別のプロジェクトの Diff。
+    mount
+      .querySelector<HTMLElement>('.main-tab[data-tab-id="a2"] .main-tab-close')
+      ?.click();
+    expect([calls, handle.panes().fronts.left?.id ?? null]).toEqual([
+      [],
+      expected,
+    ]);
+  });
+
+  test("このページのプロジェクトで開いたファイルは、このプロジェクトのグループに入る", async () => {
+    const { handle, mount } = setup(
+      async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps(),
+    );
+    await handle.restore();
+    // 前面を別のプロジェクトのファイルにしてから、木で開いたファイル (URL の route)。
+    mount.querySelector<HTMLElement>('.main-tab[data-tab-id="l1"]')?.click();
+    handle.syncRoute(fileRoute("docs/new.md"));
+    expect(strip(mount)).toEqual([
+      "[SL]",
+      `${LIB}(lib.ts diff Shell shell-lib)`,
+      "[SA]",
+      `${APP}(app.ts README.md >new.md)`,
+      "+",
+      "-(agents)",
+    ]);
+  });
+
+  test("▾ のメニュー: このプロジェクトに切り替える (そのグループで最後に前面だったタブ)・このグループを閉じる", async () => {
+    const calls: string[] = [];
+    const { handle, mount } = setup(
+      async () => ({ ...saved, groupFronts: { [LIB]: "sh" } }),
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps(calls),
+    );
+    await handle.restore();
+    const menuItems = (root: string) => {
+      mount
+        .querySelector<HTMLElement>(
+          `.main-tab-group[data-group="${root}"] .main-tab-group-menu`,
+        )
+        ?.click();
+      const items = [
+        ...document.querySelectorAll<HTMLElement>(
+          ".gdp-context-menu [role=menuitem]",
+        ),
+      ];
+      return items;
+    };
+    const here = menuItems(APP).map(
+      (item) =>
+        `${item.textContent}${(item as HTMLButtonElement).disabled ? " (disabled)" : ""}`,
+    );
+    closeContextMenu();
+    menuItems(LIB)
+      .find((item) => item.textContent === "Switch to this project")
+      ?.click();
+    menuItems(LIB)
+      .find((item) => item.textContent === "Close this group")
+      ?.click();
+    expect([here, calls, strip(mount)]).toEqual([
       [
-        "README.md",
-        ">app.ts (preview)",
-        "diff",
-        "shot.png",
-        "Shell shell-ab12",
+        // 札には頭文字しか無いので、メニューの頭にプロジェクトの名前。
+        "sample-app (disabled)",
+        "Switch to this project (disabled)",
+        "Collapse",
+        "Close this group",
       ],
-      written,
-      true,
+      [`switch:${LIB}:-:sh`],
+      ["[SA]", `${APP}(>app.ts README.md)`, "+", "-(agents)"],
+    ]);
+  });
+
+  test("別のグループの間には落とせない (印も出さない)。同じグループの中は落とせる", async () => {
+    const { handle, mount } = setup(
+      async () => saved,
+      undefined,
+      undefined,
+      fileRoute("src/app.ts"),
+      APP,
+      groupDeps(),
+    );
+    await handle.restore();
+    const el = (id: string) =>
+      mount.querySelector<HTMLElement>(
+        `.main-tab[data-tab-id="${id}"]`,
+      ) as HTMLElement;
+    const stripEl = mount.querySelector<HTMLElement>(
+      '.main-tabs-pane[data-side="left"] .main-tabs-strip',
+    ) as HTMLElement;
+    // happy-dom は配置をしないので、タブの矩形を並びの順に 100px ずつ置く。
+    const order = ["l1", "ld", "sh", "a1", "a2", "ag"];
+    for (const [index, id] of order.entries())
+      el(id).getBoundingClientRect = () =>
+        ({
+          left: index * 100,
+          width: 100,
+          right: index * 100 + 100,
+        }) as DOMRect;
+    const drag = (id: string, x: number) => {
+      el(id).dispatchEvent(new Event("dragstart", { bubbles: true }));
+      const over = new Event("dragover", { bubbles: true, cancelable: true });
+      Object.assign(over, { clientX: x });
+      stripEl.dispatchEvent(over);
+      const marked = [...mount.querySelectorAll(".main-tab-drop-before")].map(
+        (tab) => (tab as HTMLElement).dataset.tabId,
+      );
+      el(id).dispatchEvent(new Event("dragend", { bubbles: true }));
+      return [over.defaultPrevented, marked];
+    };
+    // a2 を l1 の前 (別のグループ) へ / a1 の前 (同じグループ) へ。
+    expect([drag("a2", 10), drag("a2", 310)]).toEqual([
+      [false, []],
+      [true, ["a1"]],
     ]);
   });
 });
@@ -2214,21 +2639,6 @@ describe("main tabs view: 左右 2 面", () => {
       style.getPropertyValue("--split-right-w"),
     ]).toEqual(["640px", "639px"]);
     document.body.classList.remove("sample-column-hidden");
-  });
-
-  // タブの最小幅は列の幅をタブの数で割って決める (style.css の .main-tab)。
-  test("タブの列にタブの数を書く", async () => {
-    const { handle, mount } = setup(async () => null);
-    await handle.restore();
-    handle.syncRoute({ screen: "diff", range });
-    handle.openTerminal("shell-a1");
-    const strip = mount.querySelector<HTMLElement>(
-      '.main-tabs-pane[data-side="left"] .main-tabs-strip',
-    );
-    expect([
-      strip?.style.getPropertyValue("--main-tab-count"),
-      strip?.querySelectorAll(".main-tab").length,
-    ]).toEqual(["3", 3]);
   });
 
   test("右の面にフォーカスがあるとき左のタブを押すと、本文をそのタブの route に合わせる", async () => {

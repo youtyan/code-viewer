@@ -5,7 +5,9 @@ import {
   readFileSync,
   realpathSync,
   statSync,
+  unwatchFile,
   watch,
+  watchFile,
 } from "node:fs";
 import { stat } from "node:fs/promises";
 import { basename, dirname, extname, join, relative } from "node:path";
@@ -76,6 +78,7 @@ import {
 import { processAlive } from "./file-lock";
 import { writeUploadedFiles } from "./file-upload";
 import * as git from "./git";
+import { mainTabsPath } from "./main-tabs-store";
 import {
   GithubIssueListError,
   normalizeGithubIssueListLimit,
@@ -3486,6 +3489,10 @@ const shutdown = createProcessShutdown([
       watcher?.close();
     },
   },
+  {
+    label: "code-viewer main tabs watch stop",
+    run: () => unwatchFile(mainTabsWatched),
+  },
   { label: "code-viewer server close", run: () => server.close() },
 ]);
 
@@ -3582,6 +3589,20 @@ if (backendMode && entryPid !== null && entryToken !== null) {
     });
   }, ENTRY_WATCH_INTERVAL_MS).unref();
 }
+
+// タブの配置 (全プロジェクト共通、main-tabs.json) は、別のプロジェクトの裏や
+// 別の窓が書く。書き換わったら画面へ知らせ、画面が取り直して自分の配置に重ねる
+// (views/main-tabs の refreshFromServer)。書き込みは原子的な置き換え (rename) なので、
+// fs.watch ではなく時刻を見る (置き換えた後も同じパスを見続ける)。
+const MAIN_TABS_WATCH_INTERVAL_MS = 1000;
+const mainTabsWatched = mainTabsPath();
+watchFile(
+  mainTabsWatched,
+  { interval: MAIN_TABS_WATCH_INTERVAL_MS, persistent: false },
+  (now, before) => {
+    if (now.mtimeMs !== before.mtimeMs) sendSse("tabs", String(now.mtimeMs));
+  },
+);
 
 startDevAssetReload({
   enabled: process.env.CODE_VIEWER_DEV === "1",

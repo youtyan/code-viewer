@@ -1177,3 +1177,49 @@ describe("where a key works (inputs, terminals, the installed window)", () => {
     expect(sanitizeKeymapOverrides(raw)).toEqual(expected);
   });
 });
+
+// 左の一覧の並びで前・次のプロジェクトへ (⌘⇧↑↓、Windows / Linux は Ctrl+Shift)。
+// 設定の画面から変えられるよう、キーの定義の 1 つの操作として持つ。
+describe("switching projects with the arrow keys", () => {
+  test.each([
+    ["⌘⇧↑", "ArrowUp", { meta: true, shift: true }, "project-previous"],
+    ["⌘⇧↓", "ArrowDown", { meta: true, shift: true }, "project-next"],
+    [
+      "Ctrl+Shift+↑",
+      "ArrowUp",
+      { ctrl: true, shift: true },
+      "project-previous",
+    ],
+    ["Ctrl+Shift+↓", "ArrowDown", { ctrl: true, shift: true }, "project-next"],
+    [
+      "Ctrl+↓ は今までどおり 1 画面下へ",
+      "ArrowDown",
+      { ctrl: true },
+      "scroll-main-page-down",
+    ],
+    ["⌘↓ は取らない", "ArrowDown", { meta: true }, null],
+  ] as const)("%s", (_name, keyValue, options, expected) => {
+    expect(
+      (["global", "sidebar", "main"] as const).map((scope) =>
+        action(keyValue, scope, options),
+      ),
+    ).toEqual([expected, expected, expected]);
+  });
+
+  test("入力欄の中では効かない (行の先頭・末尾まで選ぶ働きのまま)", () => {
+    expect(
+      resolveKeymapAction(key("ArrowUp", { meta: true, shift: true }), {
+        scope: "global",
+        editable: true,
+      }),
+    ).toBeNull();
+  });
+
+  test("ほかの操作とぶつからない", () => {
+    expect(
+      findKeymapConflicts().filter((conflict) =>
+        conflict.actions.some((item) => item.startsWith("project-")),
+      ),
+    ).toEqual([]);
+  });
+});

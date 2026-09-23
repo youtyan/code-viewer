@@ -14,9 +14,20 @@
 // - activeId は面の中に存在するか null。null は左の面だけ (本文の既定を出す)。
 //   右の面は空にならず (空になれば 1 面に戻る)、必ずどれかを選んでいる
 // - 右の面のタブは canPlace(target, "right") を満たす
-// - 仮のタブ (preview) は面ごとに最大 1
+// - 仮のタブ (preview) は面ごと・プロジェクトごとに最大 1
 // - 同じ中身 (sameTarget) のタブは、ファイルなら面ごとに最大 1 (左右で同じ
 //   ファイルは開ける)、ほかは全体で最大 1 (perPaneTarget)
+//
+// タブは全プロジェクト共通の 1 つの配置で、タブはプロジェクトの持ち物を持つ
+// (target の project = そのプロジェクトの根のパス)。ファイル・リポジトリの画像・
+// Diff などの画面はそのプロジェクトのもの (isProjectKind)。シェル・全体ボード・
+// Tools・設定と案内・ターミナルに出た画像 (絶対パス) は持ち物を持たない。シェルの
+// タブのグループは、そのシェルが動いているフォルダで画面側が決める (target には
+// 持たない)。同じパスでもプロジェクトが違えば別のタブ。
+//
+// タブ列はプロジェクトごとのグループに分けて並べる (regroup・tabGroups)。グループの
+// 並びは画面側が決める順 (左の一覧のプロジェクトの並び)、中のタブの順は利用者が
+// 並べたとおり。
 //
 // 表示名は画面側 (i18n) が作る。ここは同一判定だけを持つ。
 
@@ -50,10 +61,54 @@ export type TabTarget =
        * 版が違えば別のタブ (sameTarget)。
        */
       ref?: string;
+      /** 持ち物のプロジェクトの根 (isProjectKind の種類だけ。下の project の決まり)。 */
+      project?: string;
     }
   | { kind: "terminal"; session: string }
-  | { kind: "image"; path: string }
-  | { kind: "page"; page: PageKind };
+  | { kind: "image"; path: string; project?: string }
+  | { kind: "page"; page: PageKind; project?: string };
+
+// ---- タブの持ち物のプロジェクト ----
+//
+// project はプロジェクトの根のパス (登録簿・サーバの根と同じ文字列)。持たない
+// のは「どのプロジェクトのものでもない」タブ。持ち物になりうる種類 (isProjectKind)
+// でも持っていないことがある (根を知らないまま開いた画面・テスト) ので、そのときも
+// どのプロジェクトのものでもない扱い (グループの外、タブ列の右端) にする。
+
+// Tools (書き捨ての Markdown・Mermaid・JSON) はリポジトリの中身を見ない。
+// Search (grep の結果) はそのリポジトリの結果なのでプロジェクトのもの。
+const PROJECT_FREE_PAGES: ReadonlySet<PageKind> = new Set([
+  "agents",
+  "tools",
+  "help",
+]);
+
+/** その種類のタブがプロジェクトの中身を見せるか (project を持つ種類)。 */
+export function isProjectKind(target: TabTarget): boolean {
+  switch (target.kind) {
+    case "terminal":
+      return false;
+    case "image":
+      // ターミナルに出た画像は絶対パス。リポジトリの画像はリポジトリの中の相対パス。
+      return !target.path.startsWith("/");
+    case "page":
+      return !PROJECT_FREE_PAGES.has(target.page);
+    case "file":
+      return true;
+  }
+}
+
+/** target が持っている持ち物のプロジェクト (無ければ null。シェルは画面側が決める)。 */
+export function targetProject(target: TabTarget): string | null {
+  return target.kind === "terminal" ? null : (target.project ?? null);
+}
+
+/** 持ち物になりうる種類に、持ち物のプロジェクトを付ける (持っていれば変えない)。 */
+export function withProject(target: TabTarget, project: string): TabTarget {
+  if (!isProjectKind(target) || target.kind === "terminal") return target;
+  if (target.project !== undefined) return target;
+  return { ...target, project };
+}
 
 export type Tab = {
   id: string;
@@ -79,6 +134,20 @@ export type Layout = {
    * 画面の幅に対する比で持つので、窓の幅が変わっても比が保たれる。
    */
   split?: number;
+  /**
+   * グループ (プロジェクトの根) ごとの、最後に前面だったタブの id。左の一覧で
+   * そのプロジェクトへ切り替えたときに前面に出す (画面側が noteGroupFronts で書く)。
+   */
+  groupFronts?: Record<string, string>;
+  /** 畳んだグループ (プロジェクトの根)。左右の面で共通。 */
+  collapsed?: string[];
+  /**
+   * シェルのタブのグループの控え (シェルの id → プロジェクトの根)。シェルの
+   * グループは動いているフォルダで決まり、画面はエージェントの一覧が届くまで
+   * 分からない。控えが無いと、読み込み直後にシェルのタブが右端に並び、一覧が
+   * 届いたときにグループへ飛んでタブ列が動く。
+   */
+  terminalGroups?: Record<string, string>;
 };
 
 /** 分割した直後の左の面の比。 */
@@ -96,6 +165,12 @@ export type OpenOptions = {
   preview?: boolean;
   /** 新しいタブの id。既定は使われていない `t<n>`。 */
   newId?: () => string;
+  /**
+   * タブのグループ (プロジェクトの根。無ければ null)。渡すと、新しいタブは同じ
+   * グループのタブの隣に入り (前面が別のグループなら、そのグループの末尾)、仮の
+   * タブは同じグループの仮のタブだけを置き換える。渡さなければ target の project。
+   */
+  groupOf?: (target: TabTarget) => string | null;
 };
 
 type TabMenuState = {
@@ -125,6 +200,10 @@ type MoveResult =
     };
 
 /**
+ * 5: タブは全プロジェクト共通の 1 つの配置。ファイル・画像・画面のタブが持ち物の
+ *    プロジェクト (target の project) を持ち、配置がグループの前面 (groupFronts) と
+ *    畳んだグループ (collapsed) を持つ。4 までの配置はプロジェクトごとの保存で、
+ *    読むときに parseLayout の project で持ち物を付ける (core/main-tabs-migrate.ts)。
  * 4: ファイルのタブが版 (ref) を持つ。同じパスでも版が違えば別のタブ。
  *    3 までしか読めない古いアプリは版を読まずに同じパスのタブを 2 つと数え、
  *    壊れた配置として捨てるので、版を分けて「版が違う」と報告させる。
@@ -136,7 +215,7 @@ type MoveResult =
  *    許した。
  * 1〜3 の値も読む (repo のタブは落とし、右の面の page のタブは左へ移す。3 までのファイルのタブは作業ツリーの版)。
  */
-export const LAYOUT_VERSION = 4;
+export const LAYOUT_VERSION = 5;
 
 /** 作業ツリーの版。ファイルのタブの target には書かない (ref が無い = 作業ツリー)。 */
 export const WORKTREE_REF = "worktree";
@@ -155,6 +234,8 @@ export function emptyLayout(): Layout {
 }
 
 export function sameTarget(a: TabTarget, b: TabTarget): boolean {
+  // 同じパス・同じ画面でも、プロジェクトが違えば別のタブ。
+  if (targetProject(a) !== targetProject(b)) return false;
   switch (a.kind) {
     case "file":
       // 行の指定は見ない (同じ版の中の移動は同じタブ)。版は見る。
@@ -170,6 +251,11 @@ export function sameTarget(a: TabTarget, b: TabTarget): boolean {
     case "page":
       return b.kind === "page" && a.page === b.page;
   }
+}
+
+/** open の groupOf が無いときのグループ (target の project)。 */
+function groupKeyOf(opts: Pick<OpenOptions, "groupOf">) {
+  return opts.groupOf ?? targetProject;
 }
 
 function sides(layout: Layout): PaneSide[] {
@@ -313,9 +399,15 @@ export function open(
   }
   const pane = paneOf(layout, side) as Pane;
   const tab = newTab(layout, target, opts);
+  const groupOf = groupKeyOf(opts);
+  const group = groupOf(target);
   const preview = tab.preview;
+  // 仮のタブは同じグループの仮のタブだけを置き換える (別のプロジェクトで見ていた
+  // 仮のタブを消さない)。
   const previewIndex = preview
-    ? pane.tabs.findIndex((item) => item.preview)
+    ? pane.tabs.findIndex(
+        (item) => item.preview && groupOf(item.target) === group,
+      )
     : -1;
   let tabs: Tab[];
   let recent = pane.recent;
@@ -326,16 +418,31 @@ export function open(
     );
     recent = recent.filter((item) => item !== replaced);
   } else {
-    const activeIndex = pane.tabs.findIndex(
-      (item) => item.id === pane.activeId,
-    );
-    const at = activeIndex >= 0 ? activeIndex + 1 : pane.tabs.length;
+    const at = insertionIndex(pane, group, groupOf);
     tabs = [...pane.tabs.slice(0, at), tab, ...pane.tabs.slice(at)];
   }
   return {
     ...withPane(layout, side, selectIn({ ...pane, tabs, recent }, tab.id)),
     focused: side,
   };
+}
+
+/**
+ * 新しいタブを入れる位置: 前面が同じグループならその右、別のグループなら同じ
+ * グループの末尾の右、同じグループのタブが無ければ面の末尾 (グループの並びは
+ * 画面側が regroup で整える)。
+ */
+function insertionIndex(
+  pane: Pane,
+  group: string | null,
+  groupOf: (target: TabTarget) => string | null,
+): number {
+  const activeIndex = pane.tabs.findIndex((item) => item.id === pane.activeId);
+  if (activeIndex >= 0 && groupOf(pane.tabs[activeIndex].target) === group)
+    return activeIndex + 1;
+  for (let index = pane.tabs.length - 1; index >= 0; index -= 1)
+    if (groupOf(pane.tabs[index].target) === group) return index + 1;
+  return pane.tabs.length;
 }
 
 /** open が同じ中身を探す面と、無ければ入れる面。 */
@@ -638,9 +745,14 @@ export function move(
     found.side,
     removeFromPane(source, new Set([id])),
   );
-  // 移した先で仮のタブが 2 つにならないよう、先の仮のタブは固定にする。
+  // 移した先で (同じプロジェクトの) 仮のタブが 2 つにならないよう、先の仮のタブは固定にする。
+  const movingProject = targetProject(found.tab.target);
   const destTabs = dest.tabs.map((tab) =>
-    found.tab.preview && tab.preview ? { ...tab, preview: false } : tab,
+    found.tab.preview &&
+    tab.preview &&
+    targetProject(tab.target) === movingProject
+      ? { ...tab, preview: false }
+      : tab,
   );
   const at = Math.max(0, Math.min(index, destTabs.length));
   const tabs = [...destTabs.slice(0, at), found.tab, ...destTabs.slice(at)];
@@ -787,11 +899,17 @@ export function unsplit(layout: Layout): Layout {
   const right = layout.panes.right;
   if (!right) return layout;
   const left = layout.panes.left;
-  const hasPreview = left.tabs.some((tab) => tab.preview);
+  const previewProjects = new Set(
+    left.tabs
+      .filter((tab) => tab.preview)
+      .map((tab) => targetProject(tab.target)),
+  );
   const moved = right.tabs
     .filter((tab) => !left.tabs.some((t) => sameTarget(t.target, tab.target)))
     .map((tab) =>
-      hasPreview && tab.preview ? { ...tab, preview: false } : tab,
+      tab.preview && previewProjects.has(targetProject(tab.target))
+        ? { ...tab, preview: false }
+        : tab,
     );
   return {
     panes: { left: { ...left, tabs: [...left.tabs, ...moved] } },
@@ -824,7 +942,15 @@ export function activateIndex(layout: Layout, n: number): Layout {
   return tab ? activate(layout, tab.id) : layout;
 }
 
-export function tabMenu(layout: Layout, id: string): TabMenuState {
+/**
+ * keyOf を渡すと、左へ・右へ はグループの中だけ (グループをまたいで動かせない:
+ * 持ち物が違う)。
+ */
+export function tabMenu(
+  layout: Layout,
+  id: string,
+  keyOf?: (tab: Tab) => string | null,
+): TabMenuState {
   const found = findTab(layout, id);
   if (!found)
     return {
@@ -848,11 +974,123 @@ export function tabMenu(layout: Layout, id: string): TabMenuState {
     splitRight: canSplit(layout) && canPlace(found.tab.target, "right"),
     moveToOtherSide:
       canMoveToOtherSide(layout) && canPlace(found.tab.target, other),
-    moveLeft: found.index > 0,
-    moveRight: found.index < pane.tabs.length - 1,
+    moveLeft:
+      found.index > 0 &&
+      (!keyOf || keyOf(pane.tabs[found.index - 1]) === keyOf(found.tab)),
+    moveRight:
+      found.index < pane.tabs.length - 1 &&
+      (!keyOf || keyOf(pane.tabs[found.index + 1]) === keyOf(found.tab)),
     copyPath:
       found.tab.target.kind === "file" || found.tab.target.kind === "image",
   };
+}
+
+// ---- グループ (プロジェクトごと) ----
+//
+// タブ列はプロジェクトごとのグループに分けて並べる。モデルの並びもグループの順に
+// 保つ (regroup) ので、キー・右クリック・ドラッグの位置はそのまま並びの位置になる。
+// グループの鍵 (keyOf) は画面が決める: ファイルなどは target の project、シェルは
+// 動いているフォルダのプロジェクト。null はどのプロジェクトのものでもない。
+
+export type TabGroup = { key: string | null; tabs: Tab[] };
+
+/**
+ * 面ごとに、タブをグループの順 (rankOf の小さい順。同じなら今の並び) に並べ直す。
+ * 中のタブの順は変えない。変わらなければ同じ layout を返す。
+ */
+export function regroup(layout: Layout, rankOf: (tab: Tab) => number): Layout {
+  let next = layout;
+  for (const side of sides(layout)) {
+    const pane = paneOf(next, side) as Pane;
+    const ranked = pane.tabs.map((tab, index) => ({
+      tab,
+      index,
+      rank: rankOf(tab),
+    }));
+    ranked.sort((a, b) => a.rank - b.rank || a.index - b.index);
+    if (ranked.every((item, index) => item.index === index)) continue;
+    next = withPane(next, side, {
+      ...pane,
+      tabs: ranked.map((item) => item.tab),
+    });
+  }
+  return next;
+}
+
+/** 並び (regroup した後) を、続いている同じ鍵のタブのまとまりに分ける。 */
+export function tabGroups(
+  tabs: readonly Tab[],
+  keyOf: (tab: Tab) => string | null,
+): TabGroup[] {
+  const groups: TabGroup[] = [];
+  for (const tab of tabs) {
+    const key = keyOf(tab);
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.tabs.push(tab);
+    else groups.push({ key, tabs: [tab] });
+  }
+  return groups;
+}
+
+/** 面の前面のタブを、そのグループの「最後に前面だったタブ」として覚える。 */
+export function noteGroupFronts(
+  layout: Layout,
+  keyOf: (tab: Tab) => string | null,
+): Layout {
+  let fronts = layout.groupFronts;
+  for (const side of sides(layout)) {
+    const tab = frontTab(layout, side);
+    const key = tab ? keyOf(tab) : null;
+    if (!tab || key === null || fronts?.[key] === tab.id) continue;
+    fronts = { ...fronts, [key]: tab.id };
+  }
+  return fronts === layout.groupFronts
+    ? layout
+    : { ...layout, groupFronts: fronts };
+}
+
+/** そのグループで最後に前面だったタブ (もう無ければ、そのグループの先頭のタブ)。 */
+export function groupFront(
+  layout: Layout,
+  key: string,
+  keyOf: (tab: Tab) => string | null,
+): Tab | null {
+  const id = layout.groupFronts?.[key];
+  const remembered = id ? findTab(layout, id)?.tab : undefined;
+  if (remembered && keyOf(remembered) === key) return remembered;
+  return allTabs(layout).find((tab) => keyOf(tab) === key) ?? null;
+}
+
+/** グループを畳む・開く。 */
+export function setCollapsed(
+  layout: Layout,
+  key: string,
+  collapsed: boolean,
+): Layout {
+  const now = layout.collapsed ?? [];
+  if (now.includes(key) === collapsed) return layout;
+  const next = collapsed ? [...now, key] : now.filter((item) => item !== key);
+  if (next.length > 0) return { ...layout, collapsed: next };
+  const { collapsed: _dropped, ...rest } = layout;
+  return rest;
+}
+
+/** そのグループのタブを全部閉じる (グループの ▾ の「このグループを閉じる」)。 */
+export function closeGroup(
+  layout: Layout,
+  key: string,
+  keyOf: (tab: Tab) => string | null,
+): Layout {
+  let next = layout;
+  for (const side of sides(layout)) {
+    const pane = paneOf(next, side);
+    if (!pane) continue;
+    const ids = new Set(
+      pane.tabs.filter((tab) => keyOf(tab) === key).map((tab) => tab.id),
+    );
+    next = removeIds(next, side, ids);
+  }
+  return setCollapsed(next, key, false);
 }
 
 // ---- 保存 ----
@@ -879,6 +1117,12 @@ export type SerializedLayout = {
   focused: PaneSide;
   /** 2 面のときだけ。左の面の幅の比。 */
   split?: number;
+  /** グループ (プロジェクトの根) ごとの、最後に前面だったタブの id。 */
+  groupFronts?: Record<string, string>;
+  /** 畳んだグループ (プロジェクトの根)。 */
+  collapsed?: string[];
+  /** シェルのタブのグループの控え (シェルの id → プロジェクトの根)。 */
+  terminalGroups?: Record<string, string>;
   panes: Array<{
     side: PaneSide;
     activeId: string | null;
@@ -905,6 +1149,15 @@ export function serializeLayout(
     // 比を持っている 2 面だけ書く (持っていない配置に既定の値を作って書かない)。
     ...(layout.panes.right && layout.split !== undefined
       ? { split: layout.split }
+      : {}),
+    ...(layout.groupFronts && Object.keys(layout.groupFronts).length > 0
+      ? { groupFronts: { ...layout.groupFronts } }
+      : {}),
+    ...(layout.collapsed && layout.collapsed.length > 0
+      ? { collapsed: [...layout.collapsed] }
+      : {}),
+    ...(layout.terminalGroups && Object.keys(layout.terminalGroups).length > 0
+      ? { terminalGroups: { ...layout.terminalGroups } }
       : {}),
     panes: sides(layout).map((side) => {
       const pane = paneOf(layout, side) as Pane;
@@ -938,10 +1191,12 @@ type ParsedLayout = {
   relocated: Array<{ at: string; id: string }>;
   /** タブの id ごとの、保存してあった page の route (Search の語・Tools の道具)。 */
   pageRoutes: Record<string, SerializedPageRoute>;
+  /** もう無いタブを指していたので落としたグループの前面。 */
+  staleGroupFronts: Array<{ group: string; id: string }>;
 };
 
 /** 読める版。1 は repo の page タブと、右の面の page のタブを持ちうる。 */
-const READABLE_VERSIONS: readonly unknown[] = [1, 2, 3, LAYOUT_VERSION];
+const READABLE_VERSIONS: readonly unknown[] = [1, 2, 3, 4, LAYOUT_VERSION];
 
 /**
  * このアプリより新しい版で保存された配置か (古い版のアプリへ戻したとき)。
@@ -1002,8 +1257,23 @@ function parsePageRoute(
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-/** target を読む。不明な種類は null (落とす)、壊れていれば理由の文字列。 */
+/**
+ * target を読む。不明な種類は null (落とす)、壊れていれば理由の文字列。
+ * project は持ち物になりうる種類だけが、絶対パスで持てる。
+ */
 function parseTarget(raw: unknown): TabTarget | null | string {
+  const target = parseTargetBody(raw);
+  if (target === null || typeof target === "string") return target;
+  const project = (raw as Record<string, unknown>).project;
+  if (project === undefined) return target;
+  if (typeof project !== "string" || !project.startsWith("/"))
+    return `${target.kind} target has a bad project: ${JSON.stringify(project)}`;
+  if (!isProjectKind(target))
+    return `${target.kind} target cannot belong to a project: ${JSON.stringify(project)}`;
+  return withProject(target, project);
+}
+
+function parseTargetBody(raw: unknown): TabTarget | null | string {
   if (!isRecord(raw)) return "target is not an object";
   if (typeof raw.kind !== "string" || !KNOWN_KINDS.has(raw.kind)) return null;
   const nonEmpty = (value: unknown) =>
@@ -1044,8 +1314,13 @@ function parseTarget(raw: unknown): TabTarget | null | string {
 /**
  * 保存した値を読む。壊れていれば、見つけた理由を全部 (どの面のどのタブの
  * 何か) 並べた Error を投げる。種類の分からないタブは落とし、dropped に返す。
+ * options.project は 4 までの (プロジェクトごとの) 配置を読むときの、その配置の
+ * プロジェクトの根: 持ち物になりうるタブに付ける。
  */
-export function parseLayout(raw: unknown): ParsedLayout {
+export function parseLayout(
+  raw: unknown,
+  options: { project?: string } = {},
+): ParsedLayout {
   const problems: string[] = [];
   const dropped: ParsedLayout["dropped"] = [];
   const retired: ParsedLayout["retired"] = [];
@@ -1098,11 +1373,17 @@ export function parseLayout(raw: unknown): ParsedLayout {
         retired.push({ at, raw: tabRaw });
         return;
       }
-      const target = parseTarget(tabRaw.target);
-      if (target === null) {
+      const read = parseTarget(tabRaw.target);
+      if (read === null) {
         dropped.push({ at, raw: tabRaw });
         return;
       }
+      const target =
+        typeof read !== "string" &&
+        options.project !== undefined &&
+        raw.version !== LAYOUT_VERSION
+          ? withProject(read, options.project)
+          : read;
       if (typeof target === "string") {
         problems.push(`${at}: ${target}`);
         return;
@@ -1129,11 +1410,11 @@ export function parseLayout(raw: unknown): ParsedLayout {
       else if (pageRoute) pageRoutes[tabRaw.id] = pageRoute;
       tabs.push({ id: tabRaw.id, target, preview: tabRaw.preview === true });
     });
-    const previews = tabs.filter((tab) => tab.preview);
-    if (previews.length > 1)
-      problems.push(
-        `${where} has ${previews.length} preview tabs (${previews.map((t) => t.id).join(", ")}); at most 1`,
-      );
+    for (const previews of previewsByProject(tabs))
+      if (previews.length > 1)
+        problems.push(
+          `${where} has ${previews.length} preview tabs (${previews.map((t) => t.id).join(", ")}); at most 1${previewProjectNote(previews[0])}`,
+        );
     let activeId: string | null = null;
     const removed = (list: Array<{ raw: unknown }>) =>
       list.some(
@@ -1199,62 +1480,118 @@ export function parseLayout(raw: unknown): ParsedLayout {
   };
   layout = collapseEmpty(layout);
   if (!paneOf(layout, layout.focused)) layout = { ...layout, focused: "left" };
-  return { layout, dropped, retired, relocated, pageRoutes };
-}
-
-// ---- プロジェクトに属さないタブ (共通のタブ) ----
-//
-// 全体ボード・Tools・設定と案内・ターミナル (シェルとペイン)・リポジトリの外の画像
-// (ターミナルに出た画像) は、プロジェクトを切り替えても残す。配置 (並び・面・
-// 前面) はプロジェクトごとの保存のまま持ち、共通のタブの集まりだけをユーザー
-// 単位でもう 1 つ保存して、読み戻しで突き合わせる (withCommonTabs)。別の
-// プロジェクトで閉じた共通のタブは消え、開いたものは左の面の末尾に足される。
-// 保存先は server/main-tabs-store.ts の同じファイルの common。
-
-/** 共通のタブの保存の版。プロジェクトの配置の版 (LAYOUT_VERSION) とは別に上げる。 */
-export const COMMON_TABS_VERSION = 1;
-
-// Tools (書き捨ての Markdown・Mermaid・JSON) はリポジトリの中身を見ない。
-// Search (grep の結果) はそのリポジトリの結果なのでプロジェクトごと。
-const COMMON_PAGES: ReadonlySet<PageKind> = new Set([
-  "agents",
-  "tools",
-  "help",
-]);
-
-/** プロジェクトを切り替えても残すタブか。 */
-export function isCommonTarget(target: TabTarget): boolean {
-  switch (target.kind) {
-    case "terminal":
-      return true;
-    case "image":
-      // ターミナルに出た画像は絶対パス。リポジトリの画像はリポジトリの中の相対パス。
-      return target.path.startsWith("/");
-    case "page":
-      return COMMON_PAGES.has(target.page);
-    case "file":
-      return false;
-  }
-}
-
-export type SerializedCommonTabs = {
-  version: number;
-  targets: TabTarget[];
-};
-
-export function serializeCommonTabs(layout: Layout): SerializedCommonTabs {
+  const groups = parseGroupState(raw, layout);
   return {
-    version: COMMON_TABS_VERSION,
-    targets: allTabs(layout)
-      .map((tab) => tab.target)
-      .filter(isCommonTarget),
+    layout: { ...layout, ...groups.state },
+    dropped,
+    retired,
+    relocated,
+    pageRoutes,
+    staleGroupFronts: groups.stale,
   };
 }
 
+/** 仮のタブをプロジェクトごとに分ける (仮のタブは面ごと・プロジェクトごとに 1 つ)。 */
+function previewsByProject(tabs: readonly Tab[]): Tab[][] {
+  const out = new Map<string | null, Tab[]>();
+  for (const tab of tabs) {
+    if (!tab.preview) continue;
+    const key = targetProject(tab.target);
+    out.set(key, [...(out.get(key) ?? []), tab]);
+  }
+  return [...out.values()];
+}
+
+function previewProjectNote(tab: Tab): string {
+  const project = targetProject(tab.target);
+  return project === null ? "" : ` in project ${JSON.stringify(project)}`;
+}
+
+/**
+ * groupFronts と collapsed を読む。形が違えば壊れた配置として投げる。もう無い
+ * タブを指すグループの前面は落とし、stale に返す (閉じた後の保存では起きない
+ * が、手で直したファイルなどで起きうる)。
+ */
+function parseGroupState(
+  raw: Record<string, unknown>,
+  layout: Layout,
+): {
+  state: Pick<Layout, "groupFronts" | "collapsed" | "terminalGroups">;
+  stale: Array<{ group: string; id: string }>;
+} {
+  const problems: string[] = [];
+  const state: Pick<Layout, "groupFronts" | "collapsed" | "terminalGroups"> =
+    {};
+  const stale: Array<{ group: string; id: string }> = [];
+  if (raw.groupFronts !== undefined) {
+    if (!isRecord(raw.groupFronts))
+      problems.push(`groupFronts is ${JSON.stringify(raw.groupFronts)}`);
+    else {
+      const fronts: Record<string, string> = {};
+      for (const [group, id] of Object.entries(raw.groupFronts)) {
+        if (typeof id !== "string" || id.length === 0) {
+          problems.push(
+            `groupFronts[${JSON.stringify(group)}] is ${JSON.stringify(id)}`,
+          );
+          continue;
+        }
+        if (findTab(layout, id)) fronts[group] = id;
+        else stale.push({ group, id });
+      }
+      if (Object.keys(fronts).length > 0) state.groupFronts = fronts;
+    }
+  }
+  if (raw.collapsed !== undefined) {
+    const list = raw.collapsed;
+    if (
+      !Array.isArray(list) ||
+      list.some((item) => typeof item !== "string" || item.length === 0)
+    )
+      problems.push(`collapsed is ${JSON.stringify(list)}`);
+    else if (list.length > 0) state.collapsed = [...new Set(list as string[])];
+  }
+  if (raw.terminalGroups !== undefined) {
+    if (!isRecord(raw.terminalGroups))
+      problems.push(`terminalGroups is ${JSON.stringify(raw.terminalGroups)}`);
+    else {
+      const groups: Record<string, string> = {};
+      const open = new Set(
+        allTabs(layout).flatMap((tab) =>
+          tab.target.kind === "terminal" ? [tab.target.session] : [],
+        ),
+      );
+      for (const [session, root] of Object.entries(raw.terminalGroups)) {
+        if (typeof root !== "string" || !root.startsWith("/"))
+          problems.push(
+            `terminalGroups[${JSON.stringify(session)}] is ${JSON.stringify(root)}`,
+          );
+        // 閉じたシェルの控えは読まない (次の保存で消える)。
+        else if (open.has(session)) groups[session] = root;
+      }
+      if (Object.keys(groups).length > 0) state.terminalGroups = groups;
+    }
+  }
+  if (problems.length > 0)
+    throw new Error(
+      `main tab layout is broken (${problems.length} problem${problems.length === 1 ? "" : "s"}):\n- ${problems.join("\n- ")}`,
+    );
+  return { state, stale };
+}
+
+// ---- 前の版の共通のタブ (読むだけ) ----
+//
+// 前の版はタブの配置をプロジェクトごとに保存し、プロジェクトに属さないタブ
+// (シェル・全体ボード・Tools・設定と案内・ターミナルに出た画像) の集まりだけを
+// 別に持っていた (`main-tabs.json` の common)。今は全部が 1 つの配置なので、読むのは
+// 前の版の保存を移すとき (core/main-tabs-migrate.ts) だけ。
+
+/** 前の版の共通のタブの保存の版。 */
+export const COMMON_TABS_VERSION = 1;
+
 type ParsedCommonTabs =
-  /** まだ保存が無い (この版を初めて使う)。プロジェクトの配置のまま使う。 */
+  /** 保存が無い。 */
   | { kind: "none" }
-  /** 新しい版の保存。読めないので使わず、上書きもしない。 */
+  /** 新しい版の保存。読めない。 */
   | { kind: "newer"; version: number }
   | {
       kind: "ok";
@@ -1264,8 +1601,8 @@ type ParsedCommonTabs =
     };
 
 /**
- * 保存した共通のタブを読む。壊れていれば理由を全部並べた Error を投げる。
- * 共通に置かない種類 (ファイルなど) や重なりも壊れた値として扱う。
+ * 前の版の共通のタブを読む。壊れていれば理由を全部並べた Error を投げる。
+ * プロジェクトの持ち物になる種類 (ファイルなど) や重なりも壊れた値として扱う。
  */
 export function parseCommonTabs(raw: unknown): ParsedCommonTabs {
   if (raw === null || raw === undefined) return { kind: "none" };
@@ -1292,7 +1629,7 @@ export function parseCommonTabs(raw: unknown): ParsedCommonTabs {
       problems.push(`${at}: ${target}`);
       return;
     }
-    if (!isCommonTarget(target)) {
+    if (isProjectKind(target)) {
       problems.push(
         `${at}: ${target.kind} ${JSON.stringify(target)} is not a common tab`,
       );
@@ -1309,36 +1646,6 @@ export function parseCommonTabs(raw: unknown): ParsedCommonTabs {
       `common tabs are broken (${problems.length} problem${problems.length === 1 ? "" : "s"}):\n- ${problems.join("\n- ")}`,
     );
   return { kind: "ok", targets, dropped };
-}
-
-/**
- * プロジェクトの配置に共通のタブを突き合わせる: 配置にあって共通に無いもの
- * (別のプロジェクトで閉じた) は取り除き、共通にあって配置に無いもの (別の
- * プロジェクトで開いた) は左の面の末尾に足す。並びと前面は配置のまま。
- */
-export function withCommonTabs(
-  layout: Layout,
-  common: readonly TabTarget[],
-): Layout {
-  const kept = (target: TabTarget) =>
-    !isCommonTarget(target) || common.some((item) => sameTarget(item, target));
-  let next = layout;
-  for (const side of sides(layout)) {
-    const pane = paneOf(next, side) as Pane;
-    const ids = new Set(
-      pane.tabs.filter((tab) => !kept(tab.target)).map((tab) => tab.id),
-    );
-    if (ids.size > 0) next = removeIds(next, side, ids);
-  }
-  for (const target of common) {
-    if (findTarget(next, target)) continue;
-    const tab: Tab = { id: nextId(next), target, preview: false };
-    next = withPane(next, "left", {
-      ...next.panes.left,
-      tabs: [...next.panes.left.tabs, tab],
-    });
-  }
-  return next;
 }
 
 /** 不変条件の検査。破れていれば理由を全部並べて投げる (テストと開発用)。 */
@@ -1364,8 +1671,11 @@ export function assertLayout(layout: Layout): void {
         );
       seen.push(tab.target);
     }
-    if (pane.tabs.filter((tab) => tab.preview).length > 1)
-      problems.push(`${side} has more than one preview tab`);
+    for (const previews of previewsByProject(pane.tabs))
+      if (previews.length > 1)
+        problems.push(
+          `${side} has more than one preview tab${previewProjectNote(previews[0])}`,
+        );
     if (
       pane.activeId === null
         ? side === "right" && pane.tabs.length > 0

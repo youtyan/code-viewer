@@ -378,6 +378,22 @@ export const KEYMAP_ACTION_INFO: Record<KeymapAction, KeymapActionInfo> = {
       ja: "左右に分けたメインの面で、もう一方の面へ",
     },
   },
+  // 左の一覧の並びで前・次のプロジェクトへ。前面はそのプロジェクトのタブの
+  // グループで最後に前面だったタブ (views/main-tabs の prepareProjectSwitch)。
+  "project-previous": {
+    group: "tabs",
+    label: {
+      en: "Switch to the previous project in the sidebar list",
+      ja: "左の一覧の前のプロジェクトへ切り替える",
+    },
+  },
+  "project-next": {
+    group: "tabs",
+    label: {
+      en: "Switch to the next project in the sidebar list",
+      ja: "左の一覧の次のプロジェクトへ切り替える",
+    },
+  },
   "sidebar-next": {
     group: "sidebar",
     label: { en: "Move selection down", ja: "選択を下へ移動" },

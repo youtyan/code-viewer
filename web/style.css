@@ -17539,10 +17539,6 @@ body.main-split .main-tabs-pane[data-side="left"] {
   flex: 0 0 max(0px, calc(var(--split-left-w) + var(--listcol-shown) - var(--column-head-w)));
 }
 .main-tabs-strip {
-  /* タブの最小幅を列の幅から決める (.main-tab の min-width が 100cqi を読む)。 */
-  container-type: inline-size;
-  /* ＋ の箱の幅 (ボタン + 左右の余白)。タブの最小幅はこの分を除いて割る。 */
-  --main-tabs-new-w: calc(var(--ui-control-sm) + var(--space-1) * 2);
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
@@ -17567,21 +17563,19 @@ body.main-split .main-tabs-pane[data-side="left"] {
 }
 .main-tab {
   position: relative;
-  flex: 0 1 auto;
   display: flex;
   align-items: center;
   /* 絵と名前の間は 6 (絵の指定)。段階に無いので単位から作る。 */
   gap: calc(var(--space-unit) * 1.5);
-  /* 最小幅はふだん 120。列に全部のタブが 120 で入らないときは、列の幅をタブの
-     数で割った幅まで縮め (名前を省略する)、88 で止める (絵と閉じるは残る)。
-     それでも入らなければ列を横に送る。タブの数は main-tabs-view.ts の render()
-     が列の --main-tab-count へ書く。 */
-  min-width: clamp(
-    calc(var(--space-unit) * 22),   /* 88 */
-    (100cqi - var(--main-tabs-new-w) - var(--main-tab-count, 1) * 1px) / var(--main-tab-count, 1),
-    calc(var(--space-unit) * 30)    /* 120 */
-  );
-  max-width: calc(var(--space-unit) * 45);   /* 180 */
+  /* 幅は中身 (絵・名前の全文・閉じる) で、上限は 200 (ターミナルは下の 240)。列に
+     入りきらないときだけ、main-tabs-view.ts の fitTabs が全部のタブを同じ割合で
+     縮めた幅を --main-tab-w に書く。縮めても名前が 8 文字ほど読める幅
+     (core/tab-widths.ts の TAB_FLOOR_UNITS) で止め、それでも入らなければ列を横に
+     送る (前面のタブは見える位置へ)。名前の幅で決めるので、列の幅をタブの数で
+     割って名前を 1〜2 文字まで削ることはしない。 */
+  flex: 0 0 auto;
+  width: var(--main-tab-w, auto);
+  max-width: calc(var(--space-unit) * 50);   /* 200 */
   padding: 0 var(--space-3);
   background: var(--color-nav);
   color: var(--color-text-2);
@@ -17689,9 +17683,6 @@ body.main-split .main-tabs-pane[data-side="left"] {
 .main-tab.main-tab-drop-before {
   box-shadow: inset 2px 0 0 var(--color-accent);
 }
-.main-tabs-drop-end .main-tab:last-child {
-  box-shadow: inset -2px 0 0 var(--color-accent);
-}
 .main-tabs-actions {
   flex: 0 0 auto;
   display: flex;
@@ -17738,6 +17729,90 @@ body.main-split .main-tabs-pane[data-side="left"] {
 }
 .main-tab-icon .terminal-mark {
   margin: auto;
+}
+/* ---- タブのグループ (プロジェクトごと。main-tabs-view.ts の renderGroups) ----
+   グループの頭に札 (色の四角と頭文字・名前・畳んだときの枚数・▾)、札とグループの
+   タブの下端にプロジェクトの色の線。色は data-project-color の --project-color
+   (views/projects/project-looks.ts)。グループのタブの並び (.main-tabs-group-list) も
+   .main-tabs-list なので配置では透明 (タブは列の直接の並び)。どのプロジェクトの
+   ものでもないタブは最後の並びで、線を引かない。 */
+.main-tab-group {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-1);
+  background: var(--color-nav);
+}
+.main-tab-group::after,
+.main-tabs-group-list > .main-tab::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2px;
+  background: var(--project-color);
+  pointer-events: none;
+}
+/* 札は色の四角と頭文字と ▾ だけ (名前は一覧の列の頭の 1 段目に出ているので、
+   並べると同じ名前が 2 回出た。名前は title・aria-label と ▾ のメニューの頭)。
+   押せる 2 つ (畳む・開く / ▾ のメニュー) を 1 つの丸い面に見せ、面はプロジェクトの
+   色を薄く混ぜる。畳んだときだけ頭文字の横に枚数が出て、札の右が伸びる。 */
+.main-tab-group-toggle,
+.main-tab-group-menu {
+  display: flex;
+  align-items: center;
+  height: var(--ui-control-sm);
+  border: 0;
+  background: color-mix(in srgb, var(--project-color) 24%, var(--color-nav));
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+.main-tab-group-toggle {
+  min-width: 0;
+  gap: var(--space-1);
+  padding: 0 var(--space-1) 0 var(--space-1);
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
+}
+.main-tab-group-menu {
+  justify-content: center;
+  width: var(--space-4);
+  padding: 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  color: var(--color-text-2);
+}
+.main-tab-group-toggle:hover,
+.main-tab-group-menu:hover {
+  background: color-mix(in srgb, var(--project-color) 38%, var(--color-nav));
+  color: var(--color-text);
+}
+.main-tab-group-toggle:focus-visible,
+.main-tab-group-menu:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.main-tab-group-menu svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.main-tab-group-count {
+  color: var(--color-text-2);
+  font-size: var(--ui-font-xs);
+  font-variant-numeric: tabular-nums;
+}
+.main-tab-group-count[hidden] {
+  display: none;
+}
+/* グループがあるとき、どのプロジェクトのものでもないタブ (全体ボード・設定など) は
+   列の右端に寄せる (＋ は最後のグループのタブのすぐ右)。入りきらなければ詰める。 */
+.main-tabs-grouped > .main-tabs-list:not(.main-tabs-group-list) > .main-tab:first-child {
+  margin-left: auto;
+}
+/* 最後のタブの右へ落とす印 (グループごとに並びがあるので、列の最後のタブに付ける)。 */
+.main-tab.main-tab-drop-after {
+  box-shadow: inset -2px 0 0 var(--color-accent);
 }
 
 /* ---- メインの面の左右の箱 (.main-pane-host。app.ts の PANE_HOSTS) ----
@@ -18715,6 +18790,11 @@ body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
 }
 .gdp-file-detail-sticky .gdp-file-breadcrumb > :first-child {
   margin-left: calc(var(--space-1) * -1);
+}
+/* 別のプロジェクトのファイルのパンくず (app.ts の foreignBreadcrumb) は、頭に
+   そのプロジェクトの色の四角を置く。四角は面を持たないので外へ出さない。 */
+.gdp-file-detail-sticky .gdp-file-breadcrumb > .main-pane-foreign-mark:first-child {
+  margin-left: 0;
 }
 /* 表示の切替は小さな区切りの付いた切替 (絵の Preview / Source)。 */
 .gdp-file-detail-sticky .gdp-file-detail-tabs .gdp-source-tabs {

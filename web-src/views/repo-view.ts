@@ -1414,8 +1414,11 @@ export function createRepoView(deps: RepoViewDeps) {
    */
   const RAW_FILE_INFO_IN_FLIGHT = new Map<string, Promise<RawFileInfo>>();
 
-  function loadRawFileInfo(target: SourceFileTarget): Promise<RawFileInfo> {
-    const url = buildRawFileUrl(target);
+  /** url を渡すと、その URL で聞く (別のプロジェクトのファイル。app.ts)。 */
+  function loadRawFileInfo(
+    target: SourceFileTarget,
+    url: string = buildRawFileUrl(target),
+  ): Promise<RawFileInfo> {
     const inFlight = RAW_FILE_INFO_IN_FLIGHT.get(url);
     if (inFlight) return inFlight;
     const request = requestRawFileInfo(target, url).finally(() => {
