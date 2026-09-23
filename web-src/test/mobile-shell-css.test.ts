@@ -3,7 +3,7 @@
 //
 // 守ること:
 // - 節の条件は core/mobile-layout.ts の media query と同じ (CSS は変数を読めない)
-// - 電話の段では左のサイドバー・一覧の列・右の列が場所を取らず、本文が全幅
+// - SP では左のサイドバーと一覧の列が場所を取らず、本文が全幅
 // - 下端に切替の帯、上下に安全領域
 // - 指の画面では押せるものが 44px 以上
 // - 足した部品と SP の名前は SP の節の外に漏れない (デスクトップを変えない)
@@ -295,9 +295,9 @@ describe("電話の段の骨格", () => {
     ).toBe("var(--main-tabs-h)");
   });
 
-  // 右の列を畳んでも (一覧の画面・利用者が畳んだ) 絵柄は頭の行に残る
+  // ファイル一覧を畳んでも (一覧を出す画面・利用者が畳んだ) 絵柄は頭の行に残る
   // (デスクトップと同じ。帯は無い)。頭の行を隠すと面から絵柄が消える。
-  test("右の列を畳んでも面の頭の絵柄は横に並んだまま出る", () => {
+  test("ファイル一覧を畳んでも面の頭の絵柄は横に並んだまま出る", () => {
     const rules = withTiers(SOFT_KEYS, PHONE);
     const head = declarationsOf(rules, [
       ".view-head",
@@ -400,8 +400,13 @@ describe("指の画面の押せる大きさ", () => {
     ".nav-empty-action",
     ".nav-note-link",
     ".history-item",
+    // History の一覧は id の規則 (高さの固定と min-height: 0) が上書きしていた。
+    "#history-panel .history-item",
     "#filelist.tree:not(.tree-virtual) .tree-file",
     "#filelist.tree:not(.tree-virtual) .tree-dir",
+    // ファイル一覧 (Files の画面の面) の行も同じ。
+    "#file-list-rows.tree:not(.tree-virtual) .tree-file",
+    "#file-list-rows.tree:not(.tree-virtual) .tree-dir",
     ".mobile-key",
     // 差分のカードの見出しの「確認済み」「ファイルを見る」と、折り返しの切替。
     ".d2h-file-header .d2h-file-collapse",
@@ -432,6 +437,8 @@ describe("指の画面の押せる大きさ", () => {
   test.each([
     "#filelist.tree.tree-virtual .tree-file",
     "#filelist.tree.tree-virtual .tree-dir",
+    "#file-list-rows.tree.tree-virtual .tree-file",
+    "#file-list-rows.tree.tree-virtual .tree-dir",
   ])("%s の行は密度の行の高さと 44px の大きい方", (selector) => {
     const box = declarationsOf(rules, [selector]);
     expect([box.get("height"), box.get("min-height")]).toEqual([

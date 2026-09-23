@@ -1,5 +1,5 @@
-// 電話の幅 (SP) の骨格: 左のサイドバーの引き出し (drawer)・右の列を下から
-// 出す面 (sheet)・下端の切替の帯・端末の操作札。
+// SP の骨格: 左のサイドバーの引き出し (drawer)・一覧の列 (ファイル一覧と、その
+// 画面の一覧) を下から出す面 (sheet)・下端の切替の帯・端末の操作札。
 //
 // 配置と見た目は style.css 末尾の「Phone (SP)」の節が media query だけで決める
 // (JS が動く前の初回描画から崩れない)。ここが持つのは開け閉めの状態
@@ -679,7 +679,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   }
   // 指の動きと離すのは、指を置いた要素で見る: touchmove / touchend はその要素へ
   // 届き続けるが、メニューを出した行が描き直しで DOM から外れると document まで
-  // 上がってこない (Files の木で、離したときの click が止まらずメニューが閉じた)。
+  // 上がってこない (ファイル一覧で、離したときの click が止まらずメニューが閉じた)。
   document.addEventListener(
     "touchstart",
     (event) => {

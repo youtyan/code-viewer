@@ -2163,7 +2163,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     loadRepo,
     renderRepoBlobSidebar,
     syncRepoTargetInput,
-    closeRepoContextMenu,
     handleSidebarContextMenu,
     invalidateRepoSidebar,
     refreshRepoSidebar,
@@ -6053,7 +6052,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     (event) => activeSourceView().handleVirtualSourcePagingKeydown(event),
     { capture: true },
   );
-  document.addEventListener("click", closeRepoContextMenu);
   $("#file-list-rows").addEventListener(
     "contextmenu",
     handleSidebarContextMenu,
@@ -6061,7 +6059,6 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   document.addEventListener("keydown", async (e) => {
     if (isImeComposing(e) || e.defaultPrevented) return;
-    if (e.key === "Escape") closeRepoContextMenu();
     if ((e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled)
       return;
     const targetEl = e.target as Element | null;

@@ -18,7 +18,7 @@ export type MobileShellText = {
   agents: string;
   /** 「エージェント」の入口の名前に、入力待ちの件数を添えたもの。 */
   agentsWaiting: (count: number) => string;
-  /** 右の列 (木・一覧) を下から出す。 */
+  /** 一覧の列 (ファイル一覧か、その画面の一覧) を下から出す。 */
   list: string;
   /** 開いている引き出し・面を閉じる。 */
   close: string;

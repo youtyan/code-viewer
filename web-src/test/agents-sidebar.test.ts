@@ -15,7 +15,6 @@ import {
   beforeAll,
   describe,
   expect,
-  onTestFinished,
   test,
   vi,
 } from "vitest";
@@ -540,16 +539,8 @@ describe("agents sidebar heading marks", () => {
     ]);
   });
 
-  test("the menu's Color… lists the palette and saves the chosen color", async () => {
-    // リポジトリの画面と同じく、文書の click で開いているメニューを閉じる
-    // (repo-view.ts の closeRepoContextMenu)。「色…」の click がここまで
-    // 届いても、色の一覧は残る。
-    const closeOnDocumentClick = () =>
-      document.querySelector(".gdp-context-menu")?.remove();
-    document.addEventListener("click", closeOnDocumentClick);
-    onTestFinished(() =>
-      document.removeEventListener("click", closeOnDocumentClick),
-    );
+  test("the menu's Color… lists the palette and saves the chosen color", () => {
+    // 色の一覧は「色…」の同じ click の中で開き直す (待たない)。
     const actions = fakeActions();
     const { root } = mount(overview([], REGISTERED), actions);
     const head = [
@@ -567,7 +558,6 @@ describe("agents sidebar heading marks", () => {
     menuItems()
       .find((item) => item.textContent === text.color)
       ?.click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(
       menuItems().map((item) => [
         item.textContent,

@@ -43,12 +43,7 @@ export function showProjectMenu(
       {
         label: t.color,
         title: t.colorTitle,
-        // この click が文書まで届いてから開く。リポジトリの画面は文書の click で
-        // 開いているメニューを全部閉じる (repo-view.ts の closeRepoContextMenu)
-        // ので、同じ click の中で開くとすぐ閉じられる。
-        onSelect: () => {
-          window.setTimeout(() => showColorMenu(anchor, info, options), 0);
-        },
+        onSelect: () => showColorMenu(anchor, info, options),
       },
       {
         label: t.moveUp,

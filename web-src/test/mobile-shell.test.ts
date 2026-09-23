@@ -134,6 +134,12 @@ beforeEach(() => {
         <a class="view-strip-item" data-route="repo" href="/">Files</a>
         <a class="view-strip-item" data-route="diff" href="/todif">Diff</a>
       </div>
+      <aside id="file-list">
+        <ul id="file-list-rows">
+          <li class="tree-dir"><span class="dir-label">lib</span></li>
+          <li class="tree-file"><span class="file-label">b.ts</span></li>
+        </ul>
+      </aside>
       <aside id="sidebar">
         <ul id="filelist">
           <li class="tree-dir"><span class="dir-label">src</span></li>
@@ -347,7 +353,7 @@ describe("引き出し (左のサイドバー)", () => {
   });
 });
 
-describe("面 (右の列と一覧の列) と下端の帯", () => {
+describe("面 (一覧の列) と下端の帯", () => {
   test("一覧のボタンで面を開き、引き出しとは同時に開かない", () => {
     install(PHONE);
     barButton(1).click();
@@ -359,8 +365,13 @@ describe("面 (右の列と一覧の列) と下端の帯", () => {
 
   test.each([
     {
-      name: "ファイルの行",
+      name: "変更ファイルの一覧のファイルの行",
       selector: "#filelist .tree-file .file-label",
+      closes: true,
+    },
+    {
+      name: "ファイル一覧のファイルの行",
+      selector: "#file-list-rows .tree-file .file-label",
       closes: true,
     },
     // 面の下の段にそのコミットの変更ファイルが出るので、続けて選べるよう閉じない。
@@ -373,6 +384,11 @@ describe("面 (右の列と一覧の列) と下端の帯", () => {
     {
       name: "フォルダの行 (開くだけ)",
       selector: "#filelist .tree-dir .dir-label",
+      closes: false,
+    },
+    {
+      name: "ファイル一覧のフォルダの行 (開くだけ)",
+      selector: "#file-list-rows .tree-dir .dir-label",
       closes: false,
     },
   ])("$name を押すと面を閉じる: $closes", ({ selector, closes }) => {
@@ -796,6 +812,7 @@ describe("長押しで右クリックのメニュー", () => {
   test.each([
     ".nav-agent",
     ".main-tab",
+    "#file-list-rows li.tree-file",
     "#filelist li.tree-file",
     ".gdp-repo-row",
   ])("%s: 置いたままで右クリックのメニューを送り、離したときの click を止める", (selector) => {
@@ -843,11 +860,11 @@ describe("長押しで右クリックのメニュー", () => {
   });
 
   // メニューを出した行が描き直しで DOM から外れると、離したときの touchend は
-  // 外れた行にだけ届く (document まで上がらない)。Files の木でこれが起き、click が
+  // 外れた行にだけ届く (document まで上がらない)。ファイル一覧でこれが起き、click が
   // 止まらずメニューが閉じた。
   test("メニューで行が描き直されて外れても、離したときの click を止める", () => {
     install(PHONE);
-    const row = q(document, "#filelist li.tree-file");
+    const row = q(document, "#file-list-rows li.tree-file");
     row.addEventListener("contextmenu", () => row.remove());
     fingers(row, "touchstart", [[40, 60]]);
     vi.advanceTimersByTime(LONG_PRESS_MS);

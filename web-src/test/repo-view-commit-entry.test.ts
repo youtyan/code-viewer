@@ -11,6 +11,11 @@ import {
 } from "vitest";
 import type { AppRoute } from "../core/routes";
 import type { RepoTreeResponse, SidebarItem } from "../core/types";
+import {
+  closeContextMenu,
+  isContextMenuOpen,
+  showContextMenu,
+} from "../views/context-menu";
 import { createRepoView, type RepoViewDeps } from "../views/repo-view";
 
 const markdownPreview = vi.hoisted(() => ({ failWith: null as Error | null }));
@@ -45,6 +50,8 @@ afterAll(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  // 開いたままのメニューは document のキーと押下の受け手を持ち続ける。
+  closeContextMenu();
   document.body.innerHTML = "";
 });
 
@@ -315,6 +322,77 @@ describe("repo view commit entries", () => {
       ["Open in new tab", "Open to the right"],
       [["alpha.ts", intent]],
     ]);
+  });
+
+  // 行のメニューも開け閉めは context-menu.ts の 1 つの経路 (同時に 1 枚・Escape と
+  // 外を押すと閉じ、キーの受け手も外れる)。行のメニューだけが要素を直に消して
+  // いた頃は、別のメニューの項目から開いた次のメニューを消し、Escape でも外を
+  // 押しても行のメニューが残った。
+  test.each([
+    [
+      "Escape",
+      () =>
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        ),
+    ],
+    [
+      "a press outside",
+      () =>
+        document.body.dispatchEvent(
+          new Event("pointerdown", { bubbles: true }),
+        ),
+    ],
+  ])("the row menu is the one shared menu and closes on %s", async (_name, close) => {
+    setupDom();
+    globalThis.fetch = (async () =>
+      response({
+        ref: "worktree",
+        path: "",
+        project: "sample-repo",
+        entries: [{ name: "alpha.ts", path: "alpha.ts", type: "blob" }],
+      })) as typeof fetch;
+    const { view } = makeRepoView({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range,
+    });
+    await view.loadRepo();
+    const other = document.createElement("button");
+    document.body.append(other);
+    showContextMenu(other, [
+      {
+        label: "Other menu",
+        onSelect() {
+          /* noop */
+        },
+      },
+    ]);
+    document
+      .querySelector(".gdp-repo-row")
+      ?.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    const opened = [
+      [...document.querySelectorAll(".gdp-context-menu")].map(
+        (menu) => menu.querySelector("button")?.textContent,
+      ),
+      isContextMenuOpen(),
+    ];
+    close();
+    const arrow = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(arrow);
+    expect([
+      opened,
+      document.querySelectorAll(".gdp-context-menu").length,
+      isContextMenuOpen(),
+      arrow.defaultPrevented,
+    ]).toEqual([[["Open in new tab"], true], 0, false, false]);
   });
 
   test.each([

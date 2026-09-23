@@ -23275,7 +23275,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
    にはこの節のどの規則も効かない:
      1. 電話の段 (core/mobile-layout.ts の PHONE_MEDIA_QUERY と同じ文字列):
         縦向き 640px 以下、または指の画面で高さ 500px 以下 (横向きの電話)。
-        左のサイドバーは引き出し、右の列は下から出す面、本文は全幅、2 面は無し
+        左のサイドバーは引き出し、一覧の列は下から出す面、本文は全幅、2 面は無し
      2. 電話の段か指の画面: 端末の操作札
      3. 指の画面 (pointer: coarse): 押せるものの高さを 44px 以上
      (1' は 1 のうち横向きの電話だけの上書き)
@@ -23361,8 +23361,9 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 /* ---- 1. 電話の段: 骨格 ---- */
 @media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
   /* 骨格の長さ (T1 の上書きと T2 の定義し直し)。body に置く理由は html, body
-     ブロックのコメント (T1 の上書きが body に載る)。gdp-sidebar-hidden と
-     main-split は右の列と右の面の幅を足すので、同じ詳細度で並べて上書きする。 */
+     ブロックのコメント (T1 の上書きが body に載る)。gdp-sidebar-hidden・main-split・
+     一覧を出す画面 (data-list-column) はファイル一覧・右の面・一覧の列の幅を
+     決め直すので、同じ詳細度で並べて上書きする。 */
   body,
   body.gdp-sidebar-hidden,
   body.main-split,
@@ -23378,7 +23379,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     --sp-drawer-w: min(calc(var(--space-unit) * 80), calc(100vw - var(--sp-touch)));
     /* 上: タブ列に安全領域を足す。 */
     --global-header-h: calc(var(--main-tabs-h) + var(--sp-safe-top));
-    /* 左右: 左のサイドバー・一覧の列・右の列は場所を取らない (重ねて出す)。 */
+    /* 左右: 左のサイドバーと一覧の列は場所を取らない (重ねて出す)。 */
     --chrome-left: var(--sp-safe-left);
     --listcol-shown: 0px;
     --column-head-w: 0px;
@@ -23430,7 +23431,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     padding-top: var(--content-top-gap);
   }
 
-  /* タブ列: 安全領域の下から。右の列が無いので右端まで。 */
+  /* タブ列: 安全領域の下から。一覧の列の頭は面へ移すので、左端から右端まで。 */
   #main-tabs {
     box-sizing: border-box;
     height: var(--global-header-h);
@@ -23453,8 +23454,8 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     right: var(--chrome-right);
     width: auto;
   }
-  /* タブ列の左: 引き出しを開くボタンだけ。右の列を畳んだときに移ってくる
-     名前とブランチ・サイドバーを開くボタンは出さない (引き出しと面が代わる)。 */
+  /* タブ列の左: 引き出しを開くボタンだけ。左のサイドバーを畳んだときに一覧の列の
+     頭に出る「サイドバーを出す」は出さない (引き出しが代わる)。 */
   #nav-expand {
     display: none;
   }
@@ -23483,7 +23484,8 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     outline-offset: -2px;
   }
   /* History・作業ツリーの変更ファイルの一覧 (一覧の隣の列) を畳んだときの
-     開くボタン。電話ではその木を出さないので、開くボタンも出さない。 */
+     開くボタン。SP では面の下の段にいつも出す (下の「面を上下 2 段に」) ので、
+     開くボタンは出さない。 */
   body[data-list-tree-folded] .list-tree-open {
     display: none;
   }
@@ -23525,9 +23527,10 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     display: block;
   }
 
-  /* ---- 右の列と一覧の列 = 下から出す面 ----
-     頭 (画面の入口・名前とブランチ) と、その画面の一覧 (Files の木・Diff の
-     変更ファイル・History と作業ツリーの一覧) をまとめて下から出す。閉じている
+  /* ---- 一覧の列 = 下から出す面 ----
+     一覧の列の頭 (画面の入口) と、その画面の一覧 (一覧の無い画面はファイル一覧、
+     Diff は変更ファイルの一覧、History と作業ツリーは一覧と変更ファイルの一覧) を
+     まとめて下から出す。閉じている
      間は画面の外で、visibility で Tab と読み上げからも外す (display は他の規則が
      !important で決めているので触らない)。一覧の列の置き場所の規則
      (body[data-list-column] #…) と同じ詳細度で並べて上書きする。 */
@@ -23572,14 +23575,14 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     box-shadow: 0 -1px 0 var(--color-line-soft);
   }
   /* 上の 640px の古い節の .app-menu (flex: 1 1 0) は縦に並べた頭の中で高さを
-     0 に潰すので、絵柄の列の高さを戻す。右の列を畳んでも (一覧の画面・利用者が
-     畳んだ) 絵柄は頭の行に残る (デスクトップと同じ)。 */
+     0 に潰すので、絵柄の列の高さを戻す。ファイル一覧を畳んでも (一覧を出す画面・
+     利用者が畳んだ) 絵柄は頭の行に残る (デスクトップと同じ)。 */
   #panel-head > #view-head > .view-strip {
     flex: none;
     flex-direction: row;
     height: var(--main-tabs-h);
   }
-  /* 右の列を畳んだ (デスクトップの設定)・一覧の列を隠した (このセッション) の
+  /* ファイル一覧を畳んだ (デスクトップの設定)・一覧の列を隠した (このセッション) の
      どちらでも、面には一覧を出す。 */
   body.mobile-sheet-open.gdp-sidebar-hidden:not([data-list-column]) #file-list,
   body.mobile-sheet-open[data-list-column="sidebar"][data-list-column-hidden] #sidebar {
@@ -23599,8 +23602,8 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
   /* History・作業ツリーでは、面を上下 2 段に分ける: 上にコミット / 作業ツリーの
      一覧、下にその変更ファイルの一覧 (デスクトップでは一覧の右の 2 列目)。境目
-     --sp-sheet-mid (T2) は面の本体の半分。デスクトップで木を帯に畳んでいても
-     (data-list-tree-folded) 電話では木を出す (帯の開くボタンは出さない)。 */
+     --sp-sheet-mid (T2) は面の本体の半分。デスクトップで変更ファイルの一覧を帯に
+     畳んでいても (data-list-tree-folded) SP では出す (帯の開くボタンは出さない)。 */
   body[data-list-column="history"],
   body[data-list-column="worktree"] {
     --sp-sheet-mid: calc(
@@ -23868,7 +23871,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 
   /* ---- 開いているタブの一覧 ----
      入口はタブ列の右端 (分割のボタンの代わり。枚数を枠に入れる)。一覧は下から
-     出す面 (#mobile-tabs。mobile-shell.ts)。場所は一覧の面 (#sidebar) と同じ。 */
+     出す面 (#mobile-tabs。mobile-shell.ts)。場所は一覧の面 (#file-list・#sidebar) と同じ。 */
   .main-tabs-list-open:not([hidden]) {
     display: grid;
     color: var(--color-text-2);
@@ -24141,11 +24144,15 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .nav-project-head,
   .nav-project-toggle,
   .history-item,
+  #history-panel .history-item,
   .d2h-file-header .d2h-file-collapse,
   .d2h-file-header .gdp-view-file,
   .mobile-wrap-toggle,
   .gdp-help-nav button,
   .gdp-help-nav-toggle,
+  #file-list-rows:not(.tree-virtual) li,
+  #file-list-rows.tree:not(.tree-virtual) .tree-dir,
+  #file-list-rows.tree:not(.tree-virtual) .tree-file,
   #filelist:not(.tree-virtual) li,
   #filelist.tree:not(.tree-virtual) .tree-dir,
   #filelist.tree:not(.tree-virtual) .tree-file {
@@ -24158,6 +24165,8 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
   /* 仮想表示の木 (3000 件超) は行を絶対配置で並べ、位置を TS が数える
      (sidebar.ts の virtualRowHeight が同じ max を --sp-touch から読む)。 */
+  #file-list-rows.tree.tree-virtual .tree-dir,
+  #file-list-rows.tree.tree-virtual .tree-file,
   #filelist.tree.tree-virtual .tree-dir,
   #filelist.tree.tree-virtual .tree-file {
     height: max(var(--ui-row-h), var(--sp-touch));
@@ -24172,6 +24181,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .nav-agent,
   .nav-project-head,
   .main-tab,
+  #file-list-rows li,
   #filelist li,
   .gdp-repo-row {
     -webkit-touch-callout: none;

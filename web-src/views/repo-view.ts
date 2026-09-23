@@ -40,6 +40,7 @@ import type {
 } from "../core/types";
 import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
 import { fitBreadcrumb } from "./breadcrumb-fit";
+import { type ContextMenuItem, showContextMenu } from "./context-menu";
 import { fileRouteKeepingActiveView } from "./file-shell";
 import {
   type MarkdownLinkNavigationDeps,
@@ -319,10 +320,6 @@ export function createRepoView(deps: RepoViewDeps) {
     );
   }
 
-  function closeRepoContextMenu() {
-    document.querySelector<HTMLElement>(".gdp-context-menu")?.remove();
-  }
-
   function confirmMoveToTrash(
     path: string,
     focusReturnTarget?: HTMLElement | null,
@@ -468,85 +465,70 @@ export function createRepoView(deps: RepoViewDeps) {
     if (entry.children_omitted_reason === "internal") return false;
     if (entry.type !== "tree" && entry.type !== "blob") return false;
     event.preventDefault();
-    closeRepoContextMenu();
 
-    const menu = document.createElement("div");
-    menu.className = "gdp-context-menu";
-    const anchor = event.target as Element | null;
-    const focusReturnTarget = anchor?.closest<HTMLElement>("li, .gdp-repo-row");
-    const anchorRect = anchor
-      ?.closest<HTMLElement>("li, .gdp-repo-row")
-      ?.getBoundingClientRect();
-    const anchorX =
-      event.clientX > 0
-        ? event.clientX
-        : anchorRect?.left || window.innerWidth / 2;
-    const anchorY =
-      event.clientY > 0
-        ? event.clientY
-        : anchorRect?.bottom || window.innerHeight / 2;
-    menu.style.left = `${anchorX}px`;
-    menu.style.top = `${anchorY}px`;
+    // 開く・閉じるは context-menu.ts に任せる (同時に 1 枚・外を押す / Escape で
+    // 閉じる・キーの受け手の後始末)。ここで要素だけを消すと、別の場所で開いた
+    // メニューまで消し、キーとスクロールの受け手が残った。
+    const row =
+      (event.target as Element | null)?.closest<HTMLElement>(
+        "li, .gdp-repo-row",
+      ) ?? null;
+    const rowRect = row?.getBoundingClientRect();
+    const at = {
+      x:
+        event.clientX > 0
+          ? event.clientX
+          : rowRect?.left || window.innerWidth / 2,
+      y:
+        event.clientY > 0
+          ? event.clientY
+          : rowRect?.bottom || window.innerHeight / 2,
+    };
 
     const text = repoViewText(STATE.language);
-    const openItems =
+    const items: ContextMenuItem[] =
       entry.type === "blob"
-        ? (
-            [
-              [text.openInNewTab, "new-tab"],
-              [text.openToTheRight, "other-pane"],
-            ] as const
-          ).map(([label, intent]) => {
-            const button = document.createElement("button");
-            button.type = "button";
-            button.textContent = label;
-            button.addEventListener("click", () => {
-              closeRepoContextMenu();
-              deps.openTreeFileAs(entry.path, intent);
-            });
-            return button;
-          })
+        ? [
+            {
+              label: text.openInNewTab,
+              onSelect: () => deps.openTreeFileAs(entry.path, "new-tab"),
+            },
+            {
+              label: text.openToTheRight,
+              onSelect: () => deps.openTreeFileAs(entry.path, "other-pane"),
+            },
+          ]
         : [];
-    const copyPath = document.createElement("button");
-    copyPath.type = "button";
-    copyPath.textContent = text.copyPath;
-    copyPath.addEventListener("click", async () => {
-      closeRepoContextMenu();
-      await copyRepoContextText(filePathClipboardText(entry.path));
-    });
-    const copyName = document.createElement("button");
-    copyName.type = "button";
-    copyName.textContent = text.copyName;
-    copyName.addEventListener("click", async () => {
-      closeRepoContextMenu();
-      await copyRepoContextText(fileNameClipboardText(entry.path));
-    });
-    const createDir = document.createElement("button");
-    createDir.type = "button";
-    createDir.textContent = text.newFolderMenu;
-    createDir.addEventListener("click", async () => {
-      closeRepoContextMenu();
-      const targetPath =
-        entry.type === "blob" ? parentRepoPath(entry.path) : entry.path;
-      await requestCreateDirectory(targetPath, onChanged, {
-        focusReturnTarget,
-      });
-    });
-    const trash = document.createElement("button");
-    trash.type = "button";
-    trash.className = "danger";
-    trash.textContent = text.moveToTrashMenu;
-    trash.addEventListener("click", async () => {
-      closeRepoContextMenu();
-      await requestMoveToTrash(entry.path, onChanged, { focusReturnTarget });
-    });
-    menu.append(...openItems, copyPath, copyName, createDir, trash);
-    document.body.appendChild(menu);
-    const rect = menu.getBoundingClientRect();
-    const left = Math.min(anchorX, window.innerWidth - rect.width - 8);
-    const top = Math.min(anchorY, window.innerHeight - rect.height - 8);
-    menu.style.left = `${Math.max(8, left)}px`;
-    menu.style.top = `${Math.max(8, top)}px`;
+    items.push(
+      {
+        label: text.copyPath,
+        onSelect: () =>
+          void copyRepoContextText(filePathClipboardText(entry.path)),
+      },
+      {
+        label: text.copyName,
+        onSelect: () =>
+          void copyRepoContextText(fileNameClipboardText(entry.path)),
+      },
+      {
+        label: text.newFolderMenu,
+        onSelect: () =>
+          void requestCreateDirectory(
+            entry.type === "blob" ? parentRepoPath(entry.path) : entry.path,
+            onChanged,
+            { focusReturnTarget: row },
+          ),
+      },
+      {
+        label: text.moveToTrashMenu,
+        danger: true,
+        onSelect: () =>
+          void requestMoveToTrash(entry.path, onChanged, {
+            focusReturnTarget: row,
+          }),
+      },
+    );
+    showContextMenu(row ?? document.body, items, { at, focusReturn: row });
     return true;
   }
 
@@ -1722,7 +1704,6 @@ export function createRepoView(deps: RepoViewDeps) {
     renderRepoBlobSidebar,
     ensureFileList,
     syncRepoTargetInput,
-    closeRepoContextMenu,
     handleSidebarContextMenu,
     fileEntryIcon,
     invalidateRepoSidebar,

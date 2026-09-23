@@ -1,9 +1,9 @@
-// 電話の幅 (SP) のときの骨格の決まり。DOM に触らない。
+// SP のときの骨格の決まり。DOM に触らない。
 //
 // code-viewer はデスクトップの道具で、電話で使う場面は 3 つに絞っている:
 // エージェントの状態を見て入力待ちに返事する・Diff とファイルを読む・
 // プロジェクトを切り替える。その 3 つのために、狭い画面では左のサイドバーを
-// 引き出し (drawer)、右の列を下から出す面 (sheet) にし、本文を全幅にする。
+// 引き出し (drawer)、一覧の列を下から出す面 (sheet) にし、本文を全幅にする。
 // 配置は style.css 末尾の「Phone (SP)」の節、開け閉めは views/mobile-shell.ts。
 
 /** これ以下の幅は電話の段 (縦向き)。 */
@@ -11,7 +11,7 @@ export const PHONE_MAX_WIDTH = 640;
 
 /**
  * 指で触る画面で、高さがこれ以下なら横向きの電話として電話の段に入れる。
- * 横向きの電話は幅が 640 を超える (844 など) が、左右の列を並べると本文が
+ * 横向きの電話は幅が 640 を超える (844 など) が、左のサイドバーと一覧の列を並べると本文が
  * 残らない。マウスの画面 (pointer: fine) は高さが低くても入れない。
  */
 export const PHONE_LANDSCAPE_MAX_HEIGHT = 500;
@@ -241,11 +241,11 @@ export const LONG_PRESS_MOVE_TOLERANCE = 10;
 
 /**
  * 長押しで右クリックのメニューを出す行 (エージェントの行・プロジェクトの見出し
- * (上へ・下へを含む)・タブ・ファイルの行・フォルダ表示の行)。ここに無い所
+ * (上へ・下へを含む)・タブ・ファイル一覧と変更ファイルの一覧の行・フォルダ表示の行)。ここに無い所
  * (本文・端末) の長押しはブラウザに任せる (文字の選択)。
  */
 export const LONG_PRESS_TARGETS =
-  ".nav-agent, .nav-project-head, .main-tab, #filelist li, .gdp-repo-row";
+  ".nav-agent, .nav-project-head, .main-tab, #file-list-rows li, #filelist li, .gdp-repo-row";
 
 /** 指を置いた位置から、長押しを諦めるほど動いたか。 */
 export function longPressMoved(
