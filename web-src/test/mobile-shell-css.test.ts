@@ -96,6 +96,12 @@ describe("電話の段の骨格", () => {
       expected: "env(safe-area-inset-right, 0px)",
     },
     {
+      // タブ列の右端 (デスクトップでは右の列の頭の行の幅)
+      name: "右の列の頭の行",
+      variable: "--panelcol-head-w",
+      expected: "env(safe-area-inset-right, 0px)",
+    },
+    {
       name: "本文の右端",
       variable: "--page-right",
       expected: "env(safe-area-inset-right, 0px)",
@@ -286,13 +292,29 @@ describe("電話の段の骨格", () => {
     ).toBe("var(--main-tabs-h)");
   });
 
-  test("帯のとき空の #view-head は面の頭で場所を取らない", () => {
+  // 右の列を畳んでも (一覧の画面・利用者が畳んだ) 絵柄は頭の行に残る
+  // (デスクトップと同じ。帯は無い)。頭の行を隠すと面から絵柄が消える。
+  test("右の列を畳んでも面の頭の絵柄は横に並んだまま出る", () => {
     const rules = withTiers(SOFT_KEYS, PHONE);
-    expect(
-      declarationsOf(rules, [
-        "body.gdp-sidebar-hidden #panel-head > #view-head",
-      ]).get("display"),
-    ).toBe("none");
+    const head = declarationsOf(rules, [
+      ".view-head",
+      "#panel-head > #view-head",
+      "body.gdp-sidebar-hidden #panel-head > #view-head",
+    ]);
+    const strip = declarationsOf(rules, [
+      "#panel-head > #view-head > .view-strip",
+    ]);
+    expect({
+      display: head.get("display"),
+      direction: head.get("flex-direction"),
+      stripDirection: strip.get("flex-direction"),
+      stripHeight: strip.get("height"),
+    }).toEqual({
+      display: "flex",
+      direction: "row",
+      stripDirection: "row",
+      stripHeight: "var(--main-tabs-h)",
+    });
   });
 
   test("タブ列の左端は引き出しのボタンと短い名前の幅", () => {

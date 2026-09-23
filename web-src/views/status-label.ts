@@ -3,6 +3,16 @@
 // 長い文言で決まるので、状態が変わっても隣 (エージェントの件数・右の操作) が
 // 動かない。文言を差し替えるだけだと Live と Loading の幅の差で隣が揺れていた。
 
+/**
+ * 状態ごとの文言 (app.ts の setStatus が重ねる並び: 稼働中・更新中・エラー・待機中)。
+ * index.html の早いスクリプト (#first-status) が最初の描画で同じ文言を重ねて置く
+ * (web-src/test/first-screen.test.ts が同じであることを確かめる)。
+ */
+export const STATUS_LABEL_TEXT = {
+  en: { live: "Live", loading: "Loading", error: "Error", idle: "Idle" },
+  ja: { live: "稼働中", loading: "更新中", error: "エラー", idle: "待機中" },
+} as const;
+
 export function renderStatusLabel(
   host: HTMLElement,
   labels: readonly string[],

@@ -160,7 +160,7 @@ function installFakeDom() {
   const body = new FakeElement("body");
   // 右の列の頭 (#panel-head) の中の画面の入口 (#view-head) と、畳むボタンの
   // 置き場所 (.view-head-row)。プロジェクト名の切替はタブ列の左端 (#tabs-lead)
-  // に固定 (index.html)。右の列を畳むと細い帯 (#panel-rail) に開くボタンと絵柄。
+  // に固定 (index.html)。右の列を畳んでも頭の行 (ボタンと絵柄) はそのまま。
   const tabsLead = new FakeElement("div", "tabs-lead");
   const brand = new FakeElement("button", "project-switcher");
   brand.className = "brand";
@@ -170,12 +170,11 @@ function installFakeDom() {
   const nameRow = new FakeElement("div");
   nameRow.className = "view-head-row";
   viewHead.appendChild(nameRow);
-  // 画面の入口の絵柄。畳んだときだけ帯 (#panel-rail) へ縦に移る。
+  // 画面の入口の絵柄。右の列を畳んでも頭の行から動かない。
   const strip = new FakeElement("nav");
   strip.className = "app-menu view-strip";
   viewHead.appendChild(strip);
-  const rail = new FakeElement("div", "panel-rail");
-  leftHead.append(viewHead, rail);
+  leftHead.append(viewHead);
   const topbar = new FakeElement("div", "topbar");
   const sidebar = new FakeElement("aside", "sidebar");
   const sidebarHead = new FakeElement("div");
@@ -207,7 +206,6 @@ function installFakeDom() {
     viewHead,
     nameRow,
     strip,
-    rail,
     sidebar,
     sidebarHead,
     topbar,
@@ -300,9 +298,9 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
 }
 
 // プロジェクト名とブランチはタブ列の左端に固定で、右の列を畳んでも動かない。
-// 画面の入口は右の列の頭の 1 段で、右の列を畳んだときだけ絵柄が帯へ移る。
-// 木を畳む / 出すボタンは右の列の頭の右端: 出ているときは絵柄の行の右端、
-// 畳んだときは右の列の細い帯 (ツールバーやタブ列へは行かない)。
+// 画面の入口は右の列の頭の 1 段で、右の列を畳んでも絵柄はそこに残る (畳むのは
+// 頭の下の本体だけ)。木を畳む / 出すボタンは右の列の頭の右端 (絵柄の行の
+// 右端) で、畳んでも同じ場所 (ツールバーやタブ列へは行かない)。
 describe("project name and view entries placement", () => {
   test.each([
     {
@@ -326,15 +324,15 @@ describe("project name and view entries placement", () => {
       stripAt: "first",
     },
     {
-      // 名前はタブ列の左端のまま。絵柄は帯へ (タブ列の左へは移さない)。
-      name: "the user folded the column: the name stays in the tab row's lead, the toggle and the view icons on the rail",
+      // 名前はタブ列の左端のまま。畳むボタンと絵柄も頭の行のまま。
+      name: "the user folded the column: the name stays in the tab row's lead, the toggle and the view icons in the head row",
       hidden: true,
       screenHidesTree: false,
       host: "leftHead" as const,
-      toggleHost: "rail" as const,
-      stripHost: "rail" as const,
+      toggleHost: "nameRow" as const,
+      stripHost: "viewHead" as const,
       toggleAt: "first",
-      stripAt: "last",
+      stripAt: "first",
     },
   ])("$name", ({
     hidden,
@@ -357,7 +355,7 @@ describe("project name and view entries placement", () => {
       dom.brand.parentElement === dom.tabsLead,
     ]).toEqual([true, true, true, true]);
     // 置き場所の中の順は見た目の順 (Tab で移る順): 畳むボタンは絵柄の行の右端の
-    // 置き場所 (中はボタンだけ)、帯では頭。右の列の頭では絵柄が行の頭。
+    // 置き場所 (中はボタンだけ)。右の列の頭では絵柄が行の頭。
     const at = (element: FakeElement) => {
       const siblings = element.parentElement?.children ?? [];
       return siblings[0] === element
@@ -372,14 +370,20 @@ describe("project name and view entries placement", () => {
     expect([at(toggle), at(dom.strip)]).toEqual([toggleAt, stripAt]);
   });
 
-  test("folding and unfolding moves the view icons to the rail and back", () => {
+  test("folding and unfolding keeps the view icons and the toggle in the head row", () => {
     const dom = installFakeDom();
     const state = { sidebarHidden: false };
     const sidebar = createSidebarForTest(state);
+    const places = () => [
+      dom.strip.parentElement === dom.viewHead,
+      dom.viewHead.children[0] === dom.strip,
+      document.querySelector<HTMLElement>("#sidebar-toggle")?.parentElement ===
+        (dom.nameRow as unknown as HTMLElement),
+    ];
     sidebar.applySidebarHidden(true);
-    expect(dom.strip.parentElement).toBe(dom.rail);
+    expect(places()).toEqual([true, true, true]);
     sidebar.applySidebarHidden(false);
-    expect(dom.strip.parentElement).toBe(dom.viewHead);
+    expect(places()).toEqual([true, true, true]);
   });
 });
 
@@ -395,8 +399,8 @@ describe("sidebar toggle placement", () => {
     sidebar.applySidebarHidden(true);
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");
     expect([
-      toggle?.parentElement === (dom.rail as unknown as HTMLElement),
-      // 名前はタブ列の左端のまま、入口は右の列の頭のまま (帯へ移るのは絵柄だけ)。
+      toggle?.parentElement === (dom.nameRow as unknown as HTMLElement),
+      // 名前はタブ列の左端のまま、入口は右の列の頭のまま。
       dom.brand.parentElement === dom.tabsLead &&
         dom.viewHead.parentElement === dom.leftHead,
       toggle?.offsetParent === null,
@@ -446,7 +450,7 @@ describe("sidebar toggle placement", () => {
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");
     expect([
       toggle === null,
-      toggle?.parentElement === (dom.rail as unknown as HTMLElement),
+      toggle?.parentElement === (dom.nameRow as unknown as HTMLElement),
       toggle?.offsetParent === null,
       toggle?.innerHTML.includes("<svg"),
     ]).toEqual([false, true, false, true]);
@@ -458,11 +462,11 @@ describe("sidebar toggle placement", () => {
     dom.tabsLead.remove();
     const sidebar = createSidebarForTest({ sidebarHidden: false });
     expect(() => sidebar.placeSidebarToggle()).toThrow(
-      "view head: missing #view-head, #view-head .view-head-row, #panel-head, #panel-rail in index.html",
+      "view head: missing #view-head, #view-head .view-head-row, #panel-head in index.html",
     );
   });
 
-  test("empty history pane keeps the toggle on the rail after clearing repo DOM", () => {
+  test("empty history pane keeps the toggle in the head row after clearing repo DOM", () => {
     const dom = installFakeDom();
     const state = { sidebarHidden: false };
     const sidebar = createSidebarForTest(state);
@@ -512,7 +516,7 @@ describe("sidebar toggle placement", () => {
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");
     expect([
       toggle === null,
-      toggle?.parentElement === (dom.rail as unknown as HTMLElement),
+      toggle?.parentElement === (dom.nameRow as unknown as HTMLElement),
       toggle?.offsetParent === null,
       toggle?.getAttribute("aria-expanded"),
       toggle?.innerHTML.includes("<svg"),

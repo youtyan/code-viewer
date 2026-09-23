@@ -12,7 +12,8 @@ import { DIFF_SCREEN_TEXT } from "../views/diff-view-i18n";
 // 一覧の列の決まり (core/list-column.ts)。本文 = room − 一覧 − 変更ファイルの木。
 // 本文が need に足りなければ、一覧を詰めた幅 (240) にし、次に木を帯 (28) に畳む。
 // 利用者が木を開いていれば畳まない。利用者の幅が詰めた幅以下なら詰めない。
-// 境目は既定の密度・左のサイドバー 280・右の列の帯 28 のとき room = 窓 − 308。
+// 境目は既定の密度・左のサイドバー 280 のとき room = 窓 − 280 (一覧の画面では
+// 右の列の本体は畳んであり、頭の行は残るが本文の横には何も取らない)。
 describe("listColumnLayout", () => {
   const base = {
     preferred: 320,
@@ -22,21 +23,21 @@ describe("listColumnLayout", () => {
     treeKeptOpen: false,
   };
   test.each([
-    // 1 面の History (need 480): 窓 1348 から全幅、1268 から詰める、それ未満は木を畳む
-    { name: "1 面 History 1348", room: 1040, need: 480, width: 320, tree: 240 },
-    { name: "1 面 History 1347", room: 1039, need: 480, width: 240, tree: 240 },
-    { name: "1 面 History 1268", room: 960, need: 480, width: 240, tree: 240 },
-    { name: "1 面 History 1267", room: 959, need: 480, width: 240, tree: 28 },
-    // 2 面の History (need 961): 1829 から全幅、1749 から詰める、それ未満は木を畳む
-    { name: "2 面 History 1829", room: 1521, need: 961, width: 320, tree: 240 },
-    { name: "2 面 History 1828", room: 1520, need: 961, width: 240, tree: 240 },
-    { name: "2 面 History 1749", room: 1441, need: 961, width: 240, tree: 240 },
-    { name: "2 面 History 1748", room: 1440, need: 961, width: 240, tree: 28 },
-    { name: "2 面 History 1600", room: 1292, need: 961, width: 240, tree: 28 },
+    // 1 面の History (need 480): 窓 1320 から全幅、1240 から詰める、それ未満は木を畳む
+    { name: "1 面 History 1320", room: 1040, need: 480, width: 320, tree: 240 },
+    { name: "1 面 History 1319", room: 1039, need: 480, width: 240, tree: 240 },
+    { name: "1 面 History 1240", room: 960, need: 480, width: 240, tree: 240 },
+    { name: "1 面 History 1239", room: 959, need: 480, width: 240, tree: 28 },
+    // 2 面の History (need 961): 1801 から全幅、1721 から詰める、それ未満は木を畳む
+    { name: "2 面 History 1801", room: 1521, need: 961, width: 320, tree: 240 },
+    { name: "2 面 History 1800", room: 1520, need: 961, width: 240, tree: 240 },
+    { name: "2 面 History 1721", room: 1441, need: 961, width: 240, tree: 240 },
+    { name: "2 面 History 1720", room: 1440, need: 961, width: 240, tree: 28 },
+    { name: "2 面 History 1600", room: 1320, need: 961, width: 240, tree: 28 },
     // 木を開いたまま (利用者が開いた) なら、足りなくても畳まない
     {
       name: "2 面 History 1600・木を開いた",
-      room: 1292,
+      room: 1320,
       need: 961,
       treeKeptOpen: true,
       width: 240,
@@ -44,7 +45,7 @@ describe("listColumnLayout", () => {
     },
     // Diff は木が無い
     {
-      name: "1 面 Diff 1108",
+      name: "1 面 Diff 1080",
       room: 800,
       need: 480,
       tree0: true,
@@ -52,7 +53,7 @@ describe("listColumnLayout", () => {
       tree: 0,
     },
     {
-      name: "1 面 Diff 1107",
+      name: "1 面 Diff 1079",
       room: 799,
       need: 480,
       tree0: true,
@@ -60,7 +61,7 @@ describe("listColumnLayout", () => {
       tree: 0,
     },
     {
-      name: "2 面 Diff 1589",
+      name: "2 面 Diff 1561",
       room: 1281,
       need: 961,
       tree0: true,
@@ -68,7 +69,7 @@ describe("listColumnLayout", () => {
       tree: 0,
     },
     {
-      name: "2 面 Diff 1588",
+      name: "2 面 Diff 1560",
       room: 1280,
       need: 961,
       tree0: true,
@@ -78,7 +79,7 @@ describe("listColumnLayout", () => {
     // 一覧を隠している (preferred 0) ときも、木は畳む
     {
       name: "一覧を隠した 2 面 History 1280",
-      room: 972,
+      room: 1000,
       need: 961,
       preferred: 0,
       width: 0,
@@ -87,7 +88,7 @@ describe("listColumnLayout", () => {
     // 利用者が広げた幅・詰めた幅と同じ幅
     {
       name: "利用者 560・1 面 History 1600",
-      room: 1292,
+      room: 1320,
       need: 480,
       preferred: 560,
       width: 560,

@@ -395,16 +395,19 @@ html, body {
      --content-h の代わりにこれで箱を作る (.main-pane-source)。 */
   --main-pane-h: calc(100vh - var(--global-header-h) - var(--main-bottom));
   /* 右の列 (パネルの列。画面の右端の固定の列で、上端から)。頭 (#panel-head) は
-     1 段 (タブ列と同じ高さ) で画面の入口の絵柄と畳むボタン、その下に Files の木
+     1 段 (タブ列と同じ高さ) で画面の入口の絵柄と畳むボタン、その下の本体に Files の木
      (#sidebar。探して開くための木) を出す。プロジェクト名とブランチはタブ列の
      左端 (#tabs-lead、幅 --tabs-lead-w) に固定。本文を選ぶための一覧 (Diff・History・選んでいる Worktrees) は
      右の列ではなく本文の左の一覧の列 (--listcol-shown) に出し、その画面の間は
-     右の列を細い帯 (--panelcol-rail-w、開くボタン 1 つ分の実寸) へ自動で畳む
-     (core/panel-column-policy.ts)。利用者が畳んだとき (gdp-sidebar-hidden) も帯。 */
+     右の列の本体を自動で畳む (core/panel-column-policy.ts)。利用者が畳んだとき
+     (gdp-sidebar-hidden) も同じ。畳むのは本体だけで、頭の行は同じ幅
+     (--panelcol-head-w) で残る (タブ列の右端・分割のボタン・絵柄を動かさない)。
+     --panelcol-shown は本体が本文の横に取る幅 (畳めば 0)。 */
   --panelcol-w: var(--sidebar-w);
+  --panelcol-head-w: var(--panelcol-w);
   --panelcol-shown: var(--panelcol-w);
-  /* 帯の幅 = 開くボタンと画面の入口の絵柄 1 つ分 (押せる領域の大きさ。密度で
-     変わるので固定の px にしない。特大で絵柄が帯からはみ出した)。 */
+  /* 変更ファイルの木 (一覧の列の 2 列目) を畳んだ帯の幅 = 開くボタン 1 つ分 (押せる
+     領域の大きさ。密度で変わるので固定の px にしない)。 */
   --panelcol-rail-w: var(--ui-control-sm);
   /* 右の列の本体の上端 = 頭 (タブ列の行と同じ高さの 1 段) の下。 */
   --panel-body-top: var(--global-header-h);
@@ -451,8 +454,10 @@ body[data-list-column="worktree"] {
 body[data-list-tree-folded] {
   --list-tree-w: var(--panelcol-rail-w);
 }
+/* 右の列を畳む = 本体 (木) だけを畳む。頭の行 (--panelcol-head-w) は残し、本文は
+   頭の行の下から右端まで。 */
 body.gdp-sidebar-hidden {
-  --panelcol-shown: var(--panelcol-rail-w);
+  --panelcol-shown: 0px;
 }
 
 /* 左右 2 面: 本文は左の面に収める (route のタブは左にしか置けない。T2 の上書き。body で決める)。 */
@@ -17114,7 +17119,8 @@ body.gdp-nav-resizing {
    フォーカスのある面の選択中のタブだけ、そのタブの幅だけ)。 */
 #main-tabs {
   position: fixed;
-  top: 0; left: var(--chrome-left); right: var(--panelcol-shown);
+  /* 右端は右の列の頭の左。右の列を畳んでも頭の行は残るので動かない。 */
+  top: 0; left: var(--chrome-left); right: var(--panelcol-head-w);
   height: var(--main-tabs-h);
   z-index: 60;
   display: flex;
@@ -17626,7 +17632,7 @@ button.brand[aria-expanded="true"] {
 
 /* ---- 画面の入口 (#view-head) とプロジェクト名 (#tabs-lead) の置き場所 ----
    入口の絵柄は右の列の頭 (#panel-head) の 1 段 (右端に右の列を畳むボタン)。
-   利用者が右の列を畳んだら絵柄は帯へ縦に (views/sidebar.ts の
+   右の列を畳んでも頭の行はそのまま (畳むのは本体だけ。views/sidebar.ts の
    placeSidebarToggle)。プロジェクト名とブランチはタブ列の左端に固定。 */
 .view-head {
   display: flex;
@@ -17635,13 +17641,13 @@ button.brand[aria-expanded="true"] {
   min-width: 0;
 }
 /* 右の列の頭 (#panel-head)。タブ列の行と同じ高さの 1 段に絵柄の列と、右端に列を
-   畳むボタン。タブを切り替えても動かない。
+   畳むボタン。タブの切替でも右の列の開閉 (自動で畳むときを含む) でも動かない。
    文字は文字の線 (--pad-text)、押せる領域の左端は面の線 (--pad-face)。 */
 #panel-head {
   position: fixed;
   right: 0;
   top: 0;
-  width: var(--panelcol-w);
+  width: var(--panelcol-head-w);
   height: var(--global-header-h);
   z-index: 32;
   box-sizing: border-box;
@@ -17651,36 +17657,13 @@ button.brand[aria-expanded="true"] {
      削られ、History で列が広がると畳むボタンが 1px 動く)。 */
   box-shadow: inset 1px 0 0 var(--color-line-soft);
 }
-/* 畳んだ右の列は細い帯。帯には開くボタン (#panel-rail の頭、タブ列の行) と、
-   その下に画面の入口の絵柄を縦に置く。 */
-body.gdp-sidebar-hidden #panel-head {
-  width: var(--panelcol-shown);
-  height: auto;
-  bottom: var(--chrome-bottom);
-  padding: 0;
-}
-.panel-rail {
-  display: none;
-}
-body.gdp-sidebar-hidden .panel-rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-/* 開くボタンはタブ列の行の高さの中に (タブ列とそろえる)。 */
-body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
-  flex: none;
-  margin: calc((var(--global-header-h) - var(--ui-control-sm)) / 2) 0;
-}
-.panel-rail > .view-strip {
-  flex-direction: column;
-}
-/* 2 面のために自動で畳んだ帯: 開くボタンの肩に小さな印を出し、手で畳んだ
-   ときと見分けられるようにする (理由はボタンの title に入れる)。 */
-.panel-rail.panel-rail-auto-hidden {
+/* 2 面のために自動で畳んだ: 開くボタンの肩に小さな印を出し、手で畳んだ
+   ときと見分けられるようにする (理由はボタンの title に入れる。app.ts の
+   markPanelColumnAutoHidden)。印は流れの外 (角に重ねる)。 */
+#sidebar-toggle.sidebar-toggle-auto-hidden {
   position: relative;
 }
-.panel-rail.panel-rail-auto-hidden::after {
+#sidebar-toggle.sidebar-toggle-auto-hidden::after {
   content: "";
   position: absolute;
   top: var(--space-1);
@@ -17706,7 +17689,7 @@ body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
   flex: none;
   margin-left: auto;
 }
-/* 木を畳むボタンは絵柄の行の右端 (畳んだときの開くボタンは #panel-rail)。 */
+/* 木を畳む / 開くボタンは絵柄の行の右端 (畳んでも同じ場所)。 */
 .view-head-row > #sidebar-toggle {
   flex: none;
 }
@@ -23200,6 +23183,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     /* 左右: 左のサイドバー・一覧の列・右の列は場所を取らない (重ねて出す)。 */
     --chrome-left: var(--sp-safe-left);
     --listcol-shown: 0px;
+    --panelcol-head-w: var(--sp-safe-right);
     --panelcol-shown: var(--sp-safe-right);
     --page-right: var(--panelcol-shown);
     /* 下: 最下段の下に切替の帯。 */
@@ -23384,21 +23368,12 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     box-shadow: 0 -1px 0 var(--color-line-soft);
   }
   /* 上の 640px の古い節の .app-menu (flex: 1 1 0) は縦に並べた頭の中で高さを
-     0 に潰すので、絵柄の列の高さを戻す。右の列が帯のとき (一覧の画面・
-     利用者が畳んだ) は帯の中の絵柄を横に並べる。 */
-  #panel-head > #view-head > .view-strip,
-  .panel-rail > .view-strip {
+     0 に潰すので、絵柄の列の高さを戻す。右の列を畳んでも (一覧の画面・利用者が
+     畳んだ) 絵柄は頭の行に残る (デスクトップと同じ)。 */
+  #panel-head > #view-head > .view-strip {
     flex: none;
     flex-direction: row;
     height: var(--main-tabs-h);
-  }
-  body.gdp-sidebar-hidden .panel-rail {
-    flex-direction: row;
-  }
-  /* 帯のとき絵柄は #panel-rail へ移り、#view-head は空。空のまま 1 段を取ると
-     絵柄の列が頭の外 (一覧の下) へ押し出される。 */
-  body.gdp-sidebar-hidden #panel-head > #view-head {
-    display: none;
   }
   /* 右の列を畳んだ (デスクトップの設定)・一覧の列を隠した (このセッション) の
      どちらでも、面には一覧を出す。 */

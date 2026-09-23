@@ -111,7 +111,7 @@ export type SidebarDeps = {
    */
   onUserToggledSidebarHidden?(hidden: boolean): void;
   /**
-   * 帯のボタンを押した。一覧を本文の左の列に出す画面なら、右の列の代わりに
+   * 右の列の畳むボタンを押した。一覧を本文の左の列に出す画面なら、右の列の代わりに
    * 一覧の列を出し入れして true (app.ts の toggleListColumn)。
    */
   toggleListColumn?(): boolean;
@@ -318,54 +318,45 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   /**
-   * 置き場所の中の順は見た目の順 (Tab で移る順)。名前の行では名前の後 (右端)、
-   * 帯では頭 (上端)。CSS の order で見た目だけ並べ替えると、Tab が右端の
-   * ボタンから名前へ戻った。
+   * 置き場所の中の順は見た目の順 (Tab で移る順)。絵柄の行ではボタンは右端 (絵柄の
+   * 後)。CSS の order で見た目だけ並べ替えると、Tab が右端のボタンから名前へ
+   * 戻った。
    */
-  function attachSidebarToggle(host: HTMLElement, first: boolean) {
+  function attachSidebarToggle(host: HTMLElement) {
     const button = ensureSidebarToggleButton();
     syncSidebarToggleIcon(button);
     if (button.parentElement === host) return;
-    if (first) host.prepend(button);
-    else host.append(button);
+    host.append(button);
   }
 
   /**
-   * 木を畳む / 出すボタンと画面の入口 (#view-head) の置き場所。入口の絵柄は右の
-   * 列の頭 (#panel-head) の 1 段目で、右の列を畳んだときだけ細い帯
-   * (#panel-rail) へ縦に移す。ボタンは出ているときは絵柄の行の右端
-   * (.view-head-row)、畳んだときは帯の頭 (どちらも右の列の頭の右端)。
-   * プロジェクト名とブランチ (#project-switcher) はタブ列の左端 (#tabs-lead) に
-   * 固定で、ここでは動かさない (画面や右の列の開閉で出たり消えたりしない)。
+   * 木を畳む / 出すボタンと画面の入口 (#view-head) の置き場所。入口の絵柄と
+   * ボタンは右の列の頭 (#panel-head) の 1 段で、右の列を畳んでも動かさない
+   * (畳むのは頭の下の本体だけ。ui-layout.md の「一覧の列と右の列」)。ボタンは
+   * 絵柄の行の右端 (.view-head-row)。プロジェクト名とブランチ
+   * (#project-switcher) はタブ列の左端 (#tabs-lead) に固定で、ここでは動かさない。
    */
   function placeSidebarToggle() {
     const head = document.querySelector<HTMLElement>("#view-head");
     const row = head?.querySelector<HTMLElement>(".view-head-row") ?? null;
     const panelHead = document.querySelector<HTMLElement>("#panel-head");
-    const rail = document.querySelector<HTMLElement>("#panel-rail");
-    if (!head || !row || !panelHead || !rail)
+    if (!head || !row || !panelHead)
       throw new Error(
         `view head: missing ${[
           ["#view-head", head],
           ["#view-head .view-head-row", row],
           ["#panel-head", panelHead],
-          ["#panel-rail", rail],
         ]
           .filter(([, el]) => !el)
           .map(([name]) => name)
           .join(", ")} in index.html`,
       );
-    attachSidebarToggle(STATE.sidebarHidden ? rail : row, STATE.sidebarHidden);
+    attachSidebarToggle(row);
     if (head.parentElement !== panelHead) panelHead.prepend(head);
-    // 畳んだときは画面の入口の絵柄 (.view-strip) だけを帯へ縦に並べる (帯 =
-    // 絵柄の列)。右の列の頭では絵柄が行の頭で、畳むボタンがその右端 (Tab で移る
-    // 順を見た目の順にそろえる)。
+    // 絵柄 (.view-strip) は行の頭で、畳むボタンがその右端 (Tab で移る順を見た目の
+    // 順にそろえる)。
     const strip = document.querySelector<HTMLElement>(".view-strip");
-    if (strip) {
-      if (STATE.sidebarHidden) {
-        if (strip.parentElement !== rail) rail.append(strip);
-      } else if (head.firstElementChild !== strip) head.prepend(strip);
-    }
+    if (strip && head.firstElementChild !== strip) head.prepend(strip);
     placeSidebarFilter();
   }
 

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
+import { pageModeClasses } from "../core/page-mode";
 
 const appSource = readFileSync("web-src/app.ts", "utf8");
 const sidebarSource = readFileSync("web-src/views/sidebar.ts", "utf8");
@@ -40,9 +41,19 @@ describe("sidebar filter placement on navigation", () => {
     expect(body.includes("syncSidebarHeaderHeight()")).toBe(true);
   });
 
+  // 画面の印は core/page-mode.ts の pageModeClasses が決める (index.html の早い
+  // スクリプトと共有。web-src/test/first-screen.test.ts)。ここは Diff の印だけを
+  // 振る舞いで見る。
   test("setPageMode marks diff pages and clears stale repository target", () => {
+    const diff = pageModeClasses(
+      { screen: "diff", range: { from: "HEAD", to: "worktree" } },
+      false,
+    );
+    expect([diff.has("gdp-diff-page"), diff.has("gdp-repo-page")]).toEqual([
+      true,
+      false,
+    ]);
     const body = functionBody(appSource, "setPageMode");
-    expect(body.includes('"gdp-diff-page"')).toBe(true);
     expect(body.includes("repoTargetWrap.hidden = true")).toBe(true);
   });
 

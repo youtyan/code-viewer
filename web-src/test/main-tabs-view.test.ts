@@ -1588,23 +1588,24 @@ describe("main tabs view: 左右 2 面", () => {
 
   // 2 面のときの一覧の列と右の列 (ui-layout.md の「一覧の列と右の列」)。一覧の
   // 画面 (Diff・History・選んでいる作業ツリー) は一覧を本文の左の列に出し、右の列は
-  // 帯 (28) に畳んだまま。History は一覧の右に変更ファイルの木 (240) の列も並ぶ
-  // (どちらも面の外)。本文が 2 面のゆとり (961) に足りなければ、一覧を詰めた幅
-  // (240) にし、次に木を帯 (28) に畳み (core/list-column.ts。app.ts が決めて
-  // listColumnWidth で渡す)、それでも 2 面の下限 (641) に足りなければ右の面を
-  // 預ける。一覧の無い画面 (Files。右の列 240) は、ゆとりが無ければ右の列を畳む。
-  // 本文の幅 = 窓 − 左のサイドバー 280 − 右の列 − 一覧の列。
+  // 本体を畳んだまま (頭の行 240 は残るが、本文の横には 0。panelColumnWidth)。
+  // History は一覧の右に変更ファイルの木 (240) の列も並ぶ (どちらも面の外)。本文が
+  // 2 面のゆとり (961) に足りなければ、一覧を詰めた幅 (240) にし、次に木を帯 (28)
+  // に畳み (core/list-column.ts。app.ts が決めて listColumnWidth で渡す)、それでも
+  // 2 面の下限 (641) に足りなければ右の面を預ける。一覧の無い画面 (Files。右の列
+  // 240) は、ゆとりが無ければ右の列を畳む。
+  // 本文の幅 = 窓 − 左のサイドバー 280 − 右の列の本体 − 一覧の列。
   test.each([
     {
       screen: "History",
-      window: 1216,
+      window: 1188,
       column: 268,
       parked: true,
       action: "keep",
     },
     {
       screen: "History",
-      window: 1217,
+      window: 1189,
       column: 268,
       parked: false,
       action: "keep",
@@ -1625,43 +1626,43 @@ describe("main tabs view: 左右 2 面", () => {
     },
     {
       screen: "History",
-      window: 1748,
+      window: 1720,
       column: 268,
       parked: false,
       action: "keep",
     },
     {
       screen: "History",
-      window: 1749,
+      window: 1721,
       column: 480,
       parked: false,
       action: "keep",
     },
     {
       screen: "History",
-      window: 1829,
+      window: 1801,
       column: 560,
       parked: false,
       action: "keep",
     },
-    { screen: "Diff", window: 1188, column: 240, parked: true, action: "keep" },
+    { screen: "Diff", window: 1160, column: 240, parked: true, action: "keep" },
     {
       screen: "Diff",
-      window: 1189,
+      window: 1161,
       column: 240,
       parked: false,
       action: "keep",
     },
     {
       screen: "Diff",
-      window: 1588,
+      window: 1560,
       column: 240,
       parked: false,
       action: "keep",
     },
     {
       screen: "Diff",
-      window: 1589,
+      window: 1561,
       column: 320,
       parked: false,
       action: "keep",
@@ -1689,20 +1690,21 @@ describe("main tabs view: 左右 2 面", () => {
     action,
   }) => {
     const holdsList = screen !== "Files";
-    const rail = 28;
+    const treeRail = 28;
     Object.defineProperty(document.documentElement, "clientWidth", {
       configurable: true,
       value: window - 280,
     });
+    // 右の列の頭は畳んでも 240 のまま。本文の横に取るのは本体の幅だけ。
     const panelColumn = document.createElement("div");
-    panelColumn.getBoundingClientRect = () =>
-      new DOMRect(0, 0, holdsList ? rail : 240, 80);
+    panelColumn.getBoundingClientRect = () => new DOMRect(0, 0, 240, 80);
+    const body = holdsList ? 0 : 240;
     const layout = listColumnLayout({
-      room: window - 280 - rail,
+      room: window - 280 - body,
       preferred: HISTORY_WIDTH.default,
       compact: HISTORY_WIDTH.min,
       tree: screen === "History" ? 240 : 0,
-      treeRail: rail,
+      treeRail,
       treeKeptOpen: false,
       need: COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH,
     });
@@ -1744,6 +1746,7 @@ describe("main tabs view: 左右 2 面", () => {
       undefined,
       {
         panelColumnHoldsList: () => holdsList,
+        panelColumnWidth: () => body,
         listColumnWidth: () => listWidth,
       },
     );

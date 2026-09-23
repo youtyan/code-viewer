@@ -58,11 +58,10 @@ test.each([
   [".db-root", "container", "db-pane / inline-size"],
   // 右の列の見出しも実幅で (件数を省く段階)
   ["#sidebar .sb-head", "container", "sidebar-head / inline-size"],
-  // 畳んだ右の列 (帯) は開くボタンと画面の入口の絵柄を縦に並べる (絵柄をタブ列の
-  // 左へ移すと、2 面の狭い面でタブが 38px まで潰れた)。帯の幅は押せる領域の
-  // 大きさ (密度で変わる。特大で絵柄がはみ出した)
-  ["body.gdp-sidebar-hidden .panel-rail", "flex-direction", "column"],
-  [".panel-rail > .view-strip", "flex-direction", "column"],
+  // 右の列を畳んでも頭の行 (画面の入口の絵柄と畳むボタン) は横に並んだまま
+  // (web-src/test/panel-head-kept.test.ts)。畳んだ変更ファイルの木の帯の幅は
+  // 押せる領域の大きさ (密度で変わる。特大で絵柄がはみ出した)
+  ["#panel-head > #view-head", "flex-direction", "row"],
   ["body", "--panelcol-rail-w", "var(--ui-control-sm)"],
   // プロジェクト名と枝の名前の幅は views/brand-fit.ts が分ける。枝は自然な幅
   // (上限は約 40%) まで出して縮めず、名前が残りで省略する (枝が「m」になった)

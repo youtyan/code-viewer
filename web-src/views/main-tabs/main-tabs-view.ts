@@ -139,10 +139,15 @@ export type MainTabsDeps = {
    */
   lead?: HTMLElement;
   /**
-   * 右の列 (画面の右端の固定の列) の頭。本文の幅はタブ列の左端からこの左まで
-   * で数える (畳んでいれば細い帯の幅)。無ければ右の列は無いものとする。
+   * 右の列 (画面の右端の固定の列) の頭。幅が変わったら (木の幅を変えた) 面の
+   * 幅を合わせ直す。無ければ右の列は無いものとする。
    */
   panelColumn?: HTMLElement;
+  /**
+   * 右の列が本文の横に取っている幅 (core/panel-column-policy.ts の
+   * panelColumnBodyWidth。畳めば頭の行が残っても 0)。無ければ panelColumn の幅。
+   */
+  panelColumnWidth?(): number;
   getLanguage(): MainTabsLang;
   /** page のタブの名前 (画面の入口と同じ文言)。 */
   pageLabel(page: PageKind): string;
@@ -547,8 +552,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
 
   // ---- 幅 ----
 
-  /** 右の列の幅 (畳んでいれば細い帯の幅)。 */
+  /** 右の列が本文の横に取っている幅 (畳んでいれば 0)。 */
   function panelColumnWidth(): number {
+    if (deps.panelColumnWidth) return deps.panelColumnWidth();
     return deps.panelColumn?.getBoundingClientRect().width ?? 0;
   }
 

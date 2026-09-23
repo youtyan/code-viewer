@@ -380,12 +380,7 @@ describe("a focused control draws the ring that fits where it sits", () => {
           <a id="head-view" class="app-menu-item view-strip-item" href="#files">files</a>
         </nav>
       </div>
-      <div id="panel-rail" class="panel-rail">
-        <button id="sidebar-toggle">show</button>
-        <nav class="app-menu view-strip">
-          <a id="rail-view" class="app-menu-item view-strip-item" href="#diff">diff</a>
-        </nav>
-      </div>
+      <button id="sidebar-toggle">show</button>
     </div>
     <header id="topbar">
       <div class="ref-pickers">
@@ -482,11 +477,10 @@ describe("a focused control draws the ring that fits where it sits", () => {
     ["usage-item", INSET],
     ["status-action", INSET],
     ["auto-update", INSET],
-    // 窓の右端に接する (畳んだ帯)
+    // 窓の右端に接する (右の列の頭の右端)
     ["sidebar-toggle", INSET],
-    // 画面の絵柄 (右の列の頭では上端、畳んだ帯では右端)
+    // 画面の絵柄 (右の列の頭。窓の上端)
     ["head-view", INSET],
-    ["rail-view", INSET],
     // overflow で切る枠の中
     ["layout-unified", INSET],
     ["view-tree", INSET],
@@ -509,21 +503,29 @@ describe("a focused control draws the ring that fits where it sits", () => {
     });
   });
 
-  // 右の列を畳むボタンは 1 つで、右の列の頭 (上端) と畳んだ帯 (右端) を移る
+  // 右の列を畳むボタンと画面の絵柄は、右の列を畳んでも頭の行に残る
   // (views/sidebar.ts の placeSidebarToggle)。どちらも窓の端なので内側。
-  test("the right column's toggle draws inside in the head row and on the rail", () => {
+  test("the right column's toggle and view icons draw inside, open and folded", () => {
     const toggle = document.getElementById("sidebar-toggle");
-    const row = document.querySelector(".view-head-row");
-    const rail = document.getElementById("panel-rail");
-    if (!toggle || !row || !rail)
-      throw new Error("focus ring test: missing the toggle's places");
+    const row = document.querySelector("#panel-head .view-head-row");
+    if (!toggle || !row)
+      throw new Error("focus ring test: missing the toggle's place");
     row.append(toggle);
-    const inHeadRow = focusedRing("sidebar-toggle");
-    rail.prepend(toggle);
-    expect({ inHeadRow, onRail: focusedRing("sidebar-toggle") }).toEqual({
-      inHeadRow: { outline: "none", shadow: resolveVar(INSET, light) },
-      onRail: { outline: "none", shadow: resolveVar(INSET, light) },
+    const rings = () => ({
+      toggle: focusedRing("sidebar-toggle"),
+      view: focusedRing("head-view"),
     });
+    const open = rings();
+    document.body.classList.add("gdp-sidebar-hidden");
+    try {
+      const inside = { outline: "none", shadow: resolveVar(INSET, light) };
+      expect({ open, folded: rings() }).toEqual({
+        open: { toggle: inside, view: inside },
+        folded: { toggle: inside, view: inside },
+      });
+    } finally {
+      document.body.classList.remove("gdp-sidebar-hidden");
+    }
   });
 
   // 並べ替えの帯はボタンの高さいっぱいで、すぐ下の一覧の面が外の輪の下辺を隠す。

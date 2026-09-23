@@ -10,14 +10,16 @@ import {
 } from "./_css-fixture";
 
 describe("main tabs while a tab is dragged", () => {
-  // 右の端はタブ列と同じ (本文の右の端 = 右の列の左)。値は固定しない。
+  // 右の端は本文の面の箱と同じ (本文の右の端 = 右の列の本体の左。右の列を畳めば
+  // 窓の右端)。タブ列の右端は右の列の頭の左で、畳んでも動かないので比べない。
+  // 値は固定しない。
   test("the split drop zone ends where the main area ends, left of the right column", () => {
     const rules = baseRules(loadStyleSheet());
     const right = (selector: string) =>
       cascadedDeclarations(rules, (candidate) => candidate === selector).get(
         "right",
       );
-    expect(right(".main-split-drop")).toBe(right("#main-tabs"));
+    expect(right(".main-split-drop")).toBe(right(".main-pane-host"));
   });
 });
 
