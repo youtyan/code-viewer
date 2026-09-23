@@ -362,8 +362,10 @@ Examples:
       try {
         cwd = realpathSync(next);
         cwdWasExplicit = true;
-      } catch {
-        console.error("--cwd must point to an existing directory");
+      } catch (error) {
+        console.error(
+          `--cwd must point to an existing directory: ${next}\n${formatErrorDetail(error)}`,
+        );
         process.exit(1);
       }
     } else if (arg === "--port") {

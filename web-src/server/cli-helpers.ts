@@ -152,10 +152,10 @@ export function resolveRepoRootSafe(
   let baseReal: string;
   try {
     baseReal = realpathSync(base);
-  } catch {
+  } catch (error) {
     return {
       ok: false,
-      error: `--cwd must point to an existing directory: ${base}`,
+      error: `--cwd must point to an existing directory: ${base}\n${formatErrorDetail(error)}`,
     };
   }
   const root = git.repoRootResult(baseReal);

@@ -19,6 +19,7 @@ import {
   checkDatastoreConnectivity,
   type DatastoreConnectivityDeps,
   DEFAULT_DATASTORE_CONNECTIVITY_DEPS,
+  readThenClose,
 } from "../server/doctor";
 
 type SpawnSyncLike = typeof spawnSync;
@@ -169,6 +170,39 @@ describe("defaultDatastoreProbe (Supabase CLI source)", () => {
   });
 });
 
+// 読み取りの後の close の失敗を捨てない (読み取りも失敗していたら両方を持つ)。
+describe("readThenClose", () => {
+  const readFailure = new Error("sample read failure");
+  const closeFailure = new Error("sample close failure");
+  test.each([
+    {
+      name: "a close failure after a successful read",
+      read: () => Promise.resolve(),
+      expected: {
+        message: "closing after the probe failed",
+        cause: closeFailure,
+      },
+    },
+    {
+      name: "both failures when the read and the close fail",
+      read: () => Promise.reject(readFailure),
+      expected: {
+        message: "the probe failed, and closing it also failed",
+        errors: [readFailure, closeFailure],
+      },
+    },
+  ])("rejects with $name", async ({ read, expected }) => {
+    const resource = {
+      close: () => {
+        throw closeFailure;
+      },
+    };
+    await expect(
+      readThenClose(resource, read, new AbortController().signal),
+    ).rejects.toMatchObject(expected);
+  });
+});
+
 describe("checkDatastoreConnectivity", () => {
   test("emits datastore.none row (status ok) when no sources are discovered", async () => {
     const group = await checkDatastoreConnectivity(
@@ -262,7 +296,7 @@ describe("checkDatastoreConnectivity", () => {
         id: "datastore.docker:pg-svc",
         title: "postgresql:docker:pg-svc",
         status: "warn",
-        detail: "probe failed: ECONNREFUSED 127.0.0.1:5432",
+        detail: "probe failed: Error: ECONNREFUSED 127.0.0.1:5432",
         hint: "Retry with: code-viewer query schemas --db 'docker:pg-svc' --json",
       },
     ]);
@@ -338,7 +372,7 @@ describe("checkDatastoreConnectivity", () => {
         id: "datastore.discovery",
         title: "Source discovery",
         status: "warn",
-        detail: "source discovery failed: docker daemon unreachable",
+        detail: "source discovery failed: Error: docker daemon unreachable",
       },
     ]);
   });
@@ -385,6 +419,6 @@ describe("checkDatastoreConnectivity", () => {
     expect(group.rows).toHaveLength(1);
     const row = group.rows[0];
     expect(row.status).toBe("warn");
-    expect(/^probe failed: aborted$/.test(row.detail ?? "")).toBe(true);
+    expect(row.detail).toBe("probe failed: Error: aborted");
   });
 });

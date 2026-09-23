@@ -2,8 +2,10 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  resolveRepoRootSafe,
   screenBaseUrl,
   takeGlobalCliOption,
   validateRefValue,
@@ -110,6 +112,51 @@ describe("takeGlobalCliOption", () => {
   ])("keeps shared validation behavior: $name", ({ value, expected }) => {
     expect(validateRefValue(value, "--value")).toBe(expected);
     expect(validateRepoRelativePathValue(value, "--value")).toBe(expected);
+  });
+});
+
+// 読めない --cwd は、どのパスが・なぜ (code まで) 読めないかを言う。
+describe("--cwd that cannot be read", () => {
+  const missing = join(tmpdir(), "code-viewer-sample-missing-cwd", "gone");
+  const bundle = join(
+    fileURLToPath(new URL(".", import.meta.url)),
+    "..",
+    "..",
+    "dist",
+    "code-viewer.js",
+  );
+  test.each([
+    {
+      name: "resolveRepoRootSafe",
+      run: () => {
+        const result = resolveRepoRootSafe(missing);
+        return { exit: null, text: result.ok === false ? result.error : "" };
+      },
+    },
+    {
+      name: "the standalone server",
+      run: () => {
+        const child = spawnSync(
+          process.execPath,
+          [bundle, "--standalone", "--cwd", missing],
+          { encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } },
+        );
+        return { exit: child.status, text: child.stderr.trim() };
+      },
+      exit: 1,
+    },
+  ])("$name names the path and the reason", ({ run, exit = null }) => {
+    const { exit: status, text } = run();
+    const [head, ...detail] = text.split("\n");
+    expect({
+      exit: status,
+      head,
+      code: detail.join("\n").includes('"code":"ENOENT"'),
+    }).toEqual({
+      exit,
+      head: `--cwd must point to an existing directory: ${missing}`,
+      code: true,
+    });
   });
 });
 

@@ -1,14 +1,20 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { errorWithCause } from "../core/error-detail";
+import {
+  configureExternalCommands,
+  resetExternalCommandsForTest,
+} from "../server/command-resolver";
 import {
   _classifySqliteLoadError,
   _parseSqliteAbiMismatchMessage,
@@ -17,6 +23,7 @@ import {
 import {
   buildDoctorReport,
   checkServer,
+  findCodeViewerPackageJson,
   handleDoctor,
   shellAvailabilityToRow,
   sqliteStatusToRow,
@@ -224,19 +231,19 @@ describe("doctor report", () => {
         {
           groupId: "git",
           rowId: "git.binary",
-          detail: "git not found in PATH",
+          detail: "git not found in PATH\nstderr: spawn git ENOENT",
           override: "--bin git=/absolute/path",
         },
         {
           groupId: "search",
           rowId: "search.rg",
-          detail: "rg not found in PATH",
+          detail: "rg not found in PATH\nstderr: spawn rg ENOENT",
           override: "--bin rg=/absolute/path",
         },
         {
           groupId: "terminal",
           rowId: "terminal.tmux",
-          detail: "tmux not found in PATH",
+          detail: "tmux not found in PATH\nstderr: spawn tmux ENOENT",
           override: "--bin tmux=/absolute/path",
         },
       ];
@@ -355,4 +362,238 @@ describe("doctor report", () => {
     },
     DOCTOR_TEST_TIMEOUT_MS,
   );
+});
+
+// 失敗した検査の行が、何が・なぜ失敗したかを持つこと (1 行目だけ・固定の文に潰さない)。
+describe("doctor keeps why a check failed", () => {
+  const roots: string[] = [];
+  const tempDir = (prefix: string): string => {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    roots.push(dir);
+    return dir;
+  };
+  afterEach(() => {
+    resetExternalCommandsForTest();
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // 偽の docker。引数ごとの応答を sh の case で返し、知らない引数は 64 で終える。
+  const fakeDocker = (answers: Record<string, string>): string => {
+    const path = join(tempDir("code-viewer-doctor-docker-"), "docker");
+    const cases = Object.entries(answers)
+      .map(([args, body]) => `  "${args}") ${body} ;;`)
+      .join("\n");
+    writeFileSync(
+      path,
+      `#!/bin/sh\ncase "$*" in\n${cases}\n  *) echo "unexpected: $*" >&2; exit 64 ;;\nesac\n`,
+    );
+    chmodSync(path, 0o755);
+    return path;
+  };
+  const answer = (stdout: string) => `echo "${stdout}"; exit 0`;
+  const fail = (...stderr: string[]) =>
+    `printf '${stderr.join("\\n")}\\n' >&2; exit 1`;
+  const running = {
+    "--version": answer("Docker version 0.0.0-sample"),
+    "compose version --short": answer("0.0.0-sample"),
+    "info --format {{.ServerVersion}}": answer("0.0.0-sample"),
+  };
+
+  test.each([
+    {
+      name: "the compose plugin and the daemon",
+      answers: {
+        "--version": answer("Docker version 0.0.0-sample"),
+        "compose version --short": fail("sample plugin failure"),
+        "info --format {{.ServerVersion}}": fail(
+          "sample daemon line 1",
+          "sample daemon line 2",
+        ),
+      },
+      expected: {
+        "docker.compose-v2": {
+          status: "error",
+          detail:
+            "not available\ndocker compose version --short exited with 1\nstderr: sample plugin failure",
+        },
+        "docker.daemon": {
+          status: "error",
+          detail: "sample daemon line 1\nsample daemon line 2",
+        },
+      },
+    },
+    {
+      name: "the service list and the ps output",
+      answers: {
+        ...running,
+        "compose config --quiet": "exit 0",
+        "compose config --services": fail("sample services failure"),
+        "compose ps --all --format json": answer("sample non-json"),
+      },
+      expected: {
+        "docker.compose-config:": {
+          status: "warn",
+          detail:
+            "`docker compose config --services` failed: sample services failure",
+        },
+        "docker.compose-ps:": {
+          status: "warn",
+          detail: expect.stringMatching(
+            /^could not parse `docker compose ps --format json` output: SyntaxError: /,
+          ),
+        },
+      },
+    },
+    {
+      name: "every stderr line of compose config and ps",
+      answers: {
+        ...running,
+        "compose config --quiet": fail(
+          "sample config line 1",
+          "sample config line 2",
+        ),
+        "compose ps --all --format json": fail(
+          "sample ps line 1",
+          "sample ps line 2",
+        ),
+      },
+      expected: {
+        "docker.compose-config:": {
+          status: "error",
+          detail: "sample config line 1\nsample config line 2",
+        },
+        "docker.compose-ps:": {
+          status: "warn",
+          detail: "sample ps line 1\nsample ps line 2",
+        },
+      },
+    },
+  ])(
+    "docker rows keep $name",
+    async ({ answers, expected }) => {
+      const cwd = tempDir("code-viewer-doctor-compose-");
+      writeFileSync(
+        join(cwd, "docker-compose.yml"),
+        "services:\n  db:\n    image: postgres:16\n",
+      );
+      expect(
+        configureExternalCommands({
+          cwd,
+          env: {},
+          cliOverrides: [{ name: "docker", path: fakeDocker(answers) }],
+        }),
+      ).toEqual({ ok: true });
+      const report = await buildDoctorReport({
+        cwd,
+        scopeOmitDirNames: [],
+        listenPort: 0,
+      });
+      const rows = report.groups.find((g) => g.id === "docker")?.rows ?? [];
+      const found = Object.fromEntries(
+        Object.keys(expected).map((prefix) => {
+          const row = rows.find((candidate) => candidate.id.startsWith(prefix));
+          return [prefix, row && { status: row.status, detail: row.detail }];
+        }),
+      );
+      expect(found).toEqual(expected);
+    },
+    DOCTOR_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "snapshot and git rows say why, instead of 'not created yet' or 'outside a work tree'",
+    async () => {
+      const cwd = realpathSync(tempDir("code-viewer-doctor-loop-"));
+      // .code-viewer が自分を指す: access・stat は ENOENT でなく ELOOP で失敗する。
+      symlinkSync(".code-viewer", join(cwd, ".code-viewer"));
+      // 版の確認は PATH を鍵に含めずに覚えるので、PATH を空にした前のテストの
+      // 「git が無い」を引かないよう、新しいモジュールで組み立てる。
+      vi.resetModules();
+      const fresh = await import("../server/doctor");
+      const report = await fresh.buildDoctorReport({
+        cwd,
+        scopeOmitDirNames: [],
+        listenPort: 0,
+      });
+      const row = (id: string) => {
+        const found = report.groups
+          .flatMap((group) => group.rows)
+          .find((candidate) => candidate.id === id);
+        return found && { status: found.status, detail: found.detail };
+      };
+      const eloop = expect.stringContaining('"code":"ELOOP"');
+      expect({
+        dir: row("snapshot.dir"),
+        db: row("snapshot.db"),
+        open: row("sqlite.snapshot-open"),
+        repo: row("git.repo"),
+      }).toEqual({
+        dir: {
+          status: "error",
+          detail: expect.stringMatching(
+            /\(not writable\)\nError: ELOOP: .*"code":"ELOOP"/s,
+          ),
+        },
+        db: { status: "error", detail: eloop },
+        open: { status: "error", detail: eloop },
+        repo: {
+          status: "warn",
+          detail: expect.stringMatching(
+            /^.* is not inside a git work tree\ngit rev-parse --is-inside-work-tree exited with 128\nstderr: fatal: /,
+          ),
+        },
+      });
+    },
+    DOCTOR_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "an aborted report throws and is not remembered as a failed check",
+    async () => {
+      vi.resetModules();
+      const fresh = await import("../server/doctor");
+      const cwd = tempDir("code-viewer-doctor-abort-");
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        fresh.buildDoctorReport({
+          cwd,
+          scopeOmitDirNames: [],
+          listenPort: 0,
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow("doctor aborted");
+      const report = await fresh.buildDoctorReport({
+        cwd,
+        scopeOmitDirNames: [],
+        listenPort: 0,
+      });
+      const git = report.groups
+        .find((group) => group.id === "git")
+        ?.rows.find((candidate) => candidate.id === "git.binary");
+      expect(git?.status).toBe("ok");
+    },
+    DOCTOR_TEST_TIMEOUT_MS,
+  );
+
+  test("the package lookup keeps an unreadable package.json on its way up", () => {
+    const root = realpathSync(tempDir("code-viewer-doctor-package-"));
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({ name: "@youtyan/code-viewer", version: "0.0.0-sample" }),
+    );
+    mkdirSync(join(root, "sample", "nested"), { recursive: true });
+    writeFileSync(join(root, "sample", "package.json"), "{ sample");
+    expect(findCodeViewerPackageJson(join(root, "sample", "nested"))).toEqual({
+      version: "0.0.0-sample",
+      path: join(root, "package.json"),
+      failures: [
+        expect.stringContaining(
+          `${join(root, "sample", "package.json")}: SyntaxError: `,
+        ),
+      ],
+    });
+  });
 });
