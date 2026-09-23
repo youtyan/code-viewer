@@ -77,6 +77,12 @@ type SessionEntry = {
   listeners: Set<(chunk: string) => void>;
   exitListeners: Set<(exitCode: number) => void>;
   /**
+   * 出力が出たことだけを知りたい者 (terminal/attach-watch.ts の見張り)。購読者
+   * (listeners) とは別に持つ: 購読者に数えると、まだ誰にも渡っていない出力
+   * (unseenChars) を渡したことになり、端末への問い合わせに誰も答えなくなる。
+   */
+  outputWatchers: Set<() => void>;
+  /**
    * 最初の出力を受けたか。プロンプトが出た = シェルが入力を読む状態になった
    * 合図として使う (writeToShellWhenReady)。
    */
@@ -250,6 +256,32 @@ export function rememberShellTmuxAttachment(
   entry.meta.purpose = purpose;
 }
 
+/** code-viewer がそのシェルから接続した tmux の宛先 (まだ・もう無ければ null)。 */
+export function shellTmuxAttachment(
+  id: ShellSessionId,
+): { session: string; pane: string } | null {
+  const entry = sessions.get(id);
+  if (!entry || entry.meta.exited || !entry.tmuxAttachment) return null;
+  return { ...entry.tmuxAttachment };
+}
+
+/**
+ * シェルに出力が出るたびに呼ぶ。中身は渡さず、購読とは数えない (溜め置きの
+ * 渡し方を変えない)。シェルが終われば呼ばれなくなる。戻り値で止める。
+ * シェルがもう無ければ null。
+ */
+export function watchShellOutput(
+  id: ShellSessionId,
+  onOutput: () => void,
+): (() => void) | null {
+  const entry = sessions.get(id);
+  if (!entry || entry.meta.exited) return null;
+  entry.outputWatchers.add(onOutput);
+  return () => {
+    entry.outputWatchers.delete(onOutput);
+  };
+}
+
 export function getShellSession(id: ShellSessionId): ShellSession | null {
   return sessions.get(id)?.meta ?? null;
 }
@@ -347,6 +379,7 @@ export async function createShellSession(
     unseenChars: 0,
     listeners: new Set(),
     exitListeners: new Set(),
+    outputWatchers: new Set(),
     ready: false,
     queued: [],
     tmuxAttachment: null,
@@ -364,6 +397,7 @@ export async function createShellSession(
     // 待たせていた入力があればここで流す。
     markShellReady(entry);
     for (const listener of [...entry.listeners]) listener(chunk);
+    for (const watcher of [...entry.outputWatchers]) watcher();
   });
   child.onExit(({ exitCode }) => {
     entry.meta.exited = true;
@@ -379,6 +413,7 @@ export async function createShellSession(
     // 生きているので、ここには来ない。
     entry.listeners.clear();
     entry.exitListeners.clear();
+    entry.outputWatchers.clear();
     sessions.delete(id);
   });
 
@@ -557,6 +592,7 @@ export async function closeShellSession(
   if (!entry) return { status: "gone" };
   sessions.delete(id);
   entry.listeners.clear();
+  entry.outputWatchers.clear();
   const queued = entry.queued.splice(0);
   entry.ready = true;
   for (const item of queued) item.resolve({ status: "gone" });

@@ -151,6 +151,9 @@ describe("端末の操作札", () => {
       trackLoad: (promise) => promise,
       onStatus: () => undefined,
       onTargetGone: () => undefined,
+      onShellExited: () => undefined,
+      tmuxWindow: () => null,
+      onTmuxWindowStale: () => undefined,
       isImageShelfCollapsed: () => false,
       setImageShelfCollapsed: () => undefined,
     });

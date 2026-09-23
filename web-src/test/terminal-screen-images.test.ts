@@ -383,6 +383,9 @@ function makeScreen(
     getText: () => terminalText("en"),
     onStatus: (message) => statusMessages.push(message),
     onTargetGone: () => undefined,
+    onShellExited: () => undefined,
+    tmuxWindow: () => null,
+    onTmuxWindowStale: () => undefined,
     getFontSize: () => 14,
     isImageShelfCollapsed: () => shelfCollapsed,
     setImageShelfCollapsed: (collapsed) => {

@@ -214,6 +214,9 @@ describe("流し直しの印を読んで、端末の答えを送るか決める"
       trackLoad: (promise) => promise,
       onStatus: () => undefined,
       onTargetGone: () => undefined,
+      onShellExited: () => undefined,
+      tmuxWindow: () => null,
+      onTmuxWindowStale: () => undefined,
       isImageShelfCollapsed: () => false,
       setImageShelfCollapsed: () => undefined,
     });

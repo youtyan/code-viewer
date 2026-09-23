@@ -126,8 +126,14 @@ function shellQuote(value: string): string {
  * 開いたシェルがもう tmux の中にいて、そのままでは attach が「sessions should be
  * nested with care」で断られた。TMUX を外せば入れ子で繋がる。`env` は外部の
  * コマンドなので、zsh / bash / fish のどれでも同じに働く。
+ *
+ * `&& exit` を後ろに付ける: tmux から抜けたら (セッションが終わった・tmux の
+ * サーバが終わった・detach した。どれも tmux は 0 で終わる) シェルごと終わり、
+ * そのシェルのタブが閉じる。映すものが無いのに外側のシェルのプロンプトが
+ * 残っていた。繋げなかったとき (ペインが無い等。tmux は 1 で終わる) はシェルを
+ * 残し、tmux の理由をそのまま読めるようにする。`exec` にしないのはこのため。
  */
 export function tmuxAttachCommandLine(paneId: TmuxPaneId): string {
   const tmux = shellQuote(commandForExternal("tmux"));
-  return `env -u TMUX ${tmux} attach-session -t ${shellQuote(paneId)}\r`;
+  return `env -u TMUX ${tmux} attach-session -t ${shellQuote(paneId)} && exit\r`;
 }

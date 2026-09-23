@@ -14,17 +14,23 @@ import {
   vi,
 } from "vitest";
 import type { ShellSession, ShellSessionId } from "../core/shell";
+import type { TerminalScreenDeps } from "../views/terminal/terminal-screen";
 
 const terminalScreenState = vi.hoisted(() => ({
   screens: [] as Array<{
     attached: ShellSession | null;
     focusCount: number;
+    deps: TerminalScreenDeps;
   }>,
 }));
 
 vi.mock("../views/terminal/terminal-screen", () => ({
-  createTerminalScreen: () => {
-    const state = { attached: null as ShellSession | null, focusCount: 0 };
+  createTerminalScreen: (deps: TerminalScreenDeps) => {
+    const state = {
+      attached: null as ShellSession | null,
+      focusCount: 0,
+      deps,
+    };
     terminalScreenState.screens.push(state);
     return {
       el: document.createElement("div"),
@@ -43,6 +49,7 @@ vi.mock("../views/terminal/terminal-screen", () => ({
       applyFontSize: () => undefined,
       setInputEnabled: () => undefined,
       localize: () => undefined,
+      updateTmuxCover: () => undefined,
       dispose: () => undefined,
     };
   },
@@ -89,6 +96,7 @@ function setup(responses: Array<() => Response | Promise<Response>>) {
     }),
   );
   const opened: string[] = [];
+  const ended: string[] = [];
   const view = createTerminalView({
     trackLoad: (promise) => promise,
     actionHeaders: () => ({}),
@@ -101,8 +109,11 @@ function setup(responses: Array<() => Response | Promise<Response>>) {
       opened.push(
         pane ? `${session.id}:${pane}:${side}` : `${session.id}:${side}`,
       ),
+    onShellEnded: (id) => ended.push(id),
+    tmuxWindow: () => null,
+    onTmuxWindowStale: () => undefined,
   });
-  return { view, requests, opened };
+  return { view, requests, opened, ended };
 }
 
 const json = (body: unknown, status = 200) =>
@@ -260,5 +271,42 @@ describe("terminal view: 案内と状態行", () => {
         role: "status",
       },
     });
+  });
+});
+
+// 前面のタブのシェルが終わったら、タブを閉じて知らせてもらう (app.ts)。
+// 「セッションを止める」で止めたときは、止めた人が知っているので知らせない。
+describe("terminal view: シェルの終わり", () => {
+  test("映しているシェルが終わったら、そのシェルを渡して一覧からも外す", async () => {
+    const session = shell("shell-e1");
+    const { view, ended } = setup([
+      () => json({ available: true, sessions: [session] }),
+    ]);
+    await view.loadShells();
+    await view.showInTab(session.id, "left");
+    terminalScreenState.screens[0]?.deps.onShellExited(session);
+    expect([ended, view.knownShells()?.sessions]).toEqual([["shell-e1"], []]);
+  });
+
+  test("「セッションを止める」で止めている間に届いた終わりは知らせない", async () => {
+    const session = shell("shell-e2");
+    let release: (response: Response) => void = () => undefined;
+    const { view, ended } = setup([
+      () => json({ available: true, sessions: [session] }),
+      () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+    ]);
+    await view.loadShells();
+    await view.showInTab(session.id, "left");
+    const closing = view.closeShell(session.id);
+    // サーバは止める応答より先に、流れへ「終わった」を送る。
+    terminalScreenState.screens[0]?.deps.onShellExited(session);
+    release(json({ ok: true }));
+    await closing;
+    // 止めた後に同じ id が別の理由で終わることは無いが、印は残さない。
+    terminalScreenState.screens[0]?.deps.onShellExited(session);
+    expect(ended).toEqual(["shell-e2"]);
   });
 });

@@ -442,6 +442,83 @@ describe("buildAgentOverview", () => {
       ["%4", ""],
     ]);
   });
+
+  // ブラウザは shells で、前面でないタブのシェルが終わったことを知り (タブを
+  // 閉じる)、tmux のウインドウの外側を覆う。端末名が空のシェルに、無関係な
+  // 端末 (空の tty) の大きさを付けない。
+  test("生きているシェルと、そのシェルの tmux の端末とウインドウの大きさを載せる", async () => {
+    const shell = (id: string, tty: string, exited = false) => ({
+      id,
+      command: "zsh",
+      cwd: "/work/sample-repo",
+      cols: 80,
+      rows: 24,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      exited,
+      exitCode: null,
+      tty,
+    });
+    const window = {
+      clientCols: 132,
+      clientRows: 48,
+      windowCols: 100,
+      windowRows: 29,
+      statusLines: 1,
+      statusAt: "bottom" as const,
+      sessionClients: 2,
+    };
+    const overview = await buildAgentOverview(
+      deps({
+        listShells: () => [
+          shell("shell-tmux", "/dev/ttys001"),
+          shell("shell-plain", "/dev/ttys002"),
+          shell("shell-no-tty", ""),
+          shell("shell-exited", "/dev/ttys003", true),
+        ],
+        listClients: async () => ({
+          status: "ok",
+          clients: [
+            {
+              tty: "/dev/ttys001",
+              session: "sample-session",
+              pane: "%2",
+              window,
+            },
+            { tty: "", session: "sample-session", pane: "%3", window },
+          ],
+        }),
+      }),
+    );
+    expect(overview.shells).toEqual([
+      { id: "shell-tmux", window },
+      { id: "shell-plain", window: null },
+      { id: "shell-no-tty", window: null },
+    ]);
+  });
+
+  test("tmux の一覧に失敗しても、生きているシェルは載せる (タブを閉じ損ねない)", async () => {
+    const overview = await buildAgentOverview(
+      deps({
+        listPanes: async () => {
+          throw new Error("sample tmux failure");
+        },
+        listShells: () => [
+          {
+            id: "shell-1",
+            command: "zsh",
+            cwd: "/work/sample-repo",
+            cols: 80,
+            rows: 24,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            exited: false,
+            exitCode: null,
+            tty: "/dev/ttys001",
+          },
+        ],
+      }),
+    );
+    expect(overview.shells).toEqual([{ id: "shell-1", window: null }]);
+  });
 });
 
 describe("registered projects in the overview", () => {

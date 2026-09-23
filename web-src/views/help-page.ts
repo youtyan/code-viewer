@@ -289,7 +289,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Typing goes to that shell, so you can answer a prompt without leaving the tab. The tab's right-click menu also turns input off when you only want to watch (Read only) and changes the text size; both apply to every terminal tab. A terminal tab is named after what it shows: the agent and its state, or Shell and a number in the order the shells were opened. Shells live as long as the server does; typing exit ends one, and so does Stop session.",
+                text: "Typing goes to that shell, so you can answer a prompt without leaving the tab. The tab's right-click menu also turns input off when you only want to watch (Read only) and changes the text size; both apply to every terminal tab. A terminal tab is named after what it shows: the agent and its state, or Shell and a number in the order the shells were opened. Shells live as long as the server does; typing exit ends one and closes its tab, and so does Stop session. A tab opened for a tmux pane closes when that pane ends, even when other panes are left in the session (the tab does not switch to them), and when you leave tmux (the session ends or you detach); a short note at the bottom right names what ended. When the same tmux session is also open in a smaller terminal, tmux shrinks the window to that size and fills the rest with dots; the terminal tab covers that area and gives the window size and the reason.",
               },
               {
                 kind: "paragraph",
@@ -1211,7 +1211,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "打ったキーはそのシェルに届くので、タブを離れずに返事ができます。見るだけにしたいときはタブの右クリックで入力を切れます (閲覧のみ)。同じメニューで文字の大きさも変えられます (どちらも全部のターミナルのタブに効きます)。ターミナルのタブの名前は映しているもので、エージェントならその種類と状態、ただのシェルなら「シェル」と番号です。シェルはサーバが動いている間だけ生き、exit と打てば閉じます (「セッションを止める」でも同じです)。",
+                text: "打ったキーはそのシェルに届くので、タブを離れずに返事ができます。見るだけにしたいときはタブの右クリックで入力を切れます (閲覧のみ)。同じメニューで文字の大きさも変えられます (どちらも全部のターミナルのタブに効きます)。ターミナルのタブの名前は映しているもので、エージェントならその種類と状態、ただのシェルなら「シェル」と番号です。シェルはサーバが動いている間だけ生き、exit と打てばタブごと閉じます (「セッションを止める」でも同じです)。tmux のペインを開いたタブは、そのペインが終わると閉じます。セッションに別のペインが残っていても、そちらへは切り替わりません。tmux から抜けた (セッションが終わった・detach した) ときも閉じます。何が終わったかは右下に短く出ます。同じ tmux のセッションをもっと小さい端末でも開いていると、tmux はウインドウをその大きさに縮め、余りを点で埋めます。ターミナルのタブはその余りを覆い、ウインドウの大きさと理由を出します。",
               },
               {
                 kind: "paragraph",

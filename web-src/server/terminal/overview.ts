@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import { isAccountAgent, type PaneAccount } from "../../core/agent-accounts";
 import {
   type AgentOverviewResponse,
+  type AgentOverviewShell,
   type AgentPane,
   type AgentProjectInfo,
   type AgentProjectServer,
@@ -132,6 +133,7 @@ export async function buildAgentOverview(
       projects: [],
       errors,
       registry: await deps.readRegistry(),
+      shells: overviewShells(await deps.listShells(), []),
     };
   }
   const tmuxPanes = panes.running ? flattenTmuxPanes(panes.sessions) : [];
@@ -146,12 +148,10 @@ export async function buildAgentOverview(
   }
 
   const clients = await deps.listClients();
+  const shells = await deps.listShells();
   let paneToShell = new Map<string, string>();
   if (clients.status === "ok") {
-    paneToShell = linkShellsAndPanes(
-      await deps.listShells(),
-      clients.clients,
-    ).paneToShell;
+    paneToShell = linkShellsAndPanes(shells, clients.clients).paneToShell;
   } else {
     errors.push(error("list_clients", "", clients.error, now));
   }
@@ -299,7 +299,31 @@ export async function buildAgentOverview(
     projects: [...projects.values()],
     errors,
     registry,
+    shells: overviewShells(
+      shells,
+      clients.status === "ok" ? clients.clients : [],
+    ),
   };
+}
+
+/**
+ * 生きているシェルと、その端末に繋がっている tmux のクライアントの大きさ。
+ * 端末名 (tty) を引けなかったシェルは、どのクライアントにも当てない
+ * (空文字どうしが一致して無関係な端末の大きさを覆いに使わない)。
+ */
+function overviewShells(
+  shells: ShellSession[],
+  clients: TmuxClient[],
+): AgentOverviewShell[] {
+  return shells
+    .filter((shell) => !shell.exited)
+    .map((shell) => ({
+      id: shell.id,
+      window:
+        (shell.tty
+          ? clients.find((client) => client.tty === shell.tty)?.window
+          : undefined) ?? null,
+    }));
 }
 
 /** 短い間だけ覚える。失敗も同じ間だけ覚え、同じ失敗で git を叩き続けない。 */

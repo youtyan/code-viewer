@@ -18816,6 +18816,43 @@ button.brand[aria-expanded="true"] .brand-chevron svg {
   padding: var(--space-2) var(--pad-text);
 }
 
+/* ---- ターミナル: tmux のウインドウの外側の覆い (views/terminal/tmux-cover.ts) ----
+   tmux のウインドウが端末より小さいと (同じセッションを別の端末でも開いて
+   いる)、tmux が外側を点で埋める。そこを端末の地の色で覆い、理由を 1 行出す。
+   xterm の画面の要素 (.xterm-screen) の中に置き、行と桁 (--cover-*) に
+   マス目の大きさ (--tmux-cell-*) を掛けて位置を決める。箱の寸法は変えない。
+   操作は下の端末へ通す (クリック・選択・ホイール)。重なりは xterm の文字の層
+   より上、入力の層 (.xterm-helpers、z-index 5。IME の変換) より下。 */
+.terminal-tmux-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.terminal-tmux-cover[hidden] {
+  display: none;
+}
+.terminal-tmux-cover-part {
+  position: absolute;
+  top: calc(var(--cover-top) * var(--tmux-cell-h));
+  left: calc(var(--cover-left) * var(--tmux-cell-w));
+  width: calc(var(--cover-cols) * var(--tmux-cell-w));
+  height: calc(var(--cover-rows) * var(--tmux-cell-h));
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  /* 端末の地にわずかに文字の色を混ぜる: 点は隠し、ウインドウの端は見える。 */
+  background: color-mix(in srgb, var(--color-text-3) 6%, var(--color-term));
+}
+.terminal-tmux-cover-message {
+  margin: 0;
+  padding: 0 var(--space-2);
+  color: var(--color-text-3);
+  font-family: var(--font-ui);
+  font-size: var(--ui-font-sm);
+  text-align: center;
+}
+
 /* ---- ターミナル: 画像の棚 (views/terminal/image-shelf.ts) ----
    端末の文字の上に重ねず、画面の右に別の列として場所を取る。画像が無ければ
    出さない。畳むと画像の印と件数のボタンだけの細い列になる。 */

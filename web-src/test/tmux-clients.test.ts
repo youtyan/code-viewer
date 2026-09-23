@@ -64,6 +64,100 @@ describe("parseTmuxClients", () => {
     ]);
   });
 
+  // 大きさの列 (端末の桁・行、ウインドウの桁・行、status、status-position、
+  // セッションに繋がっている端末の数)。読めない値が 1 つでもあれば大きさを
+  // 持たせない (覆う範囲を当て推量しない)。宛先としては残す。
+  test.each([
+    {
+      name: "ステータスが下に 1 行",
+      size: ["378", "113", "378", "104", "on", "bottom", "2"],
+      window: {
+        clientCols: 378,
+        clientRows: 113,
+        windowCols: 378,
+        windowRows: 104,
+        statusLines: 1,
+        statusAt: "bottom",
+        sessionClients: 2,
+      },
+    },
+    {
+      name: "ステータスが上に 2 行",
+      size: ["200", "50", "120", "40", "2", "top", "3"],
+      window: {
+        clientCols: 200,
+        clientRows: 50,
+        windowCols: 120,
+        windowRows: 40,
+        statusLines: 2,
+        statusAt: "top",
+        sessionClients: 3,
+      },
+    },
+    {
+      name: "ステータスなし",
+      size: ["80", "24", "80", "24", "off", "bottom", "1"],
+      window: {
+        clientCols: 80,
+        clientRows: 24,
+        windowCols: 80,
+        windowRows: 24,
+        statusLines: 0,
+        statusAt: "bottom",
+        sessionClients: 1,
+      },
+    },
+    {
+      name: "status が知らない値",
+      size: ["80", "24", "80", "23", "6", "bottom", "1"],
+      window: null,
+    },
+    {
+      name: "status-position が知らない値",
+      size: ["80", "24", "80", "23", "on", "left", "1"],
+      window: null,
+    },
+    {
+      name: "大きさが数でない",
+      size: ["80", "", "80", "23", "on", "bottom", "1"],
+      window: null,
+    },
+    {
+      name: "大きさが 0",
+      size: ["80", "24", "0", "23", "on", "bottom", "1"],
+      window: null,
+    },
+    { name: "大きさの列が無い (古い書式)", size: [], window: null },
+  ])("大きさの列: $name", ({ size, window }) => {
+    const stdout = [line("/dev/ttys001", "work", "%3"), ...size].join(SEP);
+    expect(parseTmuxClients(stdout)).toEqual([
+      {
+        tty: "/dev/ttys001",
+        session: "work",
+        pane: "%3",
+        ...(window ? { window } : {}),
+      },
+    ]);
+  });
+
+  test("list-clients に大きさとステータスの書式を渡す", async () => {
+    runTmux.mockResolvedValue({ status: "ok", stdout: "" });
+    await listTmuxClients("/sample");
+    const format = runTmux.mock.calls[0]?.[0]?.[2] as string;
+    expect(format.split(SEP)).toEqual([
+      "#{client_tty}",
+      "#{client_session}",
+      "#{pane_id}",
+      "#{client_width}",
+      "#{client_height}",
+      "#{window_width}",
+      "#{window_height}",
+      "#{status}",
+      "#{status-position}",
+      "#{session_attached}",
+    ]);
+  });
+
   test("末尾の改行で空の 1 件を作らない", () => {
     expect(
       parseTmuxClients(`${line("/dev/ttys001", "0", "%1")}\n`),

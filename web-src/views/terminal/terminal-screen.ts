@@ -39,6 +39,7 @@ import {
   type PasteImageResponse,
   SHIFT_ENTER_SEQUENCE,
 } from "../../core/terminal-paste";
+import type { TmuxClientWindow } from "../../core/tmux";
 import {
   loadXterm,
   type XtermBufferLine,
@@ -57,6 +58,7 @@ import {
   shelfEntryByCandidate,
   shelfGallery,
 } from "./image-shelf-list";
+import { tmuxCover } from "./tmux-cover";
 
 /** シェルの scrollback 行数。 */
 const SHELL_SCROLLBACK = 5000;
@@ -120,6 +122,15 @@ export type TerminalScreenDeps = {
   onStatus(message: string | null): void;
   /** 映していたシェルが無くなった。一覧を取り直してもらう。 */
   onTargetGone(session: ShellSession): void;
+  /** 映していたシェルが終わった (exit・tmux から抜けた・映していたペインが終わった)。 */
+  onShellExited(session: ShellSession): void;
+  /**
+   * そのシェルの中の tmux の端末とウインドウの大きさ (全画面共通の取り直しで
+   * 届いた最後の値)。tmux が動いていなければ null。
+   */
+  tmuxWindow(session: ShellSession): TmuxClientWindow | null;
+  /** 端末の大きさを変えた。tmux の大きさを早めに取り直してもらう。 */
+  onTmuxWindowStale(): void;
   /** 人が選んだ文字サイズ (px)。 */
   getFontSize(): number;
   /** 画像の棚を畳んでいるか (ユーザー単位の設定)。 */
@@ -154,6 +165,8 @@ export type TerminalScreenHandle = {
   measure(): { cols: number; rows: number } | null;
   /** 言語が変わった。棚の文言を当て直す。 */
   localize(): void;
+  /** tmux の大きさが届いた。ウインドウの外側の覆いを描き直す。 */
+  updateTmuxCover(): void;
 };
 
 /**
@@ -268,6 +281,15 @@ export function createTerminalScreen(
   >();
   /** 出力の走査で持ち越している末尾。 */
   let shellScanTail = "";
+  /**
+   * tmux のウインドウの外側 (tmux が点で埋める所) の覆い。xterm の画面の要素
+   * (`.xterm-screen`) の中に置き、行と桁で位置を決める (箱の寸法は変えない)。
+   * 操作は通す (pointer-events: none。下の端末がクリック・選択・ホイールを
+   * 受ける)。
+   */
+  const cover = document.createElement("div");
+  cover.className = "terminal-tmux-cover";
+  cover.hidden = true;
 
   function enqueueInput(data: string): void {
     if (!inputEnabled || !attached || disposed || data.length === 0) return;
@@ -336,6 +358,8 @@ export function createTerminalScreen(
       if (attached?.id === id) {
         attached.cols = cols;
         attached.rows = rows;
+        // 中の tmux の大きさも変わる。覆いを合わせるため、早めに取り直す。
+        deps.onTmuxWindowStale();
       }
     } catch (error) {
       if (disposed) return;
@@ -889,6 +913,62 @@ export function createTerminalScreen(
     source = null;
   }
 
+  /**
+   * tmux のウインドウの外側を覆う。覆うのは、届いた大きさが今の端末の桁数・
+   * 行数と同じときだけ (大きさを変えた直後の古い値で、ずれた所を覆わない。
+   * 次の取り直しで描き直す)。覆う所が無ければ (アプリだけが繋がっている) 何も
+   * 出さない。
+   */
+  function renderTmuxCover(): void {
+    const window = attached ? deps.tmuxWindow(attached) : null;
+    const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+    const shown =
+      term &&
+      screen &&
+      window &&
+      window.clientCols === term.cols &&
+      window.clientRows === term.rows
+        ? tmuxCover(window)
+        : null;
+    if (!term || !screen || !window || !shown || shown.rects.length === 0) {
+      cover.hidden = true;
+      cover.replaceChildren();
+      return;
+    }
+    if (cover.parentElement !== screen) screen.append(cover);
+    cover.style.setProperty(
+      "--tmux-cell-w",
+      `${screen.clientWidth / term.cols}px`,
+    );
+    cover.style.setProperty(
+      "--tmux-cell-h",
+      `${screen.clientHeight / term.rows}px`,
+    );
+    const text = deps.getText();
+    cover.replaceChildren(
+      ...shown.rects.map((rect, index) => {
+        const part = document.createElement("div");
+        part.className = "terminal-tmux-cover-part";
+        part.style.setProperty("--cover-top", String(rect.top));
+        part.style.setProperty("--cover-left", String(rect.left));
+        part.style.setProperty("--cover-rows", String(rect.rows));
+        part.style.setProperty("--cover-cols", String(rect.cols));
+        if (index === shown.messageIn) {
+          const message = document.createElement("p");
+          message.className = "terminal-tmux-cover-message";
+          message.textContent = text.tmuxWindowSmaller(
+            window.windowCols,
+            window.windowRows,
+            window.sessionClients > 1,
+          );
+          part.append(message);
+        }
+        return part;
+      }),
+    );
+    cover.hidden = false;
+  }
+
   function destroyTerminal(): void {
     term?.dispose();
     term = null;
@@ -920,6 +1000,9 @@ export function createTerminalScreen(
     created.loadAddon(fit);
     created.open(screenEl);
     created.registerLinkProvider({ provideLinks: provideImageLinks });
+    // 桁数・行数が変われば覆う所も変わる (届いている tmux の大きさと合わなく
+    // なれば、合うまで隠す)。
+    created.onResize(() => renderTmuxCover());
     created.onData((data) => {
       if (replayWrites > 0) return;
       enqueueInput(data);
@@ -993,10 +1076,12 @@ export function createTerminalScreen(
           `${deps.getText().shellExited(null)}\n${formatErrorDetail(error)}`,
         );
         closeSource();
+        deps.onShellExited(session);
         return;
       }
       deps.onStatus(deps.getText().shellExited(code));
       closeSource();
+      deps.onShellExited(session);
     });
     stream.addEventListener("gone", () => {
       if (stale()) return;
@@ -1047,6 +1132,7 @@ export function createTerminalScreen(
     // 代替画面へ入ると、画面に無いはずの行が溜まり、行の位置がずれて最後の行が
     // 重複して並ぶ。reset は今の寸法で両方の画面を作り直すので、上限も揃う。
     created.reset();
+    renderTmuxCover();
     openSource(session, myGen);
     void loadImageHistory(session, myGen);
   }
@@ -1074,6 +1160,7 @@ export function createTerminalScreen(
     clearAttachments();
     closeSource();
     attached = null;
+    renderTmuxCover();
     // 付いていたシェルの画面を残さない (閉じたシェルのタブに、直前にこの枠が
     // 映していた別のシェルの画面が出ていた)。
     term?.reset();
@@ -1088,6 +1175,8 @@ export function createTerminalScreen(
     applyFontSize() {
       if (!term) return;
       term.options.fontSize = deps.getFontSize();
+      // 桁数・行数が同じでもマス目の大きさが変わる。
+      renderTmuxCover();
       // 字の大きさが変われば入る桁数・行数も変わる。PTY にも伝え直す。
       scheduleShellResize();
     },
@@ -1122,7 +1211,9 @@ export function createTerminalScreen(
     },
     localize() {
       shelf.localize();
+      renderTmuxCover();
     },
+    updateTmuxCover: renderTmuxCover,
     dispose() {
       disposed = true;
       generation += 1;

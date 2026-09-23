@@ -20,6 +20,7 @@ import type {
   ShellSessionId,
 } from "../../core/shell";
 import type { TerminalImageRef } from "../../core/terminal-images";
+import type { TmuxClientWindow } from "../../core/tmux";
 import {
   clampTerminalFontSize,
   MAX_TERMINAL_FONT_SIZE,
@@ -56,6 +57,17 @@ export type TerminalViewDeps = {
     pane: string | undefined,
     side: TabSide,
   ): void;
+  /**
+   * そのシェルが終わった (exit・tmux から抜けた・映していたペインが終わった)。
+   * タブを閉じて知らせてもらう。「セッションを止める」で止めたシェルには呼ばない
+   * (止めた人は知っている)。前面でないタブのシェルの終わりはここには来ない
+   * (購読していない)。app が全画面共通の取り直しで拾う。
+   */
+  onShellEnded(id: ShellSessionId): void;
+  /** そのシェルの中の tmux の端末とウインドウの大きさ。無ければ null。 */
+  tmuxWindow(id: ShellSessionId): TmuxClientWindow | null;
+  /** 端末の大きさを変えた。tmux の大きさを早めに取り直してもらう。 */
+  onTmuxWindowStale(): void;
   /** 棚の画像を画像のタブで開く (既定の押し方)。 */
   onOpenImage?: (
     image: TerminalImageRef,
@@ -93,6 +105,8 @@ export type TerminalViewHandle = {
   loadShells(): Promise<ShellListResponse>;
   /** 最後に取ったシェルの一覧 (まだ取っていなければ null)。 */
   knownShells(): ShellListResponse | null;
+  /** tmux の大きさが新しく届いた。映している端末の覆いを描き直す。 */
+  updateTmuxCovers(): void;
   focusTab(side: TabSide): void;
   /** その面の端末へ操作札のキーを送る (映していなければ何もしない)。 */
   sendSoftKey(side: TabSide, key: TerminalSoftKey): void;
@@ -138,6 +152,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   let listGeneration = 0;
   let inputEnabled = true;
   let disposed = false;
+  /** 「セッションを止める」で止めている最中のシェル。終わっても知らせない。 */
+  const stopping = new Set<ShellSessionId>();
 
   function text(): TerminalText {
     return terminalText(deps.getLanguage());
@@ -178,6 +194,12 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       // 状態の行は枠の中にあるので、付け替えても映しているシェルの状態が付いて行く。
       onStatus: (message) => writeStatus({ status, hint }, message),
       onTargetGone: (session) => forgetShell(session.id),
+      onShellExited: (session) => {
+        forgetShell(session.id);
+        if (!stopping.has(session.id)) deps.onShellEnded(session.id);
+      },
+      tmuxWindow: (session) => deps.tmuxWindow(session.id),
+      onTmuxWindowStale: deps.onTmuxWindowStale,
       isImageShelfCollapsed: deps.isImageShelfCollapsed,
       setImageShelfCollapsed: deps.onImageShelfCollapsedChange,
       onOpenImage: deps.onOpenImage,
@@ -369,21 +391,30 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
   }
 
   async function closeShell(id: ShellSessionId): Promise<void> {
-    const res = await deps.trackLoad(
-      fetch(apiUrl("shellClose"), {
-        method: "POST",
-        headers: {
-          ...deps.actionHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ id }),
-      }),
-    );
-    if (!res.ok)
-      throw new Error(await responseErrorMessage(res, text().shellCloseFailed));
-    if (disposed) return;
-    releaseTab(id);
-    forgetShell(id);
+    // 止めたことは止めた人が知っている。終わりの知らせ (onShellEnded) は出さない。
+    // 止める応答より先に「終わった」が流れに届くので、頼む前に印を付ける。
+    stopping.add(id);
+    try {
+      const res = await deps.trackLoad(
+        fetch(apiUrl("shellClose"), {
+          method: "POST",
+          headers: {
+            ...deps.actionHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ id }),
+        }),
+      );
+      if (!res.ok)
+        throw new Error(
+          await responseErrorMessage(res, text().shellCloseFailed),
+        );
+      if (disposed) return;
+      releaseTab(id);
+      forgetShell(id);
+    } finally {
+      stopping.delete(id);
+    }
   }
 
   async function showInTab(id: ShellSessionId, side: TabSide): Promise<void> {
@@ -435,6 +466,9 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     closeShell,
     loadShells,
     knownShells: () => shells,
+    updateTmuxCovers: () => {
+      for (const slot of slots()) slot.screen.updateTmuxCover();
+    },
     focusTab: (side) => tabs[side]?.screen.focus(),
     sendSoftKey: (side, key) => tabs[side]?.screen.sendSoftKey(key),
     refit: () => {

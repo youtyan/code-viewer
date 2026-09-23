@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   listTmuxClients: vi.fn(),
   resolvePaneSession: vi.fn(),
   selectTmuxPane: vi.fn(),
+  watchAttachedShell: vi.fn(),
 }));
 
 vi.mock("../server/shell/session", () => ({
@@ -22,7 +23,8 @@ vi.mock("../server/shell/session", () => ({
 }));
 
 vi.mock("../server/tmux/clients", () => ({
-  findClientByTty: () => null,
+  findClientByTty: (clients: { tty: string }[], tty: string) =>
+    clients.find((client) => client.tty === tty) ?? null,
   listTmuxClients: mocks.listTmuxClients,
 }));
 
@@ -30,6 +32,10 @@ vi.mock("../server/tmux/focus", () => ({
   resolvePaneSession: mocks.resolvePaneSession,
   selectTmuxPane: mocks.selectTmuxPane,
   tmuxAttachCommandLine: () => "attach sample pane\r",
+}));
+
+vi.mock("../server/terminal/attach-watch", () => ({
+  watchAttachedShell: mocks.watchAttachedShell,
 }));
 
 import { LOGIN_SESSION } from "../core/agent-accounts";
@@ -99,6 +105,25 @@ describe("openTmuxPaneInShell", () => {
       "%1",
       null,
     );
+    // 映していたペインが終わったら閉じる見張りは、attach を打ち込んだ 1 回だけ。
+    expect(mocks.watchAttachedShell.mock.calls).toEqual([
+      [SESSION.id, "/sample"],
+    ]);
+  });
+
+  test("does not watch a shell where the user started tmux by hand", async () => {
+    // 利用者が自分で tmux を起こしたシェルは、利用者のもの。ペインが終わっても閉じない。
+    const manual = { ...SESSION, id: "shell-manual" };
+    mocks.listShellSessionsForMatching.mockResolvedValue([manual]);
+    mocks.listTmuxClients.mockResolvedValue({
+      status: "ok",
+      clients: [{ tty: manual.tty, session: "sample-session", pane: "%1" }],
+    });
+    await expect(openTmuxPaneInShell("%1", "/sample")).resolves.toMatchObject({
+      status: "ok",
+      action: "switched",
+    });
+    expect(mocks.watchAttachedShell).not.toHaveBeenCalled();
   });
 
   // ログインのウィンドウのペインだけに用途が付く。tmux が起き直して同じ ID が

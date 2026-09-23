@@ -180,7 +180,7 @@ import {
   validateTerminalImageResponseUrls,
 } from "./core/terminal-images";
 import type { TerminalTabProject } from "./core/terminal-tab-name";
-import { clampTerminalFontSize } from "./core/tmux";
+import { clampTerminalFontSize, type TmuxClientWindow } from "./core/tmux";
 import { isToolId, type ToolId } from "./core/tools";
 import {
   type AppSettingsState,
@@ -333,6 +333,10 @@ import {
   STATUS_LABEL_TEXT,
 } from "./views/status-label";
 import { terminalText } from "./views/terminal/i18n";
+import {
+  createShellEndNotice,
+  createShellEndTracker,
+} from "./views/terminal/shell-ends";
 import { createTerminalView } from "./views/terminal/terminal-view";
 import { toolsText } from "./views/tools/i18n";
 import { createToolsView } from "./views/tools/tools-view";
@@ -6905,6 +6909,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (pane) TAB_SHELL_PANES.set(session.id, pane);
       MAIN_TABS.openTerminal(session.id, side);
     },
+    onShellEnded: (id) => closeEndedTerminal(id),
+    tmuxWindow: (id) => TMUX_WINDOWS.get(id) ?? null,
+    // 大きさを変えた後の取り直しは全画面共通の取り直しに相乗りする (重なれば
+    // 走っているものを待つ)。
+    onTmuxWindowStale: () => void AGENT_MONITOR.refresh(),
     onOpenImage: (image, gallery, kept) => {
       IMAGE_REFS.set(image.path, { image, images: gallery });
       const open = () => MAIN_TABS.openImage(image.path, "other-if-split");
@@ -7905,6 +7914,37 @@ window.GdpExpandLogic = GdpExpandLogic;
    */
   const TAB_SHELL_PANES = new Map<string, string>();
 
+  /**
+   * ターミナルのタブが最後にエージェントを映していたときの名前。シェルの終わりに
+   * 気付く時点では、映していたペインがもう一覧から消えていて、名前を引き直すと
+   * 「Shell 2」になる。知らせには終わったもの (エージェント) の名前を出す。
+   */
+  const TAB_LAST_LABELS = new Map<string, string>();
+  /** シェルごとの、中の tmux の端末とウインドウの大きさ (全画面共通の取り直し)。 */
+  let TMUX_WINDOWS = new Map<string, TmuxClientWindow | null>();
+  /** 前面でないタブのシェルの終わりを、取り直しの一覧から拾う。 */
+  const SHELL_ENDS = createShellEndTracker();
+  const SHELL_END_NOTICE = createShellEndNotice(
+    $("#statusbar .statusbar-actions"),
+  );
+
+  /**
+   * シェルが終わったタブを閉じ、最下段に短く知らせる。閉じた後の前面は、
+   * 利用者が閉じたときと同じ決まり (同じ面の最近使った順)。閉じたタブは
+   * 「閉じたタブを開き直す」の履歴に積まない (開き直してもシェルが無い)。
+   */
+  function closeEndedTerminal(session: string): void {
+    TAB_SHELL_PANES.delete(session);
+    if (!MAIN_TABS.hasTerminal(session)) {
+      TAB_LAST_LABELS.delete(session);
+      return;
+    }
+    const name = TAB_LAST_LABELS.get(session) ?? terminalTabInfo(session).label;
+    TAB_LAST_LABELS.delete(session);
+    MAIN_TABS.closeTerminal(session);
+    SHELL_END_NOTICE.show(terminalText(STATE.language).tabEnded(name));
+  }
+
   /** そのシェルが映しているエージェントのペイン。 */
   function paneForShell(session: string): AgentPane | undefined {
     const panes = AGENT_MONITOR.snapshot().overview?.panes ?? [];
@@ -8362,12 +8402,30 @@ window.GdpExpandLogic = GdpExpandLogic;
     // ペインに付く (ログインのウィンドウを閉じた後の最初の起動がそう)。
     // 残すと、新しいエージェントを閉じ終わった古いシェルのタブで開いてしまう。
     const overview = AGENT_MONITOR.snapshot().overview;
+    // 前面でないタブのシェルは終わりが届かない。一覧から消えたら閉じる。
+    // ペインとの対応を捨てる下の処理より先に、覚えている名前で知らせる。
+    // shells の無い古い版のサーバでは何もしない。
+    if (overview?.shells) {
+      TMUX_WINDOWS = new Map(
+        overview.shells.map((shell) => [shell.id, shell.window]),
+      );
+      const ended = SHELL_ENDS.update(
+        overview.shells.map((shell) => shell.id),
+        MAIN_TABS.terminalSessions(),
+      );
+      for (const session of ended) closeEndedTerminal(session);
+    }
     if (overview && !overview.tmux.error) {
       const live = new Set(overview.panes.map((pane) => pane.id));
       for (const [shell, pane] of TAB_SHELL_PANES) {
         if (!live.has(pane)) TAB_SHELL_PANES.delete(shell);
       }
     }
+    for (const session of MAIN_TABS.terminalSessions()) {
+      if (paneForShell(session)?.kind || !TAB_LAST_LABELS.has(session))
+        TAB_LAST_LABELS.set(session, terminalTabInfo(session).label);
+    }
+    TERMINAL_VIEW.updateTmuxCovers();
     // ターミナルのタブの名前 (エージェントの状態) を当て直す。
     MAIN_TABS.localize();
   });

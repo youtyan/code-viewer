@@ -39,9 +39,15 @@ describe("tmuxAttachCommandLine", () => {
   // TMUX を外して打つ (シェルが tmux の中でも入れ子で繋がる)。止める系の
   // tmux のコマンドは決して入れない。
   test.each([
-    { pane: "%3", line: "env -u TMUX 'tmux' attach-session -t '%3'\r" },
-    { pane: "%12", line: "env -u TMUX 'tmux' attach-session -t '%12'\r" },
-  ] as const)("$pane を引用し、TMUX を外して attach する 1 行を返す", ({
+    {
+      pane: "%3",
+      line: "env -u TMUX 'tmux' attach-session -t '%3' && exit\r",
+    },
+    {
+      pane: "%12",
+      line: "env -u TMUX 'tmux' attach-session -t '%12' && exit\r",
+    },
+  ] as const)("$pane を引用し、TMUX を外して attach し、抜けたらシェルも終える 1 行を返す", ({
     pane,
     line,
   }) => {

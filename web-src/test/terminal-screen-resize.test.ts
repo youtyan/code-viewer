@@ -259,6 +259,9 @@ describe("attach は寸法を合わせてから端末を作り直す", () => {
       trackLoad: (promise) => promise,
       onStatus: () => undefined,
       onTargetGone: () => undefined,
+      onShellExited: () => undefined,
+      tmuxWindow: () => null,
+      onTmuxWindowStale: () => undefined,
       isImageShelfCollapsed: () => false,
       setImageShelfCollapsed: () => undefined,
     });

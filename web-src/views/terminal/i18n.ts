@@ -33,6 +33,16 @@ export type TerminalText = {
   shellExited: (exitCode: number | null) => string;
   /** 開いていたシェルが無くなっていた。 */
   shellClosed: string;
+  /**
+   * シェル (または映していた tmux のペイン) が終わり、そのタブを閉じた。
+   * name はタブの名前。最下段に短く出す。
+   */
+  tabEnded: (name: string) => string;
+  /**
+   * tmux のウインドウが端末より小さく、外側を覆っている理由。shared は、同じ
+   * セッションを別の端末でも開いているか。
+   */
+  tmuxWindowSmaller: (cols: number, rows: number, shared: boolean) => string;
   /** シェルを開けなかった。 */
   shellCreateFailed: string;
   shellCloseFailed: string;
@@ -157,6 +167,11 @@ const EN: TerminalText = {
       ? "The shell has exited."
       : `The shell has exited (code ${exitCode}).`,
   shellClosed: "This shell has been closed.",
+  tabEnded: (name) => `${name} has ended.`,
+  tmuxWindowSmaller: (cols, rows, shared) =>
+    shared
+      ? `The tmux window is ${cols}×${rows} (sized to another terminal attached to the same session).`
+      : `The tmux window is ${cols}×${rows} (smaller than this terminal; set by the tmux window-size option).`,
   shellCreateFailed: "Could not open a shell.",
   shellCloseFailed: "Could not close the shell.",
   shellLimitReached: "Too many shells are open. Close one first.",
@@ -248,6 +263,11 @@ const JA: TerminalText = {
       ? "シェルが終了しました。"
       : `シェルが終了しました (終了コード ${exitCode})。`,
   shellClosed: "このシェルは閉じられました。",
+  tabEnded: (name) => `${name} は終了しました`,
+  tmuxWindowSmaller: (cols, rows, shared) =>
+    shared
+      ? `tmux のウインドウは ${cols}×${rows} です（同じセッションを開いている別の端末の大きさに合わせています）`
+      : `tmux のウインドウは ${cols}×${rows} です（tmux の window-size の設定で、この端末より小さくなっています）`,
   shellCreateFailed: "シェルを開けませんでした。",
   shellCloseFailed: "シェルを閉じられませんでした。",
   shellLimitReached: "開いているシェルが多すぎます。どれかを閉じてください。",

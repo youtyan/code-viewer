@@ -9,7 +9,7 @@
 // tmux を呼ばない変換は parseTmuxClients に切り出してある (panes.ts と
 // 同じ作り)。書式の取り違えはそこだけをテストすれば検出できる。
 
-import type { TmuxClient } from "../../core/tmux";
+import type { TmuxClient, TmuxClientWindow } from "../../core/tmux";
 import { TMUX_FIELD_SEP as FIELD_SEP, runTmux } from "./command";
 
 export type TmuxClientsResult =
@@ -23,6 +23,16 @@ const CLIENT_FIELDS = [
   // そのクライアントが今見ているペイン。カレントウィンドウのアクティブ
   // ペインが解決されて入る。
   "#{pane_id}",
+  // 端末とウインドウの大きさ・ステータスの行。ウインドウが端末より小さいと、
+  // 外側を tmux が点で埋める (アプリの端末はそこを覆う)。オプションは名前で
+  // 書式に書けば、そのクライアントのセッションの値に解ける。
+  "#{client_width}",
+  "#{client_height}",
+  "#{window_width}",
+  "#{window_height}",
+  "#{status}",
+  "#{status-position}",
+  "#{session_attached}",
 ];
 
 const CLIENT_FORMAT = CLIENT_FIELDS.join(FIELD_SEP);
@@ -32,24 +42,82 @@ const FIELD = {
   tty: 0,
   session: 1,
   pane: 2,
+  clientCols: 3,
+  clientRows: 4,
+  windowCols: 5,
+  windowRows: 6,
+  status: 7,
+  statusPosition: 8,
+  sessionClients: 9,
 } as const;
 
+/** 1 以上の整数でなければ null (空・`-`・小数)。 */
+function positiveInt(raw: string | undefined): number | null {
+  if (!raw || !/^[0-9]+$/.test(raw)) return null;
+  const value = Number(raw);
+  return value > 0 ? value : null;
+}
+
 /**
- * `list-clients -F` の出力を配列にする。列数が足りない行と、tty が空の行は
- * 捨てる (tty が無いクライアントは宛先にできない)。
+ * tmux の `status` の値 (off / on / 2〜5) をステータスの行数にする。知らない
+ * 値は null (覆う範囲を当て推量しない)。
+ */
+function statusLines(raw: string | undefined): number | null {
+  if (raw === "off") return 0;
+  if (raw === "on") return 1;
+  if (raw && /^[2-5]$/.test(raw)) return Number(raw);
+  return null;
+}
+
+/** 大きさの列を読む。どれか 1 つでも読めなければ無し (覆わない)。 */
+function parseClientWindow(fields: string[]): TmuxClientWindow | undefined {
+  const clientCols = positiveInt(fields[FIELD.clientCols]);
+  const clientRows = positiveInt(fields[FIELD.clientRows]);
+  const windowCols = positiveInt(fields[FIELD.windowCols]);
+  const windowRows = positiveInt(fields[FIELD.windowRows]);
+  const lines = statusLines(fields[FIELD.status]);
+  const position = fields[FIELD.statusPosition];
+  const sessionClients = positiveInt(fields[FIELD.sessionClients]);
+  if (
+    clientCols === null ||
+    clientRows === null ||
+    windowCols === null ||
+    windowRows === null ||
+    lines === null ||
+    (position !== "top" && position !== "bottom") ||
+    sessionClients === null
+  )
+    return undefined;
+  return {
+    clientCols,
+    clientRows,
+    windowCols,
+    windowRows,
+    statusLines: lines,
+    statusAt: position,
+    sessionClients,
+  };
+}
+
+/**
+ * `list-clients -F` の出力を配列にする。宛先の 3 列が足りない行と、tty が空の
+ * 行は捨てる (tty が無いクライアントは宛先にできない)。大きさの列が読めない
+ * 行は、宛先としては残し、大きさだけ持たない。
  */
 export function parseTmuxClients(stdout: string): TmuxClient[] {
   const clients: TmuxClient[] = [];
   for (const line of stdout.split("\n")) {
     if (!line) continue;
     const fields = line.split(FIELD_SEP);
-    if (fields.length < CLIENT_FIELDS.length) continue;
+    if (fields.length <= FIELD.pane) continue;
     const tty = fields[FIELD.tty] ?? "";
     if (!tty) continue;
+    const window = parseClientWindow(fields);
     clients.push({
       tty,
       session: fields[FIELD.session] ?? "",
       pane: fields[FIELD.pane] ?? "",
+      ...(window ? { window } : {}),
     });
   }
   return clients;

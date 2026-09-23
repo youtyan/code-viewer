@@ -6,7 +6,10 @@
 // - そのセッションを既に開いているシェルがあれば、そのシェルを映したうえで
 //   ペインをカレントにする。端末は増えない。
 // - 無ければシェルを 1 本開いて attach する。人が自分で `tmux attach` と
-//   打ったのと同じ状態になるので、detach すればそのシェルが残る。
+//   打ったのと同じ状態だが、tmux から抜ければ (セッションが終わった・detach
+//   した) シェルも終わる (tmux/focus.ts の `&& exit`)。映していたペインが
+//   終わって tmux が別のペインへ移したときも閉じる (attach-watch.ts)。どちらも
+//   映すものが無くなったので、タブを残さない。
 //
 // セッションで見るのが要点。同じセッションの別ペインへ移るだけなら、既に
 // 繋がっているシェルの中で選び直せば済む。ペインごとに端末を増やすと、同じ
@@ -31,6 +34,7 @@ import {
   selectTmuxPane,
   tmuxAttachCommandLine,
 } from "../tmux/focus";
+import { watchAttachedShell } from "./attach-watch";
 
 export type OpenTmuxPaneResult =
   | {
@@ -144,5 +148,6 @@ export async function openTmuxPaneInShell(
     return written;
   }
   rememberShellTmuxAttachment(created.session.id, session, paneId, purpose);
+  watchAttachedShell(created.session.id, cwd);
   return { status: "ok", session: created.session, action: "attached" };
 }

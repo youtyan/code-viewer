@@ -312,7 +312,13 @@ Requires Node.js 20 or newer. Development uses
   otherwise a shell is opened and attached for you, so you end up with one
   shell per tmux session rather than one per pane. This also works from a
   shell that is inside tmux or whose startup starts tmux (the attach runs
-  with `TMUX` unset, so the pane shows up nested). Powerline separators and
+  with `TMUX` unset, so the pane shows up nested). That tab closes when the
+  pane it shows ends — it does not switch to another pane left in the session —
+  and when you leave tmux (the session ends or you detach); a short note at
+  the bottom right names what ended. A shell ended with `exit` closes its tab
+  the same way. When the same session is also open in a smaller terminal, tmux
+  shrinks the window and fills the rest with dots; the tab covers that area
+  and shows the window size and why. Powerline separators and
   file icons render when a Nerd Font is installed — the terminal asks for the
   common Nerd Font families before falling back to the usual monospace stack,
   so no font ships with the package. Panes need `tmux` on `PATH`; shells work

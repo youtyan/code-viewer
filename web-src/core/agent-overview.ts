@@ -20,7 +20,7 @@ import type {
   RegisteredProjectInfo,
 } from "./projects";
 import { basenameOf } from "./terminal-board";
-import type { TmuxPaneId } from "./tmux";
+import type { TmuxClientWindow, TmuxPaneId } from "./tmux";
 
 /**
  * エージェントの種類。claude / codex はペインで動いているコマンド名か、
@@ -208,6 +208,20 @@ export type AgentOverviewResponse = {
    * 移っても消えない。この欄を持たない古い版のサーバでは無い。
    */
   unread?: AgentUnreadEntry[];
+  /**
+   * このサーバが開いているシェル (ブラウザのターミナルのタブの中身) と、
+   * その中で tmux が動いていれば、その端末とウインドウの大きさ。ブラウザは
+   * これで、終わったシェルのタブを閉じ (前面でないタブにはシェルの終わりが
+   * 届かない)、tmux がウインドウの外に描く点を覆う。この欄を持たない古い版の
+   * サーバでは無い。
+   */
+  shells?: AgentOverviewShell[];
+};
+
+export type AgentOverviewShell = {
+  id: string;
+  /** tmux のクライアントとして繋がっていなければ (大きさが読めなければ) null。 */
+  window: TmuxClientWindow | null;
 };
 
 export type AgentUnreadEntry = {
