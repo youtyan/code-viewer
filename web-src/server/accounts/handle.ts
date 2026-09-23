@@ -53,8 +53,9 @@ import { sharedAccountService } from "./service";
 const MAX_ACCOUNT_BODY_BYTES = 16 * 1024;
 
 function errorResponse(error: unknown): Response {
-  const detail = formatErrorDetail(error);
   if (error instanceof AccountError || error instanceof StatusLineError) {
+    // code は本文の欄で返す。文にも入れると、画面で同じ code が 2 度出る。
+    const detail = formatErrorDetail(error, { fieldsShownElsewhere: ["code"] });
     const status =
       error.code === "invalid"
         ? 400
@@ -72,7 +73,7 @@ function errorResponse(error: unknown): Response {
     return json({ error: detail, code: error.code }, status);
   }
   console.error("[code-viewer] account request failed", error);
-  return json({ error: detail, code: "failed" }, 500);
+  return json({ error: formatErrorDetail(error), code: "failed" }, 500);
 }
 
 function text(value: unknown, max: number): string | null {

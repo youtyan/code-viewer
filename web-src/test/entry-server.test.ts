@@ -709,6 +709,12 @@ describe("the entry server", () => {
     expect(first.body.log).toContain(
       `this project process is version 0.0.2-sample, but the entry server that started it (pid ${entryPid}) is version 0.0.1-sample.`,
     );
+    // 画面は detail と log を繋いで出す。子の出力はそのうち 1 度だけ。
+    expect(
+      [first.body.detail, first.body.log]
+        .join("\n")
+        .split("this project process is version 0.0.2-sample").length - 1,
+    ).toBe(1);
     // 2 回目からは起こさずに同じ案内を返す (起こしても同じ理由で終わる)。
     const again = await failure();
     expect([again.status, again.body.error]).toEqual([503, first.body.error]);

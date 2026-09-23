@@ -184,11 +184,14 @@ function formatNonError(value: unknown): string {
   }
 }
 
-function formatErrorFields(error: Error): string {
+function formatErrorFields(
+  error: Error,
+  shownElsewhere: readonly string[] = [],
+): string {
   const fields = sanitizeObjectFields(
     error,
     new Set([error]),
-    new Set(["name", "message", "stack", "cause"]),
+    new Set(["name", "message", "stack", "cause", ...shownElsewhere]),
   );
   if (fields === OMIT_VALUE) return "";
   const output = fields.value as Record<string, unknown>;
@@ -197,15 +200,27 @@ function formatErrorFields(error: Error): string {
     : "";
 }
 
-/** Preserve the complete Error cause chain in text shown by the browser or HTTP handlers. */
-export function formatErrorDetail(error: unknown): string {
+/**
+ * Preserve the complete Error cause chain in text shown by the browser or HTTP handlers.
+ * `fieldsShownElsewhere`: fields of the outermost error that the caller already sends
+ * beside this text (such as a JSON `code`), so they are not repeated in it.
+ */
+export function formatErrorDetail(
+  error: unknown,
+  {
+    fieldsShownElsewhere = [],
+  }: { fieldsShownElsewhere?: readonly string[] } = {},
+): string {
   const parts: string[] = [];
   const seen = new Set<unknown>();
   let current: unknown = error;
   while (current instanceof Error && !seen.has(current)) {
     seen.add(current);
     parts.push(
-      `${errorName(current)}: ${errorMessage(current)}${formatErrorFields(current)}`,
+      `${errorName(current)}: ${errorMessage(current)}${formatErrorFields(
+        current,
+        current === error ? fieldsShownElsewhere : [],
+      )}`,
     );
     try {
       current = (current as Error & { cause?: unknown }).cause;

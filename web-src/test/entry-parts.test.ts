@@ -335,6 +335,33 @@ describe("the project processes the entry starts", () => {
     expect(b.state(ROOT)).toBe("absent");
   });
 
+  // 子が起動中に終わったときの理由 (worktree/open.ts) は、同じ出力の末尾を
+  // 既に含む。出力は log の欄に 1 度だけ (画面・500 の本文は detail と log を繋ぐ)。
+  test.each([
+    ["it exits", (message: string) => new Error(message)],
+    [
+      "the entry is out of date",
+      (message: string) => new EntryOutdatedError(message),
+    ],
+  ])("shows the server output once when the reason already carries it (%s)", async (_label, makeError) => {
+    const { b } = backends([
+      {
+        status: "error",
+        error: makeError(
+          "exited before it was ready (exit code 3)\nserver output: sample tail",
+        ),
+      },
+    ]);
+    const target = (await b.target(ROOT)) as Extract<
+      BackendTarget,
+      { status: "failed" }
+    >;
+    const shown = [target.detail, target.log].filter(Boolean).join("\n");
+    expect(shown.split("server output: sample tail")).toHaveLength(2);
+    expect(target.log).toBe("server output: sample tail");
+    expect(target.detail).toContain("exited before it was ready (exit code 3)");
+  });
+
   test("notes once that the entry is older than the installed code-viewer, stops starting processes for it, and tries again on restart", async () => {
     const { b, opens, lines } = backends([
       {

@@ -1,12 +1,11 @@
 #!/usr/bin/env -S npx tsx
 
 import { spawn } from "node:child_process";
-import { readdirSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type BuildContext, context } from "esbuild";
 import { type DevChildProcess, terminateChild } from "./dev-process";
-import { errno } from "./terminal/settings-file";
+import { devWatchSignature } from "./dev-watch";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = normalize(join(HERE, "..", ".."));
@@ -34,60 +33,6 @@ function withoutOpen(args: string[]) {
 function serverArgs() {
   const args = withDefaultPort(process.argv.slice(2));
   return firstStart ? args : withoutOpen(args);
-}
-
-function walkTsFiles(dir: string): string[] {
-  const out: string[] = [];
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch (error) {
-    // 途中で消えたフォルダ (ブランチの切り替えなど) だけ飛ばす。
-    if (isGone(error)) return out;
-    throw error;
-  }
-  for (const name of entries) {
-    const full = join(dir, name);
-    let isDir = false;
-    try {
-      isDir = statSync(full).isDirectory();
-    } catch (error) {
-      if (isGone(error)) continue;
-      throw error;
-    }
-    if (isDir) {
-      out.push(...walkTsFiles(full));
-    } else if (name.endsWith(".ts")) {
-      out.push(full);
-    }
-  }
-  return out;
-}
-
-function watchedFiles() {
-  return walkTsFiles(SERVER_ROOT).concat(
-    walkTsFiles(join(ROOT, "web-src", "core")),
-  );
-}
-
-function fileSignature(file: string): string {
-  // A watched file may disappear mid-flight (branch switch, rename). Other
-  // failures reach the tick's catch, which logs them and keeps the loop alive.
-  try {
-    return `${file}:${statSync(file).mtimeMs}`;
-  } catch (error) {
-    if (isGone(error)) return `${file}:missing`;
-    throw error;
-  }
-}
-
-function isGone(error: unknown): boolean {
-  const code = errno(error);
-  return code === "ENOENT" || code === "ENOTDIR";
-}
-
-function watchSignature() {
-  return watchedFiles().map(fileSignature).join("|");
 }
 
 /** Node の子プロセスを dev-process の扱える形 (kill / exited) に包む。 */
@@ -186,10 +131,10 @@ console.log(`code-viewer dev server watching ${SERVER_ROOT}`);
 await startBuild();
 startServer();
 
-let sig = watchSignature();
+let sig = devWatchSignature(ROOT);
 setInterval(() => {
   try {
-    const next = watchSignature();
+    const next = devWatchSignature(ROOT);
     if (next === sig) return;
     sig = next;
     console.log("server source changed; restarting preview server");

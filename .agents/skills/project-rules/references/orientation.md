@@ -76,12 +76,13 @@
 
 ## dev サーバが実際に見ているもの（推測しないための一次情報）
 
-`web-src/server/dev.ts` の実装から確定する事実。
+`web-src/server/dev.ts` と `dev-watch.ts` の実装から確定する事実。
 
 | 編集したもの | 実際に起きること |
 |---|---|
 | `web-src/server/**` | **サーバ再起動**（500ms 間隔の mtime ポーリング）。`pnpm dev` は `cli.ts` を起こすので入口のサーバになり、再起動のたびに裏（開いているプロジェクトのプロセス）も起き直す |
 | `web-src/core/**` | **サーバ再起動**（core も watch 対象に含まれる） |
+| `package.json`（版を上げたなど） | **サーバ再起動**。入口と裏は起動時に版を読むので、入口が古い版のままだと新しい版の裏がその入口を断って起きない |
 | `web-src/views/**`, `web-src/app.ts` | `web/app.js` を esbuild watch が焼き直すだけ。**サーバは再起動しない** |
 | `web-src/*-entry.ts`（遅延バンドル入口） | **dev では何も起きない。** `pnpm run build:web` が要る |
 | `web/style.css`, `web/index.html` | `CODE_VIEWER_DEV=1` のとき SSE の `reload` のみ |
