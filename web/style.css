@@ -1687,6 +1687,18 @@ body.gdp-diff-page #repo-target-wrap {
   line-height: 1;
   white-space: nowrap;
 }
+/* 状態の文言は全部を同じ升に重ね、今の 1 つだけ見せる (views/status-label.ts)。
+   幅は一番長い文言で決まり、状態が変わっても隣が動かない。 */
+#status .status-label {
+  display: inline-grid;
+}
+#status .status-label > span {
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+#status .status-label > span.is-current {
+  visibility: visible;
+}
 #status::before {
   content: "";
   flex: 0 0 auto;
@@ -15253,13 +15265,25 @@ body.db-resizing {
   color: var(--fg-muted);
   font-size: 13px;
 }
+/* 診断の結果の点は、ボタンの角に重ねる (流れの中に置くと、点が出たときに
+   ボタンが太って最下段の右の操作が動く。#annotations-count と同じ形)。
+   display を指定しているので、[hidden] は自分で消す (消さないと問題が無い
+   ときも点が出ていた)。 */
+#doctor-btn {
+  position: relative;
+}
 .doctor-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
   display: inline-flex;
-  margin-left: 4px;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--danger, #cf222e);
+}
+.doctor-badge[hidden] {
+  display: none;
 }
 .doctor-badge[data-level="warn"] {
   background: var(--attn, #9a6700);
@@ -15881,6 +15905,11 @@ html[data-theme="dark"] .tools-code span[style] {
   padding: 5px 8px;
   flex: 0 1 auto;
   min-width: 0;
+  /* チップが 1 つも無いときも、チップ 1 つの行の高さを取る (閉じるボタン 24 +
+     チップの上下の余白 4・枠 1 + この列の上下の余白 5 = 44。内訳が変わったら
+     fixed-parts-layout.test.ts が落ちる)。最初のチップが後から入ったときに
+     バーが伸び、下の本文が 8px 下がっていた。 */
+  min-height: 44px;
 }
 .db-root .db-tabs-chip {
   border: 1px solid var(--db-glass-border);
@@ -16629,6 +16658,10 @@ html[data-nav-collapsed] #app-nav {
 .nav-icon-action .goi-icon {
   display: inline-flex;
   flex: none;
+  /* 絵は JS が後から差し込む。箱の大きさを最初から取っておき、差し込んだ
+     ときに隣の文字が動かないようにする (検索の文字が右へ 14px 動いていた)。 */
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 .nav-search svg,
 .nav-foot-item svg,

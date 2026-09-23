@@ -284,6 +284,7 @@ import {
   type SourceViewDeps,
   type VirtualSourcePagingKeyboardEvent,
 } from "./views/source-view";
+import { currentStatusLabel, renderStatusLabel } from "./views/status-label";
 import { terminalText } from "./views/terminal/i18n";
 import { createTerminalView } from "./views/terminal/terminal-view";
 import { toolsText } from "./views/tools/i18n";
@@ -418,8 +419,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       statusEl.title =
         state.inFlight > 0
           ? text.statusInFlightTitle(state.inFlight, state.cancellable)
-          : (statusEl.querySelector<HTMLElement>(".status-label")
-              ?.textContent ?? "");
+          : currentStatusLabel(statusEl);
     }
     const cancelButton =
       document.querySelector<HTMLButtonElement>("#cancel-requests");
@@ -3364,7 +3364,17 @@ window.GdpExpandLogic = GdpExpandLogic;
             ? text.global.statusError
             : text.global.statusIdle;
     const labelEl = el.querySelector<HTMLElement>(".status-label");
-    if (labelEl) labelEl.textContent = label;
+    if (labelEl)
+      renderStatusLabel(
+        labelEl,
+        [
+          text.global.statusLive,
+          text.global.statusLoading,
+          text.global.statusError,
+          text.global.statusIdle,
+        ],
+        label,
+      );
     el.setAttribute("aria-label", label);
     updateNetworkActivity();
   }
