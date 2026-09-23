@@ -1014,3 +1014,62 @@ describe("`code-viewer` in another folder", () => {
     expect(existsSync(join(box.stateDir, "projects.json"))).toBe(false);
   });
 });
+
+// 同梱スキルが使う CLI (annotate・query・journal・search) は、そのプロジェクトの
+// 裏に要求する。入口だけが動いていて裏が止まっている (画面を開いていない・
+// --idle-stop で止まった) ときは、入口に頼んで裏を起こしてから続ける。
+describe("CLI commands that need the project's process", () => {
+  const registryFile = (box: Sandbox, root: string) =>
+    join(box.registryDir, `${rootFileKey(root)}.json`);
+  const startingLine = (root: string, url: string) =>
+    `starting the code-viewer project process for ${root} through the entry server at ${url.replace(/\/$/, "")}…`;
+
+  test.each([
+    { args: ["annotate", "list"], stdout: "no annotations" },
+    { args: ["query", "sources", "--json"], stdout: '"files": []' },
+    { args: ["journal", "list", "--json"], stdout: "[" },
+    { args: ["search", "files", "--term", "README"], stdout: "README.md" },
+  ])("`code-viewer $args.0 $args.1` starts the project process through the running entry server", async ({
+    args,
+    stdout,
+  }) => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    const { url } = await startEntry(box, root);
+    // 入口は画面を開くまで裏を起こさない。
+    expect(existsSync(registryFile(box, root))).toBe(false);
+
+    const result = await runCli(box, root, args);
+    expect(result.stderr).toContain(startingLine(root, url));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(stdout);
+    expect(existsSync(registryFile(box, root))).toBe(true);
+  }, 30_000);
+
+  test("a project process stopped by --idle-stop is started again for the CLI", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    const { url } = await startEntry(box, root, ["--idle-stop", "1"]);
+    const first = await runCli(box, root, ["annotate", "list"]);
+    expect(first.status).toBe(0);
+    const firstPid = backendPid(box, root);
+    expect(await waitUntil(() => !alive(firstPid), 10_000)).toBe(true);
+
+    const again = await runCli(box, root, ["annotate", "list"]);
+    expect(again.stderr).toContain(startingLine(root, url));
+    expect(again).toMatchObject({ status: 0, stdout: "no annotations\n" });
+    expect(backendPid(box, root)).not.toBe(firstPid);
+  }, 30_000);
+
+  test("with no entry server either, it says to start code-viewer and leave it running", async () => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    const result = await runCli(box, root, ["annotate", "list"]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      "no running code-viewer server for this repository, and no code-viewer entry server is running.\n" +
+        `Start code-viewer (from ${root}) in another terminal and leave it running, then run this command again:\n` +
+        "  code-viewer\n",
+    );
+  });
+});

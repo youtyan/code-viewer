@@ -1337,10 +1337,15 @@ references the annotation by URL for sharing back into the originating agent.
 The panel-open state, selected session, and selected annotation are also kept
 in the URL, so a reload or shared link restores the same walkthrough context.
 
-The `annotate` subcommand talks to the running server for the repository
-(discovered via `~/.cache/code-viewer/servers/`); start one with
-`code-viewer` first. Pass `--cwd <repo>` when annotating a repository other
-than the current directory, or `--server <url>` to target a specific server.
+The `annotate` subcommand (like `query`, `journal` and `search`) talks to the
+repository's server (discovered via `~/.cache/code-viewer/servers/`). When
+code-viewer is running but that repository's project process is not (the
+project was never opened, or it was stopped after `--idle-stop`), the CLI asks
+the running code-viewer to start it, the same way opening the project in the
+browser does, and waits up to 30 seconds for each request. With no
+code-viewer running, start one with `code-viewer` first and leave it running.
+Pass `--cwd <repo>` when annotating a repository other than the current
+directory, or `--server <url>` to target a specific server.
 
 `add` appends to the most recent session (creating one when none exists);
 run `annotate start` again to begin a new session, or pass `--session <id>`

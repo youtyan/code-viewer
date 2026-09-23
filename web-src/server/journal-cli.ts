@@ -140,8 +140,9 @@ export type JournalParseResult =
 export const JOURNAL_HELP = `code-viewer journal — daily work journal and task queue
 
 The journal is stored in <repo>/.code-viewer/daily-journal.json and tasks are
-stored in <repo>/.code-viewer/tasks.json. A running code-viewer server for the
-repository is required unless you pass --dry-run for a write command.
+stored in <repo>/.code-viewer/tasks.json. A running code-viewer is required
+unless you pass --dry-run for a write command; if this repository's project
+process is not running, the CLI asks the running code-viewer to start it.
 The github-issues command is read-only and runs gh directly without a server.
 
 Run "code-viewer journal agent-help" for an AI-agent oriented guide.

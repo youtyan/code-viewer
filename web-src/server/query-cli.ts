@@ -298,7 +298,8 @@ can review what you queried.
 
 ## Requirements
 
-- A code-viewer server must be running for the repository.
+- code-viewer must be running. When this repository's project process is not
+  running, the CLI asks the running code-viewer to start it (stderr says so).
 - Only SELECT, PRAGMA, EXPLAIN, WITH queries are allowed (for exec).
 - Results are persisted and visible to the human.
 

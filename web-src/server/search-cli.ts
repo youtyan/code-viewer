@@ -151,7 +151,9 @@ environments. Results are NOT persisted on the server; this is a pure read.
 
 ## Requirements
 
-- A code-viewer server must already be running for the repository.
+- code-viewer must already be running (the human starts it with:
+  code-viewer). When this repository's project process is not running, the
+  CLI asks the running code-viewer to start it (stderr says so).
 - Run from inside the repository, or pass --cwd <repo>.
 - If "code-viewer" is not on PATH (the human runs it via npx), invoke as:
     npx -y @youtyan/code-viewer search code --term "..."

@@ -11,9 +11,19 @@ import {
   type ExternalCommandOverride,
   parseExternalCommandOverride,
 } from "./command-resolver";
-import { liveEntryUrl } from "./entry/entry-file";
+import {
+  type EntryIdentityVerification,
+  type EntryRecord,
+  liveEntryRecord,
+  liveEntryUrl,
+  verifyEntryIdentity,
+} from "./entry/entry-file";
 import * as git from "./git";
-import { readServerRegistry, rootFileKey } from "./server-registry";
+import {
+  readServerRegistry,
+  rootFileKey,
+  type ServerRegistryEntry,
+} from "./server-registry";
 
 // `--flag <value>` を 1 つ消費する。値が無ければ {error}。
 export function takeValue(
@@ -220,37 +230,255 @@ export async function probeServer(
   };
 }
 
-// `--server` override があればそれを使う。無ければ server-registry から
-// 動いている code-viewer を探す。どちらにも届かなければ exit 1。
-// CLI は自前で server を立てない (long-running process なので使い回す前提)。
+/**
+ * 入口に裏のプロセスを起こしてもらうのを待つ上限 (1 回の要求ごと)。入口は裏の
+ * 起動を 20 秒まで待つ (worktree/open.ts の START_TIMEOUT_MS)。それに余裕を足す。
+ */
+export const ENTRY_WAKE_TIMEOUT_MS = 30_000;
+
+/** 裏を起こすのに入口へ送る要求。読むだけで軽い `/_settings` を使う。 */
+const ENTRY_WAKE_PATH = "/_settings";
+
+export type ServerUrlDeps = {
+  readRegistry(root: string): ServerRegistryEntry | null;
+  probe(url: string, healthPath: string): Promise<ServerProbe>;
+  /** 生きている入口の記録。記録が読めなければ投げる。 */
+  liveEntry(): EntryRecord | null;
+  verifyEntry(entry: EntryRecord): Promise<EntryIdentityVerification>;
+  fetch(url: string, init: RequestInit): Promise<Response>;
+  /** 裏を起こし始めたことを知らせる (stderr)。 */
+  notice(message: string): void;
+  wakeTimeoutMs: number;
+};
+
+const defaultServerUrlDeps: ServerUrlDeps = {
+  readRegistry: readServerRegistry,
+  probe: probeServer,
+  liveEntry: () => liveEntryRecord(),
+  verifyEntry: verifyEntryIdentity,
+  fetch: (url, init) => fetch(url, init),
+  notice: (message) => console.error(message),
+  wakeTimeoutMs: ENTRY_WAKE_TIMEOUT_MS,
+};
+
+export type ServerUrlResult =
+  | { status: "ok"; url: string }
+  | { status: "error"; message: string };
+
+/**
+ * CLI が要求を送るサーバを決める。
+ *
+ * 1. `--server` があればそれだけ (届かなければ失敗)
+ * 2. 登録簿にこのリポジトリのサーバがあり、答えればそれ (`--standalone` もここ)
+ * 3. 登録簿に無い・入口の裏が答えない: 動いている入口に頼んで裏を起こして
+ *    もらう。画面が `/p/<鍵>/` を開くときと同じ経路 (`/_entry/open` で鍵を
+ *    もらい、`/p/<鍵>/…` の取り次ぎで裏を起こす)。起きたら登録簿の裏の URL
+ *    で続ける
+ * 4. 入口も居ない: 入口を起こす案内を出して失敗
+ *
+ * 登録簿にあるのが `--standalone` のサーバ (裏ではない) で答えないときは、
+ * 入口には頼まない (今までどおり失敗)。
+ */
+export async function resolveServerUrl(
+  root: string,
+  override: string | undefined,
+  healthPath: string,
+  deps: ServerUrlDeps = defaultServerUrlDeps,
+): Promise<ServerUrlResult> {
+  if (override) {
+    const url = override.replace(/\/+$/, "");
+    const probe = await deps.probe(url, healthPath);
+    if (probe.status === "ok") return { status: "ok", url };
+    return {
+      status: "error",
+      message: `could not reach the code-viewer server at ${url}.\n${formatErrorDetail(probe.error)}`,
+    };
+  }
+  const registered = deps.readRegistry(root);
+  let registeredFailure = "";
+  if (registered) {
+    const url = registered.url.replace(/\/+$/, "");
+    const probe = await deps.probe(url, healthPath);
+    if (probe.status === "ok") return { status: "ok", url };
+    registeredFailure = `\nThe registered server at ${url} (pid ${registered.pid}) ${probe.status === "unreachable" ? "could not be reached" : "answered with an error"}:\n${formatErrorDetail(probe.error)}`;
+    if (!registered.backend) {
+      return {
+        status: "error",
+        message:
+          "no running code-viewer server for this repository.\n" +
+          `Start one (from ${root}), then run this command again:\n` +
+          "  code-viewer" +
+          registeredFailure,
+      };
+    }
+  }
+  const entry = deps.liveEntry();
+  if (!entry) {
+    return {
+      status: "error",
+      message:
+        "no running code-viewer server for this repository, and no code-viewer entry server is running.\n" +
+        `Start code-viewer (from ${root}) in another terminal and leave it running, then run this command again:\n` +
+        "  code-viewer" +
+        registeredFailure,
+    };
+  }
+  const woken = await wakeThroughEntry(entry, root, healthPath, deps);
+  if (woken.status === "ok") return woken;
+  return { ...woken, message: woken.message + registeredFailure };
+}
+
+/** 入口に頼んでこのリポジトリの裏を起こし、その裏の URL を返す。 */
+async function wakeThroughEntry(
+  entry: EntryRecord,
+  root: string,
+  healthPath: string,
+  deps: ServerUrlDeps,
+): Promise<ServerUrlResult> {
+  const entryUrl = entry.url.replace(/\/+$/, "");
+  const fail = (message: string): ServerUrlResult => ({
+    status: "error",
+    message: `no running code-viewer server for this repository, and the code-viewer entry server at ${entryUrl} (pid ${entry.pid}) could not start one for ${root}:\n${message}`,
+  });
+  const identity = await deps.verifyEntry(entry);
+  if (identity.status === "dead") return fail("the entry server has exited");
+  if (identity.status === "unreachable")
+    return fail(
+      `the entry server did not answer:\n${formatErrorDetail(identity.error)}`,
+    );
+  if (identity.status === "invalid") return fail(identity.detail);
+
+  const seconds = deps.wakeTimeoutMs / 1000;
+  const request = async (
+    label: string,
+    url: string,
+    init: RequestInit,
+  ): Promise<
+    | { ok: true; text: string }
+    | { ok: false; message: string; status?: number; code?: unknown }
+  > => {
+    let res: Response;
+    let text: string;
+    try {
+      res = await deps.fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(deps.wakeTimeoutMs),
+      });
+      text = await res.text();
+    } catch (error) {
+      const timedOut =
+        error instanceof Error &&
+        (error.name === "TimeoutError" || error.name === "AbortError");
+      return {
+        ok: false,
+        message: `${label} ${timedOut ? `did not answer within ${seconds} seconds` : "failed"}:\n${formatErrorDetail(errorWithCause(`${init.method ?? "GET"} ${url} failed`, error))}`,
+      };
+    }
+    if (!res.ok) {
+      let code: unknown;
+      try {
+        code = (JSON.parse(text) as { code?: unknown } | null)?.code;
+      } catch {
+        // 本文が JSON でない失敗 (text/plain)。本文はそのまま message に入る。
+      }
+      return {
+        ok: false,
+        message: `${label} answered HTTP ${res.status}:\n${text}`,
+        status: res.status,
+        code,
+      };
+    }
+    return { ok: true, text };
+  };
+
+  // 鍵 (と、入口が使う根のパス) をもらう。git の中なら登録もされる
+  // (そのリポジトリで `code-viewer` を打ったときと同じ)。
+  const headers = {
+    "Content-Type": "application/json",
+    Origin: new URL(entryUrl).origin,
+    "X-Code-Viewer-Action": "1",
+  };
+  const opened = await request(
+    "asking the entry server to open the project",
+    `${entryUrl}/_entry/open`,
+    { method: "POST", headers, body: JSON.stringify({ path: root }) },
+  );
+  if (opened.ok === false) return fail(opened.message);
+  let key: unknown;
+  let projectRoot: unknown;
+  try {
+    ({ key, root: projectRoot } = JSON.parse(opened.text) as {
+      key?: unknown;
+      root?: unknown;
+    });
+  } catch (error) {
+    return fail(
+      `the entry server answered /_entry/open with a body that is not JSON:\n${opened.text}\n${formatErrorDetail(error)}`,
+    );
+  }
+  if (typeof key !== "string" || typeof projectRoot !== "string") {
+    return fail(
+      `the entry server answered /_entry/open without a project key and root:\n${opened.text}`,
+    );
+  }
+
+  // 画面と同じ取り次ぎで裏を起こす (入口は起きるまで待ってから取り次ぐ)。
+  deps.notice(
+    `starting the code-viewer project process for ${projectRoot} through the entry server at ${entryUrl}…`,
+  );
+  const wake = () =>
+    request(
+      "the entry server, while starting the project process,",
+      `${entryUrl}/p/${key}${ENTRY_WAKE_PATH}`,
+      { method: "GET" },
+    );
+  let woke = await wake();
+  // 裏が落ちていた (502 backend-stopped) なら、画面の「再起動」と同じ
+  // `/_entry/restart` を 1 回だけ頼んで、もう一度起こす。
+  if (
+    woke.ok === false &&
+    woke.status === 502 &&
+    woke.code === "backend-stopped"
+  ) {
+    const restarted = await request(
+      "asking the entry server to restart the stopped project process",
+      `${entryUrl}/_entry/restart`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ key }),
+      },
+    );
+    if (restarted.ok === false)
+      return fail(`${woke.message}\n${restarted.message}`);
+    woke = await wake();
+  }
+  if (woke.ok === false) return fail(woke.message);
+
+  const registered = deps.readRegistry(projectRoot);
+  if (!registered) {
+    return fail(
+      `the entry server answered ${ENTRY_WAKE_PATH} for project ${key}, but no project process for ${projectRoot} is in the server registry`,
+    );
+  }
+  const url = registered.url.replace(/\/+$/, "");
+  const probe = await deps.probe(url, healthPath);
+  if (probe.status === "ok") return { status: "ok", url };
+  return fail(
+    `the project process at ${url} (pid ${registered.pid}) was started, but ${probe.status === "unreachable" ? "could not be reached" : "answered with an error"}:\n${formatErrorDetail(probe.error)}`,
+  );
+}
+
+// 決まらなければ理由を出して exit 1。CLI は自前で server を立てない
+// (long-running process なので使い回す前提。入口が居れば入口に起こしてもらう)。
 export async function ensureServerUrl(
   root: string,
   override: string | undefined,
   healthPath: string,
 ): Promise<string> {
-  if (override) {
-    const url = override.replace(/\/+$/, "");
-    const probe = await probeServer(url, healthPath);
-    if (probe.status === "ok") return url;
-    console.error(
-      `could not reach the code-viewer server at ${url}.\n${formatErrorDetail(probe.error)}`,
-    );
-    process.exit(1);
-  }
-  const registered = readServerRegistry(root);
-  let registeredFailure = "";
-  if (registered) {
-    const url = registered.url.replace(/\/+$/, "");
-    const probe = await probeServer(url, healthPath);
-    if (probe.status === "ok") return url;
-    registeredFailure = `\nThe registered server at ${url} (pid ${registered.pid}) ${probe.status === "unreachable" ? "could not be reached" : "answered with an error"}:\n${formatErrorDetail(probe.error)}`;
-  }
-  console.error(
-    "no running code-viewer server for this repository.\n" +
-      `Start one manually (from ${root}):\n` +
-      "  code-viewer" +
-      registeredFailure,
-  );
+  const result = await resolveServerUrl(root, override, healthPath);
+  if (result.status === "ok") return result.url;
+  console.error(result.message);
   process.exit(1);
 }
 

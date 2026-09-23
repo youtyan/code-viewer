@@ -111,9 +111,10 @@ type AnnotationAddCommonOptions = {
 export const ANNOTATE_HELP = `code-viewer annotate — attach explanations to code locations
 
 The annotations show up live in the code-viewer browser UI and are stored
-in <repo>/.code-viewer/annotations.json. A running code-viewer server for
-the repository is required: start one with "code-viewer" before using
-annotate (or point at one explicitly with --server).
+in <repo>/.code-viewer/annotations.json. A running code-viewer is
+required: start one with "code-viewer" before using annotate (or point at
+a server explicitly with --server). If this repository's project process
+is not running, annotate asks the running code-viewer to start it.
 
 Run "code-viewer annotate agent-help" for an AI-agent oriented guide
 (workflow, conventions, and pitfalls for writing good walkthroughs).
@@ -173,8 +174,10 @@ location and renders your explanation directly under the annotated lines.
 
 ## Requirements
 
-- A code-viewer server must already be running for the repository
-  (the human starts it with: code-viewer). This command never starts one.
+- code-viewer must already be running (the human starts it with:
+  code-viewer, and leaves it running). This command never starts
+  code-viewer itself; when this repository's project process is not
+  running, it asks the running code-viewer to start it (stderr says so).
 - Run from inside the repository, or pass --cwd <repo>.
 - If "code-viewer" is not on PATH (e.g. the human runs it via npx), invoke
   every command below as: npx -y @youtyan/code-viewer annotate ...
