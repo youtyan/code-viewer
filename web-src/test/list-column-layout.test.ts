@@ -86,10 +86,15 @@ function declarationsOn(element: string, page: Page): Map<string, string> {
 
 describe("list column layout", () => {
   // 本文の左端 = 左のサイドバーの右 + ファイル一覧 + 一覧 + 変更ファイルの一覧
-  // (無い列は 0、畳んだファイル一覧は 0、畳んだ一覧と変更ファイルの一覧は帯の幅)。
+  // (無い列は 0、畳んだファイル一覧は画面の入口の縦の帯の幅、畳んだ一覧と変更ファイルの一覧は帯の幅)。
   test.each([
     { page: "none", files: "--sidebar-w", list: "0px", tree: "0px" },
-    { page: "none-files-folded", files: "0px", list: "0px", tree: "0px" },
+    {
+      page: "none-files-folded",
+      files: "--view-rail-w",
+      list: "0px",
+      tree: "0px",
+    },
     { page: "sidebar", files: "--sidebar-w", list: "--list-w", tree: "0px" },
     {
       page: "sidebar-list-folded",
@@ -111,7 +116,7 @@ describe("list column layout", () => {
     },
     {
       page: "history-files-folded",
-      files: "0px",
+      files: "--view-rail-w",
       list: "--list-w",
       tree: "--sidebar-w",
     },

@@ -21,7 +21,7 @@
 | 層 | 何か | 例 | 生の px |
 |---|---|---|---|
 | **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義。余白・角丸の段階 (`--space-*` `--radius-*`) もここ。一覧の行の高さ `--ui-row-h` だけは出所が TS (`views/shell/row-height.ts`。仮想表示が位置の計算に使うため) で、CSS は初回描画用の既定。表の行の高さ `--ui-table-row-h` は仮想表示に使わないので CSS だけ (`ui-surface.md` の決まり 7) | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--ui-row-h` `--ui-table-row-h` `--code-line-height` | **可**（ここだけ） |
-| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--view-head-h` (一覧の列の頭の 2 段目の高さ) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--sidebar-w` (ファイル一覧の幅) `--files-shown` (ファイル一覧が占める幅。畳めば 0) `--history-w` (一覧の利用者の幅) `--list-w` (一覧のいまの幅。TS が書く) `--listcol-head-w` `--column-head-w` (一覧の列の頭の幅) `--chrome-right` (右端の固定物。デスクトップは 0) `--annotation-panel-w` | **可**（その固定物の実寸なので） |
+| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--view-head-h` (一覧の列の頭の 2 段目の高さ) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--sidebar-w` (ファイル一覧の幅) `--files-shown` (ファイル一覧が占める幅。畳めば縦の帯の幅 `--view-rail-w`) `--history-w` (一覧の利用者の幅) `--list-w` (一覧のいまの幅。TS が書く) `--listcol-head-w` `--column-head-w` (一覧の列の頭の幅) `--chrome-right` (右端の固定物。デスクトップは 0) `--annotation-panel-w` | **可**（その固定物の実寸なので） |
 | **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--main-bottom` (メインの面の箱の下端。最下段の上) `--main-pane-h` (面の箱の高さ) `--column-head-h` (一覧の列の頭の 2 段の高さ) `--panel-body-top` (一覧の列の本体の上端 = 頭の下) `--listcol-shown` (一覧の列が占める幅) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) | **不可。T2 の式に px リテラルを書かない** |
 | **T3** ローカルインセット | 「このエンベロープの内側に居座る家具の高さ」 | `--file-detail-head-h` | **可。ただし必ず命名し、ページスコープに宣言し、何の高さかコメントする** |
 
@@ -81,14 +81,23 @@ grep -n "100vh\|100dvh" web/style.css \
     畳んだときだけ、先頭に「サイドバーを出す」`#nav-expand` が出る
   - **2 段目 (`#view-head`、高さ `--view-head-h`) は画面の入口の絵柄 (`.view-strip`) と、右端に
     ファイル一覧を畳むボタン (`#sidebar-toggle`)**
+  - **ファイル一覧を畳んだ間 (手・自動。`body.gdp-sidebar-hidden`) は、2 段目を 1 段目の下の縦の帯に
+    移す** (利用者の決定。幅 `--view-rail-w` = `--space-unit` × 10。左のサイドバーのすぐ右、1 段目の下
+    から最下段の上まで。絵柄と開くボタンは同じ大きさ・同じ並び・同じ Tab の順で縦に積む)。頭は 1 段
+    (`height: --panel-body-top`)、`--files-shown` は帯の幅、`--panel-body-top` は 1 段目の下になり、
+    本文と一覧の列の残りは帯の右・1 段目の下から。2 段目の高さを残したまま本文を左へ寄せると、本文
+    (端末など) が 2 段目の場所に重なって絵柄と開くボタンを隠した。`--view-rail-w` は `@property` で
+    長さとして登録してある (TS と早いスクリプトが px で読む。登録しないと `calc()` のまま返る)。
+    SP の面ではこの帯は作らない (電話の節が元に戻す)
   - 幅は固定の `--column-head-w` (= `--listcol-head-w`。既定の密度でファイル一覧の既定の幅 240 に
     そろう。`#nav-expand` が出ている間だけ `--nav-expand-w` だけ広がる)。画面の切替でも一覧の列の
-    開閉 (手・自動) でもプロジェクト名の長さでも、頭の高さと絵柄・畳むボタンは動かない (畳むのは頭の
-    下の列だけ。`views/sidebar.ts` の `placeSidebarToggle`、`web-src/test/panel-head-kept.test.ts`)
+    開閉 (手・自動) でもプロジェクト名の長さでも、1 段目は動かない。畳むボタンと絵柄は、ファイル
+    一覧の開閉でだけ 2 段目と縦の帯の間を移る (`views/sidebar.ts` の `placeSidebarToggle`、
+    `web-src/test/panel-head-kept.test.ts`)。頭の部品は、どの画面・前面のタブでも、ほかの要素に隠れない
+    (部品の中心で `elementFromPoint` がその部品を返す)
   - **一覧の列の中身 (ファイル一覧・一覧・変更ファイルの一覧・掴み・畳んだ帯・つまみ) は、どれも頭の
-    下 (`--panel-body-top`) から**。ファイル一覧を畳むと一覧が頭の下に来るので、タブ列の下から始めると
-    2 段目に隠れる (`panel-head-kept.test.ts` の上端の表)。頭の右・タブ列の下の一覧の列の上は、
-    2 段目の高さだけ地のまま
+    下 (`--panel-body-top`) から**。タブ列の下から始めると 2 段目に隠れる (`panel-head-kept.test.ts` の
+    上端の表)。ファイル一覧を開いている間、頭の右・タブ列の下の一覧の列の上は 2 段目の高さだけ地のまま
 - **タブ列は頭の右から窓の右端まで** (`left: --chrome-left + --column-head-w`、`right: --chrome-right`)。
   **左端にプロジェクト名の枠は置かない** (名前は頭の 1 段目。`#tabs-lead` は SP の引き出しを開く
   ボタンの置き場所で、デスクトップでは空・幅 0)。タブは左端から。2 面でも左の面のタブ列の左端。
@@ -103,7 +112,7 @@ grep -n "100vh\|100dvh" web/style.css \
   置かない。
   - **ファイル一覧** (`#file-list`。リポジトリの木) はどの画面でも出す。幅 `--sidebar-w` (掴み
     `#file-list-resizer` は右端。設定 `sidebarWidth`)。利用者が畳む (頭の畳むボタン・`⌘B`。設定
-    `sidebarHidden`) と `body.gdp-sidebar-hidden` で `--files-shown` が 0
+    `sidebarHidden`) と `body.gdp-sidebar-hidden` で `--files-shown` が縦の帯の幅 (`--view-rail-w`。上の頭の決まり)
   - **一覧**: Diff は変更ファイルの一覧 (`#sidebar`)、History はコミット (`#history-panel`)、選んで
     いる作業ツリーは作業ツリーの一覧 (`#worktree-panel`)。幅 `--list-w` (掴み `#history-resizer`)
   - **変更ファイルの一覧** (`#sidebar`): History と選んでいる作業ツリーでは一覧の右。幅は
@@ -126,8 +135,9 @@ grep -n "100vh\|100dvh" web/style.css \
   (`main-tabs-view.ts` の `fitToWidth`)。左のサイドバーは畳まない。**利用者が手で開いた列は、その
   セッションの間は自動で畳まない** (保存しない)。既定の密度・左のサイドバー 280・ファイル一覧 240 での
   境目: 1 面の History は窓 1560 未満で詰め、1480 未満で変更ファイルの一覧を畳み、1268 未満でファイル
-  一覧を畳む。2 面の History は 2041・1961・1749、1189 未満で預ける。Diff は 1 面 1320 未満で詰め
-  1240 未満でファイル一覧を畳む、2 面は 1801・1721、1161 未満で預ける。一覧の無い画面の 2 面は 1481
+  一覧を畳む。2 面の History は 2041・1961・1749、1229 未満で預ける。Diff は 1 面 1320 未満で詰め
+  1240 未満でファイル一覧を畳む、2 面は 1801・1721、1201 未満で預ける (預ける境目は、畳んだファイル
+  一覧が残す縦の帯 40 を含めて数える。`listColumnLayout` の `filesRail`)。一覧の無い画面の 2 面は 1481
   未満でファイル一覧を畳む (`web-src/test/list-column.test.ts`)
 - **どの列も手で畳める**: ファイル一覧は頭の畳むボタン、一覧と変更ファイルの一覧は列の右端の線の
   中ほどのつまみ (`.list-fold` / `.sidebar-fold`。`views/list-tree-open.ts` の `createColumnFold`)。
@@ -229,7 +239,8 @@ grep -n "100vh\|100dvh" web/style.css \
 | 「＋」(`.main-tabs-new`) | タブの数が変わったとき (最後のタブのすぐ右。`ui-surface.md` のタブの決まり) |
 | 分割のボタン (`.main-tabs-split`) | 2 面のときだけ (面ごとに右端に付く)。一覧の列の開閉では動かない |
 | 左のサイドバーの頭・検索・足元 (`.nav-head`・`#search-btn`・`.nav-foot`) | 左のサイドバーの幅を変えたときだけ |
-| 一覧の列の頭 (`#panel-head`、2 段)・1 段目の色の四角と名前の左端 (`#project-mark`・`#project-switcher`)・画面の入口の絵柄 (`.view-strip`)・畳むボタン (`#sidebar-toggle`) | 左のサイドバーの幅を変えた・畳んだときだけ (一覧の列を畳んでも頭は同じ場所・幅・高さで残る。名前・ブランチの中身が後から入っても動かない。`web-src/test/panel-head-kept.test.ts`・`fixed-parts-layout.test.ts`) |
+| 一覧の列の頭 (`#panel-head`)・1 段目の色の四角と名前の左端 (`#project-mark`・`#project-switcher`) | 左のサイドバーの幅を変えた・畳んだときだけ (一覧の列を畳んでも 1 段目は同じ場所・幅・高さで残る。名前・ブランチの中身が後から入っても動かない。`web-src/test/panel-head-kept.test.ts`・`fixed-parts-layout.test.ts`) |
+| 画面の入口の絵柄 (`.view-strip`)・畳むボタン (`#sidebar-toggle`) | 左のサイドバーの幅を変えた・畳んだときと、ファイル一覧を畳む / 開くとき (2 段目と縦の帯の間を移る) だけ |
 | 1 段目のブランチ (`#project-branch`) | 右端は動かない。左端はブランチの名前の長さで動く (右寄せ) |
 | 最下段 (`#statusbar`) と、その右寄せの部品 (`#status`・右の操作 `.statusbar-actions`・`#doctor-btn`) | 窓の幅が変わったときだけ |
 | 最下段のエージェントの件数 (`#agent-status`) | 右端は動かない。左端は件数の桁が増えたときだけ (数字は等幅) |

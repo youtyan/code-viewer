@@ -1859,42 +1859,43 @@ describe("main tabs view: 左右 2 面", () => {
   // ファイル一覧 (240)・一覧 (Diff の変更ファイルの一覧・History のコミット 320)・
   // 変更ファイルの一覧 (History だけ 240) が並ぶ (どれも面の外)。本文が 2 面の
   // ゆとり (961) に足りなければ、一覧を詰めた幅 (240) にし、次に変更ファイルの一覧を
-  // 帯 (28) に畳み、次にファイル一覧を畳む (core/list-column.ts。app.ts が決めて
+  // 帯 (28) に畳み、次にファイル一覧を畳む (畳んでも画面の入口の縦の帯 40 は残る。
+  // core/list-column.ts。app.ts が決めて
   // listColumnWidth で渡す)。それでも 2 面の下限 (641) に足りなければ右の面を
   // 預ける。本文の幅 = 窓 − 左のサイドバー 280 − 一覧の列。
   test.each([
     {
       screen: "History",
-      window: 1188,
-      column: 268,
+      window: 1228,
+      column: 308,
       parked: true,
       filesFolded: true,
     },
     {
       screen: "History",
-      window: 1189,
-      column: 268,
+      window: 1229,
+      column: 308,
       parked: false,
       filesFolded: true,
     },
     {
       screen: "History",
       window: 1280,
-      column: 268,
+      column: 308,
       parked: false,
       filesFolded: true,
     },
     {
       screen: "History",
       window: 1600,
-      column: 268,
+      column: 308,
       parked: false,
       filesFolded: true,
     },
     {
       screen: "History",
       window: 1748,
-      column: 268,
+      column: 308,
       parked: false,
       filesFolded: true,
     },
@@ -1921,22 +1922,22 @@ describe("main tabs view: 左右 2 面", () => {
     },
     {
       screen: "Diff",
-      window: 1160,
-      column: 240,
+      window: 1200,
+      column: 280,
       parked: true,
       filesFolded: true,
     },
     {
       screen: "Diff",
-      window: 1161,
-      column: 240,
+      window: 1201,
+      column: 280,
       parked: false,
       filesFolded: true,
     },
     {
       screen: "Diff",
       window: 1720,
-      column: 240,
+      column: 280,
       parked: false,
       filesFolded: true,
     },
@@ -1957,14 +1958,14 @@ describe("main tabs view: 左右 2 面", () => {
     {
       screen: "Files",
       window: 1280,
-      column: 0,
+      column: 40,
       parked: false,
       filesFolded: true,
     },
     {
       screen: "Files",
       window: 1480,
-      column: 0,
+      column: 40,
       parked: false,
       filesFolded: true,
     },
@@ -1998,6 +1999,7 @@ describe("main tabs view: 左右 2 面", () => {
     const layout = listColumnLayout({
       room: window - 280,
       files,
+      filesRail: 40,
       filesKeptOpen: false,
       preferred: holdsList ? HISTORY_WIDTH.default : 0,
       compact: HISTORY_WIDTH.min,
@@ -2007,7 +2009,7 @@ describe("main tabs view: 左右 2 面", () => {
       need: COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH,
     });
     const listWidth =
-      (layout.filesFolded ? 0 : files) + layout.width + layout.tree;
+      (layout.filesFolded ? 40 : files) + layout.width + layout.tree;
     const saved = {
       version: 3,
       focused: "left",

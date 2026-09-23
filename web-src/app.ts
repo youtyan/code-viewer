@@ -7667,11 +7667,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       requireColumnHead().getBoundingClientRect().left;
     // 畳んだ列の帯の幅 (--panelcol-rail-w。密度で変わる)。
     const rail = bodyLength("--panelcol-rail-w");
+    // 畳んだファイル一覧が残す画面の入口の縦の帯の幅 (--view-rail-w)。
+    const filesRail = bodyLength("--view-rail-w");
     const userHidden = STATE.sidebarHidden && !FILE_LIST_AUTO_HIDDEN;
     const hasTree = kind === "history" || kind === "worktree";
     const layout = listColumnLayout({
       room,
       files: userHidden ? 0 : STATE.sbWidth,
+      filesRail,
       filesKeptOpen: FILE_LIST_KEPT_OPEN,
       // 手で畳んだ一覧・変更ファイルの一覧は帯 (開くボタン) の幅。
       preferred: !kind ? 0 : LIST_COLUMN_HIDDEN ? rail : STATE.historyWidth,
@@ -7683,7 +7686,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
     // 一覧の列が本文の横に取る幅 (ファイル一覧・一覧・変更ファイルの一覧)。
     const width =
-      (userHidden || layout.filesFolded ? 0 : STATE.sbWidth) +
+      (userHidden || layout.filesFolded ? filesRail : STATE.sbWidth) +
       (kind ? layout.width + layout.tree : 0);
     return { kind, room, userHidden, hasTree, layout, width };
   }
@@ -7721,7 +7724,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       applySidebarHidden(FILE_LIST_AUTO_HIDDEN, { persist: false });
     }
     markFileListAutoHidden();
-    const files = STATE.sidebarHidden ? 0 : STATE.sbWidth;
+    const files = STATE.sidebarHidden
+      ? bodyLength("--view-rail-w")
+      : STATE.sbWidth;
     // 掴んで広げられる一覧の上限 = 今のファイル一覧と変更ファイルの一覧のままで
     // 本文が need を保てる幅。
     LIST_FITS_WIDTH = room - files - layout.tree - need;

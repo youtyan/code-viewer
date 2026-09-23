@@ -63,6 +63,13 @@ const variables = new Map([
 const cssPx = (name: string) =>
   Number.parseFloat(resolveVar(`var(${name})`, variables));
 const TREE_RAIL = cssPx("--panelcol-rail-w");
+// 画面の入口の縦の帯の幅は calc(<長さ> * <数>) (密度で変わる)。
+const VIEW_RAIL = (() => {
+  const value = resolveVar("var(--view-rail-w)", variables);
+  const product = /^calc\(([\d.]+)px \* ([\d.]+)\)$/.exec(value);
+  if (!product) throw new Error(`--view-rail-w is not calc(px * n): ${value}`);
+  return Number(product[1]) * Number(product[2]);
+})();
 const NAV_W = cssPx("--nav-w");
 
 type Look = {
@@ -115,6 +122,7 @@ function runFirstScreen(url: string, width: number, look: Look) {
       "--history-w": inline("--history-w") || `${cssPx("--history-w")}px`,
       "--sidebar-w": inline("--sidebar-w") || `${cssPx("--sidebar-w")}px`,
       "--panelcol-rail-w": `${TREE_RAIL}px`,
+      "--view-rail-w": `${VIEW_RAIL}px`,
     };
     return {
       getPropertyValue: (name: string) => values[name] ?? "",
@@ -161,6 +169,7 @@ function expected(url: string, width: number, look: Look, nav: number) {
   const layout = listColumnLayout({
     room: width - nav,
     files: userHidden ? 0 : files,
+    filesRail: VIEW_RAIL,
     filesKeptOpen: false,
     preferred: list ? look.historyWidth || HISTORY_WIDTH.default : 0,
     compact: HISTORY_WIDTH.min,

@@ -1,7 +1,9 @@
-// ファイル一覧を畳む = 頭の下の一覧だけを畳む。一覧の列の頭 (#panel-head: 1 段目に
+// ファイル一覧を畳む = 頭の下の一覧を畳む。一覧の列の頭 (#panel-head: 1 段目に
 // いま見ているプロジェクト、2 段目に画面の入口の絵柄と畳むボタン。左のサイドバーの
-// 右) は同じ場所・幅・高さで残り、タブ列の左端・右端 (分割のボタン) は動かない
-// (ui-layout.md の「一覧の列」)。本文は一覧の列の残りの右から使う。
+// 右) の 1 段目は同じ場所・幅・高さで残り、タブ列の左端・右端 (分割のボタン) は
+// 動かない。2 段目は 1 段目の下の縦の帯 (--view-rail-w) になり、本文と一覧の列の
+// 残りはその右・1 段目の下から使う (ui-layout.md の「一覧の列」。2 段目の場所に
+// 本文が重なって絵柄を隠していた)。
 //
 // 状態は body の印の組み合わせ (ファイル一覧を畳んだ・2 面・一覧を出す画面・一覧や
 // 変更ファイルの一覧を畳んだ)。値は固定せず、骨格の変数から組み立てた式と比べる。
@@ -89,11 +91,12 @@ describe("一覧の列の頭の行は畳んでも残る", () => {
 
   test.each(
     STATES,
-  )("$name: 頭は 2 段のまま (1 段目はタブ列と同じ高さ、下端は一覧の列の本体の上端)", ({
+  )("$name: 1 段目はタブ列と同じ高さ。頭の下端は一覧の列の本体の上端 (開いていれば 2 段、畳めば 1 段)", ({
     marks,
   }) => {
     const head = declarationsOn("#panel-head", marks);
     const tabs = declarationsOn("#main-tabs", marks);
+    const folded = marks.includes(FOLDED);
     expect({
       top: head.get("top"),
       height: resolved(head.get("height"), marks),
@@ -102,17 +105,61 @@ describe("一覧の列の頭の行は畳んでも残る", () => {
         declarationsOn(".project-head", marks).get("height"),
         marks,
       ),
-      secondRow: resolved(
-        declarationsOn("#panel-head > #view-head", marks).get("height"),
-        marks,
-      ),
+      secondRow: folded
+        ? null
+        : resolved(
+            declarationsOn("#panel-head > #view-head", marks).get("height"),
+            marks,
+          ),
     }).toEqual({
       top: "0",
       height: resolved("var(--panel-body-top)", marks),
       bottom: undefined,
       firstRow: resolved(tabs.get("height"), marks),
-      secondRow: resolved("var(--view-head-h)", marks),
+      secondRow: folded ? null : resolved("var(--view-head-h)", marks),
     });
+    expect(resolved("var(--panel-body-top)", marks)).toBe(
+      folded
+        ? resolved(tabs.get("height"), marks)
+        : resolved("calc(var(--main-tabs-h) + var(--view-head-h))", marks),
+    );
+  });
+
+  // 畳んだ間の 2 段目 = 縦の帯: 左のサイドバーのすぐ右、1 段目の下から最下段の上まで、
+  // 幅はファイル一覧が占める幅 (本文と一覧の列はその右から。重ならない)。
+  test.each(
+    STATES.filter(({ marks }) => marks.includes(FOLDED)),
+  )("$name: 2 段目は 1 段目の下の縦の帯で、本文の左端は帯の右端", ({
+    marks,
+  }) => {
+    const rail = declarationsOn("#panel-head > #view-head", marks);
+    expect({
+      position: rail.get("position"),
+      left: resolved(rail.get("left"), marks),
+      top: resolved(rail.get("top"), marks),
+      bottom: resolved(rail.get("bottom"), marks),
+      width: resolved(rail.get("width"), marks),
+      direction: rail.get("flex-direction"),
+      strip: declarationsOn(
+        "#panel-head > #view-head > .view-strip",
+        marks,
+      ).get("flex-direction"),
+    }).toEqual({
+      position: "fixed",
+      left: resolved("var(--chrome-left)", marks),
+      top: resolved("var(--main-tabs-h)", marks),
+      bottom: resolved("var(--chrome-bottom)", marks),
+      width: resolved("var(--files-shown)", marks),
+      direction: "column",
+      strip: "column",
+    });
+    // 本文の左端 = 帯の右端 + 一覧 (と変更ファイルの一覧) の幅。
+    expect(resolved("var(--page-left)", marks)).toBe(
+      resolved(
+        "calc(var(--chrome-left) + calc(var(--view-rail-w) + var(--list-shown) + var(--list-tree-w)))",
+        marks,
+      ),
+    );
   });
 
   test("頭の高さは 2 段の和 (2 段目の高さを変えると、頭と一覧の列の本体の上端が一緒に変わる)", () => {
@@ -161,11 +208,13 @@ describe("一覧の列の頭の行は畳んでも残る", () => {
 
   test.each(
     STATES,
-  )("$name: ファイル一覧の幅は開いていれば --sidebar-w、畳めば 0", ({
+  )("$name: ファイル一覧の幅は開いていれば --sidebar-w、畳めば画面の入口の縦の帯の幅", ({
     marks,
   }) => {
     expect(resolved("var(--files-shown)", marks)).toBe(
-      marks.includes(FOLDED) ? "0px" : resolved("var(--sidebar-w)", []),
+      marks.includes(FOLDED)
+        ? resolved("var(--view-rail-w)", [])
+        : resolved("var(--sidebar-w)", []),
     );
   });
 

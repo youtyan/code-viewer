@@ -97,7 +97,8 @@
   // 240 = HISTORY_WIDTH.min)。縮める順: 一覧を詰める → 変更ファイルの一覧を帯に
   // 畳む → ファイル一覧を畳む。2 面かは保存したタブを読むまで分からないので 1 面で数える。
   var room = root.clientWidth - px("--nav-w");
-  var files = userHidden ? 0 : px("--sidebar-w");
+  // 利用者が畳んだファイル一覧も、画面の入口の縦の帯の幅 (--view-rail-w) は取る。
+  var files = userHidden ? px("--view-rail-w") : px("--sidebar-w");
   var preferred = list ? px("--history-w") : 0;
   var narrow = Math.min(preferred, 240);
   var tree = list === "history" || list === "worktree" ? px("--sidebar-w") : 0;
@@ -110,7 +111,7 @@
     if (room - files - narrow - tree < 480) {
       treeFolded = tree !== 0;
       var treeWidth = treeFolded ? rail : tree;
-      filesFolded = files !== 0 && room - files - narrow - treeWidth < 480;
+      filesFolded = !userHidden && room - files - narrow - treeWidth < 480;
     }
   }
   if (filesFolded) body.classList.add("gdp-sidebar-hidden");

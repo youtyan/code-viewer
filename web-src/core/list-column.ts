@@ -21,6 +21,11 @@ export type ListColumnInput = {
   room: number;
   /** ファイル一覧の幅。利用者が畳んでいるなら 0。 */
   files: number;
+  /**
+   * 畳んだファイル一覧が残す縦の帯 (頭の 2 段目の画面の入口の絵柄と開くボタンを
+   * 縦に並べたもの) の幅。畳んでも本文はこの帯の右から。
+   */
+  filesRail: number;
   /** 利用者が手でファイル一覧を開いた (このセッションは自動で畳まない)。 */
   filesKeptOpen: boolean;
   /** 一覧の利用者の幅。一覧の無い画面・利用者が一覧を畳んだなら 0。 */
@@ -49,12 +54,14 @@ export type ListColumnLayout = {
   tree: number;
   /** 変更ファイルの一覧を畳んだ。 */
   treeFolded: boolean;
-  /** ファイル一覧を自動で畳んだ (幅は 0。頭の畳むボタンで開く)。 */
+  /** ファイル一覧を自動で畳んだ (幅は帯の幅 filesRail。帯の開くボタンで開く)。 */
   filesFolded: boolean;
 };
 
 export function listColumnLayout(input: ListColumnInput): ListColumnLayout {
-  const { room, files, preferred, tree, treeRail, need } = input;
+  const { room, preferred, tree, treeRail, need } = input;
+  // 利用者が畳んだファイル一覧も帯の幅は取る。
+  const files = input.files === 0 ? input.filesRail : input.files;
   const narrow = Math.min(preferred, input.compact);
   const compact = narrow !== preferred;
   const fits = (fileList: number, list: number, treeWidth: number) =>
@@ -93,7 +100,7 @@ export function listColumnLayout(input: ListColumnInput): ListColumnLayout {
     compact,
     tree: treeWidth,
     treeFolded,
-    filesFolded: files !== 0 && !input.filesKeptOpen,
+    filesFolded: input.files !== 0 && !input.filesKeptOpen,
   };
 }
 

@@ -17,6 +17,7 @@ import { DIFF_SCREEN_TEXT } from "../views/diff-view-i18n";
 describe("listColumnLayout", () => {
   const base = {
     files: 240,
+    filesRail: 40,
     filesKeptOpen: false,
     preferred: 320,
     compact: 240,
@@ -185,6 +186,17 @@ describe("listColumnLayout", () => {
       input: { files: 0 },
       width: 240,
       tree: 28,
+      filesFolded: false,
+    },
+    // 利用者が畳んだファイル一覧も画面の入口の縦の帯 (40) は取る: 帯を数えなければ
+    // 全幅の一覧が入る幅でも、帯の分だけ詰める。
+    {
+      name: "1 面 History・ファイル一覧を利用者が畳んだ・帯の分だけ詰める",
+      room: 1060,
+      need: 480,
+      input: { files: 0 },
+      width: 240,
+      tree: 240,
       filesFolded: false,
     },
     // Diff は一覧が変更ファイルの一覧 (その右の列は無い): 1 面は 1320 から全幅、

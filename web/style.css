@@ -340,6 +340,16 @@
   --graph-branch:       #a89d82;
 }
 
+/* 畳んだファイル一覧の縦の帯の幅 (--view-rail-w。下の html, body で --space-unit の倍数)
+   は長さとして登録する。画面 (app.ts の listColumnLayoutFor・index.html の
+   #first-screen) が getComputedStyle で px として読むため。登録しない変数は calc()
+   のまま返り、読めない。 */
+@property --view-rail-w {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
 /* ===== Reset / base ===== */
 *, *::before, *::after { box-sizing: border-box; }
 html, body {
@@ -444,6 +454,9 @@ html, body {
   /* 畳んだ列の帯の幅 = 開くボタン 1 つ分 (押せる領域の大きさ。密度で変わるので
      固定の px にしない)。 */
   --panelcol-rail-w: var(--ui-control-sm);
+  /* ファイル一覧を畳んだ間の、頭の 2 段目 (画面の入口の絵柄と開くボタン) を縦に
+     並べた帯の幅。絵柄 (--ui-control-sm 角) と左右の余白。本文はこの帯の右から。 */
+  --view-rail-w: calc(var(--space-unit) * 10);
   /* 一覧・変更ファイルの一覧を畳むつまみの幅 (列の右端の線に重ねる)。 */
   --column-fold-w: var(--space-4);
   /* 頭の 2 段目 (画面の入口の絵柄の段) の高さ。1 段目はタブ列と同じ高さ。 */
@@ -452,7 +465,7 @@ html, body {
   --column-head-h: calc(var(--main-tabs-h) + var(--view-head-h));
   /* 一覧の列の本体の上端 = 頭の下 (頭は窓の上端から)。 */
   --panel-body-top: var(--column-head-h);
-  /* ファイル一覧が占めている幅。畳んだ間 (gdp-sidebar-hidden) は 0。 */
+  /* ファイル一覧が占めている幅。畳んだ間 (gdp-sidebar-hidden) は縦の帯の幅。 */
   --files-shown: var(--sidebar-w);
   /* 右端に付く固定物の幅。デスクトップには無い (0。電話は安全領域)。 */
   --chrome-right: 0px;
@@ -500,10 +513,13 @@ body[data-list-column="worktree"] {
 body[data-list-tree-folded] {
   --list-tree-w: var(--panelcol-rail-w);
 }
-/* ファイル一覧を畳む (手・幅が足りないときの自動) = 頭の下の一覧だけを畳む。頭の
-   行 (--column-head-w) は残し、本文は左のサイドバーの右 (一覧の列の残り) から。 */
+/* ファイル一覧を畳む (手・幅が足りないときの自動) = 頭の 1 段目 (--column-head-w) と
+   タブ列は残し、2 段目 (画面の入口の絵柄と開くボタン) を 1 段目の下の縦の帯
+   (--view-rail-w) に移す。本文と一覧の列の残りは帯の右、1 段目の下から (2 段目の
+   高さを残すと、本文が 2 段目の場所に重なって絵柄を隠した)。 */
 body.gdp-sidebar-hidden {
-  --files-shown: 0px;
+  --files-shown: var(--view-rail-w);
+  --panel-body-top: var(--main-tabs-h);
 }
 
 /* 左右 2 面: 本文は左の面に収める (route のタブは左にしか置けない。T2 の上書き。body で決める)。 */
@@ -17993,7 +18009,8 @@ body.main-split-resizing {
   display: flex;
   flex-direction: column;
   width: var(--column-head-w);
-  height: var(--column-head-h);
+  /* 開いているときは 2 段、ファイル一覧を畳んだら 1 段 (2 段目は縦の帯)。 */
+  height: var(--panel-body-top);
   z-index: 32;
   box-sizing: border-box;
   padding: 0 var(--pad-face);
@@ -18135,6 +18152,29 @@ button.brand[aria-expanded="true"] .brand-chevron svg {
 }
 #panel-head > #view-head > .view-strip {
   flex: 0 1 auto;
+}
+/* ファイル一覧を畳んだ間: 2 段目は 1 段目の下の縦の帯 (左のサイドバーの右、最下段の
+   上まで)。絵柄と開くボタンは同じ大きさ・同じ並び (Tab の順も同じ) で縦に積む。 */
+body.gdp-sidebar-hidden #panel-head > #view-head {
+  position: fixed;
+  left: var(--chrome-left);
+  top: var(--panel-body-top);
+  bottom: var(--chrome-bottom);
+  width: var(--view-rail-w);
+  height: auto;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  padding: var(--space-2) 0;
+  background: var(--color-tree);
+  /* 右の線は頭と同じ内側の影。 */
+  box-shadow: inset -1px 0 0 var(--color-line-soft);
+}
+body.gdp-sidebar-hidden #panel-head > #view-head > .view-strip {
+  flex-direction: column;
+}
+body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
+  margin-left: 0;
 }
 .view-head-row {
   display: flex;
@@ -23827,6 +23867,27 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body.mobile-sheet-open:not([data-worktree-overview]) #worktree-panel {
     transform: none;
     visibility: visible;
+  }
+  /* 畳んだファイル一覧の縦の帯 (デスクトップ) は作らない: 電話では 2 段目のまま、
+     一覧の列は幅を取らない。 */
+  body.gdp-sidebar-hidden {
+    --files-shown: 0px;
+  }
+  body.gdp-sidebar-hidden #panel-head > #view-head {
+    position: static;
+    width: auto;
+    height: var(--view-head-h);
+    flex-direction: row;
+    gap: 0;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+  }
+  body.gdp-sidebar-hidden #panel-head > #view-head > .view-strip {
+    flex-direction: row;
+  }
+  body.gdp-sidebar-hidden #panel-head > #view-head > .view-head-row {
+    margin-left: auto;
   }
   #panel-head,
   body.gdp-sidebar-hidden #panel-head {
