@@ -483,13 +483,16 @@ describe("agents sidebar heading marks", () => {
   });
 });
 
+// エージェントの行は 2 行組のカード: 1 行目は作業の要約 (無ければ種類)、2 行目は
+// 種類 (1 行目が要約のとき)・状態の語・経過時間。プロジェクトの見出しとは形で分かる。
 describe("agents sidebar row contents", () => {
-  test.each<[string, AgentState, string, string, string]>([
+  test.each<[string, AgentState, string, string, string, string]>([
     [
       "agent title",
       "working",
       "✳ Review plan",
       "Review plan",
+      "claude · Working · –",
       "Working · Review plan",
     ],
     [
@@ -497,18 +500,27 @@ describe("agents sidebar row contents", () => {
       "working",
       "✳ 調査中",
       "調査中",
+      "claude · Working · –",
       "Working · 調査中",
     ],
-    ["command title", "idle", "claude", "Idle", "Idle"],
+    ["command title", "idle", "claude", "claude", "Idle · –", "Idle"],
     [
       "one-word shell title",
       "waiting",
       "workstation",
-      "Needs input",
+      "claude",
+      "Needs input · –",
       "Needs input",
     ],
-    ["empty title", "done", "", "Finished · unread", "Finished · unread"],
-  ])("%s", (_name, state, title, expected, tooltip) => {
+    [
+      "empty title",
+      "done",
+      "",
+      "claude",
+      "Finished · unread · –",
+      "Finished · unread",
+    ],
+  ])("%s", (_name, state, title, name, meta, tooltip) => {
     const { root } = mount(
       overview(
         [pane("%1", "work:0.0", "/work/sample-app", state, title)],
@@ -516,8 +528,42 @@ describe("agents sidebar row contents", () => {
       ),
     );
     const row = root.querySelector<HTMLElement>(".nav-agent");
-    expect(row?.querySelector(".nav-agent-task")?.textContent).toBe(expected);
-    expect(row?.title.split("\n")[0]).toBe(tooltip);
+    expect({
+      name: row?.querySelector(".agent-card-head .agent-card-name")
+        ?.textContent,
+      meta: row?.querySelector(".agent-card-meta")?.textContent,
+      tooltip: row?.title.split("\n")[0],
+    }).toEqual({ name, meta, tooltip });
+  });
+
+  test("a project heading carries its agent count, not a card", () => {
+    const { root } = mount(
+      overview(
+        [
+          pane("%1", "work:0.0", "/work/sample-app", "working"),
+          pane("%2", "work:1.0", "/work/sample-app", "idle"),
+          pane("%3", "work:2.0", "/work/sample-lib", "waiting"),
+        ],
+        REGISTERED,
+      ),
+    );
+    const heads = [...root.querySelectorAll<HTMLElement>(".nav-project-head")];
+    expect(
+      heads.map((head) => ({
+        name: head.querySelector(".nav-project-name")?.textContent,
+        count: head.querySelector(".nav-project-count")?.textContent ?? null,
+        card: head.classList.contains("agent-card"),
+      })),
+    ).toEqual([
+      { name: "sample-app", count: "2", card: false },
+      { name: "sample-lib", count: "1", card: false },
+      { name: "sample-docs", count: null, card: false },
+    ]);
+    expect(
+      [...root.querySelectorAll(".nav-agent")].every((row) =>
+        row.classList.contains("agent-card"),
+      ),
+    ).toBe(true);
   });
 });
 

@@ -33,7 +33,6 @@ import {
   groupAgentPanes,
   matchesStateFilter,
   notifyPermissionView,
-  paneTaskSummary,
 } from "../../core/agent-overview";
 import {
   CHEVRON_DOWN_16_PATH,
@@ -47,6 +46,7 @@ import type { PageView } from "../page-view";
 import type { ProjectActions } from "../projects/project-actions";
 import { showProjectMenu } from "../projects/project-menu";
 import type { AccountsBand } from "./accounts-band";
+import { fillAgentCard } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
 import { paneText } from "./pane-text";
@@ -190,16 +190,11 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
   hint.className = "agents-hint";
   toolbar.append(boardTitle, filterGroup, allPanesLabel, toolbarSpacer, hint);
 
-  // 列の名前。行と同じ格子に乗せる (見出しの文字の左端 = 行の文字の左端)。
-  const columns = document.createElement("div");
-  columns.className = "agents-columns";
-  columns.setAttribute("aria-hidden", "true");
-
   const list = document.createElement("div");
   list.className = "agents-list";
   list.role = "tree";
   list.addEventListener("keydown", onListKeydown);
-  board.append(toolbar, columns, list);
+  board.append(toolbar, list);
 
   root.append(header, hookHint, problems, deps.accountsBand.element, board);
 
@@ -225,13 +220,6 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     return current.state[filter];
   }
 
-  function stateMark(state: AgentPane["state"]): HTMLElement {
-    const mark = document.createElement("i");
-    mark.className = `terminal-mark terminal-mark-${state}`;
-    mark.setAttribute("aria-hidden", "true");
-    return mark;
-  }
-
   function select(pane: AgentPane, destination?: "opposite"): void {
     selected = pane.id;
     deps.monitor.markRead(pane.id);
@@ -252,74 +240,24 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     row.classList.toggle("unread", unread !== undefined);
     if (pane.id === selected) row.setAttribute("aria-current", "true");
 
-    const state = document.createElement("span");
-    state.className = `agents-cell agents-state terminal-row-state-${pane.state}`;
-    const stateLabel = document.createElement("span");
-    stateLabel.className = "agents-cell-text";
-    stateLabel.textContent = current.state[pane.state];
-    state.append(stateMark(pane.state), stateLabel);
-
-    const kind = document.createElement("span");
-    kind.className = `agents-cell agents-kind agents-kind-${pane.kind ?? "shell"}`;
-    kind.textContent = pane.kind ? current.kind[pane.kind] : current.kindShell;
-
-    const account = accountLabel(pane);
-
-    // 作業の名前。無いときは種類の名前を繰り返さず「作業の名前なし」と薄く出す
-    // (コマンド名はツールチップにある)。worktree は作業の後ろに補助の色で。
-    const task = document.createElement("span");
-    task.className = "agents-cell agents-task";
-    const taskText = document.createElement("span");
-    taskText.className = "agents-cell-text";
-    // 要約はサイドバー・「＋」・パレットと同じ判定 (tmux の既定の題名 =
-    // ホスト名などは作業とみなさない)。状態はこの表では別の列にある。
-    const summary = paneTaskSummary(pane);
-    taskText.textContent = summary ?? current.board.noTask;
-    task.classList.toggle("agents-task-none", summary === null);
-    task.appendChild(taskText);
-    if (pane.worktree) {
-      const worktree = document.createElement("span");
-      worktree.className = "agents-worktree";
-      worktree.textContent = pane.worktree;
-      worktree.title = current.worktreeTitle(pane.worktree);
-      task.appendChild(worktree);
-    }
-
+    // 左のサイドバーと同じ 2 行組のカード (agent-card.ts)。この画面は幅が
+    // あるので、補足にアカウントと tmux の場所も足す。
     const place = document.createElement("span");
-    place.className = "agents-cell agents-place terminal-mono";
+    place.className = "agents-place terminal-mono";
     place.textContent = pane.label;
-
-    const age = document.createElement("span");
-    age.className = "agents-cell agents-age";
-    // 変わった瞬間を見たものだけ時間を出す。それ以外は種類を問わず同じ
-    // 「–」にして、分かっている下限だけをツールチップに書く。
-    if (pane.updatedAt > 0) {
-      age.textContent = current.elapsed(Date.now() - pane.updatedAt);
-    } else {
-      age.textContent = current.elapsedUnknown;
-      const watched =
-        pane.watchedSince > 0 ? Date.now() - pane.watchedSince : 0;
-      age.title =
-        watched >= 60_000
-          ? current.elapsedAtLeast(current.elapsed(watched))
-          : current.elapsedJustWatched;
-    }
-
-    // 未読の点は行の右端 (左のサイドバーの行と同じ位置)。
-    const dot = document.createElement("span");
-    dot.className = "agents-unread";
-    if (unread) {
-      dot.title =
-        unread === "waiting" ? current.unreadWaiting : current.unreadFinished;
-      dot.setAttribute("aria-label", current.unread);
-    }
-
-    row.append(state, kind, account, task, place, age, dot);
+    const card = fillAgentCard(row, pane, current, unread, [
+      accountLabel(pane),
+      place,
+    ]);
     row.title = [
       paneText(pane, current).title,
       pane.path,
-      unread ? dot.title : "",
-      age.title,
+      unread
+        ? unread === "waiting"
+          ? current.unreadWaiting
+          : current.unreadFinished
+        : "",
+      card.ageTitle,
       current.openPane,
     ]
       .filter(Boolean)
@@ -340,7 +278,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
   function accountLabel(pane: AgentPane): HTMLElement {
     const t = text().accounts;
     const label = document.createElement("span");
-    label.className = "agents-cell agents-account";
+    label.className = "agents-account";
     const account = pane.account;
     if (!account) return label;
     const data = deps.getAccounts();
@@ -847,22 +785,6 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     launchButton.title = current.accounts.launchButtonTitle;
     hookHintClose.title = current.hookHintClose;
     hookHintClose.setAttribute("aria-label", current.hookHintClose);
-    const names = current.board.columns;
-    columns.replaceChildren(
-      ...[
-        names.status,
-        names.agent,
-        names.account,
-        names.task,
-        names.pane,
-        names.elapsed,
-      ].map((label) => {
-        const cell = document.createElement("span");
-        cell.className = "agents-cell";
-        cell.textContent = label;
-        return cell;
-      }),
-    );
     renderNotify();
     deps.accountsBand.render();
     renderHookHint();

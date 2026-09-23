@@ -8,7 +8,7 @@ import type {
   HookAgent,
   HookRowAction,
 } from "../../core/agent-hooks";
-import type { AgentKind } from "../../core/agent-overview";
+import type { AgentKind, AgentTransition } from "../../core/agent-overview";
 import type { AgentState } from "../../core/agent-state";
 import { elapsedBucket } from "../../core/terminal-board";
 import {
@@ -44,6 +44,8 @@ export type AgentsText = {
   unread: string;
   unreadWaiting: string;
   unreadFinished: string;
+  /** エージェントのカードの札 (見ていない間に入力待ちになった・終わった)。 */
+  cardBadge: Record<AgentTransition, string>;
   /** 状態が変わってからの経過。刻み方はターミナルの一覧と同じ。 */
   elapsed: (ms: number) => string;
   /** 状態が変わった瞬間を見ていないペインの経過時間の欄。 */
@@ -119,18 +121,8 @@ export type AgentsText = {
 
 export type AgentsBoardText = {
   allAgents: string;
-  columns: {
-    status: string;
-    agent: string;
-    account: string;
-    task: string;
-    pane: string;
-    elapsed: string;
-  };
   /** 登録してあるがエージェントの居ないプロジェクトの行。 */
   noAgents: string;
-  /** タスクの名前が無いペイン。 */
-  noTask: string;
   /** プロジェクトの見出しのツールチップに出す件数。 */
   projectCounts: (summary: string) => string;
 };
@@ -443,6 +435,7 @@ const EN: AgentsText = {
   unread: "Unread",
   unreadWaiting: "Started waiting for input while you were away",
   unreadFinished: "Finished while you were away",
+  cardBadge: { waiting: "Needs input", finished: "Done" },
   elapsed: (ms) => terminalText("en").elapsed(elapsedBucket(ms)),
   elapsedUnknown: "–",
   elapsedAtLeast: (lowerBound) =>
@@ -500,16 +493,7 @@ const EN: AgentsText = {
   keyboardHint: "↑↓ move · Enter open",
   board: {
     allAgents: "All agents",
-    columns: {
-      status: "Status",
-      agent: "Agent",
-      account: "Account",
-      task: "Task",
-      pane: "Pane",
-      elapsed: "Elapsed",
-    },
     noAgents: "No agents",
-    noTask: "No active task",
     projectCounts: (summary) => summary || "No agents",
   },
   hookHint: (agents) =>
@@ -575,6 +559,7 @@ const JA: AgentsText = {
   unread: "未読",
   unreadWaiting: "見ていない間に入力待ちになりました",
   unreadFinished: "見ていない間に終わりました",
+  cardBadge: { waiting: "入力待ち", finished: "完了" },
   elapsed: (ms) => terminalText("ja").elapsed(elapsedBucket(ms)),
   elapsedUnknown: "–",
   elapsedAtLeast: (lowerBound) =>
@@ -631,16 +616,7 @@ const JA: AgentsText = {
   keyboardHint: "↑↓ 移動 · Enter 開く",
   board: {
     allAgents: "すべてのエージェント",
-    columns: {
-      status: "状態",
-      agent: "種類",
-      account: "アカウント",
-      task: "作業",
-      pane: "ペイン",
-      elapsed: "経過",
-    },
     noAgents: "エージェントはいません",
-    noTask: "作業の名前なし",
     projectCounts: (summary) => summary || "エージェントはいません",
   },
   hookHint: (agents) =>

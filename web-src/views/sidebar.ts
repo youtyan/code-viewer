@@ -5,7 +5,10 @@ import { apiUrl } from "../core/api-url";
 
 import { classifyDiffFileKind } from "../core/diff-file-kinds";
 import { responseErrorMessage } from "../core/error-detail";
-import { compileFileFilter } from "../core/file-filter";
+import {
+  type CompiledFileFilter,
+  compileFileFilter,
+} from "../core/file-filter";
 import { nextVisibleFileIndex } from "../core/file-navigation";
 import { filePathDisplayText } from "../core/file-path-copy";
 import {
@@ -1096,6 +1099,30 @@ export function createSidebar(deps: SidebarDeps) {
     SIDEBAR_ROW_BY_PATH = byPath;
   }
 
+  // 絞り込み欄の title は使い方の説明 (app.ts が言語ごとに付ける)。正規表現の
+  // 誤りの間だけ理由に差し替え、直ったら説明に戻す。誤りの間に説明が付き直した
+  // (言語の切替) なら、戻すのはその新しい説明。
+  function showFilterValidity(
+    input: HTMLInputElement,
+    filter: CompiledFileFilter,
+  ): boolean {
+    const invalid = filter.kind === "invalid";
+    input.toggleAttribute("aria-invalid", invalid);
+    const shown = input.dataset.filterError;
+    if (invalid) {
+      const error =
+        filter.error || DIFF_SCREEN_TEXT[pageLanguage()].invalidRegex;
+      if (input.title !== shown) input.dataset.filterHelp = input.title;
+      input.title = error;
+      input.dataset.filterError = error;
+    } else if (shown !== undefined) {
+      if (input.title === shown) input.title = input.dataset.filterHelp ?? "";
+      delete input.dataset.filterError;
+      delete input.dataset.filterHelp;
+    }
+    return invalid;
+  }
+
   function computeVirtualSidebarVisibleRows() {
     if (!SIDEBAR_TREE_ROOT) {
       SIDEBAR_VISIBLE_ROWS = [];
@@ -1103,11 +1130,7 @@ export function createSidebar(deps: SidebarDeps) {
     }
     const input = $<HTMLInputElement>("#sb-filter");
     const filter = compileFileFilter(input.value);
-    const invalid = filter.kind === "invalid";
-    input.toggleAttribute("aria-invalid", invalid);
-    input.title = invalid
-      ? filter.error || DIFF_SCREEN_TEXT[pageLanguage()].invalidRegex
-      : "";
+    const invalid = showFilterValidity(input, filter);
     const filterActive = filter.kind !== "empty" && !invalid;
     const matches = invalid ? () => true : filter.match;
     let totalFiles = 0;
@@ -1850,11 +1873,7 @@ export function createSidebar(deps: SidebarDeps) {
       return;
     }
     const filter = compileFileFilter(input.value);
-    const invalid = filter.kind === "invalid";
-    input.toggleAttribute("aria-invalid", invalid);
-    input.title = invalid
-      ? filter.error || DIFF_SCREEN_TEXT[pageLanguage()].invalidRegex
-      : "";
+    const invalid = showFilterValidity(input, filter);
     const matches = invalid ? () => true : filter.match;
     const filterActive = filter.kind !== "empty" && !invalid;
     let totalFiles = 0;

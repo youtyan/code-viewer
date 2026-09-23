@@ -14,6 +14,7 @@
 | 同じ場所のテキストボタン | 同上 + `width: auto; padding: 0 var(--space-2);` 程度の上書きに留める |
 | 左のサイドバー (`#app-nav`) の下端の項目 | `nav-foot-item` (アイコン + 文字)。見出しの横の小さな操作は `nav-icon-action` |
 | 左のサイドバーの行の操作 (hover で出る) | `nav-row-action`。場所を確保せず行の上に重ねる (`.nav-project-actions`) |
+| エージェントの行 (左のサイドバー・全体ボード) | `views/agents/agent-card.ts` の `fillAgentCard` (`.agent-card`)。2 行組のカード: 1 行目 = 状態の印・名前・札 (未読の入力待ち・完了)、2 行目 = 補足。プロジェクトはカードにしない (太く大きい見出しの行 + 件数)。場所ごとの補足は `extra` で足す (全体ボードのアカウント・tmux の場所) |
 | 最下段のバー (`#statusbar`) | 押せる塊は `usage-status-item` / `statusbar-icon-action`。流動的な文言は幅を固定した塊の中だけ |
 | メインの面の左右の箱 (ターミナル・画像・置き札) | `app.ts` の `PANE_HOSTS` (`.main-pane-host[data-side]`)。前面のタブがターミナル・画像・本文を出していない route のタブ (置き札 `.main-pane-placeholder`) のときだけ `is-shown`。画像は `views/image-tab.ts` を面ごとに 1 つ使い回す。面の境界は `.main-split-divider` (掴みしろ 6px・線 1px・ホバー/ドラッグ中 2px)、右に分割のドロップ先は `.main-split-drop` |
 | メインの面のターミナルのタブ | 置き場所は `views/terminal/terminal-view.ts` の `tabPaneFor(side)` (面ごとの枠)。タブの名前はエージェントを映していれば「種類 · 状態」(`agentsText().kind` / `.state`)、絵は状態の印 (`.terminal-mark-*`) |

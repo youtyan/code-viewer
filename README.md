@@ -140,9 +140,11 @@ Requires Node.js 20 or newer. Development uses
   deleting one removes its folder from disk and keeps the branch.
 - Keep your projects and their agents in the left sidebar on every screen:
   registered projects first, in your order, then projects found in tmux that
-  are not registered. Rows never reorder when states change. Each project
-  heading keeps its state mark, ＋ and … controls visible; each agent row shows
-  its state, kind, task title and elapsed time. Click a project name to switch
+  are not registered. Rows never reorder when states change. Each project is a
+  bold heading with its state mark and agent count (＋ and … on hover); its
+  agents sit under it as indented two-line cards: the task title (or the kind)
+  with a badge when it started waiting or finished while you were away, then
+  the kind, state, elapsed time and worktree. Click a project name to switch
   to it in the same tab (an unregistered one is registered first), or click an
   agent to open its pane in a terminal tab of the main area. Alt+click or the
   row menu opens it in the opposite pane, splitting a single pane to the right.
@@ -151,9 +153,8 @@ Requires Node.js 20 or newer. Development uses
 - See every coding agent running in tmux on this machine on the All agents
   board (the button next to Projects in the sidebar, or `g a`), grouped by
   project (the git repository of each pane's folder; worktrees fold into their
-  repository). Each row shows the
-  state (needs input / working / idle), the agent kind, how long it has been in
-  that state, the pane title, and its tmux location; needs-input rows come
+  repository). Each agent is the same two-line card as in the sidebar, with
+  the account and the tmux location added to its second line; needs-input rows come
   first, and Enter opens the pane in a terminal tab. A counter in the bottom
   bar shows needs-input and working agents on every screen, next to each
   account's usage, changed rows get an

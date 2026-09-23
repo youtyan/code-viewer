@@ -78,8 +78,13 @@ function createDialogShell(
 }
 
 // Tab / Shift+Tab の forward/backward を focusables 配列内で循環させる。
-function trapTabKey(event: KeyboardEvent, focusables: HTMLElement[]): boolean {
+// 押せない部品 (値が正しくない間の確定など) は輪に入れない。入れると、その手前の
+// 部品からの Tab がブラウザに任され、押せない部品を飛ばして dialog の外へ出た。
+function trapTabKey(event: KeyboardEvent, candidates: HTMLElement[]): boolean {
   if (event.key !== "Tab") return false;
+  const focusables = candidates.filter(
+    (element) => !element.matches(":disabled") && !element.hidden,
+  );
   const index = focusables.indexOf(document.activeElement as HTMLElement);
   if (index < 0) {
     event.preventDefault();

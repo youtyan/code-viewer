@@ -43,13 +43,78 @@ function parseDeclarations(block: string): Map<string, string> {
   return declarations;
 }
 
-function specificity(selector: string): [number, number, number] {
-  const idCount = (selector.match(/#[\w-]+/g) || []).length;
-  const classCount = (selector.match(/\.[\w-]+/g) || []).length;
-  const pseudoClassCount = (selector.match(/:[\w-]+/g) || []).length;
-  const elementCount = (selector.match(/(^|[\s>+~])([a-z][\w-]*)/gi) || [])
-    .length;
-  return [idCount, classCount + pseudoClassCount, elementCount];
+type Specificity = [number, number, number];
+
+function compareSpecificity(a: Specificity, b: Specificity): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+/**
+ * 詳細度 (Selectors Level 4)。`:is()` `:not()` `:has()` は引数の中で最も高いもの、
+ * `:where()` は 0。属性選択子は class と同じ段、疑似要素は要素と同じ段。
+ */
+function specificity(selector: string): Specificity {
+  const total: Specificity = [0, 0, 0];
+  let rest = "";
+  for (let i = 0; i < selector.length; i += 1) {
+    const functional = /^:(is|not|has|where)\(/.exec(selector.slice(i));
+    if (!functional) {
+      rest += selector[i];
+      continue;
+    }
+    let depth = 0;
+    let end = i + functional[0].length - 1;
+    for (; end < selector.length; end += 1) {
+      if (selector[end] === "(") depth += 1;
+      else if (selector[end] === ")" && --depth === 0) break;
+    }
+    if (functional[1] !== "where") {
+      const inner = selector.slice(i + functional[0].length, end);
+      const highest = splitSelectorList(inner)
+        .map(specificity)
+        .reduce((a, b) => (compareSpecificity(a, b) >= 0 ? a : b), [0, 0, 0]);
+      for (let k = 0; k < 3; k++) total[k] += highest[k];
+    }
+    rest += " ";
+    i = end;
+  }
+  const withoutAttributes = rest.replace(/\[[^\]]*\]/g, " [] ");
+  // `::after` は `:after` としても数えてしまうので、その分を class の段から引く。
+  const pseudoElements = (withoutAttributes.match(/::[\w-]+/g) || []).length;
+  total[0] += (withoutAttributes.match(/#[\w-]+/g) || []).length;
+  total[1] +=
+    (withoutAttributes.match(/\.[\w-]+/g) || []).length +
+    (withoutAttributes.match(/\[\]/g) || []).length +
+    (withoutAttributes.match(/:[\w-]+/g) || []).length -
+    pseudoElements;
+  total[2] +=
+    (withoutAttributes.match(/(^|[\s>+~])([a-z][\w-]*)/gi) || []).length +
+    pseudoElements;
+  return total;
+}
+
+/**
+ * 選択子の並びを 1 つずつに分ける。`:is(a, b)` や `[title="a, b"]` の中のカンマでは
+ * 切らない (切ると壊れた断片が規則になり、要素に当てられない)。
+ */
+function splitSelectorList(list: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < list.length; i += 1) {
+    const char = list[i];
+    if (char === "(" || char === "[") depth += 1;
+    else if (char === ")" || char === "]") depth -= 1;
+    else if (char === "," && depth === 0) {
+      parts.push(list.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(list.slice(start));
+  return parts.map((part) => part.trim()).filter(Boolean);
 }
 
 export function parseCss(source: string): CssRule[] {
@@ -89,10 +154,7 @@ export function parseCss(source: string): CssRule[] {
     const atRule = atRuleStack.length
       ? atRuleStack[atRuleStack.length - 1]
       : null;
-    for (const selector of head
-      .split(",")
-      .map((part) => part.trim())
-      .filter(Boolean)) {
+    for (const selector of splitSelectorList(head)) {
       rules.push({
         selector,
         declarations: parseDeclarations(block),
@@ -117,16 +179,6 @@ export function loadStyleSheet(): CssRule[] {
  */
 export function baseRules(rules: CssRule[]): CssRule[] {
   return rules.filter((rule) => rule.atRule === null);
-}
-
-function compareSpecificity(
-  a: [number, number, number],
-  b: [number, number, number],
-): number {
-  for (let i = 0; i < 3; i++) {
-    if (a[i] !== b[i]) return a[i] - b[i];
-  }
-  return 0;
 }
 
 /**

@@ -955,8 +955,8 @@ button.brand[aria-expanded="true"] .brand-chevron svg {
   transform: rotate(180deg);
 }
 button.brand:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .brand .title {
   /* 名前と枝の幅は views/brand-fit.ts が分ける: 枝は自然な幅 (上限は見出しの
@@ -1069,10 +1069,12 @@ button.brand:focus-visible {
   background: var(--bg-mute);
   border-color: var(--border-strong);
 }
+/* 最下段 (窓の下端) とタブ列の左 (上端) に置くので、輪は内側
+   (外の輪が窓の端で切れる。focus-ring-contrast.test.ts)。 */
 .global-actions #theme:focus-visible,
 .global-icon-action:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
 }
 .global-icon-action.copied {
   color: var(--success);
@@ -2649,8 +2651,8 @@ body[data-focus-scope="main"] #content {
   color: var(--fg);
 }
 .sb-icon-action:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .sb-icon-action:disabled {
   opacity: 0.38;
@@ -2658,7 +2660,6 @@ body[data-focus-scope="main"] #content {
 }
 .sb-actions .sb-tree-action:first-of-type {
   margin-left: 0;
-  box-shadow: none;
 }
 .sb-icon-action svg {
   display: block;
@@ -15649,18 +15650,6 @@ html[data-theme="dark"] .tools-code span[style] {
 .terminal-tree-twisty .octicon {
   display: block;
 }
-.terminal-row-state-waiting {
-  color: var(--attn);
-}
-.terminal-row-state-done {
-  color: var(--done, #8250df);
-}
-.terminal-row-state-working {
-  color: var(--success, #1a7f37);
-}
-.terminal-row-state-idle {
-  color: var(--fg-muted, #57606a);
-}
 .terminal-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -16333,8 +16322,8 @@ html[data-theme="dark"] .tools-code span[style] {
 
 /* ============================================================
    Agents — tmux で動いているエージェントの一覧 (/agents) と、
-   ヘッダの件数表示。状態の印・色は terminal の .terminal-mark /
-   .terminal-row-state-* をそのまま使い、ここでは並べ方だけを決める。
+   ヘッダの件数表示。状態の印・色は terminal の .terminal-mark をそのまま使い、
+   ここでは並べ方だけを決める。
    ============================================================ */
 
 .gdp-agents-page #topbar,
@@ -16389,8 +16378,8 @@ body.gdp-search-page {
   color: var(--fg-muted);
 }
 .agent-status:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
 }
 .agent-status-item {
   display: inline-flex;
@@ -16630,7 +16619,6 @@ html[data-nav-collapsed] #app-nav {
 .nav-icon-action:focus-visible,
 .nav-foot-item:focus-visible,
 .nav-project-toggle:focus-visible,
-.nav-agent:focus-visible,
 .nav-row-action:focus-visible,
 .usage-status-item:focus-visible,
 .statusbar-icon-action:focus-visible {
@@ -16710,8 +16698,9 @@ html[data-nav-collapsed] #app-nav {
   padding: 0 var(--pad-face) var(--space-2);
   scrollbar-width: thin;
 }
+/* プロジェクトの間は空ける (見出しとその下のカードが 1 つの塊に見えるように)。 */
 .nav-project + .nav-project {
-  margin-top: var(--space-1);
+  margin-top: var(--space-3);
 }
 .nav-project-head {
   position: relative;
@@ -16738,7 +16727,9 @@ html[data-nav-collapsed] #app-nav {
   background: transparent;
   color: var(--color-text);
   font: inherit;
-  font-size: var(--ui-font-md);
+  /* 見出しはエージェントのカードより大きく太く (2 段の見え方を分ける)。 */
+  font-size: var(--ui-font-lg);
+  font-weight: 600;
   text-align: left;
   cursor: pointer;
 }
@@ -16787,9 +16778,6 @@ html[data-nav-collapsed] #app-nav {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.nav-project-head.current .nav-project-name {
-  font-weight: 600;
 }
 .nav-project-head.current .nav-project-icon {
   color: var(--color-accent);
@@ -16847,6 +16835,26 @@ html[data-nav-collapsed] #app-nav {
   opacity: 1;
   pointer-events: auto;
 }
+/* エージェントの数。＋と ⋯ の場所に出し、操作が出ている間は隠す。 */
+.nav-project-count {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--space-7);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: var(--space-2);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.nav-project-head:hover .nav-project-count,
+.nav-project-head:focus-within .nav-project-count {
+  visibility: hidden;
+}
 .nav-row-action {
   display: inline-grid;
   place-items: center;
@@ -16883,65 +16891,111 @@ html[data-nav-collapsed] #app-nav {
   display: flex;
   flex-direction: column;
   gap: calc(var(--space-1) / 2);
-  margin-top: calc(var(--space-1) / 2);
+  margin-top: var(--space-1);
 }
 .nav-agents[hidden] {
   display: none;
 }
+/* エージェントの行は見出しより字下げした 2 行組のカード (.agent-card)。地より一段
+   明るい面。 */
 .nav-agent {
-  display: grid;
-  grid-template-columns: var(--icon-md) auto minmax(0, 1fr) auto auto;
-  align-items: center;
-  column-gap: var(--space-2);
-  height: var(--ui-row-h);
-  padding: 0 calc(var(--pad-text) - var(--pad-face)) 0 calc(var(--pad-text) - var(--pad-face) + var(--indent-step) + var(--space-1));
+  margin-left: calc(var(--pad-text) - var(--pad-face) + var(--indent-step));
+  padding: var(--space-1) var(--space-2);
   border: 0;
   border-radius: var(--radius-md);
-  background: transparent;
+  background: var(--color-doc);
   color: var(--color-text);
   font: inherit;
-  font-size: var(--ui-font-md);
-  text-align: left;
   cursor: pointer;
   transition: background var(--motion-fast), box-shadow var(--motion-fast);
 }
 .nav-agent:hover {
-  background: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  background: var(--color-raised);
 }
 /* 選んでいる行 (ターミナルで見ているペイン)。面の色と内側の光だけ。 */
 .nav-agent.active {
   background: var(--color-select);
   box-shadow: var(--glow-select);
 }
-.nav-agent-kind {
-  color: var(--color-text);
-  white-space: nowrap;
+/* 最も詰めた密度では 1 行組 (補足を名前の右に続ける)。 */
+body[data-sidebar-font-size="compact"] .nav-agent {
+  grid-template-columns:
+    var(--icon-md) minmax(0, max-content) minmax(0, 1fr) var(--dot-size);
+  grid-template-areas: "mark head meta dot";
+  height: var(--ui-row-h);
+  padding-block: 0;
 }
-.nav-agent-task {
+
+/* ---- エージェントのカード (views/agents/agent-card.ts。左のサイドバーと全体ボード) ----
+   1 行目: 状態の印・名前 (太め)・札。2 行目: 補足 (小さく薄い字)。右端: 未読の点。 */
+.agent-card {
+  display: grid;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr) var(--dot-size);
+  grid-template-areas:
+    "mark head dot"
+    ".    meta dot";
+  align-items: center;
+  column-gap: var(--space-2);
+  text-align: left;
+}
+.agent-card > .terminal-mark {
+  grid-area: mark;
+  justify-self: center;
+}
+.agent-card-head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.agent-card-name {
   min-width: 0;
   overflow: hidden;
-  color: var(--color-text-2);
-  font-size: var(--ui-font-base);
+  color: var(--color-text);
+  font-size: var(--ui-font-md);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.nav-agent-age {
-  color: var(--color-text-3);
-  font-family: var(--font-mono);
-  font-size: var(--ui-font-sm);
-  font-variant-numeric: tabular-nums;
+/* 札: 見ていない間に入力待ちになった・終わった。枠だけの小さな札で、色は状態の色。 */
+.agent-card-badge {
+  flex: none;
+  padding: 0 var(--space-1);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font-size: var(--ui-font-xs);
+  font-weight: 500;
+  line-height: 1.5;
   white-space: nowrap;
 }
-.nav-agent-unread {
+.agent-card-badge-waiting {
+  color: var(--color-waiting);
+}
+.agent-card-badge-finished {
+  color: var(--color-done);
+}
+.agent-card-meta {
+  grid-area: meta;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-card-age,
+.agent-card .agents-place {
+  font-variant-numeric: tabular-nums;
+}
+.agent-card-unread {
+  grid-area: dot;
   width: var(--dot-size);
   height: var(--dot-size);
   border-radius: 50%;
 }
-.nav-agent.unread .nav-agent-unread {
+.agent-card.unread .agent-card-unread {
   background: var(--color-done);
-}
-.nav-agent-waiting .nav-agent-task {
-  color: var(--color-text);
 }
 .nav-note {
   display: block;
@@ -17439,24 +17493,47 @@ button.brand[aria-expanded="true"] {
   color: var(--color-text);
   text-decoration: none;
 }
-.view-strip-item:focus-visible {
+/* キーで届くのにブラウザの既定の輪か自前の outline だった部品 (色も太さもほかと
+   違った): 左のサイドバーの案内のリンク・
+   差分のカードの見出しのボタン (畳む・パスのコピー・全部の行・フォルダを開く・
+   Preview・View file)・本文のボタン (History・Upload files など)・Diff の上の段
+   (対象を戻す・読み直す・ws / syntax / no test)。 */
+.nav-note-link:focus-visible,
+.gdp-file-header-icon:focus-visible,
+.gdp-preview-file:focus-visible,
+.gdp-view-file:focus-visible,
+.gdp-btn:focus-visible,
+.ref-pickers > button:focus-visible,
+.controls > button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
-/* キーで届くのにブラウザの既定の輪だった部品 (色も太さもほかと違った): タブ列の
-   ＋と分割・右の列を畳むボタン・左のサイドバーの案内のリンク・パンくずの段と「…」・
-   差分のカードの見出しのボタン (畳む・パスのコピー・全部の行・フォルダを開く・
-   Preview・View file)。 */
+/* 外の輪 (4px) が切れる所は内側に描く (部品の位置は動かさない)。
+   - 窓の上端に接する部品: 左のサイドバーの頭 (検索・畳む)・タブ列の操作 (最後の
+     タブの右の＋・右端の分割)・タブ列の左端のプロジェクトの切替
+   - 右の列を畳むボタン: 右の列の頭 (上端) か畳んだ帯 (右端) のどちらかにいる
+   - 窓の下端に接する部品: 最下段の件数・使用量・操作
+   - 画面の絵柄: 右の列の頭では上端、畳んだ帯では右端に接する
+   - overflow で切る枠の中の部品: Diff の上の段と木の切替 (.seg)・パンくずの段と「…」 */
+.nav-head > .nav-search:focus-visible,
+.nav-head > .nav-icon-action:focus-visible,
 .main-tabs-action:focus-visible,
+#tabs-lead button.brand:focus-visible,
 #sidebar-toggle:focus-visible,
-.nav-note-link:focus-visible,
+#statusbar .usage-status-item:focus-visible,
+#statusbar .statusbar-icon-action:focus-visible,
+.view-strip-item:focus-visible,
+#topbar .seg button:focus-visible,
+.sb-view-seg button:focus-visible,
 .gdp-file-breadcrumb-part:focus-visible,
-.gdp-file-breadcrumb-ellipsis:focus-visible,
-.gdp-file-header-icon:focus-visible,
-.gdp-preview-file:focus-visible,
-.gdp-view-file:focus-visible {
+.gdp-file-breadcrumb-current:focus-visible,
+.gdp-file-breadcrumb-ellipsis:focus-visible {
   outline: none;
-  box-shadow: var(--focus-ring);
+  box-shadow: var(--focus-ring-inset);
+}
+/* 選んでいる切替の光は残す。 */
+#topbar .seg button.active:focus-visible {
+  box-shadow: var(--focus-ring-inset), var(--glow-select);
 }
 /* 見出しの Viewed はチェックの箱に輪を描くと箱だけが囲まれるので、文字ごと
    (label) を囲む。 */
@@ -18993,14 +19070,10 @@ body.gdp-files-column-page #sidebar .sb-head > .sb-view-seg {
 }
 
 /* ---- 全体ボード (/agents。views/agents/agents-view.ts・accounts-band.ts・usage-meter.ts) ----
-   面は 3 つ: 画面の地 (--color-ground)、アカウントのカード (--color-doc)、
-   表の行 (地のまま。hover と選択だけ面を付ける)。外周の線は引かない。
-   画面の左右の余白は --pad-doc。表とカードはその線から始め、表の中の文字は
-   さらに --pad-text 内側 (行の選択の面は表の端から描く)。 */
+   面は 2 つ: 画面の地 (--color-ground) と、その上のカード (アカウント・エージェントの
+   行。--color-doc)。外周の線は引かない。画面の左右の余白は --pad-doc。カードは
+   その線から始め、カードの中の文字はさらに --pad-text 内側。 */
 .agents-page {
-  --agents-grid:
-    minmax(0, 1.1fr) minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(0, 1.8fr)
-    minmax(0, 1fr) minmax(0, 0.65fr) var(--dot-size);
   --ui-row-h: var(--ui-control-sm);
   --ui-table-row-h: var(--ui-control-md);
   height: var(--content-h);
@@ -19495,40 +19568,21 @@ button.agents-account-name:hover {
   font-size: var(--ui-font-sm);
   white-space: nowrap;
 }
-.agents-columns,
-.agents-row {
-  display: grid;
-  grid-template-columns: var(--agents-grid);
-  column-gap: var(--space-4);
-  align-items: center;
-  padding: 0 var(--pad-text);
-}
-.agents-columns {
-  height: var(--ui-control-md);
-  color: var(--color-text-2);
-  font-size: var(--ui-font-sm);
-  box-shadow: inset 0 -1px 0 var(--color-line);
-}
-.agents-cell {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .agents-list {
   display: flex;
   flex-direction: column;
 }
+/* プロジェクトの見出しはカードの外の見出しの行 (左のサイドバーと同じ 2 段の
+   見え方)。面は付けず、大きさ・太さとプロジェクトの間の余白で分ける。 */
 .agents-project-head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   height: var(--ui-row-h);
   padding: 0 var(--pad-face) 0 var(--pad-text);
-  background: var(--color-inset);
 }
 .agents-project + .agents-project {
-  margin-top: 0;
+  margin-top: var(--space-3);
 }
 .agents-project-toggle {
   display: inline-flex;
@@ -19552,6 +19606,8 @@ button.agents-account-name:hover {
 .agents-project-name {
   min-width: 0;
   overflow: hidden;
+  font-size: var(--ui-font-lg);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -19601,15 +19657,22 @@ button.agents-account-name:hover {
 .agents-project-none[hidden] {
   display: none;
 }
+/* 行は左のサイドバーと同じ 2 行組のカード (.agent-card)。地より一段明るい面に
+   置き、行の間を少し空ける。 */
+.agents-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1) 0 var(--space-2);
+}
 .agents-row {
   width: 100%;
-  height: var(--ui-table-row-h);
+  padding: var(--space-2) var(--pad-text);
   border: 0;
   border-radius: var(--radius-md);
-  background: none;
+  background: var(--color-doc);
   color: var(--color-text);
   font: inherit;
-  text-align: left;
   cursor: pointer;
 }
 .agents-row:hover {
@@ -19619,55 +19682,20 @@ button.agents-account-name:hover {
   background: var(--color-select);
   box-shadow: var(--glow-select);
 }
+/* カードの間は狭く、外の輪の下辺が次のカードの面に隠れるので、内側に描く
+   (左のサイドバーのカードと同じ)。選んでいるカードは光も残す。 */
+.nav-agent:focus-visible,
 .agents-row:focus-visible {
   outline: none;
-  box-shadow: var(--focus-ring);
+  box-shadow: var(--focus-ring-inset);
 }
-.agents-state {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.agents-cell-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.agents-task {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--space-2);
-}
-.agents-task-none {
-  color: var(--color-text-3);
-}
-.agents-worktree {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-text-3);
-  font-size: var(--ui-font-sm);
-  text-overflow: ellipsis;
-}
-.agents-place,
-.agents-age {
-  color: var(--color-text-2);
-  font-variant-numeric: tabular-nums;
-}
-.agents-place {
-  font-size: var(--ui-font-sm);
+.nav-agent.active:focus-visible,
+.agents-row.active:focus-visible {
+  box-shadow: var(--focus-ring-inset), var(--glow-select);
 }
 .agents-account-unregistered,
 .agents-account-unknown {
   color: var(--color-text-3);
-}
-.agents-unread {
-  width: var(--dot-size);
-  height: var(--dot-size);
-  border-radius: 50%;
-}
-.agents-row.unread .agents-unread {
-  background: var(--color-done);
 }
 .agents-project-none {
   display: flex;
@@ -20501,10 +20529,6 @@ button.agents-account-name:hover {
 .nav-empty-action:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-}
-/* 表に行が 1 つも無いとき (tmux が無い・エージェントが居ない) は列の名前を出さない。 */
-.agents-board:not(:has(.agents-project)) .agents-columns {
-  display: none;
 }
 
 /* ---- B-1: ソース表示 (Code / Blame / History。views/source-view.ts・blame-view.ts・file-history-shell.ts) ----

@@ -32,6 +32,7 @@ import {
 import { showContextMenu } from "../context-menu";
 import type { ProjectActions } from "../projects/project-actions";
 import { showProjectMenu } from "../projects/project-menu";
+import { agentStateMark, fillAgentCard } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
 import { paneText } from "./pane-text";
@@ -102,28 +103,6 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     return node;
   }
 
-  function stateMark(state: AgentPane["state"]): HTMLElement {
-    const mark = el("i", `terminal-mark terminal-mark-${state}`);
-    mark.setAttribute("aria-hidden", "true");
-    return mark;
-  }
-
-  function ageText(pane: AgentPane): { text: string; title: string } {
-    const current = text();
-    // 変わった瞬間を見たものだけ時間を出す (全体ボードと同じ決まり)。
-    if (pane.updatedAt > 0) {
-      return { text: current.elapsed(Date.now() - pane.updatedAt), title: "" };
-    }
-    const watched = pane.watchedSince > 0 ? Date.now() - pane.watchedSince : 0;
-    return {
-      text: current.elapsedUnknown,
-      title:
-        watched >= 60_000
-          ? current.elapsedAtLeast(current.elapsed(watched))
-          : current.elapsedJustWatched,
-    };
-  }
-
   function createAgentRow(pane: AgentPane, viewing: string | null) {
     const current = text();
     const unread = deps.monitor.snapshot().unread.get(pane.id);
@@ -137,17 +116,11 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     row.classList.toggle("unread", unread !== undefined);
     if (active) row.setAttribute("aria-current", "true");
 
-    // 作業の要約 (無ければ状態の語) は「＋」・パレット・タブと同じ決まり
-    // (pane-text.ts)。tmux の既定の題名 (ホスト名など) は出さない。
+    // 2 行組のカード (全体ボードと同じ部品。agent-card.ts)。作業の要約は
+    // 「＋」・パレット・タブと同じ決まり (pane-text.ts)。tmux の既定の題名
+    // (ホスト名など) は出さない。
     const shown = paneText(pane, current);
-    const kind = el("span", "nav-agent-kind", shown.kind);
-    const task = el("span", "nav-agent-task", shown.summary);
-    const age = ageText(pane);
-    const time = el("span", "nav-agent-age", age.text);
-    if (age.title) time.title = age.title;
-    const dot = el("span", "nav-agent-unread");
-    dot.setAttribute("aria-hidden", "true");
-    row.append(stateMark(pane.state), kind, task, time, dot);
+    const card = fillAgentCard(row, pane, current, unread);
     row.title = [
       shown.title,
       pane.worktree ? current.worktreeTitle(pane.worktree) : "",
@@ -156,7 +129,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
           ? current.unreadWaiting
           : current.unreadFinished
         : "",
-      age.title,
+      card.ageTitle,
       current.openPane,
       current.openPaneOppositeHint,
     ]
@@ -164,7 +137,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       .join("\n");
     row.setAttribute(
       "aria-label",
-      `${current.state[pane.state]} · ${kind.textContent} · ${task.textContent}`,
+      `${current.state[pane.state]} · ${shown.kind} · ${shown.summary}`,
     );
     const openHere = (destination?: "opposite") => {
       deps.monitor.markRead(pane.id);
@@ -281,7 +254,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     if (starting) {
       icon.appendChild(el("i", "terminal-mark nav-mark-starting"));
     } else if (projectState) {
-      icon.appendChild(stateMark(projectState));
+      icon.appendChild(agentStateMark(projectState));
     } else {
       icon.innerHTML = iconSvg(
         "octicon-file-directory",
@@ -305,6 +278,13 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     });
     head.append(twisty, toggle);
 
+    // 件数は右端 (＋と ⋯ の場所)。見出しに載ったとき (hover・フォーカス) は
+    // 操作に場所を譲る。
+    if (hasAgents) {
+      const count = el("span", "nav-project-count", String(group.panes.length));
+      count.setAttribute("aria-hidden", "true");
+      head.appendChild(count);
+    }
     const actions = el("span", "nav-project-actions");
     if (info.error || info.server.status === "unreachable") {
       const problem = el("span", "nav-project-problem", "!");

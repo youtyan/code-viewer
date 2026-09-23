@@ -6,7 +6,8 @@
 // 地がアクセントの塗りのボタンでは、輪と塗りが同じ色で接してボタンが少し大きく
 // 見えるだけだったので、輪と部品の間に地の色の隙間を挟む。
 
-import { describe, expect, test } from "vitest";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
   baseRules,
   cascadedDeclarations,
@@ -81,7 +82,8 @@ const themes = {
     ...block('[data-theme="dark"][data-palette="warm"]'),
   ]),
 };
-// 輪が乗る面: 窓の地・サイドバー・木・本文・コード・hover・選んでいる行・前面のタブ。
+// 輪が乗る面: 窓の地・サイドバー・木・本文・コード・hover・選んでいる行・前面のタブ・
+// 一段沈んだ面 (検索の入口・Diff の上の段と木の切替の地。内側の輪はこの上に乗る)。
 const SURFACES = [
   "--color-ground",
   "--color-nav",
@@ -91,6 +93,7 @@ const SURFACES = [
   "--color-raised",
   "--color-select",
   "--color-tab-active",
+  "--color-inset",
 ];
 
 type Layer = { inset: boolean; spread: number; color: string };
@@ -201,11 +204,7 @@ test("no rule puts inset in front of the two-layer ring", () => {
 // キーで届くのにブラウザの既定の輪 (色も太さもほかと違う) だった部品も、同じ輪を描く。
 describe("controls that had the browser's default ring draw the shared ring", () => {
   test.each([
-    ".main-tabs-action",
-    "#sidebar-toggle",
     ".nav-note-link",
-    ".gdp-file-breadcrumb-part",
-    ".gdp-file-breadcrumb-ellipsis",
     // 差分のカードの見出しのボタン。
     ".gdp-file-header-icon",
     ".gdp-preview-file",
@@ -315,5 +314,217 @@ describe("the diff card header's Viewed and the hidden-line buttons draw the sha
       focused.get("outline"),
       resolveVar(focused.get("box-shadow") ?? "", light),
     ]).toEqual(["none", resolveVar("var(--focus-ring-inset)", light)]);
+  });
+});
+
+// 実際の部品に当たる規則だけでカスケードを解き (当たりは happy-dom が決める)、
+// フォーカスのある部品がどの輪を描くかを見る。一般の規則 (外の輪) と、輪と関係の
+// ない規則 (木の全部開くの box-shadow: none のような) に負けていないことも分かる。
+//
+// - 自前の outline かブラウザの既定の輪だった部品は、共有の外の輪
+// - 外の輪 (4px) が切れる所は内側の輪 (部品の位置は動かさない):
+//   窓の上端に接する (左のサイドバーの頭・タブ列の操作・タブ列の左端の
+//   プロジェクトの切替・右の列の頭)、右端に接する (畳んだ右の列の帯)、下端に接する
+//   (最下段)、画面の絵柄 (右の列の頭
+//   では上端、畳んだ帯では右端)、overflow で切る枠の中 (Diff の上の段と木の切替・
+//   パンくずの段と「…」)、間の狭いカード (エージェントのカード)
+describe("a focused control draws the ring that fits where it sits", () => {
+  const PAGE = `
+    <aside id="app-nav">
+      <div class="nav-head">
+        <button id="search-btn" class="nav-search">search</button>
+        <button id="nav-collapse" class="nav-icon-action">hide</button>
+      </div>
+      <div class="nav-projects">
+        <div class="nav-agents">
+          <button id="nav-card" class="nav-agent agent-card">sample</button>
+          <button id="nav-card-active" class="nav-agent agent-card active">sample</button>
+        </div>
+      </div>
+    </aside>
+    <footer id="statusbar">
+      <button id="agent-status" class="agent-status">waiting 1</button>
+      <button id="usage-item" class="usage-status-item">usage</button>
+      <button id="status-action" class="statusbar-icon-action">stop</button>
+      <div class="global-actions">
+        <button id="auto-update" class="global-icon-action">auto</button>
+      </div>
+    </footer>
+    <div class="agents-rows">
+      <button id="board-card" class="agents-row agent-card">sample</button>
+      <button id="board-card-active" class="agents-row agent-card active">sample</button>
+    </div>
+    <nav id="main-tabs">
+      <div class="main-tabs-pane">
+        <div id="tabs-lead" class="tabs-lead">
+          <div id="view-head" class="view-head">
+            <div class="view-head-row">
+              <button id="lead-switcher" class="brand">sample</button>
+            </div>
+          </div>
+        </div>
+        <div class="main-tabs-strip">
+          <button id="tab-new" class="main-tabs-action">new</button>
+        </div>
+        <div class="main-tabs-actions">
+          <button id="tab-split" class="main-tabs-action">split</button>
+        </div>
+      </div>
+    </nav>
+    <div id="panel-head" class="panel-head">
+      <div class="view-head">
+        <div class="view-head-row">
+          <button id="project-switcher" class="brand">sample</button>
+        </div>
+        <nav class="app-menu view-strip">
+          <a id="head-view" class="app-menu-item view-strip-item" href="#files">files</a>
+        </nav>
+      </div>
+      <div id="panel-rail" class="panel-rail">
+        <button id="sidebar-toggle">show</button>
+        <nav class="app-menu view-strip">
+          <a id="rail-view" class="app-menu-item view-strip-item" href="#diff">diff</a>
+        </nav>
+      </div>
+    </div>
+    <header id="topbar">
+      <div class="ref-pickers">
+        <button id="ref-reset">reset</button>
+        <button id="reload-prom">reload</button>
+      </div>
+      <div class="controls">
+        <div class="seg">
+          <button id="layout-split" class="active" data-layout="side-by-side">split</button>
+          <button id="layout-unified" data-layout="line-by-line">unified</button>
+        </div>
+        <button id="ignore-ws" class="active">ws</button>
+        <button id="hide-tests">no test</button>
+      </div>
+    </header>
+    <aside id="sidebar">
+      <div class="sb-head">
+        <div class="sb-actions" role="group">
+          <button id="sb-expand-all" class="sb-icon-action sb-tree-action">open</button>
+          <button id="sb-collapse-all" class="sb-icon-action sb-tree-action">close</button>
+        </div>
+        <div class="seg sb-view-seg">
+          <button id="view-tree" class="active" data-view="tree">tree</button>
+          <button id="view-flat" data-view="flat">flat</button>
+        </div>
+      </div>
+    </aside>
+    <section class="gdp-repo-shell">
+      <div class="gdp-file-detail-header gdp-repo-toolbar">
+        <div class="gdp-file-detail-path">
+          <nav class="gdp-file-breadcrumb">
+            <button id="crumb-part" class="gdp-file-breadcrumb-part">sample</button>
+            <span id="crumb-more" class="gdp-file-breadcrumb-ellipsis" tabindex="0">…</span>
+            <button id="crumb-current" class="gdp-file-breadcrumb-current">file</button>
+          </nav>
+        </div>
+        <button id="repo-history" class="gdp-btn gdp-btn-sm">History</button>
+      </div>
+    </section>`;
+
+  beforeAll(() => {
+    GlobalRegistrator.register();
+    document.body.innerHTML = PAGE;
+  });
+  afterAll(() => {
+    GlobalRegistrator.unregister();
+  });
+
+  /** その部品に当たる規則だけで解いた、フォーカス中の outline と box-shadow。 */
+  function focusedRing(id: string) {
+    const element = document.getElementById(id);
+    if (!element) throw new Error(`focus ring test: missing #${id}`);
+    element.focus();
+    if (!element.matches(":focus-visible"))
+      throw new Error(`focus ring test: #${id} did not take focus`);
+    const won = cascadedDeclarations(
+      rules,
+      (selector) => !selector.includes("::") && element.matches(selector),
+    );
+    return {
+      outline: won.get("outline"),
+      shadow: resolveVar(won.get("box-shadow") ?? "none", light),
+    };
+  }
+
+  const OUTER = "var(--focus-ring)";
+  const INSET = "var(--focus-ring-inset)";
+  test.each([
+    // 自前の outline だった: プロジェクトの切替 (右の列の頭)・木の全部開く / 畳む
+    ["project-switcher", OUTER],
+    ["sb-expand-all", OUTER],
+    ["sb-collapse-all", OUTER],
+    // ブラウザの既定の輪だった: 本文のボタン・Diff の上の段
+    ["repo-history", OUTER],
+    ["ref-reset", OUTER],
+    ["reload-prom", OUTER],
+    ["ignore-ws", OUTER],
+    ["hide-tests", OUTER],
+    // 窓の上端に接する
+    ["search-btn", INSET],
+    ["nav-collapse", INSET],
+    ["lead-switcher", INSET],
+    // 窓の下端に接する (最下段)
+    ["agent-status", INSET],
+    ["usage-item", INSET],
+    ["status-action", INSET],
+    ["auto-update", INSET],
+    // 窓の右端に接する (畳んだ帯)
+    ["sidebar-toggle", INSET],
+    // 画面の絵柄 (右の列の頭では上端、畳んだ帯では右端)
+    ["head-view", INSET],
+    ["rail-view", INSET],
+    // overflow で切る枠の中
+    ["layout-unified", INSET],
+    ["view-tree", INSET],
+    ["view-flat", INSET],
+    ["crumb-part", INSET],
+    ["crumb-more", INSET],
+    ["crumb-current", INSET],
+    // 選んでいる表示の切替は光を残す
+    ["layout-split", `${INSET}, var(--glow-select)`],
+    // エージェントのカード (間が狭く、外の輪の下辺が次のカードに隠れる)。
+    // 選んでいるカードは光を残す
+    ["nav-card", INSET],
+    ["nav-card-active", `${INSET}, var(--glow-select)`],
+    ["board-card", INSET],
+    ["board-card-active", `${INSET}, var(--glow-select)`],
+  ])("#%s", (id, ring) => {
+    expect(focusedRing(id)).toEqual({
+      outline: "none",
+      shadow: resolveVar(ring, light),
+    });
+  });
+
+  // 右の列を畳むボタンは 1 つで、右の列の頭 (上端) と畳んだ帯 (右端) を移る
+  // (views/sidebar.ts の placeSidebarToggle)。どちらも窓の端なので内側。
+  test("the right column's toggle draws inside in the head row and on the rail", () => {
+    const toggle = document.getElementById("sidebar-toggle");
+    const row = document.querySelector(".view-head-row");
+    const rail = document.getElementById("panel-rail");
+    if (!toggle || !row || !rail)
+      throw new Error("focus ring test: missing the toggle's places");
+    row.append(toggle);
+    const inHeadRow = focusedRing("sidebar-toggle");
+    rail.prepend(toggle);
+    expect({ inHeadRow, onRail: focusedRing("sidebar-toggle") }).toEqual({
+      inHeadRow: { outline: "none", shadow: resolveVar(INSET, light) },
+      onRail: { outline: "none", shadow: resolveVar(INSET, light) },
+    });
+  });
+
+  // タブ列の操作は窓の上端にいる (＋は最後のタブのすぐ右、分割は右端)。
+  test.each([
+    "tab-new",
+    "tab-split",
+  ])("the tab strip's #%s draws inside", (id) => {
+    expect(focusedRing(id)).toEqual({
+      outline: "none",
+      shadow: resolveVar(INSET, light),
+    });
   });
 });

@@ -138,6 +138,36 @@ describe("showPromptDialog", () => {
     );
     expect(await p).toBe("ok");
   });
+
+  // 確定が押せない間 (値が正しくない間) は、Cancel の次の Tab で dialog の外
+  // (body) へ抜けていた。押せない確定を飛ばして入力欄へ戻る。
+  test.each([
+    ["Tab on Cancel", ".gdp-dialog-cancel", false, ".gdp-dialog-input"],
+    ["Shift+Tab on the field", ".gdp-dialog-input", true, ".gdp-dialog-cancel"],
+  ])("with submit disabled, %s stays inside", async (_name, from, shiftKey, to) => {
+    const p = showPromptDialog({
+      title: "Path?",
+      validate: (v) => (v.startsWith("/") ? v : null),
+    });
+    await tick();
+    const start = getOpenDialog().querySelector<HTMLElement>(from);
+    if (!start) throw new Error(`missing ${from}`);
+    expect(actionButtons()[1].disabled).toBe(true);
+    start.focus();
+    const event = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey,
+      bubbles: true,
+      cancelable: true,
+    });
+    start.dispatchEvent(event);
+    expect({
+      trapped: event.defaultPrevented,
+      focused: document.activeElement?.matches(to),
+    }).toEqual({ trapped: true, focused: true });
+    clickDialogCancel();
+    expect(await p).toBeNull();
+  });
 });
 
 describe("showAlertDialog", () => {
