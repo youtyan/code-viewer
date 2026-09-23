@@ -23037,3 +23037,559 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   border-color: var(--color-line-soft);
   background: transparent;
 }
+
+/* ======================================================================
+   Phone (SP) — 電話の幅と指の画面。
+   code-viewer はデスクトップの道具で、電話で使う場面は 3 つに絞る:
+   エージェントの状態を見て入力待ちに返事する・Diff とファイルを読む・
+   プロジェクトを切り替える (Data・作業ツリー・Tools は崩れないだけ)。
+   開け閉めの状態 (body の mobile-nav-open / mobile-sheet-open /
+   mobile-keyboard-open) と足した部品 (#mobile-nav-open・#mobile-bar・
+   #mobile-scrim・#mobile-keys) は views/mobile-shell.ts。
+   条件は 3 つの media query だけで、デスクトップ (幅 > 640 で pointer: fine)
+   にはこの節のどの規則も効かない:
+     1. 電話の段 (core/mobile-layout.ts の PHONE_MEDIA_QUERY と同じ文字列):
+        縦向き 640px 以下、または指の画面で高さ 500px 以下 (横向きの電話)。
+        左のサイドバーは引き出し、右の列は下から出す面、本文は全幅、2 面は無し
+     2. 電話の段か指の画面: 端末の操作札
+     3. 指の画面 (pointer: coarse): 押せるものの高さを 44px 以上
+     (1' は 1 のうち横向きの電話だけの上書き)
+   長さは ui-layout.md の 4 層に従う: T1 を上書きし、T2 は body で定義し直す。
+   ====================================================================== */
+
+/* ---- 2. 電話の段か指の画面: 触れる大きさの名前と端末の操作札 ---- */
+@media (max-width: 640px), (pointer: coarse) {
+  html,
+  body {
+    /* 指で押せる最小の大きさ (T0)。 */
+    --sp-touch: 44px;
+    /* 端末の操作札の帯の高さ (T1)。札 (44) と上下の余白。 */
+    --sp-keys-h: calc(var(--sp-touch) + var(--space-2));
+    /* 操作札の帯が占めている高さ。前面が端末でないときは 0。 */
+    --sp-keys-visible-h: 0px;
+  }
+  body:has(.main-pane-host[data-side="left"][data-kind="terminal"].is-shown) {
+    --sp-keys-visible-h: var(--sp-keys-h);
+  }
+  /* 面の箱 (端末) の下端を操作札の帯の上にする (T2 に 1 項)。 */
+  body {
+    --main-bottom: calc(var(--chrome-bottom) + var(--sp-keys-visible-h));
+  }
+  .mobile-keys:not([hidden]) {
+    position: fixed;
+    left: var(--page-left);
+    right: var(--panelcol-shown);
+    bottom: var(--chrome-bottom);
+    z-index: 56;
+    display: none;
+    align-items: center;
+    gap: var(--space-1);
+    height: var(--sp-keys-h);
+    box-sizing: border-box;
+    padding: 0 var(--pad-face);
+    overflow-x: auto;
+    background: var(--color-ground);
+    border-top: 1px solid var(--color-line-soft);
+    scrollbar-width: none;
+  }
+  body:has(.main-pane-host[data-side="left"][data-kind="terminal"].is-shown) .mobile-keys:not([hidden]) {
+    display: flex;
+  }
+  .mobile-key {
+    flex: 1 0 auto;
+    min-width: var(--sp-touch);
+    min-height: var(--sp-touch);
+    padding: 0 var(--space-2);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    color: var(--color-text);
+    font: inherit;
+    font-family: var(--font-mono);
+    font-size: var(--ui-font-md);
+    touch-action: manipulation;
+    cursor: pointer;
+  }
+  /* キーボードの絵は文字 1 つなので、札の文字より大きくする。 */
+  .mobile-key-keyboard {
+    font-family: var(--font-ui);
+    font-size: var(--ui-font-title);
+  }
+  .mobile-key:active {
+    background: var(--color-select);
+  }
+  .mobile-key:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+}
+
+/* ---- 1. 電話の段: 骨格 ---- */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
+  /* 骨格の長さ (T1 の上書きと T2 の定義し直し)。body に置く理由は html, body
+     ブロックのコメント (T1 の上書きが body に載る)。gdp-sidebar-hidden と
+     main-split は右の列と右の面の幅を足すので、同じ詳細度で並べて上書きする。 */
+  body,
+  body.gdp-sidebar-hidden,
+  body.main-split,
+  body[data-list-column]:not([data-list-column-hidden]) {
+    /* 安全領域 (切り欠き・角・ホームバー)。viewport-fit=cover のときだけ 0 以外。 */
+    --sp-safe-top: env(safe-area-inset-top, 0px);
+    --sp-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --sp-safe-left: env(safe-area-inset-left, 0px);
+    --sp-safe-right: env(safe-area-inset-right, 0px);
+    /* 下端の切替の帯 (T1)。ホームバーの分だけ下に伸ばす。 */
+    --sp-bar-h: calc(var(--sp-touch) + var(--sp-safe-bottom));
+    /* 引き出しの幅 (T3)。右に本文が 1 押しぶん見えるようにする。 */
+    --sp-drawer-w: min(calc(var(--space-unit) * 80), calc(100vw - var(--sp-touch)));
+    /* 上: タブ列に安全領域を足す。 */
+    --global-header-h: calc(var(--main-tabs-h) + var(--sp-safe-top));
+    /* 左右: 左のサイドバー・一覧の列・右の列は場所を取らない (重ねて出す)。 */
+    --chrome-left: var(--sp-safe-left);
+    --listcol-shown: 0px;
+    --panelcol-shown: var(--sp-safe-right);
+    --page-right: var(--panelcol-shown);
+    /* 下: 最下段の下に切替の帯。 */
+    --chrome-bottom: calc(var(--statusbar-h) + var(--sp-bar-h));
+    /* 高さの T2 は、ブラウザの上下の帯が出ている間の見えている高さ (dvh) から
+       引く (電話の 100vh は帯を畳んだときの高さで、下端が帯に隠れる)。 */
+    --content-h: calc(100dvh - var(--chrome-h) - var(--chrome-bottom));
+    --main-pane-h: calc(100dvh - var(--global-header-h) - var(--main-bottom));
+    /* 下から出す面の上端 (T2)。上に本文を少し残し、面であると分かるようにする。 */
+    --sp-sheet-top: calc(var(--global-header-h) + 12vh);
+    --panel-body-top: calc(var(--sp-sheet-top) + var(--main-tabs-h));
+    /* タブ列の左端 (T1): 引き出しを開くボタンと、省略したプロジェクト名だけ。
+       デスクトップの固定の幅 (200) ではタブが 1 枚ぶんしか残らない。 */
+    --tabs-lead-w: calc(var(--sp-touch) + var(--space-unit) * 30);
+  }
+  /* ソフトキーボードが出ている間は、帯と最下段を隠して端末を広く取る。
+     隠れている高さ --sp-keyboard-h (T1) の出所は mobile-shell.ts
+     (visualViewport。html に書く)。 */
+  body.mobile-keyboard-open {
+    --chrome-bottom: var(--sp-keyboard-h, 0px);
+  }
+  body.mobile-keyboard-open #statusbar,
+  body.mobile-keyboard-open .mobile-bar {
+    display: none;
+  }
+  /* 画面ごとのツールバーは 1 段で、入らない分は横に送る (上の 640px の古い節の
+     2 段・112px を上書き。密度の上書きより後ろに置き、密度の比は保つ)。 */
+  body,
+  body[data-sidebar-font-size] {
+    --topbar-h: calc(var(--ui-control-sm) + var(--space-2) * 2);
+  }
+  #topbar {
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-3);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  #topbar > * {
+    flex-shrink: 0;
+  }
+  #content {
+    /* 本文の左右の余白 (T3) を詰める。上の 900px の古い節の padding-top
+       (上に積んだ木の分) を戻す。 */
+    --content-pad-x: var(--space-3);
+    padding-top: var(--content-top-gap);
+  }
+
+  /* タブ列: 安全領域の下から。右の列が無いので右端まで。 */
+  #main-tabs {
+    box-sizing: border-box;
+    height: var(--global-header-h);
+    padding-top: var(--sp-safe-top);
+  }
+  /* 2 面は無し: 右の面・境界・分割のボタン・ドロップ先を出さない (狭い幅では
+     main-tabs-view.ts が右の面を預けている。横向きで幅が足りても出さない)。 */
+  .main-tabs-pane[data-side="right"],
+  .main-tabs-split,
+  .main-pane-host[data-side="right"].is-shown,
+  body .main-split-divider,
+  body.main-split .main-split-divider,
+  .main-split-drop {
+    display: none;
+  }
+  body.main-split .main-tabs-pane[data-side="left"] {
+    flex: 1 1 auto;
+  }
+  body.main-split .main-pane-host[data-side="left"] {
+    right: var(--panelcol-shown);
+    width: auto;
+  }
+  /* タブ列の左: 引き出しを開くボタンだけ。右の列を畳んだときに移ってくる
+     名前とブランチ・サイドバーを開くボタンは出さない (引き出しと面が代わる)。 */
+  #nav-expand {
+    display: none;
+  }
+  .mobile-nav-button:not([hidden]) {
+    display: inline-grid;
+    place-items: center;
+    width: var(--ui-control-sm);
+    height: var(--ui-control-sm);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--color-text-2);
+    cursor: pointer;
+  }
+  .mobile-nav-button[aria-expanded="true"] {
+    color: var(--color-accent-strong);
+  }
+  .mobile-nav-icon {
+    width: var(--icon-md);
+    height: var(--icon-md);
+    fill: currentColor;
+  }
+  .mobile-nav-button:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+  /* History・作業ツリーの変更ファイルの木 (一覧の隣の列) を畳んだときの
+     開くボタン。電話ではその木を出さないので、開くボタンも出さない。 */
+  body[data-list-tree-folded] .list-tree-open {
+    display: none;
+  }
+
+  /* ---- 左のサイドバー = 引き出し ---- */
+  #app-nav,
+  #app-nav[hidden],
+  html[data-nav-collapsed] #app-nav {
+    display: flex;
+    top: 0;
+    bottom: var(--sp-bar-h);
+    width: calc(var(--sp-drawer-w) + var(--sp-safe-left));
+    z-index: 70;
+    box-sizing: border-box;
+    padding: var(--sp-safe-top) 0 0 var(--sp-safe-left);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform var(--motion-fast), visibility var(--motion-fast);
+    box-shadow: var(--shadow-lg, 0 8px 24px rgb(0 0 0 / 0.3));
+  }
+  body.mobile-nav-open #app-nav {
+    transform: none;
+    visibility: visible;
+  }
+  /* 幅を変える・畳むは電話では使わない (畳みはデスクトップの設定に残る)。 */
+  #app-nav-resizer,
+  #nav-collapse {
+    display: none;
+  }
+  .mobile-scrim:not([hidden]) {
+    position: fixed;
+    inset: 0 0 var(--sp-bar-h);
+    z-index: 69;
+    display: none;
+    background: color-mix(in srgb, var(--color-ground) 60%, transparent);
+  }
+  body.mobile-nav-open .mobile-scrim:not([hidden]),
+  body.mobile-sheet-open .mobile-scrim:not([hidden]) {
+    display: block;
+  }
+
+  /* ---- 右の列と一覧の列 = 下から出す面 ----
+     頭 (画面の入口・名前とブランチ) と、その画面の一覧 (Files の木・Diff の
+     変更ファイル・History と作業ツリーの一覧) をまとめて下から出す。閉じている
+     間は画面の外で、visibility で Tab と読み上げからも外す (display は他の規則が
+     !important で決めているので触らない)。一覧の列の置き場所の規則
+     (body[data-list-column] #…) と同じ詳細度で並べて上書きする。 */
+  #panel-head,
+  #sidebar,
+  body[data-list-column] #sidebar,
+  #history-panel,
+  body:not([data-worktree-overview]) #worktree-panel {
+    position: fixed;
+    top: var(--panel-body-top);
+    bottom: var(--chrome-bottom);
+    left: var(--chrome-left);
+    right: var(--panelcol-shown);
+    width: auto;
+    max-height: none;
+    z-index: 70;
+    border: 0;
+    transform: translateY(100vh);
+    visibility: hidden;
+  }
+  body.mobile-sheet-open #panel-head,
+  body.mobile-sheet-open #sidebar,
+  body.mobile-sheet-open #history-panel,
+  body.mobile-sheet-open:not([data-worktree-overview]) #worktree-panel {
+    transform: none;
+    visibility: visible;
+  }
+  #panel-head,
+  body.gdp-sidebar-hidden #panel-head {
+    top: var(--sp-sheet-top);
+    bottom: auto;
+    width: auto;
+    height: var(--main-tabs-h);
+    padding: 0 var(--pad-face);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    box-shadow: 0 -1px 0 var(--color-line-soft);
+  }
+  /* 上の 640px の古い節の .app-menu (flex: 1 1 0) は縦に並べた頭の中で高さを
+     0 に潰すので、絵柄の列の高さを戻す。右の列が帯のとき (一覧の画面・
+     利用者が畳んだ) は帯の中の絵柄を横に並べる。 */
+  #panel-head > #view-head > .view-strip,
+  .panel-rail > .view-strip {
+    flex: none;
+    flex-direction: row;
+    height: var(--main-tabs-h);
+  }
+  body.gdp-sidebar-hidden .panel-rail {
+    flex-direction: row;
+  }
+  /* 帯のとき絵柄は #panel-rail へ移り、#view-head は空。空のまま 1 段を取ると
+     絵柄の列が頭の外 (一覧の下) へ押し出される。 */
+  body.gdp-sidebar-hidden #panel-head > #view-head {
+    display: none;
+  }
+  /* 右の列を畳んだ (デスクトップの設定)・一覧の列を隠した (このセッション) の
+     どちらでも、面には一覧を出す。 */
+  body.mobile-sheet-open.gdp-sidebar-hidden:not([data-list-column]) #sidebar,
+  body.mobile-sheet-open[data-list-column="sidebar"][data-list-column-hidden] #sidebar {
+    display: block !important;
+  }
+  body.mobile-sheet-open[data-list-column-hidden] #history-panel,
+  body.mobile-sheet-open[data-list-column-hidden] #worktree-panel {
+    display: flex !important;
+  }
+  /* 作業ツリーの一覧だけの画面では一覧が本文 (面には出さない)。余白を詰める。 */
+  body[data-worktree-overview] #worktree-panel {
+    padding: 0 var(--space-3) var(--space-3);
+  }
+  /* History・作業ツリーでは面に出すのはコミット / 作業ツリーの一覧。本文の左の
+     2 列目 (変更ファイル) は電話では出さない (差分は本文に全部並ぶ)。 */
+  body[data-list-column="history"] #sidebar,
+  body[data-list-column="worktree"] #sidebar {
+    display: none !important;
+  }
+  body.gdp-history-page main#content,
+  body.gdp-history-page.gdp-sidebar-hidden main#content,
+  body.gdp-worktree-page:not([data-worktree-overview]) main#content,
+  body.gdp-worktree-page.gdp-sidebar-hidden:not([data-worktree-overview]) main#content {
+    margin-left: 0;
+  }
+  /* タブ列の左端の名前と枝: 上の 640px の古い節 (上の行があった頃の詰め方) が
+     .brand を 28px にし、名前と枝を隠すので戻す。枝を CSS だけで隠すと、名前と枝の
+     幅分け (views/brand-fit.ts) が見えない枝の分を空けて名前を削る。 */
+  .tabs-lead {
+    gap: 0;
+    padding-right: var(--space-1);
+  }
+  .tabs-lead .brand {
+    flex: 0 1 auto;
+    max-width: 100%;
+    gap: var(--space-1);
+    padding: 0 var(--space-1);
+  }
+  .tabs-lead .brand .title {
+    display: block;
+  }
+  .tabs-lead #project-branch:not([hidden]) {
+    display: inline-flex;
+  }
+  /* 列を畳む・一覧を隠す・幅を変えるは電話では使わない (面の開け閉めが代わる)。 */
+  #sidebar-toggle,
+  #sidebar-resizer,
+  #history-resizer {
+    display: none !important;
+  }
+
+  /* ---- 本文の画面 (3 場面の外は崩れないことだけ) ---- */
+  /* 全体ボード: 左右の余白を詰め、見出しの行 (題名と操作) を折り返す。 */
+  .agents-board {
+    padding: 0 var(--space-3);
+  }
+  .agents-header {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
+  /* Data: 接続の一覧を上、表を下に積む (横に並べると表が 1/2 幅に潰れる)。 */
+  .db-upper-area {
+    flex-direction: column;
+  }
+  .db-sidebar {
+    width: auto;
+    max-width: none;
+    max-height: 40%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .db-sidebar-resize {
+    display: none;
+  }
+  .db-no-datastores-actions {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  /* 設定とヘルプ: 目次を上、本文を下に積む。 */
+  .gdp-help-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gdp-help-nav {
+    position: static;
+    padding-right: 0;
+    border-right: 0;
+  }
+
+  /* ---- 最下段 = 要点だけ (エージェントの件数・サーバの状態・診断) ---- */
+  #statusbar {
+    bottom: var(--sp-bar-h);
+    padding: 0 calc(var(--pad-face) + var(--sp-safe-right)) 0 calc(var(--pad-face) + var(--sp-safe-left));
+  }
+  #statusbar .usage-status,
+  #statusbar .statusbar-actions,
+  #statusbar .statusbar-sep {
+    display: none;
+  }
+
+  /* ---- 下端の切替の帯 ---- */
+  .mobile-bar:not([hidden]) {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 71;
+    display: flex;
+    height: var(--sp-bar-h);
+    box-sizing: border-box;
+    padding: 0 var(--sp-safe-right) var(--sp-safe-bottom) var(--sp-safe-left);
+    background: var(--color-ground);
+    border-top: 1px solid var(--color-line-soft);
+  }
+  .mobile-bar-item {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    height: var(--sp-touch);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-2);
+    font: inherit;
+    font-size: var(--ui-font-xs);
+    touch-action: manipulation;
+    cursor: pointer;
+  }
+  .mobile-bar-item[aria-expanded="true"] {
+    color: var(--color-accent-strong);
+  }
+  .mobile-bar-icon {
+    width: var(--icon-md);
+    height: var(--icon-md);
+    fill: currentColor;
+  }
+  .mobile-bar-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mobile-bar-item:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+}
+
+/* ---- 1'. 横向きの電話 (core/mobile-layout.ts の PHONE_LANDSCAPE_MEDIA_QUERY):
+   面に残る高さが少ないので、面をタブ列のすぐ下から出す (上に本文をのぞかせない)。 ---- */
+@media (pointer: coarse) and (max-height: 500px) {
+  body,
+  body.gdp-sidebar-hidden,
+  body.main-split,
+  body[data-list-column]:not([data-list-column-hidden]) {
+    --sp-sheet-top: var(--global-header-h);
+  }
+  /* 引き出しの下の 3 項目 (New agent・Settings・Help) を横 1 列の絵だけにし、
+     プロジェクトの一覧に高さを残す (縦に並べると一覧が 2 行ぶんまで潰れた)。
+     名前は読み上げ用に残す (display: none にすると名前が消える)。 */
+  .nav-foot {
+    flex-direction: row;
+  }
+  .nav-foot-item {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+  .nav-foot-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* ---- 3. 指の画面: 押せるものの高さを 44px 以上 ---- */
+@media (pointer: coarse) {
+  html,
+  body {
+    /* タブ列 (T1)。合計の --global-header-h はこれを読む。 */
+    --main-tabs-h: var(--sp-touch);
+  }
+  body,
+  body[data-sidebar-font-size] {
+    --statusbar-h: var(--sp-touch);
+  }
+  .main-tabs-action,
+  .global-icon-action,
+  .agents-icon-action,
+  .mobile-nav-button,
+  .nav-icon-action,
+  .nav-row-action,
+  .view-strip-item,
+  #statusbar .agent-status,
+  #statusbar .statusbar-icon-action {
+    min-width: var(--sp-touch);
+    min-height: var(--sp-touch);
+  }
+  .nav-search,
+  .nav-foot-item,
+  .agents-primary,
+  .agents-secondary,
+  .agents-text-action,
+  .agents-filter button,
+  .nav-empty-action,
+  .nav-note-link,
+  .nav-agent,
+  .nav-project-head,
+  .nav-project-toggle,
+  .history-item,
+  #filelist:not(.tree-virtual) li,
+  #filelist.tree:not(.tree-virtual) .tree-dir,
+  #filelist.tree:not(.tree-virtual) .tree-file {
+    min-height: var(--sp-touch);
+    box-sizing: border-box;
+  }
+  .nav-agent,
+  .nav-project-head {
+    height: auto;
+  }
+  .nav-twisty {
+    height: var(--sp-touch);
+  }
+  /* hover の無い画面では、行の操作を最初から見せる (場所は最初から取っている)。 */
+  .nav-project-actions {
+    opacity: 1;
+    pointer-events: auto;
+    background: transparent;
+  }
+  #topbar .controls > button,
+  #topbar .seg > button {
+    min-height: var(--sp-touch);
+  }
+  body,
+  body[data-sidebar-font-size] {
+    --topbar-h: calc(var(--sp-touch) + var(--space-2) * 2);
+  }
+}

@@ -16,6 +16,10 @@ import {
   responseErrorMessage,
 } from "../../core/error-detail";
 import {
+  softKeySequence,
+  type TerminalSoftKey,
+} from "../../core/mobile-layout";
+import {
   clampShellSize,
   type ShellSession,
   type ShellSessionId,
@@ -140,6 +144,8 @@ export type TerminalScreenHandle = {
   /** ドロワーの幅が変わったとき。 */
   refit(): void;
   focus(): void;
+  /** 端末の操作札 (電話・指の画面) を押した。打鍵と同じ経路で送る。 */
+  sendSoftKey(key: TerminalSoftKey): void;
   setInputEnabled(enabled: boolean): void;
   dispose(): void;
   /** 今映しているシェル。tmux へ「このペインを開いて」と頼む宛先になる。 */
@@ -1090,6 +1096,10 @@ export function createTerminalScreen(
     refit,
     focus() {
       term?.focus();
+    },
+    sendSoftKey(key) {
+      if (!term) return;
+      enqueueInput(softKeySequence(key, term.modes.applicationCursorKeysMode));
     },
     setInputEnabled(enabled: boolean) {
       inputEnabled = enabled;

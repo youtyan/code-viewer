@@ -347,6 +347,20 @@ Requires Node.js 20 or newer. Development uses
 5. When something does not work, `code-viewer doctor` lists what is missing
    (git, tmux, an old code-viewer still running, …) and how to fix it.
 
+### On a phone
+
+In a window 640px wide or less (or a phone turned sideways) the layout is
+reduced to three tasks: checking agents and answering one that needs input,
+reading diffs and files, and switching projects. A bar at the bottom opens
+**Projects** (the left sidebar; it also slides in from the left edge),
+**Files**, **Diff**, **Agents** and **List** (the file tree or the current
+screen's list, as a sheet from the bottom). Split view is off. On a touch
+screen, buttons, tabs and rows are at least 44px tall, and a terminal tab shows
+the keys an on-screen keyboard lacks (Esc, Ctrl+C, ↑, ↓, Enter, and ⌨ to bring
+up the keyboard). Browser notifications need a secure page (https, or localhost
+on the same machine), so they are not available when the page is opened over
+plain http from another device.
+
 ## Usage
 
 From inside a git repository, run it without installing:

@@ -257,6 +257,7 @@ import {
   SPLIT_DIVIDER_WIDTH,
 } from "./views/main-tabs/main-tabs-view";
 import { pageIconPaths } from "./views/main-tabs/tab-icons";
+import { installMobileShell } from "./views/mobile-shell";
 import { createProjectActions } from "./views/projects/project-actions";
 import {
   mountProjectSwitcher,
@@ -7036,6 +7037,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   );
 
   relocalizeTerminal = () => TERMINAL_VIEW.localize();
+
+  // 電話の幅の骨格 (引き出し・下からの面・下端の帯・端末の操作札)。2 面は
+  // 無いので、端末は左の面のものに送る。
+  installMobileShell({
+    getLanguage: () => STATE.language,
+    sendTerminalKey: (key) => TERMINAL_VIEW.sendSoftKey("left", key),
+    focusTerminal: () => TERMINAL_VIEW.focusTab("left"),
+  });
 
   /**
    * URL の ?terminal= (映しているシェル) に合わせる。そのシェルのタブを開いて

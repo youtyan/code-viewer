@@ -102,6 +102,8 @@ export type XtermTerminal = {
   readonly element: HTMLElement | undefined;
   readonly textarea: HTMLTextAreaElement | undefined;
   readonly buffer: { readonly active: XtermBuffer };
+  /** 端末のモード。カーソルキーのモード (DECCKM) で矢印の送り方が変わる。 */
+  readonly modes: { readonly applicationCursorKeysMode: boolean };
   options: XtermOptions;
   open(parent: HTMLElement): void;
   write(data: string | Uint8Array, callback?: () => void): void;

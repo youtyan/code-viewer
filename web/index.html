@@ -2,7 +2,9 @@
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- viewport-fit=cover: 電話の切り欠き・ホームバーの下まで描き、安全領域は
+     style.css の Phone (SP) の節が env(safe-area-inset-*) で空ける。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>code viewer</title>
 <link rel="icon" type="image/png" href="/favicon.png" />
 <!-- インストールした窓 (PWA)。色は骨格の地 (--color-ground)。キーの扱いは web-src/core/pwa.ts。 -->

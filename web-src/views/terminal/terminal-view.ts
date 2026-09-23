@@ -13,6 +13,7 @@ import {
   formatErrorDetail,
   responseErrorMessage,
 } from "../../core/error-detail";
+import type { TerminalSoftKey } from "../../core/mobile-layout";
 import type {
   ShellListResponse,
   ShellSession,
@@ -93,6 +94,8 @@ export type TerminalViewHandle = {
   /** 最後に取ったシェルの一覧 (まだ取っていなければ null)。 */
   knownShells(): ShellListResponse | null;
   focusTab(side: TabSide): void;
+  /** その面の端末へ操作札のキーを送る (映していなければ何もしない)。 */
+  sendSoftKey(side: TabSide, key: TerminalSoftKey): void;
 };
 
 /** メインの面の左右。core/main-tabs.ts の PaneSide と同じ値。 */
@@ -413,6 +416,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     loadShells,
     knownShells: () => shells,
     focusTab: (side) => tabs[side]?.screen.focus(),
+    sendSoftKey: (side, key) => tabs[side]?.screen.sendSoftKey(key),
     refit: () => {
       for (const slot of slots()) slot.screen.refit();
     },
