@@ -19,7 +19,9 @@ import {
   moveProject,
   type ProjectRegistry,
   parseProjectRegistry,
+  placeProject,
   projectDestination,
+  projectDropBefore,
   removeProject,
   renameProject,
 } from "../core/projects";
@@ -196,6 +198,103 @@ describe("changing the registry", () => {
     const start = registry("/work/a", "/work/b");
     const result = moveProject(start, "/work/a", -1);
     expect(result.ok && result.registry).toBe(start);
+  });
+
+  // ドラッグで落とした位置 (隣の鍵の前、null は末尾) へ置く。
+  test.each<[string, string, string | null, string[]]>([
+    [
+      "to the top",
+      "/work/c",
+      "/work/a",
+      ["/work/c", "/work/a", "/work/b", "/work/d"],
+    ],
+    [
+      "into the middle, upwards",
+      "/work/d",
+      "/work/b",
+      ["/work/a", "/work/d", "/work/b", "/work/c"],
+    ],
+    [
+      "into the middle, downwards",
+      "/work/a",
+      "/work/c",
+      ["/work/b", "/work/a", "/work/c", "/work/d"],
+    ],
+    [
+      "to the end",
+      "/work/a",
+      null,
+      ["/work/b", "/work/c", "/work/d", "/work/a"],
+    ],
+    [
+      "the last to the end stays",
+      "/work/d",
+      null,
+      ["/work/a", "/work/b", "/work/c", "/work/d"],
+    ],
+    [
+      "before the next one stays",
+      "/work/b",
+      "/work/c",
+      ["/work/a", "/work/b", "/work/c", "/work/d"],
+    ],
+    [
+      "before itself stays",
+      "/work/b",
+      "/work/b",
+      ["/work/a", "/work/b", "/work/c", "/work/d"],
+    ],
+  ])("placeProject: %s", (_label, root, before, expected) => {
+    const start = registry("/work/a", "/work/b", "/work/c", "/work/d");
+    const result = placeProject(start, root, before);
+    expect(result.ok && roots(result.registry)).toEqual(expected);
+  });
+
+  test.each<[string, string, string | null]>([
+    ["the last to the end", "/work/b", null],
+    ["before the next one", "/work/a", "/work/b"],
+    ["before itself", "/work/a", "/work/a"],
+  ])("placeProject that changes nothing returns the same registry (%s)", (_label, root, before) => {
+    const start = registry("/work/a", "/work/b");
+    const result = placeProject(start, root, before);
+    expect(result.ok && result.registry).toBe(start);
+  });
+
+  test.each<[string, string, string | null, string]>([
+    ["an unknown project", "/work/x", "/work/a", "/work/x"],
+    ["an unknown neighbour", "/work/a", "/work/x", "/work/x"],
+  ])("placeProject with %s is not-found", (_label, root, before, missing) => {
+    expect(placeProject(registry("/work/a", "/work/b"), root, before)).toEqual({
+      ok: false,
+      issue: { code: "not-found", root: missing },
+    });
+  });
+
+  // 並べたことの無いもの (後から登録) は末尾に付き、外したものは順から抜ける。
+  test("a later registration goes to the end and a removed one leaves the order", () => {
+    let current = registry("/work/a", "/work/b", "/work/c");
+    const steps: [
+      string,
+      (value: ProjectRegistry) => ReturnType<typeof placeProject>,
+    ][] = [
+      ["place c first", (value) => placeProject(value, "/work/c", "/work/a")],
+      ["add d", (value) => addProject(value, { root: "/work/d" }, NOW)],
+      ["remove a", (value) => removeProject(value, "/work/a")],
+      ["move d up", (value) => moveProject(value, "/work/d", -1)],
+    ];
+    const seen = steps.map(([label, step]) => {
+      const result = step(current);
+      if (result.ok === false)
+        throw new Error(`${label}: ${JSON.stringify(result.issue)}`);
+      current = result.registry;
+      return [label, roots(current)];
+    });
+    expect(seen).toEqual([
+      ["place c first", ["/work/c", "/work/a", "/work/b"]],
+      ["add d", ["/work/c", "/work/a", "/work/b", "/work/d"]],
+      ["remove a", ["/work/c", "/work/b", "/work/d"]],
+      ["move d up", ["/work/c", "/work/d", "/work/b"]],
+    ]);
   });
 
   test.each([
@@ -413,16 +512,52 @@ describe("groupAgentPanes with registered projects", () => {
     pane("%4", "/work/reg-second", "working"),
   ];
 
-  test("urgent first, then registered in the user's order, then the rest", () => {
+  // 全体ボードもサイドバーと同じ 1 つの順。入力待ちを含むものも前へ出ない。
+  test("registered in the user's order, then the rest by name, whatever the states", () => {
     const order = groupAgentPanes(panes, projects, {
       includeEmptyRegistered: true,
     }).map((group) => [group.info.root, group.panes.length]);
     expect(order).toEqual([
-      ["/work/other-waiting", 1],
-      ["/work/reg-second", 1],
       ["/work/reg-first", 0],
+      ["/work/reg-second", 1],
       ["/work/reg-idle", 1],
       ["/work/other-idle", 1],
+      ["/work/other-waiting", 1],
+    ]);
+  });
+
+  // 並べた順は 1 つ: 全体ボードとサイドバーでプロジェクトの並びが同じ。
+  test.each<[string, AgentState[]]>([
+    ["all idle", ["idle", "idle", "idle", "idle"]],
+    ["waiting in an unregistered one", ["idle", "idle", "waiting", "idle"]],
+    ["working in the last registered", ["idle", "idle", "idle", "working"]],
+    ["mixed", ["done", "waiting", "working", "idle"]],
+  ])("the board and the sidebar list projects in the same order (%s)", (_label, states) => {
+    const mixed = panes.map((item, index) => ({
+      ...item,
+      state: states[index] ?? "idle",
+    }));
+    const board = groupAgentPanes(mixed, projects, {
+      includeEmptyRegistered: true,
+    }).map((group) => group.info.root);
+    const sidebar = groupAgentPanesByPlace(mixed, projects, {
+      includeEmptyRegistered: true,
+    }).map((group) => group.info.root);
+    expect([board, sidebar]).toEqual([
+      [
+        "/work/reg-first",
+        "/work/reg-second",
+        "/work/reg-idle",
+        "/work/other-idle",
+        "/work/other-waiting",
+      ],
+      [
+        "/work/reg-first",
+        "/work/reg-second",
+        "/work/reg-idle",
+        "/work/other-idle",
+        "/work/other-waiting",
+      ],
     ]);
   });
 
@@ -618,5 +753,27 @@ describe("user settings", () => {
       user: { theme: "light", keybindings: null },
       repo: { hideTests: true, range: { from: "a", to: "b" } },
     });
+  });
+});
+
+describe("projectDropBefore (where a dragged heading lands)", () => {
+  const order = ["/work/a", "/work/b", "/work/c"];
+  // 隙間の番号: 0 = a の前, 1 = a と b の間, 2 = b と c の間, 3 = c の後。
+  test.each<[string, string, number, { before: string | null } | null]>([
+    ["a to the gap before c", "/work/a", 2, { before: "/work/c" }],
+    ["a to the end", "/work/a", 3, { before: null }],
+    ["c to the top", "/work/c", 0, { before: "/work/a" }],
+    ["c between a and b", "/work/c", 1, { before: "/work/b" }],
+    ["b to the top", "/work/b", 0, { before: "/work/a" }],
+    ["b to the end", "/work/b", 3, { before: null }],
+    ["b just above itself does nothing", "/work/b", 1, null],
+    ["b just below itself does nothing", "/work/b", 2, null],
+    ["a at the top does nothing", "/work/a", 0, null],
+    ["c at the end does nothing", "/work/c", 3, null],
+    ["a gap past the end does nothing", "/work/a", 4, null],
+    ["a negative gap does nothing", "/work/a", -1, null],
+    ["an unknown heading does nothing", "/work/x", 0, null],
+  ])("%s", (_label, dragged, gap, expected) => {
+    expect(projectDropBefore(order, dragged, gap)).toEqual(expected);
   });
 });

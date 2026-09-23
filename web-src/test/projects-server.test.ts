@@ -21,8 +21,11 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { AppSettingsState } from "../core/types";
 import { checkProjects } from "../server/doctor";
 import { tryAcquireFileLock } from "../server/file-lock";
+import { handleProjectsPost } from "../server/projects/handle";
 import {
   ProjectRegistryError,
+  projectRegistryPath,
+  projectRegistrySnapshot,
   readProjectRegistry,
   updateProjectRegistry,
 } from "../server/projects/registry";
@@ -142,6 +145,58 @@ describe("the project registry on disk", () => {
     ).toEqual([[a, "First"]]);
     // 外しても、リポジトリはそのまま。
     expect(existsSync(join(b, "README.md"))).toBe(true);
+  });
+
+  // 左のサイドバーのドラッグ: POST /_agent/projects の move に before (その前へ、
+  // null は末尾)。書いた順は一覧の取り直し (登録簿の読み出し) にそのまま出る。
+  test("dragging saves the order through the HTTP handler and the list reads it back", async () => {
+    const saved = process.env.CODE_VIEWER_TEST_STATE_DIR;
+    process.env.CODE_VIEWER_TEST_STATE_DIR = join(dir, "state");
+    try {
+      const path = projectRegistryPath();
+      const [a, b, c] = ["repo-a", "repo-b", "repo-c"].map(makeRepo);
+      for (const root of [a, b, c]) {
+        await changeProjects({ action: "add", path: root }, root, 1, path);
+      }
+      const post = async (body: unknown) => {
+        const res = await handleProjectsPost(
+          new Request("http://127.0.0.1/_agent/projects", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+          a,
+        );
+        return [
+          res.status,
+          projectRegistrySnapshot(path).projects.map((p) => p.root),
+        ];
+      };
+      expect([
+        await post({ action: "move", root: c, before: a }),
+        await post({ action: "move", root: c, before: null }),
+        await post({ action: "move", root: a, before: c }),
+        await post({ action: "move", root: b, direction: 1 }),
+        await post({ action: "move", root: a, before: "relative/path" }),
+        await post({
+          action: "move",
+          root: a,
+          before: join(dir, "not-registered"),
+        }),
+        await post({ action: "move", root: a, before: 3 }),
+      ]).toEqual([
+        [200, [c, a, b]],
+        [200, [a, b, c]],
+        [200, [b, a, c]],
+        [200, [a, b, c]],
+        [400, [a, b, c]],
+        [404, [a, b, c]],
+        [400, [a, b, c]],
+      ]);
+    } finally {
+      if (saved === undefined) delete process.env.CODE_VIEWER_TEST_STATE_DIR;
+      else process.env.CODE_VIEWER_TEST_STATE_DIR = saved;
+    }
   });
 
   test.each([

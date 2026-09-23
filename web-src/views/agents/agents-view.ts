@@ -50,6 +50,7 @@ import type { AccountsBand } from "./accounts-band";
 import { fillAgentCard } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
+import { markPreviewRow, PANE_PREVIEW, type PanePreview } from "./pane-preview";
 import { paneText } from "./pane-text";
 
 export type AgentsViewDeps = {
@@ -79,6 +80,8 @@ export type AgentsViewDeps = {
   onVisibilityChange(visible: boolean): void;
   /** プロジェクトの登録・開く・止める (ヘッダの切替と共通)。 */
   projects: ProjectActions;
+  /** 行に載せたときの覗き窓 (既定は左のサイドバーと共有の 1 つ)。 */
+  preview?: PanePreview;
 };
 
 export type AgentsView = PageView;
@@ -250,8 +253,10 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
       accountLabel(pane),
       place,
     ]);
+    const shown = paneText(pane, current);
+    markPreviewRow(row, pane.id, shown.row);
     row.title = [
-      paneText(pane, current).title,
+      shown.title,
       pane.path,
       unread
         ? unread === "waiting"
@@ -814,7 +819,7 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
         navs.find((item) => item.getAttribute(NAV_ATTR) === focusedKey)) ||
       null;
     // 行へ Tab で入れるのは 1 つだけ (矢印で動く)。選んでいる行、無ければ
-    // 一番上の行 (並び順で最も急ぐもの)。Enter 1 回でそこへ行ける。
+    // 一番上の行 (先頭のプロジェクトの最も急ぐもの)。Enter 1 回でそこへ行ける。
     const tabStop =
       restore ??
       navs.find((item) => item.classList.contains("active")) ??
@@ -878,9 +883,15 @@ export function createAgentsView(deps: AgentsViewDeps): AgentsView {
     deps.syncHeaderMenu();
     const offMonitor = deps.monitor.subscribe(() => render());
     const offProjects = deps.projects.subscribe(() => render());
+    // 行は横に長いので、覗き窓は行の下に重ねる。
+    const offPreview = (deps.preview ?? PANE_PREVIEW).watch(list, {
+      placement: "below",
+      getText: () => text().preview,
+    });
     unsubscribe = () => {
       offMonitor();
       offProjects();
+      offPreview();
     };
     deps.onVisibilityChange(true);
   }

@@ -299,33 +299,6 @@ export function countAgentStates(
   return counts;
 }
 
-/**
- * 並びの段。人間の番のもの (入力待ち・完了) と作業中を含むプロジェクトが
- * 先 (0)。それ以外は、登録したプロジェクト (利用者が決めた順, 1) →
- * 登録していないプロジェクト (2)。
- */
-function projectTier(group: AgentProjectGroup): number {
-  const [head] = group.panes;
-  if (head && head.state !== "idle") return 0;
-  return group.info.registered ? 1 : 2;
-}
-
-function compareGroups(a: AgentProjectGroup, b: AgentProjectGroup): number {
-  const tier = projectTier(a) - projectTier(b);
-  if (tier !== 0) return tier;
-  const [headA] = a.panes;
-  const [headB] = b.panes;
-  if (projectTier(a) === 1) {
-    const order =
-      (a.info.registered?.order ?? 0) - (b.info.registered?.order ?? 0);
-    if (order !== 0) return order;
-  } else if (headA && headB) {
-    const byHead = comparePanes(headA, headB);
-    if (byHead !== 0) return byHead;
-  }
-  return a.info.name.localeCompare(b.info.name);
-}
-
 /** ペインをプロジェクトごとに束ねる (並べる前)。 */
 function collectAgentGroups(
   panes: AgentPane[],
@@ -367,11 +340,12 @@ function collectAgentGroups(
 }
 
 /**
- * ペインをプロジェクトごとに束ねて、急ぐ順に並べる (エージェントの全体ボード)。
+ * ペインをプロジェクトごとに束ねる (エージェントの全体ボード)。
  *
- * プロジェクトの並びは compareGroups (入力待ち・完了・作業中を含むものが
- * 中の一番上の行と同じ規則で先、次に登録順、最後に登録していないもの)。
- * 「いま手が要るものを上から片付ける」画面の並び。状態が変わると順が動く。
+ * プロジェクトの並びは左のサイドバーと同じ 1 つの順 (compareGroupsByRegistry:
+ * 利用者が並べた登録順 → 登録していないもの)。中の行は急ぐ順 (comparePanes)。
+ * 「いま手が要るもの」は行の順・絞り込み (入力待ち)・見出しの印で見せ、
+ * プロジェクトの位置は状態で動かさない。
  *
  * ペインが 1 つも残らないプロジェクトは、登録したものだけ includeEmpty の
  * ときに見出しだけで出す (絞り込み中は出さない)。
@@ -386,7 +360,7 @@ export function groupAgentPanes(
     projects,
     options.includeEmptyRegistered === true,
     comparePanes,
-  ).sort(compareGroups);
+  ).sort(compareGroupsByRegistry);
 }
 
 /** tmux の場所 `session:window.pane` を、比べられる形に分ける。 */

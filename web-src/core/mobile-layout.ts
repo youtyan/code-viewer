@@ -30,7 +30,9 @@ export const TOUCH_MEDIA_QUERY = "(pointer: coarse)";
 
 /**
  * 端末の操作札を出す画面: 電話の段か指の画面 (電話の段の横向きの条件は指の
- * 画面に含まれる)。style.css の操作札の節の条件と同じ文字列。
+ * 画面に含まれる)。style.css の操作札の節の条件と同じ文字列。エージェントの
+ * 行の覗き窓 (views/agents/pane-preview.ts) とプロジェクトの見出しのドラッグも、
+ * この画面では出さない・使わない (長押しのメニューに任せる)。
  */
 export const SOFT_KEYS_MEDIA_QUERY = `(max-width: ${PHONE_MAX_WIDTH}px), ${TOUCH_MEDIA_QUERY}`;
 
@@ -238,12 +240,12 @@ export const LONG_PRESS_MS = 500;
 export const LONG_PRESS_MOVE_TOLERANCE = 10;
 
 /**
- * 長押しで右クリックのメニューを出す行 (エージェントの行・タブ・ファイルの行・
- * フォルダ表示の行)。ここに無い所 (本文・端末) の長押しはブラウザに任せる
- * (文字の選択)。
+ * 長押しで右クリックのメニューを出す行 (エージェントの行・プロジェクトの見出し
+ * (上へ・下へを含む)・タブ・ファイルの行・フォルダ表示の行)。ここに無い所
+ * (本文・端末) の長押しはブラウザに任せる (文字の選択)。
  */
 export const LONG_PRESS_TARGETS =
-  ".nav-agent, .main-tab, #filelist li, .gdp-repo-row";
+  ".nav-agent, .nav-project-head, .main-tab, #filelist li, .gdp-repo-row";
 
 /** 指を置いた位置から、長押しを諦めるほど動いたか。 */
 export function longPressMoved(

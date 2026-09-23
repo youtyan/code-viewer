@@ -26,6 +26,7 @@ const API_ENDPOINTS = {
   agentAccounts: { path: "/_agent/accounts", zone: "entry" },
   agentAccountsLogin: { path: "/_agent/accounts/login", zone: "entry" },
   agentAccountsPlan: { path: "/_agent/accounts/plan", zone: "entry" },
+  agentCapture: { path: "/_agent/capture", zone: "entry" },
   agentHooks: { path: "/_agent/hooks", zone: "entry" },
   agentHooksApply: { path: "/_agent/hooks/apply", zone: "entry" },
   agentHooksFailures: { path: "/_agent/hooks/failures", zone: "entry" },

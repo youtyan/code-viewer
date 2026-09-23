@@ -2,6 +2,7 @@
 // の /_agent/ の表に載せる (並行するルータは作らない)。
 //
 // - POST /_agent/projects       足す (パス・このサーバのリポジトリ)・外す・名前・並べ替え
+//                               (並べ替えは 1 つ上下か、別のプロジェクトの前へ)
 // - POST /_agent/projects/open  登録したプロジェクトのサーバを (無ければ起こして) 返す
 // - POST /_agent/projects/stop  code-viewer が起こしたサーバを止める
 //
@@ -108,6 +109,14 @@ function parseChange(
     return { action, root, name };
   }
   if (action === "move") {
+    // before: その前へ置く (null は末尾。ドラッグで落とした位置)。
+    // direction: 1 つ上 (-1) か下 (+1) (メニュー・Alt+↑↓)。
+    if (body.before !== undefined) {
+      if (body.before === null) return { action, root, before: null };
+      const before = pathField(body.before);
+      if (!before) return "before must be an absolute path or null";
+      return { action, root, before };
+    }
     if (body.direction !== -1 && body.direction !== 1) {
       return "direction must be -1 or 1";
     }

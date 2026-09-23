@@ -257,79 +257,37 @@ describe("groupAgentPanes", () => {
     project("/work/delta", "delta"),
   ];
 
-  test("入力待ちを含む → 作業中を含む → それ以外の順にプロジェクトを並べる", () => {
-    const groups = groupAgentPanes(
+  // プロジェクトの並びは左のサイドバーと同じ 1 つの順 (登録順 → 登録していない
+  // ものは名前の順)。状態が変わってもプロジェクトは動かない。
+  test.each<[string, [string, string, AgentState, number][], string[]]>([
+    [
+      "入力待ち・作業中を含むものがあっても",
       [
-        pane({
-          id: "%1",
-          project: "/work/alpha",
-          state: "idle",
-          updatedAt: 900,
-        }),
-        pane({
-          id: "%2",
-          project: "/work/beta",
-          state: "working",
-          updatedAt: 100,
-        }),
-        pane({
-          id: "%3",
-          project: "/work/gamma",
-          state: "waiting",
-          updatedAt: 50,
-        }),
-        pane({
-          id: "%4",
-          project: "/work/beta",
-          state: "idle",
-          updatedAt: 800,
-        }),
+        ["%1", "/work/alpha", "idle", 900],
+        ["%2", "/work/beta", "working", 100],
+        ["%3", "/work/gamma", "waiting", 50],
+        ["%4", "/work/beta", "idle", 800],
       ],
+      ["alpha", "beta", "gamma"],
+    ],
+    [
+      "状態が変わった時刻が違っても",
+      [
+        ["%1", "/work/alpha", "working", 100],
+        ["%2", "/work/beta", "working", 300],
+        ["%3", "/work/delta", "working", 200],
+        ["%4", "/work/gamma", "working", 200],
+      ],
+      ["alpha", "beta", "delta", "gamma"],
+    ],
+  ])("プロジェクトは名前の順 (%s)", (_label, rows, expected) => {
+    const groups = groupAgentPanes(
+      rows.map(([id, root, state, updatedAt]) =>
+        pane({ id, project: root, state, updatedAt }),
+      ),
       projects,
     );
-    expect(groups.map((group) => group.info.name)).toEqual([
-      "gamma",
-      "beta",
-      "alpha",
-    ]);
-  });
-
-  test("同じ段のプロジェクトは状態が変わったのが新しい順、同時刻なら名前順", () => {
-    const groups = groupAgentPanes(
-      [
-        pane({
-          id: "%1",
-          project: "/work/alpha",
-          state: "working",
-          updatedAt: 100,
-        }),
-        pane({
-          id: "%2",
-          project: "/work/beta",
-          state: "working",
-          updatedAt: 300,
-        }),
-        pane({
-          id: "%3",
-          project: "/work/delta",
-          state: "working",
-          updatedAt: 200,
-        }),
-        pane({
-          id: "%4",
-          project: "/work/gamma",
-          state: "working",
-          updatedAt: 200,
-        }),
-      ],
-      projects,
-    );
-    expect(groups.map((group) => group.info.name)).toEqual([
-      "beta",
-      "delta",
-      "gamma",
-      "alpha",
-    ]);
+    expect(groups.map((group) => group.info.name)).toEqual(expected);
   });
 
   test("プロジェクトの中は 入力待ち → 完了 (未読) → 作業中 → 待機、同じ状態は新しい順、時刻不明は最後", () => {

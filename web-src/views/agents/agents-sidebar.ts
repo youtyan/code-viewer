@@ -19,6 +19,7 @@ import { formatErrorDetail } from "../../core/error-detail";
 import {
   type AgentPane,
   type AgentProjectGroup,
+  type AgentProjectInfo,
   groupAgentPanesByPlace,
   notifyPermissionView,
 } from "../../core/agent-overview";
@@ -29,12 +30,15 @@ import {
   KEBAB_16_PATH,
   PLUS_16_PATH,
 } from "../../core/icons";
+import { SOFT_KEYS_MEDIA_QUERY } from "../../core/mobile-layout";
+import { projectDropBefore } from "../../core/projects";
 import { showContextMenu } from "../context-menu";
 import type { ProjectActions } from "../projects/project-actions";
 import { showProjectMenu } from "../projects/project-menu";
 import { agentStateMark, fillAgentCard } from "./agent-card";
 import type { AgentMonitor } from "./agent-monitor";
 import type { AgentsText } from "./i18n";
+import { markPreviewRow, PANE_PREVIEW, type PanePreview } from "./pane-preview";
 import { paneText } from "./pane-text";
 
 export type AgentsSidebarDeps = {
@@ -61,6 +65,8 @@ export type AgentsSidebarDeps = {
   /** 最初の入力待ちの「通知を許可すると…」を閉じたか・閉じる。 */
   notifyHintDismissed(): boolean;
   dismissNotifyHint(): void;
+  /** 行に載せたときの覗き窓 (既定は全体ボードと共有の 1 つ)。 */
+  preview?: PanePreview;
 };
 
 export type AgentsSidebar = {
@@ -79,6 +85,10 @@ const NAV_ATTR = "data-nav-item";
  * 同じボタンにもう一度止まる。
  */
 const FOCUS_ATTR = "data-nav-focus";
+/** 見出しのドラッグの dataTransfer の型 (文字の欄へ落としても名前を入れない)。 */
+const PROJECT_DRAG_TYPE = "application/x-code-viewer-project";
+/** 上の区画 (登録したもの) のプロジェクトの箱の印。値は root。並べ替えの対象。 */
+const ORDER_ATTR = "data-nav-order";
 
 export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
   const { root } = deps;
@@ -87,6 +97,16 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
   /** 畳んだプロジェクト (root)。 */
   const collapsed = new Set<string>(deps.getCollapsed());
   let lastSignature = "";
+  const preview = deps.preview ?? PANE_PREVIEW;
+  preview.watch(root, { placement: "right", getText: () => text().preview });
+  /** 登録したプロジェクト (上の区画) の root → 情報。並べ替えのキーとドロップに使う。 */
+  let registeredInfos = new Map<string, AgentProjectInfo>();
+  /**
+   * 掴んでいる見出しの root。掴んでいる間は描き直さない (落とす先の線のほかは
+   * 何も動かさない。掴んだ要素を差し替えると dragend が届かないこともある)。
+   */
+  let dragRoot: string | null = null;
+  let renderDeferred = false;
 
   function text(): AgentsText {
     return deps.getText();
@@ -120,6 +140,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     // 「＋」・パレット・タブと同じ決まり (pane-text.ts)。tmux の既定の題名
     // (ホスト名など) は出さない。
     const shown = paneText(pane, current);
+    markPreviewRow(row, pane.id, shown.row);
     const card = fillAgentCard(row, pane, current, unread);
     row.title = [
       shown.title,
@@ -238,7 +259,10 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
             : info.registered
               ? current.projects.openStoppedTitle(info.name)
               : current.projects.openUnregisteredTitle(info.name),
-    ].join("\n");
+      info.registered ? current.sidebar.reorderHint : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
     // 見出しの絵: 起こしている最中は回る点線、人の番のもの (入力待ち・完了)
     // があればその印 (畳んでいても中に何があるか分かる)、無ければフォルダ。
     const projectState =
@@ -277,6 +301,20 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
       void deps.projects.open(info, currentPath(), { confirmRegister: false });
     });
     head.append(twisty, toggle);
+    const openMenu = (anchor: HTMLElement, at?: { x: number; y: number }) =>
+      showProjectMenu(anchor, info, {
+        actions: deps.projects,
+        text: current.projects,
+        registeredCount:
+          deps.monitor.snapshot().overview?.registry.projects.length ?? 0,
+        at,
+      });
+    // 右クリック (電話では長押し) で ⋯ と同じメニュー (上へ・下へを含む)。
+    head.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openMenu(head, { x: event.clientX, y: event.clientY });
+    });
+    if (info.registered) wireProjectDrag(section, head, info.root);
 
     // 件数は右端 (＋と ⋯ の場所)。見出しに載ったとき (hover・フォーカス) は
     // 操作に場所を譲る。
@@ -313,13 +351,7 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
         `menu:${info.root}`,
         iconSvg("octicon-kebab-horizontal", KEBAB_16_PATH),
         current.projects.menuTitle(info.name),
-        (_event, button) =>
-          showProjectMenu(button, info, {
-            actions: deps.projects,
-            text: current.projects,
-            registeredCount:
-              deps.monitor.snapshot().overview?.registry.projects.length ?? 0,
-          }),
+        (_event, button) => openMenu(button),
       ),
     );
     head.appendChild(actions);
@@ -356,6 +388,115 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     }
     return section;
   }
+
+  /**
+   * 上の区画の見出しを掴んで並べ替える。落とす先は隙間の線だけで示し、
+   * 落とすまで何も動かさない。指の画面では掴まない (長押しはメニュー)。
+   */
+  function wireProjectDrag(
+    section: HTMLElement,
+    head: HTMLElement,
+    rootKey: string,
+  ): void {
+    section.setAttribute(ORDER_ATTR, rootKey);
+    if (window.matchMedia?.(SOFT_KEYS_MEDIA_QUERY).matches) return;
+    head.draggable = true;
+    head.addEventListener("dragstart", (event) => {
+      dragRoot = rootKey;
+      preview.setPaused(true);
+      section.classList.add("nav-project-dragging");
+      const transfer = event.dataTransfer;
+      if (!transfer) return;
+      transfer.setData(PROJECT_DRAG_TYPE, rootKey);
+      transfer.effectAllowed = "move";
+      // 下のエージェントも一緒に動くことを、掴んだ絵 (箱ごと) で見せる。
+      const rect = section.getBoundingClientRect();
+      transfer.setDragImage(
+        section,
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+      );
+    });
+    head.addEventListener("dragend", endDrag);
+  }
+
+  function orderedSections(): HTMLElement[] {
+    return [...root.querySelectorAll<HTMLElement>(`:scope > [${ORDER_ATTR}]`)];
+  }
+
+  /**
+   * ポインタの高さから落とす隙間 (0 = 先頭の前) と、送る before。見出しの
+   * 真ん中より下なら、その箱 (下のエージェントを含む) の後ろ。
+   */
+  function dropTarget(
+    clientY: number,
+  ): { gap: number; before: string | null } | null {
+    if (dragRoot === null) return null;
+    const sections = orderedSections();
+    const gap = sections.filter((section) => {
+      const head = section.querySelector(".nav-project-head") ?? section;
+      const rect = head.getBoundingClientRect();
+      return rect.top + rect.height / 2 < clientY;
+    }).length;
+    const order = sections.map((item) => item.getAttribute(ORDER_ATTR) ?? "");
+    const drop = projectDropBefore(order, dragRoot, gap);
+    return drop && { gap, before: drop.before };
+  }
+
+  function clearDropMarks(): void {
+    for (const section of root.querySelectorAll(
+      ".nav-project-drop-before, .nav-project-drop-after",
+    )) {
+      section.classList.remove("nav-project-drop-before");
+      section.classList.remove("nav-project-drop-after");
+    }
+  }
+
+  function endDrag(): void {
+    if (dragRoot === null) return;
+    dragRoot = null;
+    clearDropMarks();
+    for (const section of root.querySelectorAll(".nav-project-dragging")) {
+      section.classList.remove("nav-project-dragging");
+    }
+    preview.setPaused(false);
+    if (renderDeferred) {
+      renderDeferred = false;
+      render(true);
+    }
+  }
+
+  root.addEventListener("dragover", (event) => {
+    clearDropMarks();
+    const target = dropTarget(event.clientY);
+    if (!target) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const sections = orderedSections();
+    const at = sections[target.gap];
+    if (at) at.classList.add("nav-project-drop-before");
+    else sections[sections.length - 1]?.classList.add("nav-project-drop-after");
+  });
+  root.addEventListener("dragleave", (event) => {
+    if (!root.contains(event.relatedTarget as Node | null)) clearDropMarks();
+  });
+  root.addEventListener("drop", (event) => {
+    const target = dropTarget(event.clientY);
+    const info = dragRoot === null ? undefined : registeredInfos.get(dragRoot);
+    endDrag();
+    if (!target || !info) return;
+    event.preventDefault();
+    void deps.projects.place(info, target.before);
+  });
+  // 描き直しなどで dragend が届かなかったとき (タブの列と同じ)。ドラッグの間は
+  // ポインタの移動が届かないので、ボタンを離した移動が来たら終わっている。
+  document.addEventListener(
+    "pointermove",
+    (event) => {
+      if (dragRoot !== null && event.buttons === 0) endDrag();
+    },
+    { passive: true },
+  );
 
   function toggleCollapsed(root: string): void {
     if (collapsed.has(root)) collapsed.delete(root);
@@ -462,6 +603,10 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
   }
 
   function render(force = false): void {
+    if (dragRoot !== null) {
+      renderDeferred = true;
+      return;
+    }
     const next = signature();
     if (!force && next === lastSignature) return;
     lastSignature = next;
@@ -496,6 +641,9 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
     });
     const registered = groups.filter((group) => group.info.registered);
     const detected = groups.filter((group) => !group.info.registered);
+    registeredInfos = new Map(
+      registered.map((group) => [group.info.root, group.info]),
+    );
     for (const group of registered) {
       root.appendChild(createProject(group, viewing));
     }
@@ -646,11 +794,29 @@ export function mountAgentsSidebar(deps: AgentsSidebarDeps): AgentsSidebar {
   }
 
   function onKeydown(event: KeyboardEvent): void {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const target = event.target;
     if (!(target instanceof HTMLElement) || !target.hasAttribute(NAV_ATTR)) {
       return;
     }
+    if (
+      event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      (event.key === "ArrowUp" || event.key === "ArrowDown")
+    ) {
+      // 見出しで Alt+↑↓ は並べ替え (メニューの「上へ」「下へ」と同じ)。
+      // フォーカスは描き直しが同じ見出しへ戻す。
+      const key = target.getAttribute(NAV_ATTR) ?? "";
+      const info = key.startsWith("project:")
+        ? registeredInfos.get(key.slice("project:".length))
+        : undefined;
+      if (!info) return;
+      event.preventDefault();
+      void deps.projects.move(info, event.key === "ArrowUp" ? -1 : 1);
+      return;
+    }
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     if (event.key === "Enter") {
       // ボタンの既定の動作に任せると届き方で click にならないことがある
       // (全体ボードと同じ)。1 回だけ押す。

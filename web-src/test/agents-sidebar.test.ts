@@ -24,6 +24,8 @@ import type {
   AgentProjectInfo,
 } from "../core/agent-overview";
 import type { AgentState } from "../core/agent-state";
+import { BACKGROUND_REQUEST_HEADER } from "../core/network-activity";
+import { PANE_PREVIEW_DELAY_MS } from "../core/pane-preview";
 import type {
   AgentMonitor,
   AgentMonitorSnapshot,
@@ -33,6 +35,7 @@ import {
   mountAgentsSidebar,
 } from "../views/agents/agents-sidebar";
 import { agentsText } from "../views/agents/i18n";
+import { PANE_PREVIEW } from "../views/agents/pane-preview";
 import { closeContextMenu } from "../views/context-menu";
 import {
   createProjectActions,
@@ -162,11 +165,21 @@ function fakeMonitor(
 
 function fakeActions(): ProjectActions & {
   opened: { root: string; path: string; confirmRegister?: boolean }[];
+  /** 並べ替えの呼び出し (move は ±1、place は before)。 */
+  reordered: (
+    | { root: string; direction: -1 | 1 }
+    | { root: string; before: string | null }
+  )[];
 } {
   const opened: { root: string; path: string; confirmRegister?: boolean }[] =
     [];
+  const reordered: (
+    | { root: string; direction: -1 | 1 }
+    | { root: string; before: string | null }
+  )[] = [];
   return {
     opened,
+    reordered,
     activity: () => null,
     signature: () => "",
     dismiss: () => undefined,
@@ -183,7 +196,12 @@ function fakeActions(): ProjectActions & {
     registerByPath: async () => undefined,
     unregister: async () => undefined,
     rename: async () => undefined,
-    move: async () => undefined,
+    move: async (item, direction) => {
+      reordered.push({ root: item.root, direction });
+    },
+    place: async (item, before) => {
+      reordered.push({ root: item.root, before });
+    },
     stop: async () => undefined,
   };
 }
@@ -796,5 +814,304 @@ describe("project actions open", () => {
       { url: "/_agent/projects/open", body: { root: "/work/sample-tools" } },
     ]);
     expect(navigated).toEqual(["http://127.0.0.1:65001/history"]);
+  });
+});
+
+describe("agents sidebar reordering projects", () => {
+  const data = overview(
+    [
+      pane("%1", "work:0.0", "/work/sample-app", "idle"),
+      pane("%2", "work:1.0", "/work/sample-lib", "working"),
+      pane("%3", "work:2.0", "/work/sample-tools", "idle"),
+    ],
+    [...REGISTERED, info("/work/sample-tools", null)],
+  );
+
+  function toggle(root: HTMLElement, project: string): HTMLElement {
+    const found = root.querySelector<HTMLElement>(
+      `[data-nav-item="project:${project}"]`,
+    );
+    if (!found) throw new Error(`missing project ${project}`);
+    return found;
+  }
+
+  function sections(root: HTMLElement): HTMLElement[] {
+    return [...root.querySelectorAll<HTMLElement>(":scope > .nav-project")];
+  }
+
+  /** 見出しを上から 40px おき (高さ 30px) に置いたことにする。 */
+  function stackHeads(root: HTMLElement): void {
+    sections(root).forEach((section, index) => {
+      const head = section.querySelector<HTMLElement>(".nav-project-head");
+      if (!head) throw new Error("missing head");
+      head.getBoundingClientRect = () =>
+        ({ top: index * 40, height: 30, bottom: index * 40 + 30 }) as DOMRect;
+    });
+  }
+
+  function drag(target: Element, type: string, clientY = 0): Event {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clientY", { value: clientY });
+    target.dispatchEvent(event);
+    return event;
+  }
+
+  test.each<{
+    key: string;
+    project: string;
+    expected: { root: string; direction: -1 | 1 }[];
+  }>([
+    {
+      key: "ArrowUp",
+      project: "/work/sample-lib",
+      expected: [{ root: "/work/sample-lib", direction: -1 }],
+    },
+    {
+      key: "ArrowDown",
+      project: "/work/sample-lib",
+      expected: [{ root: "/work/sample-lib", direction: 1 }],
+    },
+    {
+      key: "ArrowUp",
+      project: "/work/sample-app",
+      expected: [{ root: "/work/sample-app", direction: -1 }],
+    },
+    // 登録していない (下の区画の) ものは並べ替えの対象でない。
+    { key: "ArrowUp", project: "/work/sample-tools", expected: [] },
+  ])("Alt+$key on $project", ({ key, project, expected }) => {
+    const { root, actions } = mount(data);
+    const target = toggle(root, project);
+    const event = new KeyboardEvent("keydown", {
+      key,
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    target.dispatchEvent(event);
+    expect([actions.reordered, event.defaultPrevented]).toEqual([
+      expected,
+      expected.length > 0,
+    ]);
+  });
+
+  test("a plain arrow still moves the focus, not the project", () => {
+    const { root, actions } = mount(data);
+    const first = toggle(root, "/work/sample-app");
+    first.focus();
+    first.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+    );
+    expect([actions.reordered, document.activeElement === first]).toEqual([
+      [],
+      false,
+    ]);
+  });
+
+  test.each([
+    [
+      "Move up",
+      "/work/sample-lib",
+      { root: "/work/sample-lib", direction: -1 },
+    ],
+    [
+      "Move down",
+      "/work/sample-lib",
+      { root: "/work/sample-lib", direction: 1 },
+    ],
+  ])("right-click on a heading → %s", (label, project, expected) => {
+    const { root, actions } = mount(data);
+    const head = toggle(root, project).closest(".nav-project-head");
+    if (!head) throw new Error("missing head");
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 20,
+      clientY: 30,
+    });
+    head.dispatchEvent(event);
+    const item = [
+      ...document.querySelectorAll<HTMLElement>(".gdp-context-menu button"),
+    ].find((button) => button.textContent === label);
+    item?.click();
+    expect([event.defaultPrevented, actions.reordered]).toEqual([
+      true,
+      [expected],
+    ]);
+  });
+
+  test("only registered headings can be dragged", () => {
+    const { root } = mount(data);
+    const draggable = [
+      ...root.querySelectorAll<HTMLElement>(".nav-project-head"),
+    ].map((head) => [
+      head.querySelector(".nav-project-name")?.textContent,
+      head.draggable === true,
+    ]);
+    expect(draggable).toEqual([
+      ["sample-app", true],
+      ["sample-lib", true],
+      ["sample-docs", true],
+      ["sample-tools", false],
+    ]);
+  });
+
+  // 見出しは上から 0・40・80px (真ん中は 15・55・95)。
+  test.each<{
+    project: string;
+    y: number;
+    mark: [string, string] | null;
+    before: string | null | undefined;
+  }>([
+    {
+      project: "/work/sample-docs",
+      y: 5,
+      mark: ["sample-app", "before"],
+      before: "/work/sample-app",
+    },
+    {
+      project: "/work/sample-app",
+      y: 60,
+      mark: ["sample-docs", "before"],
+      before: "/work/sample-docs",
+    },
+    {
+      project: "/work/sample-app",
+      y: 120,
+      mark: ["sample-docs", "after"],
+      before: null,
+    },
+    // 自分の前後の隙間は並びが変わらないので、線も出さず落とせない。
+    { project: "/work/sample-lib", y: 30, mark: null, before: undefined },
+    { project: "/work/sample-lib", y: 70, mark: null, before: undefined },
+  ])("dragging $project to y=$y", ({ project, y, mark, before }) => {
+    const { root, actions } = mount(data);
+    stackHeads(root);
+    const head = toggle(root, project).closest(".nav-project-head");
+    if (!head) throw new Error("missing head");
+    drag(head, "dragstart");
+    const over = drag(root, "dragover", y);
+    const marks = sections(root).flatMap((section) => {
+      const name =
+        section.querySelector(".nav-project-name")?.textContent ?? "";
+      if (section.classList.contains("nav-project-drop-before"))
+        return [[name, "before"]];
+      if (section.classList.contains("nav-project-drop-after"))
+        return [[name, "after"]];
+      return [];
+    });
+    expect([over.defaultPrevented, marks]).toEqual([
+      mark !== null,
+      mark ? [mark] : [],
+    ]);
+    // 落とすまで、箱の中身 (並び) は変わらない。
+    expect(
+      sections(root).map(
+        (section) => section.querySelector(".nav-project-name")?.textContent,
+      ),
+    ).toEqual(["sample-app", "sample-lib", "sample-docs"]);
+    drag(root, "drop", y);
+    expect(actions.reordered).toEqual(
+      before === undefined ? [] : [{ root: project, before }],
+    );
+    expect(
+      root.querySelector(
+        ".nav-project-drop-before, .nav-project-drop-after, .nav-project-dragging",
+      ),
+    ).toBeNull();
+  });
+
+  // 掴んでいる間は取り直しが来ても描き直さない (落とす先の線のほかは動かさない)。
+  // 終わったら溜めた分を描く。
+  test("the sidebar is not redrawn while a heading is held", () => {
+    const { root, publish } = mount(data);
+    const head = toggle(root, "/work/sample-app").closest(".nav-project-head");
+    if (!head) throw new Error("missing head");
+    drag(head, "dragstart");
+    expect(
+      head.closest(".nav-project")?.classList.contains("nav-project-dragging"),
+    ).toBe(true);
+    const reordered = overview(data.panes, [
+      info("/work/sample-lib", 0),
+      info("/work/sample-app", 1, { status: "current" }),
+      info("/work/sample-docs", 2),
+      info("/work/sample-tools", null),
+    ]);
+    publish(reordered);
+    expect([head.isConnected, layout(root).registered]).toEqual([
+      true,
+      ["sample-app", "sample-lib", "sample-docs"],
+    ]);
+    drag(head, "dragend");
+    expect([head.isConnected, layout(root).registered]).toEqual([
+      false,
+      ["sample-lib", "sample-app", "sample-docs"],
+    ]);
+  });
+});
+
+describe("agents sidebar screen preview", () => {
+  afterEach(() => {
+    PANE_PREVIEW.hide();
+    vi.useRealTimers();
+  });
+
+  // 行は共有の覗き窓に載り、既存の GET /_agent/capture (今の画面だけ) を
+  // 裏の取り直しとして読む。押せば今までどおりそのペインを開き、窓は消える。
+  test("resting on an agent asks /_agent/capture, and a click still opens the pane", async () => {
+    vi.useFakeTimers();
+    const requests: [string, string | null][] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      requests.push([
+        url,
+        new Headers(init?.headers).get(BACKGROUND_REQUEST_HEADER),
+      ]);
+      return new Response(
+        JSON.stringify({
+          target: "%1",
+          kind: "tmux",
+          content: "$ sample\nready\n\n",
+          cursor: "",
+          reset: false,
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    });
+    const opened: string[] = [];
+    const { root } = mount(
+      overview(
+        [pane("%1", "work:0.0", "/work/sample-app", "idle", "Review plan")],
+        REGISTERED,
+      ),
+      fakeActions(),
+      (id) => opened.push(id),
+    );
+    const row = root.querySelector<HTMLElement>(".nav-agent");
+    if (!row) throw new Error("missing agent row");
+    row.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        pointerType: "mouse",
+        clientX: 20,
+        clientY: 30,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(PANE_PREVIEW_DELAY_MS);
+    const box = document.querySelector<HTMLElement>(".pane-preview");
+    expect([
+      requests,
+      box?.hidden,
+      box?.querySelector("pre")?.textContent,
+      box?.querySelector(".pane-preview-head")?.textContent,
+    ]).toEqual([
+      [["/_agent/capture?target=%251&history=0", "1"]],
+      false,
+      "$ sample\nready",
+      "claude · Review plan · work:0.0",
+    ]);
+    row.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }),
+    );
+    row.click();
+    expect([opened, box?.hidden]).toEqual([["%1"], true]);
   });
 });

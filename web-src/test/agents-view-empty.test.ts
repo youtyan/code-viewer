@@ -9,6 +9,7 @@ import type { AgentOverviewResponse, AgentPane } from "../core/agent-overview";
 import type { AgentMonitor } from "../views/agents/agent-monitor";
 import { createAgentsView } from "../views/agents/agents-view";
 import { agentsText } from "../views/agents/i18n";
+import type { PanePreview } from "../views/agents/pane-preview";
 import type { ProjectActions } from "../views/projects/project-actions";
 import { agentPane } from "./_test-helpers";
 
@@ -32,7 +33,11 @@ function overview(panes: AgentPane[]): AgentOverviewResponse {
   };
 }
 
-async function board(panes: AgentPane[], lang: "en" | "ja" = "en") {
+async function mountBoard(
+  panes: AgentPane[],
+  lang: "en" | "ja" = "en",
+  preview?: PanePreview,
+) {
   document.body.innerHTML = '<main id="content"></main>';
   const calls: string[] = [];
   const snapshot = {
@@ -66,6 +71,7 @@ async function board(panes: AgentPane[], lang: "en" | "ja" = "en") {
     unregister: async () => undefined,
     rename: async () => undefined,
     move: async () => undefined,
+    place: async () => undefined,
     stop: async () => undefined,
   };
   const view = createAgentsView({
@@ -91,8 +97,14 @@ async function board(panes: AgentPane[], lang: "en" | "ja" = "en") {
     },
     onVisibilityChange: () => undefined,
     projects,
+    preview,
   });
   await view.enter();
+  return { view, calls };
+}
+
+async function board(panes: AgentPane[], lang: "en" | "ja" = "en") {
+  const { calls } = await mountBoard(panes, lang);
   const empty = document.querySelector<HTMLElement>(".empty-state");
   if (!empty) throw new Error("no empty state on the board");
   return { empty, calls };
@@ -141,5 +153,34 @@ describe("the board with no agents", () => {
     ))
       button.click();
     expect(calls).toEqual(["launch", "register"]);
+  });
+});
+
+// 全体ボードの行も左のサイドバーと同じ覗き窓に載る (行の下に出す)。画面を
+// 離れたら見張りを外す。
+describe("the board rows and the screen preview", () => {
+  test("rows are watched below while the board is shown, and let go when it is left", async () => {
+    const watched: string[] = [];
+    const preview: PanePreview = {
+      watch(container, options) {
+        watched.push(`watch ${container.className} ${options.placement}`);
+        return () => watched.push("unwatch");
+      },
+      hide: () => undefined,
+      setPaused: () => undefined,
+      current: () => null,
+    };
+    const { view } = await mountBoard(
+      [agentPane({ id: "%1", title: "Review plan", label: "work:0.0" })],
+      "en",
+      preview,
+    );
+    const row = document.querySelector<HTMLElement>(".agents-row");
+    expect([
+      row?.getAttribute("data-preview-pane"),
+      row?.getAttribute("data-preview-name"),
+    ]).toEqual(["%1", "claude · Review plan · work:0.0"]);
+    view.suspend();
+    expect(watched).toEqual(["watch agents-list below", "unwatch"]);
   });
 });

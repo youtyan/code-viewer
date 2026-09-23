@@ -218,6 +218,31 @@ export function renameProject(
   return replaceAt(registry, index, { ...current, name: next });
 }
 
+/**
+ * before の前へ置く (null なら末尾)。位置を番号でなく隣の鍵で受けるのは、
+ * 別のサーバが間に登録簿を変えても、利用者が落とした場所の隣に置くため。
+ * 並びが変わらなければ同じ登録簿を返す (書かない)。
+ */
+export function placeProject(
+  registry: ProjectRegistry,
+  root: string,
+  before: string | null,
+): ProjectRegistryChange {
+  const index = findIndex(registry, root);
+  if (typeof index !== "number") return index;
+  const project = registry.projects[index] as StoredProject;
+  const rest = registry.projects.filter((_, at) => at !== index);
+  const target =
+    before === null ? rest.length : rest.findIndex((p) => p.root === before);
+  if (target < 0) {
+    if (before === root) return { ok: true, registry, project };
+    return { ok: false, issue: { code: "not-found", root: before as string } };
+  }
+  if (target === index) return { ok: true, registry, project };
+  const projects = [...rest.slice(0, target), project, ...rest.slice(target)];
+  return { ok: true, registry: { version: 1, projects }, project };
+}
+
 /** 1 つ上 (-1) か下 (+1) へ。端ではそのまま。 */
 export function moveProject(
   registry: ProjectRegistry,
@@ -226,15 +251,35 @@ export function moveProject(
 ): ProjectRegistryChange {
   const index = findIndex(registry, root);
   if (typeof index !== "number") return index;
-  const project = registry.projects[index] as StoredProject;
-  const target = index + direction;
-  if (target < 0 || target >= registry.projects.length) {
-    return { ok: true, registry, project };
+  const neighbor = registry.projects[index + direction];
+  if (!neighbor) {
+    return {
+      ok: true,
+      registry,
+      project: registry.projects[index] as StoredProject,
+    };
   }
-  const projects = [...registry.projects];
-  projects[index] = projects[target] as StoredProject;
-  projects[target] = project;
-  return { ok: true, registry: { version: 1, projects }, project };
+  const before =
+    direction < 0
+      ? neighbor.root
+      : (registry.projects[index + 2]?.root ?? null);
+  return placeProject(registry, root, before);
+}
+
+/**
+ * ドラッグで落とす位置 (並びの中の隙間の番号、0 = 先頭の前、length = 末尾の
+ * 後) から、送る before を決める。掴んだものの前後の隙間は並びが変わらない
+ * ので null (落とす先の線も出さない)。
+ */
+export function projectDropBefore(
+  order: readonly string[],
+  dragged: string,
+  gap: number,
+): { before: string | null } | null {
+  const from = order.indexOf(dragged);
+  if (from < 0 || gap < 0 || gap > order.length) return null;
+  if (gap === from || gap === from + 1) return null;
+  return { before: order[gap] ?? null };
 }
 
 /** 一覧・切替に載せる登録の情報 (ワイヤ形式)。 */

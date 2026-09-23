@@ -16754,6 +16754,84 @@ html[data-nav-collapsed] #app-nav {
 .nav-project-head:hover {
   background: color-mix(in srgb, var(--color-raised) 60%, transparent);
 }
+/* 見出しのドラッグで並べ替える (登録したもの)。落とす先は隙間の真ん中の線だけで
+   示し、箱も周りの行も落とすまで動かさない。掴んだ箱は薄くするだけ。 */
+.nav-project[data-nav-order] {
+  position: relative;
+}
+.nav-project-dragging {
+  opacity: 0.5;
+}
+.nav-project-drop-before::before,
+.nav-project-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  pointer-events: none;
+}
+.nav-project-drop-before::before {
+  top: calc(var(--space-3) / -2 - 1px);
+}
+.nav-project-drop-before:first-child::before {
+  top: 0;
+}
+.nav-project-drop-after::after {
+  bottom: calc(var(--space-3) / -2 - 1px);
+}
+/* エージェントの行に載せたときのシェルの覗き窓 (views/agents/pane-preview.ts)。
+   body 直下に fixed で本文の上に重ね、周りを動かさない。見るだけなのでポインタを
+   受けない。高さは行数 (--pane-preview-lines、TS が書く) で決め、中身で伸び縮み
+   しない。メニュー (1000) より下。 */
+.pane-preview {
+  position: fixed;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  width: min(calc(var(--space-unit) * 180), calc(100vw - var(--space-4)));
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--color-overlay);
+  box-shadow: 0 0 0 1px var(--color-line-strong), var(--shadow-pop);
+  color: var(--color-text);
+  pointer-events: none;
+}
+.pane-preview[hidden] {
+  display: none;
+}
+.pane-preview-head {
+  flex: none;
+  padding: var(--space-1) var(--space-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  box-shadow: inset 0 -1px 0 var(--color-line);
+}
+.pane-preview-screen {
+  flex: none;
+  height: calc(var(--pane-preview-lines) * 1lh + var(--space-2) * 2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  overflow: hidden;
+  background: var(--color-term);
+  color: var(--color-term-text);
+  font-size: var(--ui-font-sm);
+  line-height: 1.35;
+  white-space: pre;
+}
+.pane-preview-screen[data-tone="muted"] {
+  color: var(--color-text-3);
+  white-space: pre-wrap;
+}
+.pane-preview-screen[data-tone="failed"] {
+  color: var(--color-failed);
+  white-space: pre-wrap;
+}
 .nav-project-toggle {
   flex: 1 1 auto;
   min-width: 0;
@@ -23973,6 +24051,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
      LONG_PRESS_TARGETS と同じ並び)。長押しでブラウザの文字の選択とリンクの
      既定のメニューを出さない。 */
   .nav-agent,
+  .nav-project-head,
   .main-tab,
   #filelist li,
   .gdp-repo-row {

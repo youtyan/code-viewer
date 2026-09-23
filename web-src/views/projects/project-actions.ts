@@ -61,6 +61,8 @@ export type ProjectActions = {
   unregister(info: AgentProjectInfo): Promise<void>;
   rename(info: AgentProjectInfo): Promise<void>;
   move(info: AgentProjectInfo, direction: -1 | 1): Promise<void>;
+  /** before の前へ (null は末尾)。左のサイドバーのドラッグ。 */
+  place(info: AgentProjectInfo, before: string | null): Promise<void>;
   stop(info: AgentProjectInfo): Promise<void>;
 };
 
@@ -231,6 +233,9 @@ export function createProjectActions(deps: ProjectActionsDeps): ProjectActions {
     },
     async move(info, direction) {
       await change(info.root, { action: "move", root: info.root, direction });
+    },
+    async place(info, before) {
+      await change(info.root, { action: "move", root: info.root, before });
     },
     async stop(info) {
       const text = deps.getText();

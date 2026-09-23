@@ -140,7 +140,10 @@ Requires Node.js 20 or newer. Development uses
   deleting one removes its folder from disk and keeps the branch.
 - Keep your projects and their agents in the left sidebar on every screen:
   registered projects first, in your order, then projects found in tmux that
-  are not registered. Rows never reorder when states change. Each project is a
+  are not registered. Rows never reorder when states change. Drag a registered
+  project's heading (its agents move with it) to reorder, or press Alt+↑ / Alt+↓
+  on it, or use Move up / Move down in its right-click menu; the order is saved
+  with the project list, so every browser and window shows the same one. Each project is a
   bold heading with its state mark and agent count (＋ and … on hover); its
   agents sit under it as indented two-line cards: the task title (or the kind)
   with a badge when it started waiting or finished while you were away, then
@@ -148,14 +151,19 @@ Requires Node.js 20 or newer. Development uses
   to it in the same tab (an unregistered one is registered first), or click an
   agent to open its pane in a terminal tab of the main area. Alt+click or the
   row menu opens it in the opposite pane, splitting a single pane to the right.
+  Rest the pointer on an agent (or reach it with the keyboard) to see the last
+  lines of its screen in a read-only preview that refreshes every second;
+  Escape closes it.
   The sidebar folds away and its width and folding follow you across
   projects.
 - See every coding agent running in tmux on this machine on the All agents
   board (the button next to Projects in the sidebar, or `g a`), grouped by
   project (the git repository of each pane's folder; worktrees fold into their
   repository). Each agent is the same two-line card as in the sidebar, with
-  the account and the tmux location added to its second line; needs-input rows come
-  first, and Enter opens the pane in a terminal tab. A counter in the bottom
+  the account and the tmux location added to its second line. Projects follow
+  the same order as the sidebar; inside each, needs-input rows come first, and
+  Enter opens the pane in a terminal tab. The same screen preview appears under
+  a row you rest the pointer on. A counter in the bottom
   bar shows needs-input and working agents on every screen, next to each
   account's usage, changed rows get an
   unread dot and the tab title an unread count, and desktop notifications can

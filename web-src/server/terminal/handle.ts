@@ -40,6 +40,7 @@ import {
 import { formatErrorDetail } from "../../core/error-detail";
 import type { ProjectOpenResponse } from "../../core/projects";
 import { isShellSessionId } from "../../core/shell";
+import type { TerminalCaptureResponse } from "../../core/terminal-capture";
 import {
   findImagePathsNewestFirst,
   MAX_TERMINAL_IMAGE_PATHS,
@@ -291,7 +292,7 @@ async function handleCaptureGet(url: URL, cwd: string): Promise<Response> {
     content: result.slice.content,
     cursor: result.slice.cursor,
     reset: result.slice.reset,
-  });
+  } satisfies TerminalCaptureResponse);
 }
 
 /**

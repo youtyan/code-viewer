@@ -16,6 +16,7 @@ import {
   addProject,
   moveProject,
   type ProjectOpenResponse,
+  placeProject,
   removeProject,
   renameProject,
   type StoredProject,
@@ -72,7 +73,8 @@ export type ProjectChange =
   | { action: "add"; path: string; name?: string }
   | { action: "remove"; root: string }
   | { action: "rename"; root: string; name: string }
-  | { action: "move"; root: string; direction: -1 | 1 };
+  | { action: "move"; root: string; direction: -1 | 1 }
+  | { action: "move"; root: string; before: string | null };
 
 export async function changeProjects(
   change: ProjectChange,
@@ -91,7 +93,9 @@ export async function changeProjects(
     if (change.action === "rename") {
       return renameProject(registry, change.root, change.name);
     }
-    return moveProject(registry, change.root, change.direction);
+    return "before" in change
+      ? placeProject(registry, change.root, change.before)
+      : moveProject(registry, change.root, change.direction);
   });
 }
 

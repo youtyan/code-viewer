@@ -18,6 +18,7 @@ import {
 } from "../projects/projects-i18n";
 import { terminalText } from "../terminal/i18n";
 import { ACCOUNTS_EN, ACCOUNTS_JA, type AccountsText } from "./accounts-i18n";
+import type { PanePreviewText } from "./pane-preview";
 
 export type AgentsLang = "en" | "ja";
 
@@ -121,6 +122,8 @@ export type AgentsText = {
   readRelayFailed: string;
   /** 左のサイドバー (views/agents/agents-sidebar.ts・views/shell/app-nav.ts)。 */
   sidebar: AgentsSidebarText;
+  /** 行に載せたときのシェルの覗き窓 (views/agents/pane-preview.ts)。 */
+  preview: PanePreviewText;
 };
 
 export type AgentsBoardText = {
@@ -149,6 +152,8 @@ export type AgentsSidebarText = {
   detectedTitle: string;
   /** プロジェクトのサーバを起こしている最中 (見出しの中)。 */
   starting: string;
+  /** 登録したプロジェクトの見出しのツールチップ (並べ替えの仕方)。 */
+  reorderHint: string;
   /** 登録したプロジェクトが 1 つも無いときの見出しと説明。 */
   noProjectsTitle: string;
   noProjectsBody: string;
@@ -532,6 +537,7 @@ const EN: AgentsText = {
       "Projects with agents in tmux that are not registered. Opening one registers it.",
     noProjectsTitle: "No projects yet",
     noProjectsBody: "Register a repository and it is listed here.",
+    reorderHint: "Drag, or Alt+↑ / Alt+↓, to reorder",
     noTmux: "tmux is not running",
     notInstalled: "tmux was not found",
     noAgents: "No agents are running",
@@ -539,6 +545,12 @@ const EN: AgentsText = {
       `${count} problem${count === 1 ? "" : "s"} reading agents — open the board`,
     usageLabel: "Usage by account",
     usageTitle: (lines) => lines.join("\n"),
+  },
+  preview: {
+    label: (name) => `Preview: ${name}`,
+    loading: "Loading…",
+    gone: "This pane has closed.",
+    failed: (detail) => `Could not read the pane.\n${detail}`,
   },
 };
 
@@ -656,6 +668,7 @@ const JA: AgentsText = {
       "登録していないが tmux でエージェントが動いているプロジェクト。開くと登録されます。",
     noProjectsTitle: "プロジェクトはまだありません",
     noProjectsBody: "リポジトリを登録すると、ここに並びます。",
+    reorderHint: "ドラッグか Alt+↑ / Alt+↓ で並べ替え",
     noTmux: "tmux が動いていません",
     notInstalled: "tmux が見つかりません",
     noAgents: "エージェントが動いていません",
@@ -663,6 +676,12 @@ const JA: AgentsText = {
       `エージェントの読み取りで ${count} 件の問題 — ボードで確認`,
     usageLabel: "アカウントごとの使用量",
     usageTitle: (lines) => lines.join("\n"),
+  },
+  preview: {
+    label: (name) => `プレビュー: ${name}`,
+    loading: "読み込み中…",
+    gone: "このペインは閉じられました。",
+    failed: (detail) => `ペインを読めませんでした。\n${detail}`,
   },
 };
 
