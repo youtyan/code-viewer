@@ -1521,6 +1521,9 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   /** 開いたときの ?terminal= (起動の途中で URL が書き直される前に読む)。 */
   const INITIAL_TERMINAL_PARAM = parseTerminalOverlay(window.location.search);
+  /** 開いたときの ?terminal= がシェル (タブを読み戻した後、その端末が前面になる)。 */
+  const TERMINAL_FRONT_AT_BOOT =
+    INITIAL_TERMINAL_PARAM !== null && INITIAL_TERMINAL_PARAM !== "open";
   /** 開いたときの ?open-pane= (別のプロジェクトから移ってきた。同じく先に読む)。 */
   const INITIAL_OPEN_PANE = parseOpenPaneOverlay(window.location.search);
   /** 保存したタブの前面を URL の route より優先するか (同じく先に読む)。 */
@@ -1646,7 +1649,22 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 左の面の前面が画面 (route) のタブか、何も選んでいない (showPanes が控える)。
    * false (端末・画像) なら一覧の列に一覧を出さない (listColumnKind)。
    */
-  let LEFT_FRONT_IS_PAGE = true;
+  let LEFT_FRONT_IS_PAGE = !TERMINAL_FRONT_AT_BOOT;
+  /**
+   * 保存したタブを読み戻すまでの間 (起動の途中)。開いたときの ?terminal= にシェルが
+   * あれば、読み戻した後に端末が前面になる (syncTerminalFromUrl) ので、その前に
+   * URL の画面のタブ (MAIN_TABS.syncRoute) が前面に来ても一覧を出さない。
+   * index.html の #first-screen と同じ見方 (出してから外すと、読み込み直すたびに
+   * 本文が 2 回動いた)。
+   */
+  let RESTORING_TABS = true;
+  /** 控えに書いた 2 面か (rememberSplitForFirstScreen)。まだ書いていなければ null。 */
+  let EARLY_SPLIT: boolean | null = null;
+  /**
+   * タブを読み戻すまで、一覧の列を 2 面として数えるか (控えの split。#first-screen と
+   * 同じ見方。1 面で数え直すと、早いスクリプトが 2 面で畳んだ列を開き直して動いた)。
+   */
+  let BOOT_SPLIT = false;
   /** 一覧と変更ファイルの一覧を畳む / 開くボタン (syncListColumn の後ろで作る)。 */
   let LIST_COLUMN_FOLDS: {
     listFold: HTMLButtonElement;
@@ -5448,6 +5466,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
     if (boot.userHidden) STATE.sidebarHidden = true;
     FILE_LIST_AUTO_HIDDEN = boot.autoHidden;
+    BOOT_SPLIT = "look" in early && early.look?.split === true;
   }
 
   // ----- wiring -----
@@ -6555,6 +6574,27 @@ window.GdpExpandLogic = GdpExpandLogic;
         return null;
       });
   }
+  /** タブを読み戻し終えた: 一覧の列を今の左の面の前面で決め直す。 */
+  function endTabRestore(): void {
+    if (!RESTORING_TABS) return;
+    RESTORING_TABS = false;
+    const panes = MAIN_TABS.panes();
+    LEFT_FRONT_IS_PAGE = leftFrontIsPage(panes.fronts.left);
+    syncListColumn();
+    rememberSplitForFirstScreen(panes.split);
+  }
+
+  /**
+   * 2 面かを控える (index.html の #first-screen が、次に開いたとき一覧の列を 2 面の
+   * 本文の幅で数える。数え違うと、読み込むたびに一覧の列が詰めた幅へ動いた)。
+   * 読み戻す前の 1 面は書かない。
+   */
+  function rememberSplitForFirstScreen(split: boolean): void {
+    if (RESTORING_TABS || split === EARLY_SPLIT) return;
+    EARLY_SPLIT = split;
+    rememberEarlyLook({ split });
+  }
+
   /** 保存した配置に残った、サーバにもう無いシェルのタブを閉じる。 */
   function closeTabsOfGoneShells(): void {
     // 読み戻した時点のタブだけを見る (この後に開いたシェルは、一覧に載る前に
@@ -6578,7 +6618,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   loadInitialState().finally(() => {
     MAIN_TABS.syncRoute(STATE.route);
     // ?terminal= のタブが前面になるかは、読み戻したタブの並びで決まる。
-    void MAIN_TABS.restore({
+    const restoring = MAIN_TABS.restore({
       ...(INITIAL_RIGHT_ROUTE ? { rightRoute: INITIAL_RIGHT_ROUTE } : {}),
       // URL がシェルかペインを指すときだけ、保存した前面 (ターミナル) を残す。
       keepSavedFront: INITIAL_KEEPS_SAVED_FRONT,
@@ -6611,6 +6651,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         );
       }
     });
+    // 読み戻し (と ?terminal= の端末を開くこと) が済んだら一覧の列を決め直す。失敗
+    // しても URL の ?terminal= で止めたままにしない。失敗は finally の先の拒否として
+    // 今までどおり外へ出る (ここで受けない)。
+    void restoring.finally(endTabRestore);
     if (STATE.route.screen === "help") {
       setStatus("live");
       renderHelpPage();
@@ -8000,7 +8044,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function syncListColumn(): void {
     const body = document.body;
-    const need = MAIN_TABS.panes().split ? SPLIT_NEED : COMFORTABLE_PANE_WIDTH;
+    const split = RESTORING_TABS ? BOOT_SPLIT : MAIN_TABS.panes().split;
+    const need = split ? SPLIT_NEED : COMFORTABLE_PANE_WIDTH;
     const { kind, room, userHidden, hasTree, layout } =
       listColumnLayoutFor(need);
     if (kind) body.dataset.listColumn = kind;
@@ -8216,12 +8261,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncListColumn();
   }
 
+  function leftFrontIsPage(leftFront: PanesView["fronts"]["left"]): boolean {
+    if (RESTORING_TABS && TERMINAL_FRONT_AT_BOOT) return false;
+    return leftFront === null || MAIN_TABS.isRouteTab(leftFront);
+  }
+
   function showPanes(view: PanesView, how: FrontChange): void {
     // 端末・画像のタブが左の前面なら、背面の画面の一覧は出さない (列は前面の
     // タブの画面で決める)。
-    const leftFront = view.fronts.left;
-    LEFT_FRONT_IS_PAGE = leftFront === null || MAIN_TABS.isRouteTab(leftFront);
+    LEFT_FRONT_IS_PAGE = leftFrontIsPage(view.fronts.left);
     syncListColumn();
+    rememberSplitForFirstScreen(view.split);
     for (const side of ["left", "right"] as const) {
       const host = PANE_HOSTS[side];
       const tab = view.fronts[side];

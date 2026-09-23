@@ -30,8 +30,11 @@ import {
   worktreeOverview,
 } from "../core/page-mode";
 import { HISTORY_WIDTH, SIDEBAR_WIDTH } from "../core/panel-sizes";
-import { parseRoute } from "../core/routes";
-import { COMFORTABLE_PANE_WIDTH } from "../views/main-tabs/main-tabs-view";
+import { parseRoute, parseTerminalOverlay } from "../core/routes";
+import {
+  COMFORTABLE_PANE_WIDTH,
+  SPLIT_DIVIDER_WIDTH,
+} from "../views/main-tabs/main-tabs-view";
 import {
   EARLY_PROJECTS_MAX,
   withEarlyProject,
@@ -80,6 +83,7 @@ type Look = {
   sidebarWidth?: number;
   historyWidth?: number;
   language?: "en" | "ja";
+  split?: boolean;
 };
 
 beforeAll(() => {
@@ -158,11 +162,13 @@ function expected(url: string, width: number, look: Look, nav: number) {
   const pageClasses = pageModeClasses(route, hostedSourceOpen);
   const page = [...pageClasses].sort();
   const overview = worktreeOverview(route);
-  // 直接開いたときの前面は URL の画面のタブ。
+  // 直接開いたときの前面は URL の画面のタブ。?terminal= にシェルがあれば、そのシェルの
+  // タブ (app.ts の syncTerminalFromUrl。1 面で数える)。
+  const terminal = parseTerminalOverlay(parsed.search);
   const list = listColumnKindFor({
     has: (pageClass) => pageClasses.has(pageClass as never),
     worktreeOverview: overview,
-    leftFrontIsPage: true,
+    leftFrontIsPage: terminal === null || terminal === "open",
   });
   const userHidden = look.sidebarHidden === true;
   const files = look.sidebarWidth || SIDEBAR_WIDTH.default;
@@ -176,7 +182,10 @@ function expected(url: string, width: number, look: Look, nav: number) {
     tree: list === "history" || list === "worktree" ? files : 0,
     treeRail: TREE_RAIL,
     treeKeptOpen: false,
-    need: COMFORTABLE_PANE_WIDTH,
+    // 2 面の控えなら 2 面の本文 (app.ts の SPLIT_NEED)。
+    need: look.split
+      ? COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH
+      : COMFORTABLE_PANE_WIDTH,
   });
   return {
     page,
@@ -234,6 +243,13 @@ const URLS = [
   "/file?path=src%2Fa.ts&preview=1",
   "/file",
   "/sample-unknown",
+  // 端末が前面のまま読み込み直した URL (背面の画面の印は残し、一覧は出さない)。
+  "/history?terminal=shell-sample1",
+  "/p/0123456789abcdef/todif?from=HEAD&to=worktree&terminal=shell-sample1",
+  "/worktree?wt=%2Fsample%2Frepo-a-wt&terminal=shell-sample1",
+  "/file?path=src%2Fa.ts&terminal=shell-sample1",
+  // シェルでない値は app.ts が外すだけ (前面は URL の画面のタブ)。
+  "/history?terminal=1",
 ];
 
 const LOOKS: Array<{ name: string; look: Look }> = [
@@ -245,6 +261,11 @@ const LOOKS: Array<{ name: string; look: Look }> = [
   {
     name: "利用者がファイル一覧を畳んだ・左 320",
     look: { sidebarHidden: true, navWidth: 320 },
+  },
+  { name: "2 面", look: { split: true } },
+  {
+    name: "2 面・利用者がファイル一覧を畳んだ",
+    look: { split: true, sidebarHidden: true },
   },
 ];
 

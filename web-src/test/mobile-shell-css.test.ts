@@ -428,6 +428,8 @@ describe("指の画面の押せる大きさ", () => {
     ".nav-agent",
     ".nav-project-head",
     ".nav-project-toggle",
+    // 一覧の列の頭の 1 段目のプロジェクト名 ▾ (切替)。
+    "button.brand",
     ".nav-foot-item",
     ".nav-search",
     ".agents-primary",

@@ -24507,6 +24507,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .nav-agent,
   .nav-project-head,
   .nav-project-toggle,
+  button.brand,
   .history-item,
   #history-panel .history-item,
   .d2h-file-header .d2h-file-collapse,

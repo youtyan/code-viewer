@@ -84,8 +84,11 @@
   if (screen !== "file") body.classList.add("gdp-" + screen + "-page");
   if (screen === "worktree" && !selectedWorktree) body.setAttribute("data-worktree-overview", "");
   // core/list-column.ts の listColumnKindFor (前面は URL の画面のタブ)。Diff から
-  // 開いたファイルの詳細 (差分の 1 ファイル) も変更ファイルの一覧を出す。
-  var list = screen === "diff" || fileView === "detail" ? "sidebar" : screen === "history" ? "history" : selectedWorktree ? "worktree" : "";
+  // 開いたファイルの詳細 (差分の 1 ファイル) も変更ファイルの一覧を出す。?terminal=
+  // にシェル (core/shell.ts の isShellSessionId) があれば前面は端末 (app.ts の
+  // syncTerminalFromUrl が開く) なので一覧は出さない。1 面で数える (下の幅と同じ)。
+  var terminalFront = /^shell-[0-9a-z]{6,}$/.test(q.get("terminal") || "");
+  var list = terminalFront ? "" : screen === "diff" || fileView === "detail" ? "sidebar" : screen === "history" ? "history" : selectedWorktree ? "worktree" : "";
   if (list) body.setAttribute("data-list-column", list);
   var css = getComputedStyle(body);
   var px = function (name) {
@@ -93,9 +96,11 @@
     if (!(value >= 0)) throw new Error(name + " is not a length: " + JSON.stringify(css.getPropertyValue(name)));
     return value;
   };
-  // listColumnLayout と同じ決まり (1 面の本文 480 = COMFORTABLE_PANE_WIDTH、詰めた幅
-  // 240 = HISTORY_WIDTH.min)。縮める順: 一覧を詰める → 変更ファイルの一覧を帯に
-  // 畳む → ファイル一覧を畳む。2 面かは保存したタブを読むまで分からないので 1 面で数える。
+  // listColumnLayout と同じ決まり (1 面の本文 480 = COMFORTABLE_PANE_WIDTH、2 面の本文
+  // 961 = その 2 つ分と仕切り SPLIT_DIVIDER_WIDTH、詰めた幅 240 = HISTORY_WIDTH.min)。縮める
+  // 順: 一覧を詰める → 変更ファイルの一覧を帯に畳む → ファイル一覧を畳む。2 面かは保存
+  // したタブを読むまで分からないので、控え (前に見ていた画面が 2 面か) で数える。
+  var need = look.split === true ? 961 : 480;
   var room = root.clientWidth - px("--nav-w");
   // 利用者が畳んだファイル一覧も、画面の入口の縦の帯の幅 (--view-rail-w) は取る。
   var files = userHidden ? px("--view-rail-w") : px("--sidebar-w");
@@ -106,12 +111,12 @@
   var width = preferred;
   var treeFolded = false;
   var filesFolded = false;
-  if (room - files - preferred - tree < 480) {
+  if (room - files - preferred - tree < need) {
     width = narrow;
-    if (room - files - narrow - tree < 480) {
+    if (room - files - narrow - tree < need) {
       treeFolded = tree !== 0;
       var treeWidth = treeFolded ? rail : tree;
-      filesFolded = !userHidden && room - files - narrow - treeWidth < 480;
+      filesFolded = !userHidden && room - files - narrow - treeWidth < need;
     }
   }
   if (filesFolded) body.classList.add("gdp-sidebar-hidden");
