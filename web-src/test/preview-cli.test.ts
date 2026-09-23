@@ -702,6 +702,86 @@ describe("preview CLI", () => {
     }
   });
 
+  // 失敗した要求は、固定の 1 文 (invalid json・not in ref・空の一覧) でなく理由を返す。
+  test("failed requests answer with the reason", async () => {
+    const root = mkdtempSync(join(tmpdir(), "code-viewer-preview-reasons-"));
+    tmpRoots.push(root);
+    git(root, ["init", "-q", "-b", "main", "."]);
+    git(root, ["config", "user.email", "sample-author"]);
+    git(root, ["config", "user.name", "sample-author"]);
+    writeFileSync(join(root, "sample.txt"), "sample\n");
+    git(root, ["add", "sample.txt"]);
+    git(root, ["commit", "-q", "-m", "sample commit"]);
+    const locked = join(root, "locked");
+    mkdirSync(locked);
+    chmodSync(locked, 0);
+    const preview = await startTestPreview(root);
+    const origin = new URL(preview.url).origin;
+    const cases = [
+      {
+        name: "a broken JSON body",
+        request: new Request(new URL("/_create_directory", preview.url), {
+          method: "POST",
+          headers: {
+            Origin: origin,
+            "X-Code-Viewer-Action": "1",
+            "Content-Type": "application/json",
+          },
+          body: "{broken",
+        }),
+        expected: { status: 400, text: /^invalid JSON body: SyntaxError: / },
+      },
+      {
+        name: "a path that is not in the ref",
+        request: new Request(
+          new URL("/_file?path=gone.txt&ref=HEAD", preview.url),
+        ),
+        expected: { status: 404, text: /^not in ref: fatal: / },
+      },
+      {
+        name: "an untracked diff outside the worktree",
+        request: new Request(
+          new URL(
+            "/file_diff?path=sample.txt&untracked=1&from=HEAD&to=main",
+            preview.url,
+          ),
+        ),
+        expected: {
+          status: 400,
+          text: /^invalid diff range: untracked file diffs require a worktree range$/,
+        },
+      },
+      {
+        name: "a folder that cannot be read",
+        request: new Request(
+          new URL("/_tree?ref=worktree&path=locked", preview.url),
+        ),
+        expected: { status: 500, text: /"code":"EACCES"/ },
+      },
+    ];
+    try {
+      const answers = [];
+      for (const { name, request } of cases) {
+        const response = await fetch(request);
+        answers.push({
+          name,
+          status: response.status,
+          text: await response.text(),
+        });
+      }
+      expect(answers).toEqual(
+        cases.map(({ name, expected }) => ({
+          name,
+          status: expected.status,
+          text: expect.stringMatching(expected.text),
+        })),
+      );
+    } finally {
+      chmodSync(locked, 0o700);
+      await stopTestPreview(preview.proc, preview.exited);
+    }
+  });
+
   test("/_grep keeps an unknown ref as a client error", async () => {
     const root = mkdtempSync(join(tmpdir(), "code-viewer-grep-ref-"));
     tmpRoots.push(root);

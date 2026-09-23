@@ -34,6 +34,8 @@ import {
   commandNotFoundDetail,
   isCommandNotFoundResult,
 } from "./command-resolver";
+import { errno } from "./terminal/settings-file";
+import { skipUnreadablePath } from "./unreadable-path";
 import { compileNamePatterns, type NamePatternSet } from "./name-pattern";
 import {
   type RunAsyncOptions,
@@ -1807,15 +1809,14 @@ function syntheticUncommittedBlameFromWorktree(
       isSynthetic: true,
     };
   } catch (err) {
-    if (
-      typeof err === "object" &&
-      err !== null &&
-      "code" in err &&
-      (err as { code?: unknown }).code === "ENOENT"
-    ) {
+    if (errno(err) === "ENOENT") {
       return { lines: [], commits: {}, error: "file not found" };
     }
-    return { lines: [], commits: {}, error: "file not readable" };
+    return {
+      lines: [],
+      commits: {},
+      error: `file not readable: ${formatErrorDetail(err)}`,
+    };
   }
 }
 
@@ -1994,8 +1995,13 @@ function realpathWithinRepo(
       return null;
     if (rel === "" && !allowRoot) return null;
     return realFull;
-  } catch {
-    return null;
+  } catch (error) {
+    // 無い・リンクが回っている場所は「中に入れない」。ほかの理由は投げる。
+    const code = errno(error);
+    if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+      return null;
+    }
+    throw error;
   }
 }
 
@@ -2014,7 +2020,10 @@ function resolveWorktreeSymlinkTarget(
   let symlink_target: string | undefined;
   try {
     symlink_target = readlinkSync(full);
-  } catch {
+  } catch (error) {
+    // 一覧を読んだ後に消えた・リンクでなくなったものだけ、行き先なしにする。
+    const code = errno(error);
+    if (code !== "ENOENT" && code !== "EINVAL") throw error;
     symlink_target = undefined;
   }
   let symlink_target_type: "tree" | "blob" | "missing" = "missing";
@@ -2026,7 +2035,11 @@ function resolveWorktreeSymlinkTarget(
         : stat.isFile()
           ? "blob"
           : "missing";
-    } catch {
+    } catch (error) {
+      const code = errno(error);
+      if (code !== "ENOENT" && code !== "ENOTDIR" && code !== "ELOOP") {
+        throw error;
+      }
       symlink_target_type = "missing";
     }
   }
@@ -2150,8 +2163,11 @@ async function worktreeFilesystemEntriesAsync(
         )
         .filter((entry) => entry.path),
     );
-  } catch {
-    return [];
+  } catch (error) {
+    // 無いフォルダは空の一覧。読めないなど、ほかの理由は投げる。
+    const code = errno(error);
+    if (code === "ENOENT" || code === "ENOTDIR") return [];
+    throw error;
   }
   if (!recursive) return directEntries;
 
@@ -2192,7 +2208,8 @@ async function worktreeFilesystemEntriesAsync(
     let entries: Dirent[];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      skipUnreadablePath(dir, error, "the worktree file walk");
       return;
     }
     for (const entry of entries) {
@@ -2247,9 +2264,10 @@ function hasDotGitEntry(dir: string): boolean {
     lstatSync(join(dir, ".git"));
     return true;
   } catch (err) {
-    return (
-      !!err && typeof err === "object" && "code" in err && err.code !== "ENOENT"
-    );
+    if (errno(err) === "ENOENT") return false;
+    // 確かめられない場所は入れ子のリポジトリと同じく中へ入らない (記録はする)。
+    skipUnreadablePath(dir, err, "the worktree file walk");
+    return true;
   }
 }
 

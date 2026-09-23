@@ -11,6 +11,7 @@ import { basename, join, relative } from "node:path";
 import { hasControlCharacter } from "../../core/control-chars";
 import type { DbFileInfo, DbKind } from "../../core/database/types";
 import { errno } from "../terminal/settings-file";
+import { skipUnreadablePath } from "../unreadable-path";
 
 const SQLITE_EXTENSIONS = new Set([".db", ".sqlite", ".sqlite3", ".s3db"]);
 const SQLITE_MAGIC = "SQLite format 3\0";
@@ -19,21 +20,8 @@ const MAX_ENTRIES = 50;
 const DOCKER_DISCOVERY_TTL_MS = 5_000;
 const SQLITE_DISCOVERY_TTL_MS = 5_000;
 
-// 探索の途中で消えた場所 (ENOENT・ENOTDIR) は黙って飛ばす。権限の無い場所
-// (root の docker volume など) も飛ばすが、どこを飛ばしたかは 1 度だけ記録する。
-// ほかの失敗は探索の失敗として投げる。
-const reportedUnreadablePaths = new Set<string>();
-function skipUnreadablePath(path: string, error: unknown): void {
-  const code = errno(error);
-  if (code === "ENOENT" || code === "ENOTDIR") return;
-  if (code !== "EACCES" && code !== "EPERM") throw error;
-  if (reportedUnreadablePaths.has(path)) return;
-  reportedUnreadablePaths.add(path);
-  console.warn(
-    `[code-viewer] database discovery skipped a path it cannot read: ${path}`,
-    error,
-  );
-}
+const skipUnreadable = (path: string, error: unknown) =>
+  skipUnreadablePath(path, error, "database discovery");
 
 function isSqliteFile(fullPath: string): boolean {
   try {
@@ -70,7 +58,7 @@ async function isSqliteFileAsync(fullPath: string): Promise<boolean> {
       await file.close();
     }
   } catch (error) {
-    skipUnreadablePath(fullPath, error);
+    skipUnreadable(fullPath, error);
     return false;
   }
 }
@@ -119,7 +107,7 @@ export async function discoverSqliteFilesAsync(
     try {
       entries = await readdir(dir);
     } catch (error) {
-      skipUnreadablePath(dir, error);
+      skipUnreadable(dir, error);
       return;
     }
     for (const entry of entries) {
@@ -131,7 +119,7 @@ export async function discoverSqliteFilesAsync(
       try {
         entryStat = await lstat(full);
       } catch (error) {
-        skipUnreadablePath(full, error);
+        skipUnreadable(full, error);
         continue;
       }
       if (entryStat.isSymbolicLink()) continue;
@@ -748,7 +736,7 @@ async function parseComposeFileAsync(
   try {
     content = await readFile(filepath, "utf-8");
   } catch (error) {
-    skipUnreadablePath(filepath, error);
+    skipUnreadable(filepath, error);
     return;
   }
   const composeDirEnv = await readDotenvAsync(composeDir);
@@ -791,7 +779,7 @@ async function pathExistsAsync(path: string): Promise<boolean> {
     await stat(path);
     return true;
   } catch (error) {
-    skipUnreadablePath(path, error);
+    skipUnreadable(path, error);
     return false;
   }
 }
@@ -818,7 +806,7 @@ async function walkForMarkerFileAsync(
   try {
     entries = await readdir(dir);
   } catch (error) {
-    skipUnreadablePath(dir, error);
+    skipUnreadable(dir, error);
     return;
   }
   for (const entry of entries) {
@@ -829,7 +817,7 @@ async function walkForMarkerFileAsync(
     try {
       entryStat = await lstat(full);
     } catch (error) {
-      skipUnreadablePath(full, error);
+      skipUnreadable(full, error);
       continue;
     }
     if (entryStat.isSymbolicLink()) continue;
@@ -1121,7 +1109,7 @@ export async function discoverSupabaseCliProjectsAsync(
       try {
         content = await readFile(configPath, "utf-8");
       } catch (error) {
-        skipUnreadablePath(configPath, error);
+        skipUnreadable(configPath, error);
         return;
       }
       const parsed = parseSupabaseConfigToml(content);

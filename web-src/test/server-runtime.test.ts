@@ -277,7 +277,7 @@ describe("server runtime compatibility helpers", () => {
       const response = await fetch(`http://127.0.0.1:${server.port}/explode`);
 
       expect(response.status).toBe(500);
-      expect(await response.text()).toBe("internal server error");
+      expect(await response.text()).toBe("Error: boom from handler");
       expect(logged.length).toBe(1);
       expect(logged[0]?.[0]).toBe("[code-viewer] request error:");
       expect(logged[0]?.[1]).toBe("GET");

@@ -33,12 +33,3 @@ export async function terminateChild(
     }
   }
 }
-
-export async function terminateChildren(
-  children: DevChildProcess[],
-  options: TerminateChildOptions = {},
-): Promise<void> {
-  await Promise.allSettled(
-    children.map((child) => terminateChild(child, options)),
-  );
-}

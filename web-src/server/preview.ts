@@ -53,6 +53,7 @@ import {
 } from "./annotations";
 import {
   cacheFresh,
+  DiffRangeError,
   fileDiffCacheKey,
   MAX_TIMED_CACHE_ENTRIES,
   setTimedCacheEntry,
@@ -65,7 +66,10 @@ import {
   parseExternalCommandOverride,
 } from "./command-resolver";
 import { isAbortLikeError } from "./database/adapters/abort";
-import { parseBoundedJsonBody } from "./database/handle-shared";
+import {
+  parseBoundedJsonBody,
+  readBoundedJsonBody,
+} from "./database/handle-shared";
 import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
 import {
@@ -160,6 +164,7 @@ import { createProcessShutdown, reportFatalAndShutdown } from "./shutdown";
 import { applySseClientOperation } from "./sse-clients";
 import { loadAppSettingsState } from "./state-store";
 import { staticFile, WEB_ROOT } from "./static-files";
+import { errno } from "./terminal/settings-file";
 import type { ListTmuxPanesOptions } from "./tmux/panes";
 import { startWatchSupervisor, type WatchSupervisor } from "./watch-supervisor";
 import { LAUNCHED_BY_ENV } from "./worktree/open";
@@ -1182,11 +1187,18 @@ function safeOpenWorktreePath(path: string): string | null {
       const realCwd = realpathSync(cwd);
       if (git.isGitInternalPath(realCwd)) return null;
       return realCwd;
-    } catch {
-      return null;
+    } catch (error) {
+      // 開いているリポジトリが消えたときだけ「無い」。ほかの理由は投げる。
+      if (isGonePath(error)) return null;
+      throw error;
     }
   }
   return safeWorktreePath(path);
+}
+
+function isGonePath(error: unknown): boolean {
+  const code = errno(error);
+  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 function parentRepoPath(path: string): string {
@@ -1214,8 +1226,10 @@ function worktreeFileMetadata(path: string, knownSize?: number): FileMetadata {
       created_at: isoDate(stat.birthtimeMs),
       updated_at: isoDate(stat.mtimeMs),
     };
-  } catch {
-    return {};
+  } catch (error) {
+    // 読んだ直後に消えたファイルは日付なし。ほかの理由は投げる。
+    if (isGonePath(error)) return {};
+    throw error;
   }
 }
 
@@ -1251,8 +1265,9 @@ async function directoryMetadata(
         created_at: isoDate(stat.birthtimeMs),
         updated_at: isoDate(stat.mtimeMs),
       };
-    } catch {
-      return {};
+    } catch (error) {
+      if (isGonePath(error)) return {};
+      throw error;
     }
   }
   const commitUpdatedAt =
@@ -1329,8 +1344,10 @@ async function readReadme(
       if (!full) continue;
       try {
         return { path, text: readFileSync(full, "utf8") };
-      } catch {
-        continue;
+      } catch (error) {
+        // 同じ名前のフォルダ・消えたファイルは次の候補へ。読めない README は投げる。
+        if (isGonePath(error) || errno(error) === "EISDIR") continue;
+        throw error;
       }
     }
     const res = await git.showAsync(target, path, cwd);
@@ -1650,7 +1667,9 @@ async function handleLog(url: URL) {
   let hasWorktree = false;
   if (wantsWorktreeHead) {
     const status = await git.statusPorcelainForPathAsync(path, cwd);
-    if (status.ok && status.stdout.length > 0) {
+    // 未コミットの変更があるかを確かめられなかったことを、「無い」にしない。
+    if (status.ok === false) return text(status.error, 500);
+    if (status.stdout.length > 0) {
       // Any non-empty record means the path has uncommitted changes.
       const parts = status.stdout.split("\0").filter(Boolean);
       if (parts.length > 0) {
@@ -1682,8 +1701,9 @@ function blamePathKey(p: string): string {
   try {
     const st = statSync(join(cwd, p));
     return `${st.mtimeMs}:${st.size}`;
-  } catch {
-    return "missing";
+  } catch (error) {
+    if (isGonePath(error)) return "missing";
+    throw error;
   }
 }
 
@@ -1799,8 +1819,9 @@ async function handleFileDiff(url: URL) {
       args,
       cwd,
     });
-  } catch {
-    return text("invalid diff range", 400);
+  } catch (error) {
+    if (!(error instanceof DiffRangeError)) throw error;
+    return text(`invalid diff range: ${error.message}`, 400);
   }
   const cached = fileCache.get(cacheKey);
   let diffText: string;
@@ -1870,8 +1891,10 @@ function worktreeLineIndexSignature(full: string): string | null {
       ino?: number;
     };
     return `size:${stat.size}|mtime:${stat.mtimeMs}|ctime:${stat.ctimeMs}|ino:${stat.ino || 0}`;
-  } catch {
-    return null;
+  } catch (error) {
+    // 消えたファイルは索引なし (読み直しの側が理由ごと失敗する)。ほかは投げる。
+    if (isGonePath(error)) return null;
+    throw error;
   }
 }
 
@@ -1983,6 +2006,11 @@ async function collectGitBlobLineRangeWithIndex(
  * 無い) 場合は「その ref にその中身が無い」と混ぜず、理由を cause に残して
  * 投げる。呼び出し側の 404 / null は「動いたが 0 で終わらなかった」だけを指す。
  */
+// ref に無い・blob でない。git が理由を言っていれば後ろに付ける。
+function notInRef(stderr: string): string {
+  return stderr.trim() ? `not in ref: ${stderr.trim()}` : "not in ref";
+}
+
 function blobStreamExitCode(exit: SpawnStreamExit, oid: string): number {
   if (exit.kind === "failed")
     throw errorWithCause(
@@ -1995,14 +2023,15 @@ function blobStreamExitCode(exit: SpawnStreamExit, oid: string): number {
 async function readGitBlobBytesWithIndex(
   oid: string,
   sizeHint: number,
-): Promise<{ bytes: Uint8Array; index: LineOffsetIndex } | null> {
+): Promise<{ bytes: Uint8Array; index: LineOffsetIndex }> {
   const shown = git.catFileBlobStream(oid, cwd);
   const result = await collectBytesWithLineOffsetIndexFromStream(
     shown.stream,
     sizeHint,
   );
   const code = blobStreamExitCode(await shown.exited, oid);
-  if (code !== 0) return null;
+  if (code !== 0)
+    throw new Error(`git cat-file blob ${oid} exited with ${code}`);
   return result;
 }
 
@@ -2010,11 +2039,14 @@ async function collectGitBlobLineRangeFromStream(
   oid: string,
   start: number,
   end: number,
-): Promise<LineRangeResult | null> {
+): Promise<LineRangeResult> {
   const shown = git.catFileBlobStream(oid, cwd);
   const result = await collectLineRangeFromStream(shown.stream, start, end);
   const code = blobStreamExitCode(await shown.exited, oid);
-  if (code !== 0 && result.complete) return null;
+  // 途中で読むのをやめた (complete でない) ときの終了は想定内。
+  if (code !== 0 && result.complete) {
+    throw new Error(`git cat-file blob ${oid} exited with ${code}`);
+  }
   return result;
 }
 
@@ -2024,7 +2056,7 @@ async function collectIndexedGitBlobLineRange(
   size: number,
   start: number,
   end: number,
-): Promise<LineRangeResult | null> {
+): Promise<LineRangeResult> {
   const cacheKey = `${oid}\0${path}`;
   const cached = cachedBlobLineRange(cacheKey, start, end);
   if (cached) return cached;
@@ -2043,7 +2075,6 @@ async function collectIndexedGitBlobLineRange(
   if (size > LINE_INDEX_MAX_FILE_BYTES)
     return collectGitBlobLineRangeFromStream(oid, start, end);
   const indexedBlob = await readGitBlobBytesWithIndex(oid, size);
-  if (!indexedBlob) return null;
   setBlobLineCache(cacheKey, indexedBlob.bytes, indexedBlob.index);
   return (
     cachedBlobLineRange(cacheKey, start, end) ||
@@ -2110,9 +2141,11 @@ async function handleFileRange(url: URL) {
     if (refCheck.ok !== true)
       return text(refCheck.error, refCheck.status ?? 400);
     const oid = await git.objectIdAsync(ref, path, cwd);
-    if (oid.code !== 0 || !oid.oid) return text("not in ref", 404);
+    if (oid.code !== 0 || !oid.oid) return text(notInRef(oid.stderr), 404);
     const size = await git.objectByteSizeAsync(oid.oid, cwd);
-    if (size.code !== 0) return text("cannot read ref", 500);
+    if (size.code !== 0) {
+      return text(git.gitFailureMessage(size, "cannot read ref"), 500);
+    }
     const result = await collectIndexedGitBlobLineRange(
       path,
       oid.oid,
@@ -2120,7 +2153,6 @@ async function handleFileRange(url: URL) {
       start,
       end,
     );
-    if (!result) return text("cannot read ref", 500);
     const body: FileRangeResponse = {
       path,
       ref,
@@ -2144,9 +2176,11 @@ async function handleRawFile(req: Request, url: URL) {
     if (refCheck.ok !== true)
       return text(refCheck.error, refCheck.status ?? 400);
     const oid = await git.objectIdAsync(ref, path, cwd);
-    if (oid.code !== 0 || !oid.oid) return text("not in ref", 404);
+    if (oid.code !== 0 || !oid.oid) return text(notInRef(oid.stderr), 404);
     const sizeResult = await git.objectByteSizeAsync(oid.oid, cwd);
-    if (sizeResult.code !== 0) return text("cannot read ref", 500);
+    if (sizeResult.code !== 0) {
+      return text(git.gitFailureMessage(sizeResult, "cannot read ref"), 500);
+    }
     const size = sizeResult.size;
     const metadata = await gitFileMetadata(ref, path, size);
     const rangeResult = req.headers.get("range")
@@ -2177,7 +2211,9 @@ async function handleRawFile(req: Request, url: URL) {
         range.end + 1,
       );
       const code = blobStreamExitCode(await shown.exited, oid.oid);
-      if (code !== 0) return text("not in ref", 404);
+      if (code !== 0) {
+        throw new Error(`git cat-file blob ${oid.oid} exited with ${code}`);
+      }
       const body = bytes.buffer.slice(
         bytes.byteOffset,
         bytes.byteOffset + bytes.byteLength,
@@ -2259,8 +2295,9 @@ async function rawFileSize(path: string, ref: string): Promise<number | null> {
     // Report anything but a regular file as missing so /_file answers 404 -
     // the client uses that to tell a directory link apart from a file link.
     return stats.isFile() ? stats.size : null;
-  } catch {
-    return null;
+  } catch (error) {
+    if (isGonePath(error)) return null;
+    throw error;
   }
 }
 
@@ -2342,8 +2379,8 @@ async function handleUploadFiles(req: Request) {
   let form: FormData;
   try {
     form = await req.formData();
-  } catch {
-    return text("invalid form data", 400);
+  } catch (error) {
+    return text(`invalid form data: ${formatErrorDetail(error)}`, 400);
   }
 
   const dir = String(form.get("dir") || "").replace(/^\/+|\/+$/g, "");
@@ -2428,14 +2465,9 @@ async function handleOpenPath(req: Request) {
   const length = Number(req.headers.get("content-length") || "0");
   if (length > 1024) return text("payload too large", 413);
 
-  let body: { path?: unknown; kind?: unknown } = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > 1024) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, 1024, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as { path?: unknown; kind?: unknown };
 
   const path =
     typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
@@ -2470,14 +2502,9 @@ async function handleTrashPath(req: Request) {
   const length = Number(req.headers.get("content-length") || "0");
   if (length > 1024) return text("payload too large", 413);
 
-  let body: { path?: unknown } = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > 1024) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, 1024, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as { path?: unknown };
 
   const path =
     typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
@@ -2529,14 +2556,9 @@ async function handleCreateDirectory(req: Request) {
     return text("invalid content length", 400);
   if (length > 2048) return text("payload too large", 413);
 
-  let body: { dir?: unknown; name?: unknown } = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > 2048) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, 2048, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as { dir?: unknown; name?: unknown };
 
   const dir =
     typeof body.dir === "string"
@@ -2558,9 +2580,12 @@ async function handleCreateDirectory(req: Request) {
   try {
     mkdirSync(target, { recursive: false });
   } catch (error) {
-    if ((error as { code?: string }).code === "EEXIST")
-      return text("already exists", 409);
-    return text("create failed", 500);
+    if (errno(error) === "EEXIST") return text("already exists", 409);
+    console.error(
+      `[code-viewer] creating the folder ${targetPath} failed:`,
+      error,
+    );
+    return text(`create failed: ${formatErrorDetail(error)}`, 500);
   }
   // 空ディレクトリの作成は diff に影響しない。パス付きで通知して、開いている
   // Diff 画面のロード済みカードが全部 stale 扱いされるのを避ける。
@@ -2577,14 +2602,12 @@ async function handleRestoreTrash(req: Request) {
   const length = Number(req.headers.get("content-length") || "0");
   if (length > 1024) return text("payload too large", 413);
 
-  let body: { original_path?: unknown; trashPath?: unknown } = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > 1024) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, 1024, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as {
+    original_path?: unknown;
+    trashPath?: unknown;
+  };
 
   const originalPath =
     typeof body.original_path === "string"
@@ -2768,14 +2791,9 @@ async function handleJournal(req: Request): Promise<Response> {
   const length = Number(req.headers.get("content-length") || "0");
   if (length > maxBytes) return text("payload too large", 413);
 
-  let body: Record<string, unknown> = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > maxBytes) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, maxBytes, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as Record<string, unknown>;
 
   try {
     const action = body.action;
@@ -3027,14 +3045,9 @@ async function handleAnnotations(req: Request) {
   const length = Number(req.headers.get("content-length") || "0");
   if (length > maxBytes) return text("payload too large", 413);
 
-  let body: Record<string, unknown> = {};
-  try {
-    const raw = await req.text();
-    if (raw.length > maxBytes) return text("payload too large", 413);
-    body = JSON.parse(raw);
-  } catch {
-    return text("invalid json", 400);
-  }
+  const parsed = await readBoundedJsonBody(req, maxBytes, "payload too large");
+  if (parsed instanceof Response) return parsed;
+  const body = (parsed ?? {}) as Record<string, unknown>;
 
   const action = body.action;
   if (action === "start") {
@@ -3553,7 +3566,13 @@ if (process.env.CODE_VIEWER_DEV === "1") {
   setInterval(() => {
     try {
       process.kill(parentPid, 0);
-    } catch {
+    } catch (error) {
+      // ESRCH (居ない)・EPERM (pid が別の持ち主に使い回された) は親が居ない。
+      // ほかの理由でも親を確かめられないので終えるが、理由は出す。
+      const code = errno(error);
+      if (code !== "ESRCH" && code !== "EPERM") {
+        console.error("dev wrapper check failed:", error);
+      }
       console.log("dev wrapper exited; shutting down preview server");
       void shutdown.run(0);
     }
@@ -3645,8 +3664,7 @@ function startScopedWorktreeWatch(): WatchSupervisor {
       );
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`code-viewer worktree watch skipped: ${message}`);
+      console.warn("code-viewer worktree watch skipped:", error);
     },
   });
 }

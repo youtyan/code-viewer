@@ -6,7 +6,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { Readable } from "node:stream";
-import { errorWithCause } from "../core/error-detail";
+import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 
 /** `/events` sends this often; the entry proxy allows three missed beats. */
 export const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
@@ -361,7 +361,7 @@ export function startServer(options: {
         return;
       }
       res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("internal server error");
+      res.end(formatErrorDetail(error));
     }
   });
   return new Promise((resolve, reject) => {

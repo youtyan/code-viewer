@@ -989,7 +989,7 @@ async function runStatusTool(
       isError: !!(report.changed.error || report.staged.error),
     };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `status failed: ${detail}`, isError: true };
   }
 }
@@ -1143,7 +1143,7 @@ async function runFileShowTool(
       isError: report.error !== undefined,
     };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `file show failed: ${detail}`, isError: true };
   }
 }
@@ -1197,7 +1197,7 @@ async function runFileBlameTool(
       isError: report.result.error !== undefined,
     };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `file blame failed: ${detail}`, isError: true };
   }
 }
@@ -1280,7 +1280,7 @@ async function runFileHistoryTool(
       isError: report.result.error !== undefined,
     };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `file history failed: ${detail}`, isError: true };
   }
 }
@@ -1423,7 +1423,7 @@ async function runFileDiffTool(
       isError: report.error !== undefined,
     };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `file diff failed: ${detail}`, isError: true };
   }
 }
@@ -1623,7 +1623,7 @@ async function runDatastoreSourcesTool(
     );
     return { text: JSON.stringify(payload, null, 2) };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `datastore sources failed: ${detail}`, isError: true };
   }
 }
@@ -1659,7 +1659,7 @@ async function runDatastoreSchemasTool(
     );
     return dbServiceResultToMcpToolReturn("datastore schemas", result);
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `datastore schemas failed: ${detail}`, isError: true };
   }
 }
@@ -1705,7 +1705,7 @@ async function runDatastoreSchemaTool(
     );
     return dbServiceResultToMcpToolReturn("datastore schema", result);
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `datastore schema failed: ${detail}`, isError: true };
   }
 }
@@ -1748,7 +1748,7 @@ async function runDatastoreColumnsTool(
     );
     return dbServiceResultToMcpToolReturn("datastore columns", result);
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `datastore columns failed: ${detail}`, isError: true };
   }
 }
@@ -1794,7 +1794,7 @@ async function runDatastoreDdlTool(
     );
     return dbServiceResultToMcpToolReturn("datastore DDL", result);
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `datastore DDL failed: ${detail}`, isError: true };
   }
 }
@@ -1854,7 +1854,7 @@ async function runDatastoreQueryTool(
     );
     return dbServiceResultToMcpToolReturn("datastore query", result);
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `datastore query failed: ${detail}`, isError: true };
   }
 }
@@ -1888,7 +1888,7 @@ async function runDatastoreHistoryTool(
     });
     return dbServiceResultToMcpToolReturn("datastore history", result);
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return { text: `datastore history failed: ${detail}`, isError: true };
   }
 }
@@ -2057,7 +2057,7 @@ export function parseJsonRpcBody(
   try {
     return { ok: true, value: JSON.parse(body) };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = formatErrorDetail(err);
     return {
       ok: false,
       response: jsonRpcError(
@@ -2177,7 +2177,8 @@ export async function dispatchJsonRpc(
         };
     }
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    console.error("[code-viewer] MCP request failed:", err);
+    const detail = formatErrorDetail(err);
     return {
       kind: "response",
       body: jsonRpcError(
