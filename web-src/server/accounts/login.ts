@@ -52,12 +52,14 @@ export const ACCOUNT_READ_REQUESTS = [
   }),
 ];
 
-/** 行ごとに読む対話の結果。timedOut なら code は null。 */
+/** 行ごとに読む対話の結果。timedOut・tooMuchOutput なら code は null。 */
 export type RpcResult = {
   code: number | null;
   lines: string[];
   stderr: string;
   timedOut: boolean;
+  /** stdout が RPC_MAX_BYTES を超えたので止めた。 */
+  tooMuchOutput: boolean;
 };
 
 export type LoginDeps = {
@@ -92,6 +94,7 @@ function runRpc(
     let bytes = 0;
     let stderr = "";
     let timedOut = false;
+    let tooMuchOutput = false;
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
@@ -100,6 +103,7 @@ function runRpc(
     child.stdout.on("data", (chunk: string) => {
       bytes += chunk.length;
       if (bytes > RPC_MAX_BYTES) {
+        tooMuchOutput = true;
         child.kill("SIGKILL");
         return;
       }
@@ -120,7 +124,7 @@ function runRpc(
     // 先に終わったプロセスへ書くと EPIPE になる。終わった理由は close の
     // 終了コードと stderr で分かるので、ここでは書き込みの失敗だけを添える。
     child.stdin.on("error", (error) => {
-      stderr += `\n[stdin] ${formatErrorDetail(error).split("\n")[0]}`;
+      stderr += `\n[stdin] ${formatErrorDetail(error)}`;
     });
     child.on("error", (error) => {
       clearTimeout(timer);
@@ -129,7 +133,13 @@ function runRpc(
     child.on("close", (code) => {
       clearTimeout(timer);
       if (pending) lines.push(pending);
-      resolve({ code: timedOut ? null : code, lines, stderr, timedOut });
+      resolve({
+        code: timedOut || tooMuchOutput ? null : code,
+        lines,
+        stderr,
+        timedOut,
+        tooMuchOutput,
+      });
     });
     child.stdin.write(`${requests.join("\n")}\n`);
   });
@@ -298,9 +308,11 @@ export function parseCodexAccountRead(
   if (!answer) {
     const how = result.timedOut
       ? `did not answer within ${LOGIN_TIMEOUT_MS / 1000} s`
-      : isNotFound(result)
-        ? "was not found"
-        : `exited with ${result.code} without answering`;
+      : result.tooMuchOutput
+        ? `was stopped after writing more than ${RPC_MAX_BYTES} bytes to stdout`
+        : isNotFound(result)
+          ? "was not found"
+          : `exited with ${result.code} without answering`;
     const stderr = stderrHead(result.stderr);
     return none(
       `${asked} ${how}${stderr ? `: ${stderr}` : ""} (${result.lines.length} lines on stdout, not shown)`,

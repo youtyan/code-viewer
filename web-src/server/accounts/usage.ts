@@ -404,7 +404,12 @@ export function readCodexUsage(configDir: string): AccountUsage {
   try {
     files = recentRolloutFiles(sessions);
   } catch (error) {
-    if (errno(error) === "ENOENT") {
+    // sessions そのものが無いときだけ「まだ使っていない」。中の日付のフォルダや
+    // ファイルが途中で消えたのは、読めなかった理由として出す。
+    if (
+      errno(error) === "ENOENT" &&
+      (error as NodeJS.ErrnoException).path === sessions
+    ) {
       return {
         status: "unavailable",
         reason: "no-sessions",

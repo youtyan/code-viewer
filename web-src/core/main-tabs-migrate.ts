@@ -17,6 +17,7 @@
 // - 読めない配置・知らない種類のタブは捨てずに、場所・理由・元の値を unmigrated
 //   に返す (呼び出し側は元のファイルを写して残し、理由を出す)
 
+import { formatErrorDetail } from "./error-detail";
 import {
   assertLayout,
   canPlace,
@@ -24,6 +25,7 @@ import {
   emptyLayout,
   isNewerLayoutVersion,
   type Layout,
+  parseCommonTabs,
   parseLayout,
   type SerializedLayout,
   type SerializedPageRoute,
@@ -31,7 +33,6 @@ import {
   serializeLayout,
   type Tab,
   type TabTarget,
-  parseCommonTabs,
 } from "./main-tabs";
 
 export type Unmigrated = { at: string; reason: string; raw: unknown };
@@ -112,7 +113,7 @@ export function migratePerProjectTabs(raw: unknown): MigratedTabs {
     } catch (error) {
       unmigrated.push({
         at,
-        reason: error instanceof Error ? error.message : String(error),
+        reason: formatErrorDetail(error),
         raw: entry.layout,
       });
       continue;
@@ -165,8 +166,18 @@ export function migratePerProjectTabs(raw: unknown): MigratedTabs {
   if ("common" in file && file.common !== undefined) {
     const common = file.common as unknown;
     const tabs = isRecord(common) ? common.tabs : undefined;
+    // 読めない共通のタブだけを「移せなかった」にする。移す処理の誤りは投げる。
+    let parsed: ReturnType<typeof parseCommonTabs> | null = null;
     try {
-      const parsed = parseCommonTabs(tabs);
+      parsed = parseCommonTabs(tabs);
+    } catch (error) {
+      unmigrated.push({
+        at: "common",
+        reason: formatErrorDetail(error),
+        raw: common,
+      });
+    }
+    if (parsed !== null) {
       if (parsed.kind === "newer")
         unmigrated.push({
           at: "common",
@@ -194,12 +205,6 @@ export function migratePerProjectTabs(raw: unknown): MigratedTabs {
           moved += 1;
         }
       }
-    } catch (error) {
-      unmigrated.push({
-        at: "common",
-        reason: error instanceof Error ? error.message : String(error),
-        raw: common,
-      });
     }
   }
   assertLayout(result);

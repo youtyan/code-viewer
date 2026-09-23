@@ -25,6 +25,7 @@ import {
   describe,
   expect,
   test,
+  vi,
 } from "vitest";
 import type { AgentEvent, AgentState } from "../core/agent-state";
 import { MAX_TERMINAL_IMAGE_QUERY } from "../core/terminal-images";
@@ -485,6 +486,31 @@ describe("画像の貼り付け", () => {
   ])("$name ものは弾く", async ({ body }) => {
     const res = await post("/_agent/paste", body);
     expect(res?.status).toBe(400);
+  });
+
+  test("保存できないときは 500 の本文に理由を出す", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "code-viewer-paste-"));
+    // 置き場所の親がファイルなので mkdir が失敗する。
+    writeFileSync(join(repo, ".code-viewer"), "not a directory");
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const res = await postRoute(
+        handleAgentRoute,
+        "/_agent/paste",
+        { mime: "image/png", data: PNG_1PX },
+        undefined,
+        repo,
+      );
+      expect(res?.status).toBe(500);
+      expect(await res?.text()).toMatch(
+        /^failed to save image: Error: .*\nDetails: \{.*"syscall":"mkdir".*\}$/s,
+      );
+    } finally {
+      errors.mockRestore();
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
 

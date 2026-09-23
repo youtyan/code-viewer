@@ -75,8 +75,18 @@ export function loadShikiHighlighter(
       langs: options.langs,
     }),
   );
+  // fallback の呼び出し側は色なしの文字で出し続ける。失敗は 1 度だけ記録する
+  // (同じ組み合わせの null を覚えるので、2 度目以降は読み直さない)。
   const promise =
-    options.failureMode === "throw" ? load : load.catch(() => null);
+    options.failureMode === "throw"
+      ? load
+      : load.catch((error: unknown) => {
+          console.error(
+            `shiki: could not load the highlighter (${options.langs.join(", ")}); showing plain text`,
+            error,
+          );
+          return null;
+        });
   cache.set(key, promise);
   return promise;
 }

@@ -123,8 +123,10 @@ function ensureHighlightLanguage(
   if (hljsRef.getLanguage?.(name)) return;
   try {
     hljsRef.registerLanguage(name, definition);
-  } catch {
-    // A broken optional language must not disable the rest of highlighting.
+  } catch (error) {
+    // A broken optional language must not disable the rest of highlighting,
+    // but the broken registration is logged instead of vanishing.
+    console.error(`highlight.js: could not register ${name}`, error);
   }
 }
 

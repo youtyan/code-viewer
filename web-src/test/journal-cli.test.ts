@@ -214,6 +214,67 @@ describe("parseJournalArgs", () => {
     );
   });
 
+  test.each([
+    {
+      flag: "--body-file",
+      argv: (path: string) => [
+        "add",
+        "--date",
+        "2026-09-24",
+        "--title",
+        "T",
+        "--body-file",
+        path,
+      ],
+    },
+    {
+      flag: "--note-file",
+      argv: (path: string) => [
+        "task-done",
+        "t1",
+        "--by",
+        "a",
+        "--note-file",
+        path,
+      ],
+    },
+  ])("an unreadable $flag says why, after the flag and the path", async ({
+    flag,
+    argv,
+  }) => {
+    const path = join(tmpdir(), "code-viewer-journal-missing", "sample.md");
+    const captured = captureIo();
+    try {
+      await catchExitAsync(() => runJournalCli([...argv(path), "--dry-run"]));
+    } finally {
+      restoreIo();
+    }
+    expect(captured.exits).toEqual([1]);
+    expect(captured.errs.join("\n")).toMatch(
+      new RegExp(
+        `^could not read ${flag}: ${path}\\nError: ENOENT.*\\nDetails: \\{.*"code":"ENOENT".*"syscall":"open"`,
+        "s",
+      ),
+    );
+  });
+
+  test("only argument mistakes become a usage error; other failures are thrown", () => {
+    const failure = new TypeError("sample parser failure");
+    const argv = ["add", "--title", "T"];
+    Object.defineProperty(argv, 2, {
+      get() {
+        throw failure;
+      },
+    });
+    expect(() => parseJournalArgs(argv)).toThrow(failure);
+    expect(
+      parseJournalArgs(["add", "--date", "someday", "--title", "T"]),
+    ).toEqual({
+      ok: false,
+      error: "--date must be YYYY-MM-DD or today",
+    });
+  });
+
   test("dry-run normalizes task-add none dates to null", async () => {
     const captured = captureIo();
     try {

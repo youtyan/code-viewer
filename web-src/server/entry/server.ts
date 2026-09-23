@@ -24,11 +24,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { PROJECT_HEADER } from "../../core/api-url";
 import { hasControlCharacter } from "../../core/control-chars";
-import {
-  errorWithCause,
-  errorWithCauses,
-  formatErrorDetail,
-} from "../../core/error-detail";
+import { errorWithCause, formatErrorDetail } from "../../core/error-detail";
 import type { ProjectOpenResponse } from "../../core/projects";
 import type {
   EntryBackendFailure,
@@ -43,6 +39,7 @@ import {
   parseBoundedJsonBody,
   textError,
 } from "../database/handle-shared";
+import { cleanUpAfterFailure, processAlive } from "../file-lock";
 import * as git from "../git";
 import { openUrlInOs } from "../os-opener";
 import { ProjectRegistryError } from "../projects/registry";
@@ -339,14 +336,7 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
   try {
     await registerLaunchRoot(launchRoot);
   } catch (error) {
-    try {
-      lock.release();
-    } catch (releaseError) {
-      throw errorWithCauses(
-        "project registration and entry start lock release both failed",
-        [error, releaseError],
-      );
-    }
+    cleanUpAfterFailure(() => lock.release(), error, "project registration");
     throw error;
   }
   let server: Awaited<ReturnType<typeof startServer>>;
@@ -363,7 +353,7 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
         ),
     });
   } catch (error) {
-    lock.release();
+    cleanUpAfterFailure(() => lock.release(), error, "entry server start");
     fail(
       `code-viewer could not start the entry server on port ${args.port}:\n${formatErrorDetail(error)}`,
     );
@@ -378,9 +368,11 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
       version: VERSION,
       started_at: context.startedAt,
     });
-  } finally {
-    lock.release();
+  } catch (error) {
+    cleanUpAfterFailure(() => lock.release(), error, "writing entry.json");
+    throw error;
   }
+  lock.release();
   const shutdown = createProcessShutdown([
     {
       label: "code-viewer entry record cleanup",
@@ -430,13 +422,11 @@ export async function runEntry(argv: readonly string[]): Promise<void> {
   }
   if (process.env.CODE_VIEWER_DEV === "1") {
     const parentPid = process.ppid;
+    // 居ない (ESRCH) ときだけ終わる。確かめられない失敗は投げて、共通の終了処理へ。
     setInterval(() => {
-      try {
-        process.kill(parentPid, 0);
-      } catch {
-        console.log("dev wrapper exited; shutting down the entry server");
-        void shutdown.run(0);
-      }
+      if (processAlive(parentPid)) return;
+      console.log("dev wrapper exited; shutting down the entry server");
+      void shutdown.run(0);
     }, 1000).unref();
   }
   // 開発中の読み直し (index.html・style.css・app.js) は裏の SSE が送る

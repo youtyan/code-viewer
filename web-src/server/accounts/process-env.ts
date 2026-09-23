@@ -15,6 +15,7 @@
 
 import { basename } from "node:path";
 import { pickAccountEnv } from "../../core/agent-accounts";
+import { formatErrorDetail } from "../../core/error-detail";
 import { runAsync } from "../runtime";
 
 /** 調べ直すまでの間。コマンド名が変わったらすぐ調べ直す。 */
@@ -186,7 +187,7 @@ export function createProcessEnvProber(
       listCalls += 1;
       rows = await deps.listProcesses();
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = formatErrorDetail(error);
       for (const target of stale) remember(target, { status: "error", reason });
       return out;
     }
@@ -211,7 +212,7 @@ export function createProcessEnvProber(
       envCalls += 1;
       envs = await deps.readAccountEnv([...new Set(agentPid.values())]);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = formatErrorDetail(error);
       for (const target of stale) {
         if (agentPid.has(target.id))
           remember(target, { status: "error", reason });
@@ -275,7 +276,7 @@ export function createProcessEnvProber(
           // refresh は失敗を結果として覚えるので、ここに来るのは想定外の
           // 例外だけ。黙って捨てず、行に理由として出す。
           console.error("[code-viewer] account probe failed", error);
-          const reason = error instanceof Error ? error.message : String(error);
+          const reason = formatErrorDetail(error);
           for (const target of old) {
             cache.set(target.id, {
               key: `${target.pid}:${target.command}`,

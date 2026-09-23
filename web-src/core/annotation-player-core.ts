@@ -28,6 +28,10 @@ export type PlayerCoreDeps = {
   onStateChange(state: PlayerState): void;
 };
 
+function reportJumpFailure(entryId: string, error: unknown): void {
+  console.error(`annotation player: could not jump to entry ${entryId}`, error);
+}
+
 export function createAnnotationPlayerCore(deps: PlayerCoreDeps) {
   let status: PlayerStatus = "idle";
   let index = -1;
@@ -76,7 +80,11 @@ export function createAnnotationPlayerCore(deps: PlayerCoreDeps) {
         cancelCurrent = deps.schedule(deps.displayMs(text), advance);
       }
     };
-    deps.jump(item.entryId).then(proceed, proceed);
+    // 飛べなくても読み上げは続ける。飛べなかったことは記録する。
+    deps.jump(item.entryId).then(proceed, (error: unknown) => {
+      reportJumpFailure(item.entryId, error);
+      proceed();
+    });
   }
 
   function play(fromIndex?: number) {
@@ -117,7 +125,10 @@ export function createAnnotationPlayerCore(deps: PlayerCoreDeps) {
       index = clamped;
       emit();
       const item = deps.items()[clamped];
-      if (item) void deps.jump(item.entryId).catch(() => undefined);
+      if (item)
+        void deps
+          .jump(item.entryId)
+          .catch((error: unknown) => reportJumpFailure(item.entryId, error));
     }
   }
 

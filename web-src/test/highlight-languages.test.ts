@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   ensureGdscriptHighlightLanguage,
   ensureTerraformHighlightLanguage,
@@ -73,5 +73,31 @@ describe("highlight language registration", () => {
     ensure(api);
 
     expect(calls).toBe(0);
+  });
+
+  test.each(
+    LANGUAGE_CASES,
+  )("a failing $language registration is logged, not thrown", ({
+    language,
+    ensure,
+  }) => {
+    const failure = new Error("sample registration failure");
+    const api: HljsApi = {
+      getLanguage: () => null,
+      registerLanguage: () => {
+        throw failure;
+      },
+    };
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      ensure(api);
+      expect(errors.mock.calls).toEqual([
+        [`highlight.js: could not register ${language}`, failure],
+      ]);
+    } finally {
+      errors.mockRestore();
+    }
   });
 });

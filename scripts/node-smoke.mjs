@@ -146,5 +146,6 @@ try {
   clearTimeout(hardLimit);
   child.kill("SIGTERM");
 } catch (error) {
-  fail(error instanceof Error ? error.message : String(error));
+  // 元の error ごと (スタックと cause まで) 出す。
+  fail(error);
 }

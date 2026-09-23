@@ -672,32 +672,41 @@ describe("process environment", () => {
     expect(calls).toEqual({ list: 2, env: 2 });
   });
 
+  const spawnFailure = Object.assign(new Error("spawn ps EAGAIN"), {
+    code: "EAGAIN",
+  });
   test.each([
     {
       name: "ps -A fails",
       over: {
         async listProcesses(): Promise<never> {
-          throw new Error("ps -A exited with 1\nstderr: sample failure");
+          throw Object.assign(new Error("ps -A exited with 1"), {
+            cause: spawnFailure,
+          });
         },
       },
-      reason: "ps -A exited with 1",
+      reason:
+        'Error: ps -A exited with 1\nCaused by: Error: spawn ps EAGAIN\nDetails: {"code":"EAGAIN"}',
     },
     {
       name: "ps eww fails",
       over: {
         async readAccountEnv(): Promise<never> {
-          throw new Error("ps eww exited with 2\nstderr: sample failure");
+          throw Object.assign(new Error("ps eww exited with 2"), {
+            cause: spawnFailure,
+          });
         },
       },
-      reason: "ps eww exited with 2",
+      reason:
+        'Error: ps eww exited with 2\nCaused by: Error: spawn ps EAGAIN\nDetails: {"code":"EAGAIN"}',
     },
-  ])("when $name the reason is kept for the row", async ({ over, reason }) => {
+  ])("when $name the reason and its cause are kept for the row", async ({
+    over,
+    reason,
+  }) => {
     const { value } = deps(over);
     const out = await createProcessEnvProber(value).probe(targets);
-    expect(out.get("%1")).toEqual({
-      status: "error",
-      reason: expect.stringContaining(reason),
-    });
+    expect(out.get("%1")).toEqual({ status: "error", reason });
   });
 });
 
@@ -888,6 +897,7 @@ describe("login status (asked from the CLI itself)", () => {
     lines,
     stderr: "",
     timedOut: false,
+    tooMuchOutput: false,
   });
   test.each([
     {
@@ -952,6 +962,7 @@ describe("login status (asked from the CLI itself)", () => {
         lines: [`${EMAIL} sample`],
         stderr: "error: unrecognized subcommand 'app-server'\n",
         timedOut: false,
+        tooMuchOutput: false,
       },
       expected: {
         who: "",
@@ -961,7 +972,13 @@ describe("login status (asked from the CLI itself)", () => {
     },
     {
       name: "no answer in time",
-      result: { code: null, lines: [], stderr: "", timedOut: true },
+      result: {
+        code: null,
+        lines: [],
+        stderr: "",
+        timedOut: true,
+        tooMuchOutput: false,
+      },
       expected: {
         who: "",
         whoDetail:
@@ -975,6 +992,7 @@ describe("login status (asked from the CLI itself)", () => {
         lines: [],
         stderr: "zsh:1: command not found: codex",
         timedOut: false,
+        tooMuchOutput: false,
       },
       expected: {
         who: "",
@@ -1058,6 +1076,39 @@ describe("login status (asked from the CLI itself)", () => {
     expect(login).toMatchObject({ state: "logged-in", who: "" });
     expect(login.whoDetail).toContain(
       "codex app-server could not run: Error: spawn /bin/sample-shell ENOENT",
+    );
+  });
+
+  test("an app-server that floods stdout is stopped and says so", async () => {
+    const fake =
+      "process.stdout.write('x'.repeat(2 * 1024 * 1024)); setInterval(() => {}, 1000);";
+    const result = await DEFAULT_LOGIN_DEPS.rpc(
+      [process.execPath, "-e", fake],
+      process.env,
+      ACCOUNT_READ_REQUESTS,
+      () => false,
+    );
+    expect(result).toMatchObject({
+      code: null,
+      timedOut: false,
+      tooMuchOutput: true,
+    });
+    expect(parseCodexAccountRead(result).whoDetail).toBe(
+      `codex app-server (account/read) was stopped after writing more than 1048576 bytes to stdout (${result.lines.length} lines on stdout, not shown)`,
+    );
+  });
+
+  test("a failed write to the app-server's stdin keeps the whole reason", async () => {
+    // 子は stdin をすぐ閉じる。書き込みが pipe の容量を超えると EPIPE になる。
+    const fake = "process.stdin.destroy(); setTimeout(() => {}, 300);";
+    const result = await DEFAULT_LOGIN_DEPS.rpc(
+      [process.execPath, "-e", fake],
+      process.env,
+      ["x".repeat(1024 * 1024)],
+      () => false,
+    );
+    expect(result.stderr).toMatch(
+      /\[stdin\] Error: write E[A-Z]+\nDetails: \{.*"syscall":"write".*\}/,
     );
   });
 

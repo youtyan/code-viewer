@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   buildLineOffsetIndex,
   buildLineOffsetIndexFromStream,
@@ -233,5 +233,49 @@ describe("line offset index", () => {
     expect(
       collectLineRangeFromIndexedText("one\ntwo\nthree", index, 1, 3).complete,
     ).toBe(true);
+  });
+});
+
+describe("cancelling the rest of a stream", () => {
+  // 読み終えた後の取り消しが失敗しても、読んだ分は返し、失敗は記録する。
+  test.each([
+    {
+      name: "a line range",
+      read: (stream: ReadableStream<Uint8Array>) =>
+        collectLineRangeFromStream(stream, 1, 1).then((r) => r.lines),
+      expected: ["one"],
+    },
+    {
+      name: "a byte range",
+      read: (stream: ReadableStream<Uint8Array>) =>
+        collectByteRangeFromStream(stream, 0, 3).then((bytes) =>
+          new TextDecoder().decode(bytes),
+        ),
+      expected: "one",
+    },
+  ])("$name keeps what it read and logs a failed cancel", async ({
+    read,
+    expected,
+  }) => {
+    const failure = new Error("sample cancel failure");
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("one\ntwo\nthree\n"));
+      },
+      cancel() {
+        throw failure;
+      },
+    });
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      expect(await read(stream)).toEqual(expected);
+      expect(errors.mock.calls).toEqual([
+        ["[code-viewer] could not cancel the rest of a stream", failure],
+      ]);
+    } finally {
+      errors.mockRestore();
+    }
   });
 });

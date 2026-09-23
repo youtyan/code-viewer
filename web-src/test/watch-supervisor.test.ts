@@ -179,12 +179,31 @@ describe("watch supervisor: 通知の受け渡し", () => {
     supervisor.close();
   });
 
-  test("壊れた行は無視し、子を落とさない", () => {
-    const { supervisor, children, updates } = startWithFakes();
+  test("壊れた行は理由を報告し、子を落とさない", () => {
+    const { supervisor, children, updates, errors } = startWithFakes();
     children[0].emitRaw("not json at all\n");
     children[0].emitMessage({ type: "update", paths: ["a.ts"] });
     expect(updates).toEqual([["a.ts"]]);
     expect(children).toHaveLength(1);
+    expect(errors).toEqual([
+      'watch child sent a line that is not JSON: "not json at all"',
+    ]);
+    supervisor.close();
+  });
+
+  test("通知の受け手が投げても報告して、次の行を続けて処理する", () => {
+    let calls = 0;
+    const { supervisor, children, errors } = startWithFakes({
+      onUpdate: () => {
+        calls++;
+        if (calls === 1) throw new Error("sample handler failure");
+      },
+    });
+    children[0].emitRaw(
+      '{"type":"update","paths":["a.ts"]}\n{"type":"update","paths":["b.ts"]}\n',
+    );
+    expect(calls).toBe(2);
+    expect(errors).toEqual(["sample handler failure"]);
     supervisor.close();
   });
 });
@@ -234,6 +253,23 @@ describe("watch supervisor: 故障からの復帰", () => {
     supervisor.close();
   });
 
+  test("差し替えた子にシグナルを送れなかったら報告する", () => {
+    const { supervisor, clock, children, ready, errors } = startWithFakes();
+    ready(children[0]);
+    children[0].kill = () => {
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    };
+    clock.advance(HEARTBEAT_MS * 4);
+    ready(children[1]);
+    clock.advance(2_000);
+    expect(errors).toEqual([
+      "watch child stopped reporting; restarting",
+      "could not send SIGTERM to the abandoned watch child (pid undefined)",
+      "could not send SIGKILL to the abandoned watch child (pid undefined)",
+    ]);
+    supervisor.close();
+  });
+
   test("SIGTERM の猶予を過ぎたら SIGKILL を送る", () => {
     const { supervisor, clock, children, ready } = startWithFakes();
     ready(children[0]);
@@ -244,10 +280,13 @@ describe("watch supervisor: 故障からの復帰", () => {
     supervisor.close();
   });
 
-  test("exit した子は間を置いて再起動する", () => {
-    const { supervisor, children, clock, ready } = startWithFakes();
+  test("exit した子は終わり方を報告し、間を置いて再起動する", () => {
+    const { supervisor, children, clock, ready, errors } = startWithFakes();
     ready(children[0]);
     children[0].emit("exit", 1, null);
+    expect(errors).toEqual([
+      "watch child exited (code 1, signal null); restarting",
+    ]);
     expect(children).toHaveLength(1);
     clock.advance(HEARTBEAT_MS);
     expect(children).toHaveLength(2);

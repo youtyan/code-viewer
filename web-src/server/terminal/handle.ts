@@ -433,7 +433,7 @@ async function handlePastePost(req: Request, cwd: string): Promise<Response> {
   if (result.status === "invalid") return textError(result.message, 400);
   if (result.status === "error") {
     console.error(`[code-viewer] paste save failed: ${result.message}`);
-    return textError("failed to save image", 500);
+    return textError(`failed to save image: ${result.message}`, 500);
   }
   return json({
     path: result.path,

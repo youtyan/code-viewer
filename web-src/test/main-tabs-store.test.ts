@@ -398,8 +398,21 @@ describe("main tabs store: 前の版 (プロジェクトごと) の保存を移�
       {
         at: 'projects["/work/sample-lib"]',
         reason:
-          'main tab layout is broken (2 problems):\n- focused is "middle"\n- panes has 0 entries (1 or 2 allowed)',
+          'Error: main tab layout is broken (2 problems):\n- focused is "middle"\n- panes has 0 entries (1 or 2 allowed)',
         raw: broken,
+      },
+    ]);
+  });
+
+  test("読めない共通のタブは、error の名前ごと理由を返す", async () => {
+    const common = { tabs: "sample broken tabs" };
+    writeFileSync(path, JSON.stringify({ version: 1, projects: {}, common }));
+    const loaded = await loadMainTabs(path, 0);
+    expect(loaded.kind === "ok" && loaded.migration?.unmigrated).toEqual([
+      {
+        at: "common",
+        reason: "Error: common tabs: not an object",
+        raw: common,
       },
     ]);
   });

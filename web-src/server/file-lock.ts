@@ -75,16 +75,30 @@ export function processAlive(pid: number): boolean {
   }
 }
 
+/**
+ * 中身が壊れている (空・JSON でない・欄が無い) ロック。古ければ奪ってよい。
+ * 読めない (権限・I/O) の失敗とは分ける: そちらは奪わずに投げる。
+ */
+class BrokenLockError extends Error {}
+
 function readFileLock(file: string): FileLockEntry | null {
-  let raw: unknown;
+  let text: string;
   try {
-    raw = JSON.parse(readFileSync(file, "utf8"));
+    text = readFileSync(file, "utf8");
   } catch (error) {
     if (errno(error) === "ENOENT") return null;
     throw errorWithCause(`failed to read lock ${file}`, error);
   }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (error) {
+    throw Object.assign(new BrokenLockError(`invalid lock ${file}: not JSON`), {
+      cause: error,
+    });
+  }
   if (!raw || typeof raw !== "object") {
-    throw new Error(`invalid lock ${file}: expected an object`);
+    throw new BrokenLockError(`invalid lock ${file}: expected an object`);
   }
   const entry = raw as Record<string, unknown>;
   if (
@@ -95,7 +109,7 @@ function readFileLock(file: string): FileLockEntry | null {
     typeof entry.createdAt !== "number" ||
     !Number.isFinite(entry.createdAt)
   ) {
-    throw new Error(`invalid lock ${file}: missing required fields`);
+    throw new BrokenLockError(`invalid lock ${file}: missing required fields`);
   }
   return {
     token: entry.token,
@@ -111,6 +125,7 @@ function lockTokenOrUnreadable(file: string): string | { unreadable: unknown } {
     if (entry) return entry.token;
     return { unreadable: new Error(`lock ${file} disappeared`) };
   } catch (error) {
+    if (!(error instanceof BrokenLockError)) throw error;
     return { unreadable: error };
   }
 }
@@ -137,20 +152,54 @@ function removeStaleLock(
     throw error;
   }
   try {
-    const moved = lockTokenOrUnreadable(aside);
-    if (expected === null ? typeof moved !== "string" : moved === expected) {
-      return;
-    }
-    try {
-      linkSync(aside, file);
-    } catch (error) {
-      throw errorWithCauses(
-        `the lock ${file} was replaced by another owner while taking over a stale one, and could not be put back`,
-        typeof moved === "string" ? [error] : [error, moved.unreadable],
-      );
-    }
-  } finally {
-    unlinkSync(aside);
+    putBackIfReplaced(file, aside, expected);
+  } catch (error) {
+    cleanUpAfterFailure(
+      () => unlinkSync(aside),
+      error,
+      `taking over the stale lock ${file}`,
+    );
+    throw error;
+  }
+  unlinkSync(aside);
+}
+
+/** 退避したものが読んだものと違う (相手の新しいロック) なら元の場所へ戻す。 */
+function putBackIfReplaced(
+  file: string,
+  aside: string,
+  expected: string | null,
+): void {
+  const moved = lockTokenOrUnreadable(aside);
+  if (expected === null ? typeof moved !== "string" : moved === expected) {
+    return;
+  }
+  try {
+    linkSync(aside, file);
+  } catch (error) {
+    throw errorWithCauses(
+      `the lock ${file} was replaced by another owner while taking over a stale one, and could not be put back`,
+      typeof moved === "string" ? [error] : [error, moved.unreadable],
+    );
+  }
+}
+
+/**
+ * 失敗した処理の後の片付け。片付けも失敗したら、元の失敗と両方を持つ error を
+ * 投げる (片付けの失敗で元の失敗を上書きしない)。成功したら何もしない。
+ */
+export function cleanUpAfterFailure(
+  cleanUp: () => void,
+  error: unknown,
+  what: string,
+): void {
+  try {
+    cleanUp();
+  } catch (cleanUpError) {
+    throw errorWithCauses(`${what} failed, and cleaning up also failed`, [
+      error,
+      cleanUpError,
+    ]);
   }
 }
 
@@ -201,15 +250,23 @@ function placeLockEntry(
     flag: "wx",
     mode: 0o600,
   });
+  let placed: boolean;
   try {
     linkSync(temp, file);
-    return true;
+    placed = true;
   } catch (error) {
-    if (errno(error) !== "EEXIST") throw error;
-    return false;
-  } finally {
-    unlinkSync(temp);
+    if (errno(error) !== "EEXIST") {
+      cleanUpAfterFailure(
+        () => unlinkSync(temp),
+        error,
+        `placing the lock ${file}`,
+      );
+      throw error;
+    }
+    placed = false;
   }
+  unlinkSync(temp);
+  return placed;
 }
 
 /**
@@ -247,7 +304,11 @@ export function tryAcquireFileLock(
       // 書きかけのまま落ちると残る。放っておくと、このロックを使う経路が
       // ずっと失敗し続けるので、staleMs より古ければ理由を出して奪う。
       // 新しいものは、書きかけかもしれないので今までどおり投げる。
-      if (!takeOverUnreadableLock(file, error, now, options.staleMs, token)) {
+      // 権限・I/O で読めないものは中身が壊れているとは限らないので奪わない。
+      if (
+        !(error instanceof BrokenLockError) ||
+        !takeOverUnreadableLock(file, error, now, options.staleMs, token)
+      ) {
         throw error;
       }
       continue;
@@ -284,7 +345,11 @@ export async function withFileLock<T>(
   try {
     result = await run();
   } catch (error) {
-    lock.release();
+    cleanUpAfterFailure(
+      () => lock.release(),
+      error,
+      `the work under the lock ${file}`,
+    );
     throw error;
   }
   lock.release();

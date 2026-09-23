@@ -4,7 +4,7 @@
 // `annotate-cli.ts` と `query-cli.ts` で同じ形が token fingerprint 完全一致
 // していたため集約。
 
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { errorWithCause, formatErrorDetail } from "../core/error-detail";
 import {
   type ExternalCommandName,
@@ -84,6 +84,19 @@ export function takeGlobalCliOption(
     };
   }
   return { kind: "unhandled" };
+}
+
+// `--body-file` などで渡されたファイルを読む。読めなければ 1 行目に旗とパス、
+// 次の行に理由 (code・syscall・cause) を出して exit 1。
+export function readFlagFile(flag: string, path: string): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    console.error(
+      `could not read ${flag}: ${path}\n${formatErrorDetail(error)}`,
+    );
+    process.exit(1);
+  }
 }
 
 // POSIX shell の single-quote 規則: '...' 内は literal、内部の ' だけ

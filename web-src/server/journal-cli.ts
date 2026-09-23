@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import {
   filterJournalTasks,
   isIsoDate,
@@ -13,6 +12,7 @@ import {
 } from "../core/journal";
 import {
   ensureServerUrl,
+  readFlagFile,
   readStdin,
   requestJson,
   resolveRepoRoot,
@@ -217,6 +217,9 @@ explicit task queues without guessing from memory.
   your local labels. It does not copy the issue body or update GitHub.
 `;
 
+/** 利用者が渡した引数の誤り。parseJournalArgs はこれだけを案内の文にする。 */
+class JournalArgsError extends Error {}
+
 function parsePositiveInteger(
   value: string | undefined,
   flag: string,
@@ -224,7 +227,7 @@ function parsePositiveInteger(
   if (value === undefined) return undefined;
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1)
-    throw new Error(`${flag} must be a positive integer`);
+    throw new JournalArgsError(`${flag} must be a positive integer`);
   return n;
 }
 
@@ -235,14 +238,17 @@ function parseDateValue(
   if (value === undefined) return undefined;
   if (value === "today") return todayIsoDate();
   if (value === "none") return "";
-  if (!isIsoDate(value)) throw new Error(`${flag} must be YYYY-MM-DD or today`);
+  if (!isIsoDate(value))
+    throw new JournalArgsError(`${flag} must be YYYY-MM-DD or today`);
   return value;
 }
 
 function parseStatus(value: string | undefined): JournalTaskStatus | undefined {
   if (value === undefined) return undefined;
   if (isJournalTaskStatus(value)) return value;
-  throw new Error("--status must be draft, todo, doing, blocked, or done");
+  throw new JournalArgsError(
+    "--status must be draft, todo, doing, blocked, or done",
+  );
 }
 
 function parsePriority(
@@ -250,7 +256,7 @@ function parsePriority(
 ): JournalTaskPriority | undefined {
   if (value === undefined) return undefined;
   if (isJournalTaskPriority(value)) return value;
-  throw new Error("--priority must be p0, p1, p2, or p3");
+  throw new JournalArgsError("--priority must be p0, p1, p2, or p3");
 }
 
 function parseGithubIssueState(
@@ -258,7 +264,7 @@ function parseGithubIssueState(
 ): GithubIssueListState {
   if (value === undefined) return "open";
   if (value === "open" || value === "closed" || value === "all") return value;
-  throw new Error("--state must be open, closed, or all");
+  throw new JournalArgsError("--state must be open, closed, or all");
 }
 
 function parseGithubOption(
@@ -267,7 +273,8 @@ function parseGithubOption(
 ): string | undefined {
   if (value === undefined) return undefined;
   const normalized = singleLineGithubOption(value);
-  if (!normalized) throw new Error(`${flag} must be a non-empty single line`);
+  if (!normalized)
+    throw new JournalArgsError(`${flag} must be a non-empty single line`);
   return normalized;
 }
 
@@ -636,11 +643,9 @@ export function parseJournalArgs(argv: string[]): JournalParseResult {
     }
     return { ok: false, error: `unknown journal command: ${subcommand}` };
   } catch (error) {
-    return {
-      ok: false,
-      error:
-        error instanceof Error ? error.message : "invalid journal arguments",
-    };
+    // 引数の誤りだけを案内にする。解析の誤りまで「引数が違う」にしない。
+    if (!(error instanceof JournalArgsError)) throw error;
+    return { ok: false, error: error.message };
   }
 }
 
@@ -654,12 +659,7 @@ async function textFromBody(
   }
   if (command.body !== undefined) return command.body;
   if (command.bodyFile !== undefined) {
-    try {
-      return readFileSync(command.bodyFile, "utf8");
-    } catch {
-      console.error(`could not read --body-file: ${command.bodyFile}`);
-      process.exit(1);
-    }
+    return readFlagFile("--body-file", command.bodyFile);
   }
   const stdin = await readStdin();
   if (stdin.trim()) return stdin;
@@ -677,12 +677,7 @@ function textFromNote(command: NoteInput): string | undefined {
   }
   if (command.note !== undefined) return command.note;
   if (command.noteFile !== undefined) {
-    try {
-      return readFileSync(command.noteFile, "utf8");
-    } catch {
-      console.error(`could not read --note-file: ${command.noteFile}`);
-      process.exit(1);
-    }
+    return readFlagFile("--note-file", command.noteFile);
   }
   return undefined;
 }

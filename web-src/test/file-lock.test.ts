@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -11,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { tryAcquireFileLock } from "../server/file-lock";
+import { tryAcquireFileLock, withFileLock } from "../server/file-lock";
 
 const CHILD = fileURLToPath(new URL("./_file-lock-child.ts", import.meta.url));
 
@@ -88,6 +90,47 @@ describe("file lock", () => {
     expect(String(errors[0][0])).toContain("removing unreadable lock");
     expect(errors[0][1]).toBeInstanceOf(Error);
     expect(existsSync(file)).toBe(false);
+  });
+
+  // 権限で読めないロックは、中身が壊れているとは限らない。古くても奪わない。
+  test("a lock that cannot be read (not broken) is never taken over", () => {
+    const file = join(dir, "sample.json.lock");
+    writeFileSync(
+      file,
+      JSON.stringify({ token: "x", pid: process.pid, createdAt: 0 }),
+    );
+    chmodSync(file, 0o000);
+    try {
+      expect(() =>
+        tryAcquireFileLock(file, { staleMs: 60_000, now: Date.now() + 61_000 }),
+      ).toThrow(/failed to read lock/);
+      expect(existsSync(file)).toBe(true);
+    } finally {
+      chmodSync(file, 0o600);
+    }
+  });
+
+  test("when the work and the release both fail, both failures are thrown", async () => {
+    const locks = join(dir, "locks");
+    mkdirSync(locks);
+    const file = join(locks, "sample.json.lock");
+    const failure = new Error("sample work failure");
+    let thrown: unknown;
+    try {
+      await withFileLock(file, () => {
+        // 外すときの unlink が EACCES になる。
+        chmodSync(locks, 0o500);
+        throw failure;
+      });
+    } catch (error) {
+      thrown = error;
+    } finally {
+      chmodSync(locks, 0o700);
+    }
+    expect(thrown).toMatchObject({
+      message: `the work under the lock ${file} failed, and cleaning up also failed`,
+      errors: [failure, expect.objectContaining({ code: "EACCES" })],
+    });
   });
 
   // ロックを「作ってから書く」と、その間に読んだ別のプロセスが空のファイルを

@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import type {
   AnnotationDatabaseTab,
   AnnotationEntry,
@@ -9,6 +8,7 @@ import type {
 import { normalizeDatabaseTab, parseAnnotationLine } from "./annotations";
 import {
   ensureServerUrl,
+  readFlagFile,
   readStdin,
   requestJson,
   resolveRepoRoot,
@@ -669,12 +669,7 @@ async function annotationBodyFromCommand(command: {
 }): Promise<string> {
   let body = command.body;
   if (body === undefined && command.bodyFile !== undefined) {
-    try {
-      body = readFileSync(command.bodyFile, "utf8");
-    } catch {
-      console.error(`could not read --body-file: ${command.bodyFile}`);
-      process.exit(1);
-    }
+    body = readFlagFile("--body-file", command.bodyFile);
   }
   if (body === undefined) body = await readStdin();
   if (!body.trim()) {
@@ -742,12 +737,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     const body = await annotationBodyFromCommand(command);
     let sql = command.sql;
     if (sql === undefined && command.sqlFile !== undefined) {
-      try {
-        sql = readFileSync(command.sqlFile, "utf8");
-      } catch {
-        console.error(`could not read --sql-file: ${command.sqlFile}`);
-        process.exit(1);
-      }
+      sql = readFlagFile("--sql-file", command.sqlFile);
     }
     const dataState =
       command.gridSearch ||
@@ -839,7 +829,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
   if (command.kind === "edit") {
     let bodyText = command.body;
     if (command.bodyFile !== undefined)
-      bodyText = readFileSync(command.bodyFile, "utf8");
+      bodyText = readFlagFile("--body-file", command.bodyFile);
     if (bodyText === undefined) {
       const stdin = await readStdin();
       if (stdin.trim()) bodyText = stdin;

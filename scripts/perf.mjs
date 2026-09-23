@@ -602,6 +602,29 @@ async function createPage(cdp) {
   return { targetId, sessionId };
 }
 
+/**
+ * Throw `error` with a snapshot of the page. When taking the snapshot fails
+ * too, both failures are kept instead of the snapshot failure replacing it.
+ */
+async function failWithPageSnapshot(
+  cdp,
+  sessionId,
+  expression,
+  error,
+  describe,
+) {
+  let snapshot;
+  try {
+    snapshot = await evaluate(cdp, sessionId, expression);
+  } catch (snapshotError) {
+    throw new AggregateError(
+      [error, snapshotError],
+      describe("(the page snapshot also failed)"),
+    );
+  }
+  throw new Error(describe(snapshot), { cause: error });
+}
+
 async function evaluate(cdp, sessionId, expression) {
   const result = await cdp.send(
     "Runtime.evaluate",
@@ -694,13 +717,14 @@ async function timeInPage(cdp, sessionId, act, ready, timeoutMs = 20_000) {
     cdp,
     sessionId,
     `(async () => {
-      const ready = () => { try { return !!(${ready}); } catch { return false; } };
+      let lastReadyError = null;
+      const ready = () => { try { return !!(${ready}); } catch (error) { lastReadyError = String(error?.stack ?? error); return false; } };
       const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
       const started = performance.now();
       const acted = (() => { ${act} })();
       if (acted === false) return { ok: false, reason: "action target not found" };
       while (!ready()) {
-        if (performance.now() - started > ${timeoutMs}) return { ok: false, reason: "timed out" };
+        if (performance.now() - started > ${timeoutMs}) return { ok: false, reason: lastReadyError === null ? "timed out" : "timed out; the last ready check threw: " + lastReadyError };
         await frame();
       }
       await frame();
@@ -826,12 +850,13 @@ async function treeMeasurements(cdp, sessionId) {
       "bulk tree row",
     );
   } catch (error) {
-    const snapshot = await evaluate(
+    await failWithPageSnapshot(
       cdp,
       sessionId,
       `JSON.stringify({ url: location.href, body: document.body.className, list: document.querySelector('#filelist')?.className, rows: [...document.querySelectorAll('#filelist li')].slice(0, 20).map((li) => li.className + ' ' + (li.dataset.dirpath ?? li.dataset.path ?? '')) })`,
+      error,
+      (snapshot) => `bulk tree row is missing: ${snapshot}`,
     );
-    throw new Error(`bulk tree row is missing: ${snapshot}`, { cause: error });
   }
   for (let index = 0; index < RUNS; index++) {
     if (
@@ -985,14 +1010,13 @@ async function sseMeasurements(cdp, sessionId, entryRef, env, repo) {
           20_000,
         );
       } catch (error) {
-        const snapshot = await evaluate(
+        await failWithPageSnapshot(
           cdp,
           sessionId,
           `JSON.stringify({ url: location.href, visibility: document.visibilityState, focus: document.hasFocus(), status: document.querySelector('#status')?.className, body: document.body.className, rows: [...document.querySelectorAll('#filelist li')].map((li) => li.dataset.dirpath ?? li.dataset.path ?? li.className).slice(0, 12), autoUpdate: document.querySelector('#auto-update')?.className ?? null, banner: document.querySelector('.change-banner, #change-banner')?.textContent ?? null })`,
-        );
-        throw new Error(
-          `SSE run ${index}: ${snapshot}; /events requests since restart: ${eventRequests - before}\n${entryRef.current.output()}`,
-          { cause: error },
+          error,
+          (snapshot) =>
+            `SSE run ${index}: ${snapshot}; /events requests since restart: ${eventRequests - before}\n${entryRef.current.output()}`,
         );
       }
       values.push(performance.now() - started);

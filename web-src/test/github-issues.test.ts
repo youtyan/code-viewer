@@ -209,4 +209,47 @@ describe("github issue listing", () => {
       labels: [],
     });
   });
+
+  test.each([
+    {
+      name: "list prints an object",
+      script: "printf '%s\\n' '{\"message\":\"sample\"}'",
+      read: (cwd: string) => readGithubIssueListAsync({ cwd }),
+      error:
+        /^failed to parse gh issue list output: Error: gh issue list printed object instead of a JSON array$/,
+    },
+    {
+      name: "list prints text",
+      script: "printf '%s\\n' 'not json'",
+      read: (cwd: string) => readGithubIssueListAsync({ cwd }),
+      error: /^failed to parse gh issue list output: SyntaxError: /,
+    },
+    {
+      name: "view prints text",
+      script: "printf '%s\\n' 'not json'",
+      read: (cwd: string) => readGithubIssueAsync({ cwd, number: 7 }),
+      error: /^failed to parse gh issue view output: SyntaxError: /,
+    },
+    {
+      name: "list fails",
+      script: "echo 'sample failure' >&2; exit 4",
+      read: (cwd: string) => readGithubIssueListAsync({ cwd }),
+      error: /^gh issue list exited with code 4: sample failure$/,
+    },
+  ])("keeps the reason when $name", async ({ script, read, error }) => {
+    const base = mkdtempSync(join(tmpdir(), "code-viewer-gh-"));
+    const cwd = join(base, "cwd");
+    mkdirSync(cwd);
+    const gh = join(base, "gh");
+    writeFileSync(gh, `#!/bin/sh\n${script}\n`);
+    chmodSync(gh, 0o755);
+    expect(
+      configureExternalCommands({
+        cwd,
+        cliOverrides: [{ name: "gh", path: gh }],
+        allowedNames: ["gh"],
+      }),
+    ).toEqual({ ok: true });
+    await expect(read(cwd)).rejects.toThrow(error);
+  });
 });
