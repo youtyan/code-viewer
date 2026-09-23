@@ -121,6 +121,17 @@ export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
 export const THEME_CHOICES = ["dark", "graphite", "warm", "light"] as const;
 export type ThemeChoice = (typeof THEME_CHOICES)[number];
 
+/**
+ * ページの「変更を保存」で一緒に保存する、ほかの節の下書き (アカウントの
+ * 起動コマンド)。保存の口はページに 1 つだけにする (節ごとの「保存」を
+ * 置かない)。変わったら listener を呼ぶ。
+ */
+export type SettingsDraft = {
+  dirty(): boolean;
+  save(): Promise<void>;
+  subscribe(listener: () => void): void;
+};
+
 export type ViewerSettingsDeps = {
   getText(): ViewerSettingsText;
   /**
@@ -148,6 +159,8 @@ export type ViewerSettingsDeps = {
   agentHooksSection: HTMLElement;
   /** エージェント連携の前に置く節 (アカウント)。持ち主は accounts-settings.ts。 */
   agentAccountsSection: HTMLElement;
+  /** ページの「変更を保存」で一緒に保存する節の下書き。 */
+  drafts: readonly SettingsDraft[];
 };
 
 const FONT_SIZE_VALUES = ["compact", "regular", "large", "xlarge"] as const;
@@ -248,6 +261,11 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
   let category: SettingsCategory = "general";
   /** 節と、その節が属する分類。build() が埋める。 */
   const categorized: Array<[HTMLElement, SettingsCategory]> = [];
+  /**
+   * 「デフォルトに戻す」が戻す項目を持つ節。どれも出ていない分類 (アカウント)
+   * では、ページの下の「デフォルトに戻す」を出さない (戻すものが無い)。
+   */
+  const generalSections: HTMLElement[] = [];
   const search = document.createElement("input");
   search.type = "search";
   search.id = "scope-settings-search";
@@ -516,6 +534,14 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       generalActions,
     );
 
+    generalSections.push(
+      display,
+      uploads,
+      agentNotify,
+      excluded,
+      datastores,
+      watch,
+    );
     categorized.push(
       [display, "appearance"],
       [uploads, "general"],
@@ -613,8 +639,23 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       renderGeneralSaveState();
     });
     saveButton.addEventListener("click", () => {
-      void saveGeneralSettings();
+      void saveChanges();
     });
+    for (const draft of deps.drafts) {
+      draft.subscribe(() => {
+        if (draft.dirty()) {
+          generalStatus = "dirty";
+          clearGeneralSaveError();
+        } else if (!anyDirty() && generalStatus === "dirty") {
+          generalStatus = "idle";
+        }
+        renderGeneralSaveState();
+      });
+    }
+  }
+
+  function anyDirty(): boolean {
+    return generalDirty || deps.drafts.some((draft) => draft.dirty());
   }
 
   function markGeneralDirty(field: keyof ViewerSettingsDraft): void {
@@ -637,15 +678,25 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     const text = deps.getText();
     saveButton.textContent =
       generalStatus === "saving" ? text.saving : text.save;
-    saveButton.disabled = generalSavePending || !generalDirty;
+    const dirty = anyDirty();
+    saveButton.disabled = generalSavePending || !dirty;
     resetButton.disabled = generalSavePending;
-    saveStatus.textContent =
+    const state =
       generalStatus === "saving"
+        ? "saving"
+        : dirty
+          ? "unsaved"
+          : generalStatus === "saved"
+            ? "saved"
+            : "";
+    saveStatus.dataset.state = state;
+    saveStatus.textContent =
+      state === "saving"
         ? text.saving
-        : generalStatus === "saved"
-          ? text.saved
-          : generalDirty
-            ? text.unsaved
+        : state === "unsaved"
+          ? text.unsaved
+          : state === "saved"
+            ? text.saved
             : "";
   }
 
@@ -720,10 +771,10 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     };
   }
 
-  async function saveGeneralSettings(): Promise<void> {
-    if (generalSavePending || !generalDirty) return;
-    const draft = readGeneralDraft();
-    if (!draft) return;
+  async function saveChanges(): Promise<void> {
+    if (generalSavePending || !anyDirty()) return;
+    const draft = generalDirty ? readGeneralDraft() : null;
+    if (generalDirty && !draft) return;
     refreshGeneration += 1;
     generalSavePending = true;
     generalStatus = "saving";
@@ -732,13 +783,18 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     renderGeneralSaveState();
     let completed = false;
     try {
-      await deps.onSave(draft, {
-        restoreDefaults,
-        changedFields: [...changedGeneralFields],
-      });
-      generalDirty = false;
-      restoreDefaults = false;
-      changedGeneralFields.clear();
+      if (draft) {
+        await deps.onSave(draft, {
+          restoreDefaults,
+          changedFields: [...changedGeneralFields],
+        });
+        generalDirty = false;
+        restoreDefaults = false;
+        changedGeneralFields.clear();
+      }
+      for (const section of deps.drafts) {
+        if (section.dirty()) await section.save();
+      }
       generalStatus = "saved";
       completed = true;
     } catch (error) {
@@ -981,6 +1037,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
       if (visible) shown += 1;
     }
     searchEmpty.hidden = !query || shown > 0;
+    resetButton.hidden = !generalSections.some((section) => !section.hidden);
     searchEmpty.textContent = query
       ? deps.getText().searchNoMatch(search.value.trim())
       : "";

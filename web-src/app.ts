@@ -5096,6 +5096,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     onAgentRulesReset: resetAgentScreenRuleSettings,
     agentHooksSection: AGENT_HOOKS_SETTINGS.element,
     agentAccountsSection: ACCOUNTS_SETTINGS.element,
+    drafts: [ACCOUNTS_SETTINGS.draft],
   });
   relocalizeViewerSettings = () => {
     VIEWER_SETTINGS.localize();

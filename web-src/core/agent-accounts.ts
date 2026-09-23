@@ -502,10 +502,14 @@ export type AccountLogin = {
    * - no-config-dir: 設定ディレクトリが無い
    */
   state: "logged-in" | "logged-out" | "unknown" | "no-config-dir";
-  /** 誰として。分からなければ空。 */
+  /** 誰として (CLI が答えたメールアドレス)。分からなければ空。 */
   who: string;
+  /** ログイン済みなのに who が空の理由。 */
+  whoDetail: string;
   /** 認証の方式 (claude.ai / ChatGPT など)。分からなければ空。 */
   method: string;
+  /** 契約のプラン (max / pro など、CLI の答えのまま)。分からなければ空。 */
+  plan: string;
   /** unknown の理由。 */
   detail: string;
   checkedAt: number;

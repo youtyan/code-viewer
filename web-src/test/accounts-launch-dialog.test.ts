@@ -40,7 +40,9 @@ function response(claude: string): AccountsResponse {
         login: {
           state: "logged-in",
           who: "",
+          whoDetail: "",
           method: "",
+          plan: "",
           detail: "",
           checkedAt: 1,
         },

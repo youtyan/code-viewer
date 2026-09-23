@@ -148,6 +148,11 @@ export function agentCommandArgv(
   return [shell, "-i", "-c", script, shell, ...args];
 }
 
+/** codex app-server (account/read で誰としてかを訊く。server/accounts/login.ts)。 */
+export function accountReadArgv(command: string): string[] {
+  return agentCommandArgv(command, ["app-server"]);
+}
+
 /** ログインの状態を訊く argv (server/accounts/login.ts)。 */
 export function loginStatusArgv(
   agent: AccountAgent,

@@ -51,7 +51,8 @@ export type AccountService = {
   /** 登録簿 (読めなければ既定だけ) と、読めなかった理由。 */
   entries(): { entries: AccountEntry[]; registryError: string | null };
   overview(options: {
-    forceLogin?: boolean;
+    /** true なら全部、アカウントの id ならその 1 つだけ、ログインを訊き直す。 */
+    forceLogin?: boolean | string;
     serverRoot: string;
   }): Promise<AccountsResponse>;
   /** 種類ごとの起動コマンド (設定されていなければ種類の名前)。 */
@@ -134,7 +135,9 @@ export function createAccountService(
       : {
           state: dir.error ? ("unknown" as const) : ("no-config-dir" as const),
           who: "",
+          whoDetail: "",
           method: "",
+          plan: "",
           detail: dir.error || entry.configDir,
           checkedAt: Date.now(),
         };
@@ -164,7 +167,7 @@ export function createAccountService(
           status(
             entry,
             launchCommandsOf(registry)[entry.agent],
-            options.forceLogin === true,
+            options.forceLogin === true || options.forceLogin === entry.id,
             launcher,
           ),
         ),

@@ -96,7 +96,11 @@ export async function handleAccountsGet(
   try {
     return json(
       await sharedAccountService().overview({
-        forceLogin: url.searchParams.get("login") === "refresh",
+        // login=refresh で全部、account=<id> を添えるとその行だけ訊き直す。
+        forceLogin:
+          url.searchParams.get("login") === "refresh"
+            ? (url.searchParams.get("account") ?? true)
+            : false,
         serverRoot: realpathSync(cwd),
       }),
     );

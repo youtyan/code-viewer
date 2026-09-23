@@ -188,7 +188,11 @@ Requires Node.js 20 or newer. Development uses
   create one that links your settings from the default directory (you choose
   what to share; sign-in, account identity, history and caches can never be
   shared) or register one you already
-  have, showing what will be created and linked first. Sign in once per account
+  have, showing what will be created and linked first. Each account is one row
+  with its email (claude also shows the plan), its state (Signed in, Not signed
+  in, or Unknown with the reason) and when it was last checked; the state and
+  email come from the CLI itself (`claude auth status`, `codex login status`
+  and `codex app-server`), never from reading tokens. Sign in once per account
   with the official command, opened in a new tmux window. The Agents list then
   shows which account each agent runs with, a band of account cards with every
   quota window present in the latest record and its reset time (codex from its

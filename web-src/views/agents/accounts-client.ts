@@ -38,10 +38,14 @@ export type AccountsSnapshot = {
 export type AccountsClient = {
   snapshot(): AccountsSnapshot;
   subscribe(listener: () => void): () => void;
-  /** 取り直す。background は周期の取り直し。 */
+  /**
+   * 取り直す。background は周期の取り直し。refreshLogin はログインの状態を
+   * CLI に訊き直させる (account を添えるとそのアカウントだけ)。
+   */
   load(options?: {
     background?: boolean;
     refreshLogin?: boolean;
+    account?: string;
   }): Promise<void>;
   /** 見ている間だけ周期で取り直す。何度呼んでもよい (数える)。 */
   retain(): () => void;
@@ -103,10 +107,16 @@ export function createAccountsClient(deps: AccountsClientDeps): AccountsClient {
   }
 
   async function load(
-    options: { background?: boolean; refreshLogin?: boolean } = {},
+    options: {
+      background?: boolean;
+      refreshLogin?: boolean;
+      account?: string;
+    } = {},
   ): Promise<void> {
     const mine = ++generation;
-    const query = options.refreshLogin ? "?login=refresh" : "";
+    const query = options.refreshLogin
+      ? `?${new URLSearchParams(options.account ? { login: "refresh", account: options.account } : { login: "refresh" })}`
+      : "";
     try {
       const res = options.background
         ? await fetch(`${apiUrl("agentAccounts")}${query}`, {

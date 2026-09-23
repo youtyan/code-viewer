@@ -46,7 +46,9 @@ function account(
     login: {
       state: "logged-in",
       who: "",
+      whoDetail: "",
       method: "",
+      plan: "",
       detail: "",
       checkedAt: NOW,
     },
@@ -176,7 +178,9 @@ describe("the usage popover", () => {
         login: {
           state: "logged-out",
           who: "",
+          whoDetail: "",
           method: "",
+          plan: "",
           detail: "",
           checkedAt: NOW - 5 * MINUTE,
         },
@@ -249,7 +253,9 @@ describe("the usage popover", () => {
         login: {
           state: "logged-out",
           who: "",
+          whoDetail: "",
           method: "",
+          plan: "",
           detail: "",
           checkedAt: NOW,
         },
@@ -265,7 +271,9 @@ describe("the usage popover", () => {
           login: {
             state: "logged-out",
             who: "",
+            whoDetail: "",
             method: "",
+            plan: "",
             detail: "",
             checkedAt: NOW,
           },

@@ -63,9 +63,24 @@ export type AccountsText = {
   hooksShort: (state: string) => string;
   registerUnregistered: string;
   registerUnregisteredTitle: (path: string) => string;
-  // 設定の節
+  // 設定の節 (1 アカウント 1 行)
   sectionTitle: string;
   sectionIntro: string;
+  /** 表の列の見出し。 */
+  columns: { account: string; email: string; state: string; checked: string };
+  /** 状態の列。no-config-dir は未ログインとして出し、理由を 2 段目に書く。 */
+  loginShown: Record<"in" | "out" | "unknown", string>;
+  /** メールアドレスが無い行の列の中身。 */
+  noEmail: string;
+  /** 不明の理由 (CLI に訊いた結果)。 */
+  unknownWhy: (detail: string) => string;
+  /** ログイン済みなのにメールアドレスが無い理由。 */
+  noEmailWhy: (detail: string) => string;
+  checkedAgo: (ago: string) => string;
+  checkedJustNow: string;
+  checking: string;
+  recheck: string;
+  recheckTitle: (name: string) => string;
   loading: string;
   registryError: (path: string) => string;
   pathTitle: (path: string) => string;
@@ -134,7 +149,13 @@ export type AccountsText = {
   added: (name: string) => string;
   // 使用量 (statusLine)
   usageTitle: string;
+  /** 仕組みの説明 (開いたときだけ見える欄)。 */
   usageIntro: string;
+  usageHow: string;
+  usageReceiving: (when: string) => string;
+  usageWaiting: string;
+  usageOff: string;
+  usageFile: (path: string) => string;
   statusLine: Record<StatusLineState, string>;
   statusLineCommand: (command: string) => string;
   statusLineWrapperMissing: string;
@@ -165,8 +186,8 @@ export type AccountsText = {
   // 起動コマンド
   commandsTitle: string;
   commandsIntro: string;
-  commandsSave: string;
-  commandsSaved: string;
+  commandsReset: string;
+  commandsUnsaved: string;
   // 起動
   launchButton: string;
   launchButtonTitle: string;
@@ -246,7 +267,7 @@ export const ACCOUNTS_EN: AccountsText = {
   loginWho: (who, method) =>
     [who, method].filter(Boolean).join(" · ") || "Signed in",
   loginUnknownWho:
-    "Which account is signed in is not shown: the official status command does not print it, and code-viewer does not open credential files.",
+    "The CLI did not report which account is signed in (see Settings → Accounts for the reason).",
   loginButton: "Sign in",
   loginTitle: (name) =>
     `Open the official sign-in for ${name} in a new tmux window. You approve it in the browser; code-viewer does not see or store credentials.`,
@@ -298,9 +319,24 @@ export const ACCOUNTS_EN: AccountsText = {
   registerUnregistered: "Register",
   registerUnregisteredTitle: (path) =>
     `An agent runs with ${path}, which is not registered. Register it to name it and see its usage.`,
-  sectionTitle: "Accounts",
+  sectionTitle: "Sign-in",
   sectionIntro:
-    "claude and codex keep one sign-in per settings directory. Register a directory per account; sign in once per account, then start agents with any account.",
+    "One row per account (one settings directory). The state and the email come from the CLI itself: claude auth status, codex login status.",
+  columns: {
+    account: "Account",
+    email: "Signed in as",
+    state: "State",
+    checked: "Last checked",
+  },
+  loginShown: { in: "Signed in", out: "Not signed in", unknown: "Unknown" },
+  noEmail: "—",
+  unknownWhy: (detail) => `Could not check: ${detail}`,
+  noEmailWhy: (detail) => `No email: ${detail}`,
+  checkedAgo: (ago) => `${ago} ago`,
+  checkedJustNow: "just now",
+  checking: "Checking…",
+  recheck: "Check again",
+  recheckTitle: (name) => `Ask the CLI again whether ${name} is signed in`,
   loading: "Loading accounts…",
   registryError: (path) =>
     `The account registry ${path} cannot be read, so it is not changed. Only the default accounts are listed until it is fixed:`,
@@ -390,9 +426,16 @@ export const ACCOUNTS_EN: AccountsText = {
     "The directory is registered as is. code-viewer does not change anything inside it.",
   registerRun: "Register",
   added: (name) => `Added ${name}.`,
-  usageTitle: "claude usage",
+  usageTitle: "Usage",
   usageIntro:
-    "claude reports its 5-hour and weekly usage only to the status line. code-viewer can wrap the status line command: it keeps the data it receives, runs your command with the same input and returns its output unchanged.",
+    "claude reports its 5-hour and weekly usage only to the status line. code-viewer can wrap the status line command: it keeps the data it receives, runs your command with the same input and returns its output unchanged. codex usage is read from its session logs and needs no setting.",
+  usageHow: "How it works",
+  usageReceiving: (when) =>
+    `Receiving the 5-hour and weekly usage (last received: ${when})`,
+  usageWaiting:
+    "On, but nothing received yet. It arrives when a claude session with this account gets a response.",
+  usageOff: "Not receiving the 5-hour and weekly usage.",
+  usageFile: (path) => `Settings file: ${path}`,
   statusLine: {
     none: "Off (no status line)",
     plain: "Off",
@@ -443,8 +486,8 @@ export const ACCOUNTS_EN: AccountsText = {
   commandsTitle: "Launch commands",
   commandsIntro:
     "The command run in a new tmux window by New agent. Runs in your interactive shell, so shell functions and aliases work.",
-  commandsSave: "Save",
-  commandsSaved: "Saved.",
+  commandsReset: "Restore default launch commands",
+  commandsUnsaved: "Unsaved",
   launchButton: "New agent",
   launchButtonTitle: "Start claude or codex in a new tmux window",
   launchProjectTitle: (name) => `Start an agent in ${name}`,
@@ -497,7 +540,7 @@ export const ACCOUNTS_JA: AccountsText = {
   loginWho: (who, method) =>
     [who, method].filter(Boolean).join(" · ") || "ログイン済み",
   loginUnknownWho:
-    "どのアカウントでログインしているかは表示できません。公式の状態確認コマンドが出さず、code-viewer は認証ファイルを開かないためです。",
+    "どのアカウントでログインしているかを CLI が答えませんでした（理由は 設定 → アカウント に出ています）。",
   loginButton: "ログイン",
   loginTitle: (name) =>
     `${name} の公式のログインを tmux の新しいウィンドウで開きます。承認はブラウザで行います。code-viewer は認証情報を受け取らず、保存もしません。`,
@@ -558,9 +601,24 @@ export const ACCOUNTS_JA: AccountsText = {
   registerUnregistered: "登録",
   registerUnregisteredTitle: (path) =>
     `登録していない ${path} で動いているエージェントがあります。登録すると名前が付き、使用量も見られます。`,
-  sectionTitle: "アカウント",
+  sectionTitle: "ログイン",
   sectionIntro:
-    "claude と codex は設定ディレクトリごとに 1 つのログインを持ちます。アカウントごとにディレクトリを登録し、それぞれ最初に 1 回だけログインすれば、どのアカウントでもエージェントを起動できます。",
+    "1 行が 1 つのアカウント（設定のディレクトリ 1 つ）です。状態とメールアドレスは CLI 自身に訊いています（claude auth status・codex login status）。",
+  columns: {
+    account: "アカウント",
+    email: "ログイン中のメールアドレス",
+    state: "状態",
+    checked: "最後に確かめた時刻",
+  },
+  loginShown: { in: "ログイン済み", out: "未ログイン", unknown: "不明" },
+  noEmail: "—",
+  unknownWhy: (detail) => `確かめられませんでした: ${detail}`,
+  noEmailWhy: (detail) => `メールアドレスを出せません: ${detail}`,
+  checkedAgo: (ago) => `${ago}前`,
+  checkedJustNow: "たった今",
+  checking: "確かめています…",
+  recheck: "確かめ直す",
+  recheckTitle: (name) => `${name} のログインの状態を CLI に訊き直します`,
   loading: "アカウントを読み込んでいます…",
   registryError: (path) =>
     `アカウントの登録簿 ${path} を読めないため、書き換えません。直すまでは既定のアカウントだけを表示します:`,
@@ -650,9 +708,16 @@ export const ACCOUNTS_JA: AccountsText = {
     "このディレクトリをそのまま登録します。code-viewer は中身を変えません。",
   registerRun: "登録する",
   added: (name) => `${name} を追加しました。`,
-  usageTitle: "claude の使用量",
+  usageTitle: "使用量",
   usageIntro:
-    "claude は 5時間枠と週枠の使用量をステータスラインにだけ渡します。code-viewer はステータスラインのコマンドを包み、受け取ったデータを保存してから、あなたのコマンドに同じ入力を渡し、その出力をそのまま返します。",
+    "claude は 5時間枠と週枠の使用量をステータスラインにだけ渡します。code-viewer はステータスラインのコマンドを包み、受け取ったデータを保存してから、あなたのコマンドに同じ入力を渡し、その出力をそのまま返します。codex の使用量はセッションの記録から読むので、設定は要りません。",
+  usageHow: "仕組み",
+  usageReceiving: (when) =>
+    `5 時間と週の使用量を受け取っています（最後に受け取った時刻: ${when}）`,
+  usageWaiting:
+    "有効ですが、まだ届いていません。このアカウントの claude のセッションが応答を受け取ると届きます。",
+  usageOff: "5 時間と週の使用量を受け取っていません。",
+  usageFile: (path) => `設定ファイル: ${path}`,
   statusLine: {
     none: "無効（ステータスラインなし）",
     plain: "無効",
@@ -703,8 +768,8 @@ export const ACCOUNTS_JA: AccountsText = {
   commandsTitle: "起動コマンド",
   commandsIntro:
     "「新しいエージェント」で tmux の新しいウィンドウに実行するコマンド。あなたの対話シェルで動くので、シェルの関数やエイリアスも使えます。",
-  commandsSave: "保存",
-  commandsSaved: "保存しました。",
+  commandsReset: "起動コマンドを既定に戻す",
+  commandsUnsaved: "未保存",
   launchButton: "新しいエージェント",
   launchButtonTitle: "claude か codex を tmux の新しいウィンドウで起動する",
   launchProjectTitle: (name) => `${name} でエージェントを起動する`,

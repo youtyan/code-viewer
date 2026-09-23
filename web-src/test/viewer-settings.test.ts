@@ -10,6 +10,7 @@ import {
 } from "vitest";
 import {
   createViewerSettings,
+  type SettingsDraft,
   type ThemeChoice,
   type ViewerSettingsDraft,
   type ViewerSettingsText,
@@ -173,6 +174,7 @@ function setup(
     ) => Promise<void>;
     saveRules?: (value: string) => Promise<void>;
     resetRules?: () => Promise<void>;
+    draft?: SettingsDraft;
   } = {},
 ) {
   document.body.innerHTML = '<div id="host"></div>';
@@ -248,6 +250,7 @@ function setup(
       "sample-accounts-heading",
       "Accounts list",
     ),
+    drafts: options.draft ? [options.draft] : [],
   });
 
   return {
@@ -699,6 +702,110 @@ describe("viewer settings form", () => {
     expect(
       q<HTMLInputElement>(document, "#scope-watch-limit-range").value,
     ).toBe("512");
+  });
+
+  describe("one save for the whole page (section drafts)", () => {
+    function fakeDraft(save: () => Promise<void> = () => Promise.resolve()) {
+      let dirty = false;
+      const listeners: Array<() => void> = [];
+      const saves: number[] = [];
+      const draft: SettingsDraft = {
+        dirty: () => dirty,
+        async save() {
+          saves.push(1);
+          await save();
+          dirty = false;
+        },
+        subscribe(listener) {
+          listeners.push(listener);
+        },
+      };
+      return {
+        draft,
+        saves,
+        edit(next = true) {
+          dirty = next;
+          for (const listener of listeners) listener();
+        },
+      };
+    }
+    const status = () =>
+      q<HTMLElement>(document, "#scope-settings-save-status");
+    const saveButton = () =>
+      q<HTMLButtonElement>(document, "#scope-settings-save");
+
+    test("an edited section alone marks the page unsaved and is saved by Save changes", async () => {
+      const section = fakeDraft();
+      const { settings, host, calls } = setup({ draft: section.draft });
+      settings.mount(host);
+      expect(saveButton().disabled).toBe(true);
+      expect(status().dataset.state).toBe("");
+
+      section.edit();
+      expect(saveButton().disabled).toBe(false);
+      expect(status().dataset.state).toBe("unsaved");
+      expect(status().textContent).toBe("Unsaved changes.");
+
+      saveButton().click();
+      await vi.waitFor(() => expect(status().dataset.state).toBe("saved"));
+      expect(section.saves).toEqual([1]);
+      expect(calls.save).toEqual([]);
+      expect(saveButton().disabled).toBe(true);
+    });
+
+    test("undoing the section edit clears the unsaved mark", () => {
+      const section = fakeDraft();
+      const { settings, host } = setup({ draft: section.draft });
+      settings.mount(host);
+      section.edit();
+      section.edit(false);
+      expect(status().dataset.state).toBe("");
+      expect(saveButton().disabled).toBe(true);
+    });
+
+    test("general fields and a section are saved together, once each", async () => {
+      const section = fakeDraft();
+      const { settings, host, calls } = setup({ draft: section.draft });
+      settings.mount(host);
+      const upload = q<HTMLInputElement>(document, "#upload-enabled");
+      upload.checked = !upload.checked;
+      fire(upload, "change");
+      section.edit();
+      saveButton().click();
+      await vi.waitFor(() => expect(status().dataset.state).toBe("saved"));
+      expect(calls.save).toHaveLength(1);
+      expect(section.saves).toEqual([1]);
+    });
+
+    test("a section that fails to save stays unsaved and shows the whole cause", async () => {
+      const section = fakeDraft(async () => {
+        throw Object.assign(
+          new Error("save the launch commands (HTTP 400): sample reason"),
+          { cause: new Error("sample cause") },
+        );
+      });
+      const { settings, host } = setup({ draft: section.draft });
+      settings.mount(host);
+      section.edit();
+      saveButton().click();
+      const error = q<HTMLElement>(document, "#scope-settings-save-error");
+      await vi.waitFor(() => expect(error.hidden).toBe(false));
+      expect(error.textContent).toContain("sample reason");
+      expect(error.textContent).toContain("sample cause");
+      expect(status().dataset.state).toBe("unsaved");
+      expect(saveButton().disabled).toBe(false);
+    });
+
+    test("restore defaults at the bottom is only offered where it has something to restore", () => {
+      const { settings, host } = setup();
+      settings.mount(host);
+      const reset = () => q<HTMLButtonElement>(document, "#scope-omit-reset");
+      expect(reset().hidden).toBe(false);
+      settings.setCategory("accounts");
+      expect(reset().hidden).toBe(true);
+      settings.setCategory("advanced");
+      expect(reset().hidden).toBe(false);
+    });
   });
 
   test("restore defaults stages values until the save button is pressed", async () => {

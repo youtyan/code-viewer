@@ -37,7 +37,9 @@ function account(
     login: {
       state: "logged-in",
       who: "",
+      whoDetail: "",
       method: "",
+      plan: "",
       detail: "",
       checkedAt: 1,
     },

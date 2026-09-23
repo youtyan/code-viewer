@@ -18,21 +18,26 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   defaultShareSelection,
   SHARED_CONFIG_ENTRIES,
 } from "../core/agent-accounts";
 import {
+  accountReadArgv,
   agentCommandArgv,
   interactiveShell,
   loginStatusArgv,
   loginWindowArgv,
 } from "../server/accounts/launch";
 import {
+  ACCOUNT_READ_ID,
+  ACCOUNT_READ_REQUESTS,
   accountEnv,
   createLoginChecker,
+  DEFAULT_LOGIN_DEPS,
   parseClaudeAuthStatus,
+  parseCodexAccountRead,
   parseCodexLoginStatus,
 } from "../server/accounts/login";
 import {
@@ -54,6 +59,7 @@ import {
   readAccountRegistry,
   updateAccountRegistry,
 } from "../server/accounts/registry";
+import { createAccountService } from "../server/accounts/service";
 import {
   claudeUsageFile,
   lastCodexUsage,
@@ -695,80 +701,458 @@ describe("process environment", () => {
   });
 });
 
-describe("login status (official commands only)", () => {
+describe("login status (asked from the CLI itself)", () => {
   const AT = 5;
+  const ESC = String.fromCharCode(27);
+  // 対話シェルの初期化が JSON の前に出す端末向けの文字列 (tmux が包んだ OSC 7)。
+  const SHELL_NOISE = `${ESC}Ptmux;${ESC}${ESC}]7;file://sample-host/${ESC}${ESC}\\${ESC}\\`;
+  const EMAIL = "sample@example.invalid";
+  const signedIn = JSON.stringify(
+    {
+      loggedIn: true,
+      authMethod: "claude.ai",
+      apiProvider: "firstParty",
+      email: EMAIL,
+      orgId: "sample-org-id",
+      orgName: "Sample org",
+      subscriptionType: "max",
+    },
+    null,
+    2,
+  );
+  const ok = (stdout: string, code = 0, stderr = "") => ({
+    code,
+    stdout,
+    stderr,
+  });
+
   test.each([
     {
-      name: "claude signed in",
-      result: {
-        code: 0,
-        stdout:
-          '{"loggedIn":true,"authMethod":"claude.ai","email":"sample@example.invalid","subscriptionType":"max"}',
-        stderr: "",
-      },
+      name: "signed in",
+      result: ok(signedIn),
       expected: {
         state: "logged-in",
-        who: "sample@example.invalid",
-        method: "claude.ai (max)",
+        who: EMAIL,
+        plan: "max",
+        method: "claude.ai",
+        whoDetail: "",
+        detail: "",
       },
     },
     {
-      name: "claude signed out",
-      result: { code: 1, stdout: '{"loggedIn":false}', stderr: "" },
-      expected: { state: "logged-out", who: "", method: "" },
+      name: "signed in, with the interactive shell's escape before the JSON",
+      result: ok(`${SHELL_NOISE}${signedIn}\n${SHELL_NOISE}`),
+      expected: { state: "logged-in", who: EMAIL, plan: "max" },
     },
     {
-      name: "claude missing",
-      result: { code: 1, stdout: "", stderr: "spawn claude ENOENT" },
+      name: "signed in without an email (API key)",
+      result: ok('{"loggedIn":true,"authMethod":"sample-method"}'),
+      expected: {
+        state: "logged-in",
+        who: "",
+        plan: "",
+        whoDetail:
+          "claude auth status --json did not include an email (sign-in method: sample-method)",
+      },
+    },
+    {
+      name: "signed out (exit 1)",
+      result: ok(`${SHELL_NOISE}{"loggedIn":false,"authMethod":"none"}`, 1),
+      expected: { state: "logged-out", who: "", detail: "" },
+    },
+    {
+      name: "the command is missing (the shell says so)",
+      result: ok("", 127, "zsh:1: command not found: claude\n"),
       expected: {
         state: "unknown",
-        detail: "the claude command was not found",
+        detail:
+          "claude auth status --json: the command was not found (exit 127: zsh:1: command not found: claude)",
       },
     },
-  ])("$name", ({ result, expected }) => {
+    {
+      name: "the command is missing (spawn)",
+      result: ok("", 1, "spawn claude ENOENT"),
+      expected: {
+        state: "unknown",
+        detail:
+          "claude auth status --json: the command was not found (exit 1: spawn claude ENOENT)",
+      },
+    },
+    {
+      name: "the answer is not JSON",
+      result: ok(`${EMAIL} not json`, 2, "sample failure\nsecond line"),
+      expected: {
+        state: "unknown",
+        detail:
+          "claude auth status --json exited with 2: sample failure (stdout 31 bytes, not shown); no JSON object in the output",
+      },
+    },
+    {
+      name: "the JSON has no loggedIn",
+      result: ok('{"email":"sample@example.invalid"}'),
+      expected: {
+        state: "unknown",
+        detail:
+          "claude auth status --json exited with 0 (stdout 34 bytes, not shown); the JSON has no loggedIn field",
+      },
+    },
+  ])("claude: $name", ({ result, expected }) => {
     expect(parseClaudeAuthStatus(result, AT)).toMatchObject(expected);
   });
 
-  test("an unreadable claude answer does not repeat its output (it may hold an email)", () => {
-    const login = parseClaudeAuthStatus(
-      { code: 2, stdout: "sample@example.invalid not json", stderr: "" },
+  test("claude: only the shown fields leave the parser, and failures never quote the output", () => {
+    const withSecrets = ok(
+      signedIn.replace(
+        '"loggedIn": true,',
+        '"loggedIn": true, "accessToken": "sample-token-SECRET", "refreshToken": "sample-refresh-SECRET",',
+      ),
+    );
+    const login = parseClaudeAuthStatus(withSecrets, AT);
+    expect(Object.keys(login).sort()).toEqual(
+      [
+        "checkedAt",
+        "detail",
+        "method",
+        "plan",
+        "state",
+        "who",
+        "whoDetail",
+      ].sort(),
+    );
+    expect(JSON.stringify(login)).not.toMatch(
+      /SECRET|sample-org-id|Sample org/,
+    );
+    // JSON.parse のエラー文は入力を引用する。壊れた出力の一部も理由に載らない。
+    const broken = parseClaudeAuthStatus(
+      ok(`{"email":"${EMAIL}", broken`, 1),
       AT,
     );
-    expect(login.state).toBe("unknown");
-    expect(login.detail).not.toContain("sample@example.invalid");
-    expect(login.detail).toContain("exited with 2");
+    expect(broken.state).toBe("unknown");
+    expect(broken.detail).not.toMatch(/sample@|example\.invalid/);
+  });
+
+  test("claude: the launch command in the reason is the one that was run", () => {
+    expect(
+      parseClaudeAuthStatus(ok("", 3, "boom"), AT, "/opt/sample/claude-wrapper")
+        .detail,
+    ).toBe(
+      "/opt/sample/claude-wrapper auth status --json exited with 3: boom (stdout 0 bytes, not shown); no JSON object in the output",
+    );
   });
 
   test.each([
     {
       name: "ChatGPT",
-      out: { code: 0, stdout: "", stderr: "Logged in using ChatGPT\n" },
+      out: ok(SHELL_NOISE, 0, "Logged in using ChatGPT\n"),
       expected: { state: "logged-in", method: "ChatGPT", who: "" },
     },
     {
       name: "an API key (the key's tail is not kept)",
-      out: {
-        code: 0,
-        stdout: "Logged in using an API key - sk-sample***TAIL\n",
-        stderr: "",
-      },
+      out: ok("Logged in using an API key - sk-sample***TAIL\n"),
       expected: { state: "logged-in", method: "API key", who: "" },
     },
     {
       name: "signed out",
-      out: { code: 1, stdout: "", stderr: "Not logged in\n" },
+      out: ok("", 1, "Not logged in\n"),
       expected: { state: "logged-out" },
     },
     {
-      name: "something else",
-      out: { code: 3, stdout: "sample output", stderr: "" },
-      expected: { state: "unknown" },
+      name: "the command is missing",
+      out: ok("", 127, "zsh:1: command not found: codex\n"),
+      expected: {
+        state: "unknown",
+        detail:
+          "codex login status: the command was not found (exit 127: zsh:1: command not found: codex)",
+      },
     },
-  ])("codex $name", ({ out, expected }) => {
+    {
+      name: "something else",
+      out: ok("sample output", 3, "Error loading configuration: sample\n"),
+      expected: {
+        state: "unknown",
+        detail:
+          "codex login status exited with 3: Error loading configuration: sample (stdout 13 bytes, not shown)",
+      },
+    },
+  ])("codex: $name", ({ out, expected }) => {
     const login = parseCodexLoginStatus(out, AT);
     expect(login).toMatchObject(expected);
     expect(JSON.stringify(login)).not.toContain("TAIL");
     expect(JSON.stringify(login)).not.toContain("sample output");
+  });
+
+  const answer = (result: unknown) =>
+    JSON.stringify({ id: ACCOUNT_READ_ID, result });
+  const rpcOk = (...lines: string[]) => ({
+    code: 0,
+    lines,
+    stderr: "",
+    timedOut: false,
+  });
+  test.each([
+    {
+      name: "a ChatGPT account",
+      result: rpcOk(
+        `${SHELL_NOISE}{"id":1,"result":{"userAgent":"sample"}}`,
+        '{"method":"remoteControl/status/changed","params":{"status":"disabled"}}',
+        answer({
+          account: { type: "chatgpt", email: EMAIL, planType: "pro" },
+          requiresOpenaiAuth: true,
+          workspaceRouting: { chatgptAccountId: "sample-account-id" },
+        }),
+      ),
+      expected: { who: EMAIL, plan: "pro", whoDetail: "" },
+    },
+    {
+      name: "no email in the answer",
+      result: rpcOk(
+        answer({ account: { type: "chatgpt", email: null, planType: "plus" } }),
+      ),
+      expected: {
+        who: "",
+        plan: "plus",
+        whoDetail: "codex app-server (account/read) did not include an email",
+      },
+    },
+    {
+      name: "an API key",
+      result: rpcOk(answer({ account: { type: "apiKey" } })),
+      expected: {
+        who: "",
+        whoDetail: "signed in with an API key, which has no email",
+      },
+    },
+    {
+      name: "no account",
+      result: rpcOk(answer({ account: null, requiresOpenaiAuth: true })),
+      expected: {
+        who: "",
+        whoDetail:
+          "codex app-server (account/read) reports no signed-in account",
+      },
+    },
+    {
+      name: "an error answer",
+      result: rpcOk(
+        JSON.stringify({
+          id: ACCOUNT_READ_ID,
+          error: { code: -32601, message: "method not found" },
+        }),
+      ),
+      expected: {
+        who: "",
+        whoDetail:
+          "codex app-server (account/read) returned an error: code -32601, method not found",
+      },
+    },
+    {
+      name: "no answer before it exited",
+      result: {
+        code: 2,
+        lines: [`${EMAIL} sample`],
+        stderr: "error: unrecognized subcommand 'app-server'\n",
+        timedOut: false,
+      },
+      expected: {
+        who: "",
+        whoDetail:
+          "codex app-server (account/read) exited with 2 without answering: error: unrecognized subcommand 'app-server' (1 lines on stdout, not shown)",
+      },
+    },
+    {
+      name: "no answer in time",
+      result: { code: null, lines: [], stderr: "", timedOut: true },
+      expected: {
+        who: "",
+        whoDetail:
+          "codex app-server (account/read) did not answer within 8 s (0 lines on stdout, not shown)",
+      },
+    },
+    {
+      name: "the command is missing",
+      result: {
+        code: 127,
+        lines: [],
+        stderr: "zsh:1: command not found: codex",
+        timedOut: false,
+      },
+      expected: {
+        who: "",
+        whoDetail:
+          "codex app-server (account/read) was not found: zsh:1: command not found: codex (0 lines on stdout, not shown)",
+      },
+    },
+  ])("codex account/read: $name", ({ result, expected }) => {
+    const out = parseCodexAccountRead(result);
+    expect(out).toMatchObject(expected);
+    expect(Object.keys(out).sort()).toEqual(["plan", "who", "whoDetail"]);
+    expect(JSON.stringify(out)).not.toContain("sample-account-id");
+  });
+
+  const codexAccount = {
+    id: "sample-id",
+    agent: "codex" as const,
+    name: "work",
+    configDir: "/home/sample/codex-work",
+    builtin: false,
+    managed: true,
+  };
+
+  test("codex: asks app-server only when signed in with ChatGPT, in the account's CODEX_HOME", async () => {
+    const calls: Array<{ args: string[]; home: string | undefined }> = [];
+    let status = "Logged in using ChatGPT\n";
+    const checker = createLoginChecker({
+      async run() {
+        return ok("", status.startsWith("Not") ? 1 : 0, status);
+      },
+      async rpc(args, env, requests, done) {
+        calls.push({ args, home: env.CODEX_HOME });
+        expect(requests).toEqual(ACCOUNT_READ_REQUESTS);
+        const line = answer({
+          account: { type: "chatgpt", email: EMAIL, planType: "pro" },
+        });
+        expect(done('{"id":1,"result":{}}')).toBe(false);
+        expect(done(line)).toBe(true);
+        return rpcOk(line);
+      },
+      now: () => 0,
+    });
+    await expect(checker.status(codexAccount, "codex")).resolves.toMatchObject({
+      state: "logged-in",
+      method: "ChatGPT",
+      who: EMAIL,
+      plan: "pro",
+    });
+    expect(calls).toEqual([
+      {
+        args: accountReadArgv("codex"),
+        home: "/home/sample/codex-work",
+      },
+    ]);
+    status = "Not logged in\n";
+    await expect(
+      checker.status(codexAccount, "codex", true),
+    ).resolves.toMatchObject({ state: "logged-out", who: "" });
+    status = "Logged in using an API key - sk-sample***TAIL\n";
+    await expect(
+      checker.status(codexAccount, "codex", true),
+    ).resolves.toMatchObject({
+      state: "logged-in",
+      who: "",
+      whoDetail: "signed in with API key, which has no email",
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("codex: app-server failing to start keeps the sign-in and says why there is no email", async () => {
+    const checker = createLoginChecker({
+      async run() {
+        return ok("", 0, "Logged in using ChatGPT\n");
+      },
+      async rpc() {
+        throw new Error("spawn /bin/sample-shell ENOENT");
+      },
+      now: () => 0,
+    });
+    const login = await checker.status(codexAccount, "codex");
+    expect(login).toMatchObject({ state: "logged-in", who: "" });
+    expect(login.whoDetail).toContain(
+      "codex app-server could not run: Error: spawn /bin/sample-shell ENOENT",
+    );
+  });
+
+  test("the app-server exchange keeps stdin open until the answer, then closes it", async () => {
+    // 本物の codex の振る舞い: stdin が閉じたら答える前に終わる。答えは
+    // account/read を受け取ってから 1 行で返す。
+    const fake = [
+      "let buf = '';",
+      "process.stdin.on('data', (c) => { buf += c;",
+      "  for (const line of buf.split('\\n').slice(0, -1)) {",
+      "    const m = JSON.parse(line);",
+      "    if (m.method === 'account/read') setTimeout(() => process.stdout.write(JSON.stringify({ id: m.id, result: { account: { type: 'chatgpt', email: 'sample@example.invalid', planType: 'pro' } } }) + '\\n'), 50);",
+      "  }",
+      "  buf = buf.slice(buf.lastIndexOf('\\n') + 1); });",
+      "process.stdin.on('end', () => process.exit(0));",
+    ].join("\n");
+    const result = await DEFAULT_LOGIN_DEPS.rpc(
+      [process.execPath, "-e", fake],
+      process.env,
+      ACCOUNT_READ_REQUESTS,
+      (line) => line.includes(`"id":${ACCOUNT_READ_ID}`),
+    );
+    expect(result).toMatchObject({ code: 0, timedOut: false });
+    expect(parseCodexAccountRead(result)).toEqual({
+      who: "sample@example.invalid",
+      plan: "pro",
+      whoDetail: "",
+    });
+  });
+
+  test("the account list carries the email and plan, never other fields, and logs nothing from the output", async () => {
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map(
+      (name) => vi.spyOn(console, name),
+    );
+    try {
+      mkdirSync(join(paths.home, ".claude"), { recursive: true });
+      const service = createAccountService(
+        paths,
+        createProcessEnvProber({
+          async listProcesses() {
+            return [];
+          },
+          async readAccountEnv() {
+            return new Map();
+          },
+          now: () => AT,
+        }),
+        createLoginChecker({
+          async run(args) {
+            return args.includes("--json")
+              ? ok(
+                  `${SHELL_NOISE}${signedIn.replace('"loggedIn": true,', '"loggedIn": true, "accessToken": "sample-token-SECRET",')}`,
+                )
+              : ok("", 0, "Logged in using ChatGPT\n");
+          },
+          async rpc() {
+            return rpcOk(
+              answer({
+                account: { type: "chatgpt", email: EMAIL, planType: "pro" },
+                workspaceRouting: { chatgptAccountId: "sample-account-id" },
+                tokens: { access_token: "sample-codex-SECRET" },
+              }),
+            );
+          },
+          now: () => AT,
+        }),
+      );
+      const body = JSON.stringify(
+        await service.overview({ serverRoot: root, forceLogin: true }),
+      );
+      const claude = JSON.parse(body).accounts.find(
+        (account: { id: string }) => account.id === "claude:default",
+      );
+      expect(claude.login).toMatchObject({
+        state: "logged-in",
+        who: EMAIL,
+        plan: "max",
+      });
+      const codex = JSON.parse(body).accounts.find(
+        (account: { id: string }) => account.id === "codex:default",
+      );
+      expect(codex.login).toMatchObject({
+        state: "logged-in",
+        who: EMAIL,
+        plan: "pro",
+      });
+      expect(body).not.toMatch(/SECRET|sample-account-id|sample-org-id/);
+      for (const spy of spies) {
+        expect(JSON.stringify(spy.mock.calls)).not.toMatch(
+          /sample@example|SECRET/,
+        );
+      }
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
   });
 
   test("the default account unsets the variable, others set it", () => {
@@ -792,7 +1176,10 @@ describe("login status (official commands only)", () => {
     const checker = createLoginChecker({
       async run() {
         runs += 1;
-        return { code: 0, stdout: '{"loggedIn":true}', stderr: "" };
+        return ok('{"loggedIn":true}');
+      },
+      async rpc() {
+        throw new Error("claude does not use app-server");
       },
       now: () => 0,
     });
