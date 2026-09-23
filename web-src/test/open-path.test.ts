@@ -149,15 +149,13 @@ describe("sidebar tree bulk actions", () => {
     ).toBe(true);
     expect(app.includes("function setSidebarTreeActionIcons()")).toBe(true);
     expect(
-      app.includes("const sidebarToggle = ensureSidebarToggleButton()"),
-    ).toBe(true);
-    expect(
       app.includes("function syncSidebarToggleIcon(button: HTMLButtonElement)"),
     ).toBe(true);
     expect(app.includes("button.innerHTML = iconSvg('octicon-sidebar',")).toBe(
       true,
     );
-    expect(app.includes("syncSidebarToggleIcon(sidebarToggle)")).toBe(true);
+    // 畳むボタンの絵はファイル一覧の側だけが付ける (振る舞いは
+    // sidebar-toggle.test.ts の「the toggle belongs to the file list」)。
     expect(
       app.includes(
         "expand.innerHTML = iconSvg('octicon-chevron-down', EXPAND_ALL_16_PATHS)",
@@ -168,16 +166,8 @@ describe("sidebar tree bulk actions", () => {
         "collapse.innerHTML = iconSvg('octicon-chevron-up', COLLAPSE_ALL_16_PATHS)",
       ),
     ).toBe(true);
-    expect(
-      app.includes(
-        "$('#sb-expand-all').addEventListener('click', () => setAllSidebarDirsCollapsed(false))",
-      ),
-    ).toBe(true);
-    expect(
-      app.includes(
-        "$('#sb-collapse-all').addEventListener('click', () => setAllSidebarDirsCollapsed(true))",
-      ),
-    ).toBe(true);
+    // 全部開く / 畳むのボタンの配線 (一覧ごと) は振る舞いで見る
+    // (file-tree-keyboard.test.ts の「expand and collapse all」)。
     expect(style.includes(".sb-actions")).toBe(true);
     expect(style.includes(".sb-icon-action")).toBe(true);
   });

@@ -25,7 +25,10 @@ function target(
 
 describe("focus scope helpers", () => {
   test("detects sidebar and main keymap scopes from the event target", () => {
-    expect(keymapScope(target("BUTTON", { "#sidebar": true }))).toBe("sidebar");
+    // ファイル一覧と変更ファイルの一覧は同じキー (sidebar)。
+    expect(
+      keymapScope(target("BUTTON", { "#sidebar, #file-list": true })),
+    ).toBe("sidebar");
     expect(keymapScope(target("BUTTON", { "#content": true }))).toBe("main");
     expect(keymapScope(target("BUTTON", { ".main-pane-source": true }))).toBe(
       "main",
@@ -174,56 +177,57 @@ describe("focus scope helpers", () => {
     expect(getPanelFocusScope(doc)).toBeNull();
   });
 
-  test("panel focus helpers update the visual focus scope", () => {
-    const calls: string[] = [];
-    const sidebar = { focus: () => calls.push("sidebar") };
-    const content = { focus: () => calls.push("content") };
-    const doc = {
-      body: { dataset: {} },
+  // 一覧へのフォーカス: 一覧を出す画面 (body[data-list-column]) は変更ファイルの
+  // 一覧 (#sidebar)、ほかの画面はファイル一覧 (#file-list)。
+  function panelDoc(listColumn: boolean, calls: string[]) {
+    const lists = listColumn
+      ? { root: "#sidebar", rows: "#filelist" }
+      : { root: "#file-list", rows: "#file-list-rows" };
+    return {
+      body: { dataset: {}, hasAttribute: () => listColumn },
       querySelector: (selector: string) => {
         if (
           selector ===
-          "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]"
+          `${lists.rows} li.active[data-path], ${lists.rows} .tree-dir.active[data-dirpath]`
         )
           return null;
-        if (selector === "#sidebar") return sidebar;
-        if (selector === "#content") return content;
+        if (selector === lists.root)
+          return { focus: () => calls.push(lists.root) };
+        if (selector === "#content")
+          return { focus: () => calls.push("content") };
         return null;
       },
     } as unknown as Document;
+  }
+
+  test.each([
+    { listColumn: true, list: "#sidebar" },
+    { listColumn: false, list: "#file-list" },
+  ])("panel focus helpers update the visual focus scope (list column $listColumn → $list)", ({
+    listColumn,
+    list,
+  }) => {
+    const calls: string[] = [];
+    const doc = panelDoc(listColumn, calls);
 
     focusSidebarPanel(doc);
-    expect(calls).toEqual(["sidebar"]);
+    expect(calls).toEqual([list]);
     expect(getPanelFocusScope(doc)).toBe("sidebar");
 
     focusMainPanel(doc);
-    expect(calls).toEqual(["sidebar", "content"]);
+    expect(calls).toEqual([list, "content"]);
     expect(getPanelFocusScope(doc)).toBe("main");
   });
 
   test("restores saved panel focus through the focus helpers", () => {
     const calls: string[] = [];
-    const sidebar = { focus: () => calls.push("sidebar") };
-    const content = { focus: () => calls.push("content") };
-    const doc = {
-      body: { dataset: {} },
-      querySelector: (selector: string) => {
-        if (
-          selector ===
-          "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]"
-        )
-          return null;
-        if (selector === "#sidebar") return sidebar;
-        if (selector === "#content") return content;
-        return null;
-      },
-    } as unknown as Document;
+    const doc = panelDoc(true, calls);
 
     restorePanelFocusScope("main", doc);
     restorePanelFocusScope("sidebar", doc);
     restorePanelFocusScope(null, doc);
 
-    expect(calls).toEqual(["content", "sidebar"]);
+    expect(calls).toEqual(["content", "#sidebar"]);
     expect(getPanelFocusScope(doc)).toBeNull();
   });
 

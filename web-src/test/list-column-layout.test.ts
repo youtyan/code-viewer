@@ -7,24 +7,44 @@ import {
   resolveVar,
 } from "./_css-fixture";
 
-// 本文の左の一覧の列 (ui-layout.md の「一覧の列と右の列」)。一覧 (Diff の変更
-// ファイル・History のコミット・選んでいる作業ツリー) は左のサイドバーの右に
-// 置き、本文の左端 (--page-left) はその右。値そのものは固定せず、骨格の変数から
-// 組み立てた式と比べる (幅を調整しただけでは落ちず、構造が壊れたときに落ちる)。
+// 一覧の列 (ui-layout.md の「一覧の列」)。左のサイドバーの右に、ファイル一覧
+// (どの画面でも)・一覧 (Diff の変更ファイルの一覧・History のコミット・選んで
+// いる作業ツリー)・変更ファイルの一覧 (History・作業ツリーだけ) の順に置き、本文の
+// 左端 (--page-left) はその右。値そのものは固定せず、骨格の変数から組み立てた式と
+// 比べる (幅を調整しただけでは落ちず、構造が壊れたときに落ちる)。
 
 const rules = baseRules(loadStyleSheet());
 
-/** 一覧の列を出す画面の状態 (body の属性)。 */
-type Page = "none" | "sidebar" | "history" | "history-folded";
+/** 一覧の列の状態 (body の属性)。 */
+type Page =
+  | "none"
+  | "none-files-folded"
+  | "sidebar"
+  | "sidebar-list-folded"
+  | "history"
+  | "history-folded"
+  | "history-files-folded";
 
 /** その状態の body に当たる規則のセレクタ。 */
 function bodySelectors(page: Page): string[] {
-  if (page === "none") return [];
-  const list = page === "sidebar" ? "sidebar" : "history";
+  const filesFolded = page.endsWith("files-folded")
+    ? ["body.gdp-sidebar-hidden"]
+    : [];
+  if (page.startsWith("none")) return filesFolded;
+  const list = page.startsWith("sidebar") ? "sidebar" : "history";
+  const listFolded = page === "sidebar-list-folded";
   return [
-    "body[data-list-column]:not([data-list-column-hidden])",
+    "body[data-list-column]",
+    listFolded
+      ? "body[data-list-column][data-list-column-hidden]"
+      : "body[data-list-column]:not([data-list-column-hidden])",
+    ...(listFolded ? ["body[data-list-column-hidden]"] : []),
     `body[data-list-column="${list}"]`,
+    ...(listFolded
+      ? [`body[data-list-column="${list}"][data-list-column-hidden]`]
+      : []),
     ...(page === "history-folded" ? ["body[data-list-tree-folded]"] : []),
+    ...filesFolded,
   ];
 }
 
@@ -51,6 +71,11 @@ function resolved(name: string, page: Page): string {
 }
 
 /** その画面で element に当たる宣言 (element 単独と、画面の属性つきの規則)。 */
+/** display の値 (!important を外す。宣言が無ければ undefined)。 */
+function displayOf(box: Map<string, string>): string | undefined {
+  return box.get("display")?.replace(/\s*!important$/, "");
+}
+
 function declarationsOn(element: string, page: Page): Map<string, string> {
   const scoped = bodySelectors(page).map((body) => `${body} ${element}`);
   return cascadedDeclarations(
@@ -60,26 +85,77 @@ function declarationsOn(element: string, page: Page): Map<string, string> {
 }
 
 describe("list column layout", () => {
-  // 本文の左端 = 左のサイドバーの右 + 一覧 + 変更ファイルの木 (木の無い画面は 0、
-  // 畳んだら帯の幅)。
+  // 本文の左端 = 左のサイドバーの右 + ファイル一覧 + 一覧 + 変更ファイルの一覧
+  // (無い列は 0、畳んだファイル一覧は 0、畳んだ一覧と変更ファイルの一覧は帯の幅)。
   test.each([
-    { page: "none", list: "0px", tree: "0px" },
-    { page: "sidebar", list: "--list-w", tree: "0px" },
-    { page: "history", list: "--list-w", tree: "--sidebar-w" },
-    { page: "history-folded", list: "--list-w", tree: "--panelcol-rail-w" },
-  ] as const)("$page: 本文の左端は一覧と木の右", ({ page, list, tree }) => {
+    { page: "none", files: "--sidebar-w", list: "0px", tree: "0px" },
+    { page: "none-files-folded", files: "0px", list: "0px", tree: "0px" },
+    { page: "sidebar", files: "--sidebar-w", list: "--list-w", tree: "0px" },
+    {
+      page: "sidebar-list-folded",
+      files: "--sidebar-w",
+      list: "--panelcol-rail-w",
+      tree: "0px",
+    },
+    {
+      page: "history",
+      files: "--sidebar-w",
+      list: "--list-w",
+      tree: "--sidebar-w",
+    },
+    {
+      page: "history-folded",
+      files: "--sidebar-w",
+      list: "--list-w",
+      tree: "--panelcol-rail-w",
+    },
+    {
+      page: "history-files-folded",
+      files: "0px",
+      list: "--list-w",
+      tree: "--sidebar-w",
+    },
+  ] as const)("$page: 本文の左端はファイル一覧・一覧・変更ファイルの一覧の右", ({
+    page,
+    files,
+    list,
+    tree,
+  }) => {
     const value = (name: string) =>
       name.startsWith("--") ? resolved(name, page) : name;
     expect(resolved("--page-left", page)).toBe(
-      `calc(${resolved("--chrome-left", page)} + calc(${value(list)} + ${value(tree)}))`,
+      `calc(${resolved("--chrome-left", page)} + calc(${value(files)} + ${value(list)} + ${value(tree)}))`,
     );
+  });
+
+  test.each([
+    { page: "none", display: "block" },
+    { page: "history", display: "block" },
+    { page: "none-files-folded", display: "none" },
+    { page: "history-files-folded", display: "none" },
+  ] as const)("$page: ファイル一覧は左のサイドバーのすぐ右 (畳めば出さない: $display)", ({
+    page,
+    display,
+  }) => {
+    const box = declarationsOn("#file-list", page);
+    const vars = bodyVariables(page);
+    expect({
+      left: resolveVar(box.get("left") ?? "", vars),
+      width: resolveVar(box.get("width") ?? "", vars),
+      display: displayOf(box) ?? "block",
+    }).toEqual({
+      left: resolved("--chrome-left", page),
+      width: resolved("--sidebar-w", page),
+      display,
+    });
   });
 
   test.each([
     { page: "history", element: "#history-panel" },
     { page: "history", element: "#worktree-panel" },
+    { page: "history-files-folded", element: "#history-panel" },
     { page: "sidebar", element: "#sidebar" },
-  ] as const)("$page: 一覧 $element は左のサイドバーの右に一覧の幅で置く", ({
+  ] as const)("$page: 一覧 $element はファイル一覧の右に一覧の幅で置く", ({
     page,
     element,
   }) => {
@@ -89,28 +165,26 @@ describe("list column layout", () => {
       left: resolveVar(box.get("left") ?? "", vars),
       width: resolveVar(box.get("width") ?? "", vars),
     }).toEqual({
-      left: resolved("--chrome-left", page),
+      left: `calc(${resolved("--chrome-left", page)} + ${resolved("--files-shown", page)})`,
       width: resolved("--list-w", page),
     });
   });
 
-  test("History: 変更ファイルの木は一覧の右、本文の左端の手前に置く", () => {
+  test("History: 変更ファイルの一覧は一覧の右、本文の左端の手前に置く", () => {
     const vars = bodyVariables("history");
     const tree = declarationsOn("#sidebar", "history");
-    const left = resolveVar(tree.get("left") ?? "", vars);
-    const width = resolveVar(tree.get("width") ?? "", vars);
     expect({
-      left,
-      width,
+      left: resolveVar(tree.get("left") ?? "", vars),
+      width: resolveVar(tree.get("width") ?? "", vars),
       top: resolveVar(tree.get("top") ?? "", vars),
     }).toEqual({
-      left: `calc(${resolved("--chrome-left", "history")} + ${resolved("--list-w", "history")})`,
+      left: `calc(${resolved("--chrome-left", "history")} + ${resolved("--files-shown", "history")} + ${resolved("--list-w", "history")})`,
       width: resolved("--sidebar-w", "history"),
       top: resolved("--global-header-h", "history"),
     });
   });
 
-  test("History: 木を畳んだら木を隠し、開くボタンの帯を木の場所に出す", () => {
+  test("History: 変更ファイルの一覧を畳んだら隠し、開くボタンの帯をその場所に出す", () => {
     const vars = bodyVariables("history-folded");
     const tree = declarationsOn("#sidebar", "history-folded");
     const rail = declarationsOn(".list-tree-open", "history-folded");
@@ -122,25 +196,41 @@ describe("list column layout", () => {
     }).toEqual({
       tree: "none",
       rail: "flex",
-      left: `calc(${resolved("--chrome-left", "history-folded")} + ${resolved("--list-w", "history-folded")})`,
+      left: `calc(${resolved("--chrome-left", "history-folded")} + ${resolved("--files-shown", "history-folded")} + ${resolved("--list-w", "history-folded")})`,
       width: resolved("--panelcol-rail-w", "history-folded"),
     });
   });
 
-  test("掴み: 一覧の掴みは一覧の右端、木の掴みは本文の左端", () => {
+  test("Diff: 一覧を手で畳んだら隠し、開くボタンの帯をその場所に出す", () => {
+    const page = "sidebar-list-folded";
+    const vars = bodyVariables(page);
+    const list = declarationsOn("#sidebar", page);
+    const rail = declarationsOn(".sidebar-open", page);
+    expect({
+      list: displayOf(list),
+      rail: rail.get("display"),
+      left: resolveVar(rail.get("left") ?? "", vars),
+      width: resolveVar(rail.get("width") ?? "", vars),
+    }).toEqual({
+      list: "none",
+      rail: "flex",
+      left: `calc(${resolved("--chrome-left", page)} + ${resolved("--files-shown", page)})`,
+      width: resolved("--panelcol-rail-w", page),
+    });
+  });
+
+  test("掴み: ファイル一覧・一覧の掴みはそれぞれの右端、変更ファイルの一覧の掴みは本文の左端", () => {
     const vars = bodyVariables("history");
     const space = resolved("--space-1", "history");
+    const left = (element: string) =>
+      resolveVar(declarationsOn(element, "history").get("left") ?? "", vars);
     expect({
-      list: resolveVar(
-        declarationsOn("#history-resizer", "history").get("left") ?? "",
-        vars,
-      ),
-      tree: resolveVar(
-        declarationsOn("#sidebar-resizer", "history").get("left") ?? "",
-        vars,
-      ),
+      files: left("#file-list-resizer"),
+      list: left("#history-resizer"),
+      tree: left("#sidebar-resizer"),
     }).toEqual({
-      list: `calc(${resolved("--chrome-left", "history")} + ${resolved("--list-w", "history")} - ${space})`,
+      files: `calc(${resolved("--chrome-left", "history")} + ${resolved("--sidebar-w", "history")} - ${space})`,
+      list: `calc(${resolved("--chrome-left", "history")} + ${resolved("--files-shown", "history")} + ${resolved("--list-w", "history")} - ${space})`,
       tree: `calc(${resolved("--page-left", "history")} - ${space})`,
     });
   });

@@ -1,69 +1,68 @@
-// 右の列 (Files の木) を自動で畳むか・開くかの決まり (ui-layout.md の
-// 「一覧の列と右の列」)。DOM に触らない。配線は app.ts の syncPanelColumn。
+// ファイル一覧を自動で畳むか・開くかの決まりと、一覧の列が本文の横に取る幅
+// (ui-layout.md の「一覧の列」)。DOM に触らない。配線は app.ts の
+// syncListColumn。
 //
-// 畳むのは右の列の本体 (木) だけ。頭の行 (#panel-head: 画面の入口の絵柄と畳む
-// ボタン) は畳んでも同じ幅でタブ列の行の右端に残る (タブ列の右端・分割の
-// ボタン・絵柄を動かさない)。本文は頭の行の下から右端まで使う。
+// 畳むのは一覧の列の頭の下のファイル一覧だけ。頭 (#panel-head: 画面の入口の
+// 絵柄と畳むボタン) はタブ列の行の左端に同じ幅で残る (絵柄・畳むボタン・タブ列
+// の左端の名前の枠・分割のボタンを動かさない)。
 //
-// - 本文を選ぶための一覧 (Diff の変更ファイル・History のコミット・選んでいる
-//   作業ツリー) は本文の左の列に出す。その画面の間、右の列の本体は畳む (木は
-//   探して開くためのもので、一覧を見ている間は要らない)。別の画面へ移れば、
-//   自動で畳んでいたものは開く
-// - 2 面で、本文が面 2 つ分のゆとりに足りないなら畳む (Data の欄などが潰れる)
-// - 1 面に戻ったら、自動で畳んでいたものは開く
-// - 利用者が自分で畳んだ / 2 面の間に自分で開いたなら、その意思を優先する
+// - 幅が足りない (core/list-column.ts の listColumnLayout が filesFolded) なら
+//   畳み、足りるようになったら、自動で畳んでいたものだけ開く
+// - 利用者が自分で畳んだなら、その意思を優先して触らない (手で開いた後は
+//   listColumnLayout がそのセッションは畳まない)
 
-export type PanelColumnState = {
-  /** 2 面を出している (右の面を預けている間は false)。 */
-  split: boolean;
-  /** 一覧が左の列にある画面 (Diff・History・選んでいる作業ツリー) を出している。 */
-  holdsList: boolean;
-  /**
-   * 一覧の画面から出たところ。一覧のために畳んでいたなら一度開き、2 面の決まりは
-   * 開いた幅で判断し直す (畳んだままの幅では「ゆとりがある」と出てしまう)。
-   */
-  leftList: boolean;
+export type FileListState = {
+  /** 幅が足りないので畳む (listColumnLayout の filesFolded)。 */
+  folded: boolean;
   /** いま自動で畳んでいる。 */
   autoHidden: boolean;
   /** 利用者が自分で畳んでいる (自動で畳んだものは含めない)。 */
   userHidden: boolean;
-  /** 2 面の間に利用者が自分で開いた (このセッションでは自動で畳まない)。 */
-  userOptedOut: boolean;
-  /** 右の列を開いたままで、2 面がゆとりを持って並ぶ。 */
-  fitsWithColumn: boolean;
 };
 
-export type PanelColumnAction = "collapse" | "restore" | "keep";
+export type FileListAction = "collapse" | "restore" | "keep";
 
-export function panelColumnAction(state: PanelColumnState): PanelColumnAction {
-  if (state.holdsList)
-    return state.autoHidden || state.userHidden ? "keep" : "collapse";
-  if (state.leftList && state.autoHidden) return "restore";
-  if (state.split) {
-    if (state.autoHidden || state.userHidden || state.userOptedOut)
-      return "keep";
-    return state.fitsWithColumn ? "keep" : "collapse";
-  }
+export function fileListAction(state: FileListState): FileListAction {
+  if (state.userHidden) return "keep";
+  if (state.folded) return state.autoHidden ? "keep" : "collapse";
   return state.autoHidden ? "restore" : "keep";
 }
 
-export type PanelColumnBodyInput = {
-  /** 右の列を畳んでいる (自動・手のどちらでも)。 */
-  hidden: boolean;
+/**
+ * 起動の途中で、index.html の早いスクリプトが付けたファイル一覧の畳み
+ * (body.gdp-sidebar-hidden) を引き継ぐ。外さない (外した状態が描かれ、設定を
+ * 読んでまた畳むと本文がファイル一覧の幅だけ動いた)。控えが利用者の畳みなら
+ * 利用者の畳みとして (設定を読むと当て直す)、そうでなければ幅による自動の
+ * 畳みとして (syncListColumn が幅で決め直す) 引き継ぐ。控えが読めなければ
+ * 自動の畳み。
+ */
+export function bootFileListFold(input: {
+  /** 早いスクリプトが畳んで描いた。 */
+  bodyHidden: boolean;
+  /** 控えの「利用者がファイル一覧を畳んでいる」(読めなければ null)。 */
+  earlyUserHidden: boolean | null;
+}): { userHidden: boolean; autoHidden: boolean } {
+  if (!input.bodyHidden) return { userHidden: false, autoHidden: false };
+  const user = input.earlyUserHidden === true;
+  return { userHidden: user, autoHidden: !user };
+}
+
+export type ListColumnBodyInput = {
   /**
-   * 右の列を本文の横に置かず、重ねて出す面にしている (電話の幅)。本文の幅は
+   * 一覧の列を本文の横に置かず、重ねて出す面にしている (電話の幅)。本文の幅は
    * これまでどおり頭の実幅を引く (電話では 2 面を出さない)。
    */
   overlaid: boolean;
-  /** 右の列の頭 (#panel-head) の実幅。畳んでも変わらない。 */
+  /** 一覧の列が出している幅 (ファイル一覧・一覧・変更ファイルの一覧の和)。 */
+  shown: number;
+  /** 一覧の列の頭 (#panel-head) の実幅。 */
   headWidth: number;
 };
 
 /**
- * 右の列が本文の横に取っている幅 (本文の幅 = 窓 − 左 − 一覧の列 − これ)。
- * 畳んでも頭の行は残るが、その下の本体は 0 なので、本文は右端まで使える。
+ * 一覧の列が本文の横に取っている幅 (本文の幅 = 窓 − 左のサイドバー − これ)。
+ * 頭の行はタブ列の行にあり、その下の本文の幅には数えない。
  */
-export function panelColumnBodyWidth(input: PanelColumnBodyInput): number {
-  if (input.overlaid) return input.headWidth;
-  return input.hidden ? 0 : input.headWidth;
+export function listColumnBodyWidth(input: ListColumnBodyInput): number {
+  return input.overlaid ? input.headWidth : input.shown;
 }

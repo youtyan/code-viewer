@@ -145,7 +145,9 @@
   --nav-w: 280px;
   /* 最下段のステータスバー。表示密度で変わる (body[data-sidebar-font-size])。 */
   --statusbar-h: 28px;
-  /* 幅の出所は TS (views/sidebar.ts の SIDEBAR_WIDTH)。初回描画用の既定。 */
+  /* ファイル一覧 (#file-list) の幅。History・選んでいる作業ツリーの変更ファイルの
+     一覧 (一覧の右の #sidebar) も同じ幅。出所は TS (core/panel-sizes.ts の
+     SIDEBAR_WIDTH、当てるのは views/sidebar.ts)。初回描画用の既定。 */
   --sidebar-w: 240px;
   /* 本文の左の一覧の列 (Diff の変更ファイル・History のコミット・選んでいる
      作業ツリー) の利用者の幅。出所は TS (core/panel-sizes.ts の HISTORY_WIDTH)。
@@ -156,8 +158,8 @@
   /* 一覧が占めている幅。一覧の列を出す画面 (body[data-list-column]) だけ
      --list-w にする (T1 の「既定 0 + 占有時に上書き」)。 */
   --list-shown: 0px;
-  /* 一覧の右に並ぶ変更ファイルの木 (History・選んでいる作業ツリーの #sidebar) が
-     占めている幅。木を畳んだ間 (data-list-tree-folded) は帯の幅。 */
+  /* 一覧の右に並ぶ変更ファイルの一覧 (History・選んでいる作業ツリーの #sidebar)
+     が占めている幅。畳んだ間 (data-list-tree-folded) は帯の幅。 */
   --list-tree-w: 0px;
   --sidebar-restore-rail-w: 44px;
   --annotation-panel-w: 380px;
@@ -394,37 +396,48 @@ html, body {
   /* メインの面の箱 (.main-pane-host) の高さ。右の面のソース表示は、本文の
      --content-h の代わりにこれで箱を作る (.main-pane-source)。 */
   --main-pane-h: calc(100vh - var(--global-header-h) - var(--main-bottom));
-  /* 右の列 (パネルの列。画面の右端の固定の列で、上端から)。頭 (#panel-head) は
-     1 段 (タブ列と同じ高さ) で画面の入口の絵柄と畳むボタン、その下の本体に Files の木
-     (#sidebar。探して開くための木) を出す。プロジェクト名とブランチはタブ列の
-     左端 (#tabs-lead、幅 --tabs-lead-w) に固定。本文を選ぶための一覧 (Diff・History・選んでいる Worktrees) は
-     右の列ではなく本文の左の一覧の列 (--listcol-shown) に出し、その画面の間は
-     右の列の本体を自動で畳む (core/panel-column-policy.ts)。利用者が畳んだとき
-     (gdp-sidebar-hidden) も同じ。畳むのは本体だけで、頭の行は同じ幅
-     (--panelcol-head-w) で残る (タブ列の右端・分割のボタン・絵柄を動かさない)。
-     --panelcol-shown は本体が本文の横に取る幅 (畳めば 0)。 */
-  --panelcol-w: var(--sidebar-w);
-  --panelcol-head-w: var(--panelcol-w);
-  --panelcol-shown: var(--panelcol-w);
-  /* 変更ファイルの木 (一覧の列の 2 列目) を畳んだ帯の幅 = 開くボタン 1 つ分 (押せる
-     領域の大きさ。密度で変わるので固定の px にしない)。 */
+  /* 一覧の列 (左のサイドバーの右、本文の左)。左から、ファイル一覧 (#file-list。
+     どの画面でも出す)、一覧 (Diff の変更ファイルの一覧 #sidebar・History の
+     コミット・選んでいる作業ツリー)、変更ファイルの一覧 (History・選んでいる作業
+     ツリーの #sidebar。一覧の右)。頭 (#panel-head) はタブ列の行の左端の 1 段で、
+     画面の入口の絵柄と、右端にファイル一覧を畳むボタン。幅は固定
+     (--column-head-w) で、画面の切替でも列の開閉 (手・自動) でも動かない (畳むのは
+     頭の下の列だけ)。タブ列は頭の右から。プロジェクト名とブランチはタブ列の左端
+     (#tabs-lead、幅 --tabs-lead-w) に固定。 */
+  /* 頭の絵柄の行の幅。中身 (絵柄 6 つ・間・畳むボタン・左右の余白) より広く、既定の
+     密度ではファイル一覧の既定の幅 (240) にそろう (頭の右端と一覧の右端が並ぶ)。
+     密度で変わるので固定の px にしない。 */
+  --listcol-head-w: calc(var(--space-unit) * 60);
+  /* 左のサイドバーを畳んだときだけ頭の先頭に出る「サイドバーを出す」の幅 (出して
+     いなければ 0。html[data-nav-collapsed] で上書き)。 */
+  --nav-expand-w: 0px;
+  /* 畳んだ列の帯の幅 = 開くボタン 1 つ分 (押せる領域の大きさ。密度で変わるので
+     固定の px にしない)。 */
   --panelcol-rail-w: var(--ui-control-sm);
-  /* 右の列の本体の上端 = 頭 (タブ列の行と同じ高さの 1 段) の下。 */
+  /* 一覧・変更ファイルの一覧を畳むつまみの幅 (列の右端の線に重ねる)。 */
+  --column-fold-w: var(--space-4);
+  /* 一覧の列の本体の上端 = 頭 (タブ列の行と同じ高さの 1 段) の下。 */
   --panel-body-top: var(--global-header-h);
+  /* ファイル一覧が占めている幅。畳んだ間 (gdp-sidebar-hidden) は 0。 */
+  --files-shown: var(--sidebar-w);
   /* タブ列の左端のプロジェクト名とブランチ (#tabs-lead) の幅。固定で、画面・
      タブ・右の列の開閉・2 面で変えない (出たり消えたり動いたりしない)。名前と
      枝はこの中で fitBrandWidths の決まりで分ける (views/brand-fit.ts)。 */
   --tabs-lead-w: calc(var(--space-unit) * 50);
-  /* 本文 (route の中身: ツールバー・#content・面の箱) の左右の端。左は左の
-     サイドバーの右、右は右の列の左。左右 2 面のときは左の面の幅に収める (面の
-     幅 --split-*-w は views/main-tabs/main-tabs-view.ts が本文の幅で書く)。
-     本文まわりの固定物はこの 2 つだけを読む (下パネル・最下段は右の列の下も
-     またぐので --chrome-left と 0 のまま)。左は一覧の列の右 (一覧の列は本文の
-     外。2 面でも本文全体の左に 1 本)。 */
-  /* 一覧の列 (一覧 + 変更ファイルの木) が占めている幅。 */
-  --listcol-shown: calc(var(--list-shown) + var(--list-tree-w));
+  /* 右端に付く固定物の幅。デスクトップには無い (0。電話は安全領域)。 */
+  --chrome-right: 0px;
+  /* 一覧の列の頭の幅 (絵柄の行と、左のサイドバーを畳んだときの開くボタン)。
+     タブ列はこの右から。 */
+  --column-head-w: calc(var(--listcol-head-w) + var(--nav-expand-w));
+  /* 本文 (route の中身: ツールバー・#content・面の箱) の左右の端。左は一覧の列の
+     右 (一覧の列は本文の外。2 面でも本文全体の左に 1 本)、右は窓の右端。左右
+     2 面のときは左の面の幅に収める (面の幅 --split-*-w は
+     views/main-tabs/main-tabs-view.ts が本文の幅で書く)。本文まわりの固定物は
+     この 2 つだけを読む (最下段は一覧の列の下もまたぐので --chrome-left のまま)。 */
+  /* 一覧の列 (ファイル一覧 + 一覧 + 変更ファイルの一覧) が占めている幅。 */
+  --listcol-shown: calc(var(--files-shown) + var(--list-shown) + var(--list-tree-w));
   --page-left: calc(var(--chrome-left) + var(--listcol-shown));
-  --page-right: var(--panelcol-shown);
+  --page-right: var(--chrome-right);
 
 
   --code-font-size: 13px;
@@ -439,13 +452,16 @@ html, body {
   -moz-osx-font-smoothing: auto;
 }
 
-/* 一覧の列を出す画面 (値は出す一覧: sidebar = Diff の変更ファイル、history、
-   worktree。app.ts が付ける)。利用者が一覧を隠した間 (帯のボタン) は 0。
-   History と選んでいる作業ツリーは一覧の右に変更ファイルの木が並び、本文が
-   足りないときは木を帯に畳む (app.ts が data-list-tree-folded を付ける。決まりは
-   core/list-column.ts)。 */
+/* 一覧を出す画面 (値は出す一覧: sidebar = Diff の変更ファイルの一覧、history、
+   worktree。app.ts が付ける)。利用者が一覧を畳んだ間 (data-list-column-hidden)
+   は開くボタンの帯の幅。History と選んでいる作業ツリーは一覧の右に変更ファイルの
+   一覧が並び、本文が足りないときは帯に畳む (app.ts が data-list-tree-folded を
+   付ける。決まりは core/list-column.ts)。 */
 body[data-list-column]:not([data-list-column-hidden]) {
   --list-shown: var(--list-w);
+}
+body[data-list-column][data-list-column-hidden] {
+  --list-shown: var(--panelcol-rail-w);
 }
 body[data-list-column="history"],
 body[data-list-column="worktree"] {
@@ -454,15 +470,15 @@ body[data-list-column="worktree"] {
 body[data-list-tree-folded] {
   --list-tree-w: var(--panelcol-rail-w);
 }
-/* 右の列を畳む = 本体 (木) だけを畳む。頭の行 (--panelcol-head-w) は残し、本文は
-   頭の行の下から右端まで。 */
+/* ファイル一覧を畳む (手・幅が足りないときの自動) = 頭の下の一覧だけを畳む。頭の
+   行 (--column-head-w) は残し、本文は左のサイドバーの右 (一覧の列の残り) から。 */
 body.gdp-sidebar-hidden {
-  --panelcol-shown: 0px;
+  --files-shown: 0px;
 }
 
 /* 左右 2 面: 本文は左の面に収める (route のタブは左にしか置けない。T2 の上書き。body で決める)。 */
 body.main-split {
-  --page-right: calc(var(--panelcol-shown) + var(--split-right-w) + var(--split-divider-w));
+  --page-right: calc(var(--chrome-right) + var(--split-right-w) + var(--split-divider-w));
 }
 
 body[data-sidebar-font-size="compact"] {
@@ -1857,13 +1873,13 @@ body.gdp-diff-page #repo-target-wrap {
 
 /* ===== Commit history panel ===== */
 /* 作業ツリー画面の 2 枚のパネルも同じ箱を使う。位置だけ Worktrees セクションで
-   上書きし、見た目はここ 1 箇所で決まる。置き場所は本文の左の一覧の列 (左の
-   サイドバーの右、タブ列の下。幅は --list-w)。 */
+   上書きし、見た目はここ 1 箇所で決まる。置き場所は一覧の列のファイル一覧の右
+   (タブ列の下。幅は --list-w)。 */
 #history-panel,
 #worktree-panel {
   display: none;
   position: fixed;
-  left: var(--chrome-left);
+  left: calc(var(--chrome-left) + var(--files-shown));
   top: var(--global-header-h);
   bottom: var(--chrome-bottom);
   width: var(--list-w);
@@ -1874,54 +1890,63 @@ body.gdp-diff-page #repo-target-wrap {
   flex-direction: column;
   font-size: var(--ui-font-base);
 }
-body.gdp-history-page #history-panel { display: flex; }
-/* Diff: 変更ファイルの一覧 (#sidebar) を一覧の列に置く (ふだんの #sidebar は
-   右の列の Files の木)。幅の掴みは一覧の列の #history-resizer なので、右の列の
-   掴みは出さない。 */
+/* 一覧は一覧の列に出すときだけ (app.ts の listColumnKind。前面が端末・画像の
+   タブなら、背面の History の印が残っていても出さない)。 */
+body[data-list-column="history"] #history-panel { display: flex; }
+/* 変更ファイルの一覧 (#sidebar) は一覧を出す画面だけ (ほかの画面の一覧の列は
+   ファイル一覧だけ)。 */
+body:not([data-list-column]) #sidebar,
+body:not([data-list-column]) #sidebar-resizer {
+  display: none;
+}
+/* Diff: 変更ファイルの一覧 (#sidebar) が一覧 (ファイル一覧の右)。幅の掴みは一覧の
+   列の #history-resizer なので、#sidebar の掴みは出さない。 */
 body[data-list-column="sidebar"] #sidebar {
-  left: var(--chrome-left);
-  right: auto;
-  top: var(--global-header-h);
+  left: calc(var(--chrome-left) + var(--files-shown));
   width: var(--list-w);
-  border-left: 0;
 }
 body[data-list-column="sidebar"] #sidebar-resizer {
   display: none;
 }
-/* History と選んでいる作業ツリー: 一覧の右に変更ファイルの木 (#sidebar) の列。
-   一覧と同じく面の外 (本文の左端 --page-left はその右)。幅の掴みは木の右端。
-   畳んだら (data-list-tree-folded) 木を隠し、同じ場所に開くボタンの帯を出す。 */
+/* History と選んでいる作業ツリー: 一覧の右に変更ファイルの一覧 (#sidebar) の列。
+   一覧と同じく面の外 (本文の左端 --page-left はその右)。幅の掴みは右端。
+   畳んだら (data-list-tree-folded) 隠し、同じ場所に開くボタンの帯を出す。 */
 body[data-list-column="history"] #sidebar,
 body[data-list-column="worktree"] #sidebar {
-  left: calc(var(--chrome-left) + var(--list-shown));
-  right: auto;
-  top: var(--global-header-h);
+  left: calc(var(--chrome-left) + var(--files-shown) + var(--list-shown));
   width: var(--list-tree-w);
-  border-left: 0;
-  border-right: 1px solid var(--border);
 }
 body[data-list-column="history"] #sidebar-resizer,
 body[data-list-column="worktree"] #sidebar-resizer {
   left: calc(var(--page-left) - var(--space-1));
-  right: auto;
-  top: var(--global-header-h);
 }
 body[data-list-tree-folded] #sidebar,
 body[data-list-tree-folded] #sidebar-resizer {
   display: none;
 }
-.list-tree-open {
+/* 手で一覧を畳んだ (data-list-column-hidden) 間は一覧を隠し、同じ場所に開くボタンの
+   帯。Diff の一覧は #sidebar なので、その帯は .sidebar-open。 */
+body[data-list-column="sidebar"][data-list-column-hidden] #sidebar,
+body[data-list-column-hidden] #history-panel,
+body[data-list-column-hidden] #worktree-panel {
+  display: none !important;
+}
+/* 畳んだ列の帯 (開くボタン)。帯そのものがボタン (押せる領域は帯の全体)。 */
+.list-tree-open,
+.list-open,
+.sidebar-open {
   display: none;
 }
-body[data-list-tree-folded] .list-tree-open {
+body[data-list-tree-folded] .list-tree-open,
+body[data-list-column="history"][data-list-column-hidden] .list-open,
+body[data-list-column="worktree"][data-list-column-hidden] .list-open,
+body[data-list-column="sidebar"][data-list-column-hidden] .sidebar-open {
   position: fixed;
-  left: calc(var(--chrome-left) + var(--list-shown));
   top: var(--global-header-h);
   bottom: var(--chrome-bottom);
   z-index: 30;
   display: flex;
   justify-content: center;
-  width: var(--list-tree-w);
   padding: var(--space-2) 0 0;
   border: 0;
   border-right: 1px solid var(--color-line-soft);
@@ -1929,19 +1954,85 @@ body[data-list-tree-folded] .list-tree-open {
   color: var(--color-text-3);
   cursor: pointer;
 }
-body[data-list-tree-folded] .list-tree-open:hover {
+body[data-list-tree-folded] .list-tree-open {
+  left: calc(var(--chrome-left) + var(--files-shown) + var(--list-shown));
+  width: var(--list-tree-w);
+}
+body[data-list-column-hidden] .list-open,
+body[data-list-column-hidden] .sidebar-open {
+  left: calc(var(--chrome-left) + var(--files-shown));
+  width: var(--list-shown);
+}
+.list-tree-open:hover,
+.list-open:hover,
+.sidebar-open:hover {
   background: var(--color-raised);
   color: var(--color-text);
 }
-/* 帯そのものがボタン (押せる領域は帯の全体) なので、輪は帯の内側に描く。 */
-body[data-list-tree-folded] .list-tree-open:focus-visible {
+/* 輪は帯の内側に描く。 */
+.list-tree-open:focus-visible,
+.list-open:focus-visible,
+.sidebar-open:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring-inset);
   color: var(--color-text);
 }
-.list-tree-open svg {
+.list-tree-open svg,
+.list-open svg,
+.sidebar-open svg {
   width: var(--icon-md);
   height: var(--icon-md);
+}
+/* 一覧・変更ファイルの一覧を手で畳むボタン: 列の右端の線の中ほどに重ねる小さな
+   つまみ (views/list-tree-open.ts の createColumnFold)。見出しは画面ごとに中身が
+   違い作り直されるので、見出しには置かない。縦は列の上端と下端の間の真ん中
+   (top / bottom と高さと margin: auto)。 */
+.list-column-fold {
+  display: none;
+}
+body[data-list-column="history"]:not([data-list-column-hidden]) .list-fold,
+body[data-list-column="worktree"]:not([data-list-column-hidden]) .list-fold,
+body[data-list-column="sidebar"]:not([data-list-column-hidden]) .sidebar-fold,
+body[data-list-column="history"]:not([data-list-tree-folded]) .sidebar-fold,
+body[data-list-column="worktree"]:not([data-list-tree-folded]) .sidebar-fold {
+  position: fixed;
+  top: var(--global-header-h);
+  bottom: var(--chrome-bottom);
+  z-index: 33;
+  display: grid;
+  place-items: center;
+  width: var(--column-fold-w);
+  height: var(--ui-control-md);
+  margin: auto 0;
+  padding: 0;
+  border: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-tree);
+  color: var(--color-text-3);
+  cursor: pointer;
+}
+/* 一覧の右端 (History・作業ツリーの一覧、Diff の #sidebar)。 */
+body[data-list-column] .list-fold,
+body[data-list-column="sidebar"] .sidebar-fold {
+  left: calc(var(--chrome-left) + var(--files-shown) + var(--list-shown) - var(--column-fold-w) / 2);
+}
+/* 変更ファイルの一覧の右端 (History・作業ツリー)。 */
+body[data-list-column="history"] .sidebar-fold,
+body[data-list-column="worktree"] .sidebar-fold {
+  left: calc(var(--page-left) - var(--column-fold-w) / 2);
+}
+.list-column-fold:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.list-column-fold:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
+  color: var(--color-text);
+}
+.list-column-fold svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 body.gdp-history-page #repo-target-wrap {
   display: none !important;
@@ -1951,7 +2042,7 @@ body.gdp-history-page #repo-target-wrap {
   position: fixed;
   top: var(--global-header-h);
   bottom: var(--chrome-bottom);
-  left: calc(var(--chrome-left) + var(--list-shown) - var(--space-1));
+  left: calc(var(--chrome-left) + var(--files-shown) + var(--list-shown) - var(--space-1));
   width: 8px;
   cursor: col-resize;
   z-index: 32;
@@ -2518,16 +2609,19 @@ body.gdp-history-page #history-commit-info:not([hidden]),
 }
 
 /* ===== Sidebar ===== */
-/* 既定は右の列の本体 (頭 #panel-head の下)。一覧パネルを持つ画面では本文の
-   左の 2 列目 (その画面の規則が left / top を上書きする)。 */
-#sidebar {
+/* ファイル一覧 (#file-list) と変更ファイルの一覧 (#sidebar)。どちらも一覧の列の
+   頭の下 (--panel-body-top) から。ファイル一覧は左のサイドバーのすぐ右、変更
+   ファイルの一覧の位置と幅は一覧を出す画面の規則 (Commit history panel の節)
+   が決める。 */
+#sidebar,
+#file-list {
   position: fixed;
-  right: 0;
+  left: var(--chrome-left);
   top: var(--panel-body-top);
   bottom: var(--chrome-bottom);
   width: var(--sidebar-w);
   background: var(--bg-soft);
-  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   overflow-y: auto;
   padding: 0 0 32px;
   z-index: 30;
@@ -2578,25 +2672,25 @@ body.gdp-file-detail-page.gdp-sidebar-hidden #sidebar-toggle,
 body.gdp-repo-page.gdp-sidebar-hidden #sidebar-toggle {
   display: inline-grid;
 }
-body[data-sidebar-font-size="compact"] #sidebar {
+body[data-sidebar-font-size="compact"] :is(#sidebar, #file-list) {
   --sidebar-dir-font: 13px;
   --sidebar-file-font: 12px;
   --sidebar-stat-font: 10.5px;
   --sidebar-row-y: 3px;
 }
-body[data-sidebar-font-size="large"] #sidebar {
+body[data-sidebar-font-size="large"] :is(#sidebar, #file-list) {
   --sidebar-dir-font: 15px;
   --sidebar-file-font: 14px;
   --sidebar-stat-font: 12px;
   --sidebar-row-y: 5px;
 }
-body[data-sidebar-font-size="xlarge"] #sidebar {
+body[data-sidebar-font-size="xlarge"] :is(#sidebar, #file-list) {
   --sidebar-dir-font: 16px;
   --sidebar-file-font: 15px;
   --sidebar-stat-font: 12.5px;
   --sidebar-row-y: 6px;
 }
-body[data-focus-scope="sidebar"] #sidebar {
+body[data-focus-scope="sidebar"] :is(#sidebar, #file-list) {
   background: var(--bg-soft);
   outline: none;
   box-shadow: none;
@@ -2628,7 +2722,7 @@ body[data-focus-scope="main"] #content {
 .sb-view-seg {
   flex: 0 0 auto;
 }
-#totals {
+:is(#totals, #file-list-totals) {
   color: var(--fg-muted);
   font-weight: 400;
   font-variant-numeric: tabular-nums;
@@ -2715,7 +2809,7 @@ body[data-focus-scope="main"] #content {
   transform-origin: left center;
   pointer-events: none;
 }
-#sb-filter {
+:is(#sb-filter, #file-list-filter) {
   box-sizing: border-box;
   width: 100%;
   height: var(--ui-control-md);
@@ -2730,35 +2824,36 @@ body[data-focus-scope="main"] #content {
   outline: none;
   transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
 }
-#sb-filter:hover {
+:is(#sb-filter, #file-list-filter):hover {
   border-color: var(--border);
   background: var(--bg);
 }
-#sb-filter:focus {
+:is(#sb-filter, #file-list-filter):focus {
   border-color: var(--accent);
   background: var(--bg);
   box-shadow: 0 0 0 3px var(--accent-muted);
 }
-#sb-filter[aria-invalid="true"] {
+:is(#sb-filter, #file-list-filter)[aria-invalid="true"] {
   border-color: var(--danger);
   box-shadow: 0 0 0 3px rgba(207,34,46,0.20);
 }
-#sb-filter::placeholder {
+:is(#sb-filter, #file-list-filter)::placeholder {
   color: var(--fg-subtle);
   opacity: 1;
 }
-#sb-filter::-webkit-search-decoration,
-#sb-filter::-webkit-search-cancel-button {
+:is(#sb-filter, #file-list-filter)::-webkit-search-decoration,
+:is(#sb-filter, #file-list-filter)::-webkit-search-cancel-button {
   -webkit-appearance: none;
   appearance: none;
 }
 
-/* ===== Sidebar resizer (右の列は左端を、History の変更ファイルの列は右端を掴む) ===== */
-#sidebar-resizer {
+/* ===== Sidebar resizer (ファイル一覧と、History の変更ファイルの一覧の右端を掴む) ===== */
+#sidebar-resizer,
+#file-list-resizer {
   position: fixed;
   top: var(--panel-body-top);
   bottom: var(--chrome-bottom);
-  right: calc(var(--sidebar-w) - 4px);
+  left: calc(var(--chrome-left) + var(--sidebar-w) - var(--space-1));
   width: 8px;
   cursor: col-resize;
   z-index: 31;
@@ -2766,7 +2861,9 @@ body[data-focus-scope="main"] #content {
   transition: background 0.12s;
 }
 #sidebar-resizer:hover,
-body.gdp-resizing #sidebar-resizer {
+#file-list-resizer:hover,
+body.gdp-resizing #sidebar-resizer,
+body.gdp-file-list-resizing #file-list-resizer {
   background: var(--accent);
   opacity: 0.5;
 }
@@ -2774,6 +2871,7 @@ body.gdp-resizing #sidebar-resizer {
 /* Lightweight preview line shown only while dragging — avoids reflowing the
  * (very tall) diff content on every mousemove. */
 #sidebar-resize-preview,
+#file-list-resize-preview,
 #history-resize-preview {
   display: none;
   position: fixed;
@@ -2785,11 +2883,13 @@ body.gdp-resizing #sidebar-resizer {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 body.gdp-resizing,
+body.gdp-file-list-resizing,
 body.gdp-history-resizing {
   cursor: col-resize !important;
   user-select: none;
 }
 body.gdp-resizing *,
+body.gdp-file-list-resizing *,
 body.gdp-history-resizing * {
   user-select: none !important;
 }
@@ -3424,14 +3524,14 @@ body.gdp-help-page #content {
 }
 
 /* ===== Tree view ===== */
-#filelist.tree {
+:is(#filelist, #file-list-rows).tree {
   padding: 4px 0 0;
 }
-#filelist.tree.tree-virtual {
+:is(#filelist, #file-list-rows).tree.tree-virtual {
   padding: 0;
 }
-#filelist.tree.tree-virtual .tree-dir,
-#filelist.tree.tree-virtual .tree-file {
+:is(#filelist, #file-list-rows).tree.tree-virtual .tree-dir,
+:is(#filelist, #file-list-rows).tree.tree-virtual .tree-file {
   height: 29px;
   min-height: 29px;
   overflow: hidden;
@@ -3443,8 +3543,8 @@ body.gdp-help-page #content {
    tiling to the indent region and collapses to 0 at depth 0, where a row
    has no ancestor dirs. Works for both the nested renderer and the flat
    absolute-positioned virtual rows. */
-#filelist.tree .tree-dir::before,
-#filelist.tree .tree-file::before {
+:is(#filelist, #file-list-rows).tree .tree-dir::before,
+:is(#filelist, #file-list-rows).tree .tree-file::before {
   content: "";
   position: absolute;
   top: 0;
@@ -3457,7 +3557,7 @@ body.gdp-help-page #content {
   background-size: 16px 100%;
   pointer-events: none;
 }
-#filelist.tree .tree-dir {
+:is(#filelist, #file-list-rows).tree .tree-dir {
   position: relative;
   display: grid;
   grid-template-columns: 16px 16px minmax(0, 1fr) 22px;
@@ -3472,28 +3572,28 @@ body.gdp-help-page #content {
   border-left: 2px solid transparent;
   transition: background 0.10s, border-color 0.10s;
 }
-#filelist.tree .tree-dir:hover { background: var(--bg-mute); color: var(--fg); }
-#filelist.tree .tree-dir.active {
+:is(#filelist, #file-list-rows).tree .tree-dir:hover { background: var(--bg-mute); color: var(--fg); }
+:is(#filelist, #file-list-rows).tree .tree-dir.active {
   background: var(--accent-subtle);
   border-left-color: var(--accent);
 }
-#filelist.tree .tree-dir.children-omitted {
+:is(#filelist, #file-list-rows).tree .tree-dir.children-omitted {
   color: var(--fg-muted);
 }
-#filelist.tree .tree-dir.children-omitted .dir-icon {
+:is(#filelist, #file-list-rows).tree .tree-dir.children-omitted .dir-icon {
   color: var(--fg-muted);
   opacity: 0.72;
 }
-#filelist.tree .tree-dir.children-omitted .dir-label {
+:is(#filelist, #file-list-rows).tree .tree-dir.children-omitted .dir-label {
   border-bottom: 0;
 }
-#filelist.tree .tree-dir.children-omitted-heavy {
+:is(#filelist, #file-list-rows).tree .tree-dir.children-omitted-heavy {
   cursor: pointer;
 }
-#filelist.tree .tree-dir.children-omitted-internal {
+:is(#filelist, #file-list-rows).tree .tree-dir.children-omitted-internal {
   cursor: default;
 }
-#filelist.tree .tree-dir .chev {
+:is(#filelist, #file-list-rows).tree .tree-dir .chev {
   display: flex;
   width: 16px;
   height: 20.8px;
@@ -3504,26 +3604,26 @@ body.gdp-help-page #content {
   transition: transform 0.15s, color 0.15s;
   color: var(--fg-subtle);
 }
-#filelist.tree .tree-dir.collapsed .chev { transform: rotate(-90deg); }
-#filelist.tree .tree-dir:hover .chev { color: var(--fg-muted); }
-#filelist.tree .tree-dir .chev .octicon {
+:is(#filelist, #file-list-rows).tree .tree-dir.collapsed .chev { transform: rotate(-90deg); }
+:is(#filelist, #file-list-rows).tree .tree-dir:hover .chev { color: var(--fg-muted); }
+:is(#filelist, #file-list-rows).tree .tree-dir .chev .octicon {
   display: block;
   width: 12px;
   height: 12px;
 }
-#filelist.tree .tree-dir .chev-spacer {
+:is(#filelist, #file-list-rows).tree .tree-dir .chev-spacer {
   width: 16px;
   height: 16px;
   display: inline-block;
 }
-#filelist.tree .tree-dir .dir-label {
+:is(#filelist, #file-list-rows).tree .tree-dir .dir-label {
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
   overflow: hidden;
 }
-#filelist.tree .tree-dir .dir-name {
+:is(#filelist, #file-list-rows).tree .tree-dir .dir-name {
   min-width: 0;
   font-size: var(--sidebar-dir-font);
   line-height: calc(var(--sidebar-dir-font) + 7px);
@@ -3532,10 +3632,10 @@ body.gdp-help-page #content {
   text-decoration: none;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-#filelist.tree .tree-dir.children-omitted .dir-name {
+:is(#filelist, #file-list-rows).tree .tree-dir.children-omitted .dir-name {
   color: var(--fg-muted);
 }
-#filelist.tree .tree-dir .dir-omitted {
+:is(#filelist, #file-list-rows).tree .tree-dir .dir-omitted {
   flex: 0 0 auto;
   max-width: 62px;
   overflow: hidden;
@@ -3548,17 +3648,17 @@ body.gdp-help-page #content {
   line-height: 15px;
   text-transform: uppercase;
 }
-#filelist.tree .tree-dir .dir-omitted-heavy {
+:is(#filelist, #file-list-rows).tree .tree-dir .dir-omitted-heavy {
   color: var(--fg-subtle);
   border-color: var(--border);
   background: var(--bg-soft);
 }
-#filelist.tree .tree-dir .dir-omitted-internal {
+:is(#filelist, #file-list-rows).tree .tree-dir .dir-omitted-internal {
   color: var(--fg-subtle);
   border-color: var(--border);
   background: var(--bg-soft);
 }
-#filelist.tree .tree-dir .dir-icon {
+:is(#filelist, #file-list-rows).tree .tree-dir .dir-icon {
   /* Match the repo listing's folder color (.gdp-repo-row .dir-icon). */
   color: var(--accent);
   flex-shrink: 0;
@@ -3568,13 +3668,13 @@ body.gdp-help-page #content {
   align-items: center;
   justify-content: center;
 }
-#filelist.tree .tree-dir .dir-icon .octicon { display: block; }
-#filelist.tree .tree-dir.collapsed { color: var(--fg); }
-#filelist.tree .tree-dir.collapsed .dir-name { color: var(--fg); font-weight: 400; }
-#filelist.tree .tree-children { list-style: none; padding: 0; margin: 0; }
-#filelist.tree .tree-dir.collapsed + .tree-children { display: none; }
+:is(#filelist, #file-list-rows).tree .tree-dir .dir-icon .octicon { display: block; }
+:is(#filelist, #file-list-rows).tree .tree-dir.collapsed { color: var(--fg); }
+:is(#filelist, #file-list-rows).tree .tree-dir.collapsed .dir-name { color: var(--fg); font-weight: 400; }
+:is(#filelist, #file-list-rows).tree .tree-children { list-style: none; padding: 0; margin: 0; }
+:is(#filelist, #file-list-rows).tree .tree-dir.collapsed + .tree-children { display: none; }
 
-#filelist.tree .tree-file {
+:is(#filelist, #file-list-rows).tree .tree-file {
   position: relative;
   display: grid;
   grid-template-columns: 16px 16px minmax(0, 1fr) auto auto;
@@ -3587,22 +3687,22 @@ body.gdp-help-page #content {
   border-left: 2px solid transparent;
   transition: background 0.10s, border-color 0.10s;
 }
-#filelist.tree .tree-file:hover { background: var(--bg-mute); }
-#filelist.tree .tree-file.active {
+:is(#filelist, #file-list-rows).tree .tree-file:hover { background: var(--bg-mute); }
+:is(#filelist, #file-list-rows).tree .tree-file.active {
   background: var(--accent-subtle);
   border-left-color: var(--accent);
 }
-#filelist.tree .tree-file .chev-spacer {
+:is(#filelist, #file-list-rows).tree .tree-file .chev-spacer {
   width: 16px;
   height: 1px;
 }
-#filelist li.viewed,
-#filelist.tree .tree-file.viewed {
+:is(#filelist, #file-list-rows) li.viewed,
+:is(#filelist, #file-list-rows).tree .tree-file.viewed {
   color: var(--fg-muted);
   border-left-color: var(--success);
 }
-#filelist li.viewed::after,
-#filelist.tree .tree-file.viewed::after {
+:is(#filelist, #file-list-rows) li.viewed::after,
+:is(#filelist, #file-list-rows).tree .tree-file.viewed::after {
   content: "✓";
   display: inline-flex;
   align-items: center;
@@ -3616,43 +3716,43 @@ body.gdp-help-page #content {
   font-weight: 700;
   line-height: 1;
 }
-#filelist li.viewed.active,
-#filelist.tree .tree-file.viewed.active {
+:is(#filelist, #file-list-rows) li.viewed.active,
+:is(#filelist, #file-list-rows).tree .tree-file.viewed.active {
   border-left-color: var(--success);
 }
-#filelist li.viewed .badge,
-#filelist.tree .tree-file.viewed .badge,
-#filelist li.viewed .stat,
-#filelist.tree .tree-file.viewed .stat {
+:is(#filelist, #file-list-rows) li.viewed .badge,
+:is(#filelist, #file-list-rows).tree .tree-file.viewed .badge,
+:is(#filelist, #file-list-rows) li.viewed .stat,
+:is(#filelist, #file-list-rows).tree .tree-file.viewed .stat {
   opacity: .72;
 }
-#filelist.tree .tree-file.hidden,
-#filelist.tree .tree-dir.hidden { display: none; }
-#filelist.tree .tree-file .name {
+:is(#filelist, #file-list-rows).tree .tree-file.hidden,
+:is(#filelist, #file-list-rows).tree .tree-dir.hidden { display: none; }
+:is(#filelist, #file-list-rows).tree .tree-file .name {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: var(--sidebar-file-font);
 }
-#filelist.tree .tree-file .stat {
+:is(#filelist, #file-list-rows).tree .tree-file .stat {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: var(--sidebar-stat-font);
   font-variant-numeric: tabular-nums;
 }
-#filelist.tree .tree-file .stat .a { color: var(--success); }
-#filelist.tree .tree-file .stat .d { color: var(--danger); }
-#filelist .gdp-open-path {
+:is(#filelist, #file-list-rows).tree .tree-file .stat .a { color: var(--success); }
+:is(#filelist, #file-list-rows).tree .tree-file .stat .d { color: var(--danger); }
+:is(#filelist, #file-list-rows) .gdp-open-path {
   width: 22px;
   height: 22px;
   padding: 0;
   border-radius: 5px;
   opacity: 0;
 }
-#filelist li:hover .gdp-open-path,
-#filelist .tree-dir:hover .gdp-open-path,
-#filelist .gdp-open-path:focus-visible {
+:is(#filelist, #file-list-rows) li:hover .gdp-open-path,
+:is(#filelist, #file-list-rows) .tree-dir:hover .gdp-open-path,
+:is(#filelist, #file-list-rows) .gdp-open-path:focus-visible {
   opacity: 1;
 }
-#filelist { list-style: none; margin: 0; padding: 6px 0 0; }
-#filelist li {
+:is(#filelist, #file-list-rows) { list-style: none; margin: 0; padding: 6px 0 0; }
+:is(#filelist, #file-list-rows) li {
   display: grid;
   grid-template-columns: 16px 1fr auto auto;
   align-items: center;
@@ -3664,28 +3764,28 @@ body.gdp-help-page #content {
   border-left: 2px solid transparent;
   transition: background 0.10s, border-color 0.10s;
 }
-#filelist li:hover { background: var(--bg-mute); }
-#filelist li.active {
+:is(#filelist, #file-list-rows) li:hover { background: var(--bg-mute); }
+:is(#filelist, #file-list-rows) li.active {
   background: var(--accent-subtle);
   border-left-color: var(--accent);
   color: var(--fg);
 }
-#filelist li.hidden { display: none; }
-#filelist li .name {
+:is(#filelist, #file-list-rows) li.hidden { display: none; }
+:is(#filelist, #file-list-rows) li .name {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   direction: rtl; text-align: left;
   /* The name is a real link (new-tab clicks); it must not read as one. */
   color: inherit; text-decoration: none;
 }
-#filelist li .name::before { content: "\200E"; }
-#filelist li .stat {
+:is(#filelist, #file-list-rows) li .name::before { content: "\200E"; }
+:is(#filelist, #file-list-rows) li .stat {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: var(--sidebar-stat-font);
   font-variant-numeric: tabular-nums;
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
-#filelist li .stat .a { color: var(--success); }
-#filelist li .stat .d { color: var(--danger); }
+:is(#filelist, #file-list-rows) li .stat .a { color: var(--success); }
+:is(#filelist, #file-list-rows) li .stat .d { color: var(--danger); }
 .bar {
   display: inline-flex; gap: 1px;
   margin-left: 4px;
@@ -3772,8 +3872,8 @@ body.gdp-help-page #content {
 /* Recolor the row's own type icon (file icon, or the shared blue dir-icon)
    to match the target label, so the symlink signal isn't limited to the
    sublabel text. */
-#filelist.tree .tree-file.symlink-row .d2h-icon-wrapper,
-#filelist.tree .tree-dir.symlink-row .dir-icon,
+:is(#filelist, #file-list-rows).tree .tree-file.symlink-row .d2h-icon-wrapper,
+:is(#filelist, #file-list-rows).tree .tree-dir.symlink-row .dir-icon,
 .gdp-repo-row.symlink-row .d2h-icon-wrapper,
 .gdp-repo-row.symlink-row .dir-icon {
   color: var(--done);
@@ -5976,61 +6076,13 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   }
 }
 
-body.gdp-repo-page #sidebar {
-  display: block;
-}
-body.gdp-repo-page #sidebar-resizer {
-  display: block;
-}
-body.gdp-repo-page .sb-head,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-head,
-body.gdp-files-column-page .sb-head {
-  display: grid;
-  grid-template:
-    "toggle title totals ." auto
-    "ref ref ref ref" auto
-    "actions actions . view" auto
-    "filter filter filter filter" auto
-    / 28px auto minmax(0, 1fr) auto;
-  justify-content: stretch;
-  align-items: center;
-  gap: 8px;
+/* ファイル一覧の見出し: 題・件数・対象の ref・全部開く / 畳む・絞り込み (下の
+   「ファイルのツリーの頭は 2 段」が並びを決める)。絞り込みは見出しの中。 */
+#file-list .sb-head {
   top: 0;
   z-index: 5;
 }
-body.gdp-repo-page .sb-title,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-title,
-body.gdp-files-column-page .sb-title {
-  grid-area: title;
-}
-body.gdp-repo-page #totals,
-body.gdp-file-detail-page.gdp-repo-blob-page #totals,
-body.gdp-files-column-page #totals {
-  grid-area: totals;
-}
-body.gdp-repo-page #repo-target-wrap,
-body.gdp-file-detail-page.gdp-repo-blob-page #repo-target-wrap,
-body.gdp-files-column-page #repo-target-wrap {
-  grid-area: ref;
-}
-.ref-selector.ref-selector-in-grid { width: 100%; }
-body.gdp-repo-page .sb-actions,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-actions,
-body.gdp-files-column-page .sb-actions {
-  grid-area: actions;
-  margin-left: 0;
-  justify-self: start;
-}
-body.gdp-repo-page .sb-view-seg,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-view-seg,
-body.gdp-files-column-page .sb-view-seg {
-  grid-area: view;
-  margin-left: auto;
-}
-body.gdp-repo-page .sb-filter-wrap,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap,
-body.gdp-files-column-page .sb-filter-wrap {
-  grid-area: filter;
+#file-list .sb-filter-wrap {
   position: relative;
   /* The base rule is sticky with top: var(--sidebar-head-h); keeping that
      offset while relative shifts the filter below the .sb-head grid. */
@@ -6042,24 +6094,19 @@ body.gdp-files-column-page .sb-filter-wrap {
 }
 /* The magnifier glyph offsets assume the default 7px 12px wrap padding;
    the grid layout drops the horizontal padding, so shift it back in. */
-body.gdp-repo-page .sb-filter-wrap::before,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap::before,
-body.gdp-files-column-page .sb-filter-wrap::before {
+#file-list .sb-filter-wrap::before {
   left: 11px;
   top: 16px;
 }
-body.gdp-repo-page .sb-filter-wrap::after,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap::after,
-body.gdp-files-column-page .sb-filter-wrap::after {
+#file-list .sb-filter-wrap::after {
   left: 22px;
   top: 27px;
 }
-body.gdp-repo-page .sb-filter-clear,
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-clear,
-body.gdp-files-column-page .sb-filter-clear {
+#file-list .sb-filter-clear {
   right: 7px;
   top: 22px;
 }
+.ref-selector.ref-selector-in-grid { width: 100%; }
 body.gdp-file-detail-page {
   --chrome-h: var(--global-header-h);
 }
@@ -6079,17 +6126,9 @@ body.gdp-repo-page #content {
      フォルダ表示とファイル表示で本文の左端が 8px ずれていた。 */
   padding: var(--content-top-gap) var(--content-pad-x) 48px;
 }
-/* 右の列を帯に畳んだら、右の列の Files の木を隠す。一覧の列を出す画面の
-   #sidebar は右の列に居ない (Diff は一覧の列、History・選んでいる作業ツリーは
-   本文の 2 列目) ので、右の列を畳んでも隠さない。 */
-body.gdp-sidebar-hidden:not([data-list-column]) #sidebar,
-body.gdp-sidebar-hidden:not([data-list-column]) #sidebar-resizer {
-  display: none !important;
-}
-/* 一覧の列を隠した (一覧の画面の帯のボタン) 間は一覧を隠す。 */
-body[data-list-column="sidebar"][data-list-column-hidden] #sidebar,
-body[data-list-column-hidden] #history-panel,
-body[data-list-column-hidden] #worktree-panel {
+/* ファイル一覧を畳んだ (手・幅が足りないときの自動) 間は隠す。頭の行は残る。 */
+body.gdp-sidebar-hidden #file-list,
+body.gdp-sidebar-hidden #file-list-resizer {
   display: none !important;
 }
 body.gdp-sidebar-hidden #content,
@@ -8442,13 +8481,17 @@ body.gdp-worktree-page #topbar .ref-pickers {
   display: none;
 }
 
-body.gdp-worktree-page #worktree-panel {
+/* 一覧だけの表示 (data-worktree-overview) は一覧が本文。選んでいる間は一覧の列に
+   出すときだけ (前面が端末・画像のタブなら出さない。History と同じ)。 */
+body.gdp-worktree-page[data-worktree-overview] #worktree-panel,
+body[data-list-column="worktree"] #worktree-panel {
   display: flex;
 }
 
-/* 選んでいる間の並べ方 (一覧 → 変更ファイルの木 → 本文) は History と同じ規則
-   (body[data-list-column="worktree"]。Commit history panel の節)。一覧だけを
-   出しているとき (data-worktree-overview) は一覧が本文で、右の列が Files の木。 */
+/* 選んでいる間の並べ方 (ファイル一覧 → 一覧 → 変更ファイルの一覧 → 本文) は
+   History と同じ規則 (body[data-list-column="worktree"]。Commit history panel の
+   節)。一覧だけを出しているとき (data-worktree-overview) は一覧が本文で、一覧の
+   列はファイル一覧だけ。 */
 
 /* サイドバーで意味を持たないのは「対象 ref」だけ。ツリー / 一覧の切替と
    全展開・全折りたたみはこの画面でも効く。 */
@@ -8481,9 +8524,9 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 
 /* 未コミット / コミット済み の区切り。ファイル行ではないので、ツリーの
    省略ルールから外して 1 行の見出しとして出す。 */
-#filelist .worktree-file-group,
-#filelist.tree .worktree-file-group {
-  /* #filelist の li は flex 前提なので、文字だけの見出しは block に戻す。
+:is(#filelist, #file-list-rows) .worktree-file-group,
+:is(#filelist, #file-list-rows).tree .worktree-file-group {
+  /* :is(#filelist, #file-list-rows) の li は flex 前提なので、文字だけの見出しは block に戻す。
      flex のままだと匿名アイテムになって幅を持てず、日本語が縦に潰れる。 */
   display: block;
   padding: 8px 12px 2px;
@@ -8495,14 +8538,14 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 
 /* 選択中の worktree にだけ出すコミット。履歴画面の行を再利用するが、
    ここでは選択操作を持たないので hover と pointer は付けない。 */
-#filelist .worktree-commit,
-#filelist.tree .worktree-commit {
+:is(#filelist, #file-list-rows) .worktree-commit,
+:is(#filelist, #file-list-rows).tree .worktree-commit {
   display: block;
   padding: 8px 12px;
   border-left-width: 2px;
   cursor: default;
 }
-#filelist .worktree-commit:hover {
+:is(#filelist, #file-list-rows) .worktree-commit:hover {
   background: transparent;
 }
 
@@ -8550,7 +8593,7 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 }
 
 /* 2 段目のフォルダの場所。パスは末尾が肝心なので、長いときは頭側を省略する。
-   direction: rtl は #filelist li .name と同じ手で、::before の LRM
+   direction: rtl は :is(#filelist, #file-list-rows) li .name と同じ手で、::before の LRM
    (U+200E) まで込みで 1 組。これが無いと、末尾が記号で終わるパスで並びが
    崩れる。 */
 .worktree-row-path {
@@ -8777,7 +8820,7 @@ body.gdp-worktree-page .history-head .worktree-head-btn {
 }
 
 /* ⇄ の意味。重なりが 1 件も無いときは出さない。 */
-#filelist .worktree-overlap-legend {
+:is(#filelist, #file-list-rows) .worktree-overlap-legend {
   display: block;
   padding: 8px 12px 2px;
   color: var(--fg-muted);
@@ -14329,7 +14372,7 @@ body.db-resizing {
   flex-shrink: 0;
 }
 
-/* Explorer 表示: 既存ファイルツリー (#filelist.tree) の見た目を S3 ペインに
+/* Explorer 表示: 既存ファイルツリー (:is(#filelist, #file-list-rows).tree) の見た目を S3 ペインに
    合わせて再現したもの。クラス名は共通 (.tree-dir / .tree-file / .chev ...)。
    sidebar 内の sidebarSlot に置かれるため、flex で残りの高さを満たし、
    スクロール可能にする。padding をなくし、sidebarSlot の余白に揃える。 */
@@ -16597,6 +16640,8 @@ body.gdp-search-page {
    body より先に付けるため (移った直後に骨格が一瞬崩れない)。 */
 html[data-nav-collapsed] body {
   --nav-w: 0px;
+  /* 一覧の列の頭の先頭に「サイドバーを出す」(#nav-expand) が出る。 */
+  --nav-expand-w: calc(var(--ui-control-sm) + var(--space-2));
 }
 html[data-nav-collapsed] #app-nav {
   display: none;
@@ -17199,8 +17244,8 @@ body.gdp-nav-resizing {
    フォーカスのある面の選択中のタブだけ、そのタブの幅だけ)。 */
 #main-tabs {
   position: fixed;
-  /* 右端は右の列の頭の左。右の列を畳んでも頭の行は残るので動かない。 */
-  top: 0; left: var(--chrome-left); right: var(--panelcol-head-w);
+  /* 左端は一覧の列の頭の右 (列を畳んでも頭の行は残るので動かない)、右端は窓の右端。 */
+  top: 0; left: calc(var(--chrome-left) + var(--column-head-w)); right: var(--chrome-right);
   height: var(--main-tabs-h);
   z-index: 60;
   display: flex;
@@ -17228,10 +17273,10 @@ body.main-split .main-tabs-pane.main-tabs-pane-focused::after {
   background: var(--color-accent);
   pointer-events: none;
 }
-/* 2 面の左の面のタブ列は左の面の幅 (右の列の上には伸ばさない)。タブ列は一覧の
-   列の上もまたぐので、一覧の列の幅を足して面の境界にそろえる。 */
+/* 2 面の左の面のタブ列は面の境界まで。タブ列は一覧の列の頭の右から始まり、一覧の
+   列の上もまたぐので、一覧の列の幅を足して頭の幅を引く。 */
 body.main-split .main-tabs-pane[data-side="left"] {
-  flex: 0 0 calc(var(--split-left-w) + var(--listcol-shown));
+  flex: 0 0 max(0px, calc(var(--split-left-w) + var(--listcol-shown) - var(--column-head-w)));
 }
 .main-tabs-strip {
   /* タブの最小幅を列の幅から決める (.main-tab の min-width が 100cqi を読む)。 */
@@ -17436,13 +17481,13 @@ body.main-split .main-tabs-pane[data-side="left"] {
 }
 
 /* ---- メインの面の左右の箱 (.main-pane-host。app.ts の PANE_HOSTS) ----
-   前面のタブがターミナルか画像 (右の面ならファイルも) のとき、その面の位置 (タブ列の下・右の列の右・
-   本文の下端の上) に重ねて出す。右の列 (木) は覆わない。左の前面が route のタブか何も選んでいないときは出さない
+   前面のタブがターミナルか画像 (右の面ならファイルも) のとき、その面の位置 (タブ列の下・一覧の列の右・
+   本文の下端の上) に重ねて出す。一覧の列は覆わない。左の前面が route のタブか何も選んでいないときは出さない
    (下の本文が見える)。画面ごとのツールバー (50) より上、
    上の行・タブ列 (60) より下。 */
 .main-pane-host {
   position: fixed;
-  top: var(--global-header-h); left: var(--page-left); right: var(--panelcol-shown);
+  top: var(--global-header-h); left: var(--page-left); right: var(--chrome-right);
   bottom: var(--main-bottom);
   z-index: 55;
   display: none;
@@ -17527,12 +17572,12 @@ body.main-split-resizing {
   user-select: none;
 }
 /* タブを右端へドラッグしたときの「右に分割」のドロップ先。ドラッグ中だけ、
-   本文の右半分に出す (タブ列・左のサイドバー・右の列は覆わない)。 */
+   本文の右半分に出す (タブ列・左のサイドバー・一覧の列は覆わない)。 */
 .main-split-drop {
   position: fixed;
   top: var(--global-header-h);
   bottom: var(--main-bottom);
-  right: var(--panelcol-shown);
+  right: var(--chrome-right);
   /* 本文の横幅の半分。幅 --main-w は TS (main-tabs-view.ts の applyGeometry) が書く。 */
   width: calc(var(--main-w, 50vw) / 2);
   z-index: 58;
@@ -17711,35 +17756,45 @@ button.brand[aria-expanded="true"] {
 }
 
 /* ---- 画面の入口 (#view-head) とプロジェクト名 (#tabs-lead) の置き場所 ----
-   入口の絵柄は右の列の頭 (#panel-head) の 1 段 (右端に右の列を畳むボタン)。
-   右の列を畳んでも頭の行はそのまま (畳むのは本体だけ。views/sidebar.ts の
-   placeSidebarToggle)。プロジェクト名とブランチはタブ列の左端に固定。 */
+   入口の絵柄は一覧の列の頭 (#panel-head。タブ列の行の左端) の 1 段 (右端に
+   ファイル一覧を畳むボタン)。ファイル一覧を畳んでも頭の行はそのまま (畳むのは
+   頭の下の一覧だけ。views/sidebar.ts の placeSidebarToggle)。プロジェクト名と
+   ブランチはタブ列の左端 (頭の右) に固定。 */
 .view-head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
 }
-/* 右の列の頭 (#panel-head)。タブ列の行と同じ高さの 1 段に絵柄の列と、右端に列を
-   畳むボタン。タブの切替でも右の列の開閉 (自動で畳むときを含む) でも動かない。
-   文字は文字の線 (--pad-text)、押せる領域の左端は面の線 (--pad-face)。 */
+/* 一覧の列の頭 (#panel-head)。タブ列の行と同じ高さの 1 段に絵柄の列と、右端に
+   ファイル一覧を畳むボタン。幅は固定 (--column-head-w) で、画面の切替でも一覧の
+   列の開閉 (自動で畳むときを含む) でも動かない。左のサイドバーを畳んだときだけ、
+   先頭に「サイドバーを出す」が出て、その幅だけ広がる。押せる領域の左端は面の線
+   (--pad-face)。 */
 #panel-head {
   position: fixed;
-  right: 0;
+  left: var(--chrome-left);
   top: 0;
-  width: var(--panelcol-head-w);
+  display: flex;
+  align-items: center;
+  width: var(--column-head-w);
   height: var(--global-header-h);
   z-index: 32;
   box-sizing: border-box;
   padding: 0 var(--pad-face);
   background: var(--color-tree);
-  /* 左の線は内側の影で引く (border だと幅 --sidebar-w のときだけ中身が 1px
-     削られ、History で列が広がると畳むボタンが 1px 動く)。 */
-  box-shadow: inset 1px 0 0 var(--color-line-soft);
+  /* 右の線は内側の影で引く (border だと中身が 1px 削られ、畳むボタンが動く)。 */
+  box-shadow: inset -1px 0 0 var(--color-line-soft);
 }
-/* 2 面のために自動で畳んだ: 開くボタンの肩に小さな印を出し、手で畳んだ
+/* 左のサイドバーを畳んだときの「サイドバーを出す」: 頭の先頭 (幅は
+   --nav-expand-w = ボタンと間)。 */
+#panel-head > #nav-expand {
+  flex: none;
+  margin-right: var(--space-2);
+}
+/* 幅が足りずに自動で畳んだ: 開くボタンの肩に小さな印を出し、手で畳んだ
    ときと見分けられるようにする (理由はボタンの title に入れる。app.ts の
-   markPanelColumnAutoHidden)。印は流れの外 (角に重ねる)。 */
+   markFileListAutoHidden)。印は流れの外 (角に重ねる)。 */
 #sidebar-toggle.sidebar-toggle-auto-hidden {
   position: relative;
 }
@@ -17755,9 +17810,9 @@ button.brand[aria-expanded="true"] {
 }
 /* 1 段 (タブ列の行) に絵柄と、右端に畳むボタン。 */
 #panel-head > #view-head {
+  flex: 1 1 auto;
   flex-direction: row;
   align-items: center;
-  width: 100%;
   height: var(--global-header-h);
 }
 #panel-head > #view-head > .view-strip {
@@ -17769,24 +17824,18 @@ button.brand[aria-expanded="true"] {
   flex: none;
   margin-left: auto;
 }
-/* 木を畳む / 開くボタンは絵柄の行の右端 (畳んでも同じ場所)。 */
+/* ファイル一覧を畳む / 開くボタンは絵柄の行の右端 (畳んでも同じ場所)。 */
 .view-head-row > #sidebar-toggle {
   flex: none;
 }
 /* タブ列の左端のプロジェクト名とブランチ (= プロジェクトの切替)。幅は固定の
-   --tabs-lead-w で、画面・タブ・右の列の開閉・2 面で変えない (出たり消えたり
+   --tabs-lead-w で、画面・タブ・一覧の列の開閉・2 面で変えない (出たり消えたり
    動いたりすると、押す場所がずれる)。名前と枝はこの幅の中で分ける
    (views/brand-fit.ts)。タブはその右から始まる。 */
 .tabs-lead {
   display: flex;
   align-items: center;
   flex: none;
-}
-/* 左のサイドバーを畳んだときの「サイドバーを出す」は名前の枠の外 (左)。枠の幅と
-   枠の中の名前の位置は変えない (枠の中に置くと名前が 28px 右へずれて縮んだ)。 */
-.tabs-lead > #nav-expand {
-  flex: none;
-  margin-left: var(--pad-face);
 }
 .tabs-lead-name {
   display: flex;
@@ -18086,45 +18135,45 @@ button.brand[aria-expanded="true"] {
 #app-nav {
   border-right: 1px solid var(--color-line-soft);
 }
-#sidebar {
+:is(#sidebar, #file-list) {
   background: var(--color-tree);
   border-right: 1px solid var(--color-line-soft);
 }
-#sidebar .sb-head,
-#sidebar .sb-filter-wrap {
+:is(#sidebar, #file-list) .sb-head,
+:is(#sidebar, #file-list) .sb-filter-wrap {
   background: var(--color-tree);
 }
-#filelist {
+:is(#filelist, #file-list-rows) {
   padding: var(--space-1) var(--space-2) 0;
 }
-#filelist li,
-#filelist.tree .tree-file {
+:is(#filelist, #file-list-rows) li,
+:is(#filelist, #file-list-rows).tree .tree-file {
   border-left: 0;
   border-radius: var(--radius-md);
 }
-#filelist li:hover,
-#filelist.tree .tree-file:hover {
+:is(#filelist, #file-list-rows) li:hover,
+:is(#filelist, #file-list-rows).tree .tree-file:hover {
   background: color-mix(in srgb, var(--color-raised) 70%, transparent);
 }
-#filelist li.active,
-#filelist.tree .tree-file.active {
+:is(#filelist, #file-list-rows) li.active,
+:is(#filelist, #file-list-rows).tree .tree-file.active {
   background: var(--color-select);
   box-shadow: var(--glow-select);
   color: var(--color-text);
 }
 /* キーで届いた木の行 (Tab の止まり場所は 1 行)。行は列の端から端までで外の輪は
    切れるので、内側に描く。選んでいる行の光は残す。 */
-#filelist li:focus-visible {
+:is(#filelist, #file-list-rows) li:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring-inset);
 }
-#filelist li.active:focus-visible,
-#filelist.tree .tree-file.active:focus-visible {
+:is(#filelist, #file-list-rows) li.active:focus-visible,
+:is(#filelist, #file-list-rows).tree .tree-file.active:focus-visible {
   box-shadow: var(--focus-ring-inset), var(--glow-select);
 }
 /* 閲覧済みの印は左の線ではなく、行末のチェック (既存) だけにする。 */
-#filelist li.viewed,
-#filelist.tree .tree-file.viewed {
+:is(#filelist, #file-list-rows) li.viewed,
+:is(#filelist, #file-list-rows).tree .tree-file.viewed {
   border-left: 0;
 }
 
@@ -18167,8 +18216,8 @@ button.brand[aria-expanded="true"] {
   border: 0;
   background: transparent;
 }
-#filelist.tree,
-#filelist.tree.tree-virtual {
+:is(#filelist, #file-list-rows).tree,
+:is(#filelist, #file-list-rows).tree.tree-virtual {
   padding-right: var(--space-2);
   padding-left: var(--space-2);
 }
@@ -18516,19 +18565,19 @@ button.brand[aria-expanded="true"] {
 
 /* ファイルのツリーの行も面の線から描く (仮想表示の行は絶対配置なので、
    左右を面の線に置き直す)。字下げは views/tree-indent.ts。 */
-#filelist.tree.tree-virtual > li {
+:is(#filelist, #file-list-rows).tree.tree-virtual > li {
   /* left / right は表示の側 (sidebar.ts) が 0 で書くので、余白で内側へ。 */
   margin: 0 var(--pad-face);
 }
-#filelist li {
+:is(#filelist, #file-list-rows) li {
   padding-left: calc(var(--pad-text) - var(--pad-face));
 }
-#filelist.tree .tree-dir,
-#filelist.tree .tree-file {
+:is(#filelist, #file-list-rows).tree .tree-dir,
+:is(#filelist, #file-list-rows).tree .tree-file {
   padding-left: var(--lvl-pad);
 }
 /* ツリーの頭 (見出し・対象・切替・絞り込み) も面の線から。 */
-#sidebar .sb-head {
+:is(#sidebar, #file-list) .sb-head {
   padding: var(--space-3) var(--pad-face) var(--space-2);
 }
 /* 切替の中に同居するコピーのボタンは、切替の文字から 1 段離す。 */
@@ -18579,25 +18628,23 @@ button.brand[aria-expanded="true"] {
 }
 
 /* ---- 行の高さを 1 つの値に (--ui-row-h。出所は views/shell/row-height.ts) ---- */
-#filelist.tree.tree-virtual .tree-dir,
-#filelist.tree.tree-virtual .tree-file,
-#filelist.tree .tree-dir,
-#filelist.tree .tree-file,
-#filelist li {
+:is(#filelist, #file-list-rows).tree.tree-virtual .tree-dir,
+:is(#filelist, #file-list-rows).tree.tree-virtual .tree-file,
+:is(#filelist, #file-list-rows).tree .tree-dir,
+:is(#filelist, #file-list-rows).tree .tree-file,
+:is(#filelist, #file-list-rows) li {
   height: var(--ui-row-h);
   min-height: var(--ui-row-h);
   padding-top: 0;
   padding-bottom: 0;
 }
 
-/* ---- ファイルのツリーの頭は 2 段 ----
-   1 段目: 「FILES」の見出し・対象の ref (既定の worktree はアイコンだけ、ほかを
-   選んでいるときは値を出す)・全部開く / 全部畳む・tree / flat・ツリーを隠す。
+/* ---- ファイル一覧と変更ファイルの一覧の頭は 2 段 ----
+   1 段目: 見出し (「FILES」・「変更ファイル」)・対象の ref (ファイル一覧だけ。既定の
+   worktree はアイコンだけ、ほかを選んでいるときは値を出す)・件数・全部開く / 全部
+   畳む・tree / flat (変更ファイルの一覧だけ。ファイル一覧は木に固定)。
    2 段目: 絞り込み。見出しの文字は文字の線、右端の押せる領域は面の線。 */
-#sidebar .sb-head,
-body.gdp-repo-page #sidebar .sb-head,
-body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head,
-body.gdp-files-column-page #sidebar .sb-head {
+:is(#sidebar, #file-list) .sb-head {
   display: grid;
   grid-template:
     "title ref totals actions view toggle" var(--ui-control-sm)
@@ -18607,10 +18654,10 @@ body.gdp-files-column-page #sidebar .sb-head {
   column-gap: var(--space-1);
   row-gap: var(--space-2);
   padding: var(--space-3) var(--pad-face) var(--space-2) var(--pad-text);
-  /* 詰め方は窓ではなくこの見出しの実幅で決める (右の列の幅は利用者が変える)。 */
+  /* 詰め方は窓ではなくこの見出しの実幅で決める (列の幅は利用者が変える)。 */
   container: sidebar-head / inline-size;
 }
-#sidebar .sb-head > .sb-title {
+:is(#sidebar, #file-list) .sb-head > .sb-title {
   grid-area: title;
   /* 幅が足りないとき (日本語・特大の密度) に縮むのは題のほう (… で省く)。
      縮まないと右端の「ツリー / 一覧」が列の外へ押し出された。 */
@@ -18626,7 +18673,7 @@ body.gdp-files-column-page #sidebar .sb-head {
 }
 /* 見出しの行が狭いとき (日本語・大きい密度) に詰めるのは件数だけ (… で省く)。
    題と切替の語は折らない。 */
-#sidebar .sb-head > #totals {
+:is(#sidebar, #file-list) .sb-head > :is(#totals, #file-list-totals) {
   grid-area: totals;
   justify-self: end;
   /* 自分の列より広がらない (広がると右の操作と重なり、「1…」だけが見えた)。 */
@@ -18642,16 +18689,16 @@ body.gdp-files-column-page #sidebar .sb-head {
    ままだと特大で件数が残り、左の列 (319px) の題が「ファイル」の 2px 手前で
    切れた。 */
 @container sidebar-head (max-width: 22em) {
-  #sidebar .sb-head > #totals {
+  :is(#sidebar, #file-list) .sb-head > :is(#totals, #file-list-totals) {
     display: none;
   }
 }
-#sidebar .sb-head > #repo-target-wrap {
+:is(#sidebar, #file-list) .sb-head > #repo-target-wrap {
   grid-area: ref;
   justify-self: start;
   max-width: 100%;
 }
-#sidebar .sb-head > .sb-actions {
+:is(#sidebar, #file-list) .sb-head > .sb-actions {
   grid-area: actions;
   margin: 0;
   padding: 0;
@@ -18659,11 +18706,11 @@ body.gdp-files-column-page #sidebar .sb-head {
   border: 0;
   background: transparent;
 }
-#sidebar .sb-head > .sb-view-seg {
+:is(#sidebar, #file-list) .sb-head > .sb-view-seg {
   grid-area: view;
   margin: 0;
 }
-#sidebar .sb-head > .sb-filter-wrap {
+:is(#sidebar, #file-list) .sb-head > .sb-filter-wrap {
   grid-area: filter;
   padding: 0;
   margin-left: calc(var(--pad-face) - var(--pad-text));
@@ -18675,15 +18722,15 @@ body.gdp-files-column-page #sidebar .sb-head {
    --sidebar-head-h に書くので、下に貼り付く絞り込みはずれない)。自分の grid の
    区画は container の中から変えられないので、線で置き直す。 */
 @container sidebar-head (max-width: 17.5em) {
-  #sidebar .sb-head > .sb-actions {
+  :is(#sidebar, #file-list) .sb-head > .sb-actions {
     grid-area: 2 / 5 / auto / 7;
     justify-self: end;
   }
-  #sidebar .sb-head > .sb-filter-wrap {
+  :is(#sidebar, #file-list) .sb-head > .sb-filter-wrap {
     grid-area: 2 / 1 / auto / 5;
   }
 }
-#sidebar .sb-head .sb-icon-action,
+:is(#sidebar, #file-list) .sb-head .sb-icon-action,
 .view-head-row > #sidebar-toggle {
   width: var(--ui-control-sm);
   height: var(--ui-control-sm);
@@ -18692,12 +18739,12 @@ body.gdp-files-column-page #sidebar .sb-head {
   background: transparent;
   color: var(--color-text-3);
 }
-#sidebar .sb-head .sb-icon-action:hover,
+:is(#sidebar, #file-list) .sb-head .sb-icon-action:hover,
 .view-head-row > #sidebar-toggle:hover {
   background: var(--color-raised);
   color: var(--color-text);
 }
-#sidebar .sb-head .sb-view-seg button {
+:is(#sidebar, #file-list) .sb-head .sb-view-seg button {
   height: calc(var(--ui-control-sm) - var(--space-1));
   padding: 0 var(--space-1);
   font-size: var(--ui-font-xs);
@@ -18705,7 +18752,7 @@ body.gdp-files-column-page #sidebar .sb-head {
 }
 /* 対象の ref: 小さな面。既定のときはアイコンだけの押せる領域 (入力欄は面の
    上に重ねたまま透明にして、押すと今までどおり選ぶ一覧が開く)。 */
-#sidebar .sb-head .ref-selector.ref-selector-in-grid {
+:is(#sidebar, #file-list) .sb-head .ref-selector.ref-selector-in-grid {
   position: relative;
   width: auto;
   max-width: 100%;
@@ -18716,18 +18763,18 @@ body.gdp-files-column-page #sidebar .sb-head {
   border-radius: var(--radius-sm);
   background: var(--color-inset);
 }
-#sidebar .sb-head .ref-selector.ref-selector-in-grid input {
+:is(#sidebar, #file-list) .sb-head .ref-selector.ref-selector-in-grid input {
   min-width: 0;
   width: calc(var(--space-unit) * 18);
   font-size: var(--ui-font-sm);
 }
-#sidebar .sb-head .ref-selector.ref-selector-in-grid[data-default-ref="true"] {
+:is(#sidebar, #file-list) .sb-head .ref-selector.ref-selector-in-grid[data-default-ref="true"] {
   width: var(--ui-control-sm);
   padding: 0;
   justify-content: center;
   background: transparent;
 }
-#sidebar .sb-head .ref-selector.ref-selector-in-grid[data-default-ref="true"] input {
+:is(#sidebar, #file-list) .sb-head .ref-selector.ref-selector-in-grid[data-default-ref="true"] input {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -18735,7 +18782,7 @@ body.gdp-files-column-page #sidebar .sb-head {
   background: transparent;
   cursor: pointer;
 }
-#sidebar .sb-head .ref-selector.ref-selector-in-grid[data-default-ref="true"] .ref-selector-caret {
+:is(#sidebar, #file-list) .sb-head .ref-selector.ref-selector-in-grid[data-default-ref="true"] .ref-selector-caret {
   display: none;
 }
 
@@ -19179,23 +19226,16 @@ body.gdp-files-column-page #sidebar .sb-head {
   height: var(--image-tab-aux-h);
   border-color: transparent;
 }
-#sidebar .sb-head .sb-view-seg {
+:is(#sidebar, #file-list) .sb-head .sb-view-seg {
   align-self: center;
   /* overflow: hidden の枠は grid で 0 まで縮められ、「ツリー」が 1 文字ずつ
      折り返して潰れた。語の幅は守る。 */
   min-width: max-content;
 }
-#sidebar .sb-head .sb-view-seg button {
+:is(#sidebar, #file-list) .sb-head .sb-view-seg button {
   display: inline-grid;
   place-items: center;
   line-height: 1;
-}
-/* リポジトリの表示ではツリーに固定される (sidebar.ts の treeMode) ので、効かない
-   tree / flat の切替は出さず、その幅を対象の ref の値に回す。 */
-body.gdp-repo-page #sidebar .sb-head > .sb-view-seg,
-body.gdp-file-detail-page.gdp-repo-blob-page #sidebar .sb-head > .sb-view-seg,
-body.gdp-files-column-page #sidebar .sb-head > .sb-view-seg {
-  display: none;
 }
 
 /* ---- 全体ボード (/agents。views/agents/agents-view.ts・accounts-band.ts・usage-meter.ts) ----
@@ -21571,7 +21611,7 @@ body.gdp-history-page #diff {
   box-shadow: var(--glow-select);
 }
 /* キーで届いた行 (Tab の止まり場所は 1 行)。行は一覧の端まで広がるので輪は
-   内側に描く。選んでいる行の光は残す (#filelist の行と同じ)。 */
+   内側に描く。選んでいる行の光は残す (:is(#filelist, #file-list-rows) の行と同じ)。 */
 #history-panel .history-item:focus-visible,
 .gdp-file-history-panel .history-item:focus-visible {
   outline: none;
@@ -22332,9 +22372,8 @@ body[data-worktree-overview] #history-resizer,
 body[data-worktree-overview] main#content {
   display: none;
 }
-/* 一覧だけのときは本文の場所いっぱい (右の列は Files の木)。2 面なら左の面まで
-   (右の端を 0 にしていたので、右の列が右の面の下に潜っていた)。列の畳み方は
-   この箱の幅で決める (@container worktree-overview)。 */
+/* 一覧だけのときは本文の場所いっぱい (一覧の列はファイル一覧だけ)。2 面なら左の
+   面まで。列の畳み方はこの箱の幅で決める (@container worktree-overview)。 */
 body[data-worktree-overview] #worktree-panel {
   container: worktree-overview / inline-size;
   left: var(--page-left);
@@ -22651,7 +22690,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
 }
 /* 選んだ作業ツリーのコミット (件名と情報の 2 段) は一覧の行の高さに収まらない。
    作業ツリーのファイルの一覧は仮想表示ではないので、高さを中身に任せる。 */
-#filelist li.worktree-commit {
+:is(#filelist, #file-list-rows) li.worktree-commit {
   height: auto;
   padding: var(--space-1) var(--pad-text);
 }
@@ -23203,7 +23242,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .mobile-keys:not([hidden]) {
     position: fixed;
     left: var(--page-left);
-    right: var(--panelcol-shown);
+    right: var(--chrome-right);
     bottom: var(--chrome-bottom);
     z-index: 56;
     display: none;
@@ -23272,9 +23311,9 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     /* 左右: 左のサイドバー・一覧の列・右の列は場所を取らない (重ねて出す)。 */
     --chrome-left: var(--sp-safe-left);
     --listcol-shown: 0px;
-    --panelcol-head-w: var(--sp-safe-right);
-    --panelcol-shown: var(--sp-safe-right);
-    --page-right: var(--panelcol-shown);
+    --column-head-w: 0px;
+    --chrome-right: var(--sp-safe-right);
+    --page-right: var(--chrome-right);
     /* 下: 最下段の下に切替の帯。 */
     --chrome-bottom: calc(var(--statusbar-h) + var(--sp-bar-h));
     /* 高さの T2 は、ブラウザの上下の帯が出ている間の見えている高さ (dvh) から
@@ -23341,7 +23380,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     flex: 1 1 auto;
   }
   body.main-split .main-pane-host[data-side="left"] {
-    right: var(--panelcol-shown);
+    right: var(--chrome-right);
     width: auto;
   }
   /* タブ列の左: 引き出しを開くボタンだけ。右の列を畳んだときに移ってくる
@@ -23373,7 +23412,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     outline: 2px solid var(--color-accent);
     outline-offset: -2px;
   }
-  /* History・作業ツリーの変更ファイルの木 (一覧の隣の列) を畳んだときの
+  /* History・作業ツリーの変更ファイルの一覧 (一覧の隣の列) を畳んだときの
      開くボタン。電話ではその木を出さないので、開くボタンも出さない。 */
   body[data-list-tree-folded] .list-tree-open {
     display: none;
@@ -23423,6 +23462,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
      !important で決めているので触らない)。一覧の列の置き場所の規則
      (body[data-list-column] #…) と同じ詳細度で並べて上書きする。 */
   #panel-head,
+  #file-list,
   #sidebar,
   body[data-list-column] #sidebar,
   #history-panel,
@@ -23435,7 +23475,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     top: var(--panel-body-top);
     bottom: var(--chrome-bottom);
     left: var(--chrome-left);
-    right: var(--panelcol-shown);
+    right: var(--chrome-right);
     width: auto;
     max-height: none;
     z-index: 70;
@@ -23444,6 +23484,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     visibility: hidden;
   }
   body.mobile-sheet-open #panel-head,
+  body.mobile-sheet-open #file-list,
   body.mobile-sheet-open #sidebar,
   body.mobile-sheet-open #history-panel,
   body.mobile-sheet-open:not([data-worktree-overview]) #worktree-panel {
@@ -23470,9 +23511,13 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
   /* 右の列を畳んだ (デスクトップの設定)・一覧の列を隠した (このセッション) の
      どちらでも、面には一覧を出す。 */
-  body.mobile-sheet-open.gdp-sidebar-hidden:not([data-list-column]) #sidebar,
+  body.mobile-sheet-open.gdp-sidebar-hidden:not([data-list-column]) #file-list,
   body.mobile-sheet-open[data-list-column="sidebar"][data-list-column-hidden] #sidebar {
     display: block !important;
+  }
+  /* 一覧を出す画面の面には、その一覧だけを出す (ファイル一覧は重ねない)。 */
+  body[data-list-column] #file-list {
+    display: none !important;
   }
   body.mobile-sheet-open[data-list-column-hidden] #history-panel,
   body.mobile-sheet-open[data-list-column-hidden] #worktree-panel {
@@ -23483,7 +23528,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     padding: 0 var(--space-3) var(--space-3);
   }
   /* History・作業ツリーでは、面を上下 2 段に分ける: 上にコミット / 作業ツリーの
-     一覧、下にその変更ファイルの木 (デスクトップでは一覧の右の 2 列目)。境目
+     一覧、下にその変更ファイルの一覧 (デスクトップでは一覧の右の 2 列目)。境目
      --sp-sheet-mid (T2) は面の本体の半分。デスクトップで木を帯に畳んでいても
      (data-list-tree-folded) 電話では木を出す (帯の開くボタンは出さない)。 */
   body[data-list-column="history"],
@@ -23544,7 +23589,11 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   /* 列を畳む・一覧を隠す・幅を変えるは電話では使わない (面の開け閉めが代わる)。 */
   #sidebar-toggle,
   #sidebar-resizer,
-  #history-resizer {
+  #file-list-resizer,
+  #history-resizer,
+  .list-column-fold,
+  .list-open,
+  .sidebar-open {
     display: none !important;
   }
 
@@ -23781,7 +23830,7 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     top: var(--sp-sheet-top);
     bottom: var(--chrome-bottom);
     left: var(--chrome-left);
-    right: var(--panelcol-shown);
+    right: var(--chrome-right);
     z-index: 70;
     display: flex;
     flex-direction: column;

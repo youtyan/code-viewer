@@ -212,8 +212,8 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
       {
         selectors: [{ action: "toggle-sidebar" }],
         description: {
-          en: "Show or hide the sidebar",
-          ja: "サイドバーの表示を切り替え",
+          en: "Show or hide the file list",
+          ja: "ファイル一覧の表示を切り替え",
         },
       },
       {

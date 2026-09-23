@@ -104,7 +104,8 @@ const DRAWER_CLOSING_TARGETS =
  */
 function closesSheet(target: Element): boolean {
   if (target.closest(".view-strip-item")) return true;
-  const row = target.closest("#filelist li");
+  // ファイル一覧 (#file-list-rows) と変更ファイルの一覧 (#filelist) の行。
+  const row = target.closest("#filelist li, #file-list-rows li");
   return row !== null && !row.classList.contains("tree-dir");
 }
 
@@ -167,7 +168,8 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     list: barButton(SIDEBAR_HIDE_16_PATHS, () => toggle("sheet")),
   };
   barItems.projects.setAttribute("aria-controls", "app-nav");
-  barItems.list.setAttribute("aria-controls", "sidebar");
+  // 面に出すのはファイル一覧か、一覧を出す画面ではその一覧 (style.css の SP の節)。
+  barItems.list.setAttribute("aria-controls", "file-list sidebar");
   bar.append(...Object.values(barItems));
   // 「エージェント」の入力待ちの件数の札 (最下段の件数と同じ数え方。app.ts が渡す)。
   const agentsBadge = document.createElement("span");

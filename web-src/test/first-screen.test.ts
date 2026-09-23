@@ -1,11 +1,12 @@
-// index.html の body の早いスクリプト (#first-screen・#first-status・
-// #first-sidebar-filter) が、最初の描画で付ける印と置く文言が、app.js が後から
-// 付けるものと同じであること。違えば JS の後に並びが動く (読み込みの CLS)。
+// index.html の body の早いスクリプト (#first-screen・#first-status) が、最初の
+// 描画で付ける印と置く文言が、app.js が後から付けるものと同じであること。違えば
+// JS の後に並びが動く (読み込みの CLS)。
 //
 // 比べる相手は app.ts が使う本物の決まり: 画面の印 core/page-mode.ts の
 // pageModeClasses (route は core/routes.ts の parseRoute)、一覧の列 core/list-column.ts
-// の listColumnLayout、一覧の画面で右の列の本体を畳む (core/panel-column-policy.ts)、
-// 最下段の文言 views/status-label.ts の renderStatusLabel と STATUS_LABEL_TEXT。
+// の listColumnKindFor と listColumnLayout (一覧の幅・変更ファイルの一覧とファイル
+// 一覧を幅のために畳むか)、最下段の文言 views/status-label.ts の renderStatusLabel と
+// STATUS_LABEL_TEXT。
 //
 // happy-dom は var() を含むカスタムプロパティを解決しないので、スクリプトが読む
 // 骨格の変数 (--nav-w など) は _css-fixture.ts で style.css から解決した値を渡す。
@@ -21,7 +22,7 @@ import {
   test,
 } from "vitest";
 import { withoutProjectPrefix } from "../core/api-url";
-import { listColumnLayout } from "../core/list-column";
+import { listColumnKindFor, listColumnLayout } from "../core/list-column";
 import { PAGE_MODE_CLASSES, pageModeClasses } from "../core/page-mode";
 import { HISTORY_WIDTH, SIDEBAR_WIDTH } from "../core/panel-sizes";
 import { parseRoute } from "../core/routes";
@@ -124,44 +125,48 @@ function expected(url: string, width: number, look: Look, nav: number) {
     parsed.search,
     { from: "HEAD", to: "worktree" },
   );
+  // 画面でない URL でも、利用者のファイル一覧の畳みは当てる (app.ts も画面に
+  // よらず当てる)。
   if (route.screen === "unknown")
     return {
       page: [],
       overview: false,
       list: null,
-      hidden: false,
+      hidden: look.sidebarHidden === true,
       layout: null,
     };
   const hostedSourceOpen =
     route.screen === "history" && !!parsed.searchParams.get("source");
-  const page = [...pageModeClasses(route, hostedSourceOpen)].sort();
-  const list =
-    route.screen === "diff"
-      ? "sidebar"
-      : route.screen === "history"
-        ? "history"
-        : route.screen === "worktree" && route.wt
-          ? "worktree"
-          : null;
-  const layout = list
-    ? listColumnLayout({
-        // 一覧の画面では右の列の本体は畳んである (頭の行は数えない)。
-        room: width - nav,
-        preferred: look.historyWidth || HISTORY_WIDTH.default,
-        compact: HISTORY_WIDTH.min,
-        tree:
-          list === "sidebar" ? 0 : look.sidebarWidth || SIDEBAR_WIDTH.default,
-        treeRail: TREE_RAIL,
-        treeKeptOpen: false,
-        need: COMFORTABLE_PANE_WIDTH,
-      })
-    : null;
+  const pageClasses = pageModeClasses(route, hostedSourceOpen);
+  const page = [...pageClasses].sort();
+  const overview = route.screen === "worktree" && !route.wt;
+  // 直接開いたときの前面は URL の画面のタブ。
+  const list = listColumnKindFor({
+    has: (pageClass) => pageClasses.has(pageClass as never),
+    worktreeOverview: overview,
+    leftFrontIsPage: true,
+  });
+  const userHidden = look.sidebarHidden === true;
+  const files = look.sidebarWidth || SIDEBAR_WIDTH.default;
+  const layout = listColumnLayout({
+    room: width - nav,
+    files: userHidden ? 0 : files,
+    filesKeptOpen: false,
+    preferred: list ? look.historyWidth || HISTORY_WIDTH.default : 0,
+    compact: HISTORY_WIDTH.min,
+    tree: list === "history" || list === "worktree" ? files : 0,
+    treeRail: TREE_RAIL,
+    treeKeptOpen: false,
+    need: COMFORTABLE_PANE_WIDTH,
+  });
   return {
     page,
-    overview: route.screen === "worktree" && !route.wt,
+    overview,
     list,
-    hidden: !!list || look.sidebarHidden === true,
-    layout: layout && { width: `${layout.width}px`, folded: layout.treeFolded },
+    hidden: userHidden || layout.filesFolded,
+    layout: list
+      ? { width: `${layout.width}px`, folded: layout.treeFolded }
+      : null,
   };
 }
 
@@ -219,7 +224,7 @@ const LOOKS: Array<{ name: string; look: Look }> = [
     look: { navCollapsed: true, historyWidth: 420, sidebarWidth: 300 },
   },
   {
-    name: "利用者が右の列を畳んだ・左 320",
+    name: "利用者がファイル一覧を畳んだ・左 320",
     look: { sidebarHidden: true, navWidth: 320 },
   },
 ];
@@ -313,28 +318,7 @@ describe("#first-status は setStatus と同じ文言を同じ並びで重ねる
   });
 });
 
-describe("#first-sidebar-filter は placeSidebarFilter と同じ置き場所", () => {
-  test.each([
-    { classes: ["gdp-repo-page"], inHead: true },
-    { classes: ["gdp-file-detail-page", "gdp-repo-blob-page"], inHead: true },
-    { classes: ["gdp-database-page", "gdp-files-column-page"], inHead: true },
-    { classes: ["gdp-diff-page"], inHead: false },
-    { classes: ["gdp-history-page"], inHead: false },
-    { classes: ["gdp-file-detail-page"], inHead: false },
-  ])("$classes → 見出しの中 $inHead", ({ classes, inHead }) => {
-    document.body.innerHTML =
-      '<aside id="sidebar"><div class="sb-head"></div><div class="sb-filter-wrap"></div></aside>';
-    document.body.className = classes.join(" ");
-    new Function(inlineScript("first-sidebar-filter"))();
-    expect(
-      document
-        .querySelector(".sb-filter-wrap")
-        ?.parentElement?.matches(".sb-head"),
-    ).toBe(inHead);
-  });
-});
-
-describe("右の列を畳むボタンは最初から頭の行の右端にある", () => {
+describe("ファイル一覧を畳むボタンは最初から頭の行の右端にある", () => {
   test("index.html: 絵柄の後の .view-head-row の中に #sidebar-toggle が 1 つ", () => {
     // 読み込み (link・script) は外して形だけを読む (happy-dom が取りに行く)。
     const markup = html

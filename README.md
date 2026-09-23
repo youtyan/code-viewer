@@ -7,8 +7,9 @@ Requires Node.js 20 or newer. Development uses
 
 ## Features
 
-- Browse repository files and folders in a persistent sidebar with live
-  worktree change updates over SSE. The sidebar filter takes plain text
+- Browse repository files and folders in the file list, shown on every screen
+  next to the left sidebar, with live worktree change updates over SSE. Its
+  filter takes plain text
   (substring), `/pattern/` (regex), `~text` (fuzzy, same matcher as the file
   palette) and globs such as `*.ts` or `src/**`, and shows
   `matching / all` file counts in the header while it is active. Rows are
@@ -16,19 +17,22 @@ Requires Node.js 20 or newer. Development uses
 - Keep files and screens open as tabs in the top row (there is no header row
   above it). The project name and its branch (the project switcher, also `p`)
   stay fixed at the left end of the tab row in a box of fixed width, and the
-  tabs start to its right; switching tabs or screens, splitting, folding the
-  right column or showing the list column never moves or hides it. The six
-  view icons (Files / Diff / History / Worktrees / Data / Work log, with the
-  name and key on hover) sit at the head of the right column, next to the
-  Files tree (the left sidebar holds the projects and agents), and move to the
-  right column's strip when you fold it. In a narrow box the branch keeps its whole name up to about
-  40% of the width and the project name is shortened into the rest. The lists you pick
-  the main area from (Diff's changed files, History's commits and a selected worktree's
-  list) sit in a list column between the left sidebar and the main area; on those
-  screens the right column folds to its strip, whose button hides or shows the list
-  instead. The list column keeps the width you drag it to (320px at first) and narrows
-  to 240px when the main area would be narrower than 480px; History's changed
-  files column next to it folds to a strip after that. History's branch labels keep
+  tabs start to its right; switching tabs or screens, splitting, folding a
+  column or showing the lists never moves or hides it. The six view icons
+  (Files / Diff / History / Worktrees / Data / Work log, with the name and key
+  on hover) sit at the head of the list column, at the left end of the top row,
+  with the button that folds the file list. In a narrow box the branch keeps its whole name up to about
+  40% of the width and the project name is shortened into the rest. The left
+  sidebar holds the projects and agents; the list column to its right shows the
+  file list on every screen and, next to it, the list you pick the main area
+  from (Diff's changed files, History's commits and a selected worktree's list,
+  with the changed files of History and a selected worktree next to the list).
+  The columns follow the tab in front: with a terminal in front only the file
+  list stays. The list keeps the width you drag it to (320px at first); when the
+  main area would be narrower than 480px it narrows to 240px, then the changed
+  files fold to a strip, then the file list folds away. Every column folds by
+  hand (the file list with its button, the lists with the handle on their right
+  edge), and a column you open yourself stays open until a reload. History's branch labels keep
   their whole name up to about 40% of the room they share with the subject. A terminal
   tab showing an agent from another project reads `project · title`, and a narrow tab
   shortens the project name first. A single click opens a file in a preview tab (italic)
@@ -56,12 +60,10 @@ Requires Node.js 20 or newer. Development uses
   **Split right**, Alt+click, **Open to the right**, or drag one onto the
   dashed area on the right half),
   resize by dragging the line between, and press `g o` to switch sides. When
-  the two sides would be narrower than 480px each, the right column folds to
-  its strip while split (with a mark on its button) and comes back on one
-  side; opening it yourself keeps it open until a reload. On Diff, History and
-  a selected worktree the list column narrows first, then History's changed
-  files column folds, and the right side is set aside if two sides still do
-  not fit. The main area
+  the two sides would be narrower than 480px each, the list column makes room
+  in the same order while split (with a mark on the file list button when it
+  folds) and comes back on one side, and the right side is set aside if two
+  sides still do not fit. The main area
   scrolls in its own box (the page never scrolls, and Back / Forward return to
   the scroll position), and a breadcrumb too long for its row folds its middle
   folders into `…` (hover for the full path; click it, or Tab to it and press
@@ -118,10 +120,9 @@ Requires Node.js 20 or newer. Development uses
   Blame groups consecutive lines from the same commit with an Older→Newer
   colour bar and lets you jump to the originating commit; History embeds the
   same commit list and diff renderer used by `/history` inside the file's
-  tab shell, filtered to that path. Both tabs keep the Repository sidebar
-  visible.
+  tab shell, filtered to that path. Both tabs keep the file list visible.
 - Browse every worktree of the repository from the `Worktrees` icon at the
-  head of the file tree, in the same three-pane shape as History: worktrees on the left,
+  head of the list column, in the same shape as History: worktrees on the left,
   the picked one's changed files in the middle, the diff on the right. Changed
   images, video, and audio show a before / after preview there too, with the
   same media card as the Diff Viewer, read from that worktree. Each row
@@ -197,7 +198,7 @@ Requires Node.js 20 or newer. Development uses
   keeps the newest values and adds a Mixed note that says how to separate them.
 - Register your projects so they stay in the Agents list (in your order) even
   with no agent running, and switch between them from the project name at
-  the head of the file tree (`p`) or from the left sidebar on any screen. One
+  the left end of the tab row (`p`) or from the left sidebar on any screen. One
   code-viewer serves every project on one port: switching reloads the page at
   `/p/<key>/…` on the same address, so notification permission, the terminal
   shells and unread marks carry over, and reload, back/forward and bookmarks

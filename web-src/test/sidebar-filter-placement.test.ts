@@ -1,16 +1,20 @@
 import { readFileSync } from "node:fs";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { describe, expect, test } from "vitest";
 import { pageModeClasses } from "../core/page-mode";
+import {
+  baseRules,
+  cascadedDeclarations,
+  loadStyleSheet,
+} from "./_css-fixture";
 
 const appSource = readFileSync("web-src/app.ts", "utf8");
-const sidebarSource = readFileSync("web-src/views/sidebar.ts", "utf8");
-const style = readFileSync("web/style.css", "utf8");
+const html = readFileSync("web/index.html", "utf8");
 
-// Repo pages move .sb-filter-wrap inside .sb-head (grid layout); every other
-// page expects it back outside as the sticky sibling. setPageMode() is the
-// single place body page classes flip during SPA navigation, so it must also
-// re-place the filter — otherwise navigating repo → diff/history/help leaves
-// the filter stranded inside .sb-head until a full reload.
+// 絞り込み欄は動かさない: ファイル一覧 (#file-list) は見出し (.sb-head) の中の
+// 2 段目、変更ファイルの一覧 (#sidebar) は見出しの下に貼り付く兄弟。前は 1 つの
+// #sidebar を使い回し、画面が変わるたびに placeSidebarFilter が移していた
+// (移し忘れると見出しの中に取り残された)。
 describe("sidebar filter placement on navigation", () => {
   function functionBody(source: string, name: string): string {
     const start = source.indexOf(`function ${name}(`);
@@ -25,13 +29,26 @@ describe("sidebar filter placement on navigation", () => {
     throw new Error(`unbalanced braces in ${name}`);
   }
 
-  test("placeSidebarFilter moves the filter wrap by sidebar mode", () => {
-    const body = functionBody(sidebarSource, "placeSidebarFilter");
-    expect(body.includes("sidebarHead.appendChild(filter)")).toBe(true);
-    expect(body.includes("sidebarHead.after(filter)")).toBe(true);
+  test.each([
+    { list: "file-list", inHead: true },
+    { list: "sidebar", inHead: false },
+  ])("#$list: the filter is in the head $inHead", ({ list, inHead }) => {
+    GlobalRegistrator.register();
+    try {
+      const page = new DOMParser().parseFromString(html, "text/html");
+      const filter = page.querySelector(`#${list} .sb-filter-wrap`);
+      expect({
+        inHead: filter?.parentElement?.classList.contains("sb-head"),
+        besideHead:
+          filter?.previousElementSibling?.classList.contains("sb-head") ??
+          false,
+      }).toEqual({ inHead, besideHead: !inHead });
+    } finally {
+      GlobalRegistrator.unregister();
+    }
   });
 
-  test("setPageMode re-places the sidebar filter after page classes change", () => {
+  test("setPageMode re-places the file list toggle after page classes change", () => {
     const body = functionBody(appSource, "setPageMode");
     expect(body.includes("placeSidebarToggle()")).toBe(true);
   });
@@ -58,22 +75,22 @@ describe("sidebar filter placement on navigation", () => {
   });
 
   // The base .sb-filter-wrap rule is sticky with top: var(--sidebar-head-h);
-  // the repo-grid override switches to relative and must zero out that top
-  // offset, or the filter renders below the .sb-head grid row.
-  test("repo-mode filter override resets the sticky top offset", () => {
-    const start = style.indexOf("body.gdp-repo-page .sb-filter-wrap,");
-    expect(start > -1).toBe(true);
-    const block = style.slice(start, style.indexOf("}", start));
-    expect(block.includes("position: relative")).toBe(true);
-    expect(block.includes("top: 0")).toBe(true);
+  // the file list keeps its filter inside the .sb-head grid, so it switches to
+  // relative and must zero out that top offset, or the filter renders below
+  // the grid row. The magnifier glyph moves with the dropped padding.
+  const rules = baseRules(loadStyleSheet());
+  const declarations = (selector: string) =>
+    cascadedDeclarations(rules, (candidate) => candidate === selector);
+  test("the file list filter resets the sticky top offset", () => {
+    const wrap = declarations("#file-list .sb-filter-wrap");
+    expect([wrap.get("position"), wrap.get("top")]).toEqual(["relative", "0"]);
   });
 
-  test("repo-mode filter re-positions the magnifier glyph", () => {
-    expect(style.includes("body.gdp-repo-page .sb-filter-wrap::before")).toBe(
-      true,
-    );
-    expect(style.includes("body.gdp-repo-page .sb-filter-wrap::after")).toBe(
-      true,
-    );
+  test.each([
+    "#file-list .sb-filter-wrap::before",
+    "#file-list .sb-filter-wrap::after",
+  ])("%s re-positions the magnifier glyph", (selector) => {
+    const glyph = declarations(selector);
+    expect([glyph.has("left"), glyph.has("top")]).toEqual([true, true]);
   });
 });

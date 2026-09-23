@@ -129,7 +129,7 @@ if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
   ブラウザの繋ぎ直しを既定の約 3 秒より早める（入口を起動し直した後に画面が追いつくまでの
   待ちの大半だった）。**切れていた間の変更は通知されない**ので、繋ぎ直し（`open`）・
   タブが前面に戻ったとき・窓のフォーカスで `app.ts` の `catchUpMissedChanges` が取り直す。
-  どう取り直すかは `core/catch-up.ts` の `catchUpKind`（差分は読み直し、Files の木と blob は
+  どう取り直すかは `core/catch-up.ts` の `catchUpKind`（差分は読み直し、ファイル一覧と blob は
   変わったパスが不明な SSE の更新と同じ道）。取り直さない画面を足すと、そこでは次の変更まで
   古い表示が残る
 - 裏に繋がらない = 502 (`backend-stopped`)、起きない = 503 (`backend-start-failed`)、

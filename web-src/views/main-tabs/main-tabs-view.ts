@@ -108,14 +108,15 @@ const DRAG_TYPE = "application/x-code-viewer-main-tab";
 /** 2 面のときの各面の最小の幅 (px)。これが 2 つ置けない幅では分割しない。 */
 const MIN_PANE_WIDTH = 360;
 /**
- * 2 面がゆとりを持って並ぶ幅。これを下回るなら、右の列を畳めば並ぶので、
- * 2 面の間だけ自動で畳む (app.ts の syncPanelColumnForSplit)。Data の全体検索と
+ * 2 面がゆとりを持って並ぶ幅。これを下回るなら、一覧の列を詰める・畳む
+ * (app.ts の syncListColumn。core/list-column.ts の順)。Data の全体検索と
  * クエリの欄が縦に積まれ始める幅 (560px) の少し下に置いてある: ここを 560 に
  * すると 1600px の窓でも畳むことになり、畳まないで済む幅まで畳んでしまう。
  */
 export const COMFORTABLE_PANE_WIDTH = 480;
 /**
- * 利用者が自分で右の列を開いたときだけ許す、面の幅の下限。ここまでは両面を
+ * 一覧の列を詰めて畳んでも (または利用者が手で開いて) ゆとりに足りないときに
+ * 許す、面の幅の下限。ここまでは両面を
  * 同じ比で縮め、中身は自分の箱の中で横に送ってもらう (右の面を先に畳まない)。
  */
 const TIGHT_PANE_WIDTH = 320;
@@ -142,15 +143,10 @@ export type MainTabsDeps = {
    */
   lead?: HTMLElement;
   /**
-   * 右の列 (画面の右端の固定の列) の頭。幅が変わったら (木の幅を変えた) 面の
-   * 幅を合わせ直す。無ければ右の列は無いものとする。
+   * 一覧の列の頭 (タブ列の行の左端、左のサイドバーの右)。その左端から一覧の列
+   * (listColumnWidth) を除いた右が本文。無ければタブ列の左端から数える。
    */
-  panelColumn?: HTMLElement;
-  /**
-   * 右の列が本文の横に取っている幅 (core/panel-column-policy.ts の
-   * panelColumnBodyWidth。畳めば頭の行が残っても 0)。無ければ panelColumn の幅。
-   */
-  panelColumnWidth?(): number;
+  columnHead?: HTMLElement;
   getLanguage(): MainTabsLang;
   /** page のタブの名前 (画面の入口と同じ文言)。 */
   pageLabel(page: PageKind): string;
@@ -207,15 +203,23 @@ export type MainTabsDeps = {
   /** 開いているターミナルのタブ (一覧の印) と、閉じたもの (購読をやめる)。 */
   onTerminals(open: ReadonlySet<string>, closed: string[]): void;
   /**
-   * 右の列に今の画面の一覧 (History・作業ツリー) を出しているか。出している間は
-   * 右の列を畳まないので、右の面を預けたときの説明をそれに合わせる。
+   * 一覧の列に今の画面の一覧 (Diff・History・作業ツリー) を出しているか。右の面を
+   * 預けたときの説明をそれに合わせる (一覧を出すために預けた)。
    */
-  panelColumnHoldsList?(): boolean;
+  listColumnHoldsList?(): boolean;
   /**
-   * 本文の左の一覧の列の幅 (出していなければ 0)。本文の幅はタブ列の左端から
-   * これと右の列を引いた幅。
+   * 一覧の列が本文の横に取っている幅 (core/panel-column-policy.ts の
+   * listColumnBodyWidth。出していなければ 0)。本文の幅は一覧の列の頭の左端から
+   * これを引いた幅。
    */
   listColumnWidth?(): number;
+  /**
+   * 2 面にしたときの一覧の列の幅 (幅が足りなければ詰めて畳んだ幅。
+   * core/list-column.ts の listColumnLayout を 2 面の本文で当てる)。2 面を置けるかは
+   * この幅で数える (1 面の今の幅で数えると、畳めば入る幅でも分割できない)。無ければ
+   * listColumnWidth。
+   */
+  splitListColumnWidth?(): number;
   /**
    * 電話の段のタブ列の右端の「開いているタブ」を押した (一覧の面を開く。
    * views/mobile-shell.ts)。無ければボタンを出さない。
@@ -267,12 +271,6 @@ export type MainTabsHandle = {
   front(): Tab | null;
   /** 今の面の様子 (前面・フォーカス・本文を置く面)。 */
   panes(): PanesView;
-  /**
-   * いまの本文の幅 (右の列は今の状態のまま) で、2 面がゆとりを持って
-   * (COMFORTABLE_PANE_WIDTH) 並ぶか。false なら右の列を畳むと並ぶ (app.ts が
-   * 2 面の間だけ自動で畳む)。
-   */
-  splitFitsWithPanelColumn(): boolean;
   /** そのシェルのターミナルのタブがあるか。 */
   hasTerminal(session: string): boolean;
   /**
@@ -305,7 +303,7 @@ export type MainTabsHandle = {
   sideHolding(route: AppRoute): PaneSide | null;
   /** 面にフォーカスを移す。2 面でなければ何もしない。 */
   focusSide(side: PaneSide): void;
-  /** 画面の x 座標がどちらの面か (2 面でないか、右の列の上なら null)。 */
+  /** 画面の x 座標がどちらの面か (2 面でないか、一覧の列の上なら null)。 */
   sideAt(clientX: number): PaneSide | null;
   focusOther(): void;
   /**
@@ -610,35 +608,34 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
 
   // ---- 幅 ----
 
-  /** 右の列が本文の横に取っている幅 (畳んでいれば 0)。 */
-  function panelColumnWidth(): number {
-    if (deps.panelColumnWidth) return deps.panelColumnWidth();
-    return deps.panelColumn?.getBoundingClientRect().width ?? 0;
+  /** 本文の左端 (一覧の列の右)。 */
+  function bodyLeft(): number {
+    const base = (deps.columnHead ?? deps.mount).getBoundingClientRect().left;
+    return base + (deps.listColumnWidth?.() ?? 0);
   }
 
   /**
-   * 本文の横幅 (タブ列の左端から右の列の左まで、一覧の列を除く)。面の最小幅は
-   * この幅で数える (右の列と一覧の列を含めない)。
+   * 本文の横幅 (一覧の列の右から窓の右端まで)。面の最小幅はこの幅で数える
+   * (一覧の列を含めない)。
    */
   function mainWidth(): number {
-    return (
-      document.documentElement.clientWidth -
-      deps.mount.getBoundingClientRect().left -
-      panelColumnWidth() -
-      (deps.listColumnWidth?.() ?? 0)
-    );
+    return document.documentElement.clientWidth - bodyLeft();
   }
 
   /**
    * 2 面を置ける幅か。下限は詰めたときの幅 (TIGHT_PANE_WIDTH)。ゆとりのある
-   * 幅 (MIN_PANE_WIDTH) を下回るときは、右の列を畳めば戻るので、畳む判断は
-   * splitFitsWithPanelColumn() を見る側 (app.ts) が行う。
+   * 幅 (COMFORTABLE_PANE_WIDTH) を下回るときに一覧の列を詰める・畳むのは app.ts
+   * (core/list-column.ts の listColumnLayout)。
    */
   function splitAllowed(): boolean {
     // 電話の段 (横向きの電話は幅が足りても) では 2 面を組まない。保存された
     // 2 面は右の面を預けて 1 面にし、デスクトップの幅に戻れば戻す (fitToWidth)。
     if (phoneQuery.matches) return false;
-    return mainWidth() >= TIGHT_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH;
+    const base = (deps.columnHead ?? deps.mount).getBoundingClientRect().left;
+    const column =
+      deps.splitListColumnWidth?.() ?? deps.listColumnWidth?.() ?? 0;
+    const width = document.documentElement.clientWidth - base - column;
+    return width >= TIGHT_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH;
   }
 
   /**
@@ -766,7 +763,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     revealIn(strip, newButton);
     deps.onNewTab(side, newButton);
   }
-  // 列が狭くなると (窓・面・右の列の幅) 前面のタブが列の外へ出ることがある。
+  // 列が狭くなると (窓・面・一覧の列の幅) 前面のタブが列の外へ出ることがある。
   const stripObserver = new ResizeObserver((entries) => {
     for (const entry of entries)
       if (entry.target instanceof HTMLElement) revealFront(entry.target);
@@ -780,7 +777,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     for (const side of SIDES) revealFront(sections[side].strip);
   });
 
-  /** 窓・本文・右の列の寸法が変わったあとに、面の幅と 2 面の可否を合わせる。 */
+  /** 窓・本文・一覧の列の寸法が変わったあとに、面の幅と 2 面の可否を合わせる。 */
   function followGeometry(): void {
     const before = panesView(layout);
     if (!fitToWidth()) {
@@ -799,13 +796,14 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   }
   const geometryObserver = new ResizeObserver(followGeometry);
   geometryObserver.observe(deps.mount);
-  // 右の列の幅が変わる (畳む・幅を変える・History の一覧の幅) と本文の幅も変わる。
-  if (deps.panelColumn) geometryObserver.observe(deps.panelColumn);
+  // 一覧の列の頭の幅が変わる (左のサイドバーを畳むと頭の先頭に開くボタンが出る)。
+  // 一覧の列の幅の変化は app.ts が refit() で知らせる。
+  if (deps.columnHead) geometryObserver.observe(deps.columnHead);
   // ResizeObserver は描画の段で届くので、背面のタブ (document.hidden) では前面に
-  // 戻るまで届かない。読み込み直後は面の幅を右の列が開いたまま (240px) で数え、
-  // そのあと 2 面のために右の列を畳む (body の印) ので、--split-left-w が畳む前の
+  // 戻るまで届かない。読み込み直後は面の幅を列が開いたまま (240px) で数え、
+  // そのあと 2 面のために列を畳む (body の印) ので、--split-left-w が畳む前の
   // 幅 (1280 で 380px) のまま残り、面の中身だけが畳んだあとの幅で並んでいた。
-  // 右の列の開閉・画面の切替は body の印で起きるので、それも見て合わせ直す
+  // 列の開閉・画面の切替は body の印で起きるので、それも見て合わせ直す
   // (MutationObserver は背面でも届く)。
   new MutationObserver(followGeometry).observe(document.body, {
     attributes: true,
@@ -1550,7 +1548,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       const label = !left
         ? current.unsplit
         : parked
-          ? deps.panelColumnHoldsList?.()
+          ? deps.listColumnHoldsList?.()
             ? current.rightParkedForList(parked.pane.tabs.length)
             : current.rightParked(parked.pane.tabs.length)
           : blocker === null
@@ -1876,8 +1874,6 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     },
     front: () => activeTab(layout),
     panes: () => panesView(layout),
-    splitFitsWithPanelColumn: () =>
-      mainWidth() >= COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH,
     hasTerminal: (session) => findTerminal(session) !== undefined,
     openingNewTab(run) {
       openingKept = true;
@@ -1911,8 +1907,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     focusSide,
     sideAt(clientX) {
       if (!layout.panes.right) return null;
-      const left = deps.mount.getBoundingClientRect().left;
-      // 右の列 (木・一覧) と左のサイドバーは面の外: そこから開くときフォーカスを動かさない。
+      const left = bodyLeft();
+      // 一覧の列と左のサイドバーは面の外: そこから開くときフォーカスを動かさない。
       if (clientX < left || clientX >= left + mainWidth()) return null;
       return clientX < left + leftWidthFor(layout.split ?? DEFAULT_SPLIT)
         ? "left"

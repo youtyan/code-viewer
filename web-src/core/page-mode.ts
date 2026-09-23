@@ -1,5 +1,6 @@
 // 画面 (route) ごとに body に付ける印 (app.ts の setPageMode が当てる)。CSS は
-// この印で画面の並び (上の帯の有無・右の列に Files の木を出すか) を決める。
+// この印で画面の並び (上の帯の有無) を決める。一覧の列に何を出すかは
+// body[data-list-column] (app.ts の syncListColumn。ファイル一覧はどの画面でも出す)。
 //
 // index.html の body の頭の早いスクリプト (#first-screen) も、同じ印を URL から
 // 付けて最初の描画から場所を取る (JS の後に並びが変わると大きく動く)。その
@@ -23,7 +24,6 @@ export const PAGE_MODE_CLASSES = [
   "gdp-agents-page",
   "gdp-tools-page",
   "gdp-search-page",
-  "gdp-files-column-page",
 ] as const;
 
 export type PageModeClass = (typeof PAGE_MODE_CLASSES)[number];
@@ -59,17 +59,5 @@ export function pageModeClasses(
   };
   const page = byScreen[route.screen];
   if (page) on.add(page);
-  // 右の列: 自分の一覧を持たない画面は Files の木を出す (History・選んでいる
-  // Worktrees は一覧パネル、repo / file / diff は #sidebar の自分の一覧)。
-  if (
-    route.screen === "journal" ||
-    route.screen === "agents" ||
-    route.screen === "tools" ||
-    route.screen === "search" ||
-    route.screen === "help" ||
-    route.screen === "database" ||
-    (route.screen === "worktree" && !route.wt)
-  )
-    on.add("gdp-files-column-page");
   return on;
 }

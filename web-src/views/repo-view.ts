@@ -89,8 +89,8 @@ export type RepoViewDeps = {
   renderStandaloneSource(target: SourceFileTarget): Promise<unknown>;
   repoFileTargetFromRoute(): string | null;
   /**
-   * 一覧を持たない画面 (Work log・全体ボード・設定・Data・Worktrees の一覧表示)
-   * で右の列に Files の木を出すときの ref。そうでない画面は null。
+   * Files とファイルの画面の外 (Diff・History・Data など) でファイル一覧に出す
+   * ref。ファイル一覧はどの画面でも出している。
    */
   filesColumnRef(): string | null;
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;
@@ -234,7 +234,7 @@ export function createRepoView(deps: RepoViewDeps) {
   }
 
   function isRepoSidebarDomReusable(): boolean {
-    const filelist = document.querySelector<HTMLElement>("#filelist");
+    const filelist = document.querySelector<HTMLElement>("#file-list-rows");
     if (!filelist || !getSidebarOnFileClick()) return false;
     return !!filelist.querySelector("[data-path], [data-dirpath]");
   }
@@ -557,7 +557,7 @@ export function createRepoView(deps: RepoViewDeps) {
   } | null {
     if (!isRepositorySidebarMode()) return null;
     const row = (event.target as Element | null)?.closest<HTMLElement>(
-      "#filelist li",
+      "#file-list-rows li",
     );
     if (!row) return null;
     const path = row.dataset.path || row.dataset.dirpath || "";
@@ -760,7 +760,8 @@ export function createRepoView(deps: RepoViewDeps) {
     setPageMode();
     removeStandaloneSource();
     $("#empty").classList.add("hidden");
-    if (!isRepoSidebarReusable(meta.ref)) $("#totals").textContent = "";
+    if (!isRepoSidebarReusable(meta.ref))
+      $("#file-list-totals").textContent = "";
     STATE.files = [];
     clearLoadQueue();
     renderRepoBlobSidebar(meta.path || "", meta.ref);
@@ -1168,9 +1169,9 @@ export function createRepoView(deps: RepoViewDeps) {
         );
         setRepoSidebarRef(null);
         renderSidebar([], undefined);
-        // #totals は幅の決まった枠なので、1 行の文言はそのまま出し、理由の
+        // 件数の枠 (#file-list-totals) は幅の決まった枠なので、1 行の文言はそのまま出し、理由の
         // 全文 (cause の連鎖ごと) は title に置く。
-        const totals = $("#totals");
+        const totals = $("#file-list-totals");
         totals.textContent = repoViewText(STATE.language).cannotLoadTree;
         totals.title = formatErrorDetail(error);
       })
@@ -1182,6 +1183,22 @@ export function createRepoView(deps: RepoViewDeps) {
       });
     REPO_SIDEBAR_LOAD = load;
     return load;
+  }
+
+  /**
+   * Files とファイルの画面の外でファイル一覧を出す。同じ ref で読み込み済みなら
+   * 何もしない (選んでいる行もスクロールも動かさない)。
+   */
+  function ensureFileList(ref: string): Promise<void> {
+    const normalizedRef = ref || "worktree";
+    if (isRepoSidebarReusable(normalizedRef)) {
+      syncRepoTargetInput(normalizedRef);
+      return Promise.resolve();
+    }
+    return renderRepoBlobSidebar(
+      getSidebarVirtualActivePath() || "",
+      normalizedRef,
+    );
   }
 
   async function loadRepoSidebarAncestors(currentPath: string) {
@@ -1703,6 +1720,7 @@ export function createRepoView(deps: RepoViewDeps) {
     loadRawFileInfo,
     repoRoute,
     renderRepoBlobSidebar,
+    ensureFileList,
     syncRepoTargetInput,
     closeRepoContextMenu,
     handleSidebarContextMenu,

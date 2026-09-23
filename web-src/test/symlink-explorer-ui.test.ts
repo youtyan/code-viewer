@@ -1,5 +1,6 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { FILE_LIST_DOM } from "../views/sidebar";
 import { createSidebarForTest, installSidebarDom } from "./_sidebar-fixture";
 
 beforeAll(() => {
@@ -164,13 +165,12 @@ describe("lazily loaded directory children keep their status and symlink metadat
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
-    document.body.classList.remove("gdp-repo-page");
   });
 
   test("a file fetched via ensureVirtualSidebarDirLoaded keeps its git status badge", async () => {
-    installSidebarDom();
-    document.body.classList.add("gdp-repo-page");
-    const sidebar = createSidebarForTest();
+    // 遅延で読む子はファイル一覧 (リポジトリの木) だけ。
+    installSidebarDom(FILE_LIST_DOM);
+    const sidebar = createSidebarForTest({ dom: FILE_LIST_DOM });
     globalThis.fetch = (async () =>
       ({
         ok: true,
@@ -199,9 +199,9 @@ describe("lazily loaded directory children keep their status and symlink metadat
   });
 
   test("a symlink fetched via ensureVirtualSidebarDirLoaded keeps its symlink metadata", async () => {
-    installSidebarDom();
-    document.body.classList.add("gdp-repo-page");
-    const sidebar = createSidebarForTest();
+    // 遅延で読む子はファイル一覧 (リポジトリの木) だけ。
+    installSidebarDom(FILE_LIST_DOM);
+    const sidebar = createSidebarForTest({ dom: FILE_LIST_DOM });
     globalThis.fetch = (async () =>
       ({
         ok: true,

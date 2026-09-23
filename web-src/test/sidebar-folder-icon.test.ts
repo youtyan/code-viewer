@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { describe, expect, test } from "vitest";
 import { sourceFixture } from "./source-fixture";
 
@@ -35,19 +36,37 @@ describe("sidebar folder icons", () => {
     ).toBe(true);
   });
 
-  test("sizes the sidebar folder icon like a 16px Octicon", () => {
-    expect(style.includes("#filelist.tree .tree-dir .dir-icon")).toBe(true);
-    expect(style.includes("width: 16px")).toBe(true);
-    expect(style.includes("height: 16px")).toBe(true);
-    expect(style.includes("color: #54aeff")).toBe(true);
-    expect(
-      style.includes("grid-template-columns: 16px 16px minmax(0, 1fr)"),
-    ).toBe(true);
-    expect(style.includes("gap: 8px")).toBe(true);
-    expect(
-      style.includes(
-        "padding: calc(var(--sidebar-row-y) + 1.5px) 8px calc(var(--sidebar-row-y) + 1.5px) var(--lvl-pad, 12px)",
-      ),
-    ).toBe(true);
+  // 生の文字列ではなく、実際の style.css を当てた寸法を見る (testing.md)。ファイル
+  // 一覧 (#file-list-rows) と変更ファイルの一覧 (#filelist) の両方で同じ。
+  test.each([
+    ["the file list", "file-list", "file-list-rows"],
+    ["the changed files", "sidebar", "filelist"],
+  ])("sizes the folder icon of %s like a 16px Octicon", (_name, root, list) => {
+    GlobalRegistrator.register();
+    try {
+      const sheet = document.createElement("style");
+      sheet.textContent = style;
+      document.head.appendChild(sheet);
+      document.body.innerHTML = `<aside id="${root}"><ul id="${list}" class="tree"><li class="tree-dir"><span class="chev"></span><span class="dir-icon"></span><span class="name">src</span></li></ul></aside>`;
+      const icon = getComputedStyle(
+        document.querySelector(".dir-icon") as HTMLElement,
+      );
+      const row = getComputedStyle(
+        document.querySelector(".tree-dir") as HTMLElement,
+      );
+      expect({
+        width: icon.width,
+        height: icon.height,
+        columns: row.gridTemplateColumns.split(" ").slice(0, 2),
+        gap: row.gap,
+      }).toEqual({
+        width: "16px",
+        height: "16px",
+        columns: ["16px", "16px"],
+        gap: "8px",
+      });
+    } finally {
+      GlobalRegistrator.unregister();
+    }
   });
 });

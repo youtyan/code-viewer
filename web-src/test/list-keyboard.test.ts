@@ -18,7 +18,11 @@ import {
   onListRowKeys,
   syncListTabStop,
 } from "../views/list-tab-stop";
-import { createListTreeOpen } from "../views/list-tree-open";
+import {
+  createColumnFold,
+  createColumnOpen,
+  createListTreeOpen,
+} from "../views/list-tree-open";
 import {
   baseRules,
   cascadedDeclarations,
@@ -528,9 +532,77 @@ describe("the folded tree's open button", () => {
   });
 });
 
+// ---- 一覧と変更ファイルの一覧を手で畳むつまみ・開く帯 (views/list-tree-open.ts) ----
+
+describe("the fold handle and the open strip of a list", () => {
+  function mountList() {
+    document.body.innerHTML = `
+      <aside id="history-panel">
+        <div class="history-item" tabindex="-1">a</div>
+        <div class="history-item" tabindex="0">b</div>
+      </aside>
+      <aside id="sidebar"></aside>`;
+    const panel = document.getElementById("history-panel") as HTMLElement;
+    const calls: string[] = [];
+    const fold = createColumnFold({
+      className: "list-fold",
+      after: panel,
+      fold: () => calls.push("fold"),
+      label: () => "Hide the list",
+    });
+    const open = createColumnOpen({
+      className: "list-open",
+      after: panel,
+      open: () => calls.push("open"),
+      focusStop: () =>
+        panel.querySelector<HTMLElement>('[tabindex="0"]') ?? panel,
+      label: () => "Show the list",
+    });
+    return { fold, open, calls };
+  }
+
+  test("both are named buttons right after the list (Tab order: list → its buttons → next column)", () => {
+    const { fold, open } = mountList();
+    const describe = (button: HTMLButtonElement) => ({
+      type: button.type,
+      label: button.getAttribute("aria-label"),
+      classes: [...button.classList],
+    });
+    expect({
+      order: [...document.body.children].map((el) => el.id || el.className),
+      fold: describe(fold),
+      open: describe(open),
+    }).toEqual({
+      order: [
+        "history-panel",
+        "list-open",
+        "list-column-fold list-fold",
+        "sidebar",
+      ],
+      fold: {
+        type: "button",
+        label: "Hide the list",
+        classes: ["list-column-fold", "list-fold"],
+      },
+      open: { type: "button", label: "Show the list", classes: ["list-open"] },
+    });
+  });
+
+  test("folding calls fold; opening calls open and moves the focus to the list's tab stop", () => {
+    const { fold, open, calls } = mountList();
+    fold.click();
+    open.focus();
+    open.click();
+    expect({
+      calls,
+      focused: document.activeElement?.textContent,
+    }).toEqual({ calls: ["fold", "open"], focused: "b" });
+  });
+});
+
 // キーで届いた行とボタンの輪は内側に描く (行は一覧の端まで広がるので外の輪は
-// 切れる)。選んでいる行は光も残す。#filelist の行 (Diff と History の変更
-// ファイル) は Files の木と同じ規則 (file-tree-keyboard の CSS)。
+// 切れる)。選んでいる行は光も残す。変更ファイルの一覧 (#filelist) の行は
+// ファイル一覧 (#file-list-rows) の行と同じ規則。
 describe("focus rings of the list column", () => {
   const rules = baseRules(loadStyleSheet());
   const shadowOf = (selector: string) =>
@@ -556,12 +628,26 @@ describe("focus rings of the list column", () => {
         "body.gdp-worktree-page #worktree-panel .history-item.active:focus-visible",
       shadow: "var(--focus-ring-inset), var(--glow-select)",
     },
+    // 畳んだ列の帯 (変更ファイルの一覧・一覧・Diff の一覧) と、列を畳むつまみ。
     {
-      selector: "body[data-list-tree-folded] .list-tree-open:focus-visible",
+      selector: ".list-tree-open:focus-visible",
       shadow: "var(--focus-ring-inset)",
     },
     {
-      selector: "#filelist li:focus-visible",
+      selector: ".list-open:focus-visible",
+      shadow: "var(--focus-ring-inset)",
+    },
+    {
+      selector: ".sidebar-open:focus-visible",
+      shadow: "var(--focus-ring-inset)",
+    },
+    {
+      selector: ".list-column-fold:focus-visible",
+      shadow: "var(--focus-ring-inset)",
+    },
+    // 変更ファイルの一覧とファイル一覧の行 (同じ規則)。
+    {
+      selector: ":is(#filelist, #file-list-rows) li:focus-visible",
       shadow: "var(--focus-ring-inset)",
     },
   ])("$selector", ({ selector, shadow }) => {

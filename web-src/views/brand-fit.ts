@@ -1,6 +1,6 @@
 // プロジェクト名と枝の名前 (#project-switcher) の幅を、使える幅に合わせて分ける
-// (決め方は core/brand-fit.ts)。右の列の頭でも、畳んだときのタブ列の左でも
-// 同じ部品なので、置き場所が変わって幅が変わるたびに測り直す。
+// (決め方は core/brand-fit.ts)。置き場所 (タブ列の左端の枠) の幅が変わる
+// たびに測り直す。
 //
 // 分けた幅は部品の CSS 変数 (--brand-name-max / --brand-branch-max) へ書く
 // (style.css の .brand .title / .brand .project-branch が読む)。
@@ -79,7 +79,7 @@ export function fitBrand(button: HTMLElement): void {
   };
 
   if (typeof ResizeObserver !== "undefined") {
-    // 置き場所 (右の列の頭 / タブ列の左) と、その幅が変わったら測り直す。
+    // 置き場所 (タブ列の左端の枠) と、その幅が変わったら測り直す。
     // 測り直しは同じ幅なら同じ結果なので、部品の幅は変わらず通知は止まる。
     let observedParent: Element | null = null;
     const observer = new ResizeObserver(() => {

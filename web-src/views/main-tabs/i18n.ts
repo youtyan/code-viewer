@@ -27,8 +27,8 @@ type MainTabsText = {
   /** 窓が狭くて右の面を隠している間の、分割のボタンの説明。 */
   rightParked: (count: number) => string;
   /**
-   * 右の列の一覧 (History・作業ツリー) を出すために右の面を隠している間の説明。
-   * 一覧が右の列にある画面では右の列を畳まないので、本文が狭くなる。
+   * 一覧の列の一覧 (Diff・History・作業ツリー) を出すために右の面を隠している
+   * 間の説明。一覧を詰めて列を畳んでも、本文が 2 面の下限に足りない。
    */
   rightParkedForList: (count: number) => string;
   resizeSplit: string;

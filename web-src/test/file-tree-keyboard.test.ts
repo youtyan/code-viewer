@@ -4,6 +4,7 @@
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { CHANGES_LIST_DOM, FILE_LIST_DOM } from "../views/sidebar";
 import { createSidebarForTest, installSidebarDom } from "./_sidebar-fixture";
 
 beforeAll(() => {
@@ -251,6 +252,37 @@ describe("keys on a tree row", () => {
       folded: ["src", "README.md"],
       opened: ALL,
       focused: "src",
+    });
+  });
+});
+
+// 全部開く / 全部畳むのボタンは一覧ごと (ファイル一覧と変更ファイルの一覧は同時に
+// 出る)。押した一覧のフォルダだけが畳まれる。
+describe("expand and collapse all", () => {
+  test.each([
+    { name: "the changed files", dom: CHANGES_LIST_DOM },
+    { name: "the file list", dom: FILE_LIST_DOM },
+  ])("the buttons of $name fold and unfold its folders", ({ dom }) => {
+    installSidebarDom(dom);
+    const sidebar = createSidebarForTest({ dom });
+    // 変更ファイルの一覧は差分の一覧 (onFileClick なし)、ファイル一覧は木。
+    sidebar.renderSidebar(
+      FILES,
+      dom === FILE_LIST_DOM ? () => undefined : undefined,
+    );
+    sidebar.bindTreeActions();
+    const visible = () =>
+      [...document.querySelectorAll<HTMLElement>(`${dom.list} li`)]
+        .filter((li) => !li.closest(".tree-dir.collapsed + .tree-children"))
+        .map(rowPath);
+    const button = (selector: string) =>
+      document.querySelector<HTMLButtonElement>(selector) as HTMLButtonElement;
+    button(dom.collapseAll).click();
+    const collapsed = visible();
+    button(dom.expandAll).click();
+    expect({ collapsed, expanded: visible() }).toEqual({
+      collapsed: ["src", "README.md"],
+      expanded: ALL,
     });
   });
 });

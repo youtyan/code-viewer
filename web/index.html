@@ -46,8 +46,8 @@
      app.js が画面を描くまで並びが Files のままだと、Diff・History・選んでいる
      作業ツリーを直接開いたときに本文・上の帯・一覧の列が大きく動いていた。
      付けるのは app.ts が付けるのと同じ印 (core/page-mode.ts の pageModeClasses・
-     一覧の列 core/list-column.ts の listColumnLayout・一覧の画面で右の列の本体を
-     畳む core/panel-column-policy.ts)。app.ts が同じ印を付け直す。同じであることは
+     一覧の列 core/list-column.ts の listColumnLayout: 一覧の幅・変更ファイルの一覧と
+     ファイル一覧を幅のために畳むか)。app.ts が同じ印を付け直す。同じであることは
      web-src/test/first-screen.test.ts が URL と窓の幅の表で確かめる。寸法の控えは
      views/shell/early-look.ts が書く。body の頭に置くのは body に印を付けるため
      (head では body がまだ無い。style.css は読み終わっているので変数を読める)。 -->
@@ -59,6 +59,9 @@
   var body = document.body;
   if (look.sidebarWidth > 0) root.style.setProperty("--sidebar-w", look.sidebarWidth + "px");
   if (look.historyWidth > 0) root.style.setProperty("--history-w", look.historyWidth + "px");
+  // 利用者がファイル一覧を畳んでいる。
+  var userHidden = look.sidebarHidden === true;
+  if (userHidden) body.classList.add("gdp-sidebar-hidden");
   var path = location.pathname.replace(/^\/p\/[0-9a-f]{16}(?=[\/?#]|$)/, "");
   if (path.charAt(0) !== "/") path = "/" + path;
   var q = new URLSearchParams(location.search);
@@ -79,14 +82,11 @@
   if (fileView === "blob" || fileView === "blame" || fileView === "history") body.classList.add("gdp-repo-blob-page");
   if (fileView === "history") body.classList.add("gdp-file-history-page");
   if (screen !== "file") body.classList.add("gdp-" + screen + "-page");
-  if (/^(journal|agents|tools|search|help|database)$/.test(screen) || (screen === "worktree" && !selectedWorktree))
-    body.classList.add("gdp-files-column-page");
   if (screen === "worktree" && !selectedWorktree) body.setAttribute("data-worktree-overview", "");
-  var list = screen === "diff" ? "sidebar" : screen === "history" ? "history" : selectedWorktree ? "worktree" : "";
-  // 一覧の画面の間は右の列の本体を畳む (頭の行は残る)。利用者が畳んでいれば他の画面も。
-  if (list || look.sidebarHidden === true) body.classList.add("gdp-sidebar-hidden");
-  if (!list) return;
-  body.setAttribute("data-list-column", list);
+  // core/list-column.ts の listColumnKindFor (前面は URL の画面のタブ)。Diff から
+  // 開いたファイルの詳細 (差分の 1 ファイル) も変更ファイルの一覧を出す。
+  var list = screen === "diff" || fileView === "detail" ? "sidebar" : screen === "history" ? "history" : selectedWorktree ? "worktree" : "";
+  if (list) body.setAttribute("data-list-column", list);
   var css = getComputedStyle(body);
   var px = function (name) {
     var value = parseFloat(css.getPropertyValue(name));
@@ -94,19 +94,29 @@
     return value;
   };
   // listColumnLayout と同じ決まり (1 面の本文 480 = COMFORTABLE_PANE_WIDTH、詰めた幅
-  // 240 = HISTORY_WIDTH.min)。2 面かは保存したタブを読むまで分からないので 1 面で数える。
+  // 240 = HISTORY_WIDTH.min)。縮める順: 一覧を詰める → 変更ファイルの一覧を帯に
+  // 畳む → ファイル一覧を畳む。2 面かは保存したタブを読むまで分からないので 1 面で数える。
   var room = root.clientWidth - px("--nav-w");
-  var preferred = px("--history-w");
+  var files = userHidden ? 0 : px("--sidebar-w");
+  var preferred = list ? px("--history-w") : 0;
   var narrow = Math.min(preferred, 240);
-  var tree = list === "sidebar" ? 0 : px("--sidebar-w");
+  var tree = list === "history" || list === "worktree" ? px("--sidebar-w") : 0;
+  var rail = px("--panelcol-rail-w");
   var width = preferred;
-  var folded = false;
-  if (room - preferred - tree < 480) {
+  var treeFolded = false;
+  var filesFolded = false;
+  if (room - files - preferred - tree < 480) {
     width = narrow;
-    folded = tree !== 0 && room - narrow - tree < 480;
+    if (room - files - narrow - tree < 480) {
+      treeFolded = tree !== 0;
+      var treeWidth = treeFolded ? rail : tree;
+      filesFolded = files !== 0 && room - files - narrow - treeWidth < 480;
+    }
   }
+  if (filesFolded) body.classList.add("gdp-sidebar-hidden");
+  if (!list) return;
   root.style.setProperty("--list-w", width + "px");
-  if (folded) body.setAttribute("data-list-tree-folded", "");
+  if (treeFolded) body.setAttribute("data-list-tree-folded", "");
 })();
 </script>
 <div id="app">
@@ -130,16 +140,41 @@
     </div>
     <div id="app-nav-resizer" class="app-nav-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="resize sidebar"></div>
   </aside>
-  <!-- 上の行は持たない: タブ列が最上段。プロジェクト名・ブランチ (= プロジェクトの
-       切替) はタブ列の左端 (#tabs-lead。幅は固定の --tabs-lead-w) に常に置き、画面・
-       タブ・右の列の開閉・2 面で出したり消したり動かしたりしない。画面の入口の絵柄
-       (#view-head) は右の列の頭 (#panel-head) の 1 段だけで、右の列を畳んでも動かない
-       (畳むのは頭の下の本体だけ)。
-       右の列の頭は本文の後に置く (キーボードの移る順は #panel-head の前のコメント)。 -->
-  <div id="tabs-lead" class="tabs-lead">
-    <!-- 左のサイドバーを畳んだときだけ出る。名前の枠の外 (左) に置き、名前の枠の
-         幅と枠の中の名前の位置を変えない。 -->
+  <!-- 上の行は持たない: 最上段は一覧の列の頭とタブ列の 1 段。
+       一覧の列の頭 (#panel-head) はその段の左端 (左のサイドバーの右) で、画面の入口の
+       絵柄 (#view-head) と、右端にファイル一覧を畳むボタン。幅は固定 (--listcol-head-w)
+       で、画面の切替でも一覧の列の開閉 (手・自動) でも動かない (畳むのは頭の下の一覧
+       だけ)。その右がタブ列で、左端にプロジェクト名・ブランチ (= プロジェクトの切替。
+       #tabs-lead。幅は固定の --tabs-lead-w)。
+       キーボードの移る順は DOM の順: 左のサイドバー → 一覧の列の頭 → タブ列 →
+       ファイル一覧 → 一覧 → 変更ファイルの一覧 → 本文 → 最下段。 -->
+  <div id="panel-head" class="panel-head">
+    <!-- 左のサイドバーを畳んだときだけ出る。段の左端 (頭の中の先頭) に置き、絵柄と
+         畳むボタンとタブ列はその幅だけ右から始まる (プロジェクト名の枠の幅と枠の中の
+         名前の位置は変えない)。 -->
     <button id="nav-expand" class="global-icon-action" type="button" title="show sidebar" aria-label="show sidebar" hidden><span class="goi-icon" aria-hidden="true"></span></button>
+    <div id="view-head" class="view-head">
+      <!-- 画面の入口。押すとその画面のタブを開くか前面に出す (Files は本文の
+           既定 = フォルダ表示)。何を見ているかはタブだけが示すので、選択の印は
+           付けない。 -->
+      <nav class="app-menu view-strip" aria-label="Views">
+        <a class="app-menu-item view-strip-item" data-route="repo" href="/"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="diff" href="/todif?from=HEAD&to=worktree"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="history" href="/history"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="worktree" href="/worktree"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="database" href="/database"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="journal" href="/journal"><span class="goi-icon" aria-hidden="true"></span></a>
+      </nav>
+      <!-- ファイル一覧を畳むボタン (絵柄の行の右端。views/sidebar.ts が絵と名前を付ける)。
+           最初から置いて場所を取る (JS が後から差し込むと、絵柄が 56px 動いた)。 -->
+      <div class="view-head-row">
+        <button id="sidebar-toggle" type="button" title="hide file list" aria-label="hide file list">
+          <span class="sidebar-toggle-label">Files</span>
+        </button>
+      </div>
+    </div>
+  </div>
+  <div id="tabs-lead" class="tabs-lead">
     <div class="tabs-lead-name">
       <!-- リポジトリ名 = プロジェクトの切替 (views/projects/project-switcher.ts)。 -->
       <button id="project-switcher" class="brand" type="button">
@@ -207,18 +242,39 @@
     </div>
   </div>
 
+  <!-- ファイル一覧 (リポジトリの木)。どの画面でも左のサイドバーの右に出す (畳む・
+       幅を変えるは頭のボタンと右端の掴み)。中身は views/sidebar.ts の createSidebar
+       (FILE_LIST_DOM) と views/repo-view.ts。Diff・History・作業ツリーの一覧はこの右。 -->
+  <aside id="file-list" aria-label="Files">
+    <div class="sb-head">
+      <span class="sb-title">Files</span>
+      <span id="file-list-totals" class="sb-totals"></span>
+      <span data-ref-selector-mount data-ref-id="repo-target" data-wrapper-id="repo-target-wrap" data-extra-class="ref-selector-in-grid" data-placeholder="target..." data-title="repository target" hidden></span>
+      <div class="sb-actions" role="group" aria-label="file list actions">
+        <button id="file-list-expand-all" class="sb-icon-action sb-tree-action" title="expand all folders" aria-label="expand all folders"></button>
+        <button id="file-list-collapse-all" class="sb-icon-action sb-tree-action" title="collapse all folders" aria-label="collapse all folders"></button>
+      </div>
+      <div class="sb-filter-wrap">
+        <input id="file-list-filter" class="sb-filter" type="search" placeholder="filter files…  /  ⌘K" title="Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help." autocomplete="off" />
+        <button id="file-list-filter-clear" type="button" class="sb-filter-clear" title="Clear file filter" aria-label="Clear file filter" hidden>Clear</button>
+      </div>
+    </div>
+    <ul id="file-list-rows"></ul>
+    <div id="file-list-resizer" aria-hidden="true"></div>
+  </aside>
   <aside id="history-panel" hidden></aside>
   <div id="history-resizer" aria-hidden="true"></div>
   <!-- 作業ツリー画面の一覧。中身は worktree-view が入れる。見た目は
        #history-panel と同じ規則を共有している。変更ファイルは Repository と
        同じ #sidebar、差分は #diff を使うので、増える箱はこれだけ。 -->
   <aside id="worktree-panel" hidden></aside>
-  <aside id="sidebar">
+  <!-- 変更ファイルの一覧。Diff では一覧そのもの、History と選んでいる作業ツリーでは
+       一覧の右に出す。ほかの画面では出さない。 -->
+  <aside id="sidebar" aria-label="Changed files">
     <div class="sb-head">
-      <span class="sb-title">Files</span>
-      <span id="totals"></span>
-      <span data-ref-selector-mount data-ref-id="repo-target" data-wrapper-id="repo-target-wrap" data-extra-class="ref-selector-in-grid" data-placeholder="target..." data-title="repository target" hidden></span>
-      <div class="sb-actions" role="group" aria-label="sidebar actions">
+      <span class="sb-title">Changed files</span>
+      <span id="totals" class="sb-totals"></span>
+      <div class="sb-actions" role="group" aria-label="changed file list actions">
         <button id="sb-expand-all" class="sb-icon-action sb-tree-action" title="expand all folders" aria-label="expand all folders"></button>
         <button id="sb-collapse-all" class="sb-icon-action sb-tree-action" title="collapse all folders" aria-label="collapse all folders"></button>
       </div>
@@ -228,22 +284,12 @@
       </div>
     </div>
     <div class="sb-filter-wrap">
-      <input id="sb-filter" type="search" placeholder="filter files…  /  ⌘K" title="Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help." autocomplete="off" />
+      <input id="sb-filter" class="sb-filter" type="search" placeholder="filter files…  /  ⌘K" title="Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help." autocomplete="off" />
       <button id="sb-filter-clear" type="button" class="sb-filter-clear" title="Clear file filter" aria-label="Clear file filter" hidden>Clear</button>
     </div>
     <ul id="filelist"></ul>
     <div id="sidebar-resizer" aria-hidden="true"></div>
   </aside>
-  <!-- Files の木を出す画面 (#first-screen が付けた印) では、絞り込みを木の見出しの中へ
-       最初から置く (views/sidebar.ts の placeSidebarFilter と同じ置き場所。JS の後に
-       移すと見出しが 31px 伸びた)。 -->
-  <script id="first-sidebar-filter">
-  (function () {
-    var page = document.body.classList;
-    if (!page.contains("gdp-repo-page") && !page.contains("gdp-repo-blob-page") && !page.contains("gdp-files-column-page")) return;
-    document.querySelector("#sidebar .sb-head").appendChild(document.querySelector("#sidebar .sb-filter-wrap"));
-  })();
-  </script>
 
   <div id="quick-help-popover" hidden role="dialog" aria-label="quick help" aria-modal="false">
     <div class="quick-help-head">
@@ -342,31 +388,6 @@
     <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
     <aside id="search-sheet" class="search-sheet" hidden aria-hidden="true" inert aria-label="search results"></aside>
   </main>
-  <!-- 右の列の頭 (画面の入口の絵柄と右の列を畳むボタン。畳んでも同じ幅で残る)。位置は
-       fixed で右端の上なので、DOM では本文の後に置く (キーボードの移る順:
-       左のサイドバー → タブ列 → 一覧 → 木 → 本文 → 右の列の頭 → 最下段)。 -->
-  <div id="panel-head" class="panel-head">
-    <div id="view-head" class="view-head">
-      <!-- 画面の入口。押すとその画面のタブを開くか前面に出す (Files は本文の
-           既定 = フォルダ表示)。何を見ているかはタブだけが示すので、選択の印は
-           付けない。 -->
-      <nav class="app-menu view-strip" aria-label="Views">
-        <a class="app-menu-item view-strip-item" data-route="repo" href="/"><span class="goi-icon" aria-hidden="true"></span></a>
-        <a class="app-menu-item view-strip-item" data-route="diff" href="/todif?from=HEAD&to=worktree"><span class="goi-icon" aria-hidden="true"></span></a>
-        <a class="app-menu-item view-strip-item" data-route="history" href="/history"><span class="goi-icon" aria-hidden="true"></span></a>
-        <a class="app-menu-item view-strip-item" data-route="worktree" href="/worktree"><span class="goi-icon" aria-hidden="true"></span></a>
-        <a class="app-menu-item view-strip-item" data-route="database" href="/database"><span class="goi-icon" aria-hidden="true"></span></a>
-        <a class="app-menu-item view-strip-item" data-route="journal" href="/journal"><span class="goi-icon" aria-hidden="true"></span></a>
-      </nav>
-      <!-- 右の列を畳むボタン (絵柄の行の右端。views/sidebar.ts が絵と名前を付ける)。
-           最初から置いて場所を取る (JS が後から差し込むと、絵柄が 56px 左へ動いた)。 -->
-      <div class="view-head-row">
-        <button id="sidebar-toggle" type="button" title="hide sidebar" aria-label="hide sidebar">
-          <span class="sidebar-toggle-label">Files</span>
-        </button>
-      </div>
-    </div>
-  </div>
   <!-- 最下段: アカウントごとの使用量 (views/agents/usage-status.ts)、
        エージェントの件数 (views/agents/agent-status.ts)、サーバの状態と診断。 -->
   <footer id="statusbar">

@@ -257,15 +257,19 @@ describe("a focused diff scroll box draws the shared ring above the line numbers
 });
 
 // 木の行は列の端から端までで外の輪は切れるので、内側に描く。選んでいる行は光も残す。
+// 変更ファイルの一覧 (#filelist) とファイル一覧 (#file-list-rows) は同じ規則。
 describe("a focused tree row draws the shared ring inside", () => {
   test.each([
-    ["#filelist li:focus-visible", "var(--focus-ring-inset)"],
     [
-      "#filelist.tree .tree-file.active:focus-visible",
+      ":is(#filelist, #file-list-rows) li:focus-visible",
+      "var(--focus-ring-inset)",
+    ],
+    [
+      ":is(#filelist, #file-list-rows).tree .tree-file.active:focus-visible",
       "var(--focus-ring-inset), var(--glow-select)",
     ],
     [
-      "#filelist li.active:focus-visible",
+      ":is(#filelist, #file-list-rows) li.active:focus-visible",
       "var(--focus-ring-inset), var(--glow-select)",
     ],
   ])("%s", (selector, expected) => {
@@ -279,7 +283,7 @@ describe("a focused tree row draws the shared ring inside", () => {
     expect(
       cascadedDeclarations(
         rules,
-        (s) => s === "#filelist li:focus-visible",
+        (s) => s === ":is(#filelist, #file-list-rows) li:focus-visible",
       ).get("outline"),
     ).toBe("none");
   });

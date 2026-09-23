@@ -30,7 +30,7 @@ export function isPageKeymapBlockedKey(
 
 // Tab で届く、Enter で押せる部品。ページのキー割り当ての Enter (木の項目を開く) は
 // 部品の外 (本文・木の行・何も選んでいないとき) のためのもので、ここで拾うと
-// ボタンが押されない (New agent・画面の入口・右の列を畳むボタンが Enter で
+// ボタンが押されない (New agent・画面の入口・ファイル一覧を畳むボタンが Enter で
 // 動かず、木のファイルが開いていた)。木の行のリンクは tabIndex -1 で Tab に
 // 入らないので、今までどおりページの Enter が開く。
 const ENTER_CONTROL_SELECTOR =
@@ -66,15 +66,16 @@ export function keymapScope(target: Element | null): KeymapScope {
   if (target?.closest("#content")) return "main";
   // 右の面のソース表示 (#content の外の 2 つ目の実体) も本文と同じキー。
   if (target?.closest(".main-pane-source")) return "main";
-  if (target?.closest("#sidebar")) return "sidebar";
+  // ファイル一覧 (#file-list) と変更ファイルの一覧 (#sidebar) は同じキー。
+  if (target?.closest("#sidebar, #file-list")) return "sidebar";
   return "global";
 }
 
 export function prepareKeyboardPanels(doc: Document = document) {
-  const sidebar = doc.querySelector<HTMLElement>("#sidebar");
-  const content = doc.querySelector<HTMLElement>("#content");
-  if (sidebar) sidebar.tabIndex = -1;
-  if (content) content.tabIndex = -1;
+  for (const panel of doc.querySelectorAll<HTMLElement>(
+    "#sidebar, #file-list, #content",
+  ))
+    panel.tabIndex = -1;
 }
 
 export function getPanelFocusScope(
@@ -102,11 +103,19 @@ export function restorePanelFocusScope(
   else setPanelFocusScope(null, doc);
 }
 
+/**
+ * 一覧へフォーカスを移す: 一覧を出す画面 (body[data-list-column]) は変更ファイルの
+ * 一覧 (#sidebar)、ほかはファイル一覧 (#file-list)。
+ */
 export function focusSidebarPanel(doc: Document = document) {
+  const changes = doc.body?.hasAttribute("data-list-column") ?? false;
+  const [root, list] = changes
+    ? ["#sidebar", "#filelist"]
+    : ["#file-list", "#file-list-rows"];
   const active = doc.querySelector<HTMLElement>(
-    "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]",
+    `${list} li.active[data-path], ${list} .tree-dir.active[data-dirpath]`,
   );
-  const sidebar = doc.querySelector<HTMLElement>("#sidebar");
+  const sidebar = doc.querySelector<HTMLElement>(root);
   (active || sidebar)?.focus({ preventScroll: true });
   setPanelFocusScope("sidebar", doc);
 }

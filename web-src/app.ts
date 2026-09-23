@@ -105,9 +105,9 @@ import { isNativeLinkClick } from "./core/link-click";
 import {
   type ListColumnKind,
   listColumnDrag,
+  listColumnKindFor,
   listColumnLayout,
   restoredListWidth,
-  sidebarTitle,
 } from "./core/list-column";
 import type { PaneSide, TabTarget } from "./core/main-tabs";
 import {
@@ -118,8 +118,9 @@ import {
 import { createNetworkActivityTracker } from "./core/network-activity";
 import { PAGE_MODE_CLASSES, pageModeClasses } from "./core/page-mode";
 import {
-  panelColumnAction,
-  panelColumnBodyWidth,
+  bootFileListFold,
+  fileListAction,
+  listColumnBodyWidth,
 } from "./core/panel-column-policy";
 import {
   clampPanelSize,
@@ -263,6 +264,8 @@ import {
 } from "./views/line-ref-pill";
 import { onListRowKeys } from "./views/list-tab-stop";
 import {
+  createColumnFold,
+  createColumnOpen,
   createListTreeOpen,
   localizeListTreeOpen as setListTreeOpenLabel,
 } from "./views/list-tree-open";
@@ -297,8 +300,15 @@ import {
 } from "./views/search-palette-ui";
 import { createSearchResultsView } from "./views/search-results-view";
 import { type AppNav, mountAppNav } from "./views/shell/app-nav";
-import { rememberEarlyLook } from "./views/shell/early-look";
-import { createSidebar, type ViewerFontSize } from "./views/sidebar";
+import { readEarlyLook, rememberEarlyLook } from "./views/shell/early-look";
+import {
+  CHANGES_LIST_DOM,
+  createSidebar,
+  FILE_LIST_DOM,
+  type SidebarDeps,
+  type SidebarDom,
+  type ViewerFontSize,
+} from "./views/sidebar";
 import {
   createSourceView,
   type SourceViewDeps,
@@ -1377,9 +1387,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyPersistedStateToState();
     applySidebarFontSize();
     applyCodeFontSize();
-    // 利用者が畳んでいれば、それは自動の畳みではない (一覧の画面を出ても開かない)。
-    if (STATE.sidebarHidden) PANEL_COLUMN_AUTO_HIDDEN = false;
-    applySidebarHidden(STATE.sidebarHidden || PANEL_COLUMN_AUTO_HIDDEN, {
+    // 利用者が畳んでいれば、それは自動の畳みではない (幅が足りても開かない)。
+    if (STATE.sidebarHidden) FILE_LIST_AUTO_HIDDEN = false;
+    applySidebarHidden(STATE.sidebarHidden || FILE_LIST_AUTO_HIDDEN, {
       persist: false,
     });
     applyHistoryWidth(STATE.historyWidth, false);
@@ -1403,8 +1413,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   function rememberLayoutLook(): void {
     rememberEarlyLook({
       language: STATE.language,
-      // 利用者が畳んだものだけ (一覧の画面・2 面の自動の畳みは画面で決まる)。
-      sidebarHidden: STATE.sidebarHidden && !PANEL_COLUMN_AUTO_HIDDEN,
+      // 利用者が畳んだものだけ (幅による自動の畳みは早いスクリプトが幅で決める)。
+      sidebarHidden: STATE.sidebarHidden && !FILE_LIST_AUTO_HIDDEN,
       sidebarWidth: STATE.sbWidth,
       historyWidth: STATE.historyWidth,
     });
@@ -1511,21 +1521,42 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * 一覧の列を隠している (一覧の画面の右の列の畳むボタン)。このセッションだけ (保存
-   * しない。右の列の畳みの設定とは別)。配線は syncListColumn。
+   * 利用者が一覧 (Diff の変更ファイルの一覧・History・作業ツリー) を手で畳んだ
+   * (列の右端の畳むボタン)。このセッションだけ (保存しない。ファイル一覧の畳みの
+   * 設定とは別)。配線は syncListColumn。
    */
   let LIST_COLUMN_HIDDEN = false;
+  /** 利用者が History・作業ツリーの変更ファイルの一覧を手で畳んだ (このセッションだけ)。 */
+  let LIST_TREE_HIDDEN = false;
   /**
-   * 利用者が畳んだ変更ファイルの木を開いた (このセッションは畳まない)。
+   * 利用者が畳んだ変更ファイルの一覧を開いた (このセッションは畳まない)。
    * 配線は syncListColumn。
    */
   let LIST_TREE_KEPT_OPEN = false;
   /**
-   * 一覧の列のいまの幅 (一覧 + 変更ファイルの木。出していなければ 0)。2 面の
-   * 幅の計算が引く。
+   * 一覧の列のいまの幅 (ファイル一覧 + 一覧 + 変更ファイルの一覧。出していない
+   * ものは 0)。2 面の幅の計算が引く。
    */
   let LIST_COLUMN_WIDTH = 0;
-  /** 見えている一覧だけの幅 (木を含めない。出していなければ 0)。掴みの開始幅。 */
+  /**
+   * 2 面の本文の幅 (面 2 つ分のゆとりと仕切り)。一覧の列を 2 面のために詰める・
+   * 畳むときに本文へ残す幅 (syncListColumn・splitListColumnWidth)。
+   */
+  const SPLIT_NEED = COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH;
+  /**
+   * 左の面の前面が画面 (route) のタブか、何も選んでいない (showPanes が控える)。
+   * false (端末・画像) なら一覧の列に一覧を出さない (listColumnKind)。
+   */
+  let LEFT_FRONT_IS_PAGE = true;
+  /** 一覧と変更ファイルの一覧を畳む / 開くボタン (syncListColumn の後ろで作る)。 */
+  let LIST_COLUMN_FOLDS: {
+    listFold: HTMLButtonElement;
+    listOpen: HTMLButtonElement;
+    sidebarFold: HTMLButtonElement;
+    sidebarOpen: HTMLButtonElement;
+    treeOpen: HTMLButtonElement;
+  } | null = null;
+  /** 見えている一覧だけの幅 (変更ファイルの一覧を含めない。出していなければ 0)。掴みの開始幅。 */
   let LIST_SHOWN_WIDTH = 0;
   /** 本文が要る幅を保てる一覧の幅 (掴んで広げられる上限)。 */
   let LIST_FITS_WIDTH = HISTORY_WIDTH.max;
@@ -1549,13 +1580,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!lead) throw new Error("#tabs-lead is missing from index.html");
       return lead;
     })(),
-    panelColumn: (() => {
+    columnHead: (() => {
       const head = document.getElementById("panel-head");
       if (!head) throw new Error("#panel-head is missing from index.html");
       return head;
     })(),
-    panelColumnWidth: () => panelColumnShownWidth(),
-    listColumnWidth: () => LIST_COLUMN_WIDTH,
+    listColumnWidth: () => listColumnShownWidth(),
+    splitListColumnWidth: () => splitListColumnWidth(),
     getLanguage: () => STATE.language,
     pageLabel: (page) => uiText().nav[page],
     navigate: (route, replace) => {
@@ -1621,7 +1652,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     terminalInfo: (session) => terminalTabInfo(session),
     onPanes: (view, how) => showPanes(view, how),
-    panelColumnHoldsList,
+    listColumnHoldsList: () => listColumnKind() !== null,
     onTerminals: (_open, closed) => {
       for (const id of closed) TERMINAL_VIEW.releaseTab(id as ShellSessionId);
     },
@@ -1749,7 +1780,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   // ---------- Sidebar: extracted to sidebar.ts ----------
-  const SIDEBAR = createSidebar({
+  // 一覧は 2 つ。ファイル一覧 (FILE_LIST。リポジトリの木で、どの画面でも出す) と
+  // 変更ファイルの一覧 (SIDEBAR。Diff の一覧・History と作業ツリーの一覧の右)。
+  const SIDEBAR_DEPS: Omit<SidebarDeps, "dom" | "repository"> = {
     $,
     $$,
     STATE,
@@ -1818,9 +1851,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     filterCountTitle: (visible, total) =>
       uiText().sidebar.filterCountTitle(visible, total),
     fileCountText: (count) => uiText().diff.files(count),
-    sidebarToggleTitle: panelColumnToggleTitle,
+    sidebarToggleTitle: fileListToggleTitle,
     onUserToggledSidebarHidden,
-    toggleListColumn,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
     omittedDirectoryBadge: (reason) => {
       const text = uiText().sidebar;
@@ -1840,52 +1872,73 @@ window.GdpExpandLogic = GdpExpandLogic;
             title: text.commitEntryGitlinkTitle,
           };
     },
+  };
+  const SIDEBAR = createSidebar({
+    ...SIDEBAR_DEPS,
+    dom: CHANGES_LIST_DOM,
+    repository: false,
   });
+  const FILE_LIST = createSidebar({
+    ...SIDEBAR_DEPS,
+    dom: FILE_LIST_DOM,
+    repository: true,
+  });
+  type FileListHandle = typeof FILE_LIST;
+  /**
+   * キーで動かす一覧: フォーカスのある一覧。どちらにも無ければ画面の一覧
+   * (Diff・History・選んでいる作業ツリーは変更ファイルの一覧、ほかはファイル一覧)。
+   */
+  function keyList(): FileListHandle {
+    const active = document.activeElement;
+    if (active?.closest(FILE_LIST_DOM.root)) return FILE_LIST;
+    if (active?.closest(CHANGES_LIST_DOM.root)) return SIDEBAR;
+    return listColumnKind() ? SIDEBAR : FILE_LIST;
+  }
+  // 骨格 (列を畳むボタン・幅・文字の大きさ) はファイル一覧の側が持つ。
   const {
-    renderSidebar,
-    refreshRepoSidebarTree,
-    applyFilter,
-    scheduleApplyFilter,
-    flushSidebarFilter,
-    syncSidebarFilterClearButton,
-    clearSidebarFilter,
-    markActive,
-    rerenderVirtualSidebar,
-    ensureVirtualSidebarDirLoaded,
-    scrollVirtualSidebarPathIntoView,
-    shouldLazyLoadSidebarDir,
-    setFolderIcon,
-    isRepositorySidebarMode,
     placeSidebarToggle,
     applySidebarHidden,
     applySidebarWidth,
     applySidebarFontSize,
     savedSidebarFontSize,
-    syncSidebarHeaderHeight,
-    observeSidebarHeaderHeight,
-    setSidebarTreeActionIcons,
-    setAllSidebarDirsCollapsed,
+  } = FILE_LIST;
+  function syncSidebarHeaderHeight(): void {
+    FILE_LIST.syncSidebarHeaderHeight();
+    SIDEBAR.syncSidebarHeaderHeight();
+  }
+  // 変更ファイルの一覧 (Diff の描画・絞り込み・Tests を隠す)。
+  const {
+    renderSidebar,
+    rerenderVirtualSidebar,
     updateTreeDirVisibility,
-    moveActiveSidebarItem,
-    moveActiveSidebarPage,
-    moveActiveSidebarToEdge,
-    openActiveSidebarItem,
-    setActiveSidebarDirectoryCollapsed,
-    toggleActiveSidebarDirectoryCollapsed,
     isVirtualSidebarActive,
-    selectVirtualSidebarIndex,
-    virtualSidebarActiveIndex,
-    adjacentVisibleSidebarItem,
-    scrollSidebarItemIntoView,
-    sidebarItemPath,
-    visibleSidebarItems,
-    getSidebarRowByPath,
-    getSidebarVirtualActivePath,
-    getSidebarFiles,
-    getSidebarOnFileClick,
-    getSidebarVisibleRows,
-    visibleSidebarItemFrom,
   } = SIDEBAR;
+  // キーで動かす一覧 (keyList)。
+  const isRepositorySidebarMode = () => keyList().isRepositorySidebarMode();
+  const markActive = (path: string, options?: { reveal?: boolean }) =>
+    keyList().markActive(path, options);
+  const moveActiveSidebarPage = (direction: 1 | -1) =>
+    keyList().moveActiveSidebarPage(direction);
+  const moveActiveSidebarToEdge = (edge: "top" | "bottom") =>
+    keyList().moveActiveSidebarToEdge(edge);
+  const openActiveSidebarItem = () => keyList().openActiveSidebarItem();
+  const setActiveSidebarDirectoryCollapsed = (collapsed: boolean) =>
+    keyList().setActiveSidebarDirectoryCollapsed(collapsed);
+  const toggleActiveSidebarDirectoryCollapsed = () =>
+    keyList().toggleActiveSidebarDirectoryCollapsed();
+  const selectVirtualSidebarIndex: FileListHandle["selectVirtualSidebarIndex"] =
+    (...args) => keyList().selectVirtualSidebarIndex(...args);
+  const virtualSidebarActiveIndex = () => keyList().virtualSidebarActiveIndex();
+  const adjacentVisibleSidebarItem = (direction: 1 | -1) =>
+    keyList().adjacentVisibleSidebarItem(direction);
+  const scrollSidebarItemIntoView: FileListHandle["scrollSidebarItemIntoView"] =
+    (...args) => keyList().scrollSidebarItemIntoView(...args);
+  const sidebarItemPath = (item: HTMLElement) =>
+    keyList().sidebarItemPath(item);
+  const getSidebarVisibleRows = () => keyList().getSidebarVisibleRows();
+  const visibleSidebarItemFrom: FileListHandle["visibleSidebarItemFrom"] = (
+    ...args
+  ) => keyList().visibleSidebarItemFrom(...args);
 
   // ---------- Source view: extracted to source-view.ts ----------
   // 本文 (左の面) のソース表示の依存。右の面のソース表示はこれを土台に、
@@ -2009,25 +2062,25 @@ window.GdpExpandLogic = GdpExpandLogic;
     setProjectName,
     currentRange,
     appendScopeParams,
-    markActive,
-    applyFilter,
-    renderSidebar,
-    refreshRepoSidebarTree,
-    rerenderVirtualSidebar,
-    ensureVirtualSidebarDirLoaded,
-    scrollVirtualSidebarPathIntoView,
-    shouldLazyLoadSidebarDir,
-    setFolderIcon,
-    isRepositorySidebarMode,
+    // Files の画面の木はファイル一覧 (FILE_LIST)。
+    markActive: FILE_LIST.markActive,
+    applyFilter: FILE_LIST.applyFilter,
+    renderSidebar: FILE_LIST.renderSidebar,
+    refreshRepoSidebarTree: FILE_LIST.refreshRepoSidebarTree,
+    rerenderVirtualSidebar: FILE_LIST.rerenderVirtualSidebar,
+    ensureVirtualSidebarDirLoaded: FILE_LIST.ensureVirtualSidebarDirLoaded,
+    scrollVirtualSidebarPathIntoView:
+      FILE_LIST.scrollVirtualSidebarPathIntoView,
+    shouldLazyLoadSidebarDir: FILE_LIST.shouldLazyLoadSidebarDir,
+    setFolderIcon: FILE_LIST.setFolderIcon,
+    isRepositorySidebarMode: FILE_LIST.isRepositorySidebarMode,
     placeSidebarToggle,
     createOpenPathButton,
     removeStandaloneSource,
     renderStandaloneSource,
     repoFileTargetFromRoute,
-    filesColumnRef: () =>
-      document.body.classList.contains("gdp-files-column-page")
-        ? STATE.repoRef || "worktree"
-        : null,
+    // Files とファイルの画面の外でも、ファイル一覧は Files の対象の ref を出す。
+    filesColumnRef: () => STATE.repoRef || "worktree",
     trackLoad,
     isAbortError,
     syncSidebarHeaderHeight,
@@ -2037,10 +2090,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRepoSidebarRef: (ref: string | null) => {
       REPO_SIDEBAR_REF = ref;
     },
-    getSidebarOnFileClick: () => SIDEBAR.getSidebarOnFileClick(),
+    getSidebarOnFileClick: () => FILE_LIST.getSidebarOnFileClick(),
     syncHeaderMenu,
-    getSidebarRowByPath,
-    getSidebarVirtualActivePath,
+    getSidebarRowByPath: FILE_LIST.getSidebarRowByPath,
+    getSidebarVirtualActivePath: FILE_LIST.getSidebarVirtualActivePath,
     pushUndo: (undo: UndoActionResponse) => {
       UNDO_STACK.unshift(undo);
     },
@@ -2255,8 +2308,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         show: string;
         hideList: string;
         showList: string;
+        hideTree: string;
         showTree: string;
-        autoHiddenForSplit: string;
+        autoHidden: string;
         repoTarget: string;
         openDirectoryInOs: string;
         omittedHeavyLabel: string;
@@ -2425,14 +2479,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterClear: "Clear",
         filterClearTitle: "Clear file filter",
         filterLabel: "Filter files",
-        hide: "Hide right column",
-        show: "Show right column",
-        hideList: "hide the list",
-        showList: "show the list",
-        showTree:
-          "show the changed files (folded to make room for the main area)",
-        autoHiddenForSplit:
-          "collapsed to make room for the two panes - open it to keep it open",
+        hide: "Hide the file list",
+        show: "Show the file list",
+        hideList: "Hide the list",
+        showList: "Show the list",
+        hideTree: "Hide the changed files",
+        showTree: "Show the changed files",
+        autoHidden:
+          "folded to make room for the main area - open it to keep it open",
         repoTarget: "repository target",
         openDirectoryInOs: "open this folder in OS",
         omittedHeavyLabel: "skipped",
@@ -2821,13 +2875,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterClear: "解除",
         filterClearTitle: "ファイル絞り込みを解除",
         filterLabel: "ファイル絞り込み",
-        hide: "右の列を隠す",
-        show: "右の列を表示",
+        hide: "ファイル一覧を隠す",
+        show: "ファイル一覧を表示",
         hideList: "一覧を隠す",
         showList: "一覧を表示",
-        showTree: "変更ファイルを表示 (本文の幅のために畳みました)",
-        autoHiddenForSplit:
-          "2 面のために畳みました。開くと、そのまま開いたままにします",
+        hideTree: "変更ファイルの一覧を隠す",
+        showTree: "変更ファイルの一覧を表示",
+        autoHidden:
+          "本文の幅のために畳みました。開くと、そのまま開いたままにします",
         repoTarget: "リポジトリの対象",
         openDirectoryInOs: "このフォルダをOSで開く",
         omittedHeavyLabel: "省略",
@@ -3283,19 +3338,39 @@ window.GdpExpandLogic = GdpExpandLogic;
     setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
 
     syncSidebarTitle();
-    const sidebarActions = document.querySelector<HTMLElement>(".sb-actions");
-    sidebarActions?.setAttribute("aria-label", text.sidebar.actions);
-    const expandAll =
-      document.querySelector<HTMLButtonElement>("#sb-expand-all");
-    if (expandAll) {
-      expandAll.title = text.sidebar.expandAll;
-      expandAll.setAttribute("aria-label", text.sidebar.expandAll);
-    }
-    const collapseAll =
-      document.querySelector<HTMLButtonElement>("#sb-collapse-all");
-    if (collapseAll) {
-      collapseAll.title = text.sidebar.collapseAll;
-      collapseAll.setAttribute("aria-label", text.sidebar.collapseAll);
+    // ファイル一覧と変更ファイルの一覧の見出しの操作と絞り込み。
+    for (const dom of [FILE_LIST_DOM, CHANGES_LIST_DOM]) {
+      document
+        .querySelector<HTMLElement>(`${dom.root} .sb-actions`)
+        ?.setAttribute("aria-label", text.sidebar.actions);
+      const expandAll = document.querySelector<HTMLButtonElement>(
+        dom.expandAll,
+      );
+      if (expandAll) {
+        expandAll.title = text.sidebar.expandAll;
+        expandAll.setAttribute("aria-label", text.sidebar.expandAll);
+      }
+      const collapseAll = document.querySelector<HTMLButtonElement>(
+        dom.collapseAll,
+      );
+      if (collapseAll) {
+        collapseAll.title = text.sidebar.collapseAll;
+        collapseAll.setAttribute("aria-label", text.sidebar.collapseAll);
+      }
+      const filter = document.querySelector<HTMLInputElement>(dom.filter);
+      if (filter) {
+        filter.placeholder = text.sidebar.filter;
+        filter.title = text.sidebar.filterTitle;
+        filter.setAttribute("aria-label", text.sidebar.filterLabel);
+      }
+      const filterClear = document.querySelector<HTMLButtonElement>(
+        dom.filterClear,
+      );
+      if (filterClear) {
+        filterClear.textContent = text.sidebar.filterClear;
+        filterClear.title = text.sidebar.filterClearTitle;
+        filterClear.setAttribute("aria-label", text.sidebar.filterClearTitle);
+      }
     }
     const sbView = document.querySelector<HTMLElement>(".sb-view-seg");
     sbView?.setAttribute("aria-label", text.sidebar.view);
@@ -3309,19 +3384,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       '.sb-view-seg button[data-view="flat"]',
     );
     if (sbViewFlat) sbViewFlat.title = text.sidebar.flatTitle;
-    const filter = document.querySelector<HTMLInputElement>("#sb-filter");
-    if (filter) {
-      filter.placeholder = text.sidebar.filter;
-      filter.title = text.sidebar.filterTitle;
-      filter.setAttribute("aria-label", text.sidebar.filterLabel);
-    }
-    const filterClear =
-      document.querySelector<HTMLButtonElement>("#sb-filter-clear");
-    if (filterClear) {
-      filterClear.textContent = text.sidebar.filterClear;
-      filterClear.title = text.sidebar.filterClearTitle;
-      filterClear.setAttribute("aria-label", text.sidebar.filterClearTitle);
-    }
     const repoTarget = document.querySelector<HTMLInputElement>("#repo-target");
     if (repoTarget) {
       repoTarget.title = text.sidebar.repoTarget;
@@ -3330,11 +3392,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     const sidebarToggle =
       document.querySelector<HTMLButtonElement>("#sidebar-toggle");
     if (sidebarToggle) {
-      const sidebarToggleTitle = panelColumnToggleTitle(STATE.sidebarHidden);
+      const sidebarToggleTitle = fileListToggleTitle(STATE.sidebarHidden);
       sidebarToggle.title = sidebarToggleTitle;
       sidebarToggle.setAttribute("aria-label", sidebarToggleTitle);
-      localizeListTreeOpen();
     }
+    localizeListColumnFolds();
     setElementText(".sidebar-toggle-label", text.sidebar.files);
 
     setElementText(".history-title", text.history.title);
@@ -3653,10 +3715,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     VIEWER_SETTINGS.sync();
   }
 
-  /** サイドバーで選ばれているファイルのパスをクリップボードへ。 */
+  /** キーで動かす一覧 (keyList) で選ばれているファイルのパスをクリップボードへ。 */
   function copyActiveFilePath(): boolean {
+    const dom = keyList() === FILE_LIST ? FILE_LIST_DOM : CHANGES_LIST_DOM;
     const active = document.querySelector<HTMLElement>(
-      "#filelist li.active[data-path]",
+      `${dom.list} li.active[data-path]`,
     );
     const path = active?.dataset.path;
     if (!path) return false;
@@ -4469,12 +4532,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
-  /** 右の列に Files の木を出す (読み込み済みなら使い回す)。失敗は状態と console に出す。 */
-  function showFilesTreeInLeftColumn(): void {
+  /**
+   * Files とファイルの画面の外で、ファイル一覧を出す (読み込み済みなら選択も
+   * スクロールもそのまま)。失敗は状態と console に出す。
+   */
+  function showFileList(): void {
     const ref = STATE.repoRef || "worktree";
-    REPO_VIEW.renderRepoBlobSidebar("", ref).catch((error: unknown) => {
+    REPO_VIEW.ensureFileList(ref).catch((error: unknown) => {
       console.error(
-        `[code-viewer] the Files tree (${ref}) for the left column could not be loaded`,
+        `[code-viewer] the file list (${ref}) could not be loaded`,
         error,
       );
       setStatus("error");
@@ -4503,8 +4569,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     const pageMode = pageModeClasses(STATE.route, hostedSourceOpen);
     for (const name of PAGE_MODE_CLASSES)
       document.body.classList.toggle(name, pageMode.has(name));
-    const filesColumnRoute = pageMode.has("gdp-files-column-page");
-    if (filesColumnRoute) showFilesTreeInLeftColumn();
+    // ファイル一覧はどの画面でも出す (Files とファイルの画面は repo-view が描く)。
+    if (!repoSidebarRoute) showFileList();
     const repoTargetWrap =
       document.querySelector<HTMLElement>("#repo-target-wrap");
     if (!repoSidebarRoute && repoTargetWrap) {
@@ -5186,53 +5252,61 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
-  // ---- 2 面のときの右の列 (ui-layout.md の「2 面と右の列」) ----
-  // 2 面にした本文が、ゆとりのある面の最小幅 2 つ分に足りないなら、右の列の
-  // 本体を自動で畳む (Data の検索欄などが 0 幅に潰れるため。頭の行は残る)。
-  // 2 面を解いたら元へ戻す。一覧の画面 (Diff・History・選んでいる作業ツリー) の
-  // 間は一覧のために畳んである。利用者が 2 面の間に自分で開いたら、その意思を優先して、この
-  // セッションでは二度と自動で畳まない (保存はしない = 読み直しで元に戻る)。
-  // 決まりそのものは core/panel-column-policy.ts。
-  let PANEL_COLUMN_AUTO_HIDDEN = false;
-  let PANEL_COLUMN_AUTO_HIDE_OFF = false;
-  let PANEL_COLUMN_SPLIT = false;
-  let PANEL_COLUMN_HOLDS_LIST = false;
-  // index.html の早いスクリプト (#first-screen) が、一覧の画面を直接開いたときに
-  // 右の列の本体を畳んで一覧の列を出している (最初の描画の場所取り)。その畳みは
-  // 一覧のための自動の畳みとして引き継ぐ (ここで開くと、設定を読むまでの間
-  // 本文と一覧の列が右の列の分だけ動く)。画面が違えば syncPanelColumn が戻す。
-  if (document.body.hasAttribute("data-list-column")) {
-    PANEL_COLUMN_HOLDS_LIST = true;
-    PANEL_COLUMN_AUTO_HIDDEN = true;
+  // ---- 一覧の列のファイル一覧 (ui-layout.md の「一覧の列」) ----
+  // ファイル一覧を自動で畳んでいる (幅が足りないとき。core/list-column.ts の
+  // 順の最後)。利用者が手で開いたら、このセッションは自動で畳まない
+  // (FILE_LIST_KEPT_OPEN。保存はしない = 読み直しで元に戻る)。決まりは
+  // core/panel-column-policy.ts の fileListAction。
+  let FILE_LIST_AUTO_HIDDEN = false;
+  let FILE_LIST_KEPT_OPEN = false;
+  // index.html の早いスクリプト (#first-screen) が付けたファイル一覧の畳みは
+  // 外さずに引き継ぐ (core/panel-column-policy.ts の bootFileListFold)。
+  {
+    const early = readEarlyLook();
+    // 控えが読めないなら、利用者の畳みかは設定を読むまで分からない。自動の
+    // 畳みとして扱い (幅で決め直す)、読めなかった理由は残す。
+    if ("error" in early)
+      console.warn(
+        "[code-viewer] could not read the early look; a folded file list is treated as folded for width",
+        early.error,
+      );
+    const boot = bootFileListFold({
+      bodyHidden: document.body.classList.contains("gdp-sidebar-hidden"),
+      earlyUserHidden:
+        "look" in early ? early.look?.sidebarHidden === true : null,
+    });
+    if (boot.userHidden) STATE.sidebarHidden = true;
+    FILE_LIST_AUTO_HIDDEN = boot.autoHidden;
   }
 
   // ----- wiring -----
   applySidebarFontSize();
   applyCodeFontSize();
-  applySidebarHidden(STATE.sidebarHidden || PANEL_COLUMN_AUTO_HIDDEN, {
+  applySidebarHidden(STATE.sidebarHidden || FILE_LIST_AUTO_HIDDEN, {
     persist: false,
   });
-  observeSidebarHeaderHeight();
+  FILE_LIST.observeSidebarHeaderHeight();
+  SIDEBAR.observeSidebarHeaderHeight();
   installHistoryPageDom();
   hydrateRefSelectorMounts();
-  setSidebarTreeActionIcons();
+  FILE_LIST.setSidebarTreeActionIcons();
+  SIDEBAR.setSidebarTreeActionIcons();
   setGlobalHeaderIcons();
   setRefActionIcons();
-  // Sidebar view toggle (tree / flat)
+  // 変更ファイルの一覧の tree / flat (ファイル一覧は木に固定)。
   $$(".sb-view-seg button").forEach((b) => {
     b.addEventListener("click", () => {
       STATE.sbView = (b.dataset.view as SidebarView) || "tree";
       patchSettings({ sidebarView: STATE.sbView });
-      if (getSidebarFiles().length)
-        renderSidebar(getSidebarFiles(), getSidebarOnFileClick());
+      if (SIDEBAR.getSidebarFiles().length)
+        SIDEBAR.renderSidebar(
+          SIDEBAR.getSidebarFiles(),
+          SIDEBAR.getSidebarOnFileClick(),
+        );
     });
   });
-  $("#sb-expand-all").addEventListener("click", () =>
-    setAllSidebarDirsCollapsed(false),
-  );
-  $("#sb-collapse-all").addEventListener("click", () =>
-    setAllSidebarDirsCollapsed(true),
-  );
+  SIDEBAR.bindTreeActions();
+  FILE_LIST.bindTreeActions();
   $("#doctor-btn")?.addEventListener("click", (event) => {
     event.preventDefault();
     toggleDoctorSheet();
@@ -5348,7 +5422,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   localizeViewerChrome();
   prepareKeyboardPanels();
-  // Diff の変更ファイル (History の変更ファイルの木も) の行の上のキー。↑↓・
+  // Diff の変更ファイル (History の変更ファイルの一覧も) の行の上のキー。↑↓・
   // Home / End は j k・gg / G と同じキー割り当てを呼び、Enter は 1 回押したのと
   // 同じ (行の click)。作業ツリーの変更ファイルは worktree-view.ts が受ける。
   const diffFileList = document.getElementById("filelist");
@@ -5369,7 +5443,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     row: HTMLElement,
     action: "sidebar-next" | "sidebar-previous",
   ): void {
-    if (!row.classList.contains("active")) markActive(sidebarItemPath(row));
+    if (!row.classList.contains("active"))
+      SIDEBAR.markActive(SIDEBAR.sidebarItemPath(row));
     keepDiffListFocus(action);
   }
   /**
@@ -5430,8 +5505,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   })();
   /**
    * 列の幅を掴んで変える (線を引き、離したときに 1 度だけ幅を当てる。重い本文を
-   * 動かすたびに組み直さない)。列が画面の右端に付いていれば (右の列) 左へ引くと
-   * 広がり、左に付いていれば (History の変更ファイルの列) 右へ引くと広がる。
+   * 動かすたびに組み直さない)。一覧の列の列 (ファイル一覧・一覧・変更ファイルの
+   * 一覧) は左に付いているので右へ引くと広がる。画面の右端に付いた列なら左へ引く
+   * と広がる。
    */
   function setupColumnResizer(opts: {
     handle: HTMLElement | null;
@@ -5489,16 +5565,21 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
     handle.addEventListener("dblclick", opts.reset);
   }
-  setupColumnResizer({
-    handle: document.getElementById("sidebar-resizer"),
-    previewId: "sidebar-resize-preview",
-    resizingClass: "gdp-resizing",
-    column: () => document.getElementById("sidebar"),
-    width: () => STATE.sbWidth,
-    clamp: (w) => Math.max(SIDEBAR_WIDTH.min, Math.min(SIDEBAR_WIDTH.max, w)),
-    apply: (w) => applySidebarWidth(w),
-    reset: () => applySidebarWidth(SIDEBAR_WIDTH.default),
-  });
+  // ファイル一覧と、History・作業ツリーの変更ファイルの一覧は同じ幅 (--sidebar-w)。
+  for (const [id, resizingClass] of [
+    ["sidebar", "gdp-resizing"],
+    ["file-list", "gdp-file-list-resizing"],
+  ] as const)
+    setupColumnResizer({
+      handle: document.getElementById(`${id}-resizer`),
+      previewId: `${id}-resize-preview`,
+      resizingClass,
+      column: () => document.getElementById(id),
+      width: () => STATE.sbWidth,
+      clamp: (w) => Math.max(SIDEBAR_WIDTH.min, Math.min(SIDEBAR_WIDTH.max, w)),
+      apply: (w) => applySidebarWidth(w),
+      reset: () => applySidebarWidth(SIDEBAR_WIDTH.default),
+    });
   setupColumnResizer({
     handle: document.getElementById("history-resizer"),
     previewId: "history-resize-preview",
@@ -5527,52 +5608,56 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyTheme();
   });
 
-  function jumpToActiveOrFirstFilteredItem() {
-    if (isVirtualSidebarActive()) {
-      const current = virtualSidebarActiveIndex();
-      selectVirtualSidebarIndex(current >= 0 ? current : 0, { open: true });
-      $<HTMLInputElement>("#sb-filter").blur();
-      return;
-    }
-    const items = visibleSidebarItems();
-    const active = items.find((li) => li.classList.contains("active"));
-    const target = active || items[0];
-    if (target) {
-      target.click();
-      $<HTMLInputElement>("#sb-filter").blur();
-    }
-  }
-  const sbFilter = $<HTMLInputElement>("#sb-filter");
-  if (sbFilter) {
-    sbFilter.addEventListener("input", () => {
-      syncSidebarFilterClearButton();
-      scheduleApplyFilter();
+  // 一覧の絞り込み (ファイル一覧と変更ファイルの一覧のそれぞれ)。
+  function wireListFilter(list: FileListHandle, dom: SidebarDom): void {
+    const input = $<HTMLInputElement>(dom.filter);
+    const jumpToActiveOrFirstFilteredItem = () => {
+      if (list.isVirtualSidebarActive()) {
+        const current = list.virtualSidebarActiveIndex();
+        list.selectVirtualSidebarIndex(current >= 0 ? current : 0, {
+          open: true,
+        });
+        input.blur();
+        return;
+      }
+      const items = list.visibleSidebarItems();
+      const active = items.find((li) => li.classList.contains("active"));
+      const target = active || items[0];
+      if (target) {
+        target.click();
+        input.blur();
+      }
+    };
+    input.addEventListener("input", () => {
+      list.syncSidebarFilterClearButton();
+      list.scheduleApplyFilter();
     });
-    sbFilter.addEventListener("keydown", (e) => {
+    input.addEventListener("keydown", (e) => {
       if (isImeComposing(e)) return;
       if (e.key === "Enter") {
         e.preventDefault();
-        flushSidebarFilter();
+        list.flushSidebarFilter();
         jumpToActiveOrFirstFilteredItem();
       } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        flushSidebarFilter();
-        moveActiveSidebarItem(e.key === "ArrowDown" ? 1 : -1);
+        list.flushSidebarFilter();
+        list.moveActiveSidebarItem(e.key === "ArrowDown" ? 1 : -1);
       } else if (e.key === "Escape") {
-        if (sbFilter.value) {
-          clearSidebarFilter();
+        if (input.value) {
+          list.clearSidebarFilter();
         } else {
-          sbFilter.blur();
+          input.blur();
         }
       }
     });
+    list.syncSidebarFilterClearButton();
+    $<HTMLButtonElement>(dom.filterClear).addEventListener(
+      "click",
+      list.clearSidebarFilter,
+    );
   }
-  const sbFilterClear =
-    document.querySelector<HTMLButtonElement>("#sb-filter-clear");
-  if (sbFilterClear) {
-    syncSidebarFilterClearButton();
-    sbFilterClear.addEventListener("click", clearSidebarFilter);
-  }
+  wireListFilter(FILE_LIST, FILE_LIST_DOM);
+  wireListFilter(SIDEBAR, CHANGES_LIST_DOM);
   // Header search button: the palettes were keyboard-only before this, so a
   // mouse user had no way to discover them. Plain click = files, Shift+click
   // = grep; either palette can switch to the other from its label row.
@@ -5581,8 +5666,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     ?.addEventListener("click", (event) => {
       openSearchPalette(event.shiftKey ? "grep" : "file");
     });
+  /**
+   * 「/」の絞り込み: 画面の一覧の絞り込み (Diff・History・選んでいる作業ツリーは
+   * 変更ファイルの一覧、ほかはファイル一覧)。ファイル一覧を畳んでいれば開く。
+   */
   function focusFileFilter() {
-    const input = $<HTMLInputElement>("#sb-filter");
+    const changes = listColumnKind() !== null;
+    if (!changes && STATE.sidebarHidden) {
+      applySidebarHidden(false);
+      onUserToggledSidebarHidden(false);
+    }
+    const input = $<HTMLInputElement>(
+      changes ? CHANGES_LIST_DOM.filter : FILE_LIST_DOM.filter,
+    );
     input.focus();
     input.select();
   }
@@ -5615,7 +5711,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "focus-sidebar") {
-      if (STATE.sidebarHidden) applySidebarHidden(false);
+      // 一覧を出す画面では変更ファイルの一覧、ほかはファイル一覧 (畳んでいれば開く)。
+      if (!listColumnKind() && STATE.sidebarHidden) {
+        applySidebarHidden(false);
+        onUserToggledSidebarHidden(false);
+      }
       focusSidebarPanel();
       return true;
     }
@@ -5835,7 +5935,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "toggle-sidebar") {
-      applySidebarHidden(!STATE.sidebarHidden);
+      // ファイル一覧を畳む / 出す (頭の畳むボタンと同じ)。
+      FILE_LIST.toggleSidebarHidden();
       return true;
     }
     // 名前は下パネルにターミナルがあった頃のまま (保存したキー割り当てを
@@ -5944,7 +6045,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     { capture: true },
   );
   document.addEventListener("click", closeRepoContextMenu);
-  $("#filelist").addEventListener("contextmenu", handleSidebarContextMenu);
+  $("#file-list-rows").addEventListener(
+    "contextmenu",
+    handleSidebarContextMenu,
+  );
 
   document.addEventListener("keydown", async (e) => {
     if (isImeComposing(e) || e.defaultPrevented) return;
@@ -6800,7 +6904,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       );
       return virtual && virtual.offsetParent !== null ? virtual : root;
     };
-    // 本文だけのもの (body のクラス・木・右の列のボタン) は右の面では動かさない。
+    // 本文だけのもの (body のクラス・一覧・一覧の列の畳むボタン) は右の面では動かさない。
     const noop = () => undefined;
     // 実体の依存は描くときの route を読む (pane は下で組む)。
     let pane: SidePane;
@@ -6944,7 +7048,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!MAIN_TABS.openRouteRight(route)) return false;
     showSourceInRight();
     syncLineRefPill();
-    if (isRepositorySidebarMode()) markActive(route.path);
+    FILE_LIST.markActive(route.path);
     const url = withPaneOverlay(urlForRoute(route), "right");
     if (url !== window.location.pathname + window.location.search) {
       if (replace)
@@ -7028,7 +7132,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       : "";
     const siblings = path.startsWith("/")
       ? [path]
-      : getSidebarFiles()
+      : FILE_LIST.getSidebarFiles()
           .map((item) => item.path)
           .filter(
             (item) =>
@@ -7356,125 +7460,155 @@ window.GdpExpandLogic = GdpExpandLogic;
    * ターミナルならそのシェルを積み、そうでないタブへ route を移らずに戻った
    * ときは ?terminal= を外す。
    */
-  // ---- 2 面のときの右の列: 状態は wiring の前に宣言してある (PANEL_COLUMN_*) ----
+  // ---- 一覧の列 (ファイル一覧・一覧・変更ファイルの一覧) ----
+  // 状態は wiring の前に宣言してある (FILE_LIST_AUTO_HIDDEN など)。
 
   /**
-   * 本文の左の一覧の列に出す一覧 (body[data-list-column] の値)。Diff は変更
-   * ファイル (#sidebar)、History はコミット、選んでいる作業ツリーは作業ツリーの
-   * 一覧。どれでもない画面は null。画面の印 (body の class と
-   * data-worktree-overview) から決める: 作業ツリーの選択の印は worktree-view.ts
-   * が付けるので、route からでは遅れる。
+   * 一覧の列に出す一覧 (core/list-column.ts の listColumnKindFor)。画面の印
+   * (body の class と data-worktree-overview) と、左の面の前面が画面のタブか
+   * (showPanes が控える LEFT_FRONT_IS_PAGE) から決める: 作業ツリーの選択の印は
+   * worktree-view.ts が付けるので、route からでは遅れる。
    */
   function listColumnKind(): ListColumnKind | null {
     const body = document.body;
-    if (body.classList.contains("gdp-diff-page")) return "sidebar";
-    if (body.classList.contains("gdp-history-page")) return "history";
-    if (
-      body.classList.contains("gdp-worktree-page") &&
-      !body.hasAttribute("data-worktree-overview")
-    )
-      return "worktree";
-    return null;
-  }
-
-  function panelColumnHoldsList(): boolean {
-    return listColumnKind() !== null;
-  }
-
-  /**
-   * 右の列が本文の横に取っている幅 (core/panel-column-policy.ts の
-   * panelColumnBodyWidth)。畳んでも頭の行 (#panel-head) は同じ幅で残る。
-   */
-  function panelColumnShownWidth(): number {
-    const head = document.getElementById("panel-head");
-    if (!head) throw new Error("#panel-head is missing from index.html");
-    return panelColumnBodyWidth({
-      hidden: document.body.classList.contains("gdp-sidebar-hidden"),
-      overlaid: window.matchMedia(PHONE_MEDIA_QUERY).matches,
-      headWidth: head.getBoundingClientRect().width,
+    return listColumnKindFor({
+      has: (pageClass) => body.classList.contains(pageClass),
+      worktreeOverview: body.hasAttribute("data-worktree-overview"),
+      leftFrontIsPage: LEFT_FRONT_IS_PAGE,
     });
   }
 
+  function requireColumnHead(): HTMLElement {
+    const head = document.getElementById("panel-head");
+    if (!head) throw new Error("#panel-head is missing from index.html");
+    return head;
+  }
+
   /**
-   * 一覧の列を出す / 隠す印と、出す幅 (利用者の幅か詰めた幅。決まりは
-   * core/list-column.ts) を合わせる。幅が変わったら 2 面の幅も合わせ直す。
+   * 一覧の列が本文の横に取っている幅 (core/panel-column-policy.ts の
+   * listColumnBodyWidth)。
    */
+  function listColumnShownWidth(): number {
+    return listColumnBodyWidth({
+      overlaid: window.matchMedia(PHONE_MEDIA_QUERY).matches,
+      shown: LIST_COLUMN_WIDTH,
+      headWidth: requireColumnHead().getBoundingClientRect().width,
+    });
+  }
+
+  /** body で決まる長さの変数 (密度で変わる) を px で読む。 */
+  function bodyLength(name: string): number {
+    const value = getComputedStyle(document.body).getPropertyValue(name);
+    const length = Number.parseFloat(value);
+    if (!Number.isFinite(length))
+      throw new Error(`${name} is not a length: ${JSON.stringify(value)}`);
+    return length;
+  }
+
+  /**
+   * 一覧の列を合わせる: 出す一覧の印、ファイル一覧・一覧・変更ファイルの一覧の
+   * 幅と畳み (決まりは core/list-column.ts と core/panel-column-policy.ts)。
+   * 幅が変わったら 2 面の幅も合わせ直す。
+   */
+  /**
+   * 今の画面の一覧の列を、本文に need を残す形で決める (core/list-column.ts の
+   * listColumnLayout)。DOM の印は変えない。
+   */
+  function listColumnLayoutFor(need: number) {
+    const kind = listColumnKind();
+    // 一覧の列と本文 = 一覧の列の頭の左端 (左のサイドバーの右) から窓の右端まで。
+    const room =
+      document.documentElement.clientWidth -
+      requireColumnHead().getBoundingClientRect().left;
+    // 畳んだ列の帯の幅 (--panelcol-rail-w。密度で変わる)。
+    const rail = bodyLength("--panelcol-rail-w");
+    const userHidden = STATE.sidebarHidden && !FILE_LIST_AUTO_HIDDEN;
+    const hasTree = kind === "history" || kind === "worktree";
+    const layout = listColumnLayout({
+      room,
+      files: userHidden ? 0 : STATE.sbWidth,
+      filesKeptOpen: FILE_LIST_KEPT_OPEN,
+      // 手で畳んだ一覧・変更ファイルの一覧は帯 (開くボタン) の幅。
+      preferred: !kind ? 0 : LIST_COLUMN_HIDDEN ? rail : STATE.historyWidth,
+      compact: HISTORY_WIDTH.min,
+      tree: !hasTree ? 0 : LIST_TREE_HIDDEN ? rail : STATE.sbWidth,
+      treeRail: rail,
+      treeKeptOpen: LIST_TREE_KEPT_OPEN || LIST_TREE_HIDDEN,
+      need,
+    });
+    // 一覧の列が本文の横に取る幅 (ファイル一覧・一覧・変更ファイルの一覧)。
+    const width =
+      (userHidden || layout.filesFolded ? 0 : STATE.sbWidth) +
+      (kind ? layout.width + layout.tree : 0);
+    return { kind, room, userHidden, hasTree, layout, width };
+  }
+
+  /**
+   * 2 面にしたときの一覧の列の幅 (main-tabs-view が 2 面を置けるかを数える)。
+   * 電話では重ねて出す面なので、今の幅 (頭の実幅) のまま。
+   */
+  function splitListColumnWidth(): number {
+    if (window.matchMedia(PHONE_MEDIA_QUERY).matches)
+      return listColumnShownWidth();
+    return listColumnLayoutFor(SPLIT_NEED).width;
+  }
+
   function syncListColumn(): void {
     const body = document.body;
-    const kind = listColumnKind();
+    const need = MAIN_TABS.panes().split ? SPLIT_NEED : COMFORTABLE_PANE_WIDTH;
+    const { kind, room, userHidden, hasTree, layout } =
+      listColumnLayoutFor(need);
     if (kind) body.dataset.listColumn = kind;
     else delete body.dataset.listColumn;
     body.toggleAttribute(
       "data-list-column-hidden",
       !!kind && LIST_COLUMN_HIDDEN,
     );
-    let total = 0;
-    let shown = 0;
-    let treeFolded = false;
-    if (kind) {
-      // 一覧の列と本文 = タブ列の左端 (左のサイドバーの右) から右の列の本体の
-      // 左まで。タブ列の右端は右の列の頭の左で、畳んでも動かないので使わない。
-      const tabs = document.getElementById("main-tabs");
-      if (!tabs) throw new Error("#main-tabs is missing");
-      const room =
-        document.documentElement.clientWidth -
-        tabs.getBoundingClientRect().left -
-        panelColumnShownWidth();
-      // 変更ファイルの木を畳んだ帯の幅 (--panelcol-rail-w。密度で変わる)。
-      const railValue =
-        getComputedStyle(body).getPropertyValue("--panelcol-rail-w");
-      const treeRail = Number.parseFloat(railValue);
-      if (!Number.isFinite(treeRail))
-        throw new Error(
-          `--panelcol-rail-w is not a length: ${JSON.stringify(railValue)}`,
-        );
-      const split = MAIN_TABS.panes().split;
-      const need = split
-        ? COMFORTABLE_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH
-        : COMFORTABLE_PANE_WIDTH;
-      const layout = listColumnLayout({
-        room,
-        preferred: LIST_COLUMN_HIDDEN ? 0 : STATE.historyWidth,
-        compact: HISTORY_WIDTH.min,
-        // History・作業ツリーは一覧の右に変更ファイルの木の列が並ぶ。
-        tree: kind === "sidebar" ? 0 : STATE.sbWidth,
-        treeRail,
-        treeKeptOpen: LIST_TREE_KEPT_OPEN,
-        need,
-      });
-      // 掴んで広げられる上限 = 今の木の幅のままで本文が need を保てる幅。
-      LIST_FITS_WIDTH = room - layout.tree - need;
-      if (!LIST_COLUMN_HIDDEN)
-        document.documentElement.style.setProperty(
-          "--list-w",
-          `${layout.width}px`,
-        );
-      treeFolded = layout.treeFolded;
-      total = layout.width + layout.tree;
-      shown = LIST_COLUMN_HIDDEN ? 0 : layout.width;
+    // 電話では一覧の列は重ねて出す面なので、幅では畳まない。
+    const overlaid = window.matchMedia(PHONE_MEDIA_QUERY).matches;
+    const action = fileListAction({
+      folded: layout.filesFolded && !overlaid,
+      autoHidden: FILE_LIST_AUTO_HIDDEN,
+      userHidden,
+    });
+    if (action !== "keep") {
+      FILE_LIST_AUTO_HIDDEN = action === "collapse";
+      applySidebarHidden(FILE_LIST_AUTO_HIDDEN, { persist: false });
     }
-    LIST_SHOWN_WIDTH = shown;
-    // 木の幅そのものは CSS が --sidebar-w と帯の幅から作る (木の掴みでの
-    // ドラッグを ResizeObserver で拾えるように)。ここは畳むかどうかだけ。
-    body.toggleAttribute("data-list-tree-folded", treeFolded);
-    syncSidebarTitle();
+    markFileListAutoHidden();
+    const files = STATE.sidebarHidden ? 0 : STATE.sbWidth;
+    // 掴んで広げられる一覧の上限 = 今のファイル一覧と変更ファイルの一覧のままで
+    // 本文が need を保てる幅。
+    LIST_FITS_WIDTH = room - files - layout.tree - need;
+    if (kind && !LIST_COLUMN_HIDDEN)
+      document.documentElement.style.setProperty(
+        "--list-w",
+        `${layout.width}px`,
+      );
+    // 変更ファイルの一覧の幅そのものは CSS が --sidebar-w と帯の幅から作る (掴み
+    // でのドラッグを ResizeObserver で拾えるように)。ここは畳むかどうかだけ。
+    body.toggleAttribute(
+      "data-list-tree-folded",
+      hasTree && (layout.treeFolded || LIST_TREE_HIDDEN),
+    );
+    LIST_SHOWN_WIDTH = kind && !LIST_COLUMN_HIDDEN ? layout.width : 0;
+    localizeListColumnFolds();
+    const total = files + (kind ? layout.width + layout.tree : 0);
     if (total === LIST_COLUMN_WIDTH) return;
     LIST_COLUMN_WIDTH = total;
     MAIN_TABS.refit();
   }
 
   /**
-   * #sidebar の見出し (core/list-column.ts の sidebarTitle)。画面の切替
-   * (syncListColumn) と言語の切替 (localizeViewerChrome) で当てる。
+   * 見出しの題。ファイル一覧は Files、#sidebar は変更ファイルの一覧。言語の切替
+   * (localizeViewerChrome) で当てる。
    */
   function syncSidebarTitle(): void {
     const text = uiText();
+    setElementText(`${FILE_LIST_DOM.root} .sb-title`, text.sidebar.files);
     setElementText(
-      ".sb-title",
-      sidebarTitle(listColumnKind(), {
-        files: text.sidebar.files,
-        changedFiles: text.diff.fileListLabel,
-      }),
+      `${CHANGES_LIST_DOM.root} .sb-title`,
+      text.diff.fileListLabel,
     );
   }
 
@@ -7489,73 +7623,29 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   /**
-   * 右の列を畳む / 出すボタンの説明。2 面のために自動で畳んだときは、その理由も
-   * 出す (手で畳んだときと区別が付かないと、なぜ消えたのか分からない)。一覧の
-   * 画面では、このボタンは一覧の列を出し入れする (toggleListColumn)。
+   * ファイル一覧を畳む / 出すボタンの説明。幅が足りずに自動で畳んだときは、その
+   * 理由も出す (手で畳んだときと区別が付かないと、なぜ消えたのか分からない)。
    */
-  function panelColumnToggleTitle(hidden: boolean): string {
+  function fileListToggleTitle(hidden: boolean): string {
     const text = uiText().sidebar;
-    if (listColumnKind())
-      return LIST_COLUMN_HIDDEN ? text.showList : text.hideList;
     if (!hidden) return text.hide;
-    return PANEL_COLUMN_AUTO_HIDDEN
-      ? `${text.show} (${text.autoHiddenForSplit})`
+    return FILE_LIST_AUTO_HIDDEN
+      ? `${text.show} (${text.autoHidden})`
       : text.show;
   }
 
   /**
-   * 2 面になった / 解いた、または一覧のある画面に入った / 出たときに、右の列を
-   * 畳む・開く。どちらも変わっていなければ何もしない (利用者の操作を上書きしない)。
+   * 畳むボタン (一覧の列の頭の右端) に「幅のために畳みました」の印と説明を出す /
+   * 外す。
    */
-  function syncPanelColumn(split: boolean = PANEL_COLUMN_SPLIT): void {
-    syncListColumn();
-    const holdsList = panelColumnHoldsList();
-    if (split === PANEL_COLUMN_SPLIT && holdsList === PANEL_COLUMN_HOLDS_LIST)
-      return;
-    const leftList = PANEL_COLUMN_HOLDS_LIST && !holdsList;
-    PANEL_COLUMN_SPLIT = split;
-    PANEL_COLUMN_HOLDS_LIST = holdsList;
-    applyPanelColumnAction(split, holdsList, leftList);
-    // 一覧の画面を出て開いた: 2 面なら、開いた幅でもう一度決める。
-    if (leftList && !PANEL_COLUMN_AUTO_HIDDEN)
-      applyPanelColumnAction(split, holdsList, false);
-    // 畳むボタンの意味 (右の列か一覧の列か) が画面で変わる。
-    markPanelColumnAutoHidden();
-  }
-
-  function applyPanelColumnAction(
-    split: boolean,
-    holdsList: boolean,
-    leftList: boolean,
-  ): void {
-    const action = panelColumnAction({
-      split,
-      holdsList,
-      leftList,
-      autoHidden: PANEL_COLUMN_AUTO_HIDDEN,
-      userHidden: STATE.sidebarHidden && !PANEL_COLUMN_AUTO_HIDDEN,
-      userOptedOut: PANEL_COLUMN_AUTO_HIDE_OFF,
-      fitsWithColumn: MAIN_TABS.splitFitsWithPanelColumn(),
-    });
-    if (action === "keep") return;
-    PANEL_COLUMN_AUTO_HIDDEN = action === "collapse";
-    SIDEBAR.applySidebarHidden(action === "collapse", { persist: false });
-    markPanelColumnAutoHidden();
-  }
-
-  /**
-   * 畳むボタン (右の列の頭の右端) に「2 面のため畳みました」の印と説明を出す /
-   * 外す。一覧の画面では一覧のために畳んでいるので印は出さず、説明は一覧の列の
-   * 出し入れにする。
-   */
-  function markPanelColumnAutoHidden(): void {
+  function markFileListAutoHidden(): void {
     const toggle = document.querySelector<HTMLButtonElement>("#sidebar-toggle");
     if (!toggle) return;
     toggle.classList.toggle(
       "sidebar-toggle-auto-hidden",
-      PANEL_COLUMN_AUTO_HIDDEN && STATE.sidebarHidden && !listColumnKind(),
+      FILE_LIST_AUTO_HIDDEN && STATE.sidebarHidden,
     );
-    const title = panelColumnToggleTitle(STATE.sidebarHidden);
+    const title = fileListToggleTitle(STATE.sidebarHidden);
     toggle.title = title;
     toggle.setAttribute("aria-label", title);
   }
@@ -7563,60 +7653,128 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 一覧のある画面に入った / 出た (本文の route・作業ツリーの選択) ときも合わせる。
   // 画面の印は app.ts の画面の切替と worktree-view.ts の何か所かで付くので、
   // 付け忘れが起きないよう body の印そのものを見る。
-  new MutationObserver(() => syncPanelColumn()).observe(document.body, {
+  new MutationObserver(() => syncListColumn()).observe(document.body, {
     attributes: true,
     attributeFilter: ["class", "data-worktree-overview"],
   });
 
-  // 窓・左のサイドバー・右の列の幅 (タブ列の幅) と、History の変更ファイルの
-  // 木の幅が変わったら、一覧の列の幅を決め直す。
-  // 畳んだ変更ファイルの木の帯。押すと開き、このセッションは畳まない。
-  createListTreeOpen({
-    open: () => {
-      LIST_TREE_KEPT_OPEN = true;
+  // 一覧と変更ファイルの一覧を手で畳むボタン (列の右端の線の中ほど) と、畳んだ
+  // 帯の開くボタン (views/list-tree-open.ts)。一覧 (History・作業ツリー) の分は
+  // #worktree-panel の後、#sidebar (Diff の一覧・History と作業ツリーの変更
+  // ファイルの一覧) の分は #sidebar の後に置く (Tab の順)。
+  LIST_COLUMN_FOLDS = (() => {
+    const sidebar = document.getElementById("sidebar");
+    const worktreePanel = document.getElementById("worktree-panel");
+    if (!sidebar || !worktreePanel)
+      throw new Error("#sidebar or #worktree-panel is missing from index.html");
+    const listPanel = (): HTMLElement => {
+      const kind = listColumnKind();
+      const id = kind ? LIST_COLUMN_IDS[kind] : "history-panel";
+      const panel = document.getElementById(id);
+      if (!panel) throw new Error(`#${id} is missing from index.html`);
+      return panel;
+    };
+    const foldList = () => {
+      LIST_COLUMN_HIDDEN = true;
       syncListColumn();
-    },
-    label: () => uiText().sidebar.showTree,
-  });
+    };
+    const foldTree = () => {
+      LIST_TREE_HIDDEN = true;
+      syncListColumn();
+    };
+    const openList = () => {
+      LIST_COLUMN_HIDDEN = false;
+      syncListColumn();
+    };
+    const listStop = () =>
+      listPanel().querySelector<HTMLElement>('[tabindex="0"]') ?? listPanel();
+    return {
+      // 一覧 (History・作業ツリー) を畳む / 開く。
+      listFold: createColumnFold({
+        className: "list-fold",
+        after: worktreePanel,
+        fold: foldList,
+        label: () => uiText().sidebar.hideList,
+      }),
+      listOpen: createColumnOpen({
+        className: "list-open",
+        after: worktreePanel,
+        open: openList,
+        focusStop: listStop,
+        label: () => uiText().sidebar.showList,
+      }),
+      // #sidebar: Diff では一覧そのもの、History・作業ツリーでは変更ファイルの一覧。
+      sidebarFold: createColumnFold({
+        className: "sidebar-fold",
+        after: sidebar,
+        fold: () => (listColumnKind() === "sidebar" ? foldList() : foldTree()),
+        label: () =>
+          listColumnKind() === "sidebar"
+            ? uiText().sidebar.hideList
+            : uiText().sidebar.hideTree,
+      }),
+      sidebarOpen: createColumnOpen({
+        className: "sidebar-open",
+        after: sidebar,
+        open: openList,
+        focusStop: listStop,
+        label: () => uiText().sidebar.showList,
+      }),
+      // 変更ファイルの一覧を開く帯 (幅が足りずに畳んだときも出る)。押したらこの
+      // セッションは畳まない。
+      treeOpen: createListTreeOpen({
+        open: () => {
+          LIST_TREE_HIDDEN = false;
+          LIST_TREE_KEPT_OPEN = true;
+          syncListColumn();
+        },
+        label: () => uiText().sidebar.showTree,
+      }),
+    };
+  })();
 
-  /** 言語の切替でも呼ばれる (ボタンを作る前にも呼ばれるので DOM から引く)。 */
-  function localizeListTreeOpen(): void {
-    const button = document.querySelector<HTMLButtonElement>(".list-tree-open");
-    if (button) setListTreeOpenLabel(button, uiText().sidebar.showTree);
+  /** 畳む / 開くボタンの名前 (画面と言語で変わる)。言語の切替でも呼ばれる。 */
+  function localizeListColumnFolds(): void {
+    // 言語の切替はボタンを作る前 (起動の途中) にも呼ばれる。
+    if (!LIST_COLUMN_FOLDS) return;
+    const text = uiText().sidebar;
+    const diff = listColumnKind() === "sidebar";
+    setListTreeOpenLabel(LIST_COLUMN_FOLDS.listFold, text.hideList);
+    setListTreeOpenLabel(LIST_COLUMN_FOLDS.listOpen, text.showList);
+    setListTreeOpenLabel(
+      LIST_COLUMN_FOLDS.sidebarFold,
+      diff ? text.hideList : text.hideTree,
+    );
+    setListTreeOpenLabel(LIST_COLUMN_FOLDS.sidebarOpen, text.showList);
+    const treeAuto =
+      document.body.hasAttribute("data-list-tree-folded") && !LIST_TREE_HIDDEN;
+    setListTreeOpenLabel(
+      LIST_COLUMN_FOLDS.treeOpen,
+      treeAuto ? `${text.showTree} (${text.autoHidden})` : text.showTree,
+    );
   }
 
   const listColumnObserver = new ResizeObserver(() => syncListColumn());
-  for (const id of ["main-tabs", "sidebar"]) {
+  for (const id of ["main-tabs", "sidebar", "file-list"]) {
     const el = document.getElementById(id);
     if (!el) throw new Error(`#${id} is missing from index.html`);
     listColumnObserver.observe(el);
   }
 
-  /**
-   * 右の列の畳むボタン (と、そのキー) を一覧の画面で押した: 右の列の本体は
-   * 一覧の画面の間は畳んだまま (開いても出す木が無い) なので、代わりに一覧の列を
-   * 出し入れする。
-   * 一覧の画面でなければ false (右の列を開く / 畳む)。
-   */
-  function toggleListColumn(): boolean {
-    if (!listColumnKind()) return false;
-    LIST_COLUMN_HIDDEN = !LIST_COLUMN_HIDDEN;
-    syncListColumn();
-    markPanelColumnAutoHidden();
-    return true;
-  }
-
   function onUserToggledSidebarHidden(hidden: boolean): void {
-    if (!hidden && PANEL_COLUMN_SPLIT) {
-      // 2 面の間に自分で開いた = これ以降は自動で畳まない。
-      PANEL_COLUMN_AUTO_HIDE_OFF = true;
-    }
-    PANEL_COLUMN_AUTO_HIDDEN = false;
-    markPanelColumnAutoHidden();
+    // 手で開いた = このセッションは幅のために自動で畳まない。
+    if (!hidden) FILE_LIST_KEPT_OPEN = true;
+    FILE_LIST_AUTO_HIDDEN = false;
+    markFileListAutoHidden();
+    syncListColumn();
   }
 
   function showPanes(view: PanesView, how: FrontChange): void {
-    syncPanelColumn(view.split);
+    // 端末・画像のタブが左の前面なら、背面の画面の一覧は出さない (列は前面の
+    // タブの画面で決める)。
+    const leftFront = view.fronts.left;
+    LEFT_FRONT_IS_PAGE = leftFront === null || isRouteTab(leftFront);
+    syncListColumn();
     for (const side of ["left", "right"] as const) {
       const host = PANE_HOSTS[side];
       const tab = view.fronts[side];
@@ -7643,14 +7801,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncHeaderMenu();
     AGENTS_SIDEBAR?.refresh();
     syncLineRefPill();
-    // 木の選択の印は、フォーカスのある面のファイル (リポジトリの木のとき)。
-    if (isRepositorySidebarMode()) {
+    // ファイル一覧の選択の印は、フォーカスのある面のファイル。
+    {
       const right =
         view.focused === "right" && view.fronts.right?.target.kind === "file"
           ? MAIN_TABS.paneRoute("right")
           : null;
       const focusedRoute = right ?? STATE.route;
-      if (focusedRoute.screen === "file") markActive(focusedRoute.path);
+      if (focusedRoute.screen === "file")
+        FILE_LIST.markActive(focusedRoute.path);
     }
     if (how !== "navigate")
       syncFocusedPaneUrl(how === "stay" ? "push" : "replace");
@@ -8300,12 +8459,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     getText: () => worktreeText(STATE.language),
     setPageMode,
     syncHeaderMenu,
-    onSidebarOwner: (owned) => {
-      // 作業ツリーの変更ファイルを書くなら、Files の木はもう使い回せない。
-      // 一覧だけの表示なら右の列を Files の木に戻す (読み込み済みなら使い回す)。
-      if (owned) invalidateRepoSidebar();
-      else showFilesTreeInLeftColumn();
-    },
+    // 作業ツリーの変更ファイルは変更ファイルの一覧 (#sidebar) に描く。ファイル一覧
+    // (#file-list) は別の要素なので、持ち主が変わっても何もしない。
+    onSidebarOwner: () => undefined,
     setStatus,
     createOpenPathButton,
     openPathInOs: (path, kind) => openPathInOs(path, kind),
@@ -8683,7 +8839,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function applyHideTests() {
     const btn = $("#hide-tests");
     if (btn) btn.classList.toggle("active", STATE.hideTests);
-    const effective = STATE.hideTests && !isRepositorySidebarMode();
+    const effective = STATE.hideTests && !SIDEBAR.isRepositorySidebarMode();
     document
       .querySelectorAll<HTMLElement>(".gdp-file-shell")
       .forEach((card) => {
@@ -8705,7 +8861,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function visibleDiffMetaForBrief(meta: DiffMeta): DiffMeta {
     if (!meta.totals) return meta;
-    const effective = STATE.hideTests && !isRepositorySidebarMode();
+    const effective = STATE.hideTests && !SIDEBAR.isRepositorySidebarMode();
     if (!effective) return meta;
     let additions = 0;
     let deletions = 0;

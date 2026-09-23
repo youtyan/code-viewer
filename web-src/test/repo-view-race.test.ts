@@ -40,7 +40,7 @@ function installNullDocument() {
 function installFilelistDocument(hasEntries: () => boolean) {
   globalThis.document = {
     querySelector: (selector: string) =>
-      selector === "#filelist"
+      selector === "#file-list-rows"
         ? ({
             querySelector: () => (hasEntries() ? ({} as Element) : null),
           } as unknown as HTMLElement)
@@ -60,6 +60,8 @@ function makeRepoView(
     elements?: Record<string, HTMLElement>;
     lazyDirPaths?: Set<string>;
     lazyLoadChildren?: Record<string, string[]>;
+    /** Files とファイルの画面の外でファイル一覧に出す ref (app.ts は常に出す)。 */
+    filesColumnRef?: string | null;
   } = {},
 ) {
   let repoSidebarRef: string | null = options.repoSidebarRef ?? null;
@@ -142,7 +144,7 @@ function makeRepoView(
       /* noop */
     },
     renderStandaloneSource: async () => undefined,
-    filesColumnRef: () => null,
+    filesColumnRef: () => options.filesColumnRef ?? null,
     repoFileTargetFromRoute: () =>
       state.route.screen === "file" && state.route.view === "blob"
         ? state.route.ref
@@ -402,10 +404,50 @@ describe("repo view route races", () => {
   });
 });
 
+// ファイル一覧はどの画面でも出す (Diff・History なども)。その画面へ移るたびに
+// app.ts が ensureFileList を呼ぶ。
+describe("the file list on screens other than Files", () => {
+  test.each([
+    {
+      name: "already loaded for the ref",
+      loaded: true,
+      fetches: 0,
+      renders: 0,
+    },
+    { name: "not loaded yet", loaded: false, fetches: 1, renders: 1 },
+  ])("$name: fetches $fetches, renders $renders", async ({
+    loaded,
+    fetches,
+    renders,
+  }) => {
+    installFilelistDocument(() => loaded);
+    const urls: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return Promise.resolve(jsonResponse(treeResponse()));
+    }) as unknown as typeof fetch;
+    const { view, calls } = makeRepoView(diffRoute, {
+      repoMode: true,
+      repoSidebarRef: loaded ? "worktree" : null,
+      repoSidebarDomReady: loaded,
+      filesColumnRef: "worktree",
+    });
+
+    await view.ensureFileList("worktree");
+
+    expect({
+      fetches: urls.length,
+      renders: calls.sidebarRenders.length,
+      // 読み込み済みなら選んでいる行を付け直さない (スクロールも動かさない)。
+      marked: loaded ? calls.activePaths : [],
+    }).toEqual({ fetches, renders, marked: [] });
+  });
+});
+
 describe("repo sidebar refresh failures", () => {
   // 直す前は catch が引数を受け取らず、console にも画面にも理由が残らなかった
   // (同じファイルのほかの 3 か所は理由を出していた)。
-  test("木の読み込みに失敗したら、理由を console と #totals の title に出す", async () => {
+  test("木の読み込みに失敗したら、理由を console とファイル一覧の件数 (#file-list-totals) の title に出す", async () => {
     installNullDocument();
     const totals = {
       textContent: "",
@@ -430,7 +472,7 @@ describe("repo sidebar refresh failures", () => {
         view: "blob",
         range,
       },
-      { elements: { "#totals": totals as unknown as HTMLElement } },
+      { elements: { "#file-list-totals": totals as unknown as HTMLElement } },
     );
 
     await view.renderRepoBlobSidebar("README.md", "worktree");

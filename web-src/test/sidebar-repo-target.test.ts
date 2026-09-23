@@ -1,7 +1,16 @@
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
-import { createSidebar, type SidebarDeps } from "../views/sidebar";
+import {
+  CHANGES_LIST_DOM,
+  createSidebar,
+  FILE_LIST_DOM,
+  type SidebarDeps,
+} from "../views/sidebar";
+import {
+  createSidebarForTest as createFixtureSidebar,
+  installSidebarDom as installFixtureDom,
+} from "./_sidebar-fixture";
 
 const styleCss = readFileSync("web/style.css", "utf8");
 
@@ -43,6 +52,8 @@ function installSidebarDom() {
       <ul id="filelist"></ul>
     </aside>
     <div id="sidebar-resizer"></div>
+    <aside id="file-list"><ul id="file-list-rows"></ul></aside>
+    <div id="file-list-resizer"></div>
     <aside id="history-panel"></aside>
   `;
 }
@@ -53,10 +64,16 @@ function installStyleCss() {
   document.head.appendChild(style);
 }
 
-function computedDisplayForBodyClass(selector: string, className: string) {
+function computedDisplayForBodyClass(
+  selector: string,
+  className: string,
+  listColumn = "",
+) {
   document.body.innerHTML = "";
   document.head.innerHTML = "";
   document.body.className = className;
+  if (listColumn) document.body.dataset.listColumn = listColumn;
+  else delete document.body.dataset.listColumn;
   installSidebarDom();
   installStyleCss();
   const el = document.querySelector<HTMLElement>(selector);
@@ -93,6 +110,8 @@ function createSidebarForTest(
     lazyExpandedDirs: new Set<string>(),
   };
   return createSidebar({
+    dom: CHANGES_LIST_DOM,
+    repository: false,
     STATE: state,
     openDiffFile: overrides.openDiffFile ?? (() => undefined),
     openFileAs: overrides.openFileAs ?? (() => undefined),
@@ -206,26 +225,30 @@ describe("diff sidebar repository target", () => {
     expect(sidebar.getSidebarVirtualActivePath()).toBe("src");
   });
 
-  test("hides the repository target selector when rendering the diff sidebar", () => {
-    installSidebarDom();
-    const sidebar = createSidebarForTest();
+  // 対象の ref の枠 (#repo-target-wrap) はファイル一覧の見出しにある。変更ファイルの
+  // 一覧を描いても触らない (2 つの一覧は同時に出る)。ファイル一覧は木が無い
+  // (読めなかった) ときだけ隠す。
+  test.each([
+    { list: "changes", hidden: false },
+    { list: "files", hidden: true },
+  ] as const)("rendering the $list list without a tree: the repository target is hidden $hidden", ({
+    list,
+    hidden,
+  }) => {
+    installFixtureDom(FILE_LIST_DOM);
+    const fileList = document.body.innerHTML;
+    installFixtureDom(CHANGES_LIST_DOM);
+    document.body.insertAdjacentHTML("beforeend", fileList);
     const wrap = document.querySelector<HTMLElement>("#repo-target-wrap");
     if (!wrap) throw new Error("missing repo target wrap");
     wrap.hidden = false;
-
-    sidebar.renderSidebar([
-      {
-        path: "sample.ts",
-        display_path: "sample.ts",
-        status: "M",
-      },
-    ]);
-
-    expect(wrap.hidden).toBe(true);
-    expect(wrap.style.display).toBe("none");
-    expect(
-      document.querySelector('#filelist li[data-path="sample.ts"]'),
-    ).toBeTruthy();
+    const dom = list === "files" ? FILE_LIST_DOM : CHANGES_LIST_DOM;
+    createFixtureSidebar({ dom }).renderSidebar(
+      list === "files"
+        ? []
+        : [{ path: "sample.ts", display_path: "sample.ts", status: "M" }],
+    );
+    expect(wrap.hidden).toBe(hidden);
   });
 
   test("keeps file counts out of repository sidebars", () => {
@@ -270,23 +293,24 @@ describe("diff sidebar repository target", () => {
     ).toBe("flex");
   });
 
-  // The diff file list stays on screen in the source view opened from the
-  // diff ("View File"). Pages without a list of their own show the Files
-  // tree in the same column, so only the user's toggle hides it.
+  // 変更ファイルの一覧 (#sidebar) は一覧を出す画面 (data-list-column) だけ。Diff
+  // から開いたファイルの詳細でも出たまま。ファイル一覧 (#file-list) はどの画面でも
+  // 出し、利用者か幅で畳んだときだけ隠す。
   test.each([
-    ["", "block"],
-    ["gdp-diff-page", "block"],
-    ["gdp-file-detail-page", "block"],
-    ["gdp-file-detail-page gdp-repo-blob-page", "block"],
-    ["gdp-history-page gdp-file-detail-page", "block"],
-    ["gdp-file-detail-page gdp-sidebar-hidden", "none"],
-    ["gdp-help-page gdp-files-column-page", "block"],
-    ["gdp-help-page gdp-files-column-page gdp-sidebar-hidden", "none"],
-  ])("sidebar display for body class %j", (className, display) => {
-    expect(computedDisplayForBodyClass("#sidebar", className)).toBe(display);
-    expect(computedDisplayForBodyClass("#sidebar-resizer", className)).toBe(
-      display,
-    );
+    ["", "", "none", "block"],
+    ["gdp-diff-page", "sidebar", "block", "block"],
+    ["gdp-file-detail-page", "sidebar", "block", "block"],
+    ["gdp-file-detail-page gdp-repo-blob-page", "", "none", "block"],
+    ["gdp-history-page gdp-file-detail-page", "history", "block", "block"],
+    ["gdp-file-detail-page gdp-sidebar-hidden", "sidebar", "block", "none"],
+    ["gdp-help-page", "", "none", "block"],
+    ["gdp-help-page gdp-sidebar-hidden", "", "none", "none"],
+  ])("body class %j, list column %j: changed files %s, file list %s", (className, listColumn, changes, files) => {
+    expect([
+      computedDisplayForBodyClass("#sidebar", className, listColumn),
+      computedDisplayForBodyClass("#file-list", className, listColumn),
+      computedDisplayForBodyClass("#file-list-resizer", className, listColumn),
+    ]).toEqual([changes, files, files]);
   });
 
   // Rows carry their route as a real link so the browser can open it in a
@@ -381,15 +405,19 @@ describe("diff sidebar repository target", () => {
     expect([opened, event.defaultPrevented]).toEqual([opens, prevented]);
   });
 
-  // The commit list stays while the history screen shows a source view.
+  // The commit list stays while the history screen shows a source view. It
+  // follows the list column (app.ts listColumnKind), not the page class: with
+  // a terminal tab in front, the History page class stays on the body but the
+  // list column is gone, so the commit list must go too.
   test.each([
-    ["gdp-history-page", "flex"],
-    ["gdp-history-page gdp-file-detail-page", "flex"],
-    ["gdp-file-detail-page", "none"],
-  ])("history panel display for body class %j", (className, display) => {
-    expect(computedDisplayForBodyClass("#history-panel", className)).toBe(
-      display,
-    );
+    ["gdp-history-page", "history", "flex"],
+    ["gdp-history-page gdp-file-detail-page", "history", "flex"],
+    ["gdp-file-detail-page", "sidebar", "none"],
+    ["gdp-history-page", "", "none"],
+  ])("history panel display for body class %j, list column %j: %s", (className, listColumn, display) => {
+    expect(
+      computedDisplayForBodyClass("#history-panel", className, listColumn),
+    ).toBe(display);
   });
 
   test("clears the file filter and restores hidden sidebar rows", () => {

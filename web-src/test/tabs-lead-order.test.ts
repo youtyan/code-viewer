@@ -2,11 +2,11 @@
 //
 // 名前の枠は幅 --tabs-lead-w で、画面・2 面・左のサイドバーの開閉で名前の
 // 位置を変えない。左のサイドバーを畳んだときだけ出る「サイドバーを出す」は
-// 枠の外 (左) に置く。枠の中に置くと、名前が 28px 右へずれて縮んだ。
+// 枠の外に置く (枠の中に置くと、名前が 28px 右へずれて縮んだ)。いまは最上段の
+// 左端 = 一覧の列の頭 (#panel-head) の先頭。
 //
-// 右の列の頭 (#panel-head) は fixed で右端の上にあるが、Tab で移る順は
-// 「左のサイドバー → タブ列 → 一覧 → 木 → 本文 → 右の列の頭 → 最下段」。
-// Tab の順は DOM の並びなので、#panel-head は本文 (#content) の後に置く。
+// Tab で移る順は見た目の順 (DOM の並び): 左のサイドバー → 一覧の列の頭 →
+// タブ列 → ファイル一覧 → 一覧 → 変更ファイルの一覧 → 本文 → 最下段。
 
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -41,12 +41,11 @@ describe("the name box at the left end of the tab row", () => {
     expect(box?.parentElement?.id).toBe("tabs-lead");
   });
 
-  test("the show-sidebar button is outside the name box, before it", () => {
+  test("the show-sidebar button is outside the name box, first in the column head", () => {
     const expand = byId("nav-expand");
     expect(expand.closest(".tabs-lead-name")).toBeNull();
-    expect(expand.parentElement?.id).toBe("tabs-lead");
-    const box = byId("tabs-lead").querySelector(".tabs-lead-name");
-    expect(expand.nextElementSibling).toBe(box);
+    expect(expand.parentElement?.id).toBe("panel-head");
+    expect(expand.nextElementSibling).toBe(byId("view-head"));
   });
 
   test("the name box keeps the fixed width and the button does not take from it", () => {
@@ -61,30 +60,31 @@ describe("the name box at the left end of the tab row", () => {
     const box = cascadedDeclarations(rules, (s) => s === ".tabs-lead-name");
     expect(resolveVar(box.get("width") ?? "", vars)).toBe(width);
     expect(resolveVar(box.get("flex") ?? "", vars)).toBe(`0 0 ${width}`);
-    // 外側の #tabs-lead は幅を持たない (ボタンの分だけ広がり、名前の枠は縮めない)
+    // 外側の #tabs-lead は幅を持たない (名前の枠の幅だけ)
     const lead = cascadedDeclarations(rules, (s) => s === ".tabs-lead");
     expect(lead.get("width")).toBeUndefined();
     expect(lead.get("flex")).toBe("none");
     const expand = cascadedDeclarations(
       rules,
-      (s) => s === ".tabs-lead > #nav-expand",
+      (s) => s === "#panel-head > #nav-expand",
     );
     expect(expand.get("flex")).toBe("none");
   });
 });
 
 describe("keyboard order follows the DOM order", () => {
-  // 一覧 (History・作業ツリー) → 変更ファイルの木 (#sidebar) → 本文。
-  // Diff の一覧は #sidebar そのもの。
+  // ファイル一覧 → 一覧 (History・作業ツリー) → 変更ファイルの一覧 (#sidebar) →
+  // 本文。Diff の一覧は #sidebar そのもの。
   const order = [
     "app-nav",
+    "panel-head",
     "tabs-lead",
     "main-tabs",
+    "file-list",
     "history-panel",
     "worktree-panel",
     "sidebar",
     "content",
-    "panel-head",
     "statusbar",
   ];
 

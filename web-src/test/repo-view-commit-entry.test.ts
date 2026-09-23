@@ -58,9 +58,9 @@ function response(data: RepoTreeResponse): Response {
 function setupDom() {
   document.body.innerHTML = `
     <div id="empty"></div>
-    <div id="totals"></div>
+    <div id="file-list-totals"></div>
     <div id="diff"></div>
-    <ul id="filelist"></ul>
+    <ul id="file-list-rows"></ul>
   `;
 }
 

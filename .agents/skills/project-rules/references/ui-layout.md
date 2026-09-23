@@ -21,8 +21,8 @@
 | 層 | 何か | 例 | 生の px |
 |---|---|---|---|
 | **T0** スケールトークン | 文字とコントロールの寸法。密度モードごとに定義。余白・角丸の段階 (`--space-*` `--radius-*`) もここ。一覧の行の高さ `--ui-row-h` だけは出所が TS (`views/shell/row-height.ts`。仮想表示が位置の計算に使うため) で、CSS は初回描画用の既定。表の行の高さ `--ui-table-row-h` は仮想表示に使わないので CSS だけ (`ui-surface.md` の決まり 7) | `--ui-font-*` `--ui-control-*` `--ui-dense-row-h` `--ui-row-h` `--ui-table-row-h` `--code-line-height` | **可**（ここだけ） |
-| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--tabs-lead-w` (タブ列の左端のプロジェクト名 `#tabs-lead` の固定の幅。body で決める) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--sidebar-w` `--history-w` (一覧の列の利用者の幅) `--list-w` (一覧の列のいまの幅。TS が書く) `--listcol-shown` (一覧の列が占める幅。出していなければ 0) `--annotation-panel-w` | **可**（その固定物の実寸なので） |
-| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--main-bottom` (メインの面の箱の下端。最下段の上) `--main-pane-h` (面の箱の高さ) `--panel-body-top` (右の列の本体の上端) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) | **不可。T2 の式に px リテラルを書かない** |
+| **T1** chrome 実寸 | 「この固定物が何 px 占有しているか」 | `--main-tabs-h` (最上段のタブ列) `--global-header-h` (上に居座る固定物の合計。今はタブ列だけなので `= --main-tabs-h`。body で決める) `--tabs-lead-w` (タブ列の左端のプロジェクト名 `#tabs-lead` の固定の幅。body で決める) `--topbar-h` `--nav-w` (左のサイドバー) `--statusbar-h` (最下段) `--sidebar-w` (ファイル一覧の幅) `--files-shown` (ファイル一覧が占める幅。畳めば 0) `--history-w` (一覧の利用者の幅) `--list-w` (一覧のいまの幅。TS が書く) `--listcol-head-w` `--column-head-w` (一覧の列の頭の幅) `--chrome-right` (右端の固定物。デスクトップは 0) `--annotation-panel-w` | **可**（その固定物の実寸なので） |
+| **T2** 導出エンベロープ | T1 の純粋な `calc()`。本文が使える領域 | `--chrome-h` `--content-h` `--chrome-left` `--chrome-bottom` `--main-bottom` (メインの面の箱の下端。最下段の上) `--main-pane-h` (面の箱の高さ) `--panel-body-top` (一覧の列の本体の上端 = 頭の下) `--listcol-shown` (一覧の列が占める幅) `--page-left` `--page-right` (本文の左右の端。下の「左右 2 面」) | **不可。T2 の式に px リテラルを書かない** |
 | **T3** ローカルインセット | 「このエンベロープの内側に居座る家具の高さ」 | `--file-detail-head-h` | **可。ただし必ず命名し、ページスコープに宣言し、何の高さかコメントする** |
 
 ### 消費側の規則
@@ -62,69 +62,81 @@ grep -n "100vh\|100dvh" web/style.css \
 **ゼロが正しい状態。** 除外を `--content-h:` の決め打ちにしないこと。T2 が増えたときに
 正しいコードが違反として並び、逆に本物の違反が埋もれる。
 
-## 骨格 — 左・右・下の固定物
+## 骨格 — 左・上・下の固定物
 
-画面は次の固定物で囲まれている: 左のサイドバー (`#app-nav`、幅 `--nav-w`)、最上段のタブ列
-(`#main-tabs`、`--main-tabs-h`。**上の行は無い**: `web/index.html` のコメントと da82d59。右端は右の
-列の左。**左端はプロジェクト名とブランチ (= プロジェクトの切替 `#project-switcher`) の固定の枠
-`#tabs-lead`、幅 `--tabs-lead-w`**。画面・タブ・2 面・右の列の開閉・一覧の列の出入りのどれでも
-出したり消したり動かしたりしない (動くと押す場所がずれる。利用者の指示)。左のサイドバーを畳んだときだけ
-出る「サイドバーを出す」(`#nav-expand`) は名前の枠 (`.tabs-lead-name`) の外の左に置き、枠の幅と枠の中の名前の
-位置を変えない (`web-src/test/tabs-lead-order.test.ts`)。タブはその右から。2 面でも
-左の面のタブ列の左端)、画面の右端の右の列 (上端から。頭 `#panel-head` は 1 段 = タブ列の行に画面の
-入口の絵柄と、右端に畳むボタン。位置は fixed だが DOM では本文 `#content` の後に置き、Tab の順を
-「左のサイドバー → タブ列 → 一覧 → 木 → 本文 → 右の列の頭 → 最下段」にする。頭の幅 `--panelcol-head-w`、本体の幅 `--panelcol-shown`。本体は `--panel-body-top` (= 頭の下) から。**探して開くための木** = Files の木 `#sidebar` はここ)、**本文を選ぶための一覧**
-を置く一覧の列 (左のサイドバーの右、タブ列の下。幅 `--listcol-shown`。下の「一覧の列と右の列」)、
-画面ごとのツールバー (`#topbar`、`--topbar-h`)、最下段のバー (`#statusbar`、`--statusbar-h`)。画面下の
-パネルは無い (Tools と Search はタブ。`orientation.md`)。**右の列を畳む (`body.gdp-sidebar-hidden`) =
-本体 (木) だけを畳む**: `--panelcol-shown` が 0 になり、本文は頭の行の下から窓の右端まで使う。頭の行
-(`#panel-head`: 画面の入口の絵柄 `.view-strip` と畳むボタン `#sidebar-toggle`) は同じ幅
-`--panelcol-head-w` で残り、タブ列の右端・分割のボタン・絵柄は動かない (縦の帯は無い。畳むボタンは
-頭の行の右端に 1 つ。`views/sidebar.ts` の `placeSidebarToggle`、`web-src/test/panel-head-kept.test.ts`)。
-自動で畳むのは、一覧の画面の間と 2 面の間 (下の「一覧の列と右の列」)。
+画面は次の固定物で囲まれている: 左のサイドバー (`#app-nav`、幅 `--nav-w`)、その右の一覧の列
+(下の「一覧の列」)、最上段の 1 段 (一覧の列の頭 `#panel-head` とタブ列 `#main-tabs`、高さ
+`--main-tabs-h`。**上の行は無い**: `web/index.html` のコメントと da82d59)、画面ごとのツールバー
+(`#topbar`、`--topbar-h`)、最下段のバー (`#statusbar`、`--statusbar-h`)。**画面の右端に列は無い**
+(`--chrome-right` は電話の安全領域だけ。デスクトップは 0)。画面下のパネルは無い (Tools と Search は
+タブ。`orientation.md`)。
 
-### 一覧の列と右の列
+- **一覧の列の頭 (`#panel-head`) は最上段の左端** (左のサイドバーの右、`left: --chrome-left`)。1 段に
+  画面の入口の絵柄 (`.view-strip`) と、右端にファイル一覧を畳むボタン (`#sidebar-toggle`)。幅は固定の
+  `--column-head-w` (= `--listcol-head-w`。既定の密度でファイル一覧の既定の幅 240 にそろう。左の
+  サイドバーを畳んだときだけ、先頭に「サイドバーを出す」`#nav-expand` が出て `--nav-expand-w` だけ
+  広がる)。画面の切替でも一覧の列の開閉 (手・自動) でも動かない (畳むのは頭の下の列だけ。
+  `views/sidebar.ts` の `placeSidebarToggle`、`web-src/test/panel-head-kept.test.ts`)
+- **タブ列は頭の右から窓の右端まで** (`left: --chrome-left + --column-head-w`、`right: --chrome-right`)。
+  **左端はプロジェクト名とブランチ (= プロジェクトの切替 `#project-switcher`) の固定の枠
+  `#tabs-lead`、幅 `--tabs-lead-w`**。画面・タブ・2 面・一覧の列の開閉のどれでも出したり消したり
+  動かしたりしない (動くと押す場所がずれる。利用者の指示)。タブはその右から。2 面でも左の面の
+  タブ列の左端。「＋」は最後のタブのすぐ右、分割のボタンは面ごとの右端
+- DOM の並び = Tab の順: 左のサイドバー → 一覧の列の頭 → タブ列 → ファイル一覧 → 一覧 → 変更
+  ファイルの一覧 → 本文 → 最下段 (`web-src/test/tabs-lead-order.test.ts`)
 
-- **本文を選ぶための一覧は本文の左の一覧の列、探して開くための木は右の列。** 一覧の画面 =
-  Diff (変更ファイル。`#sidebar` を一覧の列へ移す)・History (`#history-panel`)・選んでいる
-  作業ツリー (`#worktree-panel`)。`app.ts` の `syncListColumn` が `body[data-list-column]` に
-  出す一覧 (`sidebar` / `history` / `worktree`) を書き、CSS はこの属性だけで置き場所を決める
-  (ページクラスを並べない)。作業ツリーの一覧だけの画面 (`data-worktree-overview`) は一覧が
-  本文なので一覧の列を出さず、右の列は Files の木のまま
-- **一覧の画面の間、右の列の本体は自動で畳む** (`core/panel-column-policy.ts`。開いても出す木が
-  無い。頭の行は残る)。一覧の画面を出たら、一覧のために畳んでいたものは開き、2 面なら開いた幅で
-  2 面の決まりをもう一度当てる。一覧の画面では畳むボタン (`#sidebar-toggle`) は一覧の列を隠す / 出す
-  (`toggleListColumn`。このセッションだけ。`body[data-list-column-hidden]`)
-- **本文の幅は右の列の本体の幅で数える** (`core/panel-column-policy.ts` の `panelColumnBodyWidth`。
-  畳めば 0。頭の行の幅は数えない)。2 面の面の幅 (`main-tabs-view.ts` の `mainWidth`。依存の
-  `panelColumnWidth`) と一覧の列の決まり (`syncListColumn` の `room`) の両方がこれを使う。タブ列の
-  右端は右の列の頭の左で畳んでも動かないので、タブ列の幅から本文の幅を出さない
-- **一覧の列 = 一覧 + (History・選んでいる作業ツリーなら) 変更ファイルの木。どちらも面の外**
-  (`--listcol-shown = --list-shown + --list-tree-w`。`--page-left` はその右。2 面でも本文全体の左)。
-  木 (`#sidebar`) の幅は `--sidebar-w` (掴み `#sidebar-resizer` は木の右端)
+### 一覧の列
+
+- **一覧の列は左から、ファイル一覧・一覧・変更ファイルの一覧** (利用者の指示。どれも面の外で、2 面
+  でも本文全体の左に 1 本)。左に並ぶ列は、左のサイドバーとこの一覧の列の 2 本だけ。画面の右端に列は
+  置かない。
+  - **ファイル一覧** (`#file-list`。リポジトリの木) はどの画面でも出す。幅 `--sidebar-w` (掴み
+    `#file-list-resizer` は右端。設定 `sidebarWidth`)。利用者が畳む (頭の畳むボタン・`⌘B`。設定
+    `sidebarHidden`) と `body.gdp-sidebar-hidden` で `--files-shown` が 0
+  - **一覧**: Diff は変更ファイルの一覧 (`#sidebar`)、History はコミット (`#history-panel`)、選んで
+    いる作業ツリーは作業ツリーの一覧 (`#worktree-panel`)。幅 `--list-w` (掴み `#history-resizer`)
+  - **変更ファイルの一覧** (`#sidebar`): History と選んでいる作業ツリーでは一覧の右。幅は
+    ファイル一覧と同じ `--sidebar-w` (掴み `#sidebar-resizer` は右端)
+  - `#sidebar` (変更ファイルの一覧) と `#file-list` (ファイル一覧) は別の要素で、`views/sidebar.ts`
+    の `createSidebar` を 2 つ作る (`CHANGES_LIST_DOM` / `FILE_LIST_DOM`。app.ts の `SIDEBAR` /
+    `FILE_LIST`)。キーで動かす一覧はフォーカスのある一覧、無ければ画面の一覧 (`keyList`)
+- **出す一覧は前面のタブの画面で決める** (`core/list-column.ts` の `listColumnKindFor`。`app.ts` の
+  `syncListColumn` が `body[data-list-column]` に `sidebar` / `history` / `worktree` を書き、CSS は
+  この属性だけで置き場所と表示を決める。ページクラスを並べない)。Diff から開いたファイルの詳細
+  (差分の 1 ファイル) も変更ファイルの一覧を出す。**端末・画像のタブが左の面の前面なら一覧は出さない**
+  (背面の画面の印は body に残るので、印だけで決めると History のコミットと変更ファイルの一覧が
+  端末の左に残った)。作業ツリーの一覧だけの画面 (`data-worktree-overview`) は一覧が本文なので出さない
 - **足りないときの順番** (`core/list-column.ts` の `listColumnLayout`): 本文 (1 面は
   `COMFORTABLE_PANE_WIDTH`、2 面はその 2 つ分 + 仕切り) に足りなければ、(1) 一覧を詰めた幅
-  (`HISTORY_WIDTH.min` = 240。History は件名と札だけ) にし、(2) 木を帯 (`--panelcol-rail-w`) に
-  畳み (`body[data-list-tree-folded]`。帯は開くボタン `.list-tree-open`。押したらこのセッションは
-  畳まない)、(3) それでも 2 面の下限 (`TIGHT_PANE_WIDTH` × 2 + 仕切り) に足りなければ右の面を
-  預ける (`main-tabs-view.ts` の `fitToWidth`。本文の幅 `mainWidth` は一覧の列を引く)。左の
-  サイドバーは畳まない (プロジェクトとエージェントは常に見える)。一覧の利用者の幅は
-  `HISTORY_WIDTH` (既定 320、掴み `#history-resizer`、設定の `historyWidth`。読み戻しは
-  `restoredListWidth`: 範囲の外は既定に戻す)。既定の密度・左のサイドバー 280 での境目 (一覧の
-  画面では右の列の本体は 0): 1 面の History は窓 1320 未満で詰め 1240 未満で木を畳む、2 面の
-  History は 1801 未満で詰め 1721 未満で木を畳み 1189 未満で預ける。Diff (木なし) は 1 面 1080・
-  2 面 1561 未満で詰め、2 面 1161 未満で預ける
-- 一覧の列の幅が変わる (窓・左のサイドバー・右の列・変更ファイルの木・掴み) と `syncListColumn` が
-  幅を決め直し、変われば `MAIN_TABS.refit()` で面の幅を合わせ直す (CSS 変数の変化は
-  ResizeObserver に届かない)。木の幅は TS が書かず CSS が `--sidebar-w` から作る (木の掴みで
-  変えた幅を `#sidebar` の ResizeObserver で拾うため)。TS が付けるのは畳む印だけ
+  (`HISTORY_WIDTH.min` = 240。History は件名と札だけ) にし、(2) 変更ファイルの一覧を帯
+  (`--panelcol-rail-w`) に畳み (`body[data-list-tree-folded]`。帯は開くボタン `.list-tree-open`)、
+  (3) ファイル一覧を畳む (最後まで残す。`core/panel-column-policy.ts` の `fileListAction`。畳むボタンに
+  印と理由)。(4) それでも 2 面の下限 (`TIGHT_PANE_WIDTH` × 2 + 仕切り) に足りなければ右の面を預ける
+  (`main-tabs-view.ts` の `fitToWidth`)。左のサイドバーは畳まない。**利用者が手で開いた列は、その
+  セッションの間は自動で畳まない** (保存しない)。既定の密度・左のサイドバー 280・ファイル一覧 240 での
+  境目: 1 面の History は窓 1560 未満で詰め、1480 未満で変更ファイルの一覧を畳み、1268 未満でファイル
+  一覧を畳む。2 面の History は 2041・1961・1749、1189 未満で預ける。Diff は 1 面 1320 未満で詰め
+  1240 未満でファイル一覧を畳む、2 面は 1801・1721、1161 未満で預ける。一覧の無い画面の 2 面は 1481
+  未満でファイル一覧を畳む (`web-src/test/list-column.test.ts`)
+- **どの列も手で畳める**: ファイル一覧は頭の畳むボタン、一覧と変更ファイルの一覧は列の右端の線の
+  中ほどのつまみ (`.list-fold` / `.sidebar-fold`。`views/list-tree-open.ts` の `createColumnFold`)。
+  畳んだ一覧と変更ファイルの一覧は帯 (`.list-open` / `.sidebar-open` / `.list-tree-open`) になり、
+  押すと開く。一覧と変更ファイルの一覧の手の畳みはこのセッションだけ
+- **本文の幅は一覧の列の幅で数える** (`core/panel-column-policy.ts` の `listColumnBodyWidth`)。2 面の
+  面の幅 (`main-tabs-view.ts` の `mainWidth` = 窓 − 一覧の列の頭の左端 − 一覧の列) がこれを使う。
+  タブ列は頭の右から始まるので、タブ列の左端から本文の幅を出さない
+- `--listcol-shown = --files-shown + --list-shown + --list-tree-w`。`--page-left` はその右
+- 一覧の列の幅が変わる (窓・左のサイドバー・ファイル一覧・変更ファイルの一覧・掴み) と
+  `syncListColumn` が幅を決め直し、変われば `MAIN_TABS.refit()` で面の幅を合わせ直す (CSS 変数の
+  変化は ResizeObserver に届かない)。ファイル一覧と変更ファイルの一覧の幅は TS が書かず CSS が
+  `--sidebar-w` から作る (掴みで変えた幅を ResizeObserver で拾うため)。TS が付けるのは畳む印だけ
 
 - **本文 (`#content`) は自分の箱の中でスクロールする。窓 (`html` / `body`) は
   スクロールしない** (`html, body` の `overflow: hidden`)。`#content` は
   `position: fixed` で `top: --chrome-h` / `left: --page-left` /
   `right: --page-right` / `bottom: --chrome-bottom`、`overflow: auto`。
-  こうしないと縦のスクロールバーが右の列のさらに右 (窓の右端) に出て、本文と
-  右の列が左へ寄る。付いて回る決まり:
+  こうしないと縦のスクロールバーが窓の右端に出て、本文が左へ寄る。付いて回る
+  決まり:
   - 箱の中の sticky な見出し (`.d2h-file-header`・`.gdp-shell-header`・
     `.gdp-file-detail-sticky` など) の `top` は**箱の上端が基準**。chrome の変数を
     読まない。箱の上の余白 (`--content-top-gap`) の分だけ上へ出す
@@ -140,13 +152,10 @@ grep -n "100vh\|100dvh" web/style.css \
     項ごとの鍵で覚えて戻す (`core/scroll-memory.ts` と `app.ts` の
     `restoreMainScroll`)
 - **2 面にした本文が、面 2 つ分のゆとり (`COMFORTABLE_PANE_WIDTH` × 2 + 仕切り)
-  に足りないときは、2 面の間だけ右の列の本体を自動で畳む** (頭の行は残る。`app.ts` の
-  `syncPanelColumn`)。2 面を解いたら戻す。利用者が 2 面の間に自分で
-  開いたら、そのセッションでは自動で畳まない (保存しない)。面の幅の下限は、
-  自分で開いている間だけ `TIGHT_PANE_WIDTH` まで下げ、両面を同じ比で縮める。一覧の画面 (Diff・
-  History・選んでいる作業ツリー) では右の列の本体はもう畳んであり、先に一覧の列を詰め、それでも本文が 2 面の
-  下限に足りなければ右の面を預ける (理由は分割のボタンの説明。上の「一覧の列と右の列」)。
-  決まりは `core/panel-column-policy.ts`
+  に足りないときは、上の「一覧の列」の順で詰める・畳む** (2 面を解いたら、自動で畳んだものは開く)。
+  面の幅の下限は、一覧の列を畳みきっても (または利用者が手で開いて) ゆとりに足りない間だけ
+  `TIGHT_PANE_WIDTH` まで下げ、両面を同じ比で縮める。それでも足りなければ右の面を預ける (理由は
+  分割のボタンの説明)
 - **面の中で入力と操作を横 1 行に並べる画面は、窓の幅ではなく面の実幅で縦に積む**
   (`@container`。2 面の左の面は窓の半分以下になるので `@media` では決まらない)。
   実例: Data の `.db-root` の `container: db-pane` と `@container db-pane (max-width: 560px)`、
@@ -156,20 +165,20 @@ grep -n "100vh\|100dvh" web/style.css \
   `--chrome-h` の上書き・sticky の `top`・面の箱の `top` はこれを読むので、上に固定物を足す / 消す
   ときはこの式に項を足すだけ。左のサイドバーの頭 (`.nav-head`) はタブ列と高さをそろえるため
   `--main-tabs-h` を読む
-- **本文まわりの固定物 (ツールバー・読み込みの帯・ファイルの木・履歴や作業ツリーの面・注釈の面・
+- **本文まわりの固定物 (ツールバー・読み込みの帯・履歴や作業ツリーの一覧だけの面・注釈の面・
   `body` の左右の余白) の左右の端は `--page-left` / `--page-right` だけを読む。**
   `--page-left = --chrome-left + --listcol-shown` (一覧の列の右から。一覧の列は面の外で、2 面でも
-  本文全体の左に 1 本)、`--page-right = --panelcol-shown` (右の列の本体の左まで。畳めば窓の右端)。メインの面を左右
+  本文全体の左に 1 本)、`--page-right = --chrome-right` (窓の右端。デスクトップは 0)。メインの面を左右
   2 面に分けたとき (`body.main-split`)、本文 (route の中身) は左の面にだけ描くので `--page-right` に
   右の面と境界の幅を足す。面の幅 `--split-left-w` / `--split-right-w` / `--split-divider-w` と本文の幅 `--main-w` は TS
   (`views/main-tabs/main-tabs-view.ts` の `applyGeometry`) が出所
 - **メインの面の箱 (`.main-pane-host`。`app.ts` の `PANE_HOSTS`) は `top: --global-header-h`・
-  `left: --page-left`・`right: --panelcol-shown`・`bottom: --main-bottom`。** 右の列 (木) を覆わない。2 面では左の箱は
+  `left: --page-left`・`right: --chrome-right`・`bottom: --main-bottom`。** 一覧の列を覆わない。2 面では左の箱は
   `--split-left-w` の幅、右の箱は残り。右の面のソース表示 (`.main-pane-source`) は本文の
-  `--content-h` ではなく `--main-pane-h` で箱を作る。タブ列は面をまたぐので左は `--chrome-left`、
-  右は `--panelcol-head-w` (右の列の頭の左。右の列を畳んでも動かない。一覧の列の上もまたぐ。2 面の
-  左の面のタブ列は `--split-left-w` + `--listcol-shown`、右の面のタブ列はその残りで、右の列を
-  畳んだ間は右の面の本文より頭の行の幅だけ短い)。最下段は右の列の下もまたぐ
+  `--content-h` ではなく `--main-pane-h` で箱を作る。タブ列は面をまたぐので左は
+  `--chrome-left + --column-head-w` (一覧の列の頭の右。列を畳んでも動かない。一覧の列の上もまたぐ)、
+  右は `--chrome-right`。2 面の左の面のタブ列は `--split-left-w + --listcol-shown − --column-head-w`
+  (面の境界まで)、右の面のタブ列はその残り。最下段は一覧の列の下もまたぐ
 - `--main-tabs-h` と `--global-header-h` は `html, body` で決める (密度の `--space-unit` の上書きが
   body に載るため。下の「T2 を宣言する要素を間違えない」と同じ理由)
 
@@ -188,8 +197,8 @@ grep -n "100vh\|100dvh" web/style.css \
   `getBoundingClientRect().left` で読む。`0` 起点の座標を書かない
 - 骨格の幅・高さ (`--nav-w` など) の既定・下限・上限は `core/panel-sizes.ts`
   だけが持つ（画面とサーバの設定の検査が同じ値を使う）。保存先はサーバの設定: 左のサイドバーの
-  幅と畳みは全プロジェクト共通の設定 (`core/user-settings.ts` の `USER_SETTING_KEYS`)、ファイルの木と
-  一覧の列の幅 (`historyWidth`) はリポジトリの設定 (`server/state-store.ts` が検査する)。**localStorage に
+  幅と畳みは全プロジェクト共通の設定 (`core/user-settings.ts` の `USER_SETTING_KEYS`)、ファイル一覧の
+  幅 (`sidebarWidth`)・畳み (`sidebarHidden`) と一覧の幅 (`historyWidth`) はリポジトリの設定 (`server/state-store.ts` が検査する)。**localStorage に
   置かない**: localStorage はオリジン (ポート) ごとで、ポートは続かない。入口のサーバは `--port` を
   付けなければ起動のたびに OS が選ぶポートで待ち受ける (`server/entry/args.ts` の
   `parseEntryArgs` の既定が 0) ので、code-viewer を起こし直すと空から始まる。`--standalone` の
@@ -206,14 +215,14 @@ grep -n "100vh\|100dvh" web/style.css \
 | 部品 | 動いてよいとき |
 |---|---|
 | タブ列の左端のプロジェクト名と枝 (`#tabs-lead`) | 動かない (上の「骨格」) |
-| タブ列 (`#main-tabs`) | 動かない (右端は右の列の頭の左で、右の列の開閉でも動かない)。タブは左から詰める |
+| タブ列 (`#main-tabs`) | 動かない (左端は一覧の列の頭の右、右端は窓の右端。一覧の列の開閉でも動かない)。タブは左から詰める |
 | 「＋」(`.main-tabs-new`) | タブの数が変わったとき (最後のタブのすぐ右。`ui-surface.md` のタブの決まり) |
-| 分割のボタン (`.main-tabs-split`) | 2 面のときだけ (面ごとに右端に付く)。右の列の開閉では動かない |
+| 分割のボタン (`.main-tabs-split`) | 2 面のときだけ (面ごとに右端に付く)。一覧の列の開閉では動かない |
 | 左のサイドバーの頭・検索・足元 (`.nav-head`・`#search-btn`・`.nav-foot`) | 左のサイドバーの幅を変えたときだけ |
-| 右の列の頭 (`#panel-head`)・画面の入口の絵柄 (`.view-strip`)・畳むボタン (`#sidebar-toggle`) | 動かない (右の列を畳んでも頭の行は同じ幅で残る。`web-src/test/panel-head-kept.test.ts`) |
+| 一覧の列の頭 (`#panel-head`)・画面の入口の絵柄 (`.view-strip`)・畳むボタン (`#sidebar-toggle`) | 左のサイドバーの幅を変えた・畳んだときだけ (一覧の列を畳んでも頭の行は同じ場所と幅で残る。`web-src/test/panel-head-kept.test.ts`) |
 | 最下段 (`#statusbar`) と、その右寄せの部品 (`#status`・右の操作 `.statusbar-actions`・`#doctor-btn`) | 窓の幅が変わったときだけ |
 | 最下段のエージェントの件数 (`#agent-status`) | 右端は動かない。左端は件数の桁が増えたときだけ (数字は等幅) |
-| 一覧の列の頭 (`#sidebar .sb-head`・`#history-panel .history-head`・`#worktree-panel .history-head`)・本文の上の帯 (`#topbar`)・本文の箱 (`#content`) | 画面の並びが変わるとき (一覧の列の出入り・一覧の列の幅・2 面・上の帯を持たない画面との行き来)。同じ画面の中の状態では動かない |
+| 一覧の列の中の見出し (`#file-list .sb-head`・`#sidebar .sb-head`・`#history-panel .history-head`・`#worktree-panel .history-head`)・本文の上の帯 (`#topbar`)・本文の箱 (`#content`) | 画面の並びが変わるとき (一覧の出入り・列の幅・列の開閉・2 面・上の帯を持たない画面との行き来)。同じ画面の中の状態では動かない |
 
 部品を足したらこの表に行を足し、状態で動かないことを `web-src/test/fixed-parts-layout.test.ts`
 の表に足す。
@@ -263,15 +272,18 @@ grep -n "100vh\|100dvh" web/style.css \
 
 9. **最初の描画で並びを決める印は、app.js を待たずに URL から付ける。** `web/index.html` の body の
    頭の早いスクリプト (`#first-screen`) が、app.ts が後から付けるのと同じ印 (画面の印
-   `core/page-mode.ts` の `pageModeClasses`・一覧の列 `body[data-list-column]` と `--list-w`・木を
-   畳む印・一覧の画面で右の列の本体を畳む `gdp-sidebar-hidden`) を付け、CSS は今の規則のまま最初から
-   場所を取る。別の印と規則を足さない (2 つの出所はずれる)。同じであることは
-   `web-src/test/first-screen.test.ts` が URL・窓の幅・控えの表で確かめる。寸法 (木と一覧の幅・
-   利用者の畳み・言語) は `views/shell/early-look.ts` の控え。最下段の `#status` の文言
-   (`#first-status`)、Files の木の見出しの絞り込み (`#first-sidebar-filter`)、右の列を畳むボタン
-   (index.html に最初から置く) も同じ考え。**app.ts の起動の途中で、早いスクリプトの印を一度
-   外してから付け直さない** (外した状態がタスクをまたぐと描かれる。一覧の画面の右の列の畳みは、
-   起動の `applySidebarHidden` が一覧のための自動の畳みとして引き継ぐ)。直接開いたときの読み込みの
+   `core/page-mode.ts` の `pageModeClasses`・一覧の列 `body[data-list-column]` (`listColumnKindFor`)
+   と `--list-w`・変更ファイルの一覧を畳む印・ファイル一覧を畳む `gdp-sidebar-hidden` (利用者の
+   畳みと、`listColumnLayout` の幅による畳み)) を付け、CSS は今の規則のまま最初から場所を取る。
+   別の印と規則を足さない (2 つの出所はずれる)。同じであることは `web-src/test/first-screen.test.ts`
+   が URL・窓の幅・控えの表で確かめる。寸法 (ファイル一覧と一覧の幅・利用者の畳み・言語) は
+   `views/shell/early-look.ts` の控え。最下段の `#status` の文言 (`#first-status`)、ファイル一覧の
+   見出しの絞り込み (index.html で最初から見出しの中)、ファイル一覧を畳むボタン (index.html に最初から
+   置く) も同じ考え。**app.ts の起動の途中で、早いスクリプトの印を一度外してから付け直さない**
+   (外した状態がタスクをまたぐと描かれる。ファイル一覧の畳みは `core/panel-column-policy.ts` の
+   `bootFileListFold` で引き継ぐ: 控え (`readEarlyLook`) が利用者の畳みなら利用者の畳み、そうでなければ
+   幅による自動の畳み。一度外していた間は、利用者が畳んだ人の読み込みで本文が 240px 動き、CLS が
+   0.14 / 0.38 あった。1280 / 1600)。直接開いたときの読み込みの
    CLS は History 0.21/0.37 → 0.0002/0.0006、選んでいる作業ツリー 0.24/0.38 → 0.04/0.02
    (1280 / 1600。残りは本文の中身)
 10. **場所取りの詰め物は、要素 (`::before` / `::after` / 空の箱) でなく余白 (`padding` /
@@ -282,7 +294,7 @@ grep -n "100vh\|100dvh" web/style.css \
 **既知の残り (最初の描画)。**
 - 2 面かどうかは保存したタブを読むまで分からないので、早いスクリプトは 1 面で数える。2 面の一覧の
   画面を直接開くと、一覧の列の幅が詰めた幅へ動くことがある
-- 木と一覧の幅はリポジトリの設定、控えはオリジンで 1 つ。入口の下で別のプロジェクトへ移った直後は
+- ファイル一覧と一覧の幅はリポジトリの設定、控えはオリジンで 1 つ。入口の下で別のプロジェクトへ移った直後は
   前のプロジェクトの幅で描き始める。表示の密度 (`body[data-sidebar-font-size]`) も控えていない
 - 保存したタブが URL と違う画面を前面にする読み込み (`urlKeepsSavedFront`) では、URL から付けた
   印と違う並びになり、そのときだけ動く

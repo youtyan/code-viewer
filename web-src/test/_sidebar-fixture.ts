@@ -1,36 +1,60 @@
-// Files の木 (views/sidebar.ts) を happy-dom で描くための DOM と deps。
+// 一覧 (views/sidebar.ts) を happy-dom で描くための DOM と deps。変更ファイルの
+// 一覧 (#sidebar。既定) とファイル一覧 (#file-list) のどちらでも組める。
 // GlobalRegistrator の登録は呼び出し側のテストが行う。
 
-import { createSidebar, type SidebarDeps } from "../views/sidebar";
+import {
+  CHANGES_LIST_DOM,
+  createSidebar,
+  FILE_LIST_DOM,
+  type SidebarDeps,
+  type SidebarDom,
+} from "../views/sidebar";
 
-export function installSidebarDom() {
+const id = (selector: string) => selector.replace(/^#/, "");
+
+/** dom の要素を index.html と同じ形で置く (ファイル一覧は絞り込みが見出しの中)。 */
+export function installSidebarDom(dom: SidebarDom = CHANGES_LIST_DOM) {
+  const files = dom === FILE_LIST_DOM;
+  const filter = `
+      <div class="sb-filter-wrap">
+        <input id="${id(dom.filter)}" value="" />
+        <button id="${id(dom.filterClear)}" type="button" hidden>Clear</button>
+      </div>`;
   document.body.innerHTML = `
-    <aside id="sidebar">
+    <aside id="${id(dom.root)}">
       <div class="sb-head">
         <span class="sb-title">Files</span>
-        <span id="totals"></span>
-        <div id="repo-target-wrap" data-ref-selector>
+        <span id="${id(dom.totals)}"></span>
+        ${
+          files
+            ? `<div id="repo-target-wrap" data-ref-selector>
           <input id="repo-target" value="worktree" />
-        </div>
+        </div>`
+            : ""
+        }
         <div class="sb-actions" role="group">
-          <button id="sb-expand-all" class="sb-tree-action"></button>
-          <button id="sb-collapse-all" class="sb-tree-action"></button>
+          <button id="${id(dom.expandAll)}" class="sb-tree-action"></button>
+          <button id="${id(dom.collapseAll)}" class="sb-tree-action"></button>
         </div>
-        <div class="seg sb-view-seg">
+        ${
+          files
+            ? filter
+            : `<div class="seg sb-view-seg">
           <button data-view="tree"></button>
           <button data-view="flat"></button>
-        </div>
+        </div>`
+        }
       </div>
-      <div class="sb-filter-wrap">
-        <input id="sb-filter" value="" />
-        <button id="sb-filter-clear" type="button" hidden>Clear</button>
-      </div>
-      <ul id="filelist"></ul>
+      ${files ? "" : filter}
+      <ul id="${id(dom.list)}"></ul>
     </aside>
   `;
 }
 
-export function createSidebarForTest() {
+export function createSidebarForTest(
+  options: { dom?: SidebarDom; repository?: boolean } = {},
+) {
+  const dom = options.dom ?? CHANGES_LIST_DOM;
   const state = {
     sbView: "tree" as const,
     sbWidth: 280,
@@ -43,6 +67,8 @@ export function createSidebarForTest() {
     lazyExpandedDirs: new Set<string>(),
   };
   return createSidebar({
+    dom,
+    repository: options.repository ?? dom === FILE_LIST_DOM,
     STATE: state,
     openFileAs() {
       /* noop */

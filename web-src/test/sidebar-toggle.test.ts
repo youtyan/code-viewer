@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { showEmptyHistoryDiffPane } from "../views/empty-diff-pane";
-import { createSidebar } from "../views/sidebar";
+import {
+  CHANGES_LIST_DOM,
+  createSidebar,
+  FILE_LIST_DOM,
+} from "../views/sidebar";
 
 const originalDocument = globalThis.document;
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
@@ -158,9 +162,10 @@ class FakeElement {
 
 function installFakeDom() {
   const body = new FakeElement("body");
-  // 右の列の頭 (#panel-head) の中の画面の入口 (#view-head) と、畳むボタンの
-  // 置き場所 (.view-head-row)。プロジェクト名の切替はタブ列の左端 (#tabs-lead)
-  // に固定 (index.html)。右の列を畳んでも頭の行 (ボタンと絵柄) はそのまま。
+  // 一覧の列の頭 (#panel-head。タブ列の行の左端) の中の画面の入口 (#view-head) と、
+  // 畳むボタンの置き場所 (.view-head-row)。プロジェクト名の切替はタブ列の左端
+  // (#tabs-lead) に固定 (index.html)。ファイル一覧を畳んでも頭の行 (ボタンと絵柄)
+  // はそのまま。
   const tabsLead = new FakeElement("div", "tabs-lead");
   const brand = new FakeElement("button", "project-switcher");
   brand.className = "brand";
@@ -170,7 +175,7 @@ function installFakeDom() {
   const nameRow = new FakeElement("div");
   nameRow.className = "view-head-row";
   viewHead.appendChild(nameRow);
-  // 画面の入口の絵柄。右の列を畳んでも頭の行から動かない。
+  // 画面の入口の絵柄。ファイル一覧を畳んでも頭の行から動かない。
   const strip = new FakeElement("nav");
   strip.className = "app-menu view-strip";
   viewHead.appendChild(strip);
@@ -212,8 +217,14 @@ function installFakeDom() {
   };
 }
 
-function createSidebarForTest(state: { sidebarHidden: boolean }) {
+// 畳むボタンと頭の置き場所はファイル一覧 (FILE_LIST_DOM) の側が持つ。
+function createSidebarForTest(
+  state: { sidebarHidden: boolean },
+  list: "files" | "changes" = "files",
+) {
   return createSidebar({
+    dom: list === "files" ? FILE_LIST_DOM : CHANGES_LIST_DOM,
+    repository: list === "files",
     STATE: {
       sbView: "tree",
       sbWidth: 280,
@@ -297,10 +308,10 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
   });
 }
 
-// プロジェクト名とブランチはタブ列の左端に固定で、右の列を畳んでも動かない。
-// 画面の入口は右の列の頭の 1 段で、右の列を畳んでも絵柄はそこに残る (畳むのは
-// 頭の下の本体だけ)。木を畳む / 出すボタンは右の列の頭の右端 (絵柄の行の
-// 右端) で、畳んでも同じ場所 (ツールバーやタブ列へは行かない)。
+// プロジェクト名とブランチはタブ列の左端に固定で、ファイル一覧を畳んでも動かない。
+// 画面の入口は一覧の列の頭の 1 段で、畳んでも絵柄はそこに残る (畳むのは頭の下の
+// ファイル一覧だけ)。ファイル一覧を畳む / 出すボタンは頭の右端 (絵柄の行の右端)
+// で、畳んでも同じ場所 (ツールバーやタブ列へは行かない)。
 describe("project name and view entries placement", () => {
   test.each([
     {
@@ -355,7 +366,7 @@ describe("project name and view entries placement", () => {
       dom.brand.parentElement === dom.tabsLead,
     ]).toEqual([true, true, true, true]);
     // 置き場所の中の順は見た目の順 (Tab で移る順): 畳むボタンは絵柄の行の右端の
-    // 置き場所 (中はボタンだけ)。右の列の頭では絵柄が行の頭。
+    // 置き場所 (中はボタンだけ)。一覧の列の頭では絵柄が行の頭。
     const at = (element: FakeElement) => {
       const siblings = element.parentElement?.children ?? [];
       return siblings[0] === element
@@ -387,6 +398,27 @@ describe("project name and view entries placement", () => {
   });
 });
 
+// ファイル一覧と変更ファイルの一覧は同時に出る。畳むボタン (#sidebar-toggle) の絵と
+// 状態はファイル一覧の側だけが付け、変更ファイルの一覧の側は触らない (両方が付けると、
+// 後に呼んだ側の状態でボタンが描き直される)。
+describe("the toggle belongs to the file list", () => {
+  test.each([
+    { list: "files" as const, icon: true },
+    { list: "changes" as const, icon: false },
+  ])("$list list: sets the toggle icon $icon", ({ list, icon }) => {
+    installFakeDom();
+    const toggle = document.querySelector(
+      "#sidebar-toggle",
+    ) as unknown as FakeElement;
+    toggle.innerHTML = "";
+    createSidebarForTest(
+      { sidebarHidden: false },
+      list,
+    ).setSidebarTreeActionIcons();
+    expect(toggle.innerHTML.includes("<svg")).toBe(icon);
+  });
+});
+
 describe("sidebar toggle placement", () => {
   test("keeps the toggle in the left column even when a repo toolbar exists", () => {
     const dom = installFakeDom();
@@ -400,7 +432,7 @@ describe("sidebar toggle placement", () => {
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");
     expect([
       toggle?.parentElement === (dom.nameRow as unknown as HTMLElement),
-      // 名前はタブ列の左端のまま、入口は右の列の頭のまま。
+      // 名前はタブ列の左端のまま、入口は一覧の列の頭のまま。
       dom.brand.parentElement === dom.tabsLead &&
         dom.viewHead.parentElement === dom.leftHead,
       toggle?.offsetParent === null,

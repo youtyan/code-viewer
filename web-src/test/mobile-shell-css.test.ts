@@ -93,15 +93,15 @@ describe("電話の段の骨格", () => {
     },
     { name: "一覧の列", variable: "--listcol-shown", expected: "0px" },
     {
-      name: "右の列",
-      variable: "--panelcol-shown",
+      name: "右端の固定物",
+      variable: "--chrome-right",
       expected: "env(safe-area-inset-right, 0px)",
     },
     {
-      // タブ列の右端 (デスクトップでは右の列の頭の行の幅)
-      name: "右の列の頭の行",
-      variable: "--panelcol-head-w",
-      expected: "env(safe-area-inset-right, 0px)",
+      // タブ列の左端 (デスクトップでは一覧の列の頭の幅)
+      name: "一覧の列の頭",
+      variable: "--column-head-w",
+      expected: "0px",
     },
     {
       name: "本文の右端",
@@ -125,10 +125,10 @@ describe("電話の段の骨格", () => {
       expected: "0px",
     },
     {
-      name: "右の列を畳んだ画面",
+      name: "ファイル一覧を畳んだ画面",
       selector: "body.gdp-sidebar-hidden",
-      variable: "--panelcol-shown",
-      expected: "env(safe-area-inset-right, 0px)",
+      variable: "--listcol-shown",
+      expected: "0px",
     },
     {
       name: "2 面",
@@ -221,15 +221,16 @@ describe("電話の段の骨格", () => {
     expect(box.get("display")).toBe("flex");
   });
 
-  test("面の一覧は面の頭の下から最下段の上まで、画面の幅いっぱい", () => {
-    const box = declarationsOf(rules, [
-      "#sidebar",
-      "body[data-list-column] #sidebar",
-    ]);
+  // 面に出すのはファイル一覧 (#file-list) か、一覧を出す画面ではその一覧。
+  test.each([
+    ["#sidebar", "body[data-list-column] #sidebar"],
+    ["#file-list"],
+  ])("面の一覧 %s は面の頭の下から最下段の上まで、画面の幅いっぱい", (...selectors) => {
+    const box = declarationsOf(rules, selectors);
     expect(box.get("top")).toBe("var(--panel-body-top)");
     expect(box.get("bottom")).toBe("var(--chrome-bottom)");
     expect(box.get("left")).toBe("var(--chrome-left)");
-    expect(box.get("right")).toBe("var(--panelcol-shown)");
+    expect(box.get("right")).toBe("var(--chrome-right)");
   });
 
   test.each([

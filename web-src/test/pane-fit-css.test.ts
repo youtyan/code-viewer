@@ -40,8 +40,8 @@ test.each([
     "container",
     "worktree-overview / inline-size",
   ],
-  // 本文は窓ではなく自分の箱でスクロールする (縦のスクロールバーを右の列の
-  // さらに右に出さない)。箱の端は本文の端の変数だけを読む
+  // 本文は窓ではなく自分の箱でスクロールする (縦のスクロールバーを窓の右端に
+  // 出さない)。箱の端は本文の端の変数だけを読む
   ["#content", "position", "fixed"],
   ["#content", "overflow", "auto"],
   ["#content", "top", "var(--chrome-h)"],
@@ -56,11 +56,15 @@ test.each([
   [".gdp-file-detail-sticky", "top", "calc(0px - var(--content-top-gap, 0px))"],
   // Data は面の実幅で詰め方を決める (2 面の左の面で欄が潰れない)
   [".db-root", "container", "db-pane / inline-size"],
-  // 右の列の見出しも実幅で (件数を省く段階)
-  ["#sidebar .sb-head", "container", "sidebar-head / inline-size"],
-  // 右の列を畳んでも頭の行 (画面の入口の絵柄と畳むボタン) は横に並んだまま
-  // (web-src/test/panel-head-kept.test.ts)。畳んだ変更ファイルの木の帯の幅は
-  // 押せる領域の大きさ (密度で変わる。特大で絵柄がはみ出した)
+  // ファイル一覧と変更ファイルの一覧の見出しも実幅で (件数を省く段階)
+  [
+    ":is(#sidebar, #file-list) .sb-head",
+    "container",
+    "sidebar-head / inline-size",
+  ],
+  // ファイル一覧を畳んでも頭の行 (画面の入口の絵柄と畳むボタン) は横に並んだまま
+  // (web-src/test/panel-head-kept.test.ts)。畳んだ列の帯の幅は押せる領域の
+  // 大きさ (密度で変わる。特大で絵柄がはみ出した)
   ["#panel-head > #view-head", "flex-direction", "row"],
   ["body", "--panelcol-rail-w", "var(--ui-control-sm)"],
   // プロジェクト名と枝の名前の幅は views/brand-fit.ts が分ける。枝は自然な幅
@@ -89,9 +93,13 @@ test.each([
   [".main-tab-icon", "flex", "0 0 auto"],
   [".main-tab-close", "flex", "0 0 auto"],
   [".main-tab-name", "text-overflow", "ellipsis"],
-  // 木の見出しが狭い (日本語・特大) とき縮むのは題 (右端の切替を押し出さない)
-  ["#sidebar .sb-head > .sb-title", "min-width", "0"],
-  ["#sidebar .sb-head > .sb-title", "text-overflow", "ellipsis"],
+  // 一覧の見出しが狭い (日本語・特大) とき縮むのは題 (右端の切替を押し出さない)
+  [":is(#sidebar, #file-list) .sb-head > .sb-title", "min-width", "0"],
+  [
+    ":is(#sidebar, #file-list) .sb-head > .sb-title",
+    "text-overflow",
+    "ellipsis",
+  ],
   // 全体ボード: 狭い面では絞り込みを折り返し、アカウントのカードは行を折る
   [".agents-toolbar", "flex-wrap", "wrap"],
   [".agents-filter", "flex-wrap", "wrap"],
@@ -101,9 +109,13 @@ test.each([
     "padding",
     "var(--content-top-gap) var(--content-pad-x) 48px",
   ],
-  // 右の列の見出し: 「ツリー / 一覧」と題の語を折らない
-  ["#sidebar .sb-head .sb-view-seg", "min-width", "max-content"],
-  ["#sidebar .sb-head > .sb-title", "white-space", "nowrap"],
+  // 一覧の見出し: 「ツリー / 一覧」と題の語を折らない
+  [
+    ":is(#sidebar, #file-list) .sb-head .sb-view-seg",
+    "min-width",
+    "max-content",
+  ],
+  [":is(#sidebar, #file-list) .sb-head > .sb-title", "white-space", "nowrap"],
 ])("%s has %s: %s", (selector, property, expected) => {
   expect(
     cascadedDeclarations(rules, (candidate) => candidate === selector).get(
@@ -112,7 +124,7 @@ test.each([
   ).toBe(expected);
 });
 
-// 帯が狭いときの段。68em 以下 (1280px の窓で右の列を開いた 1 面の帯 58.5em を
+// 帯が狭いときの段。68em 以下 (1280px の窓で列を開いた 1 面の帯 58.5em を
 // 含む): Split / Unified は絵だけにし、次の未閲覧を省く (上の段の中身は約 67em で、
 // 入らない分の Split / Unified が帯の外へ押し出されていた)。56em 以下 (2 面の
 // 左の面など): 選択欄の頭の絵も省いて枝の名前に幅を回す。
@@ -411,18 +423,20 @@ test("the sidebar head drops the totals below 22em", () => {
       allRules.filter(
         (rule) => rule.atRule === "@container sidebar-head (max-width: 22em)",
       ),
-      (candidate) => candidate === "#sidebar .sb-head > #totals",
+      (candidate) =>
+        candidate ===
+        ":is(#sidebar, #file-list) .sb-head > :is(#totals, #file-list-totals)",
     ).get("display"),
   ).toBe("none");
 });
 
-// 右の列の見出し: 題は省略しない。大・特大の既定の幅 (17.5em 以下) では、全部
+// 一覧の見出し: 題は省略しない。大・特大の既定の幅 (17.5em 以下) では、全部
 // 開く / 畳むを 2 段目へ下ろす (日本語・特大で題が「フ…」になった)。素の規則と
 // 合わせて重ねて、段の規則が勝つこと (前に書くと詳細度が同じ素の grid-area が
 // 勝ち、段が効かなかった)。
 test.each([
-  ["#sidebar .sb-head > .sb-actions", "2 / 5 / auto / 7"],
-  ["#sidebar .sb-head > .sb-filter-wrap", "2 / 1 / auto / 5"],
+  [":is(#sidebar, #file-list) .sb-head > .sb-actions", "2 / 5 / auto / 7"],
+  [":is(#sidebar, #file-list) .sb-head > .sb-filter-wrap", "2 / 1 / auto / 5"],
 ])("narrow sidebar head: %s is placed at %s", (selector, expected) => {
   expect(
     cascadedDeclarations(

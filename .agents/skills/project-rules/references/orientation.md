@@ -116,8 +116,10 @@ global の `my-reuse-first` に従う。ここに置くのは**このリポジ�
 | 戻る / 進むで本文のスクロール位置を戻す | `core/scroll-memory.ts` `createScrollMemory` / `scrollKeyOfHistoryState`（本文の箱は窓でないのでブラウザが戻さない。配線は `app.ts` の `restoreMainScroll`） |
 | 長い横スクロールの箱に、見えている下端へ貼り付く代わりのスクロールバーを付ける | `core/hscroll-proxy.ts`（数え方）+ `views/diff-hscroll.ts` `attachStickyHScroll` / `detachStickyHScroll` |
 | 入りきらないパンくずの真ん中を「…」に畳む | `core/breadcrumb-fit.ts` `collapsedBreadcrumbRange` + `views/breadcrumb-fit.ts` `fitBreadcrumb`（Diff・ファイル表示・フォルダ表示が共有） |
-| 一覧の画面と 2 面のときに右の列を畳む / 開くの判断 | `core/panel-column-policy.ts` `panelColumnAction`（DOM に触らない。配線は `app.ts` の `syncPanelColumn`） |
-| 本文の左の一覧の列の幅 (利用者の幅か詰めた幅) | `core/list-column.ts` `listColumnWidth`（配線は `app.ts` の `syncListColumn`） |
+| 一覧の列に出す一覧・ファイル一覧を幅のために畳む / 開くの判断 | `core/list-column.ts` `listColumnKindFor` と `core/panel-column-policy.ts` `fileListAction`（DOM に触らない。配線は `app.ts` の `syncListColumn`） |
+| 一覧の列の幅と畳む順 (一覧を詰める → 変更ファイルの一覧を畳む → ファイル一覧を畳む) | `core/list-column.ts` `listColumnLayout`（配線は `app.ts` の `syncListColumn`） |
+| ファイル一覧と変更ファイルの一覧を描く | `views/sidebar.ts` `createSidebar`（`FILE_LIST_DOM` / `CHANGES_LIST_DOM` で 2 つ作る。app.ts の `FILE_LIST` / `SIDEBAR`） |
+| 列を手で畳むつまみと、畳んだ列の開く帯 | `views/list-tree-open.ts` `createColumnFold` / `createColumnOpen` / `createListTreeOpen` |
 | 札と名前の幅の分け方 (名前を省略し、札は自然な幅を 40% まで) | `core/brand-fit.ts` `fitBrandWidths`（タブ列の左端のプロジェクト名。別のプロジェクトのタブの名前も同じ決まりを CSS で。History の枝の札は同じ決まりを CSS の flex で: `style.css` の B-1） |
 | あいまい検索 | `core/fuzzy-search.ts` |
 | 制御文字の検出 | `core/control-chars.ts` `hasControlCharacter` |

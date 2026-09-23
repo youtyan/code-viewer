@@ -1,32 +1,40 @@
-// 本文の左の一覧の列 (Diff の変更ファイル・History のコミット・選んでいる作業
-// ツリー) の幅の決まり (ui-layout.md の「一覧の列と右の列」)。DOM に触らない。
-// 配線は app.ts の syncListColumn。
+// 一覧の列 (左のサイドバーの右、本文の左) の幅の決まり (ui-layout.md の
+// 「一覧の列」)。DOM に触らない。配線は app.ts の syncListColumn。
 //
-// History と選んでいる作業ツリーは、一覧の右に変更ファイルの木 (#sidebar) の
-// 列も並ぶ。一覧と木はどちらも面の外 (2 面でも本文全体の左)。本文 (1 面なら
-// 1 面、2 面なら 2 面と仕切り) が足りないときは、まず一覧を詰めた幅
-// (HISTORY_WIDTH.min の 240。題と札だけが読める幅) にし、次に木を帯に畳む
-// (開くボタンを残す。利用者が開いたらそのセッションは畳まない)。それでも
-// 足りなければ、2 面なら右の面を預け (main-tabs-view の fitToWidth)、1 面なら
-// そのまま出す。左のサイドバー (プロジェクトとエージェント) は畳まない。
+// 並びは左から、ファイル一覧 (どの画面でも出す)、一覧 (Diff の変更ファイルの
+// 一覧・History のコミット・選んでいる作業ツリー)、変更ファイルの一覧
+// (History・選んでいる作業ツリーだけ。一覧の右)。どれも面の外 (2 面でも本文
+// 全体の左)。本文 (1 面なら 1 面、2 面なら 2 面と仕切り) が足りないときは、
+// (1) 一覧を詰めた幅 (HISTORY_WIDTH.min の 240。題と札だけが読める幅) にし、
+// (2) 変更ファイルの一覧を帯に畳み、(3) ファイル一覧を畳む (最後まで残す)。
+// それでも足りなければ、2 面なら右の面を預け (main-tabs-view の fitToWidth)、
+// 1 面ならそのまま出す。利用者が手で開いた列は、そのセッションは自動で畳まない。
+// 左のサイドバー (プロジェクトとエージェント) は畳まない。
 
 import type { PanelSize } from "./panel-sizes";
 
 export type ListColumnInput = {
   /**
-   * 一覧の列・木・本文が使える幅 (左のサイドバーの右から、右の列の本体の左
-   * まで。本体を畳めば窓の右端まで。頭の行は数えない)。一覧の列の今の幅に関わらない。
+   * 一覧の列と本文が使える幅 (左のサイドバーの右から窓の右端まで)。一覧の列の
+   * 今の幅に関わらない。
    */
   room: number;
-  /** 一覧の利用者の幅。一覧を隠しているなら 0。 */
+  /** ファイル一覧の幅。利用者が畳んでいるなら 0。 */
+  files: number;
+  /** 利用者が手でファイル一覧を開いた (このセッションは自動で畳まない)。 */
+  filesKeptOpen: boolean;
+  /** 一覧の利用者の幅。一覧の無い画面・利用者が一覧を畳んだなら 0。 */
   preferred: number;
   /** 一覧の詰めた幅。 */
   compact: number;
-  /** 変更ファイルの木の幅。木の無い画面 (Diff) は 0。 */
+  /**
+   * 変更ファイルの一覧 (一覧の右) の幅。それを持たない画面 (Diff は一覧そのもの
+   * が変更ファイルの一覧) と、利用者が畳んだなら 0。
+   */
   tree: number;
-  /** 木を畳んだ帯の幅。 */
+  /** 畳んだ列の帯の幅。 */
   treeRail: number;
-  /** 利用者が畳んだ木を開いた (このセッションは畳まない)。 */
+  /** 利用者が畳んだ変更ファイルの一覧を開いた (このセッションは畳まない)。 */
   treeKeptOpen: boolean;
   /** 本文に要る幅 (1 面なら 1 面分、2 面なら 2 面と仕切り)。 */
   need: number;
@@ -37,23 +45,56 @@ export type ListColumnLayout = {
   width: number;
   /** 一覧を詰めた。 */
   compact: boolean;
-  /** 木の幅 (畳んだら帯の幅)。 */
+  /** 変更ファイルの一覧の幅 (畳んだら帯の幅)。 */
   tree: number;
-  /** 木を畳んだ。 */
+  /** 変更ファイルの一覧を畳んだ。 */
   treeFolded: boolean;
+  /** ファイル一覧を自動で畳んだ (幅は 0。頭の畳むボタンで開く)。 */
+  filesFolded: boolean;
 };
 
 export function listColumnLayout(input: ListColumnInput): ListColumnLayout {
-  const { room, preferred, tree, treeRail, need } = input;
+  const { room, files, preferred, tree, treeRail, need } = input;
   const narrow = Math.min(preferred, input.compact);
-  const fits = (list: number, treeWidth: number) =>
-    room - list - treeWidth >= need;
-  if (fits(preferred, tree))
-    return { width: preferred, compact: false, tree, treeFolded: false };
   const compact = narrow !== preferred;
-  if (fits(narrow, tree) || tree === 0 || input.treeKeptOpen)
-    return { width: narrow, compact, tree, treeFolded: false };
-  return { width: narrow, compact, tree: treeRail, treeFolded: true };
+  const fits = (fileList: number, list: number, treeWidth: number) =>
+    room - fileList - list - treeWidth >= need;
+  if (fits(files, preferred, tree))
+    return {
+      width: preferred,
+      compact: false,
+      tree,
+      treeFolded: false,
+      filesFolded: false,
+    };
+  // (1) 一覧を詰める。
+  if (fits(files, narrow, tree))
+    return {
+      width: narrow,
+      compact,
+      tree,
+      treeFolded: false,
+      filesFolded: false,
+    };
+  // (2) 変更ファイルの一覧を帯に畳む。
+  const treeFolded = tree !== 0 && !input.treeKeptOpen;
+  const treeWidth = treeFolded ? treeRail : tree;
+  if (fits(files, narrow, treeWidth))
+    return {
+      width: narrow,
+      compact,
+      tree: treeWidth,
+      treeFolded,
+      filesFolded: false,
+    };
+  // (3) ファイル一覧を畳む。
+  return {
+    width: narrow,
+    compact,
+    tree: treeWidth,
+    treeFolded,
+    filesFolded: files !== 0 && !input.filesKeptOpen,
+  };
 }
 
 export type ListColumnDrag = {
@@ -65,7 +106,7 @@ export type ListColumnDrag = {
 
 /**
  * 一覧の列の掴み (#history-resizer) の開始幅と上限。開始は見えている一覧の
- * 幅 (隣の変更ファイルの木を含めない。含めると掴んだ瞬間に木の幅だけ広がり、
+ * 幅 (隣の変更ファイルの一覧を含めない。含めると掴んだ瞬間にその幅だけ広がり、
  * 狭めても上限で止まった)。上限は、本文が要る幅を保てる一覧の幅まで (それを
  * 超えて離すと詰めた幅へ跳ぶので、そこで止める)。下限・上限は size の範囲。
  */
@@ -88,7 +129,7 @@ export function listColumnDrag(input: {
 /**
  * 保存した一覧の列の幅 (設定の historyWidth) を読み戻す。範囲 (HISTORY_WIDTH の
  * 下限〜上限) の中ならそのまま、外や数でないものは既定。端へ寄せない: 範囲の
- * 外の値は、この列が別の意味 (右の列の一覧) だった頃や壊れた設定から来るので、
+ * 外の値は、この列が別の意味 (画面の右端の列の一覧) だった頃や壊れた設定から来るので、
  * 端に寄せた幅は利用者が選んだ幅ではない。
  */
 export function restoredListWidth(value: unknown, size: PanelSize): number {
@@ -100,17 +141,40 @@ export function restoredListWidth(value: unknown, size: PanelSize): number {
     : size.default;
 }
 
-/** 一覧の列を出す画面 (Diff は #sidebar そのもの、History と作業ツリーは専用の一覧)。 */
+/**
+ * 一覧を出す画面 (Diff は変更ファイルの一覧 #sidebar そのもの、History と作業
+ * ツリーは専用の一覧で、変更ファイルの一覧はその右)。
+ */
 export type ListColumnKind = "sidebar" | "history" | "worktree";
 
+export type ListColumnKindInput = {
+  /** body の画面の印 (core/page-mode.ts の pageModeClasses)。 */
+  has(pageClass: string): boolean;
+  /** 作業ツリーの一覧だけの表示 (body[data-worktree-overview])。一覧が本文。 */
+  worktreeOverview: boolean;
+  /**
+   * 左の面の前面が画面 (route) のタブか、何も選んでいない。端末・画像のタブが
+   * 前面なら false: 本文はその面の箱が覆い、一覧は出さない (その画面の印は
+   * 背面のタブのまま残っている)。
+   */
+  leftFrontIsPage: boolean;
+};
+
 /**
- * #sidebar の見出し。一覧の列を出す画面では #sidebar は変更ファイル (Diff は
- * 一覧そのもの、History と作業ツリーは一覧の隣の列) なので changedFiles、
- * それ以外の画面では Files の木なので files。
+ * 一覧の列に出す一覧 (body[data-list-column] の値)。列は前面のタブの画面で
+ * 決める: Diff と、Diff から開いたファイルの詳細 (差分の 1 ファイル) は変更
+ * ファイルの一覧、History はコミット、選んでいる作業ツリーは作業ツリーの一覧。
+ * どれでもない画面と、前面が端末・画像のタブは null (ファイル一覧だけ)。
  */
-export function sidebarTitle(
-  kind: ListColumnKind | null,
-  labels: { files: string; changedFiles: string },
-): string {
-  return kind ? labels.changedFiles : labels.files;
+export function listColumnKindFor(
+  input: ListColumnKindInput,
+): ListColumnKind | null {
+  if (!input.leftFrontIsPage) return null;
+  if (input.has("gdp-diff-page")) return "sidebar";
+  if (input.has("gdp-history-page")) return "history";
+  if (input.has("gdp-worktree-page") && !input.worktreeOverview)
+    return "worktree";
+  if (input.has("gdp-file-detail-page") && !input.has("gdp-repo-blob-page"))
+    return "sidebar";
+  return null;
 }

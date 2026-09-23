@@ -2,139 +2,430 @@ import { describe, expect, test } from "vitest";
 import {
   type ListColumnKind,
   listColumnDrag,
+  listColumnKindFor,
   listColumnLayout,
   restoredListWidth,
-  sidebarTitle,
 } from "../core/list-column";
 import { HISTORY_WIDTH } from "../core/panel-sizes";
 import { DIFF_SCREEN_TEXT } from "../views/diff-view-i18n";
 
-// 一覧の列の決まり (core/list-column.ts)。本文 = room − 一覧 − 変更ファイルの木。
-// 本文が need に足りなければ、一覧を詰めた幅 (240) にし、次に木を帯 (28) に畳む。
-// 利用者が木を開いていれば畳まない。利用者の幅が詰めた幅以下なら詰めない。
-// 境目は既定の密度・左のサイドバー 280 のとき room = 窓 − 280 (一覧の画面では
-// 右の列の本体は畳んであり、頭の行は残るが本文の横には何も取らない)。
+// 一覧の列の決まり (core/list-column.ts)。本文 = room − ファイル一覧 − 一覧 −
+// 変更ファイルの一覧。本文が need に足りなければ、(1) 一覧を詰めた幅 (240) に
+// し、(2) 変更ファイルの一覧を帯 (28) に畳み、(3) ファイル一覧を畳む。利用者が
+// 手で開いた列は畳まない。境目は既定の密度・左のサイドバー 280・ファイル一覧
+// 240 のとき room = 窓 − 280。
 describe("listColumnLayout", () => {
   const base = {
+    files: 240,
+    filesKeptOpen: false,
     preferred: 320,
     compact: 240,
     tree: 240,
     treeRail: 28,
     treeKeptOpen: false,
   };
-  test.each([
-    // 1 面の History (need 480): 窓 1320 から全幅、1240 から詰める、それ未満は木を畳む
-    { name: "1 面 History 1320", room: 1040, need: 480, width: 320, tree: 240 },
-    { name: "1 面 History 1319", room: 1039, need: 480, width: 240, tree: 240 },
-    { name: "1 面 History 1240", room: 960, need: 480, width: 240, tree: 240 },
-    { name: "1 面 History 1239", room: 959, need: 480, width: 240, tree: 28 },
-    // 2 面の History (need 961): 1801 から全幅、1721 から詰める、それ未満は木を畳む
-    { name: "2 面 History 1801", room: 1521, need: 961, width: 320, tree: 240 },
-    { name: "2 面 History 1800", room: 1520, need: 961, width: 240, tree: 240 },
-    { name: "2 面 History 1721", room: 1441, need: 961, width: 240, tree: 240 },
-    { name: "2 面 History 1720", room: 1440, need: 961, width: 240, tree: 28 },
-    { name: "2 面 History 1600", room: 1320, need: 961, width: 240, tree: 28 },
-    // 木を開いたまま (利用者が開いた) なら、足りなくても畳まない
-    {
-      name: "2 面 History 1600・木を開いた",
-      room: 1320,
-      need: 961,
-      treeKeptOpen: true,
-      width: 240,
-      tree: 240,
-    },
-    // Diff は木が無い
-    {
-      name: "1 面 Diff 1080",
-      room: 800,
-      need: 480,
-      tree0: true,
-      width: 320,
-      tree: 0,
-    },
-    {
-      name: "1 面 Diff 1079",
-      room: 799,
-      need: 480,
-      tree0: true,
-      width: 240,
-      tree: 0,
-    },
-    {
-      name: "2 面 Diff 1561",
-      room: 1281,
-      need: 961,
-      tree0: true,
-      width: 320,
-      tree: 0,
-    },
-    {
-      name: "2 面 Diff 1560",
-      room: 1280,
-      need: 961,
-      tree0: true,
-      width: 240,
-      tree: 0,
-    },
-    // 一覧を隠している (preferred 0) ときも、木は畳む
-    {
-      name: "一覧を隠した 2 面 History 1280",
-      room: 1000,
-      need: 961,
-      preferred: 0,
-      width: 0,
-      tree: 28,
-    },
-    // 利用者が広げた幅・詰めた幅と同じ幅
-    {
-      name: "利用者 560・1 面 History 1600",
-      room: 1320,
-      need: 480,
-      preferred: 560,
-      width: 560,
-      tree: 240,
-    },
-    {
-      name: "利用者 240・狭い",
-      room: 500,
-      need: 480,
-      preferred: 240,
-      width: 240,
-      tree: 28,
-    },
-  ])("$name → 一覧 $width・木 $tree", ({
-    name: _name,
-    room,
-    need,
-    width,
-    tree,
-    tree0,
-    preferred,
-    treeKeptOpen,
-  }: {
+  type Row = {
     name: string;
     room: number;
     need: number;
+    input?: Partial<typeof base>;
     width: number;
     tree: number;
-    tree0?: boolean;
-    preferred?: number;
-    treeKeptOpen?: boolean;
+    filesFolded: boolean;
+  };
+  const rows: Row[] = [
+    // 1 面の History (need 480): 窓 1560 から全幅、1480 から詰め、1268 から変更
+    // ファイルの一覧を畳み、それ未満はファイル一覧も畳む
+    {
+      name: "1 面 History 1560",
+      room: 1280,
+      need: 480,
+      width: 320,
+      tree: 240,
+      filesFolded: false,
+    },
+    {
+      name: "1 面 History 1559",
+      room: 1279,
+      need: 480,
+      width: 240,
+      tree: 240,
+      filesFolded: false,
+    },
+    {
+      name: "1 面 History 1480",
+      room: 1200,
+      need: 480,
+      width: 240,
+      tree: 240,
+      filesFolded: false,
+    },
+    {
+      name: "1 面 History 1479",
+      room: 1199,
+      need: 480,
+      width: 240,
+      tree: 28,
+      filesFolded: false,
+    },
+    {
+      name: "1 面 History 1280",
+      room: 1000,
+      need: 480,
+      width: 240,
+      tree: 28,
+      filesFolded: false,
+    },
+    {
+      name: "1 面 History 1268",
+      room: 988,
+      need: 480,
+      width: 240,
+      tree: 28,
+      filesFolded: false,
+    },
+    {
+      name: "1 面 History 1267",
+      room: 987,
+      need: 480,
+      width: 240,
+      tree: 28,
+      filesFolded: true,
+    },
+    // 2 面の History (need 961): 2041 から全幅、1961 から詰め、1749 から畳み、
+    // それ未満はファイル一覧も畳む (右の面を預けるかは main-tabs-view)
+    {
+      name: "2 面 History 2041",
+      room: 1761,
+      need: 961,
+      width: 320,
+      tree: 240,
+      filesFolded: false,
+    },
+    {
+      name: "2 面 History 2040",
+      room: 1760,
+      need: 961,
+      width: 240,
+      tree: 240,
+      filesFolded: false,
+    },
+    {
+      name: "2 面 History 1961",
+      room: 1681,
+      need: 961,
+      width: 240,
+      tree: 240,
+      filesFolded: false,
+    },
+    {
+      name: "2 面 History 1960",
+      room: 1680,
+      need: 961,
+      width: 240,
+      tree: 28,
+      filesFolded: false,
+    },
+    {
+      name: "2 面 History 1749",
+      room: 1469,
+      need: 961,
+      width: 240,
+      tree: 28,
+      filesFolded: false,
+    },
+    {
+      name: "2 面 History 1748",
+      room: 1468,
+      need: 961,
+      width: 240,
+      tree: 28,
+      filesFolded: true,
+    },
+    {
+      name: "2 面 History 1600",
+      room: 1320,
+      need: 961,
+      width: 240,
+      tree: 28,
+      filesFolded: true,
+    },
+    {
+      name: "2 面 History 1280",
+      room: 1000,
+      need: 961,
+      width: 240,
+      tree: 28,
+      filesFolded: true,
+    },
+    // 利用者が手で開いた列は、足りなくても畳まない
+    {
+      name: "2 面 History 1600・変更ファイルの一覧を開いた",
+      room: 1320,
+      need: 961,
+      input: { treeKeptOpen: true },
+      width: 240,
+      tree: 240,
+      filesFolded: true,
+    },
+    {
+      name: "2 面 History 1600・ファイル一覧を開いた",
+      room: 1320,
+      need: 961,
+      input: { filesKeptOpen: true },
+      width: 240,
+      tree: 28,
+      filesFolded: false,
+    },
+    // 利用者がファイル一覧を畳んでいる (files 0): 畳むものは無い
+    {
+      name: "2 面 History 1280・ファイル一覧を利用者が畳んだ",
+      room: 1000,
+      need: 961,
+      input: { files: 0 },
+      width: 240,
+      tree: 28,
+      filesFolded: false,
+    },
+    // Diff は一覧が変更ファイルの一覧 (その右の列は無い): 1 面は 1320 から全幅、
+    // 1240 から詰め、それ未満はファイル一覧を畳む。2 面は 1801・1721
+    {
+      name: "1 面 Diff 1320",
+      room: 1040,
+      need: 480,
+      input: { tree: 0 },
+      width: 320,
+      tree: 0,
+      filesFolded: false,
+    },
+    {
+      name: "1 面 Diff 1319",
+      room: 1039,
+      need: 480,
+      input: { tree: 0 },
+      width: 240,
+      tree: 0,
+      filesFolded: false,
+    },
+    {
+      name: "1 面 Diff 1240",
+      room: 960,
+      need: 480,
+      input: { tree: 0 },
+      width: 240,
+      tree: 0,
+      filesFolded: false,
+    },
+    {
+      name: "1 面 Diff 1239",
+      room: 959,
+      need: 480,
+      input: { tree: 0 },
+      width: 240,
+      tree: 0,
+      filesFolded: true,
+    },
+    {
+      name: "2 面 Diff 1801",
+      room: 1521,
+      need: 961,
+      input: { tree: 0 },
+      width: 320,
+      tree: 0,
+      filesFolded: false,
+    },
+    {
+      name: "2 面 Diff 1721",
+      room: 1441,
+      need: 961,
+      input: { tree: 0 },
+      width: 240,
+      tree: 0,
+      filesFolded: false,
+    },
+    {
+      name: "2 面 Diff 1720",
+      room: 1440,
+      need: 961,
+      input: { tree: 0 },
+      width: 240,
+      tree: 0,
+      filesFolded: true,
+    },
+    // 一覧の無い画面 (Files など): 2 面は 1481 からファイル一覧を出したまま
+    {
+      name: "2 面 Files 1481",
+      room: 1201,
+      need: 961,
+      input: { preferred: 0, tree: 0 },
+      width: 0,
+      tree: 0,
+      filesFolded: false,
+    },
+    {
+      name: "2 面 Files 1480",
+      room: 1200,
+      need: 961,
+      input: { preferred: 0, tree: 0 },
+      width: 0,
+      tree: 0,
+      filesFolded: true,
+    },
+    {
+      name: "1 面 Files 1280",
+      room: 1000,
+      need: 480,
+      input: { preferred: 0, tree: 0 },
+      width: 0,
+      tree: 0,
+      filesFolded: false,
+    },
+    // 利用者が一覧を畳んだ (帯 28 の幅で渡す): 詰めない
+    {
+      name: "一覧を畳んだ 2 面 History 1600",
+      room: 1320,
+      need: 961,
+      input: { preferred: 28 },
+      width: 28,
+      tree: 28,
+      filesFolded: false,
+    },
+    // 利用者が広げた幅・詰めた幅と同じ幅
+    {
+      name: "利用者 560・1 面 History 1800",
+      room: 1520,
+      need: 480,
+      input: { preferred: 560 },
+      width: 560,
+      tree: 240,
+      filesFolded: false,
+    },
+    {
+      name: "利用者 240・狭い",
+      room: 760,
+      need: 480,
+      input: { preferred: 240 },
+      width: 240,
+      tree: 28,
+      filesFolded: true,
+    },
+  ];
+  test.each(
+    rows,
+  )("$name → 一覧 $width・変更ファイルの一覧 $tree・ファイル一覧を畳む $filesFolded", ({
+    room,
+    need,
+    input: extra,
+    width,
+    tree,
+    filesFolded,
   }) => {
-    const input = {
-      ...base,
-      room,
-      need,
-      ...(tree0 ? { tree: 0 } : {}),
-      ...(preferred === undefined ? {} : { preferred }),
-      ...(treeKeptOpen === undefined ? {} : { treeKeptOpen }),
-    };
+    const input = { ...base, ...extra, room, need };
     expect(listColumnLayout(input)).toEqual({
       width,
       compact: width !== input.preferred,
       tree,
       treeFolded: input.tree > 0 && tree !== input.tree,
+      filesFolded,
     });
+  });
+});
+
+// 一覧の列に出す一覧 (core/list-column.ts の listColumnKindFor)。列は前面の
+// タブの画面で決める。端末・画像のタブが左の前面なら、背面の画面の印が残って
+// いても一覧は出さない (History から端末を開くと、コミットと変更ファイルの一覧が
+// 端末の左に残っていた)。
+describe("listColumnKindFor", () => {
+  const rows: Array<{
+    name: string;
+    classes: string[];
+    overview?: boolean;
+    front: "page" | "terminal";
+    kind: ListColumnKind | null;
+  }> = [
+    {
+      name: "Diff",
+      classes: ["gdp-diff-page"],
+      front: "page",
+      kind: "sidebar",
+    },
+    {
+      name: "History",
+      classes: ["gdp-history-page"],
+      front: "page",
+      kind: "history",
+    },
+    {
+      name: "History で開いたファイル",
+      classes: ["gdp-history-page", "gdp-file-detail-page"],
+      front: "page",
+      kind: "history",
+    },
+    {
+      name: "選んでいる作業ツリー",
+      classes: ["gdp-worktree-page"],
+      front: "page",
+      kind: "worktree",
+    },
+    {
+      name: "作業ツリーの一覧だけ",
+      classes: ["gdp-worktree-page"],
+      overview: true,
+      front: "page",
+      kind: null,
+    },
+    {
+      name: "Diff から開いたファイルの詳細",
+      classes: ["gdp-file-detail-page"],
+      front: "page",
+      kind: "sidebar",
+    },
+    {
+      name: "ファイルのソース",
+      classes: ["gdp-file-detail-page", "gdp-repo-blob-page"],
+      front: "page",
+      kind: null,
+    },
+    { name: "Files", classes: ["gdp-repo-page"], front: "page", kind: null },
+    { name: "Data", classes: ["gdp-database-page"], front: "page", kind: null },
+    {
+      name: "History の上に端末",
+      classes: ["gdp-history-page"],
+      front: "terminal",
+      kind: null,
+    },
+    {
+      name: "Diff の上に端末",
+      classes: ["gdp-diff-page"],
+      front: "terminal",
+      kind: null,
+    },
+    {
+      name: "選んでいる作業ツリーの上に端末",
+      classes: ["gdp-worktree-page"],
+      front: "terminal",
+      kind: null,
+    },
+    {
+      name: "Files の上に端末",
+      classes: ["gdp-repo-page"],
+      front: "terminal",
+      kind: null,
+    },
+  ];
+  test.each(rows)("$name ($front) → $kind", ({
+    classes,
+    overview,
+    front,
+    kind,
+  }) => {
+    expect(
+      listColumnKindFor({
+        has: (pageClass) => classes.includes(pageClass),
+        worktreeOverview: overview === true,
+        leftFrontIsPage: front === "page",
+      }),
+    ).toBe(kind);
   });
 });
 
@@ -161,7 +452,7 @@ describe("restoredListWidth", () => {
 });
 
 // 一覧の列の掴みの開始幅と上限 (core/list-column.ts の listColumnDrag)。開始は
-// 見えている一覧の幅 (隣の変更ファイルの木を含めない)、上限は本文が要る幅を
+// 見えている一覧の幅 (隣の変更ファイルの一覧を含めない)、上限は本文が要る幅を
 // 保てる幅 (範囲 240〜800 の中)。
 describe("listColumnDrag", () => {
   test.each([
@@ -226,32 +517,10 @@ describe("listColumnDrag", () => {
   });
 });
 
-// #sidebar の見出し。一覧の列を出す画面では #sidebar は変更ファイルなので
-// 「Changed files / 変更ファイル」。Files の木のときだけ「Files」。History の
-// 変更ファイルの列が「FILES」と出て、右の列の Files の木に見えたことがある。
-describe("sidebarTitle", () => {
-  const cases: Array<{ kind: ListColumnKind | null; changed: boolean }> = [
-    { kind: null, changed: false },
-    { kind: "sidebar", changed: true },
-    { kind: "history", changed: true },
-    { kind: "worktree", changed: true },
-  ];
-  for (const language of ["en", "ja"] as const) {
-    const labels = {
-      files: `files-${language}`,
-      changedFiles: DIFF_SCREEN_TEXT[language].fileListLabel,
-    };
-    for (const { kind, changed } of cases) {
-      test(`${language} ${kind ?? "no list column"}`, () => {
-        expect(sidebarTitle(kind, labels)).toBe(
-          changed ? labels.changedFiles : labels.files,
-        );
-      });
-    }
-  }
-
-  test("the changed files label is the one the screens use", () => {
-    expect(DIFF_SCREEN_TEXT.en.fileListLabel).toBe("Changed files");
-    expect(DIFF_SCREEN_TEXT.ja.fileListLabel).toBe("変更ファイル");
-  });
+// 変更ファイルの一覧 (#sidebar) の見出し。ファイル一覧 (#file-list) の「Files」と
+// 分けて、同時に出ていてもどちらの一覧か分かるようにする (app.ts の
+// syncSidebarTitle が当てる)。
+test("the changed files label is the one the screens use", () => {
+  expect(DIFF_SCREEN_TEXT.en.fileListLabel).toBe("Changed files");
+  expect(DIFF_SCREEN_TEXT.ja.fileListLabel).toBe("変更ファイル");
 });

@@ -85,9 +85,9 @@ export type WorktreeViewDeps = {
   setPageMode(): void;
   syncHeaderMenu(): void;
   /**
-   * #sidebar (#filelist) の持ち主が変わる。true = この画面が作業ツリーの変更
-   * ファイルを書く (Files の木の使い回しをやめてもらう)。false = 一覧だけの
-   * 表示で、#sidebar は右の列の Files の木に戻してもらう。
+   * #sidebar (#filelist。変更ファイルの一覧) の持ち主が変わる。true = この画面が
+   * 作業ツリーの変更ファイルを書く。false = 一覧だけの表示で、#sidebar は使わない
+   * (ファイル一覧は別の要素 #file-list なので、app.ts は今は何もしない)。
    */
   onSidebarOwner(owned: boolean): void;
   setStatus(status: "live" | "refreshing" | "error" | null): void;
@@ -1996,7 +1996,7 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       button.disabled = !tree;
     }
     const item = selectedWorktree();
-    // 一覧だけのとき #sidebar は右の列の Files の木 (app が出す)。触らない。
+    // 一覧だけのとき #sidebar (変更ファイルの一覧) は出さない。触らない。
     if (!item) {
       deps.onSidebarOwner(false);
       return;

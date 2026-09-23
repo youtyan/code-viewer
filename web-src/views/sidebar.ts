@@ -1,7 +1,10 @@
 import { apiUrl } from "../core/api-url";
-// File list sidebar: tree/flat rendering, virtual tree for huge repos,
-// filtering, folder icons, keyboard navigation, and sidebar chrome
-// (width / font size / hide toggle). Extracted from app.ts.
+// The two file lists: the file list (the repository tree, #file-list, shown on
+// every screen) and the list of changed files (#sidebar: Diff, and next to the
+// History / worktree lists). One createSidebar per list (SidebarDom).
+// Tree/flat rendering, virtual tree for huge repos, filtering, folder icons,
+// keyboard navigation, and the file list's chrome (width / font size / hide
+// toggle). Extracted from app.ts.
 
 import { classifyDiffFileKind } from "../core/diff-file-kinds";
 import { responseErrorMessage } from "../core/error-detail";
@@ -50,7 +53,58 @@ export function sidebarAncestorDirs(path: string): string[] {
   return dirs;
 }
 
+/**
+ * 一覧を描く要素 (セレクタ)。変更ファイルの一覧 (#sidebar) とファイル一覧
+ * (#file-list) で 1 つずつ createSidebar を作る (ui-layout.md の「一覧の列」)。
+ */
+export type SidebarDom = {
+  /** 列の要素 (スクロールする箱)。 */
+  root: string;
+  /** 行を描く ul。 */
+  list: string;
+  head: string;
+  filterWrap: string;
+  filter: string;
+  filterClear: string;
+  totals: string;
+  expandAll: string;
+  collapseAll: string;
+};
+
+/** 変更ファイルの一覧 (Diff の一覧・History と作業ツリーの一覧の右)。 */
+export const CHANGES_LIST_DOM: SidebarDom = {
+  root: "#sidebar",
+  list: "#filelist",
+  head: "#sidebar .sb-head",
+  filterWrap: "#sidebar .sb-filter-wrap",
+  filter: "#sb-filter",
+  filterClear: "#sb-filter-clear",
+  totals: "#totals",
+  expandAll: "#sb-expand-all",
+  collapseAll: "#sb-collapse-all",
+};
+
+/** ファイル一覧 (どの画面でも左のサイドバーの右に出すリポジトリの木)。 */
+export const FILE_LIST_DOM: SidebarDom = {
+  root: "#file-list",
+  list: "#file-list-rows",
+  head: "#file-list .sb-head",
+  filterWrap: "#file-list .sb-filter-wrap",
+  filter: "#file-list-filter",
+  filterClear: "#file-list-filter-clear",
+  totals: "#file-list-totals",
+  expandAll: "#file-list-expand-all",
+  collapseAll: "#file-list-collapse-all",
+};
+
 export type SidebarDeps = {
+  /** 描く要素。 */
+  dom: SidebarDom;
+  /**
+   * ファイル一覧 (リポジトリの木) なら true、変更ファイルの一覧なら false。
+   * 列を畳むボタン・幅・文字の大きさはファイル一覧の側が持つ。
+   */
+  repository: boolean;
   STATE: {
     sbView: "tree" | "flat";
     sbWidth: number;
@@ -106,15 +160,10 @@ export type SidebarDeps = {
   fileCountText(count: number): string;
   sidebarToggleTitle(hidden: boolean): string;
   /**
-   * 利用者が自分で右の列を畳んだ / 開いた (ボタン・キー)。自動で畳んだものと
-   * 区別するために呼ぶ (app.ts の 2 面のときの自動の畳み)。
+   * 利用者が自分でファイル一覧を畳んだ / 開いた (ボタン・キー)。自動で畳んだ
+   * ものと区別するために呼ぶ (app.ts の、幅が足りないときの自動の畳み)。
    */
   onUserToggledSidebarHidden?(hidden: boolean): void;
-  /**
-   * 右の列の畳むボタンを押した。一覧を本文の左の列に出す画面なら、右の列の代わりに
-   * 一覧の列を出し入れして true (app.ts の toggleListColumn)。
-   */
-  toggleListColumn?(): boolean;
   openDirectoryInOsTitle(): string;
   omittedDirectoryBadge(reason: RepoTreeEntry["children_omitted_reason"]): {
     label: string;
@@ -133,6 +182,7 @@ export function createSidebar(deps: SidebarDeps) {
     $,
     $$,
     STATE,
+    dom: DOM,
     openDiffFile,
     sidebarItemHref,
     prefetchByPath,
@@ -216,6 +266,14 @@ export function createSidebar(deps: SidebarDeps) {
 
   let SIDEBAR_VIRTUAL_ACTIVE_PATH = "";
 
+  // 選んでいる行。変更ファイルの一覧は本文と共有する STATE.activeFile
+  // (diff-view が読む)、ファイル一覧は自分だけで持つ (同時に出すので、片方の
+  // 選択がもう片方の選択を上書きしない)。
+  let REPO_ACTIVE_PATH: string | null = null;
+  function activePath(): string | null {
+    return deps.repository ? REPO_ACTIVE_PATH : STATE.activeFile;
+  }
+
   let SIDEBAR_TREE_ITEMS_CACHE = new WeakMap<TreeNode, TreeNodeItem[]>();
 
   const SIDEBAR_LAZY_LOADED_DIRS = new Set<string>();
@@ -235,11 +293,14 @@ export function createSidebar(deps: SidebarDeps) {
     document.body.style.setProperty("--ui-row-h", `${rowHeightFor(size)}px`);
   }
 
+  // 見出しの高さ (その下に貼り付く絞り込みの top)。一覧は 2 つ同時に出るので、
+  // それぞれの列の要素に書く。
   function syncSidebarHeaderHeight() {
     requestAnimationFrame(() => {
-      const head = document.querySelector<HTMLElement>(".sb-head");
-      if (head)
-        document.documentElement.style.setProperty(
+      const head = document.querySelector<HTMLElement>(DOM.head);
+      const root = document.querySelector<HTMLElement>(DOM.root);
+      if (head && root)
+        root.style.setProperty(
           "--sidebar-head-h",
           `${Math.ceil(head.getBoundingClientRect().height)}px`,
         );
@@ -247,7 +308,7 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function observeSidebarHeaderHeight() {
-    const head = document.querySelector<HTMLElement>(".sb-head");
+    const head = document.querySelector<HTMLElement>(DOM.head);
     if (!head || typeof ResizeObserver === "undefined") {
       syncSidebarHeaderHeight();
       return;
@@ -271,11 +332,10 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function setSidebarTreeActionIcons() {
-    const sidebarToggle = ensureSidebarToggleButton();
-    const expand = document.querySelector<HTMLButtonElement>("#sb-expand-all");
-    const collapse =
-      document.querySelector<HTMLButtonElement>("#sb-collapse-all");
-    syncSidebarToggleIcon(sidebarToggle);
+    // 列を畳むボタンはファイル一覧の列の頭にあり、ファイル一覧の側が持つ。
+    if (deps.repository) syncSidebarToggleIcon(ensureSidebarToggleButton());
+    const expand = document.querySelector<HTMLButtonElement>(DOM.expandAll);
+    const collapse = document.querySelector<HTMLButtonElement>(DOM.collapseAll);
     if (expand)
       expand.innerHTML = iconSvg("octicon-chevron-down", EXPAND_ALL_16_PATHS);
     if (collapse)
@@ -308,7 +368,7 @@ export function createSidebar(deps: SidebarDeps) {
     if (!button) button = createSidebarToggleButton();
     bindSidebarToggleButton(button);
     // 文言が「畳む / 出す」と状態で変わるので、押した状態 (aria-pressed) は
-    // 付けない (「出す、押されている」と読まれて逆に聞こえた)。右の列が
+    // 付けない (「出す、押されている」と読まれて逆に聞こえた)。ファイル一覧が
     // 出ているかを開閉 (aria-expanded) で伝える。
     button.setAttribute(
       "aria-expanded",
@@ -334,11 +394,12 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   /**
-   * 木を畳む / 出すボタンと画面の入口 (#view-head) の置き場所。入口の絵柄と
-   * ボタンは右の列の頭 (#panel-head) の 1 段で、右の列を畳んでも動かさない
-   * (畳むのは頭の下の本体だけ。ui-layout.md の「一覧の列と右の列」)。ボタンは
-   * 絵柄の行の右端 (.view-head-row)。プロジェクト名とブランチ
-   * (#project-switcher) はタブ列の左端 (#tabs-lead) に固定で、ここでは動かさない。
+   * ファイル一覧を畳む / 出すボタンと画面の入口 (#view-head) の置き場所。入口の
+   * 絵柄とボタンは一覧の列の頭 (#panel-head。タブ列の行の左端) の 1 段で、
+   * ファイル一覧を畳んでも動かさない (畳むのは頭の下の一覧だけ。ui-layout.md の
+   * 「一覧の列」)。ボタンは絵柄の行の右端 (.view-head-row)。プロジェクト名と
+   * ブランチ (#project-switcher) はタブ列の左端 (#tabs-lead) に固定で、ここでは
+   * 動かさない。
    */
   function placeSidebarToggle() {
     const head = document.querySelector<HTMLElement>("#view-head");
@@ -356,27 +417,11 @@ export function createSidebar(deps: SidebarDeps) {
           .join(", ")} in index.html`,
       );
     attachSidebarToggle(row);
-    if (head.parentElement !== panelHead) panelHead.prepend(head);
+    if (head.parentElement !== panelHead) panelHead.append(head);
     // 絵柄 (.view-strip) は行の頭で、畳むボタンがその右端 (Tab で移る順を見た目の
     // 順にそろえる)。
     const strip = document.querySelector<HTMLElement>(".view-strip");
     if (strip && head.firstElementChild !== strip) head.prepend(strip);
-    placeSidebarFilter();
-  }
-
-  function placeSidebarFilter() {
-    const sidebarHead = document.querySelector<HTMLElement>(".sb-head");
-    const filter = document.querySelector<HTMLElement>(".sb-filter-wrap");
-    const list = document.querySelector<HTMLElement>("#filelist");
-    if (!sidebarHead || !filter || !list) return;
-    const repoSidebar = isRepositorySidebarMode();
-    if (repoSidebar && filter.parentElement !== sidebarHead) {
-      sidebarHead.appendChild(filter);
-      return;
-    }
-    if (!repoSidebar && filter.parentElement === sidebarHead) {
-      sidebarHead.after(filter);
-    }
   }
 
   function applySidebarHidden(
@@ -393,7 +438,6 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function toggleSidebarHidden() {
-    if (deps.toggleListColumn?.()) return;
     const hidden = !STATE.sidebarHidden;
     applySidebarHidden(hidden);
     deps.onUserToggledSidebarHidden?.(hidden);
@@ -1123,7 +1167,7 @@ export function createSidebar(deps: SidebarDeps) {
       SIDEBAR_VISIBLE_ROWS = [];
       return;
     }
-    const input = $<HTMLInputElement>("#sb-filter");
+    const input = $<HTMLInputElement>(DOM.filter);
     const filter = compileFileFilter(input.value);
     const invalid = showFilterValidity(input, filter);
     const filterActive = filter.kind !== "empty" && !invalid;
@@ -1189,7 +1233,7 @@ export function createSidebar(deps: SidebarDeps) {
     syncSidebarFilterCount(filterActive, visibleFiles, totalFiles);
   }
 
-  // "#totals" normally shows the sidebar summary ("12 files"). While a
+  // The totals (#totals / #file-list-totals) normally show the sidebar summary ("12 files"). While a
   // filter is active it shows "matching / all" instead, and the original text
   // comes back when the filter clears. Only the text this function wrote is
   // replaced, so a later writer (e.g. "Cannot load tree") is never clobbered.
@@ -1197,7 +1241,7 @@ export function createSidebar(deps: SidebarDeps) {
   let SIDEBAR_TOTALS_FILTER_TEXT = "";
   function setSidebarTotals(text: string) {
     SIDEBAR_TOTALS_BASE = text;
-    const el = $("#totals");
+    const el = $(DOM.totals);
     if (el.textContent === SIDEBAR_TOTALS_FILTER_TEXT) el.textContent = text;
     if (!SIDEBAR_TOTALS_FILTER_TEXT) {
       el.textContent = text;
@@ -1211,7 +1255,7 @@ export function createSidebar(deps: SidebarDeps) {
     visible: number,
     total: number,
   ) {
-    const el = document.querySelector<HTMLElement>("#totals");
+    const el = document.querySelector<HTMLElement>(DOM.totals);
     if (!el) return;
     if (!active) {
       if (SIDEBAR_TOTALS_FILTER_TEXT) {
@@ -1228,7 +1272,7 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function sidebarVirtualRange() {
-    const sidebar = document.querySelector<HTMLElement>("#sidebar");
+    const sidebar = document.querySelector<HTMLElement>(DOM.root);
     const scrollTop = sidebar?.scrollTop || 0;
     const height = sidebar?.clientHeight || window.innerHeight;
     const rowHeight = virtualRowHeight();
@@ -1244,7 +1288,7 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function renderVirtualSidebarWindow() {
-    const ul = $("#filelist");
+    const ul = $(DOM.list);
     if (!ul.classList.contains("tree-virtual")) return;
     const { start, end } = sidebarVirtualRange();
     const rowHeight = virtualRowHeight();
@@ -1316,7 +1360,7 @@ export function createSidebar(deps: SidebarDeps) {
     (
       restored ??
       target ??
-      document.querySelector<HTMLElement>("#sidebar")
+      document.querySelector<HTMLElement>(DOM.root)
     )?.focus({ preventScroll: true });
   }
 
@@ -1349,19 +1393,19 @@ export function createSidebar(deps: SidebarDeps) {
   function scrollVirtualSidebarPathIntoView(path: string) {
     const index = SIDEBAR_VISIBLE_ROWS.findIndex((row) => row.path === path);
     if (index < 0) return;
-    const sidebar = document.querySelector<HTMLElement>("#sidebar");
+    const sidebar = document.querySelector<HTMLElement>(DOM.root);
     if (!sidebar) return;
-    const ul = $("#filelist");
+    const ul = $(DOM.list);
     const rowHeight = virtualRowHeight();
     const top = index * rowHeight;
     const bottom = top + rowHeight;
     const sidebarRect = sidebar.getBoundingClientRect();
     const stickyBottom = Math.max(
       sidebarRect.top,
-      document.querySelector<HTMLElement>(".sb-head")?.getBoundingClientRect()
+      document.querySelector<HTMLElement>(DOM.head)?.getBoundingClientRect()
         .bottom || sidebarRect.top,
       document
-        .querySelector<HTMLElement>(".sb-filter-wrap")
+        .querySelector<HTMLElement>(DOM.filterWrap)
         ?.getBoundingClientRect().bottom || sidebarRect.top,
     );
     const topPadding = Math.max(8, stickyBottom - sidebarRect.top + 8);
@@ -1383,14 +1427,14 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function rerenderVirtualSidebar() {
-    const ul = document.querySelector<HTMLElement>("#filelist");
+    const ul = document.querySelector<HTMLElement>(DOM.list);
     if (!ul?.classList.contains("tree-virtual")) return;
     computeVirtualSidebarVisibleRows();
     renderVirtualSidebarWindow();
   }
 
   function renderVirtualTreeSidebar(root: TreeNode) {
-    const ul = $("#filelist");
+    const ul = $(DOM.list);
     SIDEBAR_TREE_ROOT = root;
     buildSidebarTreeRows(root);
     ul.classList.add("tree-virtual");
@@ -1399,7 +1443,7 @@ export function createSidebar(deps: SidebarDeps) {
     computeVirtualSidebarVisibleRows();
     renderVirtualSidebarWindow();
     document
-      .querySelector<HTMLElement>("#sidebar")
+      .querySelector<HTMLElement>(DOM.root)
       ?.addEventListener("scroll", renderVirtualSidebarWindow, {
         passive: true,
       });
@@ -1513,7 +1557,8 @@ export function createSidebar(deps: SidebarDeps) {
     buildSidebarTreeRows(SIDEBAR_TREE_ROOT);
     rerenderVirtualSidebar();
     // active ハイライトのみ再適用する。reveal なしなのでスクロールは動かない。
-    if (STATE.activeFile) markActive(STATE.activeFile);
+    const active = activePath();
+    if (active) markActive(active);
     applyFilter();
   }
 
@@ -1631,9 +1676,9 @@ export function createSidebar(deps: SidebarDeps) {
     files: SidebarItem[],
     onFileClick?: (file: SidebarItem) => void,
   ) {
-    const ul = $("#filelist");
+    const ul = $(DOM.list);
     const repoSidebar = !!onFileClick;
-    if (!repoSidebar) {
+    if (!repoSidebar && deps.repository) {
       const repoTarget =
         document.querySelector<HTMLElement>("#repo-target-wrap");
       if (repoTarget) {
@@ -1661,10 +1706,10 @@ export function createSidebar(deps: SidebarDeps) {
     // Repo-mode sidebars (custom onFileClick) list the whole repository;
     // writing that into STATE.files would make every file look like part of
     // the current diff. Only the diff sidebar owns STATE.files.
-    if (!onFileClick) STATE.files = files as FileMeta[];
+    if (!onFileClick && !deps.repository) STATE.files = files as FileMeta[];
     SIDEBAR_FILES = files;
     SIDEBAR_ON_FILE_CLICK = onFileClick;
-    if (!onFileClick) setRepoSidebarRef(null);
+    if (!onFileClick && deps.repository) setRepoSidebarRef(null);
     if (treeMode) {
       const root = buildTree(files);
       if (repoSidebar || files.length >= VIRTUAL_SIDEBAR_THRESHOLD)
@@ -1678,27 +1723,28 @@ export function createSidebar(deps: SidebarDeps) {
     );
     // Update view-toggle visual
     const effectiveView = treeMode ? "tree" : STATE.sbView;
-    $$(".sb-view-seg button").forEach((b) => {
+    $$(`${DOM.root} .sb-view-seg button`).forEach((b) => {
       b.classList.toggle("active", b.dataset.view === effectiveView);
     });
-    $$(".sb-tree-action").forEach((b) => {
+    $$(`${DOM.root} .sb-tree-action`).forEach((b) => {
       (b as HTMLButtonElement).disabled = !treeMode || !files.length;
     });
     // Re-apply active highlight if any
-    if (STATE.activeFile) markActive(STATE.activeFile);
+    const active = activePath();
+    if (active) markActive(active);
     applyFilter();
     syncDiffListRoles(ul, repoSidebar, treeMode);
     syncDiffListTabStop(focused);
   }
 
-  // 差分の一覧 (Diff の変更ファイル・History の変更ファイルの木。仮想表示で
+  // 差分の一覧 (Diff の変更ファイル・History の変更ファイルの一覧。仮想表示で
   // ない木と平らな一覧) も Tab の止まり場所を 1 つにする (views/list-tab-stop.ts。
   // Files の木は仮想表示で syncTreeTabStop)。行は作り直さず印だけ変わるので、
   // 選び直し・絞り込み・開閉のたびに付け直す。
   const DIFF_LIST_ROW_SELECTOR = "li[data-path], li[data-dirpath]";
 
   function syncDiffListTabStop(focused?: FocusedListRow | null) {
-    const ul = document.querySelector<HTMLElement>("#filelist");
+    const ul = document.querySelector<HTMLElement>(DOM.list);
     if (
       !ul?.hasAttribute("data-diff-list") ||
       ul.classList.contains("tree-virtual")
@@ -1719,7 +1765,7 @@ export function createSidebar(deps: SidebarDeps) {
       actionSelector: "[data-row-action]",
       ariaSelected: true,
       ...(focused === undefined ? {} : { focused }),
-      fallback: document.querySelector<HTMLElement>("#sidebar"),
+      fallback: document.querySelector<HTMLElement>(DOM.root),
     });
   }
 
@@ -1748,11 +1794,21 @@ export function createSidebar(deps: SidebarDeps) {
       group.setAttribute("role", "group");
   }
 
+  /** 見出しの全部開く / 全部畳むのボタンを、この一覧に付ける (一覧ごとに 1 組)。 */
+  function bindTreeActions() {
+    $(DOM.expandAll).addEventListener("click", () =>
+      setAllSidebarDirsCollapsed(false),
+    );
+    $(DOM.collapseAll).addEventListener("click", () =>
+      setAllSidebarDirsCollapsed(true),
+    );
+  }
+
   function setAllSidebarDirsCollapsed(collapsed: boolean) {
     const before = new Set(STATE.collapsedDirs);
     const beforeLazyExpanded = new Set(STATE.lazyExpandedDirs);
     if (!collapsed) STATE.collapsedDirs.clear();
-    if ($("#filelist").classList.contains("tree-virtual")) {
+    if ($(DOM.list).classList.contains("tree-virtual")) {
       const added: string[] = [];
       const addedLazyExpanded: string[] = [];
       if (collapsed) {
@@ -1788,7 +1844,7 @@ export function createSidebar(deps: SidebarDeps) {
       return;
     }
     const added: string[] = [];
-    $$<HTMLElement>("#filelist .tree-dir[data-dirpath]").forEach((li) => {
+    $$<HTMLElement>(`${DOM.list} .tree-dir[data-dirpath]`).forEach((li) => {
       const path = li.dataset.dirpath || "";
       if (!path) return;
       li.classList.toggle("collapsed", collapsed);
@@ -1826,7 +1882,7 @@ export function createSidebar(deps: SidebarDeps) {
         lazyExpandedAdded.push(dir);
       }
       const liEl = document.querySelector<HTMLElement>(
-        `#filelist .tree-dir[data-dirpath="${CSS.escape(dir)}"]`,
+        `${DOM.list} .tree-dir[data-dirpath="${CSS.escape(dir)}"]`,
       );
       liEl?.classList.remove("collapsed");
       const icon = liEl?.querySelector<HTMLElement>(".dir-icon");
@@ -1839,11 +1895,12 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function markActive(path: string, options: { reveal?: boolean } = {}) {
-    STATE.activeFile = path;
+    if (deps.repository) REPO_ACTIVE_PATH = path;
+    else STATE.activeFile = path;
     SIDEBAR_VIRTUAL_ACTIVE_PATH = path;
     if (options.reveal && isSidebarTreeRendered()) expandSidebarAncestors(path);
     setActiveSidebarItem(sidebarItemByPath(path));
-    if ($("#filelist").classList.contains("tree-virtual")) {
+    if ($(DOM.list).classList.contains("tree-virtual")) {
       renderVirtualSidebarWindow();
       // Only navigation-driven activations may move the sidebar scroll.
       // Re-marking during a refresh/re-render must not yank the position
@@ -1861,9 +1918,9 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function applyFilter() {
-    const input = $<HTMLInputElement>("#sb-filter");
+    const input = $<HTMLInputElement>(DOM.filter);
     syncSidebarFilterClearButton();
-    if ($("#filelist").classList.contains("tree-virtual")) {
+    if ($(DOM.list).classList.contains("tree-virtual")) {
       rerenderVirtualSidebar();
       return;
     }
@@ -1873,7 +1930,7 @@ export function createSidebar(deps: SidebarDeps) {
     const filterActive = filter.kind !== "empty" && !invalid;
     let totalFiles = 0;
     let visibleFiles = 0;
-    $$("#filelist li[data-path]").forEach((li) => {
+    $$(`${DOM.list} li[data-path]`).forEach((li) => {
       const match = matches(li.dataset.path || "");
       li.classList.toggle("hidden", !match);
       if (li.classList.contains("hidden-by-tests")) return;
@@ -1899,7 +1956,7 @@ export function createSidebar(deps: SidebarDeps) {
     dirMatches?: (path: string) => boolean,
     filterActive = false,
   ) {
-    const dirs = $$<HTMLElement>("#filelist .tree-dir");
+    const dirs = $$<HTMLElement>(`${DOM.list} .tree-dir`);
     for (let i = dirs.length - 1; i >= 0; i--) {
       const dir = dirs[i];
       const childUl = dir.nextElementSibling;
@@ -1952,15 +2009,14 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function syncSidebarFilterClearButton() {
-    const input = document.querySelector<HTMLInputElement>("#sb-filter");
-    const button =
-      document.querySelector<HTMLButtonElement>("#sb-filter-clear");
+    const input = document.querySelector<HTMLInputElement>(DOM.filter);
+    const button = document.querySelector<HTMLButtonElement>(DOM.filterClear);
     if (!input || !button) return;
     button.hidden = input.value.length === 0;
   }
 
   function clearSidebarFilter() {
-    const input = document.querySelector<HTMLInputElement>("#sb-filter");
+    const input = document.querySelector<HTMLInputElement>(DOM.filter);
     if (!input?.value) return;
     input.value = "";
     // Repository 以外の画面も同じ入力の input event を購読している。
@@ -1985,7 +2041,8 @@ export function createSidebar(deps: SidebarDeps) {
     )
       return false;
     let parent = row.parentElement;
-    while (parent && parent.id !== "filelist") {
+    const list = document.querySelector(DOM.list);
+    while (parent && parent !== list) {
       if (parent.classList.contains("tree-children")) {
         const dir = parent.previousElementSibling;
         if (
@@ -1999,8 +2056,7 @@ export function createSidebar(deps: SidebarDeps) {
     return true;
   }
 
-  const SIDEBAR_ITEM_SELECTOR =
-    "#filelist li[data-path], #filelist .tree-dir[data-dirpath]";
+  const SIDEBAR_ITEM_SELECTOR = `${DOM.list} li[data-path], ${DOM.list} .tree-dir[data-dirpath]`;
 
   function sidebarItemPath(item: HTMLElement): string {
     return item.dataset.path || item.dataset.dirpath || "";
@@ -2014,13 +2070,13 @@ export function createSidebar(deps: SidebarDeps) {
     if (isVirtualSidebarActive() && SIDEBAR_ROW_BY_PATH.has(path)) {
       return (
         document.querySelector<HTMLElement>(
-          `#filelist li[data-path="${CSS.escape(path)}"], #filelist .tree-dir[data-dirpath="${CSS.escape(path)}"]`,
+          `${DOM.list} li[data-path="${CSS.escape(path)}"], ${DOM.list} .tree-dir[data-dirpath="${CSS.escape(path)}"]`,
         ) || null
       );
     }
     const escaped = CSS.escape(path);
     return document.querySelector<HTMLElement>(
-      `#filelist li[data-path="${escaped}"], #filelist .tree-dir[data-dirpath="${escaped}"]`,
+      `${DOM.list} li[data-path="${escaped}"], ${DOM.list} .tree-dir[data-dirpath="${escaped}"]`,
     );
   }
 
@@ -2038,12 +2094,12 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function isVirtualSidebarActive() {
-    return $("#filelist").classList.contains("tree-virtual");
+    return $(DOM.list).classList.contains("tree-virtual");
   }
 
   function virtualSidebarActiveIndex() {
-    const activePath = SIDEBAR_VIRTUAL_ACTIVE_PATH || STATE.activeFile || "";
-    return SIDEBAR_VISIBLE_ROWS.findIndex((row) => row.path === activePath);
+    const active = SIDEBAR_VIRTUAL_ACTIVE_PATH || activePath() || "";
+    return SIDEBAR_VISIBLE_ROWS.findIndex((row) => row.path === active);
   }
 
   function selectVirtualSidebarIndex(
@@ -2079,7 +2135,7 @@ export function createSidebar(deps: SidebarDeps) {
     current: HTMLElement,
     direction: 1 | -1,
   ): HTMLElement | null {
-    const root = document.querySelector<HTMLElement>("#filelist");
+    const root = document.querySelector<HTMLElement>(DOM.list);
     if (!current.isConnected) return null;
     if (!root) return null;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
@@ -2126,7 +2182,7 @@ export function createSidebar(deps: SidebarDeps) {
     item: HTMLElement,
     block: "nearest" | "start" | "end" = "nearest",
   ) {
-    const sidebar = document.querySelector<HTMLElement>("#sidebar");
+    const sidebar = document.querySelector<HTMLElement>(DOM.root);
     if (!sidebar) {
       item.scrollIntoView({ block });
       return;
@@ -2135,10 +2191,10 @@ export function createSidebar(deps: SidebarDeps) {
     const itemRect = item.getBoundingClientRect();
     const stickyBottom = Math.max(
       sidebarRect.top,
-      document.querySelector<HTMLElement>(".sb-head")?.getBoundingClientRect()
+      document.querySelector<HTMLElement>(DOM.head)?.getBoundingClientRect()
         .bottom || sidebarRect.top,
       document
-        .querySelector<HTMLElement>(".sb-filter-wrap")
+        .querySelector<HTMLElement>(DOM.filterWrap)
         ?.getBoundingClientRect().bottom || sidebarRect.top,
     );
     const topPadding = Math.max(8, stickyBottom - sidebarRect.top + 8);
@@ -2160,15 +2216,11 @@ export function createSidebar(deps: SidebarDeps) {
   }
 
   function isRepositorySidebarMode() {
-    return (
-      document.body.classList.contains("gdp-repo-page") ||
-      document.body.classList.contains("gdp-repo-blob-page") ||
-      document.body.classList.contains("gdp-files-column-page")
-    );
+    return deps.repository;
   }
 
   function isSidebarTreeRendered() {
-    return $("#filelist").classList.contains("tree");
+    return $(DOM.list).classList.contains("tree");
   }
 
   function moveActiveSidebarItem(direction: 1 | -1) {
@@ -2198,7 +2250,7 @@ export function createSidebar(deps: SidebarDeps) {
 
   function moveActiveSidebarPage(direction: 1 | -1) {
     if (isVirtualSidebarActive()) {
-      const sidebar = document.querySelector<HTMLElement>("#sidebar");
+      const sidebar = document.querySelector<HTMLElement>(DOM.root);
       const halfPageRows = Math.max(
         1,
         Math.floor(
@@ -2216,7 +2268,7 @@ export function createSidebar(deps: SidebarDeps) {
     const items = visibleSidebarItems();
     if (!items.length) return;
     const repoSidebar = isRepositorySidebarMode();
-    const sidebar = document.querySelector<HTMLElement>("#sidebar");
+    const sidebar = document.querySelector<HTMLElement>(DOM.root);
     const sample = items.find(
       (item) => item.getBoundingClientRect().height > 0,
     );
@@ -2330,7 +2382,7 @@ export function createSidebar(deps: SidebarDeps) {
       return;
     }
     const active = document.querySelector<HTMLElement>(
-      "#filelist .tree-dir.active[data-dirpath]",
+      `${DOM.list} .tree-dir.active[data-dirpath]`,
     );
     if (!active) {
       if (collapsed) moveDomSidebarToParent();
@@ -2353,7 +2405,7 @@ export function createSidebar(deps: SidebarDeps) {
       return;
     }
     const active = document.querySelector<HTMLElement>(
-      "#filelist .tree-dir.active[data-dirpath]",
+      `${DOM.list} .tree-dir.active[data-dirpath]`,
     );
     if (!active) return;
     const control = active.querySelector<HTMLElement>(".chev");
@@ -2367,7 +2419,7 @@ export function createSidebar(deps: SidebarDeps) {
       return;
     }
     const active = document.querySelector<HTMLElement>(
-      "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]",
+      `${DOM.list} li.active[data-path], ${DOM.list} .tree-dir.active[data-dirpath]`,
     );
     if (active && isSidebarRowVisible(active)) active.click();
   }
@@ -2392,8 +2444,7 @@ export function createSidebar(deps: SidebarDeps) {
     return items;
   }
 
-  const ACTIVE_SIDEBAR_ITEM_SELECTOR =
-    "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]";
+  const ACTIVE_SIDEBAR_ITEM_SELECTOR = `${DOM.list} li.active[data-path], ${DOM.list} .tree-dir.active[data-dirpath]`;
   function getSidebarRowByPath(path: string) {
     return SIDEBAR_ROW_BY_PATH.get(path);
   }
@@ -2427,7 +2478,6 @@ export function createSidebar(deps: SidebarDeps) {
     isRepositorySidebarMode,
     placeSidebarToggle,
     ensureSidebarToggleButton,
-    placeSidebarFilter,
     applySidebarHidden,
     toggleSidebarHidden,
     applySidebarWidth,
@@ -2437,6 +2487,7 @@ export function createSidebar(deps: SidebarDeps) {
     observeSidebarHeaderHeight,
     setSidebarTreeActionIcons,
     setAllSidebarDirsCollapsed,
+    bindTreeActions,
     expandSidebarAncestors,
     updateTreeDirVisibility,
     moveActiveSidebarItem,
