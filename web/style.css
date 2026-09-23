@@ -3825,10 +3825,12 @@ body.gdp-diff-page {
   /* 末尾の詰め物を画面ぴったりにせず、この分だけ短くする。 */
   --diff-tail-inset: 40px;
 }
-body.gdp-diff-page #diff::after {
-  content: "";
-  display: block;
-  height: calc(var(--content-h) - var(--diff-tail-inset));
+/* 末尾の詰め物は要素 (::after) ではなく下の余白にする。要素だと、カードが
+   届く前の空の本文の頭に 1 画面分の箱が描かれ、カードが届くとそれが押し
+   出されてレイアウトシフトになる (直接開いた Diff で 0.46〜0.57)。余白は
+   要素ではないので、上にカードが入っても動いたものに数えられない。 */
+body.gdp-diff-page #diff {
+  padding-bottom: calc(var(--content-h) - var(--diff-tail-inset));
 }
 
 .empty {

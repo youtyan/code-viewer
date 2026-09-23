@@ -26,6 +26,13 @@ export type DiffRowBasis = {
   split_changes: number;
   /** 最初のハンクが新しい側の 2 行目以降から始まるか (上へ広げるボタンが 1 段出る)。 */
   lead_gap: boolean;
+  /**
+   * 最後のハンクの後ろの文脈が 3 行ちょうどか (= まだ行が続く見込み。git は
+   * 変更の後ろに文脈を 3 行まで付け、ファイルの終わりで切れると 3 行未満になる)。
+   * 見込みなら画面は最後の「下へ広げる」行を描いた時点で置く
+   * (views/hunk-expand.ts)。無い (古い応答・追跡外) ときは false と同じ。
+   */
+  tail_more?: boolean;
 };
 
 export type DiffCardLayout = "side-by-side" | "line-by-line";
@@ -38,6 +45,8 @@ export type DiffCardMetrics = {
   headerHeight: number;
   /** ハンクの区切りの広げるボタン 1 段の高さ (`--code-line-height`)。 */
   gapRowHeight: number;
+  /** 最後のハンクの後ろの「下へ広げる」行の高さ。測れなければ 0 (入れない)。 */
+  trailingRowHeight?: number;
 };
 
 export type DiffCardEstimateInput = {
@@ -111,7 +120,15 @@ export function estimateDiffCardHeight(
   // (views/hunk-expand.ts の attachExpandControls)。
   const gapRows = (basis.lead_gap ? 1 : 0) + (basis.hunks - 1) * 2;
   const { rowHeight, headerHeight, gapRowHeight } = input.metrics;
-  return Math.round(headerHeight + rows * rowHeight + gapRows * gapRowHeight);
+  // 最後の「下へ広げる」行は、行が続く見込みのときに描いた時点で置かれる
+  // (削除したファイルには新しい側が無いので置かない)。
+  const trailing =
+    basis.tail_more && input.status !== "D"
+      ? (input.metrics.trailingRowHeight ?? 0)
+      : 0;
+  return Math.round(
+    headerHeight + rows * rowHeight + gapRows * gapRowHeight + trailing,
+  );
 }
 
 /**
@@ -130,6 +147,8 @@ export function diffRowBasisFromText(
     inHunk: boolean;
     dels: number;
     adds: number;
+    /** いまのハンクの終わりに続いている文脈の行の数。 */
+    tail: number;
   } | null = null;
   const flushBlock = () => {
     if (!current) return;
@@ -140,6 +159,11 @@ export function diffRowBasisFromText(
   const flushFile = () => {
     if (!current) return;
     flushBlock();
+    // 新しい側が無い (削除) ときは続きも無い。
+    current.basis.tail_more =
+      current.newPath !== null &&
+      current.basis.hunks > 0 &&
+      current.tail >= DIFF_CONTEXT_LINES;
     const key = current.newPath ?? current.oldPath;
     if (key !== null) out.set(key, current.basis);
     current = null;
@@ -155,6 +179,7 @@ export function diffRowBasisFromText(
         inHunk: false,
         dels: 0,
         adds: 0,
+        tail: 0,
       };
       continue;
     }
@@ -168,6 +193,7 @@ export function diffRowBasisFromText(
         current.basis.lead_gap = Number(header[1]) >= 2;
       current.basis.hunks += 1;
       current.inHunk = true;
+      current.tail = 0;
       continue;
     }
     if (!current.inHunk) {
@@ -184,12 +210,15 @@ export function diffRowBasisFromText(
     if (mark === " ") {
       flushBlock();
       current.basis.context += 1;
+      current.tail += 1;
     } else if (mark === "-") {
       // 削除の後に追加が来たら、次のかたまりの削除は新しいかたまり。
       if (current.adds > 0) flushBlock();
       current.dels += 1;
+      current.tail = 0;
     } else if (mark === "+") {
       current.adds += 1;
+      current.tail = 0;
     }
     // `\ No newline at end of file` と、本文の最後の空行は行に数えない。
   }

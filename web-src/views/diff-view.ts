@@ -46,7 +46,11 @@ import { fitBreadcrumb } from "./breadcrumb-fit";
 import { attachStickyHScroll, detachStickyHScroll } from "./diff-hscroll";
 import { diffRowAfterLineNumber } from "./diff-line-select";
 import type { DiffViewText, ManualLoadReason } from "./diff-view-i18n";
-import type { ExpandStackElement } from "./hunk-expand";
+import {
+  createExpandStack,
+  createTrailingExpandRow,
+  type ExpandStackElement,
+} from "./hunk-expand";
 import { enhanceMediaCard } from "./media-embed";
 
 export type DiffViewDeps = {
@@ -1303,7 +1307,25 @@ export function createDiffView(deps: DiffViewDeps) {
       );
       const rowHeight = row?.getBoundingClientRect().height ?? 0;
       if (headerHeight <= 0 || rowHeight <= 0) return null;
-      const metrics = { rowHeight, headerHeight, gapRowHeight };
+      // 最後の「下へ広げる」行 (本物と同じ組み立て。views/hunk-expand.ts)。
+      // 左右の表示では左右の表に 1 行ずつ並ぶので、高さは 1 行分。
+      let trailingRowHeight = 0;
+      for (const tbody of body.querySelectorAll("tbody")) {
+        const { tr, ln } = createTrailingExpandRow(layout === "side-by-side");
+        ln.appendChild(
+          createExpandStack([
+            { direction: "down", title: "", onClick: () => undefined },
+          ]),
+        );
+        tbody.appendChild(tr);
+        trailingRowHeight = tr.getBoundingClientRect().height;
+      }
+      const metrics = {
+        rowHeight,
+        headerHeight,
+        gapRowHeight,
+        trailingRowHeight,
+      };
       CARD_METRICS.set(key, metrics);
       return metrics;
     } finally {

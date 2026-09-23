@@ -202,3 +202,26 @@ describe("端末の案内と状態行は、どちらか一方だけ見せる (�
     expect({ hint: at(hint), status: at(status) }).toEqual(expected);
   });
 });
+
+describe("Diff の本文の末尾の詰め物は要素でなく余白", () => {
+  // 要素 (::after) だと、カードが届く前の空の本文の頭に 1 画面分の箱が描かれ、
+  // カードが届くと押し出されてレイアウトシフトになる (直接開いた Diff で
+  // 0.4〜0.6)。余白は要素ではないので動いたものに数えられない。最後のカードを
+  // 上端まで送れる長さは同じ。
+  test("::after は無く、#diff の下の余白が 1 画面分 (から少し引いた長さ)", () => {
+    const tail = rules.filter(
+      (rule) => rule.selector === "body.gdp-diff-page #diff::after",
+    );
+    const diff = cascadedDeclarations(
+      rules,
+      (s) => s === "body.gdp-diff-page #diff",
+    );
+    expect({
+      pseudo: tail.length,
+      paddingBottom: diff.get("padding-bottom"),
+    }).toEqual({
+      pseudo: 0,
+      paddingBottom: "calc(var(--content-h) - var(--diff-tail-inset))",
+    });
+  });
+});

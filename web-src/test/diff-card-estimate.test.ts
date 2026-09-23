@@ -91,31 +91,61 @@ describe("diffRowBasisFromText (サーバが本文から数える材料)", () =>
       name: "短いファイル 1 ハンク (先頭の行から)",
       text: SHORT,
       path: "src/short.ts",
-      expected: { hunks: 1, context: 0, split_changes: 1, lead_gap: false },
+      expected: {
+        hunks: 1,
+        context: 0,
+        split_changes: 1,
+        lead_gap: false,
+        tail_more: false,
+      },
     },
     {
       name: "長いファイルの多ハンク (途中から始まる)",
       text: longDiff(),
       path: "src/long.ts",
-      expected: { hunks: 5, context: 29, split_changes: 6, lead_gap: true },
+      expected: {
+        hunks: 5,
+        context: 29,
+        split_changes: 6,
+        lead_gap: true,
+        tail_more: false,
+      },
     },
     {
       name: "新規のファイル",
       text: NEW_FILE,
       path: "src/fresh.ts",
-      expected: { hunks: 1, context: 0, split_changes: 2, lead_gap: false },
+      expected: {
+        hunks: 1,
+        context: 0,
+        split_changes: 2,
+        lead_gap: false,
+        tail_more: false,
+      },
     },
     {
       name: "削除したファイル (鍵は古い側のパス)",
       text: DELETED_FILE,
       path: "src/removed.ts",
-      expected: { hunks: 1, context: 0, split_changes: 3, lead_gap: false },
+      expected: {
+        hunks: 1,
+        context: 0,
+        split_changes: 3,
+        lead_gap: false,
+        tail_more: false,
+      },
     },
     {
       name: "二進 (ハンクが無い)",
       text: BINARY,
       path: "assets/sample.png",
-      expected: { hunks: 0, context: 0, split_changes: 0, lead_gap: false },
+      expected: {
+        hunks: 0,
+        context: 0,
+        split_changes: 0,
+        lead_gap: false,
+        tail_more: false,
+      },
     },
   ])("$name", ({ text, path, expected }) => {
     expect(diffRowBasisFromText(text).get(path)).toEqual(expected);
@@ -140,7 +170,42 @@ describe("diffRowBasisFromText (サーバが本文から数える材料)", () =>
       context: 3,
       split_changes: 4,
       lead_gap: true,
+      tail_more: false,
     });
+  });
+
+  test.each([
+    {
+      name: "最後の文脈が 3 行ちょうど: まだ行が続く見込み",
+      after: 3,
+      tail: true,
+    },
+    { name: "最後の文脈が 2 行: ファイルの終わり", after: 2, tail: false },
+  ])("$name", ({ after, tail }) => {
+    const context = Array.from({ length: after }, (_, i) => ` after ${i}`);
+    const text = `${header("src/tail.ts")}
+@@ -10,${4 + after} +10,${4 + after} @@
+ before 1
+ before 2
+ before 3
+-old
++new
+${context.join("\n")}
+`;
+    expect(diffRowBasisFromText(text).get("src/tail.ts")?.tail_more).toBe(tail);
+  });
+
+  test("削除したファイルは、最後の文脈が 3 行でも続きが無い", () => {
+    const text = `${header("src/gone.ts").replace("+++ b/src/gone.ts", "+++ /dev/null")}
+@@ -1,4 +0,0 @@
+-a
+-b
+-c
+-d
+`;
+    expect(diffRowBasisFromText(text).get("src/gone.ts")?.tail_more).toBe(
+      false,
+    );
   });
 
   test("ハンクの中の --- / +++ で始まる行は見出しではなく行", () => {
@@ -155,6 +220,7 @@ describe("diffRowBasisFromText (サーバが本文から数える材料)", () =>
       context: 1,
       split_changes: 1,
       lead_gap: false,
+      tail_more: false,
     });
   });
 
@@ -257,6 +323,36 @@ describe("estimateDiffCardHeight (描いた直後の高さ)", () => {
     expect(estimateDiffCardHeight({ ...input, layout, metrics: METRICS })).toBe(
       expected,
     );
+  });
+
+  test.each([
+    {
+      name: "行が続く見込み: 最後の「下へ広げる」行が入る",
+      status: "M",
+      expected: 46 + 3 * 22.4375 + 36,
+    },
+    {
+      name: "削除したファイル: 最後の行は置かれない",
+      status: "D",
+      expected: 46 + 3 * 22.4375,
+    },
+  ])("$name", ({ status, expected }) => {
+    expect(
+      estimateDiffCardHeight({
+        additions: 1,
+        deletions: 1,
+        status,
+        basis: {
+          hunks: 1,
+          context: 2,
+          split_changes: 1,
+          lead_gap: false,
+          tail_more: true,
+        },
+        layout: "side-by-side",
+        metrics: { ...METRICS, trailingRowHeight: 36 },
+      }),
+    ).toBe(Math.round(expected));
   });
 
   test.each([

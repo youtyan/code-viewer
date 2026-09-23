@@ -112,6 +112,65 @@ function clearExpandFailure(anchors: HTMLTableRowElement[]): void {
   }
 }
 
+export type ExpandButtonSpec = {
+  direction: "up" | "down";
+  title: string;
+  onClick: () => void;
+};
+
+const EXPAND_ICON_PATHS = {
+  up: "M8 3.5 3.75 7.75l1.06 1.06L7.25 6.37V13h1.5V6.37l2.44 2.44 1.06-1.06L8 3.5z",
+  down: "M8 12.5 12.25 8.25l-1.06-1.06L8.75 9.63V3h-1.5v6.63L4.81 7.19 3.75 8.25 8 12.5z",
+};
+
+export function createExpandStack(buttons: ExpandButtonSpec[]) {
+  const stack = document.createElement("div");
+  stack.className = "gdp-expand-stack";
+  buttons.forEach((spec) => {
+    const button = document.createElement("button");
+    button.className = "gdp-expand-btn";
+    button.title = spec.title;
+    button.setAttribute("aria-label", spec.title);
+    button.innerHTML =
+      '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+      '<path fill="currentColor" d="' +
+      EXPAND_ICON_PATHS[spec.direction] +
+      '"/></svg>';
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (button.disabled) return;
+      spec.onClick();
+    });
+    stack.appendChild(button);
+  });
+  return stack;
+}
+
+/**
+ * 最後のハンクの後の「下へ広げる」行 (ボタンは呼び出し側が ln に入れる)。
+ * 本物の行 (attachTrailingExpandControls) と、Diff のカードの見積もりで高さを
+ * 測る見本 (views/diff-view.ts の measuredCardMetrics) が同じ形を使う。
+ */
+export function createTrailingExpandRow(isSplit: boolean): {
+  tr: HTMLTableRowElement;
+  ln: HTMLTableCellElement;
+} {
+  const tr = document.createElement("tr");
+  tr.className = "gdp-hunk-row gdp-trailing-expand-row";
+  const ln = document.createElement("td");
+  ln.className = isSplit
+    ? "d2h-code-side-linenumber d2h-info"
+    : "d2h-code-linenumber d2h-info";
+  const info = document.createElement("td");
+  info.className = "d2h-info";
+  const spacer = document.createElement("div");
+  spacer.className = isSplit ? "d2h-code-side-line" : "d2h-code-line";
+  info.appendChild(spacer);
+  tr.appendChild(ln);
+  tr.appendChild(info);
+  return { tr, ln };
+}
+
 export function createHunkExpand(deps: HunkExpandDeps) {
   // ---------- Hunk expand (mimics GitHub's ↕ at hunk separators) ----------
   // Parse "@@ -OLD,COUNT +NEW,COUNT @@" out of a row's text.
@@ -233,13 +292,17 @@ export function createHunkExpand(deps: HunkExpandDeps) {
     const trailingIndex = GdpExpandLogic.trailingExpandTargetIndex(
       infoRows.length,
     );
-    if (trailingIndex != null) {
-      probeAndAttachTrailingExpandControls(
-        infoRows[trailingIndex],
-        file,
-        ref,
-        refPath,
-      );
+    // 削除したファイルには新しい側が無いので、最後のハンクの後ろを問い合わせ
+    // ない (作業ツリーに無いファイルを問い合わせて、エラーの行が出ていた)。
+    if (trailingIndex != null && file.status !== "D") {
+      const last = infoRows[trailingIndex];
+      // 最後のハンクの後ろの文脈が 3 行ちょうどなら、まだ行が続く見込み
+      // (row_basis.tail_more。core/diff-card-estimate.ts)。描いた時点で行を置き
+      // (カードの見積もりにもこの行が入っている)、問い合わせで行が無いと
+      // 分かったら外す。後から足すと、その分だけ下のカードが下がっていた。
+      if (file.row_basis?.tail_more)
+        attachTrailingExpandControls(last, file, ref, refPath);
+      probeAndAttachTrailingExpandControls(last, file, ref, refPath);
     }
   }
 
@@ -453,40 +516,6 @@ export function createHunkExpand(deps: HunkExpandDeps) {
     }
   }
 
-  type ExpandButtonSpec = {
-    direction: "up" | "down";
-    title: string;
-    onClick: () => void;
-  };
-
-  const EXPAND_ICON_PATHS = {
-    up: "M8 3.5 3.75 7.75l1.06 1.06L7.25 6.37V13h1.5V6.37l2.44 2.44 1.06-1.06L8 3.5z",
-    down: "M8 12.5 12.25 8.25l-1.06-1.06L8.75 9.63V3h-1.5v6.63L4.81 7.19 3.75 8.25 8 12.5z",
-  };
-
-  function createExpandStack(buttons: ExpandButtonSpec[]) {
-    const stack = document.createElement("div");
-    stack.className = "gdp-expand-stack";
-    buttons.forEach((spec) => {
-      const button = document.createElement("button");
-      button.className = "gdp-expand-btn";
-      button.title = spec.title;
-      button.setAttribute("aria-label", spec.title);
-      button.innerHTML =
-        '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
-        '<path fill="currentColor" d="' +
-        EXPAND_ICON_PATHS[spec.direction] +
-        '"/></svg>';
-      button.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (button.disabled) return;
-        spec.onClick();
-      });
-      stack.appendChild(button);
-    });
-    return stack;
-  }
-
   function syncExpandRowHeights(
     rows: HTMLTableRowElement[],
     stackRow: HTMLTableRowElement,
@@ -523,19 +552,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         const tbody = sib.tr.parentElement;
         if (!tbody) return null;
         const isSplit = !!sib.tr.querySelector("td.d2h-code-side-linenumber");
-        const tr = document.createElement("tr");
-        tr.className = "gdp-hunk-row gdp-trailing-expand-row";
-        const ln = document.createElement("td");
-        ln.className = isSplit
-          ? "d2h-code-side-linenumber d2h-info"
-          : "d2h-code-linenumber d2h-info";
-        const info = document.createElement("td");
-        info.className = "d2h-info";
-        const spacer = document.createElement("div");
-        spacer.className = isSplit ? "d2h-code-side-line" : "d2h-code-line";
-        info.appendChild(spacer);
-        tr.appendChild(ln);
-        tr.appendChild(info);
+        const { tr, ln } = createTrailingExpandRow(isSplit);
         tbody.appendChild(tr);
         return { tr, ln, sideIndex: sib.sideIndex || 0 };
       })
@@ -670,13 +687,17 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         if (data.generation && data.generation !== deps.getServerGeneration())
           return;
         if (!item.tr.isConnected) return;
-        const hasTrailingRow = (item.siblings || []).some(
-          (sib) =>
-            !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"),
-        );
-        if (hasTrailingRow) return;
-        if (!GdpExpandLogic.shouldAttachTrailingExpand(data.lines.length))
+        const trailingRows = (item.siblings || []).flatMap((sib) => [
+          ...(sib.tr.parentElement?.querySelectorAll(
+            ".gdp-trailing-expand-row",
+          ) ?? []),
+        ]);
+        if (!GdpExpandLogic.shouldAttachTrailingExpand(data.lines.length)) {
+          // 見込みで置いた行 (最後の文脈がちょうど 3 行でファイルが終わる) は外す。
+          for (const row of trailingRows) row.remove();
           return;
+        }
+        if (trailingRows.length > 0) return;
         attachTrailingExpandControls(item, file, ref, refPath);
       })
       .catch((error: unknown) => {

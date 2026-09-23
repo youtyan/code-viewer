@@ -2064,6 +2064,7 @@ describe("preview CLI", () => {
           error: undefined,
           files: [
             {
+              // 追跡外 (新規) は差分の本文を読まないので tail_more を持たない (= false)。
               path: "fresh.txt",
               height: 90,
               basis: {
@@ -2074,7 +2075,8 @@ describe("preview CLI", () => {
               },
             },
             {
-              // 10 行目と 100 行目: 2 ハンク、それぞれ前後 3 行の文脈。
+              // 10 行目と 100 行目: 2 ハンク、それぞれ前後 3 行の文脈。最後の
+              // ハンクの後ろが 3 行ちょうどなので、まだ行が続く見込み (tail_more)。
               path: "long.txt",
               height: 46 + 14 * 22 + 3 * 22,
               basis: {
@@ -2082,6 +2084,7 @@ describe("preview CLI", () => {
                 context: 12,
                 split_changes: 2,
                 lead_gap: true,
+                tail_more: true,
               },
             },
             {
@@ -2092,6 +2095,7 @@ describe("preview CLI", () => {
                 context: 0,
                 split_changes: 3,
                 lead_gap: false,
+                tail_more: false,
               },
             },
             {
@@ -2102,6 +2106,7 @@ describe("preview CLI", () => {
                 context: 0,
                 split_changes: 1,
                 lead_gap: false,
+                tail_more: false,
               },
             },
           ],
