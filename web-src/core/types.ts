@@ -49,8 +49,17 @@ export type DiffMeta = {
   project?: string;
   generation?: number;
   error?: string;
-  /** 見積もりの材料を数えられなかった理由 (Diff は出せる。見積もりが粗くなるだけ)。 */
-  row_basis_error?: string;
+  /** 見積もりの材料を数えられなかった理由。1 件ずつ (Diff は出せる。見積もりが粗くなるだけ)。 */
+  row_basis_errors?: RowBasisError[];
+};
+
+/** 見積もりの材料を数えられなかった 1 件 (server/row-basis.ts)。 */
+export type RowBasisError = {
+  /** 読めなかったファイル (差分全体の失敗には無い)。 */
+  path?: string;
+  /** 失敗した操作 (`stat untracked file`・`read untracked file`・`git diff`・`read git diff`)。 */
+  operation: string;
+  message: string;
 };
 
 // ai-dup-check: allow -- client response DTO is intentionally kept in core types.

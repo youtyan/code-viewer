@@ -165,6 +165,7 @@ export const KNOWN_SNAKE_CASE_IDENTIFIERS: readonly string[] = [
   "restricted_table",
   "revision_id",
   "row_basis",
+  "row_basis_errors",
   "row_count",
   "row_hash",
   "row_key_hash",

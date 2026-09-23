@@ -7,10 +7,10 @@ import {
   statSync,
   watch,
 } from "node:fs";
+import { stat } from "node:fs/promises";
 import { basename, dirname, extname, join, relative } from "node:path";
 import {
   type DiffRowBasis,
-  diffRowBasisFromText,
   estimateDiffCardHeight,
 } from "../core/diff-card-estimate";
 import { normalizeNewDirectoryName } from "../core/directory-name";
@@ -126,6 +126,7 @@ import {
   sideEffectRequestAllowed as sideEffectRequestAllowedForOrigin,
 } from "./request-origin";
 import { ROOT } from "./root";
+import { diffRowBasisFor, readFileHead } from "./row-basis";
 import {
   fileByteRangeResponseBody,
   fileReadableStream,
@@ -803,70 +804,6 @@ function estimateHeight(
   );
 }
 
-/** 見積もりの材料を数える差分の上限 (これを超えたら数えず、画面が数え直す)。 */
-const ROW_BASIS_LINE_BUDGET = 20000;
-const ROW_BASIS_FILE_BUDGET = 500;
-
-/**
- * 小さいファイル (中身を丸ごと描くカード) の見積もりの材料。追跡中のファイルは
- * 差分の本文を 1 回読んで数え、追跡外 (新規) は追加の行だけ。数えられなかった
- * ときは空の材料と理由を返す (画面は追加・削除から数え直す。理由は応答の
- * row_basis_error に載せて、黙って捨てない)。
- */
-async function diffRowBasisFor(
-  files: git.GitFileMeta[],
-  diffArgs: string[],
-): Promise<{ basis: Map<string, DiffRowBasis>; error?: string }> {
-  const basis = new Map<string, DiffRowBasis>();
-  const small = files.filter(
-    (file) => !file.binary && classify(file) === "small",
-  );
-  for (const file of small) {
-    if (!file.untracked) continue;
-    const additions = file.additions || 0;
-    basis.set(file.path, {
-      hunks: additions > 0 ? 1 : 0,
-      context: 0,
-      split_changes: additions,
-      lead_gap: false,
-    });
-  }
-  const tracked = small.filter((file) => !file.untracked);
-  const lines = tracked.reduce(
-    (sum, file) => sum + (file.additions || 0) + (file.deletions || 0),
-    0,
-  );
-  if (
-    tracked.length === 0 ||
-    tracked.length > ROW_BASIS_FILE_BUDGET ||
-    lines > ROW_BASIS_LINE_BUDGET
-  )
-    return { basis };
-  const paths = tracked.flatMap((file) =>
-    file.old_path && file.old_path !== file.path
-      ? [file.old_path, file.path]
-      : [file.path],
-  );
-  const res = await git.fileDiffTextAsync(diffArgs, paths, cwd);
-  if (res.code !== 0) {
-    const error = `counting diff rows for the card height estimate failed (git diff exit ${res.code}, ${paths.length} paths): ${res.stderr.trim()}`;
-    console.error(`[code-viewer] ${error}`);
-    return { basis, error };
-  }
-  try {
-    for (const [path, rows] of diffRowBasisFromText(res.stdout))
-      basis.set(path, rows);
-  } catch (err) {
-    const failure = errorWithCause(
-      `reading the git diff for the card height estimate failed (${paths.length} paths)`,
-      err,
-    );
-    console.error(failure);
-    return { basis, error: formatErrorDetail(failure) };
-  }
-  return { basis };
-}
-
 function buildQuery(params: Record<string, unknown>) {
   const q = new URLSearchParams();
   for (const key of Object.keys(params).sort()) {
@@ -975,7 +912,16 @@ async function computePayload(
     if (e === "-w" || e === "--ignore-all-space") extraQs.ignore_ws = "1";
     if (e === "--ignore-blank-lines") extraQs.ignore_blank = "1";
   }
-  const rowBasis = await diffRowBasisFor(filteredFiles, [...extras, ...args]);
+  // 小さいファイル (中身を丸ごと描くカード) の見積もりの材料 (server/row-basis.ts)。
+  const rowBasis = await diffRowBasisFor(
+    filteredFiles.filter((file) => !file.binary && classify(file) === "small"),
+    {
+      diffText: (paths) =>
+        git.fileDiffTextAsync([...extras, ...args], paths, cwd),
+      fileSize: async (path) => (await stat(join(cwd, path))).size,
+      readHead: (path, bytes) => readFileHead(join(cwd, path), bytes),
+    },
+  );
   const meta = filteredFiles.map((file) =>
     fileToMeta(
       file,
@@ -1001,7 +947,9 @@ async function computePayload(
     branch: await currentBranchMetadata(),
     generation: responseGeneration,
     ...(metaError ? { error: metaError } : {}),
-    ...(rowBasis.error ? { row_basis_error: rowBasis.error } : {}),
+    ...(rowBasis.errors.length > 0
+      ? { row_basis_errors: rowBasis.errors }
+      : {}),
   };
 }
 

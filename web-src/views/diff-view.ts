@@ -6,9 +6,11 @@
 import { apiUrl, withoutProjectPrefix } from "../core/api-url";
 import { changedPathsCoverPath } from "../core/changed-paths";
 import {
+  type DiffCardHScrollMetrics,
   type DiffCardLayout,
   type DiffCardMetrics,
   estimateDiffCardHeight,
+  tabbedTextWidth,
 } from "../core/diff-card-estimate";
 import { hasControlCharacter } from "../core/control-chars";
 import { showCopyFailure } from "../core/copy-failure";
@@ -1239,14 +1241,18 @@ export function createDiffView(deps: DiffViewDeps) {
   // 組み合わせごとに覚える。測れない (描く道具が無い・本文が描かれていない)
   // ときは null で、覚えない (次に測り直す)。
   const CARD_METRICS = new Map<string, DiffCardMetrics>();
+  // 表の枠から必ずはみ出す長さの本文 (行の本文以外の幅と、横のスクロール
+  // バーの行の高さを測る)。
+  const METRICS_SAMPLE_LONG = "x".repeat(1000);
   const METRICS_SAMPLE_DIFF = [
     "diff --git a/sample.txt b/sample.txt",
     "--- a/sample.txt",
     "+++ b/sample.txt",
-    "@@ -1,2 +1,2 @@",
+    "@@ -1,3 +1,3 @@",
     " sample",
     "-old",
     "+new",
+    ` ${METRICS_SAMPLE_LONG}`,
     "",
   ].join("\n");
 
@@ -1308,6 +1314,7 @@ export function createDiffView(deps: DiffViewDeps) {
       );
       const rowHeight = row?.getBoundingClientRect().height ?? 0;
       if (headerHeight <= 0 || rowHeight <= 0) return null;
+      const hscroll = measuredHScroll(probe, body);
       // 最後の「下へ広げる」行 (本物と同じ組み立て。views/hunk-expand.ts)。
       // 左右の表示では左右の表に 1 行ずつ並ぶので、高さは 1 行分。
       let trailingRowHeight = 0;
@@ -1326,12 +1333,68 @@ export function createDiffView(deps: DiffViewDeps) {
         headerHeight,
         gapRowHeight,
         trailingRowHeight,
+        hscroll,
       };
       CARD_METRICS.set(key, metrics);
       return metrics;
     } finally {
       probe.remove();
     }
+  }
+
+  /**
+   * 横のスクロールバーの判定に使う寸法を、見本のカードで測る。見本の長い行で
+   * 表をはみ出させ、はみ出した幅 (scrollWidth) から本文の幅を引いて行番号・印・
+   * 余白の幅を出す。ハンクの見出しは組み方が違うので、長い行を縮めて見出しを
+   * 長くしてから同じように測る。字体で測れない (canvas が無い) ときは無し。
+   */
+  function measuredHScroll(
+    probe: HTMLElement,
+    body: HTMLElement,
+  ): DiffCardHScrollMetrics | undefined {
+    const tables = [...body.querySelectorAll<HTMLElement>(".d2h-code-wrapper")];
+    const longLines = [
+      ...body.querySelectorAll<HTMLElement>(".d2h-code-line-ctn"),
+    ].filter((el) => el.textContent === METRICS_SAMPLE_LONG);
+    const head = body.querySelector<HTMLElement>(
+      "td.d2h-info .d2h-code-side-line, td.d2h-info .d2h-code-line",
+    );
+    const lineWidth = textWidthIn(longLines[0]);
+    const headWidth = textWidthIn(head);
+    if (!lineWidth || !headWidth || !head || tables.length === 0) return;
+    const room = (table: HTMLElement, width: number) =>
+      table.clientWidth - (table.scrollWidth - width);
+    const long = lineWidth(METRICS_SAMPLE_LONG);
+    const lineRoom = tables.map((table) => room(table, long));
+    // 本物と同じ組み立て (views/diff-hscroll.ts)。見本ははみ出しているので出る。
+    attachStickyHScroll(probe);
+    const rowHeight =
+      probe.querySelector(".gdp-hscroll")?.getBoundingClientRect().height ?? 0;
+    detachStickyHScroll(probe);
+    for (const el of longLines) el.textContent = "x";
+    head.textContent = METRICS_SAMPLE_LONG;
+    const headRoom = room(tables[0], headWidth(METRICS_SAMPLE_LONG));
+    if (rowHeight <= 0) return;
+    return { rowHeight, lineRoom, headRoom, lineWidth, headWidth };
+  }
+
+  /** その要素の字体で、文字の幅を測る関数 (タブは要素の tab-size)。 */
+  function textWidthIn(
+    el: Element | null | undefined,
+  ): ((text: string) => number) | null {
+    if (!el) return null;
+    const context = document.createElement("canvas").getContext("2d");
+    if (!context) return null;
+    const style = getComputedStyle(el);
+    context.font = [
+      style.fontStyle,
+      style.fontWeight,
+      style.fontSize,
+      style.fontFamily,
+    ].join(" ");
+    const tabSize = Number.parseFloat(style.tabSize);
+    return (text) =>
+      tabbedTextWidth(text, (part) => context.measureText(part).width, tabSize);
   }
 
   /**

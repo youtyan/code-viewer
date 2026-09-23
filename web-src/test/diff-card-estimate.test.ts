@@ -5,12 +5,16 @@
 
 import { describe, expect, test } from "vitest";
 import {
+  type DiffCardHScrollMetrics,
   type DiffCardMetrics,
   type DiffRowBasis,
+  diffCardScrollsSideways,
   diffRowBasisFromText,
   estimateDiffCardHeight,
   fallbackDiffRowBasis,
+  tabbedTextWidth,
   unquoteGitPath,
+  widestLines,
 } from "../core/diff-card-estimate";
 
 const METRICS: DiffCardMetrics = {
@@ -97,6 +101,11 @@ describe("diffRowBasisFromText (サーバが本文から数える材料)", () =>
         split_changes: 1,
         lead_gap: false,
         tail_more: false,
+        widest: {
+          old: ["export const sample = 1;"],
+          new: ["export const sample = 5;"],
+          head: ["@@ -1 +1 @@"],
+        },
       },
     },
     {
@@ -109,6 +118,12 @@ describe("diffRowBasisFromText (サーバが本文から数える材料)", () =>
         split_changes: 6,
         lead_gap: true,
         tail_more: false,
+        // 同じ長さの行は先の 1 本 (ctx after 1・2 は ctx after 0 以下)。
+        widest: {
+          old: ["ctx after 0"],
+          new: ["ctx after 0"],
+          head: ["@@ -115,6 +115,6 @@"],
+        },
       },
     },
     {
@@ -121,6 +136,11 @@ describe("diffRowBasisFromText (サーバが本文から数える材料)", () =>
         split_changes: 2,
         lead_gap: false,
         tail_more: false,
+        widest: {
+          old: [],
+          new: ["export const fresh2 = 2;"],
+          head: ["@@ -0,0 +1,2 @@"],
+        },
       },
     },
     {
@@ -133,6 +153,11 @@ describe("diffRowBasisFromText (サーバが本文から数える材料)", () =>
         split_changes: 3,
         lead_gap: false,
         tail_more: false,
+        widest: {
+          old: ["export const removed1 = 1;"],
+          new: [],
+          head: ["@@ -1,3 +0,0 @@"],
+        },
       },
     },
     {
@@ -145,6 +170,7 @@ describe("diffRowBasisFromText (サーバが本文から数える材料)", () =>
         split_changes: 0,
         lead_gap: false,
         tail_more: false,
+        widest: { old: [], new: [], head: [] },
       },
     },
   ])("$name", ({ text, path, expected }) => {
@@ -171,6 +197,7 @@ describe("diffRowBasisFromText (サーバが本文から数える材料)", () =>
       split_changes: 4,
       lead_gap: true,
       tail_more: false,
+      widest: { old: ["keep"], new: ["keep"], head: ["@@ -3,7 +3,8 @@"] },
     });
   });
 
@@ -221,6 +248,11 @@ ${context.join("\n")}
       split_changes: 1,
       lead_gap: false,
       tail_more: false,
+      widest: {
+        old: ["--- old rule"],
+        new: ["+++ new rule"],
+        head: ["@@ -1,2 +1,2 @@"],
+      },
     });
   });
 
@@ -246,10 +278,164 @@ ${context.join("\n")}
     ]);
   });
 
+  test("横に長い行: 文脈は両方の表・削除は古い側・追加は新しい側、CR は外す", () => {
+    const text = `${header("src/wide.ts")}
+@@ -1,3 +1,3 @@ export function sample() {
+ const keep = 1;\r
+-const old = "shorter";\r
++const replaced = "a longer line";\r
+ }\r
+`;
+    expect(diffRowBasisFromText(text).get("src/wide.ts")?.widest).toEqual({
+      old: ['const old = "shorter";'],
+      new: ['const replaced = "a longer line";'],
+      head: ["@@ -1,3 +1,3 @@ export function sample() {"],
+    });
+  });
+
   test("読めないハンクの見出しは、その行を添えて投げる", () => {
     expect(() =>
       diffRowBasisFromText(`${header("src/short.ts")}\n@@ broken @@\n`),
     ).toThrow("unreadable hunk header in git diff: @@ broken @@");
+  });
+});
+
+describe("widestLines (字の幅が分からなくても一番幅を取りうる行)", () => {
+  test.each([
+    {
+      name: "どの種類でも別の行以下の行は外す",
+      lines: ["ab", "abc", "a"],
+      expected: ["abc"],
+    },
+    {
+      name: "同じ数の行は先の 1 本",
+      lines: ["abc", "xyz"],
+      expected: ["abc"],
+    },
+    {
+      name: "全角が多い行と ASCII が多い行は両方 (おおよその幅の広い順)",
+      lines: ["xxxxxxxxxx", "漢漢漢漢漢漢"],
+      expected: ["漢漢漢漢漢漢", "xxxxxxxxxx"],
+    },
+    {
+      name: "タブは別の種類",
+      lines: ["abcd", "\tab"],
+      expected: ["\tab", "abcd"],
+    },
+    {
+      name: "その他の字 (アクセント付き) は全角と別の種類",
+      lines: ["éé", "漢"],
+      expected: ["éé", "漢"],
+    },
+    {
+      name: "幅の無い字 (結合文字) は数えない",
+      lines: ["e\u0301e\u0301", "eee"],
+      expected: ["eee"],
+    },
+    { name: "行が無い", lines: [], expected: [] },
+  ])("$name", ({ lines, expected }) => {
+    expect(widestLines(lines)).toEqual(expected);
+  });
+
+  test("候補は 8 本まで・1 行は 1000 字まで", () => {
+    // ASCII が 1 字増えるごとに全角が 1 字減る 10 本は、どれも外れない。
+    const tradeOff = Array.from(
+      { length: 10 },
+      (_, i) => "a".repeat(i) + "漢".repeat(10 - i),
+    );
+    expect({
+      count: widestLines(tradeOff),
+      long: widestLines(["x".repeat(1500)]).map((line) => line.length),
+    }).toEqual({ count: tradeOff.slice(0, 8), long: [1000] });
+  });
+});
+
+describe("tabbedTextWidth (タブを止まりまで進めた行の幅)", () => {
+  // 字は 1 字 10px (W だけ 37px)。空白 10px・tab-size 4 で止まりは 40px ごと。
+  const measure = (text: string) =>
+    [...text].reduce((sum, ch) => sum + (ch === "W" ? 37 : 10), 0);
+  test.each([
+    { text: "ab", expected: 20 },
+    { text: "\tab", expected: 60 },
+    { text: "a\tb", expected: 50 },
+    { text: "abcd\tx", expected: 90 },
+    // 止まり (40) まで 3px しかない (空白の半分未満) ので、次の止まり (80) まで。
+    { text: "W\tx", expected: 90 },
+  ])("$text", ({ text, expected }) => {
+    expect(tabbedTextWidth(text, measure, 4)).toBe(expected);
+  });
+});
+
+describe("diffCardScrollsSideways (貼り付く横スクロールバーが出るか)", () => {
+  // 1 字 10px。左右の表示は古い側 100px・新しい側 200px、見出しは 120px まで。
+  const split: DiffCardHScrollMetrics = {
+    rowHeight: 10,
+    lineRoom: [100, 200],
+    headRoom: 120,
+    lineWidth: (text) => text.length * 10,
+    headWidth: (text) => text.length * 10,
+  };
+  const unified = { ...split, lineRoom: [150] };
+  const lines = (old: number, fresh: number, head = 0) => ({
+    old: [old ? "x".repeat(old) : ""],
+    new: [fresh ? "x".repeat(fresh) : ""],
+    head: [head ? "@".repeat(head) : ""],
+  });
+  test.each([
+    {
+      name: "材料に行が無い",
+      widest: undefined,
+      hscroll: split,
+      expected: false,
+    },
+    {
+      name: "古い側の行が古い側の表を超える",
+      widest: lines(11, 0),
+      hscroll: split,
+      expected: true,
+    },
+    {
+      name: "新しい側の行は新しい側の表の幅で見る",
+      widest: lines(0, 11),
+      hscroll: split,
+      expected: false,
+    },
+    {
+      name: "1px までのはみ出しは出さない (views/diff-hscroll.ts と同じ)",
+      widest: lines(0, 0),
+      hscroll: { ...split, lineRoom: [99, 200], lineWidth: () => 100 },
+      expected: false,
+    },
+    {
+      name: "1px を超えるはみ出しは出す",
+      widest: lines(0, 0),
+      hscroll: { ...split, lineRoom: [98.9, 200], lineWidth: () => 100 },
+      expected: true,
+    },
+    {
+      name: "1 列は両側の行を 1 つの表で見る",
+      widest: lines(0, 16),
+      hscroll: unified,
+      expected: true,
+    },
+    {
+      name: "見出しは見出しの幅で見る",
+      widest: lines(0, 0, 13),
+      hscroll: split,
+      expected: true,
+    },
+  ])("$name", ({ widest, hscroll, expected }) => {
+    const layout =
+      hscroll.lineRoom.length === 2 ? "side-by-side" : "line-by-line";
+    expect(diffCardScrollsSideways(widest, layout, hscroll)).toBe(expected);
+  });
+
+  test("測った表の数が並べ方と合わなければ理由つきで投げる", () => {
+    expect(() =>
+      diffCardScrollsSideways(lines(1, 1), "side-by-side", unified),
+    ).toThrow(
+      "diff card width measured for 1 tables, but side-by-side draws 2",
+    );
   });
 });
 
@@ -353,6 +539,35 @@ describe("estimateDiffCardHeight (描いた直後の高さ)", () => {
         metrics: { ...METRICS, trailingRowHeight: 36 },
       }),
     ).toBe(Math.round(expected));
+  });
+
+  test.each([
+    {
+      name: "横に長い行があると、バーの行の高さを足す",
+      room: 100,
+      expected: 78,
+    },
+    { name: "収まれば足さない", room: 300, expected: 68 },
+  ])("$name", ({ room, expected }) => {
+    // 見出し 46 + 1 行 22.4375 (= 68) に、1 字 10px の行 (24 字) の幅を当てる。
+    expect(
+      estimateDiffCardHeight({
+        additions: 1,
+        deletions: 1,
+        basis: diffRowBasisFromText(SHORT).get("src/short.ts"),
+        layout: "side-by-side",
+        metrics: {
+          ...METRICS,
+          hscroll: {
+            rowHeight: 10,
+            lineRoom: [room, room],
+            headRoom: room,
+            lineWidth: (text) => text.length * 10,
+            headWidth: (text) => text.length * 10,
+          },
+        },
+      }),
+    ).toBe(expected);
   });
 
   test.each([

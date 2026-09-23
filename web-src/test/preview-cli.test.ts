@@ -2015,7 +2015,8 @@ describe("preview CLI", () => {
 
   // Diff のカードの高さの見積もりの材料 (core/diff-card-estimate.ts の
   // DiffRowBasis)。画面はこれに自分の寸法を当てて、中身が届くまでの高さに
-  // する。追跡中は差分の本文から、追跡外 (新規) は追加の行から数える。
+  // する。追跡中は差分の本文から、追跡外 (新規) は追加の行とファイルの先頭から
+  // 数える。
   runOrSkip(
     "diff metadata carries the row basis for the card height estimate",
     async () => {
@@ -2049,11 +2050,11 @@ describe("preview CLI", () => {
             estimated_height_px?: number;
             row_basis?: unknown;
           }>;
-          row_basis_error?: string;
+          row_basis_errors?: unknown[];
         };
         expect({
           status: response.status,
-          error: body.row_basis_error,
+          errors: body.row_basis_errors,
           files: body.files.map((file) => ({
             path: file.path,
             height: file.estimated_height_px,
@@ -2061,10 +2062,12 @@ describe("preview CLI", () => {
           })),
         }).toEqual({
           status: 200,
-          error: undefined,
+          errors: undefined,
           files: [
             {
-              // 追跡外 (新規) は差分の本文を読まないので tail_more を持たない (= false)。
+              // 追跡外 (新規) は差分の本文を読まないので tail_more を持たない
+              // (= false)。横に長い行はファイルの先頭から選び、見出しは git が
+              // 新規のファイルに付けるもの。
               path: "fresh.txt",
               height: 90,
               basis: {
@@ -2072,6 +2075,11 @@ describe("preview CLI", () => {
                 context: 0,
                 split_changes: 2,
                 lead_gap: false,
+                widest: {
+                  old: [],
+                  new: ["new one"],
+                  head: ["@@ -0,0 +1,2 @@"],
+                },
               },
             },
             {
@@ -2085,6 +2093,11 @@ describe("preview CLI", () => {
                 split_changes: 2,
                 lead_gap: true,
                 tail_more: true,
+                widest: {
+                  old: ["line 100"],
+                  new: ["line 100 changed"],
+                  head: ["@@ -97,7 +97,7 @@ line 96"],
+                },
               },
             },
             {
@@ -2096,6 +2109,7 @@ describe("preview CLI", () => {
                 split_changes: 3,
                 lead_gap: false,
                 tail_more: false,
+                widest: { old: ["three"], new: [], head: ["@@ -1,3 +0,0 @@"] },
               },
             },
             {
@@ -2107,6 +2121,11 @@ describe("preview CLI", () => {
                 split_changes: 1,
                 lead_gap: false,
                 tail_more: false,
+                widest: {
+                  old: ["base"],
+                  new: ["first"],
+                  head: ["@@ -1 +1 @@"],
+                },
               },
             },
           ],

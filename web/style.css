@@ -6732,22 +6732,24 @@ body.gdp-def-mod #content #diff .d2h-code-line-ctn:hover {
   box-shadow: inset -1px 0 0 color-mix(in srgb, var(--diff-del-fg) 25%, transparent);
 }
 
-/* Word-level highlights inside add/del lines */
+/* Word-level highlights inside add/del lines. 左右の 1px の張り出しは影で描く
+   (padding にすると強調した語の数だけ行が広がり、上下の行と桁がずれ、行の幅から
+   横のスクロールバーが出るかを見積もれなくなる。core/diff-card-estimate.ts)。 */
 .d2h-ins.d2h-change ins,
 .d2h-ins ins {
   background: var(--diff-add-word-bg) !important;
+  box-shadow: -1px 0 var(--diff-add-word-bg), 1px 0 var(--diff-add-word-bg);
   color: inherit;
   text-decoration: none;
   border-radius: 1px;
-  padding: 0 1px;
 }
 .d2h-del.d2h-change del,
 .d2h-del del {
   background: var(--diff-del-word-bg) !important;
+  box-shadow: -1px 0 var(--diff-del-word-bg), 1px 0 var(--diff-del-word-bg);
   color: inherit;
   text-decoration: none;
   border-radius: 1px;
-  padding: 0 1px;
 }
 
 /* Empty placeholder cells (for split view) */

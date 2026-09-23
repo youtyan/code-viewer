@@ -9,9 +9,12 @@
 // を当てて高さを出す。材料が無いとき (予算を超えた・古い応答) は、追加・削除と
 // 分かる範囲のハンクの数・ファイルの行数から数え直す。
 //
-// 描いた直後の高さを見積もる。最後のハンクの後の「下へ広げる」行は、描いた後に
-// ファイルの残りを問い合わせてから足すので入れない (入れると、描いた瞬間に
-// 縮んでから伸びる 2 回の動きになる)。
+// 描いた直後の高さを見積もる。最後のハンクの後の「下へ広げる」行は、行が続く
+// 見込みのときだけ入れる (tail_more)。横に長い行があると貼り付く横スクロール
+// バーの行 (views/diff-hscroll.ts) が出るので、サーバが幅を取りうる行を選んで
+// 返し (widest)、画面が実際の字体でその幅を測って、出るかを前もって決める。
+
+import { needsProxyScrollbar } from "./hscroll-proxy";
 
 /** ファイルごとの材料。サーバが差分の本文から数える (`diffRowBasisFromText`)。 */
 export type DiffRowBasis = {
@@ -33,6 +36,21 @@ export type DiffRowBasis = {
    * (views/hunk-expand.ts)。無い (古い応答・追跡外) ときは false と同じ。
    */
   tail_more?: boolean;
+  /** 横に一番長くなりうる行 (横のスクロールバーが出るかを画面が決める)。 */
+  widest?: DiffWidestLines;
+};
+
+/**
+ * 横に一番長くなりうる行 (`widestLines`)。画面はこれだけを実際の字体で測る。
+ * 行は差分の印 (`+` `-` ` `) を外した本文。
+ */
+export type DiffWidestLines = {
+  /** 古い側の表 (文脈と削除) の行。 */
+  old: string[];
+  /** 新しい側の表 (文脈と追加) の行。 */
+  new: string[];
+  /** ハンクの見出しの行 (`@@ … @@ 関数名`)。左右の表示では古い側の表にだけ出る。 */
+  head: string[];
 };
 
 export type DiffCardLayout = "side-by-side" | "line-by-line";
@@ -47,6 +65,24 @@ export type DiffCardMetrics = {
   gapRowHeight: number;
   /** 最後のハンクの後ろの「下へ広げる」行の高さ。測れなければ 0 (入れない)。 */
   trailingRowHeight?: number;
+  /** 横のスクロールバーの判定に使う寸法。測れなければ無し (バーの行を入れない)。 */
+  hscroll?: DiffCardHScrollMetrics;
+};
+
+export type DiffCardHScrollMetrics = {
+  /** 貼り付く横スクロールバーの行 (`.gdp-hscroll`) の高さ。 */
+  rowHeight: number;
+  /**
+   * 表ごとの、行の本文が使える幅 (表の枠の幅から行番号・印・余白を引いたもの)。
+   * 左右の表示は [古い側, 新しい側]、1 列は [表]。
+   */
+  lineRoom: number[];
+  /** ハンクの見出しの文字が使える幅 (見出しは最初の表にだけ出る)。 */
+  headRoom: number;
+  /** 行の本文の幅 (px。画面の字体で測る)。 */
+  lineWidth: (text: string) => number;
+  /** ハンクの見出しの文字の幅 (px)。 */
+  headWidth: (text: string) => number;
 };
 
 export type DiffCardEstimateInput = {
@@ -126,9 +162,114 @@ export function estimateDiffCardHeight(
     basis.tail_more && input.status !== "D"
       ? (input.metrics.trailingRowHeight ?? 0)
       : 0;
+  const { hscroll } = input.metrics;
+  const scrollbar =
+    hscroll && diffCardScrollsSideways(basis.widest, input.layout, hscroll)
+      ? hscroll.rowHeight
+      : 0;
   return Math.round(
-    headerHeight + rows * rowHeight + gapRows * gapRowHeight + trailing,
+    headerHeight +
+      rows * rowHeight +
+      gapRows * gapRowHeight +
+      trailing +
+      scrollbar,
   );
+}
+
+/**
+ * 描いたカードに貼り付く横スクロールバーが出るか。バーを出す判定
+ * (`needsProxyScrollbar`) に、行の幅と表の枠の幅の代わりに、本文の幅と本文が
+ * 使える幅を渡す (どちらも行番号・印・余白の分だけ小さいので差は同じ)。
+ */
+export function diffCardScrollsSideways(
+  widest: DiffWidestLines | undefined,
+  layout: DiffCardLayout,
+  hscroll: DiffCardHScrollMetrics,
+): boolean {
+  if (!widest) return false;
+  const over = (width: number, room: number) =>
+    needsProxyScrollbar({ scrollWidth: width, clientWidth: room });
+  if (
+    widest.head.some((line) => over(hscroll.headWidth(line), hscroll.headRoom))
+  )
+    return true;
+  const tables =
+    layout === "side-by-side"
+      ? [widest.old, widest.new]
+      : [[...widest.old, ...widest.new]];
+  if (tables.length !== hscroll.lineRoom.length)
+    throw new Error(
+      `diff card width measured for ${hscroll.lineRoom.length} tables, but ${layout} draws ${tables.length}`,
+    );
+  return tables.some((lines, i) =>
+    lines.some((line) => over(hscroll.lineWidth(line), hscroll.lineRoom[i])),
+  );
+}
+
+/**
+ * 行の本文の幅 (px)。タブは次の止まり (tab-size × 空白の幅ごと) まで進め、
+ * 止まりまで空白の半分に足りなければその次の止まりまで進める (ブラウザの決まり)。
+ */
+export function tabbedTextWidth(
+  text: string,
+  measure: (text: string) => number,
+  tabSize: number,
+): number {
+  const [first, ...rest] = text.split("\t");
+  const space = measure(" ");
+  const stop = tabSize * space;
+  let x = measure(first);
+  for (const part of rest) {
+    let next = (Math.floor(x / stop) + 1) * stop;
+    if (next - x < space / 2) next += stop;
+    x = next + measure(part);
+  }
+  return x;
+}
+
+/** 候補の行の数と、1 行の文字の数の上限 (応答を大きくしない)。 */
+const WIDEST_LINE_LIMIT = 8;
+const WIDEST_TEXT_LIMIT = 1000;
+
+/** 幅の無い字 (結合文字・ZWJ などの書式の字)。 */
+const ZERO_WIDTH_CHAR = /\p{M}|\p{Cf}/u;
+/** 等幅の字体に無く、全角で描かれる字 (CJK・かな・ハングル・全角・絵文字)。 */
+const WIDE_CHAR =
+  /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua000-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6\u{1f300}-\u{1faff}\u{20000}-\u{3fffd}]/u;
+
+/** 字の種類ごとの数 [ASCII, タブ, 全角, その他]。 */
+function charKindCounts(text: string): number[] {
+  const counts = [0, 0, 0, 0];
+  for (const ch of text) {
+    if (ch === "\t") counts[1] += 1;
+    else if (ch <= "\u007f") counts[0] += 1;
+    else if (WIDE_CHAR.test(ch)) counts[2] += 1;
+    else if (!ZERO_WIDTH_CHAR.test(ch)) counts[3] += 1;
+  }
+  return counts;
+}
+
+/**
+ * 字の幅が分からなくても、一番幅を取りうる行。字を 4 種類 (ASCII・タブ・全角・
+ * その他) に分けて数え、どの種類でも別の行以下の行は外す (字の幅がどうでも、
+ * その行より広くならない)。残りが多ければ、おおよその幅の広い順に上限まで。
+ */
+export function widestLines(lines: readonly string[]): string[] {
+  const kept: { text: string; counts: number[] }[] = [];
+  const covers = (a: number[], b: number[]) => a.every((n, i) => n >= b[i]);
+  for (const text of lines) {
+    const counts = charKindCounts(text);
+    if (kept.some((k) => covers(k.counts, counts))) continue;
+    for (let i = kept.length - 1; i >= 0; i--)
+      if (covers(counts, kept[i].counts)) kept.splice(i, 1);
+    kept.push({ text, counts });
+  }
+  const rough = ([ascii, tab, wide, other]: number[]) =>
+    ascii + tab * 4 + wide * 2 + other;
+  return kept
+    .sort((a, b) => rough(b.counts) - rough(a.counts))
+    .slice(0, WIDEST_LINE_LIMIT)
+    .map((k) => k.text.slice(0, WIDEST_TEXT_LIMIT));
 }
 
 /**
@@ -149,6 +290,8 @@ export function diffRowBasisFromText(
     adds: number;
     /** いまのハンクの終わりに続いている文脈の行の数。 */
     tail: number;
+    /** 表ごとの行の本文 (候補を選ぶため。ファイルの終わりで捨てる)。 */
+    lines: { old: string[]; new: string[]; head: string[] };
   } | null = null;
   const flushBlock = () => {
     if (!current) return;
@@ -164,6 +307,12 @@ export function diffRowBasisFromText(
       current.newPath !== null &&
       current.basis.hunks > 0 &&
       current.tail >= DIFF_CONTEXT_LINES;
+    const { lines } = current;
+    current.basis.widest = {
+      old: widestLines(lines.old),
+      new: widestLines(lines.new),
+      head: widestLines(lines.head),
+    };
     const key = current.newPath ?? current.oldPath;
     if (key !== null) out.set(key, current.basis);
     current = null;
@@ -180,6 +329,7 @@ export function diffRowBasisFromText(
         dels: 0,
         adds: 0,
         tail: 0,
+        lines: { old: [], new: [], head: [] },
       };
       continue;
     }
@@ -194,6 +344,7 @@ export function diffRowBasisFromText(
       current.basis.hunks += 1;
       current.inHunk = true;
       current.tail = 0;
+      current.lines.head.push(line);
       continue;
     }
     if (!current.inHunk) {
@@ -207,18 +358,24 @@ export function diffRowBasisFromText(
       continue;
     }
     const mark = line[0];
+    // CRLF のファイルの行の終わりの CR は描かれない。
+    const text = line.slice(1).replace(/\r$/, "");
     if (mark === " ") {
       flushBlock();
       current.basis.context += 1;
       current.tail += 1;
+      current.lines.old.push(text);
+      current.lines.new.push(text);
     } else if (mark === "-") {
       // 削除の後に追加が来たら、次のかたまりの削除は新しいかたまり。
       if (current.adds > 0) flushBlock();
       current.dels += 1;
       current.tail = 0;
+      current.lines.old.push(text);
     } else if (mark === "+") {
       current.adds += 1;
       current.tail = 0;
+      current.lines.new.push(text);
     }
     // `\ No newline at end of file` と、本文の最後の空行は行に数えない。
   }

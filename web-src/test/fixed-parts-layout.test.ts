@@ -257,3 +257,29 @@ describe("Diff の本文の末尾の詰め物は要素でなく余白", () => {
     });
   });
 });
+
+describe("Diff の単語の強調は行の幅を変えない", () => {
+  // 横のスクロールバーが出るかは行の本文の幅で見積もる (core/diff-card-estimate.ts)。
+  // 強調した語に左右の padding / margin / border があると、語の数だけ行が広がり
+  // 見積もりが外れる (上下の行と桁もずれる)。左右の張り出しは影で描く。
+  test.each([
+    { mark: "ins", selectors: [".d2h-ins ins", ".d2h-ins.d2h-change ins"] },
+    { mark: "del", selectors: [".d2h-del del", ".d2h-del.d2h-change del"] },
+  ])("$mark", ({ mark, selectors }) => {
+    const declarations = cascadedDeclarations(rules, (s) =>
+      selectors.includes(s),
+    );
+    const bg = `var(--diff-${mark === "ins" ? "add" : "del"}-word-bg)`;
+    expect({
+      padding: declarations.get("padding"),
+      margin: declarations.get("margin"),
+      border: declarations.get("border"),
+      boxShadow: declarations.get("box-shadow"),
+    }).toEqual({
+      padding: undefined,
+      margin: undefined,
+      border: undefined,
+      boxShadow: `-1px 0 ${bg}, 1px 0 ${bg}`,
+    });
+  });
+});
