@@ -363,7 +363,15 @@ wraps long lines. Opening an agent from a notification, the bottom counter or
 the All agents board closes the sidebar and the sheet. On a touch screen,
 buttons, tabs, rows and the file tree are at least 44px tall, and a terminal
 tab shows the keys an on-screen keyboard lacks (Esc, Tab, ⇧Tab, Ctrl+C, ↑, ↓,
-Enter, and ⌨ to bring up or put away the keyboard). Browser notifications
+Enter, and ⌨ to bring up or put away the keyboard). The square with a number
+at the right end of the tab strip lists every open tab, including those of a
+saved right side (opening one moves it to the left). Swiping up from the
+bottom bar opens **List**, and swiping down on a sheet's header closes it.
+Holding a finger on an agent, a tab or a file row opens its right-click menu.
+Pinching on a terminal changes its text size for this browser (the phone
+starts at 12px; the desktop size is kept). A phone turned sideways hides the
+status bar and thins the bottom bar. Settings open as contents first; pick a
+section, and the row at the top goes back. Browser notifications
 need a secure page (https, or localhost on the same machine), so they are not
 available when the page is opened over plain http from another device.
 

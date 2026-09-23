@@ -5,6 +5,7 @@ import {
   COMMON_TABS_VERSION,
   close,
   closeOthers,
+  closeParked,
   closeToRight,
   isCommonTarget,
   keepOpen,
@@ -28,6 +29,7 @@ import {
   splitRight,
   type TabTarget,
   tabMenu,
+  takeParked,
   unparkRight,
   unsplit,
   withCommonTabs,
@@ -1507,6 +1509,90 @@ describe("窓が狭い間の右の面の預かり (parkRight / unparkRight)", ()
       undefined,
       2,
     ]);
+  });
+});
+
+// 電話の段のタブの一覧から、預けた右の面のタブを前面に出す・閉じる。
+describe("預けた右の面のタブ (takeParked / closeParked)", () => {
+  /** 預けた面を表と同じ書き方で (空なら null)。 */
+  const showParked = (layout: Layout) => {
+    const { parked } = parkRight(layout);
+    return parked;
+  };
+  test.each([
+    {
+      name: "左の末尾へ移して前面に出し、預けた面から外す",
+      before: withRightIds(layoutOf("[a] b", "[c] ~img")),
+      take: "img-r",
+      left: "a b [~img] (left)",
+      rest: "[c]",
+    },
+    {
+      name: "預けた面の前面を移すと、預けた面は直前の前面へ",
+      before: withRightIds(layoutOf("[a]", "c [d]")),
+      take: "d-r",
+      left: "a [d] (left)",
+      rest: "[c]",
+    },
+    {
+      name: "左に同じ中身があれば、そのタブを前面に出す (2 枚にしない)",
+      before: withRightIds(layoutOf("[a] b", "[b] c")),
+      take: "b-r",
+      left: "a [b] (left)",
+      rest: "[c]",
+    },
+    {
+      name: "最後の 1 枚を移すと預けた面は無くなる",
+      before: withRightIds(layoutOf("[a]", "[c]")),
+      take: "c-r",
+      left: "a [c] (left)",
+      rest: null,
+    },
+  ])("$name", ({ before, take, left, rest }) => {
+    const stash = showParked(before);
+    if (!stash) throw new Error("expected the right pane to be parked");
+    const { layout: parked } = parkRight(before);
+    const taken = takeParked(parked, stash, take);
+    assertLayout(taken.layout);
+    expect([
+      show(taken.layout),
+      taken.parked
+        ? show({ panes: { left: taken.parked.pane }, focused: "left" }).replace(
+            / \(left\)$/,
+            "",
+          )
+        : null,
+    ]).toEqual([left, rest]);
+  });
+
+  test("預けた面に無い id は投げる", () => {
+    const before = withRightIds(layoutOf("[a]", "[c]"));
+    const { layout: parked, parked: stash } = parkRight(before);
+    if (!stash) throw new Error("expected the right pane to be parked");
+    expect(() => takeParked(parked, stash, "a")).toThrow(/"a" is missing/);
+  });
+
+  test.each([
+    { name: "前面でないタブ", right: "[c] d", close: "d-r", rest: "[c]" },
+    {
+      name: "前面のタブは隣が前面に",
+      right: "c [d]",
+      close: "d-r",
+      rest: "[c]",
+    },
+    { name: "最後の 1 枚なら null", right: "[c]", close: "c-r", rest: null },
+  ])("閉じる: $name", ({ right, close: id, rest }) => {
+    const stash = showParked(withRightIds(layoutOf("[a]", right)));
+    if (!stash) throw new Error("expected the right pane to be parked");
+    const next = closeParked(stash, id);
+    expect(
+      next
+        ? show({ panes: { left: next.pane }, focused: "left" }).replace(
+            / \(left\)$/,
+            "",
+          )
+        : null,
+    ).toBe(rest);
   });
 });
 

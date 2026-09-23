@@ -16,11 +16,16 @@ import {
   SIDEBAR_SHOW_16_PATHS,
 } from "../core/icons";
 import {
+  bottomSwipeAction,
   drawerDragOffset,
   edgeSwipeAction,
+  LONG_PRESS_MS,
+  LONG_PRESS_TARGETS,
+  longPressMoved,
   type MobileBarView,
   mobileBarCurrent,
   PHONE_MEDIA_QUERY,
+  pinchFontSize,
   softKeyboardInset,
   TERMINAL_SOFT_KEYS,
   type TerminalSoftKey,
@@ -28,7 +33,9 @@ import {
   type ViewportTier,
   viewportTier,
 } from "../core/mobile-layout";
-import { pageIconPaths } from "./main-tabs/tab-icons";
+import { MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE } from "../core/tmux";
+import type { TabListEntry } from "./main-tabs/main-tabs-view";
+import { CLOSE_ICON_PATH, pageIconPaths } from "./main-tabs/tab-icons";
 import {
   type MobileShellLang,
   type MobileShellText,
@@ -42,6 +49,22 @@ export type MobileShellDeps = {
   sendTerminalKey(key: TerminalSoftKey): void;
   /** 前面 (左の面) の端末に入力を向ける (ソフトキーボードが出る)。 */
   focusTerminal(): void;
+  /**
+   * 開いているタブの一覧の面 (電話の段のタブ列の右端の入口から開く。
+   * main-tabs-view.ts の tabList など)。無ければ面を作らない。
+   */
+  tabs?: MobileTabsDeps;
+  /** 左の面の端末の文字の大きさ (電話の段の値)。ピンチで変える。 */
+  terminalFontSize?(): number;
+  setTerminalFontSize?(size: number): void;
+};
+
+export type MobileTabsDeps = {
+  list(): TabListEntry[];
+  bringToFront(id: string): void;
+  close(id: string): void;
+  /** タブ列を描き直したら呼ぶ。外す関数を返す。 */
+  onRender(listener: () => void): () => void;
 };
 
 export type MobileShell = {
@@ -49,6 +72,8 @@ export type MobileShell = {
   tier(): ViewportTier;
   openDrawer(): void;
   openSheet(): void;
+  /** 開いているタブの一覧の面を開く。 */
+  openTabs(): void;
   /** 開いている引き出し・面を閉じる。 */
   close(): void;
   /** 下端の帯の「エージェント」に出す入力待ちの件数 (0 で札を隠す)。 */
@@ -57,12 +82,16 @@ export type MobileShell = {
   dispose(): void;
 };
 
-type Panel = "drawer" | "sheet";
+type Panel = "drawer" | "sheet" | "tabs";
 
 const OPEN_CLASS: Record<Panel, string> = {
   drawer: "mobile-nav-open",
   sheet: "mobile-sheet-open",
+  tabs: "mobile-tabs-open",
 };
+
+/** ピンチで端末の文字を変える場所 (左の面の端末)。 */
+const TERMINAL_HOST = '.main-pane-host[data-side="left"][data-kind="terminal"]';
 
 /** 押したら引き出しを閉じるもの (移る・開く)。山形や行の操作では閉じない。 */
 const DRAWER_CLOSING_TARGETS =
@@ -199,7 +228,117 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
       event.preventDefault();
   });
 
-  app.append(scrim, keys, bar);
+  // 開いているタブの一覧の面 (電話の段)。タブ列の右端の入口 (main-tabs-view.ts
+  // の listButton) から開く。行を押すとそのタブを前面に出して閉じ、×でタブを
+  // 閉じる (面は開いたまま)。
+  const tabsSheet = deps.tabs ? document.createElement("section") : null;
+  const tabsTitle = document.createElement("h2");
+  const tabsCloseButton = document.createElement("button");
+  const tabsList = document.createElement("ul");
+  let stopTabsRender: (() => void) | null = null;
+  if (tabsSheet && deps.tabs) {
+    const tabs = deps.tabs;
+    tabsSheet.id = "mobile-tabs";
+    tabsSheet.className = "mobile-tabs";
+    tabsSheet.setAttribute("role", "dialog");
+    const head = document.createElement("div");
+    head.className = "mobile-tabs-head";
+    tabsTitle.className = "mobile-tabs-title";
+    tabsTitle.id = "mobile-tabs-title";
+    tabsSheet.setAttribute("aria-labelledby", tabsTitle.id);
+    tabsCloseButton.type = "button";
+    tabsCloseButton.className = "mobile-tabs-x mobile-tabs-dismiss";
+    tabsCloseButton.innerHTML = iconSvg("mobile-tabs-x-icon", CLOSE_ICON_PATH);
+    tabsCloseButton.addEventListener("click", () => close());
+    head.append(tabsTitle, tabsCloseButton);
+    tabsList.className = "mobile-tabs-list";
+    tabsSheet.append(head, tabsList);
+    tabsList.addEventListener("click", (event) => {
+      const target = event.target as Element;
+      const row = target.closest<HTMLElement>(".mobile-tabs-row");
+      const id = row?.dataset.tabId;
+      if (!id) return;
+      if (target.closest(".mobile-tabs-x")) {
+        tabs.close(id);
+        return;
+      }
+      close();
+      tabs.bringToFront(id);
+    });
+    stopTabsRender = tabs.onRender(() => {
+      if (open === "tabs") renderTabs();
+    });
+  }
+
+  app.append(scrim, keys, bar, ...(tabsSheet ? [tabsSheet] : []));
+
+  /** タブの一覧の面の中身を今のタブから組み直す (×の後も面は開いたまま)。 */
+  function renderTabs(): void {
+    if (!deps.tabs) return;
+    const t = text();
+    const entries = deps.tabs.list();
+    tabsTitle.textContent = t.tabsTitle(entries.length);
+    tabsCloseButton.title = t.close;
+    tabsCloseButton.setAttribute("aria-label", t.close);
+    // 閉じたタブの行にフォーカスがあったら、同じ位置の行 (無ければ前の行) へ移す。
+    const focusedRow =
+      document.activeElement instanceof HTMLElement &&
+      tabsList.contains(document.activeElement)
+        ? [...tabsList.children].indexOf(
+            document.activeElement.closest(".mobile-tabs-row") as Element,
+          )
+        : -1;
+    if (entries.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "mobile-tabs-empty";
+      empty.textContent = t.tabsEmpty;
+      tabsList.replaceChildren(empty);
+      return;
+    }
+    tabsList.replaceChildren(
+      ...entries.map((entry) => {
+        const row = document.createElement("li");
+        row.className = "mobile-tabs-row";
+        row.dataset.tabId = entry.id;
+        row.classList.toggle("is-front", entry.front);
+        row.classList.toggle("is-preview", entry.preview);
+        const openButton = document.createElement("button");
+        openButton.type = "button";
+        openButton.className = "mobile-tabs-open";
+        openButton.title = entry.title;
+        if (entry.front) openButton.setAttribute("aria-current", "true");
+        const icon = document.createElement("span");
+        icon.className = "mobile-tabs-icon";
+        icon.innerHTML = entry.iconHtml;
+        const name = document.createElement("span");
+        name.className = "mobile-tabs-name";
+        name.textContent = entry.name;
+        openButton.append(icon, name);
+        if (entry.parked) {
+          const tag = document.createElement("span");
+          tag.className = "mobile-tabs-parked";
+          tag.textContent = t.tabsParked;
+          tag.title = t.tabsParkedTitle;
+          openButton.append(tag);
+        }
+        const closeButton = document.createElement("button");
+        closeButton.type = "button";
+        closeButton.className = "mobile-tabs-x";
+        closeButton.innerHTML = iconSvg("mobile-tabs-x-icon", CLOSE_ICON_PATH);
+        const closeLabel = t.closeTab(entry.name);
+        closeButton.title = closeLabel;
+        closeButton.setAttribute("aria-label", closeLabel);
+        row.append(openButton, closeButton);
+        return row;
+      }),
+    );
+    if (focusedRow >= 0) {
+      const rows = tabsList.querySelectorAll<HTMLElement>(".mobile-tabs-open");
+      rows[Math.min(focusedRow, rows.length - 1)]?.focus({
+        preventScroll: true,
+      });
+    }
+  }
 
   function barButton(
     paths: string | string[],
@@ -283,7 +422,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     if (next === open) return;
     const wasOpen = open;
     open = next;
-    for (const panel of ["drawer", "sheet"] as const) {
+    for (const panel of ["drawer", "sheet", "tabs"] as const) {
       document.body.classList.toggle(OPEN_CLASS[panel], open === panel);
     }
     menuButton.setAttribute("aria-expanded", String(open === "drawer"));
@@ -301,6 +440,14 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
       nav
         .querySelector<HTMLElement>("button, a[href]")
         ?.focus({ preventScroll: true });
+    }
+    if (open === "tabs") {
+      renderTabs();
+      (
+        tabsList.querySelector<HTMLElement>(".is-front .mobile-tabs-open") ??
+        tabsList.querySelector<HTMLElement>(".mobile-tabs-open") ??
+        tabsCloseButton
+      ).focus({ preventScroll: true });
     }
     if (!open && wasOpen) {
       if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
@@ -350,6 +497,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     bar.hidden = !phone;
     wrapButton.hidden = !phone;
     scrim.hidden = !phone;
+    if (tabsSheet) tabsSheet.hidden = !phone;
     keys.hidden = !(phone || touchQuery.matches);
     if (!phone) {
       close();
@@ -457,6 +605,205 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
       });
       if (action === "open") setOpen("drawer");
       else if (action === "close" && open === "drawer") close();
+      else if (!action) followBottomSwipe(start, touch);
+    },
+    { passive: true, signal },
+  );
+
+  /**
+   * 下端の帯から上への指の動きで一覧の面を開き、開いている面 (一覧・タブ) の
+   * 頭の行から下への動きで閉じる (bottomSwipeAction)。
+   */
+  function followBottomSwipe(
+    start: { x: number; y: number; drawerOpen: boolean },
+    touch: Touch,
+  ): void {
+    if (start.drawerOpen || bar.hidden) return;
+    const head =
+      open === "sheet"
+        ? document.getElementById("panel-head")
+        : open === "tabs"
+          ? tabsSheet?.querySelector(".mobile-tabs-head")
+          : null;
+    const headRect = head?.getBoundingClientRect() ?? null;
+    const action = bottomSwipeAction({
+      startX: start.x,
+      startY: start.y,
+      endX: touch.clientX,
+      endY: touch.clientY,
+      barTop: bar.getBoundingClientRect().top,
+      sheetHead: headRect
+        ? { top: headRect.top, bottom: headRect.bottom }
+        : null,
+    });
+    if (action === "open" && !open) setOpen("sheet");
+    else if (action === "close") close();
+  }
+
+  // 長押しで右クリックのメニュー (LONG_PRESS_TARGETS の行)。既存の contextmenu の
+  // 入口 (行ごとの右クリック) をそのまま使うため、指を置いた要素へ contextmenu を
+  // 送る。長押しで出るブラウザの文字の選択と既定のメニューは、行の CSS
+  // (-webkit-touch-callout・user-select) と、下の本物の contextmenu の扱いで止める。
+  let press: {
+    x: number;
+    y: number;
+    target: Element;
+    timer: ReturnType<typeof setTimeout>;
+    fired: boolean;
+    /** 指を置いた要素に付けた見張りを外す。 */
+    stop: AbortController;
+  } | null = null;
+  /** 合成のメニューを出した時刻 (後から届く本物の contextmenu を 2 重に出さない)。 */
+  let firedAt = Number.NEGATIVE_INFINITY;
+  function cancelPress(): void {
+    if (!press) return;
+    clearTimeout(press.timer);
+    press.stop.abort();
+    press = null;
+  }
+  function firePress(): void {
+    if (!press) return;
+    press.fired = true;
+    firedAt = performance.now();
+    press.target.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: press.x,
+        clientY: press.y,
+      }),
+    );
+  }
+  // 指の動きと離すのは、指を置いた要素で見る: touchmove / touchend はその要素へ
+  // 届き続けるが、メニューを出した行が描き直しで DOM から外れると document まで
+  // 上がってこない (Files の木で、離したときの click が止まらずメニューが閉じた)。
+  document.addEventListener(
+    "touchstart",
+    (event) => {
+      cancelPress();
+      const touch = event.touches[0];
+      const target = event.target;
+      if (
+        event.touches.length !== 1 ||
+        !touch ||
+        !(target instanceof Element) ||
+        !target.closest(LONG_PRESS_TARGETS)
+      )
+        return;
+      const stop = new AbortController();
+      const current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        target,
+        timer: setTimeout(firePress, LONG_PRESS_MS),
+        fired: false,
+        stop,
+      };
+      press = current;
+      target.addEventListener(
+        "touchmove",
+        (move) => {
+          const now = (move as TouchEvent).touches[0];
+          if (
+            !current.fired &&
+            (!now ||
+              longPressMoved(current, { x: now.clientX, y: now.clientY }))
+          )
+            cancelPress();
+        },
+        { passive: true, signal: stop.signal },
+      );
+      // 長押しでメニューを出したら、指を離したときの click (行を開く) を止める。
+      // preventDefault するので passive にしない。
+      target.addEventListener(
+        "touchend",
+        (end) => {
+          if (current.fired && end.cancelable) end.preventDefault();
+          cancelPress();
+        },
+        { signal: stop.signal },
+      );
+      target.addEventListener("touchcancel", cancelPress, {
+        passive: true,
+        signal: stop.signal,
+      });
+    },
+    { passive: true, signal },
+  );
+  // 長押しで本物の contextmenu を出すブラウザ (Android) と 2 重にしない: 先に
+  // 本物が来たら合成をやめ、合成の後に来た本物は止める。
+  document.addEventListener(
+    "contextmenu",
+    (event) => {
+      if (!event.isTrusted) return;
+      if (press && !press.fired) {
+        clearTimeout(press.timer);
+        press.fired = true;
+        return;
+      }
+      if (performance.now() - firedAt < LONG_PRESS_MS * 2) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    },
+    { capture: true, signal },
+  );
+
+  // 左の面の端末の上の 2 本指のピンチで、端末の文字の大きさを変える (電話の段の
+  // 値。保存したデスクトップの値は変えない)。ページの拡大は style.css の
+  // touch-action で止める。
+  let pinch: { startSize: number; startDistance: number; size: number } | null =
+    null;
+  const fingerDistance = (touches: TouchList): number => {
+    const a = touches[0];
+    const b = touches[1];
+    return a && b
+      ? Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+      : 0;
+  };
+  document.addEventListener(
+    "touchstart",
+    (event) => {
+      pinch = null;
+      if (
+        event.touches.length !== 2 ||
+        current !== "phone" ||
+        !deps.terminalFontSize ||
+        !(event.target instanceof Element) ||
+        !event.target.closest(TERMINAL_HOST)
+      )
+        return;
+      const size = deps.terminalFontSize();
+      pinch = {
+        startSize: size,
+        startDistance: fingerDistance(event.touches),
+        size,
+      };
+    },
+    { passive: true, signal },
+  );
+  document.addEventListener(
+    "touchmove",
+    (event) => {
+      if (!pinch || event.touches.length !== 2) return;
+      const size = pinchFontSize({
+        startSize: pinch.startSize,
+        startDistance: pinch.startDistance,
+        distance: fingerDistance(event.touches),
+        min: MIN_TERMINAL_FONT_SIZE,
+        max: MAX_TERMINAL_FONT_SIZE,
+      });
+      if (size === pinch.size) return;
+      pinch.size = size;
+      deps.setTerminalFontSize?.(size);
+    },
+    { passive: true, signal },
+  );
+  document.addEventListener(
+    "touchend",
+    (event) => {
+      if (event.touches.length < 2) pinch = null;
     },
     { passive: true, signal },
   );
@@ -496,7 +843,12 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     signal,
   });
   // 言語の切替は app.ts が html の lang に書く。それを見て当て直す。
-  const langObserver = new MutationObserver(localize);
+  // タブの一覧は開いている間だけ組み直す (localize はフォーカスの出入りでも
+  // 呼ぶので、そこで組み直すとフォーカスのある行が消える)。
+  const langObserver = new MutationObserver(() => {
+    localize();
+    if (open === "tabs") renderTabs();
+  });
   langObserver.observe(document.documentElement, {
     attributes: true,
     attributeFilter: ["lang"],
@@ -509,6 +861,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     tier: () => current,
     openDrawer: () => setOpen("drawer"),
     openSheet: () => setOpen("sheet"),
+    openTabs: () => setOpen("tabs"),
     close,
     setWaitingAgents(count) {
       waitingAgents = count;
@@ -517,6 +870,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     dispose() {
       close();
       endDrag();
+      cancelPress();
       listening.abort();
       langObserver.disconnect();
       pageObserver.disconnect();
@@ -527,6 +881,8 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
       scrim.remove();
       keys.remove();
       bar.remove();
+      stopTabsRender?.();
+      tabsSheet?.remove();
     },
   };
 }

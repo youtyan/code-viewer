@@ -2,14 +2,18 @@
 // スワイプ・ソフトキーボードの高さ・端末の操作札のバイト列。
 import { describe, expect, test } from "vitest";
 import {
+  bottomSwipeAction,
   DRAWER_DRAG_START,
   diffLayoutFor,
   drawerDragOffset,
   EDGE_SWIPE_START_MAX_X,
   edgeSwipeAction,
+  LONG_PRESS_MOVE_TOLERANCE,
+  longPressMoved,
   mobileBarCurrent,
   PHONE_LANDSCAPE_MEDIA_QUERY,
   PHONE_MEDIA_QUERY,
+  pinchFontSize,
   SOFT_KEYS_MEDIA_QUERY,
   softKeyboardInset,
   softKeySequence,
@@ -376,6 +380,74 @@ describe("mobileBarCurrent", () => {
         (name) => (classes as readonly string[]).includes(name),
         covered,
       ),
+    ).toBe(expected);
+  });
+});
+
+describe("longPressMoved", () => {
+  const T = LONG_PRESS_MOVE_TOLERANCE;
+  test.each([
+    ["still", 0, 0, false],
+    ["right by the tolerance", T, 0, false],
+    ["right past the tolerance", T + 1, 0, true],
+    ["down past the tolerance", 0, T + 1, true],
+    ["diagonal within the tolerance (6, 8 = 10)", 6, 8, false],
+    ["diagonal past the tolerance (8, 8)", 8, 8, true],
+  ] as const)("%s", (_name, dx, dy, expected) => {
+    expect(
+      longPressMoved({ x: 100, y: 200 }, { x: 100 + dx, y: 200 + dy }),
+    ).toBe(expected);
+  });
+});
+
+describe("bottomSwipeAction", () => {
+  const BAR_TOP = 800;
+  const HEAD = { top: 150, bottom: 194 };
+  test.each([
+    ["closed: up from the bar", 820, 700, 0, null, "open"],
+    ["closed: up from the bar top edge", BAR_TOP, 700, 0, null, "open"],
+    ["closed: up from above the bar (page scroll)", 790, 600, 0, null, null],
+    ["closed: up from the bar, too short", 820, 780, 0, null, null],
+    ["closed: more sideways than up", 820, 700, 200, null, null],
+    ["closed: down from the bar", 820, 900, 0, null, null],
+    ["open: down from the sheet head", 170, 300, 0, HEAD, "close"],
+    [
+      "open: down from the head bottom edge",
+      HEAD.bottom,
+      300,
+      0,
+      HEAD,
+      "close",
+    ],
+    ["open: down inside the list (scroll)", 400, 600, 0, HEAD, null],
+    ["open: up from the head", 170, 60, 0, HEAD, null],
+    ["open: up from the bar does not reopen", 820, 700, 0, HEAD, null],
+  ] as const)("%s", (_name, startY, endY, dx, sheetHead, expected) => {
+    expect(
+      bottomSwipeAction({
+        startX: 100,
+        startY,
+        endX: 100 + dx,
+        endY,
+        barTop: BAR_TOP,
+        sheetHead,
+      }),
+    ).toBe(expected);
+  });
+});
+
+describe("pinchFontSize", () => {
+  test.each([
+    ["no change", 12, 100, 100, 12],
+    ["spread 1.5x", 12, 100, 150, 18],
+    ["pinch to half stops at the min", 12, 100, 50, 8],
+    ["rounds to a whole size (12 x 1.2 = 14.4)", 12, 100, 120, 14],
+    ["stops at the max", 20, 100, 300, 28],
+    ["stops at the min", 10, 100, 10, 8],
+    ["fingers on the same point: keeps the size", 12, 0, 80, 12],
+  ] as const)("%s", (_name, startSize, startDistance, distance, expected) => {
+    expect(
+      pinchFontSize({ startSize, startDistance, distance, min: 8, max: 28 }),
     ).toBe(expected);
   });
 });

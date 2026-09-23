@@ -230,3 +230,90 @@ export function softKeySequence(
       return applicationCursorKeys ? "\x1bOB" : "\x1b[B";
   }
 }
+
+/** 長押しと見なす指の置き時間 (ms)。右クリックのメニューを出す。 */
+export const LONG_PRESS_MS = 500;
+
+/** 長押しの間に指が動いてよい距離 (px)。これを超えたらスクロールとして諦める。 */
+export const LONG_PRESS_MOVE_TOLERANCE = 10;
+
+/**
+ * 長押しで右クリックのメニューを出す行 (エージェントの行・タブ・ファイルの行・
+ * フォルダ表示の行)。ここに無い所 (本文・端末) の長押しはブラウザに任せる
+ * (文字の選択)。
+ */
+export const LONG_PRESS_TARGETS =
+  ".nav-agent, .main-tab, #filelist li, .gdp-repo-row";
+
+/** 指を置いた位置から、長押しを諦めるほど動いたか。 */
+export function longPressMoved(
+  start: { x: number; y: number },
+  now: { x: number; y: number },
+): boolean {
+  return (
+    Math.hypot(now.x - start.x, now.y - start.y) > LONG_PRESS_MOVE_TOLERANCE
+  );
+}
+
+export type BottomSwipeFacts = {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  /** 下端の帯の上端 (px。画面の上からの距離)。ここから下で始めた動きだけ開く。 */
+  barTop: number;
+  /** 面が開いているなら、面の頭の行の上端と下端 (px)。閉じていれば null。 */
+  sheetHead: { top: number; bottom: number } | null;
+};
+
+/**
+ * 1 回の指の動きが下からの面を開ける / 閉じるか。縦の移動が横より大きく、
+ * SWIPE_MIN_DISTANCE 以上のときだけ。開けるのは閉じている間に下端の帯から
+ * 上へ動かしたとき (画面の最下端の OS のホームの動きとは、帯の高さの分だけ
+ * 離れる)。閉じるのは開いている間に面の頭の行から下へ動かしたとき (面の中の
+ * 一覧のスクロールでは閉じない)。
+ */
+export function bottomSwipeAction(
+  facts: BottomSwipeFacts,
+): "open" | "close" | null {
+  const dx = facts.endX - facts.startX;
+  const dy = facts.endY - facts.startY;
+  if (Math.abs(dy) < SWIPE_MIN_DISTANCE || Math.abs(dy) <= Math.abs(dx))
+    return null;
+  if (!facts.sheetHead)
+    return dy < 0 && facts.startY >= facts.barTop ? "open" : null;
+  const { top, bottom } = facts.sheetHead;
+  return dy > 0 && facts.startY >= top && facts.startY <= bottom
+    ? "close"
+    : null;
+}
+
+/**
+ * 電話の段の端末の既定の文字の大きさ (px)。デスクトップの既定 (13) では 390px
+ * の幅に 45 桁前後しか入らない。この端末 (ブラウザ) だけの値で、保存した
+ * デスクトップの値は変えない。
+ */
+export const PHONE_TERMINAL_FONT_SIZE = 12;
+
+export type PinchFacts = {
+  /** 2 本の指を置いたときの文字の大きさ。 */
+  startSize: number;
+  /** 2 本の指を置いたときの指の間の距離 (px)。 */
+  startDistance: number;
+  /** 今の指の間の距離 (px)。 */
+  distance: number;
+  min: number;
+  max: number;
+};
+
+/**
+ * ピンチの間の端末の文字の大きさ。指の間の距離の比で大きさを掛け、整数に
+ * 丸めて範囲に収める。置いた直後の距離が 0 (同じ点) なら変えない。
+ */
+export function pinchFontSize(facts: PinchFacts): number {
+  const scaled =
+    facts.startDistance > 0
+      ? facts.startSize * (facts.distance / facts.startDistance)
+      : facts.startSize;
+  return Math.min(facts.max, Math.max(facts.min, Math.round(scaled)));
+}

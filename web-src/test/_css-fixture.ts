@@ -25,6 +25,11 @@ export type CssRule = {
    * デスクトップの見た目を検査したいなら baseRules() で絞る。
    */
   atRule: string | null;
+  /**
+   * 囲っている at-rule を外側から全部 (@media の中の @container など)。atRule は
+   * このうちいちばん内側。
+   */
+  atRules: string[];
 };
 
 function stripComments(source: string): string {
@@ -161,6 +166,7 @@ export function parseCss(source: string): CssRule[] {
         order: order++,
         specificity: specificity(selector),
         atRule,
+        atRules: [...atRuleStack],
       });
     }
     index = end + 1;

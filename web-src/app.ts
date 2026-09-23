@@ -110,7 +110,11 @@ import {
   sidebarTitle,
 } from "./core/list-column";
 import type { PaneSide, TabTarget } from "./core/main-tabs";
-import { diffLayoutFor, PHONE_MEDIA_QUERY } from "./core/mobile-layout";
+import {
+  diffLayoutFor,
+  PHONE_MEDIA_QUERY,
+  PHONE_TERMINAL_FONT_SIZE,
+} from "./core/mobile-layout";
 import { createNetworkActivityTracker } from "./core/network-activity";
 import { PAGE_MODE_CLASSES, pageModeClasses } from "./core/page-mode";
 import {
@@ -158,6 +162,11 @@ import {
 import { rememberPaletteSelection } from "./core/search-palette";
 import type { ShellListResponse, ShellSessionId } from "./core/shell";
 import { sourceInternalPathKind } from "./core/source-meta";
+import {
+  readStoredSize,
+  reportStoredSizeFailure,
+  writeStoredSize,
+} from "./core/stored-size";
 import {
   type TerminalImageRef,
   type TerminalImagesResponse,
@@ -1042,6 +1051,26 @@ window.GdpExpandLogic = GdpExpandLogic;
   /** 電話の段で切り替えた差分の並べ方 (保存しない。diffLayoutFor)。 */
   let phoneDiffLayout: LayoutMode | null = null;
 
+  /**
+   * 電話の段の端末の文字の大きさ。設定 (terminalFontSize) は全部の端末で共有
+   * するデスクトップの値なので、電話ではこのブラウザにだけ覚える (ピンチ・
+   * 右クリックの大きさの操作。core/stored-size.ts)。
+   */
+  const PHONE_TERMINAL_FONT_SIZE_KEY = "code-viewer:phone-terminal-font-size";
+  function terminalFontSize(): number {
+    if (!PHONE_QUERY.matches)
+      return clampTerminalFontSize(APP_SETTINGS.terminalFontSize);
+    const result = readStoredSize(
+      PHONE_TERMINAL_FONT_SIZE_KEY,
+      PHONE_TERMINAL_FONT_SIZE,
+    );
+    reportStoredSizeFailure(
+      result,
+      "reading the phone terminal font size failed",
+    );
+    return clampTerminalFontSize(result.value);
+  }
+
   /** いま見せる差分の並べ方 (電話の段では 1 列が既定)。 */
   function shownLayout(): LayoutMode {
     return diffLayoutFor(
@@ -1508,6 +1537,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   } as const;
 
   const MAIN_TABS = createMainTabsView({
+    // 電話の段のタブ列の右端の「開いているタブ」(MOBILE_SHELL は後で作る)。
+    onTabList: () => MOBILE_SHELL.openTabs(),
     mount: (() => {
       const mount = document.getElementById("main-tabs");
       if (!mount) throw new Error("#main-tabs is missing from index.html");
@@ -6680,9 +6711,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     actionHeaders,
     // 文字サイズは他の表示設定と同じ置き場 (app settings) に持たせる。
     // 保存の経路も codeFontSize などと同じ patchSettings に乗せる。
-    getFontSize: () => clampTerminalFontSize(APP_SETTINGS.terminalFontSize),
+    getFontSize: terminalFontSize,
     onFontSizeChange: (size) => {
       const next = clampTerminalFontSize(size);
+      if (PHONE_QUERY.matches) {
+        reportStoredSizeFailure(
+          writeStoredSize(PHONE_TERMINAL_FONT_SIZE_KEY, next),
+          "saving the phone terminal font size failed",
+        );
+        return;
+      }
       mergeLocalSettings({ terminalFontSize: next });
       patchSettings({ terminalFontSize: next });
     },
@@ -7091,7 +7129,26 @@ window.GdpExpandLogic = GdpExpandLogic;
     getLanguage: () => STATE.language,
     sendTerminalKey: (key) => TERMINAL_VIEW.sendSoftKey("left", key),
     focusTerminal: () => TERMINAL_VIEW.focusTab("left"),
+    tabs: {
+      list: () => MAIN_TABS.tabList(),
+      bringToFront: (id) => MAIN_TABS.bringToFront(id),
+      close: (id) => MAIN_TABS.closeTab(id),
+      onRender: (listener) => MAIN_TABS.onRender(listener),
+    },
+    terminalFontSize,
+    setTerminalFontSize: (size) => {
+      reportStoredSizeFailure(
+        writeStoredSize(
+          PHONE_TERMINAL_FONT_SIZE_KEY,
+          clampTerminalFontSize(size),
+        ),
+        "saving the phone terminal font size failed",
+      );
+      TERMINAL_VIEW.applyFontSize();
+    },
   });
+  // 電話の段に出入りすると、端末の文字の大きさの出所 (電話の値と設定) が替わる。
+  PHONE_QUERY.addEventListener("change", () => TERMINAL_VIEW.applyFontSize());
 
   /**
    * URL の ?terminal= (映しているシェル) に合わせる。そのシェルのタブを開いて

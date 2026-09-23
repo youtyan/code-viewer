@@ -33,6 +33,15 @@ export type MobileShellText = {
   /** 差分の長い行を折り返す切替 (札の文字と名前)。 */
   wrap: string;
   wrapTitle: string;
+  /** 開いているタブの一覧の面の見出し。 */
+  tabsTitle: (count: number) => string;
+  /** タブが 1 枚も無いとき。 */
+  tabsEmpty: string;
+  /** 右の面に預けているタブの札 (電話では右の面を出さない)。 */
+  tabsParked: string;
+  tabsParkedTitle: string;
+  /** 一覧の行のタブを閉じる。 */
+  closeTab: (name: string) => string;
 };
 
 const EN: MobileShellText = {
@@ -59,6 +68,12 @@ const EN: MobileShellText = {
   keyboardHide: "Hide keyboard",
   wrap: "Wrap",
   wrapTitle: "Wrap long lines in the diff",
+  tabsTitle: (count) => `Open tabs (${count})`,
+  tabsEmpty: "No open tabs",
+  tabsParked: "Right",
+  tabsParkedTitle:
+    "On the right side (hidden on a phone). Opening it moves it to the left side.",
+  closeTab: (name) => `Close ${name}`,
 };
 
 const JA: MobileShellText = {
@@ -84,6 +99,12 @@ const JA: MobileShellText = {
   keyboardHide: "キーボードをしまう",
   wrap: "折り返し",
   wrapTitle: "差分の長い行を折り返す",
+  tabsTitle: (count) => `開いているタブ (${count} 枚)`,
+  tabsEmpty: "開いているタブはありません",
+  tabsParked: "右",
+  tabsParkedTitle:
+    "右の面のタブです (電話では右の面を出しません)。開くと左の面へ移します。",
+  closeTab: (name) => `${name} を閉じる`,
 };
 
 export function mobileShellText(lang: MobileShellLang): MobileShellText {

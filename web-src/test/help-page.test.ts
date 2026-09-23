@@ -15,10 +15,12 @@ import {
   documentedHelpKeybindingActions,
   HIDDEN_HELP_KEYBINDING_ACTIONS,
 } from "../views/help-keybindings";
+import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import {
   createHelpPage,
   type HelpSection,
   openHelpKeybindings,
+  openHelpSection,
 } from "../views/help-page";
 
 /** インストールの案内を出さないブラウザ (案内の中身は pwa.test.ts)。 */
@@ -199,8 +201,93 @@ describe("help page settings categories", () => {
       route: () => route,
       category: () => category,
       searchHosts,
+      /** openHelpSection で節を指して開く (設定の見出しへ送る経路)。 */
+      openSection: (next: HelpSection) =>
+        openHelpSection(
+          {
+            getRoute: () => route,
+            getLanguage: () => "en",
+            currentRange: () => range,
+            setRoute: (value) => {
+              route = value;
+            },
+            setPageMode: () => undefined,
+            cancelActiveSourceLoad: () => true,
+            renderHelpPage: (options) => page.renderHelpPage(options),
+            setStatus: () => undefined,
+          },
+          next,
+        ),
     };
   }
+
+  // 電話の段では 2 段の画面: ほかの画面から入ると目次 (1 段目)、節を選ぶと本文
+  // (2 段目)、頭の「‹ 目次」で 1 段目へ戻る。節を指して開いたときは 2 段目から。
+  describe("on a phone: contents, then a section", () => {
+    let phone = true;
+    let originalMatchMedia: typeof window.matchMedia;
+    beforeAll(() => {
+      originalMatchMedia = window.matchMedia;
+      window.matchMedia = ((query: string) => ({
+        get matches() {
+          return query === PHONE_MEDIA_QUERY && phone;
+        },
+        media: query,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      })) as unknown as typeof window.matchMedia;
+    });
+    afterAll(() => {
+      window.matchMedia = originalMatchMedia;
+      phone = true;
+    });
+    const level = () =>
+      document
+        .querySelector(".gdp-help-layout")
+        ?.classList.contains("gdp-help-nav-open")
+        ? "contents"
+        : "section";
+    const heading = () =>
+      document.querySelector(".gdp-help-content h2")?.textContent;
+
+    test("entering shows the contents, a pick shows that section, the toggle row goes back", () => {
+      phone = true;
+      const view = renderSettings("settings");
+      const entered = level();
+      view.click("Agents");
+      const picked = [level(), heading()];
+      document
+        .querySelector<HTMLButtonElement>(".gdp-help-nav-toggle")
+        ?.click();
+      expect({ entered, picked, back: level() }).toEqual({
+        entered: "contents",
+        picked: ["section", "Agents"],
+        back: "contents",
+      });
+    });
+
+    test("typing in the settings search from the contents shows the section", () => {
+      phone = true;
+      const view = renderSettings("settings");
+      const input = document.createElement("input");
+      view.searchHosts[0]?.append(input);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(level()).toBe("section");
+    });
+
+    test("opening a section directly skips the contents", () => {
+      phone = true;
+      const view = renderSettings("settings");
+      view.openSection("settings");
+      expect(level()).toBe("section");
+    });
+
+    test("off the phone the contents stay folded when entering", () => {
+      phone = false;
+      renderSettings("settings");
+      expect(level()).toBe("section");
+    });
+  });
 
   test("lists the settings categories, then key bindings, then the help sections", () => {
     const view = renderSettings("settings");

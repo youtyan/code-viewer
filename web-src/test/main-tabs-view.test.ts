@@ -1689,6 +1689,173 @@ describe("main tabs view: 左右 2 面", () => {
     }
   });
 
+  // 電話の段のタブの一覧: タブ列の右端の入口 (枚数) と、左の面・預けた右の面の
+  // タブを前面に出す・閉じる。預けたタブを前面に出すと左の面へ移す (電話では
+  // 右の面を出さない)。
+  test("the phone tier lists every tab, brings a parked one to the left, and closes from the list", async () => {
+    const OriginalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      observe() {
+        /* 幅は変えない (電話の段だけで決まることを見る) */
+      }
+      unobserve() {
+        /* 同上 */
+      }
+      disconnect() {
+        /* 同上 */
+      }
+    } as unknown as typeof ResizeObserver;
+    let phone = true;
+    const changes: Array<() => void> = [];
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      get matches() {
+        return query === PHONE_MEDIA_QUERY ? phone : false;
+      },
+      media: query,
+      addEventListener: (_type: string, listener: () => void) => {
+        if (query === PHONE_MEDIA_QUERY) changes.push(listener);
+      },
+      removeEventListener: () => undefined,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: 390,
+      });
+      const saved = {
+        version: 3,
+        focused: "left",
+        split: 0.5,
+        panes: [
+          {
+            side: "left",
+            activeId: "a",
+            tabs: [
+              {
+                id: "a",
+                preview: false,
+                target: { kind: "file", path: "src/app.ts" },
+              },
+              {
+                id: "b",
+                preview: true,
+                target: { kind: "file", path: "src/b.ts" },
+              },
+            ],
+          },
+          {
+            side: "right",
+            activeId: "t",
+            tabs: [
+              {
+                id: "t",
+                preview: false,
+                target: { kind: "terminal", session: "shell-a1" },
+              },
+              {
+                id: "img",
+                preview: false,
+                target: { kind: "image", path: "docs/shot.png" },
+              },
+            ],
+          },
+        ],
+      };
+      const calls: string[] = [];
+      const { handle, mount, terminals } = setup(
+        async () => saved,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { onTabList: () => calls.push("tab-list") },
+      );
+      await handle.restore();
+      let renders = 0;
+      handle.onRender(() => {
+        renders++;
+      });
+      const button = mount.querySelector<HTMLButtonElement>(
+        ".main-tabs-list-open",
+      );
+      if (!button) throw new Error("expected the open tabs button");
+      const list = () =>
+        handle
+          .tabList()
+          .map(
+            (entry) =>
+              `${entry.front ? ">" : ""}${entry.name}${entry.preview ? " (preview)" : ""}${entry.parked ? " [right]" : ""}`,
+          );
+      const onPhone = {
+        shown: !button.hidden,
+        count: button.textContent,
+        label: button.getAttribute("aria-label"),
+        list: list(),
+      };
+      button.click();
+      handle.bringToFront("img");
+      const afterBring = {
+        list: list(),
+        front: panes(handle).left,
+        renders: renders > 0,
+      };
+      handle.closeTab("t");
+      const afterCloseParked = {
+        list: list(),
+        count: button.textContent,
+        closedShell: terminals[terminals.length - 1]?.closed,
+      };
+      handle.closeTab("a");
+      const afterCloseLeft = list();
+      expect(() => handle.closeTab("gone")).toThrow(/"gone" is not open/);
+      phone = false;
+      for (const notify of changes) notify();
+      expect({
+        onPhone,
+        calls,
+        afterBring,
+        afterCloseParked,
+        afterCloseLeft,
+        hiddenOnDesktop: button.hidden,
+      }).toEqual({
+        onPhone: {
+          shown: true,
+          count: "4",
+          label: "Open tabs (4)",
+          list: [
+            ">app.ts",
+            "b.ts (preview)",
+            "claude · Working [right]",
+            "shot.png [right]",
+          ],
+        },
+        calls: ["tab-list"],
+        afterBring: {
+          list: [
+            "app.ts",
+            "b.ts (preview)",
+            ">shot.png",
+            "claude · Working [right]",
+          ],
+          front: { kind: "image", path: "docs/shot.png" },
+          renders: true,
+        },
+        afterCloseParked: {
+          list: ["app.ts", "b.ts (preview)", ">shot.png"],
+          count: "3",
+          closedShell: ["shell-a1"],
+        },
+        afterCloseLeft: ["b.ts (preview)", ">shot.png"],
+        hiddenOnDesktop: true,
+      });
+    } finally {
+      globalThis.ResizeObserver = OriginalResizeObserver;
+      window.matchMedia = originalMatchMedia;
+      Reflect.deleteProperty(document.documentElement, "clientWidth");
+    }
+  });
+
   // 2 面のときの一覧の列と右の列 (ui-layout.md の「一覧の列と右の列」)。一覧の
   // 画面 (Diff・History・選んでいる作業ツリー) は一覧を本文の左の列に出し、右の列は
   // 本体を畳んだまま (頭の行 240 は残るが、本文の横には 0。panelColumnWidth)。

@@ -96,6 +96,11 @@ export type TerminalViewHandle = {
   focusTab(side: TabSide): void;
   /** その面の端末へ操作札のキーを送る (映していなければ何もしない)。 */
   sendSoftKey(side: TabSide, key: TerminalSoftKey): void;
+  /**
+   * 文字の大きさ (deps.getFontSize) を全部の端末に当て直す。電話の段の出入りと
+   * ピンチで、読む値が変わったとき。
+   */
+  applyFontSize(): void;
 };
 
 /** メインの面の左右。core/main-tabs.ts の PaneSide と同じ値。 */
@@ -434,6 +439,9 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     sendSoftKey: (side, key) => tabs[side]?.screen.sendSoftKey(key),
     refit: () => {
       for (const slot of slots()) slot.screen.refit();
+    },
+    applyFontSize: () => {
+      for (const slot of slots()) slot.screen.applyFontSize();
     },
     menuItems,
     localize() {

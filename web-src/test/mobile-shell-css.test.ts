@@ -10,6 +10,7 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
+  LONG_PRESS_TARGETS,
   PHONE_LANDSCAPE_MEDIA_QUERY,
   PHONE_MEDIA_QUERY,
   SOFT_KEYS_MEDIA_QUERY,
@@ -562,5 +563,214 @@ describe("on a phone the History list sits in the sheet", () => {
       "var(--panel-body-top)",
       "calc(100dvh - var(--sp-sheet-mid))",
     ]);
+  });
+});
+
+// 電話の段のタブの一覧: 入口 (タブ列の右端) はデスクトップでは hidden で消え、
+// 一覧は一覧の面と同じ場所に下から出す。行と×は指の大きさ。
+describe("the open tabs sheet", () => {
+  const rules = withTiers(SOFT_KEYS, PHONE);
+  const vars = bodyVariables(rules);
+
+  test("the entry in the tab strip is gone while hidden (the desktop)", () => {
+    expect(
+      declarationsOf(baseRules(sheet), [".main-tabs-list-open[hidden]"]).get(
+        "display",
+      ),
+    ).toBe("none");
+  });
+
+  test("the sheet sits where the list sheet does, off screen until opened", () => {
+    const closed = declarationsOf(rules, [".mobile-tabs:not([hidden])"]);
+    const opened = declarationsOf(rules, [
+      "body.mobile-tabs-open .mobile-tabs:not([hidden])",
+    ]);
+    const scrim = declarationsOf(rules, [
+      "body.mobile-tabs-open .mobile-scrim:not([hidden])",
+    ]);
+    expect({
+      closed: [
+        closed.get("position"),
+        closed.get("top"),
+        closed.get("bottom"),
+        closed.get("transform"),
+        closed.get("visibility"),
+      ],
+      opened: [opened.get("transform"), opened.get("visibility")],
+      scrim: scrim.get("display"),
+    }).toEqual({
+      closed: [
+        "fixed",
+        "var(--sp-sheet-top)",
+        "var(--chrome-bottom)",
+        "translateY(100vh)",
+        "hidden",
+      ],
+      opened: ["none", "visible"],
+      scrim: "block",
+    });
+  });
+
+  test.each([
+    { selector: ".mobile-tabs-open", property: "min-height" },
+    { selector: ".mobile-tabs-x", property: "width" },
+    { selector: ".mobile-tabs-x", property: "height" },
+  ])("$selector $property is a finger's size", ({ selector, property }) => {
+    const box = declarationsOf(rules, [selector]);
+    expect(resolveVar(box.get(property) ?? "", vars)).toBe("44px");
+  });
+});
+
+// 長押しで右クリックのメニューを出す行は、指の画面で文字の選択とリンクの既定の
+// メニューを出さない (core/mobile-layout.ts の LONG_PRESS_TARGETS と同じ並び)。
+describe("long press rows on a touch screen", () => {
+  const targets = LONG_PRESS_TARGETS.split(",").map((part) => part.trim());
+  test.each(targets)("%s: no text selection, no link callout", (selector) => {
+    const onTouch = declarationsOf(withTiers(TOUCH), [selector]);
+    const onDesktop = declarationsOf(baseRules(sheet), [selector]);
+    expect({
+      touch: [
+        onTouch.get("user-select"),
+        onTouch.get("-webkit-user-select"),
+        onTouch.get("-webkit-touch-callout"),
+      ],
+      // デスクトップには足さない (タブはもともと選択しない)。
+      desktop: onDesktop.get("-webkit-touch-callout") ?? null,
+    }).toEqual({ touch: ["none", "none", "none"], desktop: null });
+  });
+
+  test("the menu items are a finger's height", () => {
+    const rules = withTiers(SOFT_KEYS, TOUCH);
+    const item = declarationsOf(rules, [".gdp-context-menu button"]);
+    expect([
+      item.get("height"),
+      resolveVar(item.get("min-height") ?? "", bodyVariables(rules)),
+    ]).toEqual(["auto", "44px"]);
+  });
+
+  test("two fingers on the terminal do not zoom the page", () => {
+    expect(
+      declarationsOf(withTiers(TOUCH), [
+        '.main-pane-host[data-kind="terminal"]',
+      ]).get("touch-action"),
+    ).toBe("pan-x pan-y");
+  });
+});
+
+// 横向きの電話: 高さ 390 のうち端末に残るのは 200px 前後だった。最下段を隠し、
+// 下端の帯を細く (絵と名前を横に並べる) する。縦向きは変えない。
+describe("a landscape phone gives the height back", () => {
+  const landscape = withTiers(SOFT_KEYS, PHONE, PHONE_LANDSCAPE);
+
+  test("the bottom is only the thin bar (no status bar)", () => {
+    const vars = bodyVariables(landscape);
+    vars.set("--space-unit", "U");
+    expect({
+      bottom: resolveVar(vars.get("--chrome-bottom") ?? "", vars),
+      statusbar: declarationsOf(landscape, ["#statusbar"]).get("display"),
+    }).toEqual({
+      bottom: "calc(calc(U * 9) + env(safe-area-inset-bottom, 0px))",
+      statusbar: "none",
+    });
+  });
+
+  test("the bar lays the icon beside the name at the thin height", () => {
+    const item = declarationsOf(landscape, [".mobile-bar-item"]);
+    expect([item.get("flex-direction"), item.get("height")]).toEqual([
+      "row",
+      "var(--sp-bar-compact-h)",
+    ]);
+  });
+
+  test("a portrait phone keeps the status bar", () => {
+    const portrait = withTiers(SOFT_KEYS, PHONE);
+    expect(declarationsOf(portrait, ["#statusbar"]).get("display")).not.toBe(
+      "none",
+    );
+  });
+});
+
+// 設定とヘルプは電話では 2 段の画面: 目次を開いている間は目次だけ、節では本文だけ。
+// 面が狭いとき (@container help-shell) の規則は 2 面のデスクトップにもあるので、
+// 2 段にする規則は電話の段の中に入れ子にする (デスクトップの狭い面は今のまま)。
+describe("settings on a phone are contents, then a section", () => {
+  const CONTAINER = "@container help-shell (max-width: 579px)";
+  const inside = (outer: string[]) =>
+    sheet.filter(
+      (rule) =>
+        rule.atRules.length === outer.length &&
+        rule.atRules.every((atRule, index) => atRule === outer[index]),
+    );
+
+  test("the phone hides the section while the contents are open, and the toggle row", () => {
+    const rules = inside([PHONE, CONTAINER]);
+    expect({
+      content: declarationsOf(rules, [
+        ".gdp-help-nav-open > .gdp-help-content",
+      ]).get("display"),
+      toggle: declarationsOf(rules, [
+        ".gdp-help-nav-open > .gdp-help-nav-toggle",
+      ]).get("display"),
+    }).toEqual({ content: "none", toggle: "none" });
+  });
+
+  test("a narrow desktop side keeps the contents above the section", () => {
+    const rules = inside([CONTAINER]);
+    expect(
+      declarationsOf(rules, [".gdp-help-nav-open > .gdp-help-content"]).size,
+    ).toBe(0);
+  });
+});
+
+// 電話の段の文字の大きさ: 既定の密度のときだけ画面の文字を一段大きく (large の
+// 文字の段)、入力欄は iOS が拡大しない 16px。選んだ密度とデスクトップは変えない。
+describe("text size on a phone", () => {
+  const phone = withTiers(SOFT_KEYS, PHONE);
+  const fontSteps = (rules: CssRule[], selector: string) => {
+    const box = declarationsOf(rules, [selector]);
+    return ["--ui-font-sm", "--ui-font-md", "--ui-font-title"].map(
+      (name) => box.get(name) ?? null,
+    );
+  };
+
+  test("the default density takes the large text steps", () => {
+    expect({
+      regular: fontSteps(phone, 'body[data-sidebar-font-size="regular"]'),
+      beforeScript: fontSteps(phone, "body:not([data-sidebar-font-size])"),
+      large: fontSteps(
+        baseRules(sheet),
+        'body[data-sidebar-font-size="large"]',
+      ),
+    }).toEqual({
+      regular: ["12px", "15px", "17px"],
+      beforeScript: ["12px", "15px", "17px"],
+      large: ["12px", "15px", "17px"],
+    });
+  });
+
+  test("a chosen density is left alone", () => {
+    const phoneOnly = sheet.filter((rule) => rule.atRule === PHONE);
+    expect(
+      fontSteps(phoneOnly, 'body[data-sidebar-font-size="compact"]'),
+    ).toEqual([null, null, null]);
+  });
+
+  test.each([
+    "textarea",
+    "select",
+  ])("%s is 16px so iOS does not zoom in", (selector) => {
+    const vars = bodyVariables(phone);
+    const value = declarationsOf(phone, [selector]).get("font-size") ?? "";
+    expect({
+      // 欄ごとの id の規則に負けないよう !important (style.css のコメント)。
+      important: value.endsWith("!important"),
+      phone: resolveVar(value.replace(/\s*!important$/, ""), vars),
+      desktop:
+        declarationsOf(baseRules(sheet), [selector]).get("font-size") ?? null,
+    }).toEqual({
+      important: true,
+      phone: "16px",
+      desktop: expect.not.stringMatching(/^16px$/),
+    });
   });
 });

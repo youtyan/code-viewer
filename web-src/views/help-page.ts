@@ -1,6 +1,7 @@
 // Help page (keybindings reference), extracted from app.ts.
 
 import type { KeyBinding } from "../core/keymap";
+import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import type { InstallOffer } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
 import {
@@ -337,7 +338,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "On a phone (a window 640px wide or less, or a phone turned sideways) the layout changes for three things: checking agents and answering one that needs input, reading diffs and files, and switching projects. The bar at the bottom opens Projects (the left sidebar, which follows your finger in from the left edge), Files, Diff, Agents, and List (the file tree or the list of the current screen, from the bottom; on History and a worktree the sheet shows the list on top and the chosen commit's changed files below). The bar marks the screen you are on, and Agents carries the number of agents waiting for input. Split view is not available there; a split you saved comes back on a wide window. Diffs show as one column (Unified) by default, a Split you pick on the phone lasts until you leave, and Wrap at the end of the Diff bar wraps long lines. Opening an agent from a notification, the bottom counter or the All agents board closes the sidebar and the sheet. On a touch screen, buttons, tabs, rows and the file tree are at least 44px tall, and a terminal tab shows keys the on-screen keyboard lacks: Esc, Tab, ⇧Tab, Ctrl+C, ↑, ↓ and Enter, plus ⌨ to bring up or put away the keyboard. Browser notifications need a secure page (https, or localhost on the same machine); opened over plain http from another device they are not available.",
+                text: "On a phone (a window 640px wide or less, or a phone turned sideways) the layout changes for three things: checking agents and answering one that needs input, reading diffs and files, and switching projects. The bar at the bottom opens Projects (the left sidebar, which follows your finger in from the left edge), Files, Diff, Agents, and List (the file tree or the list of the current screen, from the bottom; on History and a worktree the sheet shows the list on top and the chosen commit's changed files below). The bar marks the screen you are on, and Agents carries the number of agents waiting for input. Split view is not available there; a split you saved comes back on a wide window. Diffs show as one column (Unified) by default, a Split you pick on the phone lasts until you leave, and Wrap at the end of the Diff bar wraps long lines. Opening an agent from a notification, the bottom counter or the All agents board closes the sidebar and the sheet. On a touch screen, buttons, tabs, rows and the file tree are at least 44px tall, and a terminal tab shows keys the on-screen keyboard lacks: Esc, Tab, ⇧Tab, Ctrl+C, ↑, ↓ and Enter, plus ⌨ to bring up or put away the keyboard. The square with a number at the right end of the tab strip lists every open tab, including those of a saved right side (opening one moves it to the left). Swipe up from the bottom bar to open List, and down on a sheet's header to close it. Hold a finger on an agent, a tab or a file row for its right-click menu. Pinch on a terminal to change its text size for this browser (the phone starts at 12px; the desktop size is kept). Turned sideways, the status bar is hidden and the bottom bar is thinner. Settings open as contents first; pick a section, and the row at the top goes back. Browser notifications need a secure page (https, or localhost on the same machine); opened over plain http from another device they are not available.",
               },
             ],
           },
@@ -1259,7 +1260,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "電話の幅 (640px 以下の窓、または横向きの電話) では、エージェントの状態を見て入力待ちに返事する・差分とファイルを読む・プロジェクトを切り替える、の 3 つのために画面の形が変わります。下端の帯から、プロジェクト (左のサイドバー。左端から指に付いて引き出せます)・ファイル・差分・エージェント・一覧 (ファイルの木や、その画面の一覧を下から出す。History と作業ツリーでは上に一覧、下に選んだコミットの変更ファイル) を開きます。帯には今の画面の印が付き、エージェントには入力待ちの件数が出ます。2 面にはできません (保存した 2 面は広い窓で戻ります)。差分は 1 列 (Unified) が既定で、電話で選んだ 2 列はその場だけ効きます。差分の帯の端の「折り返し」で長い行を折り返します。通知・最下段の件数・全体ボードからエージェントを開くと、引き出しと面は閉じます。指で触る画面では、ボタン・タブ・行・ファイルの木の高さが 44px 以上になり、ターミナルのタブの下にソフトキーボードに無いキー (Esc・Tab・⇧Tab・Ctrl+C・↑・↓・Enter と、キーボードを出す / しまう ⌨) が出ます。ブラウザの通知は安全なページ (https か、同じ機械の localhost) でだけ使えます。別の機械から http で開いた画面では使えません。",
+                text: "電話の幅 (640px 以下の窓、または横向きの電話) では、エージェントの状態を見て入力待ちに返事する・差分とファイルを読む・プロジェクトを切り替える、の 3 つのために画面の形が変わります。下端の帯から、プロジェクト (左のサイドバー。左端から指に付いて引き出せます)・ファイル・差分・エージェント・一覧 (ファイルの木や、その画面の一覧を下から出す。History と作業ツリーでは上に一覧、下に選んだコミットの変更ファイル) を開きます。帯には今の画面の印が付き、エージェントには入力待ちの件数が出ます。2 面にはできません (保存した 2 面は広い窓で戻ります)。差分は 1 列 (Unified) が既定で、電話で選んだ 2 列はその場だけ効きます。差分の帯の端の「折り返し」で長い行を折り返します。通知・最下段の件数・全体ボードからエージェントを開くと、引き出しと面は閉じます。指で触る画面では、ボタン・タブ・行・ファイルの木の高さが 44px 以上になり、ターミナルのタブの下にソフトキーボードに無いキー (Esc・Tab・⇧Tab・Ctrl+C・↑・↓・Enter と、キーボードを出す / しまう ⌨) が出ます。タブ列の右端の数字の四角で、開いているタブを全部 (預けた右の面のタブも) 一覧にします (右の面のタブを開くと左の面へ移ります)。下端の帯から上へ指を動かすと一覧の面が開き、面の頭から下へ動かすと閉じます。エージェント・タブ・ファイルの行を長押しすると右クリックのメニューが出ます。ターミナルの上で 2 本指を広げる・狭めると、このブラウザだけの文字の大きさが変わります (電話は 12px から。デスクトップの大きさはそのまま)。横向きでは最下段を隠し、下端の帯を細くします。設定は目次から開き、節を選ぶと本文だけになり、上の 1 行で目次へ戻ります。ブラウザの通知は安全なページ (https か、同じ機械の localhost) でだけ使えます。別の機械から http で開いた画面では使えません。",
               },
             ],
           },
@@ -1966,7 +1967,11 @@ export type OpenHelpSectionDeps = Pick<
   | "setPageMode"
   | "cancelActiveSourceLoad"
 > & {
-  renderHelpPage(): void;
+  /**
+   * openedSection: 節を指して開いた (設定の見出しへ送るなど)。電話の段で目次の
+   * 1 段目を飛ばしてその節を出す。
+   */
+  renderHelpPage(options?: { openedSection?: boolean }): void;
   setStatus(status: "live" | "refreshing" | "error" | null): void;
 };
 
@@ -1986,7 +1991,7 @@ export function openHelpSection(
     range: deps.currentRange(),
   });
   deps.setPageMode();
-  deps.renderHelpPage();
+  deps.renderHelpPage({ openedSection: true });
   deps.setStatus("live");
 }
 
@@ -2087,13 +2092,22 @@ const HELP_NAV_TOGGLE_TEXT: Record<HelpLanguage, string> = {
 export function createHelpPage(deps: HelpPageDeps) {
   // 狭い面 (style.css の @container help-shell) では目次を本文の上に畳む。既定は
   // 畳み、節を選んだらまた畳む (描き直しても開いたままにはしない)。
+  // 電話の段では 2 段の画面: 目次を開いている間は目次だけ (1 段目)、節を選ぶと
+  // 本文だけ (2 段目。頭の「‹ 目次」で 1 段目へ戻る)。ほかの画面から入ったら
+  // 1 段目から (節を指して開いたときは 2 段目)。
   let helpNavOpen = false;
+  const phoneQuery = window.matchMedia(PHONE_MEDIA_QUERY);
 
-  function renderHelpPage() {
+  function renderHelpPage(options: { openedSection?: boolean } = {}) {
     deps.cancelActiveSourceLoad("navigation");
     deps.removeStandaloneSource();
     deps.clearLoadQueue();
     const target = deps.$("#diff");
+    const entering =
+      !target.firstElementChild?.classList.contains("gdp-help-shell");
+    const openedSection = options.openedSection === true;
+    if (phoneQuery.matches && (entering || openedSection))
+      helpNavOpen = !openedSection;
     const empty = deps.$("#empty");
     empty.classList.add("hidden");
     deps.$("#meta").textContent = "";
@@ -2274,6 +2288,13 @@ export function createHelpPage(deps: HelpPageDeps) {
         const field = event.target;
         goToSection("settings");
         if (field instanceof HTMLInputElement) field.focus();
+      });
+    // 電話の段の目次 (1 段目) で打ち始めたら、結果を出す設定の節 (2 段目) へ。
+    else
+      searchRow.addEventListener("input", () => {
+        if (!helpNavOpen) return;
+        helpNavOpen = false;
+        syncNavOpen();
       });
     shell.append(header, searchRow, layout);
     target.replaceChildren(shell);

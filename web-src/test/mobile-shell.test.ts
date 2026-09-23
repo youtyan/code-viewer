@@ -10,13 +10,21 @@ import {
   describe,
   expect,
   test,
+  vi,
 } from "vitest";
 import {
+  LONG_PRESS_MOVE_TOLERANCE,
+  LONG_PRESS_MS,
   PHONE_MEDIA_QUERY,
   type TerminalSoftKey,
   TOUCH_MEDIA_QUERY,
 } from "../core/mobile-layout";
-import { installMobileShell, type MobileShell } from "../views/mobile-shell";
+import type { TabListEntry } from "../views/main-tabs/main-tabs-view";
+import {
+  installMobileShell,
+  type MobileShell,
+  type MobileShellDeps,
+} from "../views/mobile-shell";
 import { q } from "./_test-helpers";
 
 type Viewport = { width: number; height: number; coarse: boolean };
@@ -78,7 +86,10 @@ function resizeTo(viewport: Viewport): void {
   for (const { list } of mediaLists) list.dispatchEvent(new Event("change"));
 }
 
-function install(viewport: Viewport): MobileShell {
+function install(
+  viewport: Viewport,
+  extra: Partial<MobileShellDeps> = {},
+): MobileShell {
   setViewport(viewport);
   shell = installMobileShell({
     getLanguage: () => language,
@@ -86,6 +97,7 @@ function install(viewport: Viewport): MobileShell {
     focusTerminal: () => {
       focused++;
     },
+    ...extra,
   });
   return shell;
 }
@@ -614,5 +626,353 @@ describe("引き出しは指に付いて動く", () => {
     touch("touchmove", 20, 300);
     expect(nav.style.transform).toBe("");
     touch("touchend", 20, 300);
+  });
+});
+
+/**
+ * 指の入力を送る。points は画面の座標の並び (1 本なら [[x, y]])。touchend は
+ * 離した指を changedTouches に入れる。送った TouchEvent を返す。
+ */
+function fingers(
+  target: EventTarget,
+  type: string,
+  points: [number, number][],
+): TouchEvent {
+  const list = points.map(
+    ([clientX, clientY], identifier) =>
+      ({ clientX, clientY, identifier, target }) as unknown as Touch,
+  );
+  const event = new TouchEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    touches: type === "touchend" ? [] : list,
+    changedTouches: list,
+  });
+  target.dispatchEvent(event);
+  return event;
+}
+
+describe("開いているタブの一覧の面", () => {
+  function fakeTabs(entries: TabListEntry[]) {
+    const calls: string[] = [];
+    let listener: (() => void) | null = null;
+    return {
+      calls,
+      deps: {
+        list: () => entries,
+        bringToFront: (id: string) => calls.push(`front:${id}`),
+        close: (id: string) => {
+          calls.push(`close:${id}`);
+          entries.splice(
+            entries.findIndex((entry) => entry.id === id),
+            1,
+          );
+          listener?.();
+        },
+        onRender: (next: () => void) => {
+          listener = next;
+          return () => {
+            listener = null;
+          };
+        },
+      },
+    };
+  }
+  const entry = (
+    id: string,
+    extra: Partial<TabListEntry> = {},
+  ): TabListEntry => ({
+    id,
+    name: `${id}.ts`,
+    title: `src/${id}.ts`,
+    iconHtml: "<svg></svg>",
+    front: false,
+    preview: false,
+    parked: false,
+    ...extra,
+  });
+  const rows = () =>
+    [...document.querySelectorAll("#mobile-tabs .mobile-tabs-row")].map(
+      (row) =>
+        `${row.classList.contains("is-front") ? ">" : ""}${row.querySelector(".mobile-tabs-name")?.textContent}${row.querySelector(".mobile-tabs-parked") ? " [right]" : ""}`,
+    );
+
+  test("開くと全部のタブを並べ、前面の行にフォーカスを置く", () => {
+    const tabs = fakeTabs([
+      entry("a"),
+      entry("b", { front: true }),
+      entry("c", { parked: true }),
+    ]);
+    const created = install(PHONE, { tabs: tabs.deps });
+    created.openTabs();
+    expect({
+      open: document.body.classList.contains("mobile-tabs-open"),
+      title: q(document, "#mobile-tabs .mobile-tabs-title").textContent,
+      rows: rows(),
+      focus: (document.activeElement as HTMLElement | null)
+        ?.closest(".mobile-tabs-row")
+        ?.getAttribute("data-tab-id"),
+      current: q(document, ".is-front .mobile-tabs-open").getAttribute(
+        "aria-current",
+      ),
+    }).toEqual({
+      open: true,
+      title: "Open tabs (3)",
+      rows: ["a.ts", ">b.ts", "c.ts [right]"],
+      focus: "b",
+      current: "true",
+    });
+  });
+
+  test("行を押すとそのタブを前面に出して面を閉じ、×は閉じて面を開いたまま描き直す", () => {
+    const tabs = fakeTabs([entry("a", { front: true }), entry("b")]);
+    const created = install(PHONE, { tabs: tabs.deps });
+    created.openTabs();
+    q<HTMLButtonElement>(
+      document,
+      '.mobile-tabs-row[data-tab-id="a"] .mobile-tabs-x',
+    ).click();
+    const afterClose = {
+      open: document.body.classList.contains("mobile-tabs-open"),
+      rows: rows(),
+    };
+    q<HTMLButtonElement>(
+      document,
+      '.mobile-tabs-row[data-tab-id="b"] .mobile-tabs-open',
+    ).click();
+    expect({
+      calls: tabs.calls,
+      afterClose,
+      closed: document.body.classList.contains("mobile-tabs-open"),
+    }).toEqual({
+      calls: ["close:a", "front:b"],
+      afterClose: { open: true, rows: ["b.ts"] },
+      closed: false,
+    });
+  });
+
+  test("タブが無ければその旨を出す。言語を替えると見出しも替わる", async () => {
+    const tabs = fakeTabs([]);
+    const created = install(PHONE, { tabs: tabs.deps });
+    created.openTabs();
+    const empty = q(document, "#mobile-tabs .mobile-tabs-empty").textContent;
+    language = "ja";
+    document.documentElement.lang = "ja";
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect({
+      empty,
+      title: q(document, "#mobile-tabs .mobile-tabs-title").textContent,
+    }).toEqual({ empty: "No open tabs", title: "開いているタブ (0 枚)" });
+  });
+
+  test("デスクトップでは面を出さない", () => {
+    install(DESKTOP, { tabs: fakeTabs([entry("a")]).deps });
+    expect(q<HTMLElement>(document, "#mobile-tabs").hidden).toBe(true);
+  });
+});
+
+describe("長押しで右クリックのメニュー", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    q(document, "#app").insertAdjacentHTML(
+      "beforeend",
+      `<div class="main-tab">tab</div><button class="gdp-repo-row">row</button>`,
+    );
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** 長押しの行で受け取った contextmenu (座標つき)。 */
+  function listen(target: Element): string[] {
+    const got: string[] = [];
+    target.addEventListener("contextmenu", (event) => {
+      const mouse = event as MouseEvent;
+      got.push(`${mouse.clientX},${mouse.clientY}`);
+    });
+    return got;
+  }
+
+  test.each([
+    ".nav-agent",
+    ".main-tab",
+    "#filelist li.tree-file",
+    ".gdp-repo-row",
+  ])("%s: 置いたままで右クリックのメニューを送り、離したときの click を止める", (selector) => {
+    install(PHONE);
+    const row = q(document, selector);
+    const got = listen(row);
+    fingers(row, "touchstart", [[40, 60]]);
+    vi.advanceTimersByTime(LONG_PRESS_MS - 1);
+    const before = [...got];
+    vi.advanceTimersByTime(1);
+    const release = fingers(row, "touchend", [[40, 60]]);
+    expect({ before, got, prevented: release.defaultPrevented }).toEqual({
+      before: [],
+      got: ["40,60"],
+      prevented: true,
+    });
+  });
+
+  test.each([
+    {
+      name: "指が動いたらスクロールとして諦める",
+      move: [40 + LONG_PRESS_MOVE_TOLERANCE + 1, 60] as [number, number],
+      wait: LONG_PRESS_MS,
+    },
+    {
+      name: "動きが許す範囲なら出す",
+      move: [40 + LONG_PRESS_MOVE_TOLERANCE, 60] as [number, number],
+      wait: LONG_PRESS_MS,
+      expected: ["40,60"],
+    },
+    { name: "時間の前に離したら出さない", move: null, wait: LONG_PRESS_MS - 1 },
+  ])("$name", ({ move, wait, expected = [] }) => {
+    install(PHONE);
+    const row = q(document, ".nav-agent");
+    const got = listen(row);
+    fingers(row, "touchstart", [[40, 60]]);
+    if (move) fingers(row, "touchmove", [move]);
+    vi.advanceTimersByTime(wait);
+    const release = fingers(row, "touchend", [[40, 60]]);
+    vi.advanceTimersByTime(LONG_PRESS_MS);
+    expect({ got, prevented: release.defaultPrevented }).toEqual({
+      got: expected,
+      prevented: expected.length > 0,
+    });
+  });
+
+  // メニューを出した行が描き直しで DOM から外れると、離したときの touchend は
+  // 外れた行にだけ届く (document まで上がらない)。Files の木でこれが起き、click が
+  // 止まらずメニューが閉じた。
+  test("メニューで行が描き直されて外れても、離したときの click を止める", () => {
+    install(PHONE);
+    const row = q(document, "#filelist li.tree-file");
+    row.addEventListener("contextmenu", () => row.remove());
+    fingers(row, "touchstart", [[40, 60]]);
+    vi.advanceTimersByTime(LONG_PRESS_MS);
+    const release = fingers(row, "touchend", [[40, 60]]);
+    expect({
+      detached: !row.isConnected,
+      prevented: release.defaultPrevented,
+    }).toEqual({
+      detached: true,
+      prevented: true,
+    });
+  });
+
+  test("長押しの行でない所と 2 本指では出さない", () => {
+    install(PHONE);
+    const topbar = q(document, "#topbar");
+    const row = q(document, ".nav-agent");
+    const got = [...listen(topbar), ...listen(row)];
+    fingers(topbar, "touchstart", [[40, 60]]);
+    vi.advanceTimersByTime(LONG_PRESS_MS);
+    fingers(topbar, "touchend", [[40, 60]]);
+    fingers(row, "touchstart", [
+      [40, 60],
+      [80, 60],
+    ]);
+    vi.advanceTimersByTime(LONG_PRESS_MS);
+    expect(got).toEqual([]);
+  });
+});
+
+describe("下端の帯から上へのスワイプで一覧の面", () => {
+  function rect(el: Element, top: number, bottom: number) {
+    el.getBoundingClientRect = () =>
+      ({
+        top,
+        bottom,
+        left: 0,
+        right: 390,
+        width: 390,
+        height: bottom - top,
+      }) as DOMRect;
+  }
+
+  test("帯から上へで開き、面の頭から下へで閉じる。帯の上から始めたものと面の中の送りでは動かない", () => {
+    install(PHONE);
+    rect(q(document, "#mobile-bar"), 800, 844);
+    rect(q(document, "#panel-head"), 150, 194);
+    const isOpen = () => document.body.classList.contains("mobile-sheet-open");
+    const swipe = (fromY: number, toY: number) => {
+      fingers(document.body, "touchstart", [[200, fromY]]);
+      fingers(document.body, "touchmove", [[200, toY]]);
+      fingers(document.body, "touchend", [[200, toY]]);
+      return isOpen();
+    };
+    expect({
+      aboveBar: swipe(790, 600),
+      fromBar: swipe(820, 700),
+      insideList: swipe(400, 600),
+      fromHead: swipe(170, 320),
+    }).toEqual({
+      aboveBar: false,
+      fromBar: true,
+      insideList: true,
+      fromHead: false,
+    });
+  });
+
+  test("デスクトップでは開かない", () => {
+    install(DESKTOP);
+    fingers(document.body, "touchstart", [[200, 820]]);
+    fingers(document.body, "touchend", [[200, 600]]);
+    expect(document.body.classList.contains("mobile-sheet-open")).toBe(false);
+  });
+});
+
+describe("端末の上のピンチで文字の大きさ", () => {
+  function pinchOn(target: Element, from: number, to: number[]): number[] {
+    const sizes: number[] = [];
+    let size = 12;
+    shell?.dispose();
+    install(PHONE, {
+      terminalFontSize: () => size,
+      setTerminalFontSize: (next) => {
+        size = next;
+        sizes.push(next);
+      },
+    });
+    fingers(target, "touchstart", [
+      [100, 300],
+      [100 + from, 300],
+    ]);
+    for (const distance of to)
+      fingers(target, "touchmove", [
+        [100, 300],
+        [100 + distance, 300],
+      ]);
+    fingers(target, "touchend", [[100, 300]]);
+    return sizes;
+  }
+
+  test("指を広げると大きく、狭めると小さく (同じ大きさは送り直さない)", () => {
+    const host = q(document, '.main-pane-host[data-side="left"]');
+    expect({
+      spread: pinchOn(host, 100, [110, 150, 151]),
+      pinch: pinchOn(host, 100, [50]),
+    }).toEqual({ spread: [13, 18], pinch: [8] });
+  });
+
+  test("端末の外とデスクトップでは変えない", () => {
+    const outside = pinchOn(q(document, "#topbar"), 100, [150]);
+    const sizes: number[] = [];
+    shell?.dispose();
+    install(DESKTOP, {
+      terminalFontSize: () => 12,
+      setTerminalFontSize: (next) => sizes.push(next),
+    });
+    const host = q(document, '.main-pane-host[data-side="left"]');
+    fingers(host, "touchstart", [
+      [100, 300],
+      [200, 300],
+    ]);
+    fingers(host, "touchmove", [
+      [100, 300],
+      [250, 300],
+    ]);
+    expect({ outside, desktop: sizes }).toEqual({ outside: [], desktop: [] });
   });
 });

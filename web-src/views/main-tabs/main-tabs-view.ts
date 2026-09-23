@@ -34,6 +34,7 @@ import {
   close,
   closedTabs,
   closeOthers,
+  closeParked,
   closeToRight,
   DEFAULT_SPLIT,
   emptyLayout,
@@ -75,6 +76,7 @@ import {
   type Tab,
   type TabTarget,
   tabMenu,
+  takeParked,
   unparkRight,
   unsplit,
   WORKTREE_REF,
@@ -214,6 +216,27 @@ export type MainTabsDeps = {
    * これと右の列を引いた幅。
    */
   listColumnWidth?(): number;
+  /**
+   * 電話の段のタブ列の右端の「開いているタブ」を押した (一覧の面を開く。
+   * views/mobile-shell.ts)。無ければボタンを出さない。
+   */
+  onTabList?(): void;
+};
+
+/** 電話の段のタブの一覧の 1 行 (左の面のタブと、預けた右の面のタブ)。 */
+export type TabListEntry = {
+  id: string;
+  /** タブの名前 (タブ列と同じ)。 */
+  name: string;
+  /** 補足 (ファイルのパスと版。タブの title と同じ)。 */
+  title: string;
+  /** タブ列と同じ絵 (エージェントを映す端末は状態の印)。 */
+  iconHtml: string;
+  /** 左の面の前面のタブ。 */
+  front: boolean;
+  preview: boolean;
+  /** 右の面 (電話では預けていて見えない) のタブ。 */
+  parked: boolean;
 };
 
 export type MainTabsHandle = {
@@ -316,6 +339,17 @@ export type MainTabsHandle = {
    * 可否を合わせ直す。
    */
   refit(): void;
+  /** 電話の段のタブの一覧: 左の面のタブ、続けて預けた右の面のタブ。 */
+  tabList(): TabListEntry[];
+  /**
+   * 一覧から前面に出す。預けた右の面のタブは左の面へ移して出す (電話では右の
+   * 面を出さないので)。
+   */
+  bringToFront(id: string): void;
+  /** 一覧から閉じる (×と同じく、閉じたタブの履歴に積む)。 */
+  closeTab(id: string): void;
+  /** タブ列を描き直したあとに呼ぶ (一覧の面を開いている間の描き直し)。外す関数を返す。 */
+  onRender(listener: () => void): () => void;
   /** テストと確認用。 */
   layout(): Layout;
 };
@@ -431,6 +465,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
   let closedHistory: ClosedTab[] = [];
   /** openingNewTab の run の間だけ true。開くタブを仮にしない。 */
   let openingKept = false;
+  /** 描き直しのたびに呼ぶもの (電話の段のタブの一覧の面)。 */
+  const renderListeners = new Set<() => void>();
 
   /** 仮にするかの指定 (openingNewTab の間は固定)。 */
   function keptOption(): Pick<OpenOptions, "preview"> {
@@ -446,6 +482,8 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     list: HTMLElement;
     newButton: HTMLButtonElement;
     splitButton: HTMLButtonElement;
+    /** 電話の段だけ出す「開いているタブ」と枚数の枠 (左の面だけ)。 */
+    listButton: { button: HTMLButtonElement; count: HTMLElement } | null;
   };
   const sections = {} as Record<PaneSide, Section>;
   const phoneQuery = window.matchMedia(PHONE_MEDIA_QUERY);
@@ -515,12 +553,30 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       if (front && splitBlocker(layout) === null && splitAllowed())
         changeAndGo((l) => splitRight(l, front.id));
     });
+    // 電話の段では分割のボタンの代わりに、開いているタブの一覧の入口を置く
+    // (88px のタブが 2 枚しか見えず、預けた右の面のタブには届かない)。
+    let listButton: Section["listButton"] = null;
+    if (side === "left" && deps.onTabList) {
+      const onTabList = deps.onTabList;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "main-tabs-action main-tabs-list-open";
+      button.setAttribute("aria-haspopup", "dialog");
+      button.hidden = true;
+      // 枚数を四角の枠に入れて出す (ブラウザのタブの数の印と同じ形)。
+      const count = document.createElement("span");
+      count.className = "main-tabs-list-count";
+      button.append(count);
+      button.addEventListener("click", () => onTabList());
+      actions.append(button);
+      listButton = { button, count };
+    }
     actions.append(splitButton);
     strip.append(list, newButton);
     if (side === "left" && deps.lead) el.append(deps.lead);
     el.append(strip, actions);
     wireStrip(strip, side);
-    return { el, strip, list, newButton, splitButton };
+    return { el, strip, list, newButton, splitButton, listButton };
   }
 
   function labelOf(target: TabTarget): string {
@@ -839,9 +895,19 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     return routes.get(tab.id) ?? deps.defaultRoute(tab.target);
   }
 
-  function commit(next: Layout, how: FrontChange = "stay"): void {
+  /**
+   * nextParked を渡すと預けた右の面も差し替える (電話の段のタブの一覧から
+   * 預けたタブを前面に出す・閉じる)。閉じた端末を数えるため、差し替える前の
+   * 全体を先に数える。
+   */
+  function commit(
+    next: Layout,
+    how: FrontChange = "stay",
+    nextParked?: ParkedRight | null,
+  ): void {
     const before = panesView(layout);
     const terminalsBefore = terminalsOf(fullLayout());
+    if (nextParked !== undefined) parked = nextParked;
     layout = next;
     fitToWidth();
     pruneRoutes();
@@ -893,31 +959,34 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
    * 画像のタブは route を持たない (本文の route は下に残ったまま)。その route
    * のタブへ戻るだけなら移り直さない (描き直してスクロールを失わない)。
    */
-  function changeAndGo(change: (current: Layout) => Layout): void {
+  function changeAndGo(
+    change: (current: Layout) => Layout,
+    nextParked?: ParkedRight | null,
+  ): void {
     rememberRoute();
     const next = change(layout);
     const after = activeTab(next);
     if (!after) {
       // 左の面で何も選んでいない: 本文の既定 (フォルダ表示) を出す。
       if (deps.currentRoute().screen === "repo") {
-        commit(next, "stay");
+        commit(next, "stay", nextParked);
         return;
       }
-      commit(next, "navigate");
+      commit(next, "navigate", nextParked);
       deps.navigate(homeRoute());
       return;
     }
     // 右の面のファイルは本文ではなく右の面の箱に描く (app の showPanes)。
     if (!isRouteTab(after) || next.focused === "right") {
-      commit(next, "stay");
+      commit(next, "stay", nextParked);
       return;
     }
     const route = routeOf(after);
     if (JSON.stringify(route) === JSON.stringify(deps.currentRoute())) {
-      commit(next, "stay");
+      commit(next, "stay", nextParked);
       return;
     }
-    commit(next, "navigate");
+    commit(next, "navigate", nextParked);
     deps.navigate(route);
   }
 
@@ -1339,6 +1408,25 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     return { project: null, title, full: title };
   }
 
+  /** タブの絵。エージェントを映しているターミナルは、絵の代わりに状態の印 (形で区別する)。 */
+  function iconMarkup(target: TabTarget): string {
+    const state =
+      target.kind === "terminal"
+        ? deps.terminalInfo(target.session).state
+        : null;
+    return state
+      ? `<i class="terminal-mark terminal-mark-${state}" aria-hidden="true"></i>`
+      : iconSvg("main-tab-svg", iconOf(target));
+  }
+
+  /** タブの title (ファイルはパスと版)。 */
+  function titleOf(target: TabTarget, label: string): string {
+    if (target.kind !== "file" && target.kind !== "image") return label;
+    return target.kind === "file" && target.ref !== undefined
+      ? `${target.path} @ ${target.ref}`
+      : target.path;
+  }
+
   function renderTab(tab: Tab, active: boolean, side: PaneSide): HTMLElement {
     const current = text();
     const tabName = nameOf(tab.target);
@@ -1362,23 +1450,11 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     el.setAttribute("aria-selected", String(active));
     el.tabIndex = active ? 0 : -1;
     el.draggable = true;
-    el.title =
-      tab.target.kind === "file" || tab.target.kind === "image"
-        ? tab.target.path
-        : label;
-    if (tab.target.kind === "file" && tab.target.ref !== undefined)
-      el.title += ` @ ${tab.target.ref}`;
+    el.title = titleOf(tab.target, label);
     if (tab.preview) el.title += `\n${current.previewHint}`;
     const icon = document.createElement("span");
     icon.className = "main-tab-icon";
-    const state =
-      tab.target.kind === "terminal"
-        ? deps.terminalInfo(tab.target.session).state
-        : null;
-    // エージェントを映しているターミナルは、絵の代わりに状態の印 (形で区別する)。
-    icon.innerHTML = state
-      ? `<i class="terminal-mark terminal-mark-${state}" aria-hidden="true"></i>`
-      : iconSvg("main-tab-svg", iconOf(tab.target));
+    icon.innerHTML = iconMarkup(tab.target);
     const name = document.createElement("span");
     name.className = "main-tab-name";
     if (tabName.project === null) name.textContent = label;
@@ -1485,6 +1561,15 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     }
     divider.setAttribute("aria-label", current.resizeSplit);
     dropLabel.textContent = current.dropToSplit;
+    const listButton = sections.left.listButton;
+    if (listButton) {
+      const count = allTabs(fullLayout()).length;
+      const label = current.openTabs(count);
+      listButton.button.hidden = !phoneQuery.matches;
+      listButton.count.textContent = String(count);
+      listButton.button.title = label;
+      listButton.button.setAttribute("aria-label", label);
+    }
   }
 
   function render(): void {
@@ -1532,6 +1617,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       revealFront(strip);
     }
     renderActions();
+    for (const listener of renderListeners) listener();
     if (focusedTabId !== undefined)
       deps.mount
         .querySelector<HTMLElement>(
@@ -1879,6 +1965,56 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     flush,
     localize: render,
     refit: () => followGeometry(),
+    tabList() {
+      const entry = (tab: Tab, front: boolean, isParked: boolean) => {
+        const name = nameOf(tab.target).full;
+        return {
+          id: tab.id,
+          name,
+          title: titleOf(tab.target, name),
+          iconHtml: iconMarkup(tab.target),
+          front,
+          preview: tab.preview,
+          parked: isParked,
+        };
+      };
+      const right = parked?.pane ?? layout.panes.right;
+      return [
+        ...layout.panes.left.tabs.map((tab) =>
+          entry(tab, tab.id === layout.panes.left.activeId, false),
+        ),
+        ...(right?.tabs ?? []).map((tab) => entry(tab, false, true)),
+      ];
+    },
+    bringToFront(id) {
+      if (parked?.pane.tabs.some((tab) => tab.id === id)) {
+        const taken = takeParked(layout, parked, id);
+        changeAndGo(() => taken.layout, taken.parked);
+        return;
+      }
+      if (!findTab(layout, id))
+        throw new Error(`main tabs: tab ${JSON.stringify(id)} is not open`);
+      if (activeTab(layout)?.id === id && layout.focused === "left") return;
+      changeAndGo((l) => activate(l, id));
+    },
+    closeTab(id) {
+      const index = parked?.pane.tabs.findIndex((tab) => tab.id === id) ?? -1;
+      if (parked && index >= 0) {
+        const tab = parked.pane.tabs[index];
+        closedHistory = pushClosed(closedHistory, [
+          { target: tab.target, side: "right", index },
+        ]);
+        commit(layout, "stay", closeParked(parked, id));
+        return;
+      }
+      if (!findTab(layout, id))
+        throw new Error(`main tabs: tab ${JSON.stringify(id)} is not open`);
+      closeByUser((l) => close(l, id));
+    },
+    onRender(listener) {
+      renderListeners.add(listener);
+      return () => renderListeners.delete(listener);
+    },
     layout: () => layout,
   };
 }

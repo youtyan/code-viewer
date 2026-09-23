@@ -23095,6 +23095,12 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
    長さは ui-layout.md の 4 層に従う: T1 を上書きし、T2 は body で定義し直す。
    ====================================================================== */
 
+/* 電話の段のタブ列の右端の「開いているタブ」(main-tabs-view.ts)。.main-tabs-action が
+   display を決めるので、hidden (電話の段の外) を効かせる。 */
+.main-tabs-list-open[hidden] {
+  display: none;
+}
+
 /* ---- 2. 電話の段か指の画面: 触れる大きさの名前と端末の操作札 ---- */
 @media (max-width: 640px), (pointer: coarse) {
   html,
@@ -23105,6 +23111,9 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     --sp-keys-h: calc(var(--sp-touch) + var(--space-2));
     /* 操作札の帯が占めている高さ。前面が端末でないときは 0。 */
     --sp-keys-visible-h: 0px;
+    /* 入力欄の文字の大きさ (T0)。これより小さいと iOS が入力欄に触れたときに
+       画面を拡大する (端末の見えない入力欄 xterm-helper-textarea も同じ)。 */
+    --sp-input-font: 16px;
   }
   body:has(.main-pane-host[data-side="left"][data-kind="terminal"].is-shown) {
     --sp-keys-visible-h: var(--sp-keys-h);
@@ -23636,16 +23645,249 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body.mobile-diff-wrap table.d2h-diff-table td.d2h-code-side-linenumber {
     vertical-align: top;
   }
+
+  /* ---- 文字の大きさ (電話の段の既定) ----
+     画面の文字は既定の密度 (regular) のときだけ一段大きい段 (large の文字の段)
+     にする。高さと余白 (--space-unit・--ui-control-*) は変えない (指の画面の 44px が
+     決める)。利用者が選んだ密度はそのまま。コードの文字はデスクトップの既定の
+     まま (長い行は折り返しの切替)、端末は app.ts の電話の値。入力欄は iOS が
+     拡大しない大きさ。 */
+  body:not([data-sidebar-font-size]),
+  body[data-sidebar-font-size="regular"] {
+    --ui-font-xs: 11px;
+    --ui-font-sm: 12px;
+    --ui-font-base: 14px;
+    --ui-font-md: 15px;
+    --ui-font-lg: 16px;
+    --ui-font-title: 17px;
+  }
+  /* !important: 欄ごとの規則 (#sb-filter・#ref-from など id の詳細度) より強く
+     しないと、そこだけ 16px を下回って iOS が拡大する。 */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: var(--sp-input-font) !important;
+  }
+
+  /* ---- 開いているタブの一覧 ----
+     入口はタブ列の右端 (分割のボタンの代わり。枚数を枠に入れる)。一覧は下から
+     出す面 (#mobile-tabs。mobile-shell.ts)。場所は一覧の面 (#sidebar) と同じ。 */
+  .main-tabs-list-open:not([hidden]) {
+    display: grid;
+    color: var(--color-text-2);
+    font: inherit;
+  }
+  .main-tabs-list-count {
+    display: inline-grid;
+    place-items: center;
+    min-width: var(--icon-md);
+    height: var(--icon-md);
+    box-sizing: content-box;
+    padding: 0 calc(var(--space-1) / 2);
+    border: 1.5px solid currentColor;
+    border-radius: var(--radius-sm);
+    font-size: var(--ui-font-xs);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  body.mobile-tabs-open .main-tabs-list-open {
+    color: var(--color-accent-strong);
+  }
+  .main-tabs-list-open:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+  .mobile-tabs:not([hidden]) {
+    position: fixed;
+    top: var(--sp-sheet-top);
+    bottom: var(--chrome-bottom);
+    left: var(--chrome-left);
+    right: var(--panelcol-shown);
+    z-index: 70;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-nav);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    box-shadow: 0 -1px 0 var(--color-line-soft);
+    transform: translateY(100vh);
+    visibility: hidden;
+    transition: transform var(--motion-fast), visibility var(--motion-fast);
+  }
+  body.mobile-tabs-open .mobile-tabs:not([hidden]) {
+    transform: none;
+    visibility: visible;
+  }
+  body.mobile-tabs-open .mobile-scrim:not([hidden]) {
+    display: block;
+  }
+  .mobile-tabs-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    height: var(--main-tabs-h);
+    padding: 0 var(--pad-face) 0 var(--pad-text);
+  }
+  .mobile-tabs-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    color: var(--color-text);
+    font-size: var(--ui-font-md);
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mobile-tabs-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0 var(--pad-face) var(--space-2);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    list-style: none;
+  }
+  .mobile-tabs-row {
+    display: flex;
+    align-items: center;
+    border-radius: var(--radius-md);
+  }
+  .mobile-tabs-row.is-front {
+    background: var(--color-select);
+    box-shadow: var(--glow-select);
+  }
+  .mobile-tabs-open {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: var(--sp-touch);
+    padding: 0 var(--space-2);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--color-text);
+    font: inherit;
+    font-size: var(--ui-font-md);
+    text-align: left;
+    touch-action: manipulation;
+    cursor: pointer;
+  }
+  .mobile-tabs-icon {
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    width: var(--icon-md);
+    height: var(--icon-md);
+    color: var(--color-text-2);
+  }
+  .mobile-tabs-icon svg {
+    width: 100%;
+    height: 100%;
+    fill: currentColor;
+  }
+  .mobile-tabs-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* 仮のタブはタブ列と同じく斜体。 */
+  .mobile-tabs-row.is-preview .mobile-tabs-name {
+    font-style: italic;
+  }
+  .mobile-tabs-parked {
+    flex: none;
+    padding: 0 var(--space-1);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-3);
+    font-size: var(--ui-font-xs);
+  }
+  .mobile-tabs-x {
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    width: var(--sp-touch);
+    height: var(--sp-touch);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--color-text-2);
+    touch-action: manipulation;
+    cursor: pointer;
+  }
+  .mobile-tabs-x-icon {
+    width: var(--icon-md);
+    height: var(--icon-md);
+    fill: currentColor;
+  }
+  .mobile-tabs-open:active,
+  .mobile-tabs-x:active {
+    background: var(--color-raised);
+  }
+  .mobile-tabs-open:focus-visible,
+  .mobile-tabs-x:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+  .mobile-tabs-empty {
+    padding: var(--space-4) var(--space-2);
+    color: var(--color-text-3);
+  }
+
+  /* ---- 設定とヘルプ: 目次 → 節の 2 段の画面 (help-page.ts) ----
+     目次を開いている間 (1 段目) は目次だけを全幅で、節を選ぶと本文だけ (2 段目)。
+     2 段目の頭の 1 行 (「‹ 目次 今の節」) で 1 段目へ戻る。面が広い横向きは
+     目次と本文が横に並ぶので、この節は効かない。 */
+  @container help-shell (max-width: 579px) {
+    .gdp-help-nav-open > .gdp-help-content,
+    .gdp-help-nav-open > .gdp-help-nav-toggle {
+      display: none;
+    }
+    .gdp-help-nav {
+      border-bottom: 0;
+    }
+    .gdp-help-nav-toggle::after,
+    .gdp-help-nav-open > .gdp-help-nav-toggle::after {
+      order: -1;
+      margin: 0 0 0 var(--space-1);
+      transform: rotate(135deg);
+    }
+  }
 }
 
 /* ---- 1'. 横向きの電話 (core/mobile-layout.ts の PHONE_LANDSCAPE_MEDIA_QUERY):
    面に残る高さが少ないので、面をタブ列のすぐ下から出す (上に本文をのぞかせない)。 ---- */
 @media (pointer: coarse) and (max-height: 500px) {
+  /* 端末と面の高さを取る: 最下段を隠し (入力待ちの件数は帯の「エージェント」の
+     札に出る)、下端の帯を細くする (絵と名前を横に並べる。帯の入口は横に長いので
+     当たりの幅は十分)。 */
   body,
   body.gdp-sidebar-hidden,
   body.main-split,
   body[data-list-column]:not([data-list-column-hidden]) {
     --sp-sheet-top: var(--global-header-h);
+    /* 横向きの下端の帯の高さ (T1)。 */
+    --sp-bar-compact-h: calc(var(--space-unit) * 9);
+    --sp-bar-h: calc(var(--sp-bar-compact-h) + var(--sp-safe-bottom));
+    --chrome-bottom: var(--sp-bar-h);
+  }
+  #statusbar {
+    display: none;
+  }
+  .mobile-bar-item {
+    flex-direction: row;
+    gap: var(--space-2);
+    height: var(--sp-bar-compact-h);
+    font-size: var(--ui-font-sm);
+  }
+  .mobile-bar-badge:not([hidden]) {
+    top: 0;
   }
   /* 引き出しの下の 3 項目 (New agent・Settings・Help) を横 1 列の絵だけにし、
      プロジェクトの一覧に高さを残す (縦に並べると一覧が 2 行ぶんまで潰れた)。
@@ -23705,6 +23947,8 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .d2h-file-header .d2h-file-collapse,
   .d2h-file-header .gdp-view-file,
   .mobile-wrap-toggle,
+  .gdp-help-nav button,
+  .gdp-help-nav-toggle,
   #filelist:not(.tree-virtual) li,
   #filelist.tree:not(.tree-virtual) .tree-dir,
   #filelist.tree:not(.tree-virtual) .tree-file {
@@ -23724,6 +23968,26 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   }
   .nav-twisty {
     height: var(--sp-touch);
+  }
+  /* 長押しで右クリックのメニューを出す行 (core/mobile-layout.ts の
+     LONG_PRESS_TARGETS と同じ並び)。長押しでブラウザの文字の選択とリンクの
+     既定のメニューを出さない。 */
+  .nav-agent,
+  .main-tab,
+  #filelist li,
+  .gdp-repo-row {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .gdp-context-menu button {
+    height: auto;
+    min-height: var(--sp-touch);
+  }
+  /* 端末の上の 2 本指はページの拡大ではなく端末の文字の大きさ (mobile-shell.ts の
+     ピンチ)。1 本指の縦横の送りはそのまま。 */
+  .main-pane-host[data-kind="terminal"] {
+    touch-action: pan-x pan-y;
   }
   /* hover の無い画面では、行の操作を最初から見せる (場所は最初から取っている)。 */
   .nav-project-actions {

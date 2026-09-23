@@ -469,6 +469,43 @@ export function unparkRight(layout: Layout, parked: ParkedRight): Layout {
   };
 }
 
+/**
+ * 預かった右の面のタブを左の面の末尾へ移して前面に出す (電話の段のタブの
+ * 一覧。電話では右の面を出さないので、預けたタブにはここからしか届かない)。
+ * 左に同じ中身のタブがあれば、それを前面に出して預けた側からは落とす。
+ * 預けた面が空になれば parked は null。
+ */
+export function takeParked(
+  layout: Layout,
+  parked: ParkedRight,
+  id: string,
+): { layout: Layout; parked: ParkedRight | null } {
+  const tab = parked.pane.tabs.find((item) => item.id === id);
+  if (!tab)
+    throw new Error(`main tabs: parked tab ${JSON.stringify(id)} is missing`);
+  const rest = closeParked(parked, id);
+  const left = layout.panes.left;
+  const existing = left.tabs.find((item) =>
+    sameTarget(item.target, tab.target),
+  );
+  const pane = existing
+    ? selectIn(left, existing.id)
+    : selectIn({ ...left, tabs: [...left.tabs, tab] }, tab.id);
+  return {
+    layout: { ...withPane(layout, "left", pane), focused: "left" },
+    parked: rest,
+  };
+}
+
+/** 預かった右の面からタブを 1 つ閉じる。空になれば null。 */
+export function closeParked(
+  parked: ParkedRight,
+  id: string,
+): ParkedRight | null {
+  const pane = removeFromPane(parked.pane, new Set([id]));
+  return pane.tabs.length > 0 ? { ...parked, pane } : null;
+}
+
 export function keepOpen(layout: Layout, id: string): Layout {
   const found = findTab(layout, id);
   if (!found?.tab.preview) return layout;
