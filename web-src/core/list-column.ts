@@ -99,3 +99,18 @@ export function restoredListWidth(value: unknown, size: PanelSize): number {
     ? Math.round(value)
     : size.default;
 }
+
+/** 一覧の列を出す画面 (Diff は #sidebar そのもの、History と作業ツリーは専用の一覧)。 */
+export type ListColumnKind = "sidebar" | "history" | "worktree";
+
+/**
+ * #sidebar の見出し。一覧の列を出す画面では #sidebar は変更ファイル (Diff は
+ * 一覧そのもの、History と作業ツリーは一覧の隣の列) なので changedFiles、
+ * それ以外の画面では Files の木なので files。
+ */
+export function sidebarTitle(
+  kind: ListColumnKind | null,
+  labels: { files: string; changedFiles: string },
+): string {
+  return kind ? labels.changedFiles : labels.files;
+}

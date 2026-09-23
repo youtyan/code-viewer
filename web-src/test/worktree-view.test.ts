@@ -8,7 +8,15 @@
 // 「何を渡したか」だけを見る。
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import type { AppRoute, DiffRange } from "../core/routes";
 import type { CommitMeta, WorktreesResponse } from "../core/types";
 import type { WorktreeFileChange, WorktreeItem } from "../core/worktree";
@@ -425,6 +433,16 @@ function menuItem(label: string): HTMLButtonElement {
 function lastRoute(routes: AppRoute[]): AppRoute | undefined {
   return routes[routes.length - 1];
 }
+
+// テストで開いたまま終わったダイアログ・メニューを閉じる。閉じないと document の
+// keydown を受け続け、後のテストで押した Enter で送信してフォーカスを開く前の
+// 場所へ戻した (ui-dialog.ts)。受け手は Escape で外れる。
+afterEach(async () => {
+  document.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
 
 beforeEach(() => {
   installDom();
@@ -2285,17 +2303,6 @@ describe("event wiring", () => {
 // 行の分だけ Tab に入る。↑↓・Home / End はフォーカスを移すだけ (選ぶと画面が
 // 切り替わる)。Enter は 1 回押したのと同じ。
 describe("worktree rows by keyboard", () => {
-  // 前のテストで開いたまま残ったダイアログは document の keydown を受け続け、
-  // ここで押す Enter で送信してフォーカスを開く前の場所 (body) へ戻す
-  // (ui-dialog.ts)。始める前に Escape で閉じ、その後始末を流し切る。
-  beforeEach(async () => {
-    document.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-    );
-    for (let i = 0; i < 5; i++)
-      await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-
   function press(target: HTMLElement, key: string): boolean {
     const event = new KeyboardEvent("keydown", {
       key,
@@ -2419,6 +2426,15 @@ describe("worktree rows by keyboard", () => {
       same: document.activeElement === after,
       connected: document.activeElement?.isConnected,
     }).toEqual({ same: true, connected: true });
+  });
+
+  // 変更ファイルの列の見出しは「Files」ではなく「Changed files」(Files の木と
+  // 見分ける。History の変更ファイルの列も同じ)。
+  test("the changed files column is titled Changed files", async () => {
+    await mountWith(three(), { route: { wt: "/repo" } });
+    expect(document.querySelector(".sb-title")?.textContent).toBe(
+      "Changed files",
+    );
   });
 
   const withFiles = () =>

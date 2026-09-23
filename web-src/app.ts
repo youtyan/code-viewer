@@ -99,9 +99,11 @@ import {
 } from "./core/keymap";
 import { isNativeLinkClick } from "./core/link-click";
 import {
+  type ListColumnKind,
   listColumnDrag,
   listColumnLayout,
   restoredListWidth,
+  sidebarTitle,
 } from "./core/list-column";
 import type { PaneSide, TabTarget } from "./core/main-tabs";
 import { createNetworkActivityTracker } from "./core/network-activity";
@@ -3196,7 +3198,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyAutoUpdateButton();
     setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
 
-    setElementText(".sb-title", text.sidebar.files);
+    syncSidebarTitle();
     const sidebarActions = document.querySelector<HTMLElement>(".sb-actions");
     sidebarActions?.setAttribute("aria-label", text.sidebar.actions);
     const expandAll =
@@ -7281,7 +7283,7 @@ window.GdpExpandLogic = GdpExpandLogic;
    * data-worktree-overview) から決める: 作業ツリーの選択の印は worktree-view.ts
    * が付けるので、route からでは遅れる。
    */
-  function listColumnKind(): "sidebar" | "history" | "worktree" | null {
+  function listColumnKind(): ListColumnKind | null {
     const body = document.body;
     if (body.classList.contains("gdp-diff-page")) return "sidebar";
     if (body.classList.contains("gdp-history-page")) return "history";
@@ -7356,9 +7358,25 @@ window.GdpExpandLogic = GdpExpandLogic;
     // 木の幅そのものは CSS が --sidebar-w と帯の幅から作る (木の掴みでの
     // ドラッグを ResizeObserver で拾えるように)。ここは畳むかどうかだけ。
     body.toggleAttribute("data-list-tree-folded", treeFolded);
+    syncSidebarTitle();
     if (total === LIST_COLUMN_WIDTH) return;
     LIST_COLUMN_WIDTH = total;
     MAIN_TABS.refit();
+  }
+
+  /**
+   * #sidebar の見出し (core/list-column.ts の sidebarTitle)。画面の切替
+   * (syncListColumn) と言語の切替 (localizeViewerChrome) で当てる。
+   */
+  function syncSidebarTitle(): void {
+    const text = uiText();
+    setElementText(
+      ".sb-title",
+      sidebarTitle(listColumnKind(), {
+        files: text.sidebar.files,
+        changedFiles: text.diff.fileListLabel,
+      }),
+    );
   }
 
   /** 一覧の列の掴みの開始幅と上限 (core/list-column.ts の listColumnDrag)。 */

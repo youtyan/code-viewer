@@ -68,36 +68,22 @@
        タブ・右の列の開閉・2 面で出したり消したり動かしたりしない。画面の入口の絵柄
        (#view-head) は右の列の頭 (#panel-head) の 1 段だけ。利用者が右の列を畳んだら
        絵柄は細い帯 (#panel-rail) へ縦に移る (views/sidebar.ts の placeSidebarToggle)。
-       右の列はタブ列の後に置く (キーボードの移る順: サイドバー → タブ → 右の列)。 -->
+       右の列の頭は本文の後に置く (キーボードの移る順は #panel-head の前のコメント)。 -->
   <div id="tabs-lead" class="tabs-lead">
+    <!-- 左のサイドバーを畳んだときだけ出る。名前の枠の外 (左) に置き、名前の枠の
+         幅と枠の中の名前の位置を変えない。 -->
     <button id="nav-expand" class="global-icon-action" type="button" title="show sidebar" aria-label="show sidebar" hidden><span class="goi-icon" aria-hidden="true"></span></button>
-    <!-- リポジトリ名 = プロジェクトの切替 (views/projects/project-switcher.ts)。 -->
-    <button id="project-switcher" class="brand" type="button">
-      <span class="title" id="project-title">repository</span>
-      <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
-    </button>
+    <div class="tabs-lead-name">
+      <!-- リポジトリ名 = プロジェクトの切替 (views/projects/project-switcher.ts)。 -->
+      <button id="project-switcher" class="brand" type="button">
+        <span class="title" id="project-title">repository</span>
+        <span id="project-branch" class="project-branch" hidden><span class="goi-icon" aria-hidden="true"></span><span class="project-branch-name"></span></span>
+      </button>
+    </div>
   </div>
   <!-- メインの面のタブ列 (最上段)。中身は views/main-tabs/main-tabs-view.ts。
        ファイル・各画面を開いたまま切り替える。高さは --main-tabs-h。 -->
   <nav id="main-tabs" aria-label="Tabs"></nav>
-  <div id="panel-head" class="panel-head">
-    <div id="view-head" class="view-head">
-      <!-- 右の列を畳むボタンの置き場所 (絵柄の行の右端。views/sidebar.ts)。 -->
-      <div class="view-head-row"></div>
-      <!-- 画面の入口。押すとその画面のタブを開くか前面に出す (Files は本文の
-           既定 = フォルダ表示)。何を見ているかはタブだけが示すので、選択の印は
-           付けない。 -->
-      <nav class="app-menu view-strip" aria-label="Views">
-        <a class="app-menu-item view-strip-item" data-route="repo" href="/"><span class="goi-icon" aria-hidden="true"></span></a>
-        <a class="app-menu-item view-strip-item" data-route="diff" href="/todif?from=HEAD&to=worktree"><span class="goi-icon" aria-hidden="true"></span></a>
-        <a class="app-menu-item view-strip-item" data-route="history" href="/history"><span class="goi-icon" aria-hidden="true"></span></a>
-        <a class="app-menu-item view-strip-item" data-route="worktree" href="/worktree"><span class="goi-icon" aria-hidden="true"></span></a>
-        <a class="app-menu-item view-strip-item" data-route="database" href="/database"><span class="goi-icon" aria-hidden="true"></span></a>
-        <a class="app-menu-item view-strip-item" data-route="journal" href="/journal"><span class="goi-icon" aria-hidden="true"></span></a>
-      </nav>
-    </div>
-    <div id="panel-rail" class="panel-rail"></div>
-  </div>
   <header id="topbar">
     <div id="meta"></div>
     <div class="ref-pickers">
@@ -282,6 +268,27 @@
     <aside id="tools-sheet" class="tools-sheet" hidden aria-hidden="true" inert aria-label="tools"></aside>
     <aside id="search-sheet" class="search-sheet" hidden aria-hidden="true" inert aria-label="search results"></aside>
   </main>
+  <!-- 右の列の頭 (画面の入口の絵柄と右の列を畳むボタン。畳むと細い帯)。位置は
+       fixed で右端の上なので、DOM では本文の後に置く (キーボードの移る順:
+       左のサイドバー → タブ列 → 一覧 → 木 → 本文 → 右の列の頭 → 最下段)。 -->
+  <div id="panel-head" class="panel-head">
+    <div id="view-head" class="view-head">
+      <!-- 右の列を畳むボタンの置き場所 (絵柄の行の右端。views/sidebar.ts)。 -->
+      <div class="view-head-row"></div>
+      <!-- 画面の入口。押すとその画面のタブを開くか前面に出す (Files は本文の
+           既定 = フォルダ表示)。何を見ているかはタブだけが示すので、選択の印は
+           付けない。 -->
+      <nav class="app-menu view-strip" aria-label="Views">
+        <a class="app-menu-item view-strip-item" data-route="repo" href="/"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="diff" href="/todif?from=HEAD&to=worktree"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="history" href="/history"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="worktree" href="/worktree"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="database" href="/database"><span class="goi-icon" aria-hidden="true"></span></a>
+        <a class="app-menu-item view-strip-item" data-route="journal" href="/journal"><span class="goi-icon" aria-hidden="true"></span></a>
+      </nav>
+    </div>
+    <div id="panel-rail" class="panel-rail"></div>
+  </div>
   <!-- 最下段: アカウントごとの使用量 (views/agents/usage-status.ts)、
        エージェントの件数 (views/agents/agent-status.ts)、サーバの状態と診断。 -->
   <footer id="statusbar">

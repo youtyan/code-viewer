@@ -1,10 +1,13 @@
 import { describe, expect, test } from "vitest";
 import {
+  type ListColumnKind,
   listColumnDrag,
   listColumnLayout,
   restoredListWidth,
+  sidebarTitle,
 } from "../core/list-column";
 import { HISTORY_WIDTH } from "../core/panel-sizes";
+import { DIFF_SCREEN_TEXT } from "../views/diff-view-i18n";
 
 // 一覧の列の決まり (core/list-column.ts)。本文 = room − 一覧 − 変更ファイルの木。
 // 本文が need に足りなければ、一覧を詰めた幅 (240) にし、次に木を帯 (28) に畳む。
@@ -219,5 +222,35 @@ describe("listColumnDrag", () => {
       start,
       max,
     });
+  });
+});
+
+// #sidebar の見出し。一覧の列を出す画面では #sidebar は変更ファイルなので
+// 「Changed files / 変更ファイル」。Files の木のときだけ「Files」。History の
+// 変更ファイルの列が「FILES」と出て、右の列の Files の木に見えたことがある。
+describe("sidebarTitle", () => {
+  const cases: Array<{ kind: ListColumnKind | null; changed: boolean }> = [
+    { kind: null, changed: false },
+    { kind: "sidebar", changed: true },
+    { kind: "history", changed: true },
+    { kind: "worktree", changed: true },
+  ];
+  for (const language of ["en", "ja"] as const) {
+    const labels = {
+      files: `files-${language}`,
+      changedFiles: DIFF_SCREEN_TEXT[language].fileListLabel,
+    };
+    for (const { kind, changed } of cases) {
+      test(`${language} ${kind ?? "no list column"}`, () => {
+        expect(sidebarTitle(kind, labels)).toBe(
+          changed ? labels.changedFiles : labels.files,
+        );
+      });
+    }
+  }
+
+  test("the changed files label is the one the screens use", () => {
+    expect(DIFF_SCREEN_TEXT.en.fileListLabel).toBe("Changed files");
+    expect(DIFF_SCREEN_TEXT.ja.fileListLabel).toBe("変更ファイル");
   });
 });

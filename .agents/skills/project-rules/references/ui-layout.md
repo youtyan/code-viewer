@@ -68,9 +68,12 @@ grep -n "100vh\|100dvh" web/style.css \
 (`#main-tabs`、`--main-tabs-h`。**上の行は無い**: `web/index.html` のコメントと da82d59。右端は右の
 列の左。**左端はプロジェクト名とブランチ (= プロジェクトの切替 `#project-switcher`) の固定の枠
 `#tabs-lead`、幅 `--tabs-lead-w`**。画面・タブ・2 面・右の列の開閉・一覧の列の出入りのどれでも
-出したり消したり動かしたりしない (動くと押す場所がずれる。利用者の指示)。タブはその右から。2 面でも
+出したり消したり動かしたりしない (動くと押す場所がずれる。利用者の指示)。左のサイドバーを畳んだときだけ
+出る「サイドバーを出す」(`#nav-expand`) は名前の枠 (`.tabs-lead-name`) の外の左に置き、枠の幅と枠の中の名前の
+位置を変えない (`web-src/test/tabs-lead-order.test.ts`)。タブはその右から。2 面でも
 左の面のタブ列の左端)、画面の右端の右の列 (上端から。頭 `#panel-head` は 1 段 = タブ列の行に画面の
-入口の絵柄と、右端に畳むボタン。幅 `--panelcol-shown`。本体は `--panel-body-top` (= 頭の下) から。**探して開くための木** = Files の木 `#sidebar` はここ)、**本文を選ぶための一覧**
+入口の絵柄と、右端に畳むボタン。位置は fixed だが DOM では本文 `#content` の後に置き、Tab の順を
+「左のサイドバー → タブ列 → 一覧 → 木 → 本文 → 右の列の頭 → 最下段」にする。幅 `--panelcol-shown`。本体は `--panel-body-top` (= 頭の下) から。**探して開くための木** = Files の木 `#sidebar` はここ)、**本文を選ぶための一覧**
 を置く一覧の列 (左のサイドバーの右、タブ列の下。幅 `--listcol-shown`。下の「一覧の列と右の列」)、
 画面ごとのツールバー (`#topbar`、`--topbar-h`)、最下段のバー (`#statusbar`、`--statusbar-h`)。画面下の
 パネルは無い (Tools と Search はタブ。`orientation.md`)。右の列を畳むと (`body.gdp-sidebar-hidden`) `--panelcol-shown` が

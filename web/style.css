@@ -17717,11 +17717,21 @@ body.gdp-sidebar-hidden .panel-rail > #sidebar-toggle {
 .tabs-lead {
   display: flex;
   align-items: center;
+  flex: none;
+}
+/* 左のサイドバーを畳んだときの「サイドバーを出す」は名前の枠の外 (左)。枠の幅と
+   枠の中の名前の位置は変えない (枠の中に置くと名前が 28px 右へずれて縮んだ)。 */
+.tabs-lead > #nav-expand {
+  flex: none;
+  margin-left: var(--pad-face);
+}
+.tabs-lead-name {
+  display: flex;
+  align-items: center;
   flex: 0 0 var(--tabs-lead-w);
   width: var(--tabs-lead-w);
   min-width: 0;
   box-sizing: border-box;
-  gap: var(--space-1);
   padding: 0 var(--space-2) 0 var(--pad-face);
 }
 .tabs-lead .brand {
@@ -23409,9 +23419,19 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   /* タブ列の左端の名前と枝: 上の 640px の古い節 (上の行があった頃の詰め方) が
      .brand を 28px にし、名前と枝を隠すので戻す。枝を CSS だけで隠すと、名前と枝の
      幅分け (views/brand-fit.ts) が見えない枝の分を空けて名前を削る。 */
+  /* 電話では引き出しのボタン (#mobile-nav-open) も幅 --tabs-lead-w の中に入れる
+     (その幅はボタンの分を含む)。デスクトップの名前の枠 (.tabs-lead-name) は
+     外の #tabs-lead に溶かし、名前をボタンの隣の子として並べる。 */
   .tabs-lead {
+    flex: 0 0 var(--tabs-lead-w);
+    width: var(--tabs-lead-w);
+    min-width: 0;
+    box-sizing: border-box;
     gap: 0;
-    padding-right: var(--space-1);
+    padding: 0 var(--space-1) 0 var(--pad-face);
+  }
+  .tabs-lead-name {
+    display: contents;
   }
   .tabs-lead .brand {
     flex: 0 1 auto;

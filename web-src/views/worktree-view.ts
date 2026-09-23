@@ -2002,7 +2002,8 @@ export function createWorktreeView(deps: WorktreeViewDeps): WorktreeView {
       return;
     }
     deps.onSidebarOwner(true);
-    if (title) title.textContent = t.panes.files;
+    // 見出しは app.ts の syncSidebarTitle と同じ「変更ファイル」。
+    if (title) title.textContent = t.panes.fileListLabel;
     if (totals) totals.textContent = t.files.heading(item.fileCount);
     list.removeAttribute("data-diff-list");
     list.replaceChildren();
