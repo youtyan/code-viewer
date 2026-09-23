@@ -16706,7 +16706,9 @@ html[data-nav-collapsed] #app-nav {
   position: relative;
   display: flex;
   align-items: center;
-  height: var(--ui-row-h);
+  /* 見出しの字 (--ui-font-lg) は密度で大きくなるので、行の高さも密度に追従させる
+     (regular は 30px のまま。固定の --ui-row-h だと特大で字が詰まった)。 */
+  height: calc(var(--ui-control-sm) + var(--space-1) / 2);
   padding-left: calc(var(--pad-text) - var(--pad-face));
   border-radius: var(--radius-md);
 }
@@ -17534,6 +17536,18 @@ button.brand[aria-expanded="true"] {
 /* 選んでいる切替の光は残す。 */
 #topbar .seg button.active:focus-visible {
   box-shadow: var(--focus-ring-inset), var(--glow-select);
+}
+/* Files の一覧の並べ替えのボタン (Name ↑ など)。帯の高さいっぱいで、すぐ下に
+   一覧が続くので、外の輪の下辺は一覧の面に隠れる。フォーカスのある間だけ帯を
+   一覧より上の層に置く (位置は動かない)。 */
+.gdp-repo-sort-header button:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--focus-ring);
+}
+.gdp-repo-sort-header:has(button:focus-visible) {
+  position: relative;
+  z-index: 1;
 }
 /* 見出しの Viewed はチェックの箱に輪を描くと箱だけが囲まれるので、文字ごと
    (label) を囲む。 */

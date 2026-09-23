@@ -38,14 +38,15 @@ const themes = {
   dark: new Map([...regular, ...block('[data-theme="dark"]')]),
 };
 
-/** `12px`・`calc(4px * 3)`・`calc(4px / 2)` だけを読む。 */
+/**
+ * var() を解いた後の長さ (`12px`・`calc(28px + 4px / 2)` など、px と数と四則だけ)
+ * を px の数にする。
+ */
 function px(value: string): number {
-  const plain = /^([\d.]+)px$/.exec(value);
-  if (plain) return Number(plain[1]);
-  const calc = /^calc\(([\d.]+)px ([*/]) ([\d.]+)\)$/.exec(value);
-  if (!calc) throw new Error(`agents list look: cannot read ${value}`);
-  const [a, op, b] = [Number(calc[1]), calc[2], Number(calc[3])];
-  return op === "*" ? a * b : a / b;
+  const expression = value.replace(/calc\(/g, "(").replace(/([\d.]+)px/g, "$1");
+  if (!/^[\d.\s+\-*/()]+$/.test(expression))
+    throw new Error(`agents list look: cannot read ${value}`);
+  return Number(new Function(`return (${expression});`)());
 }
 
 function luminance(hex: string): number {
@@ -74,6 +75,13 @@ describe.each(Object.entries(densities))("density %s", (_name, vars) => {
       sidebar: size(".nav-project-toggle") > size(".agent-card-name"),
       board: size(".agents-project-name") > size(".agent-card-name"),
     }).toEqual({ sidebar: true, board: true });
+  });
+
+  test("a project heading's row fits its text (1.5 lines of the heading size)", () => {
+    const height = px(
+      resolveVar(declared(".nav-project-head", "height"), vars),
+    );
+    expect(height).toBeGreaterThanOrEqual(size(".nav-project-toggle") * 1.5);
   });
 
   test("projects are spaced wider than the cards under them", () => {
@@ -126,4 +134,15 @@ test.each(
   ];
   const ratio = (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
   expect(ratio).toBeGreaterThanOrEqual(4.5);
+});
+
+// 見出しの行の高さは密度で変わる (以前は --ui-row-h の 30px 固定で、特大では字だけが
+// 大きくなって詰まった)。
+test("a project heading's row grows with the density", () => {
+  const heights = Object.values(densities).map((vars) =>
+    px(resolveVar(declared(".nav-project-head", "height"), vars)),
+  );
+  expect(heights.every((height, i) => i === 0 || height > heights[i - 1])).toBe(
+    true,
+  );
 });

@@ -424,6 +424,13 @@ describe("a focused control draws the ring that fits where it sits", () => {
         </div>
         <button id="repo-history" class="gdp-btn gdp-btn-sm">History</button>
       </div>
+      <div class="gdp-repo-sort-host">
+        <div id="repo-sort" class="gdp-repo-sort-header">
+          <span class="gdp-repo-sort-spacer"></span>
+          <button id="sort-name" class="active" data-repo-sort="name">Name ↑</button>
+          <button id="sort-size" data-repo-sort="size">Size</button>
+        </div>
+      </div>
     </section>`;
 
   beforeAll(() => {
@@ -458,8 +465,10 @@ describe("a focused control draws the ring that fits where it sits", () => {
     ["project-switcher", OUTER],
     ["sb-expand-all", OUTER],
     ["sb-collapse-all", OUTER],
-    // ブラウザの既定の輪だった: 本文のボタン・Diff の上の段
+    // ブラウザの既定の輪だった: 本文のボタン・Diff の上の段・Files の一覧の並べ替え
     ["repo-history", OUTER],
+    ["sort-name", OUTER],
+    ["sort-size", OUTER],
     ["ref-reset", OUTER],
     ["reload-prom", OUTER],
     ["ignore-ws", OUTER],
@@ -514,6 +523,27 @@ describe("a focused control draws the ring that fits where it sits", () => {
     expect({ inHeadRow, onRail: focusedRing("sidebar-toggle") }).toEqual({
       inHeadRow: { outline: "none", shadow: resolveVar(INSET, light) },
       onRail: { outline: "none", shadow: resolveVar(INSET, light) },
+    });
+  });
+
+  // 並べ替えの帯はボタンの高さいっぱいで、すぐ下の一覧の面が外の輪の下辺を隠す。
+  // フォーカスのある間だけ帯を上の層に置く (位置は動かさない)。
+  test("the sort header lifts above the list while a button has the ring", () => {
+    const header = document.getElementById("repo-sort");
+    if (!header) throw new Error("focus ring test: missing the sort header");
+    const layer = () => {
+      const won = cascadedDeclarations(
+        rules,
+        (selector) => !selector.includes("::") && header.matches(selector),
+      );
+      return { position: won.get("position"), zIndex: won.get("z-index") };
+    };
+    (document.activeElement as HTMLElement | null)?.blur();
+    const idle = layer();
+    focusedRing("sort-name");
+    expect({ idle, focused: layer() }).toEqual({
+      idle: { position: undefined, zIndex: undefined },
+      focused: { position: "relative", zIndex: "1" },
     });
   });
 
