@@ -18681,8 +18681,18 @@ body.gdp-files-column-page #sidebar .sb-head {
 .terminal-pane-body:has(.terminal-screen:empty) {
   display: none;
 }
+/* 案内は下端の状態行 (.terminal-status) とは別の要素 (terminal-view.ts の
+   createSlot)。同じ要素を真ん中から下端へ動かすと、画面が付いたときに
+   レイアウトシフトになる。見えるのはどちらか一方だけ。 */
+.terminal-empty-hint {
+  display: none;
+}
 .terminal-slot:has(.terminal-screen:empty) > .terminal-status {
+  display: none;
+}
+.terminal-slot:has(.terminal-screen:empty) > .terminal-empty-hint:not([hidden]) {
   flex: 1 1 auto;
+  margin: 0;
   display: grid;
   place-items: center;
   padding: var(--space-5);

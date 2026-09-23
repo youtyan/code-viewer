@@ -181,3 +181,24 @@ describe("後から中身が入る行は、最初から中身 1 つ分の高さ�
     expect(px(list.get("min-height"))).toBe(rowHeight);
   });
 });
+
+describe("端末の案内と状態行は、どちらか一方だけ見せる (同じ要素を動かさない)", () => {
+  const at = (selector: string) =>
+    cascadedDeclarations(rules, (s) => s === selector).get("display");
+  test.each([
+    {
+      state: "何も映していない",
+      hint: ".terminal-slot:has(.terminal-screen:empty) > .terminal-empty-hint:not([hidden])",
+      status: ".terminal-slot:has(.terminal-screen:empty) > .terminal-status",
+      expected: { hint: "grid", status: "none" },
+    },
+    {
+      state: "映している",
+      hint: ".terminal-empty-hint",
+      status: ".terminal-status",
+      expected: { hint: "none", status: undefined },
+    },
+  ])("$state", ({ hint, status, expected }) => {
+    expect({ hint: at(hint), status: at(status) }).toEqual(expected);
+  });
+});

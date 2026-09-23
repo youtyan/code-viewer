@@ -229,3 +229,36 @@ describe("terminal view: シェルの作成と停止", () => {
     ]);
   });
 });
+
+// 何も映していない間の案内 (真ん中) と、画面の下端の状態行は別の要素。同じ
+// 要素を真ん中から下端へ動かすと、画面が付いたときにレイアウトシフトになって
+// いた (ui-layout.md の「切替で CLS 0 を保つ」)。どちらを見せるかは style.css。
+describe("terminal view: 案内と状態行", () => {
+  test("案内と状態行は別の要素で、同じ文言を持つ", async () => {
+    const { view } = setup([() => json({ available: true, sessions: [] })]);
+    await view.showInTab("shell-gone" as ShellSessionId, "left");
+    const slot = view.tabPaneFor("left").querySelector(".terminal-slot");
+    if (!slot) throw new Error("no terminal slot");
+    const part = (selector: string) => {
+      const el = slot.querySelector<HTMLElement>(selector);
+      return el && { text: el.textContent, hidden: el.hidden, role: el.role };
+    };
+    expect({
+      order: [...slot.children].map((child) => child.className),
+      hint: part(".terminal-empty-hint"),
+      status: part(".terminal-status"),
+    }).toEqual({
+      order: ["", "terminal-empty-hint", "terminal-status"],
+      hint: {
+        text: "This shell has been closed.",
+        hidden: false,
+        role: "status",
+      },
+      status: {
+        text: "This shell has been closed.",
+        hidden: false,
+        role: "status",
+      },
+    });
+  });
+});

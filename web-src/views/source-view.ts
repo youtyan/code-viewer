@@ -973,7 +973,11 @@ export function createSourceView(deps: SourceViewDeps) {
     return info;
   }
 
-  function createSourceCopyButton(textValue: string): HTMLButtonElement {
+  /**
+   * 中身をコピーするボタン。textValue が null なら読み込む前の場所取り
+   * (押せない。読み込んだら本物と差し替える)。
+   */
+  function createSourceCopyButton(textValue: string | null): HTMLButtonElement {
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className = "gdp-file-header-icon gdp-copy-source";
@@ -981,6 +985,10 @@ export function createSourceView(deps: SourceViewDeps) {
     copy.title = text.copySource;
     copy.setAttribute("aria-label", text.copySource);
     copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+    if (textValue === null) {
+      copy.disabled = true;
+      return copy;
+    }
     copy.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(textValue);
@@ -1028,7 +1036,7 @@ export function createSourceView(deps: SourceViewDeps) {
     button.textContent = text.go;
     const count = document.createElement("span");
     count.className = "gdp-source-line-count";
-    count.textContent = total ? text.total(total) : "";
+    count.textContent = total ? text.total(total) : text.totalPending;
     form.append(count, label, button);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -1042,10 +1050,15 @@ export function createSourceView(deps: SourceViewDeps) {
     return form;
   }
 
+  /**
+   * 見出しの右の切替・行へ移る欄・コピー。textValue が null なら読み込む前の
+   * 場所取り (コピーは押せない)、undefined ならコピーを置かない (大きいファイル
+   * を分けて読むとき)。
+   */
   function createSourceTabs(
     target: SourceFileTarget,
     active: SourceBlobTab,
-    textValue?: string,
+    textValue?: string | null,
     options: { previewable?: boolean } = {},
   ) {
     const tabs = document.createElement("div");
@@ -1061,7 +1074,7 @@ export function createSourceView(deps: SourceViewDeps) {
           sourceInternalPathKind(target.path) !== "code-viewer",
         previewable: !!options.previewable || active === "preview",
         sourceTabClick: "manual",
-        ...(textValue != null
+        ...(textValue !== undefined
           ? { sourceCopyButton: createSourceCopyButton(textValue) }
           : {}),
       },
@@ -2581,7 +2594,7 @@ export function createSourceView(deps: SourceViewDeps) {
       mediaOnly || (!internalKind && !!currentFileRoute()?.preview)
         ? "preview"
         : "code";
-    const { sticky, header } = createFileShellSticky(
+    const { sticky, header, tabsHost } = createFileShellSticky(
       {
         currentRange,
         setRoute,
@@ -2594,6 +2607,18 @@ export function createSourceView(deps: SourceViewDeps) {
       activeTab,
       internalKind ? { includeFileTabs: false, previewable: false } : {},
     );
+    // 文字のファイルは、読み込んだ後の切替・行へ移る欄・コピーを読み込む前から
+    // 同じ関数で置く。後から足すと、右寄せの切替が左へ伸びて見出しが動いていた
+    // (約 250px)。大きいファイル (分けて読む) はコピーを置かないので、そのとき
+    // だけコピーの幅の分が残る。
+    if (!internalKind && sourceDisplayKind(target.path) === "text") {
+      const previewable = isPreviewableSource(target.path);
+      tabsHost.replaceChildren(
+        createSourceTabs(target, preferredSourceTabFor(previewable), null, {
+          previewable,
+        }).tabs,
+      );
+    }
     const pathActions =
       header.querySelector<HTMLElement>(".gdp-file-detail-path") || header;
     pathActions.appendChild(
@@ -2980,8 +3005,10 @@ export function createSourceView(deps: SourceViewDeps) {
         if (label?.firstChild) label.firstChild.textContent = text.line;
         input?.setAttribute("aria-label", text.line);
         if (button) button.textContent = text.go;
-        if (count && input?.max)
-          count.textContent = text.total(Number(input.max));
+        if (count)
+          count.textContent = input?.max
+            ? text.total(Number(input.max))
+            : text.totalPending;
       });
     document
       .querySelectorAll<DelimitedPreviewElement>(".gdp-csv-preview")

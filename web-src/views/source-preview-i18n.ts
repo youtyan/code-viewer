@@ -69,6 +69,8 @@ export const SOURCE_READING_TEXT = {
     tabBlame: "Blame",
     tabHistory: "History",
     total: (n: number) => `${n.toLocaleString()} lines`,
+    // 読み込む前の行数 (見出しの幅を読み込みの前後でそろえるための仮の文字)。
+    totalPending: "– lines",
     blameOlder: "Older",
     blameNewer: "Newer",
     blameUncommitted: "Uncommitted",
@@ -119,6 +121,7 @@ export const SOURCE_READING_TEXT = {
     tabBlame: "Blame",
     tabHistory: "履歴",
     total: (n: number) => `${n.toLocaleString()} 行`,
+    totalPending: "– 行",
     blameOlder: "古い",
     blameNewer: "新しい",
     blameUncommitted: "未コミット",

@@ -105,7 +105,14 @@ export type TabSide = "left" | "right";
 type ScreenSlot = {
   el: HTMLElement;
   screen: TerminalScreenHandle;
+  /** 画面の下端の 1 行 (画面を映している間の状態)。 */
   status: HTMLElement;
+  /**
+   * 何も映していない間に、画面の代わりに真ん中に出す案内 (文字は status と同じ)。
+   * status とは別の要素にする: 同じ要素を真ん中から下端へ動かすと、画面が
+   * 付いたときにレイアウトシフトになっていた (読み込みで 0.30)。
+   */
+  hint: HTMLElement;
 };
 
 export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
@@ -131,9 +138,14 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     return terminalText(deps.getLanguage());
   }
 
-  function writeStatus(el: HTMLElement, message: string | null): void {
-    el.textContent = message ?? "";
-    el.hidden = !message;
+  function writeStatus(
+    slot: Pick<ScreenSlot, "status" | "hint">,
+    message: string | null,
+  ): void {
+    for (const el of [slot.status, slot.hint]) {
+      el.textContent = message ?? "";
+      el.hidden = !message;
+    }
   }
 
   function slots(): ScreenSlot[] {
@@ -147,13 +159,19 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     status.className = "terminal-status";
     status.role = "status";
     status.hidden = true;
+    // 見えるのは status か hint のどちらか一方だけ (style.css)。読み上げも
+    // 見えている方から届く。
+    const hint = document.createElement("p");
+    hint.className = "terminal-empty-hint";
+    hint.role = "status";
+    hint.hidden = true;
     const screen = createTerminalScreen({
       trackLoad: deps.trackLoad,
       actionHeaders: deps.actionHeaders,
       getText: text,
       getFontSize: () => clampTerminalFontSize(deps.getFontSize()),
       // 状態の行は枠の中にあるので、付け替えても映しているシェルの状態が付いて行く。
-      onStatus: (message) => writeStatus(status, message),
+      onStatus: (message) => writeStatus({ status, hint }, message),
       onTargetGone: (session) => forgetShell(session.id),
       isImageShelfCollapsed: deps.isImageShelfCollapsed,
       setImageShelfCollapsed: deps.onImageShelfCollapsedChange,
@@ -162,8 +180,8 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     screen.setInputEnabled(inputEnabled);
     const el = document.createElement("div");
     el.className = "terminal-slot";
-    el.append(screen.el, status);
-    return { el, screen, status };
+    el.append(screen.el, hint, status);
+    return { el, screen, status, hint };
   }
 
   function createTabPane(): HTMLElement {
@@ -274,7 +292,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
 
   async function openPaneInTab(pane: string, side: TabSide): Promise<void> {
     const slot = tabSlot(side);
-    const report = (message: string) => writeStatus(slot.status, message);
+    const report = (message: string) => writeStatus(slot, message);
     try {
       const size = slot.screen.measure();
       const res = await deps.trackLoad(
@@ -382,7 +400,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
       if (myGen !== tabGeneration[side] || disposed) return;
       if (!session) {
         slot.screen.detach();
-        writeStatus(slot.status, text().shellClosed);
+        writeStatus(slot, text().shellClosed);
         return;
       }
       await slot.screen.attach(session);
@@ -390,10 +408,7 @@ export function createTerminalView(deps: TerminalViewDeps): TerminalViewHandle {
     } catch (error) {
       if (myGen !== tabGeneration[side] || disposed) return;
       console.error("[code-viewer] terminal tab attach failed", error);
-      writeStatus(
-        slot.status,
-        `${text().loadFailed}\n${formatErrorDetail(error)}`,
-      );
+      writeStatus(slot, `${text().loadFailed}\n${formatErrorDetail(error)}`);
     }
   }
 

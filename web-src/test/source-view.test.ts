@@ -1073,3 +1073,72 @@ describe("visible source line navigation", () => {
     );
   });
 });
+
+// 見出しの右の切替・行へ移る欄・コピーは、読み込む前から読み込んだ後と同じ
+// 並びで置く (後から足すと、右寄せの切替が左へ伸びて見出しが動いていた)。
+// ui-layout.md の「切替で CLS 0 を保つ」。
+describe("file header tabs keep their place while the file loads", () => {
+  const shape = () => {
+    const tabs = document.querySelector<HTMLElement>(
+      ".gdp-file-detail-tabs .gdp-source-tabs",
+    );
+    if (!tabs) throw new Error("no file header tabs");
+    return [...tabs.children].map((child) => {
+      const el = child as HTMLElement;
+      const inner =
+        el.tagName === "FORM"
+          ? `(${[...el.children].map((part) => part.className || part.tagName.toLowerCase()).join(" ")})`
+          : "";
+      return `${el.tagName.toLowerCase()}.${[...el.classList].join(".")}[${el.dataset.sourceTab ?? ""}]${inner}`;
+    });
+  };
+
+  test.each([
+    { path: "src/sample.ts", name: "code only" },
+    { path: "docs/sample.md", name: "previewable" },
+  ])("$name ($path)", async ({ path }) => {
+    document.body.innerHTML = '<div id="diff"></div>';
+    const gate = deferred<Response>();
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/_file") return gate.promise;
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
+    });
+    const view = createSourceViewForCursorTest(blobRoute(path));
+    const rendered = view.renderStandaloneSource({ path, ref: "worktree" });
+    await waitFor(
+      () =>
+        document.querySelector<HTMLElement>(".gdp-standalone-source")?.dataset
+          .sourceState === "loading",
+    );
+    const copy = () =>
+      document.querySelector<HTMLButtonElement>(
+        ".gdp-file-detail-tabs .gdp-copy-source",
+      );
+    const count = () =>
+      document.querySelector(".gdp-file-detail-tabs .gdp-source-line-count")
+        ?.textContent;
+    const before = {
+      shape: shape(),
+      copyDisabled: copy()?.disabled,
+      count: count(),
+    };
+
+    gate.resolve(new Response("line one\nline two", { status: 200 }));
+    await rendered;
+
+    expect(before).toEqual({
+      shape: shape(),
+      copyDisabled: true,
+      count: "– lines",
+    });
+    expect({ copyDisabled: copy()?.disabled, count: count() }).toEqual({
+      copyDisabled: false,
+      count: "2 lines",
+    });
+  });
+});
