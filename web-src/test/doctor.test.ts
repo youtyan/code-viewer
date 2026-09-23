@@ -7,7 +7,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { errorWithCause } from "../core/error-detail";
 import {
   _classifySqliteLoadError,
   _parseSqliteAbiMismatchMessage,
@@ -16,6 +17,7 @@ import {
 import {
   buildDoctorReport,
   checkServer,
+  handleDoctor,
   shellAvailabilityToRow,
   sqliteStatusToRow,
 } from "../server/doctor";
@@ -136,6 +138,39 @@ describe("terminal dependency diagnostics", () => {
 const DOCTOR_TEST_TIMEOUT_MS = 30_000;
 
 describe("doctor report", () => {
+  test("a report that cannot be built answers 500 with the cause chain and logs the error", async () => {
+    const failure = errorWithCause(
+      "sample doctor failure",
+      new TypeError("sample cause"),
+    );
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const res = await handleDoctor({
+        get cwd(): string {
+          throw failure;
+        },
+        scopeOmitDirNames: [],
+        listenPort: 0,
+      });
+      expect({
+        status: res.status,
+        body: await res.json(),
+        logged: log.mock.calls,
+      }).toEqual({
+        status: 500,
+        body: {
+          error:
+            "Error: sample doctor failure\nCaused by: TypeError: sample cause",
+        },
+        logged: [
+          ["[code-viewer] the doctor report could not be built:", failure],
+        ],
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   test("excludes the current worktree when cwd is one of its subdirectories", async () => {
     const root = mkdtempSync(join(tmpdir(), "code-viewer-doctor-worktree-"));
     const registry = mkdtempSync(

@@ -1911,17 +1911,13 @@ export async function handleDoctor(ctx: DoctorContext): Promise<Response> {
       },
     });
   } catch (err) {
-    return new Response(
-      JSON.stringify({
-        error: err instanceof Error ? err.message : String(err),
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          "Cache-Control": "no-store",
-        },
+    console.error("[code-viewer] the doctor report could not be built:", err);
+    return new Response(JSON.stringify({ error: formatErrorDetail(err) }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
       },
-    );
+    });
   }
 }
