@@ -7,6 +7,11 @@ import {
   expect,
   test,
 } from "vitest";
+import {
+  DEFAULT_KEY_BINDINGS,
+  type KeyBinding,
+  resolveKeyBindings,
+} from "../core/keymap";
 import { createQuickHelp, type QuickHelpText } from "../views/quick-help";
 
 beforeAll(() => {
@@ -51,6 +56,7 @@ function makeQuickHelp(
   language: "en" | "ja" = "en",
   onOpenFull?: () => void,
   onOpenSettings?: () => void,
+  bindings: KeyBinding[] = DEFAULT_KEY_BINDINGS,
 ) {
   installFixtureDom();
   return createQuickHelp({
@@ -61,6 +67,7 @@ function makeQuickHelp(
     },
     getLanguage: () => language,
     getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
+    getKeyBindings: () => bindings,
     openFullKeybindings: () => onOpenFull?.(),
     openSettings: () => onOpenSettings?.(),
   });
@@ -96,6 +103,21 @@ describe("quick help popover", () => {
 
     // Sidebar-only rows must not leak into the compact panel.
     expect(groupTitles.includes("Sidebar")).toBe(false);
+  });
+
+  test("shows the keys the user assigned in the shortcut settings", () => {
+    const quickHelp = makeQuickHelp(
+      "en",
+      undefined,
+      undefined,
+      resolveKeyBindings({ "toggle-theme": [{ key: "x", alt: true }] }),
+    );
+    quickHelp.open();
+
+    const themeRow = Array.from(
+      document.querySelectorAll("#quick-help-groups tr"),
+    ).find((row) => row.textContent?.includes("Toggle theme"));
+    expect(themeRow?.querySelector("th")?.textContent).toBe("Alt+X");
   });
 
   test("re-clicking the trigger toggles the panel closed", () => {
@@ -156,6 +178,7 @@ describe("quick help popover", () => {
         document.querySelector(sel) as T,
       getLanguage: () => language,
       getText: () => (language === "ja" ? JA_TEXT : EN_TEXT),
+      getKeyBindings: () => DEFAULT_KEY_BINDINGS,
       openFullKeybindings: () => undefined,
       openSettings: () => undefined,
     });

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
+  chordUsers,
+  chordWhere,
   DEFAULT_KEY_BINDINGS,
+  defaultKeyBindings,
   findKeymapConflicts,
   type KeyBinding,
   type KeyChord,
@@ -11,6 +14,7 @@ import {
   resolveKeyBindings,
   resolveKeymapAction,
   sanitizeKeymapOverrides,
+  withChordWhere,
 } from "../core/keymap";
 
 function key(
@@ -839,5 +843,337 @@ describe("sanitizeKeymapOverrides", () => {
     expect(
       sanitizeKeymapOverrides(JSON.parse(JSON.stringify(overrides))),
     ).toEqual(overrides);
+  });
+});
+
+describe("where a key works (inputs, terminals, the installed window)", () => {
+  const MAC = defaultKeyBindings(true);
+  const OTHER = defaultKeyBindings(false);
+
+  test.each([
+    { name: "on a Mac", bindings: MAC },
+    { name: "off a Mac", bindings: OTHER },
+  ])("the defaults with the window keys have no clashes $name", ({
+    bindings,
+  }) => {
+    expect(findKeymapConflicts(bindings)).toEqual([]);
+  });
+
+  // [名前, キー, 修飾, 場所, 窓, 期待]。場所: page (入力欄の外) / input / terminal。
+  test.each<
+    [
+      string,
+      string,
+      Parameters<typeof key>[1],
+      "page" | "input" | "terminal",
+      boolean,
+      KeymapAction | null,
+    ]
+  >([
+    [
+      "Cmd+K in a terminal (Meta, allowed in inputs)",
+      "k",
+      { meta: true },
+      "terminal",
+      false,
+      "open-file-palette",
+    ],
+    [
+      "Ctrl+K in a terminal stays in the terminal",
+      "k",
+      { ctrl: true },
+      "terminal",
+      false,
+      null,
+    ],
+    [
+      "Cmd+Z in a terminal (Meta, not allowed in inputs)",
+      "z",
+      { meta: true },
+      "terminal",
+      false,
+      null,
+    ],
+    [
+      "Ctrl+K in a text field",
+      "k",
+      { ctrl: true },
+      "input",
+      false,
+      "open-file-palette",
+    ],
+    ["plain t in a text field", "t", {}, "input", false, null],
+    [
+      "Cmd+Left in a browser tab",
+      "ArrowLeft",
+      { meta: true },
+      "page",
+      false,
+      null,
+    ],
+    [
+      "Cmd+Left in the installed window",
+      "ArrowLeft",
+      { meta: true },
+      "page",
+      true,
+      "main-tab-previous",
+    ],
+    [
+      "Cmd+Left in a text field of the installed window",
+      "ArrowLeft",
+      { meta: true },
+      "input",
+      true,
+      null,
+    ],
+    [
+      "Cmd+Left in a terminal of the installed window",
+      "ArrowLeft",
+      { meta: true },
+      "terminal",
+      true,
+      "main-tab-previous",
+    ],
+    [
+      "Cmd+W in a text field of the installed window",
+      "w",
+      { meta: true },
+      "input",
+      true,
+      "main-tab-close",
+    ],
+    ["Cmd+W in a browser tab", "w", { meta: true }, "page", false, null],
+  ])("%s", (_name, value, modifiers, target, standalone, expected) => {
+    expect(
+      resolveKeymapAction(
+        key(value, modifiers),
+        {
+          scope: "global",
+          editable: target !== "page",
+          terminal: target === "terminal",
+          standalone,
+        },
+        MAC,
+      ),
+    ).toBe(expected);
+  });
+
+  test("a space is named space in both the binding and the event", () => {
+    const bindings = resolveKeyBindings({ "toggle-theme": [{ key: " " }] });
+
+    expect(
+      resolveKeymapAction(
+        key(" "),
+        { scope: "main", editable: false },
+        bindings,
+      ),
+    ).toBe("toggle-theme");
+  });
+
+  test.each<{
+    name: string;
+    action: KeymapAction;
+    chord: KeyChord;
+    expected: { inputs: boolean; terminal: boolean; pwa: boolean };
+  }>([
+    {
+      name: "a plain default key",
+      action: "toggle-theme",
+      chord: { key: "t" },
+      expected: { inputs: false, terminal: false, pwa: false },
+    },
+    {
+      name: "Cmd+K (Meta and inputs mean terminals too)",
+      action: "open-file-palette",
+      chord: { key: "k", meta: true },
+      expected: { inputs: true, terminal: true, pwa: false },
+    },
+    {
+      name: "Ctrl+K",
+      action: "open-file-palette",
+      chord: { key: "k", ctrl: true },
+      expected: { inputs: true, terminal: false, pwa: false },
+    },
+    {
+      name: "Cmd+Left",
+      action: "main-tab-previous",
+      chord: { key: "arrowleft", meta: true },
+      expected: { inputs: false, terminal: true, pwa: true },
+    },
+    {
+      name: "a new key takes the action's conditions",
+      action: "open-file-palette",
+      chord: { key: "p", meta: true },
+      expected: { inputs: true, terminal: true, pwa: false },
+    },
+    {
+      name: "a written flag wins",
+      action: "toggle-theme",
+      chord: { key: "t", pwa: true, terminal: true },
+      expected: { inputs: false, terminal: true, pwa: true },
+    },
+    {
+      name: "turning inputs off keeps the terminal as it was",
+      action: "open-file-palette",
+      chord: { key: "k", meta: true, inputs: false },
+      expected: { inputs: false, terminal: true, pwa: false },
+    },
+  ])("chordWhere: $name", ({ action, chord, expected }) => {
+    expect(chordWhere(action, chord, MAC)).toEqual(expected);
+  });
+
+  test.each<{
+    name: string;
+    action: KeymapAction;
+    chord: KeyChord;
+    where: { inputs: boolean; terminal: boolean; pwa: boolean };
+    expected: KeyChord;
+  }>([
+    {
+      name: "the default place writes nothing",
+      action: "toggle-theme",
+      chord: { key: "t" },
+      where: { inputs: false, terminal: false, pwa: false },
+      expected: { key: "t" },
+    },
+    {
+      name: "only the changed place is written",
+      action: "main-tab-previous",
+      chord: { key: "arrowleft", meta: true },
+      where: { inputs: false, terminal: true, pwa: false },
+      expected: { key: "arrowleft", meta: true, pwa: false },
+    },
+    {
+      name: "old flags that match the default are dropped",
+      action: "toggle-theme",
+      chord: { key: "t", inputs: true },
+      where: { inputs: false, terminal: false, pwa: false },
+      expected: { key: "t" },
+    },
+    {
+      name: "every place changed",
+      action: "toggle-theme",
+      chord: { key: "t" },
+      where: { inputs: true, terminal: true, pwa: true },
+      expected: { key: "t", inputs: true, terminal: true, pwa: true },
+    },
+  ])("withChordWhere: $name", ({ action, chord, where, expected }) => {
+    expect(withChordWhere(action, chord, where, MAC)).toEqual(expected);
+  });
+
+  test("an override keeps the default rows of the keys it keeps", () => {
+    const bindings = resolveKeyBindings(
+      {
+        "main-tab-close": [
+          { key: "x", pendingG: true },
+          { key: "w", meta: true },
+          { key: "q" },
+        ],
+      },
+      MAC,
+    );
+
+    expect(
+      bindings.filter((binding) => binding.action === "main-tab-close"),
+    ).toEqual([
+      { action: "main-tab-close", key: "x", pendingG: true },
+      {
+        action: "main-tab-close",
+        key: "w",
+        meta: true,
+        allowEditable: true,
+        pwa: true,
+        terminal: true,
+      },
+      { action: "main-tab-close", key: "q" },
+    ]);
+  });
+
+  test("an action with no default key gets its keys after the defaults", () => {
+    const bindings = resolveKeyBindings({ "new-agent": [{ key: "f8" }] }, MAC);
+
+    expect([
+      bindings[bindings.length - 1],
+      resolveKeymapAction(
+        key("F8"),
+        { scope: "sidebar", editable: false },
+        bindings,
+      ),
+    ]).toEqual([{ action: "new-agent", key: "f8" }, "new-agent"]);
+  });
+
+  test.each<{
+    name: string;
+    action: KeymapAction;
+    chord: KeyChord;
+    expected: KeymapAction[];
+  }>([
+    {
+      name: "a free key",
+      action: "toggle-theme",
+      chord: { key: "f8" },
+      expected: [],
+    },
+    {
+      name: "a key of an unscoped action",
+      action: "toggle-theme",
+      chord: { key: "s" },
+      expected: ["layout-split"],
+    },
+    {
+      name: "a key used in several scopes",
+      action: "toggle-theme",
+      chord: { key: "j" },
+      expected: ["sidebar-next", "scroll-main-down", "history-next-commit"],
+    },
+    {
+      name: "the action's own key",
+      action: "toggle-theme",
+      chord: { key: "t" },
+      expected: [],
+    },
+    {
+      name: "a window key",
+      action: "toggle-theme",
+      chord: { key: "w", meta: true },
+      expected: ["main-tab-close"],
+    },
+    {
+      name: "a different g prefix",
+      action: "toggle-theme",
+      chord: { key: "s", pendingG: true },
+      expected: [],
+    },
+  ])("chordUsers: $name", ({ action, chord, expected }) => {
+    expect(chordUsers(action, chord, MAC, MAC)).toEqual(expected);
+  });
+
+  test.each<{ name: string; raw: unknown; expected: KeymapOverrides }>([
+    {
+      name: "where flags keep true and false",
+      raw: {
+        "toggle-theme": [
+          { key: "t", inputs: false, terminal: true, pwa: false },
+        ],
+      },
+      expected: {
+        "toggle-theme": [
+          { key: "t", inputs: false, terminal: true, pwa: false },
+        ],
+      },
+    },
+    {
+      name: "where flags that are not booleans are dropped",
+      raw: { "toggle-theme": [{ key: "t", inputs: "yes", pwa: 1 }] },
+      expected: { "toggle-theme": [{ key: "t" }] },
+    },
+    {
+      name: "the new actions are kept",
+      raw: { "new-agent": [{ key: "f8" }], "main-tab-reopen": [] },
+      expected: { "new-agent": [{ key: "f8" }], "main-tab-reopen": [] },
+    },
+  ])("sanitizeKeymapOverrides: $name", ({ raw, expected }) => {
+    expect(sanitizeKeymapOverrides(raw)).toEqual(expected);
   });
 });

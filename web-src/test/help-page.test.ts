@@ -6,6 +6,7 @@ import {
   type KeyBinding,
   resolveKeymapAction,
 } from "../core/keymap";
+import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import type { InstallOffer, InstallOfferState } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
 import { parseQueryArgs } from "../server/query-cli";
@@ -15,13 +16,13 @@ import {
   documentedHelpKeybindingActions,
   HIDDEN_HELP_KEYBINDING_ACTIONS,
 } from "../views/help-keybindings";
-import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import {
   createHelpPage,
   type HelpSection,
   openHelpKeybindings,
   openHelpSection,
 } from "../views/help-page";
+import type { SettingsCategory } from "../views/viewer-settings";
 
 /** インストールの案内を出さないブラウザ (案内の中身は pwa.test.ts)。 */
 const HIDDEN_INSTALL_OFFER: InstallOffer = {
@@ -139,12 +140,7 @@ describe("help page settings categories", () => {
     ].join("");
     const range = { from: "HEAD", to: "worktree" };
     let route: AppRoute = { screen: "help", lang: "en", section, range };
-    let category:
-      | "general"
-      | "appearance"
-      | "agents"
-      | "accounts"
-      | "advanced" = "general";
+    let category: SettingsCategory = "general";
     const searchHosts: HTMLElement[] = [];
     const page = createHelpPage({
       $: <T extends Element = HTMLElement>(sel: string): T => {
@@ -178,7 +174,7 @@ describe("help page settings categories", () => {
         category = next;
       },
       getKeyBindings: () => DEFAULT_KEY_BINDINGS,
-      decorateKeybindings: () => undefined,
+      openShortcutSettings: () => undefined,
       installOffer: HIDDEN_INSTALL_OFFER,
     });
     page.renderHelpPage();
@@ -387,7 +383,7 @@ describe("help page CLI reference", () => {
       getSettingsCategory: () => "general",
       setSettingsCategory: () => undefined,
       getKeyBindings: () => DEFAULT_KEY_BINDINGS,
-      decorateKeybindings: () => undefined,
+      openShortcutSettings: () => undefined,
       installOffer,
     });
     page.renderHelpPage();

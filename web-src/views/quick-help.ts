@@ -1,4 +1,5 @@
 import { isImeComposing } from "../core/keyboard";
+import type { KeyBinding } from "../core/keymap";
 import {
   buildHelpKeybindingGroups,
   type HelpKeybindingLanguage,
@@ -18,6 +19,8 @@ export type QuickHelpText = {
 export type QuickHelpDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
   getLanguage(): HelpKeybindingLanguage;
+  /** 利用者の割り当てを重ねた、いま効くバインド (設定のショートカット) */
+  getKeyBindings(): KeyBinding[];
   getText(): QuickHelpText;
   openFullKeybindings(): void;
   // 歯車ボタンを廃止したので、設定へはここと Help のナビから辿る。
@@ -41,7 +44,7 @@ export function createQuickHelp(deps: QuickHelpDeps) {
     groupsHost.innerHTML = "";
     const groups = buildHelpKeybindingGroups(
       deps.getLanguage(),
-      undefined,
+      deps.getKeyBindings(),
       QUICK_HELP_GROUP_TITLES_EN,
     );
     for (const group of groups) {

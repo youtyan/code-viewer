@@ -1,3 +1,5 @@
+import { isPwaWindowKey } from "./pwa";
+
 // "history" is the commit list (history screen or the History tab of a file):
 // j / k step commits there without stealing the j / k of the sidebar.
 export const KEYMAP_SCOPES = [
@@ -62,6 +64,10 @@ export const KEYMAP_ACTIONS = [
   "goto-journal",
   "goto-database",
   "goto-agents",
+  "goto-worktrees",
+  "goto-tools",
+  "goto-search",
+  "new-agent",
   "switch-project",
   "nav-back",
   "nav-forward",
@@ -86,6 +92,8 @@ export const KEYMAP_ACTIONS = [
   "main-tab-7",
   "main-tab-8",
   "main-tab-9",
+  "main-tab-last",
+  "main-tab-reopen",
   "main-pane-other",
 ] as const;
 
@@ -108,6 +116,10 @@ export type KeymapContext = {
   paletteOpen?: boolean;
   pendingG?: boolean;
   lightboxOpen?: boolean;
+  /** キーを受けたのが端末 (xterm) の中か。端末の中では terminalAllowed の行だけが効く */
+  terminal?: boolean;
+  /** インストールした窓 (PWA、display-mode: standalone) か。pwa の行はこのときだけ効く */
+  standalone?: boolean;
 };
 
 export type KeyBinding = {
@@ -124,15 +136,22 @@ export type KeyBinding = {
   requires?: {
     lightboxClosed?: boolean;
   };
+  /**
+   * 端末 (xterm) の中でも効くか。書かなければ、Meta 付きで入力欄でも効く行だけ
+   * (端末は Cmd の付かないキーを全部受け取る。terminalAllowed)。
+   */
+  terminal?: boolean;
+  /** インストールした窓 (PWA) だけで効く。通常のタブでは効かない */
+  pwa?: boolean;
 };
 
 /**
- * ユーザーが編集できるのは「押し方」だけ。scope / allowEditable などの
- * 発火条件はデフォルト定義から引き継ぐ (resolveKeyBindings を参照)。
- * 誤設定で入力欄にキーが漏れる事故を、型のレベルで防ぐための切り分け。
+ * ユーザーが編集できるのは「押し方」と「効く所」(入力欄・端末・PWA の窓)。
+ * scope や allowPaletteOpen などの発火条件はデフォルト定義から引き継ぐ
+ * (resolveKeyBindings を参照)。
  */
 export type KeyChord = {
-  /** event.key を小文字にしたもの。"k" / "escape" / "pagedown" / "}" */
+  /** event.key を normalizeKeyName したもの。"k" / "escape" / "space" / "}" */
   key: string;
   ctrl?: boolean;
   meta?: boolean;
@@ -140,6 +159,20 @@ export type KeyChord = {
   shift?: boolean;
   /** 直前に g を押す必要があるか (g d のような 2 ストローク) */
   pendingG?: boolean;
+  /** 効く所。書かなければその押し方の既定 (chordWhere) のまま */
+  inputs?: boolean;
+  terminal?: boolean;
+  pwa?: boolean;
+};
+
+/** 押し方ごとの効く所 (設定の画面のチェック)。 */
+export type KeyWhere = {
+  /** 文字の入力欄 (input・textarea・contenteditable) の中でも効く */
+  inputs: boolean;
+  /** 端末 (xterm) の中でも効く */
+  terminal: boolean;
+  /** インストールした窓 (PWA) だけで効く */
+  pwa: boolean;
 };
 
 /**
@@ -323,20 +356,123 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "main-pane-other", key: "o", pendingG: true },
 ];
 
+/**
+ * インストールした窓 (PWA) の既定のキー。通常のタブではブラウザが先に取るか
+ * (⌘W・⌘T・⌘1〜9・Ctrl+Tab)、ブラウザの戻る / 進む (⌘← →) と取り合うので、
+ * pwa の行にする。mac は ⌘、ほかは Ctrl (その OS のブラウザのタブ操作の修飾キー)。
+ */
+export function pwaKeyBindings(mac: boolean): KeyBinding[] {
+  const primary = mac ? { meta: true } : { ctrl: true };
+  // 本文でも入力欄でも効く (文字の編集に使わないキー)。端末の中は ⌘ のときだけ
+  // (Ctrl のキーは端末のもの。Ctrl+W は単語の削除)。
+  const tab = { allowEditable: true, pwa: true, terminal: mac };
+  const rows: KeyBinding[] = [
+    { action: "main-tab-close", key: "w", ...primary, ...tab },
+    { action: "main-tab-reopen", key: "t", shift: true, ...primary, ...tab },
+    { action: "toggle-terminal-panel", key: "t", ...primary, ...tab },
+  ];
+  for (let n = 1; n <= 8; n += 1)
+    rows.push({
+      action: `main-tab-${n}` as KeymapAction,
+      key: String(n),
+      ...primary,
+      ...tab,
+    });
+  rows.push(
+    { action: "main-tab-last", key: "9", ...primary, ...tab },
+    {
+      action: "main-tab-next",
+      key: "tab",
+      ctrl: true,
+      ...tab,
+      terminal: false,
+    },
+    {
+      action: "main-tab-previous",
+      key: "tab",
+      ctrl: true,
+      shift: true,
+      ...tab,
+      terminal: false,
+    },
+  );
+  // ⌘⇧] / ⌘⇧[ (mac のブラウザの次 / 前のタブ)。Shift で event.key が } / { になる配列もある。
+  if (mac)
+    for (const [action, keys] of [
+      ["main-tab-next", ["]", "}"]],
+      ["main-tab-previous", ["[", "{"]],
+    ] as const)
+      for (const key of keys)
+        rows.push({ action, key, meta: true, shift: true, ...tab });
+  // ⌘← / ⌘→ (mac 以外は Ctrl)。入力欄では行の先頭・末尾へ動く今の働きのまま
+  // (入力欄では効かない)。端末の中ではタブを移る。
+  rows.push(
+    {
+      action: "main-tab-previous",
+      key: "arrowleft",
+      ...primary,
+      pwa: true,
+      terminal: true,
+    },
+    {
+      action: "main-tab-next",
+      key: "arrowright",
+      ...primary,
+      pwa: true,
+      terminal: true,
+    },
+  );
+  return rows;
+}
+
+/** その OS の既定のバインド全部 (PWA の行を含む)。 */
+export function defaultKeyBindings(mac: boolean): KeyBinding[] {
+  return [...DEFAULT_KEY_BINDINGS, ...pwaKeyBindings(mac)];
+}
+
+/** event.key を割り当ての名前にする (小文字。空白のキーは "space")。 */
+export function normalizeKeyName(key: string): string {
+  return key === " " ? "space" : key.trim().toLowerCase();
+}
+
+/** その行が端末 (xterm) の中でも効くか。 */
+export function terminalAllowed(binding: KeyBinding): boolean {
+  return binding.terminal ?? (!!binding.meta && !!binding.allowEditable);
+}
+
+export function whereOf(binding: KeyBinding): KeyWhere {
+  return {
+    inputs: !!binding.allowEditable,
+    terminal: terminalAllowed(binding),
+    pwa: !!binding.pwa,
+  };
+}
+
 export function resolveKeymapAction(
   event: KeyEventLike,
   context: KeymapContext,
   bindings: KeyBinding[] = DEFAULT_KEY_BINDINGS,
 ): KeymapAction | null {
-  const key = event.key.toLowerCase();
+  const key = normalizeKeyName(event.key);
   if (context.composing || context.pageKeymapBlocked) return null;
   for (const binding of bindings) {
     if (binding.key !== key) continue;
+    if (binding.pwa && !context.standalone) continue;
     if (binding.requires?.lightboxClosed && context.lightboxOpen) continue;
     if (binding.scope && binding.scope !== context.scope) continue;
-    if (!!binding.pendingG !== !!context.pendingG) continue;
+    // PWA の窓のキー (⌘W など) は、直前に押した g を待っていても効く (g の後で
+    // 窓を閉じるキーが何もしなくなるのを避ける。作業前の窓のキーの受け方と同じ)。
+    if (
+      !!binding.pendingG !== !!context.pendingG &&
+      !(binding.pwa && !binding.pendingG)
+    )
+      continue;
     if (context.paletteOpen && !binding.allowPaletteOpen) continue;
-    if (context.editable && !binding.allowEditable) continue;
+    // 端末の文字の欄 (xterm の textarea) は入力欄でもあるが、効く所は端末の
+    // 決まりで決める。
+    if (context.terminal) {
+      if (!terminalAllowed(binding)) continue;
+    } else if (context.editable && !binding.allowEditable) continue;
     if (!!binding.ctrl !== !!event.ctrlKey) continue;
     if (!!binding.meta !== !!event.metaKey) continue;
     if (!!binding.alt !== !!event.altKey) continue;
@@ -355,6 +491,35 @@ export function resolveKeymapAction(
 }
 
 /**
+ * run: その操作をする。swallow: 何もしないがブラウザの既定の動作 (インストール
+ * した窓を閉じる・窓を増やす) は止める (core/pwa.ts の isPwaWindowKey)。
+ */
+export type KeyOutcome =
+  | { kind: "run"; action: KeymapAction }
+  | { kind: "swallow" }
+  | null;
+
+/** キーを 1 つ受けたときの行き先。app の keydown はこれだけを見る。 */
+export function resolveKeyOutcome(
+  event: KeyEventLike,
+  context: KeymapContext & { mac: boolean },
+  bindings: KeyBinding[],
+): KeyOutcome {
+  const action = resolveKeymapAction(event, context, bindings);
+  if (action) return { kind: "run", action };
+  return isPwaWindowKey(event, {
+    standalone: !!context.standalone,
+    mac: context.mac,
+    // パレットやダイアログが開いている間は、端末のキーとして通さず止める。
+    terminal:
+      !!context.terminal && !context.paletteOpen && !context.pageKeymapBlocked,
+    composing: !!context.composing,
+  })
+    ? { kind: "swallow" }
+    : null;
+}
+
+/**
  * バインドのうち「押し方」以外の発火条件。1 アクションが複数行に分かれている
  * のは、たいていこの条件が違うから (sidebar と main で別々に効かせる等)。
  */
@@ -370,7 +535,7 @@ function conditionKey(binding: KeyBinding): string {
 function applyChord(condition: KeyBinding, chord: KeyChord): KeyBinding {
   const binding: KeyBinding = {
     action: condition.action,
-    key: chord.key.toLowerCase(),
+    key: normalizeKeyName(chord.key),
   };
   if (condition.scope) binding.scope = condition.scope;
   if (chord.ctrl) binding.ctrl = true;
@@ -385,12 +550,73 @@ function applyChord(condition: KeyBinding, chord: KeyChord): KeyBinding {
 }
 
 /**
+ * 新しい押し方が引き継ぐ発火条件 (その操作の既定の行から、PWA の行を除いて
+ * 条件ごとに 1 行)。既定のキーが無い操作は、どこでも効く条件 1 つ。
+ */
+function conditionsOf(
+  action: KeymapAction,
+  defaults: KeyBinding[],
+): KeyBinding[] {
+  const list: KeyBinding[] = [];
+  for (const binding of defaults) {
+    if (binding.action !== action || binding.pwa) continue;
+    const key = conditionKey(binding);
+    if (!list.some((item) => conditionKey(item) === key)) list.push(binding);
+  }
+  return list.length ? list : [{ action, key: "" }];
+}
+
+/** 押し方に書いた効く所を行に当てる。書いていない所は行のまま。 */
+function withWhere(row: KeyBinding, chord: KeyChord): KeyBinding {
+  if (
+    chord.inputs === undefined &&
+    chord.terminal === undefined &&
+    chord.pwa === undefined
+  )
+    return row;
+  // 端末の既定は入力欄の値から決まる (terminalAllowed) ので、入力欄を変える前に
+  // 今の値で固める。入力欄だけ変えたのに端末の効き方まで変わらないように。
+  const out: KeyBinding = {
+    ...row,
+    terminal: chord.terminal ?? terminalAllowed(row),
+  };
+  if (chord.inputs === true) out.allowEditable = true;
+  if (chord.inputs === false) delete out.allowEditable;
+  if (chord.pwa === true) out.pwa = true;
+  if (chord.pwa === false) delete out.pwa;
+  return out;
+}
+
+/**
+ * その操作に割り当てた 1 つの押し方の行。既定にある押し方は既定の行 (scope・
+ * 入力欄・PWA などをそのまま)、新しい押し方はその操作の発火条件を引き継ぐ。
+ */
+export function chordBindings(
+  action: KeymapAction,
+  chord: KeyChord,
+  defaults: KeyBinding[],
+): KeyBinding[] {
+  const id = keyChordId(chord);
+  const own = defaults.filter(
+    (binding) =>
+      binding.action === action && keyChordId(keyChordOf(binding)) === id,
+  );
+  const rows = own.length
+    ? own
+    : conditionsOf(action, defaults).map((condition) =>
+        applyChord(condition, chord),
+      );
+  return rows.map((row) => withWhere(row, chord));
+}
+
+/**
  * ユーザーの差分をデフォルト定義に重ねて、実際に使うバインド一覧を作る。
  *
  * 「行の置き換え」ではなく「条件への適用」にしているのが要点。たとえば
  * sidebar-next は sidebar と global の 2 行あるので、キーを 1 つ変えたら
  * 両方の行が新しいキーになる必要がある。出力順はデフォルトの並びを保つ -
  * resolveKeymapAction は先頭一致なので、並びがそのまま優先順位になる。
+ * 既定のキーが無い操作 (新しいエージェントなど) は、既定の並びの後ろに足す。
  */
 export function resolveKeyBindings(
   overrides?: KeymapOverrides,
@@ -398,19 +624,13 @@ export function resolveKeyBindings(
 ): KeyBinding[] {
   if (!overrides) return defaults;
 
-  const conditions = new Map<KeymapAction, KeyBinding[]>();
-  for (const binding of defaults) {
-    const list = conditions.get(binding.action);
-    if (!list) {
-      conditions.set(binding.action, [binding]);
-      continue;
-    }
-    const key = conditionKey(binding);
-    if (!list.some((item) => conditionKey(item) === key)) list.push(binding);
-  }
-
   const out: KeyBinding[] = [];
   const expanded = new Set<KeymapAction>();
+  const expand = (action: KeymapAction, chords: KeyChord[]) => {
+    expanded.add(action);
+    for (const chord of chords)
+      out.push(...chordBindings(action, chord, defaults));
+  };
   for (const binding of defaults) {
     const chords = overrides[binding.action];
     // 差分が無いアクションはデフォルトのまま。空配列は「無効化」なので、
@@ -419,11 +639,11 @@ export function resolveKeyBindings(
       out.push(binding);
       continue;
     }
-    if (expanded.has(binding.action)) continue;
-    expanded.add(binding.action);
-    for (const chord of chords)
-      for (const condition of conditions.get(binding.action) || [])
-        out.push(applyChord(condition, chord));
+    if (!expanded.has(binding.action)) expand(binding.action, chords);
+  }
+  for (const action of KEYMAP_ACTIONS) {
+    const chords = overrides[action];
+    if (chords && !expanded.has(action)) expand(action, chords);
   }
   return out;
 }
@@ -436,8 +656,8 @@ export type KeymapConflict = {
 };
 
 /** バインドから「押し方」だけを取り出す。設定 UI の初期値にも使う。 */
-export function keyChordOf(binding: KeyBinding): KeyChord {
-  const chord: KeyChord = { key: binding.key.toLowerCase() };
+export function keyChordOf(binding: KeyBinding | KeyChord): KeyChord {
+  const chord: KeyChord = { key: normalizeKeyName(binding.key) };
   if (binding.ctrl) chord.ctrl = true;
   if (binding.meta) chord.meta = true;
   if (binding.alt) chord.alt = true;
@@ -449,7 +669,7 @@ export function keyChordOf(binding: KeyBinding): KeyChord {
 /** 押し方の同一性を見るためのキー。衝突判定と重複除去の両方で使う。 */
 export function keyChordId(chord: KeyChord): string {
   return [
-    chord.key.toLowerCase(),
+    normalizeKeyName(chord.key),
     chord.ctrl ? "c" : "",
     chord.meta ? "m" : "",
     chord.alt ? "a" : "",
@@ -494,15 +714,15 @@ export function findKeymapConflicts(
   return conflicts;
 }
 
-const MAX_CHORD_KEY_LENGTH = 64;
-const MAX_CHORDS_PER_ACTION = 8;
+export const MAX_CHORD_KEY_LENGTH = 64;
+export const MAX_CHORDS_PER_ACTION = 8;
 
 function sanitizeChord(raw: unknown): KeyChord | null {
   if (!raw || typeof raw !== "object") return null;
   const source = raw as Record<string, unknown>;
   const key = source.key;
   if (typeof key !== "string") return null;
-  const trimmed = key.trim().toLowerCase();
+  const trimmed = normalizeKeyName(key);
   if (!trimmed || trimmed.length > MAX_CHORD_KEY_LENGTH) return null;
   const chord: KeyChord = { key: trimmed };
   if (source.ctrl === true) chord.ctrl = true;
@@ -510,6 +730,10 @@ function sanitizeChord(raw: unknown): KeyChord | null {
   if (source.alt === true) chord.alt = true;
   if (source.shift === true) chord.shift = true;
   if (source.pendingG === true) chord.pendingG = true;
+  // 効く所は false にも意味がある (既定では効く所を止める)。
+  for (const field of ["inputs", "terminal", "pwa"] as const)
+    if (typeof source[field] === "boolean")
+      chord[field] = source[field] as boolean;
   return chord;
 }
 
@@ -535,4 +759,82 @@ export function sanitizeKeymapOverrides(raw: unknown): KeymapOverrides {
     out[action] = chords;
   }
   return out;
+}
+
+/** 押し方の形だけ (効く所を除く)。 */
+function chordShape(chord: KeyChord): KeyChord {
+  return keyChordOf(chord);
+}
+
+/** 操作の押し方 (重複を除き、並びのまま)。設定の画面の 1 行の中身。 */
+export function actionChords(
+  action: KeymapAction,
+  bindings: KeyBinding[],
+): KeyChord[] {
+  const chords: KeyChord[] = [];
+  const seen = new Set<string>();
+  for (const binding of bindings) {
+    if (binding.action !== action) continue;
+    const chord = keyChordOf(binding);
+    const id = keyChordId(chord);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    chords.push(chord);
+  }
+  return chords;
+}
+
+/** その操作のその押し方が効く所 (書いた効く所を当てた後)。 */
+export function chordWhere(
+  action: KeymapAction,
+  chord: KeyChord,
+  defaults: KeyBinding[],
+): KeyWhere {
+  return whereOf(chordBindings(action, chord, defaults)[0]);
+}
+
+/**
+ * 効く所を where にした押し方。既定と同じ所は書かない (JSON に書くのは既定から
+ * 変えた所だけ。既定を後で変えても、利用者が触っていない所は追従する)。
+ */
+export function withChordWhere(
+  action: KeymapAction,
+  chord: KeyChord,
+  where: KeyWhere,
+  defaults: KeyBinding[],
+): KeyChord {
+  const shape = chordShape(chord);
+  const natural = chordWhere(action, shape, defaults);
+  if (where.inputs !== natural.inputs) shape.inputs = where.inputs;
+  // 入力欄だけ変えても端末の効き方は変わらない (withWhere が端末を先に固める)
+  // ので、端末も既定と比べるだけでよい。
+  if (where.terminal !== natural.terminal) shape.terminal = where.terminal;
+  if (where.pwa !== natural.pwa) shape.pwa = where.pwa;
+  return shape;
+}
+
+/**
+ * その操作にその押し方を足すと取り合う、ほかの操作 (同じ押し方で、効く場所
+ * (scope) が重なるもの)。設定の画面が「置き換えるか」を聞くのに使う。
+ */
+export function chordUsers(
+  action: KeymapAction,
+  chord: KeyChord,
+  bindings: KeyBinding[],
+  defaults: KeyBinding[],
+): KeymapAction[] {
+  const mine = chordBindings(action, chordShape(chord), defaults);
+  const id = keyChordId(chord);
+  const users: KeymapAction[] = [];
+  for (const binding of bindings) {
+    if (binding.action === action || users.includes(binding.action)) continue;
+    if (keyChordId(keyChordOf(binding)) !== id) continue;
+    if (
+      mine.some(
+        (row) => !row.scope || !binding.scope || row.scope === binding.scope,
+      )
+    )
+      users.push(binding.action);
+  }
+  return users;
 }

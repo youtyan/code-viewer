@@ -8,6 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import { defaultKeyBindings, resolveKeyOutcome } from "../core/keymap";
 import { isGitInternalPath } from "../server/git";
 import { safeWorktreePath } from "../server/search-service";
 import {
@@ -250,8 +251,49 @@ describe("repository scope omit settings", () => {
 });
 
 describe("search palette shortcuts", () => {
+  // 押したキーの行き先はソースの文字ではなく、app の keydown と同じ解決
+  // (resolveKeyOutcome) で見る。Ctrl+K / Ctrl+G は入力欄の中 (ファイルの絞り込み)
+  // からも開き、/ は入力欄の外だけ。
+  test.each([
+    {
+      name: "Ctrl+K in the file filter",
+      key: "k",
+      ctrl: true,
+      editable: true,
+      action: "open-file-palette",
+    },
+    {
+      name: "Ctrl+G in the file filter",
+      key: "g",
+      ctrl: true,
+      editable: true,
+      action: "open-grep-palette",
+    },
+    {
+      name: "/ outside a text field",
+      key: "/",
+      ctrl: false,
+      editable: false,
+      action: "focus-file-filter",
+    },
+    {
+      name: "/ inside a text field",
+      key: "/",
+      ctrl: false,
+      editable: true,
+      action: null,
+    },
+  ])("$name resolves to $action", ({ key, ctrl, editable, action }) => {
+    expect(
+      resolveKeyOutcome(
+        { key, ctrlKey: ctrl },
+        { scope: "sidebar", editable, mac: false },
+        defaultKeyBindings(false),
+      ),
+    ).toEqual(action ? { kind: "run", action } : null);
+  });
+
   test("Ctrl+K and Ctrl+G open the palette while slash keeps sidebar filter focus", () => {
-    expect(app.includes("resolveKeymapAction")).toBe(true);
     expect(app.includes("openSearchPalette('file')")).toBe(true);
     expect(app.includes("openSearchPalette('grep')")).toBe(true);
     expect(app.includes("if (action === 'focus-file-filter')")).toBe(true);

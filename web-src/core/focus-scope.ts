@@ -24,8 +24,18 @@ export function isPageKeymapBlockedKey(
   metaKey: boolean,
 ): boolean {
   if (!target || typeof target.closest !== "function") return false;
-  if (target.closest('[role="dialog"]:not(.gdp-palette)') !== null) return true;
+  if (isInModalDialog(target)) return true;
   return target.closest(".xterm") !== null && !metaKey;
+}
+
+/**
+ * モーダルのダイアログの中か (検索のパレットは除く)。ページのキー割り当ては
+ * ここでは何も動かさない。端末の中で効くかは割り当てごとに決まる (keymap.ts の
+ * terminalAllowed。既定は上の決まりと同じ: Meta 付きで入力欄でも効くキーだけ)。
+ */
+export function isInModalDialog(target: Element | null): boolean {
+  if (!target || typeof target.closest !== "function") return false;
+  return target.closest('[role="dialog"]:not(.gdp-palette)') !== null;
 }
 
 // Tab で届く、Enter で押せる部品。ページのキー割り当ての Enter (木の項目を開く) は

@@ -26,7 +26,8 @@
 | 確認 / 入力ダイアログ | `views/ui-dialog.ts` の `showConfirmDialog` / `showAlertDialog` / `showPromptDialog` / `showFormDialog`。型は 1 つ (面は `--color-overlay`、内側 7 単位、右上の閉じる = 取り消し、ボタンは `gdp-dialog-cancel` / `gdp-dialog-confirm` / 危険は `danger`)。見出しの下の 1 文は `description`。本文の見出しつきの値・コードの枠・箇条書きは `agent-hooks-dialog-*` の部品 (`accounts-dialogs.ts` の `labeled`)。ボタンのクラスを呼び出し側で付け直さない |
 | 使用量 (5h / week の割合・バー・リセットまで・いつの値か) | `views/agents/usage-meter.ts` の `usageMeterRow` / `usageObservedText`。全体ボードのカードと最下段のポップオーバーが同じものを使う (場所で見え方を変えない) |
 | 全体ボードの操作 | 主の操作は `agents-primary`、枠つきの小さな操作は `agents-secondary`、文字だけは `agents-text-action`、アイコンは `agents-icon-action` (28px 角)。プロジェクトの見出しの開く・起動・⋯ は hover / フォーカスで出し、場所は最初から取る |
-| 設定の節 (Help ページの設定) | `views/viewer-settings.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: general / appearance / agents / accounts / advanced) を 1 つ付ける (付けないと全部の分類に出る)。右の列・検索欄・見出しは `help-page.ts` が描く。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (分類も切り替わる)。保存はページの下の「変更を保存」1 つ: 節が下書きを持つなら `SettingsDraft` を `drafts` に渡し、節の中に「保存」を置かない (アカウントの節で保存が 2 つになり、利用者が迷った)。未保存は保存の横の文言 (`data-state="unsaved"`) で示す |
+| 設定の節 (Help ページの設定) | `views/viewer-settings.ts`。節を足したら `build()` の `categorized` に分類 (`SETTINGS_CATEGORIES`: general / appearance / shortcuts / agents / accounts / advanced) を 1 つ付ける (付けないと全部の分類に出る)。右の列・検索欄・見出しは `help-page.ts` が描く。ほかの画面から節へ送るのは `openSettingsAt(見出しの id)` (分類も切り替わる)。保存はページの下の「変更を保存」1 つ: 節が下書きを持つなら `SettingsDraft` を `drafts` に渡し、節の中に「保存」を置かない (アカウントの節で保存が 2 つになり、利用者が迷った)。保存できない間 (JSON の誤りなど) は `problem()` で理由を返し、ページはどの節も保存しない。未保存は保存の横の文言 (`data-state="unsaved"`) で示す |
+| キーの割り当て (設定の「ショートカット」・ヘルプのキーの一覧・クイックヘルプ・パレットのキー) | 操作の名前と分類は `views/help-keybindings.ts` の `KEYMAP_ACTION_INFO` だけに書く (Record なので操作を足すと書き忘れが型で落ちる)。既定のキーは `core/keymap.ts` (`DEFAULT_KEY_BINDINGS` と、PWA の窓の `pwaKeyBindings`)、利用者の差分を重ねるのは `resolveKeyBindings`、画面に出すのは app の `activeKeyBindings` (ヘルプ) / `shownKeyBindings` (この窓で効くものだけ: title・パレット)。キーの効く所 (入力欄・端末・PWA の窓) は押し方ごと (`KeyChord` の inputs / terminal / pwa)。編集の画面は `views/help-keybinding-editor.ts` |
 | ⌘K のパレットの行き先 (ファイル以外) | `views/search-palette-ui.ts` の `PaletteCommand` (群 = projects / agents / sessions / actions。エージェントでないペインとシェルは sessions)。中身は `app.ts` の `paletteCommands()`、操作は `PALETTE_ACTIONS` (キー割り当てのある操作は `keymap` を書けばキーが右に出て、実行も同じ `dispatchKeymapAction`)。ファイルの絞り込み・grep の側には足さない |
 | 作業ツリーの一覧の行 | `views/worktree-view.ts`。何も選んでいないときは一覧だけの画面 (`body[data-worktree-overview]`、列は `--worktree-columns`)。行の「開く」はこのときだけ置き、選んだ後の狭い一覧は「…」だけ (選んだ瞬間にボタンを増やさない) |
 | Data の表の足元 | `views/database/table-grid.ts` の `db-grid-status` (件数) と `db-grid-pager` (見えている行の範囲と 1 画面ずつのページ送り)。表の行の高さは表示密度の値 (`views/shell/row-height.ts` の `currentRowHeight`、CSS は `--ui-row-h`)、列幅は TS が持つので、CSS は色と線だけ |
@@ -82,10 +83,12 @@
 - **戻る・進む**は本文 (URL) だけを動かし、タブの配置は変えない。その route のタブがどちらかの面に
   あれば前面に出すだけで、新しい仮のタブは作らない (右の面にだけあるファイルは右の面の前面に。
   app の popstate と `MAIN_TABS.sideHolding`)
-- **PWA (インストールした窓)** ではブラウザのタブのキー (⌘/Ctrl+W・1〜9・Ctrl+Tab など) がアプリのタブに
-  効く。どのキーを何に振り向けるかの表は `core/pwa.ts` の `PWA_TAB_KEYS` だけに書く (ここに写さない)。
-  振り向け先は上と同じタブの操作 (閉じる・次 / 前・n 番目、最後に閉じたタブは `MAIN_TABS.reopenClosed()`)
-  で、PWA だけの開き方・閉じ方を作らない。ブラウザのタブの中では変えない
+- **PWA (インストールした窓)** ではブラウザのタブのキー (⌘/Ctrl+W・1〜9・Ctrl+Tab・⌘/Ctrl+← → など) がアプリの
+  タブに効く。どのキーを何に振り向けるかの既定は `core/keymap.ts` の `pwaKeyBindings` だけに書き (ここに
+  写さない。利用者は設定の「ショートカット」で変えられる)、割り当てが無くても窓を閉じさせないキーの一覧は
+  `core/pwa.ts` の `PWA_WINDOW_KEYS`。振り向け先は上と同じタブの操作 (閉じる・次 / 前・n 番目・最後、最後に
+  閉じたタブは `MAIN_TABS.reopenClosed()`) で、PWA だけの開き方・閉じ方を作らない。ブラウザのタブの中では
+  既定では変えない (⌘← → は戻る / 進むのまま)
 - **「＋」は最後のタブのすぐ右** (列の右端ではない。ブラウザのタブと同じ)。タブが増えれば一緒に右へ動き、
   列に入りきらず横に送るときも一緒に送られる。前面が最後のタブなら ＋ まで見せ、＋ を押した直後
   (⌘/Ctrl+T も) は ＋ が見える位置まで送る。タブが 0 枚なら列の左端。分割のボタン・預けの札は列の外の

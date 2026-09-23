@@ -50,7 +50,7 @@ import {
   focusSidebarPanel,
   isEditableKeyTarget,
   isEnterForFocusedControl,
-  isPageKeymapBlockedKey,
+  isInModalDialog,
   keymapScope,
   mainScrollBox,
   prepareKeyboardPanels,
@@ -93,13 +93,13 @@ import {
 } from "./core/icons";
 import { isImeComposing } from "./core/keyboard";
 import {
-  DEFAULT_KEY_BINDINGS,
+  defaultKeyBindings,
   type KeyBinding,
   type KeymapAction,
   type KeymapOverrides,
   type KeymapScope,
   resolveKeyBindings,
-  resolveKeymapAction,
+  resolveKeyOutcome,
 } from "./core/keymap";
 import { isNativeLinkClick } from "./core/link-click";
 import {
@@ -134,8 +134,8 @@ import {
 import { isProjectColor, projectInitials } from "./core/project-colors";
 import {
   createInstallOffer,
+  isPwaWindowKey,
   lastTabNumber,
-  resolvePwaKey,
   STANDALONE_MEDIA_QUERY,
   syncThemeColor,
 } from "./core/pwa";
@@ -245,7 +245,7 @@ import {
   fileRouteKeepingActiveView,
   isBlobOrBlameFileRoute,
 } from "./views/file-shell";
-import { createHelpKeybindingEditor } from "./views/help-keybinding-editor";
+import { createShortcutSettings } from "./views/help-keybinding-editor";
 import { formatKeyBinding } from "./views/help-keybindings";
 import {
   createHelpPage,
@@ -362,6 +362,11 @@ const VIEW_STRIP_KEYS: Record<
   database: "goto-database",
   journal: "goto-journal",
 };
+
+/** macOS か。ブラウザのタブ操作の修飾キー (⌘ か Ctrl か) と既定のキーを決める。 */
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+/** この OS の既定のキー (PWA の窓のキーを含む)。利用者の割り当てはこの上に重ねる。 */
+const PLATFORM_KEY_BINDINGS = defaultKeyBindings(IS_MAC);
 
 window.GdpExpandLogic = GdpExpandLogic;
 
@@ -759,14 +764,32 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 作り直し、変わらなければ前回の配列をそのまま返す。keydown ごとに
   // 展開し直さずに済み、更新の呼び忘れも起きない。
   let cachedKeymapOverrides: KeymapOverrides | undefined;
-  let cachedKeyBindings: KeyBinding[] = DEFAULT_KEY_BINDINGS;
+  let cachedKeyBindings: KeyBinding[] = PLATFORM_KEY_BINDINGS;
 
   function activeKeyBindings(): KeyBinding[] {
     if (APP_SETTINGS.keybindings !== cachedKeymapOverrides) {
       cachedKeymapOverrides = APP_SETTINGS.keybindings;
-      cachedKeyBindings = resolveKeyBindings(cachedKeymapOverrides);
+      cachedKeyBindings = resolveKeyBindings(
+        cachedKeymapOverrides,
+        PLATFORM_KEY_BINDINGS,
+      );
     }
     return cachedKeyBindings;
+  }
+
+  /** インストールした窓 (PWA) で開いているか。PWA の行はこのときだけ効く。 */
+  function isStandaloneWindow(): boolean {
+    return window.matchMedia(STANDALONE_MEDIA_QUERY).matches;
+  }
+
+  /**
+   * 画面の入口の title・パレット・プロジェクトの切替にキーを添えるときの割り当て。
+   * この窓で効かない PWA の行を外す (通常のタブで ⌘W を案内しない)。ヘルプの
+   * 一覧は activeKeyBindings ((PWA) を付けて全部出す)。
+   */
+  function shownKeyBindings(): KeyBinding[] {
+    const standalone = isStandaloneWindow();
+    return activeKeyBindings().filter((binding) => standalone || !binding.pwa);
   }
 
   let pendingSettingsPatch: SettingsPatch | null = null;
@@ -2812,6 +2835,11 @@ window.GdpExpandLogic = GdpExpandLogic;
             label: "Agents",
             description: "Notifications and hooks.",
           },
+          shortcuts: {
+            label: "Shortcuts",
+            description:
+              "Keys for every action, where each key works, and JSON export and import.",
+          },
           accounts: {
             label: "Accounts",
             description:
@@ -3212,6 +3240,11 @@ window.GdpExpandLogic = GdpExpandLogic;
             label: "エージェント",
             description: "通知とフック。",
           },
+          shortcuts: {
+            label: "ショートカット",
+            description:
+              "操作ごとのキーと、キーの効く所。JSON の書き出し・読み込み。",
+          },
           accounts: {
             label: "アカウント",
             description:
@@ -3280,7 +3313,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     // 画面の入口 (木の見出しの絵柄の列)。絵だけなので、名前とキーは
     // title / aria-label に出す。
-    const bindings = activeKeyBindings();
+    const bindings = shownKeyBindings();
     document
       .querySelectorAll<HTMLElement>(".view-strip-item")
       .forEach((link) => {
@@ -5037,6 +5070,36 @@ window.GdpExpandLogic = GdpExpandLogic;
     getText: () => agentsText(STATE.language).accounts,
   });
 
+  // ---------- Shortcuts (settings): help-keybinding-editor.ts ----------
+  // 保存はページの「変更を保存」(draft)。保存先はユーザー単位のサーバの設定
+  // (ブラウザと PWA で共通。core/user-settings.ts の keybindings)。
+  const SHORTCUT_SETTINGS = createShortcutSettings({
+    getLanguage: () => STATE.language,
+    mac: IS_MAC,
+    getSaved: () => APP_SETTINGS.keybindings || {},
+    save: async (next) => {
+      // 差分が空になったら丸ごと消す。次に読んだときは素直にデフォルトへ。
+      await persistSettingsPatch({
+        keybindings: Object.keys(next).length ? next : null,
+      });
+      renderHelpPage();
+    },
+    getSharedTag: () => ({
+      text: uiText().settings.sharedTag,
+      title: uiText().settings.sharedTagTitle,
+    }),
+    download: (fileName, text) => {
+      const url = URL.createObjectURL(
+        new Blob([text], { type: "application/json" }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+  });
+
   // ---------- Viewer settings: extracted to viewer-settings.ts ----------
   // 以前はヘッダの歯車から出るポップオーバーだった。今は Help ページの
   // 設定セクションが唯一の置き場で、ここは値の出し入れだけを受け持つ。
@@ -5090,32 +5153,22 @@ window.GdpExpandLogic = GdpExpandLogic;
         AGENT_HOOKS_SETTINGS.refresh(),
         ACCOUNTS_SETTINGS.refresh(),
       ]);
+      SHORTCUT_SETTINGS.refresh();
     },
     onSave: saveViewerSettings,
     onAgentRulesSave: saveAgentScreenRules,
     onAgentRulesReset: resetAgentScreenRuleSettings,
     agentHooksSection: AGENT_HOOKS_SETTINGS.element,
     agentAccountsSection: ACCOUNTS_SETTINGS.element,
-    drafts: [ACCOUNTS_SETTINGS.draft],
+    shortcutsSection: SHORTCUT_SETTINGS.element,
+    drafts: [ACCOUNTS_SETTINGS.draft, SHORTCUT_SETTINGS.draft],
   });
   relocalizeViewerSettings = () => {
     VIEWER_SETTINGS.localize();
     AGENT_HOOKS_SETTINGS.localize();
     ACCOUNTS_SETTINGS.localize();
+    SHORTCUT_SETTINGS.localize();
   };
-
-  // ---------- Keybinding editor: extracted to help-keybinding-editor.ts ----
-  const KEYBINDING_EDITOR = createHelpKeybindingEditor({
-    getLanguage: () => STATE.language,
-    getOverrides: () => APP_SETTINGS.keybindings || {},
-    saveOverrides: (next) => {
-      // 差分が空になったら丸ごと消す。次に読んだときは素直にデフォルトへ。
-      patchSettings({
-        keybindings: Object.keys(next).length ? next : null,
-      });
-    },
-    onChanged: () => renderHelpPage(),
-  });
 
   // ---------- Help page: extracted to help-page.ts ----------
   const { renderHelpPage } = createHelpPage({
@@ -5137,9 +5190,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     getSettingsCategory: () => VIEWER_SETTINGS.getCategory(),
     setSettingsCategory: (category) => VIEWER_SETTINGS.setCategory(category),
+    // ヘルプの一覧は PWA の窓のキーも (PWA) を付けて出す (通常のタブでも案内する)。
     getKeyBindings: activeKeyBindings,
-    decorateKeybindings: (article, groups) =>
-      KEYBINDING_EDITOR.decorate(article, groups),
+    openShortcutSettings: () => openSettingsAt("shortcut-settings-title"),
     // インストールの案内 (PWA)。ブラウザが出す 1 度きりの event を今から受けておく。
     installOffer: createInstallOffer(window),
   });
@@ -6036,6 +6089,22 @@ window.GdpExpandLogic = GdpExpandLogic;
       navigateToPageTab({ screen: "agents", range: currentRange() });
       return true;
     }
+    if (action === "goto-worktrees") {
+      navigateToRoute({ screen: "worktree", range: currentRange() });
+      return true;
+    }
+    if (action === "goto-tools") {
+      openToolsPage();
+      return true;
+    }
+    if (action === "goto-search") {
+      openSearchPage();
+      return true;
+    }
+    if (action === "new-agent") {
+      launchAgent();
+      return true;
+    }
     if (action === "main-tab-next") {
       MAIN_TABS.next();
       focusActiveMainTabSurface();
@@ -6055,6 +6124,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (action === "main-pane-other") {
       MAIN_TABS.focusOther();
       focusActiveMainTabSurface();
+      return true;
+    }
+    if (action === "main-tab-last") {
+      MAIN_TABS.activateNth(lastTabNumber(MAIN_TABS.layout()));
+      focusActiveMainTabSurface();
+      return true;
+    }
+    if (action === "main-tab-reopen") {
+      // 開き直せるものが無ければ何もしない (インストールした窓は閉じさせない)。
+      if (MAIN_TABS.reopenClosed()) focusActiveMainTabSurface();
       return true;
     }
     const nthTab = /^main-tab-([1-9])$/.exec(action);
@@ -6122,21 +6201,31 @@ window.GdpExpandLogic = GdpExpandLogic;
     handleSidebarContextMenu,
   );
 
-  document.addEventListener("keydown", async (e) => {
-    if (isImeComposing(e) || e.defaultPrevented) return;
+  // ページのキー割り当て。インストールした窓 (PWA) のブラウザのタブ操作のキー
+  // (⌘W・⌘T・⌘1〜9・Ctrl+Tab・⌘← → など) も同じ表 (core/keymap.ts の
+  // pwaKeyBindings、設定で変えられる) で受け、割り当ての無い窓のキーは既定の
+  // 動作 (窓を閉じる・窓を増やす) だけを止める (core/pwa.ts の isPwaWindowKey)。
+  document.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
     if ((e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled)
       return;
     const targetEl = e.target as Element | null;
     const scope = keymapScope(targetEl);
-    const action = resolveKeymapAction(
+    const standalone = isStandaloneWindow();
+    const terminal = !!targetEl?.closest?.(".xterm");
+    const composing = isImeComposing(e);
+    const outcome = resolveKeyOutcome(
       e,
       {
         scope,
         editable: isEditableKeyTarget(targetEl),
+        terminal,
+        standalone,
+        mac: IS_MAC,
         pageKeymapBlocked:
-          isPageKeymapBlockedKey(targetEl, e.metaKey) ||
+          isInModalDialog(targetEl) ||
           isEnterForFocusedControl(targetEl, e.key),
-        composing: isImeComposing(e),
+        composing,
         paletteOpen: isPaletteOpen(),
         pendingG:
           PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL,
@@ -6144,51 +6233,23 @@ window.GdpExpandLogic = GdpExpandLogic;
       },
       activeKeyBindings(),
     );
-    if (!action) return;
-    if (dispatchKeymapAction(action, scope, e.repeat, targetEl))
-      e.preventDefault();
-  });
-
-  // インストールした窓 (PWA) だけ、ブラウザのタブ操作のキー (⌘W・⌘T・⌘1〜9・
-  // Ctrl+Tab など) をメインの面のタブへ振り向ける。表と決まりは core/pwa.ts。
-  document.addEventListener("keydown", (e) => {
-    if (e.defaultPrevented) return;
-    const targetEl = e.target as Element | null;
-    const outcome = resolvePwaKey(e, {
-      standalone: window.matchMedia(STANDALONE_MEDIA_QUERY).matches,
-      mac: /Mac|iPhone|iPad/.test(navigator.platform),
-      // Meta 付きとして聞くと、塞がるのはダイアログだけ (端末は下で分ける)。
-      target:
-        isPaletteOpen() || isPageKeymapBlockedKey(targetEl, true)
-          ? "blocked"
-          : targetEl?.closest(".xterm")
-            ? "terminal"
-            : "page",
-      composing: isImeComposing(e),
-    });
     if (!outcome) return;
-    e.preventDefault();
-    if (outcome.kind === "swallow") return;
-    if (outcome.action === "main-tab-new-menu") {
-      openNewTabMenuFromKeys();
+    if (outcome.kind === "swallow") {
+      e.preventDefault();
       return;
     }
-    if (outcome.action === "main-tab-reopen") {
-      // 開き直せるものが無ければ何もしない (窓は閉じさせない)。
-      if (MAIN_TABS.reopenClosed()) focusActiveMainTabSurface();
-      return;
-    }
-    if (outcome.action === "main-tab-last") {
-      MAIN_TABS.activateNth(lastTabNumber(MAIN_TABS.layout()));
-      focusActiveMainTabSurface();
-      return;
-    }
-    dispatchKeymapAction(
+    const handled = dispatchKeymapAction(
       outcome.action,
-      keymapScope(targetEl),
+      scope,
       e.repeat,
       targetEl,
     );
+    // 窓のキーは、操作が何もしなくても窓を閉じさせない。
+    if (
+      handled ||
+      isPwaWindowKey(e, { standalone, mac: IS_MAC, terminal, composing })
+    )
+      e.preventDefault();
   });
 
   // ----- initial state + live updates -----
@@ -6663,6 +6724,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     $,
     getLanguage: () => STATE.language,
     getText: () => uiText().quickHelp,
+    getKeyBindings: activeKeyBindings,
     openFullKeybindings: () => openHelpKeybindings(helpSectionDeps()),
     openSettings: () => openHelpSection(helpSectionDeps(), "settings"),
   });
@@ -8023,16 +8085,16 @@ window.GdpExpandLogic = GdpExpandLogic;
    */
   const PALETTE_ACTIONS: ReadonlyArray<{
     id: PaletteActionId;
-    keymap?: KeymapAction;
+    /** 実行とキーの表示は同じ操作 (設定のショートカットで変えたキーも出る) */
+    keymap: KeymapAction;
     icon: string | string[];
     suggested: boolean;
-    run?: () => void;
   }> = [
     {
       id: "new-agent",
+      keymap: "new-agent",
       icon: PLUS_16_PATH,
       suggested: true,
-      run: () => launchAgent(),
     },
     {
       id: "open-settings",
@@ -8066,9 +8128,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     {
       id: "goto-worktrees",
+      keymap: "goto-worktrees",
       icon: ARROW_RIGHT_16_PATH,
       suggested: false,
-      run: () => navigateToRoute({ screen: "worktree", range: currentRange() }),
     },
     {
       id: "goto-database",
@@ -8090,15 +8152,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     {
       id: "goto-tools",
+      keymap: "goto-tools",
       icon: BOOK_16_PATH,
       suggested: false,
-      run: () => openToolsPage(),
     },
     {
       id: "goto-search",
+      keymap: "goto-search",
       icon: SEARCH_16_PATH,
       suggested: false,
-      run: () => openSearchPage(),
     },
     {
       id: "toggle-terminal-panel",
@@ -8199,11 +8261,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         run: () => MAIN_TABS.openTerminal(session.id),
       });
     }
-    const bindings = activeKeyBindings();
+    const bindings = shownKeyBindings();
     for (const action of PALETTE_ACTIONS) {
-      const binding = action.keymap
-        ? bindings.find((item) => item.action === action.keymap)
-        : undefined;
+      const binding = bindings.find((item) => item.action === action.keymap);
       commands.push({
         group: "actions",
         id: `action:${action.id}`,
@@ -8212,9 +8272,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         shortcut: binding ? formatKeyBinding(binding) : "",
         suggested: action.suggested,
         run: () => {
-          if (action.run) action.run();
-          else if (action.keymap)
-            dispatchKeymapAction(action.keymap, "global", false, null);
+          dispatchKeymapAction(action.keymap, "global", false, null);
         },
       });
     }
@@ -8366,7 +8424,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         currentPath: currentScreenPath,
         currentName: () => PROJECT_NAME,
         shortcutLabel: () => {
-          const binding = activeKeyBindings().find(
+          const binding = shownKeyBindings().find(
             (item) => item.action === "switch-project",
           );
           return binding ? formatKeyBinding(binding) : "";

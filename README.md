@@ -81,9 +81,12 @@ Requires Node.js 20 or newer. Development uses
   closes the front tab (never the window; ⌘⇧W / Ctrl+Shift+W still closes
   the window), ⌘T / Ctrl+T opens the `+` menu, ⌘⇧T / Ctrl+Shift+T reopens
   the last closed tab, ⌘1–8 / Ctrl+1–8 pick a tab and ⌘9 / Ctrl+9 the last,
-  Ctrl+Tab / Ctrl+Shift+Tab (⌘⇧] / ⌘⇧[ on a Mac) move between tabs, and
-  ⌘N / Ctrl+N does nothing. Ctrl keys in a terminal tab still go to the
-  terminal. In an ordinary browser tab nothing changes. To try it, start
+  Ctrl+Tab / Ctrl+Shift+Tab (⌘⇧] / ⌘⇧[ on a Mac) and ⌘← / ⌘→ (Ctrl+← /
+  Ctrl+→ on Windows and Linux) move to the previous / next tab of the
+  focused side, and ⌘N / Ctrl+N does nothing. In a text field ⌘← / ⌘→ still
+  move within the line; in a terminal tab they move between tabs, and the
+  other Ctrl keys still go to the terminal. In an ordinary browser tab
+  nothing changes (⌘← / ⌘→ stay Back / Forward). To try it, start
   `code-viewer`, open its address in Chrome and install it; in the new
   window open a few files, then press ⌘T (the `+` menu opens), ⌘1, ⌘9 and
   Ctrl+Tab (the front tab changes) and ⌘W (the front tab closes, the window
@@ -271,6 +274,15 @@ Requires Node.js 20 or newer. Development uses
 - Read the built-in Settings & Help page (Settings and Help at the bottom of the left sidebar) for getting
   started, the `.code-viewer/` project files, AI annotations, datastores,
   the agent skill, and keybindings.
+- Change any shortcut in Settings → Shortcuts: every action of the app is
+  listed with a filter; open one, press Add key and then the key. An action
+  can have several keys, a key another action uses asks before it is moved,
+  and each key can work in text fields, in terminals, or only in the
+  installed app window (keys a browser tab keeps for itself, such as ⌘W or
+  ⌘T, are marked as app-window only). Restore one action or all of them,
+  and export, import or edit the changes as JSON (a mistake is shown by line
+  and column and nothing is saved). The keys are saved with the settings
+  shared by every project, the browser and the app window.
 - Scratch on pasted text in a Tools tab (the tab row's `+` menu, the
   palette, or `/tools?tool=<tool>`): Markdown
   preview (same renderer as file preview, so table of contents, task lists,

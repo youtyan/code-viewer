@@ -111,6 +111,7 @@ export type ViewerSettingsValues = ViewerSettingsDraft & {
 export const SETTINGS_CATEGORIES = [
   "general",
   "appearance",
+  "shortcuts",
   "agents",
   "accounts",
   "advanced",
@@ -128,6 +129,11 @@ export type ThemeChoice = (typeof THEME_CHOICES)[number];
  */
 export type SettingsDraft = {
   dirty(): boolean;
+  /**
+   * 保存できない理由 (直すまで何も保存しない)。無ければ null。ショートカットの
+   * JSON に誤りがある間など。
+   */
+  problem?(): string | null;
   save(): Promise<void>;
   subscribe(listener: () => void): void;
 };
@@ -159,6 +165,8 @@ export type ViewerSettingsDeps = {
   agentHooksSection: HTMLElement;
   /** エージェント連携の前に置く節 (アカウント)。持ち主は accounts-settings.ts。 */
   agentAccountsSection: HTMLElement;
+  /** ショートカットの節。持ち主は help-keybinding-editor.ts。 */
+  shortcutsSection: HTMLElement;
   /** ページの「変更を保存」で一緒に保存する節の下書き。 */
   drafts: readonly SettingsDraft[];
 };
@@ -544,6 +552,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     );
     categorized.push(
       [display, "appearance"],
+      [deps.shortcutsSection, "shortcuts"],
       [uploads, "general"],
       [agentNotify, "agents"],
       [deps.agentAccountsSection, "accounts"],
@@ -556,6 +565,7 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
     wrap.append(
       searchEmpty,
       display,
+      deps.shortcutsSection,
       uploads,
       agentNotify,
       deps.agentAccountsSection,
@@ -773,6 +783,15 @@ export function createViewerSettings(deps: ViewerSettingsDeps) {
 
   async function saveChanges(): Promise<void> {
     if (generalSavePending || !anyDirty()) return;
+    // 1 つでも保存できない節があれば、ほかの節も保存しない (半分だけ保存しない)。
+    const problems = deps.drafts
+      .map((section) => section.problem?.() ?? null)
+      .filter((problem): problem is string => !!problem);
+    if (problems.length) {
+      saveError.textContent = problems.join("\n");
+      saveError.hidden = false;
+      return;
+    }
     const draft = generalDirty ? readGeneralDraft() : null;
     if (generalDirty && !draft) return;
     refreshGeneration += 1;

@@ -111,6 +111,7 @@ const EN_TEXT: ViewerSettingsText = {
   categories: {
     general: { label: "General", description: "General settings." },
     appearance: { label: "Appearance", description: "Look." },
+    shortcuts: { label: "Shortcuts", description: "Keys." },
     agents: { label: "Agents", description: "Agent settings." },
     accounts: { label: "Accounts", description: "Sign-in." },
     advanced: { label: "Advanced", description: "Rarely changed." },
@@ -249,6 +250,10 @@ function setup(
     agentAccountsSection: sectionWithHeading(
       "sample-accounts-heading",
       "Accounts list",
+    ),
+    shortcutsSection: sectionWithHeading(
+      "sample-shortcuts-heading",
+      "Shortcut list",
     ),
     drafts: options.draft ? [options.draft] : [],
   });
@@ -775,6 +780,26 @@ describe("viewer settings form", () => {
       await vi.waitFor(() => expect(status().dataset.state).toBe("saved"));
       expect(calls.save).toHaveLength(1);
       expect(section.saves).toEqual([1]);
+    });
+
+    test("a section that cannot be saved stops the whole save and says why", async () => {
+      const section = fakeDraft();
+      section.draft.problem = () => "Fix the sample JSON before saving.";
+      const { settings, host, calls } = setup({ draft: section.draft });
+      settings.mount(host);
+      const upload = q<HTMLInputElement>(document, "#upload-enabled");
+      upload.checked = !upload.checked;
+      fire(upload, "change");
+      section.edit();
+      saveButton().click();
+      const error = q<HTMLElement>(document, "#scope-settings-save-error");
+      await vi.waitFor(() => expect(error.hidden).toBe(false));
+      expect([
+        error.textContent,
+        calls.save.length,
+        section.saves.length,
+        status().dataset.state,
+      ]).toEqual(["Fix the sample JSON before saving.", 0, 0, "unsaved"]);
     });
 
     test("a section that fails to save stays unsaved and shows the whole cause", async () => {

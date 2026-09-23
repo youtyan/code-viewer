@@ -3330,115 +3330,227 @@ body.gdp-help-page #content {
   text-align: center;
 }
 
-/* ===== Keybinding editor (Help > Keybindings) ===== */
-.gdp-help-keybinding-actions {
-  width: 1%;
-  white-space: nowrap;
-  text-align: right;
+/* ===== Shortcuts (Help > Settings > Shortcuts) =====
+   設定の「ショートカット」の節 (views/help-keybinding-editor.ts)。行は押すと開き、
+   開いた行の下にキーごとの効く所を並べる。寸法は名前だけで書く。 */
+.gdp-help-shortcut-link {
+  margin: var(--space-2) 0 var(--space-4);
+  color: var(--color-text-2);
+  font-size: var(--ui-font-base);
 }
-/* 変更済みの印はボタンの外に置く。ラベルに混ぜると押す場所がずれる。 */
-.gdp-kbe-changed {
-  margin-right: 8px;
-  color: var(--fg-muted);
-  font-size: 11px;
+.gdp-help-shortcut-link a {
+  color: var(--color-accent);
 }
-.gdp-kbe-toolbar {
-  display: flex;
-  gap: 8px;
-  margin-top: 16px;
-}
-.gdp-kbe-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 380px;
-}
-.gdp-kbe-action {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.gdp-kbe-action + .gdp-kbe-action {
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-.gdp-kbe-action-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-.gdp-kbe-action-head strong {
-  font: 12px "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-}
-.gdp-kbe-default,
-.gdp-kbe-empty {
-  color: var(--fg-muted);
-  font-size: 11px;
-}
-.gdp-kbe-chips {
+.shortcut-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  min-height: 26px;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
 }
-.gdp-kbe-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.shortcut-filter {
+  flex: 1 1 calc(var(--space-unit) * 60);
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--ui-control-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--ui-font-base);
 }
-.gdp-kbe-chip-remove {
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 18px;
+.shortcut-json {
+  margin-bottom: var(--space-3);
 }
-.gdp-kbe-chip-remove:hover {
-  background: var(--bg-soft);
-  color: var(--fg);
-}
-.gdp-kbe-gprefix {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--fg-muted);
-  font-size: 12px;
-}
-.gdp-kbe-action-buttons {
-  display: flex;
-  gap: 8px;
-}
-/* 記録中はラベルが「キーを押してください…」に変わる。押す的が動かないよう
-   両方のラベルが収まる幅を先に取っておく (stable box)。 */
-.gdp-kbe-action-buttons .gdp-btn:first-child {
-  min-width: 12em;
-}
-.gdp-kbe-warnings {
-  min-height: 18px;
-  color: var(--attn);
-  font-size: 12px;
-}
-.gdp-kbe-warnings p {
-  margin: 0 0 4px;
-}
-.gdp-kbe-json textarea {
+.shortcut-json textarea {
   box-sizing: border-box;
   width: 100%;
-  min-width: 420px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-soft);
-  color: var(--fg);
-  padding: 8px;
-  font: 12px "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  min-height: calc(var(--space-unit) * 50);
+  margin-top: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+  color: var(--color-text);
+  font: var(--ui-font-base) / 1.5 var(--font-mono);
   resize: vertical;
+}
+.shortcut-json textarea[aria-invalid="true"] {
+  border-color: var(--color-failed);
+}
+.shortcut-json-issues {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  color: var(--color-failed);
+  font-size: var(--ui-font-sm);
+}
+.shortcut-group + .shortcut-group {
+  margin-top: var(--space-4);
+}
+.shortcut-group-title {
+  margin: 0 0 var(--space-1);
+  padding: 0 var(--space-2);
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
+}
+/* 行: 名前・変更済みの札 (幅を固定) ・キー。押すと下に開く。キーが多い行でも
+   名前の幅を残すよう、キーの列は幅を分け合って折り返す。 */
+.shortcut-row-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(var(--space-unit) * 20) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--ui-row-h);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--ui-font-base);
+  text-align: left;
+  cursor: pointer;
+}
+.shortcut-row-head:hover,
+.shortcut-row-head[aria-expanded="true"] {
+  background: var(--color-raised);
+}
+.shortcut-row-head:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.shortcut-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shortcut-changed {
+  color: var(--color-waiting);
+  font-size: var(--ui-font-sm);
+  text-align: right;
+  white-space: nowrap;
+}
+.shortcut-keys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  padding: var(--space-1) 0;
+}
+.shortcut-none {
+  color: var(--color-text-3);
+  font-size: var(--ui-font-sm);
+}
+.shortcut-settings kbd {
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-inset);
+  color: var(--color-text);
+  font: var(--ui-font-sm) / 1.6 var(--font-mono);
+  white-space: nowrap;
+}
+.shortcut-row-detail {
+  margin: var(--space-1) 0 var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-inset);
+}
+.shortcut-chords {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.shortcut-chord {
+  display: grid;
+  grid-template-columns: calc(var(--space-unit) * 40) minmax(0, 1fr) var(--ui-control-sm);
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--ui-control-sm);
+}
+.shortcut-chord kbd {
+  justify-self: start;
+}
+.shortcut-wheres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+}
+.scope-settings label.shortcut-where {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  color: var(--color-text-2);
+  font-size: var(--ui-font-sm);
+  cursor: pointer;
+}
+.scope-settings label.shortcut-where:has(input:disabled) {
+  cursor: default;
+}
+.shortcut-where input {
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+.shortcut-chord-remove {
+  width: var(--ui-control-sm);
+  height: var(--ui-control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-3);
+  font-size: var(--ui-font-lg);
+  cursor: pointer;
+}
+.shortcut-chord-remove:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+.shortcut-chord .shortcut-chord-note {
+  grid-column: 2 / -1;
+  margin: 0;
+}
+.shortcut-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+/* 記録中はラベルが「キーを押してください…」に変わる。押す的が動かないよう、
+   両方のラベルが収まる幅を先に取っておく。 */
+.shortcut-row-actions .shortcut-add {
+  min-inline-size: 12em;
+}
+.shortcut-conflict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-waiting) 16%, transparent);
+}
+.shortcut-conflict p {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--ui-font-base);
+}
+.shortcut-notice {
+  margin-top: var(--space-2);
+}
+.shortcut-filter-empty {
+  padding: 0 var(--space-2);
 }
 
 /* ===== Tree view ===== */

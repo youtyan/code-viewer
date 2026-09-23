@@ -4,10 +4,7 @@ import type { KeyBinding } from "../core/keymap";
 import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import type { InstallOffer } from "../core/pwa";
 import type { AppRoute } from "../core/routes";
-import {
-  buildHelpKeybindingGroups,
-  type HelpKeybindingTableGroup,
-} from "./help-keybindings";
+import { buildHelpKeybindingGroups } from "./help-keybindings";
 import type { SettingsCategory } from "./viewer-settings";
 
 export type HelpPageDeps = {
@@ -36,13 +33,10 @@ export type HelpPageDeps = {
   /** ユーザーの差分を反映した、いま実際に効くバインド一覧 */
   getKeyBindings(): KeyBinding[];
   /**
-   * キーバインド表に変更ボタンとツールバーを足す。実体は
-   * views/help-keybinding-editor.ts が持つ。
+   * 設定の「ショートカット」を開く。キーの一覧はそこで変える (一覧の上に
+   * 案内を出す。編集の画面は views/help-keybinding-editor.ts)。
    */
-  decorateKeybindings(
-    article: HTMLElement,
-    groups: HelpKeybindingTableGroup[],
-  ): void;
+  openShortcutSettings(): void;
   /** インストールの案内 (PWA) を出すか・ボタンを出せるか。実体は core/pwa.ts */
   installOffer: InstallOffer;
 };
@@ -238,7 +232,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "Installed as an app (the install button in the address bar or the browser menu), code-viewer opens in its own window, and there the browser's tab keys work on these tabs: ⌘W / Ctrl+W closes the front tab (never the window), ⌘T / Ctrl+T opens the ＋ menu, ⌘⇧T / Ctrl+Shift+T reopens the last tab you closed, ⌘1–8 / Ctrl+1–8 pick a tab and ⌘9 / Ctrl+9 the last one, and Ctrl+Tab / Ctrl+Shift+Tab (or ⌘⇧] / ⌘⇧[ on a Mac) move to the next / previous tab. ⌘N / Ctrl+N does nothing, so the window is not doubled. ⌘⇧W / Ctrl+Shift+W is left to the browser and closes the window. In a terminal tab, Ctrl keys still go to the terminal. In an ordinary browser tab nothing changes: the browser keeps these keys, and g t / g T / g x / g 1–9 work everywhere.",
+                text: "Installed as an app (the install button in the address bar or the browser menu), code-viewer opens in its own window, and there the browser's tab keys work on these tabs: ⌘W / Ctrl+W closes the front tab (never the window), ⌘T / Ctrl+T opens the ＋ menu, ⌘⇧T / Ctrl+Shift+T reopens the last tab you closed, ⌘1–8 / Ctrl+1–8 pick a tab and ⌘9 / Ctrl+9 the last one, Ctrl+Tab / Ctrl+Shift+Tab (or ⌘⇧] / ⌘⇧[ on a Mac) and ⌘← / ⌘→ (Ctrl+← / Ctrl+→ on Windows and Linux) move to the previous / next tab of the focused side, going round at either end. In a text field ⌘← / ⌘→ still move to the start / end of the line; in a terminal they move between tabs. ⌘N / Ctrl+N does nothing, so the window is not doubled. ⌘⇧W / Ctrl+Shift+W is left to the browser and closes the window. In a terminal tab, the other Ctrl keys still go to the terminal. In an ordinary browser tab nothing changes: the browser keeps these keys (⌘← / ⌘→ stay Back / Forward), and g t / g T / g x / g 1–9 work everywhere. All of these keys can be changed, or made to work in browser tabs too, in Settings › Shortcuts.",
               },
             ],
           },
@@ -987,7 +981,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "Keybindings",
         title: "Keyboard Shortcuts",
         intro:
-          "Use these shortcuts to move between panels and navigate files without leaving the keyboard.",
+          "Use these shortcuts to move between panels and navigate files without leaving the keyboard. The list shows the keys you set: in Settings › Shortcuts every action can take other keys or several keys, each key can be allowed in text fields, in terminals or only in the installed app window, and the changes can be exported, imported or edited as JSON.",
         groups: [
           {
             title: "Line selection",
@@ -1160,7 +1154,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "アプリとしてインストールすると (アドレスバーかブラウザのメニューのインストール)、専用の窓で開き、その窓ではブラウザのタブ操作のキーがこのタブ列に効きます。⌘W / Ctrl+W で前面のタブを閉じ (窓は閉じません)、⌘T / Ctrl+T で「＋」のメニュー、⌘⇧T / Ctrl+Shift+T で最後に閉じたタブを開き直し、⌘1〜8 / Ctrl+1〜8 で N 番目、⌘9 / Ctrl+9 で最後のタブ、Ctrl+Tab / Ctrl+Shift+Tab (Mac では ⌘⇧] / ⌘⇧[ も) で次 / 前のタブへ移ります。⌘N / Ctrl+N は何もしません (窓を増やさないため)。⌘⇧W / Ctrl+Shift+W はブラウザのままで、窓を閉じます。ターミナルのタブでは、Ctrl のキーは今までどおりターミナルに届きます。通常のブラウザのタブでは何も変わらず、これらのキーはブラウザのもので、g t / g T / g x / g 1〜9 はどちらでも使えます。",
+                text: "アプリとしてインストールすると (アドレスバーかブラウザのメニューのインストール)、専用の窓で開き、その窓ではブラウザのタブ操作のキーがこのタブ列に効きます。⌘W / Ctrl+W で前面のタブを閉じ (窓は閉じません)、⌘T / Ctrl+T で「＋」のメニュー、⌘⇧T / Ctrl+Shift+T で最後に閉じたタブを開き直し、⌘1〜8 / Ctrl+1〜8 で N 番目、⌘9 / Ctrl+9 で最後のタブ、Ctrl+Tab / Ctrl+Shift+Tab (Mac では ⌘⇧] / ⌘⇧[ も) と ⌘← / ⌘→ (Windows と Linux では Ctrl+← / Ctrl+→) で、フォーカスのある面の前 / 次のタブへ移ります (端では反対の端へ回ります)。入力欄の中の ⌘← / ⌘→ は今までどおり行の先頭 / 末尾へ動き、ターミナルの中ではタブを移ります。⌘N / Ctrl+N は何もしません (窓を増やさないため)。⌘⇧W / Ctrl+Shift+W はブラウザのままで、窓を閉じます。ターミナルのタブでは、ほかの Ctrl のキーは今までどおりターミナルに届きます。通常のブラウザのタブでは何も変わらず、これらのキーはブラウザのもので (⌘← / ⌘→ は戻る / 進むのまま)、g t / g T / g x / g 1〜9 はどちらでも使えます。これらのキーは、設定 › ショートカット で変えたり、通常のタブでも効くようにしたりできます。",
               },
             ],
           },
@@ -1907,7 +1901,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "キーバインド",
         title: "キーバインド",
         intro:
-          "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。",
+          "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。一覧は設定したキーで出ます。設定 › ショートカット では、どの操作にも別のキーや複数のキーを割り当てられ、キーごとに入力欄の中・端末の中・PWA の窓だけのどこで効くかを選べ、変えた内容を JSON で書き出す・読み込む・直接編集できます。",
         groups: [
           {
             title: "行選択",
@@ -2089,7 +2083,40 @@ const HELP_NAV_TOGGLE_TEXT: Record<HelpLanguage, string> = {
   ja: "目次",
 };
 
+/** キーの一覧の上の案内: キーは設定の「ショートカット」で変える。 */
+const SHORTCUT_SETTINGS_LINK: Record<
+  HelpLanguage,
+  { before: string; link: string; after: string }
+> = {
+  en: {
+    before: "Change these keys in ",
+    link: "Settings › Shortcuts",
+    after: ". Keys marked (PWA) work only in the installed app window.",
+  },
+  ja: {
+    before: "キーは ",
+    link: "設定 › ショートカット",
+    after:
+      " で変えられます。(PWA) の付いたキーは、インストールした窓だけで効きます。",
+  },
+};
+
 export function createHelpPage(deps: HelpPageDeps) {
+  function shortcutSettingsLink(lang: HelpLanguage): HTMLElement {
+    const text = SHORTCUT_SETTINGS_LINK[lang];
+    const note = document.createElement("p");
+    note.className = "gdp-help-shortcut-link";
+    const link = document.createElement("a");
+    link.href = "#shortcut-settings-title";
+    link.textContent = text.link;
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      deps.openShortcutSettings();
+    });
+    note.append(text.before, link, text.after);
+    return note;
+  }
+
   // 狭い面 (style.css の @container help-shell) では目次を本文の上に畳む。既定は
   // 畳み、節を選んだらまた畳む (描き直しても開いたままにはしない)。
   // 電話の段では 2 段の画面: 目次を開いている間は目次だけ (1 段目)、節を選ぶと
@@ -2220,13 +2247,10 @@ export function createHelpPage(deps: HelpPageDeps) {
     h2.textContent = settingsCategory?.label ?? sectionContent.title;
     intro.textContent = settingsCategory?.description ?? sectionContent.intro;
     article.append(h2, intro);
-    sectionGroups.forEach((group, index) => {
+    if (section === "keybindings") article.append(shortcutSettingsLink(lang));
+    sectionGroups.forEach((group) => {
       const groupSection = document.createElement("section");
       groupSection.className = "gdp-help-group";
-      // キー一覧のグループだけ印を付ける。後段の編集 UI が、静的な説明表と
-      // 取り違えずに変更ボタンを差せるようにするため。
-      if (index < keybindingGroups.length)
-        groupSection.classList.add("gdp-help-keybinding-group");
       const groupTitle = document.createElement("h3");
       groupTitle.textContent = group.title;
       groupSection.append(groupTitle);
@@ -2247,8 +2271,6 @@ export function createHelpPage(deps: HelpPageDeps) {
     // フォーム部品は HelpBlock では表せないので、静的コンテンツを組んだ後で
     // 差し込む。
     if (section === "settings") deps.mountViewerSettings(article);
-    if (section === "keybindings")
-      deps.decorateKeybindings(article, keybindingGroups);
     deps.installOffer.onChange(installBlock);
 
     // 狭い面だけで見える、目次を開閉する 1 行 (広い面では CSS が隠す)。

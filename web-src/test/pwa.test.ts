@@ -3,16 +3,18 @@
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import type { KeyEventLike } from "../core/keymap";
+import {
+  defaultKeyBindings,
+  type KeyEventLike,
+  type KeyOutcome,
+  resolveKeyOutcome,
+} from "../core/keymap";
 import type { Layout } from "../core/main-tabs";
 import {
   createInstallOffer,
   type InstallOfferState,
   isChromeBrowser,
   lastTabNumber,
-  type PwaKeyOutcome,
-  type PwaKeyTarget,
-  resolvePwaKey,
   syncThemeColor,
   type UserAgentBrand,
 } from "../core/pwa";
@@ -149,6 +151,38 @@ function keyEvent(key: string, mods: Mods): KeyEventLike {
 const run = (action: string) => ({ kind: "run", action });
 const SWALLOW = { kind: "swallow" };
 
+type PwaKeyOutcome = KeyOutcome;
+/**
+ * キーを受けた場所。page: 本文 (入力欄の外)、input: 文字の入力欄、terminal:
+ * xterm の中、blocked: ダイアログの中。
+ */
+type PwaKeyTarget = "page" | "input" | "terminal" | "blocked";
+
+/** app の keydown と同じ形で、既定の割り当て (その OS の PWA の行を含む) を引く。 */
+function resolvePwaKey(
+  event: KeyEventLike,
+  context: {
+    standalone: boolean;
+    mac: boolean;
+    target: PwaKeyTarget;
+    composing: boolean;
+  },
+): PwaKeyOutcome {
+  return resolveKeyOutcome(
+    event,
+    {
+      scope: "global",
+      editable: context.target === "input" || context.target === "terminal",
+      terminal: context.target === "terminal",
+      pageKeymapBlocked: context.target === "blocked",
+      standalone: context.standalone,
+      mac: context.mac,
+      composing: context.composing,
+    },
+    defaultKeyBindings(context.mac),
+  );
+}
+
 describe("the tab keys of an installed window", () => {
   // [押し方, event.key, 修飾, standalone, mac, 受けた場所, 結果]
   test.each<
@@ -191,6 +225,15 @@ describe("the tab keys of an installed window", () => {
       SWALLOW as PwaKeyOutcome,
     ],
     [
+      "Cmd+W in a text field still closes the tab (not a text editing key)",
+      "w",
+      "cmd",
+      true,
+      true,
+      "input",
+      run("main-tab-close") as PwaKeyOutcome,
+    ],
+    [
       "Ctrl+W on a Mac is not a browser key",
       "w",
       "ctrl",
@@ -225,7 +268,7 @@ describe("the tab keys of an installed window", () => {
       true,
       true,
       "page",
-      run("main-tab-new-menu") as PwaKeyOutcome,
+      run("toggle-terminal-panel") as PwaKeyOutcome,
     ],
     [
       "Cmd+N does not open another window",
@@ -317,8 +360,25 @@ describe("the tab keys of an installed window", () => {
       "page",
       run("main-tab-previous") as PwaKeyOutcome,
     ],
-    ["Cmd+K is not a tab key", "k", "cmd", true, true, "page", null],
-    ["a plain w is not a tab key", "w", "", true, true, "page", null],
+    // タブのキーでないものは、ページのキー割り当てのまま (窓のキーとして止めない)。
+    [
+      "Cmd+K is not a tab key: it stays the file palette",
+      "k",
+      "cmd",
+      true,
+      true,
+      "page",
+      run("open-file-palette") as PwaKeyOutcome,
+    ],
+    [
+      "a plain w is not a tab key: it stays ignore-whitespace",
+      "w",
+      "",
+      true,
+      true,
+      "page",
+      run("toggle-ignore-whitespace") as PwaKeyOutcome,
+    ],
     [
       "Ctrl+W closes the front tab off a Mac",
       "w",
@@ -371,7 +431,7 @@ describe("the tab keys of an installed window", () => {
       true,
       false,
       "page",
-      run("main-tab-new-menu") as PwaKeyOutcome,
+      run("toggle-terminal-panel") as PwaKeyOutcome,
     ],
     [
       "Ctrl+9 off a Mac is the last tab",
@@ -421,6 +481,41 @@ describe("the tab keys of an installed window", () => {
   ])("%s", (_label, key, mods, standalone, mac, target, expected) => {
     expect(
       resolvePwaKey(keyEvent(key, mods), {
+        standalone,
+        mac,
+        target,
+        composing: false,
+      }),
+    ).toEqual(expected);
+  });
+
+  // ⌘← / ⌘→ (mac 以外は Ctrl) で隣のタブへ。PWA の窓だけ。入力欄では行の先頭・
+  // 末尾へ動く今の働きのまま (ページは受けない)、端末の中ではタブを移る。
+  test.each<[boolean, boolean, PwaKeyTarget, string, PwaKeyOutcome]>([
+    [true, true, "page", "ArrowLeft", run("main-tab-previous") as KeyOutcome],
+    [true, true, "page", "ArrowRight", run("main-tab-next") as KeyOutcome],
+    [
+      true,
+      true,
+      "terminal",
+      "ArrowLeft",
+      run("main-tab-previous") as KeyOutcome,
+    ],
+    [true, true, "terminal", "ArrowRight", run("main-tab-next") as KeyOutcome],
+    [true, true, "input", "ArrowLeft", null],
+    [true, true, "input", "ArrowRight", null],
+    [true, true, "blocked", "ArrowLeft", null],
+    [true, false, "page", "ArrowLeft", null],
+    [true, false, "page", "ArrowRight", null],
+    [true, false, "terminal", "ArrowRight", null],
+    [false, true, "page", "ArrowLeft", run("main-tab-previous") as KeyOutcome],
+    [false, true, "page", "ArrowRight", run("main-tab-next") as KeyOutcome],
+    [false, true, "terminal", "ArrowRight", run("main-tab-next") as KeyOutcome],
+    [false, true, "input", "ArrowRight", null],
+    [false, false, "page", "ArrowRight", null],
+  ])("mac %s, installed window %s, %s: the primary key + %s", (mac, standalone, target, key, expected) => {
+    expect(
+      resolvePwaKey(keyEvent(key, mac ? "cmd" : "ctrl"), {
         standalone,
         mac,
         target,
