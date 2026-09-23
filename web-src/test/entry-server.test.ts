@@ -954,6 +954,55 @@ describe("`code-viewer` in another folder", () => {
     expect(entry.hint).toContain(`kill ${process.pid}`);
   });
 
+  // 入口の答えの URL は OS の開く命令 (Windows では cmd.exe) に渡るので、入口が
+  // 作る形 (自分のオリジンの `/p/<鍵>/`) 以外は表示も開きもしない。
+  test.each([
+    {
+      name: "cmd.exe text",
+      url: (port: number) =>
+        `http://127.0.0.1:${port}/p/0123456789abcdef/&calc`,
+    },
+    { name: "a file URL", url: () => "file:///sample/app" },
+    {
+      name: "another origin",
+      url: () => "http://127.0.0.1:1/p/0123456789abcdef/",
+    },
+  ])("refuses a URL the entry did not make ($name)", async ({ url }) => {
+    const box = sandbox();
+    const root = repo(box, "sample-app");
+    let answered = "";
+    fake = createServer((req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        req.url === "/_entry/open"
+          ? answered
+          : JSON.stringify({
+              role: "entry",
+              pid: process.pid,
+              token: SAMPLE_TOKEN,
+              version: PACKAGE_VERSION,
+            }),
+      );
+    });
+    await new Promise<void>((resolve) => fake?.listen(0, "127.0.0.1", resolve));
+    const port = (fake.address() as AddressInfo).port;
+    answered = JSON.stringify({ url: url(port) });
+    writeEntryJson(box, {
+      url: `http://127.0.0.1:${port}/`,
+      pid: process.pid,
+      token: SAMPLE_TOKEN,
+      version: PACKAGE_VERSION,
+    });
+    const result = await runCli(box, root);
+    expect({
+      status: result.status,
+      stdout: result.stdout,
+      refused: result.stderr.includes(
+        `the code-viewer entry server at http://127.0.0.1:${port}/ returned a URL that is not one of its projects: ${answered}`,
+      ),
+    }).toEqual({ status: 1, stdout: "", refused: true });
+  });
+
   test("starts outside git, says why the folder is not registered and does not register it", async () => {
     const box = sandbox();
     const folder = join(box.dir, "plain-folder");

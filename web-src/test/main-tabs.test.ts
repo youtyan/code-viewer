@@ -65,7 +65,7 @@ function pane(spec: string) {
       const active = raw.startsWith("[");
       const bare = raw.replace(/[[\]]/g, "");
       const preview = bare.startsWith("*");
-      const named = bare.replace("*", "");
+      const named = preview ? bare.slice(1) : bare;
       const name = named.replace(/^[~@$]/, "");
       const target = named.startsWith("~")
         ? image(name)

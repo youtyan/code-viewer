@@ -202,3 +202,95 @@ describe("OS opener fallback and errors", () => {
     ]);
   });
 });
+
+// cmd.exe は /c の後ろを自分でもう一度読む。作業ツリーのフォルダ名や URL に
+// 命令として読まれる文字があれば、cmd.exe を起こさない。
+describe("cmd.exe never receives text it would run as a command", () => {
+  beforeEach(() => {
+    runAsync.mockReset();
+  });
+
+  const CMD_TEXT = ["a&calc", "a|calc", "a>out", "a<in", "a^b", "%PATH%"];
+
+  test.each([
+    ...CMD_TEXT.map((name) => ({ name, cmd: false })),
+    { name: "サンプル (1)", cmd: true },
+    { name: "sample-dir", cmd: true },
+  ])("WSL directory $name → cmd.exe used: $cmd", async ({ name, cmd }) => {
+    const windowsPath = `\\\\wsl.localhost\\sample\\repo\\${name}`;
+    runAsync
+      .mockResolvedValueOnce({
+        code: 0,
+        stdout: `${windowsPath}\n`,
+        stderr: "",
+      })
+      .mockResolvedValueOnce({ code: 0, stdout: "/mnt/c\n", stderr: "" })
+      .mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" });
+
+    await openDirectoryInOs(`/repo/${name}`, "linux", "5.15.0-standard-WSL2");
+
+    expect(runAsync.mock.calls[2]?.[0]).toEqual(
+      cmd
+        ? ["cmd.exe", "/c", "start", "", windowsPath]
+        : ["gio", "open", `/repo/${name}`],
+    );
+  });
+
+  test("when every WSL opener fails, the error says why cmd.exe was not run", async () => {
+    runAsync
+      .mockResolvedValueOnce({
+        code: 0,
+        stdout: "\\\\wsl.localhost\\sample\\repo\\a&calc\n",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({ code: 0, stdout: "/mnt/c\n", stderr: "" })
+      .mockResolvedValueOnce({ code: 1, stdout: "", stderr: "gio error" })
+      .mockResolvedValueOnce({ code: 1, stdout: "", stderr: "xdg error" });
+
+    const error = await openDirectoryInOs(
+      "/repo/a&calc",
+      "linux",
+      "5.15.0-standard-WSL2",
+    ).catch((caught: unknown) => caught);
+
+    expect(
+      (error as { errors: Error[] }).errors.map((each) => each.message),
+    ).toEqual([
+      'cmd.exe was not run: it would read part of "\\\\\\\\wsl.localhost\\\\sample\\\\repo\\\\a&calc" as a command (& | < > ^ % " or a line break)',
+      "gio exited with 1",
+      "xdg-open exited with 1",
+    ]);
+  });
+
+  test("Windows: a URL with & is refused instead of being started through cmd.exe", async () => {
+    await expect(
+      openUrlInOs(
+        "http://127.0.0.1:64160/&calc",
+        "/repo/sample",
+        "win32",
+        "sample-kernel",
+      ),
+    ).rejects.toThrow(
+      'cmd.exe was not run: it would read part of "http://127.0.0.1:64160/&calc" as a command',
+    );
+    expect(runAsync).not.toHaveBeenCalled();
+  });
+
+  test("WSL: a URL with & skips cmd.exe and opens with gio", async () => {
+    runAsync
+      .mockResolvedValueOnce({ code: 0, stdout: "/mnt/c\n", stderr: "" })
+      .mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" });
+
+    await openUrlInOs(
+      "http://127.0.0.1:64160/&calc",
+      "/repo/sample",
+      "linux",
+      "5.15.0-standard-WSL2",
+    );
+
+    expect(runAsync.mock.calls.map(([args]) => args)).toEqual([
+      ["wslpath", "-u", "C:\\"],
+      ["gio", "open", "http://127.0.0.1:64160/&calc"],
+    ]);
+  });
+});

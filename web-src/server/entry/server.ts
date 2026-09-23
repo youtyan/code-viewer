@@ -180,6 +180,10 @@ export async function findRunningEntry(): Promise<RunningEntry> {
   };
 }
 
+/** 入口が `/_entry/open` で返すプロジェクトの URL (projectUrl の形)。 */
+const PROJECT_OPEN_URL =
+  /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d+\/p\/[0-9a-f]{16}\/$/;
+
 /** 動いている入口に「このディレクトリを開いて」を送り、開く URL を返す。 */
 async function delegateOpen(entryUrl: string, path: string): Promise<string> {
   const origin = new URL(entryUrl).origin;
@@ -211,10 +215,18 @@ async function delegateOpen(entryUrl: string, path: string): Promise<string> {
     );
   }
   const body = JSON.parse(text) as { url?: unknown };
-  if (typeof body.url !== "string") {
+  const url = body.url;
+  if (typeof url !== "string") {
     throw new Error(`the entry server returned no URL: ${text}`);
   }
-  return body.url;
+  // 返す URL は OS の開く命令 (Windows では cmd.exe) に渡す。入口が作るのは
+  // 自分のオリジンの `/p/<鍵>/` だけなので、それ以外は表示も開きもしない。
+  if (!PROJECT_OPEN_URL.test(url) || new URL(url).origin !== origin) {
+    throw new Error(
+      `the code-viewer entry server at ${entryUrl} returned a URL that is not one of its projects: ${text}`,
+    );
+  }
+  return url;
 }
 
 function errorJson(

@@ -4469,7 +4469,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       fileRouteSignatureCheck = null;
       if (!isAbortError(error))
         console.error(
-          `[code-viewer] could not check whether ${key} changed`,
+          "[code-viewer] could not check whether %s changed",
+          key,
           error,
         );
     });
@@ -4698,7 +4699,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     const ref = STATE.repoRef || "worktree";
     REPO_VIEW.ensureFileList(ref).catch((error: unknown) => {
       console.error(
-        `[code-viewer] the file list (${ref}) could not be loaded`,
+        "[code-viewer] the file list (%s) could not be loaded",
+        ref,
         error,
       );
       setStatus("error");
@@ -6567,7 +6569,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         if (!isCurrentDiffRequest()) return null;
         if (!isAbortError(error))
           console.error(
-            `[code-viewer] the diff ${fromAtRequest}..${toAtRequest} could not be loaded or drawn`,
+            "[code-viewer] the diff %s..%s could not be loaded or drawn",
+            fromAtRequest,
+            toAtRequest,
             error,
           );
         setStatus("error");

@@ -20,7 +20,7 @@ function paneOf(spec: string): Pane {
       const active = raw.startsWith("[");
       const bare = raw.replace(/[[\]]/g, "");
       const preview = bare.startsWith("*");
-      const name = bare.replace("*", "");
+      const name = preview ? bare.slice(1) : bare;
       const id = name.replace(/^[$@]/, "");
       const target: TabTarget = name.startsWith("$")
         ? { kind: "terminal", session: id }
