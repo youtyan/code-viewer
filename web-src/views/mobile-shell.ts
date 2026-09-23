@@ -16,7 +16,10 @@ import {
   SIDEBAR_SHOW_16_PATHS,
 } from "../core/icons";
 import {
+  drawerDragOffset,
   edgeSwipeAction,
+  type MobileBarView,
+  mobileBarCurrent,
   PHONE_MEDIA_QUERY,
   softKeyboardInset,
   TERMINAL_SOFT_KEYS,
@@ -48,6 +51,8 @@ export type MobileShell = {
   openSheet(): void;
   /** 開いている引き出し・面を閉じる。 */
   close(): void;
+  /** 下端の帯の「エージェント」に出す入力待ちの件数 (0 で札を隠す)。 */
+  setWaitingAgents(count: number): void;
   /** 足した部品と見張りを外す (テスト用。アプリは一度だけ作る)。 */
   dispose(): void;
 };
@@ -63,9 +68,13 @@ const OPEN_CLASS: Record<Panel, string> = {
 const DRAWER_CLOSING_TARGETS =
   ".nav-agent, .nav-project-toggle, a[href], #nav-launch, #search-btn, #quick-help-btn";
 
-/** 押したら面を閉じるもの (ファイル・コミット・画面の入口)。フォルダの行では閉じない。 */
+/**
+ * 押したら面を閉じるもの (ファイル・画面の入口)。フォルダの行では閉じない。
+ * History のコミットでも閉じない: 面の下の段にそのコミットの変更ファイルが
+ * 出るので (style.css の SP の節)、続けてファイルを選べる。
+ */
 function closesSheet(target: Element): boolean {
-  if (target.closest(".history-item, .view-strip-item")) return true;
+  if (target.closest(".view-strip-item")) return true;
   const row = target.closest("#filelist li");
   return row !== null && !row.classList.contains("tree-dir");
 }
@@ -84,10 +93,12 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   const phoneQuery = window.matchMedia(PHONE_MEDIA_QUERY);
   const touchQuery = window.matchMedia(TOUCH_MEDIA_QUERY);
 
+  const topbar = requireElement("#topbar");
   const listening = new AbortController();
   const { signal } = listening;
   let current: ViewportTier = "desktop";
   let open: Panel | null = null;
+  let waitingAgents = 0;
   /** 開く前にフォーカスがあった場所 (閉じたら戻す)。 */
   let returnFocus: HTMLElement | null = null;
 
@@ -129,6 +140,31 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
   barItems.projects.setAttribute("aria-controls", "app-nav");
   barItems.list.setAttribute("aria-controls", "sidebar");
   bar.append(...Object.values(barItems));
+  // 「エージェント」の入力待ちの件数の札 (最下段の件数と同じ数え方。app.ts が渡す)。
+  const agentsBadge = document.createElement("span");
+  agentsBadge.className = "mobile-bar-badge";
+  agentsBadge.setAttribute("aria-hidden", "true");
+  agentsBadge.hidden = true;
+  barItems.agents.append(agentsBadge);
+  const pageViews: Record<MobileBarView, HTMLButtonElement> = {
+    files: barItems.files,
+    diff: barItems.diff,
+    agents: barItems.agents,
+  };
+
+  // 差分の長い行を折り返す切替 (電話の段だけ。Diff の上の帯の端に置く)。
+  // .controls の中に置かない: その規則は display を決めるので、デスクトップで
+  // hidden にしても場所を取る。見た目は SP の節だけ。状態はこのセッションだけ。
+  const wrapButton = document.createElement("button");
+  wrapButton.type = "button";
+  wrapButton.className = "mobile-wrap-toggle";
+  wrapButton.setAttribute("aria-pressed", "false");
+  wrapButton.addEventListener("click", () => {
+    const next = !document.body.classList.contains("mobile-diff-wrap");
+    document.body.classList.toggle("mobile-diff-wrap", next);
+    wrapButton.setAttribute("aria-pressed", String(next));
+  });
+  topbar.append(wrapButton);
 
   // 端末の操作札。ソフトキーボードに無いキー (Esc・Ctrl+C・矢印) と、確定の
   // Enter。押してもフォーカスを端末から奪わない (キーボードが閉じない)。
@@ -145,11 +181,18 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     button.addEventListener("click", () => deps.sendTerminalKey(key));
     return button;
   });
+  // ⌨ は出す / しまうの切替。端末に入力が向いていれば (キーボードが出ている)
+  // 外してしまい、向いていなければ端末に向けて出す。
   const keyboardButton = document.createElement("button");
   keyboardButton.type = "button";
   keyboardButton.className = "mobile-key mobile-key-keyboard";
   keyboardButton.textContent = "⌨";
-  keyboardButton.addEventListener("click", () => deps.focusTerminal());
+  keyboardButton.addEventListener("click", () => {
+    const typing = terminalTyping();
+    if (typing) typing.blur();
+    else deps.focusTerminal();
+    localize();
+  });
   keys.append(...keyButtons, keyboardButton);
   keys.addEventListener("pointerdown", (event) => {
     if ((event.target as Element).closest(".mobile-key"))
@@ -168,6 +211,37 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     button.innerHTML = `${iconSvg("mobile-bar-icon", paths)}<span class="mobile-bar-label"></span>`;
     button.addEventListener("click", onClick);
     return button;
+  }
+
+  /** 左の面の端末に入力が向いているなら、その要素 (xterm の入力欄)。 */
+  function terminalTyping(): HTMLElement | null {
+    const active = document.activeElement;
+    return active instanceof HTMLElement &&
+      active.closest('.main-pane-host[data-side="left"][data-kind="terminal"]')
+      ? active
+      : null;
+  }
+
+  /** 帯の入口に「いま見ている画面」の印と、入力待ちの件数を付け直す。 */
+  function syncBar(): void {
+    const leftHost = document.querySelector(
+      '.main-pane-host[data-side="left"]',
+    );
+    const now = mobileBarCurrent(
+      (name) => document.body.classList.contains(name),
+      leftHost?.classList.contains("is-shown") ?? false,
+    );
+    for (const [view, button] of Object.entries(pageViews)) {
+      if (view === now) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    }
+    agentsBadge.hidden = waitingAgents === 0;
+    agentsBadge.textContent = waitingAgents > 0 ? String(waitingAgents) : "";
+    const t = text();
+    const agentsLabel =
+      waitingAgents > 0 ? t.agentsWaiting(waitingAgents) : t.agents;
+    barItems.agents.title = agentsLabel;
+    barItems.agents.setAttribute("aria-label", agentsLabel);
   }
 
   function followLink(selector: string): void {
@@ -197,8 +271,12 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
       button.title = label;
       button.setAttribute("aria-label", label);
     }
-    keyboardButton.title = t.keyboard;
-    keyboardButton.setAttribute("aria-label", t.keyboard);
+    const keyboardLabel = terminalTyping() ? t.keyboardHide : t.keyboard;
+    keyboardButton.title = keyboardLabel;
+    keyboardButton.setAttribute("aria-label", keyboardLabel);
+    wrapButton.textContent = t.wrap;
+    wrapButton.title = t.wrapTitle;
+    syncBar();
   }
 
   function setOpen(next: Panel | null): void {
@@ -270,6 +348,7 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     const phone = current === "phone";
     menuButton.hidden = !phone;
     bar.hidden = !phone;
+    wrapButton.hidden = !phone;
     scrim.hidden = !phone;
     keys.hidden = !(phone || touchQuery.matches);
     if (!phone) {
@@ -311,12 +390,23 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     { signal },
   );
 
-  // 左端からのスワイプで開き、開いている間は左へのスワイプで閉じる。
+  // 左端からのスワイプで開き、開いている間は左へのスワイプで閉じる。指を
+  // 動かしている間は引き出しが指に付いて動く (drawerDragOffset)。離したときに
+  // 開くか閉じるかは edgeSwipeAction が決める。
   let touchStart: { x: number; y: number; drawerOpen: boolean } | null = null;
+  let dragging = false;
+  function endDrag(): void {
+    if (!dragging) return;
+    dragging = false;
+    nav.style.removeProperty("transform");
+    nav.style.removeProperty("transition");
+    nav.style.removeProperty("visibility");
+  }
   document.addEventListener(
     "touchstart",
     (event) => {
       const touch = event.touches[0];
+      endDrag();
       touchStart =
         current === "phone" && event.touches.length === 1 && touch
           ? {
@@ -329,10 +419,33 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     { passive: true, signal },
   );
   document.addEventListener(
+    "touchmove",
+    (event) => {
+      const start = touchStart;
+      const touch = event.touches[0];
+      if (!start || !touch || current !== "phone") return;
+      const offset = drawerDragOffset({
+        startX: start.x,
+        startY: start.y,
+        x: touch.clientX,
+        y: touch.clientY,
+        drawerOpen: start.drawerOpen,
+        width: nav.getBoundingClientRect().width,
+      });
+      if (offset === null) return;
+      dragging = true;
+      nav.style.transition = "none";
+      nav.style.visibility = "visible";
+      nav.style.transform = `translateX(${offset}px)`;
+    },
+    { passive: true, signal },
+  );
+  document.addEventListener(
     "touchend",
     (event) => {
       const start = touchStart;
       touchStart = null;
+      endDrag();
       const touch = event.changedTouches[0];
       if (!start || !touch || current !== "phone") return;
       const action = edgeSwipeAction({
@@ -347,6 +460,31 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     },
     { passive: true, signal },
   );
+  document.addEventListener(
+    "touchcancel",
+    () => {
+      touchStart = null;
+      endDrag();
+    },
+    { passive: true, signal },
+  );
+
+  // 画面の切替 (body の画面の印) と、左の面の前面のタブ (端末など) の出し入れで
+  // 帯の「いま見ている画面」を付け直す。
+  const pageObserver = new MutationObserver(syncBar);
+  pageObserver.observe(document.body, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+  const leftHost = document.querySelector('.main-pane-host[data-side="left"]');
+  if (leftHost)
+    pageObserver.observe(leftHost, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  // ⌨ の名前 (出す / しまう) は端末に入力が向いているかで変わる。
+  document.addEventListener("focusin", localize, { signal });
+  document.addEventListener("focusout", localize, { signal });
 
   phoneQuery.addEventListener("change", apply, { signal });
   touchQuery.addEventListener("change", apply, { signal });
@@ -372,10 +510,18 @@ export function installMobileShell(deps: MobileShellDeps): MobileShell {
     openDrawer: () => setOpen("drawer"),
     openSheet: () => setOpen("sheet"),
     close,
+    setWaitingAgents(count) {
+      waitingAgents = count;
+      syncBar();
+    },
     dispose() {
       close();
+      endDrag();
       listening.abort();
       langObserver.disconnect();
+      pageObserver.disconnect();
+      wrapButton.remove();
+      document.body.classList.remove("mobile-diff-wrap");
       nav.inert = false;
       menuButton.remove();
       scrim.remove();

@@ -1,8 +1,13 @@
-// 電話の幅の骨格の純関数 (core/mobile-layout.ts)。幅の段・左端のスワイプ・
-// ソフトキーボードの高さ・端末の操作札のバイト列。
+// 電話の幅の骨格の純関数 (core/mobile-layout.ts)。幅の段・差分の並べ方・左端の
+// スワイプ・ソフトキーボードの高さ・端末の操作札のバイト列。
 import { describe, expect, test } from "vitest";
 import {
+  DRAWER_DRAG_START,
+  diffLayoutFor,
+  drawerDragOffset,
+  EDGE_SWIPE_START_MAX_X,
   edgeSwipeAction,
+  mobileBarCurrent,
   PHONE_LANDSCAPE_MEDIA_QUERY,
   PHONE_MEDIA_QUERY,
   SOFT_KEYS_MEDIA_QUERY,
@@ -107,6 +112,22 @@ describe("viewportTier", () => {
     );
     expect(TOUCH_MEDIA_QUERY).toBe("(pointer: coarse)");
     expect(SOFT_KEYS_MEDIA_QUERY).toBe("(max-width: 640px), (pointer: coarse)");
+  });
+});
+
+// 電話の段では 2 列の差分が幅に入らないので 1 列が既定。電話で切り替えたものは
+// その場だけ効き、デスクトップは保存した並べ方のまま。
+describe("diffLayoutFor", () => {
+  test.each([
+    ["desktop", "side-by-side", null, "side-by-side"],
+    ["desktop", "line-by-line", null, "line-by-line"],
+    ["desktop", "side-by-side", "line-by-line", "side-by-side"],
+    ["phone", "side-by-side", null, "line-by-line"],
+    ["phone", "line-by-line", null, "line-by-line"],
+    ["phone", "line-by-line", "side-by-side", "side-by-side"],
+    ["phone", "side-by-side", "line-by-line", "line-by-line"],
+  ] as const)("%s, saved %s, chosen on the phone %s → %s", (tier, saved, chosen, expected) => {
+    expect(diffLayoutFor(tier, saved, chosen)).toBe(expected);
   });
 });
 
@@ -274,6 +295,10 @@ describe("softKeySequence", () => {
   test.each<{ key: TerminalSoftKey; app: boolean; expected: string }>([
     { key: "escape", app: false, expected: "\x1b" },
     { key: "escape", app: true, expected: "\x1b" },
+    { key: "tab", app: false, expected: "\t" },
+    { key: "tab", app: true, expected: "\t" },
+    { key: "shiftTab", app: false, expected: "\x1b[Z" },
+    { key: "shiftTab", app: true, expected: "\x1b[Z" },
     { key: "ctrlC", app: false, expected: "\x03" },
     { key: "ctrlC", app: true, expected: "\x03" },
     { key: "enter", app: false, expected: "\r" },
@@ -284,5 +309,73 @@ describe("softKeySequence", () => {
     { key: "down", app: true, expected: "\x1bOB" },
   ])("$key (アプリのカーソルキー $app)", ({ key, app, expected }) => {
     expect(softKeySequence(key, app)).toBe(expected);
+  });
+});
+
+// 指を動かしている間、引き出しが指に付いて動く (以前は離したときに開くか閉じる
+// かだけだった)。閉じた位置は -幅、開いた位置は 0。縦のスクロールや本文の横の
+// 送りでは動かさない。
+describe("drawerDragOffset", () => {
+  const W = 320;
+  const edge = EDGE_SWIPE_START_MAX_X;
+  test.each([
+    [
+      "closed: from the edge, right by 100",
+      false,
+      edge,
+      0,
+      edge + 100,
+      0,
+      -220,
+    ],
+    ["closed: right past the full width stops at open", false, 0, 0, 400, 0, 0],
+    [
+      "closed: a tap-sized move does nothing",
+      false,
+      0,
+      0,
+      DRAWER_DRAG_START - 1,
+      0,
+      null,
+    ],
+    [
+      "closed: from the middle of the page does nothing",
+      false,
+      edge + 1,
+      0,
+      edge + 200,
+      0,
+      null,
+    ],
+    ["closed: more down than right is a scroll", false, 0, 0, 40, 80, null],
+    ["closed: leftwards does nothing", false, edge, 0, 0, 0, null],
+    ["open: left by 100", true, 300, 0, 200, 0, -100],
+    ["open: left past the width stops at closed", true, 300, 0, -200, 0, -W],
+    ["open: rightwards does nothing", true, 100, 0, 200, 0, null],
+  ] as const)("%s", (_name, drawerOpen, startX, startY, x, y, expected) => {
+    expect(
+      drawerDragOffset({ startX, startY, x, y, drawerOpen, width: W }),
+    ).toBe(expected);
+  });
+});
+
+// 下端の帯の「いま見ている画面」の入口 (body の画面の印から)。左の面の前面が
+// タブ (端末など) で画面が隠れているときは付けない。
+describe("mobileBarCurrent", () => {
+  test.each([
+    [["gdp-diff-page"], false, "diff"],
+    [["gdp-repo-page"], false, "files"],
+    [["gdp-repo-blob-page", "gdp-file-detail-page"], false, "files"],
+    [["gdp-agents-page"], false, "agents"],
+    [["gdp-history-page"], false, null],
+    [["gdp-diff-page"], true, null],
+    [[], false, null],
+  ] as const)("%j, covered by a tab %s → %s", (classes, covered, expected) => {
+    expect(
+      mobileBarCurrent(
+        (name) => (classes as readonly string[]).includes(name),
+        covered,
+      ),
+    ).toBe(expected);
   });
 });

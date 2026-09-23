@@ -7,7 +7,8 @@
 // - 下端に切替の帯、上下に安全領域
 // - 指の画面では押せるものが 44px 以上
 // - 足した部品と SP の名前は SP の節の外に漏れない (デスクトップを変えない)
-import { describe, expect, test } from "vitest";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
   PHONE_LANDSCAPE_MEDIA_QUERY,
   PHONE_MEDIA_QUERY,
@@ -400,6 +401,10 @@ describe("指の画面の押せる大きさ", () => {
     "#filelist.tree:not(.tree-virtual) .tree-file",
     "#filelist.tree:not(.tree-virtual) .tree-dir",
     ".mobile-key",
+    // 差分のカードの見出しの「確認済み」「ファイルを見る」と、折り返しの切替。
+    ".d2h-file-header .d2h-file-collapse",
+    ".d2h-file-header .gdp-view-file",
+    ".mobile-wrap-toggle",
   ])("%s の行は 44px 以上", (selector) => {
     const box = declarationsOf(rules, [selector]);
     expect(resolveVar(box.get("min-height") ?? "", vars)).toBe("44px");
@@ -420,9 +425,142 @@ describe("指の画面の押せる大きさ", () => {
     );
   });
 
+  // 仮想表示の木 (Files の木はいつもこれ) は、行の位置を TS が数えるので、
+  // CSS も同じ max (密度の行の高さと 44px の大きい方) を使う。
+  test.each([
+    "#filelist.tree.tree-virtual .tree-file",
+    "#filelist.tree.tree-virtual .tree-dir",
+  ])("%s の行は密度の行の高さと 44px の大きい方", (selector) => {
+    const box = declarationsOf(rules, [selector]);
+    expect([box.get("height"), box.get("min-height")]).toEqual([
+      "max(var(--ui-row-h), var(--sp-touch))",
+      "max(var(--ui-row-h), var(--sp-touch))",
+    ]);
+  });
+
   test("hover の無い画面では行の操作を最初から押せる", () => {
     const actions = declarationsOf(rules, [".nav-project-actions"]);
     expect(actions.get("opacity")).toBe("1");
     expect(actions.get("pointer-events")).toBe("auto");
+  });
+});
+
+// History・選んでいる作業ツリーでは、面を上下 2 段に分ける: 上に一覧、下にその
+// 変更ファイルの木 (デスクトップの一覧の右の 2 列目)。以前は電話で木を出す手段が
+// 無かった。2 段は同じ線 (--sp-sheet-mid) で接し、木は畳んだ設定でも出す。
+describe("the History / worktree sheet stacks the list over the changed files", () => {
+  const rules = withTiers(PHONE);
+  test.each([
+    ["history", 'body[data-list-column="history"] #history-panel'],
+    [
+      "worktree",
+      'body[data-list-column="worktree"]:not([data-worktree-overview]) #worktree-panel',
+    ],
+  ])("%s", (column, listSelector) => {
+    const tree = declarationsOf(rules, [
+      `body[data-list-column="${column}"] #sidebar`,
+    ]);
+    const list = declarationsOf(rules, [listSelector]);
+    const mid = bodyVariables(rules, `body[data-list-column="${column}"]`).get(
+      "--sp-sheet-mid",
+    );
+    expect({
+      treeShown: tree.get("display"),
+      treeTop: tree.get("top"),
+      listBottom: list.get("bottom"),
+      midDefined: mid !== undefined,
+    }).toEqual({
+      treeShown: "block !important",
+      treeTop: "var(--sp-sheet-mid)",
+      listBottom: "calc(100dvh - var(--sp-sheet-mid))",
+      midDefined: true,
+    });
+  });
+});
+
+// 差分の長い行の折り返しは電話の段だけ (切替を押したときの body の印で効く)。
+// 行の番号の列はそのまま、字の欄だけを折り返す。デスクトップの規則には無い。
+describe("wrapping long diff lines on the phone", () => {
+  const ctn = "body.mobile-diff-wrap table.d2h-diff-table .d2h-code-line-ctn";
+  test("the phone tier wraps the text column", () => {
+    const text = declarationsOf(withTiers(PHONE), [ctn]);
+    expect([text.get("white-space"), text.get("overflow-wrap")]).toEqual([
+      "pre-wrap",
+      "anywhere",
+    ]);
+  });
+
+  test("the desktop has no wrap rule", () => {
+    expect(declarationsOf(baseRules(sheet), [ctn]).size).toBe(0);
+  });
+});
+
+// 下端の帯: いま見ている画面の入口は色と上端の線、「エージェント」には入力待ちの
+// 件数の札 (場所を取らない重ね)。
+describe("the bottom bar marks the current view and waiting agents", () => {
+  const rules = withTiers(PHONE);
+  test("the current view", () => {
+    const item = declarationsOf(rules, [
+      '.mobile-bar-item[aria-current="page"]',
+    ]);
+    expect([item.get("color"), item.get("box-shadow")]).toEqual([
+      "var(--color-accent-strong)",
+      "inset 0 calc(var(--space-1) / 2) 0 var(--color-accent)",
+    ]);
+  });
+
+  test("the waiting badge sits over the icon without taking room", () => {
+    const badge = declarationsOf(rules, [".mobile-bar-badge:not([hidden])"]);
+    const item = declarationsOf(rules, [".mobile-bar-item"]);
+    expect([
+      badge.get("position"),
+      item.get("position"),
+      badge.get("background"),
+    ]).toEqual(["absolute", "relative", "var(--color-waiting)"]);
+  });
+});
+
+// 電話の幅では、上の行があった頃の古い節 (900px・640px) も効く。そのうち
+// body.gdp-history-page #history-panel (position: static) が SP の節の
+// #history-panel (fixed) に詳細度で勝ち、History の一覧だけが面の位置に来ず、
+// 画面の上端から本文に重なっていた。電話の幅で効く節を全部重ね、実際の要素に
+// 当たる規則だけで解く (当たりは happy-dom)。
+describe("on a phone the History list sits in the sheet", () => {
+  beforeAll(() => {
+    GlobalRegistrator.register();
+  });
+  afterAll(() => {
+    GlobalRegistrator.unregister();
+  });
+
+  test("fixed at the sheet's top, stopping where the changed files start", () => {
+    document.body.className = "gdp-history-page";
+    document.body.dataset.listColumn = "history";
+    document.body.innerHTML = '<aside id="history-panel"></aside>';
+    const panel = document.getElementById("history-panel");
+    if (!panel) throw new Error("missing #history-panel");
+    const onPhone = [
+      ...baseRules(sheet),
+      ...sheet.filter(
+        (rule) =>
+          rule.atRule !== null &&
+          [
+            "@media (max-width: 900px)",
+            "@media (max-width: 640px)",
+            PHONE,
+            SOFT_KEYS,
+            TOUCH,
+          ].includes(rule.atRule),
+      ),
+    ];
+    const won = cascadedDeclarations(
+      onPhone,
+      (selector) => !selector.includes("::") && panel.matches(selector),
+    );
+    expect([won.get("position"), won.get("top"), won.get("bottom")]).toEqual([
+      "fixed",
+      "var(--panel-body-top)",
+      "calc(100dvh - var(--sp-sheet-mid))",
+    ]);
   });
 });

@@ -53,6 +53,22 @@ export function viewportTier(facts: ViewportFacts): ViewportTier {
   return "desktop";
 }
 
+export type DiffLayout = "side-by-side" | "line-by-line";
+
+/**
+ * 差分の並べ方。電話の段では 2 列が幅に入らないので 1 列 (line-by-line) を既定に
+ * し、電話で切り替えたものがあればそれを見せる (電話での切替は保存しない。
+ * デスクトップの既定を変えないため)。デスクトップは保存した並べ方。
+ */
+export function diffLayoutFor(
+  tier: ViewportTier,
+  saved: DiffLayout,
+  chosenOnPhone: DiffLayout | null,
+): DiffLayout {
+  if (tier === "desktop") return saved;
+  return chosenOnPhone ?? "line-by-line";
+}
+
 /** 左端から引き出しを開く指の動きを受け付ける、左端からの幅 (px)。 */
 export const EDGE_SWIPE_START_MAX_X = 24;
 
@@ -83,6 +99,60 @@ export function edgeSwipeAction(facts: SwipeFacts): "open" | "close" | null {
   if (!facts.drawerOpen && dx > 0 && facts.startX <= EDGE_SWIPE_START_MAX_X)
     return "open";
   if (facts.drawerOpen && dx < 0) return "close";
+  return null;
+}
+
+/** 指に付いて引き出しを動かし始める横の移動量 (px)。これ未満はタップとして待つ。 */
+export const DRAWER_DRAG_START = 8;
+
+export type DrawerDragFacts = {
+  startX: number;
+  startY: number;
+  /** 今の指の位置。 */
+  x: number;
+  y: number;
+  /** 指を置いたときに引き出しが開いていたか。 */
+  drawerOpen: boolean;
+  /** 引き出しの幅 (px)。 */
+  width: number;
+};
+
+/**
+ * 指を動かしている間の引き出しの位置 (translateX の px。-width が閉じた位置、
+ * 0 が開いた位置)。引き出しを動かす指の動きでなければ null (縦のスクロール・
+ * 左端以外からの横の送り・開いているときの右への動き)。離したときに開くか
+ * 閉じるかは edgeSwipeAction が決める。
+ */
+export function drawerDragOffset(facts: DrawerDragFacts): number | null {
+  const dx = facts.x - facts.startX;
+  const dy = facts.y - facts.startY;
+  if (Math.abs(dx) < DRAWER_DRAG_START || Math.abs(dx) <= Math.abs(dy))
+    return null;
+  if (!facts.drawerOpen) {
+    if (facts.startX > EDGE_SWIPE_START_MAX_X || dx <= 0) return null;
+    return Math.min(0, dx - facts.width);
+  }
+  if (dx >= 0) return null;
+  return Math.max(-facts.width, dx);
+}
+
+/** 下端の帯のうち、画面へ移る入口。 */
+export type MobileBarView = "files" | "diff" | "agents";
+
+/**
+ * 下端の帯で「いま見ている画面」の印を付ける入口。body の画面の印 (app.ts の
+ * setPageMode) から決める。左の面の前面がタブ (端末・画像など) で画面が
+ * 隠れているときは印を付けない。
+ */
+export function mobileBarCurrent(
+  hasPageClass: (name: string) => boolean,
+  coveredByTab: boolean,
+): MobileBarView | null {
+  if (coveredByTab) return null;
+  if (hasPageClass("gdp-agents-page")) return "agents";
+  if (hasPageClass("gdp-diff-page")) return "diff";
+  if (hasPageClass("gdp-repo-page") || hasPageClass("gdp-repo-blob-page"))
+    return "files";
   return null;
 }
 
@@ -117,9 +187,14 @@ export function softKeyboardInset(facts: VisualViewportFacts): number {
   return covered >= SOFT_KEYBOARD_MIN_HEIGHT ? covered : 0;
 }
 
-/** 端末の操作札 (電話・指の画面で、端末の下に出す押せる札) の並び。 */
+/**
+ * 端末の操作札 (電話・指の画面で、端末の下に出す押せる札) の並び。Tab と
+ * Shift+Tab はエージェントの補完とモードの切替 (ソフトキーボードに無い)。
+ */
 export const TERMINAL_SOFT_KEYS = [
   "escape",
+  "tab",
+  "shiftTab",
   "ctrlC",
   "up",
   "down",
@@ -140,6 +215,11 @@ export function softKeySequence(
   switch (key) {
     case "escape":
       return "\x1b";
+    case "tab":
+      return "\t";
+    case "shiftTab":
+      // xterm が Shift+Tab で送る逆向きのタブ (CSI Z)。
+      return "\x1b[Z";
     case "ctrlC":
       return "\x03";
     case "enter":

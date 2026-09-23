@@ -23339,6 +23339,10 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   #sidebar,
   body[data-list-column] #sidebar,
   #history-panel,
+  /* 上の 900px の古い節の body.gdp-history-page #history-panel (position:
+     static) を同じ詳細度で上書きする。負けると History の一覧だけが面の位置に
+     来ず、画面の上端から本文に重なった。 */
+  body.gdp-history-page #history-panel,
   body:not([data-worktree-overview]) #worktree-panel {
     position: fixed;
     top: var(--panel-body-top);
@@ -23391,11 +23395,29 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   body[data-worktree-overview] #worktree-panel {
     padding: 0 var(--space-3) var(--space-3);
   }
-  /* History・作業ツリーでは面に出すのはコミット / 作業ツリーの一覧。本文の左の
-     2 列目 (変更ファイル) は電話では出さない (差分は本文に全部並ぶ)。 */
+  /* History・作業ツリーでは、面を上下 2 段に分ける: 上にコミット / 作業ツリーの
+     一覧、下にその変更ファイルの木 (デスクトップでは一覧の右の 2 列目)。境目
+     --sp-sheet-mid (T2) は面の本体の半分。デスクトップで木を帯に畳んでいても
+     (data-list-tree-folded) 電話では木を出す (帯の開くボタンは出さない)。 */
+  body[data-list-column="history"],
+  body[data-list-column="worktree"] {
+    --sp-sheet-mid: calc(
+      (var(--panel-body-top) + 100dvh - var(--chrome-bottom)) / 2
+    );
+  }
+  body[data-list-column="history"] #history-panel,
+  body[data-list-column="worktree"]:not([data-worktree-overview]) #worktree-panel {
+    bottom: calc(100dvh - var(--sp-sheet-mid));
+  }
   body[data-list-column="history"] #sidebar,
   body[data-list-column="worktree"] #sidebar {
-    display: none !important;
+    display: block !important;
+    top: var(--sp-sheet-mid);
+    border-top: 1px solid var(--color-line-soft);
+  }
+  body[data-list-column="history"] #sidebar-resizer,
+  body[data-list-column="worktree"] #sidebar-resizer {
+    display: none;
   }
   body.gdp-history-page main#content,
   body.gdp-history-page.gdp-sidebar-hidden main#content,
@@ -23539,6 +23561,81 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
     outline: 2px solid var(--color-accent);
     outline-offset: -2px;
   }
+  /* いま見ている画面の入口 (mobile-shell.ts が aria-current を付ける): 色と
+     帯の上端の線。箱の寸法は変えない。 */
+  .mobile-bar-item[aria-current="page"] {
+    color: var(--color-accent-strong);
+    box-shadow: inset 0 calc(var(--space-1) / 2) 0 var(--color-accent);
+  }
+  /* 「エージェント」の入力待ちの件数の札。絵の右上に重ね、場所は取らない。 */
+  .mobile-bar-item {
+    position: relative;
+  }
+  .mobile-bar-badge:not([hidden]) {
+    position: absolute;
+    top: calc(var(--space-1) / 2);
+    left: calc(50% + var(--icon-md) / 2 - var(--space-1));
+    min-width: calc(var(--space-unit) * 4);
+    height: calc(var(--space-unit) * 4);
+    box-sizing: border-box;
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-lg);
+    background: var(--color-waiting);
+    color: var(--color-on-accent);
+    font-size: var(--ui-font-xs);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: calc(var(--space-unit) * 4);
+    text-align: center;
+  }
+
+  /* ---- 差分の長い行の折り返し (Diff の上の帯の端の切替。mobile-shell.ts) ----
+     行の番号の列はそのまま、字の欄だけを欄の幅で折り返す。 */
+  .mobile-wrap-toggle:not([hidden]) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: var(--ui-control-sm);
+    padding: 0 var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-3);
+    font: inherit;
+    font-size: var(--ui-font-sm);
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .mobile-wrap-toggle[aria-pressed="true"] {
+    background: var(--color-select);
+    box-shadow: var(--glow-select);
+    color: var(--color-text);
+  }
+  /* 帯は横に送る箱 (overflow) なので、輪は内側。 */
+  .mobile-wrap-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring-inset);
+  }
+  .mobile-wrap-toggle[aria-pressed="true"]:focus-visible {
+    box-shadow: var(--focus-ring-inset), var(--glow-select);
+  }
+  body.mobile-diff-wrap table.d2h-diff-table .d2h-code-line,
+  body.mobile-diff-wrap table.d2h-diff-table .d2h-code-side-line {
+    display: flex;
+    white-space: normal;
+  }
+  body.mobile-diff-wrap table.d2h-diff-table .d2h-code-line-ctn {
+    display: block;
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  body.mobile-diff-wrap table.d2h-diff-table td.d2h-code-linenumber,
+  body.mobile-diff-wrap table.d2h-diff-table td.d2h-code-side-linenumber {
+    vertical-align: top;
+  }
 }
 
 /* ---- 1'. 横向きの電話 (core/mobile-layout.ts の PHONE_LANDSCAPE_MEDIA_QUERY):
@@ -23605,6 +23702,9 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .nav-project-head,
   .nav-project-toggle,
   .history-item,
+  .d2h-file-header .d2h-file-collapse,
+  .d2h-file-header .gdp-view-file,
+  .mobile-wrap-toggle,
   #filelist:not(.tree-virtual) li,
   #filelist.tree:not(.tree-virtual) .tree-dir,
   #filelist.tree:not(.tree-virtual) .tree-file {
@@ -23614,6 +23714,13 @@ body[data-worktree-overview] #worktree-panel .worktree-row-compare {
   .nav-agent,
   .nav-project-head {
     height: auto;
+  }
+  /* 仮想表示の木 (3000 件超) は行を絶対配置で並べ、位置を TS が数える
+     (sidebar.ts の virtualRowHeight が同じ max を --sp-touch から読む)。 */
+  #filelist.tree.tree-virtual .tree-dir,
+  #filelist.tree.tree-virtual .tree-file {
+    height: max(var(--ui-row-h), var(--sp-touch));
+    min-height: max(var(--ui-row-h), var(--sp-touch));
   }
   .nav-twisty {
     height: var(--sp-touch);

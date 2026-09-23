@@ -16,6 +16,8 @@ export type MobileShellText = {
   diff: string;
   /** 全体ボード (エージェントの一覧) へ。 */
   agents: string;
+  /** 「エージェント」の入口の名前に、入力待ちの件数を添えたもの。 */
+  agentsWaiting: (count: number) => string;
   /** 右の列 (木・一覧) を下から出す。 */
   list: string;
   /** 開いている引き出し・面を閉じる。 */
@@ -26,6 +28,11 @@ export type MobileShellText = {
   keyLabel: Record<TerminalSoftKey, string>;
   /** ソフトキーボードを出す (端末に入力を向ける)。 */
   keyboard: string;
+  /** ソフトキーボードをしまう (端末から入力を外す)。 */
+  keyboardHide: string;
+  /** 差分の長い行を折り返す切替 (札の文字と名前)。 */
+  wrap: string;
+  wrapTitle: string;
 };
 
 const EN: MobileShellText = {
@@ -34,17 +41,24 @@ const EN: MobileShellText = {
   files: "Files",
   diff: "Diff",
   agents: "Agents",
+  agentsWaiting: (count) =>
+    `Agents (${count} ${count === 1 ? "needs" : "need"} input)`,
   list: "List",
   close: "Close",
   keys: "Terminal keys",
   keyLabel: {
     escape: "Escape",
+    tab: "Tab",
+    shiftTab: "Shift+Tab",
     ctrlC: "Control+C (interrupt)",
     up: "Up arrow",
     down: "Down arrow",
     enter: "Enter",
   },
   keyboard: "Show keyboard",
+  keyboardHide: "Hide keyboard",
+  wrap: "Wrap",
+  wrapTitle: "Wrap long lines in the diff",
 };
 
 const JA: MobileShellText = {
@@ -53,17 +67,23 @@ const JA: MobileShellText = {
   files: "ファイル",
   diff: "差分",
   agents: "エージェント",
+  agentsWaiting: (count) => `エージェント (入力待ち ${count})`,
   list: "一覧",
   close: "閉じる",
   keys: "端末のキー",
   keyLabel: {
     escape: "Esc",
+    tab: "Tab",
+    shiftTab: "Shift+Tab",
     ctrlC: "Ctrl+C (中断)",
     up: "上矢印",
     down: "下矢印",
     enter: "Enter",
   },
   keyboard: "キーボードを出す",
+  keyboardHide: "キーボードをしまう",
+  wrap: "折り返し",
+  wrapTitle: "差分の長い行を折り返す",
 };
 
 export function mobileShellText(lang: MobileShellLang): MobileShellText {
@@ -73,6 +93,8 @@ export function mobileShellText(lang: MobileShellLang): MobileShellText {
 /** 札に書く文字。キーの刻印なので言語で変えない。 */
 export const SOFT_KEY_CAPS: Record<TerminalSoftKey, string> = {
   escape: "Esc",
+  tab: "Tab",
+  shiftTab: "⇧Tab",
   ctrlC: "Ctrl+C",
   up: "↑",
   down: "↓",

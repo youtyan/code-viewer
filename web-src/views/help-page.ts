@@ -337,7 +337,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
-                text: "On a phone (a window 640px wide or less, or a phone turned sideways) the layout changes for three things: checking agents and answering one that needs input, reading diffs and files, and switching projects. The bar at the bottom opens Projects (the left sidebar, which also slides in from the left edge), Files, Diff, Agents, and List (the file tree or the list of the current screen, from the bottom). Split view is not available there. On a touch screen, buttons, tabs and rows are at least 44px tall, and a terminal tab shows keys the on-screen keyboard lacks: Esc, Ctrl+C, ↑, ↓ and Enter, plus ⌨ to bring up the keyboard. Browser notifications need a secure page (https, or localhost on the same machine); opened over plain http from another device they are not available.",
+                text: "On a phone (a window 640px wide or less, or a phone turned sideways) the layout changes for three things: checking agents and answering one that needs input, reading diffs and files, and switching projects. The bar at the bottom opens Projects (the left sidebar, which follows your finger in from the left edge), Files, Diff, Agents, and List (the file tree or the list of the current screen, from the bottom; on History and a worktree the sheet shows the list on top and the chosen commit's changed files below). The bar marks the screen you are on, and Agents carries the number of agents waiting for input. Split view is not available there; a split you saved comes back on a wide window. Diffs show as one column (Unified) by default, a Split you pick on the phone lasts until you leave, and Wrap at the end of the Diff bar wraps long lines. Opening an agent from a notification, the bottom counter or the All agents board closes the sidebar and the sheet. On a touch screen, buttons, tabs, rows and the file tree are at least 44px tall, and a terminal tab shows keys the on-screen keyboard lacks: Esc, Tab, ⇧Tab, Ctrl+C, ↑, ↓ and Enter, plus ⌨ to bring up or put away the keyboard. Browser notifications need a secure page (https, or localhost on the same machine); opened over plain http from another device they are not available.",
               },
             ],
           },
@@ -1259,7 +1259,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "paragraph",
-                text: "電話の幅 (640px 以下の窓、または横向きの電話) では、エージェントの状態を見て入力待ちに返事する・差分とファイルを読む・プロジェクトを切り替える、の 3 つのために画面の形が変わります。下端の帯から、プロジェクト (左のサイドバー。左端から指で引き出すこともできます)・ファイル・差分・エージェント・一覧 (ファイルの木や、その画面の一覧を下から出す) を開きます。2 面にはできません。指で触る画面では、ボタン・タブ・行の高さが 44px 以上になり、ターミナルのタブの下にソフトキーボードに無いキー (Esc・Ctrl+C・↑・↓・Enter と、キーボードを出す ⌨) が出ます。ブラウザの通知は安全なページ (https か、同じ機械の localhost) でだけ使えます。別の機械から http で開いた画面では使えません。",
+                text: "電話の幅 (640px 以下の窓、または横向きの電話) では、エージェントの状態を見て入力待ちに返事する・差分とファイルを読む・プロジェクトを切り替える、の 3 つのために画面の形が変わります。下端の帯から、プロジェクト (左のサイドバー。左端から指に付いて引き出せます)・ファイル・差分・エージェント・一覧 (ファイルの木や、その画面の一覧を下から出す。History と作業ツリーでは上に一覧、下に選んだコミットの変更ファイル) を開きます。帯には今の画面の印が付き、エージェントには入力待ちの件数が出ます。2 面にはできません (保存した 2 面は広い窓で戻ります)。差分は 1 列 (Unified) が既定で、電話で選んだ 2 列はその場だけ効きます。差分の帯の端の「折り返し」で長い行を折り返します。通知・最下段の件数・全体ボードからエージェントを開くと、引き出しと面は閉じます。指で触る画面では、ボタン・タブ・行・ファイルの木の高さが 44px 以上になり、ターミナルのタブの下にソフトキーボードに無いキー (Esc・Tab・⇧Tab・Ctrl+C・↑・↓・Enter と、キーボードを出す / しまう ⌨) が出ます。ブラウザの通知は安全なページ (https か、同じ機械の localhost) でだけ使えます。別の機械から http で開いた画面では使えません。",
               },
             ],
           },

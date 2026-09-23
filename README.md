@@ -352,14 +352,20 @@ Requires Node.js 20 or newer. Development uses
 In a window 640px wide or less (or a phone turned sideways) the layout is
 reduced to three tasks: checking agents and answering one that needs input,
 reading diffs and files, and switching projects. A bar at the bottom opens
-**Projects** (the left sidebar; it also slides in from the left edge),
-**Files**, **Diff**, **Agents** and **List** (the file tree or the current
-screen's list, as a sheet from the bottom). Split view is off. On a touch
-screen, buttons, tabs and rows are at least 44px tall, and a terminal tab shows
-the keys an on-screen keyboard lacks (Esc, Ctrl+C, ↑, ↓, Enter, and ⌨ to bring
-up the keyboard). Browser notifications need a secure page (https, or localhost
-on the same machine), so they are not available when the page is opened over
-plain http from another device.
+**Projects** (the left sidebar; it also follows your finger in from the left
+edge), **Files**, **Diff**, **Agents** and **List** (the file tree or the
+current screen's list, as a sheet from the bottom; on History and a worktree
+the sheet shows the list on top and the chosen commit's changed files below).
+The bar marks the current screen, and **Agents** shows how many agents wait
+for input. Split view is off (a saved split comes back on a wide window).
+Diffs default to one column there, and **Wrap** at the end of the Diff bar
+wraps long lines. Opening an agent from a notification, the bottom counter or
+the All agents board closes the sidebar and the sheet. On a touch screen,
+buttons, tabs, rows and the file tree are at least 44px tall, and a terminal
+tab shows the keys an on-screen keyboard lacks (Esc, Tab, ⇧Tab, Ctrl+C, ↑, ↓,
+Enter, and ⌨ to bring up or put away the keyboard). Browser notifications
+need a secure page (https, or localhost on the same machine), so they are not
+available when the page is opened over plain http from another device.
 
 ## Usage
 

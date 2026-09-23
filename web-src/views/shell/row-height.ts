@@ -6,6 +6,7 @@
 // style.css の html, body ブロックの --ui-row-h は JS 実行前の初回描画用の
 // 既定だけ (ui-layout.md の「CSS と TypeScript に同じ数値を書かない」)。
 
+import { TOUCH_MEDIA_QUERY } from "../../core/mobile-layout";
 import type { ViewerFontSizeSetting } from "../../core/types";
 
 export const ROW_HEIGHT: Record<ViewerFontSizeSetting, number> = {
@@ -31,4 +32,23 @@ export function currentRowHeight(): number {
     throw new Error(`unknown display density on body: ${JSON.stringify(size)}`);
   }
   return ROW_HEIGHT[size as ViewerFontSizeSetting];
+}
+
+/**
+ * 指の画面で押せる最小の高さ (px)。指の画面でなければ 0。値の出所は style.css の
+ * --sp-touch (JS の前の初回描画から効く)。仮想表示の木は行の位置を TS で数える
+ * ので、行の高さをこの値より低くしないためにここで読む。px でなければ投げる。
+ */
+export function touchRowFloor(): number {
+  if (!window.matchMedia(TOUCH_MEDIA_QUERY).matches) return 0;
+  const value = getComputedStyle(document.body)
+    .getPropertyValue("--sp-touch")
+    .trim();
+  const px = Number.parseFloat(value);
+  if (!value.endsWith("px") || !Number.isFinite(px)) {
+    throw new Error(
+      `the touch target height --sp-touch is not a px length: ${JSON.stringify(value)}`,
+    );
+  }
+  return px;
 }

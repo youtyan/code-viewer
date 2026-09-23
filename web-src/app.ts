@@ -1,5 +1,9 @@
 import type { AgentHooksResponse } from "./core/agent-hooks";
-import { type AgentPane, titleWithUnread } from "./core/agent-overview";
+import {
+  type AgentPane,
+  headerAgentCounts,
+  titleWithUnread,
+} from "./core/agent-overview";
 import {
   type AgentScreenRuleIssue,
   type AgentScreenRulesResponse,
@@ -106,7 +110,7 @@ import {
   sidebarTitle,
 } from "./core/list-column";
 import type { PaneSide, TabTarget } from "./core/main-tabs";
-import { PHONE_MEDIA_QUERY } from "./core/mobile-layout";
+import { diffLayoutFor, PHONE_MEDIA_QUERY } from "./core/mobile-layout";
 import { createNetworkActivityTracker } from "./core/network-activity";
 import { PAGE_MODE_CLASSES, pageModeClasses } from "./core/page-mode";
 import {
@@ -236,11 +240,6 @@ import {
   openHelpSection,
 } from "./views/help-page";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
-import { onListRowKeys } from "./views/list-tab-stop";
-import {
-  createListTreeOpen,
-  localizeListTreeOpen as setListTreeOpenLabel,
-} from "./views/list-tree-open";
 import { createHunkExpand } from "./views/hunk-expand";
 import { createImageTabView, type ImageTabHandle } from "./views/image-tab";
 import {
@@ -253,6 +252,11 @@ import {
   langFromPath,
   readRenderedLines,
 } from "./views/line-ref-pill";
+import { onListRowKeys } from "./views/list-tab-stop";
+import {
+  createListTreeOpen,
+  localizeListTreeOpen as setListTreeOpenLabel,
+} from "./views/list-tree-open";
 import {
   COMFORTABLE_PANE_WIDTH,
   createMainTabsView,
@@ -1033,6 +1037,20 @@ window.GdpExpandLogic = GdpExpandLogic;
       : "side-by-side";
   }
 
+  /** 電話の段 (core/mobile-layout.ts。style.css の SP の節と同じ条件)。 */
+  const PHONE_QUERY = window.matchMedia(PHONE_MEDIA_QUERY);
+  /** 電話の段で切り替えた差分の並べ方 (保存しない。diffLayoutFor)。 */
+  let phoneDiffLayout: LayoutMode | null = null;
+
+  /** いま見せる差分の並べ方 (電話の段では 1 列が既定)。 */
+  function shownLayout(): LayoutMode {
+    return diffLayoutFor(
+      PHONE_QUERY.matches ? "phone" : "desktop",
+      savedLayout(),
+      phoneDiffLayout,
+    );
+  }
+
   // 未設定ならダーク (既定のテーマ)。light / dark を保存している人はその値。
   function savedTheme(): ThemeMode {
     return APP_SETTINGS.theme === "light" ? "light" : "dark";
@@ -1294,7 +1312,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const route = routeFromLocation();
     const savedLanguage =
       viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
-    STATE.layout = savedLayout();
+    STATE.layout = shownLayout();
     STATE.theme = savedTheme();
     STATE.language = savedLanguage;
     STATE.sbView = savedSidebarView();
@@ -1393,7 +1411,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   const STATE: AppState = (() => {
     const route = routeFromLocation();
     return {
-      layout: savedLayout(),
+      layout: shownLayout(),
       theme: savedTheme(),
       language:
         viewerLanguageFromSearch(window.location.search) ||
@@ -3536,7 +3554,9 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function setLayout(layout: LayoutMode, persist = true) {
     STATE.layout = layout;
-    if (persist) patchSettings({ layout });
+    // 電話の段での切替はその場だけ (デスクトップの既定を変えない)。
+    if (persist && PHONE_QUERY.matches) phoneDiffLayout = layout;
+    else if (persist) patchSettings({ layout });
     $$("#topbar .seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.layout === layout);
     });
@@ -5970,6 +5990,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   // 読んだ設定を当てるだけ。書き戻すと、開くたびにリポジトリへ
   // .code-viewer/settings.json を作ってしまう (利用者は何も変えていない)。
   setLayout(STATE.layout, false);
+  // 電話の段に入る・出ると、見せる差分の並べ方が変わる (電話では 1 列が既定)。
+  PHONE_QUERY.addEventListener("change", () => setLayout(shownLayout(), false));
   setPageMode();
   if (routePathname() === "/") {
     setRoute(STATE.route, true);
@@ -7065,7 +7087,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // 電話の幅の骨格 (引き出し・下からの面・下端の帯・端末の操作札)。2 面は
   // 無いので、端末は左の面のものに送る。
-  installMobileShell({
+  const MOBILE_SHELL = installMobileShell({
     getLanguage: () => STATE.language,
     sendTerminalKey: (key) => TERMINAL_VIEW.sendSoftKey("left", key),
     focusTerminal: () => TERMINAL_VIEW.focusTab("left"),
@@ -7896,6 +7918,10 @@ window.GdpExpandLogic = GdpExpandLogic;
    * 別のプロジェクトのペインならそのプロジェクトへ移る (agent-pane-opener.ts)。
    */
   function openAgentPane(pane: string, destination?: "opposite"): void {
+    // 電話の段で引き出しや面が開いたままだと、開いた端末がその下に隠れる
+    // (引き出しと面の中の行は押したときに自分で閉じるが、通知・最下段の件数・
+    // 全体ボード・パレットから来たときは閉じていなかった)。
+    MOBILE_SHELL.close();
     AGENT_PANE_OPENER(pane, destination);
   }
 
@@ -8026,6 +8052,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         console.error("[code-viewer] launch dialog failed", error),
     );
   }
+
+  // 電話の段の下端の帯の「エージェント」に、最下段と同じ数え方の入力待ちの件数。
+  AGENT_MONITOR.subscribe(() =>
+    MOBILE_SHELL.setWaitingAgents(
+      headerAgentCounts(AGENT_MONITOR.snapshot().overview?.panes ?? []).waiting,
+    ),
+  );
 
   AGENT_MONITOR.subscribe(() => {
     // 開いたときのペインが一覧から消えたら、その対応を捨てる。ペイン ID は

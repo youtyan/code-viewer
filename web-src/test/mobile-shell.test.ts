@@ -114,6 +114,10 @@ beforeEach(() => {
         <a id="nav-board-link" data-route="agents" href="/agents">All agents</a>
       </aside>
       <div id="tabs-lead"></div>
+      <header id="topbar"><div class="controls"></div></header>
+      <div class="main-pane-host" data-side="left" data-kind="terminal">
+        <textarea class="xterm-helper-textarea"></textarea>
+      </div>
       <div id="panel-head">
         <a class="view-strip-item" data-route="repo" href="/">Files</a>
         <a class="view-strip-item" data-route="diff" href="/todif">Diff</a>
@@ -220,6 +224,7 @@ describe("デスクトップの見た目を変えない (実物の style.css)", 
     "#mobile-bar",
     "#mobile-scrim",
     "#mobile-keys",
+    ".mobile-wrap-toggle",
   ])("%s には display を付けない", (selector) => {
     const style = document.createElement("style");
     style.textContent = readFileSync("web/style.css", "utf8");
@@ -346,7 +351,8 @@ describe("面 (右の列と一覧の列) と下端の帯", () => {
       selector: "#filelist .tree-file .file-label",
       closes: true,
     },
-    { name: "コミットの行", selector: ".history-item", closes: true },
+    // 面の下の段にそのコミットの変更ファイルが出るので、続けて選べるよう閉じない。
+    { name: "コミットの行", selector: ".history-item", closes: false },
     {
       name: "画面の入口",
       selector: '.view-strip-item[data-route="diff"]',
@@ -380,6 +386,8 @@ describe("面 (右の列と一覧の列) と下端の帯", () => {
 describe("端末の操作札", () => {
   test.each<{ key: TerminalSoftKey }>([
     { key: "escape" },
+    { key: "tab" },
+    { key: "shiftTab" },
     { key: "ctrlC" },
     { key: "up" },
     { key: "down" },
@@ -394,6 +402,31 @@ describe("端末の操作札", () => {
     install(PHONE);
     q<HTMLButtonElement>(document, "#mobile-keys .mobile-key-keyboard").click();
     expect(focused).toBe(1);
+  });
+
+  // ⌨ は出す / しまうの切替。端末に入力が向いている (キーボードが出ている) 間は
+  // 入力を外してしまい、名前も「しまう」になる。
+  test("キーボードの札は、端末に入力が向いていればしまう", () => {
+    install(PHONE);
+    const keyboard = q<HTMLButtonElement>(
+      document,
+      "#mobile-keys .mobile-key-keyboard",
+    );
+    const input = q<HTMLTextAreaElement>(document, ".xterm-helper-textarea");
+    input.focus();
+    const whileTyping = keyboard.getAttribute("aria-label");
+    keyboard.click();
+    expect({
+      whileTyping,
+      focusedTerminal: focused,
+      inputStillFocused: document.activeElement === input,
+      after: keyboard.getAttribute("aria-label"),
+    }).toEqual({
+      whileTyping: "Hide keyboard",
+      focusedTerminal: 0,
+      inputStillFocused: false,
+      after: "Show keyboard",
+    });
   });
 
   test("札を押してもフォーカスを端末から奪わない (pointerdown を止める)", () => {
@@ -443,5 +476,143 @@ describe("dispose", () => {
     ).toBeNull();
     expect(document.body.classList.contains("mobile-nav-open")).toBe(false);
     expect(q<HTMLElement>(document, "#app-nav").inert).toBe(false);
+  });
+});
+
+describe("差分の折り返し (Diff の上の帯の端)", () => {
+  test("電話の段だけに出し、押すと body の印と押した状態が切り替わる", () => {
+    install(PHONE);
+    const toggle = q<HTMLButtonElement>(
+      document,
+      "#topbar .mobile-wrap-toggle",
+    );
+    const shown = !toggle.hidden;
+    toggle.click();
+    const on = [
+      document.body.classList.contains("mobile-diff-wrap"),
+      toggle.getAttribute("aria-pressed"),
+    ];
+    toggle.click();
+    expect({
+      shown,
+      on,
+      off: [
+        document.body.classList.contains("mobile-diff-wrap"),
+        toggle.getAttribute("aria-pressed"),
+      ],
+      label: toggle.textContent,
+    }).toEqual({
+      shown: true,
+      on: [true, "true"],
+      off: [false, "false"],
+      label: "Wrap",
+    });
+  });
+
+  test("デスクトップでは出さない", () => {
+    install(DESKTOP);
+    expect(q<HTMLButtonElement>(document, ".mobile-wrap-toggle").hidden).toBe(
+      true,
+    );
+  });
+});
+
+describe("下端の帯の今の画面と入力待ちの件数", () => {
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const current = () =>
+    [...document.querySelectorAll("#mobile-bar .mobile-bar-item")]
+      .filter((item) => item.getAttribute("aria-current") === "page")
+      .map((item) => item.querySelector(".mobile-bar-label")?.textContent);
+
+  test("画面の印に合わせて印を付け、前面がタブ (端末など) の間は外す", async () => {
+    install(PHONE);
+    document.body.classList.add("gdp-diff-page");
+    await tick();
+    const onDiff = current();
+    q(document, '.main-pane-host[data-side="left"]').classList.add("is-shown");
+    await tick();
+    const underTerminal = current();
+    q(document, '.main-pane-host[data-side="left"]').classList.remove(
+      "is-shown",
+    );
+    document.body.classList.replace("gdp-diff-page", "gdp-agents-page");
+    await tick();
+    expect({ onDiff, underTerminal, onAgents: current() }).toEqual({
+      onDiff: ["Diff"],
+      underTerminal: [],
+      onAgents: ["Agents"],
+    });
+  });
+
+  test("入力待ちがあれば「エージェント」に件数の札を出し、名前にも添える", () => {
+    const created = install(PHONE);
+    const agents = barButton(4);
+    const badge = q<HTMLElement>(agents, ".mobile-bar-badge");
+    created.setWaitingAgents(2);
+    const waiting = [
+      badge.hidden,
+      badge.textContent,
+      agents.getAttribute("aria-label"),
+    ];
+    created.setWaitingAgents(0);
+    expect({
+      waiting,
+      none: [
+        badge.hidden,
+        badge.textContent,
+        agents.getAttribute("aria-label"),
+      ],
+    }).toEqual({
+      waiting: [false, "2", "Agents (2 need input)"],
+      none: [true, "", "Agents"],
+    });
+  });
+});
+
+describe("引き出しは指に付いて動く", () => {
+  function touch(type: string, x: number, y = 100) {
+    const point = {
+      clientX: x,
+      clientY: y,
+      identifier: 0,
+      target: document.body,
+    };
+    document.dispatchEvent(
+      new TouchEvent(type, {
+        bubbles: true,
+        touches: type === "touchend" ? [] : [point as unknown as Touch],
+        changedTouches: [point as unknown as Touch],
+      }),
+    );
+  }
+
+  test("左端から右へ動かしている間は引き出しに位置が付き、離すと外して開く", () => {
+    install(PHONE);
+    const nav = q<HTMLElement>(document, "#app-nav");
+    touch("touchstart", 4);
+    touch("touchmove", 104);
+    const dragging = {
+      transform: nav.style.transform,
+      transition: nav.style.transition,
+    };
+    touch("touchend", 104);
+    expect({
+      dragging,
+      released: nav.style.transform,
+      open: document.body.classList.contains("mobile-nav-open"),
+    }).toEqual({
+      dragging: { transform: "translateX(0px)", transition: "none" },
+      released: "",
+      open: true,
+    });
+  });
+
+  test("縦のスクロールでは動かさない", () => {
+    install(PHONE);
+    const nav = q<HTMLElement>(document, "#app-nav");
+    touch("touchstart", 4, 100);
+    touch("touchmove", 20, 300);
+    expect(nav.style.transform).toBe("");
+    touch("touchend", 20, 300);
   });
 });

@@ -30,14 +30,14 @@ import type {
 } from "../core/types";
 import { TREE_WITHOUT_COMMIT_DATES } from "../core/types";
 import { DIFF_SCREEN_TEXT } from "./diff-view-i18n";
-import { pageLanguage } from "./page-language";
-import { repoViewText } from "./repo-view-i18n";
-import { rowHeightFor } from "./shell/row-height";
 import {
   type FocusedListRow,
   focusedListRow,
   syncListTabStop,
 } from "./list-tab-stop";
+import { pageLanguage } from "./page-language";
+import { repoViewText } from "./repo-view-i18n";
+import { rowHeightFor, touchRowFloor } from "./shell/row-height";
 import { treeLevelPad } from "./tree-indent";
 
 export type ViewerFontSize = "compact" | "regular" | "large" | "xlarge";
@@ -180,9 +180,13 @@ export function createSidebar(deps: SidebarDeps) {
 
   const VIRTUAL_SIDEBAR_THRESHOLD = 3000;
 
-  /** 仮想表示の 1 行の高さ (px)。値の出所は views/shell/row-height.ts。 */
+  /**
+   * 仮想表示の 1 行の高さ (px)。値の出所は views/shell/row-height.ts。指の画面
+   * では押せる最小の高さ (--sp-touch) より低くしない (style.css の指の画面の節の
+   * 仮想表示の行と同じ max)。
+   */
   function virtualRowHeight(): number {
-    return rowHeightFor(savedSidebarFontSize());
+    return Math.max(rowHeightFor(savedSidebarFontSize()), touchRowFloor());
   }
 
   const VIRTUAL_SIDEBAR_OVERSCAN = 16;

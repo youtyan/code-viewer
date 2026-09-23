@@ -16,6 +16,7 @@ import type {
   SerializedLayout,
   TabTarget,
 } from "../core/main-tabs";
+import { PHONE_MEDIA_QUERY } from "../core/mobile-layout";
 import { panelColumnAction } from "../core/panel-column-policy";
 import { HISTORY_WIDTH } from "../core/panel-sizes";
 import { lastTabNumber } from "../core/pwa";
@@ -1583,6 +1584,108 @@ describe("main tabs view: 左右 2 面", () => {
       ]);
     } finally {
       globalThis.ResizeObserver = OriginalResizeObserver;
+    }
+  });
+
+  // 電話の段 (横向きの電話は幅が足りても) では 2 面を組まない。保存された 2 面は
+  // 右の面を預けて 1 面にし、電話の段を出れば戻す。保存は右の面ごと (デスクトップ
+  // に戻ったとき 2 面のまま)。
+  test("the phone tier holds one side even when wide enough, and gives the right side back when it leaves", async () => {
+    const OriginalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      observe() {
+        /* 幅は変えない (電話の段だけで決まることを見る) */
+      }
+      unobserve() {
+        /* 同上 */
+      }
+      disconnect() {
+        /* 同上 */
+      }
+    } as unknown as typeof ResizeObserver;
+    let phone = true;
+    const changes: Array<() => void> = [];
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      get matches() {
+        return query === PHONE_MEDIA_QUERY ? phone : false;
+      },
+      media: query,
+      addEventListener: (_type: string, listener: () => void) => {
+        if (query === PHONE_MEDIA_QUERY) changes.push(listener);
+      },
+      removeEventListener: () => undefined,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      Object.defineProperty(document.documentElement, "clientWidth", {
+        configurable: true,
+        value: 1600,
+      });
+      vi.useFakeTimers();
+      const saved = {
+        version: 3,
+        focused: "right",
+        split: 0.4,
+        panes: [
+          {
+            side: "left",
+            activeId: "a",
+            tabs: [
+              {
+                id: "a",
+                preview: false,
+                target: { kind: "file", path: "src/app.ts" },
+              },
+            ],
+          },
+          {
+            side: "right",
+            activeId: "t",
+            tabs: [
+              {
+                id: "t",
+                preview: false,
+                target: { kind: "terminal", session: "shell-a1" },
+              },
+            ],
+          },
+        ],
+      };
+      const { handle, mount, saves } = setup(async () => saved);
+      await handle.restore();
+      const onPhone = {
+        split: panes(handle).split,
+        rightSection: !!mount.querySelector(
+          '.main-tabs-pane[data-side="right"]',
+        ),
+      };
+      handle.syncRoute(fileRoute("src/other.ts"));
+      vi.advanceTimersByTime(1000);
+      const savedOnPhone = saves[saves.length - 1]?.panes.map(
+        (pane) => pane.side,
+      );
+      phone = false;
+      for (const notify of changes) notify();
+      vi.useRealTimers();
+      expect({
+        onPhone,
+        savedOnPhone,
+        backOnDesktop: {
+          split: panes(handle).split,
+          right: panes(handle).right,
+        },
+      }).toEqual({
+        onPhone: { split: false, rightSection: false },
+        savedOnPhone: ["left", "right"],
+        backOnDesktop: {
+          split: true,
+          right: { kind: "terminal", session: "shell-a1" },
+        },
+      });
+    } finally {
+      globalThis.ResizeObserver = OriginalResizeObserver;
+      window.matchMedia = originalMatchMedia;
+      Reflect.deleteProperty(document.documentElement, "clientWidth");
     }
   });
 

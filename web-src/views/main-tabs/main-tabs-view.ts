@@ -80,6 +80,7 @@ import {
   WORKTREE_REF,
   withCommonTabs,
 } from "../../core/main-tabs";
+import { PHONE_MEDIA_QUERY } from "../../core/mobile-layout";
 import type { AppRoute } from "../../core/routes";
 import { basenameOf } from "../../core/terminal-board";
 import { terminalImageExtension } from "../../core/terminal-images";
@@ -447,6 +448,7 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
     splitButton: HTMLButtonElement;
   };
   const sections = {} as Record<PaneSide, Section>;
+  const phoneQuery = window.matchMedia(PHONE_MEDIA_QUERY);
   for (const side of SIDES) sections[side] = createSection(side);
 
   // 面の境界。掴みしろ 6px、線は 1px (ホバー・ドラッグ中は 2px の強調)。
@@ -577,6 +579,9 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
    * splitFitsWithPanelColumn() を見る側 (app.ts) が行う。
    */
   function splitAllowed(): boolean {
+    // 電話の段 (横向きの電話は幅が足りても) では 2 面を組まない。保存された
+    // 2 面は右の面を預けて 1 面にし、デスクトップの幅に戻れば戻す (fitToWidth)。
+    if (phoneQuery.matches) return false;
     return mainWidth() >= TIGHT_PANE_WIDTH * 2 + SPLIT_DIVIDER_WIDTH;
   }
 
@@ -711,6 +716,13 @@ export function createMainTabsView(deps: MainTabsDeps): MainTabsHandle {
       if (entry.target instanceof HTMLElement) revealFront(entry.target);
   });
   for (const side of SIDES) stripObserver.observe(sections[side].strip);
+  // 電話の段に入る・出るとタブ列の組み方 (左端の枠の幅・右の面) が変わり、
+  // 列の送り量が 0 のまま前面のタブが外に残ることがある。面を合わせ直してから
+  // 前面のタブを見える所へ送る。
+  phoneQuery.addEventListener("change", () => {
+    followGeometry();
+    for (const side of SIDES) revealFront(sections[side].strip);
+  });
 
   /** 窓・本文・右の列の寸法が変わったあとに、面の幅と 2 面の可否を合わせる。 */
   function followGeometry(): void {
